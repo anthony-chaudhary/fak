@@ -22,10 +22,13 @@ const (
 	Version        = 3
 	defaultAlign   = 32
 	maxStringBytes = 1 << 30
+	qk4            = 32
 	qk5            = 32
 	qk8_0          = 32
 	qkK            = 256
 	kScaleSize     = 12
+	blockQ4_0Bytes = 2 + qk4/2
+	blockQ4_1Bytes = 2 + 2 + qk4/2
 	blockQ5_0Bytes = 2 + 4 + qk5/2
 	blockQ5_1Bytes = 2 + 2 + 4 + qk5/2
 	blockQ8_0Bytes = 2 + qk8_0
@@ -59,6 +62,8 @@ type TensorType uint32
 const (
 	TensorF32   TensorType = 0
 	TensorF16   TensorType = 1
+	TensorQ4_0  TensorType = 2
+	TensorQ4_1  TensorType = 3
 	TensorQ5_0  TensorType = 6
 	TensorQ5_1  TensorType = 7
 	TensorQ8_0  TensorType = 8
@@ -90,6 +95,10 @@ func (t TensorType) String() string {
 		return "F32"
 	case TensorF16:
 		return "F16"
+	case TensorQ4_0:
+		return "Q4_0"
+	case TensorQ4_1:
+		return "Q4_1"
 	case TensorQ5_0:
 		return "Q5_0"
 	case TensorQ5_1:
@@ -1602,6 +1611,16 @@ func tensorPayloadBytes(t TensorInfo) (uint64, error) {
 		return elems * 4, nil
 	case TensorF16, TensorBF16:
 		return elems * 2, nil
+	case TensorQ4_0:
+		if elems%qk4 != 0 {
+			return 0, fmt.Errorf("gguf: tensor %s Q4_0 element count %d is not a multiple of %d", t.Name, elems, qk4)
+		}
+		return elems / qk4 * blockQ4_0Bytes, nil
+	case TensorQ4_1:
+		if elems%qk4 != 0 {
+			return 0, fmt.Errorf("gguf: tensor %s Q4_1 element count %d is not a multiple of %d", t.Name, elems, qk4)
+		}
+		return elems / qk4 * blockQ4_1Bytes, nil
 	case TensorQ5_0:
 		if elems%qk5 != 0 {
 			return 0, fmt.Errorf("gguf: tensor %s Q5_0 element count %d is not a multiple of %d", t.Name, elems, qk5)
@@ -1695,6 +1714,24 @@ func dequantF32(t TensorInfo, raw []byte) ([]float32, error) {
 		for i := range out {
 			out[i] = math.Float32frombits(uint32(binary.LittleEndian.Uint16(raw[i*2:])) << 16)
 		}
+	case TensorQ4_0:
+		if elems%qk4 != 0 {
+			return nil, fmt.Errorf("gguf: tensor %s Q4_0 element count %d is not a multiple of %d", t.Name, elems, qk4)
+		}
+		want := int(elems / qk4 * blockQ4_0Bytes)
+		if len(raw) != want {
+			return nil, fmt.Errorf("gguf: tensor %s Q4_0 payload has %d bytes, want %d", t.Name, len(raw), want)
+		}
+		dequantQ4_0(out, raw)
+	case TensorQ4_1:
+		if elems%qk4 != 0 {
+			return nil, fmt.Errorf("gguf: tensor %s Q4_1 element count %d is not a multiple of %d", t.Name, elems, qk4)
+		}
+		want := int(elems / qk4 * blockQ4_1Bytes)
+		if len(raw) != want {
+			return nil, fmt.Errorf("gguf: tensor %s Q4_1 payload has %d bytes, want %d", t.Name, len(raw), want)
+		}
+		dequantQ4_1(out, raw)
 	case TensorQ5_0:
 		if elems%qk5 != 0 {
 			return nil, fmt.Errorf("gguf: tensor %s Q5_0 element count %d is not a multiple of %d", t.Name, elems, qk5)
@@ -1777,6 +1814,47 @@ func dequantF32(t TensorInfo, raw []byte) ([]float32, error) {
 		return nil, fmt.Errorf("gguf: tensor %s type %d cannot dequantize to f32 yet", t.Name, t.Type)
 	}
 	return out, nil
+}
+
+// dequantQ4_0 expands the legacy GGML Q4_0 32-element block. Each block is a
+// little-endian f16 scale d followed by qk4/2 bytes of packed 4-bit codes (two
+// nibbles per byte). The GGML layout (dequantize_row_q4_0) is interleaved: the low
+// nibble of byte j is element j, the high nibble is element j+qk4/2, and each code is
+// re-centered by -8 before scaling: y = (nibble-8)*d. This is the 4-bit sibling of
+// dequantQ5_0 with no 5th high bit.
+func dequantQ4_0(out []float32, raw []byte) {
+	for block := 0; block < len(out)/qk4; block++ {
+		base := block * blockQ4_0Bytes
+		d := math.Float32frombits(f16bitsToF32bits(binary.LittleEndian.Uint16(raw[base:])))
+		qs := raw[base+2 : base+blockQ4_0Bytes]
+		yi := block * qk4
+		for j := 0; j < qk4/2; j++ {
+			x0 := int(qs[j]&0x0f) - 8
+			x1 := int(qs[j]>>4) - 8
+			out[yi+j] = float32(x0) * d
+			out[yi+j+qk4/2] = float32(x1) * d
+		}
+	}
+}
+
+// dequantQ4_1 expands the legacy GGML Q4_1 32-element block: a little-endian f16
+// scale d, then a little-endian f16 min m, then qk4/2 bytes of packed 4-bit codes.
+// The GGML layout (dequantize_row_q4_1) keeps the same low/high-nibble interleave as
+// Q4_0 but the codes are NOT re-centered — they carry an affine min: y = nibble*d + m.
+func dequantQ4_1(out []float32, raw []byte) {
+	for block := 0; block < len(out)/qk4; block++ {
+		base := block * blockQ4_1Bytes
+		d := math.Float32frombits(f16bitsToF32bits(binary.LittleEndian.Uint16(raw[base:])))
+		m := math.Float32frombits(f16bitsToF32bits(binary.LittleEndian.Uint16(raw[base+2:])))
+		qs := raw[base+4 : base+blockQ4_1Bytes]
+		yi := block * qk4
+		for j := 0; j < qk4/2; j++ {
+			x0 := int(qs[j] & 0x0f)
+			x1 := int(qs[j] >> 4)
+			out[yi+j] = float32(x0)*d + m
+			out[yi+j+qk4/2] = float32(x1)*d + m
+		}
+	}
 }
 
 func dequantQ5_0(out []float32, raw []byte) {
