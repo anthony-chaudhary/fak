@@ -127,6 +127,9 @@ class EvaluateTest(unittest.TestCase):
         mod.spawn_detached = boom
 
     def _patch(self, mod, *, pre, lane_pick) -> None:
+        # refresh_registry shells out to fleet_sessions.py; stub it so the tick is
+        # hermetic. Its real behavior (route off fresh evidence) is covered below.
+        mod.refresh_registry = lambda root: {"ok": True, "stubbed": True}
         mod.preflight = lambda root, **kw: pre
         mod.pick_lane = lambda root, explicit: lane_pick
 
@@ -200,6 +203,44 @@ class EvaluateTest(unittest.TestCase):
         self.assertEqual(p["lane"], "docs")
         self.assertEqual(p["witness"]["cmd"],
                          "python tools/bench_witness.py --lane docs")
+
+
+class RefreshRegistryTest(unittest.TestCase):
+    """The per-tick registry refresh: route off CURRENT account evidence so a
+    freshly-blocked account is never handed to a worker that would instantly die."""
+
+    def test_refresh_runs_before_preflight_and_is_recorded(self) -> None:
+        mod = load()
+        order: list[str] = []
+        mod.refresh_registry = lambda root: (order.append("refresh") or
+                                             {"ok": True, "marker": "fresh"})
+
+        def pre(root, **kw):
+            order.append("preflight")
+            return {"verdict": "REFUSE_AT_CAP", "reason": "x", "cap": 2,
+                    "live": 2, "account": {}}
+        mod.preflight = pre
+        mod.pick_lane = lambda root, explicit: {"lane": "docs", "issues": 1,
+                                                "by_lane": {}}
+        p = mod.evaluate(ROOT, max_workers=2, work_kind="engineering",
+                         lane=None, live=False)
+        # refresh happens FIRST (so preflight's switcher reads the fresh roster),
+        self.assertEqual(order, ["refresh", "preflight"])
+        # and the refresh outcome is surfaced in the tick record.
+        self.assertEqual(p["registry_refresh"], {"ok": True, "marker": "fresh"})
+
+    def test_refresh_false_skips_the_scan(self) -> None:
+        mod = load()
+        def boom(root):
+            raise AssertionError("refresh=False must not scan")
+        mod.refresh_registry = boom
+        mod.preflight = lambda root, **kw: {"verdict": "REFUSE_AT_CAP",
+                                            "reason": "x", "account": {}}
+        mod.pick_lane = lambda root, explicit: {"lane": "docs", "issues": 1,
+                                                "by_lane": {}}
+        p = mod.evaluate(ROOT, max_workers=2, work_kind="engineering",
+                         lane=None, live=False, refresh=False)
+        self.assertTrue(p["registry_refresh"].get("skipped"))
 
 
 if __name__ == "__main__":

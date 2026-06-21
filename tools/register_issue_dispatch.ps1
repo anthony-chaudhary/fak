@@ -28,6 +28,13 @@ param(
   [string]$Workspace  = $(Split-Path -Parent $PSScriptRoot),
   [int]$MaxWorkers    = 2,
   [int]$EveryMinutes  = 10,
+  # Which tick the always-on task runs:
+  #   resolve (default) -> issue_resolve_dispatch.py: spawns an ISSUE-resolution
+  #     worker on one concrete open issue (cites #N so the close path fires). This
+  #     is the arm that moves the open-issue counter on a plan-empty repo.
+  #   loop -> issue_dispatch.py: spawns the generic /dos-dispatch-loop worker that
+  #     resolves units from the PLAN portfolio (use when the repo ships PLAN-*.md).
+  [ValidateSet('resolve','loop')] [string]$Mode = 'resolve',
   [switch]$Live
 )
 $ErrorActionPreference = 'Stop'
@@ -49,20 +56,30 @@ if ($Action -eq 'remove') {
 $py = (Get-Command python -ErrorAction SilentlyContinue).Source
 if (-not $py) { $py = (Get-Command python3 -ErrorAction SilentlyContinue).Source }
 if (-not $py) { throw "python not found on PATH" }
-$tick = Join-Path $Workspace 'tools\issue_dispatch.py'
-if (-not (Test-Path $tick)) { throw "issue_dispatch.py not found at $tick" }
+$tickName = if ($Mode -eq 'resolve') { 'issue_resolve_dispatch.py' } else { 'issue_dispatch.py' }
+$tick = Join-Path $Workspace ('tools\' + $tickName)
+if (-not (Test-Path $tick)) { throw "$tickName not found at $tick" }
 
 $liveFlag = if ($Live) { ' --live' } else { '' }
+# The python path lives under "C:\Program Files\..." on a standard install, so its
+# SPACE must survive both PowerShell's parser and schtasks' /TR parser. Two rules:
+#   1. Inside the -Command string, quote $py/$tick/$Workspace with SINGLE quotes so
+#      PowerShell takes the space literally (the call operator & needs the exe quoted).
+#   2. schtasks reads /TR as a double-quoted token; any double-quote INSIDE it must be
+#      escaped as \" or schtasks truncates at the first inner quote ("Invalid argument
+#      'C:\Program'"). So the whole -Command payload is wrapped in \"...\".
+# Passing $tr as ONE PowerShell argument (not a here-string split on spaces) keeps the
+# Program Files path intact end-to-end. This is the gap that left the old fleet-public
+# task working (python was on PATH sans spaces) but broke on a Program Files python.
 $inner = "& '$py' '$tick' --workspace '$Workspace' --max-workers $MaxWorkers$liveFlag --json"
-# Wrap in powershell so the JSON plan lands in the task log for the status command.
-$tr = "powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -Command `"$inner`""
+$tr = "powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -Command \`"$inner\`""
 
 schtasks /Create /TN $TaskName /SC MINUTE /MO $EveryMinutes /TR $tr /RL LIMITED /F | Out-Null
 if ($LASTEXITCODE -ne 0) { throw "schtasks /Create failed ($LASTEXITCODE)" }
 
-$mode = if ($Live) { "LIVE (bounded autonomous spawning, cap=$MaxWorkers)" } else { "DRY-RUN (logs plans, spawns nothing)" }
-Write-Output "installed $TaskName -- every $EveryMinutes min, current-user interactive, $mode"
+$runMode = if ($Live) { "LIVE (bounded autonomous spawning, cap=$MaxWorkers)" } else { "DRY-RUN (logs plans, spawns nothing)" }
+Write-Output "installed $TaskName -- every $EveryMinutes min, arm=$Mode ($tickName), current-user interactive, $runMode"
 Write-Output "check status any time:  python tools\dispatch_status.py"
 if (-not $Live) {
-  Write-Output "to go live later:  .\tools\register_issue_dispatch.ps1 -Live -MaxWorkers $MaxWorkers"
+  Write-Output "to go live later:  .\tools\register_issue_dispatch.ps1 -Live -Mode $Mode -MaxWorkers $MaxWorkers"
 }

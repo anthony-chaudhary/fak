@@ -87,6 +87,26 @@ def run_json(cmd: list[str], cwd: Path, timeout: int,
     return doc
 
 
+def refresh_registry(root: Path) -> dict[str, Any]:
+    """Re-derive the account registry from live sessions BEFORE routing.
+
+    The switcher (``fleet_accounts route``, called inside the preflight) reads the
+    cached ``tools/_registry/sessions.json`` snapshot. On an always-on tick that
+    snapshot goes stale between launches, so an account that just hit a weekly
+    limit — or whose org disabled Claude-Code subscription access — would still be
+    handed out, the worker would spawn and instantly die, and the loop would make
+    no progress (the exact failure that left ``.dispatch-runs/`` empty: the tick
+    routed to a dead default account every time). Regenerating the registry
+    each tick folds the current session evidence (throttle/auth/org-disabled) into
+    the roster the switcher reads, so a freshly-blocked account is skipped
+    automatically. A no-probe scan — cheap, read-only, no model call. Best-effort:
+    a refresh failure is recorded, never fatal (the tick proceeds on the prior
+    snapshot rather than refusing)."""
+    doc = run_json([_py(), str(root / "tools" / "fleet_sessions.py"), "registry"],
+                   root, timeout=120, ok_codes=set(range(0, 16)))
+    return {"ok": "_error" not in doc, "error": doc.get("_error")}
+
+
 def preflight(root: Path, *, max_workers: int, work_kind: str) -> dict[str, Any]:
     return run_json([_py(), str(root / "tools" / "dispatch_preflight.py"), "--json",
                      "--max-workers", str(max_workers), "--work-kind", work_kind],
@@ -152,7 +172,12 @@ def spawn_detached(command: list[str], env: dict[str, str], cwd: Path,
 
 
 def evaluate(root: Path, *, max_workers: int, work_kind: str, lane: str | None,
-             live: bool) -> dict[str, Any]:
+             live: bool, refresh: bool = True) -> dict[str, Any]:
+    # Refresh the account registry from live sessions FIRST, so the switcher routes
+    # off current evidence (a freshly weekly-limited / org-disabled account is
+    # skipped, not handed out to a worker that would instantly die). Skippable for
+    # tests/inspection via refresh=False.
+    reg = refresh_registry(root) if refresh else {"ok": None, "skipped": True}
     pre = preflight(root, max_workers=max_workers, work_kind=work_kind)
     pre_ok = pre.get("verdict") == "SPAWN_OK"
     acct = pre.get("account") or {}
@@ -165,6 +190,7 @@ def evaluate(root: Path, *, max_workers: int, work_kind: str, lane: str | None,
         "workspace": str(root),
         "live": live,
         "max_workers": max_workers,
+        "registry_refresh": reg,
         "preflight": {"verdict": pre.get("verdict"), "reason": pre.get("reason"),
                       "cap": pre.get("cap"), "live": pre.get("live")},
         "account": {k: acct.get(k) for k in ("tag", "tier", "model", "dir")},
@@ -239,12 +265,15 @@ def main(argv: list[str] | None = None) -> int:
                     help="explicit lane (default: the lane with the most open issues)")
     ap.add_argument("--live", action="store_true",
                     help="actually spawn the worker (default: dry-run / plan only)")
+    ap.add_argument("--no-refresh", action="store_true",
+                    help="skip the per-tick account-registry refresh (route off the "
+                         "cached snapshot; for inspection / when a fresh scan just ran)")
     ap.add_argument("--json", action="store_true", help="emit machine-readable JSON")
     args = ap.parse_args(argv)
 
     root = Path(args.workspace).resolve() if args.workspace else repo_root()
     payload = evaluate(root, max_workers=args.max_workers, work_kind=args.work_kind,
-                       lane=args.lane, live=args.live)
+                       lane=args.lane, live=args.live, refresh=not args.no_refresh)
     print(json.dumps(payload, indent=2) if args.json else render(payload))
     return 0 if payload.get("ok") else 1
 
