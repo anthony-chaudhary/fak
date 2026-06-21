@@ -13,8 +13,10 @@
 # about fleet -- real lanes, fleet's ship anchor, fleet's own invariants as refusal
 # vocabulary. None of it introduces a spontaneous refusal: the custom [reasons.*]
 # are DATA that fire only at the opt-in `dos apply` surface / their named floor.
-# Validated with `dos doctor`, `dos verify` (recognizes fak/<leaf>: ships, sha
-# ef239c9), and `dos arbitrate` (two disjoint leaf lanes co-acquire) before commit.
+# Validated with `dos doctor`, `dos verify` (recognizes a `(fak <leaf>)` trailer / a
+# `fak/<leaf>:` ship within dos's 50-commit grep window -- re-run for the live witness
+# sha, which drifts as the window advances), and `dos arbitrate` (two disjoint leaf
+# lanes co-acquire) before commit.
 workspace = "."
 
 # Lane taxonomy -- a concurrent lane may run iff its file-tree is disjoint from
@@ -109,7 +111,11 @@ plans_glob = "PLAN-*.md"
 # "vX.Y.Z:" anchor which dos correctly classifies as a release-bump (not a phase
 # ship); per-leaf ships read "fak/<leaf>: ...". subject_dirs = [] keeps the generic
 # dir-free shape so `verify` never MISSES a fleet ship by over-requiring a prefix --
-# confirmed: `dos verify fak architest` -> SHIPPED, source=grep-subject, sha 644e778.
+# confirmed: `dos verify fak <leaf>` -> SHIPPED (source=grep-subject) for any leaf
+# shipped within dos's 50-commit grep window -- e.g. `dos verify fak tools` -> SHIPPED
+# ce2c2f3 (2026-06-21). A witness sha frozen in this comment necessarily goes stale once
+# its ship scrolls out of the window (which is why an older pinned sha here drifts dead);
+# re-run the command for the live witness rather than trusting a sha pinned in prose.
 #
 # trailer_stamp = true (docs/289): ALSO bind the Conventional-Commits subject the
 # fleet actually writes -- `feat(scope): ... (fak <leaf>)` / `fix(scope): ...
