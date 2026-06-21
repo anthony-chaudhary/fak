@@ -117,10 +117,36 @@ def live_resolution_issues(runs_dir: Path) -> set[int]:
     return live
 
 
-def pick_target_issue(numbers: list[int], live: set[int]) -> int | None:
-    """The first lane issue not already being resolved by a live worker."""
+def recently_attempted_issues(runs_dir: Path, *, cooldown_min: int,
+                              now_ts: float | None = None) -> set[int]:
+    """Issue numbers attempted within the last ``cooldown_min`` minutes — read from
+    the mtime of their ``resolve-<N>-*.log``. This is the anti-churn gate: a hard
+    issue (e.g. a mislabeled epic) that a worker could not land must NOT be re-picked
+    every tick — re-dispatching it re-storms a known drain while the rest of the
+    lane's backlog goes untouched. After the cooldown it becomes eligible again (the
+    repo may have changed, or a fresh worker may get further). 0 disables the gate."""
+    if cooldown_min <= 0 or not runs_dir.is_dir():
+        return set()
+    import time
+    now = now_ts if now_ts is not None else time.time()
+    horizon = now - cooldown_min * 60
+    recent: set[int] = set()
+    for log in runs_dir.glob("resolve-*.log"):
+        m = _LOG_ISSUE_RE.search(log.name)
+        if not m:
+            continue
+        try:
+            if log.stat().st_mtime >= horizon:
+                recent.add(int(m.group(1)))
+        except OSError:
+            continue
+    return recent
+
+
+def pick_target_issue(numbers: list[int], skip: set[int]) -> int | None:
+    """The first lane issue not in ``skip`` (live workers ∪ recently-attempted)."""
     for n in numbers:
-        if n not in live:
+        if n not in skip:
             return n
     return None
 
@@ -147,7 +173,7 @@ def spawn_issue_worker(prompt: str, env: dict[str, str], cwd: Path,
 
 
 def evaluate(root: Path, *, max_workers: int, work_kind: str, lane: str | None,
-             live: bool, refresh: bool = True) -> dict[str, Any]:
+             live: bool, refresh: bool = True, cooldown_min: int = 120) -> dict[str, Any]:
     reg = issue_dispatch.refresh_registry(root) if refresh else {"skipped": True}
     pre = issue_dispatch.preflight(root, max_workers=max_workers, work_kind=work_kind)
     pre_ok = pre.get("verdict") == "SPAWN_OK"
@@ -157,7 +183,11 @@ def evaluate(root: Path, *, max_workers: int, work_kind: str, lane: str | None,
     chosen_lane = pick.get("lane")
     runs_dir = root / RUNS_DIRNAME
     live_issues = live_resolution_issues(runs_dir)
-    target = pick_target_issue(pick.get("numbers") or [], live_issues)
+    cooled = recently_attempted_issues(runs_dir, cooldown_min=cooldown_min)
+    # Skip both a live worker's issue AND a recently-attempted one (anti-churn), so
+    # the picker advances down the lane instead of re-storming one un-landable issue.
+    skip = live_issues | cooled
+    target = pick_target_issue(pick.get("numbers") or [], skip)
 
     payload: dict[str, Any] = {
         "schema": SCHEMA, "workspace": str(root), "live": live,
@@ -166,7 +196,7 @@ def evaluate(root: Path, *, max_workers: int, work_kind: str, lane: str | None,
                       "cap": pre.get("cap"), "live": pre.get("live")},
         "account": {k: acct.get(k) for k in ("tag", "tier", "model", "dir")},
         "lane": chosen_lane, "lane_issue_count": len(pick.get("numbers") or []),
-        "target_issue": target,
+        "cooled_recently": sorted(cooled), "target_issue": target,
         "already_live": sorted(live_issues),
     }
 
@@ -181,9 +211,10 @@ def evaluate(root: Path, *, max_workers: int, work_kind: str, lane: str | None,
         return payload
     if target is None:
         payload.update({"ok": False, "action": "no_issue", "verdict": "NO_ISSUE",
-                        "reason": (f"every open issue on lane '{chosen_lane}' "
-                                   f"already has a live resolution worker "
-                                   f"({sorted(live_issues)})")})
+                        "reason": (f"every open issue on lane '{chosen_lane}' is "
+                                   f"either live ({sorted(live_issues)}) or in "
+                                   f"cooldown ({sorted(cooled)}) — nothing fresh to "
+                                   f"dispatch this tick")})
         return payload
 
     rec = issue_worker_prompt.build(target, chosen_lane, workspace=root)
@@ -253,12 +284,16 @@ def main(argv: list[str] | None = None) -> int:
                     help="actually spawn the worker (default: dry-run / plan only)")
     ap.add_argument("--no-refresh", action="store_true",
                     help="skip the per-tick account-registry refresh")
+    ap.add_argument("--cooldown-min", type=int, default=120,
+                    help="skip an issue attempted within this many minutes (anti-churn; "
+                         "0 disables). Default 120 — stops re-storming one un-landable issue.")
     ap.add_argument("--json", action="store_true", help="emit machine-readable JSON")
     args = ap.parse_args(argv)
 
     root = Path(args.workspace).resolve() if args.workspace else repo_root()
     payload = evaluate(root, max_workers=args.max_workers, work_kind=args.work_kind,
-                       lane=args.lane, live=args.live, refresh=not args.no_refresh)
+                       lane=args.lane, live=args.live, refresh=not args.no_refresh,
+                       cooldown_min=args.cooldown_min)
     print(json.dumps(payload, indent=2) if args.json else render(payload))
     return 0 if payload.get("ok") else 1
 
