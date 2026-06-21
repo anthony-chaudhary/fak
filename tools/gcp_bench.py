@@ -79,8 +79,12 @@ import gcp_gpu_probe as probe
 
 SCHEMA = "fak.gcp-bench.v1"
 ROOT = Path(__file__).resolve().parents[1]
-RUNS_DIR = ROOT / "fak" / "experiments" / "benchmark" / "runs" / "by-machine"
-MACHINES_DIR = ROOT / "fak" / "experiments" / "benchmark" / "machines"
+# The Go module source root. In the private monorepo it was a fak/ subdir; in the
+# public tree the module IS the repo root. Auto-detect so the tarball, the on-VM
+# `$SRC/go.mod` guard, and the runs/machines dirs all resolve on either layout.
+FAK_SRC = (ROOT / "fak") if (ROOT / "fak" / "go.mod").is_file() else ROOT
+RUNS_DIR = FAK_SRC / "experiments" / "benchmark" / "runs" / "by-machine"
+MACHINES_DIR = FAK_SRC / "experiments" / "benchmark" / "machines"
 
 # The model the on-VM bench runs. A small, fast-to-fetch GGUF that exercises the
 # real decode path on the datacenter GPU without a multi-hundred-GB download --
@@ -463,7 +467,7 @@ def make_source_tarball(dest: Path, dry_run: bool) -> Path:
     fetches its own GGUF. Uses Python's tarfile (no shell, fully portable); a dir
     excluded by the filter is not walked, so the multi-GB .cache is never stat'd.
     """
-    fak_dir = ROOT / "fak"
+    fak_dir = FAK_SRC
     # `experiments/` is benchmark DATA (handoff tarballs, GGUFs, oracle dumps --
     # hundreds of MB); the VM builds cmd/modelbench from SOURCE and fetches its own
     # model, so none of it is needed. Excluding it is what keeps the tarball small.
@@ -475,6 +479,11 @@ def make_source_tarball(dest: Path, dry_run: bool) -> Path:
     def keep(ti: tarfile.TarInfo) -> Optional[tarfile.TarInfo]:
         parts = ti.name.split("/")
         if any(p in exclude_dir_names for p in parts):
+            return None
+        # When the source IS the repo root, a compiled `fak` binary may sit at the
+        # root; it has no excluded suffix, so drop it explicitly (it would tar as
+        # fak/fak and bloat the tarball / shadow nothing useful on the VM).
+        if FAK_SRC == ROOT and ti.name == "fak/fak":
             return None
         if ti.isfile() and ti.name.endswith(exclude_suffixes):
             return None
@@ -802,6 +811,12 @@ def main(argv: Optional[list[str]] = None) -> int:
             write_lf(startup_path, startup_body)
             write_lf(driver_path, driver_body)
         make_source_tarball(tarball_path, args.dry_run)
+        # Fail-fast BEFORE any billable create if the source root has no go.mod: the
+        # on-VM driver guards on `$SRC/go.mod` and would fatal AFTER the VM is booting
+        # and billing. Turn that silent-spend into a free local error.
+        if not (FAK_SRC / "go.mod").is_file():
+            log(f"aborting: bench source root {FAK_SRC} has no go.mod (nothing to build)")
+            return 2
         # Arm teardown around the ENTIRE window the VM could exist: set the flag BEFORE
         # the create call, so a partial create that then raises (or a Ctrl-C mid-create)
         # still hits the idempotent teardown in finally. Deleting a never-created

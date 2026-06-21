@@ -33,7 +33,12 @@ Usage:
   python tools/gcp_quota_request.py --dry-run                  # show the plan
   python tools/gcp_quota_request.py --submit                   # file the B200 request (8 GPUs, us-central1)
   python tools/gcp_quota_request.py --gpus 8 --region us-central1 --family NVIDIA_B200 --submit
+  python tools/gcp_quota_request.py --family NVIDIA_H100 --region us-east4 --gpus 8 --submit  # H100 path
   python tools/gcp_quota_request.py --status                   # poll grant status
+
+Any NVIDIA_* gpu_family passes through verbatim (B200 / H100 / H200 / ...). Both
+the per-region family quota and the global GPUS-ALL-REGIONS ceiling are raised.
+A real request needs --project and --contact (the defaults are public placeholders).
 """
 from __future__ import annotations
 
@@ -49,7 +54,10 @@ import urllib.request
 
 
 ROOT = Path(__file__).resolve().parents[1]
-EVIDENCE_DIR = ROOT / "fak" / "experiments" / "gcp-quota"
+# experiments/ lives at the repo root in the public tree (no fak/ subdir); the
+# stale fak/ prefix made mkdir() raise, since a compiled `fak` binary occupies
+# that path.
+EVIDENCE_DIR = ROOT / "experiments" / "gcp-quota"
 API = "https://cloudquotas.googleapis.com/v1"
 DEFAULT_PROJECT = "example-gcp-project"
 DEFAULT_CONTACT = "anthony.chaudhary@example.com"
@@ -243,6 +251,13 @@ def main(argv: Optional[list[str]] = None) -> int:
             print()
         print("Re-run with --submit to file, or --status to poll.")
         return 0
+
+    # Refuse to hit the live API with the public placeholder identity: a real
+    # --submit/--status against project "example-gcp-project" / the example.com
+    # contact is never what the operator means.
+    if args.project == DEFAULT_PROJECT or args.contact == DEFAULT_CONTACT:
+        ap.error("refusing a live --submit/--status with the example-gcp-project / "
+                 "example.com placeholders -- pass --project and --contact")
 
     token = access_token()
     EVIDENCE_DIR.mkdir(parents=True, exist_ok=True)

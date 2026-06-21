@@ -346,5 +346,31 @@ class DriverScriptTest(unittest.TestCase):
         os.remove(p)
 
 
+class SourceTarballLayoutTest(unittest.TestCase):
+    """The on-VM driver guards on `$SRC/go.mod` where $SRC=$WORK/fak, so the
+    tarball MUST carry a fak/go.mod member regardless of repo layout. A
+    fak/-prefix regression here silently spends a VM then fatals the driver."""
+
+    def test_fak_src_is_a_real_module_root(self):
+        # Auto-detect must land on a dir that actually has a go.mod.
+        self.assertTrue((gcp_bench.FAK_SRC / "go.mod").is_file(),
+                        f"FAK_SRC {gcp_bench.FAK_SRC} has no go.mod")
+
+    def test_tarball_contains_fak_go_mod_and_excludes_root_binary(self):
+        import tarfile, tempfile, os
+        d = tempfile.mkdtemp()
+        dest = Path(d) / "src.tgz"
+        gcp_bench.make_source_tarball(dest, dry_run=False)
+        with tarfile.open(dest, "r:gz") as tf:
+            names = tf.getnames()
+        self.assertIn("fak/go.mod", names,
+                      "driver's $SRC/go.mod guard needs a fak/go.mod member")
+        # When the source is the repo root, the compiled root `fak` binary must
+        # not ride along as fak/fak.
+        if gcp_bench.FAK_SRC == gcp_bench.ROOT:
+            self.assertNotIn("fak/fak", names, "root fak binary must be excluded")
+        os.remove(dest)
+
+
 if __name__ == "__main__":
     unittest.main()
