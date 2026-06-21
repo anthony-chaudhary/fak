@@ -172,6 +172,13 @@ REPLACEMENTS = [
     ("node-qwen36-surfaces", "node-qwen36-surfaces", "test fixture label node-qwen36-surfaces"),
     ("node-qwen36-watch-live", "node-qwen36-watch-live", "test fixture label node-qwen36-watch-live"),
     ("node-agent", "node-agent", "test fixture/account label node-agent"),
+    # Operator org suffix on Claude account dirs: `.claude-<tag>-netra` -> `<tag>`.
+    # The `-netra` suffix is the operator org codename (= netrasystems); it survived
+    # the `netrasystems` needle because that needle never matched the bare suffix.
+    # Rewrite to a generic `-acct` so the account-tooling grammar stays intact
+    # (fleet_accounts.account_tag strips the suffix either way) without shipping the
+    # codename. Already applied to the public copy.
+    ("-netra", "-acct", "operator org suffix on account dirs -netra -> -acct"),
 ]
 
 # Tokens that appear in varying CASES (Windows hostnames are case-insensitive;
@@ -235,6 +242,10 @@ AUDIT_NEEDLES = [
 # the operator investigates before publishing.
 EXPORT_AUDIT_NEEDLES = AUDIT_NEEDLES + [
     "netrasystems",
+    "-netra",   # operator org suffix on account dirs (.claude-<tag>-netra) -- the
+                # bare-suffix form the `netrasystems` needle above misses; rewritten
+                # to the generic `-acct` by REPLACEMENTS. Hyphen-anchored so it does
+                # not fire on the legit `netrasystems` module path or "Netra Systems".
     "node-macos-a",
     "dgx-a100",  # operator lab DGX machine (infra) -- prefix of the SSH password below
     "example.lab",       # operator lab DNS domain

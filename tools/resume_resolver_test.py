@@ -45,7 +45,7 @@ def _avail(account: str, available: bool, *, live: int = 0, active: int = 0,
         "account": account, "available": available,
         "live_sessions": live, "active_sessions": active,
         "tag": account.replace(".claude-", "").replace(".claude", "default")
-                      .replace("-netra", ""),
+                      .replace("-acct", ""),
         "config_dir": os.path.join(home, account) if home else account,
     }
 
@@ -57,10 +57,10 @@ class LocateOwnerTests(unittest.TestCase):
 
     def test_single_owner(self) -> None:
         with tempfile.TemporaryDirectory() as home:
-            _write_session(home, ".claude-gem8-netra")
+            _write_session(home, ".claude-gem8-acct")
             owner = resume_resolver.locate_owner(SID, home)
             self.assertIsNotNone(owner)
-            self.assertEqual(owner["account"], ".claude-gem8-netra")
+            self.assertEqual(owner["account"], ".claude-gem8-acct")
             self.assertEqual(owner["project"], PROJECT)
             self.assertEqual(owner["dup_count"], 1)
 
@@ -68,13 +68,13 @@ class LocateOwnerTests(unittest.TestCase):
         # session present in BOTH ~/.claude (host) and a rotated account -> the
         # non-host account owns it even when the host copy is newer on disk.
         with tempfile.TemporaryDirectory() as home:
-            rotated = _write_session(home, ".claude-gem8-netra")
+            rotated = _write_session(home, ".claude-gem8-acct")
             host = _write_session(home, ".claude")
             # make the host copy strictly newer
             newer = os.path.getmtime(rotated) + 100
             os.utime(host, (newer, newer))
             owner = resume_resolver.locate_owner(SID, home)
-            self.assertEqual(owner["account"], ".claude-gem8-netra")
+            self.assertEqual(owner["account"], ".claude-gem8-acct")
             self.assertEqual(owner["dup_count"], 2)
 
     def test_host_only_owner(self) -> None:
@@ -85,18 +85,18 @@ class LocateOwnerTests(unittest.TestCase):
 
     def test_newest_non_host_wins(self) -> None:
         with tempfile.TemporaryDirectory() as home:
-            old = _write_session(home, ".claude-gem7-netra")
-            new = _write_session(home, ".claude-gem8-netra")
+            old = _write_session(home, ".claude-gem7-acct")
+            new = _write_session(home, ".claude-gem8-acct")
             os.utime(old, (1_000_000, 1_000_000))
             os.utime(new, (2_000_000, 2_000_000))
             owner = resume_resolver.locate_owner(SID, home)
-            self.assertEqual(owner["account"], ".claude-gem8-netra")
+            self.assertEqual(owner["account"], ".claude-gem8-acct")
 
 
 class ResolveTests(unittest.TestCase):
     def test_pin_when_owner_available(self) -> None:
         with tempfile.TemporaryDirectory() as home:
-            _write_session(home, ".claude-gem8-netra")
+            _write_session(home, ".claude-gem8-acct")
             calls: list = []
             rec = resume_resolver.resolve(
                 SID, home,
@@ -106,33 +106,33 @@ class ResolveTests(unittest.TestCase):
             self.assertEqual(rec["action"], "PIN")
             self.assertFalse(rec["rehomed"])
             self.assertEqual(rec["pin_config_dir"],
-                             os.path.join(home, ".claude-gem8-netra"))
+                             os.path.join(home, ".claude-gem8-acct"))
             self.assertEqual(calls, [])  # no copy on the pin path
 
     def test_rehome_when_owner_throttled(self) -> None:
         with tempfile.TemporaryDirectory() as home:
-            _write_session(home, ".claude-gem8-netra", sidecar=True)
+            _write_session(home, ".claude-gem8-acct", sidecar=True)
             calls: list = []
             rec = resume_resolver.resolve(
                 SID, home,
                 owner_status={"available": False,
                               "block_reason": "usage limit; resets 12:50pm"},
                 availability=[
-                    _avail(".claude-gem8-netra", False, home=home),
-                    _avail(".claude-gem5-netra", True, live=1, active=5, home=home),
-                    _avail(".claude-jack-barker-claude-netra", True, live=0, active=6, home=home),
+                    _avail(".claude-gem8-acct", False, home=home),
+                    _avail(".claude-gem5-acct", True, live=1, active=5, home=home),
+                    _avail(".claude-jack-barker-claude-acct", True, live=0, active=6, home=home),
                 ],
                 rehome_fn=lambda *a: calls.append(a) or True)
             self.assertEqual(rec["action"], "REHOME")
             self.assertTrue(rec["rehomed"])
             # least-loaded healthy Claude worker (0 live) wins over gem5 (1 live)
-            self.assertEqual(rec["pin_account"], ".claude-jack-barker-claude-netra")
+            self.assertEqual(rec["pin_account"], ".claude-jack-barker-claude-acct")
             self.assertEqual(rec["source_config_dir"],
-                             os.path.join(home, ".claude-gem8-netra"))
+                             os.path.join(home, ".claude-gem8-acct"))
             self.assertEqual(len(calls), 1)
             src, dst, proj, sid = calls[0]
-            self.assertEqual(src, os.path.join(home, ".claude-gem8-netra"))
-            self.assertEqual(dst, os.path.join(home, ".claude-jack-barker-claude-netra"))
+            self.assertEqual(src, os.path.join(home, ".claude-gem8-acct"))
+            self.assertEqual(dst, os.path.join(home, ".claude-jack-barker-claude-acct"))
             self.assertEqual(proj, PROJECT)
             self.assertEqual(sid, SID)
 
@@ -142,14 +142,14 @@ class ResolveTests(unittest.TestCase):
         # copy is stamped NEWEST so the host-last/newest-mtime owner pick can't
         # re-select the throttled original (which copy2 would otherwise mtime-tie).
         with tempfile.TemporaryDirectory() as home:
-            src = _write_session(home, ".claude-gem8-netra", sidecar=True)
+            src = _write_session(home, ".claude-gem8-acct", sidecar=True)
             os.utime(src, (1_000_000, 1_000_000))  # old source mtime
             rec = resume_resolver.resolve(
                 SID, home,
                 owner_status={"available": False, "block_reason": "usage limit"},
-                availability=[_avail(".claude-gem5-netra", True, home=home)])
+                availability=[_avail(".claude-gem5-acct", True, home=home)])
             self.assertEqual(rec["action"], "REHOME")
-            dst = os.path.join(home, ".claude-gem5-netra", "projects", PROJECT)
+            dst = os.path.join(home, ".claude-gem5-acct", "projects", PROJECT)
             dst_jsonl = os.path.join(dst, SID + ".jsonl")
             self.assertTrue(os.path.isfile(dst_jsonl))
             self.assertTrue(os.path.isfile(os.path.join(dst, SID, "agent-x.jsonl")))
@@ -158,34 +158,34 @@ class ResolveTests(unittest.TestCase):
 
     def test_dry_run_does_not_copy(self) -> None:
         with tempfile.TemporaryDirectory() as home:
-            _write_session(home, ".claude-gem8-netra")
+            _write_session(home, ".claude-gem8-acct")
             rec = resume_resolver.resolve(
                 SID, home, dry_run=True,
                 owner_status={"available": False, "block_reason": "usage limit"},
-                availability=[_avail(".claude-gem5-netra", True, home=home)])
+                availability=[_avail(".claude-gem5-acct", True, home=home)])
             self.assertEqual(rec["action"], "REHOME")
             self.assertFalse(rec["rehomed"])
             self.assertTrue(rec["would_rehome"])
-            dst = os.path.join(home, ".claude-gem5-netra", "projects", PROJECT,
+            dst = os.path.join(home, ".claude-gem5-acct", "projects", PROJECT,
                                SID + ".jsonl")
             self.assertFalse(os.path.exists(dst))  # nothing copied in dry-run
 
     def test_pin_blocked_when_no_healthy_account(self) -> None:
         with tempfile.TemporaryDirectory() as home:
-            _write_session(home, ".claude-gem8-netra")
+            _write_session(home, ".claude-gem8-acct")
             rec = resume_resolver.resolve(
                 SID, home,
                 owner_status={"available": False, "block_reason": "usage limit"},
-                availability=[_avail(".claude-gem5-netra", False, home=home)])
+                availability=[_avail(".claude-gem5-acct", False, home=home)])
             self.assertEqual(rec["action"], "PIN_BLOCKED")
             self.assertFalse(rec["rehomed"])
             self.assertEqual(rec["pin_config_dir"],
-                             os.path.join(home, ".claude-gem8-netra"))
+                             os.path.join(home, ".claude-gem8-acct"))
 
     def test_opencode_never_a_rehome_target(self) -> None:
         # a Claude transcript can only resume under another Claude config dir.
         with tempfile.TemporaryDirectory() as home:
-            _write_session(home, ".claude-gem8-netra")
+            _write_session(home, ".claude-gem8-acct")
             rec = resume_resolver.resolve(
                 SID, home,
                 owner_status={"available": False, "block_reason": "usage limit"},
@@ -211,7 +211,7 @@ class MainCliTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as home:
             # A name that cannot collide with the live registry, so runtime_status
             # falls back to its available=True default -> PIN, bare dir on stdout.
-            acct = ".claude-resolvertest-netra"
+            acct = ".claude-resolvertest-acct"
             _write_session(home, acct)
             out, err = io.StringIO(), io.StringIO()
             with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):

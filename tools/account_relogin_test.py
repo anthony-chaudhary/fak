@@ -25,8 +25,8 @@ def status_runner(email, logged_in=True, sub="max"):
 
 
 ROWS = [
-    {"product": "claude", "kind": "worker", "tag": "gem5", "dir": "C:/x/.claude-gem5-netra"},
-    {"product": "claude", "kind": "worker", "tag": "gem8", "dir": "C:/x/.claude-gem8-netra"},
+    {"product": "claude", "kind": "worker", "tag": "gem5", "dir": "C:/x/.claude-gem5-acct"},
+    {"product": "claude", "kind": "worker", "tag": "gem8", "dir": "C:/x/.claude-gem8-acct"},
 ]
 
 

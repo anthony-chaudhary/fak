@@ -41,7 +41,7 @@ def runner_returning(exit_code=0, stdout="", stderr="", timed_out=False, spawn_e
     return _run
 
 
-def worker_row(account=".claude-gem8-netra", tag="gem8"):
+def worker_row(account=".claude-gem8-acct", tag="gem8"):
     return {"dir": f"C:/Users/USER/{account}", "product": "claude",
             "account": account, "tag": tag, "kind": "worker"}
 
@@ -98,14 +98,14 @@ class ProbeAccountTest(unittest.TestCase):
         v = account_probe.probe_account(
             worker_row(), runner=runner_returning(0, "pong", ""))
         self.assertEqual(v["status"], "OK")
-        self.assertEqual(v["account"], ".claude-gem8-netra")
+        self.assertEqual(v["account"], ".claude-gem8-acct")
         self.assertEqual(v["tag"], "gem8")
         self.assertIn("probed_utc", v)
         self.assertGreaterEqual(v["latency_ms"], 0)
 
     def test_probe_account_access_wall(self) -> None:
         v = account_probe.probe_account(
-            worker_row(".claude-gem5-netra", "gem5"),
+            worker_row(".claude-gem5-acct", "gem5"),
             runner=runner_returning(1, "", BANNER_ACCESS))
         self.assertEqual(v["status"], "ACCESS")
         self.assertIn("disabled", v["block_reason"].lower())
@@ -145,7 +145,7 @@ class MergeRoundTripTest(unittest.TestCase):
         return account_probe.verdict_to_row(v)
 
     def test_fresh_ok_probe_clears_stale_auth(self) -> None:
-        account = ".claude-gem5-netra"
+        account = ".claude-gem5-acct"
         # prior registry: a 2-day-old auth blocker on this account
         prev_reg = {
             "generated_utc": "2026-06-18T07:39:17+00:00",
@@ -159,7 +159,7 @@ class MergeRoundTripTest(unittest.TestCase):
         self.assertNotIn(account, merged, "fresh OK probe should clear the stale auth latch")
 
     def test_fresh_ok_probe_clears_stale_throttle(self) -> None:
-        account = ".claude-gem8-netra"
+        account = ".claude-gem8-acct"
         prev_reg = {
             "generated_utc": "2026-06-18T07:39:17+00:00",
             "auth": {},
@@ -182,7 +182,7 @@ class MergeRoundTripTest(unittest.TestCase):
         self.assertEqual(merged[account]["block_kind"], "auth")
 
     def test_fresh_limit_probe_sets_throttle(self) -> None:
-        account = ".claude-gem8-netra"
+        account = ".claude-gem8-acct"
         prev_reg = {"generated_utc": "2026-06-18T00:00:00+00:00", "auth": {}, "throttle": {}}
         v = account_probe.probe_account(
             worker_row(account, "gem8"), runner=runner_returning(1, "", BANNER_LIMIT))
@@ -198,14 +198,14 @@ class SelectTargetsTest(unittest.TestCase):
         return [
             {"kind": "worker", "account": ".claude", "tag": "default", "available": True,
              "active_sessions": 5, "live_sessions": 2, "block_kind": None},
-            {"kind": "worker", "account": ".claude-gem5-netra", "tag": "gem5",
+            {"kind": "worker", "account": ".claude-gem5-acct", "tag": "gem5",
              "available": False, "active_sessions": 0, "live_sessions": 0,
              "block_kind": "auth", "throttled": False},
-            {"kind": "worker", "account": ".claude-gem8-netra", "tag": "gem8",
+            {"kind": "worker", "account": ".claude-gem8-acct", "tag": "gem8",
              "available": False, "active_sessions": 0, "live_sessions": 0,
              "block_kind": "usage", "throttled": True,
              "reset": "Jun 24, 8pm (America/Los_Angeles)"},
-            {"kind": "excluded", "account": ".claude-adminbackup-netra", "tag": "adminbackup",
+            {"kind": "excluded", "account": ".claude-adminbackup-acct", "tag": "adminbackup",
              "available": False},
         ]
 
@@ -235,8 +235,8 @@ class SelectTargetsTest(unittest.TestCase):
 
 class ProbeAccountsBatchTest(unittest.TestCase):
     def test_batch_probes_all_targets(self) -> None:
-        targets = [worker_row(".claude-gem5-netra", "gem5"),
-                   worker_row(".claude-gem8-netra", "gem8")]
+        targets = [worker_row(".claude-gem5-acct", "gem5"),
+                   worker_row(".claude-gem8-acct", "gem8")]
         verdicts = account_probe.probe_accounts(
             targets, runner=runner_returning(0, "pong", ""), max_workers=2)
         self.assertEqual(len(verdicts), 2)
@@ -267,7 +267,7 @@ class ProbeLedgerTest(unittest.TestCase):
         return account_probe.probe_account(worker_row(account, tag), runner=runner)
 
     def test_ledger_appends_and_reads_back(self) -> None:
-        v = self._verdict(".claude-gem5-netra", "gem5", "ACCESS")
+        v = self._verdict(".claude-gem5-acct", "gem5", "ACCESS")
         recs = account_probe.append_probe_ledger([v], self.rd)
         self.assertEqual(len(recs), 1)
         self.assertEqual(recs[0]["status"], "ACCESS")
@@ -275,7 +275,7 @@ class ProbeLedgerTest(unittest.TestCase):
         self.assertFalse(recs[0]["flip"])
         # second read sees it as the latest
         latest = account_probe.last_probe_by_account(self.rd)
-        self.assertEqual(latest[".claude-gem5-netra"]["status"], "ACCESS")
+        self.assertEqual(latest[".claude-gem5-acct"]["status"], "ACCESS")
 
     def test_flip_detected_across_two_probes(self) -> None:
         account_probe.append_probe_ledger(
@@ -288,14 +288,14 @@ class ProbeLedgerTest(unittest.TestCase):
 
     def test_no_flip_when_status_unchanged(self) -> None:
         account_probe.append_probe_ledger(
-            [self._verdict(".claude-gem5-netra", "gem5", "ACCESS")], self.rd)
+            [self._verdict(".claude-gem5-acct", "gem5", "ACCESS")], self.rd)
         recs = account_probe.append_probe_ledger(
-            [self._verdict(".claude-gem5-netra", "gem5", "ACCESS")], self.rd)
+            [self._verdict(".claude-gem5-acct", "gem5", "ACCESS")], self.rd)
         self.assertEqual(recs[0]["prev_status"], "ACCESS")
         self.assertFalse(recs[0]["flip"])
 
     def test_min_interval_skips_recently_probed(self) -> None:
-        account = ".claude-gem8-netra"
+        account = ".claude-gem8-acct"
         account_probe.append_probe_ledger(
             [self._verdict(account, "gem8", "LIMIT")], self.rd)
         annotated = [{"kind": "worker", "account": account, "tag": "gem8",
@@ -311,7 +311,7 @@ class ProbeLedgerTest(unittest.TestCase):
 
     def test_account_filter_ignores_min_interval(self) -> None:
         # an explicit single-account probe is always honored, even if just probed
-        account = ".claude-gem8-netra"
+        account = ".claude-gem8-acct"
         account_probe.append_probe_ledger(
             [self._verdict(account, "gem8", "LIMIT")], self.rd)
         annotated = [{"kind": "worker", "account": account, "tag": "gem8",

@@ -3,7 +3,7 @@ r"""account_relogin -- fix Claude config dirs logged into the WRONG account.
 
 The fleet roster keys an account on its dir name, but the account actually *logged into*
 a dir is whatever the last ``/login`` flow signed in as. When several dirs get logged into
-the same account by mistake (e.g. ``.claude-gem5/gem7/c10-netra`` all signed into one
+the same account by mistake (e.g. ``.claude-gem5/gem7/c10-acct`` all signed into one
 account), the roster sees one account masquerading as several workers. This tool fixes the
 mismatch the only way it can be fixed -- per dir -- while automating everything around the
 one interactive step:

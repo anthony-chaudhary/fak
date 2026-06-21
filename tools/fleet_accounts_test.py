@@ -66,7 +66,7 @@ class FleetAccountsTest(unittest.TestCase):
 
     def test_discover_accounts_separates_workers_excluded_and_non_accounts(self) -> None:
         account_dir(self.home, ".claude")
-        account_dir(self.home, ".claude-gem8-netra")
+        account_dir(self.home, ".claude-gem8-acct")
         account_dir(self.home, ".claude-backup")
         account_dir(self.home, ".claude-monitor", projects=False)
         (self.home / ".claude.json").write_text("{}", encoding="utf-8")
@@ -78,9 +78,9 @@ class FleetAccountsTest(unittest.TestCase):
         self.assertEqual(by_account[".claude"]["kind"], "worker")
         self.assertEqual(by_account[".claude"]["product"], "claude")
         self.assertEqual(by_account[".claude"]["tag"], "default")
-        self.assertEqual(by_account[".claude-gem8-netra"]["kind"], "worker")
-        self.assertEqual(by_account[".claude-gem8-netra"]["product"], "claude")
-        self.assertEqual(by_account[".claude-gem8-netra"]["tag"], "gem8")
+        self.assertEqual(by_account[".claude-gem8-acct"]["kind"], "worker")
+        self.assertEqual(by_account[".claude-gem8-acct"]["product"], "claude")
+        self.assertEqual(by_account[".claude-gem8-acct"]["tag"], "gem8")
         self.assertEqual(by_account[".claude-backup"]["kind"], "excluded")
         self.assertEqual(by_account[".claude-monitor"]["kind"], "non-account")
         self.assertEqual(by_account[".claude.json"]["kind"], "non-account")
@@ -108,18 +108,18 @@ class FleetAccountsTest(unittest.TestCase):
     def test_runtime_status_blocks_usage_and_credit_accounts(self) -> None:
         registry = {
             "generated_utc": "2026-06-17T00:00:00+00:00",
-            "throttle": {".claude-gem7-netra": {"reset": "tomorrow"}},
+            "throttle": {".claude-gem7-acct": {"reset": "tomorrow"}},
             "sessions": [
                 {
-                    "account": ".claude-gem8-netra",
+                    "account": ".claude-gem8-acct",
                     "disp": "INFRA_AUTH",
                     "last": "Credit balance is too low",
                 }
             ],
         }
 
-        usage = fleet_accounts.runtime_status(".claude-gem7-netra", registry=registry)
-        credit = fleet_accounts.runtime_status(".claude-gem8-netra", registry=registry)
+        usage = fleet_accounts.runtime_status(".claude-gem7-acct", registry=registry)
+        credit = fleet_accounts.runtime_status(".claude-gem8-acct", registry=registry)
 
         self.assertFalse(usage["available"])
         self.assertEqual(usage["block_kind"], "usage")
@@ -130,14 +130,14 @@ class FleetAccountsTest(unittest.TestCase):
     def test_runtime_status_surfaces_weekly_window_alongside_daily(self) -> None:
         registry = {
             "generated_utc": "2026-06-17T00:00:00+00:00",
-            "throttle": {".claude-gem7-netra": {
+            "throttle": {".claude-gem7-acct": {
                 "reset": "tomorrow",
                 "weekly": "next Monday",
             }},
             "sessions": [],
         }
 
-        status = fleet_accounts.runtime_status(".claude-gem7-netra", registry=registry)
+        status = fleet_accounts.runtime_status(".claude-gem7-acct", registry=registry)
 
         self.assertFalse(status["available"])
         self.assertEqual(status["reset"], "tomorrow")
@@ -149,7 +149,7 @@ class FleetAccountsTest(unittest.TestCase):
             "generated_utc": "2026-06-17T00:00:00+00:00",
             "sessions": [
                 {
-                    "account": ".claude-gem7-netra",
+                    "account": ".claude-gem7-acct",
                     "disp": "INFRA_AUTH",
                     "last": (
                         "Your organization has disabled Claude subscription access "
@@ -159,7 +159,7 @@ class FleetAccountsTest(unittest.TestCase):
             ],
         }
 
-        status = fleet_accounts.runtime_status(".claude-gem7-netra", registry=registry)
+        status = fleet_accounts.runtime_status(".claude-gem7-acct", registry=registry)
 
         self.assertFalse(status["available"])
         self.assertEqual(status["block_kind"], "access")
@@ -171,13 +171,13 @@ class FleetAccountsTest(unittest.TestCase):
             "throttle": {},
             "sessions": [
                 {
-                    "account": ".claude-gem8-netra",
+                    "account": ".claude-gem8-acct",
                     "disp": "LIVE",
                     "age_min": 1.0,
                     "last": "successful tool result",
                 },
                 {
-                    "account": ".claude-gem8-netra",
+                    "account": ".claude-gem8-acct",
                     "disp": "INFRA_AUTH",
                     "age_min": 200.0,
                     "last": "Please run /login",
@@ -185,7 +185,7 @@ class FleetAccountsTest(unittest.TestCase):
             ],
         }
 
-        status = fleet_accounts.runtime_status(".claude-gem8-netra", registry=registry)
+        status = fleet_accounts.runtime_status(".claude-gem8-acct", registry=registry)
 
         self.assertTrue(status["available"])
         self.assertFalse(status["blocked"])
@@ -196,13 +196,13 @@ class FleetAccountsTest(unittest.TestCase):
             "throttle": {},
             "sessions": [
                 {
-                    "account": ".claude-gem8-netra",
+                    "account": ".claude-gem8-acct",
                     "disp": "INFRA_AUTH",
                     "age_min": "unknown",
                     "last": "Please run /login",
                 },
                 {
-                    "account": ".claude-gem8-netra",
+                    "account": ".claude-gem8-acct",
                     "disp": "DONE",
                     "age_min": 5.0,
                     "last": "completed after re-login",
@@ -210,7 +210,7 @@ class FleetAccountsTest(unittest.TestCase):
             ],
         }
 
-        status = fleet_accounts.runtime_status(".claude-gem8-netra", registry=registry)
+        status = fleet_accounts.runtime_status(".claude-gem8-acct", registry=registry)
 
         self.assertFalse(status["available"])
         self.assertTrue(status["blocked"])
@@ -218,7 +218,7 @@ class FleetAccountsTest(unittest.TestCase):
 
     def test_explicit_empty_registry_does_not_load_live_registry(self) -> None:
         with mock.patch.object(fleet_accounts, "load_registry", side_effect=AssertionError("unexpected load")):
-            status = fleet_accounts.runtime_status(".claude-gem8-netra", registry={})
+            status = fleet_accounts.runtime_status(".claude-gem8-acct", registry={})
 
         self.assertTrue(status["available"])
         self.assertEqual(status["status_source"], "none")
@@ -227,7 +227,7 @@ class FleetAccountsTest(unittest.TestCase):
         registry = {
             "generated_utc": "2026-06-17T00:00:00+00:00",
             "auth": {
-                ".claude-gem8-netra": {
+                ".claude-gem8-acct": {
                     "block_kind": "auth",
                     "block_reason": "auth/login required",
                     "seen_utc": "2026-06-16T23:00:00+00:00",
@@ -236,7 +236,7 @@ class FleetAccountsTest(unittest.TestCase):
             "sessions": [],
         }
 
-        status = fleet_accounts.runtime_status(".claude-gem8-netra", registry=registry)
+        status = fleet_accounts.runtime_status(".claude-gem8-acct", registry=registry)
 
         self.assertFalse(status["available"])
         self.assertEqual(status["block_kind"], "auth")
@@ -245,7 +245,7 @@ class FleetAccountsTest(unittest.TestCase):
         registry = {
             "generated_utc": "2026-06-17T00:00:00+00:00",
             "auth": {
-                ".claude-gem7-netra": {
+                ".claude-gem7-acct": {
                     "block_kind": "auth",
                     "block_reason": "auth/login required",
                     "last": (
@@ -257,7 +257,7 @@ class FleetAccountsTest(unittest.TestCase):
             "sessions": [],
         }
 
-        status = fleet_accounts.runtime_status(".claude-gem7-netra", registry=registry)
+        status = fleet_accounts.runtime_status(".claude-gem7-acct", registry=registry)
 
         self.assertFalse(status["available"])
         self.assertEqual(status["block_kind"], "access")
@@ -267,7 +267,7 @@ class FleetAccountsTest(unittest.TestCase):
         registry = {
             "generated_utc": "2026-06-17T00:00:00+00:00",
             "auth": {
-                ".claude-gem8-netra": {
+                ".claude-gem8-acct": {
                     "block_kind": "auth",
                     "block_reason": "auth/login required",
                     "seen_utc": "2026-06-16T23:00:00+00:00",
@@ -275,7 +275,7 @@ class FleetAccountsTest(unittest.TestCase):
             },
             "sessions": [
                 {
-                    "account": ".claude-gem8-netra",
+                    "account": ".claude-gem8-acct",
                     "disp": "DONE",
                     "seen_utc": "2026-06-16T23:30:00+00:00",
                     "last": "completed after re-login",
@@ -283,7 +283,7 @@ class FleetAccountsTest(unittest.TestCase):
             ],
         }
 
-        status = fleet_accounts.runtime_status(".claude-gem8-netra", registry=registry)
+        status = fleet_accounts.runtime_status(".claude-gem8-acct", registry=registry)
 
         self.assertTrue(status["available"])
         self.assertFalse(status["blocked"])
@@ -292,13 +292,13 @@ class FleetAccountsTest(unittest.TestCase):
         # is_worker is the cheap per-account check the session tools call in their
         # scan loop; it must not require the account dir to exist on disk.
         pol = {"exclude": ["backup", "breakglass"], "include_only": [], "notes": {}}
-        self.assertTrue(fleet_accounts.is_worker(".claude-gem99-netra", str(self.home), pol))
+        self.assertTrue(fleet_accounts.is_worker(".claude-gem99-acct", str(self.home), pol))
         self.assertFalse(fleet_accounts.is_worker(".claude-backup", str(self.home), pol))
 
     def test_include_only_excludes_accounts_off_the_allowlist(self) -> None:
         account_dir(self.home, ".claude")
-        account_dir(self.home, ".claude-gem8-netra")
-        account_dir(self.home, ".claude-c10-netra")
+        account_dir(self.home, ".claude-gem8-acct")
+        account_dir(self.home, ".claude-c10-acct")
         pol = {"exclude": [], "include_only": ["gem8"], "notes": {}}
         kinds = {r["tag"]: r["kind"]
                  for r in fleet_accounts.discover_accounts(str(self.home), pol,
@@ -353,7 +353,7 @@ class FleetAccountsTest(unittest.TestCase):
 
     def test_account_product_and_tag_classify_both_families(self) -> None:
         self.assertEqual(fleet_accounts.account_product(".claude"), "claude")
-        self.assertEqual(fleet_accounts.account_product(".claude-gem8-netra"), "claude")
+        self.assertEqual(fleet_accounts.account_product(".claude-gem8-acct"), "claude")
         self.assertEqual(fleet_accounts.account_product(".claude.json"), "claude")
         self.assertEqual(fleet_accounts.account_product("opencode"), "opencode")
         self.assertEqual(fleet_accounts.account_product("opencode-glm"), "opencode")
@@ -361,13 +361,13 @@ class FleetAccountsTest(unittest.TestCase):
         self.assertEqual(fleet_accounts.account_tag("opencode"), "default")
         self.assertEqual(fleet_accounts.account_tag("opencode-glm"), "glm")
         # claude tag derivation is unchanged
-        self.assertEqual(fleet_accounts.account_tag(".claude-gem8-netra"), "gem8")
+        self.assertEqual(fleet_accounts.account_tag(".claude-gem8-acct"), "gem8")
         self.assertEqual(fleet_accounts.account_tag(".claude"), "default")
 
     def test_discover_accounts_finds_opencode_alongside_claude(self) -> None:
         # claude side
         account_dir(self.home, ".claude")
-        account_dir(self.home, ".claude-gem8-netra")
+        account_dir(self.home, ".claude-gem8-acct")
         # opencode side
         opencode_dir(self.config_home, "opencode")
         opencode_dir(self.config_home, "opencode-glm")
@@ -377,7 +377,7 @@ class FleetAccountsTest(unittest.TestCase):
         by_key = {(r["product"], r["account"]): r for r in rows}
 
         self.assertEqual(by_key[("claude", ".claude")]["kind"], "worker")
-        self.assertEqual(by_key[("claude", ".claude-gem8-netra")]["tag"], "gem8")
+        self.assertEqual(by_key[("claude", ".claude-gem8-acct")]["tag"], "gem8")
         self.assertEqual(by_key[("opencode", "opencode")]["kind"], "worker")
         self.assertEqual(by_key[("opencode", "opencode")]["tag"], "default")
         self.assertEqual(by_key[("opencode", "opencode-glm")]["kind"], "worker")
@@ -539,8 +539,8 @@ class FleetAccountsTest(unittest.TestCase):
         # bias the deterministic tiebreak is alphabetical (gem7 < gem8). An operator who
         # KNOWS gem8 has more room (the router can't measure quota) lifts it with a positive
         # route_weight, and the switcher must then prefer gem8 despite the alphabetical order.
-        account_dir(self.home, ".claude-gem7-netra")
-        account_dir(self.home, ".claude-gem8-netra")
+        account_dir(self.home, ".claude-gem7-acct")
+        account_dir(self.home, ".claude-gem8-acct")
 
         # baseline: no weights -> alphabetical tiebreak picks gem7
         pol_plain = {"exclude": [], "include_only": [], "notes": {},
@@ -572,13 +572,13 @@ class FleetAccountsTest(unittest.TestCase):
     def test_route_weight_defaults_to_zero_and_keeps_session_balancing(self) -> None:
         # With no route_weight, the row still carries the default 0 and routing is unchanged:
         # fewest-live wins regardless of alphabetical order (gem8 idle beats a busy gem7).
-        account_dir(self.home, ".claude-gem7-netra")
-        account_dir(self.home, ".claude-gem8-netra")
+        account_dir(self.home, ".claude-gem7-acct")
+        account_dir(self.home, ".claude-gem8-acct")
         registry = {
             "generated_utc": "2026-06-17T00:00:00+00:00",
             "sessions": [
-                {"account": ".claude-gem7-netra", "disp": "LIVE", "age_min": 1.0},
-                {"account": ".claude-gem7-netra", "disp": "LIVE", "age_min": 1.0},
+                {"account": ".claude-gem7-acct", "disp": "LIVE", "age_min": 1.0},
+                {"account": ".claude-gem7-acct", "disp": "LIVE", "age_min": 1.0},
             ],
         }
         rows = fleet_accounts.annotate_accounts(
@@ -631,17 +631,17 @@ class IdentityReconciliationTest(unittest.TestCase):
                                                 config_home=str(self.config_home))
 
     def test_reads_login_identity(self) -> None:
-        login_dir(self.home, ".claude-gem8-netra", uuid="uuid-a",
+        login_dir(self.home, ".claude-gem8-acct", uuid="uuid-a",
                   email="jack@x.ai")
         by = {r["account"]: r for r in self._discover()}
-        row = by[".claude-gem8-netra"]
+        row = by[".claude-gem8-acct"]
         self.assertEqual(row["account_uuid"], "uuid-a")
         self.assertEqual(row["login_email"], "jack@x.ai")
         self.assertEqual(row["identity_role"], "unique")
 
     def test_three_dirs_one_account_collapse_to_canonical_plus_duplicates(self) -> None:
         # same uuid across three differently-named dirs (the live gem5/gem7/c10 case)
-        for name in (".claude-gem5-netra", ".claude-gem7-netra", ".claude-c10-netra"):
+        for name in (".claude-gem5-acct", ".claude-gem7-acct", ".claude-c10-acct"):
             login_dir(self.home, name, uuid="shared", email="agent@x.ai")
         rows = [r for r in self._discover() if r.get("account_uuid") == "shared"]
         roles = sorted(r["identity_role"] for r in rows)
@@ -653,7 +653,7 @@ class IdentityReconciliationTest(unittest.TestCase):
             self.assertEqual(len(r["identity_peers"]), 2)
 
     def test_duplicate_excluded_from_routing(self) -> None:
-        for name in (".claude-gem5-netra", ".claude-gem7-netra"):
+        for name in (".claude-gem5-acct", ".claude-gem7-acct"):
             login_dir(self.home, name, uuid="shared", email="agent@x.ai")
         rows = self._discover()
         routable = [r for r in rows if fleet_accounts.routable_worker(r)]
@@ -670,9 +670,9 @@ class IdentityReconciliationTest(unittest.TestCase):
 
     def test_tag_login_mismatch_flagged(self) -> None:
         # dir named gem5 but logged in as agent@ -> mismatch
-        login_dir(self.home, ".claude-gem5-netra", uuid="u", email="agent@x.ai")
+        login_dir(self.home, ".claude-gem5-acct", uuid="u", email="agent@x.ai")
         # dir named gem8 logged in as gem8@ -> match
-        login_dir(self.home, ".claude-gem8-netra", uuid="v", email="gem8@x.ai")
+        login_dir(self.home, ".claude-gem8-acct", uuid="v", email="gem8@x.ai")
         by = {r["tag"]: r for r in self._discover()}
         self.assertFalse(by["gem5"]["tag_login_match"])
         self.assertTrue(by["gem8"]["tag_login_match"])
@@ -681,14 +681,14 @@ class IdentityReconciliationTest(unittest.TestCase):
         # gem5 dir holding gem5@ and the default dir ALSO holding gem5@: the purpose-named
         # gem5 dir must be canonical; 'default' (which may legitimately hold any account)
         # is the duplicate, never the other way round.
-        login_dir(self.home, ".claude-gem5-netra", uuid="shared", email="gem5@x.ai")
+        login_dir(self.home, ".claude-gem5-acct", uuid="shared", email="gem5@x.ai")
         login_dir(self.home, ".claude", uuid="shared", email="gem5@x.ai")
         by = {r["tag"]: r for r in self._discover()}
         self.assertEqual(by["gem5"]["identity_role"], "canonical")
         self.assertEqual(by["default"]["identity_role"], "duplicate")
 
     def test_distinct_accounts_stay_unique(self) -> None:
-        login_dir(self.home, ".claude-gem8-netra", uuid="a", email="jack@x.ai")
+        login_dir(self.home, ".claude-gem8-acct", uuid="a", email="jack@x.ai")
         login_dir(self.home, ".claude", uuid="b", email="gem5@x.ai")
         by = {r["tag"]: r for r in self._discover()}
         self.assertEqual(by["gem8"]["identity_role"], "unique")
@@ -696,12 +696,12 @@ class IdentityReconciliationTest(unittest.TestCase):
 
     def test_huge_config_does_not_crash_discovery(self) -> None:
         # a 40KB+ .claude.json (like a heavily-used account) must still parse identity
-        path = login_dir(self.home, ".claude-big-netra", uuid="big", email="b@x.ai")
+        path = login_dir(self.home, ".claude-big-acct", uuid="big", email="b@x.ai")
         cfg = json.loads((path / ".claude.json").read_text(encoding="utf-8"))
         cfg["junk"] = "x" * 60000
         (path / ".claude.json").write_text(json.dumps(cfg), encoding="utf-8")
         by = {r["account"]: r for r in self._discover()}
-        self.assertEqual(by[".claude-big-netra"]["account_uuid"], "big")
+        self.assertEqual(by[".claude-big-acct"]["account_uuid"], "big")
 
     def test_opencode_has_no_identity_fields(self) -> None:
         opencode_dir(self.config_home, "opencode-glm", config={"model": "z/glm"})
@@ -715,7 +715,7 @@ class IdentityReconciliationTest(unittest.TestCase):
         # router routes to: a duplicate-identity dir is the same Anthropic account as its
         # canonical sibling, so offering it double-counts one account's capacity. Both CLI
         # modes must filter through routable_worker(), like available_accounts()/route do.
-        login_dir(self.home, ".claude-gem5-netra", uuid="shared", email="gem5@x.ai")
+        login_dir(self.home, ".claude-gem5-acct", uuid="shared", email="gem5@x.ai")
         login_dir(self.home, ".claude", uuid="shared", email="gem5@x.ai")  # default = dup
         # explicit empty registry so a stale host throttle (gem5 is usage-limited on the
         # real box) can't bleed in and mark the canonical dir unavailable.
@@ -740,8 +740,8 @@ class IdentityReconciliationTest(unittest.TestCase):
 
         offered = {r["account"] for r in doc["available_accounts"]}
         # canonical offered on both surfaces; duplicate suppressed on both
-        self.assertIn(".claude-gem5-netra", available)
-        self.assertIn(".claude-gem5-netra", offered)
+        self.assertIn(".claude-gem5-acct", available)
+        self.assertIn(".claude-gem5-acct", offered)
         self.assertNotIn(".claude", available,
                          "CLI `available` must not offer a duplicate-identity dir")
         self.assertNotIn(".claude", offered,

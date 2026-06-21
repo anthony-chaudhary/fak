@@ -69,7 +69,7 @@ class ClaudeAgentChatTest(unittest.TestCase):
         self.home = Path(self.tmp.name)
         self.addCleanup(self.tmp.cleanup)
         make_account(self.home, ".claude")
-        make_account(self.home, ".claude-gem8-netra")
+        make_account(self.home, ".claude-gem8-acct")
         make_account(self.home, ".claude-backup")
 
     def rows(self, registry=None):
@@ -83,10 +83,10 @@ class ClaudeAgentChatTest(unittest.TestCase):
     def test_auto_selects_available_least_busy_worker(self) -> None:
         registry = {
             "generated_utc": "2026-06-18T12:00:00+00:00",
-            "throttle": {".claude-gem8-netra": {"reset": "tomorrow"}},
+            "throttle": {".claude-gem8-acct": {"reset": "tomorrow"}},
             "sessions": [
                 {"account": ".claude", "disp": "LIVE"},
-                {"account": ".claude-gem8-netra", "disp": "STOPPED_LIMIT"},
+                {"account": ".claude-gem8-acct", "disp": "STOPPED_LIMIT"},
             ],
         }
 
@@ -98,7 +98,7 @@ class ClaudeAgentChatTest(unittest.TestCase):
     def test_blocked_explicit_account_refuses_unless_allowed(self) -> None:
         registry = {
             "generated_utc": "2026-06-18T12:00:00+00:00",
-            "throttle": {".claude-gem8-netra": {"reset": "tomorrow"}},
+            "throttle": {".claude-gem8-acct": {"reset": "tomorrow"}},
             "sessions": [],
         }
         rows = self.rows(registry)
@@ -107,7 +107,7 @@ class ClaudeAgentChatTest(unittest.TestCase):
             chat.choose_account(rows, "gem8")
 
         chosen = chat.choose_account(rows, "gem8", allow_blocked=True)
-        self.assertEqual(chosen["account"], ".claude-gem8-netra")
+        self.assertEqual(chosen["account"], ".claude-gem8-acct")
 
     def test_excluded_account_is_not_offerable(self) -> None:
         with self.assertRaises(chat.SelectionError):
@@ -300,7 +300,7 @@ class GlmPacketTest(unittest.TestCase):
         self.home = Path(self.tmp.name)
         self.addCleanup(self.tmp.cleanup)
         make_account(self.home, ".claude")
-        make_account(self.home, ".claude-gem8-netra")
+        make_account(self.home, ".claude-gem8-acct")
         # Pin opencode discovery to the temp dir too, so the host's real
         # ~/.config/opencode never leaks into this hermetic roster. fleet_accounts
         # reads CONFIG_HOME at import, so patch the module global (not the env).

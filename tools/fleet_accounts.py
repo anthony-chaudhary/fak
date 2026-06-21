@@ -32,7 +32,7 @@ applies to BOTH products uniformly:
     }
 
 ``exclude`` substrings are matched against the bare account *tag*
-(``.claude-<tag>-netra`` -> ``<tag>``; ``opencode-<tag>`` -> ``<tag>``;
+(``.claude-<tag>-acct`` -> ``<tag>``; ``opencode-<tag>`` -> ``<tag>``;
 ``.claude`` / ``opencode`` -> ``default``) and the dir basename.
 ``include_only`` (when non-empty) is an allowlist. The built-in default already
 excludes ``backup`` / ``breakglass`` so backup accounts are out of the box even
@@ -156,18 +156,18 @@ def account_tag(account: str) -> str:
     convention used across the resume layer (fleet_sessions.py / the watchdog).
 
     Per product:
-      Claude:   ``.claude-gem8-netra`` -> ``gem8``; ``.claude`` -> ``default``
+      Claude:   ``.claude-gem8-acct`` -> ``gem8``; ``.claude`` -> ``default``
       opencode: ``opencode-glm``       -> ``glm``;  ``opencode``  -> ``default``
 
-    The trailing ``-netra`` org suffix (Claude convention) is stripped if present.
+    The trailing ``-acct`` org suffix (Claude convention) is stripped if present.
     """
     product = account_product(account)
     if product == "opencode":
         tag = account.replace("opencode-", "").replace("opencode", "")
     else:
         tag = account.replace(".claude-", "").replace(".claude", "")
-    if tag.endswith("-netra"):
-        tag = tag[: -len("-netra")]
+    if tag.endswith("-acct"):
+        tag = tag[: -len("-acct")]
     return tag or "default"
 
 
@@ -894,7 +894,7 @@ def discover_accounts(home: str = USER, policy: dict | None = None,
     Returns a list of dicts (sorted by product, then kind, then tag) with keys:
       dir       absolute path of the account directory
       product   ``claude`` | ``opencode``
-      account   the dir basename (e.g. ``.claude-gem8-netra``, ``opencode-glm``)
+      account   the dir basename (e.g. ``.claude-gem8-acct``, ``opencode-glm``)
       tag       normalized short name (e.g. ``gem8``, ``default``)
       kind      one of "worker" | "excluded" | "non-account"
       reason    one-line human explanation of the classification
