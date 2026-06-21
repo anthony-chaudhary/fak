@@ -79,7 +79,10 @@ QUANT_ARCH_FLOOR: dict[str, float] = {
 DSA_STOCK_FLOOR_CC = 9.0  # Hopper sm_90; Blackwell sm_100 (>9.0) also supported.
 ADA_PORT_CC = 8.9         # community-only Ada port (renning22/glm-5.2-4090, ada_dsa.py).
 
-SUPPORTED_GPUS = ["H200", "B200", "B300", "GB300"]  # SGLang GLM-5.2 cookbook.
+# sm_90+ data-center parts the DSA gate accepts. H100/H200 are Hopper (sm_90);
+# B200/B300/GB200/GB300 are Blackwell (sm_100). The SGLang GLM-5.2 cookbook
+# validated H200/B200/B300/GB300; H100 and GB200 clear the same arch floor.
+SUPPORTED_GPUS = ["H100", "H200", "B200", "B300", "GB200", "GB300"]
 
 # GPU model name -> CUDA compute capability, when nvidia-smi can't report
 # compute_cap directly. Checked in order; first substring hit wins, so more
@@ -159,6 +162,23 @@ def required_vram_gb(quant: str, kv_overhead: float) -> float:
     return round(weights * (1.0 + kv_overhead), 1)
 
 
+# Per-rank fixed reserve (NCCL buffers + CUDA context + CUDA-graph/activation
+# scratch) that does NOT shard with tensor-parallel. Bounded so the validated
+# even-8-GPU H100/H200 nodes stay READY while a node that clears AGGREGATE VRAM
+# but can't hold its per-card TP shard is still caught.
+PER_RANK_RESERVE_GB = 7.0
+
+
+def required_per_gpu_vram_gb(quant: str, kv_overhead: float, gpu_count: int) -> float:
+    """Per-card VRAM a tensor-parallel shard needs: weights/TP scaled by KV
+    overhead, plus the non-sharding per-rank reserve. gpu_count<=1 degrades to the
+    single-rank footprint."""
+    if gpu_count <= 1:
+        return required_vram_gb(quant, kv_overhead)
+    per_rank_weights = QUANT_WEIGHTS_GB[quant] / gpu_count
+    return round(per_rank_weights * (1.0 + kv_overhead) + PER_RANK_RESERVE_GB, 1)
+
+
 def quant_arch_ok(quant: str, cc: float | None) -> bool:
     """Does this GPU's compute capability support this quant's kernels?"""
     floor = QUANT_ARCH_FLOOR.get(quant, DSA_STOCK_FLOOR_CC)
@@ -186,11 +206,18 @@ def evaluate_engine(
     engine_version: str,
     quant: str,
     kv_overhead: float,
+    per_gpu_vram_gb: float | None = None,
 ) -> dict[str, Any]:
     """Per-engine go/no-go for serving GLM-5.2. Fails closed on unknown arch."""
     need = required_vram_gb(quant, kv_overhead)
     fit_quant = recommended_quant(total_vram_gb, kv_overhead, cc)
-    memory_ok = total_vram_gb >= need
+    aggregate_ok = total_vram_gb >= need
+    # A node can clear AGGREGATE VRAM yet be unable to hold its per-card TP shard
+    # (weights/TP + KV + the non-sharding per-rank reserve). When per-card data is
+    # known, gate on BOTH; when it is not, the aggregate check stands alone.
+    per_gpu_need = required_per_gpu_vram_gb(quant, kv_overhead, gpu_count)
+    per_gpu_ok = per_gpu_vram_gb is None or per_gpu_vram_gb >= per_gpu_need
+    memory_ok = aggregate_ok and per_gpu_ok
     arch_ok = cc is not None and cc >= DSA_STOCK_FLOOR_CC
     quant_ok = quant_arch_ok(quant, cc)
     notes: list[str] = []
@@ -209,7 +236,8 @@ def evaluate_engine(
             notes.append(
                 f"{arch_label(cc)} is below the DSA kernel floor (sm_90). Stock "
                 "SGLang/vLLM cannot serve GLM-5.2 here (vLLM #35021). Use llama.cpp "
-                "(MLA path, runs on Ampere/CPU) or target H200/B200/B300/GB300."
+                "(MLA path, runs on Ampere/CPU) or target any sm_90+ part: Hopper "
+                "(H100/H200) or Blackwell (B200/B300/GB200/GB300)."
             )
     elif not quant_ok:
         verdict = "BLOCKED_QUANT_ARCH"
@@ -221,7 +249,15 @@ def evaluate_engine(
         )
     elif not memory_ok:
         verdict = "BLOCKED_MEMORY"
-        if fit_quant:
+        if aggregate_ok and not per_gpu_ok:
+            # Aggregate clears, per-card shard does not — the OOM-at-load case the
+            # aggregate-only check used to miss.
+            notes.append(
+                f"aggregate VRAM clears but the per-GPU TP shard (~{per_gpu_need} GB/card "
+                f"incl. ~{PER_RANK_RESERVE_GB:.0f} GB reserve) exceeds the {per_gpu_vram_gb:.0f} GB "
+                f"smallest card — would OOM at load. Use more/larger GPUs or a smaller quant."
+            )
+        elif fit_quant:
             notes.append(
                 f"{quant} needs ~{need} GB but only {total_vram_gb:.0f} GB present; "
                 f"{fit_quant} would fit — re-run with --quant {fit_quant}."
@@ -238,6 +274,12 @@ def evaluate_engine(
         verdict = "READY"
         notes.append(f"{engine} {engine_version} present; arch + memory OK for {quant}.")
 
+    if quant == "int4" and verdict in {"READY", "READY_PENDING_INSTALL"}:
+        notes.append(
+            "int4 = self-quant only: there is no official GLM-5.2 INT4 (AWQ/GPTQ) repo, "
+            "so the serve script has no default checkpoint — set MODEL=<your-int4-hf-repo>."
+        )
+
     return {
         "engine": engine,
         "verdict": verdict,
@@ -249,6 +291,8 @@ def evaluate_engine(
         "quant": quant,
         "required_vram_gb": need,
         "total_vram_gb": round(total_vram_gb, 1),
+        "required_per_gpu_vram_gb": per_gpu_need,
+        "per_gpu_vram_gb": per_gpu_vram_gb,
         "gpu_count": gpu_count,
         "recommended_quant": fit_quant,
         "notes": notes,
@@ -333,6 +377,18 @@ def resolve_node(
         total_gb = 0.0
         mem_source = ""
 
+    # Smallest card decides the per-GPU/TP-shard fit. Prefer the real per-card data
+    # (detected nvidia-smi rows); on the override path (no per-card data) fall back
+    # to an even split, which assumes a homogeneous node.
+    per_gpu_gb: float | None = None
+    per_gpu_source = ""
+    if gpus and any(g.get("memory_total_mib") for g in gpus):
+        per_gpu_gb = round(min((g.get("memory_total_mib") or 0) for g in gpus) / 1024, 1)
+        per_gpu_source = "min-card"
+    elif total_gb > 0 and count > 0:
+        per_gpu_gb = round(total_gb / count, 1)
+        per_gpu_source = "even-split"
+
     return {
         "gpu_name": name,
         "gpu_count": count,
@@ -341,6 +397,8 @@ def resolve_node(
         "arch": arch_label(cc),
         "total_vram_gb": total_gb,
         "total_vram_source": mem_source,
+        "per_gpu_vram_gb": per_gpu_gb,
+        "per_gpu_vram_source": per_gpu_source,
     }
 
 
@@ -402,6 +460,7 @@ def build_report(
             engine_version=str(probe.get("version") or ""),
             quant=quant,
             kv_overhead=kv_overhead,
+            per_gpu_vram_gb=node.get("per_gpu_vram_gb"),
         ))
 
     any_ready = any(e["ready"] for e in evaluations)
@@ -472,6 +531,11 @@ def render_markdown(report: dict[str, Any]) -> str:
         for note in e.get("notes", []):
             lines.append(f"- `{e['engine']}`: {note}")
     lines += [
+        "",
+        f"> KV headroom is modeled as a flat {report.get('kv_overhead')} fraction of weights, "
+        "independent of served context length. At long context (the serve script defaults to "
+        "131072, up to 1M) the real KV/activation working set is larger and not modeled here — "
+        "verify on-node before committing to a high `--context-length`.",
         "",
         "After a READY/READY_PENDING_INSTALL node serves the endpoint, capture the issue-#130 "
         "evidence with `tools/glm52_serving_witness.py --base-url <url>/v1 --engine-cache-engine <engine>`.",

@@ -260,6 +260,60 @@ def test_int4_on_hopper_h100_is_ready():
     assert sg["arch_ok"] is True and sg["memory_ok"] is True
 
 
+def test_int4_ready_carries_self_quant_caveat():
+    # int4 is servable but has no official checkpoint; READY must say so, matching
+    # the serve script's exit-2-without-MODEL reality.
+    rows = [(str(i), "NVIDIA H100 80GB HBM3", 81920, "9.0") for i in range(8)]
+    rep = report_for(rows, installed={"sglang": "0.5.0"}, quant="int4")
+    sg = next(e for e in rep["engines"] if e["engine"] == "sglang")
+    assert any("self-quant" in n and "MODEL=" in n for n in sg["notes"])
+    # A stock quant (w4afp8) must NOT carry the caveat.
+    rep2 = report_for(rows, installed={"sglang": "0.5.0"}, quant="w4afp8")
+    sg2 = next(e for e in rep2["engines"] if e["engine"] == "sglang")
+    assert not any("self-quant" in n for n in sg2["notes"])
+
+
+# --------------------------------------------------------------------------- #
+# per-GPU / tensor-parallel shard fit (not just aggregate VRAM)
+# --------------------------------------------------------------------------- #
+
+def test_per_gpu_need_shards_with_tp_plus_reserve():
+    # weights/TP scaled by KV overhead, plus the fixed per-rank reserve.
+    expect = round((pf.QUANT_WEIGHTS_GB["w4afp8"] / 8) * 1.15 + pf.PER_RANK_RESERVE_GB, 1)
+    assert pf.required_per_gpu_vram_gb("w4afp8", 0.15, 8) == expect
+    # gpu_count<=1 degrades to the single-rank footprint.
+    assert pf.required_per_gpu_vram_gb("fp8", 0.0, 1) == pf.required_vram_gb("fp8", 0.0)
+
+
+def test_validated_8x_h100_stays_ready_under_per_gpu_gate():
+    # The per-GPU gate must NOT regress the validated even-8-GPU READY verdicts.
+    rows = [(str(i), "NVIDIA H100 80GB HBM3", 81920, "9.0") for i in range(8)]
+    for q in ("w4afp8", "int4"):
+        rep = report_for(rows, installed={"sglang": "0.5.0"}, quant=q)
+        sg = next(e for e in rep["engines"] if e["engine"] == "sglang")
+        assert sg["verdict"] == "READY", f"{q} regressed: {sg['verdict']}"
+        assert sg["memory_ok"] is True
+
+
+def test_aggregate_clears_but_per_card_fails_is_blocked_memory():
+    # Heterogeneous node: aggregate VRAM clears w4afp8 but the smallest card cannot
+    # hold its TP shard -> BLOCKED_MEMORY with a per-GPU OOM note (was false READY).
+    rows = [(str(i), "NVIDIA H100 80GB HBM3", 81920, "9.0") for i in range(7)]
+    rows.append(("7", "NVIDIA H100 PCIe", 24576, "9.0"))  # one 24 GB card drags the floor
+    rep = report_for(rows, installed={"sglang": "0.5.0"}, quant="w4afp8")
+    sg = next(e for e in rep["engines"] if e["engine"] == "sglang")
+    assert sg["verdict"] == "BLOCKED_MEMORY"
+    assert sg["memory_ok"] is False
+    assert any("per-GPU" in n and "OOM" in n for n in sg["notes"])
+
+
+def test_supported_gpus_includes_h100_and_gb200():
+    # Advisory list must not steer an H100 operator away from a path the gate
+    # itself marks READY.
+    assert "H100" in pf.SUPPORTED_GPUS
+    assert "GB200" in pf.SUPPORTED_GPUS
+
+
 def test_w4afp8_on_hopper_h100_is_ready():
     # The actual chosen path: 8x H100-80, PhalaCloud/GLM-5.2-W4AFP8 -> READY.
     rows = [(str(i), "NVIDIA H100 80GB HBM3", 81920, "9.0") for i in range(8)]
