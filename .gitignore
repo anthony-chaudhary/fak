@@ -287,3 +287,10 @@ gpucheck_wsl
 # suite (any seed bump, any clone) leaves git status quiet. The .go SOURCES stay tracked.
 /experiments/turn-tax/
 /experiments/kvmmu/
+
+# --- scrub/adjudication session scratch (node-local; never commit) ----------------
+# .adjudicate/ holds one-off diffs + copies of the PRIVATE `fleet` repo's scrub
+# tooling (fleet_scrub_public_copy.py / fleet_PUBLIC-SCRUB-POLICY.md / fleet_SUNSET.md),
+# which carry the real-secret denylist by reference — the exact content the
+# PUBLIC-SCRUB-POLICY leak gate keeps out of this public tree. Never stage it.
+/.adjudicate/
