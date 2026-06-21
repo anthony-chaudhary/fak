@@ -259,3 +259,31 @@ experiments/fleet/*.log
 
 gpucheck_wsl
 *.tmp.*
+
+# --- public-issue scrub session scratch (node-local; never commit) ---------------
+# One-off issue-text scrub/leak-audit session (tools/.issue_scrub.py + a .scrub_work/
+# tree) dumps live GitHub issue bodies, leak-needle audits, and a private-preserve
+# ledger to the repo root. These carry the very content the PUBLIC-SCRUB-POLICY gate
+# exists to keep out of the public tree (live issue JSON, leaked-number lists,
+# private backlinks), so they must never be staged. The scrub TOOL itself, if it is
+# ever promoted to a tracked tool, lives under tools/ — this hides only the run state.
+/.scrub_work/
+/.issue_scrub.py
+/.fak_all_now.json
+/.fak_final.json
+/.fak_issues_now*.json
+/.leaked_issue_nums.json
+/.move_private_nums.json
+# the dry-run / migration text dumps from the same session (and future relabels)
+/.added*.txt
+/.del_*.txt
+/.dryrun_*.txt
+
+# Regenerable turn-tax + kvmmu witness reports. WRITTEN BY TESTS, not curated:
+# internal/turnbench/stochastic_test.go writes experiments/turn-tax/turntax-{stochastic,
+# breakeven}.json (and reads them back as its own fixtures — "a new file" per the test),
+# and internal/kvmmu/kvmmu_test.go drops a kvmmu-report.json. Same regenerable-bench-output
+# class as /turntax-report.json above; ignore the whole report dirs so re-running the
+# suite (any seed bump, any clone) leaves git status quiet. The .go SOURCES stay tracked.
+/experiments/turn-tax/
+/experiments/kvmmu/
