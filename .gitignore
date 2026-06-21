@@ -243,5 +243,19 @@ experiments/fleet/*.log
 # run. The FILE_ADMISSION pre-commit gate already refuses it; ignoring it keeps the
 # documented proof from ever leaving a stray file for `git add` to sweep in.
 /agent-report.json
+
+# public(fak) vs private(fleet, codename "fleetfak") `git ls-files` parity diff —
+# regenerable scratch dropped at the repo root by an untracked peer migration/parity
+# helper (a manual public-vs-private tracked-file comparison). No tracked tool emits
+# these; the FILE_ADMISSION pre-commit gate would refuse them, but committing the
+# ignore protects every session in this shared tree (better than a per-clone
+# .git/info/exclude). The literal names today, plus a glob for future relabels.
+/.fak_tracked.txt
+/.fleetfak_tracked.txt
+/.only_in_fak.txt
+/.only_in_fleetfak.txt
+/*_tracked.txt
+/.only_in_*.txt
+
 gpucheck_wsl
 *.tmp.*
