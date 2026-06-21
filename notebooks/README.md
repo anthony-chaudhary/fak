@@ -1,7 +1,7 @@
 # Notebooks — try `fak` in a hosted cloud notebook
 
 Lowest-friction way to see the agent kernel work: no local Go toolchain, no clone on your
-machine, a free GPU on demand. These are a hosted re-skin of `fak/GETTING-STARTED.md`'s
+machine, a free GPU on demand. These are a hosted re-skin of [`GETTING-STARTED.md`](../GETTING-STARTED.md)'s
 tier ladder — every command already ships; the notebook just wraps it.
 
 | Notebook | Host | Tiers | Status |
@@ -9,26 +9,25 @@ tier ladder — every command already ships; the notebook just wraps it.
 | [`fak-quickstart.ipynb`](fak-quickstart.ipynb) | **Google Colab** / Kaggle (free T4) | 0 (CPU) + 1 (front a real model on a GPU) | runnable |
 | [`fak-inkernel.ipynb`](fak-inkernel.ipynb) | Lightning AI / RunPod Jupyter (neocloud) | 2 — fused in-kernel decode + a stable endpoint | runnable |
 
-The full design — platform comparison, the three install paths, build order, and the one
-real blocker (the repo is private until issue #74 flips) — is in
-[`../PLAN-cloud-notebook-experiment-2026-06-21.md`](../docs/notes/PLAN-cloud-notebook-experiment-2026-06-21.md).
+Open the quickstart directly:
+[![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/anthony-chaudhary/fak/blob/main/notebooks/fak-quickstart.ipynb)
 
 ## Running `fak-quickstart.ipynb`
 
 1. Open it in [Google Colab](https://colab.research.google.com/) (or Kaggle), or run
    locally with `jupyter lab`.
-2. **While the repo is private (#74):** add a `GITHUB_TOKEN` so the *Get the binary* cell
-   can clone — in Colab use 🔑 **Secrets** → `GITHUB_TOKEN`; elsewhere
-   `export GITHUB_TOKEN=…` before launching. (Once the repo is public this step goes away.)
+2. **No key, no token.** `fak` is a public repo, so the *Get the binary* cell clones and
+   builds it anonymously (no `GITHUB_TOKEN` needed). The clone also brings the `examples/`
+   the demos use.
 3. **Tier 0 needs no GPU.** For **Tier 1**, set **Runtime → Change runtime type → T4 GPU**,
    then ▶ **Run all**.
 
 The notebook is **Run-all idempotent** (re-builds the binary and re-pulls the model on a
 fresh runtime) and degrades gracefully — with no GPU it runs Tier 0 only and tells you so.
 
-> **Knobs** (environment / Colab secrets): `GITHUB_TOKEN`, `FAK_REPO`, `FAK_BRANCH`
-> (pin a release tag here), `FAK_MODEL` (default `qwen2.5:7b`), `FAK_WORK`, `FAK_LIVE`
-> (the zero-install demo endpoint).
+> **Knobs** (environment / Colab secrets): `FAK_REPO`, `FAK_BRANCH` (pin a release tag
+> here), `FAK_MODEL` (default `qwen2.5:7b`), `FAK_WORK`, and `FAK_LIVE` (optional — point at
+> a remote `fak serve` endpoint you already run; unset by default).
 
 ## These notebooks are generated — don't hand-edit them
 

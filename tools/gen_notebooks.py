@@ -47,25 +47,19 @@ WORK = os.environ.get("FAK_WORK") or ("/content" if os.path.isdir("/content")
 os.makedirs(WORK, exist_ok=True); os.chdir(WORK)
 
 REPO   = os.environ.get("FAK_REPO", "anthony-chaudhary/fak")
-BRANCH = os.environ.get("FAK_BRANCH", "main")
-TOKEN  = os.environ.get("GITHUB_TOKEN", "")
-try:  # Colab secret, if present
-    from google.colab import userdata
-    TOKEN = TOKEN or (userdata.get("GITHUB_TOKEN") or "")
-except Exception:
-    pass
+BRANCH = os.environ.get("FAK_BRANCH", "main")  # pin a release tag here, e.g. v0.30.0
 
 HAS_GPU = shutil.which("nvidia-smi") is not None and \
           subprocess.run(["nvidia-smi"], capture_output=True).returncode == 0
 print("work dir :", WORK)
-print(f"repo     : {REPO}@{BRANCH}  (token set: {'yes' if TOKEN else 'no'})")
+print(f"repo     : {REPO}@{BRANCH}")
 print("GPU      :", __GPU_NOTE__)''').replace("__GPU_NOTE__", gpu_note_expr)
 
 
-GET_BINARY_CELL = r'''# --- get a `fak` binary. When the repo is PUBLIC this is one line:
-#       !curl -fsSL https://raw.githubusercontent.com/{REPO}/main/install.sh | sh
-#     Until #74 flips it's private, so we clone + build (also gives examples/ + testdata/
-#     the demos need). Installs Go 1.26 if absent. Pin with FAK_BRANCH=<tag>.
+GET_BINARY_CELL = r'''# --- get a `fak` binary. The one-liner install is `curl -fsSL .../install.sh | sh`,
+#     but we clone + build so the demos also get examples/ + testdata/ from the repo.
+#     The Go module is the repository ROOT (go.mod), so the clone dir *is* the build dir.
+#     Installs Go 1.26 if absent. Pin a release with FAK_BRANCH=<tag>.
 import urllib.request, tarfile
 
 def sh(cmd):
@@ -86,16 +80,16 @@ if not go_ok():
 os.environ["PATH"] = "/usr/local/go/bin:" + os.environ["PATH"]
 print(subprocess.run(["go","version"], capture_output=True, text=True).stdout.strip())
 
-# clone (token-aware, never echoed) — idempotent
-CLONE = os.path.join(WORK, "fleet")
-if not os.path.isdir(os.path.join(CLONE, ".git")):
-    url = f"https://{TOKEN + '@' if TOKEN else ''}github.com/{REPO}.git"
-    print(f"$ git clone --depth 1 -b {BRANCH} https://github.com/{REPO}.git  ->  {CLONE}")
-    subprocess.run(["git","clone","--depth","1","-b",BRANCH,url,CLONE], check=True)
+# clone the public repo (anonymous; no token needed) — idempotent
+FAK_DIR = os.path.join(WORK, "fak")
+if not os.path.isdir(os.path.join(FAK_DIR, ".git")):
+    print(f"$ git clone --depth 1 -b {BRANCH} https://github.com/{REPO}.git  ->  {FAK_DIR}")
+    subprocess.run(["git","clone","--depth","1","-b",BRANCH,
+                    f"https://github.com/{REPO}.git", FAK_DIR], check=True)
 else:
-    print("clone exists, reusing:", CLONE)
+    print("clone exists, reusing:", FAK_DIR)
 
-FAK_DIR = os.path.join(CLONE, "fak")
+# the module is the repo root, so build right here
 FAK = os.path.join(FAK_DIR, "fak")
 sh(f'cd "{FAK_DIR}" && go build -o fak ./cmd/fak')
 print("\nfak ->", FAK)
@@ -119,36 +113,36 @@ calls, quarantine poisoned results. The same in-process gate is both a **securit
 (a default-deny the model can't talk past) and a **performance gate** (do the shared work
 once, not every turn).
 
-This notebook runs the first two tiers from `fak/GETTING-STARTED.md`:
+This notebook runs the first two tiers from `GETTING-STARTED.md`:
 
 | Tier | What you do | Needs |
 |---|---|---|
 | **0 — Try the kernel** | offline injection A/B + capability deny | **CPU only** |
 | **1 — Front a real model** | `fak serve` in front of Ollama, driven from the OpenAI Python SDK | a **GPU** (Runtime → Change runtime type → T4) |
 
-> **While the repo is private (issue #74):** the anonymous one-click install isn't live
-> yet, so the *Get the binary* cell clones + builds from source and accepts a
-> `GITHUB_TOKEN` (Colab: 🔑 **Secrets** → add `GITHUB_TOKEN`). Tier 0 needs no GPU; Tier 1 does.
-> Run the cells top-to-bottom (▶ **Run all**).
+> **No setup, no key, no token.** `fak` is a public repo, so the *Get the binary* cell clones
+> and builds it anonymously (the clone also brings the `examples/` the demos use). **Tier 0**
+> needs no GPU; **Tier 1** wants one (Runtime → Change runtime type → T4). Run the cells
+> top-to-bottom (▶ **Run all**).
 
 ''' + GEN_MARKER),
         code(setup_cell('"yes — Tier 1 ready" if HAS_GPU '
                         'else "no — Tier 0 only (Runtime -> T4 for Tier 1)"')),
-        code(r'''# --- (optional) zero-install proof: hit the LIVE fak demo VM, no setup, no repo access ---
-# Real adjudication verdicts in ~3s. The endpoint is open by design.
+        code(GET_BINARY_CELL),
+        code(r'''# --- (optional) point at a remote fak endpoint, if you have one running ---
+# By default this is skipped. If you (or a teammate) run `fak serve` somewhere reachable,
+# set FAK_LIVE=http://host:port to see the kernel adjudicate tool calls by STRUCTURE —
+# no model needed. Otherwise the rest of the notebook runs YOUR OWN kernel, built above.
 import json, urllib.request
 
-B = os.environ.get("FAK_LIVE", "http://35.255.200.88:8080")
-def _get(p):
-    with urllib.request.urlopen(B + p, timeout=15) as r: return json.load(r)
-def _post(p, payload):
-    req = urllib.request.Request(B + p, data=json.dumps(payload).encode(),
-                                 headers={"Content-Type": "application/json"})
-    with urllib.request.urlopen(req, timeout=15) as r: return json.load(r)
-
-try:
-    print("healthz :", _get("/healthz"))
-    print("\n-- kernel adjudication (verdict by structure, no model needed) --")
+B = os.environ.get("FAK_LIVE", "")
+if not B:
+    print("FAK_LIVE not set — skipping the remote check; the cells below use your own build.")
+else:
+    def _post(p, payload):
+        req = urllib.request.Request(B + p, data=json.dumps(payload).encode(),
+                                     headers={"Content-Type": "application/json"})
+        with urllib.request.urlopen(req, timeout=15) as r: return json.load(r)
     cases = [
         ("Bash ls (read-only)",  {"tool":"Bash","arguments":{"command":"ls -la"},"read_only":True}),
         ("git push (write)",     {"tool":"Bash","arguments":{"command":"git push origin main"}}),
@@ -156,15 +150,15 @@ try:
         ("rm -rf (destructive)", {"tool":"Bash","arguments":{"command":"rm -rf /tmp/x"}}),
         ("delete_account (tool)",{"tool":"delete_account","arguments":{"confirm":True}}),
     ]
-    for name, payload in cases:
-        r = _post("/v1/fak/adjudicate", payload)
-        v = r.get("verdict", r)
-        print(f"  {name:<24} -> {v.get('kind') or r.get('kind','?')} "
-              f"({v.get('reason') or r.get('reason','-')})")
-except Exception as e:
-    print("live VM unreachable (demo box, may be down):", e)
-    print("skip this cell — the rest of the notebook runs YOUR OWN kernel.")'''),
-        code(GET_BINARY_CELL),
+    try:
+        print("-- kernel adjudication on", B, "(verdict by structure, no model needed) --")
+        for name, payload in cases:
+            r = _post("/v1/fak/adjudicate", payload)
+            v = r.get("verdict", r)
+            print(f"  {name:<24} -> {v.get('kind') or r.get('kind','?')} "
+                  f"({v.get('reason') or r.get('reason','-')})")
+    except Exception as e:
+        print("endpoint unreachable:", e, "— skip this cell; the rest uses your own kernel.")'''),
         md(r'''## Tier 0 — try the kernel (no GPU, no key, no model)
 
 The headline: the **same task run twice** — tools wired directly vs. behind `fak`. Both
@@ -279,7 +273,7 @@ or a **RunPod / Vast** GPU pod (the `[VERIFIED]` single-GPU rows in
 | **2b — real SmolLM2-135M** | the same path on weights exported from HuggingFace | **CPU ok** (Python/torch) |
 | **bigger model + endpoint** | `qwen2.5:14b` behind `fak serve` on a 24 GB card, exposed publicly | **GPU** (24 GB) |
 
-> Honest scope (matches `fak/CLAIMS.md`): the in-kernel paths are proven correct at the
+> Honest scope (matches `CLAIMS.md`): the in-kernel paths are proven correct at the
 > tensor layer against a HuggingFace oracle — they make model state first-class kernel-owned
 > state; they are **not** a production chat-quality serving engine. For practical chat, the
 > bigger-model section uses Tier 1 (front Ollama).
@@ -384,9 +378,9 @@ if HAS_GPU:
 - **Why this is the deep fusion:** `docs/explainers/addressable-kv-cache.md` (mid-run causal
   span eviction, bit-exact `max|Δ| = 0`).
 - **The expert smoke** — Qwen3.6-27B through fak's own GGUF→Q8 path (`cmd/fakchat`):
-  `fak/GETTING-STARTED.md` §4c–4d.
+  `GETTING-STARTED.md` §4c–4d.
 - **The cost/hardware tiers** behind this notebook: `PLAN-cloud-neocloud-rightsizing-2026-06-20.md`.
-- **What's real vs. simulated vs. stub:** `fak/CLAIMS.md`.
+- **What's real vs. simulated vs. stub:** `CLAIMS.md`.
 
 *Cleanup:* `!pkill -f "fak serve"; pkill -f ollama; pkill -f cloudflared`'''),
     ]
