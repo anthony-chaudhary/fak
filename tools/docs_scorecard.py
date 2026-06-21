@@ -70,8 +70,8 @@ AUTHORITY_REL = "fak/BENCHMARK-AUTHORITY.md"
 # points, not destinations, so they are exempt from the orphan check (README is
 # the repo home, INDEX is the full map, docs/index.md is the Pages landing).
 FRONT_DOOR_REL = "README.md"  # primary BFS root
-FRONT_DOORS = ["README.md", "INDEX.md", "docs/index.md"]
-FRONT_DOOR_EXEMPT = {"README.md", "INDEX.md", "docs/index.md"}
+FRONT_DOORS = ["README.md", "docs/index.md"]
+FRONT_DOOR_EXEMPT = {"README.md", "docs/index.md"}
 
 # ---------------------------------------------------------------------------
 # The CORE SET: the surfaces the project itself points adopters at. Derived from
@@ -84,34 +84,30 @@ CORE_DOCS: list[str] = [
     # front door / navigation
     "README.md",
     "START-HERE.md",
-    "INDEX.md",
     "INSTALL.md",
     "docs/index.md",
-    # onboarding
-    "fak/GETTING-STARTED.md",
+    # onboarding (the Go module is the repo root now — no fak/ prefix)
+    "GETTING-STARTED.md",
     "docs/fak/tutorial.md",
-    "fak/cmd/simpledemo/README.md",
+    "cmd/simpledemo/README.md",
     "docs/repro-packet.md",
-    "docs/adoption-playbook.md",
     # conceptual
     "docs/concepts-and-story.md",
     "docs/explainers/policy-in-the-kernel.md",
     "docs/explainers/addressable-kv-cache.md",
     "docs/explainers/sota-optimizations.md",
-    "EXPLAINER-trust-floor-two-lenses-2026-06-17.md",
-    "docs/SCALING-LAWS-OF-AGENTS-2026-06-19.md",
     # reference
-    "fak/ARCHITECTURE.md",
-    "fak/POLICY.md",
-    "fak/CLAIMS.md",
-    "fak/STATUS.md",
-    "fak/EXTENDING.md",
-    "fak/BENCHMARK-AUTHORITY.md",
+    "ARCHITECTURE.md",
+    "POLICY.md",
+    "CLAIMS.md",
+    "STATUS.md",
+    "EXTENDING.md",
+    "BENCHMARK-AUTHORITY.md",
     "docs/FAQ.md",
     # project meta
     "CONTRIBUTING.md",
     "SECURITY.md",
-    "fak/README.md",
+    "docs/cli-reference.md",
 ]
 
 # Expected-topic coverage: a topic is COVERED if at least one of its candidate
@@ -119,14 +115,14 @@ CORE_DOCS: list[str] = [
 # hole in what a docs set must answer. Paths, not content-sniffing, so it is
 # deterministic and obvious to audit.
 EXPECTED_TOPICS: list[tuple[str, list[str]]] = [
-    ("install", ["INSTALL.md", "fak/GETTING-STARTED.md", "install.sh"]),
+    ("install", ["INSTALL.md", "GETTING-STARTED.md", "install.sh"]),
     ("quickstart", ["START-HERE.md", "docs/fak/tutorial.md"]),
-    ("architecture", ["fak/ARCHITECTURE.md"]),
-    ("security_threat_model", ["SECURITY.md", "fak/POLICY.md"]),
+    ("architecture", ["ARCHITECTURE.md"]),
+    ("security_threat_model", ["SECURITY.md", "POLICY.md"]),
     ("contributing", ["CONTRIBUTING.md"]),
     ("faq", ["docs/FAQ.md"]),
-    ("benchmarks_evidence", ["fak/BENCHMARK-AUTHORITY.md", "fak/CLAIMS.md"]),
-    ("extending_api", ["fak/EXTENDING.md"]),
+    ("benchmarks_evidence", ["BENCHMARK-AUTHORITY.md", "CLAIMS.md"]),
+    ("extending_api", ["EXTENDING.md"]),
     ("concepts", ["docs/concepts-and-story.md"]),
     ("license_cite", ["LICENSE", "CITATION.cff"]),
 ]
