@@ -71,7 +71,10 @@ $liveFlag = if ($Live) { ' --live' } else { '' }
 # Passing $tr as ONE PowerShell argument (not a here-string split on spaces) keeps the
 # Program Files path intact end-to-end. This is the gap that left the old fleet-public
 # task working (python was on PATH sans spaces) but broke on a Program Files python.
-$inner = "& '$py' '$tick' --workspace '$Workspace' --max-workers $MaxWorkers$liveFlag --json"
+# End with `; exit $LASTEXITCODE` so the task's LastTaskResult reflects PYTHON's
+# exit (1 = a legitimate preflight REFUSE), not powershell.exe's own host status,
+# which flaps to 1 on a non-terminating warning and masks the real verdict.
+$inner = "& '$py' '$tick' --workspace '$Workspace' --max-workers $MaxWorkers$liveFlag --json; exit `$LASTEXITCODE"
 $tr = "powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -Command \`"$inner\`""
 
 schtasks /Create /TN $TaskName /SC MINUTE /MO $EveryMinutes /TR $tr /RL LIMITED /F | Out-Null

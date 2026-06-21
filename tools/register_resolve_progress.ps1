@@ -59,7 +59,11 @@ if (-not (Test-Path $tick)) { throw "issue_resolve_progress.py not found at $tic
 # $Workspace are single-quoted for PowerShell and the whole -Command payload is
 # wrapped in \"...\" so schtasks does not truncate at the first inner quote.
 $liveFlag = if ($Live) { ' --live' } else { '' }
-$inner = "& '$py' '$tick' --workspace '$Workspace' --target $Target --close$liveFlag --json"
+# End with `; exit $LASTEXITCODE` so the task's LastTaskResult reflects PYTHON's
+# exit code, not powershell.exe's own status. Without it, `-Command` returns the
+# host's status (which flaps to 1 on a non-terminating warning) and the task looks
+# failed even when the tick succeeded (exit 0) — the LastResult=1 red herring.
+$inner = "& '$py' '$tick' --workspace '$Workspace' --target $Target --close$liveFlag --json; exit `$LASTEXITCODE"
 $tr = "powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -Command \`"$inner\`""
 
 schtasks /Create /TN $TaskName /SC MINUTE /MO $EveryMinutes /TR $tr /RL LIMITED /F | Out-Null
