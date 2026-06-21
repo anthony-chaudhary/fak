@@ -117,6 +117,31 @@ class EvaluateTest(unittest.TestCase):
         self.assertEqual(p["closed_now"], 0)              # dry-run closes nothing
         self.assertEqual(p["closed_by_loop_total"], 1)    # history only
 
+    def test_audit_error_does_not_fail_the_snapshot(self) -> None:
+        # A closure-audit hiccup (dos momentarily unreachable) must NOT fail the
+        # tick — the open-count is the proof metric; the curve must not gap.
+        mod = load()
+        mod.open_issue_count = lambda root: 479
+        mod.closure_audit = lambda root, *, max_commits: {"_error": "dos not found"}
+        mod.fold_closed_history = lambda runs_dir: 0
+        with tempfile.TemporaryDirectory() as d:
+            p = mod.evaluate(Path(d), target=50, do_close=True, live=True,
+                             max_commits=100)
+        self.assertTrue(p["ok"])                 # snapshot still OK
+        self.assertEqual(p["witnessed_open"], 0)  # but no witnessed work this tick
+        self.assertEqual(p["audit_error"], "dos not found")
+
+    def test_no_open_count_fails(self) -> None:
+        # Conversely, losing the open-count (gh down) IS a failed tick.
+        mod = load()
+        mod.open_issue_count = lambda root: None
+        mod.closure_audit = lambda root, *, max_commits: {"issues": []}
+        mod.fold_closed_history = lambda runs_dir: 0
+        with tempfile.TemporaryDirectory() as d:
+            p = mod.evaluate(Path(d), target=50, do_close=False, live=False,
+                             max_commits=100)
+        self.assertFalse(p["ok"])
+
 
 if __name__ == "__main__":
     unittest.main()

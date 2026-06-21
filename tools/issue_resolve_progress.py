@@ -221,8 +221,15 @@ def evaluate(root: Path, *, target: int, do_close: bool, live: bool,
     target_remaining = (max(0, target - resolved) if resolved is not None
                         else None)
 
+    # A snapshot is OK as long as we got a live open-count — that is the proof
+    # metric. A closure-audit hiccup (e.g. `dos` momentarily unreachable under a
+    # hidden-window scheduled task) only blanks the witnessed count for this tick;
+    # it must NOT fail the whole tick, or the always-on curve develops gaps and the
+    # task's LastResult flaps to 1 on a transient. Surface the audit error in the
+    # record, but key `ok` (and the exit code) on the open-count alone.
+    ok = open_now is not None
     rec = {
-        "schema": SCHEMA, "utc": _now(), "target": target,
+        "schema": SCHEMA, "utc": _now(), "target": target, "ok": ok,
         "open_now": open_now, "baseline_open": baseline_open,
         "resolved_toward_target": resolved, "target_remaining": target_remaining,
         "witnessed_open": len(witnessed), "witnessed_numbers": witnessed[:50],
@@ -231,8 +238,7 @@ def evaluate(root: Path, *, target: int, do_close: bool, live: bool,
         "close_result": close_result,
         "audit_error": audit.get("_error"),
     }
-    append_progress(runs_dir, rec)
-    rec["ok"] = open_now is not None and "_error" not in audit
+    append_progress(runs_dir, rec)   # rec already carries `ok` — the log is honest
     return rec
 
 
