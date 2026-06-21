@@ -119,6 +119,13 @@ starts `fak serve` in front of it, resolves the `.claude` config dir through the
 Claude Code (or runs a single headless turn for `--probe`). It tears the kernel down
 on exit.
 
+> **One canonical resolve path.** Every front door (this launcher, `launch_goal_detached.ps1`,
+> `issue_dispatch`) picks its account through the switcher's single subcommand,
+> `fleet_accounts.py resolve` — one call returns the `config_dir`, the long-lived
+> `oauth_token`, and the model tier in a flat record (pin a tag with `--account`, take the
+> isolated dogfood account with `--faklocal-ok`). No front door re-implements the
+> roster+route+token dance.
+
 Knobs: `FAK_DOGFOOD_PORT` (8080), `FAK_DOGFOOD_MODEL` (override; default = the
 **largest installed** ollama model, auto-upgraded to `FAK_DOGFOOD_FALLBACK_MODEL`
 when the box has only tiny <=3B models), `FAK_DOGFOOD_FALLBACK_MODEL`
@@ -221,7 +228,23 @@ The bash script above is macOS/Linux-shaped (ollama+Metal default, `/opt/homebre
 .\scripts\dogfood-claude.ps1                          # interactive Claude Code on the local model
 .\scripts\dogfood-claude.ps1 --print-env             # the $env: lines for your own `claude` invocation
 .\scripts\dogfood-claude.ps1 --list-accounts         # the account switcher roster
+.\scripts\dogfood-claude.ps1 --install               # copy fak.exe + a fak-dogfood.cmd shim onto PATH, then exit
 ```
+
+### Run it from anywhere (Windows)
+
+```powershell
+.\scripts\dogfood-claude.ps1 --install   # one-time: copies fak.exe + writes fak-dogfood.cmd
+fak-dogfood --smoke                        # then, from ANY directory:
+fak-dogfood --probe "say pong"             #   one witnessable live turn
+fak serve --help                           #   repo CLI from PATH
+```
+
+Windows symlinks need elevation/dev-mode, so `--install` **copies** the built `fak.exe`
+and writes a `fak-dogfood.cmd` shim (which re-invokes the in-tree script) into
+`%USERPROFILE%\bin` (override with `FAK_DOGFOOD_BINDIR`). It prints a `setx PATH` hint if
+that dir isn't on PATH yet. Re-run `--install` to refresh the `fak.exe` copy after a
+rebuild (the shim always runs the current in-tree script).
 
 What differs (so it works on a CPU-only Windows box out of the box):
 

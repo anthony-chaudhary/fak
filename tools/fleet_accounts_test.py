@@ -610,6 +610,93 @@ class FleetAccountsTest(unittest.TestCase):
         self.assertIn("fallback_used", routed)
         self.assertEqual(routed["account"]["product"], "claude")
 
+    # ---- resolve_account / read_oauth_token / annotated_roster ----------------
+
+    def test_resolve_account_routes_and_attaches_token(self) -> None:
+        # The canonical front-door call: route (no pin) -> a flat record carrying the
+        # config_dir, the long-lived oauth token, and the selected tier.
+        d = account_dir(self.home, ".claude")
+        (d / ".oauth-token").write_text("tok-xyz\n", encoding="utf-8")
+        r = fleet_accounts.resolve_account(
+            work_kind="engineering", product="claude",
+            home=str(self.home), config_home=str(self.config_home), registry={})
+        self.assertTrue(r["ok"])
+        self.assertEqual(r["config_dir"], str(d))
+        self.assertEqual(r["oauth_token"], "tok-xyz")
+        self.assertEqual(r["selected_tier"], 1)
+        self.assertFalse(r["fallback_used"])
+        # The flat contract the shell front doors parse:
+        for key in ("ok", "reason", "account", "tag", "product", "config_dir",
+                    "oauth_token", "selected_tier", "target_tier", "fallback_used"):
+            self.assertIn(key, r)
+
+    def test_resolve_account_pins_a_named_worker(self) -> None:
+        account_dir(self.home, ".claude")
+        gem = account_dir(self.home, ".claude-gem8-acct")
+        r = fleet_accounts.resolve_account(
+            "gem8", home=str(self.home), config_home=str(self.config_home), registry={})
+        self.assertTrue(r["ok"])
+        self.assertEqual(r["config_dir"], str(gem))
+        self.assertEqual(r["tag"], "gem8")
+        self.assertEqual(r["reason"], "pinned account")
+        # No .oauth-token on disk -> oauth_token is None (caller drops the ambient one).
+        self.assertIsNone(r["oauth_token"])
+
+    def test_resolve_account_unknown_pin_is_not_ok(self) -> None:
+        account_dir(self.home, ".claude")
+        r = fleet_accounts.resolve_account(
+            "no-such", home=str(self.home), config_home=str(self.config_home), registry={})
+        self.assertFalse(r["ok"])
+        self.assertIn("not an offered worker", r["reason"])
+        self.assertEqual(r["config_dir"], "")
+
+    def test_resolve_account_blocked_pin_refused_without_fallback(self) -> None:
+        account_dir(self.home, ".claude-gem8-acct")
+        # A throttle on the account makes it unavailable; pin must refuse.
+        reg = {"throttle": {".claude-gem8-acct": {"reset": "Dec 31, 11:59pm"}}}
+        r = fleet_accounts.resolve_account(
+            "gem8", home=str(self.home), config_home=str(self.config_home), registry=reg)
+        self.assertFalse(r["ok"])
+        self.assertIn("blocked", r["reason"])
+        self.assertTrue(r["block_reason"])
+        # ...but -AllowTierFallback (allow_tier_fallback) launches it anyway.
+        r2 = fleet_accounts.resolve_account(
+            "gem8", allow_tier_fallback=True,
+            home=str(self.home), config_home=str(self.config_home), registry=reg)
+        self.assertTrue(r2["ok"])
+        self.assertEqual(r2["tag"], "gem8")
+
+    def test_resolve_account_faklocal_synthesizes_isolated_dir(self) -> None:
+        r = fleet_accounts.resolve_account(
+            "faklocal", faklocal_ok=True,
+            home=str(self.home), config_home=str(self.config_home), registry={})
+        self.assertTrue(r["ok"])
+        self.assertEqual(r["tag"], "faklocal")
+        self.assertEqual(r["config_dir"], str(self.home / ".claude-faklocal"))
+        self.assertTrue((self.home / ".claude-faklocal" / "projects").is_dir())
+
+    def test_read_oauth_token_present_absent_and_empty(self) -> None:
+        d = account_dir(self.home, ".claude-gem8-acct")
+        self.assertIsNone(fleet_accounts.read_oauth_token(str(d)))  # no file
+        (d / ".oauth-token").write_text("  abc123  \n", encoding="utf-8")
+        self.assertEqual(fleet_accounts.read_oauth_token(str(d)), "abc123")  # stripped
+        (d / ".oauth-token").write_text("\n\n", encoding="utf-8")
+        self.assertIsNone(fleet_accounts.read_oauth_token(str(d)))  # empty -> None
+        self.assertIsNone(fleet_accounts.read_oauth_token(""))      # no dir -> None
+
+    def test_annotated_roster_shape_matches_inlined_call(self) -> None:
+        account_dir(self.home, ".claude")
+        account_dir(self.home, ".claude-gem8-acct")
+        rows = fleet_accounts.annotated_roster(
+            str(self.home), config_home=str(self.config_home), registry={})
+        # Same rows + the live-availability fields annotate_accounts attaches.
+        self.assertTrue(rows)
+        for r in rows:
+            self.assertIn("available", r)
+            self.assertIn("kind", r)
+        tags = {r["tag"] for r in rows}
+        self.assertIn("gem8", tags)
+
 
 class IdentityReconciliationTest(unittest.TestCase):
     """The roster must see WHO each dir is logged into, not just its name -- so N dirs
