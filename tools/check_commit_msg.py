@@ -69,7 +69,7 @@ def verdict(subject: str):
                 "(types: " + "/".join(TYPES) + ")")
     if m.group("type") not in TYPES:
         return f"unknown type '{m.group('type')}' (use one of: {'/'.join(TYPES)})"
-    first = re.split(r"[\s:]", m.group("rest").strip(), 1)[0].lower().strip("`*\"'")
+    first = re.split(r"[\s:]", m.group("rest").strip(), maxsplit=1)[0].lower().strip("`*\"'")
     if first not in VERBS:
         return (f"description leads with '{first}', not a recognized verb — the witness "
                 f"ABSTAINs on a noun-led subject. Lead with a verb (add/fix/implement/…).")
