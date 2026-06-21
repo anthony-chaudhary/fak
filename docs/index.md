@@ -38,6 +38,7 @@ context) also drives **performance** (do shared work once instead of every turn)
 > cache-efficient inference for **self-hosted LLM agent fleets** — at one boundary.
 
 [Get started](../GETTING-STARTED.md){: .btn } ·
+[See the showcase](showcase.html){: .btn } ·
 [Read the FAQ](FAQ.md){: .btn } ·
 [GitHub repository](https://github.com/anthony-chaudhary/fak){: .btn }
 
