@@ -40,6 +40,26 @@ func TestRefactorMatchesSerial(t *testing.T) {
 		}
 	})
 
+	t.Run("f32 no-cache forward (R1 oracle block)", func(t *testing.T) {
+		// The cacheless full-prefill Forward path (forward.go:layer → attnSeq/mlpSeq/
+		// composeSeqSublayer, the R1 oracle rung) is the one decoder-block transcription
+		// the f32 prefill/decode subtests above do NOT cover: it routes its matmuls through
+		// the residentKernel (matRows) instead of the cached blockStep (parMatRows). matRows
+		// and parMatRows share ONE fdot reduction order by construction (forward.go:matRows
+		// doc), so Forward must reproduce the legacy per-token block to the last bit. The
+		// existing R2 witness of this (TestCachedDecodeMatchesPrefill, Forward==Prefill) is
+		// gated on the ~538MB exported oracle and t.Skips without it; assert it here on the
+		// weight-free synthetic so the SEAM-0 refactor's no-cache block stays bit-locked in
+		// the fast, artifact-free path too.
+		prompt := []int{3, 17, 5, 23, 41, 2, 19}
+		act := m.Forward(prompt)
+		legacy := m.NewSession()
+		for i, id := range prompt {
+			legacyX := legacyTokenHiddenF32ForTest(legacy, id, legacy.Cache.Len())
+			assertFloat32BitsEqual(t, "forward logits pos "+itoa(i), legacy.head(legacyX), act.Logits[i])
+		}
+	})
+
 	t.Run("q8 decode matches legacy hand-copy within quant gate", func(t *testing.T) {
 		// Q8 arithmetic is lossy by design, and the optimized decode path may use a different
 		// accumulation order than the old hand-copy. Keep cache positions exact, but gate Q8
