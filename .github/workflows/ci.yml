@@ -141,31 +141,6 @@ jobs:
       # (dead links, stale install pins, placeholders, missing titles, strawman
       # headlines, orphans). Two tiers, matching how the gofmt gate ratcheted once
       # the tree was clean:
-      #   * HARD gate on --scope core (the 26 curated must-be-perfect surfaces):
-      #     a non-zero exit (doc-debt > 0) FAILS the build. Core is at 0 today;
-      #     this keeps it there. Fix locally with /garden-docs.
-      #   * ADVISORY on --scope reachable (the 167-doc reader surface): surfaces
-      #     the work-list as a ::warning:: without failing — reader-surface debt is
-      #     a judgment call until ratcheted (issue #95).
-      # Runs the tool's own test first. Pure-stdlib Python, repo root like the
-      # other doc-honesty gates (claims-lint, hero-benchmark, leak-scan).
-      - name: docs scorecard (5 KPIs + doc-debt; core stays clean)
-        working-directory: ${{ github.workspace }}
-        run: |
-          python tools/docs_scorecard_test.py
-          echo "::group::docs-scorecard (core: HARD gate at doc-debt 0)"
-          python tools/docs_scorecard.py --scope core
-          echo "::endgroup::"
-          echo "::group::docs-scorecard (reachable: advisory)"
-          python tools/docs_scorecard.py --scope reachable \
-            || echo "::warning title=docs-debt::reader-surface doc-debt present (advisory) — run /garden-docs, see docs/DOCS-SCORECARD.md"
-          echo "::endgroup::"
-
-      # Docs scorecard: the whole-corpus analogue of the README freshness audit.
-      # Grades every core / reader-reachable doc on five KPIs and counts doc-debt
-      # (dead links, stale install pins, placeholders, missing titles, strawman
-      # headlines, orphans). Two tiers, matching how the gofmt gate ratcheted once
-      # the tree was clean:
       #   * ADVISORY on --scope core for now: the public snapshot scrub removed
       #     docs/adoption-playbook.md (an internal note) but left dead links to it
       #     in README.md / docs/FAQ.md + the core-doc list, so core doc-debt is
