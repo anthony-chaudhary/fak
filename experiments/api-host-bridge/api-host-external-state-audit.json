@@ -1,0 +1,486 @@
+{
+  "schema": "fak.api-host-external-state-audit.v1",
+  "generated_at": "2026-06-18T13:12:34.450536Z",
+  "scope_note": "Current external-state audit for API-host roster targets. It records whether credentials are present, and whether host proof is live, ready, blocked by auth/billing/transport state, or still unprobed. Secret values are never emitted.",
+  "summary": {
+    "roster_targets": 13,
+    "env_present": 1,
+    "env_missing": 11,
+    "no_auth_declared": 1,
+    "live_confirmed": 1,
+    "ready_for_live_run": 0,
+    "blocked_auth": 1,
+    "blocked_billing": 1,
+    "needs_credential": 10,
+    "rate_or_transport_blocked": 0,
+    "unprobed_templates": 0,
+    "invalid_templates": 0,
+    "unsupported_templates": 0,
+    "unclassified": 0,
+    "artifact_errors": 0,
+    "status_counts": {
+      "BLOCKED_AUTH": 1,
+      "BLOCKED_BILLING": 1,
+      "LIVE_CONFIRMED": 1,
+      "NEEDS_CREDENTIAL": 10
+    },
+    "external_state_audit_gate": true
+  },
+  "targets": [
+    {
+      "name": "gemini_openai_compatible",
+      "provider": "openai-compatible",
+      "contract_class": "openai_compatible_upstream",
+      "base_url": "https://generativelanguage.googleapis.com/v1beta/openai",
+      "model_hint": "gemini-2.5-flash",
+      "api_key_env": "GEMINI_API_KEY",
+      "credential_state": "ENV_MISSING",
+      "env_present": false,
+      "roster_status": "SUPPORTED_TEMPLATE",
+      "readiness": {
+        "status": "AUTH_ENV_MISSING",
+        "http_status": null,
+        "models": 0,
+        "url": "https://generativelanguage.googleapis.com/v1beta/openai/models"
+      },
+      "acceptance": {
+        "status": "NEEDS_AUTH_ENV",
+        "readiness_status": "AUTH_ENV_MISSING",
+        "contract_class": "openai_compatible_upstream",
+        "reason": "Required API key environment variable is not set.",
+        "has_next_live_command": false
+      },
+      "retry": {
+        "status": "NEEDS_AUTH_ENV",
+        "action_type": "set_auth_env_then_probe_and_smoke",
+        "operator_prerequisite": "Set GEMINI_API_KEY for this host.",
+        "commands": 3
+      },
+      "live_inventory_evidence": {
+        "id": "gemini_openai_compatible_turntax",
+        "status": "LIVE_CONFIRMED",
+        "evidence_path": "fak/experiments/agent-live/turntax-injection-live.json",
+        "model": "gemini-2.5-flash",
+        "base_url": "https://generativelanguage.googleapis.com/v1beta/openai"
+      },
+      "external_state_status": "LIVE_CONFIRMED",
+      "next_evidence_needed": "Committed evidence already confirms a live bridge run for this host/base URL."
+    },
+    {
+      "name": "glama_gateway",
+      "provider": "openai-compatible",
+      "contract_class": "openai_compatible_upstream",
+      "base_url": "https://gateway.glama.ai/v1",
+      "model_hint": "openai/gpt-4.1-nano-2025-04-14",
+      "api_key_env": "GLAMA_API_KEY",
+      "credential_state": "ENV_PRESENT",
+      "env_present": true,
+      "roster_status": "SUPPORTED_TEMPLATE",
+      "readiness": {
+        "status": "MODELS_CONFIRMED",
+        "http_status": 200,
+        "models": 25,
+        "url": "https://gateway.glama.ai/v1/models"
+      },
+      "acceptance": {
+        "status": "BILLING_REQUIRED",
+        "readiness_status": "MODELS_CONFIRMED",
+        "contract_class": "openai_compatible_upstream",
+        "reason": "Latest live bridge smoke hit a typed external blocker.",
+        "has_next_live_command": false
+      },
+      "retry": {
+        "status": "BILLING_REQUIRED",
+        "action_type": "fix_billing_then_smoke",
+        "operator_prerequisite": "Attach billing/payment method for the account behind GLAMA_API_KEY.",
+        "commands": 1
+      },
+      "live_inventory_evidence": {
+        "id": "glama_gateway_billing_state",
+        "status": "BILLING_REQUIRED",
+        "evidence_path": null,
+        "model": null,
+        "base_url": "https://gateway.glama.ai/v1"
+      },
+      "external_state_status": "BLOCKED_BILLING",
+      "next_evidence_needed": "Attach billing/payment method for the account behind GLAMA_API_KEY."
+    },
+    {
+      "name": "pollinations_no_key",
+      "provider": "openai-compatible",
+      "contract_class": "openai_compatible_upstream",
+      "base_url": "https://gen.pollinations.ai/v1",
+      "model_hint": "openai-fast",
+      "api_key_env": "",
+      "credential_state": "NO_AUTH_DECLARED",
+      "env_present": false,
+      "roster_status": "SUPPORTED_TEMPLATE",
+      "readiness": {
+        "status": "ACCESS_DENIED",
+        "http_status": 403,
+        "models": 0,
+        "url": "https://gen.pollinations.ai/v1/models"
+      },
+      "acceptance": {
+        "status": "AUTH_REQUIRED",
+        "readiness_status": "ACCESS_DENIED",
+        "contract_class": "openai_compatible_upstream",
+        "reason": "Latest live bridge smoke hit a typed external blocker.",
+        "has_next_live_command": false
+      },
+      "retry": {
+        "status": "AUTH_REQUIRED",
+        "action_type": "configure_access_then_probe_and_smoke",
+        "operator_prerequisite": "Configure a valid bearer token or access path via POLLINATIONS_API_KEY.",
+        "commands": 3
+      },
+      "live_inventory_evidence": {
+        "id": "pollinations_tool_call_auth_state",
+        "status": "AUTH_REQUIRED",
+        "evidence_path": null,
+        "model": null,
+        "base_url": "https://gen.pollinations.ai/v1"
+      },
+      "external_state_status": "BLOCKED_AUTH",
+      "next_evidence_needed": "Configure a valid bearer token or access path via POLLINATIONS_API_KEY."
+    },
+    {
+      "name": "openai_api",
+      "provider": "openai-compatible",
+      "contract_class": "openai_compatible_upstream",
+      "base_url": "https://api.openai.com/v1",
+      "model_hint": "gpt-4.1-mini",
+      "api_key_env": "OPENAI_API_KEY",
+      "credential_state": "ENV_MISSING",
+      "env_present": false,
+      "roster_status": "SUPPORTED_TEMPLATE",
+      "readiness": {
+        "status": "AUTH_ENV_MISSING",
+        "http_status": null,
+        "models": 0,
+        "url": "https://api.openai.com/v1/models"
+      },
+      "acceptance": {
+        "status": "NEEDS_AUTH_ENV",
+        "readiness_status": "AUTH_ENV_MISSING",
+        "contract_class": "openai_compatible_upstream",
+        "reason": "Required API key environment variable is not set.",
+        "has_next_live_command": false
+      },
+      "retry": {
+        "status": "NEEDS_AUTH_ENV",
+        "action_type": "set_auth_env_then_probe_and_smoke",
+        "operator_prerequisite": "Set OPENAI_API_KEY for this host.",
+        "commands": 3
+      },
+      "live_inventory_evidence": {},
+      "external_state_status": "NEEDS_CREDENTIAL",
+      "next_evidence_needed": "Set OPENAI_API_KEY, then rerun readiness, acceptance, and live smoke."
+    },
+    {
+      "name": "xai_api",
+      "provider": "xai",
+      "contract_class": "openai_compatible_upstream",
+      "base_url": "https://api.x.ai/v1",
+      "model_hint": "grok-3-mini",
+      "api_key_env": "XAI_API_KEY",
+      "credential_state": "ENV_MISSING",
+      "env_present": false,
+      "roster_status": "SUPPORTED_TEMPLATE",
+      "readiness": {
+        "status": "AUTH_ENV_MISSING",
+        "http_status": null,
+        "models": 0,
+        "url": "https://api.x.ai/v1/models"
+      },
+      "acceptance": {
+        "status": "NEEDS_AUTH_ENV",
+        "readiness_status": "AUTH_ENV_MISSING",
+        "contract_class": "openai_compatible_upstream",
+        "reason": "Required API key environment variable is not set.",
+        "has_next_live_command": false
+      },
+      "retry": {
+        "status": "NEEDS_AUTH_ENV",
+        "action_type": "set_auth_env_then_probe_and_smoke",
+        "operator_prerequisite": "Set XAI_API_KEY for this host.",
+        "commands": 3
+      },
+      "live_inventory_evidence": {},
+      "external_state_status": "NEEDS_CREDENTIAL",
+      "next_evidence_needed": "Set XAI_API_KEY, then rerun readiness, acceptance, and live smoke."
+    },
+    {
+      "name": "openrouter_gateway",
+      "provider": "openai-compatible",
+      "contract_class": "openai_compatible_upstream",
+      "base_url": "https://openrouter.ai/api/v1",
+      "model_hint": "openai/gpt-4.1-mini",
+      "api_key_env": "OPENROUTER_API_KEY",
+      "credential_state": "ENV_MISSING",
+      "env_present": false,
+      "roster_status": "SUPPORTED_TEMPLATE",
+      "readiness": {
+        "status": "AUTH_ENV_MISSING",
+        "http_status": null,
+        "models": 0,
+        "url": "https://openrouter.ai/api/v1/models"
+      },
+      "acceptance": {
+        "status": "NEEDS_AUTH_ENV",
+        "readiness_status": "AUTH_ENV_MISSING",
+        "contract_class": "openai_compatible_upstream",
+        "reason": "Required API key environment variable is not set.",
+        "has_next_live_command": false
+      },
+      "retry": {
+        "status": "NEEDS_AUTH_ENV",
+        "action_type": "set_auth_env_then_probe_and_smoke",
+        "operator_prerequisite": "Set OPENROUTER_API_KEY for this host.",
+        "commands": 3
+      },
+      "live_inventory_evidence": {},
+      "external_state_status": "NEEDS_CREDENTIAL",
+      "next_evidence_needed": "Set OPENROUTER_API_KEY, then rerun readiness, acceptance, and live smoke."
+    },
+    {
+      "name": "groq_openai",
+      "provider": "openai-compatible",
+      "contract_class": "openai_compatible_upstream",
+      "base_url": "https://api.groq.com/openai/v1",
+      "model_hint": "llama-3.3-70b-versatile",
+      "api_key_env": "GROQ_API_KEY",
+      "credential_state": "ENV_MISSING",
+      "env_present": false,
+      "roster_status": "SUPPORTED_TEMPLATE",
+      "readiness": {
+        "status": "AUTH_ENV_MISSING",
+        "http_status": null,
+        "models": 0,
+        "url": "https://api.groq.com/openai/v1/models"
+      },
+      "acceptance": {
+        "status": "NEEDS_AUTH_ENV",
+        "readiness_status": "AUTH_ENV_MISSING",
+        "contract_class": "openai_compatible_upstream",
+        "reason": "Required API key environment variable is not set.",
+        "has_next_live_command": false
+      },
+      "retry": {
+        "status": "NEEDS_AUTH_ENV",
+        "action_type": "set_auth_env_then_probe_and_smoke",
+        "operator_prerequisite": "Set GROQ_API_KEY for this host.",
+        "commands": 3
+      },
+      "live_inventory_evidence": {},
+      "external_state_status": "NEEDS_CREDENTIAL",
+      "next_evidence_needed": "Set GROQ_API_KEY, then rerun readiness, acceptance, and live smoke."
+    },
+    {
+      "name": "together_openai",
+      "provider": "openai-compatible",
+      "contract_class": "openai_compatible_upstream",
+      "base_url": "https://api.together.xyz/v1",
+      "model_hint": "meta-llama/Llama-3.3-70B-Instruct-Turbo",
+      "api_key_env": "TOGETHER_API_KEY",
+      "credential_state": "ENV_MISSING",
+      "env_present": false,
+      "roster_status": "SUPPORTED_TEMPLATE",
+      "readiness": {
+        "status": "AUTH_ENV_MISSING",
+        "http_status": null,
+        "models": 0,
+        "url": "https://api.together.xyz/v1/models"
+      },
+      "acceptance": {
+        "status": "NEEDS_AUTH_ENV",
+        "readiness_status": "AUTH_ENV_MISSING",
+        "contract_class": "openai_compatible_upstream",
+        "reason": "Required API key environment variable is not set.",
+        "has_next_live_command": false
+      },
+      "retry": {
+        "status": "NEEDS_AUTH_ENV",
+        "action_type": "set_auth_env_then_probe_and_smoke",
+        "operator_prerequisite": "Set TOGETHER_API_KEY for this host.",
+        "commands": 3
+      },
+      "live_inventory_evidence": {},
+      "external_state_status": "NEEDS_CREDENTIAL",
+      "next_evidence_needed": "Set TOGETHER_API_KEY, then rerun readiness, acceptance, and live smoke."
+    },
+    {
+      "name": "mistral_openai",
+      "provider": "openai-compatible",
+      "contract_class": "openai_compatible_upstream",
+      "base_url": "https://api.mistral.ai/v1",
+      "model_hint": "mistral-small-latest",
+      "api_key_env": "MISTRAL_API_KEY",
+      "credential_state": "ENV_MISSING",
+      "env_present": false,
+      "roster_status": "SUPPORTED_TEMPLATE",
+      "readiness": {
+        "status": "AUTH_ENV_MISSING",
+        "http_status": null,
+        "models": 0,
+        "url": "https://api.mistral.ai/v1/models"
+      },
+      "acceptance": {
+        "status": "NEEDS_AUTH_ENV",
+        "readiness_status": "AUTH_ENV_MISSING",
+        "contract_class": "openai_compatible_upstream",
+        "reason": "Required API key environment variable is not set.",
+        "has_next_live_command": false
+      },
+      "retry": {
+        "status": "NEEDS_AUTH_ENV",
+        "action_type": "set_auth_env_then_probe_and_smoke",
+        "operator_prerequisite": "Set MISTRAL_API_KEY for this host.",
+        "commands": 3
+      },
+      "live_inventory_evidence": {},
+      "external_state_status": "NEEDS_CREDENTIAL",
+      "next_evidence_needed": "Set MISTRAL_API_KEY, then rerun readiness, acceptance, and live smoke."
+    },
+    {
+      "name": "deepseek_openai",
+      "provider": "openai-compatible",
+      "contract_class": "openai_compatible_upstream",
+      "base_url": "https://api.deepseek.com",
+      "model_hint": "deepseek-chat",
+      "api_key_env": "DEEPSEEK_API_KEY",
+      "credential_state": "ENV_MISSING",
+      "env_present": false,
+      "roster_status": "SUPPORTED_TEMPLATE",
+      "readiness": {
+        "status": "AUTH_ENV_MISSING",
+        "http_status": null,
+        "models": 0,
+        "url": "https://api.deepseek.com/models"
+      },
+      "acceptance": {
+        "status": "NEEDS_AUTH_ENV",
+        "readiness_status": "AUTH_ENV_MISSING",
+        "contract_class": "openai_compatible_upstream",
+        "reason": "Required API key environment variable is not set.",
+        "has_next_live_command": false
+      },
+      "retry": {
+        "status": "NEEDS_AUTH_ENV",
+        "action_type": "set_auth_env_then_probe_and_smoke",
+        "operator_prerequisite": "Set DEEPSEEK_API_KEY for this host.",
+        "commands": 3
+      },
+      "live_inventory_evidence": {},
+      "external_state_status": "NEEDS_CREDENTIAL",
+      "next_evidence_needed": "Set DEEPSEEK_API_KEY, then rerun readiness, acceptance, and live smoke."
+    },
+    {
+      "name": "fireworks_openai",
+      "provider": "openai-compatible",
+      "contract_class": "openai_compatible_upstream",
+      "base_url": "https://api.fireworks.ai/inference/v1",
+      "model_hint": "accounts/fireworks/models/llama-v3p1-8b-instruct",
+      "api_key_env": "FIREWORKS_API_KEY",
+      "credential_state": "ENV_MISSING",
+      "env_present": false,
+      "roster_status": "SUPPORTED_TEMPLATE",
+      "readiness": {
+        "status": "AUTH_ENV_MISSING",
+        "http_status": null,
+        "models": 0,
+        "url": "https://api.fireworks.ai/inference/v1/models"
+      },
+      "acceptance": {
+        "status": "NEEDS_AUTH_ENV",
+        "readiness_status": "AUTH_ENV_MISSING",
+        "contract_class": "openai_compatible_upstream",
+        "reason": "Required API key environment variable is not set.",
+        "has_next_live_command": false
+      },
+      "retry": {
+        "status": "NEEDS_AUTH_ENV",
+        "action_type": "set_auth_env_then_probe_and_smoke",
+        "operator_prerequisite": "Set FIREWORKS_API_KEY for this host.",
+        "commands": 3
+      },
+      "live_inventory_evidence": {},
+      "external_state_status": "NEEDS_CREDENTIAL",
+      "next_evidence_needed": "Set FIREWORKS_API_KEY, then rerun readiness, acceptance, and live smoke."
+    },
+    {
+      "name": "perplexity_openai",
+      "provider": "openai-compatible",
+      "contract_class": "openai_compatible_upstream",
+      "base_url": "https://api.perplexity.ai",
+      "model_hint": "sonar",
+      "api_key_env": "PERPLEXITY_API_KEY",
+      "credential_state": "ENV_MISSING",
+      "env_present": false,
+      "roster_status": "SUPPORTED_TEMPLATE",
+      "readiness": {
+        "status": "AUTH_ENV_MISSING",
+        "http_status": null,
+        "models": 0,
+        "url": "https://api.perplexity.ai/models"
+      },
+      "acceptance": {
+        "status": "NEEDS_AUTH_ENV",
+        "readiness_status": "AUTH_ENV_MISSING",
+        "contract_class": "openai_compatible_upstream",
+        "reason": "Required API key environment variable is not set.",
+        "has_next_live_command": false
+      },
+      "retry": {
+        "status": "NEEDS_AUTH_ENV",
+        "action_type": "set_auth_env_then_probe_and_smoke",
+        "operator_prerequisite": "Set PERPLEXITY_API_KEY for this host.",
+        "commands": 3
+      },
+      "live_inventory_evidence": {},
+      "external_state_status": "NEEDS_CREDENTIAL",
+      "next_evidence_needed": "Set PERPLEXITY_API_KEY, then rerun readiness, acceptance, and live smoke."
+    },
+    {
+      "name": "cerebras_openai",
+      "provider": "openai-compatible",
+      "contract_class": "openai_compatible_upstream",
+      "base_url": "https://api.cerebras.ai/v1",
+      "model_hint": "llama3.1-8b",
+      "api_key_env": "CEREBRAS_API_KEY",
+      "credential_state": "ENV_MISSING",
+      "env_present": false,
+      "roster_status": "SUPPORTED_TEMPLATE",
+      "readiness": {
+        "status": "AUTH_ENV_MISSING",
+        "http_status": null,
+        "models": 0,
+        "url": "https://api.cerebras.ai/v1/models"
+      },
+      "acceptance": {
+        "status": "NEEDS_AUTH_ENV",
+        "readiness_status": "AUTH_ENV_MISSING",
+        "contract_class": "openai_compatible_upstream",
+        "reason": "Required API key environment variable is not set.",
+        "has_next_live_command": false
+      },
+      "retry": {
+        "status": "NEEDS_AUTH_ENV",
+        "action_type": "set_auth_env_then_probe_and_smoke",
+        "operator_prerequisite": "Set CEREBRAS_API_KEY for this host.",
+        "commands": 3
+      },
+      "live_inventory_evidence": {},
+      "external_state_status": "NEEDS_CREDENTIAL",
+      "next_evidence_needed": "Set CEREBRAS_API_KEY, then rerun readiness, acceptance, and live smoke."
+    }
+  ],
+  "artifact_errors": {},
+  "artifacts": {
+    "roster": "fak/experiments/api-host-bridge/api-host-roster.json",
+    "readiness": "fak/experiments/api-host-bridge/api-host-readiness.json",
+    "acceptance": "fak/experiments/api-host-bridge/api-host-acceptance.json",
+    "retry": "fak/experiments/api-host-bridge/api-host-retry-packet.json",
+    "live": "fak/experiments/api-host-bridge/api-host-live-inventory.json"
+  }
+}

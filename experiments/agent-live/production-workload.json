@@ -1,0 +1,72 @@
+{
+  "schema": "fak.agent-workload.v1",
+  "name": "production-readiness-phase0-agent-runs",
+  "source": "Recorded fak agent A/B reports under fak/experiments/agent-live, captured on 2026-06-17.",
+  "generated_at": "2026-06-18T00:00:00-07:00",
+  "meta": {
+    "method": "Prompt and completion token counts are copied from recorded agent reports. The compute benchmarks replay these recorded shapes with deterministic token IDs because tokenizer-free modelbench consumes token IDs directly and transformer compute cost is shape-driven.",
+    "task_family": "airline booking agent with tool calls, refund-policy retrieval, currency conversion, and booking"
+  },
+  "cases": [
+    {
+      "name": "offline-mock-fak",
+      "source": "fak/experiments/agent-live/offline-mock.json",
+      "arm": "fak",
+      "transcript_sha": "49834db6283ab0b5",
+      "prompt_tokens": 1501,
+      "completion_tokens": 184,
+      "turns": 7,
+      "tool_calls": 6
+    },
+    {
+      "name": "offline-mock-baseline",
+      "source": "fak/experiments/agent-live/offline-mock.json",
+      "arm": "baseline",
+      "transcript_sha": "49834db6283ab0b5",
+      "prompt_tokens": 2555,
+      "completion_tokens": 232,
+      "turns": 9,
+      "tool_calls": 8
+    },
+    {
+      "name": "qwen-0.5b-fak",
+      "source": "fak/experiments/agent-live/local-qwen-0.5b.json",
+      "arm": "fak",
+      "transcript_sha": "ad09133492c0b452",
+      "prompt_tokens": 1640,
+      "completion_tokens": 229,
+      "turns": 2,
+      "tool_calls": 4
+    },
+    {
+      "name": "qwen-1.5b-fak",
+      "source": "fak/experiments/agent-live/local-qwen-1.5b.json",
+      "arm": "fak",
+      "transcript_sha": "629b501ab2d24a8c",
+      "prompt_tokens": 1690,
+      "completion_tokens": 269,
+      "turns": 2,
+      "tool_calls": 5
+    },
+    {
+      "name": "gemini-flash-fak",
+      "source": "fak/experiments/agent-live/gemini-2.5-flash-t1.json",
+      "arm": "fak",
+      "transcript_sha": "ee43efb161fd84bc",
+      "prompt_tokens": 4100,
+      "completion_tokens": 208,
+      "turns": 6,
+      "tool_calls": 5
+    },
+    {
+      "name": "gemini-flash-lite-fak",
+      "source": "fak/experiments/agent-live/gemini-2.5-flash-lite-t1.json",
+      "arm": "fak",
+      "transcript_sha": "b4a7c6fb5c704227",
+      "prompt_tokens": 2942,
+      "completion_tokens": 204,
+      "turns": 4,
+      "tool_calls": 5
+    }
+  ]
+}

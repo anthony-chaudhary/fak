@@ -1,0 +1,508 @@
+{
+  "profile": {
+    "name": "research-goal",
+    "goal_pool": 8,
+    "plan_reads": 4,
+    "p_shared": 0.55,
+    "p_private": 0.15,
+    "p_alias": 0.06,
+    "p_pure": 0.06,
+    "p_static": 0.04,
+    "p_write": 0
+  },
+  "cost_model": {
+    "prefix_tokens": 2048,
+    "suffix_tokens": 256,
+    "decode_tokens_per_turn": 120,
+    "fold_tokens_per_result": 200,
+    "fold_turn_token_budget": 4000,
+    "dollars_per_mtok_in": 3,
+    "dollars_per_mtok_out": 15,
+    "cache_read_mult": 0.1,
+    "cache_write_mult": 1.25,
+    "turn_latency_ms": 1500
+  },
+  "seed": 1592652270,
+  "trials": 16,
+  "agent_grid": [
+    1,
+    2,
+    4,
+    8,
+    16,
+    32,
+    64,
+    128,
+    256,
+    512,
+    1024
+  ],
+  "sub_turn_grid": [
+    4
+  ],
+  "cells": [
+    {
+      "agents": 1,
+      "sub_turns": 4,
+      "trials": 16,
+      "calls": 8,
+      "shared_saved": {
+        "min": 0,
+        "p10": 1,
+        "p50": 2,
+        "p90": 3,
+        "max": 3,
+        "mean": 2.125
+      },
+      "isolated_saved": {
+        "min": 0,
+        "p10": 1,
+        "p50": 2,
+        "p90": 3,
+        "max": 3,
+        "mean": 2.125
+      },
+      "cross_uplift": {
+        "min": 0,
+        "p10": 0,
+        "p50": 0,
+        "p90": 0,
+        "max": 0,
+        "mean": 0
+      },
+      "prefix_tokens_saved": 0,
+      "token_mult_naive": 1.0718390804597702,
+      "token_mult_reuse": 1.2557471264367817,
+      "tax_clawed_back_frac": 0,
+      "critical_path_turns": 6,
+      "total_work_turns": 6,
+      "parallel_speedup": 1,
+      "fold_turns": 1,
+      "agent_turns_per_sec": 0.6666666666666666,
+      "dedup_tokens_saved": 0,
+      "net_tokens_saved": -512,
+      "net_dollars_saved": -0.001536
+    },
+    {
+      "agents": 2,
+      "sub_turns": 4,
+      "trials": 16,
+      "calls": 12,
+      "shared_saved": {
+        "min": 3,
+        "p10": 4,
+        "p50": 4,
+        "p90": 5,
+        "max": 5,
+        "mean": 4.3125
+      },
+      "isolated_saved": {
+        "min": 3,
+        "p10": 3,
+        "p50": 4,
+        "p90": 5,
+        "max": 5,
+        "mean": 4.125
+      },
+      "cross_uplift": {
+        "min": 0,
+        "p10": 0,
+        "p50": 0,
+        "p90": 1,
+        "max": 1,
+        "mean": 0.1875
+      },
+      "prefix_tokens_saved": 2048,
+      "token_mult_naive": 2.1436781609195403,
+      "token_mult_reuse": 1.6655172413793105,
+      "tax_clawed_back_frac": 0.4180904522613065,
+      "critical_path_turns": 6,
+      "total_work_turns": 10,
+      "parallel_speedup": 1.6666666666666667,
+      "fold_turns": 1,
+      "agent_turns_per_sec": 1.1111111111111112,
+      "dedup_tokens_saved": 0,
+      "net_tokens_saved": 1331,
+      "net_dollars_saved": 0.003993
+    },
+    {
+      "agents": 4,
+      "sub_turns": 4,
+      "trials": 16,
+      "calls": 20,
+      "shared_saved": {
+        "min": 6,
+        "p10": 9,
+        "p50": 10,
+        "p90": 12,
+        "max": 12,
+        "mean": 10
+      },
+      "isolated_saved": {
+        "min": 4,
+        "p10": 7,
+        "p50": 8,
+        "p90": 11,
+        "max": 11,
+        "mean": 8.3125
+      },
+      "cross_uplift": {
+        "min": 0,
+        "p10": 0,
+        "p50": 2,
+        "p90": 3,
+        "max": 4,
+        "mean": 1.6875
+      },
+      "prefix_tokens_saved": 6144,
+      "token_mult_naive": 4.287356321839081,
+      "token_mult_reuse": 2.485057471264368,
+      "tax_clawed_back_frac": 0.5482517482517483,
+      "critical_path_turns": 6,
+      "total_work_turns": 18,
+      "parallel_speedup": 3,
+      "fold_turns": 1,
+      "agent_turns_per_sec": 2,
+      "dedup_tokens_saved": 752,
+      "net_tokens_saved": 5769,
+      "net_dollars_saved": 0.017307
+    },
+    {
+      "agents": 8,
+      "sub_turns": 4,
+      "trials": 16,
+      "calls": 36,
+      "shared_saved": {
+        "min": 16,
+        "p10": 17,
+        "p50": 20,
+        "p90": 22,
+        "max": 24,
+        "mean": 19.8125
+      },
+      "isolated_saved": {
+        "min": 11,
+        "p10": 12,
+        "p50": 15,
+        "p90": 20,
+        "max": 21,
+        "mean": 15.3125
+      },
+      "cross_uplift": {
+        "min": 0,
+        "p10": 1,
+        "p50": 4,
+        "p90": 8,
+        "max": 8,
+        "mean": 4.5
+      },
+      "prefix_tokens_saved": 14336,
+      "token_mult_naive": 8.574712643678161,
+      "token_mult_reuse": 4.124137931034483,
+      "tax_clawed_back_frac": 0.587556904400607,
+      "critical_path_turns": 6,
+      "total_work_turns": 34,
+      "parallel_speedup": 5.666666666666667,
+      "fold_turns": 1,
+      "agent_turns_per_sec": 3.7777777777777777,
+      "dedup_tokens_saved": 1504,
+      "net_tokens_saved": 13894,
+      "net_dollars_saved": 0.041682
+    },
+    {
+      "agents": 16,
+      "sub_turns": 4,
+      "trials": 16,
+      "calls": 68,
+      "shared_saved": {
+        "min": 43,
+        "p10": 44,
+        "p50": 46,
+        "p90": 50,
+        "max": 50,
+        "mean": 46.375
+      },
+      "isolated_saved": {
+        "min": 28,
+        "p10": 30,
+        "p50": 34,
+        "p90": 37,
+        "max": 38,
+        "mean": 34
+      },
+      "cross_uplift": {
+        "min": 6,
+        "p10": 7,
+        "p50": 12,
+        "p90": 16,
+        "max": 18,
+        "mean": 12.375
+      },
+      "prefix_tokens_saved": 30720,
+      "token_mult_naive": 17.149425287356323,
+      "token_mult_reuse": 7.402298850574713,
+      "tax_clawed_back_frac": 0.6035587188612099,
+      "critical_path_turns": 6,
+      "total_work_turns": 66,
+      "parallel_speedup": 11,
+      "fold_turns": 1,
+      "agent_turns_per_sec": 7.333333333333333,
+      "dedup_tokens_saved": 4512,
+      "net_tokens_saved": 31648,
+      "net_dollars_saved": 0.094944
+    },
+    {
+      "agents": 32,
+      "sub_turns": 4,
+      "trials": 16,
+      "calls": 132,
+      "shared_saved": {
+        "min": 89,
+        "p10": 92,
+        "p50": 95,
+        "p90": 101,
+        "max": 102,
+        "mean": 95.625
+      },
+      "isolated_saved": {
+        "min": 57,
+        "p10": 61,
+        "p50": 66,
+        "p90": 77,
+        "max": 78,
+        "mean": 66.4375
+      },
+      "cross_uplift": {
+        "min": 20,
+        "p10": 23,
+        "p50": 30,
+        "p90": 33,
+        "max": 37,
+        "mean": 29.1875
+      },
+      "prefix_tokens_saved": 63488,
+      "token_mult_naive": 34.298850574712645,
+      "token_mult_reuse": 13.958620689655174,
+      "tax_clawed_back_frac": 0.6108387987573352,
+      "critical_path_turns": 7,
+      "total_work_turns": 131,
+      "parallel_speedup": 18.714285714285715,
+      "fold_turns": 2,
+      "agent_turns_per_sec": 12.476190476190476,
+      "dedup_tokens_saved": 11280,
+      "net_tokens_saved": 67907,
+      "net_dollars_saved": 0.20372099999999999
+    },
+    {
+      "agents": 64,
+      "sub_turns": 4,
+      "trials": 16,
+      "calls": 260,
+      "shared_saved": {
+        "min": 183,
+        "p10": 187,
+        "p50": 191,
+        "p90": 202,
+        "max": 204,
+        "mean": 193.6875
+      },
+      "isolated_saved": {
+        "min": 123,
+        "p10": 123,
+        "p50": 134,
+        "p90": 143,
+        "max": 150,
+        "mean": 134.25
+      },
+      "cross_uplift": {
+        "min": 51,
+        "p10": 52,
+        "p50": 58,
+        "p90": 67,
+        "max": 70,
+        "mean": 59.4375
+      },
+      "prefix_tokens_saved": 129024,
+      "token_mult_naive": 68.59770114942529,
+      "token_mult_reuse": 27.07126436781609,
+      "tax_clawed_back_frac": 0.6143172929773848,
+      "critical_path_turns": 9,
+      "total_work_turns": 261,
+      "parallel_speedup": 29,
+      "fold_turns": 4,
+      "agent_turns_per_sec": 19.333333333333332,
+      "dedup_tokens_saved": 21808,
+      "net_tokens_saved": 137417,
+      "net_dollars_saved": 0.41225100000000003
+    },
+    {
+      "agents": 128,
+      "sub_turns": 4,
+      "trials": 16,
+      "calls": 516,
+      "shared_saved": {
+        "min": 378,
+        "p10": 380,
+        "p50": 387,
+        "p90": 399,
+        "max": 402,
+        "mean": 388.1875
+      },
+      "isolated_saved": {
+        "min": 257,
+        "p10": 259,
+        "p50": 268,
+        "p90": 280,
+        "max": 280,
+        "mean": 269
+      },
+      "cross_uplift": {
+        "min": 102,
+        "p10": 103,
+        "p50": 122,
+        "p90": 129,
+        "max": 131,
+        "mean": 119.1875
+      },
+      "prefix_tokens_saved": 260096,
+      "token_mult_naive": 137.19540229885058,
+      "token_mult_reuse": 53.296551724137935,
+      "tax_clawed_back_frac": 0.616018229386446,
+      "critical_path_turns": 12,
+      "total_work_turns": 520,
+      "parallel_speedup": 43.333333333333336,
+      "fold_turns": 7,
+      "agent_turns_per_sec": 28.88888888888889,
+      "dedup_tokens_saved": 45872,
+      "net_tokens_saved": 279446,
+      "net_dollars_saved": 0.838338
+    },
+    {
+      "agents": 256,
+      "sub_turns": 4,
+      "trials": 16,
+      "calls": 1028,
+      "shared_saved": {
+        "min": 773,
+        "p10": 781,
+        "p50": 785,
+        "p90": 796,
+        "max": 797,
+        "mean": 787.125
+      },
+      "isolated_saved": {
+        "min": 513,
+        "p10": 518,
+        "p50": 536,
+        "p90": 551,
+        "max": 556,
+        "mean": 534.75
+      },
+      "cross_uplift": {
+        "min": 232,
+        "p10": 237,
+        "p50": 251,
+        "p90": 272,
+        "max": 275,
+        "mean": 252.375
+      },
+      "prefix_tokens_saved": 522240,
+      "token_mult_naive": 274.39080459770116,
+      "token_mult_reuse": 105.74712643678161,
+      "tax_clawed_back_frac": 0.6168593651461004,
+      "critical_path_turns": 18,
+      "total_work_turns": 1038,
+      "parallel_speedup": 57.666666666666664,
+      "fold_turns": 13,
+      "agent_turns_per_sec": 38.44444444444444,
+      "dedup_tokens_saved": 94376,
+      "net_tokens_saved": 563880,
+      "net_dollars_saved": 1.69164
+    },
+    {
+      "agents": 512,
+      "sub_turns": 4,
+      "trials": 16,
+      "calls": 2052,
+      "shared_saved": {
+        "min": 1549,
+        "p10": 1560,
+        "p50": 1572,
+        "p90": 1589,
+        "max": 1597,
+        "mean": 1574.75
+      },
+      "isolated_saved": {
+        "min": 1046,
+        "p10": 1048,
+        "p50": 1069,
+        "p90": 1109,
+        "max": 1118,
+        "mean": 1076
+      },
+      "cross_uplift": {
+        "min": 465,
+        "p10": 475,
+        "p50": 503,
+        "p90": 523,
+        "max": 545,
+        "mean": 498.75
+      },
+      "prefix_tokens_saved": 1046528,
+      "token_mult_naive": 548.7816091954023,
+      "token_mult_reuse": 210.64827586206897,
+      "tax_clawed_back_frac": 0.6172776297291058,
+      "critical_path_turns": 31,
+      "total_work_turns": 2075,
+      "parallel_speedup": 66.93548387096774,
+      "fold_turns": 26,
+      "agent_turns_per_sec": 44.623655913978496,
+      "dedup_tokens_saved": 189128,
+      "net_tokens_saved": 1130491,
+      "net_dollars_saved": 3.3914729999999995
+    },
+    {
+      "agents": 1024,
+      "sub_turns": 4,
+      "trials": 16,
+      "calls": 4100,
+      "shared_saved": {
+        "min": 3119,
+        "p10": 3134,
+        "p50": 3155,
+        "p90": 3202,
+        "max": 3204,
+        "mean": 3157.5625
+      },
+      "isolated_saved": {
+        "min": 2087,
+        "p10": 2125,
+        "p50": 2152,
+        "p90": 2183,
+        "max": 2209,
+        "mean": 2152.75
+      },
+      "cross_uplift": {
+        "min": 973,
+        "p10": 979,
+        "p50": 1005,
+        "p90": 1029,
+        "max": 1032,
+        "mean": 1004.8125
+      },
+      "prefix_tokens_saved": 2095104,
+      "token_mult_naive": 1097.5632183908046,
+      "token_mult_reuse": 420.45057471264363,
+      "tax_clawed_back_frac": 0.6174861898722236,
+      "critical_path_turns": 57,
+      "total_work_turns": 4149,
+      "parallel_speedup": 72.78947368421052,
+      "fold_turns": 52,
+      "agent_turns_per_sec": 48.526315789473685,
+      "dedup_tokens_saved": 377880,
+      "net_tokens_saved": 2262961,
+      "net_dollars_saved": 6.788882999999999
+    }
+  ],
+  "generated_by": "fak/internal/turnbench (fanout)"
+}

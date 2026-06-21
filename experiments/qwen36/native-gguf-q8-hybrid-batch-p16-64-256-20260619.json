@@ -1,0 +1,46 @@
+{
+  "app_version": "0.22.0",
+  "backend": {
+    "registered_backends": [
+      "cpu-ref"
+    ],
+    "selected": "legacy"
+  },
+  "decode": {
+    "prompt_tokens": 16,
+    "decode_steps": 4,
+    "reps": 1,
+    "per_token_median_ms": 783.35635,
+    "tok_per_sec": 1.2765582355973752
+  },
+  "engine": "fak-in-kernel Q8_0 (pure-Go, quantized weights+activations, int8×int8→int32 dot)",
+  "go_threads": "GOMAXPROCS=32, matmul workers=32 (FAK_WORKERS to pin)",
+  "lean": true,
+  "load_ms": 43121.6354,
+  "model": "Qwen3.6-27B-Q4_K_M.gguf [gguf-lean]",
+  "precision": "Q8_0",
+  "prefill": [
+    {
+      "tokens": 16,
+      "reps": 1,
+      "median_ms": 1928.8509,
+      "tok_per_sec": 8.295094244972487
+    },
+    {
+      "tokens": 64,
+      "reps": 1,
+      "median_ms": 6009.5994,
+      "tok_per_sec": 10.649628326307408
+    },
+    {
+      "tokens": 256,
+      "reps": 1,
+      "median_ms": 23439.7635,
+      "tok_per_sec": 10.921611901075707
+    }
+  ],
+  "quant_ms": 0,
+  "quantized_at_load": true,
+  "source": "C:\\Users\\USER\\.cache\\fak-models\\gguf\\Qwen3.6-27B-Q4_K_M.gguf",
+  "workers": 32
+}

@@ -1,0 +1,160 @@
+{
+  "engine": "llama.cpp b9707 llama-server",
+  "model": "Qwen3.6-27B.q4_k_m.gguf",
+  "host": "Apple M3 Pro Metal",
+  "captured_at": "2026-06-19",
+  "command": "DYLD_LIBRARY_PATH=/Users/USER/.local/llamacpp-b9707/llama-b9707 /Users/USER/.local/llamacpp-b9707/llama-b9707/llama-server -m /Users/USER/.cache/fak-models/gguf/Qwen3.6-27B.q4_k_m.gguf -ngl 99 -t 6 -c 4096 --host 127.0.0.1 --port 8137 --no-warmup -a qwen36-parity",
+  "request": {
+    "endpoint": "POST /completion",
+    "body": {
+      "prompt": "<|im_start|>system\nYou are a helpful assistant.<|im_end|>\n<|im_start|>user\nSay OK.<|im_end|>\n<|im_start|>assistant\n",
+      "n_predict": 3,
+      "temperature": 0,
+      "top_k": 1,
+      "stream": false,
+      "cache_prompt": false,
+      "logprobs": 5,
+      "top_logprobs": 5,
+      "return_tokens": true
+    }
+  },
+  "prompt_ids": [
+    248045,
+    8678,
+    198,
+    2523,
+    513,
+    264,
+    10631,
+    17313,
+    13,
+    248046,
+    198,
+    248045,
+    846,
+    198,
+    44240,
+    10092,
+    13,
+    248046,
+    198,
+    248045,
+    74455,
+    198
+  ],
+  "response": {
+    "content": "<think>\nThinking",
+    "tokens": [
+      248068,
+      198,
+      90700
+    ],
+    "tokens_predicted": 3,
+    "tokens_evaluated": 22,
+    "stop_type": "limit",
+    "timings": {
+      "prompt_n": 22,
+      "prompt_ms": 856.699,
+      "predicted_n": 3,
+      "predicted_ms": 298.659
+    },
+    "completion_probabilities": [
+      {
+        "id": 248068,
+        "token": "<think>",
+        "logprob": -0.000791028025560081,
+        "top_logprobs": [
+          {
+            "id": 248068,
+            "token": "<think>",
+            "logprob": -0.000791028025560081
+          },
+          {
+            "id": 3793,
+            "token": "OK",
+            "logprob": -7.165629863739014
+          },
+          {
+            "id": 248046,
+            "token": "",
+            "logprob": -11.570046424865723
+          },
+          {
+            "id": 31248,
+            "token": "Okay",
+            "logprob": -12.432734489440918
+          },
+          {
+            "id": 248069,
+            "token": "</think>",
+            "logprob": -12.657183647155762
+          }
+        ]
+      },
+      {
+        "id": 198,
+        "token": "\n",
+        "logprob": -0.6472052335739136,
+        "top_logprobs": [
+          {
+            "id": 198,
+            "token": "\n",
+            "logprob": -0.6472052335739136
+          },
+          {
+            "id": 271,
+            "token": "\n\n",
+            "logprob": -0.7413023710250854
+          },
+          {
+            "id": 248044,
+            "token": "",
+            "logprob": -15.887528419494629
+          },
+          {
+            "id": 56963,
+            "token": "\n   \n",
+            "logprob": -17.107084274291992
+          },
+          {
+            "id": 248046,
+            "token": "",
+            "logprob": -17.33649253845215
+          }
+        ]
+      },
+      {
+        "id": 90700,
+        "token": "Thinking",
+        "logprob": -0.5469353199005127,
+        "top_logprobs": [
+          {
+            "id": 90700,
+            "token": "Thinking",
+            "logprob": -0.5469353199005127
+          },
+          {
+            "id": 8160,
+            "token": "Here",
+            "logprob": -0.9449380040168762
+          },
+          {
+            "id": 760,
+            "token": "The",
+            "logprob": -3.5217716693878174
+          },
+          {
+            "id": 31248,
+            "token": "Okay",
+            "logprob": -6.4929118156433105
+          },
+          {
+            "id": 1596,
+            "token": "We",
+            "logprob": -7.76640510559082
+          }
+        ]
+      }
+    ]
+  }
+}

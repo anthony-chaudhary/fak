@@ -1,0 +1,206 @@
+{
+  "schema": "fak.api-host-live-smoke-runner.v1",
+  "generated_at": "2026-06-18T13:12:35.064717Z",
+  "scope_note": "Execution ledger for API-host live-smoke queue rows. By default it does not spend tokens or call paid/keyed hosts; pass --execute-ready to run rows whose queue state is READY_TO_EXECUTE. The gate fails closed if ready rows are left unexecuted.",
+  "summary": {
+    "targets": 13,
+    "execute_ready": false,
+    "already_complete": 1,
+    "ready_to_execute": 0,
+    "ready_not_executed": 0,
+    "executed": 0,
+    "passed": 0,
+    "failed": 0,
+    "skipped_external_state": 2,
+    "skipped_waiting_for_credential": 10,
+    "skipped_ready_for_probe": 0,
+    "command_gaps": 0,
+    "unclassified": 0,
+    "artifact_errors": 0,
+    "ready_execution_gaps": 0,
+    "live_smoke_runner_gate": true
+  },
+  "runs": [
+    {
+      "target": "gemini_openai_compatible",
+      "queue_state": "COMPLETE",
+      "operator_prerequisite": "none",
+      "command_count": 0,
+      "commands": [],
+      "runner_status": "ALREADY_COMPLETE",
+      "command_results": []
+    },
+    {
+      "target": "glama_gateway",
+      "queue_state": "BLOCKED_EXTERNAL_STATE",
+      "operator_prerequisite": "Attach billing/payment method for the account behind GLAMA_API_KEY.",
+      "command_count": 1,
+      "commands": [
+        "pwsh tools/run_transcript_adapter_sweep.ps1 -OutDir fak/experiments/agent-live/transcript-adapter-sweep-glama-gateway-retry -ApiBaseUrl 'https://gateway.glama.ai/v1' -ApiKeyEnv GLAMA_API_KEY -ApiModels 'openai/gpt-4.1-nano-2025-04-14' -SkipOffline -SkipLocalShim -SkipMicrobench -MaxTurns 12 -Trials 1"
+      ],
+      "runner_status": "SKIPPED_EXTERNAL_STATE",
+      "command_results": []
+    },
+    {
+      "target": "pollinations_no_key",
+      "queue_state": "BLOCKED_EXTERNAL_STATE",
+      "operator_prerequisite": "Configure a valid bearer token or access path via POLLINATIONS_API_KEY.",
+      "command_count": 3,
+      "commands": [
+        "python tools/api_host_readiness_probe.py --target 'pollinations_no_key|https://gen.pollinations.ai/v1|POLLINATIONS_API_KEY|openai-fast' --out fak/experiments/api-host-bridge/api-host-readiness.json --markdown fak/experiments/api-host-bridge/api-host-readiness.md",
+        "python tools/api_host_acceptance_probe.py --target 'pollinations_no_key|openai-compatible|https://gen.pollinations.ai/v1|POLLINATIONS_API_KEY|openai-fast' --out fak/experiments/api-host-bridge/api-host-acceptance.json --markdown fak/experiments/api-host-bridge/api-host-acceptance.md",
+        "pwsh tools/run_transcript_adapter_sweep.ps1 -OutDir fak/experiments/agent-live/transcript-adapter-sweep-pollinations-no-key-retry -ApiBaseUrl 'https://gen.pollinations.ai/v1' -ApiKeyEnv POLLINATIONS_API_KEY -ApiModels 'openai-fast' -SkipOffline -SkipLocalShim -SkipMicrobench -MaxTurns 12 -Trials 1"
+      ],
+      "runner_status": "SKIPPED_EXTERNAL_STATE",
+      "command_results": []
+    },
+    {
+      "target": "openai_api",
+      "queue_state": "WAITING_FOR_CREDENTIAL",
+      "operator_prerequisite": "Set OPENAI_API_KEY for this host.",
+      "command_count": 3,
+      "commands": [
+        "python tools/api_host_readiness_probe.py --target 'openai_api|https://api.openai.com/v1|OPENAI_API_KEY|gpt-4.1-mini' --out fak/experiments/api-host-bridge/api-host-readiness.json --markdown fak/experiments/api-host-bridge/api-host-readiness.md",
+        "python tools/api_host_acceptance_probe.py --target 'openai_api|openai-compatible|https://api.openai.com/v1|OPENAI_API_KEY|gpt-4.1-mini' --out fak/experiments/api-host-bridge/api-host-acceptance.json --markdown fak/experiments/api-host-bridge/api-host-acceptance.md",
+        "pwsh tools/run_transcript_adapter_sweep.ps1 -OutDir fak/experiments/agent-live/transcript-adapter-sweep-openai-api-retry -ApiBaseUrl 'https://api.openai.com/v1' -ApiKeyEnv OPENAI_API_KEY -ApiModels 'gpt-4.1-mini' -SkipOffline -SkipLocalShim -SkipMicrobench -MaxTurns 12 -Trials 1"
+      ],
+      "runner_status": "SKIPPED_WAITING_FOR_CREDENTIAL",
+      "command_results": []
+    },
+    {
+      "target": "xai_api",
+      "queue_state": "WAITING_FOR_CREDENTIAL",
+      "operator_prerequisite": "Set XAI_API_KEY for this host.",
+      "command_count": 3,
+      "commands": [
+        "python tools/api_host_readiness_probe.py --target 'xai_api|https://api.x.ai/v1|XAI_API_KEY|grok-3-mini' --out fak/experiments/api-host-bridge/api-host-readiness.json --markdown fak/experiments/api-host-bridge/api-host-readiness.md",
+        "python tools/api_host_acceptance_probe.py --target 'xai_api|xai|https://api.x.ai/v1|XAI_API_KEY|grok-3-mini' --out fak/experiments/api-host-bridge/api-host-acceptance.json --markdown fak/experiments/api-host-bridge/api-host-acceptance.md",
+        "pwsh tools/run_transcript_adapter_sweep.ps1 -OutDir fak/experiments/agent-live/transcript-adapter-sweep-xai-api-retry -ApiBaseUrl 'https://api.x.ai/v1' -ApiKeyEnv XAI_API_KEY -ApiModels 'grok-3-mini' -SkipOffline -SkipLocalShim -SkipMicrobench -MaxTurns 12 -Trials 1"
+      ],
+      "runner_status": "SKIPPED_WAITING_FOR_CREDENTIAL",
+      "command_results": []
+    },
+    {
+      "target": "openrouter_gateway",
+      "queue_state": "WAITING_FOR_CREDENTIAL",
+      "operator_prerequisite": "Set OPENROUTER_API_KEY for this host.",
+      "command_count": 3,
+      "commands": [
+        "python tools/api_host_readiness_probe.py --target 'openrouter_gateway|https://openrouter.ai/api/v1|OPENROUTER_API_KEY|openai/gpt-4.1-mini' --out fak/experiments/api-host-bridge/api-host-readiness.json --markdown fak/experiments/api-host-bridge/api-host-readiness.md",
+        "python tools/api_host_acceptance_probe.py --target 'openrouter_gateway|openai-compatible|https://openrouter.ai/api/v1|OPENROUTER_API_KEY|openai/gpt-4.1-mini' --out fak/experiments/api-host-bridge/api-host-acceptance.json --markdown fak/experiments/api-host-bridge/api-host-acceptance.md",
+        "pwsh tools/run_transcript_adapter_sweep.ps1 -OutDir fak/experiments/agent-live/transcript-adapter-sweep-openrouter-gateway-retry -ApiBaseUrl 'https://openrouter.ai/api/v1' -ApiKeyEnv OPENROUTER_API_KEY -ApiModels 'openai/gpt-4.1-mini' -SkipOffline -SkipLocalShim -SkipMicrobench -MaxTurns 12 -Trials 1"
+      ],
+      "runner_status": "SKIPPED_WAITING_FOR_CREDENTIAL",
+      "command_results": []
+    },
+    {
+      "target": "groq_openai",
+      "queue_state": "WAITING_FOR_CREDENTIAL",
+      "operator_prerequisite": "Set GROQ_API_KEY for this host.",
+      "command_count": 3,
+      "commands": [
+        "python tools/api_host_readiness_probe.py --target 'groq_openai|https://api.groq.com/openai/v1|GROQ_API_KEY|llama-3.3-70b-versatile' --out fak/experiments/api-host-bridge/api-host-readiness.json --markdown fak/experiments/api-host-bridge/api-host-readiness.md",
+        "python tools/api_host_acceptance_probe.py --target 'groq_openai|openai-compatible|https://api.groq.com/openai/v1|GROQ_API_KEY|llama-3.3-70b-versatile' --out fak/experiments/api-host-bridge/api-host-acceptance.json --markdown fak/experiments/api-host-bridge/api-host-acceptance.md",
+        "pwsh tools/run_transcript_adapter_sweep.ps1 -OutDir fak/experiments/agent-live/transcript-adapter-sweep-groq-openai-retry -ApiBaseUrl 'https://api.groq.com/openai/v1' -ApiKeyEnv GROQ_API_KEY -ApiModels 'llama-3.3-70b-versatile' -SkipOffline -SkipLocalShim -SkipMicrobench -MaxTurns 12 -Trials 1"
+      ],
+      "runner_status": "SKIPPED_WAITING_FOR_CREDENTIAL",
+      "command_results": []
+    },
+    {
+      "target": "together_openai",
+      "queue_state": "WAITING_FOR_CREDENTIAL",
+      "operator_prerequisite": "Set TOGETHER_API_KEY for this host.",
+      "command_count": 3,
+      "commands": [
+        "python tools/api_host_readiness_probe.py --target 'together_openai|https://api.together.xyz/v1|TOGETHER_API_KEY|meta-llama/Llama-3.3-70B-Instruct-Turbo' --out fak/experiments/api-host-bridge/api-host-readiness.json --markdown fak/experiments/api-host-bridge/api-host-readiness.md",
+        "python tools/api_host_acceptance_probe.py --target 'together_openai|openai-compatible|https://api.together.xyz/v1|TOGETHER_API_KEY|meta-llama/Llama-3.3-70B-Instruct-Turbo' --out fak/experiments/api-host-bridge/api-host-acceptance.json --markdown fak/experiments/api-host-bridge/api-host-acceptance.md",
+        "pwsh tools/run_transcript_adapter_sweep.ps1 -OutDir fak/experiments/agent-live/transcript-adapter-sweep-together-openai-retry -ApiBaseUrl 'https://api.together.xyz/v1' -ApiKeyEnv TOGETHER_API_KEY -ApiModels 'meta-llama/Llama-3.3-70B-Instruct-Turbo' -SkipOffline -SkipLocalShim -SkipMicrobench -MaxTurns 12 -Trials 1"
+      ],
+      "runner_status": "SKIPPED_WAITING_FOR_CREDENTIAL",
+      "command_results": []
+    },
+    {
+      "target": "mistral_openai",
+      "queue_state": "WAITING_FOR_CREDENTIAL",
+      "operator_prerequisite": "Set MISTRAL_API_KEY for this host.",
+      "command_count": 3,
+      "commands": [
+        "python tools/api_host_readiness_probe.py --target 'mistral_openai|https://api.mistral.ai/v1|MISTRAL_API_KEY|mistral-small-latest' --out fak/experiments/api-host-bridge/api-host-readiness.json --markdown fak/experiments/api-host-bridge/api-host-readiness.md",
+        "python tools/api_host_acceptance_probe.py --target 'mistral_openai|openai-compatible|https://api.mistral.ai/v1|MISTRAL_API_KEY|mistral-small-latest' --out fak/experiments/api-host-bridge/api-host-acceptance.json --markdown fak/experiments/api-host-bridge/api-host-acceptance.md",
+        "pwsh tools/run_transcript_adapter_sweep.ps1 -OutDir fak/experiments/agent-live/transcript-adapter-sweep-mistral-openai-retry -ApiBaseUrl 'https://api.mistral.ai/v1' -ApiKeyEnv MISTRAL_API_KEY -ApiModels 'mistral-small-latest' -SkipOffline -SkipLocalShim -SkipMicrobench -MaxTurns 12 -Trials 1"
+      ],
+      "runner_status": "SKIPPED_WAITING_FOR_CREDENTIAL",
+      "command_results": []
+    },
+    {
+      "target": "deepseek_openai",
+      "queue_state": "WAITING_FOR_CREDENTIAL",
+      "operator_prerequisite": "Set DEEPSEEK_API_KEY for this host.",
+      "command_count": 3,
+      "commands": [
+        "python tools/api_host_readiness_probe.py --target 'deepseek_openai|https://api.deepseek.com|DEEPSEEK_API_KEY|deepseek-chat' --out fak/experiments/api-host-bridge/api-host-readiness.json --markdown fak/experiments/api-host-bridge/api-host-readiness.md",
+        "python tools/api_host_acceptance_probe.py --target 'deepseek_openai|openai-compatible|https://api.deepseek.com|DEEPSEEK_API_KEY|deepseek-chat' --out fak/experiments/api-host-bridge/api-host-acceptance.json --markdown fak/experiments/api-host-bridge/api-host-acceptance.md",
+        "pwsh tools/run_transcript_adapter_sweep.ps1 -OutDir fak/experiments/agent-live/transcript-adapter-sweep-deepseek-openai-retry -ApiBaseUrl 'https://api.deepseek.com' -ApiKeyEnv DEEPSEEK_API_KEY -ApiModels 'deepseek-chat' -SkipOffline -SkipLocalShim -SkipMicrobench -MaxTurns 12 -Trials 1"
+      ],
+      "runner_status": "SKIPPED_WAITING_FOR_CREDENTIAL",
+      "command_results": []
+    },
+    {
+      "target": "fireworks_openai",
+      "queue_state": "WAITING_FOR_CREDENTIAL",
+      "operator_prerequisite": "Set FIREWORKS_API_KEY for this host.",
+      "command_count": 3,
+      "commands": [
+        "python tools/api_host_readiness_probe.py --target 'fireworks_openai|https://api.fireworks.ai/inference/v1|FIREWORKS_API_KEY|accounts/fireworks/models/llama-v3p1-8b-instruct' --out fak/experiments/api-host-bridge/api-host-readiness.json --markdown fak/experiments/api-host-bridge/api-host-readiness.md",
+        "python tools/api_host_acceptance_probe.py --target 'fireworks_openai|openai-compatible|https://api.fireworks.ai/inference/v1|FIREWORKS_API_KEY|accounts/fireworks/models/llama-v3p1-8b-instruct' --out fak/experiments/api-host-bridge/api-host-acceptance.json --markdown fak/experiments/api-host-bridge/api-host-acceptance.md",
+        "pwsh tools/run_transcript_adapter_sweep.ps1 -OutDir fak/experiments/agent-live/transcript-adapter-sweep-fireworks-openai-retry -ApiBaseUrl 'https://api.fireworks.ai/inference/v1' -ApiKeyEnv FIREWORKS_API_KEY -ApiModels 'accounts/fireworks/models/llama-v3p1-8b-instruct' -SkipOffline -SkipLocalShim -SkipMicrobench -MaxTurns 12 -Trials 1"
+      ],
+      "runner_status": "SKIPPED_WAITING_FOR_CREDENTIAL",
+      "command_results": []
+    },
+    {
+      "target": "perplexity_openai",
+      "queue_state": "WAITING_FOR_CREDENTIAL",
+      "operator_prerequisite": "Set PERPLEXITY_API_KEY for this host.",
+      "command_count": 3,
+      "commands": [
+        "python tools/api_host_readiness_probe.py --target 'perplexity_openai|https://api.perplexity.ai|PERPLEXITY_API_KEY|sonar' --out fak/experiments/api-host-bridge/api-host-readiness.json --markdown fak/experiments/api-host-bridge/api-host-readiness.md",
+        "python tools/api_host_acceptance_probe.py --target 'perplexity_openai|openai-compatible|https://api.perplexity.ai|PERPLEXITY_API_KEY|sonar' --out fak/experiments/api-host-bridge/api-host-acceptance.json --markdown fak/experiments/api-host-bridge/api-host-acceptance.md",
+        "pwsh tools/run_transcript_adapter_sweep.ps1 -OutDir fak/experiments/agent-live/transcript-adapter-sweep-perplexity-openai-retry -ApiBaseUrl 'https://api.perplexity.ai' -ApiKeyEnv PERPLEXITY_API_KEY -ApiModels 'sonar' -SkipOffline -SkipLocalShim -SkipMicrobench -MaxTurns 12 -Trials 1"
+      ],
+      "runner_status": "SKIPPED_WAITING_FOR_CREDENTIAL",
+      "command_results": []
+    },
+    {
+      "target": "cerebras_openai",
+      "queue_state": "WAITING_FOR_CREDENTIAL",
+      "operator_prerequisite": "Set CEREBRAS_API_KEY for this host.",
+      "command_count": 3,
+      "commands": [
+        "python tools/api_host_readiness_probe.py --target 'cerebras_openai|https://api.cerebras.ai/v1|CEREBRAS_API_KEY|llama3.1-8b' --out fak/experiments/api-host-bridge/api-host-readiness.json --markdown fak/experiments/api-host-bridge/api-host-readiness.md",
+        "python tools/api_host_acceptance_probe.py --target 'cerebras_openai|openai-compatible|https://api.cerebras.ai/v1|CEREBRAS_API_KEY|llama3.1-8b' --out fak/experiments/api-host-bridge/api-host-acceptance.json --markdown fak/experiments/api-host-bridge/api-host-acceptance.md",
+        "pwsh tools/run_transcript_adapter_sweep.ps1 -OutDir fak/experiments/agent-live/transcript-adapter-sweep-cerebras-openai-retry -ApiBaseUrl 'https://api.cerebras.ai/v1' -ApiKeyEnv CEREBRAS_API_KEY -ApiModels 'llama3.1-8b' -SkipOffline -SkipLocalShim -SkipMicrobench -MaxTurns 12 -Trials 1"
+      ],
+      "runner_status": "SKIPPED_WAITING_FOR_CREDENTIAL",
+      "command_results": []
+    }
+  ],
+  "artifact_errors": {},
+  "artifacts": {
+    "queue": "fak/experiments/api-host-bridge/api-host-live-smoke-queue.json"
+  },
+  "queue_summary": {
+    "targets": 13,
+    "complete": 1,
+    "ready_to_execute": 0,
+    "blocked_external_state": 2,
+    "waiting_for_credential": 10,
+    "ready_for_probe": 0,
+    "unqualified": 0,
+    "unclassified": 0,
+    "command_gaps": 0,
+    "commands": 34,
+    "artifact_errors": 0,
+    "live_smoke_queue_gate": true
+  }
+}

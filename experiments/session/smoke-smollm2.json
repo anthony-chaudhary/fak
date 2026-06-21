@@ -1,0 +1,108 @@
+{
+  "cells": [
+    {
+      "turns": 10,
+      "agents": 4,
+      "prefix": 512,
+      "decode": 24,
+      "result": 48,
+      "arm_A_naive_stateless": {
+        "name": "A_naive_stateless",
+        "prefill_ms": 165066.0168557089,
+        "decode_ms": 28311.766336,
+        "total_ms": 193377.7831917089,
+        "live": false
+      },
+      "arm_B_per_agent_kv": {
+        "name": "B_per_agent_kv",
+        "prefill_ms": 17415.966206,
+        "decode_ms": 28311.766336,
+        "total_ms": 45727.732542,
+        "live": true
+      },
+      "arm_C_fak_fused": {
+        "name": "C_fak_fused",
+        "prefill_ms": 8940.11225,
+        "clone_ms": 4.492625,
+        "decode_ms": 9490.459917,
+        "total_ms": 18435.064792,
+        "live": true
+      },
+      "net_value_add_vs_naive": 10.489672012198529,
+      "net_value_add_vs_tuned": 2.4804758246276304,
+      "turn_tax_A_over_B": 4.228895080553039
+    },
+    {
+      "turns": 20,
+      "agents": 4,
+      "prefix": 512,
+      "decode": 24,
+      "result": 48,
+      "arm_A_naive_stateless": {
+        "name": "A_naive_stateless",
+        "prefill_ms": 578064.3835828787,
+        "decode_ms": 69940.563461,
+        "total_ms": 648004.9470438787,
+        "live": false
+      },
+      "arm_B_per_agent_kv": {
+        "name": "B_per_agent_kv",
+        "prefill_ms": 31470.834251,
+        "decode_ms": 69940.563461,
+        "total_ms": 101411.397712,
+        "live": true
+      },
+      "arm_C_fak_fused": {
+        "name": "C_fak_fused",
+        "prefill_ms": 22231.175916,
+        "clone_ms": 3.233708,
+        "decode_ms": 24008.905539,
+        "total_ms": 46243.315163,
+        "live": true
+      },
+      "net_value_add_vs_naive": 14.012943162914878,
+      "net_value_add_vs_tuned": 2.1929958385237236,
+      "turn_tax_A_over_B": 6.389863089000698
+    }
+  ],
+  "decode_per_turn": 24,
+  "engine": "fak sessionbench (multi-agent session value stack, Q8=true)",
+  "go_threads": 12,
+  "live_validate": {
+    "armA_decode_live_ms": 25767.555249,
+    "armA_prefill_computed_ms": 116391.278147407,
+    "armA_prefill_live_ms": 109113.571749,
+    "armB_decode_live_ms": 24799.031706,
+    "decode_A_over_B": 1.0390548935330273,
+    "prefill_computed_over_live": 1.0666984526466452,
+    "scale": {
+      "C": 4,
+      "D": 24,
+      "P": 512,
+      "R": 48,
+      "T": 8
+    }
+  },
+  "methodology": "arms B,C run end-to-end LIVE (attention growth captured); arm A re-prefill computed from prefillCost(L) measured at sampled lengths (O(L^2) prefill-attention captured) summed over exact per-turn contexts; arm A decode := arm B live decode (byte-identical serial work); validate runs arm A fully live",
+  "model": "smollm2-135m",
+  "prefill_model": {
+    "lens": [
+      256,
+      512,
+      680,
+      1104,
+      1528,
+      1952
+    ],
+    "ms": [
+      888.997875,
+      2239.122333,
+      2977.604792,
+      5867.408208,
+      9978.068875,
+      14396.25825
+    ]
+  },
+  "prefix": 512,
+  "result_per_turn": 48
+}

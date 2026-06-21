@@ -1,0 +1,185 @@
+{
+  "schema": "fak.permission-source-audit.v1",
+  "generated_at": "2026-06-18T13:12:20.130307Z",
+  "scope_note": "Network source audit for external permission-system benchmark claims.",
+  "summary": {
+    "sources": 7,
+    "verified": 7,
+    "failed": 0,
+    "source_audit_gate": true
+  },
+  "sources": [
+    {
+      "id": "anthropic_auto_blog",
+      "system": "claude_code_auto",
+      "url": "https://www.anthropic.com/engineering/claude-code-auto-mode",
+      "claim": "Claude Code auto mode is classifier-mediated and publishes non-zero false-negative rates.",
+      "status": "VERIFIED",
+      "http_error": "",
+      "body_sha256": "d667dbc0f52c108e51312a1aeda76c8f9cee0edbcc53088a4f05156a84cf7333",
+      "body_bytes": 183122,
+      "checks": [
+        {
+          "pattern": "auto mode .* delegates approvals to model-based classifiers",
+          "matched": true
+        },
+        {
+          "pattern": "17% false-negative rate",
+          "matched": true
+        },
+        {
+          "pattern": "5\\.7% FNR",
+          "matched": true
+        },
+        {
+          "pattern": "prompt-injection probe .* adds a warning",
+          "matched": true
+        }
+      ]
+    },
+    {
+      "id": "claude_permission_modes",
+      "system": "claude_code_auto",
+      "url": "https://code.claude.com/docs/en/permission-modes",
+      "claim": "Claude Code exposes auto and bypass permission modes.",
+      "status": "VERIFIED",
+      "http_error": "",
+      "body_sha256": "60f0ccaf24057bc94d680ef350496981a4e1a81808343feabd3ce40765bca3ca",
+      "body_bytes": 1327954,
+      "checks": [
+        {
+          "pattern": "auto.*appears when your account meets the auto mode requirements",
+          "matched": true
+        },
+        {
+          "pattern": "bypassPermissions",
+          "matched": true
+        },
+        {
+          "pattern": "--dangerously-skip-permissions",
+          "matched": true
+        }
+      ]
+    },
+    {
+      "id": "claude_permissions",
+      "system": "claude_code_auto",
+      "url": "https://code.claude.com/docs/en/permissions",
+      "claim": "Claude Code permission rules use deny/ask/allow precedence and hooks cannot loosen denies.",
+      "status": "VERIFIED",
+      "http_error": "",
+      "body_sha256": "0aa1809401ec531b7ae3d6afa842f601bb92eebf71ad656430bbf40c756a3003",
+      "body_bytes": 1412981,
+      "checks": [
+        {
+          "pattern": "deny, then ask, then allow",
+          "matched": true
+        },
+        {
+          "pattern": "Deny and ask rules are evaluated regardless of what a PreToolUse hook returns",
+          "matched": true
+        },
+        {
+          "pattern": "If a tool is denied at any level, no other level can allow it",
+          "matched": true
+        }
+      ]
+    },
+    {
+      "id": "codex_sandbox",
+      "system": "codex_workspace_sandbox",
+      "url": "https://developers.openai.com/codex/concepts/sandboxing",
+      "claim": "Codex uses sandbox boundaries together with approval flow.",
+      "status": "VERIFIED",
+      "http_error": "",
+      "body_sha256": "3aebbb17b09fe127a794b146af24037df6c2a3d9fff27318d8ef392fab1cf973",
+      "body_bytes": 317918,
+      "checks": [
+        {
+          "pattern": "Sandboxing and approvals are different controls that work together",
+          "matched": true
+        },
+        {
+          "pattern": "filesystem and network boundaries",
+          "matched": true
+        },
+        {
+          "pattern": "danger-full-access",
+          "matched": true
+        }
+      ]
+    },
+    {
+      "id": "codex_permissions",
+      "system": "codex_workspace_sandbox",
+      "url": "https://developers.openai.com/codex/permissions",
+      "claim": "Codex permission profiles configure filesystem and network policy with deny precedence.",
+      "status": "VERIFIED",
+      "http_error": "",
+      "body_sha256": "4b93cb88e3ed18dd341cd3aa6eb4228d39087798ceb4040d1f79d236e19c6441",
+      "body_bytes": 374162,
+      "checks": [
+        {
+          "pattern": "permissions\\.<name>\\.filesystem",
+          "matched": true
+        },
+        {
+          "pattern": "permissions\\.<name>\\.network",
+          "matched": true
+        },
+        {
+          "pattern": "deny.*takes precedence",
+          "matched": true
+        }
+      ]
+    },
+    {
+      "id": "copilot_firewall",
+      "system": "github_copilot_cloud_agent",
+      "url": "https://docs.github.com/en/enterprise-cloud@latest/copilot/how-tos/copilot-on-github/customize-copilot/customize-cloud-agent/customize-the-agent-firewall",
+      "claim": "Copilot cloud agent internet access is limited by a firewall by default.",
+      "status": "VERIFIED",
+      "http_error": "",
+      "body_sha256": "6298e7514516816892de4387de27850230427d31c0a5c02daebc625896125dae",
+      "body_bytes": 590347,
+      "checks": [
+        {
+          "pattern": "access to the internet is limited by a firewall",
+          "matched": true
+        },
+        {
+          "pattern": "data exfiltration risks",
+          "matched": true
+        },
+        {
+          "pattern": "recommended allowlist",
+          "matched": true
+        }
+      ]
+    },
+    {
+      "id": "copilot_agents",
+      "system": "github_copilot_cloud_agent",
+      "url": "https://docs.github.com/en/copilot/responsible-use/agents",
+      "claim": "Copilot coding agent runs in an ephemeral, firewalled execution environment.",
+      "status": "VERIFIED",
+      "http_error": "",
+      "body_sha256": "f3529e5e371b37b6f1a0ac23f3e37f7f35181c23ce2fa8f8c5a115d87e68a45b",
+      "body_bytes": 653203,
+      "checks": [
+        {
+          "pattern": "Ephemeral, firewalled execution",
+          "matched": true
+        },
+        {
+          "pattern": "ephemeral development environment",
+          "matched": true
+        },
+        {
+          "pattern": "firewall is enabled by default",
+          "matched": true
+        }
+      ]
+    }
+  ]
+}

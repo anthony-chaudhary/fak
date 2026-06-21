@@ -1,0 +1,29 @@
+{
+  "rung": "4b",
+  "date": "2026-06-19",
+  "host": "node-macos-a / Apple M3 Pro / 36GB",
+  "engine": "fak in-kernel Gated-DeltaNet (resident Q4_K decode + Q8 fallback, cached)",
+  "model": "Qwen3.6-27B q4_k_m",
+  "prompt_text": "<|im_start|>system\\nYou are a helpful assistant.<|im_end|>\\n<|im_start|>user\\nSay OK.<|im_end|>\\n<|im_start|>assistant\\n",
+  "prompt_ids": [248045,8678,198,2523,513,264,10631,17313,13,248046,198,248045,846,198,44240,10092,13,248046,198,248045,74455,198],
+  "prompt_tokens": 22,
+  "fak_generated_text": "<think>\\nHere's a thinking",
+  "fak_generated_n": 6,
+  "llamacpp_oracle_text": "<think>\\nThinking",
+  "llamacpp_oracle_ids": [248068, 198, 90700],
+  "token_agreement": {
+    "token_1": {"fak": 248068, "llamacpp": 248068, "match": true, "surface": "<think>"},
+    "token_2": {"fak": 198, "llamacpp": 198, "match": true, "surface": "\\n"},
+    "token_3": {"fak": "Here's/Here", "llamacpp": 90700, "match": false, "surface_fak": "Here's", "surface_llamacpp": "Thinking"}
+  },
+  "first_token_match_length": 2,
+  "diagnosis_refined": "Resident-q4k does NOT close the token-3 drift (same pattern as the Q8 path). This DISPROVES the rung-3 hypothesis that the drift was a Q8-round-trip artifact -- resident-q4k skips that round-trip yet still drifts at token 3. Combined with rung 3 (0.8B f32 is coherent), the drift is a kernel numerics divergence at 27B scale on the hybrid GDN path, on IDENTICAL q4_k_m weights both engines -- most likely small float differences compounding through the GDN recurrent state / mRoPE / partial-RoPE handling. fak and llama.cpp agree for 2 tokens then diverge, the signature of compounding float error in a recurrent path.",
+  "perf": {
+    "load_ms": 36415,
+    "prefill_ms": 49920,
+    "prefill_tok_s": 0.44,
+    "decode_tok_s": 0.9,
+    "note": "resident-q4k is ~9x faster decode (0.9 vs 0.1) and ~2x faster load (36s vs 75s) than the GGUF->Q8 path -- real progress, but still ~8x below the 7.29 tok/s llama.cpp Metal bar (see rung 4a)."
+  },
+  "memgate_admit": true
+}

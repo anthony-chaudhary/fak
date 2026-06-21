@@ -1,0 +1,715 @@
+{
+  "schema": "fak.api-host-bridge-matrix.v1",
+  "generated_at": "2026-06-18T13:12:20.258624Z",
+  "bridge_claim": "A model can stay behind any compatible API host while FAK/DOS owns the tool-call boundary.",
+  "summary": {
+    "required_witnesses": 9,
+    "resolved_required_witnesses": 9,
+    "bridge_covered": true,
+    "provider_shapes_covered": [
+      "anthropic",
+      "gemini",
+      "openai-compatible",
+      "xai"
+    ]
+  },
+  "witnesses": [
+    {
+      "id": "policy_manifest_floor",
+      "claim": "Reviewable manifests narrow risky allowed tools by argument without prompt tax.",
+      "required": true,
+      "status": "resolved",
+      "command": "go test ./internal/policy ./cmd/fak -run 'Test(ArgRulesAreLoadBearing|LoadedPolicyIsLoadBearing|ApplyRuntimeInstallsIFCManifestPolicy)$'",
+      "cwd": "fak",
+      "argv": [
+        "go",
+        "test",
+        "./internal/policy",
+        "./cmd/fak",
+        "-run",
+        "Test(ArgRulesAreLoadBearing|LoadedPolicyIsLoadBearing|ApplyRuntimeInstallsIFCManifestPolicy)$",
+        "-count=1"
+      ],
+      "providers": [],
+      "evidence": [
+        {
+          "type": "go_symbol",
+          "path": "fak/internal/policy/policy_test.go",
+          "name": "TestArgRulesAreLoadBearing",
+          "status": "resolved",
+          "line": 171
+        },
+        {
+          "type": "go_symbol",
+          "path": "fak/internal/policy/policy_test.go",
+          "name": "TestLoadedPolicyIsLoadBearing",
+          "status": "resolved",
+          "line": 139
+        },
+        {
+          "type": "go_symbol",
+          "path": "fak/cmd/fak/main_test.go",
+          "name": "TestApplyRuntimeInstallsIFCManifestPolicy",
+          "status": "resolved",
+          "line": 17
+        }
+      ]
+    },
+    {
+      "id": "openai_compatible_gateway",
+      "claim": "OpenAI-compatible clients can route through the gateway, receive filtered/repaired tool calls, and have tool-result bytes quarantined before upstream model send.",
+      "required": true,
+      "status": "resolved",
+      "command": "go test ./internal/gateway -run 'Test(ChatProxyFiltersAndRepairs|ChatProxyOpenAICompatibleToolResultsAreQuarantinedPreSend|HTTPModelsAndHealth)$'",
+      "cwd": "fak",
+      "argv": [
+        "go",
+        "test",
+        "./internal/gateway",
+        "-run",
+        "Test(ChatProxyFiltersAndRepairs|ChatProxyOpenAICompatibleToolResultsAreQuarantinedPreSend|HTTPModelsAndHealth)$",
+        "-count=1"
+      ],
+      "providers": [],
+      "evidence": [
+        {
+          "type": "go_symbol",
+          "path": "fak/internal/gateway/gateway_test.go",
+          "name": "TestChatProxyFiltersAndRepairs",
+          "status": "resolved",
+          "line": 419
+        },
+        {
+          "type": "go_symbol",
+          "path": "fak/internal/gateway/gateway_test.go",
+          "name": "TestChatProxyOpenAICompatibleToolResultsAreQuarantinedPreSend",
+          "status": "resolved",
+          "line": 1272
+        },
+        {
+          "type": "go_symbol",
+          "path": "fak/internal/gateway/gateway_test.go",
+          "name": "TestHTTPModelsAndHealth",
+          "status": "resolved",
+          "line": 354
+        },
+        {
+          "type": "source_token",
+          "path": "fak/internal/gateway/gateway_test.go",
+          "token": "/v1/chat/completions",
+          "status": "resolved",
+          "line": 416
+        },
+        {
+          "type": "source_token",
+          "path": "fak/internal/gateway/gateway_test.go",
+          "token": "/v1/models",
+          "status": "resolved",
+          "line": 363
+        },
+        {
+          "type": "source_token",
+          "path": "fak/internal/gateway/gateway_test.go",
+          "token": "_quarantined",
+          "status": "resolved",
+          "line": 1289
+        },
+        {
+          "type": "source_token",
+          "path": "fak/internal/gateway/gateway_test.go",
+          "token": "pre_send",
+          "status": "resolved",
+          "line": 1289
+        }
+      ]
+    },
+    {
+      "id": "native_provider_adapters",
+      "claim": "Provider-specific transcript adapters preserve pre-send result quarantine for native host shapes.",
+      "required": true,
+      "status": "resolved",
+      "command": "go test ./internal/agent -run 'Test(PreSendQuarantineRedactsToolResultsAcrossAdapters|ProviderAdaptersMarshalNativeToolShapes|ProviderAdaptersOmitToolChoiceWithoutTools|ProviderAdaptersParseToolCalls|HTTPPlannerUsesProviderAdapterAndPreSendQuarantine)$'",
+      "cwd": "fak",
+      "argv": [
+        "go",
+        "test",
+        "./internal/agent",
+        "-run",
+        "Test(PreSendQuarantineRedactsToolResultsAcrossAdapters|ProviderAdaptersMarshalNativeToolShapes|ProviderAdaptersOmitToolChoiceWithoutTools|ProviderAdaptersParseToolCalls|HTTPPlannerUsesProviderAdapterAndPreSendQuarantine)$",
+        "-count=1"
+      ],
+      "providers": [
+        "openai-compatible",
+        "xai",
+        "anthropic",
+        "gemini"
+      ],
+      "evidence": [
+        {
+          "type": "go_symbol",
+          "path": "fak/internal/agent/adapters_test.go",
+          "name": "TestPreSendQuarantineRedactsToolResultsAcrossAdapters",
+          "status": "resolved",
+          "line": 40
+        },
+        {
+          "type": "go_symbol",
+          "path": "fak/internal/agent/adapters_test.go",
+          "name": "TestProviderAdaptersMarshalNativeToolShapes",
+          "status": "resolved",
+          "line": 157
+        },
+        {
+          "type": "go_symbol",
+          "path": "fak/internal/agent/adapters_test.go",
+          "name": "TestProviderAdaptersOmitToolChoiceWithoutTools",
+          "status": "resolved",
+          "line": 198
+        },
+        {
+          "type": "go_symbol",
+          "path": "fak/internal/agent/adapters_test.go",
+          "name": "TestProviderAdaptersParseToolCalls",
+          "status": "resolved",
+          "line": 221
+        },
+        {
+          "type": "go_symbol",
+          "path": "fak/internal/agent/adapters_test.go",
+          "name": "TestHTTPPlannerUsesProviderAdapterAndPreSendQuarantine",
+          "status": "resolved",
+          "line": 269
+        },
+        {
+          "type": "source_token",
+          "path": "fak/internal/agent/adapters_test.go",
+          "token": "ProviderOpenAI",
+          "status": "resolved",
+          "line": 53
+        },
+        {
+          "type": "source_token",
+          "path": "fak/internal/agent/adapters_test.go",
+          "token": "ProviderXAI",
+          "status": "resolved",
+          "line": 53
+        },
+        {
+          "type": "source_token",
+          "path": "fak/internal/agent/adapters_test.go",
+          "token": "ProviderAnthropic",
+          "status": "resolved",
+          "line": 53
+        },
+        {
+          "type": "source_token",
+          "path": "fak/internal/agent/adapters_test.go",
+          "token": "ProviderGemini",
+          "status": "resolved",
+          "line": 53
+        },
+        {
+          "type": "source_token",
+          "path": "fak/internal/agent/adapters_test.go",
+          "token": "_quarantined",
+          "status": "resolved",
+          "line": 73
+        }
+      ]
+    },
+    {
+      "id": "provider_proxy_end_to_end",
+      "claim": "An OpenAI-compatible client can call FAK while FAK fronts each covered upstream provider wire and filters proposed tool calls.",
+      "required": true,
+      "status": "resolved",
+      "command": "go test ./internal/gateway -run 'TestChatProxyProviderAdaptersEndToEnd$'",
+      "cwd": "fak",
+      "argv": [
+        "go",
+        "test",
+        "./internal/gateway",
+        "-run",
+        "TestChatProxyProviderAdaptersEndToEnd$",
+        "-count=1"
+      ],
+      "providers": [
+        "openai-compatible",
+        "xai",
+        "anthropic",
+        "gemini"
+      ],
+      "evidence": [
+        {
+          "type": "go_symbol",
+          "path": "fak/internal/gateway/gateway_test.go",
+          "name": "TestChatProxyProviderAdaptersEndToEnd",
+          "status": "resolved",
+          "line": 469
+        },
+        {
+          "type": "source_token",
+          "path": "fak/internal/gateway/gateway_test.go",
+          "token": "/v1/chat/completions",
+          "status": "resolved",
+          "line": 416
+        },
+        {
+          "type": "source_token",
+          "path": "fak/internal/gateway/gateway_test.go",
+          "token": "openai",
+          "status": "resolved",
+          "line": 477
+        },
+        {
+          "type": "source_token",
+          "path": "fak/internal/gateway/gateway_test.go",
+          "token": "xai",
+          "status": "resolved",
+          "line": 479
+        },
+        {
+          "type": "source_token",
+          "path": "fak/internal/gateway/gateway_test.go",
+          "token": "anthropic",
+          "status": "resolved",
+          "line": 481
+        },
+        {
+          "type": "source_token",
+          "path": "fak/internal/gateway/gateway_test.go",
+          "token": "gemini",
+          "status": "resolved",
+          "line": 483
+        },
+        {
+          "type": "source_token",
+          "path": "fak/internal/gateway/gateway_test.go",
+          "token": "{\"redacted\":true}",
+          "status": "resolved",
+          "line": 61
+        }
+      ]
+    },
+    {
+      "id": "host_agnostic_openai_compatible",
+      "claim": "Arbitrary OpenAI-compatible API hosts can sit behind FAK using compatible aliases, configured base URLs, opaque model ids, optional auth, ignored vendor extension fields, and stream=true client requests synthesized only after adjudication.",
+      "required": true,
+      "status": "resolved",
+      "command": "go test ./internal/gateway -run 'TestChatProxyOpenAICompatible(AliasIsHostAgnostic|ObjectArgumentsAreHostAgnostic|StreamModeStreamsAdjudicatedCalls)$'",
+      "cwd": "fak",
+      "argv": [
+        "go",
+        "test",
+        "./internal/gateway",
+        "-run",
+        "TestChatProxyOpenAICompatible(AliasIsHostAgnostic|ObjectArgumentsAreHostAgnostic|StreamModeStreamsAdjudicatedCalls)$",
+        "-count=1"
+      ],
+      "providers": [
+        "openai-compatible"
+      ],
+      "evidence": [
+        {
+          "type": "go_symbol",
+          "path": "fak/internal/gateway/gateway_test.go",
+          "name": "TestChatProxyOpenAICompatibleAliasIsHostAgnostic",
+          "status": "resolved",
+          "line": 567
+        },
+        {
+          "type": "go_symbol",
+          "path": "fak/internal/gateway/gateway_test.go",
+          "name": "TestChatProxyOpenAICompatibleObjectArgumentsAreHostAgnostic",
+          "status": "resolved",
+          "line": 724
+        },
+        {
+          "type": "go_symbol",
+          "path": "fak/internal/gateway/gateway_test.go",
+          "name": "TestChatProxyOpenAICompatibleStreamModeStreamsAdjudicatedCalls",
+          "status": "resolved",
+          "line": 799
+        },
+        {
+          "type": "source_token",
+          "path": "fak/internal/gateway/gateway_test.go",
+          "token": "openai-compatible",
+          "status": "resolved",
+          "line": 576
+        },
+        {
+          "type": "source_token",
+          "path": "fak/internal/gateway/gateway_test.go",
+          "token": "chat-completions",
+          "status": "resolved",
+          "line": 590
+        },
+        {
+          "type": "source_token",
+          "path": "fak/internal/gateway/gateway_test.go",
+          "token": "empty-provider-default-trailing-base",
+          "status": "resolved",
+          "line": 583
+        },
+        {
+          "type": "source_token",
+          "path": "fak/internal/gateway/gateway_test.go",
+          "token": "/tenant/acme/openai",
+          "status": "resolved",
+          "line": 578
+        },
+        {
+          "type": "source_token",
+          "path": "fak/internal/gateway/gateway_test.go",
+          "token": "/gateway/compat/",
+          "status": "resolved",
+          "line": 585
+        },
+        {
+          "type": "source_token",
+          "path": "fak/internal/gateway/gateway_test.go",
+          "token": "/v42/compatible",
+          "status": "resolved",
+          "line": 592
+        },
+        {
+          "type": "source_token",
+          "path": "fak/internal/gateway/gateway_test.go",
+          "token": "opaque-host/model:v1",
+          "status": "resolved",
+          "line": 579
+        },
+        {
+          "type": "source_token",
+          "path": "fak/internal/gateway/gateway_test.go",
+          "token": "opaque-object-args:model",
+          "status": "resolved",
+          "line": 743
+        },
+        {
+          "type": "source_token",
+          "path": "fak/internal/gateway/gateway_test.go",
+          "token": "vendor_extra",
+          "status": "resolved",
+          "line": 672
+        },
+        {
+          "type": "source_token",
+          "path": "fak/internal/gateway/gateway_test.go",
+          "token": "gateway must not ask upstream for raw streaming deltas",
+          "status": "resolved",
+          "line": 822
+        },
+        {
+          "type": "source_token",
+          "path": "fak/internal/gateway/gateway_test.go",
+          "token": "denied tool call reached streamed delta",
+          "status": "resolved",
+          "line": 924
+        },
+        {
+          "type": "source_token",
+          "path": "fak/internal/gateway/gateway_test.go",
+          "token": "text/event-stream",
+          "status": "resolved",
+          "line": 871
+        },
+        {
+          "type": "source_token",
+          "path": "fak/internal/gateway/gateway_test.go",
+          "token": "{\"redacted\":true}",
+          "status": "resolved",
+          "line": 61
+        }
+      ]
+    },
+    {
+      "id": "openai_compatible_host_profiles",
+      "claim": "OpenAI-compatible host-profile drift is covered across null arguments, legacy function_call, typed content parts, extra fields, omitted tool_choice without advertised tools, rogue tool calls, multichoice responses, and content-only replies.",
+      "required": true,
+      "status": "resolved",
+      "command": "go test ./internal/gateway -run 'TestChatProxyOpenAICompatibleHostProfileConformance$'",
+      "cwd": "fak",
+      "argv": [
+        "go",
+        "test",
+        "./internal/gateway",
+        "-run",
+        "TestChatProxyOpenAICompatibleHostProfileConformance$",
+        "-count=1"
+      ],
+      "providers": [
+        "openai-compatible"
+      ],
+      "evidence": [
+        {
+          "type": "go_symbol",
+          "path": "fak/internal/gateway/gateway_test.go",
+          "name": "TestChatProxyOpenAICompatibleHostProfileConformance",
+          "status": "resolved",
+          "line": 944
+        },
+        {
+          "type": "source_token",
+          "path": "fak/internal/gateway/gateway_test.go",
+          "token": "profile-null-arguments-extra-fields",
+          "status": "resolved",
+          "line": 959
+        },
+        {
+          "type": "source_token",
+          "path": "fak/internal/gateway/gateway_test.go",
+          "token": "profile-legacy-function-call",
+          "status": "resolved",
+          "line": 1051
+        },
+        {
+          "type": "source_token",
+          "path": "fak/internal/gateway/gateway_test.go",
+          "token": "profile-content-parts-with-tool-call",
+          "status": "resolved",
+          "line": 1071
+        },
+        {
+          "type": "source_token",
+          "path": "fak/internal/gateway/gateway_test.go",
+          "token": "profile-no-tools-rogue-tool-call",
+          "status": "resolved",
+          "line": 989
+        },
+        {
+          "type": "source_token",
+          "path": "fak/internal/gateway/gateway_test.go",
+          "token": "tool_choice must be omitted when no tools are sent",
+          "status": "resolved",
+          "line": 1157
+        },
+        {
+          "type": "source_token",
+          "path": "fak/internal/gateway/gateway_test.go",
+          "token": "profile-multichoice-mixed-arguments",
+          "status": "resolved",
+          "line": 1016
+        },
+        {
+          "type": "source_token",
+          "path": "fak/internal/gateway/gateway_test.go",
+          "token": "profile-content-only-no-fak-extension",
+          "status": "resolved",
+          "line": 1104
+        },
+        {
+          "type": "source_token",
+          "path": "fak/internal/gateway/gateway_test.go",
+          "token": "\"arguments\":null",
+          "status": "resolved",
+          "line": 974
+        },
+        {
+          "type": "source_token",
+          "path": "fak/internal/gateway/gateway_test.go",
+          "token": "\"finish_reason\":\"function_call\"",
+          "status": "resolved",
+          "line": 1063
+        },
+        {
+          "type": "source_token",
+          "path": "fak/internal/gateway/gateway_test.go",
+          "token": "client part one",
+          "status": "resolved",
+          "line": 1097
+        },
+        {
+          "type": "source_token",
+          "path": "fak/internal/gateway/gateway_test.go",
+          "token": "profile_extra",
+          "status": "resolved",
+          "line": 1202
+        },
+        {
+          "type": "source_token",
+          "path": "fak/internal/gateway/gateway_test.go",
+          "token": "second choice must not leak",
+          "status": "resolved",
+          "line": 1038
+        }
+      ]
+    },
+    {
+      "id": "direct_http_syscall",
+      "claim": "Any-language clients can bypass provider quirks and call the kernel over native HTTP.",
+      "required": true,
+      "status": "resolved",
+      "command": "go test ./internal/gateway -run 'Test(HTTPSyscallAllow|HTTPAdjudicateTransformRepairsArgs|HTTPQuarantineSurfaced|HTTPSyscallWitnessFailsClosed)$'",
+      "cwd": "fak",
+      "argv": [
+        "go",
+        "test",
+        "./internal/gateway",
+        "-run",
+        "Test(HTTPSyscallAllow|HTTPAdjudicateTransformRepairsArgs|HTTPQuarantineSurfaced|HTTPSyscallWitnessFailsClosed)$",
+        "-count=1"
+      ],
+      "providers": [],
+      "evidence": [
+        {
+          "type": "go_symbol",
+          "path": "fak/internal/gateway/gateway_test.go",
+          "name": "TestHTTPSyscallAllow",
+          "status": "resolved",
+          "line": 195
+        },
+        {
+          "type": "go_symbol",
+          "path": "fak/internal/gateway/gateway_test.go",
+          "name": "TestHTTPAdjudicateTransformRepairsArgs",
+          "status": "resolved",
+          "line": 240
+        },
+        {
+          "type": "go_symbol",
+          "path": "fak/internal/gateway/gateway_test.go",
+          "name": "TestHTTPQuarantineSurfaced",
+          "status": "resolved",
+          "line": 307
+        },
+        {
+          "type": "go_symbol",
+          "path": "fak/internal/gateway/gateway_test.go",
+          "name": "TestHTTPSyscallWitnessFailsClosed",
+          "status": "resolved",
+          "line": 293
+        }
+      ]
+    },
+    {
+      "id": "direct_mcp_syscall",
+      "claim": "Any-language clients can call the same kernel over MCP stdio or MCP-over-HTTP.",
+      "required": true,
+      "status": "resolved",
+      "command": "go test ./internal/gateway -run 'Test(MCPStdioRoundtrip|MCPOverHTTP)$'",
+      "cwd": "fak",
+      "argv": [
+        "go",
+        "test",
+        "./internal/gateway",
+        "-run",
+        "Test(MCPStdioRoundtrip|MCPOverHTTP)$",
+        "-count=1"
+      ],
+      "providers": [],
+      "evidence": [
+        {
+          "type": "go_symbol",
+          "path": "fak/internal/gateway/gateway_test.go",
+          "name": "TestMCPStdioRoundtrip",
+          "status": "resolved",
+          "line": 1381
+        },
+        {
+          "type": "go_symbol",
+          "path": "fak/internal/gateway/gateway_test.go",
+          "name": "TestMCPOverHTTP",
+          "status": "resolved",
+          "line": 1490
+        }
+      ]
+    },
+    {
+      "id": "dos_style_turnbench",
+      "claim": "DOS-style proof remains available at the bridge: safety, vDSO path swap, and no fake turn-tax win.",
+      "required": true,
+      "status": "resolved",
+      "command": "go test ./internal/turnbench -run 'TestRun_(AirlineClassesAreLiveKernelEvents|VDSOAblationIsARealPathSwap|HappyPathSavesNothing)$'",
+      "cwd": "fak",
+      "argv": [
+        "go",
+        "test",
+        "./internal/turnbench",
+        "-run",
+        "TestRun_(AirlineClassesAreLiveKernelEvents|VDSOAblationIsARealPathSwap|HappyPathSavesNothing)$",
+        "-count=1"
+      ],
+      "providers": [],
+      "evidence": [
+        {
+          "type": "go_symbol",
+          "path": "fak/internal/turnbench/turnbench_test.go",
+          "name": "TestRun_AirlineClassesAreLiveKernelEvents",
+          "status": "resolved",
+          "line": 33
+        },
+        {
+          "type": "go_symbol",
+          "path": "fak/internal/turnbench/turnbench_test.go",
+          "name": "TestRun_VDSOAblationIsARealPathSwap",
+          "status": "resolved",
+          "line": 121
+        },
+        {
+          "type": "go_symbol",
+          "path": "fak/internal/turnbench/turnbench_test.go",
+          "name": "TestRun_HappyPathSavesNothing",
+          "status": "resolved",
+          "line": 157
+        }
+      ]
+    },
+    {
+      "id": "live_api_host_inventory",
+      "claim": "Committed live artifacts include a Gemini OpenAI-compatible success, local OpenAI-compatible shims, and typed auth/billing blockers.",
+      "required": false,
+      "status": "resolved",
+      "command": "python tools/api_host_live_inventory.py --out fak/experiments/api-host-bridge/api-host-live-inventory.json --markdown fak/experiments/api-host-bridge/api-host-live-inventory.md",
+      "cwd": "",
+      "argv": [],
+      "providers": [],
+      "evidence": [
+        {
+          "type": "file_exists",
+          "path": "tools/api_host_live_inventory.py",
+          "status": "resolved"
+        },
+        {
+          "type": "file_exists",
+          "path": "tools/api_host_live_inventory_test.py",
+          "status": "resolved"
+        }
+      ]
+    },
+    {
+      "id": "current_api_host_readiness",
+      "claim": "Current compatible-host /models probes classify reachable, missing-auth, auth, billing, access-denied, and transport states without running chat completions.",
+      "required": false,
+      "status": "resolved",
+      "command": "python tools/api_host_readiness_probe.py --out fak/experiments/api-host-bridge/api-host-readiness.json --markdown fak/experiments/api-host-bridge/api-host-readiness.md",
+      "cwd": "",
+      "argv": [],
+      "providers": [],
+      "evidence": [
+        {
+          "type": "file_exists",
+          "path": "tools/api_host_readiness_probe.py",
+          "status": "resolved"
+        },
+        {
+          "type": "file_exists",
+          "path": "tools/api_host_readiness_probe_test.py",
+          "status": "resolved"
+        },
+        {
+          "type": "file_exists",
+          "path": "fak/experiments/api-host-bridge/api-host-readiness.json",
+          "status": "resolved"
+        },
+        {
+          "type": "source_token",
+          "path": "fak/experiments/api-host-bridge/api-host-readiness.json",
+          "token": "\"readiness_gate\": true",
+          "status": "resolved",
+          "line": 15
+        }
+      ]
+    }
+  ]
+}

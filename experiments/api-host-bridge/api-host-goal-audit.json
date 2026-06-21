@@ -1,0 +1,318 @@
+{
+  "schema": "fak.api-host-goal-audit.v1",
+  "generated_at": "2026-06-18T13:12:35.342598Z",
+  "objective": "Hone in on the initial 'works with any API host' bridge, benchmark it against Claude Code auto permissions and other permission systems, and work toward DOS-style completion/proof that it is working.",
+  "summary": {
+    "requirements": 15,
+    "proven": 13,
+    "residual": 2,
+    "incomplete": 0,
+    "goal_complete": false,
+    "goal_status": "SCOPE_BOUNDED_PROGRESS_NOT_COMPLETE"
+  },
+  "requirements": [
+    {
+      "id": "compatible_api_host_bridge",
+      "requirement": "A compatible API host can sit behind the model boundary while FAK/DOS owns tool-call admission.",
+      "status": "PROVEN",
+      "evidence": "fak/experiments/api-host-bridge/api-host-bridge-proof.json",
+      "detail": {
+        "required_rows": [
+          "source_witness_matrix",
+          "executed_witness_gate",
+          "host_agnostic_conformance",
+          "compatibility_contract",
+          "api_host_conformance_certificate",
+          "committed_live_inventory"
+        ]
+      }
+    },
+    {
+      "id": "candidate_host_workflow",
+      "requirement": "An operator can point the bridge at candidate hosts and get ready/live-confirmed/typed-blocker/unsupported-wire states.",
+      "status": "PROVEN",
+      "evidence": "fak/experiments/api-host-bridge/api-host-acceptance.json",
+      "detail": {
+        "summary": {
+          "targets": 13,
+          "known_statuses": 13,
+          "ready_for_live_bridge_run": 0,
+          "live_bridge_confirmed": 0,
+          "wire_supported_unprobed": 0,
+          "typed_external_blockers": 13,
+          "unsupported_wire": 0,
+          "invalid_targets": 0,
+          "unclassified": 0,
+          "sweep_artifact_errors": 0,
+          "acceptance_gate": true
+        },
+        "artifact_errors": []
+      }
+    },
+    {
+      "id": "expanded_candidate_host_roster",
+      "requirement": "A broad no-spend roster of API-host target templates is valid and ready for credentialed readiness/acceptance probing.",
+      "status": "PROVEN",
+      "evidence": "fak/experiments/api-host-bridge/api-host-roster.json",
+      "detail": {
+        "targets": 13,
+        "supported_templates": 13,
+        "openai_compatible_templates": 13,
+        "native_provider_templates": 0,
+        "direct_templates": 0,
+        "invalid_targets": 0,
+        "unsupported_wire": 0,
+        "duplicate_names": 0,
+        "auth_required_templates": 12,
+        "roster_gate": true
+      }
+    },
+    {
+      "id": "host_agnostic_compatible_api_host",
+      "requirement": "Host-agnostic OpenAI-compatible conformance cases cover compatible aliases, arbitrary base paths, opaque model ids, optional auth, ignored vendor extension fields, and stream=true client requests whose chunks are synthesized only after adjudication.",
+      "status": "PROVEN",
+      "evidence": "fak/experiments/api-host-bridge/api-host-bridge-gate.json",
+      "detail": {
+        "matrix_schema": "fak.api-host-bridge-matrix.v1",
+        "gate_schema": "fak.api-host-bridge-gate.v1",
+        "gate_matrix_schema": "fak.api-host-bridge-matrix.v1",
+        "matrix_witness": "resolved",
+        "gate_run": "passed",
+        "required_matches": true,
+        "command_matches": true,
+        "cwd_matches": true,
+        "argv_matches": true,
+        "provider_covered": true,
+        "evidence_resolved": true,
+        "command": "go test ./internal/gateway -run 'TestChatProxyOpenAICompatible(AliasIsHostAgnostic|ObjectArgumentsAreHostAgnostic|StreamModeStreamsAdjudicatedCalls)$'",
+        "elapsed_ms": 1327
+      }
+    },
+    {
+      "id": "openai_compatible_host_profile_corpus",
+      "requirement": "OpenAI-compatible host profile drift is covered across null arguments, legacy function_call, typed content parts, extra fields, omitted tool_choice without advertised tools, rogue tool calls, multichoice responses, and content-only replies.",
+      "status": "PROVEN",
+      "evidence": "fak/experiments/api-host-bridge/api-host-bridge-proof.json",
+      "detail": {
+        "matrix_witness": "resolved",
+        "gate_run": "passed",
+        "required_matches": true,
+        "command_matches": true,
+        "cwd_matches": true,
+        "argv_matches": true,
+        "provider_covered": true,
+        "evidence_resolved": true
+      }
+    },
+    {
+      "id": "api_host_conformance_certificate",
+      "requirement": "The compatible-host claim is captured in a machine-readable certificate with proven capabilities and explicit non-claims.",
+      "status": "PROVEN",
+      "evidence": "fak/experiments/api-host-bridge/api-host-conformance-certificate.json",
+      "detail": {
+        "capabilities": 10,
+        "proven_capabilities": 10,
+        "failed_capabilities": 0,
+        "missing_required_non_claims": 0,
+        "artifact_errors": 0,
+        "certificate_gate": true
+      }
+    },
+    {
+      "id": "blocked_host_retry_packet",
+      "requirement": "Typed external host blockers have exact operator prerequisites and rerun commands.",
+      "status": "PROVEN",
+      "evidence": "fak/experiments/api-host-bridge/api-host-retry-packet.json",
+      "detail": {
+        "targets": 13,
+        "actionable_blockers": 13,
+        "ready_for_live_bridge_run": 0,
+        "live_bridge_confirmed": 0,
+        "unsupported_wire": 0,
+        "invalid_targets": 0,
+        "shape_mismatch": 0,
+        "unclassified": 0,
+        "action_gaps": 0,
+        "artifact_errors": 0,
+        "commands": 37,
+        "retry_packet_gate": true
+      }
+    },
+    {
+      "id": "paid_keyed_external_state_audit",
+      "requirement": "Paid/keyed and no-auth roster targets have typed current external state and next evidence commands without exposing secret values.",
+      "status": "PROVEN",
+      "evidence": "fak/experiments/api-host-bridge/api-host-external-state-audit.json",
+      "detail": {
+        "roster_targets": 13,
+        "env_present": 1,
+        "env_missing": 11,
+        "no_auth_declared": 1,
+        "live_confirmed": 1,
+        "ready_for_live_run": 0,
+        "blocked_auth": 1,
+        "blocked_billing": 1,
+        "needs_credential": 10,
+        "rate_or_transport_blocked": 0,
+        "unprobed_templates": 0,
+        "invalid_templates": 0,
+        "unsupported_templates": 0,
+        "unclassified": 0,
+        "artifact_errors": 0,
+        "status_counts": {
+          "BLOCKED_AUTH": 1,
+          "BLOCKED_BILLING": 1,
+          "LIVE_CONFIRMED": 1,
+          "NEEDS_CREDENTIAL": 10
+        },
+        "external_state_audit_gate": true
+      }
+    },
+    {
+      "id": "api_host_qualification_predicate",
+      "requirement": "Each roster target is reduced to a machine-readable bridge qualification: live, ready for smoke, typed external blocker, credential-needed, or probe-needed.",
+      "status": "PROVEN",
+      "evidence": "fak/experiments/api-host-bridge/api-host-qualification.json",
+      "detail": {
+        "targets": 13,
+        "in_contract_targets": 13,
+        "live_confirmed": 1,
+        "ready_for_live_smoke": 0,
+        "external_blocked": 2,
+        "needs_credential": 10,
+        "needs_probe": 0,
+        "out_of_contract": 0,
+        "invalid_targets": 0,
+        "unclassified": 0,
+        "artifact_errors": 0,
+        "qualification_gate": true
+      }
+    },
+    {
+      "id": "paid_keyed_live_execution_queue",
+      "requirement": "Remaining paid/keyed live-smoke work is reduced to a credential-conditioned execution queue with exact commands and typed prerequisites.",
+      "status": "PROVEN",
+      "evidence": "fak/experiments/api-host-bridge/api-host-live-smoke-queue.json",
+      "detail": {
+        "summary": {
+          "targets": 13,
+          "complete": 1,
+          "ready_to_execute": 0,
+          "blocked_external_state": 2,
+          "waiting_for_credential": 10,
+          "ready_for_probe": 0,
+          "unqualified": 0,
+          "unclassified": 0,
+          "command_gaps": 0,
+          "commands": 34,
+          "artifact_errors": 0,
+          "live_smoke_queue_gate": true
+        },
+        "state_total": 13
+      }
+    },
+    {
+      "id": "paid_keyed_live_runner_gate",
+      "requirement": "Ready paid/keyed live-smoke rows are executed by a runner or the proof fails closed; currently blocked rows remain typed skips.",
+      "status": "PROVEN",
+      "evidence": "fak/experiments/api-host-bridge/api-host-live-smoke-runner.json",
+      "detail": {
+        "targets": 13,
+        "execute_ready": false,
+        "already_complete": 1,
+        "ready_to_execute": 0,
+        "ready_not_executed": 0,
+        "executed": 0,
+        "passed": 0,
+        "failed": 0,
+        "skipped_external_state": 2,
+        "skipped_waiting_for_credential": 10,
+        "skipped_ready_for_probe": 0,
+        "command_gaps": 0,
+        "unclassified": 0,
+        "artifact_errors": 0,
+        "ready_execution_gaps": 0,
+        "live_smoke_runner_gate": true
+      }
+    },
+    {
+      "id": "permission_system_benchmark",
+      "requirement": "FAK/DOS risk controls and API-host bridge controls are benchmarked against Claude auto, Codex, Copilot, prompts, and bypass using source-audited claims.",
+      "status": "PROVEN",
+      "evidence": "fak/experiments/permission-systems/permission-system-benchmark.json",
+      "detail": {
+        "systems": [
+          "fak_dos_gateway",
+          "claude_code_auto",
+          "codex_workspace_sandbox",
+          "github_copilot_cloud_agent",
+          "manual_prompts",
+          "bypass_permissions"
+        ],
+        "source_audit": "PROVEN"
+      }
+    },
+    {
+      "id": "dos_style_proof",
+      "requirement": "The bridge claim is backed by source witnesses, executable gates, live inventory, candidate-host acceptance, and source-audited benchmark evidence.",
+      "status": "PROVEN",
+      "evidence": "fak/experiments/api-host-bridge/api-host-bridge-proof.json",
+      "detail": {
+        "proof_rows": [
+          "source_witness_matrix",
+          "executed_witness_gate",
+          "host_agnostic_conformance",
+          "host_profile_conformance",
+          "api_host_conformance_certificate",
+          "api_host_roster",
+          "api_host_external_state_audit",
+          "api_host_qualification",
+          "api_host_live_smoke_queue",
+          "api_host_live_smoke_runner",
+          "committed_live_inventory",
+          "candidate_host_acceptance",
+          "permission_source_audit"
+        ],
+        "proof_summary": {
+          "requirements": 16,
+          "proven": 16,
+          "failed_or_missing": 0,
+          "proof_gate": true,
+          "completion_scope": "BRIDGE_PROVEN_SCOPE_BOUNDED"
+        }
+      }
+    },
+    {
+      "id": "universal_any_api_host",
+      "requirement": "Every API host on the internet works with the bridge.",
+      "status": "NOT_PROVEN",
+      "evidence": "fak/experiments/api-host-bridge/api-host-bridge-proof.json",
+      "detail": {
+        "reason": "The proof covers compatible host shapes, committed Gemini/OpenAI-compatible live runs, local OpenAI-compatible shims, current typed readiness, and a reusable candidate-host acceptance gate. It does not prove every API host on the internet."
+      }
+    },
+    {
+      "id": "paid_or_keyed_live_hosts",
+      "requirement": "Paid/keyed hosts have completed live tool-calling runs.",
+      "status": "EXTERNAL_STATE",
+      "evidence": "fak/experiments/api-host-bridge/api-host-bridge-proof.json",
+      "detail": {
+        "reason": "Additional live tool-calling runs for paid/keyed roster targets require billing/API-key/access state beyond this no-spend gate; the external-state audit, live-smoke queue, and runner ledger record the current typed blockers and exact retry evidence."
+      }
+    }
+  ],
+  "artifacts": {
+    "matrix": "fak/experiments/api-host-bridge/api-host-bridge-matrix.json",
+    "gate": "fak/experiments/api-host-bridge/api-host-bridge-gate.json",
+    "proof": "fak/experiments/api-host-bridge/api-host-bridge-proof.json",
+    "benchmark": "fak/experiments/permission-systems/permission-system-benchmark.json",
+    "acceptance": "fak/experiments/api-host-bridge/api-host-acceptance.json",
+    "roster": "fak/experiments/api-host-bridge/api-host-roster.json",
+    "retry": "fak/experiments/api-host-bridge/api-host-retry-packet.json",
+    "external_state": "fak/experiments/api-host-bridge/api-host-external-state-audit.json",
+    "certificate": "fak/experiments/api-host-bridge/api-host-conformance-certificate.json",
+    "qualification": "fak/experiments/api-host-bridge/api-host-qualification.json",
+    "live_queue": "fak/experiments/api-host-bridge/api-host-live-smoke-queue.json",
+    "live_runner": "fak/experiments/api-host-bridge/api-host-live-smoke-runner.json"
+  }
+}

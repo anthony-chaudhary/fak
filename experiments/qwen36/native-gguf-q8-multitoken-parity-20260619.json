@@ -1,0 +1,142 @@
+{
+  "model": {
+    "source": "/Users/USER/.cache/fak-models/gguf/Qwen3.6-27B.q4_k_m.gguf",
+    "type": "qwen35",
+    "hidden": 5120,
+    "layers": 64,
+    "heads": 24,
+    "kv_heads": 4,
+    "head_dim": 256,
+    "intermediate": 17408,
+    "vocab": 248320,
+    "quant_loaded": true,
+    "qwen35_hybrid": true,
+    "norm_gain_1p": true,
+    "partial_rotary": 0.25,
+    "rope_theta": 10000000,
+    "attn_output_gate": true,
+    "linear_conv_kernel": 4,
+    "linear_key_heads": 16,
+    "linear_key_head_dim": 128,
+    "linear_value_heads": 48,
+    "linear_value_head_dim": 128
+  },
+  "prompt_ids": [
+    248045,
+    8678,
+    198,
+    2523,
+    513,
+    264,
+    10631,
+    17313,
+    13,
+    248046,
+    198,
+    248045,
+    846,
+    198,
+    44240,
+    10092,
+    13,
+    248046,
+    198,
+    248045,
+    74455,
+    198
+  ],
+  "generated_ids": [
+    248068,
+    198,
+    8160
+  ],
+  "expected_ids": [
+    248068,
+    198,
+    90700
+  ],
+  "expect_match": false,
+  "steps": [
+    {
+      "index": 0,
+      "token_id": 248068,
+      "eos": false,
+      "top": [
+        {
+          "id": 248068,
+          "logit": 28.297756
+        },
+        {
+          "id": 3793,
+          "logit": 23.289362
+        },
+        {
+          "id": 31248,
+          "logit": 17.87954
+        },
+        {
+          "id": 11245,
+          "logit": 16.680702
+        },
+        {
+          "id": 547,
+          "logit": 14.690568
+        }
+      ]
+    },
+    {
+      "index": 1,
+      "token_id": 198,
+      "eos": false,
+      "top": [
+        {
+          "id": 198,
+          "logit": 27.149233
+        },
+        {
+          "id": 271,
+          "logit": 26.024843
+        },
+        {
+          "id": 248046,
+          "logit": 16.425463
+        },
+        {
+          "id": 1358,
+          "logit": 13.92086
+        },
+        {
+          "id": 695,
+          "logit": 13.544906
+        }
+      ]
+    },
+    {
+      "index": 2,
+      "token_id": 8160,
+      "eos": false,
+      "top": [
+        {
+          "id": 8160,
+          "logit": 23.184399
+        },
+        {
+          "id": 90700,
+          "logit": 21.433077
+        },
+        {
+          "id": 31248,
+          "logit": 18.228834
+        },
+        {
+          "id": 760,
+          "logit": 17.295563
+        },
+        {
+          "id": 40,
+          "logit": 16.826128
+        }
+      ]
+    }
+  ]
+}

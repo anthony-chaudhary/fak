@@ -1,0 +1,53 @@
+{
+  "backend": {
+    "caps": {
+      "Async": false,
+      "FusedAttn": false,
+      "FusedFFN": false,
+      "GraphCompile": false,
+      "UploadDtype": true,
+      "DeviceMemory": true
+    },
+    "class": "approx",
+    "registered_backends": [
+      "cpu-ref",
+      "cuda"
+    ],
+    "selected": "cuda",
+    "tier": "sm_89"
+  },
+  "decode": {
+    "prompt_tokens": 16,
+    "decode_steps": 128,
+    "reps": 5,
+    "per_token_median_ms": 39.772838,
+    "tok_per_sec": 25.14278714533773
+  },
+  "engine": "fak-in-kernel via compute HAL backend \"cuda\"",
+  "go_threads": "GOMAXPROCS=4, matmul workers=4 (FAK_WORKERS to pin)",
+  "load_ms": 49051.084356,
+  "model": "qwen2.5-3b (qwen2) [lean]",
+  "precision": "Q8_0",
+  "prefill": [
+    {
+      "tokens": 16,
+      "reps": 5,
+      "median_ms": 631.169984,
+      "tok_per_sec": 25.34974793731636
+    },
+    {
+      "tokens": 64,
+      "reps": 5,
+      "median_ms": 2488.735726,
+      "tok_per_sec": 25.715868234375964
+    },
+    {
+      "tokens": 256,
+      "reps": 5,
+      "median_ms": 10192.097474,
+      "tok_per_sec": 25.1174991853301
+    }
+  ],
+  "quant_ms": 0.000218,
+  "workers": 4
+}

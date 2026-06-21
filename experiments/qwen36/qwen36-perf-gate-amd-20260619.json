@@ -1,0 +1,147 @@
+{
+  "cases": [
+    {
+      "failures": [],
+      "fak": {
+        "decode": {
+          "decode_steps": 4,
+          "prompt_tokens": 16,
+          "tok_per_sec": 1.2366664937394687
+        },
+        "engine": "fak-in-kernel Q8_0 (pure-Go, quantized weights+activations, int8\u00d7int8\u2192int32 dot)",
+        "model": "Qwen3.6-27B-Q4_K_M.gguf [gguf-lean]",
+        "path": "fak/experiments/qwen36/native-gguf-q8-hybrid-headscan-p16-64-256-20260619.json",
+        "prefill": {
+          "16": 14.856939741552393,
+          "64": 27.459750013300813,
+          "256": 31.3399988205877
+        }
+      },
+      "label": "amd-p16-64-256",
+      "llama": {
+        "backends": "Vulkan",
+        "build_commit": "9b260fc9e",
+        "build_number": 9673,
+        "decode": {
+          "n_gen": 1,
+          "tok_per_sec": 0.989596
+        },
+        "model_type": "qwen35 27B Q4_K - Medium",
+        "path": "fak/experiments/qwen36/llamacpp-vulkan-qwen36-pp16-64-256-tg1-20260619.json",
+        "prefill": {
+          "16": 5.198249,
+          "64": 14.56946,
+          "256": 9.948934
+        }
+      },
+      "passed": true,
+      "rows": [
+        {
+          "fak_tok_per_sec": 14.856939741552393,
+          "kind": "prefill",
+          "llama_tok_per_sec": 5.198249,
+          "metric": "prefill_P16",
+          "passed": true,
+          "ratio": 2.858066195280833,
+          "tokens": 16
+        },
+        {
+          "fak_tok_per_sec": 27.459750013300813,
+          "kind": "prefill",
+          "llama_tok_per_sec": 14.56946,
+          "metric": "prefill_P64",
+          "passed": true,
+          "ratio": 1.8847472736327093,
+          "tokens": 64
+        },
+        {
+          "fak_tok_per_sec": 31.3399988205877,
+          "kind": "prefill",
+          "llama_tok_per_sec": 9.948934,
+          "metric": "prefill_P256",
+          "passed": true,
+          "ratio": 3.150086111797274,
+          "tokens": 256
+        },
+        {
+          "fak_decode_steps": 4,
+          "fak_tok_per_sec": 1.2366664937394687,
+          "kind": "decode",
+          "llama_n_gen": 1,
+          "llama_tok_per_sec": 0.989596,
+          "metric": "decode",
+          "passed": true,
+          "ratio": 1.2496680400279192
+        }
+      ]
+    },
+    {
+      "failures": [],
+      "fak": {
+        "decode": {
+          "decode_steps": 16,
+          "prompt_tokens": 256,
+          "tok_per_sec": 1.1482907655209915
+        },
+        "engine": "fak-in-kernel Q8_0 (pure-Go, quantized weights+activations, int8\u00d7int8\u2192int32 dot)",
+        "model": "Qwen3.6-27B-Q4_K_M.gguf [gguf-lean]",
+        "path": "fak/experiments/qwen36/native-gguf-q8-hybrid-headscan-p512-1024-dp256-d16-20260619.json",
+        "prefill": {
+          "512": 30.28030788543928,
+          "1024": 29.667817759646507
+        }
+      },
+      "label": "amd-p512-1024",
+      "llama": {
+        "backends": "Vulkan",
+        "build_commit": "9b260fc9e",
+        "build_number": 9673,
+        "decode": {
+          "n_gen": 16,
+          "tok_per_sec": 0.990989
+        },
+        "model_type": "qwen35 27B Q4_K - Medium",
+        "path": "fak/experiments/qwen36/llamacpp-vulkan-qwen36-pp512-1024-tg16-20260619.json",
+        "prefill": {
+          "512": 9.323368,
+          "1024": 9.306442
+        }
+      },
+      "passed": true,
+      "rows": [
+        {
+          "fak_tok_per_sec": 30.28030788543928,
+          "kind": "prefill",
+          "llama_tok_per_sec": 9.323368,
+          "metric": "prefill_P512",
+          "passed": true,
+          "ratio": 3.2477864099582128,
+          "tokens": 512
+        },
+        {
+          "fak_tok_per_sec": 29.667817759646507,
+          "kind": "prefill",
+          "llama_tok_per_sec": 9.306442,
+          "metric": "prefill_P1024",
+          "passed": true,
+          "ratio": 3.187879724565683,
+          "tokens": 1024
+        },
+        {
+          "fak_decode_steps": 16,
+          "fak_tok_per_sec": 1.1482907655209915,
+          "kind": "decode",
+          "llama_n_gen": 16,
+          "llama_tok_per_sec": 0.990989,
+          "metric": "decode",
+          "passed": true,
+          "ratio": 1.1587321004784024
+        }
+      ]
+    }
+  ],
+  "failures": [],
+  "min_ratio": 1.0,
+  "passed": true,
+  "schema": "fak.qwen36-perf-gate.v1"
+}

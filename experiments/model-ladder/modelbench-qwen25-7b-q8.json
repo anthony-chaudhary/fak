@@ -1,0 +1,46 @@
+{
+  "app_version": "0.24.0",
+  "backend": {
+    "registered_backends": [
+      "cpu-ref"
+    ],
+    "selected": "legacy"
+  },
+  "decode": {
+    "prompt_tokens": 16,
+    "decode_steps": 16,
+    "reps": 2,
+    "per_token_median_ms": 115.197572,
+    "tok_per_sec": 8.680738514176323
+  },
+  "engine": "fak-in-kernel Q8_0 (pure-Go, quantized weights+activations, int8×int8→int32 dot)",
+  "go_threads": "GOMAXPROCS=12, matmul workers=12 (FAK_WORKERS to pin)",
+  "lean": true,
+  "load_ms": 23631.158541,
+  "model": "qwen2.5-7b-instruct (qwen2) [lean]",
+  "precision": "Q8_0",
+  "prefill": [
+    {
+      "tokens": 16,
+      "reps": 2,
+      "median_ms": 1039.658333,
+      "tok_per_sec": 15.389671291174079
+    },
+    {
+      "tokens": 64,
+      "reps": 2,
+      "median_ms": 3993.861,
+      "tok_per_sec": 16.024593745250524
+    },
+    {
+      "tokens": 256,
+      "reps": 2,
+      "median_ms": 15886.216375,
+      "tok_per_sec": 16.11459859018822
+    }
+  ],
+  "quant_ms": 0.000125,
+  "quantized_at_load": true,
+  "source": "/Users/USER/.cache/fak-models/qwen2.5-7b-instruct/model.safetensors (quantize-at-load)",
+  "workers": 12
+}

@@ -1,0 +1,245 @@
+{
+  "schema": "fak.api-host-bridge-gate.v1",
+  "generated_at": "2026-06-18T13:12:32.623329Z",
+  "bridge_claim": "A model can stay behind any compatible API host while FAK/DOS owns the tool-call boundary.",
+  "timeout_s": 180,
+  "matrix_schema": "fak.api-host-bridge-matrix.v1",
+  "matrix_summary": {
+    "required_witnesses": 9,
+    "resolved_required_witnesses": 9,
+    "bridge_covered": true,
+    "provider_shapes_covered": [
+      "anthropic",
+      "gemini",
+      "openai-compatible",
+      "xai"
+    ]
+  },
+  "summary": {
+    "required_witnesses": 9,
+    "passed_required_witnesses": 9,
+    "failed_required_witnesses": 0,
+    "executable_bridge_covered": true
+  },
+  "runs": [
+    {
+      "id": "policy_manifest_floor",
+      "claim": "Reviewable manifests narrow risky allowed tools by argument without prompt tax.",
+      "required": true,
+      "command": "go test ./internal/policy ./cmd/fak -run 'Test(ArgRulesAreLoadBearing|LoadedPolicyIsLoadBearing|ApplyRuntimeInstallsIFCManifestPolicy)$'",
+      "cwd": "fak",
+      "argv": [
+        "go",
+        "test",
+        "./internal/policy",
+        "./cmd/fak",
+        "-run",
+        "Test(ArgRulesAreLoadBearing|LoadedPolicyIsLoadBearing|ApplyRuntimeInstallsIFCManifestPolicy)$",
+        "-count=1"
+      ],
+      "started_at": "2026-06-18T13:12:20.381906Z",
+      "status": "passed",
+      "exit_code": 0,
+      "elapsed_ms": 1462,
+      "stdout_tail": "ok  \tgithub.com/anthony-chaudhary/fleet/fak/internal/policy\t0.262s\nok  \tgithub.com/anthony-chaudhary/fleet/fak/cmd/fak\t0.320s\n",
+      "stderr_tail": "",
+      "output_sha256": "bb06fda52a6c44d9f4a1653c5de17a4876845ed83e1489502b0fd07780c327aa"
+    },
+    {
+      "id": "openai_compatible_gateway",
+      "claim": "OpenAI-compatible clients can route through the gateway, receive filtered/repaired tool calls, and have tool-result bytes quarantined before upstream model send.",
+      "required": true,
+      "command": "go test ./internal/gateway -run 'Test(ChatProxyFiltersAndRepairs|ChatProxyOpenAICompatibleToolResultsAreQuarantinedPreSend|HTTPModelsAndHealth)$'",
+      "cwd": "fak",
+      "argv": [
+        "go",
+        "test",
+        "./internal/gateway",
+        "-run",
+        "Test(ChatProxyFiltersAndRepairs|ChatProxyOpenAICompatibleToolResultsAreQuarantinedPreSend|HTTPModelsAndHealth)$",
+        "-count=1"
+      ],
+      "started_at": "2026-06-18T13:12:21.844859Z",
+      "status": "passed",
+      "exit_code": 0,
+      "elapsed_ms": 1294,
+      "stdout_tail": "ok  \tgithub.com/anthony-chaudhary/fleet/fak/internal/gateway\t0.506s\n",
+      "stderr_tail": "",
+      "output_sha256": "c2bd1dffad2f7d3b18275d52262d990de0e68c879fa42c2540bd36ef0d6b2f83"
+    },
+    {
+      "id": "native_provider_adapters",
+      "claim": "Provider-specific transcript adapters preserve pre-send result quarantine for native host shapes.",
+      "required": true,
+      "command": "go test ./internal/agent -run 'Test(PreSendQuarantineRedactsToolResultsAcrossAdapters|ProviderAdaptersMarshalNativeToolShapes|ProviderAdaptersOmitToolChoiceWithoutTools|ProviderAdaptersParseToolCalls|HTTPPlannerUsesProviderAdapterAndPreSendQuarantine)$'",
+      "cwd": "fak",
+      "argv": [
+        "go",
+        "test",
+        "./internal/agent",
+        "-run",
+        "Test(PreSendQuarantineRedactsToolResultsAcrossAdapters|ProviderAdaptersMarshalNativeToolShapes|ProviderAdaptersOmitToolChoiceWithoutTools|ProviderAdaptersParseToolCalls|HTTPPlannerUsesProviderAdapterAndPreSendQuarantine)$",
+        "-count=1"
+      ],
+      "started_at": "2026-06-18T13:12:23.139340Z",
+      "status": "passed",
+      "exit_code": 0,
+      "elapsed_ms": 1343,
+      "stdout_tail": "ok  \tgithub.com/anthony-chaudhary/fleet/fak/internal/agent\t0.585s\n",
+      "stderr_tail": "",
+      "output_sha256": "e5ee961fbfe1db83c76f2e0501c4f77a925bbb58b5b57c18180f49e33711bfe2"
+    },
+    {
+      "id": "provider_proxy_end_to_end",
+      "claim": "An OpenAI-compatible client can call FAK while FAK fronts each covered upstream provider wire and filters proposed tool calls.",
+      "required": true,
+      "command": "go test ./internal/gateway -run 'TestChatProxyProviderAdaptersEndToEnd$'",
+      "cwd": "fak",
+      "argv": [
+        "go",
+        "test",
+        "./internal/gateway",
+        "-run",
+        "TestChatProxyProviderAdaptersEndToEnd$",
+        "-count=1"
+      ],
+      "started_at": "2026-06-18T13:12:24.483302Z",
+      "status": "passed",
+      "exit_code": 0,
+      "elapsed_ms": 1344,
+      "stdout_tail": "ok  \tgithub.com/anthony-chaudhary/fleet/fak/internal/gateway\t0.541s\n",
+      "stderr_tail": "",
+      "output_sha256": "12b8194f8eed58660cde7ff01e5e558e7ac232513f37d655b07cdc813fc254b6"
+    },
+    {
+      "id": "host_agnostic_openai_compatible",
+      "claim": "Arbitrary OpenAI-compatible API hosts can sit behind FAK using compatible aliases, configured base URLs, opaque model ids, optional auth, ignored vendor extension fields, and stream=true client requests synthesized only after adjudication.",
+      "required": true,
+      "command": "go test ./internal/gateway -run 'TestChatProxyOpenAICompatible(AliasIsHostAgnostic|ObjectArgumentsAreHostAgnostic|StreamModeStreamsAdjudicatedCalls)$'",
+      "cwd": "fak",
+      "argv": [
+        "go",
+        "test",
+        "./internal/gateway",
+        "-run",
+        "TestChatProxyOpenAICompatible(AliasIsHostAgnostic|ObjectArgumentsAreHostAgnostic|StreamModeStreamsAdjudicatedCalls)$",
+        "-count=1"
+      ],
+      "started_at": "2026-06-18T13:12:25.828255Z",
+      "status": "passed",
+      "exit_code": 0,
+      "elapsed_ms": 1327,
+      "stdout_tail": "ok  \tgithub.com/anthony-chaudhary/fleet/fak/internal/gateway\t0.567s\n",
+      "stderr_tail": "",
+      "output_sha256": "1aa0d3acfda0b6a4ddfe4b6cfc251b0eb3057ccfaab34e06dadbc4e772312887"
+    },
+    {
+      "id": "openai_compatible_host_profiles",
+      "claim": "OpenAI-compatible host-profile drift is covered across null arguments, legacy function_call, typed content parts, extra fields, omitted tool_choice without advertised tools, rogue tool calls, multichoice responses, and content-only replies.",
+      "required": true,
+      "command": "go test ./internal/gateway -run 'TestChatProxyOpenAICompatibleHostProfileConformance$'",
+      "cwd": "fak",
+      "argv": [
+        "go",
+        "test",
+        "./internal/gateway",
+        "-run",
+        "TestChatProxyOpenAICompatibleHostProfileConformance$",
+        "-count=1"
+      ],
+      "started_at": "2026-06-18T13:12:27.155938Z",
+      "status": "passed",
+      "exit_code": 0,
+      "elapsed_ms": 1304,
+      "stdout_tail": "ok  \tgithub.com/anthony-chaudhary/fleet/fak/internal/gateway\t0.519s\n",
+      "stderr_tail": "",
+      "output_sha256": "c7ed2d34511f84cf7f016ebd3b39cbe29a341ee7d17ba9abd0c857ce730e58aa"
+    },
+    {
+      "id": "direct_http_syscall",
+      "claim": "Any-language clients can bypass provider quirks and call the kernel over native HTTP.",
+      "required": true,
+      "command": "go test ./internal/gateway -run 'Test(HTTPSyscallAllow|HTTPAdjudicateTransformRepairsArgs|HTTPQuarantineSurfaced|HTTPSyscallWitnessFailsClosed)$'",
+      "cwd": "fak",
+      "argv": [
+        "go",
+        "test",
+        "./internal/gateway",
+        "-run",
+        "Test(HTTPSyscallAllow|HTTPAdjudicateTransformRepairsArgs|HTTPQuarantineSurfaced|HTTPSyscallWitnessFailsClosed)$",
+        "-count=1"
+      ],
+      "started_at": "2026-06-18T13:12:28.460649Z",
+      "status": "passed",
+      "exit_code": 0,
+      "elapsed_ms": 1251,
+      "stdout_tail": "ok  \tgithub.com/anthony-chaudhary/fleet/fak/internal/gateway\t0.518s\n",
+      "stderr_tail": "",
+      "output_sha256": "8e17e9cd39679c2c2575c8b54ce9487b5fd61e721cad4880d11dc055d422acf4"
+    },
+    {
+      "id": "direct_mcp_syscall",
+      "claim": "Any-language clients can call the same kernel over MCP stdio or MCP-over-HTTP.",
+      "required": true,
+      "command": "go test ./internal/gateway -run 'Test(MCPStdioRoundtrip|MCPOverHTTP)$'",
+      "cwd": "fak",
+      "argv": [
+        "go",
+        "test",
+        "./internal/gateway",
+        "-run",
+        "Test(MCPStdioRoundtrip|MCPOverHTTP)$",
+        "-count=1"
+      ],
+      "started_at": "2026-06-18T13:12:29.712146Z",
+      "status": "passed",
+      "exit_code": 0,
+      "elapsed_ms": 1348,
+      "stdout_tail": "ok  \tgithub.com/anthony-chaudhary/fleet/fak/internal/gateway\t0.551s\n",
+      "stderr_tail": "",
+      "output_sha256": "f9b2ff49e9cc2a7b6275f4430327b927d14e982c3efae0bc1011aef484de8709"
+    },
+    {
+      "id": "dos_style_turnbench",
+      "claim": "DOS-style proof remains available at the bridge: safety, vDSO path swap, and no fake turn-tax win.",
+      "required": true,
+      "command": "go test ./internal/turnbench -run 'TestRun_(AirlineClassesAreLiveKernelEvents|VDSOAblationIsARealPathSwap|HappyPathSavesNothing)$'",
+      "cwd": "fak",
+      "argv": [
+        "go",
+        "test",
+        "./internal/turnbench",
+        "-run",
+        "TestRun_(AirlineClassesAreLiveKernelEvents|VDSOAblationIsARealPathSwap|HappyPathSavesNothing)$",
+        "-count=1"
+      ],
+      "started_at": "2026-06-18T13:12:31.060865Z",
+      "status": "passed",
+      "exit_code": 0,
+      "elapsed_ms": 1562,
+      "stdout_tail": "ok  \tgithub.com/anthony-chaudhary/fleet/fak/internal/turnbench\t0.629s\n",
+      "stderr_tail": "",
+      "output_sha256": "e9d83999b8816048cb2d1450ba78e67adc8ce8862485cb2c58772faa1939bdef"
+    },
+    {
+      "id": "live_api_host_inventory",
+      "claim": "Committed live artifacts include a Gemini OpenAI-compatible success, local OpenAI-compatible shims, and typed auth/billing blockers.",
+      "required": false,
+      "command": "python tools/api_host_live_inventory.py --out fak/experiments/api-host-bridge/api-host-live-inventory.json --markdown fak/experiments/api-host-bridge/api-host-live-inventory.md",
+      "cwd": "",
+      "argv": [],
+      "status": "skipped",
+      "reason": "supporting witness"
+    },
+    {
+      "id": "current_api_host_readiness",
+      "claim": "Current compatible-host /models probes classify reachable, missing-auth, auth, billing, access-denied, and transport states without running chat completions.",
+      "required": false,
+      "command": "python tools/api_host_readiness_probe.py --out fak/experiments/api-host-bridge/api-host-readiness.json --markdown fak/experiments/api-host-bridge/api-host-readiness.md",
+      "cwd": "",
+      "argv": [],
+      "status": "skipped",
+      "reason": "supporting witness"
+    }
+  ]
+}

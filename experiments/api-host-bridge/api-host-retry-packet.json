@@ -1,0 +1,419 @@
+{
+  "schema": "fak.api-host-retry-packet.v1",
+  "generated_at": "2026-06-18T13:12:34.339100Z",
+  "scope_note": "Operational retry packet for candidate API hosts. It records the exact operator prerequisite and rerun command for typed external blockers; it does not mark billing/auth/access as solved.",
+  "summary": {
+    "targets": 13,
+    "actionable_blockers": 13,
+    "ready_for_live_bridge_run": 0,
+    "live_bridge_confirmed": 0,
+    "unsupported_wire": 0,
+    "invalid_targets": 0,
+    "shape_mismatch": 0,
+    "unclassified": 0,
+    "action_gaps": 0,
+    "artifact_errors": 0,
+    "commands": 37,
+    "retry_packet_gate": true
+  },
+  "actions": [
+    {
+      "target": "gemini_openai_compatible",
+      "provider": "openai-compatible",
+      "contract_class": "openai_compatible_upstream",
+      "base_url": "https://generativelanguage.googleapis.com/v1beta/openai",
+      "model_hint": "gemini-2.5-flash",
+      "status": "NEEDS_AUTH_ENV",
+      "readiness_status": "AUTH_ENV_MISSING",
+      "api_key_env": "GEMINI_API_KEY",
+      "required_env": "GEMINI_API_KEY",
+      "external_state": true,
+      "action_type": "set_auth_env_then_probe_and_smoke",
+      "operator_prerequisite": "Set GEMINI_API_KEY for this host.",
+      "commands": [
+        "python tools/api_host_readiness_probe.py --target 'gemini_openai_compatible|https://generativelanguage.googleapis.com/v1beta/openai|GEMINI_API_KEY|gemini-2.5-flash' --out fak/experiments/api-host-bridge/api-host-readiness.json --markdown fak/experiments/api-host-bridge/api-host-readiness.md",
+        "python tools/api_host_acceptance_probe.py --target 'gemini_openai_compatible|openai-compatible|https://generativelanguage.googleapis.com/v1beta/openai|GEMINI_API_KEY|gemini-2.5-flash' --out fak/experiments/api-host-bridge/api-host-acceptance.json --markdown fak/experiments/api-host-bridge/api-host-acceptance.md",
+        "pwsh tools/run_transcript_adapter_sweep.ps1 -OutDir fak/experiments/agent-live/transcript-adapter-sweep-gemini-openai-compatible-retry -ApiBaseUrl 'https://generativelanguage.googleapis.com/v1beta/openai' -ApiKeyEnv GEMINI_API_KEY -ApiModels 'gemini-2.5-flash' -SkipOffline -SkipLocalShim -SkipMicrobench -MaxTurns 12 -Trials 1"
+      ],
+      "latest_sweep": {},
+      "live_inventory_evidence": {
+        "id": "gemini_openai_compatible_turntax",
+        "status": "LIVE_CONFIRMED",
+        "evidence": {
+          "path": "fak/experiments/agent-live/turntax-injection-live.json",
+          "model": "gemini-2.5-flash",
+          "base_url": "https://generativelanguage.googleapis.com/v1beta/openai",
+          "trials": 3,
+          "transcript_shas": [
+            "fab73aa703b56c5e",
+            "692abbe85b80a20a",
+            "22060be6e80c8eac"
+          ],
+          "conditions": {
+            "status_measured": true,
+            "seam_live_openai_compatible": true,
+            "base_url_openai_compatible": true,
+            "headline_both_completed": true,
+            "headline_retry_supported": true,
+            "all_trials_have_transcript_sha": true,
+            "raw_fak_kept_injection_out": true,
+            "raw_baseline_had_injection": true
+          }
+        }
+      }
+    },
+    {
+      "target": "glama_gateway",
+      "provider": "openai-compatible",
+      "contract_class": "openai_compatible_upstream",
+      "base_url": "https://gateway.glama.ai/v1",
+      "model_hint": "openai/gpt-4.1-nano-2025-04-14",
+      "status": "BILLING_REQUIRED",
+      "readiness_status": "MODELS_CONFIRMED",
+      "api_key_env": "GLAMA_API_KEY",
+      "required_env": "GLAMA_API_KEY",
+      "external_state": true,
+      "action_type": "fix_billing_then_smoke",
+      "operator_prerequisite": "Attach billing/payment method for the account behind GLAMA_API_KEY.",
+      "commands": [
+        "pwsh tools/run_transcript_adapter_sweep.ps1 -OutDir fak/experiments/agent-live/transcript-adapter-sweep-glama-gateway-retry -ApiBaseUrl 'https://gateway.glama.ai/v1' -ApiKeyEnv GLAMA_API_KEY -ApiModels 'openai/gpt-4.1-nano-2025-04-14' -SkipOffline -SkipLocalShim -SkipMicrobench -MaxTurns 12 -Trials 1"
+      ],
+      "latest_sweep": {
+        "summary_path": "fak/experiments/agent-live/transcript-adapter-sweep-glama-live-smoke/sweep-summary.json",
+        "status": "failed",
+        "model": "openai/gpt-4.1-nano-2025-04-14",
+        "error_excerpt": "fak: fak arm turn 1: planner: HTTP 402: {\"error\":{\"code\":\"no_payment_method\",\"message\":\"No payment method\"}}",
+        "transcript_sha": null
+      },
+      "live_inventory_evidence": {
+        "id": "glama_gateway_billing_state",
+        "status": "BILLING_REQUIRED",
+        "evidence": {
+          "base_url": "https://gateway.glama.ai/v1",
+          "rows": [
+            {
+              "summary_path": "fak/experiments/agent-live/transcript-adapter-sweep/sweep-summary.json",
+              "model": "zai/glm-4.7-flash",
+              "status": "failed",
+              "classification": "BILLING_REQUIRED",
+              "error_excerpt": "fak: fak arm turn 1: planner: HTTP 402: {\"error\":{\"code\":\"no_payment_method\",\"message\":\"No payment method\"}}"
+            },
+            {
+              "summary_path": "fak/experiments/agent-live/transcript-adapter-sweep/sweep-summary.json",
+              "model": "openai/gpt-4.1-nano-2025-04-14",
+              "status": "failed",
+              "classification": "BILLING_REQUIRED",
+              "error_excerpt": "fak: fak arm turn 1: planner: HTTP 402: {\"error\":{\"code\":\"no_payment_method\",\"message\":\"No payment method\"}}"
+            },
+            {
+              "summary_path": "fak/experiments/agent-live/transcript-adapter-sweep/sweep-summary.json",
+              "model": "deepseek/deepseek-v4-flash",
+              "status": "failed",
+              "classification": "BILLING_REQUIRED",
+              "error_excerpt": "fak: fak arm turn 1: planner: HTTP 402: {\"error\":{\"code\":\"no_payment_method\",\"message\":\"No payment method\"}}"
+            },
+            {
+              "summary_path": "fak/experiments/agent-live/transcript-adapter-sweep-glama-live-smoke/sweep-summary.json",
+              "model": "openai/gpt-4.1-nano-2025-04-14",
+              "status": "failed",
+              "classification": "BILLING_REQUIRED",
+              "error_excerpt": "fak: fak arm turn 1: planner: HTTP 402: {\"error\":{\"code\":\"no_payment_method\",\"message\":\"No payment method\"}}"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "target": "pollinations_no_key",
+      "provider": "openai-compatible",
+      "contract_class": "openai_compatible_upstream",
+      "base_url": "https://gen.pollinations.ai/v1",
+      "model_hint": "openai-fast",
+      "status": "AUTH_REQUIRED",
+      "readiness_status": "ACCESS_DENIED",
+      "api_key_env": "",
+      "required_env": "POLLINATIONS_API_KEY",
+      "external_state": true,
+      "action_type": "configure_access_then_probe_and_smoke",
+      "operator_prerequisite": "Configure a valid bearer token or access path via POLLINATIONS_API_KEY.",
+      "commands": [
+        "python tools/api_host_readiness_probe.py --target 'pollinations_no_key|https://gen.pollinations.ai/v1|POLLINATIONS_API_KEY|openai-fast' --out fak/experiments/api-host-bridge/api-host-readiness.json --markdown fak/experiments/api-host-bridge/api-host-readiness.md",
+        "python tools/api_host_acceptance_probe.py --target 'pollinations_no_key|openai-compatible|https://gen.pollinations.ai/v1|POLLINATIONS_API_KEY|openai-fast' --out fak/experiments/api-host-bridge/api-host-acceptance.json --markdown fak/experiments/api-host-bridge/api-host-acceptance.md",
+        "pwsh tools/run_transcript_adapter_sweep.ps1 -OutDir fak/experiments/agent-live/transcript-adapter-sweep-pollinations-no-key-retry -ApiBaseUrl 'https://gen.pollinations.ai/v1' -ApiKeyEnv POLLINATIONS_API_KEY -ApiModels 'openai-fast' -SkipOffline -SkipLocalShim -SkipMicrobench -MaxTurns 12 -Trials 1"
+      ],
+      "latest_sweep": {
+        "summary_path": "fak/experiments/agent-live/transcript-adapter-sweep-pollinations/sweep-summary.json",
+        "status": "failed",
+        "model": "openai-fast",
+        "error_excerpt": "fak agent: env NONE_LOCAL is empty \u2014 proceeding with no auth header (fine for a local endpoint)\r\nfak: fak arm turn 1: planner: HTTP 401: {\"success\":false,\"error\":{\"message\":\"Authentication required. Please provide an API key via Authorizati",
+        "transcript_sha": null
+      },
+      "live_inventory_evidence": {
+        "id": "pollinations_tool_call_auth_state",
+        "status": "AUTH_REQUIRED",
+        "evidence": {
+          "base_url": "https://gen.pollinations.ai/v1",
+          "rows": [
+            {
+              "summary_path": "fak/experiments/agent-live/transcript-adapter-sweep-pollinations/sweep-summary.json",
+              "model": "openai-fast",
+              "status": "failed",
+              "classification": "AUTH_REQUIRED",
+              "error_excerpt": "fak agent: env NONE_LOCAL is empty \u2014 proceeding with no auth header (fine for a local endpoint)\r\nfak: fak arm turn 1: planner: HTTP 401: {\"success\":false,\"error\":{\"message\":\"Authentication required. Please provide an API key via Authorizati"
+            },
+            {
+              "summary_path": "fak/experiments/agent-live/transcript-adapter-sweep-pollinations/sweep-summary.json",
+              "model": "qwen-coder",
+              "status": "failed",
+              "classification": "AUTH_REQUIRED",
+              "error_excerpt": "fak agent: env NONE_LOCAL is empty \u2014 proceeding with no auth header (fine for a local endpoint)\r\nfak: fak arm turn 1: planner: HTTP 401: {\"success\":false,\"error\":{\"message\":\"Authentication required. Please provide an API key via Authorizati"
+            },
+            {
+              "summary_path": "fak/experiments/agent-live/transcript-adapter-sweep-pollinations/sweep-summary.json",
+              "model": "gemini-flash-lite-3.1",
+              "status": "failed",
+              "classification": "AUTH_REQUIRED",
+              "error_excerpt": "fak agent: env NONE_LOCAL is empty \u2014 proceeding with no auth header (fine for a local endpoint)\r\nfak: fak arm turn 1: planner: HTTP 401: {\"success\":false,\"error\":{\"message\":\"Authentication required. Please provide an API key via Authorizati"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "target": "openai_api",
+      "provider": "openai-compatible",
+      "contract_class": "openai_compatible_upstream",
+      "base_url": "https://api.openai.com/v1",
+      "model_hint": "gpt-4.1-mini",
+      "status": "NEEDS_AUTH_ENV",
+      "readiness_status": "AUTH_ENV_MISSING",
+      "api_key_env": "OPENAI_API_KEY",
+      "required_env": "OPENAI_API_KEY",
+      "external_state": true,
+      "action_type": "set_auth_env_then_probe_and_smoke",
+      "operator_prerequisite": "Set OPENAI_API_KEY for this host.",
+      "commands": [
+        "python tools/api_host_readiness_probe.py --target 'openai_api|https://api.openai.com/v1|OPENAI_API_KEY|gpt-4.1-mini' --out fak/experiments/api-host-bridge/api-host-readiness.json --markdown fak/experiments/api-host-bridge/api-host-readiness.md",
+        "python tools/api_host_acceptance_probe.py --target 'openai_api|openai-compatible|https://api.openai.com/v1|OPENAI_API_KEY|gpt-4.1-mini' --out fak/experiments/api-host-bridge/api-host-acceptance.json --markdown fak/experiments/api-host-bridge/api-host-acceptance.md",
+        "pwsh tools/run_transcript_adapter_sweep.ps1 -OutDir fak/experiments/agent-live/transcript-adapter-sweep-openai-api-retry -ApiBaseUrl 'https://api.openai.com/v1' -ApiKeyEnv OPENAI_API_KEY -ApiModels 'gpt-4.1-mini' -SkipOffline -SkipLocalShim -SkipMicrobench -MaxTurns 12 -Trials 1"
+      ],
+      "latest_sweep": {},
+      "live_inventory_evidence": {}
+    },
+    {
+      "target": "xai_api",
+      "provider": "xai",
+      "contract_class": "openai_compatible_upstream",
+      "base_url": "https://api.x.ai/v1",
+      "model_hint": "grok-3-mini",
+      "status": "NEEDS_AUTH_ENV",
+      "readiness_status": "AUTH_ENV_MISSING",
+      "api_key_env": "XAI_API_KEY",
+      "required_env": "XAI_API_KEY",
+      "external_state": true,
+      "action_type": "set_auth_env_then_probe_and_smoke",
+      "operator_prerequisite": "Set XAI_API_KEY for this host.",
+      "commands": [
+        "python tools/api_host_readiness_probe.py --target 'xai_api|https://api.x.ai/v1|XAI_API_KEY|grok-3-mini' --out fak/experiments/api-host-bridge/api-host-readiness.json --markdown fak/experiments/api-host-bridge/api-host-readiness.md",
+        "python tools/api_host_acceptance_probe.py --target 'xai_api|xai|https://api.x.ai/v1|XAI_API_KEY|grok-3-mini' --out fak/experiments/api-host-bridge/api-host-acceptance.json --markdown fak/experiments/api-host-bridge/api-host-acceptance.md",
+        "pwsh tools/run_transcript_adapter_sweep.ps1 -OutDir fak/experiments/agent-live/transcript-adapter-sweep-xai-api-retry -ApiBaseUrl 'https://api.x.ai/v1' -ApiKeyEnv XAI_API_KEY -ApiModels 'grok-3-mini' -SkipOffline -SkipLocalShim -SkipMicrobench -MaxTurns 12 -Trials 1"
+      ],
+      "latest_sweep": {},
+      "live_inventory_evidence": {}
+    },
+    {
+      "target": "openrouter_gateway",
+      "provider": "openai-compatible",
+      "contract_class": "openai_compatible_upstream",
+      "base_url": "https://openrouter.ai/api/v1",
+      "model_hint": "openai/gpt-4.1-mini",
+      "status": "NEEDS_AUTH_ENV",
+      "readiness_status": "AUTH_ENV_MISSING",
+      "api_key_env": "OPENROUTER_API_KEY",
+      "required_env": "OPENROUTER_API_KEY",
+      "external_state": true,
+      "action_type": "set_auth_env_then_probe_and_smoke",
+      "operator_prerequisite": "Set OPENROUTER_API_KEY for this host.",
+      "commands": [
+        "python tools/api_host_readiness_probe.py --target 'openrouter_gateway|https://openrouter.ai/api/v1|OPENROUTER_API_KEY|openai/gpt-4.1-mini' --out fak/experiments/api-host-bridge/api-host-readiness.json --markdown fak/experiments/api-host-bridge/api-host-readiness.md",
+        "python tools/api_host_acceptance_probe.py --target 'openrouter_gateway|openai-compatible|https://openrouter.ai/api/v1|OPENROUTER_API_KEY|openai/gpt-4.1-mini' --out fak/experiments/api-host-bridge/api-host-acceptance.json --markdown fak/experiments/api-host-bridge/api-host-acceptance.md",
+        "pwsh tools/run_transcript_adapter_sweep.ps1 -OutDir fak/experiments/agent-live/transcript-adapter-sweep-openrouter-gateway-retry -ApiBaseUrl 'https://openrouter.ai/api/v1' -ApiKeyEnv OPENROUTER_API_KEY -ApiModels 'openai/gpt-4.1-mini' -SkipOffline -SkipLocalShim -SkipMicrobench -MaxTurns 12 -Trials 1"
+      ],
+      "latest_sweep": {},
+      "live_inventory_evidence": {}
+    },
+    {
+      "target": "groq_openai",
+      "provider": "openai-compatible",
+      "contract_class": "openai_compatible_upstream",
+      "base_url": "https://api.groq.com/openai/v1",
+      "model_hint": "llama-3.3-70b-versatile",
+      "status": "NEEDS_AUTH_ENV",
+      "readiness_status": "AUTH_ENV_MISSING",
+      "api_key_env": "GROQ_API_KEY",
+      "required_env": "GROQ_API_KEY",
+      "external_state": true,
+      "action_type": "set_auth_env_then_probe_and_smoke",
+      "operator_prerequisite": "Set GROQ_API_KEY for this host.",
+      "commands": [
+        "python tools/api_host_readiness_probe.py --target 'groq_openai|https://api.groq.com/openai/v1|GROQ_API_KEY|llama-3.3-70b-versatile' --out fak/experiments/api-host-bridge/api-host-readiness.json --markdown fak/experiments/api-host-bridge/api-host-readiness.md",
+        "python tools/api_host_acceptance_probe.py --target 'groq_openai|openai-compatible|https://api.groq.com/openai/v1|GROQ_API_KEY|llama-3.3-70b-versatile' --out fak/experiments/api-host-bridge/api-host-acceptance.json --markdown fak/experiments/api-host-bridge/api-host-acceptance.md",
+        "pwsh tools/run_transcript_adapter_sweep.ps1 -OutDir fak/experiments/agent-live/transcript-adapter-sweep-groq-openai-retry -ApiBaseUrl 'https://api.groq.com/openai/v1' -ApiKeyEnv GROQ_API_KEY -ApiModels 'llama-3.3-70b-versatile' -SkipOffline -SkipLocalShim -SkipMicrobench -MaxTurns 12 -Trials 1"
+      ],
+      "latest_sweep": {},
+      "live_inventory_evidence": {}
+    },
+    {
+      "target": "together_openai",
+      "provider": "openai-compatible",
+      "contract_class": "openai_compatible_upstream",
+      "base_url": "https://api.together.xyz/v1",
+      "model_hint": "meta-llama/Llama-3.3-70B-Instruct-Turbo",
+      "status": "NEEDS_AUTH_ENV",
+      "readiness_status": "AUTH_ENV_MISSING",
+      "api_key_env": "TOGETHER_API_KEY",
+      "required_env": "TOGETHER_API_KEY",
+      "external_state": true,
+      "action_type": "set_auth_env_then_probe_and_smoke",
+      "operator_prerequisite": "Set TOGETHER_API_KEY for this host.",
+      "commands": [
+        "python tools/api_host_readiness_probe.py --target 'together_openai|https://api.together.xyz/v1|TOGETHER_API_KEY|meta-llama/Llama-3.3-70B-Instruct-Turbo' --out fak/experiments/api-host-bridge/api-host-readiness.json --markdown fak/experiments/api-host-bridge/api-host-readiness.md",
+        "python tools/api_host_acceptance_probe.py --target 'together_openai|openai-compatible|https://api.together.xyz/v1|TOGETHER_API_KEY|meta-llama/Llama-3.3-70B-Instruct-Turbo' --out fak/experiments/api-host-bridge/api-host-acceptance.json --markdown fak/experiments/api-host-bridge/api-host-acceptance.md",
+        "pwsh tools/run_transcript_adapter_sweep.ps1 -OutDir fak/experiments/agent-live/transcript-adapter-sweep-together-openai-retry -ApiBaseUrl 'https://api.together.xyz/v1' -ApiKeyEnv TOGETHER_API_KEY -ApiModels 'meta-llama/Llama-3.3-70B-Instruct-Turbo' -SkipOffline -SkipLocalShim -SkipMicrobench -MaxTurns 12 -Trials 1"
+      ],
+      "latest_sweep": {},
+      "live_inventory_evidence": {}
+    },
+    {
+      "target": "mistral_openai",
+      "provider": "openai-compatible",
+      "contract_class": "openai_compatible_upstream",
+      "base_url": "https://api.mistral.ai/v1",
+      "model_hint": "mistral-small-latest",
+      "status": "NEEDS_AUTH_ENV",
+      "readiness_status": "AUTH_ENV_MISSING",
+      "api_key_env": "MISTRAL_API_KEY",
+      "required_env": "MISTRAL_API_KEY",
+      "external_state": true,
+      "action_type": "set_auth_env_then_probe_and_smoke",
+      "operator_prerequisite": "Set MISTRAL_API_KEY for this host.",
+      "commands": [
+        "python tools/api_host_readiness_probe.py --target 'mistral_openai|https://api.mistral.ai/v1|MISTRAL_API_KEY|mistral-small-latest' --out fak/experiments/api-host-bridge/api-host-readiness.json --markdown fak/experiments/api-host-bridge/api-host-readiness.md",
+        "python tools/api_host_acceptance_probe.py --target 'mistral_openai|openai-compatible|https://api.mistral.ai/v1|MISTRAL_API_KEY|mistral-small-latest' --out fak/experiments/api-host-bridge/api-host-acceptance.json --markdown fak/experiments/api-host-bridge/api-host-acceptance.md",
+        "pwsh tools/run_transcript_adapter_sweep.ps1 -OutDir fak/experiments/agent-live/transcript-adapter-sweep-mistral-openai-retry -ApiBaseUrl 'https://api.mistral.ai/v1' -ApiKeyEnv MISTRAL_API_KEY -ApiModels 'mistral-small-latest' -SkipOffline -SkipLocalShim -SkipMicrobench -MaxTurns 12 -Trials 1"
+      ],
+      "latest_sweep": {},
+      "live_inventory_evidence": {}
+    },
+    {
+      "target": "deepseek_openai",
+      "provider": "openai-compatible",
+      "contract_class": "openai_compatible_upstream",
+      "base_url": "https://api.deepseek.com",
+      "model_hint": "deepseek-chat",
+      "status": "NEEDS_AUTH_ENV",
+      "readiness_status": "AUTH_ENV_MISSING",
+      "api_key_env": "DEEPSEEK_API_KEY",
+      "required_env": "DEEPSEEK_API_KEY",
+      "external_state": true,
+      "action_type": "set_auth_env_then_probe_and_smoke",
+      "operator_prerequisite": "Set DEEPSEEK_API_KEY for this host.",
+      "commands": [
+        "python tools/api_host_readiness_probe.py --target 'deepseek_openai|https://api.deepseek.com|DEEPSEEK_API_KEY|deepseek-chat' --out fak/experiments/api-host-bridge/api-host-readiness.json --markdown fak/experiments/api-host-bridge/api-host-readiness.md",
+        "python tools/api_host_acceptance_probe.py --target 'deepseek_openai|openai-compatible|https://api.deepseek.com|DEEPSEEK_API_KEY|deepseek-chat' --out fak/experiments/api-host-bridge/api-host-acceptance.json --markdown fak/experiments/api-host-bridge/api-host-acceptance.md",
+        "pwsh tools/run_transcript_adapter_sweep.ps1 -OutDir fak/experiments/agent-live/transcript-adapter-sweep-deepseek-openai-retry -ApiBaseUrl 'https://api.deepseek.com' -ApiKeyEnv DEEPSEEK_API_KEY -ApiModels 'deepseek-chat' -SkipOffline -SkipLocalShim -SkipMicrobench -MaxTurns 12 -Trials 1"
+      ],
+      "latest_sweep": {},
+      "live_inventory_evidence": {}
+    },
+    {
+      "target": "fireworks_openai",
+      "provider": "openai-compatible",
+      "contract_class": "openai_compatible_upstream",
+      "base_url": "https://api.fireworks.ai/inference/v1",
+      "model_hint": "accounts/fireworks/models/llama-v3p1-8b-instruct",
+      "status": "NEEDS_AUTH_ENV",
+      "readiness_status": "AUTH_ENV_MISSING",
+      "api_key_env": "FIREWORKS_API_KEY",
+      "required_env": "FIREWORKS_API_KEY",
+      "external_state": true,
+      "action_type": "set_auth_env_then_probe_and_smoke",
+      "operator_prerequisite": "Set FIREWORKS_API_KEY for this host.",
+      "commands": [
+        "python tools/api_host_readiness_probe.py --target 'fireworks_openai|https://api.fireworks.ai/inference/v1|FIREWORKS_API_KEY|accounts/fireworks/models/llama-v3p1-8b-instruct' --out fak/experiments/api-host-bridge/api-host-readiness.json --markdown fak/experiments/api-host-bridge/api-host-readiness.md",
+        "python tools/api_host_acceptance_probe.py --target 'fireworks_openai|openai-compatible|https://api.fireworks.ai/inference/v1|FIREWORKS_API_KEY|accounts/fireworks/models/llama-v3p1-8b-instruct' --out fak/experiments/api-host-bridge/api-host-acceptance.json --markdown fak/experiments/api-host-bridge/api-host-acceptance.md",
+        "pwsh tools/run_transcript_adapter_sweep.ps1 -OutDir fak/experiments/agent-live/transcript-adapter-sweep-fireworks-openai-retry -ApiBaseUrl 'https://api.fireworks.ai/inference/v1' -ApiKeyEnv FIREWORKS_API_KEY -ApiModels 'accounts/fireworks/models/llama-v3p1-8b-instruct' -SkipOffline -SkipLocalShim -SkipMicrobench -MaxTurns 12 -Trials 1"
+      ],
+      "latest_sweep": {},
+      "live_inventory_evidence": {}
+    },
+    {
+      "target": "perplexity_openai",
+      "provider": "openai-compatible",
+      "contract_class": "openai_compatible_upstream",
+      "base_url": "https://api.perplexity.ai",
+      "model_hint": "sonar",
+      "status": "NEEDS_AUTH_ENV",
+      "readiness_status": "AUTH_ENV_MISSING",
+      "api_key_env": "PERPLEXITY_API_KEY",
+      "required_env": "PERPLEXITY_API_KEY",
+      "external_state": true,
+      "action_type": "set_auth_env_then_probe_and_smoke",
+      "operator_prerequisite": "Set PERPLEXITY_API_KEY for this host.",
+      "commands": [
+        "python tools/api_host_readiness_probe.py --target 'perplexity_openai|https://api.perplexity.ai|PERPLEXITY_API_KEY|sonar' --out fak/experiments/api-host-bridge/api-host-readiness.json --markdown fak/experiments/api-host-bridge/api-host-readiness.md",
+        "python tools/api_host_acceptance_probe.py --target 'perplexity_openai|openai-compatible|https://api.perplexity.ai|PERPLEXITY_API_KEY|sonar' --out fak/experiments/api-host-bridge/api-host-acceptance.json --markdown fak/experiments/api-host-bridge/api-host-acceptance.md",
+        "pwsh tools/run_transcript_adapter_sweep.ps1 -OutDir fak/experiments/agent-live/transcript-adapter-sweep-perplexity-openai-retry -ApiBaseUrl 'https://api.perplexity.ai' -ApiKeyEnv PERPLEXITY_API_KEY -ApiModels 'sonar' -SkipOffline -SkipLocalShim -SkipMicrobench -MaxTurns 12 -Trials 1"
+      ],
+      "latest_sweep": {},
+      "live_inventory_evidence": {}
+    },
+    {
+      "target": "cerebras_openai",
+      "provider": "openai-compatible",
+      "contract_class": "openai_compatible_upstream",
+      "base_url": "https://api.cerebras.ai/v1",
+      "model_hint": "llama3.1-8b",
+      "status": "NEEDS_AUTH_ENV",
+      "readiness_status": "AUTH_ENV_MISSING",
+      "api_key_env": "CEREBRAS_API_KEY",
+      "required_env": "CEREBRAS_API_KEY",
+      "external_state": true,
+      "action_type": "set_auth_env_then_probe_and_smoke",
+      "operator_prerequisite": "Set CEREBRAS_API_KEY for this host.",
+      "commands": [
+        "python tools/api_host_readiness_probe.py --target 'cerebras_openai|https://api.cerebras.ai/v1|CEREBRAS_API_KEY|llama3.1-8b' --out fak/experiments/api-host-bridge/api-host-readiness.json --markdown fak/experiments/api-host-bridge/api-host-readiness.md",
+        "python tools/api_host_acceptance_probe.py --target 'cerebras_openai|openai-compatible|https://api.cerebras.ai/v1|CEREBRAS_API_KEY|llama3.1-8b' --out fak/experiments/api-host-bridge/api-host-acceptance.json --markdown fak/experiments/api-host-bridge/api-host-acceptance.md",
+        "pwsh tools/run_transcript_adapter_sweep.ps1 -OutDir fak/experiments/agent-live/transcript-adapter-sweep-cerebras-openai-retry -ApiBaseUrl 'https://api.cerebras.ai/v1' -ApiKeyEnv CEREBRAS_API_KEY -ApiModels 'llama3.1-8b' -SkipOffline -SkipLocalShim -SkipMicrobench -MaxTurns 12 -Trials 1"
+      ],
+      "latest_sweep": {},
+      "live_inventory_evidence": {}
+    }
+  ],
+  "artifact_errors": {},
+  "artifacts": {
+    "acceptance": "fak/experiments/api-host-bridge/api-host-acceptance.json",
+    "live": "fak/experiments/api-host-bridge/api-host-live-inventory.json"
+  },
+  "acceptance_summary": {
+    "targets": 13,
+    "known_statuses": 13,
+    "ready_for_live_bridge_run": 0,
+    "live_bridge_confirmed": 0,
+    "wire_supported_unprobed": 0,
+    "typed_external_blockers": 13,
+    "unsupported_wire": 0,
+    "invalid_targets": 0,
+    "unclassified": 0,
+    "sweep_artifact_errors": 0,
+    "acceptance_gate": true
+  },
+  "live_summary": {
+    "live_frontier_successes": 2,
+    "local_openai_compatible_successes": 1,
+    "billing_required_hosts": 1,
+    "auth_required_hosts": 1,
+    "incomplete_or_unclassified": 0,
+    "live_inventory_gate": true
+  }
+}

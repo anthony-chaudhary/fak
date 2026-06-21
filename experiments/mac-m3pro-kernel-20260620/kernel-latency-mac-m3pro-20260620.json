@@ -1,0 +1,62 @@
+{
+  "_doc": "Pure-kernel latency witness for fak on Apple M3 Pro. Generated 2026-06-20 by the `go test -bench` and `fak bench` harnesses. This is the committed artifact behind the BENCHMARK-AUTHORITY.md pure-kernel rows and MAC-M3PRO-KERNEL-BENCH-2026-06-20.md. Every ns/op below is the median of count=8 trials with the per-trial min/max shown.",
+  "provenance": {
+    "date": "2026-06-20",
+    "machine": "Mac15,7 (Apple M3 Pro, 12 core, arm64)",
+    "os": "darwin",
+    "go_version": "go1.26.0",
+    "fak_version": "0.25.0",
+    "generated_by": "go test -run=^$ -bench=. -benchmem -count=8 (adjudicator, ctxmmu); fak bench --baseline-n 100 (syscall A/B)",
+    "repro": {
+      "decide_path": "go test -run=^$ -bench=. -benchmem -count=8 ./internal/adjudicator/",
+      "context_admission": "go test -run=^$ -bench=. -benchmem -count=8 ./internal/ctxmmu/",
+      "syscall_ab": "go build -o fak ./cmd/fak && ./fak bench --suite tau2-smoke --baseline-n 100 --out report.json"
+    }
+  },
+  "decide_path": {
+    "_doc": "The per-tool-call adjudication decision (syscall path), before dispatch. BenchmarkDecide is the canonical allow-path decide; BenchmarkAdjudicateArgScaling adds an ArgPredicate ladder (unrelated-arg count swept 0..2000).",
+    "BenchmarkDecide":                 { "ns_p50": 361.9, "ns_range": [359, 376],   "bytes_per_op": 256, "allocs_per_op": 5,  "trials": 8, "verdict": "ALLOW" },
+    "BenchmarkAdjudicateArgScaling/unrelated=0":    { "ns_p50": 559.5, "ns_range": [555, 570], "bytes_per_op": 600, "allocs_per_op": 14, "trials": 8 },
+    "BenchmarkAdjudicateArgScaling/unrelated=100":  { "ns_p50": 564.2, "ns_range": [560, 595], "bytes_per_op": 600, "allocs_per_op": 14, "trials": 8 },
+    "BenchmarkAdjudicateArgScaling/unrelated=2000": { "ns_p50": 605.0, "ns_range": [592, 626], "bytes_per_op": 600, "allocs_per_op": 14, "trials": 8 }
+  },
+  "context_admission_scan": {
+    "_doc": "ctxmmu.ScreenBytes: the pure in-memory detection scan (no page-out side-effect, no allocation on the secret path). The explainers' cited '~1,300 ns' is the narrow reading of this layer; it reproduces only for the cheapest (secret-regex) path. The injection scan is ~8x slower because it runs the nested repeats()/injection-marker analysis.",
+    "BenchmarkScreenBytesBenign":     { "ns_p50": 4481.5, "ns_range": [4454, 4513], "bytes_per_op": 128, "allocs_per_op": 2, "trials": 8, "caught": false },
+    "BenchmarkScreenBytesSecret":     { "ns_p50": 1811.5, "ns_range": [1803, 1835], "bytes_per_op": 0,   "allocs_per_op": 0, "trials": 8, "caught": true, "_note": "closest to the cited ~1,300 ns figure" },
+    "BenchmarkScreenBytesInjection":  { "ns_p50": 14061.5,"ns_range": [14012, 14353],"bytes_per_op": 417,"allocs_per_op": 2, "trials": 8, "caught": true }
+  },
+  "context_admission_full_gate": {
+    "_doc": "ctxmmu.Admit: the full write-time gate including the page-out side-effect a QUARANTINE verdict performs (blob-store write + in-place stub rewrite) and oversize Transform on the benign path. End-to-end per-result admission cost over the testdata/poison.json payloads.",
+    "BenchmarkAdmitBenign":  { "ns_p50": 4520.0,  "ns_range": [4484, 4546],   "bytes_per_op": 305,  "allocs_per_op": 4,  "trials": 8, "verdict": "ALLOW" },
+    "BenchmarkAdmitSecret":  { "ns_p50": 3336.5,  "ns_range": [3315, 3370],   "bytes_per_op": 2022, "allocs_per_op": 26, "trials": 8, "verdict": "QUARANTINE" },
+    "BenchmarkAdmitPoison":  { "ns_p50": 15798.5, "ns_range": [15649, 16224], "bytes_per_op": 2662, "allocs_per_op": 28, "trials": 8, "verdict": "QUARANTINE" }
+  },
+  "context_admission_chain": {
+    "_doc": "The full registered ResultAdmitter chain (normgate rank-5 + ctxmmu), the fold cmd/ctxbench -chain and the kernel Reap exercise. normgate canonicalization (base64/hex decode, unicode/homoglyph fold, letter-run de-separation, broadened secret vocab) dominates the bare-gate cost ~6x on the benign/allow path.",
+    "BenchmarkAdmitChainBenign": { "ns_p50": 29170.5, "ns_range": [29014, 29329], "bytes_per_op": 1662, "allocs_per_op": 25, "trials": 8, "verdict": "ALLOW" },
+    "BenchmarkAdmitChainPoison": { "ns_p50": 87056.0, "ns_range": [86608, 87363], "bytes_per_op": 4854, "allocs_per_op": 38, "trials": 8, "verdict": "QUARANTINE" }
+  },
+  "syscall_subsystem_ab": {
+    "_doc": "fak bench (tau2-airline-smoke, mock-offline engine): the in-process adjudication boundary vs a process-per-decide spawned `fak hook` baseline. This is the regression sentinel that proves the decide path is resident (no per-call process boundary), NOT a production-throughput headline. n=100 spawned samples.",
+    "slice_id": "tau2-airline-smoke",
+    "in_process_p50_ns": 2427,
+    "spawned_hook_p50_ns": 6913458,
+    "boundary_tax_p50_x": 2849,
+    "spawned_samples": 100,
+    "gate_primary": "pass",
+    "vdso_hit_rate": 0.500,
+    "token_delta_pct": 47.17,
+    "_artifact": "report.json (canonical) + experiments/mac-m3pro-kernel-20260620/report.json (dated)"
+  },
+  "related_kernel_driven_reproductions": {
+    "_doc": "Fresh Mac reproductions of the committed kernel-driven benches (CPU-only; no GPU). These reproduce the published Mac evidence bit-for-bit and are re-witnessed here, not new claims.",
+    "fanbench_N1024": { "cross_agent_saves": 1005, "tax_clawed_back_pct": 61.7, "_reproduces": "FANOUT-BENCH-RESULTS.md", "artifact": "fanout-mac-m3pro-20260620.json" },
+    "fleetbench_T50_A50": { "shared_calls": 2344, "of_total": 2500, "cross_agent_turns": 370, "_reproduces": "FLEET-SWEEP-RESULTS.md / VISUALS-benchmarking-status", "artifact": "fleet-mac-m3pro-20260620.json" }
+  },
+  "honest_read": {
+    "decide_path": "The syscall decision is sub-microsecond on this machine: 362 ns allow, 560-605 ns with an ArgPredicate ladder. The fak-bench in-process p50 (2,427 ns) is the broader Submit+Reap loop, not just Decide, so the two are consistent.",
+    "cited_1300ns": "The '~1,300 ns' admission figure cited in DISAGGREGATED-AGENT-MEMORY.md and MEMORY-LAYERS-EXPLAINER.md is the narrow reading (the secret-regex ScreenBytes scan measures ~1.8 us here). The general ScreenBytes scan is 4.5-14 us, the full Admit (with page-out) is 3.3-15.8 us, and the full normgate+ctxmmu chain is 29-87 us. The cited figure undersells the composed path but is not fabricated; it names the cheapest layer.",
+    "what_this_does_not_prove": "These are microbenchmark latencies on an idle M3 Pro, not production throughput under load, not model quality, and not a serving-rail number. The page-out side-effect cost reflects the in-process blob backend; an external KV backend would shift it."
+  }
+}

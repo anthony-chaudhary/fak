@@ -1,0 +1,29 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="850" height="360" viewBox="0 0 850 360" font-family="-apple-system,Segoe UI,Helvetica,Arial,sans-serif">
+<rect width="850" height="360" fill="white"/>
+<text x="28" y="34" font-size="19" font-weight="700" fill="#1f2933">50-turn x 5-agent session — wall-clock per arm (log scale)</text>
+<text x="28" y="55" font-size="12.5" fill="#6b7280">Qwen2.5-1.5B-Instruct · P=2048 prefix, D=32, R=64 · same bit-identical kernel in all three arms</text>
+<line x1="250.0" y1="78" x2="250.0" y2="300" stroke="#e5e7eb"/>
+<text x="250.0" y="318" font-size="10.5" fill="#6b7280" text-anchor="middle">1 min</text>
+<line x1="386.3" y1="78" x2="386.3" y2="300" stroke="#e5e7eb"/>
+<text x="386.3" y="318" font-size="10.5" fill="#6b7280" text-anchor="middle">10 min</text>
+<line x1="492.4" y1="78" x2="492.4" y2="300" stroke="#e5e7eb"/>
+<text x="492.4" y="318" font-size="10.5" fill="#6b7280" text-anchor="middle">1 h</text>
+<line x1="628.7" y1="78" x2="628.7" y2="300" stroke="#e5e7eb"/>
+<text x="628.7" y="318" font-size="10.5" fill="#6b7280" text-anchor="middle">10 h</text>
+<text x="238" y="118" font-size="13" font-weight="600" fill="#1f2933" text-anchor="end">A — naive-stateless</text>
+<text x="238" y="134" font-size="10.5" fill="#6b7280" text-anchor="end">re-prefill whole context every turn</text>
+<rect x="250" y="104" width="417.0" height="30" rx="3" fill="#d64545"/>
+<text x="675.0" y="124" font-size="14" font-weight="700" fill="#d64545">19.1 h</text>
+<text x="238" y="176" font-size="13" font-weight="600" fill="#1f2933" text-anchor="end">B — per-agent KV</text>
+<text x="238" y="192" font-size="10.5" fill="#6b7280" text-anchor="end">warm KV per agent, serial decode</text>
+<rect x="250" y="162" width="258.2" height="30" rx="3" fill="#e0a82e"/>
+<text x="516.2" y="182" font-size="14" font-weight="700" fill="#e0a82e">1.3 h</text>
+<text x="238" y="234" font-size="13" font-weight="600" fill="#1f2933" text-anchor="end">C — fak fused</text>
+<text x="238" y="250" font-size="10.5" fill="#6b7280" text-anchor="end">prefix x1 + clone + batched decode</text>
+<rect x="250" y="220" width="174.3" height="30" rx="3" fill="#2f9e6f"/>
+<text x="432.3" y="240" font-size="14" font-weight="700" fill="#2f9e6f">19 min</text>
+<line x1="715" y1="119" x2="715" y2="235" stroke="#1f2933" stroke-width="1.5"/>
+<text x="724" y="173" font-size="20" font-weight="800" fill="#1f2933">60.3x</text>
+<text x="724" y="190" font-size="10.5" fill="#6b7280">net A/C</text>
+<text x="28" y="346" font-size="11" fill="#6b7280">Apple M3 Pro (6P+6E, 36 GB unified, ~150 GB/s) · pure-Go forward · Q8_0   ·   arms B,C run live end-to-end; arm A computed from the measured curve + anchored to live</text>
+</svg>

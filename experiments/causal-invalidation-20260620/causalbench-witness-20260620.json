@@ -1,0 +1,16 @@
+{
+  "version": "fak-causalbench-v1",
+  "demo": "cmd/causalbench -selfcheck",
+  "w1_hit_before_write": true,
+  "w2_hit_before_write": true,
+  "w1_served_byte_exact": true,
+  "w1_evicted_by_write": 1,
+  "w2_warm_after_write": true,
+  "w2_byte_identical_across": true,
+  "w1_miss_after_write": true,
+  "w1_readmission_refused": true,
+  "unrelated_witness_evicts": 0,
+  "coherence_broadcast_fired": true,
+  "trust_epoch_advanced": true,
+  "max_abs_delta": 0
+}

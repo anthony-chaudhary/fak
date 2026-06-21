@@ -1,0 +1,138 @@
+{
+  "provenance": {
+    "app_version": "0.25.0",
+    "command": "fak bench --suite tau2-airline-smoke",
+    "engine_model": "mock-offline",
+    "slice_id": "tau2-airline-smoke",
+    "workload_hash": "9f1701415fb4a360",
+    "go_version": "go1.26.0",
+    "os": "darwin",
+    "generated_by": "fak/internal/bench"
+  },
+  "vdso_on": {
+    "label": "vdso_on",
+    "calls": 12,
+    "p50_ns": 2427,
+    "p99_ns": 3468,
+    "mean_ns": 2370,
+    "engine_calls": 6,
+    "vdso_hits": 6,
+    "denies": 0,
+    "quarantines": 0,
+    "input_tokens": 355,
+    "output_tokens": 140,
+    "buckets": [
+      {
+        "label": "\u003c100ns",
+        "count": 0
+      },
+      {
+        "label": "\u003c1µs",
+        "count": 2
+      },
+      {
+        "label": "\u003c10µs",
+        "count": 10
+      },
+      {
+        "label": "\u003c100µs",
+        "count": 0
+      },
+      {
+        "label": "\u003c1ms",
+        "count": 0
+      },
+      {
+        "label": "\u003c10ms",
+        "count": 0
+      },
+      {
+        "label": "\u003c100ms",
+        "count": 0
+      },
+      {
+        "label": "\u003c1s",
+        "count": 0
+      },
+      {
+        "label": "\u003e=1s",
+        "count": 0
+      }
+    ],
+    "provider_cache_hits": 0,
+    "provider_cache_read_tokens": 0
+  },
+  "vdso_off": {
+    "label": "vdso_off",
+    "calls": 12,
+    "p50_ns": 2429,
+    "p99_ns": 3621,
+    "mean_ns": 2429,
+    "engine_calls": 12,
+    "vdso_hits": 0,
+    "denies": 0,
+    "quarantines": 0,
+    "input_tokens": 687,
+    "output_tokens": 250,
+    "buckets": [
+      {
+        "label": "\u003c100ns",
+        "count": 0
+      },
+      {
+        "label": "\u003c1µs",
+        "count": 1
+      },
+      {
+        "label": "\u003c10µs",
+        "count": 11
+      },
+      {
+        "label": "\u003c100µs",
+        "count": 0
+      },
+      {
+        "label": "\u003c1ms",
+        "count": 0
+      },
+      {
+        "label": "\u003c10ms",
+        "count": 0
+      },
+      {
+        "label": "\u003c100ms",
+        "count": 0
+      },
+      {
+        "label": "\u003c1s",
+        "count": 0
+      },
+      {
+        "label": "\u003e=1s",
+        "count": 0
+      }
+    ],
+    "provider_cache_hits": 0,
+    "provider_cache_read_tokens": 0
+  },
+  "spawned_hook_baseline": {
+    "source": "spawned `fak hook` per decide, this machine",
+    "p50_ns": 6913458,
+    "p99_ns": 7941791,
+    "calls": 100,
+    "spawn_model": "process-per-decide (darwin)"
+  },
+  "kpis": {
+    "tool_call_p50_ns": 2427,
+    "tool_call_p99_ns": 3468,
+    "vdso_hit_rate": 0.5,
+    "preflight_catch_rate": 0,
+    "context_pollution_rate": 0,
+    "tokens_per_task": 41.25
+  },
+  "gate_primary": "pass",
+  "primary_detail": "in-process adjudication p50 (2427ns) vs spawned-hook p50 (6913458ns)",
+  "token_delta_pct": 47.171824973319104,
+  "dollar_per_task": 0.001485,
+  "live_seam": "live_seam_unverified"
+}

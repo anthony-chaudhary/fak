@@ -1,0 +1,90 @@
+{
+  "experiment": "turn-tax error-injection composition harness (LIVE)",
+  "purpose": "MEASURE whether a real model fires the '+1 retry turn per recoverable tool error' that the turn-tax benchmark only MODELS. An InjectingPlanner decorator (internal/agent/inject.go) corrupts a canonical convert_currency arg to a known grammar alias (from_currency->from) ONCE per arm; the SAME corruption hits both arms, so the only difference is the kernel: the fak arm repairs the alias in-syscall (no retry), the baseline tool rejects it (a real model must spend +1 turn to recover).",
+  "status": "measured",
+  "seam": "LIVE (real model over OpenAI-compatible endpoint; each trial carries a distinct transcript_sha)",
+  "model": "gemini-2.5-flash",
+  "base_url": "https://generativelanguage.googleapis.com/v1beta/openai",
+  "injection": {
+    "kind": "alias",
+    "target": "convert_currency",
+    "mode": "once-per-arm",
+    "prob": 1.0,
+    "note": "one corruption per arm so the model's retry is left CLEAN and recovers — isolates a single, measurable retry turn instead of spinning the baseline to the turn cap"
+  },
+  "headline": {
+    "trials": 3,
+    "all_trials_identical": true,
+    "both_completed": true,
+    "baseline_tool_errors_per_run": 1,
+    "fak_repairs_per_run": 1,
+    "baseline_turns": 7,
+    "fak_turns": 6,
+    "turns_saved_by_fak": 1,
+    "measured_retry_turns_per_error": 1.0,
+    "retry_supported": true,
+    "verdict": "The turn-tax benchmark's '+1 turn per recoverable error' baseline is SUPPORTED by this live measurement: gemini-2.5-flash spent exactly one extra turn (7 vs 6) recovering from the single injected tool error the baseline could not repair, while the fak arm absorbed the same corruption with one in-syscall grammar repair and zero retry turns. Both arms still completed the booking, so the turn delta is comparable."
+  },
+  "honest_caveats": [
+    "n=3 on ONE strong model and ONE alias-corruption shape; the measured ratio is 1.00 exactly because gemini-2.5-flash recovers cleanly in a single retry. A weaker model could need >1 retry or derail (then both_completed=false and the ratio is correctly flagged NOT comparable, as the aggressive-injection pre-run showed).",
+    "The retry is REAL re-planning by the live model (distinct transcript_sha per trial; trial 3 even appended the refund policy verbatim) — not the scripted offline mock, which is plumbing-only.",
+    "An EARLIER run with prob=1.0 re-corrupting EVERY retry (no once-latch) drove the baseline to 9 tool errors over the 12-turn cap and FAILED the task (both_completed=false, retry_turns_per_error not comparable). That is the metric trap the once-mode and the both_completed gate guard against; it is recorded here as the negative control.",
+    "On this happy-path strong model the kernel's turn win is small (1 turn); the durable win remains the deterministic floor (injection_in_context: baseline YES / fak no, quarantines=1 every run)."
+  ],
+  "negative_control_aggressive": {
+    "mode": "every-retry-corrupted (prob=1.0, once=false)",
+    "baseline_tool_errors": 9,
+    "baseline_turns": 12,
+    "baseline_hit_turn_cap": true,
+    "baseline_task_completed": false,
+    "fak_turns": 6,
+    "fak_task_completed": true,
+    "both_completed": false,
+    "note": "re-corrupting every retry prevents recovery — the baseline never escapes the error loop. Correctly reported as NOT comparable. Demonstrates why the harness measures with one-shot injection."
+  },
+  "trials": [
+    {
+      "trial": 1,
+      "seed": 1,
+      "transcript_sha": "fab73aa703b56c5e",
+      "injected": 2,
+      "fak_repairs": 1,
+      "baseline_tool_errors": 1,
+      "baseline_turns": 7,
+      "fak_turns": 6,
+      "both_completed": true,
+      "retry_turns_per_error": 1.0,
+      "retry_supported": true
+    },
+    {
+      "trial": 2,
+      "seed": 2,
+      "transcript_sha": "692abbe85b80a20a",
+      "injected": 2,
+      "fak_repairs": 1,
+      "baseline_tool_errors": 1,
+      "baseline_turns": 7,
+      "fak_turns": 6,
+      "both_completed": true,
+      "retry_turns_per_error": 1.0,
+      "retry_supported": true
+    },
+    {
+      "trial": 3,
+      "seed": 3,
+      "transcript_sha": "22060be6e80c8eac",
+      "injected": 2,
+      "fak_repairs": 1,
+      "baseline_tool_errors": 1,
+      "baseline_turns": 7,
+      "fak_turns": 6,
+      "both_completed": true,
+      "retry_turns_per_error": 1.0,
+      "retry_supported": true
+    }
+  ],
+  "raw_trial_1_arms": {
+    "fak": {"turns": 6, "tool_calls": 5, "tool_errors": 0, "repairs": 1, "quarantines": 1, "prompt_tokens": 4092, "completion_tokens": 208, "injection_in_context": false, "task_completed": true},
+    "baseline": {"turns": 7, "tool_calls": 6, "tool_errors": 1, "repairs": 0, "quarantines": 0, "prompt_tokens": 5284, "completion_tokens": 239, "injection_in_context": true, "task_completed": true}
+  }
+}

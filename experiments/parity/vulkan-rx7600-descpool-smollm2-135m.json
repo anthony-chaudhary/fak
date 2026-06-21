@@ -1,0 +1,54 @@
+{
+  "app_version": "0.8.0",
+  "backend": {
+    "caps": {
+      "Async": false,
+      "FusedAttn": false,
+      "FusedFFN": false,
+      "GraphCompile": false,
+      "UploadDtype": false,
+      "DeviceMemory": true
+    },
+    "class": "approx",
+    "registered_backends": [
+      "cpu-ref",
+      "vulkan"
+    ],
+    "selected": "vulkan",
+    "tier": "discrete:AMD Radeon RX 7600"
+  },
+  "decode": {
+    "prompt_tokens": 16,
+    "decode_steps": 16,
+    "reps": 1,
+    "per_token_median_ms": 588.210362,
+    "tok_per_sec": 1.700072056874102
+  },
+  "engine": "fak-in-kernel via compute HAL backend \"vulkan\"",
+  "go_threads": "GOMAXPROCS=32, matmul workers=32 (FAK_WORKERS to pin)",
+  "load_ms": 216.8345,
+  "model": "fak-vulkan-rx7600-descpool",
+  "precision": "f32",
+  "prefill": [
+    {
+      "tokens": 16,
+      "reps": 1,
+      "median_ms": 8983.315,
+      "tok_per_sec": 1.7810797016468862
+    },
+    {
+      "tokens": 64,
+      "reps": 1,
+      "median_ms": 37705.3698,
+      "tok_per_sec": 1.697370967039289
+    },
+    {
+      "tokens": 256,
+      "reps": 1,
+      "median_ms": 167839.0162,
+      "tok_per_sec": 1.5252710948623875
+    }
+  ],
+  "quant_ms": 0,
+  "workers": 32
+}

@@ -1,0 +1,163 @@
+{
+  "schema": "fak.api-host-compat-contract.v1",
+  "generated_at": "2026-06-18T13:12:34.596638Z",
+  "contract": "A compatible API host is one that can present an OpenAI-compatible upstream, a covered native provider transcript wire, or direct HTTP/MCP access to the FAK/DOS syscall boundary.",
+  "summary": {
+    "host_classes": 5,
+    "proven_host_classes": 5,
+    "failed_host_classes": 0,
+    "contract_gate": true
+  },
+  "host_classes": [
+    {
+      "id": "openai_compatible_upstream",
+      "claim": "An OpenAI-compatible upstream can be fronted while FAK/DOS owns tool-call filtering, repair, and downstream stream=true chunk synthesis after adjudication.",
+      "status": "PROVEN",
+      "checks": {
+        "source_witness_resolved": true,
+        "witness_command_passed": true,
+        "provider_proxy_end_to_end_passed": true,
+        "host_agnostic_alias_passed": true,
+        "host_profile_conformance_passed": true,
+        "current_models_surface_confirmed": true,
+        "no_invalid_readiness_targets": true
+      },
+      "evidence": {
+        "matrix_witness": "openai_compatible_gateway",
+        "gate_run": "openai_compatible_gateway",
+        "end_to_end_gate_run": "provider_proxy_end_to_end",
+        "host_agnostic_gate_run": "host_agnostic_openai_compatible",
+        "host_profile_gate_run": "openai_compatible_host_profiles",
+        "readiness": {
+          "targets": 13,
+          "models_confirmed": 1,
+          "auth_env_missing": 11,
+          "auth_required": 0,
+          "access_denied": 1,
+          "billing_required": 0,
+          "transient_transport": 0,
+          "invalid_targets": 0,
+          "unclassified": 0,
+          "readiness_gate": true
+        },
+        "acceptance_models_confirmed": 1,
+        "acceptance": {
+          "targets": 13,
+          "known_statuses": 13,
+          "ready_for_live_bridge_run": 0,
+          "live_bridge_confirmed": 0,
+          "wire_supported_unprobed": 0,
+          "typed_external_blockers": 13,
+          "unsupported_wire": 0,
+          "invalid_targets": 0,
+          "unclassified": 0,
+          "sweep_artifact_errors": 0,
+          "acceptance_gate": true
+        }
+      }
+    },
+    {
+      "id": "native_provider_transcript_adapters",
+      "claim": "Native provider adapters preserve pre-send quarantine and provider-specific tool shapes.",
+      "status": "PROVEN",
+      "checks": {
+        "source_witness_resolved": true,
+        "witness_command_passed": true,
+        "provider_proxy_end_to_end_passed": true,
+        "required_provider_shapes_covered": true
+      },
+      "evidence": {
+        "required_provider_shapes": [
+          "anthropic",
+          "gemini",
+          "openai-compatible",
+          "xai"
+        ],
+        "provider_shapes_covered": [
+          "anthropic",
+          "gemini",
+          "openai-compatible",
+          "xai"
+        ],
+        "end_to_end_gate_run": "provider_proxy_end_to_end"
+      }
+    },
+    {
+      "id": "direct_kernel_http_syscall",
+      "claim": "Any-language clients can bypass provider quirks and call the kernel over native HTTP.",
+      "status": "PROVEN",
+      "checks": {
+        "source_witness_resolved": true,
+        "witness_command_passed": true
+      },
+      "evidence": {
+        "matrix_witness": "direct_http_syscall",
+        "gate_run": "direct_http_syscall"
+      }
+    },
+    {
+      "id": "direct_kernel_mcp_syscall",
+      "claim": "Any-language clients can call the same kernel over MCP stdio or MCP-over-HTTP.",
+      "status": "PROVEN",
+      "checks": {
+        "source_witness_resolved": true,
+        "witness_command_passed": true
+      },
+      "evidence": {
+        "matrix_witness": "direct_mcp_syscall",
+        "gate_run": "direct_mcp_syscall"
+      }
+    },
+    {
+      "id": "live_scoped_host_evidence",
+      "claim": "Committed live artifacts prove the bridge on at least one real frontier OpenAI-compatible host plus local OpenAI-compatible shims.",
+      "status": "PROVEN",
+      "checks": {
+        "live_inventory_gate": true,
+        "frontier_successes": true,
+        "local_shim_success": true,
+        "no_unclassified_live_rows": true
+      },
+      "evidence": {
+        "live": {
+          "live_frontier_successes": 2,
+          "local_openai_compatible_successes": 1,
+          "billing_required_hosts": 1,
+          "auth_required_hosts": 1,
+          "incomplete_or_unclassified": 0,
+          "live_inventory_gate": true
+        }
+      }
+    }
+  ],
+  "non_claims": [
+    {
+      "id": "arbitrary_api_host_without_compatible_wire",
+      "status": "OUT_OF_CONTRACT",
+      "reason": "A host must expose an OpenAI-compatible wire, one of the covered native provider wires, or use direct HTTP/MCP syscall integration."
+    },
+    {
+      "id": "streaming_chat_completions_delta_passthrough",
+      "status": "OUT_OF_CONTRACT",
+      "reason": "Downstream stream=true is supported by synthesized chunks after full adjudication; raw upstream streaming delta passthrough remains out of contract."
+    },
+    {
+      "id": "paid_or_keyed_live_execution_without_credentials",
+      "status": "EXTERNAL_STATE",
+      "reason": "Billing, API-key, or edge-access failures are typed readiness states, not bridge failures."
+    },
+    {
+      "id": "provider_semantics_beyond_tool_wire",
+      "status": "OUT_OF_CONTRACT",
+      "reason": "The bridge owns tool-call admission and result quarantine; it does not claim vendor model quality or universal task success."
+    }
+  ],
+  "artifact_errors": {},
+  "artifacts": {
+    "matrix": "fak/experiments/api-host-bridge/api-host-bridge-matrix.json",
+    "gate": "fak/experiments/api-host-bridge/api-host-bridge-gate.json",
+    "live": "fak/experiments/api-host-bridge/api-host-live-inventory.json",
+    "readiness": "fak/experiments/api-host-bridge/api-host-readiness.json",
+    "acceptance": "fak/experiments/api-host-bridge/api-host-acceptance.json"
+  }
+}

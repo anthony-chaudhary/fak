@@ -1,0 +1,43 @@
+{
+  "demo": "session-recall: a quarantine that survives the process boundary",
+  "demos": [
+    {
+      "action": "resolve benign account",
+      "page": 0,
+      "resolved": true,
+      "outcome": "RESOLVED 79 bytes: a2deb0bb9d17"
+    },
+    {
+      "action": "resolve poison policy (no witness)",
+      "page": 1,
+      "resolved": false,
+      "outcome": "REFUSED: recall: page sealed by the trust gate: page 1 (TRUST_VIOLATION) refused — no witness Clear(\"q1\")"
+    },
+    {
+      "action": "resolve poison policy (after clear)",
+      "page": 1,
+      "resolved": false,
+      "outcome": "REFUSED: recall: page sealed by the trust gate: page 1 cleared by witness but the content re-screen RE-QUARANTINED it (TRUST_VIOLATION) — clearance does not launder poison"
+    }
+  ],
+  "image_dir": "experiments/recall/airline-image",
+  "poison_in_set": false,
+  "query": "what refund fee did the user's account show?",
+  "session": {
+    "version": "recall.v1",
+    "session_id": "airline-mia",
+    "pages": 4,
+    "benign": 2,
+    "quarantined": 2,
+    "cleared": 1,
+    "cas_bytes": 442
+  },
+  "witness": "benign round-trips byte-identical; poison REFUSED without a witness AND after a clear (content re-screen); poison never in the recalled working set",
+  "working_set": [
+    {
+      "descriptor": "get_user_details: {\"user_id\":\"mia_li_3668\",\"tier\":\"gold\",\"refund_fee\":\"25 EUR\",\"status\":\"active\"}",
+      "role": "get_user_details",
+      "step": 0
+    }
+  ]
+}
