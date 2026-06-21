@@ -48,7 +48,7 @@ curl -fsSL https://raw.githubusercontent.com/anthony-chaudhary/fak/main/install.
 fak version
 ```
 
-**B. Build from a clone** (Go 1.26+; the module lives in the `fak/` subdir):
+**B. Build from a clone** (Go 1.26+; the Go module is the repository root):
 
 ```sh
 git clone https://github.com/anthony-chaudhary/fak.git
