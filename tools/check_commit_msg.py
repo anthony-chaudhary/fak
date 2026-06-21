@@ -44,6 +44,7 @@ VERBS = {
     "revert", "merge", "split", "extract", "inline", "dedupe", "consolidate",
     "close", "land", "ship", "generalize", "normalize", "reconcile",
     "make", "use", "switch", "replace", "set", "allow", "ensure", "handle",
+    "archive", "ignore", "back",  # "archive X", "ignore Y (gitignore)", "back up Z"
 }
 SUBJECT_RE = re.compile(r"^(?P<type>[a-z]+)(\([^)]+\))?(?P<bang>!)?:\s+(?P<rest>.+)$")
 EXEMPT_PREFIXES = ("Merge ", "Revert ", "fixup! ", "squash! ", "amend! ")
