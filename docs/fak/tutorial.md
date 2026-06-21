@@ -11,7 +11,7 @@ the real, unedited terminal output** — what you see here is what you will see.
 - **Prereqs:** [Go 1.26+](https://go.dev/dl/) *or* a [prebuilt binary](../../INSTALL.md).
   Nothing else for Parts 1–2.
 - **Already know the pitch?** This is the *guided first session*. For the install
-  reference and the four usage tiers, see [`fak/GETTING-STARTED.md`](../../fak/GETTING-STARTED.md);
+  reference and the four usage tiers, see [`fak/GETTING-STARTED.md`](../../GETTING-STARTED.md);
   for the idea, the [main README](../../README.md).
 
 > **One sentence of context.** `fak` treats the model like an untrusted program and a
@@ -278,7 +278,7 @@ vocabulary is closed, so a typo'd reason is caught here, not in production:
 # then load it on any verb with:  --policy floor.json
 ```
 
-The full manifest schema is in [`fak/POLICY.md`](../../fak/POLICY.md); a fuller authoring
+The full manifest schema is in [`fak/POLICY.md`](../../POLICY.md); a fuller authoring
 walkthrough with patterns is in the [policy guide](policy-guide.md).
 
 ### 1.6 *(Optional)* the fusion-speedup gate
@@ -422,7 +422,7 @@ for an upstream:
 ```
 
 …and harden it with `--policy floor.json` and `--require-key-env FAK_TOKEN`. The full Tier 1
-serving path is in [`fak/GETTING-STARTED.md` §3](../../fak/GETTING-STARTED.md) and
+serving path is in [`fak/GETTING-STARTED.md` §3](../../GETTING-STARTED.md) and
 [`server-quickstart.md`](server-quickstart.md).
 
 ✅ **End of Part 2.** You've fronted a model with an HTTP gate, run a syscall and an
@@ -434,7 +434,7 @@ adjudication over the wire, and seen the audit log.
 
 This part downloads a small model so you can see **real tokens**. Two ways:
 
-**A. The friendly chat REPL** ([Simple Demo](../../fak/cmd/simpledemo/README.md)):
+**A. The friendly chat REPL** ([Simple Demo](../../cmd/simpledemo/README.md)):
 
 ```sh
 go run ./cmd/simpledemo -gguf ~/Downloads/Qwen2.5-1.5B-Instruct-Q8_0.gguf
@@ -463,13 +463,13 @@ Claude Code or any OpenAI client can talk to it locally:
 ```
 
 Pointing the real Claude Code CLI at a local model behind the kernel is its own one-command
-walkthrough: [`fak/DOGFOOD-CLAUDE.md`](../../fak/DOGFOOD-CLAUDE.md) (and the
-[Claude Code setup notes](../../fak/cmd/simpledemo/CLAUDE.md)). Where to get models and the
-size/RAM table are in the [Simple Demo README](../../fak/cmd/simpledemo/README.md).
+walkthrough: [`fak/DOGFOOD-CLAUDE.md`](../../DOGFOOD-CLAUDE.md) (and the
+[Claude Code setup notes](../../cmd/simpledemo/CLAUDE.md)). Where to get models and the
+size/RAM table are in the [Simple Demo README](../../cmd/simpledemo/README.md).
 
 > **Honesty note.** The in-kernel model path is a *correctness reference* proven bit-exact
 > against HuggingFace, not a production chat engine. For chat-quality serving at scale, use
-> Part 2's Tier 1 proxy in front of a real serving engine. See [`fak/CLAIMS.md`](../../fak/CLAIMS.md).
+> Part 2's Tier 1 proxy in front of a real serving engine. See [`fak/CLAIMS.md`](../../CLAIMS.md).
 
 ---
 
@@ -481,7 +481,7 @@ Every verdict you saw decodes the same way. Keep this handy:
 |---|---|---|
 | `verdict` / `kind` | `ALLOW` · `DENY` · `TRANSFORM` · `QUARANTINE` | the decision on this call |
 | `by` | `vdso` · `monitor` | served from the local fast-path (no engine call) vs. through the full path |
-| `reason` | `NONE` · `DEFAULT_DENY` · `POLICY_BLOCK` · `SECRET_EXFIL` · … | the **named** reason (closed vocabulary — see [`POLICY.md`](../../fak/POLICY.md)) |
+| `reason` | `NONE` · `DEFAULT_DENY` · `POLICY_BLOCK` · `SECRET_EXFIL` · … | the **named** reason (closed vocabulary — see [`POLICY.md`](../../POLICY.md)) |
 | `disposition` | `TERMINAL` · … | whether the call is finally refused or eligible for repair |
 | `ifc_taint` | `trusted` · `quarantined` | whether the result may enter the model's context |
 | `trace_id` | `gw-N` | correlates the response, the HTTP log, and the verdict log |
@@ -510,18 +510,18 @@ summary: submits=12 vdso_hits=6 engine_calls=6 denies=0 transforms=0 quarantines
 | `address already in use` on `fak serve` | Another process owns the port — pick a different `--addr`. |
 | Windows: `An Application Control policy has blocked this file` during `go test` | OS quirk on freshly-built **test** binaries only — `go build`/`go run` are unaffected. Run the suite under WSL. Type the binary as `.\fak.exe`. |
 | `/v1/fak/syscall` returns an empty/odd result | Use the key `arguments`, not `args` — unknown keys are silently dropped. |
-| Garbled tokens from a real GGUF | Ensure you're on a build with the NEOX-rope GGUF fix; then try `-temp 0.3`. See the [Simple Demo troubleshooting](../../fak/cmd/simpledemo/README.md#troubleshooting). |
+| Garbled tokens from a real GGUF | Ensure you're on a build with the NEOX-rope GGUF fix; then try `-temp 0.3`. See the [Simple Demo troubleshooting](../../cmd/simpledemo/README.md#troubleshooting). |
 
 ---
 
 ## Where to go next
 
-- **Make the policy yours** → [policy authoring guide](policy-guide.md) · [`POLICY.md`](../../fak/POLICY.md)
+- **Make the policy yours** → [policy authoring guide](policy-guide.md) · [`POLICY.md`](../../POLICY.md)
 - **Run it in production** → [server quickstart](server-quickstart.md) · [server config](server-config.md) · [security best practices](security.md)
 - **See it observed** → [observability guide](observability.md) (`/metrics`, `/debug/vars`, the trace ids)
 - **Wire your language/agent** → [integration examples](../integrations/claude.md)
 - **Understand the two flips** → [Policy in the kernel](../explainers/policy-in-the-kernel.md) · [Addressable KV cache](../explainers/addressable-kv-cache.md)
-- **Check what's real** → [`fak/CLAIMS.md`](../../fak/CLAIMS.md) (every capability tagged `[SHIPPED]`/`[SIMULATED]`/`[STUB]`)
+- **Check what's real** → [`fak/CLAIMS.md`](../../CLAIMS.md) (every capability tagged `[SHIPPED]`/`[SIMULATED]`/`[STUB]`)
 
 ---
 

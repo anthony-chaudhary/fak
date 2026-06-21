@@ -1,6 +1,6 @@
 # Policy authoring guide (with worked examples)
 
-This is the **task-oriented** companion to [`fak/POLICY.md`](../../fak/POLICY.md). POLICY.md
+This is the **task-oriented** companion to [`fak/POLICY.md`](../../POLICY.md). POLICY.md
 is the schema reference — the fields and their meaning. This page shows you how to *build a
 real capability floor for a real agent*, with **example manifests you can copy** and the
 **actual `fak` output each one produces** (every output block below was captured from a
@@ -195,7 +195,7 @@ build, so a broken floor can never ship.
 
 ## Honest scope — what the floor does and does *not* bound
 
-Carried verbatim from [`POLICY.md`](../../fak/POLICY.md) because it matters:
+Carried verbatim from [`POLICY.md`](../../POLICY.md) because it matters:
 
 - ✅ **Bounds which tools run.** An irreversible tool you don't allow-list is refused
   *regardless of context* — including an injection that talks the model into calling it.
@@ -227,7 +227,7 @@ curl -X POST http://127.0.0.1:8080/v1/fak/policy/reload   # bearer token if --re
 
 ## See also
 
-- [`fak/POLICY.md`](../../fak/POLICY.md) — the field-by-field schema reference and the closed reason vocabulary.
+- [`fak/POLICY.md`](../../POLICY.md) — the field-by-field schema reference and the closed reason vocabulary.
 - [tutorial.md §1.5](tutorial.md) — authoring a floor in the guided first session.
 - [security.md](security.md) — hardening the deployed gateway (auth, network, defense-in-depth).
 - [Policy in the kernel](../explainers/policy-in-the-kernel.md) — the design rationale.

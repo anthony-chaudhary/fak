@@ -94,7 +94,7 @@ Live demonstration of the kernel's capability gate. Drives a real local model be
 ./examples/adjudication-demo/run.sh --dry-run  # Show verdicts without execution
 ```
 
-See [`fak/examples/adjudication-demo/README.md`](../../fak/examples/adjudication-demo/README.md) for details.
+See [`fak/examples/adjudication-demo/README.md`](../../examples/adjudication-demo/README.md) for details.
 
 ### `fak/cmd/simpledemo`
 
@@ -108,7 +108,7 @@ go run ./cmd/simpledemo
 .\simpledemo.exe -gguf C:\path\to\model.gguf
 ```
 
-See [`fak/cmd/simpledemo/README.md`](../../fak/cmd/simpledemo/README.md) for model recommendations and troubleshooting.
+See [`fak/cmd/simpledemo/README.md`](../../cmd/simpledemo/README.md) for model recommendations and troubleshooting.
 
 ## Model Fetching Scripts
 
@@ -158,7 +158,7 @@ fak policy --check examples/customer-support-readonly-policy.json
 fak serve --policy examples/dev-agent-policy.json ...
 ```
 
-See [`fak/examples/README.md`](../../fak/examples/README.md) for the full template catalog.
+See [`fak/examples/README.md`](../../examples/README.md) for the full template catalog.
 
 ## Fleet Operations Tools
 
@@ -365,7 +365,7 @@ python3 tools/fleet_supervisor_watchdog.py
 
 ### For Claude Code Users
 
-- **`fak serve`** as a local model backend: See [`fak/cmd/simpledemo/CLAUDE.md`](../../fak/cmd/simpledemo/CLAUDE.md)
+- **`fak serve`** as a local model backend: See [`fak/cmd/simpledemo/CLAUDE.md`](../../cmd/simpledemo/CLAUDE.md)
 - **`dogfood-claude.sh`**: One-command local model + kernel setup
 - **`fleet_sessions.py`**: Track stopped sessions across accounts
 
@@ -383,8 +383,8 @@ python3 tools/fleet_supervisor_watchdog.py
 
 ## See Also
 
-- [`docs/cli-reference.md`](../../fak/README.md) — Main fak documentation
-- [`fak/GETTING-STARTED.md`](../../fak/GETTING-STARTED.md) — Install and run guide
-- [`fak/POLICY.md`](../../fak/POLICY.md) — Capability floor schema
+- [`docs/cli-reference.md`](../../README.md) — Main fak documentation
+- [`fak/GETTING-STARTED.md`](../../GETTING-STARTED.md) — Install and run guide
+- [`fak/POLICY.md`](../../POLICY.md) — Capability floor schema
 - [`docs/fak/server-quickstart.md`](server-quickstart.md) — Server deployment scenarios
 - [`CONTRIBUTING.md`](../../CONTRIBUTING.md) — Contributor guide & repo conventions

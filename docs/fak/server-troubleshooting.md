@@ -441,10 +441,10 @@ fak serve --gguf models/qwen.gguf --policy-check
 
 ## Additional Resources
 
-- [Getting Started](../../fak/GETTING-STARTED.md) - Install and basic usage
-- [GPU Support](../../fak/GPU.md) - CUDA and Vulkan setup
-- [README](../../fak/README.md) - Project overview
-- [Architecture](../../fak/ARCHITECTURE.md) - System design
+- [Getting Started](../../GETTING-STARTED.md) - Install and basic usage
+- [GPU Support](../../GPU.md) - CUDA and Vulkan setup
+- [README](../../README.md) - Project overview
+- [Architecture](../../ARCHITECTURE.md) - System design
 
 ---
 

@@ -48,15 +48,15 @@ Two invariants that hold for **all** of the migrations below:
 ## Before you start: get fak running
 
 Build or install the binary (full matrix in [`INSTALL.md`](../../INSTALL.md) and
-[`fak/GETTING-STARTED.md`](../../fak/GETTING-STARTED.md)):
+[`fak/GETTING-STARTED.md`](../../GETTING-STARTED.md)):
 
 ```bash
 # Prebuilt binary (no Go required)
 curl -fsSL https://raw.githubusercontent.com/anthony-chaudhary/fak/main/install.sh | sh
 
-# …or build from a clone (the Go module lives in the fak/ subdir)
+# …or build from a clone (the Go module is the repository root)
 git clone https://github.com/anthony-chaudhary/fak.git
-cd fleet-public/fak && go build -o fak ./cmd/fak
+cd fak && go build -o fak ./cmd/fak
 ```
 
 Start a gateway in front of whatever model server you already use. The shape is
@@ -296,12 +296,12 @@ model.
 > production-optimized chat engine. For chat-quality serving at scale, keep
 > `llama-server` and use **Option A**. Reach for **Option B** when you specifically
 > want the model to be kernel-owned state (the deepest fusion). This scope is spelled
-> out in [`fak/GETTING-STARTED.md` §4](../../fak/GETTING-STARTED.md) and
-> [`fak/CLAIMS.md`](../../fak/CLAIMS.md).
+> out in [`fak/GETTING-STARTED.md` §4](../../GETTING-STARTED.md) and
+> [`fak/CLAIMS.md`](../../CLAIMS.md).
 
 The infrastructure-level differences between fak and per-session servers like
 llama.cpp (cross-worker and cross-session KV reuse) are quantified in
-[`docs/fak-vs-alternatives-comparison.md`](../../fak/docs/fak-vs-alternatives-comparison.md).
+[`docs/fak-vs-alternatives-comparison.md`](../../docs/fak-vs-alternatives-comparison.md).
 
 ---
 
@@ -377,7 +377,7 @@ A manifest is plain JSON (`fak-policy/v1`):
 | Field | What it does in a migration |
 |---|---|
 | `allow` / `allow_prefix` | The tools your framework registers that the agent legitimately needs. Anything not listed here (and not explicitly denied) hits the fail-closed `DEFAULT_DENY`. |
-| `deny` | Tools you want refused with a **named, provable** reason (closed vocabulary — see [`fak/POLICY.md`](../../fak/POLICY.md)). |
+| `deny` | Tools you want refused with a **named, provable** reason (closed vocabulary — see [`fak/POLICY.md`](../../POLICY.md)). |
 | `self_modify_globs` | Path fragments that prove a self-modification attempt in a write-shaped call's target argument. |
 | `redact_fields` | Arg keys whose value is stripped before dispatch (secret hygiene). |
 
@@ -387,9 +387,9 @@ A manifest is plain JSON (`fak-policy/v1`):
 > So the safe pattern is: keep irreversible / exfil-shaped operations **off** the
 > allow-list and let `DEFAULT_DENY` hold them, rather than allow-listing a broad tool
 > and hoping to filter its arguments. The full honest-scope discussion is in
-> [`fak/POLICY.md`](../../fak/POLICY.md).
+> [`fak/POLICY.md`](../../POLICY.md).
 
-Ready-made starting points ship in [`fak/examples/`](../../fak/examples/):
+Ready-made starting points ship in [`fak/examples/`](../../examples/):
 `dev-agent-policy.json` (coding agent), `research-agent-policy.json` (read-only),
 `customer-support-readonly-policy.json`, and `devops-dryrun-policy.json`.
 
@@ -467,8 +467,8 @@ The guided, fully-captured walkthrough of these commands is in
 - [tutorial.md](tutorial.md) — zero-to-first-call with real captured output at every step.
 - [api-reference.md](api-reference.md) — every endpoint, field, and the `fak` extension in full.
 - [server-quickstart.md](server-quickstart.md) · [server-config.md](server-config.md) — every flag and environment variable.
-- [policy-guide.md](policy-guide.md) · [`fak/POLICY.md`](../../fak/POLICY.md) — authoring the capability floor.
+- [policy-guide.md](policy-guide.md) · [`fak/POLICY.md`](../../POLICY.md) — authoring the capability floor.
 - [security.md](security.md) — hardening a network-reachable gateway.
 - [`docs/integrations/claude.md`](../integrations/claude.md) · [`docs/integrations/openai-codex.md`](../integrations/openai-codex.md) · [`docs/integrations/cursor.md`](../integrations/cursor.md) — per-client integration playbooks.
-- [`docs/fak-vs-alternatives-comparison.md`](../../fak/docs/fak-vs-alternatives-comparison.md) — fak vs llama.cpp / vLLM / provider caching, quantified.
+- [`docs/fak-vs-alternatives-comparison.md`](../../docs/fak-vs-alternatives-comparison.md) — fak vs llama.cpp / vLLM / provider caching, quantified.
 ```

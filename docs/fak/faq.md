@@ -26,7 +26,7 @@ adjudicated against a reviewable policy; the gateway returns only the admitted (
 calls, plus a `fak` extension describing every decision. You can also run the kernel with no
 model and no network at all (`fak preflight`, `fak run`) to test policy decisions offline.
 
-→ [tutorial.md](tutorial.md) (zero to first adjudicated call) · [`fak/ARCHITECTURE.md`](../../fak/ARCHITECTURE.md)
+→ [tutorial.md](tutorial.md) (zero to first adjudicated call) · [`fak/ARCHITECTURE.md`](../../ARCHITECTURE.md)
 
 ### What is `fak` vs llama.cpp vs vLLM?
 
@@ -43,7 +43,7 @@ the kernel boundary. `fak` does ship an in-kernel engine that can load a GGUF di
 that path is a *correctness reference*, not a production serving engine (see
 [Does `fak` work with any model?](#does-fak-work-with-any-model)). The infrastructure-level
 differences (cross-worker / cross-session reuse, measured 20–24× vs naive re-prefill) are
-quantified in [`docs/fak-vs-alternatives-comparison.md`](../../fak/docs/fak-vs-alternatives-comparison.md).
+quantified in [`docs/fak-vs-alternatives-comparison.md`](../../docs/fak-vs-alternatives-comparison.md).
 
 ### Why a kernel for tool adjudication?
 
@@ -69,7 +69,7 @@ Two things:
 `"admit_and_log"`, which admits *read-shaped* default-denies while logging
 `would_deny=DEFAULT_DENY` (write-shaped calls and explicit denials still fail closed).
 
-→ [`fak/POLICY.md`](../../fak/POLICY.md) · [policy-guide.md](policy-guide.md)
+→ [`fak/POLICY.md`](../../POLICY.md) · [policy-guide.md](policy-guide.md)
 
 ### How does quarantine work?
 
@@ -123,7 +123,7 @@ the forward pass inside the kernel's address space. This is a *correctness refer
 bit-exact against a HuggingFace oracle — **not** a hardened, production-optimized chat engine.
 For chat-quality serving at scale, front a real engine via the gateway. Per-capability
 status (`[SHIPPED]` / `[SIMULATED]` / `[STUB]`) is tracked honestly in
-[`fak/CLAIMS.md`](../../fak/CLAIMS.md).
+[`fak/CLAIMS.md`](../../CLAIMS.md).
 
 → [migration-guide.md](migration-guide.md) · [server-config.md](server-config.md)
 
@@ -157,7 +157,7 @@ notes:
 - **Measure it yourself.** `fak bench` runs the vDSO ablation (in-process vs spawned-hook),
   and the live `kernel` counters in `/debug/vars` show how much load the fast path served.
 
-→ [observability.md](observability.md) · [`docs/fak-vs-alternatives-comparison.md`](../../fak/docs/fak-vs-alternatives-comparison.md)
+→ [observability.md](observability.md) · [`docs/fak-vs-alternatives-comparison.md`](../../docs/fak-vs-alternatives-comparison.md)
 
 ### Does `fak` execute my tools?
 
@@ -220,7 +220,7 @@ a policy loader that is fail-loud and round-trip-stable. It's deterministic and 
 so the boundary itself doesn't become the thing you debug at 2 a.m.
 
 → [api-reference.md → A refusal is not an error](api-reference.md#a-refusal-is-not-an-error) ·
-[`fak/POLICY.md`](../../fak/POLICY.md)
+[`fak/POLICY.md`](../../POLICY.md)
 
 ---
 
@@ -238,7 +238,7 @@ fak preflight --policy policy.json --tool git_push --args '{}'
 The `reason` tells you *why*: `DEFAULT_DENY` (never allow-listed → add it to `allow` /
 `allow_prefix` if it's legitimate), `POLICY_BLOCK` (an explicit `deny` entry), `SELF_MODIFY`
 (a write into a `self_modify_globs` path), `SECRET_EXFIL`, and so on — all from the
-[closed refusal vocabulary](../../fak/POLICY.md). In the running gateway, the same decision is
+[closed refusal vocabulary](../../POLICY.md). In the running gateway, the same decision is
 in the access log (`event: gateway_operation`, with `tool`, `verdict`, `reason`,
 `disposition`, and a `trace_id`) and in the per-response `fak.adjudications` array.
 
@@ -258,7 +258,7 @@ Reload is **replace, not merge** — the new manifest *is* the whole floor, so s
 by accident. (`SIGHUP` and signed manifests are roadmap; the HTTP reload route is what's
 shipped today.)
 
-→ [server-config.md](server-config.md) · [`fak/POLICY.md` → Roadmap](../../fak/POLICY.md)
+→ [server-config.md](server-config.md) · [`fak/POLICY.md` → Roadmap](../../POLICY.md)
 
 ### How do I monitor `fak` behavior?
 
@@ -341,7 +341,7 @@ floor (`fak policy --dump > policy.json`, edit, `fak policy --check policy.json`
   *name* — it does **not** bound the *values* an allow-listed tool is called with. An
   allow-listed `send_email` with attacker-chosen recipients is *not* stopped by the floor.
   Keep exfil-/irreversible-shaped tools **off** the allow-list and let `DEFAULT_DENY` hold
-  them. (Argument-level value predicates are a [roadmap item](../../fak/POLICY.md), not
+  them. (Argument-level value predicates are a [roadmap item](../../POLICY.md), not
   shipped; `redact_fields` and `self_modify_globs` are best-effort key/substring hygiene, not
   a cryptographic guarantee.)
 - ❌ **The blast radius of an admitted call.** `fak` decides *whether* a call runs, not how
@@ -375,7 +375,7 @@ allow-list.
 ### Known edge cases and wire gotchas
 
 - **The in-kernel engine is a reference, not a serving engine** — front a real engine for
-  production chat ([`fak/CLAIMS.md`](../../fak/CLAIMS.md)).
+  production chat ([`fak/CLAIMS.md`](../../CLAIMS.md)).
 - **Streaming is buffered then re-emitted** — correct on the wire, but not token-by-token
   passthrough before adjudication.
 - **The response extension key is `fak`** (with `adjudications` / `result_admissions`). Some
@@ -391,17 +391,17 @@ allow-list.
 | If you want to… | Read |
 |---|---|
 | Run `fak` for the first time (real output at every step) | [tutorial.md](tutorial.md) |
-| Install the binary (Docker / prebuilt / source) | [`INSTALL.md`](../../INSTALL.md) · [`fak/GETTING-STARTED.md`](../../fak/GETTING-STARTED.md) |
+| Install the binary (Docker / prebuilt / source) | [`INSTALL.md`](../../INSTALL.md) · [`fak/GETTING-STARTED.md`](../../GETTING-STARTED.md) |
 | Get a gateway running fast | [server-quickstart.md](server-quickstart.md) |
 | Look up every flag and env var | [server-config.md](server-config.md) |
 | Look up every endpoint and field | [api-reference.md](api-reference.md) |
 | Fix a startup / port / model-load problem | [server-troubleshooting.md](server-troubleshooting.md) |
-| Build a capability floor (worked examples) | [policy-guide.md](policy-guide.md) · [`fak/POLICY.md`](../../fak/POLICY.md) |
+| Build a capability floor (worked examples) | [policy-guide.md](policy-guide.md) · [`fak/POLICY.md`](../../POLICY.md) |
 | Harden a network-facing deployment | [security.md](security.md) · [deployment-guide.md](deployment-guide.md) |
 | Wire up metrics, logs, and traces | [observability.md](observability.md) |
 | Move an existing stack (LangChain / AutoGen / llama.cpp / OpenAI) over | [migration-guide.md](migration-guide.md) |
 | Understand agent ↔ kernel integration | [agent-integration-architecture.md](agent-integration-architecture.md) |
-| Understand the system design | [`fak/ARCHITECTURE.md`](../../fak/ARCHITECTURE.md) · [Policy in the kernel](../explainers/policy-in-the-kernel.md) |
-| See what's `[SHIPPED]` vs `[SIMULATED]` vs `[STUB]` | [`fak/CLAIMS.md`](../../fak/CLAIMS.md) |
-| Compare infrastructure efficiency vs alternatives | [`docs/fak-vs-alternatives-comparison.md`](../../fak/docs/fak-vs-alternatives-comparison.md) |
+| Understand the system design | [`fak/ARCHITECTURE.md`](../../ARCHITECTURE.md) · [Policy in the kernel](../explainers/policy-in-the-kernel.md) |
+| See what's `[SHIPPED]` vs `[SIMULATED]` vs `[STUB]` | [`fak/CLAIMS.md`](../../CLAIMS.md) |
+| Compare infrastructure efficiency vs alternatives | [`docs/fak-vs-alternatives-comparison.md`](../../docs/fak-vs-alternatives-comparison.md) |
 | See the rest of the docs backlog | [documentation-roadmap.md](documentation-roadmap.md) |

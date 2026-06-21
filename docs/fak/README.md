@@ -12,8 +12,8 @@ scaling laws, the explainers) live one level up in [`docs/`](../) and at the
 | If you want to… | Read |
 |---|---|
 | **Run `fak` for the first time** (guided, real output at every step) | [**tutorial.md**](tutorial.md) ⭐ |
-| Install the binary (Docker / prebuilt / source) | [`INSTALL.md`](../../INSTALL.md) · [`fak/GETTING-STARTED.md`](../../fak/GETTING-STARTED.md) |
-| Just chat with a local model | [Simple Demo](../../fak/cmd/simpledemo/README.md) |
+| Install the binary (Docker / prebuilt / source) | [`INSTALL.md`](../../INSTALL.md) · [`fak/GETTING-STARTED.md`](../../GETTING-STARTED.md) |
+| Just chat with a local model | [Simple Demo](../../cmd/simpledemo/README.md) |
 | Quick answers — what it is, how it differs, threat model | [faq.md](faq.md) |
 
 ## Run the server
@@ -33,7 +33,7 @@ scaling laws, the explainers) live one level up in [`docs/`](../) and at the
 | Topic | Doc |
 |---|---|
 | Build a capability floor (worked examples) | [policy-guide.md](policy-guide.md) |
-| The manifest schema + refusal vocabulary | [`fak/POLICY.md`](../../fak/POLICY.md) |
+| The manifest schema + refusal vocabulary | [`fak/POLICY.md`](../../POLICY.md) |
 | Hardening a deployment (auth, network, threat model) | [security.md](security.md) |
 
 ## Integrate
