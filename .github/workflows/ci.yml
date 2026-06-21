@@ -26,6 +26,11 @@ jobs:
         working-directory: .
     steps:
       - uses: actions/checkout@v4
+        with:
+          # Full history + tags: the release-substrate tests read the release note
+          # AT the tag (`git show v0.30.0:docs/releases/...`), which a default shallow
+          # checkout doesn't fetch — the tag's tree is absent and the check 404s.
+          fetch-depth: 0
 
       - uses: actions/setup-go@v5
         with:
