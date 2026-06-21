@@ -543,5 +543,5 @@ against the floor — while the breaker logic lives where retries and failover b
   surfaces, with the metric families and PromQL these patterns alert on.
 - [security.md](security.md) — auth, network exposure, and the threat model for a
   network-reachable gateway.
-- [`fak/GETTING-STARTED.md`](../../fak/GETTING-STARTED.md) — the route table and a guided
+- [`fak/GETTING-STARTED.md`](../../GETTING-STARTED.md) — the route table and a guided
   first session.

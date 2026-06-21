@@ -451,11 +451,11 @@ Example invalidation configuration:
 
 ## References
 
-- **fak documentation**: [README.md](../../fak/README.md)
-- **Policy schema**: [POLICY.md](../../fak/POLICY.md)
+- **fak documentation**: [README.md](../../README.md)
+- **Policy schema**: [POLICY.md](../../POLICY.md)
 - **Cursor MCP docs**: [cursor.com/docs/mcp](https://cursor.com/docs/mcp)
 - **MCP protocol**: [modelcontextprotocol.io](https://modelcontextprotocol.io)
-- **Example policies**: [fak/examples/](../../fak/examples/)
+- **Example policies**: [fak/examples/](../../examples/)
 
 ---
 

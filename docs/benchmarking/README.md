@@ -1,7 +1,7 @@
 # Benchmarking Documentation Index
 
 > **Quick link:** The single source of truth for all benchmark numbers is
-> **[`fak/BENCHMARK-AUTHORITY.md`](../../fak/BENCHMARK-AUTHORITY.md)**. Every claim
+> **[`fak/BENCHMARK-AUTHORITY.md`](../../BENCHMARK-AUTHORITY.md)**. Every claim
 > traces back to a commit and artifact file. Start there for authoritative numbers.
 
 This index organizes all benchmark-related documentation across the repo.
@@ -31,7 +31,7 @@ for a visual comparison.
 - **Modeled/Projected:** Extrapolations from measured rates, clearly labeled
 - **Frontier targets:** Design directions, not shipped claims
 
-All measured claims in [`fak/BENCHMARK-AUTHORITY.md`](../../fak/BENCHMARK-AUTHORITY.md).
+All measured claims in [`fak/BENCHMARK-AUTHORITY.md`](../../BENCHMARK-AUTHORITY.md).
 
 ---
 
@@ -42,21 +42,21 @@ All measured claims in [`fak/BENCHMARK-AUTHORITY.md`](../../fak/BENCHMARK-AUTHOR
 **Result:** 19 min vs ~19 h naive (≈60×) on 50-turn × 5-agent session
 **Baseline:** Naive stateless (re-send everything every turn)
 **Details:** [`fak/SESSION-VALUE-STACK-DECK.md`](../../fak/SESSION-VALUE-STACK-DECK.md)
-**Authority:** [`fak/BENCHMARK-AUTHORITY.md`](../../fak/BENCHMARK-AUTHORITY.md) → "Session value-add"
+**Authority:** [`fak/BENCHMARK-AUTHORITY.md`](../../BENCHMARK-AUTHORITY.md) → "Session value-add"
 
 ### RadixAttention Cache Parity
 **What:** KV cache hit rate comparison with SGLang's RadixAttention
 **Result:** 86.7% hit rate on agents workload (inside SGLang's 50–99% band)
 **Baseline:** SGLang published results
 **Details:** [`fak/RADIXATTENTION-RESULTS.md`](../../fak/RADIXATTENTION-RESULTS.md)
-**Authority:** [`fak/BENCHMARK-AUTHORITY.md`](../../fak/BENCHMARK-AUTHORITY.md) → "RadixAttention Results"
+**Authority:** [`fak/BENCHMARK-AUTHORITY.md`](../../BENCHMARK-AUTHORITY.md) → "RadixAttention Results"
 
 ### Safety / Injection Resistance
 **What:** Prompt injection resistance on real models
 **Result:** 5/5 injections reached unprotected baseline; 0/5 reached fak
 **Baseline:** Unmediated tool calls
 **Details:** [`fak/LIVE-RESULTS.md`](../../fak/LIVE-RESULTS.md)
-**Authority:** See SECURITY section in [`fak/BENCHMARK-AUTHORITY.md`](../../fak/BENCHMARK-AUTHORITY.md)
+**Authority:** See SECURITY section in [`fak/BENCHMARK-AUTHORITY.md`](../../BENCHMARK-AUTHORITY.md)
 
 ---
 
@@ -205,7 +205,7 @@ M3 arm64). See [`fak/experiments/radixattention/CROSS-PLATFORM-REPRO-20260619.md
 ## Governance Process
 
 ### DOS-Centric Verification
-**[`fak/BENCHMARK-GOVERNANCE.md`](../../fak/BENCHMARK-GOVERNANCE.md)**
+**[`fak/BENCHMARK-GOVERNANCE.md`](../../BENCHMARK-GOVERNANCE.md)**
 - How benchmark claims are created, verified, and published
 - The discipline that ensures traceability
 
@@ -245,7 +245,7 @@ go run ./cmd/radixbench \
   -out experiments/radixattention/radixbench-smollm2-135m-q8.json
 ```
 
-See [`fak/BENCHMARK-AUTHORITY.md`](../../fak/BENCHMARK-AUTHORITY.md) → "Reproduce" section.
+See [`fak/BENCHMARK-AUTHORITY.md`](../../BENCHMARK-AUTHORITY.md) → "Reproduce" section.
 
 ---
 

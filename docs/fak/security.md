@@ -189,7 +189,7 @@ Stated plainly so you don't over-trust it:
   serving engine. For production serving, front a real engine via Tier 1.
 
 Per-capability status (`[SHIPPED]` / `[SIMULATED]` / `[STUB]`) is tracked honestly in
-[`fak/CLAIMS.md`](../../fak/CLAIMS.md). To report a vulnerability, see the repository's
+[`fak/CLAIMS.md`](../../CLAIMS.md). To report a vulnerability, see the repository's
 security policy.
 
 ---

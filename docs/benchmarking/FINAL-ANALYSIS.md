@@ -17,13 +17,13 @@
 > as an **illustrative projection of the demorace shape**, not a measurement.
 >
 > **For release-quote numbers, use the committed, artifact-traced authority instead:**
-> [`fak/BENCHMARK-AUTHORITY.md`](../../fak/BENCHMARK-AUTHORITY.md). The 135M
+> [`fak/BENCHMARK-AUTHORITY.md`](../../BENCHMARK-AUTHORITY.md). The 135M
 > RadixAttention `agents` result there is **4.58× live / 7.50× token** (committed
 > `92896a4`), reproduced bit-for-bit on a second architecture; the front-page headline
 > is **60.3× vs naive** on 50×5 Qwen2.5-1.5B (committed `2bbda6f`,
 > `headline-qwen-50x5.json`). The `demorace` `13.2×` *token* ratio is real and matches
 > the handoff (15200 vs 1152 prefill tokens) — it is the **wall-clock** `6.82×` that is
-> the unverified projection. Per [BENCHMARK-GOVERNANCE.md](../../fak/BENCHMARK-GOVERNANCE.md),
+> the unverified projection. Per [BENCHMARK-GOVERNANCE.md](../../BENCHMARK-GOVERNANCE.md),
 > no wall-clock number ships without a committed artifact.
 >
 > The rest of this doc (shipped infrastructure: `cmd/demorace`, the sweep

@@ -63,7 +63,7 @@ Clear every item before a network-facing deploy. Sources for each are in
 - [ ] **Timeouts sized to the backend.** Keep the conservative defaults for a fast
   hosted upstream; raise `FAK_HTTP_WRITE_TIMEOUT_S` **and** `FAK_PLANNER_TIMEOUT_S`
   together for a slow local model (the write timeout must be ≥ the planner
-  timeout). See [Timeout tuning](../../fak/docs/serve-config.md#timeout-tuning-remote-upstream-vs-slow-local-model).
+  timeout). See [Timeout tuning](../../docs/serve-config.md#timeout-tuning-remote-upstream-vs-slow-local-model).
 - [ ] **Audit journal enabled** (recommended). Set `FAK_AUDIT_JOURNAL=/path/to/audit.jsonl`
   to a durable, writable path for a tamper-evident record of every adjudicated
   syscall.
@@ -367,7 +367,7 @@ download the `.zip` manually.
 
 ```bash
 git clone https://github.com/anthony-chaudhary/fak.git
-cd fleet-public/fak           # the Go module lives in fak/, not the repo root
+cd fak                        # the Go module is the repository root
 go build -trimpath -o /usr/local/bin/fak ./cmd/fak   # Go 1.26+, auto-fetched via GOTOOLCHAIN=auto
 ```
 
@@ -484,7 +484,7 @@ errors are covered in [server-troubleshooting.md](server-troubleshooting.md).
 - [security.md](security.md) — threat model and hardening for a network deploy
 - [observability.md](observability.md) — metrics, logs, and traces
 - [server-troubleshooting.md](server-troubleshooting.md) — when something breaks
-- [policy-guide.md](policy-guide.md) and [`fak/POLICY.md`](../../fak/POLICY.md) —
+- [policy-guide.md](policy-guide.md) and [`fak/POLICY.md`](../../POLICY.md) —
   authoring the capability floor and the refusal vocabulary
 - [`Dockerfile`](../../Dockerfile) and [`install.sh`](../../install.sh) — the
   build and install sources this guide describes

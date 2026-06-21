@@ -210,7 +210,7 @@ All benchmark results explicitly state:
 3. **What hardware is used** (e.g., "Apple M3 Pro, 32GB RAM")
 4. **What the gain is attributed to** (e.g., "fused serving + cross-agent sharing")
 
-See [`fak/BENCHMARK-AUTHORITY.md`](../../fak/BENCHMARK-AUTHORITY.md) for the single source of truth on all benchmark numbers.
+See [`fak/BENCHMARK-AUTHORITY.md`](../../BENCHMARK-AUTHORITY.md) for the single source of truth on all benchmark numbers.
 
 ---
 

@@ -172,4 +172,4 @@ hardening (bind address, reverse-proxy scrape isolation) is covered in
 - [tutorial.md §2.5](tutorial.md) — seeing the access log in the guided first session.
 - [security.md](security.md) — auth, network exposure, and the threat model for these surfaces.
 - [server-config.md](server-config.md) — every `fak serve` flag and env var.
-- [`fak/GETTING-STARTED.md` §3](../../fak/GETTING-STARTED.md) — the full route table.
+- [`fak/GETTING-STARTED.md` §3](../../GETTING-STARTED.md) — the full route table.

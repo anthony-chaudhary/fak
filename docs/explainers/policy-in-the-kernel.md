@@ -168,8 +168,8 @@ gate structural instead of just another recognizer.
 
 - The same mechanism told in two vocabularies (security ↔ optimization), with the
   Rosetta table: [`EXPLAINER-trust-floor-two-lenses-2026-06-17.md`](../notes/EXPLAINER-trust-floor-two-lenses-2026-06-17.md)
-- The deployable policy manifest and its exact honest-scope boundary: [`fak/POLICY.md`](../../fak/POLICY.md)
+- The deployable policy manifest and its exact honest-scope boundary: [`fak/POLICY.md`](../../POLICY.md)
 - The capability-floor argument-value deny picture: [`SECURITY-capability-floor-2026-06-18.md`](../notes/SECURITY-capability-floor-2026-06-18.md)
-- The extension model (how a rung registers without a spine edit): [`fak/ARCHITECTURE.md`](../../fak/ARCHITECTURE.md)
+- The extension model (how a rung registers without a spine edit): [`fak/ARCHITECTURE.md`](../../ARCHITECTURE.md)
 - Live A/B on real models (injection kept out of context 5/5): [`fak/LIVE-RESULTS.md`](../../fak/LIVE-RESULTS.md)
-- The full per-capability honesty ledger: [`fak/CLAIMS.md`](../../fak/CLAIMS.md)
+- The full per-capability honesty ledger: [`fak/CLAIMS.md`](../../CLAIMS.md)

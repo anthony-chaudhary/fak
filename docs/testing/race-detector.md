@@ -64,13 +64,13 @@ needed — `CGO_ENABLED` defaults to `1` on these platforms.
 ### Windows via WSL (the canonical local path on the dev box)
 
 The repo's normal Go test runner already shells into WSL (see
-[`fak/test.sh`](../../fak/test.sh)) because native Windows test execution is
+[`fak/test.sh`](../../test.sh)) because native Windows test execution is
 blocked by an Application Control policy. The same WSL distro provides the cgo
 toolchain the race detector needs:
 
 ```bash
 # from a WSL Ubuntu shell with gcc installed (apt install build-essential)
-cd /mnt/c/.../fleet-public/fak
+cd /mnt/c/.../fak
 CGO_ENABLED=1 GOTOOLCHAIN=auto go test -race -count=1 ./...
 ```
 
