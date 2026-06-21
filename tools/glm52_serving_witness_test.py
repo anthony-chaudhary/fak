@@ -88,6 +88,35 @@ class Glm52ServingWitnessTest(unittest.TestCase):
             self.assertEqual(report["engine_cache"]["fallback_scope"], "whole_prefix_cache")
             self.assertTrue(report["engine_cache"]["require_exact_span"])
 
+    def test_default_fak_command_targets_repo_root_not_fak_subdir(self) -> None:
+        # Regression: the Go module is the repo ROOT in the public tree, not a
+        # fak/ subdir. The default --fak-command must be `go run ./cmd/fak`
+        # (resolvable from cwd=ROOT), never `go -C fak run ...` which would
+        # start-fail the gateway and sink the #130 evidence before any traffic.
+        with tempfile.TemporaryDirectory() as td:
+            out = Path(td) / "report.json"
+            with redirect_stdout(StringIO()):
+                code = witness.main([
+                    "--base-url", "http://127.0.0.1:9/v1",
+                    "--dry-run",
+                    "--out", str(out),
+                ])
+            self.assertEqual(code, 0)
+            report = json.loads(out.read_text(encoding="utf-8"))
+            command = report["gateway"]["command"]
+            self.assertEqual(command[:2], ["go", "run"])
+            self.assertNotIn("-C", command)
+            self.assertNotIn("fak", command[:3])
+
+    def test_existing_gateway_url_strips_v1_suffix(self) -> None:
+        # Regression: a --gateway-url carrying a /v1 suffix (the --base-url
+        # convention) must normalize to a bare origin so the rebuilt route is
+        # <origin>/v1/chat/completions, not .../v1/v1/... which 404s.
+        args = type("A", (), {"gateway_url": "http://node:8000/v1/"})()
+        _, origin, info = witness.start_gateway(args, {})
+        self.assertEqual(origin, "http://node:8000")
+        self.assertEqual(info["url"], "http://node:8000")
+
     def test_fake_gateway_report_passes_required_acceptance_fields(self) -> None:
         server = ThreadingHTTPServer(("127.0.0.1", 0), FakeOpenAIHandler)
         thread = threading.Thread(target=server.serve_forever, daemon=True)

@@ -233,7 +233,12 @@ def build_fak_serve_command(args: argparse.Namespace, port: int) -> list[str]:
 
 def start_gateway(args: argparse.Namespace, env: dict[str, str]) -> tuple[subprocess.Popen[str] | None, str, dict[str, Any]]:
     if args.gateway_url:
-        return None, args.gateway_url.rstrip("/"), {"mode": "existing", "url": args.gateway_url.rstrip("/")}
+        # Normalize to a bare origin so a /v1-suffixed URL (the --base-url convention)
+        # doesn't double-prefix into .../v1/v1/chat/completions and 404. root_url()
+        # already strips a trailing /v1; both gateway_chat and run_quarantine then
+        # rebuild the canonical <origin>/v1/chat/completions route.
+        origin = root_url(args.gateway_url)
+        return None, origin, {"mode": "existing", "url": origin}
     port = args.gateway_port or free_port()
     url = f"http://127.0.0.1:{port}"
     cmd = build_fak_serve_command(args, port)
@@ -473,13 +478,13 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--engine-cache-idle-timeout-s", type=int, default=0)
     ap.add_argument("--engine-cache-require-exact-span", action="store_true",
                     help="pass fak's strict exact-span cache mode; current SGLang/vLLM quarantine flows are expected to fail closed")
-    ap.add_argument("--gateway-url", default="", help="existing fak gateway URL; if omitted, this runner starts one")
+    ap.add_argument("--gateway-url", default="", help="existing fak gateway origin (with or without a /v1 suffix); if omitted, this runner starts one")
     ap.add_argument("--gateway-port", type=int, default=0)
     ap.add_argument("--gateway-start-timeout-s", type=float, default=45.0)
     ap.add_argument("--http-timeout-s", type=float, default=15.0)
     ap.add_argument("--model-timeout-s", type=float, default=900.0)
-    ap.add_argument("--fak-command", default="go -C fak run ./cmd/fak")
-    ap.add_argument("--out", default="fak/experiments/glm52/full-size-serving-witness.json")
+    ap.add_argument("--fak-command", default="go run ./cmd/fak")
+    ap.add_argument("--out", default="experiments/glm52/full-size-serving-witness.json")
     ap.add_argument("--markdown", default="")
     ap.add_argument("--dry-run", action="store_true")
     args = ap.parse_args(argv)
