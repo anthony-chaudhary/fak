@@ -23,6 +23,7 @@
   --smoke           curl the wire end-to-end (no model needed), then exit
   --print-env       print the env lines for your own `claude` invocation
   --list-accounts   show the account switcher's roster, then exit
+  --install         copy `fak.exe` + a `fak-dogfood.cmd` shim onto PATH, then exit
   --help            this help
 
 .NOTES
@@ -36,6 +37,7 @@
                              key + real model tiers flow through; cache_control survives
                              byte-for-byte. Override the upstream with FAK_DOGFOOD_BASE_URL.
     FAK_DOGFOOD_ACCOUNT    account tag for the switcher    (default: isolated .claude-faklocal)
+    FAK_DOGFOOD_BINDIR     --install target dir on PATH    (default: <home>\bin)
     FAK_PLANNER_TIMEOUT_S  upstream model round-trip cap   (default 60; raise for big CPU models)
     FAK_PYTHON             python executable               (default: python)
 
@@ -56,6 +58,7 @@ if ($args.Count -ge 1) {
     '--smoke'         { $Mode = 'smoke' }
     '--print-env'     { $Mode = 'print-env' }
     '--list-accounts' { $Mode = 'list-accounts' }
+    '--install'       { $Mode = 'install' }
     '--help'          { $Mode = 'help' }
     '-h'              { $Mode = 'help' }
     default           { $RunArgs = $args }   # interactive: pass everything through to claude
@@ -109,6 +112,42 @@ if ($Mode -eq 'help') {
 if ($Mode -eq 'list-accounts') {
   & $Python (Join-Path $Root 'tools\fleet_accounts.py') list
   exit $LASTEXITCODE
+}
+if ($Mode -eq 'install') {
+  # Windows twin of the bash `--install`: put launchers on PATH so you can run the
+  # dogfood + the repo CLI from any directory. Windows symlinks need elevation/dev-mode,
+  # so (per the install decision) we COPY the built fak.exe and write a .cmd SHIM for the
+  # dogfood launcher (a launcher can't be "copied" like an exe; the shim always runs the
+  # in-tree script). Idempotent: re-running refreshes the fak.exe copy (it goes stale
+  # until then) and rewrites the shim.
+  $BinDir = if ($env:FAK_DOGFOOD_BINDIR) { $env:FAK_DOGFOOD_BINDIR } else { Join-Path $UserHome 'bin' }
+  if (-not (Test-Path $BinDir)) { New-Item -ItemType Directory -Force $BinDir | Out-Null }
+  if (-not (Test-Path $BinDir)) { Die "could not create bin dir: $BinDir (set FAK_DOGFOOD_BINDIR)" }
+
+  # Build + copy the repo CLI as fak.exe.
+  Log "building fak -> $Bin"
+  New-Item -ItemType Directory -Force (Split-Path -Parent $Bin) | Out-Null
+  Push-Location $FakDir
+  try { & go build -o $Bin ./cmd/fak; if ($LASTEXITCODE -ne 0) { Die "go build failed" } }
+  finally { Pop-Location }
+  Copy-Item -Force $Bin (Join-Path $BinDir 'fak.exe')
+
+  # Write the fak-dogfood.cmd shim -> this script, by absolute path.
+  $self = $MyInvocation.MyCommand.Path
+  $shim = Join-Path $BinDir 'fak-dogfood.cmd'
+  $shimBody = "@powershell -NoProfile -ExecutionPolicy Bypass -File `"$self`" %*`r`n"
+  [System.IO.File]::WriteAllText($shim, $shimBody, (New-Object System.Text.ASCIIEncoding))
+
+  Log "installed: $(Join-Path $BinDir 'fak.exe')  (copied; re-run --install to refresh)"
+  Log "installed: $shim  -> $self"
+  $onPath = (($env:PATH -split ';') | ForEach-Object { $_.TrimEnd('\') }) -contains $BinDir.TrimEnd('\')
+  if ($onPath) {
+    Log "ready - run ``fak-dogfood --smoke`` or ``fak serve --help`` from anywhere"
+  } else {
+    Log "add to PATH (current user), then reopen your shell:"
+    Log "  setx PATH `"`$env:PATH;$BinDir`""
+  }
+  exit 0
 }
 
 $script:children = @()
@@ -187,16 +226,17 @@ try {
   Log "kernel healthy: $((Invoke-WebRequest "http://127.0.0.1:$Port/healthz" -UseBasicParsing).Content)"
 
   # ---- resolve the account dir through the switcher ------------------------
+  # ONE call to the switcher's canonical front door: `resolve --faklocal-ok` pins the
+  # named tag (or synthesizes the isolated .claude-faklocal dogfood account for the
+  # 'faklocal' default), returning the config dir in a single flat record.
   function Resolve-AccountDir { param([string]$tag)
-    if ($tag -eq 'faklocal') {
-      $d = Join-Path $UserHome '.claude-faklocal'
-      New-Item -ItemType Directory -Force (Join-Path $d 'projects') | Out-Null
-      return $d
+    $r = (& $Python (Join-Path $Root 'tools\fleet_accounts.py') `
+            resolve --faklocal-ok --account $tag | ConvertFrom-Json)
+    if (-not $r -or -not $r.ok) {
+      $why = if ($r -and $r.reason) { $r.reason } else { 'resolve failed' }
+      Die "account tag '$tag' not resolved: $why - run with --list-accounts"
     }
-    $j = (& $Python (Join-Path $Root 'tools\fleet_accounts.py') json | ConvertFrom-Json)
-    $acct = $j.accounts | Where-Object { $_.tag -eq $tag } | Select-Object -First 1
-    if (-not $acct) { Die "account tag '$tag' not found - run with --list-accounts" }
-    return $acct.dir
+    return $r.config_dir
   }
   $AccountDir = Resolve-AccountDir $Account
 

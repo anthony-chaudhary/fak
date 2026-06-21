@@ -160,16 +160,13 @@ fi
 # shows up in `fleet_accounts.py list` as a first-class switchable account.
 resolve_account_dir() {
   local tag="${FAK_DOGFOOD_ACCOUNT:-faklocal}"
-  if [ "$tag" = "faklocal" ]; then
-    local dir="$FLEET_USER_HOME/.claude-faklocal"
-    mkdir -p "$dir/projects"
-    printf '%s' "$dir"; return
-  fi
-  # Resolve a named tag through the switcher's own classifier.
+  # ONE call to the switcher's canonical front door: `resolve --faklocal-ok` pins the
+  # named tag (or synthesizes the isolated .claude-faklocal dogfood account for the
+  # 'faklocal' default), printing the config dir from a single flat record.
   local dir
-  dir="$(python3 "$ROOT/tools/fleet_accounts.py" json 2>/dev/null \
-    | python3 -c "import json,sys; d=json.load(sys.stdin); print(next((a['dir'] for a in d['accounts'] if a['tag']=='$tag'),''))" 2>/dev/null || true)"
-  [ -n "$dir" ] || die "account tag '$tag' not found — run: $0 --list-accounts"
+  dir="$(python3 "$ROOT/tools/fleet_accounts.py" resolve --faklocal-ok --account "$tag" 2>/dev/null \
+    | python3 -c "import json,sys; d=json.load(sys.stdin); print(d['config_dir'] if d.get('ok') else '')" 2>/dev/null || true)"
+  [ -n "$dir" ] || die "account tag '$tag' not resolved — run: $0 --list-accounts"
   printf '%s' "$dir"
 }
 

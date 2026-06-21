@@ -16,7 +16,8 @@
   grabbed the ambient `claude` and launched under whatever account happened to be the
   default -- no CLAUDE_CONFIG_DIR, no availability check, no tier. A throttled or
   auth-blocked default account silently failed the dispatch. It now resolves an account
-  through the SAME switcher every other front door uses (`fleet_accounts.py route`),
+  through the SAME switcher front door every other consumer uses
+  (`fleet_accounts.py resolve` -- one call returns config_dir + oauth_token + tier),
   pins `CLAUDE_CONFIG_DIR` to it, and picks the model tier by WORK KIND:
 
     -WorkKind engineering   -> tier 1 (max-quality frontier; the DEFAULT, unchanged)
@@ -67,52 +68,33 @@ if ($cond.Length -gt 4000) { throw "goal condition is $($cond.Length) chars (>40
 $claude = (Get-Command claude).Source
 
 # --- Resolve the account + tier through the switcher (the dispatch integration) -------
-# Use the SAME router every other front door uses, scoped to claude (this launches
-# Claude Code, not opencode). Capture JSON to a temp file to dodge PS native-exe stdout
-# quirks, then parse. On a routing failure we FAIL -- never silently run ambient.
+# ONE call to the switcher's canonical front door (`fleet_accounts.py resolve`): pin OR
+# tier/work-kind route, plus the account's oauth token, in a single flat record. Scoped
+# to claude (this launches Claude Code, not opencode). Capture JSON to a temp file to
+# dodge PS native-exe stdout quirks, then parse. On a refusal we FAIL -- never silently
+# run ambient.
 $py = if (Get-Command python -ErrorAction SilentlyContinue) { 'python' } else { 'python3' }
 $tmpOut = Join-Path ([System.IO.Path]::GetTempPath()) ("goal-route-{0}.json" -f ([Guid]::NewGuid().ToString('N')))
 
-if ($Account) {
-  # Explicit account pin (rare; debugging). `route` selects by tier, not by name, so
-  # resolve the named account from the roster JSON instead and validate availability.
-  & $py (Join-Path $Workspace 'tools\fleet_accounts.py') json > $tmpOut 2>$null
-  $doc = $null
-  if (Test-Path $tmpOut) { try { $doc = Get-Content -Raw $tmpOut | ConvertFrom-Json } catch { $doc = $null }; Remove-Item $tmpOut -ErrorAction SilentlyContinue }
-  if (-not $doc) { throw "could not read account roster JSON -- cannot pin -Account '$Account'" }
-  $needle = $Account.ToLower()
-  $acct = @($doc.accounts | Where-Object {
-    $_.kind -eq 'worker' -and (
-      ("$($_.tag)".ToLower() -eq $needle) -or ("$($_.account)".ToLower() -eq $needle))
-  }) | Select-Object -First 1
-  if (-not $acct) { throw "account '$Account' is not an offered worker" }
-  if (-not $acct.available -and -not $AllowTierFallback) {
-    $why = if ($acct.block_reason) { $acct.block_reason } else { 'blocked' }
-    throw "account '$Account' is blocked: $why -- fix it or pass -AllowTierFallback to launch anyway"
-  }
-  $configDir = $acct.dir
-  $tierSel = $acct.model_tier
-  $fellBack = $false
-} else {
-  # Tier/work-kind routing among AVAILABLE accounts.
-  $routeArgs = @((Join-Path $Workspace 'tools\fleet_accounts.py'), 'route', '--product', 'claude')
-  if ($WorkKind) { $routeArgs += @('--work-kind', $WorkKind) } else { $routeArgs += @('--tier', $Tier) }
-  if ($AllowTierFallback) { $routeArgs += '--allow-tier-fallback' }
-  & $py @routeArgs > $tmpOut 2>$null
-  $routeRc = $LASTEXITCODE
-  $route = $null
-  if (Test-Path $tmpOut) { try { $route = Get-Content -Raw $tmpOut | ConvertFrom-Json } catch { $route = $null }; Remove-Item $tmpOut -ErrorAction SilentlyContinue }
-  if (-not $route) { throw "account routing produced no JSON (python=$py, rc=$routeRc) -- cannot dispatch" }
-  if (-not $route.ok) {
-    $reason = if ($route.reason) { $route.reason } else { 'no available account' }
-    throw "account switcher refused dispatch: $reason -- no worker is available at the requested tier. Fix the account (re-login / wait for reset) or pass -AllowTierFallback."
-  }
-  $acct = $route.account
-  $configDir = $acct.dir
-  $tierSel = $route.selected_tier
-  $fellBack = [bool]$route.fallback_used
+$resolveArgs = @((Join-Path $Workspace 'tools\fleet_accounts.py'), 'resolve', '--product', 'claude')
+if ($Account)          { $resolveArgs += @('--account', $Account) }
+elseif ($WorkKind)     { $resolveArgs += @('--work-kind', $WorkKind) }
+else                   { $resolveArgs += @('--tier', $Tier) }
+if ($AllowTierFallback) { $resolveArgs += '--allow-tier-fallback' }
+& $py @resolveArgs > $tmpOut 2>$null
+$resolveRc = $LASTEXITCODE
+$r = $null
+if (Test-Path $tmpOut) { try { $r = Get-Content -Raw $tmpOut | ConvertFrom-Json } catch { $r = $null }; Remove-Item $tmpOut -ErrorAction SilentlyContinue }
+if (-not $r) { throw "account resolve produced no JSON (python=$py, rc=$resolveRc) -- cannot dispatch" }
+if (-not $r.ok) {
+  $reason = if ($r.reason) { $r.reason } else { 'no available account' }
+  throw "account switcher refused dispatch: $reason -- fix the account (re-login / wait for reset) or pass -AllowTierFallback."
 }
-if (-not $configDir) { throw "routed account $($acct.account) has no config dir" }
+$acct      = $r
+$configDir = $r.config_dir
+$tierSel   = $r.selected_tier
+$fellBack  = [bool]$r.fallback_used
+if (-not $configDir) { throw "resolved account $($r.account) has no config dir" }
 
 if (-not (Test-Path $LogDir)) { New-Item -ItemType Directory -Path $LogDir | Out-Null }
 $stamp  = Get-Date -Format "yyyyMMdd-HHmmss"
@@ -135,15 +117,14 @@ $inF    = Join-Path $LogDir "$tag-$stamp.in.txt"
 # switcher-selected account, not the ambient default.
 $env:CLAUDE_CONFIG_DIR = $configDir
 
-# Serve on the credential the account actually authenticates with: prefer its
-# long-lived setup token (.oauth-token) over the interactive .credentials.json,
-# which EXPIRES. Observed 2026-06-21: gem7/gem8 serve via their setup token while
-# their interactive creds report "Not logged in - Please run /login" — so a launcher
-# that pins only CLAUDE_CONFIG_DIR false-fails the worker on turn 1. This mirrors
-# fleet_resume_watchdog.ps1 and account_probe.py. Drop any ambient token when the
-# account has none, to avoid a sibling account's token bleeding into this worker.
-$tokFile = Join-Path $configDir '.oauth-token'
-if (Test-Path $tokFile) { $env:CLAUDE_CODE_OAUTH_TOKEN = (Get-Content $tokFile -Raw).Trim() }
+# Serve on the credential the account actually authenticates with: the resolver already
+# applied the switcher's single token rule (prefer the dir's long-lived .oauth-token over
+# the interactive .credentials.json, which EXPIRES) and handed back oauth_token. Observed
+# 2026-06-21: gem7/gem8 serve via their setup token while their interactive creds report
+# "Not logged in" — so a launcher that pins only CLAUDE_CONFIG_DIR false-fails the worker
+# on turn 1. Drop any ambient token when the account has none, so a sibling account's
+# token never bleeds into this worker.
+if ($r.oauth_token) { $env:CLAUDE_CODE_OAUTH_TOKEN = "$($r.oauth_token)" }
 else { Remove-Item Env:CLAUDE_CODE_OAUTH_TOKEN -ErrorAction SilentlyContinue }
 
 # Start-Process => detached child in its own process tree; -Redirect* keep the streams.
