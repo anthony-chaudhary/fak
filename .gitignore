@@ -237,5 +237,11 @@ experiments/fleet/*.log
 # default `-out` of `fak turntax` (cmd/fak/main.go) — a regenerable report written at the
 # module root when no --out is given. Committed bench records live under experiments/.
 /turntax-report.json
+
+# default report of `fak agent --offline` (the canonical first-command in AGENTS.md /
+# the 60-second proof) — a regenerable scratch file dropped at the module root every
+# run. The FILE_ADMISSION pre-commit gate already refuses it; ignoring it keeps the
+# documented proof from ever leaving a stray file for `git add` to sweep in.
+/agent-report.json
 gpucheck_wsl
 *.tmp.*

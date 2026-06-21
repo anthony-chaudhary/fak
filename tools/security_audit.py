@@ -49,8 +49,12 @@ SECURITY_POLICY_CANDIDATES = ["SECURITY.md", ".github/SECURITY.md", "docs/SECURI
 LEAK_SCANNER = "tools/scrub_public_copy.py"
 PRECOMMIT_HOOK = "tools/githooks/pre-commit"
 
-GOMOD = "fak/go.mod"
-GOSUM = "fak/go.sum"
+# The Go module lives at the REPOSITORY ROOT in the public layout (`go.mod`), and
+# under `fak/` in the private/nested layout — check root first, then fall back. A
+# single hardcoded `fak/go.mod` mis-fired a WARN on the public root-module clone
+# (the module is at the root here; `fak/go.mod` does not exist). Each pair is tried
+# in order; the first go.mod that exists is the module surface to audit.
+GOMOD_CANDIDATES = [("go.mod", "go.sum"), ("fak/go.mod", "fak/go.sum")]
 
 
 class Finding:
@@ -170,16 +174,26 @@ def check_secret_leak_gate(root: Path) -> list[Finding]:
 
 
 def check_dependency_surface(root: Path) -> list[Finding]:
-    gomod = _read(root, GOMOD)
+    # Resolve the module surface from the first candidate go.mod that exists
+    # (root for the public layout, fak/ for the nested/private one).
+    gomod_rel = gosum_rel = ""
+    gomod = ""
+    for mod_rel, sum_rel in GOMOD_CANDIDATES:
+        text = _read(root, mod_rel)
+        if text:
+            gomod, gomod_rel, gosum_rel = text, mod_rel, sum_rel
+            break
     if not gomod:
-        return [Finding("dependency-surface", "WARN", "fak/go.mod not found", GOMOD)]
+        tried = ", ".join(m for m, _ in GOMOD_CANDIDATES)
+        return [Finding("dependency-surface", "WARN", f"go.mod not found (tried: {tried})",
+                        GOMOD_CANDIDATES[0][0])]
     deps = parse_external_requires(gomod, _module_path(gomod))
     if not deps:
         return []  # zero external deps — the repo's stated posture; nothing to pin.
-    if not (root / GOSUM).exists():
+    if not (root / gosum_rel).exists():
         return [Finding("dependency-surface", "FAIL",
-                        f"{len(deps)} external dependency(ies) but no fak/go.sum "
-                        f"to pin them (unverified dependency surface)", GOMOD)]
+                        f"{len(deps)} external dependency(ies) but no {gosum_rel} "
+                        f"to pin them (unverified dependency surface)", gomod_rel)]
     return []
 
 
