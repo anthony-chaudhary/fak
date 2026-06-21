@@ -49,6 +49,10 @@ CLI:
     python tools/fleet_accounts.py json       # machine roster + live status
     python tools/fleet_accounts.py available  # account dirs safe to offer now
     python tools/fleet_accounts.py route --task "say pong"  # tier-aware pick
+    python tools/fleet_accounts.py resolve --work-kind engineering  # ONE flat record:
+                                              # config_dir + oauth_token + tier (pin via
+                                              # --account; dogfood via --faklocal-ok). The
+                                              # single call every dispatch front door makes.
 """
 from __future__ import annotations
 
@@ -937,6 +941,50 @@ def routable_worker(row: dict) -> bool:
     return row.get("kind") == "worker" and not is_duplicate_identity(row)
 
 
+def annotated_roster(home: str = USER, policy: dict | None = None,
+                     registry: dict | None = None,
+                     throttle: dict | None = None,
+                     sessions: list[dict] | None = None,
+                     *, config_home: str | None = None) -> list[dict]:
+    """The full roster with live availability attached -- the canonical "give me the
+    live accounts" call.
+
+    Consumers historically spelled this out as
+    ``annotate_accounts(discover_accounts(...), registry=load_registry())`` in five
+    places (account_probe, claude_agent_chat, fleet_sessions x2, resume_resolver), each
+    a slightly different copy. This is the one helper they all route through, so a change
+    to discovery/annotation reaches every front door at once. ``registry`` defaults to
+    the live session registry (``load_registry()``); pass an explicit dict (or the
+    ``throttle``/``sessions`` overrides) when a caller already has the data in hand."""
+    reg = load_registry() if registry is None else registry
+    return annotate_accounts(
+        discover_accounts(home, policy, config_home=config_home),
+        reg, throttle, sessions)
+
+
+def read_oauth_token(account_dir: str) -> str | None:
+    """Return the account's long-lived setup token, or None.
+
+    The single implementation of the credential rule the dispatch front doors share:
+    prefer the dir's ``.oauth-token`` (a long-lived setup token) over the interactive
+    ``.credentials.json``, which EXPIRES -- a worker pinned only by CLAUDE_CONFIG_DIR can
+    false-fail on turn 1 when the interactive creds have lapsed but the setup token is
+    still good. Returns the stripped token string when ``<account_dir>/.oauth-token``
+    exists and is readable, else None so the caller can DROP any ambient
+    CLAUDE_CODE_OAUTH_TOKEN (never bleed a sibling account's token into this worker).
+    Pure read -- the caller decides whether to set or pop the env var.
+
+    Previously duplicated in launch_goal_detached.ps1 and issue_dispatch.py."""
+    if not account_dir:
+        return None
+    try:
+        with open(os.path.join(account_dir, ".oauth-token"), encoding="utf-8") as f:
+            tok = f.read().strip()
+    except OSError:
+        return None
+    return tok or None
+
+
 def available_accounts(home: str = USER, policy: dict | None = None,
                        registry: dict | None = None,
                        throttle: dict | None = None,
@@ -947,8 +995,8 @@ def available_accounts(home: str = USER, policy: dict | None = None,
     Duplicate-identity dirs are excluded: they resolve to the same Anthropic account as
     their canonical sibling, so offering them would double-count one account's capacity.
     """
-    rows = annotate_accounts(discover_accounts(home, policy, config_home=config_home),
-                             registry, throttle, sessions)
+    rows = annotated_roster(home, policy, registry, throttle, sessions,
+                            config_home=config_home)
     return [r for r in rows if routable_worker(r) and r["available"]]
 
 
@@ -1201,6 +1249,129 @@ def route_account(rows: list[dict], task_text: str = "", task_class: str = "auto
     }
 
 
+FAKLOCAL_TAG = "faklocal"
+
+
+def _flatten_resolved(acct: dict, *, ok: bool, reason: str,
+                      selected_tier=None, target_tier=None,
+                      fallback_used: bool = False,
+                      block_reason: str = "") -> dict:
+    """Project an account row into the flat resolve_account() return shape, stamping
+    the long-lived oauth token so every front door reads ONE record."""
+    config_dir = str(acct.get("dir") or "")
+    return {
+        "ok": ok,
+        "reason": reason,
+        "account": str(acct.get("account") or ""),
+        "tag": str(acct.get("tag") or ""),
+        "product": str(acct.get("product") or ""),
+        "config_dir": config_dir,
+        "oauth_token": read_oauth_token(config_dir),
+        "model": str(acct.get("model") or ""),
+        "model_tier": acct.get("model_tier"),
+        "selected_tier": selected_tier if selected_tier is not None else acct.get("model_tier"),
+        "target_tier": target_tier,
+        "fallback_used": bool(fallback_used),
+        "block_reason": block_reason,
+    }
+
+
+def resolve_account(pin: str | None = None, *, task_text: str = "",
+                    task_class: str = "auto", work_kind: str = "",
+                    product: str | None = None,
+                    allow_tier_fallback: bool = False,
+                    strict_tier: bool = False,
+                    faklocal_ok: bool = False,
+                    home: str = USER, policy: dict | None = None,
+                    registry: dict | None = None,
+                    config_home: str | None = None) -> dict:
+    """Resolve ONE fully-specified account for a dispatch -- the canonical front-door call.
+
+    The single entry point every front door (launch_goal_detached.ps1, the dogfood
+    launchers, issue_dispatch) routes through instead of stitching ``json``+``route``+a
+    hand-rolled availability check + a separate ``.oauth-token`` read. Returns a FLAT dict
+    ``{ok, reason, account, tag, product, config_dir, oauth_token, model, model_tier,
+    selected_tier, target_tier, fallback_used, block_reason}`` -- ``config_dir`` is what to
+    pin as CLAUDE_CONFIG_DIR and ``oauth_token`` is the long-lived setup token (or None ->
+    drop the ambient one).
+
+    Three request shapes:
+      * ``pin`` set: pick the worker dir whose tag/account matches ``pin`` and validate it
+        is available (refuse with ok=False unless ``allow_tier_fallback``). The dogfood
+        ``faklocal`` default is special-cased when ``faklocal_ok``: it synthesizes the
+        isolated ``<home>/.claude-faklocal`` dir (creating ``projects/``) so the launchers
+        stop hand-rolling it.
+      * otherwise: delegate to route_account() (tier/work-kind routing among AVAILABLE
+        accounts), then flatten its pick + attach the token.
+
+    A work_kind (gardening/engineering) is an operator-stated fact and wins over the
+    free-text heuristic, exactly as route_account documents."""
+    pol = policy or load_policy()
+
+    # The dogfood isolated account: not a discovered worker, synthesized on demand.
+    if faklocal_ok and pin and account_tag(pin) == FAKLOCAL_TAG:
+        d = os.path.join(home, ".claude-faklocal")
+        try:
+            os.makedirs(os.path.join(d, "projects"), exist_ok=True)
+        except OSError:
+            pass
+        return _flatten_resolved(
+            {"account": ".claude-faklocal", "tag": FAKLOCAL_TAG, "product": "claude",
+             "dir": d, "model": "local", "model_tier": 3},
+            ok=True, reason="isolated dogfood faklocal account",
+            selected_tier=3, target_tier=3)
+
+    rows = annotated_roster(home, pol, registry, config_home=config_home)
+
+    if pin:
+        needle = pin.strip().lower()
+        match = next(
+            (r for r in rows
+             if r.get("kind") == "worker"
+             and (str(r.get("tag") or "").lower() == needle
+                  or str(r.get("account") or "").lower() == needle)),
+            None)
+        if match is None:
+            return _flatten_resolved(
+                {}, ok=False, reason=f"account '{pin}' is not an offered worker")
+        if not match.get("available") and not allow_tier_fallback:
+            why = str(match.get("block_reason") or "blocked")
+            return _flatten_resolved(
+                match, ok=False,
+                reason=f"account '{pin}' is blocked: {why}",
+                block_reason=why)
+        return _flatten_resolved(
+            match, ok=True, reason="pinned account",
+            selected_tier=match.get("model_tier"),
+            target_tier=match.get("model_tier"))
+
+    # Tier / work-kind routing among available accounts.
+    cls = task_class
+    strict = strict_tier
+    wk = (work_kind or "").strip().lower()
+    if wk in GARDENING_WORK_KINDS or wk in ENGINEERING_WORK_KINDS:
+        cls, strict = wk, False
+    route = route_account(rows, task_text, cls,
+                          allow_tier_fallback=allow_tier_fallback,
+                          strict_tier=strict, product=product, policy=pol)
+    if not route.get("ok"):
+        return {
+            "ok": False,
+            "reason": str(route.get("reason") or "no available account"),
+            "account": "", "tag": "", "product": "",
+            "config_dir": "", "oauth_token": None,
+            "model": "", "model_tier": None,
+            "selected_tier": None, "target_tier": route.get("target_tier"),
+            "fallback_used": False, "block_reason": "",
+            "blocked_target_accounts": route.get("blocked_target_accounts", []),
+        }
+    return _flatten_resolved(
+        route["account"], ok=True, reason=str(route.get("reason") or "routed"),
+        selected_tier=route.get("selected_tier"),
+        target_tier=route.get("target_tier"),
+        fallback_used=bool(route.get("fallback_used")))
+
+
 def is_worker(account: str, home: str = USER, policy: dict | None = None) -> bool:
     """True iff ``account`` (a config-dir basename, any product) classifies as a worker.
 
@@ -1338,6 +1509,27 @@ def main(argv: list[str]) -> int:
             allow_tier_fallback=_has_arg(argv, ("--allow-tier-fallback",)),
             strict_tier=strict,
             product=product or None,
+        )
+        print(json.dumps(doc, indent=1))
+        return 0 if doc.get("ok") else 1
+    elif mode == "resolve":
+        # The single front-door call: pin OR tier/work-kind route -> ONE flat record with
+        # config_dir + oauth_token + tier. Same arg grammar as `route`, plus --account (pin)
+        # and --faklocal-ok (synthesize the dogfood .claude-faklocal dir).
+        tier, strict = _tier_arg(argv)
+        kind = _arg_value(argv, ("--work-kind", "--kind"), "").strip().lower()
+        task = _arg_value(argv, ("--task", "--goal", "--prompt"), "")
+        product = _arg_value(argv, ("--product",), "")
+        pin = _arg_value(argv, ("--account",), "")
+        doc = resolve_account(
+            pin or None,
+            task_text=task,
+            task_class=tier,
+            work_kind=kind,
+            product=product or None,
+            allow_tier_fallback=_has_arg(argv, ("--allow-tier-fallback",)),
+            strict_tier=strict,
+            faklocal_ok=_has_arg(argv, ("--faklocal-ok",)),
         )
         print(json.dumps(doc, indent=1))
         return 0 if doc.get("ok") else 1
