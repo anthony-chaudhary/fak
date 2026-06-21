@@ -52,7 +52,7 @@ fak version
 
 ```sh
 git clone https://github.com/anthony-chaudhary/fak.git
-cd fleet-public/fak
+cd fak
 go build -o fak ./cmd/fak          # Windows: build with -o fak.exe (see the Windows note)
 ./fak version
 ```

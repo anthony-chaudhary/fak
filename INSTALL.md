@@ -151,11 +151,11 @@ gateway.
 ## Build from source
 
 If your platform isn't a published target (e.g. `linux/arm64`), or you want to build a
-specific commit, the Go module lives in the `fak/` subdirectory:
+specific commit, the Go module is the repository root:
 
 ```sh
 git clone https://github.com/anthony-chaudhary/fak.git
-cd fleet-public/fak
+cd fak
 go build -o fak ./cmd/fak        # needs Go 1.26+
 ./fak version
 ```

@@ -19,7 +19,7 @@ lang: en
 
 # Published location (GitHub project site for anthony-chaudhary/fak).
 url: "https://anthony-chaudhary.github.io"
-baseurl: "/fleet-public"
+baseurl: "/fak"
 
 theme: jekyll-theme-cayman
 
