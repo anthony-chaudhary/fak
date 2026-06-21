@@ -24,6 +24,8 @@
 
 The real number is lower because actual WebVoyager tasks have fewer turns (median 12) than the conservative assumptions used for theoretical modeling.
 
+![WebBench prefill elimination — measured 8.8×–9.7× prefill-token elimination on real WebVoyager across worker counts, fak's fused resident KV vs naive per-turn re-prefill](../visuals/51-webbench-prefill-elimination.svg)
+
 ---
 
 ## Executive Summary

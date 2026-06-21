@@ -1,6 +1,6 @@
 # fak — the agent kernel
 
-<!-- readme-verified: 2026-06-21 vs VERSION 0.30.0 + BENCHMARK-AUTHORITY · process: tools/readme_freshness_audit.py + /refresh-readme -->
+<!-- readme-verified: 2026-06-21 vs VERSION 0.30.0 + BENCHMARK-AUTHORITY · process: tools/readme_freshness_audit.py + /refresh-readme · front page refocused on the turn-tax hero; breadth stills moved to BENCHMARK-GALLERY.md -->
 
 **Treat the model like an untrusted program, and the tool call like a syscall.**
 That one move is the whole idea. Everything an agent does to the outside world — call
@@ -19,48 +19,34 @@ memory, when reuse is still legal, and what survives a session boundary.**
 <!-- hero video — generated from the headline visuals by tools/hero_video_gen.py
      (storyboard: visuals/hero-video.storyboard.json). GitHub markdown can't autoplay a
      repo-relative .mp4, so the embed is a compact looping .gif that links to the full mp4. -->
-[![fak — the agent kernel · a ~40s model-card reveal of the headline benchmarks: the performance spectrum, the turn-tax curves (measured 9.7x), the capability matrix, the three-pillar stat card with its honest single-stream fence, and the eight-axis sweep — click for the full-resolution MP4](visuals/hero-video.gif)](visuals/hero-video.mp4)
+[![fak — the agent kernel · a ~40s, 1440p model-card reveal: the turn-tax curves animate the measured 9.7x prefill elimination, then the capability matrix, the three-pillar stat card with its honest single-stream fence, and the eight-axis sweep build in — click for the full-resolution MP4](visuals/hero-video.gif)](visuals/hero-video.mp4)
 
-<sub>▶ the headline benchmarks as a ~40-second reveal — [full-resolution MP4](visuals/hero-video.mp4) · stills below</sub>
+<sub>▶ a ~40-second reveal — the curves draw themselves, the multipliers count up — [full-resolution MP4 (1440p)](visuals/hero-video.mp4)</sub>
 
-[![The performance spectrum: from raw parity, through measured reuse wins, to agent-scale leverage](visuals/41-performance-spectrum.svg)](BENCHMARK-GALLERY.md)
+**Live:** [the showcase](https://anthony-chaudhary.github.io/fak/showcase.html) ·
+[docs site](https://anthony-chaudhary.github.io/fak/) ·
+**Try it now:** [in Colab](https://colab.research.google.com/github/anthony-chaudhary/fak/blob/main/notebooks/fak-quickstart.ipynb) (free GPU, nothing to install)
 
 ---
 
-## fak by the benchmarks — receipts in a lab-release grammar
+## The one chart: re-prefill is linear, resident KV is not
 
-Four headline visuals, in the visual grammar a frontier lab ships a model card in. Each
-is generated from one source-of-truth data file, every figure traced to its commit — and
-honest by construction (a `[NAIVE]` number is fenced, competitor cells never carry a
-fabricated figure, and the single-stream throughput `fak` *doesn't* target is shown, not
-hidden). → **[The full benchmark gallery](BENCHMARK-GALLERY.md)** ·
-**[every number, traced to its commit + artifact](BENCHMARK-AUTHORITY.md)** ⭐
-
-_Click any figure to open its full write-up — the link lands on that figure's own section in the gallery, not the top of the page._
-
-**1 · The mechanism — re-prefill cost is linear; `fak`'s resident, addressable KV is not.**
-Three lenses: a structural per-cold-miss tax, a measured **9.7×** WebVoyager elimination,
-and the conservative **4.1×** vs a tuned warm-cache SOTA stack.
+An agent rereads the same setup on every turn. The naive baseline re-prefills it on each
+cold KV miss, so its cost climbs linearly with context, fleet size, and turns. `fak`
+keeps that work **resident and addressable**, so its line stays flat — and the gap is the
+whole pitch: a measured **9.7×** less prefill at 8 workers on real WebVoyager, the
+conservative **4.1×** vs a tuned warm-cache SOTA stack.
 
 [![fak turn-tax efficiency curves — three panels (per-turn prefill cost vs context, WebVoyager fleet prefill vs workers, 50-turn fleet serving work vs turns), each a baseline re-prefill curve rising linearly while fak's resident-KV curve stays flat, multipliers 20,480x / measured 9.7x / 4.1x](visuals/60-hero-turntax-curves.png)](BENCHMARK-GALLERY.md#60--turn-tax-curves)
 
-**2 · The headline — `fak` spans the whole boundary; the serving stacks span one band.**
-Its cache is **addressable** (it reaches into the middle of a kept run); theirs is
-front-prefix only. fak carries a value in *every* row — an em-dash is a capability the
-stack doesn't ship, not a measured zero.
-
-[![fak capability matrix — fak vs vLLM, SGLang, llama.cpp and an API prompt cache across serving reuse, correctness, the security kernel and an honest single-stream fence; the fak column is typed "addressable" and highlighted, carries a value in every row with an inline coverage pip-strip, while the serving stacks carry an em-dash outside the serving and single-stream bands](visuals/59-hero-capability-matrix.png)](BENCHMARK-GALLERY.md#59--capability-matrix)
-
-**3 · The receipts — three pillars + an honest single-stream fence, on one card.**
-Serving efficiency, correctness (the reuse is bit-exact), and a security kernel — with the
-`[SOTA-style]` 4.1× and the greyed `[NAIVE]` 139.3× marked so neither can be misread.
-
-[![fak benchmark breadth card — a three-pillar capability sweep (serving efficiency 4.1x / 86.7% KV hit / 6.95x RadixAttention, correctness max-delta-zero eviction / 7-of-7 greedy parity, security kernel 362ns decide / 3.3us quarantine / 2849x boundary tax) over an honest single-stream fence where llama.cpp leads](visuals/55-hero-statcard.png)](BENCHMARK-GALLERY.md#55--benchmark-breadth-card)
-
-**4 · The sweep — eight axes, `fak` (green) vs one honest reference each.**
-The final panel is the fence `fak` does not target, inverted to the SOTA leader.
-
-[![fak benchmark sweep — an eight-panel bar grid across serving efficiency, correctness and the security kernel plus a single-stream fence, fak in green against one honest reference per panel, with llama.cpp leading the decode fence](visuals/61-hero-benchmark-sweep.png)](BENCHMARK-GALLERY.md#61--benchmark-sweep)
+**The breadth is the point too — but it belongs in the gallery, not the front page.** A
+capability matrix (`fak` spans the whole boundary; serving stacks span one band), a
+three-pillar stat card with its honest single-stream fence, and an eight-axis sweep round
+out the receipts — each generated from one source-of-truth data file, honest by
+construction (a `[NAIVE]` number stays fenced, competitor cells never carry a fabricated
+figure, and the single-stream throughput `fak` *doesn't* target is shown, not hidden).
+→ **[The full benchmark gallery](BENCHMARK-GALLERY.md)** ·
+**[every number, traced to its commit + artifact](BENCHMARK-AUTHORITY.md)** ⭐
 
 ---
 
@@ -147,74 +133,36 @@ model and the dangerous action never runs. Full walkthrough:
 ## Why this matters now
 
 An agent system's cost isn't one number — it's roughly `agents × turns × working-set ×
-reread-rate × legality checks`, and the naive stack lets all five multiply. The waste
-isn't that the model is dumb; it's that the system keeps making it **reread the same
-setup** (five agents over fifty turns is 250 chances to reprocess the same shared
-prompt). You feel it as a cliff: a long conversation gets *slower per turn* because each
-turn reprocesses a longer history, and a single turn at long context is risky enough that
-whole workflows are built around not taking one. The frontier is full of these walls — KV
-residency, invalidation storms, tool-rate limits, approval queues.
+reread-rate × legality checks`, and the naive stack lets all five multiply by making the
+model **reread the same setup** on every turn (five agents over fifty turns is 250 chances
+to reprocess the same shared prompt). `fak` attacks the one safe term, reread-rate,
+*without* deleting the proof reuse is still legal: the first worker pays, everyone after
+reads for free, so *more agents can mean less total work*. Two fences — the reuse win is
+**self-host only** (an app that just *calls* a frontier API gets the safety floor, not the
+savings), and the frontier-scale "agent city" numbers are design targets, not
+measurements. → **[The full cost model and personas](docs/concepts-and-story.md)**
 
-`fak` attacks the one safe term, reread-rate, *without* deleting the proof reuse is still
-legal. We measure against the best already-shipped setup, not a strawman: on a 50-turn ×
-5-agent run that's **~4× vs a tuned warm-cache stack** — the honest few-fold against
-state-of-the-art reuse. (Against the *naive* pattern that re-sends the whole growing
-context every turn it's ~60×, but beating naive is easy and we don't lead with it.) The
-counter-intuitive part: the first worker pays, everyone after reads for free, so *more
-agents can mean less total work*. Two fences: the reuse win is **self-host only** (an app
-that just *calls* a frontier API gets the safety floor, not the savings), and the
-frontier-scale "agent city" numbers are design targets, not measurements.
-
-**The benchmarks — the whole boundary, not one number.** `fak` isn't a single-axis
-speedup; the breadth *is* the point. A capabilities sweep across the three pillars it
-spans — **serving efficiency** (it does the SOTA stack's reuse), **correctness** (that
-reuse is bit-exact — the thing no serving engine proves), and a **security kernel** (the
-default-deny gate, at syscall speed — the boundary they don't own) — with the
-single-stream throughput it *doesn't* target shown honestly below the line. The 4.1× is
-marked `[SOTA-style]`, not a green win (its baseline is fak's own kernel held constant,
-so it isolates reuse); the seductive 139.3× is greyed and tagged `[NAIVE]` so it can't
-read as a SOTA result. Every number carries its commit and traces to the authority doc.
-
-The turn-tax curves, the capability matrix, the breadth card, and the per-benchmark sweep
-are **[at the top of this README](#fak-by-the-benchmarks--receipts-in-a-lab-release-grammar)**;
-the full set lives in the **[benchmark gallery](BENCHMARK-GALLERY.md)**.
-
-→ **[Every number, traced to its commit + artifact](BENCHMARK-AUTHORITY.md)** ⭐
-
-**And it's not one lucky box.** The same pure-Go kernel — same bit-exact gates — is
-profiled across **4 distinct hardware platforms**: Apple M3 Pro (**Metal** + arm64 NEON),
-AMD Ryzen 9 + Radeon RX 7600 (**Vulkan**), Intel + NVIDIA RTX 4070 (**CUDA** Ada), and an
-8× A100 serving node (**CUDA** Ampere) — spanning 2 CPU ISAs, 4 GPU backends, and 4
-operating systems. The deterministic results reproduce byte-for-byte across all of them.
-→ **[The hardware matrix](docs/HARDWARE-MATRIX.md)**
-
-[![fak hardware coverage matrix — four hardware platforms (Apple M3 Pro / Metal, AMD Ryzen + RX 7600 / Vulkan, Intel + RTX 4070 / CUDA Ada, 8x A100 / CUDA Ampere) across two CPU ISAs, four GPU backends, and four operating systems, with the bit-exact correctness gates passing on every backend](visuals/56-hardware-coverage-matrix.svg)](docs/HARDWARE-MATRIX.md#the-coverage-matrix)
-
-### Web agent workloads: the turn-tax is structural ✅
-
-For web/browser agent benchmarks — WebVoyager, BrowseComp, Browser Agent Benchmark —
-the same story plays out at a different scale. Every navigation action re-prefills the
-entire browser context (DOM state, tool schemas, task history). That's 2K+ tokens per
-turn, times ~12 turns per task, times 586 tasks for WebVoyager.
-
-**Measured on real WebVoyager (643 tasks):**
+**Measured on real WebVoyager (643 tasks)** — every navigation action re-prefills the
+whole browser context (DOM, tool schemas, task history), so the turn-tax compounds with
+fleet size:
 
 | Workers | Naive Re-Prefill | fak Fused | Net Elimination |
 |---------|-----------------|-----------|-----------------|
 | 1 | 170.9 M tokens | 19.4 M tokens | **8.8×** |
 | 8 | 1.37 G tokens | 141.3 M tokens | **9.7×** |
 
-The same elimination, generalized into three lenses — re-prefill cost climbs ~linearly
-with context, fleet, and turns while fak's resident, addressable KV stays flat (the
-middle panel *is* the measured WebVoyager `9.7×` above):
+The turn-tax is **worker-independent** — every agent pays it, every turn, regardless of
+fleet size. SOTA agents like Alumnium (98.5% WebVoyager success) reach the same capability
+through `fak` at ~9× less prefill cost (measured).
+→ **[Frontier WebBench baselines](docs/webbench-baselines.md)**
 
-[![fak turn-tax efficiency curves — three panels (per-turn prefill cost vs context length, WebVoyager fleet prefill vs workers, and 50-turn fleet serving work vs turns) each showing a baseline re-prefill curve rising linearly while fak's resident-KV curve stays flat, with multipliers of 20480x at 1M context, a measured 9.7x at 8 workers, and a conservative 4.1x vs a tuned warm-cache SOTA stack](visuals/60-hero-turntax-curves.png)](BENCHMARK-GALLERY.md#60--turn-tax-curves)
+**And it's not one lucky box.** The same pure-Go kernel — same bit-exact gates — is
+profiled across **4 distinct hardware platforms** (Apple M3 Pro/Metal, AMD Ryzen +
+RX 7600/Vulkan, Intel + RTX 4070/CUDA Ada, 8× A100/CUDA Ampere) spanning 2 CPU ISAs, 4 GPU
+backends, and 4 operating systems — and the deterministic results reproduce byte-for-byte
+on every one. → **[The hardware matrix](docs/HARDWARE-MATRIX.md)**
 
-The turn-tax (re-prefill vs KV persistence) is **worker-independent** — every agent
-pays it, every turn, regardless of fleet size. **SOTA agents** like Alumnium (98.5% WebVoyager
-success) achieve the same capability through fak at **~9× less prefill cost** (measured).
-→ **[Frontier WebBench baselines](docs/webbench-baselines.md)** ·
-[![WebBench prefill elimination](visuals/51-webbench-prefill-elimination.svg)](docs/webbench-baselines.md)
+[![fak hardware coverage matrix — four hardware platforms (Apple M3 Pro / Metal, AMD Ryzen + RX 7600 / Vulkan, Intel + RTX 4070 / CUDA Ada, 8x A100 / CUDA Ampere) across two CPU ISAs, four GPU backends, and four operating systems, with the bit-exact correctness gates passing on every backend](visuals/56-hardware-coverage-matrix.svg)](docs/HARDWARE-MATRIX.md#the-coverage-matrix)
 
 ---
 
