@@ -46,6 +46,9 @@ ALLOWED_ROOT_MD = {
     # benchmark front-door set (the single-source-of-truth deck the README cites)
     "BENCHMARK-AUTHORITY.md", "BENCHMARK-GALLERY.md",
     "BENCHMARK-GOVERNANCE.md", "BENCHMARK-TEMPLATE.md",
+    # generated presentation layer linked from BENCHMARK-AUTHORITY.md (dated by
+    # design: it's the model-card-style hero comparison, regenerated per release).
+    "HERO-BENCHMARK-2026-06-21.md",
     # common OSS root/meta docs (allowed if a maintainer adds one)
     "CODE_OF_CONDUCT.md", "CHANGELOG.md", "GOVERNANCE.md", "MAINTAINERS.md",
     "ROADMAP.md", "AUTHORS.md", "NOTICE.md", "SUPPORT.md", "HISTORY.md",

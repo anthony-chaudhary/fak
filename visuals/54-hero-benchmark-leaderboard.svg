@@ -92,5 +92,5 @@
   <text x="96" y="645" class="legend"><tspan style="font-weight:900;fill:#2e8b57;">Bold green</tspan> = fak leads the SOTA baseline.</text>
   <rect x="520" y="628" width="22" height="22" rx="4" fill="#fff5e8" stroke="#dfbd78"/>
   <text x="552" y="645" class="legend">Amber = fak trails (single-stream raw throughput) — shown honestly.</text>
-  <text x="1180" y="645" class="small">All numbers trace to fak/BENCHMARK-AUTHORITY.md.</text>
+  <text x="1180" y="645" class="small">All numbers trace to BENCHMARK-AUTHORITY.md.</text>
 </svg>

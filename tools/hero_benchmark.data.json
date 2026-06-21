@@ -6,11 +6,11 @@
     "version": "v2",
     "fak_version": "0.30.0",
     "machine": "node-macos-a — Apple M3 Pro (6P+6E, 36 GB unified, ~150 GB/s), arm64, macOS 26.5",
-    "doc_path": "fak/HERO-BENCHMARK-2026-06-21.md",
+    "doc_path": "HERO-BENCHMARK-2026-06-21.md",
     "hero_svg": "visuals/53-hero-benchmark-comparison.svg",
     "leaderboard_svg": "visuals/54-hero-benchmark-leaderboard.svg",
     "html_path": "visuals/hero-benchmark.html",
-    "authority": "fak/BENCHMARK-AUTHORITY.md",
+    "authority": "BENCHMARK-AUTHORITY.md",
     "artifact_root": "fak"
   },
   "headline": {
