@@ -97,6 +97,11 @@ jobs:
           sha256sum "${ARCHIVE}" > "${ARCHIVE}.sha256"
           echo "built ${ARCHIVE}"
           cat "${ARCHIVE}.sha256"
+          # Hand the exact pair this leg produced to the upload step. Globbing for
+          # every extension (`dist/*.zip` on a linux leg) fails under `set -u`
+          # because the unmatched pattern stays literal and `gh` 404s on it.
+          echo "ARCHIVE=dist/${ARCHIVE}" >> "$GITHUB_ENV"
+          echo "ARCHIVE_SUM=dist/${ARCHIVE}.sha256" >> "$GITHUB_ENV"
 
       - name: Upload to the GitHub release
         env:
@@ -104,8 +109,9 @@ jobs:
         run: |
           set -euo pipefail
           TAG="${{ github.event.inputs.tag || github.ref_name }}"
+          # Upload only the one archive (+ its checksum) this matrix leg built.
           # --clobber makes a re-run (dispatch backfill, retried matrix leg) idempotent.
-          gh release upload "$TAG" dist/*.tar.gz dist/*.zip dist/*.sha256 --clobber
+          gh release upload "$TAG" "$ARCHIVE" "$ARCHIVE_SUM" --clobber
 
   checksums:
     name: aggregate SHA256SUMS
