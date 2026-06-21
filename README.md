@@ -23,7 +23,7 @@ memory, when reuse is still legal, and what survives a session boundary.**
 
 <sub>▶ the headline benchmarks as a ~40-second reveal — [full-resolution MP4](visuals/hero-video.mp4) · stills below</sub>
 
-![The performance spectrum: from raw parity, through measured reuse wins, to agent-scale leverage](visuals/41-performance-spectrum.svg)
+[![The performance spectrum: from raw parity, through measured reuse wins, to agent-scale leverage](visuals/41-performance-spectrum.svg)](BENCHMARK-GALLERY.md)
 
 ---
 
@@ -36,29 +36,31 @@ fabricated figure, and the single-stream throughput `fak` *doesn't* target is sh
 hidden). → **[The full benchmark gallery](BENCHMARK-GALLERY.md)** ·
 **[every number, traced to its commit + artifact](BENCHMARK-AUTHORITY.md)** ⭐
 
-**1 · The headline — `fak` spans the whole boundary; the serving stacks span one band.**
+_Click any figure to open its full write-up — the link lands on that figure's own section in the gallery, not the top of the page._
+
+**1 · The mechanism — re-prefill cost is linear; `fak`'s resident, addressable KV is not.**
+Three lenses: a structural per-cold-miss tax, a measured **9.7×** WebVoyager elimination,
+and the conservative **4.1×** vs a tuned warm-cache SOTA stack.
+
+[![fak turn-tax efficiency curves — three panels (per-turn prefill cost vs context, WebVoyager fleet prefill vs workers, 50-turn fleet serving work vs turns), each a baseline re-prefill curve rising linearly while fak's resident-KV curve stays flat, multipliers 20,480x / measured 9.7x / 4.1x](visuals/60-hero-turntax-curves.png)](BENCHMARK-GALLERY.md#60--turn-tax-curves)
+
+**2 · The headline — `fak` spans the whole boundary; the serving stacks span one band.**
 Its cache is **addressable** (it reaches into the middle of a kept run); theirs is
 front-prefix only. fak carries a value in *every* row — an em-dash is a capability the
 stack doesn't ship, not a measured zero.
 
-[![fak capability matrix — fak vs vLLM, SGLang, llama.cpp and an API prompt cache across serving reuse, correctness, the security kernel and an honest single-stream fence; the fak column is typed "addressable" and highlighted, carries a value in every row with an inline coverage pip-strip, while the serving stacks carry an em-dash outside the serving and single-stream bands](visuals/59-hero-capability-matrix.png)](BENCHMARK-GALLERY.md)
-
-**2 · The mechanism — re-prefill cost is linear; `fak`'s resident, addressable KV is not.**
-Three lenses: a structural per-cold-miss tax, a measured **9.7×** WebVoyager elimination,
-and the conservative **4.1×** vs a tuned warm-cache SOTA stack.
-
-[![fak turn-tax efficiency curves — three panels (per-turn prefill cost vs context, WebVoyager fleet prefill vs workers, 50-turn fleet serving work vs turns), each a baseline re-prefill curve rising linearly while fak's resident-KV curve stays flat, multipliers 20,480x / measured 9.7x / 4.1x](visuals/60-hero-turntax-curves.png)](BENCHMARK-GALLERY.md)
+[![fak capability matrix — fak vs vLLM, SGLang, llama.cpp and an API prompt cache across serving reuse, correctness, the security kernel and an honest single-stream fence; the fak column is typed "addressable" and highlighted, carries a value in every row with an inline coverage pip-strip, while the serving stacks carry an em-dash outside the serving and single-stream bands](visuals/59-hero-capability-matrix.png)](BENCHMARK-GALLERY.md#59--capability-matrix)
 
 **3 · The receipts — three pillars + an honest single-stream fence, on one card.**
 Serving efficiency, correctness (the reuse is bit-exact), and a security kernel — with the
 `[SOTA-style]` 4.1× and the greyed `[NAIVE]` 139.3× marked so neither can be misread.
 
-[![fak benchmark breadth card — a three-pillar capability sweep (serving efficiency 4.1x / 86.7% KV hit / 6.95x RadixAttention, correctness max-delta-zero eviction / 7-of-7 greedy parity, security kernel 362ns decide / 3.3us quarantine / 2849x boundary tax) over an honest single-stream fence where llama.cpp leads](visuals/55-hero-statcard.png)](BENCHMARK-AUTHORITY.md)
+[![fak benchmark breadth card — a three-pillar capability sweep (serving efficiency 4.1x / 86.7% KV hit / 6.95x RadixAttention, correctness max-delta-zero eviction / 7-of-7 greedy parity, security kernel 362ns decide / 3.3us quarantine / 2849x boundary tax) over an honest single-stream fence where llama.cpp leads](visuals/55-hero-statcard.png)](BENCHMARK-GALLERY.md#55--benchmark-breadth-card)
 
 **4 · The sweep — eight axes, `fak` (green) vs one honest reference each.**
 The final panel is the fence `fak` does not target, inverted to the SOTA leader.
 
-[![fak benchmark sweep — an eight-panel bar grid across serving efficiency, correctness and the security kernel plus a single-stream fence, fak in green against one honest reference per panel, with llama.cpp leading the decode fence](visuals/61-hero-benchmark-sweep.png)](BENCHMARK-GALLERY.md)
+[![fak benchmark sweep — an eight-panel bar grid across serving efficiency, correctness and the security kernel plus a single-stream fence, fak in green against one honest reference per panel, with llama.cpp leading the decode fence](visuals/61-hero-benchmark-sweep.png)](BENCHMARK-GALLERY.md#61--benchmark-sweep)
 
 ---
 
@@ -173,9 +175,9 @@ marked `[SOTA-style]`, not a green win (its baseline is fak's own kernel held co
 so it isolates reuse); the seductive 139.3× is greyed and tagged `[NAIVE]` so it can't
 read as a SOTA result. Every number carries its commit and traces to the authority doc.
 
-The breadth card, the capability matrix, and the per-benchmark sweep are **[at the top of
-this README](#fak-by-the-benchmarks--receipts-in-a-lab-release-grammar)**; the full set
-lives in the **[benchmark gallery](BENCHMARK-GALLERY.md)**.
+The turn-tax curves, the capability matrix, the breadth card, and the per-benchmark sweep
+are **[at the top of this README](#fak-by-the-benchmarks--receipts-in-a-lab-release-grammar)**;
+the full set lives in the **[benchmark gallery](BENCHMARK-GALLERY.md)**.
 
 → **[Every number, traced to its commit + artifact](BENCHMARK-AUTHORITY.md)** ⭐
 
@@ -186,7 +188,7 @@ AMD Ryzen 9 + Radeon RX 7600 (**Vulkan**), Intel + NVIDIA RTX 4070 (**CUDA** Ada
 operating systems. The deterministic results reproduce byte-for-byte across all of them.
 → **[The hardware matrix](docs/HARDWARE-MATRIX.md)**
 
-[![fak hardware coverage matrix — four hardware platforms (Apple M3 Pro / Metal, AMD Ryzen + RX 7600 / Vulkan, Intel + RTX 4070 / CUDA Ada, 8x A100 / CUDA Ampere) across two CPU ISAs, four GPU backends, and four operating systems, with the bit-exact correctness gates passing on every backend](visuals/56-hardware-coverage-matrix.svg)](docs/HARDWARE-MATRIX.md)
+[![fak hardware coverage matrix — four hardware platforms (Apple M3 Pro / Metal, AMD Ryzen + RX 7600 / Vulkan, Intel + RTX 4070 / CUDA Ada, 8x A100 / CUDA Ampere) across two CPU ISAs, four GPU backends, and four operating systems, with the bit-exact correctness gates passing on every backend](visuals/56-hardware-coverage-matrix.svg)](docs/HARDWARE-MATRIX.md#the-coverage-matrix)
 
 ### Web agent workloads: the turn-tax is structural ✅
 
@@ -206,13 +208,13 @@ The same elimination, generalized into three lenses — re-prefill cost climbs ~
 with context, fleet, and turns while fak's resident, addressable KV stays flat (the
 middle panel *is* the measured WebVoyager `9.7×` above):
 
-[![fak turn-tax efficiency curves — three panels (per-turn prefill cost vs context length, WebVoyager fleet prefill vs workers, and 50-turn fleet serving work vs turns) each showing a baseline re-prefill curve rising linearly while fak's resident-KV curve stays flat, with multipliers of 20480x at 1M context, a measured 9.7x at 8 workers, and a conservative 4.1x vs a tuned warm-cache SOTA stack](visuals/60-hero-turntax-curves.png)](BENCHMARK-GALLERY.md)
+[![fak turn-tax efficiency curves — three panels (per-turn prefill cost vs context length, WebVoyager fleet prefill vs workers, and 50-turn fleet serving work vs turns) each showing a baseline re-prefill curve rising linearly while fak's resident-KV curve stays flat, with multipliers of 20480x at 1M context, a measured 9.7x at 8 workers, and a conservative 4.1x vs a tuned warm-cache SOTA stack](visuals/60-hero-turntax-curves.png)](BENCHMARK-GALLERY.md#60--turn-tax-curves)
 
 The turn-tax (re-prefill vs KV persistence) is **worker-independent** — every agent
 pays it, every turn, regardless of fleet size. **SOTA agents** like Alumnium (98.5% WebVoyager
 success) achieve the same capability through fak at **~9× less prefill cost** (measured).
 → **[Frontier WebBench baselines](docs/webbench-baselines.md)** ·
-![WebBench prefill elimination](visuals/51-webbench-prefill-elimination.svg)
+[![WebBench prefill elimination](visuals/51-webbench-prefill-elimination.svg)](docs/webbench-baselines.md)
 
 ---
 
