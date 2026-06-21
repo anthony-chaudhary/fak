@@ -317,8 +317,8 @@
       "note": "single source of truth for every committed number."
     },
     {
-      "text": "fak/RADIXATTENTION-RESULTS.md",
-      "href": "RADIXATTENTION-RESULTS.md",
+      "text": "RADIXATTENTION-RESULTS.md",
+      "href": "docs/benchmarks/RADIXATTENTION-RESULTS.md",
       "note": "SGLang RadixAttention parity + hit-rate method."
     },
     {

@@ -47,7 +47,9 @@ SOFT_JUNK = [
     re.compile(r"\.tmp$"),
     re.compile(r"(^|/)(report|agent-report)\.json$"),
 ]
-EXEMPT_DATA_DIRS = ("fak/experiments/", "fak/testdata/")
+# The Go module + experiments/ are at the repo ROOT now (post-hoist), so the data
+# dirs where soft-junk names (report.json, *.log) are real artifacts live at root.
+EXEMPT_DATA_DIRS = ("experiments/", "testdata/", "internal/", "fak/experiments/", "fak/testdata/")
 # Specific tracked files that trip a soft rule but are intentionally kept.
 KEEP_EXCEPTIONS = {
     "fak/demorace-err.log",  # cited as evidence in docs/benchmarking/FINAL-ANALYSIS.md
