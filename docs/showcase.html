@@ -22,6 +22,9 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 
+<!-- Inline SVG favicon (the brand dot) — avoids a 404 on /favicon.ico for this page. -->
+<link rel="icon" href="data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2032%2032'%3E%3Crect%20width='32'%20height='32'%20rx='7'%20fill='%23070a10'/%3E%3Ccircle%20cx='16'%20cy='16'%20r='8'%20fill='%2338bdf8'/%3E%3C/svg%3E" />
+
 <!-- ---- SEO / AEO (hand-written; this page opts out of the Jekyll theme + jekyll-seo-tag) ---- -->
 <title>fak — the agent kernel | a live showcase</title>
 <meta name="description" content="fak is an agent kernel: an in-process, default-deny permission gate for AI agents fused with an addressable, bit-exact KV cache, in Go. Treat the model like an untrusted program and every tool call like a syscall — one boundary for prompt-injection containment, capability security, and cache-efficient self-hosted agent fleets." />
@@ -505,8 +508,12 @@ go run ./cmd/fak agent --offline
           tooltip:{callbacks:{label:function(c){return c.parsed.x + ' min';}}}
         },
         scales:{
-          x:{type:'logarithmic', grid:{color:'#1c2636'},
-             ticks:{color:'#aab8cb', callback:function(v){return v + ' min';}}},
+          // log axis, but pin a sparse tick set — the default log scale emits a tick at
+          // every integer in the first decade (10,11,12…20), which collide at desktop width.
+          x:{type:'logarithmic', min:10, max:90, grid:{color:'#1c2636'},
+             afterBuildTicks:function(axis){ axis.ticks = [10,20,30,50,80].map(function(v){return {value:v};}); },
+             ticks:{color:'#aab8cb', autoSkip:false,
+                    callback:function(v){ return [10,20,30,50,80].indexOf(v) >= 0 ? v + ' min' : ''; }}},
           y:{grid:{display:false}, ticks:{color:'#e6edf6', font:{weight:'600'}}}
         }
       }
