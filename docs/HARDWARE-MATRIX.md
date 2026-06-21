@@ -10,7 +10,7 @@
 > every one.
 
 Every number on this page traces to a committed artifact via the single source of
-truth, **[`fak/BENCHMARK-AUTHORITY.md`](../fak/BENCHMARK-AUTHORITY.md)**. This page is the
+truth, **[`fak/BENCHMARK-AUTHORITY.md`](../BENCHMARK-AUTHORITY.md)**. This page is the
 *rollup* — the at-a-glance "how serious is this" view — not a new claim. Where a number
 appears here it carries a pointer to the doc + commit that owns it.
 
@@ -59,7 +59,7 @@ The box almost every published `fak` number is measured on.
 - **The agent-fleet value stack** — the README headline 50-turn × 5-agent Qwen2.5-1.5B
   run: **19.0 min vs ~78 min** tuned warm-cache (**4.1×**), and the high-T session ladder
   climbing **24.9× → 139.3×** vs the naive loop.
-  → [`BENCHMARK-AUTHORITY.md`](../fak/BENCHMARK-AUTHORITY.md)
+  → [`BENCHMARK-AUTHORITY.md`](../BENCHMARK-AUTHORITY.md)
 - **RadixAttention ladder** — live speedup **4.58× → 6.95×** (135M → 1.5B), **86.7%** hit
   rate (100% of optimal), climbing to the deterministic 7.50× token ceiling.
 - **The pure-kernel latency stack** — canonical Decide **362 ns**, full Admit gate
@@ -94,7 +94,7 @@ vendor's GPU through Vulkan.
   **24.6 tok/s**, a **1.49×** win over the same forward in f32 on the same device (narrower
   weight traffic on a memory-bound path). Correctness gated on the real GPU
   (`TestHALVulkanQ8ForwardMatchesComputeQ8`, cosine 1.0).
-  → [`BENCHMARK-AUTHORITY.md`](../fak/BENCHMARK-AUTHORITY.md)
+  → [`BENCHMARK-AUTHORITY.md`](../BENCHMARK-AUTHORITY.md)
 - **GPU/CPU crossover** — the CPU's lead collapses **7.2× (135M) → 1.16× (1.5B)** as
   per-token compute grows ~11×: direct evidence the device path is launch-bound on tiny
   models and catches up as the model grows.
@@ -150,13 +150,15 @@ multi-GPU serving and frontier-model readiness.
 
 - **The model-ladder-on-A100 plan** — tiny smoke model → dense Qwen2.5 → hybrid
   Gated-DeltaNet bridge → Qwen3.6-27B, de-risking multi-GPU serving and the
-  fak-gateway-vs-raw comparison per rung.
-  → [`PLAN-model-ladder-dgx-a100-2026-06-20.md`](notes/PLAN-model-ladder-dgx-a100-2026-06-20.md)
+  fak-gateway-vs-raw comparison per rung. *(Tracked in the private DGX-A100
+  model-ladder runbook, not part of the public snapshot.)*
 - **GLM-5.2 serving-readiness** — the feasibility finding that stock SGLang/vLLM cannot
   serve GLM-5.2's `glm_moe_dsa` (DSA kernels + memory) on Ampere sm_80, which is precisely
   where `fak`'s gateway/baseline role and the shipped serving-readiness preflight gate
-  apply. → [`GLM-5.2-DGX-FAST-LOOP-2026-06-20.md`](notes/GLM-5.2-DGX-FAST-LOOP-2026-06-20.md)
-  · [`GLM-5.2-SGLANG-VLLM-READINESS-2026-06-21.md`](notes/GLM-5.2-SGLANG-VLLM-READINESS-2026-06-21.md)
+  apply. The runnable form of this finding ships publicly as
+  [`tools/glm52_serve_preflight.py`](../tools/glm52_serve_preflight.py) and
+  [`tools/glm52_serve.sh`](../tools/glm52_serve.sh); the private DGX fast-loop and
+  SGLang/vLLM-readiness notes are not part of the public snapshot.
 
 > **Honesty fence.** This lane is reported as the documented serving/readiness track, not
 > a published single-box throughput row — the per-rung wall-clock witnesses live behind
@@ -186,7 +188,7 @@ spread on purpose:
 
 ## See also
 
-- **[`fak/BENCHMARK-AUTHORITY.md`](../fak/BENCHMARK-AUTHORITY.md)** ⭐ — the single source of
+- **[`fak/BENCHMARK-AUTHORITY.md`](../BENCHMARK-AUTHORITY.md)** ⭐ — the single source of
   truth; every number here traces to a row there with its commit + artifact.
 - **[`fak/HARDWARE-CATALOG.md`](../fak/HARDWARE-CATALOG.md)** — the per-machine onboarding
   catalog (specs, baseline-run requirements, the scientific-rigor metadata schema).
