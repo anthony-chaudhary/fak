@@ -1,0 +1,473 @@
+{
+  "experiments": {
+    "experiments/agent-live/dogfood-claude-probe-win.json": [
+      "DOGFOOD-CLAUDE.md"
+    ],
+    "experiments/agent-live/dogfood-claude-probe.json": [
+      "DOGFOOD-CLAUDE.md"
+    ],
+    "experiments/agent-live/offline-mock.json": [
+      "LIVE-RESULTS.md"
+    ],
+    "experiments/agent-live/production-workload.json": [
+      "docs/benchmark/CROSS-MACHINE-INFRASTRUCTURE.md",
+      "docs/production-benchmark-methodology.md"
+    ],
+    "experiments/agent-live/transcript-adapter-sweep/sweep-summary.json": [
+      "docs/benchmarking/FINAL-ANALYSIS.md"
+    ],
+    "experiments/agent-live/turntax-injection-live.json": [
+      "TURN-TAX-RESULTS.md"
+    ],
+    "experiments/api-host-bridge/api-host-acceptance.json": [
+      "docs/permission-system-benchmark-methodology.md"
+    ],
+    "experiments/api-host-bridge/api-host-acceptance.md": [
+      "docs/permission-system-benchmark-methodology.md"
+    ],
+    "experiments/api-host-bridge/api-host-bridge-gate.json": [
+      "docs/permission-system-benchmark-methodology.md"
+    ],
+    "experiments/api-host-bridge/api-host-bridge-gate.md": [
+      "docs/permission-system-benchmark-methodology.md"
+    ],
+    "experiments/api-host-bridge/api-host-bridge-matrix.json": [
+      "docs/permission-system-benchmark-methodology.md"
+    ],
+    "experiments/api-host-bridge/api-host-bridge-matrix.md": [
+      "docs/permission-system-benchmark-methodology.md"
+    ],
+    "experiments/api-host-bridge/api-host-bridge-proof.json": [
+      "docs/permission-system-benchmark-methodology.md"
+    ],
+    "experiments/api-host-bridge/api-host-bridge-proof.md": [
+      "docs/permission-system-benchmark-methodology.md"
+    ],
+    "experiments/api-host-bridge/api-host-bridge-verify-all.json": [
+      "docs/permission-system-benchmark-methodology.md"
+    ],
+    "experiments/api-host-bridge/api-host-bridge-verify-all.md": [
+      "docs/permission-system-benchmark-methodology.md"
+    ],
+    "experiments/api-host-bridge/api-host-compat-contract.json": [
+      "docs/permission-system-benchmark-methodology.md"
+    ],
+    "experiments/api-host-bridge/api-host-compat-contract.md": [
+      "docs/permission-system-benchmark-methodology.md"
+    ],
+    "experiments/api-host-bridge/api-host-conformance-certificate.json": [
+      "docs/permission-system-benchmark-methodology.md"
+    ],
+    "experiments/api-host-bridge/api-host-conformance-certificate.md": [
+      "docs/permission-system-benchmark-methodology.md"
+    ],
+    "experiments/api-host-bridge/api-host-external-state-audit.json": [
+      "docs/permission-system-benchmark-methodology.md"
+    ],
+    "experiments/api-host-bridge/api-host-external-state-audit.md": [
+      "docs/permission-system-benchmark-methodology.md"
+    ],
+    "experiments/api-host-bridge/api-host-goal-audit.json": [
+      "docs/permission-system-benchmark-methodology.md"
+    ],
+    "experiments/api-host-bridge/api-host-goal-audit.md": [
+      "docs/permission-system-benchmark-methodology.md"
+    ],
+    "experiments/api-host-bridge/api-host-live-inventory.json": [
+      "docs/permission-system-benchmark-methodology.md"
+    ],
+    "experiments/api-host-bridge/api-host-live-inventory.md": [
+      "docs/permission-system-benchmark-methodology.md"
+    ],
+    "experiments/api-host-bridge/api-host-live-smoke-queue.json": [
+      "docs/permission-system-benchmark-methodology.md"
+    ],
+    "experiments/api-host-bridge/api-host-live-smoke-queue.md": [
+      "docs/permission-system-benchmark-methodology.md"
+    ],
+    "experiments/api-host-bridge/api-host-live-smoke-runner.json": [
+      "docs/permission-system-benchmark-methodology.md"
+    ],
+    "experiments/api-host-bridge/api-host-live-smoke-runner.md": [
+      "docs/permission-system-benchmark-methodology.md"
+    ],
+    "experiments/api-host-bridge/api-host-qualification.json": [
+      "docs/permission-system-benchmark-methodology.md"
+    ],
+    "experiments/api-host-bridge/api-host-qualification.md": [
+      "docs/permission-system-benchmark-methodology.md"
+    ],
+    "experiments/api-host-bridge/api-host-readiness.json": [
+      "docs/permission-system-benchmark-methodology.md"
+    ],
+    "experiments/api-host-bridge/api-host-readiness.md": [
+      "docs/permission-system-benchmark-methodology.md"
+    ],
+    "experiments/api-host-bridge/api-host-retry-packet.json": [
+      "docs/permission-system-benchmark-methodology.md"
+    ],
+    "experiments/api-host-bridge/api-host-retry-packet.md": [
+      "docs/permission-system-benchmark-methodology.md"
+    ],
+    "experiments/api-host-bridge/api-host-roster.json": [
+      "docs/permission-system-benchmark-methodology.md"
+    ],
+    "experiments/api-host-bridge/api-host-roster.md": [
+      "docs/permission-system-benchmark-methodology.md"
+    ],
+    "experiments/benchmark/catalog.json": [
+      "docs/benchmark/QUICKSTART.md",
+      "docs/benchmarking/DEEPSWEBENCH-INTEGRATION.md"
+    ],
+    "experiments/benchmark/charts/batch-comparison.html": [
+      "docs/benchmark/CROSS-MACHINE-INFRASTRUCTURE.md"
+    ],
+    "experiments/benchmark/dashboard/index.html": [
+      "docs/benchmark/CROSS-MACHINE-INFRASTRUCTURE.md"
+    ],
+    "experiments/causal-invalidation-20260620/causalbench-witness-20260620.json": [
+      "BENCHMARK-AUTHORITY.md"
+    ],
+    "experiments/fanout/RESEARCH-BRIEF-fanout-2026-06-17.md": [
+      "CLAIMS.md",
+      "FANOUT-BENCH-RESULTS.md"
+    ],
+    "experiments/fanout/fanbench-research.csv": [
+      "FANOUT-BENCH-RESULTS.md"
+    ],
+    "experiments/fanout/fanbench-research.json": [
+      "FANOUT-BENCH-RESULTS.md",
+      "docs/fak-vs-alternatives-comparison.md"
+    ],
+    "experiments/fleet/fleet-axes.png": [
+      "FLEET-SWEEP-RESULTS.md"
+    ],
+    "experiments/fleet/fleet-compare.png": [
+      "FLEET-SWEEP-RESULTS.md"
+    ],
+    "experiments/fleet/fleet-eraser.png": [
+      "FLEET-SWEEP-RESULTS.md"
+    ],
+    "experiments/fleet/fleet-heatmap.png": [
+      "FLEET-SWEEP-RESULTS.md"
+    ],
+    "experiments/gpu/CROSSOVER-1P5B-RX7600-20260619.md": [
+      "BENCHMARK-AUTHORITY.md"
+    ],
+    "experiments/gpu/README.md": [
+      "docs/releases/v0.21.1.md",
+      "docs/releases/v0.21.2.md",
+      "docs/releases/v0.21.3.md"
+    ],
+    "experiments/gpu/VULKAN-Q8-RX7600-20260619.md": [
+      "BENCHMARK-AUTHORITY.md"
+    ],
+    "experiments/gpu/figures/decode-vs-llama.svg": [
+      "GPU-QWEN-RESULTS.md",
+      "docs/releases/v0.21.2.md"
+    ],
+    "experiments/gpu/figures/prefill-decode.svg": [
+      "GPU-QWEN-RESULTS.md"
+    ],
+    "experiments/gpu/qwen2.5-3b-q8-cuda-4070.json": [
+      "docs/releases/v0.21.1.md"
+    ],
+    "experiments/kvmmu/kvmmu-report.json": [
+      "KV-QUARANTINE-BRIDGE-RESULTS.md"
+    ],
+    "experiments/mac-m3pro-kernel-20260620/kernel-latency-mac-m3pro-20260620.json": [
+      "BENCHMARK-AUTHORITY.md"
+    ],
+    "experiments/mac-m3pro-kernel-20260620/report.json": [
+      "BENCHMARK-AUTHORITY.md"
+    ],
+    "experiments/model-baseline/INT8-RUNG-VERIFICATION.md": [
+      "CLAIMS.md"
+    ],
+    "experiments/model-baseline/batch-decode-q8.json": [
+      "MODEL-BATCHING-RESULTS.md"
+    ],
+    "experiments/model-baseline/comparison.json": [
+      "docs/explainers/local-vs-frontier-parity.md"
+    ],
+    "experiments/model-baseline/turn-agent-realistic/bounded-long-wsl-compare.json": [
+      "LLAMACPP-HEADTOHEAD-RESULTS.md"
+    ],
+    "experiments/model-baseline/turn-agent-realistic/probe-compare.json": [
+      "LLAMACPP-HEADTOHEAD-RESULTS.md"
+    ],
+    "experiments/model-ladder/modelbench-qwen25-7b-q8.json": [
+      "QWEN25-7B-RESULTS.md"
+    ],
+    "experiments/model-ladder/qwen36-resident-q4k-parity-20260619.json": [
+      "QWEN36-PARITY-RESULTS.md"
+    ],
+    "experiments/parity/PARITY.md": [
+      "QWEN25-7B-RESULTS.md",
+      "docs/explainers/local-vs-frontier-parity.md"
+    ],
+    "experiments/parity/local-qwen-1.5b.json": [
+      "docs/explainers/local-vs-frontier-parity.md"
+    ],
+    "experiments/parity/parity.json": [
+      "docs/explainers/local-vs-frontier-parity.md"
+    ],
+    "experiments/parity/reference-frontier.json": [
+      "docs/explainers/local-vs-frontier-parity.md"
+    ],
+    "experiments/parity/vulkan-rx7600-descpool-smollm2-135m.json": [
+      "VULKAN-AMD-RESULTS.md"
+    ],
+    "experiments/parity/vulkan-rx7600-fused-smollm2-135m.json": [
+      "VULKAN-AMD-RESULTS.md"
+    ],
+    "experiments/parity/vulkan-rx7600-inplace-rope-matmuladd-smollm2-135m.json": [
+      "VULKAN-AMD-RESULTS.md"
+    ],
+    "experiments/parity/vulkan-rx7600-inplace-rope-smollm2-135m.json": [
+      "VULKAN-AMD-RESULTS.md"
+    ],
+    "experiments/parity/vulkan-rx7600-stackdesc-smollm2-135m.json": [
+      "VULKAN-AMD-RESULTS.md"
+    ],
+    "experiments/parity/vulkan-rx7600-staging-smollm2-135m.json": [
+      "VULKAN-AMD-RESULTS.md"
+    ],
+    "experiments/permission-systems/permission-source-audit.json": [
+      "docs/permission-system-benchmark-methodology.md"
+    ],
+    "experiments/permission-systems/permission-source-audit.md": [
+      "docs/permission-system-benchmark-methodology.md"
+    ],
+    "experiments/permission-systems/permission-system-benchmark.json": [
+      "docs/permission-system-benchmark-methodology.md"
+    ],
+    "experiments/permission-systems/permission-system-benchmark.md": [
+      "docs/permission-system-benchmark-methodology.md"
+    ],
+    "experiments/qwen36/QWEN36-PARITY-AND-MEASUREMENT-STATUS-2026-06-20.md": [
+      "docs/proofs/model-forward-parity.md"
+    ],
+    "experiments/qwen36/amd-vulkan-local-full.json": [
+      "QWEN36-AMD-VULKAN-RESULTS.md"
+    ],
+    "experiments/qwen36/amd-vulkan-local-full.md": [
+      "QWEN36-AMD-VULKAN-RESULTS.md"
+    ],
+    "experiments/qwen36/llamacpp-qwen36-multitoken-oracle-20260619.json": [
+      "FAK-NATIVE-QWEN35-RESULTS.md"
+    ],
+    "experiments/qwen36/llamacpp-vulkan-qwen36-pp16-64-256-tg1-20260619.json": [
+      "QWEN36-AMD-VULKAN-RESULTS.md"
+    ],
+    "experiments/qwen36/llamacpp-vulkan-qwen36-pp512-1024-tg16-20260619.json": [
+      "QWEN36-AMD-VULKAN-RESULTS.md"
+    ],
+    "experiments/qwen36/native-gguf-q8-hybrid-batch-p16-64-256-20260619.json": [
+      "QWEN36-AMD-VULKAN-RESULTS.md"
+    ],
+    "experiments/qwen36/native-gguf-q8-hybrid-headscan-p16-64-256-20260619.json": [
+      "QWEN36-AMD-VULKAN-RESULTS.md"
+    ],
+    "experiments/qwen36/native-gguf-q8-hybrid-headscan-p512-1024-dp256-d16-20260619.json": [
+      "QWEN36-AMD-VULKAN-RESULTS.md"
+    ],
+    "experiments/qwen36/native-gguf-q8-multitoken-parity-20260619.json": [
+      "FAK-NATIVE-QWEN35-RESULTS.md",
+      "docs/proofs/model-forward-parity.md",
+      "docs/releases/v0.28.0.md"
+    ],
+    "experiments/qwen36/qwen36-agent-amd-vulkan-local-full.json": [
+      "QWEN36-AMD-VULKAN-RESULTS.md"
+    ],
+    "experiments/qwen36/qwen36-perf-gate-amd-20260619.json": [
+      "QWEN36-AMD-VULKAN-RESULTS.md"
+    ],
+    "experiments/qwen36/qwen36-perf-gate-amd-20260619.md": [
+      "QWEN36-AMD-VULKAN-RESULTS.md"
+    ],
+    "experiments/radixattention/CROSS-PLATFORM-REPRO-20260619.md": [
+      "BENCHMARK-AUTHORITY.md"
+    ],
+    "experiments/radixattention/radixbench-qwen2.5-1.5b-q8-agents-fresh-20260619.json": [
+      "HERO-BENCHMARK-2026-06-21.md",
+      "tools/hero_benchmark.data.json"
+    ],
+    "experiments/radixattention/radixbench-smollm2-135m-q8.json": [
+      "BENCHMARK-AUTHORITY.md",
+      "docs/benchmarking/README.md",
+      "docs/releases/v0.9.0.md"
+    ],
+    "experiments/recall/recall-report.json": [
+      "RECALL-RESULTS.md"
+    ],
+    "experiments/session/chart1-headline-walltime.svg": [
+      "BENCHMARK-AUTHORITY.md"
+    ],
+    "experiments/session/headline-qwen-50x5.json": [
+      "BENCHMARK-AUTHORITY.md",
+      "HERO-BENCHMARK-2026-06-21.md",
+      "SESSION-VALUE-STACK-RESULTS.md",
+      "docs/fak-vs-alternatives-comparison.md",
+      "tools/hero_benchmark.data.json"
+    ],
+    "experiments/session/smoke-smollm2.json": [
+      "BENCHMARK-AUTHORITY.md",
+      "SESSION-VALUE-STACK-RESULTS.md"
+    ],
+    "experiments/session/smoke.json": [
+      "docs/benchmarking/README.md"
+    ],
+    "experiments/turn-tax/turntax-breakeven.json": [
+      "TURN-TAX-RESULTS.md"
+    ],
+    "experiments/turn-tax/turntax-breakeven.png": [
+      "TURN-TAX-RESULTS.md"
+    ],
+    "experiments/turn-tax/turntax-stochastic.json": [
+      "TURN-TAX-RESULTS.md"
+    ],
+    "experiments/webbench/README.md": [
+      "docs/webbench-blockers.md"
+    ],
+    "experiments/webbench/sample-dataset.json": [
+      "docs/webbench-blockers.md"
+    ]
+  },
+  "note": "DERIVED by tools/public_evidence_manifest.py --derive. ship-iff-cited: a public claim's citation chain reaches every path here. Regenerate; do not hand-edit.",
+  "results_docs": {
+    "CDB-RESULTS.md": [
+      "CLAIMS.md",
+      "STATUS.md",
+      "docs/cli-reference.md"
+    ],
+    "FAK-NATIVE-QWEN35-RESULTS.md": [
+      "GETTING-STARTED.md",
+      "docs/HARDWARE-MATRIX.md",
+      "docs/cli-reference.md"
+    ],
+    "FANOUT-BENCH-RESULTS.md": [
+      "CLAIMS.md",
+      "docs/benchmarking/README.md",
+      "docs/cli-reference.md",
+      "docs/fak-vs-alternatives-comparison.md"
+    ],
+    "FLEET-SWEEP-RESULTS.md": [
+      "docs/cli-reference.md"
+    ],
+    "GPU-QWEN-F16-RESULTS.md": [
+      "docs/releases/v0.13.0.md"
+    ],
+    "GPU-QWEN-RESULTS.md": [
+      "docs/releases/v0.21.1.md",
+      "docs/releases/v0.21.2.md",
+      "docs/releases/v0.21.3.md"
+    ],
+    "IN-KERNEL-MODEL-RESULTS.md": [
+      "CLAIMS.md",
+      "docs/cli-reference.md"
+    ],
+    "KV-QUARANTINE-BRIDGE-RESULTS.md": [
+      "CLAIMS.md",
+      "STATUS.md",
+      "docs/cli-reference.md",
+      "docs/explainers/addressable-kv-cache.md"
+    ],
+    "LIVE-RESULTS.md": [
+      "CLAIMS.md",
+      "GETTING-STARTED.md",
+      "STATUS.md",
+      "docs/benchmarking/README.md",
+      "docs/cli-reference.md",
+      "docs/explainers/policy-in-the-kernel.md"
+    ],
+    "LLAMACPP-HEADTOHEAD-RESULTS.md": [
+      "GPU.md",
+      "docs/explainers/hardware-portability.md"
+    ],
+    "M3-LLAMACPP-RESULTS.md": [
+      "docs/explainers/hardware-portability.md",
+      "docs/explainers/local-vs-frontier-parity.md",
+      "docs/releases/v0.6.0.md"
+    ],
+    "M3-METAL-PARITY-RESULTS.md": [
+      "docs/releases/v0.9.0.md"
+    ],
+    "MEMORY-DREAM-CLEANUP-RESULTS.md": [
+      "docs/cli-reference.md"
+    ],
+    "MODEL-BASELINE-RESULTS.md": [
+      "CLAIMS.md",
+      "STATUS.md",
+      "docs/cli-reference.md",
+      "docs/releases/v0.2.0.md"
+    ],
+    "MODEL-BATCHING-RESULTS.md": [
+      "docs/explainers/sota-optimizations.md"
+    ],
+    "QWEN25-7B-RESULTS.md": [
+      "BENCHMARK-AUTHORITY.md",
+      "HERO-BENCHMARK-2026-06-21.md",
+      "tools/hero_benchmark.data.json"
+    ],
+    "QWEN36-AMD-VULKAN-RESULTS.md": [
+      "docs/HARDWARE-MATRIX.md"
+    ],
+    "QWEN36-PARITY-RESULTS.md": [
+      "GETTING-STARTED.md"
+    ],
+    "RADIXATTENTION-RESULTS.md": [
+      "BENCHMARK-AUTHORITY.md",
+      "CLAIMS.md",
+      "HERO-BENCHMARK-2026-06-21.md",
+      "docs/benchmarking/README.md",
+      "docs/explainers/addressable-kv-cache.md",
+      "docs/explainers/sota-optimizations.md",
+      "docs/releases/v0.9.0.md",
+      "tools/hero_benchmark.data.json"
+    ],
+    "REALISTIC-WORKLOAD-RESULTS.md": [
+      "docs/cli-reference.md"
+    ],
+    "RECALL-RESULTS.md": [
+      "CLAIMS.md",
+      "STATUS.md",
+      "docs/cli-reference.md"
+    ],
+    "ROPE-SCALING-RESULTS.md": [
+      "docs/releases/v0.14.0.md",
+      "docs/releases/v0.15.1.md",
+      "docs/releases/v0.18.0.md"
+    ],
+    "SESSION-VALUE-STACK-RESULTS.md": [
+      "BENCHMARK-AUTHORITY.md",
+      "HERO-BENCHMARK-2026-06-21.md",
+      "tools/hero_benchmark.data.json"
+    ],
+    "SLIDING-WINDOW-RESULTS.md": [
+      "docs/releases/v0.11.0.md",
+      "docs/releases/v0.12.0.md"
+    ],
+    "SWEBENCH-RESULTS.md": [
+      "docs/releases/v0.16.0.md"
+    ],
+    "TOOL-RESULT-TREE-KV-RESULTS.md": [
+      "docs/explainers/addressable-kv-cache.md"
+    ],
+    "TURN-TAX-RESULTS.md": [
+      "CLAIMS.md",
+      "STATUS.md",
+      "docs/cli-reference.md",
+      "docs/releases/v0.2.1.md",
+      "docs/releases/v0.3.0.md"
+    ],
+    "VULKAN-AMD-RESULTS.md": [
+      "ARCHITECTURE.md",
+      "CLAIMS.md",
+      "STATUS.md",
+      "docs/explainers/hardware-portability.md",
+      "docs/explainers/local-vs-frontier-parity.md"
+    ]
+  },
+  "schema": "fleet-public-evidence/1"
+}
