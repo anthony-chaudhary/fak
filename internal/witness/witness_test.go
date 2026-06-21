@@ -89,11 +89,11 @@ func TestRealGitAncestor(t *testing.T) {
 		t.Fatalf("HEAD must be its own ancestor (Confirmed), got %v", got)
 	}
 	// committed: paths are REPO-ROOT-relative (git's ":/" anchor), so this is
-	// cwd-independent. fak/go.mod is a tracked file; .git lives at the fleet root.
-	if got := r.Resolve(ctx, nil, "committed:fak/go.mod"); got != abi.WitnessConfirmed {
-		t.Fatalf("fak/go.mod is tracked => Confirmed, got %v", got)
+	// cwd-independent. go.mod is a tracked file at the repo root; .git lives there too.
+	if got := r.Resolve(ctx, nil, "committed:go.mod"); got != abi.WitnessConfirmed {
+		t.Fatalf("go.mod is tracked => Confirmed, got %v", got)
 	}
-	if got := r.Resolve(ctx, nil, "committed:fak/this-path-does-not-exist.xyz"); got != abi.WitnessRefuted {
+	if got := r.Resolve(ctx, nil, "committed:this-path-does-not-exist.xyz"); got != abi.WitnessRefuted {
 		t.Fatalf("an untracked path => Refuted, got %v", got)
 	}
 	// a 40-zero sha is well-formed but not a real commit => not an ancestor.
