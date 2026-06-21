@@ -48,8 +48,13 @@ _PLACEHOLDER_RE = re.compile(r"MODELNAME|MODEL-NAME|^\d+B-RESULTS|YYYY|<.*>|\*|\
 # A citation is either an experiments/ artifact path or a *-RESULTS.md provenance doc.
 # Match both markdown-link `](path)` and inline-code `` `path` `` / bare forms; tolerate
 # a leading fak/ or ./ or ../ (pre-hoist links) and normalize to a root-relative path.
-_EXPERIMENTS_RE = re.compile(r"(?:\.{0,2}/)?(?:fak/)?(experiments/[A-Za-z0-9_./{},*-]+?\.(?:json|csv|svg|png|md|jsonl|tsv|html))")
+# jsonl BEFORE json so the longer extension wins; the trailing (?![A-Za-z]) stops
+# `.json` matching as a prefix of `.jsonl`.
+_EXPERIMENTS_RE = re.compile(r"(?:\.{0,2}/)?(?:fak/)?(experiments/[A-Za-z0-9_./{},*-]+?\.(?:jsonl|json|tsv|csv|svg|png|md|html))(?![A-Za-z])")
 _RESULTS_RE = re.compile(r"([A-Z0-9][A-Z0-9-]*-RESULTS\.md)")
+# A path right after an output flag (`--output X`, `-out X`, `-o X`) is a file a command
+# WRITES, not an artifact the doc CITES — don't treat it as a published-evidence citation.
+_OUTPUT_FLAG_RE = re.compile(r"(?:--?o(?:ut(?:put)?)?)\s+$")
 
 
 def _norm(p: str) -> str:
@@ -72,7 +77,11 @@ def _doc_roots(public_root: str) -> list[str]:
 
 
 def _cited_in(text: str) -> tuple[set[str], set[str]]:
-    exp = {_norm(m) for m in _EXPERIMENTS_RE.findall(text)}
+    exp = set()
+    for m in _EXPERIMENTS_RE.finditer(text):
+        if _OUTPUT_FLAG_RE.search(text[max(0, m.start() - 14):m.start()]):
+            continue  # command output path, not a citation
+        exp.add(_norm(m.group(1)))
     res = {_norm(m) for m in _RESULTS_RE.findall(text)}
     return exp, res
 
@@ -100,10 +109,15 @@ def derive(public_root: str, private_root: str) -> dict:
             if _PLACEHOLDER_RE.search(p):
                 continue
             results.setdefault(p, []).append(rel)
-    # Transitive closure: each cited RESULTS doc (likely cut from public) pulls in the
-    # experiments/ it cites — read it from the PRIVATE tree (fak/<doc> or <doc>).
+    # Transitive closure: each cited RESULTS doc pulls in the experiments/ it cites.
+    # Prefer the PUBLIC restored copy (docs/benchmarks/<doc> — already de-citeed of
+    # ghost artifacts) over the private original, so closure reflects what actually
+    # ships; fall back to the private tree only for docs not yet restored.
     for doc in sorted(results):
-        for cand in (os.path.join(private_root, "fak", doc), os.path.join(private_root, doc)):
+        for cand in (os.path.join(public_root, "docs", "benchmarks", doc),
+                     os.path.join(public_root, doc),
+                     os.path.join(private_root, "fak", doc),
+                     os.path.join(private_root, doc)):
             if os.path.isfile(cand):
                 exp, _ = _cited_in(_read(cand))
                 for p in exp:
@@ -138,10 +152,26 @@ def cmd_check(public_root: str) -> int:
         return 2
     with open(out, encoding="utf-8") as fh:
         man = json.load(fh)
-    cited = list(man.get("experiments", {})) + list(man.get("results_docs", {}))
-    # brace-globs (e.g. radixbench-{a,b}.json) expand to multiple real files — skip the
-    # literal brace entry; the expansion members are matched on their own if also cited.
-    missing = [p for p in cited if "{" not in p and not os.path.exists(os.path.join(public_root, p))]
+    experiments = man.get("experiments", {})
+    results_docs = man.get("results_docs", {})
+    cited = list(experiments) + list(results_docs)
+
+    def _present(p: str) -> bool:
+        # brace-globs (e.g. radixbench-{a,b}.json) expand to multiple real files — skip
+        # the literal brace entry; the expansion members match on their own if cited.
+        if "{" in p:
+            return True
+        if os.path.exists(os.path.join(public_root, p)):
+            return True
+        # A *-RESULTS.md provenance doc is cited by its bare basename (the citation regex
+        # normalizes the path away), but dated docs may not live at the repo root — the
+        # doc-placement gate keeps them under docs/benchmarks/. Resolve a results-doc
+        # basename to its canonical restored home there too.
+        if p in results_docs and os.path.exists(os.path.join(public_root, "docs", "benchmarks", p)):
+            return True
+        return False
+
+    missing = [p for p in cited if not _present(p)]
     if missing:
         print(f"PUBLIC_EVIDENCE: {len(missing)} cited evidence path(s) are MISSING from the "
               f"public tree — a published claim cites them but the scrub cut them "

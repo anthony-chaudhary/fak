@@ -1,0 +1,3 @@
+{"task_id":"wb-001","benchmark":"webbench","source_url":"https://example.com","description":"Find the contact email on a simple website","instructions":"Navigate to https://example.com and find the contact email address. Return just the email address."}
+{"task_id":"wb-002","benchmark":"webbench","source_url":"https://news.ycombinator.com","description":"Find the top story title on Hacker News","instructions":"Go to Hacker News front page and extract the title of the first/top story. Return only the title text."}
+{"task_id":"wb-003","benchmark":"webbench","source_url":"https://github.com","description":"Count the repositories in a GitHub search","instructions":"Search GitHub for 'web scraping' and count how many repositories are returned. Return the count number."}

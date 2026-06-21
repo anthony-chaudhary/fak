@@ -1,0 +1,127 @@
+# SWE-bench Verified — fak ↔ bench, directly comparable
+
+> **What this is.** A fak-native SWE-bench Verified benchmark whose results are
+> **directly comparable** to the external **Benchmark tool** ("bench",
+> `<benchmark-checkout>`) that runs the same 500-instance task set against
+> an SGLang endpoint — on the four metrics fak is built to move. It runs **now, on
+> this Mac, with no GPU / Docker / network**, and scales to a real coding-agent
+> resolve run with a Qwen3.6-27B-class model on the DGX via the **identical**
+> upstream harness.
+>
+> **Status: the cost/cache comparison is SHIPPED & runnable; resolve-rate is wired
+> and DGX-gated.** `go build ./... && go vet ./... && go test ./internal/swebench/`
+> green on this box (go1.26, darwin/arm64).
+
+---
+
+## Why this exists — the comparison contract
+
+bench runs SWE-bench Verified as a **KV-cache / serving** benchmark: `bench
+exec-sweep --swebench-preset verified --serve-preset <model> --target <dgx>
+--sweep-workers 1,2,4,8` drives the upstream **`mini-swe-agent`** (`mini-extra
+swebench`) against a self-hosted **SGLang OpenAI-compatible endpoint**, scrapes
+SGLang's **Prometheus** for the server stream (TTFT/throughput/**cache-hit**/KV),
+and grades predictions with the upstream `python -m swebench.harness.run_evaluation`.
+It emits one `results_<run_id>.json` (`schema_version` 6; loader tolerates v4).
+
+fak's whole thesis is *also* about the KV cache (the session value stack, prefix
+reuse, the turn-tax). So the honest, direct comparison is: **fak's harness-cost /
+cache-reuse metrics vs the same SWE-bench Verified workload bench measures** —
+expressed in **bench's own metric vocabulary** (its `critical-metrics.md`: an
+*agent stream* and a *server stream*) so the numbers slot side-by-side.
+
+---
+
+## The four metric families (keyed to bench's vocabulary)
+
+Each is tagged **comparable** (bench measures an analog → a true head-to-head) or
+**fak-native** (fak's differentiator, no bench analog), and **computed**
+(deterministic arithmetic), **live** (measured here), or **gated** (DGX-only).
+
+| family | kind vs bench | provenance | headline (real 500-instance set) |
+|---|---|---|---|
+| **prefill / KV-reuse work-elimination** | **fak-native** (related to, not the same quantity as, server-side cache-hit) | computed | A/C **17.9×→23.4×** (workers 1→16); B/C **1.0×→1.31×** |
+| **turns + tokens** | comparable — agent-stream `actual_agent_steps` | computed | Σ steps **9 846**, median **22**; turn-tax A/B **17.9×** (fak-native lever) |
+| **in-process adjudication cost** | **fak-native** — bench has no analog | live (this Mac) | in-process p50 **~2.4 µs** vs spawn-per-hook **~5.8 ms** ⇒ **~2 400×** |
+| **resolve-rate + safety** | comparable — agent-stream `resolved_count` / `pass_rate_pct` | gated (DGX) | gated here (≈0 with the local 135M model); real number is a DGX/Qwen3.6-27B run |
+
+### The value-stack floor (deterministic, no model)
+
+The prefill-token work-elimination is **exact arithmetic** over the real instance
+geometry (sessionbench's proven A/B/C formula) — the *contention-free floor* under
+any measured wall-clock, so it cannot drift with machine load:
+
+| workers | A naive (re-prefill/turn) | B per-agent KV | C fak fused | **A/C** | **B/C** | A/B (turn-tax) |
+|---:|---:|---:|---:|---:|---:|---:|
+| 1 | 89.4 M | 4.99 M | 4.99 M | **17.9×** | 1.00× | 17.9× |
+| 4 | 357 M | 19.95 M | 16.2 M | **22.1×** | 1.23× | 17.9× |
+| 8 | 715 M | 39.9 M | 31.2 M | **22.9×** | 1.28× | 17.9× |
+| 16 | 1.43 B | 79.8 M | 61.1 M | **23.4×** | 1.31× | 17.9× |
+
+- **A/B = 17.9×** is the **turn-tax**: a re-prefill-every-turn harness reprocesses
+  the whole growing context each turn; KV persistence reprocesses only the new
+  result. Worker-independent.
+- **B/C** is **cross-worker prefix reuse** — the system+tool preamble prefilled
+  **once** for all workers vs **once per worker**. It grows with the worker sweep
+  (the exact `--sweep-workers 1,2,4,8` axis bench uses). It is *thematically* the
+  same "don't redo prefill" story bench's server-side `token_hit_ratio` also tracks,
+  but it is a **different quantity** — an unbounded work-ratio (≥1), not a bounded
+  0–100 % hit fraction — and a fak-vs-fak arm, **not** that server metric.
+
+> **Honesty (METRICS-HONESTY discipline).** A/C, B/C and the turn-tax A/B are
+> fak-vs-**fak-harness-arms** ratios (naive re-prefill vs per-agent-KV vs fak-fused),
+> tagged **fak-native** and reported as such — **not** a head-to-head vs a tuned
+> SGLang `kv_unified`+`seq_cp` server (which *also* reuses a shared prefix, so there
+> is no fair-comparator win to claim here). They are a *deterministic floor* (exact
+> token arithmetic), **not** a measured wall-clock; live TTFT/wall-clock is the gated
+> DGX number. The bucket-derived turn counts are **estimates** (labeled
+> `geometry_source: difficulty`) — a recorded `mini-swe-agent` trajectory supplies
+> real `actual_agent_steps` on the DGX path. The only **comparable** (true
+> head-to-head) families are turns (`actual_agent_steps`) and resolve-rate.
+
+---
+
+## Runnable now (this Mac) vs DGX
+
+| capability | here | DGX |
+|---|---|---|
+| dataset ingest (500 ids + official difficulty buckets) | ✓ | ✓ + full problem-statement token geometry |
+| value-stack floor (prefill work-elimination, all 4 families' computed parts) | ✓ | ✓ |
+| in-process vs spawn-per-hook adjudication gate | ✓ (measured) | ✓ |
+| resolve-rate (official harness) | gated (no Docker) — prints the exact DGX command | ✓ with Docker + a capable model |
+| live coding-agent solve (mini-swe-agent → `fak serve` → Qwen3.6-27B) | — | ✓ (roadmap: `fak serve` `/metrics` so bench scrapes fak like SGLang) |
+
+---
+
+## Reproduce
+
+```bash
+cd fak
+# the value-stack floor on the real 500-instance set, across the worker sweep
+go run ./cmd/fak swebench describe --workers 1,2,4,8
+
+# the full four-family comparison + the adjudication gate, to JSON + markdown
+go run ./cmd/fak swebench compare --workers 1,2,4,8 --with-adjudication \
+  --md swebench-compare.md --out swebench-compare.json
+
+# grade predictions into the resolve-rate (gated here; prints the DGX command)
+go run ./cmd/fak swebench eval --predictions preds.json
+
+# side-by-side vs a real bench run
+go run ./cmd/fak swebench compare --bench-result /path/to/results_<run_id>.json --md compare.md
+```
+
+`describe`/`compare` default to the local bench difficulty map when present; pass
+`--dataset <princeton-nlp/SWE-bench_Verified export>` for real token geometry.
+
+---
+
+## The integration gap (named, not hidden)
+
+To be **scraped by bench exactly like SGLang**, `fak serve` needs a Prometheus
+`/metrics` route exposing `kernel.Counters()` (vDSO hits / quarantines / denies)
+and the prefix-reuse stats. Today those counters live only in-process; the gateway
+exposes no `/metrics`. Closing that makes fak a drop-in measured endpoint in bench's
+`monitor` loop — the deepest form of "directly comparable." Until then, fak emits
+the comparison artifact (`compare --out/--md`) and bench's `compare`/`chart`
+pipeline can consume it.

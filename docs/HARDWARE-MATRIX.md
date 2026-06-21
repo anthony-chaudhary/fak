@@ -67,7 +67,7 @@ The box almost every published `fak` number is measured on.
 - **Qwen3.6-27B in fak's *own* in-kernel engine** — the 753-tensor `qwen35`
   Gated-DeltaNet path loads and generates end-to-end (GGUF→Q8, ~25.8 GB RSS), first two
   greedy tokens matching the llama.cpp oracle.
-  → [`FAK-NATIVE-QWEN35-RESULTS.md`](../fak/FAK-NATIVE-QWEN35-RESULTS.md)
+  → [`FAK-NATIVE-QWEN35-RESULTS.md`](benchmarks/FAK-NATIVE-QWEN35-RESULTS.md)
 - **arm64 NEON kernel work** — the `tile2x4` register-tiled GEMM, ~252 tok/s prefill@256,
   plus the Q8 decode bandwidth-roofline.
   → [`MAC-M3PRO-TILE2X4-KERNEL-BENCH-2026-06-21.md`](../fak/MAC-M3PRO-TILE2X4-KERNEL-BENCH-2026-06-21.md)
@@ -101,7 +101,7 @@ vendor's GPU through Vulkan.
 - **Qwen3.6-27B, full agent surface** — **3/3** live surfaces pass (agent · OpenAI gateway
   · MCP); fak's gateway runs at **0.96×** of raw llama.cpp on the identical setup, and the
   pure-fak in-kernel prefill is **1.88–3.25×** over llama.cpp's Vulkan build on the same
-  GGUF. → [`QWEN36-AMD-VULKAN-RESULTS.md`](../fak/QWEN36-AMD-VULKAN-RESULTS.md)
+  GGUF. → [`QWEN36-AMD-VULKAN-RESULTS.md`](benchmarks/QWEN36-AMD-VULKAN-RESULTS.md)
 
 ---
 

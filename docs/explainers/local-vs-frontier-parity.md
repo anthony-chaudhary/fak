@@ -124,7 +124,7 @@ the capability gap closes as you climb to the 7-9B rung an 8 GB GPU can hold.**
 - **llama.cpp / `llama-server`** is the SOTA-local *serving* engine and a drop-in
   OpenAI-compatible endpoint — point `fak agent --base-url` at it exactly like the
   CPU shim, but quantized + SIMD-fast. The in-tree speed baseline
-  (`fak/experiments/model-baseline/comparison.json`) already measures it: for
+  already measures it: for
   SmolLM2-135M Q8, llama.cpp decodes at ~6.9 ms/tok vs fak's pure-Go ~7.7 ms/tok —
   near parity — and Q4_K_M is faster still. (That ~parity is single-stream SmolLM2 on Zen5; on
   a *larger* real model the kernel-tuning gap widens — `../../fak/M3-LLAMACPP-RESULTS.md` measures

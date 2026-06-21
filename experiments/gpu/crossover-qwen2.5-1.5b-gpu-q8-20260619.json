@@ -1,0 +1,51 @@
+{
+  "app_version": "0.24.0",
+  "backend": {
+    "caps": {
+      "Async": false,
+      "FusedAttn": false,
+      "FusedFFN": false,
+      "GraphCompile": false,
+      "UploadDtype": true,
+      "DeviceMemory": true
+    },
+    "class": "approx",
+    "registered_backends": [
+      "cpu-ref",
+      "vulkan"
+    ],
+    "selected": "vulkan",
+    "tier": "discrete:AMD Radeon RX 7600"
+  },
+  "decode": {
+    "prompt_tokens": 16,
+    "decode_steps": 32,
+    "reps": 2,
+    "per_token_median_ms": 62.892065,
+    "tok_per_sec": 15.900257051505625
+  },
+  "engine": "fak-in-kernel via compute HAL backend \"vulkan\"",
+  "go_threads": "GOMAXPROCS=32, matmul workers=8 (FAK_WORKERS to pin)",
+  "lean": true,
+  "load_ms": 4396.1951,
+  "model": "Qwen2.5-1.5B-Instruct.Q8_0.gguf [gguf-lean]",
+  "precision": "Q8_0",
+  "prefill": [
+    {
+      "tokens": 16,
+      "reps": 2,
+      "median_ms": 2014.1025,
+      "tok_per_sec": 7.943984975938415
+    },
+    {
+      "tokens": 64,
+      "reps": 2,
+      "median_ms": 4550.3958,
+      "tok_per_sec": 14.064710590669936
+    }
+  ],
+  "quant_ms": 0,
+  "quantized_at_load": true,
+  "source": "C:\\Users\\USER\\.cache\\fak-models\\gguf\\Qwen2.5-1.5B-Instruct.Q8_0.gguf",
+  "workers": 8
+}

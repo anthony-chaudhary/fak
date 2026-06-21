@@ -393,5 +393,5 @@ whatever the caller proposed. `--base-url` (Tier 1 proxy) wins if both are set.
   on Windows — no ollama, CPU-friendly). Live turns on your own box; witnessed on macOS + Windows.
 - [`POLICY.md`](POLICY.md) — the deployable capability floor (the adopter's front door).
 - [`ARCHITECTURE.md`](ARCHITECTURE.md) — how a new idea bakes in as a package + one registration.
-- [`LIVE-RESULTS.md`](LIVE-RESULTS.md) — the live prompt-injection A/B on real models.
+- [`LIVE-RESULTS.md`](docs/benchmarks/LIVE-RESULTS.md) — the live prompt-injection A/B on real models.
 - [`CLAIMS.md`](CLAIMS.md) — every capability tagged `[SHIPPED]` / `[SIMULATED]` / `[STUB]`.

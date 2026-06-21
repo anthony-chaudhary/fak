@@ -163,5 +163,5 @@ llama-bench -m <qwen2.5-7b-q8_0.gguf> -ngl 99 -t 6 -p 256 -n 64
 - [`fak/WHY-REUSE-WINS-2026-06-21.md`](WHY-REUSE-WINS-2026-06-21.md) — the **why** behind this hero: reuse is a *different class* of optimization (work-elimination, not work-acceleration) — exact, training-free, and composes on top of every per-token trick. Argues it and fences where it's overstated.
 - [`fak/MODEL-LADDER-VS-SOTA-2026-06-21.md`](MODEL-LADDER-VS-SOTA-2026-06-21.md) — the full two-regime ladder (single-stream **and** multi-agent value stack) this hero distills.
 - [`fak/BENCHMARK-AUTHORITY.md`](BENCHMARK-AUTHORITY.md) — single source of truth for every committed number.
-- [`fak/RADIXATTENTION-RESULTS.md`](RADIXATTENTION-RESULTS.md) — SGLang RadixAttention parity + hit-rate method.
+- [`RADIXATTENTION-RESULTS.md`](docs/benchmarks/RADIXATTENTION-RESULTS.md) — SGLang RadixAttention parity + hit-rate method.
 - [`docs/explainers/sota-optimizations.md`](../docs/explainers/sota-optimizations.md) — the 10 tuned-SOTA optimizations `fak` sits on top of.
