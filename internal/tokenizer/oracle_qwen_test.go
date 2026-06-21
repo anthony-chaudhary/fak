@@ -20,17 +20,9 @@ import (
 // FAK_TOKENIZER_DIR (default ~/.cache/fak-models/tokenizers/qwen2.5) and skips if
 // unavailable, keeping CI green on machines without the model cache.
 func TestQwenOracleGolden(t *testing.T) {
-	dir := os.Getenv("FAK_TOKENIZER_DIR")
-	if dir == "" {
-		home, err := os.UserHomeDir()
-		if err != nil {
-			t.Skip("no home dir")
-		}
-		dir = filepath.Join(home, ".cache", "fak-models", "tokenizers", "qwen2.5")
-	}
-	tjson := filepath.Join(dir, "tokenizer.json")
-	if _, err := os.Stat(tjson); err != nil {
-		t.Skipf("Qwen2.5 reference tokenizer not present at %s (skipping llama.cpp oracle gate)", tjson)
+	tjson := qwen25TokenizerJSONPath()
+	if tjson == "" {
+		t.Skip("Qwen2.5 reference tokenizer not cached (set FAK_TOKENIZER_DIR or pull the HF model); skipping llama.cpp oracle gate")
 	}
 	tok, err := LoadJSON(tjson)
 	if err != nil {
@@ -83,6 +75,39 @@ func TestQwenOracleGolden(t *testing.T) {
 		t.Fatal("golden empty")
 	}
 	t.Logf("llama.cpp oracle gate: %d lines byte-exact (Qwen2.5)", n)
+}
+
+// qwen25TokenizerJSONPath locates a real Qwen2.5 tokenizer.json, or "" if none is
+// cached. It tries FAK_TOKENIZER_DIR, then the fak-models cache, then the standard
+// HuggingFace hub cache — so the encoder oracle leg witnesses on a plain
+// `huggingface_hub` download, not only the fak-specific layout. Qwen2.5 ships one
+// shared tokenizer across sizes; the golden in qwen25_golden.tsv was produced from
+// Qwen2.5-1.5B-Instruct, so that snapshot is preferred over the broader fallback.
+func qwen25TokenizerJSONPath() string {
+	var candidates []string
+	if dir := os.Getenv("FAK_TOKENIZER_DIR"); dir != "" {
+		candidates = append(candidates, filepath.Join(dir, "tokenizer.json"))
+	}
+	if home, err := os.UserHomeDir(); err == nil {
+		candidates = append(candidates,
+			filepath.Join(home, ".cache", "fak-models", "tokenizers", "qwen2.5", "tokenizer.json"))
+		for _, g := range []string{
+			filepath.Join(home, ".cache", "huggingface", "hub",
+				"models--Qwen--Qwen2.5-1.5B-Instruct", "snapshots", "*", "tokenizer.json"),
+			filepath.Join(home, ".cache", "huggingface", "hub",
+				"models--Qwen--Qwen2.5-*-Instruct", "snapshots", "*", "tokenizer.json"),
+		} {
+			if m, _ := filepath.Glob(g); len(m) > 0 {
+				candidates = append(candidates, m...)
+			}
+		}
+	}
+	for _, p := range candidates {
+		if _, err := os.Stat(p); err == nil {
+			return p
+		}
+	}
+	return ""
 }
 
 func TestOptionalQwen36ChatMLPromptMatchesLlamaCpp(t *testing.T) {

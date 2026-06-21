@@ -106,21 +106,14 @@ func TestGGMLEmbeddedOracle(t *testing.T) {
 	t.Logf("embedded-tokenizer oracle: %d lines byte-exact vs llama.cpp (model %s)", n, filepath.Base(ggufPath))
 }
 
-// tokenizerJSONDir returns the Qwen2.5 tokenizer.json dir (FAK_TOKENIZER_DIR or the
-// default cache), or "" if it has no tokenizer.json.
+// tokenizerJSONDir returns the dir of a real Qwen2.5 tokenizer.json (FAK_TOKENIZER_DIR,
+// the fak-models cache, or the standard HF hub cache), or "" if none is cached. It
+// shares discovery with the tokenizer.json oracle gate via qwen25TokenizerJSONPath.
 func tokenizerJSONDir() string {
-	dir := os.Getenv("FAK_TOKENIZER_DIR")
-	if dir == "" {
-		home, err := os.UserHomeDir()
-		if err != nil {
-			return ""
-		}
-		dir = filepath.Join(home, ".cache", "fak-models", "tokenizers", "qwen2.5")
+	if p := qwen25TokenizerJSONPath(); p != "" {
+		return filepath.Dir(p)
 	}
-	if _, err := os.Stat(filepath.Join(dir, "tokenizer.json")); err != nil {
-		return ""
-	}
-	return dir
+	return ""
 }
 
 // findQwen2GGUF locates a Qwen2(.5)-family GGUF whose embedded tokenizer matches
