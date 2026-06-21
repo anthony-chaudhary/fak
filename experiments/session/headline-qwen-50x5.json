@@ -1,0 +1,89 @@
+{
+  "cells": [
+    {
+      "turns": 50,
+      "agents": 5,
+      "prefix": 2048,
+      "decode": 32,
+      "result": 64,
+      "arm_A_naive_stateless": {
+        "name": "A_naive_stateless",
+        "prefill_ms": 65847620.59106346,
+        "decode_ms": 2878394.184195,
+        "total_ms": 68726014.77525845,
+        "live": false
+      },
+      "arm_B_per_agent_kv": {
+        "name": "B_per_agent_kv",
+        "prefill_ms": 1818954.373501,
+        "decode_ms": 2878394.184195,
+        "total_ms": 4697348.557696,
+        "live": true
+      },
+      "arm_C_fak_fused": {
+        "name": "C_fak_fused",
+        "prefill_ms": 686755.858212,
+        "clone_ms": 22.256083,
+        "decode_ms": 452092.817584,
+        "total_ms": 1138870.931879,
+        "live": true
+      },
+      "prefill_anchor": 1.5624291869316924,
+      "arm_A_prefill_raw_ms": 42144387.17723611,
+      "prefill_tokens": {
+        "a": 1100000,
+        "b": 25920,
+        "c": 17728,
+        "a_over_c": 62.04873646209386,
+        "b_over_c": 1.4620938628158844
+      },
+      "net_value_add_vs_naive": 60.34574494044623,
+      "net_value_add_vs_tuned": 4.124566205185288,
+      "turn_tax_A_over_B": 14.630810111517004
+    }
+  ],
+  "complete": true,
+  "decode_per_turn": 32,
+  "engine": "fak sessionbench (multi-agent session value stack, Q8=true)",
+  "go_threads": 12,
+  "live_validate": {
+    "anchored_computed_over_live": 1.0039036174173885,
+    "armA_decode_live_ms": 18645.032958,
+    "armA_prefill_computed_anchored_ms": 174563.85957404028,
+    "armA_prefill_computed_raw_ms": 204761.44660194175,
+    "armA_prefill_live_ms": 173885.078752,
+    "armB_decode_live_ms": 18635.208292,
+    "decode_A_over_B": 1.0005272098838958,
+    "prefill_anchor": 0.8525230822059688,
+    "raw_computed_over_live": 1.1775676675166507,
+    "scale": {
+      "C": 2,
+      "D": 24,
+      "P": 512,
+      "R": 48,
+      "T": 6
+    }
+  },
+  "methodology": "arms B,C run end-to-end LIVE (attention growth captured); arm A re-prefill computed from prefillCost(L) measured at sampled lengths (O(L^2) prefill-attention captured) summed over exact per-turn contexts; arm A decode := arm B live decode (byte-identical serial work); validate runs arm A fully live",
+  "model": "qwen2.5-1.5b-instruct [lean]",
+  "prefill_model": {
+    "lens": [
+      256,
+      1904,
+      2048,
+      3552,
+      5200,
+      6848
+    ],
+    "ms": [
+      4988,
+      50631,
+      54284,
+      115496,
+      204427,
+      318047
+    ]
+  },
+  "prefix": 2048,
+  "result_per_turn": 64
+}
