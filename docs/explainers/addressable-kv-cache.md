@@ -190,11 +190,11 @@ kernel object is what makes it possible.
 
 ## Where to go deeper
 
-- The full vLLM / SGLang / llama.cpp / HF / fak span-surgery comparison: [`fak/TOOL-RESULT-TREE-KV-RESULTS.md`](../../fak/TOOL-RESULT-TREE-KV-RESULTS.md)
+- The full vLLM / SGLang / llama.cpp / HF / fak span-surgery comparison: `TOOL-RESULT-TREE-KV-RESULTS.md` (private companion)
 - The SOTA parity map (what every production cache exposes, with arxiv/doc URLs): [`AGENTIC-CACHING-SOTA-2026-06-19.md`](../notes/AGENTIC-CACHING-SOTA-2026-06-19.md)
-- The Feynman walk-through of why prefix reuse is bit-exact + the radix tree: [`fak/RADIXATTENTION-EXPLAINER.md`](../../fak/RADIXATTENTION-EXPLAINER.md)
-- The measured hit-rate head-to-head with SGLang: [`fak/RADIXATTENTION-RESULTS.md`](../../fak/RADIXATTENTION-RESULTS.md)
-- The quarantine-verdict-drives-KV-eviction bridge: [`fak/KV-QUARANTINE-BRIDGE-RESULTS.md`](../../fak/KV-QUARANTINE-BRIDGE-RESULTS.md)
+- The Feynman walk-through of why prefix reuse is bit-exact + the radix tree: `RADIXATTENTION-EXPLAINER.md` (private companion)
+- The measured hit-rate head-to-head with SGLang: `RADIXATTENTION-RESULTS.md` (private companion)
+- The quarantine-verdict-drives-KV-eviction bridge: `KV-QUARANTINE-BRIDGE-RESULTS.md` (private companion)
 - The queryable on-demand context proof + kill criteria: [`ON-DEMAND-CONTEXT-KV-REUSE-2026-06-19.md`](../notes/ON-DEMAND-CONTEXT-KV-REUSE-2026-06-19.md)
-- Why this is the lead cross-tenant feature (provable forgetting): [`fak/DISAGGREGATED-AGENT-MEMORY.md`](../../fak/DISAGGREGATED-AGENT-MEMORY.md)
+- Why this is the lead cross-tenant feature (provable forgetting): `DISAGGREGATED-AGENT-MEMORY.md` (private companion)
 - How the KV cache erodes in agent loops (the input:output lever): [`kv-cache-agentic-context.md`](kv-cache-agentic-context.md)

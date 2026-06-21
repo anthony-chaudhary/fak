@@ -41,7 +41,7 @@ for subsequent requests that share a prefix. Eliminates redundant computation.
 - LMCache: Distributed KV cache
 
 **fak status:** ✅ **Implemented** — `internal/radixkv` implements RadixAttention algorithm with
-86.7% hit rate on agents workload (inside SGLang's 50–99% band). See [`fak/RADIXATTENTION-RESULTS.md`](../../fak/RADIXATTENTION-RESULTS.md).
+86.7% hit rate on agents workload (inside SGLang's 50–99% band). See `RADIXATTENTION-RESULTS.md` (private companion).
 
 **Differentiator:** fak adds **policy-driven eviction** — can evict by quarantine verdict, not
 just LRU memory pressure.
@@ -56,7 +56,7 @@ Increases throughput by keeping all compute units busy.
 **SOTA implementations:** vLLM, SGLang, llama.cpp, TensorRT-LLM
 
 **fak status:** ✅ **Implemented** — `internal/model.BatchFromPrefix` processes C agents
-concurrently with shared prefix. See [`fak/MODEL-BATCHING-RESULTS.md`](../../fak/MODEL-BATCHING-RESULTS.md).
+concurrently with shared prefix. See `MODEL-BATCHING-RESULTS.md` (private companion).
 
 ---
 
@@ -68,7 +68,7 @@ requirements and increase compute speed. Modern quantization preserves most accu
 **SOTA implementations:** llama.cpp (Q8_0, Q4_K_M, Q2_K, etc.), vLLM, AWQ, GPTQ
 
 **fak status:** ✅ **Implemented** — Q8_0 quantization with proven bit-exact forward pass
-against HF reference. See [`fak/IN-KERNEL-MODEL-DESIGN.md`](../../fak/IN-KERNEL-MODEL-DESIGN.md).
+against HF reference. See `IN-KERNEL-MODEL-DESIGN.md` (private companion).
 
 ---
 

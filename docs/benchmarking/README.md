@@ -41,21 +41,21 @@ All measured claims in [`fak/BENCHMARK-AUTHORITY.md`](../../BENCHMARK-AUTHORITY.
 **What:** Multi-turn, multi-agent session efficiency
 **Result:** 19 min vs ~19 h naive (≈60×) on 50-turn × 5-agent session
 **Baseline:** Naive stateless (re-send everything every turn)
-**Details:** [`fak/SESSION-VALUE-STACK-DECK.md`](../../fak/SESSION-VALUE-STACK-DECK.md)
+**Details:** `SESSION-VALUE-STACK-DECK.md` (private companion — see Authority below)
 **Authority:** [`fak/BENCHMARK-AUTHORITY.md`](../../BENCHMARK-AUTHORITY.md) → "Session value-add"
 
 ### RadixAttention Cache Parity
 **What:** KV cache hit rate comparison with SGLang's RadixAttention
 **Result:** 86.7% hit rate on agents workload (inside SGLang's 50–99% band)
 **Baseline:** SGLang published results
-**Details:** [`fak/RADIXATTENTION-RESULTS.md`](../../fak/RADIXATTENTION-RESULTS.md)
+**Details:** `RADIXATTENTION-RESULTS.md` (private companion — see Authority below)
 **Authority:** [`fak/BENCHMARK-AUTHORITY.md`](../../BENCHMARK-AUTHORITY.md) → "RadixAttention Results"
 
 ### Safety / Injection Resistance
 **What:** Prompt injection resistance on real models
 **Result:** 5/5 injections reached unprotected baseline; 0/5 reached fak
 **Baseline:** Unmediated tool calls
-**Details:** [`fak/LIVE-RESULTS.md`](../../fak/LIVE-RESULTS.md)
+**Details:** `LIVE-RESULTS.md` (private companion — see Authority below)
 **Authority:** See SECURITY section in [`fak/BENCHMARK-AUTHORITY.md`](../../BENCHMARK-AUTHORITY.md)
 
 ---
@@ -65,12 +65,12 @@ All measured claims in [`fak/BENCHMARK-AUTHORITY.md`](../../BENCHMARK-AUTHORITY.
 ### Fan-out Benchmark
 **What:** N=1…1024 sub-agents with shared prefix ladder
 **Result:** Scaling behavior across agent counts
-**Details:** [`fak/FANOUT-BENCH-RESULTS.md`](../../fak/FANOUT-BENCH-RESULTS.md)
+**Details:** `FANOUT-BENCH-RESULTS.md` (detailed write-up not yet public)
 
 ### Fleet Read-heavy Projection
 **What:** Cross-agent shared-read optimization
 **Result:** 2,344/2,500 duplicate tool calls deleted
-**Details:** [`fak/FLEET-VALUE-PROJECTION.md`](../../fak/FLEET-VALUE-PROJECTION.md)
+**Details:** `FLEET-VALUE-PROJECTION.md` (detailed write-up not yet public)
 
 ---
 
@@ -97,7 +97,7 @@ All measured claims in [`fak/BENCHMARK-AUTHORITY.md`](../../BENCHMARK-AUTHORITY.
 - What the arms measure (naive vs tuned vs fused)
 
 ### RadixAttention Explainer
-**[`fak/RADIXATTENTION-EXPLAINER.md`](../../fak/RADIXATTENTION-EXPLAINER.md)**
+**`RADIXATTENTION-EXPLAINER.md`** (private companion)
 - First-principles walkthrough of RadixAttention
 - How the benchmark works
 
@@ -198,7 +198,7 @@ python tools/run_sweep.py --profile quick-smoke --trials 5 --models glm-4.7-flas
 
 ### Cross-Platform Reproducibility
 RadixAttention hit rates reproduce bit-for-bit across platforms (Windows x86_64 vs Mac
-M3 arm64). See [`fak/experiments/radixattention/CROSS-PLATFORM-REPRO-20260619.md`](../../fak/experiments/radixattention/CROSS-PLATFORM-REPRO-20260619.md).
+M3 arm64). See `CROSS-PLATFORM-REPRO-20260619.md` (private companion).
 
 ---
 
