@@ -1,0 +1,211 @@
+# DOS workspace config -- fleet's own governance, dogfooded.
+#
+# fak IS an OS-for-agents (a "DOS"); this file turns the SAME kernel on the repo
+# that builds it. Until now `dos doctor` saw fleet through trivial defaults: one
+# `**/*` lane (so `dos arbitrate` treated the whole repo as a single tree -> max
+# concurrency 1), a plans glob that matched none of fleet's plans, and no fleet
+# ship grammar. This file replaces those with fleet's real shape, so the DOS loops
+# (arbitrate / verify / next-up / self-improve / goal-gate) operate on the truth
+# instead of a stub. The mechanism stays in the installed `dos` package; this is
+# the only policy that crosses into the tree.
+#
+# SAFETY (this is a LIVE multi-session fleet): every table only makes DOS smarter
+# about fleet -- real lanes, fleet's ship anchor, fleet's own invariants as refusal
+# vocabulary. None of it introduces a spontaneous refusal: the custom [reasons.*]
+# are DATA that fire only at the opt-in `dos apply` surface / their named floor.
+# Validated with `dos doctor`, `dos verify` (recognizes fak/<leaf>: ships, sha
+# ef239c9), and `dos arbitrate` (two disjoint leaf lanes co-acquire) before commit.
+workspace = "."
+
+# Lane taxonomy -- a concurrent lane may run iff its file-tree is disjoint from
+# every live lease; an exclusive lane runs alone. fak's architecture is a STAR of
+# disjoint leaf trees (PARTITION.md: "dos-arbitrate takes one lease per tree"), and
+# the arbiter keys concurrency on the LANE: two workers wanting the same named lane
+# serialize even on disjoint sub-trees. So the honest partition is ONE LANE PER LEAF
+# (matching the dos-kernel repo's own one-lane-per-dir convention) -- that is what
+# lets the live fleet edit N leaves in parallel (e.g. a model-peer and an architest
+# worker at once). The trees are prefix-based and pairwise disjoint by construction.
+# `internal/abi` is the frozen, human-owned spine (PARTITION.md "wave-0, unleasable")
+# -> EXCLUSIVE: an ABI change is the serial gate that every leaf imports.
+[lanes]
+concurrent = [
+  "adjudicator", "agent", "agentdojo", "architest", "bench", "blob", "canon", "compute",
+  "cachemeta",
+  "cdb", "ctxmmu", "engine", "gateway", "ggufload", "grammar", "harvest", "ifc", "kernel",
+  "kvmmu", "metrics", "model", "normgate", "plancfi", "policy", "preflight",
+  "provenance", "recall", "registrations", "shipgate", "steward", "turnbench",
+  "vdso", "witness",
+  "cmd", "experiments", "docs", "tools", "visuals", "claude", "ci",
+  "tokenizer",
+  # new-leaf:lane -- `python tools/new_leaf.py` inserts a generated leaf lane above
+]
+exclusive = ["abi", "release", "global"]
+autopick = [
+  "adjudicator", "agent", "agentdojo", "architest", "bench", "blob", "canon", "compute",
+  "cachemeta",
+  "cdb", "ctxmmu", "engine", "gateway", "ggufload", "grammar", "harvest", "ifc", "kernel",
+  "kvmmu", "metrics", "model", "normgate", "plancfi", "policy", "preflight",
+  "provenance", "recall", "registrations", "shipgate", "steward", "turnbench",
+  "vdso", "witness",
+  "cmd", "experiments", "docs", "tools", "visuals", "claude", "ci",
+  "tokenizer",
+  # new-leaf:lane
+]
+
+[lanes.trees]
+adjudicator = ["fak/internal/adjudicator/**"]
+agent = ["fak/internal/agent/**"]
+agentdojo = ["fak/internal/agentdojo/**"]
+architest = ["fak/internal/architest/**"]
+bench = ["fak/internal/bench/**"]
+blob = ["fak/internal/blob/**"]
+canon = ["fak/internal/canon/**"]
+cachemeta = ["fak/internal/cachemeta/**"]
+compute = ["fak/internal/compute/**"]
+cdb = ["fak/internal/cdb/**"]
+ctxmmu = ["fak/internal/ctxmmu/**"]
+engine = ["fak/internal/engine/**"]
+gateway = ["fak/internal/gateway/**"]
+ggufload = ["fak/internal/ggufload/**"]
+grammar = ["fak/internal/grammar/**"]
+harvest = ["fak/internal/harvest/**"]
+ifc = ["fak/internal/ifc/**"]
+kernel = ["fak/internal/kernel/**"]
+kvmmu = ["fak/internal/kvmmu/**"]
+metrics = ["fak/internal/metrics/**"]
+model = ["fak/internal/model/**"]
+normgate = ["fak/internal/normgate/**"]
+plancfi = ["fak/internal/plancfi/**"]
+policy = ["fak/internal/policy/**"]
+preflight = ["fak/internal/preflight/**"]
+provenance = ["fak/internal/provenance/**"]
+recall = ["fak/internal/recall/**"]
+registrations = ["fak/internal/registrations/**"]
+shipgate = ["fak/internal/shipgate/**"]
+steward = ["fak/internal/steward/**"]
+turnbench = ["fak/internal/turnbench/**"]
+vdso = ["fak/internal/vdso/**"]
+witness = ["fak/internal/witness/**"]
+tokenizer = ["fak/internal/tokenizer/**"]
+# new-leaf:tree -- generated leaf trees inserted above this line
+cmd         = ["fak/cmd/**"]
+experiments = ["fak/experiments/**"]
+docs        = ["docs/**"]
+tools       = ["tools/**"]
+visuals     = ["visuals/**"]
+claude      = [".claude/**"]
+ci          = [".github/**"]
+abi         = ["fak/internal/abi/**"]
+release     = ["VERSION", "docs/releases/**"]
+global      = ["**/*"]
+
+# Where fleet keeps the state DOS reads. fak/ carries no version constant; the bare
+# `VERSION` file at the root is the single marker (.claude/project.yaml). The primary
+# plan surface is the 100-unit MVP plan; BUILD-*.md is a secondary prose log.
+[paths]
+plans_glob = "PLAN-*.md"
+
+# How fleet stamps a shipped phase in commit subjects. Releases use the UNIVERSAL
+# "vX.Y.Z:" anchor which dos correctly classifies as a release-bump (not a phase
+# ship); per-leaf ships read "fak/<leaf>: ...". subject_dirs = [] keeps the generic
+# dir-free shape so `verify` never MISSES a fleet ship by over-requiring a prefix --
+# confirmed: `dos verify fak architest` -> SHIPPED, source=grep-subject, sha 644e778.
+#
+# trailer_stamp = true (docs/289): ALSO bind the Conventional-Commits subject the
+# fleet actually writes -- `feat(scope): ... (fak <leaf>)` / `fix(scope): ...
+# (fak <leaf>)`. Fleet has standardized on `type(scope):` subjects (32/50 of recent
+# commits; 0 use the legacy `fak/<leaf>:` start-prefix), so without this `dos verify`
+# / the goal-gate referee bind NOTHING in the fresh window -- `dos doctor` reported
+# "none of your last 50 commits name a unit of work" (DOS-INSTALL-AUDIT-2026-06-19).
+# This recognizes a `(fak <leaf>)` trailer at the END of the subject as a direct ship
+# of leaf <leaf>; it is purely ADDITIVE (the legacy `fak/<leaf>:` start-form still
+# binds via the direct rung) and introduces NO spontaneous refusal. The trailer is
+# exactly as forgeable as the start-prefix, so the rung grades it `grep-subject` the
+# same way. Verified in-process against the real oracle: `fix(gateway): ... (fak
+# gateway)` -> SHIPPED via trailer (47c010c); a bare `fix(gateway): ...` with no
+# trailer stays NOT_SHIPPED (an un-stamped commit is not a forgeable ship). The
+# commit-side half of this convention lives in CLAUDE.md / AGENTS.md.
+[stamp]
+style         = "grep"
+subject_dirs  = []
+trailer_stamp = true
+
+# Standing supervisor policy for the generic DOS population loop. Fleet has a
+# static, disjoint lane roster, so a target of three is reachable without the
+# dynamic-claim `max_concurrency` budget the job repo uses. The worker is
+# launched through a backend-selector shim (tools/dispatch_worker.py) so the
+# fleet can run a MIX of Claude and opencode workers behind one template: the
+# shim defaults to Claude (the dos-kernel plugin skill `/dos-kernel:dos-*`) and
+# switches to opencode (the `.opencode/agent/dos-dispatch.md` worker) when
+# FLEET_WORKER_BACKEND=opencode is set on a node. The Claude launch shape lives
+# in the shim and is kept byte-identical to the historical direct template.
+[supervise]
+target = 4
+# NOTE (2026-06-20): in dos v0.28.0 this template is NOT exec'd by anything on the
+# live path -- `dos loop` is emit-only (it only PRINTS this string; the kernel never
+# Popens) and the in-tree enacting driver hardcodes its own `claude` argv. The real
+# Mac/Linux spawner is tools/dos_supervisor_watchdog.py:enact_command, which launches
+# dispatch_worker.py via sys.executable (the running interpreter) -- so the bare
+# `python` token below is a printed/validated mirror, not a portable exec line, and is
+# intentionally left as-is (the template only substitutes {lane}, so it cannot reach
+# sys.executable; `python3` would ENOENT on Windows-bare-python nodes and `py -3` on
+# POSIX). If a future caller ever shlex-splits + exec's this string, switch to the
+# shim-as-exec-target shape (a dispatch_worker.cmd twin + the existing shebang). See
+# docs/MULTINODE-DOS-FAK-CROSSOVER-2026-06-20.md and the BARE-PYTHON-TEMPLATE issue.
+worker_launch_template = 'python tools/dispatch_worker.py --lane {lane}'
+
+# Dogfood: fleet's OWN architectural invariants, declared as DOS refusal vocabulary
+# (DATA -- no kernel edit), each with a deterministic floor that already runs in CI.
+# This is the whole repo turned on itself: a change that breaks the layering or the
+# typed-core direction is refusable with a structured, citable reason from a closed
+# set, not free-text -- the same discipline fak imposes on tool results. The floor
+# under each is the architest gate (`go test ./internal/architest`).
+[reasons.ARCH_LAYER_VIOLATION]
+category = "OPERATOR_GATE"
+refusal  = true
+summary  = "change breaks the layered-DAG import contract (an upward/cross-tier import, or a new leaf with no declared tier)"
+fix      = "invert the dependency through a registration seam or push the shared type down a layer; declare a new leaf's tier in internal/architest (or run `python tools/new_leaf.py`). Floor: `.\\fak\\test.ps1 ./internal/architest/`"
+see_also = ["fak/internal/architest/architest_test.go", "fak/ARCHITECTURE.md", "fak/GROWTH.md"]
+
+[reasons.OUT_OF_DIRECTION]
+category = "OPERATOR_GATE"
+refusal  = true
+summary  = "request-path logic in an untyped language, or a non-Go package blank-imported into the kernel (DIRECTION.md)"
+fix      = "keep the request path Go-only; a non-Go seam must be off-path and cross a typed, re-validated boundary. Floor: architest TestHotPathHasNoExec"
+see_also = ["fak/DIRECTION.md", "fak/internal/architest/architest_test.go"]
+
+# Trunk discipline: work lands directly on `main` as a SINGLE working tree, not on
+# stray feature branches / per-issue worktrees. This is the cross-agent "stay on the trunk"
+# policy turned into DOS vocabulary -- the same structured-reason discipline fak imposes
+# on tool results, aimed at the fleet's own git workflow so Claude, Codex, and humans
+# share ONE refusal instead of three doc sentences that only one of them reads. The named
+# floor is the git hook (tools/githooks/reference-transaction), which fires below the
+# agent layer; `python tools/install_trunk_guard.py` activates it per clone.
+[reasons.OFF_TRUNK]
+category = "OPERATOR_GATE"
+refusal  = true
+summary  = "work landed off the trunk -- a new branch or worktree was created instead of committing directly to main (the single-tree-on-trunk operator law). Every worker MUST stay on main in the main worktree; creating a side branch/worktree to route around a dirty or diverged tree is the specific anti-pattern this reason names."
+fix      = "commit directly to main with small, path-scoped commits; pull/merge frequently, preferring merge or pull --no-rebase when unrelated dirty files are present. `git commit -- <paths>` and merge never need a clean tree, so a worktree is never required to ship -- a dirty/diverged tree means WAIT or merge in place, never escape into a side tree; if you truly cannot proceed on main, STOP and surface the blocker. Floor: tools/githooks/reference-transaction blocks off-trunk branch creation by default; set FLEET_TRUNK_GUARD=warn for advisory mode, or FLEET_ALLOW_BRANCH=1 to override once (release tooling only)."
+see_also = ["CLAUDE.md", "AGENTS.md", "tools/githooks/reference-transaction", "tools/install_trunk_guard.py"]
+
+# Public-copy leak scan: the private canonical repo is the source for every
+# future public export, so the redact-needles listed in PUBLIC-SCRUB-POLICY.md
+# (operator Tailscale IPs, SSH user, machine paths, the .claude-agent-*
+# config dir, the Go-module codename, operator hostnames, sibling-repo
+# working-copy paths) must never enter THIS history in the first place. The
+# named floor is the git hook (tools/githooks/pre-commit), which fires below
+# the agent layer; `python tools/install_trunk_guard.py` activates it alongside
+# the trunk guard. The export-time scrubber (tools/scrub_public_copy.py) is
+# defense-in-depth; this hook is the primary gate.
+[reasons.PUBLIC_LEAK]
+category = "OPERATOR_GATE"
+refusal  = true
+summary  = "staged content matches a redact-needle -- operator-private info would enter the repo's history (the source for every public export)"
+fix      = "remove the needle from the staged change, or redact it per PUBLIC-SCRUB-POLICY.md. Floor: tools/githooks/pre-commit blocks the commit by default; set FLEET_SCRUB_GUARD=warn for advisory mode, or FLEET_ALLOW_LEAK=1 to override once (only for new fake adversarial fixtures that intentionally trip a needle)."
+see_also = ["PUBLIC-SCRUB-POLICY.md", "tools/githooks/pre-commit", "tools/scrub_public_copy.py", "tools/install_trunk_guard.py"]
+
+# Bound the per-project `.dos/` scratch so a long-lived repo doesn't accrete audit
+# reports without limit (the "never reap a live lease" floor is the collector's,
+# independent of this number).
+[retention]
+audits_keep_last = 30

@@ -1,0 +1,142 @@
+{
+  "tasks_total": 3,
+  "tasks_success": 0,
+  "success_rate": 0,
+  "total_tokens": 0,
+  "total_prefill": 0,
+  "total_decode": 0,
+  "results": [
+    {
+      "task_id": "wb-001",
+      "success": false,
+      "turn_results": [
+        {
+          "turn_number": 1,
+          "prefill_tokens": 0,
+          "decode_tokens": 0,
+          "total_tokens": 0,
+          "latency_ms": 1284,
+          "timestamp": "2026-06-20T08:22:40.7670389-07:00",
+          "error": "GLM API call failed: API returned 401 Unauthorized: {\"error\":{\"code\":\"401\",\"message\":\"令牌已过期或验证不正确\"}}"
+        },
+        {
+          "turn_number": 2,
+          "prefill_tokens": 0,
+          "decode_tokens": 0,
+          "total_tokens": 0,
+          "latency_ms": 329,
+          "timestamp": "2026-06-20T08:22:42.0511276-07:00",
+          "error": "GLM API call failed: API returned 401 Unauthorized: {\"error\":{\"code\":\"401\",\"message\":\"令牌已过期或验证不正确\"}}"
+        },
+        {
+          "turn_number": 3,
+          "prefill_tokens": 0,
+          "decode_tokens": 0,
+          "total_tokens": 0,
+          "latency_ms": 346,
+          "timestamp": "2026-06-20T08:22:42.3801861-07:00",
+          "error": "GLM API call failed: API returned 401 Unauthorized: {\"error\":{\"code\":\"401\",\"message\":\"令牌已过期或验证不正确\"}}"
+        }
+      ],
+      "total_prefill": 0,
+      "total_decode": 0,
+      "total_tokens": 0,
+      "turn_count": 0,
+      "start_time": "2026-06-20T08:22:40.7670389-07:00",
+      "end_time": "2026-06-20T08:22:42.7269561-07:00",
+      "duration_ms": 1959
+    },
+    {
+      "task_id": "wb-002",
+      "success": false,
+      "turn_results": [
+        {
+          "turn_number": 1,
+          "prefill_tokens": 0,
+          "decode_tokens": 0,
+          "total_tokens": 0,
+          "latency_ms": 334,
+          "timestamp": "2026-06-20T08:22:42.7269561-07:00",
+          "error": "GLM API call failed: API returned 401 Unauthorized: {\"error\":{\"code\":\"401\",\"message\":\"令牌已过期或验证不正确\"}}"
+        },
+        {
+          "turn_number": 2,
+          "prefill_tokens": 0,
+          "decode_tokens": 0,
+          "total_tokens": 0,
+          "latency_ms": 329,
+          "timestamp": "2026-06-20T08:22:43.0615552-07:00",
+          "error": "GLM API call failed: API returned 401 Unauthorized: {\"error\":{\"code\":\"401\",\"message\":\"令牌已过期或验证不正确\"}}"
+        },
+        {
+          "turn_number": 3,
+          "prefill_tokens": 0,
+          "decode_tokens": 0,
+          "total_tokens": 0,
+          "latency_ms": 355,
+          "timestamp": "2026-06-20T08:22:43.3906728-07:00",
+          "error": "GLM API call failed: API returned 401 Unauthorized: {\"error\":{\"code\":\"401\",\"message\":\"令牌已过期或验证不正确\"}}"
+        }
+      ],
+      "total_prefill": 0,
+      "total_decode": 0,
+      "total_tokens": 0,
+      "turn_count": 0,
+      "start_time": "2026-06-20T08:22:42.7269561-07:00",
+      "end_time": "2026-06-20T08:22:43.7466431-07:00",
+      "duration_ms": 1019
+    },
+    {
+      "task_id": "wb-003",
+      "success": false,
+      "turn_results": [
+        {
+          "turn_number": 1,
+          "prefill_tokens": 0,
+          "decode_tokens": 0,
+          "total_tokens": 0,
+          "latency_ms": 693,
+          "timestamp": "2026-06-20T08:22:43.7466431-07:00",
+          "error": "GLM API call failed: API returned 401 Unauthorized: {\"error\":{\"code\":\"401\",\"message\":\"令牌已过期或验证不正确\"}}"
+        },
+        {
+          "turn_number": 2,
+          "prefill_tokens": 0,
+          "decode_tokens": 0,
+          "total_tokens": 0,
+          "latency_ms": 397,
+          "timestamp": "2026-06-20T08:22:44.4398291-07:00",
+          "error": "GLM API call failed: API returned 401 Unauthorized: {\"error\":{\"code\":\"401\",\"message\":\"令牌已过期或验证不正确\"}}"
+        },
+        {
+          "turn_number": 3,
+          "prefill_tokens": 0,
+          "decode_tokens": 0,
+          "total_tokens": 0,
+          "latency_ms": 347,
+          "timestamp": "2026-06-20T08:22:44.8370586-07:00",
+          "error": "GLM API call failed: API returned 401 Unauthorized: {\"error\":{\"code\":\"401\",\"message\":\"令牌已过期或验证不正确\"}}"
+        }
+      ],
+      "total_prefill": 0,
+      "total_decode": 0,
+      "total_tokens": 0,
+      "turn_count": 0,
+      "start_time": "2026-06-20T08:22:43.7466431-07:00",
+      "end_time": "2026-06-20T08:22:45.1850406-07:00",
+      "duration_ms": 1438
+    }
+  ],
+  "config": {
+    "DatasetPath": "../../experiments/webbench/sample-dataset.jsonl",
+    "APIKey": "test-key",
+    "Model": "glm-4",
+    "MaxTurns": 10,
+    "OutputPath": "results.json",
+    "MaxTasks": 0,
+    "TimeoutSeconds": 300
+  },
+  "start_time": "2026-06-20T08:22:40.7670389-07:00",
+  "end_time": "2026-06-20T08:22:45.1850406-07:00",
+  "duration_sec": 4.4180017
+}

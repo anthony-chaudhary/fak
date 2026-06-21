@@ -1,0 +1,88 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "benchmark/machine-specs.v1.json",
+  "title": "Machine Specification",
+  "description": "Hardware and runtime specifications for a benchmark machine",
+  "type": "object",
+  "required": ["machine_id", "hostname", "registered_at", "hardware", "os", "runtime", "tags"],
+  "properties": {
+    "$schema": {
+      "type": "string",
+      "const": "benchmark/machine-specs.v1"
+    },
+    "machine_id": {
+      "type": "string",
+      "pattern": "^[a-z0-9-]+$",
+      "description": "Unique identifier for the machine (slug format)"
+    },
+    "hostname": {
+      "type": "string",
+      "description": "Operating system hostname"
+    },
+    "registered_at": {
+      "type": "string",
+      "format": "date-time",
+      "description": "ISO 8601 timestamp when machine was registered"
+    },
+    "hardware": {
+      "type": "object",
+      "required": ["cpu", "ram_gb"],
+      "properties": {
+        "cpu": {
+          "type": "object",
+          "required": ["model", "cores_physical", "cores_logical", "architecture"],
+          "properties": {
+            "model": {"type": "string"},
+            "cores_physical": {"type": "integer", "minimum": 1},
+            "cores_logical": {"type": "integer", "minimum": 1},
+            "frequency_base_mhz": {"type": "number", "minimum": 0},
+            "architecture": {"type": "string", "enum": ["x86_64", "arm64", "aarch64"]}
+          }
+        },
+        "gpu": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["model"],
+            "properties": {
+              "model": {"type": "string"},
+              "memory_gb": {"type": "number", "minimum": 0},
+              "compute_capability": {"type": "string"},
+              "cuda_version": {"type": "string"}
+            }
+          }
+        },
+        "ram_gb": {"type": "number", "minimum": 0},
+        "storage": {
+          "type": "object",
+          "properties": {
+            "type": {"type": "string"},
+            "size_gb": {"type": "number", "minimum": 0}
+          }
+        }
+      }
+    },
+    "os": {
+      "type": "object",
+      "required": ["name"],
+      "properties": {
+        "name": {"type": "string"},
+        "version": {"type": "string"},
+        "kernel": {"type": "string"}
+      }
+    },
+    "runtime": {
+      "type": "object",
+      "properties": {
+        "go_version": {"type": "string"},
+        "python_version": {"type": "string"},
+        "cuda_driver_version": {"type": "string"}
+      }
+    },
+    "tags": {
+      "type": "array",
+      "items": {"type": "string"},
+      "description": "Machine classification tags (e.g., amd64, cuda, wsl2)"
+    }
+  }
+}

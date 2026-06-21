@@ -1,0 +1,82 @@
+# Security-audit automation for the fak module (issue #54 / SOTA-parity E-004).
+#
+# Two jobs, both reproducible on a clean ubuntu runner:
+#
+#   govulncheck — the authoritative scan. `govulncheck ./...` is Go's official
+#     vulnerability analysis: it walks the call graph of the fak module against the
+#     Go vulnerability database (https://vuln.go.dev) and reports only the CVEs whose
+#     vulnerable symbols this code ACTUALLY reaches — covering static analysis,
+#     dependency scanning, and the standard library at once. The fak module ships
+#     zero external deps today (go.mod), so in practice this is the stdlib-CVE
+#     gate; it stays correct the moment a `require` is ever added.
+#
+#   posture — the deterministic wiring gate. Runs tools/security_audit.py, which needs
+#     no Go toolchain or network: it verifies the automation itself is in place (this
+#     workflow runs govulncheck, the secret-leak scanner + pre-commit hook exist, the
+#     dependency surface is pinned, SECURITY.md is present). This is the local,
+#     on-demand half of the audit — the same posture as public_readiness_audit.py.
+#
+# CVE tracking: the weekly `schedule` re-runs govulncheck against an UNCHANGED tree, so
+# a CVE disclosed after the last push still trips the build. workflow_dispatch lets a
+# maintainer run the scan on demand.
+name: security-audit
+
+on:
+  push:
+    branches: [main, master, fak-v0.1]
+  pull_request:
+  schedule:
+    # 06:17 UTC every Monday — catch newly-disclosed CVEs against a quiet tree.
+    - cron: "17 6 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  govulncheck:
+    name: govulncheck · fak (static analysis + CVE/dependency scan)
+    runs-on: ubuntu-latest
+    env:
+      # The toolchain comes from go.mod (go 1.26); GOTOOLCHAIN=auto lets the
+      # runner fetch it if its Go is older — mirrors .github/workflows/ci.yml.
+      GOTOOLCHAIN: auto
+    defaults:
+      run:
+        working-directory: .
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: false # zero external deps -> no go.sum to key a cache on
+
+      # govulncheck is golang.org/x/vuln — an external tool, NOT this repo's module,
+      # so `go install ...@latest` works here (the #72 caveat is about installing fak
+      # itself, which isn't go-gettable yet). Pin nothing: we WANT the latest DB client.
+      - name: install govulncheck
+        run: go install golang.org/x/vuln/cmd/govulncheck@latest
+
+      # Exit code IS the gate: govulncheck exits non-zero iff a reachable vulnerability
+      # is found, failing the build. ./... covers every package in the module.
+      - name: govulncheck ./...
+        run: govulncheck ./...
+
+  posture:
+    name: security-posture audit (wiring + secret-leak gate + deps + policy)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+
+      # The auditor's own tests first (fixtures that trip / clear each check), then the
+      # auditor against this repo — exit 1 on any FAIL (missing scan, scanner, policy).
+      - name: security_audit tests
+        run: python tools/security_audit_test.py
+
+      - name: security_audit (FAIL on any wiring/policy gap)
+        run: python tools/security_audit.py

@@ -1,0 +1,148 @@
+#version 450
+#extension GL_EXT_shader_explicit_arithmetic_types_int8 : require
+#extension GL_EXT_shader_8bit_storage : require
+// rmsnorm_q8_matmul3.comp — RMSNorm(X) then Q/K/V Q8_0 projections in ONE dispatch.
+//
+// The Q8 analogue of rmsnorm_matmul3.comp (decode attention input path, no attention bias):
+// it splices the RMSNorm fold onto the on-the-fly activation quantization of q8_matmul3. Weights
+// are pre-quantized Q8_0 (int8 codes + per-block f32 scales); the normed activation
+// (X * inv * NormW) is quantized per 32-block on the fly (amax/127, round half away from zero),
+// reproducing cpuref quantizeVecQ8 + qdot8scalar so the result holds the Approx gate.
+//
+// Same structure as rmsnorm_q8_matmul2: reduce sumsq -> inv, then window the input staging the
+// NORMED activation, quantize, and dot per output across windows. The output index o selects the
+// Q matrix for [0,qOut), K for [qOut,qOut+kOut), V beyond.
+layout(local_size_x = 256) in;
+
+const uint BLOCK = 32u;
+const uint SHARED_CAP = 2048u;
+const uint WIN_BLOCKS = SHARED_CAP / BLOCK;
+
+layout(std430, binding = 0) readonly buffer Wqq { int8_t Wqcodes[]; };
+layout(std430, binding = 1) readonly buffer Wqs { float Wqscale[]; };
+layout(std430, binding = 2) readonly buffer Wkq { int8_t Wkcodes[]; };
+layout(std430, binding = 3) readonly buffer Wks { float Wkscale[]; };
+layout(std430, binding = 4) readonly buffer Wvq { int8_t Wvcodes[]; };
+layout(std430, binding = 5) readonly buffer Wvs { float Wvscale[]; };
+layout(std430, binding = 6) readonly buffer Xb  { float X[]; };
+layout(std430, binding = 7) readonly buffer Nb  { float NormW[]; };
+layout(std430, binding = 8) writeonly buffer Qb { float Q[]; };
+layout(std430, binding = 9) writeonly buffer Kb { float K[]; };
+layout(std430, binding = 10) writeonly buffer Vb { float V[]; };
+
+layout(push_constant) uniform Push { int qOut; int kOut; int vOut; int inDim; int P; float eps; } pc;
+
+shared float  red[256];
+shared int8_t Xq[SHARED_CAP];
+shared float  Xs[SHARED_CAP / 32u];
+
+int8_t q8round(float x) {
+    int t = int(x);
+    float f = x - float(t);
+    if (f >= 0.5) t += 1; else if (f <= -0.5) t -= 1;
+    t = clamp(t, -127, 127);
+    return int8_t(t);
+}
+
+void main() {
+    uint qOut = uint(pc.qOut);
+    uint kOut = uint(pc.kOut);
+    uint vOut = uint(pc.vOut);
+    uint totalOut = qOut + kOut + vOut;
+    uint outGroups = (totalOut + 255u) / 256u;
+    uint t = gl_WorkGroupID.x / outGroups;
+    if (t >= uint(pc.P)) return;
+    uint outGroup = gl_WorkGroupID.x - t * outGroups;
+    uint tid = gl_LocalInvocationID.x;
+    uint in_ = uint(pc.inDim);
+    uint nblk = in_ / BLOCK;
+    uint xbase = t * in_;
+
+    float local = 0.0;
+    for (uint i = tid; i < in_; i += 256u) {
+        float v = X[xbase + i];
+        local += v * v;
+    }
+    red[tid] = local;
+    barrier();
+    for (uint s = 128u; s > 0u; s >>= 1) {
+        if (tid < s) red[tid] += red[tid + s];
+        barrier();
+    }
+    float inv = inversesqrt(red[0] / float(pc.inDim) + pc.eps);
+    barrier();
+
+    uint o = outGroup * 256u + tid;
+    float acc = 0.0;
+
+    for (uint wb = 0u; wb < nblk; wb += WIN_BLOCKS) {
+        uint winBlocks = min(WIN_BLOCKS, nblk - wb);
+        uint winBase = wb * BLOCK;
+
+        for (uint b = tid; b < winBlocks; b += 256u) {
+            uint base = b * BLOCK;
+            uint gbase = winBase + base;
+            float amax = 0.0;
+            for (uint i = 0u; i < BLOCK; ++i) {
+                float xn = X[xbase + gbase + i] * inv * NormW[gbase + i];
+                amax = max(amax, abs(xn));
+            }
+            float d = amax / 127.0;
+            Xs[b] = d;
+            float qd = d > 0.0 ? 1.0 / d : 0.0;
+            for (uint i = 0u; i < BLOCK; ++i) {
+                float xn = X[xbase + gbase + i] * inv * NormW[gbase + i];
+                Xq[base + i] = (d > 0.0) ? q8round(xn * qd) : int8_t(0);
+            }
+        }
+        barrier();
+
+        if (o < totalOut) {
+            // select weight matrix + local output index
+            uint oLocal;
+            int which; // 0=Q, 1=K, 2=V
+            if (o < qOut)            { which = 0; oLocal = o; }
+            else if (o < qOut + kOut){ which = 1; oLocal = o - qOut; }
+            else                     { which = 2; oLocal = o - qOut - kOut; }
+            uint wbaseCodes = oLocal * in_;
+            uint sbase = oLocal * nblk;
+            for (uint lb = 0u; lb < winBlocks; ++lb) {
+                uint cb = wbaseCodes + (wb + lb) * BLOCK;
+                uint xb = lb * BLOCK;
+                int s0 = 0, s1 = 0, s2 = 0, s3 = 0;
+                if (which == 0) {
+                    for (uint i = 0u; i < BLOCK; i += 4u) {
+                        s0 += int(Wqcodes[cb + i])      * int(Xq[xb + i]);
+                        s1 += int(Wqcodes[cb + i + 1u]) * int(Xq[xb + i + 1u]);
+                        s2 += int(Wqcodes[cb + i + 2u]) * int(Xq[xb + i + 2u]);
+                        s3 += int(Wqcodes[cb + i + 3u]) * int(Xq[xb + i + 3u]);
+                    }
+                    acc += float((s0 + s1) + (s2 + s3)) * Wqscale[sbase + wb + lb] * Xs[lb];
+                } else if (which == 1) {
+                    for (uint i = 0u; i < BLOCK; i += 4u) {
+                        s0 += int(Wkcodes[cb + i])      * int(Xq[xb + i]);
+                        s1 += int(Wkcodes[cb + i + 1u]) * int(Xq[xb + i + 1u]);
+                        s2 += int(Wkcodes[cb + i + 2u]) * int(Xq[xb + i + 2u]);
+                        s3 += int(Wkcodes[cb + i + 3u]) * int(Xq[xb + i + 3u]);
+                    }
+                    acc += float((s0 + s1) + (s2 + s3)) * Wkscale[sbase + wb + lb] * Xs[lb];
+                } else {
+                    for (uint i = 0u; i < BLOCK; i += 4u) {
+                        s0 += int(Wvcodes[cb + i])      * int(Xq[xb + i]);
+                        s1 += int(Wvcodes[cb + i + 1u]) * int(Xq[xb + i + 1u]);
+                        s2 += int(Wvcodes[cb + i + 2u]) * int(Xq[xb + i + 2u]);
+                        s3 += int(Wvcodes[cb + i + 3u]) * int(Xq[xb + i + 3u]);
+                    }
+                    acc += float((s0 + s1) + (s2 + s3)) * Wvscale[sbase + wb + lb] * Xs[lb];
+                }
+            }
+        }
+        barrier();
+    }
+
+    if (o < totalOut) {
+        if (o < qOut)             Q[t * qOut + o] = acc;
+        else if (o < qOut + kOut) K[t * kOut + (o - qOut)] = acc;
+        else                      V[t * vOut + (o - qOut - kOut)] = acc;
+    }
+}

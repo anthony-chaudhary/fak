@@ -1,0 +1,137 @@
+#version 450
+#extension GL_EXT_shader_explicit_arithmetic_types_int8 : require
+#extension GL_EXT_shader_8bit_storage : require
+// rmsnorm_q8_matmul2.comp — RMSNorm(X) then two Q8_0 projections in ONE dispatch.
+//
+// The Q8 analogue of rmsnorm_matmul2.comp (FFN gate/up): it splices the RMSNorm fold of
+// rmsnorm_matmul2 onto the on-the-fly activation quantization of q8_matmul2. The WEIGHTS are
+// pre-quantized Q8_0 (int8 codes [out,in] + per-block f32 scales [out, in/32]); the normed
+// ACTIVATION (X * inv * NormW) is quantized per 32-block on the fly (amax/127, round half away
+// from zero), reproducing the cpuref quantizeVecQ8 + qdot8scalar path so the result holds the
+// Approx gate (cosine ≥ 0.9999, small max|Δ|) exactly as the unfused q8 lane.
+//
+// One workgroup processes a 256-output tile for one row t of X. Because RMSNorm needs the full
+// row's sum-of-squares before any element can be normed, the kernel first reduces sumsq over
+// all of X (→ inv), then windows the input in whole-block chunks: each window stages
+// Xnorm = X*inv*NormW, quantizes it into shared int8 + per-block scale, and every output thread
+// dots it against the int8 weight codes, accumulating across windows. Block order across windows
+// is unchanged, so the result equals a single pass (the inDim ≤ SHARED_CAP case is one window).
+layout(local_size_x = 256) in;
+
+const uint BLOCK = 32u;
+const uint SHARED_CAP = 2048u;              // staged input floats per window (multiple of BLOCK)
+const uint WIN_BLOCKS = SHARED_CAP / BLOCK; // whole Q8_0 blocks staged per window (=64)
+
+layout(std430, binding = 0) readonly buffer W0q { int8_t W0codes[]; };
+layout(std430, binding = 1) readonly buffer W0s { float W0scale[]; };
+layout(std430, binding = 2) readonly buffer W1q { int8_t W1codes[]; };
+layout(std430, binding = 3) readonly buffer W1s { float W1scale[]; };
+layout(std430, binding = 4) readonly buffer Xb  { float X[]; };
+layout(std430, binding = 5) readonly buffer Nb  { float NormW[]; };
+layout(std430, binding = 6) writeonly buffer Y0b { float Y0[]; };
+layout(std430, binding = 7) writeonly buffer Y1b { float Y1[]; };
+
+layout(push_constant) uniform Push { int out0; int out1; int inDim; int P; float eps; } pc;
+
+shared float  red[256];
+shared int8_t Xq[SHARED_CAP];
+shared float  Xs[SHARED_CAP / 32u];
+
+int8_t q8round(float x) {
+    int t = int(x);
+    float f = x - float(t);
+    if (f >= 0.5) t += 1; else if (f <= -0.5) t -= 1;
+    t = clamp(t, -127, 127);
+    return int8_t(t);
+}
+
+void main() {
+    uint totalOut = uint(pc.out0 + pc.out1);
+    uint outGroups = (totalOut + 255u) / 256u;
+    uint t = gl_WorkGroupID.x / outGroups;
+    if (t >= uint(pc.P)) return;
+    uint outGroup = gl_WorkGroupID.x - t * outGroups;
+    uint tid = gl_LocalInvocationID.x;
+    uint in_ = uint(pc.inDim);
+    uint nblk = in_ / BLOCK;
+    uint xbase = t * in_;
+
+    // ---- pass 1: RMS reduction over the whole row -> inv scale ----
+    float local = 0.0;
+    for (uint i = tid; i < in_; i += 256u) {
+        float v = X[xbase + i];
+        local += v * v;
+    }
+    red[tid] = local;
+    barrier();
+    for (uint s = 128u; s > 0u; s >>= 1) {
+        if (tid < s) red[tid] += red[tid + s];
+        barrier();
+    }
+    float inv = inversesqrt(red[0] / float(pc.inDim) + pc.eps);
+    barrier();
+
+    uint o = outGroup * 256u + tid;
+    uint out0 = uint(pc.out0);
+    float acc = 0.0;
+
+    // ---- pass 2: window over the input, staging the NORMED activation, quantizing, dotting ----
+    for (uint wb = 0u; wb < nblk; wb += WIN_BLOCKS) {
+        uint winBlocks = min(WIN_BLOCKS, nblk - wb);
+        uint winBase = wb * BLOCK;
+
+        for (uint b = tid; b < winBlocks; b += 256u) {
+            uint base = b * BLOCK;
+            uint gbase = winBase + base;
+            float amax = 0.0;
+            for (uint i = 0u; i < BLOCK; ++i) {
+                float xn = X[xbase + gbase + i] * inv * NormW[gbase + i];
+                amax = max(amax, abs(xn));
+            }
+            float d = amax / 127.0;
+            Xs[b] = d;
+            float qd = d > 0.0 ? 1.0 / d : 0.0;
+            for (uint i = 0u; i < BLOCK; ++i) {
+                float xn = X[xbase + gbase + i] * inv * NormW[gbase + i];
+                Xq[base + i] = (d > 0.0) ? q8round(xn * qd) : int8_t(0);
+            }
+        }
+        barrier();
+
+        if (o < totalOut) {
+            // pick the weight matrix this output belongs to (W0 for [0,out0), W1 beyond)
+            bool isW0 = o < out0;
+            uint oLocal = isW0 ? o : (o - out0);
+            uint wbaseCodes = oLocal * in_;
+            uint sbase = oLocal * nblk;
+            for (uint lb = 0u; lb < winBlocks; ++lb) {
+                uint cb = wbaseCodes + (wb + lb) * BLOCK;
+                uint xb = lb * BLOCK;
+                int s0 = 0, s1 = 0, s2 = 0, s3 = 0;
+                if (isW0) {
+                    for (uint i = 0u; i < BLOCK; i += 4u) {
+                        s0 += int(W0codes[cb + i])      * int(Xq[xb + i]);
+                        s1 += int(W0codes[cb + i + 1u]) * int(Xq[xb + i + 1u]);
+                        s2 += int(W0codes[cb + i + 2u]) * int(Xq[xb + i + 2u]);
+                        s3 += int(W0codes[cb + i + 3u]) * int(Xq[xb + i + 3u]);
+                    }
+                    acc += float((s0 + s1) + (s2 + s3)) * W0scale[sbase + wb + lb] * Xs[lb];
+                } else {
+                    for (uint i = 0u; i < BLOCK; i += 4u) {
+                        s0 += int(W1codes[cb + i])      * int(Xq[xb + i]);
+                        s1 += int(W1codes[cb + i + 1u]) * int(Xq[xb + i + 1u]);
+                        s2 += int(W1codes[cb + i + 2u]) * int(Xq[xb + i + 2u]);
+                        s3 += int(W1codes[cb + i + 3u]) * int(Xq[xb + i + 3u]);
+                    }
+                    acc += float((s0 + s1) + (s2 + s3)) * W1scale[sbase + wb + lb] * Xs[lb];
+                }
+            }
+        }
+        barrier();
+    }
+
+    if (o < totalOut) {
+        if (o < out0) Y0[t * out0 + o] = acc;
+        else          Y1[t * uint(pc.out1) + (o - out0)] = acc;
+    }
+}

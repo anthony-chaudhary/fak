@@ -1,0 +1,35 @@
+%%{init: {'theme':'base','themeVariables':{'fontFamily':'Segoe UI, Helvetica, Arial, sans-serif','fontSize':'13px','lineColor':'#5B6B7B','primaryColor':'#DCE9FB','primaryTextColor':'#1B3A66','primaryBorderColor':'#3B6FB5','clusterBkg':'#F7F9FB','clusterBorder':'#AFC0CE'}}}%%
+flowchart LR
+  hdr["Top-5 load-bearing claims, prototyped + tested against<br/>REAL telemetry + fresh microbenchmarks (2026-06-16/17),<br/>each adversarially verified"]
+
+  c1["KV-density gate"] --> m1["claimed 8B@50K=10 /<br/>3B@50K=43 warm sessions/H100"] --> v1["CONFIRMED<br/>reproduces from real HF GQA math<br/>(the solid quantitative pillar)"]
+  c2["Fusion multiplier"] --> m2["claimed ~100x vs Go-spawn /<br/>~2500x vs Python-spawn"] --> v2["REFINED ↓ ~10x / ~130x<br/>big numbers priced fused side at a<br/>5ns floor the real hook never hits"]
+  c3["Cross-agent dedup"] --> m3["claimed 'approaches N'"] --> v3["REFINED ↓ 1.105x<br/>sharing is thin (1.8% of keys);<br/>prefix cache already harvests ~94%"]
+  c4["I:O ratio"] --> m4["cited 53:1"] --> v4["MEASURED HIGHER 239:1<br/>(median session 382:1)<br/>strengthens 'tool time = ingest time'"]
+  c5["Speculation hit-rate"] --> m5["raw next-tool top-1 ~49%"] --> v5["REFINED ↓ safe yield ~29%<br/>burst self-repeat, not workflow;<br/>args only ~0.8% predictable"]
+
+  net["NET: the qualitative direction of all 5 held —<br/>but 4 of 5 headline MAGNITUDES were overstated,<br/>and I:O was understated. 0/29 claims scored NOVEL:<br/>the IP is the ASSEMBLY of known parts."]
+  v1 -.- net
+  v2 -.- net
+  v3 -.- net
+  v4 -.- net
+  v5 -.- net
+
+  classDef untrusted fill:#FFE9D6,stroke:#E8833A,stroke-width:2px,color:#7A3E12;
+  classDef kernel fill:#DCE9FB,stroke:#3B6FB5,stroke-width:2px,color:#1B3A66;
+  classDef gate fill:#FFF3CC,stroke:#C9A227,stroke-width:2px,color:#6B5410;
+  classDef pass fill:#DBF3E1,stroke:#3FA45F,stroke-width:2px,color:#1C5230;
+  classDef deny fill:#FBDDDD,stroke:#C9453F,stroke-width:2px,color:#6E1F1B;
+  classDef mem fill:#EDE7FB,stroke:#7B5BC0,stroke-width:2px,color:#3A2A66;
+  classDef cheap fill:#E8ECEF,stroke:#7A8A99,stroke-width:1.5px,color:#33424F;
+  classDef world fill:#FCEEDB,stroke:#B5792B,stroke-width:2px,color:#5E3D12;
+  classDef frontier fill:#E7D9F5,stroke:#8A53C0,stroke-width:2px,color:#3F2466;
+  classDef note fill:#F7F9FB,stroke:#AFC0CE,stroke-width:1px,color:#46586A;
+
+  class hdr note;
+  class c1,c2,c3,c4,c5 untrusted;
+  class m1,m2,m3,m4,m5 gate;
+  class v1 pass;
+  class v4 kernel;
+  class v2,v3,v5 deny;
+  class net note;

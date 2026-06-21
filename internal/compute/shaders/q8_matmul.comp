@@ -1,0 +1,112 @@
+#version 450
+#extension GL_EXT_shader_explicit_arithmetic_types_int8 : require
+#extension GL_EXT_shader_8bit_storage : require
+// q8_matmul.comp — Q8_0 quantized matmul: y[o] = Σ_b (Σ_i Wq[o,b,i]·Xq[b,i]) · dW[o,b]·dX[b].
+//
+// The WEIGHT is pre-quantized Q8_0 (int8 codes [out,in] + per-block f32 scales [out, in/blk]),
+// uploaded ONCE — that is the 4× memory-traffic cut over f32 that makes decode (memory-bound)
+// faster and makes the comparison with llama.cpp's Q8_0 fair. The ACTIVATION is quantized on
+// the fly per block (amax/127 scale, round-half-away-from-zero), reproducing the cpuref path
+// (quantizeVecQ8 + qdot8scalar) so the result is held to the Approx gate (argmax-exact vs the
+// f32 reference, like the CPU Q8 lane).
+//
+// One workgroup processes a 256-output tile for one row t of X: it stages X[t,:] in
+// shared memory, quantizes each block once into shared int8 + per-block scale, then each
+// thread computes one output reading the int8 weight codes. block is fixed at 32 (Q8_0).
+// The output tiling keeps the 49k-vocab LM head spread across CUs instead of making one
+// long-running workgroup walk the whole vocabulary.
+//
+// Input tiling: when inDim exceeds the shared staging cap (SHARED_CAP floats), the input is
+// processed in WINDOWS of whole blocks that fit the cap — each window is staged+quantized
+// into shared memory, then dotted, accumulating into `acc` across windows. Because `acc`
+// already sums per-block contributions in block order, windowing only changes WHICH blocks
+// are resident at once, not the combine order — the result is identical to a single pass and
+// stays bit-for-bit on the Approx gate. This lifts the old inDim<=2048 limit (e.g. a 1.5B
+// FFN down_proj with inDim=8960) without changing the math.
+layout(local_size_x = 256) in;
+
+const uint BLOCK = 32u;
+const uint SHARED_CAP = 2048u;            // staged input floats per window (multiple of BLOCK)
+const uint WIN_BLOCKS = SHARED_CAP / BLOCK; // whole Q8_0 blocks staged per window (=64)
+
+layout(std430, binding = 0) readonly buffer Wq   { int8_t  Wcodes[]; };  // [out*in] int8 weight codes
+layout(std430, binding = 1) readonly buffer Ws   { float   Wscale[]; };  // [out*nblk] per-block weight scales
+layout(std430, binding = 2) readonly buffer Xb   { float   X[]; };       // [P*in] f32 activations
+layout(std430, binding = 3) writeonly buffer Yb  { float   Y[]; };       // [P*out]
+
+layout(push_constant) uniform Push { int outDim; int inDim; int P; } pc;
+
+shared int8_t Xq[SHARED_CAP];        // quantized activation codes for row t
+shared float  Xs[SHARED_CAP / 32u];  // per-block activation scale (one per 32)
+
+int8_t q8round(float x) {
+    // truncate-then-fractional round, half away from zero, clamped to [-127,127] (matches q8round)
+    int t = int(x);
+    float f = x - float(t);
+    if (f >= 0.5) t += 1; else if (f <= -0.5) t -= 1;
+    t = clamp(t, -127, 127);
+    return int8_t(t);
+}
+
+void main() {
+    uint outGroups = (uint(pc.outDim) + 255u) / 256u;
+    uint t = gl_WorkGroupID.x / outGroups;
+    if (t >= uint(pc.P)) return;
+    uint outGroup = gl_WorkGroupID.x - t * outGroups;
+    uint tid = gl_LocalInvocationID.x;
+    uint in_ = uint(pc.inDim);
+    uint out_ = uint(pc.outDim);
+    uint nblk = in_ / BLOCK;
+    uint xbase = t * in_;
+
+    uint o = outGroup * 256u + tid;
+    uint wbase = o * in_;
+    uint sbase = o * nblk;
+    float acc = 0.0;
+
+    // ---- window over the input in chunks of WIN_BLOCKS whole blocks (<= SHARED_CAP floats) ----
+    // Each window is staged+quantized into shared memory once, then dotted by every output
+    // thread, accumulating into `acc`. Block order across windows is unchanged, so the result
+    // equals a single pass (the old inDim<=2048 case is exactly one window).
+    for (uint wb = 0u; wb < nblk; wb += WIN_BLOCKS) {
+        uint winBlocks = min(WIN_BLOCKS, nblk - wb);  // blocks in this window
+        uint winBase = wb * BLOCK;                     // first input float of this window
+
+        // quantize this window's activations into shared Xq + Xs, one block per (subset of) threads
+        for (uint b = tid; b < winBlocks; b += 256u) {
+            uint base = b * BLOCK;            // shared-local block offset
+            uint gbase = winBase + base;      // global input offset
+            float amax = 0.0;
+            for (uint i = 0u; i < BLOCK; ++i) amax = max(amax, abs(X[xbase + gbase + i]));
+            float d = amax / 127.0;
+            Xs[b] = d;
+            float inv = d > 0.0 ? 1.0 / d : 0.0;
+            for (uint i = 0u; i < BLOCK; ++i) {
+                Xq[base + i] = (d > 0.0) ? q8round(X[xbase + gbase + i] * inv) : int8_t(0);
+            }
+        }
+        barrier();
+
+        // per-output int8 dot over this window's blocks (reproduces qdot8scalar combine order)
+        if (o < out_) {
+            for (uint lb = 0u; lb < winBlocks; ++lb) {
+                uint cb = wbase + (wb + lb) * BLOCK;   // global weight code offset
+                uint xb = lb * BLOCK;                  // shared-local activation offset
+                // 4 partial int accumulators, matching the cpuref s0..s3 layout
+                int s0 = 0, s1 = 0, s2 = 0, s3 = 0;
+                for (uint i = 0u; i < BLOCK; i += 4u) {
+                    s0 += int(Wcodes[cb + i])     * int(Xq[xb + i]);
+                    s1 += int(Wcodes[cb + i + 1u]) * int(Xq[xb + i + 1u]);
+                    s2 += int(Wcodes[cb + i + 2u]) * int(Xq[xb + i + 2u]);
+                    s3 += int(Wcodes[cb + i + 3u]) * int(Xq[xb + i + 3u]);
+                }
+                acc += float((s0 + s1) + (s2 + s3)) * Wscale[sbase + wb + lb] * Xs[lb];
+            }
+        }
+        barrier();  // all threads done reading shared before the next window overwrites it
+    }
+
+    if (o < out_) {
+        Y[t * out_ + o] = acc;
+    }
+}

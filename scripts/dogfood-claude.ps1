@@ -1,0 +1,303 @@
+<#
+.SYNOPSIS
+  dogfood-claude.ps1 - ONE command to use fak as a product on Windows: spin up a
+  local model, put the fak kernel in front of it as a NATIVE Anthropic Messages
+  server, and point the real Claude Code CLI at it. Every tool call Claude proposes
+  is adjudicated by the kernel (dropped / grammar-repaired) before Claude sees it.
+
+    Claude Code  --/v1/messages-->  fak serve (the kernel)  --/v1/chat/...-->  local model
+       (harness)  <----- SSE ------  adjudicates every tool   <-------------    (transformers shim)
+
+  This is the Windows-native twin of scripts/dogfood-claude.sh. Differences that
+  make it work on a CPU-only Windows host out of the box:
+    * Backend defaults to the in-tree transformers `shim` (no ollama dependency).
+    * Model defaults to SmolLM2-135M-Instruct - ~85x faster than Qwen-1.5B on CPU
+      (a real Claude Code turn lands in seconds, not minutes). Point FAK_DOGFOOD_MODEL
+      at a larger tool-capable model for real work (and raise FAK_PLANNER_TIMEOUT_S).
+    * Windows paths, PowerShell process management, and port auto-bump (so it does
+      not collide with another session already on :8080).
+
+.PARAMETER (positional)
+  (none)            interactive Claude Code on the local model
+  --probe "<text>"  ONE headless live turn (witnessable proof), then exit
+  --smoke           curl the wire end-to-end (no model needed), then exit
+  --print-env       print the env lines for your own `claude` invocation
+  --list-accounts   show the account switcher's roster, then exit
+  --help            this help
+
+.NOTES
+  Knobs (env):
+    FAK_DOGFOOD_PORT       fak serve port                 (default 8080, auto-bumped if busy)
+    FAK_DOGFOOD_SHIM_PORT  transformers shim port         (default 8190, auto-bumped if busy)
+    FAK_DOGFOOD_MODEL      served model id                (default HuggingFaceTB/SmolLM2-135M-Instruct; empty for anthropic)
+    FAK_DOGFOOD_BACKEND    shim | ollama | anthropic      (default shim)
+                             anthropic = front the REAL Claude API (api.anthropic.com):
+                             Claude Code -> fak (adjudicates) -> real Claude. Your own
+                             key + real model tiers flow through; cache_control survives
+                             byte-for-byte. Override the upstream with FAK_DOGFOOD_BASE_URL.
+    FAK_DOGFOOD_ACCOUNT    account tag for the switcher    (default: isolated .claude-faklocal)
+    FAK_PLANNER_TIMEOUT_S  upstream model round-trip cap   (default 60; raise for big CPU models)
+    FAK_PYTHON             python executable               (default: python)
+
+  It cannot damage your normal `claude`: every wiring env var is set only for the
+  child `claude` this script spawns (PowerShell child processes inherit the
+  process env, not your shell profile), and CLAUDE_CONFIG_DIR points at an isolated
+  .claude-faklocal account, never your default ~/.claude.
+#>
+$ErrorActionPreference = 'Stop'
+
+# ---- parse mode ------------------------------------------------------------
+$Mode = 'run'
+$ProbePrompt = 'Reply with exactly the word: pong'
+$RunArgs = @()
+if ($args.Count -ge 1) {
+  switch ($args[0]) {
+    '--probe'         { $Mode = 'probe'; if ($args.Count -ge 2) { $ProbePrompt = [string]$args[1] } }
+    '--smoke'         { $Mode = 'smoke' }
+    '--print-env'     { $Mode = 'print-env' }
+    '--list-accounts' { $Mode = 'list-accounts' }
+    '--help'          { $Mode = 'help' }
+    '-h'              { $Mode = 'help' }
+    default           { $RunArgs = $args }   # interactive: pass everything through to claude
+  }
+}
+
+# ---- locate the repo (this script lives in fak/scripts/) -------------------
+$ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
+$FakDir = (Resolve-Path (Join-Path $ScriptDir '..')).Path
+$Root   = (Resolve-Path (Join-Path $FakDir '..')).Path
+
+# ---- knobs -----------------------------------------------------------------
+$Port      = if ($env:FAK_DOGFOOD_PORT)      { [int]$env:FAK_DOGFOOD_PORT }      else { 8080 }
+$ShimPort  = if ($env:FAK_DOGFOOD_SHIM_PORT) { [int]$env:FAK_DOGFOOD_SHIM_PORT } else { 8190 }
+$Backend   = if ($env:FAK_DOGFOOD_BACKEND)   { $env:FAK_DOGFOOD_BACKEND }   else { 'shim' }
+# The 'anthropic' upstream fronts the REAL Claude API — Claude Code keeps its own
+# real model tiers (claude-opus-4-8, etc.), so the single-model override is OFF and
+# the default 'model' is empty. Local backends still map every tier onto one model.
+$AnthropicUpstream = ($Backend -eq 'anthropic')
+$DefaultModel = if ($AnthropicUpstream) { '' } else { 'HuggingFaceTB/SmolLM2-135M-Instruct' }
+$Model     = if ($env:FAK_DOGFOOD_MODEL)     { $env:FAK_DOGFOOD_MODEL }     else { $DefaultModel }
+$Account   = if ($env:FAK_DOGFOOD_ACCOUNT)   { $env:FAK_DOGFOOD_ACCOUNT }   else { 'faklocal' }
+$UserHome  = if ($env:FLEET_USER_HOME)       { $env:FLEET_USER_HOME }       else { $env:USERPROFILE }
+$Python    = if ($env:FAK_PYTHON)            { $env:FAK_PYTHON }            else { 'python' }
+$Bin       = Join-Path $Root 'tools\.bin\fak.exe'
+# The account switcher (tools/fleet_accounts.py) globs FLEET_USER_HOME/.claude*.
+$env:FLEET_USER_HOME = $UserHome
+
+function Log  { param([string]$m) Write-Host "[dogfood] $m" -ForegroundColor Cyan }
+function Die  { param([string]$m) Write-Host "[dogfood] $m" -ForegroundColor Red; exit 1 }
+
+function Test-PortFree { param([int]$p)
+  -not (Get-NetTCPConnection -LocalPort $p -State Listen -ErrorAction SilentlyContinue)
+}
+function Get-UsablePort { param([int]$p)
+  for ($i = 0; $i -lt 50; $i++) { if (Test-PortFree ($p + $i)) { return ($p + $i) } }
+  Die "no free port near $p"
+}
+function Wait-Url { param([string]$url, [int]$timeoutSec = 120)
+  for ($i = 0; $i -lt ($timeoutSec * 2); $i++) {
+    try { Invoke-WebRequest -Uri $url -TimeoutSec 2 -UseBasicParsing | Out-Null; return $true } catch { Start-Sleep -Milliseconds 500 }
+  }
+  return $false
+}
+
+# ---- help / list-accounts: no stack needed ---------------------------------
+if ($Mode -eq 'help') {
+  Get-Help $MyInvocation.MyCommand.Path -Detailed
+  exit 0
+}
+if ($Mode -eq 'list-accounts') {
+  & $Python (Join-Path $Root 'tools\fleet_accounts.py') list
+  exit $LASTEXITCODE
+}
+
+$script:children = @()
+function Stop-Children {
+  foreach ($p in $script:children) {
+    if ($p -and -not $p.HasExited) { try { Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue } catch {} }
+  }
+}
+
+try {
+  # ---- build the kernel binary ---------------------------------------------
+  Log "building fak -> $Bin"
+  New-Item -ItemType Directory -Force (Split-Path -Parent $Bin) | Out-Null
+  Push-Location $FakDir
+  try { & go build -o $Bin ./cmd/fak; if ($LASTEXITCODE -ne 0) { Die "go build failed" } }
+  finally { Pop-Location }
+
+  # ---- bring up the local model backend (skipped for --smoke) --------------
+  # The 'anthropic' upstream needs no local model: fak proxies straight to the real
+  # Claude API. Set the upstream URL unconditionally (even for --smoke, so the wire
+  # smoke exercises the same provider path) and skip the shim/ollama bring-up.
+  $BaseUrl = ''
+  $Provider = 'openai'
+  if ($AnthropicUpstream) {
+    $Provider = 'anthropic'
+    $BaseUrl  = if ($env:FAK_DOGFOOD_BASE_URL) { $env:FAK_DOGFOOD_BASE_URL } else { 'https://api.anthropic.com' }
+    Log "upstream = REAL Claude API ($BaseUrl) - fak adjudicates every tool call on your live turns"
+  }
+  if ($Mode -ne 'smoke' -and -not $AnthropicUpstream) {
+    if ($Backend -eq 'shim') {
+      if (-not (Get-Command $Python -ErrorAction SilentlyContinue)) { Die "python ('$Python') not found - install Python 3 or set FAK_PYTHON" }
+      $ShimPort = Get-UsablePort $ShimPort
+      Log "starting transformers shim ($Model) on :$ShimPort"
+      $shimOut = Join-Path $env:TEMP 'fak-dogfood-shim.out.log'
+      $shimErr = Join-Path $env:TEMP 'fak-dogfood-shim.err.log'
+      $shim = Start-Process -FilePath $Python `
+        -ArgumentList @((Join-Path $FakDir 'experiments\agent-live\local_shim.py'), '--model', $Model, '--port', $ShimPort) `
+        -PassThru -NoNewWindow -RedirectStandardOutput $shimOut -RedirectStandardError $shimErr
+      $script:children += $shim
+      if (-not (Wait-Url "http://127.0.0.1:$ShimPort/v1/models" 180)) {
+        Get-Content $shimErr -Tail 20 -ErrorAction SilentlyContinue | Write-Host
+        Die "shim did not come up on :$ShimPort"
+      }
+      $BaseUrl = "http://127.0.0.1:$ShimPort/v1"
+    }
+    elseif ($Backend -eq 'ollama') {
+      $oll = if ($env:OLLAMA_HOST) { $env:OLLAMA_HOST } else { '127.0.0.1:11434' }
+      if (-not (Wait-Url "http://$oll/api/tags" 3)) { Die "ollama not reachable at $oll (start 'ollama serve' or use FAK_DOGFOOD_BACKEND=shim)" }
+      $BaseUrl = "http://$oll/v1"
+    }
+    else { Die "unknown FAK_DOGFOOD_BACKEND=$Backend (want shim|ollama)" }
+  }
+
+  # ---- start fak serve (the kernel) in front of the model ------------------
+  # Claude Code's prompt is large; even SmolLM2-135M can take >60s/turn on a CPU
+  # box, which would trip the planner's 60s and the gateway's 90s WriteTimeout and
+  # cut the turn off with a 502. Default both generous (300s) unless the operator
+  # already set them. fak serve inherits these from this process env via Start-Process.
+  if (-not $env:FAK_PLANNER_TIMEOUT_S)    { $env:FAK_PLANNER_TIMEOUT_S = '300' }
+  if (-not $env:FAK_HTTP_WRITE_TIMEOUT_S) { $env:FAK_HTTP_WRITE_TIMEOUT_S = '300' }
+  $Port = Get-UsablePort $Port
+  $serveArgs = @('serve', '--addr', "127.0.0.1:$Port", '--provider', $Provider)
+  if ($Model)   { $serveArgs += @('--model', $Model) }
+  if ($BaseUrl) { $serveArgs += @('--base-url', $BaseUrl) }
+  if ($env:FAK_DOGFOOD_POLICY) { $serveArgs += @('--policy', $env:FAK_DOGFOOD_POLICY) }
+  Log "starting kernel: fak $($serveArgs -join ' ')"
+  $serveOut = Join-Path $env:TEMP 'fak-dogfood-serve.out.log'
+  $serveErr = Join-Path $env:TEMP 'fak-dogfood-serve.err.log'
+  $serve = Start-Process -FilePath $Bin -ArgumentList $serveArgs -PassThru -NoNewWindow `
+    -RedirectStandardOutput $serveOut -RedirectStandardError $serveErr
+  $script:children += $serve
+  if (-not (Wait-Url "http://127.0.0.1:$Port/healthz" 30)) {
+    Get-Content $serveErr -Tail 20 -ErrorAction SilentlyContinue | Write-Host
+    Die "fak serve did not become healthy on :$Port"
+  }
+  Log "kernel healthy: $((Invoke-WebRequest "http://127.0.0.1:$Port/healthz" -UseBasicParsing).Content)"
+
+  # ---- resolve the account dir through the switcher ------------------------
+  function Resolve-AccountDir { param([string]$tag)
+    if ($tag -eq 'faklocal') {
+      $d = Join-Path $UserHome '.claude-faklocal'
+      New-Item -ItemType Directory -Force (Join-Path $d 'projects') | Out-Null
+      return $d
+    }
+    $j = (& $Python (Join-Path $Root 'tools\fleet_accounts.py') json | ConvertFrom-Json)
+    $acct = $j.accounts | Where-Object { $_.tag -eq $tag } | Select-Object -First 1
+    if (-not $acct) { Die "account tag '$tag' not found - run with --list-accounts" }
+    return $acct.dir
+  }
+  $AccountDir = Resolve-AccountDir $Account
+
+  # ---- wire the Claude Code harness to the kernel --------------------------
+  # Claude Code appends /v1/messages itself, so the base URL must NOT include /v1.
+  $env:ANTHROPIC_BASE_URL = "http://127.0.0.1:$Port"
+  $env:CLAUDE_CONFIG_DIR  = $AccountDir
+  if ($AnthropicUpstream) {
+    # Real Claude API upstream: fak is a TRANSPARENT hop. Leave the model tiers and
+    # the API key ALONE — Claude Code uses its real models (claude-opus-4-8, ...) and
+    # its own credential, which fak forwards verbatim to api.anthropic.com (the inbound
+    # x-api-key is passed through; cache_control survives byte-for-byte). Do NOT pin a
+    # placeholder key or remap tiers — that would defeat the point.
+    Log "Claude Code wired (REAL Claude API through fak):"
+    Log "  ANTHROPIC_BASE_URL = $($env:ANTHROPIC_BASE_URL)   (native /v1/messages on the kernel)"
+    Log "  CLAUDE_CONFIG_DIR  = $($env:CLAUDE_CONFIG_DIR)    (account: $Account)"
+    Log "  upstream           = $BaseUrl   (real models + your own key flow through)"
+  } else {
+    $env:ANTHROPIC_API_KEY  = if ($env:ANTHROPIC_API_KEY) { $env:ANTHROPIC_API_KEY } else { 'fak-local-dogfood' }
+    # Map every Claude Code model tier onto our single local model.
+    $env:ANTHROPIC_MODEL = $Model
+    $env:ANTHROPIC_DEFAULT_OPUS_MODEL = $Model
+    $env:ANTHROPIC_DEFAULT_SONNET_MODEL = $Model
+    $env:ANTHROPIC_DEFAULT_HAIKU_MODEL = $Model
+    $env:ANTHROPIC_SMALL_FAST_MODEL = $Model
+    Log "Claude Code wired:"
+    Log "  ANTHROPIC_BASE_URL = $($env:ANTHROPIC_BASE_URL)   (native /v1/messages on the kernel)"
+    Log "  CLAUDE_CONFIG_DIR  = $($env:CLAUDE_CONFIG_DIR)    (account: $Account)"
+    Log "  model (all tiers)  = $Model"
+  }
+  if (-not $env:CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC) { $env:CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC = '1' }
+
+  switch ($Mode) {
+    'smoke' {
+      # Use Invoke-WebRequest, NOT curl.exe: when PowerShell passes a JSON `-d`
+      # argument to a native exe it strips the inner double-quotes, so curl would
+      # send unquoted keys and the kernel rejects the body. Native PS HTTP avoids it.
+      $wire = {
+        param([string]$body)
+        try { (Invoke-WebRequest -Uri "$($env:ANTHROPIC_BASE_URL)/v1/messages" -Method Post -ContentType 'application/json' -Body $body -UseBasicParsing).Content }
+        catch {
+          $resp = $_.Exception.Response
+          if ($resp) { (New-Object System.IO.StreamReader($resp.GetResponseStream())).ReadToEnd() }
+          else { "[wire error] $($_.Exception.Message)" }
+        }
+      }
+      Log "wire smoke - POST /v1/messages (buffered):"
+      $b = '{"model":"claude-smoke","max_tokens":64,"messages":[{"role":"user","content":"hi"}]}'
+      (& $wire $b) | ForEach-Object { "    $_" }
+      Log "wire smoke - POST /v1/messages (stream:true) event names:"
+      $bs = '{"model":"claude-smoke","max_tokens":64,"stream":true,"messages":[{"role":"user","content":"hi"}]}'
+      ((& $wire $bs) -split "`n") | Select-String '^event:' | ForEach-Object { "    $($_.Line.Trim())" }
+      Log "smoke ok"
+    }
+    'print-env' {
+      @"
+`$env:ANTHROPIC_BASE_URL="$($env:ANTHROPIC_BASE_URL)"
+`$env:ANTHROPIC_API_KEY="$($env:ANTHROPIC_API_KEY)"
+`$env:CLAUDE_CONFIG_DIR="$($env:CLAUDE_CONFIG_DIR)"
+`$env:ANTHROPIC_MODEL="$Model"
+`$env:ANTHROPIC_DEFAULT_OPUS_MODEL="$Model"
+`$env:ANTHROPIC_DEFAULT_SONNET_MODEL="$Model"
+`$env:ANTHROPIC_DEFAULT_HAIKU_MODEL="$Model"
+`$env:ANTHROPIC_SMALL_FAST_MODEL="$Model"
+"@ | Write-Host
+    }
+    'probe' {
+      $out = Join-Path $FakDir 'experiments\agent-live\dogfood-claude-probe-win.json'
+      Log "one live turn through Claude Code (headless): `"$ProbePrompt`""
+      $perr = Join-Path $env:TEMP 'fak-dogfood-claude.err.log'
+      # Relax $ErrorActionPreference around the call: in PS 5.1, `2>` redirecting a
+      # native command's stderr under 'Stop' turns claude's harmless "no stdin in 3s"
+      # warning into a TERMINATING NativeCommandError that aborts the probe. Pipe
+      # empty stdin ($null) so claude gets immediate EOF instead of waiting 3s.
+      $prevEAP = $ErrorActionPreference
+      $ErrorActionPreference = 'Continue'
+      try {
+        $null | & claude -p $ProbePrompt --output-format json --dangerously-skip-permissions 1>$out 2>$perr
+        $rc = $LASTEXITCODE
+      } finally { $ErrorActionPreference = $prevEAP }
+      if ($rc -ne 0) { Get-Content $perr -Tail 20 -ErrorAction SilentlyContinue | Write-Host; Die "claude probe exited $rc" }
+      # PS 5.1's `1>` redirect writes UTF-16; normalize the committed witness to UTF-8.
+      if (Test-Path $out) {
+        $raw = Get-Content $out -Raw
+        [System.IO.File]::WriteAllText($out, $raw, (New-Object System.Text.UTF8Encoding($false)))
+      }
+      Log "transcript -> $out"
+      try {
+        $d = Get-Content $out -Raw | ConvertFrom-Json
+        $res = if ($d.result) { $d.result } else { $d }
+        Log ("result: " + ([string]$res).Substring(0, [math]::Min(400, ([string]$res).Length)))
+        Log ("subtype=$($d.subtype)  is_error=$($d.is_error)  turns=$($d.num_turns)  model=$(@($d.modelUsage.PSObject.Properties.Name) -join ',')")
+      } catch { Log "(probe JSON written; parse skipped)" }
+      Log "live turn ok - Claude Code completed a turn against the local kernel-fronted model"
+    }
+    'run' {
+      Log "launching interactive Claude Code (Ctrl-C to stop; kernel shuts down on exit)"
+      & claude --dangerously-skip-permissions @RunArgs
+    }
+  }
+}
+finally {
+  Stop-Children
+}

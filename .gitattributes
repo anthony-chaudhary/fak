@@ -1,0 +1,11 @@
+# Shell scripts run inside WSL — they must keep LF endings even when this repo
+# is checked out on Windows with core.autocrlf=true. CRLF would break the bash
+# shebang / parsing of fak/test.sh.
+*.sh text eol=lf
+
+# Golden fixtures are compared BYTE-FOR-BYTE against `\n`-marshaled JSON
+# (e.g. internal/abi TestABIGoldenFreeze does `string(want) != string(gotJSON)`).
+# Under core.autocrlf=true a Windows checkout rewrites them to CRLF and the
+# byte compare fails locally while passing on Linux/CI. Pin LF so the freeze
+# tests are platform-independent.
+*.golden text eol=lf

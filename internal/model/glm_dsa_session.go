@@ -1,0 +1,395 @@
+package model
+
+import (
+	"fmt"
+	"math"
+)
+
+type glmDsaKVCache struct {
+	K         [][]float32
+	Kraw      [][]float32
+	V         [][]float32
+	IndexK    [][]float64
+	IndexKraw [][]float64
+}
+
+func newGLMDsaKVCache(cfg Config) *glmDsaKVCache {
+	if !cfg.isGLMMoeDsa() {
+		return nil
+	}
+	return &glmDsaKVCache{
+		K:         make([][]float32, cfg.NumLayers),
+		Kraw:      make([][]float32, cfg.NumLayers),
+		V:         make([][]float32, cfg.NumLayers),
+		IndexK:    make([][]float64, cfg.NumLayers),
+		IndexKraw: make([][]float64, cfg.NumLayers),
+	}
+}
+
+func (c *glmDsaKVCache) cloneWithReserve(cfg Config, extraPositions int) *glmDsaKVCache {
+	if c == nil {
+		return nil
+	}
+	if extraPositions < 0 {
+		extraPositions = 0
+	}
+	kExtra := extraPositions * glmDsaAttentionKStride(cfg)
+	vExtra := extraPositions * glmDsaAttentionVStride(cfg)
+	idxExtra := extraPositions * cfg.IndexHeadDim
+	out := &glmDsaKVCache{
+		K:         make([][]float32, len(c.K)),
+		Kraw:      make([][]float32, len(c.Kraw)),
+		V:         make([][]float32, len(c.V)),
+		IndexK:    make([][]float64, len(c.IndexK)),
+		IndexKraw: make([][]float64, len(c.IndexKraw)),
+	}
+	for l := range c.K {
+		out.K[l] = cloneFloat32WithReserve(c.K[l], kExtra)
+		out.Kraw[l] = cloneFloat32WithReserve(c.Kraw[l], kExtra)
+		out.V[l] = cloneFloat32WithReserve(c.V[l], vExtra)
+		out.IndexK[l] = cloneFloat64WithReserve(c.IndexK[l], idxExtra)
+		out.IndexKraw[l] = cloneFloat64WithReserve(c.IndexKraw[l], idxExtra)
+	}
+	return out
+}
+
+func (c *glmDsaKVCache) reserve(cfg Config, extraPositions int) {
+	if c == nil || extraPositions <= 0 {
+		return
+	}
+	kExtra := extraPositions * glmDsaAttentionKStride(cfg)
+	vExtra := extraPositions * glmDsaAttentionVStride(cfg)
+	idxExtra := extraPositions * cfg.IndexHeadDim
+	for l := range c.K {
+		c.K[l] = reserveFloat32(c.K[l], kExtra)
+		c.Kraw[l] = reserveFloat32(c.Kraw[l], kExtra)
+		c.V[l] = reserveFloat32(c.V[l], vExtra)
+		c.IndexK[l] = reserveFloat64(c.IndexK[l], idxExtra)
+		c.IndexKraw[l] = reserveFloat64(c.IndexKraw[l], idxExtra)
+	}
+}
+
+func (c *glmDsaKVCache) evict(cfg Config, from, end int) {
+	if c == nil {
+		return
+	}
+	kStride := glmDsaAttentionKStride(cfg)
+	vStride := glmDsaAttentionVStride(cfg)
+	idxStride := cfg.IndexHeadDim
+	for l := range c.K {
+		c.K[l] = evictFloat32Rows(c.K[l], from, end, kStride)
+		c.Kraw[l] = evictFloat32Rows(c.Kraw[l], from, end, kStride)
+		c.V[l] = evictFloat32Rows(c.V[l], from, end, vStride)
+		c.IndexK[l] = evictFloat64Rows(c.IndexK[l], from, end, idxStride)
+		c.IndexKraw[l] = evictFloat64Rows(c.IndexKraw[l], from, end, idxStride)
+	}
+}
+
+func evictFloat32Rows(s []float32, from, end, stride int) []float32 {
+	if len(s) == 0 {
+		return s
+	}
+	return append(s[:from*stride], s[end*stride:]...)
+}
+
+func evictFloat64Rows(s []float64, from, end, stride int) []float64 {
+	if len(s) == 0 {
+		return s
+	}
+	return append(s[:from*stride], s[end*stride:]...)
+}
+
+func (c *glmDsaKVCache) rerotateSurvivor(cfg Config, pos int) {
+	if c == nil {
+		return
+	}
+	qkNope, qkRope := cfg.QKNopeHeadDim, cfg.QKRopeHeadDim
+	qkHead := qkNope + qkRope
+	kStride := glmDsaAttentionKStride(cfg)
+	idxStride := cfg.IndexHeadDim
+	for l := range c.K {
+		cos, sin := ropeRowForLayer(cfg, l, pos)
+		for h := 0; h < cfg.NumHeads; h++ {
+			off := pos*kStride + h*qkHead
+			raw := c.Kraw[l][off : off+qkHead]
+			dst := c.K[l][off : off+qkHead]
+			copy(dst[:qkNope], raw[:qkNope])
+			copy(dst[qkNope:], glmDsaApplyInterleavedRoPE(raw[qkNope:], cos, sin))
+		}
+		if len(c.IndexKraw[l]) == 0 {
+			continue
+		}
+		off := pos * idxStride
+		raw := float64To32(c.IndexKraw[l][off : off+idxStride])
+		glmDsaApplyIndexerRoPE(raw[:qkRope], cos, sin)
+		for i, v := range raw {
+			c.IndexK[l][off+i] = float64(v)
+		}
+	}
+}
+
+func glmDsaAttentionKStride(cfg Config) int {
+	return cfg.NumHeads * (cfg.QKNopeHeadDim + cfg.QKRopeHeadDim)
+}
+
+func glmDsaAttentionVStride(cfg Config) int {
+	return cfg.NumHeads * cfg.VHeadDim
+}
+
+func (s *Session) tokenHiddenGLMDsa(id, pos int) []float32 {
+	xf, err := s.decodeBandGLMDsa(id, nil, 0, s.M.Cfg.NumLayers, pos, true, true)
+	if err != nil {
+		panic(err)
+	}
+	return xf
+}
+
+// decodeBandGLMDsa runs ONE incremental decode step through transformer-layer band
+// [lo,hi) at absolute position pos, mutating only this session's DSA cache slots in
+// [lo,hi). isFirst embeds id into the initial hidden; otherwise x is the hidden state
+// handed over from the previous stage and id is ignored. isLast appends the pos ledger
+// entry and applies finalNorm, returning the head's input; a non-last stage returns the
+// raw band-output hidden for the next stage and does NOT touch Cache.pos. pos is the
+// caller's absolute position — never read from Cache.Len(), which only the tail stage
+// advances. sharedTopK is band-local: reset here every call, and because every band
+// begins on a full-indexer layer (PartitionPlan rule, re-guarded below) the first layer
+// recomputes its own top-k, so a fresh slice is correct and no top-k crosses a boundary.
+// tokenHiddenGLMDsa delegates to this over [0,NumLayers) so there is ONE instruction
+// stream (the FMA-fusion no-op gate) — the monolithic path is byte-for-byte unchanged.
+func (s *Session) decodeBandGLMDsa(id int, x []float32, lo, hi, pos int, isFirst, isLast bool) ([]float32, error) {
+	m, cfg := s.M, s.M.Cfg
+	if lo < 0 || hi <= lo || hi > cfg.NumLayers {
+		return nil, fmt.Errorf("model: decodeBandGLMDsa range [%d,%d) invalid for %d layers", lo, hi, cfg.NumLayers)
+	}
+	if glmDsaIndexerIsShared(cfg, lo) {
+		return nil, fmt.Errorf("model: decodeBandGLMDsa cannot start at GLM shared-indexer layer %d (band must begin on a full-indexer layer)", lo)
+	}
+	if isFirst {
+		H := cfg.HiddenSize
+		embed := m.embedRows()
+		x = append([]float32(nil), embed[id*H:(id+1)*H]...)
+		scaleEmbedInPlace(x, cfg)
+	}
+	s.glmDsaSharedTopK = nil
+	eps := float32(cfg.RMSNormEps)
+	mat := residentKernel{m}
+	for l := lo; l < hi; l++ {
+		layer := l
+		attnBody := func(xn []float32) []float32 {
+			out, topK, ok := m.glmDsaAttentionStep(s.Cache.glm, layer, pos, xn, s.glmDsaSharedTopK)
+			if !ok {
+				panic("model: glm_moe_dsa attention step failed")
+			}
+			if !glmDsaIndexerIsShared(cfg, layer) {
+				s.glmDsaSharedTopK = append(s.glmDsaSharedTopK[:0], topK...)
+			}
+			return out
+		}
+		mlpBody := func(xn []float32) []float32 {
+			return m.ffnForLayer(layer).apply(m, layer, mat.prep(xn), mat)
+		}
+		attnNorm := m.attentionNorms(layer)
+		mlpNorm := m.mlpNorms(layer)
+		if cfg.BlockTopology == ParallelResidual {
+			mlpNorm = m.parallelMLPNorms(layer, attnNorm)
+		}
+		composeBlock(cfg.BlockTopology, x, attnNorm, mlpNorm, eps, cfg, attnBody, mlpBody)
+	}
+	if isLast {
+		s.Cache.pos = append(s.Cache.pos, pos)
+		return m.finalNorm(x), nil
+	}
+	return x, nil
+}
+
+func (m *Model) glmDsaAttentionStep(cache *glmDsaKVCache, layer, pos int, xn []float32, sharedTopK []int) ([]float32, []int, bool) {
+	cfg := m.Cfg
+	if cache == nil || !cfg.isGLMMoeDsa() || len(xn) != cfg.HiddenSize {
+		return nil, nil, false
+	}
+	var topK []int
+	if glmDsaIndexerIsShared(cfg, layer) {
+		if len(sharedTopK) == 0 {
+			return nil, nil, false
+		}
+		topK = append([]int(nil), sharedTopK...)
+	} else {
+		if !glmDsaIndexerIsFull(cfg, layer) {
+			return nil, nil, false
+		}
+		var ok bool
+		topK, ok = m.glmDsaIndexStep(cache, layer, pos, xn)
+		if !ok {
+			return nil, nil, false
+		}
+	}
+	query, ok := m.glmDsaAppendAttentionKV(cache, layer, pos, xn)
+	if !ok {
+		return nil, nil, false
+	}
+	out, ok := m.glmDsaAttendCached(cache, layer, pos, query, topK)
+	if !ok {
+		return nil, nil, false
+	}
+	return out, topK, true
+}
+
+func (m *Model) glmDsaIndexStep(cache *glmDsaKVCache, layer, pos int, xn []float32) ([]int, bool) {
+	cfg := m.Cfg
+	H, qLora := cfg.HiddenSize, cfg.QLoraRank
+	indexHeads, indexDim := cfg.IndexNHeads, cfg.IndexHeadDim
+	qkRope := cfg.QKRopeHeadDim
+	if H == 0 || qLora == 0 || indexHeads == 0 || indexDim == 0 || qkRope <= 0 || qkRope > indexDim || qkRope%2 != 0 {
+		return nil, false
+	}
+
+	ap := layerPrefix(layer) + "self_attn."
+	qResid := m.residentMatRows(ap+"q_a_proj.weight", xn, qLora, H)
+	addOptionalBias(qResid, m.tensorOptional(ap+"q_a_proj.bias"))
+	qResid = rmsnorm(qResid, m.tensor(ap+"q_a_layernorm.weight"), glmDsaInnerNormEps)
+	qFull := m.residentMatRows(ap+"indexer.wq_b.weight", qResid, indexHeads*indexDim, qLora)
+
+	k := layernorm(m.residentMatRows(ap+"indexer.wk.weight", xn, indexDim, H),
+		m.tensor(ap+"indexer.k_norm.weight"), m.tensor(ap+"indexer.k_norm.bias"), glmDsaInnerNormEps)
+	weights := m.residentMatRows(ap+"indexer.weights_proj.weight", xn, indexHeads, H)
+	weightScale := float32(1.0 / math.Sqrt(float64(indexHeads)))
+	for i := range weights {
+		weights[i] *= weightScale
+	}
+
+	cos, sin := ropeRowForLayer(cfg, layer, pos)
+	indexQ := make([][]float64, indexHeads)
+	for h := 0; h < indexHeads; h++ {
+		head := append([]float32(nil), qFull[h*indexDim:(h+1)*indexDim]...)
+		glmDsaApplyIndexerRoPE(head[:qkRope], cos, sin)
+		indexQ[h] = float32To64(head)
+	}
+	k = append([]float32(nil), k...)
+	kRaw := append([]float32(nil), k...)
+	glmDsaApplyIndexerRoPE(k[:qkRope], cos, sin)
+	k64 := float32To64(k)
+	cache.IndexKraw[layer] = append(cache.IndexKraw[layer], float32To64(kRaw)...)
+	cache.IndexK[layer] = append(cache.IndexK[layer], k64...)
+	if len(cache.IndexK[layer]) != (pos+1)*indexDim || len(cache.IndexKraw[layer]) != (pos+1)*indexDim {
+		return nil, false
+	}
+
+	scores := make([]float64, pos+1)
+	scale := 1.0 / math.Sqrt(float64(indexDim))
+	for keyPos := 0; keyPos <= pos; keyPos++ {
+		key := cache.IndexK[layer][keyPos*indexDim : (keyPos+1)*indexDim]
+		var score float64
+		for h := 0; h < indexHeads; h++ {
+			headScore := dot64(indexQ[h], key) * scale
+			if math.IsNaN(headScore) {
+				return nil, false
+			}
+			if headScore < 0 {
+				headScore = 0
+			}
+			score += float64(weights[h]) * headScore
+		}
+		scores[keyPos] = score
+	}
+	topK, ok := dsaTopKIndices([][]float64{scores}, []int{pos}, glmDsaPositions(pos+1), cfg.IndexTopK)
+	if !ok || len(topK) != 1 {
+		return nil, false
+	}
+	return topK[0], true
+}
+
+func (m *Model) glmDsaAppendAttentionKV(cache *glmDsaKVCache, layer, pos int, xn []float32) ([]float32, bool) {
+	cfg := m.Cfg
+	H, nH := cfg.HiddenSize, cfg.NumHeads
+	qLora, kvLora := cfg.QLoraRank, cfg.KVLoraRank
+	qkNope, qkRope, vHead := cfg.QKNopeHeadDim, cfg.QKRopeHeadDim, cfg.VHeadDim
+	qkHead := qkNope + qkRope
+	if H == 0 || nH == 0 || qLora == 0 || kvLora == 0 || qkNope == 0 || qkRope == 0 || vHead == 0 || qkRope%2 != 0 {
+		return nil, false
+	}
+
+	ap := layerPrefix(layer) + "self_attn."
+	qResid := m.residentMatRows(ap+"q_a_proj.weight", xn, qLora, H)
+	addOptionalBias(qResid, m.tensorOptional(ap+"q_a_proj.bias"))
+	qResid = rmsnorm(qResid, m.tensor(ap+"q_a_layernorm.weight"), glmDsaInnerNormEps)
+	qFull := m.residentMatRows(ap+"q_b_proj.weight", qResid, nH*qkHead, qLora)
+
+	compressedKV := m.residentMatRows(ap+"kv_a_proj_with_mqa.weight", xn, kvLora+qkRope, H)
+	addOptionalBias(compressedKV, m.tensorOptional(ap+"kv_a_proj_with_mqa.bias"))
+	kvLatent := rmsnorm(compressedKV[:kvLora], m.tensor(ap+"kv_a_layernorm.weight"), glmDsaInnerNormEps)
+	kvFull := m.residentMatRows(ap+"kv_b_proj.weight", kvLatent, nH*(qkNope+vHead), kvLora)
+	kRotRaw := compressedKV[kvLora:]
+
+	cos, sin := ropeRowForLayer(cfg, layer, pos)
+	query := make([]float32, nH*qkHead)
+	key := make([]float32, nH*qkHead)
+	keyRaw := make([]float32, nH*qkHead)
+	value := make([]float32, nH*vHead)
+	for h := 0; h < nH; h++ {
+		qSrc := qFull[h*qkHead : (h+1)*qkHead]
+		qDst := query[h*qkHead : (h+1)*qkHead]
+		copy(qDst[:qkNope], qSrc[:qkNope])
+		copy(qDst[qkNope:], glmDsaApplyInterleavedRoPE(qSrc[qkNope:], cos, sin))
+
+		kvSrc := kvFull[h*(qkNope+vHead) : (h+1)*(qkNope+vHead)]
+		kDst := key[h*qkHead : (h+1)*qkHead]
+		kRawDst := keyRaw[h*qkHead : (h+1)*qkHead]
+		copy(kDst[:qkNope], kvSrc[:qkNope])
+		copy(kRawDst[:qkNope], kvSrc[:qkNope])
+		copy(kRawDst[qkNope:], kRotRaw)
+		copy(kDst[qkNope:], glmDsaApplyInterleavedRoPE(kRawDst[qkNope:], cos, sin))
+		copy(value[h*vHead:(h+1)*vHead], kvSrc[qkNope:])
+	}
+	cache.K[layer] = append(cache.K[layer], key...)
+	cache.Kraw[layer] = append(cache.Kraw[layer], keyRaw...)
+	cache.V[layer] = append(cache.V[layer], value...)
+	if len(cache.K[layer]) != (pos+1)*nH*qkHead ||
+		len(cache.Kraw[layer]) != (pos+1)*nH*qkHead ||
+		len(cache.V[layer]) != (pos+1)*nH*vHead {
+		return nil, false
+	}
+	return query, true
+}
+
+func (m *Model) glmDsaAttendCached(cache *glmDsaKVCache, layer, pos int, query []float32, topK []int) ([]float32, bool) {
+	cfg := m.Cfg
+	nH := cfg.NumHeads
+	qkHead := cfg.QKNopeHeadDim + cfg.QKRopeHeadDim
+	vHead := cfg.VHeadDim
+	H := cfg.HiddenSize
+	selected, ok := glmDsaSelectedCausalKeys(topK, pos, pos+1)
+	if !ok || len(selected) == 0 || len(query) != nH*qkHead {
+		return nil, false
+	}
+	scale := float32(1.0 / math.Sqrt(float64(qkHead)))
+	attnConcat := make([]float32, nH*vHead)
+	for h := 0; h < nH; h++ {
+		qh := query[h*qkHead : (h+1)*qkHead]
+		scores := make([]float32, len(selected))
+		for i, keyPos := range selected {
+			kh := cache.K[layer][keyPos*nH*qkHead+h*qkHead : keyPos*nH*qkHead+(h+1)*qkHead]
+			scores[i] = dot(qh, kh) * scale
+		}
+		softmaxInPlace(scores)
+		oh := attnConcat[h*vHead : (h+1)*vHead]
+		for i, keyPos := range selected {
+			vh := cache.V[layer][keyPos*nH*vHead+h*vHead : keyPos*nH*vHead+(h+1)*vHead]
+			w := scores[i]
+			for d := 0; d < vHead; d++ {
+				oh[d] += w * vh[d]
+			}
+		}
+	}
+	ap := layerPrefix(layer) + "self_attn."
+	out := m.residentMatRows(ap+"o_proj.weight", attnConcat, H, nH*vHead)
+	addOptionalBias(out, m.tensorOptional(ap+"o_proj.bias"))
+	return out, true
+}
+
+func glmDsaPositions(n int) []int {
+	out := make([]int, n)
+	for i := range out {
+		out[i] = i
+	}
+	return out
+}

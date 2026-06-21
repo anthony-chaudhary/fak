@@ -1,0 +1,74 @@
+#version 450
+// attention.comp — decode attention, one workgroup per query head. Mirrors k_attention.
+// q[nH*hd] (one position); K,V [nPos, nKV*hd] row-major; out[nH*hd].
+// Causal by construction (the cache holds exactly the attendable keys). The Scores scratch
+// is a device buffer [nH*nPos] supplied by the shim (binding 4), matching the CUDA scratch.
+// Four phases: raw scores -> reduce max -> exp + reduce sum -> weighted sum of V.
+layout(local_size_x = 128) in;
+
+layout(std430, binding = 0) readonly  buffer Qbuf { float Q[]; };
+layout(std430, binding = 1) readonly  buffer Kbuf { float K[]; };
+layout(std430, binding = 2) readonly  buffer Vbuf { float V[]; };
+layout(std430, binding = 3) writeonly buffer Obuf { float Outp[]; };
+layout(std430, binding = 4)           buffer Sbuf { float Scores[]; };
+
+layout(push_constant) uniform Push {
+    int nPos; int nH; int nKV; int hd; float scale;
+} pc;
+
+shared float red[128];
+
+void main() {
+    uint h = gl_WorkGroupID.x;
+    if (h >= uint(pc.nH)) return;
+    uint tid = gl_LocalInvocationID.x;
+    int grp = pc.nH / pc.nKV;
+    int kvh = int(h) / grp;
+    int w = pc.nKV * pc.hd;
+    uint qbase = h * uint(pc.hd);
+    uint scbase = h * uint(pc.nPos);
+
+    // phase 1: raw scores = scale * dot(qh, K[j, kvh])
+    for (uint j = tid; j < uint(pc.nPos); j += 128u) {
+        uint kbase = j * uint(w) + uint(kvh) * uint(pc.hd);
+        float d = 0.0;
+        for (int e = 0; e < pc.hd; ++e) d += Q[qbase + uint(e)] * K[kbase + uint(e)];
+        Scores[scbase + j] = d * pc.scale;
+    }
+    barrier();
+
+    // phase 2: block-reduce max
+    float lm = -1e30;
+    for (uint j = tid; j < uint(pc.nPos); j += 128u) lm = max(lm, Scores[scbase + j]);
+    red[tid] = lm; barrier();
+    for (uint s = 64u; s > 0u; s >>= 1) {
+        if (tid < s) red[tid] = max(red[tid], red[tid + s]);
+        barrier();
+    }
+    float mx = red[0];
+    barrier();
+
+    // phase 3: exp in place + block-reduce sum
+    float ls = 0.0;
+    for (uint j = tid; j < uint(pc.nPos); j += 128u) {
+        float e = exp(Scores[scbase + j] - mx);
+        Scores[scbase + j] = e;
+        ls += e;
+    }
+    red[tid] = ls; barrier();
+    for (uint s = 64u; s > 0u; s >>= 1) {
+        if (tid < s) red[tid] += red[tid + s];
+        barrier();
+    }
+    float sum = red[0];
+    barrier();
+
+    // phase 4: out[d] = Σ_j (sc[j]/sum) * V[j, kvh, d]
+    for (uint d = tid; d < uint(pc.hd); d += 128u) {
+        float acc = 0.0;
+        for (int j = 0; j < pc.nPos; ++j) {
+            acc += Scores[scbase + uint(j)] * V[uint(j) * uint(w) + uint(kvh) * uint(pc.hd) + d];
+        }
+        Outp[h * uint(pc.hd) + d] = acc / sum;
+    }
+}

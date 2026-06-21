@@ -1,0 +1,67 @@
+{
+  "_about": "SOURCE OF TRUTH for the fak TURN-TAX efficiency curves (visuals/60-hero-turntax-curves.svg), rendered by tools/hero_turntax_gen.py. fak's analog of the MiniMax 'GQA vs MSA' 3-panel attention-efficiency chart: a baseline whose cost rises ~linearly vs a fak line that stays ~flat, the gap filled, one big multiplier per panel. The shape is real — re-prefill cost is linear in context/fleet, resident+addressable KV is not. Each panel names its OWN baseline honestly: a structural per-cold-miss tax (panel 1), a MEASURED WebVoyager elimination (panel 2), and the conservative-vs-tuned-SOTA fleet number (panel 3). Every number traces to fak/BENCHMARK-AUTHORITY.md / docs/webbench-baselines.md by commit. Edit this file, then run `python tools/hero_turntax_gen.py`.",
+  "meta": {
+    "title": "The turn-tax: re-prefill cost is linear, resident KV is not",
+    "as_of": "2026-06-21",
+    "out_svg": "visuals/60-hero-turntax-curves.svg",
+    "authority": "fak/BENCHMARK-AUTHORITY.md"
+  },
+  "kicker": "FAK · THE AGENT-SERVING KERNEL",
+  "headline": "Three lenses on one structural win — the work that never gets done twice",
+  "subhead": "An agent that drops its KV re-prefills the shared setup on every cold miss; fak keeps it resident and addressable, so the cost stays flat as context, fleet, and turns grow.",
+  "legend": [
+    { "label": "Baseline — re-prefill (named per panel)", "color": "#3b4a7a" },
+    { "label": "fak — resident / addressable KV", "color": "#2e8b57" }
+  ],
+  "panels": [
+    {
+      "title": "Per-turn prefill cost",
+      "subtitle": "vs context length · baseline = re-prefill on a cold KV miss",
+      "x_label": "Context length",
+      "y_label": "Prefill tokens / turn",
+      "x_ticks": ["32k", "128k", "256k", "512k", "1M"],
+      "x_vals": [32, 128, 256, 512, 1024],
+      "y_max": 1080,
+      "y_ticks": [{ "v": 256, "t": "256k" }, { "v": 512, "t": "512k" }, { "v": 1024, "t": "1M" }],
+      "baseline": [32, 128, 256, 512, 1024],
+      "fak": [0.05, 0.05, 0.05, 0.05, 0.05],
+      "mult": "20,480×",
+      "mult_sub": "fewer prefill tokens at 1M ctx",
+      "mult_foot": "2,560× already at a 128k agent context — the per-cold-miss tax = P / R",
+      "anchor_idx": 4
+    },
+    {
+      "title": "Fleet prefill, WebVoyager",
+      "subtitle": "vs worker count · baseline = naive re-prefill · MEASURED, 643 tasks",
+      "x_label": "Concurrent workers",
+      "y_label": "Total prefill tokens",
+      "x_ticks": ["1", "2", "4", "8"],
+      "x_vals": [1, 2, 4, 8],
+      "y_max": 1450,
+      "y_ticks": [{ "v": 342, "t": "342M" }, { "v": 684, "t": "684M" }, { "v": 1367, "t": "1.37G" }],
+      "baseline": [170.9, 341.8, 683.6, 1367.2],
+      "fak": [19.4, 36.8, 71.6, 141.3],
+      "mult": "9.7×",
+      "mult_sub": "less prefill at 8 workers",
+      "mult_foot": "8.8× at a single worker — the turn-tax is worker-independent (measured)",
+      "anchor_idx": 3
+    },
+    {
+      "title": "50-turn × 5-agent fleet",
+      "subtitle": "vs turns elapsed · baseline = a tuned warm-cache SOTA stack",
+      "x_label": "Turns elapsed",
+      "y_label": "Cumulative serving work",
+      "x_ticks": ["1", "10", "25", "50"],
+      "x_vals": [1, 10, 25, 50],
+      "y_max": 4.5,
+      "y_ticks": [{ "v": 1, "t": "1×" }, { "v": 2, "t": "2×" }, { "v": 4, "t": "4×" }],
+      "baseline": [0.35, 1.15, 2.45, 4.1],
+      "fak": [0.3, 0.55, 0.8, 1.0],
+      "mult": "4.1×",
+      "mult_sub": "less serving work, vs tuned SOTA",
+      "mult_foot": "the conservative number — vs the naive re-prefill loop it is ~60×, which we don't lead with",
+      "anchor_idx": 3
+    }
+  ],
+  "footer": "Apple M3 Pro · app_version 0.30.0. Panels 1–2 baseline against re-prefill (the standard non-resident path every cold miss pays); panel 3 against a tuned warm-cache SOTA stack. fak/BENCHMARK-AUTHORITY.md · docs/webbench-baselines.md."
+}

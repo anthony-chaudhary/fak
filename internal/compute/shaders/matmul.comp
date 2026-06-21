@@ -1,0 +1,55 @@
+#version 450
+// matmul.comp — y[P,out] = x[P,in] @ W[out,in]^T, all row-major f32.
+//
+// One workgroup processes one row t of X: it cooperatively stages X[t,:] into shared memory
+// ONCE (in inDim-sized chunks), then each thread computes a strided set of outputs y[t,o] =
+// dot(W[o,:], Xs[:]) reading the staged input from fast shared memory instead of re-reading
+// the whole input vector from global memory for every output. For decode (P=1, out up to
+// 49152, in=576) this is the dominant kernel; staging x cuts its global-memory traffic from
+// O(out·in) reads of x to O(in). Still an Approx peer of cpuref (the per-output reduction is
+// a plain serial sum — a different order than the model's fdot tree, hence Approx).
+//
+// SHARED_CAP bounds the staged chunk; inDim larger than the cap is handled by looping over
+// chunks and accumulating, so the shader is correct for any inDim.
+layout(local_size_x = 256) in;
+
+layout(std430, binding = 0) readonly  buffer Wbuf { float W[]; };
+layout(std430, binding = 1) readonly  buffer Xbuf { float X[]; };
+layout(std430, binding = 2) writeonly buffer Ybuf { float Y[]; };
+
+layout(push_constant) uniform Push { int outDim; int inDim; int P; } pc;
+
+const uint SHARED_CAP = 1024u;     // staged input chunk (covers SmolLM2's in=576 in one pass)
+shared float Xs[SHARED_CAP];
+
+void main() {
+    uint t = gl_WorkGroupID.x;                 // one workgroup per row of X
+    if (t >= uint(pc.P)) return;
+    uint tid = gl_LocalInvocationID.x;
+    uint in_ = uint(pc.inDim);
+    uint out_ = uint(pc.outDim);
+    uint xbase = t * in_;
+
+    // Each thread keeps a running accumulator per output it owns. Outputs are assigned
+    // round-robin (o = tid, tid+256, ...). We chunk the input dimension so the staged tile
+    // fits in shared memory; accumulators persist across chunks.
+    // To bound registers we recompute per output in the o-loop and chunk inside it.
+    for (uint o = tid; o < out_; o += 256u) {
+        Y[t * out_ + o] = 0.0; // initialized; accumulated below
+    }
+
+    for (uint c0 = 0u; c0 < in_; c0 += SHARED_CAP) {
+        uint clen = min(SHARED_CAP, in_ - c0);
+        // cooperatively stage X[t, c0 .. c0+clen) into shared memory
+        for (uint i = tid; i < clen; i += 256u) Xs[i] = X[xbase + c0 + i];
+        barrier();
+        // each thread accumulates its outputs over this input chunk
+        for (uint o = tid; o < out_; o += 256u) {
+            uint wbase = o * in_ + c0;
+            float acc = 0.0;
+            for (uint i = 0u; i < clen; ++i) acc += W[wbase + i] * Xs[i];
+            Y[t * out_ + o] += acc;
+        }
+        barrier();
+    }
+}

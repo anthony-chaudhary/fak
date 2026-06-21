@@ -1,0 +1,36 @@
+#version 450
+// rmsnorm.comp — per-row RMSNorm: y[r,:] = x[r,:] * rsqrt(mean(x[r,:]^2)+eps) * w[:].
+// Mirrors k_rmsnorm: one workgroup per row, shared-memory tree reduction of the
+// sum-of-squares, then scale. local_size_x = 256 matches the CUDA blockDim.
+layout(local_size_x = 256) in;
+
+layout(std430, binding = 0) readonly  buffer Xbuf { float X[]; };
+layout(std430, binding = 1) readonly  buffer Wbuf { float W[]; };
+layout(std430, binding = 2) writeonly buffer Ybuf { float Y[]; };
+
+layout(push_constant) uniform Push { int rows; int n; float eps; } pc;
+
+shared float red[256];
+
+void main() {
+    uint r = gl_WorkGroupID.x;
+    if (r >= uint(pc.rows)) return;
+    uint base = r * uint(pc.n);
+    uint tid = gl_LocalInvocationID.x;
+
+    float local = 0.0;
+    for (uint i = tid; i < uint(pc.n); i += 256u) {
+        float v = X[base + i];
+        local += v * v;
+    }
+    red[tid] = local;
+    barrier();
+    for (uint s = 128u; s > 0u; s >>= 1) {
+        if (tid < s) red[tid] += red[tid + s];
+        barrier();
+    }
+    float inv = inversesqrt(red[0] / float(pc.n) + pc.eps);
+    for (uint i = tid; i < uint(pc.n); i += 256u) {
+        Y[base + i] = X[base + i] * inv * W[i];
+    }
+}

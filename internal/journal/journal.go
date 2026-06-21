@@ -1,0 +1,544 @@
+// Package journal is the durable, append-only, tamper-evident DECISION JOURNAL —
+// the regulated-audit (AUD) surface of the trust floor. The kernel already
+// fans out a lifecycle Event on every adjudication (abi.RegisterEmitter), but
+// the three shipped emitters (harvest, vdso, ifc) are all IN-MEMORY: none is a
+// durable record of "what did the kernel decide, when, over which bytes, and
+// why". This package closes that gap.
+//
+// WHAT IT GUARANTEES.
+//
+//   - DURABLE: a persisting abi.Emitter writes one JSONL row per
+//     EvDecide / EvDeny / EvQuarantine / EvVDSOHit (the vDSO-served hit included,
+//     so a cache hit is audited exactly like an engine call). Rows are appended
+//     and flushed per write, so a process crash loses nothing already returned to
+//     the caller.
+//   - TIME/SEQUENCE ANCHORED: the journal stamps its OWN monotonic Seq (1-based)
+//     and a wall-clock timestamp on every row. The anchor lives in the row, not in
+//     abi.Event — the frozen ABI is untouched.
+//   - TAMPER-EVIDENT: every row carries the hash of the previous row's hash
+//     chained with its own content (a hash chain / WORM ledger). Verify re-reads
+//     the file and recomputes the chain; a single flipped byte breaks the link at
+//     that row and fails the check. The journal does not PREVENT a privileged
+//     edit, but it makes one DETECTABLE — the property an auditor underwrites.
+//   - LIVE: in-process subscribers (and the gateway's /v1/fak/events stream) see
+//     each row as it is committed; Recent serves a bounded tail without re-reading
+//     the file.
+//
+// ENABLEMENT. The journal is OPT-IN and off by default: writing to disk on every
+// adjudication is an audit-deployment choice, not something a benchmark or a unit
+// test should pay for. Set FAK_AUDIT_JOURNAL=/path/to/journal.jsonl and the
+// package's init registers a persisting emitter against the frozen ABI (the
+// FAK_IFC-style env toggle the rest of the kernel uses). Unset => no emitter is
+// registered and this package is inert.
+package journal
+
+import (
+	"bufio"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
+	"fmt"
+	"io"
+	"os"
+	"sync"
+	"time"
+
+	"github.com/anthony-chaudhary/fak/internal/abi"
+)
+
+// Row is one durable audit record. It is the on-disk JSONL schema AND the live
+// stream element. Field order is the hash-chain pre-image order — do not reorder
+// without bumping the chain (it would invalidate every existing journal).
+type Row struct {
+	Seq          uint64 `json:"seq"`          // monotonic 1-based order anchor
+	TSUnixNano   int64  `json:"ts_unix_nano"` // wall-clock time anchor
+	Kind         string `json:"kind"`         // DECIDE | DENY | QUARANTINE | VDSO_HIT
+	Tool         string `json:"tool,omitempty"`
+	TraceID      string `json:"trace_id,omitempty"`
+	Verdict      string `json:"verdict,omitempty"`
+	Reason       string `json:"reason,omitempty"`
+	By           string `json:"by,omitempty"`            // which adjudicator decided
+	Taint        string `json:"taint,omitempty"`         // result provenance taint
+	ArgsDigest   string `json:"args_digest,omitempty"`   // content hash of the call args
+	ResultDigest string `json:"result_digest,omitempty"` // content hash of the result payload
+	PrevHash     string `json:"prev_hash"`               // hash of the previous row ("" at genesis)
+	Hash         string `json:"hash"`                    // chainHash(PrevHash, this row)
+}
+
+// Journal is a hash-chained append-only ledger with an in-process live stream.
+// The zero value is not usable; construct with Open (file-backed) or OpenMemory
+// (in-memory, for tests of the stream/verify logic).
+type Journal struct {
+	mu        sync.Mutex
+	bw        *bufio.Writer
+	f         *os.File         // nil for an in-memory journal
+	path      string           // file path ("" for an in-memory journal)
+	seq       uint64           // last committed seq
+	lastHash  string           // last committed row hash (the chain head)
+	clock     func() time.Time // injectable for deterministic tests
+	subs      map[int]chan Row // live subscribers (best-effort fan-out)
+	nextSub   int
+	recent    []Row // bounded tail for Recent (full history is on disk)
+	maxRecent int
+	dropped   uint64 // live-stream sends dropped (slow consumer)
+	writeErr  uint64 // append failures (file-backed)
+}
+
+const defaultMaxRecent = 1024
+
+// Open opens (creating if absent) a file-backed journal in append mode. If the
+// file already holds rows, Open recovers the chain head (seq + last hash) so a
+// restart CONTINUES the same tamper-evident chain instead of forking it. A
+// corrupt tail is reported via Verify, not here — Open stays robust so a damaged
+// log never bricks startup; the auditor runs Verify to learn the chain is broken.
+func Open(path string) (*Journal, error) {
+	// Recover the chain head from any existing content first.
+	seq, last, err := recoverHead(path)
+	if err != nil {
+		return nil, err
+	}
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+	if err != nil {
+		return nil, fmt.Errorf("journal: open %s: %w", path, err)
+	}
+	j := newJournal()
+	j.f = f
+	j.bw = bufio.NewWriter(f)
+	j.path = path
+	j.seq = seq
+	j.lastHash = last
+	return j, nil
+}
+
+// OpenMemory builds an in-memory journal (no file). Rows still chain, stream, and
+// land in Recent; VerifyRows validates the chain over Recent without touching
+// disk. Used by tests of the stream/verify logic.
+func OpenMemory() *Journal { return newJournal() }
+
+func newJournal() *Journal {
+	return &Journal{
+		clock:     time.Now,
+		subs:      map[int]chan Row{},
+		maxRecent: defaultMaxRecent,
+	}
+}
+
+// Emit implements abi.Emitter: it is the kernel's per-event tap. It records every
+// audit-relevant lifecycle event as a durable, chained row. It never blocks the
+// kernel on a slow live consumer (best-effort fan-out) and never panics; a write
+// failure is counted (WriteErrors) rather than propagated, since the fan-out
+// contract is fire-and-forget.
+func (j *Journal) Emit(ev abi.Event) {
+	row, ok := rowFromEvent(ev)
+	if !ok {
+		return
+	}
+	j.append(row)
+}
+
+// append stamps the order/time anchor + chain hash and commits the row.
+func (j *Journal) append(row Row) {
+	j.mu.Lock()
+	j.seq++
+	row.Seq = j.seq
+	row.TSUnixNano = j.clock().UnixNano()
+	row.PrevHash = j.lastHash
+	row.Hash = chainHash(row.PrevHash, row)
+	j.lastHash = row.Hash
+
+	if j.bw != nil {
+		if err := writeRow(j.bw, row); err != nil {
+			j.writeErr++
+		}
+	}
+	// Bounded recent tail (full history is the file).
+	j.recent = append(j.recent, row)
+	if len(j.recent) > j.maxRecent {
+		j.recent = j.recent[len(j.recent)-j.maxRecent:]
+	}
+	// Best-effort live fan-out: never block the kernel on a slow subscriber.
+	for _, ch := range j.subs {
+		select {
+		case ch <- row:
+		default:
+			j.dropped++
+		}
+	}
+	j.mu.Unlock()
+}
+
+// Subscribe returns a live channel of rows committed AFTER the call, plus a
+// cancel that unsubscribes and closes the channel. Sends are best-effort: a
+// subscriber that falls behind drops rows (counted in Dropped) — the FILE is the
+// durable record, the stream is a convenience.
+func (j *Journal) Subscribe() (<-chan Row, func()) {
+	j.mu.Lock()
+	id := j.nextSub
+	j.nextSub++
+	ch := make(chan Row, 256)
+	j.subs[id] = ch
+	j.mu.Unlock()
+	var once sync.Once
+	cancel := func() {
+		once.Do(func() {
+			j.mu.Lock()
+			if c, ok := j.subs[id]; ok {
+				delete(j.subs, id)
+				close(c)
+			}
+			j.mu.Unlock()
+		})
+	}
+	return ch, cancel
+}
+
+// Recent returns up to the last n committed rows (most recent last). n<=0 returns
+// the whole bounded tail. It serves the gateway endpoint without re-reading disk.
+func (j *Journal) Recent(n int) []Row {
+	j.mu.Lock()
+	defer j.mu.Unlock()
+	if n <= 0 || n > len(j.recent) {
+		n = len(j.recent)
+	}
+	out := make([]Row, n)
+	copy(out, j.recent[len(j.recent)-n:])
+	return out
+}
+
+// Stats reports the journal's live counters (head seq, dropped stream sends,
+// write errors) for /healthz-style introspection.
+func (j *Journal) Stats() (seq, dropped, writeErrors uint64) {
+	j.mu.Lock()
+	defer j.mu.Unlock()
+	return j.seq, j.dropped, j.writeErr
+}
+
+// ExportTo writes the journal as JSONL to w — the durable full history for a
+// file-backed journal (re-read from disk after flushing buffered rows), or the
+// bounded recent tail for an in-memory one. Returns the number of rows written.
+// The output round-trips through Verify-style parsing, so an export of a sound
+// journal is itself a sound journal.
+func (j *Journal) ExportTo(w io.Writer) (int, error) {
+	j.mu.Lock()
+	if j.bw != nil {
+		if err := j.bw.Flush(); err != nil {
+			j.mu.Unlock()
+			return 0, err
+		}
+	}
+	path, mem := j.path, append([]Row(nil), j.recent...)
+	j.mu.Unlock()
+
+	if path == "" { // in-memory: export the recent tail
+		n := 0
+		for _, row := range mem {
+			b, err := json.Marshal(row)
+			if err != nil {
+				return n, err
+			}
+			if _, err := w.Write(append(b, '\n')); err != nil {
+				return n, err
+			}
+			n++
+		}
+		return n, nil
+	}
+	f, err := os.Open(path)
+	if err != nil {
+		return 0, fmt.Errorf("journal: export %s: %w", path, err)
+	}
+	defer f.Close()
+	n := 0
+	sc := bufio.NewScanner(f)
+	sc.Buffer(make([]byte, 0, 64*1024), 8*1024*1024)
+	for sc.Scan() {
+		if len(sc.Bytes()) == 0 {
+			continue
+		}
+		if _, err := w.Write(append(sc.Bytes(), '\n')); err != nil {
+			return n, err
+		}
+		n++
+	}
+	return n, sc.Err()
+}
+
+// Flush pushes buffered bytes to the OS (durable across a process crash, not a
+// power loss). Append already flushes per row; Flush is for explicit sync points.
+func (j *Journal) Flush() error {
+	j.mu.Lock()
+	defer j.mu.Unlock()
+	if j.bw != nil {
+		return j.bw.Flush()
+	}
+	return nil
+}
+
+// Close flushes, fsyncs, and closes the file. Safe on an in-memory journal.
+func (j *Journal) Close() error {
+	j.mu.Lock()
+	defer j.mu.Unlock()
+	if j.bw != nil {
+		if err := j.bw.Flush(); err != nil {
+			return err
+		}
+	}
+	if j.f != nil {
+		_ = j.f.Sync()
+		err := j.f.Close()
+		j.f, j.bw = nil, nil
+		return err
+	}
+	return nil
+}
+
+// writeRow appends one JSONL row and flushes it (per-row durability).
+func writeRow(bw *bufio.Writer, row Row) error {
+	b, err := json.Marshal(row)
+	if err != nil {
+		return err
+	}
+	if _, err := bw.Write(b); err != nil {
+		return err
+	}
+	if err := bw.WriteByte('\n'); err != nil {
+		return err
+	}
+	return bw.Flush()
+}
+
+// chainHash is the tamper-evident link: sha256 over the previous row's hash
+// chained with this row's content fields (Seq..ResultDigest, in declaration
+// order). PrevHash and Hash are excluded from the pre-image (PrevHash is the
+// chained-in prefix; Hash is the output). A unit separator (0x1f) delimits fields
+// so no concatenation collision is possible.
+func chainHash(prev string, r Row) string {
+	h := sha256.New()
+	io.WriteString(h, prev)
+	fmt.Fprintf(h, "\x1f%d\x1f%d\x1f%s\x1f%s\x1f%s\x1f%s\x1f%s\x1f%s\x1f%s\x1f%s\x1f%s",
+		r.Seq, r.TSUnixNano, r.Kind, r.Tool, r.TraceID, r.Verdict,
+		r.Reason, r.By, r.Taint, r.ArgsDigest, r.ResultDigest)
+	return hex.EncodeToString(h.Sum(nil))
+}
+
+// rowFromEvent projects a lifecycle Event into an audit row, returning false for
+// a non-audit kind (EvSubmit/EvDispatch/EvComplete/EvRungLabel are operational,
+// not decisions). Digests come from the frozen Ref.Digest (the content hash the
+// vDSO + provenance already maintain) — the emitter never resolves blob bytes,
+// so it stays cheap and leaks no payload into the log.
+func rowFromEvent(ev abi.Event) (Row, bool) {
+	var kind string
+	switch ev.Kind {
+	case abi.EvDecide:
+		kind = "DECIDE"
+	case abi.EvDeny:
+		kind = "DENY"
+	case abi.EvQuarantine:
+		kind = "QUARANTINE"
+	case abi.EvVDSOHit:
+		kind = "VDSO_HIT"
+	default:
+		return Row{}, false
+	}
+	row := Row{Kind: kind}
+	if c := ev.Call; c != nil {
+		row.Tool = c.Tool
+		row.TraceID = c.TraceID
+		row.ArgsDigest = refDigest(c.Args)
+	}
+	if v := ev.Verdict; v != nil {
+		row.Verdict = verdictName(v.Kind)
+		row.Reason = abi.ReasonName(v.Reason)
+		row.By = v.By
+	}
+	if r := ev.Result; r != nil {
+		row.ResultDigest = refDigest(r.Payload)
+		row.Taint = taintName(r.Payload.Taint)
+	}
+	return row, true
+}
+
+// refDigest is the audit identity of a Ref's bytes WITHOUT resolving them: the
+// content hash if the backend stamped one, else a hash of the inline bytes, else
+// empty. Never materializes a blob (no resolver dependency on the hot path).
+func refDigest(r abi.Ref) string {
+	if r.Digest != "" {
+		return r.Digest
+	}
+	if r.Kind == abi.RefInline && len(r.Inline) > 0 {
+		sum := sha256.Sum256(r.Inline)
+		return "sha256:" + hex.EncodeToString(sum[:])
+	}
+	return ""
+}
+
+func verdictName(k abi.VerdictKind) string {
+	switch k {
+	case abi.VerdictAllow:
+		return "ALLOW"
+	case abi.VerdictDeny:
+		return "DENY"
+	case abi.VerdictTransform:
+		return "TRANSFORM"
+	case abi.VerdictQuarantine:
+		return "QUARANTINE"
+	case abi.VerdictRequireWitness:
+		return "WITNESS"
+	case abi.VerdictDefer:
+		return "DEFER"
+	}
+	return fmt.Sprintf("K%d", k)
+}
+
+func taintName(t abi.TaintLabel) string {
+	switch t {
+	case abi.TaintTrusted:
+		return "trusted"
+	case abi.TaintTainted:
+		return "tainted"
+	case abi.TaintQuarantined:
+		return "quarantined"
+	}
+	return ""
+}
+
+// recoverHead scans an existing journal to recover the chain head (last seq + last
+// hash) so an append continues the same chain. A missing file is the genesis case
+// (seq 0, empty hash). It does NOT validate the chain (that is Verify's job) so a
+// damaged log never blocks startup.
+func recoverHead(path string) (seq uint64, lastHash string, err error) {
+	f, err := os.Open(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return 0, "", nil
+		}
+		return 0, "", fmt.Errorf("journal: stat %s: %w", path, err)
+	}
+	defer f.Close()
+	sc := bufio.NewScanner(f)
+	sc.Buffer(make([]byte, 0, 64*1024), 8*1024*1024)
+	for sc.Scan() {
+		line := sc.Bytes()
+		if len(line) == 0 {
+			continue
+		}
+		var r Row
+		if err := json.Unmarshal(line, &r); err != nil {
+			// A torn final line (crash mid-write) is tolerated: stop at the last
+			// well-formed row. Verify will catch genuine corruption.
+			break
+		}
+		seq = r.Seq
+		lastHash = r.Hash
+	}
+	if err := sc.Err(); err != nil {
+		return 0, "", fmt.Errorf("journal: scan %s: %w", path, err)
+	}
+	return seq, lastHash, nil
+}
+
+// Verify re-reads a journal file and validates the hash chain end to end. It
+// returns the number of rows checked and a non-nil error naming the FIRST broken
+// link (a recomputed hash mismatch, a prev-hash discontinuity, or a sequence
+// gap). A journal that passes Verify has not been edited since it was written.
+func Verify(path string) (n int, err error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return 0, fmt.Errorf("journal: open %s: %w", path, err)
+	}
+	defer f.Close()
+	return verifyReader(f)
+}
+
+func verifyReader(r io.Reader) (int, error) {
+	sc := bufio.NewScanner(r)
+	sc.Buffer(make([]byte, 0, 64*1024), 8*1024*1024)
+	var (
+		prev    string
+		wantSeq uint64
+		n       int
+	)
+	for sc.Scan() {
+		line := sc.Bytes()
+		if len(line) == 0 {
+			continue
+		}
+		var row Row
+		if err := json.Unmarshal(line, &row); err != nil {
+			return n, fmt.Errorf("journal: row %d: malformed JSON: %w", n+1, err)
+		}
+		wantSeq++
+		next, err := verifyStep(prev, wantSeq, row)
+		if err != nil {
+			return n, err
+		}
+		prev = next
+		n++
+	}
+	if err := sc.Err(); err != nil {
+		return n, fmt.Errorf("journal: scan: %w", err)
+	}
+	return n, nil
+}
+
+// VerifyRows validates the hash chain over an in-memory slice (e.g. Recent() of
+// an in-memory journal). Same checks as Verify, returning the first broken link.
+func VerifyRows(rows []Row) (int, error) {
+	var (
+		prev    string
+		wantSeq uint64
+	)
+	for i, row := range rows {
+		wantSeq++
+		next, err := verifyStep(prev, wantSeq, row)
+		if err != nil {
+			return i, err
+		}
+		prev = next
+	}
+	return len(rows), nil
+}
+
+// verifyStep checks one row against the running chain head + expected sequence and
+// returns the new chain head. It is the single source of truth for "is this row
+// authentic and in order", shared by file and in-memory verification.
+func verifyStep(prev string, wantSeq uint64, row Row) (string, error) {
+	if row.Seq != wantSeq {
+		return "", fmt.Errorf("journal: sequence gap: seq=%d want %d", row.Seq, wantSeq)
+	}
+	if row.PrevHash != prev {
+		return "", fmt.Errorf("journal: broken chain at seq %d: prev_hash=%q want %q", row.Seq, row.PrevHash, prev)
+	}
+	if got := chainHash(row.PrevHash, row); got != row.Hash {
+		return "", fmt.Errorf("journal: tampered row at seq %d: hash=%q recomputed %q", row.Seq, row.Hash, got)
+	}
+	return row.Hash, nil
+}
+
+// ---------------------------------------------------------------------------
+// Registered instance — opt-in via FAK_AUDIT_JOURNAL.
+// ---------------------------------------------------------------------------
+
+var active *Journal
+
+// Active returns the registered durable journal, or nil if FAK_AUDIT_JOURNAL was
+// unset at boot (the gateway uses this to serve /v1/fak/events or 404).
+func Active() *Journal { return active }
+
+func init() {
+	path := os.Getenv("FAK_AUDIT_JOURNAL")
+	if path == "" {
+		return // off by default: no emitter registered, package inert
+	}
+	j, err := Open(path)
+	if err != nil {
+		// Fail loud but do not brick the kernel: a missing audit sidecar must not
+		// stop adjudication (the in-memory counters still hold). An auditor who
+		// requires fail-closed wires that as a separate posture (issue #12).
+		fmt.Fprintf(os.Stderr, "fak: audit journal disabled — %v\n", err)
+		return
+	}
+	active = j
+	abi.RegisterEmitter(j)
+	fmt.Fprintf(os.Stderr, "fak: audit journal -> %s (durable, hash-chained)\n", path)
+}

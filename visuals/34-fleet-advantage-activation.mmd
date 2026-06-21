@@ -1,0 +1,29 @@
+%%{init: {'theme':'base','themeVariables':{'fontFamily':'Segoe UI, Helvetica, Arial, sans-serif','primaryColor':'#EAF3FB','primaryTextColor':'#1B3A66','primaryBorderColor':'#3B6FB5','lineColor':'#3B6FB5','fontSize':'15px'}}}%%
+flowchart LR
+  classDef tier fill:#EAF3FB,stroke:#3B6FB5,stroke-width:1.5px,color:#1B3A66;
+  classDef now fill:#E7F5EC,stroke:#3FA45F,stroke-width:1.5px,color:#14532D;
+  classDef proof fill:#FBF6E7,stroke:#C9A227,stroke-width:1px,color:#5A4A10;
+
+  subgraph N1["N = 1 agent · turn 1"]
+    direction TB
+    S1["SAFETY gate ON<br/>100% vs 50% safe (tau-bench airline)<br/>enforced by kernel, not model"]:::now
+    T1["TURN-TAX delete<br/>kernel removes the error/retry model turn<br/>the harness otherwise pays"]:::now
+  end
+
+  subgraph N2["N = 2 agents · or 1 agent, 2+ turns"]
+    direction TB
+    K2["KV REUSE turns on<br/>shared prefix (sys prompt / tools / RAG)<br/>prefilled once, not N times"]:::now
+    B2["BATCHED-DECODE crossover<br/>weight byte-stream amortised across users<br/>(decode is bandwidth-bound at B=1)"]:::now
+  end
+
+  subgraph NF["N = fleet (dozens+)"]
+    direction TB
+    A3["AGGREGATE THROUGHPUT<br/>~12x per-user · ~45x measured aggregate<br/>~90x roofline vs naive serial"]:::now
+    X3["CROSS-AGENT KV at scale<br/>scoped, correctness-gated invalidation"]:::now
+  end
+
+  N1 --> N2 --> NF
+  class N1,N2,NF tier;
+
+  P["Parity is table-stakes (removes 'it's slower'); the LIFT is the fleet economics above.<br/>Proven: forward pass bit-identical vs HF · KV eviction logit-exact · every headline survived a 4-skeptic pass.<br/>Honest ceiling: DETECTION is ~100% evadable — durable guarantees are the ENFORCEMENT layers (IFC / plan-CFI / witness), not the detector."]:::proof
+  NF -.-> P

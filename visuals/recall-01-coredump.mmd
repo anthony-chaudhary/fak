@@ -1,0 +1,32 @@
+%%{init: {'theme':'base','themeVariables':{'fontFamily':'Segoe UI, Helvetica, Arial, sans-serif','fontSize':'14px','lineColor':'#5B6B7B','primaryColor':'#DCE9FB','primaryTextColor':'#1B3A66','primaryBorderColor':'#3B6FB5','clusterBkg':'#F7F9FB','clusterBorder':'#AFC0CE'}}}%%
+flowchart TD
+  s(["Finished session — ~350k tokens of (system, user, assistant, tool)"])
+  q{"one more follow-up question"}
+  s --> q
+  q -->|"naive: execv the corpse"| naive["paste ALL 350k into a fresh window"]
+  naive --> cost["pays AGAIN, per question:<br/>• input tokens re-billed (a cache read is still metered)<br/>• prefill latency on a cache miss<br/>• may exceed the context ceiling<br/>• RE-CONTAMINATION: every poisoned byte pasted back ungated"]
+  q -->|"fak: attach to the core dump"| demand["demand-page ONLY the working set the question touches"]
+  subgraph image["the session was ALREADY a core dump (paged out at write time)"]
+    man[("manifest = page table<br/>roles + digests + descriptors + quarantine state (small)")]
+    cas[("CAS = swap device<br/>dedup'd, content-addressed bytes (cold)")]
+    wv["frozen world-version<br/>(no more writes will ever happen)"]
+  end
+  demand --> image
+  image --> kn["⚡ re-output a stored result = 0 model tokens (rung 0)"]
+  classDef untrusted fill:#FFE9D6,stroke:#E8833A,stroke-width:2px,color:#7A3E12;
+  classDef kernel fill:#DCE9FB,stroke:#3B6FB5,stroke-width:2px,color:#1B3A66;
+  classDef gate fill:#FFF3CC,stroke:#C9A227,stroke-width:2px,color:#6B5410;
+  classDef pass fill:#DBF3E1,stroke:#3FA45F,stroke-width:2px,color:#1C5230;
+  classDef deny fill:#FBDDDD,stroke:#C9453F,stroke-width:2px,color:#6E1F1B;
+  classDef mem fill:#EDE7FB,stroke:#7B5BC0,stroke-width:2px,color:#3A2A66;
+  classDef cheap fill:#E8ECEF,stroke:#7A8A99,stroke-width:1.5px,color:#33424F;
+  classDef world fill:#FCEEDB,stroke:#B5792B,stroke-width:2px,color:#5E3D12;
+  classDef frontier fill:#E7D9F5,stroke:#8A53C0,stroke-width:2px,color:#3F2466;
+  classDef note fill:#F7F9FB,stroke:#AFC0CE,stroke-width:1px,color:#46586A;
+  class s untrusted;
+  class q gate;
+  class naive,cost deny;
+  class demand pass;
+  class man,cas mem;
+  class wv cheap;
+  class kn note;

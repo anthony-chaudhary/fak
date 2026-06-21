@@ -1,0 +1,79 @@
+#!/bin/sh
+# fleet pre-commit gates  --  DOS reasons: PUBLIC_LEAK, SECRET_SHAPE,
+# DOC_PLACEMENT, BROKEN_LINK, FILE_ADMISSION.
+#
+# A sequence of independent commit-boundary gates, each owned by a tools/check_*.py
+# (or the scrubber). git runs this BELOW the agent layer, so the gates bind Claude
+# Code, Codex, opencode, and a human at the same point -- none can talk their way
+# around a structural refusal the way they can around a doc sentence.
+#
+# Every gate is uniform:
+#   * mode  FLEET_<NAME>_GUARD = block (default) | warn | off
+#   * one-shot escape (its own env var)
+#   * FAILS OPEN if its checker cannot run -- a broken check must never wedge every
+#     commit in the clone (a non-1 exit is treated as "could not run", skipped).
+# The commit is refused iff some gate in `block` mode reports a violation (exit 1).
+#
+#   Gate            mode env           escape              checker
+#   PUBLIC_LEAK     FLEET_SCRUB_GUARD  FLEET_ALLOW_LEAK    tools/scrub_public_copy.py --audit-staged
+#   SECRET_SHAPE    FLEET_SHAPE_GUARD  ALLOW_SECRET_SHAPE  tools/check_secret_shapes.py
+#   DOC_PLACEMENT   FLEET_DOC_GUARD    ALLOW_ROOT_DOC      tools/check_doc_placement.py
+#   BROKEN_LINK     FLEET_LINK_GUARD   ALLOW_BAD_LINK      tools/check_links.py
+#   FILE_ADMISSION  FLEET_FILE_GUARD   ALLOW_STRAY_FILE    tools/check_committed_files.py
+#
+# The leak needle list (AUDIT_NEEDLES) is owned by tools/scrub_public_copy.py so the
+# commit gate and the export-time scrub cannot drift; the other gates own their own
+# allowlists, shared with the DoD auditor (tools/public_readiness_audit.py) and CI.
+
+root="$(git rev-parse --show-toplevel 2>/dev/null)" || exit 0
+
+# Resolve a python interpreter once. PY_A is the binary (quoted at the call site so a
+# path with spaces survives); PY_B is an optional arg for the Windows `py -3` launcher
+# (left unquoted so it expands to two words). Empty PY_A -> skip every gate (fail open):
+# Windows boxes ship `python`/`py`, not `python3`, and a command-not-found here once
+# read as a leak and wedged every commit in the clone.
+if [ -n "${PYTHON:-}" ]; then PY_A="$PYTHON"; PY_B=""
+elif command -v python3 >/dev/null 2>&1; then PY_A=python3; PY_B=""
+elif command -v python  >/dev/null 2>&1; then PY_A=python;  PY_B=""
+elif command -v py >/dev/null 2>&1; then PY_A=py; PY_B="-3"
+else PY_A=""; PY_B=""; fi
+
+gate_failed=0
+
+# run_gate  NAME  CHECKER_RELPATH  MODE  ESCAPED
+run_gate() {
+	_name="$1"; _rel="$2"; _mode="$3"; _esc="$4"
+	[ "$_mode" = "off" ] && return 0
+	[ "$_esc" = "1" ] && return 0
+	[ -n "$PY_A" ] || return 0
+	[ -f "$root/$_rel" ] || return 0
+	_out="$("$PY_A" $PY_B "$root/$_rel" --audit-staged --root "$root" 2>&1)"
+	_st=$?
+	[ "$_st" -eq 0 ] && return 0
+	if [ "$_st" -ne 1 ]; then
+		echo "$_name (warn): check could not run (status $_st); skipped." >&2
+		return 0
+	fi
+	if [ "$_mode" = "block" ]; then
+		echo "$_out" >&2
+		gate_failed=1
+	else
+		echo "$_name (advisory):" >&2
+		echo "$_out" >&2
+	fi
+	return 0
+}
+
+run_gate PUBLIC_LEAK    tools/scrub_public_copy.py     "${FLEET_SCRUB_GUARD:-block}" "${FLEET_ALLOW_LEAK:-0}"
+run_gate SECRET_SHAPE   tools/check_secret_shapes.py   "${FLEET_SHAPE_GUARD:-block}" "${ALLOW_SECRET_SHAPE:-0}"
+run_gate DOC_PLACEMENT  tools/check_doc_placement.py   "${FLEET_DOC_GUARD:-block}"   "${ALLOW_ROOT_DOC:-0}"
+run_gate BROKEN_LINK    tools/check_links.py           "${FLEET_LINK_GUARD:-block}"  "${ALLOW_BAD_LINK:-0}"
+run_gate FILE_ADMISSION tools/check_committed_files.py "${FLEET_FILE_GUARD:-block}"  "${ALLOW_STRAY_FILE:-0}"
+
+if [ "$gate_failed" -ne 0 ]; then
+	echo "" >&2
+	echo "commit refused by a fleet pre-commit gate (above)." >&2
+	echo "  soften one gate: FLEET_<NAME>_GUARD=warn (or =off), or use its one-shot escape." >&2
+	exit 1
+fi
+exit 0

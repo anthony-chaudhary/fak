@@ -1,0 +1,244 @@
+# fak — the agent kernel
+
+`fak` is the runnable implementation of the Fused Agent Kernel: one Go binary
+that puts a policy and quarantine boundary between an AI agent and its tools.
+The practical use is gateway-first: keep your existing model or agent host, front
+it with `fak serve`, and make tool calls cross a reviewable capability floor
+before anything dangerous executes.
+
+Under the hood, every tool call becomes a syscall-like request: adjudicated
+in-process, served from a local **tool vDSO** when possible, screened by a
+**pre-flight + grammar ladder** before it fires, and admitted through a
+**context-MMU** before tool results enter model context.
+
+## Use fak with your coding agent (Claude Code, Cursor, …)
+
+If you drive a coding agent, fak fits in two ways:
+
+- **In front of the model** — point your agent's `ANTHROPIC_BASE_URL` (or OpenAI
+  base URL) at `fak serve`, and every tool call the model proposes is
+  denied / repaired / quarantined by the kernel before your agent runs it. No
+  agent-side changes; the Anthropic `/v1/messages` and OpenAI
+  `/v1/chat/completions` wires are both adjudicated, and a dropped or repaired
+  call comes back with an in-band `[fak]` note so the agent adapts instead of
+  looping. Witnessed live on macOS + Windows with the real Claude Code CLI:
+  [`DOGFOOD-CLAUDE.md`](DOGFOOD-CLAUDE.md) (one command — `scripts/dogfood-claude.sh`,
+  or `scripts/dogfood-claude.ps1` on Windows).
+- **As an MCP server** — `fak serve --stdio` exposes the kernel's verbs
+  (`fak_adjudicate`, `fak_syscall`, `fak_admit`, …) as MCP tools, so your agent
+  can ask the kernel for a verdict before it runs a tool, or screen a result it
+  executed itself through the exfil floor. Copy-paste config + the tool catalog:
+  [`examples/mcp/`](examples/mcp/) (drop [`examples/mcp/.mcp.json`](examples/mcp/.mcp.json)
+  in your project root for Claude Code).
+
+Both put the **same reviewable capability floor** (`--policy floor.json`) on every
+tool call. New here? The fastest "feel it" is the no-credential boundary below;
+the fastest "use it for real" is the dogfood path above.
+
+## Try the boundary first
+
+Run the no-credential proof before reading the architecture:
+
+```bash
+go run ./cmd/fak policy --check examples/customer-support-readonly-policy.json
+go run ./cmd/fak preflight --policy examples/customer-support-readonly-policy.json --tool refund_payment --args "{}"
+go run ./cmd/fak preflight --policy examples/customer-support-readonly-policy.json --tool search_kb --args "{}"
+go run ./cmd/fak agent --offline
+```
+
+This shows the adoption posture in one screen: a dangerous support action is
+denied, a benign search is allowed, and the offline injection A/B blocks the
+poisoned instruction while the task still completes.
+
+## Try the live gateway
+
+The boundary above is offline. To put the gate **in front of a real model** over
+OpenAI-compatible HTTP, run `fak serve`: it fronts any OpenAI-compatible upstream
+(Ollama / vLLM / llama.cpp / a cloud provider), and on every `/v1/chat/completions`
+it denies / repairs / quarantines the tool calls the model proposes before returning
+the survivors.
+
+```bash
+ollama serve &                         # any OpenAI-compatible server on :11434
+ollama pull qwen2.5:1.5b
+go run ./cmd/fak serve --addr 127.0.0.1:8080 \
+  --base-url http://localhost:11434/v1 --model qwen2.5:1.5b
+# from a second terminal:
+curl -s http://127.0.0.1:8080/healthz                       # liveness
+curl -s http://127.0.0.1:8080/metrics | head                # Prometheus scrape
+```
+
+Point any OpenAI client at `http://127.0.0.1:8080/v1`. `fak serve` also speaks the
+Anthropic `/v1/messages` wire, exposes `/metrics` + `/debug/vars`, and takes
+`--policy floor.json` + `--require-key-env VAR` to harden it. One caveat worth
+knowing up front: `stream:true` SSE is **synthesized from the finished,
+already-adjudicated turn** — well-formed, but not true token-by-token streaming. (The
+client's `max_tokens`/`temperature`/`top_p`/`stop` are now forwarded per request, so
+long completions are no longer truncated.) Full walkthrough (Tiers 0–2):
+[`GETTING-STARTED.md`](GETTING-STARTED.md).
+
+> **Status: shipped & benchmarked** (current release `v0.30.0` — single source of truth is
+> the root [`VERSION`](../VERSION) file). `go build`/`go vet`/`go test ./...` green across the
+> internal packages, CI green, and the A/B benchmark gate passes. Confirmed not by self-report
+> but by the DOS truth syscall (`dos_verify`): the shipped line runs from **`v0.1.0`** (the
+> syscall skeleton, sha `c72ddf1`) through **`v0.2.0`** (model fusion + security substrate +
+> gateway) and **`v0.2.1`** (gateway hardening + the turn-tax bench) onward to the current
+> release — see `../docs/releases/`.
+>
+> **What v0.2 added on top of the v0.1 syscall skeleton** (each its own witnessed lane):
+> a **real model fused into the kernel** (a pure-Go SmolLM2-135M forward pass, every rung
+> proven bit-for-bit vs HuggingFace, then made parity-fast — `MODEL-BASELINE-RESULTS.md`);
+> a **kernel-authored security substrate** (information-flow control, a trust/provenance
+> classifier, plan-CFI, an effect-verifying witness gate, and a normalize-and-rescan
+> admission driver — the kernel stops believing the model's self-reports); a **gateway**
+> (`fak serve`) fronting the syscall boundary over OpenAI-compatible HTTP + MCP; a durable
+> **session core-dump + context debugger + dream cleanup** (`recall` / `fak debug` /
+> `fak dream` — a quarantine that survives the process boundary, plus an offline
+> re-screen/prune pass, `RECALL-RESULTS.md` / `CDB-RESULTS.md` /
+> `MEMORY-DREAM-CLEANUP-RESULTS.md`); and a dedicated
+> **turn-tax benchmark** (`fak turntax`) pricing the extra error-code model turn the
+> 1-shot kernel deletes. The `fak agent` verb still drives the **live** turn-count A/B
+> (real Gemini + local Qwen2.5, transcript-hashed) — see `LIVE-RESULTS.md`.
+
+## The one honest KPI (cannot go red — call-mix-independent)
+
+`fak bench --suite tau2-smoke` replays a frozen tool-call trace through the one
+binary and times the **in-process tool-call adjudication boundary** against a
+**spawned-hook baseline** measured on the same machine (the same `Fold` decide, two
+transports — apples-to-apples):
+
+```
+in-process adjudication p50 : ~1,300 ns
+spawned-hook        p50     : ~6,000,000–50,000,000 ns  (process-per-decide)
+PRIMARY GATE                : pass   (~5,000–39,000x fusion speedup)
+```
+
+This is the headline because it is **independent of the tool mix**: it times the
+adjudication fold, not the workload, so a low vDSO hit-rate can never turn it red.
+The vDSO hit-rate and token savings are reported as **soft UPSIDE secondaries**,
+never the gate.
+
+## Verbs
+
+```
+fak run       --trace testdata/tau2/tau2-smoke.json    # replay a trace through the kernel
+fak preflight --tool create_user --args '{"_positional":["alice"]}'   # rung-only check
+fak bench     --suite tau2-smoke --out report.json     # A/B vDSO ablation -> report.json (the ns gate)
+fak turntax   --suite turntax-airline                  # price the extra error-code MODEL turn the 1-shot kernel deletes
+fak agent     --offline | --base-url URL --model M --api-key-env VAR  # LIVE turn-count A/B (see LIVE-RESULTS.md)
+fak serve     --addr :8080 [--require-key-env VAR]     # OpenAI-compatible HTTP + MCP gateway (any-language agents)
+fak recall    --dir DIR                                # persist/inspect a finished session as a durable core image
+fak dream     --dir DIR --out-dir DIR                   # offline cleanup pass over a sleeping core image
+fak debug     --session DIR --cmd info|bt|x|ws|grep    # attach to a session core image; demand-page its working set
+fak policy    --dump > policy.json | --check policy.json   # author/validate the deployable capability floor
+fak hook      < call.json                              # spawned-hook decide (the A/B baseline)
+```
+
+`run`, `preflight`, and `agent` take `--policy FILE` to load the capability floor
+from a declarative JSON **manifest** instead of the compiled-in default — so WHICH
+tools the agent may call is a reviewable file, not a Go edit. See `POLICY.md`.
+
+`scripts/ci.ps1` (or `make ci`) runs build + vet + test + the CLAIMS lint as one gate.
+
+> It is *designed for extension*: other ideas bake in as a new package + one
+> registration, never a core edit (see `ARCHITECTURE.md`).
+
+## What's here
+
+| File | What it is |
+|---|---|
+| `internal/abi/types.go` | The **frozen, additive-only** ABI spine: the syscall envelope, the discriminated-union Verdict, the addressable `Ref`, the async + provisional-lifecycle seams, and the core interfaces. No subsystem is named in it. |
+| `internal/abi/registry.go` | The **extension mechanism**: `Register*` from a driver's `init()`, reserved number ranges for link-time disjointness, the driver interfaces (engine / region / page-out / witness / steward). |
+| `ARCHITECTURE.md` | The extension model — how a new idea bakes in, the 4 seams that had to be frozen now, the bake-in walkthrough (speculative exec, async, zero-copy, the syscall-tuned model, an unforeseen idea). |
+| `DIRECTION.md` | The **strongly-typed-core direction** — the request/enforcement path is Go (illegal states unrepresentable, the same thesis applied to the source); non-Go is permitted only at rare named *seams/interconnects* that sit off the path behind a typed, serialized boundary (the ML-ecosystem oracle, build/CI glue, out-of-band analysis). With the reviewer's three greps that prove it holds. |
+| `DISAGGREGATED-AGENT-MEMORY.md` | The **strategy note** — fak as the MMU + reference monitor for shared agent memory: six memory semantics (S1–S6) mapped to shipped primitives, the cross-agent / cross-tenant / cross-node axes, and §2.5's four-layer distinction (routing vs addressing vs fusion vs semantics) that keeps a routing win from being mistold as a fak win. |
+| `MEMORY-LAYERS-EXPLAINER.md` | The **four-layer explainer** (teaching artifact for the above §2.5): *routing* (where a cell lives), *addressing* (its name), *fusion* (zero-copy co-residence), *semantics* (coherent mutation / isolation / provenance / capability — fak's actual change), with an ASCII stack diagram, the Docker(defines the object) vs Kubernetes(routes the object) analogy, and the one-line "is this a routing claim or a fak claim" test. |
+| `SKILL-CONTEXT-MEMORY.md` | The **skill-context memory** note - treats `.claude/skills/` as the procedural twin of `.claude/memory/`: named, versioned, load-on-demand context capsules that can emit witnessed, cacheable `SkillContextRecord`s instead of replaying long context. |
+| `POLICY.md` | The **deployable capability floor** — the dump→edit→check→load workflow, the `fak-policy/v1` manifest schema, the closed refusal vocabulary, and the honest scope of what the floor does and does not bound. The adopter's front door. |
+| `PARTITION.md` | The `dos-plan-price` fleet partition: wave-0 gate, the 4 wave-1 leaves, the 3 wave-2 workers, the serial tail, and the **growth slots** for post-v0.1 ideas. |
+| `WORKER-PACKET.md` | The per-worker dispatch packet the fleet consumes (goal · leased tree · `dos hook stop` witness · `dos verify` done-proof). |
+| `LIVE-RESULTS.md` | The **live** turn-count A/B: a real model (Gemini OpenAI-compat + local Qwen2.5) drives the `fak agent` loop twice over one task; each run carries a transcript hash. The honest read of what fusion does and does not buy live. |
+| `TICKETS.md` | Issues the live `fak agent` lane surfaced (FIXED / OPEN / NOTE). |
+| `RECALL-RESULTS.md` | The **session-recall** lane: a quarantine that survives the session boundary (a finished session as a *core dump*; benign pages demand-paged byte-identical, sealed pages refused across the boundary + re-screened on page-in). Witness-grounded; 5/5 adversarially confirmed. |
+| `CDB-RESULTS.md` | The **context-debugger** lane (`fak debug`): attach to a finished session as a core dump and answer a follow-up by *demand-paging only the working set* (Denning) — never replaying the address space. Ingests a REAL Claude Code transcript; measured on a 2.8 MB session, an 18 KB page table over a 1.2 MB swap device, follow-ups paging in ~1.8–6.2% of the resident image. |
+| `MEMORY-DREAM-CLEANUP-RESULTS.md` | The **memory-dream cleanup** lane (`fak dream`): an offline sleep pass over a core image that re-screens resident pages, pre-seals refuted witnesses, repairs sealed descriptors from metadata only, surfaces duplicate aliases, and prunes unreferenced CAS bytes. |
+| `IN-KERNEL-MODEL-RESULTS.md` | The **model fused into the kernel**: a pure-Go SmolLM2-135M forward pass (134.5M params / 272 tensors), every rung proven against HuggingFace (0/134.5M decode bit-mismatches, layer cos=1.000000, KV-decode + KV-quarantine-evict token-for-token identical). The kernel owns the KV cache; the design is in `IN-KERNEL-MODEL-DESIGN.md`. |
+| `MODEL-BASELINE-RESULTS.md` | The fused forward pass **measured** against the next-best CPU baselines (HF transformers, llama.cpp): naive tax → parity lane (decodes *faster* than same-precision HF f32) → an int8/Q8 SIMD lane at near-parity with llama.cpp Q8_0 (~7.7 ms/tok, the in-flight Act 3). Every number recomputed from raw JSON, survived a 4-skeptic adversarial pass. |
+| `MODEL-ARCH-SUPPORT-AUDIT-2026-06-18.md` | Current top-10 architecture support audit: what is witnessed today, what is only loader/shape-compatible, and which GitHub issues cover the remaining families. |
+| `FAK-NATIVE-QWEN35-RESULTS.md` | The Qwen3.5/Qwen3.6 Gated-DeltaNet lane: 0.8B coherent f32 chat plus the 2026-06-19 pure-fak Qwen3.6-27B GGUF->Q8 smoke with first-token llama.cpp parity on the M3 Pro. |
+| `KV-QUARANTINE-BRIDGE-RESULTS.md` | The deepest "model is secondary" rung: the byte-gate drives the **KV-gate** — a `Quarantine` verdict evicts the poison's K/V span, leaving the attention cache bit-identical (max\|Δ\|=0) to never-having-seen it. |
+| `TURN-TAX-RESULTS.md` | The **turn-tax** benchmark (`fak turntax`): prices the extra error-code MODEL turn the 1-shot kernel deletes (forced vs elision, with a consistency guard and a happy-path=0 control), keeping the safety floor on its own axis. |
+| `FLEET-SWEEP-RESULTS.md` | The 2-D **turns x agents** sweep: shared-cache fleet vs isolated agents, exact-zero no-share controls, and the scoped-invalidation eraser that fixes the write-rate crossover. |
+| `FANOUT-BENCH-RESULTS.md` | The one-master-goal **fan-out** benchmark: N=1..1024 sub-agents, real cross-agent tool-result dedup, transparent prefix-cache economics, and the fold-bound latency knee. |
+| `REALISTIC-WORKLOAD-RESULTS.md` | The transcript-derived workload profile and replay: real Claude Code session shapes replace the synthetic constants, with a tuning dial for tool-result-bearing turns. |
+| `../VISUALS-benchmarking-status-2026-06-18.md` | The refreshed benchmark visual/status dashboard tying the current plots, headline numbers, and caveats together. |
+| `../EXPLAINER-trust-floor-two-lenses-2026-06-17.md` | **fak explained twice** — once for *security researchers*, once for *agent-optimization*, with a Rosetta table mapping each primitive to both vocabularies. |
+
+## The contract in one breath
+
+`Kernel.Submit` adjudicates (folds the LSM-style `Adjudicator` chain by `FoldRank`)
+and enqueues; `Reap` returns the typed completion; `Syscall` is the sync convenience
+over the two. Payloads are addressable `Ref`s (zero-copy is a backend swap).
+`Verdict` is a closed, trainable, discriminated union with an open registered range
+(the syscall-tuned model's clean target). Speculation/transaction effects are
+provisional until `Promote`/`Rollback`. Everything else — engines, vDSO tiers,
+rungs, the MMU codec, stewards, KPIs, witnesses, and ideas nobody's had yet —
+attaches through a registry.
+
+## What shipped (witness-closed)
+
+| Subsystem | Tree | What it does | Witness |
+|---|---|---|---|
+| in-process adjudicator | `internal/adjudicator` | DOS reference monitor: provable-deny / unprovable-defer, structured 12-reason refusal, bounded-disclosure SELF_MODIFY witness, redact-transform | `go test`, `BenchmarkDecide` |
+| deployable policy | `internal/policy` | the capability floor as a declarative, version-tagged JSON manifest (`--policy FILE`); closed-vocab deny validation; fail-loud load; `--dump`↔`--check` round-trip; `fak policy` verb | `go test` (9, incl. `TestRoundTrip`) |
+| tool vDSO | `internal/vdso` | 3-tier local fast path (pure / content-cache / static), world-versioned, LRU, canonical keys | `go test` |
+| engine | `internal/engine` | OpenAI-compatible client, base_url-swappable, cassette replay, usage extraction, mock | `go test` |
+| pre-flight + grammar | `internal/preflight`,`internal/grammar` | rung ladder + JSON-schema; positional→named auto-repair; fail-open; grammar dedup; hard-negative harvest | `go test` |
+| context-MMU | `internal/ctxmmu` | write-time quarantine (secret/injection/poison/repeat), page-out to <2KB pointer, witness-gated page-in | `go test` + `poison.json` |
+| security substrate | `internal/ifc`,`provenance`,`plancfi`,`witness`,`canon`,`normgate`,`agentdojo`,`harvest` | the kernel stops believing the model: source-stamped taint + sink-gated flows (ifc), kernel-authored trust/provenance, plan-CFI (`RequireApproval`), an effect-verifying `dos_verify` witness gate, a normalize-and-rescan admission driver (normgate), and a dynamic ASR-gated attack battery (agentdojo) | `go test` (per pkg); `cmd/ctxbench -chain`; `experiments/SECURITY-DRIVERS-*.md` |
+| KV-quarantine bridge | `internal/kvmmu` | the same ctxmmu `Quarantine` verdict mechanically evicts the poison's K/V span, leaving the kernel-owned attention cache bit-identical (max\|Δ\|=0) to never-having-seen it | `go test` (5); `KV-QUARANTINE-BRIDGE-RESULTS.md` |
+| session core-dump + debugger + dream cleanup | `internal/recall`,`internal/cdb` | persist a finished session as a page-table-over-CAS core image; `fak debug` attaches to it (incl. a REAL transcript) and demand-pages only the working set a question touches; agent/requester tombstones suppress unwanted memories from future context without deleting audit bytes; `fak dream` auto-cleans the sleeping image by re-screening, pre-sealing refuted witnesses, and pruning dead CAS bytes | `go test` + `recall-report.json`,`cdb-report.json`,`dream-report.json` |
+| in-kernel model | `internal/model` | a pure-Go SmolLM2-135M forward pass the kernel owns (KV cache as a Go structure), every rung proven bit-for-bit vs HuggingFace, then made parity-fast (parallel matmul + batched GEMM, decoding faster than same-precision HF f32); an int8/Q8 SIMD lane at near-parity with llama.cpp Q8_0 is the active **in-flight** extension | `go test` (oracle argmax-exact); `MODEL-BASELINE-RESULTS.md` |
+| gateway | `internal/gateway` | `fak serve`: OpenAI-compatible HTTP (`/v1/chat/completions` adjudication proxy, `/v1/fak/*`) + MCP over stdio/HTTP, so any-language agents route tool calls through the syscall boundary; mints a tainted agent-scoped `Ref` from raw bytes (IFC/secret/self-modify rungs stay armed) | `go test`; v0.2.1 adversarial-review hardening |
+| dispatch fusion | `internal/kernel` | one in-process chain; no `os/exec` on the hot path | `go test` (ABSENCE proof) |
+| KPI + A/B bench | `internal/metrics`,`internal/bench` | vDSO ablation; the primary gate; provenance + identical-workload guard | `report.json`, `baseline.json` |
+| turn-tax bench | `internal/turnbench` | `fak turntax`: prices the extra error-code MODEL turn (malformed/duplicate/poison) a SOTA loop fires vs the 1-shot kernel, per lever, safety floor on its own axis | `go test` (incl. happy-path=0 control); `TURN-TAX-RESULTS.md` |
+| stewards + RSI gate | `internal/steward`,`internal/shipgate` | single-invariant stewards + meta-prune; keep-or-revert on a non-forgeable keep-bit, worktree isolation, escalation breaker | `go test` |
+
+## What this is NOT (labeled, not hidden — see `CLAIMS.md`)
+
+- **The in-kernel model is a reference forward pass; GPU throughput is real, but it is not
+  yet a full production serving engine.** v0.2 fuses a real pure-Go SmolLM2-135M forward pass
+  into the kernel with the KV cache as a kernel-owned Go structure (proven bit-for-bit vs
+  HuggingFace, then made decode-parity-fast incl. an int8 SIMD lane). The CUDA backend takes
+  it onto the GPU and reaches **decode parity with llama.cpp Q8_0 (≈120 tok/s on an RTX 4070;
+  `GPU.md` §3b)** — so GPU throughput is **not** out of scope. What *is* still future work is
+  production *serving* (continuous batching, paged attention, multi-tenant scheduling); the
+  live `fak agent` / `fak serve` lanes drive an external OpenAI-compatible engine for that
+  today.
+- **NOT** zero-copy KV co-residence with an external engine: that remains the
+  addressable-`Ref` seam wired to a **copy** backend (a backend swap later, behind
+  capability `zerocopy`). The in-kernel model owns *its own* KV cache; sharing one KV
+  arena with a separate serving process is the unbuilt stub.
+- **NOT** GPU-dependent: continuous-batching / token-per-watt / metrics-service
+  KV-residency are read-only **SIMULATED** telemetry (no GPU on the box).
+- **NOT** a fine-tuned *syscall/adjudication* model: the typed `LabelRow`/`VerdictKind`
+  training targets exist (and `internal/harvest` now folds the live verdict stream into a
+  corpus of them), but the model that would emit Verdicts from them is not trained — the
+  fused model is a stock reference, not a tuned adjudicator.
+- The vDSO real-world hit-rate is low (~0.7% addressable on real tau2-airline) — the
+  demo trace is deliberately cache-favorable, which is why the headline is the
+  call-mix-independent adjudication gate, not the vDSO win.
+
+Every claim in `CLAIMS.md` carries exactly one of `[SHIPPED]` / `[SIMULATED]` /
+`[STUB]` (lint-enforced). See `../BUILD-72h-fused-agent-kernel.md` for the original
+scope and `../PLAN-fak-mvp-100-units-2026-06-16.md` for the 100-unit plan.
+
+## Launching the build
+
+1. Land + freeze wave 0 (this artifact): `go build ./... && go vet ./...`, commit the
+   golden conformance test, author the operator fixtures, run the vDSO purity gate.
+2. `dos-plan-price PARTITION.md` → confirm collision-free; `dos-arbitrate` the leases.
+3. `dos-goal-fleet` the wave-1 packets; gate wave 2 on `dos-witness-claim`; fold; tag.
+
+License: Apache-2.0 (matches the Microsoft Agent Governance Toolkit dep).

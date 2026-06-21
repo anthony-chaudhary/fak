@@ -1,0 +1,181 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="800" viewBox="0 0 1600 800" role="img" aria-labelledby="title desc">
+  <title id="title">Tool Call Flow Through the fak Kernel</title>
+  <desc id="desc">A visual flow diagram showing how a tool call passes through the fak kernel gates: shortcut, permission, auto-repair, execution, and quarantine.</desc>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#f7faf9"/>
+      <stop offset="50%" stop-color="#eef5f6"/>
+      <stop offset="100%" stop-color="#faf4ee"/>
+    </linearGradient>
+    <filter id="shadow" x="-10%" y="-10%" width="120%" height="130%">
+      <feDropShadow dx="0" dy="6" stdDeviation="8" flood-color="#14202b" flood-opacity="0.13"/>
+    </filter>
+    <style>
+      .title { font: 900 44px "Segoe UI", Arial, sans-serif; fill: #14202b; }
+      .subtitle { font: 400 18px "Segoe UI", Arial, sans-serif; fill: #405063; }
+      .cardTitle { font: 800 18px "Segoe UI", Arial, sans-serif; fill: #1b2733; }
+      .label { font: 700 15px "Segoe UI", Arial, sans-serif; fill: #314153; }
+      .body { font: 400 14px "Segoe UI", Arial, sans-serif; fill: #415266; }
+      .small { font: 400 12px "Segoe UI", Arial, sans-serif; fill: #5b6a7a; }
+      .tiny { font: 700 11px "Segoe UI", Arial, sans-serif; fill: #ffffff; letter-spacing: 0; }
+      .gate { fill: #ffffff; stroke-width: 2; }
+      .allow { stroke: #85bc98; }
+      .deny { stroke: #cf5a5a; }
+      .quarantine { stroke: #dfbd78; }
+      .arrow { stroke: #8b98a6; stroke-width: 2; fill: none; }
+    </style>
+  </defs>
+
+  <rect width="1600" height="800" fill="url(#bg)"/>
+  <rect x="38" y="28" width="1524" height="744" rx="8" fill="#ffffff" opacity="0.62"/>
+
+  <text x="72" y="78" class="title">Tool Call Flow Through the Kernel</text>
+  <text x="74" y="110" class="subtitle">Every tool call passes through five gates. Each gate can stop it, fix it, or let it through.</text>
+
+  <!-- Flow from left to right -->
+  <!-- Agent -->
+  <g filter="url(#shadow)">
+    <rect x="58" y="180" width="140" height="100" rx="8" fill="#eef3f6" stroke="#d8e1e8"/>
+    <text x="78" y="220" class="cardTitle">AI Agent</text>
+    <text x="78" y="245" class="body">Proposes:</text>
+    <text x="78" y="265" class="small">tool_call(...)</text>
+  </g>
+
+  <line x1="198" y1="230" x2="238" y2="230" class="arrow"/>
+  <path d="M238 230 L230 224 L230 236 Z" fill="#8b98a6"/>
+
+  <!-- Gate 1: Shortcut -->
+  <g filter="url(#shadow)">
+    <rect x="248" y="160" width="180" height="140" rx="8" class="gate allow"/>
+    <rect x="248" y="160" width="180" height="35" rx="8" fill="#85bc98"/>
+    <text x="268" y="185" class="tiny">GATE 1: SHORTCUT</text>
+
+    <text x="268" y="220" class="label">Answer locally?</text>
+    <text x="268" y="245" class="body">If already answered</text>
+    <text x="268" y="265" class="body">recently, reuse result</text>
+    <text x="268" y="290" class="small" style="fill:#2e8b57;">✓ Skip tool call</text>
+  </g>
+
+  <line x1="428" y1="230" x2="468" y2="230" class="arrow"/>
+  <path d="M468 230 L460 224 L460 236 Z" fill="#8b98a6"/>
+
+  <!-- Gate 2: Permission -->
+  <g filter="url(#shadow)">
+    <rect x="478" y="160" width="180" height="140" rx="8" class="gate deny"/>
+    <rect x="478" y="160" width="180" height="35" rx="8" fill="#cf5a5a"/>
+    <text x="498" y="185" class="tiny">GATE 2: PERMISSION</text>
+
+    <text x="498" y="220" class="label">Is this allowed?</text>
+    <text x="498" y="245" class="body">Check tool name vs</text>
+    <text x="498" y="265" class="body">allow-list</text>
+    <text x="498" y="290" class="small" style="fill:#cf5a5a;">✗ DENY if not listed</text>
+  </g>
+
+  <line x1="658" y1="230" x2="698" y2="230" class="arrow"/>
+  <path d="M698 230 L690 224 L690 236 Z" fill="#8b98a6"/>
+
+  <!-- Gate 3: Auto-repair -->
+  <g filter="url(#shadow)">
+    <rect x="708" y="160" width="180" height="140" rx="8" class="gate" stroke="#dfbd78"/>
+    <rect x="708" y="160" width="180" height="35" rx="8" fill="#dfbd78"/>
+    <text x="728" y="185" class="tiny">GATE 3: AUTO-REPAIR</text>
+
+    <text x="728" y="220" class="label">Fix malformed?</text>
+    <text x="728" y="245" class="body">Grammar-based</text>
+    <text x="728" y="265" class="body">argument repair</text>
+    <text x="728" y="290" class="small" style="fill:#b57920;">~ Fix and continue</text>
+  </g>
+
+  <line x1="888" y1="230" x2="928" y2="230" class="arrow"/>
+  <path d="M928 230 L920 224 L920 236 Z" fill="#8b98a6"/>
+
+  <!-- Execution -->
+  <g filter="url(#shadow)">
+    <rect x="938" y="180" width="140" height="100" rx="8" fill="#eef3f6" stroke="#d8e1e8"/>
+    <text x="958" y="220" class="cardTitle">Run It</text>
+    <text x="958" y="245" class="body">Execute tool</text>
+    <text x="958" y="265" class="body">with arguments</text>
+  </g>
+
+  <line x1="1078" y1="230" x2="1118" y2="230" class="arrow"/>
+  <path d="M1118 230 L1110 224 L1110 236 Z" fill="#8b98a6"/>
+
+  <!-- Gate 4: Quarantine -->
+  <g filter="url(#shadow)">
+    <rect x="1128" y="160" width="180" height="140" rx="8" class="gate quarantine"/>
+    <rect x="1128" y="160" width="180" height="35" rx="8" fill="#dfbd78"/>
+    <text x="1148" y="185" class="tiny">GATE 4: QUARANTINE</text>
+
+    <text x="1148" y="220" class="label">Is result safe?</text>
+    <text x="1148" y="245" class="body">Detector screens</text>
+    <text x="1148" y="265" class="body">for poison</text>
+    <text x="1148" y="290" class="small" style="fill:#b57920;">⚠ Hold if suspicious</text>
+  </g>
+
+  <line x1="1308" y1="230" x2="1348" y2="230" class="arrow"/>
+  <path d="M1348 230 L1340 224 L1340 236 Z" fill="#8b98a6"/>
+
+  <!-- Result -->
+  <g filter="url(#shadow)">
+    <rect x="1358" y="180" width="140" height="100" rx="8" fill="#eef3f6" stroke="#d8e1e8"/>
+    <text x="1378" y="215" class="cardTitle">Result</text>
+    <text x="1378" y="245" class="body">Admitted to</text>
+    <text x="1378" y="265" class="body">context</text>
+  </g>
+
+  <!-- Deny path -->
+  <rect x="478" y="320" width="180" height="60" rx="4" fill="#faeef3" stroke="#cf5a5a"/>
+  <text x="498" y="345" class="label" style="font-size:14px; fill:#cf5a5a;">DENY → stop</text>
+  <text x="498" y="365" class="small">Tool never runs</text>
+
+  <line x1="568" y1="300" x2="568" y2="320" stroke="#cf5a5a" stroke-width="2"/>
+
+  <!-- Quarantine path -->
+  <rect x="1128" y="320" width="180" height="60" rx="4" fill="#fff5e8" stroke="#dfbd78"/>
+  <text x="1148" y="345" class="label" style="font-size:14px; fill:#b57920;">QUARANTINE → hold</text>
+  <text x="1148" y="365" class="small">Result never reaches model</text>
+
+  <line x1="1218" y1="300" x2="1218" y2="320" stroke="#dfbd78" stroke-width="2"/>
+
+  <!-- Key insight box -->
+  <rect x="72" y="420" width="1456" height="340" rx="8" fill="#edf7f0" stroke="#85bc98"/>
+
+  <text x="98" y="465" class="cardTitle">Why this flow matters</text>
+
+  <g>
+    <rect x="98" y="490" width="440" height="90" rx="4" fill="#ffffff"/>
+    <text x="112" y="520" class="label">Gate 2 (Permission) is structural</text>
+    <text x="112" y="545" class="body">If a tool isn't in the allow-list, it can never</text>
+    <text x="112" y="565" class="body">execute — no matter what the AI says.</text>
+  </g>
+
+  <g>
+    <rect x="560" y="490" width="440" height="90" rx="4" fill="#ffffff"/>
+    <text x="574" y="520" class="label">Gate 4 (Quarantine) protects memory</text>
+    <text x="574" y="545" class="body">A poisoned tool result is held out of context</text>
+    <text x="574" y="565" class="body">entirely — the AI never sees it.</text>
+  </g>
+
+  <g>
+    <rect x="1022" y="490" width="470" height="90" rx="4" fill="#ffffff"/>
+    <text x="1036" y="520" class="label">Both gates are independent</text>
+    <text x="1036" y="545" class="body">Attacker must beat BOTH — not just one.</text>
+    <text x="1036" y="565" class="body">That's why it's harder to break.</text>
+  </g>
+
+  <text x="98" y="610" class="label">Comparison to typical approach:</text>
+
+  <g>
+    <rect x="98" y="640" width="680" height="100" rx="4" fill="#faeef3" stroke="#cf5a5a"/>
+    <text x="112" y="670" class="label">Typical: AI → Tool → Result (with optional filter)</text>
+    <text x="112" y="700" class="body">If the filter fails, the attack succeeds. One line of defense.</text>
+  </g>
+
+  <g>
+    <rect x="800" y="640" width="690" height="100" rx="4" fill="#edf7f0" stroke="#85bc98"/>
+    <text x="814" y="670" class="label">fak: AI → Permission → Repair → Tool → Quarantine → Result</text>
+    <text x="814" y="700" class="body">Two independent gates. Even if quarantine fails, permission still blocks.</text>
+  </g>
+
+  <text x="98" y="760" class="small">See fak/POLICY.md for permission manifest details. Live results: fak/LIVE-RESULTS.md</text>
+</svg>

@@ -1,0 +1,52 @@
+{
+  "version": "fak-policy/v1",
+  "allow": [
+    "search_web",
+    "fetch_url",
+    "run_query",
+    "create_ticket",
+    "send_slack_message"
+  ],
+  "allow_prefix": [
+    "read_",
+    "get_",
+    "search_",
+    "list_",
+    "lookup_",
+    "find_"
+  ],
+  "deny": {
+    "delete_account": "POLICY_BLOCK",
+    "rotate_credentials": "POLICY_BLOCK",
+    "exfiltrate": "SECRET_EXFIL",
+    "transfer_funds": "POLICY_BLOCK"
+  },
+  "self_modify_globs": [
+    ".git/",
+    ".dos/",
+    "policy.json",
+    "/etc/",
+    "id_rsa"
+  ],
+  "redact_fields": [
+    "password",
+    "secret",
+    "api_key",
+    "token",
+    "authorization"
+  ],
+  "safe_sinks": [
+    "transfer_to_human_agents"
+  ],
+  "authorize": [
+    {
+      "tool": "send_slack_message",
+      "sink": "EGRESS"
+    }
+  ],
+  "sources": {
+    "read_file": "trusted_local",
+    "read_corp_kb": "trusted_local",
+    "fetch_url": "untrusted"
+  }
+}

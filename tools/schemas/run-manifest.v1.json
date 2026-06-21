@@ -1,0 +1,104 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "benchmark/run-manifest.v1.json",
+  "title": "Benchmark Run Manifest",
+  "description": "Metadata for a single benchmark run",
+  "type": "object",
+  "required": [
+    "run_id",
+    "machine_id",
+    "timestamp",
+    "git",
+    "harness",
+    "model",
+    "config",
+    "tags",
+    "artifacts"
+  ],
+  "properties": {
+    "$schema": {
+      "type": "string",
+      "const": "benchmark/run-manifest.v1"
+    },
+    "run_id": {
+      "type": "string",
+      "pattern": "^[a-z0-9-]+-[0-9]{8}T[0-9]{6}Z$",
+      "description": "Unique run identifier ending with ISO timestamp"
+    },
+    "machine_id": {
+      "type": "string",
+      "description": "Reference to machine in catalog"
+    },
+    "timestamp": {
+      "type": "string",
+      "format": "date-time",
+      "description": "ISO 8601 UTC timestamp"
+    },
+    "git": {
+      "type": "object",
+      "required": ["rev"],
+      "properties": {
+        "rev": {"type": "string", "pattern": "^[a-f0-9]+$"},
+        "branch": {"type": "string"},
+        "dirty": {"type": "boolean"}
+      }
+    },
+    "harness": {
+      "type": "object",
+      "required": ["name", "version"],
+      "properties": {
+        "name": {"type": "string"},
+        "version": {"type": "string"}
+      }
+    },
+    "model": {
+      "type": "object",
+      "required": ["name", "parameters", "source", "precision"],
+      "properties": {
+        "name": {"type": "string"},
+        "family": {"type": "string"},
+        "parameters": {"type": "string"},
+        "source": {"type": "string"},
+        "precision": {"type": "string", "enum": ["f32", "f16", "bf16", "q8", "q4", "int8"]},
+        "quantization": {"type": "string"}
+      }
+    },
+    "config": {
+      "type": "object",
+      "properties": {
+        "batch_sizes": {"type": "array", "items": {"type": "integer"}},
+        "workers": {"type": "integer", "minimum": 1},
+        "decode_steps": {"type": "integer", "minimum": 1},
+        "prefill_sizes": {"type": "array", "items": {"type": "integer"}},
+        "workload_file": {"type": "string"},
+        "workload_prefill_cap": {"type": "integer", "minimum": 0},
+        "workload_prompt_cap": {"type": "integer", "minimum": 0}
+      }
+    },
+    "tags": {
+      "type": "array",
+      "items": {"type": "string"},
+      "description": "Run classification tags (e.g., kernel, batch, smoke)"
+    },
+    "artifacts": {
+      "type": "object",
+      "properties": {
+        "kernel": {"type": "string"},
+        "batch": {"type": "string"},
+        "modelbench": {"type": "string"},
+        "fleetbench": {"type": "string"},
+        "workload": {"type": "string"},
+        "gate": {"type": "string"}
+      }
+    },
+    "gate": {
+      "type": "object",
+      "properties": {
+        "required": {"type": "boolean"},
+        "status": {"type": "string", "enum": ["passed", "failed", "skipped"]},
+        "min_speedup": {"type": "number"},
+        "actual_speedup": {"type": "number"}
+      }
+    }
+  }
+}

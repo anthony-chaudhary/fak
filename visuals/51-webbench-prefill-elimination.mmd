@@ -1,0 +1,27 @@
+graph TD
+    subgraph Workers["Worker Scaling"]
+        W1["1 worker: 15.6x elimination"]
+        W2["2 workers: 16.1x elimination"]
+        W4["4 workers: 16.4x elimination"]
+        W8["8 workers: 16.6x elimination"]
+    end
+
+    subgraph Metrics["Key Metrics"]
+        M1["Net Elimination A/C: 15.6x - 16.6x"]
+        M2["Cross-Worker Reuse B/C: 1.00x - 1.07x"]
+        M3["Turn-Tax A/B: 15.6x worker-independent"]
+    end
+
+    W1 --> M1
+    W2 --> M1
+    W4 --> M1
+    W8 --> M1
+
+    M1 -.-> M2
+    M2 -.-> M3
+
+    style Workers fill:#ffe6e6,stroke:#ff6666,stroke-width:2px
+    style Metrics fill:#e6f3ff,stroke:#6666ff,stroke-width:2px
+    style M1 fill:#fff0f0,stroke:#ff0000,stroke-width:3px
+    style M2 fill:#f0f0ff,stroke:#0000ff,stroke-width:2px
+    style M3 fill:#f0fff0,stroke:#00aa00,stroke-width:2px

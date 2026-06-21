@@ -1,0 +1,9 @@
+{
+  "slice_id": "turntax-happy",
+  "_provenance": "operator-authored calibration slice. A clean happy path: every call is a first-occurrence allow+engine round-trip with no alias, no duplicate, no poison, no destructive deny. The kernel saves NOTHING here -> turns_saved MUST be 0. This is the anti-inflation control: it proves the turn-tax headline reflects real avoided errors, not a fixed discount applied to every call.",
+  "calls": [
+    { "tool": "get_user_details", "args": {"user_id": "mia_li_3668"}, "meta": {"readOnlyHint": "true", "idempotentHint": "true"}, "class": "pass", "note": "first lookup -> engine (both arms identical)" },
+    { "tool": "search_direct_flight", "args": {"origin": "SFO", "destination": "LAX", "date": "2026-08-01"}, "meta": {"readOnlyHint": "true", "idempotentHint": "true"}, "class": "pass", "note": "first search -> engine" },
+    { "tool": "book_flight", "args": {"user_id": "mia_li_3668", "flight_id": "UA123"}, "meta": {"readOnlyHint": "false", "idempotentHint": "false", "destructive": "true"}, "class": "pass", "note": "the write -> allow+engine" }
+  ]
+}

@@ -1,0 +1,252 @@
+#!/usr/bin/env python3
+"""Gate Qwen3.6 pure-fak speed artifacts against llama.cpp artifacts.
+
+This is intentionally artifact-only: it does not rerun either engine. The benchmark run
+produces the witness; this script makes the witness fail-closed when a checked fak point
+falls below the corresponding llama.cpp point.
+"""
+from __future__ import annotations
+
+import argparse
+import json
+import sys
+from pathlib import Path
+
+
+SCHEMA = "fak.qwen36-perf-gate.v1"
+ROOT = Path(__file__).resolve().parents[1]
+
+DEFAULT_CASES = (
+    (
+        "amd-p16-64-256",
+        "fak/experiments/qwen36/native-gguf-q8-hybrid-headscan-p16-64-256-20260619.json",
+        "fak/experiments/qwen36/llamacpp-vulkan-qwen36-pp16-64-256-tg1-20260619.json",
+    ),
+    (
+        "amd-p512-1024",
+        "fak/experiments/qwen36/native-gguf-q8-hybrid-headscan-p512-1024-dp256-d16-20260619.json",
+        "fak/experiments/qwen36/llamacpp-vulkan-qwen36-pp512-1024-tg16-20260619.json",
+    ),
+)
+
+
+def repo_path(path: str) -> Path:
+    p = Path(path)
+    if p.is_absolute():
+        return p
+    return ROOT / p
+
+
+def load_json(path: Path):
+    with path.open(encoding="utf-8") as f:
+        return json.load(f)
+
+
+def as_float(value):
+    if isinstance(value, bool):
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def as_int(value):
+    if isinstance(value, bool):
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def rel(path: Path) -> str:
+    try:
+        return str(path.relative_to(ROOT)).replace("\\", "/")
+    except ValueError:
+        return str(path)
+
+
+def fak_metrics(path: Path) -> dict:
+    data = load_json(path)
+    prefill = {}
+    for row in data.get("prefill") or []:
+        tokens = as_int(row.get("tokens"))
+        tps = as_float(row.get("tok_per_sec"))
+        if tokens and tps and tps > 0:
+            prefill[tokens] = tps
+    dec = data.get("decode") or {}
+    decode_tps = as_float(dec.get("tok_per_sec"))
+    decode = None
+    if decode_tps and decode_tps > 0:
+        decode = {
+            "tok_per_sec": decode_tps,
+            "prompt_tokens": as_int(dec.get("prompt_tokens")),
+            "decode_steps": as_int(dec.get("decode_steps")),
+        }
+    return {
+        "path": rel(path),
+        "engine": data.get("engine"),
+        "model": data.get("model"),
+        "prefill": prefill,
+        "decode": decode,
+    }
+
+
+def llama_metrics(path: Path) -> dict:
+    data = load_json(path)
+    if not isinstance(data, list):
+        raise ValueError(f"{rel(path)} is not a llama-bench JSON array")
+    prefill = {}
+    decode = None
+    meta = {}
+    for row in data:
+        if not meta:
+            meta = {
+                "build_commit": row.get("build_commit"),
+                "build_number": row.get("build_number"),
+                "backends": row.get("backends"),
+                "model_type": row.get("model_type"),
+            }
+        n_prompt = as_int(row.get("n_prompt")) or 0
+        n_gen = as_int(row.get("n_gen")) or 0
+        tps = as_float(row.get("avg_ts"))
+        if not tps or tps <= 0:
+            continue
+        if n_prompt > 0 and n_gen == 0:
+            prefill[n_prompt] = tps
+        elif n_prompt == 0 and n_gen > 0:
+            decode = {"tok_per_sec": tps, "n_gen": n_gen}
+    return {"path": rel(path), "prefill": prefill, "decode": decode, **meta}
+
+
+def compare_case(label: str, fak_path: Path, llama_path: Path, min_ratio: float) -> dict:
+    fak = fak_metrics(fak_path)
+    llama = llama_metrics(llama_path)
+    rows = []
+    failures = []
+
+    common_prefill = sorted(set(fak["prefill"]) & set(llama["prefill"]))
+    for tokens in common_prefill:
+        ft = fak["prefill"][tokens]
+        lt = llama["prefill"][tokens]
+        ratio = ft / lt
+        passed = ratio >= min_ratio
+        if not passed:
+            failures.append(f"{label} P{tokens}: fak {ft:.4g} < {min_ratio:g}x llama {lt:.4g}")
+        rows.append({
+            "metric": f"prefill_P{tokens}",
+            "kind": "prefill",
+            "tokens": tokens,
+            "fak_tok_per_sec": ft,
+            "llama_tok_per_sec": lt,
+            "ratio": ratio,
+            "passed": passed,
+        })
+
+    if fak["decode"] and llama["decode"]:
+        ft = fak["decode"]["tok_per_sec"]
+        lt = llama["decode"]["tok_per_sec"]
+        ratio = ft / lt
+        passed = ratio >= min_ratio
+        fsteps = fak["decode"].get("decode_steps")
+        lsteps = llama["decode"].get("n_gen")
+        if not passed:
+            failures.append(f"{label} decode: fak {ft:.4g} < {min_ratio:g}x llama {lt:.4g}")
+        rows.append({
+            "metric": "decode",
+            "kind": "decode",
+            "fak_decode_steps": fsteps,
+            "llama_n_gen": lsteps,
+            "fak_tok_per_sec": ft,
+            "llama_tok_per_sec": lt,
+            "ratio": ratio,
+            "passed": passed,
+        })
+
+    if not rows:
+        failures.append(f"{label}: no comparable prefill or decode metrics")
+
+    return {
+        "label": label,
+        "fak": fak,
+        "llama": llama,
+        "rows": rows,
+        "passed": not failures,
+        "failures": failures,
+    }
+
+
+def render_markdown(report: dict) -> str:
+    lines = [
+        "# Qwen3.6 Perf Gate",
+        "",
+        f"- Verdict: {'PASS' if report['passed'] else 'FAIL'}",
+        f"- Minimum ratio: {report['min_ratio']:.3g}x",
+        "",
+        "| case | metric | fak tok/s | llama.cpp tok/s | ratio | verdict |",
+        "|---|---:|---:|---:|---:|---|",
+    ]
+    for case in report["cases"]:
+        for row in case["rows"]:
+            lines.append(
+                f"| {case['label']} | `{row['metric']}` | "
+                f"{row['fak_tok_per_sec']:.2f} | {row['llama_tok_per_sec']:.2f} | "
+                f"{row['ratio']:.2f}x | {'PASS' if row['passed'] else 'FAIL'} |"
+            )
+    if report["failures"]:
+        lines.extend(["", "Failures:"])
+        lines.extend(f"- {failure}" for failure in report["failures"])
+    lines.append("")
+    return "\n".join(lines)
+
+
+def build_report(cases, min_ratio: float) -> dict:
+    checked = []
+    failures = []
+    for label, fak_path, llama_path in cases:
+        case = compare_case(label, repo_path(fak_path), repo_path(llama_path), min_ratio)
+        checked.append(case)
+        failures.extend(case["failures"])
+    return {
+        "schema": SCHEMA,
+        "min_ratio": min_ratio,
+        "passed": not failures,
+        "failures": failures,
+        "cases": checked,
+    }
+
+
+def parse_args(argv):
+    ap = argparse.ArgumentParser(description=__doc__)
+    ap.add_argument(
+        "--case",
+        action="append",
+        nargs=3,
+        metavar=("LABEL", "FAK_JSON", "LLAMA_JSON"),
+        help="comparison case; may be repeated. Defaults to the committed AMD Qwen3.6 artifacts.",
+    )
+    ap.add_argument("--min-ratio", type=float, default=1.0, help="required fak/llama tok/s ratio")
+    ap.add_argument("--out", help="write machine-readable gate report JSON")
+    ap.add_argument("--markdown", help="write markdown report")
+    return ap.parse_args(argv)
+
+
+def main(argv=None) -> int:
+    args = parse_args(argv or sys.argv[1:])
+    cases = args.case if args.case else DEFAULT_CASES
+    report = build_report(cases, args.min_ratio)
+    if args.out:
+        out = repo_path(args.out)
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    if args.markdown:
+        md = repo_path(args.markdown)
+        md.parent.mkdir(parents=True, exist_ok=True)
+        md.write_text(render_markdown(report), encoding="utf-8")
+    print(render_markdown(report), end="")
+    return 0 if report["passed"] else 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

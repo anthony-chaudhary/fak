@@ -1,0 +1,211 @@
+{
+  "schema": "fleet-control-pane.loop-catalog/1",
+  "_doc": "Tracked loop catalog for tools/fleet_control_pane.py. Add durable loop specs here with `python tools/fleet_control_pane.py loop-add NAME --scope repo --status-cmd ... --apply`; machine-local config can override any loop.",
+  "loops": {
+    "dos-supervisor-status": {
+      "enabled": true,
+      "status_cmd": [
+        "{python}",
+        "tools/dos_supervisor_status.py",
+        "--json"
+      ],
+      "auto_recover": false,
+      "timeout_s": 45,
+      "action": "When READY_TO_CANARY, run the bounded operator-approved canary named by payload.next_action; the target is derived from the current live count."
+    },
+    "dos-supervisor-watchdog": {
+      "enabled": true,
+      "status_cmd": [
+        "{python}",
+        "tools/dos_supervisor_watchdog.py",
+        "--json"
+      ],
+      "auto_recover": false,
+      "timeout_s": 60,
+      "action": "Dry-run only: reports the bounded dos loop --enact command and live safety preflight; add --live only after operator approval."
+    },
+    "dos-supervisor-canary-audit": {
+      "enabled": true,
+      "status_cmd": [
+        "{python}",
+        "tools/dos_supervisor_canary_audit.py",
+        "--json"
+      ],
+      "auto_recover": false,
+      "timeout_s": 60,
+      "action": "Read-only productivity fold: reports pre-canary gate, live-worker observation, landed work, honest drain, or typed blockers."
+    },
+    "issue-closure-audit": {
+      "enabled": true,
+      "status_cmd": [
+        "{python}",
+        "tools/issue_closure_audit.py",
+        "--json"
+      ],
+      "auto_recover": false,
+      "timeout_s": 180,
+      "action": "Read-only closure-honesty fold: grades every closed issue through dos commit-audit and reports closure_rate (TRUE_RESOLVED vs CLAIMED_CLOSED). ACTION when an issue is closed with no DOS-witnessed resolving commit, or shipped-but-still-open (OPEN_WITNESSED). This is how the supervisor proves open tickets get TRULY resolved, not just closed."
+    },
+    "memory-recall-audit": {
+      "enabled": true,
+      "status_cmd": [
+        "{python}",
+        "tools/memory_recall_audit.py",
+        "--json"
+      ],
+      "auto_recover": false,
+      "timeout_s": 120,
+      "action": "Read-only memory-freshness fold: re-verifies every committed .claude/memory fact through `dos memory verify` and reports memory_freshness_rate (FRESH vs STALE; UNVERIFIABLE prose notes are expected, not failures). ACTION when a memory is RECALL_STALE \u2014 its named SHA/path/token no longer holds against git/the working tree \u2014 so refresh, retire, or correct it (then re-mirror with tools/sync_memory.py) and NEVER surface it as current fact. This is the checking layer for the memory mirror's acceleration layer (.claude/rsi-loop-dod.md)."
+    },
+    "readme-freshness": {
+      "enabled": true,
+      "status_cmd": [
+        "{python}",
+        "tools/readme_freshness_audit.py",
+        "--json"
+      ],
+      "auto_recover": false,
+      "timeout_s": 60,
+      "action": "Read-only front-door fold: re-checks README.md against the filesystem, the VERSION file, and fak/BENCHMARK-AUTHORITY.md, enforcing the three front-page laws (SOTA-vs-us-never-naive, 6th-grade/Feynman-but-accurate, numbers-trace-to-one-source). ok:false (ACTION) ONLY on a required fix (FAIL): a dead local link, a version pin behind VERSION, or a bolded headline that LEADS with a naive baseline. WARN (untraced headline number, stamp absent/older-than-14d) and ADVISORY (un-glossed first-screen jargon) stay green \u2014 they are judgment calls for the next pass, not breakage. ACTION here means invoke /refresh-readme: fix each FAIL, re-stamp the readme-verified marker, commit ONLY README.md by explicit path. This is the README's checking layer, the way memory-recall-audit is the memory mirror's; runbook .claude/skills/refresh-readme/SKILL.md."
+    },
+    "docs-scorecard": {
+      "enabled": true,
+      "status_cmd": [
+        "{python}",
+        "tools/docs_scorecard.py",
+        "--scope",
+        "reachable",
+        "--json"
+      ],
+      "auto_recover": false,
+      "timeout_s": 120,
+      "action": "Read-only whole-corpus docs fold: grades every reader-reachable doc (link-BFS from the front doors README/INDEX/docs-index) on five KPIs (freshness, links, structure, readability, evidence) and counts doc-debt -- the concrete, re-derivable defects a cold reader hits (dead local link, stale install pin behind VERSION, unresolved placeholder, missing H1 title, strawman-led 'naive' headline, orphaned doc, uncovered expected topic). ok:false (ACTION) ONLY on a HARD defect (corpus.doc_debt > 0); soft signals (un-glossed jargon, a bolded number not yet mirrored in BENCHMARK-AUTHORITY) lower a doc's score but stay green -- judgment calls, not breakage. ACTION here means invoke /garden-docs: retire each defect worst-first (corpus.worst + coverage.defects), regenerate docs/DOCS-SCORECARD.md, commit the docs lane by explicit path with a docs(scope): subject. This is the whole-corpus analogue of readme-freshness (which checks only the front page); the 26 curated must-be-perfect surfaces are the --scope core subset CI hard-gates at doc-debt 0. Runbook .claude/skills/garden-docs/SKILL.md."
+    },
+    "issue-lane-router": {
+      "enabled": true,
+      "status_cmd": [
+        "{python}",
+        "tools/issue_lane_router.py",
+        "--json"
+      ],
+      "auto_recover": false,
+      "timeout_s": 120,
+      "action": "Read-only routing fold: maps every OPEN issue to the dos.toml lane whose file-tree it touches (path-confirmed > exact-scope > alias > label). The dos-dispatch worker folds lanes[<its lane>].issues into its dispositions sidecar so the supervisor TARGETS the ticket backlog, not just plan lanes. Surfaces the UNROUTED bucket for operator triage; ACTION when the UNROUTED fraction exceeds --max-unrouted-frac."
+    },
+    "dos-supervisor-canary": {
+      "enabled": true,
+      "status_cmd": [
+        "{python}",
+        "tools/dos_supervisor_canary.py",
+        "--json"
+      ],
+      "auto_recover": false,
+      "timeout_s": 90,
+      "action": "Dry-run only: one-command canary preflight plus audit; add --live only after operator approval."
+    },
+    "dos-supervisor-canary-history": {
+      "enabled": true,
+      "status_cmd": [
+        "{python}",
+        "tools/dos_supervisor_canary.py",
+        "--history",
+        "--json"
+      ],
+      "auto_recover": false,
+      "timeout_s": 30,
+      "action": "Read-only canary ledger summary: reports missing history, latest blocker, or recurring blocker rows from tools/_registry."
+    },
+    "release-status": {
+      "enabled": true,
+      "status_cmd": [
+        "{python}",
+        "tools/release_status.py",
+        "--json",
+        "--require-ci-green",
+        "--skip-gh",
+        "--skip-cut-plan",
+        "--limit-commits",
+        "20"
+      ],
+      "auto_recover": false,
+      "timeout_s": 90
+    },
+    "gardening-loops-audit": {
+      "enabled": true,
+      "status_cmd": [
+        "{python}",
+        "tools/fleet_control_pane.py",
+        "loop-audit",
+        "--json"
+      ],
+      "auto_recover": false,
+      "timeout_s": 180,
+      "action": "Read-only aggregate self-audit: runs every other enabled gardening loop once and buckets each healthy/action/broken. ok:false (so the pane shows ACTION) ONLY when some loop is BROKEN (its status command could not run, state UNAVAILABLE/TIMEOUT) -- a loop correctly surfacing a condition (action bucket) is a PASS. ACTION here means a gardening loop itself has broken and needs repair; see docs/repo-gardening-loops.md. This loop skips itself when enumerating, so it never recurses."
+    },
+    "visual-gen-grade": {
+      "enabled": true,
+      "status_cmd": [
+        "{python}",
+        "tools/visual_gen_bench.py",
+        "--no-db",
+        "--json"
+      ],
+      "auto_recover": false,
+      "action": "Read-only visual-generation quality fold: grades the explanatory-diagram deck (fleet-bite-test/visuals .mmd->SVG) through tools/visual_gen_grade.py and reports mean_score vs the durable benchmark-DB baseline. ACTION (ok:false) when a figure is below the render-quality floor (all-foreignObject whitespace bug / width=100%-no-height -- see RENDERING-NOTE.md) OR the deck score regressed vs the last DB run. The shipgate keep-bit is computed and recorded as DB evidence (the bench writes a catalog run when invoked without --no-db); the loop tick is --no-db read-only and NEVER auto-reverts a figure -- it surfaces ACTION for a worker/operator to re-render or fix the source. This is the benchmark->RSI feedback for visual generation; runbook docs/visual-gen-rsi-loop.md.",
+      "timeout_s": 120
+    },
+    "public-leak-scan": {
+      "enabled": true,
+      "status_cmd": [
+        "{python}",
+        "tools/scrub_public_copy.py",
+        "--audit-tree",
+        "--root",
+        ".",
+        "--json"
+      ],
+      "auto_recover": false,
+      "timeout_s": 90,
+      "action": "Read-only public-cleanliness fold for the HARD-CUT model (PLAN-hard-cut-private-public-2026-06-20.md): scans every git-tracked text file in THIS public repo for redact-needles -- secret SHAPES (live Slack token) always, plus the REAL operator needles once pulled into the gitignored sidecar via tools/pull_scan_needles.py. ok:false (ACTION) when a needle is present in a shippable file -- a leak to scrub before it reaches the public remote. payload.mode is `full` (private needles pulled) or `shape-only` (degraded: run tools/pull_scan_needles.py for full coverage on a box that has the private repo). This is the standing backstop now that the public copy is edited DIRECTLY, not regenerated from private; the pre-commit leak gate (tools/githooks/pre-commit) is the commit-time half. Runbook: docs/repo-gardening-loops.md + PUBLIC-SCRUB-POLICY.md."
+    },
+    "scan-needles": {
+      "enabled": true,
+      "status_cmd": [
+        "{python}",
+        "tools/pull_scan_needles.py",
+        "--check",
+        "--json"
+      ],
+      "recover_cmd": [
+        "{python}",
+        "tools/pull_scan_needles.py"
+      ],
+      "auto_recover": true,
+      "timeout_s": 60,
+      "action": "Self-healing durability for the hard-cut leak scan: keeps the public-leak-scan in FULL mode automatically. status (pull_scan_needles --check) reports whether the REAL private needles are pulled into the gitignored sidecar. OK when pulled OR when no private repo is reachable on this box (shape-only is the best available -- no nag). ACTION only when a private repo IS reachable but the needles are not pulled yet; auto_recover then runs pull_scan_needles to pull them, so the next public-leak-scan tick scans in full mode. Pairs with public-leak-scan; the canonical needle source is the private repo's scrub_needles.json (or its scrub_public_copy.py). See PLAN-hard-cut-private-public-2026-06-20.md."
+    },
+    "proc-resource-guard": {
+      "enabled": true,
+      "status_cmd": [
+        "{python}",
+        "tools/proc_resource_guard.py",
+        "--reap-orphans",
+        "--json"
+      ],
+      "auto_recover": false,
+      "timeout_s": 90,
+      "action": "Read-only host-resource fold: scans every live process and flags any whose OS thread / handle / working-set count has gone pathological (default thread ceiling 2000, far above the busiest legit process yet far below the witnessed 129k-thread llama-cli runaway that pinned the host), AND any orphaned ephemeral helper -- a `dos_mcp.server` still resident after the claude/opencode session that spawned it exited, serving no one (the quiet sprawl that makes a long-uptime host feel slow while every gauge reads idle). ok:false (ACTION) when a non-protected runaway OR orphan is live -- inspect it, fix the launcher that spawned it (an inference binary spawned with NO -t/--threads bound is the runaway root-cause class), then reap with `python tools/proc_resource_guard.py --reap-orphans --enact` (DESTRUCTIVE, opt-in; never kills an OS-critical process or the guard's own tree). The fleet watchdogs keep the supervisor and sessions ALIVE; nothing else watches a live process whose resource has run away or an orphan that outlived its session. Runbook docs/perf-runaway-guard.md."
+    },
+    "gofmt-debt-audit": {
+      "enabled": true,
+      "status_cmd": [
+        "{python}",
+        "tools/gofmt_debt_audit.py",
+        "--json"
+      ],
+      "auto_recover": false,
+      "action": "Read-only gofmt format-debt fold for the blocking gofmt CI gate (#38): formats every committed fak/**/*.go BLOB (git show HEAD:f | gofmt \u2014 the CI-equivalent LF check, immune to the local autocrlf/CRLF artifact that makes working-tree gofmt -l unreliable) and counts those not gofmt-clean. ok:false (ACTION) when >=1 committed .go file would FAIL the gofmt gate, i.e. the trunk is one push from a red CI build. ACTION means invoke /gofmt-sweep: format each listed file via the blob method, build, then commit lane-by-lane by explicit path with a (fak <lane>) trailer \u2014 never `gofmt -w .` (rewrites active WIP) and never `git add -A`. This is the format layer checking loop, the way readme-freshness is the front door; the commit-time half is the CI gofmt step. Runbook: .claude/skills/gofmt-sweep/SKILL.md.",
+      "timeout_s": 120
+    }
+  }
+}

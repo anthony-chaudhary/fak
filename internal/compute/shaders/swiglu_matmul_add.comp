@@ -1,0 +1,42 @@
+#version 450
+// swiglu_matmul_add.comp — D[t,out] += silu(G[t,in]) * U[t,in] @ W[out,in]^T.
+//
+// This fuses the HAL MLP tail (SwiGLU -> down projection -> residual add). It avoids the
+// intermediate activation tensor and one dispatch while preserving the same f32 math order
+// inside each output dot product as matmul.comp/matmul_add.comp.
+layout(local_size_x = 256) in;
+
+layout(std430, binding = 0) readonly buffer Wbuf { float W[]; };
+layout(std430, binding = 1) readonly buffer Gbuf { float G[]; };
+layout(std430, binding = 2) readonly buffer Ubuf { float U[]; };
+layout(std430, binding = 3) buffer Dbuf { float D[]; };
+
+layout(push_constant) uniform Push { int outDim; int inDim; int P; } pc;
+
+const uint SHARED_CAP = 1024u;
+shared float Xs[SHARED_CAP];
+
+void main() {
+    uint t = gl_WorkGroupID.x;
+    if (t >= uint(pc.P)) return;
+    uint tid = gl_LocalInvocationID.x;
+    uint in_ = uint(pc.inDim);
+    uint out_ = uint(pc.outDim);
+    uint xbase = t * in_;
+
+    for (uint c0 = 0u; c0 < in_; c0 += SHARED_CAP) {
+        uint clen = min(SHARED_CAP, in_ - c0);
+        for (uint i = tid; i < clen; i += 256u) {
+            float g = G[xbase + c0 + i];
+            Xs[i] = (g / (1.0 + exp(-g))) * U[xbase + c0 + i];
+        }
+        barrier();
+        for (uint o = tid; o < out_; o += 256u) {
+            uint wbase = o * in_ + c0;
+            float acc = 0.0;
+            for (uint i = 0u; i < clen; ++i) acc += W[wbase + i] * Xs[i];
+            D[t * out_ + o] += acc;
+        }
+        barrier();
+    }
+}

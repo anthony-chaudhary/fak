@@ -1,0 +1,40 @@
+%%{init: {'theme':'base','themeVariables':{'fontFamily':'Segoe UI, Helvetica, Arial, sans-serif','fontSize':'14px','lineColor':'#5B6B7B','primaryColor':'#DCE9FB','primaryTextColor':'#1B3A66','primaryBorderColor':'#3B6FB5','clusterBkg':'#F7F9FB','clusterBorder':'#AFC0CE'}}}%%
+flowchart TD
+  title["THE SCALING LAW — and WHY it saturates<br/>(the 'sticker collector' rule)"]
+
+  pool[("There are only 8 popular routes<br/>everyone tends to ask about.<br/>(think: 8 stickers to collect)")]
+
+  first["The FIRST worker is the one who<br/>fills the whiteboard in: it pays to look<br/>up each of the 8 routes once."]
+
+  rest["Every worker AFTER the first<br/>finds all 8 already on the board.<br/>=> each extra worker saves ~8 trips."]
+
+  lawA["So along the AGENTS dial:<br/>savings grow in a STRAIGHT LINE.<br/>uplift is about 8 x (number of extra workers)"]
+
+  lawT["Along the TURNS dial it FLATTENS OUT:<br/>once the board has all 8 routes,<br/>talking longer finds nothing new to cache.<br/>(you already collected every sticker)"]
+
+  formula["The whole surface in one line:<br/>uplift = (agents - 1) x pool x (1 - (1 - 1/pool) ^ (shared-reads))<br/>'every extra worker gets every route the first one already collected'"]
+
+  match["This formula was DERIVED first,<br/>then matched the kernel's real numbers<br/>with ZERO knobs to tune. The data agrees."]
+
+  pool --> first
+  first --> rest
+  rest --> lawA
+  rest --> lawT
+  lawA --> formula
+  lawT --> formula
+  formula --> match
+
+  class pool mem
+  class first cheap
+  class rest pass
+  class lawA kernel
+  class lawT world
+  class formula gate
+  class match pass
+
+  classDef kernel fill:#DCE9FB,stroke:#3B6FB5,stroke-width:2px,color:#1B3A66;
+  classDef gate fill:#FFF3CC,stroke:#C9A227,stroke-width:2px,color:#6B5410;
+  classDef pass fill:#DBF3E1,stroke:#3FA45F,stroke-width:2px,color:#1C5230;
+  classDef mem fill:#EDE7FB,stroke:#7B5BC0,stroke-width:2px,color:#3A2A66;
+  classDef world fill:#FCEEDB,stroke:#B5792B,stroke-width:2px,color:#5E3D12;
+  classDef cheap fill:#E8ECEF,stroke:#7A8A99,stroke-width:1.5px,color:#33424F;

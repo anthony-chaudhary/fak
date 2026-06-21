@@ -1,0 +1,111 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="1060" viewBox="0 0 1600 1060" role="img" aria-labelledby="title desc">
+  <title id="title">fak hero benchmark — agent-fleet serving efficiency vs the SOTA serving floor</title>
+  <desc id="desc">On a realistic 50-turn × 5-agent run (Apple M3 Pro, Qwen2.5-1.5B Q8), fak serves the fleet in 19.0 minutes. A per-agent warm-KV cache — the same reuse discipline SGLang, vLLM, and OpenAI prompt caching ship — needs ≈78 minutes on the identical forward pass: fak does 4.1× less serving work. That baseline is fak's own kernel run in warm-KV mode (both arms live, kernel held constant), so the 4.1× isolates cross-agent reuse, not kernel speed — see What the 4.1× is measured against below. Every comparison here is against that tuned SOTA floor.</desc>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#f7faf9"/>
+      <stop offset="50%" stop-color="#eef5f6"/>
+      <stop offset="100%" stop-color="#faf4ee"/>
+    </linearGradient>
+    <filter id="shadow" x="-10%" y="-10%" width="120%" height="130%">
+      <feDropShadow dx="0" dy="8" stdDeviation="10" flood-color="#14202b" flood-opacity="0.13"/>
+    </filter>
+    <style>
+      .title { font: 900 46px "Segoe UI", Arial, sans-serif; fill: #14202b; }
+      .subtitle { font: 400 21px "Segoe UI", Arial, sans-serif; fill: #405063; }
+      .kicker { font: 800 17px "Segoe UI", Arial, sans-serif; fill: #2e8b57; letter-spacing: 2px; }
+      .cardTitle { font: 800 22px "Segoe UI", Arial, sans-serif; fill: #1b2733; }
+      .hero { font: 900 122px "Segoe UI", Arial, sans-serif; fill: #2e8b57; }
+      .heroUnit { font: 700 24px "Segoe UI", Arial, sans-serif; fill: #5b6a7a; }
+      .heroDelta { font: 900 36px "Segoe UI", Arial, sans-serif; fill: #2e8b57; }
+      .heroCtx { font: 600 19px "Segoe UI", Arial, sans-serif; fill: #314153; }
+      .big { font: 900 40px "Segoe UI", Arial, sans-serif; fill: #17202a; }
+      .cardT { fill: #ffffff; stroke: #e3e9ee; stroke-width: 1; }
+      .tagD { font: 800 13px "Segoe UI", Arial, sans-serif; letter-spacing: 1px; }
+      .label { font: 700 17px "Segoe UI", Arial, sans-serif; fill: #314153; }
+      .barLabel { font: 800 20px "Segoe UI", Arial, sans-serif; fill: #ffffff; }
+      .barVal { font: 900 22px "Segoe UI", Arial, sans-serif; fill: #17202a; }
+      .body { font: 400 16px "Segoe UI", Arial, sans-serif; fill: #415266; }
+      .small { font: 400 14px "Segoe UI", Arial, sans-serif; fill: #5b6a7a; }
+      .axis { font: 700 14px "Segoe UI", Arial, sans-serif; fill: #8090a0; }
+      .tag { font: 800 13px "Segoe UI", Arial, sans-serif; fill: #ffffff; letter-spacing: 1px; }
+      .card { fill: #ffffff; stroke: #d9e1e8; stroke-width: 1.5; }
+      .highlight { fill: #edf7f0; stroke: #85bc98; stroke-width: 2; }
+      .warn { fill: #fff5e8; stroke: #dfbd78; }
+    </style>
+  </defs>
+
+  <rect width="1600" height="1060" fill="url(#bg)"/>
+  <rect x="38" y="28" width="1524" height="1004" rx="10" fill="#ffffff" opacity="0.62"/>
+
+  <text x="72" y="86" class="kicker">HERO BENCHMARK · AGENT-FLEET SERVING EFFICIENCY</text>
+  <text x="72" y="138" class="title">fak does the fleet's shared work once — not every turn</text>
+  <text x="72" y="174" class="subtitle">Same 50-turn × 5-agent run · Apple M3 Pro · Qwen2.5-1.5B Q8 · measured against the tuned SOTA prefix cache</text>
+
+  <g filter="url(#shadow)">
+    <rect x="72" y="214" width="430" height="360" rx="10" class="highlight"/>
+    <text x="100" y="258" class="label">fak — 50-turn × 5-agent fleet serving time</text>
+    <text x="92" y="368" class="hero">19.0</text>
+    <text x="100" y="404" class="heroUnit">minutes  (lower is better)</text>
+    <line x1="100" y1="430" x2="474" y2="430" stroke="#cfe3d6" stroke-width="2"/>
+    <text x="100" y="476" class="heroDelta">4.1× less work</text>
+    <text x="100" y="510" class="heroCtx">vs 78 min · Warm-KV cache</text>
+    <text x="100" y="540" class="small">SGLang / vLLM-style · same kernel, warm-KV vs fused.</text>
+  </g>
+
+  <g>
+    <rect x="540" y="214" width="988" height="360" rx="10" class="card"/>
+    <text x="568" y="258" class="cardTitle">Time to serve the 50×5 fleet — fak vs tuned SOTA cache  (lower is better)</text>
+    <line x1="588" y1="540" x2="1500" y2="540" stroke="#c4cfd8" stroke-width="2"/>
+    <text x="588" y="562" class="axis" text-anchor="start">0</text>
+    <text x="816" y="562" class="axis" text-anchor="middle">20 min</text>
+    <text x="1044" y="562" class="axis" text-anchor="middle">40 min</text>
+    <text x="1272" y="562" class="axis" text-anchor="middle">60 min</text>
+    <text x="1500" y="562" class="axis" text-anchor="end">80 min</text>
+    <rect x="588" y="298" width="889" height="44" rx="6" fill="#1c7c92"/>
+    <text x="606" y="326" class="barLabel">Tuned SOTA prefix cache (per-agent warm KV)</text>
+    <text x="1467" y="326" class="barVal" text-anchor="end" style="fill:#ffffff;">78 min</text>
+    <rect x="588" y="368" width="217" height="44" rx="6" fill="#2e8b57"/>
+    <rect x="588" y="368" width="217" height="44" rx="6" fill="none" stroke="#1f6e43" stroke-width="2"/>
+    <text x="606" y="396" class="barLabel">fak fused</text>
+    <text x="817" y="396" class="barVal">19.0 min  ·  4.1× less work</text>
+    <text x="568" y="528" class="small">Both arms run fully live on the identical Q8 forward pass, bit-identical tokens — baseline = the tuned warm per-agent KV cache (the SGLang / vLLM floor).</text>
+  </g>
+
+  <text x="72" y="636" class="cardTitle">The top-3 SOTA serving systems fak is measured against — and where fak sits</text>
+  <text x="72" y="664" class="body">All three give you the per-agent warm cache (the 78-min floor above). fak adds the one reuse a per-agent cache structurally can't take: cross-agent prefix fusion.</text>
+
+  <g>
+    <rect x="72" y="690" width="466" height="240" rx="8" class="cardT"/>
+    <rect x="72" y="690" width="466" height="6" rx="3" fill="#1c7c92"/>
+    <text x="92" y="726" class="tagD" style="fill:#1c7c92;">SOTA #1 · SGLANG (RADIXATTENTION)</text>
+    <text x="92" y="772" class="label">What it gives</text>
+    <text x="92" y="800" class="body">Per-request radix prefix cache; published</text>
+    <text x="92" y="824" class="body">50–99% hit-rate band.</text>
+    <text x="92" y="868" class="label">fak’s position</text>
+    <text x="92" y="896" class="body" style="fill:#2e8b57;">Parity: 86.7% hit = 100% of optimal —</text>
+    <text x="92" y="918" class="body" style="fill:#2e8b57;">then dedups the prefix across the whole fleet.</text>
+    <rect x="567" y="690" width="466" height="240" rx="8" class="cardT"/>
+    <rect x="567" y="690" width="466" height="6" rx="3" fill="#1c7c92"/>
+    <text x="587" y="726" class="tagD" style="fill:#1c7c92;">SOTA #2 · vLLM (AUTO PREFIX CACHING)</text>
+    <text x="587" y="772" class="label">What it gives</text>
+    <text x="587" y="800" class="body">Automatic per-agent prefix reuse from the</text>
+    <text x="587" y="824" class="body">front; the same warm 78-min floor.</text>
+    <text x="587" y="868" class="label">fak’s position</text>
+    <text x="587" y="896" class="body" style="fill:#2e8b57;">19.0 min vs 78 min (4.1× less) by fusing</text>
+    <text x="587" y="918" class="body" style="fill:#2e8b57;">one shared prefix across 5 agents, not 5 copies.</text>
+    <rect x="1062" y="690" width="466" height="240" rx="8" class="cardT"/>
+    <rect x="1062" y="690" width="466" height="6" rx="3" fill="#6a7685"/>
+    <text x="1082" y="726" class="tagD" style="fill:#6a7685;">SOTA #3 · LLAMA.CPP (RAW THROUGHPUT)</text>
+    <text x="1082" y="772" class="label">What it gives</text>
+    <text x="1082" y="800" class="body">Fastest single-stream decode on this box:</text>
+    <text x="1082" y="824" class="body">17.3 tok/s on 7B Q8 (Metal).</text>
+    <text x="1082" y="868" class="label">fak’s position</text>
+    <text x="1082" y="896" class="body" style="fill:#b06a2a;">fak 8.7 tok/s (0.50×) today — gap closing</text>
+    <text x="1082" y="918" class="body" style="fill:#b06a2a;">(#578). fak wins the fleet, not the stream.</text>
+  </g>
+
+  <rect x="72" y="952" width="1456" height="62" rx="8" class="warn"/>
+  <text x="92" y="982" class="label">Two regimes, one honest answer.</text>
+  <text x="92" y="1006" class="small">fak is not a faster model server — on a single stream it currently trails llama.cpp (closing) and tops out at 7B on this 36 GB box. The win is the agent fleet: cross-agent prefix sharing. Every number traces to fak/BENCHMARK-AUTHORITY.md (commit 2bbda6f, headline-qwen-50x5.json).</text>
+</svg>

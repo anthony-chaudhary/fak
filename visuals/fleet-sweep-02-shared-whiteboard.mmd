@@ -1,0 +1,35 @@
+%%{init: {'theme':'base','themeVariables':{'fontFamily':'Segoe UI, Helvetica, Arial, sans-serif','fontSize':'14px','lineColor':'#5B6B7B','primaryColor':'#DCE9FB','primaryTextColor':'#1B3A66','primaryBorderColor':'#3B6FB5','clusterBkg':'#F7F9FB','clusterBorder':'#AFC0CE'}}}%%
+flowchart TD
+  title["THE BIG IDEA — a shared whiteboard of answers<br/>(why having MORE workers can save work)"]
+
+  a1(["Worker 1 asks:<br/>'flights SFO to JFK?'"])
+  tool["The tool (slow):<br/>actually goes and looks it up.<br/>Costs a real round-trip."]
+  wb[("SHARED WHITEBOARD<br/>(the kernel's result cache)<br/>'SFO to JFK = UA123, DL456'<br/>written down for everyone")]
+
+  a2(["Worker 2 later asks<br/>the SAME thing:<br/>'flights SFO to JFK?'"])
+  a3(["Worker 3 later asks<br/>the SAME thing too"])
+
+  hit["Kernel: 'Already on the whiteboard!'<br/>Hands back the answer instantly.<br/>NO slow tool trip. A round-trip DELETED."]
+
+  save["Every worker after the FIRST one<br/>gets that answer for free.<br/>=> more workers reading the same things<br/>=> more saved trips"]
+
+  a1 --> tool
+  tool -->|"writes the answer down"| wb
+  a2 -. "reads it free" .-> wb
+  a3 -. "reads it free" .-> wb
+  wb --> hit
+  hit --> save
+
+  class a1 untrusted
+  class a2 untrusted
+  class a3 untrusted
+  class tool cheap
+  class wb mem
+  class hit pass
+  class save kernel
+
+  classDef untrusted fill:#FFE9D6,stroke:#E8833A,stroke-width:2px,color:#7A3E12;
+  classDef kernel fill:#DCE9FB,stroke:#3B6FB5,stroke-width:2px,color:#1B3A66;
+  classDef pass fill:#DBF3E1,stroke:#3FA45F,stroke-width:2px,color:#1C5230;
+  classDef mem fill:#EDE7FB,stroke:#7B5BC0,stroke-width:2px,color:#3A2A66;
+  classDef cheap fill:#E8ECEF,stroke:#7A8A99,stroke-width:1.5px,color:#33424F;

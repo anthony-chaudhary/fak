@@ -1,0 +1,30 @@
+{
+  "_doc": "Account policy for the fleet resume/switcher layer (tools/fleet_accounts.py), applying uniformly to BOTH product families -- Claude (config dirs under the user home, e.g. ~/.claude*) and opencode (config dirs under XDG config home, e.g. ~/.config/opencode*). Copy this to tools/_registry/accounts_policy.json and edit; the live file under _registry/ is gitignored so each host keeps its own roster. 'exclude' substrings are matched against the bare account tag (e.g. 'backup', 'worker-a') and the dir basename; a match tombstones that account so it is never offered as a resume target. 'include_only' (when non-empty) is an allowlist: only listed tags are workers. 'account_profiles' can override model_tier/model/effort by account basename, product:tag, tag, or product. With NO live file present, fleet_accounts.py falls back first to this example, then to its built-in defaults (which already exclude backup/breakglass accounts and infer Claude as tier 1 Opus/xhigh, GLM-5.2 opencode as tier 2, unknowns as tier 3).",
+  "exclude": ["backup", "breakglass"],
+  "include_only": [],
+  "notes": {
+    "backup": "break-glass backup account; never auto-resume"
+  },
+  "account_profiles": {},
+  "_account_profiles_example": {
+    "claude": {
+      "model_tier": 1,
+      "model": "opus",
+      "effort": "xhigh"
+    },
+    "opencode:zai2": {
+      "model_tier": 2,
+      "model": "zai-coding-plan/glm-5.2"
+    }
+  },
+  "route_weights": {},
+  "_route_weights_example": {
+    "gem7": 10,
+    "gem8": -10
+  },
+  "_route_weights_doc": "route_weights maps an account (basename, product:tag, tag, or product) to an int capacity bias (default 0) for the switcher's tie-break: HIGHER = more room -> preferred EARLIER. The fleet has NO remaining-quota telemetry (an account probe only returns OK/AUTH/LIMIT, never headroom), so the router cannot itself tell which available account has the most quota left -- it otherwise balances purely on live/active SESSION counts. Use route_weights to encode out-of-band knowledge: lift an account you know has room (gem7:+10 above) and/or push a near-capped one down (gem8:-10). This is a SEPARATE map from account_profiles on purpose -- a bare account_profiles entry would clobber the account's inferred model-tier and silently drop it out of routing. With all weights 0 the historical session-count balancing is unchanged.",
+  "routing": {
+    "light_confidence": 0.999,
+    "hard_tier1_fallback": "stop"
+  }
+}

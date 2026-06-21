@@ -1,0 +1,33 @@
+{
+  "_provenance": "operator-authored adversarial fixture (unit 11) for the pre-flight + grammar rungs. NOT worker-authored.",
+  "_purpose": "calls a rung must catch BEFORE they fire: unparseable args, schema-type mismatch, and the live --name-as-positional bug (repairable + unrepairable).",
+  "calls": [
+    {
+      "name": "rung0_unparseable",
+      "tool": "create_user",
+      "raw_args": "{name: alice, ",
+      "expect": "DENY:MALFORMED@rung0"
+    },
+    {
+      "name": "rung1_type_mismatch",
+      "tool": "search_flights",
+      "args": {"origin": 12345},
+      "schema": {"required": {"origin": "string"}},
+      "expect": "DENY:MALFORMED@rung1"
+    },
+    {
+      "name": "grammar_positional_repairable",
+      "tool": "create_user",
+      "args": {"_positional": ["alice"]},
+      "grammar_schema": {"properties": {"name": {"type": "string"}}, "required": ["name"]},
+      "expect": "TRANSFORM:MISROUTE (positional -> named auto-repair)"
+    },
+    {
+      "name": "grammar_positional_unrepairable",
+      "tool": "create_user",
+      "args": {"_positional": ["alice", "bob", "carol"]},
+      "grammar_schema": {"properties": {"name": {"type": "string"}}, "required": ["name"]},
+      "expect": "DENY:MISROUTE (arity mismatch)"
+    }
+  ]
+}

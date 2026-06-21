@@ -1,0 +1,54 @@
+{
+  "_comment": [
+    "Public-safe template for OPTIONAL remote benchmark/test endpoints.",
+    "Copy this to tools/fleet_endpoints.local.json or tools/fleet_endpoints.json",
+    "and fill in real tailnet hostnames/IPs on a private machine. Local registry",
+    "files are gitignored; do not commit real tailnet names, personal hostnames,",
+    "LAN IPs, or device-owner details."
+  ],
+  "version": 1,
+  "tailnet": "example-tailnet",
+  "magicdns_suffix": "tailnet.example",
+  "driver": {
+    "name": "benchmark-driver",
+    "tailscale_ip": "198.51.100.10",
+    "role": "benchmark-driver",
+    "note": "Local driver allowed to reach endpoint serve/ssh ports."
+  },
+  "safety": {
+    "bind": "tailnet-only",
+    "serve_recommendation": "Prefer a private tailnet-only serve path. Never bind 0.0.0.0 on a personal machine.",
+    "acl_scope": "Restrict endpoint serve/ssh ports to the benchmark driver.",
+    "auth": "Tailnet identity provides transport auth. The local model shim uses --api-key-env NONE_LOCAL; no real API keys cross the wire.",
+    "optin": "enabled defaults to false. A device owner flips it true only after setup and consent.",
+    "resource_guard": "Cap server threads or run with lower priority so benchmarks do not monopolize a personal machine.",
+    "reversible": "Every step should be undoable: stop the server, turn off the private serve path, remove the ACL rule."
+  },
+  "endpoints": [
+    {
+      "name": "worker-a",
+      "tailnet_host": "worker-a",
+      "magicdns": "worker-a.tailnet.example",
+      "tailscale_ip": "198.51.100.11",
+      "os": "linux",
+      "owner": "local-operator",
+      "enabled": false,
+      "serve_port": 8131,
+      "ssh": {
+        "available": false,
+        "port": 22,
+        "method": "private-tailnet-ssh"
+      },
+      "measured": {
+        "rtt_ms": null,
+        "path": "not measured in public template",
+        "ssh_port_open": false,
+        "as_of": null
+      },
+      "roles": [
+        "http-model-endpoint"
+      ],
+      "notes": "Example endpoint. Replace only in an ignored local registry."
+    }
+  ]
+}

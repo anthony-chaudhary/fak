@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>fak — Hero Benchmark Comparison (v2, SOTA-only)</title>
+<style>
+  body { font-family: "Segoe UI", system-ui, Arial, sans-serif; color: #1b2733; max-width: 760px; margin: 1.5rem auto; padding: 0 1rem; }
+  .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; margin: 1rem 0; }
+  .card { background: #eef5f6; border-radius: 8px; padding: 1rem; }
+  .lbl { font-size: 13px; color: #5b6a7a; }
+  .val { font-size: 26px; font-weight: 800; color: #2e8b57; }
+  .sub { font-size: 12px; color: #8090a0; }
+  .note { font-size: 12px; color: #8090a0; line-height: 1.6; }
+  h1 { font-size: 22px; }
+</style></head>
+<body>
+  <h1>fak — Hero Benchmark Comparison (v2, SOTA-only)</h1>
+  <p class="note">Generated from <code>tools/hero_benchmark.data.json</code>. fak — 50-turn × 5-agent fleet serving time: <b>19.0</b> minutes  (lower is better).</p>
+  <div class="cards">
+    <div class="card"><div class="lbl">fak fleet serving time</div><div class="val">19.0 min</div><div class="sub">50-turn × 5-agent, Q8</div></div>
+    <div class="card"><div class="lbl">tuned SOTA cache floor</div><div class="val">78 min</div><div class="sub">warm per-agent KV (4.1× more)</div></div>
+    <div class="card"><div class="lbl">KV-cache hit rate</div><div class="val">86.7%</div><div class="sub">vs SGLang 50–99% · =100% opt</div></div>
+    <div class="card"><div class="lbl">single-stream decode, 7B</div><div class="val">8.7 tok/s</div><div class="sub">llama.cpp 17.3 — trails, closing</div></div>
+  </div>
+  <div style="position: relative; height: 220px;">
+    <canvas id="hero" role="img" aria-label="Total time to serve the 50 by 5 agent fleet, log scale minutes."></canvas>
+  </div>
+  <p class="note">Log scale (minutes) so all three bars are visible — the gap is the point. Both arms run fully live on the identical Q8 forward pass, bit-identical tokens — baseline = the tuned warm per-agent KV cache (the SGLang / vLLM floor).</p>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
+  <script>
+    new Chart(document.getElementById('hero'), {
+      type: 'bar',
+      data: { labels: ["Tuned SOTA cache  78 min", "fak fused  19.0 min"], datasets: [{ data: [78, 19], backgroundColor: ["#1c7c92", "#2e8b57"], borderRadius: 4, barPercentage: 0.7 }] },
+      options: { indexAxis: 'y', responsive: true, maintainAspectRatio: false,
+        plugins: { legend: { display: false }, tooltip: { callbacks: { label: (c) => c.parsed.x + ' min' } } },
+        scales: { x: { type: 'logarithmic', title: { display: true, text: 'minutes (log scale) — lower is better' },
+          ticks: { callback: (v) => ([10,100,1000].includes(v) ? v : '') } } } }
+    });
+  </script>
+</body></html>

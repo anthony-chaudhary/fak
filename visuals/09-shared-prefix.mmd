@@ -1,0 +1,46 @@
+%%{init: {'theme':'base','themeVariables':{'fontFamily':'Segoe UI, Helvetica, Arial, sans-serif','fontSize':'14px','lineColor':'#5B6B7B','primaryColor':'#DCE9FB','primaryTextColor':'#1B3A66','primaryBorderColor':'#3B6FB5','clusterBkg':'#F7F9FB','clusterBorder':'#AFC0CE'}}}%%
+flowchart TD
+  prefix[("Shared-prefix KV block<br/>(system prompt + tool table + DOS preamble)<br/>computed ONCE, resident, copy-on-write")]
+  a1(["Agent 1"])
+  a2(["Agent 2"])
+  a3(["Agent 3"])
+  s1[("Suffix 1<br/>divergent history")]
+  s2[("Suffix 2<br/>divergent history")]
+  s3[("Suffix 3<br/>divergent history")]
+  page["Page in/out:<br/>moves ONLY the suffix<br/>(prefix stays resident + shared)"]
+  bound{"Boundary steward:<br/>CoW prefix stops EXACTLY<br/>at public/shared edge"}
+  leak["No agent-private tokens<br/>leak into a shared page"]
+  num["HBM saving that<br/>GROWS with fleet size"]
+
+  prefix -. "same bytes, CoW" .-> a1
+  prefix -. "same bytes, CoW" .-> a2
+  prefix -. "same bytes, CoW" .-> a3
+  a1 --> s1
+  a2 --> s2
+  a3 --> s3
+  s1 -. "page moves suffix only" .-> page
+  s2 -. "page moves suffix only" .-> page
+  s3 -. "page moves suffix only" .-> page
+  a1 --> num
+  a2 --> num
+  a3 --> num
+  prefix --> bound
+  bound -->|invariant| leak
+
+  classDef untrusted fill:#FFE9D6,stroke:#E8833A,stroke-width:2px,color:#7A3E12;
+  classDef kernel fill:#DCE9FB,stroke:#3B6FB5,stroke-width:2px,color:#1B3A66;
+  classDef gate fill:#FFF3CC,stroke:#C9A227,stroke-width:2px,color:#6B5410;
+  classDef pass fill:#DBF3E1,stroke:#3FA45F,stroke-width:2px,color:#1C5230;
+  classDef deny fill:#FBDDDD,stroke:#C9453F,stroke-width:2px,color:#6E1F1B;
+  classDef mem fill:#EDE7FB,stroke:#7B5BC0,stroke-width:2px,color:#3A2A66;
+  classDef cheap fill:#E8ECEF,stroke:#7A8A99,stroke-width:1.5px,color:#33424F;
+  classDef world fill:#FCEEDB,stroke:#B5792B,stroke-width:2px,color:#5E3D12;
+  classDef frontier fill:#E7D9F5,stroke:#8A53C0,stroke-width:2px,color:#3F2466;
+  classDef note fill:#F7F9FB,stroke:#AFC0CE,stroke-width:1px,color:#46586A;
+
+  class prefix,s1,s2,s3 mem;
+  class a1,a2,a3 untrusted;
+  class page kernel;
+  class bound gate;
+  class leak pass;
+  class num note;

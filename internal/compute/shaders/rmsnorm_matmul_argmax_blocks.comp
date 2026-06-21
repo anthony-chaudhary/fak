@@ -1,0 +1,77 @@
+#version 450
+// rmsnorm_matmul_argmax_blocks.comp — per-output-block best of W * RMSNorm(x).
+//
+// Used for greedy decode's final head: it fuses model.norm with the first pass of the
+// two-pass lm-head argmax, avoiding a separate RMSNorm dispatch and normalized hidden tensor.
+layout(local_size_x = 256) in;
+
+layout(std430, binding = 0) readonly  buffer Wbuf { float W[]; };
+layout(std430, binding = 1) readonly  buffer Xbuf { float X[]; };
+layout(std430, binding = 2) readonly  buffer Nbuf { float NormW[]; };
+layout(std430, binding = 3) writeonly buffer Vbuf { float BestVal[]; };
+layout(std430, binding = 4) writeonly buffer Ibuf { int BestIdx[]; };
+
+layout(push_constant) uniform Push { int outDim; int inDim; float eps; } pc;
+
+const uint SHARED_CAP = 1024u;
+shared float red[256];
+shared float Xs[SHARED_CAP];
+shared float vbest[256];
+shared int   ibest[256];
+
+void main() {
+    uint tid = gl_LocalInvocationID.x;
+    uint o = gl_WorkGroupID.x * 256u + tid;
+    uint out_ = uint(pc.outDim);
+    uint in_ = uint(pc.inDim);
+    bool valid = o < out_;
+
+    float local = 0.0;
+    for (uint i = tid; i < in_; i += 256u) {
+        float v = X[i];
+        local += v * v;
+    }
+    red[tid] = local;
+    barrier();
+    for (uint s = 128u; s > 0u; s >>= 1) {
+        if (tid < s) red[tid] += red[tid + s];
+        barrier();
+    }
+    float inv = inversesqrt(red[0] / float(pc.inDim) + pc.eps);
+    barrier();
+
+    float acc = 0.0;
+    for (uint c0 = 0u; c0 < in_; c0 += SHARED_CAP) {
+        uint clen = min(SHARED_CAP, in_ - c0);
+        for (uint i = tid; i < clen; i += 256u) {
+            uint ix = c0 + i;
+            Xs[i] = X[ix] * inv * NormW[ix];
+        }
+        barrier();
+        if (valid) {
+            uint wbase = o * in_ + c0;
+            for (uint i = 0u; i < clen; ++i) acc += W[wbase + i] * Xs[i];
+        }
+        barrier();
+    }
+
+    vbest[tid] = valid ? acc : -1e30;
+    ibest[tid] = valid ? int(o) : 0;
+    barrier();
+
+    for (uint s = 128u; s > 0u; s >>= 1) {
+        if (tid < s) {
+            float ov = vbest[tid + s];
+            int oi = ibest[tid + s];
+            if (ov > vbest[tid] || (ov == vbest[tid] && oi < ibest[tid])) {
+                vbest[tid] = ov;
+                ibest[tid] = oi;
+            }
+        }
+        barrier();
+    }
+    if (tid == 0u) {
+        BestVal[gl_WorkGroupID.x] = vbest[0];
+        BestIdx[gl_WorkGroupID.x] = ibest[0];
+    }
+}

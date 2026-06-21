@@ -1,0 +1,43 @@
+%%{init: {'theme':'base','themeVariables':{'fontFamily':'Segoe UI, Helvetica, Arial, sans-serif','fontSize':'14px','lineColor':'#5B6B7B','primaryColor':'#DCE9FB','primaryTextColor':'#1B3A66','primaryBorderColor':'#3B6FB5','clusterBkg':'#F7F9FB','clusterBorder':'#AFC0CE'}}}%%
+flowchart LR
+  subgraph SEP["Separated (today) — 4 processes"]
+    direction TB
+    eng1(["engine"])
+    ser1["serialize args<br/>(50-200us)"]
+    ipc1["localhost socket / IPC<br/>(0.2-1ms)"]
+    spawn1["spawn DOS hook as process<br/>(Go 5.4-13.9ms / Py 232-262ms)"]
+    adj1{"adjudicate"}
+    tool1[["run tool"]]
+    back1["serialize result + socket back<br/>+ engine deserialize"]
+    retok1[("RE-TOKENIZE + re-prefill<br/>on KV miss (50-100ms+)")]
+    eng1 --> ser1 --> ipc1 --> spawn1 --> adj1 --> tool1 --> back1 --> retok1
+  end
+  subgraph FUS["Fused (one binary) — one address space"]
+    direction TB
+    eng2(["engine"])
+    zc2["zero-copy structs +<br/>function call (~0)"]
+    adj2{"in-proc Go adjudicate<br/>38ns-6us (~160us if stat-probes FS)"}
+    tool2[["run tool"]]
+    kv2[("KV resident<br/>0 re-prefill")]
+    eng2 --> zc2 --> adj2 --> tool2 --> kv2
+  end
+  punch["Overhead: ~1-300 ms  to  ~tens of us<br/>(~1000x on overhead)"]
+  SEP -.-> punch
+  FUS -.-> punch
+  classDef untrusted fill:#FFE9D6,stroke:#E8833A,stroke-width:2px,color:#7A3E12;
+  classDef kernel fill:#DCE9FB,stroke:#3B6FB5,stroke-width:2px,color:#1B3A66;
+  classDef gate fill:#FFF3CC,stroke:#C9A227,stroke-width:2px,color:#6B5410;
+  classDef pass fill:#DBF3E1,stroke:#3FA45F,stroke-width:2px,color:#1C5230;
+  classDef deny fill:#FBDDDD,stroke:#C9453F,stroke-width:2px,color:#6E1F1B;
+  classDef mem fill:#EDE7FB,stroke:#7B5BC0,stroke-width:2px,color:#3A2A66;
+  classDef cheap fill:#E8ECEF,stroke:#7A8A99,stroke-width:1.5px,color:#33424F;
+  classDef world fill:#FCEEDB,stroke:#B5792B,stroke-width:2px,color:#5E3D12;
+  classDef frontier fill:#E7D9F5,stroke:#8A53C0,stroke-width:2px,color:#3F2466;
+  classDef note fill:#F7F9FB,stroke:#AFC0CE,stroke-width:1px,color:#46586A;
+  class eng1,eng2 untrusted;
+  class ser1,ipc1,spawn1,back1 cheap;
+  class adj1,adj2 gate;
+  class tool1,tool2 world;
+  class retok1,kv2 mem;
+  class zc2 kernel;
+  class punch note;

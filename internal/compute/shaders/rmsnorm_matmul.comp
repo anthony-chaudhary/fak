@@ -1,0 +1,56 @@
+#version 450
+// rmsnorm_matmul.comp - RMSNorm(X) followed by one projection in one dispatch.
+// Used for the final full-logit lm_head path; greedy uses rmsnorm_matmul_argmax.
+layout(local_size_x = 256) in;
+
+layout(std430, binding = 0) readonly buffer Wbuf { float W[]; };
+layout(std430, binding = 1) readonly buffer Xbuf { float X[]; };
+layout(std430, binding = 2) readonly buffer Nbuf { float NormW[]; };
+layout(std430, binding = 3) buffer Ybuf { float Y[]; };
+
+layout(push_constant) uniform Push { int outDim; int inDim; int P; float eps; } pc;
+
+const uint SHARED_CAP = 1024u;
+shared float red[256];
+shared float Xs[SHARED_CAP];
+
+void main() {
+    uint t = gl_WorkGroupID.x;
+    if (t >= uint(pc.P)) return;
+    uint tid = gl_LocalInvocationID.x;
+    uint out_ = uint(pc.outDim);
+    uint in_ = uint(pc.inDim);
+    uint xbase = t * in_;
+    uint ybase = t * out_;
+
+    float local = 0.0;
+    for (uint i = tid; i < in_; i += 256u) {
+        float v = X[xbase + i];
+        local += v * v;
+    }
+    red[tid] = local;
+    barrier();
+    for (uint s = 128u; s > 0u; s >>= 1) {
+        if (tid < s) red[tid] += red[tid + s];
+        barrier();
+    }
+    float inv = inversesqrt(red[0] / float(pc.inDim) + pc.eps);
+    barrier();
+
+    for (uint o = tid; o < out_; o += 256u) Y[ybase + o] = 0.0;
+
+    for (uint c0 = 0u; c0 < in_; c0 += SHARED_CAP) {
+        uint clen = min(SHARED_CAP, in_ - c0);
+        for (uint i = tid; i < clen; i += 256u) {
+            uint ix = c0 + i;
+            Xs[i] = X[xbase + ix] * inv * NormW[ix];
+        }
+        barrier();
+        for (uint o = tid; o < out_; o += 256u) {
+            float acc = 0.0;
+            for (uint i = 0u; i < clen; ++i) acc += W[o * in_ + c0 + i] * Xs[i];
+            Y[ybase + o] += acc;
+        }
+        barrier();
+    }
+}

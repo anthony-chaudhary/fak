@@ -1,0 +1,36 @@
+global:
+  scrape_interval: 30s
+  evaluation_interval: 30s
+
+rule_files:
+  - "prometheus-alerts.yml"
+
+scrape_configs:
+  - job_name: fleet_bottleneck
+    # fleet_bottleneck.py serves the Prometheus exposition at :9095/metrics
+    # (the same port + UI host as its HTML dashboard). Start it with:
+    #   python tools/fleet_bottleneck.py serve --port 9095
+    #
+    # Default (bridge networking / Docker Desktop):
+    #   "host.docker.internal" resolves to the host machine's IP.
+    #
+    # Linux host networking:
+    #   Change to "localhost:9095" (container shares the host network stack).
+    metrics_path: /metrics
+    static_configs:
+      - targets: ["host.docker.internal:9095"]
+        labels:
+          fleet: claude-code-workers
+
+  - job_name: fak_gateway
+    # fak serve exposes gateway/kernel telemetry at :8080/metrics by default.
+    # Start it with, for example:
+    #   ./fak serve --addr 127.0.0.1:8080
+    #
+    # If the gateway is started with --require-key-env, add Prometheus auth here
+    # (for example bearer_token_file) or run a separate loopback-only scrape proxy.
+    metrics_path: /metrics
+    static_configs:
+      - targets: ["host.docker.internal:8080"]
+        labels:
+          service: fak-gateway

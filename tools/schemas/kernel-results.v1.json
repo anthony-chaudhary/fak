@@ -1,0 +1,58 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "benchmark/kernel-results.v1.json",
+  "title": "Kernel Benchmark Results",
+  "description": "Results from single-stream kernel benchmark",
+  "type": "object",
+  "required": ["run_id", "engine", "precision", "model", "benchmark"],
+  "properties": {
+    "$schema": {
+      "type": "string",
+      "const": "benchmark/kernel-results.v1"
+    },
+    "run_id": {"type": "string"},
+    "engine": {"type": "string"},
+    "precision": {"type": "string"},
+    "model": {"type": "string"},
+    "benchmark": {
+      "type": "object",
+      "required": ["prefill", "decode"],
+      "properties": {
+        "prefill": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["tokens", "median_ms", "tok_per_sec"],
+            "properties": {
+              "tokens": {"type": "integer", "minimum": 1},
+              "median_ms": {"type": "number", "minimum": 0},
+              "tok_per_sec": {"type": "number", "minimum": 0},
+              "reps": {"type": "integer", "minimum": 1}
+            }
+          }
+        },
+        "decode": {
+          "type": "object",
+          "required": ["per_token_median_ms", "tok_per_sec"],
+          "properties": {
+            "prompt_tokens": {"type": "integer", "minimum": 0},
+            "decode_steps": {"type": "integer", "minimum": 1},
+            "reps": {"type": "integer", "minimum": 1},
+            "per_token_median_ms": {"type": "number", "minimum": 0},
+            "tok_per_sec": {"type": "number", "minimum": 0}
+          }
+        }
+      }
+    },
+    "kernel_breakdown": {
+      "type": "object",
+      "properties": {
+        "f32_ms": {"type": "number"},
+        "f32_gbs": {"type": "number"},
+        "int8xf32_ms": {"type": "number"},
+        "int8xf32_gbs": {"type": "number"},
+        "int8xf32_xf32": {"type": "number"}
+      }
+    }
+  }
+}

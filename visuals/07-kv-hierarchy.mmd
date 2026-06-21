@@ -1,0 +1,43 @@
+%%{init: {'theme':'base','themeVariables':{'fontFamily':'Segoe UI, Helvetica, Arial, sans-serif','fontSize':'14px','lineColor':'#5B6B7B','primaryColor':'#DCE9FB','primaryTextColor':'#1B3A66','primaryBorderColor':'#3B6FB5','clusterBkg':'#F7F9FB','clusterBorder':'#AFC0CE'}}}%%
+flowchart TD
+  premise["HBM is the binding constraint<br/>compute is reclaimable for free;<br/>resident KV is not"]
+  L1[("L1 - HBM (GPU)<br/>medium: resident in HBM<br/>make-resident cost: 0<br/>holds: runnable / decoding agents")]
+  L2[("L2 - system DRAM<br/>medium: HBM&lt;-&gt;DRAM DMA over PCIe/NVLink<br/>make-resident cost: a few ms<br/>holds: idle-but-warm (blocked on a tool call)")]
+  L3[("L3 - local NVMe/SSD<br/>medium: ~GB/s, content-addressed<br/>make-resident cost: tens of ms<br/>holds: cold agents (idle a long time)")]
+  L4["L4 - recompute from tokens<br/>medium: re-prefill from token log<br/>make-resident cost: proportional to context length<br/>holds: the backstop - drop the KV, re-prefill"]
+  xover{"L3 vs L4 crossover (decidable)<br/>transfer ~ S / BW_interconnect (bw-bound)<br/>vs recompute ~ T * prefill_flops / FLOPS (compute-bound)<br/>long ctx -&gt; keep bytes; short / contended bus -&gt; recompute"}
+  keep["keep the bytes<br/>(stay in L1-L3)"]
+  recomp["recompute on resume<br/>(L4 re-prefill)"]
+  density["Density per 80GB H100 (after weights):<br/>8B@50K: ~10 warm/H100;  3B: ~42;  +headroom: ~100-150<br/>measure, don't assert"]
+
+  premise --> L1
+  L1 -->|"evict idle"| L2
+  L2 -->|"age out"| L3
+  L3 --> xover
+  xover -->|"long context"| keep
+  xover -->|"short / contended bus"| recomp
+  recomp --> L4
+  L4 -.->|"on resume"| L1
+  keep -.-> L1
+  density -.-> xover
+
+  classDef untrusted fill:#FFE9D6,stroke:#E8833A,stroke-width:2px,color:#7A3E12;
+  classDef kernel fill:#DCE9FB,stroke:#3B6FB5,stroke-width:2px,color:#1B3A66;
+  classDef gate fill:#FFF3CC,stroke:#C9A227,stroke-width:2px,color:#6B5410;
+  classDef pass fill:#DBF3E1,stroke:#3FA45F,stroke-width:2px,color:#1C5230;
+  classDef deny fill:#FBDDDD,stroke:#C9453F,stroke-width:2px,color:#6E1F1B;
+  classDef mem fill:#EDE7FB,stroke:#7B5BC0,stroke-width:2px,color:#3A2A66;
+  classDef cheap fill:#E8ECEF,stroke:#7A8A99,stroke-width:1.5px,color:#33424F;
+  classDef world fill:#FCEEDB,stroke:#B5792B,stroke-width:2px,color:#5E3D12;
+  classDef frontier fill:#E7D9F5,stroke:#8A53C0,stroke-width:2px,color:#3F2466;
+  classDef note fill:#F7F9FB,stroke:#AFC0CE,stroke-width:1px,color:#46586A;
+
+  class premise note;
+  class L1 frontier;
+  class L2 mem;
+  class L3 mem;
+  class L4 kernel;
+  class xover gate;
+  class keep pass;
+  class recomp deny;
+  class density note;

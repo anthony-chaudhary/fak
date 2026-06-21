@@ -1,0 +1,15 @@
+apiVersion: 1
+
+datasources:
+  - name: Prometheus
+    uid: fleet-prometheus
+    type: prometheus
+    access: proxy
+    # Default (bridge networking / Docker Desktop):
+    #   "prometheus" is resolved by Docker's built-in DNS to the Prometheus container.
+    #
+    # Linux host networking:
+    #   Change to "http://localhost:9091" (both containers share the host network).
+    url: http://prometheus:9091
+    isDefault: true
+    editable: true

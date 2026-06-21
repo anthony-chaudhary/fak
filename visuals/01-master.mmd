@@ -1,0 +1,62 @@
+%%{init: {'theme':'base','themeVariables':{'fontFamily':'Segoe UI, Helvetica, Arial, sans-serif','fontSize':'14px','lineColor':'#5B6B7B','primaryColor':'#DCE9FB','primaryTextColor':'#1B3A66','primaryBorderColor':'#3B6FB5','clusterBkg':'#F7F9FB','clusterBorder':'#AFC0CE'}}}%%
+flowchart TD
+  punch["4 subsystems &rarr; 1 Go binary"]
+  model(["Model(s): generate tokens, propose tool calls<br/>(userspace, untrusted)"])
+
+  subgraph BIN["ONE Go binary (engine + harness + fleet + DOS)"]
+    direction TB
+    subgraph SYS["Syscall layer / kernel (harness + DOS)"]
+      direction TB
+      tbl["Tool Table: versioned typed syscall ABI"]
+      vdso["Tool vDSO: cheap / pure / cached calls<br/>(no model round-trip)"]
+      ladder{"Pre-flight Verification Ladder"}
+      mon{"DOS Reference Monitor<br/>verdict from evidence agent did NOT author"}
+      uring["io_uring submit / complete queue<br/>+ speculative execution"]
+      mmu{"Context MMU: admission control on results"}
+    end
+    subgraph ENG["Engine / scheduler (fleet 2-D sched)"]
+      direction TB
+      batch["Tool-wait-aware continuous batching<br/>(fill GPU bubbles) + 2-D sched {agent x tier}"]
+      kv[("KV-cache hierarchy: HBM / DRAM / SSD / recompute")]
+    end
+  end
+
+  stewards["10x single-invariant Stewards: validation + steering"]
+  rsi{"RSI keep-or-revert loop"}
+  world[["The World: side-effecting tools"]]
+
+  model -->|tool call = syscall| tbl
+  tbl --> vdso
+  vdso -->|cache miss| ladder
+  ladder --> mon
+  mon -->|allow / transform| uring
+  mon -.->|deny / require-witness| model
+  uring --> batch
+  batch --> kv
+  kv --> mmu
+  mmu -->|admit| model
+  uring -->|effects| world
+  vdso -.->|cheap answer| model
+
+  stewards -. gardens .-> BIN
+  rsi -. improves every subsystem .-> BIN
+  punch -.-> BIN
+
+  classDef untrusted fill:#FFE9D6,stroke:#E8833A,stroke-width:2px,color:#7A3E12;
+  classDef kernel fill:#DCE9FB,stroke:#3B6FB5,stroke-width:2px,color:#1B3A66;
+  classDef gate fill:#FFF3CC,stroke:#C9A227,stroke-width:2px,color:#6B5410;
+  classDef pass fill:#DBF3E1,stroke:#3FA45F,stroke-width:2px,color:#1C5230;
+  classDef deny fill:#FBDDDD,stroke:#C9453F,stroke-width:2px,color:#6E1F1B;
+  classDef mem fill:#EDE7FB,stroke:#7B5BC0,stroke-width:2px,color:#3A2A66;
+  classDef cheap fill:#E8ECEF,stroke:#7A8A99,stroke-width:1.5px,color:#33424F;
+  classDef world fill:#FCEEDB,stroke:#B5792B,stroke-width:2px,color:#5E3D12;
+  classDef frontier fill:#E7D9F5,stroke:#8A53C0,stroke-width:2px,color:#3F2466;
+  classDef note fill:#F7F9FB,stroke:#AFC0CE,stroke-width:1px,color:#46586A;
+
+  class model untrusted;
+  class tbl,vdso,uring,batch kernel;
+  class ladder,mon,mmu,rsi gate;
+  class kv mem;
+  class stewards cheap;
+  class world world;
+  class punch note;

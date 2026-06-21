@@ -1,0 +1,72 @@
+{
+  "version": "fak-policy/v1",
+  "posture": "fail_closed",
+  "allow": [
+    "create_change_request",
+    "diff_infra",
+    "helm_template",
+    "kubectl_get",
+    "plan_deploy",
+    "validate_terraform"
+  ],
+  "allow_prefix": [
+    "read_",
+    "get_",
+    "list_",
+    "lookup_",
+    "describe_",
+    "dryrun_"
+  ],
+  "deny": {
+    "deploy_production": "POLICY_BLOCK",
+    "drop_database": "POLICY_BLOCK",
+    "kubectl_delete": "POLICY_BLOCK",
+    "kubectl_exec": "POLICY_BLOCK",
+    "rotate_credentials": "POLICY_BLOCK",
+    "run_command": "POLICY_BLOCK",
+    "shell": "POLICY_BLOCK",
+    "terraform_apply": "POLICY_BLOCK",
+    "transfer_funds": "POLICY_BLOCK"
+  },
+  "self_modify_globs": [
+    ".git/",
+    ".dos/",
+    ".kube/config",
+    "policy.json",
+    "devops-dryrun-policy.json",
+    "terraform.tfstate",
+    "secrets/",
+    "/etc/",
+    "id_rsa"
+  ],
+  "redact_fields": [
+    "password",
+    "secret",
+    "api_key",
+    "token",
+    "authorization",
+    "kubeconfig"
+  ],
+  "safe_sinks": [
+    "create_change_request"
+  ],
+  "sources": {
+    "fetch_runbook": "trusted_local",
+    "read_repo": "trusted_local",
+    "read_ticket": "untrusted"
+  },
+  "arg_rules": [
+    {
+      "tool": "create_change_request",
+      "arg": "body",
+      "max_bytes": 8000,
+      "reason": "OVERSIZE"
+    },
+    {
+      "tool": "plan_deploy",
+      "arg": "environment",
+      "deny_regex": "(?i)^(prod|production)$",
+      "reason": "POLICY_BLOCK"
+    }
+  ]
+}

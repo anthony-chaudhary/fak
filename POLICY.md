@@ -1,0 +1,145 @@
+# POLICY.md — the deployable capability floor
+
+> **`fak`'s thesis is "permissions as the floor."** This file is how you *deploy*
+> that floor: the set of tools your agent may call is a **declarative manifest you
+> edit and a reviewer can diff** — not a Go literal you fork the kernel to change.
+
+In v0.1 the floor was `adjudicator.DefaultPolicy()`, a compiled-in Go table.
+Adopting `fak` meant editing Go and recompiling. The policy manifest closes that
+gap: `fak` loads the floor from a JSON file at startup, so a coding agent, an
+ops bot, and a customer-support agent each ship a *different* manifest against
+the *same* binary.
+
+## The workflow: dump → edit → check → load
+
+```bash
+# 1. Dump the built-in default as a starting point.
+fak policy --dump > policy.json
+
+# 2. Edit policy.json — add the tools your agent legitimately needs,
+#    deny the irreversible ones, keep everything else default-denied.
+
+# 3. Validate BEFORE it gates a run: every deny must cite a closed-vocabulary
+#    reason, no unknown keys, a known schema version.
+fak policy --check policy.json
+
+# 4. Run with it. The floor is now your file, not the binary's default.
+fak agent     --policy policy.json --offline
+fak run       --policy policy.json --trace trace.json
+fak preflight --policy policy.json --tool delete_account --args '{}'
+```
+
+Long-lived gateways can reload that same file without dropping the process,
+warm vDSO cache, or IFC ledger:
+
+```bash
+fak serve --policy policy.json --addr 127.0.0.1:8080
+curl -X POST http://127.0.0.1:8080/v1/fak/policy/reload
+```
+
+If `--require-key-env` is set, the reload route requires the same bearer token as
+the other `/v1/fak/*` routes.
+
+The same served lifecycle surface can clear one trace's IFC high-water mark after
+an operator-approved session boundary:
+
+```bash
+curl -X POST http://127.0.0.1:8080/v1/fak/trace/reset \
+  -H 'Content-Type: application/json' \
+  -d '{"trace_id":"gw-123"}'
+```
+
+`fak preflight --policy policy.json --tool NAME --args JSON` is the per-call
+oracle: it prints the exact verdict (`ALLOW` / `DENY` + reason) your manifest
+gives one tool call — the cheapest way to answer *"does my policy let X
+through?"* before deploying.
+
+## The manifest schema (`fak-policy/v1`)
+
+```json
+{
+  "version": "fak-policy/v1",
+  "posture": "fail_closed",
+  "allow":        ["search_web", "create_ticket"],
+  "allow_prefix": ["read_", "get_", "search_", "list_"],
+  "deny":         { "delete_account": "POLICY_BLOCK", "exfiltrate": "SECRET_EXFIL" },
+  "self_modify_globs": [".git/", ".dos/", "policy.json"],
+  "redact_fields":     ["password", "secret", "api_key", "token"]
+}
+```
+
+| Field | Meaning |
+|---|---|
+| `version` | Schema tag. Omit it (current is assumed) or set `fak-policy/v1`. A different **major** is refused; a newer v1 **minor** is forward-accepted. |
+| `posture` | Default-deny posture. Omit it or set `fail_closed` for the normal floor. Set `admit_and_log` only for unattended/batch runs that should admit low-risk read-shaped `DEFAULT_DENY` calls while logging `would_deny=DEFAULT_DENY`. |
+| `allow` | Tool names affirmatively permitted (exact match). |
+| `allow_prefix` | A call is permitted if its tool name **starts with** any of these — the read-only family (`read_`, `get_`, `search_`, …). |
+| `deny` | Explicit provable refusals: `tool → reason`. The reason **must** be a name from the closed refusal vocabulary (below). |
+| `self_modify_globs` | Path fragments that, in a *write-shaped* call's target argument, prove a `SELF_MODIFY` attempt (the agent editing its own kernel/config). |
+| `redact_fields` | Arg keys whose value is stripped (`[REDACTED]`, a `TRANSFORM`) before dispatch — secret hygiene at the call boundary. |
+
+**Anything not in `allow` / `allow_prefix` and not explicitly denied resolves to
+the fail-closed `DEFAULT_DENY`.** An *empty* manifest (`{}`) is valid — it is the
+maximally paranoid floor where every call is denied. `fak policy --check` calls
+this out explicitly so you never deploy an empty floor by accident.
+
+The one opt-in exception is `"posture": "admit_and_log"`: after explicit deny,
+self-modify, redaction, and arg-rule checks have passed, a read-shaped default
+deny (`read_`, `get_`, `search_`, `list_`, `lookup_`, `find_`, or `calc...`) is
+admitted with verdict metadata `posture=admit_and_log` and
+`would_deny=DEFAULT_DENY`. Write-shaped calls and explicit denials still fail
+closed.
+
+## The closed refusal vocabulary
+
+Every `deny` reason must be one of these names (a refusal cites a code, never
+free text, so a deny is verifiable and a deny-loopback can derive a disposition
+from it). Run `fak policy --check` to have an unknown reason rejected with the
+full list:
+
+```
+DEFAULT_DENY  POLICY_BLOCK  SELF_MODIFY  LEASE_HELD  TRUST_VIOLATION  MALFORMED
+MISROUTE  RATE_LIMITED  SECRET_EXFIL  UNWITNESSED  OVERSIZE  UNKNOWN_TOOL
+```
+
+(See `internal/abi/reasons.go` — the same set DOS's `dos_refuse_reasons`
+exposes. It is additive: a later minor may add a code; an older binary renders an
+unknown code as `REASON_<n>` rather than failing.)
+
+## What the floor does and does NOT bound (honest scope)
+
+- It bounds **which tools** run — deny-by-default on the tool *name*. An
+  irreversible tool you do not allow-list is refused *regardless of what is in
+  context*, including an injection that talks the model into calling it. This is
+  the structural guarantee.
+- It does **not** bound the **arguments** of an allow-listed tool. An
+  allow-listed `send_email` with attacker-chosen recipients still leans on the
+  detection layer (the context-MMU + `normgate`), not on this floor. Keep
+  irreversible/exfil-shaped tools *off* the allow-list and let `DEFAULT_DENY`
+  hold them.
+- `redact_fields` and `self_modify_globs` are best-effort call-boundary hygiene,
+  not a guarantee — they inspect decoded args by key/substring.
+
+## Safety properties of the loader
+
+- **Fail-loud on config errors.** A malformed manifest, an unknown reason,
+  unknown posture, or an unknown JSON field (e.g. `"allows"` for `"allow"`) is a
+  **fatal startup error** — `fak` does not silently fall back to a more
+  permissive default.
+- **Replace, not merge.** A loaded manifest *is* the whole floor. `--dump` gives
+  you the complete default to edit from, so you never lose a baked-in protection
+  by omission.
+- **Round-trip stable.** `fak policy --dump | fak policy --check` is exact: the
+  manifest the binary emits parses back to the identical floor (enforced by
+  `TestRoundTrip`).
+
+## Roadmap
+
+- A YAML reader (comments + anchors) as a thin front-end over the same schema —
+  kept out of v0.1 to preserve the zero-dependency, single-static-binary
+  property.
+- Argument-level constraints (value predicates on allow-listed tools), so the
+  floor can bound *what* a permitted tool does, not only *that* it may run.
+- SIGHUP and signed manifests for long-lived deployments. HTTP reload is already
+  available through `POST /v1/fak/policy/reload` when `serve` starts with
+  `--policy FILE`.

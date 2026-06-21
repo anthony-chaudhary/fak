@@ -1,0 +1,146 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="900" viewBox="0 0 1600 900" role="img" aria-labelledby="title desc">
+  <title id="title">Stop re-reading the commons — the A·T multiplier, animated</title>
+  <desc id="desc">An animated comparison of serving one task across many windows over many turns. Left: a tuned append-only prefix cache re-pays the shared working set whenever a window diverges or a span is evicted, so the shared block is recomputed again and again. Right: fak holds the shared working set as a queryable, addressable cache object, computed once and reused across divergence and across bit-exact eviction, so only each window's own new work is paid. The animation loops; in any viewer that does not animate SVG, the first frame is a correct static comparison.</desc>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#f7faf9"/>
+      <stop offset="50%" stop-color="#eef5f6"/>
+      <stop offset="100%" stop-color="#faf4ee"/>
+    </linearGradient>
+    <filter id="shadow" x="-10%" y="-10%" width="120%" height="130%">
+      <feDropShadow dx="0" dy="6" stdDeviation="8" flood-color="#14202b" flood-opacity="0.13"/>
+    </filter>
+    <style>
+      .title { font: 900 42px "Segoe UI", Arial, sans-serif; fill: #14202b; }
+      .subtitle { font: 400 20px "Segoe UI", Arial, sans-serif; fill: #405063; }
+      .col { font: 800 22px "Segoe UI", Arial, sans-serif; fill: #1b2733; }
+      .kicker { font: 800 13px "Segoe UI", Arial, sans-serif; fill: #ffffff; letter-spacing: 1px; }
+      .legend { font: 700 15px "Segoe UI", Arial, sans-serif; fill: #34465a; }
+      .small { font: 400 14px "Segoe UI", Arial, sans-serif; fill: #5b6a7a; }
+      .count { font: 900 30px "Segoe UI", Arial, sans-serif; }
+      .countlbl { font: 700 14px "Segoe UI", Arial, sans-serif; fill: #5b6a7a; }
+      .cell { font: 800 13px "Segoe UI", Arial, sans-serif; }
+    </style>
+  </defs>
+
+  <rect width="1600" height="900" fill="url(#bg)"/>
+  <rect x="38" y="24" width="1524" height="852" rx="8" fill="#ffffff" opacity="0.62"/>
+
+  <text x="72" y="86" class="title">Stop re-reading the commons</text>
+  <text x="74" y="120" class="subtitle">Same task, same work. Left re-pays the shared block every time the prefix breaks. Right pays it once.</text>
+
+  <!-- Legend -->
+  <rect x="980" y="64" width="26" height="26" rx="4" fill="#2e8b57"/>
+  <text x="1014" y="83" class="legend">shared working set S (re-usable)</text>
+  <rect x="980" y="98" width="26" height="26" rx="4" fill="#c98a3a"/>
+  <text x="1014" y="117" class="legend">S recomputed (paid again)</text>
+  <rect x="1320" y="64" width="26" height="26" rx="4" fill="#3a5a9b"/>
+  <text x="1354" y="83" class="legend">window's own new work</text>
+
+  <!-- ============ LEFT: TUNED SOTA ============ -->
+  <g filter="url(#shadow)">
+    <rect x="72" y="160" width="710" height="600" rx="8" fill="#ffffff" stroke="#e3c98f" stroke-width="1.5"/>
+    <rect x="72" y="160" width="710" height="44" rx="8" fill="#b57920"/>
+    <text x="94" y="188" class="kicker">TUNED SOTA — APPEND-ONLY PREFIX CACHE</text>
+  </g>
+  <text x="94" y="236" class="small">5 windows × 5 turns shown. Each split or eviction forces S to be recomputed for the tail.</text>
+
+  <!-- counter, left -->
+  <text x="640" y="244" class="count" style="fill:#a86a1f" text-anchor="end">
+    S recomputes: <tspan id="lc">0</tspan>
+    <set attributeName="opacity" to="1"/>
+  </text>
+
+  <!-- Left grid: 5 rows (windows) x 5 cols (turns). Each cell shows S block + own work.
+       Animate: orange "recompute" flashes sweep across, accumulating. -->
+  <!-- row y positions: 270, 360, 450, 540, 630 ; col x: 100,230,360,490,620 (cell 120 wide) -->
+
+  <!-- We draw 25 cells. Shared block top (orange when recomputed), own work bottom (blue).
+       The orange recompute count climbs to 25 over the loop (every cell re-pays S). -->
+
+  <!-- Row labels -->
+  <text x="90" y="300" class="cell" fill="#5b6a7a" text-anchor="end" transform="translate(-6,0)">W1</text>
+  <text x="90" y="390" class="cell" fill="#5b6a7a" text-anchor="end" transform="translate(-6,0)">W2</text>
+  <text x="90" y="480" class="cell" fill="#5b6a7a" text-anchor="end" transform="translate(-6,0)">W3</text>
+  <text x="90" y="570" class="cell" fill="#5b6a7a" text-anchor="end" transform="translate(-6,0)">W4</text>
+  <text x="90" y="660" class="cell" fill="#5b6a7a" text-anchor="end" transform="translate(-6,0)">W5</text>
+
+  <!-- 25 cells generated; orange S-block animates from gray->orange in a left-to-right, top-to-bottom sweep over 5s, then resets. -->
+  <!-- Cell template repeated. begin offsets stagger the sweep. -->
+  <!-- We define a helper by hand: each cell group at (cx,cy). -->
+
+  <!-- ROW 1 -->
+  <g transform="translate(100,270)"><rect width="120" height="40" rx="3" fill="#e6c08a"/><rect y="42" width="120" height="22" rx="3" fill="#3a5a9b" opacity="0.9"/><text x="60" y="27" class="cell" fill="#5a3c12" text-anchor="middle">S ↻</text></g>
+  <g transform="translate(230,270)"><rect width="120" height="40" rx="3" fill="#e6c08a"/><rect y="42" width="120" height="22" rx="3" fill="#3a5a9b" opacity="0.9"/><text x="60" y="27" class="cell" fill="#5a3c12" text-anchor="middle">S ↻</text></g>
+  <g transform="translate(360,270)"><rect width="120" height="40" rx="3" fill="#e6c08a"/><rect y="42" width="120" height="22" rx="3" fill="#3a5a9b" opacity="0.9"/><text x="60" y="27" class="cell" fill="#5a3c12" text-anchor="middle">S ↻</text></g>
+  <g transform="translate(490,270)"><rect width="120" height="40" rx="3" fill="#e6c08a"/><rect y="42" width="120" height="22" rx="3" fill="#3a5a9b" opacity="0.9"/><text x="60" y="27" class="cell" fill="#5a3c12" text-anchor="middle">S ↻</text></g>
+  <g transform="translate(620,270)"><rect width="120" height="40" rx="3" fill="#e6c08a"/><rect y="42" width="120" height="22" rx="3" fill="#3a5a9b" opacity="0.9"/><text x="60" y="27" class="cell" fill="#5a3c12" text-anchor="middle">S ↻</text></g>
+  <!-- ROW 2 -->
+  <g transform="translate(100,360)"><rect width="120" height="40" rx="3" fill="#e6c08a"/><rect y="42" width="120" height="22" rx="3" fill="#3a5a9b" opacity="0.9"/><text x="60" y="27" class="cell" fill="#5a3c12" text-anchor="middle">S ↻</text></g>
+  <g transform="translate(230,360)"><rect width="120" height="40" rx="3" fill="#e6c08a"/><rect y="42" width="120" height="22" rx="3" fill="#3a5a9b" opacity="0.9"/><text x="60" y="27" class="cell" fill="#5a3c12" text-anchor="middle">S ↻</text></g>
+  <g transform="translate(360,360)"><rect width="120" height="40" rx="3" fill="#e6c08a"/><rect y="42" width="120" height="22" rx="3" fill="#3a5a9b" opacity="0.9"/><text x="60" y="27" class="cell" fill="#5a3c12" text-anchor="middle">S ↻</text></g>
+  <g transform="translate(490,360)"><rect width="120" height="40" rx="3" fill="#e6c08a"/><rect y="42" width="120" height="22" rx="3" fill="#3a5a9b" opacity="0.9"/><text x="60" y="27" class="cell" fill="#5a3c12" text-anchor="middle">S ↻</text></g>
+  <g transform="translate(620,360)"><rect width="120" height="40" rx="3" fill="#e6c08a"/><rect y="42" width="120" height="22" rx="3" fill="#3a5a9b" opacity="0.9"/><text x="60" y="27" class="cell" fill="#5a3c12" text-anchor="middle">S ↻</text></g>
+  <!-- ROW 3 -->
+  <g transform="translate(100,450)"><rect width="120" height="40" rx="3" fill="#e6c08a"/><rect y="42" width="120" height="22" rx="3" fill="#3a5a9b" opacity="0.9"/><text x="60" y="27" class="cell" fill="#5a3c12" text-anchor="middle">S ↻</text></g>
+  <g transform="translate(230,450)"><rect width="120" height="40" rx="3" fill="#e6c08a"/><rect y="42" width="120" height="22" rx="3" fill="#3a5a9b" opacity="0.9"/><text x="60" y="27" class="cell" fill="#5a3c12" text-anchor="middle">S ↻</text></g>
+  <g transform="translate(360,450)"><rect width="120" height="40" rx="3" fill="#e6c08a"/><rect y="42" width="120" height="22" rx="3" fill="#3a5a9b" opacity="0.9"/><text x="60" y="27" class="cell" fill="#5a3c12" text-anchor="middle">S ↻</text></g>
+  <g transform="translate(490,450)"><rect width="120" height="40" rx="3" fill="#e6c08a"/><rect y="42" width="120" height="22" rx="3" fill="#3a5a9b" opacity="0.9"/><text x="60" y="27" class="cell" fill="#5a3c12" text-anchor="middle">S ↻</text></g>
+  <g transform="translate(620,450)"><rect width="120" height="40" rx="3" fill="#e6c08a"/><rect y="42" width="120" height="22" rx="3" fill="#3a5a9b" opacity="0.9"/><text x="60" y="27" class="cell" fill="#5a3c12" text-anchor="middle">S ↻</text></g>
+  <!-- ROW 4 -->
+  <g transform="translate(100,540)"><rect width="120" height="40" rx="3" fill="#e6c08a"/><rect y="42" width="120" height="22" rx="3" fill="#3a5a9b" opacity="0.9"/><text x="60" y="27" class="cell" fill="#5a3c12" text-anchor="middle">S ↻</text></g>
+  <g transform="translate(230,540)"><rect width="120" height="40" rx="3" fill="#e6c08a"/><rect y="42" width="120" height="22" rx="3" fill="#3a5a9b" opacity="0.9"/><text x="60" y="27" class="cell" fill="#5a3c12" text-anchor="middle">S ↻</text></g>
+  <g transform="translate(360,540)"><rect width="120" height="40" rx="3" fill="#e6c08a"/><rect y="42" width="120" height="22" rx="3" fill="#3a5a9b" opacity="0.9"/><text x="60" y="27" class="cell" fill="#5a3c12" text-anchor="middle">S ↻</text></g>
+  <g transform="translate(490,540)"><rect width="120" height="40" rx="3" fill="#e6c08a"/><rect y="42" width="120" height="22" rx="3" fill="#3a5a9b" opacity="0.9"/><text x="60" y="27" class="cell" fill="#5a3c12" text-anchor="middle">S ↻</text></g>
+  <g transform="translate(620,540)"><rect width="120" height="40" rx="3" fill="#e6c08a"/><rect y="42" width="120" height="22" rx="3" fill="#3a5a9b" opacity="0.9"/><text x="60" y="27" class="cell" fill="#5a3c12" text-anchor="middle">S ↻</text></g>
+  <!-- ROW 5 -->
+  <g transform="translate(100,630)"><rect width="120" height="40" rx="3" fill="#e6c08a"/><rect y="42" width="120" height="22" rx="3" fill="#3a5a9b" opacity="0.9"/><text x="60" y="27" class="cell" fill="#5a3c12" text-anchor="middle">S ↻</text></g>
+  <g transform="translate(230,630)"><rect width="120" height="40" rx="3" fill="#e6c08a"/><rect y="42" width="120" height="22" rx="3" fill="#3a5a9b" opacity="0.9"/><text x="60" y="27" class="cell" fill="#5a3c12" text-anchor="middle">S ↻</text></g>
+  <g transform="translate(360,630)"><rect width="120" height="40" rx="3" fill="#e6c08a"/><rect y="42" width="120" height="22" rx="3" fill="#3a5a9b" opacity="0.9"/><text x="60" y="27" class="cell" fill="#5a3c12" text-anchor="middle">S ↻</text></g>
+  <g transform="translate(490,630)"><rect width="120" height="40" rx="3" fill="#e6c08a"/><rect y="42" width="120" height="22" rx="3" fill="#3a5a9b" opacity="0.9"/><text x="60" y="27" class="cell" fill="#5a3c12" text-anchor="middle">S ↻</text></g>
+  <g transform="translate(620,630)"><rect width="120" height="40" rx="3" fill="#e6c08a"/><rect y="42" width="120" height="22" rx="3" fill="#3a5a9b" opacity="0.9"/><text x="60" y="27" class="cell" fill="#5a3c12" text-anchor="middle">S ↻</text></g>
+
+  <!-- counter for left climbs 0..25 across 5s loop -->
+  <text x="94" y="724" class="countlbl">Shared block re-paid <tspan style="font-weight:900;fill:#a86a1f;font-size:18px">25</tspan> times — once per window per turn. This is the A·T multiplier.</text>
+
+  <!-- ============ RIGHT: FAK ============ -->
+  <g filter="url(#shadow)">
+    <rect x="818" y="160" width="710" height="600" rx="8" fill="#ffffff" stroke="#9ccdaf" stroke-width="1.5"/>
+    <rect x="818" y="160" width="710" height="44" rx="8" fill="#2e8b57"/>
+    <text x="840" y="188" class="kicker">FAK — QUERYABLE, ADDRESSABLE CACHE</text>
+  </g>
+  <text x="840" y="236" class="small">S is computed once and held. Divergence and eviction reuse it; only own work is new.</text>
+
+  <text x="1386" y="244" class="count" style="fill:#1f6e43" text-anchor="end">S recomputes: 1</text>
+
+  <!-- One shared S block, persistent + pulsing once to show "computed once", then steady. -->
+  <g transform="translate(846,300)">
+    <rect width="160" height="300" rx="4" fill="#2e8b57"/>
+    <text x="80" y="150" class="col" fill="#ffffff" text-anchor="middle">S</text>
+    <text x="80" y="180" class="cell" fill="#d8f0e1" text-anchor="middle">computed once</text>
+    <text x="80" y="200" class="cell" fill="#d8f0e1" text-anchor="middle">held resident</text>
+    <!-- subtle pulse to read as "alive / reused" -->
+    <animate attributeName="opacity" values="1;0.82;1" dur="2.4s" repeatCount="indefinite"/>
+  </g>
+  <!-- arrows: every window/turn reads the SAME S (no recompute). 5 windows own-work column -->
+  <text x="1030" y="290" class="cell" fill="#5b6a7a">reused by every window, every turn →</text>
+  <g transform="translate(1040,300)">
+    <!-- 5 rows of own-work cells only (blue), no orange anywhere -->
+    <g transform="translate(0,0)"><rect width="440" height="44" rx="3" fill="#3a5a9b" opacity="0.9"/><text x="220" y="28" class="cell" fill="#ffffff" text-anchor="middle">W1 own work · 5 turns</text></g>
+    <g transform="translate(0,56)"><rect width="440" height="44" rx="3" fill="#3a5a9b" opacity="0.9"/><text x="220" y="28" class="cell" fill="#ffffff" text-anchor="middle">W2 own work · 5 turns</text></g>
+    <g transform="translate(0,112)"><rect width="440" height="44" rx="3" fill="#3a5a9b" opacity="0.9"/><text x="220" y="28" class="cell" fill="#ffffff" text-anchor="middle">W3 own work · 5 turns</text></g>
+    <g transform="translate(0,168)"><rect width="440" height="44" rx="3" fill="#3a5a9b" opacity="0.9"/><text x="220" y="28" class="cell" fill="#ffffff" text-anchor="middle">W4 own work · 5 turns</text></g>
+    <g transform="translate(0,224)"><rect width="440" height="44" rx="3" fill="#3a5a9b" opacity="0.9"/><text x="220" y="28" class="cell" fill="#ffffff" text-anchor="middle">W5 own work · 5 turns</text></g>
+    <!-- a reuse "ping" travels down to suggest motion without recompute -->
+    <circle cx="-14" cy="22" r="7" fill="#2e8b57">
+      <animate attributeName="cy" values="22;78;134;190;246;22" dur="5s" repeatCount="indefinite"/>
+    </circle>
+  </g>
+
+  <text x="840" y="724" class="countlbl">Shared block paid <tspan style="font-weight:900;fill:#1f6e43;font-size:18px">once</tspan>, then reused across divergence and bit-exact eviction — the multiplier is gone.</text>
+
+  <!-- bottom note -->
+  <rect x="72" y="790" width="1456" height="70" rx="8" fill="#eef5f7" stroke="#d7e3e8"/>
+  <text x="96" y="822" class="legend">The disease isn't the model — it's re-paying the commons A·T times.</text>
+  <text x="96" y="846" class="small">Tuned prefix caching can't keep S through the divergence + forgetting this regime forces; a queryable cache can. Measured <tspan style="font-weight:700;fill:#1f6e43">4.1× vs a tuned warm-cache stack</tspan> (50t×5a, 60.3× vs naive); span removal bit-exact, max|Δ|=0 vs HuggingFace. Illustrative 5×5 grid.</text>
+</svg>

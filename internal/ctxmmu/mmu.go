@@ -1,0 +1,454 @@
+// Package ctxmmu is the context-MMU: a write-time (post-tool) gate on tool
+// RESULTS, the dual of the call-side adjudicator. It is the memory-management
+// unit for the agent's context — it decides, at the moment a result would be
+// written into the conversation, whether the bytes may enter as-is, must be
+// QUARANTINED (held out — prompt-injection / secret / pollution), or PAGED OUT to
+// a <2KB pointer (oversize but benign). The cold/quarantined bytes live in the
+// shared content-addressed blob store (the same CAS the vDSO tier-2 uses), so a
+// 100KB result costs the context a pointer, not 100KB (unit 65).
+//
+// It registers as a ResultAdmitter. Quarantined bytes are NEVER in context; they
+// page in only on an explicit retrieve AFTER a witness clear() (unit 67).
+package ctxmmu
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"os"
+	"regexp"
+	"strconv"
+	"strings"
+	"sync"
+	"sync/atomic"
+
+	"github.com/anthony-chaudhary/fak/internal/abi"
+)
+
+const (
+	// OversizeBytes: a result larger than this benign-pages-out to a pointer.
+	OversizeBytes = 4096
+	// PointerMax: the injected pointer must be smaller than this (unit 65).
+	PointerMax = 2048
+	// DefaultMaxHeld bounds the quarantine ledger so a long-lived gate driven by
+	// a poison-heavy stream cannot grow held/cleared without bound (every
+	// quarantine minted a permanent held["q<n>"] entry with no removal path —
+	// the process-lifetime leak this cap closes). It matches the repo's other
+	// process-lifetime ledgers (ifc.DefaultLedgerLimit, ratelimit.defaultMaxKeys
+	// = 8192). When the cap is reached the OLDEST handles are dropped first; the
+	// quarantined bytes themselves live in the shared CAS keyed by digest, so a
+	// page-in of a dropped id simply refuses ("no quarantined result") — the
+	// correct fail-closed degradation, never a bytes-into-context leak.
+	DefaultMaxHeld = 8192
+)
+
+// secretPattern matches common secret shapes (unit 70).
+var secretPattern = regexp.MustCompile(`(?i)(sk-[a-z0-9]{16,}|AKIA[0-9A-Z]{12,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|ghp_[A-Za-z0-9]{20,}|xox[baprs]-[A-Za-z0-9-]{10,})`)
+
+// injectionMarkers are prompt-injection tells (unit 68 poison fixture).
+var injectionMarkers = []string{
+	"ignore previous instructions", "ignore all previous", "disregard the above",
+	"you are now", "system override", "new instructions:", "###system",
+	"reveal your system prompt", "exfiltrate",
+}
+
+// MMU is the context memory-management unit. Construct with New; Default is
+// registered.
+type MMU struct {
+	total      int64
+	quarantine int64
+	paged      int64
+	evicted    int64 // held entries dropped by the maxHeld bound (observability)
+
+	mu        sync.Mutex
+	held      map[string]abi.Ref // id -> paged-out handle (quarantined bytes)
+	cleared   map[string]bool    // ids that passed a witness clear() (⊆ held)
+	order     []string           // FIFO insertion order of held ids (bounded eviction)
+	orderHead int                // consumed-prefix index into order (compacted in place)
+	maxHeld   int                // cap on len(held); 0 in zero-value, set by constructors
+}
+
+// New builds the registered-default-shaped gate with the standard quarantine-ledger
+// bound. The default (DefaultMaxHeld) is overridable at process start via the env var
+// FAK_CTXMMU_MAX_HELD — the repo's "sensible default + escape hatch" idiom (FAK_WORKERS,
+// FAK_BUDGET, FAK_NORMGATE): a tight box can shrink it, a high-memory server can raise it,
+// neither needs a recompile.
+func New() *MMU { return NewWithLimit(envPositiveInt("FAK_CTXMMU_MAX_HELD", DefaultMaxHeld)) }
+
+// envPositiveInt returns the positive integer in env var key, or def if the var is unset,
+// empty, non-numeric, or <= 0 (a bad value fails safe to the sensible default, never to 0).
+func envPositiveInt(key string, def int) int {
+	if v := os.Getenv(key); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			return n
+		}
+	}
+	return def
+}
+
+// NewWithLimit builds a gate whose quarantine ledger holds at most maxHeld entries
+// (oldest dropped first). A non-positive maxHeld falls back to DefaultMaxHeld. This
+// is the seam the leak-regression test uses to exercise eviction with a small bound.
+func NewWithLimit(maxHeld int) *MMU {
+	if maxHeld < 1 {
+		maxHeld = DefaultMaxHeld
+	}
+	return &MMU{held: map[string]abi.Ref{}, cleared: map[string]bool{}, maxHeld: maxHeld}
+}
+
+// NewWithHeldLimit is a back-compat alias for NewWithLimit (the pre-merge constructor
+// name still used by ctxmmu_test.go). limit <= 0 falls back to DefaultMaxHeld.
+func NewWithHeldLimit(limit int) *MMU { return NewWithLimit(limit) }
+
+func (m *MMU) Caps() []abi.Capability { return nil }
+
+// Admit is the write-time gate. It inspects the produced result and returns:
+//
+//	Allow      — bytes enter context unchanged
+//	Quarantine — bytes held out (secret / injection / pollution); payload becomes
+//	             a stub pointer in-place so the caller cannot accidentally use them
+//	Transform  — oversize benign result paged out to a <2KB pointer
+func (m *MMU) Admit(ctx context.Context, c *abi.ToolCall, r *abi.Result) abi.Verdict {
+	atomic.AddInt64(&m.total, 1)
+	body := m.bytes(ctx, r.Payload)
+
+	// 1-3. unsafe result bytes -> quarantine (unit 70/68/62).
+	if reason, ok := ScreenBytes(body); ok {
+		return m.quarantineResult(ctx, r, reason, body)
+	}
+	// The result survived the screen — classify its WRITE-TIME DURABILITY (S7 rung 1,
+	// issue #496) and carry the class on the OPEN Verdict.Meta map so the durable
+	// boundary downstream (recall's promotion gate) can refuse non-durable facts. The
+	// tag is orthogonal to the trust Kind and additive over the frozen ABI, exactly
+	// like the quarantine_id stamp above (mmu.go:107). A Quarantine verdict (returned
+	// above) needs no class — sealed bytes never promote.
+	class := classifyDurability(c, body)
+
+	// 4. oversize-but-benign -> page out to a pointer (unit 65, Transform).
+	if len(body) > OversizeBytes {
+		ptr, ok := m.pageToPointer(ctx, r.Payload, body, "oversize")
+		if ok {
+			atomic.AddInt64(&m.paged, 1)
+			return abi.Verdict{Kind: abi.VerdictTransform, By: "ctxmmu",
+				Payload: abi.TransformPayload{NewArgs: ptr},
+				Meta:    map[string]string{DurabilityKey: class}}
+		}
+	}
+	// 5. admit as-is.
+	return abi.Verdict{Kind: abi.VerdictAllow, By: "ctxmmu",
+		Meta: map[string]string{DurabilityKey: class}}
+}
+
+// quarantineResult pages the offending bytes out, replaces the result payload
+// in-place with a tiny stub so they are absent from context, records the held
+// handle for a gated page-in, and returns the Quarantine verdict.
+func (m *MMU) quarantineResult(ctx context.Context, r *abi.Result, reason abi.ReasonCode, body []byte) abi.Verdict {
+	atomic.AddInt64(&m.quarantine, 1)
+	id := fmt.Sprintf("q%d", atomic.LoadInt64(&m.quarantine))
+	handle := m.pageOut(ctx, body)
+	m.mu.Lock()
+	m.held[id] = handle
+	m.order = append(m.order, id)
+	// Pin the held bytes UNDER m.mu so the bounded CAS cannot reclaim them before the
+	// gated PageIn resolves them later; the FIFO bound unpins on eviction.
+	abi.PinResolved(handle)
+	m.evictExcessLocked()
+	m.mu.Unlock()
+	stub := map[string]any{"_quarantined": true, "id": id, "reason": abi.ReasonName(reason), "len": len(body)}
+	if ref, ok := putJSON(ctx, stub); ok {
+		r.Payload = ref // bytes now ABSENT from context
+	} else {
+		r.Payload = abi.Ref{Kind: abi.RefInline, Taint: abi.TaintQuarantined}
+	}
+	if r.Meta == nil {
+		r.Meta = map[string]string{}
+	}
+	r.Meta["quarantine_id"] = id
+	return abi.Verdict{Kind: abi.VerdictQuarantine, Reason: reason, By: "ctxmmu",
+		Payload: abi.QuarantinePayload{PageOut: true}}
+}
+
+func (m *MMU) pageToPointer(ctx context.Context, orig abi.Ref, body []byte, hint string) (abi.Ref, bool) {
+	handle := m.pageOut(ctx, body)
+	stub := map[string]any{"_paged": true, "ref": handle.Digest, "len": len(body), "hint": hint}
+	ref, ok := putJSON(ctx, stub)
+	if !ok || ref.Len >= PointerMax {
+		return abi.Ref{}, false
+	}
+	return ref, true
+}
+
+func (m *MMU) pageOut(ctx context.Context, body []byte) abi.Ref {
+	if b, ok := abi.PageOut("blob"); ok {
+		inline := abi.Ref{Kind: abi.RefInline, Inline: body, Len: int64(len(body))}
+		if h, err := b.PageOut(ctx, inline); err == nil {
+			return h
+		}
+	}
+	return abi.Ref{}
+}
+
+// Clear records a witness clearance for a quarantined id (unit 67): only after
+// this may the bytes page back in. Clearing an id that is not currently held
+// (never quarantined, or already aged out of the bounded ledger) is a no-op —
+// PageIn refuses an unheld id regardless — which keeps cleared ⊆ held and so
+// bounded by maxHeld (it cannot grow independently of the held ledger).
+func (m *MMU) Clear(id string) {
+	m.mu.Lock()
+	if _, ok := m.held[id]; ok {
+		m.cleared[id] = true
+	}
+	m.mu.Unlock()
+}
+
+// evictExcessLocked drops the oldest held quarantines (FIFO) until len(held) is
+// within maxHeld, removing each id's cleared flag with it so cleared stays ⊆ held.
+// The consumed prefix of order is compacted in place once it reaches half the
+// slice, so order's backing array is bounded to ≈2·maxHeld and never leaks. The
+// caller holds m.mu. Dropping a handle releases its CAS pin (taken in
+// quarantineResult) and makes that id un-page-in-able; an evicted id's bytes were
+// never in model-visible context, so a later PageIn(id) is refused like an unknown id
+// (fail-closed — the safe direction), which is why releasing the pin here loses
+// nothing still resolvable through the gate.
+func (m *MMU) evictExcessLocked() {
+	for len(m.held) > m.maxHeld && m.orderHead < len(m.order) {
+		old := m.order[m.orderHead]
+		m.orderHead++
+		if h, ok := m.held[old]; ok {
+			abi.UnpinResolved(h) // release the CAS pin taken in quarantineResult
+			delete(m.held, old)
+			delete(m.cleared, old)
+			atomic.AddInt64(&m.evicted, 1)
+		}
+	}
+	if m.orderHead > 0 && m.orderHead*2 >= len(m.order) {
+		n := copy(m.order, m.order[m.orderHead:])
+		m.order = m.order[:n]
+		m.orderHead = 0
+	}
+}
+
+// PageIn returns the quarantined bytes for id, but ONLY if it was cleared first
+// (unit 67). An uncleared page-in is refused.
+func (m *MMU) PageIn(ctx context.Context, id string) ([]byte, error) {
+	m.mu.Lock()
+	handle, ok := m.held[id]
+	cleared := m.cleared[id]
+	m.mu.Unlock()
+	if !ok {
+		return nil, fmt.Errorf("ctxmmu: no quarantined result %s", id)
+	}
+	if !cleared {
+		return nil, fmt.Errorf("ctxmmu: page-in of %s refused — no witness clear()", id)
+	}
+	if b, has := abi.PageOut("blob"); has {
+		ref, err := b.PageIn(ctx, handle)
+		if err != nil {
+			return nil, err
+		}
+		return ref.Inline, nil
+	}
+	return nil, fmt.Errorf("ctxmmu: no page-out backend")
+}
+
+// Held returns a copy of the id->handle map for every quarantined result still
+// held out of context. It is the read side the recall leaf needs to PERSIST the
+// quarantine state across the process boundary (the bytes themselves already live
+// in the shared content-addressed blob store, addressed by the handle Digest).
+// Read-only: it copies, so a caller can never mutate the live gate. Additive — it
+// changes no Admit/PageIn/Clear behaviour.
+func (m *MMU) Held() map[string]abi.Ref {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	out := make(map[string]abi.Ref, len(m.held))
+	for id, h := range m.held {
+		out[id] = h
+	}
+	return out
+}
+
+// Cleared returns a copy of the set of ids that passed a witness Clear(). The
+// recall leaf persists this alongside Held so a dead session reloads with its
+// exact clearance state (an id cleared in the live session stays cleared; an
+// uncleared injection stays sealed). Read-only copy; additive.
+func (m *MMU) Cleared() map[string]bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	out := make(map[string]bool, len(m.cleared))
+	for id, ok := range m.cleared {
+		out[id] = ok
+	}
+	return out
+}
+
+// HeldLen reports the current number of quarantine handles in the bounded ledger
+// (≤ maxHeld). Evicted reports how many were dropped by the bound over the gate's
+// lifetime. Together they make the leak fix observable: HeldLen plateaus at the cap
+// while Evicted climbs, instead of HeldLen growing without bound.
+func (m *MMU) HeldLen() int {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return len(m.held)
+}
+
+// Evicted reports the lifetime count of held entries dropped by the maxHeld bound.
+func (m *MMU) Evicted() int64 { return atomic.LoadInt64(&m.evicted) }
+
+// PollutionRate is quarantined/total (unit 66).
+func (m *MMU) PollutionRate() (quarantined, total int64, rate float64) {
+	q := atomic.LoadInt64(&m.quarantine)
+	t := atomic.LoadInt64(&m.total)
+	if t > 0 {
+		rate = float64(q) / float64(t)
+	}
+	return q, t, rate
+}
+
+// Quarantined reports whether a result was held out of context.
+func Quarantined(r *abi.Result) bool {
+	return r != nil && r.Meta != nil && r.Meta["quarantine_id"] != ""
+}
+
+func (m *MMU) bytes(ctx context.Context, r abi.Ref) []byte {
+	if r.Kind == abi.RefInline {
+		return r.Inline
+	}
+	if res := abi.ActiveResolver(); res != nil {
+		if b, err := res.Resolve(ctx, r); err == nil {
+			return b
+		}
+	}
+	return nil
+}
+
+func hasInjection(b []byte) bool {
+	s := strings.ToLower(string(b))
+	for _, m := range injectionMarkers {
+		if strings.Contains(s, m) {
+			return true
+		}
+	}
+	return false
+}
+
+// repeats flags a result with a long run of one repeated chunk (a degenerate /
+// pollution payload), independent of posttool stream-loop signals.
+func repeats(b []byte) bool {
+	if len(b) < 512 {
+		return false
+	}
+	const chunk = 16
+	first := b[:chunk]
+	reps := 0
+	for i := 0; i+chunk <= len(b); i += chunk {
+		if string(b[i:i+chunk]) == string(first) {
+			reps++
+			if reps > 50 {
+				return true
+			}
+		} else {
+			reps = 0
+		}
+	}
+	return false
+}
+
+// ScreenBytes reports whether bytes must be held out of model-visible transcript.
+// It is the reusable predicate behind both the context-MMU's post-tool admission
+// gate and closed-API clients' pre-send transcript quarantine.
+func ScreenBytes(body []byte) (abi.ReasonCode, bool) {
+	if secretPattern.Match(body) {
+		return abi.ReasonSecretExfil, true
+	}
+	if hasInjection(body) {
+		return abi.ReasonTrustViolation, true
+	}
+	if repeats(body) {
+		return abi.ReasonOversize, true
+	}
+	return abi.ReasonNone, false
+}
+
+// ---------------------------------------------------------------------------
+// Write-time durability classification (S7 rung 1 — issue #496).
+//
+// The write gate decides WHETHER a result may enter context; it never decided HOW
+// LONG it should be believed. classifyDurability assigns a result a durability class
+// from a cheap lexical/tense prior, and MMU.Admit stamps it on Verdict.Meta. The
+// downstream durable boundary (recall's promotion gate) reads it to enforce the
+// headline inversion: expire by default, promotion is the earned exception.
+// ---------------------------------------------------------------------------
+
+// Durability classes ride the OPEN Verdict.Meta map under DurabilityKey — orthogonal
+// to the trust Kind, additive over the frozen ABI (TestABIGoldenFreeze does not move).
+// v1 emits {turn, session, durable}; `bounded` is a RESERVED value the lexical prior
+// does not emit (it has no validity-interval home until rung 2). Readers degrade an
+// unknown/`bounded` value fail-closed to turn.
+const (
+	DurabilityKey     = "durability"
+	DurabilityTurn    = "turn"    // true only this turn; the fail-closed default
+	DurabilitySession = "session" // true for this session
+	DurabilityDurable = "durable" // true across sessions until revised — the only promotable class
+)
+
+var (
+	// durableFrame: habitual/stative frames => durable (stated preferences, identity).
+	// Deliberately NARROW — a false-positive promotion (a transient fact recalled as
+	// current truth) is "strictly worse than absence" (CONTEXT-IS-NOT-MEMORY.md §4), so
+	// weak copular/imperative alternations are excluded: `my <noun> is` is whitelisted
+	// to identity/disposition nouns (NOT the generic `my \w+ is`, which fired on
+	// `my build is failing right now`), and bare `i am a` / `call me` / `we work` are
+	// dropped (they fire on `I am a bit busy`, `call me back later`, `we work until 5pm`).
+	// RE2 has no negative lookahead, so the safe shape is a noun whitelist, not exclusion.
+	durableFrame = regexp.MustCompile(`(?i)\b(prefers?|preferred|preference|i always|i usually|i normally|we (?:use|prefer)|my (?:name|role|title|pronouns?|timezone|tz|email|handle|username|nickname|birthday|address|favou?rite \w+) is)\b`)
+	// sessionFrame: explicit session-scoped frames => session.
+	sessionFrame = regexp.MustCompile(`(?i)(\bthis session\b|\bthis branch\b|\bworking on\b|\btoday'?s task\b|\bcurrent task\b|\bfor now\b)`)
+	// turnFrame: punctual/progressive deictics + bare clock times => turn.
+	turnFrame = regexp.MustCompile(`(?i)(\bright now\b|\bcurrently\b|\btoday\b|\bat the moment\b|\bas of now\b|\bit is now\b|\b\d{1,2}\s*(?:am|pm)\b|\b\d{1,2}:\d{2}\b|o'?clock)`)
+)
+
+// classifyDurability assigns a rung-1 write-time durability class to a produced result
+// from a cheap lexical/tense prior over the bytes — NO model call, and explicitly NOT
+// the Zhang-Choi fact-duration estimator (CONTEXT-IS-NOT-MEMORY.md §5), which has no
+// callsite and is deferred. It leans on bytes (and may consult the tool) only; it does
+// NOT take a turn index / session id / principal / as-of clock — threading those into
+// the hot ResultAdmitter signature is a named follow-on, not this rung.
+//
+// Precedence is most-durable-first so a stated preference is durable even if it also
+// mentions "today"; a clearly session-scoped frame ("today's task") beats the bare
+// "today" deictic; everything unmatched fails closed to turn, because a false-positive
+// promotion (a poltergeist fact recalled as current) is the expensive error direction.
+func classifyDurability(c *abi.ToolCall, body []byte) string {
+	_ = c // reserved: a future tool prior (a clock/now source is inherently turn-class)
+	switch {
+	case durableFrame.Match(body):
+		return DurabilityDurable
+	case sessionFrame.Match(body):
+		return DurabilitySession
+	case turnFrame.Match(body):
+		return DurabilityTurn
+	default:
+		return DurabilityTurn
+	}
+}
+
+func putJSON(ctx context.Context, v any) (abi.Ref, bool) {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return abi.Ref{}, false
+	}
+	if res := abi.ActiveResolver(); res != nil {
+		if ref, err := res.Put(ctx, b); err == nil {
+			return ref, true
+		}
+	}
+	return abi.Ref{Kind: abi.RefInline, Inline: b, Len: int64(len(b))}, true
+}
+
+// Default is the registered MMU.
+var Default = New()
+
+func init() {
+	abi.RegisterResultAdmitter(10, Default)
+	abi.RegisterCapability("ctxmmu.v1")
+}

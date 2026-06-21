@@ -1,0 +1,236 @@
+# Alert rules for the Fleet Bottleneck engine (metrics emitted by
+# fleet_bottleneck.py /metrics, namespace fleet_). Mirrors the metrics-service
+# alert structure: grouped by layer, severity label + summary/description.
+# The generic Top-10 rules at the bottom fire for ANY class crossing a severity
+# band (the title/layer travel in $labels), so new bottleneck classes are covered
+# without adding a rule.
+groups:
+  - name: fleet_availability
+    rules:
+      - alert: FleetBottleneckEngineDown
+        expr: up{job="fleet_bottleneck"} == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Fleet bottleneck engine is not scrapeable"
+          description: "Prometheus cannot scrape fleet_bottleneck.py at :9095/metrics for 1m — you are flying blind. Is `python tools/fleet_bottleneck.py serve` running?"
+
+      - alert: FleetHealthCritical
+        expr: fleet_health_state >= 2
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Fleet health is CRITICAL"
+          description: "fleet_health_state = {{ $value }} (2 critical / 3 down) for 1m — at least one CRITICAL bottleneck is binding throughput."
+
+      - alert: FleetAllAccountsThrottled
+        expr: fleet_accounts_throttled >= fleet_accounts and fleet_accounts > 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Every account is rate-limited"
+          description: "All accounts throttled (fleet_accounts_throttled = fleet_accounts) — the whole fleet has stalled on its external ceiling. Wait for reset or add account capacity."
+
+  - name: fleet_account_ceiling
+    rules:
+      - alert: FleetAuthBlocked
+        expr: fleet_workers_auth_blocked > 0
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Workers blocked on authentication"
+          description: "{{ $value }} worker(s) need /login for 2m — a human must re-auth the owning account (run /login under its CLAUDE_CONFIG_DIR). That account contributes zero until then."
+
+      - alert: FleetThrottleSaturation
+        expr: fleet_bottleneck_score{id="throttle_saturation"} >= 55
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Rate-limit / throttle saturation"
+          description: "throttle_saturation score {{ $value }} (layer {{ $labels.layer }}) — most in-flight workers sit on a rate-limited account. Spread work across accounts or wait for reset."
+
+  - name: fleet_recovery
+    rules:
+      - alert: FleetResumeBacklog
+        expr: fleet_resume_queue > 0
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Crash-resume backlog not draining"
+          description: "{{ $value }} worker(s) queued AUTO_RESUME but not recovered for 10m — confirm the resume watchdog is scheduled and in LIVE mode (DRY-RUN never resumes)."
+
+      - alert: FleetSurfaceBacklog
+        expr: fleet_surface_backlog > 5
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Dead-crash surfacing backlog"
+          description: "{{ $value }} crashed/stopped interactive worker(s) flagged for human review (action=SURFACE) for 15m — triage them (resume the keepers, close the rest)."
+
+      - alert: FleetRecoveryStale
+        expr: fleet_bottleneck_score{id="recovery_stale"} >= 55
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Recovery plumbing is stale"
+          description: "recovery_stale score {{ $value }} — the supervisor/resume watchdog looks down while workers need recovery. Nothing self-heals until you restart it."
+
+  - name: fleet_provider
+    rules:
+      - alert: FleetApiErrorStalls
+        expr: fleet_api_error_stalls > 3
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Workers stalling on API errors"
+          description: "{{ $value }} worker(s) stopped on a transient API/transport error (STOPPED_APIERR) for 5m — if climbing, the upstream API is degraded. Check provider status before adding load."
+
+  - name: fleet_cost
+    rules:
+      - alert: FleetTokenWaste
+        expr: fleet_cache_hit_ratio_median < 0.8
+        for: 30m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Low prompt-cache reuse (token waste)"
+          description: "Median per-session cache-hit {{ $value | printf \"%.2f\" }} below 0.80 for 30m — workers are re-reading context instead of reusing the prompt cache. Inspect the worst-cache sessions."
+
+  - name: fleet_observability
+    rules:
+      - alert: FleetTelemetryStale
+        expr: fleet_registry_age_minutes > 15
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Fleet telemetry is stale"
+          description: "Session registry is {{ $value | printf \"%.0f\" }} min old — every signal reflects a fleet that may have changed. Re-run `python tools/fleet_sessions.py registry`."
+
+      - alert: FleetSnapshotStale
+        expr: (time() - fleet_snapshot_timestamp_seconds) > 600
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Bottleneck snapshot not refreshing"
+          description: "The engine last produced a snapshot {{ $value | printf \"%.0f\" }}s ago — the serve loop or cron refresh has stopped. Metrics are frozen."
+
+  - name: fleet_top10_generic
+    rules:
+      - alert: FleetBottleneckCritical
+        expr: fleet_bottleneck_score >= 80
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "CRITICAL bottleneck: {{ $labels.title }}"
+          description: "{{ $labels.title }} ({{ $labels.layer }}) scored {{ $value }} — it is the most likely actual limiter right now. See the Grafana dashboard / `python tools/fleet_bottleneck.py report` for the fix."
+
+      - alert: FleetBottleneckHigh
+        expr: fleet_bottleneck_score >= 55
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "HIGH bottleneck: {{ $labels.title }}"
+          description: "{{ $labels.title }} ({{ $labels.layer }}) scored {{ $value }} for 5m. Check the ranked card for the recommended fix."
+
+  - name: fak_gateway_availability
+    rules:
+      - alert: FakGatewayDown
+        # `up == 0` is the authoritative "process gone" signal — critical/2m to match
+        # FleetBottleneckEngineDown. (A self-report `fak_gateway_up != 1` rule was removed:
+        # the gateway emits fak_gateway_up as a constant 1, so when it is alive the metric
+        # is 1 and when it is dead the series is absent — `!= 1` can never fire. This `up`
+        # scrape check is the real down-detector; do not replace it with a self-report.)
+        expr: up{job="fak_gateway"} == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "fak gateway metrics are not scrapeable"
+          description: "Prometheus cannot scrape fak serve at :8080/metrics for 2m. If the gateway is expected to be live, start `fak serve` or check bearer-auth scrape credentials."
+
+  - name: fak_gateway_request_path
+    rules:
+      - alert: FakGateway5xx
+        expr: sum(rate(fak_gateway_http_requests_total{status=~"5.."}[5m])) > 0
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "fak gateway is returning 5xx responses"
+          description: "Gateway 5xx response rate is {{ $value | printf \"%.3f\" }}/s for 2m. Check upstream model errors and gateway logs."
+
+      - alert: FakGatewayHighHTTPP95
+        expr: histogram_quantile(0.95, sum by (le) (rate(fak_gateway_http_request_duration_seconds_bucket[5m]))) > 2
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "fak gateway HTTP p95 latency is high"
+          description: "Gateway HTTP p95 latency is {{ $value | printf \"%.2f\" }}s for 5m. Split by route in the FAK Gateway Observability dashboard."
+
+      - alert: FakGatewayHighInflight
+        expr: fak_gateway_inflight_requests > 50
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "fak gateway has high inflight request count"
+          description: "{{ $value }} gateway requests have been inflight for 5m. Check upstream model latency, clients, or stuck connections."
+
+      # Fires WHILE a request is still running, not after it completes. The HTTP
+      # p95/duration histograms only observe a request once it returns, so a single
+      # request wedged on a slow or hung upstream is invisible to them (and to the
+      # count-based HighInflight rule) until it finally finishes -- or never, if it
+      # hangs. fak_gateway_inflight_max_age_seconds is computed at scrape time from
+      # the set of in-flight requests, so this is the live "a request is stuck right
+      # now" signal. 120s is well past a healthy upstream round-trip.
+      - alert: FakGatewayRequestStuck
+        expr: fak_gateway_inflight_max_age_seconds > 120
+        for: 1m
+        labels:
+          severity: warning
+        annotations:
+          summary: "fak gateway has a request stuck in flight"
+          description: "The oldest in-flight gateway request has been running for {{ $value | printf \"%.0f\" }}s (still executing). Likely a slow or hung upstream model call or a stuck client connection -- inspect gateway logs and the upstream provider."
+
+  - name: fak_gateway_kernel_path
+    rules:
+      - alert: FakGatewayDenyRatioHigh
+        expr: sum(rate(fak_gateway_operations_total{verdict="DENY"}[5m])) / clamp_min(sum(rate(fak_gateway_operations_total[5m])), 0.001) > 0.5
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "fak gateway deny ratio is high"
+          description: "More than half of gateway kernel operations are DENY verdicts for 10m. This may be expected during an attack test; otherwise inspect client/tool drift."
+
+      - alert: FakGatewayQuarantineObserved
+        expr: increase(fak_kernel_quarantines_total[5m]) > 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "fak gateway quarantined a result"
+          description: "{{ $value }} result quarantine(s) observed in 5m. Treat this as a trust-floor event and inspect the trace/client that supplied the result."
+
+      - alert: FakGatewayHighOperationP95
+        expr: histogram_quantile(0.95, sum by (le) (rate(fak_gateway_operation_duration_seconds_bucket[5m]))) > 1
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "fak gateway kernel operation p95 latency is high"
+          description: "Gateway syscall/adjudicate/admit p95 latency is {{ $value | printf \"%.2f\" }}s for 5m. Split by operation in the dashboard."

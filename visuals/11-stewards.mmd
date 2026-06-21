@@ -1,0 +1,47 @@
+%%{init: {'theme':'base','themeVariables':{'fontFamily':'Segoe UI, Helvetica, Arial, sans-serif','fontSize':'14px','lineColor':'#5B6B7B','primaryColor':'#DCE9FB','primaryTextColor':'#1B3A66','primaryBorderColor':'#3B6FB5','clusterBkg':'#F7F9FB','clusterBorder':'#AFC0CE'}}}%%
+flowchart TD
+  meta["META-STEWARD<br/>invariant: 'stewards still earn their keep'<br/>prunes non-firing, proposes new ones (RSI hook)"]
+  punch["one steward per invariant<br/>fail-to-abstain"]
+
+  subgraph pop["population of single-invariant stewards (cheap CPU/DRAM tier)"]
+    s1["steward A<br/>'no two agents on the same lane'"]
+    s2["steward B<br/>'every claimed ship has a backing commit'"]
+    s3["steward C<br/>'no plan BLOCKED twice on the same cause'"]
+  end
+
+  fleet[["The Fleet (agents on lanes)"]]
+  gate{"witness it did NOT author?"}
+  fires["FIRES with witness"]
+  abst["ABSTAINS (no independent evidence)"]
+
+  meta -.-> pop
+  punch -.- meta
+
+  s1 -.watches.-> fleet
+  s2 -.watches.-> fleet
+  s3 -.watches.-> fleet
+
+  pop --> gate
+  gate -- yes --> fires
+  gate -- no --> abst
+  fires == "steering: rebalance lane / demote draft class" ==> fleet
+
+  class meta cheap
+  class s1,s2,s3 cheap
+  class pop cheap
+  class fleet world
+  class gate gate
+  class fires deny
+  class abst pass
+  class punch note
+
+classDef untrusted fill:#FFE9D6,stroke:#E8833A,stroke-width:2px,color:#7A3E12;
+classDef kernel fill:#DCE9FB,stroke:#3B6FB5,stroke-width:2px,color:#1B3A66;
+classDef gate fill:#FFF3CC,stroke:#C9A227,stroke-width:2px,color:#6B5410;
+classDef pass fill:#DBF3E1,stroke:#3FA45F,stroke-width:2px,color:#1C5230;
+classDef deny fill:#FBDDDD,stroke:#C9453F,stroke-width:2px,color:#6E1F1B;
+classDef mem fill:#EDE7FB,stroke:#7B5BC0,stroke-width:2px,color:#3A2A66;
+classDef cheap fill:#E8ECEF,stroke:#7A8A99,stroke-width:1.5px,color:#33424F;
+classDef world fill:#FCEEDB,stroke:#B5792B,stroke-width:2px,color:#5E3D12;
+classDef frontier fill:#E7D9F5,stroke:#8A53C0,stroke-width:2px,color:#3F2466;
+classDef note fill:#F7F9FB,stroke:#AFC0CE,stroke-width:1px,color:#46586A;

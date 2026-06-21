@@ -1,0 +1,210 @@
+name: Release cadence
+
+# Fleet's release cadence is evidence-driven and dry-run-first. Scheduled ticks
+# decide and plan, but do not mutate the repo. A manual dispatch with
+# dry_run=false is the explicit arm for commit -> push -> CI witness -> tag ->
+# GitHub release.
+on:
+  schedule:
+    - cron: "37 */6 * * *"
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Decide and plan the cut, but do not commit, push, or tag"
+        type: boolean
+        default: true
+      require_ci_green:
+        description: "Block when the current trunk CI state cannot be confirmed green"
+        type: boolean
+        default: true
+      force:
+        description: "Bypass only the substantive-commit floor; CI/drift/parse gates still bind"
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-cadence
+  cancel-in-progress: false
+
+jobs:
+  cadence:
+    name: decide, plan, and optionally release
+    if: github.ref_name == 'main' || github.ref_name == 'master'
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    permissions:
+      contents: write
+      actions: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref_name }}
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Release status snapshot
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          python tools/release_status.py --json --require-ci-green --skip-gh --skip-cut-plan --limit-commits 50 > release-status.json
+          cat release-status.json
+          action="$(python -c 'import json; print(json.load(open("release-status.json"))["next_action"]["kind"])')"
+          detail="$(python -c 'import json; print(json.load(open("release-status.json"))["next_action"]["detail"])')"
+          {
+            echo "## Release status"
+            echo ""
+            echo "\`$action\` - $detail"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Decide release readiness
+        id: decide
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          flags=(--json --limit-commits 50)
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            [ "${{ inputs.require_ci_green }}" = "true" ] && flags+=(--require-ci-green)
+            [ "${{ inputs.force }}" = "true" ] && flags+=(--force)
+          else
+            flags+=(--require-ci-green)
+          fi
+
+          set +e
+          python tools/release_decide.py "${flags[@]}" > decision.json
+          code=$?
+          set -e
+          cat decision.json
+          if [ "$code" -ne 0 ] && [ "$code" -ne 2 ]; then
+            exit "$code"
+          fi
+
+          decision="$(python -c 'import json; print(json.load(open("decision.json"))["decision"])')"
+          level="$(python -c 'import json; print(json.load(open("decision.json")).get("level") or "")')"
+          version="$(python -c 'import json; print(json.load(open("decision.json")).get("next_version") or "")')"
+          reason="$(python -c 'import json; print(json.load(open("decision.json")).get("reason") or "")')"
+          {
+            echo "decision=$decision"
+            echo "level=$level"
+            echo "version=$version"
+          } >> "$GITHUB_OUTPUT"
+          {
+            echo "## Release cadence: $decision"
+            echo ""
+            echo "$reason"
+            if [ "$decision" = "release" ]; then
+              echo ""
+              echo "Planned: \`v$version\` ($level)"
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Hold without mutation
+        if: steps.decide.outputs.decision != 'release'
+        run: |
+          echo "cadence: hold; no release work to perform."
+
+      - name: Plan release cut
+        if: steps.decide.outputs.decision == 'release'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          python tools/release_cut.py --json --require-ci-green --limit-commits 50 > cut-plan.json
+          cat cut-plan.json
+          ok="$(python -c 'import json; print(json.load(open("cut-plan.json"))["ok"])')"
+          if [ "$ok" != "True" ]; then
+            echo "::error::release_cut dry-run refused"
+            exit 1
+          fi
+
+      - name: Dry-run stop
+        if: >-
+          steps.decide.outputs.decision == 'release' &&
+          (github.event_name == 'schedule' || inputs.dry_run)
+        run: |
+          echo "## Dry-run only" >> "$GITHUB_STEP_SUMMARY"
+          echo "Scheduled ticks and default manual runs stop after the plan. Dispatch with dry_run=false to execute." >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Cut release commit
+        id: cut
+        if: >-
+          steps.decide.outputs.decision == 'release' &&
+          github.event_name == 'workflow_dispatch' &&
+          inputs.dry_run == false
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          git config user.name "fleet-release-cadence[bot]"
+          git config user.email "fleet-release-cadence@users.noreply.github.com"
+          python tools/release_cut.py --execute --json --require-ci-green --limit-commits 50 > cut.json
+          cat cut.json
+          ok="$(python -c 'import json; print(json.load(open("cut.json"))["ok"])')"
+          if [ "$ok" != "True" ]; then
+            echo "::error::release_cut execute refused"
+            exit 1
+          fi
+          version="$(python -c 'import json; print(json.load(open("cut.json"))["version"])')"
+          sha="$(git rev-parse HEAD)"
+          {
+            echo "version=$version"
+            echo "sha=$sha"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Push trunk
+        if: steps.cut.outputs.sha != ''
+        run: |
+          set -euo pipefail
+          python tools/fleet_control_pane.py publish --apply --json > publish.json
+          cat publish.json
+          ok="$(python -c 'import json; print(json.load(open("publish.json"))["ok"])')"
+          if [ "$ok" != "True" ]; then
+            echo "::error::checked publish refused"
+            exit 1
+          fi
+
+      - name: Tag after green CI
+        id: tag
+        if: steps.cut.outputs.sha != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          python tools/release_tag.py \
+            --version "${{ steps.cut.outputs.version }}" \
+            --ref HEAD \
+            --require-ci \
+            --wait-ci \
+            --execute \
+            --push \
+            --json > tag.json
+          cat tag.json
+          ok="$(python -c 'import json; print(json.load(open("tag.json"))["ok"])')"
+          if [ "$ok" != "True" ]; then
+            echo "::error::release_tag refused"
+            exit 1
+          fi
+
+      - name: GitHub release
+        if: steps.cut.outputs.sha != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          python tools/release_publish.py \
+            --version "${{ steps.cut.outputs.version }}" \
+            --execute \
+            --json > release-publish.json
+          cat release-publish.json
+          ok="$(python -c 'import json; print(json.load(open("release-publish.json"))["ok"])')"
+          if [ "$ok" != "True" ]; then
+            echo "::error::release_publish refused"
+            exit 1
+          fi

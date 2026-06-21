@@ -1,0 +1,29 @@
+#version 450
+// rope.comp — HF non-interleaved rotate_half RoPE at one absolute position `pos`.
+// Mirrors k_rope: one invocation per (head, j) pair rotates the (j, j+half) lane pair.
+// theta is passed as a float push constant (the angle math is done in fp32 on-device;
+// the cpuref does it in fp64 then stores fp32 — this is part of why the backend is Approx,
+// and the Approx gate tolerates it).
+layout(local_size_x = 128) in;
+
+layout(std430, binding = 0) buffer Xbuf { float X[]; };
+
+layout(push_constant) uniform Push {
+    int pos; int nHeads; int headDim; float theta;
+} pc;
+
+void main() {
+    int hf = pc.headDim / 2;                       // 'half' is a GLSL reserved word
+    uint t = gl_GlobalInvocationID.x;             // one (head, j) pair
+    if (t >= uint(pc.nHeads) * uint(hf)) return;
+    int h = int(t) / hf;
+    int j = int(t) % hf;
+    float inv = pow(pc.theta, float(2 * j) / float(pc.headDim));
+    float a = float(pc.pos) / inv;                // pos * theta^(-2j/d)
+    float c = cos(a), s = sin(a);
+    uint base = uint(h) * uint(pc.headDim);
+    float x0 = X[base + uint(j)];
+    float x1 = X[base + uint(j + hf)];
+    X[base + uint(j)]      = x0 * c - x1 * s;
+    X[base + uint(j + hf)] = x1 * c + x0 * s;
+}

@@ -1,0 +1,41 @@
+%%{init: {'theme':'base','themeVariables':{'fontFamily':'Segoe UI, Helvetica, Arial, sans-serif','fontSize':'14px','lineColor':'#5B6B7B','primaryColor':'#DCE9FB','primaryTextColor':'#1B3A66','primaryBorderColor':'#3B6FB5','clusterBkg':'#F7F9FB','clusterBorder':'#AFC0CE'}}}%%
+flowchart TD
+  t(["LIVE: a tool returns the poisoned refund policy"])
+  adm{"ctxmmu.Admit — write-time gate"}
+  held["QUARANTINE — bytes held out of context, a stub left behind"]
+  persist[("recall.Persist → manifest.json + cas.json<br/>(sealed bytes on the content-addressed swap device)")]
+  boundary["═══ PROCESS BOUNDARY — the run returns, process memory is gone ═══"]
+  load["recall.Load → a FRESH Session (its own CAS + a fresh gate)"]
+  rb(["follow-up: Resolve(benign account)"])
+  okb["RESOLVED byte-identical — 0 model tokens"]
+  rp(["follow-up: Resolve(poison policy)"])
+  w{"witness Clear() ran?"}
+  refnw["REFUSED — sealed, no witness"]
+  rs{"content re-screen (fresh ctxmmu.Admit)"}
+  refls["REFUSED — clearance does not launder poison"]
+  t --> adm --> held --> persist --> boundary --> load
+  load --> rb --> okb
+  load --> rp --> w
+  w -->|"no"| refnw
+  w -->|"yes"| rs
+  rs -->|"still flagged"| refls
+  kn["⚡ the seal OUTLIVES the process — no transcript-replay memory system does this"]
+  refls -.- kn
+  classDef untrusted fill:#FFE9D6,stroke:#E8833A,stroke-width:2px,color:#7A3E12;
+  classDef kernel fill:#DCE9FB,stroke:#3B6FB5,stroke-width:2px,color:#1B3A66;
+  classDef gate fill:#FFF3CC,stroke:#C9A227,stroke-width:2px,color:#6B5410;
+  classDef pass fill:#DBF3E1,stroke:#3FA45F,stroke-width:2px,color:#1C5230;
+  classDef deny fill:#FBDDDD,stroke:#C9453F,stroke-width:2px,color:#6E1F1B;
+  classDef mem fill:#EDE7FB,stroke:#7B5BC0,stroke-width:2px,color:#3A2A66;
+  classDef cheap fill:#E8ECEF,stroke:#7A8A99,stroke-width:1.5px,color:#33424F;
+  classDef world fill:#FCEEDB,stroke:#B5792B,stroke-width:2px,color:#5E3D12;
+  classDef frontier fill:#E7D9F5,stroke:#8A53C0,stroke-width:2px,color:#3F2466;
+  classDef note fill:#F7F9FB,stroke:#AFC0CE,stroke-width:1px,color:#46586A;
+  class t,rb,rp untrusted;
+  class adm,w,rs gate;
+  class held,refnw,refls deny;
+  class persist mem;
+  class load kernel;
+  class boundary note;
+  class okb pass;
+  class kn note;

@@ -1,0 +1,6 @@
+%%{init: {'theme':'base','themeVariables':{'fontFamily':'Segoe UI, Helvetica, Arial, sans-serif','xyChart':{'backgroundColor':'#F7F9FB','titleColor':'#1B3A66','xAxisLabelColor':'#1B3A66','yAxisLabelColor':'#1B3A66','xAxisTitleColor':'#1B3A66','yAxisTitleColor':'#1B3A66','plotColorPalette':'#3FA45F'}}}}%%
+xychart-beta
+  title "Fig 33 - Prefill-256 ms ladder -> parity (log10, lower better; Act5 per-token 1.03x vs llama.cpp)"
+  x-axis ["serial GEMV (Act1)", "f32 batched (Act2)", "Q8 legacy (Act3)", "Q8 tile (Act4)", "Q8 parity (Act5)", "llama.cpp Q8 (1t)"]
+  y-axis "log10( prefill-256 ms )" 1.5 --> 4.2
+  bar [4.04, 2.83, 2.48, 2.16, 2.02, 1.87]

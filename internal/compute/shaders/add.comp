@@ -1,0 +1,13 @@
+#version 450
+// add.comp — dst += src, elementwise, length n. Mirrors k_add (the residual add).
+layout(local_size_x = 256) in;
+
+layout(std430, binding = 0) buffer Dbuf { float D[]; };
+layout(std430, binding = 1) readonly buffer Sbuf { float S[]; };
+
+layout(push_constant) uniform Push { int n; } pc;
+
+void main() {
+    uint i = gl_GlobalInvocationID.x;
+    if (i < uint(pc.n)) D[i] += S[i];
+}

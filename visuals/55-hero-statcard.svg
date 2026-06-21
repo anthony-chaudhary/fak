@@ -1,0 +1,219 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1440" height="1080" viewBox="0 0 1440 1080" role="img" aria-labelledby="sc-title sc-desc">
+  <title id="sc-title">fak benchmark breadth — a three-pillar capability sweep (serving, correctness, security kernel) with an honest single-stream fence</title>
+  <desc id="sc-desc">fak owns the whole agent-infrastructure boundary. Breadth across three pillars — it does the SOTA serving stack's reuse, AND owns the safety/correctness boundary they don't, proven exact, at syscall speed. Every number traces to fak/BENCHMARK-AUTHORITY.md.</desc>
+  <defs>
+    <linearGradient id="sc-bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#f7f9fb"/>
+      <stop offset="55%" stop-color="#eef4f1"/>
+      <stop offset="100%" stop-color="#f8f3ee"/>
+    </linearGradient>
+    <style>
+      .kick { font: 800 13px "Segoe UI", Arial, sans-serif; fill: #2e8b57; letter-spacing: 2px; }
+      .ti   { font: 900 40px "Segoe UI", Arial, sans-serif; fill: #14202b; }
+      .sub  { font: 400 19px "Segoe UI", Arial, sans-serif; fill: #415266; }
+      .pchip { font: 700 12px "Segoe UI", Arial, sans-serif; fill: #5b6a7a; }
+      .rlab { font: 800 12px "Segoe UI", Arial, sans-serif; fill: #5b6a7a; letter-spacing: 1.5px; }
+      .rbody { font: 400 14px "Segoe UI", Arial, sans-serif; fill: #415266; }
+      .rchipT { font: 700 13px "Segoe UI", Arial, sans-serif; fill: #1b2733; }
+      .rchipN { font: 400 11px "Segoe UI", Arial, sans-serif; fill: #6a7a89; }
+      .brkt { font: 800 11px "Segoe UI", Arial, sans-serif; fill: #14202b; }
+      .brktG { font: 700 10px "Segoe UI", Arial, sans-serif; fill: #6a7685; }
+      .imlab { font: 800 11px "Segoe UI", Arial, sans-serif; fill: #2e8b57; letter-spacing: 1px; }
+      .imbody { font: 400 13px "Segoe UI", Arial, sans-serif; fill: #1b2733; }
+      .pull { font: 800 17px "Segoe UI", Arial, sans-serif; fill: #ffffff; }
+      .bandT { font: 800 15px "Segoe UI", Arial, sans-serif; fill: #ffffff; }
+      .bandR { font: 700 11px "Segoe UI", Arial, sans-serif; fill: #ffffff; fill-opacity: 0.85; }
+      .shead { font: 400 12px "Segoe UI", Arial, sans-serif; fill: #5b6a7a; }
+      .tlab { font: 700 14px "Segoe UI", Arial, sans-serif; fill: #1b2733; }
+      .tbase { font: 400 10.5px "Segoe UI", Arial, sans-serif; fill: #6a7a89; }
+      .big  { font: 900 33px "Segoe UI", Arial, sans-serif; }
+      .bigV { font: 900 25px "Segoe UI", Arial, sans-serif; }
+      .tsub { font: 700 13px "Segoe UI", Arial, sans-serif; fill: #415266; }
+      .note { font: 400 11px "Segoe UI", Arial, sans-serif; fill: #5b6a7a; }
+      .barcap { font: 400 9.5px "Segoe UI", Arial, sans-serif; fill: #8090a0; }
+      .chipt { font: 700 11px "Segoe UI", Arial, sans-serif; }
+      .commit { font: 400 12px "Segoe UI", Arial, sans-serif; fill: #8090a0; }
+      .fhead { font: 800 14px "Segoe UI", Arial, sans-serif; fill: #b06a2a; }
+      .flab { font: 700 13px "Segoe UI", Arial, sans-serif; fill: #1b2733; }
+      .fown { font: 800 14px "Segoe UI", Arial, sans-serif; fill: #1b2733; }
+      .ffak { font: 800 15px "Segoe UI", Arial, sans-serif; fill: #b06a2a; }
+      .fnote { font: 400 12px "Segoe UI", Arial, sans-serif; fill: #5b6a7a; }
+      .ft1 { font: 800 16px "Segoe UI", Arial, sans-serif; fill: #14202b; }
+      .ft2 { font: 700 14px "Segoe UI", Arial, sans-serif; fill: #3a7d9c; }
+      .ftr { font: 400 12px "Segoe UI", Arial, sans-serif; fill: #5b6a7a; }
+    </style>
+  </defs>
+  <rect width="1440" height="1080" fill="url(#sc-bg)"/>
+  <rect x="24" y="20" width="1392" height="1040" rx="12" fill="#ffffff" opacity="0.62" stroke="#d9e1e8"/>
+  <text x="56" y="70" class="kick">CAPABILITY SWEEP · THE AGENT-INFRASTRUCTURE KERNEL</text>
+  <text x="56" y="116" class="ti">fak owns the whole agent-infrastructure boundary</text>
+  <text x="56" y="150" class="sub">Breadth across three pillars — it does the SOTA serving stack's reuse, AND owns the safety/correctness boundary they don't, proven exact, at syscall speed.</text>
+  <line x1="56" y1="172" x2="1384" y2="172" stroke="#d9e1e8" stroke-width="1"/>
+  <rect x="40" y="196" width="320" height="660" rx="10" fill="#f4f8f6" stroke="#d9e1e8"/>
+  <text x="60" y="230" class="rlab">THE THESIS</text>
+  <text x="60" y="258" class="rbody">fak is the kernel under the agent</text>
+  <text x="60" y="278" class="rbody">stack — it does SOTA reuse, proves</text>
+  <text x="60" y="298" class="rbody">that reuse is exact, and makes the</text>
+  <text x="60" y="318" class="rbody">permission gate a syscall.</text>
+  <rect x="96" y="364" width="236" height="52" rx="8" fill="#ffffff" stroke="#e3e9ee"/>
+  <rect x="96" y="364" width="5" height="52" rx="2.5" fill="#3a7d9c"/>
+  <text x="112" y="386" class="rchipT">SERVING reuse</text>
+  <text x="112" y="404" class="rchipN">SGLang · vLLM · llama.cpp parity</text>
+  <rect x="96" y="428" width="236" height="52" rx="8" fill="#ffffff" stroke="#e3e9ee"/>
+  <rect x="96" y="428" width="5" height="52" rx="2.5" fill="#7a5cb0"/>
+  <text x="112" y="450" class="rchipT">CORRECTNESS (exact)</text>
+  <text x="112" y="468" class="rchipN">they don't prove this</text>
+  <rect x="96" y="492" width="236" height="52" rx="8" fill="#ffffff" stroke="#e3e9ee"/>
+  <rect x="96" y="492" width="5" height="52" rx="2.5" fill="#1c7c92"/>
+  <text x="112" y="514" class="rchipT">SECURITY KERNEL</text>
+  <text x="112" y="532" class="rchipN">in-process — they don't own this</text>
+  <path d="M84 364 h-8 v180 h8" fill="none" stroke="#14202b" stroke-width="2"/>
+  <text x="74" y="454" class="brkt" text-anchor="middle" transform="rotate(-90 74 454)">fak spans all 3</text>
+  <path d="M340 364 h8 v52 h-8" fill="none" stroke="#6a7685" stroke-width="1.5"/>
+  <text x="352" y="430" class="brktG">SOTA serving</text>
+  <text x="352" y="442" class="brktG">= serving only</text>
+  <rect x="60" y="568" width="288" height="120" rx="8" fill="#edf7f0" stroke="#85bc98"/>
+  <text x="76" y="592" class="imlab">INDUSTRY IMPACT</text>
+  <text x="76" y="614" class="imbody">Serving engines accelerate one stream.</text>
+  <text x="76" y="631" class="imbody">fak eliminates redundant work across a</text>
+  <text x="76" y="648" class="imbody">fleet AND adjudicates every tool call</text>
+  <text x="76" y="665" class="imbody">in-process — one address space, no</text>
+  <text x="76" y="682" class="imbody">boundary tax.</text>
+  <rect x="60" y="704" width="288" height="64" rx="8" fill="#2e3a47"/>
+  <text x="78" y="732" class="pull">one chat → llama.cpp;</text>
+  <text x="78" y="756" class="pull">an agent fleet → fak.</text>
+  <text x="60" y="796" class="rchipN">Every number → fak/BENCHMARK-AUTHORITY.md</text>
+  <text x="60" y="812" class="rchipN">(commit + JSON artifact, per row).</text>
+  <rect x="392" y="196" width="320" height="46" rx="8" fill="#3a7d9c"/>
+  <text x="408" y="225" class="bandT">SERVING EFFICIENCY</text>
+  <text x="698" y="225" class="bandR" text-anchor="end">vs best shipped SOTA</text>
+  <text x="394" y="264" class="shead">vs the best already-shipped serving stack</text>
+  <rect x="392" y="286" width="320" height="132" rx="8" fill="#ffffff" stroke="#d9e1e8"/>
+  <text x="408" y="308" class="tlab">50-turn × 5-agent fleet serving</text>
+  <text x="408" y="354" class="big" style="fill:#1c7c92;">4.1×</text>
+  <text x="696" y="354" class="tsub" text-anchor="end">less serving work</text>
+  <text x="408" y="370" class="note">fak's own kernel, reuse isolated</text>
+  <rect x="408" y="390" width="77" height="18" rx="9" fill="#eef4f8" stroke="#3a7d9c"/>
+  <text x="446.5" y="403" class="chipt" text-anchor="middle" style="fill:#155a6b;">SOTA-style</text>
+  <text x="696" y="403" class="commit" text-anchor="end">2bbda6f</text>
+  <rect x="392" y="432" width="320" height="132" rx="8" fill="#ffffff" stroke="#d9e1e8"/>
+  <text x="408" y="454" class="tlab">KV-cache hit rate</text>
+  <text x="408" y="500" class="big" style="fill:#1c7c92;">86.7%</text>
+  <text x="696" y="500" class="tsub" text-anchor="end">= 100% of optimal</text>
+  <text x="408" y="516" class="tbase">matches SGLang RadixAttention 50–99% band</text>
+  <rect x="408" y="536" width="84" height="18" rx="9" fill="#eef4f8" stroke="#3a7d9c"/>
+  <text x="450.0" y="549" class="chipt" text-anchor="middle" style="fill:#155a6b;">SOTA-parity</text>
+  <text x="696" y="549" class="commit" text-anchor="end">92896a4</text>
+  <rect x="392" y="578" width="320" height="132" rx="8" fill="#ffffff" stroke="#d9e1e8"/>
+  <text x="408" y="600" class="tlab">RadixAttention live prefill speedup</text>
+  <text x="408" y="646" class="big" style="fill:#1c7c92;">6.95×</text>
+  <text x="696" y="646" class="tsub" text-anchor="end">fewer prefill FLOPs</text>
+  <rect x="408" y="656" width="200" height="7" rx="3" fill="#1c7c92" fill-opacity="0.15"/>
+  <rect x="408" y="656" width="185" height="7" rx="3" fill="#1c7c92"/>
+  <text x="408" y="677" class="barcap">93% of the 7.50× ceiling</text>
+  <rect x="408" y="682" width="44" height="18" rx="9" fill="#eef4f8" stroke="#3a7d9c"/>
+  <text x="430.0" y="695" class="chipt" text-anchor="middle" style="fill:#155a6b;">reuse</text>
+  <text x="696" y="695" class="commit" text-anchor="end">92896a4</text>
+  <rect x="392" y="724" width="320" height="132" rx="8" fill="#ffffff" stroke="#d9e1e8"/>
+  <text x="408" y="746" class="tlab">Long-context session value-add (T=512)</text>
+  <text x="408" y="792" class="big" style="fill:#6a7685;">139.3×</text>
+  <text x="696" y="792" class="tsub" text-anchor="end">less work</text>
+  <text x="408" y="808" class="tbase">vs a naive stateless re-prefill loop</text>
+  <rect x="408" y="828" width="103" height="18" rx="9" fill="#fff5e8" stroke="#dfbd78"/>
+  <text x="459.5" y="841" class="chipt" text-anchor="middle" style="fill:#b06a2a;">NAIVE baseline</text>
+  <text x="696" y="841" class="commit" text-anchor="end" style="fill:#b06a2a;">not a SOTA win</text>
+  <rect x="732" y="196" width="320" height="46" rx="8" fill="#7a5cb0"/>
+  <text x="748" y="225" class="bandT">CORRECTNESS</text>
+  <text x="1038" y="225" class="bandR" text-anchor="end">the reuse is EXACT</text>
+  <text x="734" y="264" class="shead">exact — what no serving engine proves</text>
+  <rect x="732" y="286" width="320" height="132" rx="8" fill="#ffffff" stroke="#d9e1e8"/>
+  <text x="748" y="308" class="tlab">Mid-run span eviction, causal</text>
+  <text x="748" y="324" class="tlab">invalidation</text>
+  <text x="748" y="368" class="bigV" style="fill:#7a5cb0;">✓ max|Δ|=0</text>
+  <text x="748" y="386" class="tbase">identical to a run that never saw the evicted span</text>
+  <rect x="748" y="390" width="44" height="18" rx="9" fill="#f1edf8" stroke="#7a5cb0"/>
+  <text x="770.0" y="403" class="chipt" text-anchor="middle" style="fill:#54458a;">exact</text>
+  <text x="1036" y="403" class="commit" text-anchor="end">0fc39aa</text>
+  <rect x="732" y="432" width="320" height="132" rx="8" fill="#ffffff" stroke="#d9e1e8"/>
+  <text x="748" y="454" class="tlab">Single-stream 7B greedy decode</text>
+  <text x="748" y="498" class="bigV" style="fill:#7a5cb0;">✓ 7/7</text>
+  <text x="748" y="516" class="tbase">exact parity vs llama.cpp on the same Q8 weights</text>
+  <rect x="748" y="536" width="51" height="18" rx="9" fill="#f1edf8" stroke="#7a5cb0"/>
+  <text x="773.5" y="549" class="chipt" text-anchor="middle" style="fill:#54458a;">parity</text>
+  <text x="1036" y="549" class="commit" text-anchor="end">34c74f4</text>
+  <rect x="732" y="578" width="320" height="132" rx="8" fill="#ffffff" stroke="#d9e1e8"/>
+  <text x="748" y="600" class="tlab">RadixAttention token reuse</text>
+  <text x="748" y="646" class="big" style="fill:#7a5cb0;">7.50×</text>
+  <text x="1036" y="646" class="tsub" text-anchor="end">fewer tokens</text>
+  <rect x="748" y="656" width="200" height="7" rx="3" fill="#7a5cb0" fill-opacity="0.15"/>
+  <rect x="748" y="656" width="200" height="7" rx="3" fill="#7a5cb0"/>
+  <text x="748" y="677" class="barcap">deterministic token-count ceiling</text>
+  <rect x="748" y="682" width="44" height="18" rx="9" fill="#f1edf8" stroke="#7a5cb0"/>
+  <text x="770.0" y="695" class="chipt" text-anchor="middle" style="fill:#54458a;">exact</text>
+  <text x="1036" y="695" class="commit" text-anchor="end">92896a4</text>
+  <rect x="732" y="724" width="320" height="132" rx="8" fill="#ffffff" stroke="#d9e1e8"/>
+  <text x="748" y="746" class="tlab">Qwen3.5-0.8B hybrid-GDN runs in fak</text>
+  <text x="748" y="790" class="bigV" style="fill:#7a5cb0;">✓ coherent</text>
+  <text x="748" y="808" class="tbase">exotic Mamba2 / Gated-DeltaNet arch runs correct…</text>
+  <rect x="748" y="828" width="51" height="18" rx="9" fill="#f1edf8" stroke="#7a5cb0"/>
+  <text x="773.5" y="841" class="chipt" text-anchor="middle" style="fill:#54458a;">parity</text>
+  <text x="1036" y="841" class="commit" text-anchor="end">6a376b8</text>
+  <rect x="1072" y="196" width="320" height="46" rx="8" fill="#1c7c92"/>
+  <text x="1088" y="225" class="bandT">SECURITY KERNEL</text>
+  <text x="1378" y="225" class="bandR" text-anchor="end">the boundary they don't own</text>
+  <text x="1074" y="264" class="shead">default-deny, in one address space</text>
+  <rect x="1072" y="286" width="320" height="132" rx="8" fill="#ffffff" stroke="#d9e1e8"/>
+  <text x="1088" y="308" class="tlab">In-kernel permission decide</text>
+  <text x="1088" y="354" class="big" style="fill:#1c7c92;">362 ns</text>
+  <text x="1376" y="354" class="tsub" text-anchor="end">allow / deny</text>
+  <text x="1088" y="370" class="tbase">syscall-speed adjudication, one address space</text>
+  <rect x="1088" y="390" width="64" height="18" rx="9" fill="#e9f3f6" stroke="#1c7c92"/>
+  <text x="1120.0" y="403" class="chipt" text-anchor="middle" style="fill:#155a6b;">absolute</text>
+  <text x="1376" y="403" class="commit" text-anchor="end">bcad56e</text>
+  <rect x="1072" y="432" width="320" height="132" rx="8" fill="#ffffff" stroke="#d9e1e8"/>
+  <text x="1088" y="454" class="tlab">Result admission + quarantine</text>
+  <text x="1088" y="500" class="big" style="fill:#1c7c92;">3.3 µs</text>
+  <text x="1376" y="500" class="tsub" text-anchor="end">page out a secret</text>
+  <text x="1088" y="516" class="tbase">full Admit gate: scan + quarantine + page-out</text>
+  <rect x="1088" y="536" width="64" height="18" rx="9" fill="#e9f3f6" stroke="#1c7c92"/>
+  <text x="1120.0" y="549" class="chipt" text-anchor="middle" style="fill:#155a6b;">absolute</text>
+  <text x="1376" y="549" class="commit" text-anchor="end">bcad56e</text>
+  <rect x="1072" y="578" width="320" height="132" rx="8" fill="#ffffff" stroke="#d9e1e8"/>
+  <text x="1088" y="600" class="tlab">In-process vs spawned-hook gate</text>
+  <text x="1088" y="646" class="big" style="fill:#1c7c92;">2,849×</text>
+  <text x="1376" y="646" class="tsub" text-anchor="end">faster</text>
+  <text x="1088" y="662" class="note">the cost of NOT owning the boundary</text>
+  <rect x="1088" y="682" width="64" height="18" rx="9" fill="#e9f3f6" stroke="#1c7c92"/>
+  <text x="1120.0" y="695" class="chipt" text-anchor="middle" style="fill:#155a6b;">absolute</text>
+  <text x="1376" y="695" class="commit" text-anchor="end">bcad56e</text>
+  <rect x="1072" y="724" width="320" height="132" rx="8" fill="#ffffff" stroke="#d9e1e8"/>
+  <text x="1088" y="746" class="tlab">Nested prompt-injection containment</text>
+  <text x="1088" y="790" class="bigV" style="fill:#1c7c92;">✓ QUARANTINE</text>
+  <text x="1088" y="808" class="tbase">nested injection caught + quarantined out of…</text>
+  <rect x="1088" y="828" width="64" height="18" rx="9" fill="#e9f3f6" stroke="#1c7c92"/>
+  <text x="1120.0" y="841" class="chipt" text-anchor="middle" style="fill:#155a6b;">absolute</text>
+  <text x="1376" y="841" class="commit" text-anchor="end">bcad56e</text>
+  <rect x="40" y="884" width="1360" height="116" rx="10" fill="#fff5e8" stroke="#dfbd78"/>
+  <text x="60" y="912" class="fhead">SINGLE STREAM — WHERE fak DOES NOT LEAD — shown, not hidden — fak explicitly does not target raw throughput</text>
+  <rect x="60" y="926" width="656" height="56" rx="8" fill="#ffffff" stroke="#dfbd78"/>
+  <text x="76" y="950" class="flab">Decode (Qwen2.5-7B Q8)</text>
+  <text x="76" y="970" class="fown">llama.cpp Metal 17.3 tok/s</text>
+  <text x="628" y="961" class="ffak" text-anchor="end">8.7 tok/s = 0.50×</text>
+  <rect x="638" y="946" width="44" height="18" rx="9" fill="#fff5e8" stroke="#dfbd78"/>
+  <text x="660" y="959" class="chipt" text-anchor="middle" style="fill:#b06a2a;">LOSS</text>
+  <text x="698" y="961" font-size="20" text-anchor="middle" style="fill:#b06a2a;font-weight:800;">—</text>
+  <text x="76" y="970" class="commit" text-anchor="start" opacity="0"> </text>
+  <text x="700" y="978" class="commit" text-anchor="end">34c74f4</text>
+  <rect x="744" y="926" width="656" height="56" rx="8" fill="#ffffff" stroke="#dfbd78"/>
+  <text x="760" y="950" class="flab">Prefill (Qwen2.5-7B Q8)</text>
+  <text x="760" y="970" class="fown">llama.cpp CPU (apples-to-apples)</text>
+  <text x="1312" y="961" class="ffak" text-anchor="end">~0.12× CPU · 0.083× vs Metal GPU</text>
+  <rect x="1322" y="946" width="44" height="18" rx="9" fill="#fff5e8" stroke="#dfbd78"/>
+  <text x="1344" y="959" class="chipt" text-anchor="middle" style="fill:#b06a2a;">LOSS</text>
+  <text x="1382" y="961" font-size="20" text-anchor="middle" style="fill:#b06a2a;font-weight:800;">—</text>
+  <text x="760" y="970" class="commit" text-anchor="start" opacity="0"> </text>
+  <text x="1384" y="978" class="commit" text-anchor="end">34c74f4</text>
+  <text x="40" y="1034" class="ft1">fak is the kernel under the agent stack — it does SOTA reuse AND owns the safety boundary, proven exact, at syscall speed.</text>
+  <text x="40" y="1058" class="ft2">one chat → llama.cpp; an agent fleet → fak.</text>
+  <text x="1400" y="1058" class="ftr" text-anchor="end">Apple M3 Pro · app_version 0.30.0 · every number traces to fak/BENCHMARK-AUTHORITY.md (commit + artifact).</text>
+</svg>

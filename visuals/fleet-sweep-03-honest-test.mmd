@@ -1,0 +1,39 @@
+%%{init: {'theme':'base','themeVariables':{'fontFamily':'Segoe UI, Helvetica, Arial, sans-serif','fontSize':'14px','lineColor':'#5B6B7B','primaryColor':'#DCE9FB','primaryTextColor':'#1B3A66','primaryBorderColor':'#3B6FB5','clusterBkg':'#F7F9FB','clusterBorder':'#AFC0CE'}}}%%
+flowchart TD
+  title["THE HONEST TEST — how we PROVE the whiteboard helped<br/>(we run the exact same work TWICE)"]
+
+  work["Take the same team's work<br/>(the same questions, same order)"]
+
+  subgraph A["Run A — SHARE the whiteboard"]
+    sa["All workers share ONE whiteboard.<br/>Worker 2 can read what Worker 1 wrote.<br/>=> saved trips: a BIG number"]
+  end
+
+  subgraph B["Run B — everyone ALONE"]
+    sb["Each worker gets their OWN private notebook.<br/>Nobody can read anyone else's.<br/>=> saved trips: a smaller number"]
+  end
+
+  diff["THE DIFFERENCE (A minus B)<br/>= exactly what SHARING bought.<br/>This is 'cross-agent uplift'."]
+
+  proof["Why this is honest:<br/>the kernel COUNTS the saved trips itself.<br/>We don't model or guess them.<br/>It is a real before/after swap."]
+
+  ctrl["Sanity check: if the workers share<br/>NOTHING (all different questions),<br/>the difference must be ZERO.<br/>We measured exactly 0 in all 2,500 cells. ✓"]
+
+  work --> A
+  work --> B
+  A --> diff
+  B --> diff
+  diff --> proof
+  proof --> ctrl
+
+  class work cheap
+  class sa pass
+  class sb world
+  class diff kernel
+  class proof gate
+  class ctrl pass
+
+  classDef kernel fill:#DCE9FB,stroke:#3B6FB5,stroke-width:2px,color:#1B3A66;
+  classDef gate fill:#FFF3CC,stroke:#C9A227,stroke-width:2px,color:#6B5410;
+  classDef pass fill:#DBF3E1,stroke:#3FA45F,stroke-width:2px,color:#1C5230;
+  classDef world fill:#FCEEDB,stroke:#B5792B,stroke-width:2px,color:#5E3D12;
+  classDef cheap fill:#E8ECEF,stroke:#7A8A99,stroke-width:1.5px,color:#33424F;

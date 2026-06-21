@@ -1,0 +1,253 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>fak · multi-agent context demo</title>
+<style>
+  :root{
+    --bg:#f6f8fa; --panel:#ffffff; --panel2:#f0f3f6; --line:#d0d7de;
+    --txt:#1f2328; --dim:#6e7781; --dim2:#57606a;
+    --fak:#1a7f37; --fakg:#116329; --naive:#bf8700; --naiveg:#7d5300; --accent:#0969da;
+    --prefix:#6366f1; --decode:#9aa5b1;
+    --t0:#0a85d1; --t1:#8250df; --t2:#bf3989; --t3:#bf8700;
+  }
+  *{box-sizing:border-box}
+  body{background:var(--bg);color:var(--txt);font:13px/1.45 ui-monospace,Menlo,Consolas,"SF Mono",monospace;margin:0;padding:0}
+  h1{font-size:17px;font-weight:600;margin:0}
+  h2{font-size:13px;font-weight:600;color:var(--dim2);margin:0 0 10px;letter-spacing:.04em;text-transform:uppercase}
+  a{color:var(--accent)}
+  .wrap{max-width:1100px;margin:0 auto;padding:22px 20px 60px}
+  .top{display:flex;align-items:baseline;gap:14px;flex-wrap:wrap;margin-bottom:4px}
+  .sub{color:var(--dim);font-size:12px;margin-bottom:18px}
+  .pill{font-size:11px;color:var(--dim2);border:1px solid var(--line);border-radius:20px;padding:2px 9px}
+  .panel{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:16px 18px;margin-bottom:16px}
+  .row{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:12px}
+  label{color:var(--dim2);font-size:11px}
+  select{background:var(--panel2);border:1px solid var(--line);color:var(--txt);border-radius:6px;padding:5px 8px;font:inherit}
+  button{background:var(--accent);color:#ffffff;border:none;border-radius:7px;padding:8px 16px;font:inherit;font-weight:600;cursor:pointer}
+  button:hover{filter:brightness(1.08)}
+  button:disabled{opacity:.45;cursor:default}
+  /* scenario tabs */
+  .tabs{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px}
+  .tab{border:1px solid var(--line);background:var(--panel2);color:var(--dim2);border-radius:8px;padding:8px 12px;cursor:pointer;font:inherit;text-align:left;min-width:150px}
+  .tab:hover{border-color:var(--accent)}
+  .tab.on{border-color:var(--accent);color:var(--txt);background:#ddf4ff}
+  .tab .nm{font-weight:600;display:block}
+  .tab .rt{font-size:11px;color:var(--fak);font-weight:700}
+  .desc{color:var(--dim2);font-size:12px;margin:2px 0 14px;line-height:1.5;max-width:880px}
+  .cfg{color:var(--dim2);font-size:12px}.cfg b{color:var(--txt)}
+  /* token-work bars */
+  .bars{margin-top:6px}
+  .bar{display:flex;align-items:center;gap:10px;margin:7px 0}
+  .bar .lbl{width:150px;color:var(--dim2);font-size:11px;text-align:right}
+  .bar .track{flex:1;height:22px;background:var(--panel2);border:1px solid var(--line);border-radius:6px;overflow:hidden}
+  .bar .fill{height:100%;display:flex;align-items:center;padding-left:8px;font-size:11px;font-weight:700;white-space:nowrap;border-radius:5px 0 0 5px}
+  .bar .val{width:120px;font-size:11px;color:var(--dim2);font-variant-numeric:tabular-nums}
+  .bar.naive .fill{background:linear-gradient(90deg,var(--naive),var(--naiveg));color:#2a1602}
+  .bar.tuned .fill{background:linear-gradient(90deg,#8c96a0,#6e7781);color:#ffffff}
+  .bar.fak .fill{background:linear-gradient(90deg,var(--fak),var(--fakg));color:#042511}
+  /* context timeline */
+  .agent{display:flex;align-items:center;gap:9px;margin:5px 0}
+  .agent .who{width:70px;color:var(--dim2);font-size:11px;text-align:right}
+  .ctx{flex:1;display:flex;height:24px;border:1px solid var(--line);border-radius:6px;overflow:hidden;background:var(--panel2)}
+  .seg{height:100%;display:flex;align-items:center;justify-content:center;font-size:9px;color:#ffffff;overflow:hidden;white-space:nowrap;border-right:1px solid rgba(0,0,0,.25)}
+  .seg.prefix{background:var(--prefix);color:#e7e9ff}
+  .seg.decode{background:var(--decode);color:#1f2328}
+  .agent .tk{width:96px;font-size:10px;color:var(--dim);font-variant-numeric:tabular-nums}
+  .tllegend{display:flex;gap:14px;flex-wrap:wrap;font-size:10px;color:var(--dim2);margin:10px 0 2px}
+  .sw{display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:4px;vertical-align:middle}
+  /* race */
+  .lane{margin:10px 0}
+  .lane .hd{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:5px}
+  .lane .nm{font-weight:600}.lane .ms{color:var(--dim2);font-variant-numeric:tabular-nums}
+  .lane .meta{font-size:11px;color:var(--dim);margin-top:4px;font-variant-numeric:tabular-nums}
+  .rtrack{height:26px;background:var(--panel2);border:1px solid var(--line);border-radius:7px;overflow:hidden;position:relative}
+  .rfill{height:100%;width:0%;transition:width .25s ease;display:flex;align-items:center;padding-left:9px;font-weight:700;font-size:11px;white-space:nowrap}
+  .fak .nm{color:var(--fak)}.fak .rfill{background:linear-gradient(90deg,var(--fak),var(--fakg));color:#042511}
+  .naive .nm{color:var(--naive)}.naive .rfill{background:linear-gradient(90deg,var(--naive),var(--naiveg));color:#2a1602}
+  .idle{color:var(--dim)}.doneBadge{color:var(--fak);font-weight:700}
+  .tag{font-size:10px;border-radius:4px;padding:1px 6px;border:1px solid var(--line);color:var(--dim2);margin-left:6px}
+  .result{margin-top:14px;padding:13px 15px;background:var(--panel2);border:1px solid var(--line);border-radius:9px;display:none}
+  .result.show{display:block}
+  .result .big{font-size:26px;font-weight:700;color:var(--fak)}
+  .result .grid{display:flex;gap:26px;flex-wrap:wrap;margin-top:6px}
+  .result .cell{font-size:12px;color:var(--dim2)}.result .cell b{color:var(--txt);font-size:15px;display:block;font-variant-numeric:tabular-nums}
+  .log{margin-top:12px;max-height:110px;overflow:auto;font-size:11px;color:var(--dim);background:var(--panel2);border:1px solid var(--line);border-radius:7px;padding:8px 10px;white-space:pre-wrap}
+  .log:empty:before{content:"(event log)";color:#afb8c1}
+  .note{font-size:11px;color:var(--dim);margin-top:10px;line-height:1.5}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="top">
+    <h1>fak · the multi-agent context demo</h1>
+    <span class="pill" id="gmxPill">…</span>
+  </div>
+  <div class="sub">Many agents · many turns · long context · and a <b style="color:var(--txt)">different-sized tool result every turn</b>. The honest baseline is a <b style="color:var(--txt)">warm per-agent KV cache</b> — each agent already reuses its own KV across turns (what vLLM / SGLang / provider prompt-caching give you). fak's win is the step that cache can't take: <b style="color:var(--txt)">cross-agent prefix sharing</b> — one copy of the shared setup serves the whole fleet. A cold no-cache loop that re-reads the whole growing context every turn is shown only as a worst-case reference. Pick an agentic shape and watch the gap.</div>
+
+  <!-- ① SCENARIO + EXACT TOKEN WORK -->
+  <div class="panel">
+    <h2>① Pick an agentic shape <span class="tag">exact · timing-free · model-independent</span></h2>
+    <div class="tabs" id="tabs"></div>
+    <div class="desc" id="desc"></div>
+    <div class="cfg" id="cfg"></div>
+    <div class="bars" id="bars" style="margin-top:12px"></div>
+    <div class="note" id="floorNote"></div>
+  </div>
+
+  <!-- ② CONTEXT TIMELINE -->
+  <div class="panel">
+    <h2>② How each agent's context assembles <span class="tag">tool results drawn to scale</span></h2>
+    <div class="tllegend">
+      <span><span class="sw" style="background:var(--prefix)"></span>shared prefix (system + tool schema)</span>
+      <span><span class="sw" style="background:var(--decode)"></span>decode (model output)</span>
+      <span id="toolLegend"></span>
+    </div>
+    <div id="timeline"></div>
+    <div class="note" id="tlNote"></div>
+  </div>
+
+  <!-- ③ LIVE RACE -->
+  <div class="panel">
+    <h2>③ Live race — fak vs the cold no-cache reference <span class="tag">real in-kernel model, this box</span></h2>
+    <div class="row">
+      <label>model <select id="model"></select></label>
+      <span class="cfg" id="raceCfg"></span>
+      <button id="raceBtn">Run live race</button>
+    </div>
+    <div class="lane fak">
+      <div class="hd"><span class="nm">fak <span class="idle" id="fakState">idle</span></span><span class="ms" id="fakMs">—</span></div>
+      <div class="rtrack"><div class="rfill" id="fakFill"></div></div>
+      <div class="meta" id="fakMeta">prefilled 0 · decoded 0</div>
+    </div>
+    <div class="lane naive">
+      <div class="hd"><span class="nm">no-cache re-prefill <span class="tag">worst-case ref</span> <span class="idle" id="naiveState">idle</span></span><span class="ms" id="naiveMs">—</span></div>
+      <div class="rtrack"><div class="rfill" id="naiveFill"></div></div>
+      <div class="meta" id="naiveMeta">prefilled 0 · decoded 0</div>
+    </div>
+    <div class="result" id="result"><div id="resultLine"></div><div class="grid" id="resultGrid"></div></div>
+    <div class="log" id="log"></div>
+    <div class="note">This race pits fak against the <b>cold no-cache re-prefill</b> loop — a <b>worst-case reference</b>, not a serving baseline (the honest baseline, a warm per-agent KV cache, is the token accounting in panel ①). The fak arm always runs <b>live</b>. For the long scenarios the no-cache arm would re-prefill tens of thousands of tokens and grind for minutes, so it is <b>projected from this run's measured prefill throughput</b> (the sessionbench method) and labelled as such — small scenarios run both arms fully live.</div>
+  </div>
+
+  <div class="sub" style="margin-top:18px;color:#afb8c1">fak in-kernel engine · pure-Go Q8 forward pass · tokens are real model output. No network, no API — all on this box.</div>
+</div>
+
+<script>
+const $=id=>document.getElementById(id);
+const fmt=s=>s<60?s.toFixed(1)+"s":Math.floor(s/60)+"m "+Math.round(s%60)+"s";
+const TCOL=["var(--t0)","var(--t1)","var(--t2)","var(--t3)"];
+let scenarios=[], cur=null, toolColors={};
+
+fetch("/api/scenarios").then(r=>r.json()).then(d=>{
+  scenarios=d.scenarios||[];
+  $("gmxPill").textContent="GOMAXPROCS "+d.gomaxprocs;
+  const sel=$("model");
+  (d.models||[]).forEach(m=>{if(m.Present){const o=document.createElement("option");o.value=m.Name;o.textContent=m.Name+" ("+m.Params+")";sel.appendChild(o);}});
+  if(!sel.options.length){const o=document.createElement("option");o.textContent="(no model on disk)";sel.appendChild(o);}
+  renderTabs(); if(scenarios.length) select(0);
+});
+
+function renderTabs(){
+  const t=$("tabs");t.innerHTML="";
+  scenarios.forEach((v,i)=>{
+    const b=document.createElement("button");b.className="tab"+(i===0?" on":"");
+    b.innerHTML='<span class="nm">'+v.scenario.label+'</span><span class="rt">'+v.tokens.tuned_over_fak.toFixed(1)+'× vs warm KV</span>';
+    b.onclick=()=>select(i);t.appendChild(b);
+  });
+}
+
+function select(i){
+  cur=scenarios[i];
+  [...$("tabs").children].forEach((c,j)=>c.classList.toggle("on",j===i));
+  const s=cur.scenario,tk=cur.tokens;
+  $("desc").textContent=s.desc;
+  $("cfg").innerHTML="workload: <b>"+s.agents+"</b> agents × <b>"+s.turns+"</b> turns · shared prefix <b>"+s.prefix+"</b> tok · decode <b>"+s.decode+"</b>/turn · "+s.tools.length+" tools · longest context <b>"+tk.max_context+"</b> tok";
+  // assign tool colors
+  toolColors={};s.tools.forEach((tl,k)=>toolColors[tl.name]=TCOL[k%TCOL.length]);
+  drawBars(tk);drawTimeline(cur);
+  $("toolLegend").innerHTML=s.tools.map(tl=>'<span><span class="sw" style="background:'+toolColors[tl.name]+'"></span>'+tl.name+' ('+tl.min_tok+'–'+tl.max_tok+' tok)</span>').join(" ");
+  $("floorNote").innerHTML="Baseline <b>warm per-agent KV</b> re-reads "+tk.per_agent_kv.toLocaleString()+" prefill tokens (the shared prefix once per agent) · <b>fak</b> "+tk.fak_fused.toLocaleString()+" (prefix once for the whole fleet). fak does <b style='color:var(--fak)'>"+tk.tuned_over_fak.toFixed(1)+"×</b> less prefill re-read than a warm per-agent KV cache — that is the cross-agent prefix-sharing win. <span style='color:var(--dim)'>(A cold no-cache loop re-reads "+tk.naive_reprefill.toLocaleString()+" tokens, "+tk.naive_over_fak.toFixed(1)+"× fak's — a worst-case reference, not a serving baseline.)</span>";
+  $("raceCfg").innerHTML="scenario: <b>"+s.id+"</b> · "+(s.agents*s.turns)+" requests";
+  resetRace();
+}
+
+function drawBars(tk){
+  const max=tk.naive_reprefill||1;
+  const mk=(cls,lbl,val)=>'<div class="bar '+cls+'"><div class="lbl">'+lbl+'</div><div class="track"><div class="fill" style="width:'+(val/max*100).toFixed(1)+'%">'+(val/max>0.12?val.toLocaleString():"")+'</div></div><div class="val">'+val.toLocaleString()+' tok</div></div>';
+  $("bars").innerHTML=
+    mk("tuned","warm per-agent KV (baseline)",tk.per_agent_kv)+
+    mk("fak","fak fused (cross-agent)",tk.fak_fused)+
+    mk("naive","no-cache re-prefill (worst-case ref)",tk.naive_reprefill);
+}
+
+function drawTimeline(v){
+  const s=v.scenario,res=v.workload.results,tn=v.workload.tool_names;
+  // global scale: widest agent context across the fleet (so rows are comparable)
+  let maxCtx=0;
+  res.forEach(row=>{let c=s.prefix+s.decode;row.forEach((r,t)=>c+=r+s.decode);maxCtx=Math.max(maxCtx,c);});
+  const tl=$("timeline");tl.innerHTML="";
+  res.forEach((row,a)=>{
+    let segs='<div class="seg prefix" style="width:'+(s.prefix/maxCtx*100)+'%" title="shared prefix '+s.prefix+' tok">prefix</div>';
+    let total=s.prefix;
+    for(let t=0;t<s.turns;t++){
+      segs+='<div class="seg decode" style="width:'+(s.decode/maxCtx*100)+'%" title="turn '+t+' decode '+s.decode+' tok"></div>';total+=s.decode;
+      if(t<row.length){const r=row[t],nm=tn[a][t];
+        segs+='<div class="seg" style="width:'+(r/maxCtx*100)+'%;background:'+toolColors[nm]+'" title="'+nm+' → '+r+' tok">'+(r/maxCtx>0.045?r:"")+'</div>';total+=r;}
+    }
+    const row2=document.createElement("div");row2.className="agent";
+    row2.innerHTML='<div class="who">agent '+a+'</div><div class="ctx">'+segs+'</div><div class="tk">'+total.toLocaleString()+' tok</div>';
+    tl.appendChild(row2);
+  });
+  $("tlNote").innerHTML="Each agent's context is the <b>same shared prefix</b> plus its own uneven trail of decode + tool results — every result a different size (that is the context <i>changing</i> per turn). A warm per-agent KV cache reads that shared prefix once <i>per agent</i>; fak reads it once for the <b>whole fleet</b> and only ingests the coloured tips. (A cold no-cache loop re-reads each whole row up to every turn boundary — the worst-case reference.)";
+}
+
+// ---- live race (SSE) ----
+let es=null;
+function setFill(id,pct,label){const f=$(id);f.style.width=Math.min(100,pct)+"%";f.textContent=label||"";}
+function resetRace(){
+  ["fakState","naiveState"].forEach(id=>{$(id).textContent="idle";$(id).className="idle";});
+  ["fakMs","naiveMs"].forEach(id=>$(id).textContent="—");
+  ["fakFill","naiveFill"].forEach(id=>setFill(id,0));
+  $("fakMeta").textContent="prefilled 0 · decoded 0";$("naiveMeta").textContent="prefilled 0 · decoded 0";
+  $("result").classList.remove("show");$("log").textContent="";
+}
+$("raceBtn").onclick=()=>{
+  if(!cur)return; if(es)es.close();
+  resetRace();$("raceBtn").disabled=true;
+  const url="/api/race?scenario="+encodeURIComponent(cur.scenario.id)+"&model="+encodeURIComponent($("model").value||"");
+  es=new EventSource(url);
+  es.onmessage=ev=>{
+    const e=JSON.parse(ev.data);appendLog(e);
+    if(e.type==="start"){const st=$(e.arm+"State");st.textContent=e.projected?"projecting…":"running…";st.className="";}
+    if(e.type==="turn"){
+      const pct=e.requests_done/e.total_requests*100;
+      setFill(e.arm+"Fill",pct,e.requests_done+"/"+e.total_requests+(e.projected?" (proj)":""));
+      $(e.arm+"Ms").textContent=fmt(e.elapsed_ms/1000);
+      $(e.arm+"Meta").textContent="prefilled "+(e.tokens_prefilled||0).toLocaleString()+" · decoded "+(e.tokens_decoded||0).toLocaleString();
+    }
+    if(e.type==="done"){
+      $(e.arm+"State").innerHTML='<span class="doneBadge">'+(e.projected?"projected":"done")+'</span>';
+      setFill(e.arm+"Fill",100,e.arm==="fak"?"reuse":(e.projected?"re-prefill (projected)":"re-prefill"));
+      $(e.arm+"Ms").textContent=fmt(e.total_ms/1000);
+    }
+    if(e.type==="result"){
+      $("result").classList.add("show");
+      $("resultLine").innerHTML='fak <span class="big" style="color:var(--fak)">'+e.tokens.tuned_over_fak.toFixed(1)+'×</span> less prefill re-read than a <b>warm per-agent KV cache</b> (the cross-agent win) · cold no-cache wall-clock: fak '+fmt(e.fak_ms/1000)+' vs '+fmt(e.naive_ms/1000)+(e.naive_projected?' <span class="tag">no-cache projected</span>':'')+' = '+e.ratio.toFixed(1)+'× <span class="tag">worst-case ref</span>';
+      $("resultGrid").innerHTML=
+        '<div class="cell">fak-win vs warm KV<b>'+e.tokens.tuned_over_fak.toFixed(1)+'×</b></div>'+
+        '<div class="cell">fak wall-clock<b>'+fmt(e.fak_ms/1000)+'</b></div>'+
+        '<div class="cell">no-cache ref wall-clock<b>'+fmt(e.naive_ms/1000)+'</b></div>'+
+        '<div class="cell">no-cache speedup (ref)<b>'+e.ratio.toFixed(1)+'×</b></div>'+
+        '<div class="cell">no-cache re-read (ref)<b>'+e.tokens.naive_over_fak.toFixed(1)+'×</b></div>';
+      $("raceBtn").disabled=false;es.close();es=null;
+    }
+    if(e.type==="error"){$("raceBtn").disabled=false;es.close();es=null;}
+  };
+  es.onerror=()=>{$("raceBtn").disabled=false;if(es)es.close();es=null;};
+};
+function appendLog(e){const l=$("log");let s=JSON.stringify(e);if(s.length>180)s=s.slice(0,177)+"...";l.textContent+=e.type+": "+s+"\n";l.scrollTop=l.scrollHeight;}
+</script>
+</body>
+</html>

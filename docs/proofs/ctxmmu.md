@@ -1,0 +1,42 @@
+# D3 · ctxmmu
+
+> **Update — witness pass (2026-06-20, commit `3cb8ff9`).** 2 OPEN obligation(s) below were CLOSED to ✅ PROVEN by new deterministic tests added in `internal/ctxmmu/proofs_witness_test.go`. The body keeps the original analysis (the gap **and** the 'to close' plan that was then executed); the **current verdict is in the [master ledger](README.md)** and the executed closures are listed in *Closures* at the foot of this file.
+
+`ctxmmu` is the context memory-management unit: a **write-time (post-tool) gate on tool *results***, the dual of the call-side adjudicator. At the moment a result would be written into the conversation, `Admit` decides whether the bytes may enter as-is (`Allow`), must be held out of context (`Quarantine` — secret / prompt-injection / degenerate-repeat pollution, with the offending payload swapped in-place for a tiny stub), or paged out to a `<2KB` pointer (`Transform` — oversize but benign). "Correct" for `ctxmmu` is **decision-procedure soundness** (regime D): the gate never lets forbidden bytes through, never *gratuitously* mutates bytes it admits, and re-running the gate on its own output does not re-do work. The two theorems below address the *gratuitous-mutation* and *re-run* faces of that soundness. Both are honestly **OPEN**: the implementing mechanism makes each hold by construction, but no existing deterministic witness asserts the *specific* property — a green package run is not, by itself, a witness of these theorems.
+
+---
+
+THEOREM  (1) page-out is idempotent. For any result `r` whose `Payload` is already a `ctxmmu` page-out/quarantine stub (the JSON `{"_quarantined":true,…}` or `{"_paged":true,…}` that `Admit` substitutes in-place), a second `Admit(ctx,c,r)` is a no-op: it returns `VerdictAllow` and does not page the stub out again (the `paged`/`quarantine` counters and `r.Payload` are unchanged by the re-admission).
+
+REGIME  D — decision-procedure soundness (idempotence of the gate on its own output).
+
+PROOF  `Admit` (`fak/internal/ctxmmu/mmu.go:67`) screens `body` via `ScreenBytes` (`mmu.go:255-266`). A page-out stub is small benign JSON, so `ScreenBytes` returns `(ReasonNone,false)` — the quarantine branch (`mmu.go:72`) is skipped. The stub is built by `quarantineResult` (`mmu.go:98-103`) or `pageToPointer` (`mmu.go:114-119`), both bounded under `PointerMax = 2048 < OversizeBytes = 4096`, so `len(stub) <= OversizeBytes` and the oversize `Transform` branch (`mmu.go:76-83`) is skipped. Control falls to the unconditional `VerdictAllow` return (`mmu.go:85`), which calls neither `pageOut` nor `pageToPointer` and does not mutate `r.Payload`. Hence re-admitting a stub is a no-op. The argument is sound but no test exercises this second-admit path.
+
+WITNESS  `(go test ./internal/ctxmmu/ -count=1 -timeout 120s -run 'TestAdmit')` — existing tests `TestAdmitBenignAllows`, `TestAdmitPoisonFixture`, `TestAdmitOversizeBenignTransforms` all PASS, but **none re-Admits an already-stubbed payload** (a grep for `idempot|no-op|re-admit|twice|second.*admit` over the package returns nothing). The witness that would *close* this: produce a stub via a first `Admit` (a secret body → `r.Payload` becomes the stub `Ref`), capture the stub bytes, run a **second** `Admit` on a result carrying that stub as its payload, then assert `Verdict.Kind == VerdictAllow`, assert `r.Payload` is byte-identical to the captured stub, and assert `m.PollutionRate()`'s quarantined count did not increase across the second `Admit`.
+
+VERDICT  **OPEN** (2026-06-20, native go1.26 darwin/arm64). True-looking and mechanism-present, but un-witnessed by any existing assertion; promote to PROVEN only with the second-admit test above. Not REFUTED — no counterexample; the Allow path provably skips both page-out branches.
+
+DOS  bound at ship.
+
+---
+
+THEOREM  (2) a benign result round-trips byte-identical (no false page-out of clean bytes). For any clean result body (no secret pattern, no injection marker, no degenerate repeat, `len <= OversizeBytes = 4096`), `Admit(ctx,c,r)` returns `VerdictAllow` and leaves `r.Payload` byte-identical to the input.
+
+REGIME  D — decision-procedure soundness (the gate does not gratuitously mutate bytes it admits).
+
+PROOF  On a clean small body, `ScreenBytes` (`mmu.go:255`) returns `false`, so the quarantine branch (`mmu.go:72`) is skipped; `len(body) <= OversizeBytes`, so the `Transform` branch (`mmu.go:76`) is skipped; `Admit` returns `VerdictAllow` at `mmu.go:85`. The only writes to `r.Payload` in the function are inside `quarantineResult` (`mmu.go:100`/`mmu.go:102`) and via the `Transform` `NewArgs` payload — neither reached on the Allow path. So between `mmu.go:67` and the return at `mmu.go:85` nothing assigns `r.Payload`, and the admitted bytes are byte-identical to the input.
+
+WITNESS  `(go test ./internal/ctxmmu/ -count=1 -timeout 120s -run 'TestAdmitBenignAllows|TestAdmitPoisonFixture')` — both PASS (`ok … 0.238s`). `TestAdmitBenignAllows` (`ctxmmu_test.go:53`) and the `benign_control` branch of `TestAdmitPoisonFixture` (`ctxmmu_test.go:142`) assert the **weaker** property — a clean body yields `VerdictAllow` and `ctxmmu.Quarantined(r) == false`, i.e. clean bytes are *not* paged out — but **neither asserts `r.Payload` is byte-identical** after `Admit` (no `bytes.Equal` on the payload bytes before/after). The witness that would *close* this: capture a copy of the input body, `Admit`, assert `Verdict.Kind == VerdictAllow`, then assert `r.Payload.Kind == RefInline` **and** `bytes.Equal(r.Payload.Inline, savedCopy)`.
+
+VERDICT  **OPEN** (2026-06-20, native go1.26 darwin/arm64). The "no FALSE page-out" half is witnessed (Allow + `!Quarantined`); the strict **byte-identity** half holds by construction but is un-asserted. Promote to PROVEN only with the explicit `bytes.Equal` assertion above. Not REFUTED — the Allow path provably leaves `r.Payload` untouched.
+
+DOS  bound at ship.
+
+---
+
+## Closures (witness pass 2026-06-20, commit `3cb8ff9`)
+
+Each obligation marked OPEN above was discharged by a new zero-dependency (stdlib `testing`/`testing/quick`) metamorphic/round-trip/invariant test that ASSERTS the property against an independently recomputed reference. Verified by `go test -count=1 ./internal/...` (45 packages green, 0 failures).
+
+- **page-out-idempotent** → ✅ PROVEN by `TestProofPageOutIdempotent`. Witnessed on BOTH stub shapes. quarantine-secret: a secret-shaped body is quarantined in-place (r.Payload becomes the {"_quarantined":true,...} stub ref). oversize-paged: a >OversizeBytes clean non-repeating body Transforms; the verdict's TransformPayload.NewArgs ({"_paged":true,...} stub) is installed as r.Payload exactly as the result-admit pipeline does. In both, a SECOND Admit returns VerdictAllow, the quarantine counter is unchanged (qAfter==qBefore), and r.Payload is unchanged (same Kind/Digest/Len AND byte-identical materialized content). The test also asserts the stub is itself small (<=OversizeBytes) and clean (ScreenBytes returns ok=false), which is WHY re-admission cannot re-page it. Note on counters: PollutionRate's total DOES advance by 1 on the re-admit (every Admit increments m.total at mmu.go:68); the theorem as stated is about the paged/quarantine counters, which are the ones that stay fixed — total is the call-count, not a page-out count, so total+1 is the correct expected value and the test asserts exactly that.
+- **benign-byte-identical** → ✅ PROVEN by `TestProofBenignByteIdentical`. Driven over 261 clean bodies: 5 targeted edge cases (empty, {}, a JSON record, a plain log line, and a body of EXACTLY OversizeBytes=4096 that is clean+non-repeating to prove the len==OversizeBytes boundary is NOT oversize) plus 256 randomized bodies on a FIXED seed (rand.NewSource(0xC7C7C7C7)), sized 1..OversizeBytes, salted with a per-token incrementing counter so the 16-byte repeat detector never fires. Each body passes a precondition guard (len<=OversizeBytes AND ScreenBytes ok=false) so the hypothesis is genuinely in-scope, then asserts: VerdictAllow, !Quarantined(r), r.Payload.Kind stays RefInline (no page-out), r.Payload.Inline is bytes.Equal to an independent copy of the input (no mutation), and PollutionRate quarantine count stays 0. A first attempt with bytes.Repeat("x",4096) as an edge case was correctly REJECTED by the precondition guard (a 4096-byte run of one char IS a degenerate repeat -> ScreenBytes returns OVERSIZE), confirming the guard is non-vacuous; that out-of-scope case was replaced with the distinctBenign boundary body.

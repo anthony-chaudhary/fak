@@ -1,0 +1,28 @@
+#version 450
+// rope_copy.comp — value-semantics RoPE: read X, write rotated Y.
+// This replaces the previous copy-buffer + in-place-rope pair for backend RoPE(),
+// cutting one recorded operation and barrier for every Q/K rotation.
+layout(local_size_x = 128) in;
+
+layout(std430, binding = 0) readonly  buffer Xbuf { float X[]; };
+layout(std430, binding = 1) writeonly buffer Ybuf { float Y[]; };
+
+layout(push_constant) uniform Push {
+    int pos; int nHeads; int headDim; float theta;
+} pc;
+
+void main() {
+    int hf = pc.headDim / 2;
+    uint t = gl_GlobalInvocationID.x;
+    if (t >= uint(pc.nHeads) * uint(hf)) return;
+    int h = int(t) / hf;
+    int j = int(t) % hf;
+    float inv = pow(pc.theta, float(2 * j) / float(pc.headDim));
+    float a = float(pc.pos) / inv;
+    float c = cos(a), s = sin(a);
+    uint base = uint(h) * uint(pc.headDim);
+    float x0 = X[base + uint(j)];
+    float x1 = X[base + uint(j + hf)];
+    Y[base + uint(j)]      = x0 * c - x1 * s;
+    Y[base + uint(j + hf)] = x1 * c + x0 * s;
+}

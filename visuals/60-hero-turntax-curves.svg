@@ -1,0 +1,113 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1320" height="622" viewBox="0 0 1320 622" role="img" aria-labelledby="tt-title tt-desc">
+  <title id="tt-title">The turn-tax: re-prefill cost is linear, resident KV is not</title>
+  <desc id="tt-desc">Three panels — per-turn prefill cost vs context, WebVoyager fleet prefill vs workers, and 50-turn fleet serving work vs turns. In each, a baseline re-prefill curve rises ~linearly while fak's resident-KV curve stays flat; multipliers 20,480× / 9.7× / 4.1×. Panel 2 is measured (643 WebVoyager tasks); panel 3 is the conservative number vs a tuned SOTA cache.</desc>
+  <defs>
+    <linearGradient id="tt-bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#fbfcfd"/>
+      <stop offset="60%" stop-color="#f4f7f9"/>
+      <stop offset="100%" stop-color="#f6f4f0"/>
+    </linearGradient>
+    <style>
+      .k    { font: 800 14px "Segoe UI", Arial, sans-serif; fill: #2e8b57; letter-spacing: 1.6px; }
+      .ti   { font: 900 33px "Segoe UI", Arial, sans-serif; fill: #14202b; }
+      .sub  { font: 400 16px "Segoe UI", Arial, sans-serif; fill: #415266; }
+      .pt   { font: 800 18px "Segoe UI", Arial, sans-serif; fill: #14202b; }
+      .pst  { font: 400 12.5px "Segoe UI", Arial, sans-serif; fill: #5b6a7a; }
+      .axt  { font: 600 12px "Segoe UI", Arial, sans-serif; fill: #6a7685; }
+      .axl  { font: 700 12.5px "Segoe UI", Arial, sans-serif; fill: #415266; }
+      .ytk  { font: 400 11px "Segoe UI", Arial, sans-serif; fill: #8090a0; }
+      .mult { font: 900 50px "Segoe UI", Arial, sans-serif; fill: #14202b; }
+      .msub { font: 700 13px "Segoe UI", Arial, sans-serif; fill: #415266; }
+      .mfoot{ font: 400 11.5px "Segoe UI", Arial, sans-serif; fill: #6a7685; }
+      .leg  { font: 600 14px "Segoe UI", Arial, sans-serif; fill: #1b2733; }
+      .foot { font: 400 12px "Segoe UI", Arial, sans-serif; fill: #6a7685; }
+    </style>
+  </defs>
+  <rect width="1320" height="622" fill="url(#tt-bg)"/>
+  <text x="64" y="58" class="k">FAK · THE AGENT-SERVING KERNEL</text>
+  <text x="64" y="96" class="ti">Three lenses on one structural win — the work that never gets done twice</text>
+  <text x="64" y="124" class="sub">An agent that drops its KV re-prefills the shared setup on every cold miss; fak keeps it resident and addressable, so the cost stays flat as context, fleet, and turns grow.</text>
+  <text x="64" y="210" class="pt">Per-turn prefill cost</text>
+  <text x="64" y="230" class="pst">vs context length · baseline = re-prefill on a cold KV miss</text>
+  <line x1="104" y1="442.7" x2="424" y2="442.7" stroke="#e3e9ee" stroke-width="1"/>
+  <text x="98" y="446.7" class="ytk" text-anchor="end">256k</text>
+  <line x1="104" y1="383.5" x2="424" y2="383.5" stroke="#e3e9ee" stroke-width="1"/>
+  <text x="98" y="387.5" class="ytk" text-anchor="end">512k</text>
+  <line x1="104" y1="265.0" x2="424" y2="265.0" stroke="#e3e9ee" stroke-width="1"/>
+  <text x="98" y="269.0" class="ytk" text-anchor="end">1M</text>
+  <line x1="104" y1="252" x2="104" y2="502" stroke="#b9c4cf" stroke-width="1.5"/>
+  <line x1="104" y1="502" x2="424" y2="502" stroke="#b9c4cf" stroke-width="1.5"/>
+  <polygon points="104.0,494.6 135.0,472.4 176.3,442.7 258.8,383.5 424.0,265.0 424.0,502.0 258.8,502.0 176.3,502.0 135.0,502.0 104.0,502.0" fill="#e7ebf4" opacity="0.65"/>
+  <polygon points="104.0,502.0 135.0,502.0 176.3,502.0 258.8,502.0 424.0,502.0 424.0,502.0 104.0,502.0" fill="#e9f5ee" opacity="0.7"/>
+  <polyline points="104.0,494.6 135.0,472.4 176.3,442.7 258.8,383.5 424.0,265.0" fill="none" stroke="#3b4a7a" stroke-width="3" stroke-linejoin="round" stroke-linecap="round"/>
+  <polyline points="104.0,502.0 135.0,502.0 176.3,502.0 258.8,502.0 424.0,502.0" fill="none" stroke="#2e8b57" stroke-width="3" stroke-linejoin="round" stroke-linecap="round"/>
+  <circle cx="424.0" cy="265.0" r="5" fill="#3b4a7a"/>
+  <circle cx="424.0" cy="502.0" r="5" fill="#2e8b57"/>
+  <text x="104.0" y="520" class="axt" text-anchor="middle">32k</text>
+  <text x="135.0" y="520" class="axt" text-anchor="middle">128k</text>
+  <text x="176.3" y="520" class="axt" text-anchor="middle">256k</text>
+  <text x="258.8" y="520" class="axt" text-anchor="middle">512k</text>
+  <text x="424.0" y="520" class="axt" text-anchor="middle">1M</text>
+  <text x="264.0" y="540" class="axl" text-anchor="middle">Context length</text>
+  <text x="76" y="377.0" class="axl" text-anchor="middle" transform="rotate(-90 76 377.0)">Prefill tokens / turn</text>
+  <text x="280.0" y="402.0" class="mult" text-anchor="middle">20,480×</text>
+  <text x="280.0" y="422.0" class="msub" text-anchor="middle">fewer prefill tokens at 1M ctx</text>
+  <text x="280.0" y="442.0" class="mfoot" text-anchor="middle">2,560× already at a 128k agent context — the per-cold-miss tax = P / R</text>
+  <text x="474" y="210" class="pt">Fleet prefill, WebVoyager</text>
+  <text x="474" y="230" class="pst">vs worker count · baseline = naive re-prefill · MEASURED, 643 tasks</text>
+  <line x1="514" y1="443.0" x2="834" y2="443.0" stroke="#e3e9ee" stroke-width="1"/>
+  <text x="508" y="447.0" class="ytk" text-anchor="end">342M</text>
+  <line x1="514" y1="384.1" x2="834" y2="384.1" stroke="#e3e9ee" stroke-width="1"/>
+  <text x="508" y="388.1" class="ytk" text-anchor="end">684M</text>
+  <line x1="514" y1="266.3" x2="834" y2="266.3" stroke="#e3e9ee" stroke-width="1"/>
+  <text x="508" y="270.3" class="ytk" text-anchor="end">1.37G</text>
+  <line x1="514" y1="252" x2="514" y2="502" stroke="#b9c4cf" stroke-width="1.5"/>
+  <line x1="514" y1="502" x2="834" y2="502" stroke="#b9c4cf" stroke-width="1.5"/>
+  <polygon points="514.0,472.5 559.7,443.1 651.1,384.1 834.0,266.3 834.0,477.6 651.1,489.7 559.7,495.7 514.0,498.7" fill="#e7ebf4" opacity="0.65"/>
+  <polygon points="514.0,498.7 559.7,495.7 651.1,489.7 834.0,477.6 834.0,502.0 514.0,502.0" fill="#e9f5ee" opacity="0.7"/>
+  <polyline points="514.0,472.5 559.7,443.1 651.1,384.1 834.0,266.3" fill="none" stroke="#3b4a7a" stroke-width="3" stroke-linejoin="round" stroke-linecap="round"/>
+  <polyline points="514.0,498.7 559.7,495.7 651.1,489.7 834.0,477.6" fill="none" stroke="#2e8b57" stroke-width="3" stroke-linejoin="round" stroke-linecap="round"/>
+  <circle cx="834.0" cy="266.3" r="5" fill="#3b4a7a"/>
+  <circle cx="834.0" cy="477.6" r="5" fill="#2e8b57"/>
+  <text x="514.0" y="520" class="axt" text-anchor="middle">1</text>
+  <text x="559.7" y="520" class="axt" text-anchor="middle">2</text>
+  <text x="651.1" y="520" class="axt" text-anchor="middle">4</text>
+  <text x="834.0" y="520" class="axt" text-anchor="middle">8</text>
+  <text x="674.0" y="540" class="axl" text-anchor="middle">Concurrent workers</text>
+  <text x="486" y="377.0" class="axl" text-anchor="middle" transform="rotate(-90 486 377.0)">Total prefill tokens</text>
+  <text x="690.0" y="402.0" class="mult" text-anchor="middle">9.7×</text>
+  <text x="690.0" y="422.0" class="msub" text-anchor="middle">less prefill at 8 workers</text>
+  <text x="690.0" y="442.0" class="mfoot" text-anchor="middle">8.8× at a single worker — the turn-tax is worker-independent (measured)</text>
+  <text x="884" y="210" class="pt">50-turn × 5-agent fleet</text>
+  <text x="884" y="230" class="pst">vs turns elapsed · baseline = a tuned warm-cache SOTA stack</text>
+  <line x1="924" y1="446.4" x2="1244" y2="446.4" stroke="#e3e9ee" stroke-width="1"/>
+  <text x="918" y="450.4" class="ytk" text-anchor="end">1×</text>
+  <line x1="924" y1="390.9" x2="1244" y2="390.9" stroke="#e3e9ee" stroke-width="1"/>
+  <text x="918" y="394.9" class="ytk" text-anchor="end">2×</text>
+  <line x1="924" y1="279.8" x2="1244" y2="279.8" stroke="#e3e9ee" stroke-width="1"/>
+  <text x="918" y="283.8" class="ytk" text-anchor="end">4×</text>
+  <line x1="924" y1="252" x2="924" y2="502" stroke="#b9c4cf" stroke-width="1.5"/>
+  <line x1="924" y1="502" x2="1244" y2="502" stroke="#b9c4cf" stroke-width="1.5"/>
+  <polygon points="924.0,482.6 982.8,438.1 1080.7,365.9 1244.0,274.2 1244.0,446.4 1080.7,457.6 982.8,471.4 924.0,485.3" fill="#e7ebf4" opacity="0.65"/>
+  <polygon points="924.0,485.3 982.8,471.4 1080.7,457.6 1244.0,446.4 1244.0,502.0 924.0,502.0" fill="#e9f5ee" opacity="0.7"/>
+  <polyline points="924.0,482.6 982.8,438.1 1080.7,365.9 1244.0,274.2" fill="none" stroke="#3b4a7a" stroke-width="3" stroke-linejoin="round" stroke-linecap="round"/>
+  <polyline points="924.0,485.3 982.8,471.4 1080.7,457.6 1244.0,446.4" fill="none" stroke="#2e8b57" stroke-width="3" stroke-linejoin="round" stroke-linecap="round"/>
+  <circle cx="1244.0" cy="274.2" r="5" fill="#3b4a7a"/>
+  <circle cx="1244.0" cy="446.4" r="5" fill="#2e8b57"/>
+  <text x="924.0" y="520" class="axt" text-anchor="middle">1</text>
+  <text x="982.8" y="520" class="axt" text-anchor="middle">10</text>
+  <text x="1080.7" y="520" class="axt" text-anchor="middle">25</text>
+  <text x="1244.0" y="520" class="axt" text-anchor="middle">50</text>
+  <text x="1084.0" y="540" class="axl" text-anchor="middle">Turns elapsed</text>
+  <text x="896" y="377.0" class="axl" text-anchor="middle" transform="rotate(-90 896 377.0)">Cumulative serving work</text>
+  <text x="1100.0" y="402.0" class="mult" text-anchor="middle">4.1×</text>
+  <text x="1100.0" y="422.0" class="msub" text-anchor="middle">less serving work, vs tuned SOTA</text>
+  <text x="1100.0" y="442.0" class="mfoot" text-anchor="middle">the conservative number — vs the naive re-prefill loop it is ~60×, which we don't lead with</text>
+  <line x1="270" y1="561" x2="304" y2="561" stroke="#3b4a7a" stroke-width="4" stroke-linecap="round"/>
+  <circle cx="287" cy="561" r="4.5" fill="#3b4a7a"/>
+  <text x="316" y="566" class="leg">Baseline — re-prefill (named per panel)</text>
+  <line x1="700" y1="561" x2="734" y2="561" stroke="#2e8b57" stroke-width="4" stroke-linecap="round"/>
+  <circle cx="717" cy="561" r="4.5" fill="#2e8b57"/>
+  <text x="746" y="566" class="leg">fak — resident / addressable KV</text>
+  <text x="64" y="602" class="foot">Apple M3 Pro · app_version 0.30.0. Panels 1–2 baseline against re-prefill (the standard non-resident path every cold miss pays); panel 3 against a tuned warm-cache SOTA stack. fak/BENCHMARK-AUTHORITY.md · docs/webbench-baselines.md.</text>
+</svg>

@@ -1,0 +1,40 @@
+%%{init: {'theme':'base','themeVariables':{'fontFamily':'Segoe UI, Helvetica, Arial, sans-serif','fontSize':'13px','lineColor':'#5B6B7B','primaryColor':'#DCE9FB','primaryTextColor':'#1B3A66','primaryBorderColor':'#3B6FB5','clusterBkg':'#F7F9FB','clusterBorder':'#AFC0CE'}}}%%
+flowchart LR
+  live(["live session<br/>tool results stream in"])
+  mmu["ctxmmu gate pages each result to a<br/>content-addressed store at WRITE time<br/>(quarantine decided here, once)"]
+  live --> mmu
+
+  subgraph CORE["the core image (recall.Recorder.Persist)"]
+    direction TB
+    man[("manifest.json<br/>page table: roles · digests ·<br/>real extractive descriptor · QUARANTINE state")]
+    cas[("cas.json<br/>swap device: content-addressed bytes")]
+  end
+  mmu --> CORE
+
+  boundary{{"PROCESS BOUNDARY<br/>session ends = a core dump"}}
+  CORE --> boundary
+
+  load["recall.Load(dir)<br/>rebuilds a Session with its OWN CAS + a FRESH ctxmmu gate<br/>verifies every blob vs its digest → a tampered device FAILS CLOSED"]
+  boundary --> load
+  load --> sess(["new Session, self-contained,<br/>ready to Resolve / Recall"])
+
+  note["the seal OUTLIVES the process: a page the gate quarantined<br/>before the boundary stays sealed after it — no memory system<br/>that re-pastes transcript bytes has this. recall makes the<br/>decision DURABLE + re-screenable; it does not change the decision."]
+  boundary -.- note
+
+  classDef untrusted fill:#FFE9D6,stroke:#E8833A,stroke-width:2px,color:#7A3E12;
+  classDef kernel fill:#DCE9FB,stroke:#3B6FB5,stroke-width:2px,color:#1B3A66;
+  classDef gate fill:#FFF3CC,stroke:#C9A227,stroke-width:2px,color:#6B5410;
+  classDef pass fill:#DBF3E1,stroke:#3FA45F,stroke-width:2px,color:#1C5230;
+  classDef deny fill:#FBDDDD,stroke:#C9453F,stroke-width:2px,color:#6E1F1B;
+  classDef mem fill:#EDE7FB,stroke:#7B5BC0,stroke-width:2px,color:#3A2A66;
+  classDef cheap fill:#E8ECEF,stroke:#7A8A99,stroke-width:1.5px,color:#33424F;
+  classDef world fill:#FCEEDB,stroke:#B5792B,stroke-width:2px,color:#5E3D12;
+  classDef frontier fill:#E7D9F5,stroke:#8A53C0,stroke-width:2px,color:#3F2466;
+  classDef note fill:#F7F9FB,stroke:#AFC0CE,stroke-width:1px,color:#46586A;
+
+  class live untrusted;
+  class mmu,load kernel;
+  class man,cas mem;
+  class boundary deny;
+  class sess pass;
+  class note note;

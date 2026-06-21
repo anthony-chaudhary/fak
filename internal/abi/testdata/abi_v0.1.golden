@@ -1,0 +1,45 @@
+{
+  "abi": {
+    "Major": 0,
+    "Minor": 1
+  },
+  "fallback": {
+    "Allow": 1,
+    "Defer": 2,
+    "Deny": 0
+  },
+  "outcome": {
+    "Committed": 0,
+    "RolledBack": 2,
+    "Squashed": 1
+  },
+  "refkind": {
+    "Blob": 1,
+    "Inline": 0,
+    "Region": 2
+  },
+  "scope": {
+    "Agent": 0,
+    "Fleet": 1,
+    "Tenant": 2
+  },
+  "status": {
+    "Error": 1,
+    "OK": 0,
+    "Pending": 2
+  },
+  "taint": {
+    "Quarantined": 2,
+    "Tainted": 0,
+    "Trusted": 1
+  },
+  "verdict_kinds": {
+    "Allow": 0,
+    "Defer": 5,
+    "Deny": 1,
+    "Quarantine": 3,
+    "RequireWitness": 4,
+    "ReservedMax": 1023,
+    "Transform": 2
+  }
+}

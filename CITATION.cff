@@ -1,0 +1,40 @@
+cff-version: 1.2.0
+title: "fak — the agent kernel"
+message: "If you use fak in your research or product, please cite it using these metadata."
+type: software
+authors:
+  - family-names: Chaudhary
+    given-names: Anthony
+repository-code: "https://github.com/anthony-chaudhary/fak"
+url: "https://github.com/anthony-chaudhary/fak"
+abstract: >-
+  fak is an agent kernel: an in-process, default-deny permission gate for AI
+  agents fused with an addressable, bit-exact KV cache, written in Go. It treats
+  the language model as an untrusted program and every tool call as a syscall that
+  must pass through a kernel the model does not control. The same boundary enforces
+  security (which effects are allowed, which tool results may enter the model's
+  context) and drives performance (shared work is computed once and reused). fak
+  provides prompt-injection and tool-poisoning containment via result quarantine,
+  capability security via a reviewable allow-list, and mid-run causal KV-cache span
+  eviction that is bit-for-bit exact against a reference run (max|delta| = 0), for
+  safe and cache-efficient self-hosted LLM agent fleets.
+keywords:
+  - agent kernel
+  - agent tool firewall
+  - AI agents
+  - LLM agents
+  - prompt injection
+  - tool poisoning
+  - capability security
+  - default-deny permission gate
+  - KV cache
+  - addressable KV cache
+  - LLM inference
+  - LLM serving
+  - self-hosted LLM
+  - AI safety
+  - agentic AI
+  - Go
+license: Apache-2.0
+version: 0.30.0
+date-released: "2026-06-21"

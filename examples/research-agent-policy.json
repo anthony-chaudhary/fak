@@ -1,0 +1,64 @@
+{
+  "version": "fak-policy/v1",
+  "posture": "admit_and_log",
+  "allow": [
+    "cite_source",
+    "create_note",
+    "fetch_url",
+    "read_webpage",
+    "summarize_document"
+  ],
+  "allow_prefix": [
+    "read_",
+    "get_",
+    "search_",
+    "list_",
+    "lookup_",
+    "find_",
+    "calc"
+  ],
+  "deny": {
+    "delete_file": "POLICY_BLOCK",
+    "drop_table": "POLICY_BLOCK",
+    "exfiltrate": "SECRET_EXFIL",
+    "post_message": "POLICY_BLOCK",
+    "run_command": "POLICY_BLOCK",
+    "send_email": "POLICY_BLOCK",
+    "transfer_funds": "POLICY_BLOCK",
+    "upload_file": "POLICY_BLOCK"
+  },
+  "self_modify_globs": [
+    ".git/",
+    ".dos/",
+    "policy.json",
+    "research-agent-policy.json",
+    "/etc/",
+    "id_rsa"
+  ],
+  "redact_fields": [
+    "password",
+    "secret",
+    "api_key",
+    "token",
+    "authorization"
+  ],
+  "sources": {
+    "fetch_url": "untrusted",
+    "read_file": "trusted_local",
+    "read_webpage": "untrusted"
+  },
+  "arg_rules": [
+    {
+      "tool": "create_note",
+      "arg": "path",
+      "allow_glob": "notes/**",
+      "reason": "POLICY_BLOCK"
+    },
+    {
+      "tool": "fetch_url",
+      "arg": "url",
+      "deny_regex": "(?i)^(file|ftp|ssh)://",
+      "reason": "POLICY_BLOCK"
+    }
+  ]
+}

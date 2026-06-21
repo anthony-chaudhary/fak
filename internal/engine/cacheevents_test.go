@@ -1,0 +1,138 @@
+package engine_test
+
+import (
+	"strings"
+	"testing"
+
+	"github.com/anthony-chaudhary/fak/internal/cachemeta"
+	"github.com/anthony-chaudhary/fak/internal/engine"
+)
+
+// A routing/offload/restore sequence must be normalized into the SAME cache-entry
+// stream (plane kv_transfer) as tool/context entries, with residency tier + owner
+// recorded separately from the payload.
+func TestCacheEventRecorderNormalizesIntoCacheEntryStream(t *testing.T) {
+	rec := engine.NewCacheEventRecorder()
+
+	off := rec.Record(engine.CacheEvent{
+		Direction:  cachemeta.KVOffload,
+		SpanDigest: "span-1",
+		Tokens:     2048,
+		ModelID:    "m",
+		FromTier:   cachemeta.TierHBM,
+		ToTier:     cachemeta.TierDRAM,
+		Owner:      "kvbm",
+		BytesMoved: 1 << 20,
+		Outcome:    cachemeta.KVTransferOK,
+	})
+	if off.Entry.Plane != cachemeta.PlaneKVTransfer || off.Entry.ID.MediaType != cachemeta.MediaKVSpan {
+		t.Fatalf("offload not on the kv_transfer plane: %+v", off.Entry)
+	}
+	// Residency tier + owner separate from payload.
+	if off.Entry.Residency.Tier != cachemeta.TierDRAM || off.Entry.Residency.Owner != "kvbm" {
+		t.Fatalf("residency not recorded separately: %+v", off.Entry.Residency)
+	}
+	if off.Entry.Labels["direction"] != "offload" || off.Entry.Labels["to_tier"] != "dram" {
+		t.Fatalf("transition labels missing: %+v", off.Entry.Labels)
+	}
+	if off.Verdict.Kind != cachemeta.LookupHit {
+		t.Fatalf("ok offload should HIT, got %s", off.Verdict.Kind)
+	}
+
+	rt := rec.Record(engine.CacheEvent{
+		Direction: cachemeta.KVRoute, SpanDigest: "span-1", ToTier: cachemeta.TierRemote,
+		Owner: "router", Outcome: cachemeta.KVTransferOK,
+	})
+	if rt.Entry.Labels["direction"] != "route" || rt.Verdict.Kind != cachemeta.LookupHit {
+		t.Fatalf("route not normalized: %+v / %s", rt.Entry.Labels, rt.Verdict.Kind)
+	}
+
+	if got := rec.Metrics().Snapshot().Events; got != 2 {
+		t.Fatalf("expected 2 normalized events, got %d", got)
+	}
+}
+
+// §2.2 acceptance: a failure to restore/load KV is a typed MISS or FAULT, never a
+// silent recompute. SilentRecompute() flags any non-Hit so the caller cannot fold a
+// fault away.
+func TestCacheEventRestoreFaultIsTypedNeverSilent(t *testing.T) {
+	rec := engine.NewCacheEventRecorder()
+
+	fault := rec.Record(engine.CacheEvent{
+		Direction: cachemeta.KVRestore, Outcome: cachemeta.KVTransferFault, FaultReason: "page-in EIO",
+	})
+	if fault.Verdict.Kind != cachemeta.LookupFault || fault.Verdict.Reason != cachemeta.ReasonResidencyFault {
+		t.Fatalf("restore fault must be FAULT(residency_fault), got %+v", fault.Verdict)
+	}
+	if !fault.SilentRecompute() {
+		t.Fatal("a fault must be flagged as non-serveable (cannot be silently recomputed)")
+	}
+
+	miss := rec.Record(engine.CacheEvent{Direction: cachemeta.KVRestore, Outcome: cachemeta.KVTransferMissed})
+	if miss.Verdict.Kind != cachemeta.LookupMiss || miss.Verdict.Reason != cachemeta.ReasonRestoreMiss {
+		t.Fatalf("restore miss must be MISS(restore_miss), got %+v", miss.Verdict)
+	}
+	if !miss.SilentRecompute() {
+		t.Fatal("a miss must be flagged as non-serveable")
+	}
+
+	snap := rec.Metrics().Snapshot()
+	if snap.RestoreFault != 1 || snap.RestoreMiss != 1 || snap.Faults != 1 || snap.Misses != 1 {
+		t.Fatalf("typed miss/fault not counted in metrics: %+v", snap)
+	}
+}
+
+// Cache events must be exposable as metrics (not only internal engine counters):
+// the snapshot keys by direction x outcome x to_tier and renders Prometheus text.
+func TestCacheEventMetricsExposedAsPrometheus(t *testing.T) {
+	rec := engine.NewCacheEventRecorder()
+	rec.Record(engine.CacheEvent{Direction: cachemeta.KVOffload, ToTier: cachemeta.TierDisk, BytesMoved: 100, Tokens: 10, Outcome: cachemeta.KVTransferOK})
+	rec.Record(engine.CacheEvent{Direction: cachemeta.KVOffload, ToTier: cachemeta.TierDisk, BytesMoved: 50, Tokens: 5, Outcome: cachemeta.KVTransferOK})
+	rec.Record(engine.CacheEvent{Direction: cachemeta.KVRestore, ToTier: cachemeta.TierHBM, Outcome: cachemeta.KVTransferFault, FaultReason: "x"})
+
+	snap := rec.Metrics().Snapshot()
+	if snap.Events != 3 || snap.BytesMoved != 150 || snap.TokensMoved != 15 {
+		t.Fatalf("aggregate totals wrong: %+v", snap)
+	}
+	// The two offload-ok-disk events collapse into one keyed row with count 2.
+	var found bool
+	for _, r := range snap.Rows {
+		if r.Direction == "offload" && r.Outcome == "ok" && r.ToTier == "disk" {
+			found = true
+			if r.Count != 2 || r.BytesMoved != 150 || r.TokensMoved != 15 {
+				t.Fatalf("offload/ok/disk row wrong: %+v", r)
+			}
+		}
+	}
+	if !found {
+		t.Fatalf("missing offload/ok/disk row in %+v", snap.Rows)
+	}
+
+	prom := snap.Prometheus()
+	for _, want := range []string{
+		"fak_engine_cache_events_total 3",
+		"fak_engine_cache_restore_fault_total 1",
+		"fak_engine_cache_bytes_moved_total 150",
+		`fak_engine_cache_event_breakdown_total{direction="offload",outcome="ok",to_tier="disk"} 2`,
+		"# TYPE fak_engine_cache_faults_total counter",
+	} {
+		if !strings.Contains(prom, want) {
+			t.Fatalf("Prometheus output missing %q:\n%s", want, prom)
+		}
+	}
+}
+
+// The recorder fans every normalized (entry, verdict) out to an installed sink so a
+// structured logger / tracer can observe the same stream.
+func TestCacheEventRecorderSinkFanout(t *testing.T) {
+	rec := engine.NewCacheEventRecorder()
+	var seen []cachemeta.LookupKind
+	rec.SetSink(func(_ cachemeta.Entry, v cachemeta.LookupVerdict) {
+		seen = append(seen, v.Kind)
+	})
+	rec.Record(engine.CacheEvent{Direction: cachemeta.KVOffload, Outcome: cachemeta.KVTransferOK})
+	rec.Record(engine.CacheEvent{Direction: cachemeta.KVRestore, Outcome: cachemeta.KVTransferMissed})
+	if len(seen) != 2 || seen[0] != cachemeta.LookupHit || seen[1] != cachemeta.LookupMiss {
+		t.Fatalf("sink did not observe the stream: %+v", seen)
+	}
+}

@@ -1,0 +1,39 @@
+%%{init: {'theme':'base','themeVariables':{'fontFamily':'Segoe UI, Helvetica, Arial, sans-serif','fontSize':'14px','lineColor':'#5B6B7B','primaryColor':'#DCE9FB','primaryTextColor':'#1B3A66','primaryBorderColor':'#3B6FB5','clusterBkg':'#F7F9FB','clusterBorder':'#AFC0CE'}}}%%
+flowchart TD
+  agent(["agent proposes a tool call"]):::untrusted
+  r0{"rung 0 - static<br/>parses? binary on PATH? args type-check?<br/>(microseconds)"}:::gate
+  r1{"rung 1 - dry-run / linter<br/>--collect-only, --help, compile-check<br/>(milliseconds)"}:::gate
+  r2{"rung 2 - sandbox probe<br/>tiny fixture, read-only, no network<br/>(tens of ms)"}:::gate
+  r3[["rung 3 - fire for real<br/>(full cost)"]]:::world
+  d0["deny -> call never fires"]:::deny
+  d1["deny -> call never fires"]:::deny
+  d2["deny -> call never fires"]:::deny
+  rsi[("every pass-k / fail-(k+1) is a<br/>labeled example that tightens the ladder<br/>(the RSI signal)")]:::mem
+  cost["a failed call's REAL cost is context pollution:<br/>a stack trace ~500-2000 tokens + a wasted recovery turn<br/>(not wall-clock)"]:::note
+  punch["spend 1 us to avoid a stack trace in context"]:::note
+
+  agent --> r0
+  r0 -->|"pass"| r1
+  r1 -->|"pass"| r2
+  r2 -->|"pass"| r3
+  r0 -.->|"would fail"| d0
+  r1 -.->|"would fail"| d1
+  r2 -.->|"would fail"| d2
+  d0 -.-> cost
+  d1 -.-> cost
+  d2 -.-> cost
+  cost --> punch
+  d0 -.-> rsi
+  d1 -.-> rsi
+  d2 -.-> rsi
+
+  classDef untrusted fill:#FFE9D6,stroke:#E8833A,stroke-width:2px,color:#7A3E12;
+  classDef kernel fill:#DCE9FB,stroke:#3B6FB5,stroke-width:2px,color:#1B3A66;
+  classDef gate fill:#FFF3CC,stroke:#C9A227,stroke-width:2px,color:#6B5410;
+  classDef pass fill:#DBF3E1,stroke:#3FA45F,stroke-width:2px,color:#1C5230;
+  classDef deny fill:#FBDDDD,stroke:#C9453F,stroke-width:2px,color:#6E1F1B;
+  classDef mem fill:#EDE7FB,stroke:#7B5BC0,stroke-width:2px,color:#3A2A66;
+  classDef cheap fill:#E8ECEF,stroke:#7A8A99,stroke-width:1.5px,color:#33424F;
+  classDef world fill:#FCEEDB,stroke:#B5792B,stroke-width:2px,color:#5E3D12;
+  classDef frontier fill:#E7D9F5,stroke:#8A53C0,stroke-width:2px,color:#3F2466;
+  classDef note fill:#F7F9FB,stroke:#AFC0CE,stroke-width:1px,color:#46586A;

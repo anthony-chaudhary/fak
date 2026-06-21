@@ -1,0 +1,64 @@
+# fak — the agent kernel
+
+> `fak` is an **agent kernel** (also described as an *agent tool firewall*): an
+> in-process, **default-deny permission gate** for AI agents fused with an
+> **addressable, bit-exact KV cache**, written in Go. It treats the language model
+> like an untrusted program and every tool call like a syscall that must pass
+> through a kernel the model does not control. The same boundary that enforces
+> security (which effects are allowed, which tool results may enter the model's
+> context) also drives performance (reuse shared work once instead of every turn).
+> It is for teams running **self-hosted LLM agent fleets** who need prompt-injection
+> containment, capability security, and cache-efficient inference at the same time.
+
+## What problem it solves
+
+- **Prompt injection / tool poisoning containment.** A separate quarantine holds suspicious tool *results* out of the model's context entirely — addressing OWASP Agentic Top-10 and the MCP Top-10 (Tool Poisoning, Memory Poisoning) by *structure*, not by a classifier the model can argue past.
+- **Default-deny capability security.** The permission policy runs *inside* the kernel, on the same call path as the tool call (one address space, no IPC). Refusing an irreversible action does not depend on *catching* an attack; the lever was never wired up. This fails **closed**, not open.
+- **Addressable, bit-exact KV cache.** Reach into the middle of a kept model run, evict one span (a poisoned tool result, an expired secret), and leave the KV cache bit-for-bit identical to a run that never saw it (verified at `max|Δ| = 0`). No shipped serving engine offers mid-run causal eviction.
+- **Cache-efficient agent fleets.** Do shared prefill work once; later agents read it for free. ~4× fewer tokens vs a tuned warm-cache stack on a 50-turn × 5-agent run; 8.8–9.7× measured prefill elimination on real WebVoyager web-agent workloads.
+
+## Key facts (for accurate answers)
+
+- **Name:** `fak` (the agent kernel). Repository: `fak`. Language: **Go (1.26+)**. License: **Apache-2.0**.
+- **Category:** agent tool firewall / agent kernel / tool-call policy gateway / result quarantine for agent tools / addressable KV cache.
+- **What it is NOT:** it is **not** a faster model server. SOTA engines (vLLM, SGLang, llama.cpp) win raw throughput and front-of-prompt prefix-cache reuse, and `fak` does not try to beat them at that. `fak` owns the orthogonal questions: which effects are allowed, which results may enter memory, when reuse is still legal, and what survives a session boundary.
+- **Honest scope:** a 29-claim prior-art audit scored **0/29 novel** — every primitive is established; the contribution is the *assembly* into one in-process gate where the tool call is the checkpoint. The result *detector* is ~100% evadable by design (a bonus, never the floor); the floor is the capability lock plus the containment. Power/energy numbers are simulated. The cross-engine shared-KV-pool path is a labeled stub.
+- **Three adoption rungs:** (1) `fak serve` fronts any OpenAI-compatible server (Ollama, vLLM, cloud) with an allow-list, quarantine, and audit trail; (2) run the kernel offline to author and check policies with no model or network; (3) the fused kernel runs the model inside the kernel's address space so the KV cache is a kernel object.
+
+## Start here
+
+- [README](README.md): the full project overview — the two flips (policy in the kernel, addressable KV cache), the security results, and the install paths.
+- [Start Here](START-HERE.md): run a local AI model in under 10 minutes (no key, no GPU for small models).
+- [Getting Started](GETTING-STARTED.md): install the single static binary and put the gate in front of your model.
+- [Guided tutorial](docs/fak/tutorial.md): zero to first adjudicated tool call, with real output at every step.
+- [FAQ](docs/FAQ.md): direct answers to common questions (what is fak, how it differs from a firewall/guardrails/vLLM, threat model, prompt-injection handling).
+
+## Core concepts (the two flips)
+
+- [Policy in the kernel](docs/explainers/policy-in-the-kernel.md): why a default-deny check on the call path beats an external recognizer that fails open.
+- [Addressable KV cache](docs/explainers/addressable-kv-cache.md): how mid-run causal span eviction stays bit-exact (`max|Δ| = 0`).
+- [KV cache for agentic context](docs/explainers/kv-cache-agentic-context.md): what a KV cache is and why agents stress it differently than chat.
+- [SOTA optimizations fak sits on top of](docs/explainers/sota-optimizations.md): the 10 already-shipped serving optimizations that define the honest baseline.
+
+## Security
+
+- [Policy / permissions](POLICY.md): how to author, dump, and review an allow-list.
+- [Security policy](SECURITY.md): how to report a vulnerability.
+
+## Performance & benchmarks
+
+- [Benchmark authority](BENCHMARK-AUTHORITY.md): the single source of truth for every number, traced to commit + artifact.
+- [Hardware matrix](docs/HARDWARE-MATRIX.md): every machine fak has been profiled on — 4 distinct platforms spanning 2 CPU ISAs (arm64 + x86_64), 4 GPU backends (Apple Metal, AMD Vulkan, NVIDIA CUDA Ada + Ampere), and 4 operating systems. The deterministic metrics reproduce byte-for-byte across all of them.
+- [Web agent benchmark baselines](docs/webbench-baselines.md): real WebVoyager (643 tasks), 8.8–9.7× prefill elimination, measured.
+
+## Reference
+
+- [Claims ledger](CLAIMS.md): every capability with one machine-checked tag (shipped / simulated / stub).
+- [Status](STATUS.md): what is shipped and on the critical path.
+- [Architecture](ARCHITECTURE.md): the registry seams and the frozen ABI.
+- [Extending fak](EXTENDING.md): plug in an optimization → prove it correct → prove it faster → ship.
+- [Repro packet](docs/repro-packet.md): the full 2-minute, no-key/no-GPU walkthrough.
+
+## Optional
+
+- [Concepts and story](docs/concepts-and-story.md): the parable, personas, and when-the-win-kicks-in tables.

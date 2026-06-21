@@ -1,0 +1,35 @@
+{
+  "_about": "SOURCE OF TRUTH for the fak BENCHMARK SWEEP grid (visuals/61-hero-benchmark-sweep.svg), rendered by tools/hero_sweep_gen.py. fak's analog of the GLM-5.2 'LLM Performance Evaluation' 2x4 bar-grid: one small grouped-bar panel per benchmark, value labels on top, a badge on each bar, the benchmark name in a pill below, the subject (fak) bar in the bright accent. Honesty rules: every fak figure traces to fak/BENCHMARK-AUTHORITY.md by commit and is the bright bar; each panel compares fak against ONE named, honest reference (a tuned-SOTA baseline, a deterministic ceiling, the optimal, the spawned-hook, or — for capability panels — a field that does not ship it), never a fabricated competitor number. The final panel is the SINGLE-STREAM fence and INVERTS the accent: llama.cpp owns the bright/tall bar, fak shows its honest lower number. Edit this file, then run `python tools/hero_sweep_gen.py`.",
+  "meta": {
+    "title": "fak — the agent kernel, the benchmark sweep",
+    "as_of": "2026-06-21",
+    "out_svg": "visuals/61-hero-benchmark-sweep.svg",
+    "authority": "fak/BENCHMARK-AUTHORITY.md"
+  },
+  "kicker": "BENCHMARK SWEEP · 8 AXES ACROSS THREE PILLARS",
+  "title": "fak by the benchmarks — breadth, not a single number",
+  "subtitle": "Eight axes spanning serving efficiency, correctness, and the security kernel — each fak figure (green) against one honest reference; the last panel is the single-stream fence fak does not target, where llama.cpp leads.",
+  "legend": [
+    { "label": "fak (the subject)", "color": "#2e8b57" },
+    { "label": "honest reference — baseline / ceiling / optimal / SOTA leader", "color": "#9aa6b2" }
+  ],
+  "panels": [
+    { "name": "Fleet serving efficiency", "pillar": "SERVING", "foot": "less serving work · 50t × 5a", "commit": "2bbda6f", "y_max": 4.6,
+      "bars": [ { "who": "fak", "badge": "f", "v": 4.1, "label": "4.1×", "subject": true }, { "who": "tuned SOTA", "badge": "S", "v": 1.0, "label": "1.0×" } ] },
+    { "name": "KV-cache hit rate", "pillar": "SERVING", "foot": "= 100% of optimal", "commit": "92896a4", "y_max": 112,
+      "bars": [ { "who": "fak", "badge": "f", "v": 86.7, "label": "86.7%", "subject": true }, { "who": "optimal", "badge": "◎", "v": 100, "label": "100%" } ] },
+    { "name": "RadixAttention prefill", "pillar": "SERVING", "foot": "fewer prefill FLOPs", "commit": "92896a4", "y_max": 8.2,
+      "bars": [ { "who": "fak", "badge": "f", "v": 6.95, "label": "6.95×", "subject": true }, { "who": "ceiling", "badge": "▲", "v": 7.50, "label": "7.50×" } ] },
+    { "name": "Mid-run eviction", "pillar": "CORRECTNESS", "foot": "bit-exact vs a clean run", "commit": "0fc39aa", "y_max": 1.0, "capability": true,
+      "bars": [ { "who": "fak", "badge": "f", "v": 1.0, "label": "max|Δ|=0", "subject": true }, { "who": "field", "badge": "—", "v": 0.0, "label": "—" } ] },
+    { "name": "Exact token reuse", "pillar": "CORRECTNESS", "foot": "fewer tokens, exact accounting", "commit": "92896a4", "y_max": 8.2,
+      "bars": [ { "who": "fak", "badge": "f", "v": 7.50, "label": "7.50×", "subject": true }, { "who": "re-prefill", "badge": "·", "v": 1.0, "label": "1.0×" } ] },
+    { "name": "In-process decide", "pillar": "SECURITY", "foot": "faster than a spawned hook (log)", "commit": "bcad56e", "y_max": 1.0, "log_multiplier": "2,849×",
+      "bars": [ { "who": "fak", "badge": "f", "v": 1.0, "label": "362 ns", "subject": true }, { "who": "spawned hook", "badge": "H", "v": 0.22, "label": "1× (≈1 ms)" } ] },
+    { "name": "Injection containment", "pillar": "SECURITY", "foot": "quarantined out of context", "commit": "bcad56e", "y_max": 1.0, "capability": true,
+      "bars": [ { "who": "fak", "badge": "f", "v": 1.0, "label": "QUARANTINE", "subject": true }, { "who": "field", "badge": "—", "v": 0.0, "label": "—" } ] },
+    { "name": "Single-stream decode", "pillar": "FENCE", "foot": "fak does NOT target this — llama.cpp leads", "commit": "34c74f4", "y_max": 19, "fence": true,
+      "bars": [ { "who": "fak", "badge": "f", "v": 8.7, "label": "8.7 tok/s" }, { "who": "llama.cpp", "badge": "L", "v": 17.3, "label": "17.3 tok/s", "subject": true } ] }
+  ],
+  "footer": "Apple M3 Pro 6P+6E 36 GB · app_version 0.30.0 · llama.cpp b9707, same box. Each fak figure traces to fak/BENCHMARK-AUTHORITY.md by the commit under its panel. Capability panels (max|Δ|=0, containment) compare against a field that ships no such gate; the in-process-decide panel is a log multiplier (2,849× vs a spawned hook); the fence panel inverts the accent to the SOTA leader."
+}

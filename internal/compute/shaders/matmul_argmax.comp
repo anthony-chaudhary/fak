@@ -1,0 +1,82 @@
+#version 450
+// matmul_argmax.comp — first argmax of y = x @ W^T without materializing y.
+//
+// One workgroup covers the whole output vector. Each invocation owns a strided subset of
+// output rows, computes the serial dot for each owned row, tracks its local best, then a
+// shared reduction picks the global first-max index. This is for greedy decode's final
+// lm_head only: it removes the vocab-sized logits buffer and the separate argmax dispatch.
+layout(local_size_x = 256) in;
+
+layout(std430, binding = 0) readonly  buffer Wbuf { float W[]; };
+layout(std430, binding = 1) readonly  buffer Xbuf { float X[]; };
+layout(std430, binding = 2) writeonly buffer Obuf { int outIdx[]; };
+
+layout(push_constant) uniform Push { int outDim; int inDim; } pc;
+
+const uint SHARED_CAP = 1024u;
+shared float Xs[SHARED_CAP];
+shared float vbest[256];
+shared int   ibest[256];
+
+void main() {
+    uint tid = gl_LocalInvocationID.x;
+    uint out_ = uint(pc.outDim);
+    uint in_ = uint(pc.inDim);
+    uint passes = (out_ + 255u) / 256u;
+
+    float bv = -1e30;
+    int bi = 0;
+
+    if (in_ <= SHARED_CAP) {
+        for (uint i = tid; i < in_; i += 256u) Xs[i] = X[i];
+        barrier();
+        for (uint o = tid; o < out_; o += 256u) {
+            uint wbase = o * in_;
+            float acc = 0.0;
+            for (uint i = 0u; i < in_; ++i) acc += W[wbase + i] * Xs[i];
+            if (acc > bv || (acc == bv && int(o) < bi)) {
+                bv = acc;
+                bi = int(o);
+            }
+        }
+    } else {
+        // All invocations execute every pass/chunk so the cooperative staging barriers remain
+        // uniform even when outDim is not a multiple of 256. This slow path preserves
+        // correctness for wide hidden states; the SmolLM2 decode head takes the fast path.
+        for (uint pass = 0u; pass < passes; ++pass) {
+            uint o = pass * 256u + tid;
+            bool valid = o < out_;
+            float acc = 0.0;
+            for (uint c0 = 0u; c0 < in_; c0 += SHARED_CAP) {
+                uint clen = min(SHARED_CAP, in_ - c0);
+                for (uint i = tid; i < clen; i += 256u) Xs[i] = X[c0 + i];
+                barrier();
+                if (valid) {
+                    uint wbase = o * in_ + c0;
+                    for (uint i = 0u; i < clen; ++i) acc += W[wbase + i] * Xs[i];
+                }
+                barrier();
+            }
+            if (valid && (acc > bv || (acc == bv && int(o) < bi))) {
+                bv = acc;
+                bi = int(o);
+            }
+        }
+    }
+
+    vbest[tid] = bv;
+    ibest[tid] = bi;
+    barrier();
+    for (uint s = 128u; s > 0u; s >>= 1) {
+        if (tid < s) {
+            float ov = vbest[tid + s];
+            int oi = ibest[tid + s];
+            if (ov > vbest[tid] || (ov == vbest[tid] && oi < ibest[tid])) {
+                vbest[tid] = ov;
+                ibest[tid] = oi;
+            }
+        }
+        barrier();
+    }
+    if (tid == 0u) outIdx[0] = ibest[0];
+}

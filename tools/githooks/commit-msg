@@ -1,0 +1,47 @@
+#!/bin/sh
+# fleet commit-message gate  --  DOS reason: COMMIT_MSG
+#
+# Nudges every commit subject toward `type(scope): <verb> <what>` so the DOS
+# commit-audit witness can grade the commit. A noun-led subject ABSTAINs, and an
+# ABSTAIN on a landed commit is immutable -- so this catches it before it lands.
+#
+# Mode (env FLEET_MSG_GUARD):  warn (default) | block | off
+#   warn   allow the commit, print an advisory      (exit 0)
+#   block  refuse the commit                         (exit 1)
+#   off    do nothing
+# Escape:  FLEET_ALLOW_MSG=1 <git cmd>   always allows.
+#
+# Default is WARN, not block: a non-gradeable subject is a lost grading
+# opportunity, not a leak, and ~10 auto-committing agents should not be wedged by
+# message style. Hard-enforce with FLEET_MSG_GUARD=block. Logic lives in
+# tools/check_commit_msg.py.
+
+msgfile="$1"                       # save BEFORE `set --` clobbers the positionals
+mode="${FLEET_MSG_GUARD:-warn}"
+[ "$mode" = "off" ] && exit 0
+[ "${FLEET_ALLOW_MSG:-0}" = "1" ] && exit 0
+
+root="$(git rev-parse --show-toplevel 2>/dev/null)" || exit 0
+chk="$root/tools/check_commit_msg.py"
+[ -f "$chk" ] || exit 0
+
+if [ -n "${PYTHON:-}" ]; then set -- "$PYTHON"
+elif command -v python3 >/dev/null 2>&1; then set -- python3
+elif command -v python >/dev/null 2>&1; then set -- python
+elif command -v py >/dev/null 2>&1; then set -- py -3
+else exit 0; fi
+
+out="$("$@" "$chk" --file "$msgfile" 2>&1)"; status=$?
+[ "$status" -eq 0 ] && exit 0
+# status 2 (could-not-read) -> fail open, never wedge a commit over a style check
+[ "$status" -ne 1 ] && exit 0
+
+if [ "$mode" = "block" ]; then
+	echo "$out" >&2
+	echo "  (FLEET_MSG_GUARD=warn softens; =off disables; FLEET_ALLOW_MSG=1 overrides once)" >&2
+	exit 1
+fi
+echo "COMMIT_MSG (advisory):" >&2
+echo "$out" >&2
+echo "  hard-enforce with FLEET_MSG_GUARD=block." >&2
+exit 0

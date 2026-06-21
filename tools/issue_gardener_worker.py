@@ -1,0 +1,328 @@
+#!/usr/bin/env python3
+"""Tier-2 launcher for the GitHub-issue *gardener* — the model-driven pass.
+
+The backlog gardener is two layers, mirroring the supervisor/dispatch split:
+
+* a **deterministic spine** — ``tools/issue_triage.py --status`` — rides the
+  existing ``FleetControlPaneTick`` heartbeat as the tracked ``issue-gardener``
+  control-pane loop. It is read-only and needs no model; it only decides *when*
+  the backlog has drifted past a gardening threshold (ACTION).
+* a **model-driven pass** — THIS launcher — does the *judgment* the spine
+  cannot: assign priority/area/kind to unlabeled issues, propose **expansion**
+  (split an oversized ``needs-split`` issue into focused sub-issues) and
+  **contraction** (confirm duplicate/stale/dormant clusters for merge/close).
+
+Per the operator policy, the gardener runs on a **tier-2 model by default**
+(Sonnet — the mid-tier Claude), not the tier-1 model the interactive fleet
+uses: gardening is a high-volume, low-stakes cadence task where a cheaper model
+is the right default. Model selection precedence (highest first):
+
+1. ``--model`` CLI flag (an explicit model id/alias, e.g. ``opus``/``sonnet``).
+2. ``--tier {1,2,3}`` → ``opus`` / ``sonnet`` / ``haiku``.
+3. ``FLEET_GARDENER_MODEL`` env var.
+4. ``sonnet`` (tier 2, the default).
+
+Like the supervisor/watchdog/canary layer (and UNLIKE the leaf
+``dispatch_worker.py``), this launcher is **dry-run by default** — it prints the
+``claude`` command it *would* run. Pass ``--live`` to actually launch it. The
+gardening prompt is **propose-only**: it writes a dated proposal under
+``docs/_audits/`` and NEVER edits, labels, comments on, or closes an issue.
+Applying the proposed labels/closes stays the operator-gated ``/issue-triage``
+step. This is the same read-only-decides / operator-acts discipline the helper
+and skill already enforce.
+"""
+from __future__ import annotations
+
+import argparse
+import datetime as dt
+import json
+import os
+import shutil
+import subprocess
+import sys
+from pathlib import Path
+from typing import Any, Callable, Sequence
+
+try:
+    sys.stdout.reconfigure(encoding="utf-8")  # type: ignore[union-attr]
+except (AttributeError, ValueError):
+    pass
+
+SCHEMA = "fleet-issue-gardener-worker/1"
+
+# Tier -> Claude model alias. Tier 2 (Sonnet) is the gardener default.
+TIER_MODELS = {"1": "opus", "2": "sonnet", "3": "haiku"}
+MODEL_TIERS = {v: k for k, v in TIER_MODELS.items()}
+DEFAULT_TIER = "2"
+DEFAULT_MODEL = TIER_MODELS[DEFAULT_TIER]  # "sonnet"
+
+BACKENDS = ("claude",)
+DEFAULT_BACKEND = "claude"
+
+# Default permission posture: read + propose, no execution of writes. The
+# gardener is autonomous and on a cadence, so the safe default is plan mode;
+# the operator opts into a writing mode explicitly.
+DEFAULT_PERMISSION_MODE = "plan"
+
+
+def repo_root(start: Path | None = None) -> Path:
+    here = (start or Path(__file__)).resolve()
+    return here.parent.parent
+
+
+def resolve_model(
+    explicit: str | None,
+    tier: str | None,
+    env: dict[str, str] | None,
+) -> str:
+    """Pick the gardener model. Precedence: --model > --tier > env > sonnet."""
+    if explicit:
+        return explicit.strip()
+    if tier:
+        t = str(tier).strip()
+        if t not in TIER_MODELS:
+            raise ValueError(f"unknown tier {tier!r}; expected one of {sorted(TIER_MODELS)}")
+        return TIER_MODELS[t]
+    env_model = (env if env is not None else os.environ).get("FLEET_GARDENER_MODEL")
+    if env_model and env_model.strip():
+        return env_model.strip()
+    return DEFAULT_MODEL
+
+
+def model_tier(model: str) -> str:
+    """Best-effort reverse lookup (a bare model id maps to '?')."""
+    return MODEL_TIERS.get(model, "?")
+
+
+def build_prompt(*, as_of: str, scope: str | None, apply_mechanical: bool) -> str:
+    """The gardening instruction handed to ``claude -p``.
+
+    Concrete and propose-only: it runs the read-only helper, then asks the model
+    for the three judgment moves (priorities/tags, expansion, contraction) and
+    to write the enriched proposal to a dated audit file. The model is told NOT
+    to write to GitHub; applying is the operator-gated /issue-triage step.
+    """
+    scope_clause = f" Limit to the `{scope}` bucket." if scope else ""
+    mech = (
+        " You MAY additionally run the calendar-defensible mechanical batch "
+        "(mark-stale / close-dormant-question) from the actions manifest, one "
+        "batch at a time."
+        if apply_mechanical
+        else " Do NOT edit, label, comment on, or close any issue - propose only."
+    )
+    return (
+        "Garden the open GitHub issue backlog (tier-2 pass).{scope}\n"
+        "1. Run `python tools/issue_triage.py --detect-split --markdown "
+        "--out docs/_audits/issue-triage-{date}.md` and "
+        "`python tools/issue_triage.py --detect-split --actions "
+        "--out docs/_audits/issue-actions-{date}.json` for the ranked classification.\n"
+        "2. TRIAGE / priorities / tags: for each needs-priority / needs-kind / "
+        "needs-area issue, propose a concrete label from fleet's taxonomy.\n"
+        "3. EXPANSION: for each `needs-split` (oversized) issue, propose a "
+        "concrete breakdown into focused sub-issues.\n"
+        "4. CONTRACTION: for each likely-dup cluster and each stale / "
+        "dormant-question row, propose the merge/close with the issue's own evidence.\n"
+        "5. Write the enriched gardening proposal to "
+        "docs/_audits/issue-gardener-{date}.md.\n"
+        "{mech}"
+    ).format(scope=scope_clause, date=as_of, mech=mech)
+
+
+def build_command(
+    model: str,
+    *,
+    as_of: str,
+    scope: str | None = None,
+    apply_mechanical: bool = False,
+    permission_mode: str = DEFAULT_PERMISSION_MODE,
+    backend: str = DEFAULT_BACKEND,
+) -> list[str]:
+    """Pure: the logical argv for one gardener launch (no path resolution)."""
+    if backend != "claude":
+        raise ValueError(f"unknown backend {backend!r}; expected one of {BACKENDS}")
+    if not model:
+        raise ValueError("model must be a non-empty string")
+    prompt = build_prompt(as_of=as_of, scope=scope, apply_mechanical=apply_mechanical)
+    return [
+        "claude",
+        "-p",
+        "--model",
+        model,
+        "--permission-mode",
+        permission_mode,
+        prompt,
+    ]
+
+
+def child_env(
+    model: str,
+    workspace: Path,
+    base: dict[str, str] | None = None,
+) -> dict[str, str]:
+    """The env the gardener child runs under (self-describing, like dispatch)."""
+    env = dict(base if base is not None else os.environ)
+    env["DISPATCH_WORKSPACE"] = str(workspace)
+    env["GARDENER_MODEL"] = model
+    env["GARDENER_TIER"] = model_tier(model)
+    return env
+
+
+def resolve_exe(name: str) -> str:
+    found = shutil.which(name)
+    return found or name
+
+
+Runner = Callable[[Sequence[str], Path, dict[str, str]], dict[str, Any]]
+
+
+def launch(
+    command: Sequence[str],
+    cwd: Path,
+    env: dict[str, str],
+    *,
+    runner: Runner | None = None,
+    timeout_s: int | None = None,
+) -> dict[str, Any]:
+    """Exec the gardener command. ``runner`` is injectable for hermetic tests."""
+    if runner is not None:
+        return runner(command, cwd, env)
+    resolved = list(command)
+    if resolved:
+        resolved[0] = resolve_exe(resolved[0])
+    try:
+        proc = subprocess.run(resolved, cwd=cwd, env=env, timeout=timeout_s)
+    except FileNotFoundError as exc:
+        return {"returncode": 127, "error": str(exc)}
+    except subprocess.TimeoutExpired:
+        return {"returncode": 124, "timeout": True}
+    return {"returncode": proc.returncode}
+
+
+def build_payload(
+    *,
+    model: str,
+    backend: str,
+    workspace: Path,
+    dry_run: bool,
+    as_of: str,
+    scope: str | None,
+    apply_mechanical: bool,
+    permission_mode: str,
+    result: dict[str, Any] | None = None,
+    error: str | None = None,
+) -> dict[str, Any]:
+    command = (
+        build_command(
+            model,
+            as_of=as_of,
+            scope=scope,
+            apply_mechanical=apply_mechanical,
+            permission_mode=permission_mode,
+            backend=backend,
+        )
+        if not error
+        else []
+    )
+    ok = error is None and (result is None or result.get("returncode") == 0)
+    return {
+        "schema": SCHEMA,
+        "ok": ok,
+        "backend": backend,
+        "model": model,
+        "tier": model_tier(model),
+        "workspace": str(workspace),
+        "dry_run": dry_run,
+        "propose_only": not apply_mechanical,
+        "permission_mode": permission_mode,
+        "scope": scope,
+        "as_of": as_of,
+        "command": command,
+        "env": {
+            "DISPATCH_WORKSPACE": str(workspace),
+            "GARDENER_MODEL": model,
+            "GARDENER_TIER": model_tier(model),
+        },
+        "result": result,
+        "error": error,
+    }
+
+
+def render(payload: dict[str, Any]) -> str:
+    cmd = " ".join(payload.get("command") or []) or "-"
+    lines = [
+        f"issue-gardener: model={payload.get('model')} (tier {payload.get('tier')}) "
+        f"backend={payload.get('backend')} dry_run={payload.get('dry_run')} "
+        f"propose_only={payload.get('propose_only')}",
+        f"command: {cmd}",
+    ]
+    if payload.get("error"):
+        lines.append(f"error: {payload['error']}")
+    result = payload.get("result")
+    if isinstance(result, dict):
+        lines.append(f"returncode: {result.get('returncode')}")
+    return "\n".join(lines)
+
+
+def main(argv: list[str] | None = None) -> int:
+    ap = argparse.ArgumentParser(
+        description="Launch the tier-2 GitHub-issue gardener (dry-run by default)."
+    )
+    ap.add_argument("--model", default=None,
+                    help="explicit model id/alias (overrides --tier/env/default)")
+    ap.add_argument("--tier", default=None, choices=sorted(TIER_MODELS),
+                    help="model tier: 1=opus, 2=sonnet (default), 3=haiku")
+    ap.add_argument("--backend", choices=BACKENDS, default=DEFAULT_BACKEND,
+                    help="worker backend (default: claude)")
+    ap.add_argument("--workspace", default="", help="workspace root (default: repo root)")
+    ap.add_argument("--scope", default=None,
+                    help="limit to one bucket: priority|kind|area|orphans|stale|dup|question")
+    ap.add_argument("--permission-mode", default=DEFAULT_PERMISSION_MODE,
+                    help="claude permission mode (default: plan — read + propose, no writes)")
+    ap.add_argument("--apply-mechanical", action="store_true",
+                    help="also allow the calendar-defensible mechanical batch "
+                         "(mark-stale / close-dormant); priorities/splits stay proposal-only")
+    ap.add_argument("--as-of", default=None, help="date stamp (default: today UTC)")
+    ap.add_argument("--live", action="store_true",
+                    help="actually launch (default: dry-run; print the command)")
+    ap.add_argument("--timeout-s", type=int, default=None, help="child timeout in seconds")
+    ap.add_argument("--json", action="store_true", help="emit machine-readable JSON")
+    args = ap.parse_args(argv)
+
+    workspace = Path(args.workspace).resolve() if args.workspace else repo_root()
+    as_of = args.as_of or dt.datetime.now(dt.timezone.utc).date().isoformat()
+
+    error: str | None = None
+    model = DEFAULT_MODEL
+    try:
+        model = resolve_model(args.model, args.tier, None)
+    except ValueError as exc:
+        error = str(exc)
+
+    dry_run = not args.live or bool(error)
+
+    if dry_run:
+        payload = build_payload(
+            model=model, backend=args.backend, workspace=workspace, dry_run=True,
+            as_of=as_of, scope=args.scope, apply_mechanical=args.apply_mechanical,
+            permission_mode=args.permission_mode, error=error,
+        )
+        print(json.dumps(payload, indent=2) if args.json else render(payload))
+        return 0 if not error else 2
+
+    command = build_command(
+        model, as_of=as_of, scope=args.scope, apply_mechanical=args.apply_mechanical,
+        permission_mode=args.permission_mode, backend=args.backend,
+    )
+    env = child_env(model, workspace)
+    result = launch(command, workspace, env, timeout_s=args.timeout_s)
+    payload = build_payload(
+        model=model, backend=args.backend, workspace=workspace, dry_run=False,
+        as_of=as_of, scope=args.scope, apply_mechanical=args.apply_mechanical,
+        permission_mode=args.permission_mode, result=result,
+    )
+    print(json.dumps(payload, indent=2) if args.json else render(payload))
+    return int(result.get("returncode") or 0)
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

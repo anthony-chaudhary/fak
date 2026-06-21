@@ -1,0 +1,137 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="900" viewBox="0 0 1600 900" role="img" aria-labelledby="title desc">
+  <title id="title">Two-Gate Security Model: Why fak is harder to break than a content filter</title>
+  <desc id="desc">A visual comparison of single-gate (content filter) vs two-gate (permission + quarantine) security models, showing how the two-gate model is harder to bypass.</desc>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#f7faf9"/>
+      <stop offset="50%" stop-color="#eef5f6"/>
+      <stop offset="100%" stop-color="#faf4ee"/>
+    </linearGradient>
+    <filter id="shadow" x="-10%" y="-10%" width="120%" height="130%">
+      <feDropShadow dx="0" dy="8" stdDeviation="10" flood-color="#14202b" flood-opacity="0.13"/>
+    </filter>
+    <style>
+      .title { font: 900 48px "Segoe UI", Arial, sans-serif; fill: #14202b; }
+      .subtitle { font: 400 20px "Segoe UI", Arial, sans-serif; fill: #405063; }
+      .cardTitle { font: 800 22px "Segoe UI", Arial, sans-serif; fill: #1b2733; }
+      .big { font: 900 42px "Segoe UI", Arial, sans-serif; fill: #17202a; }
+      .label { font: 700 16px "Segoe UI", Arial, sans-serif; fill: #314153; }
+      .body { font: 400 15px "Segoe UI", Arial, sans-serif; fill: #415266; }
+      .small { font: 400 13px "Segoe UI", Arial, sans-serif; fill: #5b6a7a; }
+      .tiny { font: 700 12px "Segoe UI", Arial, sans-serif; fill: #ffffff; letter-spacing: 0; }
+      .card { fill: #ffffff; stroke: #d9e1e8; stroke-width: 1.5; }
+      .muted { fill: #eef3f6; stroke: #d8e1e8; }
+      .danger { fill: #faeef3; stroke: #cf92b0; }
+      .safe { fill: #edf7f0; stroke: #85bc98; }
+    </style>
+  </defs>
+
+  <rect width="1600" height="900" fill="url(#bg)"/>
+  <rect x="38" y="28" width="1524" height="844" rx="8" fill="#ffffff" opacity="0.62"/>
+
+  <text x="72" y="88" class="title">Two-Gate Security Model</text>
+  <text x="74" y="125" class="subtitle">Why fak is harder to break than a typical content filter</text>
+
+  <!-- Single Gate Approach -->
+  <g filter="url(#shadow)">
+    <rect x="58" y="170" width="680" height="580" rx="8" class="card"/>
+    <rect x="58" y="170" width="680" height="50" rx="8" fill="#cf5a5a"/>
+    <text x="78" y="202" class="tiny">SINGLE GATE: CONTENT FILTER</text>
+
+    <text x="78" y="260" class="cardTitle">One line of defense</text>
+
+    <!-- Flow diagram for single gate -->
+    <rect x="78" y="300" width="140" height="60" rx="4" fill="#eef3f6" stroke="#d8e1e8"/>
+    <text x="98" y="335" class="body">AI Agent</text>
+
+    <line x1="218" y1="330" x2="268" y2="330" stroke="#8b98a6" stroke-width="2"/>
+    <path d="M268 330 L258 324 L258 336 Z" fill="#8b98a6"/>
+
+    <rect x="278" y="300" width="140" height="60" rx="4" fill="#fff5e8" stroke="#dfbd78"/>
+    <text x="298" y="325" class="label" style="font-size:14px;">Content Filter</text>
+    <text x="298" y="345" class="small">"Is this bad?"</text>
+
+    <line x1="418" y1="330" x2="468" y2="330" stroke="#8b98a6" stroke-width="2"/>
+    <path d="M468 330 L458 324 L458 336 Z" fill="#8b98a6"/>
+
+    <rect x="478" y="300" width="140" height="60" rx="4" fill="#eef3f6" stroke="#d8e1e8"/>
+    <text x="498" y="335" class="body">Tool/API</text>
+
+    <!-- Success case -->
+    <rect x="78" y="390" width="540" height="70" rx="4" class="safe"/>
+    <text x="98" y="420" class="label" style="fill:#2e8b57;">✅ Filter recognizes attack</text>
+    <text x="98" y="445" class="body">Poisoned input is blocked</text>
+
+    <!-- Failure case -->
+    <rect x="78" y="480" width="540" height="70" rx="4" class="danger"/>
+    <text x="98" y="510" class="label" style="fill:#cf5a5a;">❌ Filter is fooled</text>
+    <text x="98" y="535" class="body">Attack succeeds — you're compromised</text>
+
+    <text x="78" y="590" class="label">The problem:</text>
+    <text x="78" y="620" class="body">One thing trying to recognize attacks.</text>
+    <text x="78" y="645" class="body">If it guesses wrong, game over.</text>
+
+    <text x="78" y="700" class="label">Example approaches:</text>
+    <text x="78" y="730" class="body">• Prompt injection filters</text>
+    <text x="78" y="755" class="body">• Content moderation systems</text>
+  </g>
+
+  <!-- Two Gate Approach -->
+  <g filter="url(#shadow)">
+    <rect x="860" y="170" width="680" height="580" rx="8" class="card"/>
+    <rect x="860" y="170" width="680" height="50" rx="8" fill="#2e8b57"/>
+    <text x="880" y="202" class="tiny">TWO GATE: PERMISSION + QUARANTINE</text>
+
+    <text x="880" y="260" class="cardTitle">Two independent lines of defense</text>
+
+    <!-- Flow diagram for two gates -->
+    <rect x="880" y="300" width="120" height="50" rx="4" fill="#eef3f6" stroke="#d8e1e8"/>
+    <text x="900" y="330" class="body">AI Agent</text>
+
+    <line x1="1000" y1="325" x2="1040" y2="325" stroke="#8b98a6" stroke-width="2"/>
+    <path d="M1040 325 L1032 319 L1032 331 Z" fill="#8b98a6"/>
+
+    <rect x="1050" y="280" width="160" height="90" rx="4" fill="#edf7f0" stroke="#85bc98"/>
+    <text x="1070" y="310" class="label" style="font-size:14px;">GATE 1</text>
+    <text x="1070" y="330" class="body" style="fill:#2e8b57;">Permission</text>
+    <text x="1070" y="350" class="small">"Is this allowed?"</text>
+
+    <line x1="1210" y1="325" x2="1250" y2="325" stroke="#8b98a6" stroke-width="2"/>
+    <path d="M1250 325 L1242 319 L1242 331 Z" fill="#8b98a6"/>
+
+    <rect x="1260" y="280" width="140" height="90" rx="4" fill="#fff5e8" stroke="#dfbd78"/>
+    <text x="1280" y="310" class="label" style="font-size:14px;">GATE 2</text>
+    <text x="1280" y="330" class="body">Quarantine</text>
+    <text x="1280" y="350" class="small">"Is this safe?"</text>
+
+    <line x1="1400" y1="325" x2="1440" y2="325" stroke="#8b98a6" stroke-width="2"/>
+    <path d="M1440 325 L1432 319 L1432 331 Z" fill="#8b98a6"/>
+
+    <rect x="1450" y="300" width="120" height="50" rx="4" fill="#eef3f6" stroke="#d8e1e8"/>
+    <text x="1470" y="330" class="body">Tool/API</text>
+
+    <!-- Explanation -->
+    <rect x="880" y="390" width="640" height="100" rx="4" class="safe"/>
+    <text x="900" y="420" class="label" style="fill:#2e8b57;">✅ Even if Gate 2 fails, Gate 1 protects you</text>
+    <text x="900" y="445" class="body">If quarantine misses, the permission gate still blocks</text>
+    <text x="900" y="470" class="body">unknown tools. The attacker must beat BOTH gates.</text>
+
+    <rect x="880" y="510" width="640" height="80" rx="4" class="muted"/>
+    <text x="900" y="545" class="label">Gate 1 (Permission):</text>
+    <text x="900" y="570" class="body">Structural — only named tools can execute. Fail-closed by design.</text>
+
+    <rect x="880" y="610" width="640" height="80" rx="4" class="muted"/>
+    <text x="900" y="645" class="label">Gate 2 (Quarantine):</text>
+    <text x="900" y="670" class="body">Probabilistic — tries to recognize poisoned results.</text>
+
+    <text x="880" y="720" class="label">Why it's harder to break:</text>
+    <text x="880" y="750" class="body">Attacker must (a) slip past quarantine AND (b) find a tool that</text>
+    <text x="880" y="775" class="body">exists in the allow-list. Most dangerous tools simply aren't wired up.</text>
+  </g>
+
+  <!-- Bottom summary -->
+  <rect x="72" y="780" width="1456" height="80" rx="8" fill="#17202a"/>
+  <text x="98" y="820" class="label" style="fill:#ffffff; font-size:18px;">The key difference:</text>
+  <text x="350" y="820" class="body" style="fill:#ffffff; font-size:16px;">Single gate relies on recognition (can be fooled). Two gates use structure (fails closed) + recognition (bonus).</text>
+  <text x="98" y="850" class="small" style="fill:#dce9ef;">Real results: 5/5 injections reached unprotected baseline; 0/5 reached fak. See fak/LIVE-RESULTS.md</text>
+</svg>

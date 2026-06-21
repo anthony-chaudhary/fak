@@ -1,0 +1,18 @@
+{
+  "_meta": {
+    "_source_dataset": "princeton-nlp/SWE-bench_Verified",
+    "_source_split": "test",
+    "_snapshot_date": "2024-03-15",
+    "_total_instances": 5,
+    "_bucket_counts": {
+      "<15min": 2,
+      "15min-1hr": 2,
+      "1-4hr": 1
+    }
+  },
+  "django__django-12345": "<15min",
+  "django__django-23456": "<15min",
+  "sympy__sympy-34567": "15min-1hr",
+  "sympy__sympy-45678": "15min-1hr",
+  "scikit-learn__scikit-learn-56789": "1-4hr"
+}

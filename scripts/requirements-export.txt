@@ -1,0 +1,10 @@
+# Python deps for internal/model/export_oracle.py, installed by scripts/fetch-model.{sh,ps1}
+# into a throwaway venv. CPU is sufficient — the export loads the model in float32 on CPU.
+#
+# torch is the large download. For a smaller CPU-only wheel you can pre-install:
+#   pip install torch --index-url https://download.pytorch.org/whl/cpu
+# before running fetch-model, and it will be reused.
+torch>=2.2
+transformers>=4.40,<6
+numpy>=1.24
+safetensors>=0.4

@@ -1,0 +1,149 @@
+//go:build amd64
+
+#include "textflag.h"
+
+// func saxpy3asm(out0, out1, out2, x *float32, a0, a1, a2 float32, n int)
+TEXT ·saxpy3asm(SB), NOSPLIT, $0-56
+	MOVQ out0+0(FP), DI
+	MOVQ out1+8(FP), SI
+	MOVQ out2+16(FP), DX
+	MOVQ x+24(FP), R8
+	MOVQ n+48(FP), CX
+	VBROADCASTSS a0+32(FP), Y10
+	VBROADCASTSS a1+36(FP), Y11
+	VBROADCASTSS a2+40(FP), Y12
+
+	CMPQ CX, $8
+	JL   tail
+
+loop:
+	VMOVUPS (R8), Y0
+
+	VMOVUPS (DI), Y1
+	VMULPS  Y10, Y0, Y2
+	VADDPS  Y2, Y1, Y1
+	VMOVUPS Y1, (DI)
+
+	VMOVUPS (SI), Y3
+	VMULPS  Y11, Y0, Y4
+	VADDPS  Y4, Y3, Y3
+	VMOVUPS Y3, (SI)
+
+	VMOVUPS (DX), Y5
+	VMULPS  Y12, Y0, Y6
+	VADDPS  Y6, Y5, Y5
+	VMOVUPS Y5, (DX)
+
+	ADDQ $32, DI
+	ADDQ $32, SI
+	ADDQ $32, DX
+	ADDQ $32, R8
+	SUBQ $8, CX
+	CMPQ CX, $8
+	JGE  loop
+
+tail:
+	TESTQ CX, CX
+	JE    done
+
+tailloop:
+	VMOVSS (R8), X0
+
+	VMOVSS (DI), X1
+	VMULSS X10, X0, X2
+	VADDSS X2, X1, X1
+	VMOVSS X1, (DI)
+
+	VMOVSS (SI), X3
+	VMULSS X11, X0, X4
+	VADDSS X4, X3, X3
+	VMOVSS X3, (SI)
+
+	VMOVSS (DX), X5
+	VMULSS X12, X0, X6
+	VADDSS X6, X5, X5
+	VMOVSS X5, (DX)
+
+	ADDQ $4, DI
+	ADDQ $4, SI
+	ADDQ $4, DX
+	ADDQ $4, R8
+	DECQ CX
+	JNZ  tailloop
+
+done:
+	VZEROUPPER
+	RET
+
+// func saxpy3asm512(out0, out1, out2, x *float32, a0, a1, a2 float32, n int)
+TEXT ·saxpy3asm512(SB), NOSPLIT, $0-56
+	MOVQ out0+0(FP), DI
+	MOVQ out1+8(FP), SI
+	MOVQ out2+16(FP), DX
+	MOVQ x+24(FP), R8
+	MOVQ n+48(FP), CX
+	VBROADCASTSS a0+32(FP), Z10
+	VBROADCASTSS a1+36(FP), Z11
+	VBROADCASTSS a2+40(FP), Z12
+
+	CMPQ CX, $16
+	JL   tail512
+
+loop512:
+	VMOVUPS (R8), Z0
+
+	VMOVUPS (DI), Z1
+	VMULPS  Z10, Z0, Z2
+	VADDPS  Z2, Z1, Z1
+	VMOVUPS Z1, (DI)
+
+	VMOVUPS (SI), Z3
+	VMULPS  Z11, Z0, Z4
+	VADDPS  Z4, Z3, Z3
+	VMOVUPS Z3, (SI)
+
+	VMOVUPS (DX), Z5
+	VMULPS  Z12, Z0, Z6
+	VADDPS  Z6, Z5, Z5
+	VMOVUPS Z5, (DX)
+
+	ADDQ $64, DI
+	ADDQ $64, SI
+	ADDQ $64, DX
+	ADDQ $64, R8
+	SUBQ $16, CX
+	CMPQ CX, $16
+	JGE  loop512
+
+tail512:
+	TESTQ CX, CX
+	JE    done512
+
+tailloop512:
+	VMOVSS (R8), X0
+
+	VMOVSS (DI), X1
+	VMULSS X10, X0, X2
+	VADDSS X2, X1, X1
+	VMOVSS X1, (DI)
+
+	VMOVSS (SI), X3
+	VMULSS X11, X0, X4
+	VADDSS X4, X3, X3
+	VMOVSS X3, (SI)
+
+	VMOVSS (DX), X5
+	VMULSS X12, X0, X6
+	VADDSS X6, X5, X5
+	VMOVSS X5, (DX)
+
+	ADDQ $4, DI
+	ADDQ $4, SI
+	ADDQ $4, DX
+	ADDQ $4, R8
+	DECQ CX
+	JNZ  tailloop512
+
+done512:
+	VZEROUPPER
+	RET

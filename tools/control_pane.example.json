@@ -1,0 +1,56 @@
+{
+  "schema": "fleet-control-pane.config/1",
+  "_doc": "Template for tools/fleet_control_pane.py. Keep shared loops in tools/control_pane.loops.json and real per-machine paths in ignored tools/_registry/control_pane.local.json via `python tools/fleet_control_pane.py init`.",
+  "session_window_h": 6,
+  "target": 4,
+  "job_dir": "../job",
+  "user_home": "~",
+  "registry_dir": "tools/_registry",
+  "machine_dir": "tools/_registry/machines",
+  "machine_id": "",
+  "machine_stale_min": 15,
+  "watchdog_log_dir": "tools/_watchdog",
+  "git_remote": "origin",
+  "loops": {
+    "example-loop": {
+      "enabled": false,
+      "status_cmd": [
+        "{python}",
+        "tools/example_loop_status.py",
+        "--json"
+      ],
+      "recover_cmd": [
+        "{python}",
+        "tools/example_loop_watchdog.py"
+      ],
+      "auto_recover": false,
+      "timeout_s": 20,
+      "action": "replace this disabled sample with a real loop status/recovery command"
+    }
+  },
+  "control_tick": {
+    "task_name": "FleetControlPaneTick",
+    "register_script": "tools/register_control_pane_tick.ps1",
+    "posix_register_script": "tools/register_control_pane_tick.sh",
+    "interval_min": 5
+  },
+  "watchdogs": {
+    "supervisor": {
+      "task_name": "FleetSupervisorWatchdog",
+      "script": "tools/fleet_supervisor_watchdog.ps1",
+      "register_script": "tools/register_supervisor_watchdog.ps1",
+      "interval_min": 5
+    },
+    "resume": {
+      "task_name": "FleetResumeWatchdog",
+      "script": "tools/fleet_resume_watchdog.ps1",
+      "register_script": "tools/register_resume_watchdog.ps1",
+      "interval_min": 10
+    }
+  },
+  "supervisor_status_cmd": [
+    "{python}",
+    "tools/dos_supervisor_status.py",
+    "--json"
+  ]
+}

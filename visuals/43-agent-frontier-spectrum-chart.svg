@@ -1,0 +1,160 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="1050" viewBox="0 0 1600 1050" role="img" aria-labelledby="title desc">
+  <title id="title">Agent frontier spectrum chart</title>
+  <desc id="desc">A chart-style frontier spectrum showing agent workload scale on a log axis, with measured, projected, and frontier points, and curves for naive reread pressure, tuned warm-cache serving, and coherent kernel reuse.</desc>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#f8fafb"/>
+      <stop offset="50%" stop-color="#f2f7f4"/>
+      <stop offset="100%" stop-color="#fbf5ed"/>
+    </linearGradient>
+    <filter id="shadow" x="-10%" y="-10%" width="120%" height="130%">
+      <feDropShadow dx="0" dy="8" stdDeviation="10" flood-color="#15212b" flood-opacity="0.12"/>
+    </filter>
+    <style>
+      .title { font: 900 48px "Segoe UI", Arial, sans-serif; fill: #14202b; }
+      .subtitle { font: 400 21px "Segoe UI", Arial, sans-serif; fill: #405063; }
+      .axis { stroke: #263442; stroke-width: 2; }
+      .grid { stroke: #d8e2e8; stroke-width: 1; }
+      .grid2 { stroke: #e6edf1; stroke-width: 1; stroke-dasharray: 5 7; }
+      .tick { font: 700 14px "Segoe UI", Arial, sans-serif; fill: #415266; }
+      .axisLabel { font: 800 17px "Segoe UI", Arial, sans-serif; fill: #263442; }
+      .bandLabel { font: 800 15px "Segoe UI", Arial, sans-serif; fill: #25313d; }
+      .small { font: 400 14px "Segoe UI", Arial, sans-serif; fill: #5e6e7f; }
+      .legend { font: 700 15px "Segoe UI", Arial, sans-serif; fill: #243240; }
+      .noteTitle { font: 900 20px "Segoe UI", Arial, sans-serif; fill: #17202a; }
+      .note { font: 400 16px "Segoe UI", Arial, sans-serif; fill: #415266; }
+      .pointLabel { font: 800 15px "Segoe UI", Arial, sans-serif; fill: #17202a; }
+      .pointSub { font: 400 13px "Segoe UI", Arial, sans-serif; fill: #4c5d70; }
+      .pill { font: 800 13px "Segoe UI", Arial, sans-serif; fill: #ffffff; }
+      .darkText { font: 700 21px "Segoe UI", Arial, sans-serif; fill: #e6eef4; }
+      .callout { fill: #ffffff; stroke: #d9e3ea; stroke-width: 1.4; }
+      .frontier { fill: #fbedf4; stroke: #cc8caf; }
+      .measured { fill: #eaf6ee; stroke: #7fba96; }
+      .projected { fill: #fff3df; stroke: #d6aa55; }
+    </style>
+  </defs>
+
+  <rect width="1600" height="1050" fill="url(#bg)"/>
+  <rect x="36" y="30" width="1528" height="982" rx="8" fill="#ffffff" opacity="0.68"/>
+
+  <text x="72" y="88" class="title">Agent frontier spectrum</text>
+  <text x="74" y="124" class="subtitle">A scaling chart for agent workloads: raw serving is the left edge; legal reuse and saturation control are the frontier.</text>
+
+  <rect x="90" y="160" width="1400" height="650" rx="8" fill="#ffffff" stroke="#d9e3ea"/>
+
+  <!-- regime bands -->
+  <rect x="140" y="190" width="260" height="560" fill="#eef2f5" opacity="0.72"/>
+  <rect x="400" y="190" width="260" height="560" fill="#e8f4f6" opacity="0.72"/>
+  <rect x="660" y="190" width="260" height="560" fill="#e9f6ee" opacity="0.72"/>
+  <rect x="920" y="190" width="260" height="560" fill="#fff1dd" opacity="0.72"/>
+  <rect x="1180" y="190" width="260" height="560" fill="#faedf4" opacity="0.72"/>
+
+  <text x="166" y="218" class="bandLabel">single request</text>
+  <text x="426" y="218" class="bandLabel">long session</text>
+  <text x="686" y="218" class="bandLabel">small fleet</text>
+  <text x="946" y="218" class="bandLabel">large fleet</text>
+  <text x="1206" y="218" class="bandLabel">agent city</text>
+
+  <!-- chart grid -->
+  <line x1="140" y1="250" x2="1440" y2="250" class="grid"/>
+  <line x1="140" y1="350" x2="1440" y2="350" class="grid2"/>
+  <line x1="140" y1="450" x2="1440" y2="450" class="grid"/>
+  <line x1="140" y1="550" x2="1440" y2="550" class="grid2"/>
+  <line x1="140" y1="650" x2="1440" y2="650" class="grid"/>
+
+  <line x1="140" y1="190" x2="140" y2="750" class="grid"/>
+  <line x1="400" y1="190" x2="400" y2="750" class="grid"/>
+  <line x1="660" y1="190" x2="660" y2="750" class="grid"/>
+  <line x1="920" y1="190" x2="920" y2="750" class="grid"/>
+  <line x1="1180" y1="190" x2="1180" y2="750" class="grid"/>
+  <line x1="1440" y1="190" x2="1440" y2="750" class="grid"/>
+
+  <!-- axes -->
+  <line x1="140" y1="750" x2="1440" y2="750" class="axis"/>
+  <line x1="140" y1="190" x2="140" y2="750" class="axis"/>
+  <path d="M1440 750 L1424 741 L1424 759 Z" fill="#263442"/>
+  <path d="M140 190 L131 206 L149 206 Z" fill="#263442"/>
+
+  <text x="520" y="800" class="axisLabel">workload scale: agent-turns per workflow / power user (log scale)</text>
+  <text x="22" y="492" class="axisLabel" transform="rotate(-90 22 492)">dominant scaling pressure</text>
+
+  <text x="132" y="777" class="tick">1</text>
+  <text x="384" y="777" class="tick">100</text>
+  <text x="636" y="777" class="tick">10k</text>
+  <text x="892" y="777" class="tick">1M</text>
+  <text x="1140" y="777" class="tick">10M</text>
+  <text x="1400" y="777" class="tick">100M</text>
+  <text x="86" y="656" class="tick">token</text>
+  <text x="82" y="456" class="tick">reread</text>
+  <text x="74" y="256" class="tick">coherence</text>
+
+  <!-- curves -->
+  <path d="M140 690 C300 650 450 575 620 470 C800 360 1020 270 1440 225" fill="none" stroke="#a76c22" stroke-width="6" stroke-linecap="round"/>
+  <path d="M140 704 C340 685 520 650 760 590 C1010 530 1220 475 1440 420" fill="none" stroke="#1c7c92" stroke-width="6" stroke-linecap="round"/>
+  <path d="M140 715 C380 710 560 690 760 655 C940 625 1120 590 1260 545 C1350 515 1410 485 1440 455" fill="none" stroke="#2e8b57" stroke-width="7" stroke-linecap="round"/>
+
+  <!-- saturation wall -->
+  <path d="M1180 250 C1230 275 1265 320 1298 375 C1338 443 1382 510 1440 555" fill="none" stroke="#9b4d77" stroke-width="5" stroke-dasharray="10 8"/>
+  <text x="1210" y="245" class="pointLabel" fill="#9b4d77">saturation wall</text>
+  <text x="1210" y="267" class="pointSub">memory, tools, approvals, audit, metadata</text>
+
+  <!-- point markers -->
+  <circle cx="140" cy="704" r="8" fill="#6a7685" stroke="#ffffff" stroke-width="3"/>
+  <circle cx="452" cy="500" r="10" fill="#2e8b57" stroke="#ffffff" stroke-width="3"/>
+  <circle cx="660" cy="570" r="10" fill="#b57920" stroke="#ffffff" stroke-width="3"/>
+  <circle cx="762" cy="545" r="10" fill="#b57920" stroke="#ffffff" stroke-width="3"/>
+  <circle cx="1440" cy="455" r="11" fill="#9b4d77" stroke="#ffffff" stroke-width="3"/>
+
+  <!-- callouts -->
+  <g filter="url(#shadow)">
+    <rect x="185" y="604" width="288" height="84" rx="8" class="callout"/>
+    <text x="205" y="632" class="pointLabel">raw parity lane</text>
+    <text x="205" y="657" class="pointSub">Can the runner keep up with</text>
+    <text x="205" y="675" class="pointSub">serious serving engines?</text>
+  </g>
+
+  <g filter="url(#shadow)">
+    <rect x="490" y="396" width="312" height="98" rx="8" class="measured"/>
+    <text x="512" y="425" class="pointLabel">measured session: 250 turns</text>
+    <text x="512" y="450" class="pointSub">50 turns x 5 agents</text>
+    <text x="512" y="470" class="pointSub">60.3x vs naive, 4.12x vs tuned</text>
+  </g>
+
+  <g filter="url(#shadow)">
+    <rect x="704" y="586" width="332" height="90" rx="8" class="projected"/>
+    <text x="726" y="615" class="pointLabel">read-heavy fleet shape</text>
+    <text x="726" y="640" class="pointSub">2,344 / 2,500 duplicate reads deleted</text>
+    <text x="726" y="660" class="pointSub">writes need scoped invalidation</text>
+  </g>
+
+  <g filter="url(#shadow)">
+    <rect x="1090" y="600" width="338" height="92" rx="8" class="projected"/>
+    <text x="1112" y="629" class="pointLabel">value-sweep planning point</text>
+    <text x="1112" y="654" class="pointSub">100 agents x 250 turns</text>
+    <text x="1112" y="674" class="pointSub">measured-supported projection, not prod claim</text>
+  </g>
+
+  <g filter="url(#shadow)">
+    <rect x="1054" y="310" width="386" height="112" rx="8" class="frontier"/>
+    <text x="1076" y="340" class="pointLabel">frontier design target</text>
+    <text x="1076" y="366" class="pointSub">10,000 agents x 10,000 turns = 100M agent-turns</text>
+    <text x="1076" y="386" class="pointSub">question: which rereads are legal to skip?</text>
+    <text x="1076" y="406" class="pointSub">not a shipped benchmark claim</text>
+  </g>
+
+  <!-- legend -->
+  <rect x="980" y="835" width="510" height="112" rx="8" fill="#ffffff" stroke="#d9e3ea"/>
+  <line x1="1010" y1="865" x2="1070" y2="865" stroke="#a76c22" stroke-width="6" stroke-linecap="round"/>
+  <text x="1084" y="871" class="legend">naive reread pressure</text>
+  <line x1="1010" y1="897" x2="1070" y2="897" stroke="#1c7c92" stroke-width="6" stroke-linecap="round"/>
+  <text x="1084" y="903" class="legend">tuned warm-cache serving</text>
+  <line x1="1010" y1="929" x2="1070" y2="929" stroke="#2e8b57" stroke-width="7" stroke-linecap="round"/>
+  <text x="1084" y="935" class="legend">coherent kernel reuse path</text>
+
+  <rect x="72" y="835" width="858" height="112" rx="8" fill="#17202a"/>
+  <text x="100" y="870" class="pill">FRONTIER-CHART READING</text>
+  <text x="100" y="902" class="darkText">The frontier shifts from "can we generate tokens?" to</text>
+  <text x="100" y="932" class="darkText">"can we keep millions of memory/effect claims legal while deleting rereads?"</text>
+
+  <text x="72" y="990" class="small">Measured points are the named session/fleet rows. Planning and frontier points mark workload regimes to test, not universal production claims.</text>
+</svg>

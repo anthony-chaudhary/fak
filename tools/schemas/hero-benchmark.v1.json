@@ -1,0 +1,155 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://github.com/anthony-chaudhary/fak/tools/schemas/hero-benchmark.v1.json",
+  "title": "fak hero benchmark comparison — data source of truth (v1)",
+  "description": "Schema for tools/hero_benchmark.data.json, the single source of truth the hero comparison (doc + 2 SVGs + html) is generated from by tools/hero_benchmark_gen.py. No number here is new: every top10 row carries provenance (commit + artifact/doc); rows with a `verify` block are machine-checkable against the committed benchmark JSON via `--verify-sources`.",
+  "type": "object",
+  "required": ["meta", "headline", "cost_collapse", "top3_sota", "palette", "leaderboard", "top10", "lineage", "reproduce", "see_also"],
+  "additionalProperties": true,
+  "properties": {
+    "meta": {
+      "type": "object",
+      "required": ["title", "as_of", "version", "doc_path", "hero_svg", "leaderboard_svg", "authority", "artifact_root"],
+      "additionalProperties": true,
+      "properties": {
+        "title": { "type": "string" },
+        "as_of": { "type": "string", "description": "YYYY-MM-DD the underlying measurements are as-of" },
+        "version": { "type": "string" },
+        "fak_version": { "type": "string" },
+        "machine": { "type": "string" },
+        "doc_path": { "type": "string", "description": "repo-relative output path for the markdown doc" },
+        "hero_svg": { "type": "string" },
+        "leaderboard_svg": { "type": "string" },
+        "html_path": { "type": "string" },
+        "authority": { "type": "string" },
+        "artifact_root": { "type": "string", "description": "repo-relative dir the top10 `artifact` paths are resolved under" }
+      }
+    },
+    "headline": {
+      "type": "object",
+      "required": ["kicker", "title", "subtitle", "primary", "secondary", "cards", "statement", "bitexact", "provenance"],
+      "additionalProperties": true,
+      "properties": {
+        "primary": { "$ref": "#/$defs/valueBaseline" },
+        "secondary": { "$ref": "#/$defs/valueBaseline" },
+        "cards": { "type": "array", "items": { "type": "object", "required": ["label", "value", "sub"] } },
+        "provenance": { "type": "object", "required": ["commit", "artifact"] }
+      }
+    },
+    "baseline_explainer": {
+      "type": "object",
+      "description": "optional section explaining what the headline reuse multiplier is measured against (the baseline is fak's own kernel held constant) + its theoretical ceiling + next-step; rendered into the doc after the headline when present",
+      "required": ["heading", "body_md", "bound_md"],
+      "additionalProperties": true,
+      "properties": {
+        "heading": { "type": "string" },
+        "body_md": { "type": "string" },
+        "bound_md": { "type": "string" }
+      }
+    },
+    "cost_collapse": {
+      "type": "object",
+      "required": ["title", "chart_max_min", "axis_ticks_min", "footnote", "arms"],
+      "additionalProperties": true,
+      "properties": {
+        "chart_max_min": { "type": "number", "exclusiveMinimum": 0 },
+        "axis_ticks_min": { "type": "array", "items": { "type": "number" }, "minItems": 2 },
+        "arms": {
+          "type": "array", "minItems": 2,
+          "items": {
+            "type": "object",
+            "required": ["name", "minutes", "display", "role"],
+            "additionalProperties": true,
+            "properties": {
+              "minutes": { "type": "number", "exclusiveMinimum": 0 },
+              "role": { "type": "string", "enum": ["naive", "sota", "fak"] },
+              "offchart": { "type": "boolean" }
+            }
+          }
+        }
+      }
+    },
+    "top3_sota": {
+      "type": "object",
+      "required": ["heading", "intro", "intro_md", "items"],
+      "additionalProperties": true,
+      "properties": {
+        "items": {
+          "type": "array", "minItems": 1,
+          "items": {
+            "type": "object",
+            "required": ["rank", "system", "tag", "header_role", "ships_md", "position_md", "gives", "position", "position_role"],
+            "additionalProperties": true,
+            "properties": {
+              "header_role": { "type": "string", "enum": ["sota", "loss"] },
+              "position_role": { "type": "string", "enum": ["win", "loss"] },
+              "gives": { "type": "array", "items": { "type": "string" } },
+              "position": { "type": "array", "items": { "type": "string" } }
+            }
+          }
+        }
+      }
+    },
+    "palette": {
+      "type": "object",
+      "description": "regime tag -> hex fill; every distinct top10 `regime` MUST have a key here",
+      "additionalProperties": { "type": "string", "pattern": "^#[0-9a-fA-F]{6}$" }
+    },
+    "leaderboard": {
+      "type": "object",
+      "required": ["heading", "subtitle", "note_md"],
+      "additionalProperties": true
+    },
+    "top10": {
+      "type": "array", "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": ["rank", "benchmark", "sub", "regime", "baseline", "fak", "fak_md", "win"],
+        "additionalProperties": true,
+        "properties": {
+          "rank": { "type": "integer", "minimum": 1 },
+          "win": { "type": "boolean" },
+          "commit": { "type": "string" },
+          "artifact": { "type": "string", "description": "repo-relative-to-artifact_root path to the committed benchmark JSON" },
+          "provenance_doc": { "type": "string", "description": "doc-based provenance when no single artifact field applies" },
+          "verify": {
+            "type": "object",
+            "description": "machine-checkable assertion against the committed artifact (run with --verify-sources)",
+            "required": ["field", "expect"],
+            "additionalProperties": false,
+            "properties": {
+              "field": { "type": "string", "description": "dotted path with array indices, e.g. cells[0].net_value_add_vs_tuned" },
+              "expect": { "type": "number" },
+              "tol": { "type": "number" }
+            }
+          }
+        }
+      }
+    },
+    "not_leading": {
+      "type": "object",
+      "required": ["intro", "bullets", "synthesis"],
+      "properties": { "bullets": { "type": "array", "items": { "type": "string" } } }
+    },
+    "lineage": {
+      "type": "array",
+      "items": { "type": "object", "required": ["field", "value"] }
+    },
+    "reproduce": { "type": "array", "items": { "type": "string" } },
+    "see_also": {
+      "type": "array",
+      "items": { "type": "object", "required": ["text", "href", "note"] }
+    }
+  },
+  "$defs": {
+    "valueBaseline": {
+      "type": "object",
+      "required": ["value", "baseline"],
+      "additionalProperties": true,
+      "properties": {
+        "value": { "type": "string" },
+        "baseline": { "type": "string" }
+      }
+    }
+  }
+}

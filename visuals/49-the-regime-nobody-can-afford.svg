@@ -1,0 +1,119 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="1240" viewBox="0 0 1600 1240" role="img" aria-labelledby="title desc">
+  <title id="title">The regime nobody can afford — and the two moves that change its cost class</title>
+  <desc id="desc">One task is now routinely spread across 10+ context windows running 100+ turns. At a tuned SOTA serving stack — append-only prefix caching at its best — the shared working set still cannot be reused across the divergence and the eviction that the many-window, long-horizon regime forces, so it falls back toward re-paying the commons on every window every turn. fak makes the cache queryable and addressable: the shared work is computed once and stays reused across divergence and across bit-exact span removal, collapsing the multiplier. A second move, distinct: the permission check runs inside the prefill/cache/decode loop on the same call path, default-deny, with no outside seam to fail open — a property that is, at best, deeply buried in the rest of the industry.</desc>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#f7faf9"/>
+      <stop offset="50%" stop-color="#eef5f6"/>
+      <stop offset="100%" stop-color="#faf4ee"/>
+    </linearGradient>
+    <filter id="shadow" x="-10%" y="-10%" width="120%" height="130%">
+      <feDropShadow dx="0" dy="8" stdDeviation="10" flood-color="#14202b" flood-opacity="0.13"/>
+    </filter>
+    <style>
+      .title { font: 900 50px "Segoe UI", Arial, sans-serif; fill: #14202b; }
+      .subtitle { font: 400 22px "Segoe UI", Arial, sans-serif; fill: #405063; }
+      .kicker { font: 800 14px "Segoe UI", Arial, sans-serif; fill: #ffffff; letter-spacing: 1px; }
+      .eq { font: 900 30px "Segoe UI", Arial, sans-serif; fill: #ffffff; }
+      .eqSmall { font: 700 17px "Segoe UI", Arial, sans-serif; fill: #dce9ef; }
+      .cardTitle { font: 800 24px "Segoe UI", Arial, sans-serif; fill: #1b2733; }
+      .cardBody { font: 400 16px "Segoe UI", Arial, sans-serif; fill: #415266; }
+      .big { font: 900 40px "Segoe UI", Arial, sans-serif; fill: #17202a; }
+      .label { font: 800 17px "Segoe UI", Arial, sans-serif; fill: #25313d; }
+      .small { font: 400 14px "Segoe UI", Arial, sans-serif; fill: #5b6a7a; }
+      .mono { font: 700 18px "Consolas", "Courier New", monospace; fill: #17202a; }
+      .card { fill: #ffffff; stroke: #d8e2e8; stroke-width: 1.5; }
+      .warn { fill: #fff5e8; stroke: #dfbd78; }
+      .ok { fill: #edf7f0; stroke: #85bc98; }
+      .note { fill: #eef5f7; stroke: #d7e3e8; }
+      .sec { fill: #eef3fb; stroke: #9fb6df; }
+    </style>
+  </defs>
+
+  <rect width="1600" height="1240" fill="url(#bg)"/>
+  <rect x="38" y="28" width="1524" height="1178" rx="8" fill="#ffffff" opacity="0.62"/>
+
+  <!-- Kicker + title -->
+  <rect x="72" y="58" width="372" height="30" rx="6" fill="#9b4d77"/>
+  <text x="86" y="79" class="kicker">THE LEAD WE KEEP BURYING</text>
+  <text x="72" y="138" class="title">The regime nobody can afford</text>
+  <text x="74" y="176" class="subtitle">One task is now routinely <tspan style="font-weight:800;fill:#1b2733">10+ context windows × 100+ turns</tspan>. Even a <tspan style="font-weight:800;fill:#1b2733">tuned SOTA stack</tspan> can't keep the shared work reused through that — for a reason that is structural, not a tuning gap.</text>
+
+  <!-- Row 1: regime + why tuned SOTA still can't -->
+  <g filter="url(#shadow)">
+    <rect x="72" y="208" width="700" height="150" rx="8" class="note"/>
+    <rect x="72" y="208" width="700" height="40" rx="8" fill="#1c7c92"/>
+    <text x="92" y="234" class="kicker">WHAT CHANGED — THE WORKLOAD, NOT THE MODEL</text>
+    <text x="92" y="282" class="cardBody"><tspan style="font-weight:800;fill:#1b2733">Many windows per task is the default now.</tspan> "10 agents" can be 10 file</text>
+    <text x="92" y="306" class="cardBody">analyses feeding one report, a planner fanning out workers, or a panel of</text>
+    <text x="92" y="330" class="cardBody">reviewers. <tspan style="font-weight:800;fill:#1b2733">Long horizon is the default too:</tspan> 100+ turns, where agents</text>
+    <text x="92" y="354" class="cardBody">used to get lost after ~10. Both are now table stakes, not exotic.</text>
+  </g>
+
+  <g filter="url(#shadow)">
+    <rect x="800" y="208" width="728" height="150" rx="8" class="warn"/>
+    <rect x="800" y="208" width="728" height="40" rx="8" fill="#b57920"/>
+    <text x="820" y="234" class="kicker">WHY EVEN A TUNED STACK CAN'T AFFORD IT</text>
+    <text x="820" y="282" class="cardBody">Every window shares a big working set <tspan class="mono" style="font-size:16px">S</tspan> — system prompt, tools,</text>
+    <text x="820" y="306" class="cardBody">shared docs, the report-so-far. Tuned prefix caching reuses <tspan class="mono" style="font-size:16px">S</tspan> —</text>
+    <text x="820" y="330" class="cardBody"><tspan style="font-weight:800;fill:#7a5410">but only while the prefix stays whole.</tspan> The regime breaks it,</text>
+    <text x="820" y="354" class="cardBody">so the commons drifts back to being paid <tspan class="mono" style="font-size:16px">A × T</tspan> times.</text>
+  </g>
+
+  <!-- Cost-class line -->
+  <rect x="72" y="378" width="1456" height="118" rx="8" fill="#17202a"/>
+  <text x="98" y="414" class="kicker" style="fill:#9fd9b6">THE COST OF SERVING ONE TASK (the shared term is what bites)</text>
+  <text x="100" y="456" class="eq">cost  ≈  <tspan style="fill:#ff9a9a">A · T</tspan> · f(S)  <tspan style="fill:#dce9ef;font-weight:700;font-size:24px">+  (each window's own new work)</tspan></text>
+  <text x="102" y="486" class="eqSmall"><tspan class="mono" style="fill:#ffffff;font-size:15px">A</tspan> = windows on the task &#160;·&#160; <tspan class="mono" style="fill:#ffffff;font-size:15px">T</tspan> = turns each &#160;·&#160; <tspan class="mono" style="fill:#ffffff;font-size:15px">S</tspan> = shared working set &#160;·&#160; the disease is the <tspan style="fill:#ff9a9a;font-weight:800">A · T</tspan> multiplier on the commons — and the win is removing it, not changing the model.</text>
+
+  <!-- Two columns: tuned SOTA vs fak (NO naive column; direct claim is vs tuned) -->
+  <!-- Tuned SOTA -->
+  <g filter="url(#shadow)">
+    <rect x="72" y="520" width="710" height="356" rx="8" class="warn"/>
+    <rect x="72" y="520" width="710" height="46" rx="8" fill="#b57920"/>
+    <text x="94" y="550" class="kicker">TUNED SOTA — APPEND-ONLY PREFIX CACHE (vLLM · SGLang · provider)</text>
+    <text x="94" y="612" class="big" style="font-size:28px;fill:#7a5410">reuse holds only to the first split</text>
+    <text x="94" y="648" class="cardBody">Reuse is <tspan style="font-weight:800;fill:#7a5410">prefix-only and append-only</tspan>: change context at position N and</text>
+    <text x="94" y="672" class="cardBody">everything after N is recomputed. The regime breaks that two ways:</text>
+    <rect x="94" y="694" width="666" height="74" rx="6" fill="#ffffff" stroke="#e3c98f"/>
+    <text x="112" y="722" class="cardBody">• <tspan style="font-weight:800">Windows diverge by design</tspan> — each does different work, so the shared</text>
+    <text x="112" y="744" class="cardBody">&#160;&#160;prefix survives only up to the first divergence point.</text>
+    <rect x="94" y="780" width="666" height="74" rx="6" fill="#ffffff" stroke="#e3c98f"/>
+    <text x="112" y="808" class="cardBody">• <tspan style="font-weight:800">Forgetting breaks the prefix</tspan> — evict a secret or a poisoned result and</text>
+    <text x="112" y="830" class="cardBody">&#160;&#160;the tail after it must be recomputed. Long horizons force eviction.</text>
+  </g>
+
+  <!-- fak -->
+  <g filter="url(#shadow)">
+    <rect x="818" y="520" width="710" height="356" rx="8" class="ok"/>
+    <rect x="818" y="520" width="710" height="46" rx="8" fill="#2e8b57"/>
+    <text x="840" y="550" class="kicker">FAK — A QUERYABLE, ADDRESSABLE CACHE</text>
+    <text x="840" y="612" class="big" style="font-size:28px;fill:#1f6e43">the A · T multiplier → ≈ 1</text>
+    <text x="840" y="648" class="cardBody">fak owns the KV cache as a kernel object, so it is <tspan style="font-weight:800;fill:#1f6e43">queryable</tspan> — <tspan class="mono" style="font-size:15px">S</tspan> survives</text>
+    <text x="840" y="672" class="cardBody"><tspan style="font-weight:800;fill:#1f6e43">divergence</tspan> + <tspan style="font-weight:800;fill:#1f6e43">eviction</tspan>: reach in, remove a span, leave the rest</text>
+    <rect x="840" y="694" width="666" height="74" rx="6" fill="#ffffff" stroke="#9ccdaf"/>
+    <text x="858" y="722" class="cardBody"><tspan style="font-weight:800;fill:#1f6e43">bit-for-bit identical</tspan> to a run that never saw it — witnessed vs</text>
+    <text x="858" y="744" class="cardBody">HuggingFace at <tspan class="mono" style="font-size:15px">max|Δ| = 0</tspan>. (Shipped and tested.)</text>
+    <rect x="840" y="780" width="666" height="74" rx="6" fill="#edf7f0" stroke="#9ccdaf"/>
+    <text x="858" y="808" class="cardBody">Measured head-to-head: <tspan style="font-weight:900;fill:#1f6e43;font-size:20px">4.1×</tspan> vs a <tspan style="font-weight:800">tuned</tspan> warm-cache stack</text>
+    <text x="858" y="830" class="cardBody">(50t × 5a, Qwen2.5-1.5B Q8, bit-identical tokens · 60.3× vs naive).</text>
+  </g>
+
+  <!-- Second, distinct lead: in-loop policy fast path -->
+  <g filter="url(#shadow)">
+    <rect x="72" y="896" width="1456" height="200" rx="8" class="sec"/>
+    <rect x="72" y="896" width="1456" height="44" rx="8" fill="#3a5a9b"/>
+    <text x="94" y="924" class="kicker">A SECOND MOVE, DISTINCT FROM THE CACHE — POLICY INSIDE THE LOOP</text>
+    <text x="96" y="974" class="cardTitle">The permission check lives on the prefill / cache / decode call path itself</text>
+    <text x="96" y="1008" class="cardBody">Most agent safety bolts a recognizer onto the <tspan style="font-weight:800">outside</tspan> of the loop — a pre-tool hook in another process, a sidecar over a socket, an LLM judge. The model can argue past a</text>
+    <text x="96" y="1032" class="cardBody">recognizer, and when that outside thing times out the call usually runs anyway — <tspan style="font-weight:800;fill:#7a2f2f">fail-open, exactly under load or attack.</tspan> fak puts the decision in <tspan style="font-weight:800">one address space, on the same</tspan></text>
+    <text x="96" y="1056" class="cardBody"><tspan style="font-weight:800">code path</tspan> as the tool call — <tspan style="font-weight:800">default-deny</tspan>, no IPC seam — the way a <tspan class="mono" style="font-size:15px">read()</tspan> passes through the OS kernel before it touches a disk. You can't sweet-talk a gate that isn't a participant.</text>
+    <text x="96" y="1082" class="small" style="font-weight:700;fill:#3a5a9b">If anyone else offers this at all, it is deeply buried — the in-loop, same-address-space, default-deny reference monitor is not a feature the rest of the industry surfaces.</text>
+  </g>
+
+  <!-- Honest boundary -->
+  <rect x="72" y="1110" width="1456" height="86" rx="8" class="note"/>
+  <text x="98" y="1142" class="label">Claim boundary (kept honest)</text>
+  <text x="98" y="1168" class="small">The <tspan style="font-weight:700">4.1×</tspan> is a committed measured head-to-head <tspan style="font-weight:700">vs a tuned warm-cache stack</tspan> (arm B), bit-identical tokens (commit 2bbda6f). The <tspan style="font-weight:700">60.3×</tspan> is vs the <tspan style="font-weight:700">naive</tspan> loop, with arm A's prefill modeled + validated live ~0.4%. Don't quote 60.3× as vs-tuned.</text>
+  <text x="98" y="1188" class="small">The 4.1× is the <tspan style="font-weight:700">favorable (homogeneous) batching regime</tspan> — co-serving windows in one batch degrades when tool outputs are large + heterogeneous (open problem, §3b). Capability claims (queryable bit-exact removal; in-loop default-deny) hold regardless. "Collapses A·T" is the cost model, not a new attention exponent. All numbers → BENCHMARK-AUTHORITY.md.</text>
+</svg>

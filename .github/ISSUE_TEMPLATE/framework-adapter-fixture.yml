@@ -1,0 +1,63 @@
+name: Framework or host adapter fixture
+description: Request a minimal allow/deny/quarantine fixture for an agent framework or host.
+title: "[adapter] "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Use this when an agent framework, MCP host, SDK, or gateway would benefit
+        from a small fixture around policy refusal, quarantine metadata, or audit
+        evidence.
+
+        The intended contract is narrow: proposed tool call -> policy verdict ->
+        execute only admitted calls -> return host-native deny/quarantine metadata.
+  - type: input
+    id: host-name
+    attributes:
+      label: Host or framework
+      placeholder: "Example: LangGraph, OpenAI Agents SDK, MCP host, custom gateway"
+    validations:
+      required: true
+  - type: textarea
+    id: integration-point
+    attributes:
+      label: Tool-call integration point
+      description: Where does this host represent proposed tool calls and tool results?
+      placeholder: "Link to docs or describe the callback/middleware/result shape."
+    validations:
+      required: true
+  - type: textarea
+    id: desired-fixture
+    attributes:
+      label: Desired fixture
+      description: What should the minimal example prove?
+      placeholder: "A destructive tool is denied with a reason code; a benign read is allowed; quarantine metadata survives back to the host."
+    validations:
+      required: true
+  - type: textarea
+    id: native-shape
+    attributes:
+      label: Native result shape
+      description: How should deny/quarantine metadata appear to the host, user, or model?
+      placeholder: "Example: tool result object, callback error, event stream item, audit row, response metadata."
+    validations:
+      required: true
+  - type: textarea
+    id: test-command
+    attributes:
+      label: Preferred test or example command
+      description: If known, name the command that should prove the fixture in that project.
+      placeholder: "Example: npm test test/policy-boundary.test.ts"
+    validations:
+      required: false
+  - type: checkboxes
+    id: scope-checks
+    attributes:
+      label: Scope checks
+      options:
+        - label: This request is for a minimal fixture or adapter, not a framework replacement.
+          required: true
+        - label: I can point to public docs or a public API shape, or provide a synthetic equivalent.
+          required: true
+        - label: No secrets, private traces, or proprietary code are included here.
+          required: true

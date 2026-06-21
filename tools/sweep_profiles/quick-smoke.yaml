@@ -1,0 +1,58 @@
+# Quick smoke test sweep - fast API models for basic validation
+# Public profile - safe to commit and share
+name: quick-smoke
+description: Fast smoke test across multiple API models to validate basic sweep infrastructure
+public: true
+
+# Workload configuration
+workload:
+  max_turns: 5
+  trials: 1
+  timeout_s: 300
+
+# Models to sweep
+models:
+  - name: zai/glm-4.7-flash
+    provider: glama
+    base_url: https://gateway.glama.ai/v1
+    api_key_env: GLAMA_API_KEY
+    enabled: true
+    price_hint:
+      input: 0.07
+      output: 0.40
+      source: glama-models-2026-06-18
+
+  - name: openai/gpt-4.1-nano-2025-04-14
+    provider: openai
+    base_url: https://gateway.glama.ai/v1
+    api_key_env: GLAMA_API_KEY
+    enabled: true
+    price_hint:
+      input: 0.10
+      output: 0.40
+      source: glama-models-2026-06-18
+
+  - name: deepseek/deepseek-v4-flash
+    provider: deepseek
+    base_url: https://gateway.glama.ai/v1
+    api_key_env: GLAMA_API_KEY
+    enabled: true
+    price_hint:
+      input: 0.14
+      output: 0.28
+      source: glama-models-2026-06-18
+
+# Output directory (relative to repo root)
+output_dir: fak/experiments/agent-live/quick-smoke
+
+# Execution flags
+skip_api: false
+skip_offline: true
+skip_local_shim: true
+fail_fast: true
+
+# Metadata tags
+tags:
+  - smoke
+  - api
+  - public

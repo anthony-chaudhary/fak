@@ -1,0 +1,96 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="700" viewBox="0 0 1600 700" role="img" aria-labelledby="title desc">
+  <title id="title">fak SOTA benchmark leaderboard — fak's number bolded where it leads the SOTA baseline</title>
+  <desc id="desc">Four agent-fleet / KV-reuse benchmarks where fak leads or reaches parity · two single-stream benchmarks where it trails — shown, not hidden. The absolute measured number is stated first; any multiplier is a parenthetical reference.</desc>
+  <defs>
+    <linearGradient id="bg2" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#f7faf9"/>
+      <stop offset="50%" stop-color="#eef5f6"/>
+      <stop offset="100%" stop-color="#faf4ee"/>
+    </linearGradient>
+    <style>
+      .title { font: 900 42px "Segoe UI", Arial, sans-serif; fill: #14202b; }
+      .subtitle { font: 400 19px "Segoe UI", Arial, sans-serif; fill: #405063; }
+      .kicker { font: 800 16px "Segoe UI", Arial, sans-serif; fill: #2e8b57; letter-spacing: 2px; }
+      .hcol { font: 800 15px "Segoe UI", Arial, sans-serif; fill: #ffffff; letter-spacing: 1px; }
+      .rank { font: 900 22px "Segoe UI", Arial, sans-serif; fill: #9aa7b3; }
+      .bname { font: 700 18px "Segoe UI", Arial, sans-serif; fill: #1b2733; }
+      .bsub { font: 400 13px "Segoe UI", Arial, sans-serif; fill: #6a7a89; }
+      .base { font: 400 15px "Segoe UI", Arial, sans-serif; fill: #51616f; }
+      .fakWin { font: 900 22px "Segoe UI", Arial, sans-serif; fill: #2e8b57; }
+      .fakLose { font: 400 17px "Segoe UI", Arial, sans-serif; fill: #51616f; }
+      .regTag { font: 800 11px "Segoe UI", Arial, sans-serif; fill: #ffffff; letter-spacing: 0.5px; }
+      .legend { font: 600 14px "Segoe UI", Arial, sans-serif; fill: #51616f; }
+      .small { font: 400 13px "Segoe UI", Arial, sans-serif; fill: #5b6a7a; }
+    </style>
+  </defs>
+
+  <rect width="1600" height="700" fill="url(#bg2)"/>
+  <rect x="32" y="24" width="1536" height="652" rx="10" fill="#ffffff" opacity="0.62"/>
+
+  <text x="64" y="76" class="kicker">SOTA BENCHMARK LEADERBOARD</text>
+  <text x="64" y="120" class="title">Every row is fak vs the best already-shipped SOTA — leader bolded</text>
+  <text x="64" y="150" class="subtitle">Four agent-fleet / KV-reuse benchmarks where fak leads or reaches parity · two single-stream benchmarks where it trails — shown, not hidden. The absolute measured number is stated first; any multiplier is a parenthetical reference.</text>
+
+  <rect x="64" y="178" width="1472" height="44" rx="6" fill="#2e3a47"/>
+  <text x="80" y="206" class="hcol">#</text>
+  <text x="132" y="206" class="hcol">BENCHMARK</text>
+  <text x="600" y="206" class="hcol">REGIME</text>
+  <text x="800" y="206" class="hcol">SOTA BASELINE</text>
+  <text x="1168" y="206" class="hcol">fak RESULT</text>
+  <text x="1436" y="206" class="hcol">LEAD?</text>
+
+  <rect x="64" y="226" width="1472" height="62" rx="4" fill="#edf7f0" stroke="#cfe7d8"/>
+  <text x="80" y="264" class="rank">1</text>
+  <text x="132" y="258" class="bname">50-turn × 5-agent fleet serving time  (front-page headline)</text>
+  <text x="132" y="278" class="bsub">Qwen2.5-1.5B Q8 · identical forward pass · commit 2bbda6f</text>
+  <rect x="600" y="244" width="160" height="26" rx="13" fill="#2e8b57"/><text x="680" y="262" class="regTag" text-anchor="middle">AGENT FLEET</text>
+  <text x="800" y="263" class="base">Tuned warm per-agent KV: 78 min</text>
+  <text x="1168" y="265" class="fakWin">19.0 min  (4.1× less work)</text>
+  <text x="1452" y="266" font-size="24" text-anchor="middle">✅</text>
+  <rect x="64" y="292" width="1472" height="62" rx="4" fill="#edf7f0" stroke="#cfe7d8"/>
+  <text x="80" y="330" class="rank">2</text>
+  <text x="132" y="324" class="bname">Marginal value over a tuned warm per-agent cache  (B vs C)</text>
+  <text x="132" y="344" class="bsub">SmolLM2-135M Q8, T=8→16 A=4 P=512 · the most conservative SOTA point</text>
+  <rect x="600" y="310" width="160" height="26" rx="13" fill="#2e8b57"/><text x="680" y="328" class="regTag" text-anchor="middle">AGENT FLEET</text>
+  <text x="800" y="329" class="base">Warm per-agent KV already hot (B): 1.0×</text>
+  <text x="1168" y="331" class="fakWin">2.4×–2.7×  (cross-agent fusion on top of warm)</text>
+  <text x="1452" y="332" font-size="24" text-anchor="middle">✅</text>
+  <rect x="64" y="358" width="1472" height="62" rx="4" fill="#edf7f0" stroke="#cfe7d8"/>
+  <text x="80" y="396" class="rank">3</text>
+  <text x="132" y="390" class="bname">KV-cache hit rate  (FCFS → cache-aware)</text>
+  <text x="132" y="410" class="bsub">reaches 100% of optimal reuse · commit 92896a4</text>
+  <rect x="600" y="376" width="160" height="26" rx="13" fill="#3a7d9c"/><text x="680" y="394" class="regTag" text-anchor="middle">KV REUSE</text>
+  <text x="800" y="395" class="base">SGLang RadixAttention band: 50–99% (FCFS 62.1%)</text>
+  <text x="1168" y="397" class="fakWin">86.7%  (= 100% of optimal)</text>
+  <text x="1452" y="398" font-size="24" text-anchor="middle">✅</text>
+  <rect x="64" y="424" width="1472" height="62" rx="4" fill="#edf7f0" stroke="#cfe7d8"/>
+  <text x="80" y="462" class="rank">4</text>
+  <text x="132" y="456" class="bname">RadixAttention live prefill speedup  (Qwen2.5-1.5B)</text>
+  <text x="132" y="476" class="bsub">93% of the 7.50× deterministic token-reuse ceiling · commit 92896a4</text>
+  <rect x="600" y="442" width="160" height="26" rx="13" fill="#3a7d9c"/><text x="680" y="460" class="regTag" text-anchor="middle">KV REUSE</text>
+  <text x="800" y="461" class="base">Deterministic token-reuse ceiling: 7.50×</text>
+  <text x="1168" y="463" class="fakWin">6.95×  (93% of the ceiling, live)</text>
+  <text x="1452" y="464" font-size="24" text-anchor="middle">✅</text>
+  <rect x="64" y="490" width="1472" height="62" rx="4" fill="#fff5e8" stroke="#e7d3a8"/>
+  <text x="80" y="528" class="rank">5</text>
+  <text x="132" y="522" class="bname">Single-stream decode  (Qwen2.5-7B Q8)</text>
+  <text x="132" y="542" class="bsub">fak is not a faster model server — and says so · commit 34c74f4</text>
+  <rect x="600" y="508" width="160" height="26" rx="13" fill="#6a7685"/><text x="680" y="526" class="regTag" text-anchor="middle">SINGLE STREAM</text>
+  <text x="800" y="527" class="base" style="font-weight:800;fill:#1b2733;">llama.cpp Metal: 17.3 tok/s</text>
+  <text x="1168" y="529" class="fakLose">8.7 tok/s  (0.50×)</text>
+  <text x="1452" y="530" font-size="22" text-anchor="middle">—</text>
+  <rect x="64" y="556" width="1472" height="62" rx="4" fill="#fff5e8" stroke="#e7d3a8"/>
+  <text x="80" y="594" class="rank">6</text>
+  <text x="132" y="588" class="bname">Single-stream prefill  (1.5B–7B Q8)</text>
+  <text x="132" y="608" class="bsub">arm64 lacks the GEMM tile (fleet#578); x86 slope = parity · commit 34c74f4</text>
+  <rect x="600" y="574" width="160" height="26" rx="13" fill="#6a7685"/><text x="680" y="592" class="regTag" text-anchor="middle">SINGLE STREAM</text>
+  <text x="800" y="593" class="base" style="font-weight:800;fill:#1b2733;">llama.cpp CPU (+ Metal GPU)</text>
+  <text x="1168" y="595" class="fakLose">0.12× CPU · 0.083× Metal-GPU</text>
+  <text x="1452" y="596" font-size="22" text-anchor="middle">—</text>
+
+  <rect x="64" y="628" width="22" height="22" rx="4" fill="#edf7f0" stroke="#85bc98"/>
+  <text x="96" y="645" class="legend"><tspan style="font-weight:900;fill:#2e8b57;">Bold green</tspan> = fak leads the SOTA baseline.</text>
+  <rect x="520" y="628" width="22" height="22" rx="4" fill="#fff5e8" stroke="#dfbd78"/>
+  <text x="552" y="645" class="legend">Amber = fak trails (single-stream raw throughput) — shown honestly.</text>
+  <text x="1180" y="645" class="small">All numbers trace to fak/BENCHMARK-AUTHORITY.md.</text>
+</svg>

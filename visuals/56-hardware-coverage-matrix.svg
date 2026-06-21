@@ -1,0 +1,145 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1500" height="880" viewBox="0 0 1500 880" role="img" aria-labelledby="title desc">
+  <title id="title">fak hardware coverage matrix</title>
+  <desc id="desc">fak has been profiled across four distinct hardware platforms: Apple M3 Pro (arm64, Metal + NEON, macOS); AMD Ryzen 9 9950X with Radeon RX 7600 (x86_64, Vulkan, Windows); Intel x86_64 with NVIDIA RTX 4070 (CUDA Ada sm_89, Windows + WSL2 Linux); and 8 NVIDIA A100-SXM4-40GB (CUDA Ampere sm_80, Linux, the multi-GPU serving lane). That spans two CPU ISAs, three CPU vendors, four GPU backends, and four operating systems. The deterministic correctness gates pass on every backend; the A100 row is the documented serving and GLM-5.2 readiness lane.</desc>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#f7faf9"/>
+      <stop offset="50%" stop-color="#eef5f6"/>
+      <stop offset="100%" stop-color="#faf4ee"/>
+    </linearGradient>
+    <filter id="shadow" x="-10%" y="-10%" width="120%" height="130%">
+      <feDropShadow dx="0" dy="6" stdDeviation="8" flood-color="#14202b" flood-opacity="0.12"/>
+    </filter>
+    <style>
+      .title { font: 900 42px "Segoe UI", Arial, sans-serif; fill: #14202b; }
+      .subtitle { font: 400 19px "Segoe UI", Arial, sans-serif; fill: #405063; }
+      .kicker { font: 800 16px "Segoe UI", Arial, sans-serif; fill: #2e8b57; letter-spacing: 2px; }
+      .statNum { font: 900 64px "Segoe UI", Arial, sans-serif; fill: #2e8b57; }
+      .statLabel { font: 800 17px "Segoe UI", Arial, sans-serif; fill: #1b2733; }
+      .statSub { font: 400 13px "Segoe UI", Arial, sans-serif; fill: #5b6a7a; }
+      .colHead { font: 800 15px "Segoe UI", Arial, sans-serif; fill: #ffffff; letter-spacing: 1px; }
+      .plat { font: 800 20px "Segoe UI", Arial, sans-serif; fill: #14202b; }
+      .platSub { font: 400 13px "Segoe UI", Arial, sans-serif; fill: #6a7685; }
+      .cell { font: 600 15px "Segoe UI", Arial, sans-serif; fill: #2b3a49; }
+      .cellSub { font: 400 12.5px "Segoe UI", Arial, sans-serif; fill: #6a7685; }
+      .check { font: 900 26px "Segoe UI", Arial, sans-serif; fill: #2e8b57; }
+      .lane { font: 800 12px "Segoe UI", Arial, sans-serif; fill: #ffffff; letter-spacing: 1px; }
+      .small { font: 400 13px "Segoe UI", Arial, sans-serif; fill: #5b6a7a; }
+      .card { fill: #ffffff; stroke: #d9e1e8; stroke-width: 1.5; }
+    </style>
+  </defs>
+
+  <rect width="1500" height="880" fill="url(#bg)"/>
+  <rect x="34" y="26" width="1432" height="828" rx="10" fill="#ffffff" opacity="0.6"/>
+
+  <text x="60" y="74" class="kicker">HARDWARE COVERAGE · ONE KERNEL, MANY MACHINES</text>
+  <text x="60" y="122" class="title">fak has been profiled across four hardware platforms</text>
+  <text x="60" y="152" class="subtitle">Two CPU ISAs · three CPU vendors · four GPU backends · four operating systems — and the bit-exact gates pass on all of them</text>
+
+  <!-- Stat chips -->
+  <g filter="url(#shadow)">
+    <rect x="60" y="178" width="330" height="132" rx="10" class="card"/>
+    <text x="86" y="256" class="statNum">4</text>
+    <text x="180" y="240" class="statLabel">hardware</text>
+    <text x="180" y="262" class="statLabel">platforms</text>
+    <text x="86" y="292" class="statSub">Apple · AMD · Intel · NVIDIA A100</text>
+
+    <rect x="410" y="178" width="330" height="132" rx="10" class="card"/>
+    <text x="436" y="256" class="statNum">2</text>
+    <text x="530" y="240" class="statLabel">CPU ISAs</text>
+    <text x="530" y="262" class="statLabel">3 vendors</text>
+    <text x="436" y="292" class="statSub">arm64 · x86_64  (Apple/AMD/Intel)</text>
+
+    <rect x="760" y="178" width="330" height="132" rx="10" class="card"/>
+    <text x="786" y="256" class="statNum">4</text>
+    <text x="880" y="240" class="statLabel">GPU</text>
+    <text x="880" y="262" class="statLabel">backends</text>
+    <text x="786" y="292" class="statSub">Metal · Vulkan · CUDA Ada · Ampere</text>
+
+    <rect x="1110" y="178" width="330" height="132" rx="10" class="card"/>
+    <text x="1136" y="256" class="statNum">4</text>
+    <text x="1230" y="240" class="statLabel">operating</text>
+    <text x="1230" y="262" class="statLabel">systems</text>
+    <text x="1136" y="292" class="statSub">macOS · Windows · WSL2 · Linux</text>
+  </g>
+
+  <!-- Matrix -->
+  <!-- column header row -->
+  <g filter="url(#shadow)">
+    <rect x="60" y="344" width="1380" height="44" rx="8" fill="#1c2a36"/>
+  </g>
+  <text x="78" y="372" class="colHead">PLATFORM</text>
+  <text x="402" y="372" class="colHead">CPU / ISA</text>
+  <text x="600" y="372" class="colHead">GPU BACKEND</text>
+  <text x="832" y="372" class="colHead">OS</text>
+  <text x="1030" y="372" class="colHead">QUANT</text>
+  <text x="1222" y="372" class="colHead" text-anchor="middle">BIT-EXACT</text>
+  <text x="1380" y="372" class="colHead" text-anchor="middle">FLEET</text>
+
+  <!-- row 1: M3 Pro -->
+  <rect x="60" y="394" width="1380" height="98" rx="6" fill="#edf7f0" stroke="#85bc98" stroke-width="1.5"/>
+  <text x="78" y="432" class="plat">Apple M3 Pro</text>
+  <text x="78" y="456" class="platSub">primary bench node · node-macos-a</text>
+  <text x="78" y="478" class="platSub">36 GB unified · ~150 GB/s</text>
+  <text x="402" y="438" class="cell">Apple M3 Pro</text>
+  <text x="402" y="460" class="cellSub">6P+6E · arm64</text>
+  <text x="600" y="438" class="cell">Metal + NEON Q8</text>
+  <text x="600" y="460" class="cellSub">18-core GPU</text>
+  <text x="832" y="443" class="cell">macOS</text>
+  <text x="1030" y="438" class="cell">f32 · Q8</text>
+  <text x="1030" y="460" class="cellSub">Q4_K · Q2_K</text>
+  <text x="1222" y="452" class="check" text-anchor="middle">✓</text>
+  <text x="1380" y="452" class="check" text-anchor="middle">✓</text>
+
+  <!-- row 2: AMD -->
+  <rect x="60" y="498" width="1380" height="98" rx="6" class="card"/>
+  <text x="78" y="536" class="plat">AMD Ryzen 9 9950X</text>
+  <text x="78" y="560" class="platSub">+ Radeon RX 7600 (Vulkan)</text>
+  <text x="78" y="582" class="platSub">the Vulkan lane (2nd GPU vendor)</text>
+  <text x="402" y="542" class="cell">Zen 5, 16C/32T</text>
+  <text x="402" y="564" class="cellSub">x86_64 · AVX-512</text>
+  <text x="600" y="542" class="cell">Vulkan Q8</text>
+  <text x="600" y="564" class="cellSub">RX 7600 + CPU Q8</text>
+  <text x="832" y="547" class="cell">Windows</text>
+  <text x="1030" y="542" class="cell">f32 · Q8</text>
+  <text x="1030" y="564" class="cellSub">Q4_K</text>
+  <text x="1222" y="556" class="check" text-anchor="middle">✓</text>
+  <text x="1380" y="556" class="check" text-anchor="middle">✓</text>
+
+  <!-- row 3: RTX 4070 -->
+  <rect x="60" y="602" width="1380" height="98" rx="6" class="card"/>
+  <text x="78" y="640" class="plat">Intel x86_64 + RTX 4070</text>
+  <text x="78" y="664" class="platSub">the CUDA / WSL2 lane (Ada sm_89)</text>
+  <text x="78" y="686" class="platSub">fits-the-GPU fused-kernel decode</text>
+  <text x="402" y="646" class="cell">Intel x86_64</text>
+  <text x="402" y="668" class="cellSub">AVX2 / AVX-512</text>
+  <text x="600" y="646" class="cell">CUDA Ada</text>
+  <text x="600" y="668" class="cellSub">f32·F16·Q8·graph</text>
+  <text x="832" y="646" class="cell">Windows</text>
+  <text x="832" y="668" class="cellSub">+ WSL2 Linux</text>
+  <text x="1030" y="646" class="cell">f32 · F16</text>
+  <text x="1030" y="668" class="cellSub">Q8</text>
+  <text x="1222" y="660" class="check" text-anchor="middle">✓</text>
+  <text x="1380" y="660" class="check" text-anchor="middle">✓</text>
+
+  <!-- row 4: A100 -->
+  <rect x="60" y="706" width="1380" height="98" rx="6" class="card"/>
+  <text x="78" y="744" class="plat">8× NVIDIA A100-SXM4-40GB</text>
+  <text x="78" y="768" class="platSub">the multi-GPU serving lane (Ampere sm_80)</text>
+  <text x="78" y="790" class="platSub">~320 GB GPU · big-iron, no single-box ceiling</text>
+  <text x="402" y="750" class="cell">x86_64 host</text>
+  <text x="402" y="772" class="cellSub">8-GPU node</text>
+  <text x="600" y="750" class="cell">CUDA Ampere</text>
+  <text x="600" y="772" class="cellSub">multi-GPU</text>
+  <text x="832" y="755" class="cell">Linux</text>
+  <text x="1030" y="750" class="cell">Q4_K</text>
+  <text x="1030" y="772" class="cellSub">FP8/BF16 target</text>
+  <rect x="1182" y="740" width="80" height="26" rx="13" fill="#c98a2a"/>
+  <text x="1222" y="758" class="lane" text-anchor="middle">LANE</text>
+  <rect x="1340" y="740" width="80" height="26" rx="13" fill="#c98a2a"/>
+  <text x="1380" y="758" class="lane" text-anchor="middle">LANE</text>
+
+  <!-- footer -->
+  <text x="60" y="840" class="small">Deterministic metrics (token-count speedups, cache hit rate, bit-exact eviction) reproduce byte-for-byte across boxes; wall-clocks stay per-box. A100 row = documented serving + GLM-5.2 readiness lane.</text>
+  <text x="60" y="862" class="small">Every figure traces to fak/BENCHMARK-AUTHORITY.md.  ·  Rolled up 2026-06-21 · fak v0.30.0</text>
+</svg>

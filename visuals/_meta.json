@@ -1,0 +1,339 @@
+[
+  {
+    "id": "01-master",
+    "title": "The Fused Agent Kernel (one page)",
+    "caption": "The Fused Agent Kernel: one Go binary collapses four subsystems that are separate today (inference engine, local harness, fleet, and DOS) into a single OS. The model lives in untrusted userspace at the top, and every proposed tool call is a syscall that must pass DOWN through the kernel's syscall layer (typed Tool Table ABI, Tool vDSO, Pre-flight Verification Ladder, the DOS Reference Monitor adjudicating from evidence the agent did not author, an io_uring queue with speculative execution, and the Context MMU admitting results) before it can reach the side-effecting World, with the engine/scheduler beneath and 10x Stewards plus the RSI keep-or-revert loop wrapping the whole binary.",
+    "altText": "A top-down OS-style diagram showing an untrusted model at the top whose tool calls flow down as syscalls through a kernel syscall layer (Tool Table, vDSO, verification ladder, DOS reference monitor, io_uring queue, Context MMU) and an engine/scheduler with a KV-cache hierarchy, all inside one Go binary, with Stewards and an RSI loop wrapping it and side-effecting tools as the World at the bottom.",
+    "killerNumber": "4 subsystems -> 1 Go binary",
+    "faithful": true,
+    "syntaxOk": true,
+    "issuesFound": [
+      "Faithfulness: source says the binary fuses FOUR named subsystems (engine, harness, fleet, DOS), but the draft's box labels did not name them. Annotated the BIN box as 'ONE Go binary (engine + harness + fleet + DOS)', the SYS box as 'Syscall layer / kernel (harness + DOS)', and the ENG box as 'Engine / scheduler (fleet 2-D sched)' so all four subsystems are explicitly mapped to the OS layout.",
+      "Verified the killer number '4 subsystems -> 1 Go binary' is present as a note-class node (punch), rendered via the &rarr; entity which mermaid resolves.",
+      "Verified node count = 13 flow nodes (punch, model, tbl, vdso, ladder, mon, uring, mmu, batch, kv, stewards, rsi, world), within the <=14 limit; subgraphs BIN/SYS/ENG are containers, not counted nodes.",
+      "Syntax: confirmed every label containing ( ) [ ] { } / , : is double-quoted; no node id named 'end'; brackets balanced; cylinder kv[(...)] and subroutine world[[...]] shapes valid.",
+      "Style: confirmed first line is the verbatim required init block and the full required classDef block is present verbatim (including the unused pass/deny/frontier classes).",
+      "Class coverage: confirmed all 13 nodes are assigned a class (model=untrusted; tbl/vdso/uring/batch=kernel; ladder/mon/mmu/rsi=gate; kv=mem; stewards=cheap; world=world; punch=note).",
+      "Confirmed required-include relationships are all drawn: model untrusted at top; tool call passes DOWN through syscall-layer/DOS (deny/require-witness loops back to model) before reaching world; engine/scheduler beneath; stewards + RSI loop wrapping BIN; single-binary subgraph box around engine + syscall-layer."
+    ]
+  },
+  {
+    "id": "02-boundaries",
+    "title": "The boundaries ARE the cost",
+    "caption": "Before/after of one tool call: separated today, the engine pays a serialized tax chain — serialize args, cross an IPC socket, spawn the DOS hook as a process (Go 5.4-13.9ms, Python 232-262ms), adjudicate, run, serialize back, then re-tokenize and re-prefill on a KV miss (50-100ms+); fused into one binary, it is zero-copy structs, a plain function call, in-process Go adjudication (38ns-6us), and a resident KV. The sub-10us adjudication logic was strangled by a per-call PROCESS BOUNDARY, and fusion deletes it: ~1-300 ms drops to ~tens of us, ~1000x on overhead.",
+    "altText": "Two side-by-side flow columns comparing one tool call: the left \"Separated (today)\" column shows a long serialized chain with millisecond costs, the right \"Fused (one binary)\" column shows a short zero-copy in-process chain with microsecond costs, both pointing to a note reading ~1-300 ms to ~tens of us (~1000x on overhead).",
+    "killerNumber": "~1-300 ms -> ~tens of us (~1000x on overhead)",
+    "faithful": true,
+    "syntaxOk": true,
+    "issuesFound": [
+      "Verified faithfulness: every source number is present (serialize 50-200us, IPC 0.2-1ms, Go hook 5.4-13.9ms, Py hook 232-262ms, re-prefill 50-100ms+, in-proc adjudicate 38ns-6us / ~160us FS-probe, zero-copy ~0, KV 0 re-prefill) and the two-column Separated-vs-Fused structure with the ~1000x net label is intact.",
+      "Verified Mermaid syntax: first line is the exact required init block; classDef block matches verbatim; no node id is named 'end'; all labels containing ( ) [ ] { } / are double-quoted; all node shapes are balanced; all 14 nodes carry a class.",
+      "Replaced the literal '->' arrow text inside the punch-note label with the word 'to' (and prefixed 'Overhead:') so no stray '->' token can be misread by a strict parser inside the note; the killer number remains visible as the note-class node.",
+      "Confirmed node count is exactly 14 (at the limit) with one clean LR layout, TB flow within each column, and crisp short labels; no nodes added or removed."
+    ]
+  },
+  {
+    "id": "03-syscall-mapping",
+    "title": "The tool call IS a system call",
+    "caption": "The tool call IS a system call: each Agent Kernel concept (left) maps by a dashed equivalence to its classic OS mechanism (right) -- tool call == int 0x80, the typed Tool Table == the syscall table/ABI, the DOS Reference Monitor == seccomp-bpf + LSM + eBPF, the Tool vDSO == the vDSO, the pre-flight ladder == fail-fast, and context == the MMU. The verdict always comes from non-self-authored evidence, never the model's narration.",
+    "altText": "A two-column diagram pairing six Agent Kernel concepts on the left with their equivalent classic OS mechanisms on the right via dashed equals links, framed by the keystone-reframe note above and a non-self-authored-verdict note below.",
+    "killerNumber": "blow the thin 'tool call' up 100x into the agent OS syscall layer",
+    "faithful": true,
+    "syntaxOk": true,
+    "issuesFound": [
+      "Node-count violation: draft had 18 nodes (8 pairs + 2 notes), over the <=14 cap. Trimmed to the 6 most load-bearing rows (tool call, Tool Table, Reference Monitor, vDSO, pre-flight ladder, context) plus the 2 note nodes = 14 nodes, honoring both the <=14 cap and the source's 'pair the 6-8 most important rows' guidance.",
+      "Dropped the io_uring and speculative-execution pairs (a7/a8/o7/o8) as the least essential to the untrusted-process-asks-trusted-kernel thesis; updated the caption accordingly so it no longer claims those two rows are shown.",
+      "Removed the now-orphaned class assignments for a7,a8,o7,o8 (would have referenced non-existent nodes after the trim).",
+      "Verified killer number (the keystone reframe) is present and rendered as a note-class node.",
+      "Verified the non-self-authored-evidence verdict note is present as a note-class node.",
+      "Confirmed all labels containing parentheses/slashes/colons are double-quoted, no node id is named 'end', brackets balanced, init line is verbatim, classDef block is the exact verbatim set, and every node carries a class."
+    ]
+  },
+  {
+    "id": "04-syscall-path",
+    "title": "The life of one tool call",
+    "caption": "The life of one tool call: the DOS Reference Monitor adjudicates a proposed call (allow/deny/transform/require-witness) on evidence the agent didn't author, the pre-flight ladder cheaply refutes losers without spending the call, dispatch answers pure/cached calls locally in the Tool vDSO or fires real ones via io_uring, and the Context Admission Gate either admits the result or quarantines it to a side store. Only bytes that earned their place ever touch context.",
+    "altText": "A top-down flowchart tracing one tool call from the model's emission through adjudication, a pre-flight refute check, vDSO-versus-fire dispatch, and a context admission gate, with deny and quarantine off-ramps, ending at \"enters context\".",
+    "killerNumber": "verdict from evidence the agent didn't author",
+    "faithful": true,
+    "syntaxOk": true,
+    "issuesFound": [
+      "Fixed a dangling class assignment: 'class vdso,fire2 kernel;' referenced node id 'fire2', which does not exist and would create a phantom node / risk a parse error. Changed to 'class vdso kernel;'.",
+      "Verified all 12 nodes are within the <=14 limit and every node is assigned exactly one class (emit=untrusted, adj/preflight/dispatch/gate=gate, deny/quarantine=deny, vdso=kernel, fire=world, sidestore=mem, ctx=pass, note=note).",
+      "Confirmed faithfulness to all 6 source steps plus both required off-ramps (deny short-circuit from adjudicate and from refuted pre-flight; quarantine to side store) and the terminal 'enters context' node.",
+      "Confirmed the killer number is present verbatim as a note-class node and dotted-linked to the adjudication diamond.",
+      "Verified init first line and classDef block match the required blocks verbatim, and all labels with special characters ( ) / , : are double-quoted; no node id named 'end'."
+    ]
+  },
+  {
+    "id": "05-preflight",
+    "title": "Pre-flight verification ladder (lint before pytest)",
+    "caption": "The pre-flight verification ladder: before any tool call fires, run the cheapest mechanistic check that could prove it fails, climbing from rung 0 (static, microseconds) through rung 1 (dry-run / linter, milliseconds) and rung 2 (sandbox probe, tens of ms) to rung 3, which fires for real at full cost. Each rung can deny without spending the call, because a failed call's real cost is context pollution -- a ~500-2000 token stack trace plus a wasted recovery turn -- so it is worth spending 1 us to avoid a stack trace in context.",
+    "altText": "A top-down four-rung ladder from an agent's proposed tool call through static, dry-run, and sandbox-probe gates to a final real fire, where each gate has a red deny off-ramp routing to the context-pollution cost note and the RSI labeled-example signal.",
+    "killerNumber": "spend 1 us to avoid a stack trace in context",
+    "faithful": true,
+    "syntaxOk": true,
+    "issuesFound": [
+      "Verified faithfulness: all four rungs, their cost classes (microseconds / milliseconds / tens of ms / full cost), the three deny off-ramps, the RSI signal, the context-pollution punchline, and the killer number were all present and correct in the draft.",
+      "Clarified the RSI label from 'pass-k / fail-k+1' to 'pass-k / fail-(k+1)' so the off-by-one rung relationship reads unambiguously and the '+1' is not misread as a label artifact.",
+      "Added '(not wall-clock)' to the cost note to surface the source's explicit contrast (real cost is context pollution, not wall-clock time), strengthening the punchline.",
+      "Confirmed rung 3 correctly has no deny off-ramp: per the source, rungs 0-2 can DENY before spending while rung 3 IS the real spend, so only three deny off-ramps is faithful, not a missing element.",
+      "Confirmed syntax: required init block is the verbatim first line, exact classDef block present, all labels with special characters are double-quoted, no node id named 'end', all 11 nodes carry a class, node count 11 <= 14."
+    ]
+  },
+  {
+    "id": "06-context-mmu",
+    "title": "Context as protected memory (the Context MMU)",
+    "caption": "The Context MMU: a tool result does not enter the model's context just because the call ran -- DOS adjudicates the RESULT at an admission gate. PASS bytes enter protected context; FAIL bytes are quarantined and fanned to headroom-compression (the page-in compressor, 40-80% tokens cut @ ~17 ms), dropped, or paged out to a side store the model can deliberately fault back in, where it must be re-admitted. One page table maps each context segment to its physical KV across HBM / DRAM / SSD / recompute / compressed -- 'what the model sees' and 'where its KV lives' are the same table.",
+    "altText": "A top-down flowchart where a tool result flows into DOS (the Context MMU) and an admission gate; PASS results enter protected context, FAIL results are quarantined and fan out to headroom-compression, drop, or page-out to a side store that the model can deliberately fault back in through the gate, with a note that one page table maps context segments to HBM/DRAM/SSD/recompute/compressed.",
+    "killerNumber": "headroom: 40-80% tokens cut @ ~17 ms",
+    "faithful": true,
+    "syntaxOk": true,
+    "issuesFound": [
+      "Faithfulness: verified all required elements present (result -> admission gate -> PASS/protected-context vs FAIL/quarantine fanning to compress/drop/page-out, page-table note with {HBM/DRAM/SSD/recompute/compressed}, and the killer number). No edits needed for content.",
+      "Style/clarity: reassigned the 'model / agent' node from class 'untrusted' to the previously-unused 'frontier' class -- the model deliberately faulting a page back in is the agent action, distinct from a raw untrusted tool result; this also exercises the defined frontier class. Kept 'result' as untrusted.",
+      "Clarity: labeled the model->gate edge 're-admit' to make explicit that a faulted-back page must pass admission again (faithful to 'only bytes that earned their place').",
+      "Clarity: tightened the page-out label to 'page-out to side store (faultable back in)' for a crisper node.",
+      "Syntax: confirmed init first line is verbatim, all 10 classDefs present verbatim, every node carries a class, no node id named 'end', and all labels containing ()/{}/ are double-quoted. Node count = 12 (<= 14).",
+      "Minor: changed gate label punctuation to 'admission gate: earns its place?' (kept inside quotes so the colon is safe)."
+    ]
+  },
+  {
+    "id": "07-kv-hierarchy",
+    "title": "The KV cache is pageable: a memory hierarchy",
+    "caption": "The KV cache as a pageable, four-tier memory hierarchy: because HBM (not compute) binds idle agents, KV is paged L1 HBM to L2 DRAM to L3 SSD to L4 recompute, with the L3-vs-L4 choice decided by transfer-vs-recompute cost. Per 80GB H100: 8B@50K holds ~10 warm agents, 3B ~42, headroom-compressed 3B ~100-150.",
+    "altText": "A top-down flowchart showing KV cache paging from L1 HBM through L2 DRAM and L3 SSD into an L4 recompute backstop, with a crossover decision node routing to keep-bytes or recompute, and a density note listing agents-per-H100.",
+    "killerNumber": "8B@50K: ~10 warm/H100; 3B: ~42; +headroom: ~100-150",
+    "faithful": true,
+    "syntaxOk": true,
+    "issuesFound": [
+      "Verified init first line and classDef block match the required verbatim text exactly.",
+      "Confirmed all labels containing ( ) [ ] { } / , : are wrapped in double quotes; HTML entities (&lt; &gt;) used for angle/arrow chars inside labels to avoid parser issues.",
+      "Confirmed every node has a class assignment and no node id is named 'end'.",
+      "Tightened L4 'holds' label from 'nothing - the backstop, drop the KV' to 'the backstop - drop the KV, re-prefill' so the tier still describes what it does (the source frames L4 as the recompute backstop, not an empty tier).",
+      "Restored 'over PCIe/NVLink' detail to L2 medium label for full faithfulness to the source.",
+      "Verified all 4 tiers carry medium + make-resident cost + holds; crossover rule and density/killer-number note present. Node count is 9 (<=14), single clean top-down flow.",
+      "Tightened caption to two sentences naming the punchline and surfacing the killer density numbers."
+    ]
+  },
+  {
+    "id": "08-residency-fsm",
+    "title": "Residency follows scheduler state",
+    "caption": "KV residency is a pure function of scheduler state: RUNNABLE and a sub-millisecond BLOCKED_FAST call keep KV in HBM (L1), a slow network/sandbox/human BLOCKED_SLOW call pages it to DRAM (L2), and a long-idle SLEEPING steward drops to SSD (L3) or recompute (L4). The same static tool table that powers pre-flight denial also carries each tool's latency class, so paging and verification fall out of one mechanism, two payoffs.",
+    "altText": "A left-to-right state machine showing RUNNABLE in HBM transitioning on fire-fast/fire-slow calls to BLOCKED_FAST (stays HBM) or BLOCKED_SLOW (DRAM L2), returning on resume, and on idle timeout to SLEEPING (SSD L3 or recompute L4), with a note reading one mechanism, two payoffs.",
+    "killerNumber": "one mechanism, two payoffs",
+    "faithful": true,
+    "syntaxOk": true,
+    "issuesFound": [
+      "Renamed the FAST and SLOW state descriptions to surface the required state names BLOCKED_FAST and BLOCKED_SLOW (the 'Must include' state names were missing from the labels).",
+      "Re-mapped state classes to match each state's role: RUNNABLE and FAST -> kernel (both scheduler-active and resident in HBM/L1), SLOW -> mem (paged to DRAM/L2), SLEEP -> cheap (cheapest tier, SSD/recompute). The draft's RUNNABLE-as-frontier mapping did not reflect any role in the source.",
+      "Verified all required transitions are present: fire fast call, fire slow call, tool returns (resume) x2, idle timeout, plus an entry edge and a sleep-resume edge.",
+      "Confirmed the verbatim init block is the first line and the full classDef block is present unchanged.",
+      "Confirmed the killer number 'one mechanism, two payoffs' is present as a note-class node and every state node carries a class.",
+      "No invented facts: all tiers (L1 HBM, L2 DRAM, L3 SSD, L4 recompute), the <1ms fast threshold, and the token-log + shared-prefix-pointer detail match the source."
+    ]
+  },
+  {
+    "id": "09-shared-prefix",
+    "title": "Shared-prefix KV: copy-on-write across the fleet",
+    "caption": "A fleet boots from one common preamble, so its shared-prefix KV is computed once and held copy-on-write while each agent owns only a small divergent suffix; paging moves just that suffix, and the HBM saving grows with fleet size. A boundary steward keeps the shared prefix stopping exactly at the public edge so no agent-private tokens leak into a shared page.",
+    "altText": "A diagram showing three agents all referencing one shared copy-on-write prefix KV block, each with its own divergent suffix that alone moves on paging, a boundary-steward gate preventing private tokens from leaking into shared pages, and a note that the HBM saving grows with fleet size.",
+    "killerNumber": "HBM saving that GROWS with fleet size",
+    "faithful": true,
+    "syntaxOk": true,
+    "issuesFound": [
+      "Re-grounded the killer number: linked the 'HBM saving GROWS with fleet size' note to the three agents (a1/a2/a3 --> num) so the saving visibly scales with the many-agents fan-out, instead of hanging off only the single prefix node.",
+      "Made the paging relationship explicit by labeling the suffix-to-page edges 'page moves suffix only' (dashed), reinforcing that only the divergent tail travels while the prefix stays resident.",
+      "Verified faithfulness: all 'Must include' elements present (3 agents sharing ONE CoW prefix, computed once/resident, per-agent divergent suffix, paging moves only suffix, public/shared boundary caveat).",
+      "Verified syntax: init block is the exact required first line; full verbatim classDef block present; all 11 nodes assigned a class; labels containing ( ) + , : are double-quoted; no node id named 'end'; brackets balanced; 11 nodes total (<=14).",
+      "Tightened the caption to a 2-sentence punchline naming the copy-on-write share, suffix-only paging, fleet-scaling saving, and the boundary steward."
+    ]
+  },
+  {
+    "id": "10-compute-tiers",
+    "title": "The 2-D scheduler: {which agent} x {which tier}",
+    "caption": "A 2-D scheduler routes {which agent} x {which tier} across a compute hierarchy that mirrors the memory hierarchy: a tiny CPU/DRAM model handles stewards, pre-flight and vDSO-class adjudication, a small GPU model runs the agentic hot path, and a frontier GPU/HBM model handles only the few hard steps. The same syscall signal that pages memory promotes/demotes agents across model tiers -- the lever is routing each token to the cheapest tier that can do the step.",
+    "altText": "A left-to-right flowchart showing a token-per-watt lever and 2-D scheduler feeding three compute tiers -- tiny CPU/DRAM, small GPU, frontier GPU/HBM -- with promote and demote arrows between them and a syscall signal driving the paging both ways.",
+    "killerNumber": "route each token to the cheapest tier that can do the step",
+    "faithful": true,
+    "syntaxOk": true,
+    "issuesFound": [
+      "Fixed a faithfulness error in the promote labels: the draft put 'step needs the big model' on the CPU->GPU edge, but the source ties 'needs the big model' to reaching the frontier step. Relabeled CPU->GPU as 'promote back to GPU' and GPU->FRONTIER as 'promote: step needs the big model'.",
+      "Corrected the class mapping: the draft assigned both lever and sched to the note class. Kept the lever (the headline killer number) as note, and remapped sched (the scheduler/kernel concept) to the kernel class so the role->class mapping is meaningful.",
+      "Quoted the previously bare 'demote' edge label as 'demote to CPU' and tightened the syscall dotted-edge label to 'SAME signal pages both ways' for clarity and safe parsing.",
+      "Tightened the CPU node label onto fewer lines (merged 'no HBM tier' into the header line) and reworded the syscall diamond to 'blocked on a slow tool call?'.",
+      "Verified all labels containing ()/:,{} are double-quoted, no node id named 'end', the init first line and full classDef block are verbatim, every node has a class, and node count is 6 (<=14)."
+    ]
+  },
+  {
+    "id": "11-stewards",
+    "title": "10x stewards: gardening by cheap single-invariant validators",
+    "caption": "A supervisor tree of stewards: a Meta-steward oversees a population of single-invariant stewards on the cheap CPU/DRAM tier, each watching the Fleet for exactly one invariant. Every steward is fail-to-abstain -- it FIRES only with a witness it did not author, otherwise it ABSTAINS -- and firing stewards feed steering back to the Fleet (rebalance a lane, demote a draft class), while the Meta-steward prunes non-firing stewards and proposes new ones.",
+    "altText": "A flowchart showing a Meta-steward at top overseeing three single-invariant stewards on the cheap tier that watch the Fleet, each routing through a witness gate to FIRES-with-witness or ABSTAINS, with firing stewards sending steering arrows back to the Fleet.",
+    "killerNumber": "one steward per invariant, fail-to-abstain",
+    "faithful": true,
+    "syntaxOk": true,
+    "issuesFound": [
+      "Reworked the decision flow: in the draft the abstain/fire diamond read off the Fleet node, which muddled the semantics (the abstain-vs-fire choice belongs to a steward's own evaluation, not the Fleet's output). Now the steward population routes into the witness gate, which branches to FIRES or ABSTAINS, and only FIRES feeds steering back to the Fleet.",
+      "Made the steward->Fleet relationship explicitly 'watches' (dotted) instead of a plain solid arrow, so the watch (observe) link is visually distinct from the steering (act) link feeding back.",
+      "Collapsed the three separate meta->s1/s2/s3 prune arrows into one meta -.-> pop edge (and gave the subgraph 'pop' a cheap class), reducing edge clutter while keeping the prune/propose semantics, with the RSI-hook note moved into the meta label.",
+      "Tightened the meta label to fit and added '(RSI hook)' to make the meta-steward's tie to the recursive-self-improvement loop explicit per the source.",
+      "Assigned a class to every node including the previously unclassed 'pop' subgraph; renamed the diamond id from 'abstain' to 'gate' to avoid confusion and align it with the gate class.",
+      "Verified the killer number 'one steward per invariant / fail-to-abstain' is present as a note-class node, init line is verbatim, and the full classDef block is present verbatim.",
+      "Confirmed all labels containing parentheses, slashes, commas, colons, and apostrophes are wrapped in double quotes; no node id named 'end'; brackets balanced."
+    ]
+  },
+  {
+    "id": "12-rsi",
+    "title": "RSI-first: the keep-or-revert loop",
+    "caption": "RSI-first: the keep-or-revert loop. A candidate is PROPOSEd, APPLYed in an isolated git worktree, VERIFYed by a witness the author didn't write, and MEASUREd; it is KEPT (merged) only when the gate confirms a strictly-measured gain (suite green + truth syscall clean + strictly-higher metric), else REVERTed -- and a streak of non-keeps trips a breaker that ESCALATEs to a human.",
+    "altText": "A left-to-right cycle from PROPOSE through APPLY, VERIFY, MEASURE into a gain-confirmed gate that either KEEPs (merges) back to the start or REVERTs into a breaker that escalates to a human on a non-keep streak, with the keep-rule shown as a headline note.",
+    "killerNumber": "kept only if a witness the author didn't write confirms a measured gain",
+    "faithful": true,
+    "syntaxOk": true,
+    "issuesFound": [
+      "Verified init line matches the required verbatim block exactly (first line).",
+      "Verified the required classDef block is present verbatim and every node is assigned a class.",
+      "Confirmed the full cycle is present and closes: PROPOSE -> APPLY (isolated worktree) -> VERIFY (witness != author) -> MEASURE -> gate{gain confirmed?} -> KEEP (merge) back to PROPOSE, or REVERT.",
+      "Confirmed the non-keep streak path: REVERT -> breaker -> ESCALATE to human (with a 'not yet' return to PROPOSE).",
+      "Confirmed the killer number is surfaced as the headline via the note-class 'rule' node; faithful to source (uses the precise 'strictly-measured gain' wording).",
+      "Checked all labels with special characters (parentheses, !=, +, ?) are wrapped in double quotes; no node id named 'end'; brackets balanced; edge/label syntax valid. Diagram parses as-is.",
+      "No content changes needed for faithfulness; tightened the caption and added alt text. 10 nodes, single LR flow direction."
+    ]
+  },
+  {
+    "id": "13-kpis",
+    "title": "How we know we won (the scorecard)",
+    "caption": "The scorecard: Fused vs a tuned-SGLang baseline, scored across four KPI clusters (Responsiveness, Efficiency, Always-on enablers, Trust) and measured on harness candidates already on disk. The discipline: measure, don't assert.",
+    "altText": "A flowchart with a central \"Fused vs tuned-SGLang baseline\" node branching to four KPI cluster nodes (Responsiveness, Efficiency, Always-on enablers, Trust), each cluster also linking to a harness-candidates node, plus a note reading \"measure, don't assert\".",
+    "killerNumber": "measure, don't assert (fused vs tuned-SGLang baseline)",
+    "faithful": true,
+    "syntaxOk": true,
+    "issuesFound": [
+      "Verified faithfulness: all four clusters and every KPI from the source are present (Responsiveness p50/p99 latency, tool-call round-trip, KV page-in stall p99; Efficiency tokens-per-resolved-task, token-per-watt-per-user, cheap-tier share; Always-on idle-reclaim, KV residency, HBM bytes amortized to suffix, tier-hit distribution; Trust context-pollution, pre-flight catch rung 0-2 vs 3, speculation hit committed vs squashed).",
+      "Confirmed the 'Must include' grouped-scorecard structure: central baseline node branches to the 4 cluster nodes, KPIs listed inside each cluster label via <br/>.",
+      "Verified the killer number 'measure, don't assert (fused vs tuned-SGLang baseline)' is present as a note-class node.",
+      "Checked Mermaid syntax: all labels containing ( ) / , : are wrapped in double quotes; the apostrophe in 'don't' is safely inside a quoted string; no node id is named 'end'; brackets balanced; double-bracket subroutine shape on harness is valid.",
+      "Confirmed style compliance: first line is exactly the required init block, the full classDef block is present verbatim, role->class mapping respected (base=kernel, clusters=gate, harness=world, killer=note), and every one of the 7 nodes is assigned a class.",
+      "Clarity OK: 7 nodes (<=14), single top-down flow direction, dashed edges link clusters to the harness, solid line attaches the killer note. No content changes were required; the draft was faithful and parseable as submitted."
+    ]
+  },
+  {
+    "id": "14-economics",
+    "title": "The honest numbers: real vs oversold",
+    "caption": "The honest economics of the fused agent kernel: the left column is real and measured -- ~1000x off tool-call overhead, 100-10,000x on vDSO-class cached calls, ns-to-us in-process DOS adjudication, 40-80% context-token savings via headroom, and a ~53:1 input:output ratio proving the cost center is re-sent context, not generation. The right column is honest about what is gated: only ~2-2.5x token-per-watt vs a TUNED baseline, always-on density HBM-bound to ~10-40 sessions/GPU, and a headline token-per-watt KPI you cannot even measure until nvml/RAPL is instrumented. Punchline: ~1000x on overhead is real; '100x always-on' is HBM-gated.",
+    "altText": "A two-column flowchart contrasting real, measured kernel wins (1000x overhead collapse, 100-10,000x vDSO, ns-us adjudication, 40-80% headroom, 53:1 context ratio) against gated or oversold claims (2x not 100x vs a tuned baseline, 10-40 sessions/GPU HBM limit, token-per-watt unmeasurable today), with a build-order note and a killer-number node.",
+    "killerNumber": "~1000x on overhead is real; '100x always-on' is HBM-gated",
+    "faithful": true,
+    "syntaxOk": true,
+    "issuesFound": [
+      "Verified all required numbers are present and faithful: overhead ~1000x [med-high], vDSO 100-10,000x [high], DOS adjudication 38ns-160us in-process [measured], headroom 40-80% at ~17ms, the ~53:1 (150,168 in : 2,817 out) ~98% re-sent ratio; and the gated side: ~2-2.5x vs TUNED baseline (5-15x vs naive), HBM-bound ~10-40 sessions/GPU, token-per-watt unmeasurable today (instrument nvml/RAPL first).",
+      "Confirmed the killer number appears verbatim as a note-class node (KILLER): '~1000x on overhead is REAL; 100x always-on is HBM-GATED'.",
+      "Confirmed the build-order note (ORDER) lists all five steps in order: watts first, resident-KV + tool-wait batching, vDSO + pre-flight, headroom as admit gate, speculation last.",
+      "Syntax: every label containing parens/brackets/braces/slashes/colons/commas/percent signs is wrapped in double quotes (r3,r4,g1,g2,g3,ORDER,KILLER), so the rhombus and cylinder shapes parse cleanly.",
+      "Syntax: no node id named 'end'; all 10 nodes carry an explicit class; subgraph and dotted-edge syntax is well-formed; brackets balanced.",
+      "Style: first line is the exact required init block; the exact 10-line classDef block is present verbatim; role->class mapping respected (pass/gate/mem/frontier/note).",
+      "Clarity: 10 nodes (<=14 limit), single LR flow into a shared KILLER note then the ORDER note; tightened the caption to plain English with the punchline named. No structural changes were needed beyond verification and caption polish."
+    ]
+  },
+  {
+    "id": "15-net-gain-frontier",
+    "title": "The net-gain frontier: when the build repays",
+    "caption": "The net-gain frontier for the dual-path inline / fused build (one-time ~$200k). Each plotted point is a break-even run count from inline_tool_roi.py ($ saved/run = N*miss*P/3000), so the frontier is the hyperbola N*miss*P = const -- an anti-diagonal in this log-log map. You must clear it on the PRODUCT: pressure alone (N=1 on a cold 128k context -> 23,438 runs) never lands, scale alone (N=1k but warm-KV / 8k context -> 7,500 runs) never lands, only fleet scale x re-prefill pressure together reaches NET GAIN (N>=1k with cold long context -> 2-23 runs). Inline / fusion is a scale optimization, exactly as the analysis predicts.",
+    "altText": "A quadrant chart of the net-gain frontier for the inline/fused build: x-axis is fleet scale (N=1 to 10k), y-axis is re-prefill pressure (miss-rate times context). Top-right is green NET GAIN (repays in 2-25 runs), bottom-left is red NET LOSS (never repays), and the two off-diagonal quadrants are gold transition bands (scale-limited and pressure-limited). Six operating points carry break-even run counts from 23,438 (N=1) down to 2 (N=10k, or N=1k on a 512k context).",
+    "killerNumber": "N=1 never repays (23,438 runs); N=10k repays in 2 -- only with cold-KV pressure",
+    "faithful": true,
+    "syntaxOk": true,
+    "issuesFound": [
+      "Added after the original 14-figure batch to cover the newest analysis (inline_tool_roi.py, 18:23). This is the deck's first quadrantChart, not a flowchart -- so it cannot carry the shared classDef vocabulary; the deck palette is preserved instead via quadrant fills (quadrant1 = pass-green for NET GAIN, quadrant3 = deny-red for NET LOSS, quadrant2/4 = gate-gold for the frontier band) and the kernel-blue point fill, all set in the init themeVariables block.",
+      "Faithfulness: every plotted break-even count is recomputed from inline_tool_roi.py (BUILD_COST=$200k; saved/run = N*K*miss*P/rho_pre/3600*gpus*price = N*miss*P/3000 at the script's constants) -- N=1 -> 23,438; N=100 -> 234; N=1k -> 23; N=10k -> 2 (all at miss=20%, P=128k, matching the script's fleet-scaling and break-even tables). The two vertical-sweep points re-derive the same way: N=1k warm-KV (P=8k, miss=1%) -> 7,500; N=1k 512k-ctx (miss=50%) -> 2.",
+      "Design: a horizontal sweep (vary N at fixed pressure) crosses a vertical sweep (vary pressure at fixed N=1k) so the figure shows BOTH axes are necessary -- the frontier is the product N*miss*P, not either factor alone (the one point the thesis and the COUNTER agree on).",
+      "Syntax: renders cleanly under mermaid-cli 11.15.0; replaced an HTML-escaping '<=25' with the plain range '2-25 runs', shortened the title so it no longer clips the chart box, and tightened the two off-diagonal quadrant labels so centered text stays inside its quadrant. PNG visually inspected at 2x.",
+      "Scope honesty: the gold quadrants are a marginal / transition band, not strict loss -- e.g. N=100 (234 runs) does eventually repay; the caption frames clearing the frontier as a product condition, not a hard pass/fail line."
+    ]
+  },
+  {
+    "id": "26-claims-vs-reality",
+    "title": "What survived contact with data",
+    "caption": "The 2026-06-16/17 empirical audit of the cluster's top-5 load-bearing claims, each prototyped + tested against real telemetry and fresh microbenchmarks and adversarially verified. KV-density gate CONFIRMED (reproduces from real HF GQA math). Fusion multiplier REFINED DOWN to ~10x vs Go-spawn / ~130x vs Python-spawn (the claimed ~100x/~2500x priced the fused side at a 5ns floor the real hook never hits). Cross-agent dedup REFINED DOWN to 1.105x (sharing is 1.8% of keys; prefix caching already harvests ~94%). I:O ratio MEASURED HIGHER at 239:1 (median session 382:1) than the cited 53:1. Speculation hit-rate REFINED DOWN to ~29% side-effect-safe yield. Net: the qualitative direction of all 5 held, but 4/5 magnitudes were overstated and I:O understated; 0/29 claims scored NOVEL, so the IP is the assembly of known parts.",
+    "altText": "A five-row flowchart, one row per claim, each showing the claim then its claimed value then its measured value and verdict: KV-density confirmed (green), fusion multiplier / dedup / speculation refined down (red), I:O ratio measured higher (blue), with a net summary note that all directions held but most magnitudes were overstated and 0/29 claims were novel.",
+    "killerNumber": "5/5 directions held, 4/5 magnitudes overstated, 0/29 NOVEL",
+    "faithful": true,
+    "syntaxOk": true,
+    "issuesFound": [
+      "Every number traces to fleet-cluster-empirical-findings: KV-density 8B@50K=10 / 3B@50K=43; fusion ~100x/~2500x claimed vs ~10x/~130x measured; dedup 'approaches N' claimed vs 1.105x measured (1.8% of keys); I:O cited 53:1 vs measured 239:1 (median 382:1); speculation raw 49% vs safe yield ~29%; 0/29 claims NOVEL.",
+      "Color encodes verdict: KV-density pass (green, confirmed), I:O kernel (blue, measured higher not worse), the three refined-down claims deny (red). Claim labels untrusted (amber), claimed values gate (gold).",
+      "Renders cleanly under mermaid-cli 11.15.0; PNG visually inspected at 2x. Disconnected three-node chains stack vertically as intended."
+    ]
+  },
+  {
+    "id": "27-sound-not-complete-not-precise",
+    "title": "Sound, not complete, not precise",
+    "caption": "The context-MMU 'uninjectable context' write-time admission gate (the repo's flagship security benchmark), run on our own session transcript. It is SOUND (0 trigger-bytes leaked after quarantine, independently re-derived) but neither COMPLETE (42 obfuscated payloads -> approximately 100% allowed; 24/24 agent red-team + 16/18 canonical battery) nor PRECISE (on our own context 4/4 quarantines were false positives -- it held mmu.go, ctxmmu_test.go, and poison.json out of context, the gate reading its own source). Root cause: detection is regex (secrets) + ASCII substring (markers) with no NFKC normalization, no decode, no provenance, no semantics -- a T1-class classifier. Cheap fix: normalize + strip zero-width before match, decode-and-rescan high-entropy blobs, and gate quarantine on untrusted egress rather than trusted local file reads.",
+    "altText": "A flowchart from the ctxmmu.Admit gate branching into three property nodes -- soundness (green, holds, zero leak), completeness (red, fails, approximately 100% evaded), precision (red, fails, 4/4 false positives) -- the two failures pointing to a root-cause note (regex plus substring, a T1 classifier) which points to a gold fix node.",
+    "killerNumber": "sound (0 leak) but ~100% evaded + 4/4 false positives",
+    "faithful": true,
+    "syntaxOk": true,
+    "issuesFound": [
+      "Numbers traced to a private transcript-derived benchmark: 0-leak soundness; approximately 100% evasion across 42 payloads; 4/4 false-positive census. The fix list follows the private report's recommendations.",
+      "Color: gate kernel-blue, soundness pass-green, the two failure modes deny-red, root-cause note-grey, fix gold (an actionable decision). Distinguishes 'architecture sound' from 'detection bound'.",
+      "Renders cleanly under mermaid-cli 11.15.0; PNG visually inspected at 2x."
+    ]
+  },
+  {
+    "id": "28-evasion-battery",
+    "title": "The evasion battery",
+    "caption": "An xychart of the adversarial evasion run against ctxmmu.Admit. Across 42 obfuscated payloads (24 from an independent agent red-team, 18 canonical) every SOTA-cited obfuscation family -- character spacing, base64/hex encoding, Unicode homoglyph/fullwidth, zero-width/bidi, pure paraphrase, cross-result split, and secret-format variants -- walked straight into context at approximately 100%; only the verbatim controls were caught. The green reference line marks the 5%-evasion 'failing grade' floor that every obfuscation bar towers over, matching the COMPARE doc's cited 'evadable up to 100%' for a T1 detector.",
+    "altText": "A bar chart with seven obfuscation-family bars all at 100% evaded and a single control bar at 0%, with a green horizontal reference line near 5% marking the security failing-grade floor that every obfuscation bar towers over.",
+    "killerNumber": "~100% of 42 obfuscated payloads evaded the gate",
+    "faithful": true,
+    "syntaxOk": true,
+    "issuesFound": [
+      "Bar heights reflect the report's per-family verdicts (sec 5 table + sec 8c): every obfuscation family EVADED, controls caught. Aggregate approximately 100% over 42 payloads is the combined headline (sec 8c).",
+      "The reference line was corrected from 95 to 5: on an evasion-rate y-axis the security 'failing grade' is <5% evasion (you need >95% catch), so 5 is the meaningful floor every bar exceeds. Title shortened so it no longer clips the chart box.",
+      "Minor: long x-axis category labels abut slightly (mermaid xychart-beta limitation, same as figs 17/19); labels remain readable. Renders cleanly under mermaid-cli 11.15.0; PNG visually inspected at 2x."
+    ]
+  },
+  {
+    "id": "29-session-core-dump",
+    "title": "A finished session is a core dump",
+    "caption": "The recall leaf's persist/reload path. Because the context-MMU already pages tool results to a content-addressed store at write time, recall.Recorder.Persist writes a core image: manifest.json (the page table -- roles, digests, a real extractive descriptor, and the quarantine state) plus cas.json (the swap device of content-addressed bytes). recall.Load(dir) rebuilds a Session with its OWN CAS and a FRESH ctxmmu gate, verifying every blob against its digest so a tampered device fails closed. The load-bearing property: the quarantine seal outlives the process boundary -- a page sealed before the boundary stays sealed after it. recall makes the gate's decision durable and re-screenable; it does not change the decision.",
+    "altText": "A left-to-right flow: a live session streams results into the ctxmmu gate, which pages them to a core image (manifest.json page table plus cas.json swap device) inside a subgraph; a process-boundary node marks the session ending as a core dump; recall.Load rebuilds a fresh self-contained Session; a note states the seal outlives the process.",
+    "killerNumber": "the quarantine seal outlives the process boundary",
+    "faithful": true,
+    "syntaxOk": true,
+    "issuesFound": [
+      "Faithful to RECALL-RESULTS.md and the fak-recall-leaf-shipped memory: Persist writes manifest.json + cas.json; Load rebuilds with its own CAS + a fresh gate and integrity-checks Digest(b)==key (tamper fails closed); the seal survives persist->reload.",
+      "Honest framing carried in the note: recall makes the decision durable + re-screenable, it does NOT improve the decision (it inherits ctxmmu's evadable detector).",
+      "Color: live session untrusted (amber), gate + load kernel-blue, the two on-disk artifacts mem-violet (a memory tier / side store), boundary deny-red, rebuilt session pass-green. Renders cleanly under mermaid-cli 11.15.0; PNG visually inspected at 2x."
+    ]
+  },
+  {
+    "id": "30-readmit-ladder",
+    "title": "The re-admit ladder (clearance does not launder poison)",
+    "caption": "The Resolve ladder in a reloaded recall Session. Rung 0: a benign page re-outputs byte-identical at zero model tokens. Rung 2: Recall(query,k) demand-pages a top-k working set, and quarantined pages are never candidates. Rung 4 -- the moat: a quarantined page is REFUSED unless a witness Clear() ran AND the bytes pass a fresh ctxmmu.Admit re-screen; if no witness it is sealed, and if cleared-but-still-flagged it is refused with 'clearance does not launder poison'. Only a genuinely-benign cleared page is released. Clearance is necessary-but-not-sufficient, and the re-screen is the precise lever a tightened pattern set pulls to re-catch an evasion that looked benign at write time. A 5-skeptic default-REFUTED panel confirmed the moat 5/5.",
+    "altText": "A top-down decision tree: Resolve branches by benign-or-quarantined; benign rung-0 and Recall rung-2 lead to green release paths; the quarantined rung-4 moat asks whether a witness Clear ran (no -> refused), then whether a fresh re-screen passes (no -> refused 'clearance does not launder poison', yes -> released), with a note that clearance is necessary but not sufficient.",
+    "killerNumber": "clearance does not launder poison (5/5 confirmed)",
+    "faithful": true,
+    "syntaxOk": true,
+    "issuesFound": [
+      "Faithful to RECALL-RESULTS.md: the two refusal messages are the report's verbatim strings; rungs 0/2/4 match the shipped Resolve ladder; quarantined pages excluded from Recall candidates; 5/5 default-REFUTED skeptics confirmed.",
+      "Color: query untrusted (amber), the three decision diamonds gate-gold, the release/byte-identical/working-set outcomes pass-green, the two refusals deny-red, the necessary-not-sufficient explainer note-grey.",
+      "Renders cleanly under mermaid-cli 11.15.0; PNG visually inspected at 2x; all labels with parentheses/slashes are quoted."
+    ]
+  },
+  {
+    "id": "31-machine-facts",
+    "title": "Machine facts from the transcripts",
+    "caption": "A dashboard of the headline facts from the session-transcript audit, all from the exact message.usage token records (the only place exact counts live). Context economics: I:O ratio 239:1 machine-wide (median session 382:1) vs the cluster's cited 53:1, so tool-call time approximately equals context-ingestion time; and approximately 94% of ingested context is cache-read (intra-session prompt-cache reuse), so the KV-reuse win is largely already harvested. Coverage and provenance: the true log floor is 2026-05-13 (about 34 days; no pre-2026 / 8-month data exists anywhere), and subagents write separate transcripts so top-level sessions undercount real work by about 32%. One-month trend: Opus 4.7->4.8 migrated at the W22/W23 boundary (early June) with Fable-5 entering W24, and amid about 7x volume growth the cache-hit rate eroded 96.7% to 92.6%.",
+    "altText": "A dashboard flowchart with a source node (exact token counts from message.usage) feeding three labeled groups: context economics (I:O 239:1, ~94% cache-read), coverage and provenance (log floor 2026-05-13, subagents undercount ~32%), and one-month trend (Opus 4.7->4.8 migration, ~7x growth with cache-hit eroding 96.7%->92.6%).",
+    "killerNumber": "I:O 239:1, ~94% cache-read, log floor 2026-05-13",
+    "faithful": true,
+    "syntaxOk": true,
+    "issuesFound": [
+      "Every figure traces to session-transcript-audit-method and fleet-cluster-empirical-findings: I:O 239:1 (median 382:1) vs cited 53:1; ~94% cache-read; log floor 2026-05-13 (~34 days, no 8-month data); subagents undercount ~32%; Opus 4.7->4.8 at W22/W23; ~7x growth; cache-hit 96.7%->92.6%.",
+      "Color: source kernel-blue, context-economics mem-violet (a memory/KV story), coverage/provenance cheap-slate (bookkeeping), the trend note-grey. Three subgraphs group the facts by theme.",
+      "Renders cleanly under mermaid-cli 11.15.0; PNG visually inspected at 2x."
+    ]
+  }
+]

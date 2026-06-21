@@ -1,0 +1,57 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  launchd keep-alive for the DOS dispatch supervisor (issue #566) — the macOS
+  analogue of the Windows Scheduled Task registered by
+  register_dos_dispatch_watchdog.ps1. It runs tools/fleet_dos_dispatch_watchdog.py
+  every 5 minutes; that watchdog respawns the `dos loop` supervisor (enact mode)
+  iff one is not already alive (and only when FAK_DISPATCH_ENABLE=1, below).
+
+  This is a TEMPLATE: replace the three __PLACEHOLDER__ tokens with absolute
+  paths for your node, then install it as a per-user agent:
+
+      sed -e "s#__PYTHON__#$(command -v python3)#" \
+          -e "s#__REPO__#$(cd "$(dirname "$0")/.." && pwd)#" \
+          tools/com.fleet.dispatch-supervisor.plist \
+        > ~/Library/LaunchAgents/com.fleet.dispatch-supervisor.plist
+      launchctl load -w ~/Library/LaunchAgents/com.fleet.dispatch-supervisor.plist
+
+  Prefer cron? `FAK_DISPATCH_ENABLE=1 ./tools/register_mac_watchers.sh` arms the
+  same watchdog from the user crontab instead.
+-->
+<plist version="1.0">
+  <dict>
+    <key>Label</key>
+    <string>com.fleet.dispatch-supervisor</string>
+
+    <key>ProgramArguments</key>
+    <array>
+      <string>__PYTHON__</string>
+      <string>__REPO__/tools/fleet_dos_dispatch_watchdog.py</string>
+      <string>--workspace</string>
+      <string>__REPO__</string>
+      <string>--live</string>
+    </array>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+      <key>FAK_DISPATCH_ENABLE</key>
+      <string>1</string>
+      <key>DISPATCH_WORKSPACE</key>
+      <string>__REPO__</string>
+    </dict>
+
+    <key>WorkingDirectory</key>
+    <string>__REPO__</string>
+
+    <key>StartInterval</key>
+    <integer>300</integer>
+
+    <key>RunAtLoad</key>
+    <true/>
+
+    <key>StandardOutPath</key>
+    <string>__REPO__/tools/_watchdog/launchd_dispatch.log</string>
+    <key>StandardErrorPath</key>
+    <string>__REPO__/tools/_watchdog/launchd_dispatch.err</string>
+  </dict>
+</plist>

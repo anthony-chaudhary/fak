@@ -1,0 +1,40 @@
+%%{init: {'theme':'base','themeVariables':{'fontFamily':'Segoe UI, Helvetica, Arial, sans-serif','fontSize':'14px','lineColor':'#5B6B7B','primaryColor':'#DCE9FB','primaryTextColor':'#1B3A66','primaryBorderColor':'#3B6FB5','clusterBkg':'#F7F9FB','clusterBorder':'#AFC0CE'}}}%%
+flowchart LR
+  rule["KEEP-RULE: kept only if a witness<br/>the author didn't write confirms<br/>a strictly-measured gain"]
+  propose(["PROPOSE candidate"])
+  apply["APPLY<br/>(isolated git worktree)"]
+  verify["VERIFY<br/>(witness != author)"]
+  measure["MEASURE<br/>(kernel metric)"]
+  gate{"gain confirmed?<br/>suite green + truth clean<br/>+ strictly-higher metric"}
+  keep["KEEP (merge)"]
+  revert["REVERT candidate"]
+  breaker{"non-keep<br/>streak?"}
+  escalate[["ESCALATE to human"]]
+
+  rule -.-> propose
+  propose --> apply --> verify --> measure --> gate
+  gate -- yes --> keep
+  gate -- no --> revert
+  keep --> propose
+  revert --> breaker
+  breaker -- "streak trips" --> escalate
+  breaker -- "not yet" --> propose
+
+  classDef untrusted fill:#FFE9D6,stroke:#E8833A,stroke-width:2px,color:#7A3E12;
+  classDef kernel fill:#DCE9FB,stroke:#3B6FB5,stroke-width:2px,color:#1B3A66;
+  classDef gate fill:#FFF3CC,stroke:#C9A227,stroke-width:2px,color:#6B5410;
+  classDef pass fill:#DBF3E1,stroke:#3FA45F,stroke-width:2px,color:#1C5230;
+  classDef deny fill:#FBDDDD,stroke:#C9453F,stroke-width:2px,color:#6E1F1B;
+  classDef mem fill:#EDE7FB,stroke:#7B5BC0,stroke-width:2px,color:#3A2A66;
+  classDef cheap fill:#E8ECEF,stroke:#7A8A99,stroke-width:1.5px,color:#33424F;
+  classDef world fill:#FCEEDB,stroke:#B5792B,stroke-width:2px,color:#5E3D12;
+  classDef frontier fill:#E7D9F5,stroke:#8A53C0,stroke-width:2px,color:#3F2466;
+  classDef note fill:#F7F9FB,stroke:#AFC0CE,stroke-width:1px,color:#46586A;
+
+  class rule note;
+  class propose untrusted;
+  class apply,verify,measure kernel;
+  class gate,breaker gate;
+  class keep pass;
+  class revert deny;
+  class escalate world;

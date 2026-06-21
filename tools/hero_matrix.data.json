@@ -1,0 +1,90 @@
+{
+  "_about": "SOURCE OF TRUTH for the fak CAPABILITY MATRIX (visuals/59-hero-capability-matrix.svg), rendered by tools/hero_matrix_gen.py. fak's analog of the MiniMax-M3 model-comparison table: capabilities grouped by category down the left, the serving stacks across the top, the subject (fak) column washed + highlighted. The thesis is structural and honest: fak carries a value down the WHOLE matrix; the SOTA serving stacks light up only the SERVING REUSE and SINGLE-STREAM rows and carry an honest em-dash everywhere else — because those boundaries are not features they ship, not measured zeros. Competitor cells are COVERAGE marks (covered / not-offered / front-only / leads), never fabricated numbers; only fak's own column carries measured figures, every one tracing to fak/BENCHMARK-AUTHORITY.md by commit. Edit this file, then run `python tools/hero_matrix_gen.py`.",
+  "meta": {
+    "title": "fak — the agent kernel, vs the serving stacks (capability matrix)",
+    "as_of": "2026-06-21",
+    "out_svg": "visuals/59-hero-capability-matrix.svg",
+    "authority": "fak/BENCHMARK-AUTHORITY.md"
+  },
+  "kicker": "CAPABILITY MATRIX · THE AGENT-INFRASTRUCTURE BOUNDARY",
+  "title": "fak spans the whole boundary; the serving stacks span one band of it",
+  "subtitle": "Serving engines win raw throughput and front-prefix reuse — and stop there. fak's cache is addressable — it reaches into the middle of a kept run — so it does that reuse too, then proves it exact and makes the permission gate a syscall. An em-dash means a capability the stack does not ship, not a measured zero.",
+  "columns": [
+    { "key": "fak", "name": "fak", "badge": "f", "subject": true, "type": "addressable" },
+    { "key": "vllm", "name": "vLLM", "badge": "v", "type": "front-prefix" },
+    { "key": "sglang", "name": "SGLang", "badge": "S", "type": "front-prefix" },
+    { "key": "llamacpp", "name": "llama.cpp", "badge": "L", "type": "front-prefix" },
+    { "key": "cache", "name": "API prompt cache", "badge": "@", "type": "front-only" }
+  ],
+  "coverage_label": "COVERAGE",
+  "categories": [
+    {
+      "name": "SERVING REUSE",
+      "note": "the band the SOTA stacks own — fak matches it",
+      "accent": "#3a7d9c",
+      "rows": [
+        { "cap": "Front-prefix KV reuse", "sub": "keep the run from the first token", "commit": "92896a4",
+          "cells": { "fak": ["yes", "✓"], "vllm": ["yes", "✓"], "sglang": ["yes", "✓"], "llamacpp": ["yes", "✓"], "cache": ["yes", "✓"] } },
+        { "cap": "KV-cache hit rate", "sub": "vs the RadixAttention band", "commit": "92896a4",
+          "cells": { "fak": ["num", "86.7%"], "vllm": ["yes", "prefix"], "sglang": ["yes", "radix"], "llamacpp": ["weak", "partial"], "cache": ["weak", "front-only"] } },
+        { "cap": "Fleet shared-prefix serving", "sub": "50-turn × 5-agent run", "commit": "2bbda6f",
+          "cells": { "fak": ["num", "4.1×"], "vllm": ["base", "1×"], "sglang": ["base", "1×"], "llamacpp": ["base", "1×"], "cache": ["no", "—"] } },
+        { "cap": "Live prefill reuse speedup", "sub": "RadixAttention, measured", "commit": "92896a4",
+          "cells": { "fak": ["num", "6.95×"], "vllm": ["yes", "✓"], "sglang": ["yes", "✓"], "llamacpp": ["weak", "front-only"], "cache": ["weak", "front-only"] } }
+      ]
+    },
+    {
+      "name": "CORRECTNESS — THE REUSE IS EXACT",
+      "note": "what no serving engine proves",
+      "accent": "#7a5cb0",
+      "rows": [
+        { "cap": "Mid-run span eviction, bit-exact", "sub": "max|Δ| = 0 vs a clean run", "commit": "0fc39aa",
+          "cells": { "fak": ["num", "max|Δ|=0"], "vllm": ["no", "—"], "sglang": ["no", "—"], "llamacpp": ["no", "—"], "cache": ["no", "—"] } },
+        { "cap": "Greedy decode token parity", "sub": "vs llama.cpp, same Q8 weights", "commit": "34c74f4",
+          "cells": { "fak": ["num", "7/7"], "vllm": ["yes", "✓"], "sglang": ["yes", "✓"], "llamacpp": ["yes", "ref"], "cache": ["na", "n/a"] } },
+        { "cap": "Exact token-reuse accounting", "sub": "reuse, not a numerics shortcut", "commit": "92896a4",
+          "cells": { "fak": ["num", "7.50×"], "vllm": ["no", "—"], "sglang": ["no", "—"], "llamacpp": ["no", "—"], "cache": ["no", "—"] } },
+        { "cap": "Exotic-arch coherence", "sub": "Mamba2 / Gated-DeltaNet in-kernel", "commit": "6a376b8",
+          "cells": { "fak": ["yes", "✓"], "vllm": ["weak", "some"], "sglang": ["weak", "some"], "llamacpp": ["weak", "some"], "cache": ["na", "n/a"] } }
+      ]
+    },
+    {
+      "name": "SECURITY KERNEL — THE BOUNDARY THEY DON'T OWN",
+      "note": "default-deny, in one address space",
+      "accent": "#1c7c92",
+      "rows": [
+        { "cap": "In-kernel permission decide", "sub": "allow / deny, syscall speed", "commit": "bcad56e",
+          "cells": { "fak": ["num", "362 ns"], "vllm": ["no", "—"], "sglang": ["no", "—"], "llamacpp": ["no", "—"], "cache": ["no", "—"] } },
+        { "cap": "Result quarantine / page-out secret", "sub": "scan + quarantine + page-out", "commit": "bcad56e",
+          "cells": { "fak": ["num", "3.3 µs"], "vllm": ["no", "—"], "sglang": ["no", "—"], "llamacpp": ["no", "—"], "cache": ["no", "—"] } },
+        { "cap": "In-process vs spawned-hook gate", "sub": "the cost of NOT owning it", "commit": "bcad56e",
+          "cells": { "fak": ["num", "2,849×"], "vllm": ["no", "—"], "sglang": ["no", "—"], "llamacpp": ["no", "—"], "cache": ["no", "—"] } },
+        { "cap": "Nested prompt-injection containment", "sub": "never reaches the model", "commit": "bcad56e",
+          "cells": { "fak": ["yes", "QUARANTINE"], "vllm": ["no", "—"], "sglang": ["no", "—"], "llamacpp": ["no", "—"], "cache": ["no", "—"] } }
+      ]
+    },
+    {
+      "name": "SINGLE STREAM — WHERE THEY LEAD",
+      "note": "shown, not hidden — fak does not target raw throughput",
+      "accent": "#6a7685",
+      "fence": true,
+      "rows": [
+        { "cap": "Decode throughput (7B Q8)", "sub": "Apple M3 Pro, same weights", "commit": "34c74f4",
+          "cells": { "fak": ["lose", "8.7 tok/s · 0.50×"], "vllm": ["lead", "leads (GPU)"], "sglang": ["lead", "leads (GPU)"], "llamacpp": ["lead", "17.3 tok/s"], "cache": ["na", "n/a"] } },
+        { "cap": "Prefill throughput (7B Q8)", "sub": "single stream, apples-to-apples", "commit": "34c74f4",
+          "cells": { "fak": ["lose", "~0.12× CPU"], "vllm": ["lead", "leads (GPU)"], "sglang": ["lead", "leads (GPU)"], "llamacpp": ["lead", "leads"], "cache": ["na", "n/a"] } }
+      ]
+    }
+  ],
+  "methodology": {
+    "title": "Evaluation methodology",
+    "notes": [
+      "Only the fak column carries measured figures; every one traces to fak/BENCHMARK-AUTHORITY.md by the commit shown at the row's right. Machine: Apple M3 Pro 6P+6E 36 GB, app_version 0.30.0, llama.cpp b9707 on the same box.",
+      "An em-dash (—) marks a capability the stack does not ship — a structural gap, not a measured zero. “n/a” marks a row that does not apply to a hosted API cache.",
+      "Serving reuse: 86.7% KV-hit is reported against SGLang RadixAttention's published 50–99% band; 4.1× fleet serving is fak's own kernel held constant (so it isolates reuse, not kernel speed) — it is a [SOTA-style] result, not a green win. The naive re-prefill comparison (~60×) is deliberately omitted as a strawman.",
+      "Correctness: max|Δ|=0 is the L∞ between an evicted-span run and a clean run that never saw the span (TestBatchedDecodeMatchesSerial / mid-run eviction). Greedy parity is 7/7 exact tokens vs llama.cpp on identical Q8 weights.",
+      "Security kernel: 362 ns decide and 3.3 µs admit are in-process p50; 2,849× is in-process vs process-per-decide adjudication (n=100). The detector that flags injections is ≈100% evadable by design — the floor is the default-deny lock + the quarantine, not the classifier.",
+      "Single stream: fak explicitly does not target raw throughput — llama.cpp/Metal leads decode (17.3 vs 8.7 tok/s) and prefill. These rows invert the highlight on purpose: the SOTA stack owns the bold cell. One chat → use llama.cpp; an agent fleet → use fak."
+    ]
+  }
+}

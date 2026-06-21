@@ -1,0 +1,71 @@
+//go:build darwin && cgo && fakmetal
+
+// q4k.go — Go side of the Metal q4_k dequant-GEMV/GEMM (q4k.m). This is the only resident
+// route that fits a 27B model on the 36 GB unified pool (q4_k_m ≈ 16 GB; f16 ≈ 54 GB does
+// not), and the only path to the llama.cpp-Metal bar: the CPU int8-SDOT kernel is
+// compute-bound at ~23 GB/s and tops out ~1.4 tok/s decode, while the GPU has both the
+// bandwidth and the parallel dequant FLOPs (which is how llama.cpp reaches 7.29/51.55 tok/s).
+// The raw q4_k super-blocks stay resident on the GPU and each thread dequants its weight row
+// on the fly, dotting against the f32 activation.
+
+package metalgemm
+
+/*
+int  mg_q4k_upload(const unsigned char* raw, int out, int in);
+void mg_q4k_gemv(int wid, const float* x, float* y);
+void mg_q4k_gemm(int wid, const float* X, int P, float* Y);
+void mg_q4k_reset(void);
+*/
+import "C"
+
+import "unsafe"
+
+// Q4KWeight is a handle to a raw q4_k weight matrix [Out, In] resident on the GPU. In must be
+// a multiple of 256 (the q4_k super-block size); the resident byte cost is Out*(In/256)*144.
+type Q4KWeight struct {
+	id      C.int
+	Out, In int
+}
+
+// UploadQ4K copies a row-major q4_k payload (the verbatim GGUF super-block bytes, length
+// out*(in/256)*144) resident onto the GPU and returns a handle, or nil if the backend is
+// unavailable, in is not a multiple of 256, or the payload is short / the table is full. The
+// slice is read only during this call (cgo copies it into the device buffer).
+func UploadQ4K(raw []byte, out, in int) *Q4KWeight {
+	if !Available() || in <= 0 || in%256 != 0 || out <= 0 {
+		return nil
+	}
+	if len(raw) < out*(in/256)*144 {
+		return nil
+	}
+	id := C.mg_q4k_upload((*C.uchar)(unsafe.Pointer(&raw[0])), C.int(out), C.int(in))
+	if id < 0 {
+		return nil
+	}
+	return &Q4KWeight{id: id, Out: out, In: in}
+}
+
+// GEMV computes y[Out] = W · x for one f32 activation row x (length In). y must have length
+// >= Out. Both slices are accessed only during the call. This is the decode GEMV.
+func (w *Q4KWeight) GEMV(x, y []float32) {
+	if w == nil || w.id < 0 || len(x) < w.In || len(y) < w.Out {
+		return
+	}
+	C.mg_q4k_gemv(w.id, (*C.float)(unsafe.Pointer(&x[0])), (*C.float)(unsafe.Pointer(&y[0])))
+}
+
+// GEMM computes Y[P, Out] = X[P, In] · Wᵀ (batched prefill GEMM). X and Y are f32 row-major;
+// Y must have length >= P*Out. Both slices are accessed only during the call.
+func (w *Q4KWeight) GEMM(X []float32, P int, Y []float32) {
+	if w == nil || w.id < 0 || P <= 0 || len(X) < P*w.In || len(Y) < P*w.Out {
+		return
+	}
+	C.mg_q4k_gemm(w.id, (*C.float)(unsafe.Pointer(&X[0])), C.int(P), (*C.float)(unsafe.Pointer(&Y[0])))
+}
+
+// ID returns the backend handle for this matrix.
+func (w *Q4KWeight) ID() int { return int(w.id) }
+
+// ResetQ4K releases every resident q4_k weight buffer and the reused scratch (the q4_k twin of
+// Reset). Call only when no Q4KWeight handle is still in use — every prior handle is invalidated.
+func ResetQ4K() { C.mg_q4k_reset() }

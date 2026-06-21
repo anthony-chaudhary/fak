@@ -1,0 +1,205 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="1100" viewBox="0 0 1600 1100" role="img" aria-labelledby="title desc">
+  <title id="title">Calculated agent frontier spectrum</title>
+  <desc id="desc">A data-backed frontier spectrum for agent workloads. The x-axis is total agent-turns on a log scale. The y-axis is shared setup payments per workflow on a log scale. Curves use explicit formulas: naive equals agents times turns, tuned equals agents, and coherent shared reuse equals one legal shared scope. Measured and projected anchors are annotated separately.</desc>
+  <metadata>
+    Curve formulas: N = agents * turns. Naive setup payments = N. Tuned per-agent KV setup payments = agents. Coherent shared-scope setup payments = 1 per legal shared scope, with result/cache residuals called out separately.
+    Curve data rows:
+    1x1 N=1 naive=1 tuned=1 coherent=1.
+    1x25 N=25 naive=25 tuned=1 coherent=1.
+    5x50 N=250 naive=250 tuned=5 coherent=1; session JSON reports A/C wall=60.3x, B/C wall=4.12x, token floor=62.0x.
+    50x50 N=2500 naive=2500 tuned=50 coherent=1; readfleet CSV reports 2344/2500 calls deleted, residual=156.
+    100x250 N=25000 naive=25000 tuned=100 coherent=1; value-sweep CSV reports 22805.7/25000 turns deleted and 736.9s to 32.9s projected parallel wall.
+    1000x1000 N=1000000 naive=1000000 tuned=1000 coherent=1; frontier extrapolation, not measured.
+    10000x10000 N=100000000 naive=100000000 tuned=10000 coherent=1; frontier extrapolation, not measured.
+  </metadata>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#f7fafb"/>
+      <stop offset="46%" stop-color="#eef7f3"/>
+      <stop offset="100%" stop-color="#fff6eb"/>
+    </linearGradient>
+    <filter id="shadow" x="-10%" y="-12%" width="125%" height="135%">
+      <feDropShadow dx="0" dy="8" stdDeviation="11" flood-color="#182430" flood-opacity="0.13"/>
+    </filter>
+    <style>
+      .title { font: 900 47px "Segoe UI", Arial, sans-serif; fill: #15212b; }
+      .subtitle { font: 400 21px "Segoe UI", Arial, sans-serif; fill: #405063; }
+      .axis { stroke: #273746; stroke-width: 2.2; }
+      .grid { stroke: #d8e2e8; stroke-width: 1; }
+      .grid2 { stroke: #e6edf1; stroke-width: 1; stroke-dasharray: 5 7; }
+      .bandLabel { font: 800 14px "Segoe UI", Arial, sans-serif; fill: #273746; }
+      .tick { font: 700 14px "Segoe UI", Arial, sans-serif; fill: #415266; }
+      .axisLabel { font: 800 17px "Segoe UI", Arial, sans-serif; fill: #273746; }
+      .small { font: 400 13px "Segoe UI", Arial, sans-serif; fill: #5f7082; }
+      .legend { font: 800 15px "Segoe UI", Arial, sans-serif; fill: #25313d; }
+      .legendSub { font: 400 13px "Segoe UI", Arial, sans-serif; fill: #607184; }
+      .noteTitle { font: 900 19px "Segoe UI", Arial, sans-serif; fill: #182430; }
+      .note { font: 400 15px "Segoe UI", Arial, sans-serif; fill: #405063; }
+      .noteStrong { font: 800 15px "Segoe UI", Arial, sans-serif; fill: #243240; }
+      .pointLabel { font: 900 15px "Segoe UI", Arial, sans-serif; fill: #17212b; }
+      .pointSub { font: 400 13px "Segoe UI", Arial, sans-serif; fill: #4d5f72; }
+      .formula { font: 800 14px "Consolas", "Cascadia Mono", monospace; fill: #ffffff; }
+      .darkText { font: 700 20px "Segoe UI", Arial, sans-serif; fill: #e8eff5; }
+      .callout { fill: #ffffff; stroke: #d9e3ea; stroke-width: 1.4; }
+      .measured { fill: #e9f7ed; stroke: #7db58f; stroke-width: 1.4; }
+      .projected { fill: #fff2df; stroke: #d3a64d; stroke-width: 1.4; }
+      .frontier { fill: #faedf4; stroke: #c486aa; stroke-width: 1.4; }
+      .naive { stroke: #a76c22; stroke-width: 7; fill: none; stroke-linecap: round; stroke-linejoin: round; }
+      .tuned { stroke: #1f7a94; stroke-width: 7; fill: none; stroke-linecap: round; stroke-linejoin: round; }
+      .kernel { stroke: #2e8b57; stroke-width: 8; fill: none; stroke-linecap: round; stroke-linejoin: round; }
+    </style>
+  </defs>
+
+  <rect width="1600" height="1100" fill="url(#bg)"/>
+  <rect x="36" y="30" width="1528" height="1038" rx="8" fill="#ffffff" opacity="0.68"/>
+
+  <text x="72" y="88" class="title">Agent frontier spectrum, calculated</text>
+  <text x="74" y="124" class="subtitle">Same frontier-lab visual language, but the curves are explicit data: setup payments on a log axis, with measured speedup anchors kept separate.</text>
+
+  <rect x="82" y="156" width="1436" height="710" rx="8" fill="#ffffff" stroke="#d9e3ea"/>
+
+  <!-- regime bands over the log-scaled x-axis -->
+  <rect x="160" y="205" width="206" height="585" fill="#eef2f5" opacity="0.75"/>
+  <rect x="366" y="205" width="148" height="585" fill="#e8f4f6" opacity="0.76"/>
+  <rect x="514" y="205" width="295" height="585" fill="#e9f6ee" opacity="0.76"/>
+  <rect x="809" y="205" width="236" height="585" fill="#fff1dd" opacity="0.76"/>
+  <rect x="1045" y="205" width="295" height="585" fill="#faedf4" opacity="0.76"/>
+
+  <text x="180" y="231" class="bandLabel">single / solo</text>
+  <text x="386" y="231" class="bandLabel">long session</text>
+  <text x="542" y="231" class="bandLabel">fleet sharing</text>
+  <text x="835" y="231" class="bandLabel">planning range</text>
+  <text x="1080" y="231" class="bandLabel">agent city</text>
+
+  <!-- grid: x ticks are 1, 100, 10k, 1M, 100M -->
+  <line x1="160" y1="205" x2="160" y2="790" class="grid"/>
+  <line x1="455" y1="205" x2="455" y2="790" class="grid"/>
+  <line x1="750" y1="205" x2="750" y2="790" class="grid"/>
+  <line x1="1045" y1="205" x2="1045" y2="790" class="grid"/>
+  <line x1="1340" y1="205" x2="1340" y2="790" class="grid"/>
+
+  <!-- grid: y ticks are 1, 10, 100, 1k, 10k, 1M, 100M -->
+  <line x1="160" y1="790" x2="1340" y2="790" class="grid"/>
+  <line x1="160" y1="719" x2="1340" y2="719" class="grid2"/>
+  <line x1="160" y1="648" x2="1340" y2="648" class="grid"/>
+  <line x1="160" y1="576" x2="1340" y2="576" class="grid2"/>
+  <line x1="160" y1="505" x2="1340" y2="505" class="grid"/>
+  <line x1="160" y1="363" x2="1340" y2="363" class="grid2"/>
+  <line x1="160" y1="220" x2="1340" y2="220" class="grid"/>
+
+  <!-- axes -->
+  <line x1="160" y1="805" x2="1340" y2="805" class="axis"/>
+  <line x1="160" y1="205" x2="160" y2="805" class="axis"/>
+  <path d="M1340 805 L1324 796 L1324 814 Z" fill="#273746"/>
+  <path d="M160 205 L151 221 L169 221 Z" fill="#273746"/>
+
+  <text x="498" y="845" class="axisLabel">total agent-turns per workflow / power user (log scale)</text>
+  <text x="26" y="565" class="axisLabel" transform="rotate(-90 26 565)">shared setup payments per workflow (log scale, lower is better)</text>
+
+  <text x="154" y="830" class="tick">1</text>
+  <text x="439" y="830" class="tick">100</text>
+  <text x="728" y="830" class="tick">10k</text>
+  <text x="1025" y="830" class="tick">1M</text>
+  <text x="1308" y="830" class="tick">100M</text>
+
+  <text x="124" y="795" class="tick">1</text>
+  <text x="115" y="724" class="tick">10</text>
+  <text x="106" y="653" class="tick">100</text>
+  <text x="98" y="581" class="tick">1k</text>
+  <text x="90" y="510" class="tick">10k</text>
+  <text x="82" y="368" class="tick">1M</text>
+  <text x="70" y="225" class="tick">100M</text>
+
+  <!-- calculated curves -->
+  <polyline class="naive" points="160,790 366,690 514,619 661,548 809,477 1045,363 1340,220"/>
+  <polyline class="tuned" points="160,790 366,790 514,740 661,669 809,648 1045,576 1340,505"/>
+  <polyline class="kernel" points="160,790 366,790 514,790 661,790 809,790 1045,790 1340,790"/>
+
+  <!-- point markers at the shared x rows -->
+  <g>
+    <circle cx="160" cy="790" r="7" fill="#6a7685" stroke="#ffffff" stroke-width="3"/>
+    <circle cx="366" cy="690" r="7" fill="#a76c22" stroke="#ffffff" stroke-width="3"/>
+    <circle cx="514" cy="619" r="9" fill="#a76c22" stroke="#ffffff" stroke-width="3"/>
+    <circle cx="514" cy="740" r="8" fill="#1f7a94" stroke="#ffffff" stroke-width="3"/>
+    <circle cx="514" cy="790" r="8" fill="#2e8b57" stroke="#ffffff" stroke-width="3"/>
+    <circle cx="661" cy="548" r="9" fill="#a76c22" stroke="#ffffff" stroke-width="3"/>
+    <circle cx="661" cy="669" r="8" fill="#1f7a94" stroke="#ffffff" stroke-width="3"/>
+    <circle cx="661" cy="790" r="8" fill="#2e8b57" stroke="#ffffff" stroke-width="3"/>
+    <circle cx="809" cy="477" r="9" fill="#a76c22" stroke="#ffffff" stroke-width="3"/>
+    <circle cx="809" cy="648" r="8" fill="#1f7a94" stroke="#ffffff" stroke-width="3"/>
+    <circle cx="809" cy="790" r="8" fill="#2e8b57" stroke="#ffffff" stroke-width="3"/>
+    <circle cx="1340" cy="220" r="10" fill="#a76c22" stroke="#ffffff" stroke-width="3"/>
+    <circle cx="1340" cy="505" r="9" fill="#1f7a94" stroke="#ffffff" stroke-width="3"/>
+    <circle cx="1340" cy="790" r="9" fill="#2e8b57" stroke="#ffffff" stroke-width="3"/>
+  </g>
+
+  <!-- saturation boundary annotation -->
+  <line x1="1045" y1="242" x2="1045" y2="790" stroke="#9b4d77" stroke-width="4" stroke-dasharray="9 8" opacity="0.72"/>
+  <text x="1064" y="420" class="pointLabel" fill="#9b4d77">saturation zone starts here</text>
+  <text x="1064" y="441" class="pointSub">KV residency, invalidation, queues, approvals, audit metadata</text>
+
+  <!-- callouts -->
+  <g filter="url(#shadow)">
+    <rect x="238" y="258" width="350" height="112" rx="8" class="callout"/>
+    <text x="260" y="288" class="pointLabel">What the curves actually mean</text>
+    <text x="260" y="315" class="pointSub">N = agents x turns. This chart counts</text>
+    <text x="260" y="335" class="pointSub">how many times shared setup is paid.</text>
+    <text x="260" y="355" class="pointSub">Full speedup is lower because decode and</text>
+    <text x="260" y="375" class="pointSub">private context still remain real work.</text>
+  </g>
+
+  <g filter="url(#shadow)">
+    <rect x="556" y="404" width="334" height="112" rx="8" class="measured"/>
+    <text x="578" y="434" class="pointLabel">measured session anchor</text>
+    <text x="578" y="461" class="pointSub">5 agents x 50 turns = 250 agent-turns</text>
+    <text x="578" y="481" class="pointSub">setup curve: 250 -> 5 -> 1 payments</text>
+    <text x="578" y="501" class="pointSub">wall: 60.3x vs naive, 4.12x vs tuned</text>
+  </g>
+  <line x1="556" y1="506" x2="514" y2="619" stroke="#7db58f" stroke-width="2" stroke-dasharray="4 5"/>
+
+  <g filter="url(#shadow)">
+    <rect x="656" y="255" width="332" height="106" rx="8" class="measured"/>
+    <text x="678" y="285" class="pointLabel">measured read-fleet anchor</text>
+    <text x="678" y="312" class="pointSub">50 agents x 50 turns = 2,500 calls</text>
+    <text x="678" y="332" class="pointSub">2,344 deleted, 156 residual calls</text>
+    <text x="678" y="352" class="pointSub">93.8% of duplicate reads removed</text>
+  </g>
+  <line x1="725" y1="361" x2="661" y2="548" stroke="#7db58f" stroke-width="2" stroke-dasharray="4 5"/>
+
+  <g filter="url(#shadow)">
+    <rect x="838" y="535" width="370" height="110" rx="8" class="projected"/>
+    <text x="860" y="565" class="pointLabel">value-sweep planning anchor</text>
+    <text x="860" y="592" class="pointSub">100 agents x 250 turns = 25,000 calls</text>
+    <text x="860" y="612" class="pointSub">22,806 deleted; 2,194 residual calls</text>
+    <text x="860" y="632" class="pointSub">parallel wall: 736.9s -> 32.9s (22.4x)</text>
+  </g>
+  <line x1="838" y1="641" x2="809" y2="477" stroke="#d3a64d" stroke-width="2" stroke-dasharray="4 5"/>
+
+  <g filter="url(#shadow)">
+    <rect x="1042" y="260" width="372" height="124" rx="8" class="frontier"/>
+    <text x="1064" y="290" class="pointLabel">frontier design target</text>
+    <text x="1064" y="317" class="pointSub">10,000 agents x 10,000 turns = 100M</text>
+    <text x="1064" y="337" class="pointSub">setup math: 100M -> 10k -> 1</text>
+    <text x="1064" y="357" class="pointSub">the open problem is legality: scope, taint,</text>
+    <text x="1064" y="377" class="pointSub">freshness, witnesses, and invalidation</text>
+  </g>
+
+  <!-- bottom explanatory panels -->
+  <rect x="72" y="895" width="815" height="126" rx="8" fill="#17202a"/>
+  <text x="100" y="930" class="formula">naive = A*T     tuned = A     coherent = 1 legal shared scope</text>
+  <text x="100" y="965" class="darkText">The frontier is not raw token speed. It is deleting repeated setup</text>
+  <text x="100" y="995" class="darkText">without deleting the proof that reuse is still allowed.</text>
+
+  <rect x="925" y="895" width="593" height="126" rx="8" fill="#ffffff" stroke="#d9e3ea"/>
+  <line x1="958" y1="927" x2="1020" y2="927" stroke="#a76c22" stroke-width="7" stroke-linecap="round"/>
+  <text x="1036" y="933" class="legend">naive stateless loop</text>
+  <text x="1232" y="933" class="legendSub">pays setup every turn</text>
+  <line x1="958" y1="964" x2="1020" y2="964" stroke="#1f7a94" stroke-width="7" stroke-linecap="round"/>
+  <text x="1036" y="970" class="legend">tuned per-agent KV</text>
+  <text x="1232" y="970" class="legendSub">pays once per agent</text>
+  <line x1="958" y1="1001" x2="1020" y2="1001" stroke="#2e8b57" stroke-width="8" stroke-linecap="round"/>
+  <text x="1036" y="1007" class="legend">coherent kernel reuse</text>
+  <text x="1232" y="1007" class="legendSub">pays once per legal scope</text>
+
+  <text x="72" y="1054" class="small">Measured anchors come from fak/experiments/session/headline-qwen-50x5.json, fak/experiments/fleet/readfleet-50x50.csv, and fak/experiments/value-sweep/value-sweep.csv. Frontier points are workload targets, not shipped benchmark claims.</text>
+</svg>

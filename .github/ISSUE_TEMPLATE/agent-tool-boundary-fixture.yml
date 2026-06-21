@@ -1,0 +1,81 @@
+name: Agent-tool boundary fixture
+description: Propose a scrubbed trace or failure mode for allow/deny/quarantine replay.
+title: "[fixture] "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Use this for a scrubbed or synthetic agent-tool trace that could become a
+        `fak` replay fixture.
+
+        Do not include secrets, proprietary data, credentials, customer records,
+        private prompts, access tokens, API keys, or classified/sensitive material.
+        If the real trace is sensitive, describe a synthetic equivalent.
+  - type: textarea
+    id: boundary-question
+    attributes:
+      label: Boundary question
+      description: What allow, deny, quarantine, or audit decision should the fixture prove?
+      placeholder: "Example: a support agent may read account status but must not call refund_payment directly."
+    validations:
+      required: true
+  - type: dropdown
+    id: fixture-kind
+    attributes:
+      label: Fixture kind
+      options:
+        - Policy deny
+        - Benign allow
+        - Tool-result quarantine
+        - Audit / self-report distrust
+        - Metadata preservation across host boundary
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: host-shape
+    attributes:
+      label: Host or tool shape
+      description: Which host, protocol, tool schema, or runtime shape should this resemble?
+      placeholder: "Example: MCP server with read_customer_record, refund_payment, and create_support_ticket tools."
+    validations:
+      required: true
+  - type: textarea
+    id: scrubbed-trace
+    attributes:
+      label: Scrubbed trace or synthetic equivalent
+      description: Include only non-sensitive tool names, argument shapes, and result shapes.
+      render: text
+      placeholder: |
+        1. read_customer_record {"customer_id":"synthetic_customer_001"} -> trusted record
+        2. fetch_refund_policy {} -> untrusted text containing a synthetic injection
+        3. refund_payment {"customer_id":"synthetic_customer_001"} -> should be denied
+    validations:
+      required: true
+  - type: textarea
+    id: expected-verdicts
+    attributes:
+      label: Expected verdicts
+      description: What should be allowed, denied, quarantined, or surfaced for audit?
+      placeholder: "refund_payment DENY/POLICY_BLOCK; search_kb ALLOW; injected policy result QUARANTINE."
+    validations:
+      required: true
+  - type: textarea
+    id: shareable-evidence
+    attributes:
+      label: Shareable evidence
+      description: What raw artifacts can be shared publicly?
+      placeholder: "Synthetic JSON trace, sanitized transcript excerpt, expected output, benchmark command, or none yet."
+    validations:
+      required: false
+  - type: checkboxes
+    id: safety-checks
+    attributes:
+      label: Safety checks
+      options:
+        - label: I have removed secrets, credentials, private customer data, and proprietary content.
+          required: true
+        - label: This issue does not imply vendor, government, or standards-body endorsement.
+          required: true
+        - label: I understand this may become a public replay fixture if accepted.
+          required: true

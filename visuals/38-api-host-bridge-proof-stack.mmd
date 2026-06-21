@@ -1,0 +1,25 @@
+%%{init: {'theme':'base','themeVariables':{'fontFamily':'Segoe UI, Helvetica, Arial, sans-serif','fontSize':'14px','lineColor':'#5B6B7B','primaryColor':'#DCE9FB','primaryTextColor':'#1B3A66','primaryBorderColor':'#3B6FB5','clusterBkg':'#F7F9FB','clusterBorder':'#AFC0CE'}}}%%
+flowchart TB
+  claim["Bridge claim<br/>compatible API host stays behind FAK<br/>while FAK owns the tool boundary"]
+
+  source["Source audit<br/>external permission claims verified: 7/7"]
+  bench["Permission benchmark<br/>FAK/DOS hard risk coverage: 6/6<br/>bridge controls: 6/6"]
+  gate["Executed witness gate<br/>required commands passed: 9/9"]
+  proof["Proof rollup<br/>requirements proven: 16/16<br/>scope: BRIDGE_PROVEN<br/>SCOPE_BOUNDED"]
+  verify["Verify-all<br/>executed steps passed: 35/35<br/>scope-bounded gate: yes"]
+
+  residual["Residual scope<br/>not proven: every API host on the internet<br/>external state: paid/keyed live hosts"]
+
+  claim --> source --> bench --> gate --> proof --> verify
+  proof -.-> residual
+  verify -.-> residual
+
+  classDef kernel fill:#DCE9FB,stroke:#3B6FB5,stroke-width:2px,color:#1B3A66;
+  classDef gate fill:#FFF3CC,stroke:#C9A227,stroke-width:2px,color:#6B5410;
+  classDef pass fill:#DBF3E1,stroke:#3FA45F,stroke-width:2px,color:#1C5230;
+  classDef deny fill:#FBDDDD,stroke:#C9453F,stroke-width:2px,color:#6E1F1B;
+  classDef note fill:#F7F9FB,stroke:#AFC0CE,stroke-width:1px,color:#46586A;
+
+  class claim kernel;
+  class source,bench,gate,proof,verify pass;
+  class residual deny;

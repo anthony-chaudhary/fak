@@ -1,0 +1,31 @@
+{
+  "schema": "fleet-bench-nodes/1",
+  "_doc": "Registry for tools/bench_node.sh — the repeatable bench-node runner. THIS file is the public-safe TEMPLATE (placeholders only). Copy it to tools/bench_nodes.json (GITIGNORED) and fill in REAL tailnet IPs / ssh users / repo paths there. Only 'sanitized_name' may ever appear in a committed artifact. Mirrors the fleet_endpoints.example.json convention.",
+  "_safety": [
+    "tools/bench_nodes.json is gitignored — real identity (tailnet_ip, ssh_user, magicdns, repo_path, host_key) lives ONLY there.",
+    "Reachability is an SSH handshake, not ICMP/tailscale ping (a node can answer ping with no sshd).",
+    "host_key is PINNED here after bootstrap — the driver verifies against it instead of blind accept-new.",
+    "Every run writes lineage.json (utc datetime + fak version/commit + node + go) for traceability.",
+    "Results go to tools/_registry/bench-runs/ (gitignored). Promoting a result to a committed path needs a REAL redaction pass (CPU brand + go/git + hostname) — the shape-only scrub audit does NOT do that."
+  ],
+  "nodes": [
+    {
+      "name": "macbook",
+      "sanitized_name": "node-macos-a",
+      "tailnet_ip": "198.51.100.10",
+      "magicdns": "node-macos-a.example.ts.net",
+      "ssh_user": "user",
+      "ssh_key": "~/.ssh/id_ed25519",
+      "ssh_port": 22,
+      "host_key": "",
+      "remote_shell": "zsh",
+      "repo_path": "~/work/fleet",
+      "repo_module": "private",
+      "toolchain_env": "GOTOOLCHAIN=auto",
+      "go_bin": "/usr/local/go/bin",
+      "capabilities": ["arm64", "darwin", "metal"],
+      "agent_host": false,
+      "facts": { "go_version": null, "git_commit": null, "bootstrapped_at": null }
+    }
+  ]
+}

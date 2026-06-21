@@ -1,0 +1,131 @@
+# Release artifacts — cross-compiled `fak` binaries attached to the GitHub release.
+#
+# The release CADENCE workflow (release-cadence.yml) cuts the version commit, pushes
+# main, tags `vX.Y.Z` after green CI, and creates the GitHub release PAGE from the
+# committed note. It ships no binaries. THIS workflow decorates that release: on the
+# `v*` tag push it cross-compiles the four supported targets and uploads them (plus
+# checksums) as release assets, so an external adopter can `curl | sh` (install.sh) or
+# download a prebuilt binary WITHOUT cloning the monorepo (issue #133).
+#
+# `cmd/fak` is pure Go (no cgo — the Vulkan backend is behind a build tag and absent
+# from the default binary), so every target builds static with CGO_ENABLED=0. A binary
+# shipped without a VERSION file alongside resolves its version from the BuildVersion
+# ldflag stamped here (internal/appversion.Current precedence).
+name: release-artifacts
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing vX.Y.Z tag to (re)build and upload assets for"
+        type: string
+        required: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-artifacts-${{ github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: ${{ matrix.goos }}/${{ matrix.goarch }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: write # gh release upload
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - goos: linux
+            goarch: amd64
+          - goos: darwin
+            goarch: amd64
+          - goos: darwin
+            goarch: arm64
+          - goos: windows
+            goarch: amd64
+    env:
+      GOTOOLCHAIN: auto
+      GOOS: ${{ matrix.goos }}
+      GOARCH: ${{ matrix.goarch }}
+      CGO_ENABLED: "0"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # The tag ref on push; the dispatch input when re-running by hand.
+          ref: ${{ github.event.inputs.tag || github.ref }}
+          fetch-depth: 0
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: false # zero external deps -> no go.sum to key a cache on
+
+      - name: Build, package, checksum
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          TAG="${{ github.event.inputs.tag || github.ref_name }}"
+          VERSION="${TAG#v}"
+          NAME="fak_${VERSION}_${GOOS}_${GOARCH}"
+          OUT="fak"; [ "$GOOS" = "windows" ] && OUT="fak.exe"
+
+          mkdir -p dist/pkg
+          go build -trimpath \
+              -ldflags "-s -w -X github.com/anthony-chaudhary/fak/internal/appversion.BuildVersion=${VERSION}" \
+              -o "dist/pkg/${OUT}" ./cmd/fak
+
+          # Bundle the binary with the license and the getting-started guide so a
+          # downloaded archive is self-explanatory.
+          cp LICENSE dist/pkg/LICENSE
+          cp GETTING-STARTED.md dist/pkg/GETTING-STARTED.md
+
+          cd dist
+          if [ "$GOOS" = "windows" ]; then
+            ARCHIVE="${NAME}.zip"
+            ( cd pkg && zip -q -r "../${ARCHIVE}" . )
+          else
+            ARCHIVE="${NAME}.tar.gz"
+            tar -C pkg -czf "${ARCHIVE}" .
+          fi
+          sha256sum "${ARCHIVE}" > "${ARCHIVE}.sha256"
+          echo "built ${ARCHIVE}"
+          cat "${ARCHIVE}.sha256"
+
+      - name: Upload to the GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          TAG="${{ github.event.inputs.tag || github.ref_name }}"
+          # --clobber makes a re-run (dispatch backfill, retried matrix leg) idempotent.
+          gh release upload "$TAG" dist/*.tar.gz dist/*.zip dist/*.sha256 --clobber
+
+  checksums:
+    name: aggregate SHA256SUMS
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - name: Fold per-asset sums into one SHA256SUMS
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          TAG="${{ github.event.inputs.tag || github.ref_name }}"
+          tmp="$(mktemp -d)"
+          # Pull the per-asset .sha256 files back down and concatenate them. Each line
+          # is already in `<hash>  <archive>` form, which the installer verifies against.
+          gh release download "$TAG" --dir "$tmp" --pattern '*.sha256' --clobber
+          cat "$tmp"/*.sha256 | sort -k2 > "$tmp/SHA256SUMS"
+          echo "== SHA256SUMS =="
+          cat "$tmp/SHA256SUMS"
+          gh release upload "$TAG" "$tmp/SHA256SUMS" --clobber

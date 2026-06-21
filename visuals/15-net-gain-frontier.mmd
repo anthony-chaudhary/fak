@@ -1,0 +1,15 @@
+%%{init: {'theme':'base','themeVariables':{'fontFamily':'Segoe UI, Helvetica, Arial, sans-serif','fontSize':'14px','quadrant1Fill':'#DBF3E1','quadrant2Fill':'#FFF3CC','quadrant3Fill':'#FBDDDD','quadrant4Fill':'#FFF3CC','quadrant1TextFill':'#1C5230','quadrant2TextFill':'#6B5410','quadrant3TextFill':'#6E1F1B','quadrant4TextFill':'#6B5410','quadrantPointFill':'#3B6FB5','quadrantPointTextFill':'#1B3A66','quadrantTitleFill':'#1B3A66','quadrantXAxisTextFill':'#1B3A66','quadrantYAxisTextFill':'#1B3A66','quadrantInternalBorderStrokeFill':'#AFC0CE','quadrantExternalBorderStrokeFill':'#5B6B7B'}}}%%
+quadrantChart
+  title The net-gain frontier -- when the inline / fused build repays
+  x-axis "few agents (N=1)" --> "fleet scale (N up to 10k)"
+  y-axis "warm KV / short ctx" --> "re-prefill pressure (miss-rate x context P)"
+  quadrant-1 "NET GAIN -- repays in 2-25 runs"
+  quadrant-2 "scale-limited (pressure alone)"
+  quadrant-3 "NET LOSS -- build never repays"
+  quadrant-4 "pressure-limited (scale alone)"
+  "N=1 / 23k runs": [0.06, 0.68]
+  "N=100 / 234 runs": [0.4, 0.65]
+  "N=1k / 23 runs": [0.62, 0.7]
+  "N=10k / 2 runs": [0.82, 0.74]
+  "N=1k warm-KV / 7.5k runs": [0.6, 0.1]
+  "N=1k 512k-ctx / 2 runs": [0.64, 0.9]

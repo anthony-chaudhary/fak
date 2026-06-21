@@ -1,0 +1,49 @@
+{
+  "version": "fak-policy/v1",
+  "allow": [
+    "git_diff",
+    "git_log",
+    "git_status",
+    "go_build",
+    "go_test",
+    "run_tests",
+    "ship_release"
+  ],
+  "allow_prefix": [
+    "read_",
+    "get_",
+    "search_",
+    "list_",
+    "lookup_",
+    "find_",
+    "calc"
+  ],
+  "deny": {
+    "git_push": "POLICY_BLOCK",
+    "git_merge": "POLICY_BLOCK",
+    "git_tag": "POLICY_BLOCK",
+    "exfiltrate": "SECRET_EXFIL"
+  },
+  "self_modify_globs": [
+    "internal/abi/",
+    "internal/kernel/",
+    "internal/adjudicator/",
+    "internal/policy/",
+    "internal/registrations/",
+    "internal/architest/",
+    "internal/shipgate/",
+    "dos.toml",
+    ".git/",
+    ".dos/",
+    "policy.json",
+    "VERSION",
+    "id_rsa"
+  ],
+  "redact_fields": [
+    "password",
+    "secret",
+    "api_key",
+    "token",
+    "authorization"
+  ]
+}

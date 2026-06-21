@@ -1,0 +1,295 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1320" height="1166" viewBox="0 0 1320 1166" role="img" aria-labelledby="mx-title mx-desc">
+  <title id="mx-title">fak — the agent kernel, vs the serving stacks (capability matrix)</title>
+  <desc id="mx-desc">A capability matrix: capabilities grouped by SERVING REUSE, CORRECTNESS, SECURITY KERNEL and a SINGLE-STREAM fence down the left; fak, vLLM, SGLang, llama.cpp and an API prompt cache across the top, fak highlighted. fak carries a value in every row; the serving stacks carry an em-dash outside the serving and single-stream bands. Only fak shows measured numbers; the fence inverts the highlight to the SOTA leader.</desc>
+  <defs>
+    <linearGradient id="mx-bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#fbfcfd"/>
+      <stop offset="60%" stop-color="#f4f7f9"/>
+      <stop offset="100%" stop-color="#f7f4f0"/>
+    </linearGradient>
+    <style>
+      .k    { font: 800 14px "Segoe UI", Arial, sans-serif; fill: #2e8b57; letter-spacing: 1.6px; }
+      .ti   { font: 900 31px "Segoe UI", Arial, sans-serif; fill: #14202b; }
+      .sub  { font: 400 15px "Segoe UI", Arial, sans-serif; fill: #415266; }
+      .hcol { font: 800 14.5px "Segoe UI", Arial, sans-serif; fill: #1b2733; }
+      .hsub { font: 800 14.5px "Segoe UI", Arial, sans-serif; fill: #2e8b57; }
+      .htype { font: 700 11px "Segoe UI", Arial, sans-serif; fill: #6a7685; }
+      .htypeF { font: 800 11px "Segoe UI", Arial, sans-serif; fill: #ffffff; letter-spacing: 0.3px; }
+      .covh { font: 800 10px "Segoe UI", Arial, sans-serif; fill: #8a96a3; letter-spacing: 0.5px; }
+      .bdg  { font: 800 13px "Segoe UI", Arial, sans-serif; }
+      .cat  { font: 800 13.5px "Segoe UI", Arial, sans-serif; fill: #ffffff; letter-spacing: 0.6px; }
+      .catn { font: 400 12px "Segoe UI", Arial, sans-serif; fill: #ffffff; opacity: 0.92; }
+      .cap  { font: 700 14px "Segoe UI", Arial, sans-serif; fill: #1b2733; }
+      .csub { font: 400 11.5px "Segoe UI", Arial, sans-serif; fill: #6a7a89; }
+      .cm   { font: 400 10.5px "Segoe UI", Arial, sans-serif; fill: #9aa6b2; }
+      .num  { font: 800 14.5px "Segoe UI", Arial, sans-serif; fill: #1f6b46; }
+      .numc { font: 700 13px "Segoe UI", Arial, sans-serif; fill: #51616f; }
+      .yes  { font: 800 16px "Segoe UI", Arial, sans-serif; fill: #2e8b57; }
+      .weak { font: 400 12px "Segoe UI", Arial, sans-serif; fill: #6a7685; }
+      .base { font: 700 12.5px "Segoe UI", Arial, sans-serif; fill: #8a96a3; }
+      .lead { font: 800 13.5px "Segoe UI", Arial, sans-serif; fill: #14202b; }
+      .lose { font: 400 12.5px "Segoe UI", Arial, sans-serif; fill: #51616f; }
+      .mh   { font: 800 16px "Segoe UI", Arial, sans-serif; fill: #14202b; letter-spacing: 0.3px; }
+      .mn   { font: 400 12.5px "Segoe UI", Arial, sans-serif; fill: #51616f; }
+      .foot { font: 400 12px "Segoe UI", Arial, sans-serif; fill: #6a7685; }
+    </style>
+  </defs>
+  <rect width="1320" height="1166" fill="url(#mx-bg)"/>
+  <text x="72" y="58" class="k">CAPABILITY MATRIX · THE AGENT-INFRASTRUCTURE BOUNDARY</text>
+  <text x="72" y="96" class="ti">fak spans the whole boundary; the serving stacks span one band of it</text>
+  <text x="72" y="124" class="sub">Serving engines win raw throughput and front-prefix reuse — and stop there. fak's cache is addressable — it reaches into the middle of a</text>
+  <text x="72" y="146" class="sub">kept run — so it does that reuse too, then proves it exact and makes the permission gate a syscall. An em-dash means a capability the</text>
+  <text x="72" y="168" class="sub">stack does not ship, not a measured zero.</text>
+  <rect x="562" y="196" width="126" height="650" rx="7" fill="#edf7f0" opacity="0.55"/>
+  <rect x="562" y="196" width="126" height="650" rx="7" fill="none" stroke="#85bc98" stroke-width="1.5" opacity="0.8"/>
+  <text x="72" y="232" class="hcol">CAPABILITY</text>
+  <text x="522" y="250" class="covh" text-anchor="middle">COVERAGE</text>
+  <rect x="567" y="202" width="20" height="20" rx="5" fill="#2e8b57" stroke="#2e8b57" stroke-width="1.2"/>
+  <text x="577" y="216" class="bdg" text-anchor="middle" style="fill:#ffffff;">f</text>
+  <text x="633" y="232" class="hsub" text-anchor="middle">fak</text>
+  <rect x="594" y="238" width="78" height="16" rx="8" fill="#2e8b57"/>
+  <text x="633" y="250" class="htypeF" text-anchor="middle">addressable</text>
+  <rect x="697" y="202" width="20" height="20" rx="5" fill="#ffffff" stroke="#c2ccd6" stroke-width="1.2"/>
+  <text x="707" y="216" class="bdg" text-anchor="middle" style="fill:#5b6a7a;">v</text>
+  <text x="763" y="232" class="hcol" text-anchor="middle">vLLM</text>
+  <text x="763" y="250" class="htype" text-anchor="middle">front-prefix</text>
+  <rect x="827" y="202" width="20" height="20" rx="5" fill="#ffffff" stroke="#c2ccd6" stroke-width="1.2"/>
+  <text x="837" y="216" class="bdg" text-anchor="middle" style="fill:#5b6a7a;">S</text>
+  <text x="893" y="232" class="hcol" text-anchor="middle">SGLang</text>
+  <text x="893" y="250" class="htype" text-anchor="middle">front-prefix</text>
+  <rect x="957" y="202" width="20" height="20" rx="5" fill="#ffffff" stroke="#c2ccd6" stroke-width="1.2"/>
+  <text x="967" y="216" class="bdg" text-anchor="middle" style="fill:#5b6a7a;">L</text>
+  <text x="1023" y="232" class="hcol" text-anchor="middle">llama.cpp</text>
+  <text x="1023" y="250" class="htype" text-anchor="middle">front-prefix</text>
+  <rect x="1087" y="202" width="20" height="20" rx="5" fill="#ffffff" stroke="#c2ccd6" stroke-width="1.2"/>
+  <text x="1097" y="216" class="bdg" text-anchor="middle" style="fill:#5b6a7a;">@</text>
+  <text x="1153" y="232" class="hcol" text-anchor="middle">API prompt cache</text>
+  <text x="1153" y="250" class="htype" text-anchor="middle">front-only</text>
+  <line x1="72" y1="258" x2="1256" y2="258" stroke="#2e3a47" stroke-width="2"/>
+  <rect x="72" y="258" width="1184" height="28" rx="5" fill="#3a7d9c"/>
+  <text x="86" y="277" class="cat">SERVING REUSE</text>
+  <text x="1244" y="277" class="catn" text-anchor="end">the band the SOTA stacks own — fak matches it</text>
+  <text x="72" y="302" class="cap">Front-prefix KV reuse</text>
+  <text x="72" y="315" class="csub">keep the run from the first token</text>
+  <text x="1256" y="302" class="cm" text-anchor="end">92896a4</text>
+  <circle cx="494" cy="304" r="4" fill="#2e8b57"/>
+  <circle cx="508" cy="304" r="4" fill="#9aa6b2"/>
+  <circle cx="522" cy="304" r="4" fill="#9aa6b2"/>
+  <circle cx="536" cy="304" r="4" fill="#9aa6b2"/>
+  <circle cx="550" cy="304" r="4" fill="#9aa6b2"/>
+  <text x="625" y="308" class="yes" text-anchor="middle">✓</text>
+  <text x="755" y="308" class="yes" text-anchor="middle">✓</text>
+  <text x="885" y="308" class="yes" text-anchor="middle">✓</text>
+  <text x="1015" y="308" class="yes" text-anchor="middle">✓</text>
+  <text x="1145" y="308" class="yes" text-anchor="middle">✓</text>
+  <line x1="72" y1="320" x2="1256" y2="320" stroke="#e7ecf0" stroke-width="1"/>
+  <text x="72" y="336" class="cap">KV-cache hit rate</text>
+  <text x="72" y="349" class="csub">vs the RadixAttention band</text>
+  <text x="1256" y="336" class="cm" text-anchor="end">92896a4</text>
+  <circle cx="494" cy="338" r="4" fill="#2e8b57"/>
+  <circle cx="508" cy="338" r="4" fill="#9aa6b2"/>
+  <circle cx="522" cy="338" r="4" fill="#9aa6b2"/>
+  <circle cx="536" cy="338" r="4" fill="#9aa6b2"/>
+  <circle cx="550" cy="338" r="4" fill="#9aa6b2"/>
+  <text x="625" y="342" class="num" text-anchor="middle">86.7%</text>
+  <text x="755" y="342" class="yes" text-anchor="middle">prefix</text>
+  <text x="885" y="342" class="yes" text-anchor="middle">radix</text>
+  <text x="1015" y="342" class="weak" text-anchor="middle">partial</text>
+  <text x="1145" y="342" class="weak" text-anchor="middle">front-only</text>
+  <line x1="72" y1="354" x2="1256" y2="354" stroke="#e7ecf0" stroke-width="1"/>
+  <text x="72" y="370" class="cap">Fleet shared-prefix serving</text>
+  <text x="72" y="383" class="csub">50-turn × 5-agent run</text>
+  <text x="1256" y="370" class="cm" text-anchor="end">2bbda6f</text>
+  <circle cx="494" cy="372" r="4" fill="#2e8b57"/>
+  <circle cx="508" cy="372" r="4" fill="#9aa6b2"/>
+  <circle cx="522" cy="372" r="4" fill="#9aa6b2"/>
+  <circle cx="536" cy="372" r="4" fill="#9aa6b2"/>
+  <circle cx="550" cy="372" r="4" fill="#ffffff" stroke="#cdd5dd" stroke-width="1.2"/>
+  <text x="625" y="376" class="num" text-anchor="middle">4.1×</text>
+  <text x="755" y="376" class="base" text-anchor="middle">1×</text>
+  <text x="885" y="376" class="base" text-anchor="middle">1×</text>
+  <text x="1015" y="376" class="base" text-anchor="middle">1×</text>
+  <text x="1145" y="376" font-size="18" text-anchor="middle" style="fill:#b8c2cc;">—</text>
+  <line x1="72" y1="388" x2="1256" y2="388" stroke="#e7ecf0" stroke-width="1"/>
+  <text x="72" y="404" class="cap">Live prefill reuse speedup</text>
+  <text x="72" y="417" class="csub">RadixAttention, measured</text>
+  <text x="1256" y="404" class="cm" text-anchor="end">92896a4</text>
+  <circle cx="494" cy="406" r="4" fill="#2e8b57"/>
+  <circle cx="508" cy="406" r="4" fill="#9aa6b2"/>
+  <circle cx="522" cy="406" r="4" fill="#9aa6b2"/>
+  <circle cx="536" cy="406" r="4" fill="#9aa6b2"/>
+  <circle cx="550" cy="406" r="4" fill="#9aa6b2"/>
+  <text x="625" y="410" class="num" text-anchor="middle">6.95×</text>
+  <text x="755" y="410" class="yes" text-anchor="middle">✓</text>
+  <text x="885" y="410" class="yes" text-anchor="middle">✓</text>
+  <text x="1015" y="410" class="weak" text-anchor="middle">front-only</text>
+  <text x="1145" y="410" class="weak" text-anchor="middle">front-only</text>
+  <line x1="72" y1="422" x2="1256" y2="422" stroke="#e7ecf0" stroke-width="1"/>
+  <rect x="72" y="422" width="1184" height="28" rx="5" fill="#7a5cb0"/>
+  <text x="86" y="441" class="cat">CORRECTNESS — THE REUSE IS EXACT</text>
+  <text x="1244" y="441" class="catn" text-anchor="end">what no serving engine proves</text>
+  <text x="72" y="466" class="cap">Mid-run span eviction, bit-exact</text>
+  <text x="72" y="479" class="csub">max|Δ| = 0 vs a clean run</text>
+  <text x="1256" y="466" class="cm" text-anchor="end">0fc39aa</text>
+  <circle cx="494" cy="468" r="4" fill="#2e8b57"/>
+  <circle cx="508" cy="468" r="4" fill="#ffffff" stroke="#cdd5dd" stroke-width="1.2"/>
+  <circle cx="522" cy="468" r="4" fill="#ffffff" stroke="#cdd5dd" stroke-width="1.2"/>
+  <circle cx="536" cy="468" r="4" fill="#ffffff" stroke="#cdd5dd" stroke-width="1.2"/>
+  <circle cx="550" cy="468" r="4" fill="#ffffff" stroke="#cdd5dd" stroke-width="1.2"/>
+  <text x="625" y="472" class="num" text-anchor="middle">max|Δ|=0</text>
+  <text x="755" y="472" font-size="18" text-anchor="middle" style="fill:#b8c2cc;">—</text>
+  <text x="885" y="472" font-size="18" text-anchor="middle" style="fill:#b8c2cc;">—</text>
+  <text x="1015" y="472" font-size="18" text-anchor="middle" style="fill:#b8c2cc;">—</text>
+  <text x="1145" y="472" font-size="18" text-anchor="middle" style="fill:#b8c2cc;">—</text>
+  <line x1="72" y1="484" x2="1256" y2="484" stroke="#e7ecf0" stroke-width="1"/>
+  <text x="72" y="500" class="cap">Greedy decode token parity</text>
+  <text x="72" y="513" class="csub">vs llama.cpp, same Q8 weights</text>
+  <text x="1256" y="500" class="cm" text-anchor="end">34c74f4</text>
+  <circle cx="494" cy="502" r="4" fill="#2e8b57"/>
+  <circle cx="508" cy="502" r="4" fill="#9aa6b2"/>
+  <circle cx="522" cy="502" r="4" fill="#9aa6b2"/>
+  <circle cx="536" cy="502" r="4" fill="#9aa6b2"/>
+  <circle cx="550" cy="502" r="4" fill="#ffffff" stroke="#cdd5dd" stroke-width="1.2"/>
+  <text x="625" y="506" class="num" text-anchor="middle">7/7</text>
+  <text x="755" y="506" class="yes" text-anchor="middle">✓</text>
+  <text x="885" y="506" class="yes" text-anchor="middle">✓</text>
+  <text x="1015" y="506" class="yes" text-anchor="middle">ref</text>
+  <text x="1145" y="506" text-anchor="middle" style="fill:#cdd5dd;font:400 11.5px Segoe UI,Arial;">n/a</text>
+  <line x1="72" y1="518" x2="1256" y2="518" stroke="#e7ecf0" stroke-width="1"/>
+  <text x="72" y="534" class="cap">Exact token-reuse accounting</text>
+  <text x="72" y="547" class="csub">reuse, not a numerics shortcut</text>
+  <text x="1256" y="534" class="cm" text-anchor="end">92896a4</text>
+  <circle cx="494" cy="536" r="4" fill="#2e8b57"/>
+  <circle cx="508" cy="536" r="4" fill="#ffffff" stroke="#cdd5dd" stroke-width="1.2"/>
+  <circle cx="522" cy="536" r="4" fill="#ffffff" stroke="#cdd5dd" stroke-width="1.2"/>
+  <circle cx="536" cy="536" r="4" fill="#ffffff" stroke="#cdd5dd" stroke-width="1.2"/>
+  <circle cx="550" cy="536" r="4" fill="#ffffff" stroke="#cdd5dd" stroke-width="1.2"/>
+  <text x="625" y="540" class="num" text-anchor="middle">7.50×</text>
+  <text x="755" y="540" font-size="18" text-anchor="middle" style="fill:#b8c2cc;">—</text>
+  <text x="885" y="540" font-size="18" text-anchor="middle" style="fill:#b8c2cc;">—</text>
+  <text x="1015" y="540" font-size="18" text-anchor="middle" style="fill:#b8c2cc;">—</text>
+  <text x="1145" y="540" font-size="18" text-anchor="middle" style="fill:#b8c2cc;">—</text>
+  <line x1="72" y1="552" x2="1256" y2="552" stroke="#e7ecf0" stroke-width="1"/>
+  <text x="72" y="568" class="cap">Exotic-arch coherence</text>
+  <text x="72" y="581" class="csub">Mamba2 / Gated-DeltaNet in-kernel</text>
+  <text x="1256" y="568" class="cm" text-anchor="end">6a376b8</text>
+  <circle cx="494" cy="570" r="4" fill="#2e8b57"/>
+  <circle cx="508" cy="570" r="4" fill="#9aa6b2"/>
+  <circle cx="522" cy="570" r="4" fill="#9aa6b2"/>
+  <circle cx="536" cy="570" r="4" fill="#9aa6b2"/>
+  <circle cx="550" cy="570" r="4" fill="#ffffff" stroke="#cdd5dd" stroke-width="1.2"/>
+  <text x="625" y="574" class="yes" text-anchor="middle">✓</text>
+  <text x="755" y="574" class="weak" text-anchor="middle">some</text>
+  <text x="885" y="574" class="weak" text-anchor="middle">some</text>
+  <text x="1015" y="574" class="weak" text-anchor="middle">some</text>
+  <text x="1145" y="574" text-anchor="middle" style="fill:#cdd5dd;font:400 11.5px Segoe UI,Arial;">n/a</text>
+  <line x1="72" y1="586" x2="1256" y2="586" stroke="#e7ecf0" stroke-width="1"/>
+  <rect x="72" y="586" width="1184" height="28" rx="5" fill="#1c7c92"/>
+  <text x="86" y="605" class="cat">SECURITY KERNEL — THE BOUNDARY THEY DON'T OWN</text>
+  <text x="1244" y="605" class="catn" text-anchor="end">default-deny, in one address space</text>
+  <text x="72" y="630" class="cap">In-kernel permission decide</text>
+  <text x="72" y="643" class="csub">allow / deny, syscall speed</text>
+  <text x="1256" y="630" class="cm" text-anchor="end">bcad56e</text>
+  <circle cx="494" cy="632" r="4" fill="#2e8b57"/>
+  <circle cx="508" cy="632" r="4" fill="#ffffff" stroke="#cdd5dd" stroke-width="1.2"/>
+  <circle cx="522" cy="632" r="4" fill="#ffffff" stroke="#cdd5dd" stroke-width="1.2"/>
+  <circle cx="536" cy="632" r="4" fill="#ffffff" stroke="#cdd5dd" stroke-width="1.2"/>
+  <circle cx="550" cy="632" r="4" fill="#ffffff" stroke="#cdd5dd" stroke-width="1.2"/>
+  <text x="625" y="636" class="num" text-anchor="middle">362 ns</text>
+  <text x="755" y="636" font-size="18" text-anchor="middle" style="fill:#b8c2cc;">—</text>
+  <text x="885" y="636" font-size="18" text-anchor="middle" style="fill:#b8c2cc;">—</text>
+  <text x="1015" y="636" font-size="18" text-anchor="middle" style="fill:#b8c2cc;">—</text>
+  <text x="1145" y="636" font-size="18" text-anchor="middle" style="fill:#b8c2cc;">—</text>
+  <line x1="72" y1="648" x2="1256" y2="648" stroke="#e7ecf0" stroke-width="1"/>
+  <text x="72" y="664" class="cap">Result quarantine / page-out secret</text>
+  <text x="72" y="677" class="csub">scan + quarantine + page-out</text>
+  <text x="1256" y="664" class="cm" text-anchor="end">bcad56e</text>
+  <circle cx="494" cy="666" r="4" fill="#2e8b57"/>
+  <circle cx="508" cy="666" r="4" fill="#ffffff" stroke="#cdd5dd" stroke-width="1.2"/>
+  <circle cx="522" cy="666" r="4" fill="#ffffff" stroke="#cdd5dd" stroke-width="1.2"/>
+  <circle cx="536" cy="666" r="4" fill="#ffffff" stroke="#cdd5dd" stroke-width="1.2"/>
+  <circle cx="550" cy="666" r="4" fill="#ffffff" stroke="#cdd5dd" stroke-width="1.2"/>
+  <text x="625" y="670" class="num" text-anchor="middle">3.3 µs</text>
+  <text x="755" y="670" font-size="18" text-anchor="middle" style="fill:#b8c2cc;">—</text>
+  <text x="885" y="670" font-size="18" text-anchor="middle" style="fill:#b8c2cc;">—</text>
+  <text x="1015" y="670" font-size="18" text-anchor="middle" style="fill:#b8c2cc;">—</text>
+  <text x="1145" y="670" font-size="18" text-anchor="middle" style="fill:#b8c2cc;">—</text>
+  <line x1="72" y1="682" x2="1256" y2="682" stroke="#e7ecf0" stroke-width="1"/>
+  <text x="72" y="698" class="cap">In-process vs spawned-hook gate</text>
+  <text x="72" y="711" class="csub">the cost of NOT owning it</text>
+  <text x="1256" y="698" class="cm" text-anchor="end">bcad56e</text>
+  <circle cx="494" cy="700" r="4" fill="#2e8b57"/>
+  <circle cx="508" cy="700" r="4" fill="#ffffff" stroke="#cdd5dd" stroke-width="1.2"/>
+  <circle cx="522" cy="700" r="4" fill="#ffffff" stroke="#cdd5dd" stroke-width="1.2"/>
+  <circle cx="536" cy="700" r="4" fill="#ffffff" stroke="#cdd5dd" stroke-width="1.2"/>
+  <circle cx="550" cy="700" r="4" fill="#ffffff" stroke="#cdd5dd" stroke-width="1.2"/>
+  <text x="625" y="704" class="num" text-anchor="middle">2,849×</text>
+  <text x="755" y="704" font-size="18" text-anchor="middle" style="fill:#b8c2cc;">—</text>
+  <text x="885" y="704" font-size="18" text-anchor="middle" style="fill:#b8c2cc;">—</text>
+  <text x="1015" y="704" font-size="18" text-anchor="middle" style="fill:#b8c2cc;">—</text>
+  <text x="1145" y="704" font-size="18" text-anchor="middle" style="fill:#b8c2cc;">—</text>
+  <line x1="72" y1="716" x2="1256" y2="716" stroke="#e7ecf0" stroke-width="1"/>
+  <text x="72" y="732" class="cap">Nested prompt-injection containment</text>
+  <text x="72" y="745" class="csub">never reaches the model</text>
+  <text x="1256" y="732" class="cm" text-anchor="end">bcad56e</text>
+  <circle cx="494" cy="734" r="4" fill="#2e8b57"/>
+  <circle cx="508" cy="734" r="4" fill="#ffffff" stroke="#cdd5dd" stroke-width="1.2"/>
+  <circle cx="522" cy="734" r="4" fill="#ffffff" stroke="#cdd5dd" stroke-width="1.2"/>
+  <circle cx="536" cy="734" r="4" fill="#ffffff" stroke="#cdd5dd" stroke-width="1.2"/>
+  <circle cx="550" cy="734" r="4" fill="#ffffff" stroke="#cdd5dd" stroke-width="1.2"/>
+  <text x="625" y="738" class="yes" text-anchor="middle">QUARANTINE</text>
+  <text x="755" y="738" font-size="18" text-anchor="middle" style="fill:#b8c2cc;">—</text>
+  <text x="885" y="738" font-size="18" text-anchor="middle" style="fill:#b8c2cc;">—</text>
+  <text x="1015" y="738" font-size="18" text-anchor="middle" style="fill:#b8c2cc;">—</text>
+  <text x="1145" y="738" font-size="18" text-anchor="middle" style="fill:#b8c2cc;">—</text>
+  <line x1="72" y1="750" x2="1256" y2="750" stroke="#e7ecf0" stroke-width="1"/>
+  <rect x="72" y="750" width="1184" height="28" rx="5" fill="#6a7685"/>
+  <text x="86" y="769" class="cat">SINGLE STREAM — WHERE THEY LEAD</text>
+  <text x="1244" y="769" class="catn" text-anchor="end">shown, not hidden — fak does not target raw throughput</text>
+  <text x="72" y="794" class="cap">Decode throughput (7B Q8)</text>
+  <text x="72" y="807" class="csub">Apple M3 Pro, same weights</text>
+  <text x="1256" y="794" class="cm" text-anchor="end">34c74f4</text>
+  <circle cx="494" cy="796" r="4" fill="#2e8b57"/>
+  <circle cx="508" cy="796" r="4" fill="#9aa6b2"/>
+  <circle cx="522" cy="796" r="4" fill="#9aa6b2"/>
+  <circle cx="536" cy="796" r="4" fill="#9aa6b2"/>
+  <circle cx="550" cy="796" r="4" fill="#ffffff" stroke="#cdd5dd" stroke-width="1.2"/>
+  <text x="625" y="800" class="lose" text-anchor="middle">8.7 tok/s · 0.50×</text>
+  <text x="755" y="800" class="lead" text-anchor="middle">leads (GPU)</text>
+  <text x="885" y="800" class="lead" text-anchor="middle">leads (GPU)</text>
+  <text x="1015" y="800" class="lead" text-anchor="middle">17.3 tok/s</text>
+  <text x="1145" y="800" text-anchor="middle" style="fill:#cdd5dd;font:400 11.5px Segoe UI,Arial;">n/a</text>
+  <line x1="72" y1="812" x2="1256" y2="812" stroke="#e7ecf0" stroke-width="1"/>
+  <text x="72" y="828" class="cap">Prefill throughput (7B Q8)</text>
+  <text x="72" y="841" class="csub">single stream, apples-to-apples</text>
+  <text x="1256" y="828" class="cm" text-anchor="end">34c74f4</text>
+  <circle cx="494" cy="830" r="4" fill="#2e8b57"/>
+  <circle cx="508" cy="830" r="4" fill="#9aa6b2"/>
+  <circle cx="522" cy="830" r="4" fill="#9aa6b2"/>
+  <circle cx="536" cy="830" r="4" fill="#9aa6b2"/>
+  <circle cx="550" cy="830" r="4" fill="#ffffff" stroke="#cdd5dd" stroke-width="1.2"/>
+  <text x="625" y="834" class="lose" text-anchor="middle">~0.12× CPU</text>
+  <text x="755" y="834" class="lead" text-anchor="middle">leads (GPU)</text>
+  <text x="885" y="834" class="lead" text-anchor="middle">leads (GPU)</text>
+  <text x="1015" y="834" class="lead" text-anchor="middle">leads</text>
+  <text x="1145" y="834" text-anchor="middle" style="fill:#cdd5dd;font:400 11.5px Segoe UI,Arial;">n/a</text>
+  <line x1="72" y1="846" x2="1256" y2="846" stroke="#e7ecf0" stroke-width="1"/>
+  <text x="72" y="876" class="mh">Evaluation methodology</text>
+  <circle cx="76" cy="894" r="2.5" fill="#2e8b57"/>
+  <text x="88" y="898" class="mn">Only the fak column carries measured figures; every one traces to fak/BENCHMARK-AUTHORITY.md by the commit shown at the row's right. Machine: Apple M3 Pro 6P+6E 36 GB,</text>
+  <text x="88" y="914" class="mn">app_version 0.30.0, llama.cpp b9707 on the same box.</text>
+  <circle cx="76" cy="934" r="2.5" fill="#2e8b57"/>
+  <text x="88" y="938" class="mn">An em-dash (—) marks a capability the stack does not ship — a structural gap, not a measured zero. “n/a” marks a row that does not apply to a hosted API cache.</text>
+  <circle cx="76" cy="958" r="2.5" fill="#2e8b57"/>
+  <text x="88" y="962" class="mn">Serving reuse: 86.7% KV-hit is reported against SGLang RadixAttention's published 50–99% band; 4.1× fleet serving is fak's own kernel held constant (so it isolates</text>
+  <text x="88" y="978" class="mn">reuse, not kernel speed) — it is a [SOTA-style] result, not a green win. The naive re-prefill comparison (~60×) is deliberately omitted as a strawman.</text>
+  <circle cx="76" cy="998" r="2.5" fill="#2e8b57"/>
+  <text x="88" y="1002" class="mn">Correctness: max|Δ|=0 is the L∞ between an evicted-span run and a clean run that never saw the span (TestBatchedDecodeMatchesSerial / mid-run eviction). Greedy parity</text>
+  <text x="88" y="1018" class="mn">is 7/7 exact tokens vs llama.cpp on identical Q8 weights.</text>
+  <circle cx="76" cy="1038" r="2.5" fill="#2e8b57"/>
+  <text x="88" y="1042" class="mn">Security kernel: 362 ns decide and 3.3 µs admit are in-process p50; 2,849× is in-process vs process-per-decide adjudication (n=100). The detector that flags injections</text>
+  <text x="88" y="1058" class="mn">is ≈100% evadable by design — the floor is the default-deny lock + the quarantine, not the classifier.</text>
+  <circle cx="76" cy="1078" r="2.5" fill="#2e8b57"/>
+  <text x="88" y="1082" class="mn">Single stream: fak explicitly does not target raw throughput — llama.cpp/Metal leads decode (17.3 vs 8.7 tok/s) and prefill. These rows invert the highlight on purpose:</text>
+  <text x="88" y="1098" class="mn">the SOTA stack owns the bold cell. One chat → use llama.cpp; an agent fleet → use fak.</text>
+</svg>

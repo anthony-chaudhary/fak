@@ -1,0 +1,262 @@
+# CI for the fak module (lives in fak/). Runs on Linux, where `go test ./...`
+# is NOT subject to the Windows Application-Control policy that forces the local
+# WSL test runner (see fak/CLAUDE.md / fak/test.sh) — so this is the public,
+# reproducible form of the "CI green" claim: build + vet + test + the CLAIMS
+# honesty-ledger lint, the same gate as `make ci` / `scripts/ci.ps1`.
+name: ci
+
+on:
+  push:
+    branches: [main, master, fak-v0.1]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  build-vet-test:
+    name: build · vet · test · claims-lint
+    runs-on: ubuntu-latest
+    env:
+      # The exact toolchain comes from go.mod (go 1.26); GOTOOLCHAIN=auto lets
+      # `go` fetch it if the runner's Go is older. Job-level so every step sees it.
+      GOTOOLCHAIN: auto
+    defaults:
+      run:
+        working-directory: .
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: false # zero external deps -> no go.sum to key a cache on
+
+      - name: build
+        run: go build ./...
+
+      # Format gate (G-001/#38): BLOCKING. The ~57 unformatted trunk files were cleared by a
+      # coordinated lane-by-lane `gofmt -w .` sweep, so this ratcheted from advisory to a hard
+      # gate — any file `gofmt -l .` reports now FAILS the build (exit 1). Runs on Linux (LF),
+      # so the list is the canonical bytes, not a Windows CRLF artifact. Fix locally with
+      # `gofmt -w .` from fak/.
+      - name: gofmt (every committed .go file is gofmt-formatted)
+        run: |
+          unformatted="$(gofmt -l .)"
+          if [ -n "$unformatted" ]; then
+            n="$(printf '%s\n' "$unformatted" | grep -c .)"
+            echo "::error::gofmt: $n file(s) not formatted (run 'gofmt -w .' from fak/):"
+            printf '%s\n' "$unformatted"
+            exit 1
+          fi
+          echo "gofmt: clean"
+
+      - name: vet
+        run: go vet ./...
+
+      # Test + coverage profile in one run (E-002): the same `go test ./...` gate, now
+      # also writing a merged statement-coverage profile so the total is reported every
+      # run. Reporting (not a hard threshold) is the foundation — a specific floor is a
+      # follow-on tuning once the baseline is known (issue #34).
+      - name: test (+ coverage profile)
+        run: go test -coverprofile=coverage.out ./...
+
+      - name: coverage report (total statement coverage)
+        run: go tool cover -func=coverage.out | tail -1
+
+      - name: claims-lint (every "- [" line in CLAIMS.md carries exactly one tag)
+        run: |
+          awk '/^- \[/{n=0; if(index($0,"[SHIPPED]"))n++; if(index($0,"[SIMULATED]"))n++; if(index($0,"[STUB]"))n++; c++; if(n!=1){print "VIOLATION:",$0; bad++}} END{printf "claims-lint: %d lines, %d violations\n",c,bad; if(bad>0||c==0)exit 1}' CLAIMS.md
+
+      - name: repo-hygiene gates (doc-placement · links · file-admission · secret-shapes)
+        working-directory: ${{ github.workspace }}
+        run: |
+          python tools/check_doc_placement.py --audit-tree
+          python tools/check_links.py --audit-tree
+          python tools/check_committed_files.py --audit-tree
+          python tools/check_secret_shapes.py --audit-tree
+
+      - name: release-substrate tests
+        working-directory: ${{ github.workspace }}
+        run: |
+          python tools/release_context_test.py
+          python tools/release_cut_test.py
+          python tools/release_manifest_test.py
+          python tools/release_dry_run_test.py
+          python tools/release_tag_test.py
+          python tools/release_publish_test.py
+          python tools/release_cadence_workflow_test.py
+          python tools/release_artifacts_workflow_test.py
+          python tools/release_status_test.py
+          python tools/release_lock_test.py
+          python tools/scrub_public_copy_test.py
+          python tools/memory_recall_audit_test.py
+          python tools/gofmt_debt_audit_test.py
+          python tools/safe_ff_sync_test.py
+          python tools/release_decide_test.py
+          python tools/stable_release_context_test.py
+          python tools/stable_release_promote_test.py
+          python tools/release_cut.py --json --allow-hold --limit-commits 20
+          python tools/release_dry_run.py --fast --json HEAD
+          python tools/release_dry_run.py --json HEAD
+
+      # Notebook anti-rot gate: the cloud-notebook quickstarts under notebooks/ are
+      # GENERATED ARTIFACTS of tools/gen_notebooks.py. `--check` re-renders in memory and
+      # fails on drift (a hand-edited .ipynb) OR a stale repo reference (a cell points at
+      # an example/script/verb that no longer exists) — so the notebooks can't silently
+      # rot away from the commands they wrap. Runs from the repo root (notebooks/ + tools/).
+      - name: notebook-sync (cloud notebooks match tools/gen_notebooks.py + refs live)
+        working-directory: ${{ github.workspace }}
+        run: python tools/gen_notebooks.py --check
+
+      # Hero-benchmark honesty gate: the front-page headline chart + the top-10
+      # leaderboard are GENERATED from tools/hero_benchmark.data.json, not hand-
+      # maintained. --check fails the build if any committed output (the HERO doc,
+      # both SVGs, the HTML widget) drifted from the data file (someone edited an
+      # SVG/number by hand and skipped the generator). --verify-sources re-asserts
+      # every leaderboard number against its committed benchmark artifact under
+      # fak/experiments (a result file changed but the headline didn't follow).
+      # Pure stdlib — no pytest/jsonschema — so it runs anywhere the release tests
+      # do. This is what makes "generated, not hand-maintained" enforced, not a
+      # promise. (Richer dev guard: tools/hero_benchmark_gen_test.py under pytest.)
+      - name: hero-benchmark drift + source verification
+        working-directory: ${{ github.workspace }}
+        run: |
+          python tools/hero_benchmark_gen.py --check
+          python tools/hero_benchmark_gen.py --verify-sources
+          python tools/hero_statcard_gen.py --check
+          # the three lab-style headline visuals (BENCHMARK-GALLERY.md): one
+          # source-of-truth data.json -> one renderer -> one SVG, drift-gated.
+          python tools/hero_matrix_gen.py --check
+          python tools/hero_turntax_gen.py --check
+          python tools/hero_sweep_gen.py --check
+
+      # Docs scorecard: the whole-corpus analogue of the README freshness audit.
+      # Grades every core / reader-reachable doc on five KPIs and counts doc-debt
+      # (dead links, stale install pins, placeholders, missing titles, strawman
+      # headlines, orphans). Two tiers, matching how the gofmt gate ratcheted once
+      # the tree was clean:
+      #   * HARD gate on --scope core (the 26 curated must-be-perfect surfaces):
+      #     a non-zero exit (doc-debt > 0) FAILS the build. Core is at 0 today;
+      #     this keeps it there. Fix locally with /garden-docs.
+      #   * ADVISORY on --scope reachable (the 167-doc reader surface): surfaces
+      #     the work-list as a ::warning:: without failing — reader-surface debt is
+      #     a judgment call until ratcheted (issue #95).
+      # Runs the tool's own test first. Pure-stdlib Python, repo root like the
+      # other doc-honesty gates (claims-lint, hero-benchmark, leak-scan).
+      - name: docs scorecard (5 KPIs + doc-debt; core stays clean)
+        working-directory: ${{ github.workspace }}
+        run: |
+          python tools/docs_scorecard_test.py
+          echo "::group::docs-scorecard (core: HARD gate at doc-debt 0)"
+          python tools/docs_scorecard.py --scope core
+          echo "::endgroup::"
+          echo "::group::docs-scorecard (reachable: advisory)"
+          python tools/docs_scorecard.py --scope reachable \
+            || echo "::warning title=docs-debt::reader-surface doc-debt present (advisory) — run /garden-docs, see docs/DOCS-SCORECARD.md"
+          echo "::endgroup::"
+
+      # Docs scorecard: the whole-corpus analogue of the README freshness audit.
+      # Grades every core / reader-reachable doc on five KPIs and counts doc-debt
+      # (dead links, stale install pins, placeholders, missing titles, strawman
+      # headlines, orphans). Two tiers, matching how the gofmt gate ratcheted once
+      # the tree was clean:
+      #   * ADVISORY on --scope core for now: the public snapshot scrub removed
+      #     docs/adoption-playbook.md (an internal note) but left dead links to it
+      #     in README.md / docs/FAQ.md + the core-doc list, so core doc-debt is
+      #     currently > 0 on the public tree. Surfaced as a ::warning:: until those
+      #     dangling refs are retired with /garden-docs, then RATCHET back to HARD.
+      #   * ADVISORY on --scope reachable (the 167-doc reader surface): surfaces
+      #     the work-list as a ::warning:: without failing — reader-surface debt is
+      #     a judgment call until ratcheted (issue #95).
+      # Runs the tool's own test first. Pure-stdlib Python, repo root like the
+      # other doc-honesty gates (claims-lint, hero-benchmark, leak-scan).
+      - name: docs scorecard (5 KPIs + doc-debt; core advisory pending scrub fix)
+        working-directory: ${{ github.workspace }}
+        run: |
+          python tools/docs_scorecard_test.py
+          echo "::group::docs-scorecard (core: advisory until adoption-playbook refs retired)"
+          python tools/docs_scorecard.py --scope core \
+            || echo "::warning title=docs-debt-core::core doc-debt present (advisory) — public-scrub dangling refs (adoption-playbook.md); run /garden-docs, then re-arm the HARD gate"
+          echo "::endgroup::"
+          echo "::group::docs-scorecard (reachable: advisory)"
+          python tools/docs_scorecard.py --scope reachable \
+            || echo "::warning title=docs-debt::reader-surface doc-debt present (advisory) — run /garden-docs, see docs/DOCS-SCORECARD.md"
+          echo "::endgroup::"
+
+      # Public-copy leak gate: the machine backstop for the redact-needle floor.
+      # The local pre-commit hook (tools/githooks/pre-commit) only fires on a clone
+      # that ran `install_trunk_guard.py`; an un-armed clone — or any path that
+      # reaches the trunk without it — has NO leak gate. This runs the SAME
+      # AUDIT_NEEDLES scan over exactly the commits the push ADDS to the trunk
+      # (added lines only, SELF_REFERENTIAL exempt), failing the build on any
+      # operator-secret needle (real IP, operator path/host) reaching the trunk. Runs
+      # from the repo root (the needle list + policy live there) like dos-review.
+      - name: leak-scan (no operator-secret needle reaches the trunk)
+        working-directory: ${{ github.workspace }}
+        run: |
+          RANGE="${{ github.event.pull_request.base.sha || github.event.before }}..${{ github.sha }}"
+          # fall back to the last commit on a shallow checkout where base is absent.
+          git rev-parse "${RANGE%%..*}" >/dev/null 2>&1 || RANGE="HEAD~1..HEAD"
+          echo "leak-scan $RANGE"
+          python tools/scrub_public_copy.py --audit-range "$RANGE" --root .
+
+      # DOS trust-floor gate: the verdict IS the exit code. `dos review` fails the build
+      # (exit 1) if any commit in the pushed range makes a code/test/doc claim its own diff
+      # does not witness (a "fix: X" that didn't touch X, an empty "done"). This is DOS
+      # gated INTO the build pipeline — not a post-hoc audit — per the workspace's own
+      # trust-floor thesis (CLAIMS.md, the dos-kernel plugin). Runs from the repo root
+      # (DOS reads .github/.. and dos.toml there), so it overrides the fak/ working-dir.
+      - name: dos-review (every claimed commit witnessed by its own diff)
+        working-directory: ${{ github.workspace }}
+        run: |
+          python -m pip install --quiet --disable-pip-version-check dos-kernel
+          RANGE="${{ github.event.pull_request.base.sha || github.event.before }}..${{ github.sha }}"
+          echo "dos review $RANGE"
+          # fetch the base so the range resolves on a shallow checkout; fall back to last commit.
+          git rev-parse "${RANGE%%..*}" >/dev/null 2>&1 || RANGE="HEAD~1..HEAD"
+          dos review "$RANGE"   # positional range; exit 0 clean / 1 residual / 2 unreadable
+
+  # E-001 (Go Race Detector Support): the data-race gate. The build-vet-test job
+  # above runs `go test ./...` WITHOUT instrumentation; this job re-runs the SAME
+  # suite under `-race`, which is the only thing that turns a benign-looking
+  # concurrent read/write into a hard CI failure. Kept a SEPARATE job (not a step)
+  # so the race signal is its own required check and its ~2-10x slowdown never
+  # gates the fast build/vet/test feedback.
+  #
+  # WHY THIS DOESN'T RUN LOCALLY ON EVERY BOX: `-race` requires cgo + a C
+  # compiler. The canonical Windows dev host has CGO_ENABLED=0 and no gcc/clang,
+  # so the race detector physically cannot build there (it silently produces an
+  # un-instrumented binary). ubuntu-latest ships gcc and defaults CGO_ENABLED=1,
+  # so this is the reproducible home of the "race-free" claim. See
+  # docs/testing/race-detector.md for how to run it locally (WSL/Linux/macOS).
+  race-detector:
+    name: race detector · go test -race ./...
+    runs-on: ubuntu-latest
+    env:
+      GOTOOLCHAIN: auto
+      # Set explicitly so the job FAILS LOUDLY if it ever lands on a cgo-less
+      # image, instead of silently building a non-instrumented (race-blind) binary.
+      CGO_ENABLED: "1"
+    defaults:
+      run:
+        working-directory: .
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: false # zero external deps -> no go.sum to key a cache on
+
+      - name: C toolchain present (the race detector needs cgo)
+        run: cc --version
+
+      - name: go test -race ./... (zero data races)
+        # -count=1 forces a real, uncached run — the honest "fresh read-back" of
+        # the race-free claim on every push/PR, never a cached green from before.
+        # -timeout=25m: ThreadSanitizer instrumentation makes CPU-bound packages
+        # (e.g. internal/turnbench's sweep/grid tests) 5-10x slower, well past the
+        # default 10m per-package binary timeout. This only grants wall-clock; it
+        # changes nothing about which tests run.
+        run: go test -race -count=1 -timeout=25m ./...

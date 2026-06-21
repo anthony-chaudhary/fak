@@ -1,0 +1,35 @@
+%%{init: {'theme':'base','themeVariables':{'fontFamily':'Segoe UI, Helvetica, Arial, sans-serif','fontSize':'14px','lineColor':'#5B6B7B','primaryColor':'#DCE9FB','primaryTextColor':'#1B3A66','primaryBorderColor':'#3B6FB5','clusterBkg':'#F7F9FB','clusterBorder':'#AFC0CE'}}}%%
+flowchart LR
+  lever["token-per-watt-per-user lever:<br/>route each token to the cheapest<br/>tier that can do the step"]
+  sched["2-D scheduler<br/>{which agent} x {which tier}"]
+  subgraph TIERS["compute hierarchy (mirrors the memory hierarchy)"]
+    direction LR
+    cpu["TINY model -- CPU/DRAM (no HBM tier)<br/>10x stewards, rung-0/1 pre-flight,<br/>vDSO-class deterministic adjudication,<br/>classifiers -- high-volume bookkeeping"]
+    gpu["SMALL model -- GPU<br/>agentic tool-calling hot path<br/>(the scoped workload)"]
+    front["FRONTIER model -- GPU/HBM<br/>only the few steps that<br/>genuinely need it"]
+  end
+  syscall{"syscall signal:<br/>blocked on a slow tool call?"}
+  lever --> sched
+  sched --> cpu
+  cpu -- "promote back to GPU" --> gpu
+  gpu -- "promote: step needs the big model" --> front
+  front -- "demote: cheap next steps" --> gpu
+  gpu -- "demote: parse result / pre-flight next call" --> cpu
+  syscall -. "SAME signal pages both ways" .-> gpu
+  syscall -. "demote to CPU" .-> cpu
+  class lever note
+  class sched kernel
+  class cpu cheap
+  class gpu untrusted
+  class front frontier
+  class syscall gate
+classDef untrusted fill:#FFE9D6,stroke:#E8833A,stroke-width:2px,color:#7A3E12;
+classDef kernel fill:#DCE9FB,stroke:#3B6FB5,stroke-width:2px,color:#1B3A66;
+classDef gate fill:#FFF3CC,stroke:#C9A227,stroke-width:2px,color:#6B5410;
+classDef pass fill:#DBF3E1,stroke:#3FA45F,stroke-width:2px,color:#1C5230;
+classDef deny fill:#FBDDDD,stroke:#C9453F,stroke-width:2px,color:#6E1F1B;
+classDef mem fill:#EDE7FB,stroke:#7B5BC0,stroke-width:2px,color:#3A2A66;
+classDef cheap fill:#E8ECEF,stroke:#7A8A99,stroke-width:1.5px,color:#33424F;
+classDef world fill:#FCEEDB,stroke:#B5792B,stroke-width:2px,color:#5E3D12;
+classDef frontier fill:#E7D9F5,stroke:#8A53C0,stroke-width:2px,color:#3F2466;
+classDef note fill:#F7F9FB,stroke:#AFC0CE,stroke-width:1px,color:#46586A;

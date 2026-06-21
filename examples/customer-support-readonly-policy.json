@@ -1,0 +1,58 @@
+{
+  "version": "fak-policy/v1",
+  "posture": "fail_closed",
+  "allow": [
+    "create_support_ticket",
+    "read_customer_record",
+    "read_corp_kb",
+    "transfer_to_human_agents"
+  ],
+  "allow_prefix": [
+    "read_",
+    "get_",
+    "search_",
+    "list_",
+    "lookup_",
+    "find_"
+  ],
+  "deny": {
+    "delete_account": "POLICY_BLOCK",
+    "export_customer_data": "SECRET_EXFIL",
+    "refund_payment": "POLICY_BLOCK",
+    "rotate_credentials": "POLICY_BLOCK",
+    "send_customer_email": "POLICY_BLOCK",
+    "transfer_funds": "POLICY_BLOCK"
+  },
+  "self_modify_globs": [
+    ".git/",
+    ".dos/",
+    "policy.json",
+    "customer-support-readonly-policy.json",
+    "/etc/",
+    "id_rsa"
+  ],
+  "redact_fields": [
+    "password",
+    "secret",
+    "api_key",
+    "token",
+    "authorization",
+    "ssn"
+  ],
+  "safe_sinks": [
+    "transfer_to_human_agents"
+  ],
+  "sources": {
+    "fetch_url": "untrusted",
+    "read_corp_kb": "trusted_local",
+    "read_customer_record": "trusted_local"
+  },
+  "arg_rules": [
+    {
+      "tool": "create_support_ticket",
+      "arg": "body",
+      "max_bytes": 4000,
+      "reason": "OVERSIZE"
+    }
+  ]
+}

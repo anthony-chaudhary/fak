@@ -1,0 +1,46 @@
+%%{init: {'theme':'base','themeVariables':{'fontFamily':'Segoe UI, Helvetica, Arial, sans-serif','fontSize':'14px','lineColor':'#5B6B7B','primaryColor':'#DCE9FB','primaryTextColor':'#1B3A66','primaryBorderColor':'#3B6FB5','clusterBkg':'#F7F9FB','clusterBorder':'#AFC0CE'}}}%%
+flowchart TD
+  start(["new here?<br/>Go 1.26+ or one prebuilt binary"]):::untrusted
+
+  subgraph P0["Part 0 - get the binary (2 min)"]
+    b0["curl install.sh  ·  or  go build ./cmd/fak"]:::cheap
+    bv["fak version  ->  0.30.0"]:::pass
+  end
+
+  subgraph P1["Part 1 - drive the kernel OFFLINE (no downloads)"]
+    t1["fak run --trace        -> 12 verdicts, 6 vDSO fast-path hits"]:::kernel
+    t2["fak preflight          -> DENY DEFAULT_DENY (not allow-listed)"]:::deny
+    t3["fak agent --offline    -> injection walled off, task still booked"]:::kernel
+    t4["fak policy --dump/check -> author + validate your own floor"]:::gate
+  end
+
+  subgraph P2["Part 2 - front a model over HTTP (no downloads)"]
+    s1["fak serve --engine inkernel"]:::world
+    s2["GET /healthz  ->  ok:true"]:::pass
+    s3["POST /v1/fak/syscall     -> ALLOW + result + trace_id"]:::kernel
+    s4["POST /v1/fak/adjudicate  -> DENY (verdict only)"]:::deny
+    s5["structured JSON access log (no payloads)"]:::note
+  end
+
+  subgraph P3["Part 3 - OPTIONAL: real local model (~1 GB GGUF)"]
+    m1["go run ./cmd/simpledemo   -> live chat REPL"]:::frontier
+    m2["fak serve --gguf ...      -> OpenAI + Anthropic wires"]:::frontier
+  end
+
+  start --> P0 --> P1 --> P2 --> P3
+  b0 --> bv
+  t1 --> t2 --> t3 --> t4
+  s1 --> s2 --> s3 --> s4 --> s5
+
+  done(["you have seen: a DENY · an injection contained · a model behind a gate"]):::pass
+  P3 --> done
+
+  classDef untrusted fill:#FFE9D6,stroke:#E8833A,stroke-width:2px,color:#7A3E12;
+  classDef kernel fill:#DCE9FB,stroke:#3B6FB5,stroke-width:2px,color:#1B3A66;
+  classDef gate fill:#FFF3CC,stroke:#C9A227,stroke-width:2px,color:#6B5410;
+  classDef pass fill:#DBF3E1,stroke:#3FA45F,stroke-width:2px,color:#1C5230;
+  classDef deny fill:#FBDDDD,stroke:#C9453F,stroke-width:2px,color:#6E1F1B;
+  classDef cheap fill:#E8ECEF,stroke:#7A8A99,stroke-width:1.5px,color:#33424F;
+  classDef world fill:#FCEEDB,stroke:#B5792B,stroke-width:2px,color:#5E3D12;
+  classDef frontier fill:#E7D9F5,stroke:#8A53C0,stroke-width:2px,color:#3F2466;
+  classDef note fill:#F7F9FB,stroke:#AFC0CE,stroke-width:1px,color:#46586A;

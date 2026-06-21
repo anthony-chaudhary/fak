@@ -1,0 +1,100 @@
+#version 450
+#extension GL_EXT_shader_explicit_arithmetic_types_int8 : require
+#extension GL_EXT_shader_8bit_storage : require
+// swiglu_q8_matmul_add.comp — D[t,o] += (silu(G) * U) @ Wq[o]^T  with a Q8_0 down projection.
+//
+// The Q8 analogue of swiglu_matmul_add.comp (FFN tail: SwiGLU -> down_proj -> residual add).
+// The down-projection WEIGHT is pre-quantized Q8_0; the SwiGLU activation (silu(g)*u) is
+// quantized per 32-block on the fly (amax/127, round half away from zero), reproducing cpuref
+// quantizeVecQ8 + qdot8scalar so the result holds the Approx gate.
+//
+// This op's input dim is the FFN intermediate (e.g. 8960 for a 1.5B), which exceeds the shared
+// staging cap, so windowing over whole blocks is mandatory — each window stages silu(G)*U,
+// quantizes it, and dots it against the int8 codes, ACCUMULATING into acc across windows. The
+// result is then ADDED into the residual D (the fused o_proj/down_proj residual add).
+layout(local_size_x = 256) in;
+
+const uint BLOCK = 32u;
+const uint SHARED_CAP = 2048u;
+const uint WIN_BLOCKS = SHARED_CAP / BLOCK;
+
+layout(std430, binding = 0) readonly buffer Wq { int8_t Wcodes[]; };
+layout(std430, binding = 1) readonly buffer Ws { float Wscale[]; };
+layout(std430, binding = 2) readonly buffer Gb { float G[]; };
+layout(std430, binding = 3) readonly buffer Ub { float U[]; };
+layout(std430, binding = 4) buffer Db { float D[]; };
+
+layout(push_constant) uniform Push { int outDim; int inDim; int P; } pc;
+
+shared int8_t Xq[SHARED_CAP];
+shared float  Xs[SHARED_CAP / 32u];
+
+int8_t q8round(float x) {
+    int t = int(x);
+    float f = x - float(t);
+    if (f >= 0.5) t += 1; else if (f <= -0.5) t -= 1;
+    t = clamp(t, -127, 127);
+    return int8_t(t);
+}
+
+void main() {
+    uint out_ = uint(pc.outDim);
+    uint outGroups = (out_ + 255u) / 256u;
+    uint t = gl_WorkGroupID.x / outGroups;
+    if (t >= uint(pc.P)) return;
+    uint outGroup = gl_WorkGroupID.x - t * outGroups;
+    uint tid = gl_LocalInvocationID.x;
+    uint in_ = uint(pc.inDim);
+    uint nblk = in_ / BLOCK;
+    uint xbase = t * in_;
+
+    uint o = outGroup * 256u + tid;
+    uint wbase = o * in_;
+    uint sbase = o * nblk;
+    float acc = 0.0;
+
+    for (uint wb = 0u; wb < nblk; wb += WIN_BLOCKS) {
+        uint winBlocks = min(WIN_BLOCKS, nblk - wb);
+        uint winBase = wb * BLOCK;
+
+        for (uint b = tid; b < winBlocks; b += 256u) {
+            uint base = b * BLOCK;
+            uint gbase = winBase + base;
+            float amax = 0.0;
+            for (uint i = 0u; i < BLOCK; ++i) {
+                float g = G[xbase + gbase + i];
+                float act = (g / (1.0 + exp(-g))) * U[xbase + gbase + i];
+                amax = max(amax, abs(act));
+            }
+            float d = amax / 127.0;
+            Xs[b] = d;
+            float qd = d > 0.0 ? 1.0 / d : 0.0;
+            for (uint i = 0u; i < BLOCK; ++i) {
+                float g = G[xbase + gbase + i];
+                float act = (g / (1.0 + exp(-g))) * U[xbase + gbase + i];
+                Xq[base + i] = (d > 0.0) ? q8round(act * qd) : int8_t(0);
+            }
+        }
+        barrier();
+
+        if (o < out_) {
+            for (uint lb = 0u; lb < winBlocks; ++lb) {
+                uint cb = wbase + (wb + lb) * BLOCK;
+                uint xb = lb * BLOCK;
+                int s0 = 0, s1 = 0, s2 = 0, s3 = 0;
+                for (uint i = 0u; i < BLOCK; i += 4u) {
+                    s0 += int(Wcodes[cb + i])      * int(Xq[xb + i]);
+                    s1 += int(Wcodes[cb + i + 1u]) * int(Xq[xb + i + 1u]);
+                    s2 += int(Wcodes[cb + i + 2u]) * int(Xq[xb + i + 2u]);
+                    s3 += int(Wcodes[cb + i + 3u]) * int(Xq[xb + i + 3u]);
+                }
+                acc += float((s0 + s1) + (s2 + s3)) * Wscale[sbase + wb + lb] * Xs[lb];
+            }
+        }
+        barrier();
+    }
+
+    if (o < out_) {
+        D[t * out_ + o] += acc;
+    }
+}

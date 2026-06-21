@@ -1,0 +1,142 @@
+{
+  "_about": "SOURCE OF TRUTH for the fak hero benchmark comparison. Edit THIS file, then run `python tools/hero_benchmark_gen.py` to rebuild the doc + both SVGs (+ optional html). No number here is new: each row carries provenance (commit + artifact/doc) tracing to fak/BENCHMARK-AUTHORITY.md. Rows with an `artifact`+`field` are re-checkable via `python tools/hero_benchmark_gen.py --verify-sources`. v2 framing rule: compare ONLY against the best already-shipped SOTA serving system (tuned warm-KV cache / SGLang / vLLM / llama.cpp) — never against a naive re-prefill strawman — and state the absolute measured science number first, with any multiplier as a parenthetical reference (model-card style).",
+  "meta": {
+    "title": "fak — Hero Benchmark Comparison (v2, SOTA-only)",
+    "as_of": "2026-06-21",
+    "version": "v2",
+    "fak_version": "0.30.0",
+    "machine": "node-macos-a — Apple M3 Pro (6P+6E, 36 GB unified, ~150 GB/s), arm64, macOS 26.5",
+    "doc_path": "fak/HERO-BENCHMARK-2026-06-21.md",
+    "hero_svg": "visuals/53-hero-benchmark-comparison.svg",
+    "leaderboard_svg": "visuals/54-hero-benchmark-leaderboard.svg",
+    "html_path": "visuals/hero-benchmark.html",
+    "authority": "fak/BENCHMARK-AUTHORITY.md",
+    "artifact_root": "fak"
+  },
+  "headline": {
+    "kicker": "HERO BENCHMARK · AGENT-FLEET SERVING EFFICIENCY",
+    "title": "fak does the fleet's shared work once — not every turn",
+    "subtitle": "Same 50-turn × 5-agent run · Apple M3 Pro · Qwen2.5-1.5B Q8 · measured against the tuned SOTA prefix cache",
+    "primary": { "value": "19.0", "label": "minutes  (lower is better)", "baseline": "fak — 50-turn × 5-agent fleet serving time" },
+    "secondary": { "value": "78 min", "baseline": "Warm-KV cache (SGLang / vLLM-style)", "note": "4.1× less work — same kernel, warm-KV vs fused." },
+    "cards": [
+      { "label": "fak fleet serving time", "value": "19.0 min", "sub": "50-turn × 5-agent, Q8" },
+      { "label": "tuned SOTA cache floor", "value": "78 min", "sub": "warm per-agent KV (4.1× more)" },
+      { "label": "KV-cache hit rate", "value": "86.7%", "sub": "vs SGLang 50–99% · =100% opt" },
+      { "label": "single-stream decode, 7B", "value": "8.7 tok/s", "sub": "llama.cpp 17.3 — trails, closing" }
+    ],
+    "statement": "On a realistic **50-turn × 5-agent** run (Apple M3 Pro, Qwen2.5-1.5B Q8), `fak` serves the fleet in **19.0 minutes**. A per-agent warm-KV cache — the same reuse discipline SGLang, vLLM, and OpenAI prompt caching ship — needs **≈78 minutes** on the *identical forward pass*: `fak` does **4.1× less serving work**. That baseline is `fak`'s **own** kernel run in warm-KV mode (both arms live, kernel held constant), so the 4.1× isolates **cross-agent reuse**, not kernel speed — see *What the 4.1× is measured against* below. Every comparison here is against that tuned SOTA floor.",
+    "bitexact": "Both arms run the **identical Q8 forward pass** and emit **bit-identical tokens** (`TestBatchedDecodeMatchesSerial`, `TestBatchFromPrefixMatchesIndependentPrefill`) — so the win is **reuse, not a numerics shortcut**. *(Commit `2bbda6f`, `headline-qwen-50x5.json`.)*",
+    "provenance": { "commit": "2bbda6f", "artifact": "experiments/session/headline-qwen-50x5.json" }
+  },
+  "baseline_explainer": {
+    "heading": "What the 4.1× is measured against (and its ceiling)",
+    "body_md": "The **≈78-minute baseline is `fak`'s own Q8 forward pass** run in a per-agent warm-KV serving discipline — the same reuse SGLang, vLLM, and OpenAI prompt caching ship — **not a measured competitor process**. Both arms run end-to-end live on one shared kernel: their decode wall-clocks are byte-identical (2,878,394 ms) and the no-reuse arm's decode is *defined* as the warm arm's live decode, so the kernel is **held constant** across arms. `fak`'s single-stream kernel is itself **unoptimized** (≈0.39× decode, ≈0.10–0.12× prefill vs llama.cpp CPU at 1.5B — it still lacks an arm64 register-blocked GEMM tile, [fleet#578](https://github.com/anthony-chaudhary/fleet/issues/578)), and the baseline holds that *same slow kernel* constant — so the **4.1× is work _eliminated_, not work made faster**. Read it as *4.1× vs a SOTA-style warm-KV discipline*, not *vs the SOTA implementation*: a production vLLM/SGLang with its own kernel tricks would shrink the absolute minutes of **both** arms, but — because per-token cost (κ) and tokens-processed (N) are orthogonal factors of the same `cost ≈ κ·N` — a *uniform* kernel speedup scales both arms equally and is **expected to leave the 4.1× reuse ratio roughly intact** ([WHY-REUSE-WINS](WHY-REUSE-WINS-2026-06-21.md) §4).",
+    "bound_md": "**Its ceiling, and the next step.** The 4.1× (warm/fused = 78.3/19.0 min) blends a measured **1.46× prefill-token saving** (25,920 → 17,728 tokens) with a **~6.4× batched-decode saving** on top. The *shared-prefix* component alone is bounded by the agent count (~5×: the warm arm prefills the shared prefix once **per agent**, `fak` once **for the fleet**) — but that 5× bounds only the shared-prefill slice, not the end-to-end multiplier (per-agent residual prefill pulls it below 5×; cross-agent decode batching pushes it above the 1.46× prefill-only bound). The open next-step kernel release — the arm64 register-blocked GEMM tile ([fleet#578](https://github.com/anthony-chaudhary/fleet/issues/578), **currently unshipped**) — **would** lower the absolute 19.0 / 78.3 minutes on both arms and **is expected** to push the realized wall-clock multiplier toward its token-count ceiling (on a *separate* workload, `radixbench` already shows live reuse at **6.95× of a 7.50× deterministic token ceiling**, climbing with model size). It would **not** change the structural shared-prefix bound, which is set by the fleet's agent count and shared-vs-residual split, not by kernel speed."
+  },
+  "cost_collapse": {
+    "title": "Time to serve the 50×5 fleet — fak vs tuned SOTA cache  (lower is better)",
+    "chart_max_min": 80,
+    "axis_ticks_min": [0, 20, 40, 60, 80],
+    "footnote": "Both arms run fully live on the identical Q8 forward pass, bit-identical tokens — baseline = the tuned warm per-agent KV cache (the SGLang / vLLM floor).",
+    "arms": [
+      { "name": "Tuned SOTA prefix cache (per-agent warm KV)", "minutes": 78, "display": "78 min", "role": "sota", "offchart": false },
+      { "name": "fak fused", "minutes": 19, "display": "19.0 min  ·  4.1× less work", "role": "fak", "offchart": false }
+    ]
+  },
+  "top3_sota": {
+    "heading": "The top-3 SOTA serving systems fak is measured against — and where fak sits",
+    "intro": "All three give you the per-agent warm cache (the 78-min floor above). fak adds the one reuse a per-agent cache structurally can't take: cross-agent prefix fusion.",
+    "intro_md": "The three leading serving systems all give you the **same per-agent warm-cache floor** (the 78-minute bar above). `fak` sits *on top* of that floor and adds the one reuse a per-agent cache **structurally cannot take**: **cross-agent prefix fusion** — one copy of the shared system-prompt + tool-schema prefix serves the whole fleet, instead of one copy per agent.",
+    "items": [
+      { "rank": 1, "system": "SGLang (RadixAttention)", "tag": "SOTA #1 · SGLANG (RADIXATTENTION)", "header_role": "sota",
+        "ships_md": "Per-request radix prefix cache; published **50–99%** hit-rate band",
+        "position_md": "**Parity** — `fak` hits **86.7%** (= **100% of optimal**, up from FCFS 62.1%) — then dedups the prefix across the fleet",
+        "gives": ["Per-request radix prefix cache; published", "50–99% hit-rate band."],
+        "position": ["Parity: 86.7% hit = 100% of optimal —", "then dedups the prefix across the whole fleet."], "position_role": "win" },
+      { "rank": 2, "system": "vLLM (Automatic Prefix Caching)", "tag": "SOTA #2 · vLLM (AUTO PREFIX CACHING)", "header_role": "sota",
+        "ships_md": "Automatic per-agent prefix reuse *from the front*; same warm 78-min floor",
+        "position_md": "`fak` serves the same fleet in **19.0 min vs 78 min** (4.1× less work) by fusing one shared prefix across 5 agents, not 5 copies",
+        "gives": ["Automatic per-agent prefix reuse from the", "front; the same warm 78-min floor."],
+        "position": ["19.0 min vs 78 min (4.1× less) by fusing", "one shared prefix across 5 agents, not 5 copies."], "position_role": "win" },
+      { "rank": 3, "system": "llama.cpp (raw throughput)", "tag": "SOTA #3 · LLAMA.CPP (RAW THROUGHPUT)", "header_role": "loss",
+        "ships_md": "**Fastest single-stream decode** on this box — 17.3 tok/s (7B Q8)",
+        "position_md": "`fak` decodes the same 7B at **8.7 tok/s (0.50×)** *today* — the gap is closing (the arm64 kernel tile, [fleet#578](https://github.com/anthony-chaudhary/fleet/issues/578)). Single chat → llama.cpp; `fak` wins the *fleet*",
+        "gives": ["Fastest single-stream decode on this box:", "17.3 tok/s on 7B Q8 (Metal)."],
+        "position": ["fak 8.7 tok/s (0.50×) today — gap closing", "(#578). fak wins the fleet, not the stream."], "position_role": "loss" }
+    ]
+  },
+  "palette": {
+    "AGENT FLEET": "#2e8b57",
+    "KV REUSE": "#3a7d9c",
+    "SINGLE STREAM": "#6a7685"
+  },
+  "leaderboard": {
+    "heading": "Every row is fak vs the best already-shipped SOTA — leader bolded",
+    "subtitle": "Four agent-fleet / KV-reuse benchmarks where fak leads or reaches parity · two single-stream benchmarks where it trails — shown, not hidden. The absolute measured number is stated first; any multiplier is a parenthetical reference.",
+    "note_md": "Six benchmarks, each `fak` against the **best already-shipped SOTA serving system** — no naive-strawman rows. The **absolute measured number leads**; the multiplier is a parenthetical reference (model-card style). **`fak`'s number is bolded where it leads or reaches parity**; the two single-stream rows where it trails are shown plain — not a clean sweep."
+  },
+  "top10": [
+    { "rank": 1, "benchmark": "50-turn × 5-agent fleet serving time  (front-page headline)", "sub": "Qwen2.5-1.5B Q8 · identical forward pass · commit 2bbda6f", "regime": "AGENT FLEET",
+      "baseline": "Tuned warm per-agent KV: 78 min", "fak": "19.0 min  (4.1× less work)", "fak_md": "19.0 min  (4.1× less work)", "win": true,
+      "commit": "2bbda6f", "artifact": "experiments/session/headline-qwen-50x5.json",
+      "verify": { "field": "cells[0].net_value_add_vs_tuned", "expect": 4.124566205185288, "tol": 1e-6 } },
+    { "rank": 2, "benchmark": "Marginal value over a tuned warm per-agent cache  (B vs C)", "sub": "SmolLM2-135M Q8, T=8→16 A=4 P=512 · the most conservative SOTA point", "regime": "AGENT FLEET",
+      "baseline": "Warm per-agent KV already hot (B): 1.0×", "fak": "2.4×–2.7×  (cross-agent fusion on top of warm)", "fak_md": "2.4×–2.7× (on top of an already-warm cache)", "win": true,
+      "commit": "", "provenance_doc": "fak/SESSION-VALUE-STACK-RESULTS.md (B/C = 2.70× @T8, 2.41× @T16) · fak/BENCHMARK-AUTHORITY.md", "field": "" },
+    { "rank": 3, "benchmark": "KV-cache hit rate  (FCFS → cache-aware)", "sub": "reaches 100% of optimal reuse · commit 92896a4", "regime": "KV REUSE",
+      "baseline": "SGLang RadixAttention band: 50–99% (FCFS 62.1%)", "fak": "86.7%  (= 100% of optimal)", "fak_md": "86.7% (= 100% of optimal)", "win": true,
+      "commit": "92896a4", "artifact": "experiments/radixattention/radixbench-qwen2.5-1.5b-q8-agents-fresh-20260619.json",
+      "verify": { "field": "workloads[0].cache_hit_rate", "expect": 0.8666666666666667, "tol": 1e-6 } },
+    { "rank": 4, "benchmark": "RadixAttention live prefill speedup  (Qwen2.5-1.5B)", "sub": "93% of the 7.50× deterministic token-reuse ceiling · commit 92896a4", "regime": "KV REUSE",
+      "baseline": "Deterministic token-reuse ceiling: 7.50×", "fak": "6.95×  (93% of the ceiling, live)", "fak_md": "6.95× (93% of the 7.50× ceiling)", "win": true,
+      "commit": "92896a4", "artifact": "experiments/radixattention/radixbench-qwen2.5-1.5b-q8-agents-fresh-20260619.json",
+      "verify": { "field": "workloads[0].live_prefill_speedup", "expect": 6.951232568881241, "tol": 1e-6 } },
+    { "rank": 5, "benchmark": "Single-stream decode  (Qwen2.5-7B Q8)", "sub": "fak is not a faster model server — and says so · commit 34c74f4", "regime": "SINGLE STREAM",
+      "baseline": "llama.cpp Metal: 17.3 tok/s", "fak": "8.7 tok/s  (0.50×)", "fak_md": "8.7 tok/s  (0.50×)", "win": false,
+      "commit": "34c74f4", "artifact": "model-ladder/modelbench-qwen25-7b-q8.json", "field": "" },
+    { "rank": 6, "benchmark": "Single-stream prefill  (1.5B–7B Q8)", "sub": "arm64 lacks the GEMM tile (fleet#578); x86 slope = parity · commit 34c74f4", "regime": "SINGLE STREAM",
+      "baseline": "llama.cpp CPU (+ Metal GPU)", "fak": "0.12× CPU · 0.083× Metal-GPU", "fak_md": "~0.12× vs llama.cpp CPU, apples-to-apples (0.083× vs Metal GPU)", "win": false,
+      "commit": "34c74f4", "provenance_doc": "fak/MODEL-LADDER-VS-SOTA-2026-06-21.md (Regime A, CPU) · fak/QWEN25-7B-RESULTS.md (Metal)", "field": "" }
+  ],
+  "leaderboard_takeaway_md": "**Every win is in the agent-fleet / KV-reuse regime — `fak`'s actual product category — and every row is against the best already-shipped SOTA, not a naive strawman.** The 2 trailing rows are single-stream raw throughput, which `fak` explicitly does not target. A bolded number means `fak` beat (or reached parity with) the best already-shipped baseline on that axis, stated as the absolute measured number.",
+  "not_leading": {
+    "intro": "The same way Opus 4.5's announcement showed GPQA and Humanity's Last Exam where it trailed Gemini 3 Pro, here is where `fak` trails the SOTA — stated plainly, not buried:",
+    "bullets": [
+      "**Single-stream decode:** `fak` decodes **8.7 tok/s** on Qwen2.5-7B Q8 vs llama.cpp Metal's **17.3 tok/s** — **0.50×**. Across the ladder the gap is **0.39× → 0.53×** (1.5B → 7B); it *narrows* with model size (decode is bandwidth-bound toward the same ~150 GB/s unified-memory floor) — `fak` trails today, and the gap is actively closing.",
+      "**Single-stream prefill:** `fak` trails — and the figure depends entirely on the baseline backend. **Apples-to-apples (both engines on CPU, same machine + Q8 weights):** on Apple M3 Pro arm64 — which still lacks the register-blocked int8 GEMM tile ([fleet#578](https://github.com/anthony-chaudhary/fleet/issues/578)) — `fak` prefill is **~0.10–0.15× of llama.cpp CPU** (1.5B 0.101×–0.15×, 7B 0.123×; median **~0.12×**). On x86 Zen5, where that tile already exists, the per-token raw-compute *slope* reaches **parity (1.03×)** — the ceiling arm64 inherits once the tile lands. **Against a Metal GPU (NOT apples-to-apples):** **0.083× (7B)** / 0.01× (27B), but the 7B doc attributes ~12× of that gap to the GPU *device* (0.083× × 12 ≈ 1.0×), so it collapses toward the ~0.10–0.12× CPU-vs-CPU figure once the GPU is removed — a device gap, not a kernel gap. Either way `fak` trails single-stream prefill **today** — closing as the arm64 tile lands (x86 slope is already at parity). The honest fence, measured fairly.",
+      "**Model-size ceiling on this box:** `fak`'s faithful ceiling is **7B** on 36 GB (GGUF dequant-to-f32 OOMs above; two arch families fail at load — [fleet#579](https://github.com/anthony-chaudhary/fleet/issues/579)). llama.cpp reaches 72B (CPU) / ~32B (Metal). The MoE standout (Qwen3-30B-A3B, **50 tok/s** on llama.cpp) runs because only 3B of 30B params are active per token — sparse activation is the lever, and `fak` doesn't load it yet."
+    ],
+    "synthesis": "**The synthesis:** *one chat → use llama.cpp; an agent fleet → use `fak`.* Both are true; never cross-compare them."
+  },
+  "lineage": [
+    { "field": "UTC", "value": "2026-06-21" },
+    { "field": "machine", "value": "`node-macos-a` — Apple M3 Pro (6P+6E, 36 GB unified, ~150 GB/s), arm64, macOS 26.5" },
+    { "field": "fak", "value": "app_version 0.30.0; headline artifacts at commits `2bbda6f` / `92896a4` / `34c74f4`" },
+    { "field": "SOTA ref", "value": "llama.cpp build `b9707` (same machine); SGLang RadixAttention (arXiv:2312.07104) hit-rate band; vLLM Automatic Prefix Caching" },
+    { "field": "harnesses", "value": "`cmd/{modelbench,radixbench,sessionbench,fleetbench}` (fak) · `llama-bench` (llama.cpp)" },
+    { "field": "bit-exactness", "value": "`TestBatchedDecodeMatchesSerial`, `TestBatchFromPrefixMatchesIndependentPrefill`, `internal/radixkv` split-reuse == recompute (max\\|Δ\\|=0)" }
+  ],
+  "regime_rule_md": "**Regime rules (per [BENCHMARK-GOVERNANCE.md](BENCHMARK-GOVERNANCE.md)):** the deterministic metrics (token speedup, hit rate, cell counts) are hardware-independent and reproduce the committed JSON bit-for-bit; only the live wall-clocks are single-box and authoritative as *within-run ratios*.",
+  "reproduce": [
+    "# Headline (the hero number): 50-turn × 5-agent serving time on Qwen2.5-1.5B Q8",
+    "FAK_WORKERS=6 go -C fak run ./cmd/sessionbench -hf <qwen2.5-1.5b-hf> -prefix 2048 -turns 50 -agents 5 -decode 32 -result 64",
+    "",
+    "# SOTA prefix-cache parity (RadixAttention hit rate + live speedup vs the 7.50× ceiling)",
+    "go -C fak run ./cmd/radixbench -dir internal/model/.cache/qwen2.5-1.5b -quant",
+    "",
+    "# Marginal value over an already-warm per-agent cache (B vs C)",
+    "go -C fak run ./cmd/sessionbench -turns 8,16 -agents 4 -prefix 512 -decode 24 -result 48",
+    "",
+    "# The honest fence: single-stream fak vs llama.cpp on the same Q8 weights",
+    "go -C fak run ./cmd/modelbench -hf <qwen2.5-7b-hf> -lean -decode-reps 6 -prefill-reps 3",
+    "llama-bench -m <qwen2.5-7b-q8_0.gguf> -ngl 99 -t 6 -p 256 -n 64"
+  ],
+  "see_also": [
+    { "text": "fak/WHY-REUSE-WINS-2026-06-21.md", "href": "WHY-REUSE-WINS-2026-06-21.md", "note": "the **why** behind this hero: reuse is a *different class* of optimization (work-elimination, not work-acceleration) — exact, training-free, and composes on top of every per-token trick. Argues it and fences where it's overstated." },
+    { "text": "fak/MODEL-LADDER-VS-SOTA-2026-06-21.md", "href": "MODEL-LADDER-VS-SOTA-2026-06-21.md", "note": "the full two-regime ladder (single-stream **and** multi-agent value stack) this hero distills." },
+    { "text": "fak/BENCHMARK-AUTHORITY.md", "href": "BENCHMARK-AUTHORITY.md", "note": "single source of truth for every committed number." },
+    { "text": "fak/RADIXATTENTION-RESULTS.md", "href": "RADIXATTENTION-RESULTS.md", "note": "SGLang RadixAttention parity + hit-rate method." },
+    { "text": "docs/explainers/sota-optimizations.md", "href": "../docs/explainers/sota-optimizations.md", "note": "the 10 tuned-SOTA optimizations `fak` sits on top of." }
+  ]
+}

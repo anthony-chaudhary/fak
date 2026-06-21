@@ -1,0 +1,29 @@
+%%{init: {'theme':'base','themeVariables':{'fontFamily':'Segoe UI, Helvetica, Arial, sans-serif','fontSize':'14px','lineColor':'#5B6B7B','primaryColor':'#DCE9FB','primaryTextColor':'#1B3A66','primaryBorderColor':'#3B6FB5','clusterBkg':'#F7F9FB','clusterBorder':'#AFC0CE'}}}%%
+flowchart TD
+  res(["a tool result (possibly obfuscated)"])
+  subgraph CHAIN["the ResultAdmitter chain — most-restrictive verdict wins (a monotone fold)"]
+    ng["normgate (rank 5)<br/>normalized-view / provenance<br/>catches evasions the base markers miss"]
+    mmu["ctxmmu (rank 10)<br/>base markers + secret regex<br/>(≈100% evadable ALONE: 24/24 obfuscated walked through)"]
+  end
+  res --> ng --> mmu
+  ng -->|"quarantine wins the fold"| sealed["SEALED — held out of context"]
+  mmu -->|"quarantine"| sealed
+  slot["roadmap drivers plug in as new ranks (no edit to ctxmmu):<br/>NFKC/UTS#39 canonicalize · broken-token pre-scan ·<br/>capability-IFC (CaMeL / FIDES) · source-taint stamp · learned detectors"]
+  slot -.->|"add a rank"| CHAIN
+  note["⚡ catch-more = an independent plug-in driver; the fold is monotone.<br/>(recall's re-screen folds the BASE gate today — folding the chain to inherit normgate is the pending one-line integration.)"]
+  sealed -.- note
+  classDef untrusted fill:#FFE9D6,stroke:#E8833A,stroke-width:2px,color:#7A3E12;
+  classDef kernel fill:#DCE9FB,stroke:#3B6FB5,stroke-width:2px,color:#1B3A66;
+  classDef gate fill:#FFF3CC,stroke:#C9A227,stroke-width:2px,color:#6B5410;
+  classDef pass fill:#DBF3E1,stroke:#3FA45F,stroke-width:2px,color:#1C5230;
+  classDef deny fill:#FBDDDD,stroke:#C9453F,stroke-width:2px,color:#6E1F1B;
+  classDef mem fill:#EDE7FB,stroke:#7B5BC0,stroke-width:2px,color:#3A2A66;
+  classDef cheap fill:#E8ECEF,stroke:#7A8A99,stroke-width:1.5px,color:#33424F;
+  classDef world fill:#FCEEDB,stroke:#B5792B,stroke-width:2px,color:#5E3D12;
+  classDef frontier fill:#E7D9F5,stroke:#8A53C0,stroke-width:2px,color:#3F2466;
+  classDef note fill:#F7F9FB,stroke:#AFC0CE,stroke-width:1px,color:#46586A;
+  class res untrusted;
+  class ng,mmu kernel;
+  class sealed deny;
+  class slot cheap;
+  class note note;

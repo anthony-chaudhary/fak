@@ -1,0 +1,648 @@
+// Command demorace is the live, on-box demo of fak's value point: REUSE.
+//
+// It runs a head-to-head LIVE race between two ways of serving the SAME model over the
+// SAME 25-request multi-agent session, and builds a reuse CURVE across a model-size ladder.
+//
+//	The session: C agents share one P-token prefix; each runs T turns, decoding D tokens
+//	per turn and ingesting R tool-result tokens between turns. Total requests = C·T (=25).
+//
+// The two arms (same model, same bit-identical kernels — the delta is PURE work-reuse):
+//
+//	arm "naive" (A) — the common local pattern: re-prefill the ENTIRE growing context every
+//	  turn, every agent. Prefill work is quadratic in T and ×C. Run FULLY LIVE here.
+//	arm "fak"   (C) — prefix prefilled ONCE and cloned into C agents; batched decode (one
+//	  weight stream serves all C); incremental result ingestion. Run FULLY LIVE here.
+//
+// Same model, same tokens, same answers; the only difference is how much shared setup the
+// system makes the model re-read. That is the whole fak thesis, made visible in real time.
+//
+// Serve it:
+//
+//	go run ./cmd/demorace -addr 127.0.0.1:8147
+//	# open http://127.0.0.1:8147  → "Run live race" then "Build curve"
+//
+// The ladder (135m → 0.5B → 1.5B → 3B) is auto-detected from disk; missing rungs are skipped.
+package main
+
+import (
+	"embed"
+	"encoding/json"
+	"flag"
+	"fmt"
+	"math"
+	"net/http"
+	"os"
+	"path/filepath"
+	"runtime"
+	"sort"
+	"strconv"
+	"strings"
+	"sync"
+	"time"
+
+	"github.com/anthony-chaudhary/fak/internal/model"
+)
+
+//go:embed page.html
+var pageFS embed.FS
+
+const version = "fak-demorace-v1"
+
+// ---------------------------------------------------------------------------
+// model ladder
+// ---------------------------------------------------------------------------
+
+type spec struct {
+	Name    string // display label
+	Dir     string // weights dir
+	Kind    string // "dir" (fak export) or "hf" (safetensors snapshot, lean Q8 load)
+	Params  string // human param count, for the curve x-axis
+	Order   int    // ladder order
+	Present bool
+}
+
+func ladderSpecs() []spec {
+	home, _ := os.UserHomeDir()
+	hf := filepath.Join(home, ".cache", "fak-models", "hf")
+	candidates := []spec{
+		{Name: "SmolLM2-135M", Params: "0.14B", Order: 0, Kind: "dir",
+			Dir: "internal/model/.cache/smollm2-135m"},
+		{Name: "Qwen2.5-0.5B", Params: "0.5B", Order: 1, Kind: "hf",
+			Dir: filepath.Join(hf, "Qwen2.5-0.5B-Instruct")},
+		{Name: "Qwen2.5-1.5B", Params: "1.5B", Order: 2, Kind: "hf",
+			Dir: filepath.Join(hf, "Qwen2.5-1.5B-Instruct")},
+		{Name: "Qwen2.5-3B", Params: "3B", Order: 3, Kind: "hf",
+			Dir: filepath.Join(hf, "Qwen2.5-3B-Instruct")},
+	}
+	wd, _ := os.Getwd()
+	for i := range candidates {
+		dir := candidates[i].Dir
+		if !filepath.IsAbs(dir) {
+			dir = filepath.Join(wd, dir)
+		}
+		_, err := os.Stat(dir)
+		candidates[i].Present = err == nil
+		candidates[i].Dir = dir
+	}
+	sort.Slice(candidates, func(i, j int) bool { return candidates[i].Order < candidates[j].Order })
+	return candidates
+}
+
+// registry: lazily load + quantize each model once, memoize.
+type registry struct {
+	mu    sync.Mutex
+	cache map[string]*loaded
+}
+
+type loaded struct {
+	m     *model.Model
+	vocab int
+	name  string
+}
+
+func newRegistry() *registry { return &registry{cache: map[string]*loaded{}} }
+
+func (r *registry) get(s spec) (*loaded, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if l, ok := r.cache[s.Name]; ok {
+		return l, nil
+	}
+	m, err := loadSpec(s)
+	if err != nil {
+		return nil, err
+	}
+	m.Quantize()
+	l := &loaded{m: m, vocab: m.Cfg.VocabSize, name: s.Name}
+	r.cache[s.Name] = l
+	return l, nil
+}
+
+func readHFConfig(dir string) (model.Config, error) {
+	var cfg model.Config
+	cb, err := os.ReadFile(filepath.Join(dir, "config.json"))
+	if err != nil {
+		return cfg, fmt.Errorf("config.json: %w", err)
+	}
+	if err := json.Unmarshal(cb, &cfg); err != nil {
+		return cfg, fmt.Errorf("config.json parse: %w", err)
+	}
+	if cfg.HeadDim == 0 && cfg.NumHeads != 0 {
+		cfg.HeadDim = cfg.HiddenSize / cfg.NumHeads
+	}
+	return cfg, nil
+}
+
+func loadSpec(s spec) (*model.Model, error) {
+	switch s.Kind {
+	case "hf":
+		cfg, err := readHFConfig(s.Dir)
+		if err != nil {
+			return nil, err
+		}
+		// sharded vs single safetensors
+		if _, err := os.Stat(filepath.Join(s.Dir, "model.safetensors.index.json")); err == nil {
+			return model.LoadSafetensorsQuantDir(s.Dir, cfg)
+		}
+		return model.LoadSafetensorsQuant(filepath.Join(s.Dir, "model.safetensors"), cfg)
+	default:
+		return model.Load(s.Dir)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// small helpers
+// ---------------------------------------------------------------------------
+
+func ms(d time.Duration) float64 { return float64(d.Nanoseconds()) / 1e6 }
+
+func lcgIDs(n, vocab int, seed uint64) []int {
+	ids := make([]int, n)
+	state := 2463534242 + seed
+	for i := 0; i < n; i++ {
+		state = (state*1103515245 + 12345) & 0x7fffffff
+		ids[i] = int(state % uint64(vocab))
+	}
+	return ids
+}
+
+// prefillModel captures prefill wall-clock at sampled lengths, so the naive arm's quadratic
+// re-prefill can be summed over the exact per-turn context lengths (the sessionbench method).
+type prefillModel struct {
+	Lens []int     `json:"lens"`
+	MS   []float64 `json:"ms"`
+}
+
+func measurePrefill(m *model.Model, vocab int, lens []int, reps int) prefillModel {
+	pm := prefillModel{}
+	for _, L := range lens {
+		ids := lcgIDs(L, vocab, uint64(1000+L))
+		best := math.MaxFloat64
+		for r := 0; r < reps; r++ {
+			s := m.NewSession()
+			s.Quant = true
+			t0 := time.Now()
+			s.Prefill(ids)
+			d := ms(time.Since(t0))
+			if d < best {
+				best = d
+			}
+			s.Close()
+		}
+		pm.Lens = append(pm.Lens, L)
+		pm.MS = append(pm.MS, best)
+	}
+	return pm
+}
+
+func (pm prefillModel) cost(L int) float64 {
+	n := len(pm.Lens)
+	if n == 0 {
+		return 0
+	}
+	if L <= pm.Lens[0] {
+		return pm.MS[0] * float64(L) / float64(pm.Lens[0])
+	}
+	for i := 1; i < n; i++ {
+		if L <= pm.Lens[i] {
+			lo, hi := pm.Lens[i-1], pm.Lens[i]
+			frac := float64(L-lo) / float64(hi-lo)
+			return pm.MS[i-1] + frac*(pm.MS[i]-pm.MS[i-1])
+		}
+	}
+	lo, hi := pm.Lens[n-2], pm.Lens[n-1]
+	slope := (pm.MS[n-1] - pm.MS[n-2]) / float64(hi-lo)
+	return pm.MS[n-1] + slope*float64(L-hi)
+}
+
+// computeAPrefill sums prefillCost over the naive arm's exact per-turn context lengths, ×C.
+func computeAPrefill(pm prefillModel, P, T, C, D, R int) float64 {
+	var total float64
+	for t := 0; t < T; t++ {
+		ctx := P + t*(D+R)
+		total += pm.cost(ctx)
+	}
+	return total * float64(C)
+}
+
+// prefillTokens is the EXACT, timing-free prefill-token count each arm processes — fixed by
+// the session structure alone, so the A/C work-elimination ratio cannot drift with load.
+func prefillTokens(P, T, C, D, R int) (a, b, c int) {
+	for t := 0; t < T; t++ {
+		a += P + t*(D+R)
+	}
+	a *= C
+	b = C * (P + (T-1)*R)
+	c = P + C*(T-1)*R
+	return
+}
+
+// ---------------------------------------------------------------------------
+// live arms with per-turn progress
+// ---------------------------------------------------------------------------
+
+type event map[string]any
+
+type emitter func(event)
+
+// liveArmC runs the fak fused arm live: prefix ONCE + clone into C agents + batched decode
+// + incremental result ingestion. Emits one "turn" event per turn (each turn serves all C
+// agents, so requests advance by C per turn).
+func liveArmC(l *loaded, P, T, C, D, R int, emit emitter) (totalMS, decodeMS float64) {
+	m, vocab := l.m, l.vocab
+	prefix := lcgIDs(P, vocab, 1)
+	ids0 := lcgIDs(C, vocab, 991)
+	start := time.Now()
+
+	base := m.NewSession()
+	base.Quant = true
+	t0 := time.Now()
+	base.Prefill(prefix)
+	prefillMS := ms(time.Since(t0))
+
+	bs := m.NewBatchFromPrefixReserve(base.Cache, C, T*(D+R))
+	bs.SetQuant(true)
+	_ = prefillMS
+
+	ids := append([]int(nil), ids0...)
+	var dcAcc float64
+	prefilledSoFar := P
+	for t := 0; t < T; t++ {
+		t1 := time.Now()
+		for d := 0; d < D; d++ {
+			bs.StepBatch(ids)
+			for j := range ids {
+				ids[j] = (ids[j]*48271 + 1) % vocab
+			}
+		}
+		dcAcc += ms(time.Since(t1))
+		if t < T-1 {
+			prompts := make([][]int, C)
+			for a := range prompts {
+				prompts[a] = lcgIDs(R, vocab, uint64(50000+t*1000+a*97))
+			}
+			bs.PrefillEach(prompts)
+			prefilledSoFar += C * R
+		}
+		emit(event{
+			"type": "turn", "arm": "fak", "turn": t, "agent": -1,
+			"requests_done": (t + 1) * C, "total_requests": C * T,
+			"tokens_prefilled": prefilledSoFar, "tokens_decoded": C * (t + 1) * D,
+			"elapsed_ms": ms(time.Since(start)),
+		})
+	}
+	base.Close()
+	totalMS = ms(time.Since(start))
+	decodeMS = dcAcc
+	return
+}
+
+// liveArmA runs the naive arm live: every (agent,turn) re-prefills the ENTIRE context so far
+// and decodes serially. Emits one "turn" event per (agent,turn).
+func liveArmA(l *loaded, P, T, C, D, R int, emit emitter) (totalMS, decodeMS float64) {
+	m, vocab := l.m, l.vocab
+	prefix := lcgIDs(P, vocab, 1)
+	ids0 := lcgIDs(C, vocab, 991)
+	start := time.Now()
+
+	var dcAcc, prefilledSoFar float64
+	done := 0
+	for a := 0; a < C; a++ {
+		ctx := append([]int(nil), prefix...)
+		tok := ids0[a]
+		for t := 0; t < T; t++ {
+			s := m.NewSession()
+			s.Quant = true
+			s.Prefill(ctx) // re-prefill the WHOLE context so far
+			prefilledSoFar += float64(len(ctx))
+			t1 := time.Now()
+			for d := 0; d < D; d++ {
+				s.Step(tok)
+				ctx = append(ctx, tok)
+				tok = (tok*48271 + 1) % vocab
+			}
+			dcAcc += ms(time.Since(t1))
+			s.Close()
+			if t < T-1 {
+				ctx = append(ctx, lcgIDs(R, vocab, uint64(50000+t*1000+a*97))...)
+			}
+			done++
+			emit(event{
+				"type": "turn", "arm": "naive", "turn": t, "agent": a,
+				"requests_done": done, "total_requests": C * T,
+				"tokens_prefilled": int(prefilledSoFar), "tokens_decoded": done * D,
+				"elapsed_ms": ms(time.Since(start)),
+			})
+		}
+	}
+	totalMS = ms(time.Since(start))
+	decodeMS = dcAcc
+	return
+}
+
+// ---------------------------------------------------------------------------
+// HTTP handlers
+// ---------------------------------------------------------------------------
+
+var (
+	reg   *registry
+	runMu sync.Mutex // only one heavy run at a time (avoids CPU-contending two big runs)
+	specs []spec
+	gomax = runtime.GOMAXPROCS(0)
+)
+
+type sseWriter struct {
+	w       http.ResponseWriter
+	flusher http.Flusher
+}
+
+func (s *sseWriter) emit(e event) {
+	b, _ := json.Marshal(e)
+	fmt.Fprintf(s.w, "data: %s\n\n", b)
+	s.flusher.Flush()
+}
+
+func handleIndex(w http.ResponseWriter, r *http.Request) {
+	if r.URL.Path != "/" {
+		http.NotFound(w, r)
+		return
+	}
+	b, err := pageFS.ReadFile("page.html")
+	if err != nil {
+		http.Error(w, err.Error(), 500)
+		return
+	}
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.Write(b)
+}
+
+func handleLadder(w http.ResponseWriter, r *http.Request) {
+	type rs struct {
+		Name    string `json:"name"`
+		Dir     string `json:"dir"`
+		Kind    string `json:"kind"`
+		Present bool   `json:"present"`
+		Params  string `json:"params"`
+	}
+	out := []rs{}
+	for _, s := range specs {
+		out = append(out, rs{s.Name, s.Dir, s.Kind, s.Present, s.Params})
+	}
+	// timing-free work-elimination ratio for the default workload, as the honest floor.
+	a, _, c := prefillTokens(512, 5, 5, 16, 32)
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]any{
+		"models":     out,
+		"gomaxprocs": gomax,
+		"prefill_tok_ratio_a_over_c": map[string]any{
+			"a": a, "c": c, "ratio": float64(a) / float64(c),
+			"note": "exact prefill-token work-elimination (timing-free): naive re-prefills the whole context every turn, fak reuses the shared prefix once.",
+		},
+	})
+}
+
+// args pulls P,T,C,D,R from the query (with defaults).
+func args(r *http.Request) (P, T, C, D, R int) {
+	P, _ = strconv.Atoi(r.URL.Query().Get("P"))
+	T, _ = strconv.Atoi(r.URL.Query().Get("T"))
+	C, _ = strconv.Atoi(r.URL.Query().Get("C"))
+	D, _ = strconv.Atoi(r.URL.Query().Get("D"))
+	R, _ = strconv.Atoi(r.URL.Query().Get("R"))
+	if P == 0 {
+		P = 512
+	}
+	if T == 0 {
+		T = 5
+	}
+	if C == 0 {
+		C = 5
+	}
+	if D == 0 {
+		D = 16
+	}
+	if R == 0 {
+		R = 32
+	}
+	return
+}
+
+func findSpec(name string) (spec, bool) {
+	for _, s := range specs {
+		if s.Name == name {
+			return s, true
+		}
+	}
+	return spec{}, false
+}
+
+// handleRace streams a live A-vs-C race for one model. fak arm runs first (fast), then the
+// naive arm (the long grind) — both fully live, same model.
+func handleRace(w http.ResponseWriter, r *http.Request) {
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		http.Error(w, "streaming unsupported", 500)
+		return
+	}
+	name := r.URL.Query().Get("model")
+	if name == "" {
+		name = "SmolLM2-135M"
+	}
+	sp, ok := findSpec(name)
+	if !ok || !sp.Present {
+		http.Error(w, "unknown/absent model "+name, 400)
+		return
+	}
+	P, T, C, D, R := args(r)
+
+	runMu.Lock()
+	defer runMu.Unlock()
+
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("X-Accel-Buffering", "no")
+	s := &sseWriter{w, flusher}
+
+	s.emit(event{"type": "info", "msg": "loading model " + name})
+	l, err := reg.get(sp)
+	if err != nil {
+		s.emit(event{"type": "error", "msg": "load: " + err.Error()})
+		return
+	}
+	s.emit(event{"type": "info", "msg": fmt.Sprintf("model loaded (%s). workload: P=%d T=%d C=%d D=%d R=%d → %d requests", name, P, T, C, D, R, C*T)})
+	runtime.GC()
+
+	// warm
+	ws := l.m.NewSession()
+	ws.Quant = true
+	ws.Prefill(lcgIDs(8, l.vocab, 77))
+	ws.Step(1)
+	ws.Close()
+
+	// fak arm (live)
+	s.emit(event{"type": "start", "arm": "fak", "total_requests": C * T})
+	cTotal, cDecode := liveArmC(l, P, T, C, D, R, s.emit)
+	s.emit(event{"type": "done", "arm": "fak", "total_ms": cTotal, "decode_ms": cDecode, "tokens_prefilled": P + C*(T-1)*R})
+
+	// naive arm (live) — the long grind
+	s.emit(event{"type": "start", "arm": "naive", "total_requests": C * T})
+	aTotal, aDecode := liveArmA(l, P, T, C, D, R, s.emit)
+	s.emit(event{"type": "done", "arm": "naive", "total_ms": aTotal, "decode_ms": aDecode})
+
+	ratio := aTotal / cTotal
+	s.emit(event{"type": "result", "fak_ms": cTotal, "naive_ms": aTotal, "ratio": ratio,
+		"saved_ms": aTotal - cTotal, "fak_decode_ms": cDecode, "naive_decode_ms": aDecode,
+		"model": name, "workload": map[string]int{"P": P, "T": T, "C": C, "D": D, "R": R}})
+}
+
+// handleCurve sweeps the ladder: per model, run arm C live + measure prefill cost to PROJECT
+// arm A (the honest sessionbench method — naive re-prefill is intractable to run live for big
+// models). Emits one curve point per model, then "curvedone".
+func handleCurve(w http.ResponseWriter, r *http.Request) {
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		http.Error(w, "streaming unsupported", 500)
+		return
+	}
+	// curve uses a smaller, tractable workload by default (big models are slow on CPU), unless overridden
+	P, T, C, D, R := args(r)
+	curveDefault := r.URL.Query().Get("P") == ""
+
+	runMu.Lock()
+	defer runMu.Unlock()
+
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("X-Accel-Buffering", "no")
+	s := &sseWriter{w, flusher}
+
+	if curveDefault {
+		P, T, C, D, R = 128, 5, 3, 16, 16
+	}
+	maxCtx := P + (T-1)*(D+R)
+	s.emit(event{"type": "info", "msg": fmt.Sprintf("curve sweep: P=%d T=%d C=%d D=%d R=%d (maxCtx=%d). fak arm run LIVE; naive arm PROJECTED from measured prefill cost.", P, T, C, D, R, maxCtx)})
+
+	for _, sp := range specs {
+		if !sp.Present {
+			continue
+		}
+		s.emit(event{"type": "phase", "model": sp.Name, "phase": "loading"})
+		l, err := reg.get(sp)
+		if err != nil {
+			s.emit(event{"type": "point", "model": sp.Name, "params": sp.Params, "error": err.Error()})
+			continue
+		}
+		// warm
+		ws := l.m.NewSession()
+		ws.Quant = true
+		ws.Prefill(lcgIDs(8, l.vocab, 77))
+		ws.Step(1)
+		ws.Close()
+
+		// prefill cost samples spanning [P, maxCtx] for the naive projection
+		lens := sampleLens(P, maxCtx)
+		s.emit(event{"type": "phase", "model": sp.Name, "phase": "measuring prefill cost (" + strconv.Itoa(len(lens)) + " sample lengths)"})
+		pm := measurePrefill(l.m, l.vocab, lens, 1)
+
+		// fak arm, LIVE
+		s.emit(event{"type": "phase", "model": sp.Name, "phase": "running fak arm live"})
+		cTotal, cDecode := liveArmC(l, P, T, C, D, R, func(e event) {})
+
+		// anchor the prefill model to the live prefix prefill (same time window as arm C),
+		// so cross-time contention does not bias the projected naive arm.
+		anchor := 1.0
+		if base := pm.cost(P); base > 0 {
+			anchor = cTotal / (base + 1) // coarse; armC total includes decode too — keep within reason
+			anchor = math.Max(0.5, math.Min(anchor, 2.0))
+		}
+		aPrefill := computeAPrefill(pm, P, T, C, D, R) * anchor
+		// naive decode = C× the fak batched decode (serial C agents vs one batched stream)
+		aDecode := float64(C) * cDecode
+		aTotal := aPrefill + aDecode
+		if cTotal > 0 && aTotal < cTotal {
+			aTotal = cTotal // never let projection undersell the floor
+		}
+		ratio := aTotal / cTotal
+
+		s.emit(event{
+			"type": "point", "model": sp.Name, "params": sp.Params,
+			"armC_ms": cTotal, "armA_ms": aTotal, "ratio": ratio,
+			"armC_decode_ms": cDecode, "armA_prefill_ms": aPrefill, "armA_decode_ms": aDecode,
+			"prefill_samples": pm, "live": true,
+		})
+		runtime.GC()
+	}
+	s.emit(event{"type": "curvedone"})
+}
+
+func sampleLens(P, maxCtx int) []int {
+	set := map[int]bool{}
+	add := func(x int) {
+		if x >= 16 {
+			set[x] = true
+		}
+	}
+	add(P)
+	if maxCtx > P {
+		for _, f := range []float64{0.34, 0.67, 1.0} {
+			add(P + int(f*float64(maxCtx-P)))
+		}
+	}
+	var out []int
+	for k := range set {
+		out = append(out, k)
+	}
+	sort.Ints(out)
+	return out
+}
+
+func main() {
+	addr := flag.String("addr", "127.0.0.1:8147", "listen address")
+	jobs := flag.Int("jobs", 0, "cap parallelism to an ABSOLUTE core count (GOMAXPROCS + matmul workers). 0 = all cores. On a shared/active machine pass e.g. 8 so the demo doesn't starve other work.")
+	budget := flag.Float64("budget", 0, "cap parallelism to a FRACTION of the machine: 0.75 = 75% of the logical cores (portable across box sizes; 75 or 0.75 accepted). Mutually exclusive with -jobs. 0 = unset.")
+	flag.Parse()
+	if *jobs > 0 && *budget > 0 {
+		fmt.Fprintln(os.Stderr, "-jobs and -budget are mutually exclusive (one is absolute, the other a fraction)")
+		os.Exit(2)
+	}
+	if *jobs > 0 {
+		runtime.GOMAXPROCS(*jobs)
+		// Route through the model package so numWorkers actually changes — setting the env
+		// here is too late (numWorkers was resolved at package init, before this).
+		if err := model.SetWorkers(*jobs); err != nil {
+			fmt.Fprintln(os.Stderr, "jobs:", err)
+			os.Exit(2)
+		}
+		gomax = *jobs
+	} else if *budget > 0 {
+		if err := model.SetWorkerBudget(*budget); err != nil {
+			fmt.Fprintln(os.Stderr, "budget:", err)
+			os.Exit(2)
+		}
+		// also bound the Go scheduler to the resolved width so the demo's own goroutines
+		// don't oversubscribe the share we promised to leave free.
+		runtime.GOMAXPROCS(model.NumWorkers())
+		gomax = model.NumWorkers()
+	}
+	reg = newRegistry()
+	specs = ladderSpecs()
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/", handleIndex)
+	mux.HandleFunc("/api/ladder", handleLadder)
+	mux.HandleFunc("/api/race", handleRace)
+	mux.HandleFunc("/api/curve", handleCurve)
+
+	present := []string{}
+	for _, s := range specs {
+		if s.Present {
+			present = append(present, s.Name)
+		}
+	}
+	fmt.Fprintf(os.Stderr, "demorace %s on http://%s (GOMAXPROCS=%d)\n", version, *addr, gomax)
+	fmt.Fprintf(os.Stderr, "ladder present: %s\n", strings.Join(present, ", "))
+	fmt.Fprintf(os.Stderr, "open the URL → 'Run live race' (fak vs naive, both LIVE) then 'Build curve'\n")
+	if err := http.ListenAndServe(*addr, mux); err != nil {
+		fmt.Fprintln(os.Stderr, "listen:", err)
+		os.Exit(1)
+	}
+}

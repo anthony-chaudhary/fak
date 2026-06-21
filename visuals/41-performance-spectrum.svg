@@ -1,0 +1,155 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="1040" viewBox="0 0 1600 1040" role="img" aria-labelledby="title desc">
+  <title id="title">Performance spectrum for FAK agent workloads</title>
+  <desc id="desc">A spectrum diagram showing FAK performance impact from raw engine parity through tuned-stack wins, the measured 60x multi-agent session, current read-heavy fleet reuse, and future 10k by 10k per-user agent workload frontiers.</desc>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#f7f9fb"/>
+      <stop offset="48%" stop-color="#eef4f1"/>
+      <stop offset="100%" stop-color="#f8f3ee"/>
+    </linearGradient>
+    <linearGradient id="spectrum" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%" stop-color="#6a7685"/>
+      <stop offset="25%" stop-color="#1c7c92"/>
+      <stop offset="50%" stop-color="#2e8b57"/>
+      <stop offset="75%" stop-color="#b57920"/>
+      <stop offset="100%" stop-color="#9b4d77"/>
+    </linearGradient>
+    <filter id="shadow" x="-10%" y="-10%" width="120%" height="130%">
+      <feDropShadow dx="0" dy="10" stdDeviation="12" flood-color="#1d2733" flood-opacity="0.12"/>
+    </filter>
+    <style>
+      .title { font: 800 48px "Segoe UI", Arial, sans-serif; fill: #17202a; }
+      .subtitle { font: 400 21px "Segoe UI", Arial, sans-serif; fill: #405063; }
+      .section { font: 800 18px "Segoe UI", Arial, sans-serif; fill: #ffffff; letter-spacing: 0; }
+      .cardTitle { font: 800 22px "Segoe UI", Arial, sans-serif; fill: #1b2733; }
+      .big { font: 900 46px "Segoe UI", Arial, sans-serif; fill: #17202a; }
+      .label { font: 700 17px "Segoe UI", Arial, sans-serif; fill: #314153; }
+      .body { font: 400 16px "Segoe UI", Arial, sans-serif; fill: #415266; }
+      .small { font: 400 14px "Segoe UI", Arial, sans-serif; fill: #5b6a7a; }
+      .tiny { font: 700 12px "Segoe UI", Arial, sans-serif; fill: #ffffff; letter-spacing: 0; }
+      .pillText { font: 800 14px "Segoe UI", Arial, sans-serif; fill: #25313d; }
+      .footer { font: 400 14px "Segoe UI", Arial, sans-serif; fill: #617080; }
+      .measured { fill: #e8f4ed; stroke: #7cb893; }
+      .frontier { fill: #f9edf3; stroke: #c282a6; }
+      .card { fill: #ffffff; stroke: #d9e1e8; stroke-width: 1.5; }
+      .muted { fill: #eef3f6; stroke: #d8e1e8; }
+    </style>
+  </defs>
+
+  <rect width="1600" height="1040" fill="url(#bg)"/>
+  <rect x="38" y="30" width="1524" height="980" rx="8" fill="#ffffff" opacity="0.58"/>
+
+  <text x="70" y="88" class="title">The performance spectrum: from parity to agent-scale leverage</text>
+  <text x="72" y="125" class="subtitle">Raw model speed is only the left edge. The big win is deleting repeated setup work while keeping reuse legal.</text>
+
+  <rect x="72" y="154" width="1456" height="96" rx="8" fill="#17202a"/>
+  <text x="96" y="187" class="section">Plain version</text>
+  <text x="96" y="215" class="section" style="font-size:24px;">Stop rereading the whole handbook.</text>
+  <text x="96" y="239" class="section" style="font-size:20px;">Read it once; keep a bookmark for each worker.</text>
+  <text x="880" y="188" class="section">Simple math</text>
+  <text x="880" y="215" class="section" style="font-size:24px;">duplicate setup reads =</text>
+  <text x="880" y="239" class="section" style="font-size:20px;">agents x turns x shared setup</text>
+
+  <line x1="92" y1="290" x2="1508" y2="290" stroke="url(#spectrum)" stroke-width="8" stroke-linecap="round"/>
+  <path d="M1510 290 L1484 275 L1484 305 Z" fill="#9b4d77"/>
+  <text x="92" y="274" class="label">raw token lane</text>
+  <text x="652" y="274" class="label">measured agent-session wins</text>
+  <text x="1262" y="274" class="label">frontier workloads</text>
+  <text x="92" y="324" class="small">more shared context, more turns, more agents, more legal reuse</text>
+
+  <g filter="url(#shadow)">
+    <rect x="58" y="338" width="284" height="394" rx="8" class="card"/>
+    <rect x="58" y="338" width="284" height="46" rx="8" fill="#6a7685"/>
+    <text x="78" y="368" class="tiny">KNOWN BASELINE</text>
+    <text x="78" y="420" class="cardTitle">1. Raw engine parity</text>
+    <text x="78" y="480" class="big">1x-ish</text>
+    <text x="78" y="518" class="body">Necessary lane, not the main</text>
+    <text x="78" y="540" class="body">performance story.</text>
+    <text x="78" y="585" class="label">Meaning</text>
+    <text x="78" y="615" class="body">Use llama.cpp, vLLM, SGLang,</text>
+    <text x="78" y="638" class="body">Ollama, or providers for raw</text>
+    <text x="78" y="661" class="body">token firepower. FAK owns the</text>
+    <text x="78" y="684" class="body">agent boundary above it.</text>
+  </g>
+
+  <g filter="url(#shadow)">
+    <rect x="360" y="338" width="284" height="394" rx="8" class="card"/>
+    <rect x="360" y="338" width="284" height="46" rx="8" fill="#1c7c92"/>
+    <text x="380" y="368" class="tiny">MEASURED VS TUNED</text>
+    <text x="380" y="420" class="cardTitle">2. Warm-cache stack</text>
+    <text x="380" y="480" class="big">1.5-4x</text>
+    <text x="380" y="518" class="body">Against a competent setup</text>
+    <text x="380" y="540" class="body">that already keeps per-agent KV.</text>
+    <text x="380" y="585" class="label">Human read</text>
+    <text x="380" y="615" class="body">At the headline shape, one fused</text>
+    <text x="380" y="638" class="body">run replaces roughly four tuned</text>
+    <text x="380" y="661" class="body">single-tenant runs doing similar</text>
+    <text x="380" y="684" class="body">work.</text>
+  </g>
+
+  <g filter="url(#shadow)">
+    <rect x="662" y="338" width="284" height="394" rx="8" class="card"/>
+    <rect x="662" y="338" width="284" height="46" rx="8" fill="#2e8b57"/>
+    <text x="682" y="368" class="tiny">MEASURED HEADLINE</text>
+    <text x="682" y="420" class="cardTitle">3. Naive loop collapse</text>
+    <text x="682" y="480" class="big">60.3x</text>
+    <text x="682" y="518" class="body">50 turns x 5 agents on M3 Pro:</text>
+    <text x="682" y="540" class="body">about 19 hours becomes 19 minutes.</text>
+    <text x="682" y="585" class="label">Human read</text>
+    <text x="682" y="615" class="body">About 60 naive boxes doing</text>
+    <text x="682" y="638" class="body">duplicate rereads become one</text>
+    <text x="682" y="661" class="body">fused box reusing the shared</text>
+    <text x="682" y="684" class="body">setup legally.</text>
+  </g>
+
+  <g filter="url(#shadow)">
+    <rect x="964" y="338" width="284" height="394" rx="8" class="card"/>
+    <rect x="964" y="338" width="284" height="46" rx="8" fill="#b57920"/>
+    <text x="984" y="368" class="tiny">CURRENT FLEET SHAPE</text>
+    <text x="984" y="420" class="cardTitle">4. Shared read fleets</text>
+    <text x="984" y="480" class="big">2,344</text>
+    <text x="984" y="518" class="body">of 2,500 duplicate tool calls</text>
+    <text x="984" y="540" class="body">deleted in the read-heavy corner.</text>
+    <text x="984" y="585" class="label">Human read</text>
+    <text x="984" y="615" class="body">Stop asking every agent to fetch</text>
+    <text x="984" y="638" class="body">the same answer again. But writes</text>
+    <text x="984" y="661" class="body">must invalidate only the affected</text>
+    <text x="984" y="684" class="body">resource.</text>
+  </g>
+
+  <g filter="url(#shadow)">
+    <rect x="1266" y="338" width="284" height="394" rx="8" class="card"/>
+    <rect x="1266" y="338" width="284" height="46" rx="8" fill="#9b4d77"/>
+    <text x="1286" y="368" class="tiny">FRONTIER, NOT MEASURED</text>
+    <text x="1286" y="420" class="cardTitle">5. 10k x 10k frontier</text>
+    <text x="1286" y="480" class="big">100M</text>
+    <text x="1286" y="518" class="body">agent-turns per power-user</text>
+    <text x="1286" y="540" class="body">workload: 10,000s x 10,000s.</text>
+    <text x="1286" y="585" class="label">Human read</text>
+    <text x="1286" y="615" class="body">The question stops being only</text>
+    <text x="1286" y="638" class="body">tokens per second. It becomes:</text>
+    <text x="1286" y="661" class="body">which rereads are legal to skip,</text>
+    <text x="1286" y="684" class="body">page, witness, and invalidate?</text>
+  </g>
+
+  <rect x="72" y="772" width="1456" height="150" rx="8" class="muted"/>
+  <text x="98" y="812" class="cardTitle">What moves as the workload gets bigger</text>
+  <text x="98" y="852" class="label">Small benchmark</text>
+  <text x="98" y="880" class="body">Can this match a serving engine?</text>
+  <text x="488" y="852" class="label">Real agent session</text>
+  <text x="488" y="880" class="body">Can this stop rereading the same setup every turn?</text>
+  <text x="970" y="852" class="label">Next-gen agent city</text>
+  <text x="970" y="880" class="body">Can this keep millions of memory and effect claims legal?</text>
+  <text x="970" y="906" class="small">Saturation: KV, invalidation, tools, approvals, audit, trust metadata.</text>
+  <line x1="350" y1="861" x2="448" y2="861" stroke="#8b98a6" stroke-width="2"/>
+  <path d="M448 861 L436 854 L436 868 Z" fill="#8b98a6"/>
+  <line x1="846" y1="861" x2="928" y2="861" stroke="#8b98a6" stroke-width="2"/>
+  <path d="M928 861 L916 854 L916 868 Z" fill="#8b98a6"/>
+
+  <rect x="72" y="944" width="706" height="38" rx="8" class="measured"/>
+  <text x="92" y="968" class="pillText">Measured: 1.5-4x vs tuned, 60.3x vs naive, 2,344/2,500 read calls deleted.</text>
+  <rect x="802" y="944" width="726" height="38" rx="8" class="frontier"/>
+  <text x="822" y="968" class="pillText">Frontier: 10k x 10k is a workload direction, not a shipped benchmark claim.</text>
+
+  <text x="72" y="1008" class="footer">SOTA comparison = tuned warm-cache serving, not a cold loop. Read-heavy workloads benefit most; full reuse savings require control of the serving/cache layer.</text>
+</svg>

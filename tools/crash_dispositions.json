@@ -1,0 +1,37 @@
+{
+  "_comment": [
+    "Recorded crash dispositions — the durable answer to 'we already diagnosed this; stop logging it as cause: unclear'.",
+    "crash_audit.py loads this and, when a recorded disposition matches the leading bugcheck's fault class on this host,",
+    "surfaces it in the audit's `disposition` block so the next run/audit reports the KNOWN cause + remediation status",
+    "instead of re-deriving an unexplained one. Adding an entry here is how a forensic conclusion becomes referenceable",
+    "by tooling (and by GitHub issues like #75 / #111) rather than living only in a prose doc.",
+    "Match is intentionally coarse (fault_class, not exact params): a recurring host-level fault recurs with new",
+    "params/timestamps but the same class. Tighten `match` with optional board/cpu/dimm fields if a host needs it.",
+    "Set `recurring` true for an accepted-recurring host fault so a repeat does not re-open as a fresh unknown."
+  ],
+  "dispositions": [
+    {
+      "id": "host-pfn-list-corrupt-2026-06-18",
+      "title": "PFN_LIST_CORRUPT (0x4E) host memory-subsystem fault",
+      "match": {
+        "fault_class": "memory",
+        "board": "MAG X870E TOMAHAWK WIFI"
+      },
+      "cause": "host_memory_subsystem",
+      "is_fak_bug": false,
+      "recurring": true,
+      "confidence": "high",
+      "summary": "Windows kernel bugcheck 0x0000004E (PFN_LIST_CORRUPT) is a HOST memory-subsystem fault, not a fak/fleet code bug (zero `pfn` in the Go source). Diagnosed at high confidence as marginal high-capacity non-ECC DDR5 on a 4-DIMM dual-rank AM5 config; a buggy kernel-mode driver yields identical bugchecks and is only excludable by reading the minidump stack (the named blind spot).",
+      "evidence_doc": "CRASH-AUDIT-2026-06-18-pfn-list-corrupt.md",
+      "tracking_issues": [111, 75],
+      "remediation_status": "operator_action_pending",
+      "remediation": "Hardware: MemTest86 + BIOS/AGESA update + (if persists) SoC/VDDG/VDDP nudge or drop to one DIMM pair — needs a drained maintenance window (CRASH-AUDIT §5.A). Fleet: frequent small commits + cold-boot watchdog resume already bound the per-crash loss (§5.B).",
+      "observability_blind_spot": {
+        "present": true,
+        "signature": "~2 min of total silence (zero warning/error events) before the bugcheck — the signature of a hardware/kernel-memory fault, which by nature cannot pre-announce itself in the software event stream.",
+        "accepted_reason": "A 0x4E corrupts kernel structures with no graceful unwind, so there is no software trail to emit before the stop. This is an inherent limitation of the fault class, not a missing log.",
+        "closure": "Switch dump mode from small (CrashControl=3) to kernel (CrashControl=2) so the NEXT bugcheck leaves an attributable minidump stack; the fleet-resilience layer (frequent commits + OS-level cold-boot watchdog resume) is the standing mitigation for the silence itself."
+      }
+    }
+  ]
+}

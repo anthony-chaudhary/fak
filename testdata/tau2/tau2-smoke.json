@@ -1,0 +1,18 @@
+{
+  "slice_id": "tau2-airline-smoke",
+  "_provenance": "operator-authored, extracted from tau2-airline read-only tool shapes; frozen fixture (unit 10). NOT worker-authored.",
+  "calls": [
+    { "tool": "get_user_details", "args": {"user_id": "mia_li_3668"}, "meta": {"readOnlyHint": "true", "idempotentHint": "true"} },
+    { "tool": "get_reservation_details", "args": {"reservation_id": "ABC123"}, "meta": {"readOnlyHint": "true", "idempotentHint": "true"} },
+    { "tool": "get_reservation_details", "args": {"reservation_id": "ABC123"}, "meta": {"readOnlyHint": "true", "idempotentHint": "true"} },
+    { "tool": "search_direct_flight", "args": {"origin": "SFO", "destination": "JFK", "date": "2026-07-01"}, "meta": {"readOnlyHint": "true", "idempotentHint": "true"} },
+    { "tool": "list_all_airports", "args": {}, "meta": {"readOnlyHint": "true", "idempotentHint": "true"} },
+    { "tool": "calculate", "args": {"a": 240, "b": 60}, "meta": {"readOnlyHint": "true", "idempotentHint": "true"} },
+    { "tool": "search_flights", "args": {"origin": "SFO", "destination": "LAX"}, "meta": {"readOnlyHint": "true", "idempotentHint": "true"} },
+    { "tool": "get_user_details", "args": {"user_id": "mia_li_3668"}, "meta": {"readOnlyHint": "true", "idempotentHint": "true"} },
+    { "tool": "search_direct_flight", "args": {"origin": "SFO", "destination": "JFK", "date": "2026-07-01"}, "meta": {"readOnlyHint": "true", "idempotentHint": "true"} },
+    { "tool": "book_reservation", "args": {"user_id": "mia_li_3668", "flight": "UA123"}, "meta": {"readOnlyHint": "false", "idempotentHint": "false", "destructive": "true"} },
+    { "tool": "get_reservation_details", "args": {"reservation_id": "ABC123"}, "meta": {"readOnlyHint": "true", "idempotentHint": "true"} },
+    { "tool": "list_all_airports", "args": {}, "meta": {"readOnlyHint": "true", "idempotentHint": "true"} }
+  ]
+}

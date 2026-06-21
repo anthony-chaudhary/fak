@@ -1,0 +1,57 @@
+# GitHub Pages configuration for the fak documentation site.
+#
+# Enable in repo Settings -> Pages: Source = "Deploy from a branch",
+# Branch = main, Folder = /docs. The site then publishes at the `url` + `baseurl`
+# below. Until Pages is enabled this file is inert (it does nothing on its own).
+#
+# SEO/AEO: jekyll-seo-tag emits <title>, <meta name="description">, canonical,
+# Open Graph, Twitter Card, and JSON-LD structured data from each page's front
+# matter; jekyll-sitemap generates /sitemap.xml automatically. Both are allow-listed
+# on GitHub Pages. The pages-theme below invokes {% seo %} in its <head>.
+
+title: "fak — the agent kernel"
+description: >-
+  fak is an agent kernel: an in-process, default-deny permission gate for AI agents
+  fused with an addressable, bit-exact KV cache. Prompt-injection and tool-poisoning
+  containment plus cache-efficient self-hosted LLM agent fleets, in Go.
+author: Anthony Chaudhary
+lang: en
+
+# Published location (GitHub project site for anthony-chaudhary/fak).
+url: "https://anthony-chaudhary.github.io"
+baseurl: "/fleet-public"
+
+theme: jekyll-theme-cayman
+
+plugins:
+  - jekyll-seo-tag
+  - jekyll-sitemap
+
+# jekyll-seo-tag extras
+social:
+  name: fak — the agent kernel
+  links:
+    - "https://github.com/anthony-chaudhary/fak"
+github:
+  is_project_page: true
+twitter:
+  card: summary_large_image
+
+# Site-wide Open Graph / Twitter card image (the social preview). Absolute raw URL
+# so it resolves even though the Pages source root is /docs.
+defaults:
+  - scope:
+      path: ""
+    values:
+      image: "https://raw.githubusercontent.com/anthony-chaudhary/fak/main/visuals/social-preview.png"
+
+# Keep build noise out of the published site (these are repo-ops files, not docs).
+exclude:
+  - "*.py"
+  - "*.pdf"
+  - benchmark/
+  - benchmarking/
+  - planning/
+  - testing/
+  - releases/
+  - stable-releases/

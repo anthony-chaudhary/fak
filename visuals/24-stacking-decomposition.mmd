@@ -1,0 +1,6 @@
+%%{init: {'theme':'base','themeVariables':{'fontFamily':'Segoe UI, Helvetica, Arial, sans-serif','xyChart':{'backgroundColor':'#F7F9FB','titleColor':'#1B3A66','xAxisLabelColor':'#1B3A66','yAxisLabelColor':'#1B3A66','xAxisTitleColor':'#1B3A66','yAxisTitleColor':'#1B3A66','plotColorPalette':'#3B6FB5'}}}}%%
+xychart-beta
+  title "Fig 24 - Stacking: $/task = $/token (Modular) x tokens/task (fused)"
+  x-axis "cost remaining after each lever (branching agent, P=128k, miss=50%)" ["naive", "+Modular engine x2", "+prefix cache (ships)", "+fused residual +trust"]
+  y-axis "log10( GPU-s per agent-run )" 2.5 --> 4
+  bar [3.717, 3.416, 3.293, 2.932]

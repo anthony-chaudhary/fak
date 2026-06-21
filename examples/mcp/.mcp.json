@@ -1,0 +1,10 @@
+{
+  "//": "Copy this to your project root as .mcp.json (Claude Code) to add fak as an MCP server. fak serve --stdio speaks newline-delimited JSON-RPC over stdin/stdout and exposes the kernel's adjudication verbs as MCP tools — your agent can route a proposed tool call through fak_adjudicate before running it, run a tool through fak_syscall, or screen a result it executed itself through fak_admit. Build the binary first: `go build -o fak ./cmd/fak` (or use a release binary on your PATH), then point `command` at it. No network, no API key — the stdio transport needs no listener and no auth surface.",
+  "mcpServers": {
+    "fak": {
+      "command": "fak",
+      "args": ["serve", "--stdio", "--policy", "examples/dev-agent-policy.json"],
+      "env": {}
+    }
+  }
+}

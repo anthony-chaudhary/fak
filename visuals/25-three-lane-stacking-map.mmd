@@ -1,0 +1,43 @@
+%%{init: {'theme':'base','themeVariables':{'fontFamily':'Segoe UI, Helvetica, Arial, sans-serif','fontSize':'13px','lineColor':'#5B6B7B','clusterBkg':'#F7F9FB','clusterBorder':'#AFC0CE'}}}%%
+flowchart TB
+  fak(["FUSED AGENT KERNEL"])
+
+  subgraph L1["$/token  (engine lane)"]
+    direction TB
+    mod["Modular MAX / Mojo<br/>SOTA kernels + NVIDIA/AMD/Apple portability"]
+    other1["quantization · spec-decode<br/>FlashAttn · disaggregated PD · MoE"]
+  end
+
+  subgraph L2["tokens/task  (loop lane)"]
+    direction TB
+    pc["prefix cache / RadixAttention / LMCache<br/>(Modular SHIPS this by default)"]
+    hr["context compression (headroom)<br/>= a component INSIDE the fused stack"]
+    res["non-prefix / branching / eviction-proof reuse<br/>= the fused kernel's MARGINAL claim"]
+  end
+
+  subgraph L3["trust  (adjudication lane)"]
+    direction TB
+    tr["effect-verification · adjudicated-KV · ring-3 inversion<br/>(no engine play has any of this)"]
+    gr["content guardrails / classifiers<br/>sit ABOVE; fused is the bottom ring"]
+  end
+
+  fak -->|"multiplies ON (x2 today)"| L1
+  fak -->|"OVERLAPS the prefix slice;<br/>captures the residual (x2-2.5 vs tuned)"| L2
+  fak -->|"OWNS, orthogonal (no $ trade)"| L3
+
+  note["combined vs naive ~6x = engine x2 . prefix x1.3 . fused-residual x2.3<br/>residual GROWS as the agent loop destroys the prefix"]
+  L2 -.-> note
+
+  classDef untrusted fill:#FFE9D6,stroke:#E8833A,stroke-width:2px,color:#7A3E12;
+  classDef kernel fill:#DCE9FB,stroke:#3B6FB5,stroke-width:2px,color:#1B3A66;
+  classDef gate fill:#FFF3CC,stroke:#C9A227,stroke-width:2px,color:#6B5410;
+  classDef pass fill:#DBF3E1,stroke:#3FA45F,stroke-width:2px,color:#1C5230;
+  classDef mem fill:#EDE7FB,stroke:#7B5BC0,stroke-width:2px,color:#3A2A66;
+  classDef note fill:#F7F9FB,stroke:#AFC0CE,stroke-width:1px,color:#46586A;
+
+  class fak untrusted;
+  class mod,other1 kernel;
+  class pc gate;
+  class hr mem;
+  class res,tr pass;
+  class gr,note note;

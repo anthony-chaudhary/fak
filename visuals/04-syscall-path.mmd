@@ -1,0 +1,47 @@
+%%{init: {'theme':'base','themeVariables':{'fontFamily':'Segoe UI, Helvetica, Arial, sans-serif','fontSize':'14px','lineColor':'#5B6B7B','primaryColor':'#DCE9FB','primaryTextColor':'#1B3A66','primaryBorderColor':'#3B6FB5','clusterBkg':'#F7F9FB','clusterBorder':'#AFC0CE'}}}%%
+flowchart TD
+    emit(["Model emits proposed tool call"])
+    adj{"DOS Reference Monitor:<br/>allow / deny / transform / require-witness?"}
+    note["verdict from evidence<br/>the agent didn't author"]
+    deny["DENY: short-circuit<br/>(call never spends)"]
+    preflight{"Pre-flight ladder:<br/>cheapest check refutes it?"}
+    dispatch{"Dispatch:<br/>pure/cached or fire for real?"}
+    vdso["Tool vDSO answers LOCALLY<br/>(never leaves binary, never re-invokes model)"]
+    fire[["Queue (io_uring) + FIRE<br/>(read-only/idempotent may run speculatively)"]]
+    gate{"Context admission gate (Context MMU):<br/>does this result earn a place?"}
+    quarantine["QUARANTINE: summarize (headroom),<br/>drop, or page to side store"]
+    sidestore[("Side store<br/>(model can fault back in)")]
+    ctx(["Result enters model's context"])
+
+    emit --> adj
+    note -.-> adj
+    adj -- "deny" --> deny
+    adj -- "allow / transform / require-witness" --> preflight
+    preflight -- "refuted" --> deny
+    preflight -- "survives" --> dispatch
+    dispatch -- "pure / cached" --> vdso
+    dispatch -- "fire for real" --> fire
+    vdso --> gate
+    fire --> gate
+    gate -- "PASS" --> ctx
+    gate -- "FAIL" --> quarantine
+    quarantine --> sidestore
+
+    classDef untrusted fill:#FFE9D6,stroke:#E8833A,stroke-width:2px,color:#7A3E12;
+    classDef kernel fill:#DCE9FB,stroke:#3B6FB5,stroke-width:2px,color:#1B3A66;
+    classDef gate fill:#FFF3CC,stroke:#C9A227,stroke-width:2px,color:#6B5410;
+    classDef pass fill:#DBF3E1,stroke:#3FA45F,stroke-width:2px,color:#1C5230;
+    classDef deny fill:#FBDDDD,stroke:#C9453F,stroke-width:2px,color:#6E1F1B;
+    classDef mem fill:#EDE7FB,stroke:#7B5BC0,stroke-width:2px,color:#3A2A66;
+    classDef cheap fill:#E8ECEF,stroke:#7A8A99,stroke-width:1.5px,color:#33424F;
+    classDef world fill:#FCEEDB,stroke:#B5792B,stroke-width:2px,color:#5E3D12;
+    classDef frontier fill:#E7D9F5,stroke:#8A53C0,stroke-width:2px,color:#3F2466;
+    classDef note fill:#F7F9FB,stroke:#AFC0CE,stroke-width:1px,color:#46586A;
+    class emit untrusted;
+    class adj,preflight,dispatch,gate gate;
+    class deny,quarantine deny;
+    class vdso kernel;
+    class fire world;
+    class sidestore mem;
+    class ctx pass;
+    class note note;

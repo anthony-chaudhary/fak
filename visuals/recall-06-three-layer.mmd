@@ -1,0 +1,29 @@
+%%{init: {'theme':'base','themeVariables':{'fontFamily':'Segoe UI, Helvetica, Arial, sans-serif','fontSize':'14px','lineColor':'#5B6B7B','primaryColor':'#DCE9FB','primaryTextColor':'#1B3A66','primaryBorderColor':'#3B6FB5','clusterBkg':'#F7F9FB','clusterBorder':'#AFC0CE'}}}%%
+flowchart TD
+  atk(["indirect prompt injection in a tool result"])
+  det["LAYER 3 — Detection: 'is this result poisoned?'<br/>base markers ≈100% evadable ALONE; now fronted by normgate (rank-5 driver)<br/>HEURISTIC — deliberately NON-LOAD-BEARING (see Fig 12)"]
+  miss(["evaded → not flagged → bytes reach context (but the ACTION is still refused — Fig 12)"])
+  subgraph FLOOR["the STRUCTURAL floor — model-independent"]
+    contain["LAYER 2 — Containment (result-side)<br/>flagged result held out; re-enters ONLY via witness Clear()"]
+    cap["LAYER 1 — Capability deny (call-side)<br/>irreversible tool refused regardless of context"]
+  end
+  atk --> det
+  det -->|"flagged"| contain
+  det -.->|"evaded"| miss
+  atk -->|"if it induces a tool call"| cap
+  kn["⚡ the floor = enforcement + capabilities (STRUCTURAL), not detection (EVADABLE). recall makes the DECISION durable, not smart."]
+  contain -.- kn
+  classDef untrusted fill:#FFE9D6,stroke:#E8833A,stroke-width:2px,color:#7A3E12;
+  classDef kernel fill:#DCE9FB,stroke:#3B6FB5,stroke-width:2px,color:#1B3A66;
+  classDef gate fill:#FFF3CC,stroke:#C9A227,stroke-width:2px,color:#6B5410;
+  classDef pass fill:#DBF3E1,stroke:#3FA45F,stroke-width:2px,color:#1C5230;
+  classDef deny fill:#FBDDDD,stroke:#C9453F,stroke-width:2px,color:#6E1F1B;
+  classDef mem fill:#EDE7FB,stroke:#7B5BC0,stroke-width:2px,color:#3A2A66;
+  classDef cheap fill:#E8ECEF,stroke:#7A8A99,stroke-width:1.5px,color:#33424F;
+  classDef world fill:#FCEEDB,stroke:#B5792B,stroke-width:2px,color:#5E3D12;
+  classDef frontier fill:#E7D9F5,stroke:#8A53C0,stroke-width:2px,color:#3F2466;
+  classDef note fill:#F7F9FB,stroke:#AFC0CE,stroke-width:1px,color:#46586A;
+  class atk,miss untrusted;
+  class det gate;
+  class contain,cap pass;
+  class kn note;

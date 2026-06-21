@@ -1,0 +1,62 @@
+#!/bin/sh
+# fleet trunk-discipline guard  --  DOS reason: OFF_TRUNK
+#
+# Nudges every actor to work directly on `main` (the single-tree-on-trunk
+# policy) instead of spinning up stray feature branches / worktrees. This is the
+# CROSS-AGENT floor: git runs it below the agent layer, so it binds Claude Code,
+# Codex, and a human at the same point -- none of them can talk their way around
+# a refusal the way they can around a CLAUDE.md / AGENTS.md sentence.
+#
+# It is the named "floor" under `dos.toml [reasons.OFF_TRUNK]`: the structured
+# reason is the shared vocabulary, this hook is what actually fires.
+#
+# Mode  (env FLEET_TRUNK_GUARD):  block (default) | warn | off
+#   block  refuse creation of an off-trunk branch              (exit 1, aborts txn)
+#   warn   allow the ref, print an advisory citing OFF_TRUNK   (exit 0)
+#   off    do nothing
+# Escape hatch:  FLEET_ALLOW_BRANCH=1 <git cmd>   always allows (e.g. release tooling).
+# Allowlisted branch names: main, master (master is the legacy private-repo alias).
+#
+# git calls this hook once per phase ("prepared", "committed", "aborted") with the
+# transaction (one "<old> <new> <ref>" line per updated ref) on stdin. A branch
+# CREATION is a refs/heads/* line whose <old> is all-zeros.
+
+phase="$1"
+mode="${FLEET_TRUNK_GUARD:-block}"
+[ "$mode" = "off" ] && exit 0
+[ "${FLEET_ALLOW_BRANCH:-0}" = "1" ] && exit 0
+
+zero="0000000000000000000000000000000000000000"
+violations=""
+while read -r old new ref; do
+	case "$ref" in
+		refs/heads/*) : ;;
+		*) continue ;;
+	esac
+	[ "$old" = "$zero" ] || continue          # creations only (skip normal commits)
+	name="${ref#refs/heads/}"
+	case "$name" in
+		main|master) continue ;;              # allowlisted trunk (main; master legacy)
+	esac
+	violations="$violations $name"
+done
+
+[ -z "$violations" ] && exit 0
+
+if [ "$mode" = "block" ]; then
+	# abort before the ref is written
+	if [ "$phase" = "prepared" ]; then
+		echo "OFF_TRUNK (blocked): refusing off-trunk branch creation:$violations" >&2
+		echo "  policy: work directly on main -- single tree on the trunk (CLAUDE.md / AGENTS.md)." >&2
+		echo "  override once: FLEET_ALLOW_BRANCH=1 <git cmd>   |   reason: dos.toml [reasons.OFF_TRUNK]" >&2
+		exit 1
+	fi
+else
+	# warn once, after the ref exists
+	if [ "$phase" = "committed" ]; then
+		echo "OFF_TRUNK (advisory): created off-trunk branch:$violations" >&2
+		echo "  prefer committing directly to main (single tree on the trunk policy)." >&2
+		echo "  see CLAUDE.md / AGENTS.md; hard-enforce with FLEET_TRUNK_GUARD=block." >&2
+	fi
+fi
+exit 0

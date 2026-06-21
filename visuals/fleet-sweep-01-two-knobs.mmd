@@ -1,0 +1,30 @@
+%%{init: {'theme':'base','themeVariables':{'fontFamily':'Segoe UI, Helvetica, Arial, sans-serif','fontSize':'14px','lineColor':'#5B6B7B','primaryColor':'#DCE9FB','primaryTextColor':'#1B3A66','primaryBorderColor':'#3B6FB5','clusterBkg':'#F7F9FB','clusterBorder':'#AFC0CE'}}}%%
+flowchart TD
+  title["WHAT WE ARE MEASURING<br/>(two dials we turn up and down)"]
+
+  subgraph KNOB1["Dial 1 — TURNS (how long ONE worker talks)"]
+    t["A 'turn' = one time the AI worker<br/>asks a tool a question and waits for the answer.<br/>1 turn = a short chat. 50 turns = a long job."]
+  end
+
+  subgraph KNOB2["Dial 2 — AGENTS (how MANY workers in the room)"]
+    a["An 'agent' = one AI worker.<br/>1 agent = working alone.<br/>50 agents = a whole team working at once."]
+  end
+
+  q["The question:<br/>as each dial goes from 1 to 50,<br/>how much WORK does the kernel save?"]
+  grid["We test every combination:<br/>50 turns x 50 agents = 2,500 little experiments.<br/>Each one is run on the REAL kernel, not a guess."]
+
+  title --> KNOB1
+  title --> KNOB2
+  KNOB1 --> q
+  KNOB2 --> q
+  q --> grid
+
+  class t cheap
+  class a kernel
+  class q gate
+  class grid pass
+
+  classDef kernel fill:#DCE9FB,stroke:#3B6FB5,stroke-width:2px,color:#1B3A66;
+  classDef gate fill:#FFF3CC,stroke:#C9A227,stroke-width:2px,color:#6B5410;
+  classDef pass fill:#DBF3E1,stroke:#3FA45F,stroke-width:2px,color:#1C5230;
+  classDef cheap fill:#E8ECEF,stroke:#7A8A99,stroke-width:1.5px,color:#33424F;

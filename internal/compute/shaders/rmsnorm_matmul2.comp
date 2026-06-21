@@ -1,0 +1,84 @@
+#version 450
+// rmsnorm_matmul2.comp — RMSNorm(X) followed by two projections in one dispatch.
+// Used for the decode MLP gate/up pair. One workgroup handles one row/token.
+layout(local_size_x = 256) in;
+
+layout(std430, binding = 0) readonly buffer W0buf { float W0[]; };
+layout(std430, binding = 1) readonly buffer W1buf { float W1[]; };
+layout(std430, binding = 2) readonly buffer Xbuf { float X[]; };
+layout(std430, binding = 3) readonly buffer Nbuf { float NormW[]; };
+layout(std430, binding = 4) buffer Y0buf { float Y0[]; };
+layout(std430, binding = 5) buffer Y1buf { float Y1[]; };
+
+layout(push_constant) uniform Push { int out0; int out1; int inDim; int P; float eps; } pc;
+
+const uint SHARED_CAP = 1024u;
+shared float red[256];
+shared float Xs[SHARED_CAP];
+
+void storeOut(uint t, uint o, float val) {
+    uint out0 = uint(pc.out0);
+    if (o < out0) {
+        Y0[t * out0 + o] = val;
+    } else {
+        uint out1 = uint(pc.out1);
+        Y1[t * out1 + (o - out0)] = val;
+    }
+}
+
+void addOut(uint t, uint o, float val) {
+    uint out0 = uint(pc.out0);
+    if (o < out0) {
+        Y0[t * out0 + o] += val;
+    } else {
+        uint out1 = uint(pc.out1);
+        Y1[t * out1 + (o - out0)] += val;
+    }
+}
+
+float weightAt(uint o, uint i) {
+    uint out0 = uint(pc.out0);
+    uint in_ = uint(pc.inDim);
+    if (o < out0) return W0[o * in_ + i];
+    return W1[(o - out0) * in_ + i];
+}
+
+void main() {
+    uint t = gl_WorkGroupID.x;
+    if (t >= uint(pc.P)) return;
+    uint tid = gl_LocalInvocationID.x;
+    uint in_ = uint(pc.inDim);
+    uint total = uint(pc.out0 + pc.out1);
+    uint xbase = t * in_;
+
+    float local = 0.0;
+    for (uint i = tid; i < in_; i += 256u) {
+        float v = X[xbase + i];
+        local += v * v;
+    }
+    red[tid] = local;
+    barrier();
+    for (uint s = 128u; s > 0u; s >>= 1) {
+        if (tid < s) red[tid] += red[tid + s];
+        barrier();
+    }
+    float inv = inversesqrt(red[0] / float(pc.inDim) + pc.eps);
+    barrier();
+
+    for (uint o = tid; o < total; o += 256u) storeOut(t, o, 0.0);
+
+    for (uint c0 = 0u; c0 < in_; c0 += SHARED_CAP) {
+        uint clen = min(SHARED_CAP, in_ - c0);
+        for (uint i = tid; i < clen; i += 256u) {
+            uint ix = c0 + i;
+            Xs[i] = X[xbase + ix] * inv * NormW[ix];
+        }
+        barrier();
+        for (uint o = tid; o < total; o += 256u) {
+            float acc = 0.0;
+            for (uint i = 0u; i < clen; ++i) acc += weightAt(o, c0 + i) * Xs[i];
+            addOut(t, o, acc);
+        }
+        barrier();
+    }
+}

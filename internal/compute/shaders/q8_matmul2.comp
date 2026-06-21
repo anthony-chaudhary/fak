@@ -1,0 +1,95 @@
+#version 450
+#extension GL_EXT_shader_explicit_arithmetic_types_int8 : require
+#extension GL_EXT_shader_8bit_storage : require
+// q8_matmul2.comp — two Q8_0 projections over the same f32 activation row/panel.
+// The activation is quantized once per output tile and shared by both projections.
+layout(local_size_x = 256) in;
+
+const uint BLOCK = 32u;
+const uint SHARED_CAP = 2048u;
+
+layout(std430, binding = 0) readonly buffer W0q { int8_t W0codes[]; };
+layout(std430, binding = 1) readonly buffer W0s { float W0scale[]; };
+layout(std430, binding = 2) readonly buffer W1q { int8_t W1codes[]; };
+layout(std430, binding = 3) readonly buffer W1s { float W1scale[]; };
+layout(std430, binding = 4) readonly buffer Xb  { float X[]; };
+layout(std430, binding = 5) writeonly buffer Y0b { float Y0[]; };
+layout(std430, binding = 6) writeonly buffer Y1b { float Y1[]; };
+
+layout(push_constant) uniform Push { int out0; int out1; int inDim; int P; } pc;
+
+shared int8_t Xq[SHARED_CAP];
+shared float Xs[SHARED_CAP / 32u];
+
+int8_t q8round(float x) {
+    int t = int(x);
+    float f = x - float(t);
+    if (f >= 0.5) t += 1; else if (f <= -0.5) t -= 1;
+    t = clamp(t, -127, 127);
+    return int8_t(t);
+}
+
+void main() {
+    uint totalOut = uint(pc.out0 + pc.out1);
+    uint outGroups = (totalOut + 255u) / 256u;
+    uint t = gl_WorkGroupID.x / outGroups;
+    if (t >= uint(pc.P)) return;
+    uint outGroup = gl_WorkGroupID.x - t * outGroups;
+    uint tid = gl_LocalInvocationID.x;
+    uint in_ = uint(pc.inDim);
+    uint nblk = in_ / BLOCK;
+    uint xbase = t * in_;
+
+    for (uint b = tid; b < nblk; b += 256u) {
+        uint base = b * BLOCK;
+        float amax = 0.0;
+        for (uint i = 0u; i < BLOCK; ++i) amax = max(amax, abs(X[xbase + base + i]));
+        float d = amax / 127.0;
+        Xs[b] = d;
+        float inv = d > 0.0 ? 1.0 / d : 0.0;
+        for (uint i = 0u; i < BLOCK; ++i) {
+            Xq[base + i] = (d > 0.0) ? q8round(X[xbase + base + i] * inv) : int8_t(0);
+        }
+    }
+    barrier();
+
+    uint o = outGroup * 256u + tid;
+    uint out0 = uint(pc.out0);
+    if (o < totalOut) {
+        float acc = 0.0;
+        if (o < out0) {
+            uint wbase = o * in_;
+            uint sbase = o * nblk;
+            for (uint b = 0u; b < nblk; ++b) {
+                uint xb = b * BLOCK;
+                uint cb = wbase + xb;
+                int s0 = 0, s1 = 0, s2 = 0, s3 = 0;
+                for (uint i = 0u; i < BLOCK; i += 4u) {
+                    s0 += int(W0codes[cb + i])      * int(Xq[xb + i]);
+                    s1 += int(W0codes[cb + i + 1u]) * int(Xq[xb + i + 1u]);
+                    s2 += int(W0codes[cb + i + 2u]) * int(Xq[xb + i + 2u]);
+                    s3 += int(W0codes[cb + i + 3u]) * int(Xq[xb + i + 3u]);
+                }
+                acc += float((s0 + s1) + (s2 + s3)) * W0scale[sbase + b] * Xs[b];
+            }
+            Y0[t * out0 + o] = acc;
+        } else {
+            uint o1 = o - out0;
+            uint wbase = o1 * in_;
+            uint sbase = o1 * nblk;
+            for (uint b = 0u; b < nblk; ++b) {
+                uint xb = b * BLOCK;
+                uint cb = wbase + xb;
+                int s0 = 0, s1 = 0, s2 = 0, s3 = 0;
+                for (uint i = 0u; i < BLOCK; i += 4u) {
+                    s0 += int(W1codes[cb + i])      * int(Xq[xb + i]);
+                    s1 += int(W1codes[cb + i + 1u]) * int(Xq[xb + i + 1u]);
+                    s2 += int(W1codes[cb + i + 2u]) * int(Xq[xb + i + 2u]);
+                    s3 += int(W1codes[cb + i + 3u]) * int(Xq[xb + i + 3u]);
+                }
+                acc += float((s0 + s1) + (s2 + s3)) * W1scale[sbase + b] * Xs[b];
+            }
+            Y1[t * uint(pc.out1) + o1] = acc;
+        }
+    }
+}

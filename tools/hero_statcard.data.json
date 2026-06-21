@@ -1,0 +1,82 @@
+{
+  "_about": "SOURCE OF TRUTH for the fak BENCHMARK BREADTH card (visuals/55-hero-statcard.svg), rendered by tools/hero_statcard_gen.py. A capabilities sweep across fak's three pillars (serving efficiency / correctness / security kernel) + an honest single-stream fence — NOT a single hero number. Every metric traces to fak/BENCHMARK-AUTHORITY.md by commit. Each row carries a `class` that sets its honesty chip + colour: a SOTA baseline, a NAIVE strawman, and an absolute measurement are coloured differently so the biggest number (139.3x vs naive) can never read as a SOTA win. Design = a judge-panel synthesis (Anthropic model-card / NVIDIA MLPerf / DeepMind matrix / system-card references). Edit this file, then run `python tools/hero_statcard_gen.py`.",
+  "meta": {
+    "title": "fak — the agent kernel, by the benchmarks",
+    "as_of": "2026-06-21",
+    "statcard_svg": "visuals/55-hero-statcard.svg",
+    "authority": "fak/BENCHMARK-AUTHORITY.md",
+    "machine": "Apple M3 Pro 6P+6E 36 GB · app_version 0.30.0 · llama.cpp b9707, same box"
+  },
+  "masthead": {
+    "kicker": "CAPABILITY SWEEP · THE AGENT-INFRASTRUCTURE KERNEL",
+    "title": "fak owns the whole agent-infrastructure boundary",
+    "subtitle": "Breadth across three pillars — it does the SOTA serving stack's reuse, AND owns the safety/correctness boundary they don't, proven exact, at syscall speed.",
+    "provenance_chip": "Every number → fak/BENCHMARK-AUTHORITY.md (commit + artifact)"
+  },
+  "rail": {
+    "thesis_label": "THE THESIS",
+    "thesis": "fak is the kernel under the agent stack — it does SOTA reuse, proves that reuse is exact, and makes the permission gate a syscall.",
+    "boundary_map": [
+      { "name": "SERVING reuse", "note": "SGLang · vLLM · llama.cpp parity", "bar": "#3a7d9c", "sota_covers": true },
+      { "name": "CORRECTNESS (exact)", "note": "they don't prove this", "bar": "#7a5cb0", "sota_covers": false },
+      { "name": "SECURITY KERNEL", "note": "in-process — they don't own this", "bar": "#1c7c92", "sota_covers": false }
+    ],
+    "impact_label": "INDUSTRY IMPACT",
+    "impact": "Serving engines accelerate one stream. fak eliminates redundant work across a fleet AND adjudicates every tool call in-process — one address space, no boundary tax.",
+    "pullquote": ["one chat → llama.cpp;", "an agent fleet → fak."]
+  },
+  "pillars": [
+    {
+      "name": "SERVING EFFICIENCY",
+      "tag": "vs best shipped SOTA",
+      "subhead": "vs the best already-shipped serving stack",
+      "accent": "#1c7c92",
+      "band": "#3a7d9c",
+      "rows": [
+        { "label": "50-turn × 5-agent fleet serving", "metric": "4.1×", "sub": "less serving work", "chip": "SOTA-style", "note": "fak's own kernel, reuse isolated", "baseline": "vs tuned warm per-agent KV — the SGLang/vLLM discipline on fak's own kernel", "commit": "2bbda6f" },
+        { "label": "KV-cache hit rate", "metric": "86.7%", "sub": "= 100% of optimal", "chip": "SOTA-parity", "baseline": "matches SGLang RadixAttention 50–99% band", "commit": "92896a4" },
+        { "label": "RadixAttention live prefill speedup", "metric": "6.95×", "sub": "fewer prefill FLOPs", "chip": "reuse", "bar_frac": 0.927, "bar_cap": "93% of the 7.50× ceiling", "baseline": "vs full re-prefill per request", "commit": "92896a4" },
+        { "label": "Long-context session value-add (T=512)", "metric": "139.3×", "sub": "less work", "chip": "NAIVE", "naive": true, "baseline": "vs a naive stateless re-prefill loop", "commit": "92896a4" }
+      ]
+    },
+    {
+      "name": "CORRECTNESS",
+      "tag": "the reuse is EXACT",
+      "subhead": "exact — what no serving engine proves",
+      "accent": "#7a5cb0",
+      "band": "#7a5cb0",
+      "rows": [
+        { "label": "Mid-run span eviction, causal invalidation", "metric": "max|Δ|=0", "sub": "bit-exact", "chip": "exact", "verdict": true, "baseline": "identical to a run that never saw the evicted span", "commit": "0fc39aa" },
+        { "label": "Single-stream 7B greedy decode", "metric": "7/7", "sub": "tokens match", "chip": "parity", "verdict": true, "baseline": "exact parity vs llama.cpp on the same Q8 weights", "commit": "34c74f4" },
+        { "label": "RadixAttention token reuse", "metric": "7.50×", "sub": "fewer tokens", "chip": "exact", "bar_frac": 1.0, "bar_cap": "deterministic token-count ceiling", "baseline": "exact accounting — reuse, not a shortcut", "commit": "92896a4" },
+        { "label": "Qwen3.5-0.8B hybrid-GDN runs in fak", "metric": "coherent", "sub": "novel arch", "chip": "parity", "verdict": true, "baseline": "exotic Mamba2 / Gated-DeltaNet arch runs correct in-kernel", "commit": "6a376b8" }
+      ]
+    },
+    {
+      "name": "SECURITY KERNEL",
+      "tag": "the boundary they don't own",
+      "subhead": "default-deny, in one address space",
+      "accent": "#1c7c92",
+      "band": "#1c7c92",
+      "rows": [
+        { "label": "In-kernel permission decide", "metric": "362 ns", "sub": "allow / deny", "chip": "absolute", "baseline": "syscall-speed adjudication, one address space", "commit": "bcad56e" },
+        { "label": "Result admission + quarantine", "metric": "3.3 µs", "sub": "page out a secret", "chip": "absolute", "baseline": "full Admit gate: scan + quarantine + page-out", "commit": "bcad56e" },
+        { "label": "In-process vs spawned-hook gate", "metric": "2,849×", "sub": "faster", "chip": "absolute", "note": "the cost of NOT owning the boundary", "baseline": "process-per-decide adjudication (n=100)", "commit": "bcad56e" },
+        { "label": "Nested prompt-injection containment", "metric": "QUARANTINE", "sub": "never reaches model", "chip": "absolute", "verdict": true, "baseline": "nested injection caught + quarantined out of context", "commit": "bcad56e" }
+      ]
+    }
+  ],
+  "fence": {
+    "name": "SINGLE STREAM — WHERE fak DOES NOT LEAD",
+    "tag": "shown, not hidden — fak explicitly does not target raw throughput",
+    "rows": [
+      { "label": "Decode (Qwen2.5-7B Q8)", "owned": "llama.cpp Metal 17.3 tok/s", "fak": "8.7 tok/s = 0.50×", "commit": "34c74f4" },
+      { "label": "Prefill (Qwen2.5-7B Q8)", "owned": "llama.cpp CPU (apples-to-apples)", "fak": "~0.12× CPU · 0.083× vs Metal GPU", "commit": "34c74f4" }
+    ]
+  },
+  "footer": {
+    "line1": "fak is the kernel under the agent stack — it does SOTA reuse AND owns the safety boundary, proven exact, at syscall speed.",
+    "line2": "one chat → llama.cpp; an agent fleet → fak.",
+    "right": "Apple M3 Pro · app_version 0.30.0 · every number traces to fak/BENCHMARK-AUTHORITY.md (commit + artifact)."
+  }
+}

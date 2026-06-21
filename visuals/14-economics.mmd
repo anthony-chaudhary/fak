@@ -1,0 +1,34 @@
+%%{init: {'theme':'base','themeVariables':{'fontFamily':'Segoe UI, Helvetica, Arial, sans-serif','fontSize':'14px','lineColor':'#5B6B7B','primaryColor':'#DCE9FB','primaryTextColor':'#1B3A66','primaryBorderColor':'#3B6FB5','clusterBkg':'#F7F9FB','clusterBorder':'#AFC0CE'}}}%%
+flowchart LR
+  subgraph REAL["&nbsp; REAL AND LARGE — measured &nbsp;"]
+    direction TB
+    r1["tool-call OVERHEAD<br/>~50-300ms to tens of us<br/>~1000x [med-high]"]
+    r2["vDSO pure / cached calls<br/>~seconds to ~us<br/>100-10,000x [high]"]
+    r3["DOS ADJUDICATION<br/>232-262ms Py / 5.4-13.9ms Go<br/>to 38ns-160us in-proc [measured]"]
+    r4["context tokens saved<br/>40-80% at ~17ms<br/>[measured, headroom]"]
+    r5["cost center is CONTEXT<br/>~150,168 in : ~2,817 out<br/>~53:1, ~98% re-sent"]
+  end
+  subgraph GATED["&nbsp; GATED — easy to oversell &nbsp;"]
+    direction TB
+    g1["token-per-watt-per-user<br/>~2-2.5x vs TUNED baseline<br/>(only 5-15x vs naive)"]
+    g2["always-on density<br/>HBM-bound ~10-40 / GPU<br/>before mitigation"]
+    g3["token-per-watt UNMEASURABLE today<br/>no watt data — instrument<br/>nvml / RAPL first"]
+  end
+  KILLER["~1000x on overhead is REAL;<br/>'100x always-on' is HBM-GATED"]
+  ORDER["BUILD ORDER<br/>1 — instrument watts first<br/>2 — resident-KV + tool-wait batching<br/>3 — vDSO + pre-flight<br/>4 — headroom as the admit gate<br/>5 — speculation last"]
+  REAL -.-> KILLER
+  GATED -.-> KILLER
+  KILLER -.-> ORDER
+  classDef untrusted fill:#FFE9D6,stroke:#E8833A,stroke-width:2px,color:#7A3E12;
+  classDef kernel fill:#DCE9FB,stroke:#3B6FB5,stroke-width:2px,color:#1B3A66;
+  classDef gate fill:#FFF3CC,stroke:#C9A227,stroke-width:2px,color:#6B5410;
+  classDef pass fill:#DBF3E1,stroke:#3FA45F,stroke-width:2px,color:#1C5230;
+  classDef deny fill:#FBDDDD,stroke:#C9453F,stroke-width:2px,color:#6E1F1B;
+  classDef mem fill:#EDE7FB,stroke:#7B5BC0,stroke-width:2px,color:#3A2A66;
+  classDef cheap fill:#E8ECEF,stroke:#7A8A99,stroke-width:1.5px,color:#33424F;
+  classDef world fill:#FCEEDB,stroke:#B5792B,stroke-width:2px,color:#5E3D12;
+  classDef frontier fill:#E7D9F5,stroke:#8A53C0,stroke-width:2px,color:#3F2466;
+  classDef note fill:#F7F9FB,stroke:#AFC0CE,stroke-width:1px,color:#46586A;
+  class r1,r2,r3,r4,r5 pass;
+  class g1,g2,g3 deny;
+  class KILLER,ORDER note;

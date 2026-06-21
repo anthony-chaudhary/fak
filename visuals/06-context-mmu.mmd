@@ -1,0 +1,50 @@
+%%{init: {'theme':'base','themeVariables':{'fontFamily':'Segoe UI, Helvetica, Arial, sans-serif','fontSize':'14px','lineColor':'#5B6B7B','primaryColor':'#DCE9FB','primaryTextColor':'#1B3A66','primaryBorderColor':'#3B6FB5','clusterBkg':'#F7F9FB','clusterBorder':'#AFC0CE'}}}%%
+flowchart TD
+  tool[["external tool / the world"]]
+  result(["tool result arrives"])
+  dos["DOS = Context MMU<br/>(denies a RESULT, not just a CALL)"]
+  gate{"admission gate:<br/>earns its place?"}
+  ctx[("protected context<br/>(only bytes that earned it)")]
+  quar["QUARANTINE<br/>(failed / noisy result)"]
+  compress["headroom-compress<br/>(page-in compressor)"]
+  drop["drop"]
+  pageout[("page-out to side store<br/>(faultable back in)")]
+  model(["model / agent<br/>deliberately faults a page back in"])
+  kn["headroom: 40-80% tokens cut @ ~17 ms"]
+  pt["ONE page table:<br/>maps each context segment to its physical KV in<br/>{HBM (hot working set) / DRAM / SSD / recompute / compressed}<br/>'what the model sees' AND 'where its KV lives' are ONE table"]
+
+  tool --> result
+  result --> dos
+  dos --> gate
+  gate -->|PASS| ctx
+  gate -->|FAIL| quar
+  quar --> compress
+  quar --> drop
+  quar --> pageout
+  compress --> ctx
+  pageout -.->|fault-in| model
+  model -.->|re-admit| gate
+  compress -.- kn
+  ctx -.- pt
+
+  classDef untrusted fill:#FFE9D6,stroke:#E8833A,stroke-width:2px,color:#7A3E12;
+  classDef kernel fill:#DCE9FB,stroke:#3B6FB5,stroke-width:2px,color:#1B3A66;
+  classDef gate fill:#FFF3CC,stroke:#C9A227,stroke-width:2px,color:#6B5410;
+  classDef pass fill:#DBF3E1,stroke:#3FA45F,stroke-width:2px,color:#1C5230;
+  classDef deny fill:#FBDDDD,stroke:#C9453F,stroke-width:2px,color:#6E1F1B;
+  classDef mem fill:#EDE7FB,stroke:#7B5BC0,stroke-width:2px,color:#3A2A66;
+  classDef cheap fill:#E8ECEF,stroke:#7A8A99,stroke-width:1.5px,color:#33424F;
+  classDef world fill:#FCEEDB,stroke:#B5792B,stroke-width:2px,color:#5E3D12;
+  classDef frontier fill:#E7D9F5,stroke:#8A53C0,stroke-width:2px,color:#3F2466;
+  classDef note fill:#F7F9FB,stroke:#AFC0CE,stroke-width:1px,color:#46586A;
+
+  class tool world;
+  class result untrusted;
+  class dos kernel;
+  class gate gate;
+  class ctx pass;
+  class quar,drop deny;
+  class compress cheap;
+  class pageout mem;
+  class model frontier;
+  class kn,pt note;

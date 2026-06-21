@@ -1,0 +1,63 @@
+{
+  "version": "fak-policy/v1",
+
+  "allow": [
+    "Bash",
+    "BashOutput",
+    "KillShell",
+    "Read",
+    "Edit",
+    "Write",
+    "NotebookEdit",
+    "Glob",
+    "Grep",
+    "LS",
+    "TodoWrite",
+    "Task",
+    "WebFetch",
+    "WebSearch",
+    "ExitPlanMode",
+    "Skill",
+    "SlashCommand"
+  ],
+
+  "allow_prefix": [
+    "read_",
+    "get_",
+    "search_",
+    "list_",
+    "lookup_",
+    "find_"
+  ],
+
+  "arg_rules": [
+    { "tool": "Bash", "arg": "command", "deny_regex": "\\brm\\s+-[A-Za-z]*[rRfF]", "reason": "POLICY_BLOCK" },
+    { "tool": "Bash", "arg": "command", "deny_regex": "\\bsudo\\b", "reason": "POLICY_BLOCK" },
+    { "tool": "Bash", "arg": "command", "deny_regex": "\\bmkfs\\b|\\bdd\\s+if=|>\\s*/dev/sd", "reason": "POLICY_BLOCK" },
+    { "tool": "Bash", "arg": "command", "deny_regex": ":\\(\\)\\s*\\{", "reason": "POLICY_BLOCK" },
+    { "tool": "Bash", "arg": "command", "deny_regex": "\\b(curl|wget)\\b[^|]*\\|\\s*(sudo\\s+)?(ba)?sh\\b", "reason": "POLICY_BLOCK" },
+    { "tool": "Bash", "arg": "command", "deny_regex": "\\bgit\\s+push\\b", "reason": "POLICY_BLOCK" }
+  ],
+
+  "self_modify_globs": [
+    "internal/abi/",
+    "internal/kernel/",
+    "internal/adjudicator/",
+    "internal/policy/",
+    "internal/registrations/",
+    ".git/",
+    ".ssh/",
+    ".dos/",
+    "VERSION",
+    "id_rsa",
+    "/etc/"
+  ],
+
+  "redact_fields": [
+    "password",
+    "secret",
+    "api_key",
+    "token",
+    "authorization"
+  ]
+}

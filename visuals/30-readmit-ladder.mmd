@@ -1,0 +1,33 @@
+%%{init: {'theme':'base','themeVariables':{'fontFamily':'Segoe UI, Helvetica, Arial, sans-serif','fontSize':'13px','lineColor':'#5B6B7B','primaryColor':'#DCE9FB','primaryTextColor':'#1B3A66','primaryBorderColor':'#3B6FB5','clusterBkg':'#F7F9FB','clusterBorder':'#AFC0CE'}}}%%
+flowchart TD
+  q(["Resolve(page) in the RELOADED session"])
+  q --> kind{"benign or<br/>quarantined?"}
+
+  kind -->|"benign · rung 0"| r0["re-output BYTE-IDENTICAL<br/>at zero model tokens"]
+  kind -->|"Recall(query,k) · rung 2"| r2["demand-page top-k working set;<br/>quarantined pages are NEVER candidates"]
+  kind -->|"quarantined · rung 4 — THE MOAT"| w{"did a witness<br/>Clear() run?"}
+
+  w -->|no| d1["REFUSED<br/>'sealed … no witness Clear(q)'"]
+  w -->|yes| rescreen{"fresh ctxmmu.Admit<br/>re-screen passes?"}
+  rescreen -->|"no (re-quarantined)"| d2["REFUSED<br/>'clearance does not launder poison'"]
+  rescreen -->|"yes — genuinely benign now"| rel["RELEASED"]
+
+  note["clearance is NECESSARY but NOT SUFFICIENT.<br/>The re-screen is the precise lever a TIGHTENED pattern set pulls:<br/>a page that looked benign at write time is RE-CAUGHT on page-in.<br/>5/5 adversarial skeptics (default-REFUTED) CONFIRMED the moat."]
+  rescreen -.- note
+
+  classDef untrusted fill:#FFE9D6,stroke:#E8833A,stroke-width:2px,color:#7A3E12;
+  classDef kernel fill:#DCE9FB,stroke:#3B6FB5,stroke-width:2px,color:#1B3A66;
+  classDef gate fill:#FFF3CC,stroke:#C9A227,stroke-width:2px,color:#6B5410;
+  classDef pass fill:#DBF3E1,stroke:#3FA45F,stroke-width:2px,color:#1C5230;
+  classDef deny fill:#FBDDDD,stroke:#C9453F,stroke-width:2px,color:#6E1F1B;
+  classDef mem fill:#EDE7FB,stroke:#7B5BC0,stroke-width:2px,color:#3A2A66;
+  classDef cheap fill:#E8ECEF,stroke:#7A8A99,stroke-width:1.5px,color:#33424F;
+  classDef world fill:#FCEEDB,stroke:#B5792B,stroke-width:2px,color:#5E3D12;
+  classDef frontier fill:#E7D9F5,stroke:#8A53C0,stroke-width:2px,color:#3F2466;
+  classDef note fill:#F7F9FB,stroke:#AFC0CE,stroke-width:1px,color:#46586A;
+
+  class q untrusted;
+  class kind,w,rescreen gate;
+  class r0,r2,rel pass;
+  class d1,d2 deny;
+  class note note;

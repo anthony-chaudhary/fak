@@ -1,0 +1,719 @@
+#!/usr/bin/env python3
+r"""gen_dashboard.py — generate the provisioned Grafana dashboard JSON.
+
+The fleet analog of metrics-service's `internal/grafana/dashboard.go`: build
+dashboards as Python dicts and dump valid JSON, so panel `expr`s stay in lock-step
+with the metric names emitted by the observability sources:
+
+  - fleet_bottleneck.py /metrics (namespace `fleet_`)
+  - fak serve /metrics (namespaces `fak_gateway_` and `fak_kernel_`)
+
+Re-run after changing either metric set:
+
+    python tools/grafana/gen_dashboard.py     # writes dashboards/fleet-bottleneck-overview.json
+                                              # and dashboards/fak-gateway-observability.json
+                                              # and dashboards/fak-dogfood-slow-requests.json
+                                              # and dashboards/fak-startup-load.json
+
+The committed JSON is what Grafana provisions; this generator is the maintainable
+source. `METRICS` / `GATEWAY_METRICS` below are the contract —
+`fleet_bottleneck_test.py` asserts dashboard/alert references against emitted
+families.
+"""
+import json, os
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+OUT = os.path.join(HERE, "dashboards", "fleet-bottleneck-overview.json")
+OUT_GATEWAY = os.path.join(HERE, "dashboards", "fak-gateway-observability.json")
+OUT_DOGFOOD = os.path.join(HERE, "dashboards", "fak-dogfood-slow-requests.json")
+OUT_STARTUP = os.path.join(HERE, "dashboards", "fak-startup-load.json")
+
+DS = {"type": "prometheus", "uid": "${DS_PROMETHEUS}"}
+
+# Every metric the dashboard queries. Kept as a manifest so the test can assert
+# both directions against render_prometheus (no panel queries a phantom metric;
+# every emitted family is reachable from a panel or deliberately listed here).
+METRICS = [
+    "fleet_health_state", "fleet_headline_score", "fleet_bottlenecks",
+    "fleet_bottleneck_score", "fleet_workers_active", "fleet_accounts_throttled",
+    "fleet_workers_auth_blocked", "fleet_registry_age_minutes",
+    "fleet_workers_hanging", "fleet_workers_on_throttled_account",
+    "fleet_resume_queue", "fleet_surface_backlog", "fleet_api_error_stalls",
+    "fleet_workers_active_per_account", "fleet_cost_usd",
+    "fleet_cost_per_active_session_hour", "fleet_cache_hit_ratio_median",
+    "fleet_io_ratio_median", "fleet_audit_sessions",
+    "fleet_top_spender_output_tokens", "fleet_worst_cache_hit_ratio",
+]
+
+GATEWAY_METRICS = [
+    "fak_gateway_up", "fak_gateway_start_time_seconds",
+    "fak_gateway_inflight_requests", "fak_gateway_inflight_max_age_seconds",
+    "fak_gateway_inflight_requests_by_route", "fak_gateway_build_info",
+    "fak_gateway_http_requests_total",
+    "fak_gateway_http_request_duration_seconds",
+    "fak_gateway_operations_total",
+    "fak_gateway_operation_duration_seconds",
+    "fak_gateway_vdso_hit_ratio",
+    "fak_kernel_submits_total", "fak_kernel_vdso_hits_total",
+    "fak_kernel_engine_calls_total", "fak_kernel_denies_total",
+    "fak_kernel_transforms_total", "fak_kernel_quarantines_total",
+    "fak_kernel_admitted_total",
+]
+
+# The one-time boot timeline + weight-load families (internal/gateway/startup.go).
+# Held as gauges at their once-at-boot values for process life — see startup.go.
+STARTUP_METRICS = [
+    "fak_gateway_time_to_ready_seconds", "fak_gateway_ready_time_seconds",
+    "fak_gateway_start_time_seconds", "fak_gateway_startup_phase_duration_seconds",
+    "fak_gateway_startup_unaccounted_seconds",
+    "fak_model_load_duration_seconds", "fak_model_load_bytes",
+    "fak_model_load_tensors", "fak_model_load_info",
+    "fak_model_load_phase_duration_seconds", "fak_model_load_phase_bytes",
+    "fak_model_load_phase_tensors",
+]
+
+_id = [0]
+def nid():
+    _id[0] += 1
+    return _id[0]
+
+
+def steps(*pairs):
+    return {"mode": "absolute", "steps": [{"color": c, "value": v} for v, c in pairs]}
+
+
+def row(title, y):
+    return {"type": "row", "title": title, "id": nid(), "collapsed": False,
+            "gridPos": {"h": 1, "w": 24, "x": 0, "y": y}, "panels": []}
+
+
+def stat(title, expr, x, y, w=4, h=4, unit="short", thresholds=None, mappings=None,
+         desc="", color="thresholds", legend=None):
+    defaults = {"color": {"mode": color}, "mappings": mappings or [],
+                "thresholds": thresholds or steps((None, "green")), "unit": unit}
+    tgt = {"datasource": DS, "expr": expr, "refId": "A"}
+    if legend is not None:
+        tgt["legendFormat"] = legend
+    return {
+        "datasource": DS, "title": title, "description": desc, "type": "stat",
+        "id": nid(), "gridPos": {"h": h, "w": w, "x": x, "y": y},
+        "fieldConfig": {"defaults": defaults, "overrides": []},
+        "options": {"colorMode": "value", "graphMode": "area", "justifyMode": "auto",
+                    "orientation": "auto", "textMode": "auto",
+                    "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": False}},
+        "pluginVersion": "11.5.2", "targets": [tgt],
+    }
+
+
+def bargauge(title, expr, legend, x, y, w=12, h=8, unit="short", thresholds=None,
+             desc="", maxv=None):
+    defaults = {"color": {"mode": "thresholds"}, "mappings": [],
+                "thresholds": thresholds or steps((None, "green")), "unit": unit}
+    if maxv is not None:
+        defaults["max"] = maxv
+        defaults["min"] = 0
+    return {
+        "datasource": DS, "title": title, "description": desc, "type": "bargauge",
+        "id": nid(), "gridPos": {"h": h, "w": w, "x": x, "y": y},
+        "fieldConfig": {"defaults": defaults, "overrides": []},
+        "options": {"displayMode": "gradient", "orientation": "horizontal",
+                    "showUnfilled": True, "minVizHeight": 10, "minVizWidth": 0,
+                    "valueMode": "color",
+                    "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": False}},
+        "pluginVersion": "11.5.2",
+        "targets": [{"datasource": DS, "expr": expr, "legendFormat": legend,
+                     "instant": True, "refId": "A"}],
+    }
+
+
+def timeseries(title, targets, x, y, w=24, h=8, unit="short", desc=""):
+    return {
+        "datasource": DS, "title": title, "description": desc, "type": "timeseries",
+        "id": nid(), "gridPos": {"h": h, "w": w, "x": x, "y": y},
+        "fieldConfig": {"defaults": {
+            "color": {"mode": "palette-classic"},
+            "custom": {"drawStyle": "line", "lineWidth": 1, "fillOpacity": 10,
+                       "showPoints": "never", "axisPlacement": "auto",
+                       "spanNulls": True, "pointSize": 5, "stacking": {"mode": "none"}},
+            "unit": unit, "mappings": [], "thresholds": steps((None, "green"))},
+            "overrides": []},
+        "options": {"legend": {"displayMode": "list", "placement": "bottom", "calcs": []},
+                    "tooltip": {"mode": "multi", "sort": "desc"}},
+        "pluginVersion": "11.5.2",
+        "targets": [{"datasource": DS, "expr": e, "legendFormat": lg, "refId": chr(65 + i)}
+                    for i, (e, lg) in enumerate(targets)],
+    }
+
+
+def text_panel(title, content, x, y, w=24, h=6, desc=""):
+    return {
+        "datasource": DS, "title": title, "description": desc, "type": "text",
+        "id": nid(), "gridPos": {"h": h, "w": w, "x": x, "y": y},
+        "fieldConfig": {"defaults": {}, "overrides": []},
+        "options": {"mode": "markdown", "content": content},
+        "pluginVersion": "11.5.2",
+    }
+
+
+def table(title, expr, x, y, w=12, h=9, desc=""):
+    # The score column is colored by the severity-band thresholds (SCORE_TH:
+    # green/blue/yellow/red = OK/MEDIUM/HIGH/CRITICAL), so severity reads off the
+    # color without a `severity` label on the series (which would churn the time
+    # series every threshold crossing — see render_prometheus). The numeric
+    # fleet_bottleneck_severity metric carries severity for PromQL/alerts.
+    return {
+        "datasource": DS, "title": title, "description": desc, "type": "table",
+        "id": nid(), "gridPos": {"h": h, "w": w, "x": x, "y": y},
+        "fieldConfig": {"defaults": {"custom": {"align": "auto", "filterable": True},
+                                     "mappings": [], "thresholds": steps((None, "green"))},
+                        "overrides": [{
+                            "matcher": {"id": "byName", "options": "score"},
+                            "properties": [
+                                {"id": "thresholds", "value": SCORE_TH},
+                                {"id": "custom.cellOptions", "value": {"type": "color-text"}}]}]},
+        "options": {"showHeader": True, "sortBy": [{"displayName": "score", "desc": True}]},
+        "pluginVersion": "11.5.2",
+        "targets": [{"datasource": DS, "expr": expr, "format": "table",
+                     "instant": True, "refId": "A"}],
+        "transformations": [{"id": "organize", "options": {
+            # drop Prometheus bookkeeping + scrape labels (instance/job/fleet) so the
+            # table is a clean title | layer | score.
+            "excludeByName": {"Time": True, "__name__": True, "id": True,
+                              "instance": True, "job": True, "fleet": True},
+            "renameByName": {"Value": "score"},
+            "indexByName": {"title": 0, "layer": 1, "score": 2}}}],
+    }
+
+
+def info_table(title, expr, x, y, w=24, h=6, desc="", exclude=None):
+    """A plain label-table: render an instant series' labels as columns, dropping
+    Prometheus bookkeeping + the (always-1) Value. Used for the *_info gauge."""
+    drop = {"Time": True, "Value": True, "__name__": True, "job": True, "instance": True}
+    for name in (exclude or []):
+        drop[name] = True
+    return {
+        "datasource": DS, "title": title, "description": desc, "type": "table",
+        "id": nid(), "gridPos": {"h": h, "w": w, "x": x, "y": y},
+        "fieldConfig": {"defaults": {
+            "color": {"mode": "thresholds"},
+            "custom": {"align": "auto", "cellOptions": {"type": "auto"}, "inspect": False},
+            "mappings": [], "thresholds": steps((None, "green"))}, "overrides": []},
+        "options": {"showHeader": True, "cellHeight": "sm",
+                    "footer": {"show": False, "reducer": ["sum"], "fields": ""}},
+        "pluginVersion": "11.5.2",
+        "targets": [{"datasource": DS, "expr": expr, "format": "table",
+                     "instant": True, "refId": "A"}],
+        "transformations": [{"id": "organize", "options": {
+            "excludeByName": drop, "renameByName": {}}}],
+    }
+
+
+SCORE_TH = steps((None, "green"), (30, "blue"), (55, "yellow"), (80, "red"))
+HEALTH_MAP = [{"type": "value", "options": {
+    "0": {"text": "OK", "color": "green", "index": 0},
+    "1": {"text": "DEGRADED", "color": "yellow", "index": 1},
+    "2": {"text": "CRITICAL", "color": "red", "index": 2},
+    "3": {"text": "DOWN", "color": "dark-red", "index": 3}}}]
+AGE_TH = steps((None, "green"), (15, "yellow"), (30, "red"))
+ONE_RED = steps((None, "green"), (1, "red"))
+UP_TH = steps((None, "red"), (1, "green"))
+CACHE_TH = steps((None, "red"), (0.8, "yellow"), (0.9, "green"))  # higher cache-hit = better
+LAT_TH = steps((None, "green"), (0.5, "yellow"), (2, "red"))
+ERR_TH = steps((None, "green"), (0.01, "yellow"), (0.05, "red"))
+
+
+def build():
+    panels = []
+
+    panels.append(row("Fleet health", 0))
+    panels.append(stat("Health", "fleet_health_state", 0, 1, color="thresholds",
+                       mappings=HEALTH_MAP, thresholds=steps((None, "green"), (1, "yellow"), (2, "red")),
+                       desc="0 OK · 1 DEGRADED · 2 CRITICAL · 3 DOWN (no telemetry)."))
+    panels.append(stat("#1 bottleneck score", "fleet_headline_score", 4, 1,
+                       thresholds=SCORE_TH, desc="Score of the most-likely actual limiter right now."))
+    panels.append(stat("Active workers", "fleet_workers_active", 8, 1,
+                       desc="In-flight workers (not cleanly finished)."))
+    panels.append(stat("Accounts throttled", "fleet_accounts_throttled", 12, 1,
+                       thresholds=ONE_RED, desc="Accounts currently rate-limited."))
+    panels.append(stat("Auth-blocked workers", "fleet_workers_auth_blocked", 16, 1,
+                       thresholds=ONE_RED, desc="Workers that need /login (a human must re-auth)."))
+    panels.append(stat("Telemetry age", "fleet_registry_age_minutes", 20, 1, unit="m",
+                       thresholds=AGE_TH, desc="Age of the session registry — stale = flying blind (#8)."))
+
+    panels.append(row("Ranked bottlenecks (the Top 10)", 5))
+    panels.append(bargauge(
+        "Bottleneck scores (ranked)", "fleet_bottleneck_score", "{{title}}", 0, 6,
+        w=12, h=9, maxv=100, thresholds=SCORE_TH,
+        desc="Every scored class, 0-100 — likelihood it is the actual limiter."))
+    panels.append(table(
+        "Bottleneck detail", "fleet_bottleneck_score", 12, 6, w=12, h=9,
+        desc="Title · layer · score (score color = severity band) for each scored class."))
+    panels.append(timeseries(
+        "Bottleneck score history", [("fleet_bottleneck_score", "{{title}}")], 0, 15,
+        w=24, h=8, desc="How each class's score moves over time."))
+
+    panels.append(row("Capacity & accounts", 23))
+    panels.append(timeseries(
+        "Worker states over time", [
+            ("fleet_workers_active", "active"),
+            ("fleet_workers_hanging", "hanging"),
+            ("fleet_workers_auth_blocked", "auth-blocked"),
+            ("fleet_workers_on_throttled_account", "on throttled acct"),
+            ("fleet_resume_queue", "resume queue"),
+            ("fleet_surface_backlog", "surface backlog"),
+            ("fleet_api_error_stalls", "api-error stalls"),
+        ], 0, 24, w=16, h=8, desc="The in-flight worker buckets that drive #1-#10."))
+    panels.append(bargauge(
+        "Active workers per account", "fleet_workers_active_per_account", "{{account}}",
+        16, 24, w=8, h=8, desc="Concentration on one account = imbalance (#7) + throttle blast radius (#1)."))
+
+    panels.append(row("Token spend (cost & cache)", 32))
+    panels.append(stat("Window cost", "fleet_cost_usd", 0, 33, unit="currencyUSD",
+                       desc="Estimated token spend over the audit window (assumed pricing)."))
+    panels.append(stat("Cost / session-hr", "fleet_cost_per_active_session_hour", 4, 33,
+                       unit="currencyUSD", desc="Estimated cost per active session-hour."))
+    panels.append(stat("Median cache-hit", "fleet_cache_hit_ratio_median", 8, 33,
+                       unit="percentunit", thresholds=CACHE_TH,
+                       desc="Median per-session prompt-cache-hit fraction — low = token waste (#6)."))
+    panels.append(stat("Median I:O", "fleet_io_ratio_median", 12, 33,
+                       desc="Median per-session input:output token ratio."))
+    panels.append(stat("Transcripts analyzed", "fleet_audit_sessions", 16, 33,
+                       desc="Sessions in the token-spend pass."))
+    panels.append(stat("Bottlenecks scored", "fleet_bottlenecks", 20, 33,
+                       desc="How many of the Top 10 classes are firing now."))
+    panels.append(bargauge(
+        "Top spenders (output tokens)", "fleet_top_spender_output_tokens", "{{session}}",
+        0, 38, w=12, h=8, desc="The heaviest sessions by output tokens (leaderboard)."))
+    panels.append(bargauge(
+        "Lowest cache-hit sessions", "fleet_worst_cache_hit_ratio", "{{session}}",
+        12, 38, w=12, h=8, unit="percentunit", thresholds=CACHE_TH,
+        desc="Token-waste suspects — sessions with the lowest cache reuse (#6)."))
+
+    return {
+        "uid": "fleet-bottleneck",
+        "title": "Fleet Bottleneck & Visibility",
+        "description": "Ranked bottlenecks (Top 10) + capacity, account, and token-spend "
+                       "visibility for the autonomous Claude Code worker fleet. "
+                       "Source: fleet_bottleneck.py /metrics (namespace fleet_).",
+        "tags": ["fleet", "bottleneck", "observability"],
+        "editable": True, "fiscalYearStartMonth": 0, "graphTooltip": 1,
+        "schemaVersion": 39, "version": 1, "refresh": "30s",
+        "time": {"from": "now-6h", "to": "now"},
+        "timepicker": {}, "links": [], "annotations": {"list": [{
+            "builtIn": 1, "datasource": {"type": "grafana", "uid": "-- Grafana --"},
+            "enable": True, "hide": True, "iconColor": "rgba(0, 211, 255, 1)",
+            "name": "Annotations & Alerts", "type": "dashboard"}]},
+        "templating": {"list": [{
+            "name": "DS_PROMETHEUS", "label": "Prometheus", "type": "datasource",
+            "query": "prometheus", "current": {}, "hide": 2, "refresh": 1,
+            "regex": "", "options": [], "includeAll": False, "multi": False}]},
+        "panels": panels,
+    }
+
+
+def build_gateway():
+    panels = []
+
+    req_rate = "sum(rate(fak_gateway_http_requests_total[5m]))"
+    # `or vector(0)` so a healthy gateway (no 5xx series at all) renders 0, not "No data".
+    err_ratio = (
+        '(sum(rate(fak_gateway_http_requests_total{status=~"5.."}[5m])) or vector(0)) / '
+        "clamp_min(sum(rate(fak_gateway_http_requests_total[5m])), 0.001)"
+    )
+    http_p95 = (
+        "histogram_quantile(0.95, "
+        "sum by (le) (rate(fak_gateway_http_request_duration_seconds_bucket[5m])))"
+    )
+    op_p95 = (
+        "histogram_quantile(0.95, "
+        "sum by (le) (rate(fak_gateway_operation_duration_seconds_bucket[5m])))"
+    )
+
+    panels.append(row("Gateway health", 0))
+    panels.append(stat("Scrape", 'up{job="fak_gateway"}', 0, 1,
+                       thresholds=UP_TH,
+                       mappings=[{"type": "value", "options": {
+                           "0": {"text": "DOWN", "color": "red", "index": 0},
+                           "1": {"text": "UP", "color": "green", "index": 1}}}],
+                       desc="Prometheus scrape health for fak serve /metrics."))
+    panels.append(stat("Gateway up", "fak_gateway_up", 4, 1,
+                       thresholds=UP_TH, desc="Self-reported gateway liveness."))
+    panels.append(stat("Requests / sec", req_rate, 8, 1,
+                       desc="Total HTTP request throughput over 5m."))
+    panels.append(stat("5xx ratio", err_ratio, 12, 1, unit="percentunit",
+                       thresholds=ERR_TH, desc="5xx responses divided by all gateway requests."))
+    panels.append(stat("HTTP p95", http_p95, 16, 1, unit="s",
+                       thresholds=LAT_TH, desc="Gateway HTTP p95 latency over 5m."))
+    panels.append(stat("Inflight", "fak_gateway_inflight_requests", 20, 1,
+                       desc="Requests currently executing in the gateway."))
+
+    panels.append(row("HTTP surface", 5))
+    panels.append(timeseries(
+        "HTTP request rate by route/status",
+        [('sum by (route, status) (rate(fak_gateway_http_requests_total[5m]))', "{{route}} {{status}}")],
+        0, 6, w=12, h=8, desc="Which route/status classes are driving traffic."))
+    panels.append(timeseries(
+        "HTTP p95 by route",
+        [("histogram_quantile(0.95, sum by (le, route) "
+          "(rate(fak_gateway_http_request_duration_seconds_bucket[5m])))", "{{route}}")],
+        12, 6, w=12, h=8, unit="s", desc="Route-level p95 latency over 5m."))
+    panels.append(bargauge(
+        "Current route rate", 'sum by (route) (rate(fak_gateway_http_requests_total[5m]))',
+        "{{route}}", 0, 14, w=12, h=8,
+        desc="Instant route throughput ranked by current rate."))
+    panels.append(bargauge(
+        "Current status rate", 'sum by (status) (rate(fak_gateway_http_requests_total[5m]))',
+        "{{status}}", 12, 14, w=12, h=8,
+        desc="Instant status-class throughput ranked by current rate."))
+
+    panels.append(row("Kernel operations", 22))
+    panels.append(timeseries(
+        "Operation verdict rate",
+        [('sum by (operation, verdict) (rate(fak_gateway_operations_total[5m]))',
+          "{{operation}} {{verdict}}")],
+        0, 23, w=12, h=8, desc="syscall/adjudicate/admit verdict mix."))
+    panels.append(timeseries(
+        "Operation p95 by operation",
+        [("histogram_quantile(0.95, sum by (le, operation) "
+          "(rate(fak_gateway_operation_duration_seconds_bucket[5m])))", "{{operation}}")],
+        12, 23, w=12, h=8, unit="s", desc="Kernel operation p95 over 5m."))
+    panels.append(stat("Operation p95", op_p95, 0, 31, unit="s",
+                       thresholds=LAT_TH, desc="Aggregate syscall/adjudicate/admit p95 latency."))
+    panels.append(stat("vDSO hit ratio", "fak_gateway_vdso_hit_ratio", 4, 31,
+                       unit="percentunit", thresholds=CACHE_TH,
+                       desc="Cumulative fast-path hit ratio over kernel submissions."))
+    panels.append(stat("Denied / sec", '(sum(rate(fak_gateway_operations_total{verdict="DENY"}[5m])) or vector(0))',
+                       8, 31, thresholds=ONE_RED, desc="Denied gateway operations per second (0 when none denied)."))
+    panels.append(stat("Quarantines / sec", "rate(fak_kernel_quarantines_total[5m])",
+                       12, 31, thresholds=ONE_RED,
+                       desc="Result admissions quarantined by the result-side stack."))
+    panels.append(stat("Engine calls / sec", "rate(fak_kernel_engine_calls_total[5m])",
+                       16, 31, desc="Kernel calls that reached the engine."))
+    panels.append(stat("Submits / sec", "rate(fak_kernel_submits_total[5m])",
+                       20, 31, desc="Kernel submissions per second."))
+
+    # Trust floor — the DOS-discipline view. fak_gateway_operations_total carries a
+    # `reason` label (the closed refusal vocabulary from internal/abi/reasons.go:
+    # TRUST_VIOLATION, UNWITNESSED, SECRET_EXFIL, SELF_MODIFY, POLICY_BLOCK,
+    # DEFAULT_DENY, RATE_LIMITED, MISROUTE, UNKNOWN_TOOL, ...) and a `disposition`
+    # label (DENY/WAIT/...). The verdict-mix panels above answer "how many were
+    # blocked"; these answer "WHY, by the structured reason the kernel refused with"
+    # — the evidence that the trust floor is actually firing, not just that traffic
+    # flowed. A non-ALLOW verdict is a refusal; grouping its rate by reason is the
+    # operator's break-glass "what is the floor catching right now" view. Empty
+    # reason ("") = the ALLOW path (no refusal reason), excluded so the panels show
+    # only the refusal vocabulary.
+    nonallow = 'fak_gateway_operations_total{reason!="",verdict!="ALLOW"}'
+    panels.append(row("Trust floor (DOS refusals by reason)", 35))
+    panels.append(timeseries(
+        "Refusal rate by reason",
+        [(f'sum by (reason) (rate({nonallow}[5m]))', "{{reason}}")],
+        0, 36, w=12, h=8,
+        desc="Per-second rate of non-ALLOW verdicts grouped by the closed refusal "
+             "vocabulary (internal/abi/reasons.go). This is the trust floor firing — "
+             "0 across the board means nothing is being refused."))
+    panels.append(bargauge(
+        "Top refusal reasons (now)",
+        f'sum by (reason) (rate({nonallow}[5m]))', "{{reason}}",
+        12, 36, w=12, h=8, thresholds=ONE_RED,
+        desc="Instant ranking of which refusal reasons are firing — the kernel's "
+             "structured 'why I said no', ranked by current rate."))
+    panels.append(timeseries(
+        "Refusal disposition mix",
+        [('sum by (disposition) '
+          '(rate(fak_gateway_operations_total{disposition!="",verdict!="ALLOW"}[5m]))',
+          "{{disposition}}")],
+        0, 44, w=24, h=6,
+        desc="How refusals are dispatched (DENY vs WAIT vs ...) — the action the "
+             "caller should take, aggregated over all reasons."))
+
+    panels.append(row("Kernel counters", 51))
+    panels.append(timeseries(
+        "Kernel call-path rates",
+        [
+            ("rate(fak_kernel_submits_total[5m])", "submits"),
+            ("rate(fak_kernel_vdso_hits_total[5m])", "vdso hits"),
+            ("rate(fak_kernel_engine_calls_total[5m])", "engine calls"),
+            ("rate(fak_kernel_denies_total[5m])", "denies"),
+            ("rate(fak_kernel_transforms_total[5m])", "transforms"),
+            ("rate(fak_kernel_quarantines_total[5m])", "quarantines"),
+            ("rate(fak_kernel_admitted_total[5m])", "admitted"),
+        ],
+        0, 36, w=24, h=8, desc="The kernel counters exported from fak serve /metrics."))
+
+    return {
+        "uid": "fak-gateway-observability",
+        "title": "FAK Gateway Observability",
+        "description": "Live HTTP, verdict, kernel-counter, and vDSO visibility for fak serve. "
+                       "Source: fak serve /metrics (namespaces fak_gateway_ and fak_kernel_).",
+        "tags": ["fak", "gateway", "observability"],
+        "editable": True, "fiscalYearStartMonth": 0, "graphTooltip": 1,
+        "schemaVersion": 39, "version": 1, "refresh": "30s",
+        "time": {"from": "now-6h", "to": "now"},
+        "timepicker": {}, "links": [], "annotations": {"list": [{
+            "builtIn": 1, "datasource": {"type": "grafana", "uid": "-- Grafana --"},
+            "enable": True, "hide": True, "iconColor": "rgba(0, 211, 255, 1)",
+            "name": "Annotations & Alerts", "type": "dashboard"}]},
+        "templating": {"list": [{
+            "name": "DS_PROMETHEUS", "label": "Prometheus", "type": "datasource",
+            "query": "prometheus", "current": {}, "hide": 2, "refresh": 1,
+            "regex": "", "options": [], "includeAll": False, "multi": False}]},
+        "panels": panels,
+    }
+
+
+def build_dogfood():
+    panels = []
+
+    msg_filter = '{job="fak_gateway",route="/v1/messages"}'
+    msg_status_filter = '{job="fak_gateway",route="/v1/messages",status=~"2..|3..|4..|5.."}'
+    msg_count = f"fak_gateway_http_request_duration_seconds_count{msg_filter}"
+    msg_sum = f"fak_gateway_http_request_duration_seconds_sum{msg_filter}"
+    msg_bucket = f"fak_gateway_http_request_duration_seconds_bucket{msg_filter}"
+    msg_requests = f"fak_gateway_http_requests_total{msg_filter}"
+    msg_requests_by_status = f"fak_gateway_http_requests_total{msg_status_filter}"
+    msg_inflight = (
+        'fak_gateway_inflight_requests_by_route'
+        '{job="fak_gateway",route="/v1/messages"} or vector(0)'
+    )
+    oldest_inflight = 'fak_gateway_inflight_max_age_seconds{job="fak_gateway"}'
+
+    msg_rate = f"sum(rate({msg_requests}[$__rate_interval]))"
+    msg_avg = (
+        f"sum(rate({msg_sum}[$__rate_interval])) / "
+        f"clamp_min(sum(rate({msg_count}[$__rate_interval])), 0.001)"
+    )
+
+    def msg_quantile(q):
+        return (
+            f"histogram_quantile({q}, "
+            f"sum by (le) (rate({msg_bucket}[$__rate_interval])))"
+        )
+
+    def slow_over(le):
+        bucket = (
+            'fak_gateway_http_request_duration_seconds_bucket'
+            f'{{job="fak_gateway",route="/v1/messages",le="{le}"}}'
+        )
+        return (
+            f"(sum(rate({msg_count}[$__rate_interval])) or vector(0)) - "
+            f"(sum(rate({bucket}[$__rate_interval])) or vector(0))"
+        )
+
+    panels.append(row("Dogfood health", 0))
+    panels.append(stat("Scrape", 'up{job="fak_gateway"}', 0, 1,
+                       thresholds=UP_TH,
+                       mappings=[{"type": "value", "options": {
+                           "0": {"text": "DOWN", "color": "red", "index": 0},
+                           "1": {"text": "UP", "color": "green", "index": 1}}}],
+                       desc="Prometheus scrape health for the fak gateway."))
+    panels.append(stat("Gateway up", "fak_gateway_up", 4, 1,
+                       thresholds=UP_TH, desc="Self-reported gateway liveness."))
+    panels.append(stat("Messages in flight", msg_inflight, 8, 1,
+                       thresholds=steps((None, "green"), (1, "yellow"), (3, "red")),
+                       desc="/v1/messages requests currently executing in the gateway."))
+    panels.append(stat("Oldest in-flight", oldest_inflight, 12, 1, unit="s",
+                       thresholds=steps((None, "green"), (60, "yellow"), (300, "red")),
+                       desc="Age of the oldest currently-running gateway request."))
+    panels.append(stat("/v1/messages / sec", msg_rate, 16, 1,
+                       desc="Claude Code dogfood request throughput."))
+    panels.append(stat("/v1/messages p95", msg_quantile("0.95"), 20, 1, unit="s",
+                       thresholds=steps((None, "green"), (60, "yellow"), (180, "red")),
+                       desc="p95 completed /v1/messages latency. Qwen3.6 local turns can be minutes."))
+
+    panels.append(row("Claude /v1/messages latency", 5))
+    panels.append(timeseries(
+        "Latency quantiles",
+        [(msg_quantile("0.50"), "p50"),
+         (msg_avg, "avg"),
+         (msg_quantile("0.95"), "p95"),
+         (msg_quantile("0.99"), "p99")],
+        0, 6, w=12, h=8, unit="s",
+        desc="Completed /v1/messages latency. Buckets extend to 1800s for local 27B prefill."))
+    panels.append(timeseries(
+        "Request rate by status",
+        [(f"sum by (status) (rate({msg_requests_by_status}[$__rate_interval]))", "{{status}}")],
+        12, 6, w=12, h=8,
+        desc="Status mix for the Claude Code dogfood endpoint."))
+
+    panels.append(row("Slow request threshold rate", 14))
+    panels.append(timeseries(
+        "Requests slower than threshold",
+        [(slow_over("30"), ">30s"),
+         (slow_over("60"), ">60s"),
+         (slow_over("120"), ">120s"),
+         (slow_over("300"), ">300s")],
+        0, 15, w=24, h=8,
+        desc="Rate of completed /v1/messages requests slower than each bucket threshold."))
+
+    panels.append(row("Kernel activity during dogfood turns", 23))
+    panels.append(timeseries(
+        "Kernel operation verdict rate",
+        [('sum by (operation, verdict) '
+          '(rate(fak_gateway_operations_total{job="fak_gateway"}[$__rate_interval]))',
+          "{{operation}} {{verdict}}")],
+        0, 24, w=12, h=8,
+        desc="Adjudication activity while Claude Code is using the gateway."))
+    panels.append(timeseries(
+        "Kernel counter rates",
+        [
+            ('rate(fak_kernel_submits_total{job="fak_gateway"}[$__rate_interval])', "submits"),
+            ('rate(fak_kernel_vdso_hits_total{job="fak_gateway"}[$__rate_interval])', "vdso hits"),
+            ('rate(fak_kernel_engine_calls_total{job="fak_gateway"}[$__rate_interval])', "engine calls"),
+            ('rate(fak_kernel_denies_total{job="fak_gateway"}[$__rate_interval])', "denies"),
+            ('rate(fak_kernel_quarantines_total{job="fak_gateway"}[$__rate_interval])', "quarantines"),
+        ],
+        12, 24, w=12, h=8,
+        desc="Kernel call-path counters during dogfood sessions."))
+
+    panels.append(text_panel(
+        "Request/debug log pointers",
+        "Grafana shows gateway metrics, not raw request bodies. For request-level debugging, "
+        "the dogfood launcher defaults Claude Code to `--debug api`; probe stderr/debug goes "
+        "to `/tmp/fak-claude.log`, and the gateway process log goes to `/tmp/fak-serve.log`. "
+        "Set `FAK_DOGFOOD_CLAUDE_DEBUG_FILE=/path/to/file` if you want Claude's debug stream "
+        "written to a dedicated file while the metrics in this dashboard show whether the "
+        "request is still in flight, completed slowly, or failed by status.",
+        0, 32, w=24, h=5,
+        desc="Operational pointers for the logs that contain raw Claude/gateway request detail."))
+
+    return {
+        "uid": "fak-dogfood-slow-requests",
+        "title": "FAK Dogfood Slow Requests",
+        "description": "Focused /v1/messages latency, status, inflight, and kernel activity "
+                       "for Claude Code dogfood sessions against slow local models.",
+        "tags": ["fak", "dogfood", "claude", "slow-requests"],
+        "editable": True, "fiscalYearStartMonth": 0, "graphTooltip": 1,
+        "schemaVersion": 39, "version": 1, "refresh": "10s",
+        "time": {"from": "now-1h", "to": "now"},
+        "timepicker": {}, "links": [], "annotations": {"list": [{
+            "builtIn": 1, "datasource": {"type": "grafana", "uid": "-- Grafana --"},
+            "enable": True, "hide": True, "iconColor": "rgba(0, 211, 255, 1)",
+            "name": "Annotations & Alerts", "type": "dashboard"}]},
+        "templating": {"list": [{
+            "name": "DS_PROMETHEUS", "label": "Prometheus", "type": "datasource",
+            "query": "prometheus", "current": {}, "hide": 2, "refresh": 1,
+            "regex": "", "options": [], "includeAll": False, "multi": False}]},
+        "panels": panels,
+    }
+
+
+READY_TH = steps((None, "green"), (5, "yellow"), (30, "red"))
+# Unaccounted boot time: green when every bit of startup is attributed to a named
+# phase, yellow once an untimed gap appears, red when a meaningful chunk of boot
+# is uninstrumented. This is the panel that says "startup is fully instrumented".
+UNACCOUNTED_TH = steps((None, "green"), (0.05, "yellow"), (0.5, "red"))
+
+
+def build_startup():
+    """The one-time boot sequence of a fak gateway: time-to-ready, per-phase boot
+    cost, the GGUF weight-load breakdown, and a coverage gauge that flags any boot
+    wall-clock the named phases do NOT explain. The startup/model-load families are
+    gauges held at their once-at-boot values for the life of the process, so a panel
+    can show what THIS process's boot cost at any later moment — a counter/rate would
+    miss it entirely on a fast restart."""
+    panels = []
+
+    # Boot summary — two rows of four stat tiles (24-wide grid, w=6 each).
+    panels.append(row("Boot summary", 0))
+    panels.append(stat("Time to ready", "fak_gateway_time_to_ready_seconds", 0, 1,
+                       unit="s", thresholds=READY_TH,
+                       desc="Total wall-clock from process start to the gateway becoming "
+                            "ready to serve (socket bound). 0 until the boot completes."))
+    panels.append(stat("Boot unaccounted", "fak_gateway_startup_unaccounted_seconds", 6, 1,
+                       unit="s", thresholds=UNACCOUNTED_TH,
+                       desc="Boot wall-clock the named phases do NOT explain "
+                            "(time_to_ready minus the sum of phase durations). Near-zero "
+                            "means startup is FULLY instrumented; a non-zero value means a "
+                            "phase is missing or work ran between New and MarkReady that "
+                            "no phase records."))
+    panels.append(stat("Gateway up", "fak_gateway_up", 12, 1, thresholds=UP_TH,
+                       mappings=[{"type": "value", "options": {
+                         "0": {"text": "DOWN", "color": "red", "index": 0},
+                         "1": {"text": "UP", "color": "green", "index": 1}}}],
+                       desc="Self-reported gateway liveness."))
+    panels.append(stat("Uptime", "time() - fak_gateway_start_time_seconds", 18, 1,
+                       unit="s", desc="Time since this gateway process started."))
+    panels.append(stat("Model load time", "fak_model_load_duration_seconds", 0, 5,
+                       unit="s", thresholds=READY_TH,
+                       desc="Total wall-clock to load model weights at boot. No data "
+                            "when serving with no --gguf weights."))
+    panels.append(stat("Weights loaded", "fak_model_load_bytes", 6, 5, unit="bytes",
+                       color="thresholds", thresholds=steps((None, "blue")),
+                       desc="Total bytes read/materialized while loading weights at boot."))
+    panels.append(stat("Tensors", "fak_model_load_tensors", 12, 5,
+                       thresholds=steps((None, "blue")),
+                       desc="Tensors materialized while loading weights at boot."))
+    panels.append(stat("Ready at", "fak_gateway_ready_time_seconds * 1000", 18, 5,
+                       unit="none", thresholds=steps((None, "blue")),
+                       desc="Unix instant (ms) the gateway became ready to serve."))
+
+    panels.append(row("Startup phase breakdown", 9))
+    panels.append(bargauge(
+        "Boot phase cost (now)", "sort_desc(fak_gateway_startup_phase_duration_seconds)",
+        "{{phase}}", 0, 10, w=12, h=8, unit="s",
+        desc="Wall-clock of each boot phase, bottleneck first: flag-parse, policy-load, "
+             "planner-init, vdso-config, kernel-init, listener-bind, and model-load "
+             "(with --gguf). The listener-bind phase is measured on the synchronous "
+             "net.Listen, so it is accurate to the moment the socket is ready."))
+    panels.append(timeseries(
+        "Time to ready over restarts",
+        [("fak_gateway_time_to_ready_seconds", "time to ready"),
+         ("fak_gateway_startup_unaccounted_seconds", "unaccounted")],
+        12, 10, w=12, h=8, unit="s",
+        desc="Both gauges hold their once-at-boot values, so each fresh process shows "
+             "as a new level — restarts and their boot cost are visible across the "
+             "window. unaccounted tracking time-to-ready means a phase is missing."))
+
+    panels.append(row("Model weight load (GGUF phases)", 18))
+    panels.append(bargauge(
+        "Load phase time (bottleneck first)",
+        "sort_desc(fak_model_load_phase_duration_seconds)", "{{phase}}",
+        0, 19, w=12, h=8, unit="s",
+        desc="Wall-clock of each GGUF weight-load phase. The top bar is the bottleneck. "
+             "Empty until a gateway is started with --gguf."))
+    panels.append(bargauge(
+        "Load phase bytes", "sort_desc(fak_model_load_phase_bytes)", "{{phase}}",
+        12, 19, w=12, h=8, unit="bytes",
+        desc="Bytes processed by each GGUF weight-load phase."))
+    panels.append(info_table(
+        "Loaded model", "fak_model_load_info", 0, 27, w=24, h=6,
+        desc="Static labels for the model loaded at boot: source path, loader mode, "
+             "and the slowest (bottleneck) load phase. Empty with no --gguf weights."))
+
+    return {
+        "uid": "fak-startup-load",
+        "title": "FAK Startup & Model Load",
+        "description": "The one-time boot sequence of a fak gateway: time-to-ready, "
+                       "per-phase boot cost, and the GGUF weight-load breakdown. Source: "
+                       "fak serve /metrics (fak_gateway_startup_* and fak_model_load_* "
+                       "gauges). Populate the model-load panels with: fak serve --gguf MODEL.gguf.",
+        "tags": ["fak", "gateway", "startup", "model-load"],
+        "editable": True, "fiscalYearStartMonth": 0, "graphTooltip": 1,
+        "schemaVersion": 39, "version": 1, "refresh": "30s",
+        "time": {"from": "now-6h", "to": "now"},
+        "timepicker": {}, "links": [], "annotations": {"list": [{
+            "builtIn": 1, "datasource": {"type": "grafana", "uid": "-- Grafana --"},
+            "enable": True, "hide": True, "iconColor": "rgba(0, 211, 255, 1)",
+            "name": "Annotations & Alerts", "type": "dashboard"}]},
+        "templating": {"list": [{
+            "name": "DS_PROMETHEUS", "label": "Prometheus", "type": "datasource",
+            "query": "prometheus", "current": {}, "hide": 2, "refresh": 1,
+            "regex": "", "options": [], "includeAll": False, "multi": False}]},
+        "panels": panels,
+    }
+
+
+def main():
+    os.makedirs(os.path.dirname(OUT), exist_ok=True)
+    for path, dash in ((OUT, build()), (OUT_GATEWAY, build_gateway()),
+                       (OUT_DOGFOOD, build_dogfood()), (OUT_STARTUP, build_startup())):
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(dash, f, indent=2)
+            f.write("\n")
+        n_panels = sum(1 for p in dash["panels"] if p["type"] != "row")
+        print(f"wrote {path}  ({n_panels} data panels, {len(dash['panels'])} total incl. rows)")
+
+
+if __name__ == "__main__":
+    main()

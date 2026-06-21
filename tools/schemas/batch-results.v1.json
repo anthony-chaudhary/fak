@@ -1,0 +1,53 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "benchmark/batch-results.v1.json",
+  "title": "Batched Decode Results",
+  "description": "Results from multi-user batched decode benchmark",
+  "type": "object",
+  "required": ["run_id", "engine", "model", "precision", "workers", "baseline", "peak", "points"],
+  "properties": {
+    "$schema": {
+      "type": "string",
+      "const": "benchmark/batch-results.v1"
+    },
+    "run_id": {"type": "string"},
+    "engine": {"type": "string"},
+    "model": {"type": "string"},
+    "precision": {"type": "string"},
+    "workers": {"type": "integer", "minimum": 1},
+    "baseline": {
+      "type": "object",
+      "required": ["batch", "tok_per_sec"],
+      "properties": {
+        "batch": {"type": "integer", "minimum": 1},
+        "tok_per_sec": {"type": "number", "minimum": 0}
+      }
+    },
+    "peak": {
+      "type": "object",
+      "required": ["batch", "agg_tok_per_sec"],
+      "properties": {
+        "batch": {"type": "integer", "minimum": 1},
+        "agg_tok_per_sec": {"type": "number", "minimum": 0},
+        "speedup_vs_baseline": {"type": "number"},
+        "speedup_vs_naive": {"type": "number"}
+      }
+    },
+    "points": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["batch", "per_user_ms_per_tok", "agg_tok_per_sec"],
+        "properties": {
+          "batch": {"type": "integer", "minimum": 1},
+          "decode_steps": {"type": "integer", "minimum": 1},
+          "reps": {"type": "integer", "minimum": 1},
+          "step_ms": {"type": "number", "minimum": 0},
+          "per_user_ms_per_tok": {"type": "number", "minimum": 0},
+          "agg_tok_per_sec": {"type": "number", "minimum": 0},
+          "speedup_vs_baseline": {"type": "number"}
+        }
+      }
+    }
+  }
+}

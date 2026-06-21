@@ -1,0 +1,284 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>fak · turn-tax demo</title>
+<style>
+  :root{
+    --bg:#f6f8fa; --panel:#ffffff; --panel2:#f0f3f6; --line:#d0d7de;
+    --txt:#1f2328; --dim:#6e7781; --dim2:#57606a;
+    --fak:#1a7f37; --fakg:#116329; --naive:#bf8700; --naiveg:#7d5300; --accent:#0969da;
+    --tuned:#0d9488; --tunedg:#0b6b61; --safety:#8250df; --safetyg:#6639ba;
+  }
+  *{box-sizing:border-box}
+  body{background:var(--bg);color:var(--txt);font:13px/1.45 ui-monospace,Menlo,Consolas,"SF Mono",monospace;margin:0;padding:0}
+  h1{font-size:17px;font-weight:600;margin:0}
+  h2{font-size:13px;font-weight:600;color:var(--dim2);margin:0 0 10px;letter-spacing:.04em;text-transform:uppercase}
+  a{color:var(--accent)}
+  .wrap{max-width:1080px;margin:0 auto;padding:22px 20px 60px}
+  .top{display:flex;align-items:baseline;gap:14px;flex-wrap:wrap;margin-bottom:4px}
+  .sub{color:var(--dim);font-size:12px;margin-bottom:18px;line-height:1.6}
+  .pill{font-size:11px;color:var(--dim2);border:1px solid var(--line);border-radius:20px;padding:2px 9px}
+  .panel{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:16px 18px;margin-bottom:16px}
+  .row{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:12px}
+  label{color:var(--dim2);font-size:11px}
+  select,input{background:var(--panel2);border:1px solid var(--line);color:var(--txt);border-radius:6px;padding:5px 8px;font:inherit}
+  button{background:var(--accent);color:#ffffff;border:none;border-radius:7px;padding:8px 16px;font:inherit;font-weight:600;cursor:pointer}
+  button:hover{filter:brightness(1.08)}
+  button:disabled{opacity:.45;cursor:default}
+  button.ghost{background:transparent;color:var(--accent);border:1px solid var(--accent)}
+  .cfg{color:var(--dim2);font-size:12px}
+  .cfg b{color:var(--txt)}
+  /* turn-counter lanes */
+  .lane{margin:12px 0}
+  .lane .hd{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:5px}
+  .lane .nm{font-weight:600}
+  .lane .ct{font-variant-numeric:tabular-nums;font-weight:700;font-size:15px}
+  .lane .meta{font-size:11px;color:var(--dim);margin-top:5px;font-variant-numeric:tabular-nums}
+  .track{display:flex;gap:3px;flex-wrap:wrap;min-height:30px;padding:5px;background:var(--panel2);border:1px solid var(--line);border-radius:7px}
+  .cell{width:22px;height:22px;border-radius:4px;border:1px solid var(--line);background:#eef1f4;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:700;color:var(--dim);transition:transform .12s ease, background .12s ease, color .12s ease;cursor:default}
+  .cell.lit{transform:scale(1.08)}
+  /* baseline cells */
+  .naive .cell.turn{background:linear-gradient(180deg,var(--naive),var(--naiveg));color:#2a1602;border-color:var(--naiveg)}
+  .naive .cell.safety{background:linear-gradient(180deg,var(--safety),var(--safetyg));color:#160a2e;border-color:var(--safetyg)}
+  .naive .cell.pass{background:#eef1f4;color:var(--dim2)}
+  /* tuned-SOTA cells: pays the FORCED turns, ELIDES the optional (pure/static) ones */
+  .tuned .cell.turn{background:linear-gradient(180deg,var(--tuned),var(--tunedg));color:#04201c;border-color:var(--tunedg)}
+  .tuned .cell.elided{background:#f6f8fa;color:var(--dim);border-style:dashed}
+  .tuned .cell.safety{background:linear-gradient(180deg,var(--safety),var(--safetyg));color:#160a2e;border-color:var(--safetyg)}
+  .tuned .cell.pass{background:#eef1f4;color:var(--dim2)}
+  /* fak cells */
+  .fak .cell.turn{background:linear-gradient(180deg,var(--fak),var(--fakg));color:#042511;border-color:var(--fakg)}
+  .fak .cell.safety{background:linear-gradient(180deg,var(--safety),var(--safetyg));color:#160a2e;border-color:var(--safetyg)}
+  .fak .cell.pass{background:#eef1f4;color:var(--dim2)}
+  .fak .nm{color:var(--fak)} .naive .nm{color:var(--naive)} .tuned .nm{color:var(--tuned)}
+  .legend{display:flex;gap:16px;font-size:11px;color:var(--dim2);margin:6px 0 2px;flex-wrap:wrap}
+  .sw{display:inline-block;width:11px;height:11px;border-radius:3px;margin-right:5px;vertical-align:middle;border:1px solid var(--line)}
+  .phase{font-size:12px;color:var(--accent);margin:8px 0 4px;min-height:16px;font-variant-numeric:tabular-nums}
+  /* result */
+  .result{margin-top:16px;padding:14px 16px;background:var(--panel2);border:1px solid var(--line);border-radius:9px;display:none}
+  .result.show{display:block}
+  .result .big{font-size:28px;font-weight:700;color:var(--fak)}
+  .result .grid{display:flex;gap:26px;flex-wrap:wrap;margin-top:8px}
+  .result .cell2{font-size:12px;color:var(--dim2)}
+  .result .cell2 b{color:var(--txt);font-size:15px;display:block;font-variant-numeric:tabular-nums}
+  .safetybox{margin-top:12px;padding:11px 14px;border:1px solid var(--safetyg);border-radius:8px;background:#faf5ff;display:none}
+  .safetybox.show{display:block}
+  .safetybox .lbl{color:var(--safety);font-weight:600;text-transform:uppercase;letter-spacing:.04em;font-size:11px;margin-bottom:6px}
+  .log{margin-top:12px;max-height:200px;overflow:auto;font-size:11px;color:var(--dim);background:var(--panel2);border:1px solid var(--line);border-radius:7px;padding:8px 10px;white-space:pre-wrap;font-variant-numeric:tabular-nums}
+  .log:empty:before{content:"(call-by-call event log)";color:#afb8c1}
+  .note{font-size:11px;color:var(--dim);margin-top:12px;line-height:1.6}
+  .tag{font-size:10px;border-radius:4px;padding:1px 6px;border:1px solid var(--line);color:var(--dim2);margin-left:6px}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="top">
+    <h1>fak · the turn-tax demo</h1>
+    <span class="pill" id="dirPill">kernel replay · no model weights</span>
+  </div>
+  <div class="sub" style="font-size:13px">
+    Every time an AI agent uses a tool, little things go wrong: a slightly-wrong argument, asking for the same
+    thing twice, or calling a tool it didn't really need. The usual fix is to send the whole chat back to the
+    model and try again — a <b>slow, pricey extra round-trip</b>. Below, the <b>same</b> tool calls run through three agents:
+    <br>• <b style="color:var(--naive)">Naive agent</b> — takes an extra round-trip for <i>every</i> little thing.
+    <br>• <b style="color:var(--tuned)">Tuned agent</b> (a well-built 2026 framework) — skips the calls it didn't need, but is <i>still forced</i> into the round-trips to fix a bad argument or a repeated read.
+    <br>• <b style="color:var(--fak)">fak</b> — fixes all of it <b>in one shot, inside the call</b>. No extra round-trips, even vs the tuned agent.
+    <br>Each square is a <b>real decision by the fak kernel</b> (no model involved). <span style="color:var(--fak)">Green ✓</span> = handled in one shot ·
+    <span style="color:var(--tuned)">dashed –</span> = the tuned agent skipped it · <span style="color:var(--safety)">purple</span> = a separate <b>safety</b> win (blocked poison / dangerous commands), never counted as a turn.
+  </div>
+
+  <div class="panel">
+    <h2>① Replay a trace through the real kernel <span class="tag">self-contained · reproducible on any box</span></h2>
+    <div class="row">
+      <label>suite <select id="suite"></select></label>
+      <label>turn latency <select id="lat">
+        <option value="400">local-fast 0.4s</option>
+        <option value="1500" selected>hosted-flash 1.5s</option>
+        <option value="4000">frontier 4s</option>
+      </select></label>
+      <button id="runBtn">Replay through the kernel</button>
+      <button id="replayBtn" class="ghost" disabled>Replay animation</button>
+      <span class="cfg" id="cfg"></span>
+    </div>
+
+    <div class="phase" id="phase"></div>
+
+    <div class="lane naive" id="laneNaive">
+      <div class="hd"><span class="nm">naive SOTA (two-pass loop)</span><span class="ct" style="color:var(--naive)" id="ctNaive">0 turns</span></div>
+      <div class="track" id="trackNaive"></div>
+      <div class="meta" id="metaNaive"></div>
+    </div>
+    <div class="lane tuned" id="laneTuned">
+      <div class="hd"><span class="nm">tuned SOTA (stronger agent + framework)</span><span class="ct" style="color:var(--tuned)" id="ctTuned">0 turns</span></div>
+      <div class="track" id="trackTuned"></div>
+      <div class="meta" id="metaTuned"></div>
+    </div>
+    <div class="lane fak" id="laneFak">
+      <div class="hd"><span class="nm">fak (1-shot kernel)</span><span class="ct" style="color:var(--fak)" id="ctFak">0 turns</span></div>
+      <div class="track" id="trackFak"></div>
+      <div class="meta" id="metaFak"></div>
+    </div>
+
+    <div class="legend">
+      <span><span class="sw" style="background:var(--naive)"></span>naive pays an extra turn</span>
+      <span><span class="sw" style="background:var(--tuned)"></span>tuned pays a forced turn</span>
+      <span><span class="sw" style="background:#f6f8fa;border-style:dashed"></span>tuned elides the optional call</span>
+      <span><span class="sw" style="background:var(--fak)"></span>fak resolved in-syscall (no turn)</span>
+      <span><span class="sw" style="background:var(--safety)"></span>safety floor (separate axis)</span>
+      <span><span class="sw" style="background:#eef1f4"></span>engine pass (all arms pay)</span>
+    </div>
+
+    <div class="result" id="result">
+      <div>fak skips <span class="big" id="bigTurns">0</span> <span style="color:var(--dim2)">slow model round-trips that the <b style="color:var(--naive)">naive</b> agent makes</span>
+        — and still <span class="big" style="color:var(--tuned)" id="bigTuned">0</span> <span style="color:var(--dim2)">that even a <b style="color:var(--tuned)">tuned</b> agent makes.</span></div>
+      <div class="grid">
+        <div class="cell2">vs tuned SOTA (forced turns)<b id="rForced">0</b></div>
+        <div class="cell2">optional calls a tuned agent skips<b id="rElision">0</b></div>
+        <div class="cell2">tokens saved<b id="rTokens">0</b></div>
+        <div class="cell2">money saved<b id="rDollars">0</b></div>
+        <div class="cell2">time saved<b id="rLatency">0</b></div>
+        <div class="cell2">fak's own work per call<b id="rServe">0</b></div>
+      </div>
+      <div class="safetybox" id="safetybox">
+        <div class="lbl">safety floor — the deterministic moat (NOT a turn count)</div>
+        <div id="safetyText"></div>
+      </div>
+    </div>
+
+    <div class="log" id="log"></div>
+    <div class="note" id="note"></div>
+  </div>
+
+  <div class="note">
+    The turn count is fixed by the kernel; only the per-turn price (latency × prompt size) is a knob — flip the latency selector and re-run.
+    This slice is deliberately error/dup/pure-rich so every lever fires; the real-world addressable rate is far lower (see <code>TURN-TAX-RESULTS.md §3.1</code> and the break-even curve). The honest headline is the <b>safety floor</b>, which holds on any backend; the turn-saving is self-host-regime upside.
+  </div>
+</div>
+
+<script>
+const $ = s => document.querySelector(s);
+let lastRun = null;
+
+const CLASS_GROUP = {
+  grammar:"turn", vdso_pure:"turn", vdso_dedup:"turn", vdso_static:"turn",
+  quarantine:"safety", deny:"safety", pass:"pass",
+};
+// short glyph per class for the cell
+const GLYPH = {
+  grammar:"⤳", vdso_dedup:"⧉", vdso_pure:"ƒ", vdso_static:"▤",
+  quarantine:"☣", deny:"⛔", pass:"·",
+};
+
+async function loadSuites(){
+  const r = await fetch('/api/suites'); const j = await r.json();
+  const sel = $('#suite'); sel.innerHTML='';
+  j.suites.forEach(s=>{
+    const o=document.createElement('option');
+    o.value=s.id; o.textContent=s.label+(s.present?` · ${s.calls} calls`:' · (missing)');
+    o.disabled=!s.present; sel.appendChild(o);
+  });
+  $('#dirPill').textContent = `kernel replay · GOMAXPROCS=${j.gomaxprocs}`;
+}
+
+function reset(){
+  $('#trackNaive').innerHTML=''; $('#trackFak').innerHTML='';
+  $('#ctNaive').textContent='0 turns'; $('#ctFak').textContent='0 turns';
+  $('#metaNaive').textContent=''; $('#metaFak').textContent='';
+  $('#result').classList.remove('show'); $('#safetybox').classList.remove('show');
+  $('#log').textContent=''; $('#phase').textContent='';
+}
+
+function cell(group, glyph, title){
+  const d=document.createElement('div');
+  d.className='cell '+group; d.textContent=glyph; d.title=title;
+  return d;
+}
+
+// animate the call-by-call walk. naive ticks on every turn; tuned ticks only on FORCED
+// turns (it elides the optional pure/static calls); fak stays flat on turns.
+async function animate(calls){
+  reset();
+  let nTurns=0, tTurns=0, nSafety=0;
+  const tN=$('#trackNaive'), tT=$('#trackTuned'), tF=$('#trackFak');
+  for(let i=0;i<calls.length;i++){
+    const c=calls[i];
+    const group=CLASS_GROUP[c.class]||'pass';
+    const glyph=GLYPH[c.class]||'·';
+    // naive cell: every turn-tax call costs a turn
+    const bn=cell(group, group==='turn'?'+1':glyph, `${c.tool}: ${c.reason}`);
+    // tuned cell: pays FORCED turns; ELIDES the optional (elision) ones; same safety/pass
+    let tg=group, tglyph=group==='turn'?'+1':glyph;
+    if(group==='turn' && !c.forced){ tg='elided'; tglyph='–'; }  // optional call a stronger agent skips
+    const tnc=cell(tg, tglyph, `${c.tool}: tuned ${group==='turn'?(c.forced?'still pays this forced turn':'elides this optional call'):c.reason}`);
+    // fak cell: a saved turn shows a green ✓ (resolved in-syscall); safety shows the page-out/deny
+    let fglyph=group==='turn'?'✓':glyph;
+    const fn=cell(group, fglyph, `${c.tool}: fak ${group==='turn'?'served in 1 shot':c.reason}`);
+    tN.appendChild(bn); tT.appendChild(tnc); tF.appendChild(fn);
+    [bn,tnc,fn].forEach(x=>x.classList.add('lit'));
+    setTimeout(()=>[bn,tnc,fn].forEach(x=>x.classList.remove('lit')),160);
+
+    if(group==='turn'){ nTurns++; $('#ctNaive').textContent=`${nTurns} turns`;
+      if(c.forced){ tTurns++; $('#ctTuned').textContent=`${tTurns} turns`; } }
+    if(group==='safety'){ nSafety++; }
+    $('#ctFak').textContent='0 turns';
+
+    let line=`#${String(i).padStart(2)} ${c.tool.padEnd(20)} `;
+    if(group==='turn') line+=`[turn-tax/${c.forced?'forced':'elision'}] naive +1 · tuned ${c.forced?'+1':'elided'} · fak 0 → ${c.reason}`;
+    else if(group==='safety') line+=`[safety-floor] ${c.reason}`;
+    else line+=`[pass] ${c.reason}`;
+    $('#log').textContent += line+"\n";
+    $('#log').scrollTop = $('#log').scrollHeight;
+    $('#phase').textContent = `call ${i+1}/${calls.length} · naive ${nTurns} · tuned ${tTurns} · fak 0 · safety ${nSafety}`;
+    await new Promise(r=>setTimeout(r, 230));
+  }
+  $('#metaNaive').textContent = `${nTurns} extra round-trips · pays for every aliased/dup/optional call`;
+  $('#metaTuned').textContent = `${tTurns} forced round-trips · elided ${nTurns-tTurns} optional call(s); still pays the forced error-recovery turns`;
+  $('#metaFak').textContent = `0 extra round-trips · all ${nTurns} resolved inside the syscall`;
+  $('#phase').textContent = `done · naive ${nTurns} · tuned ${tTurns} · fak 0 extra turns`;
+}
+
+function showReport(rep){
+  const net=rep.net, tk=rep.turn_kinds, sf=rep.safety_floor;
+  $('#bigTurns').textContent = net.turns_saved;
+  $('#bigTuned').textContent = tk.forced;   // fak's win over a TUNED agent = the forced turns
+  $('#rForced').textContent = tk.forced;
+  $('#rElision').textContent = tk.elision;
+  $('#rTokens').textContent = net.tokens_saved.toLocaleString();
+  $('#rDollars').textContent = '$'+net.dollars_saved.toFixed(5);
+  $('#rLatency').textContent = (net.latency_saved_ms/1000).toFixed(1)+' s';
+  $('#rServe').textContent = rep.local_serve_ns+' ns';
+  $('#result').classList.add('show');
+  const inj=sf.injections_admitted_baseline, des=sf.destructive_executed_baseline;
+  if(inj>0 || des>0){
+    $('#safetyText').innerHTML =
+      `baseline: <b style="color:var(--naive)">${inj}</b> injection(s) admitted to context, <b style="color:var(--naive)">${des}</b> destructive op(s) executed &nbsp;→&nbsp; `+
+      `fak: <b style="color:var(--fak)">0</b> / <b style="color:var(--fak)">0</b> (poison paged out, destructive denied). `+
+      `This is a completion/integrity delta — it holds on <b>any</b> backend, including a frontier API you don't own.`;
+    $('#safetybox').classList.add('show');
+  }
+  $('#note').innerHTML = `consistency guard (kernel counters == per-call classification): <b style="color:${rep.consistency_check==='ok'?'var(--fak)':'var(--naive)'}">${rep.consistency_check}</b> · workload hash <code>${rep.provenance.workload_hash}</code> · vDSO ablation: turns saved ON=${rep.net.turns_saved} OFF=${rep.vdso_off_net.turns_saved} (Δ = live VDSOHits ${rep.kernel_counters.vdso_hits})`;
+}
+
+async function run(){
+  $('#runBtn').disabled=true; $('#replayBtn').disabled=true;
+  const suite=$('#suite').value, lat=$('#lat').value;
+  $('#cfg').textContent='replaying…';
+  try{
+    const r=await fetch(`/api/run?suite=${encodeURIComponent(suite)}&latency_ms=${lat}`);
+    if(!r.ok){ $('#cfg').textContent='error: '+await r.text(); return; }
+    const j=await r.json(); lastRun=j;
+    $('#cfg').textContent=`${j.calls.length} calls replayed through k.Syscall`;
+    await animate(j.calls);
+    showReport(j.report);
+    $('#replayBtn').disabled=false;
+  } finally { $('#runBtn').disabled=false; }
+}
+
+$('#runBtn').onclick=run;
+$('#replayBtn').onclick=async()=>{ if(lastRun){ $('#replayBtn').disabled=true; await animate(lastRun.calls); showReport(lastRun.report); $('#replayBtn').disabled=false; } };
+loadSuites();
+</script>
+</body>
+</html>
