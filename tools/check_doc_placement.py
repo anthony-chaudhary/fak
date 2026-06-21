@@ -37,6 +37,15 @@ ALLOWED_ROOT_MD = {
     "CONTRIBUTING.md", "CLA.md", "AGENTS.md", "CLAUDE.md",
     # policy / security
     "SECURITY.md", "PUBLIC-SCRUB-POLICY.md",
+    # public front-door docs: deliberately at the root because README.md and
+    # AGENTS.md link them by their root path (the module hoist made the repo root
+    # the public home). Moving these to docs/notes/ would break those links.
+    "ARCHITECTURE.md", "EXTENDING.md", "GETTING-STARTED.md", "GPU.md",
+    "POLICY.md", "PARTITION.md", "STATUS.md", "CLAIMS.md",
+    "SOTA-COMPARISON.md", "DOGFOOD-CLAUDE.md",
+    # benchmark front-door set (the single-source-of-truth deck the README cites)
+    "BENCHMARK-AUTHORITY.md", "BENCHMARK-GALLERY.md",
+    "BENCHMARK-GOVERNANCE.md", "BENCHMARK-TEMPLATE.md",
     # common OSS root/meta docs (allowed if a maintainer adds one)
     "CODE_OF_CONDUCT.md", "CHANGELOG.md", "GOVERNANCE.md", "MAINTAINERS.md",
     "ROADMAP.md", "AUTHORS.md", "NOTICE.md", "SUPPORT.md", "HISTORY.md",
