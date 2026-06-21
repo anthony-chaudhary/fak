@@ -41,8 +41,8 @@ from typing import Any
 SCHEMA = "fleet-gofmt-debt-audit/1"
 
 # The Go module whose committed .go files the blocking CI gate covers. Pathspec is
-# git-glob (repo-root relative); fak/ is the only module in this repo today.
-DEFAULT_GLOB = "fak/**/*.go"
+# git-glob (repo-root relative); the module IS the repo root (no fak/ subdir).
+DEFAULT_GLOB = "**/*.go"
 DEFAULT_HEAD = "HEAD"
 
 # How many offending files to name in the human render / reason before eliding.
