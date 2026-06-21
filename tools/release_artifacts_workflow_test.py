@@ -62,7 +62,7 @@ class ReleaseArtifactsWorkflowTest(unittest.TestCase):
         self.assertIn("SHA256SUMS", self.text)
 
     def test_uses_module_go_version(self) -> None:
-        self.assertIn("go-version-file: fak/go.mod", self.text)
+        self.assertIn("go-version-file: go.mod", self.text)
 
     def test_write_permission_scoped_to_upload_jobs(self) -> None:
         # The top-level token is read-only; only the jobs that touch the release
