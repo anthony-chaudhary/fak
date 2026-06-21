@@ -459,9 +459,7 @@ def probe_accounts(targets: list[dict[str, Any]], *, claude_exe: str | None = No
 # ----------------------------------------------------------------------------- CLI
 
 def _load_annotated(home: str | None = None) -> list[dict[str, Any]]:
-    pol = fleet_accounts.load_policy()
-    rows = fleet_accounts.discover_accounts(home or fleet_accounts.USER, pol)
-    return fleet_accounts.annotate_accounts(rows, registry=fleet_accounts.load_registry())
+    return fleet_accounts.annotated_roster(home or fleet_accounts.USER)
 
 
 def _roster_was(row: dict[str, Any]) -> str:

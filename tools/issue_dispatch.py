@@ -47,6 +47,7 @@ except (AttributeError, ValueError):
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import dispatch_worker  # noqa: E402  (sibling tool: build_command/child_env)
+import fleet_accounts  # noqa: E402  (the switcher: read_oauth_token)
 
 SCHEMA = "fleet-issue-dispatch/1"
 RUNS_DIRNAME = ".dispatch-runs"
@@ -117,12 +118,12 @@ def worker_env(account_dir: str | None, lane: str, workspace: Path) -> dict[str,
     env = dispatch_worker.child_env(lane, "claude", workspace)
     if account_dir:
         env["CLAUDE_CONFIG_DIR"] = account_dir
-        tok = Path(account_dir) / ".oauth-token"
-        if tok.exists():
-            try:
-                env["CLAUDE_CODE_OAUTH_TOKEN"] = tok.read_text(encoding="utf-8").strip()
-            except OSError:
-                pass
+        # The switcher's single credential rule: prefer the dir's long-lived
+        # .oauth-token over the expiring interactive creds; drop any ambient token when
+        # this account has none (never bleed a sibling account's token into the worker).
+        tok = fleet_accounts.read_oauth_token(account_dir)
+        if tok:
+            env["CLAUDE_CODE_OAUTH_TOKEN"] = tok
         else:
             env.pop("CLAUDE_CODE_OAUTH_TOKEN", None)
     # The witness for this loop is the benchmark, not the unit-test suite.

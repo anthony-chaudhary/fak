@@ -122,7 +122,7 @@ def _discover_availability(home: str) -> list[dict]:
     / active_sessions / tag / config_dir). Built from the same roster + runtime
     status the account switcher uses, so a re-home target is never an account the
     switcher itself would refuse to offer."""
-    rows = fleet_accounts.annotate_accounts(fleet_accounts.discover_accounts(home))
+    rows = fleet_accounts.annotated_roster(home)
     return [
         {
             "account": r["account"],

@@ -461,10 +461,9 @@ def _verdict_freshness(account, rows, auth):
 
 def account_availability(throttle, rows, auth=None):
     """Per worker account: is it safe for the switcher to offer right now?"""
-    roster = fleet_accounts.discover_accounts(USER, ACCT_POLICY)
     registry = {"generated_utc": NOW.isoformat(), "auth": auth or {}}
-    annotated = fleet_accounts.annotate_accounts(
-        roster, registry=registry, throttle=throttle, sessions=rows)
+    annotated = fleet_accounts.annotated_roster(
+        USER, ACCT_POLICY, registry=registry, throttle=throttle, sessions=rows)
     out = []
     for a in annotated:
         if a["kind"] != "worker":
@@ -695,9 +694,8 @@ def run_probes(rows, selector):
     throttle = merge_known_throttle({}, rows)
     auth = merge_known_auth(rows)
     registry = {"generated_utc": NOW.isoformat(), "auth": auth, "throttle": throttle}
-    roster = fleet_accounts.discover_accounts(USER, ACCT_POLICY)
-    annotated = fleet_accounts.annotate_accounts(roster, registry=registry,
-                                                 throttle=throttle, sessions=rows)
+    annotated = fleet_accounts.annotated_roster(USER, ACCT_POLICY, registry=registry,
+                                                throttle=throttle, sessions=rows)
     targets = account_probe.select_targets(annotated, selector=selector,
                                            skip_active_throttle=True,
                                            min_interval_min=PROBE_MIN_INTERVAL,
