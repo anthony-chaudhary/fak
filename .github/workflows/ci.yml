@@ -129,6 +129,11 @@ jobs:
         run: |
           python tools/hero_benchmark_gen.py --check
           python tools/hero_benchmark_gen.py --verify-sources
+          # ship-iff-cited: every experiments/ artifact + *-RESULTS.md a public doc
+          # cites must EXIST in the public tree. --verify-sources proves the number
+          # matches its artifact; this proves the artifact wasn't scrubbed away (the
+          # over-cut alarm). Regenerate the manifest with --derive as new artifacts land.
+          python tools/public_evidence_manifest.py --check
           python tools/hero_statcard_gen.py --check
           # the three lab-style headline visuals (BENCHMARK-GALLERY.md): one
           # source-of-truth data.json -> one renderer -> one SVG, drift-gated.
