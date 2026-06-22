@@ -638,11 +638,23 @@ func main() {
 			present = append(present, s.Name)
 		}
 	}
-	fmt.Fprintf(os.Stderr, "demorace %s on http://%s (GOMAXPROCS=%d)\n", version, *addr, gomax)
+	fmt.Fprintf(os.Stderr, "demorace %s on http://%s (GOMAXPROCS=%d)\n", version, listenAddr(*addr), gomax)
 	fmt.Fprintf(os.Stderr, "ladder present: %s\n", strings.Join(present, ", "))
 	fmt.Fprintf(os.Stderr, "open the URL → 'Run live race' (fak vs naive, both LIVE) then 'Build curve'\n")
-	if err := http.ListenAndServe(*addr, mux); err != nil {
+	if err := http.ListenAndServe(listenAddr(*addr), mux); err != nil {
 		fmt.Fprintln(os.Stderr, "listen:", err)
 		os.Exit(1)
 	}
+}
+
+// listenAddr honors the $PORT contract used by container/VM platforms: when PORT is
+// set in the environment, bind 0.0.0.0:$PORT and ignore the -addr loopback default,
+// so the same binary serves locally (-addr) and on a public host (PORT=… + an open
+// firewall) with no rebuild. A non-default -addr still wins, so an explicit local
+// override is never silently lost.
+func listenAddr(addr string) string {
+	if p := os.Getenv("PORT"); p != "" && addr == "127.0.0.1:8147" {
+		return "0.0.0.0:" + p
+	}
+	return addr
 }

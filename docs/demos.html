@@ -1,0 +1,185 @@
+<!DOCTYPE html>
+<!--
+  fak — the agent kernel · live demos landing page.
+
+  Served by GitHub Pages at https://anthony-chaudhary.github.io/fak/demos.html . Raw HTML
+  with NO Jekyll front matter (like showcase.html) so Pages copies it verbatim instead of
+  wrapping it in the cayman theme.
+
+  The demos themselves run on a single GCE VM (NVIDIA L4) — three interactive Go servers
+  driving the REAL kernel. The links below point at that host. NOTE: the demo host is plain
+  HTTP while this page is HTTPS, so a browser will navigate to it on click (no mixed-content
+  block for a top-level link) but will not embed it. The URLs are resolved + kept current by
+  deploy/demos/40-resolve-urls.sh; if the VM's ephemeral IP changes, re-run that and re-publish.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<link rel="icon" href="data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2032%2032'%3E%3Crect%20width='32'%20height='32'%20rx='7'%20fill='%23070a10'/%3E%3Ccircle%20cx='16'%20cy='16'%20r='8'%20fill='%2338bdf8'/%3E%3C/svg%3E" />
+<title>fak — the agent kernel | live demos</title>
+<meta name="description" content="Three interactive demos of the fak agent kernel, running live on GCP: the turn-tax race (SOTA loop vs fak 1-shot), the multi-agent context reuse proof, and a live model reuse race — each driving the real kernel." />
+<link rel="canonical" href="https://anthony-chaudhary.github.io/fak/demos.html" />
+<meta name="author" content="Anthony Chaudhary" />
+<meta property="og:type" content="website" />
+<meta property="og:site_name" content="fak — the agent kernel" />
+<meta property="og:title" content="fak — the agent kernel | live demos" />
+<meta property="og:description" content="Three interactive demos driving the real kernel, live on GCP: turn-tax race, multi-agent context reuse, and a live model reuse race." />
+<meta property="og:url" content="https://anthony-chaudhary.github.io/fak/demos.html" />
+<meta property="og:image" content="https://raw.githubusercontent.com/anthony-chaudhary/fak/main/visuals/social-preview.png" />
+<meta name="twitter:card" content="summary_large_image" />
+<meta name="twitter:title" content="fak — the agent kernel | live demos" />
+<meta name="twitter:image" content="https://raw.githubusercontent.com/anthony-chaudhary/fak/main/visuals/social-preview.png" />
+
+<style>
+  :root{
+    --bg:#070a10; --bg-soft:#0b1019; --panel:#0e1420; --panel-2:#121a28; --line:#1c2636;
+    --ink:#e6edf6; --ink-soft:#aab8cb; --ink-dim:#6b7a90;
+    --fak:#38bdf8; --fak-2:#2563eb; --dos:#c084fc; --next:#34d399; --warn:#f59e0b;
+    --mono:"SFMono-Regular",ui-monospace,"JetBrains Mono","Cascadia Code",Menlo,Consolas,monospace;
+    --sans:ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    --maxw:1080px;
+  }
+  *{box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--sans);line-height:1.6;
+       -webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility;overflow-x:hidden}
+  body::before{content:"";position:fixed;inset:0;z-index:-2;
+    background:
+      radial-gradient(900px 520px at 12% -8%, rgba(56,189,248,.16), transparent 60%),
+      radial-gradient(820px 520px at 92% 4%, rgba(192,132,252,.14), transparent 60%),
+      radial-gradient(700px 700px at 50% 116%, rgba(52,211,153,.08), transparent 60%);
+    pointer-events:none}
+  a{color:inherit;text-decoration:none}
+  .wrap{max-width:var(--maxw);margin:0 auto;padding:0 24px}
+
+  nav{position:sticky;top:0;z-index:50;backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);
+      background:rgba(7,10,16,.72);border-bottom:1px solid var(--line)}
+  .nav-in{display:flex;align-items:center;gap:22px;height:60px;max-width:var(--maxw);margin:0 auto;padding:0 24px}
+  .brand{display:flex;align-items:center;gap:10px;font-weight:700;letter-spacing:.2px}
+  .brand .dot{width:11px;height:11px;border-radius:50%;
+    background:conic-gradient(from 200deg,var(--fak),var(--dos),var(--next),var(--fak));
+    box-shadow:0 0 16px rgba(120,160,255,.55)}
+  .brand .mono{font-family:var(--mono)}
+  .nav-links{margin-left:auto;display:flex;gap:8px;flex-wrap:wrap}
+  .nav-links a{font-size:13.5px;color:var(--ink-soft);padding:7px 12px;border-radius:8px;transition:.18s}
+  .nav-links a:hover{color:var(--ink);background:rgba(255,255,255,.05)}
+
+  header.hero{padding:72px 0 26px;text-align:center}
+  .eyebrow{display:inline-flex;align-items:center;gap:9px;font-family:var(--mono);font-size:12.5px;
+    letter-spacing:.12em;text-transform:uppercase;color:var(--ink-soft);
+    border:1px solid var(--line);background:var(--panel);padding:7px 14px;border-radius:999px}
+  .eyebrow b{color:var(--next);font-weight:600}
+  h1.title{font-size:clamp(2.1rem,5.4vw,3.4rem);line-height:1.05;margin:22px auto 0;max-width:18ch;
+    font-weight:800;letter-spacing:-.02em;background:linear-gradient(180deg,#ffffff 0%,#bcd0ea 100%);
+    -webkit-background-clip:text;background-clip:text;color:transparent}
+  .lede{color:var(--ink-soft);max-width:64ch;margin:18px auto 0;font-size:1.06rem}
+  .lede .k{color:var(--fak);font-weight:600}
+
+  .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:18px;margin:42px 0 10px}
+  .card{background:linear-gradient(180deg,var(--panel),var(--bg-soft));border:1px solid var(--line);
+    border-radius:16px;padding:24px;display:flex;flex-direction:column;gap:11px;
+    transition:border-color .16s,transform .16s,box-shadow .16s}
+  .card:hover{border-color:var(--fak);transform:translateY(-3px);box-shadow:0 18px 44px rgba(0,0,0,.45)}
+  .pill{display:inline-block;align-self:flex-start;font-family:var(--mono);font-size:11.5px;
+    letter-spacing:.04em;color:var(--ink-soft);border:1px solid var(--line);border-radius:999px;padding:4px 10px}
+  .pill.live{color:var(--next);border-color:rgba(52,211,153,.4)}
+  .pill.self{color:var(--fak);border-color:rgba(56,189,248,.4)}
+  .card h3{margin:2px 0 0;font-size:1.22rem;letter-spacing:-.01em}
+  .card p{margin:0;color:var(--ink-soft);font-size:.96rem;flex:1}
+  .card .go{margin-top:6px;color:var(--fak);font-weight:600;font-size:.95rem}
+  .card code{font-family:var(--mono);font-size:.84em;background:var(--panel-2);
+    border:1px solid var(--line);border-radius:6px;padding:1px 6px;color:var(--ink)}
+
+  .note{margin:30px auto 0;max-width:70ch;color:var(--ink-dim);font-size:.9rem;
+    border:1px solid var(--line);border-radius:12px;background:var(--panel);padding:14px 18px}
+  .note b{color:var(--ink-soft)}
+  footer{margin:54px 0 40px;color:var(--ink-dim);font-size:.86rem;border-top:1px solid var(--line);padding-top:22px;text-align:center}
+  footer a{color:var(--ink-soft)}
+  footer a:hover{color:var(--fak)}
+</style>
+</head>
+<body>
+
+<nav>
+  <div class="nav-in">
+    <a class="brand" href="showcase.html"><span class="dot"></span><span class="mono">fak</span></a>
+    <div class="nav-links">
+      <a href="showcase.html">showcase</a>
+      <a href="./">docs</a>
+      <a href="https://github.com/anthony-chaudhary/fak" rel="noopener">GitHub ↗</a>
+    </div>
+  </div>
+</nav>
+
+<header class="hero">
+  <div class="wrap">
+    <span class="eyebrow"><b>●</b> live on GCP · NVIDIA L4</span>
+    <h1 class="title">Drive the real kernel.</h1>
+    <p class="lede">
+      Three interactive demos, each running the <span class="k">actual fak kernel</span> on a single
+      GCE VM — not a recording, not a mock. Watch turns get saved inside the syscall, watch a shared
+      prefix get prefilled once and cloned into a fleet, and race a live model with reuse on vs off.
+    </p>
+  </div>
+</header>
+
+<div class="wrap">
+  <div class="grid">
+
+    <!-- turntax — self-contained, no model -->
+    <a class="card" href="http://136.111.250.205:8150/" rel="noopener">
+      <span class="pill self">self-contained · no model</span>
+      <h3>⚖️ Turn-tax — fak vs a SOTA loop</h3>
+      <p>Two lanes race in real time: a SOTA two-pass agent loop versus fak's one-shot kernel, replaying
+      the same class-labeled tool-call trace. Every turn fak saves — a grammar repair, a vDSO cache hit,
+      a poisoned result quarantined — ticks up visibly on one lane while the other stays flat. The safety
+      floor sits on its own axis, never folded into the turn count.</p>
+      <span class="go">Replay through the kernel →</span>
+    </a>
+
+    <!-- ctxdemo — live model, multi-agent context -->
+    <a class="card" href="http://136.111.250.205:8153/" rel="noopener">
+      <span class="pill live">live model · SmolLM2-135M</span>
+      <h3>🧩 Multi-agent context reuse</h3>
+      <p>The fleet thesis made visible: a shared prefix prefilled <em>once</em> and cloned into N agents,
+      with a per-agent timeline showing each tool result drawn to scale as the context grows unevenly.
+      Pick a scenario, read the exact prefill-token work each strategy does (naive re-prefill vs warm KV
+      vs fak), then run the live race through the real in-kernel model.</p>
+      <span class="go">Open the reuse proof →</span>
+    </a>
+
+    <!-- demorace — live model, reuse race + curve (proxied via :80) -->
+    <a class="card" href="http://136.111.250.205/demorace/" rel="noopener">
+      <span class="pill live">live model · SmolLM2-135M</span>
+      <h3>🏁 Reuse race + the reuse curve</h3>
+      <p>A head-to-head live race over one 25-request multi-agent session: the naive arm re-prefills the
+      whole growing context every turn; the fak arm prefills the shared prefix once, clones it into the
+      agents, and batches decode. Same model, same tokens, same answers — the only difference is how much
+      shared setup the system makes the model re-read. Then build the reuse curve across the model ladder.</p>
+      <span class="go">Run the live race →</span>
+    </a>
+
+  </div>
+
+  <p class="note">
+    <b>What you're hitting.</b> A single GCE VM (NVIDIA L4) running these three Go demo servers plus the
+    <code>fak serve</code> kernel gateways. The two model demos run <code>SmolLM2-135M</code> in-process
+    through the kernel. The demo host is plain HTTP, so your browser opens it in a new tab rather than
+    embedding it here. There's also a <a href="http://136.111.250.205/" rel="noopener" style="color:var(--fak)">live demos hub</a>
+    on the same host with the CPU-vs-GPU engine comparison, a chat surface, and the kernel's metrics.
+  </p>
+</div>
+
+<footer>
+  <div class="wrap">
+    <a href="showcase.html">← Back to the showcase</a> ·
+    <a href="https://github.com/anthony-chaudhary/fak" rel="noopener">GitHub</a> ·
+    <a href="./">Docs home</a>
+    <p style="margin-top:10px">Run any of these locally instead: <code>go run ./cmd/turntaxdemo</code> ·
+    <code>go run ./cmd/ctxdemo</code> · <code>go run ./cmd/demorace</code></p>
+  </div>
+</footer>
+
+</body>
+</html>

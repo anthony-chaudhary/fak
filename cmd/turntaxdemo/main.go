@@ -218,7 +218,7 @@ func main() {
 			present = append(present, ks.ID)
 		}
 	}
-	fmt.Fprintf(os.Stderr, "turntaxdemo %s on http://%s (GOMAXPROCS=%d)\n", version, *addr, gomax)
+	fmt.Fprintf(os.Stderr, "turntaxdemo %s on http://%s (GOMAXPROCS=%d)\n", version, listenAddr(*addr), gomax)
 	fmt.Fprintf(os.Stderr, "trace dir: %s\n", turnTaxDir())
 	if len(present) == 0 {
 		fmt.Fprintf(os.Stderr, "WARNING: no turntax fixtures found — run from the fak/ directory\n")
@@ -226,8 +226,20 @@ func main() {
 		fmt.Fprintf(os.Stderr, "suites present: %v\n", present)
 	}
 	fmt.Fprintf(os.Stderr, "open the URL → pick a suite → 'Replay through the kernel'\n")
-	if err := http.ListenAndServe(*addr, mux); err != nil {
+	if err := http.ListenAndServe(listenAddr(*addr), mux); err != nil {
 		fmt.Fprintln(os.Stderr, "listen:", err)
 		os.Exit(1)
 	}
+}
+
+// listenAddr honors the $PORT contract used by container platforms (Cloud Run,
+// Heroku, etc.): when PORT is set in the environment, bind 0.0.0.0:$PORT and ignore
+// the -addr loopback default, so the same binary serves locally (-addr) and in a
+// container (no flags, just $PORT) with no rebuild. An explicit -addr that is not the
+// compiled-in loopback default still wins, so a local override is never silently lost.
+func listenAddr(addr string) string {
+	if p := os.Getenv("PORT"); p != "" && addr == "127.0.0.1:8150" {
+		return "0.0.0.0:" + p
+	}
+	return addr
 }
