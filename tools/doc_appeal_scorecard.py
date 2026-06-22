@@ -269,7 +269,21 @@ def _classify_lines(text: str) -> list[tuple[int, str, str]]:
     out: list[tuple[int, str, str]] = []
     in_fence = False
     in_comment = False
-    for i, raw in enumerate(text.split("\n"), 1):
+    lines = text.split("\n")
+    # A leading YAML front-matter block (--- … ---) is page metadata (title,
+    # description), not reader prose. Mark it so no axis scores it — otherwise a
+    # long `description:` reads as a giant run-on and a Jekyll/SKILL.md page is
+    # graded on metadata it never shows a reader. Mirrors seo_aeo_scorecard.
+    fm_last = 0
+    if lines and lines[0].strip() == "---":
+        for j in range(1, len(lines)):
+            if lines[j].strip() == "---":
+                fm_last = j + 1  # 1-based line number of the closing fence
+                break
+    for i, raw in enumerate(lines, 1):
+        if i <= fm_last:
+            out.append((i, raw, "frontmatter"))
+            continue
         s = raw.strip()
         if in_comment:
             if "-->" in s:

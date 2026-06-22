@@ -76,6 +76,20 @@ def test_split_at_lowercase_fak_sentence_start() -> None:
     assert len(parts) == 2, parts
 
 
+def test_front_matter_is_not_scored_as_prose() -> None:
+    # A long YAML `description:` is page metadata, not reader prose; it must not
+    # appear in the prose corpus nor trip a clarity run-on/overlong defect.
+    fm = ("---\n"
+          "title: A page\n"
+          "description: " + ", ".join(["clause"] * 12) + " and a final long trailing thought\n"
+          "---\n\n"
+          "# Heading\n\nShort real prose.\n")
+    doc = das.parse(fm)
+    assert "clause" not in doc.prose_text, doc.prose_text
+    c = das.axis_clarity(doc)
+    assert c["defects"] == [], c["defects"]
+
+
 def test_multi_item_list_is_not_a_wall() -> None:
     # A long but genuine multi-bullet list is scannable, not a wall of text.
     items = "\n".join(f"- **Item {i}.** " + " ".join(["word"] * 40) for i in range(3))
