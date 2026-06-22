@@ -26,20 +26,44 @@ go run ./cmd/simpledemo
 ## What You'll See
 
 ```
-🤖 Found model: Qwen2.5-0.5B-Instruct-Q8_0.gguf
+🤖 Found model: Qwen2.5-1.5B-Instruct.Q8_0.gguf
 
 📦 Loading model...
-✅ Loaded Qwen2.5-0.5B in 0.8s
-🎯 Temperature: 0.5 | Max tokens: 128
+✅ Loaded qwen2 in 5.1s (tokenizer: embedded in model file)
+🧠 qwen2 · 28 layers · d_model 1,536 · 12 heads / 2 KV (GQA 6×) · head_dim 128 · ffn 8,960 · vocab 151,936 · ctx 32,768
+💾 weights 2.49 GiB resident (q8_0) · KV 84 KiB/token · decode stream 1.62 GiB/token
+⚙️  device cpu (pure-Go Q8 reference) · 32 threads · backends available: [cpu-ref]
+    └─ no GPU backend in this build — rebuild `-tags cuda` on an NVIDIA box (or `-tags fakmetal` on Apple) and pass `-backend cuda` to run on the GPU
+🎯 sampling: greedy (argmax) · temp 0.00 · max 40 tok/reply · q8_0 weights
+🧮 prefill @ P=512 ≈ 1364.7 GFLOP (counted, not timed) · heaviest ffn_gate 394.6 GFLOP · attention intensity 0.50 FLOP/B (memory-bound)
 
 💬 Chat with your AI! Type a message and press Enter.
    Commands: /clear = new chat, /exit = quit
 
-You: What is the capital of France?
-AI: The capital of France is Paris.
+You: My name is Sam and I like astronomy.
+AI: Great! Astronomy is a fascinating field. What areas interest you?
+📊 turn 1 · cpu (pure-Go Q8 reference)
+   prefill  34 tok in · 2.93s · 12 tok/s · cache cold (0%, 34 recomputed)
+   decode   16 tok out · 1.27s · 12.6 tok/s · 22 GB/s of the 1.62 GiB/token stream
+   compute  full 34-tok prefill ≈ 89.7 GFLOP · heaviest ffn_gate 26.2 GFLOP · this turn 89.7 GFLOP @ 30.6 GFLOP/s
+   total    4.20s · TTFT 2.93s · KV 52 pos / 4.3 MiB · session cache hit 0%
 
-📊 15 tok in, 8 tok out (12.5 tok/s) | 1.3s total
+You: What is my name?
+AI: Your name is Sam.
+📊 turn 2 · cpu (pure-Go Q8 reference)
+   prefill  13 new tok · 1.55s · 8 tok/s · cache hit 80% (52/65 reused, 13 recomputed)
+   decode   5 tok out · 0.35s · 14.4 tok/s · 25 GB/s of the 1.62 GiB/token stream
+   compute  full 65-tok prefill ≈ 171.2 GFLOP · heaviest ffn_gate 50.1 GFLOP · this turn 34.2 GFLOP @ 22.1 GFLOP/s
+   total    1.89s · TTFT 1.55s · KV 72 pos / 5.9 MiB · session cache hit 53%
 ```
+
+Every number is either **measured this run** (the tok/s, the GB/s, the wall times) or
+**counted from the model shape** (the GFLOP roofline, the KV bytes) — nothing is assumed.
+Note how the second turn only re-prefills the **new** 13 tokens: the system prompt and the
+first turn are reused straight out of the KV cache (an **80% cache hit**), so the kernel
+recomputes a suffix instead of the whole conversation. Prefill and decode are reported
+**separately** because they are different regimes — prefill is GEMM-bound (and the analytic
+roofline shows where), decode is bandwidth-bound (the `GiB/token` stream sets its ceiling).
 
 ---
 

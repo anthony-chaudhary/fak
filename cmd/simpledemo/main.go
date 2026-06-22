@@ -38,6 +38,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/anthony-chaudhary/fak/internal/compute"
 	"github.com/anthony-chaudhary/fak/internal/ggufload"
 	"github.com/anthony-chaudhary/fak/internal/model"
 	"github.com/anthony-chaudhary/fak/internal/pathutil"
@@ -54,6 +55,7 @@ func main() {
 	seed := flag.Int64("seed", time.Now().UnixNano(), "Random seed (for reproducibility)")
 	quiet := flag.Bool("quiet", false, "Skip welcome banner")
 	autoDownload := flag.Bool("download", false, "Auto-download default model if not found")
+	backend := flag.String("backend", "", "Compute backend to run through, e.g. cuda (default: the pure-Go Q8 CPU path). Use to prove GPU usage on a build that registered an accelerator.")
 	flag.Parse()
 
 	// Expand a leading ~ ourselves: Go's flag parsing and os.Open never do, and a
@@ -182,21 +184,44 @@ func main() {
 	// Stop tokens: prefer what the model/tokenizer actually declares over magic ids.
 	stops := stopTokenIDs(tok, *gguf)
 
+	// Pick the compute path. The default is the proven pure-Go Q8 CPU lane; -backend
+	// routes the forward pass through the compute HAL instead — the path that runs on
+	// (and proves usage of) a GPU when this build registered one (e.g. cuda).
+	session, device, err := newSession(m, *backend)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "❌ %v\n", err)
+		os.Exit(1)
+	}
+	defer func() { session.Close() }()
+
+	sampling := "greedy (argmax)"
+	if *temp > 0 {
+		sampling = fmt.Sprintf("temperature %.2f", *temp)
+	}
+
+	stats := gatherModelStats(m, modelName, device)
 	if !*quiet {
 		fmt.Fprintf(os.Stderr, "✅ Loaded %s in %.1fs (tokenizer: %s)\n", modelName, float64(loadMS)/1000, tokSource)
-		fmt.Fprintf(os.Stderr, "🎯 Temperature: %.1f | Max tokens: %d\n", *temp, *maxNew)
+		printModelCard(stats, *temp, *maxNew, sampling)
 		fmt.Fprintln(os.Stderr, "")
 		fmt.Fprintln(os.Stderr, "💬 Chat with your AI! Type a message and press Enter.")
 		fmt.Fprintln(os.Stderr, "   Commands: /clear = new chat, /exit = quit")
 		fmt.Fprintln(os.Stderr, "")
 	}
 
-	// Chat loop
+	// Chat loop. Rather than re-tokenize and re-prefill the WHOLE conversation each turn
+	// (which also duplicates it, at shifted positions, into a never-reset KV cache), we
+	// keep the cache resident and feed only the NEW turn: the system block once, then each
+	// user block. The KV prefix from prior turns is reused verbatim, so prefill recomputes
+	// only the suffix. cachedIDs tracks exactly what the cache holds, so the cache-hit %
+	// the stats report is measured, not estimated.
 	input := bufio.NewReader(os.Stdin)
-	session := m.NewSession()
-	session.Quant = true // Use Q8 quantization for speed
-
-	conversation := []string{} // Track conversation for context
+	out := bufio.NewWriter(os.Stdout)
+	rng := rand.New(rand.NewSource(*seed)) // seeded once: turns continue one RNG stream, not N correlated ones
+	var cachedIDs []int                    // the exact token sequence resident in the KV cache, in order
+	firstTurn := true
+	turnNum := 0
+	cumReused, cumPrompt := 0, 0
 
 	for {
 		// Show prompt
@@ -218,9 +243,11 @@ func main() {
 			break
 		}
 		if userMsg == "/clear" {
-			conversation = []string{}
-			session = m.NewSession()
-			session.Quant = true
+			session.Close()
+			session, _, _ = newSession(m, *backend) // backend already validated at startup
+			cachedIDs = nil
+			firstTurn = true
+			cumReused, cumPrompt = 0, 0
 			fmt.Fprintln(os.Stderr, "✨ Chat cleared.")
 			continue
 		}
@@ -228,32 +255,45 @@ func main() {
 			continue
 		}
 
-		// Build prompt with conversation context
-		prompt := buildPrompt(*sys, conversation, userMsg)
-
-		// Tokenize
-		ids, err := tok.Encode(prompt)
+		// The new text to ingest this turn: the system block only on the first turn, then
+		// the user block. Encoding each block on its own matches encoding the full prompt
+		// because ChatML's <|im_start|>/<|im_end|> are atomic special tokens — natural reuse
+		// boundaries — so the resident prefix stays bit-identical to a fresh prefill.
+		newText := userBlock(userMsg)
+		if firstTurn {
+			newText = systemBlock(*sys) + newText
+		}
+		newIDs, err := tok.Encode(newText)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "⚠️  Encoding error: %v\n", err)
 			continue
 		}
+
+		reused := len(cachedIDs)
+		promptTokens := reused + len(newIDs)
 
 		// Show we're thinking
 		if !*quiet {
 			fmt.Fprint(os.Stderr, "AI: ")
 		}
 
-		// Generate response
-		t0 = time.Now()
-		logits := session.Prefill(ids)
-		prefillS := time.Since(t0).Seconds()
-
-		out := bufio.NewWriter(os.Stdout)
-		rng := rand.New(rand.NewSource(*seed))
+		// Prefill ONLY the new suffix; the cache already holds the reused prefix.
+		tPrefill := time.Now()
+		logits := session.Prefill(newIDs)
+		prefillS := time.Since(tPrefill).Seconds()
+		cachedIDs = append(cachedIDs, newIDs...)
 
 		decodeStart := time.Now()
-		full, gen := decodeReply(session, tok, logits, stops, *maxNew, *temp, rng, out)
+		full, genIDs := decodeReply(session, tok, logits, stops, *maxNew, *temp, rng, out)
 		decodeS := time.Since(decodeStart).Seconds()
+		cachedIDs = append(cachedIDs, genIDs...)
+
+		// Close the assistant turn in the cache so the NEXT user block continues a
+		// well-formed ChatML transcript and is reused as a prefix, not recomputed.
+		if closeIDs, e := tok.Encode(assistantTurnClose); e == nil && len(closeIDs) > 0 {
+			session.PrefillNoLogits(closeIDs)
+			cachedIDs = append(cachedIDs, closeIDs...)
+		}
 
 		// A coherent model on a matched build does not repeat itself to death. When
 		// the model and build disagree the reply collapses into a loop ("2 2 2 …" or
@@ -264,26 +304,88 @@ func main() {
 			fmt.Fprintln(os.Stderr, "   with the GGUF chat fixes, or try another model — see cmd/simpledemo/README.md.")
 		}
 
-		// Add to conversation
-		conversation = append(conversation, userMsg, full)
-
-		// Limit conversation history for small models (last 4 turns)
-		if len(conversation) > 8 { // 4 user + 4 AI messages
-			conversation = conversation[len(conversation)-8:]
+		// If decode stopped at the token budget instead of a stop token, the reply was cut
+		// off; say so. The turn is still closed in the cache above so the transcript stays
+		// well-formed for the next turn.
+		if !*quiet && len(genIDs) == *maxNew {
+			fmt.Fprintf(os.Stderr, "\n  ✂️  reply truncated at the -n %d token budget (raise -n for longer replies)\n", *maxNew)
 		}
 
-		// Stats
+		firstTurn = false
+		turnNum++
+		cumReused += reused
+		cumPrompt += promptTokens
+
+		// Stats: prefill vs decode reported separately, the cache hit prefix reuse
+		// achieved, the analytic prefill operation count, the decode bandwidth, and the
+		// device — everything measured this run or counted from the model shape.
 		if !*quiet {
-			decTPS := 0.0
-			if decodeS > 0 {
-				decTPS = float64(gen) / decodeS
-			}
-			fmt.Fprintf(os.Stderr, "\n\n📊 %d tok in, %d tok out (%.1f tok/s) | %.1fs\n",
-				len(ids), gen, decTPS, prefillS+decodeS)
-			fmt.Fprintln(os.Stderr, "")
+			printTurnStats(stats, turnStats{
+				turn:         turnNum,
+				promptTokens: promptTokens,
+				newTokens:    len(newIDs),
+				reusedTokens: reused,
+				prefillS:     prefillS,
+				genTokens:    len(genIDs),
+				decodeS:      decodeS,
+				kvPositions:  len(cachedIDs),
+				cumReused:    cumReused,
+				cumPrompt:    cumPrompt,
+			})
 		}
 	}
 }
+
+// newSession builds the generation session for the chosen compute path plus a human
+// label for it. backend=="" is the default: the proven pure-Go Q8 CPU lane. A non-empty
+// backend routes through the compute HAL (NewBackendSession) — the path that runs on a
+// GPU when this build registered one — and fails loudly (rather than silently on CPU) if
+// the named backend is not compiled into this build.
+func newSession(m *model.Model, backend string) (*model.Session, string, error) {
+	if backend == "" {
+		s := m.NewSession()
+		s.Quant = true // resident Q8_0 weights — the fast, proven CPU path
+		return s, "cpu (pure-Go Q8 reference)", nil
+	}
+	be, ok := compute.Lookup(backend)
+	if !ok {
+		return nil, "", fmt.Errorf("compute backend %q is not registered in this build (have: %s)\n"+
+			"   → rebuild with its build tag on matching hardware, e.g. `go run -tags cuda ./cmd/simpledemo -backend cuda` on an NVIDIA box",
+			backend, strings.Join(compute.Registered(), ", "))
+	}
+	// The in-kernel device backends stream f32 weights (widened to f16 on the GPU); they
+	// have no quantized device GEMM, so they cannot serve a GGUF-quantized model loaded
+	// here. Refuse up front with the real GPU witness path instead of panicking deep in
+	// the HAL weight lookup (it would otherwise fail on the first f32 weight fetch).
+	if rep := m.ResidentReport(); rep.Q8Tensors > 0 || rep.Q4KTensors > 0 {
+		if be.Name() == "cpu-ref" {
+			// cpu-ref is the CPU reference HAL, not a GPU — steer back to the fast default.
+			return nil, "", fmt.Errorf("backend %q can't serve this model: it loaded as quantized GGUF (%d Q8 + %d Q4_K tensors) and the HAL reference path streams f32 weights\n"+
+				"   → drop -backend to use the fast pure-Go Q8 CPU path (the demo default)",
+				backend, rep.Q8Tensors, rep.Q4KTensors)
+		}
+		return nil, "", fmt.Errorf("backend %q can't serve this model: it loaded as quantized GGUF (%d Q8 + %d Q4_K tensors) and the device backends run f32 weights\n"+
+			"   → the GPU path runs f32 safetensors — prove GPU usage with: go run -tags cuda ./cmd/gpucheck -hf <hf-snapshot-dir> -backend cuda",
+			backend, rep.Q8Tensors, rep.Q4KTensors)
+	}
+	return m.NewBackendSession(be), fmt.Sprintf("%s (%s · %s)", be.Name(), be.Tier(), be.Class()), nil
+}
+
+// systemBlock / userBlock / assistantTurnClose are the ChatML pieces the incremental chat
+// loop feeds one at a time. systemBlock(sys)+userBlock(msg) is byte-identical to
+// buildPrompt(sys, nil, msg) — so turn 1 of the loop equals a fresh single-turn prompt and
+// the proven decode path is unchanged; later turns append only a userBlock + a closing tag.
+func systemBlock(system string) string {
+	return "<|im_start|>system\n" + system + "<|im_end|>\n"
+}
+
+func userBlock(userMsg string) string {
+	return "<|im_start|>user\n" + userMsg + "<|im_end|>\n<|im_start|>assistant\n"
+}
+
+// assistantTurnClose closes the assistant's reply in the cache after decode so the next
+// user block continues a well-formed ChatML transcript.
+const assistantTurnClose = "<|im_end|>\n"
 
 // printWelcome shows a friendly banner.
 func printWelcome() {
@@ -884,16 +986,17 @@ func sample(logits []float32, temp float64, rng *rand.Rand) int {
 // the reply to out. It decodes the whole id list each step and emits only the
 // newly-completed UTF-8 prefix, so a multi-byte rune (CJK, emoji) split across two
 // tokens is held back until complete instead of printing a � placeholder. Returns
-// the full decoded reply and the number of tokens generated.
+// the full decoded reply and the generated token ids (the count is len(genIDs); the
+// ids let the caller append them to the resident KV-cache token sequence for prefix
+// reuse on the next turn).
 //
 // This is the exact production decode path; main() and the greedy non-degeneracy
 // guard test (issue #91) both go through it so the test guards what users run.
-func decodeReply(session *model.Session, tok *tokenizer.Tokenizer, logits []float32, stops map[int]bool, maxNew int, temp float64, rng *rand.Rand, out *bufio.Writer) (string, int) {
-	gen := 0
+func decodeReply(session *model.Session, tok *tokenizer.Tokenizer, logits []float32, stops map[int]bool, maxNew int, temp float64, rng *rand.Rand, out *bufio.Writer) (string, []int) {
 	var genIDs []int
 	emitted := 0
 	full := ""
-	for gen < maxNew {
+	for len(genIDs) < maxNew {
 		next := sample(logits, temp, rng)
 		if stops[next] { // stop on EOS / end-of-turn
 			break
@@ -909,14 +1012,13 @@ func decodeReply(session *model.Session, tok *tokenizer.Tokenizer, logits []floa
 			}
 		}
 		logits = session.Step(next)
-		gen++
 	}
 	// Flush any remaining bytes (e.g. a final char held back mid-stream).
 	if len(full) > emitted {
 		out.WriteString(full[emitted:])
 	}
 	out.Flush()
-	return full, gen
+	return full, genIDs
 }
 
 // looksDegenerate reports whether a generated reply has collapsed into the

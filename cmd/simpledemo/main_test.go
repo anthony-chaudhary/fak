@@ -127,7 +127,8 @@ func TestGreedyNonDegenerate(t *testing.T) {
 		logits := session.Prefill(ids)
 		out := bufio.NewWriter(io.Discard)
 		rng := rand.New(rand.NewSource(1)) // unused at temp 0 (greedy argmax)
-		return decodeReply(session, tok, logits, stops, 48, 0, rng, out)
+		full, genIDs := decodeReply(session, tok, logits, stops, 48, 0, rng, out)
+		return full, len(genIDs)
 	}
 
 	const userMsg = "What is 2+2?"
@@ -145,4 +146,63 @@ func TestGreedyNonDegenerate(t *testing.T) {
 		t.Fatalf("greedy not deterministic across reruns:\n  run1=%q\n  run2=%q", reply, reply2)
 	}
 	t.Logf("greedy reply (%d tok): %q", gen, reply)
+}
+
+// TestIncrementalBlocksMatchFullPrompt locks the assumption the multi-turn KV prefix reuse
+// rests on: feeding ChatML blocks one at a time tokenizes IDENTICALLY to encoding the whole
+// prompt at once. It holds because <|im_start|>/<|im_end|> are atomic special tokens that
+// Encode splits on before any BPE merge — so a merge can never cross a turn boundary. If
+// that ever stopped holding, the reused KV prefix would silently diverge from a fresh
+// prefill (a wrong-but-plausible reply), so this guards it directly.
+//
+// It needs only the tokenizer (no weights), read straight from the GGUF, so it is gated on
+// FAK_SIMPLEDEMO_GGUF and skips otherwise — fast and offline by default.
+func TestIncrementalBlocksMatchFullPrompt(t *testing.T) {
+	ggufPath := os.Getenv("FAK_SIMPLEDEMO_GGUF")
+	if ggufPath == "" {
+		t.Skip("set FAK_SIMPLEDEMO_GGUF=<path to a .gguf> to run the ChatML block-equivalence guard")
+	}
+	tok, err := embeddedTokenizer(ggufPath)
+	if err != nil {
+		t.Fatalf("embeddedTokenizer(%q): %v", ggufPath, err)
+	}
+	const sys = "You are a helpful assistant. Keep answers short and clear."
+	const msg = "What is 2+2?"
+
+	enc := func(s string) []int {
+		ids, err := tok.Encode(s)
+		if err != nil {
+			t.Fatalf("Encode(%q): %v", s, err)
+		}
+		return ids
+	}
+
+	// Turn 1 of the incremental loop (systemBlock+userBlock) must equal a fresh single-turn
+	// prompt — the path the proven greedy guard exercises.
+	inc := enc(systemBlock(sys) + userBlock(msg))
+	full := enc(buildPrompt(sys, nil, msg))
+	if !slicesEqualInt(inc, full) {
+		t.Fatalf("turn-1 incremental != full prompt:\n  incremental=%v\n  full       =%v", inc, full)
+	}
+
+	// Block independence across the system→user boundary: encode(A)++encode(B) == encode(A+B).
+	// This is exactly what later turns rely on when they feed only the new userBlock.
+	a := enc(systemBlock(sys))
+	b := enc(userBlock(msg))
+	joined := append(append([]int{}, a...), b...)
+	if !slicesEqualInt(joined, inc) {
+		t.Fatalf("block-independent encoding diverges at the ChatML boundary:\n  A++B=%v\n  A+B =%v", joined, inc)
+	}
+}
+
+func slicesEqualInt(a, b []int) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
 }
