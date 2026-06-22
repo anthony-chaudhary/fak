@@ -17,19 +17,51 @@ import (
 //go:noescape
 func qdot8asm(qw, qx *int8, dw, dx *float32, nblk int) float32
 
-// neonDot is resolved once at init: true when the CPU has FEAT_DotProd (SDOT) and
-// FAK_QKERNEL does not pin the scalar path. FAK_QKERNEL ("scalar"|"neon") mirrors the amd64
-// FAK_QKERNEL knob so the kernel A/B is reproducible on either arch.
-var neonDot = resolveNeonDot()
+//go:noescape
+func qdot8amortNEON(qw, qx *int8, dw, dx *float32, nblk int) float32
 
-func resolveNeonDot() bool {
+// qdot8 kernel tiers for arm64, mirroring the amd64 FAK_QKERNEL tier scheme in
+// quant_amd64.go (tierScalar/tierAVX2/tierAVX512). Here the ladder is:
+//
+//	tierScalar — no SDOT (qdot8scalar), the safe fallback;
+//	tierNEON   — the bit-identical SDOT path (qdot8asm) + the default decode GEMV (unroll4);
+//	tierAmort  — issue #477's amortized-FP-reduction decode kernel (qdot8amortNEON), which
+//	             forfeits bit-identity for the llama.cpp-style deferred reduction.
+//
+// The SMMLA/i8mm kernel is a documented follow-up (see detectI8MM); when it lands it becomes a
+// higher tier reached on i8mm-capable parts, and the dispatch below already routes to it.
+const (
+	tierScalar = iota
+	tierNEON
+	tierAmort
+)
+
+// qkernelTier is resolved once at init. FAK_QKERNEL pins the tier for A/B measurement
+// ("scalar"|"neon"/"sdot"/"asimddp"|"amort"; "i8mm"/"smmla" alias the amortized kernel until
+// the SMMLA tier ships). neonDot is the derived bool the SDOT-based paths (qdot8, the prefill
+// GEMM) already gate on — true for any tier at or above tierNEON. The DEFAULT (no env) keeps
+// the prior behavior exactly: detectDotProd() → tierNEON or tierScalar, so the bit-identical
+// qdot8asm path and TestQdot8NEONMatchesScalar are untouched.
+var qkernelTier = resolveQKernelTier()
+
+var neonDot = qkernelTier >= tierNEON
+
+func resolveQKernelTier() int {
 	switch os.Getenv("FAK_QKERNEL") {
 	case "scalar":
-		return false
+		return tierScalar
 	case "neon", "sdot", "asimddp":
-		return true // operator asserts the hardware; the asm is built in regardless
+		return tierNEON // operator asserts the hardware; the asm is built in regardless
+	case "amort", "i8mm", "smmla":
+		// i8mm/smmla alias amort until the SMMLA tier lands (honest-block follow-up). The
+		// amortized kernel itself needs only FEAT_DotProd, so it is the correct selection on
+		// any SDOT-capable part the operator points it at.
+		return tierAmort
 	}
-	return detectDotProd()
+	if detectDotProd() {
+		return tierNEON
+	}
+	return tierScalar
 }
 
 // detectDotProd reports FEAT_DotProd (SDOT/UDOT) support. Every Apple Silicon part (M1+) has
@@ -61,6 +93,51 @@ func linuxHasASIMDDP() bool {
 		val := binary.LittleEndian.Uint64(b[i+8:])
 		if typ == atHWCAP {
 			return val&hwcapASIMDDP != 0
+		}
+		if typ == 0 {
+			break
+		}
+	}
+	return false
+}
+
+// i8mmAvailable reports FEAT_I8MM (the SMMLA / int8 matrix-multiply-accumulate extension).
+// It is the SELECTION gate for the (follow-up) SMMLA decode tier; the amortized-reduction
+// kernel that ships now uses SDOT (FEAT_DotProd) and does NOT require i8mm, so it stays
+// reachable on any SDOT part. Detection is the i8mm twin of neonDot's FEAT_DotProd path.
+var i8mmAvailable = detectI8MM()
+
+// detectI8MM reports FEAT_I8MM. ARMv8.6-A mandates it and every Apple part from M2/A15 on has
+// it (M3 — issue #477's target — does); per the issue spec darwin/ios is taken as true. (M1/A14
+// have FEAT_DotProd but NOT i8mm; that imprecision is harmless here because i8mm only gates the
+// not-yet-shipped SMMLA tier — the amortized kernel runs on M1 via SDOT regardless.) On linux it
+// reads AT_HWCAP2 bit 13 (HWCAP2_I8MM) from /proc/self/auxv — the AT_HWCAP2 twin of
+// linuxHasASIMDDP's AT_HWCAP read, stdlib-only. Any other arm64 OS: false (safe — absent proof
+// of the feature we assume absent, so an SMMLA #UD can never be reached).
+func detectI8MM() bool {
+	switch runtime.GOOS {
+	case "darwin", "ios":
+		return true
+	case "linux", "android":
+		return linuxHasI8MM()
+	default:
+		return false
+	}
+}
+
+func linuxHasI8MM() bool {
+	const atHWCAP2 = 26
+	const hwcap2I8MM = 1 << 13
+	b, err := os.ReadFile("/proc/self/auxv")
+	if err != nil {
+		return false
+	}
+	// auxv is a flat array of (uint64 type, uint64 value) pairs, terminated by type 0.
+	for i := 0; i+16 <= len(b); i += 16 {
+		typ := binary.LittleEndian.Uint64(b[i:])
+		val := binary.LittleEndian.Uint64(b[i+8:])
+		if typ == atHWCAP2 {
+			return val&hwcap2I8MM != 0
 		}
 		if typ == 0 {
 			break
@@ -185,6 +262,12 @@ func extendQ8ToQ16(q []int8, q16 []int16, nblk int) {
 // tests (argmax-exact), not by scalar bit-identity (which qdot8/qdot8asm still hold for their test).
 func qdot8GEMV(qw []int8, dw []float32, qv q8Vec, nblk int) float32 {
 	if neonDot && nblk > 0 {
+		// FAK_QKERNEL=amort (tierAmort) selects the issue #477 amortized-reduction kernel; the
+		// default (tierNEON) keeps the existing unroll4 GEMV. Both are deferred-reduction (NOT
+		// bit-identical to scalar); amort additionally amortizes the float reduce ggml-style.
+		if qkernelTier >= tierAmort {
+			return qdot8amortNEON(&qw[0], &qv.q[0], &dw[0], &qv.d[0], nblk)
+		}
 		return qdot8unroll4NEON(&qw[0], &qv.q[0], &dw[0], &qv.d[0], nblk)
 	}
 	return qdot8(qw, dw, qv, nblk)
