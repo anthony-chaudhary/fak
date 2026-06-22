@@ -16,7 +16,7 @@ description: "Frequently asked questions about fak, the agent kernel: how its de
       "name": "What is fak?",
       "acceptedAnswer": {
         "@type": "Answer",
-        "text": "fak is an agent kernel — an in-process, default-deny permission gate for AI agents, fused with an addressable, bit-exact KV cache, written in Go. It treats the language model like an untrusted program and every tool call like a syscall that must pass through a kernel the model cannot control. The same boundary enforces security (which effects are allowed, which tool results may enter the model's context) and drives performance (do shared work once instead of every turn). It is also described as an agent tool firewall."
+        "text": "fak is an agent kernel: an in-process, default-deny permission gate for AI agents, fused with an addressable, bit-exact KV cache, written in Go. It treats the language model like an untrusted program and every tool call like a syscall that must pass through a kernel the model cannot control. The same boundary enforces security (which effects are allowed, which tool results may enter the model's context) and drives performance (do shared work once instead of every turn). It is also described as an agent tool firewall."
       }
     },
     {
@@ -24,7 +24,7 @@ description: "Frequently asked questions about fak, the agent kernel: how its de
       "name": "What problem does fak solve?",
       "acceptedAnswer": {
         "@type": "Answer",
-        "text": "It closes the gap between agent safety and agent cost at the same boundary: Prompt injection and tool poisoning reach the model through tool results. fak quarantines suspicious results so they never enter the model's context. Irreversible actions (refunds, deletes, sends) are gated by a reviewable allow-list that is checked inside the kernel — default-deny, fail-closed. Agent fleets waste tokens re-processing the same shared context every turn. fak makes the KV cache a kernel object so shared work is computed once and reused."
+        "text": "It closes the gap between agent safety and agent cost at the same boundary: Prompt injection and tool poisoning reach the model through tool results. fak quarantines suspicious results so they never enter the model's context. Irreversible actions (refunds, deletes, sends) are gated by a reviewable allow-list that is checked inside the kernel. It is default-deny and fail-closed. Agent fleets waste tokens re-processing the same shared context every turn. fak makes the KV cache a kernel object so shared work is computed once and reused."
       }
     },
     {
@@ -32,7 +32,7 @@ description: "Frequently asked questions about fak, the agent kernel: how its de
       "name": "How is fak different from a normal firewall or API gateway?",
       "acceptedAnswer": {
         "@type": "Answer",
-        "text": "A normal firewall or gateway screens traffic from the outside and typically fails open when it crashes or times out. fak puts the permission check on the same call path as the tool call — one address space, no inter-process call — so it is something the call passes through, like read() through an OS kernel. It is default-deny: an action that was never allow-listed cannot run, no matter what the model was talked into."
+        "text": "A normal firewall or gateway screens traffic from the outside and typically fails open when it crashes or times out. fak puts the permission check on the same call path as the tool call (one address space, no inter-process call), so it is something the call passes through, like read() through an OS kernel. It is default-deny: an action that was never allow-listed cannot run, no matter what the model was talked into."
       }
     },
     {
@@ -40,7 +40,7 @@ description: "Frequently asked questions about fak, the agent kernel: how its de
       "name": "How does fak prevent prompt injection?",
       "acceptedAnswer": {
         "@type": "Answer",
-        "text": "With two independent gates, not one classifier: The capability lock. A dangerous tool is simply not on the allow-list, so no amount of injected text changes the answer — the lever was never wired up. Result quarantine. Suspicious tool results are held out of the model's context entirely, so a booby-trapped document never reaches the model to influence it. The detector that flags suspicious results is deliberately treated as evadable (~100% evadable by design) — it is a bonus, never the floor. An attacker has to beat two structural gates, not fool one screener. In live tests, prompt injection reached the unprotected baseline 5/5 and fak walled it off 5/5."
+        "text": "It uses two independent gates rather than one classifier: The capability lock. A dangerous tool is simply not on the allow-list, so no amount of injected text changes the answer. The lever was never wired up. Result quarantine. Suspicious tool results are held out of the model's context entirely, so a booby-trapped document never reaches the model to influence it. The detector that flags suspicious results is deliberately treated as evadable (~100% evadable by design): it is a bonus, never the floor. An attacker has to beat two structural gates rather than fool one screener. In live tests, prompt injection reached the unprotected baseline 5/5 and fak walled it off 5/5."
       }
     },
     {
@@ -48,7 +48,7 @@ description: "Frequently asked questions about fak, the agent kernel: how its de
       "name": "Does fak address the OWASP Agentic Top-10 and the MCP Top-10?",
       "acceptedAnswer": {
         "@type": "Answer",
-        "text": "Yes — structurally. It targets Tool Poisoning (MCP03) and Memory Poisoning (T1) by keeping untrusted tool results out of the model's context (containment) and by gating which effects are even possible (the capability floor). It does not rely on recognizing each attack; it relies on the dangerous lever not existing and the poisoned bytes not arriving."
+        "text": "Yes, structurally. It targets Tool Poisoning (MCP03) and Memory Poisoning (T1) by keeping untrusted tool results out of the model's context (containment) and by gating which effects are even possible (the capability floor). Rather than recognizing each attack, it leans on the dangerous lever not existing and the poisoned bytes never arriving."
       }
     },
     {
@@ -56,7 +56,7 @@ description: "Frequently asked questions about fak, the agent kernel: how its de
       "name": "What is an addressable KV cache?",
       "acceptedAnswer": {
         "@type": "Answer",
-        "text": "A KV cache is the scratchpad a model builds as it reads, so it doesn't re-read from scratch each turn. Every shipped engine (vLLM, SGLang, the OpenAI/Anthropic prompt caches) only reuses it from the front: change anything in the middle and everything after is recomputed. An addressable KV cache lets policy reach into the middle of a kept run, evict a single span (a poisoned result, an expired secret), and leave the cache bit-for-bit identical to a run that never saw it — verified at max|Δ| = 0. fak can do this because it owns the cache as a kernel object instead of renting it from a serving engine. See Addressable KV cache."
+        "text": "A KV cache is the scratchpad a model builds as it reads, so it doesn't re-read from scratch each turn. Every shipped engine (vLLM, SGLang, the OpenAI/Anthropic prompt caches) only reuses it from the front: change anything in the middle and everything after is recomputed. An addressable KV cache lets policy reach into the middle of a kept run and evict a single span: a poisoned result, an expired secret. It leaves the cache bit-for-bit identical to a run that never saw it, verified at max|Δ| = 0. fak can do this because it owns the cache as a kernel object instead of renting it from a serving engine. See Addressable KV cache."
       }
     },
     {
@@ -64,7 +64,7 @@ description: "Frequently asked questions about fak, the agent kernel: how its de
       "name": "Is fak a faster model server? How does it compare to vLLM, SGLang, or llama.cpp?",
       "acceptedAnswer": {
         "@type": "Answer",
-        "text": "No. fak is not a faster model server, and it does not try to beat vLLM, SGLang, or llama.cpp at raw throughput or front-of-prompt prefix caching — those engines win that, and fak measures itself against them honestly, not against a strawman. fak owns the orthogonal questions they don't: which effects are allowed, which results may enter memory, when reuse is still legal, and what survives a session boundary. You can even run fak serve in front of one of those engines and keep using it. The comparison that does favor fak is operational surface, not throughput — see the next question."
+        "text": "No. fak is not a faster model server. It does not try to beat vLLM, SGLang, or llama.cpp at raw throughput or front-of-prompt prefix caching. Those engines win that, and fak measures itself against them honestly rather than against a strawman. fak owns the orthogonal questions they don't. Which effects are allowed, which results may enter memory, when reuse is still legal, and what survives a session boundary. You can even run fak serve in front of one of those engines and keep using it. The comparison that does favor fak is operational surface, not throughput (see the next question)."
       }
     },
     {
@@ -72,7 +72,7 @@ description: "Frequently asked questions about fak, the agent kernel: how its de
       "name": "Why one Go binary instead of a Python serving stack like vLLM or SGLang?",
       "acceptedAnswer": {
         "@type": "Answer",
-        "text": "Because serving an agent safely is a whole stack, not just a token engine — and most of that stack is governance, not throughput. A model server (vLLM, SGLang) gives you fast tokens; to run a governed agent fleet you then assemble a gateway, a capability/policy layer, a result-screening layer, an audit pipeline, an MCP bridge, and a reverse proxy for auth around it. Those engines are Python on a CUDA/PyTorch stack and multi-process by design; their production container is multi-GB because it bundles CUDA + PyTorch by design (pip/uv into an existing env is the lighter path), and vLLM's own security docs direct you to front it with a reverse proxy for auth and endpoint allow-listing — its --api-key covers only the /v1 routes. fak collapses the governance + gateway half of that stack into one static Go binary with zero external dependencies (standard library only — there is no go.sum, no Python, no CUDA toolchain). The same binary speaks the OpenAI and Anthropic wires plus MCP, enforces a reviewable capability floor, quarantines tool results, emits a trace-correlated audit log, and exposes Prometheus metrics — and it runs on a laptop CPU with no key, model, or network. …"
+        "text": "Because serving an agent safely is a whole stack, not just a token engine, and most of that stack is governance rather than throughput. A model server (vLLM, SGLang) gives you fast tokens. To run a governed agent fleet you then assemble several pieces around it: a gateway and a capability/policy layer, a result-screening layer and an audit pipeline, and an MCP bridge plus a reverse proxy for auth. Those engines are Python on a CUDA/PyTorch stack and multi-process by design. Their production container is multi-GB because it bundles CUDA + PyTorch (pip/uv into an existing env is the lighter path), and vLLM's own security docs direct you to front it with a reverse proxy for auth and endpoint allow-listing. Its --api-key covers only the /v1 routes. fak collapses the governance + gateway half of that stack into one static Go binary with zero external dependencies (standard library only: there is no go.sum, no Python, no CUDA toolchain). That one binary does a lot at once. It speaks the OpenAI and Anthropic wires plus MCP, enforces a reviewable capability floor, quarantines tool results, emits a trace-correlated audit log, and exposes Prometheus metrics. It runs on a laptop …"
       }
     },
     {
@@ -80,7 +80,7 @@ description: "Frequently asked questions about fak, the agent kernel: how its de
       "name": "How much faster is fak for agent fleets?",
       "acceptedAnswer": {
         "@type": "Answer",
-        "text": "The win is in reread-rate, not raw GPU speed. On a 50-turn × 5-agent run it is about 4× fewer tokens than a tuned warm-cache stack — the apples-to-apples comparison (~60× only against the naive re-send-everything baseline, not the headline). On real WebVoyager web-agent workloads (643 tasks) it eliminates 8.8–9.7× of prefill, measured. The reuse win is self-host only — an app that merely calls a frontier API gets the safety floor but not the savings. Every number is traced to a commit and artifact in the benchmark authority."
+        "text": "The win is in reread-rate, not raw GPU speed. On a 50-turn × 5-agent run it is about 4× fewer tokens than a tuned warm-cache stack: the apples-to-apples comparison (~60× only against the naive re-send-everything baseline, not the headline). On real WebVoyager web-agent workloads (643 tasks) it eliminates 8.8–9.7× of prefill, measured. The reuse win is self-host only. An app that merely calls a frontier API gets the safety floor but not the savings. Every number is traced to a commit and artifact in the benchmark authority."
       }
     },
     {
@@ -88,7 +88,7 @@ description: "Frequently asked questions about fak, the agent kernel: how its de
       "name": "Is fak novel? What did the prior-art audit find?",
       "acceptedAnswer": {
         "@type": "Answer",
-        "text": "A 29-claim prior-art audit scored 0/29 novel. Every individual primitive (capability security, quarantine, KV caching, content-addressed storage) is established prior art. The contribution is the assembly: putting them together as one in-process gate where the tool call is the checkpoint, so the security boundary and the reuse boundary become the same boundary. fak is built to survive a skeptic reading the code — see the claims ledger, where every capability carries one machine-checked tag."
+        "text": "A 29-claim prior-art audit scored 0/29 novel. Every individual primitive (capability security, quarantine, KV caching, content-addressed storage) is established prior art. The contribution is the assembly: putting them together as one in-process gate where the tool call is the checkpoint, so the security boundary and the reuse boundary become the same boundary. fak is built to survive a skeptic reading the code. See the claims ledger, where every capability carries one machine-checked tag."
       }
     },
     {
@@ -128,7 +128,7 @@ description: "Frequently asked questions about fak, the agent kernel: how its de
       "name": "How do I put fak in front of my agent or framework (Claude Code, Cursor, an SDK, or MCP)?",
       "acceptedAnswer": {
         "@type": "Answer",
-        "text": "You usually change one thing: the base URL your agent already points at. fak serve speaks the OpenAI (/v1/chat/completions), Anthropic (/v1/messages), and MCP (--stdio or /mcp) wires, so any agent or framework that lets you override the base URL drops in with no agent-side code change — and every tool call it proposes is adjudicated by the capability floor before it runs. Claude Code and the Anthropic SDK set ANTHROPIC_BASE_URL; the OpenAI SDK, OpenAI Agents SDK, LangChain, LlamaIndex, and the Vercel AI SDK take an OpenAI base URL; Cursor and any MCP client wire fak serve --stdio. The integration index has the which-agent routing table, per-framework snippets, and a 60-second offline proof; the per-tool guides are Claude Code, Cursor, and OpenAI Codex."
+        "text": "You usually change one thing: the base URL your agent already points at. fak serve speaks the OpenAI (/v1/chat/completions), Anthropic (/v1/messages), and MCP (--stdio or /mcp) wires, so any agent or framework that lets you override the base URL drops in with no agent-side code change. Every tool call it proposes is adjudicated by the capability floor before it runs. Where the base URL goes depends on the agent: Claude Code and the Anthropic SDK set ANTHROPIC_BASE_URL. The OpenAI SDK, OpenAI Agents SDK, LangChain, LlamaIndex, and the Vercel AI SDK take an OpenAI base URL. Cursor and any MCP client wire fak serve --stdio. The integration index has the which-agent routing table, per-framework snippets, and a 60-second offline proof. The per-tool guides are Claude Code, Cursor, and OpenAI Codex."
       }
     },
     {
@@ -136,7 +136,7 @@ description: "Frequently asked questions about fak, the agent kernel: how its de
       "name": "Who is fak for?",
       "acceptedAnswer": {
         "@type": "Answer",
-        "text": "Teams running self-hosted LLM agent fleets who need three things at once: prompt-injection containment, reviewable capability security, and cache-efficient inference. It is useful at every rung — front your existing model for the safety floor, or go all-in on the fused kernel for the reuse wins on a self-hosted model."
+        "text": "Teams running self-hosted LLM agent fleets who need three things at once: prompt-injection containment, reviewable capability security, and cache-efficient inference. It is useful at every rung. Front your existing model for the safety floor, or go all-in on the fused kernel for the reuse wins on a self-hosted model."
       }
     },
     {
@@ -168,7 +168,7 @@ answer is written to stand on its own. For the full story, start with the
 
 ## What is fak?
 
-`fak` is an **agent kernel** — an in-process, default-deny **permission gate** for AI
+`fak` is an **agent kernel**: an in-process, default-deny **permission gate** for AI
 agents, fused with an **addressable, bit-exact KV cache**, written in Go. It treats the
 language model like an untrusted program and every tool call like a syscall that must
 pass through a kernel the model cannot control. The same boundary enforces security
@@ -183,7 +183,7 @@ It closes the gap between agent **safety** and agent **cost** at the same bounda
 1. **Prompt injection and tool poisoning** reach the model through tool results. `fak`
    quarantines suspicious results so they never enter the model's context.
 2. **Irreversible actions** (refunds, deletes, sends) are gated by a reviewable
-   allow-list that is checked inside the kernel — default-deny, fail-closed.
+   allow-list that is checked inside the kernel. It is default-deny and fail-closed.
 3. **Agent fleets waste tokens** re-processing the same shared context every turn. `fak`
    makes the KV cache a kernel object so shared work is computed once and reused.
 
@@ -191,30 +191,30 @@ It closes the gap between agent **safety** and agent **cost** at the same bounda
 
 A normal firewall or gateway screens traffic from the *outside* and typically fails
 **open** when it crashes or times out. `fak` puts the permission check on the *same call
-path* as the tool call — one address space, no inter-process call — so it is something
+path* as the tool call (one address space, no inter-process call), so it is something
 the call passes *through*, like `read()` through an OS kernel. It is **default-deny**: an
 action that was never allow-listed cannot run, no matter what the model was talked into.
 
 ## How does fak prevent prompt injection?
 
-With two independent gates, not one classifier:
+It uses two independent gates rather than one classifier:
 
 - **The capability lock.** A dangerous tool is simply not on the allow-list, so no
-  amount of injected text changes the answer — the lever was never wired up.
+  amount of injected text changes the answer. The lever was never wired up.
 - **Result quarantine.** Suspicious tool *results* are held out of the model's context
   entirely, so a booby-trapped document never reaches the model to influence it.
 
 The detector that *flags* suspicious results is deliberately treated as evadable (~100%
-evadable by design) — it is a bonus, never the floor. An attacker has to beat two
-structural gates, not fool one screener. In live tests, prompt injection reached the
+evadable by design): it is a bonus, never the floor. An attacker has to beat two
+structural gates rather than fool one screener. In live tests, prompt injection reached the
 unprotected baseline 5/5 and `fak` walled it off 5/5.
 
 ## Does fak address the OWASP Agentic Top-10 and the MCP Top-10?
 
-Yes — structurally. It targets **Tool Poisoning (MCP03)** and **Memory Poisoning (T1)**
+Yes, structurally. It targets **Tool Poisoning (MCP03)** and **Memory Poisoning (T1)**
 by keeping untrusted tool results out of the model's context (containment) and by gating
-which effects are even possible (the capability floor). It does not rely on recognizing
-each attack; it relies on the dangerous lever not existing and the poisoned bytes not
+which effects are even possible (the capability floor). Rather than recognizing each
+attack, it leans on the dangerous lever not existing and the poisoned bytes never
 arriving.
 
 ## What is an addressable KV cache?
@@ -223,51 +223,53 @@ A **KV cache** is the scratchpad a model builds as it reads, so it doesn't re-re
 scratch each turn. Every shipped engine (vLLM, SGLang, the OpenAI/Anthropic prompt
 caches) only reuses it *from the front*: change anything in the middle and everything
 after is recomputed. An **addressable** KV cache lets policy reach into the *middle* of a
-kept run, evict a single span (a poisoned result, an expired secret), and leave the cache
-**bit-for-bit identical** to a run that never saw it — verified at `max|Δ| = 0`. `fak`
+kept run and evict a single span: a poisoned result, an expired secret. It leaves the cache
+**bit-for-bit identical** to a run that never saw it, verified at `max|Δ| = 0`. `fak`
 can do this because it owns the cache as a kernel object instead of renting it from a
 serving engine. See [Addressable KV cache](explainers/addressable-kv-cache.md).
 
 ## Is fak a faster model server? How does it compare to vLLM, SGLang, or llama.cpp?
 
-No. `fak` is **not** a faster model server, and it does not try to beat vLLM, SGLang, or
-llama.cpp at raw throughput or front-of-prompt prefix caching — those engines win that,
-and `fak` measures itself against them honestly, not against a strawman. `fak` owns the
-*orthogonal* questions they don't: which effects are allowed, which results may enter
+No. `fak` is **not** a faster model server. It does not try to beat vLLM, SGLang, or
+llama.cpp at raw throughput or front-of-prompt prefix caching. Those engines win that,
+and `fak` measures itself against them honestly rather than against a strawman. `fak` owns the
+*orthogonal* questions they don't. Which effects are allowed, which results may enter
 memory, when reuse is still legal, and what survives a session boundary. You can even run
 `fak serve` *in front of* one of those engines and keep using it. The comparison that
-*does* favor `fak` is operational surface, not throughput — see the next question.
+*does* favor `fak` is operational surface, not throughput (see the next question).
 
 ## Why one Go binary instead of a Python serving stack like vLLM or SGLang?
 
-Because *serving an agent safely* is a whole stack, not just a token engine — and most of
-that stack is governance, not throughput. A model server (vLLM, SGLang) gives you fast
-tokens; to run a governed agent fleet you then assemble a gateway, a capability/policy
-layer, a result-screening layer, an audit pipeline, an MCP bridge, and a reverse proxy for
-auth around it. Those engines are Python on a CUDA/PyTorch stack and multi-process by
-design; their production container is multi-GB because it bundles CUDA + PyTorch by design
+Because *serving an agent safely* is a whole stack, not just a token engine, and most of
+that stack is governance rather than throughput. A model server (vLLM, SGLang) gives you fast
+tokens. To run a governed agent fleet you then assemble several pieces around it: a gateway
+and a capability/policy layer, a result-screening layer and an audit pipeline, and an MCP
+bridge plus a reverse proxy for auth. Those engines are Python on a CUDA/PyTorch stack and
+multi-process by design. Their production container is multi-GB because it bundles CUDA + PyTorch
 (pip/uv into an existing env is the lighter path), and vLLM's own security docs direct you
-to front it with a reverse proxy for auth and endpoint allow-listing — its `--api-key`
+to front it with a reverse proxy for auth and endpoint allow-listing. Its `--api-key`
 covers only the `/v1` routes.
 
 `fak` collapses the **governance + gateway half** of that stack into **one static Go
-binary with zero external dependencies** (standard library only — there is no `go.sum`, no
-Python, no CUDA toolchain). The same binary speaks the OpenAI and Anthropic wires plus MCP,
-enforces a reviewable capability floor, quarantines tool results, emits a trace-correlated
-audit log, and exposes Prometheus metrics — and it runs on a laptop CPU with no key, model,
-or network. Going from a developer's laptop to a hardened fleet means adding *flags*
-(`--policy floor.json`, `--require-key-env`), not new components. It does not replace the
-fast token engine — it fronts one. The honest fence: the contrast is **operational
-surface**, not tokens per second, and `fak`'s own in-binary model is a correctness
-reference, not a production server. See
+binary with zero external dependencies** (standard library only: there is no `go.sum`, no
+Python, no CUDA toolchain). That one binary does a lot at once. It speaks the OpenAI and
+Anthropic wires plus MCP, enforces a reviewable capability floor, quarantines tool results,
+emits a trace-correlated audit log, and exposes Prometheus metrics. It runs on a laptop CPU
+with no key, model, or network.
+
+Going from a developer's laptop to a hardened fleet means
+adding *flags* (`--policy floor.json`, `--require-key-env`) rather than new components. `fak`
+fronts the fast token engine instead of replacing it. The honest fence: the contrast is
+**operational surface** rather than tokens per second, and `fak`'s own in-binary model is a
+correctness reference, not a production server. See
 [One binary is the whole surface](explainers/one-binary-one-surface.md).
 
 ## How much faster is fak for agent fleets?
 
 The win is in **reread-rate**, not raw GPU speed. On a 50-turn × 5-agent run it is about
-**4× fewer tokens than a tuned warm-cache stack** — the apples-to-apples comparison
+**4× fewer tokens than a tuned warm-cache stack**: the apples-to-apples comparison
 (~60× only against the naive re-send-everything baseline, not the headline). On real WebVoyager web-agent workloads (643 tasks) it eliminates **8.8–9.7×**
-of prefill, measured. The reuse win is **self-host only** — an app that merely *calls* a
+of prefill, measured. The reuse win is **self-host only**. An app that merely *calls* a
 frontier API gets the safety floor but not the savings. Every number is traced to a
 commit and artifact in the [benchmark authority](../BENCHMARK-AUTHORITY.md).
 
@@ -277,8 +279,8 @@ A 29-claim prior-art audit scored **0/29 novel**. Every individual primitive
 (capability security, quarantine, KV caching, content-addressed storage) is established
 prior art. The contribution is the **assembly**: putting them together as one in-process
 gate where the tool call is the checkpoint, so the security boundary and the reuse
-boundary become the same boundary. `fak` is built to survive a skeptic reading the code —
-see the [claims ledger](../CLAIMS.md), where every capability carries one
+boundary become the same boundary. `fak` is built to survive a skeptic reading the code.
+See the [claims ledger](../CLAIMS.md), where every capability carries one
 machine-checked tag.
 
 ## How do I install fak?
@@ -330,13 +332,18 @@ This is where most people should start; it is a complete product by itself. See 
 You usually change one thing: the base URL your agent already points at. `fak serve`
 speaks the OpenAI (`/v1/chat/completions`), Anthropic (`/v1/messages`), and MCP
 (`--stdio` or `/mcp`) wires, so any agent or framework that lets you override the base
-URL drops in with **no agent-side code change** — and every tool call it proposes is
-adjudicated by the capability floor before it runs. **Claude Code** and the Anthropic
-SDK set `ANTHROPIC_BASE_URL`; the **OpenAI** SDK, **OpenAI Agents SDK**, **LangChain**,
-**LlamaIndex**, and the **Vercel AI SDK** take an OpenAI base URL; **Cursor** and any
-**MCP client** wire `fak serve --stdio`. The
-[integration index](integrations/README.md) has the which-agent routing table,
-per-framework snippets, and a 60-second offline proof; the per-tool guides are
+URL drops in with **no agent-side code change**. Every tool call it proposes is
+adjudicated by the capability floor before it runs.
+
+Where the base URL goes depends on the agent:
+
+- **Claude Code** and the Anthropic SDK set `ANTHROPIC_BASE_URL`.
+- The **OpenAI** SDK, **OpenAI Agents SDK**, **LangChain**, **LlamaIndex**, and the
+  **Vercel AI SDK** take an OpenAI base URL.
+- **Cursor** and any **MCP client** wire `fak serve --stdio`.
+
+The [integration index](integrations/README.md) has the which-agent routing table,
+per-framework snippets, and a 60-second offline proof. The per-tool guides are
 [Claude Code](integrations/claude.md), [Cursor](integrations/cursor.md), and
 [OpenAI Codex](integrations/openai-codex.md).
 
@@ -344,7 +351,7 @@ per-framework snippets, and a 60-second offline proof; the per-tool guides are
 
 Teams running **self-hosted LLM agent fleets** who need three things at once:
 prompt-injection containment, reviewable capability security, and cache-efficient
-inference. It is useful at every rung — front your existing model for the safety floor,
+inference. It is useful at every rung. Front your existing model for the safety floor,
 or go all-in on the fused kernel for the reuse wins on a self-hosted model.
 
 ## Where do I report a security vulnerability?

@@ -1,15 +1,15 @@
 # Getting started with fak
 
-This is the install-and-run front door. The dense pitch is in [`README.md`](README.md);
-this page gets you from a clean checkout to a running kernel — and to serving a model
-behind it — with copy-pasteable commands that were run on a clean build before being
+This is the install-and-run front door. The dense pitch is in [`README.md`](README.md).
+This page gets you from a clean checkout to a running kernel, and to serving a model
+behind it, with copy-pasteable commands that were run on a clean build before being
 written down.
 
-`fak` is **one Go binary** — a single static artifact with zero external dependencies (no
+`fak` is **one Go binary**: a single static artifact with zero external dependencies (no
 Python, no CUDA toolchain, no `go.sum`). That one binary *is* the whole governed-serving
 surface: the gateway, the policy gate, the result quarantine, and the audit/metrics
 surface in a single process. There are four things you can do with it, in rising order of
-setup cost — and **nothing new gets installed between them**:
+setup cost, and **nothing new gets installed between them**:
 
 | Tier | What you get | Setup | Downloads |
 |---|---|---|---|
@@ -20,19 +20,21 @@ setup cost — and **nothing new gets installed between them**:
 
 If you just want to **serve a useful model with fak in front of it**, you want **Tier 1**.
 Tier 2's in-kernel model is a *reference forward pass* proven bit-for-bit against
-HuggingFace — not a chat-quality serving engine (see the honest caveat in §4).
+HuggingFace, not a chat-quality serving engine (see the honest caveat in §4).
 
-> **Prefer not to install anything?** Run these tiers in a hosted cloud notebook — a free
+> **Prefer not to install anything?** Run these tiers in a hosted cloud notebook: a free
 > Colab/Kaggle T4 for Tiers 0–1, a neocloud GPU for Tier 2. See
 > [`notebooks/`](notebooks/README.md).
 
 > **Operator's local-testing default (2026-06-19).** When testing fak *locally*,
-> default to **Tier 2 — the fused in-kernel model with real weights** (`fak serve
-> --gguf …`), not the Tier 1 proxy and not the synthetic checkpoint. fak's thesis
-> is that the model runs inside the kernel address space; local testing should
-> exercise that path. The code already agrees — `--engine` defaults to `inkernel`
-> (not the offline mock). Reach for **Tier 1** only when you already have a model
-> server you want to put fak in front of, and reach for the **synthetic
+> default to **Tier 2, the fused in-kernel model with real weights** (`fak serve
+> --gguf …`), rather than the Tier 1 proxy or the synthetic checkpoint. fak's thesis
+> is that the model runs inside the kernel address space, and local testing should
+> exercise that path. The code already agrees: `--engine` defaults to `inkernel`
+> rather than the offline mock.
+
+> Reach for **Tier 1** only when you already have a model
+> server you want to put fak in front of. Reach for the **synthetic
 > checkpoint** (`fak serve --engine inkernel` with no `--gguf` / `FAK_MODEL_DIR`)
 > only for explicit wire/API / dispatch-path testing where the model output is
 > irrelevant. The biggest model currently exercisable on the in-kernel path on a
@@ -46,7 +48,7 @@ HuggingFace — not a chat-quality serving engine (see the honest caveat in §4)
   an older `go` will download the right toolchain automatically on first build (needs
   network once); otherwise install Go 1.26 from <https://go.dev/dl/>. Check with
   `go version`.
-- **That's all for Tiers 0 and 2-synthetic** — no GPU, no API key, no network.
+- **That's all for Tiers 0 and 2-synthetic**: no GPU, no API key, no network.
 - **Tier 1** additionally needs any OpenAI-compatible model server (e.g. Ollama).
 - **Tier 2 with real weights** additionally needs **Python 3.10+**; the fetch script
   (§4b) creates a venv and installs `torch`/`transformers` for you.
@@ -57,7 +59,7 @@ HuggingFace — not a chat-quality serving engine (see the honest caveat in §4)
 
 `fak` is one self-contained, static binary. Pick the path that fits you:
 
-**Adopter — no clone, no Go.** Download the prebuilt binary for your platform from the
+**Adopter (no clone, no Go).** Download the prebuilt binary for your platform from the
 [latest release](https://github.com/anthony-chaudhary/fak/releases/latest):
 
 | How | Command |
@@ -77,7 +79,7 @@ root, so it installs directly:
 go install github.com/anthony-chaudhary/fak/cmd/fak@latest   # -> $(go env GOBIN) / $GOPATH/bin
 ```
 
-**Contributor — build from the clone:**
+**Contributor (build from the clone):**
 
 ```bash
 git clone https://github.com/anthony-chaudhary/fak.git
@@ -88,9 +90,9 @@ go build -o fak ./cmd/fak          # -> ./fak   (Windows: build with -o fak.exe 
 
 > **Windows note.** `go build`/`go vet`/`go run` work natively. Running the *test
 > suite* (`go test ./...`) can hit an OS Application-Control policy that blocks the
-> freshly-compiled test binaries — that's an OS quirk, not a code failure, and it does
+> freshly-compiled test binaries. That's an OS quirk, not a code failure, and it does
 > **not** affect using `fak`. If you need the suite on Windows, run it under WSL with
-> `go test ./...`. **On Windows, build with `go build -o fak.exe ./cmd/fak`** — the explicit
+> `go test ./...`. **On Windows, build with `go build -o fak.exe ./cmd/fak`.** The explicit
 > `-o fak` (no extension) leaves a literal `fak` file that cmd.exe / PowerShell cannot launch
 > by name (Go only auto-appends `.exe` when you *omit* `-o`; git-bash can still run the
 > extensionless binary via its exec bit). Then type the binary as `.\fak.exe` (or `fak` if it's
@@ -101,8 +103,8 @@ go build -o fak ./cmd/fak          # -> ./fak   (Windows: build with -o fak.exe 
 ## 2. Tier 0 — try the kernel (zero downloads, ~2 min)
 
 Everything here is offline and deterministic. Run from inside `fak/` (the commands
-find `testdata/` relative to the working directory, and write their report files —
-`report.json`, `agent-report.json`, … — into the current directory).
+find `testdata/` relative to the working directory, and write their report files,
+such as `report.json` and `agent-report.json`, into the current directory).
 
 **Replay a tool-call trace through the kernel:**
 
@@ -133,7 +135,7 @@ went through to the engine.
 
 > **cmd.exe note.** The single-quoted `--args '{...}'` works in git-bash and PowerShell but
 > **not** cmd.exe, which passes the quotes through literally. On cmd.exe, drop the single quotes
-> and escape the inner double quotes (`--args "{""_positional"":[""alice""]}"`) — or simply run
+> and escape the inner double quotes (`--args "{""_positional"":[""alice""]}"`). Or just run
 > these examples from git-bash / PowerShell, where the shown syntax works unchanged.
 
 **The headline cost gate and the injection A/B:**
@@ -162,8 +164,8 @@ See [`POLICY.md`](POLICY.md) for the manifest schema.
 model with any OpenAI-compatible server; `fak serve --base-url` points at it. On every
 `/v1/chat/completions`, fak calls your upstream model, then **denies / repairs /
 quarantines the tool calls it proposes at the boundary**, and returns only the admitted
-ones (with a `fak` extension describing each decision). fak never executes your tools —
-your client does, on the survivors.
+ones (with a `fak` extension describing each decision). fak never executes your tools.
+Your client does, on the survivors.
 
 Example with [Ollama](https://ollama.com):
 
@@ -172,10 +174,10 @@ ollama serve &                       # OpenAI-compatible on :11434
 until curl -sf http://localhost:11434/api/tags >/dev/null; do sleep 1; done  # wait for it to bind
 ollama pull qwen2.5:1.5b
 
-# fak serve runs in the FOREGROUND — Ctrl-C to stop. Run the client calls below
+# fak serve runs in the FOREGROUND (Ctrl-C to stop). Run the client calls below
 # from a SECOND terminal. To background it: bash -> append ' &' (stop with 'kill %1');
-# Windows -> start it in its own window with Start-Process (PowerShell) or `start` (cmd)
-# — '&'/'kill %1' are bash-only — then curl from a second terminal.
+# Windows -> start it in its own window with Start-Process (PowerShell) or `start` (cmd),
+# since '&'/'kill %1' are bash-only. Then curl from a second terminal.
 ./fak serve --addr 127.0.0.1:8080 \
   --base-url http://localhost:11434/v1 \
   --model qwen2.5:1.5b
@@ -186,7 +188,7 @@ Confirm it's up (from another terminal):
 ```bash
 curl -s http://127.0.0.1:8080/healthz
 # {"engine":"inkernel","model":"qwen2.5:1.5b","ok":true}   <- engine=inkernel is the
-#   dispatch engine for the /v1/fak/* routes — a SEPARATE axis from --base-url. Your
+#   dispatch engine for the /v1/fak/* routes, a SEPARATE axis from --base-url. Your
 #   Tier-1 upstream model is reached only via /v1/chat/completions, so this is expected.
 ```
 
@@ -216,16 +218,17 @@ Routes the gateway exposes:
 | `GET /debug/vars` | authenticated expvar-style JSON snapshot of gateway config/uptime, runtime memory/goroutines, kernel counters, and completed HTTP/operation metric rows |
 
 > The `/v1/fak/*` routes dispatch to the bound `--engine` (default `mock`, or the
-> in-kernel model in Tier 2) — a **separate axis** from `--base-url`. Your upstream
+> in-kernel model in Tier 2), a **separate axis** from `--base-url`. Your upstream
 > model is reached only through `/v1/chat/completions`.
->
-> `fak serve` also writes one JSON access-log event per HTTP request to its log sink
-> (`event=gateway_http_request`, route, status, duration, bytes, and `trace_id`).
+
+> `fak serve` also writes one JSON access-log event per HTTP request to its log sink.
+> The `event=gateway_http_request` line carries route and status, duration and bytes, plus `trace_id`.
 > It honors an incoming `X-Trace-Id`; when absent, it mints one, returns it in the
-> `X-Trace-Id` response header, and threads it into gateway kernel operations, so
-> scrape metrics, per-request logs, per-operation verdict logs
-> (`event=gateway_operation`), and kernel events can be correlated without exposing
+> `X-Trace-Id` response header, and threads it into gateway kernel operations. The id
+> ties together scrape metrics, per-request logs, per-operation verdict logs
+> (`event=gateway_operation`), and kernel events. They can all be correlated without exposing
 > request bodies, arguments, or result content.
+
 > `GET /debug/vars` gives operators the same live process view as JSON for break-glass
 > checks and one-off probes; it follows the gateway auth policy just like `/metrics`.
 
@@ -233,14 +236,14 @@ Two gateway behaviors to know before you wire a real client to Tier 1:
 
 - **Client sampling params are honored.** The gateway forwards the inbound
   `max_tokens`/`temperature`/`top_p`/`stop` to the upstream model per request (both the
-  OpenAI `/v1/chat/completions` and the Anthropic `/v1/messages` wires); an omitted field
+  OpenAI `/v1/chat/completions` and the Anthropic `/v1/messages` wires). An omitted field
   falls through to the planner default, so a client that asks for a long completion is no
-  longer hard-capped — the old 1024-token truncation is fixed.
-- **SSE is buffered, not token-streaming.** When a client sends `stream:true`, the
+  longer hard-capped; the old 1024-token truncation is fixed.
+- **SSE is buffered rather than token-streaming.** When a client sends `stream:true`, the
   gateway adjudicates the **whole** upstream turn first, then re-serializes the
   finished result as a well-formed SSE event sequence. The wire is identical to a real
-  stream (a client parses it the same way), but partial tokens are never emitted — the
-  stream carries the already-adjudicated turn, not live decode.
+  stream (a client parses it the same way), but partial tokens are never emitted. The
+  stream carries the already-adjudicated turn rather than live decode.
 - **Auth.** `--require-key-env VAR` accepts the secret over **either** the
   `Authorization: Bearer <tok>` header (OpenAI/fak-native clients) **or** the
   `x-api-key: <tok>` header that Claude Code and the Anthropic SDKs send.
@@ -259,7 +262,7 @@ Harden it for real use:
 
 The kernel can dispatch an allowed tool call to a **real pure-Go SmolLM2 forward pass it
 owns** (`--engine inkernel`), decoding over a kernel-owned KV cache. This is the deepest
-fusion — the model runs inside the kernel address space — and it's reachable via
+fusion: the model runs inside the kernel address space, and it's reachable via
 `/v1/fak/syscall`.
 
 ### 4a. Synthetic weights — instant, zero download
@@ -286,8 +289,8 @@ curl -s -X POST http://127.0.0.1:8137/v1/fak/syscall \
 ```
 
 This exercises the **real** in-kernel prefill+decode loop over the kernel-owned KV cache.
-The *weights* are random-init synthetic, so the tokens are meaningless — it proves the
-dispatch+decode path, not output quality.
+The *weights* are random-init synthetic, so the tokens are meaningless: it proves the
+dispatch+decode path rather than output quality.
 
 ### 4b. Real SmolLM2-135M weights — one command
 
@@ -344,14 +347,14 @@ remaining broader logit-oracle work are tracked in `QWEN36-PARITY-RESULTS.md` an
 
 ### 4d. In-kernel CHAT through `fak serve` (both OpenAI + Anthropic wires)
 
-`fak serve` can serve the in-kernel model as a **real chat backend** — not just the
+`fak serve` can serve the in-kernel model as a **real chat backend** that goes beyond the
 byte-tokenized `/v1/fak/syscall` dispatch demo. With `--gguf` and **no** `--base-url`
-(a separate `--tokenizer` is optional — the GGUF's embedded tokenizer is used when
+(a separate `--tokenizer` is optional; the GGUF's embedded tokenizer is used when
 omitted), the gateway routes BOTH `/v1/chat/completions` (OpenAI wire) AND
 `/v1/messages` (Anthropic wire) through the in-kernel model via `internal/tokenizer`
 + the `cmd/fakchat` ChatML→Prefill→Step recipe (factored into `agent.InKernelPlanner`).
-This is the "test fak locally with the model up" path — fak's own engine as the chat
-backend, no llama-server/Ollama proxy:
+This is the "test fak locally with the model up" path: fak's own engine as the chat
+backend, with no llama-server/Ollama proxy.
 
 ```bash
 FAK_Q4K=1 ./fak serve --addr 127.0.0.1:8137 \
@@ -367,7 +370,7 @@ Witnessed on M3 Pro / Qwen3.6-27B q4_k_m: `/v1/chat/completions` returns
 `<think>\n\n</think>\n\nOK`; `/v1/messages` returns a live reasoning trace. Decode
 depth/sampling default to a greedy 256-token turn (`FAK_INKERNEL_MAX_TOKENS` /
 `FAK_INKERNEL_TEMP` / `FAK_INKERNEL_SEED` override). The planner emits **text** today
-(no structured tool-call emission yet); the gateway's adjudication layer still runs on
+(no structured tool-call emission yet), so the gateway's adjudication layer still runs on
 whatever the caller proposed. `--base-url` (Tier 1 proxy) wins if both are set.
 
 > **Honest caveat (why Tier 2 is not a production chat server).** The
@@ -394,14 +397,14 @@ whatever the caller proposed. `--base-url` (Tier 1 proxy) wins if both are set.
 
 ## Where to go next
 
-- [`docs/fak/tutorial.md`](docs/fak/tutorial.md) — **the guided first session**: a
-  step-by-step walk through Tiers 0–2 with the real, captured output of every command
+- [`docs/fak/tutorial.md`](docs/fak/tutorial.md): **the guided first session**. It walks
+  step by step through Tiers 0–2 with the real, captured output of every command
   (the friendliest on-ramp if this reference felt dense).
-- [`DOGFOOD-CLAUDE.md`](DOGFOOD-CLAUDE.md) — **use it as a product**: one command spins up
+- [`DOGFOOD-CLAUDE.md`](DOGFOOD-CLAUDE.md): **use it as a product**. One command spins up
   a local model behind the kernel as a native Anthropic `/v1/messages` server and points
   the real Claude Code CLI at it (`./scripts/dogfood-claude.sh`, or `.\scripts\dogfood-claude.ps1`
-  on Windows — no ollama, CPU-friendly). Live turns on your own box; witnessed on macOS + Windows.
-- [`POLICY.md`](POLICY.md) — the deployable capability floor (the adopter's front door).
-- [`ARCHITECTURE.md`](ARCHITECTURE.md) — how a new idea bakes in as a package + one registration.
-- [`LIVE-RESULTS.md`](docs/benchmarks/LIVE-RESULTS.md) — the live prompt-injection A/B on real models.
-- [`CLAIMS.md`](CLAIMS.md) — every capability tagged `[SHIPPED]` / `[SIMULATED]` / `[STUB]`.
+  on Windows; no ollama, CPU-friendly). Live turns on your own box; witnessed on macOS + Windows.
+- [`POLICY.md`](POLICY.md): the deployable capability floor (the adopter's front door).
+- [`ARCHITECTURE.md`](ARCHITECTURE.md): how a new idea bakes in as a package + one registration.
+- [`LIVE-RESULTS.md`](docs/benchmarks/LIVE-RESULTS.md): the live prompt-injection A/B on real models.
+- [`CLAIMS.md`](CLAIMS.md): every capability tagged `[SHIPPED]` / `[SIMULATED]` / `[STUB]`.

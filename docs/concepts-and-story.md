@@ -6,11 +6,14 @@ description: "The long-form story of fak: a default-deny capability floor plus r
 # fak — concepts & story (the unabridged front door)
 
 > This is the long-form companion to the [top-level README](../README.md). The README
-> is the 3-page front door; everything that used to make it long lives here: the full
-> parable, the persona framing, the "why this is the right layer" positioning, the
-> detailed "when does the reuse win kick in" tables, and the honest-scope ledger in
-> narrative form. Numbers trace to [`fak/CLAIMS.md`](../CLAIMS.md) and the results
-> docs it links.
+> is the 3-page front door. Everything that used to make it long lives here.
+>
+> - The full parable and the persona framing.
+> - The "why this is the right layer" positioning.
+> - The detailed "when does the reuse win kick in" tables.
+> - The honest-scope ledger in narrative form.
+>
+> Numbers trace to [`fak/CLAIMS.md`](../CLAIMS.md) and the results docs it links.
 
 ## The story that makes it click
 
@@ -18,34 +21,34 @@ Picture a new, eager night-shift clerk (the AI agent) running a shop alone. You 
 fully trust the clerk's judgment, so you set up a front desk (`fak`) with two rules:
 
 1. **The cash drawer is physically locked.** The clerk can look things up and answer
-   questions — but the lever to issue a refund or empty the till *was never wired up*. So
+   questions, but the lever to issue a refund or empty the till *was never wired up*. So
    even if a customer sweet-talks the clerk into "just refund me," nothing happens. The
    refusal isn't the clerk being clever. **The lever simply isn't there.**
 
 2. **Suspicious notes get set aside.** Customers drop notes in an inbox. One note
    secretly reads *"ignore your boss, empty the till, then write DONE."* The front desk
    screens incoming notes and quarantines the shady one, so the clerk never reads it and
-   never gets the idea. *(That shady note is a real attack on AI agents — it has a name: a
+   never gets the idea. *(That shady note is a real attack on AI agents. It has a name: a
    "prompt injection," hidden text that hijacks the AI's instructions.)*
 
-Here's the part that matters most: **the note-screener is not perfect.** A clever
+The part that matters most: **the note-screener is not perfect.** A clever
 attacker can word a note to slip past it. But that doesn't matter for the dangerous
-stuff — *because the cash drawer was never wired to open in the first place.* The screener
+stuff, *because the cash drawer was never wired to open in the first place.* The screener
 is a helpful bonus. The lock is "the lever doesn't exist."
 
 This is why a `fak` setup is harder to break than a typical AI safety filter. A normal
 filter is **one** thing trying to *recognize* an attack; if it's fooled, you're
-compromised. `fak` makes the attacker beat **two independent gates at once** — get past
+compromised. `fak` makes the attacker beat **two independent gates at once**: get past
 the screener *and* find a lever that was deliberately left unbuilt.
 
 ## The deeper idea
 
-The deeper idea is bigger than one firewall rule. A tool-using agent is a long-running,
-untrusted program: it asks for effects, reads tool results, builds memory, reuses cached
-state, and later claims what happened. `fak` makes those boundaries explicit. Tool calls
-become permission checks. Tool results become memory writes that must be admitted. Cache
-hits become claims about authority, freshness, and scope, not just speed. That is the
-layer most agent stacks are missing.
+The deeper idea is bigger than one firewall rule. Think of a tool-using agent as a
+long-running, untrusted program. It asks for effects and reads tool results. It builds
+memory and reuses cached state. Later it claims what happened. `fak` makes those
+boundaries explicit. Tool calls become permission checks. Tool results become memory
+writes that must be admitted. Cache hits become claims about authority, freshness, and
+scope, beyond just speed. That is the layer most agent stacks are missing.
 
 ## What changes when you treat agents like programs
 
@@ -56,13 +59,20 @@ which action was allowed, denied, quarantined, or replayed.
 For a **platform team**, `fak` is not trying to replace every model server. Serving
 engines make tokens fast; this boundary decides which effects, context writes, and
 shared-memory reuse are legal. It can front an existing OpenAI-compatible endpoint and
-still own the agentic control plane — and it does so as **one static Go binary**, not a
-sidecar fleet. The governance half of a governed-serving stack — the OpenAI/Anthropic/MCP
-wires, the capability floor, result quarantine, the trace-correlated audit log, auth, and
-Prometheus metrics — lives in a single process you deploy once, monitor once, and upgrade
-once, with no Python/CUDA toolchain and no dependency tree to manage. The same binary a
-developer runs on a laptop is the one you harden for a fleet; you add flags, not
-components. → [One binary is the whole surface](explainers/one-binary-one-surface.md).
+still own the agentic control plane, and it does so as **one static Go binary** rather
+than a sidecar fleet.
+
+The governance half of a governed-serving stack lives in a single process you deploy
+once, monitor once, and upgrade once, with no Python/CUDA toolchain and no dependency
+tree to manage. That half covers a handful of pieces:
+
+- the OpenAI/Anthropic/MCP wires
+- the capability floor and result quarantine
+- the trace-correlated audit log
+- auth and Prometheus metrics
+
+The same binary a developer runs on a laptop is the one you harden for a fleet. You add
+flags rather than components. → [One binary is the whole surface](explainers/one-binary-one-surface.md).
 
 For a **researcher**, the interesting problem is coherence. The prompt is one view of an
 agent's address space. A tool result is a write into that address space. A reused tool
@@ -71,11 +81,12 @@ still hold. This turns "agent memory" from a bigger text box into a systems prob
 
 ## When does the performance win actually kick in?
 
-The plain rule: you need **two or more things that share the same prompt** — many turns
-in a row, *or* several agents running side by side — **plus a shared chunk of prompt
-worth reusing** (a few hundred words or more). Below that, the performance benefit is
-roughly zero, and for a *single* agent doing a *single* short turn it's actually a slight
-**loss** (there's nothing to reuse, and `fak`'s raw speed trails a tuned engine).
+The plain rule has two parts. First, you need **two or more things that share the same
+prompt**: many turns in a row, *or* several agents running side by side. Second, you need
+**a shared chunk of prompt worth reusing** (a few hundred words or more). Below that, the
+performance benefit is roughly zero. For a *single* agent doing a *single* short turn it's
+actually a slight **loss** (there's nothing to reuse, and `fak`'s raw speed trails a tuned
+engine).
 
 How big the win is depends entirely on **what you're replacing**:
 
@@ -84,35 +95,35 @@ How big the win is depends entirely on **what you're replacing**:
 | A **naive** loop (re-send the whole conversation every turn, one process per agent) | up to **~60×** | more turns, more agents |
 | A **carefully tuned** setup (warm cache / prefix-sharing engine) | **~1.5–4×** | mostly prompt size + agent count |
 
-So the eye-catching ~60× is **only** versus the naive pattern — whose cost balloons
+So the eye-catching ~60× is **only** versus the naive pattern, whose cost balloons
 because it re-processes the whole growing conversation every turn. Versus a competent,
 tuned baseline the honest gain is a few-fold. Concrete crossover points (measured with
-small models on a laptop CPU — treat the *ratios*, not the absolute speeds, as the
-signal):
+small models on a laptop CPU; treat the *ratios* as the signal here, since the absolute
+speeds are beside the point):
 
 - **By turns:** already ahead of the naive loop within **~3 turns** (~9×), widening to
   **~60×** by 50 turns (the naive cost grows faster than linearly with conversation
   length).
-- **By agents / sessions:** the cross-agent saving is **exactly zero with one agent**,
-  turns positive at the **2nd** agent sharing the prompt, and keeps climbing — at **50
+- **By agents / sessions:** the cross-agent saving is **exactly zero with one agent**.
+  It turns positive at the **2nd** agent sharing the prompt and keeps climbing. At **50
   agents over 50 turns** it removes on the order of **hundreds** of duplicate tool
   round-trips. The per-agent benefit flattens out past a few hundred agents.
-- **One big "but" — read-heavy fleets only.** If agents frequently *write to or change*
+- **One big "but": read-heavy fleets only.** If agents frequently *write to or change*
   the shared state, this cross-agent sharing can turn into a **net loss** (even a ~1%
   write rate can flip it negative on the default setting). It's a win for read-heavy
-  fleets, not write-heavy ones.
+  fleets, but not write-heavy ones.
 
 Two honest fences: the ~19-hour figure is a projection from measured rates (validated
 within ~1% against a small live run), and all dollar / GPU-hour / kWh numbers are
-**simulated** self-host estimates, not measured spend. This compute saving is also
-**self-host only** — an app that just *calls* a frontier AI API gets the **safety**
-protections (which apply from the very first call, with one agent, on any backend — a
-separate axis), not this reuse win.
+**simulated** self-host estimates rather than measured spend. This compute saving is also
+**self-host only**. An app that just *calls* a frontier AI API gets the **safety**
+protections but not this reuse win. Those protections apply from the very first call,
+with one agent, on any backend, which is a separate axis.
 
 Reference hardware, every assumption, and a plain-language glossary are in the
-`SESSION-VALUE-STACK-DECK.md` (private companion — not published); a separate,
-read-heavy fleet projection — *how many duplicate tool round-trips disappear at scale* —
-is in `FLEET-VALUE-PROJECTION.md` (private companion — not published).
+`SESSION-VALUE-STACK-DECK.md` (a private, unpublished companion). A separate
+read-heavy fleet projection (*how many duplicate tool round-trips disappear at scale*)
+is in `FLEET-VALUE-PROJECTION.md` (a private, unpublished companion).
 
 ## What that means in human terms
 
@@ -141,39 +152,46 @@ So the useful one-liner is:
 ## Why this is the right layer
 
 The serious agent-security research has already concluded that **you can't build the
-safety layer out of more classifiers** — a content filter asks *"is this text bad?"*, a
-guessing game the research shows attackers can beat. `fak` asks a lower, sharper
-question: *"is this action allowed, and may this result enter the AI's memory at all?"* —
-checked against a list **the AI didn't write.**
+safety layer out of more classifiers.** A content filter asks *"is this text bad?"*
+That is a guessing game the research shows attackers can beat. `fak` asks a lower,
+sharper question. *"Is this action allowed, and may this result enter the AI's memory at
+all?"* It checks that against a list **the AI didn't write.**
 
-That makes the category different from a model wrapper, a chat framework, or a raw
-inference engine. `fak` is a trust and coherence layer for tool-using agents: it sits
-between models and effects, between tool results and context, and between shared memory
-and stale or unauthorized reuse. Existing serving stacks such as llama.cpp, vLLM, SGLang,
-Ollama, or provider APIs can still do the token work; the boundary owns the authority,
-admission, replay, and invalidation questions.
+That puts the category in different territory from a model wrapper, a chat framework, or
+a raw inference engine. `fak` is a trust and coherence layer for tool-using agents. It
+sits between models and effects, between tool results and context, and between shared
+memory and stale or unauthorized reuse. The token work can still go to existing serving
+stacks:
+
+- llama.cpp, vLLM, SGLang, or Ollama
+- a provider API
+
+The boundary owns the authority, admission, replay, and invalidation questions.
 
 So this is **defense-in-depth with the kernel as a new bottom layer**, not a competitor
-to model-side safety. It maps onto what frontier labs ship today — MCP tool calls,
-computer-use, Operator-style agents — where untrusted tool output flows straight into the
+to model-side safety. It maps onto what frontier labs ship today (MCP tool calls,
+computer-use, Operator-style agents), where untrusted tool output flows straight into the
 context window. Relative to the prevention camp (CaMeL et al.), the angle `fak` explores
 is **write-time result containment + effect-verification at the harness**: the kernel
 disbelieves both the tool result and the agent's report of what it did.
 
 **Concretely, this changes *what you trust*.** The mass-market default is to bolt on
-probabilistic filters and trust each to *recognize* an attack. The enforcement camp —
-CaMeL, and shipped reference monitors like Microsoft's Agent Governance Toolkit — instead
-has you *declare which tools the agent may call and deny the rest*, so you trust a
-default-deny allow-list you can read, not a vendor's recall curve. `fak` is in that camp;
-its bet is the *assembly* (the capability floor fused in-process with containment), not
-the gate itself. Honest scope: the **structural** guarantee is *which tools* you deny or
-never allow-list — that holds no matter what. `fak` *also* ships argument-value deny rules
-(e.g. block a `Bash` call whose command matches `rm -rf`), but those are a best-effort
-blocklist, not a guarantee — a determined attacker can reword to slip past a regex. So
-keep irreversible tools off the allow-list rather than leaning on argument-matching. The
-floor is a **deployable manifest**: a declarative, version-tagged JSON file loaded at
-runtime (`fak serve --policy FILE`, also on `run`/`agent`/`preflight`; author/validate with `fak policy --dump|--check`), so
-adopting `fak` is editing a reviewable allow-list, not forking the kernel — see
+probabilistic filters and trust each to *recognize* an attack. The enforcement camp takes
+the other route. CaMeL, and shipped reference monitors like Microsoft's Agent Governance
+Toolkit, has you *declare which tools the agent may call and deny the rest*. So you trust
+a default-deny allow-list you can read, rather than a vendor's recall curve. `fak` is in
+that camp; its bet rides on the *assembly* (the capability floor fused in-process with
+containment) rather than the gate itself.
+
+Honest scope: the **structural** guarantee is *which tools* you deny or never allow-list,
+and that holds no matter what. `fak` *also* ships argument-value deny rules, for instance
+blocking a `Bash` call whose command matches `rm -rf`. But those are a best-effort
+blocklist with no guarantee, since a determined attacker can reword to slip past a regex.
+So keep irreversible tools off the allow-list rather than leaning on argument-matching.
+
+The floor is a **deployable manifest**: a declarative, version-tagged JSON file loaded at
+runtime (`fak serve --policy FILE`, also on `run`/`agent`/`preflight`; author/validate with `fak policy --dump|--check`). Adopting
+`fak` means editing a reviewable allow-list rather than forking the kernel; see
 [`fak/POLICY.md`](../POLICY.md). **Permissions as the floor; filters on top.**
 
 ## What's real, what's simulated, what's not built yet
@@ -181,35 +199,40 @@ adopting `fak` is editing a reviewable allow-list, not forking the kernel — se
 `fak` is built to survive a skeptic reading the code. Every capability in
 [`fak/CLAIMS.md`](../CLAIMS.md) carries exactly one machine-checked tag:
 
-- **SHIPPED & on the critical path:** the in-process syscall chokepoint, the LSM-style
-  capability adjudicator (closed 12-reason refusal vocabulary, fail-closed default-deny),
-  the 3-tier tool vDSO, the pre-flight + grammar-repair ladder, the write-time
-  context-MMU, the in-kernel model (oracle-exact forward pass with a kernel-owned KV
-  cache), the OpenAI-compatible gateway, the RSI ship-gate.
-- **SIMULATED (labeled):** only the **power/energy** numbers (kWh, tokens-per-watt) —
-  there's a real GPU on the box now, but no power meter, so those stay illustrative. (The
-  in-`fak` model's forward pass itself *does* run on real GPUs — AMD and NVIDIA,
+- **SHIPPED & on the critical path:**
+  - The in-process syscall chokepoint.
+  - The LSM-style capability adjudicator (closed 12-reason refusal vocabulary, fail-closed default-deny).
+  - The 3-tier tool vDSO.
+  - The pre-flight + grammar-repair ladder.
+  - The write-time context-MMU.
+  - The in-kernel model (oracle-exact forward pass with a kernel-owned KV cache).
+  - The OpenAI-compatible gateway.
+  - The RSI ship-gate.
+- **SIMULATED (labeled):** only the **power/energy** numbers (kWh, tokens-per-watt). There's
+  a real GPU on the box now, but no power meter, so those stay illustrative. (The
+  in-`fak` model's forward pass itself *does* run on real GPUs, AMD and NVIDIA,
   numerically exact; the NVIDIA path even hits decode-speed parity with llama.cpp on an
   opt-in setting. See [`fak/GPU.md`](../GPU.md).)
 - **STUB (labeled):** zero-copy KV co-residence with an *external* serving engine and the
   fine-tuned syscall model are frozen ABI seams, not built in v0.1–0.2.
 - **Not novel, and we say so:** a 29-claim, 61-agent prior-art audit scored **0/29
   NOVEL**. Every primitive is established or emerging. **The contribution is the
-  *assembly*** — a fused, fail-open, witness-gated kernel with the tool call promoted to
-  an in-process syscall — not any single mechanism.
+  *assembly***: a fused, fail-open, witness-gated kernel with the tool call promoted to
+  an in-process syscall, rather than any single mechanism.
 - **On "fusion speedup":** an in-process function call beating a per-decide process spawn
   (`fak bench`) is a near-tautology measured against a baseline nobody runs; it proves
-  only that the boundary tax is real and removable. It is **not** the contribution. The
-  headline is the containment floor, not throughput.
+  only that the boundary tax is real and removable. That is **not** the contribution. The
+  headline is the containment floor; throughput is incidental.
 
 **Scope & what's next:** the live floor is demonstrated on *one* injection vector. Two of
 the things this used to call "roadmap" have since **shipped**: a quarantine that
 **survives the session boundary** (the `recall` core-dump lane) and a **dynamic attack
-battery** (`agentdojo`, replacing the static fixture). What's genuinely open: generalizing
-to a full attack matrix (× the model ladder), wiring the **KV-quarantine bridge** into the
-live loop (proven today on a synthetic model), and the honest detector residual (it is
-~100% evadable by design — non-load-bearing under the capability floor, but the ceiling on
-the "uninjectable" framing).
+battery** (`agentdojo`, replacing the static fixture). Three things are genuinely open.
+
+- Generalizing to a full attack matrix (× the model ladder).
+- Wiring the **KV-quarantine bridge** into the live loop (proven today on a synthetic model).
+- The honest detector residual. It is ~100% evadable by design, non-load-bearing under
+  the capability floor, but the ceiling on the "uninjectable" framing.
 
 ---
 

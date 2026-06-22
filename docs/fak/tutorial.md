@@ -5,11 +5,22 @@ description: "Hands-on fak tutorial: run the agent kernel offline, watch it deny
 
 # fak tutorial: zero to your first adjudicated tool call
 
+`fak` is an agent kernel that adjudicates every tool call a model makes, on your own
+machine, with no key and no GPU.
+
+> **TL;DR.** Grab the binary, then replay a tool-call trace and watch the kernel's verdict
+> on each call. Parts 1–2 are fully offline; later parts add a real model and Claude Code.
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/anthony-chaudhary/fak/main/install.sh | sh
+fak run --trace testdata/tau2/tau2-smoke.json     # the rest of the page explains this
+```
+
 **Audience:** you have never run `fak` before. By the end of this page you will have
 watched the kernel *deny a destructive tool call*, *wall off a prompt-injection*, and
-*serve a model behind an HTTP gate* — all on your own machine, **no API key, no GPU, no
-cloud bill**. Every command below was run on a clean build, and **every output block is
-the real, unedited terminal output** — what you see here is what you will see.
+*serve a model behind an HTTP gate*. It all runs on your own machine, with **no API key,
+no GPU, no cloud bill**. Every command below was run on a clean build, and **every output
+block is the real, unedited terminal output**. What you see here is what you will see.
 
 - **Time:** ~15 minutes for Parts 1–2 (zero downloads). Part 3 (chat with a real model)
   adds a model download. Parts 4–6 add a model server you point fak at, the Claude Code
@@ -24,7 +35,7 @@ the real, unedited terminal output** — what you see here is what you will see.
 > **One sentence of context.** `fak` treats the model like an untrusted program and a
 > tool call like a syscall: every call the agent wants to make passes *through* a kernel
 > the model can't talk past. This tutorial makes that concrete by watching the boundary
-> decide.
+> decide for itself.
 
 ---
 
@@ -42,7 +53,7 @@ the real, unedited terminal output** — what you see here is what you will see.
 | **5** | Connect Claude Code | the Claude Code CLI | Claude talking to a local model through the fak kernel |
 | **6** | Example workflows | none | read-only / development / deployment policies on the same gateway |
 
-You can stop after any part — each one stands on its own.
+You can stop after any part. Each one stands on its own.
 
 ---
 
@@ -125,16 +136,17 @@ summary: submits=12 vdso_hits=6 engine_calls=6 denies=0 transforms=0 quarantines
 ```
 
 **Reading it:**
-- `verdict=ALLOW` — the call was admitted (these are all read-only or allow-listed tools).
-- `by=monitor` — the call went through the full adjudication path to the engine.
-- `by=vdso` — the call was served from the local fast-path **without an engine call** —
-  a repeated read the kernel already knew the answer to. `vdso_hits=6` means **half** the
-  calls in this trace were served for free. That's the reuse win, in miniature.
+- `verdict=ALLOW`: the call was admitted (these are all read-only or allow-listed tools).
+- `by=monitor`: the call went through the full adjudication path to the engine.
+- `by=vdso`: the call was served from the local fast-path **without an engine call**.
+  That happens on a repeated read the kernel already knew the answer to. `vdso_hits=6`
+  means **half** the calls in this trace were served for free. That's the reuse win, in
+  miniature.
 
 ### 1.2 Watch the capability floor refuse a call
 
 This is the security flip: a tool that isn't on the allow-list is refused **by
-structure**, not by a classifier judging intent. Try a tool the floor never allowed:
+structure**, rather than by a classifier judging intent. Try a tool the floor never allowed:
 
 ```sh
 ./fak preflight --tool create_user --args '{"_positional":["alice"]}'
@@ -147,7 +159,7 @@ verdict=DENY reason=DEFAULT_DENY by=monitor
 ```
 
 `DEFAULT_DENY` = "not on the allow-list, so fail-closed." No prompt, no context, no clever
-phrasing changes this answer — the lever was never wired up. Now an allow-listed tool:
+phrasing changes this answer. The lever was never wired up. Now an allow-listed tool:
 
 ```sh
 ./fak preflight --tool get_user_details --args '{}'
@@ -159,7 +171,7 @@ verdict=ALLOW reason=NONE by=monitor
 
 ### 1.3 The same idea with a *deployable policy file*
 
-The allow-list is a file you can author and review, not a code edit. The repo ships an
+The allow-list is a file you can author and review, rather than a code edit. The repo ships an
 example "customer-support, read-only" policy. Run a **destructive** tool against it:
 
 ```sh
@@ -187,7 +199,7 @@ verdict=ALLOW reason=NONE by=monitor
 ```
 
 > **The headline in one line:** *a support agent under this policy can search the
-> knowledge base but physically cannot refund money* — and the reason is a named verdict
+> knowledge base but physically cannot refund money*. The reason is a named verdict
 > (`POLICY_BLOCK`), not a model's opinion.
 
 ### 1.4 The prompt-injection A/B — the demo to show a skeptic
@@ -232,15 +244,15 @@ report written: agent-report.json
 ```
 
 **The two rows that matter** are near the bottom of the table:
-- `injection in context: YES → no` — the poisoned tool result reached the baseline's
+- `injection in context: YES → no`: the poisoned tool result reached the baseline's
   context but was **walled off** from the `fak` arm. The model never saw it.
-- `destructive op executed: YES → no` — the baseline ran the dangerous action; `fak`
+- `destructive op executed: YES → no`: the baseline ran the dangerous action; `fak`
   refused it.
 
 And the kicker: **both arms still completed the task** (`task completed (booked): YES /
-YES`). Safety here is not "refuse everything" — the real booking still happened, the trap
+YES`). Safety here isn't "refuse everything." The real booking still happened, the trap
 just didn't. The token and turn savings (`37%` / `22%` on this single task) are the
-*efficiency* side of the same boundary; the full machine-readable breakdown is written to
+*efficiency* side of the same boundary. The full machine-readable breakdown is written to
 `agent-report.json`.
 
 ### 1.5 Author your own capability floor
@@ -280,8 +292,9 @@ redaction rules. The top of it looks like this (real):
 }
 ```
 
-Edit it (add/remove a tool), then **validate** it before deploying — the refusal
-vocabulary is closed, so a typo'd reason is caught here, not in production:
+Edit it (add/remove a tool), then **validate** it before deploying. The refusal
+vocabulary is closed, so a typo'd reason gets caught right here at author time, well
+before production:
 
 ```sh
 ./fak policy --check floor.json     # validates, prints the floor it admits
@@ -293,8 +306,8 @@ walkthrough with patterns is in the [policy guide](policy-guide.md).
 
 ### 1.6 *(Optional)* the fusion-speedup gate
 
-`fak bench` measures the in-process adjudication latency against a spawned-hook baseline —
-the cost of doing the check on the same call path vs. shelling out to a sidecar:
+`fak bench` measures the in-process adjudication latency against a spawned-hook baseline.
+That's the cost of doing the check on the same call path vs. shelling out to a sidecar:
 
 ```sh
 ./fak bench --suite tau2-smoke --baseline-n 5
@@ -314,12 +327,12 @@ workload hash               : 9f1701415fb4a360   live seam: live_seam_unverified
 report written              : report.json
 ```
 
-The exact `4840x` will vary by machine — the point is the order of magnitude. Adjudicating
+The exact `4840x` will vary by machine; the point is the order of magnitude. Adjudicating
 *in-process* (microseconds) instead of *spawning a hook* (tens of milliseconds) is what
 makes a default-deny gate cheap enough to put on **every** call.
 
-✅ **End of Part 1.** You've watched the kernel allow, deny, dedup, wall off an injection,
-and you've authored a policy — all offline.
+✅ **End of Part 1.** You've watched the kernel allow, deny, dedup, and wall off an
+injection. You've also authored a policy, all offline.
 
 ---
 
@@ -328,7 +341,7 @@ and you've authored a policy — all offline.
 `fak serve` is an **OpenAI-compatible gateway**. In production you point `--base-url` at a
 real model server (Ollama, vLLM, a cloud provider) and `fak` adjudicates the tool calls it
 proposes. For this tutorial we use the built-in **synthetic in-kernel engine** so you need
-**zero downloads** — the wire and the verdicts are identical; only the generated tokens are
+**zero downloads**. The wire and the verdicts are identical; only the generated tokens are
 placeholder.
 
 ### 2.1 Start the gateway
@@ -384,15 +397,15 @@ curl -s -X POST http://127.0.0.1:8137/v1/fak/syscall \
 }
 ```
 
-> **Wire gotcha:** the fak-native key is `arguments`, **not** `args` — an unknown key is
+> **Wire gotcha:** the fak-native key is `arguments`, **not** `args`. An unknown key is
 > silently dropped. The `generated_tokens` are repeated placeholders because the synthetic
-> engine has random weights; this call proves the *dispatch + decode + verdict* path, not
-> output quality.
+> engine has random weights; this call exercises the *dispatch + decode + verdict* path
+> while leaving output quality aside.
 
 ### 2.4 Get a verdict *without* dispatching
 
-`POST /v1/fak/adjudicate` returns just the decision — useful for "would this be allowed?"
-checks. Ask about a destructive tool:
+`POST /v1/fak/adjudicate` returns just the decision, which is handy for "would this be
+allowed?" checks. Ask about a destructive tool:
 
 ```sh
 curl -s -X POST http://127.0.0.1:8137/v1/fak/adjudicate \
@@ -404,7 +417,7 @@ curl -s -X POST http://127.0.0.1:8137/v1/fak/adjudicate \
 {"verdict":{"kind":"DENY","reason":"DEFAULT_DENY","by":"monitor","disposition":"TERMINAL"},"trace_id":"gw-4"}
 ```
 
-Same answer as the offline `preflight` in Part 1 — the gate is the same gate, whether you
+Same answer as the offline `preflight` in Part 1. The gate is the same gate, whether you
 reach it from the CLI or over HTTP.
 
 ### 2.5 The audit trail you get for free
@@ -418,9 +431,9 @@ see entries like this (real):
 {"event":"gateway_operation","operation":"adjudicate","tool":"refund_payment","verdict":"DENY","reason":"DEFAULT_DENY","disposition":"TERMINAL","duration_ms":0.511,"trace_id":"gw-4"}
 ```
 
-The `trace_id` ties the verdict log, the HTTP log, and the response header together —
-without ever logging request bodies, arguments, or result content. That's the audit
-surface; the full observability story (Prometheus `/metrics`, `/debug/vars`) is in the
+The `trace_id` ties together the verdict log, the HTTP log, and the response header. It
+never logs request bodies, arguments, or result content. That's the audit surface; the
+full observability story (Prometheus `/metrics`, `/debug/vars`) is in the
 [observability guide](observability.md).
 
 To point a **real** model at the gate instead of the synthetic engine, swap the engine flag
@@ -478,8 +491,8 @@ walkthrough: [`fak/DOGFOOD-CLAUDE.md`](../../DOGFOOD-CLAUDE.md) (and the
 size/RAM table are in the [Simple Demo README](../../cmd/simpledemo/README.md).
 
 > **Honesty note.** The in-kernel model path is a *correctness reference* proven bit-exact
-> against HuggingFace, not a production chat engine. For chat-quality serving at scale, use
-> Part 2's Tier 1 proxy in front of a real serving engine. See [`fak/CLAIMS.md`](../../CLAIMS.md).
+> against HuggingFace, not a production chat engine. For chat-quality serving at scale, lean
+> on Part 2's Tier 1 proxy in front of a real serving engine. See [`fak/CLAIMS.md`](../../CLAIMS.md).
 
 ---
 
@@ -487,7 +500,7 @@ size/RAM table are in the [Simple Demo README](../../cmd/simpledemo/README.md).
 
 Part 2 used the synthetic engine so you needed zero downloads. To get **real tokens**
 behind the same gate, point `fak serve` at any OpenAI-compatible model server. Pick **one**
-of the three below — they all expose the same `/v1/*` wire, so the gateway config is
+of the three below. They all expose the same `/v1/*` wire, so the gateway config is
 identical. (This is the prerequisite for Part 5.)
 
 ### 4.1 Ollama (macOS/Linux, easiest)
@@ -514,8 +527,8 @@ llama-server \
 ### 4.3 LM Studio (Windows/macOS)
 
 LM Studio is a GUI app: load a model from its catalog, then enable the **local server**
-(Developer tab → *Start Server*, default port `1234`). No CLI install needed — useful when
-you already pick models through a UI.
+(Developer tab → *Start Server*, default port `1234`). No CLI install needed, which helps
+when you already pick models through a UI.
 
 ### 4.4 Verify the model server
 
@@ -626,8 +639,8 @@ For the full list (`FAK_DOGFOOD_*`, planner timeouts, account switcher), see the
 ## Part 6 — example workflows
 
 Three policy-shaped workflows, from safest to most privileged. Each one is a different
-`--policy examples/<file>.json` handed to the **same** `fak serve` command from Part 4.5 —
-the gateway code is identical, only the capability floor changes.
+`--policy examples/<file>.json` handed to the **same** `fak serve` command from Part 4.5.
+The gateway code is identical; only the capability floor changes.
 
 ### 6.1 Read-only agent (safe exploration)
 
@@ -648,14 +661,14 @@ Try the same boundary you watched in Part 1 against this policy:
 # verdict=DENY reason=POLICY_BLOCK
 ```
 
-Allowed: `read_customer_record`, `search_kb`, `create_support_ticket`. Denied: every write,
-refund, and credential rotation.
+- **Allowed:** `read_customer_record`, `search_kb`, `create_support_ticket`.
+- **Denied:** every write, refund, and credential rotation.
 
 ### 6.2 Development agent (commits allowed, push denied)
 
-The agent can run the build, the tests, and `git diff`/`log`/`status`, and even ship a
-local release — but it cannot `git push`, `git merge`, `git tag`, or exfiltrate. Use this
-for an agent pair-programming on a clone.
+The agent can run the build, the tests, and `git diff`/`log`/`status`. It can even ship a
+local release. What it cannot do is `git push`, `git merge`, `git tag`, or exfiltrate. Use
+this for an agent pair-programming on a clone.
 
 ```sh
 ./fak serve --addr 127.0.0.1:8080 \
@@ -663,10 +676,11 @@ for an agent pair-programming on a clone.
   --policy examples/dev-agent-policy.json
 ```
 
-For the **Claude Code** tool surface (`Bash`, `Edit`, `Read`, `Write`, `Glob`, `Grep`, …)
-use the broader [`examples/dogfood-claude-policy.json`](../../examples/dogfood-claude-policy.json),
-which allows those tools but still denies `rm -rf`, `sudo`, `git push`, and writes into
-`.git/`, `internal/kernel/`, or `VERSION`.
+The **Claude Code** tool surface is broader. It covers `Bash`, `Edit`, `Read`, and `Write`,
+plus search tools like `Glob` and `Grep`. For that, reach for
+[`examples/dogfood-claude-policy.json`](../../examples/dogfood-claude-policy.json). It
+allows those tools while still denying `rm -rf`, `sudo`, and `git push`. It also blocks any
+write into `.git/`, `internal/kernel/`, or `VERSION`.
 
 ### 6.3 Deployment agent (production dry-run)
 
@@ -680,8 +694,9 @@ drafts changes for a human to review and merge.
   --policy examples/devops-dryrun-policy.json
 ```
 
-Allowed: `plan_deploy`, `validate_terraform`, `helm_template`, `diff_infra`, `kubectl_get`,
-`create_change_request`. Denied: every mutating production action.
+- **Allowed (planning):** `plan_deploy`, `validate_terraform`, `helm_template`.
+- **Allowed (inspection):** `diff_infra`, `kubectl_get`, `create_change_request`.
+- **Denied:** every mutating production action.
 
 To put **any** of the three on a network-facing host, also require an API key and bind
 publicly:
@@ -697,7 +712,7 @@ export FAK_GATEWAY_KEY="$(openssl rand -hex 32)"
 Clients then send `Authorization: Bearer $FAK_GATEWAY_KEY` (or `x-api-key:`). The full
 production hardening checklist is in [`security.md`](security.md).
 
-✅ **End of Part 6.** The same gateway, three different capability floors — pick by intent.
+✅ **End of Part 6.** The same gateway, three different capability floors. Pick by intent.
 
 ---
 
