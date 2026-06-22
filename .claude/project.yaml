@@ -40,6 +40,10 @@ helpers:
   # /issue-triage — read-only fetch/classify/rank + proposed-actions for the
   # open GitHub issue backlog. Applying actions is the skill's gated step.
   issue_triage: tools/issue_triage.py
+  # /quality-score — the code-quality scorecard: ten deterministic, evidence-
+  # grounded KPIs folded into a composite score + a code-debt integer. Read-only
+  # (shells go build/vet/gofmt + dos review); the RSI pass drives code-debt down.
+  code_quality_scorecard: tools/code_quality_scorecard.py
 
 # Where vX.Y.Z.md release notes are written.
 release_notes_dir: docs/releases
