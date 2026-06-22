@@ -138,12 +138,14 @@ read-heavy fleets.
 
 ## See it in 2 minutes (no key, no model, no GPU)
 
-Just [Go 1.26+](https://go.dev/dl/). Or run it in a hosted notebook with a free
+[Go 1.26+](https://go.dev/dl/) and a clone of this repo (the `examples/` and
+`cmd/fak` paths below live inside it). Or run it in a hosted notebook with a free
 T4 GPU and nothing to install:
 [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/anthony-chaudhary/fak/blob/main/notebooks/fak-quickstart.ipynb)
 (see [`notebooks/`](notebooks/README.md)).
 
 ```bash
+git clone https://github.com/anthony-chaudhary/fak && cd fak
 go run ./cmd/fak preflight --policy examples/customer-support-readonly-policy.json --tool refund_payment --args "{}"
 go run ./cmd/fak preflight --policy examples/customer-support-readonly-policy.json --tool search_kb --args "{}"
 go run ./cmd/fak agent --offline
