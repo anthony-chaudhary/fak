@@ -43,6 +43,31 @@ void fcuda_hostxfer_reset(void);
 /* y[P,out] = x[P,in] @ W[out,in]^T   (all row-major f32) via cuBLAS SGEMM. */
 void fcuda_matmul_f32(const float *dW, const float *dX, float *dY, int out, int in, int P);
 
+/* fp16 compute path (#484, Caps.UploadDtype + tensor-core HGEMM). __half pointers are
+ * passed as void* so THIS header stays free of <cuda_fp16.h> — the cgo type-check (`go vet
+ * -tags cuda`) parses it with a plain host compiler and no CUDA toolkit (the #479/#482/#483
+ * bar); the .cu casts back to __half. */
+
+/* fcuda_f32_to_f16 narrows a staged f32 device buffer to F16 element-for-element (row-major:
+ * dDstHalf[i] = (half)dSrc[i]). The H2D copy lands f32; this is the device-side dtype narrow
+ * that makes the resident weight F16 — the Upload(t, F16) narrowing under Caps.UploadDtype. */
+void fcuda_f32_to_f16(void *dDstHalf, const float *dSrc, int n);
+
+/* fcuda_f32_to_f16_T narrows AND transpose-repacks a row-major f32 weight [out,in] into a
+ * COLUMN-MAJOR F16 weight [out,in] (element (o,i) at o + i*out): dDstHalf[o + i*out] =
+ * (half)dSrc[o*in + i]. This is the `Layout` repack at H2D — a ColMajor weight is laid out
+ * once at upload so the HGEMM consumes it with op_N (no per-call transpose). */
+void fcuda_f32_to_f16_T(void *dDstHalf, const float *dSrc, int out, int in);
+
+/* fcuda_matmul_f16: Y[P,out] = X[P,in] @ W[out,in]^T via cuBLAS tensor-core HGEMM
+ * (cublasGemmEx, CUDA_R_16F inputs, CUBLAS_COMPUTE_32F accumulate, CUBLAS_GEMM_DEFAULT_TENSOR_OP).
+ * W is resident as __half (uploaded under Caps.UploadDtype); X is f32 and is converted to
+ * __half in an internal scratch; Y is f32 (the F32 accumulate keeps the rest of the op chain —
+ * RMSNorm/RoPE/SwiGLU/Attention — f32 and unchanged). colMajor==0 => W is row-major [out,in]
+ * (op_T, lda=in, the SGEMM recipe); colMajor!=0 => W was transpose-repacked to col-major
+ * [out,in] at H2D by fcuda_f32_to_f16_T (op_N, lda=out). Both compute the same Y. */
+void fcuda_matmul_f16(const void *dWhalf, const float *dX, float *dY, int out, int in, int P, int colMajor);
+
 /* per-row RMSNorm: y[r,:] = x[r,:] * rsqrt(mean(x[r,:]^2) + eps) * w[:]  (rows x n). */
 void fcuda_rmsnorm_f32(const float *dX, const float *dW, float *dY, int rows, int n, float eps);
 

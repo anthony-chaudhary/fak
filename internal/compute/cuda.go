@@ -52,6 +52,28 @@ var cudaMu sync.Mutex
 // stream) at its proven 7.5 tok/s without the fixed-KV memory cost.
 var graphEnabled bool
 
+// cudaFP16CosineMin is the cuda backend's RECORDED Approx cosine floor for the fp16 (HGEMM /
+// tensor-core) compute path (#484) — the device-vs-cpuref-f32 logit/GEMM cosine a witness must
+// clear. It is deliberately LOOSER than the Q8 / int8 lane's 0.999 gate, for a recorded reason,
+// not an assumed one:
+//
+//   - Q8_0 keeps a per-block(32) f32 scale beside the 8-bit codes (QuantSpec.Scale), and the
+//     activation is dynamically re-quantized per block with its own f32 scale. The dynamic
+//     range of every group is therefore carried in FULL f32; only the in-block code rounds, and
+//     the dot is integer-exact before the single f32 scale multiply. That structure keeps the
+//     int8 lane tight against the f32 reference (0.999).
+//   - fp16 (IEEE binary16) rounds BOTH operands to a 10-bit mantissa (~2^-11 relative) with NO
+//     per-block f32 scale to preserve magnitude structure, so the per-element rounding enters
+//     the product directly and compounds along the contraction. cublasGemmEx accumulates in F32
+//     (CUBLAS_COMPUTE_32F), which bounds the SUM error, but the INPUTS are already fp16-rounded
+//     before the multiply — a drift source the scaled-int8 path does not have. So the fp16 gate
+//     is set below the int8 gate as a conservative floor.
+//
+// IMPORTANT (honest handoff): this constant RECORDS the threshold; it does not assert the path
+// passes it. The realized cosine is measured on a CUDA node by tools/run_484_acceptance_on_gpu.sh
+// (the win32 build host has no CUDA toolkit / GPU). Do not read a pass from this value alone.
+const cudaFP16CosineMin = 0.997
+
 func init() {
 	var name [256]C.char
 	var sm C.int
@@ -79,6 +101,8 @@ type cudaBuf struct {
 	ptr     unsafe.Pointer // device pointer (cudaMalloc)
 	n       int            // bytes
 	host    uintptr        // source host pointer if this came from a cached Upload (0 otherwise)
+	hostDt  Dtype          // narrowed dtype this upload was cached under (so Free evicts the right key)
+	hostLo  Layout         // layout this upload was cached under (ditto — same host buffer, two layouts)
 	be      *cudaBackend   // non-nil => async op output; Ready() tracks be.fenceGen vs bornGen
 	bornGen uint64         // fence generation in which this async buffer was enqueued
 }
@@ -102,9 +126,20 @@ func (b *cudaBuf) Ready() bool {
 // uploadCache shares one VRAM copy per distinct host buffer across all sessions. A model's
 // weights are zero-copy views into one blob (m.tensor(name) returns the SAME pointer every
 // call), so without this each NewBackendSession re-uploaded the whole model — N sessions ×
-// the full weight set, which exhausts VRAM in a multi-session bench. Keyed by host pointer;
-// Free evicts (so per-token inputs, which have fresh pointers, don't accumulate).
-var uploadCache = map[uintptr]Tensor{}
+// the full weight set, which exhausts VRAM in a multi-session bench. Free evicts (so per-token
+// inputs, which have fresh pointers, don't accumulate).
+//
+// The key is (host pointer, narrowed dtype, layout), NOT the pointer alone: under #484 the SAME
+// host weight may be uploaded as F32 and as F16, or as F16 in two layouts (RowMajor vs the
+// ColMajor transpose-repack), and those are DISTINCT resident buffers. Keying on the pointer
+// alone would alias them and hand back the wrong layout/dtype.
+type ucKey struct {
+	hp uintptr
+	dt Dtype
+	lo Layout
+}
+
+var uploadCache = map[ucKey]Tensor{}
 
 type cudaBackend struct {
 	name string
@@ -182,8 +217,10 @@ func (c *cudaBackend) Caps() Caps {
 	// launches). It is advertised true exactly when that path is live (graphEnabled /
 	// FAK_CUDA_GRAPH=1) so it stays consistent with GraphBegin's consent — a consumer that reads
 	// false cleanly falls back to the synchronous per-op core (the cpu-ref/Metal default).
-	// FusedAttn/UploadDtype remain tracked seams.
-	return Caps{Async: true, DeviceMemory: true, GraphCompile: graphEnabled}
+	// UploadDtype (#484): Upload(t, F16) narrows weights to __half at H2D (with a ColMajor
+	// transpose-repack) and MatMul/BatchedMatMul run tensor-core HGEMM on them — the fp16 compute
+	// path. FusedAttn remains a tracked seam.
+	return Caps{Async: true, DeviceMemory: true, GraphCompile: graphEnabled, UploadDtype: true}
 }
 
 // ---- residency ------------------------------------------------------------------
@@ -218,8 +255,23 @@ func (c *cudaBackend) devTr(shape []int, dt Dtype) (Tensor, *cudaBuf) {
 	return t, b
 }
 
-// Upload copies host data resident -> VRAM. Only F32 is implemented today; quantized
-// upload (narrowing weights at H2D) is the UploadDtype seam, deferred.
+// devF16 is dev() for an F16-resident weight: an out*in*2-byte VRAM buffer carrying the
+// requested Layout (so MatMul can read w.Layout to pick the HGEMM op). Weights use dev/devF16,
+// never devTr, so the resident-weight cache is never recycled out from under them.
+func (c *cudaBackend) devF16(shape []int, layout Layout) (Tensor, *cudaBuf) {
+	n := 1
+	for _, d := range shape {
+		n *= d
+	}
+	buf := c.dalloc(n * F16.Bytes())
+	return makeTensor(c, F16, layout, append([]int(nil), shape...), nil, buf), buf
+}
+
+// Upload copies host data resident -> VRAM, optionally narrowing the weight dtype at H2D
+// (Caps.UploadDtype). `as == F16` is the fp16 compute path (#484): the f32 is staged on device,
+// narrowed to __half (and, for a ColMajor source, transpose-repacked — the `Layout` repack at
+// H2D), and the resident weight becomes F16. Any other `as` keeps full-precision F32 bytes (Q8 /
+// other quantized device upload is a separate tracked seam). Host data must be F32.
 func (c *cudaBackend) Upload(t Tensor, as Dtype) Tensor {
 	cudaMu.Lock()
 	defer cudaMu.Unlock()
@@ -228,22 +280,52 @@ func (c *cudaBackend) Upload(t Tensor, as Dtype) Tensor {
 		panic("compute: cuda Upload expects host data")
 	}
 	if t.Dtype != F32 {
-		panic("compute: cuda Upload supports only F32 today (got " + t.Dtype.String() + ")")
+		panic("compute: cuda Upload supports only F32 host data today (got " + t.Dtype.String() + ")")
+	}
+	store := F32
+	if as == F16 {
+		store = F16
 	}
 	f := hb.F32()
 	var hp uintptr
 	if len(f) > 0 {
 		hp = uintptr(unsafe.Pointer(&f[0]))
-		if cached, ok := uploadCache[hp]; ok {
-			return cached // same host buffer already resident in VRAM; share it
+		if cached, ok := uploadCache[ucKey{hp, store, t.Layout}]; ok {
+			return cached // same host buffer already resident at this dtype/layout; share it
 		}
+	}
+	if store == F16 {
+		return c.uploadF16(t, f, hp)
 	}
 	out, buf := c.dev(t.Shape, F32)
 	if len(f) > 0 {
 		C.fcuda_h2d(buf.ptr, unsafe.Pointer(&f[0]), C.size_t(len(f)*4))
-		buf.host = hp
-		uploadCache[hp] = out
+		buf.host, buf.hostDt, buf.hostLo = hp, F32, t.Layout
+		uploadCache[ucKey{hp, F32, t.Layout}] = out
 	}
+	return out
+}
+
+// uploadF16 narrows an f32 host weight to a resident F16 weight at H2D (#484). The f32 is staged
+// in a transient device buffer, converted to __half by a device kernel — row-major in place, or
+// ColMajor transpose-repacked ([out,in] -> col-major) — and the stage is freed. The narrow runs
+// on device (one conversion implementation, identical numerics to the GEMM's own half cast),
+// never on the host.
+func (c *cudaBackend) uploadF16(t Tensor, f []float32, hp uintptr) Tensor {
+	out, buf := c.devF16(t.Shape, t.Layout)
+	if len(f) == 0 {
+		return out
+	}
+	stage := c.dalloc(len(f) * 4)
+	C.fcuda_h2d(stage.ptr, unsafe.Pointer(&f[0]), C.size_t(len(f)*4))
+	if t.Layout == ColMajor && len(t.Shape) == 2 {
+		C.fcuda_f32_to_f16_T(buf.ptr, (*C.float)(stage.ptr), C.int(t.Shape[0]), C.int(t.Shape[1]))
+	} else {
+		C.fcuda_f32_to_f16(buf.ptr, (*C.float)(stage.ptr), C.int(len(f)))
+	}
+	C.fcuda_free(stage.ptr)
+	buf.host, buf.hostDt, buf.hostLo = hp, F16, t.Layout
+	uploadCache[ucKey{hp, F16, t.Layout}] = out
 	return out
 }
 
@@ -278,7 +360,8 @@ func (c *cudaBackend) Free(t Tensor) {
 	defer cudaMu.Unlock()
 	if db, ok := t.buf.(*cudaBuf); ok && db.ptr != nil {
 		if db.host != 0 {
-			delete(uploadCache, db.host) // evict so a re-upload of the same host buffer re-stages
+			// evict the exact (ptr, dtype, layout) entry so a re-upload of the same host buffer re-stages
+			delete(uploadCache, ucKey{db.host, db.hostDt, db.hostLo})
 		}
 		C.fcuda_free(db.ptr)
 		db.ptr = nil
@@ -289,28 +372,56 @@ func (c *cudaBackend) Free(t Tensor) {
 
 func (c *cudaBackend) cf(t Tensor) *C.float { return (*C.float)(t.buf.(*cudaBuf).ptr) }
 
+// cptr is the raw device pointer (void*), for dtypes whose element type is not *C.float — the
+// F16 weight buffer (__half) the HGEMM path reads.
+func (c *cudaBackend) cptr(t Tensor) unsafe.Pointer { return t.buf.(*cudaBuf).ptr }
+
+// colMajorFlag reports w's HGEMM layout selector: 1 when the weight was transpose-repacked to
+// column-major at H2D (op_N), 0 for the row-major SGEMM recipe (op_T).
+func colMajorFlag(w Tensor) C.int {
+	if w.Layout == ColMajor {
+		return 1
+	}
+	return 0
+}
+
 func (c *cudaBackend) MatMul(w, x Tensor) Tensor {
 	cudaMu.Lock()
 	defer cudaMu.Unlock()
 	out, in := w.Shape[0], w.Shape[1]
-	if w.Dtype != F32 {
-		panic("compute: cuda MatMul supports only F32 weights today (got " + w.Dtype.String() + "); quantized device GEMM is a tracked follow-up")
+	switch w.Dtype {
+	case F32:
+		y, _ := c.devTr([]int{out}, F32)
+		C.fcuda_matmul_f32(c.cf(w), c.cf(x), c.cf(y), C.int(out), C.int(in), 1)
+		return y
+	case F16:
+		// tensor-core HGEMM (#484): F16 weight, f32 activation (converted to __half C-side), f32
+		// accumulate/output. P=1 (decode GEMV); the activation x stays F32-resident.
+		y, _ := c.devTr([]int{out}, F32)
+		C.fcuda_matmul_f16(c.cptr(w), c.cf(x), c.cf(y), C.int(out), C.int(in), 1, colMajorFlag(w))
+		return y
+	default:
+		panic("compute: cuda MatMul supports F32 and F16 weights today (got " + w.Dtype.String() + "); quantized device GEMM is a tracked follow-up")
 	}
-	y, _ := c.devTr([]int{out}, F32)
-	C.fcuda_matmul_f32(c.cf(w), c.cf(x), c.cf(y), C.int(out), C.int(in), 1)
-	return y
 }
 
 func (c *cudaBackend) BatchedMatMul(w, X Tensor, P int) Tensor {
 	cudaMu.Lock()
 	defer cudaMu.Unlock()
 	out, in := w.Shape[0], w.Shape[1]
-	if w.Dtype != F32 {
-		panic("compute: cuda BatchedMatMul supports only F32 weights today (got " + w.Dtype.String() + ")")
+	switch w.Dtype {
+	case F32:
+		y, _ := c.devTr([]int{P, out}, F32)
+		C.fcuda_matmul_f32(c.cf(w), c.cf(X), c.cf(y), C.int(out), C.int(in), C.int(P))
+		return y
+	case F16:
+		// tensor-core HGEMM (#484): the prefill GEMM where fp16/tensor-cores pay off most.
+		y, _ := c.devTr([]int{P, out}, F32)
+		C.fcuda_matmul_f16(c.cptr(w), c.cf(X), c.cf(y), C.int(out), C.int(in), C.int(P), colMajorFlag(w))
+		return y
+	default:
+		panic("compute: cuda BatchedMatMul supports F32 and F16 weights today (got " + w.Dtype.String() + ")")
 	}
-	y, _ := c.devTr([]int{P, out}, F32)
-	C.fcuda_matmul_f32(c.cf(w), c.cf(X), c.cf(y), C.int(out), C.int(in), C.int(P))
-	return y
 }
 
 func (c *cudaBackend) RMSNorm(x, weight Tensor, eps float32) Tensor {

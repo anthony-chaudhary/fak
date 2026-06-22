@@ -15,6 +15,7 @@
 #include "cuda_backend.h"
 #include <cuda_runtime.h>
 #include <cublas_v2.h>
+#include <cuda_fp16.h>  /* __half + __float2half — the fp16 compute path (#484) */
 #include <math.h>
 #include <stdio.h>
 #include <string.h>
@@ -110,6 +111,66 @@ extern "C" void fcuda_matmul_f32(const float *dW, const float *dX, float *dY, in
               dX, in,
               &beta,
               dY, out);
+}
+
+// ---- fp16 compute path (#484): F16 weights + tensor-core HGEMM ------------------
+// The first device backend ran F32 SGEMM only. fp16/tensor-cores is the precision axis toward
+// llama.cpp throughput (bench_llamacpp.py measures F16). Weights are narrowed to __half at H2D
+// (Caps.UploadDtype); the GEMM runs on tensor cores via cublasGemmEx with F32 accumulation, so
+// the output stays f32 and the rest of the op chain is untouched. It is an Approx peer of the
+// cpuref Reference (looser cosine gate than the Q8 lane — see cudaFP16CosineMin in cuda.go),
+// NOT bit-identity.
+
+// k_f32_to_f16 narrows a staged f32 buffer to F16, element-for-element (row-major upload).
+__global__ void k_f32_to_f16(const float *src, __half *dst, int n) {
+  int i = blockIdx.x * blockDim.x + threadIdx.x;
+  if (i < n) dst[i] = __float2half(src[i]);
+}
+extern "C" void fcuda_f32_to_f16(void *dDstHalf, const float *dSrc, int n) {
+  k_f32_to_f16<<<(n + 255) / 256, 256, 0, g_stream>>>(dSrc, (__half *)dDstHalf, n);
+}
+
+// k_f32_to_f16_T narrows AND transpose-repacks a row-major f32 weight [out,in] into a
+// column-major F16 weight [out,in]: dst[o + i*out] = (half)src[o*in + i]. This is the `Layout`
+// repack at H2D — the ColMajor weight is laid out once at upload so the HGEMM reads it with
+// op_N instead of transposing per call. Indexed by the SOURCE element s = o*in + i.
+__global__ void k_f32_to_f16_T(const float *src, __half *dst, int out, int in) {
+  int s = blockIdx.x * blockDim.x + threadIdx.x;
+  if (s >= out * in) return;
+  int o = s / in, i = s % in;
+  dst[o + (size_t)i * out] = __float2half(src[s]);
+}
+extern "C" void fcuda_f32_to_f16_T(void *dDstHalf, const float *dSrc, int out, int in) {
+  int total = out * in;
+  k_f32_to_f16_T<<<(total + 255) / 256, 256, 0, g_stream>>>(dSrc, (__half *)dDstHalf, out, in);
+}
+
+// fcuda_matmul_f16: Y[P,out] = X[P,in] @ W[out,in]^T on tensor cores. W is resident __half;
+// X (f32) is converted to __half in a pooled scratch; cublasGemmEx accumulates in F32 and
+// writes f32 Y. The column-major recipe mirrors fcuda_matmul_f32:
+//   colMajor==0 (row-major W [out,in]):  op_T on A, lda=in  (W treated as col-major [in,out]).
+//   colMajor!=0 (W repacked col-major):  op_N on A, lda=out (W IS col-major [out,in]).
+// Both yield C col-major [out,P] == row-major Y[P,out] (ldc=out), B = X col-major [in,P] (ldb=in).
+extern "C" void fcuda_matmul_f16(const void *dWhalf, const float *dX, float *dY,
+                                 int out, int in, int P, int colMajor) {
+  const __half *A = (const __half *)dWhalf;
+  __half *dXh = (__half *)fcuda_malloc((size_t)P * in * sizeof(__half));
+  k_f32_to_f16<<<(P * in + 255) / 256, 256, 0, g_stream>>>(dX, dXh, P * in);
+  const float alpha = 1.0f, beta = 0.0f;
+  cublasStatus_t st;
+  if (colMajor) {
+    st = cublasGemmEx(g_blas, CUBLAS_OP_N, CUBLAS_OP_N, out, P, in,
+                      &alpha, A, CUDA_R_16F, out, dXh, CUDA_R_16F, in,
+                      &beta, dY, CUDA_R_32F, out,
+                      CUBLAS_COMPUTE_32F, CUBLAS_GEMM_DEFAULT_TENSOR_OP);
+  } else {
+    st = cublasGemmEx(g_blas, CUBLAS_OP_T, CUBLAS_OP_N, out, P, in,
+                      &alpha, A, CUDA_R_16F, in, dXh, CUDA_R_16F, in,
+                      &beta, dY, CUDA_R_32F, out,
+                      CUBLAS_COMPUTE_32F, CUBLAS_GEMM_DEFAULT_TENSOR_OP);
+  }
+  if (st != CUBLAS_STATUS_SUCCESS) fprintf(stderr, "fak-cuda: cublasGemmEx(HGEMM) failed: %d\n", (int)st);
+  fcuda_free(dXh);
 }
 
 // ---- RMSNorm: one block per row -------------------------------------------------
