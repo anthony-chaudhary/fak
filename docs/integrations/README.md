@@ -37,6 +37,11 @@ front of the engine. → [One binary is the whole surface](../explainers/one-bin
 | **OpenAI Codex** / the OpenAI API or SDK | [`openai-codex.md`](openai-codex.md) |
 | **Any MCP client** (one-paste `.mcp.json`) | [`../../examples/mcp/README.md`](../../examples/mcp/README.md) |
 
+**Adopting from outside the repo?** The [adopter playbook](adopter-playbook.md) is the
+end-to-end, bare-serve production checklist — prerequisites → `policy.json` → auth-key
+env → build/start → `/healthz` → `ANTHROPIC_BASE_URL` wiring — plus the manual Claude
+Code MCP-server setup and the CI-embed shape, none of which need the dogfood launcher.
+
 Don't see your exact tool below? Read on — if it lets you set a base URL (almost all
 do), it already works.
 
