@@ -21,13 +21,34 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List
 
-# Paths (relative to repo root)
+# Paths (relative to repo root). The Go module — and the benchmark tree — is the
+# repository root: experiments/benchmark/, NOT fak/experiments/benchmark/. The
+# stale "fak/" prefix is a fossil from when the module sat under a fak/ subdir; it
+# pointed every command at a non-existent directory, so build scanned nothing (and
+# would have WIPED the committed catalog), validate flagged every run as missing,
+# and add-machine wrote specs to a dead path.
 ROOT = Path(__file__).resolve().parents[1]
-BENCHMARK_DIR = ROOT / "fak" / "experiments" / "benchmark"
+BENCHMARK_DIR = ROOT / "experiments" / "benchmark"
 MACHINES_DIR = BENCHMARK_DIR / "machines"
 RUNS_DIR = BENCHMARK_DIR / "runs" / "by-machine"
 CATALOG_PATH = BENCHMARK_DIR / "catalog.json"
 SCHEMAS_DIR = ROOT / "tools" / "schemas"
+
+
+def normalize_run_path(path_str: str) -> str:
+    """Strip a stale leading ``fak/`` (or ``fak\\``) segment from a run path.
+
+    The benchmark tree is rooted at ``<repo>/experiments/benchmark``; older
+    catalog data embedded a non-existent ``fak/experiments/...`` prefix from when
+    the module sat under a ``fak/`` subdir. Separator style is preserved so the
+    value still matches what ``scan_runs`` emits on each OS.
+    """
+    if not path_str:
+        return path_str
+    for prefix in ("fak/", "fak\\"):
+        if path_str.startswith(prefix):
+            return path_str[len(prefix):]
+    return path_str
 
 
 def load_json(path: Path) -> Any:
@@ -45,8 +66,12 @@ def save_json(path: Path, data: Any) -> bool:
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_suffix(".tmp")
     try:
-        with open(tmp, "w", encoding="utf-8") as f:
+        # newline="\n": the catalog is a committed, cross-machine-regenerated
+        # artifact — pin LF so a Windows rebuild does not churn the whole file to
+        # CRLF vs an LF original (and vice-versa).
+        with open(tmp, "w", encoding="utf-8", newline="\n") as f:
             json.dump(data, f, indent=2, sort_keys=True)
+            f.write("\n")
         tmp.replace(path)
         return True
     except OSError as e:
@@ -88,6 +113,10 @@ def scan_machines() -> Dict[str, Dict]:
             "arch": specs.get("hardware", {}).get("cpu", {}).get("architecture", "?"),
             "cpu_cores": specs.get("hardware", {}).get("cpu", {}).get("cores_logical", 0),
             "gpu": extract_gpu_name(specs),
+            # Surface placement in the rollup: an "agent-host" node is kept for
+            # agent use and is NOT a bench target (run-on-bench-nodes-by-default);
+            # bench runs route to the "bench-node" machines.
+            "role": specs.get("role", "bench-node"),
             "runs": 0,
             "last_run": None
         }
@@ -157,7 +186,9 @@ def build_indexes(runs: List[Dict]) -> Dict[str, Dict[str, List[str]]]:
     }
 
     for run in runs:
-        run_id = run["run_id"]
+        run_id = run.get("run_id")
+        if not run_id:
+            continue
         model = run.get("model", "unknown")
         precision = run.get("precision", "unknown")
         timestamp = run.get("timestamp", "")
@@ -179,7 +210,9 @@ def update_machine_stats(catalog: Dict) -> None:
     last_run_by_machine: Dict[str, str] = {}
 
     for run in catalog["runs"]:
-        mid = run["machine_id"]
+        mid = run.get("machine_id")
+        if not mid:
+            continue
         runs_by_machine[mid] = runs_by_machine.get(mid, 0) + 1
         ts = run.get("timestamp", "")
         if ts:
@@ -193,34 +226,75 @@ def update_machine_stats(catalog: Dict) -> None:
 
 
 def build_catalog() -> Dict:
-    """Build catalog from scratch by scanning filesystem."""
+    """Rebuild the catalog by scanning the filesystem, merging with the committed copy.
+
+    Merge — not scan-and-replace — because a run's artifacts (manifest.json /
+    batch.json) live on the bench node that produced them and are gitignored in a
+    driver/agent-host clone. A naive scan there finds zero runs and would erase the
+    committed run history. So we union: locally-scanned runs refresh their entry by
+    normalized run-directory path; committed runs with no local artifact are
+    preserved (with their stale ``fak/`` path prefix normalized). Machine specs.json
+    overlay any existing catalog entry. On a full-artifact bench node the local scan
+    simply overlays everything, so the result is identical to a from-scratch build.
+    """
+    existing = load_catalog()
+
     print("[bench_catalog] Scanning machines...", file=sys.stderr)
-    machines = scan_machines()
-    print(f"[bench_catalog] Found {len(machines)} machines", file=sys.stderr)
+    scanned_machines = scan_machines()
+    machines = dict(existing.get("machines", {}))
+    for mid, rec in scanned_machines.items():
+        machines[mid] = {**machines.get(mid, {}), **rec}
+    print(f"[bench_catalog] {len(scanned_machines)} machine spec(s) on disk, "
+          f"{len(machines)} in catalog", file=sys.stderr)
 
     print("[bench_catalog] Scanning runs...", file=sys.stderr)
-    runs = scan_runs()
-    print(f"[bench_catalog] Found {len(runs)} runs", file=sys.stderr)
+    scanned_runs = scan_runs()
+    # Key the merge by run DIRECTORY, not run_id: a run *is* its directory, the
+    # path is globally unique (it embeds machine_id + timestamp), and the run_id
+    # generator can collide across distinct dirs. Normalize separators for the key
+    # so a Windows-captured (backslash) and a Mac-captured (forward-slash) path for
+    # the same run collapse instead of duplicating.
+    def _path_key(p: str) -> str:
+        return normalize_run_path(p or "").replace("\\", "/")
+    runs_by_path: Dict[str, Dict] = {}
+    for i, run in enumerate(existing.get("runs", [])):
+        run = dict(run)
+        run["path"] = normalize_run_path(run.get("path", ""))
+        # A path-less committed run (legacy/hand-edited) must not collapse onto the
+        # empty key and overwrite its siblings — give each a unique fallback.
+        runs_by_path[_path_key(run["path"]) or f"\x00existing#{i}"] = run
+    n_preserved = len(runs_by_path)
+    for run in scanned_runs:
+        runs_by_path[_path_key(run.get("path", "")) or f"\x00scanned#{run.get('run_id')}"] = run
+    runs = list(runs_by_path.values())
+    print(f"[bench_catalog] {len(scanned_runs)} run(s) scanned locally, "
+          f"{n_preserved} preserved from catalog, {len(runs)} total", file=sys.stderr)
 
     print("[bench_catalog] Building indexes...", file=sys.stderr)
     indexes = build_indexes(runs)
 
-    update_machine_stats({"machines": machines, "runs": runs})
-
     catalog = {
         "$schema": "benchmark/catalog.v1",
-        "version": "1.0",
+        "version": existing.get("version", "1.0"),
         "last_updated": datetime.now(timezone.utc).isoformat(),
         "machines": machines,
         "runs": runs,
         "index": indexes
     }
+    update_machine_stats(catalog)
 
     return catalog
 
 
 def validate_catalog(catalog: Dict) -> List[str]:
-    """Validate catalog integrity, return list of errors."""
+    """Validate structural catalog integrity, return list of hard errors.
+
+    Hard errors are inconsistencies the catalog itself owns: missing top-level
+    keys, runs pointing at an unregistered machine, and index entries pointing at
+    a run that is not in ``runs``. A run whose local directory is absent is NOT a
+    hard error — those artifacts legitimately live on the remote bench node and
+    are gitignored in a driver clone; see ``missing_run_paths`` for that warning.
+    """
     errors = []
 
     # Check structure
@@ -235,17 +309,9 @@ def validate_catalog(catalog: Dict) -> List[str]:
         if mid and mid not in machine_ids:
             errors.append(f"Run {run.get('run_id')} references unknown machine: {mid}")
 
-    # Check path existence
-    for run in catalog.get("runs", []):
-        path_str = run.get("path")
-        if path_str:
-            path = ROOT / path_str
-            if not path.exists():
-                errors.append(f"Run {run.get('run_id')} has missing path: {path_str}")
-
     # Check index consistency
     index = catalog.get("index", {})
-    all_run_ids = {r["run_id"] for r in catalog.get("runs", [])}
+    all_run_ids = {r.get("run_id") for r in catalog.get("runs", [])}
 
     for idx_type, idx in index.items():
         for key, run_ids in idx.items():
@@ -254,6 +320,21 @@ def validate_catalog(catalog: Dict) -> List[str]:
                     errors.append(f"Index {idx_type}/{key} references unknown run: {rid}")
 
     return errors
+
+
+def missing_run_paths(catalog: Dict) -> List[str]:
+    """Return non-fatal warnings for runs whose local directory is absent.
+
+    Run artifacts are produced on (and stay on) the bench node; a driver/agent-host
+    clone holds the committed catalog rollup but not the gitignored per-run dirs. A
+    missing path is therefore expected here — surfaced as a warning, never an error.
+    """
+    warnings = []
+    for run in catalog.get("runs", []):
+        path_str = run.get("path")
+        if path_str and not (ROOT / path_str).exists():
+            warnings.append(f"Run {run.get('run_id')} has no local dir: {path_str}")
+    return warnings
 
 
 def add_machine(specs_path: Path) -> bool:
@@ -328,12 +409,17 @@ def main(argv: List[str]) -> int:
             print(f"[ERROR] Failed to load catalog from {CATALOG_PATH}", file=sys.stderr)
             return 1
         errors = validate_catalog(catalog)
+        warnings = missing_run_paths(catalog)
+        if warnings:
+            print(f"[bench_catalog] {len(warnings)} run(s) have no local dir "
+                  f"(artifacts live on the bench node — expected in a driver clone)",
+                  file=sys.stderr)
         if errors:
             print(f"[ERROR] Catalog validation failed with {len(errors)} error(s):", file=sys.stderr)
             for err in errors:
                 print(f"  - {err}", file=sys.stderr)
             return 1
-        print("[bench_catalog] Catalog is valid", file=sys.stderr)
+        print("[bench_catalog] Catalog is structurally valid", file=sys.stderr)
         return 0
 
     if args.command == "add-machine":

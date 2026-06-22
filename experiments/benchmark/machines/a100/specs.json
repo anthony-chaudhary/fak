@@ -1,0 +1,39 @@
+{
+  "$schema": "benchmark/machine-specs.v1",
+  "hardware": {
+    "cpu": {
+      "architecture": "x86_64",
+      "cores_logical": 256,
+      "cores_physical": 128,
+      "model": "x86_64 datacenter host (dual-socket, reference config)"
+    },
+    "gpu": [
+      {
+        "compute_capability": "sm_80",
+        "cuda_version": "12.x",
+        "memory_gb": 40,
+        "model": "NVIDIA A100"
+      }
+    ],
+    "ram_gb": 1024
+  },
+  "hostname": "datacenter-gpu-server",
+  "machine_id": "a100",
+  "notes": "8-GPU datacenter server (Ampere sm_80), ~320 GB aggregate GPU memory \u2014 the multi-GPU serving / frontier-model readiness lane where single-box memory ceilings stop binding. The eight Ampere GPUs are the spec'd hardware; host CPU/RAM are the standard reference config (verify at onboarding). Benchmark RUNS attach under the private 'dgx' machine id (kept off the public export); this 'a100' record is the public-facing rollup (no operator identity).",
+  "os": {
+    "name": "Linux"
+  },
+  "registered_at": "2026-06-22T00:00:00Z",
+  "role": "bench-node",
+  "runtime": {
+    "cuda_driver_version": "12.x"
+  },
+  "tags": [
+    "x86_64",
+    "cuda",
+    "ampere",
+    "multi-gpu",
+    "bench-node",
+    "serving-lane"
+  ]
+}

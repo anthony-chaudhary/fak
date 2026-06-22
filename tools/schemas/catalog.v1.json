@@ -28,6 +28,11 @@
             "arch": {"type": "string"},
             "cpu_cores": {"type": "integer", "minimum": 1},
             "gpu": {"type": "string"},
+            "role": {
+              "type": "string",
+              "enum": ["agent-host", "bench-node"],
+              "description": "agent-host = kept for agent use, not a bench target; bench-node = a hardware-run target"
+            },
             "runs": {"type": "integer", "minimum": 0},
             "last_run": {"type": "string", "format": "date-time"}
           }

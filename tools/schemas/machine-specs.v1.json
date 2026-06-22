@@ -19,6 +19,11 @@
       "type": "string",
       "description": "Operating system hostname"
     },
+    "role": {
+      "type": "string",
+      "enum": ["agent-host", "bench-node"],
+      "description": "agent-host = kept for agent use, never a bench target (placement law run-on-bench-nodes-by-default); bench-node = a hardware-run target reachable over Tailscale"
+    },
     "registered_at": {
       "type": "string",
       "format": "date-time",

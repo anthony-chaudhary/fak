@@ -1,0 +1,40 @@
+{
+  "$schema": "benchmark/machine-specs.v1",
+  "hardware": {
+    "cpu": {
+      "architecture": "x86_64",
+      "cores_logical": 8,
+      "cores_physical": 4,
+      "model": "Intel Cascade Lake (GCP g2-standard-8)"
+    },
+    "gpu": [
+      {
+        "compute_capability": "sm_89",
+        "cuda_version": "12.x",
+        "memory_gb": 24,
+        "model": "NVIDIA L4"
+      }
+    ],
+    "ram_gb": 32
+  },
+  "hostname": "gcp-g2-standard-8",
+  "machine_id": "gcp-g2-l4",
+  "notes": "Ephemeral GCP g2-standard-8 (8 vCPU, 32 GB, 1x NVIDIA L4 Ada sm_89, 24 GB). Spun up on demand for CUDA Ada bench runs; not always reachable.",
+  "os": {
+    "kernel": "Linux",
+    "name": "GCP Deep Learning VM (CUDA)"
+  },
+  "registered_at": "2026-06-22T00:00:00Z",
+  "role": "bench-node",
+  "runtime": {
+    "cuda_driver_version": "12.x"
+  },
+  "tags": [
+    "x86_64",
+    "cuda",
+    "ada",
+    "gcp",
+    "bench-node",
+    "ephemeral"
+  ]
+}

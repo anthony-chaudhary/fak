@@ -53,7 +53,9 @@ class TestBenchSlack(unittest.TestCase):
 
     def test_catalog_integration(self):
         """Test that catalog can be loaded and queried."""
-        catalog_path = ROOT / "fak" / "experiments" / "benchmark" / "catalog.json"
+        # Benchmark tree is at the repo root (experiments/benchmark), not under a
+        # stale fak/ prefix — otherwise this test silently skips forever.
+        catalog_path = ROOT / "experiments" / "benchmark" / "catalog.json"
         if not catalog_path.exists():
             self.skipTest("Catalog not found")
 

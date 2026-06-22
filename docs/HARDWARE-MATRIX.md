@@ -83,15 +83,19 @@ The box almost every published `fak` number is measured on.
 ## Platform 2 — AMD Ryzen 9 9950X + Radeon RX 7600 · the Vulkan lane
 
 Proves the GPU path is not NVIDIA-only — the same HAL device backend runs on a second
-vendor's GPU through Vulkan.
+vendor's GPU through Vulkan. This box also serves as the **agent / control host** for the
+fleet: by the `run-on-bench-nodes-by-default` placement law it is kept for agent use
+(registered with `role: agent-host`), so routine hardware-benchmark runs are dispatched
+to the dedicated bench nodes over Tailscale rather than measured here.
 
 | Component | Spec |
 |---|---|
 | CPU | AMD Ryzen 9 9950X — 16 cores / 32 threads, **x86_64**, AVX-512 |
-| Memory | 272 GB |
+| Memory | 256 GB |
 | GPU | **AMD Radeon RX 7600** (8 GB, Vulkan 1.4) + integrated UMA |
-| OS | Windows (native Vulkan) |
+| OS | Windows 11 (native Vulkan) |
 | Backends | **Vulkan Q8** device GEMM, CPU Q8 (AVX-512) |
+| Role | **agent / control host** (`role: agent-host`) — kept for agent use, not a default bench target |
 
 **What's been profiled here:**
 
@@ -195,6 +199,12 @@ spread on purpose:
 
 - **[`fak/BENCHMARK-AUTHORITY.md`](../BENCHMARK-AUTHORITY.md)** ⭐ — the single source of
   truth; every number here traces to a row there with its commit + artifact.
+- **[`experiments/benchmark/catalog.json`](../experiments/benchmark/catalog.json)** — the
+  live, machine-readable catalog: every registered node (with `role` — `agent-host` vs
+  `bench-node`), its runs, and the by-model / by-precision / by-date indexes. Rebuilt from
+  the per-machine `experiments/benchmark/machines/<id>/specs.json` source-of-truth via
+  **[`tools/bench_catalog.py`](../tools/bench_catalog.py)** (`build` · `validate` ·
+  `add-machine` · `show`).
 - **`HARDWARE-CATALOG.md`** (operator machine catalog — intentionally private) — the
   per-machine onboarding catalog (specs, baseline-run requirements, the scientific-rigor metadata schema).
 - **`MODEL-LADDER-VS-SOTA-2026-06-21.md`** (private companion — not published) —

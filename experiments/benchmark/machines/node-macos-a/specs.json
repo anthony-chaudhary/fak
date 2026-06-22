@@ -1,0 +1,38 @@
+{
+  "$schema": "benchmark/machine-specs.v1",
+  "hardware": {
+    "cpu": {
+      "architecture": "arm64",
+      "cores_logical": 12,
+      "cores_physical": 12,
+      "model": "Apple M3 Pro (6P+6E)"
+    },
+    "gpu": [
+      {
+        "compute_capability": "Metal 4 (unified memory)",
+        "memory_gb": 36,
+        "model": "Apple M3 Pro 18-core GPU"
+      }
+    ],
+    "ram_gb": 36
+  },
+  "hostname": "node-macos-a",
+  "machine_id": "node-macos-a",
+  "notes": "Primary bench node \u2014 the box almost every published fak number is measured on. Metal GPU (-tags fakmetal) + NEON Q8. GPU memory is unified with system RAM (36 GB shared).",
+  "os": {
+    "name": "macOS"
+  },
+  "registered_at": "2026-06-22T00:00:00Z",
+  "role": "bench-node",
+  "runtime": {
+    "go_version": "go1.26.0"
+  },
+  "tags": [
+    "arm64",
+    "darwin",
+    "metal",
+    "neon",
+    "bench-node",
+    "primary"
+  ]
+}

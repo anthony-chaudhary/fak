@@ -1,0 +1,40 @@
+{
+  "$schema": "benchmark/machine-specs.v1",
+  "hardware": {
+    "cpu": {
+      "architecture": "x86_64",
+      "cores_logical": 20,
+      "cores_physical": 14,
+      "model": "Intel Core (13th-gen class, x86_64)"
+    },
+    "gpu": [
+      {
+        "compute_capability": "sm_89",
+        "cuda_version": "12.6",
+        "memory_gb": 8,
+        "model": "NVIDIA GeForce RTX 4070 Laptop GPU"
+      }
+    ],
+    "ram_gb": 16
+  },
+  "hostname": "workstation-a",
+  "machine_id": "workstation-a",
+  "notes": "CUDA / WSL2 lane (RTX 4070 Laptop, Ada sm_89). INFERRED, verify at onboarding: cpu.model/generation ('13th-gen class') and cores_physical (from 20 logical, 6P+8E class) are not confirmed SKUs; ram_gb 16 is the WSL2-capped working set (issue #415 records ~15 GB), host RAM is larger. CUDA 12.6 via user-space micromamba under WSL2.",
+  "os": {
+    "name": "Windows",
+    "version": "11 + WSL2 Ubuntu"
+  },
+  "registered_at": "2026-06-22T00:00:00Z",
+  "role": "bench-node",
+  "runtime": {
+    "cuda_driver_version": "12.6"
+  },
+  "tags": [
+    "x86_64",
+    "cuda",
+    "ada",
+    "windows",
+    "wsl2",
+    "bench-node"
+  ]
+}

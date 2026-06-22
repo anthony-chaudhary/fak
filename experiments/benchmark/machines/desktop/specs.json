@@ -1,0 +1,39 @@
+{
+  "$schema": "benchmark/machine-specs.v1",
+  "hardware": {
+    "cpu": {
+      "architecture": "x86_64",
+      "cores_logical": 32,
+      "cores_physical": 16,
+      "model": "AMD Ryzen 9 9950X 16-Core"
+    },
+    "gpu": [
+      {
+        "compute_capability": "RDNA3 gfx1102 (Vulkan 1.4)",
+        "memory_gb": 8,
+        "model": "AMD Radeon RX 7600"
+      }
+    ],
+    "ram_gb": 256
+  },
+  "hostname": "amd-ryzen-desktop",
+  "machine_id": "desktop",
+  "notes": "Agent/control host: kept for agent use, NOT a bench target. Placement law run-on-bench-nodes-by-default \u2014 bench_node.sh refuses a node flagged agent_host and the driver's own self-IP, so hardware benchmark runs are dispatched to the dedicated bench nodes (node-macos-a, workstation-a, gcp-g2-l4, a100) over Tailscale. This box can download model artifacts locally. The RX 7600 is the AMD Vulkan-lane GPU; all specs here are measured on this machine.",
+  "os": {
+    "name": "Windows",
+    "version": "11 Pro 10.0.26200"
+  },
+  "registered_at": "2026-06-22T00:00:00Z",
+  "role": "agent-host",
+  "runtime": {
+    "go_version": "go1.26.3",
+    "python_version": "3.13.7"
+  },
+  "tags": [
+    "x86_64",
+    "amd",
+    "vulkan",
+    "windows",
+    "agent-host"
+  ]
+}
