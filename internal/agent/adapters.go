@@ -578,6 +578,9 @@ type anthropicBlock struct {
 	Input     any             `json:"input,omitempty"`
 	ToolUseID string          `json:"tool_use_id,omitempty"`
 	Content   string          `json:"content,omitempty"`
+	Thinking  string          `json:"thinking,omitempty"`  // type=thinking reasoning text
+	Signature string          `json:"signature,omitempty"` // signs a thinking block for round-trip
+	Data      string          `json:"data,omitempty"`      // type=redacted_thinking opaque payload
 	RawInput  json.RawMessage `json:"-"`
 }
 
@@ -590,11 +593,14 @@ type anthropicTool struct {
 type anthropicResponse struct {
 	Model   string `json:"model"` // the model the upstream reports it served (#82 echo)
 	Content []struct {
-		Type  string          `json:"type"`
-		Text  string          `json:"text,omitempty"`
-		ID    string          `json:"id,omitempty"`
-		Name  string          `json:"name,omitempty"`
-		Input json.RawMessage `json:"input,omitempty"`
+		Type      string          `json:"type"`
+		Text      string          `json:"text,omitempty"`
+		ID        string          `json:"id,omitempty"`
+		Name      string          `json:"name,omitempty"`
+		Input     json.RawMessage `json:"input,omitempty"`
+		Thinking  string          `json:"thinking,omitempty"`
+		Signature string          `json:"signature,omitempty"`
+		Data      string          `json:"data,omitempty"`
 	} `json:"content"`
 	StopReason string `json:"stop_reason"`
 	Usage      struct {
@@ -664,6 +670,14 @@ func anthropicTools(tools []ToolDef) []anthropicTool {
 
 func textAndToolUseBlocks(m Message) []anthropicBlock {
 	blocks := make([]anthropicBlock, 0, 1+len(m.ToolCalls))
+	// Extended-thinking blocks must precede text/tool_use on an assistant turn and
+	// carry their signature so the Anthropic API accepts the round-trip.
+	if m.Thinking != "" {
+		blocks = append(blocks, anthropicBlock{Type: "thinking", Thinking: m.Thinking, Signature: m.ThinkingSignature})
+	}
+	for _, d := range m.RedactedThinking {
+		blocks = append(blocks, anthropicBlock{Type: "redacted_thinking", Data: d})
+	}
 	if m.Content != "" {
 		blocks = append(blocks, anthropicBlock{Type: "text", Text: m.Content})
 	}
@@ -688,6 +702,9 @@ func (anthropicAdapter) ParseResponse(raw []byte) (*Completion, error) {
 	}
 	var content []string
 	var calls []ToolCall
+	var thinking []string
+	var signature string
+	var redacted []string
 	for _, b := range ar.Content {
 		switch b.Type {
 		case "text":
@@ -700,6 +717,20 @@ func (anthropicAdapter) ParseResponse(raw []byte) (*Completion, error) {
 				args = "{}"
 			}
 			calls = append(calls, ToolCall{ID: b.ID, Type: "function", Function: Func{Name: b.Name, Arguments: args}})
+		case "thinking":
+			// Preserve Claude extended-thinking instead of dropping it; keep the
+			// signature so the block can round-trip back upstream on a later turn.
+			if b.Thinking != "" {
+				thinking = append(thinking, b.Thinking)
+			}
+			if b.Signature != "" {
+				signature = b.Signature
+			}
+		case "redacted_thinking":
+			// Opaque (encrypted) reasoning — carry it verbatim so it survives the proxy.
+			if b.Data != "" {
+				redacted = append(redacted, b.Data)
+			}
 		}
 	}
 	finish := ar.StopReason
@@ -707,7 +738,14 @@ func (anthropicAdapter) ParseResponse(raw []byte) (*Completion, error) {
 		finish = "tool_calls"
 	}
 	return normalizeCompletionToolCalls(&Completion{
-		Message:      Message{Role: RoleAssistant, Content: strings.Join(content, "\n"), ToolCalls: calls},
+		Message: Message{
+			Role:              RoleAssistant,
+			Content:           strings.Join(content, "\n"),
+			ToolCalls:         calls,
+			Thinking:          strings.Join(thinking, "\n"),
+			ThinkingSignature: signature,
+			RedactedThinking:  redacted,
+		},
 		FinishReason: finish,
 		Model:        ar.Model,
 		Usage: Usage{

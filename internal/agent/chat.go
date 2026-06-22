@@ -89,16 +89,29 @@ type Message struct {
 	FunctionCall *Func      `json:"function_call,omitempty"` // legacy OpenAI-compatible single-call shape
 	ToolCallID   string     `json:"tool_call_id,omitempty"`  // for role=tool
 	Name         string     `json:"name,omitempty"`
+
+	// Thinking carries a Claude extended-thinking ("thinking") content block
+	// through the proxy instead of dropping it; ThinkingSignature is the opaque
+	// signature the Anthropic API requires to round-trip the block back upstream
+	// on a later turn. RedactedThinking holds any redacted_thinking blocks verbatim
+	// (encrypted reasoning that must be echoed back unmodified). All three are
+	// additive over the OpenAI shape; an OpenAI client simply ignores them.
+	Thinking          string   `json:"thinking,omitempty"`
+	ThinkingSignature string   `json:"thinking_signature,omitempty"`
+	RedactedThinking  []string `json:"redacted_thinking,omitempty"`
 }
 
 func (m *Message) UnmarshalJSON(raw []byte) error {
 	var aux struct {
-		Role         string          `json:"role"`
-		Content      json.RawMessage `json:"content"`
-		ToolCalls    []ToolCall      `json:"tool_calls,omitempty"`
-		FunctionCall *Func           `json:"function_call,omitempty"`
-		ToolCallID   string          `json:"tool_call_id,omitempty"`
-		Name         string          `json:"name,omitempty"`
+		Role              string          `json:"role"`
+		Content           json.RawMessage `json:"content"`
+		ToolCalls         []ToolCall      `json:"tool_calls,omitempty"`
+		FunctionCall      *Func           `json:"function_call,omitempty"`
+		ToolCallID        string          `json:"tool_call_id,omitempty"`
+		Name              string          `json:"name,omitempty"`
+		Thinking          string          `json:"thinking,omitempty"`
+		ThinkingSignature string          `json:"thinking_signature,omitempty"`
+		RedactedThinking  []string        `json:"redacted_thinking,omitempty"`
 	}
 	if err := json.Unmarshal(raw, &aux); err != nil {
 		return err
@@ -113,6 +126,9 @@ func (m *Message) UnmarshalJSON(raw []byte) error {
 	m.FunctionCall = aux.FunctionCall
 	m.ToolCallID = aux.ToolCallID
 	m.Name = aux.Name
+	m.Thinking = aux.Thinking
+	m.ThinkingSignature = aux.ThinkingSignature
+	m.RedactedThinking = aux.RedactedThinking
 	return nil
 }
 
