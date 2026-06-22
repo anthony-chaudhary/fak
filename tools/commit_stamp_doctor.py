@@ -89,6 +89,25 @@ def declared_lanes(repo_root=None) -> set:
     return names
 
 
+def cmd_demo_leaves(repo_root=None) -> set:
+    """Lowercased names of the real `cmd/<name>/` directories.
+
+    Settling #518: the `cmd` lane owns `cmd/**` as ONE tree (`cmd = ["cmd/**"]`),
+    so a demo/binary under `cmd/<name>/` has no `internal/<name>/` package and is
+    NOT its own declared lane. Yet the fleet stamps such ships `(fak <name>)` to
+    keep per-demo attribution in the subject (e.g. `(fak turntaxdemo)`). That leaf
+    binds to the `cmd` lane's tree, so it is a legitimate ship — not the typo the
+    off-lane warning hunts for. Convention (AGENTS.md): stamp a `cmd/` demo with
+    its directory name; this set recognizes any leaf that maps to a real `cmd/<name>`
+    dir, so a RESIDUAL off-lane entry reliably means a typo or a non-lane label, not
+    a `cmd/` demo. Returns an empty set when `cmd/` is absent (check then SKIPPED)."""
+    root = Path(repo_root) if repo_root else Path(__file__).resolve().parent.parent
+    cmd_dir = root / "cmd"
+    if not cmd_dir.is_dir():
+        return set()
+    return {p.name.lower() for p in cmd_dir.iterdir() if p.is_dir()}
+
+
 def _git_log(n: int) -> list[tuple[str, str]]:
     """Return [(short_sha, subject), …] for the last n commits, newest first."""
     out = subprocess.run(
@@ -128,14 +147,19 @@ def audit(n: int) -> dict:
     unstamped = kinds.count("unstamped")
     denom = len(rows) - bookkeeping  # bookkeeping is not a unit of work
     coverage = round(100.0 * (stamped + release) / denom, 1) if denom else 0.0
-    # Off-lane trailers: stamped, but the leaf is not a declared lane (typo / non-lane).
+    # Off-lane trailers: stamped, but the leaf binds to nothing the taxonomy knows.
+    # A leaf is RECOGNIZED if it is a declared lane OR a real `cmd/<leaf>/` demo dir
+    # (#518: cmd/ demos stamp their dir name and bind to the cmd lane's `cmd/**` tree).
+    # What's left after both is a genuine typo / non-lane label — the real signal here.
     lanes = declared_lanes()
+    cmd_demos = cmd_demo_leaves()
+    recognized = lanes | cmd_demos
     off_lane = []
     if lanes:
         for sha, subj, k in rows:
             if k in ("stamped-trailer", "stamped-direct"):
                 leaf = stamp_leaf(subj)
-                if leaf and leaf not in lanes:
+                if leaf and leaf not in recognized:
                     off_lane.append({"sha": sha, "leaf": leaf, "subject": subj})
     return {
         "scanned": len(rows),
@@ -148,6 +172,7 @@ def audit(n: int) -> dict:
         "denominator": denom,
         "coverage_pct": coverage,
         "known_lanes": len(lanes),
+        "cmd_demos_recognized": len(cmd_demos),
         "off_lane_trailers": off_lane[:15],
         "unstamped_samples": [
             {"sha": sha, "subject": subj}
@@ -177,7 +202,8 @@ def main() -> int:
         print(f"  unstamped (referee-blind)    : {rep['unstamped']}")
         print(f"  bookkeeping (excluded)       : {rep['bookkeeping']}")
         if rep["off_lane_trailers"]:
-            print(f"  off-lane stamps (typo? not in {rep['known_lanes']} declared lanes):")
+            print(f"  off-lane stamps (typo? not in {rep['known_lanes']} lanes "
+                  f"+ {rep['cmd_demos_recognized']} cmd/ demos):")
             for s in rep["off_lane_trailers"]:
                 print(f"    {s['sha']}  (fak {s['leaf']})  {s['subject'][:56]}")
         if rep["unstamped_samples"]:

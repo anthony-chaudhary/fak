@@ -94,6 +94,11 @@ until it clears.
   shared multi-session tree; never stage a peer's uncommitted files.
 - **Sign off every commit** — `git commit -s` (DCO). Use a Conventional-Commits subject
   with a `(fak <leaf>)` trailer; a docs-only change uses a `docs(scope):` subject.
+  A `cmd/` **demo or binary** has no `internal/<name>/` package, so stamp it with its
+  directory name — `(fak <dir>)` for `cmd/<dir>/` (e.g. `(fak turntaxdemo)`). The leaf
+  binds to the `cmd` lane (which owns `cmd/**` as one tree) and keeps per-demo attribution
+  in the subject; `tools/commit_stamp_doctor.py` recognizes any real `cmd/<dir>` leaf, so a
+  residual off-lane warning means a genuine typo, not a `cmd/` demo (#518).
 - **Every claim carries a tag.** Each `- [` line in [`fak/CLAIMS.md`](CLAIMS.md) must
   carry exactly one of `[SHIPPED]` / `[SIMULATED]` / `[STUB]` (lint-enforced by
   `make claims-lint`). Don't overclaim; the repo keeps an honesty ledger.

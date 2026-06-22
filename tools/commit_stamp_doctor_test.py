@@ -73,5 +73,34 @@ class DeclaredLanes(unittest.TestCase):
         self.assertNotIn(csd.stamp_leaf("fix(x): y (fak gatway)"), lanes)
 
 
+class CmdDemoLeaves(unittest.TestCase):
+    """#518: a stamp leaf naming a real `cmd/<name>/` dir is a recognized cmd-lane
+    demo, NOT an off-lane typo — so the residual off-lane list means real typos."""
+
+    def test_reads_cmd_subdir_names(self):
+        with tempfile.TemporaryDirectory() as d:
+            cmd = Path(d) / "cmd"
+            (cmd / "turntaxdemo").mkdir(parents=True)
+            (cmd / "guarddemo").mkdir()
+            (cmd / "README.md").write_text("not a dir", encoding="utf-8")  # files ignored
+            demos = csd.cmd_demo_leaves(d)
+        self.assertEqual(demos, {"turntaxdemo", "guarddemo"})
+
+    def test_missing_cmd_dir_is_empty_not_error(self):
+        with tempfile.TemporaryDirectory() as d:
+            # No cmd/ dir → empty set → recognition just falls back to declared lanes.
+            self.assertEqual(csd.cmd_demo_leaves(d), set())
+
+    def test_cmd_demo_recognized_real_typo_is_not(self):
+        with tempfile.TemporaryDirectory() as d:
+            (Path(d) / "cmd" / "turntaxdemo").mkdir(parents=True)
+            (Path(d) / "dos.toml").write_text(
+                '[lanes]\nconcurrent = ["gateway"]\n', encoding="utf-8")
+            recognized = csd.declared_lanes(d) | csd.cmd_demo_leaves(d)
+        # The cmd/ demo binds (recognized); a genuine typo still does not.
+        self.assertIn(csd.stamp_leaf("test(turntaxdemo): add (fak turntaxdemo)"), recognized)
+        self.assertNotIn(csd.stamp_leaf("fix(x): y (fak gatway)"), recognized)
+
+
 if __name__ == "__main__":
     unittest.main()
