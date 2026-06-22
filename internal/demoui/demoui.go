@@ -122,9 +122,11 @@ var spinFrames = []rune{'⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', 
 // it behaves the same on a plain Windows console as on a VT-capable terminal.
 func Spinner(w io.Writer, label string) (stop func()) {
 	done := make(chan struct{})
+	finished := make(chan struct{}) // closed when the animator goroutine has returned
 	var stopped sync.Once
 	width := int32(0) // widest line written, for a clean clear
 	go func() {
+		defer close(finished)
 		start := time.Now()
 		t := time.NewTicker(120 * time.Millisecond)
 		defer t.Stop()
@@ -146,6 +148,7 @@ func Spinner(w io.Writer, label string) (stop func()) {
 	return func() {
 		stopped.Do(func() {
 			close(done)
+			<-finished // the animator may be mid-Fprintf(w); wait for it to return before the clear write below (and the caller's read of w) so neither races the animator
 			n := int(atomic.LoadInt32(&width)) + 1
 			blank := make([]rune, n)
 			for i := range blank {
