@@ -77,6 +77,7 @@ type debugOperationMetricVars struct {
 	Verdict     string           `json:"verdict"`
 	Reason      string           `json:"reason"`
 	Disposition string           `json:"disposition"`
+	By          string           `json:"by"` // which adjudicator decided (forensics)
 	Latency     debugLatencyVars `json:"latency"`
 }
 
@@ -193,6 +194,7 @@ func debugOperationRows(rows []operationMetricSnapshot) []debugOperationMetricVa
 			Verdict:     row.key.verdict,
 			Reason:      row.key.reason,
 			Disposition: row.key.disposition,
+			By:          row.key.by,
 			Latency:     debugLatency(row.val),
 		})
 	}

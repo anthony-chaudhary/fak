@@ -70,6 +70,7 @@ type operationMetricKey struct {
 	verdict     string
 	reason      string
 	disposition string
+	by          string // which adjudicator decided (forensics) — answers WHO refused, not just that it was refused
 }
 
 type latencyCounter struct {
@@ -115,6 +116,7 @@ func (m *gatewayMetrics) observeOperation(operation string, v WireVerdict, err e
 		key.verdict = "ERROR"
 	}
 	key.disposition = v.Disposition
+	key.by = v.By
 	m.mu.Lock()
 	counter := m.operations[key]
 	if counter == nil {
@@ -300,17 +302,17 @@ func (s *Server) renderMetrics() string {
 		writeHistogram(&b, "fak_gateway_http_request_duration_seconds", baseLabels, row.val)
 	}
 
-	writeHelpType(&b, "fak_gateway_operations_total", "Gateway kernel operations by operation and verdict.", "counter")
+	writeHelpType(&b, "fak_gateway_operations_total", "Gateway kernel operations by operation, verdict, and deciding adjudicator (by).", "counter")
 	for _, row := range opRows {
-		fmt.Fprintf(&b, "fak_gateway_operations_total{operation=\"%s\",verdict=\"%s\",reason=\"%s\",disposition=\"%s\"} %d\n",
+		fmt.Fprintf(&b, "fak_gateway_operations_total{operation=\"%s\",verdict=\"%s\",reason=\"%s\",disposition=\"%s\",by=\"%s\"} %d\n",
 			promQuote(row.key.operation), promQuote(row.key.verdict), promQuote(row.key.reason),
-			promQuote(row.key.disposition), row.val.count)
+			promQuote(row.key.disposition), promQuote(row.key.by), row.val.count)
 	}
-	writeHelpType(&b, "fak_gateway_operation_duration_seconds", "Gateway kernel operation latency by operation and verdict.", "histogram")
+	writeHelpType(&b, "fak_gateway_operation_duration_seconds", "Gateway kernel operation latency by operation, verdict, and deciding adjudicator (by).", "histogram")
 	for _, row := range opRows {
-		baseLabels := fmt.Sprintf("operation=\"%s\",verdict=\"%s\",reason=\"%s\",disposition=\"%s\"",
+		baseLabels := fmt.Sprintf("operation=\"%s\",verdict=\"%s\",reason=\"%s\",disposition=\"%s\",by=\"%s\"",
 			promQuote(row.key.operation), promQuote(row.key.verdict), promQuote(row.key.reason),
-			promQuote(row.key.disposition))
+			promQuote(row.key.disposition), promQuote(row.key.by))
 		writeHistogram(&b, "fak_gateway_operation_duration_seconds", baseLabels, row.val)
 	}
 
@@ -569,7 +571,10 @@ func (m *gatewayMetrics) snapshot() ([]httpMetricSnapshot, []operationMetricSnap
 		if a.reason != b.reason {
 			return a.reason < b.reason
 		}
-		return a.disposition < b.disposition
+		if a.disposition != b.disposition {
+			return a.disposition < b.disposition
+		}
+		return a.by < b.by
 	})
 	return httpRows, opRows
 }
@@ -710,6 +715,9 @@ func (s *Server) logGatewayOperation(operation, traceID, tool string, v WireVerd
 	}
 	if v.Reason != "" {
 		ev["reason"] = v.Reason
+	}
+	if v.By != "" {
+		ev["by"] = v.By
 	}
 	if v.Disposition != "" {
 		ev["disposition"] = v.Disposition
