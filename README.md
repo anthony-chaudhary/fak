@@ -241,8 +241,10 @@ Each metric is split into the two runs: *without `fak`* (unmediated) and *with `
 | `Qwen2.5-1.5B` (local, CPU) | ✓ | ✓ | YES | no |
 
 The weak model is the case that matters: without `fak` it fell for the trap and
-booked nothing; with `fak` it ignored the trap and booked the flight. Across these
-runs the injection reached the unprotected baseline 5/5 and `fak` walled it off 5/5.
+booked nothing; with `fak` it ignored the trap and booked the flight. The two
+gemini rows are five live trials per arm (`flash` ×2, `flash-lite` ×3); across
+those five the injection reached the unprotected baseline 5/5 and `fak` walled it
+off 5/5 — per-trial detail in [`LIVE-RESULTS.md`](docs/benchmarks/LIVE-RESULTS.md).
 
 ---
 
