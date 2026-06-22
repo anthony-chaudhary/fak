@@ -1,0 +1,416 @@
+{
+  "schema": "fak.dgx-endpoint-bench.v1",
+  "app_version": "0.24.0",
+  "generated_at": "2026-06-22T03:27:23.364894Z",
+  "benchmark": {
+    "base_url": "http://127.0.0.1:30000/v1",
+    "model": "Qwen/Qwen3.6-27B",
+    "stack": "raw-sglang",
+    "hardware": "dgx-a100",
+    "concurrency": [
+      1,
+      4,
+      8,
+      16,
+      32,
+      64,
+      128
+    ],
+    "requests_per_concurrency": 64,
+    "workload": "fak/experiments/agent-live/production-workload.json",
+    "prompt_cap": 0,
+    "completion_cap": 0,
+    "prompt_scale": 1.0,
+    "completion_scale": 1.0,
+    "workload_sha256": "8d818d350176c88d2e731b8720347ee7db10229424563b6d971d8ed87dea7c94",
+    "cases_sha256": "79137b9e599404f99e4e879719e862a98307a44b41615952625403feb049d919",
+    "request_template": "chat.completions.system_user.temperature0.max_tokens_case.marker.v2",
+    "system_prompt_sha256": "95f87392a1501408c04421c0644b65d837771a9a2170d4e5fb95d7e852feef4f",
+    "response_marker_required": true,
+    "response_marker_prefix": "FAK_DGX_REQ_",
+    "case_count": 6,
+    "dry_run": false
+  },
+  "provenance": {
+    "capture_host": "dgx-a100-lab",
+    "platform": "Linux-6.8.0-124-generic-x86_64-with-glibc2.39",
+    "python": "3.12.3",
+    "argv": [
+      "/srv/fleet/tools/dgx_endpoint_load.py",
+      "--base-url",
+      "http://127.0.0.1:30000/v1",
+      "--stack",
+      "raw-sglang",
+      "--out",
+      "/srv/fleet/fak/experiments/dgx/ladder-r4-20260622T032144Z/raw-sglang.json",
+      "--model",
+      "Qwen/Qwen3.6-27B",
+      "--hardware",
+      "dgx-a100",
+      "--concurrency",
+      "1,4,8,16,32,64,128",
+      "--requests-per-concurrency",
+      "64",
+      "--workload",
+      "fak/experiments/agent-live/production-workload.json",
+      "--prompt-cap",
+      "0",
+      "--completion-cap",
+      "0",
+      "--prompt-scale",
+      "1.0",
+      "--completion-scale",
+      "1.0",
+      "--timeout",
+      "600.0",
+      "--api-key-env",
+      "NONE_LOCAL",
+      "--max-error-rate",
+      "0.9",
+      "--system-prompt",
+      "You are serving a deterministic DGX benchmark load."
+    ],
+    "git": {
+      "rev": null,
+      "dirty": null
+    },
+    "env": {},
+    "nvidia_smi": {
+      "available": true,
+      "query": {
+        "ok": true,
+        "returncode": 0,
+        "stdout": "0, NVIDIA A100-SXM4-40GB, GPU-4d411923-efc8-9618-288d-535785f9e904, 40960, 580.159.03\n1, NVIDIA A100-SXM4-40GB, GPU-9b110c57-4598-ccca-84c4-42c50bbd52b4, 40960, 580.159.03\n2, NVIDIA A100-SXM4-40GB, GPU-4a3308ea-9b82-e4d2-bce9-aaf5e10ecd78, 40960, 580.159.03\n3, NVIDIA A100-SXM4-40GB, GPU-7009bce8-6342-f003-4d1c-fdf38b28a427, 40960, 580.159.03\n4, NVIDIA A100-SXM4-40GB, GPU-91414d2f-d903-46f6-688f-aaeef51d0f8f, 40960, 580.159.03\n5, NVIDIA A100-SXM4-40GB, GPU-64315e68-a056-4aab-4401-316b77e9e8cd, 40960, 580.159.03\n6, NVIDIA A100-SXM4-40GB, GPU-99d7fa53-fa9b-6b79-aedf-b6cf32289376, 40960, 580.159.03\n7, NVIDIA A100-SXM4-40GB, GPU-74ba046f-b64f-5462-17fc-30533124299b, 40960, 580.159.03",
+        "stderr": "",
+        "cmd": [
+          "/usr/bin/nvidia-smi",
+          "--query-gpu=index,name,uuid,memory.total,driver_version",
+          "--format=csv,noheader,nounits"
+        ]
+      },
+      "topo": {
+        "ok": true,
+        "returncode": 0,
+        "stdout": "\u001b[4mGPU0\tGPU1\tGPU2\tGPU3\tGPU4\tGPU5\tGPU6\tGPU7\tNIC0\tNIC1\tNIC2\tNIC3\tNIC4\tNIC5\tNIC6\tNIC7\tNIC8\tNIC9\tNIC10\tNIC11\tCPU Affinity\tNUMA Affinity\tGPU NUMA ID\u001b[0m\nGPU0\t X \tNV12\tNV12\tNV12\tNV12\tNV12\tNV12\tNV12\tPXB\tPXB\tSYS\tSYS\tSYS\tSYS\tSYS\tSYS\tSYS\tSYS\tSYS\tSYS\t48-63,176-191\t3\t\tN/A\nGPU1\tNV12\t X \tNV12\tNV12\tNV12\tNV12\tNV12\tNV12\tPXB\tPXB\tSYS\tSYS\tSYS\tSYS\tSYS\tSYS\tSYS\tSYS\tSYS\tSYS\t48-63,176-191\t3\t\tN/A\nGPU2\tNV12\tNV12\t X \tNV12\tNV12\tNV12\tNV12\tNV12\tSYS\tSYS\tPXB\tPXB\tSYS\tSYS\tSYS\tSYS\tSYS\tSYS\tSYS\tSYS\t16-31,144-159\t1\t\tN/A\nGPU3\tNV12\tNV12\tNV12\t X \tNV12\tNV12\tNV12\tNV12\tSYS\tSYS\tPXB\tPXB\tSYS\tSYS\tSYS\tSYS\tSYS\tSYS\tSYS\tSYS\t16-31,144-159\t1\t\tN/A\nGPU4\tNV12\tNV12\tNV12\tNV12\t X \tNV12\tNV12\tNV12\tSYS\tSYS\tSYS\tSYS\tSYS\tSYS\tPXB\tPXB\tSYS\tSYS\tSYS\tSYS\t112-127,240-255\t7\t\tN/A\nGPU5\tNV12\tNV12\tNV12\tNV12\tNV12\t X \tNV12\tNV12\tSYS\tSYS\tSYS\tSYS\tSYS\tSYS\tPXB\tPXB\tSYS\tSYS\tSYS\tSYS\t112-127,240-255\t7\t\tN/A\nGPU6\tNV12\tNV12\tNV12\tNV12\tNV12\tNV12\t X \tNV12\tSYS\tSYS\tSYS\tSYS\tSYS\tSYS\tSYS\tSYS\tPXB\tPXB\tSYS\tSYS\t80-95,208-223\t5\t\tN/A\nGPU7\tNV12\tNV12\tNV12\tNV12\tNV12\tNV12\tNV12\t X \tSYS\tSYS\tSYS\tSYS\tSYS\tSYS\tSYS\tSYS\tPXB\tPXB\tSYS\tSYS\t80-95,208-223\t5\t\tN/A\nNIC0\tPXB\tPXB\tSYS\tSYS\tSYS\tSYS\tSYS\tSYS\t X \tPXB\tSYS\tSYS\tSYS\tSYS\tSYS\tSYS\tSYS\tSYS\tSYS\tSYS\t\t\t\t\nNIC1\tPXB\tPXB\tSYS\tSYS\tSYS\tSYS\tSYS\tSYS\tPXB\t X \tSYS\tSYS\tSYS\tSYS\tSYS\tSYS\tSYS\tSYS\tSYS\tSYS\t\t\t\t\nNIC2\tSYS\tSYS\tPXB\tPXB\tSYS\tSYS\tSYS\tSYS\tSYS\tSYS\t X \tPXB\tSYS\tSYS\tSYS\tSYS\tSYS\tSYS\tSYS\tSYS\t\t\t\t\nNIC3\tSYS\tSYS\tPXB\tPXB\tSYS\tSYS\tSYS\tSYS\tSYS\tSYS\tPXB\t X \tSYS\tSYS\tSYS\tSYS\tSYS\tSYS\tSYS\tSYS\t\t\t\t\nNIC4\tSYS\tSYS\tSYS\tSYS\tSYS\tSYS\tSYS\tSYS\tSYS\tSYS\tSYS\tSYS\t X \tPIX\tSYS\tSYS\tSYS\tSYS\tSYS\tSYS\t\t\t\t\nNIC5\tSYS\tSYS\tSYS\tSYS\tSYS\tSYS\tSYS\tSYS\tSYS\tSYS\tSYS\tSYS\tPIX\t X \tSYS\tSYS\tSYS\tSYS\tSYS\tSYS\t\t\t\t\nNIC6\tSYS\tSYS\tSYS\tSYS\tPXB\tPXB\tSYS\tSYS\tSYS\tSYS\tSYS\tSYS\tSYS\tSYS\t X \tPXB\tSYS\tSYS\tSYS\tSYS\t\t\t\t\nNIC7\tSYS\tSYS\tSYS\tSYS\tPXB\tPXB\tSYS\tSYS\tSYS\tSYS\tSYS\tSYS\tSYS\tSYS\tPXB\t X \tSYS\tSYS\tSYS\tSYS\t\t\t\t\nNIC8\tSYS\tSYS\tSYS\tSYS\tSYS\tSYS\tPXB\tPXB\tSYS\tSYS\tSYS\tSYS\tSYS\tSYS\tSYS\tSYS\t X \tPXB\tSYS\tSYS\t\t\t\t\nNIC9\tSYS\tSYS\tSYS\tSYS\tSYS\tSYS\tPXB\tPXB\tSYS\tSYS\tSYS\tSYS\tSYS\tSYS\tSYS\tSYS\tPXB\t X \tSYS\tSYS\t\t\t\t\nNIC10\tSYS\tSYS\tSYS\tSYS\tSYS\tSYS\tSYS\tSYS\tSYS\tSYS\tSYS\tSYS\tSYS\tSYS\tSYS\tSYS\tSYS\tSYS\t X \tPIX\t\t\t\t\nNIC11\tSYS\tSYS\tSYS\tSYS\tSYS\tSYS\tSYS\tSYS\tSYS\tSYS\tSYS\tSYS\tSYS\tSYS\tSYS\tSYS\tSYS\tSYS\tPIX\t X \t\t\t\t\n\nLegend:\n\n  X    = Self\n  SYS  = Connection traversing PCIe as well as the SMP interconnect between NUMA nodes (e.g., QPI/UPI)\n  NODE = Connection traversing PCIe as well as the interconnect between PCIe Host Bridges within a NUMA node\n  PHB  = Connection traversing PCIe as well as a PCIe Host Bridge (typically the CPU)\n  PXB  = Connection traversing multiple PCIe bridges (without traversing the PCIe Host Bridge)\n  PIX  = Connection traversing at most a single PCIe bridge\n  NV#  = Connection traversing a bonded set of # NVLinks\n\nNIC Legend:\n\n  NIC0: mlx5_0\n  NIC1: mlx5_1\n  NIC2: mlx5_2\n  NIC3: mlx5_3\n  NIC4: mlx5_4\n  NIC5: mlx5_5\n  NIC6: mlx5_6\n  NIC7: mlx5_7\n  NIC8: mlx5_8\n  NIC9: mlx5_9\n  NIC10: mlx5_10\n  NIC11: mlx5_11",
+        "stderr": "",
+        "cmd": [
+          "/usr/bin/nvidia-smi",
+          "topo",
+          "-m"
+        ]
+      }
+    },
+    "auth": {
+      "api_key_env": "NONE_LOCAL",
+      "auth_header": false
+    },
+    "tags": {},
+    "models_probe": {
+      "ok": true,
+      "status": 200,
+      "json": {
+        "object": "list",
+        "data": [
+          {
+            "id": "Qwen/Qwen3.6-27B",
+            "object": "model",
+            "created": 1782098844,
+            "owned_by": "sglang",
+            "root": "Qwen/Qwen3.6-27B",
+            "parent": null,
+            "max_model_len": 262144
+          }
+        ]
+      },
+      "raw_prefix": "{\"object\":\"list\",\"data\":[{\"id\":\"Qwen/Qwen3.6-27B\",\"object\":\"model\",\"created\":1782098844,\"owned_by\":\"sglang\",\"root\":\"Qwen/Qwen3.6-27B\",\"parent\":null,\"max_model_len\":262144}]}"
+    }
+  },
+  "cases": [
+    {
+      "version": "0.24.0",
+      "name": "offline-mock-fak",
+      "source": "fak/experiments/agent-live/offline-mock.json",
+      "arm": "fak",
+      "prompt_tokens": 1501,
+      "completion_tokens": 184,
+      "recorded_prompt_tokens": 1501,
+      "recorded_completion_tokens": 184
+    },
+    {
+      "version": "0.24.0",
+      "name": "offline-mock-baseline",
+      "source": "fak/experiments/agent-live/offline-mock.json",
+      "arm": "baseline",
+      "prompt_tokens": 2555,
+      "completion_tokens": 232,
+      "recorded_prompt_tokens": 2555,
+      "recorded_completion_tokens": 232
+    },
+    {
+      "version": "0.24.0",
+      "name": "qwen-0.5b-fak",
+      "source": "fak/experiments/agent-live/local-qwen-0.5b.json",
+      "arm": "fak",
+      "prompt_tokens": 1640,
+      "completion_tokens": 229,
+      "recorded_prompt_tokens": 1640,
+      "recorded_completion_tokens": 229
+    },
+    {
+      "version": "0.24.0",
+      "name": "qwen-1.5b-fak",
+      "source": "fak/experiments/agent-live/local-qwen-1.5b.json",
+      "arm": "fak",
+      "prompt_tokens": 1690,
+      "completion_tokens": 269,
+      "recorded_prompt_tokens": 1690,
+      "recorded_completion_tokens": 269
+    },
+    {
+      "version": "0.24.0",
+      "name": "gemini-flash-fak",
+      "source": "fak/experiments/agent-live/gemini-2.5-flash-t1.json",
+      "arm": "fak",
+      "prompt_tokens": 4100,
+      "completion_tokens": 208,
+      "recorded_prompt_tokens": 4100,
+      "recorded_completion_tokens": 208
+    },
+    {
+      "version": "0.24.0",
+      "name": "gemini-flash-lite-fak",
+      "source": "fak/experiments/agent-live/gemini-2.5-flash-lite-t1.json",
+      "arm": "fak",
+      "prompt_tokens": 2942,
+      "completion_tokens": 204,
+      "recorded_prompt_tokens": 2942,
+      "recorded_completion_tokens": 204
+    }
+  ],
+  "points": [
+    {
+      "version": "0.24.0",
+      "concurrency": 1,
+      "requests": 64,
+      "ok": 51,
+      "errors": 13,
+      "error_rate": 0.203125,
+      "elapsed_s": 120.6479849210009,
+      "latency_ms": {
+        "p50": 2475.3210719209164,
+        "p95": 2933.651588507928,
+        "p99": 3069.2290840670466,
+        "max": 3069.5466650649905
+      },
+      "prompt_tokens": 152159,
+      "completion_tokens": 10567,
+      "total_tokens": 162726,
+      "requests_per_sec": 0.4227173792699007,
+      "prompt_tokens_per_sec": 1261.1814453397808,
+      "completion_tokens_per_sec": 87.5853832695106,
+      "total_tokens_per_sec": 1348.7668286092915,
+      "response_marker_required": true,
+      "response_marker_ok": 51,
+      "response_marker_errors": 13,
+      "error_samples": [
+        "response missing marker FAK_DGX_REQ_000001",
+        "response missing marker FAK_DGX_REQ_000004",
+        "response missing marker FAK_DGX_REQ_000010",
+        "response missing marker FAK_DGX_REQ_000016",
+        "response missing marker FAK_DGX_REQ_000020"
+      ]
+    },
+    {
+      "version": "0.24.0",
+      "concurrency": 4,
+      "requests": 64,
+      "ok": 50,
+      "errors": 14,
+      "error_rate": 0.21875,
+      "elapsed_s": 38.72671412816271,
+      "latency_ms": {
+        "p50": 3048.1618960620835,
+        "p95": 3921.3410810451023,
+        "p99": 4131.844241528306,
+        "max": 4165.311610791832
+      },
+      "prompt_tokens": 149927,
+      "completion_tokens": 10554,
+      "total_tokens": 160481,
+      "requests_per_sec": 1.2910984349079895,
+      "prompt_tokens_per_sec": 3871.4103010090025,
+      "completion_tokens_per_sec": 272.5250576403784,
+      "total_tokens_per_sec": 4143.935358649381,
+      "response_marker_required": true,
+      "response_marker_ok": 50,
+      "response_marker_errors": 14,
+      "error_samples": [
+        "response missing marker FAK_DGX_REQ_000001",
+        "response missing marker FAK_DGX_REQ_000004",
+        "response missing marker FAK_DGX_REQ_000010",
+        "response missing marker FAK_DGX_REQ_000016",
+        "response missing marker FAK_DGX_REQ_000020"
+      ]
+    },
+    {
+      "version": "0.24.0",
+      "concurrency": 8,
+      "requests": 64,
+      "ok": 50,
+      "errors": 14,
+      "error_rate": 0.21875,
+      "elapsed_s": 23.85685279709287,
+      "latency_ms": {
+        "p50": 3547.5071339169517,
+        "p95": 4946.412304206751,
+        "p99": 5230.698983890469,
+        "max": 5394.773174077272
+      },
+      "prompt_tokens": 149927,
+      "completion_tokens": 9911,
+      "total_tokens": 159838,
+      "requests_per_sec": 2.0958338648127492,
+      "prompt_tokens_per_sec": 6284.4416769956215,
+      "completion_tokens_per_sec": 415.43618868318316,
+      "total_tokens_per_sec": 6699.8778656788045,
+      "response_marker_required": true,
+      "response_marker_ok": 50,
+      "response_marker_errors": 14,
+      "error_samples": [
+        "response missing marker FAK_DGX_REQ_000004",
+        "response missing marker FAK_DGX_REQ_000001",
+        "response missing marker FAK_DGX_REQ_000010",
+        "response missing marker FAK_DGX_REQ_000016",
+        "response missing marker FAK_DGX_REQ_000020"
+      ]
+    },
+    {
+      "version": "0.24.0",
+      "concurrency": 16,
+      "requests": 64,
+      "ok": 52,
+      "errors": 12,
+      "error_rate": 0.1875,
+      "elapsed_s": 16.846163445850834,
+      "latency_ms": {
+        "p50": 4721.1103906156495,
+        "p95": 6793.700708390679,
+        "p99": 7240.235703757498,
+        "max": 7354.325644904748
+      },
+      "prompt_tokens": 160942,
+      "completion_tokens": 10775,
+      "total_tokens": 171717,
+      "requests_per_sec": 3.0867562318948925,
+      "prompt_tokens_per_sec": 9553.629259108227,
+      "completion_tokens_per_sec": 639.6115076666821,
+      "total_tokens_per_sec": 10193.240766774908,
+      "response_marker_required": true,
+      "response_marker_ok": 52,
+      "response_marker_errors": 12,
+      "error_samples": [
+        "response missing marker FAK_DGX_REQ_000001",
+        "response missing marker FAK_DGX_REQ_000020",
+        "response missing marker FAK_DGX_REQ_000022",
+        "response missing marker FAK_DGX_REQ_000028",
+        "response missing marker FAK_DGX_REQ_000034"
+      ]
+    },
+    {
+      "version": "0.24.0",
+      "concurrency": 32,
+      "requests": 64,
+      "ok": 55,
+      "errors": 9,
+      "error_rate": 0.140625,
+      "elapsed_s": 12.084322202019393,
+      "latency_ms": {
+        "p50": 5735.558921005577,
+        "p95": 9012.373683112673,
+        "p99": 9028.749719443731,
+        "max": 9033.49600895308
+      },
+      "prompt_tokens": 174312,
+      "completion_tokens": 10519,
+      "total_tokens": 184831,
+      "requests_per_sec": 4.551351667105419,
+      "prompt_tokens_per_sec": 14424.640214481453,
+      "completion_tokens_per_sec": 870.4666942960347,
+      "total_tokens_per_sec": 15295.106908777487,
+      "response_marker_required": true,
+      "response_marker_ok": 55,
+      "response_marker_errors": 9,
+      "error_samples": [
+        "response missing marker FAK_DGX_REQ_000013",
+        "response missing marker FAK_DGX_REQ_000027",
+        "response missing marker FAK_DGX_REQ_000028",
+        "response missing marker FAK_DGX_REQ_000030",
+        "response missing marker FAK_DGX_REQ_000042"
+      ]
+    },
+    {
+      "version": "0.24.0",
+      "concurrency": 64,
+      "requests": 64,
+      "ok": 59,
+      "errors": 5,
+      "error_rate": 0.078125,
+      "elapsed_s": 8.172321954974905,
+      "latency_ms": {
+        "p50": 7222.022671019658,
+        "p95": 8134.6969031961635,
+        "p99": 8157.8976216726005,
+        "max": 8162.493931828067
+      },
+      "prompt_tokens": 185759,
+      "completion_tokens": 11863,
+      "total_tokens": 197622,
+      "requests_per_sec": 7.219490412279184,
+      "prompt_tokens_per_sec": 22730.25965245032,
+      "completion_tokens_per_sec": 1451.6070298452196,
+      "total_tokens_per_sec": 24181.86668229554,
+      "response_marker_required": true,
+      "response_marker_ok": 59,
+      "response_marker_errors": 5,
+      "error_samples": [
+        "response missing marker FAK_DGX_REQ_000001",
+        "response missing marker FAK_DGX_REQ_000016",
+        "response missing marker FAK_DGX_REQ_000021",
+        "response missing marker FAK_DGX_REQ_000023",
+        "response missing marker FAK_DGX_REQ_000041"
+      ]
+    },
+    {
+      "version": "0.24.0",
+      "concurrency": 128,
+      "requests": 128,
+      "ok": 115,
+      "errors": 13,
+      "error_rate": 0.1015625,
+      "elapsed_s": 20.296731784008443,
+      "latency_ms": {
+        "p50": 19182.238411856815,
+        "p95": 20224.066949798726,
+        "p99": 20268.111458169296,
+        "max": 20279.357759049162
+      },
+      "prompt_tokens": 375426,
+      "completion_tokens": 22391,
+      "total_tokens": 397817,
+      "requests_per_sec": 5.66593682292275,
+      "prompt_tokens_per_sec": 18496.869545066056,
+      "completion_tokens_per_sec": 1103.182533930985,
+      "total_tokens_per_sec": 19600.05207899704,
+      "response_marker_required": true,
+      "response_marker_ok": 115,
+      "response_marker_errors": 13,
+      "error_samples": [
+        "response missing marker FAK_DGX_REQ_000001",
+        "response missing marker FAK_DGX_REQ_000012",
+        "response missing marker FAK_DGX_REQ_000028",
+        "response missing marker FAK_DGX_REQ_000084",
+        "response missing marker FAK_DGX_REQ_000093"
+      ]
+    }
+  ]
+}
