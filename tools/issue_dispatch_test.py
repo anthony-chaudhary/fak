@@ -113,6 +113,17 @@ class WorkerEnvTest(unittest.TestCase):
         self.assertEqual(env["FLEET_DISPATCH_WITNESS"], "benchmark")
         self.assertIn("--lane recall", env["FLEET_BENCH_WITNESS_CMD"])
 
+    def test_arms_verdict_journal_observe_on_dispatch_surface(self) -> None:
+        # #465: the verdict-journal auto-emit is armed per dispatched run (bounded),
+        # NOT per idle session (unbounded — the journal is not auto-rotated). The arm
+        # is independent of the account dir, so it holds for every worker env shape.
+        mod = load()
+        env_no_acct = mod.worker_env(None, "docs", ROOT)
+        self.assertEqual(env_no_acct["DISPATCH_OBSERVE"], "1")
+        with tempfile.TemporaryDirectory() as d:
+            env_acct = mod.worker_env(d, "gateway", ROOT)
+        self.assertEqual(env_acct["DISPATCH_OBSERVE"], "1")
+
 
 class EvaluateTest(unittest.TestCase):
     SPAWN_OK = {

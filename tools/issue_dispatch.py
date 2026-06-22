@@ -149,6 +149,16 @@ def worker_env(account_dir: str | None, lane: str, workspace: Path) -> dict[str,
     # The witness for this loop is the benchmark, not the unit-test suite.
     env["FLEET_DISPATCH_WITNESS"] = "benchmark"
     env["FLEET_BENCH_WITNESS_CMD"] = f"python tools/bench_witness.py --lane {lane}"
+    # Arm the DOS verdict-journal auto-emit (#465) on the *dispatch* surface, NOT the
+    # session surface. The kernel's verdict-journal is append-only and NOT auto-rotated
+    # (dos verdict_journal.py: "grows unbounded on a long-lived fleet"; the
+    # [retention] audits_keep_last cap does not fold over it). So arming it via
+    # settings.json `env` — which fires on every idle Claude Code session — would
+    # violate this issue's own "retention bounded" acceptance. Arming it here instead
+    # bounds growth to actual dispatched issue-resolution runs: a worker's verify/recall
+    # adjudications land in .dos/verdict-journal.jsonl while it works, an idle session
+    # writes nothing, and the journal rides the existing .dos/ backup story.
+    env["DISPATCH_OBSERVE"] = "1"
     return env
 
 
