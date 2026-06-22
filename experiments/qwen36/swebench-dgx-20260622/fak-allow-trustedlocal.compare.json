@@ -1,0 +1,44 @@
+{
+  "benchmark": "swe-bench-verified-resolve-compare",
+  "schema": "fak.dgx-swebench-compare.v1",
+  "model": "Qwen/Qwen3.6-27B",
+  "served_as": "qwen36-27b",
+  "tp": 8,
+  "dataset": "princeton-nlp/SWE-bench_Verified",
+  "selection": "astropy__astropy-12907",
+  "env": {
+    "host": "dgx-a100.example.lab",
+    "time": "2026-06-22T15:10:03Z",
+    "gpu0": "NVIDIA A100-SXM4-40GB",
+    "ngpu": "8"
+  },
+  "arms": [
+    {
+      "agent": {
+        "arm": "fak-gateway",
+        "endpoint": "http://127.0.0.1:8080/v1",
+        "agent_rc": 0,
+        "agent_sec": 342.2,
+        "preds_path": "/tmp/swe-cmp-6/preds_fak-gateway/preds.json",
+        "instances": 1,
+        "completed": 0,
+        "patch_bytes": 0,
+        "instance_ids": [
+          "astropy__astropy-12907"
+        ]
+      },
+      "grade": {
+        "available": true,
+        "grade_sec": 128.3,
+        "run_id": "swecmp-fak-gateway",
+        "submitted": 1,
+        "report_path": "/tmp/swe-cmp-6/preds_fak-gateway/openai__qwen36-27b.swecmp-fak-gateway.json",
+        "resolved_ids": [],
+        "resolved": 0,
+        "dataset_total": 500,
+        "total": 1,
+        "resolve_pct": 0.0
+      }
+    }
+  ]
+}
