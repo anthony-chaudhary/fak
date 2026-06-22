@@ -11,6 +11,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/anthony-chaudhary/fak/internal/blob"
 	"github.com/anthony-chaudhary/fak/internal/kernel"
 	"github.com/anthony-chaudhary/fak/internal/vdso"
 )
@@ -334,6 +335,7 @@ func (s *Server) renderMetrics() string {
 	if s.cacheStream != nil {
 		b.WriteString(s.cacheStream.Snapshot().Prometheus())
 	}
+	writeBlobMetrics(&b)
 	inf := m.writeInferenceMetrics(&b)
 
 	// Fleet-value (hero-axis) KPIs, derived live from the kernel counters + the
@@ -381,6 +383,36 @@ func writeVDSOMetrics(b *strings.Builder) {
 	fmt.Fprintf(b, "fak_vdso_cache_fills_total %d\n", fills)
 	writeHelpType(b, "fak_vdso_invalidations_total", "Write-shaped completions that stranded cached reads (the vDSO exports no per-entry LRU-eviction counter; this is the nearest invalidation signal).", "counter")
 	fmt.Fprintf(b, "fak_vdso_invalidations_total %d\n", vdso.Default.Mutations())
+}
+
+// writeBlobMetrics renders the content-addressed blob store (internal/blob) — the ONE
+// CAS the vDSO tier-2 cache AND the context-MMU page-out share, so it is the
+// cross-cache footprint/dedup/eviction surface a level below the per-cache families
+// above. The store kept concurrency-safe KPI taps (Stats/Resident/MaxBytes) but
+// emitted no metrics; this lights them up so an operator can see resident footprint,
+// content-dedup effectiveness, and whether the byte bound is actually evicting — a
+// rising fak_blob_evicted_total while the resident gauges plateau is the
+// leak-absorbed-by-the-bound signal the store's own doc comment calls out.
+func writeBlobMetrics(b *strings.Builder) {
+	puts, dedupHits, resolves := blob.Default.Stats()
+	residentBlobs, residentBytes, evicted := blob.Default.Resident()
+
+	writeCounter(b, "fak_blob_puts_total", "Payloads stored into the content-addressed blob store (CAS puts; small inline payloads never reach the store and are not counted).", puts)
+	writeCounter(b, "fak_blob_dedup_hits_total", "CAS puts whose digest was already resident — content-addressed dedup, the byte stored once and shared by the vDSO cache and the context-MMU.", dedupHits)
+	writeCounter(b, "fak_blob_resolves_total", "Blob materializations (Resolve) served from the CAS.", resolves)
+	writeHelpType(b, "fak_blob_resident_blobs", "Distinct blobs currently resident in the shared CAS.", "gauge")
+	fmt.Fprintf(b, "fak_blob_resident_blobs %d\n", residentBlobs)
+	writeHelpType(b, "fak_blob_resident_bytes", "Total bytes currently resident in the shared CAS (the live footprint a leak/pressure alarm watches).", "gauge")
+	fmt.Fprintf(b, "fak_blob_resident_bytes %d\n", residentBytes)
+	writeCounter(b, "fak_blob_evicted_total", "Digests dropped by the CAS byte bound (only ever UNPINNED transient payloads; a rising count is real working pressure or a leak the bound is absorbing).", evicted)
+	writeHelpType(b, "fak_blob_max_bytes", "Configured resident-footprint ceiling for the CAS in bytes (0 = unbounded).", "gauge")
+	fmt.Fprintf(b, "fak_blob_max_bytes %d\n", blob.Default.MaxBytes())
+	writeHelpType(b, "fak_blob_dedup_ratio", "Fraction of CAS puts served by content dedup (dedup_hits/puts; 0 when nothing has been put).", "gauge")
+	ratio := 0.0
+	if puts > 0 {
+		ratio = float64(dedupHits) / float64(puts)
+	}
+	fmt.Fprintf(b, "fak_blob_dedup_ratio %s\n", promFloat(ratio))
 }
 
 type inferenceSnapshot struct {
