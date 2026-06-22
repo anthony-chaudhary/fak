@@ -26,6 +26,8 @@ project-supplied.
 | [`plan-audit`](plan-audit/SKILL.md) | Reconcile every plan-state surface into one completion audit and render a dated snapshot. Read-only — never edits a plan file. |
 | [`curate-cluster`](curate-cluster/SKILL.md) | Reconcile a project index doc against disk, gitignore artifacts, and commit only the quiescent curation lane by explicit path — never an actively-built code tree. |
 | [`trajectory-audit`](trajectory-audit/SKILL.md) | Sweep recent Claude Code session transcripts for token-weighted cost/efficiency problems (I:O ratio, cache reuse, heaviest sessions). Read-only; wraps `tools/session_audit.py`. |
+| [`quality-score`](quality-score/SKILL.md) | The CODE-quality RSI pass: run the code-quality scorecard, retire code-debt worst-first (gofmt, real tests, safe extraction), re-measure to prove the drop, ground the ship in DOS, commit by explicit path. Wraps `tools/code_quality_scorecard.py`. |
+| [`appeal-score`](appeal-score/SKILL.md) | The PROSE-voice pass: make a doc read human, not machine. Run the doc-appeal scorecard, retire appeal-debt (em-dash flood, run-ons, walls, stacked contrast frames, LLM-scaffolding) WITHOUT changing a claim/number/link, re-measure, commit the doc lane. Wraps `tools/doc_appeal_scorecard.py`. |
 
 ## Conventions
 

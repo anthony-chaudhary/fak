@@ -44,6 +44,12 @@ helpers:
   # grounded KPIs folded into a composite score + a code-debt integer. Read-only
   # (shells go build/vet/gofmt + dos review); the RSI pass drives code-debt down.
   code_quality_scorecard: tools/code_quality_scorecard.py
+  # /appeal-score — the doc-appeal scorecard: five deterministic prose axes
+  # (clarity, priority, voice, scannability, organization) folded into an appeal
+  # score + an appeal-debt integer, with LLM-tell detectors on the voice axis
+  # (em-dash flood, contrast-frame stacking, scaffolding phrases). Read-only; the
+  # voice pass drives appeal-debt down on reader-facing prose docs.
+  doc_appeal_scorecard: tools/doc_appeal_scorecard.py
 
 # Where vX.Y.Z.md release notes are written.
 release_notes_dir: docs/releases
