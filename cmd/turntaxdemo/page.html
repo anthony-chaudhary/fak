@@ -77,6 +77,7 @@
   <div class="top">
     <h1>fak · the turn-tax demo</h1>
     <span class="pill" id="dirPill">kernel replay · no model weights</span>
+    <span class="pill" id="hwPill" title="the compute surface this demo is actually running on — cores, matmul workers, and any GPU backend compiled into this build">hardware: …</span>
   </div>
   <div class="sub" style="font-size:13px">
     Every time an AI agent uses a tool, little things go wrong: a slightly-wrong argument, asking for the same
@@ -161,6 +162,19 @@
 const $ = s => document.querySelector(s);
 let lastRun = null;
 
+// client-side wait spinner: the replay returns JSON in ONE shot (no SSE), so while the
+// fetch is in flight we animate a braille frame + elapsed-seconds counter on a ~120ms
+// interval — that guarantees something changes ~8×/s during the wait instead of a frozen
+// "replaying…" label. startWait() returns a stop() that clears the timer + the line.
+const SPIN=["⠋","⠙","⠹","⠸","⠼","⠴","⠦","⠧","⠇","⠏"];
+function startWait(){
+  let i=0; const t0=performance.now();
+  const tick=()=>{ $('#cfg').textContent=`${SPIN[i++%SPIN.length]} replaying through the kernel… ${((performance.now()-t0)/1000).toFixed(1)}s`; };
+  tick();
+  const id=setInterval(tick, 120);
+  return ()=>clearInterval(id);
+}
+
 const CLASS_GROUP = {
   grammar:"turn", vdso_pure:"turn", vdso_dedup:"turn", vdso_static:"turn",
   quarantine:"safety", deny:"safety", pass:"pass",
@@ -189,6 +203,11 @@ async function loadSuites(){
   } else {
     $('#dirPill').textContent = `kernel replay · GOMAXPROCS=${j.gomaxprocs}`;
   }
+  // surface the real compute surface this replay runs on (cores / workers / any GPU backend);
+  // this box is CPU-only, so the honest summary names no accelerator.
+  const hw=j.hardware||{};
+  $('#hwPill').textContent = 'hardware: '+(hw.summary||'…');
+  if(hw.accelerator){ $('#hwPill').style.borderColor='var(--fak)'; $('#hwPill').style.color='var(--fak)'; }
 }
 
 function reset(){
@@ -273,16 +292,17 @@ function showReport(rep){
 async function run(){
   $('#runBtn').disabled=true; $('#replayBtn').disabled=true;
   const suite=$('#suite').value, lat=$('#lat').value;
-  $('#cfg').textContent='replaying…';
+  const stopWait=startWait(); // animate the wait so there's no dead air while the fetch is in flight
   try{
     const r=await fetch(`/api/run?suite=${encodeURIComponent(suite)}&latency_ms=${lat}`);
-    if(!r.ok){ $('#cfg').textContent='error: '+await r.text(); return; }
+    if(!r.ok){ stopWait(); $('#cfg').textContent='error: '+await r.text(); return; }
     const j=await r.json(); lastRun=j;
+    stopWait();
     $('#cfg').textContent=`${j.calls.length} calls replayed through k.Syscall`;
     await animate(j.calls);
     showReport(j.report);
     $('#replayBtn').disabled=false;
-  } finally { $('#runBtn').disabled=false; }
+  } finally { stopWait(); $('#runBtn').disabled=false; }
 }
 
 $('#runBtn').onclick=run;

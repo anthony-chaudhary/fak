@@ -27,6 +27,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/anthony-chaudhary/fak/internal/demoui"
 	"github.com/anthony-chaudhary/fak/internal/ggufload"
 	"github.com/anthony-chaudhary/fak/internal/gpulease"
 	"github.com/anthony-chaudhary/fak/internal/metalgemm"
@@ -45,6 +46,7 @@ func main() {
 	metal := flag.Bool("metal", false, "run prefill on the Metal GPU (requires -tags fakmetal; decode stays CPU Q8)")
 	temp := flag.Float64("temp", 0, "sampling temperature (0 = greedy/argmax)")
 	seed := flag.Int64("seed", 1, "RNG seed for temperature sampling")
+	quiet := flag.Bool("quiet", false, "suppress the hardware line and the load/prefill spinners (the model=… banner + token stream are unaffected)")
 	flag.Parse()
 
 	// Expand a leading ~ so `-hf ~/...`, `-gguf ~/...`, `-tok ~/...` open as intended
@@ -56,6 +58,23 @@ func main() {
 	if (*hf == "") == (*gguf == "") || *prompt == "" {
 		fmt.Fprintln(os.Stderr, "usage: fakchat (-hf <model-dir> | -gguf <model.gguf>) -p <prompt> [-tok <dir>] [-metal] [-n N] [-temp T]")
 		os.Exit(2)
+	}
+
+	// Show the real compute surface this build runs on (cores / matmul workers /
+	// accelerator) so the run is never silent about its hardware. On a CPU build the
+	// summary says so plainly rather than implying a GPU. -quiet suppresses it.
+	if !*quiet {
+		fmt.Fprintln(os.Stderr, "hardware:", demoui.Probe().Summary)
+	}
+
+	// spin starts a stderr spinner for a long blocking phase (model load, prefill) so
+	// the terminal shows a live "⠙ <label>… 12.3s" instead of freezing. It is a no-op
+	// under -quiet, and the returned stop func is always safe to defer.
+	spin := func(label string) func() {
+		if *quiet {
+			return func() {}
+		}
+		return demoui.Spinner(os.Stderr, label)
 	}
 
 	cfg, err := readModelConfig(*hf, *gguf)
@@ -91,6 +110,10 @@ func main() {
 	// Load weights. Llama family: quantize-at-load (Q8) so 1.5B–14B fit on 36 GB.
 	// GGUF streams through the quantized loader; HF hybrid still uses the validated f32 GDN path.
 	t0 := time.Now()
+	// Loading + quantizing the weights is the longest silent phase (tens of seconds on
+	// the bigger rungs); spin the terminal so it shows a live elapsed counter instead of
+	// freezing. Stopped before the model=… banner prints below.
+	stopLoad := spin("Loading model")
 	var m *model.Model
 	quantLoaded := false
 	q4kLoad := os.Getenv("FAK_Q4K") != ""
@@ -110,12 +133,14 @@ func main() {
 		quantLoaded = true
 	}
 	if err != nil {
+		stopLoad()
 		fmt.Fprintln(os.Stderr, "load:", err)
 		os.Exit(1)
 	}
 	if !hybrid && !quantLoaded {
 		m.Quantize()
 	}
+	stopLoad()
 	loadMS := time.Since(t0).Seconds() * 1e3
 
 	// Tokenizer.
@@ -198,9 +223,13 @@ func main() {
 			pp = model.NewPhaseProfiler()
 			s.PhaseProfiler = pp
 		}
+		// Prefill is a silent compute block (the model is "thinking" before the first
+		// token); spin so the terminal isn't frozen. Stopped before the decode stream.
+		stopPrefill := spin("Thinking")
 		tp := time.Now()
 		logits := s.Prefill(ids)
 		prefillS := time.Since(tp).Seconds()
+		stopPrefill()
 		if pp != nil {
 			printPhaseProfile("prefill", pp.Snapshot("prefill", len(ids), 0, time.Since(tp).Nanoseconds()))
 			pp.Reset() // separate the decode phase split from prefill's
@@ -248,10 +277,13 @@ func main() {
 	fmt.Fprintf(os.Stderr, "model=%s  load=%.0fms  prompt_tokens=%d  backend=%s\n",
 		cfg.ModelType, loadMS, len(ids), backend)
 
-	// Prefill (timed).
+	// Prefill (timed). Silent compute block before the first token — spin so the
+	// terminal shows progress, stopped right before the decode stream starts.
+	stopPrefill := spin("Thinking")
 	tp := time.Now()
 	logits := s.Prefill(ids)
 	prefillS := time.Since(tp).Seconds()
+	stopPrefill()
 
 	// Decode loop (timed, streamed).
 	out := bufio.NewWriter(os.Stdout)

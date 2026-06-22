@@ -49,6 +49,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/anthony-chaudhary/fak/internal/demoui"
 	"github.com/anthony-chaudhary/fak/internal/model"
 )
 
@@ -56,6 +57,10 @@ import (
 var pageFS embed.FS
 
 const version = "fak-demorace-v1"
+
+// heartbeat is how often a blocking phase (model load, prefill measurement) emits a
+// keep-alive "tick" so the page updates ~1×/s instead of freezing on a long load.
+const heartbeat = 700 * time.Millisecond
 
 // ---------------------------------------------------------------------------
 // model ladder
@@ -455,6 +460,8 @@ func handleLadder(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(map[string]any{
 		"models":     out,
 		"gomaxprocs": gomax,
+		"hardware":   demoui.Probe(), // cores / workers / accelerator the demo actually runs on
+
 		"prefill_tok_ratio": map[string]any{
 			"a": a, "b": b, "c": c,
 			"b_over_c": float64(b) / float64(c), "a_over_c": float64(a) / float64(c),
@@ -524,8 +531,19 @@ func handleRace(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("X-Accel-Buffering", "no")
 	s := &sseWriter{w, flusher}
 
-	s.emit(event{"type": "info", "msg": "loading model " + name})
-	l, err := reg.get(sp)
+	hw := demoui.Probe()
+	s.emit(event{"type": "hw", "hardware": hw})
+	s.emit(event{"type": "info", "msg": "loading model " + name + " on " + hw.Summary})
+	// Model load + quantize is the longest blocking phase (tens of seconds on the big
+	// rungs); heartbeat it so the page shows a live elapsed counter instead of freezing.
+	var l *loaded
+	var err error
+	demoui.Beat(heartbeat,
+		func(el time.Duration) {
+			s.emit(event{"type": "tick", "phase": "loading model " + name, "elapsed_ms": ms(el)})
+		},
+		func() { l, err = reg.get(sp) },
+	)
 	if err != nil {
 		s.emit(event{"type": "error", "msg": "load: " + err.Error()})
 		return
@@ -564,6 +582,36 @@ func handleRace(w http.ResponseWriter, r *http.Request) {
 		"model": name, "workload": map[string]int{"P": P, "T": T, "C": C, "D": D, "R": R}})
 }
 
+// curveProgress turns an arm's per-turn events into a live curve phase line ("running
+// fak arm — 12/15 requests · 1.2k tok/s") so the arm runs visibly instead of as a
+// silent block. It reads the raw Go-typed event the arm emits in-process (no JSON
+// round-trip), so the int/float fields assert cleanly.
+func curveProgress(s *sseWriter, model, arm string) emitter {
+	return func(e event) {
+		if e["type"] != "turn" {
+			return
+		}
+		done, _ := e["requests_done"].(int)
+		total, _ := e["total_requests"].(int)
+		dec, _ := e["tokens_decoded"].(int)
+		el, _ := e["elapsed_ms"].(float64)
+		tps := 0.0
+		if el > 0 {
+			tps = float64(dec) / (el / 1000)
+		}
+		s.emit(event{"type": "phase", "model": model,
+			"phase": fmt.Sprintf("running %s arm — %d/%d requests · %s", arm, done, total, tokPerSec(tps))})
+	}
+}
+
+// tokPerSec formats a tokens/sec rate compactly (e.g. "1.2k tok/s", "840 tok/s").
+func tokPerSec(tps float64) string {
+	if tps >= 1000 {
+		return fmt.Sprintf("%.1fk tok/s", tps/1000)
+	}
+	return fmt.Sprintf("%.0f tok/s", tps)
+}
+
 // handleCurve sweeps the ladder: per model, run arm C live + measure prefill cost to PROJECT
 // arm A (the honest sessionbench method — naive re-prefill is intractable to run live for big
 // models). Emits one curve point per model, then "curvedone".
@@ -595,8 +643,15 @@ func handleCurve(w http.ResponseWriter, r *http.Request) {
 		if !sp.Present {
 			continue
 		}
-		s.emit(event{"type": "phase", "model": sp.Name, "phase": "loading"})
-		l, err := reg.get(sp)
+		// model load + quantize — heartbeat so a multi-second load shows a live counter.
+		var l *loaded
+		var err error
+		demoui.Beat(heartbeat,
+			func(el time.Duration) {
+				s.emit(event{"type": "phase", "model": sp.Name, "phase": fmt.Sprintf("loading · %.1fs", el.Seconds())})
+			},
+			func() { l, err = reg.get(sp) },
+		)
 		if err != nil {
 			s.emit(event{"type": "point", "model": sp.Name, "params": sp.Params, "error": err.Error()})
 			continue
@@ -608,20 +663,27 @@ func handleCurve(w http.ResponseWriter, r *http.Request) {
 		ws.Step(1)
 		ws.Close()
 
-		// prefill cost samples spanning [P, maxCtx] for the naive projection
+		// prefill cost samples spanning [P, maxCtx] for the naive projection — heartbeat it,
+		// the sweep over sample lengths is otherwise a silent multi-second stretch.
 		lens := sampleLens(P, maxCtx)
-		s.emit(event{"type": "phase", "model": sp.Name, "phase": "measuring prefill cost (" + strconv.Itoa(len(lens)) + " sample lengths)"})
-		pm := measurePrefill(l.m, l.vocab, lens, 1)
+		var pm prefillModel
+		demoui.Beat(heartbeat,
+			func(el time.Duration) {
+				s.emit(event{"type": "phase", "model": sp.Name, "phase": fmt.Sprintf("measuring prefill cost (%d sample lengths) · %.1fs", len(lens), el.Seconds())})
+			},
+			func() { pm = measurePrefill(l.m, l.vocab, lens, 1) },
+		)
 
-		// fak arm, LIVE
+		// fak arm, LIVE — feed per-turn progress to the phase line so the arm run is no
+		// longer a silent block (was a no-op emitter): the viewer sees it advance + tok/s.
 		s.emit(event{"type": "phase", "model": sp.Name, "phase": "running fak arm live"})
-		cTotal, cDecode := liveArmC(l, P, T, C, D, R, func(e event) {})
+		cTotal, cDecode := liveArmC(l, P, T, C, D, R, curveProgress(s, sp.Name, "fak"))
 
 		// tuned warm-cache arm, LIVE — the SOTA baseline. It is cheap to run (prefix once
 		// per agent + incremental ingestion, no quadratic re-prefill), so the HEADLINE
 		// fak-vs-tuned ratio is measured end-to-end, never projected.
 		s.emit(event{"type": "phase", "model": sp.Name, "phase": "running tuned warm-cache arm live"})
-		bTotal, _ := liveArmB(l, P, T, C, D, R, func(e event) {})
+		bTotal, _ := liveArmB(l, P, T, C, D, R, curveProgress(s, sp.Name, "tuned warm-cache"))
 
 		// naive cold re-prefill arm — PROJECTED reference only (quadratic in T, intractable
 		// to run live on the big rungs). Anchored to the live prefix prefill so cross-time

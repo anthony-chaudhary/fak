@@ -80,6 +80,7 @@
   .log{margin-top:12px;max-height:110px;overflow:auto;font-size:11px;color:var(--dim);background:var(--panel2);border:1px solid var(--line);border-radius:7px;padding:8px 10px;white-space:pre-wrap}
   .log:empty:before{content:"(event log)";color:#afb8c1}
   .note{font-size:11px;color:var(--dim);margin-top:10px;line-height:1.5}
+  .phase{font-size:12px;color:var(--accent);margin:4px 0 8px;min-height:16px;font-variant-numeric:tabular-nums}
 </style>
 </head>
 <body>
@@ -87,6 +88,7 @@
   <div class="top">
     <h1>fak · the multi-agent context demo</h1>
     <span class="pill" id="gmxPill">…</span>
+    <span class="pill" id="hwPill" title="the compute surface this demo is actually running on — cores, matmul workers, and any GPU backend compiled into this build">hardware: …</span>
   </div>
   <div class="sub">Many agents · many turns · long context · and a <b style="color:var(--txt)">different-sized tool result every turn</b>. The honest baseline is a <b style="color:var(--txt)">warm per-agent KV cache</b> — each agent already reuses its own KV across turns (what vLLM / SGLang / provider prompt-caching give you). fak's win is the step that cache can't take: <b style="color:var(--txt)">cross-agent prefix sharing</b> — one copy of the shared setup serves the whole fleet. A cold no-cache loop that re-reads the whole growing context every turn is shown only as a worst-case reference. Pick an agentic shape and watch the gap.</div>
 
@@ -120,6 +122,7 @@
       <span class="cfg" id="raceCfg"></span>
       <button id="raceBtn">Run live race</button>
     </div>
+    <div class="phase" id="raceStatus"></div>
     <div class="lane fak">
       <div class="hd"><span class="nm">fak <span class="idle" id="fakState">idle</span></span><span class="ms" id="fakMs">—</span></div>
       <div class="rtrack"><div class="rfill" id="fakFill"></div></div>
@@ -147,11 +150,18 @@
 const $=id=>document.getElementById(id);
 const fmt=s=>s<60?s.toFixed(1)+"s":Math.floor(s/60)+"m "+Math.round(s%60)+"s";
 const TCOL=["var(--t0)","var(--t1)","var(--t2)","var(--t3)"];
-let scenarios=[], cur=null, toolColors={};
+const SPIN=["⠋","⠙","⠹","⠸","⠼","⠴","⠦","⠧","⠇","⠏"]; let spinI=0;
+const spin=()=>SPIN[spinI++%SPIN.length];
+const tps=(dec,ms)=>ms>0?dec/(ms/1000):0;
+const tpsFmt=v=>v>=1000?(v/1000).toFixed(1)+"k tok/s":Math.round(v)+" tok/s";
+let scenarios=[], cur=null, toolColors={}, hwSummary="";
 
 fetch("/api/scenarios").then(r=>r.json()).then(d=>{
   scenarios=d.scenarios||[];
   $("gmxPill").textContent="GOMAXPROCS "+d.gomaxprocs;
+  const hw=d.hardware||{}; hwSummary=hw.summary||"";
+  $("hwPill").textContent="hardware: "+(hwSummary||"…");
+  if(hw.accelerator){$("hwPill").style.borderColor="var(--fak)";$("hwPill").style.color="var(--fak)";}
   const sel=$("model");
   (d.models||[]).forEach(m=>{if(m.Present){const o=document.createElement("option");o.value=m.Name;o.textContent=m.Name+" ("+m.Params+")";sel.appendChild(o);}});
   if(!sel.options.length){const o=document.createElement("option");o.textContent="(no model on disk)";sel.appendChild(o);}
@@ -220,7 +230,7 @@ function resetRace(){
   ["fakMs","tunedMs","naiveMs"].forEach(id=>$(id).textContent="—");
   ["fakFill","tunedFill","naiveFill"].forEach(id=>setFill(id,0));
   ["fakMeta","tunedMeta","naiveMeta"].forEach(id=>$(id).textContent="prefilled 0 · decoded 0");
-  $("result").classList.remove("show");$("log").textContent="";
+  $("result").classList.remove("show");$("log").textContent="";$("raceStatus").textContent="";
 }
 $("raceBtn").onclick=()=>{
   if(!cur)return; if(es)es.close();
@@ -229,12 +239,19 @@ $("raceBtn").onclick=()=>{
   es=new EventSource(url);
   es.onmessage=ev=>{
     const e=JSON.parse(ev.data);appendLog(e);
+    if(e.type==="hw"&&e.hardware){hwSummary=e.hardware.summary||hwSummary;$("hwPill").textContent="hardware: "+hwSummary;if(e.hardware.accelerator){$("hwPill").style.borderColor="var(--fak)";$("hwPill").style.color="var(--fak)";}}
+    // heartbeat: a blocking phase (model load) emits a tick ~1×/s so the screen never freezes
+    if(e.type==="tick"){$("raceStatus").textContent=spin()+" "+e.phase+"… "+fmt(e.elapsed_ms/1000);}
+    if(e.type==="info"&&e.msg){$("raceStatus").textContent=spin()+" "+e.msg;}
     if(e.type==="start"){const st=$(e.arm+"State");st.textContent=e.projected?"projecting…":"running…";st.className="";}
     if(e.type==="turn"){
       const pct=e.requests_done/e.total_requests*100;
+      const rate=tps(e.tokens_decoded,e.elapsed_ms);
       setFill(e.arm+"Fill",pct,e.requests_done+"/"+e.total_requests+(e.projected?" (proj)":""));
       $(e.arm+"Ms").textContent=fmt(e.elapsed_ms/1000);
-      $(e.arm+"Meta").textContent="prefilled "+(e.tokens_prefilled||0).toLocaleString()+" · decoded "+(e.tokens_decoded||0).toLocaleString();
+      $(e.arm+"Meta").textContent="prefilled "+(e.tokens_prefilled||0).toLocaleString()+" · decoded "+(e.tokens_decoded||0).toLocaleString()+" · "+tpsFmt(rate);
+      // live engine line: which arm is working, how fast, on what hardware — updates every turn
+      $("raceStatus").textContent="▶ "+e.arm+(e.projected?" (projected)":"")+" decoding · "+tpsFmt(rate)+(hwSummary?" · "+hwSummary:"");
     }
     if(e.type==="done"){
       $(e.arm+"State").innerHTML='<span class="doneBadge">'+(e.projected?"projected":"done")+'</span>';
@@ -252,9 +269,10 @@ $("raceBtn").onclick=()=>{
         '<div class="cell">time saved vs SOTA<b>'+fmt(e.saved_ms/1000)+'</b></div>'+
         '<div class="cell">exact prefill-tok vs warm KV<b>'+e.tokens.tuned_over_fak.toFixed(1)+'×</b></div>';
       $("resultRef").innerHTML='reference: the cold no-cache loop took <span style="color:var(--naive)">'+fmt(e.naive_ms/1000)+'</span>'+(e.naive_projected?' <span class="tag">projected</span>':'')+' ('+e.naive_ratio.toFixed(1)+'× fak, '+e.tokens.naive_over_fak.toFixed(1)+'× the prefill re-read) — a worst-case anchor, not a serving baseline anyone ships.';
+      $("raceStatus").textContent="✓ done · "+e.ratio.toFixed(1)+"× faster than the tuned warm-cache baseline"+(hwSummary?" · "+hwSummary:"");
       $("raceBtn").disabled=false;es.close();es=null;
     }
-    if(e.type==="error"){$("raceBtn").disabled=false;es.close();es=null;}
+    if(e.type==="error"){$("raceStatus").textContent="⚠ "+(e.msg||"error");$("raceBtn").disabled=false;es.close();es=null;}
   };
   es.onerror=()=>{$("raceBtn").disabled=false;if(es)es.close();es=null;};
 };

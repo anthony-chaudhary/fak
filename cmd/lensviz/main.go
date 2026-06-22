@@ -31,6 +31,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/anthony-chaudhary/fak/internal/demoui"
 	"github.com/anthony-chaudhary/fak/internal/ggufload"
 	"github.com/anthony-chaudhary/fak/internal/model"
 	"github.com/anthony-chaudhary/fak/internal/pathutil"
@@ -64,7 +65,15 @@ func main() {
 	cfg, err := readModelConfig(*hf, *gguf)
 	check("config", err)
 
+	// Surface the real compute surface up front (this box is CPU-only — the summary
+	// says so plainly rather than implying a GPU that isn't there).
+	fmt.Fprintf(os.Stderr, "hardware: %s\n", demoui.Probe().Summary)
+
+	// Model load + quantize is the longest silent phase (tens of seconds on the big
+	// rungs); spin a live stderr counter so the terminal isn't dead air while it loads.
+	stopLoad := demoui.Spinner(os.Stderr, "Loading model")
 	m, err := loadModel(*hf, *gguf, cfg)
+	stopLoad()
 	check("load", err)
 
 	td := resolveTokDir(*tokDir, *hf, *gguf)
@@ -91,7 +100,10 @@ func main() {
 	fmt.Fprintf(os.Stderr, "model=%s  layers=%d  vocab=%d  prompt_tokens=%d\n",
 		cfg.ModelType, cfg.NumLayers, cfg.VocabSize, len(ids))
 
+	// The forward pass is the other silent stretch; spin it too so the screen keeps moving.
+	stopFwd := demoui.Spinner(os.Stderr, "Running forward pass")
 	act := m.Forward(ids)
+	stopFwd()
 
 	inspect := *pos
 	if inspect < 0 {

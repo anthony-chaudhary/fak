@@ -56,6 +56,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/anthony-chaudhary/fak/internal/demoui"
 	"github.com/anthony-chaudhary/fak/internal/model"
 )
 
@@ -63,6 +64,11 @@ import (
 var pageFS embed.FS
 
 const version = "fak-ctxdemo-v1"
+
+// heartbeat is how often a blocking phase (model load + quantize) emits a keep-alive
+// "tick" so the page updates ~1×/s instead of freezing on a long load (tens of seconds
+// on the big rungs). Same cadence demorace uses.
+const heartbeat = 700 * time.Millisecond
 
 // projectThreshold: if the cold no-cache (naive) reference arm would re-prefill more
 // than this many tokens, project it from the fak arm's measured throughput instead of
@@ -287,6 +293,7 @@ func handleScenarios(w http.ResponseWriter, r *http.Request) {
 		"scenarios":  views,
 		"models":     models,
 		"gomaxprocs": gomax,
+		"hardware":   demoui.Probe(), // cores / workers / accelerator the demo actually runs on
 	})
 }
 
@@ -352,8 +359,19 @@ func runRace(scn Scenario, sp spec, naiveMode string, emit emitter) {
 	v := viewOf(scn)
 	emit(event{"type": "plan", "view": v, "model": sp.Name})
 
-	emit(event{"type": "info", "msg": "loading model " + sp.Name})
-	l, err := reg.get(sp)
+	hw := demoui.Probe()
+	emit(event{"type": "hw", "hardware": hw})
+	emit(event{"type": "info", "msg": "loading model " + sp.Name + " on " + hw.Summary})
+	// Model load + quantize is the longest blocking phase (tens of seconds on the big
+	// rungs); heartbeat it so the page shows a live elapsed counter instead of freezing.
+	var l *loaded
+	var err error
+	demoui.Beat(heartbeat,
+		func(el time.Duration) {
+			emit(event{"type": "tick", "phase": "loading model " + sp.Name, "elapsed_ms": ms(el)})
+		},
+		func() { l, err = reg.get(sp) },
+	)
 	if err != nil {
 		emit(event{"type": "error", "msg": "load: " + err.Error()})
 		return

@@ -39,6 +39,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/anthony-chaudhary/fak/internal/compute"
+	"github.com/anthony-chaudhary/fak/internal/demoui"
 	"github.com/anthony-chaudhary/fak/internal/ggufload"
 	"github.com/anthony-chaudhary/fak/internal/model"
 	"github.com/anthony-chaudhary/fak/internal/pathutil"
@@ -169,7 +170,17 @@ func main() {
 		fmt.Fprintln(os.Stderr, "📦 Loading model...")
 	}
 	t0 := time.Now()
+	// The GGUF load + quantize is the longest silent phase (tens of seconds on the
+	// bigger rungs). Spin a live "Loading model… 12.3s" line on stderr so the terminal
+	// never freezes; stop it the instant load returns, before the "Loaded …" line.
+	var stopLoad func()
+	if !*quiet {
+		stopLoad = demoui.Spinner(os.Stderr, "Loading model")
+	}
 	m, tok, modelName, tokSource, err := loadModel(*gguf, *tokDir, *autoDownload, *quiet)
+	if stopLoad != nil {
+		stopLoad()
+	}
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "❌ Error loading model: %v\n", err)
 		fmt.Fprintln(os.Stderr, "")
@@ -202,6 +213,10 @@ func main() {
 	stats := gatherModelStats(m, modelName, device)
 	if !*quiet {
 		fmt.Fprintf(os.Stderr, "✅ Loaded %s in %.1fs (tokenizer: %s)\n", modelName, float64(loadMS)/1000, tokSource)
+		// Show the real compute surface this run is using (cores / matmul workers /
+		// accelerator) so the user sees the hardware, not "whatever". On this CPU-only
+		// build the honest summary says pure-Go Q8 CPU with no GPU backend.
+		fmt.Fprintf(os.Stderr, "🖥️  %s\n", demoui.Probe().Summary)
 		printModelCard(stats, *temp, *maxNew, sampling)
 		fmt.Fprintln(os.Stderr, "")
 		fmt.Fprintln(os.Stderr, "💬 Chat with your AI! Type a message and press Enter.")
@@ -272,16 +287,27 @@ func main() {
 		reused := len(cachedIDs)
 		promptTokens := reused + len(newIDs)
 
+		// Prefill ONLY the new suffix; the cache already holds the reused prefix. Prefill
+		// is silent (no streamed tokens yet) and can run for seconds on a long prompt, so
+		// spin a live "Thinking… 1.2s" line on stderr while it runs. Stop it the instant
+		// prefill returns — and only THEN print the "AI: " prefix — so the spinner (which
+		// clears its own line with a carriage return) never overlaps the streamed reply.
+		var stopThink func()
+		if !*quiet {
+			stopThink = demoui.Spinner(os.Stderr, "Thinking")
+		}
+		tPrefill := time.Now()
+		logits := session.Prefill(newIDs)
+		prefillS := time.Since(tPrefill).Seconds()
+		if stopThink != nil {
+			stopThink()
+		}
+		cachedIDs = append(cachedIDs, newIDs...)
+
 		// Show we're thinking
 		if !*quiet {
 			fmt.Fprint(os.Stderr, "AI: ")
 		}
-
-		// Prefill ONLY the new suffix; the cache already holds the reused prefix.
-		tPrefill := time.Now()
-		logits := session.Prefill(newIDs)
-		prefillS := time.Since(tPrefill).Seconds()
-		cachedIDs = append(cachedIDs, newIDs...)
 
 		decodeStart := time.Now()
 		full, genIDs := decodeReply(session, tok, logits, stops, *maxNew, *temp, rng, out)

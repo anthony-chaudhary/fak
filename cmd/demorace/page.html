@@ -72,6 +72,7 @@
   <div class="top">
     <h1>fak · the reuse demo</h1>
     <span class="pill" id="ladderPill">ladder: …</span>
+    <span class="pill" id="hwPill" title="the compute surface this demo is actually running on — cores, matmul workers, and any GPU backend compiled into this build">hardware: …</span>
   </div>
   <div class="sub">Same model · same tokens · same answers. The headline race is <b style="color:var(--txt)">fak vs a tuned warm-cache baseline</b> — the real serving baseline a stack like vLLM / SGLang prefix-caching or provider prompt-caching gives you (prefix cached once per agent, only new tokens ingested). fak adds <b style="color:var(--txt)">cross-agent prefix sharing + batched decode</b> on top. The cold re-prefill loop is shown dim, as a worst-case reference only — not a baseline anyone ships.</div>
 
@@ -83,6 +84,7 @@
       <span class="cfg">workload: P=<b id="cP">512</b> T=<b id="cT">5</b> C=<b id="cC">5</b> D=<b id="cD">16</b> R=<b id="cR">32</b> → <b id="cReqs">25</b> requests</span>
       <button id="raceBtn">Run live race</button>
     </div>
+    <div class="phase" id="raceStatus"></div>
 
     <div class="lane fak">
       <div class="hd"><span class="nm">fak <small>prefix once · cloned · batched decode</small> <span class="idle" id="fakState">idle</span></span><span class="ms" id="fakMs">—</span></div>
@@ -127,7 +129,11 @@
 <script>
 const $=id=>document.getElementById(id);
 const fmt=s=>s<60?s.toFixed(1)+"s":Math.floor(s/60)+"m "+Math.round(s%60)+"s";
-let ladder=[], curvePts=[], curveMax=1;
+const SPIN=["⠋","⠙","⠹","⠸","⠼","⠴","⠦","⠧","⠇","⠏"]; let spinI=0;
+const spin=()=>SPIN[spinI++%SPIN.length];
+const tps=(dec,ms)=>ms>0?dec/(ms/1000):0;
+const tpsFmt=v=>v>=1000?(v/1000).toFixed(1)+"k tok/s":Math.round(v)+" tok/s";
+let ladder=[], curvePts=[], curveMax=1, hwSummary="";
 
 // ---- init ----
 fetch("/api/ladder").then(r=>r.json()).then(d=>{
@@ -136,6 +142,9 @@ fetch("/api/ladder").then(r=>r.json()).then(d=>{
   ladder.forEach(m=>{if(m.present){const o=document.createElement("option");o.value=m.name;o.textContent=m.name+" ("+m.params+")";sel.appendChild(o);}});
   const pr=d.prefill_tok_ratio||{};
   $("ladderPill").textContent="ladder: "+ladder.filter(m=>m.present).map(m=>m.params).join(" → ")+"  ·  timing-free fak vs tuned = "+(pr.b_over_c||0).toFixed(1)+"×  (vs no-cache ref "+(pr.a_over_c||0).toFixed(0)+"×)";
+  const hw=d.hardware||{}; hwSummary=hw.summary||"";
+  $("hwPill").textContent="hardware: "+(hwSummary||"…");
+  if(hw.accelerator){$("hwPill").style.borderColor="var(--fak)";$("hwPill").style.color="var(--fak)";}
 });
 
 // ---- race ----
@@ -144,7 +153,7 @@ const ARMS=["fak","tuned","naive"];
 function setFill(id,pct,label){const f=$(id);f.style.width=Math.min(100,pct)+"%";f.textContent=label||"";}
 function resetRace(){
   ARMS.forEach(a=>{$(a+"State").textContent="idle";$(a+"Ms").textContent="—";setFill(a+"Fill",0);$(a+"Meta").textContent="prefilled 0 · decoded 0";});
-  $("result").classList.remove("show");$("log").textContent="";
+  $("result").classList.remove("show");$("log").textContent="";$("raceStatus").textContent="";
 }
 $("raceBtn").onclick=()=>{
   if(raceES)raceES.close();
@@ -153,12 +162,19 @@ $("raceBtn").onclick=()=>{
   raceES=new EventSource("/api/race?model="+encodeURIComponent(model)+"&P=512&T=5&C=5&D=16&R=32");
   raceES.onmessage=ev=>{
     const e=JSON.parse(ev.data);appendLog(e);
+    if(e.type==="hw"&&e.hardware){hwSummary=e.hardware.summary||hwSummary;$("hwPill").textContent="hardware: "+hwSummary;}
+    // heartbeat: a blocking phase (model load) emits a tick ~1×/s so the screen never freezes
+    if(e.type==="tick"){$("raceStatus").textContent=spin()+" "+e.phase+"… "+fmt(e.elapsed_ms/1000);}
+    if(e.type==="info"&&e.msg){$("raceStatus").textContent=spin()+" "+e.msg;}
     if(e.type==="start"){$(e.arm+"State").textContent="running…";$(e.arm+"State").classList.remove("idle");}
     if(e.type==="turn"){
       const pct=e.requests_done/e.total_requests*100;
+      const rate=tps(e.tokens_decoded,e.elapsed_ms);
       $(e.arm+"Fill")&&setFill(e.arm+"Fill",pct,e.requests_done+"/"+e.total_requests);
       $(e.arm+"Ms").textContent=fmt(e.elapsed_ms/1000);
-      $(e.arm+"Meta").textContent="prefilled "+e.tokens_prefilled+" · decoded "+e.tokens_decoded;
+      $(e.arm+"Meta").textContent="prefilled "+e.tokens_prefilled+" · decoded "+e.tokens_decoded+" · "+tpsFmt(rate);
+      // live engine line: which arm is working, how fast, on what hardware — updates every turn
+      $("raceStatus").textContent="▶ "+e.arm+" decoding · "+tpsFmt(rate)+(hwSummary?" · "+hwSummary:"");
     }
     if(e.type==="done"){
       $(e.arm+"State").innerHTML='<span class="doneBadge">done</span>';
@@ -174,9 +190,10 @@ $("raceBtn").onclick=()=>{
         '<div class="cell">time saved vs SOTA<b>'+fmt(e.saved_ms/1000)+'</b></div>'+
         '<div class="cell">fak vs SOTA<b>'+e.ratio.toFixed(1)+"×</b></div>";
       $("resultRef").innerHTML='reference: the cold no-cache re-prefill loop took <span style="color:var(--naive)">'+fmt(e.naive_ms/1000)+'</span> ('+e.naive_ratio.toFixed(1)+'× fak) — shown only as a worst-case anchor, not a serving baseline anyone ships.';
+      $("raceStatus").textContent="✓ done · "+e.ratio.toFixed(1)+"× faster than the tuned warm-cache baseline"+(hwSummary?" · "+hwSummary:"");
       $("raceBtn").disabled=false;raceES.close();raceES=null;
     }
-    if(e.type==="error"){$("raceBtn").disabled=false;raceES.close();raceES=null;}
+    if(e.type==="error"){$("raceStatus").textContent="⚠ "+(e.msg||"error");$("raceBtn").disabled=false;raceES.close();raceES=null;}
   };
   raceES.onerror=()=>{$("raceBtn").disabled=false;if(raceES)raceES.close();raceES=null;};
 };

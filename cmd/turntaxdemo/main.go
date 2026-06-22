@@ -52,6 +52,7 @@ import (
 	"runtime"
 	"strconv"
 
+	"github.com/anthony-chaudhary/fak/internal/demoui"
 	"github.com/anthony-chaudhary/fak/internal/turnbench"
 
 	// Blank-import the built-in driver list so the full ABI (resolver, vDSO,
@@ -148,7 +149,12 @@ func handleSuites(w http.ResponseWriter, r *http.Request) {
 		}
 		out = append(out, row)
 	}
-	writeJSON(w, map[string]any{"suites": out, "gomaxprocs": gomax, "dir": turnTaxDir()})
+	writeJSON(w, map[string]any{
+		"suites":     out,
+		"gomaxprocs": gomax,
+		"dir":        turnTaxDir(),
+		"hardware":   demoui.Probe(), // cores / workers / accelerator this replay actually runs on
+	})
 }
 
 // handleRun replays one suite through the real kernel and returns the ordered
