@@ -1,6 +1,7 @@
 package model
 
 import (
+	"fmt"
 	"math"
 	"sort"
 )
@@ -42,6 +43,53 @@ import (
 // production oracle is — see TestOptionalMiniMaxM3Oracle* in oracle_test.go. Some
 // details that a real export will confirm and which are inferred from the public
 // reference (not a local checkpoint) are flagged in comments below.
+
+// materializeMiniMaxSharedExperts splits each MoE layer's fused shared-expert
+// projection (HF MiniMaxM3VLDenseMLP: mlp.shared_experts.gate_up_proj.weight, a single
+// [2*shared_intermediate, hidden] matrix whose first half is the gate and second half the
+// up) into the canonical split gate_proj/up_proj.weight views the Go shared-expert FFN
+// reads. The routed experts' batched gate_up/down are handled by splitBatchedMoEExperts;
+// this is the always-on shared expert's analogue. Zero-copy: the component manifest rows
+// alias slices of the original blob (mirrors splitBatchedMoEGateUp). The down projection
+// already lands as mlp.shared_experts.down_proj.weight, so it needs no split.
+func materializeMiniMaxSharedExperts(cfg Config, man map[string]tensorMeta) error {
+	if !cfg.isMiniMax() {
+		return nil
+	}
+	I := cfg.SharedIntermediateSize
+	if I == 0 {
+		I = cfg.IntermediateSize
+	}
+	H := cfg.HiddenSize
+	for l := 0; l < cfg.NumLayers; l++ {
+		name := layerName(l, "mlp.shared_experts.gate_up_proj.weight")
+		meta, ok := man[name]
+		if !ok {
+			continue
+		}
+		wantShape := []int{2 * I, H}
+		if !sameShape(meta.Shape, wantShape) {
+			return fmt.Errorf("model: MiniMax shared expert %s has shape %v, want %v", name, meta.Shape, wantShape)
+		}
+		partBytes := I * H * 4
+		if meta.Nbytes != 2*partBytes {
+			return fmt.Errorf("model: MiniMax shared expert %s has %d bytes, shape %v f32 implies %d",
+				name, meta.Nbytes, meta.Shape, 2*partBytes)
+		}
+		gateName := layerName(l, "mlp.shared_experts.gate_proj.weight")
+		upName := layerName(l, "mlp.shared_experts.up_proj.weight")
+		if _, exists := man[gateName]; exists {
+			return fmt.Errorf("model: cannot split %s: component %s already present", name, gateName)
+		}
+		if _, exists := man[upName]; exists {
+			return fmt.Errorf("model: cannot split %s: component %s already present", name, upName)
+		}
+		man[gateName] = tensorMeta{Dtype: meta.Dtype, Shape: []int{I, H}, Offset: meta.Offset, Nbytes: partBytes}
+		man[upName] = tensorMeta{Dtype: meta.Dtype, Shape: []int{I, H}, Offset: meta.Offset + partBytes, Nbytes: partBytes}
+		delete(man, name)
+	}
+	return nil
+}
 
 // layerMiniMax applies one MiniMax-M3 decoder block to x in place under the PreNorm
 // topology MiniMax uses: attention (dense GQA on full_attention layers, lightning-
@@ -104,10 +152,12 @@ func (m *Model) minimaxMSAAttnSeq(l int, xn [][]float32, rp rope) [][]float32 {
 	for t := 0; t < seq; t++ {
 		attnOut[t] = make([]float32, nH*hd)
 		for h := 0; h < nH; h++ {
-			// index_n_heads == num_key_value_heads, so each GQA group has exactly one
-			// index head, and every query head in the group shares its key selection.
+			// GQA: each query head h reads its group's K/V head kvh. The lightning
+			// indexer max-pools its block scores over ALL index heads into a SINGLE
+			// per-query block selection (HF amax(dim=1)), so every query head — across
+			// every GQA group — shares that one admitted-key set.
 			kvh := h / grp
-			admitted := sel[kvh][t]
+			admitted := sel[t]
 			qh := q[t][h*hd : (h+1)*hd]
 			scores := make([]float32, len(admitted))
 			for i, kp := range admitted {
@@ -130,15 +180,15 @@ func (m *Model) minimaxMSAAttnSeq(l int, xn [][]float32, rp rope) [][]float32 {
 }
 
 // minimaxIndexerSelect runs the MiniMax-M3 lightning indexer over a whole sequence and
-// returns, per index head (== GQA group) and per query, the ascending set of admitted
-// causal key positions. The index branch projects a low-dim per-head query
-// (self_attn.indexer.q_proj, IndexNHeads heads of IndexHeadDim) and a single shared key
-// (self_attn.indexer.k_proj, one head of IndexHeadDim), RMS-norms both (q_norm/k_norm),
-// applies partial RoPE (first rotary_dim dims, the same rope row as the main branch),
-// scores every causal key by idx_q·idx_k, max-pools to blocks of IndexBlockSize, and
-// selects the top-IndexTopKBlocks blocks plus the always-on IndexLocalBlocks local
-// window (block-level causality) — the selection helpers in msa_index.go.
-func (m *Model) minimaxIndexerSelect(l int, xn [][]float32, rp rope) [][][]int {
+// returns, per query, the ascending set of admitted causal key positions — ONE selection
+// shared by every attention head (the indexer max-pools its scores over all index heads).
+// The index branch projects a low-dim per-head query (self_attn.indexer.q_proj,
+// IndexNHeads heads of IndexHeadDim) and a single shared key (self_attn.indexer.k_proj,
+// one head of IndexHeadDim), RMS-norms both (q_norm/k_norm), applies partial RoPE (first
+// rotary_dim dims, the same rope row as the main branch), scores every causal key by
+// idx_q·idx_k, max-pools to blocks of IndexBlockSize, and selects the top-IndexTopKBlocks
+// blocks plus the always-on IndexLocalBlocks local window — the helpers in msa_index.go.
+func (m *Model) minimaxIndexerSelect(l int, xn [][]float32, rp rope) [][]int {
 	blocks := m.minimaxIndexerSelectBlocks(l, xn, rp)
 	seq := len(xn)
 	blockSize := m.Cfg.IndexBlockSize
@@ -146,27 +196,25 @@ func (m *Model) minimaxIndexerSelect(l int, xn [][]float32, rp rope) [][][]int {
 	for i := range keyPos {
 		keyPos[i] = i
 	}
-	out := make([][][]int, len(blocks))
-	for g := range blocks {
-		out[g] = make([][]int, seq)
-		for qpos := 0; qpos < seq; qpos++ {
-			keys, ok := msaSelectedKeyPositions(keyPos, qpos, blockSize, blocks[g][qpos])
-			if !ok {
-				panic("model: minimax_m3 indexer key broadcast failed")
-			}
-			out[g][qpos] = keys
+	out := make([][]int, seq)
+	for qpos := 0; qpos < seq; qpos++ {
+		keys, ok := msaSelectedKeyPositions(keyPos, qpos, blockSize, blocks[qpos])
+		if !ok {
+			panic("model: minimax_m3 indexer key broadcast failed")
 		}
+		out[qpos] = keys
 	}
 	return out
 }
 
-// minimaxIndexerSelectBlocks runs the indexer and returns, per index head (== GQA group)
-// and per query, the ASCENDING set of selected causal key-BLOCK indices (the HF-exact
-// fixed-count top-k with the local window forced in; see minimaxSelectBlocks). It is the
-// selection the HF MSA trace records, so the optional oracle test can reproduce it
-// directly; minimaxIndexerSelect broadcasts these blocks back onto key positions for the
-// actual attention.
-func (m *Model) minimaxIndexerSelectBlocks(l int, xn [][]float32, rp rope) [][][]int {
+// minimaxIndexerSelectBlocks runs the indexer and returns, PER QUERY, the ASCENDING set of
+// selected causal key-BLOCK indices (the HF-exact fixed-count top-k with the local window
+// forced in; see minimaxSelectBlocks). The HF indexer max-pools the per-key dot scores
+// into blocks (amax over keys-in-block) and then over ALL index heads (amax(dim=1)), so the
+// selection is a single per-query block set — NOT one per GQA group. It is the selection
+// the HF MSA trace records, so the optional oracle test reproduces it directly;
+// minimaxIndexerSelect broadcasts these blocks back onto key positions for the attention.
+func (m *Model) minimaxIndexerSelectBlocks(l int, xn [][]float32, rp rope) [][]int {
 	cfg := m.Cfg
 	nIdx := cfg.IndexNHeads
 	seq := len(xn)
@@ -179,10 +227,12 @@ func (m *Model) minimaxIndexerSelectBlocks(l int, xn [][]float32, rp rope) [][][
 	for i := range keyPos {
 		keyPos[i] = i
 	}
-	out := make([][][]int, nIdx)
-	for g := 0; g < nIdx; g++ {
-		out[g] = make([][]int, seq)
-		for qpos := 0; qpos < seq; qpos++ {
+	out := make([][]int, seq)
+	for qpos := 0; qpos < seq; qpos++ {
+		// Block score = max over (all index heads, all keys in the block); pooling
+		// the per-head block scores with max reproduces HF's amax(dim=1).
+		merged := map[int]float64{}
+		for g := 0; g < nIdx; g++ {
 			scores := make([]float64, seq) // entries > qpos are unused (causal skip in msaBlockScores)
 			for kk := 0; kk <= qpos; kk++ {
 				scores[kk] = float64(dot(idxQ[qpos][g], idxK[kk]))
@@ -191,8 +241,13 @@ func (m *Model) minimaxIndexerSelectBlocks(l int, xn [][]float32, rp rope) [][][
 			if !ok {
 				panic("model: minimax_m3 indexer block-score failed")
 			}
-			out[g][qpos] = minimaxSelectBlocks(bs, qpos, blockSize, topK, local)
+			for b, s := range bs {
+				if cur, seen := merged[b]; !seen || s > cur {
+					merged[b] = s
+				}
+			}
 		}
+		out[qpos] = minimaxSelectBlocks(merged, qpos, blockSize, topK, local)
 	}
 	return out
 }
@@ -272,9 +327,10 @@ func (m *Model) minimaxIndexerProject(l int, xn [][]float32, rp rope) ([][][]flo
 
 // minimaxIndexerNormalizedBlocks is the optional-oracle hook: from a layer's RAW input
 // hidden (pre-input_layernorm), normalize it the way the forward does and return the
-// per-(index head, query) selected key-block indices, so the MSA-trace oracle test can
-// compare the Go selection against the HF lightning-indexer trace.
-func (m *Model) minimaxIndexerNormalizedBlocks(l int, hidden []float32, seq int) [][][]int {
+// per-query selected key-block indices (one set per query, max-pooled over index heads),
+// so the MSA-trace oracle test can compare the Go selection against the HF lightning-
+// indexer trace.
+func (m *Model) minimaxIndexerNormalizedBlocks(l int, hidden []float32, seq int) [][]int {
 	cfg := m.Cfg
 	H := cfg.HiddenSize
 	w := m.tensor(layerName(l, "input_layernorm.weight"))

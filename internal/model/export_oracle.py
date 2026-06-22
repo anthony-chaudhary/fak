@@ -392,17 +392,23 @@ def main():
                 rec["topk_indices"] = topk[0].tolist()
             handles.append(module.register_forward_hook(hook))
 
-        # MiniMax-M3 MSA trace: the lightning indexer returns the selected key BLOCK
-        # indices per (index head = GQA group, query), right-padded with -1; the
-        # attention module emits the layer attention output. Recorded best-effort so the
-        # Go MSA block selection + sparse attention can be reproduced layer-by-layer.
+        # MiniMax-M3 MSA trace: the lightning indexer max-pools its dot scores over keys
+        # AND over all index heads, returning ONE selected key-BLOCK set per query (block
+        # indices right-padded with -1); the attention module emits the layer attention
+        # output. Recorded best-effort so the Go MSA block selection + sparse attention can
+        # be reproduced layer-by-layer. Only the sparse layers (the ones that actually own
+        # an indexer) carry an MSA trace — a dense full_attention layer has no block
+        # selection, so we skip its attention hook to keep msa_traces sparse-layer-only.
         def msa_record(layer_idx, name):
             return msa_by_layer.setdefault(layer_idx, {
                 "layer": int(layer_idx),
                 "module": name,
                 "source": "hf_forward_hook",
             })
+        sparse_layers = {layer_idx for layer_idx, _name, _module in minimax_indexer_modules}
         for layer_idx, name, module in minimax_attention_modules:
+            if layer_idx not in sparse_layers:
+                continue
             def hook(_module, _inputs, output, layer_idx=layer_idx, name=name):
                 attn = output[0] if isinstance(output, (tuple, list)) else output
                 if attn is None:
@@ -417,7 +423,7 @@ def main():
                 blk = blk.detach().cpu().to(torch.int32)
                 rec = msa_record(layer_idx, name)
                 rec["block_topk_shape"] = list(blk.shape)
-                rec["block_topk"] = blk[0].tolist()  # drop batch -> [index_heads, S_q, topk]
+                rec["block_topk"] = blk[0].tolist()  # drop batch -> [S_q, topk] (heads pooled)
             handles.append(module.register_forward_hook(hook))
 
         try:

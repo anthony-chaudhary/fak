@@ -518,6 +518,28 @@ func (c *Config) deriveConfigAxes(h configJSONHints) error {
 			c.QKNorm = true
 		}
 	}
+	if strings.Contains(family, "minimax") && h.NormGain1p == nil {
+		// MiniMax-M3 uses Gemma-style RMSNorm: every norm — the input/post
+		// layernorms, the per-head qk-norm, AND the lightning-indexer q/k
+		// norms — scales by (1+weight) (use_gemma_norm in the HF config; the
+		// modeling MiniMaxM3VLRMSNorm computes `output * (1.0 + weight)`).
+		// Default it on for the family unless an export pins it off explicitly.
+		c.NormGain1p = true
+	}
+	if strings.Contains(family, "minimax") && c.NumExperts > 0 {
+		// MiniMax-M3's MoE router (MiniMaxM3VLTopKRouter) ALWAYS renormalizes the
+		// top-k sigmoid weights by their sum (`top_k_weights /= sum`); the config
+		// carries no norm_topk_prob knob, so default it on for the family.
+		if !c.NormTopKProb {
+			c.NormTopKProb = true
+		}
+		// Every M3 MoE layer has exactly one always-on shared expert
+		// (MiniMaxM3VLSparseMoeBlock.shared_experts); the config records its width
+		// as shared_intermediate_size but no n_shared_experts count. Default to 1.
+		if c.NSharedExperts == 0 {
+			c.NSharedExperts = 1
+		}
+	}
 	if strings.Contains(family, "cohere") && h.LogitScale == nil && c.LogitScale == 0 {
 		c.LogitScale = 0.0625
 	}
@@ -1009,6 +1031,9 @@ func newModel(cfg Config, man map[string]tensorMeta, raw []byte) (*Model, error)
 		return nil, err
 	}
 	if err := splitBatchedMoEExperts(cfg, man); err != nil {
+		return nil, err
+	}
+	if err := materializeMiniMaxSharedExperts(cfg, man); err != nil {
 		return nil, err
 	}
 	return &Model{Cfg: cfg, manifest: man, raw: raw}, nil

@@ -20,15 +20,17 @@ const glmOraclePromptIDsJSON = `[[785,6722,315,9621,374],[16,11,220,17,11,220,18
 const glmOracleExportHint = "from fak/: python internal/model/export_oracle.py --online --trust-remote-code --model " +
 	glmOracleModel + " --out " + glmOracleDir + " --prompt-ids-json '" + glmOraclePromptIDsJSON + "'"
 
-// MiniMax-M3 MSA oracle. The model id is a placeholder for a tiny `minimax_m3` HF
-// fixture (text-only or VL with the vision tower dropped at load); substitute the
-// artifact node's actual tiny checkpoint. The exporter translates the real config
-// (flat index_* or nested sparse_attention_config) into fak's flat MSA axes.
+// MiniMax-M3 MSA oracle. No public tiny `minimax_m3` checkpoint exists, so the fixture
+// is built locally (à la yujiepan/glm-5-tiny-random) by make_minimax_m3_tiny.py — a small
+// text-only MiniMaxM3VL decoder with random weights, instantiable on a plain CPU box with
+// transformers>=5.12 (no GPU/artifact node needed). The exporter then translates the real
+// config (flat index_* or nested sparse_attention_config) into fak's flat MSA axes.
 const minimaxOracleDir = ".cache/oracle-minimax"
-const minimaxOracleModel = "yujiepan/minimax-m3-tiny-random"
+const minimaxOracleModel = ".cache/minimax-m3-tiny"
 const minimaxOraclePromptIDsJSON = `[[785,6722,315,9621,374],[16,11,220,17,11,220,18,11,220,19,11],[750,912,2877,11,293,982,262,470]]`
-const minimaxOracleExportHint = "from fak/: python internal/model/export_oracle.py --online --trust-remote-code --model " +
-	minimaxOracleModel + " --out " + minimaxOracleDir + " --prompt-ids-json '" + minimaxOraclePromptIDsJSON + "'"
+const minimaxOracleExportHint = "from fak/: python internal/model/make_minimax_m3_tiny.py " + minimaxOracleModel +
+	" && python internal/model/export_oracle.py --online --model " + minimaxOracleModel +
+	" --out internal/model/" + minimaxOracleDir + " --prompt-ids-json '" + minimaxOraclePromptIDsJSON + "'"
 
 type oraclePrompt struct {
 	Index     int              `json:"index"`
@@ -53,17 +55,19 @@ type oracleDSATrace struct {
 	AttnOutputFile  string  `json:"attn_output_file"`
 }
 
-// oracleMSATrace is the MiniMax-M3 lightning-indexer trace: BlockTopK is the per-(index
-// head == GQA group, query) selected key-BLOCK indices (right-padded with -1), exactly
-// what the HF MiniMaxM3VLIndexer returns; AttnOutput* is the per-layer attention output.
+// oracleMSATrace is the MiniMax-M3 lightning-indexer trace: BlockTopK is the per-query
+// selected key-BLOCK indices (right-padded with -1) — one set per query, since the HF
+// MiniMaxM3VLIndexer max-pools its block scores over all index heads (amax(dim=1)) before
+// the top-k, so the selection is shared by every attention head. AttnOutput* is the
+// per-layer attention output.
 type oracleMSATrace struct {
-	Layer           int       `json:"layer"`
-	Module          string    `json:"module"`
-	Source          string    `json:"source"`
-	BlockTopKShape  []int     `json:"block_topk_shape"`
-	BlockTopK       [][][]int `json:"block_topk"`
-	AttnOutputShape []int     `json:"attn_output_shape"`
-	AttnOutputFile  string    `json:"attn_output_file"`
+	Layer           int     `json:"layer"`
+	Module          string  `json:"module"`
+	Source          string  `json:"source"`
+	BlockTopKShape  []int   `json:"block_topk_shape"`
+	BlockTopK       [][]int `json:"block_topk"`
+	AttnOutputShape []int   `json:"attn_output_shape"`
+	AttnOutputFile  string  `json:"attn_output_file"`
 }
 
 type evictionFixture struct {
@@ -1133,21 +1137,21 @@ func TestOptionalMiniMaxM3OracleReproducesMSATrace(t *testing.T) {
 			if !cfg.isMSALayer(tr.Layer) {
 				t.Fatalf("%s MSA trace at non-sparse layer %d", dir, tr.Layer)
 			}
-			if len(tr.BlockTopK) != cfg.IndexNHeads {
-				t.Fatalf("%s layer %d HF index heads = %d, want %d", dir, tr.Layer, len(tr.BlockTopK), cfg.IndexNHeads)
+			// The HF indexer returns one block selection per query (heads pooled),
+			// so the trace is [S_q][topk].
+			if len(tr.BlockTopK) != seq {
+				t.Fatalf("%s layer %d HF trace has %d query rows, want seq %d", dir, tr.Layer, len(tr.BlockTopK), seq)
 			}
 			layerInput := hid[tr.Layer*seq*H : (tr.Layer+1)*seq*H]
 			goBlocks := m.minimaxIndexerNormalizedBlocks(tr.Layer, layerInput, seq)
-			if len(goBlocks) != cfg.IndexNHeads {
-				t.Fatalf("%s layer %d go index heads = %d, want %d", dir, tr.Layer, len(goBlocks), cfg.IndexNHeads)
+			if len(goBlocks) != seq {
+				t.Fatalf("%s layer %d go selection has %d query rows, want seq %d", dir, tr.Layer, len(goBlocks), seq)
 			}
-			for g := 0; g < cfg.IndexNHeads; g++ {
-				for qpos := 0; qpos < seq; qpos++ {
-					want := canonicalBlockSet(tr.BlockTopK[g][qpos], qpos, cfg.IndexBlockSize)
-					if !sameInts(goBlocks[g][qpos], want) {
-						t.Fatalf("%s layer %d head %d query %d MSA blocks = %v, want HF %v",
-							dir, tr.Layer, g, qpos, goBlocks[g][qpos], want)
-					}
+			for qpos := 0; qpos < seq; qpos++ {
+				want := canonicalBlockSet(tr.BlockTopK[qpos], qpos, cfg.IndexBlockSize)
+				if !sameInts(goBlocks[qpos], want) {
+					t.Fatalf("%s layer %d query %d MSA blocks = %v, want HF %v",
+						dir, tr.Layer, qpos, goBlocks[qpos], want)
 				}
 			}
 		}
