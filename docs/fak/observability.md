@@ -153,7 +153,54 @@ the local fast-path served for free.
 
 ---
 
-## 4. Securing the surfaces
+## 4. Grafana dashboards, scrape config & alerts
+
+`fak serve` emits standard Prometheus exposition, so any Prometheus + Grafana stack can
+scrape it. This repo ships a ready-to-run one under [`tools/grafana/`](../../tools/grafana/):
+
+- **Scrape config** — [`prometheus.yml`](../../tools/grafana/prometheus.yml) has a
+  `fak_gateway` job that scrapes `/metrics` every 30s:
+
+  ```yaml
+  scrape_configs:
+    - job_name: fak_gateway
+      metrics_path: /metrics
+      static_configs:
+        - targets: ["host.docker.internal:8080"]   # your `fak serve --addr`
+          labels: { service: fak-gateway }
+  ```
+
+  If the gateway runs with `--require-key-env`, add Prometheus auth for the job (e.g.
+  `bearer_token_file`) or front it with a loopback-only scrape proxy.
+
+- **Provisioned dashboards** — under
+  [`tools/grafana/dashboards/`](../../tools/grafana/dashboards/), generated from
+  [`gen_dashboard.py`](../../tools/grafana/gen_dashboard.py) (the maintainable source —
+  re-run it when a metric name changes so no panel queries a phantom family):
+  - `fak-gateway-observability.json` — up / build-info, request & error rate, p50/p95/p99
+    latency per route, in-flight saturation.
+  - `fak-startup-load.json` — `time_to_ready` and the per-phase boot breakdown.
+  - `fak-dogfood-slow-requests.json` — slowest-route drill-down.
+
+- **Alerts** — [`prometheus-alerts.yml`](../../tools/grafana/prometheus-alerts.yml)
+  carries the rule set (e.g. gateway-down on `fak_gateway_up == 0`).
+
+- **One command** — [`up.sh`](../../tools/grafana/up.sh) brings up Prometheus (`:9091`) +
+  Grafana (`:3000`, `admin` / `fleet`) with the scrape config and dashboards
+  pre-provisioned; `down.sh` tears it down (`--purge` also drops the data volumes).
+
+### Retention and rotation
+
+fak itself does **not** persist or rotate telemetry — it exposes the live surfaces above
+and writes the access log to stdout / its log sink. Retention is owned by the systems you
+point at it: set Prometheus TSDB retention with `--storage.tsdb.retention.time`, and
+ship/rotate the JSON access log with your log collector (journald, Vector, Fluent Bit, or
+a SIEM). Because no line carries request bodies or tool arguments (§1), long-retention
+shipping never turns the log into a secret-leak vector of its own.
+
+---
+
+## 5. Securing the surfaces
 
 `/metrics` and `/debug/vars` follow the gateway's auth policy. With `--require-key-env`
 set, they require the same bearer token as the `/v1/fak/*` routes; `/healthz` stays
@@ -177,4 +224,5 @@ hardening (bind address, reverse-proxy scrape isolation) is covered in
 - [tutorial.md §2.5](tutorial.md) — seeing the access log in the guided first session.
 - [security.md](security.md) — auth, network exposure, and the threat model for these surfaces.
 - [server-config.md](server-config.md) — every `fak serve` flag and env var.
+- [`tools/grafana/`](../../tools/grafana/) — the ready-to-run Prometheus + Grafana stack (scrape config, provisioned dashboards, alert rules).
 - [`fak/GETTING-STARTED.md` §3](../../GETTING-STARTED.md) — the full route table.
