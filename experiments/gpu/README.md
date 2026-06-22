@@ -2,8 +2,8 @@
 
 Captured benchmark data for the **kernel-core** forward pass — fak's own pure-Go model
 running on the GPU through the `compute.Backend` CUDA path (`-tags cuda`, `FAK_CUDA_Q8=1`),
-**not** a model fronted by `fak serve`. Companion to [`../../GPU-QWEN-RESULTS.md`](../../GPU-QWEN-RESULTS.md)
-(narrative + the launch-tax analysis) and [`../../GPU-MODEL-PICK.md`](../../GPU-MODEL-PICK.md).
+**not** a model fronted by `fak serve`. Companion to [`GPU-QWEN-RESULTS.md`](../../docs/benchmarks/GPU-QWEN-RESULTS.md)
+(narrative + the launch-tax analysis) and `GPU-MODEL-PICK.md` (operator-specific note — not published).
 Every number below is a real run captured in bench output — the JSON is the raw artifact.
 
 > **Whose engine is this? fak's own — not llama.cpp.** The throughput, the argmax-exact witness,
@@ -17,10 +17,10 @@ Every number below is a real run captured in bench output — the JSON is the ra
 
 ## Data
 - [`qwen2.5-3b-q8-cuda-4070.json`](qwen2.5-3b-q8-cuda-4070.json) — `modelbench -out` report (this run).
-- [`comparison.json`](comparison.json) — cross-engine decode tok/s (fak vs llama.cpp), cited to `../../GPU-QWEN-RESULTS.md` §3.
+- `comparison.json` (raw artifact — not committed to public) — cross-engine decode tok/s (fak vs llama.cpp), cited to [`GPU-QWEN-RESULTS.md`](../../docs/benchmarks/GPU-QWEN-RESULTS.md) §3.
 
 ## Charts
-Dependency-free SVG, regenerated from the JSON above by [`make_charts.py`](make_charts.py)
+Dependency-free SVG, regenerated from the JSON above by `make_charts.py` (chart generator — not committed to public)
 (`python make_charts.py`) so the figures can't drift from the data they show.
 
 ![Decode throughput on the RTX 4070 — fak-CUDA vs llama.cpp](figures/decode-vs-llama.svg)

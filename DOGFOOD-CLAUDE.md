@@ -156,7 +156,7 @@ merged into upstream requests), `FAK_DOGFOOD_PRESET` (`qwen36-local`),
 For a large local model already served by `llama-server`, LM Studio, vLLM, or SGLang,
 point the dogfood launcher at that endpoint instead of Ollama. The focused Qwen3.6
 Claude Code playbook is
-[`docs/qwen36-claude-dogfood-playbook.md`](../docs/qwen36-claude-dogfood-playbook.md):
+[`docs/qwen36-claude-dogfood-playbook.md`](docs/qwen36-claude-dogfood-playbook.md):
 
 ```bash
 fak-qwen36-claude --probe "Reply with exactly the word: pong"

@@ -152,4 +152,4 @@ directly.
 *Companions: [prior art & where the gap really is](_prior-art.md) ·
 [the enforcement-topology argument](_enforcement-topology.md) ·
 [what fell under adversarial review](_adversarial-review.md). Design doc:
-[`../CONTEXT-IS-NOT-MEMORY.md`](../CONTEXT-IS-NOT-MEMORY.md).*
+[`../CONTEXT-IS-NOT-MEMORY.md`](../docs/CONTEXT-IS-NOT-MEMORY.md).*

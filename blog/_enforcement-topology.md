@@ -7,7 +7,7 @@ forced vs. free, and where the boundary actually bites.*
 
 ## Which layer: the decision is a *semantics* property, not a *routing* one
 
-fak's [memory-layers framing](../MEMORY-LAYERS-EXPLAINER.md) separates four things that
+fak's [memory-layers framing](../docs/MEMORY-LAYERS-EXPLAINER.md) separates four things that
 get conflated under the word "memory":
 
 - **Routing** — where the cell physically lives, how fast it's served (KV/prefix caches,

@@ -21,7 +21,7 @@ HuggingFace — not a chat-quality serving engine (see the honest caveat in §4)
 
 > **Prefer not to install anything?** Run these tiers in a hosted cloud notebook — a free
 > Colab/Kaggle T4 for Tiers 0–1, a neocloud GPU for Tier 2. See
-> [`notebooks/`](../notebooks/README.md).
+> [`notebooks/`](notebooks/README.md).
 
 > **Operator's local-testing default (2026-06-19).** When testing fak *locally*,
 > default to **Tier 2 — the fused in-kernel model with real weights** (`fak serve
@@ -384,7 +384,7 @@ whatever the caller proposed. `--base-url` (Tier 1 proxy) wins if both are set.
 
 ## Where to go next
 
-- [`docs/fak/tutorial.md`](../docs/fak/tutorial.md) — **the guided first session**: a
+- [`docs/fak/tutorial.md`](docs/fak/tutorial.md) — **the guided first session**: a
   step-by-step walk through Tiers 0–2 with the real, captured output of every command
   (the friendliest on-ramp if this reference felt dense).
 - [`DOGFOOD-CLAUDE.md`](DOGFOOD-CLAUDE.md) — **use it as a product**: one command spins up

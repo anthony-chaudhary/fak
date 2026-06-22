@@ -42,7 +42,7 @@ ALLOWED_ROOT_MD = {
     # the public home). Moving these to docs/notes/ would break those links.
     "ARCHITECTURE.md", "EXTENDING.md", "GETTING-STARTED.md", "GPU.md",
     "POLICY.md", "PARTITION.md", "STATUS.md", "CLAIMS.md",
-    "SOTA-COMPARISON.md", "DOGFOOD-CLAUDE.md",
+    "SOTA-COMPARISON.md", "DOGFOOD-CLAUDE.md", "SUBSYSTEM-CHECKS.md",
     # benchmark front-door set (the single-source-of-truth deck the README cites)
     "BENCHMARK-AUTHORITY.md", "BENCHMARK-GALLERY.md",
     "BENCHMARK-GOVERNANCE.md", "BENCHMARK-TEMPLATE.md",

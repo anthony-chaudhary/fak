@@ -4,8 +4,8 @@
 [`BENCHMARK-AUTHORITY.md`](BENCHMARK-AUTHORITY.md) (commit + JSON artifact).
 
 > **Generated, not hand-maintained.** This file is rebuilt from
-> [`tools/hero_benchmark.data.json`](../tools/hero_benchmark.data.json) by
-> [`tools/hero_benchmark_gen.py`](../tools/hero_benchmark_gen.py). Edit the data file and rerun the
+> [`tools/hero_benchmark.data.json`](tools/hero_benchmark.data.json) by
+> [`tools/hero_benchmark_gen.py`](tools/hero_benchmark_gen.py). Edit the data file and rerun the
 > generator when a benchmark changes — do not hand-edit this doc or the two SVGs.
 
 > **The frontier-lab move, done honestly.** When a frontier lab ships a model it leads with one
@@ -37,7 +37,7 @@ next section spells that out.
 
 ## The headline
 
-![Hero: fak does the fleet's shared work once, not every turn](../visuals/53-hero-benchmark-comparison.svg)
+![Hero: fak does the fleet's shared work once, not every turn](visuals/53-hero-benchmark-comparison.svg)
 
 > On a realistic **50-turn × 5-agent** run (Apple M3 Pro, Qwen2.5-1.5B Q8), `fak` serves the fleet in **19.0 minutes**. A per-agent warm-KV cache — the same reuse discipline SGLang, vLLM, and OpenAI prompt caching ship — needs **≈78 minutes** on the *identical forward pass*: `fak` does **4.1× less serving work**. That baseline is `fak`'s **own** kernel run in warm-KV mode (both arms live, kernel held constant), so the 4.1× isolates **cross-agent reuse**, not kernel speed — see *What the 4.1× is measured against* below. Every comparison here is against that tuned SOTA floor.
 
@@ -59,7 +59,7 @@ xychart-beta
 
 ## What the 4.1× is measured against (and its ceiling)
 
-The **≈78-minute baseline is `fak`'s own Q8 forward pass** run in a per-agent warm-KV serving discipline — the same reuse SGLang, vLLM, and OpenAI prompt caching ship — **not a measured competitor process**. Both arms run end-to-end live on one shared kernel: their decode wall-clocks are byte-identical (2,878,394 ms) and the no-reuse arm's decode is *defined* as the warm arm's live decode, so the kernel is **held constant** across arms. `fak`'s single-stream kernel is itself **unoptimized** (≈0.39× decode, ≈0.10–0.12× prefill vs llama.cpp CPU at 1.5B — it still lacks an arm64 register-blocked GEMM tile, [tracked](https://github.com/anthony-chaudhary/fak/issues)), and the baseline holds that *same slow kernel* constant — so the **4.1× is work _eliminated_, not work made faster**. Read it as *4.1× vs a SOTA-style warm-KV discipline*, not *vs the SOTA implementation*: a production vLLM/SGLang with its own kernel tricks would shrink the absolute minutes of **both** arms, but — because per-token cost (κ) and tokens-processed (N) are orthogonal factors of the same `cost ≈ κ·N` — a *uniform* kernel speedup scales both arms equally and is **expected to leave the 4.1× reuse ratio roughly intact** ([WHY-REUSE-WINS](WHY-REUSE-WINS-2026-06-21.md) §4).
+The **≈78-minute baseline is `fak`'s own Q8 forward pass** run in a per-agent warm-KV serving discipline — the same reuse SGLang, vLLM, and OpenAI prompt caching ship — **not a measured competitor process**. Both arms run end-to-end live on one shared kernel: their decode wall-clocks are byte-identical (2,878,394 ms) and the no-reuse arm's decode is *defined* as the warm arm's live decode, so the kernel is **held constant** across arms. `fak`'s single-stream kernel is itself **unoptimized** (≈0.39× decode, ≈0.10–0.12× prefill vs llama.cpp CPU at 1.5B — it still lacks an arm64 register-blocked GEMM tile, [tracked](https://github.com/anthony-chaudhary/fak/issues)), and the baseline holds that *same slow kernel* constant — so the **4.1× is work _eliminated_, not work made faster**. Read it as *4.1× vs a SOTA-style warm-KV discipline*, not *vs the SOTA implementation*: a production vLLM/SGLang with its own kernel tricks would shrink the absolute minutes of **both** arms, but — because per-token cost (κ) and tokens-processed (N) are orthogonal factors of the same `cost ≈ κ·N` — a *uniform* kernel speedup scales both arms equally and is **expected to leave the 4.1× reuse ratio roughly intact** (`WHY-REUSE-WINS-2026-06-21.md` §4 — private companion, not published).
 
 **Its ceiling, and the next step.** The 4.1× (warm/fused = 78.3/19.0 min) blends a measured **1.46× prefill-token saving** (25,920 → 17,728 tokens) with a **~6.4× batched-decode saving** on top. The *shared-prefix* component alone is bounded by the agent count (~5×: the warm arm prefills the shared prefix once **per agent**, `fak` once **for the fleet**) — but that 5× bounds only the shared-prefill slice, not the end-to-end multiplier (per-agent residual prefill pulls it below 5×; cross-agent decode batching pushes it above the 1.46× prefill-only bound). The open next-step kernel release — the arm64 register-blocked GEMM tile ([tracked](https://github.com/anthony-chaudhary/fak/issues), **currently unshipped**) — **would** lower the absolute 19.0 / 78.3 minutes on both arms and **is expected** to push the realized wall-clock multiplier toward its token-count ceiling (on a *separate* workload, `radixbench` already shows live reuse at **6.95× of a 7.50× deterministic token ceiling**, climbing with model size). It would **not** change the structural shared-prefix bound, which is set by the fleet's agent count and shared-vs-residual split, not by kernel speed.
 
@@ -82,7 +82,7 @@ honest place `fak` is behind. That is the whole comparison in one line.
 
 ## The SOTA benchmark leaderboard
 
-![SOTA leaderboard: fak's number bolded where it leads](../visuals/54-hero-benchmark-leaderboard.svg)
+![SOTA leaderboard: fak's number bolded where it leads](visuals/54-hero-benchmark-leaderboard.svg)
 
 Six benchmarks, each `fak` against the **best already-shipped SOTA serving system** — no naive-strawman rows. The **absolute measured number leads**; the multiplier is a parenthetical reference (model-card style). **`fak`'s number is bolded where it leads or reaches parity**; the two single-stream rows where it trails are shown plain — not a clean sweep.
 
@@ -160,8 +160,8 @@ llama-bench -m <qwen2.5-7b-q8_0.gguf> -ngl 99 -t 6 -p 256 -n 64
 
 ## See also
 
-- [`fak/WHY-REUSE-WINS-2026-06-21.md`](WHY-REUSE-WINS-2026-06-21.md) — the **why** behind this hero: reuse is a *different class* of optimization (work-elimination, not work-acceleration) — exact, training-free, and composes on top of every per-token trick. Argues it and fences where it's overstated.
-- [`fak/MODEL-LADDER-VS-SOTA-2026-06-21.md`](MODEL-LADDER-VS-SOTA-2026-06-21.md) — the full two-regime ladder (single-stream **and** multi-agent value stack) this hero distills.
+- `WHY-REUSE-WINS-2026-06-21.md` (private companion — not published) — the **why** behind this hero: reuse is a *different class* of optimization (work-elimination, not work-acceleration) — exact, training-free, and composes on top of every per-token trick. Argues it and fences where it's overstated.
+- `MODEL-LADDER-VS-SOTA-2026-06-21.md` (private companion — not published) — the full two-regime ladder (single-stream **and** multi-agent value stack) this hero distills.
 - [`fak/BENCHMARK-AUTHORITY.md`](BENCHMARK-AUTHORITY.md) — single source of truth for every committed number.
 - [`RADIXATTENTION-RESULTS.md`](docs/benchmarks/RADIXATTENTION-RESULTS.md) — SGLang RadixAttention parity + hit-rate method.
-- [`docs/explainers/sota-optimizations.md`](../docs/explainers/sota-optimizations.md) — the 10 tuned-SOTA optimizations `fak` sits on top of.
+- [`docs/explainers/sota-optimizations.md`](docs/explainers/sota-optimizations.md) — the 10 tuned-SOTA optimizations `fak` sits on top of.

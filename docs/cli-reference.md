@@ -22,13 +22,13 @@ If you drive a coding agent, fak fits in two ways:
   `/v1/chat/completions` wires are both adjudicated, and a dropped or repaired
   call comes back with an in-band `[fak]` note so the agent adapts instead of
   looping. Witnessed live on macOS + Windows with the real Claude Code CLI:
-  [`DOGFOOD-CLAUDE.md`](DOGFOOD-CLAUDE.md) (one command — `scripts/dogfood-claude.sh`,
+  [`DOGFOOD-CLAUDE.md`](../DOGFOOD-CLAUDE.md) (one command — `scripts/dogfood-claude.sh`,
   or `scripts/dogfood-claude.ps1` on Windows).
 - **As an MCP server** — `fak serve --stdio` exposes the kernel's verbs
   (`fak_adjudicate`, `fak_syscall`, `fak_admit`, …) as MCP tools, so your agent
   can ask the kernel for a verdict before it runs a tool, or screen a result it
   executed itself through the exfil floor. Copy-paste config + the tool catalog:
-  [`examples/mcp/`](examples/mcp/) (drop [`examples/mcp/.mcp.json`](examples/mcp/.mcp.json)
+  [`examples/mcp/`](../examples/mcp/) (drop [`examples/mcp/.mcp.json`](../examples/mcp/.mcp.json)
   in your project root for Claude Code).
 
 Both put the **same reviewable capability floor** (`--policy floor.json`) on every
@@ -75,7 +75,7 @@ knowing up front: `stream:true` SSE is **synthesized from the finished,
 already-adjudicated turn** — well-formed, but not true token-by-token streaming. (The
 client's `max_tokens`/`temperature`/`top_p`/`stop` are now forwarded per request, so
 long completions are no longer truncated.) Full walkthrough (Tiers 0–2):
-[`GETTING-STARTED.md`](GETTING-STARTED.md).
+[`GETTING-STARTED.md`](../GETTING-STARTED.md).
 
 > **Status: shipped & benchmarked** (current release `v0.30.0` — single source of truth is
 > the root [`VERSION`](../VERSION) file). `go build`/`go vet`/`go test ./...` green across the
@@ -170,8 +170,8 @@ tools the agent may call is a reviewable file, not a Go edit. See `POLICY.md`.
 | `TURN-TAX-RESULTS.md` | The **turn-tax** benchmark (`fak turntax`): prices the extra error-code MODEL turn the 1-shot kernel deletes (forced vs elision, with a consistency guard and a happy-path=0 control), keeping the safety floor on its own axis. |
 | `FLEET-SWEEP-RESULTS.md` | The 2-D **turns x agents** sweep: shared-cache fleet vs isolated agents, exact-zero no-share controls, and the scoped-invalidation eraser that fixes the write-rate crossover. |
 | `FANOUT-BENCH-RESULTS.md` | The one-master-goal **fan-out** benchmark: N=1..1024 sub-agents, real cross-agent tool-result dedup, transparent prefix-cache economics, and the fold-bound latency knee. |
-| `../VISUALS-benchmarking-status-2026-06-18.md` | The refreshed benchmark visual/status dashboard tying the current plots, headline numbers, and caveats together. |
-| `../EXPLAINER-trust-floor-two-lenses-2026-06-17.md` | **fak explained twice** — once for *security researchers*, once for *agent-optimization*, with a Rosetta table mapping each primitive to both vocabularies. |
+| `VISUALS-benchmarking-status-2026-06-18.md` | The refreshed benchmark visual/status dashboard tying the current plots, headline numbers, and caveats together. |
+| `EXPLAINER-trust-floor-two-lenses-2026-06-17.md` | **fak explained twice** — once for *security researchers*, once for *agent-optimization*, with a Rosetta table mapping each primitive to both vocabularies. |
 
 ## The contract in one breath
 

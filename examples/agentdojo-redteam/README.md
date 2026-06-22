@@ -105,7 +105,7 @@ did not raise ASR on this corpus.
 ## The compiled loop: 3 of 4 arrows shipped (honesty note)
 
 This battery is one arrow of a **compiled defender-side loop**
-([`COMPILED-LOOP-2026-06-17.md`](../../COMPILED-LOOP-2026-06-17.md)):
+(`COMPILED-LOOP-2026-06-17.md` — private companion note, not published):
 
 1. **red-team** (`internal/agentdojo`) generates adaptive attacks — **shipped**.
 2. the kernel's gates **adjudicate** them into typed verdicts — **shipped**.
@@ -133,7 +133,7 @@ scoring contract (`Defense.Run`), mutations enumerated rather than learned.
 ## See also
 
 - [`CLAIMS.md`](../../CLAIMS.md) #76 — the dynamic attack battery claim this example backs.
-- [`COMPILED-LOOP-2026-06-17.md`](../../COMPILED-LOOP-2026-06-17.md) — the four-arrow loop and what the 4th arrow defers.
+- `COMPILED-LOOP-2026-06-17.md` (private companion — not published) — the four-arrow loop and what the 4th arrow defers.
 - [`internal/agentdojo/`](../../internal/agentdojo/) — the battery, the defense stack, and the generative expander (`expand.go`).
 - [`internal/harvest/`](../../internal/harvest/) — the `LabelRow` corpus this run folds outcomes into.
 - The static counterpart: [`testdata/poison.json`](../../testdata/poison.json) — the fixed fixture this dynamic battery supersedes.

@@ -94,7 +94,7 @@ Apple Silicon** for this family.
   measurement artifact (`grep -rli mlx fak/` now matches only these status docs, which name MLX
   to say we don't use it). The only measured bar is **llama.cpp b9707 Metal** (`-ngl 99`),
   which *does* implement the cached hybrid GDN: **pp22 = 51.55 tok/s**
-  ([`mac-hybrid-prefill-20260620/`](mac-hybrid-prefill-20260620/README.md)). That bar stays.
+  (`mac-hybrid-prefill-20260620/README.md` — private companion, not published). That bar stays.
 - Adding an MLX column would not strengthen the comparison; it would inject a number whose
   denominator (recompute-every-turn) is a different computation. So MLX is recorded as an
   **invalid bar for this arch**, not merely "not yet run."

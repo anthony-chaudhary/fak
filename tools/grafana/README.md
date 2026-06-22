@@ -4,15 +4,15 @@ The **human + machine** time-series surface for fleet operations and the FAK
 gateway. It scrapes:
 
 - [`../fleet_bottleneck.py`](../fleet_bottleneck.py), which scores the
-  [Top 10 fleet bottlenecks](../FLEET-BOTTLENECK-MASTER-LIST.md) from on-disk
-  telemetry and emits `fleet_*` metrics.
+  Top 10 fleet bottlenecks (`FLEET-BOTTLENECK-MASTER-LIST.md` — internal master
+  list, not published) from on-disk telemetry and emits `fleet_*` metrics.
 - `fak serve`, which emits live gateway/kernel metrics (`fak_gateway_*`,
   `fak_kernel_*`) at `/metrics`.
 
 This folder turns those metrics into provisioned Grafana dashboards + alert rules.
 
 This is the fleet adaptation of the DGX-caching
-[`metrics-service/grafana`](../../../metrics-service/grafana) stack — same
+`metrics-service/grafana` stack (internal companion — not published) — same
 Prometheus-scrapes-`:9095/metrics` → Grafana shape, scoped to fleet signals.
 
 ## One command (recommended)

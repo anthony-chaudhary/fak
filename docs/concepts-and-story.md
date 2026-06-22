@@ -4,7 +4,7 @@
 > is the 3-page front door; everything that used to make it long lives here: the full
 > parable, the persona framing, the "why this is the right layer" positioning, the
 > detailed "when does the reuse win kick in" tables, and the honest-scope ledger in
-> narrative form. Numbers trace to [`fak/CLAIMS.md`](../fak/CLAIMS.md) and the results
+> narrative form. Numbers trace to [`fak/CLAIMS.md`](../CLAIMS.md) and the results
 > docs it links.
 
 ## The story that makes it click
@@ -99,9 +99,9 @@ protections (which apply from the very first call, with one agent, on any backen
 separate axis), not this reuse win.
 
 Reference hardware, every assumption, and a plain-language glossary are in the
-**[session value-stack deck](../fak/SESSION-VALUE-STACK-DECK.md)**; a separate,
+`SESSION-VALUE-STACK-DECK.md` (private companion — not published); a separate,
 read-heavy fleet projection — *how many duplicate tool round-trips disappear at scale* —
-is in [`fak/FLEET-VALUE-PROJECTION.md`](../fak/FLEET-VALUE-PROJECTION.md).
+is in `FLEET-VALUE-PROJECTION.md` (private companion — not published).
 
 ## What that means in human terms
 
@@ -163,12 +163,12 @@ keep irreversible tools off the allow-list rather than leaning on argument-match
 floor is a **deployable manifest**: a declarative, version-tagged JSON file loaded at
 runtime (`fak serve --policy FILE`, also on `run`/`agent`/`preflight`; author/validate with `fak policy --dump|--check`), so
 adopting `fak` is editing a reviewable allow-list, not forking the kernel — see
-[`fak/POLICY.md`](../fak/POLICY.md). **Permissions as the floor; filters on top.**
+[`fak/POLICY.md`](../POLICY.md). **Permissions as the floor; filters on top.**
 
 ## What's real, what's simulated, what's not built yet
 
 `fak` is built to survive a skeptic reading the code. Every capability in
-[`fak/CLAIMS.md`](../fak/CLAIMS.md) carries exactly one machine-checked tag:
+[`fak/CLAIMS.md`](../CLAIMS.md) carries exactly one machine-checked tag:
 
 - **SHIPPED & on the critical path:** the in-process syscall chokepoint, the LSM-style
   capability adjudicator (closed 12-reason refusal vocabulary, fail-closed default-deny),
@@ -179,7 +179,7 @@ adopting `fak` is editing a reviewable allow-list, not forking the kernel — se
   there's a real GPU on the box now, but no power meter, so those stay illustrative. (The
   in-`fak` model's forward pass itself *does* run on real GPUs — AMD and NVIDIA,
   numerically exact; the NVIDIA path even hits decode-speed parity with llama.cpp on an
-  opt-in setting. See [`fak/GPU.md`](../fak/GPU.md).)
+  opt-in setting. See [`fak/GPU.md`](../GPU.md).)
 - **STUB (labeled):** zero-copy KV co-residence with an *external* serving engine and the
   fine-tuned syscall model are frozen ABI seams, not built in v0.1–0.2.
 - **Not novel, and we say so:** a 29-claim, 61-agent prior-art audit scored **0/29

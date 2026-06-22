@@ -55,7 +55,7 @@ The box almost every published `fak` number is measured on.
 - **Single-stream model ladder vs llama.cpp** — Qwen2.5-1.5B Q8 **27.9 tok/s**, 7B Q8
   **8.58 tok/s**; the fak÷llama.cpp gap *narrows* with size (0.39× → 0.53×). MoE
   30B-A3B hits 50 tok/s on llama.cpp (sparse activation, the real scaling lever).
-  → [`MODEL-LADDER-VS-SOTA-2026-06-21.md`](../fak/MODEL-LADDER-VS-SOTA-2026-06-21.md)
+  → `MODEL-LADDER-VS-SOTA-2026-06-21.md` (private companion — not published)
 - **The agent-fleet value stack** — the README headline 50-turn × 5-agent Qwen2.5-1.5B
   run: **19.0 min vs ~78 min** tuned warm-cache (**4.1×**), and the high-T session ladder
   climbing **24.9× → 139.3×** vs the naive loop.
@@ -70,8 +70,8 @@ The box almost every published `fak` number is measured on.
   → [`FAK-NATIVE-QWEN35-RESULTS.md`](benchmarks/FAK-NATIVE-QWEN35-RESULTS.md)
 - **arm64 NEON kernel work** — the `tile2x4` register-tiled GEMM, ~252 tok/s prefill@256,
   plus the Q8 decode bandwidth-roofline.
-  → [`MAC-M3PRO-TILE2X4-KERNEL-BENCH-2026-06-21.md`](../fak/MAC-M3PRO-TILE2X4-KERNEL-BENCH-2026-06-21.md)
-  · [`MAC-M3PRO-DECODE-ROOFLINE-2026-06-21.md`](../fak/MAC-M3PRO-DECODE-ROOFLINE-2026-06-21.md)
+  → `MAC-M3PRO-TILE2X4-KERNEL-BENCH-2026-06-21.md`
+  · `MAC-M3PRO-DECODE-ROOFLINE-2026-06-21.md` (private companions — not published)
 
 ---
 
@@ -190,9 +190,9 @@ spread on purpose:
 
 - **[`fak/BENCHMARK-AUTHORITY.md`](../BENCHMARK-AUTHORITY.md)** ⭐ — the single source of
   truth; every number here traces to a row there with its commit + artifact.
-- **[`fak/HARDWARE-CATALOG.md`](../fak/HARDWARE-CATALOG.md)** — the per-machine onboarding
-  catalog (specs, baseline-run requirements, the scientific-rigor metadata schema).
-- **[`fak/MODEL-LADDER-VS-SOTA-2026-06-21.md`](../fak/MODEL-LADDER-VS-SOTA-2026-06-21.md)** —
+- **`HARDWARE-CATALOG.md`** (operator machine catalog — intentionally private) — the
+  per-machine onboarding catalog (specs, baseline-run requirements, the scientific-rigor metadata schema).
+- **`MODEL-LADDER-VS-SOTA-2026-06-21.md`** (private companion — not published) —
   the full two-regime model-size ladder behind the M3 Pro rows.
 - **[`docs/benchmark/CROSS-MACHINE-INFRASTRUCTURE.md`](benchmark/CROSS-MACHINE-INFRASTRUCTURE.md)** —
   the design for storing and querying results across all of these machines.

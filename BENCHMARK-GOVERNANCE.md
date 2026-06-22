@@ -137,8 +137,8 @@ To prevent benchmark inflation:
 
 ## Cross-Index: Related Skills
 
-> **📋 Skills Index:** See **[.claude/skills/README.md](../.claude/skills/README.md)** for the complete
-> skills catalog with DOS integration details.
+> **📋 Skills Index:** the `.claude/skills/README.md` catalog (agent-side tooling — not
+> published) holds the complete skills list with DOS integration details.
 
 | Skill | Relevance to Benchmarks |
 |---|---|

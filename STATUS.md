@@ -7,7 +7,7 @@
 ## 0. 2026-06-18 benchmark/status refresh
 
 The benchmark front door is now
-[`../VISUALS-benchmarking-status-2026-06-18.md`](../docs/notes/VISUALS-benchmarking-status-2026-06-18.md):
+[`../VISUALS-benchmarking-status-2026-06-18.md`](docs/notes/VISUALS-benchmarking-status-2026-06-18.md):
 it collects the refreshed plot deck plus the current overall read. The plots were
 regenerated from checked-in CSV/JSON with `tools/fanout_plot.py`,
 `tools/fleet_heatmap.py`, `tools/fleet_compare.py`, and `tools/fleet_eraser.py`.

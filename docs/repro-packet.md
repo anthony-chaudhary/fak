@@ -26,8 +26,8 @@ go run ./cmd/fak preflight --policy examples/customer-support-readonly-policy.js
 go run ./cmd/fak agent --offline
 ```
 
-The 2026-06-18 run wrote the raw A/B JSON to
-[`fak/agent-report.json`](../fak/agent-report.json).
+The 2026-06-18 run wrote the raw A/B JSON to `agent-report.json`
+(produced by the `fak agent --offline` run above — not committed).
 
 ## Witness 1: Policy Manifest Validates
 
@@ -132,7 +132,7 @@ HEADLINE
 
 Raw output:
 
-- [`fak/agent-report.json`](../fak/agent-report.json)
+- `agent-report.json` (produced by the `fak agent --offline` run — not committed)
 
 What this proves: in the deterministic offline harness, the baseline sees the
 poisoned instruction and executes the destructive operation; the `fak` arm keeps

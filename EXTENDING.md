@@ -13,8 +13,8 @@ every other optimization at zero hot-path cost, and (3) is **provably correct an
 faster before it ships** — by a witness the harness checks, not a claim you make.
 
 This is the researcher-facing companion to [`ARCHITECTURE.md`](ARCHITECTURE.md) (the
-extension model in full), [`GROWTH.md`](GROWTH.md) (the layering gates), and the
-repo-wide [`../CONTRIBUTING.md`](../CONTRIBUTING.md) (how to land a change). Read this one
+extension model in full), the layering gates documented inline below, and the
+repo-wide [`CONTRIBUTING.md`](CONTRIBUTING.md) (how to land a change). Read this one
 first if your goal is "I want to optimize subsystem X."
 
 ---
@@ -223,8 +223,8 @@ Code session, and a Codex/Cursor/Aider run all land work identically:
    Use `docs(scope): …` for doc-only diffs.
 4. **Tests run through WSL** on Windows hosts (`.\fak\test.ps1`); `go build` / `go vet`
    work natively. Never commit a red tree.
-5. **DCO sign-off + CLA** on an external PR — see [`../CONTRIBUTING.md`](../CONTRIBUTING.md)
-   and [`../CLA.md`](../CLA.md).
+5. **DCO sign-off + CLA** on an external PR — see [`CONTRIBUTING.md`](CONTRIBUTING.md)
+   and its CLA section (the CLA itself is a draft pending legal review).
 
 That's it. Your optimization is now a first-class part of fak: the core can't break it,
 the harness proves it stays correct and fast, and it composes with every other team's

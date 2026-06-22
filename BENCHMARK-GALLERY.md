@@ -15,7 +15,7 @@ baseline so it can never read as a SOTA win, and show the single-stream throughp
 Each visual ships as a **PNG** — the bullet-proof artifact that renders in any markdown
 viewer (a standalone `.svg` can preview as whitespace in a non-browser renderer) — plus
 its crisp **SVG** vector source. The PNGs are rasterized from the SVGs by
-[`visuals/render-hero-pngs.sh`](../visuals/render-hero-pngs.sh); re-run it after
+[`visuals/render-hero-pngs.sh`](visuals/render-hero-pngs.sh); re-run it after
 regenerating any hero SVG.
 
 | # | Visual | The reference grammar it borrows | What it shows |
@@ -36,9 +36,9 @@ does not target shown below the line. The `4.1×` is `[SOTA-style]` (its baselin
 fak's own kernel held constant, isolating reuse, not kernel speed), never a green win;
 the seductive `139.3×` is greyed and `[NAIVE]`-tagged.
 
-![fak benchmark breadth card](../visuals/55-hero-statcard.png)
+![fak benchmark breadth card](visuals/55-hero-statcard.png)
 
-- **Regenerate:** `python tools/hero_statcard_gen.py` · **data:** `tools/hero_statcard.data.json` · **vector:** [55-hero-statcard.svg](../visuals/55-hero-statcard.svg)
+- **Regenerate:** `python tools/hero_statcard_gen.py` · **data:** `tools/hero_statcard.data.json` · **vector:** [55-hero-statcard.svg](visuals/55-hero-statcard.svg)
 
 ## 59 · Capability matrix
 
@@ -54,9 +54,9 @@ the serving band — "not a capability that stack ships," **not a measured zero*
 fak's column carries measured numbers; competitor cells are coverage marks, never
 fabricated figures. The single-stream fence **inverts** the highlight to the SOTA leader.
 
-![fak capability matrix vs the serving stacks](../visuals/59-hero-capability-matrix.png)
+![fak capability matrix vs the serving stacks](visuals/59-hero-capability-matrix.png)
 
-- **Regenerate:** `python tools/hero_matrix_gen.py` · **data:** `tools/hero_matrix.data.json` · **vector:** [59-hero-capability-matrix.svg](../visuals/59-hero-capability-matrix.svg)
+- **Regenerate:** `python tools/hero_matrix_gen.py` · **data:** `tools/hero_matrix.data.json` · **vector:** [59-hero-capability-matrix.svg](visuals/59-hero-capability-matrix.svg)
 
 ## 60 · Turn-tax curves
 
@@ -68,9 +68,9 @@ baseline: a structural per-cold-miss tax (vs re-prefill), a **measured** WebVoya
 elimination (`9.7×`, 643 tasks), and the conservative `4.1×` vs a tuned warm-cache SOTA
 stack (the `~60×` vs naive is mentioned only as the thing we *don't* lead with).
 
-![fak turn-tax efficiency curves](../visuals/60-hero-turntax-curves.png)
+![fak turn-tax efficiency curves](visuals/60-hero-turntax-curves.png)
 
-- **Regenerate:** `python tools/hero_turntax_gen.py` · **data:** `tools/hero_turntax.data.json` · **vector:** [60-hero-turntax-curves.svg](../visuals/60-hero-turntax-curves.svg)
+- **Regenerate:** `python tools/hero_turntax_gen.py` · **data:** `tools/hero_turntax.data.json` · **vector:** [60-hero-turntax-curves.svg](visuals/60-hero-turntax-curves.svg)
 
 ## 61 · Benchmark sweep
 
@@ -81,9 +81,9 @@ or — for the two capability panels — a field that ships no such gate). The f
 the single-stream fence and **inverts** the accent: `llama.cpp` owns the tall bar, fak
 shows its honest lower number.
 
-![fak benchmark sweep grid](../visuals/61-hero-benchmark-sweep.png)
+![fak benchmark sweep grid](visuals/61-hero-benchmark-sweep.png)
 
-- **Regenerate:** `python tools/hero_sweep_gen.py` · **data:** `tools/hero_sweep.data.json` · **vector:** [61-hero-benchmark-sweep.svg](../visuals/61-hero-benchmark-sweep.svg)
+- **Regenerate:** `python tools/hero_sweep_gen.py` · **data:** `tools/hero_sweep.data.json` · **vector:** [61-hero-benchmark-sweep.svg](visuals/61-hero-benchmark-sweep.svg)
 
 ---
 
