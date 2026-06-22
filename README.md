@@ -323,7 +323,9 @@ server. The contrast is **operational surface**, not tokens per second.
 ## What's real, what's not (we keep score)
 
 `fak` is built to survive a skeptic reading the code. Every capability in
-[`fak/CLAIMS.md`](CLAIMS.md) carries one machine-checked tag. The short version:
+[`fak/CLAIMS.md`](CLAIMS.md) carries one tag (`[SHIPPED]`/`[SIMULATED]`/`[STUB]`),
+each backed by a named witness — a test, a benchmark, or a file read-back. The
+short version:
 
 - **Shipped and tested, on the critical path:** the permission gate and the
   local-answer shortcut, the auto-repair ladder and the quarantine, the in-kernel
