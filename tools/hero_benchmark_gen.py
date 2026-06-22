@@ -359,9 +359,9 @@ def svg_leaderboard(d: dict) -> str:
 # --------------------------------------------------------------------------- #
 def render_doc(d: dict) -> str:
     m, h, cc, t3 = d["meta"], d["headline"], d["cost_collapse"], d["top3_sota"]
-    # relative path from the doc (in fak/) to the visuals dir (repo root)
-    hero_rel = "../" + m["hero_svg"]
-    lb_rel = "../" + m["leaderboard_svg"]
+    # the doc lives at the public repo root, so visuals/ is a sibling — no "../"
+    hero_rel = m["hero_svg"]
+    lb_rel = m["leaderboard_svg"]
 
     # optional "what the 4.1x is measured against" section (data-driven; rendered
     # right after the headline when present)
@@ -402,7 +402,13 @@ def render_doc(d: dict) -> str:
     nl = d["not_leading"]
     nl_bullets = "\n".join(f"- {b}" for b in nl["bullets"])
     repro = "\n".join(d["reproduce"])
-    see = "\n".join(f'- [`{s["text"]}`]({s["href"]}) — {s["note"]}' for s in d["see_also"])
+    # A "private" companion is named but NOT linked (it does not exist in the public
+    # tree); a normal entry renders as a relative link.
+    see = "\n".join(
+        (f'- `{s["href"]}` (private companion — not published) — {s["note"]}'
+         if s.get("private")
+         else f'- [`{s["text"]}`]({s["href"]}) — {s["note"]}')
+        for s in d["see_also"])
 
     return f'''# {m["title"]}
 
@@ -410,8 +416,8 @@ def render_doc(d: dict) -> str:
 [`{m["authority"]}`]({os.path.basename(m["authority"])}) (commit + JSON artifact).
 
 > **Generated, not hand-maintained.** This file is rebuilt from
-> [`tools/hero_benchmark.data.json`](../tools/hero_benchmark.data.json) by
-> [`tools/hero_benchmark_gen.py`](../tools/hero_benchmark_gen.py). Edit the data file and rerun the
+> [`tools/hero_benchmark.data.json`](tools/hero_benchmark.data.json) by
+> [`tools/hero_benchmark_gen.py`](tools/hero_benchmark_gen.py). Edit the data file and rerun the
 > generator when a benchmark changes — do not hand-edit this doc or the two SVGs.
 
 > **The frontier-lab move, done honestly.** When a frontier lab ships a model it leads with one
