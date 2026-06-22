@@ -1,3 +1,8 @@
+---
+title: "fak vs SGLang RadixAttention: KV Cache Hit Rate"
+description: "Head-to-head of fak's KV-cache reuse against SGLang's RadixAttention on cache hit rate, the hardware-independent axis, with a 4.87x live speedup."
+---
+
 # Benchmarking fak against SGLang's KV-cache RadixAttention
 
 > **📊 AUTHORITY:** All benchmark numbers for RadixAttention are centrally indexed in

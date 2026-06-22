@@ -1,3 +1,8 @@
+---
+title: "fak proof: RadixKV prefix reuse and LRU eviction"
+description: "Correctness proof for fak's RadixKV cache: longest-prefix reuse equals recompute, reference counts net to zero, and LRU leaf eviction with upward collapse."
+---
+
 # RadixKV — proof obligations (witnessed)
 
 > **Update — witness pass (2026-06-20, commit `3cb8ff9`).** 2 OPEN obligation(s) below were CLOSED to ✅ PROVEN by new deterministic tests added in `internal/radixkv/proofs_witness_test.go`. The body keeps the original analysis (the gap **and** the 'to close' plan that was then executed); the **current verdict is in the [master ledger](README.md)** and the executed closures are listed in *Closures* at the foot of this file.

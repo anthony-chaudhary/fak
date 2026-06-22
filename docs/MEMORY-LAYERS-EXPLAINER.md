@@ -1,3 +1,8 @@
+---
+title: "The four layers of agent memory, explained by fak"
+description: "How routing, addressing, fusion, and semantics are four different KV-cache problems, and why fak's paradigm change lives only at the semantics layer."
+---
+
 # The four layers of agent memory — routing, addressing, fusion, semantics
 
 *Why "the KV cache is shared now" is four different problems wearing one name — and which one fak actually changes.*

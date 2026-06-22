@@ -1,3 +1,8 @@
+---
+title: "Qwen3.6-27B Parity Bar on Apple M3 Pro"
+description: "The witnessed llama.cpp Metal reference for Qwen3.6-27B on M3 Pro, the speed bar fak's own engine targets plus first-token greedy parity."
+---
+
 # Qwen3.6-27B on Apple M3 Pro — the llama.cpp parity bar (witnessed)
 
 > Goal lane: *"complete and prove out working end to end in chat Qwen3.6-27B on

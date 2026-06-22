@@ -1,3 +1,8 @@
+---
+title: "fak proof: canon canonicalizer idempotence"
+description: "Proof that fak's de-obfuscating canonicalizer reaches an idempotent normal form and folds the homoglyph, fullwidth, and bidi evasion classes it names."
+---
+
 # D5 · canon
 
 > **Update — witness pass (2026-06-20, commit `3cb8ff9`).** 1 OPEN obligation(s) below were CLOSED to ✅ PROVEN by new deterministic tests added in `internal/canon/proofs_witness_test.go`. The body keeps the original analysis (the gap **and** the 'to close' plan that was then executed); the **current verdict is in the [master ledger](README.md)** and the executed closures are listed in *Closures* at the foot of this file.

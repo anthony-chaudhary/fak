@@ -1,3 +1,8 @@
+---
+title: "One binary is the whole agent-serving surface"
+description: "fak delivers the entire governed agent-serving stack — API surface, capability gate, result containment, audit, and auth — as one Go binary, laptop to fleet."
+---
+
 # One binary is the whole surface — laptop to fleet
 
 > The other two explainers ([policy in the kernel](policy-in-the-kernel.md),

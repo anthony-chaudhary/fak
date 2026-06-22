@@ -1,3 +1,8 @@
+---
+title: "fak proof: engine-seam determinism and invalidation"
+description: "Proof that fak's EngineDriver seam maps the same request to the same response and routes cache invalidation to the right reset, failing closed on staleness."
+---
+
 # I1 · engine-seam
 
 > **Update — witness pass (2026-06-20, commit `3cb8ff9`).** 1 OPEN obligation(s) below were CLOSED to ✅ PROVEN by new deterministic tests added in `internal/enginecache/proofs_witness_test.go`. The body keeps the original analysis (the gap **and** the 'to close' plan that was then executed); the **current verdict is in the [master ledger](README.md)** and the executed closures are listed in *Closures* at the foot of this file.

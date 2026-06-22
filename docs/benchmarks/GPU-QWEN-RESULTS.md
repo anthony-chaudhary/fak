@@ -1,3 +1,8 @@
+---
+title: "fak GPU Qwen results: f16 parity, Q8 reaching 3B"
+description: "fak-CUDA decode parity with llama.cpp f16 on Qwen2.5-1.5B and a Q8_0 path reaching Qwen2.5-3B on an 8 GB RTX 4070 laptop GPU, argmax-exact."
+---
+
 # GPU-QWEN-RESULTS — real agentic models on the laptop GPU: f16 parity (1.5B) + reaching 2.5–3B (Q8)
 
 > **Two results, one box (RTX 4070 Laptop, Ada sm_89, 8188 MiB / ~6.2–7.4 GiB free, CUDA

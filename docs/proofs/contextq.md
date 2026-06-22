@@ -1,3 +1,8 @@
+---
+title: "fak proof: contextq materialization fidelity"
+description: "Proof that fak's contextq materializer reconstructs CDB pages byte-identically on the raw path and yields the same result for the same request."
+---
+
 # A5 · contextq
 
 > **Update — witness pass (2026-06-20, commit `3cb8ff9`).** 2 OPEN obligation(s) below were CLOSED to ✅ PROVEN by new deterministic tests added in `internal/contextq/proofs_witness_test.go`. The body keeps the original analysis (the gap **and** the 'to close' plan that was then executed); the **current verdict is in the [master ledger](README.md)** and the executed closures are listed in *Closures* at the foot of this file.

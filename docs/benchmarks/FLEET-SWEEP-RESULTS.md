@@ -1,3 +1,8 @@
+---
+title: "fak fleet sweep: the 2-D turn-tax surface"
+description: "Measures the turns-by-agents turn-tax surface across a 1-50 grid, quantifying the cross-agent cache uplift from running A agents together on the real kernel."
+---
+
 # FLEET-SWEEP-RESULTS — the 2-D turn-tax surface (turns × agents), measured on the real kernel
 
 > **New here? Read `FLEET-SWEEP-EXPLAINED.md` first** —

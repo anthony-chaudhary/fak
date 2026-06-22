@@ -1,3 +1,8 @@
+---
+title: "fak memory dream: offline cleanup of finished context"
+description: "An offline pass that re-screens, repairs, and prunes a finished session's core image against today's gate without replaying the transcript or summarizing it."
+---
+
 # MEMORY-DREAM-CLEANUP-RESULTS - offline cleanup for finished context
 
 > Companion to `RECALL-RESULTS.md` and `CDB-RESULTS.md`. Those lanes made a finished

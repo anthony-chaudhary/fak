@@ -1,3 +1,8 @@
+---
+title: "fak proof: A/B benchmark paired-replay isolation"
+description: "Proof that fak's turn-tax A/B benchmark is a paired replay where only the toggled lever differs, so its measured delta is attributable and real."
+---
+
 # I2 · bench-ab-isolation
 
 **Regime A (algebraic / structural).** The `bench` and `turnbench` packages run fak's

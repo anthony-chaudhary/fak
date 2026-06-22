@@ -1,3 +1,8 @@
+---
+title: "fak in-kernel model: forward pass proven against HF"
+description: "A kernel-owned in-process CPU forward pass for SmolLM2-135M, proven rung-by-rung bit-for-bit against HuggingFace transformers including KV cache and quarantine."
+---
+
 # IN-KERNEL-MODEL-RESULTS — the model fused INTO the kernel, proven against HF
 
 > The 72h build plan (`../BUILD-72h-fused-agent-kernel.md`) deliberately punted on

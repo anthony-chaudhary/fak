@@ -1,3 +1,8 @@
+---
+title: "fak trust-floor wiring (#492): code-grounded status"
+description: "A status decomposition of fak's result-side exfil floor and trust-floor child issues, each backed by file:line evidence read against HEAD."
+---
+
 # Trust-floor wiring — code-grounded status decomposition (epic #492)
 
 _Status snapshot taken against `HEAD = 1c0c8e1` on 2026-06-21. Every status below is

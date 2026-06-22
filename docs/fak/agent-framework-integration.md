@@ -1,3 +1,8 @@
+---
+title: "fak agent framework integration: LangChain to CrewAI"
+description: "Per-framework cookbook for putting fak in front of LangChain, LlamaIndex, AutoGen, CrewAI, and OpenAI-compatible agents via proxy or explicit adjudication."
+---
+
 # Agent Framework Integration Guide
 
 A per-framework cookbook for putting `fak` in front of a tool-using agent built on

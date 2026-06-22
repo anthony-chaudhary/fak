@@ -1,3 +1,8 @@
+---
+title: "fak proof: tokenizer ByteLevel-BPE parity"
+description: "Numerical proof for fak's tokenizer: lossless ByteLevel round-trip, deterministic rank-ordered BPE merges, and exact id parity with HF and llama.cpp."
+---
+
 # N10 · tokenizer
 
 The tokenizer leaf converts between UTF-8 text and the model's integer token ids for a HuggingFace fast `tokenizer.json` with a ByteLevel-BPE model (Qwen2.5 / Qwen3.6 / SmolLM2 / GPT-2 families). It loads the BPE vocab, the ordered merge-rank table, the added/special tokens, and a ByteLevel decoder (`ParseJSON`, `fak/internal/tokenizer/tokenizer.go:103`), then `Encode` (`:200`) splits text by the model-specific pre-tokenizer and greedily applies merges in rank order, while `Decode` (`:242`) inverts the ByteLevel byte↔unicode map back to the original bytes. "Correct" here is **regime N (numerical / exact integer path)**: the produced ids must be **bit-exact** to the HuggingFace / llama.cpp reference, the byte↔token map must be a **lossless bijection** (so `Decode∘Encode = id`), and the merge selection must be a **deterministic lowest-rank-first** function so the same text always yields the same ids. There is no float tolerance — every theorem here is checked by byte-identical / exact-id equality.

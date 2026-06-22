@@ -1,3 +1,8 @@
+---
+title: "Cursor + fak: governed local-model integration"
+description: "Wire fak as a tool-governance layer for Cursor AI agents via MCP or an OpenAI-compatible proxy, adding capability-floor enforcement and quarantine."
+---
+
 # fak + Cursor Integration Guide
 
 This guide shows how to use `fak` as a tool-governance layer for Cursor AI agents, adding capability-floor enforcement and quarantine protection to Cursor's coding workflows.

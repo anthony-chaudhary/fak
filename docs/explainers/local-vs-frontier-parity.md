@@ -1,3 +1,8 @@
+---
+title: "fak explainer: local-vs-frontier parity on your hardware"
+description: "Explains how a small local model behind the fak kernel matches a hosted frontier model on safety and cost today, with capability ramping as model size grows."
+---
+
 # Local-vs-Frontier parity: a small model + the kernel, on your own hardware
 
 *2026-06-17 · fak v0.25.x · status: workflow proven on the smallest models; capability

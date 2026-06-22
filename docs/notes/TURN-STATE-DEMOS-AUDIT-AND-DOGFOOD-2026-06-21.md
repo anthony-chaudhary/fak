@@ -1,3 +1,8 @@
+---
+title: "fak turn/state demos: audited and dog-fooded (2026-06-21)"
+description: "Audits and cross-OS dog-foods fak's turn and state demos for provable deletion, causal eviction, and context admission, closed by exit codes and counters."
+---
+
 # The other key turn/state demos — audited, improved, dog-fooded (2026-06-21)
 
 > **Goal:** *audit the **other** key turn and state demos (the ones not already

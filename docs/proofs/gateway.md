@@ -1,3 +1,8 @@
+---
+title: "fak proof: gateway wire verdict parity"
+description: "Proof that fak's MCP and HTTP gateway returns the same kernel verdict as in-process and drops failed calls fail-closed, never a network bypass."
+---
+
 # D10 · gateway
 
 The gateway is the kernel-adjudicated wire: it fronts the in-process fak kernel over MCP (newline-delimited JSON-RPC) and an OpenAI- and Anthropic-compatible HTTP surface so an agent written in any language can route its tool calls through the syscall boundary without writing Go (`gateway.go:1-27`). It computes nothing numerical; what it *computes* is a **routing of every wire request onto the one in-process kernel's decision** and a **fail-closed projection of that decision back onto the wire**. "Correct" here is regime **D — decision-procedure soundness**: (a) the network seam must not be a bypass — a verdict over the wire must equal the verdict the same kernel renders in-process, and the wire must never hand the kernel a pre-trusted handle that skips a rung; and (b) a call that fails adjudication must be *dropped fail-closed* — structurally removed from what the client receives, with the default branch being deny, not allow. Both are discharged below by deterministic Go witnesses run on this macOS native node (go1.26 darwin/arm64); no oracle fixture, network, or RNG is involved.

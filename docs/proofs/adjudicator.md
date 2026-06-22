@@ -1,3 +1,8 @@
+---
+title: "fak proof: adjudicator fail-closed soundness"
+description: "Proof that fak's reference-monitor adjudicator folds verdicts by FoldRank and fails closed, resolving every absent or unknown case to Deny."
+---
+
 # D1 · adjudicator
 
 The `internal/adjudicator` package is fak's in-process **reference monitor** — the v0.1

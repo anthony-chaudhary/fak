@@ -1,3 +1,8 @@
+---
+title: "fak proofs: math-correctness master ledger"
+description: "The master ledger of fak's per-module correctness proofs: each theorem, its deterministic witness test, its live verdict, and its DOS git-evidence binding."
+---
+
 # fak math-proof section — master ledger
 
 This is fak's **dedicated proof of mathematical correctness**, sub-module by sub-module.

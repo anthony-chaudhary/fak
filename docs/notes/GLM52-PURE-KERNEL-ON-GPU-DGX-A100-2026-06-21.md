@@ -1,3 +1,8 @@
+---
+title: "GLM-5.2 pure fak kernel on an 8x A100 DGX (2026-06-21)"
+description: "On-device A100 witnesses for the pure fak CUDA kernel running end-to-end, the first GLM-MoE GPU slice, and the not-pure ledger bounding the 753B serving gap."
+---
+
 # GLM-5.2 "pure fak kernel" on a real GPU (8× A100 DGX) — witnessed results + the not-pure ledger (2026-06-21)
 
 > **Goal (verbatim):** *prove end-to-end GPU on DGX or H100 spot etc. running GLM-5.2

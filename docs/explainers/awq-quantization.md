@@ -1,3 +1,8 @@
+---
+title: "fak explainer: AWQ 4-bit quantization support"
+description: "Explains fak's AWQ support: the 4-bit activation-aware format, ~0.5625 bytes per parameter, the dequantization formula, and how to load AWQ safetensors models."
+---
+
 # AWQ Quantization Support
 
 **Status:** Implemented (P0) | **Issue:** #485 (A-001)

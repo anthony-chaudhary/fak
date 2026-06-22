@@ -1,3 +1,8 @@
+---
+title: "fak proof: plancfi plan control-flow integrity"
+description: "Soundness proof for fak's plancfi: every tool call is pinned to an approved plan transition, off-plan gadgets are trapped, and the automaton is deterministic."
+---
+
 # D6 · plancfi
 
 `plancfi` is **control-flow integrity for an agent's PLAN**: a stateful adjudicator that treats an agent's *sequence of tool calls* as its control flow and the operator-approved *plan* as its call graph. Binary CFI pins indirect jumps to a precomputed target set and traps a ROP/JOP gadget; `plancfi` pins each tool call to an approved plan transition and traps an *unplanned gadget* — e.g. a prompt-injection–induced `send_email` exfil call that the booking plan never approved. A plan is declared per `TraceID` out-of-band (`Ledger.Declare`); the adjudicator enforces it in-band. With no plan declared, CFI is inactive and `Defer`s (opt-in per session). A conforming call also `Defer`s (no objection — other gates decide). A deviating call returns `RequireApproval` (escalate to a human) by default, or `Deny` in strict mode.

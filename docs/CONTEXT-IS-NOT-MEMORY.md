@@ -1,3 +1,8 @@
+---
+title: "Context is not memory: the truth-duration axis in fak"
+description: "Why fak separates context from memory by how long a fact stays true, and enforces a write-time gate that defaults ephemeral facts to expire, not persist."
+---
+
 # Context is not memory — the durability axis the KV story leaves out
 
 *Why "it's 3pm right now" and "I prefer afternoon meetings" are not the same kind of

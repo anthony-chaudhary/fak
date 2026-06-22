@@ -1,3 +1,8 @@
+---
+title: "GLM-5.2 on the pure fak kernel: witnessed results (2026-06-21)"
+description: "Witnessed go-test results showing the GLM-5.2 architecture runs in the pure fak kernel, why serving the real 753B checkpoint is hardware-gated, plus turn demos."
+---
+
 # GLM-5.2 on the pure fak kernel + the large-scale agent/turn demos — witnessed results (2026-06-21)
 
 > **Goal:** *get GLM-5.2 self-hosted on our pure kernel up and running, and prove the

@@ -1,3 +1,8 @@
+---
+title: "fak security visual: the capability floor (2026-06-18)"
+description: "Shows how fak adjudicates every tool call before it runs, allowing everyday tools and denying destructive calls by argument value at the kernel boundary."
+---
+
 # Security visual — the capability floor: allow the useful, deny the dangerous
 
 > **One picture of the trust boundary.** Every tool call a model proposes is

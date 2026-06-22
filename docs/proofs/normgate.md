@@ -1,3 +1,8 @@
+---
+title: "fak proof: normgate obfuscated-injection gate"
+description: "Soundness proof for fak's normgate: benign byte-identical round-trip, canonical-view detection that dominates the raw regex, and an honest semantic limit."
+---
+
 # D4 · normgate
 
 > **Update — witness pass (2026-06-20, commit `3cb8ff9`).** 2 OPEN obligation(s) below were CLOSED to ✅ PROVEN by new deterministic tests added in `internal/normgate/proofs_witness_test.go`. The body keeps the original analysis (the gap **and** the 'to close' plan that was then executed); the **current verdict is in the [master ledger](README.md)** and the executed closures are listed in *Closures* at the foot of this file.

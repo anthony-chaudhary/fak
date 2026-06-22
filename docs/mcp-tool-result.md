@@ -1,3 +1,8 @@
+---
+title: "fak MCP tool-result shape: the SyscallResponse wire"
+description: "Specifies the MCP tool-result envelope and SyscallResponse fields the fak gateway returns, including the verdict object and closed refusal vocabulary."
+---
+
 # MCP tool-result shape (the `SyscallResponse` wire)
 
 The fak gateway is an MCP server (JSON-RPC 2.0, stdio or `POST /mcp`). Six tools

@@ -1,3 +1,8 @@
+---
+title: "Vulkan AMD Backend on Radeon RX 7600"
+description: "Witnesses fak's Vulkan compute backend reaching numerical parity on a real AMD RX 7600 while still ~60x slower than llama.cpp from per-dispatch overhead."
+---
+
 # VULKAN-AMD-RESULTS — the AMD GPU backend, witnessed on a real Radeon RX 7600
 
 > An AMD GPU compute backend for the in-kernel model, behind the existing `compute.Backend`

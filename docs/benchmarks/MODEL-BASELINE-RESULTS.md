@@ -1,3 +1,8 @@
+---
+title: "fak model baseline: in-kernel forward pass vs peers"
+description: "Measures the in-kernel forward pass against HF and llama.cpp on CPU, then closes it to decode parity and near-raw-compute prefill parity, every rung bit-identical."
+---
+
 # MODEL-BASELINE-RESULTS — the in-kernel forward pass, measured against the next-best baselines
 
 > `IN-KERNEL-MODEL-RESULTS.md` proves the fused forward pass **correct** (every rung

@@ -1,3 +1,8 @@
+---
+title: "fak proof: steward single-invariant population"
+description: "Soundness proof for fak's steward population: each steward checks one predicate and abstains by default, and Sweep/Prune are order-independent."
+---
+
 # D11 · steward
 
 > **Update — witness pass (2026-06-20, commit `3cb8ff9`).** 1 OPEN obligation(s) below were CLOSED to ✅ PROVEN by new deterministic tests added in `internal/steward/proofs_witness_test.go`. The body keeps the original analysis (the gap **and** the 'to close' plan that was then executed); the **current verdict is in the [master ledger](README.md)** and the executed closures are listed in *Closures* at the foot of this file.

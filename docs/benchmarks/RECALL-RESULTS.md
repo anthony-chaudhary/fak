@@ -1,3 +1,8 @@
+---
+title: "Cross-Process Recall: Quarantine Survives Sessions"
+description: "Proves a tool result quarantined by the context-MMU cannot be paged into a new context across the process boundary unless it passes a fresh content re-screen."
+---
+
 # RECALL-RESULTS — a quarantine that survives the session boundary
 
 > Companion to `LIVE-RESULTS.md`. That doc proved the trust floor holds *during* a

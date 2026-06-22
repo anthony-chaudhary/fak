@@ -1,3 +1,8 @@
+---
+title: "Session Value Stack: Reuse Win on M3 Pro"
+description: "Measures the fused agent kernel's net work-reuse value-add (11.2x to 14.5x vs naive) on a realistic 50-turn, multi-agent session on Apple M3 Pro."
+---
+
 # SESSION-VALUE-STACK-RESULTS — the net value-add of the fused agent kernel on a realistic multi-agent session, measured on Apple M3 Pro
 
 > **📊 AUTHORITY:** This document's session value-stack results (11.2–14.5× vs naive) are centrally

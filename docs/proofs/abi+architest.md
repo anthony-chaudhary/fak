@@ -1,3 +1,8 @@
+---
+title: "fak proof: abi spine and architest layering"
+description: "Proof that fak's frozen ABI wire enums stay additive and every verdict fold orders by FoldRank over a layered, subprocess-free package DAG."
+---
+
 # A8 · abi+architest
 
 `internal/abi` is the frozen wave-0 spine of fak — the one tree every fleet worker imports and no worker may edit except additively. It *computes* nothing numeric; what it provides is a **structural contract**: a closed, byte-stable set of wire enums (verdict kinds, status, outcome, taint, scope, ref-kind, fallback, the reason vocabulary) plus the `FoldRank` restrictiveness lattice that orders verdict folds. `internal/architest` is the machine-checker that proves the *composition* the rest of the proofs assume actually holds in the build: a layered package DAG with no upward imports, a subprocess-free hot path, and every most-restrictive-wins fold routed through `abi.FoldRank`. "Correct" for A8 is **regime A (algebraic / structural)**: the defining invariants — a total fold order, a layered DAG, a frozen additive-only wire shape — are preserved, witnessed by round-trip / invariant / structural-contract tests, not numerical parity. All witnesses below ran green natively on the macOS fleet node (go1.26 darwin/arm64) on 2026-06-20.

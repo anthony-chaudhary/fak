@@ -1,3 +1,8 @@
+---
+title: "fak proof: KV-cache slots, eviction, and SWA"
+description: "Bit-exact correctness proof for fak's KV cache: correct slot placement, span-exact eviction, sliding-window masking, and prefix-reuse parity."
+---
+
 # N6 · model/kv
 
 The `model/kv` sub-module is the kernel-owned attention state — `KVCache` plus the per-position decoder-block math in `Session` that fills it. Each layer holds K and V as flat row-major `[pos·(NumKVHeads·HeadDim)]` slices, a parallel pre-RoPE `Kraw`, and a shared `pos[]` recording every entry's absolute RoPE position. "Correct" for this module (regime **N — numerical**) means four bit-level properties: (a) a position's K/V is written to and read back from the right `(layer, pos, head)` slot with no aliasing; (b) `Evict(from,n)` produces a cache *byte-identical* to one that never saw the span, by re-rotating each survivor's K from its stored pre-RoPE form to its new absolute position in a single rotation (not composed); (c) the sliding-window read mask drops *exactly* the out-of-window positions, keyed off `pos[]` so it survives eviction renumbering, and is a true no-op (max|Δ|=0) when no window is set; and (d) `SessionFromPrefix` (clone + suffix-prefill) is bit/token-identical to a full recompute. Witnesses are run natively on this macOS node (go1.26 darwin/arm64) against the present `.cache/smollm2-135m` oracle export.

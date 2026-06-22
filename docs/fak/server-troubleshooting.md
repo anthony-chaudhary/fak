@@ -1,3 +1,8 @@
+---
+title: "fak server troubleshooting: ports, memory, GPU"
+description: "Diagnose and fix common fak serve failures, covering port conflicts, out-of-memory loads, GPU and CUDA errors, model loading, and policy issues."
+---
+
 # fak Server Troubleshooting
 
 Common startup failures, port conflicts, and resource issues when running `fak serve` or the in-kernel model engine.

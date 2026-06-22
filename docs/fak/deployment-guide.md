@@ -1,3 +1,8 @@
+---
+title: "fak deployment guide: Docker, Kubernetes, bare metal"
+description: "Production deployment for fak serve across Docker, Compose, Kubernetes, and bare metal, with a readiness checklist for auth, policy, and binding."
+---
+
 # fak Deployment Guide
 
 Production deployment for `fak serve` — the kernel gateway that fronts a model

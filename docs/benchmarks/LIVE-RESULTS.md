@@ -1,3 +1,8 @@
+---
+title: "fak live agent A/B: kernel vs naive on a real model"
+description: "A live multi-turn A/B where a real model drives the same airline task twice, counting turns, tokens, and the kernel's quarantines of an injected tool result."
+---
+
 # LIVE-RESULTS — fak agent: turn-use vs now, on a REAL model
 
 > The static `fak bench` proves the **adjudication-latency** fusion (in-process vs

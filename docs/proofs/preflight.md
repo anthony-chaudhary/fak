@@ -1,3 +1,8 @@
+---
+title: "fak proof: preflight cheapest-first rung ladder"
+description: "Structural proof for fak's preflight ladder: rungs evaluate cheapest-first by ascending index, and a cheap-rung Deny short-circuits the expensive rungs."
+---
+
 # A7 · preflight
 
 The `preflight` ladder (`fak/internal/preflight`) is a **cheapest-first rung ladder**:

@@ -1,3 +1,8 @@
+---
+title: "Qwen2.5-7B: fak vs llama.cpp on Apple M3 Pro"
+description: "fak's first 7B dense run on M3 Pro Q8, reporting the honest throughput gap vs llama.cpp Metal plus full greedy parity."
+---
+
 # Qwen2.5-7B-Instruct — first large dense run in fak + llama.cpp parity (rung 2)
 
 > **Purpose.** The `GPU-MODEL-PICK` target size, run in fak on this M3 Pro (CPU Q8 / `-lean`,

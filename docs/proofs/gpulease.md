@@ -1,3 +1,8 @@
+---
+title: "fak proof: gpulease machine-wide mutual exclusion"
+description: "Proof that fak's GPU lease grants at most one live holder machine-wide via flock, fails closed when busy, and reclaims a crashed holder's lease."
+---
+
 # D15 · gpulease
 
 `gpulease` is a **machine-wide advisory lease** so that at most one GPU-heavy process

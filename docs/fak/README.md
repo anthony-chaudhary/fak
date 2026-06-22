@@ -1,3 +1,8 @@
+---
+title: "fak documentation index for operators and integrators"
+description: "Navigation hub for the fak serve operator and integrator docs: install, run the gateway, author policy, integrate agents, and deploy to production."
+---
+
 # fak documentation index
 
 The `docs/fak/` directory holds the **operator and integrator** docs for `fak serve` (the

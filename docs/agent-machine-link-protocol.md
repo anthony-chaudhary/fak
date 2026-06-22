@@ -1,3 +1,8 @@
+---
+title: "Fleet Agent Link: the fak machine-link protocol"
+description: "Design for a stdio JSON-RPC control plane that reaches a remote agent checkout via one shared method registry, with A2A and MCP as edge adapters."
+---
+
 # Fleet Agent Link Design
 
 Date: 2026-06-19

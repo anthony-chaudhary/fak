@@ -1,3 +1,8 @@
+---
+title: "Sliding-Window Attention as a Read-Time Mask"
+description: "Reports fak's per-layer sliding-window attention bounding cost from O(N) to O(W), shipped as a read-time mask and byte-identical to dense when unset."
+---
+
 # Sliding-window attention — the long-context read-mask (issue #20)
 
 > Lane `model`. The compute-side long-context arch axis: a per-layer sliding window

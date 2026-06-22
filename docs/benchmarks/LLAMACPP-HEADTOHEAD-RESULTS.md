@@ -1,3 +1,8 @@
+---
+title: "fak vs llama.cpp head-to-head: CPU performance axes"
+description: "Measures fak against llama.cpp on CPU across single-stream decode, prefill, batched throughput, and shared-prefix, with an honest parity-vs-gap verdict per axis."
+---
+
 # LLAMACPP-HEADTOHEAD-RESULTS — fak vs llama.cpp across every performance axis, measured
 
 > **The honest verdict up front: fak CAN be a throughput peer of llama.cpp — and on the GPU

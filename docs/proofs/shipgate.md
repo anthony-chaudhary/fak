@@ -1,3 +1,8 @@
+---
+title: "fak proof: shipgate keep-or-revert soundness"
+description: "Soundness proof for fak's shipgate RSI loop: a candidate is kept only on a strict metric gain plus a clean non-author witness, with deterministic verdicts."
+---
+
 # D12 · shipgate
 
 > **Update — witness pass (2026-06-20, commit `3cb8ff9`).** 1 OPEN obligation(s) below were CLOSED to ✅ PROVEN by new deterministic tests added in `internal/shipgate/proofs_witness_test.go`. The body keeps the original analysis (the gap **and** the 'to close' plan that was then executed); the **current verdict is in the [master ledger](README.md)** and the executed closures are listed in *Closures* at the foot of this file.

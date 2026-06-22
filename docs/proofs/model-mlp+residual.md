@@ -1,3 +1,8 @@
+---
+title: "fak proof: SwiGLU MLP and residual stream"
+description: "Numerical correctness proof for fak's feed-forward block: SwiGLU/GeGLU gating, Mixture-of-Experts routing, and exact-addition residual-stream updates."
+---
+
 # N4 · model/mlp+residual
 
 This module is the position-wise feed-forward and residual-stream half of the

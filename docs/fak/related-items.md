@@ -1,3 +1,8 @@
+---
+title: "fak related tools, daemons, and CLI workflows"
+description: "Catalog of the fak binary verbs and companion tools, from serve, run, and preflight to bench, recall, and the CI test runners, and when to use each."
+---
+
 # Related Tools, Daemons, and Workflows
 
 This document catalogs the tools, daemons, and workflows that accompany the fak server — what they do, how they integrate, and when to use them.

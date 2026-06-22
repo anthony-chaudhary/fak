@@ -1,3 +1,8 @@
+---
+title: "fak FAQ: what it is, guarantees, and limits"
+description: "Short honest answers about fak, the tool-call kernel: what it guarantees, how it compares to llama.cpp and vLLM, and what fail-closed means."
+---
+
 # fak FAQ and common issues
 
 Short, honest answers to the questions people ask most about `fak` — what it is, what it

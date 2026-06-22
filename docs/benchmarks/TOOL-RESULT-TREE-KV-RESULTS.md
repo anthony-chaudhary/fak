@@ -1,3 +1,8 @@
+---
+title: "Tool-Result KV: Bit-Exact Middle Removal"
+description: "Pins the precise claim that fak alone removes a tool result from a sequence middle bit-identically to never-saw, against vLLM, SGLang, and llama.cpp."
+---
+
 # TOOL-RESULT-TREE-KV — why a regular KV cache can't *faithfully* store a tool result, and what fak does instead
 
 > Companion to `KV-QUARANTINE-BRIDGE-RESULTS.md` (the byte-gate drives the KV-gate),

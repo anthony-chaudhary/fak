@@ -1,3 +1,8 @@
+---
+title: "fak proof: policy manifest capability floor"
+description: "Soundness proof for fak's policy loader: the effective deny set is a superset of the declared floor, and dump-edit-load round-trips deterministically."
+---
+
 # D2 · policy
 
 The `policy` package is the deployable form of fak's "permissions as the floor"

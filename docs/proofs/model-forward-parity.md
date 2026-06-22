@@ -1,3 +1,8 @@
+---
+title: "fak proof: transformer forward-pass HF parity"
+description: "Oracle-parity proof for fak's pure-Go transformer forward pass: hidden-state cosine, per-position argmax, and greedy-id match against the HuggingFace reference."
+---
+
 # N7 · model/forward-parity
 
 **Regime N (Numerical / linear-algebra).** The `internal/model` package implements a from-scratch, pure-Go transformer forward pass — embedding lookup, the decoder stack (RMSNorm/LayerNorm, RoPE, causal multi-head/GQA/MLA attention, SwiGLU/MoE FFN, residuals, topology-selected norm placement), final norm, and the tied LM head — producing per-layer hidden states and per-position vocab logits. `internal/modelengine` wraps a loaded `Model` for decode/generation. "Correct" here means **oracle parity**: the Go forward pass must reproduce the independently-computed PyTorch/HF reference (exported by `export_oracle.py` to `.cache/oracle-*` / `.cache/<model>`). Per witness-kind §3.1 of [00-METHOD.md](00-METHOD.md), a float forward pass is correct when **hidden-state cosine ≈ 1.0**, the **per-position argmax matches the oracle at every position** (a single ULP of drift cannot flip an argmax the oracle pins), and the **greedy continuation ids match token-for-token**. This doc discharges (1) end-to-end forward parity against the HF oracle, and (2) whether that parity holds across the supported arch families.

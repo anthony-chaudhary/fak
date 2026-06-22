@@ -1,3 +1,8 @@
+---
+title: "fak proof: attention softmax and causal mask"
+description: "Numerical correctness proof for fak's scaled-dot-product attention: row-stochastic softmax, strict causal masking, and the attention-sink renormalization."
+---
+
 # N1 · model/attention
 
 > **Update — witness pass (2026-06-20, commit `3cb8ff9`).** 2 OPEN obligation(s) below were CLOSED to ✅ PROVEN by new deterministic tests added in `internal/model/proofs_witness_test.go`. The body keeps the original analysis (the gap **and** the 'to close' plan that was then executed); the **current verdict is in the [master ledger](README.md)** and the executed closures are listed in *Closures* at the foot of this file.

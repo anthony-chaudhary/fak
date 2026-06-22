@@ -1,3 +1,8 @@
+---
+title: "fak KV quarantine bridge: byte-gate evicts the K/V"
+description: "Shows the context-MMU quarantine verdict on a tool result's bytes also evicting that result's K/V span from the kernel-owned attention cache, witnessed by tests."
+---
+
 # KV-QUARANTINE-BRIDGE-RESULTS — the byte-gate drives the KV-gate
 
 > Companion to `IN-KERNEL-MODEL-RESULTS.md` and `RECALL-RESULTS.md`. The in-kernel

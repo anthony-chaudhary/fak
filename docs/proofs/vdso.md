@@ -1,3 +1,8 @@
+---
+title: "fak proof: vDSO tiered cache soundness"
+description: "Correctness proof for fak's vDSO fast-path cache: tier-1 equals recompute, a tier-2 hit never serves a stale answer, and the integrity epoch is monotone."
+---
+
 # vDSO — proof obligations (witnessed)
 
 > **Update — witness pass (2026-06-20, commit `3cb8ff9`).** 1 OPEN obligation(s) below were CLOSED to ✅ PROVEN by new deterministic tests added in `internal/vdso/proofs_witness_test.go`. The body keeps the original analysis (the gap **and** the 'to close' plan that was then executed); the **current verdict is in the [master ledger](README.md)** and the executed closures are listed in *Closures* at the foot of this file.

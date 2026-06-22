@@ -1,3 +1,8 @@
+---
+title: "fak proof: recall session core-image replay"
+description: "Structural proof for fak's recall: a query on a reloaded session returns the byte-identical answer as replay, with no false recall and deterministic assembly."
+---
+
 # A4 · recall
 
 > **Update — witness pass (2026-06-20, commit `3cb8ff9`).** 1 OPEN obligation(s) below were CLOSED to ✅ PROVEN by new deterministic tests added in `internal/recall/proofs_witness_test.go`. The body keeps the original analysis (the gap **and** the 'to close' plan that was then executed); the **current verdict is in the [master ledger](README.md)** and the executed closures are listed in *Closures* at the foot of this file.

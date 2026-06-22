@@ -1,3 +1,8 @@
+---
+title: "fak documentation roadmap and shipped doc index"
+description: "Tracks fak server and agent-integration documentation: which guides have shipped, the historical structure vision, and remaining work items."
+---
+
 # fak Documentation Roadmap
 
 **Status:** Complete — all tracked documentation has shipped and is wired into the index

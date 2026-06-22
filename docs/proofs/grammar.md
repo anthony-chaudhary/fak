@@ -1,3 +1,8 @@
+---
+title: "fak proof: grammar argument-repair soundness"
+description: "Proof that fak's grammar rung zips positional args into named params 1:1 on exact arity and fails open to Defer when no grammar is registered."
+---
+
 # D7 · grammar
 
 The grammar rung is the first (cheapest) adjudicator in the fak tool-call pipeline (`abi.RegisterAdjudicator(5, Default)`, grammar.go:261). It enforces **argument-shape well-formedness** — the "`--name` is a flag, not a positional" class of error the model makes when it guesses a tool's argument shape wrong — *before* the call spawns, and where the fix is mechanical it auto-repairs the call in-syscall (a `Transform`) instead of burning a model turn. Its four behaviours: a well-formed call defers (nothing to prove); a malformed-but-repairable call is transformed (positional args zipped into named params, or a known synonym key renamed to its canonical param); a malformed-and-unrepairable call is denied with a model-fixable `MISROUTE` disposition; and a call to a tool with **no** registered grammar defers (FAIL-OPEN). "Correct" here is **decision-procedure soundness (regime D)**: the rung's verdict must be sound (a `Transform` must yield args that preserve the *intended* invocation, and an absent grammar must never cause a refusal), and it must fail closed only where it has authority and fail open where it does not.

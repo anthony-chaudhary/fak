@@ -1,3 +1,8 @@
+---
+title: "fak proof: metrics percentile and gate soundness"
+description: "Proof that fak's metrics percentiles are monotone reads of a sorted sample, the A/B gate fails closed, and each KPI fold equals its definition."
+---
+
 # D14 · metrics
 
 `internal/metrics` is fak's KPI/observability layer and the A/B `report.json` shape. It computes

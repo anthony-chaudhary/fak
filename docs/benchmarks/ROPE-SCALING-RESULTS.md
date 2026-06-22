@@ -1,3 +1,8 @@
+---
+title: "Llama3 RoPE Scaling for Long-Context Quality"
+description: "Reports fak's NTK-by-parts RoPE rescale that lets an 8K-trained model attend coherently at 128K, proven HF-faithful and byte-identical when unset."
+---
+
 # Llama3 RoPE-scaling — the long-context positional-quality lever (issue #19)
 
 > Lane `model`. The positional-quality long-context arch axis: a piecewise rescale

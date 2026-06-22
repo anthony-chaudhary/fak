@@ -1,3 +1,8 @@
+---
+title: "fak note: agentic caching as a kernel verdict (2026-06-19)"
+description: "Maps 2026 SOTA agent-cache layers and argues a fak cache hit is an authorization, state, and coherence verdict, not a boolean reuse event."
+---
+
 # Agentic Caching as a First-Class FAK Primitive
 
 > Date: 2026-06-19.

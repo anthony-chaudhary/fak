@@ -1,3 +1,8 @@
+---
+title: "fak explained twice: security control and agent optimization"
+description: "Explains fak's write-time content-addressed gate as both injection containment and working-set paging, with a Rosetta table mapping the two vocabularies."
+---
+
 # fak, explained twice: for security researchers, and for agent-optimization people
 
 > The same mechanism reads as a **security control** to one audience and a **systems

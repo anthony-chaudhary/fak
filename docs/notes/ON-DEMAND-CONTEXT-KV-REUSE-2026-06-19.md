@@ -1,3 +1,8 @@
+---
+title: "fak note: on-demand context and non-prefix KV reuse (2026-06-19)"
+description: "Examines whether fleet can serve context on demand from digest-addressed state: prefix KV reuse is exact while non-prefix segment reuse needs a corrective path."
+---
+
 # On-Demand Context And Non-Prefix KV Reuse
 
 > Date: 2026-06-19.

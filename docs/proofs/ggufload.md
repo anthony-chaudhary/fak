@@ -1,3 +1,8 @@
+---
+title: "fak proof: GGUF loader offset and dequant layout"
+description: "Proof that fak's GGUF loader addresses each tensor's own offset window and dequantizes every block format with the correct intra-block layout."
+---
+
 # N11 · ggufload
 
 `internal/ggufload` parses GGUF model checkpoints off the inference hot path: it reads the

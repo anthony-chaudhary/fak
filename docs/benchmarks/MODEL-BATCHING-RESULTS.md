@@ -1,3 +1,8 @@
+---
+title: "fak model batching: multi-user batched CPU decode"
+description: "Measures in-kernel multi-user batched decode over per-user KV caches, scaling aggregate throughput with batch size while staying bit-identical to serial Step."
+---
+
 # MODEL-BATCHING-RESULTS — multi-user batched decode, measured
 
 > `MODEL-BASELINE-RESULTS.md` measured and then closed the **single-stream** gap (decode

@@ -1,3 +1,8 @@
+---
+title: "fak Gateway API reference: every serve endpoint"
+description: "Complete HTTP reference for fak serve, covering the OpenAI, Anthropic Messages, fak-native, and MCP surfaces plus auth, limits, and operational routes."
+---
+
 # fak Gateway API Reference
 
 A complete reference for every HTTP endpoint exposed by `fak serve` — the kernel

@@ -1,3 +1,8 @@
+---
+title: "fak proof: ratelimit quota and budget gate"
+description: "Decision-procedure soundness proof for fak's ratelimit governor: the quota and cost budget bound throughput exactly, and refused calls consume nothing."
+---
+
 # D9 · ratelimit
 
 `internal/ratelimit` is fak's throughput/cost governor — the adjudicator that turns the

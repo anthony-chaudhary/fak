@@ -1,3 +1,8 @@
+---
+title: "fak model-arch seam (#487): code-grounded status"
+description: "A maintainer status decomposition showing how much of fak's in-kernel fusion seam past Llama-only already shipped, stage by stage with file:line evidence."
+---
+
 # Model-arch seam (#487): code-grounded status decomposition
 
 _Tracking epic: **[#487](https://github.com/anthony-chaudhary/fak/issues/487)** — "adapt the in-kernel

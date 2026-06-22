@@ -1,3 +1,8 @@
+---
+title: "fak client examples in Python, JS, Go, and Rust"
+description: "Runnable client code for calling a fak serve gateway from Python, JavaScript, Go, and Rust across the OpenAI, Anthropic, and fak-native surfaces."
+---
+
 # Multi-Language Integration Examples
 
 Runnable client code for talking to a `fak serve` gateway from **Python**,

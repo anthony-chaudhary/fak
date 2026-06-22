@@ -1,3 +1,8 @@
+---
+title: "Migrating to fak: repoint a base URL in one line"
+description: "Put fak in front of LangChain, AutoGen, llama.cpp, or a direct OpenAI/Anthropic client by redirecting the base URL, with no prompt or tool changes."
+---
+
 # Migrating to fak
 
 This guide shows how to put `fak` in front of an agent stack you already run —

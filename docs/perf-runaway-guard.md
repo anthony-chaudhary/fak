@@ -1,3 +1,8 @@
+---
+title: "fak runaway-process guard and resource leak audit"
+description: "A standing guard that flags and optionally reaps any process whose thread, handle, or memory level runs away, plus verified leak-audit findings for this repo."
+---
+
 # Runaway-process guard & leak audit
 
 A standing guard against the one host failure the fleet watchdogs did **not**

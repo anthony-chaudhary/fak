@@ -1,3 +1,8 @@
+---
+title: "fak fan-out benchmark: one goal to N sub-agents"
+description: "Prices one master goal decomposed into N sub-agents swept from 1 to 1024, measuring cross-agent dedup and shared-prefix KV reuse on the real kernel."
+---
+
 # FANOUT-BENCH-RESULTS — one master goal → N sub-agents, swept N=1…1024 on the real kernel
 
 > **What this measures.** `fak turntax` prices ONE agent; `fleetbench`

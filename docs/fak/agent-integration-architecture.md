@@ -1,3 +1,8 @@
+---
+title: "fak agent integration architecture and kernel ABI"
+description: "How external coding agents integrate with the fak tool-call firewall: gateway entry points, the frozen kernel ABI, verdicts, and the policy floor."
+---
+
 # Agent Integration Architecture for fak
 
 This document describes how external coding agents integrate with the fak (Fused Agent Kernel) - the tool-call firewall and policy boundary that sits between an AI agent and its tools.

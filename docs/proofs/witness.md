@@ -1,3 +1,8 @@
+---
+title: "fak proof: require-witness fail-closed gate"
+description: "Soundness proof for fak's witness rung: a claimed effect is denied unless independent git or filesystem evidence confirms it, failing closed on uncertainty."
+---
+
 # D8 · witness
 
 The `internal/witness` package is the in-process realization of the **require-witness rung** — the DOS `dos_verify` effect-verify brought inside the kernel. When an adjudicator returns a `VerdictRequireWitness` carrying a `WitnessPayload.Claim` (e.g. `ancestor:<ref>`, `committed:<path>`, `clean:<pathspec>`), the kernel does **not** take the agent's claim on faith. It consults the registered `WitnessResolver`, which corroborates the claimed EFFECT against evidence the agent did not author — git ancestry, object existence, a tracked path, the filesystem — and returns `Confirmed`, `Refuted`, or `Abstain`. The kernel folds that outcome **fail-closed**: only `Confirmed` opens the gate to dispatch; everything else (refuted, every-resolver-abstains, or no resolver at all) is a `Deny`. "Correct" for this module is **decision-procedure soundness** (regime D): the gate never admits an unwitnessed effect, and it fails closed on its own uncertainty.

@@ -1,3 +1,8 @@
+---
+title: "fak in-kernel Qwen3.5/3.6 Gated-DeltaNet on M3"
+description: "fak's own in-kernel forward pass runs the Qwen3.5/3.6 hybrid Gated-DeltaNet architecture end-to-end, witnessed from 0.8B safetensors to the 27B q4_k_m GGUF on Apple M3."
+---
+
 # fak's own engine runs Qwen3.6-27B (`qwen35`) — witnessed on M3
 
 > The headline for the goal lane: fak's **own in-kernel forward pass** — not

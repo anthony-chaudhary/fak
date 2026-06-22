@@ -1,3 +1,8 @@
+---
+title: "fak proof: ctxmmu result-gate soundness"
+description: "Proof that fak's tool-result gate page-out is idempotent and admits benign bytes byte-identically, never gratuitously mutating what it allows."
+---
+
 # D3 · ctxmmu
 
 > **Update — witness pass (2026-06-20, commit `3cb8ff9`).** 2 OPEN obligation(s) below were CLOSED to ✅ PROVEN by new deterministic tests added in `internal/ctxmmu/proofs_witness_test.go`. The body keeps the original analysis (the gap **and** the 'to close' plan that was then executed); the **current verdict is in the [master ledger](README.md)** and the executed closures are listed in *Closures* at the foot of this file.

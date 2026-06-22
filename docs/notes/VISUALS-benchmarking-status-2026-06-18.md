@@ -1,3 +1,8 @@
+---
+title: "fak benchmarking visuals and overall status (2026-06-18)"
+description: "One front door for fak's benchmark evidence: syscall latency, fleet turn-tax sweeps, fan-out, realistic workloads, and the executive value projection charts."
+---
+
 # Benchmarking Visuals and Overall Status (2026-06-18)
 
 > One front door for the current benchmark evidence. The plots below are tracked

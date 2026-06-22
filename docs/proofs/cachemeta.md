@@ -1,3 +1,8 @@
+---
+title: "fak proof: cachemeta binding-key determinism"
+description: "Proof that fak's payload-free cachemeta key is a deterministic, injective fold over its binding axes, so distinct bindings never alias one entry."
+---
+
 # A3 · cachemeta
 
 `internal/cachemeta` is the **payload-free metadata layer** for fak's reuse planes.

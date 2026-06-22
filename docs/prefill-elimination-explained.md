@@ -1,3 +1,8 @@
+---
+title: "Prefill elimination explained: how fak cuts API costs 20x"
+description: "A non-technical walkthrough of the per-turn prefill tax and how fak avoids re-sending the same context so providers cache it and stop charging for it."
+---
+
 # Prefill Elimination Explained — How fak Saves 20x on API Costs
 
 **Target Audience:** Non-technical (product managers, decision-makers)

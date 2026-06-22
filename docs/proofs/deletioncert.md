@@ -1,3 +1,8 @@
+---
+title: "fak proof: deletion certificate unforgeability"
+description: "Proof that fak's ed25519 deletion certificate binds eviction, equivalence, and journal anchor under one signature so any tampered field fails closed."
+---
+
 # C2 · deletioncert
 
 The `deletioncert` package mints and verifies a **DeletionCertificate**: a single, portable, re-checkable receipt that binds a bit-exact KV-cache eviction to the tamper-evident audit journal that recorded it. It is a pure fold — the caller supplies every fact (the eviction count and span from `model.KVCache.Evict`, the `max|Δ|=0` equivalence measurement, the hash-chained anchor row from `internal/journal`, and the integrity/trust epoch from `internal/vdso`), and the package does nothing but (a) bind them into one ed25519-signed pre-image and (b) re-verify that pre-image against a journal verifier. "Correct" here is **regime C (crypto / integrity)**: the certificate must be *unforgeable* (any post-issue field edit is detectable), it must *fail closed* (a non-zero drift, an absent/rewritten anchor row, a relabeled subject, or a missing journal verifier all yield `Valid=false`), and a *genuine* mint must round-trip back to `Valid=true`. The package is a leaf that imports only `crypto`/`encoding` stdlib, so its witnesses are deterministic (fixed ed25519 seed, an in-test `fakeJournal`; no RNG, clock, or network).

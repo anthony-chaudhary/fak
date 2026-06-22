@@ -1,3 +1,8 @@
+---
+title: "Cutting the per-tool-call DOS hook cost in fak fleets"
+description: "A measured proposal to reduce per-agent-turn latency from spawned dos-kernel hooks via matcher-scoping and an in-process adjudication transport."
+---
+
 # Proposal: cut the per-tool-call DOS hook cost (upstream `dos-kernel`)
 
 **Status:** proposal · **Target repo:** `anthony-chaudhary/dos-kernel` · **Filed from:**

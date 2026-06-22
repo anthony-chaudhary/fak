@@ -1,3 +1,8 @@
+---
+title: "fak WebBench blockers: what stops full end-to-end runs"
+description: "Tracks the remaining blockers for full WebBench runs in fak, including model access and the missing browser-automation web agent framework."
+---
+
 # WebBench: What's Blocking Full End-to-End Runs?
 
 **Date:** 2026-06-20

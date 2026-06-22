@@ -1,3 +1,8 @@
+---
+title: "fak proof method: claim to deterministic witness"
+description: "How fak proves each sub-module math-correct: a theorem, a proof, a machine-rerun deterministic witness, and a DOS commit binding."
+---
+
 # The fak math-proof method — claim → proof → deterministic witness → DOS binding
 
 This directory is fak's **dedicated math-proof section**: one place that states, for

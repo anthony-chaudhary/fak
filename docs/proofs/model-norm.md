@@ -1,3 +1,8 @@
+---
+title: "fak proof: RMSNorm and LayerNorm parity"
+description: "Numerical correctness proof for fak's normalization primitives: RMSNorm, Gemma NormGain1p, and mean-subtracting LayerNorm against their closed-form definitions."
+---
+
 # N2 · model/norm
 
 > **Update — witness pass (2026-06-20, commit `3cb8ff9`).** 2 OPEN obligation(s) below were CLOSED to ✅ PROVEN by new deterministic tests added in `internal/model/proofs_witness_test.go`. The body keeps the original analysis (the gap **and** the 'to close' plan that was then executed); the **current verdict is in the [master ledger](README.md)** and the executed closures are listed in *Closures* at the foot of this file.

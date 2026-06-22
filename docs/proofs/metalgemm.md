@@ -1,3 +1,8 @@
+---
+title: "fak proof: Metal GPU GEMM matches CPU reference"
+description: "Proof that fak's Apple-Silicon Metal GEMM matches the f32 CPU reference within the half-precision error model, argmax-exact at logit-cosine 1.0."
+---
+
 # N9 · metalgemm
 
 > **Update — witness pass (2026-06-20, commit `3cb8ff9`).** 1 OPEN obligation(s) below were CLOSED to ✅ PROVEN by new deterministic tests added in `internal/metalgemm/proofs_witness_test.go`. The body keeps the original analysis (the gap **and** the 'to close' plan that was then executed); the **current verdict is in the [master ledger](README.md)** and the executed closures are listed in *Closures* at the foot of this file.

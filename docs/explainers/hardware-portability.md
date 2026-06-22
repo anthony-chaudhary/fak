@@ -1,3 +1,8 @@
+---
+title: "fak explainer: hardware portability via the compute HAL seam"
+description: "Explains the internal/compute HAL seam that lets fak's in-kernel forward pass add CUDA and Vulkan backends by registration rather than re-forking the hot loops."
+---
+
 # Hardware portability for the in-kernel forward pass — the `internal/compute` HAL seam
 
 > **Status:** the seam is shipped and now carries **two real device backends** beside the

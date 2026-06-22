@@ -1,3 +1,8 @@
+---
+title: "fak proof: content-addressed blob round-trip"
+description: "Proof that fak's sha256 blob store round-trips bytes byte-identically and dedupes identical content to one digest, since the address is the hash."
+---
+
 # A6 · blob
 
 The `blob` module (`fak/internal/blob`) is the v0.1 default backend behind every `abi.Ref`: a concurrency-safe, content-addressed (sha256) in-memory blob store. It implements the three seams the frozen ABI leaves open — `abi.Resolver` (Put bytes → Ref, materialize bytes ← Ref), `abi.RegionBackend`, and `abi.PageOutBackend`. Small payloads (`len ≤ InlineMax = 256`) ride inline on the Ref; larger payloads land in the CAS map keyed by their digest. **"Correct" for this module is algebraic (regime A): the address-and-materialize map must be a faithful round trip (`Resolve∘Put = id` on bytes, byte-identical, no aliasing), and content addressing must be honest — the digest IS the sha256 of the content, so byte-identical payloads collapse to one stored blob and one address.** Both properties are load-bearing: the vDSO tier-2 cache and the context-MMU page-out path share one `Default` store, and dedup is what makes that sharing free.

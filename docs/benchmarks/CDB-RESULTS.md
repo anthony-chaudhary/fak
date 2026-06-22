@@ -1,3 +1,8 @@
+---
+title: "fak cdb: demand-page a finished session's working set"
+description: "How the fak context debugger attaches to a finished session as a core image and faults in only the working set a follow-up question touches."
+---
+
 # CDB-RESULTS — the context debugger: attach to a finished session, demand-page the working set
 
 > Companion to `RECALL-RESULTS.md`. That lane shipped the *core-image substrate* — a

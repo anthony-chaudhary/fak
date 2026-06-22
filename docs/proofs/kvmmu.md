@@ -1,3 +1,8 @@
+---
+title: "fak proof: kvmmu KV-span bijection invariant"
+description: "Proof that fak's KV MMU keeps logical positions one-to-one with physical cache slots under append and evict, addressing each named span exactly."
+---
+
 # A2 · kvmmu
 
 `kvmmu` is the write-time bridge that turns `ctxmmu`'s LOGICAL quarantine verdict

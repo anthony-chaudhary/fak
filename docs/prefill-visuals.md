@@ -1,3 +1,8 @@
+---
+title: "fak SWE-bench integration: visual architecture diagrams"
+description: "Mermaid diagrams of fak's SWE-bench layers and run sequence, showing how the gateway shares a KV-cache prefix across multi-agent benchmark sessions."
+---
+
 # SWE-bench Integration — Visual Architecture
 
 ```mermaid

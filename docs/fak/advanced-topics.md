@@ -1,3 +1,8 @@
+---
+title: "fak advanced topics: scaling, multi-region, and HA"
+description: "Tune fak serve for throughput, scale it across replicas and regions, and keep it available, with sticky trace_id routing for IFC correctness."
+---
+
 # Advanced topics: performance, scaling, multi-region, and HA
 
 This guide covers running `fak serve` beyond a single-process dogfood: tuning it for

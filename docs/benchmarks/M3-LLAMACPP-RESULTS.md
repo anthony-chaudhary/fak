@@ -1,3 +1,8 @@
+---
+title: "fak on Apple M3: NEON Q8 lane vs llama.cpp"
+description: "Adds an arm64 NEON Q8 kernel that flips int8 to 1.9x faster than f32, runs Qwen2.5-1.5B, and measures fak's remaining CPU gap to llama.cpp on Apple M3 Pro."
+---
+
 # M3-LLAMACPP-RESULTS — fak on Apple Silicon: the NEON Q8 lane, the best model it runs, and the measured gap to llama.cpp
 
 > **Honest verdict up front.** Before this work fak had **no SIMD Q8 kernel on arm64** — the

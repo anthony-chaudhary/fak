@@ -1,3 +1,8 @@
+---
+title: "fak + A2A: the evidence layer behind the front door"
+description: "How fak projects its capability floor, quarantine, and task evidence onto the Agent2Agent protocol surface instead of reinventing it."
+---
+
 # Fleet A2A Value Opportunities
 
 Date: 2026-06-19

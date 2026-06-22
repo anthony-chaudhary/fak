@@ -1,3 +1,8 @@
+---
+title: "fak proof: provenance unforgeable trust label"
+description: "Integrity proof for fak's provenance leaf: a model cannot self-mint trust via forged Meta, and one kernel label is the single source the trust gates consult."
+---
+
 # C3 · provenance
 
 `internal/provenance` is the single, kernel-authored answer to "where did this byte come from, and may the kernel trust it?". It maps a `(ToolCall, Result)` pair to a label on the frozen `abi.TaintLabel` lattice (`trusted < tainted < quarantined`) using **exactly two kernel-controlled facts**: the post-call, kernel-stamped `Result` envelope (`Payload.Taint`, and the detector-stamped `quarantine_id`), and the **host-registered** source class of the tool's channel (`SourceOf`, seeded by `init`/`RegisterSource`). It deliberately does **not** read `ToolCall.Meta` on any verdict path. "Correct" here is a **regime-C integrity** property, not a numerical one: an *adversary* — an injected/derailed model that fully controls its own `ToolCall` (Op, Tool, Args, and the open `Meta` map) — must be **unable to mint trust for itself**. Two obligations capture that: (1) a forged `Meta["provenance"]="trusted_local"` self-tag is ignored for the verdict (surfaced only forensically via `AttemptedSelfTrust`); and (2) this one kernel-authored definition is the *single source* the trust gates (`ifc`, `normgate`) consult, so there is no drifting second copy a forgery could slip past.

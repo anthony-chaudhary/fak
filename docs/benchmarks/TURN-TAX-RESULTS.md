@@ -1,3 +1,8 @@
+---
+title: "Turn Tax: Safety Floor and Saved Error Turns"
+description: "Measures fak's deterministic safety floor on a live kernel trace plus the extra error-recovery turns its one-shot syscall path eliminates when self-hosted."
+---
+
 # TURN-TAX-RESULTS — the deterministic safety floor, plus the error-code turn measured and ablated
 
 > The microsecond bench (`fak bench`, `internal/bench`) answers *"how cheap is one

@@ -1,3 +1,8 @@
+---
+title: "fak permission systems visual companion (2026-06-18)"
+description: "Figures contrasting prompt fatigue, broad grants, classifier risk, and dangerous bypass against FAK/DOS, the checked-in executable kernel policy for tool calls."
+---
+
 # Permission Systems Visual Companion
 
 > Visual companion for the permission-system benchmark and API-host bridge proof.
