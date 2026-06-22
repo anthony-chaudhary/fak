@@ -230,7 +230,7 @@ func BuildComparison(in CompareInputs) Comparison {
 	}
 
 	c.Honesty = []string{
-		"prefill work-elimination is a deterministic floor (exact token arithmetic), NOT a measured wall-clock — live timing is the DGX headline",
+		"prefill work-elimination is a deterministic floor (exact token arithmetic), NOT a measured wall-clock — live timing is the GPU server headline",
 		"cross-worker reuse (B/C) is the value-stack lever; the A/C and turn-tax (A/B) numbers are fak-vs-harness-arms, reported as such, not as a tuned-SGLang head-to-head",
 		"resolve-rate is ~0 with the local 135M model; the real resolve number comes from a Qwen3.6-27B-class model on DGX via the same harness",
 		"to be scraped by bench like SGLang, fak serve needs a Prometheus /metrics route exposing kernel.Counters() — gap noted, not yet shipped",

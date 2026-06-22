@@ -45,7 +45,7 @@ import "fmt"
 // ForwardTP fails closed on each rather than silently mis-serving it. It also requires
 // f32-resident projection weights (it slices raw output rows); a quant-resident model
 // returns an error — quant-aware sharding is a later lever. The real NCCL/RDMA Collective
-// behind LocalCollective is the OTHER remaining lever and needs the DGX hardware.
+// behind LocalCollective is the OTHER remaining lever and needs the GPU server hardware.
 
 // TPConfig parameters the wired tensor-parallel forward. AttnRanks shards the attention over
 // the kv-head groups (nKV); FFNRanks shards the FFN over the intermediate dim (I). They may

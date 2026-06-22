@@ -4,7 +4,7 @@
 # CLOSED on the wrong GPU generation instead of crashing deep in a DSA kernel.
 #
 # RUN THIS ON THE SERVING NODE (a Hopper/Blackwell box: H200/B200/B300/GB300),
-# not the laptop and not the A100 DGX. The preflight will refuse Ampere (sm_80).
+# not the laptop and not the GPU server. The preflight will refuse Ampere (sm_80).
 #
 # Why this exists / what it encodes (verified 2026-06-21):
 #   * GLM-5.2 uses DeepSeek-Sparse-Attention (DSA). Stock SGLang/vLLM DSA kernels
@@ -12,7 +12,7 @@
 #     floor — vLLM #35021 reports >=3 layers of sm_80 incompatibility. The Ada
 #     (sm_89, RTX 4090) community port (renning22/glm-5.2-4090, ada_dsa.py) is the
 #     only lower-arch path and is NOT Ampere and NOT stock.
-#   * On an A100 DGX, use the llama.cpp MLA path instead: tools/glm52_serve.sh.
+#   * On a GPU server, use the llama.cpp MLA path instead: tools/glm52_serve.sh.
 #   * SGLang GLM-5.2 cookbook: `sglang serve --model-path zai-org/GLM-5.2-FP8 --tp 8`
 #     plus EAGLE speculative decode (MTP). FP8 fits 8x H200 (~1128 GB > ~866 GB).
 #   * DURABILITY: launch under `systemd-run --unit=NAME --collect` on a host where
@@ -61,7 +61,7 @@ if [ "${PREFLIGHT}" = "1" ]; then
         --engine "${ENGINE}" --quant "${QUANT}" --require-ready \
         --markdown "${HERE}/glm52-${ENGINE}-preflight.md"; then
     log "PREFLIGHT BLOCKED — this node cannot serve GLM-5.2 in ${ENGINE}."
-    log "See glm52-${ENGINE}-preflight.md. On an A100 DGX use tools/glm52_serve.sh (llama.cpp)."
+    log "See glm52-${ENGINE}-preflight.md. On a GPU server use tools/glm52_serve.sh (llama.cpp)."
     exit 1
   fi
   log "preflight OK."

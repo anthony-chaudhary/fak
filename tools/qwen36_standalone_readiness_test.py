@@ -259,7 +259,7 @@ def write_dgx_prep_run(run_dir: Path) -> None:
         "generated_at": "2026-06-19T00:03:00Z",
         "run_id": "prep-001",
         "model": "Qwen3.6-27B",
-        "hardware": "dgx-a100",
+        "hardware": "gpu-server",
         "benchmark": {"root": "/srv/Benchmark"},
     }), encoding="utf-8")
     (run_dir / "DGX_RUNBOOK.md").write_text("# prep\n", encoding="utf-8")

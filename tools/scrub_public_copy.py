@@ -32,6 +32,16 @@ DELETE_PATHS = [
     ".claude/memory",
     "AGENTS.md",  # operator-machine workflow guidance; private side only
     "CLAUDE.md",  # Claude Code mirror of AGENTS.md; private side only (symmetric)
+    # The scrub POLICY is private-side only. PUBLIC-SCRUB-POLICY.md is the
+    # human-readable companion to this file: it names every private concept, lab
+    # machine, and redaction reason in one place, so publishing it hands a reader
+    # the entire map of what we hide and why. It stays in the private canonical
+    # repo; the scrubber CODE still ships (the public clone needs it for the
+    # hard-cut self-audit -- see _effective_audit_needles / audit_tree), but the
+    # policy narrative does not. Kept in SELF_REFERENTIAL too, so the private-side
+    # gates still exempt it. (Path-absent today is fine: the delete loop skips a
+    # missing path, so this is also a forward guard if the doc is ever written.)
+    "PUBLIC-SCRUB-POLICY.md",
     "fak/experiments/fleet-nodes/anthony",
     "fak/experiments/qwen36/node-reports",  # operator-machine nvidia preflight evidence (real IP, real paths)
     # --- DGX lab-benchmark subsystem (operator's private lab infra: the example.lab
@@ -134,6 +144,24 @@ REPLACEMENTS = [
     ("C0EXAMPLE00", "C0EXAMPLE00", "operator Slack channel id (#dgx-control)"),
     ("U0EXAMPLE00", "U0EXAMPLE00", "operator Slack bot/user id"),
     ("U0EXAMPLE01", "U0EXAMPLE01", "operator Slack user id"),
+    # Operator's PRIVATE control-bridge codename. "control-hub" / "control hub" /
+    # "control_hub" is the operator's internal name for the Slack control bridge
+    # that the (deleted) dgxbridge cluster speaks -- a private concept, not a
+    # public surface. The bridge CODE is dropped in DELETE_PATHS, but the codename
+    # also leaked into KEPT files: the DGX results/runbook docs and the v0.30/v0.28
+    # release notes ("multi-session control hub", "control_hub protocol", "Slack
+    # control-hub bridge"). Normalize every form to the already-public, generic
+    # "control bridge" wording. Order matters: the bridge-suffixed FULL PHRASES go
+    # first so the bare-token rules below cannot double the trailing "bridge".
+    # Export-only -- the PRIVATE repo legitimately carries the real dgxbridge, so
+    # the codename is audited at EXPORT (EXPORT_AUDIT_NEEDLES) not at COMMIT.
+    ("Slack control-hub bridge", "Slack control bridge",
+     "private concept: Slack control-hub bridge -> generic control bridge"),
+    ("Slack control hub", "Slack control bridge",
+     "private concept: Slack control hub -> control bridge"),
+    ("control_hub", "control bridge", "private control-bridge codename (underscore form)"),
+    ("control-hub", "control bridge", "private control-bridge codename (hyphen form)"),
+    ("control hub", "control bridge", "private control-bridge codename (space form)"),
     ("100.64.0.10", "100.64.0.10",
      "operator Tailscale IP 100.64.0.10 -> generic test IP 100.64.0.10"),
     ("100.64.0.10", "100.64.0.10",
@@ -179,6 +207,11 @@ REPLACEMENTS = [
     # (fleet_accounts.account_tag strips the suffix either way) without shipping the
     # codename. Already applied to the public copy.
     ("-netra", "-acct", "operator org suffix on account dirs -netra -> -acct"),
+    # Sentence-initial "The DGX ..." -- the case-insensitive "the DGX " rule in the
+    # DGX/A100 block below would lowercase the leading "The" (it includes "the" in
+    # the token). Run this capital-preserving form FIRST so a sentence start stays
+    # capitalized; the case-insensitive rule then catches the mid-sentence forms.
+    ("The DGX ", "The GPU server ", "DGX machine (sentence-initial, capital preserved)"),
 ]
 
 # Tokens that appear in varying CASES (Windows hostnames are case-insensitive;
@@ -195,12 +228,51 @@ CASE_INSENSITIVE_REPLACEMENTS = [
     # matters: full FQDN -> short host -> domain -> tailnet, then the SSH
     # password LAST so the hostname forms clear before the shared `<ssh-password>`
     # prefix is rewritten. The password is a real credential -- rotate it.
-    ("dgx-a100.example.lab", "dgx-a100.example.lab"),
-    ("dgx-a100", "dgx-a100"),
+    # The DGX host id is also VAGUED (dgx-a100 -> gpu-server): "dgx-a100" itself
+    # names the DGX + A100 hardware, so it folds into the DGX-vagueness policy. The
+    # lowercase form (IGNORECASE) also covers the prose "DGX-A100" and the machine
+    # -id / hardware / node_name VALUES carried in the kept benchmark JSONs.
+    ("dgx-a100.example.lab", "gpu-server.example.lab"),
+    ("dgx-a100", "gpu-server"),
     ("example.lab", "example.lab"),
     ("tailnet.example.ts.net", "tailnet.example.ts.net"),
     ("tailnet", "tailnet"),
     ("<ssh-password>", "<ssh-password>"),
+    # --- DGX / A100 hardware vagueness -------------------------------------
+    # Reduce the operator's private big-iron to a vague generic. The lab box is an
+    # NVIDIA DGX A100 ("lab A100 DGX", "8x A100-SXM4-40GB", the "8x A100" count),
+    # named across the KEPT benchmark/release docs, the README/HARDWARE-MATRIX
+    # coverage matrix, and a handful of Go/tool COMMENTS. Every needle here carries
+    # a SPACE (or the explicit "8x"/"8×" count), so it can ONLY match prose or
+    # comments -- never a code identifier, which are hyphen/underscore-joined with
+    # no space: cmd/dgxbridge, dgx_qwen36_*, dgx-r4-*, the FAK_DGX_REQ_ marker, the
+    # GCP "NVIDIA_A100" quota keys, the asserted "NVIDIA A100-SXM4-40GB" preflight
+    # test fixtures. Bare "DGX"/"A100" are deliberately left alone for that reason.
+    # This is a softening pass (reduce + vague), so NO audit needle is added -- the
+    # residual technical "A100"/"sm_80"/"Ampere" arch references are legitimate and
+    # intentionally kept. Order: SKU + count forms first, then the machine brand,
+    # then the bare count, then the trailing-space "the A100 " catch-all last.
+    ("8× NVIDIA A100-SXM4-40GB", "an 8-GPU datacenter server"),
+    ("8×A100-SXM4-40GB", "an 8-GPU datacenter server"),
+    ("8× A100-SXM4-40GB", "an 8-GPU datacenter server"),
+    ("8x A100-SXM4-40GB", "an 8-GPU datacenter server"),
+    # "an A100 DGX" -> "a GPU server" (not "an GPU server"): "A100" takes "an"
+    # (vowel sound) but "GPU" takes "a" (consonant sound). Must precede "A100 DGX".
+    ("an A100 DGX", "a GPU server"),
+    ("lab A100 DGX", "lab GPU server"),
+    ("A100 DGX", "GPU server"),
+    ("DGX A100", "GPU server"),
+    ("lab DGX", "GPU server"),
+    ("the DGX ", "the GPU server "),  # "The DGX is reached", "the DGX path" (space-bounded -> prose only)
+    ("DGX bridge", "control bridge"),
+    ("DGX benchmarking", "GPU benchmarking"),
+    ("DGX node", "GPU node"),
+    # Bare count (no SKU): drop the article -- these land in adjectival/terse slots
+    # ("the real 8×A100 box", "8× A100/CUDA Ampere") where a leading "an" reads wrong.
+    ("8×A100", "8-GPU server"),
+    ("8× A100", "8-GPU server"),
+    ("8x A100", "8-GPU server"),
+    ("the A100 ", "the GPU "),
 ]
 
 # Directories whose NAME carries an owner/personal identifier. Content
@@ -255,6 +327,9 @@ EXPORT_AUDIT_NEEDLES = AUDIT_NEEDLES + [
     "C0EXAMPLE00",   # operator Slack channel id (#dgx-control) -- export-only rewrite
     "U0EXAMPLE00",   # operator Slack bot/user id
     "U0EXAMPLE01",   # operator Slack user id
+    "control-hub",   # operator private control-bridge codename (hyphen form) -- rewritten
+    "control_hub",   # underscore protocol-id form
+    "control hub",   # space form ("multi-session control hub")
 ]
 
 # Machine-id prefixes whose benchmark runs are PRIVATE and must never reach the

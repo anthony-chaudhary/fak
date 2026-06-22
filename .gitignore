@@ -117,7 +117,7 @@ tools/bench_nodes.json
 fak/experiments/fleet-nodes/
 fak/experiments/dgx/
 # DGX benchmark runs registered into the catalog by tools/bench_slack.py
-# (register_dgx_run, machine_id=dgx*) land here. The DGX lab subsystem is
+# (register_dgx_run, machine_id=dgx*) land here. The GPU server lab subsystem is
 # PRIVATE-ONLY (PUBLIC-SCRUB-POLICY.md), so keep these run dirs untracked: a run
 # registered in ANY clone (public or private) is then private by default and can
 # never be `git add`-ed into either repo by accident.

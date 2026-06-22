@@ -139,7 +139,7 @@ def main() -> int:
         seen.add(key)
         print(f"  {f}: [{shape}] {hit}", file=sys.stderr)
     print("  fix: redact to the placeholder (C:\\Users\\USER, /Users/USER, "
-          "dgx-a100/example.lab) per PUBLIC-SCRUB-POLICY.md.", file=sys.stderr)
+          "gpu-server/example.lab) per PUBLIC-SCRUB-POLICY.md.", file=sys.stderr)
     if a.audit_staged:
         print("  override once: ALLOW_SECRET_SHAPE=1 <git cmd>  (a new redaction example only).", file=sys.stderr)
     return 1

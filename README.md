@@ -173,11 +173,11 @@ through `fak` at ~9× less prefill cost (measured).
 
 **And it's not one lucky box.** The same pure-Go kernel — same bit-exact gates — is
 profiled across **4 distinct hardware platforms** (Apple M3 Pro/Metal, AMD Ryzen +
-RX 7600/Vulkan, Intel + RTX 4070/CUDA Ada, 8× A100/CUDA Ampere) spanning 2 CPU ISAs, 4 GPU
+RX 7600/Vulkan, Intel + RTX 4070/CUDA Ada, 8-GPU server/CUDA Ampere) spanning 2 CPU ISAs, 4 GPU
 backends, and 4 operating systems — and the deterministic results reproduce byte-for-byte
 on every one. → **[The hardware matrix](docs/HARDWARE-MATRIX.md)**
 
-[![fak hardware coverage matrix — four hardware platforms (Apple M3 Pro / Metal, AMD Ryzen + RX 7600 / Vulkan, Intel + RTX 4070 / CUDA Ada, 8x A100 / CUDA Ampere) across two CPU ISAs, four GPU backends, and four operating systems, with the bit-exact correctness gates passing on every backend](visuals/56-hardware-coverage-matrix.svg)](docs/HARDWARE-MATRIX.md#the-coverage-matrix)
+[![fak hardware coverage matrix — four hardware platforms (Apple M3 Pro / Metal, AMD Ryzen + RX 7600 / Vulkan, Intel + RTX 4070 / CUDA Ada, 8-GPU server / CUDA Ampere) across two CPU ISAs, four GPU backends, and four operating systems, with the bit-exact correctness gates passing on every backend](visuals/56-hardware-coverage-matrix.svg)](docs/HARDWARE-MATRIX.md#the-coverage-matrix)
 
 ---
 

@@ -207,7 +207,7 @@ def migrate_fleet_nodes(dry_run: bool) -> List[Dict]:
 
 
 # index_dgx_runs() omitted from the public copy -- it indexed the operator's
-# private lab DGX dir (fak/experiments/dgx/, excluded from export). The public
+# private GPU server dir (fak/experiments/dgx/, excluded from export). The public
 # copy has no such dir; see PUBLIC-SCRUB-POLICY.md.
 
 

@@ -219,4 +219,4 @@ fak webbench eval --predictions preds.json
 ---
 
 *Last benchmark update: 2026-06-20*  
-*Next full harness eval: pending DGX node access*
+*Next full harness eval: pending GPU node access*

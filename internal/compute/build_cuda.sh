@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # build_cuda.sh — compile the CUDA kernels (nvcc -> libfakcuda.a) and build/test the
 # `-tags cuda` variant of the compute package. Portable across three hosts with no
-# edits: WSL (user-space micromamba CUDA env at ~/cudaenv, no sudo), the lab DGX, and
+# edits: WSL (user-space micromamba CUDA env at ~/cudaenv, no sudo), the GPU server, and
 # a GCP GPU VM (Deep-Learning-VM image, CUDA at /usr/local/cuda). The default
 # `go build` (no tags) needs none of this and stays pure-Go.
 #

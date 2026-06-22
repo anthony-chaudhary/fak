@@ -129,7 +129,7 @@ lock-step with emitted metric names (`fleet_bottleneck_test.py` asserts this).
 > These match the metrics-service stack's ports. If you run **both** stacks on one
 > box, offset one set (e.g. Grafana `3001:3000`, Prometheus `9092:9091`) to avoid
 > a collision. The two engines never share the same `:9095` source — fleet's is
-> `fleet_bottleneck.py`, the DGX project's is `metricsd`.
+> `fleet_bottleneck.py`, the GPU server project's is `metricsd`.
 
 ## Regenerate the dashboard
 

@@ -9,7 +9,7 @@ import "fmt"
 // splits the layer STACK across workers and crosses a hidden state at each boundary;
 // tensor parallelism splits a SINGLE layer's matmuls across workers and crosses a
 // collective (AllGather / AllReduce) inside the layer. The two compose: a real
-// 8×A100 plan is a grid of pipeline stages × tensor-parallel ranks.
+// 8-GPU server plan is a grid of pipeline stages × tensor-parallel ranks.
 //
 // The decomposition here is the canonical Megatron-LM one, and the repo's existing
 // numeric discipline (parallel.go) is exactly what makes it honest:

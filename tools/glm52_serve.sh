@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# glm52_serve.sh — stand up GLM-5.2 (Q4_K_M GGUF) on an 8x A100-40GB host
+# glm52_serve.sh — stand up GLM-5.2 (Q4_K_M GGUF) on an 8-GPU server-40GB host
 # via llama.cpp with CPU expert-offload, then health-check it for the #130 serving
 # witness. RUN THIS ON THE GPU HOST, not a laptop.
 #

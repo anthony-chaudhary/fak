@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1500" height="880" viewBox="0 0 1500 880" role="img" aria-labelledby="title desc">
   <title id="title">fak hardware coverage matrix</title>
-  <desc id="desc">fak has been profiled across four distinct hardware platforms: Apple M3 Pro (arm64, Metal + NEON, macOS); AMD Ryzen 9 9950X with Radeon RX 7600 (x86_64, Vulkan, Windows); Intel x86_64 with NVIDIA RTX 4070 (CUDA Ada sm_89, Windows + WSL2 Linux); and 8 NVIDIA A100-SXM4-40GB (CUDA Ampere sm_80, Linux, the multi-GPU serving lane). That spans two CPU ISAs, three CPU vendors, four GPU backends, and four operating systems. The deterministic correctness gates pass on every backend; the A100 row is the documented serving and GLM-5.2 readiness lane.</desc>
+  <desc id="desc">fak has been profiled across four distinct hardware platforms: Apple M3 Pro (arm64, Metal + NEON, macOS); AMD Ryzen 9 9950X with Radeon RX 7600 (x86_64, Vulkan, Windows); Intel x86_64 with NVIDIA RTX 4070 (CUDA Ada sm_89, Windows + WSL2 Linux); and 8 NVIDIA A100-SXM4-40GB (CUDA Ampere sm_80, Linux, the multi-GPU serving lane). That spans two CPU ISAs, three CPU vendors, four GPU backends, and four operating systems. The deterministic correctness gates pass on every backend; the GPU row is the documented serving and GLM-5.2 readiness lane.</desc>
   <defs>
     <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
       <stop offset="0%" stop-color="#f7faf9"/>
@@ -124,7 +124,7 @@
 
   <!-- row 4: A100 -->
   <rect x="60" y="706" width="1380" height="98" rx="6" class="card"/>
-  <text x="78" y="744" class="plat">8× NVIDIA A100-SXM4-40GB</text>
+  <text x="78" y="744" class="plat">an 8-GPU datacenter server</text>
   <text x="78" y="768" class="platSub">the multi-GPU serving lane (Ampere sm_80)</text>
   <text x="78" y="790" class="platSub">~320 GB GPU · big-iron, no single-box ceiling</text>
   <text x="402" y="750" class="cell">x86_64 host</text>

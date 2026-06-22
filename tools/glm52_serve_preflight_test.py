@@ -6,7 +6,7 @@ Run:  python -m pytest tools/glm52_serve_preflight_test.py
 
 Deterministic and offline: nvidia-smi and the engine-import probes are injected
 through a fake runner, so the verdict logic is exercised against the real node
-shapes (A100 DGX = sm_80, H200/B200 = Hopper/Blackwell, RTX 4090 = Ada) without
+shapes (GPU server = sm_80, H200/B200 = Hopper/Blackwell, RTX 4090 = Ada) without
 any GPU or installed engine present.
 """
 from __future__ import annotations
@@ -106,7 +106,7 @@ def test_required_vram_includes_overhead():
 def test_recommended_quant_picks_highest_fidelity_that_fits():
     # 8x H200 (1128 GB, Hopper): fp8 (~866 GB with 15% overhead) fits -> fp8.
     assert pf.recommended_quant(1128.0, 0.15, 9.0) == "fp8"
-    # 320 GB (8x A100-40): even int4 (~432 GB) does not fit.
+    # 320 GB (8-GPU server-40): even int4 (~432 GB) does not fit.
     assert pf.recommended_quant(320.0, 0.15, 9.0) is None
     # ~500 GB on Hopper: fp8 no, nvfp4 Blackwell-only (skip), w4afp8 (~423) fits.
     assert pf.recommended_quant(500.0, 0.15, 9.0) == "w4afp8"
@@ -132,7 +132,7 @@ def test_quant_arch_ok():
 
 
 # --------------------------------------------------------------------------- #
-# the A100 DGX — the headline case: BLOCKED on arch (and memory)
+# the GPU server — the headline case: BLOCKED on arch (and memory)
 # --------------------------------------------------------------------------- #
 
 def a100_dgx_rows(cc: str = "8.0"):

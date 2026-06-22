@@ -75,7 +75,7 @@ class RoutingRungTest(unittest.TestCase):
 
     def test_label_only_fallback(self):
         # No conventional scope; routed by label.
-        r = route(issue(3, "DGX A100 Benchmark needs network access", labels=["gpu"]))
+        r = route(issue(3, "GPU server Benchmark needs network access", labels=["gpu"]))
         self.assertEqual(r["lane"], "compute")
         self.assertEqual(r["confidence"], "label")
 

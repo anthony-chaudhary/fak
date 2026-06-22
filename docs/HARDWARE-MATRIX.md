@@ -33,7 +33,7 @@ appears here it carries a pointer to the doc + commit that owns it.
 | **Apple M3 Pro** *(primary bench node)* | Apple M3 Pro 6P+6E, arm64 | 18-core **Metal** + **NEON** Q8 | macOS | f32 · Q8_0 · Q4_K · Q2_K | Full model ladder, the agent-fleet value stack, the pure-kernel latency stack, Qwen3.6-27B end-to-end in fak's own engine |
 | **AMD Ryzen 9 9950X + Radeon RX 7600** | AMD Zen 5, 16C/32T, x86_64, AVX-512 | **Vulkan** Q8 (RX 7600) + CPU Q8 | Windows | f32 · Q8_0 · Q4_K | Q8-on-GPU throughput, the GPU/CPU crossover, 3/3 live agent surfaces on Qwen3.6-27B |
 | **Intel x86_64 + NVIDIA RTX 4070** | Intel, x86_64, AVX2/AVX-512 | **CUDA** (Ada, sm_89): f32 · F16 · Q8 · graph | Windows + WSL2 Linux | f32 · F16 · Q8_0 | In-kernel CUDA decode at llama.cpp parity, batched decode curve, cross-platform bit-exact determinism vs the Mac |
-| **8× NVIDIA A100-SXM4-40GB** *(serving lane)* | x86_64 host | **CUDA** (Ampere, sm_80), multi-GPU | Linux | Q4_K · (FP8/BF16 target) | The multi-GPU serving + GLM-5.2 readiness lane — big-iron, where single-box ceilings stop binding |
+| **an 8-GPU datacenter server** *(serving lane)* | x86_64 host | **CUDA** (Ampere, sm_80), multi-GPU | Linux | Q4_K · (FP8/BF16 target) | The multi-GPU serving + GLM-5.2 readiness lane — big-iron, where single-box ceilings stop binding |
 
 **Reading the spread:** the deterministic results (token-count speedups, cache hit rate,
 bit-exact eviction) are *hardware-independent by construction* and reproduce byte-for-byte
@@ -139,7 +139,7 @@ determinism check that proves the deterministic metrics are not arm64-specific.
 
 ---
 
-## Platform 4 — 8× NVIDIA A100-SXM4-40GB · the multi-GPU serving lane
+## Platform 4 — an 8-GPU datacenter server · the multi-GPU serving lane
 
 The big-iron lane: ~320 GB of GPU on a DGX-class node, where the single-box memory
 ceilings (`fak` faithful ≤ 7B on the 36 GB Mac) stop binding and the questions become
@@ -147,7 +147,7 @@ multi-GPU serving and frontier-model readiness.
 
 | Component | Spec |
 |---|---|
-| GPU | **8× NVIDIA A100-SXM4-40GB** (Ampere, **sm_80**), ~320 GB aggregate |
+| GPU | **an 8-GPU datacenter server** (Ampere, **sm_80**), ~320 GB aggregate |
 | Host | x86_64, Linux |
 | Backends | **CUDA** (sm_80), multi-GPU serving target |
 
@@ -155,7 +155,7 @@ multi-GPU serving and frontier-model readiness.
 
 - **The model-ladder-on-A100 plan** — tiny smoke model → dense Qwen2.5 → hybrid
   Gated-DeltaNet bridge → Qwen3.6-27B, de-risking multi-GPU serving and the
-  fak-gateway-vs-raw comparison per rung. *(Tracked in the private DGX-A100
+  fak-gateway-vs-raw comparison per rung. *(Tracked in the private gpu-server
   model-ladder runbook, not part of the public snapshot.)*
 - **GLM-5.2 serving-readiness** — the feasibility finding that stock SGLang/vLLM cannot
   serve GLM-5.2's `glm_moe_dsa` (DSA kernels + memory) on Ampere sm_80, which is precisely
@@ -184,7 +184,7 @@ spread on purpose:
    Running the same gates on four platforms is how that claim is kept honest.
 2. **Two regimes need two kinds of hardware.** The single-stream ceiling (≤7B on 36 GB)
    is a small-box story; the multi-agent fleet win and the frontier-model serving lane
-   need the AMD/CUDA desktops and the A100 node respectively.
+   need the AMD/CUDA desktops and the GPU node respectively.
 3. **The deterministic metrics must be machine-independent.** The token-count speedups
    and cache hit rates are claimed as hardware-independent — the cross-platform Mac↔Windows
    reproduction is the witness that they actually are.

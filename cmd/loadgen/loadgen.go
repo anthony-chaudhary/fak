@@ -2,7 +2,7 @@
 // concurrency levels and reports throughput. The completion response carries token
 // counts (usage.completion_tokens) but no timing, so wall-clock is measured here.
 //
-// This is the pure-Go load matrix for the DGX benchmark: no Python, no third-party
+// This is the pure-Go load matrix for the GPU server benchmark: no Python, no third-party
 // deps. It is endpoint-agnostic — it works against fak's own in-kernel engine
 // (fak serve --gguf ...), the fak gateway fronting an upstream, or a raw SGLang/vLLM
 // server — anything that speaks the OpenAI chat wire.

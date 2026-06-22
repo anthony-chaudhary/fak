@@ -5,7 +5,7 @@
 # WHAT NODE THIS RUNS ON
 #   Any host with a CUDA toolkit (nvcc) AND a reachable NVIDIA GPU:
 #     • a dev box / WSL with a consumer card (e.g. RTX 4070 — enough for correctness),
-#     • the lab DGX, or
+#     • the GPU server, or
 #     • a GCP Deep-Learning-VM GPU instance (CUDA at /usr/local/cuda).
 #   It CANNOT run on the win32 dev host that produced this code: that host has no CUDA
 #   toolkit and the GPU quota is walled, so the test RUN is the explicit residual handed
