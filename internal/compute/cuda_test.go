@@ -81,15 +81,23 @@ func newSynth(be Backend, cfg synthCfg, host map[string][]float32) *synthModel {
 	return &synthModel{be: be, cfg: cfg, W: W, kv: kv, pos: 0, emb: host["emb"]}
 }
 
-// stepDev runs one token through all layers (decode path), appends K/V, and returns the
-// DEVICE-resident logits tensor WITHOUT a host Read — so a caller can fence it either way:
-// Read (full vector host-ward) or Argmax (on-device reduction, only the id crosses). step() is
-// exactly Read(stepDev()); the #482 async witness uses stepDev()+Argmax.
-func (m *synthModel) stepDev(id int) Tensor {
-	be, c := m.be, m.cfg
-	pos := m.pos
+// embedDev uploads token id's embedding row into a fresh device-resident hidden vector. It is
+// the per-token INPUT stage (a cudaMalloc + H2D), kept OUTSIDE any CUDA-graph capture by the
+// graph path (#483) — a cudaMalloc/H2D mid-capture is illegal. Gather stays on the host.
+func (m *synthModel) embedDev(id int) Tensor {
+	c := m.cfg
 	row := m.emb[id*c.H : (id+1)*c.H]
-	x := mkResident(be, []int{c.H}, append([]float32(nil), row...))
+	return mkResident(m.be, []int{c.H}, append([]float32(nil), row...))
+}
+
+// decodeChain runs the resident hidden x through every layer (RMSNorm→QKV→RoPE→Attention→
+// o_proj→FFN), appending this position's K/V, then the final RMSNorm→head, and returns the
+// DEVICE-resident logits. This is the FIXED per-token decode op sequence #483 captures into a
+// CUDA graph; both the eager (stepDev) and graph-replayed (stepDevGraph) paths call it, so the
+// graph witness compares the very same ops captured vs not. It does not touch m.pos (the caller
+// owns position bookkeeping) and does NOT Read — the caller fences via Read or Argmax.
+func (m *synthModel) decodeChain(x Tensor, pos int) Tensor {
+	be, c := m.be, m.cfg
 	for l := 0; l < c.L; l++ {
 		s := itoaC(l)
 		xn := be.RMSNorm(x, m.W["in"+s], c.eps)
@@ -110,7 +118,16 @@ func (m *synthModel) stepDev(id int) Tensor {
 		be.AddInPlace(x, down)
 	}
 	xf := be.RMSNorm(x, m.W["norm"], c.eps)
-	logits := be.MatMul(m.W["head"], xf)
+	return be.MatMul(m.W["head"], xf)
+}
+
+// stepDev runs one token through all layers (decode path), appends K/V, and returns the
+// DEVICE-resident logits tensor WITHOUT a host Read — so a caller can fence it either way:
+// Read (full vector host-ward) or Argmax (on-device reduction, only the id crosses). step() is
+// exactly Read(stepDev()); the #482 async witness uses stepDev()+Argmax, and the #483 graph
+// witness compares stepDev (eager) against stepDevGraph (captured) over the shared decodeChain.
+func (m *synthModel) stepDev(id int) Tensor {
+	logits := m.decodeChain(m.embedDev(id), m.pos)
 	m.pos++
 	return logits
 }

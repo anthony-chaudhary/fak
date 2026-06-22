@@ -177,8 +177,13 @@ func (c *cudaBackend) Class() CorrectnessClass { return Approx } // device GEMM 
 func (c *cudaBackend) Caps() Caps {
 	// Async (#482): ops enqueue on g_stream and return unready Buffers; the SOLE host fences
 	// are Read and Argmax. DeviceMemory: resident tensors (incl. the KV cache) are not host-
-	// addressable. FusedAttn/GraphCompile/UploadDtype remain tracked seams.
-	return Caps{Async: true, DeviceMemory: true}
+	// addressable. GraphCompile (#483): the fixed per-token decode op stream is capturable into
+	// a cudaGraph_t on g_stream and replayable as ONE cudaGraphLaunch (instead of N kernel
+	// launches). It is advertised true exactly when that path is live (graphEnabled /
+	// FAK_CUDA_GRAPH=1) so it stays consistent with GraphBegin's consent — a consumer that reads
+	// false cleanly falls back to the synchronous per-op core (the cpu-ref/Metal default).
+	// FusedAttn/UploadDtype remain tracked seams.
+	return Caps{Async: true, DeviceMemory: true, GraphCompile: graphEnabled}
 }
 
 // ---- residency ------------------------------------------------------------------
