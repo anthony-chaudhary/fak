@@ -126,17 +126,10 @@ on exit.
 > isolated dogfood account with `--faklocal-ok`). No front door re-implements the
 > roster+route+token dance.
 
-> **Fanning out? Use the wave, not a burst of `resolve`.** `resolve` returns the ONE
-> best account. A parallel fan-out that calls it N times in a burst gets the *same*
-> account N times — no session has registered yet to move the fewest-live tie-break — so
-> all N lanes share one rate-limit pool and the fan-out serializes. `fleet_accounts.py
-> wave --count N` hands out N **distinct** pools in one call (distinct by Anthropic
-> `accountUuid`, else dir basename for a no-login/opencode dir, so two dirs on one account
-> never both get a lane); `wave --explain`
-> prints the headroom multiplier, and `launch_wave_detached.ps1` dispatches one detached
-> worker per lane (plan-by-default; `-Launch` to spawn). Why this is a *provable* win even
-> though we control neither the API nor its rate limiter:
-> [`docs/explainers/account-switching-without-controlling-the-kernel.md`](docs/explainers/account-switching-without-controlling-the-kernel.md).
+> **Fanning out across accounts?** `fleet_accounts.py wave --count N` hands each lane a
+> *distinct* account, so a burst doesn't pile onto one rate-limit pool (a single-account
+> `resolve` returns the same account N times in a burst). It's a per-account rate-limit
+> load balancer — operator fleet plumbing, not a kernel feature.
 
 Knobs: `FAK_DOGFOOD_PORT` (8080), `FAK_DOGFOOD_MODEL` (override; default = the
 **largest installed** ollama model, auto-upgraded to `FAK_DOGFOOD_FALLBACK_MODEL`
