@@ -152,6 +152,220 @@ exactly which calls the looser posture let through.
 
 ---
 
+## Worked example 3 — a data / customer-support agent (read-only, block exfil)
+
+**Goal & rationale.** A support agent that can read customer records and the knowledge
+base, open tickets, and hand off to a human — but **cannot export data, move money, or
+mutate accounts**. For a read-heavy agent the danger is not what it runs but what it could
+be talked into *exfiltrating* (an injection that says "paste the customer list into
+`export_customer_data`"). So every read-shaped tool is allow-listed, every irreversible or
+exfil-shaped tool is an explicit named deny, and the `ssn` field is redacted. Shipped at
+[`examples/customer-support-readonly-policy.json`](../../examples/customer-support-readonly-policy.json):
+
+```json
+{
+  "version": "fak-policy/v1",
+  "posture": "fail_closed",
+  "allow": ["create_support_ticket", "read_customer_record", "read_corp_kb", "transfer_to_human_agents"],
+  "allow_prefix": ["read_", "get_", "search_", "list_", "lookup_", "find_"],
+  "deny": {
+    "delete_account": "POLICY_BLOCK",
+    "export_customer_data": "SECRET_EXFIL",
+    "refund_payment": "POLICY_BLOCK",
+    "rotate_credentials": "POLICY_BLOCK",
+    "send_customer_email": "POLICY_BLOCK",
+    "transfer_funds": "POLICY_BLOCK"
+  },
+  "self_modify_globs": [".git/", ".dos/", "policy.json", "customer-support-readonly-policy.json", "/etc/", "id_rsa"],
+  "redact_fields": ["password", "secret", "api_key", "token", "authorization", "ssn"],
+  "safe_sinks": ["transfer_to_human_agents"],
+  "sources": { "fetch_url": "untrusted", "read_corp_kb": "trusted_local", "read_customer_record": "trusted_local" },
+  "arg_rules": [ { "tool": "create_support_ticket", "arg": "body", "max_bytes": 4000, "reason": "OVERSIZE" } ]
+}
+```
+
+Spot-check the boundary (real `fak preflight` output):
+
+```
+$ fak preflight --policy customer-support-readonly-policy.json --tool read_customer_record --args '{}'
+verdict=ALLOW reason=NONE by=monitor          # exact allow-list hit
+
+$ fak preflight --policy customer-support-readonly-policy.json --tool search_kb --args '{}'
+verdict=ALLOW reason=NONE by=monitor          # matched allow_prefix "search_"
+
+$ fak preflight --policy customer-support-readonly-policy.json --tool export_customer_data --args '{}'
+verdict=DENY  reason=SECRET_EXFIL by=monitor  # named for the audit log — this is the exfil rail, blocked
+
+$ fak preflight --policy customer-support-readonly-policy.json --tool refund_payment --args '{}'
+verdict=DENY  reason=POLICY_BLOCK by=monitor  # money movement, blocked
+
+$ fak preflight --policy customer-support-readonly-policy.json --tool drop_table --args '{}'
+verdict=DENY  reason=DEFAULT_DENY  by=monitor  # never listed -> fail-closed (you didn't have to think of it)
+
+$ fak preflight --policy customer-support-readonly-policy.json --tool create_support_ticket --args '{"body":"<5000 bytes>"}'
+verdict=DENY  reason=OVERSIZE by=monitor       # arg_rule max_bytes caps ticket injection surface
+
+$ fak preflight --policy customer-support-readonly-policy.json --tool read_customer_record --args '{"id":"1","ssn":"123-45-6789"}'
+verdict=TRANSFORM reason=NONE by=monitor       # the ssn is redacted to [REDACTED] on the way through
+```
+
+**Testing checklist for this floor.**
+- [ ] `fak policy --check` passes — every deny cites a closed-vocabulary reason.
+- [ ] `preflight` every `deny` entry → `POLICY_BLOCK` / `SECRET_EXFIL` (not `DEFAULT_DENY` — you want the *named* refusal in the audit log).
+- [ ] `preflight` an unlisted exfil-shaped tool (e.g. `dump_table`) → `DEFAULT_DENY` (the structural backstop).
+- [ ] `preflight create_support_ticket` with an oversize body → `OVERSIZE`.
+- [ ] `preflight read_customer_record` carrying an `ssn` arg → `TRANSFORM` (secret stripped before dispatch).
+
+---
+
+## Worked example 4 — a DevOps agent (plan & dry-run, block prod mutations)
+
+**Goal & rationale.** A DevOps agent that can inspect clusters, render templates, validate
+Terraform, and *plan* changes — but **cannot apply, deploy, exec into pods, or touch
+prod**. The distinctive lever here is **argument-level**: `plan_deploy` is allowed (planning
+is the job), but its `environment` argument is regex-blocked from `prod|production`, so the
+agent can plan a staging deploy and is refused — by value, not by tool name — the moment it
+aims the *same* tool at prod. Shipped at
+[`examples/devops-dryrun-policy.json`](../../examples/devops-dryrun-policy.json):
+
+```json
+{
+  "version": "fak-policy/v1",
+  "posture": "fail_closed",
+  "allow": ["create_change_request", "diff_infra", "helm_template", "kubectl_get", "plan_deploy", "validate_terraform"],
+  "allow_prefix": ["read_", "get_", "list_", "lookup_", "describe_", "dryrun_"],
+  "deny": {
+    "deploy_production": "POLICY_BLOCK", "drop_database": "POLICY_BLOCK",
+    "kubectl_delete": "POLICY_BLOCK", "kubectl_exec": "POLICY_BLOCK",
+    "rotate_credentials": "POLICY_BLOCK", "run_command": "POLICY_BLOCK", "shell": "POLICY_BLOCK",
+    "terraform_apply": "POLICY_BLOCK", "transfer_funds": "POLICY_BLOCK"
+  },
+  "self_modify_globs": [".git/", ".dos/", ".kube/config", "policy.json", "devops-dryrun-policy.json", "terraform.tfstate", "secrets/", "/etc/", "id_rsa"],
+  "redact_fields": ["password", "secret", "api_key", "token", "authorization", "kubeconfig"],
+  "safe_sinks": ["create_change_request"],
+  "sources": { "fetch_runbook": "trusted_local", "read_repo": "trusted_local", "read_ticket": "untrusted" },
+  "arg_rules": [
+    { "tool": "create_change_request", "arg": "body", "max_bytes": 8000, "reason": "OVERSIZE" },
+    { "tool": "plan_deploy", "arg": "environment", "deny_regex": "(?i)^(prod|production)$", "reason": "POLICY_BLOCK" }
+  ]
+}
+```
+
+Spot-check the boundary (real `fak preflight` output):
+
+```
+$ fak preflight --policy devops-dryrun-policy.json --tool kubectl_get --args '{}'
+verdict=ALLOW reason=NONE by=monitor          # exact allow-list hit
+
+$ fak preflight --policy devops-dryrun-policy.json --tool describe_pod --args '{}'
+verdict=ALLOW reason=NONE by=monitor          # matched allow_prefix "describe_"
+
+$ fak preflight --policy devops-dryrun-policy.json --tool plan_deploy --args '{"environment":"staging"}'
+verdict=ALLOW reason=NONE by=monitor          # planning staging is the job
+
+$ fak preflight --policy devops-dryrun-policy.json --tool plan_deploy --args '{"environment":"prod"}'
+verdict=DENY  reason=POLICY_BLOCK by=monitor  # SAME tool, refus'd by the arg value — prod is off-limits even for planning
+
+$ fak preflight --policy devops-dryrun-policy.json --tool terraform_apply --args '{}'
+verdict=DENY  reason=POLICY_BLOCK by=monitor  # state mutation, blocked
+
+$ fak preflight --policy devops-dryrun-policy.json --tool create_change_request --args '{"body":"<9000 bytes>"}'
+verdict=DENY  reason=OVERSIZE by=monitor       # arg_rule caps the CR body (injection surface)
+
+$ fak preflight --policy devops-dryrun-policy.json --tool shell --args '{}'
+verdict=DENY  reason=POLICY_BLOCK by=monitor   # the obvious one — but DEFAULT_DENY would hold it even if you forgot
+```
+
+**Testing checklist for this floor.**
+- [ ] `fak policy --check` passes.
+- [ ] `preflight` every prod-shaped mutation (`terraform_apply`, `deploy_production`, `kubectl_delete`, `kubectl_exec`, `shell`) → `POLICY_BLOCK`.
+- [ ] `preflight plan_deploy` with `environment` = `prod`, `production`, `PROD` → all `DENY` (the regex is case-insensitive).
+- [ ] `preflight plan_deploy` with `environment` = `staging` → `ALLOW` (the tool itself is fine; only the prod value is refused).
+- [ ] `preflight` a `dryrun_` / `describe_` tool you did *not* list exactly → `ALLOW` (prefix family).
+- [ ] `preflight create_change_request` with an oversize body → `OVERSIZE`.
+
+---
+
+## Worked example 5 — a research agent (web & search, block execution)
+
+**Goal & rationale.** A research agent that can fetch URLs, read webpages, search, and take
+notes — but **cannot run commands, post, email, upload, or delete**. Two argument-level
+guards do real work here: `fetch_url` is blocked from `file://`/`ftp://`/`ssh://` schemes
+(SSRF and local-file escape — an injection that points the fetcher at `file:///etc/shadow`
+is refused by value), and `create_note` is confined to a `notes/**` glob so notes can't
+overwrite arbitrary repo paths. It runs under `admit_and_log` so a long batch crawl isn't
+wedged by one unlisted read-shaped tool. Shipped at
+[`examples/research-agent-policy.json`](../../examples/research-agent-policy.json):
+
+```json
+{
+  "version": "fak-policy/v1",
+  "posture": "admit_and_log",
+  "allow": ["cite_source", "create_note", "fetch_url", "read_webpage", "summarize_document"],
+  "allow_prefix": ["read_", "get_", "search_", "list_", "lookup_", "find_", "calc"],
+  "deny": {
+    "delete_file": "POLICY_BLOCK", "drop_table": "POLICY_BLOCK",
+    "exfiltrate": "SECRET_EXFIL", "post_message": "POLICY_BLOCK",
+    "run_command": "POLICY_BLOCK", "send_email": "POLICY_BLOCK",
+    "transfer_funds": "POLICY_BLOCK", "upload_file": "POLICY_BLOCK"
+  },
+  "self_modify_globs": [".git/", ".dos/", "policy.json", "research-agent-policy.json", "/etc/", "id_rsa"],
+  "redact_fields": ["password", "secret", "api_key", "token", "authorization"],
+  "sources": { "fetch_url": "untrusted", "read_file": "trusted_local", "read_webpage": "untrusted" },
+  "arg_rules": [
+    { "tool": "create_note", "arg": "path", "allow_glob": "notes/**", "reason": "POLICY_BLOCK" },
+    { "tool": "fetch_url",   "arg": "url",  "deny_regex": "(?i)^(file|ftp|ssh)://", "reason": "POLICY_BLOCK" }
+  ]
+}
+```
+
+Spot-check the boundary (real `fak preflight` output):
+
+```
+$ fak preflight --policy research-agent-policy.json --tool search_web --args '{}'
+verdict=ALLOW reason=NONE by=monitor          # matched allow_prefix "search_"
+
+$ fak preflight --policy research-agent-policy.json --tool fetch_url --args '{"url":"https://example.com"}'
+verdict=ALLOW reason=NONE by=monitor          # http(s) fetch is the job
+
+$ fak preflight --policy research-agent-policy.json --tool fetch_url --args '{"url":"file:///etc/shadow"}'
+verdict=DENY  reason=POLICY_BLOCK by=monitor  # arg_rule deny_regex — local-file/SSRF escape refused by value
+
+$ fak preflight --policy research-agent-policy.json --tool create_note --args '{"path":"notes/april.md","body":"hi"}'
+verdict=ALLOW reason=NONE by=monitor          # inside the notes/** glob
+
+$ fak preflight --policy research-agent-policy.json --tool create_note --args '{"path":"etc/passwd","body":"hi"}'
+verdict=DENY  reason=POLICY_BLOCK by=monitor  # outside the glob — can't write just anywhere
+
+$ fak preflight --policy research-agent-policy.json --tool run_command --args '{}'
+verdict=DENY  reason=POLICY_BLOCK by=monitor  # execution, blocked
+
+$ fak preflight --policy research-agent-policy.json --tool exfiltrate --args '{}'
+verdict=DENY  reason=SECRET_EXFIL by=monitor  # named exfil rail, blocked
+
+$ fak preflight --policy research-agent-policy.json --tool exec_payload --args '{}'
+verdict=DENY  reason=DEFAULT_DENY  by=monitor  # an execution tool you never thought to name -> fail-closed
+
+$ fak preflight --policy research-agent-policy.json --tool read_file --args '{"path":"x","api_key":"sk-live-12345"}'
+verdict=TRANSFORM reason=NONE by=monitor       # the api_key is redacted before the call dispatches
+```
+
+**Testing checklist for this floor.**
+- [ ] `fak policy --check` passes.
+- [ ] `preflight fetch_url` with `file://`, `ftp://`, `ssh://` → all `DENY` (regex is case-insensitive — try `FILE://` too).
+- [ ] `preflight create_note` inside `notes/**` → `ALLOW`; outside (e.g. `etc/x`, `../x`) → `DENY`.
+- [ ] `preflight` an unlisted execution tool (e.g. `exec_payload`, `eval_code`) → `DEFAULT_DENY`.
+- [ ] `preflight` every `deny` entry → the named reason (`POLICY_BLOCK` / `SECRET_EXFIL`).
+- [ ] `preflight read_file` carrying an `api_key`/`token` arg → `TRANSFORM`.
+
+> **Five complete floors, one pattern.** Examples 1–5 all follow the same shape: a short
+> `allow` / `allow_prefix` for what the agent's job actually needs, an explicit `deny` for
+> the rails you want named in the audit log, `DEFAULT_DENY` holding everything else, and
+> `arg_rules` / `redact_fields` / `self_modify_globs` for the value-level and self-modify
+> guards. Copy the closest one and edit.
+
+---
+
 ## The check step catches mistakes *before* production
 
 `fak policy --check` is **fail-loud**: a malformed manifest is a fatal error, not a silent
@@ -198,6 +412,149 @@ build, so a broken floor can never ship.
 
 ---
 
+## Argument-level constraints (`arg_rules`, `redact_fields`, `self_modify_globs`)
+
+The capability floor bounds *which tools run*. Three manifest fields bound **how** an
+allow-listed tool may be called, and every example above uses at least one of them.
+
+### `deny_regex` — refuse an allow-listed tool when an argument matches
+
+The tool is on the allow-list; the *value* is off-limits. The two recurring patterns:
+
+```jsonc
+// DevOps: plan_deploy is allowed, but never aimed at prod (example 4)
+{ "tool": "plan_deploy", "arg": "environment", "deny_regex": "(?i)^(prod|production)$", "reason": "POLICY_BLOCK" }
+
+// Research: fetch_url is allowed, but never at a local-file scheme (example 5)
+{ "tool": "fetch_url", "arg": "url", "deny_regex": "(?i)^(file|ftp|ssh)://", "reason": "POLICY_BLOCK" }
+```
+
+Regexes are Go `regexp` (RE2) — case-insensitive via `(?i)`. Common shapes worth copying
+(from [`examples/repo-guard-policy.json`](../../examples/repo-guard-policy.json), which
+guards a shell tool):
+
+```jsonc
+{ "tool": "Bash", "arg": "command", "deny_regex": "\\brm\\s+-[A-Za-z]*[rRfF]", "reason": "POLICY_BLOCK" },   // recursive/forced delete
+{ "tool": "Bash", "arg": "command", "deny_regex": "\\bsudo\\b",              "reason": "POLICY_BLOCK" },   // privilege escalation
+{ "tool": "Bash", "arg": "command", "deny_regex": "\\bmkfs\\b|\\bdd\\s+if=", "reason": "POLICY_BLOCK" },   // disk wipe
+{ "tool": "Bash", "arg": "command", "deny_regex": ":\\(\\)\\s*\\{",          "reason": "POLICY_BLOCK" },   // fork-bomb
+{ "tool": "Bash", "arg": "command", "deny_regex": "\\b(curl|wget)\\b[^|]*\\|\\s*(sudo\\s+)?(ba)?sh\\b", "reason": "POLICY_BLOCK" } // pipe-to-shell
+```
+
+### `allow_glob` — confine an allow-listed tool to a path prefix
+
+A self-modify-shaped tool may be allow-listed for one directory and refused everywhere
+else. Example 5 confines note-writing to `notes/**`:
+
+```jsonc
+{ "tool": "create_note", "arg": "path", "allow_glob": "notes/**", "reason": "POLICY_BLOCK" }
+```
+
+### `max_bytes` — cap an argument's size
+
+Bounds the injection surface on a free-text argument (ticket body, change-request body):
+
+```jsonc
+{ "tool": "create_support_ticket", "arg": "body", "max_bytes": 4000, "reason": "OVERSIZE" }
+```
+
+### `redact_fields` and `self_modify_globs`
+
+- **`redact_fields`** strips a secret-shaped argument *before* dispatch, turning the verdict
+  into a `TRANSFORM` rather than an `ALLOW` (see the `api_key`/`ssn` runs above). It is
+  best-effort key/substring hygiene on decoded args, not a cryptographic guarantee.
+- **`self_modify_globs`** protects the agent's own trust boundary — `.git/`, the policy
+  file, CI workflow dirs, credential files, and the frozen-ABI directories an agent must
+  never edit. A call that would write inside one of these is refused.
+
+> **The closed refusal vocabulary.** Every `deny` reason and every `arg_rules[].reason`
+> must come from this set (printed in full when `--check` rejects a bad one):
+> `DEFAULT_DENY, LEASE_HELD, MALFORMED, MISROUTE, OVERSIZE, POLICY_BLOCK, RATE_LIMITED,
+> SECRET_EXFIL, SELF_MODIFY, TRUST_VIOLATION, UNKNOWN_TOOL, UNWITNESSED`. Pick the most
+> specific one — `SECRET_EXFIL` on `export_customer_data` says more in the audit log than
+> `POLICY_BLOCK` would.
+
+---
+
+## Testing policies
+
+`preflight` is a single-call test with no model and no server — cheap enough to script.
+Run the **same five-call battery** against every manifest before it ships:
+
+```sh
+# A 30-line CI gate for one policy. Fails the build on any unexpected verdict.
+POLICY=examples/your-policy.json
+expect() { # expect <tool> <args-json> <want-verdict>
+  got=$(fak preflight --policy "$POLICY" --tool "$1" --args "$2" | grep -o 'verdict=[A-Z]*' | cut -d= -f2)
+  [ "$got" = "$3" ] || { echo "FAIL $1: want $3 got $got"; exit 1; }
+}
+expect read_x           '{}'                 ALLOW
+expect delete_x         '{}'                 DENY      # POLICY_BLOCK or DEFAULT_DENY — either is a pass
+expect unlisted_tool    '{}'                 DENY      # the DEFAULT_DENY backstop
+```
+
+**The universal testing checklist (run for every floor).**
+- [ ] `fak policy --check <manifest>` exits 0 (CI gate — a broken floor never ships).
+- [ ] `preflight` one representative tool per `allow` / `allow_prefix` entry → `ALLOW`.
+- [ ] `preflight` every `deny` entry → its **named** reason (not `DEFAULT_DENY`).
+- [ ] `preflight` a tool you deliberately did *not* list → `DEFAULT_DENY` (the backstop).
+- [ ] For each `arg_rules[]` entry: `preflight` a value that trips it (→ the rule's reason)
+      *and* a value that passes (→ `ALLOW`) — both directions, every rule.
+- [ ] `preflight` an allow-listed call carrying a `redact_fields` key → `TRANSFORM`.
+- [ ] `preflight` a call whose target path lands inside a `self_modify_globs` entry → refused.
+
+**Common pitfalls.**
+- **Hand-writing from scratch.** Always start from `fak policy --dump` — the manifest
+  *replaces* the default, it does not merge, so a from-scratch file silently drops every
+  baked-in protection.
+- **Denying instead of omitting.** A giant `deny` list is a smell: `DEFAULT_DENY` already
+  holds anything you didn't allow. Use explicit `deny` only for the rails you want *named*
+  in the audit log; keep dangerous tools off the `allow`/`allow_prefix` lists instead.
+- **Trusting the detector as the floor.** `deny_regex` and `redact_fields` are best-effort
+  value hygiene layered *on top* of the lock — they do not replace "keep the tool off the
+  allow-list." The structural guarantee is still `DEFAULT_DENY`.
+- **Forgetting the prefix family.** `allow_prefix: ["read_"]` admits `read_file`,
+  `read_webpage`, *and* a future `read_secrets`. Re-run `preflight` on every newly-added
+  tool before redeploy.
+- **One policy for all environments.** Dev and prod deserve different floors (example 4
+  blocks the prod value by argument, not by tool) — see production policies below.
+
+---
+
+## Production policies
+
+### Multi-team: one manifest per role, not one giant manifest
+
+A floor is most honest when it is short and boring. Prefer **one small manifest per agent
+role** (coding, data, devops, research — the five above) over one sweeping manifest a
+reviewer can't eyeball. Each team owns its own file; the diff between revisions *is* the
+security review.
+
+### Environment-specific: gate the dangerous *value*, not just the tool
+
+The same agent often runs in dev and prod. Rather than two tool lists, allow the tool and
+refuse the dangerous argument value. Example 4's `plan_deploy` works in staging and is
+refused at `environment=prod` — one tool, one regex, environment-scoped by value. Generalize
+it for any tool whose blast radius depends on an argument (`cluster`, `region`,
+`account_id`, …).
+
+### Rotation and reload
+
+A long-lived gateway reloads the same file without dropping the process, the warm vDSO
+cache, or the IFC ledger — see [server-config.md](server-config.md) for the
+`/v1/fak/policy/reload` endpoint and bearer/auth requirements:
+
+```sh
+fak serve --policy policy.json --addr 127.0.0.1:8080
+curl -X POST http://127.0.0.1:8080/v1/fak/policy/reload   # bearer token if --require-key-env is set
+```
+
+Because `--check` is fail-loud, the safe rotation is **always** `fak policy --check
+new.json` *before* the reload — a malformed manifest is a fatal error, never a silent
+fallback to something more permissive.
+
+---
+
 ## Honest scope — what the floor does and does *not* bound
 
 Carried verbatim from [`POLICY.md`](../../POLICY.md) because it matters:
@@ -205,10 +562,14 @@ Carried verbatim from [`POLICY.md`](../../POLICY.md) because it matters:
 - ✅ **Bounds which tools run.** An irreversible tool you don't allow-list is refused
   *regardless of context* — including an injection that talks the model into calling it.
   This is the structural guarantee.
-- ⚠️ **Does NOT bound the arguments** of an allow-listed tool. An allow-listed `send_email`
-  with attacker-chosen recipients leans on the *detection* layer (context-MMU + `normgate`),
-  not on this floor. Keep exfil-shaped tools off the allow-list and let `DEFAULT_DENY` hold
-  them. (Argument-level value predicates are on the roadmap.)
+- ⚠️ **Does NOT bound the resolved effect** of an allow-listed tool's arguments.
+  `arg_rules` (above) gives you regex / glob / size predicates on one decoded string —
+  enough to deny `rm -rf`, block `environment=prod`, or cap a body — but it is *best-effort*
+  and inspects the arg, not the resolved effect. An allow-listed `send_email` with
+  attacker-chosen recipients still leans on the *detection* layer (context-MMU +
+  `normgate`). Keep exfil-shaped tools off the allow-list and let `DEFAULT_DENY` hold them.
+  (Richer *structured* value predicates — path-resolution, numeric/range — are on the
+  [`POLICY.md`](../../POLICY.md) roadmap.)
 - ⚠️ `redact_fields` and `self_modify_globs` are **best-effort** key/substring hygiene, not a
   cryptographic guarantee — they inspect decoded args.
 
@@ -218,21 +579,11 @@ for why putting the check on the same call path (default-deny, fail-closed) is t
 
 ---
 
-## Reloading a live floor
-
-A long-lived gateway reloads the same file without dropping the process, the warm vDSO
-cache, or the IFC ledger:
-
-```sh
-fak serve --policy policy.json --addr 127.0.0.1:8080
-curl -X POST http://127.0.0.1:8080/v1/fak/policy/reload   # bearer token if --require-key-env is set
-```
-
----
-
 ## See also
 
-- [`fak/POLICY.md`](../../POLICY.md) — the field-by-field schema reference and the closed reason vocabulary.
+- [`POLICY.md`](../../POLICY.md) — the field-by-field schema reference (`arg_rules`, IFC `sources`/`safe_sinks`, the closed reason vocabulary) and the roadmap.
+- [`examples/`](../../examples/) — the five worked manifests above plus `repo-guard-policy.json`, `dogfood-claude-policy.json`, and `policy.example.json`, all copy-ready.
+- [server-config.md](server-config.md) — the `/v1/fak/policy/reload` endpoint and gateway auth/network config.
 - [tutorial.md §1.5](tutorial.md) — authoring a floor in the guided first session.
 - [security.md](security.md) — hardening the deployed gateway (auth, network, defense-in-depth).
 - [Policy in the kernel](../explainers/policy-in-the-kernel.md) — the design rationale.
