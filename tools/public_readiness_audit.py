@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Public-readiness auditor for the fleet-public repo.
+"""Public-readiness auditor for the fak public repo.
 
 Verifies the deterministic criteria in docs/PUBLIC-READINESS-DOD.md so that
 "is this repo ready to be flipped PUBLIC?" is a re-runnable check instead of a
@@ -14,10 +14,9 @@ emits machine-readable output; `--check NAME[,NAME]` runs a subset.
 Design notes:
   * The set of "tracked files" comes from `git ls-files` — never the working
     tree — so untracked scratch never counts and deleted-but-staged does.
-  * The Go module path `github.com/anthony-chaudhary/fak` is an INTENTIONAL
-    exception (DoD B3): the module is not renamed to fleet-public. Only
-    human-facing URLs (install/releases/clone/blob/tree/issues) must carry the
-    public repo slug.
+  * The Go module path `github.com/anthony-chaudhary/fak` matches the public
+    repo slug, so it needs no rename exception. Human-facing URLs must not leak
+    the private `fleet` repo name (install/releases/clone/blob/tree/issues).
 """
 from __future__ import annotations
 
@@ -28,7 +27,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-PUBLIC_SLUG = "fleet-public"
+PUBLIC_SLUG = "fak"
 OWNER = "anthony-chaudhary"
 
 # Front-door docs: what a brand-new public visitor reads first. Stricter scope —
