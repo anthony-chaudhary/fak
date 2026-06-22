@@ -24,6 +24,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -586,6 +587,7 @@ func seedDreamDemo(dir string) {
 // runs a hermetic demo over the committed synthetic fixture and emits cdb-report.json.
 func cmdDebug(argv []string) {
 	fs := flag.NewFlagSet("debug", flag.ExitOnError)
+	list := fs.Bool("list", false, "discover real Claude Code session transcripts on this machine and print the `fak debug --session <path>` to run for each (most-recent first)")
 	session := fs.String("session", "", "path to a Claude Code session .jsonl to ingest as a core image (default: the committed fixture)")
 	dir := fs.String("dir", "cdb-image", "directory for the persisted core image (attached if it already holds one and --session is empty)")
 	cmd := fs.String("cmd", "report", "report | info | bt | x | ws | grep | tombstone | context-query")
@@ -605,12 +607,20 @@ func cmdDebug(argv []string) {
 	_ = fs.Parse(argv)
 	*dir = pathutil.ExpandTilde(*dir) // a leading ~ is never expanded by Go; do it so --dir ~/img works
 
+	// Discovery: point an operator at their REAL transcripts instead of silently
+	// running the synthetic demo. Read-only; no core image is touched.
+	if *list {
+		listTranscripts(os.Stdout)
+		return
+	}
+
 	// Decide whether to ingest a fresh core image or attach to an existing one.
 	attachExisting := *session == "" && imageExists(*dir)
 	if !attachExisting {
 		src := *session
 		if src == "" {
 			src = cdbFixturePath()
+			fmt.Fprintln(os.Stderr, "fak debug: no --session given; ingesting the committed synthetic fixture (a demo). Run `fak debug --list` to find and attach your real Claude Code transcripts.")
 		}
 		id := *sid
 		if id == "" {
@@ -868,6 +878,92 @@ func cdbFixturePath() string {
 		}
 	}
 	return rel
+}
+
+// transcriptCandidate is one discovered Claude Code session file.
+type transcriptCandidate struct {
+	path  string
+	size  int64
+	mtime time.Time
+}
+
+// listTranscripts discovers real Claude Code session transcripts on this machine
+// and prints, most-recent first, the exact `fak debug --session <path>` to attach
+// each one. It is the answer to "fak debug ran a demo — where is MY session?":
+// transcripts live under <claude-home>/projects/<ns>/<uuid>.jsonl, a path no
+// operator memorizes. Read-only and bounded (a fixed two-level glob per root,
+// never a recursive walk).
+func listTranscripts(w io.Writer) {
+	var roots []string
+	if home, err := os.UserHomeDir(); err == nil && home != "" {
+		// ~/.claude, ~/.claude-<variant> (the per-host state trees this fleet uses).
+		if ms, _ := filepath.Glob(filepath.Join(home, ".claude*")); ms != nil {
+			roots = append(roots, ms...)
+		}
+	}
+	if cfg := strings.TrimSpace(os.Getenv("CLAUDE_CONFIG_DIR")); cfg != "" {
+		roots = append(roots, cfg)
+	}
+
+	seen := map[string]bool{}
+	var found []transcriptCandidate
+	for _, root := range roots {
+		// <root>/projects/<ns>/<session>.jsonl — a fixed-depth glob, not a walk.
+		matches, _ := filepath.Glob(filepath.Join(root, "projects", "*", "*.jsonl"))
+		for _, p := range matches {
+			if seen[p] {
+				continue
+			}
+			seen[p] = true
+			info, err := os.Stat(p)
+			if err != nil || info.IsDir() {
+				continue
+			}
+			found = append(found, transcriptCandidate{path: p, size: info.Size(), mtime: info.ModTime()})
+		}
+	}
+
+	if len(found) == 0 {
+		fmt.Fprintln(w, "fak debug --list: no Claude Code transcripts found.")
+		fmt.Fprintln(w, "  looked under: ~/.claude*/projects/*/*.jsonl"+claudeConfigHint())
+		fmt.Fprintln(w, "  set CLAUDE_CONFIG_DIR, or pass --session <path.jsonl> directly.")
+		return
+	}
+
+	sort.Slice(found, func(i, j int) bool { return found[i].mtime.After(found[j].mtime) })
+
+	const max = 15
+	fmt.Fprintf(w, "found %d Claude Code transcript(s); most recent first", len(found))
+	if len(found) > max {
+		fmt.Fprintf(w, " (showing %d)", max)
+	}
+	fmt.Fprintln(w, ":")
+	for i, c := range found {
+		if i >= max {
+			break
+		}
+		fmt.Fprintf(w, "  [%2d] %s  %7s  %s\n", i+1, c.mtime.Format("2006-01-02 15:04"), humanBytes(c.size), filepath.Base(c.path))
+		fmt.Fprintf(w, "       fak debug --session %q\n", c.path)
+	}
+}
+
+func claudeConfigHint() string {
+	if cfg := strings.TrimSpace(os.Getenv("CLAUDE_CONFIG_DIR")); cfg != "" {
+		return " and " + filepath.Join(cfg, "projects", "*", "*.jsonl")
+	}
+	return ""
+}
+
+// humanBytes renders a byte count compactly for the transcript listing.
+func humanBytes(n int64) string {
+	switch {
+	case n >= 1<<20:
+		return fmt.Sprintf("%.1fM", float64(n)/(1<<20))
+	case n >= 1<<10:
+		return fmt.Sprintf("%.1fK", float64(n)/(1<<10))
+	default:
+		return fmt.Sprintf("%dB", n)
+	}
 }
 
 // applyPolicy loads a capability-floor manifest and swaps it into the registered
