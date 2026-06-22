@@ -1,4 +1,4 @@
-# fak — the agent kernel
+# fak — the **F**used **A**gent **K**ernel
 
 <!-- readme-verified: 2026-06-21 vs VERSION 0.30.0 + BENCHMARK-AUTHORITY · process: tools/readme_freshness_audit.py + /refresh-readme · front page refocused on the turn-tax hero; breadth stills moved to BENCHMARK-GALLERY.md -->
 
@@ -25,7 +25,7 @@ reuse is still legal, and what survives a session boundary.**
 <!-- hero video — generated from the headline visuals by tools/hero_video_gen.py
      (storyboard: visuals/hero-video.storyboard.json). GitHub markdown can't autoplay a
      repo-relative .mp4, so the embed is a compact looping .gif that links to the full mp4. -->
-[![fak — the agent kernel · a ~40s, 1440p model-card reveal: the turn-tax curves animate the measured 9.7x prefill elimination, then the capability matrix, the three-pillar stat card with its honest single-stream fence, and the eight-axis sweep build in — click for the full-resolution MP4](visuals/hero-video.gif)](visuals/hero-video.mp4)
+[![fak — the Fused Agent Kernel · a ~40s, 1440p model-card reveal: the turn-tax curves animate the measured 9.7x prefill elimination, then the capability matrix, the three-pillar stat card with its honest single-stream fence, and the eight-axis sweep build in — click for the full-resolution MP4](visuals/hero-video.gif)](visuals/hero-video.mp4)
 
 <sub>▶ a ~40-second reveal — the curves draw themselves, the multipliers count up — [full-resolution MP4 (1440p)](visuals/hero-video.mp4)</sub>
 
