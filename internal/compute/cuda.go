@@ -359,8 +359,16 @@ func (c *cudaBackend) Upload(t Tensor, as Dtype) Tensor {
 	if t.Dtype == Q4_K {
 		return c.uploadQ4K(t, hb) // raw super-block bytes, copied resident (already narrow)
 	}
+	if t.Dtype == Q8_0 {
+		// An ALREADY-quantized Q8_0 host weight (codes + per-block scales), copied resident with
+		// NO re-quantization. This is the memory-lean load path: the model dropped the f32 weight
+		// at load and carries only the Q8 codes+scales, so the HAL hands a Q8_0 host tensor here
+		// (hal.go weightHALQ8) — distinct from the witness path that hands F32 and narrows on-device
+		// (uploadQ8 below). Without this branch the lean Q8 decode on the cuda backend panics at H2D.
+		return c.uploadQ8Resident(t, hb)
+	}
 	if t.Dtype != F32 {
-		panic("compute: cuda Upload supports F32 host data (optionally narrowing to F16/Q8_0) or raw Q4_K bytes today (got " + t.Dtype.String() + ")")
+		panic("compute: cuda Upload supports F32 host data (optionally narrowing to F16/Q8_0), prequantized Q8_0 codes, or raw Q4_K bytes today (got " + t.Dtype.String() + ")")
 	}
 	store := F32 // the resident dtype the `as` request narrows f32 host weights to
 	switch as {
@@ -435,6 +443,49 @@ func (c *cudaBackend) uploadQ8(t Tensor, f []float32, hp uintptr) Tensor {
 	C.fcuda_h2d(buf.scales, unsafe.Pointer(&scales[0]), C.size_t(len(scales)*4))
 	buf.host, buf.hostDt, buf.hostLo = hp, Q8_0, t.Layout
 	uploadCache[ucKey{hp, Q8_0, t.Layout}] = res
+	return res
+}
+
+// uploadQ8Resident copies an ALREADY-quantized Q8_0 host weight resident with NO re-quantization:
+// the int8 codes (HostBuffer.I8()) go to the buffer's ptr and the per-block(32) f32 scales
+// (QuantSpec.Scale) to its scale side-channel — the SAME resident layout uploadQ8 produces, so
+// k_q8_gemm consumes it unchanged. This is the memory-lean decode path (the HAL's weightHALQ8
+// hands a NewQ8 host tensor); the f32-narrowing uploadQ8 above is the witness/quant-at-upload path.
+func (c *cudaBackend) uploadQ8Resident(t Tensor, hb HostBuffer) Tensor {
+	if len(t.Shape) != 2 {
+		panic("compute: cuda Upload(Q8_0 host) expects a 2-D [out,in] weight (got rank " + itoaC(len(t.Shape)) + ")")
+	}
+	if t.Quant == nil || t.Quant.Scale == nil {
+		panic("compute: cuda Upload(Q8_0 host) requires QuantSpec.Scale (per-block f32 scales)")
+	}
+	out, in := t.Shape[0], t.Shape[1]
+	blk := t.Quant.Block
+	if blk <= 0 || in%blk != 0 {
+		panic("compute: cuda Upload(Q8_0 host) needs in divisible by QuantSpec.Block (block=" + itoaC(blk) + ")")
+	}
+	codes := hb.I8()
+	scales := t.Quant.Scale
+	nblk := in / blk
+	if len(codes) != 0 && len(codes) != out*in {
+		panic("compute: cuda Upload(Q8_0 host) code length " + itoaC(len(codes)) + " != out*in")
+	}
+	if len(scales) != out*nblk {
+		panic("compute: cuda Upload(Q8_0 host) scale length " + itoaC(len(scales)) + " != out*(in/block)")
+	}
+	var hp uintptr
+	if len(codes) > 0 {
+		hp = uintptr(unsafe.Pointer(&codes[0]))
+		if cached, ok := uploadCache[ucKey{hp, Q8_0, t.Layout}]; ok {
+			return cached
+		}
+	}
+	res, buf := c.devQ8(t.Shape, blk, len(scales))
+	if len(codes) > 0 {
+		C.fcuda_h2d(buf.ptr, unsafe.Pointer(&codes[0]), C.size_t(len(codes)))
+		C.fcuda_h2d(buf.scales, unsafe.Pointer(&scales[0]), C.size_t(len(scales)*4))
+		buf.host, buf.hostDt, buf.hostLo = hp, Q8_0, t.Layout
+		uploadCache[ucKey{hp, Q8_0, t.Layout}] = res
+	}
 	return res
 }
 
