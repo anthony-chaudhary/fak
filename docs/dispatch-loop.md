@@ -125,6 +125,44 @@ the genuinely-produced-nothing case is visible to an operator instead of silent;
 single hard issue (often an epic) that one pass can't land is expected, and the
 cooldown advances the picker past it.
 
+## Backends: the Claude skill-chain vs. the opencode single-shot worker
+
+The loop spawns its per-issue worker on one of two backends, and they express
+the dispatch cadence differently:
+
+- **Claude** drives a *chain of plugin slash-commands* —
+  `/dos-dispatch-loop` → `/dos-dispatch` → `/dos-next-up`, with `/dos-replan`
+  on a drain. Each `/dos-*` is a dos-kernel plugin skill that loads more
+  instruction text into context. The *multi-iteration* loop (the typed
+  `drained-twice` / `pick-cooldown` / `pick-held-invariant` stop conditions)
+  and the refill-on-drain (`/dos-replan`) live inside `dos-dispatch-loop`, so a
+  Claude worker can run its own bounded 10-iteration loop in one process.
+- **opencode** has **no plugin slash-command-to-skill loading**, so that chain
+  has no 1:1 port. The opencode worker (`.opencode/agent/dos-dispatch.md`, in
+  the sibling fleet repo) instead calls the underlying `dos` CLI verbs directly
+  (`dos doctor` / `dos arbitrate` / `dos enumerate` / `dos gate` / `dos verify`
+  / `dos lease-lane release`) and is **intentionally single-shot**: it discovers
+  → takes a lane → snapshots → gates → ships one packet → verifies → releases,
+  then exits cleanly.
+
+**Decision (#419): option (b) — the opencode backend is single-shot by design;
+the dispatch⇄replan cadence is a supervisor concern, not a worker concern.**
+There is deliberately no in-worker opencode expression of `/dos-replan` or the
+multi-iteration stop conditions. The refill-on-drain and the
+spawn-again-next-tick cadence are owned by the supervisor: the kernel already
+holds the loop state (`dos loop_decide`, the WAL, liveness), and the
+[always-on tasks](#the-always-on-tasks-the-keep-going-loop) above respawn a
+fresh worker each tick at the busiest lane's next fresh issue. A worker that
+ships one packet and exits — respawned by the supervisor — is easier to make
+resilient than one that runs its own long loop, and it keeps loop state in the
+one place (the kernel) that survives a worker crash.
+
+So the gap is **named, not silent**: on the opencode backend the worker's
+`gate → DRAIN` is a clean stop, and the *replan* that would refill the backlog
+happens on the next supervisor tick, not inside the worker. An unattended
+always-on opencode loop is therefore the **supervisor cadence × the single-shot
+worker**, not a worker running its own `/dos-dispatch-loop`.
+
 ## Extending it / adopting it elsewhere
 
 The loop reads its repo shape — lane names, file-trees, ship-stamp grammar — entirely
