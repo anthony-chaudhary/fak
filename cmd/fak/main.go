@@ -135,7 +135,7 @@ func usage() {
                 (offline "sleep" pass over a core image: re-screen, pre-seal
                  refuted witnesses, repair descriptors, surface duplicate aliases,
                  and write a pruned cleaned image)
-  fak debug     [--session JSONL] [--dir DIR] [--cmd report|info|bt|x|ws|grep|tombstone|context-query]
+  fak debug     [--session JSONL] [--dir DIR] [--cmd report|info|bt|x|ws|grep|tombstone|context-query|context-diff]
                 [--query STR] [--step N] [--grep PAT] [--k N] [--reason STR]
                 [--requested-by STR] [--out cdb-report.json]
                 (the CONTEXT DEBUGGER: attach to a finished session as a core dump and
@@ -590,13 +590,14 @@ func cmdDebug(argv []string) {
 	list := fs.Bool("list", false, "discover real Claude Code session transcripts on this machine and print the `fak debug --session <path>` to run for each (most-recent first)")
 	session := fs.String("session", "", "path to a Claude Code session .jsonl to ingest as a core image (default: the committed fixture)")
 	dir := fs.String("dir", "cdb-image", "directory for the persisted core image (attached if it already holds one and --session is empty)")
-	cmd := fs.String("cmd", "report", "report | info | bt | x | ws | grep | tombstone | context-query")
+	cmd := fs.String("cmd", "report", "report | info | bt | x | ws | grep | tombstone | context-query | context-diff")
 	query := fs.String("query", "what refund fee did the user's account show?", "the follow-up question to demand-page a working set for (cmd=ws/report)")
 	step := fs.Int("step", 0, "page step to examine (cmd=x)")
 	grepPat := fs.String("grep", "", "descriptor pattern to search the page table for (cmd=grep)")
 	k := fs.Int("k", 0, "max pages in the working set (0 = every referenced page)")
 	pins := fs.String("pins", "", "comma-separated descriptor/role/digest patterns to force into cmd=context-query")
 	excludes := fs.String("excludes", "", "comma-separated descriptor/role/digest patterns to refuse in cmd=context-query")
+	query2 := fs.String("query2", "", "second query for cmd=context-diff (diffed against --query over the SAME image)")
 	budgetBytes := fs.Int64("budget-bytes", 0, "max rendered bytes to materialize in cmd=context-query (0 = unbounded)")
 	policyVersion := fs.String("policy-version", "", "policy version label to stamp on memory views in cmd=context-query")
 	preferView := fs.String("prefer-view", "", "derived view type to prefer in cmd=context-query (e.g. summary); runs a cold-then-warm two-pass demo showing FAULT then HIT")
@@ -694,6 +695,22 @@ func cmdDebug(argv []string) {
 		res := contextq.Query(ctx(), im, req)
 		must(os.WriteFile(*out, jsonIndent(res), 0o644))
 		printContextQuery(res, *out)
+	case "context-diff":
+		// Source-set diff: materialize the SAME image under two queries and report
+		// which evidence handles the second added / dropped / kept, plus the
+		// sealed/poisoned pages each side refused to expand (issue #427).
+		baseReq := contextq.Request{
+			Query: *query, K: *k, BudgetBytes: *budgetBytes,
+			Pins: splitCSV(*pins), Excludes: splitCSV(*excludes), PolicyVersion: *policyVersion,
+		}
+		nextReq := baseReq
+		nextReq.Query = *query2
+		base := contextq.Query(ctx(), im, baseReq)
+		next := contextq.Query(ctx(), im, nextReq)
+		diff := contextq.DiffWorkingSets(base, next)
+		must(os.WriteFile(*out, jsonIndent(diff), 0o644))
+		fmt.Print(diff.Markdown())
+		fmt.Printf("\n(full JSON diff -> %s)\n", *out)
 	case "report":
 		debugReport(im, *dir, *session, *query, *out)
 	default:
