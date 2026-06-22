@@ -52,9 +52,11 @@ func BenchmarkPrefillTileVsCell478(b *testing.B) {
 			b.ReportMetric(macs/(float64(b.Elapsed().Nanoseconds())/float64(b.N)), "MAC/ns")
 		}
 		// "default" = the shipped per-cell/2×4 sweep (qGemm8Into); "tile4x4" = #478's
-		// register-blocked qgemm8tileNEON dispatcher (qGemm8TileInto). Called directly so the
-		// A/B is independent of FAK_ARM_TILE.
+		// register-blocked qgemm8tileNEON dispatcher (qGemm8TileInto); "tile4x2" = the
+		// conservative NR=2 register tile (qGemm8Tile4x2Into → qgemm8tile4x2NEON). Called directly
+		// so the A/B is independent of FAK_ARM_TILE.
 		b.Run(fmt.Sprintf("%s_P%d/default", s.name, P), func(b *testing.B) { run(b, qGemm8Into) })
 		b.Run(fmt.Sprintf("%s_P%d/tile4x4", s.name, P), func(b *testing.B) { run(b, qGemm8TileInto) })
+		b.Run(fmt.Sprintf("%s_P%d/tile4x2", s.name, P), func(b *testing.B) { run(b, qGemm8Tile4x2Into) })
 	}
 }

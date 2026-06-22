@@ -65,7 +65,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 MOD_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 PKG='./internal/model/'
-GATE='TestQGemm8Tile478Gate|TestQGemm8TileNEONMatchesCell|TestQGemm8IntoMatchesScalarNEON|TestQMatRows4NEONMatchesCell'
+GATE='TestQGemm8Tile478Gate|TestQGemm8TileNEONMatchesCell|TestQGemm8Tile4x2NEONMatchesCell|TestQGemm8Tile4x2IntoMatchesScalar|TestQGemm8IntoMatchesScalarNEON|TestQMatRows4NEONMatchesCell'
 BENCH='^(BenchmarkPrefillTileVsCell478|BenchmarkGemmKernelSingleCore|BenchmarkGemmTile2x4SingleCore)$'
 BENCHTIME="${FAK_BENCHTIME:-2s}"
 
