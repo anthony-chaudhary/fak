@@ -217,7 +217,7 @@ class LaptopRunnerTest(unittest.TestCase):
         self.assertIn("exit $LASTEXITCODE", text)
 
     def test_cuda_setup_script_fails_when_probe_fails(self) -> None:
-        setup = ROOT / "fak" / "internal" / "compute" / "setup_cuda_wsl.sh"
+        setup = runner.module_dir(ROOT) / "internal" / "compute" / "setup_cuda_wsl.sh"
         text = setup.read_text(encoding="utf-8")
         self.assertIn("set -euo pipefail", text)
         self.assertIn('echo "SETUP_FAIL"', text)

@@ -76,6 +76,19 @@ def repo_root() -> Path:
     return Path(__file__).resolve().parents[1]
 
 
+def module_dir(root: Path) -> Path:
+    """Resolve the Go-module directory under ``root``.
+
+    The runner may be handed either the module root itself (a direct clone —
+    ``go.mod`` sits at ``root``) or a multi-repo *fleet* container whose module
+    lives under ``root/fak`` (no ``go.mod`` at the top). Probe for ``go.mod`` so
+    the same runner works on both layouts. Synthetic roots that do not exist on
+    disk fall through to the nested form (preserving the fleet contract)."""
+    if (root / "go.mod").is_file():
+        return root
+    return root / "fak"
+
+
 def host_report(root: Path | None = None) -> dict:
     return {
         "node": host_platform.node() or "unknown",
@@ -166,7 +179,7 @@ def cpu_command(root: Path, args: argparse.Namespace, platform: str | None = Non
     env = host_env(os.environ, args)
     forwarded = cpu_args(args)
     if is_windows(platform):
-        ps1 = root / "fak" / "test.ps1"
+        ps1 = module_dir(root) / "test.ps1"
         argv = (
             "powershell.exe",
             "-NoProfile",
@@ -177,7 +190,7 @@ def cpu_command(root: Path, args: argparse.Namespace, platform: str | None = Non
             *forwarded,
         )
     else:
-        test_sh = posixpath.join(str(root).replace("\\", "/"), "fak", "test.sh")
+        test_sh = posixpath.join(str(module_dir(root)).replace("\\", "/"), "test.sh")
         argv = ("bash", test_sh, *forwarded)
     return Command("cpu", argv, root, env)
 
@@ -266,7 +279,7 @@ def one_line_detail(text: str) -> str:
 
 def go_env_probe_script() -> str:
     return (
-        "export PATH=/usr/local/go/bin:$HOME/go/bin:$PATH; "
+        'export PATH="/usr/local/go/bin:$HOME/go/bin:$PATH"; '
         "command -v go >/dev/null; "
         "go version; "
         "printf 'GOOS=%s GOARCH=%s\\n' \"$(go env GOOS)\" \"$(go env GOARCH)\""
@@ -896,7 +909,7 @@ def wsl_check(args: argparse.Namespace, script: str, platform: str | None = None
 def check_cpu(root: Path, args: argparse.Namespace, platform: str | None = None) -> CheckResult:
     env = host_env(os.environ, args)
     if is_windows(platform):
-        ps1 = root / "fak" / "test.ps1"
+        ps1 = module_dir(root) / "test.ps1"
         if not ps1.exists():
             return CheckResult("cpu", False, f"missing {ps1}")
         ok, detail = run_probe(
@@ -908,10 +921,10 @@ def check_cpu(root: Path, args: argparse.Namespace, platform: str | None = None)
             return CheckResult("cpu", True, "WSL Go available: " + one_line_detail(detail))
         return CheckResult("cpu", False, "WSL Go unavailable: " + detail)
 
-    sh = root / "fak" / "test.sh"
+    sh = module_dir(root) / "test.sh"
     if not sh.exists():
         return CheckResult("cpu", False, f"missing {sh}")
-    ok, detail = run_probe(("bash", "-lc", go_env_probe_script()), root / "fak", env)
+    ok, detail = run_probe(("bash", "-lc", go_env_probe_script()), module_dir(root), env)
     if ok:
         return CheckResult("cpu", True, one_line_detail(detail))
     return CheckResult("cpu", False, "go unavailable: " + detail)
@@ -938,7 +951,7 @@ def check_nvidia(root: Path, args: argparse.Namespace, platform: str | None = No
         "set -e; "
         "command -v nvidia-smi >/dev/null; nvidia-smi -L"
     )
-    ok, detail = run_probe(("bash", "-lc", script), root / "fak", env)
+    ok, detail = run_probe(("bash", "-lc", script), module_dir(root), env)
     if ok:
         return CheckResult("nvidia", True, detail)
     return CheckResult("nvidia", False, "NVIDIA check failed: " + detail)
@@ -958,7 +971,7 @@ def check_cuda_toolchain(root: Path, args: argparse.Namespace, platform: str | N
     if is_windows(host_platform):
         ok, detail = run_probe(wsl_check(args, script, host_platform), root, env)
     else:
-        ok, detail = run_probe(("bash", "-lc", script), root / "fak", env)
+        ok, detail = run_probe(("bash", "-lc", script), module_dir(root), env)
     if ok:
         return CheckResult("cuda-toolchain", True, detail)
     return CheckResult("cuda-toolchain", False, "CUDA toolkit unavailable; run the nvidia lane with --setup: " + detail)
@@ -1032,7 +1045,7 @@ def nvidia_commands(root: Path, args: argparse.Namespace, platform: str | None =
 
     if is_windows(host_platform):
         try:
-            fak_dir = windows_drive_to_wsl_path(root / "fak")
+            fak_dir = windows_drive_to_wsl_path(module_dir(root))
         except ValueError as exc:
             raise SystemExit(str(exc)) from exc
         prefix = wsl_prefix(args, host_platform)
@@ -1041,7 +1054,7 @@ def nvidia_commands(root: Path, args: argparse.Namespace, platform: str | None =
             commands.append(Command(label, (*prefix, "bash", "-lc", script), root, env))
         return commands
 
-    fak_dir = root / "fak"
+    fak_dir = module_dir(root)
     for label, argv in actions:
         commands.append(Command(label, argv, fak_dir, env))
     return commands
