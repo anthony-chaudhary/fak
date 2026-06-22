@@ -1,0 +1,57 @@
+{
+  "version": "fak-policy/v1",
+  "posture": "fail_closed",
+  "allow": [
+    "search_flights",
+    "book_flight",
+    "get_booking",
+    "read_policy",
+    "read_fare_rules",
+    "transfer_to_human_agents"
+  ],
+  "allow_prefix": [
+    "read_",
+    "get_",
+    "search_",
+    "list_",
+    "lookup_",
+    "find_"
+  ],
+  "deny": {
+    "refund_payment": "POLICY_BLOCK",
+    "cancel_booking": "POLICY_BLOCK",
+    "export_pnr": "SECRET_EXFIL",
+    "transfer_funds": "POLICY_BLOCK",
+    "rotate_credentials": "POLICY_BLOCK"
+  },
+  "self_modify_globs": [
+    ".git/",
+    ".dos/",
+    "policy.json",
+    "flight-booking-agent-policy.json",
+    "/etc/",
+    "id_rsa"
+  ],
+  "redact_fields": [
+    "cc_number",
+    "cvv",
+    "dob",
+    "pnr",
+    "passport_number"
+  ],
+  "safe_sinks": [
+    "transfer_to_human_agents"
+  ],
+  "sources": {
+    "read_policy": "untrusted",
+    "search_flights": "trusted_local"
+  },
+  "arg_rules": [
+    {
+      "tool": "book_flight",
+      "arg": "fare_amount",
+      "deny_regex": "^[0-9]{5,}",
+      "reason": "POLICY_BLOCK"
+    }
+  ]
+}
