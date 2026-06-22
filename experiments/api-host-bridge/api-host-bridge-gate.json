@@ -41,7 +41,7 @@
       "status": "passed",
       "exit_code": 0,
       "elapsed_ms": 1462,
-      "stdout_tail": "ok  \tgithub.com/anthony-chaudhary/fleet/fak/internal/policy\t0.262s\nok  \tgithub.com/anthony-chaudhary/fleet/fak/cmd/fak\t0.320s\n",
+      "stdout_tail": "ok  \tgithub.com/anthony-chaudhary/fak/internal/policy\t0.262s\nok  \tgithub.com/anthony-chaudhary/fak/cmd/fak\t0.320s\n",
       "stderr_tail": "",
       "output_sha256": "bb06fda52a6c44d9f4a1653c5de17a4876845ed83e1489502b0fd07780c327aa"
     },
@@ -63,7 +63,7 @@
       "status": "passed",
       "exit_code": 0,
       "elapsed_ms": 1294,
-      "stdout_tail": "ok  \tgithub.com/anthony-chaudhary/fleet/fak/internal/gateway\t0.506s\n",
+      "stdout_tail": "ok  \tgithub.com/anthony-chaudhary/fak/internal/gateway\t0.506s\n",
       "stderr_tail": "",
       "output_sha256": "c2bd1dffad2f7d3b18275d52262d990de0e68c879fa42c2540bd36ef0d6b2f83"
     },
@@ -85,7 +85,7 @@
       "status": "passed",
       "exit_code": 0,
       "elapsed_ms": 1343,
-      "stdout_tail": "ok  \tgithub.com/anthony-chaudhary/fleet/fak/internal/agent\t0.585s\n",
+      "stdout_tail": "ok  \tgithub.com/anthony-chaudhary/fak/internal/agent\t0.585s\n",
       "stderr_tail": "",
       "output_sha256": "e5ee961fbfe1db83c76f2e0501c4f77a925bbb58b5b57c18180f49e33711bfe2"
     },
@@ -107,7 +107,7 @@
       "status": "passed",
       "exit_code": 0,
       "elapsed_ms": 1344,
-      "stdout_tail": "ok  \tgithub.com/anthony-chaudhary/fleet/fak/internal/gateway\t0.541s\n",
+      "stdout_tail": "ok  \tgithub.com/anthony-chaudhary/fak/internal/gateway\t0.541s\n",
       "stderr_tail": "",
       "output_sha256": "12b8194f8eed58660cde7ff01e5e558e7ac232513f37d655b07cdc813fc254b6"
     },
@@ -129,7 +129,7 @@
       "status": "passed",
       "exit_code": 0,
       "elapsed_ms": 1327,
-      "stdout_tail": "ok  \tgithub.com/anthony-chaudhary/fleet/fak/internal/gateway\t0.567s\n",
+      "stdout_tail": "ok  \tgithub.com/anthony-chaudhary/fak/internal/gateway\t0.567s\n",
       "stderr_tail": "",
       "output_sha256": "1aa0d3acfda0b6a4ddfe4b6cfc251b0eb3057ccfaab34e06dadbc4e772312887"
     },
@@ -151,7 +151,7 @@
       "status": "passed",
       "exit_code": 0,
       "elapsed_ms": 1304,
-      "stdout_tail": "ok  \tgithub.com/anthony-chaudhary/fleet/fak/internal/gateway\t0.519s\n",
+      "stdout_tail": "ok  \tgithub.com/anthony-chaudhary/fak/internal/gateway\t0.519s\n",
       "stderr_tail": "",
       "output_sha256": "c7ed2d34511f84cf7f016ebd3b39cbe29a341ee7d17ba9abd0c857ce730e58aa"
     },
@@ -173,7 +173,7 @@
       "status": "passed",
       "exit_code": 0,
       "elapsed_ms": 1251,
-      "stdout_tail": "ok  \tgithub.com/anthony-chaudhary/fleet/fak/internal/gateway\t0.518s\n",
+      "stdout_tail": "ok  \tgithub.com/anthony-chaudhary/fak/internal/gateway\t0.518s\n",
       "stderr_tail": "",
       "output_sha256": "8e17e9cd39679c2c2575c8b54ce9487b5fd61e721cad4880d11dc055d422acf4"
     },
@@ -195,7 +195,7 @@
       "status": "passed",
       "exit_code": 0,
       "elapsed_ms": 1348,
-      "stdout_tail": "ok  \tgithub.com/anthony-chaudhary/fleet/fak/internal/gateway\t0.551s\n",
+      "stdout_tail": "ok  \tgithub.com/anthony-chaudhary/fak/internal/gateway\t0.551s\n",
       "stderr_tail": "",
       "output_sha256": "f9b2ff49e9cc2a7b6275f4430327b927d14e982c3efae0bc1011aef484de8709"
     },
@@ -217,7 +217,7 @@
       "status": "passed",
       "exit_code": 0,
       "elapsed_ms": 1562,
-      "stdout_tail": "ok  \tgithub.com/anthony-chaudhary/fleet/fak/internal/turnbench\t0.629s\n",
+      "stdout_tail": "ok  \tgithub.com/anthony-chaudhary/fak/internal/turnbench\t0.629s\n",
       "stderr_tail": "",
       "output_sha256": "e9d83999b8816048cb2d1450ba78e67adc8ce8862485cb2c58772faa1939bdef"
     },

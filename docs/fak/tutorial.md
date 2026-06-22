@@ -527,4 +527,4 @@ summary: submits=12 vdso_hits=6 engine_calls=6 denies=0 transforms=0 quarantines
 
 *Every command and output block on this page was captured from a clean build of `fak`
 v0.30.0. If a command prints something different for you, that's a doc bug — please
-[open an issue](https://github.com/anthony-chaudhary/fleet/issues).*
+[open an issue](https://github.com/anthony-chaudhary/fak/issues).*

@@ -155,10 +155,9 @@ build): `llama-bench -m Qwen2.5-7B-Instruct-Q4_K_M.gguf -ngl 99 -p 512 -n 128 -r
 cannot yet run Qwen2.5-7B-Q4_K_M end-to-end, so there is **no fak-vs-llama tok/s at 7B in
 this session, by construction**: the in-kernel loader holds the whole **f32** blob (a 7B
 f32 set is ~28 GB and will not fit WSL's ~15 GB RAM), and there is no GGUF / Q4_K device
-path yet. A 7B head-to-head is gated on the loaders ([#40](https://github.com/anthony-chaudhary/fleet/issues/40),
-[#41](https://github.com/anthony-chaudhary/fleet/issues/41)) + quantized device GEMM
-([#33](https://github.com/anthony-chaudhary/fleet/issues/33)), tracked under
-[#38](https://github.com/anthony-chaudhary/fleet/issues/38). What this session delivers is
+path yet. A 7B head-to-head is gated on the loaders (GGUF + quant-on-load) plus quantized device
+GEMM, [tracked in the issue tracker](https://github.com/anthony-chaudhary/fak/issues).
+What this session delivers is
 the **baseline to beat** (above) and a **witnessed modular GPU path** (§1) to grow toward
 it — not a parity claim fak has not yet earned. (For the CPU axis, the existing
 `LLAMACPP-HEADTOHEAD-RESULTS.md` already measures fak at-best-parity / otherwise-behind
@@ -222,8 +221,7 @@ graph replayable across the whole growing decode, so the per-token cost is one l
 Result: **7.5 → 119–120 tok/s decode (16×), at parity with `llama.cpp` Q8_0.** It ships
 gated `FAK_CUDA_GRAPH=1` with one honest caveat: the device KV is **fixed-capacity (1024
 positions)** so capture never hits a `cudaMalloc`; lifting that to dynamic/ring is the
-follow-up (device KV [#39](https://github.com/anthony-chaudhary/fleet/issues/39)), and fp16
-([#34](https://github.com/anthony-chaudhary/fleet/issues/34)) is the lever to also reach the
+follow-up (dynamic/ring device KV), and fp16 is the lever to also reach the
 F16 number. Native-Linux (no WSL per-call tax) would start from a far lower floor.
 
 Reproduce: fak `FAK_CUDA_GRAPH=1 go run -tags cuda ./cmd/modelbench -dir
@@ -233,22 +231,22 @@ bench`); llama `llama-bench -m SmolLM2-135M-Instruct-{f16,Q8_0}.gguf -ngl 99 -n 
 ## 4. What's still open (decode parity reached; these extend it)
 
 Decode parity with `llama.cpp` Q8_0 is **reached** on a fitting small model (§3b). These
-follow-ups extend it — to the F16 number, to a 7B, and to a non-gated default — mapped to
-tracked issues on `anthony-chaudhary/fleet`:
+follow-ups extend it — to the F16 number, to a 7B, and to a non-gated default — tracked in
+the [issue tracker](https://github.com/anthony-chaudhary/fak/issues):
 
-| Gap vs llama.cpp | Consequence | Issue |
-|---|---|---|
-| F32 compute only (no fp16 / tensor cores) | leaves the 4070's tensor cores idle; ~2–4× on the table | [#34](https://github.com/anthony-chaudhary/fleet/issues/34) |
-| No quantized device GEMM (Q8_0 / Q4_K) | a 7B Q4 model can't run weights-in-int4 on device; would dequant-to-f32 (won't fit) | [#33](https://github.com/anthony-chaudhary/fleet/issues/33) |
-| Naive decode attention (per-call scratch, one block/head) | no flash/paged attention; launch + memory overhead | [#32](https://github.com/anthony-chaudhary/fleet/issues/32) |
-| Synchronous, one kernel launch per op | batch-1 decode is launch-bound | async [#36](https://github.com/anthony-chaudhary/fleet/issues/36), CUDA Graphs [#35](https://github.com/anthony-chaudhary/fleet/issues/35) |
-| No GGUF / sharded / quant-on-load | the 7B Q4 target can't be **loaded** by the in-kernel path yet (28 GB f32 won't fit 15 GB WSL RAM) | GGUF [#41](https://github.com/anthony-chaudhary/fleet/issues/41), quant-on-load [#40](https://github.com/anthony-chaudhary/fleet/issues/40) |
-| `Evict` round-trips host-ward | quarantine correct but slow on device | [#39](https://github.com/anthony-chaudhary/fleet/issues/39) |
-| 7 hand-copied blocks not yet consolidated | arch-dispatch + clean HAL adoption blocked | SEAM-0 [#42](https://github.com/anthony-chaudhary/fleet/issues/42) |
+| Gap vs llama.cpp | Consequence |
+|---|---|
+| F32 compute only (no fp16 / tensor cores) | leaves the 4070's tensor cores idle; ~2–4× on the table |
+| No quantized device GEMM (Q8_0 / Q4_K) | a 7B Q4 model can't run weights-in-int4 on device; would dequant-to-f32 (won't fit) |
+| Naive decode attention (per-call scratch, one block/head) | no flash/paged attention; launch + memory overhead |
+| Synchronous, one kernel launch per op | batch-1 decode is launch-bound (async + CUDA Graphs) |
+| No GGUF / sharded / quant-on-load | the 7B Q4 target can't be **loaded** by the in-kernel path yet (28 GB f32 won't fit 15 GB WSL RAM) |
+| `Evict` round-trips host-ward | quarantine correct but slow on device |
+| 7 hand-copied blocks not yet consolidated | arch-dispatch + clean HAL adoption blocked (SEAM-0) |
 
 The umbrella that closes the loop — a measured Go-CUDA tok/s next to the `llama.cpp`
-baseline on Qwen2.5-7B-Q4_K_M, same batch-1 protocol — is
-[#38](https://github.com/anthony-chaudhary/fleet/issues/38).
+baseline on Qwen2.5-7B-Q4_K_M, same batch-1 protocol — is tracked in the
+[issue tracker](https://github.com/anthony-chaudhary/fak/issues).
 
 ## 5. Bottom line
 

@@ -474,7 +474,7 @@
       "command": "go test ./internal/gateway -count=1",
       "started_at": "2026-06-18T13:12:41.803528Z",
       "elapsed_ms": 1452,
-      "stdout_tail": "ok  \tgithub.com/anthony-chaudhary/fleet/fak/internal/gateway\t0.528s\n",
+      "stdout_tail": "ok  \tgithub.com/anthony-chaudhary/fak/internal/gateway\t0.528s\n",
       "stderr_tail": "",
       "output_sha256": "6324712cd7bdb1a593097efc4c1cde56254a85f0cf2114ad82a195d5b8588395"
     }

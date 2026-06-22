@@ -59,4 +59,4 @@ any remaining polish is tracked in [documentation-roadmap.md](documentation-road
 > Every command and output block in [tutorial.md](tutorial.md), [policy-guide.md](policy-guide.md),
 > [observability.md](observability.md), and [security.md](security.md) was captured from a
 > clean build of `fak` v0.30.0. If a command prints something different for you, that's a
-> doc bug — please [open an issue](https://github.com/anthony-chaudhary/fleet/issues).
+> doc bug — please [open an issue](https://github.com/anthony-chaudhary/fak/issues).
