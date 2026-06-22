@@ -56,6 +56,7 @@ var tier = map[string]int{
 	"ifc": 3, "normgate": 3, "recall": 3, "kvmmu": 3, "radixkv": 3, "cdb": 3, "contextq": 3, "agentdojo": 3, "toollint": 3,
 
 	"agent": 4, "bench": 4, "turnbench": 4, "gateway": 4, "registrations": 4, "rsiloop": 4,
+	"tracesink": 4, // imports agent/turnbench/registrations (tier 4) — tier forced to 4
 
 	"tokenizer": 1,
 	// new-leaf:tier — `python tools/new_leaf.py <name> --tier <name>` inserts the
