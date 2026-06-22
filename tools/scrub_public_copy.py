@@ -305,6 +305,15 @@ AUDIT_NEEDLES = [
     "node-windows-a",
     "node-desktop-b",
     ".claude-agent",
+    # Employer affiliation. Fine in private working material, must NEVER leak into
+    # the public tree -- catches `Samsung`, `samsungmsl`, `samsung.com`, "Samsung
+    # Data Fabric / CMM-D / Cognos" pitch language, etc. (case-insensitive
+    # substring). The gate scans only ADDED lines, so the pre-existing benign brand
+    # mentions in the public WebVoyager corpus (testdata/webbench/*.jsonl: "find a
+    # Samsung tablet on Amazon") do NOT trip it -- only NEW additions do. If a
+    # genuine public mention is ever required, override that one commit with
+    # FLEET_ALLOW_LEAK=1; the friction is deliberate.
+    "samsung",
 ]
 
 # EXPORT_AUDIT_NEEDLES -- the POST-EXPORT verification (must be ABSENT in the
