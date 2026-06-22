@@ -210,6 +210,25 @@ summary  = "staged content matches a redact-needle -- operator-private info woul
 fix      = "remove the needle from the staged change, or redact it per PUBLIC-SCRUB-POLICY.md. Floor: tools/githooks/pre-commit blocks the commit by default; set FLEET_SCRUB_GUARD=warn for advisory mode, or FLEET_ALLOW_LEAK=1 to override once (only for new fake adversarial fixtures that intentionally trip a needle)."
 see_also = ["PUBLIC-SCRUB-POLICY.md", "tools/githooks/pre-commit", "tools/scrub_public_copy.py", "tools/install_trunk_guard.py"]
 
+# Out-of-tree write guard: a destructive/write op that escapes the repo into a
+# SIBLING tree. work/ holds many sibling repos (fak/, fak-private/, fleet/, dos/,
+# tools/, ...); a tool resolving a path one level too high writes into ANOTHER
+# project. Born 2026-06-21: a build script wrote fak.exe into the sibling
+# anthony-chaudhary/tools repo, which was then rm -rf'd. The named floor is a
+# PreToolUse hook (not a commit-time hook like the reasons above) -- it fires
+# BELOW the agent, before the tool runs. tools/repo_guard.py resolves every
+# destructive/write target against the repo root and denies the out-of-tree ones
+# (allow-listing the OS temp dir + ~/.cache); the FAK regex twin is
+# examples/repo-guard-policy.json. Like the others this is purely ADDITIVE data:
+# the hook fires only on a target that lands outside the workspace, so no in-repo
+# work is ever refused; soften with FAK_REPO_GUARD=warn or off.
+[reasons.OUT_OF_TREE_WRITE]
+category = "OPERATOR_GATE"
+refusal  = true
+summary  = "a destructive or write op targets a path OUTSIDE this repo -- it would create / delete / overwrite inside a SIBLING tree (another project or git repo) or the workspace's parent, not the workspace itself"
+fix      = "operate inside the workspace; send scratch to a temp dir (/tmp, ~/.cache), never a sibling. Floor: tools/repo_guard.py (a Claude Code PreToolUse hook in .claude/settings.json) resolves each target against the repo root and denies out-of-tree ones; set FAK_REPO_GUARD=warn for advisory, off to disable. FAK regex twin: examples/repo-guard-policy.json."
+see_also = ["tools/repo_guard.py", "examples/repo-guard-policy.json", ".claude/settings.json", "DOGFOOD-CLAUDE.md"]
+
 # Bound the per-project `.dos/` scratch so a long-lived repo doesn't accrete audit
 # reports without limit (the "never reap a live lease" floor is the collector's,
 # independent of this number).

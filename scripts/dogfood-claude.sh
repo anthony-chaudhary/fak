@@ -55,7 +55,12 @@ while [ -L "$SELF" ]; do
 done
 SCRIPT_DIR="$(cd "$(dirname "$SELF")" && pwd)"
 FAK_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
-ROOT="$(cd "$FAK_DIR/.." && pwd)"
+# The Go module is the repository root (AGENTS.md). The kernel binary and the account
+# switcher live under the repo's OWN tools/ dir — tools/ is a CHILD of $FAK_DIR, not a
+# sibling — so ROOT == FAK_DIR. (A previous version set ROOT to $FAK_DIR/.. — one level
+# ABOVE the repo — so the build silently wrote the binary into, and read
+# fleet_accounts.py from, an unrelated SIBLING tools/ dir outside the repo.)
+ROOT="$FAK_DIR"
 cd "$FAK_DIR"
 
 log()  { printf '\033[36m[dogfood]\033[0m %s\n' "$*" >&2; }
@@ -92,6 +97,9 @@ PROVIDER_EXTRA_BODY="${FAK_DOGFOOD_PROVIDER_EXTRA_BODY_JSON:-${FAK_DOGFOOD_EXTRA
 CLAUDE_DEBUG="${FAK_DOGFOOD_CLAUDE_DEBUG:-api}"
 CLAUDE_DEBUG_FILE="${FAK_DOGFOOD_CLAUDE_DEBUG_FILE:-}"
 BIN="$ROOT/tools/.bin/fak"
+# Durability guard: never build outside the repo (see ROOT note above). If BIN ever
+# resolves above the module root again, refuse rather than polluting an external dir.
+case "$BIN" in "$FAK_DIR"/*) : ;; *) die "refusing to build outside the repo: $BIN (expected under $FAK_DIR)" ;; esac
 # The account switcher (tools/fleet_accounts.py) globs FLEET_USER_HOME/.claude*; on
 # this Mac the accounts live under $HOME, so point it there (the default is a
 # Windows path). This is the alignment seam with the fleet account switcher.

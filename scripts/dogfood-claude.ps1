@@ -68,7 +68,12 @@ if ($args.Count -ge 1) {
 # ---- locate the repo (this script lives in fak/scripts/) -------------------
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $FakDir = (Resolve-Path (Join-Path $ScriptDir '..')).Path
-$Root   = (Resolve-Path (Join-Path $FakDir '..')).Path
+# The Go module is the repository root (AGENTS.md). The kernel binary and the account
+# switcher live under the repo's OWN tools/ dir — tools/ is a CHILD of $FakDir, not a
+# sibling — so $Root == $FakDir. (A previous version set $Root to $FakDir\.. — one level
+# ABOVE the repo — so the build silently wrote fak.exe into, and read fleet_accounts.py
+# from, an unrelated SIBLING tools\ dir outside the repo, clobbering whatever lived there.)
+$Root = $FakDir
 
 # ---- knobs -----------------------------------------------------------------
 $Port      = if ($env:FAK_DOGFOOD_PORT)      { [int]$env:FAK_DOGFOOD_PORT }      else { 8080 }
@@ -159,6 +164,9 @@ function Stop-Children {
 
 try {
   # ---- build the kernel binary ---------------------------------------------
+  # Durability guard: never build outside the repo. If $Bin ever resolves above the
+  # module root again, refuse rather than polluting (or clobbering) an external dir.
+  if (-not $Bin.ToLowerInvariant().StartsWith($FakDir.ToLowerInvariant())) { Die "refusing to build outside the repo: $Bin (expected under $FakDir)" }
   Log "building fak -> $Bin"
   New-Item -ItemType Directory -Force (Split-Path -Parent $Bin) | Out-Null
   Push-Location $FakDir
