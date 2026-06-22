@@ -198,12 +198,19 @@ Routes the gateway exposes:
 
 | Route | What it does |
 |---|---|
-| `POST /v1/chat/completions` | the adjudicating proxy described above |
+| `POST /v1/chat/completions` | the adjudicating proxy described above (OpenAI wire) |
+| `POST /v1/messages`, `POST /v1/messages/count_tokens` | the same adjudicating proxy on the Anthropic wire + its token counter |
+| `POST /v1/embeddings`, `POST /v1/moderations` | OpenAI-compatible embeddings / moderations passthrough |
 | `GET /healthz` | unauthenticated liveness (`{"...","ok":true}`) |
 | `GET /v1/models` | advertises the served model id |
 | `POST /v1/fak/syscall` | run one adjudicated tool call through the kernel directly |
 | `POST /v1/fak/adjudicate` | get the verdict for a call without dispatching it |
+| `POST /v1/fak/admit` | admit a tool *result* through the quarantine/IFC gate without a call |
 | `GET /v1/fak/changes`, `POST /v1/fak/revoke` | the cross-agent "what changed" feed / refute a poisoned witness |
+| `GET /v1/fak/events` | drain the durable, hash-chained audit journal after a `?since=` cursor (404 unless `FAK_AUDIT_JOURNAL` is set) |
+| `POST /v1/fak/context/change` | record a safe requester-initiated mutation (e.g. a recall-page tombstone) |
+| `POST /v1/fak/policy/reload` | reload the configured policy manifest in place |
+| `POST /v1/fak/trace/reset` | reset the per-trace IFC taint state |
 | `POST /mcp` | MCP-over-HTTP (`fak serve --stdio` serves MCP over stdin/stdout) |
 | `GET /metrics` | Prometheus exposition for gateway HTTP latency/status, verdict counters, kernel counters, inflight requests, build labels, and vDSO hit ratio |
 | `GET /debug/vars` | authenticated expvar-style JSON snapshot of gateway config/uptime, runtime memory/goroutines, kernel counters, and completed HTTP/operation metric rows |
