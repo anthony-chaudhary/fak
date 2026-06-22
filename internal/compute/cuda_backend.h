@@ -68,6 +68,32 @@ void fcuda_f32_to_f16_T(void *dDstHalf, const float *dSrc, int out, int in);
  * [out,in] at H2D by fcuda_f32_to_f16_T (op_N, lda=out). Both compute the same Y. */
 void fcuda_matmul_f16(const void *dWhalf, const float *dX, float *dY, int out, int in, int P, int colMajor);
 
+/* native quantized device GEMM (#485): the weight stays narrow in VRAM (int8 codes / Q4_K
+ * super-block bytes) and the GEMM consumes it directly — no dequant-to-f32 round trip, so the
+ * VRAM/bandwidth win the quantized format buys is kept. Both are Approx peers of the cpuref
+ * Reference (per-dtype recorded cosine floors in cuda.go: cudaQ8CosineMin tighter than
+ * cudaQ4KCosineMin), NOT bit-identity. The activation arrives f32-resident; the kernels quantize
+ * (Q8_0) or dequant-fuse (Q4_K) on device, accumulate in F32, and write f32 Y so RMSNorm/RoPE/
+ * SwiGLU/Attention stay f32 and unchanged. */
+
+/* fcuda_q8_matmul_f32: Y[P,out] = X[P,in] @ W[out,in]^T where W is resident Q8_0 — int8 codes
+ * dCodes[out*in] plus per-block(=block) f32 scales dScales[out*(in/block)] (the side-channel a
+ * real Q8 weight carries). X (f32) is quantized to int8 ON DEVICE per block (d=amax/127, the
+ * cpuref q8round), then each block's integer dot is scaled by (weight block scale * activation
+ * block scale) — the same per-block scheme as cpuref qdot8scalar, so the dynamic range of every
+ * group is carried in full f32 and only the in-block code rounds. in must be divisible by block. */
+void fcuda_q8_matmul_f32(const int8_t *dCodes, const float *dScales, const float *dX, float *dY,
+                         int out, int in, int P, int block);
+
+/* fcuda_q4k_matmul_f32: Y[P,out] = X[P,in] @ W[out,in]^T where W is resident Q4_K — the raw
+ * llama.cpp k-quant super-block bytes dQ4K, 256 elements per 144-byte super-block (f16 d, f16
+ * dmin, 12 bytes of 6-bit-packed sub-block scales+mins, 128 bytes of 4-bit codes). The kernel
+ * DEQUANTS each weight fused into the GEMM tile — w = d*scale*code - dmin*min, with (scale,min)
+ * unpacked per 32-elem sub-block exactly as the GGUF loader's getScaleMinK4 — and dots it with the
+ * f32 activation, F32 accumulate. in must be divisible by 256. There is no activation quant on this
+ * path (the weight, not the activation, is the narrow operand). */
+void fcuda_q4k_matmul_f32(const uint8_t *dQ4K, const float *dX, float *dY, int out, int in, int P);
+
 /* per-row RMSNorm: y[r,:] = x[r,:] * rsqrt(mean(x[r,:]^2) + eps) * w[:]  (rows x n). */
 void fcuda_rmsnorm_f32(const float *dX, const float *dW, float *dY, int rows, int n, float eps);
 

@@ -173,6 +173,167 @@ extern "C" void fcuda_matmul_f16(const void *dWhalf, const float *dX, float *dY,
   fcuda_free(dXh);
 }
 
+// ---- native quantized device GEMM (#485): Q8_0 + Q4_K, no dequant-to-f32 --------
+// The weight stays NARROW in VRAM (int8 codes / Q4_K super-block bytes) and the GEMM
+// consumes it directly — no dequant-to-f32 round trip, so the VRAM/bandwidth win the
+// quantized format buys is kept. Both are Approx peers of the cpuref Reference (per-dtype
+// recorded cosine floors in cuda.go: cudaQ8CosineMin tighter than cudaQ4KCosineMin), NOT
+// bit-identity. The activation arrives f32-resident; the kernels quantize (Q8_0) or
+// dequant-fuse (Q4_K) on device, accumulate in F32, and write f32 Y so the rest of the op
+// chain (RMSNorm/RoPE/SwiGLU/Attention) stays f32 and unchanged.
+
+// q8round_dev reproduces cpuref q8round byte-for-byte: truncate toward zero, then round the
+// fractional part half-away-from-zero, clamp to [-127,127]. The on-device activation quant
+// must round the SAME way the cpuref reference does so the int8 lane stays tight to f32.
+__device__ signed char q8round_dev(float x) {
+  int t = (int)x; // C cast truncates toward zero, like Go int32(x)
+  float f = x - (float)t;
+  if (f >= 0.5f) t++;
+  else if (f <= -0.5f) t--;
+  if (t > 127) return 127;
+  if (t < -127) return -127;
+  return (signed char)t;
+}
+
+// k_q8_quant_act quantizes the f32 activation X[P,in] to Q8_0 ON DEVICE: per block of `block`
+// elements, d = amax/127 and code = q8round(x/d) — exactly cpuref quantizeVecQ8. One block per
+// (row t, block b); 64 power-of-two threads stride the (=32) block elements for the amax reduce.
+__global__ void k_q8_quant_act(const float *X, signed char *qX, float *xScale,
+                               int P, int in, int block) {
+  int b = blockIdx.x, t = blockIdx.y;
+  int nblk = in / block;
+  if (t >= P || b >= nblk) return;
+  const float *xb = X + (size_t)t * in + (size_t)b * block;
+  __shared__ float red[64];
+  float a = 0.f;
+  for (int i = threadIdx.x; i < block; i += blockDim.x) a = fmaxf(a, fabsf(xb[i]));
+  red[threadIdx.x] = a;
+  __syncthreads();
+  for (int s = blockDim.x / 2; s > 0; s >>= 1) {
+    if (threadIdx.x < s) red[threadIdx.x] = fmaxf(red[threadIdx.x], red[threadIdx.x + s]);
+    __syncthreads();
+  }
+  float d = red[0] / 127.f;
+  if (threadIdx.x == 0) xScale[(size_t)t * nblk + b] = d;
+  float inv = d > 0.f ? 1.f / d : 0.f;
+  signed char *qb = qX + (size_t)t * in + (size_t)b * block;
+  for (int i = threadIdx.x; i < block; i += blockDim.x)
+    qb[i] = d > 0.f ? q8round_dev(xb[i] * inv) : (signed char)0;
+}
+
+// k_q8_gemm: Y[t,o] = Σ_b (Σ_i qW[o,b,i]·qX[t,b,i]) · dW[o,b] · dX[t,b]. One block per (o,t);
+// threads stride the blocks, each forms its block's integer dot (int32) then scales by the
+// weight·activation block scales — the same per-block scheme as cpuref qdot8scalar (only the
+// reduction order differs, which is what makes the lane Approx, not Reference).
+__global__ void k_q8_gemm(const signed char *W, const float *Wscale,
+                          const signed char *qX, const float *xScale,
+                          float *Y, int out, int in, int P, int block) {
+  int o = blockIdx.x, t = blockIdx.y;
+  if (o >= out || t >= P) return;
+  int nblk = in / block;
+  const signed char *wrow = W + (size_t)o * in;
+  const float *wsc = Wscale + (size_t)o * nblk;
+  const signed char *xrow = qX + (size_t)t * in;
+  const float *xsc = xScale + (size_t)t * nblk;
+  __shared__ float red[256];
+  float local = 0.f;
+  for (int b = threadIdx.x; b < nblk; b += blockDim.x) {
+    const signed char *wb = wrow + (size_t)b * block;
+    const signed char *xb = xrow + (size_t)b * block;
+    int acc = 0;
+    for (int i = 0; i < block; i++) acc += (int)wb[i] * (int)xb[i];
+    local += (float)acc * wsc[b] * xsc[b];
+  }
+  red[threadIdx.x] = local;
+  __syncthreads();
+  for (int s = blockDim.x / 2; s > 0; s >>= 1) {
+    if (threadIdx.x < s) red[threadIdx.x] += red[threadIdx.x + s];
+    __syncthreads();
+  }
+  if (threadIdx.x == 0) Y[(size_t)t * out + o] = red[0];
+}
+
+extern "C" void fcuda_q8_matmul_f32(const int8_t *dCodes, const float *dScales, const float *dX,
+                                    float *dY, int out, int in, int P, int block) {
+  int nblk = in / block;
+  signed char *qX = (signed char *)fcuda_malloc((size_t)P * in);          // int8 activation codes
+  float *xScale = (float *)fcuda_malloc((size_t)P * nblk * sizeof(float)); // per-block act scales
+  k_q8_quant_act<<<dim3(nblk, P), 64, 0, g_stream>>>(dX, qX, xScale, P, in, block);
+  k_q8_gemm<<<dim3(out, P), 256, 0, g_stream>>>((const signed char *)dCodes, dScales, qX, xScale,
+                                                dY, out, in, P, block);
+  fcuda_free(qX);
+  fcuda_free(xScale); // pooled, stream-ordered: the GEMM reads them before any reuse
+}
+
+// getScaleMinK4_dev reproduces the GGUF loader's getScaleMinK4 (internal/ggufload) bit-for-bit:
+// the 6-bit (scale,min) for the j-th 32-elem sub-block, unpacked from the 12 packed scale bytes.
+__device__ void getScaleMinK4_dev(int j, const unsigned char *q, unsigned char *sc, unsigned char *mn) {
+  if (j < 4) {
+    *sc = q[j] & 63;
+    *mn = q[j + 4] & 63;
+  } else {
+    *sc = (q[j + 4] & 0x0f) | ((q[j - 4] >> 6) << 4);
+    *mn = (q[j + 4] >> 4) | ((q[j] >> 6) << 4);
+  }
+}
+
+// k_q4k_gemm: Y[t,o] = Σ over the row's Q4_K super-blocks of the dequant-fused dot. Each 256-elem
+// super-block is 144 bytes — f16 d (0..1), f16 dmin (2..3), 12 packed sub-scale bytes (4..15), 128
+// 4-bit code bytes (16..143). The weight is dequantized FUSED into the tile: w = d·scale·code −
+// dmin·min, with (scale,min) per 32-elem sub-block from getScaleMinK4_dev — exactly the GGUF
+// loader's dequantQ4K — and dotted with the f32 activation, F32 accumulate. No activation quant on
+// this path (the weight, not the activation, is the narrow operand). One block per (o,t); threads
+// stride the super-blocks.
+__global__ void k_q4k_gemm(const unsigned char *Q4K, const float *X, float *Y, int out, int in, int P) {
+  int o = blockIdx.x, t = blockIdx.y;
+  if (o >= out || t >= P) return;
+  int nsb = in / 256; // super-blocks per row
+  const unsigned char *wrow = Q4K + (size_t)o * nsb * 144;
+  const float *xrow = X + (size_t)t * in;
+  __shared__ float red[256];
+  float local = 0.f;
+  for (int sb = threadIdx.x; sb < nsb; sb += blockDim.x) {
+    const unsigned char *blk = wrow + (size_t)sb * 144;
+    float d = __half2float(*(const __half *)(blk));
+    float dmin = __half2float(*(const __half *)(blk + 2));
+    const unsigned char *scales = blk + 4;  // 12 packed sub-scale bytes
+    const unsigned char *q = blk + 16;      // 128 4-bit code bytes
+    const float *xb = xrow + (size_t)sb * 256;
+    int qi = 0, is = 0;
+    float acc = 0.f;
+    for (int j = 0; j < 256; j += 64) {
+      unsigned char sc, mn;
+      getScaleMinK4_dev(is, scales, &sc, &mn);
+      float d1 = d * sc, m1 = dmin * mn;
+      getScaleMinK4_dev(is + 1, scales, &sc, &mn);
+      float d2 = d * sc, m2 = dmin * mn;
+      for (int l = 0; l < 32; l++) {
+        float w = d1 * (float)(q[qi + l] & 0x0f) - m1;
+        acc += w * xb[j + l];
+      }
+      for (int l = 0; l < 32; l++) {
+        float w = d2 * (float)(q[qi + l] >> 4) - m2;
+        acc += w * xb[j + 32 + l];
+      }
+      qi += 32;
+      is += 2;
+    }
+    local += acc;
+  }
+  red[threadIdx.x] = local;
+  __syncthreads();
+  for (int s = blockDim.x / 2; s > 0; s >>= 1) {
+    if (threadIdx.x < s) red[threadIdx.x] += red[threadIdx.x + s];
+    __syncthreads();
+  }
+  if (threadIdx.x == 0) Y[(size_t)t * out + o] = red[0];
+}
+
+extern "C" void fcuda_q4k_matmul_f32(const uint8_t *dQ4K, const float *dX, float *dY,
+                                     int out, int in, int P) {
+  k_q4k_gemm<<<dim3(out, P), 256, 0, g_stream>>>((const unsigned char *)dQ4K, dX, dY, out, in, P);
+}
+
 // ---- RMSNorm: one block per row -------------------------------------------------
 __global__ void k_rmsnorm(const float *X, const float *W, float *Y, int rows, int n, float eps) {
   int r = blockIdx.x;

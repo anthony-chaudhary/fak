@@ -74,6 +74,41 @@ var graphEnabled bool
 // (the win32 build host has no CUDA toolkit / GPU). Do not read a pass from this value alone.
 const cudaFP16CosineMin = 0.997
 
+// cudaQ8CosineMin / cudaQ4KCosineMin are the cuda backend's RECORDED Approx cosine floors for the
+// native quantized device GEMMs (#485) — the device-vs-cpuref-f32 GEMM cosine each per-dtype
+// witness must clear. They are PER-DTYPE because the two formats sit at different points on the
+// precision/footprint curve, and the floor must reflect the floor's own format, not a shared guess:
+//
+//   - cudaQ8CosineMin (0.999): Q8_0 keeps a per-block(32) f32 scale beside 8-bit codes (256 levels)
+//     and the activation is dynamically re-quantized per block with its OWN f32 scale, so every
+//     group's dynamic range is carried in full f32 and only the in-block code rounds; the per-block
+//     dot is integer-exact before a single f32 scale multiply. That structure keeps the int8 lane
+//     tight against the f32 reference — the SAME 0.999 the Q8 lane has always been held to (it is the
+//     gate cudaFP16CosineMin's comment calls "the Q8 lane's 0.999").
+//   - cudaQ4KCosineMin (0.995): Q4_K is a 4-bit k-quant — codes carry only 16 levels and the
+//     per-32-sub-block (scale,min) is itself quantized to 6 bits under ONE f16 super-block (d,dmin)
+//     pair shared across 256 elements. So a Q4_K weight reconstructs less of the original f32
+//     magnitude structure than Q8_0's 8-bit+f32-scale grouping does; on a real model quantized FROM
+//     full-precision f32 the 4-bit reconstruction error is genuinely larger than 8-bit, so the
+//     recorded floor is set LOOSER than the Q8 lane. (The -tags cuda Q4_K gate isolates the device
+//     dequant-fused tile's arithmetic against an f32 dequant of the SAME super-block bytes — it
+//     witnesses the getScaleMinK4 geometry is reproduced bit-for-bit; the full-model true-f32 → Q4_K
+//     cosine is measured on a GPU node, the same honest residual as every device number here.)
+//
+// IMPORTANT (honest handoff, identical to cudaFP16CosineMin): these constants RECORD the thresholds;
+// they do NOT assert the paths pass them. The realized cosines are measured on a CUDA node by
+// tools/run_485_acceptance_on_gpu.sh (the win32 build host has no CUDA toolkit / GPU). Do not read a
+// pass from these values alone.
+const (
+	cudaQ8CosineMin  = 0.999
+	cudaQ4KCosineMin = 0.995
+)
+
+// q8DeviceBlock is the Q8_0 per-block size the device narrow-at-H2D quant uses (llama.cpp block_q8_0
+// = 32, the cpuref default). The resident weight carries it in QuantSpec.Block so the GEMM kernel
+// reconstructs nblk = in/block; `in` must be divisible by it.
+const q8DeviceBlock = 32
+
 func init() {
 	var name [256]C.char
 	var sm C.int
@@ -98,14 +133,24 @@ var cudaDev *cudaBackend
 // synchronous on return (weights, whose Upload H2D is a blocking cudaMemcpy; KV views; the
 // argmax scalar) carry be==nil and are always Ready.
 type cudaBuf struct {
-	ptr     unsafe.Pointer // device pointer (cudaMalloc)
-	n       int            // bytes
+	ptr     unsafe.Pointer // device pointer (cudaMalloc); int8 codes for Q8_0, raw bytes for Q4_K
+	n       int            // bytes at ptr
 	host    uintptr        // source host pointer if this came from a cached Upload (0 otherwise)
 	hostDt  Dtype          // narrowed dtype this upload was cached under (so Free evicts the right key)
 	hostLo  Layout         // layout this upload was cached under (ditto — same host buffer, two layouts)
 	be      *cudaBackend   // non-nil => async op output; Ready() tracks be.fenceGen vs bornGen
 	bornGen uint64         // fence generation in which this async buffer was enqueued
+	// scales is the SECOND VRAM buffer a resident Q8_0 weight carries (#485): the per-block(32)
+	// f32 scales living beside the int8 codes in ptr. Q4_K keeps d/dmin/scales/codes packed in the
+	// raw super-block bytes at ptr, so it leaves scales==nil. Freed alongside ptr in Free.
+	scales  unsafe.Pointer
+	scalesN int // bytes at scales (0 when there is no scale side-channel)
 }
+
+// residentBytes is the total VRAM the weight occupies — codes (ptr) plus any scale side-channel.
+// The #485 VRAM witness reads it to prove a Q8_0/Q4_K weight stays narrow (≈ int8/int4 size, not
+// the f32 size a dequant-to-f32 upload would have paid).
+func (b *cudaBuf) residentBytes() int { return b.n + b.scalesN }
 
 // Ready reports whether the buffer's producing kernel has been fenced host-ward. An async op
 // output is ready once a Read/Argmax has bumped the fence generation past the one it was
@@ -217,9 +262,11 @@ func (c *cudaBackend) Caps() Caps {
 	// launches). It is advertised true exactly when that path is live (graphEnabled /
 	// FAK_CUDA_GRAPH=1) so it stays consistent with GraphBegin's consent — a consumer that reads
 	// false cleanly falls back to the synchronous per-op core (the cpu-ref/Metal default).
-	// UploadDtype (#484): Upload(t, F16) narrows weights to __half at H2D (with a ColMajor
-	// transpose-repack) and MatMul/BatchedMatMul run tensor-core HGEMM on them — the fp16 compute
-	// path. FusedAttn remains a tracked seam.
+	// UploadDtype (#484/#485): Upload(t, F16) narrows weights to __half at H2D (with a ColMajor
+	// transpose-repack) for tensor-core HGEMM; Upload(t, Q8_0) narrows an f32 weight to resident
+	// int8 codes + f32 scales, and a Q4_K host weight uploads its raw super-block bytes verbatim —
+	// MatMul/BatchedMatMul then run the native quantized device GEMMs (no dequant-to-f32), keeping
+	// the weight narrow in VRAM. FusedAttn remains a tracked seam.
 	return Caps{Async: true, DeviceMemory: true, GraphCompile: graphEnabled, UploadDtype: true}
 }
 
@@ -268,10 +315,19 @@ func (c *cudaBackend) devF16(shape []int, layout Layout) (Tensor, *cudaBuf) {
 }
 
 // Upload copies host data resident -> VRAM, optionally narrowing the weight dtype at H2D
-// (Caps.UploadDtype). `as == F16` is the fp16 compute path (#484): the f32 is staged on device,
-// narrowed to __half (and, for a ColMajor source, transpose-repacked — the `Layout` repack at
-// H2D), and the resident weight becomes F16. Any other `as` keeps full-precision F32 bytes (Q8 /
-// other quantized device upload is a separate tracked seam). Host data must be F32.
+// (Caps.UploadDtype). The narrowing the `as` request selects:
+//   - `as == F16`: the fp16 compute path (#484). The f32 is staged on device, narrowed to __half
+//     (and, for a ColMajor source, transpose-repacked — the `Layout` repack at H2D); resident F16.
+//   - `as == Q8_0` (#485): the f32 weight is quantized to Q8_0 (per-block(32) int8 codes + f32
+//     scales, the cpuref QuantizeQ8 scheme) and BOTH narrow operands go resident — codes in the
+//     buffer's ptr, scales in its scale side-channel. No f32 weight ever stays resident, so the
+//     VRAM footprint is ≈ int8 size, the whole point of the native quantized GEMM.
+//   - any other `as`: full-precision F32 bytes resident (the SGEMM path).
+//
+// A weight whose HOST dtype is already Q4_K (raw GGUF super-block bytes — the resident-Q4_K loader
+// in internal/ggufload produces these) is copied resident verbatim (#485): the bytes are already
+// narrow, so there is nothing to quantize; the dequant is fused into the GEMM tile on device.
+// Every other host dtype must be F32.
 func (c *cudaBackend) Upload(t Tensor, as Dtype) Tensor {
 	cudaMu.Lock()
 	defer cudaMu.Unlock()
@@ -279,12 +335,18 @@ func (c *cudaBackend) Upload(t Tensor, as Dtype) Tensor {
 	if !ok {
 		panic("compute: cuda Upload expects host data")
 	}
-	if t.Dtype != F32 {
-		panic("compute: cuda Upload supports only F32 host data today (got " + t.Dtype.String() + ")")
+	if t.Dtype == Q4_K {
+		return c.uploadQ4K(t, hb) // raw super-block bytes, copied resident (already narrow)
 	}
-	store := F32
-	if as == F16 {
+	if t.Dtype != F32 {
+		panic("compute: cuda Upload supports F32 host data (optionally narrowing to F16/Q8_0) or raw Q4_K bytes today (got " + t.Dtype.String() + ")")
+	}
+	store := F32 // the resident dtype the `as` request narrows f32 host weights to
+	switch as {
+	case F16:
 		store = F16
+	case Q8_0:
+		store = Q8_0
 	}
 	f := hb.F32()
 	var hp uintptr
@@ -294,8 +356,11 @@ func (c *cudaBackend) Upload(t Tensor, as Dtype) Tensor {
 			return cached // same host buffer already resident at this dtype/layout; share it
 		}
 	}
-	if store == F16 {
+	switch store {
+	case F16:
 		return c.uploadF16(t, f, hp)
+	case Q8_0:
+		return c.uploadQ8(t, f, hp)
 	}
 	out, buf := c.dev(t.Shape, F32)
 	if len(f) > 0 {
@@ -304,6 +369,99 @@ func (c *cudaBackend) Upload(t Tensor, as Dtype) Tensor {
 		uploadCache[ucKey{hp, F32, t.Layout}] = out
 	}
 	return out
+}
+
+// uploadQ8 narrows an f32 host weight [out,in] to a resident Q8_0 weight at H2D (#485): the f32 is
+// quantized to per-block(32) int8 codes + f32 scales using the EXACT cpuref QuantizeQ8 scheme
+// (d=amax/127, q8round), and both narrow operands are uploaded — codes to the buffer's ptr, scales
+// to its scale side-channel. The f32 weight never becomes resident, so the VRAM footprint is the
+// int8 size (codes) + a thin per-block scale band, not the f32 size. `in` must be divisible by 32.
+func (c *cudaBackend) uploadQ8(t Tensor, f []float32, hp uintptr) Tensor {
+	if len(t.Shape) != 2 {
+		panic("compute: cuda Upload(_, Q8_0) expects a 2-D [out,in] weight (got rank " + itoaC(len(t.Shape)) + ")")
+	}
+	out, in := t.Shape[0], t.Shape[1]
+	blk := q8DeviceBlock
+	nblk := in / blk
+	if len(f) == 0 { // degenerate empty weight — mirror the F32 path's len==0 tolerance
+		res, _ := c.devQ8(t.Shape, blk, out*nblk)
+		return res
+	}
+	codes := make([]int8, out*in)
+	scales := make([]float32, out*nblk)
+	for o := 0; o < out; o++ {
+		for b := 0; b < nblk; b++ {
+			base := o*in + b*blk
+			var amax float32
+			for i := 0; i < blk; i++ {
+				if a := absf(f[base+i]); a > amax {
+					amax = a
+				}
+			}
+			d := amax / 127
+			scales[o*nblk+b] = d
+			if d == 0 {
+				continue
+			}
+			inv := 1.0 / d
+			for i := 0; i < blk; i++ {
+				codes[base+i] = q8round(f[base+i] * inv)
+			}
+		}
+	}
+	res, buf := c.devQ8(t.Shape, blk, len(scales))
+	C.fcuda_h2d(buf.ptr, unsafe.Pointer(&codes[0]), C.size_t(len(codes)))
+	C.fcuda_h2d(buf.scales, unsafe.Pointer(&scales[0]), C.size_t(len(scales)*4))
+	buf.host, buf.hostDt, buf.hostLo = hp, Q8_0, t.Layout
+	uploadCache[ucKey{hp, Q8_0, t.Layout}] = res
+	return res
+}
+
+// uploadQ4K copies raw Q4_K super-block bytes resident (#485). The host tensor carries the bytes
+// in its HostBuffer.I8() view (one int8 per byte); they are already narrow (144 bytes / 256 elems),
+// so there is no quantize or dtype-narrow step — just an H2D into a uint8 VRAM buffer the
+// dequant-fused GEMM tile consumes. Cached on (host ptr, Q4_K, layout) like every other upload.
+func (c *cudaBackend) uploadQ4K(t Tensor, hb HostBuffer) Tensor {
+	raw := hb.I8()
+	var hp uintptr
+	if len(raw) > 0 {
+		hp = uintptr(unsafe.Pointer(&raw[0]))
+		if cached, ok := uploadCache[ucKey{hp, Q4_K, t.Layout}]; ok {
+			return cached
+		}
+	}
+	res, buf := c.devQ4K(t.Shape, len(raw))
+	if len(raw) > 0 {
+		C.fcuda_h2d(buf.ptr, unsafe.Pointer(&raw[0]), C.size_t(len(raw)))
+		buf.host, buf.hostDt, buf.hostLo = hp, Q4_K, t.Layout
+		uploadCache[ucKey{hp, Q4_K, t.Layout}] = res
+	}
+	return res
+}
+
+// devQ8 allocates a resident Q8_0 weight: an out*in-byte int8 codes buffer (ptr) plus an
+// nScales*4-byte f32 scale side-channel (scales). The Tensor carries a QuantSpec{Block} so the
+// GEMM kernel reconstructs nblk = in/block. Weights use dev-family allocs, never devTr, so the
+// resident-weight cache is never recycled out from under them.
+func (c *cudaBackend) devQ8(shape []int, block, nScales int) (Tensor, *cudaBuf) {
+	out, in := shape[0], shape[1]
+	buf := c.dalloc(out * in) // int8 codes, 1 byte each
+	buf.scales = unsafe.Pointer(C.fcuda_malloc(C.size_t(nScales * 4)))
+	if buf.scales == nil {
+		panic("compute: cuda Q8 scale allocation failed")
+	}
+	buf.scalesN = nScales * 4
+	q := &QuantSpec{Block: block, Axis: 2, Bits: 8, Symmetric: true}
+	return makeTensor(c, Q8_0, RowMajor, append([]int(nil), shape...), q, buf), buf
+}
+
+// devQ4K allocates a resident Q4_K weight: a single nbytes-long uint8 buffer holding the raw GGUF
+// super-block bytes (d/dmin/scales/codes all packed; no scale side-channel). nbytes is the size of
+// the host byte slice (= (out*in/256)*144). The QuantSpec records the 256-elem super-block.
+func (c *cudaBackend) devQ4K(shape []int, nbytes int) (Tensor, *cudaBuf) {
+	buf := c.dalloc(nbytes)
+	q := &QuantSpec{Block: 256, Axis: 2, Bits: 4, Symmetric: false}
+	return makeTensor(c, Q4_K, RowMajor, append([]int(nil), shape...), q, buf), buf
 }
 
 // uploadF16 narrows an f32 host weight to a resident F16 weight at H2D (#484). The f32 is staged
@@ -363,6 +521,10 @@ func (c *cudaBackend) Free(t Tensor) {
 			// evict the exact (ptr, dtype, layout) entry so a re-upload of the same host buffer re-stages
 			delete(uploadCache, ucKey{db.host, db.hostDt, db.hostLo})
 		}
+		if db.scales != nil { // Q8_0 scale side-channel (#485)
+			C.fcuda_free(db.scales)
+			db.scales = nil
+		}
 		C.fcuda_free(db.ptr)
 		db.ptr = nil
 	}
@@ -400,8 +562,24 @@ func (c *cudaBackend) MatMul(w, x Tensor) Tensor {
 		y, _ := c.devTr([]int{out}, F32)
 		C.fcuda_matmul_f16(c.cptr(w), c.cf(x), c.cf(y), C.int(out), C.int(in), 1, colMajorFlag(w))
 		return y
+	case Q8_0:
+		// native Q8_0 GEMV (#485): int8 codes + per-block f32 scales resident, the activation
+		// quantized to int8 ON DEVICE; integer per-block dot scaled by (weight·activation block
+		// scales), F32 accumulate. No dequant-to-f32 round trip — the weight stays int8 in VRAM.
+		wb := w.buf.(*cudaBuf)
+		y, _ := c.devTr([]int{out}, F32)
+		C.fcuda_q8_matmul_f32((*C.int8_t)(wb.ptr), (*C.float)(wb.scales), c.cf(x), c.cf(y),
+			C.int(out), C.int(in), 1, C.int(w.Quant.Block))
+		return y
+	case Q4_K:
+		// native Q4_K GEMV (#485): the dequant (w = d·scale·code − dmin·min) is fused into the
+		// GEMM tile straight off the resident super-block bytes; the weight stays int4 in VRAM.
+		wb := w.buf.(*cudaBuf)
+		y, _ := c.devTr([]int{out}, F32)
+		C.fcuda_q4k_matmul_f32((*C.uint8_t)(wb.ptr), c.cf(x), c.cf(y), C.int(out), C.int(in), 1)
+		return y
 	default:
-		panic("compute: cuda MatMul supports F32 and F16 weights today (got " + w.Dtype.String() + "); quantized device GEMM is a tracked follow-up")
+		panic("compute: cuda MatMul supports F32/F16/Q8_0/Q4_K weights today (got " + w.Dtype.String() + "); other quantized device GEMM is a tracked follow-up")
 	}
 }
 
@@ -419,8 +597,23 @@ func (c *cudaBackend) BatchedMatMul(w, X Tensor, P int) Tensor {
 		y, _ := c.devTr([]int{P, out}, F32)
 		C.fcuda_matmul_f16(c.cptr(w), c.cf(X), c.cf(y), C.int(out), C.int(in), C.int(P), colMajorFlag(w))
 		return y
+	case Q8_0:
+		// native Q8_0 prefill GEMM (#485): each of the P activation rows is quantized to int8 on
+		// device, then the per-block integer dot against the resident int8 weight, F32 accumulate.
+		wb := w.buf.(*cudaBuf)
+		y, _ := c.devTr([]int{P, out}, F32)
+		C.fcuda_q8_matmul_f32((*C.int8_t)(wb.ptr), (*C.float)(wb.scales), c.cf(X), c.cf(y),
+			C.int(out), C.int(in), C.int(P), C.int(w.Quant.Block))
+		return y
+	case Q4_K:
+		// native Q4_K prefill GEMM (#485): dequant fused into the tile off the resident super-block
+		// bytes, dotted with each of the P f32 activation rows, F32 accumulate.
+		wb := w.buf.(*cudaBuf)
+		y, _ := c.devTr([]int{P, out}, F32)
+		C.fcuda_q4k_matmul_f32((*C.uint8_t)(wb.ptr), c.cf(X), c.cf(y), C.int(out), C.int(in), C.int(P))
+		return y
 	default:
-		panic("compute: cuda BatchedMatMul supports F32 and F16 weights today (got " + w.Dtype.String() + ")")
+		panic("compute: cuda BatchedMatMul supports F32/F16/Q8_0/Q4_K weights today (got " + w.Dtype.String() + ")")
 	}
 }
 

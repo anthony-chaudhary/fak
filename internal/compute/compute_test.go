@@ -379,7 +379,7 @@ func TestDtypeMetadata(t *testing.T) {
 		d Dtype
 		b int
 		q bool
-	}{{F32, 4, false}, {F16, 2, false}, {BF16, 2, false}, {Q8_0, 1, true}, {I4, 1, true}, {FP8, 1, true}} {
+	}{{F32, 4, false}, {F16, 2, false}, {BF16, 2, false}, {Q8_0, 1, true}, {I4, 1, true}, {FP8, 1, true}, {Q4_K, 1, true}} {
 		if tc.d.Bytes() != tc.b {
 			t.Errorf("%s Bytes()=%d want %d", tc.d, tc.d.Bytes(), tc.b)
 		}

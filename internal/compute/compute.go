@@ -60,6 +60,7 @@ const (
 	I8                // generic int8 (scheme in QuantSpec)
 	I4                // generic int4 / nibble-packed (scheme in QuantSpec)
 	FP8               // 8-bit float (E4M3/E5M2; variant in QuantSpec)
+	Q4_K              // llama.cpp k-quant: 256-elem super-block, f16 d+dmin, 6-bit sub-scales, 4-bit codes
 )
 
 // Bytes is the per-element storage width. For sub-byte formats (I4) it reports the
@@ -91,13 +92,17 @@ func (d Dtype) String() string {
 		return "i4"
 	case FP8:
 		return "fp8"
+	case Q4_K:
+		return "q4_k"
 	default:
 		return "dtype?"
 	}
 }
 
 // Quantized reports whether the dtype needs a QuantSpec to be interpreted.
-func (d Dtype) Quantized() bool { return d == Q8_0 || d == I8 || d == I4 || d == FP8 }
+func (d Dtype) Quantized() bool {
+	return d == Q8_0 || d == I8 || d == I4 || d == FP8 || d == Q4_K
+}
 
 // ---- Layout ---------------------------------------------------------------------
 
