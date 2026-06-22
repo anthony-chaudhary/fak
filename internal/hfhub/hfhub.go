@@ -23,11 +23,34 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 )
+
+// defaultHTTPClient is the Hub client used when a caller injects none. It carries
+// TRANSPORT deadlines (connect / TLS handshake / response-header / idle) so a dead
+// or stalled peer cannot hang a download forever, but deliberately leaves
+// Client.Timeout at 0: a model file can be many GB, and an overall request timeout
+// would cut a long-but-healthy download off mid-stream. (boundarylint
+// MISSING_HTTP_TIMEOUT: the download-safe form.)
+var defaultHTTPClient = &http.Client{
+	Transport: &http.Transport{
+		Proxy: http.ProxyFromEnvironment,
+		DialContext: (&net.Dialer{
+			Timeout:   30 * time.Second,
+			KeepAlive: 30 * time.Second,
+		}).DialContext,
+		ForceAttemptHTTP2:     true,
+		TLSHandshakeTimeout:   15 * time.Second,
+		ResponseHeaderTimeout: 60 * time.Second,
+		IdleConnTimeout:       90 * time.Second,
+		ExpectContinueTimeout: 1 * time.Second,
+	},
+}
 
 // DefaultBaseURL is the Hugging Face Hub origin the resolve URLs are built on.
 const DefaultBaseURL = "https://huggingface.co"
@@ -99,7 +122,7 @@ func NewClient() *Client {
 	}
 	return &Client{
 		BaseURL:  DefaultBaseURL,
-		HTTP:     http.DefaultClient,
+		HTTP:     defaultHTTPClient,
 		Token:    token,
 		CacheDir: defaultCacheDir(),
 	}
@@ -126,7 +149,7 @@ func (c *Client) httpClient() *http.Client {
 	if c.HTTP != nil {
 		return c.HTTP
 	}
-	return http.DefaultClient
+	return defaultHTTPClient
 }
 
 func (c *Client) authorize(req *http.Request) {
