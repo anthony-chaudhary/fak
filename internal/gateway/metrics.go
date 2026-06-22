@@ -326,6 +326,14 @@ func (s *Server) renderMetrics() string {
 	}
 	fmt.Fprintf(&b, "fak_gateway_vdso_hit_ratio %s\n", promFloat(ratio))
 	writeVDSOMetrics(&b)
+	// Unified cache-stream family (fak_cache_*): the per-(plane,tier,kind) fold over
+	// the cachemeta.Entry stream, fed live by the vDSO tier-2 cache-event sink wired
+	// in New. It sits beside the per-cache fak_vdso_* family above; the snapshot
+	// carries its own HELP/TYPE lines, so it concatenates cleanly. A Server without a
+	// stream (older construction paths) emits nothing rather than a phantom series.
+	if s.cacheStream != nil {
+		b.WriteString(s.cacheStream.Snapshot().Prometheus())
+	}
 	inf := m.writeInferenceMetrics(&b)
 
 	// Fleet-value (hero-axis) KPIs, derived live from the kernel counters + the

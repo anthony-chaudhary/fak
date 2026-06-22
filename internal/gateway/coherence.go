@@ -132,4 +132,11 @@ func (s *Server) Close() {
 	if s.feed != nil {
 		s.feed.close()
 	}
+	// Detach the vDSO cache-event sink this server installed (the sink is a single
+	// global slot, not a multi-subscriber bus), so a closed server's cache-stream
+	// fold stops receiving events and tests that construct many Servers do not leave
+	// a dangling sink on the process-global vDSO.
+	if s.cacheStream != nil {
+		vdso.Default.SetCacheEventSink(nil)
+	}
 }

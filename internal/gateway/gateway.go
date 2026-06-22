@@ -187,6 +187,12 @@ type Server struct {
 	// in-package for tests.
 	planner     agent.Planner
 	engineCache *enginecache.Client
+
+	// cacheStream is the unified cachemeta.Entry observability fold (fak_cache_*).
+	// New subscribes it to the process-global vDSO's live tier-2 cache-event sink so
+	// every fill/hit/evict/revoke on the strongest local cache is rendered on
+	// /metrics; Close detaches the sink. nil suppresses the family. See metrics.go.
+	cacheStream *cachemeta.StreamMetrics
 }
 
 // New builds a Server. It validates that the ABI is wired (a resolver is
@@ -270,6 +276,17 @@ func New(cfg Config) (*Server, error) {
 	k.SetVDSO(cfg.VDSO)
 	startup.phase("kernel-init", time.Since(t))
 
+	// Unified cache-stream observability: subscribe the live tier-2 cache-event sink
+	// of the process-global vDSO (the SAME instance writeVDSOMetrics reads Stats from)
+	// so every fill/hit/evict/revoke folds into the fak_cache_* family. The sink fires
+	// OUTSIDE the vDSO lock and Observe only takes its own cheap lock, so it never
+	// blocks the hot path. Close detaches it. This is the gateway's single production
+	// consumer of the sink (only tests set it otherwise), so owning it is safe.
+	cacheStream := cachemeta.NewStreamMetrics()
+	vdso.Default.SetCacheEventSink(func(ev vdso.CacheEvent) {
+		cacheStream.Observe(string(ev.Kind), ev.Entry)
+	})
+
 	return &Server{
 		k:            k,
 		engineID:     engineID,
@@ -282,6 +299,7 @@ func New(cfg Config) (*Server, error) {
 		startup:      startup,
 		planner:      planner,
 		engineCache:  remoteCache,
+		cacheStream:  cacheStream,
 		feed:         newCoherenceFeed(0),
 		metrics:      newGatewayMetrics(time.Now()),
 	}, nil
