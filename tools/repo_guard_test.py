@@ -77,6 +77,45 @@ class CoreTests(unittest.TestCase):
         v = self.mod.evaluate("Write", {"file_path": fp}, workspace_root=WS, safe_roots=roots)
         self.assertEqual(v, [], fp)
 
+    def test_agent_state_roots_admits_account_variant_not_lookalike(self):
+        # Per-account memory tree (~/.claude-gem8-netra) is the agent's own state;
+        # a .claude look-alike (.claudex) is some other dir and must be excluded.
+        roots = self.mod.agent_state_roots(
+            "C:/Users/u", entries=[".claude", ".claude-gem8-netra", ".claude.json", ".claudex", "Documents"]
+        )
+        self.assertIn("C:/Users/u/.claude", roots)
+        self.assertIn("C:/Users/u/.claude-gem8-netra", roots)
+        self.assertIn("C:/Users/u/.claude.json", roots)
+        self.assertNotIn("C:/Users/u/.claudex", roots)
+        self.assertNotIn("C:/Users/u/Documents", roots)
+
+    def test_account_variant_memory_write_allowed(self):
+        # The exact path the live hook was denying before this fix.
+        roots = SAFE + tuple(self.mod.agent_state_roots("C:/Users/u", entries=[".claude-gem8-netra"]))
+        fp = "C:/Users/u/.claude-gem8-netra/projects/C--Users-u-work-fak/memory/note.md"
+        self.assertEqual(self.mod.evaluate("Write", {"file_path": fp}, workspace_root=WS, safe_roots=roots), [], fp)
+
+    def test_private_companion_is_the_same_named_sibling_only(self):
+        self.assertEqual(self.mod.private_companion_roots(WS), ("C:/Users/u/work/fak-private",))
+        self.assertEqual(self.mod.private_companion_roots("/c/work/fak"), ("C:/work/fak-private",))
+
+    def test_private_companion_write_allowed(self):
+        roots = SAFE + self.mod.private_companion_roots(WS)
+        fp = "C:/Users/u/work/fak-private/MEMORY-glm52-2026-06-21.md"
+        self.assertEqual(self.mod.evaluate("Write", {"file_path": fp}, workspace_root=WS, safe_roots=roots), [], fp)
+
+    def test_private_companion_does_not_leak_to_lookalike_or_siblings(self):
+        # Even WITH the companion + state roots on the allow-list, an unrelated
+        # sibling and a `-private` look-alike must STILL deny (no broadening leak).
+        roots = SAFE + self.mod.private_companion_roots(WS) + ("C:/Users/u/.claude-gem8-netra",)
+        for fp in (
+            "C:/Users/u/work/fak-private-evil/x.md",   # look-alike component, not the companion
+            "C:/Users/u/work/fak-ci/x.md",             # a real but unrelated sibling
+            "C:/Users/u/work/tools/poison.txt",        # the incident sibling
+            "C:/Users/u/.claudex/leak.md",             # .claude look-alike, not the state tree
+        ):
+            self.assertTrue(self.mod.evaluate("Write", {"file_path": fp}, workspace_root=WS, safe_roots=roots), fp)
+
     def test_grep_dash_o_is_not_an_output_path(self):
         # -o is overloaded: grep -o is only-matching, not a build output file.
         self.assertEqual(self._v("Bash", {"command": "grep -o ../foo internal/policy/x.go"}), [])

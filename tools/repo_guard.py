@@ -276,6 +276,48 @@ def find_repo_root(start: str) -> str:
     return str(cur)
 
 
+def _is_agent_state_dir(name: str) -> bool:
+    """True iff a home-level entry is the agent's own Claude Code state/memory
+    tree: the canonical ``.claude`` or a per-account variant ``.claude-<acct>`` /
+    ``.claude.<x>`` (e.g. ``.claude-gem8-netra``, ``.claude.json``). Deliberately
+    a STRUCTURED match, not a loose prefix: ``.claudex`` is some other directory,
+    not the agent's tree, and must NOT be admitted."""
+    return name == ".claude" or name.startswith(".claude-") or name.startswith(".claude.")
+
+
+def agent_state_roots(home: str, entries: list[str] | None = None) -> list[str]:
+    """The agent's own state/memory trees under ``home`` — canonical ``~/.claude``
+    plus any per-account variant present (``~/.claude-<acct>``). Writing there is
+    the agent persisting its own memory/plans/settings, never a cross-project leak
+    (the failure mode this guard exists to catch); without it the hook blocks the
+    agent from writing its own memory. ``entries`` is injectable for tests; the
+    default is a cheap stat-walk listing of ``home`` (no subprocess). The canonical
+    ``~/.claude`` is always included even if absent on disk."""
+    roots = [f"{home}/.claude"]
+    if entries is None:
+        try:
+            entries = os.listdir(home)
+        except OSError:
+            entries = []
+    for name in sorted(entries):
+        if _is_agent_state_dir(name):
+            roots.append(f"{home}/{name}")
+    return list(dict.fromkeys(roots))
+
+
+def private_companion_roots(workspace_root: str) -> tuple[str, ...]:
+    """The workspace's OWN private companion repo — the same-named ``<ws>-private``
+    sibling (``fak`` -> ``fak-private``): the agent's durable private memory/notes
+    store. Bounded ON PURPOSE — ONLY the same-named ``-private`` sibling is admitted,
+    never an arbitrary sibling project (the ``OUT_OF_TREE_WRITE`` incident: a write
+    into the unrelated ``work/tools`` repo). A look-alike like ``fak-private-evil``
+    is a different path component and is NOT admitted."""
+    ws = normalize(workspace_root).rstrip("/")
+    if not ws:
+        return ()
+    return (ws + "-private",)
+
+
 def default_safe_roots() -> tuple[str, ...]:
     home = normalize(os.path.expanduser("~"))
     roots = [
@@ -283,12 +325,12 @@ def default_safe_roots() -> tuple[str, ...]:
         "/var/tmp",
         f"{home}/.cache",
         f"{home}/Downloads",
-        # The agent's own state/memory tree (~/.claude/projects/<ws>/memory, plans,
-        # settings). Writing there is the agent persisting its own learnings, never a
-        # cross-project leak — the failure mode this guard exists to catch. Without it
-        # the hook blocks the agent from writing its own memory.
-        f"{home}/.claude",
     ]
+    # The agent's own state/memory tree(s): ~/.claude AND per-account variants like
+    # ~/.claude-gem8-netra (see agent_state_roots). The workspace's <ws>-private
+    # companion is added at the call sites that know the workspace root (run_hook /
+    # --check), since it is workspace- not home-relative.
+    roots.extend(agent_state_roots(home))
     for var in ("TMPDIR", "TEMP", "TMP"):
         v = os.environ.get(var)
         if v:
@@ -334,8 +376,9 @@ def run_hook(stdin_text: str) -> int:
         tool_input = payload.get("tool_input") or {}
         cwd = payload.get("cwd") or os.getcwd()
         workspace_root = find_repo_root(cwd)
+        safe_roots = default_safe_roots() + private_companion_roots(workspace_root)
         violations = evaluate(
-            tool_name, tool_input, workspace_root=workspace_root, safe_roots=default_safe_roots()
+            tool_name, tool_input, workspace_root=workspace_root, safe_roots=safe_roots
         )
     except Exception as exc:  # noqa: BLE001 -- fail-open is deliberate here
         print(f"repo_guard: internal error, allowing ({exc})", file=sys.stderr)
@@ -363,7 +406,14 @@ def run_hook(stdin_text: str) -> int:
 # --------------------------------------------------------------------------- #
 def _selftest() -> int:
     WS = "C:/Users/u/work/fak"
-    SAFE = ("/tmp", "/var/tmp", "C:/Users/u/.cache", "C:/Users/u/Downloads")
+    HOME = "C:/Users/u"
+    SAFE = (
+        "/tmp", "/var/tmp", "C:/Users/u/.cache", "C:/Users/u/Downloads",
+        # agent state trees (incl. the per-account variant) + the <ws>-private
+        # companion — the exact roots the production hook composes.
+        *agent_state_roots(HOME, entries=[".claude", ".claude-gem8-netra", ".claudex", "Documents"]),
+        *private_companion_roots(WS),
+    )
     deny = [  # (tool, input) that MUST produce >=1 violation
         ("Bash", {"command": "go build -o ../tools/.bin/fak.exe ./cmd/fak"}),
         ("Bash", {"command": "rm -rf ../tools"}),
@@ -375,6 +425,11 @@ def _selftest() -> int:
         ("Bash", {"command": "cd src && rm -rf ../../other"}),
         ("Write", {"file_path": "../tools/poison.txt"}),
         ("Write", {"file_path": "C:/Users/u/work/tools/poison.txt"}),
+        # the broadened allow-list must NOT leak: a private-companion look-alike,
+        # an unrelated sibling, and a .claude look-alike all still DENY.
+        ("Write", {"file_path": "C:/Users/u/work/fak-private-evil/x.md"}),
+        ("Write", {"file_path": "C:/Users/u/work/fak-ci/x.md"}),
+        ("Write", {"file_path": "C:/Users/u/.claudex/leak.md"}),
     ]
     allow = [  # (tool, input) that MUST produce ZERO violations
         ("Bash", {"command": "go build -o fak.exe ./cmd/fak"}),
@@ -389,6 +444,9 @@ def _selftest() -> int:
         ("Bash", {"command": "mv internal/a internal/b"}),
         ("Write", {"file_path": "internal/policy/x.go"}),
         ("Write", {"file_path": "examples/repo-guard-policy.json"}),
+        # the agent's own state/memory tree (per-account variant) + private companion.
+        ("Write", {"file_path": "C:/Users/u/.claude-gem8-netra/projects/C--Users-u-work-fak/memory/note.md"}),
+        ("Write", {"file_path": "C:/Users/u/work/fak-private/MEMORY-glm52-2026-06-21.md"}),
     ]
     fails = 0
     for tool, ti in deny:
@@ -422,7 +480,8 @@ def main(argv: list[str] | None = None) -> int:
 
     ws = find_repo_root(args.workspace or os.getcwd())
     if args.check:
-        violations = classify_command(args.check, workspace_root=ws, safe_roots=default_safe_roots())
+        safe_roots = default_safe_roots() + private_companion_roots(ws)
+        violations = classify_command(args.check, workspace_root=ws, safe_roots=safe_roots)
         payload = {"schema": SCHEMA, "ok": not violations, "workspace": ws, "violations": violations}
         if args.json:
             print(json.dumps(payload, indent=2))
