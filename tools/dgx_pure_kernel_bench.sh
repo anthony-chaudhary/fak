@@ -53,6 +53,14 @@ curl -fsSL -o "$MODEL/config.json"        "$HF/config.json"        || { say "con
 curl -fsSL -o "$MODEL/model.safetensors"  "$HF/model.safetensors"  || { say "safetensors download FAILED"; echo dl >"$WORK/DONE.95"; exit 95; }
 say "model bytes: $(wc -c < "$MODEL/model.safetensors")"
 
+# cgo link flags for the -tags cuda modelbench (build_cuda.sh sets these for its own go
+# commands but `go run -tags cuda` here needs them too, else ld can't find -lcudart/-lcublas).
+PKG="$SRC/internal/compute"
+export CGO_ENABLED=1
+export CGO_CFLAGS="-I$CUDA_HOME/include"
+export CGO_LDFLAGS="-L$PKG -L$CUDA_HOME/lib64 -Wl,-rpath,$CUDA_HOME/lib64"
+export LD_LIBRARY_PATH="$CUDA_HOME/lib64:${LD_LIBRARY_PATH:-}"
+
 # pure-kernel decode on the A100: -lean (Q8 quantize-at-load) + -backend cuda -> k_q8_gemm path
 say "modelbench -backend cuda -lean -hf $MODEL -decode-steps $STEPS"
 go run -tags cuda ./cmd/modelbench -hf "$MODEL" -lean -backend cuda -require-non-reference \
