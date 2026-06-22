@@ -169,6 +169,17 @@
     embedding it here. There's also a <a href="http://136.111.250.205/" rel="noopener" style="color:var(--fak)">live demos hub</a>
     on the same host with the CPU-vs-GPU engine comparison, a chat surface, and the kernel's metrics.
   </p>
+
+  <div class="note" style="border-color:rgba(56,189,248,.4)">
+    <b style="color:var(--fak)">▶ Run your own copy.</b> Every demo is in the public repo and runs anywhere
+    Go runs — no infrastructure of ours required. The self-contained one is one command:
+    <div style="margin:10px 0 6px"><code style="display:block;padding:9px 12px;white-space:pre-wrap">git clone https://github.com/anthony-chaudhary/fak &amp;&amp; cd fak
+go run ./cmd/turntaxdemo      # → http://127.0.0.1:8150</code></div>
+    The two model demos add one step — <code>scripts/fetch-model.sh</code> exports a small CPU model — then
+    <code>go run ./cmd/ctxdemo</code> / <code>./cmd/demorace</code> light up the live race. The binaries also
+    honor <code>$PORT</code>, so they drop straight into a container or your own cloud VM.
+    <div class="go" style="margin-top:8px"><a href="run-the-demos.html" style="color:var(--fak)">Full guide: local · headless · Docker · your own cloud VM →</a></div>
+  </div>
 </div>
 
 <footer>

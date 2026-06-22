@@ -37,11 +37,18 @@ context) also drives **performance** (do shared work once instead of every turn)
 > **In one line:** prompt-injection containment, capability security, and
 > cache-efficient inference for **self-hosted LLM agent fleets** — at one boundary.
 
+[**▶ Try the live demos**](demos.html){: .btn } ·
 [Get started](../GETTING-STARTED.md){: .btn } ·
 [See the showcase](showcase.html){: .btn } ·
-[Try the live demos](demos.html){: .btn } ·
 [Read the FAQ](FAQ.md){: .btn } ·
 [GitHub repository](https://github.com/anthony-chaudhary/fak){: .btn }
+
+> **▶ See it run.** Three interactive demos drive the **real kernel** live on GCP —
+> [the turn-tax race](demos.html) (a SOTA agent loop vs fak's one-shot kernel), the
+> [multi-agent context-reuse proof](demos.html), and a [live model reuse race](demos.html).
+> Nothing to install; they run in your browser. **[Open the demos →](demos.html)**
+> Or [run your own copy](run-the-demos.md) — `go run ./cmd/turntaxdemo` locally, in a
+> container, or on your own cloud VM.
 
 ---
 

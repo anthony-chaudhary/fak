@@ -11,10 +11,16 @@ a way to do the shared work *once* instead of every turn. The surprise of this p
 is that those turn out to be the **same gate** — and that owning that boundary lets you
 do things no production agent stack does today.
 
-`fak` is not a faster model server. SOTA engines (vLLM, SGLang, llama.cpp) already win
-raw throughput and prefix-cache reuse, and `fak` doesn't try to beat them at it. It
-owns the questions they don't: **which effects are allowed, which results may enter
-memory, when reuse is still legal, and what survives a session boundary.**
+`fak` is not a faster model server, and doesn't try to be. SOTA engines (vLLM, SGLang,
+llama.cpp) win raw throughput and prefix-cache reuse — that's their job. But serving an
+agent *safely* is a whole stack on top of the token engine: the API wire your agents
+speak, a capability gate, result containment, an audit trail, auth, governance metrics.
+`fak` is that half of the stack collapsed into **one static Go binary** — the gateway,
+the policy gate, the quarantine, and the audit surface in a single process you
+`go install` and run, in front of whatever serves your tokens. It owns the questions the
+engines leave open: **which effects are allowed, which results may enter memory, when
+reuse is still legal, and what survives a session boundary.**
+→ **[One binary is the whole surface](docs/explainers/one-binary-one-surface.md)**
 
 <!-- hero video — generated from the headline visuals by tools/hero_video_gen.py
      (storyboard: visuals/hero-video.storyboard.json). GitHub markdown can't autoplay a
@@ -23,7 +29,16 @@ memory, when reuse is still legal, and what survives a session boundary.**
 
 <sub>▶ a ~40-second reveal — the curves draw themselves, the multipliers count up — [full-resolution MP4 (1440p)](visuals/hero-video.mp4)</sub>
 
-**Live:** [the showcase](https://anthony-chaudhary.github.io/fak/showcase.html) ·
+**▶ Try the live demos** — [three interactive demos running the real kernel on GCP](https://anthony-chaudhary.github.io/fak/demos.html):
+the turn-tax race (a SOTA loop vs fak's 1-shot kernel), the multi-agent context-reuse proof,
+and a live model reuse race — nothing to install, they run in your browser. Want your own copy?
+The self-contained one is one command — `go run ./cmd/turntaxdemo` —
+and [the full guide](https://anthony-chaudhary.github.io/fak/run-the-demos.html) covers local,
+headless, Docker, and your own cloud VM.
+
+**Live:** [the demos](https://anthony-chaudhary.github.io/fak/demos.html) ·
+[run your own](https://anthony-chaudhary.github.io/fak/run-the-demos.html) ·
+[the showcase](https://anthony-chaudhary.github.io/fak/showcase.html) ·
 [docs site](https://anthony-chaudhary.github.io/fak/) ·
 **Try it now:** [in Colab](https://colab.research.google.com/github/anthony-chaudhary/fak/blob/main/notebooks/fak-quickstart.ipynb) (free GPU, nothing to install)
 
@@ -216,6 +231,39 @@ at every step) · **[Getting started](GETTING-STARTED.md)**
 
 ---
 
+## One binary is the whole surface — laptop to fleet
+
+Notice that every rung above is the *same binary*. That's the part the throughput
+benchmarks never show. A fast token engine — vLLM, SGLang — is one band of serving an
+agent; the rest is a stack you normally assemble around it: a gateway for the wire, a
+policy/authorization service, a result screener, an audit pipeline, an MCP bridge, a
+reverse proxy for auth. Those engines are Python on a CUDA/PyTorch stack and multi-process
+by design; their production container is multi-GB because it bundles CUDA + PyTorch
+(pip/uv into an existing env is the lighter path), and vLLM's own security docs tell you to
+front it with a reverse proxy for auth and endpoint allow-listing. `fak` collapses the
+*governance + gateway*
+half of that stack into **one static Go binary with zero external dependencies** — no
+Python, no CUDA toolchain, no `go.sum` — that runs on a laptop CPU with no key, model, or
+network, and is the same artifact you harden for a fleet:
+
+| | A developer, locally | A platform team, in a fleet |
+|---|---|---|
+| **Run** | `fak serve --base-url … --model …` | the same binary, + the flags → |
+| **Policy** | the built-in default floor | `--policy floor.json` (a reviewable allow-list in git, not a code edit) |
+| **Auth** | none (loopback) | `--require-key-env FAK_TOKEN` (bearer or `x-api-key`) |
+| **Observe** | `curl /healthz` | scrape `/metrics`; ship JSON access logs + `X-Trace-Id` to your SIEM |
+| **Ship** | one binary on `PATH` | one ~13 MB `distroless/static` container per replica |
+
+Nothing new gets installed between those columns — no environment that drifts, no sidecar
+to keep in lockstep, one statically-linked binary as the entire supply-chain surface. It
+fronts your fast engine (Tier 1) over the OpenAI **and** Anthropic wires plus MCP, so
+Claude Code, Cursor, or any OpenAI client drops in with no agent-side changes. The honest
+fence: `fak` is not the fast token engine, and its own in-binary model is a correctness
+reference, not a production server — the contrast is **operational surface**, not tokens
+per second. → **[One binary is the whole surface](docs/explainers/one-binary-one-surface.md)**
+
+---
+
 ## What's real, what's not (we keep score)
 
 `fak` is built to survive a skeptic reading the code. Every capability in
@@ -233,8 +281,8 @@ checkpoint.
 
 ## Install
 
-One static binary — no clone, no Go toolchain. Full guide:
-[**Getting started**](GETTING-STARTED.md).
+One static binary — no clone, no Go toolchain, no Python, no CUDA, no dependency tree to
+manage (there is no `go.sum`). Full guide: [**Getting started**](GETTING-STARTED.md).
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/anthony-chaudhary/fak/main/install.sh | sh
@@ -261,6 +309,7 @@ fak serve --addr 127.0.0.1:8080 --base-url http://localhost:11434/v1 --model qwe
 | If you want… | Read |
 |---|---|
 | **The two flips, from first principles** | [Policy in the kernel](docs/explainers/policy-in-the-kernel.md) · [Addressable KV cache](docs/explainers/addressable-kv-cache.md) |
+| **Why one Go binary beats a serving stack** (operational surface, laptop → fleet) | [One binary is the whole surface](docs/explainers/one-binary-one-surface.md) |
 | **Every benchmark number** (single source of truth, traced to commit + artifact) | [`fak/BENCHMARK-AUTHORITY.md`](BENCHMARK-AUTHORITY.md) ⭐ |
 | **Every machine fak runs on** (the hardware matrix — 4 platforms, 2 CPU ISAs, 4 GPU backends, 4 OSes) | [`docs/HARDWARE-MATRIX.md`](docs/HARDWARE-MATRIX.md) |
 | **Web agent benchmark results** (real WebVoyager: 8.8-9.7× measured) | [`docs/webbench-baselines.md`](docs/webbench-baselines.md) |
