@@ -127,8 +127,14 @@ def trailing_text(rec: dict) -> str:
     return ""
 
 
-GPU_GATE = ("on a cuda node", "on a gpu", "run_48", "_on_gpu", "gpu node",
-            "hardware-gated", "cuda node", "gated by #47")
+GPU_GATE = ("on a cuda node", "run_48", "_on_gpu", "gpu node",
+            "hardware-gated", "cuda node", "gated by #47", "on a gpu")
+# explicit "I'm finished, nothing outstanding" -- overrides a GPU_GATE phrase that
+# appears only as backstory (e.g. "benchmarked on a GPU" in a session that then
+# says "green and shipped, no further action").
+SHIPPED = ("no further action", "green and shipped", "nothing left to commit",
+           "nothing to do", "fully shipped", "it's green and shipped",
+           "no action needed", "nothing outstanding")
 
 
 def classify(sid: str, pid: int, prev: dict) -> dict:
@@ -160,7 +166,11 @@ def classify(sid: str, pid: int, prev: dict) -> dict:
                               or "rate" in trailing_text(err).lower()
                               or "api error" in trailing_text(err).lower()))
     asks = bool(asst) and any(k in low for k in ASK) and low.rstrip().endswith("?")
-    gpu_gated = any(k in low for k in GPU_GATE)
+    # a GPU residual only counts when it's the live outcome, not when an explicit
+    # "shipped, no further action" verdict closes the turn (then the GPU phrase is
+    # just backstory).
+    shipped = any(k in low for k in SHIPPED)
+    gpu_gated = any(k in low for k in GPU_GATE) and not shipped
 
     if alive and grew:
         status = "WORKING"                 # still actively producing

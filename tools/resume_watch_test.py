@@ -76,6 +76,24 @@ def test_control_records_are_not_assistant_turns(tmp_path):
     assert "real work" in rw.trailing_text(t["last_asst"])
 
 
+def test_shipped_verdict_overrides_gpu_backstory():
+    # a GPU phrase as backstory must NOT mark a session GPU_GATED when it then
+    # explicitly says it's shipped / no further action.
+    low = ("benchmarked on a gpu earlier; everything verified. "
+           "no further action needed - it's green and shipped.")
+    shipped = any(k in low for k in rw.SHIPPED)
+    gpu_gated = any(k in low for k in rw.GPU_GATE) and not shipped
+    assert shipped and not gpu_gated
+
+
+def test_real_gpu_residual_still_gates():
+    low = ("residual: execute tools/run_486_acceptance_on_gpu.sh on a cuda node "
+           "to obtain the cosine verdict.")
+    shipped = any(k in low for k in rw.SHIPPED)
+    gpu_gated = any(k in low for k in rw.GPU_GATE) and not shipped
+    assert gpu_gated and not shipped
+
+
 if __name__ == "__main__":
     import pytest
 
