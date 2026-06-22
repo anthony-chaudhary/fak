@@ -36,15 +36,15 @@ import (
 // self-reported decider, and Winner marks the rung whose verdict the lattice
 // fold selected.
 type RungVerdict struct {
-	Index    int    `json:"index"`             // position in the folded chain (rank order)
-	Rung     string `json:"rung"`              // concrete adjudicator type, e.g. "adjudicator.Adjudicator"
-	By       string `json:"by,omitempty"`      // verdict.By: who claims the decision ("" on a bare defer)
-	Kind     string `json:"kind"`              // ALLOW/DENY/TRANSFORM/QUARANTINE/WITNESS/DEFER/...
-	Reason   string `json:"reason,omitempty"`  // reason name, omitted when NONE
-	Claim    string `json:"claim,omitempty"`   // bounded-disclosure witness, if this rung disclosed one
-	Rank     int    `json:"rank"`              // FoldRank(kind): restrictiveness-lattice position
-	Deferred bool   `json:"deferred"`          // Kind==DEFER: this rung abstained, did not participate
-	Winner   bool   `json:"winner"`            // this rung's verdict was the folded result
+	Index    int    `json:"index"`            // position in the folded chain (rank order)
+	Rung     string `json:"rung"`             // concrete adjudicator type, e.g. "adjudicator.Adjudicator"
+	By       string `json:"by,omitempty"`     // verdict.By: who claims the decision ("" on a bare defer)
+	Kind     string `json:"kind"`             // ALLOW/DENY/TRANSFORM/QUARANTINE/WITNESS/DEFER/...
+	Reason   string `json:"reason,omitempty"` // reason name, omitted when NONE
+	Claim    string `json:"claim,omitempty"`  // bounded-disclosure witness, if this rung disclosed one
+	Rank     int    `json:"rank"`             // FoldRank(kind): restrictiveness-lattice position
+	Deferred bool   `json:"deferred"`         // Kind==DEFER: this rung abstained, did not participate
+	Winner   bool   `json:"winner"`           // this rung's verdict was the folded result
 }
 
 // Decision is the full, explainable trace of one adjudication fold. It is the

@@ -416,7 +416,7 @@ func runRace(scn Scenario, sp spec, naiveMode string, emit emitter) {
 	emit(event{"type": "result",
 		"fak_ms": fak.totalMS, "tuned_ms": tuned.totalMS, "naive_ms": naive.totalMS,
 		"ratio": r, "naive_ratio": naive.totalMS / fak.totalMS,
-		"saved_ms": tuned.totalMS - fak.totalMS,
+		"saved_ms":        tuned.totalMS - fak.totalMS,
 		"naive_projected": project, "scenario": scn.ID, "model": sp.Name,
 		"tokens": v.Tokens})
 }

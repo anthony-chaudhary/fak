@@ -36,13 +36,13 @@ func TestFoldExplainParity(t *testing.T) {
 	xform := abi.Verdict{Kind: abi.VerdictTransform, By: "monitor"}
 
 	cases := map[string][]abi.Adjudicator{
-		"empty":         nil,
-		"all-defer":     {fakeAdj{defer_}, fakeAdj{defer_}},
-		"allow":         {fakeAdj{defer_}, fakeAdj{allow}},
-		"deny-wins":     {fakeAdj{allow}, fakeAdj{deny}},          // deny (100) beats allow (0)
-		"deny-tie":      {fakeAdj{deny}, fakeAdj{deny}},           // first at max rank wins
-		"xform-vs-deny": {fakeAdj{xform}, fakeAdj{deny}},          // deny (100) beats transform (2)
-		"xform-vs-allow": {fakeAdj{allow}, fakeAdj{xform}},        // transform (2) beats allow (0)
+		"empty":          nil,
+		"all-defer":      {fakeAdj{defer_}, fakeAdj{defer_}},
+		"allow":          {fakeAdj{defer_}, fakeAdj{allow}},
+		"deny-wins":      {fakeAdj{allow}, fakeAdj{deny}},  // deny (100) beats allow (0)
+		"deny-tie":       {fakeAdj{deny}, fakeAdj{deny}},   // first at max rank wins
+		"xform-vs-deny":  {fakeAdj{xform}, fakeAdj{deny}},  // deny (100) beats transform (2)
+		"xform-vs-allow": {fakeAdj{allow}, fakeAdj{xform}}, // transform (2) beats allow (0)
 	}
 	for name, chain := range cases {
 		want := Fold(ctx, chain, callInline("t", "{}"))
