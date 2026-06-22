@@ -121,7 +121,7 @@ is the cross-agent bonus** the same sub-agents run solo could not get.
 - This is a **latency / kernel-cost** axis, **not** task quality (no ground-truth
   sub-results; coverage@N is tracked separately).
 
-**Deep dive:** [`docs/benchmarks/FANOUT-BENCH-RESULTS.md`](../benchmarks/FANOUT-BENCH-RESULTS.md).
+**Full results:** [`docs/benchmarks/FANOUT-BENCH-RESULTS.md`](../benchmarks/FANOUT-BENCH-RESULTS.md).
 
 ---
 
@@ -167,7 +167,7 @@ over isolated (warm per-agent KV) worlds. Run it without `-agents/-turns` to swe
 - Unlike the in-tensor KV story, this is **harness-level result caching**, so it is
   available to an API consumer who fronts a read-heavy fleet with **one fak gateway**.
 
-**Deep dive:** [`docs/benchmarks/FLEET-SWEEP-RESULTS.md`](../benchmarks/FLEET-SWEEP-RESULTS.md).
+**Full results:** [`docs/benchmarks/FLEET-SWEEP-RESULTS.md`](../benchmarks/FLEET-SWEEP-RESULTS.md).
 
 ---
 
@@ -213,7 +213,7 @@ the win to grammar-only 2), and it equals the live `Counters.VDSOHits` — not a
 - The safety floor is reported on a **deliberately separate axis** and never folded into the
   turn count. (Add `--breakeven` to price the ~0.7% real rate: 0.33 turns/session.)
 
-**Deep dive:** [`docs/benchmarks/TURN-TAX-RESULTS.md`](../benchmarks/TURN-TAX-RESULTS.md).
+**Full results:** [`docs/benchmarks/TURN-TAX-RESULTS.md`](../benchmarks/TURN-TAX-RESULTS.md).
 
 ---
 
@@ -255,7 +255,7 @@ scheduler lifts FCFS's **62.1% → 86.7%** (100% of the DFS-optimal bound the pa
 - The deterministic hit rates reproduce bit-for-bit across platforms (Windows x86_64 vs Mac
   M3 arm64); add `-hf <snapshot> -lean` for the live wall-clock arm on a real checkpoint.
 
-**Deep dive:** [`docs/benchmarks/RADIXATTENTION-RESULTS.md`](../benchmarks/RADIXATTENTION-RESULTS.md)
+**Full results:** [`docs/benchmarks/RADIXATTENTION-RESULTS.md`](../benchmarks/RADIXATTENTION-RESULTS.md)
 · authority: [RadixAttention model ladder](../../BENCHMARK-AUTHORITY.md).
 
 ---
@@ -294,7 +294,7 @@ vs cold**, and **1.1× on top of an already-warm per-agent KV cache**.
 - This is the *prefill-token floor*, not a wall-clock. For the live race through a real
   in-kernel model, drop `-print` and serve the page (below), or use `-race deep-research`.
 
-**Deep dive:** the command's own header (`cmd/ctxdemo/main.go`) and
+**Details:** the command's own header (`cmd/ctxdemo/main.go`) and
 [`docs/benchmarking/README.md`](../benchmarking/README.md).
 
 ---

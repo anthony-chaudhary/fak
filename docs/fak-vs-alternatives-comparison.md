@@ -230,7 +230,7 @@ Total cached: 5,000 + 100×500 = 55,000 tokens (10x less)
 
 ---
 
-## 6. The Bottom Line — Comparison Table
+## 6. Summary — Comparison Table
 
 | Feature | Server Only | Per-Session (vLLM/SGLang) | fak Fused |
 |---------|-------------|---------------------------|-----------|
@@ -275,7 +275,7 @@ Total cached: 5,000 + 100×500 = 55,000 tokens (10x less)
 4. **Provides safety floor** — quarantine, deny-as-value
 5. **Measures and proves** the savings — deterministic benchmarks
 
-**The key insight:** Most frameworks solve caching **within one agent/session**. fak solves it **across agents, sessions, and workers** — exactly what fleet-scale operations need.
+**The point:** Most frameworks solve caching **within one agent/session**. fak solves it **across agents, sessions, and workers** — exactly what fleet-scale operations need.
 
 ---
 

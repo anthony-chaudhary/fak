@@ -3,7 +3,7 @@
 **For researchers and teams who want to make a fak subsystem faster or smarter — a new
 quantization kernel, a GPU / NPU (neural-processing-unit) backend, a cache-eviction
 policy, an admission rung, a KV (key/value attention cache) layout — and have it land as
-a first-class citizen without forking the core.**
+a peer of the built-ins without forking the core.**
 
 If you've ever shipped a clever kernel and then watched it rot because the upstream you
 patched moved underneath you, this document is the contract that stops that here. You

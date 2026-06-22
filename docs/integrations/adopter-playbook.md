@@ -126,7 +126,7 @@ export OPENAI_API_KEY="$FAK_TOKEN"
 That's the full bare-serve adopter loop: policy → auth → start → `/healthz` → repoint
 one base URL. Per-framework snippets (Python, TypeScript, env-var-only clients) are in
 the [integration index](README.md#dont-see-your-framework-the-universal-recipe); the
-Claude-specific deep dive (architecture, denial table, cloud providers, observability,
+full Claude-specific guide (architecture, denial table, cloud providers, observability,
 troubleshooting) is in [`claude.md`](claude.md).
 
 ---
@@ -215,7 +215,7 @@ the verdicts, tears it down, emits a CI-usable exit code) lives at
 ## Cross-references
 
 - [Integration index](README.md) — the front door: which-agent routing + the universal "set the base URL" recipe.
-- [Claude Code / Anthropic API guide](claude.md) — the full Claude deep dive (architecture, denial table, cloud providers, observability).
+- [Claude Code / Anthropic API guide](claude.md) — the full Claude guide (architecture, denial table, cloud providers, observability).
 - [MCP one-paste setup](../../examples/mcp/README.md) — the in-repo `.mcp.json` example and the `fak_*` tools.
 - [Getting started](../../GETTING-STARTED.md) — install the single static binary; the four run tiers.
 - [Policy / permissions](../../POLICY.md) — author, dump, and review the capability floor.

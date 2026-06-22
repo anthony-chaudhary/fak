@@ -374,7 +374,7 @@ POST /v1/messages
 
 ## Want More?
 
-- **Technical Deep Dive:** See `fak/internal/swebench/cost.go`
+- **Technical details:** See `fak/internal/swebench/cost.go`
 - **Live Numbers:** Run `fak swebench describe --difficulty <file>`
 - **Architecture:** See `docs/benchmarks.md`
 

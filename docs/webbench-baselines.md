@@ -46,7 +46,7 @@ The current web agent benchmark leaderboard measures **capability** (success rat
 | **Can the agent complete the task?** | Model (Claude, GPT-4, etc.) | Success Rate | ✗ None - model's capability |
 | **How much compute does it cost?** | Infrastructure (orchestrator, serving) | $ per task | ✓ **15x+ work-elimination** |
 
-**The key insight:** Every web agent system today is paying the **turn-tax** — re-prefill megabytes of browser state on every navigation action. That wasted work doesn't exist in fak.
+**The point:** Every web agent system today is paying the **turn-tax** — re-prefill megabytes of browser state on every navigation action. That wasted work doesn't exist in fak.
 
 ## SOTA Web Agent Benchmarks (2026)
 

@@ -262,6 +262,6 @@ docker run --rm -p 8080:8080 fak serve --addr 0.0.0.0:8080 \
 ## See also
 
 - [`fak/POLICY.md`](../../POLICY.md) — Full policy schema and refusal vocabulary
-- [`docs/serve-config.md`](../../docs/serve-config.md) — Deep dive on timeouts, auth, and reloading
+- [`docs/serve-config.md`](../../docs/serve-config.md) — Details on timeouts, auth, and reloading
 - [`fak/GETTING-STARTED.md`](../../GETTING-STARTED.md) — Full getting started guide
 - [`scripts/dogfood-claude.sh`](../../scripts/dogfood-claude.sh) — One-command local model + Claude Code
