@@ -1,3 +1,8 @@
+---
+title: "fak issue-dispatch loop: witness-gated agent fleet"
+description: "The fak issue-dispatch loop spawns capped, witness-gated workers that resolve GitHub issues, ship #N commits, and close tickets only when verified."
+---
+
 # The issue-dispatch loop (`dispatch-loop`)
 
 > The fleet's GitHub-issue backlog driver, **closed and witness-gated**. This repo

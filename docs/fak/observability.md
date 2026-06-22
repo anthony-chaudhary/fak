@@ -1,3 +1,8 @@
+---
+title: "fak observability: metrics, logs, and traces"
+description: "How fak serve exposes Prometheus metrics, JSON access logs, and trace_id correlation to audit a security gate without logging request bodies or tool arguments."
+---
+
 # Observability guide: metrics, logs, and traces
 
 `fak serve` exposes three correlated observability surfaces, all on by default, all

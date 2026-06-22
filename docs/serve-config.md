@@ -1,3 +1,8 @@
+---
+title: "fak serve config: auth, policy, and timeouts reference"
+description: "Configure a network-facing fak serve gateway: bearer-key auth, the default-deny policy floor with live reload, and HTTP and planner timeout tuning."
+---
+
 # serve-config.md — configuring a network-facing `fak serve`
 
 A single reference for the environment variables and `fak serve` flags that matter

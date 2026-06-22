@@ -1,3 +1,8 @@
+---
+title: "fak scaling laws of agents: reread rate and cache legality"
+description: "fak's thesis on the scaling laws of agents: work grows with agents, turns, working set, and reread rate, bounded by cache legality and coherence checks."
+---
+
 # Scaling laws of agents - thesis
 
 Date: 2026-06-19

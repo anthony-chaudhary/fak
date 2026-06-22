@@ -1,3 +1,8 @@
+---
+title: "fak production benchmark methodology: reproducible LLM throughput"
+description: "How to reproduce fak production benchmarks from a clean checkout: parity and agent-fleet throughput, raw artifacts, clean-box rule, and tuned-reference policy."
+---
+
 # fak production benchmark methodology
 
 This is the locked Phase 0 reproduction contract for `docs/production-readiness.md`.

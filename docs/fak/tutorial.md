@@ -1,3 +1,8 @@
+---
+title: "fak Tutorial: Your First Adjudicated Tool Call"
+description: "Hands-on fak tutorial: run the agent kernel offline, watch it deny a destructive tool call, block a prompt injection, front a model over HTTP. No key or GPU."
+---
+
 # fak tutorial: zero to your first adjudicated tool call
 
 **Audience:** you have never run `fak` before. By the end of this page you will have

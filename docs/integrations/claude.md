@@ -1,3 +1,8 @@
+---
+title: "Run Claude Code Through the fak Gateway"
+description: "Wire Claude Code or the Anthropic API to fak serve, a kernel-adjudicated gateway that allows, denies, repairs, and quarantines every tool call before it runs."
+---
+
 # fak + Claude Code Integration Guide
 
 This guide explains how to use **fak** as a kernel-adjudicated gateway for Claude Code and the Anthropic API. Every tool call a Claude agent proposes is evaluated by the kernel before it executes — dangerous calls are dropped, malformed calls are repaired, and policy violations are refused.

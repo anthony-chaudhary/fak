@@ -1,3 +1,8 @@
+---
+title: "fak Server Configuration: fak serve Flags & Env Vars"
+description: "Configuration reference for fak serve: command-line flags, environment variables, policy manifest schema, HTTP endpoints, and metrics for the gateway server."
+---
+
 # fak Server Configuration Reference
 
 This document catalogs all configuration options for `fak serve`, the gateway server that fronts the fak kernel over OpenAI-compatible HTTP and MCP interfaces.

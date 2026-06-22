@@ -169,6 +169,31 @@ jobs:
             || echo "::warning title=docs-debt::reader-surface doc-debt present (advisory) — run /garden-docs, see docs/DOCS-SCORECARD.md"
           echo "::endgroup::"
 
+      # SEO/AEO discoverability gate (the docs scorecard's discovery-side twin).
+      # The tool's own unit tests are HARD; the content checks are ADVISORY for now
+      # (the docs site + FAQ structured data are landing across commits in a shared
+      # tree). RATCHET to HARD on `gen_structured_data.py --check` once the FAQPage
+      # block has landed in docs/FAQ.md, exactly as docs-scorecard ratchets:
+      #   * gen_structured_data.py --check — the site/FAQ JSON-LD is generated and
+      #     must stay in sync with VERSION / _config.yml / FAQ.md; a drift or a raw
+      #     markdown artifact in an answer surfaces as a ::warning::.
+      #   * seo_aeo_scorecard.py --scope core — surfaces seo-debt (a page with no
+      #     meta description, a missing JSON-LD type, a dead link) as a ::warning::.
+      #     The SCORES themselves are strategic and live in the private repo
+      #     (--transfer); only the read-only work-list runs here. Pure-stdlib Python.
+      - name: seo/aeo scorecard (unit tests HARD; content checks advisory, ratchetable)
+        working-directory: ${{ github.workspace }}
+        run: |
+          python tools/seo_aeo_scorecard_test.py
+          echo "::group::structured-data sync (advisory until FAQPage lands)"
+          python tools/gen_structured_data.py --check \
+            || echo "::warning title=jsonld-drift::structured data out of date / answer artifacts — run python tools/gen_structured_data.py"
+          echo "::endgroup::"
+          echo "::group::seo-aeo-scorecard (core: advisory)"
+          python tools/seo_aeo_scorecard.py --scope core \
+            || echo "::warning title=seo-debt::SEO/AEO discoverability debt present (advisory) — add missing front-matter title/description; see tools/seo_aeo_scorecard.py"
+          echo "::endgroup::"
+
       # Public-copy leak gate: the machine backstop for the redact-needle floor.
       # The local pre-commit hook (tools/githooks/pre-commit) only fires on a clone
       # that ran `install_trunk_guard.py`; an un-armed clone — or any path that

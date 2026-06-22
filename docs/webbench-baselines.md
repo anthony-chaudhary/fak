@@ -1,3 +1,8 @@
+---
+title: "fak WebBench Baselines: 8.8x Prefill Cut on WebVoyager"
+description: "fak's measured WebVoyager efficiency: on the real 643-task set it cuts 8.8–9.7× of per-turn prefill work, so an agent keeps its success rate at lower cost."
+---
+
 # Frontier WebBench Baselines & SOTA Comparison
 
 **Last Updated:** 2026-06-20

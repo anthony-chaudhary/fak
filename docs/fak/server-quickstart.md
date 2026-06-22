@@ -1,3 +1,8 @@
+---
+title: "fak serve: Tool-Adjudicating Gateway Quickstart"
+description: "Start a fak serve gateway: an OpenAI-compatible proxy that adjudicates tool calls and enforces a default-deny permission floor before tools run. Quick setup."
+---
+
 # fak Server Quickstart
 
 This guide covers how to start a `fak serve` gateway in common scenarios. `fak serve` is an OpenAI-compatible gateway that adjudicates tool calls — it runs in front of any model (local or remote) and enforces a permission floor before tools execute.

@@ -1,3 +1,8 @@
+---
+title: "Run Claude Code on local Qwen3.6 with fak"
+description: "Dogfood playbook to run Claude Code against fak serve fronting a local Qwen3.6 OpenAI-compatible model server, with probe, setup, and troubleshooting steps."
+---
+
 # Qwen3.6 Claude Dogfood Playbook
 
 This playbook runs the real Claude Code CLI against `fak serve`, with `fak` fronting

@@ -1,3 +1,8 @@
+---
+title: "fak repo-guard: refuse out-of-tree destructive writes"
+description: "How fak's repo-guard refuses destructive or out-of-tree writes that resolve outside the repo, stopping a sibling-repo rm -rf before it runs."
+---
+
 # repo-guard — refuse destructive / out-of-tree writes before they escape the repo
 
 > **One incident, two independent gates.** On 2026-06-21 a build script

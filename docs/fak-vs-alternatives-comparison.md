@@ -1,3 +1,8 @@
+---
+title: "fak vs vLLM, SGLang & Provider KV Caching"
+description: "How fak's fused KV cache compares to vLLM, SGLang, llama.cpp and provider caches: it adds cross-worker/session prefix reuse plus addressable mid-run eviction."
+---
+
 # fak vs Alternatives — Infrastructure Comparison
 
 **Date:** 2026-06-20

@@ -1,3 +1,8 @@
+---
+title: "fak Policy Authoring Guide: Capability Floor Manifests"
+description: "Author a fak capability floor: write, check, and preflight a default-deny policy manifest that bounds which tools an AI agent may call."
+---
+
 # Policy authoring guide (with worked examples)
 
 This is the **task-oriented** companion to [`fak/POLICY.md`](../../POLICY.md). POLICY.md

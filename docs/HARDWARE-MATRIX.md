@@ -1,3 +1,8 @@
+---
+title: "fak hardware matrix: Metal, Vulkan, CUDA, A100"
+description: "The hardware coverage matrix for fak: one pure-Go agent kernel profiled across four platforms — Apple Metal, AMD Vulkan, and NVIDIA CUDA on Ada and Ampere."
+---
+
 # Hardware matrix — every machine fak has been profiled on
 
 > **The point of this page:** `fak`'s correctness and serving claims are not from one

@@ -1,3 +1,8 @@
+---
+title: "fak permission-system benchmark methodology"
+description: "How fak benchmarks agent permission systems vs Claude Code auto mode, Codex, and Copilot: deterministic tool-call boundary vs classifier, prompt, or review."
+---
+
 # Permission-System Benchmark Methodology
 
 This benchmark asks what controls a risky agent action or hostile tool result:

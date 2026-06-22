@@ -1,3 +1,8 @@
+---
+title: "fak RSI loop: self-measured recursive self-improvement"
+description: "How fak's rsiloop closes its recursive self-improvement loop: it derives every keep-or-revert witness from a real measurement run fork-isolated off main."
+---
+
 # The RSI closed loop (`rsiloop`)
 
 > fak's recursive-self-improvement loop, **closed**. `internal/shipgate` is the

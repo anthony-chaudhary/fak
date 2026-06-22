@@ -1,3 +1,8 @@
+---
+title: "fak security: hardening the agent permission gate"
+description: "Harden a fak deployment: the default-deny capability floor, result quarantine, bearer-token auth, network exposure, and an honest scope of what it cannot stop."
+---
+
 # Security best practices for deploying `fak`
 
 This is the operator's hardening guide: how to deploy `fak serve` so the gate it provides

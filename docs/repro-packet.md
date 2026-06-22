@@ -1,3 +1,8 @@
+---
+title: "fak Repro Packet — Reproduce the Allow/Deny Boundary Offline"
+description: "A no-credential, offline reproduction of fak's allow/deny/quarantine boundary: validate a policy manifest, deny a dangerous action, and run the injection A/B."
+---
+
 # Repro Packet
 
 Date captured: 2026-06-18

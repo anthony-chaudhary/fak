@@ -1,3 +1,8 @@
+---
+title: "fak + OpenAI Codex: Kernel-Gated Tool Gateway"
+description: "Use fak as a kernel-adjudicated gateway for OpenAI Codex and the OpenAI API: every tool call is allowed, denied, repaired, or quarantined before it runs."
+---
+
 # fak + OpenAI Codex Integration Guide
 
 This guide explains how to use **fak** as a kernel-adjudicated gateway for OpenAI Codex and the OpenAI API. Every tool call a Codex agent proposes is evaluated by the kernel before it executes — dangerous calls are dropped, malformed calls are repaired, and policy violations are refused.

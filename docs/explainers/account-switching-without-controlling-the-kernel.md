@@ -1,3 +1,8 @@
+---
+title: "fak account switching for parallel agent rate-limit headroom"
+description: "How fak's account switcher gives each fan-out lane its own account, so parallel agents draw on independent per-account rate limits, not one shared bucket."
+---
+
 # Account switching, and why a provable speed-up doesn't need control of the kernel
 
 > An ultracode fan-out launches many workers at once. If every worker authenticates as
