@@ -125,6 +125,14 @@ description: "Frequently asked questions about fak, the agent kernel: how its de
     },
     {
       "@type": "Question",
+      "name": "How do I put fak in front of my agent or framework (Claude Code, Cursor, an SDK, or MCP)?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "You usually change one thing: the base URL your agent already points at. fak serve speaks the OpenAI (/v1/chat/completions), Anthropic (/v1/messages), and MCP (--stdio or /mcp) wires, so any agent or framework that lets you override the base URL drops in with no agent-side code change — and every tool call it proposes is adjudicated by the capability floor before it runs. Claude Code and the Anthropic SDK set ANTHROPIC_BASE_URL; the OpenAI SDK, OpenAI Agents SDK, LangChain, LlamaIndex, and the Vercel AI SDK take an OpenAI base URL; Cursor and any MCP client wire fak serve --stdio. The integration index has the which-agent routing table, per-framework snippets, and a 60-second offline proof; the per-tool guides are Claude Code, Cursor, and OpenAI Codex."
+      }
+    },
+    {
+      "@type": "Question",
       "name": "Who is fak for?",
       "acceptedAnswer": {
         "@type": "Answer",
@@ -144,7 +152,7 @@ description: "Frequently asked questions about fak, the agent kernel: how its de
       "name": "Where can I learn more?",
       "acceptedAnswer": {
         "@type": "Answer",
-        "text": "Guided tutorial — zero to first adjudicated call. Policy in the kernel and Addressable KV cache — the two core ideas. Benchmark authority — every number. llms.txt — a machine-readable map for LLMs and answer engines."
+        "text": "Guided tutorial — zero to first adjudicated call. Integration index — put fak in front of the agent you already run (Claude Code, Cursor, an SDK, or MCP). Policy in the kernel and Addressable KV cache — the two core ideas. Benchmark authority — every number. llms.txt — a machine-readable map for LLMs and answer engines."
       }
     }
   ]
@@ -318,6 +326,21 @@ fak serve --addr 127.0.0.1:8080 --base-url http://localhost:11434/v1 --model qwe
 This is where most people should start; it is a complete product by itself. See the
 [getting started guide](../GETTING-STARTED.md).
 
+## How do I put fak in front of my agent or framework (Claude Code, Cursor, an SDK, or MCP)?
+
+You usually change one thing: the base URL your agent already points at. `fak serve`
+speaks the OpenAI (`/v1/chat/completions`), Anthropic (`/v1/messages`), and MCP
+(`--stdio` or `/mcp`) wires, so any agent or framework that lets you override the base
+URL drops in with **no agent-side code change** — and every tool call it proposes is
+adjudicated by the capability floor before it runs. **Claude Code** and the Anthropic
+SDK set `ANTHROPIC_BASE_URL`; the **OpenAI** SDK, **OpenAI Agents SDK**, **LangChain**,
+**LlamaIndex**, and the **Vercel AI SDK** take an OpenAI base URL; **Cursor** and any
+**MCP client** wire `fak serve --stdio`. The
+[integration index](integrations/README.md) has the which-agent routing table,
+per-framework snippets, and a 60-second offline proof; the per-tool guides are
+[Claude Code](integrations/claude.md), [Cursor](integrations/cursor.md), and
+[OpenAI Codex](integrations/openai-codex.md).
+
 ## Who is fak for?
 
 Teams running **self-hosted LLM agent fleets** who need three things at once:
@@ -333,6 +356,7 @@ issue for an undisclosed vulnerability.
 ## Where can I learn more?
 
 - [Guided tutorial](fak/tutorial.md) — zero to first adjudicated call.
+- [Integration index](integrations/README.md) — put fak in front of the agent you already run (Claude Code, Cursor, an SDK, or MCP).
 - [Policy in the kernel](explainers/policy-in-the-kernel.md) and [Addressable KV cache](explainers/addressable-kv-cache.md) — the two core ideas.
 - [Benchmark authority](../BENCHMARK-AUTHORITY.md) — every number.
 - [llms.txt](../llms.txt) — a machine-readable map for LLMs and answer engines.
