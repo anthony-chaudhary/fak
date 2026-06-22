@@ -1,0 +1,41 @@
+%%{init: {'theme':'base','themeVariables':{'fontFamily':'Segoe UI, Helvetica, Arial, sans-serif','fontSize':'14px','lineColor':'#5B6B7B','primaryColor':'#DCE9FB','primaryTextColor':'#1B3A66','primaryBorderColor':'#3B6FB5','clusterBkg':'#F7F9FB','clusterBorder':'#AFC0CE'}}}%%
+flowchart TB
+  BANNER["Ring-3 proposes, ring-0 disposes — only the DEPTH of the check changes.<br/>Push the gate down the stack: each rung down runs cheaper AND flips who holds the gate."]:::note
+
+  subgraph R1["RUNG 1 · the model's own loop · ~seconds–minutes / RESULT"]
+    A["AI agent loop — the gate IS the model<br/>does the work turn by turn; every fix = another forced round-trip<br/><b>cost: a MODEL TURN</b> (order-of-magnitude, not benchmarked)<br/>even a tuned 2026 agent is still forced back to fix a bad arg"]:::untrusted
+  end
+
+  subgraph R2["RUNG 2 · a hook bolted ON TOP · ~6–50 ms / DECIDE"]
+    B["harness — it INVOKES the gate"]:::untrusted
+    HK["hook gate · DOS-as-hooks, us today<br/><b>cost: a PROCESS SPAWN</b><br/>~6–50 ms/decide → ~12–100 ms/call (derived 2x), blocks the turn<br/>skips redundant work, but DEPENDS on the harness firing it"]:::gate
+    BTOOL["tool call — gated from ON TOP via a spawn,<br/>not on an in-process path"]:::untrusted
+    B == "INVOKES (spawn)" ==> HK
+    HK -. "verdict gates the call (out-of-process)" .-> BTOOL
+  end
+
+  subgraph R3["RUNG 3 · the kernel ON the call path · ~1.3 us / DECIDE"]
+    C["harness — it only PROPOSES"]:::untrusted
+    K["fak kernel · in-process gate (ring-0, analogy)<br/><b>cost: an IN-PROCESS DECIDE</b><br/>~1,300 ns · the gate TRANSPORT, not token latency<br/>like read() through an OS kernel"]:::kernel
+    P["allow → tool runs · 0 forced turns, fixed in one shot"]:::pass
+    D["deny / HOLD (default-deny)"]:::deny
+    C -. "PROPOSES the call (light) — the kernel disposes" .-> K
+    K --> P
+    K --> D
+  end
+
+  BANNER --> R1
+  R1 == "axis 1 — FEWER TURNS: skip redundant work (grounding / turn-skip)" ==> R2
+  R2 == "axis 2 — CHEAPER GATE: same decide, two transports → ~5,000–39,000x" ==> R3
+
+  HON["Three DIFFERENT clocks: a model turn ≠ a hook spawn ≠ an in-process decide.<br/>The ~5,000–39,000x is the ONLY apples-to-apples ratio (rung 2→3, same Fold).<br/>This is the gate moving down the stack, not end-to-end token speedup."]:::note
+  R1 -.-> HON
+  R2 -.-> HON
+  R3 -.-> HON
+
+  classDef untrusted fill:#FFE9D6,stroke:#E8833A,stroke-width:2px,color:#7A3E12;
+  classDef kernel fill:#DCE9FB,stroke:#3B6FB5,stroke-width:2px,color:#1B3A66;
+  classDef gate fill:#FFF3CC,stroke:#C9A227,stroke-width:2px,color:#6B5410;
+  classDef pass fill:#DBF3E1,stroke:#3FA45F,stroke-width:2px,color:#1C5230;
+  classDef deny fill:#FBDDDD,stroke:#C9453F,stroke-width:2px,color:#6E1F1B;
+  classDef note fill:#F7F9FB,stroke:#AFC0CE,stroke-width:1px,color:#46586A;
