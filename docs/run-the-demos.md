@@ -68,13 +68,17 @@ go run ./cmd/guarddemo  -selfcheck   # WITHOUT fak: 4 / 2 / 0 breaches · WITH f
 go run ./cmd/turntaxdemo -selfcheck   # turn-tax + safety-floor invariants per suite
 ```
 
-`guarddemo` also has a `-print` mode: the **30-second point with zero setup** — the
-WITHOUT-fak vs WITH-fak comparison rendered as a colored two-column diff right in the
-terminal, no browser, no port (honors `NO_COLOR`):
+Both self-contained demos also ship a `-print` mode: the **30-second point with zero
+setup** — the comparison rendered as a colored two-column diff right in the terminal, no
+browser, no port (honors `NO_COLOR`). `guarddemo` prints the **safety** axis (WITHOUT fak
+vs WITH fak); `turntaxdemo` prints the **efficiency** axis (a tuned SOTA agent's wasted
+round-trips vs fak's flat 0):
 
 ```bash
-go run ./cmd/guarddemo -print                          # the red-team scenario, side by side
-go run ./cmd/guarddemo -print -scenario turntax-happy   # the clean control (0 breaches)
+go run ./cmd/guarddemo  -print                          # safety: the red-team scenario, side by side
+go run ./cmd/guarddemo  -print -scenario turntax-happy   # safety: the clean control (0 breaches)
+go run ./cmd/turntaxdemo -print                          # efficiency: tuned SOTA vs fak (5 forced turns → 0)
+go run ./cmd/turntaxdemo -print -suite turntax-happy     # efficiency: the anti-inflation control
 ```
 
 ## 3. With a real model (the live race)

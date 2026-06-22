@@ -35,6 +35,12 @@
 //	#   turntax-airline → naive +9, tuned +5, fak 0  (every lever fires)
 //	#   turntax-happy   → all stay at 0              (the anti-inflation control, watchable)
 //
+//	go run ./cmd/turntaxdemo -print
+//	# the 30-second point with ZERO setup: render the tuned-SOTA-vs-fak turn-tax
+//	# side-by-side as a colored two-column diff in the terminal (no browser, no
+//	# port). -suite picks the trace; honors NO_COLOR. (Pairs with `guarddemo
+//	# -print`, the safety-axis twin.)
+//
 //	go run ./cmd/turntaxdemo -selfcheck
 //	# browserless: replay every suite through the kernel, assert the documented
 //	# turn-tax + safety-floor invariants, exit non-zero on any drift.
@@ -51,6 +57,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strconv"
+	"strings"
 
 	"github.com/anthony-chaudhary/fak/internal/demoui"
 	"github.com/anthony-chaudhary/fak/internal/turnbench"
@@ -224,6 +231,8 @@ func main() {
 	jobs := flag.Int("jobs", 0, "cap GOMAXPROCS to an ABSOLUTE core count (0 = all cores). On a shared/active box pass e.g. 8 so the demo doesn't starve other work.")
 	budget := flag.Float64("budget", 0, "cap GOMAXPROCS to a FRACTION of the machine: 0.75 = 75% of the logical cores (portable; 75 or 0.75 accepted). Mutually exclusive with -jobs. 0 = unset.")
 	selfcheck := flag.Bool("selfcheck", false, "run HEADLESS: replay each present suite through the kernel (the same turnbench.RunWithCalls path the browser drives), assert the documented turn-tax + safety-floor invariants, print a witness table, and exit non-zero on any mismatch. No browser, no network — the CI / cross-platform dog-food of this demo's data path.")
+	print := flag.Bool("print", false, "render the SOTA-agent vs fak turn-tax side-by-side as a colored TWO-COLUMN diff in the TERMINAL (no browser, no port) and exit. The 30-second point with zero setup. Honors NO_COLOR.")
+	suite := flag.String("suite", "turntax-airline", "suite for -print (turntax-airline | turntax-happy)")
 	flag.Parse()
 	if *jobs > 0 && *budget > 0 {
 		fmt.Fprintln(os.Stderr, "-jobs and -budget are mutually exclusive (one is absolute, the other a fraction)")
@@ -247,6 +256,9 @@ func main() {
 
 	if *selfcheck {
 		os.Exit(runSelfcheck())
+	}
+	if *print {
+		os.Exit(runPrint(*suite))
 	}
 
 	mux := http.NewServeMux()
@@ -378,4 +390,138 @@ func runSelfcheck() int {
 	}
 	fmt.Printf("OK — %d/%d suite(s) reproduced the documented turn-tax + safety-floor invariants (browserless)\n", ran, ran)
 	return 0
+}
+
+// ---------------------------------------------------------------------------
+// -print: the terminal twin of the browser turn-tax race. Same ONE live replay,
+// rendered as a colored two-column diff — a tuned 2026 SOTA agent (left) racking up
+// the FORCED model round-trips it must fire, beside fak (right) staying flat at 0 —
+// so the efficiency point lands in ~30s with zero setup (no browser, no port). The
+// HONEST headline is fak vs the TUNED agent (the forced turns); the naive two-pass
+// loop is the worst-case reference, surfaced in the summary, never the headline.
+// (Pairs with cmd/guarddemo -print, which does the same for the SAFETY axis.)
+// ---------------------------------------------------------------------------
+
+// ttPalette / ttPad / ttPaint are the small terminal-rendering helpers, kept local
+// (this weights-free demo shares nothing heavier than internal/demoui with siblings).
+type ttPalette struct{ red, green, dim, bold, reset string }
+
+func ttColors() ttPalette {
+	tty := false
+	if fi, err := os.Stdout.Stat(); err == nil {
+		tty = fi.Mode()&os.ModeCharDevice != 0
+	}
+	if os.Getenv("NO_COLOR") != "" || !tty {
+		return ttPalette{}
+	}
+	return ttPalette{red: "\033[31m", green: "\033[32m", dim: "\033[2m", bold: "\033[1m", reset: "\033[0m"}
+}
+
+func (p ttPalette) paint(code, s string) string {
+	if code == "" {
+		return s
+	}
+	return code + s + p.reset
+}
+
+// ttPad pads OR truncates a plain (un-colored) string to exactly w runes, so a later
+// color wrap never disturbs column alignment.
+func ttPad(s string, w int) string {
+	r := []rune(s)
+	if len(r) > w {
+		if w <= 1 {
+			return string(r[:w])
+		}
+		return string(r[:w-1]) + "…"
+	}
+	return s + strings.Repeat(" ", w-len(r))
+}
+
+// runPrint replays one suite and renders the tuned-SOTA-vs-fak turn-tax side-by-side
+// to stdout. Returns a process exit code (0 unless the replay errored / suite absent).
+func runPrint(suite string) int {
+	p := ttColors()
+	t, err := turnbench.LoadTrace(suitePath(suite))
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "load trace %q: %v (run from the repo root)\n", suite, err)
+		return 1
+	}
+	rep, calls, err := turnbench.RunWithCalls(context.Background(), t, turnbench.DefaultCostModel())
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "replay: %v\n", err)
+		return 1
+	}
+
+	const lw, cw, rw = 36, 22, 30
+	fmt.Printf("\n  %s — suite: %s (%d calls)\n", p.paint(p.bold, "fak · the turn tax, side by side"), suite, len(calls))
+	fmt.Printf("  %s\n\n", p.paint(p.dim, "same tool calls, two agents — count the wasted model round-trips"))
+	fmt.Printf("  %s  %s  %s\n",
+		p.paint(p.red, ttPad("tuned SOTA agent (2026)", lw)),
+		ttPad("the tool call", cw),
+		p.paint(p.green, "fak (1-shot kernel)"))
+	fmt.Printf("  %s  %s  %s\n", strings.Repeat("─", lw), strings.Repeat("─", cw), strings.Repeat("─", rw))
+
+	for _, d := range calls {
+		var lkind, ltext, rkind, rtext string
+		switch {
+		case d.Axis == "turn-tax" && d.Forced:
+			lkind = p.red
+			if d.Class == "vdso_dedup" {
+				ltext = "x +1 round-trip — dup read"
+				rkind, rtext = p.green, "# 1-shot — served from cache"
+			} else { // grammar
+				ltext = "x +1 round-trip — bad arg"
+				rkind, rtext = p.green, "# 1-shot — repaired in-syscall"
+			}
+		case d.Axis == "turn-tax" && d.Elision:
+			lkind, ltext = p.dim, ". elided (optional call)"
+			rkind, rtext = p.green, "# 1-shot — served locally"
+		case d.Axis == "safety-floor":
+			lkind, ltext = p.dim, "! would run it (safety)"
+			rkind, rtext = p.dim, "# blocked (see guarddemo)"
+		default: // control
+			lkind, ltext = p.dim, ". ran"
+			rkind, rtext = p.dim, ". ran"
+		}
+		fmt.Printf("  %s  %s  %s\n",
+			p.paint(lkind, ttPad(ltext, lw)),
+			p.paint(p.dim, ttPad(d.Tool, cw)),
+			p.paint(rkind, rtext))
+	}
+
+	fmt.Printf("  %s  %s  %s\n", strings.Repeat("─", lw), strings.Repeat("─", cw), strings.Repeat("─", rw))
+	forced := rep.TurnKinds.Forced // fak vs the TUNED agent — the honest headline
+	total := rep.Net.TurnsSaved     // fak vs the NAIVE two-pass loop — worst-case reference
+	leftScore := fmt.Sprintf("tuned SOTA agent: %d forced round-trip%s", forced, plural(forced))
+	fmt.Printf("  %s  %s\n",
+		p.paint(p.bold+p.red, ttPad(leftScore, lw+2+cw)),
+		p.paint(p.bold+p.green, "fak: 0 extra round-trips"))
+	// per-turn price from the report's net (turns are fixed by the kernel; only the
+	// per-turn cost is a knob — the hosted-flash default, 1.5s/turn).
+	perLatS, perDollar := 0.0, 0.0
+	if total > 0 {
+		perLatS = rep.Net.LatencySavedMs / 1000 / float64(total)
+		perDollar = rep.Net.DollarsSaved / float64(total)
+	}
+	if forced > 0 {
+		fmt.Printf("  %s\n", p.paint(p.dim, fmt.Sprintf(
+			"vs even a TUNED 2026 agent, fak deletes %d forced round-trip%s ≈ %.1fs and $%.4f at hosted-flash rates (1.5s/turn). "+
+				"vs a naive two-pass loop it's %d (≈ %.1fs, $%.4f) — the worst-case reference, not the headline.",
+			forced, plural(forced), float64(forced)*perLatS, float64(forced)*perDollar,
+			total, rep.Net.LatencySavedMs/1000, rep.Net.DollarsSaved)))
+		fmt.Printf("  %s\n", p.paint(p.dim, "the safety floor (poison paged out, destructive op refused) is a SEPARATE axis — see `guarddemo -print`."))
+	} else {
+		fmt.Printf("  %s\n", p.paint(p.dim,
+			"a clean happy path inflates nothing — both agents pay the same engine round-trips (the anti-inflation control). "+
+				"the gap only opens on aliased/duplicate/optional calls."))
+	}
+	fmt.Println()
+	return 0
+}
+
+func plural(n int) string {
+	if n == 1 {
+		return ""
+	}
+	return "s"
 }
