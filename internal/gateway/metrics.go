@@ -387,6 +387,21 @@ func writeVDSOMetrics(b *strings.Builder) {
 	fmt.Fprintf(b, "fak_vdso_cache_fills_total %d\n", fills)
 	writeHelpType(b, "fak_vdso_invalidations_total", "Write-shaped completions that stranded cached reads (the vDSO exports no per-entry LRU-eviction counter; this is the nearest invalidation signal).", "counter")
 	fmt.Fprintf(b, "fak_vdso_invalidations_total %d\n", vdso.Default.Mutations())
+
+	// Miss attribution: every lookup that returned no local answer, by reason — so a
+	// low hit rate is explainable (write-shaped tools vs missing readOnly/idempotent
+	// hints vs genuine cache churn) instead of collapsing to a bare miss. This is the
+	// aggregate complement to the per-call decision trace (fak preflight --explain).
+	writeHelpType(b, "fak_vdso_misses_total", "vDSO fast-path lookups that returned no local answer, by reason (DESTRUCTIVE: write-shaped tool, never cacheable; MISSING_HINTS: no readOnly/idempotent hint; RESOURCE_MISNAMED: read cannot name its entity; WITNESS_REVOKED: entry's external witness was refuted; NOT_CACHED: cacheable but unfilled or epoch-stranded).", "counter")
+	misses := vdso.Default.MissReasons()
+	missReasons := make([]string, 0, len(misses))
+	for r := range misses {
+		missReasons = append(missReasons, r)
+	}
+	sort.Strings(missReasons)
+	for _, r := range missReasons {
+		fmt.Fprintf(b, "fak_vdso_misses_total{reason=\"%s\"} %d\n", promQuote(r), misses[r])
+	}
 }
 
 // writeBlobMetrics renders the content-addressed blob store (internal/blob) — the ONE

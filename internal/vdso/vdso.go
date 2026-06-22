@@ -99,6 +99,81 @@ type VDSO struct {
 	lookups int64
 	hits    int64
 	fills   int64
+
+	// missCtr attributes every ok=false to the reason that produced it, so a low
+	// hit rate is explainable ("is it write-shaped tools, missing hints, or churn?")
+	// instead of collapsing to a bare miss. Lock-free: each is bumped at the exact
+	// early-return that decided the miss. See MissReasons + the Miss* constants.
+	missCtr struct {
+		destructive      int64
+		missingHints     int64
+		resourceMisnamed int64
+		witnessRevoked   int64
+		notCached        int64
+	}
+}
+
+// The closed vocabulary of vDSO miss reasons (the WHY behind ok=false):
+//   - MissDestructive:      the tool is write-shaped/destructive, so it is never
+//     fast-path eligible (a cached read of it would be unsound).
+//   - MissMissingHints:     the call lacks readOnlyHint/idempotentHint, so the
+//     soundness gate cannot prove it is cacheable.
+//   - MissResourceMisnamed: a read that cannot name its entity (no fine-grained
+//     write could invalidate it) — refused to the engine for soundness.
+//   - MissWitnessRevoked:   a cached entry was admitted under a now-refuted
+//     external witness; it is evicted and treated as a miss.
+//   - MissNotCached:        cacheable, but no tier-1/tier-3/tier-2 entry answered
+//     (never filled, or stranded by a write that bumped its epoch).
+const (
+	MissDestructive      = "DESTRUCTIVE"
+	MissMissingHints     = "MISSING_HINTS"
+	MissResourceMisnamed = "RESOURCE_MISNAMED"
+	MissWitnessRevoked   = "WITNESS_REVOKED"
+	MissNotCached        = "NOT_CACHED"
+)
+
+// missed records a lookup miss by reason and returns the (nil, false) a Lookup
+// caller expects — so each early-return reads `return v.missed(MissX)`.
+func (v *VDSO) missed(reason string) (*abi.Result, bool) {
+	switch reason {
+	case MissDestructive:
+		atomic.AddInt64(&v.missCtr.destructive, 1)
+	case MissMissingHints:
+		atomic.AddInt64(&v.missCtr.missingHints, 1)
+	case MissResourceMisnamed:
+		atomic.AddInt64(&v.missCtr.resourceMisnamed, 1)
+	case MissWitnessRevoked:
+		atomic.AddInt64(&v.missCtr.witnessRevoked, 1)
+	default:
+		atomic.AddInt64(&v.missCtr.notCached, 1)
+	}
+	return nil, false
+}
+
+// gateMiss attributes a miss reached without a cache hit: a write-shaped tool and
+// a hint-less call are distinguished from a genuine not-cached miss, so the
+// dominant cause of a low hit rate is legible.
+func (v *VDSO) gateMiss(c *abi.ToolCall) (*abi.Result, bool) {
+	switch {
+	case destructive(c):
+		return v.missed(MissDestructive)
+	case !metaTrue(c, "readOnlyHint") || !metaTrue(c, "idempotentHint"):
+		return v.missed(MissMissingHints)
+	default:
+		return v.missed(MissNotCached)
+	}
+}
+
+// MissReasons returns a cumulative snapshot of vDSO lookup misses by reason — the
+// WHY behind every ok=false, rendered as fak_vdso_misses_total{reason}.
+func (v *VDSO) MissReasons() map[string]uint64 {
+	return map[string]uint64{
+		MissDestructive:      uint64(atomic.LoadInt64(&v.missCtr.destructive)),
+		MissMissingHints:     uint64(atomic.LoadInt64(&v.missCtr.missingHints)),
+		MissResourceMisnamed: uint64(atomic.LoadInt64(&v.missCtr.resourceMisnamed)),
+		MissWitnessRevoked:   uint64(atomic.LoadInt64(&v.missCtr.witnessRevoked)),
+		MissNotCached:        uint64(atomic.LoadInt64(&v.missCtr.notCached)),
+	}
 }
 
 type entry struct {
@@ -287,7 +362,7 @@ func (v *VDSO) Lookup(ctx context.Context, c *abi.ToolCall) (*abi.Result, bool) 
 		// Resource-mode soundness gate: refuse to serve a read that can't name its
 		// entity (it would be invalidated by no entity-fine write) — go to the engine.
 		if v.resourceMisnamed(c, args) {
-			return nil, false
+			return v.missed(MissResourceMisnamed)
 		}
 		v.mu.Lock()
 		key := v.keyLocked(c, args)
@@ -304,7 +379,7 @@ func (v *VDSO) Lookup(ctx context.Context, c *abi.ToolCall) (*abi.Result, bool) 
 				rk, rref, rwit := e.key, e.ref, e.witness
 				v.mu.Unlock()
 				v.emitCache(CacheRevoke, rk, rref, rwit)
-				return nil, false
+				return v.missed(MissWitnessRevoked)
 			}
 			v.lru.MoveToFront(el)
 			ref := e.ref
@@ -317,7 +392,7 @@ func (v *VDSO) Lookup(ctx context.Context, c *abi.ToolCall) (*abi.Result, bool) 
 		}
 		v.mu.Unlock()
 	}
-	return nil, false
+	return v.gateMiss(c)
 }
 
 // served wraps a locally-computed tier-1/tier-3 answer. tierN tags which tier
