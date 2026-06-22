@@ -234,10 +234,15 @@ for most adopters — same gate, now in front of the model you already run.
   become real operations on attention state. This is where the two flips stop being
   framing and become mechanism: quarantine that reaches attention, prefix reuse the
   kernel owns, a finished session that reloads as a core dump. It's a correctness
-  *reference*, not a production serving engine — but on a model that fits the GPU, the
-  in-kernel CUDA decode already hits **parity with `llama.cpp` Q8_0 (~120 tok/s on an RTX
-  4070)** with an opt-in CUDA graph. Capability is still your model's job; the kernel
-  gives you frontier-grade *safety* and ~$0 cost on a small local model today.
+  *reference*, not a production serving engine. We don't claim to beat SOTA at serving
+  scale — that's still the engines' job (above). But on a single small model that fits
+  the GPU, the in-kernel CUDA decode already reaches **throughput parity with `llama.cpp`
+  Q8_0 — comparable decode speed, ~120 tok/s on an RTX 4070** with an opt-in CUDA graph.
+  That's a single-stream match, not a serving-scale win; it's simply the point at which
+  owning the GPU starts to be worth it for `fak`. (Distinct from the *numerical* parity
+  above — the cache being bit-for-bit identical at `max|Δ| = 0`.) Capability is still your
+  model's job; the kernel gives you frontier-grade *safety* and ~$0 cost on a small local
+  model today.
 
 → **[Guided tutorial](docs/fak/tutorial.md)** (zero to first adjudicated call, real output
 at every step) · **[Getting started](GETTING-STARTED.md)**
