@@ -167,6 +167,17 @@ fak/.bench-baseline.json
 # local-only so it is never accidentally committed to fleet-public.
 /ICP-NEOCLOUD-AGENTIC-PAAS-FIT-2026-06-21.md
 
+# SEO/AEO scorecard SCORES — strategic discoverability/positioning data, the same
+# go-to-market class as the ICP memo above. The measuring TOOL is public
+# (tools/seo_aeo_scorecard.py); the SCORES go to the PRIVATE repo only
+# (`python tools/seo_aeo_scorecard.py --transfer` -> ../fleet/.seo-archive/fak/).
+# These globs are the public-side guard: a locally-generated report or baseline can
+# never land in this public tree by accident.
+/SEO-AEO-SCORECARD.md
+/seo-aeo-baseline.json
+/.seo-archive/
+**/.seo-archive/
+
 # Demo deploy lane — local-only. Carries a real private GCP project id (a
 # PUBLIC-SCRUB-POLICY redact-needle the leak gate blocks), so it must be
 # redacted or kept in a private repo before it can ever land in fleet-public.

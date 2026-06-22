@@ -57,6 +57,14 @@ kernel), in addition to the CLA grant to Netra.
   strawman-led headlines, orphans). It is read-only; a non-zero exit is a work-list, not a
   block. Regenerate the scorecard snapshot with `--markdown` after a docs pass. This is the whole-corpus analogue of
   `tools/readme_freshness_audit.py`, which checks the front page.
+- **Touching the docs site or the FAQ? Keep discoverability honest.** `python
+  tools/seo_aeo_scorecard.py --scope core` grades the published Pages surfaces on five
+  SEO/AEO KPIs (title, description, headings, links, answerability) plus site-level
+  checks (sitemap, canonical, JSON-LD, `llms-full.txt`) and counts *seo-debt*. If you
+  changed the FAQ or `_config.yml`, re-run `python tools/gen_structured_data.py` to
+  regenerate the JSON-LD (CI hard-gates that it is in sync). The discoverability
+  **scores** are strategic and live in the private repo (`--transfer`); the tool and the
+  read-only work-list are public.
 - **Tests run through WSL, not native Windows** — `.\fak\test.ps1` (whole suite) or
   `.\fak\test.ps1 ./internal/<pkg>/`. `go build` / `go vet` work natively; only test
   *execution* is blocked on the Windows host. See the Windows note in

@@ -81,6 +81,19 @@
       "timeout_s": 120,
       "action": "Read-only whole-corpus docs fold: grades every reader-reachable doc (link-BFS from the front doors README/INDEX/docs-index) on five KPIs (freshness, links, structure, readability, evidence) and counts doc-debt -- the concrete, re-derivable defects a cold reader hits (dead local link, stale install pin behind VERSION, unresolved placeholder, missing H1 title, strawman-led 'naive' headline, orphaned doc, uncovered expected topic). ok:false (ACTION) ONLY on a HARD defect (corpus.doc_debt > 0); soft signals (un-glossed jargon, a bolded number not yet mirrored in BENCHMARK-AUTHORITY) lower a doc's score but stay green -- judgment calls, not breakage. ACTION here means invoke /garden-docs: retire each defect worst-first (corpus.worst + coverage.defects), regenerate docs/DOCS-SCORECARD.md, commit the docs lane by explicit path with a docs(scope): subject. This is the whole-corpus analogue of readme-freshness (which checks only the front page); the 26 curated must-be-perfect surfaces are the --scope core subset CI hard-gates at doc-debt 0. Runbook .claude/skills/garden-docs/SKILL.md."
     },
+    "seo-aeo-scorecard": {
+      "enabled": true,
+      "status_cmd": [
+        "{python}",
+        "tools/seo_aeo_scorecard.py",
+        "--scope",
+        "core",
+        "--json"
+      ],
+      "auto_recover": false,
+      "timeout_s": 90,
+      "action": "Read-only discoverability fold (the docs-scorecard's SEO/AEO twin): grades the core published Pages surfaces on five KPIs (title, description, headings, links, answerability) + site-level checks (robots, sitemap, jekyll-seo-tag, canonical, og:image, JSON-LD SoftwareApplication/FAQPage/WebSite, llms.txt, llms-full freshness, FAQ structure) and counts seo-debt -- the concrete discoverability defects an answer engine or crawler hits (a published page with no meta description/title, a missing JSON-LD @type, a stale llms-full.txt, a dead link). ok:false (ACTION) ONLY on a HARD defect (corpus.seo_debt > 0). ACTION here: add the missing front-matter title/description; run `python tools/gen_structured_data.py` to refresh JSON-LD; run `python tools/gen_llms_full.py` for the corpus; re-run to prove the drop. The SCORES are strategic -> transfer to the PRIVATE repo with `--transfer` (../fleet/.seo-archive/fak); the public .gitignore blocks the report/baseline from a public commit. The tool + work-list are public, the scores are not."
+    },
     "issue-lane-router": {
       "enabled": true,
       "status_cmd": [
