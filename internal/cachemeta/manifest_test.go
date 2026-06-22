@@ -16,6 +16,7 @@ func sampleManifest() KVManifest {
 		ProducerKeyID:      "key-1",
 		IntegrityChecksum:  "cksum-1",
 		Signature:          ManifestSignature{Algorithm: "ed25519", Value: "deadbeef"},
+		AccessPolicy:       "fleet-internal",
 	}
 }
 
@@ -120,5 +121,62 @@ func TestFromKVManifestDescribesImportableArtifact(t *testing.T) {
 	}
 	if e.Labels["sig_algorithm"] != "ed25519" {
 		t.Fatalf("entry should name the signature algorithm")
+	}
+	// Provenance + access-control metadata must survive the lowering so a sink can
+	// see who produced the KV and under what access policy it was admitted.
+	if e.Labels["producer_key_id"] != "key-1" {
+		t.Fatalf("entry should carry the producer key id, got %q", e.Labels["producer_key_id"])
+	}
+	if e.Labels["access_policy"] != "fleet-internal" {
+		t.Fatalf("entry should carry the access policy, got %q", e.Labels["access_policy"])
+	}
+}
+
+// Acceptance §2.4: provenance metadata (an attributable producer + its key id) is
+// REQUIRED before any third-party KV is admissible — digest/identity alone is not.
+func TestValidateManifestRequiresProvenance(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		mutate func(*KVManifest)
+	}{
+		{"no producer", func(m *KVManifest) { m.Producer = "" }},
+		{"no producer key", func(m *KVManifest) { m.ProducerKeyID = "" }},
+	} {
+		m := sampleManifest()
+		tc.mutate(&m)
+		if reason, ok := ValidateManifest(m); ok || reason != ReasonMissingProvenance {
+			t.Fatalf("%s: want refuse(missing_provenance), got reason=%q ok=%v", tc.name, reason, ok)
+		}
+		// The lowering checker must surface the same refusal, not a HIT.
+		claim := claimFor(m)
+		v := CheckResidentClaim(claim, m)
+		if v.Kind != LookupFault || v.Reason != ReasonMissingProvenance {
+			t.Fatalf("%s: CheckResidentClaim must FAULT(missing_provenance), got %+v", tc.name, v)
+		}
+	}
+}
+
+// Acceptance §2.4: access-control metadata is REQUIRED for any third-party KV; a
+// manifest with no declared access policy is refused before admission.
+func TestCheckResidentClaimRefusesMissingAccessControl(t *testing.T) {
+	m := sampleManifest()
+	m.AccessPolicy = ""
+	if reason, ok := ValidateManifest(m); ok || reason != ReasonAccessControlReq {
+		t.Fatalf("want refuse(access_control_required), got reason=%q ok=%v", reason, ok)
+	}
+	v := CheckResidentClaim(claimFor(m), m)
+	if v.Kind != LookupFault || v.Reason != ReasonAccessControlReq {
+		t.Fatalf("missing access policy must FAULT(access_control_required), got %+v", v)
+	}
+}
+
+// claimFor builds a fully-matching, signature-verified resident claim for a
+// manifest so a test can isolate the metadata gate from the binding/signature gates.
+func claimFor(m KVManifest) ResidentClaim {
+	return ResidentClaim{
+		ModelID: m.ModelID, TokenizerID: m.TokenizerID, AdapterID: m.AdapterID,
+		Precision: m.Precision, PositionConvention: m.PositionConvention,
+		Producer: m.Producer, SpanDigest: m.SpanDigest, Tokens: m.Tokens,
+		IntegrityChecksum: m.IntegrityChecksum, SignatureVerified: true,
 	}
 }

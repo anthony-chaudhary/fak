@@ -257,6 +257,8 @@ const (
 	ReasonRestoreMiss        LookupReason = "restore_miss"
 	ReasonManifestMismatch   LookupReason = "manifest_mismatch"
 	ReasonUnsignedArtifact   LookupReason = "unsigned_artifact"
+	ReasonMissingProvenance  LookupReason = "missing_provenance"
+	ReasonAccessControlReq   LookupReason = "access_control_required"
 	ReasonIndexMismatch      LookupReason = "index_mismatch"
 	ReasonNonCausalIndex     LookupReason = "non_causal_index"
 )

@@ -32,6 +32,11 @@ type KVManifest struct {
 	ProducerKeyID      string
 	IntegrityChecksum  string // producer-stated checksum over the KV bytes
 	Signature          ManifestSignature
+	// AccessPolicy is the access-control metadata REQUIRED for any third-party KV:
+	// the declared audience / license / tenancy that governs who may reuse this
+	// imported span. Empty is inadmissible — market KV with no stated access policy
+	// is refused before lowering (acceptance §2.4: provenance + access-control).
+	AccessPolicy string
 }
 
 // ManifestSignature is a detached signature over ManifestBindingDigest. The
@@ -91,6 +96,11 @@ type ResidentClaim struct {
 // model-bound prefill material — never semantic proof (§2.4).
 func CheckResidentClaim(claim ResidentClaim, manifest KVManifest) LookupVerdict {
 	e := manifestEntry(manifest)
+	// Admissibility precondition: any third-party KV must carry provenance and
+	// access-control metadata before its binding/signature is even considered.
+	if reason, ok := ValidateManifest(manifest); !ok {
+		return Fault(e, reason)
+	}
 	if !claim.SignatureVerified || manifest.Signature.Algorithm == "" || manifest.Signature.Algorithm == "none" {
 		return Fault(e, ReasonUnsignedArtifact)
 	}
@@ -106,6 +116,22 @@ func CheckResidentClaim(claim ResidentClaim, manifest KVManifest) LookupVerdict 
 		return Fault(e, ReasonManifestMismatch)
 	}
 	return Hit(e)
+}
+
+// ValidateManifest is the resident-claim lowering checker's admissibility gate: it
+// refuses a manifest that lacks the provenance and access-control metadata REQUIRED
+// for any third-party KV, before the manifest is lowered into a cachemeta.Entry or
+// served. Imported "market" KV needs an attributable producer (Producer AND its
+// ProducerKeyID) and a declared AccessPolicy — digest/identity alone is never enough
+// to admit it (acceptance §2.4). Returns ("", true) when the manifest is admissible.
+func ValidateManifest(m KVManifest) (LookupReason, bool) {
+	if m.Producer == "" || m.ProducerKeyID == "" {
+		return ReasonMissingProvenance, false
+	}
+	if m.AccessPolicy == "" {
+		return ReasonAccessControlReq, false
+	}
+	return "", true
 }
 
 // FromKVManifest lowers a (verified) manifest into a cachemeta entry on the
@@ -162,6 +188,8 @@ func manifestEntry(m KVManifest) Entry {
 			"integrity_checksum": m.IntegrityChecksum,
 			"binding_digest":     ManifestBindingDigest(m),
 			"sig_algorithm":      m.Signature.Algorithm,
+			"producer_key_id":    m.ProducerKeyID,
+			"access_policy":      m.AccessPolicy,
 		},
 	}
 	return e
