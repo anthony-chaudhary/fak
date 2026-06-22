@@ -189,6 +189,25 @@ jobs:
             || echo "::warning title=demo-debt::demo-debt present (advisory) — see docs/DEMO-QUALITY-SCORECARD.md; retire worst-first (add a runner, capture EXAMPLE-OUTPUT, state scope), then re-arm the HARD gate"
           echo "::endgroup::"
 
+      # Demo-robustness scorecard: the SAME demo corpus through a second lens —
+      # not "can a skeptic trust the claim" (that's demo-quality) but "will it keep
+      # running": simple to run, fast with no surprise waits, durable over time.
+      # Three axes (simplicity · speed · durability) and a robustness-debt integer
+      # (an unbounded wait loop, an unpinned run-time dep, no stated runtime, no
+      # stability guarantee). Same two tiers as its siblings:
+      #   * the tool's own unit tests are HARD (a real regression suite);
+      #   * the scorecard itself is ADVISORY for now — surfaced as a ::warning::
+      #     while robustness-debt is retired, then RATCHET to HARD.
+      # Pure-stdlib Python, repo root like the other honesty gates.
+      - name: demo-robustness scorecard (3 axes + robustness-debt; tests HARD, scorecard advisory)
+        working-directory: ${{ github.workspace }}
+        run: |
+          python tools/demo_robustness_scorecard_test.py
+          echo "::group::demo-robustness-scorecard (advisory while robustness-debt is retired)"
+          python tools/demo_robustness_scorecard.py \
+            || echo "::warning title=robustness-debt::robustness-debt present (advisory) — see docs/DEMO-ROBUSTNESS-SCORECARD.md; retire worst-first (bound unbounded waits, pin/offline run-time deps, state runtime + a stability guarantee), then re-arm the HARD gate"
+          echo "::endgroup::"
+
       # SEO/AEO discoverability gate (the docs scorecard's discovery-side twin).
       # The tool's own unit tests are HARD; the content checks are ADVISORY for now
       # (the docs site + FAQ structured data are landing across commits in a shared
