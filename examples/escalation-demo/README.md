@@ -64,7 +64,8 @@ build `fak`) and **Python 3** (stdlib only). No model, API key, GPU, or ollama.
 ./examples/escalation-demo/run.sh            # build kernel → serve the policy → run the demo → teardown
 ```
 
-`run.sh` tears down everything *it* started. Full captured run: [`EXAMPLE-OUTPUT.md`](EXAMPLE-OUTPUT.md).
+`run.sh` tears down everything *it* started. The demo itself **runs in a few seconds**
+once `fak` is built — no model, no network. Full captured run: [`EXAMPLE-OUTPUT.md`](EXAMPLE-OUTPUT.md).
 
 ## `safe_sinks` is no longer decorative
 

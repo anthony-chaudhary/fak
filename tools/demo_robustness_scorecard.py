@@ -219,6 +219,14 @@ def _readme_prose(demo: dq.Demo) -> str:
     return dq._prose_norm(demo.readme)
 
 
+def _flat_prose(demo: dq.Demo) -> str:
+    """README prose with ALL runs of whitespace collapsed to single spaces, so a
+    sentence-level phrase ("runs in a few seconds") is matched even when the source
+    wraps it across a line break. Used for the runtime + stability checks only — the
+    structural checks (multi-step list, quickstart heading) keep their line anchors."""
+    return re.sub(r"\s+", " ", _readme_prose(demo))
+
+
 def _entry_loc(demo: dq.Demo) -> int:
     """Lines of the entry scripts a reader must trust (test files excluded)."""
     total = 0
@@ -405,8 +413,8 @@ def axis_speed(demo: dq.Demo) -> dict[str, Any]:
 
     # HARD: no stated expected runtime. A demo should tell you whether it is 2s or
     # 20min, so a runner knows whether to wait.
-    has_runtime = bool(_RUNTIME_RE.search(_readme_prose(demo)) or
-                       _RUNTIME_RE.search(demo.example_output))
+    has_runtime = bool(_RUNTIME_RE.search(_flat_prose(demo)) or
+                       _RUNTIME_RE.search(re.sub(r"\s+", " ", demo.example_output)))
     if not has_runtime:
         defects.append("no stated expected runtime — the README never says how long a run takes; "
                        "state it (e.g. 'runs in ~Ns', 'completes in seconds')")
@@ -462,7 +470,7 @@ def axis_durability(demo: dq.Demo) -> dict[str, Any]:
 
     # HARD: no stability / determinism guarantee. A reader cannot tell whether re-
     # running is safe or whether the output is stable across runs/time.
-    has_stability = bool(_STABILITY_RE.search(_readme_prose(demo)))
+    has_stability = bool(_STABILITY_RE.search(_flat_prose(demo)))
     if not has_stability:
         defects.append("no stability / determinism guarantee — the README doesn't say whether a "
                        "re-run is repeatable (deterministic / byte-identical / pinned); state it")

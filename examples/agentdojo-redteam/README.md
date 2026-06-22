@@ -22,7 +22,8 @@ fixture (three fixed payloads that exercise only the raw lexical match).
 
 Everything runs **in-process, deterministically, with Go as the only prerequisite**
 — no model, no network, no API key. The same command prints byte-identical output
-every time and on every platform.
+every time and on every platform, and the whole battery **runs in ~1–2 seconds**
+(a one-time `go run` compile, then in-process).
 
 ## Run it
 

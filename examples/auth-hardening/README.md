@@ -19,8 +19,10 @@ examples/auth-hardening/run.sh            # build fak, serve with auth on, run 6
 
 Needs only Go (to build `fak`) and `curl` — **no model, key, or GPU**. The auth
 gate is a pure function of `(token, header)`, so the witnesses hit `/v1/models`
-and `/metrics`, which answer `200`-when-authed with no upstream configured. A
-captured run is in [`EXAMPLE-OUTPUT.md`](EXAMPLE-OUTPUT.md).
+and `/metrics`, which answer `200`-when-authed with no upstream configured — so the
+result is **deterministic**, identical on every run. The six witnesses **run in a
+few seconds** after the one-time `go build`. A captured run is in
+[`EXAMPLE-OUTPUT.md`](EXAMPLE-OUTPUT.md).
 
 The six witnesses:
 

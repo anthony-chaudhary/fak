@@ -101,6 +101,26 @@ def test_runtime_regex_matches_real_phrasings() -> None:
         assert dr._RUNTIME_RE.search(s), s
 
 
+def test_runtime_detected_across_a_line_wrap() -> None:
+    # A runtime phrase that the source wraps across a newline ("run in a\nfew
+    # seconds") must still be detected — the scorecard normalizes whitespace first.
+    d = Demo("examples/x",
+             readme="# X\n\nThe witnesses **run in a\nfew seconds**. Deterministic. Run `./run.sh`.\n",
+             scripts={"run.sh": "#!/bin/bash\nset -e\nexec go run ./x\n"},
+             files={"README.md", "run.sh"})
+    a = dr.axis_speed(d)
+    assert not any("no stated expected runtime" in x for x in a["defects"]), a
+
+
+def test_stability_detected_across_a_line_wrap() -> None:
+    d = Demo("examples/x",
+             readme="# X\n\nRuns in ~1s. The output is byte-\nidentical on every run.\n",
+             scripts={"run.sh": "#!/bin/bash\nset -e\nexec go run ./x\n"},
+             files={"README.md", "run.sh"})
+    a = dr.axis_durability(d)
+    assert not any("no stability" in x for x in a["defects"]), a
+
+
 def test_runtime_regex_ignores_prose_with_second_or_numbers() -> None:
     # "second turn", "a second role", "13 tokens" are NOT runtime statements.
     for s in ["the second turn only re-prefills the new 13 tokens",

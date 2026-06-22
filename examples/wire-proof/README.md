@@ -3,7 +3,8 @@
 One command proves the [integration index](../../docs/integrations/README.md)'s central
 claim — *every tool call your agent proposes passes through the capability floor first* —
 over real HTTP, with **no model, no API key, no GPU, no ollama**. Just the `fak` binary
-(or a Go toolchain to build it) and the Python standard library.
+(or a Go toolchain to build it) and the Python standard library. It **runs in a few
+seconds** — no model, no network, and no build at all when a `fak` binary is present.
 
 ```bash
 python3 examples/wire-proof/verify.py        # -> PASS / FAIL, exit 0 / 1  (CI-usable)

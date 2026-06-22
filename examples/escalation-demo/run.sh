@@ -52,10 +52,12 @@ fi
 FAKLOG="$TMP/fak-escalation-kernel.log"
 log "starting kernel: fak serve :$PORT  (capability floor = $(basename "$POLICY"))"
 "$BIN" serve --addr "127.0.0.1:$PORT" --policy "$POLICY" >"$FAKLOG" 2>&1 & KPID=$!
+tries=0
 until curl -sf "http://127.0.0.1:$PORT/healthz" >/dev/null 2>&1; do
   if ! kill -0 "$KPID" 2>/dev/null; then
     log "kernel died on startup (addr=127.0.0.1:$PORT) — last log lines:"; tail -20 "$FAKLOG" >&2 || true; exit 1
   fi
+  tries=$((tries + 1)); if [ "$tries" -ge 200 ]; then log "kernel did not become healthy within ~60s — last log lines:"; tail -20 "$FAKLOG" >&2 || true; exit 1; fi
   sleep 0.3
 done
 log "kernel healthy: $(curl -s "http://127.0.0.1:$PORT/healthz")"

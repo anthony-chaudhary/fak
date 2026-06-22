@@ -11,11 +11,11 @@
 | Metric | Value |
 |---|---|
 | Demos scored | 8 |
-| **Robustness-debt (total defects)** | **16** |
-| Axis-debt | simplicity:0 · speed:11 · durability:5 |
-| Mean score | 71.5/100 |
-| Median / min / max | 74.1 / 52.3 / 88.1 |
-| Grade distribution | A:0 B:2 C:3 D:1 F:2 |
+| **Robustness-debt (total defects)** | **0** |
+| Axis-debt | simplicity:0 · speed:0 · durability:0 |
+| Mean score | 95.3/100 |
+| Median / min / max | 95.8 / 88.0 / 100.0 |
+| Grade distribution | A:7 B:1 C:0 D:0 F:0 |
 
 ## Per-demo scores
 
@@ -23,48 +23,18 @@ Three axes, each 0–100 (simplicity · speed · durability), weighted into a sc
 
 | Score | Grade | Debt | simplicity | speed | durability | Demo |
 |---:|:--:|:--:|:--:|:--:|:--:|---|
-| 52.3 | F | 3 | 88 | 20 | 54 | `examples/adjudication-demo` |
-| 55.9 | F | 3 | 100 | 20 | 54 | `examples/auth-hardening` |
-| 67.8 | D | 2 | 100 | 20 | 88 | `examples/escalation-demo` |
-| 72.0 | C | 2 | 100 | 66 | 54 | `examples/mcp-client` |
-| 76.2 | C | 2 | 100 | 66 | 66 | `examples/mcp` |
-| 76.2 | C | 2 | 100 | 66 | 66 | `cmd/simpledemo` |
-| 83.9 | B | 1 | 100 | 66 | 88 | `examples/agentdojo-redteam` |
-| 88.1 | B | 1 | 100 | 66 | 100 | `examples/wire-proof` |
+| 88.0 | B | 0 | 88 | 88 | 88 | `examples/adjudication-demo` |
+| 91.6 | A | 0 | 100 | 88 | 88 | `examples/auth-hardening` |
+| 91.6 | A | 0 | 100 | 88 | 88 | `examples/escalation-demo` |
+| 95.8 | A | 0 | 100 | 100 | 88 | `examples/agentdojo-redteam` |
+| 95.8 | A | 0 | 100 | 100 | 88 | `examples/mcp-client` |
+| 100.0 | A | 0 | 100 | 100 | 100 | `examples/mcp` |
+| 100.0 | A | 0 | 100 | 100 | 100 | `examples/wire-proof` |
+| 100.0 | A | 0 | 100 | 100 | 100 | `cmd/simpledemo` |
 
 ## Robustness-debt work-list
 
-### `examples/adjudication-demo` — 3 defect(s), score 52.3 (F)
-- speed: no stated expected runtime — the README never says how long a run takes; state it (e.g. 'runs in ~Ns', 'completes in seconds')
-- speed: unbounded wait loop in `run.sh` — a polling loop sleeps with no timeout / max-attempts; it can hang forever (bound it)
-- durability: no stability / determinism guarantee — the README doesn't say whether a re-run is repeatable (deterministic / byte-identical / pinned); state it
-
-### `examples/auth-hardening` — 3 defect(s), score 55.9 (F)
-- speed: no stated expected runtime — the README never says how long a run takes; state it (e.g. 'runs in ~Ns', 'completes in seconds')
-- speed: unbounded wait loop in `run.sh` — a polling loop sleeps with no timeout / max-attempts; it can hang forever (bound it)
-- durability: no stability / determinism guarantee — the README doesn't say whether a re-run is repeatable (deterministic / byte-identical / pinned); state it
-
-### `examples/escalation-demo` — 2 defect(s), score 67.8 (D)
-- speed: no stated expected runtime — the README never says how long a run takes; state it (e.g. 'runs in ~Ns', 'completes in seconds')
-- speed: unbounded wait loop in `run.sh` — a polling loop sleeps with no timeout / max-attempts; it can hang forever (bound it)
-
-### `examples/mcp` — 2 defect(s), score 76.2 (C)
-- speed: no stated expected runtime — the README never says how long a run takes; state it (e.g. 'runs in ~Ns', 'completes in seconds')
-- durability: no stability / determinism guarantee — the README doesn't say whether a re-run is repeatable (deterministic / byte-identical / pinned); state it
-
-### `examples/mcp-client` — 2 defect(s), score 72.0 (C)
-- speed: no stated expected runtime — the README never says how long a run takes; state it (e.g. 'runs in ~Ns', 'completes in seconds')
-- durability: no stability / determinism guarantee — the README doesn't say whether a re-run is repeatable (deterministic / byte-identical / pinned); state it
-
-### `cmd/simpledemo` — 2 defect(s), score 76.2 (C)
-- speed: no stated expected runtime — the README never says how long a run takes; state it (e.g. 'runs in ~Ns', 'completes in seconds')
-- durability: no stability / determinism guarantee — the README doesn't say whether a re-run is repeatable (deterministic / byte-identical / pinned); state it
-
-### `examples/agentdojo-redteam` — 1 defect(s), score 83.9 (B)
-- speed: no stated expected runtime — the README never says how long a run takes; state it (e.g. 'runs in ~Ns', 'completes in seconds')
-
-### `examples/wire-proof` — 1 defect(s), score 88.1 (B)
-- speed: no stated expected runtime — the README never says how long a run takes; state it (e.g. 'runs in ~Ns', 'completes in seconds')
+No robustness-debt: every demo is simple, fast, and durable. 🎉
 
 ## Soft signals (score only, not debt)
 
@@ -81,9 +51,9 @@ Three axes, each 0–100 (simplicity · speed · durability), weighted into a sc
 - speed: builds the whole binary (`go build`) with no `go run` fast path — slower cold start and a leftover artifact
 - durability: shell-only entry (`.sh`) with no `.ps1` and no cross-platform note — a Windows user can't tell how to run it
 
-### `examples/mcp-client`
+### `examples/agentdojo-redteam`
 - durability: shell-only entry (`.sh`) with no `.ps1` and no cross-platform note — a Windows user can't tell how to run it
 
-### `examples/agentdojo-redteam`
+### `examples/mcp-client`
 - durability: shell-only entry (`.sh`) with no `.ps1` and no cross-platform note — a Windows user can't tell how to run it
 

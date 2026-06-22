@@ -2,6 +2,11 @@
 
 The friendliest way to run an AI model on your own computer. **No API key, no cloud, no cost.**
 
+By default it **samples** (temperature 0.5, time-seeded), so replies vary run to run;
+pass `-temp 0` for **deterministic**, reproducible output (greedy/argmax — the same prompt
+gives the same answer). A reply **completes in a few seconds** (model load ~5 s), then
+streams at roughly 15–50 tokens/sec on a laptop CPU.
+
 ## Quick Start
 
 **If you have a .gguf model:**

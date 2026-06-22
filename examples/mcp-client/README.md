@@ -22,8 +22,9 @@ python3 examples/mcp-client/client.py
 ```
 
 Needs only Python 3 (standard library — no `mcp` SDK, no `requests`) and the
-`fak` binary (or a Go toolchain to build it). No model, key, or GPU. A captured
-run is in [`EXAMPLE-OUTPUT.md`](EXAMPLE-OUTPUT.md).
+`fak` binary (or a Go toolchain to build it). No model, key, or GPU. It **runs in a
+few seconds** and is **deterministic** — the same six responses on every run. A
+captured run is in [`EXAMPLE-OUTPUT.md`](EXAMPLE-OUTPUT.md).
 
 ## The two transports
 

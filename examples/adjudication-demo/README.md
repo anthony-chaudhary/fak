@@ -39,6 +39,12 @@ FAK_DEMO_MODEL=qwen2.5:7b ./examples/adjudication-demo/run.sh   # smaller/faster
 
 `run.sh` tears down everything *it* started (kernel, and ollama if it had to launch it).
 
+> **Runtime & determinism.** The first run pulls `qwen2.5:14b` (~9 GB), which **takes
+> minutes**; after that a full run **takes a few seconds to a couple of minutes** of
+> local inference (hardware-dependent). Because a *real model* proposes the calls, its
+> proposals vary run to run — but the **kernel's verdicts are deterministic**: the same
+> `(policy, proposed call)` always yields the same ALLOW/DENY.
+
 ## What you see
 
 > **Reading the output:** a `✓` means *the verdict matched expectation* — so a `✓` on a

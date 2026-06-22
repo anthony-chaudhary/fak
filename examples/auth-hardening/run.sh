@@ -64,10 +64,12 @@ FAKLOG="$TMP/fak-auth-hardening.log"
 log "starting gateway: fak serve $BASE  --require-key-env FAK_TOKEN"
 "$BIN" serve --addr "127.0.0.1:$PORT" --require-key-env FAK_TOKEN >"$FAKLOG" 2>&1 & KPID=$!
 # /healthz is the ONE route exempt from the gate — so readiness needs no token.
+tries=0
 until curl -sf "$BASE/healthz" >/dev/null 2>&1; do
   if ! kill -0 "$KPID" 2>/dev/null; then
     log "gateway died on startup (addr=127.0.0.1:$PORT) — last log lines:"; tail -20 "$FAKLOG" >&2 || true; exit 1
   fi
+  tries=$((tries + 1)); if [ "$tries" -ge 200 ]; then log "gateway did not become healthy within ~60s — last log lines:"; tail -20 "$FAKLOG" >&2 || true; exit 1; fi
   sleep 0.3
 done
 log "gateway healthy (auth=on): $(curl -s "$BASE/healthz")"

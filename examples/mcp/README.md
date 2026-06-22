@@ -19,6 +19,9 @@ to build it) and the Python standard library:
 python examples/mcp/verify.py        # -> PASS / FAIL, exit 0 / 1
 ```
 
+The whole proof **runs in a few seconds** and is **deterministic** — the same four
+checks return the same verdicts on every run (no model, no network, no key).
+
 ### What you see
 
 It spawns `fak serve --stdio --policy examples/dev-agent-policy.json`, then runs four

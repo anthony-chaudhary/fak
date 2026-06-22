@@ -50,8 +50,10 @@ fi
 command -v ollama >/dev/null || { log "ollama not found — install from https://ollama.com"; exit 1; }
 if ! curl -sf "http://$OLLAMA/api/tags" >/dev/null 2>&1; then
   log "starting 'ollama serve'"; ollama serve >"$TMP/fak-demo-ollama.log" 2>&1 & OLLAMA_PID=$!
+  tries=0
   until curl -sf "http://$OLLAMA/api/tags" >/dev/null 2>&1; do
     kill -0 "$OLLAMA_PID" 2>/dev/null || { log "ollama failed to start (see $TMP/fak-demo-ollama.log)"; exit 1; }
+    tries=$((tries + 1)); [ "$tries" -ge 60 ] && { log "ollama did not answer within ~60s — giving up (see $TMP/fak-demo-ollama.log)"; exit 1; }
     sleep 1
   done
 fi
@@ -68,10 +70,12 @@ FAKLOG="$TMP/fak-demo-kernel.log"
 log "starting kernel: fak serve :$PORT  (model=$MODEL, capability floor = examples/dogfood-claude-policy.json)"
 "$BIN" serve --addr "127.0.0.1:$PORT" --model "$MODEL" \
   --base-url "http://$OLLAMA/v1" --policy "$POLICY" >"$FAKLOG" 2>&1 & KPID=$!
+tries=0
 until curl -sf "http://127.0.0.1:$PORT/healthz" >/dev/null 2>&1; do
   if ! kill -0 "$KPID" 2>/dev/null; then
     log "kernel died on startup (model=$MODEL, addr=127.0.0.1:$PORT) — last log lines:"; tail -20 "$FAKLOG" >&2 || true; exit 1
   fi
+  tries=$((tries + 1)); if [ "$tries" -ge 200 ]; then log "kernel did not become healthy within ~60s — last log lines:"; tail -20 "$FAKLOG" >&2 || true; exit 1; fi
   sleep 0.3
 done
 log "kernel healthy: $(curl -s "http://127.0.0.1:$PORT/healthz")"
