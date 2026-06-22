@@ -92,3 +92,64 @@ func TestIntentKeyDigestMismatchMisses(t *testing.T) {
 		t.Fatalf("digest mismatch should MISS(absent), got %+v", v)
 	}
 }
+
+func TestClusterPrecisionIsMeasurable(t *testing.T) {
+	// 3 of 4 members share the canonical intent => precision 0.75.
+	c := IntentCluster{
+		CanonicalIntent: "book_flight",
+		Members: []ClusterMember{
+			{IntentDigest: "a", TrueIntent: "book_flight"},
+			{IntentDigest: "b", TrueIntent: "book_flight"},
+			{IntentDigest: "c", TrueIntent: "book_hotel"}, // false grouping
+			{IntentDigest: "d", TrueIntent: "book_flight"},
+		},
+	}
+	if got := ClusterPrecision(c); got != 0.75 {
+		t.Fatalf("ClusterPrecision = %v, want 0.75", got)
+	}
+	// An empty cluster scores 0 (never act on an unobserved key).
+	if got := ClusterPrecision(IntentCluster{CanonicalIntent: "x"}); got != 0 {
+		t.Fatalf("empty cluster precision = %v, want 0", got)
+	}
+}
+
+func TestIntentKeyFromLooseClusterAbstains(t *testing.T) {
+	// A loose cluster (precision 0.75) below a 0.95 threshold must abstain, even
+	// on an exact digest match — the metric, not an asserted float, drives it.
+	loose := IntentCluster{
+		CanonicalIntent: "book_flight",
+		Members: []ClusterMember{
+			{IntentDigest: "a", TrueIntent: "book_flight"},
+			{IntentDigest: "b", TrueIntent: "book_flight"},
+			{IntentDigest: "c", TrueIntent: "book_hotel"},
+			{IntentDigest: "d", TrueIntent: "book_flight"},
+		},
+	}
+	k := IntentKeyFromCluster("intent-1", loose, 0.95, IntentKey{})
+	if k.Precision != 0.75 {
+		t.Fatalf("minted key precision = %v, want measured 0.75", k.Precision)
+	}
+	v := IntentKeyLookup(IntentCacheRequest{IntentDigest: "intent-1"}, k)
+	if v.Kind != LookupMiss || v.Reason != ReasonApproxFault {
+		t.Fatalf("loose cluster must abstain MISS(approximate_fault), got %+v", v)
+	}
+}
+
+func TestIntentKeyFromTightClusterIsAdvisoryHit(t *testing.T) {
+	// A tight cluster (precision 1.0) at/above threshold HITs — still advisory.
+	tight := IntentCluster{
+		CanonicalIntent: "book_flight",
+		Members: []ClusterMember{
+			{IntentDigest: "a", TrueIntent: "book_flight"},
+			{IntentDigest: "b", TrueIntent: "book_flight"},
+		},
+	}
+	k := IntentKeyFromCluster("intent-2", tight, 0.95, IntentKey{})
+	v := IntentKeyLookup(IntentCacheRequest{IntentDigest: "intent-2"}, k)
+	if v.Kind != LookupHit {
+		t.Fatalf("tight cluster exact match should HIT, got %s", v.Kind)
+	}
+	if v.Meta["advisory_only"] != "true" || v.Entry.Security.AdmissionVerdict != AdmissionDefer {
+		t.Fatalf("intent HIT must stay advisory-only (no direct effect): %+v", v)
+	}
+}

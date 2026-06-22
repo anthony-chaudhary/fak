@@ -226,6 +226,54 @@ func IntentKeyLookup(req IntentCacheRequest, k IntentKey) LookupVerdict {
 	return v
 }
 
+// IntentCluster is a labeled group of observed intents collapsed under one intent
+// key. Its PRECISION — the fraction of members whose true intent matches the
+// cluster's canonical intent — is the testable clustering metric that decides
+// whether the key is precise enough to act on. A loose cluster (members that merely
+// look similar) scores low and the lookup must abstain. This is the measurable
+// quantity behind IntentKey.Precision: a key minted from real evaluation data
+// carries the cluster's measured precision instead of an asserted number.
+type IntentCluster struct {
+	CanonicalIntent string
+	Members         []ClusterMember
+}
+
+// ClusterMember is one observed intent placed in a cluster. TrueIntent is its actual
+// (offline-labeled) intent; a member whose TrueIntent != the cluster's
+// CanonicalIntent is a false grouping that drags precision down.
+type ClusterMember struct {
+	IntentDigest string
+	TrueIntent   string
+}
+
+// ClusterPrecision is the fraction of cluster members whose true intent matches the
+// cluster's canonical intent. An empty cluster scores 0 (abstain — never act on an
+// unobserved key). The result is in [0,1] and is deterministic, so a clustering
+// pipeline can be regression-tested against a labeled fixture.
+func ClusterPrecision(c IntentCluster) float64 {
+	if len(c.Members) == 0 {
+		return 0
+	}
+	match := 0
+	for _, m := range c.Members {
+		if m.TrueIntent == c.CanonicalIntent {
+			match++
+		}
+	}
+	return float64(match) / float64(len(c.Members))
+}
+
+// IntentKeyFromCluster mints an intent key whose Precision is the MEASURED precision
+// of the cluster it came from, so the abstaining IntentKeyLookup is driven by a real
+// clustering metric rather than a hand-set float. The key stays advisory: it still
+// lowers to AdmissionDefer and may never directly execute an effect.
+func IntentKeyFromCluster(digest string, c IntentCluster, threshold float64, k IntentKey) IntentKey {
+	k.IntentDigest = digest
+	k.PrecisionThreshold = threshold
+	k.Precision = ClusterPrecision(c)
+	return k
+}
+
 // DigestIntentKey is the deterministic identity for an intent entry.
 func DigestIntentKey(k IntentKey) string {
 	h := sha256.New()
