@@ -25,6 +25,7 @@ const (
 	qk4            = 32
 	qk5            = 32
 	qk8_0          = 32
+	qkMXFP4        = 32
 	qkK            = 256
 	kScaleSize     = 12
 	blockQ4_0Bytes = 2 + qk4/2
@@ -37,6 +38,9 @@ const (
 	blockQ4KBytes  = 2 + 2 + kScaleSize + qkK/2
 	blockQ5KBytes  = 2 + 2 + kScaleSize + qkK/8 + qkK/2
 	blockQ6KBytes  = qkK/2 + qkK/4 + qkK/16 + 2
+	// MXFP4 (gpt-oss): a 1-byte E8M0 shared scale + qkMXFP4/2 bytes of packed
+	// 4-bit E2M1 codes (two per byte) = 17 bytes per 32-element block.
+	blockMXFP4Bytes = 1 + qkMXFP4/2
 )
 
 type ValueType uint32
@@ -1661,6 +1665,11 @@ func tensorPayloadBytes(t TensorInfo) (uint64, error) {
 			return 0, fmt.Errorf("gguf: tensor %s Q6_K element count %d is not a multiple of %d", t.Name, elems, qkK)
 		}
 		return elems / qkK * blockQ6KBytes, nil
+	case TensorMXFP4:
+		if elems%qkMXFP4 != 0 {
+			return 0, fmt.Errorf("gguf: tensor %s MXFP4 element count %d is not a multiple of %d", t.Name, elems, qkMXFP4)
+		}
+		return elems / qkMXFP4 * blockMXFP4Bytes, nil
 	default:
 		return 0, fmt.Errorf("gguf: tensor %s type %d does not have a simple f32 payload", t.Name, t.Type)
 	}
@@ -1810,6 +1819,15 @@ func dequantF32(t TensorInfo, raw []byte) ([]float32, error) {
 			return nil, fmt.Errorf("gguf: tensor %s Q6_K payload has %d bytes, want %d", t.Name, len(raw), want)
 		}
 		dequantQ6K(out, raw)
+	case TensorMXFP4:
+		if elems%qkMXFP4 != 0 {
+			return nil, fmt.Errorf("gguf: tensor %s MXFP4 element count %d is not a multiple of %d", t.Name, elems, qkMXFP4)
+		}
+		want := int(elems / qkMXFP4 * blockMXFP4Bytes)
+		if len(raw) != want {
+			return nil, fmt.Errorf("gguf: tensor %s MXFP4 payload has %d bytes, want %d", t.Name, len(raw), want)
+		}
+		dequantMXFP4(out, raw)
 	default:
 		return nil, fmt.Errorf("gguf: tensor %s type %d cannot dequantize to f32 yet", t.Name, t.Type)
 	}
@@ -1833,6 +1851,38 @@ func dequantQ4_0(out []float32, raw []byte) {
 			x1 := int(qs[j]>>4) - 8
 			out[yi+j] = float32(x0) * d
 			out[yi+j+qk4/2] = float32(x1) * d
+		}
+	}
+}
+
+// kvaluesMXFP4 maps a 4-bit E2M1 (FP4) code to its value, stored as 2x the real
+// FP4 magnitude so the table is exact integers; the ×0.5 that restores the true
+// E2M1 values {0,.5,1,1.5,2,3,4,6} is folded into the E8M0 scale by e8m0ToF32Half
+// (which yields 2^(e-128) rather than 2^(e-127)). This matches GGML's
+// kvalues_mxfp4 + GGML_E8M0_TO_FP32_HALF pairing for gpt-oss weights.
+var kvaluesMXFP4 = [16]float32{0, 1, 2, 3, 4, 6, 8, 12, 0, -1, -2, -3, -4, -6, -8, -12}
+
+// e8m0ToF32Half decodes an E8M0 shared-exponent scale byte to 2^(e-128) — the
+// half-scaled power that pairs with the doubled kvaluesMXFP4 table so that
+// kvaluesMXFP4[code] * e8m0ToF32Half(e) == fp4(code) * 2^(e-127).
+func e8m0ToF32Half(e uint8) float32 {
+	return float32(math.Ldexp(1, int(e)-128))
+}
+
+// dequantMXFP4 expands the MXFP4 (gpt-oss) 32-element block: a 1-byte E8M0 shared
+// scale followed by qkMXFP4/2 bytes of packed 4-bit E2M1 codes. The GGML layout
+// (dequantize_row_mxfp4) interleaves like Q4_0 — the low nibble of byte j is
+// element j, the high nibble is element j+qkMXFP4/2 — and each code indexes the
+// E2M1 value table scaled by the block's half-scaled E8M0 exponent.
+func dequantMXFP4(out []float32, raw []byte) {
+	for block := 0; block < len(out)/qkMXFP4; block++ {
+		base := block * blockMXFP4Bytes
+		d := e8m0ToF32Half(raw[base])
+		qs := raw[base+1 : base+blockMXFP4Bytes]
+		yi := block * qkMXFP4
+		for j := 0; j < qkMXFP4/2; j++ {
+			out[yi+j] = kvaluesMXFP4[qs[j]&0x0f] * d
+			out[yi+j+qkMXFP4/2] = kvaluesMXFP4[qs[j]>>4] * d
 		}
 	}
 }
