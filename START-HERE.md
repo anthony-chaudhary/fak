@@ -98,7 +98,7 @@ its commit and artifact.
 ## Requirements
 
 - **A clone of this repo** (`git clone https://github.com/anthony-chaudhary/fak.git`) — the demo runs from inside it
-- **Go 1.26+** (auto-downloads if you have an older version)
+- **Go 1.26+** (the toolchain auto-upgrades from `go.mod` once the repo is cloned)
 - **4-8 GB RAM** (depends on model size)
 - That's it!
 
