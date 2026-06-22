@@ -147,7 +147,9 @@ merged into upstream requests), `FAK_DOGFOOD_PRESET` (`qwen36-local`),
 > genuinely usable session use a 7B+ tool model, e.g.
 > `FAK_DOGFOOD_MODEL=qwen2.5-coder:7b fak-dogfood`. The launcher also fails loud if
 > the port is already held by a prior kernel (so you never silently attach to a
-> stale one), and `/healthz` now reports `"planner":"live"` vs `"mock"`.
+> stale one), and `/healthz` now reports a `"planner"` field — `"proxy"` (a live
+> `--base-url` upstream), `"inkernel"` (a `--gguf` fused model), or `"mock"` (the
+> scripted offline fallback) — so a probe can tell a real backend from the mock.
 
 ### Large local OpenAI-compatible model
 
@@ -201,6 +203,7 @@ call. The interesting part is what it refuses:
 |---|---|---|
 | `ls`, `cat`, `grep`, `git commit` | ✅ allowed | everyday dev work |
 | `rm -rf …`, `rm -f …` | ⛔ `POLICY_BLOCK` | destructive removal, denied by **argument value** |
+| `go build -o ../x`, `> ../x`, `cp .. ../x` | ⛔ `POLICY_BLOCK` | write that **escapes the repo** into a sibling tree — see [`docs/repo-guard.md`](docs/repo-guard.md) |
 | `sudo …` | ⛔ `POLICY_BLOCK` | privilege escalation |
 | `git push …` | ⛔ `POLICY_BLOCK` | the agent can commit but not publish |
 | `curl … \| sh`, `:(){ :\|:& };:`, `dd if=… of=/dev/sd…` | ⛔ `POLICY_BLOCK` | RCE pipe / fork bomb / disk wipe |

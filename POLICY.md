@@ -77,6 +77,7 @@ through?"* before deploying.
 | `deny` | Explicit provable refusals: `tool → reason`. The reason **must** be a name from the closed refusal vocabulary (below). |
 | `self_modify_globs` | Path fragments that, in a *write-shaped* call's target argument, prove a `SELF_MODIFY` attempt (the agent editing its own kernel/config). |
 | `redact_fields` | Arg keys whose value is stripped (`[REDACTED]`, a `TRANSFORM`) before dispatch — secret hygiene at the call boundary. |
+| `arg_rules` | Per-tool **argument-value** denials: a list of `{ "tool", "arg", "deny_regex", "reason" }`. If an allow-listed `tool`'s decoded string `arg` matches `deny_regex` (RE2 — no backreferences), the call is refused with `reason` (a closed-vocabulary code). Regex-only and best-effort — it inspects one decoded string, not the resolved effect — but enough to deny `rm -rf`, `git push`, or a write whose path escapes the repo (`-o ../…`). See [`examples/dogfood-claude-policy.json`](examples/dogfood-claude-policy.json) and [`examples/repo-guard-policy.json`](examples/repo-guard-policy.json); the path-resolving structural complement is [`tools/repo_guard.py`](tools/repo_guard.py) (see [`docs/repo-guard.md`](docs/repo-guard.md)). |
 
 **Anything not in `allow` / `allow_prefix` and not explicitly denied resolves to
 the fail-closed `DEFAULT_DENY`.** An *empty* manifest (`{}`) is valid — it is the
@@ -138,8 +139,10 @@ unknown code as `REASON_<n>` rather than failing.)
 - A YAML reader (comments + anchors) as a thin front-end over the same schema —
   kept out of v0.1 to preserve the zero-dependency, single-static-binary
   property.
-- Argument-level constraints (value predicates on allow-listed tools), so the
-  floor can bound *what* a permitted tool does, not only *that* it may run.
+- Richer argument-level constraints. A regex form (`arg_rules`, above) already
+  ships, so the floor can bound *what* a permitted tool does, not only *that* it
+  may run; the roadmap is structured value predicates (path-resolution,
+  numeric/range, allow-list-by-arg) beyond a single `deny_regex`.
 - SIGHUP and signed manifests for long-lived deployments. HTTP reload is already
   available through `POST /v1/fak/policy/reload` when `serve` starts with
   `--policy FILE`.

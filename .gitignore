@@ -257,6 +257,18 @@ experiments/fleet/*.log
 /*_tracked.txt
 /.only_in_*.txt
 
+# default outputs of `fak bench` (GETTING-STARTED Tier 0): `report.json` plus the
+# `baseline.json` companion it writes alongside (cmd/fak/main.go). Both are regenerable
+# scratch dropped at the module root, same as the turntax/agent reports above. Committed
+# bench records live under experiments/.
+/report.json
+/baseline.json
+
+# the canonical capability-floor manifest name the docs tell you to author at the module
+# root: `fak policy --dump > floor.json` (README, GETTING-STARTED, tutorial, cli-reference).
+# A user-authored scratch artifact of the getting-started flow — ignore so the documented
+# step never leaves a stray file for `git add` to sweep into this shared tree.
+/floor.json
 gpucheck_wsl
 *.tmp.*
 
