@@ -82,6 +82,10 @@ func main() {
 		cmdPolicy(os.Args[2:])
 	case "lint":
 		cmdLint(os.Args[2:])
+	case "answer-shape":
+		cmdAnswerShape(os.Args[2:])
+	case "doctor":
+		cmdDoctor(os.Args[2:])
 	case "serve":
 		cmdServe(os.Args[2:])
 	case "hook":
@@ -183,6 +187,17 @@ func usage() {
                  the model is shown but the kernel never enforces — once, instead of
                  the runtime silently papering over it every call. Exit 1 on an
                  error finding, or on any finding with --strict)
+  fak answer-shape [--text - | --file PATH | --text STR] [--max-repeat 0.5] [--max-chars N] [--ngram 3] [--json]
+                (the DEGENERATION/VERBOSITY WITNESS: judge the SHAPE of a candidate
+                 answer or tool result — how repetitive (looping) and how long
+                 (runaway) it is — against your thresholds. The graded consumer dual
+                 of the context-MMU's write-time repeat-admit rung. Reads stdin on
+                 "-" or no source. Exit 1 when degenerate, so it gates a pipeline)
+  fak doctor    [--text - | --file PATH | --text STR] [--max-repeat 0.5] [--max-chars N] [--ngram 3] [--json]
+                (the OPERATOR DIAGNOSTIC: run the answer-shape witness over a text and
+                 cross-check the real kernel admit verdict (would the context-MMU
+                 quarantine it?), then RECOMMEND what to do about each finding. Exit 1
+                 on any finding. The fak analogue of 'dos doctor')
   fak recall    [--dir DIR] [--out recall-report.json] [--query STR]
                 (persist a finished session as a core dump, reload it in a FRESH
                  store, and demonstrate the quarantine surviving the boundary)

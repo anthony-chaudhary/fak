@@ -137,9 +137,21 @@ fak serve     --addr :8080 [--require-key-env VAR]     # OpenAI-compatible HTTP 
 fak recall    --dir DIR                                # persist/inspect a finished session as a durable core image
 fak dream     --dir DIR --out-dir DIR                   # offline cleanup pass over a sleeping core image
 fak debug     --session DIR --cmd report|info|bt|x|ws|grep|tombstone|context-query|context-diff   # attach to a session core image; demand-page its working set
+fak answer-shape --text - --max-repeat 0.5 [--max-chars N]   # degeneration/verbosity witness over a text; exit 1 when it loops/runs away
+fak doctor    --text - [--max-repeat 0.5] [--max-chars N]   # run the answer-shape witness + the kernel admit cross-check, then recommend
 fak policy    --dump > policy.json | --check policy.json   # author/validate the deployable capability floor
 fak hook      < call.json                              # spawned-hook decide (the A/B baseline)
 ```
+
+`answer-shape` is the consumer-facing, GRADED dual of the context-MMU's write-time
+repeat-admit rung: the kernel quarantines only the most blatant byte-repeat
+pollution, while `fak answer-shape` judges the SHAPE of any candidate answer —
+word-n-gram repeat, repeated-line blocks, and short-period tiling, headlined as one
+`repeat` fraction — against thresholds you pick, off the hot path. It reads stdin on
+`-` (or with no source), exits `1` when degenerate, so it gates a pipeline. `fak
+doctor` wraps that witness into operator recommendations and additionally reports the
+real verdict the context-MMU would reach on the same bytes (`ctxmmu.ScreenBytes`) —
+the fak analogue of `dos doctor`.
 
 `run`, `preflight`, and `agent` take `--policy FILE` to load the capability floor
 from a declarative JSON **manifest** instead of the compiled-in default — so WHICH
