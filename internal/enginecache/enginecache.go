@@ -87,7 +87,9 @@ func (c Client) Invalidate(ctx context.Context, dirs []cachemeta.ExternalInvalid
 	}
 	httpClient := c.HTTPClient
 	if httpClient == nil {
-		httpClient = http.DefaultClient
+		// A defensive default: the request is context-scoped, but a caller-supplied
+		// ctx without a deadline would otherwise inherit DefaultClient's no-timeout.
+		httpClient = &http.Client{Timeout: 10 * time.Second}
 	}
 	resp, err := httpClient.Do(req)
 	if err != nil {

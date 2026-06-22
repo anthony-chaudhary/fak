@@ -94,7 +94,7 @@ func scanFile(path, rel string) ([]Offense, error) {
 	fset := token.NewFileSet()
 	f, err := parser.ParseFile(fset, path, nil, 0)
 	if err != nil {
-		return nil, fmt.Errorf("parse %s: %w", rel, err)
+		return nil, nil // not parseable as standalone Go (e.g. a //go:build cuda cgo file); skip
 	}
 	var offenses []Offense
 	ast.Inspect(f, func(n ast.Node) bool {

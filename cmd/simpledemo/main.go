@@ -25,6 +25,7 @@ import (
 	"io"
 	"math"
 	"math/rand"
+	"net"
 	"net/http"
 	"os"
 	"os/exec"
@@ -432,9 +433,21 @@ func downloadFile(url, dest string, showProgress bool) error {
 	return fmt.Errorf("all download methods failed: %w", err)
 }
 
+// downloadClient fetches models and tokenizers. It sets connection and
+// response-header deadlines so a dead or stalled host fails fast, but deliberately
+// leaves Client.Timeout at 0: a multi-GB model legitimately takes minutes to stream,
+// and a blanket deadline would abort a large download mid-flight.
+var downloadClient = &http.Client{
+	Transport: &http.Transport{
+		DialContext:           (&net.Dialer{Timeout: 30 * time.Second}).DialContext,
+		TLSHandshakeTimeout:   30 * time.Second,
+		ResponseHeaderTimeout: 60 * time.Second,
+	},
+}
+
 // downloadFileGo downloads using Go's HTTP client.
 func downloadFileGo(url, dest string, showProgress bool) error {
-	resp, err := http.Get(url)
+	resp, err := downloadClient.Get(url)
 	if err != nil {
 		return fmt.Errorf("fetch failed: %w", err)
 	}

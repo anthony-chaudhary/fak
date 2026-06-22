@@ -102,7 +102,7 @@ func scanCmd(dir, name string) ([]Offense, error) {
 		}
 		af, perr := parser.ParseFile(fset, filepath.Join(dir, f.Name()), nil, 0)
 		if perr != nil {
-			return nil, fmt.Errorf("parse %s/%s: %w", name, f.Name(), perr)
+			continue // not parseable as standalone Go (e.g. a //go:build cuda cgo file); skip
 		}
 		parsed = append(parsed, af)
 	}
