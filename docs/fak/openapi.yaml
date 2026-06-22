@@ -1,0 +1,1117 @@
+openapi: 3.0.3
+info:
+  title: fak gateway API
+  version: 0.30.0
+  description: |
+    Machine-readable OpenAPI 3.0 reference for every HTTP endpoint exposed by
+    `fak serve` — the agent kernel gateway. fak fronts the OpenAI
+    (`/v1/chat/completions`, `/v1/embeddings`, `/v1/moderations`, `/v1/models`),
+    Anthropic Messages (`/v1/messages`, `/v1/messages/count_tokens`), fak-native
+    adjudication (`/v1/fak/*`), and MCP-over-HTTP (`/mcp`) wires on one port,
+    behind an optional default-deny capability floor.
+
+    This spec is the companion to the human-readable reference
+    [`docs/fak/api-reference.md`](api-reference.md). Every path, method, and
+    schema below is sourced from the gateway route table
+    (`internal/gateway/http.go`) and the wire DTOs (`internal/gateway/wire.go`,
+    `gateway.go`, `coherence.go`, `embeddings.go`, `moderations.go`, `debug.go`).
+    Field names are the exact JSON tags.
+
+    A refusal (DENY / QUARANTINE / TRANSFORM) is a **successful 200** carried as a
+    value in the `verdict` object — HTTP error statuses are reserved for malformed
+    requests, auth failures, and upstream/gateway faults, never for a policy
+    refusal. See the `ErrorResponse` schema and the `WireVerdict` schema.
+
+    For the MCP tool-result wire format in depth (the `content[0].text` envelope
+    every `fak_*` tool returns over `/mcp` and stdio), see
+    [`docs/mcp-tool-result.md`](../../docs/mcp-tool-result.md).
+  license:
+    name: Apache-2.0
+    url: https://www.apache.org/licenses/LICENSE-2.0
+  contact:
+    name: fak
+    url: https://github.com/anthony-chaudhary/fak
+externalDocs:
+  description: fak Gateway API reference (human-readable)
+  url: https://github.com/anthony-chaudhary/fak/blob/main/docs/fak/api-reference.md
+servers:
+  - url: http://127.0.0.1:8080
+    description: Default loopback bind (`fak serve --addr 127.0.0.1:8080`).
+
+# ---------------------------------------------------------------------------
+# Security. Auth is OFF by default (drop-in, loopback). When the operator sets a
+# secret via `--require-key-env <ENV>`, EVERY route except /healthz requires it.
+# Both schemes compare against the SAME single secret in constant time. A bare
+# `Authorization` value with no `Bearer ` prefix is rejected.
+# ---------------------------------------------------------------------------
+security:
+  - bearerAuth: []
+  - apiKeyAuth: []
+tags:
+  - name: OpenAI
+    description: OpenAI-compatible surface (`/v1/chat/completions`, `/v1/embeddings`, `/v1/moderations`, `/v1/models`).
+  - name: Anthropic
+    description: Native Anthropic Messages surface — the wire Claude Code uses.
+  - name: fak-native
+    description: The simplest non-Go integration — one POST, one verdict (`/v1/fak/*`).
+  - name: MCP
+    description: MCP-over-HTTP — JSON-RPC 2.0 over a single POST (`/mcp`).
+  - name: Operational
+    description: Liveness, metrics, diagnostics (`/healthz`, `/metrics`, `/debug/vars`).
+
+paths:
+  # -------------------------------------------------------------------------
+  # OpenAI-compatible surface
+  # -------------------------------------------------------------------------
+  /v1/chat/completions:
+    post:
+      tags: [OpenAI]
+      summary: Adjudicating chat proxy
+      description: |
+        Forwards the chat to the configured model, then runs every **proposed**
+        `tool_call` through the kernel BEFORE the caller sees it: denied calls are
+        dropped, grammar-repaired calls have their arguments rewritten to the
+        canonical form, and a fak-aware client gets the full per-call adjudication
+        in the `fak` extension. The gateway NEVER executes the client's tools.
+        With `stream: true` a synthetic SSE stream is emitted after the full
+        upstream turn is adjudicated; raw upstream deltas are never passed through.
+      parameters:
+        - $ref: '#/components/parameters/XTraceId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ChatRequest' }
+            examples:
+              plain:
+                summary: A plain chat turn
+                value:
+                  model: qwen2.5:1.5b
+                  messages:
+                    - { role: user, content: "Say hello." }
+              withTools:
+                summary: A turn that proposes a tool call
+                value:
+                  model: qwen2.5:1.5b
+                  messages: [{ role: user, content: "Read test.txt" }]
+                  tools:
+                    - { type: function, function: { name: read_file, description: "Read a file", parameters: { type: object, properties: { path: { type: string } }, required: [path] } } }
+      responses:
+        '200':
+          description: The adjudicated completion. Denied `tool_calls` are stripped from `choices[0].message.tool_calls`; the `fak` extension carries every proposed call's verdict (including dropped ones).
+          headers:
+            X-Trace-Id: { $ref: '#/components/headers/XTraceIdResp' }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ChatResponse' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '405': { $ref: '#/components/responses/MethodNotAllowed' }
+        '502':
+          description: Upstream model error, or the upstream announced tool calls but none parsed (fail-closed). The provider's raw error body never crosses the trust boundary.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+              example: { error: { message: "upstream model error", type: "server_error", code: null, param: null } }
+
+  /v1/embeddings:
+    post:
+      tags: [OpenAI]
+      summary: Deterministic embeddings
+      description: |
+        OpenAI-compatible embeddings with a deterministic, self-contained backend
+        (an L2-normalized feature-hash projection). No GPU, no weights, no network:
+        identical text yields an identical vector. Built for deterministic tests,
+        semantic-cache keys, and nearest-neighbour smoke checks — not a learned model.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/EmbeddingsRequest' }
+            example: { model: fak, input: "hello world", encoding_format: float, dimensions: 256 }
+      responses:
+        '200':
+          description: One embedding per input item, in request order.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/EmbeddingsResponse' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '405': { $ref: '#/components/responses/MethodNotAllowed' }
+
+  /v1/moderations:
+    post:
+      tags: [OpenAI]
+      summary: Deterministic moderation
+      description: |
+        OpenAI-compatible moderation with a deterministic lexical backend that
+        scans each input for category keywords. An honest, explainable baseline
+        (not a learned safety model) that runs on-host with no GPU or network.
+        `categories` (bool) and `category_scores` ([0,1]) always carry the FULL
+        OpenAI category vocabulary; an input is `flagged` iff any category reaches 0.5.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ModerationsRequest' }
+            example: { model: fak, input: "some text to classify" }
+      responses:
+        '200':
+          description: One result per input item, in request order.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ModerationsResponse' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '405': { $ref: '#/components/responses/MethodNotAllowed' }
+
+  /v1/models:
+    get:
+      tags: [OpenAI]
+      summary: List the served model
+      description: Lists the single model configured at boot (`--model`). Method is not enforced; GET is canonical.
+      security: []   # enforced only when --require-key-env is set; documented for completeness
+      responses:
+        '200':
+          description: The OpenAI-style model list.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  object: { type: string, example: list }
+                  data:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        id: { type: string, example: qwen2.5:1.5b }
+                        object: { type: string, example: model }
+                        owned_by: { type: string, example: fak }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  # -------------------------------------------------------------------------
+  # Anthropic Messages surface
+  # -------------------------------------------------------------------------
+  /v1/messages:
+    post:
+      tags: [Anthropic]
+      summary: Adjudicating Messages proxy
+      description: |
+        The adjudication proxy on the Anthropic Messages wire — the
+        Claude-Code-facing twin of `/v1/chat/completions`. Same planner, same
+        kernel boundary, different downstream wire. Inbound `tool_result` blocks
+        are run through the result-side floor before the upstream model sees them.
+        `max_tokens` is REQUIRED on this wire. Because Claude Code reads content
+        blocks but not the `fak` key, the kernel's drops/repairs/quarantines are
+        ALSO prepended as a short in-band `[fak] …` text block.
+      parameters:
+        - $ref: '#/components/parameters/XTraceId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+              description: An Anthropic Messages request body (`model`, `messages`, `system`, `tools`, `max_tokens` (required), `temperature`, `top_p`, `stop_sequences`, `stream`). Unknown fields are ignored for drop-in compatibility.
+            example:
+              model: claude-3-5-sonnet-20241022
+              max_tokens: 256
+              messages: [{ role: user, content: "Say hello." }]
+      responses:
+        '200':
+          description: A standard Anthropic Messages object plus a top-level `fak` extension.
+          headers:
+            X-Trace-Id: { $ref: '#/components/headers/XTraceIdResp' }
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+                description: '`id`, `type: "message"`, `role: "assistant"`, `model`, `content`, `stop_reason`, `stop_sequence`, `usage`, and the optional `fak` extension.'
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '405': { $ref: '#/components/responses/MethodNotAllowed' }
+        '502':
+          description: Upstream model error (the raw provider body is not forwarded).
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+
+  /v1/messages/count_tokens:
+    post:
+      tags: [Anthropic]
+      summary: Token-count estimate
+      description: A cheap, tokenizer-free estimate. Claude Code treats this as optional (a 404 is fine), but answering it keeps its context-management heuristics from flying blind.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+              description: An Anthropic Messages request body (the `messages` array is what is counted).
+      responses:
+        '200':
+          description: The estimated input token count.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  input_tokens: { type: integer, example: 12 }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '405': { $ref: '#/components/responses/MethodNotAllowed' }
+
+  # -------------------------------------------------------------------------
+  # fak-native surface — one POST, one verdict
+  # -------------------------------------------------------------------------
+  /v1/fak/syscall:
+    post:
+      tags: [fak-native]
+      summary: Adjudicate AND execute one tool call
+      description: The self-contained / CI path — kernel dispatch to the registered engine plus result-side admission.
+      parameters:
+        - $ref: '#/components/parameters/XTraceId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/SyscallRequest' }
+            example: { tool: read_file, arguments: { path: "test.txt" } }
+      responses:
+        '200':
+          description: The verdict plus the executed result envelope.
+          headers:
+            X-Trace-Id: { $ref: '#/components/headers/XTraceIdResp' }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SyscallResponse' }
+              examples:
+                allow:
+                  summary: ALLOW — adjudicated and executed
+                  value:
+                    verdict: { kind: ALLOW, by: tool }
+                    result: { status: OK, content: "{\"rows\":3}" }
+                    trace_id: t-7f3a9c
+                deny:
+                  summary: DENY — a refusal is a successful 200
+                  value:
+                    verdict: { kind: DENY, reason: SELF_MODIFY, by: selfmod, disposition: ESCALATE, detail: { claim: "fak/internal/kernel/kernel.go" } }
+                    trace_id: t-7f3a9c
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '405': { $ref: '#/components/responses/MethodNotAllowed' }
+
+  /v1/fak/adjudicate:
+    post:
+      tags: [fak-native]
+      summary: Pre-execution verdict only
+      description: The production path for a client that runs its own tools — no dispatch, no engine, no pending state.
+      parameters:
+        - $ref: '#/components/parameters/XTraceId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/SyscallRequest' }
+            example: { tool: transform_x, arguments: { secret: "s" } }
+      responses:
+        '200':
+          description: The verdict only (`result` is absent). `repaired_arguments` is present ONLY when the verdict is `TRANSFORM`.
+          headers:
+            X-Trace-Id: { $ref: '#/components/headers/XTraceIdResp' }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SyscallResponse' }
+              examples:
+                transform:
+                  summary: TRANSFORM — run the canonical args instead
+                  value:
+                    verdict: { kind: TRANSFORM, by: canon }
+                    repaired_arguments: { path: "/srv/data/report.csv", mode: r }
+                    trace_id: t-7f3a9c
+                allow:
+                  summary: ALLOW — no result on this path
+                  value:
+                    verdict: { kind: ALLOW, by: tool }
+                    trace_id: t-7f3a9c
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '405': { $ref: '#/components/responses/MethodNotAllowed' }
+
+  /v1/fak/admit:
+    post:
+      tags: [fak-native]
+      summary: Admit a client-executed tool result
+      description: |
+        Runs a CLIENT-PRODUCED tool result through the kernel's result-side stack
+        (context-MMU quarantine + IFC source-stamp). The served-path complement of
+        `/v1/fak/adjudicate`: *adjudicate* gates the call BEFORE the client runs it;
+        *admit* contains the result AFTER. A poisoned/secret-shaped result is paged
+        out (quarantined) and the session's IFC taint high-water mark is raised.
+      parameters:
+        - $ref: '#/components/parameters/XTraceId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/AdmitRequest' }
+            example: { tool: read_file, result: { rows: 3 }, trace_id: t-7f3a9c }
+      responses:
+        '200':
+          description: The verdict (kind `QUARANTINE` means the bytes were paged out) plus the result envelope.
+          headers:
+            X-Trace-Id: { $ref: '#/components/headers/XTraceIdResp' }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SyscallResponse' }
+              example:
+                verdict: { kind: QUARANTINE, reason: SECRET_EXFIL, disposition: TERMINAL }
+                result: { status: OK, content: "", meta: { admit: quarantined } }
+                trace_id: t-7f3a9c
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '405': { $ref: '#/components/responses/MethodNotAllowed' }
+
+  /v1/fak/changes:
+    get:
+      tags: [fak-native]
+      summary: Drain the cross-agent change feed (GET)
+      description: Events after the `?since=` cursor; `since=0` (or omitted) returns everything retained.
+      parameters:
+        - name: since
+          in: query
+          required: false
+          schema: { type: integer, minimum: 0, default: 0 }
+          description: The Seq of the last event the client saw (its cursor). Non-numeric yields `400`.
+      responses:
+        '200':
+          description: The drained events plus the client's next cursor.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ChangesResponse' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+    post:
+      tags: [fak-native]
+      summary: Drain the cross-agent change feed (POST)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ChangesRequest' }
+            example: { since: 42 }
+      responses:
+        '200':
+          description: The drained events plus the client's next cursor.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ChangesResponse' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /v1/fak/events:
+    get:
+      tags: [fak-native]
+      summary: Drain the durable audit journal (GET)
+      description: |
+        The hash-chained audit-journal tail (`internal/journal`) after the `?since=`
+        cursor — the persisted verdict ledger, mirroring `/v1/fak/changes` over the
+        on-disk JSONL rather than the live coherence bus. `404` if no journal is
+        configured (`FAK_AUDIT_JOURNAL` unset at boot).
+      parameters:
+        - name: since
+          in: query
+          required: false
+          schema: { type: integer, minimum: 0, default: 0 }
+      responses:
+        '200':
+          description: The drained journal rows plus the client's next cursor.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/EventsResponse' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404':
+          description: Audit journal not enabled.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+              example: { error: { message: "audit journal not enabled (set FAK_AUDIT_JOURNAL to a path)", type: "invalid_request_error", code: null, param: null } }
+    post:
+      tags: [fak-native]
+      summary: Drain the durable audit journal (POST)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ChangesRequest' }
+            example: { since: 0 }
+      responses:
+        '200':
+          description: The drained journal rows plus the client's next cursor.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/EventsResponse' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /v1/fak/revoke:
+    post:
+      tags: [fak-native]
+      summary: Refute a world-state witness
+      description: 'Triggers a fleet-wide refutation of an external world-state witness found poisoned or stale: every pooled entry admitted under it is causally evicted, future re-admission under it is refused, and the eviction is broadcast on the change feed.'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/RevokeRequest' }
+            example: { witness: "sha256:abc123" }
+      responses:
+        '200':
+          description: The local eviction count and the post-bump integrity epoch.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RevokeResponse' }
+              example: { witness: "sha256:abc123", evicted: 3, trust_epoch: 17 }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '405': { $ref: '#/components/responses/MethodNotAllowed' }
+
+  /v1/fak/context/change:
+    post:
+      tags: [fak-native]
+      summary: Tombstone a recall page
+      description: |
+        Records a safe, requester-initiated mutation against a persisted recall core
+        image. Deliberately negative-only: today the only accepted mutation is a
+        tombstone that suppresses one persisted recall page from future
+        model-visible context. The core image's CAS bytes are preserved for audit.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ContextChangeRequest' }
+            example: { image_dir: "/srv/fak/core", step: 4, reason: "stale after revoke", action: tombstone }
+      responses:
+        '200':
+          description: The applied context-control ledger row.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ContextChangeResponse' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '405': { $ref: '#/components/responses/MethodNotAllowed' }
+
+  /v1/fak/policy/reload:
+    post:
+      tags: [fak-native]
+      summary: Hot-reload the policy manifest
+      description: Reloads the configured policy manifest in-place (no request body). The loader is injected by the host CLI, so the gateway stays policy-schema blind.
+      responses:
+        '200':
+          description: The reload result.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PolicyReloadResponse' }
+              example: { reloaded: true, source: "/etc/fak/policy.json", summary: "12 allow, 4 deny" }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404':
+          description: Policy reload is not configured for this deployment.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+              example: { error: { message: "policy reload is not configured", type: "invalid_request_error", code: null, param: null } }
+        '405': { $ref: '#/components/responses/MethodNotAllowed' }
+
+  /v1/fak/trace/reset:
+    post:
+      tags: [fak-native]
+      summary: Clear a session's IFC taint mark
+      description: Clears the per-trace IFC taint high-water mark for a live served session (e.g. to start a new logical task on a reused session). The reset implementation is injected by the host CLI.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/TraceResetRequest' }
+            example: { trace_id: t-7f3a9c }
+      responses:
+        '200':
+          description: The reset result.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TraceResetResponse' }
+              example: { reset: true, trace_id: t-7f3a9c }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404':
+          description: Trace reset is not configured for this deployment.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+              example: { error: { message: "trace reset is not configured", type: "invalid_request_error", code: null, param: null } }
+        '405': { $ref: '#/components/responses/MethodNotAllowed' }
+
+  # -------------------------------------------------------------------------
+  # MCP-over-HTTP
+  # -------------------------------------------------------------------------
+  /mcp:
+    post:
+      tags: [MCP]
+      summary: JSON-RPC 2.0 over a single POST
+      description: |
+        The kernel is exposed as an MCP server speaking JSON-RPC 2.0, hand-rolled on
+        the standard library (the repo is zero-dependency by design). `POST /mcp`
+        serves a single JSON-RPC request/response; the same dispatch is also
+        available over stdio (`fak serve --stdio`, newline-delimited frames) with no
+        listener and no auth surface.
+
+        A **notification** (no `id`, e.g. `notifications/initialized`) returns
+        `202 Accepted` with no body. A `tools/call` result wraps the matching
+        fak-native response JSON as a single text content block with `isError: false`
+        — a DENY is a valid result, not an error. JSON-RPC errors are reserved for
+        protocol/internal faults. For the MCP tool-result wire format in depth, see
+        [`docs/mcp-tool-result.md`](../../docs/mcp-tool-result.md).
+
+        Methods: `initialize`, `ping`, `tools/list`, `tools/call`.
+        Tools: `fak_adjudicate`, `fak_syscall`, `fak_admit`, `fak_changes`,
+        `fak_revoke`, `fak_context_change` — each maps 1:1 to its `/v1/fak/*` route.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/JsonRpcRequest' }
+            examples:
+              initialize:
+                value: { jsonrpc: "2.0", id: 1, method: initialize, params: { protocolVersion: "2025-06-18" } }
+              toolsCall:
+                value: { jsonrpc: "2.0", id: 2, method: tools/call, params: { name: fak_syscall, arguments: { tool: read_file, arguments: { path: "test.txt" } } } }
+      responses:
+        '200':
+          description: A single JSON-RPC response (`result` on success, `error` on a protocol fault).
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/JsonRpcResponse' }
+              example:
+                jsonrpc: "2.0"
+                id: 2
+                result:
+                  content: [{ type: text, text: "{\"verdict\":{\"kind\":\"ALLOW\",\"by\":\"tool\"},\"result\":{\"status\":\"OK\",\"content\":\"{\\\"rows\\\":3}\"}}" }]
+                  isError: false
+        '202':
+          description: Accepted — a notification (no `id`) was received; no body is returned.
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '405': { $ref: '#/components/responses/MethodNotAllowed' }
+
+  # -------------------------------------------------------------------------
+  # Operational endpoints
+  # -------------------------------------------------------------------------
+  /healthz:
+    get:
+      tags: [Operational]
+      summary: Liveness check (auth-exempt)
+      description: The ONLY auth-exempt route, so a load balancer can probe an authenticated gateway. Method is not enforced; GET is canonical.
+      security: []
+      responses:
+        '200':
+          description: Gateway is up.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/HealthResponse' }
+              example: { ok: true, engine: mock, model: "qwen2.5:1.5b", planner: mock }
+
+  /metrics:
+    get:
+      tags: [Operational]
+      summary: Prometheus metrics
+      description: Prometheus exposition format — HTTP request histograms, kernel operation counters (submits, vDSO hits, denies, transforms, quarantines, admits), startup-phase gauges, and more.
+      responses:
+        '200':
+          description: Prometheus text exposition (`text/plain; version=0.0.4`).
+          content:
+            text/plain; version=0.0.4:
+              schema: { type: string }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '405': { $ref: '#/components/responses/MethodNotAllowed' }
+
+  /debug/vars:
+    get:
+      tags: [Operational]
+      summary: JSON diagnostics snapshot
+      description: An expvar-style JSON snapshot — `gateway`, `runtime`, `kernel`, and `metrics` blocks (version, uptime, memory, goroutines, kernel counters, per-route HTTP + per-operation latency histograms).
+      responses:
+        '200':
+          description: The diagnostics snapshot.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DebugVarsResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '405': { $ref: '#/components/responses/MethodNotAllowed' }
+
+# ---------------------------------------------------------------------------
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      description: '`Authorization: Bearer <token>` — used by OpenAI / fak-native / MCP clients.'
+    apiKeyAuth:
+      type: apiKey
+      in: header
+      name: x-api-key
+      description: '`x-api-key: <token>` — used by Anthropic clients (Claude Code, the Anthropic SDKs). Compares against the SAME secret as `bearerAuth`.'
+
+  parameters:
+    XTraceId:
+      name: X-Trace-Id
+      in: header
+      required: false
+      schema: { type: string }
+      description: Optional session id correlating a request across the IFC taint ledger, plan-CFI, metrics, and the access log. If omitted, the gateway mints a fresh non-empty id and echoes it back in the response `X-Trace-Id` header.
+
+  headers:
+    XTraceIdResp:
+      description: The trace id in effect for this request (client-supplied or minted).
+      schema: { type: string }
+
+  responses:
+    BadRequest:
+      description: Malformed request body, a missing required field, or an invalid argument.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorResponse' }
+          example: { error: { message: "malformed request body: invalid character 'x' looking for beginning of value", type: "invalid_request_error", code: null, param: null } }
+    Unauthorized:
+      description: Missing or invalid credentials (only when `--require-key-env` is set; `/healthz` is exempt).
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorResponse' }
+          example: { error: { message: "missing or invalid credentials", type: "authentication_error", code: null, param: null } }
+    MethodNotAllowed:
+      description: Wrong HTTP method for this route.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorResponse' }
+          example: { error: { message: "use POST", type: "invalid_request_error", code: null, param: null } }
+    NotFound:
+      description: The requested resource or optional subsystem is not configured.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorResponse' }
+
+  schemas:
+    # ----- Shared kernel wire -------------------------------------------------
+    WireVerdict:
+      type: object
+      description: The stable, named projection of the kernel's decision.
+      properties:
+        kind:
+          type: string
+          enum: [ALLOW, DENY, TRANSFORM, QUARANTINE, REQUIRE_WITNESS, DEFER]
+          description: An unknown registered kind renders as `KIND_<n>`, never a bare integer.
+        reason:
+          type: string
+          description: The closed refusal vocabulary (`DEFAULT_DENY`, `POLICY_BLOCK`, `SELF_MODIFY`, `LEASE_HELD`, `TRUST_VIOLATION`, `MALFORMED`, `MISROUTE`, `RATE_LIMITED`, `SECRET_EXFIL`, `UNWITNESSED`, `OVERSIZE`, `UNKNOWN_TOOL`). Omitted when there is no reason.
+        by:
+          type: string
+          description: Which adjudicator decided (forensics).
+        disposition:
+          type: string
+          enum: [RETRYABLE, WAIT, ESCALATE, TERMINAL]
+          description: The actionable deny-loopback class — present on a refusal; lets a refusal cost a non-Go agent zero extra model turns.
+        detail:
+          type: object
+          additionalProperties: { type: string }
+          description: 'Bounded disclosure (e.g. `{"claim": "<offending claim/glob>"}`). The deny channel is not a policy oracle.'
+
+    ResultEnvelope:
+      type: object
+      description: A tool result rendered for the wire (bytes resolved, never a CAS handle).
+      properties:
+        status: { type: string, enum: [OK, ERROR, PENDING, UNKNOWN] }
+        content: { type: string, description: 'The tool result bytes, resolved.' }
+        meta:
+          type: object
+          additionalProperties: { type: string }
+          description: 'Side-band, e.g. `{"admit": "quarantined"}`.'
+
+    SyscallRequest:
+      type: object
+      required: [tool]
+      properties:
+        tool: { type: string, description: The logical tool name to route through the kernel. }
+        arguments:
+          description: The tool arguments — a JSON object OR a JSON-encoded string (the OpenAI `function.arguments` convention). Never a kernel CAS handle.
+        read_only: { type: boolean, description: Optional vDSO hint that the call is read-only/idempotent (enables cross-agent dedup). }
+        witness: { type: string, description: Optional external world-state token (git commit / blob hash / lease epoch); binds the entry for causal revocation. }
+        trace_id: { type: string, description: Optional session id (see X-Trace-Id). }
+
+    SyscallResponse:
+      type: object
+      properties:
+        verdict: { $ref: '#/components/schemas/WireVerdict' }
+        result:
+          allOf:
+            - $ref: '#/components/schemas/ResultEnvelope'
+          description: Present only on the execute path (`/v1/fak/syscall`, `/v1/fak/admit`).
+        repaired_arguments:
+          description: Present ONLY when the verdict is `TRANSFORM` — the canonical arguments the client should run instead.
+        trace_id: { type: string }
+
+    AdmitRequest:
+      type: object
+      required: [tool]
+      properties:
+        tool: { type: string, description: The tool that produced the result — its source class keys the provenance taint. }
+        result:
+          description: The raw result content — a JSON object or a JSON-encoded string. Never a kernel CAS handle.
+        witness: { type: string }
+        trace_id: { type: string, description: Keys the per-trace taint ledger. }
+
+    ChangesRequest:
+      type: object
+      properties:
+        since: { type: integer, minimum: 0, default: 0, description: The Seq of the last event the client saw; 0 returns everything retained. }
+
+    ChangesResponse:
+      type: object
+      properties:
+        events:
+          type: array
+          items: { $ref: '#/components/schemas/CoherenceEvent' }
+        cursor: { type: integer, description: The client's next cursor. }
+
+    CoherenceEvent:
+      type: object
+      properties:
+        kind: { type: string, enum: [mutation, revocation] }
+        seq: { type: integer, description: The shared coherence-bus sequence (this event's cursor). }
+        tool: { type: string, description: mutation — the write-shaped tool that completed. }
+        tags:
+          type: array
+          items: { type: string }
+          description: mutation — the invalidation scope (resource tags bumped).
+        witness: { type: string, description: revocation — the refuted witness. }
+        evicted: { type: integer, description: revocation — entries stranded. }
+        world_ver: { type: integer, description: Consistency clock at the event. }
+        trust_epoch: { type: integer, description: Integrity clock at the event. }
+
+    EventsResponse:
+      type: object
+      description: The drained durable audit-journal tail plus the next cursor.
+      properties:
+        events:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
+            description: A `journal.Row` (hash-chained verdict ledger entry).
+        cursor: { type: integer }
+
+    RevokeRequest:
+      type: object
+      required: [witness]
+      properties:
+        witness: { type: string, description: 'Required, non-empty.' }
+
+    RevokeResponse:
+      type: object
+      properties:
+        witness: { type: string }
+        evicted: { type: integer, description: Local entries stranded. }
+        trust_epoch: { type: integer, description: The post-bump integrity epoch. }
+
+    ContextChangeRequest:
+      type: object
+      required: [image_dir, step, reason]
+      properties:
+        image_dir: { type: string, description: Path to the persisted recall core image directory. }
+        step: { type: integer, description: The page step to suppress. }
+        reason: { type: string, description: Why the page should be absent from future context. }
+        action: { type: string, description: 'Optional; omit or use "tombstone" / "tombstone_page".' }
+        digest: { type: string, description: Optional CAS digest guard; a mismatch refuses the request. }
+        requested_by: { type: string }
+        witness: { type: string }
+
+    ContextChangeResponse:
+      type: object
+      properties:
+        image_dir: { type: string }
+        id: { type: string }
+        action: { type: string }
+        step: { type: integer }
+        digest: { type: string }
+        reason: { type: string }
+        requested_by: { type: string }
+        witness: { type: string }
+        trust_epoch: { type: integer }
+        applied: { type: boolean }
+        tombstoned: { type: boolean }
+
+    PolicyReloadResponse:
+      type: object
+      properties:
+        reloaded: { type: boolean }
+        source: { type: string, description: The path the policy was reloaded from. }
+        summary: { type: string }
+
+    TraceResetRequest:
+      type: object
+      required: [trace_id]
+      properties:
+        trace_id: { type: string, description: 'Required, non-empty.' }
+
+    TraceResetResponse:
+      type: object
+      properties:
+        reset: { type: boolean }
+        trace_id: { type: string }
+
+    # ----- OpenAI chat wire ---------------------------------------------------
+    ChatRequest:
+      type: object
+      required: [messages]
+      description: A drop-in OpenAI chat body. Unknown OpenAI fields (e.g. `tool_choice`) are accepted and ignored.
+      properties:
+        model: { type: string, description: Echoed back; the served model is fixed at boot. }
+        messages:
+          type: array
+          description: 'Standard OpenAI chat messages. Inbound `role: "tool"` results are run through the result-side floor.'
+          items: { type: object, additionalProperties: true }
+        tools:
+          type: array
+          items: { type: object, additionalProperties: true }
+        max_tokens: { type: integer, description: Forwarded to the model. Omit for the planner default. }
+        temperature: { type: number, format: float }
+        top_p: { type: number, format: float }
+        stop:
+          description: A bare string OR an array of strings (either shape accepted).
+        stream: { type: boolean, description: '`true` ⇒ a synthetic SSE stream.' }
+
+    ChatResponse:
+      type: object
+      properties:
+        id: { type: string, description: '`chatcmpl-fak-<nanos>`.' }
+        object: { type: string, example: chat.completion }
+        created: { type: integer, description: Unix seconds. }
+        model: { type: string }
+        choices:
+          type: array
+          items:
+            type: object
+            properties:
+              index: { type: integer }
+              message:
+                type: object
+                properties:
+                  role: { type: string, example: assistant }
+                  content: { type: string }
+                  tool_calls:
+                    type: array
+                    description: Only the SURVIVING (adjudicated) tool calls.
+                    items: { type: object, additionalProperties: true }
+              finish_reason: { type: string, description: '`tool_calls` when a call survived; `stop` otherwise.' }
+        usage: { $ref: '#/components/schemas/Usage' }
+        fak: { $ref: '#/components/schemas/FakExt' }
+
+    Usage:
+      type: object
+      description: OpenAI usage counters from the upstream turn.
+      properties:
+        prompt_tokens: { type: integer }
+        completion_tokens: { type: integer }
+        total_tokens: { type: integer }
+
+    FakExt:
+      type: object
+      description: The gateway's non-standard response extension. Present only when there was tool activity.
+      properties:
+        adjudications:
+          type: array
+          description: One entry per PROPOSED tool call, including dropped ones.
+          items: { $ref: '#/components/schemas/ToolAdjudication' }
+        result_admissions:
+          type: array
+          description: One entry per INBOUND tool result admitted before it reached the upstream model.
+          items: { $ref: '#/components/schemas/ResultAdmission' }
+
+    ToolAdjudication:
+      type: object
+      properties:
+        tool_call_id: { type: string }
+        tool: { type: string }
+        admitted: { type: boolean }
+        verdict: { $ref: '#/components/schemas/WireVerdict' }
+        repaired_arguments:
+          description: Present only on a `TRANSFORM`.
+
+    ResultAdmission:
+      type: object
+      properties:
+        tool_call_id: { type: string }
+        tool: { type: string }
+        verdict: { $ref: '#/components/schemas/WireVerdict' }
+
+    # ----- OpenAI embeddings/moderations wire --------------------------------
+    EmbeddingsRequest:
+      type: object
+      required: [input]
+      properties:
+        model: { type: string, description: Accepted and ignored (drop-in). }
+        input:
+          description: 'A bare string, an array of strings, an array of token ids (`int[]`), or an array of token-id arrays (`int[][]`). Max 2048 items.'
+        encoding_format: { type: string, enum: [float, base64], description: '`float` (default) or `base64` (little-endian float32).' }
+        dimensions: { type: integer, minimum: 1, maximum: 3072, description: 'Output width, clamped to [1, 3072]. Default 256.' }
+        user: { type: string, description: Accepted and ignored (drop-in). }
+
+    EmbeddingsResponse:
+      type: object
+      properties:
+        object: { type: string, example: list }
+        model: { type: string }
+        data:
+          type: array
+          items:
+            type: object
+            properties:
+              object: { type: string, example: embedding }
+              index: { type: integer }
+              embedding:
+                description: A JSON number array (`float`) OR a base64 string (`base64`).
+        usage:
+          type: object
+          properties:
+            prompt_tokens: { type: integer }
+            total_tokens: { type: integer }
+
+    ModerationsRequest:
+      type: object
+      required: [input]
+      properties:
+        model: { type: string, description: Echoed back. }
+        input:
+          description: A bare string or an array of strings (batch). Same 2048-item cap as embeddings.
+
+    ModerationsResponse:
+      type: object
+      properties:
+        id: { type: string }
+        model: { type: string }
+        results:
+          type: array
+          items: { $ref: '#/components/schemas/ModerationResult' }
+
+    ModerationResult:
+      type: object
+      properties:
+        flagged: { type: boolean, description: True iff any category reaches 0.5. }
+        categories:
+          type: object
+          additionalProperties: { type: boolean }
+          description: The full OpenAI category vocabulary (bool).
+        category_scores:
+          type: object
+          additionalProperties: { type: number }
+          description: The full OpenAI category vocabulary ([0,1]).
+
+    # ----- Operational -------------------------------------------------------
+    HealthResponse:
+      type: object
+      properties:
+        ok: { type: boolean, example: true }
+        engine: { type: string, description: 'The /v1/chat/completions backend id (`mock` | `proxy` | `inkernel`).' }
+        model: { type: string }
+        planner: { type: string, description: 'The planner kind, so a probe can detect the silent offline-mock fallback.' }
+
+    DebugVarsResponse:
+      type: object
+      description: The expvar-style diagnostics snapshot.
+      properties:
+        gateway:
+          type: object
+          properties:
+            up: { type: boolean }
+            version: { type: string }
+            engine: { type: string }
+            model: { type: string }
+            vdso: { type: boolean }
+            auth_required: { type: boolean }
+            start_time_unix: { type: integer }
+            uptime_seconds: { type: number }
+            inflight_requests: { type: integer }
+        runtime:
+          type: object
+          additionalProperties: true
+          description: 'Go version, GOOS/GOARCH, goroutine/CPU counts, and a full `memory` breakdown.'
+        kernel:
+          type: object
+          properties:
+            submits: { type: integer }
+            vdso_hits: { type: integer }
+            engine_calls: { type: integer }
+            denies: { type: integer }
+            transforms: { type: integer }
+            quarantines: { type: integer }
+            admitted: { type: integer }
+            vdso_hit_ratio: { type: number }
+        metrics:
+          type: object
+          additionalProperties: true
+          description: Per-route HTTP and per-operation latency histograms.
+
+    # ----- MCP JSON-RPC wire -------------------------------------------------
+    JsonRpcRequest:
+      type: object
+      required: [jsonrpc, method]
+      properties:
+        jsonrpc: { type: string, example: "2.0" }
+        id:
+          description: The request id. Absent ⇒ a notification (no response).
+        method:
+          type: string
+          enum: [initialize, ping, tools/list, tools/call]
+        params:
+          description: Method-specific params (e.g. `{name, arguments}` for `tools/call`).
+
+    JsonRpcResponse:
+      type: object
+      properties:
+        jsonrpc: { type: string, example: "2.0" }
+        id:
+          description: The echoed request id.
+        result:
+          description: 'The method result (absent when `error` is present). For `tools/call`, an MCP tool-result envelope `{content: [{type: "text", text: "..."}], isError: false}`.'
+        error: { $ref: '#/components/schemas/JsonRpcError' }
+
+    JsonRpcError:
+      type: object
+      properties:
+        code:
+          type: integer
+          enum: [-32700, -32600, -32601, -32602, -32603]
+          description: '`-32700` parse error · `-32600` invalid request · `-32601` method not found · `-32602` invalid params · `-32603` internal error.'
+        message: { type: string }
+
+    # ----- Error envelope (OpenAI-style) -------------------------------------
+    ErrorResponse:
+      type: object
+      description: The OpenAI-style error envelope used by every route except `/mcp`.
+      properties:
+        error:
+          type: object
+          properties:
+            message: { type: string }
+            type:
+              type: string
+              enum: [invalid_request_error, authentication_error, server_error]
+              description: Derived from the HTTP status class so a client can branch on it.
+            code:
+              description: Always `null` (reserved for future use).
+            param:
+              description: Always `null` (reserved for future use).
