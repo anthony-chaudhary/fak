@@ -1,6 +1,7 @@
 package model
 
 import (
+	"bytes"
 	"encoding/binary"
 	"encoding/json"
 	"fmt"
@@ -32,9 +33,37 @@ type safetensorsFile struct {
 	hdr      map[string]json.RawMessage
 	dataBase int64
 	size     int64
+	// data is the read-only memory-mapped file bytes when the file was opened via mmap, else
+	// nil. When set, tensorBytes returns a zero-copy slice into it instead of a per-tensor
+	// heap ReadAt, so a single-file checkpoint is never fully resident in the process heap.
+	data []byte
 }
 
+// openSafetensorsFile opens a single-file safetensors checkpoint, preferring a read-only
+// memory map (zero-copy per-tensor slices, the whole file never resident in the process heap)
+// and falling back to os.Open + per-tensor ReadAt where mmap is unavailable or fails. Both
+// paths produce a byte-identical decode (TestLoadSafetensorsMmapMatchesReadFile).
 func openSafetensorsFile(path string) (*safetensorsFile, error) {
+	if sf, err := openSafetensorsFileMmap(path); err == nil {
+		return sf, nil
+	}
+	return openSafetensorsFileReadAt(path)
+}
+
+// openSafetensorsFileMmap forces the memory-mapped path; it returns errMmapUnsupported (or a
+// header-parse error) when the file cannot be mapped/parsed, never silently falling back.
+func openSafetensorsFileMmap(path string) (*safetensorsFile, error) {
+	data, closer, err := mmapOpen(path)
+	if err != nil {
+		return nil, err
+	}
+	return newSafetensorsFileMmap(data, closer)
+}
+
+// openSafetensorsFileReadAt forces the portable os.Open + ReadAt path (one transient tensor
+// buffer at a time, never the whole file). This is the fallback used on platforms without an
+// mmap impl and the historical behaviour the mmap path is proven byte-identical against.
+func openSafetensorsFileReadAt(path string) (*safetensorsFile, error) {
 	f, err := os.Open(path)
 	if err != nil {
 		return nil, err
@@ -45,6 +74,18 @@ func openSafetensorsFile(path string) (*safetensorsFile, error) {
 		return nil, err
 	}
 	return newSafetensorsFile(f, st.Size(), f)
+}
+
+// newSafetensorsFileMmap parses the header out of the mapped bytes and records them so
+// tensorBytes can return zero-copy slices. closer munmaps the region; newSafetensorsFile
+// closes it on a header-parse error, so there is no leak on the error path.
+func newSafetensorsFileMmap(data []byte, closer io.Closer) (*safetensorsFile, error) {
+	sf, err := newSafetensorsFile(bytes.NewReader(data), int64(len(data)), closer)
+	if err != nil {
+		return nil, err
+	}
+	sf.data = data
+	return sf, nil
 }
 
 func newSafetensorsFile(r io.ReaderAt, size int64, closer io.Closer) (*safetensorsFile, error) {
@@ -108,6 +149,15 @@ func (sf *safetensorsFile) tensorBytes(e stEntry) ([]byte, error) {
 	maxInt := int64(^uint(0) >> 1)
 	if n > maxInt {
 		return nil, fmt.Errorf("safetensors: tensor too large")
+	}
+	if sf.data != nil {
+		// Zero-copy: slice directly into the read-only mmap. safetensorsDataBounds already
+		// proved [start,end) is within the file, so len(sf.data)==sf.size makes this in-range.
+		// The three-index cap stops any downstream append from scribbling past this tensor
+		// into the next one's bytes. Every consumer only READS this slice (decoding/quantizing
+		// into freshly-allocated owned memory) before the next tensor, so the source is freed
+		// before the next — the single-file analogue of LoadSafetensorsQuantDir's per-shard free.
+		return sf.data[start:end:end], nil
 	}
 	b := make([]byte, int(n))
 	if _, err := sf.r.ReadAt(b, start); err != nil {
