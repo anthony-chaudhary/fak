@@ -4,9 +4,9 @@
 > pure-Go CPU reference. `internal/compute` (the contract) registers `cpu-ref` (Reference),
 > plus `cuda` (Approx, `//go:build cuda`) and `vulkan` (Approx, `//go:build vulkan`) — each
 > proven on actual silicon: CUDA runs the in-kernel Llama decode on this box's RTX 4070
-> (argmax-exact, logit cosine 1.0 — `../../fak/GPU.md`) and Vulkan runs the full
+> (argmax-exact, logit cosine 1.0 — `../../GPU.md`) and Vulkan runs the full
 > SmolLM2-135M forward pass on a real AMD Radeon RX 7600 (argmax-exact, prefill cosine 1.0 —
-> `../../fak/VULKAN-AMD-RESULTS.md`). The model package routes through the seam via
+> `../benchmarks/VULKAN-AMD-RESULTS.md`). The model package routes through the seam via
 > `Model.NewBackendSession(compute.Backend)`, and `TestHALSessionMatchesLegacyCPUReference`
 > proves the `cpu-ref` path is byte-identical to the legacy session path on a deterministic
 > synthetic model. The optimized legacy prefill/batch path is still the default until full
@@ -113,7 +113,7 @@ real CPU backend may later expose the model's x86 AVX kernels via `Tier()`; that
 acceleration of this same reference contract, picked by the registry, not a fork of the loop.
 *(This is now concrete on two ISAs: the model package's accelerated Q8 lane is amd64
 AVX2/AVX-512 **and** arm64 NEON SDOT — measured head-to-head vs llama.cpp in
-`../../fak/LLAMACPP-HEADTOHEAD-RESULTS.md` (Zen5) and `../../fak/M3-LLAMACPP-RESULTS.md`
+`../benchmarks/LLAMACPP-HEADTOHEAD-RESULTS.md` (Zen5) and `../benchmarks/M3-LLAMACPP-RESULTS.md`
 (Apple M3). Both stay bit-identical to the scalar reference — exactly the "private
 acceleration, not a fork" the `Tier()` seam describes. So assumption #3's "ARM/RISC-V CPUs"
 gap above is now closed for arm64.)*
@@ -152,7 +152,7 @@ design panel: the deferrals are deliberate, not forgotten.
   bytes out). *Lens verdict: **built and witnessed** — `internal/compute/cuda.go`
   (+`cuda_kernels.cu`, `//go:build cuda`) runs a real in-kernel Llama decode on this box's
   RTX 4070, argmax-exact with logit cosine 1.0 vs cpu-ref (`TestHALDeviceForwardMatchesNative`;
-  `../../fak/GPU.md`). The shipped v1 advertises the `DeviceMemory` cap and a device-resident
+  `../../GPU.md`). The shipped v1 advertises the `DeviceMemory` cap and a device-resident
   KV cache; the remaining `Async`/`FusedAttn`/`UploadDtype` caps above are the still-open
   optimization surface, not a correctness gap.*
 - **Vulkan compute GPU** (AMD/RDNA3 and any Vulkan 1.x device; separate VRAM, SPIR-V
@@ -162,7 +162,7 @@ design panel: the deferrals are deliberate, not forgotten.
   (4 bytes out), and a fused decode graph (RMSNorm+Q/K/V, RMSNorm+gate/up, FFN-tail, residual
   matmul-add, op-level Q8_0 GEMM). *Lens verdict: **built and witnessed on real AMD silicon**
   — the full SmolLM2-135M forward pass on a Radeon RX 7600 is argmax-exact with prefill
-  cosine 1.0 across all 30 layers (`../../fak/VULKAN-AMD-RESULTS.md`, Rung 1). Throughput is
+  cosine 1.0 across all 30 layers (`../benchmarks/VULKAN-AMD-RESULTS.md`, Rung 1). Throughput is
   the honest open gap: ~9× behind llama.cpp CPU and climbing with each op-fusion (Rung 2),
   bounded by per-dispatch CPU/driver overhead, not numerics. This is the discrete-GPU lens
   made concrete on a card without CUDA.*

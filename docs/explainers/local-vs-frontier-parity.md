@@ -127,7 +127,7 @@ the capability gap closes as you climb to the 7-9B rung an 8 GB GPU can hold.**
   already measures it: for
   SmolLM2-135M Q8, llama.cpp decodes at ~6.9 ms/tok vs fak's pure-Go ~7.7 ms/tok —
   near parity — and Q4_K_M is faster still. (That ~parity is single-stream SmolLM2 on Zen5; on
-  a *larger* real model the kernel-tuning gap widens — `../../fak/M3-LLAMACPP-RESULTS.md` measures
+  a *larger* real model the kernel-tuning gap widens — `../benchmarks/M3-LLAMACPP-RESULTS.md` measures
   fak Qwen2.5-1.5B decode at ~2.2× behind llama.cpp's CPU Q8 on M3, llama.cpp extracting ~2×
   more memory bandwidth per core from the same Q8 bytes. fak is the in-kernel *reference* runner;
   `llama-server` stays the speed-tuned serving engine for the ramp.) **This is how you run the
@@ -135,7 +135,7 @@ the capability gap closes as you climb to the 7-9B rung an 8 GB GPU can hold.**
 - **fak's own device backends** now exist beside the CPU reference: the `internal/compute`
   HAL registers `cuda` and `vulkan` (Approx) next to `cpu-ref` (Reference). AMD Vulkan reaches
   **numerical parity on a real Radeon RX 7600** — argmax-exact decode, prefill cosine 1.0
-  (`../../fak/VULKAN-AMD-RESULTS.md`) — and CUDA the same on an RTX 4070 (`../../fak/GPU.md`). So the
+  (`../benchmarks/VULKAN-AMD-RESULTS.md`) — and CUDA the same on an RTX 4070 (`../../GPU.md`). So the
   in-kernel reference runner is no longer CPU-only; its *correctness* is proven on GPU silicon.
   Throughput is the honest open gap (Vulkan ~9× behind llama.cpp CPU and climbing as op-fusion
   lands), so `llama-server` stays the speed-tuned serving engine for the ramp while fak's GPU
