@@ -35,6 +35,8 @@
 //
 //	go run ./cmd/ctxdemo -print
 //	go run ./cmd/ctxdemo -print -json
+//	go run ./cmd/ctxdemo -bars                      # the reuse axis as a side-by-side bar chart
+//	go run ./cmd/ctxdemo -bars -scenario deep-research
 //
 // Headless live race of one scenario (needs a model on disk; shrink with -P/-C/-T/-D):
 //
@@ -453,6 +455,125 @@ func printCatalog(asJSON bool) {
 }
 
 // ---------------------------------------------------------------------------
+// -bars: the reuse axis as a SIDE-BY-SIDE bar chart — the 30-second point with
+// zero setup. The token counts are exact and timing-free (no model), so each
+// scenario's three bars (cold no-cache / tuned warm-cache / fak) are drawn to
+// scale and the headline ratio is the honest fak-vs-tuned win. (The terminal twin
+// of cmd/guarddemo -print and cmd/turntaxdemo -print, for the reuse axis.)
+// ---------------------------------------------------------------------------
+
+type barPalette struct{ red, amber, green, dim, bold, reset string }
+
+func barColors() barPalette {
+	tty := false
+	if fi, err := os.Stdout.Stat(); err == nil {
+		tty = fi.Mode()&os.ModeCharDevice != 0
+	}
+	if os.Getenv("NO_COLOR") != "" || !tty {
+		return barPalette{}
+	}
+	return barPalette{red: "\033[31m", amber: "\033[33m", green: "\033[32m", dim: "\033[2m", bold: "\033[1m", reset: "\033[0m"}
+}
+
+func (p barPalette) paint(code, s string) string {
+	if code == "" {
+		return s
+	}
+	return code + s + p.reset
+}
+
+// commaInt formats an int with thousands separators (Go has no built-in for this).
+func commaInt(n int) string {
+	s := strconv.Itoa(n)
+	neg := strings.HasPrefix(s, "-")
+	if neg {
+		s = s[1:]
+	}
+	var out []byte
+	for i, c := range []byte(s) {
+		if i > 0 && (len(s)-i)%3 == 0 {
+			out = append(out, ',')
+		}
+		out = append(out, c)
+	}
+	if neg {
+		return "-" + string(out)
+	}
+	return string(out)
+}
+
+// bar returns a block-character bar of length proportional to n/max, capped at width
+// (a non-zero value always shows at least one block so it is never invisible).
+func bar(n, max, width int) string {
+	if max <= 0 || n <= 0 {
+		return ""
+	}
+	l := int(float64(n)/float64(max)*float64(width) + 0.5)
+	if l < 1 {
+		l = 1
+	}
+	if l > width {
+		l = width
+	}
+	return strings.Repeat("█", l)
+}
+
+// printBars renders every scenario's reuse comparison as a side-by-side bar chart.
+// scenarioID == "" renders the whole catalog; a non-empty id renders just that one.
+func printBars(scenarioID string) int {
+	p := barColors()
+	scens := catalog()
+	if scenarioID != "" {
+		s, ok := findScenario(scenarioID)
+		if !ok {
+			fmt.Fprintf(os.Stderr, "unknown scenario %q (try: support-bot, coding-agent, deep-research, mixed-fleet)\n", scenarioID)
+			return 2
+		}
+		scens = []Scenario{s}
+	}
+	const width = 42
+	fmt.Printf("\n  %s\n", p.paint(p.bold, "fak · context reuse, side by side"))
+	fmt.Printf("  %s\n", p.paint(p.dim, "prefill tokens the model must RE-READ per session — lower is better (decode excluded: it's generated, not re-read)"))
+	for _, s := range scens {
+		v := viewOf(s)
+		t := v.Tokens
+		max := t.NaiveReprefill
+		if t.PerAgentKV > max {
+			max = t.PerAgentKV
+		}
+		if t.FakFused > max {
+			max = t.FakFused
+		}
+		fmt.Printf("\n  %s  %s\n",
+			p.paint(p.bold, s.ID),
+			p.paint(p.dim, fmt.Sprintf("(C=%d agents · T=%d turns · P=%d prefix · maxCtx=%s)", s.Agents, s.Turns, s.Prefix, commaInt(t.MaxContext))))
+		row := func(color, label string, n int) {
+			fmt.Printf("    %s  %s  %s\n",
+				p.paint(p.dim, padTo(label, 26)),
+				p.paint(color, padTo(bar(n, max, width), width)),
+				p.paint(color, commaInt(n)))
+		}
+		row(p.red, "cold no-cache (reference)", t.NaiveReprefill)
+		row(p.amber, "tuned warm-cache (SOTA)", t.PerAgentKV)
+		row(p.green, "fak (cross-agent reuse)", t.FakFused)
+		fmt.Printf("    %s\n", p.paint(p.dim, fmt.Sprintf(
+			"→ fak makes the model re-read %.1f× fewer tokens than even a tuned warm-cache stack (%.1f× fewer than the cold no-cache loop — worst-case reference).",
+			t.TunedOverFak, t.NaiveOverFak)))
+	}
+	fmt.Println()
+	return 0
+}
+
+// padTo right-pads a plain string to w runes (alignment-safe: color is applied after).
+func padTo(s string, w int) string {
+	r := []rune(s)
+	if len(r) >= w {
+		return s
+	}
+	return s + strings.Repeat(" ", w-len(r))
+}
+
+// ---------------------------------------------------------------------------
 
 func applyResourceCaps(jobs int, budget float64) {
 	if jobs > 0 && budget > 0 {
@@ -482,6 +603,8 @@ func main() {
 	budget := flag.Float64("budget", 0, "cap parallelism to a FRACTION of the machine: 0.75 = 75% of the logical cores (75 or 0.75 accepted). Mutually exclusive with -jobs.")
 	print := flag.Bool("print", false, "headless: print every scenario's exact timing-free token accounting and exit (no model, no server)")
 	asJSON := flag.Bool("json", false, "with -print, emit JSON instead of a table")
+	bars := flag.Bool("bars", false, "headless: render the prefill-token reuse comparison as a SIDE-BY-SIDE bar chart (no model, no server) and exit. The 30-second point with zero setup; honors NO_COLOR. -scenario picks one (default: all).")
+	scenario := flag.String("scenario", "", "with -bars, render just this scenario id (e.g. deep-research); empty = all")
 	race := flag.String("race", "", "headless: run a live race for this scenario id and exit (needs a model on disk)")
 	naive := flag.String("naive", "", "race naive arm mode: live | project (default: auto — live when small, projected when the grind would be minutes)")
 	P := flag.Int("P", 0, "override prefix tokens (0 = scenario default)")
@@ -495,6 +618,10 @@ func main() {
 	if *print {
 		printCatalog(*asJSON)
 		return
+	}
+
+	if *bars {
+		os.Exit(printBars(*scenario))
 	}
 
 	applyResourceCaps(*jobs, *budget)

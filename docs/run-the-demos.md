@@ -50,6 +50,8 @@ model or a server — useful in CI or to read the numbers directly:
 ```bash
 go run ./cmd/ctxdemo -print          # a table of per-strategy prefill-token work
 go run ./cmd/ctxdemo -print -json     # the same, as JSON
+go run ./cmd/ctxdemo -bars            # the reuse axis as a SIDE-BY-SIDE bar chart (cold vs warm-cache vs fak)
+go run ./cmd/ctxdemo -bars -scenario deep-research   # just one scenario
 ```
 
 `turntaxdemo` is always model-free; you can hit its API directly once it's running:
@@ -68,17 +70,17 @@ go run ./cmd/guarddemo  -selfcheck   # WITHOUT fak: 4 / 2 / 0 breaches · WITH f
 go run ./cmd/turntaxdemo -selfcheck   # turn-tax + safety-floor invariants per suite
 ```
 
-Both self-contained demos also ship a `-print` mode: the **30-second point with zero
-setup** — the comparison rendered as a colored two-column diff right in the terminal, no
-browser, no port (honors `NO_COLOR`). `guarddemo` prints the **safety** axis (WITHOUT fak
-vs WITH fak); `turntaxdemo` prints the **efficiency** axis (a tuned SOTA agent's wasted
-round-trips vs fak's flat 0):
+All three self-contained comparisons ship a terminal side-by-side: the **30-second point
+with zero setup** — rendered right in the terminal, no browser, no port (honors
+`NO_COLOR`). One per fak value axis: `guarddemo` the **safety** axis, `turntaxdemo` the
+**efficiency** axis, `ctxdemo` the **reuse** axis:
 
 ```bash
-go run ./cmd/guarddemo  -print                          # safety: the red-team scenario, side by side
+go run ./cmd/guarddemo  -print                          # safety: WITHOUT fak vs WITH fak (4 breaches → 0)
 go run ./cmd/guarddemo  -print -scenario turntax-happy   # safety: the clean control (0 breaches)
 go run ./cmd/turntaxdemo -print                          # efficiency: tuned SOTA vs fak (5 forced turns → 0)
 go run ./cmd/turntaxdemo -print -suite turntax-happy     # efficiency: the anti-inflation control
+go run ./cmd/ctxdemo     -bars                           # reuse: tokens re-read — cold vs warm-cache vs fak
 ```
 
 ## 3. With a real model (the live race)
