@@ -267,7 +267,9 @@ the model you already run.
   adjudication boundary, with no model and no network. (The 2-minute demo above.)
 - **Go all in: the fused kernel.** For the believers: run the model *inside* the
   kernel's address space, so the KV cache becomes a kernel object and the
-  context-MMU and vDSO become real operations on attention state. This is where
+  context-MMU (the write-time gate that decides what enters the model's context)
+  and vDSO (the in-process fast path that serves cached tool results) become real
+  operations on attention state. This is where
   the two flips stop being framing and become mechanism: quarantine that reaches
   attention, prefix reuse the kernel owns, and a finished session that reloads as
   a core dump. It's a correctness *reference* rather than a production serving
