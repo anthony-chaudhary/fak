@@ -71,6 +71,63 @@ func TestAdjudicatorsForScoped(t *testing.T) {
 	}
 }
 
+// TestScopedForMirrorsAdjudicatorsFor proves the per-kernel injection seam (issue
+// #500): ScopedFor applied to a CALLER-SUPPLIED chain filters by CallScope exactly as
+// AdjudicatorsFor filters the global registry. The same rung set, fed to ScopedFor as an
+// explicit slice, yields the identical per-tool chain the global registry yields — so a
+// kernel folding an injected chain is verdict-equivalent to one walking the registry.
+func TestScopedForMirrorsAdjudicatorsFor(t *testing.T) {
+	chain := []Adjudicator{
+		uncAdj{"u"},
+		scpAdj{"s_write", []string{"write"}},
+		uncAdj{"u2"},
+		scpAdj{"s_fetch", []string{"fetch"}},
+	}
+	for _, tool := range []string{"write", "fetch", "read", ""} {
+		c := &ToolCall{Tool: tool}
+		got := adjIDs(ScopedFor(chain, c))
+		var want []string
+		for _, a := range chain { // the reference filter: keep unconditional + scoped-to-tool
+			switch v := a.(type) {
+			case uncAdj:
+				want = append(want, v.id)
+			case scpAdj:
+				if len(v.tools) == 0 || contains(v.tools, tool) {
+					want = append(want, v.id)
+				}
+			}
+		}
+		if !eqStrs(got, want) {
+			t.Errorf("ScopedFor(tool=%q) = %v, want %v", tool, got, want)
+		}
+	}
+}
+
+// TestScopedForUnconditionalReturnsWholeChain asserts that with NO tool-scoped rung in
+// the supplied chain, ScopedFor returns the chain unchanged (the common case — a single
+// unconditional monitor), so a kernel given the global chain folds it verbatim.
+func TestScopedForUnconditionalReturnsWholeChain(t *testing.T) {
+	chain := []Adjudicator{uncAdj{"a"}, uncAdj{"b"}}
+	for _, tool := range []string{"x", "y", ""} {
+		if got := adjIDs(ScopedFor(chain, &ToolCall{Tool: tool})); !eqStrs(got, []string{"a", "b"}) {
+			t.Errorf("ScopedFor(tool=%q) = %v, want whole chain [a b]", tool, got)
+		}
+	}
+	// A nil call short-circuits to the whole chain (no tool to scope by).
+	if got := adjIDs(ScopedFor(chain, nil)); !eqStrs(got, []string{"a", "b"}) {
+		t.Errorf("ScopedFor(nil call) = %v, want [a b]", got)
+	}
+}
+
+func contains(ss []string, s string) bool {
+	for _, x := range ss {
+		if x == s {
+			return true
+		}
+	}
+	return false
+}
+
 // TestAdjudicatorsForScalesWithUnrelatedTools is the headline scaling proof: with
 // 500 rungs each scoped to a distinct tool plus 1 unconditional rung, a call for an
 // UNRELATED tool folds only the 1 unconditional rung — independent of how many

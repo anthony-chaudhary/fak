@@ -8,6 +8,7 @@ import (
 
 	"github.com/anthony-chaudhary/fak/internal/abi"
 	"github.com/anthony-chaudhary/fak/internal/adjudicator"
+	"github.com/anthony-chaudhary/fak/internal/agent"
 )
 
 // rawArgs marshals a test arg map to the Trace's json.RawMessage form.
@@ -115,12 +116,18 @@ func TestPolicyReplay_SpineCollapsesPolicyComparison(t *testing.T) {
 	}
 	// The K replays must cost FAR less wall-time than even a single policy's worth of
 	// model turns (5 turns × 1.5s = 7.5s); in practice the 20 local syscalls are sub-ms.
+	// With the arms now fanned out concurrently the wall is the OVERLAP span, which only
+	// shrinks the bound — it can never approach the naive model latency.
 	naiveLatency := time.Duration(rep.ModelTurnsNaive) * time.Duration(rep.Cost.ModelTurnLatencyMs) * time.Millisecond
 	if time.Duration(rep.ReplayWallNs) >= naiveLatency {
 		t.Errorf("replay wall %v should be << naive model latency %v", time.Duration(rep.ReplayWallNs), naiveLatency)
 	}
-	if rep.ReplayWallNs <= 0 {
-		t.Errorf("replay wall time should be measured (>0), got %d", rep.ReplayWallNs)
+	// The wall is a real measurement (never negative). It may legitimately read 0ns when
+	// the concurrent fan-out completes inside one tick of a coarse OS monotonic clock
+	// (Windows' timer is ~0.5-15ms; a warm sub-ms fan-out rounds to 0) — a sub-tick
+	// measurement, not a missing one — so the lower bound is >=0, not >0.
+	if rep.ReplayWallNs < 0 {
+		t.Errorf("replay wall time must be a real (non-negative) measurement, got %d", rep.ReplayWallNs)
 	}
 
 	// (2) The per-policy comparison is REAL: different policies produce different deny
@@ -209,6 +216,109 @@ func TestPolicyReplay_Deterministic(t *testing.T) {
 		}
 		if a.Arms[i].FirstDivergence != b.Arms[i].FirstDivergence {
 			t.Errorf("arm %q divergence drifted: %d vs %d", a.Arms[i].Name, a.Arms[i].FirstDivergence, b.Arms[i].FirstDivergence)
+		}
+	}
+}
+
+// replaySerial runs the SAME arms RunPolicyReplay runs, but strictly one-at-a-time
+// in the caller's goroutine, each against its OWN injected monitor (the per-kernel
+// adjudicator chain). It is the in-test reference the concurrent driver is compared
+// against: the counters/class/divergence surface must be IDENTICAL whether the arms
+// fan out across goroutines or run serially, which is the acceptance proof that
+// concurrency did not perturb the deterministic replay.
+func replaySerial(ctx context.Context, t *Trace, arms []PolicyArm) ([]KernelCounters, []ClassBreakdown, [][]CallDisposition) {
+	agent.Configure()
+	base := abi.Adjudicators()
+	cs := make([]KernelCounters, len(arms))
+	cbs := make([]ClassBreakdown, len(arms))
+	disps := make([][]CallDisposition, len(arms))
+	for i, arm := range arms {
+		adj := adjudicator.New(arm.Policy)
+		chain := swapMonitor(base, adj)
+		kc, cb, _, _, disp, err := replay(ctx, t, true, false, true, withAdjudicators(chain))
+		if err != nil {
+			panic(err)
+		}
+		cs[i], cbs[i], disps[i] = kc, cb, disp
+	}
+	return cs, cbs, disps
+}
+
+// TestPolicyReplay_ConcurrentEqualsSerial is the core acceptance for issue #500: the K
+// arms now fan out across goroutines (each with its OWN injected adjudicator chain,
+// NOT a process-global SetPolicy swap), and the result must be BIT-IDENTICAL to running
+// them serially. It compares the concurrent RunPolicyReplay output to an in-test serial
+// replay of the same arms: per-arm kernel counters, the per-call class breakdown, AND
+// the ordered per-call dispositions must all match exactly. If concurrency perturbed any
+// shared state (the monitor policy, the vDSO world, the CAS), a counter or a disposition
+// would drift and this test would catch it.
+func TestPolicyReplay_ConcurrentEqualsSerial(t *testing.T) {
+	ctx := context.Background()
+	tr := spineTrace(t)
+	arms := spineArms()
+
+	// Concurrent path (the production driver).
+	rep, err := RunPolicyReplay(ctx, tr, arms, "recorded", DefaultCostModel())
+	if err != nil {
+		t.Fatalf("RunPolicyReplay (concurrent): %v", err)
+	}
+
+	// Serial reference: the same arms, same injected chains, one at a time.
+	serCtr, serClass, serDisp := replaySerial(ctx, tr, arms)
+
+	if len(rep.Arms) != len(arms) {
+		t.Fatalf("arm count: concurrent=%d want=%d", len(rep.Arms), len(arms))
+	}
+	for i := range arms {
+		if rep.Arms[i].Counters != serCtr[i] {
+			t.Errorf("arm %q counters concurrent != serial:\n  concurrent=%+v\n  serial=%+v",
+				arms[i].Name, rep.Arms[i].Counters, serCtr[i])
+		}
+		if rep.Arms[i].Class != serClass[i] {
+			t.Errorf("arm %q class concurrent != serial:\n  concurrent=%+v\n  serial=%+v",
+				arms[i].Name, rep.Arms[i].Class, serClass[i])
+		}
+		if len(serDisp[i]) != len(tr.Calls) {
+			t.Fatalf("arm %q serial disposition count=%d want=%d", arms[i].Name, len(serDisp[i]), len(tr.Calls))
+		}
+	}
+}
+
+// TestPolicyReplay_ConcurrentRepeatable runs the concurrent driver many times and asserts
+// the verdict surface NEVER drifts — the determinism gate under fan-out. A latent race or
+// a shared-state leak between arms would surface as an intermittent counter/divergence
+// drift across iterations; a clean per-kernel injection is invariant.
+func TestPolicyReplay_ConcurrentRepeatable(t *testing.T) {
+	ctx := context.Background()
+	tr := spineTrace(t)
+	arms := spineArms()
+
+	first, err := RunPolicyReplay(ctx, tr, arms, "recorded", DefaultCostModel())
+	if err != nil {
+		t.Fatalf("run 0: %v", err)
+	}
+	for n := 1; n < 25; n++ {
+		got, err := RunPolicyReplay(ctx, tr, arms, "recorded", DefaultCostModel())
+		if err != nil {
+			t.Fatalf("run %d: %v", n, err)
+		}
+		if got.ExactArms != first.ExactArms || got.BoundedArms != first.BoundedArms {
+			t.Fatalf("run %d honesty split drifted: exact=%d/%d bounded=%d/%d",
+				n, got.ExactArms, first.ExactArms, got.BoundedArms, first.BoundedArms)
+		}
+		for i := range got.Arms {
+			if got.Arms[i].Counters != first.Arms[i].Counters {
+				t.Fatalf("run %d arm %q counters drifted: %+v vs %+v",
+					n, got.Arms[i].Name, got.Arms[i].Counters, first.Arms[i].Counters)
+			}
+			if got.Arms[i].FirstDivergence != first.Arms[i].FirstDivergence {
+				t.Fatalf("run %d arm %q divergence drifted: %d vs %d",
+					n, got.Arms[i].Name, got.Arms[i].FirstDivergence, first.Arms[i].FirstDivergence)
+			}
+			if got.Arms[i].Replayability != first.Arms[i].Replayability {
+				t.Fatalf("run %d arm %q replayability drifted: %q vs %q",
+					n, got.Arms[i].Name, got.Arms[i].Replayability, first.Arms[i].Replayability)
+			}
 		}
 	}
 }

@@ -679,6 +679,45 @@ func AdjudicatorsFor(c *ToolCall) []Adjudicator {
 	return s.adjudicators
 }
 
+// ScopedFor filters a CALLER-SUPPLIED adjudicator chain down to the rungs a given
+// call must fold, applying the SAME CallScope semantics AdjudicatorsFor applies to
+// the global registry — but against an explicit chain the caller owns, touching
+// NOTHING in the process-global registry. A rung that implements CallScope with a
+// non-empty Tools() is kept ONLY for a call whose Tool it lists; a rung that does
+// not (the fail-CLOSED default) is unconditional and always kept. With no scoped
+// rung in the chain the result is the chain unchanged, so the common case (a single
+// unconditional monitor) is returned verbatim and allocation-free.
+//
+// This is the per-kernel injection seam: a kernel constructed with an EXPLICIT
+// adjudicator chain (see kernel.WithAdjudicators) folds ScopedFor(chain, c) instead
+// of AdjudicatorsFor(c), so K replay arms can each carry their own monitor and fold
+// CONCURRENTLY without colliding on the process-global registry or its policy.
+func ScopedFor(chain []Adjudicator, c *ToolCall) []Adjudicator {
+	if c == nil {
+		return chain
+	}
+	scoped := false
+	for _, a := range chain {
+		if cs, ok := a.(CallScope); ok && len(cs.Tools()) > 0 {
+			scoped = true
+			break
+		}
+	}
+	if !scoped {
+		return chain // no tool-scoped rung: every call folds the whole chain
+	}
+	out := make([]Adjudicator, 0, len(chain))
+	for _, a := range chain {
+		if cs, ok := a.(CallScope); ok {
+			if ts := cs.Tools(); len(ts) > 0 && !containsStr(ts, c.Tool) {
+				continue // scoped to other tools — it would Defer on this call
+			}
+		}
+		out = append(out, a)
+	}
+	return out
+}
+
 func FastPaths() []FastPath { return loadSnapshot().fastpaths }
 
 // ResultAdmitters returns the write-time result-admission chain in rank order.

@@ -63,6 +63,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"runtime"
+	"sync"
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/abi"
@@ -181,13 +182,18 @@ type redactFingerprint struct {
 	rewrittenArgs []byte
 }
 
-// captureRedactFingerprints re-queries the CURRENTLY-INSTALLED monitor policy (set by the
-// caller for this arm) for the raw verdict of every call, recording the monitor REDACT
+// captureRedactFingerprints re-queries THIS ARM'S monitor (the adjudicator the arm's
+// kernel folded) for the raw verdict of every call, recording the monitor REDACT
 // rewrite where one fires. It does NOT run a second kernel replay — it is a read-only
 // adjudication query (the same Adjudicate the kernel's monitor link calls), so it adds no
 // engine/network work and stays deterministic. Args are Put through the active resolver
 // exactly as replay() does, so the verdict matches the one the replay's kernel saw.
-func captureRedactFingerprints(ctx context.Context, t *Trace) ([]redactFingerprint, error) {
+//
+// It takes the arm's OWN *adjudicator.Adjudicator rather than reading the process-global
+// adjudicator.Default, so K arms can capture their fingerprints CONCURRENTLY without any
+// arm depending on a global the others are also using (issue #500). adj.Adjudicate reads
+// the policy under the adjudicator's RLock, so the query is itself race-safe.
+func captureRedactFingerprints(ctx context.Context, t *Trace, adj *adjudicator.Adjudicator) ([]redactFingerprint, error) {
 	res := abi.ActiveResolver()
 	out := make([]redactFingerprint, len(t.Calls))
 	for i, c := range t.Calls {
@@ -199,7 +205,7 @@ func captureRedactFingerprints(ctx context.Context, t *Trace) ([]redactFingerpri
 		if err != nil {
 			return nil, err
 		}
-		v := adjudicator.Default.Adjudicate(ctx, &abi.ToolCall{Tool: c.Tool, Args: ref, Meta: c.Meta})
+		v := adj.Adjudicate(ctx, &abi.ToolCall{Tool: c.Tool, Args: ref, Meta: c.Meta})
 		// Only a MONITOR redact transform rewrites the model-observed args. A grammar
 		// TRANSFORM (By=="grammar") is a constant-across-arms in-syscall repair, not a
 		// policy lever, so it is never a redact divergence point.
@@ -238,19 +244,50 @@ func firstRawDivergence(t *Trace, ref, arm []redactFingerprint) (int, string) {
 	return -1, ""
 }
 
-// RunPolicyReplay scores K policy arms against ONE frozen trajectory by swapping the
-// policy on the process-global monitor and replaying the same trace per arm — the
-// structural collapse of the K-policy comparison from "K full agent+model runs" to
-// "1 recording + K model-free kernel replays" (see the file doc). The reference arm
-// (refName, or arms[0] when empty) is the recorded trajectory's policy; every arm
-// carries a divergence witness against it, so no replayed number silently crosses the
-// measured/modeled wall.
+// swapMonitor returns a COPY of the registered adjudicator chain with the rank-100
+// reference monitor (adjudicator.Default) replaced by mon, the arm's own monitor. Every
+// other rung (grammar, preflight, the IFC sink gate, …) is carried through unchanged and
+// in the same rank order, so a kernel folding the returned chain produces the IDENTICAL
+// verdict the old adjudicator.Default.SetPolicy(arm.Policy) swap produced on the live
+// chain — only the policy table the monitor consults differs, which is the whole point of
+// an arm. The copy shares no mutable state with the global registry or with another arm's
+// chain, so K arms fold concurrently without colliding. If the chain has no Default rung
+// (a stripped registration), mon is appended so the arm is still monitored (fail-closed).
+func swapMonitor(base []abi.Adjudicator, mon *adjudicator.Adjudicator) []abi.Adjudicator {
+	out := make([]abi.Adjudicator, 0, len(base)+1)
+	swapped := false
+	for _, a := range base {
+		if a == abi.Adjudicator(adjudicator.Default) {
+			out = append(out, mon)
+			swapped = true
+			continue
+		}
+		out = append(out, a)
+	}
+	if !swapped {
+		out = append(out, mon)
+	}
+	return out
+}
+
+// RunPolicyReplay scores K policy arms against ONE frozen trajectory by replaying the
+// same trace per arm — the structural collapse of the K-policy comparison from "K full
+// agent+model runs" to "1 recording + K model-free kernel replays" (see the file doc).
+// The reference arm (refName, or arms[0] when empty) is the recorded trajectory's
+// policy; every arm carries a divergence witness against it, so no replayed number
+// silently crosses the measured/modeled wall.
 //
-// It calls agent.Configure() itself (idempotent — installs the localtools engine +
-// grammar + schemas) and restores the canonical bench policy on the way out. It is NOT
-// safe to call concurrently with another replay in the same process: the monitor's
-// policy is process-global (the same single-process discipline RunFleetSweep /
-// RunStochastic already follow).
+// The arms replay CONCURRENTLY (issue #500). Each arm builds its OWN monitor
+// (adjudicator.New(arm.Policy)) and injects it into its kernel via
+// kernel.WithAdjudicators, so an arm NEVER mutates the process-global
+// adjudicator.Default — the per-kernel adjudicator injection is what lets K arms fan out
+// across goroutines instead of serializing on the shared monitor's policy. The result is
+// IDENTICAL to a serial run: each arm's verdict is a deterministic function of (its own
+// policy, the frozen trace), and the only remaining shared state (the localtools engine,
+// the CAS resolver, the vDSO world counter) is stateless or mutex-guarded and CONSTANT
+// across arms (the policy axis is the only thing that varies). agent.Configure() is
+// called once (idempotent) to install the engine/grammar/schemas; no global policy is
+// swapped, so there is nothing to restore.
 func RunPolicyReplay(ctx context.Context, t *Trace, arms []PolicyArm, refName string, cm CostModel) (*PolicyReplayReport, error) {
 	if t == nil || len(t.Calls) == 0 {
 		return nil, fmt.Errorf("turnbench: RunPolicyReplay needs a non-empty trace")
@@ -261,8 +298,6 @@ func RunPolicyReplay(ctx context.Context, t *Trace, arms []PolicyArm, refName st
 	cm = withCostModelVersion(cm)
 
 	agent.Configure()
-	// The monitor policy is process-global; leave it as we found it for the next caller.
-	defer agent.Configure()
 
 	refIdx := 0
 	if refName != "" {
@@ -281,26 +316,66 @@ func RunPolicyReplay(ctx context.Context, t *Trace, arms []PolicyArm, refName st
 	results := make([]PolicyArmResult, len(arms))
 	disps := make([][]CallDisposition, len(arms))
 	fps := make([][]redactFingerprint, len(arms))
-	var wall int64
-	for i, arm := range arms {
-		adjudicator.Default.SetPolicy(arm.Policy)
-		t0 := time.Now()
-		kc, cb, _, _, disp, err := replay(ctx, t, true, false, true)
-		dt := time.Since(t0).Nanoseconds()
-		if err != nil {
-			return nil, fmt.Errorf("turnbench: replay arm %q: %w", arm.Name, err)
+	errs := make([]error, len(arms))
+
+	// The base chain is the FULL registered adjudicator chain (rank-sorted) — every rung
+	// the global-registry replay would fold: grammar repair, preflight, the IFC sink gate,
+	// and the rank-100 monitor (adjudicator.Default). Per arm we copy it and swap ONLY the
+	// monitor for the arm's own adjudicator.New(arm.Policy). That is exactly what the old
+	// adjudicator.Default.SetPolicy(arm.Policy) swap did to the live chain — every OTHER
+	// rung is unchanged and constant across arms — so the injected per-arm chain is
+	// verdict-identical to the serial global-swap path, just without the shared mutable.
+	baseChain := abi.Adjudicators()
+
+	// Fan out: each arm runs in its own goroutine against its OWN injected monitor.
+	// Every goroutine writes ONLY its own index of the pre-sized result slices, so there
+	// is no shared mutable state between arms — the race detector run (the acceptance
+	// gate) is clean by construction. ReplayWallNs is the WALL SPAN of the whole fan-out
+	// (one clock read around wg.Wait): with the arms running concurrently the honest "how
+	// long did the K replays take" is the span they overlapped in, NOT the sum of the
+	// per-arm intervals (which would over-count concurrent time). The per-arm ReplayNs
+	// stays per-arm. NOTE: when the trace is tiny and the process warm, the whole fan-out
+	// can complete inside one tick of a coarse OS monotonic clock, so the span may read
+	// 0ns — a legitimate "sub-tick" measurement, not a missing one.
+	fanStart := time.Now()
+	var wg sync.WaitGroup
+	for i := range arms {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			arm := arms[i]
+			// The arm's own monitor — the per-kernel adjudicator chain. This replaces the
+			// old process-global adjudicator.Default.SetPolicy(arm.Policy) swap: build a
+			// fresh chain that is the registered chain with the monitor rung substituted.
+			adj := adjudicator.New(arm.Policy)
+			chain := swapMonitor(baseChain, adj)
+			t0 := time.Now()
+			kc, cb, _, _, disp, err := replay(ctx, t, true, false, true, withAdjudicators(chain))
+			dt := time.Since(t0).Nanoseconds()
+			if err != nil {
+				errs[i] = fmt.Errorf("turnbench: replay arm %q: %w", arm.Name, err)
+				return
+			}
+			// Raw monitor verdict per call for the redact-aware divergence path (#501),
+			// queried against THIS arm's own monitor (not the global), so the fingerprint
+			// matches the replay the arm's kernel just ran; a read-only adjudication, not a
+			// second replay.
+			fp, err := captureRedactFingerprints(ctx, t, adj)
+			if err != nil {
+				errs[i] = fmt.Errorf("turnbench: capture redact fingerprints arm %q: %w", arm.Name, err)
+				return
+			}
+			disps[i] = disp
+			fps[i] = fp
+			results[i] = PolicyArmResult{Name: arm.Name, Class: cb, Counters: kc, ReplayNs: dt}
+		}(i)
+	}
+	wg.Wait()
+	wall := time.Since(fanStart).Nanoseconds()
+	for i := range arms {
+		if errs[i] != nil {
+			return nil, errs[i]
 		}
-		// Raw monitor verdict per call for the redact-aware divergence path (#501).
-		// The arm's policy is still installed, so the fingerprint matches the replay
-		// the kernel just ran; it is a read-only adjudication, not a second replay.
-		fp, err := captureRedactFingerprints(ctx, t)
-		if err != nil {
-			return nil, fmt.Errorf("turnbench: capture redact fingerprints arm %q: %w", arm.Name, err)
-		}
-		wall += dt
-		disps[i] = disp
-		fps[i] = fp
-		results[i] = PolicyArmResult{Name: arm.Name, Class: cb, Counters: kc, ReplayNs: dt}
 	}
 
 	// Divergence witness: each arm vs the reference. Two witnesses fold together and

@@ -423,12 +423,41 @@ func classifyDisposition(idx int, c Call, r *abi.Result, v abi.Verdict) CallDisp
 	return d
 }
 
+// replayOpts carry the OPTIONAL per-replay overrides. The zero value is the v0.1
+// behavior (walk the process-global adjudicator registry), so every existing caller
+// is unchanged; the policy-replay driver supplies adj to give each concurrent arm its
+// OWN monitor instead of mutating the shared adjudicator.Default (issue #500).
+type replayOpts struct {
+	adj []abi.Adjudicator // explicit per-kernel adjudicator chain; nil => global registry
+}
+
+// ReplayOption is an additive functional option for replay() (and the policy-replay
+// driver). Existing callers pass none and get the v0.1 global-registry path.
+type ReplayOption func(*replayOpts)
+
+// withAdjudicators makes the replay's kernel fold an EXPLICIT adjudicator chain rather
+// than the process-global registry, so K policy arms can replay CONCURRENTLY without
+// colliding on adjudicator.Default's mutable policy (issue #500).
+func withAdjudicators(chain []abi.Adjudicator) ReplayOption {
+	return func(o *replayOpts) { o.adj = chain }
+}
+
 // replay runs the whole trace through one fresh kernel (vDSO on/off per the arm)
 // and returns the live counters, the independently-derived classification, the
 // safety observations, the in-process adjudication p50 (the 1-shot's µs cost,
 // measured with the same calibration loop internal/bench uses), and — when
 // collectDisp is set — the ordered per-call dispositions (the demo's stream).
-func replay(ctx context.Context, t *Trace, vdsoOn, calibrate, collectDisp bool) (KernelCounters, ClassBreakdown, rawSafety, int64, []CallDisposition, error) {
+//
+// An optional explicit adjudicator chain (withAdjudicators) makes the kernel fold
+// THAT chain instead of the process-global registry; with no option the kernel reads
+// the global registry exactly as before, so the turn-tax / stochastic / fleet callers
+// are unaffected.
+func replay(ctx context.Context, t *Trace, vdsoOn, calibrate, collectDisp bool, opts ...ReplayOption) (KernelCounters, ClassBreakdown, rawSafety, int64, []CallDisposition, error) {
+	var ro replayOpts
+	for _, opt := range opts {
+		opt(&ro)
+	}
+
 	// Each arm is an ISOLATED session. Reset the two process-global pieces of
 	// cross-call state so a replay is reproducible regardless of any prior run in
 	// this process: the vDSO tier-2 cache (world bump => first read of each key is
@@ -438,7 +467,11 @@ func replay(ctx context.Context, t *Trace, vdsoOn, calibrate, collectDisp bool) 
 	vdso.Default.BumpWorld()
 	ifc.Default.Reset("")
 
-	k := kernel.New("localtools")
+	var kopts []kernel.Option
+	if len(ro.adj) > 0 {
+		kopts = append(kopts, kernel.WithAdjudicators(ro.adj))
+	}
+	k := kernel.New("localtools", kopts...)
 	k.SetVDSO(vdsoOn)
 	res := abi.ActiveResolver()
 	var cb ClassBreakdown

@@ -41,11 +41,41 @@ type Kernel struct {
 	resolver abi.Resolver
 	vdsoOff  bool // the --vdso=off ablation (unit 5): skip the fast path entirely
 
+	// adjChain is an OPT-IN explicit adjudicator chain (see WithAdjudicators). When
+	// non-nil, decide() folds THIS chain (scoped per call) instead of walking the
+	// process-global abi.AdjudicatorsFor registry — letting independent kernels carry
+	// independent policies and run CONCURRENTLY without colliding on the global
+	// monitor's mutable policy. When nil (the default for every existing caller),
+	// decide() reads the global registry EXACTLY as before, so back-compat is total.
+	adjChain []abi.Adjudicator
+
 	mu      sync.Mutex
 	seq     uint64
 	pending map[uint64]*pendingCall
 
 	ctr Counters
+}
+
+// Option configures a Kernel at construction (a functional option, additive: New
+// with no options builds the v0.1 kernel unchanged).
+type Option func(*Kernel)
+
+// WithAdjudicators injects an EXPLICIT adjudicator chain the kernel folds INSTEAD of
+// the process-global abi.AdjudicatorsFor registry. It is the per-kernel adjudicator
+// injection (issue #500): a replay driver can hand each of K policy arms its own
+// monitor (e.g. []abi.Adjudicator{adjudicator.New(arm.Policy)}) and run them in
+// parallel goroutines, with NO arm mutating the shared adjudicator.Default. The chain
+// is folded per call through the same restrictiveness lattice and the same CallScope
+// tool-scoping as the global path (via abi.ScopedFor), so a kernel given the global
+// chain is verdict-identical to one reading the registry. Passing an empty/nil chain
+// is a NO-OP — the kernel falls back to the global registry — so it can never silently
+// install an empty (default-deny-everything) policy.
+func WithAdjudicators(chain []abi.Adjudicator) Option {
+	return func(k *Kernel) {
+		if len(chain) > 0 {
+			k.adjChain = chain
+		}
+	}
 }
 
 // SetVDSO toggles the vDSO fast path (the --vdso on/off ablation, unit 5). When
@@ -65,13 +95,18 @@ type pendingCall struct {
 
 // New builds a kernel bound to a registered engine id ("" => first/any engine,
 // or a no-op engine if none registered). The Resolver comes from the registered
-// RegionBackend (blob store in v0.1).
-func New(engineID string) *Kernel {
-	return &Kernel{
+// RegionBackend (blob store in v0.1). Options (e.g. WithAdjudicators) are applied
+// after construction; New with no options builds the v0.1 kernel unchanged.
+func New(engineID string, opts ...Option) *Kernel {
+	k := &Kernel{
 		engineID: engineID,
 		resolver: abi.ActiveResolver(),
 		pending:  map[uint64]*pendingCall{},
 	}
+	for _, opt := range opts {
+		opt(k)
+	}
+	return k
 }
 
 // Counters returns a snapshot of the kernel's call-path tallies.
@@ -101,7 +136,20 @@ func (k *Kernel) Decide(ctx context.Context, c *abi.ToolCall) abi.Verdict {
 }
 
 func (k *Kernel) decide(ctx context.Context, c *abi.ToolCall) abi.Verdict {
-	return Fold(ctx, abi.AdjudicatorsFor(c), c)
+	return Fold(ctx, k.adjudicatorsFor(c), c)
+}
+
+// adjudicatorsFor returns the rung chain this call folds. With an explicit chain
+// injected (WithAdjudicators) it folds THAT chain, tool-scoped exactly as the global
+// path is (abi.ScopedFor mirrors abi.AdjudicatorsFor's CallScope filtering); with no
+// injection it walks the process-global registry via abi.AdjudicatorsFor — bit-for-bit
+// the v0.1 behavior. The injected path touches nothing global, so two kernels with
+// different chains adjudicate concurrently without colliding.
+func (k *Kernel) adjudicatorsFor(c *abi.ToolCall) []abi.Adjudicator {
+	if k.adjChain != nil {
+		return abi.ScopedFor(k.adjChain, c)
+	}
+	return abi.AdjudicatorsFor(c)
 }
 
 // BatchDecide vectorizes adjudication over a list of calls in one pass (unit 75,
@@ -116,8 +164,9 @@ func (k *Kernel) BatchDecide(ctx context.Context, calls []*abi.ToolCall) []abi.V
 		// Per-call chain selection: a batch may mix tools, and AdjudicatorsFor is
 		// O(1), so each call folds only the rungs that can refuse its tool. With no
 		// tool-scoped rung registered this returns the same full chain for every
-		// call, so the batch result is unchanged.
-		out[i] = Fold(ctx, abi.AdjudicatorsFor(c), c)
+		// call, so the batch result is unchanged. An injected explicit chain (see
+		// WithAdjudicators) is folded the same way, scoped per call.
+		out[i] = Fold(ctx, k.adjudicatorsFor(c), c)
 	}
 	return out
 }
