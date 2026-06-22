@@ -175,6 +175,8 @@ def run_close(root: Path, *, live: bool, audit_path: Path | None,
     return {"verdict": doc.get("verdict"), "closed": int(counts.get("closed") or 0),
             "would_close": int(counts.get("would_close") or 0),
             "skipped": int(counts.get("skipped_unwitnessed") or 0),
+            "skipped_unpushed": int(counts.get("skipped_unpushed") or 0),
+            "pushed_gate": doc.get("pushed_gate"),
             "failed": int(counts.get("failed") or 0)}
 
 

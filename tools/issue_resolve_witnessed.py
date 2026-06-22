@@ -122,6 +122,34 @@ def reverify(root: Path, sha: str) -> dict[str, Any]:
             "reason": None if ok else f"commit-audit verdict={verdict or '?'} witness={witness or '?'}"}
 
 
+def origin_main_resolvable(root: Path) -> bool:
+    """Best-effort refresh + presence check for the origin/main remote-tracking ref.
+
+    A close is only DURABLE once its resolving commit is reachable from what the
+    REMOTE has. A commit that exists only in the local shared multi-session tree can
+    be orphaned by a peer's reset/merge AFTER we close the issue -- exactly how #350
+    became closed-but-undelivered (the close arm witnessed the commit, closed the
+    issue, then a peer git op moved main off it). We refresh origin/main so the
+    ancestry gate below is against current remote truth; a failed fetch (offline)
+    falls back to the last-known origin/main. Returns False when origin/main cannot
+    be resolved at all, in which case the caller degrades to "don't gate" rather than
+    wedging the loop on a repo with no upstream.
+    """
+    run_capture(["git", "fetch", "origin", "main"], root, timeout=30)  # best effort
+    rc, _, _ = run_capture(
+        ["git", "rev-parse", "--verify", "--quiet", "origin/main"], root, timeout=15)
+    return rc == 0
+
+
+def reachable_from_origin(root: Path, sha: str) -> bool:
+    """Is `sha` an ancestor of origin/main -- i.e. durably pushed, not just local?"""
+    if not sha:
+        return False
+    rc, _, _ = run_capture(
+        ["git", "merge-base", "--is-ancestor", sha, "origin/main"], root, timeout=15)
+    return rc == 0
+
+
 def close_comment(row: dict[str, Any]) -> str:
     subj = row.get("subject") or "resolving commit"
     return (f"Resolved by `{row['sha'][:10]}` ({subj}). Closed by the DOS dispatch "
@@ -134,14 +162,20 @@ def close_cmd(row: dict[str, Any]) -> list[str]:
 
 
 def evaluate(root: Path, *, limit: int, live: bool, audit_json: str | None,
-             max_commits: int) -> dict[str, Any]:
+             max_commits: int, require_pushed: bool = True) -> dict[str, Any]:
     audit = load_audit(root, audit_json, max_commits)
     if audit.get("_error"):
         return {"schema": SCHEMA, "ok": False, "verdict": "ERROR",
                 "reason": audit["_error"], "planned": [], "results": []}
     candidates = open_witnessed(audit)[:limit]
+    # Durability gate: only close an issue whose resolving commit is reachable from
+    # origin/main (durably pushed), never one that lives only in the local shared
+    # tree. If origin/main can't be resolved (no upstream), degrade to "don't gate"
+    # so a repo without a remote still closes -- the gate guards against orphaning,
+    # it must not wedge the loop.
+    gate_active = require_pushed and origin_main_resolvable(root)
     planned, results = [], []
-    closed = skipped = failed = 0
+    closed = skipped = skipped_unpushed = failed = 0
     for row in candidates:
         rv = reverify(root, row["sha"])
         item = {**row, **rv, "command": close_cmd(row)}
@@ -149,6 +183,12 @@ def evaluate(root: Path, *, limit: int, live: bool, audit_json: str | None,
         if not rv["witness_ok"]:
             item["action"] = "skip_unwitnessed"
             skipped += 1
+            results.append(item)
+            continue
+        if gate_active and not reachable_from_origin(root, row["sha"]):
+            item["action"] = "skip_unpushed"
+            item["reason"] = "resolving commit not on origin/main yet (not durable)"
+            skipped_unpushed += 1
             results.append(item)
             continue
         if not live:
@@ -172,9 +212,12 @@ def evaluate(root: Path, *, limit: int, live: bool, audit_json: str | None,
         "live": live, "limit": limit,
         "candidates_total": len(open_witnessed(audit)),
         "planned_count": len(planned),
+        "pushed_gate": ("active" if gate_active else
+                        "disabled" if not require_pushed else "no-origin-ref"),
         "counts": {"closed": closed, "would_close": sum(
             1 for r in results if r.get("action") == "would_close"),
-            "skipped_unwitnessed": skipped, "failed": failed},
+            "skipped_unwitnessed": skipped, "skipped_unpushed": skipped_unpushed,
+            "failed": failed},
         "closure_rate_before": audit.get("closure_rate"),
         "results": results,
     }
@@ -187,13 +230,15 @@ def render(p: dict[str, Any]) -> str:
              f"planned={p.get('planned_count')}"]
     for r in p.get("results") or []:
         mark = {"closed": "[CLOSED]", "would_close": "[would-close]",
-                "skip_unwitnessed": "[SKIP no-witness]", "close_failed": "[FAILED]"}.get(
+                "skip_unwitnessed": "[SKIP no-witness]",
+                "skip_unpushed": "[SKIP unpushed]", "close_failed": "[FAILED]"}.get(
                     r.get("action"), "[?]")
         lines.append(f"  {mark} #{r.get('number')} {r.get('sha','')[:10]}  "
                      f"{(r.get('title') or '')[:50]}")
     lines.append(f"  -> closed={c.get('closed')} would_close={c.get('would_close')} "
-                 f"skipped={c.get('skipped_unwitnessed')} failed={c.get('failed')}  "
-                 f"(closure_rate before={p.get('closure_rate_before')})")
+                 f"skipped={c.get('skipped_unwitnessed')} "
+                 f"unpushed={c.get('skipped_unpushed')} failed={c.get('failed')}  "
+                 f"(gate={p.get('pushed_gate')}, closure_rate before={p.get('closure_rate_before')})")
     if not p.get("live"):
         lines.append("  DRY-RUN — re-run with --live to execute the gh closes")
     return "\n".join(lines)
@@ -210,11 +255,16 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--max-commits", type=int, default=600,
                     help="git history budget when running the audit fresh (default: 600)")
     ap.add_argument("--json", action="store_true", help="emit machine-readable JSON")
+    ap.add_argument("--no-require-pushed", dest="require_pushed", action="store_false",
+                    help="close on a local witness even if the resolving commit is not "
+                         "yet on origin/main (default: require it pushed -- prevents "
+                         "closing an issue whose commit a shared-tree race can orphan)")
     args = ap.parse_args(argv)
 
     root = Path(args.workspace).resolve() if args.workspace else repo_root()
     payload = evaluate(root, limit=args.limit, live=args.live,
-                       audit_json=args.audit_json, max_commits=args.max_commits)
+                       audit_json=args.audit_json, max_commits=args.max_commits,
+                       require_pushed=args.require_pushed)
     print(json.dumps(payload, indent=2) if args.json else render(payload))
     return 0 if payload.get("ok") else 1
 

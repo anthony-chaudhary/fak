@@ -196,6 +196,10 @@ class EvaluateTest(unittest.TestCase):
 
     def _patch(self, mod, reverify_map) -> None:
         mod.load_audit = lambda root, audit_json, max_commits: self.AUDIT
+        # Neutralize the durability gate for the base cases (its own behavior is
+        # covered in PushedGateTest); with no resolvable origin the gate is inert,
+        # so these assertions mirror the pre-gate close logic exactly.
+        mod.origin_main_resolvable = lambda root: False
 
         def fake_reverify(root, sha):
             return reverify_map[sha]
@@ -265,6 +269,69 @@ class EvaluateTest(unittest.TestCase):
         self.assertEqual(p["verdict"], "ERROR")
         self.assertEqual(p["reason"], "boom")
         self.assertEqual(p["results"], [])
+
+
+class PushedGateTest(unittest.TestCase):
+    """The durability gate: only close an issue whose resolving commit is reachable
+    from origin/main. Guards against the #350 failure mode -- a locally-witnessed
+    commit that a shared-tree peer reset orphaned *after* the issue was closed."""
+
+    AUDIT = {
+        "closure_rate": 0.5,
+        "issues": [
+            {"number": 100, "title": "pushed", "bucket": "OPEN_WITNESSED",
+             "witnessed_commits": [{"sha": "onmain", "subject": "shipped+pushed"}]},
+            {"number": 90, "title": "local-only", "bucket": "OPEN_WITNESSED",
+             "witnessed_commits": [{"sha": "localonly", "subject": "shipped-not-pushed"}]},
+        ],
+    }
+
+    def _patch(self, mod, *, gate_active: bool) -> None:
+        mod.load_audit = lambda root, audit_json, max_commits: self.AUDIT
+        mod.reverify = lambda root, sha: {
+            "witness_ok": True, "verdict": "OK",
+            "witness": "diff-witnessed", "reason": None}
+        mod.origin_main_resolvable = lambda root: gate_active
+        # only "onmain" is an ancestor of origin/main; "localonly" is not.
+        mod.reachable_from_origin = lambda root, sha: sha == "onmain"
+
+    def test_unpushed_commit_is_skipped_not_closed(self) -> None:
+        mod = load()
+        self._patch(mod, gate_active=True)
+        closed: list = []
+        mod.run_capture = lambda cmd, cwd, timeout: (closed.append(cmd) or (0, "", ""))
+        p = mod.evaluate(ROOT, limit=10, live=True, audit_json=None, max_commits=600)
+        actions = {r["number"]: r["action"] for r in p["results"]}
+        self.assertEqual(actions[100], "closed")          # pushed -> closed
+        self.assertEqual(actions[90], "skip_unpushed")    # local-only -> held
+        self.assertEqual(p["counts"]["closed"], 1)
+        self.assertEqual(p["counts"]["skipped_unpushed"], 1)
+        self.assertEqual(p["pushed_gate"], "active")
+        # the held issue's `gh issue close` must never have run; the pushed one did.
+        self.assertFalse(any(c[:4] == ["gh", "issue", "close", "90"] for c in closed))
+        self.assertTrue(any(c[:4] == ["gh", "issue", "close", "100"] for c in closed))
+
+    def test_gate_inactive_when_no_origin_closes_local_witness(self) -> None:
+        mod = load()
+        self._patch(mod, gate_active=False)  # origin/main unresolvable -> degrade
+        mod.run_capture = lambda cmd, cwd, timeout: (0, "", "")
+        p = mod.evaluate(ROOT, limit=10, live=True, audit_json=None, max_commits=600)
+        actions = {r["number"]: r["action"] for r in p["results"]}
+        self.assertEqual(actions[100], "closed")
+        self.assertEqual(actions[90], "closed")           # not gated -> both close
+        self.assertEqual(p["counts"]["skipped_unpushed"], 0)
+        self.assertEqual(p["pushed_gate"], "no-origin-ref")
+
+    def test_require_pushed_false_disables_gate(self) -> None:
+        mod = load()
+        self._patch(mod, gate_active=True)  # origin resolvable...
+        mod.run_capture = lambda cmd, cwd, timeout: (0, "", "")
+        # ...but the caller opted out: unpushed commits close anyway.
+        p = mod.evaluate(ROOT, limit=10, live=True, audit_json=None,
+                         max_commits=600, require_pushed=False)
+        actions = {r["number"]: r["action"] for r in p["results"]}
+        self.assertEqual(actions[90], "closed")
+        self.assertEqual(p["pushed_gate"], "disabled")
 
 
 if __name__ == "__main__":
