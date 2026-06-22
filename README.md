@@ -156,8 +156,10 @@ model and the dangerous action never runs. Full walkthrough:
 An agent system's cost isn't one number — it's roughly `agents × turns × working-set ×
 reread-rate × legality checks`, and the naive stack lets all five multiply by making the
 model **reread the same setup** on every turn (five agents over fifty turns is 250 chances
-to reprocess the same shared prompt). `fak` attacks the one safe term, reread-rate,
-*without* deleting the proof reuse is still legal: the first worker pays, everyone after
+to reprocess the same shared prompt). `fak` attacks the one *safe-to-cut* term — reread-rate,
+the only one that's pure waste rather than fixed by the task (agents, turns, working-set) or
+load-bearing for correctness (legality checks) — *without* deleting the proof *that* reuse is
+still legal: the first worker pays, everyone after
 reads for free, so *more agents can mean less total work*. Two fences — the reuse win is
 **self-host only** (an app that just *calls* a frontier API gets the safety floor, not the
 savings), and the frontier-scale "agent city" numbers are design targets, not
