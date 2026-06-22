@@ -275,6 +275,21 @@ experiments/fleet/*.log
 /report.json
 /baseline.json
 
+# default outputs of the remaining demo subcommands (cmd/fak/main.go), all regenerable
+# scratch dropped at the module root by a no-arg run — same class as the report/agent/
+# turntax defaults above, so running any demo never dirties `git status` (#311):
+#   `fak debug`  -> /cdb-report.json          (the cdb-image/ dir is already ignored above)
+#   `fak recall` -> /recall-report.json + /recall-image/ core image
+#   `fak dream`  -> /dream-report.json + /dream-image/ (output) + /dream-input-image/ (seed)
+# ANCHORED (leading `/`) to the module root only: the committed demo evidence lives under
+# experiments/ (e.g. experiments/recall/recall-report.json) and must stay tracked.
+/cdb-report.json
+/recall-report.json
+/recall-image/
+/dream-report.json
+/dream-image/
+/dream-input-image/
+
 # the canonical capability-floor manifest name the docs tell you to author at the module
 # root: `fak policy --dump > floor.json` (README, GETTING-STARTED, tutorial, cli-reference).
 # A user-authored scratch artifact of the getting-started flow — ignore so the documented
