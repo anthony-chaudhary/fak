@@ -40,5 +40,6 @@ schtasks /Create /TN $TaskName /SC MINUTE /MO $EveryMin /TR $tr /RL LIMITED /F |
 if ($LASTEXITCODE -ne 0) { throw "schtasks /Create failed ($LASTEXITCODE)" }
 $mode = if ($Live) { 'LIVE (kills runaways)' } else { 'DRY-RUN (logs intentions only)' }
 Write-Output "installed $TaskName - every $EveryMin min, $mode"
-Write-Output "log: %LOCALAPPDATA%\Fleet\watchdog\runaway_reaper.log"
+Write-Output "logs: %LOCALAPPDATA%\Fleet\watchdog\runaway_reaper.log   (human, incl. spawner ancestry)"
+Write-Output "      %LOCALAPPDATA%\Fleet\watchdog\runaway_reaper.jsonl (structured, one record per event)"
 Write-Output "flip to live later:  .\tools\register_runaway_reaper.ps1 -Live"
