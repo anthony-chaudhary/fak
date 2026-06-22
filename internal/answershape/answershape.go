@@ -13,27 +13,42 @@
 // the kernel's call-time re-checks: the same concern, surfaced as a consumer
 // witness instead of an internal-only verdict.
 //
-// Three repetition sub-signals are computed. Each is ~0 for natural prose and
-// each spikes on a distinct degeneration mode; the headline RepeatFraction is
-// their maximum, so a text trips on whichever way it actually degenerated:
+// Four repetition sub-signals are computed. Each is ~0 for natural prose and each
+// spikes on a distinct degeneration mode; the headline RepeatFraction is their
+// maximum, so a text trips on whichever way it actually degenerated:
 //
 //   - NGramRepeat: 1 - unique/total word n-grams (rep-n, the standard neural-text
 //     degeneration metric). Catches looped phrases and repeated sentences.
 //   - LineBlockRepeat: runes covered by the single most-frequent non-blank line
 //     that occurs at least twice, over total runes. Catches a block/paragraph
 //     emitted over and over.
-//   - PeriodRepeat: the runes covered by the largest short-period tiling (a unit
-//     up to maxPeriod bytes repeated back-to-back), over total runes. Catches a
-//     whitespace-free character runaway ("AAAA…") and a tiled unit ("abcabc…",
-//     ".assistant.assistant…") that the word- and line-level signals miss. It
+//   - PeriodRepeat: the runes covered by the largest short-period tiling (an
+//     alphanumeric-bearing unit up to maxPeriod bytes repeated back-to-back), over
+//     total runes. Catches a whitespace-free character runaway ("AAAA…") and a
+//     tiled unit ("abcabc…", ".assistant.assistant…") the other signals miss. It
 //     generalizes the dominantPeriod/looksDegenerate detector in cmd/simpledemo
 //     (issue #91) from "is the WHOLE string periodic" to "what fraction is".
+//   - CompRepeat: a flate compression-redundancy signal that catches a long-period
+//     byte runaway BEYOND the bounded period scan — the same >maxPeriod-byte
+//     URL/hash/JSON record tiled with no internal whitespace, which n-gram (one
+//     token), line-block (one line), and period (unit too long) all miss.
+//
+// Two degeneration modes are deliberately NOT flagged, to keep the false-positive
+// rate low on ubiquitous real output: a run or tiling of PURELY non-alphanumeric
+// fill characters (a "====" rule, a "|---|---|" table separator, a progress bar,
+// an ASCII border) is structural formatting, not a loop, so a tiling unit / a
+// repeated line must carry alphanumeric content to count. A bounded enumeration
+// whose every token differs ("1, 2, 3, … 199") is left to the caller's judgment
+// (it terminates and carries information; masking digits to catch it would flag
+// legitimate numeric tables).
 //
 // Measure is pure and deterministic: identical bytes and identical Limits always
 // yield an identical Report.
 package answershape
 
 import (
+	"bytes"
+	"compress/flate"
 	"fmt"
 	"strings"
 	"unicode"
@@ -61,8 +76,20 @@ const repeatFloorChars = 24
 
 // maxPeriod bounds the tiling-unit length PeriodRepeat scans, in bytes. A unit as
 // long as a role header (".assistant\n") still tiles within it; natural language
-// is never exactly periodic at any of these lengths, so the gate is safe.
+// is never exactly periodic at any of these lengths, so the gate is safe. Longer
+// periods are caught by the length-agnostic compression signal instead.
 const maxPeriod = 32
+
+// Compression-redundancy signal constants. A flate ratio (compressed/original) far
+// below any natural text's (English ~0.4, a repetitive table ~0.25, a tight loop
+// ~0.05) isolates a long-period byte runaway. compKnee maps the ratio onto the
+// [0,1] repeat scale so the single --max-repeat knob still governs it; the signal
+// only applies above compressionFloor runes, where flate has the volume to be
+// meaningful (short inputs compress poorly and would read as spuriously redundant).
+const (
+	compressionFloor = 200
+	compKnee         = 0.20
+)
 
 // Limits are the caller-chosen thresholds the consumer surface binds. The two
 // named knobs mirror `dos answer-shape --max-repeat --max-chars`.
@@ -90,8 +117,11 @@ type Report struct {
 	NGramRepeat     float64 `json:"ngram_repeat"`
 	LineBlockRepeat float64 `json:"line_block_repeat"`
 	PeriodRepeat    float64 `json:"period_repeat"`
+	CompRepeat      float64 `json:"comp_repeat"`
+	FlateRatio      float64 `json:"flate_ratio"`
 	// RepeatFraction is the headline = max(NGramRepeat, LineBlockRepeat,
-	// PeriodRepeat). The verdict's repeat check compares this to Limits.MaxRepeat.
+	// PeriodRepeat, CompRepeat). The verdict's repeat check compares it to
+	// Limits.MaxRepeat.
 	RepeatFraction float64 `json:"repeat_fraction"`
 
 	// TopNGram is the most-frequent word n-gram (the looped phrase), surfaced for a
@@ -130,7 +160,11 @@ func Measure(text []byte, lim Limits) Report {
 	rep.NGramRepeat, rep.TopNGram, rep.TopNGramCount = ngramRepeat(words, n)
 	rep.LineBlockRepeat = lineBlockRepeat(s, rep.Chars)
 	rep.PeriodRepeat, rep.Period, rep.PeriodUnit = periodRepeat(s, rep.Chars)
+	rep.CompRepeat, rep.FlateRatio = compRepeat([]byte(s), rep.Chars)
 	rep.RepeatFraction = max3(rep.NGramRepeat, rep.LineBlockRepeat, rep.PeriodRepeat)
+	if rep.CompRepeat > rep.RepeatFraction {
+		rep.RepeatFraction = rep.CompRepeat
+	}
 
 	// Verdict. Repetition only judges text at or above the floor; length judges any
 	// length. A disabled check (<= 0) never trips.
@@ -158,11 +192,13 @@ func (r Report) dominantSignal() string {
 		return fmt.Sprintf("%d-gram-repeat", r.NGram)
 	case r.LineBlockRepeat:
 		return "line-block-repeat"
-	default:
+	case r.PeriodRepeat:
 		if r.PeriodUnit != "" {
 			return fmt.Sprintf("period-%d-tile (%q)", r.Period, r.PeriodUnit)
 		}
 		return "period-tile"
+	default:
+		return fmt.Sprintf("high-redundancy (flate %.2f)", r.FlateRatio)
 	}
 }
 
@@ -213,9 +249,13 @@ func ngramRepeat(words []string, n int) (frac float64, top string, topCount int)
 }
 
 // lineBlockRepeat returns the fraction of total runes covered by the single
-// most-frequent non-blank line that occurs at least twice. It returns 0 when no
-// line repeats (so a normal single-paragraph answer, whose one line trivially has
-// max frequency 1, scores 0 rather than 1).
+// most-frequent non-blank line that occurs at least twice. A line carrying NO
+// alphanumeric content (a "====" rule, a "|---|---|" separator) is structural
+// formatting, not a degeneration block, and is excluded. It returns 0 when no
+// qualifying line repeats (so a normal single-paragraph answer, whose one line
+// trivially has max frequency 1, scores 0 rather than 1). The winner is chosen
+// with a lexicographic tiebreak so the result is deterministic even though only
+// the fraction is returned today.
 func lineBlockRepeat(s string, totalChars int) float64 {
 	if totalChars == 0 {
 		return 0
@@ -223,17 +263,19 @@ func lineBlockRepeat(s string, totalChars int) float64 {
 	counts := map[string]int{}
 	for _, ln := range strings.Split(s, "\n") {
 		t := strings.TrimSpace(ln)
-		if t != "" {
+		if t != "" && hasAlnum(t) {
 			counts[t]++
 		}
 	}
 	bestCount, bestLen := 0, 0
+	bestLine := ""
 	for ln, c := range counts {
 		if c < 2 {
 			continue
 		}
-		if c*utf8.RuneCountInString(ln) > bestCount*bestLen {
-			bestCount, bestLen = c, utf8.RuneCountInString(ln)
+		prod := c * utf8.RuneCountInString(ln)
+		if prod > bestCount*bestLen || (prod == bestCount*bestLen && (bestLine == "" || ln < bestLine)) {
+			bestCount, bestLen, bestLine = c, utf8.RuneCountInString(ln), ln
 		}
 	}
 	if bestCount < 2 {
@@ -242,14 +284,16 @@ func lineBlockRepeat(s string, totalChars int) float64 {
 	return clamp01(float64(bestCount*bestLen) / float64(totalChars))
 }
 
-// periodRepeat finds the largest short-period tiling in s and returns the fraction
-// of runes it covers, the period length (in bytes), and a bounded preview of the
-// repeating unit. For period p it finds the longest contiguous byte block over
-// which s[i] == s[i-p] (a block of `run` matched bytes covers run+p bytes — the
-// matched tail plus the unit it copies), requiring at least two full copies. p=1
-// is a single-rune runaway; p>=2 is a tiled unit. It is the graded generalization
-// of cmd/simpledemo's dominantPeriod (issue #91), which required the WHOLE string
-// to be p-periodic.
+// periodRepeat finds the largest short-period tiling in s whose repeating unit
+// carries alphanumeric content, and returns the fraction of runes it covers, the
+// period length (in bytes), and a bounded preview of the unit. For period p it
+// finds the longest contiguous byte block over which s[i] == s[i-p] (a block of
+// `run` matched bytes covers run+p bytes — the matched tail plus the unit it
+// copies), requiring at least two full copies. p=1 is a single-rune runaway; p>=2
+// is a tiled unit. Units that are PURELY non-alphanumeric fill (a "====" rule, a
+// "|----|----|" separator, a progress bar) are excluded — they are structural
+// formatting, not a loop. It is the graded generalization of cmd/simpledemo's
+// dominantPeriod (issue #91), which required the WHOLE string to be p-periodic.
 func periodRepeat(s string, totalChars int) (frac float64, period int, unit string) {
 	n := len(s)
 	if n < 2 || totalChars == 0 {
@@ -267,7 +311,7 @@ func periodRepeat(s string, totalChars int) (frac float64, period int, unit stri
 				continue
 			}
 			if run >= p { // >= 2 full copies of the p-byte unit
-				if block := run + p; block > bestBytes {
+				if block := run + p; block > bestBytes && hasAlnum(s[start:start+p]) {
 					bestBytes, bestP, bestStart = block, p, start
 				}
 			}
@@ -280,6 +324,49 @@ func periodRepeat(s string, totalChars int) (frac float64, period int, unit stri
 	block := s[bestStart : bestStart+bestBytes]
 	frac = clamp01(float64(utf8.RuneCountInString(block)) / float64(totalChars))
 	return frac, bestP, previewUnit(s[bestStart : bestStart+bestP])
+}
+
+// compRepeat detects a long-period byte runaway BEYOND the bounded period scan —
+// the same >maxPeriod-byte unit (a URL, a hash, a JSON record) tiled with no
+// internal whitespace, which n-gram (one token), line-block (one line), and period
+// (unit too long) all miss. It flate-compresses the bytes; a ratio far below any
+// natural text's is the signal, mapped onto the [0,1] repeat scale by compKnee so
+// the single --max-repeat threshold governs it. The ratio is always reported; the
+// fraction only fires above compressionFloor runes.
+func compRepeat(b []byte, chars int) (frac, ratio float64) {
+	if len(b) == 0 {
+		return 0, 0
+	}
+	var buf bytes.Buffer
+	w, err := flate.NewWriter(&buf, flate.BestCompression)
+	if err != nil {
+		return 0, 0
+	}
+	if _, err := w.Write(b); err != nil {
+		_ = w.Close()
+		return 0, 0
+	}
+	if err := w.Close(); err != nil {
+		return 0, 0
+	}
+	ratio = float64(buf.Len()) / float64(len(b))
+	if chars < compressionFloor {
+		return 0, ratio
+	}
+	return clamp01((compKnee - ratio) / compKnee), ratio
+}
+
+// hasAlnum reports whether a string carries any Unicode letter or digit. A purely
+// non-alphanumeric run/unit (a "====" rule, a "|----|" separator, a progress bar,
+// an ASCII border, runs of spaces) is structural formatting — not degeneration —
+// so it must not drive the verdict.
+func hasAlnum(s string) bool {
+	for _, r := range strings.ToValidUTF8(s, "") {
+		if unicode.IsLetter(r) || unicode.IsNumber(r) {
+			return true
+		}
+	}
+	return false
 }
 
 // previewUnit renders a tiling unit safely and boundedly for a reason string.

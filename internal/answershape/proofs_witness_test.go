@@ -29,6 +29,8 @@ var witnessFixtures = []string{
 	strings.Repeat("ALERT: disk full\n", 20),
 	strings.Repeat("the kernel adjudicates every tool call before it dispatches anything. ", 8),
 	"yes, yes, yes, yes, yes, yes, yes, yes, yes, yes!",
+	strings.Repeat("https://example.com/api/v1/resource/12345", 25), // flate/compression path
+	strings.Repeat("=", 64), // structural fill — clean
 }
 
 // TestMeasureIsDeterministic witnesses (1). Map iteration order in ngramRepeat /

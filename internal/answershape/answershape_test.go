@@ -83,6 +83,62 @@ func TestEachSignalFires(t *testing.T) {
 	}
 }
 
+// TestStructuralFormattingIsNotDegenerate is the false-positive regression guard:
+// ubiquitous non-alphanumeric formatting — separator rules, progress bars, table
+// separators, Setext underlines, ASCII borders — must NEVER be flagged, because a
+// run/tiling of pure fill characters is structure, not a loop.
+func TestStructuralFormattingIsNotDegenerate(t *testing.T) {
+	cases := map[string]string{
+		"progress-bar":      "Downloading [==================================================] 100%",
+		"markdown-rule":     strings.Repeat("-", 72),
+		"equals-rule":       strings.Repeat("=", 64),
+		"star-rule":         strings.Repeat("*", 50),
+		"table-separator":   "| Name | Value |\n|----------|----------|\n| alpha | 1 |",
+		"setext-underline":  "Installation Guide\n========================================",
+		"ascii-border":      "+" + strings.Repeat("-", 40) + "+",
+		"build-log-w-rules": "Build complete.\n" + strings.Repeat("=", 60) + "\nResults: 42 passed\n" + strings.Repeat("=", 60) + "\nDone.",
+	}
+	for name, text := range cases {
+		t.Run(name, func(t *testing.T) {
+			r := Measure([]byte(text), def())
+			if r.Degenerate {
+				t.Fatalf("structural formatting flagged degenerate: rep=%.3f (ng=%.3f ln=%.3f pd=%.3f cp=%.3f) reasons=%v",
+					r.RepeatFraction, r.NGramRepeat, r.LineBlockRepeat, r.PeriodRepeat, r.CompRepeat, r.Reasons)
+			}
+		})
+	}
+}
+
+// TestLongPeriodRunawayCaughtByCompression guards the >maxPeriod-byte cliff: a long
+// unit (URL/hash/JSON record) tiled with no internal whitespace escapes the bounded
+// period scan and the word/line signals, but the flate redundancy signal catches it.
+func TestLongPeriodRunawayCaughtByCompression(t *testing.T) {
+	cases := map[string]string{
+		"url-repeat":  strings.Repeat("https://example.com/api/v1/resource/12345", 25), // 41-byte unit > maxPeriod
+		"hash-repeat": strings.Repeat("deadbeefcafebabe0123456789abcdef00", 30),        // 34-byte unit > maxPeriod
+		"json-retry":  strings.Repeat("{\"id\": 1, \"action\": \"retry\", \"status\": \"pending\"}\n", 40),
+	}
+	for name, text := range cases {
+		t.Run(name, func(t *testing.T) {
+			r := Measure([]byte(text), def())
+			if !r.Degenerate {
+				t.Fatalf("long-period runaway NOT flagged: rep=%.3f (ng=%.3f ln=%.3f pd=%.3f cp=%.3f flate=%.3f)",
+					r.RepeatFraction, r.NGramRepeat, r.LineBlockRepeat, r.PeriodRepeat, r.CompRepeat, r.FlateRatio)
+			}
+		})
+	}
+	// And a genuinely DIVERSE long text (distinct sentences, no runaway) must NOT
+	// trip the compression signal — the knee must sit below natural redundancy.
+	varied := "The kernel adjudicates every tool call inside one process boundary. " +
+		"A denied request comes back with a structured reason from a closed vocabulary. " +
+		"Malformed arguments are repaired in place without spending an extra model turn. " +
+		"A poisoned or secret-bearing result is quarantined by the write-time admission gate. " +
+		"None of these steps needs a network round trip or a freshly spawned subprocess."
+	if r := Measure([]byte(varied), def()); r.Degenerate {
+		t.Fatalf("diverse long prose flagged: flate=%.3f cp=%.3f rep=%.3f reasons=%v", r.FlateRatio, r.CompRepeat, r.RepeatFraction, r.Reasons)
+	}
+}
+
 func TestMaxCharsVerbosity(t *testing.T) {
 	// A coherent (non-repetitive) but long answer trips ONLY the length check.
 	long := coherent + " " + coherent // ~2x, still low repeat
