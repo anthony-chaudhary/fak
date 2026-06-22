@@ -93,6 +93,7 @@ You do not rewrite your agent to adopt fak — you repoint one base URL at `fak 
 - [Issue-dispatch loop](docs/dispatch-loop.md): the witness-gated GitHub-issue backlog driver (spawn → ship #N → witness → close), and its live view [docs/dispatch-status.md](docs/dispatch-status.md).
 - [Gateway API reference](docs/fak/api-reference.md): the complete HTTP reference for `fak serve` — its OpenAI, Anthropic Messages, fak-native, and MCP endpoints plus auth, rate limits, and ops routes.
 - [MCP tool-result wire](docs/mcp-tool-result.md): the gateway's MCP tool-result envelope — the SyscallResponse fields, the verdict object, and the closed refusal vocabulary, with one example per verdict class.
+- [Model/compute engine env knobs](docs/model-engine-env.md): every `FAK_*` variable the in-kernel model and compute engine read — GPU residency budget (`FAK_GPU_BUDGET_MB`), quant/load format, matmul worker budget, SIMD kernel tiers, and the GPU build vars — each with type, default, when-to-use, and a `file:line` source. The compute-engine companion to serve-config.md.
 - [Server troubleshooting](docs/fak/server-troubleshooting.md): diagnosing common `fak serve` failures — port conflicts, out-of-memory model loads, GPU/CUDA/Vulkan errors, and policy issues.
 - [Related tools & workflows](docs/fak/related-items.md): a catalog of fak's CLI verbs, the serve gateway, the test/CI runners, the demo scripts, and the policy templates, with usage examples.
 
