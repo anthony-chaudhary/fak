@@ -6,7 +6,7 @@
   with NO Jekyll front matter (like showcase.html) so Pages copies it verbatim instead of
   wrapping it in the cayman theme.
 
-  The demos themselves run on a single GCE VM (NVIDIA L4) — three interactive Go servers
+  The demos themselves run on a single GCE VM (NVIDIA L4) — four interactive Go servers
   driving the REAL kernel. The links below point at that host. NOTE: the demo host is plain
   HTTP while this page is HTTPS, so a browser will navigate to it on click (no mixed-content
   block for a top-level link) but will not embed it. The URLs are resolved + kept current by
@@ -18,13 +18,13 @@
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <link rel="icon" href="data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2032%2032'%3E%3Crect%20width='32'%20height='32'%20rx='7'%20fill='%23070a10'/%3E%3Ccircle%20cx='16'%20cy='16'%20r='8'%20fill='%2338bdf8'/%3E%3C/svg%3E" />
 <title>fak — the agent kernel | live demos</title>
-<meta name="description" content="Three interactive demos of the fak agent kernel, running live on GCP: the turn-tax race (SOTA loop vs fak 1-shot), the multi-agent context reuse proof, and a live model reuse race — each driving the real kernel." />
+<meta name="description" content="Four interactive demos of the fak agent kernel, running live on GCP: the safety floor side-by-side (without fak vs with fak), the turn-tax race (SOTA loop vs fak 1-shot), the multi-agent context reuse proof, and a live model reuse race — each driving the real kernel." />
 <link rel="canonical" href="https://anthony-chaudhary.github.io/fak/demos.html" />
 <meta name="author" content="Anthony Chaudhary" />
 <meta property="og:type" content="website" />
 <meta property="og:site_name" content="fak — the agent kernel" />
 <meta property="og:title" content="fak — the agent kernel | live demos" />
-<meta property="og:description" content="Three interactive demos driving the real kernel, live on GCP: turn-tax race, multi-agent context reuse, and a live model reuse race." />
+<meta property="og:description" content="Four interactive demos driving the real kernel, live on GCP: the safety floor side-by-side, the turn-tax race, multi-agent context reuse, and a live model reuse race." />
 <meta property="og:url" content="https://anthony-chaudhary.github.io/fak/demos.html" />
 <meta property="og:image" content="https://raw.githubusercontent.com/anthony-chaudhary/fak/main/visuals/social-preview.png" />
 <meta name="twitter:card" content="summary_large_image" />
@@ -117,15 +117,29 @@
     <span class="eyebrow"><b>●</b> live on GCP · NVIDIA L4</span>
     <h1 class="title">Drive the real kernel.</h1>
     <p class="lede">
-      Three interactive demos, each running the <span class="k">actual fak kernel</span> on a single
-      GCE VM — not a recording, not a mock. Watch turns get saved inside the syscall, watch a shared
-      prefix get prefilled once and cloned into a fleet, and race a live model with reuse on vs off.
+      Four interactive demos, each running the <span class="k">actual fak kernel</span> on a single
+      GCE VM — not a recording, not a mock. Watch an attack get refused at the boundary while an
+      unguarded agent runs it, watch turns get saved inside the syscall, watch a shared prefix get
+      prefilled once and cloned into a fleet, and race a live model with reuse on vs off.
     </p>
   </div>
 </header>
 
 <div class="wrap">
   <div class="grid">
+
+    <!-- guarddemo — self-contained, no model · the safety moat, side by side.
+         Reached through the :80 hub proxy (/guarddemo/) because the org firewall only
+         traverses the fixed port set {80,8080-8082,8150,8153}; :8151 would time out. -->
+    <a class="card" href="http://136.111.250.205/guarddemo/" rel="noopener">
+      <span class="pill self">self-contained · no model</span>
+      <h3>🛡️ Without fak vs With fak — the safety floor</h3>
+      <p>The moat, side by side. The <em>same</em> adversarial tool-call trace runs down two columns at once:
+      without fak, a poisoned tool result is admitted to context and the injected <code>delete_account</code>
+      payload executes; with fak, the poison is paged out and the destructive call is refused at the boundary —
+      while the legitimate calls run on both. A real kernel verdict per row, no model. The point lands in ~30 seconds.</p>
+      <span class="go">Run both agents →</span>
+    </a>
 
     <!-- turntax — self-contained, no model -->
     <a class="card" href="http://136.111.250.205:8150/" rel="noopener">
@@ -175,8 +189,10 @@
 
   <div class="note" style="border-color:rgba(56,189,248,.4)">
     <b style="color:var(--fak)">▶ Run your own copy.</b> Every demo is in the public repo and runs anywhere
-    Go runs — no infrastructure of ours required. The self-contained one is one command:
+    Go runs — no infrastructure of ours required. The two self-contained ones are one command each
+    (no model, no GPU, no downloads):
     <div style="margin:10px 0 6px"><code style="display:block;padding:9px 12px;white-space:pre-wrap">git clone https://github.com/anthony-chaudhary/fak &amp;&amp; cd fak
+go run ./cmd/guarddemo        # → http://127.0.0.1:8151   (or -print for an instant terminal diff)
 go run ./cmd/turntaxdemo      # → http://127.0.0.1:8150</code></div>
     The two model demos add one step — <code>scripts/fetch-model.sh</code> exports a small CPU model — then
     <code>go run ./cmd/ctxdemo</code> / <code>./cmd/demorace</code> light up the live race. The binaries also
@@ -190,8 +206,8 @@ go run ./cmd/turntaxdemo      # → http://127.0.0.1:8150</code></div>
     <a href="showcase.html">← Back to the showcase</a> ·
     <a href="https://github.com/anthony-chaudhary/fak" rel="noopener">GitHub</a> ·
     <a href="./">Docs home</a>
-    <p style="margin-top:10px">Run any of these locally instead: <code>go run ./cmd/turntaxdemo</code> ·
-    <code>go run ./cmd/ctxdemo</code> · <code>go run ./cmd/demorace</code></p>
+    <p style="margin-top:10px">Run any of these locally instead: <code>go run ./cmd/guarddemo</code> ·
+    <code>go run ./cmd/turntaxdemo</code> · <code>go run ./cmd/ctxdemo</code> · <code>go run ./cmd/demorace</code></p>
   </div>
 </footer>
 
