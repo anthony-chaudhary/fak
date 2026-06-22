@@ -23,12 +23,31 @@ import qwen36_node_reports as node_reports
 
 ROOT = Path(__file__).resolve().parents[1]
 SCHEMA = "fak.qwen36-standalone-readiness.v1"
-DEFAULT_EXPERIMENT_DIR = ROOT / "fak" / "experiments" / "qwen36"
+
+
+def _module_base(root: Path) -> Path:
+    """Resolve the fak module base across both supported checkouts.
+
+    The operator's private fleet superrepo nests the module under
+    ``<root>/fak/`` (artifacts at ``<root>/fak/experiments/...``), while the
+    standalone public checkout has the module at the repo root
+    (``<root>/experiments/...``). Older defaults hard-coded the ``fak/``
+    prefix, which made this audit look in a non-existent tree on the
+    standalone checkout and silently report every artifact missing. Prefer
+    whichever layout actually exists on disk; fall back to the module root.
+    """
+    if (root / "fak" / "experiments").is_dir():
+        return root / "fak"
+    return root
+
+
+BASE = _module_base(ROOT)
+DEFAULT_EXPERIMENT_DIR = BASE / "experiments" / "qwen36"
 DEFAULT_NODE_REPORT_DIR = DEFAULT_EXPERIMENT_DIR / "node-reports"
 DEFAULT_SLACK_HELPERS_DIR = ROOT.parent / "slack-helpers"
-# fak/experiments/dgx/ is operator-private lab infra, excluded from the public
+# experiments/dgx/ is operator-private lab infra, excluded from the public
 # copy (see PUBLIC-SCRUB-POLICY.md). discover_dgx_runs() no-ops when it is absent.
-DEFAULT_DGX_DIR = ROOT / "fak" / "experiments" / "dgx"
+DEFAULT_DGX_DIR = BASE / "experiments" / "dgx"
 DEFAULT_PACKET_DIRS = [
     ROOT / "tools" / "_registry" / "qwen36-watch-packets",
     ROOT / "tools" / "_registry" / "qwen36-node-packet",
@@ -1340,7 +1359,7 @@ def build_report(
         transcript_file=effective_slack_transcript_file,
     )
     checks = check_rows(
-        prep_doc=ROOT / "fak" / "QWEN36-DGX-STANDALONE-PREP.md",
+        prep_doc=BASE / "QWEN36-DGX-STANDALONE-PREP.md",
         readiness_doc=DEFAULT_EXPERIMENT_DIR / "QWEN36-DGX-STANDALONE-READINESS.md",
         watches=watches,
         node_report_summaries=node_report_summaries,

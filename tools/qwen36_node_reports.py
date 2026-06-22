@@ -15,8 +15,12 @@ from typing import Any
 
 ROOT = Path(__file__).resolve().parents[1]
 SCHEMA = "fak.qwen36-node-reports.v1"
+# The operator superrepo nests the module under <root>/fak/; the standalone
+# public checkout has experiments/ at the module root. Prefer whichever exists
+# so the default out-dir lands in the real tree (not a phantom fak/experiments).
+_BASE = ROOT / "fak" if (ROOT / "fak" / "experiments").is_dir() else ROOT
 DEFAULT_INBOX = ROOT / "tools" / "_registry" / "qwen36-report-inbox"
-DEFAULT_OUT_DIR = ROOT / "fak" / "experiments" / "qwen36" / "node-reports"
+DEFAULT_OUT_DIR = _BASE / "experiments" / "qwen36" / "node-reports"
 
 
 def find_tailscale() -> str:
