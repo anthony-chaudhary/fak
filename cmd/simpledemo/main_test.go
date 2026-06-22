@@ -5,9 +5,77 @@ import (
 	"io"
 	"math/rand"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
+
+// TestModelDownloadDerivesURL pins the filename→URL derivation that makes a missing
+// "-gguf <name>" auto-download: mradermacher names quants with a DOT and ships one
+// repo per model, but users type a dash. Both must resolve to the real file.
+func TestModelDownloadDerivesURL(t *testing.T) {
+	cases := []struct {
+		in        string
+		canonical string
+		repoFrag  string
+		ok        bool
+	}{
+		// dash-typed (as in the bug report) → canonical dot filename + per-size repo
+		{"Qwen2.5-1.5B-Instruct-Q8_0.gguf", "Qwen2.5-1.5B-Instruct.Q8_0.gguf", "mradermacher/Qwen2.5-1.5B-Instruct-GGUF", true},
+		// already canonical (dot) is preserved
+		{"Qwen2.5-0.5B-Instruct.Q8_0.gguf", "Qwen2.5-0.5B-Instruct.Q8_0.gguf", "mradermacher/Qwen2.5-0.5B-Instruct-GGUF", true},
+		// full path + a K-quant, basename only is used
+		{"/home/u/Downloads/Qwen2.5-3B-Instruct-Q4_K_M.gguf", "Qwen2.5-3B-Instruct.Q4_K_M.gguf", "mradermacher/Qwen2.5-3B-Instruct-GGUF", true},
+		// not derivable → ok=false (caller shows a friendly error instead)
+		{"not-a-model.txt", "", "", false},
+		{"model-without-quant.gguf", "", "", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.in, func(t *testing.T) {
+			canonical, urls, ok := modelDownload(tc.in)
+			if ok != tc.ok {
+				t.Fatalf("modelDownload(%q) ok = %v, want %v", tc.in, ok, tc.ok)
+			}
+			if !tc.ok {
+				return
+			}
+			if canonical != tc.canonical {
+				t.Errorf("canonical = %q, want %q", canonical, tc.canonical)
+			}
+			if len(urls) < 2 {
+				t.Fatalf("want primary + mirror URLs, got %v", urls)
+			}
+			if !strings.HasPrefix(urls[0], "https://huggingface.co/"+tc.repoFrag+"/resolve/main/") {
+				t.Errorf("primary URL = %q, want repo %q", urls[0], tc.repoFrag)
+			}
+			if !strings.HasSuffix(urls[0], tc.canonical) {
+				t.Errorf("primary URL = %q, want suffix %q", urls[0], tc.canonical)
+			}
+		})
+	}
+}
+
+// TestExpandTilde pins ~ expansion: a leading ~ becomes $HOME, everything else is
+// untouched. This is what lets "-gguf ~/Downloads/model.gguf" find the file.
+func TestExpandTilde(t *testing.T) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		t.Skipf("no home dir: %v", err)
+	}
+	cases := []struct{ in, want string }{
+		{"~/Downloads/model.gguf", filepath.Join(home, "Downloads", "model.gguf")},
+		{"~", home},
+		{"", ""},
+		{"/abs/path/model.gguf", "/abs/path/model.gguf"},
+		{"relative/model.gguf", "relative/model.gguf"},
+		{"a/~/b", "a/~/b"}, // ~ only expands as a prefix, never mid-path
+	}
+	for _, tc := range cases {
+		if got := expandTilde(tc.in); got != tc.want {
+			t.Errorf("expandTilde(%q) = %q, want %q", tc.in, got, tc.want)
+		}
+	}
+}
 
 // TestLooksDegenerate pins the issue #91 detector: the exact failure modes the bug
 // report observed must be flagged, and ordinary coherent replies must not be. This

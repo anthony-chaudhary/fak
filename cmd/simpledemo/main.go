@@ -54,6 +54,12 @@ func main() {
 	autoDownload := flag.Bool("download", false, "Auto-download default model if not found")
 	flag.Parse()
 
+	// Expand a leading ~ ourselves: Go's flag parsing and os.Open never do, and a
+	// quoted/PowerShell "-gguf ~/Downloads/model.gguf" reaches us as a literal "~"
+	// path that can't be opened (issue: "system cannot find the path specified").
+	*gguf = expandTilde(*gguf)
+	*tokDir = expandTilde(*tokDir)
+
 	// Try to auto-find a model if none specified
 	if *gguf == "" {
 		foundModel, foundTok := findModel()
@@ -139,6 +145,17 @@ func main() {
 			fmt.Fprintln(os.Stderr, "")
 			fmt.Fprintln(os.Stderr, "Or browse: https://huggingface.co/models?search=gguf qwen2.5 instruct")
 			fmt.Fprintln(os.Stderr, "")
+			os.Exit(1)
+		}
+	}
+
+	// An explicit -gguf path that isn't on disk: fetch it instead of failing. The
+	// user named the model they want, so "should auto download" means we go get it —
+	// no -download flag required. We derive the real HuggingFace URL from the
+	// filename; an unrecognizable name yields a friendly, actionable error.
+	if *gguf != "" {
+		if err := ensureModelFile(*gguf, !*quiet); err != nil {
+			fmt.Fprintf(os.Stderr, "❌ %v\n", err)
 			os.Exit(1)
 		}
 	}
@@ -274,30 +291,111 @@ func printWelcome() {
 	fmt.Fprintln(os.Stderr, "╚════════════════════════════════════════════════════════════════════════╝")
 }
 
-// modelURL returns the HuggingFace URL for a model file.
+// quantSuffixRe splits a GGUF basename into its base model name and quant label.
+// mradermacher (the GGUF publisher we pull from) names quants with a DOT —
+// "Qwen2.5-1.5B-Instruct.Q8_0.gguf" — but users and our own older docs routinely
+// type a dash before the quant. Accept either separator so a hand-typed
+// "-gguf Qwen2.5-1.5B-Instruct-Q8_0.gguf" still resolves to the real file.
+var quantSuffixRe = regexp.MustCompile(`^(.+?)[.-]((?:IQ|Q)\d[0-9A-Za-z_]*|f16|bf16|fp16)\.gguf$`)
+
+// modelDownload derives the canonical HuggingFace filename and resolve URLs (primary
+// + mirror) for a requested GGUF basename. mradermacher publishes one repo per model
+// — "mradermacher/<base>-GGUF" — and names the file "<base>.<quant>.gguf". ok is
+// false when the name isn't a recognizable "<base>.<quant>.gguf" we can map to a repo,
+// in which case callers fall back to a friendly error rather than a bogus URL.
+func modelDownload(requested string) (canonical string, urls []string, ok bool) {
+	m := quantSuffixRe.FindStringSubmatch(filepath.Base(requested))
+	if m == nil {
+		return "", nil, false
+	}
+	base, quant := m[1], m[2]
+	canonical = base + "." + quant + ".gguf"
+	repo := "mradermacher/" + base + "-GGUF"
+	return canonical, []string{
+		fmt.Sprintf("https://huggingface.co/%s/resolve/main/%s", repo, canonical),
+		fmt.Sprintf("https://hf-mirror.com/%s/resolve/main/%s", repo, canonical),
+	}, true
+}
+
+// modelURL returns the primary HuggingFace download URL for a model file, used in the
+// copy-paste curl hints. Derived from the filename so the URL matches mradermacher's
+// real layout (dot before the quant) instead of a 404-ing guess.
 func modelURL(filename string) string {
-	return fmt.Sprintf("https://huggingface.co/mradermacher/Qwen2.5-0.5B-Instruct-GGUF/resolve/main/%s", filename)
+	if _, urls, ok := modelDownload(filename); ok {
+		return urls[0]
+	}
+	return "https://huggingface.co/mradermacher/Qwen2.5-0.5B-Instruct-GGUF/resolve/main/" + filename
 }
 
 // modelURLs returns all possible URLs for a model file (primary + mirrors).
 func modelURLs(filename string) []string {
+	if _, urls, ok := modelDownload(filename); ok {
+		return urls
+	}
 	return []string{
-		fmt.Sprintf("https://huggingface.co/mradermacher/Qwen2.5-0.5B-Instruct-GGUF/resolve/main/%s", filename),
-		fmt.Sprintf("https://hf-mirror.com/mradermacher/Qwen2.5-0.5B-Instruct-GGUF/resolve/main/%s", filename),
+		"https://huggingface.co/mradermacher/Qwen2.5-0.5B-Instruct-GGUF/resolve/main/" + filename,
+		"https://hf-mirror.com/mradermacher/Qwen2.5-0.5B-Instruct-GGUF/resolve/main/" + filename,
 	}
 }
 
-// tokenizerURL returns the HuggingFace URL for the tokenizer.
+// tokenizerURL returns the HuggingFace URL for the tokenizer. mradermacher's GGUF
+// repos ship no tokenizer.json, so point at the upstream Qwen2.5 repo, which does.
+// (This is only a last-resort backstop: every demo GGUF embeds its own tokenizer.)
 func tokenizerURL() string {
-	return "https://huggingface.co/mradermacher/Qwen2.5-0.5B-Instruct-GGUF/resolve/main/tokenizer.json"
+	return "https://huggingface.co/Qwen/Qwen2.5-0.5B-Instruct/resolve/main/tokenizer.json"
 }
 
 // tokenizerURLs returns all possible URLs for the tokenizer.
 func tokenizerURLs() []string {
 	return []string{
-		"https://huggingface.co/mradermacher/Qwen2.5-0.5B-Instruct-GGUF/resolve/main/tokenizer.json",
-		"https://hf-mirror.com/mradermacher/Qwen2.5-0.5B-Instruct-GGUF/resolve/main/tokenizer.json",
+		"https://huggingface.co/Qwen/Qwen2.5-0.5B-Instruct/resolve/main/tokenizer.json",
+		"https://hf-mirror.com/Qwen/Qwen2.5-0.5B-Instruct/resolve/main/tokenizer.json",
 	}
+}
+
+// expandTilde turns a leading "~" or "~/" (or "~\" on Windows) into the user's home
+// directory. The shell normally does this, but PowerShell and most quoting pass "~"
+// through literally, and neither Go's flag parsing nor os.Open expands it — so without
+// this "-gguf ~/Downloads/model.gguf" is read as a literal "~" directory and fails.
+func expandTilde(p string) string {
+	if p == "~" || strings.HasPrefix(p, "~/") || strings.HasPrefix(p, `~\`) {
+		if home, err := os.UserHomeDir(); err == nil {
+			return filepath.Join(home, p[1:])
+		}
+	}
+	return p
+}
+
+// ensureModelFile makes path exist, downloading the model named by its basename when
+// it doesn't. The user passed "-gguf <path>"; if the file is absent we derive the
+// HuggingFace URL from the filename and fetch it ("should auto download") instead of
+// erroring out. It is a no-op when the file is already present.
+func ensureModelFile(path string, showProgress bool) error {
+	if _, err := os.Stat(path); err == nil {
+		return nil // already on disk
+	}
+	canonical, urls, ok := modelDownload(path)
+	if !ok {
+		return fmt.Errorf("model file not found: %s\n"+
+			"   → can't derive a download URL from that name; pass -gguf <existing .gguf>,\n"+
+			"     or run with -download to fetch the default model", filepath.Base(path))
+	}
+	if dir := filepath.Dir(path); dir != "" {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			return fmt.Errorf("create model directory: %w", err)
+		}
+	}
+	if showProgress {
+		fmt.Fprintf(os.Stderr, "📥 Model not found locally — downloading %s (first time only)...\n", canonical)
+	}
+	if err := downloadWithMirrors(urls, path, showProgress); err != nil {
+		return fmt.Errorf("downloading %s: %w", canonical, err)
+	}
+	if showProgress {
+		fmt.Fprintln(os.Stderr, "   ✅ Download complete!")
+		fmt.Fprintln(os.Stderr, "")
+	}
+	return nil
 }
 
 // downloadWithMirrors tries downloading from multiple URLs until one succeeds.
