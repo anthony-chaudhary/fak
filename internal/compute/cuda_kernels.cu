@@ -413,8 +413,13 @@ extern "C" void fcuda_kv_write(float *dstBase, const float *src, int offset, int
   k_copyrow<<<(n + 255) / 256, 256, 0, g_stream>>>(dstBase, src, offset, n);
 }
 
-// ---- Decode attention: one block per query head ---------------------------------
-// q[nH*hd]; K,V [nPos, nKV*hd]; out[nH*hd]; scores scratch [nH*nPos].
+// ---- Decode attention: NAIVE one-block-per-head (the #486 baseline) --------------
+// q[nH*hd]; K,V [nPos, nKV*hd]; out[nH*hd]; scores scratch [nH*nPos]. This is the
+// original correct-but-naive kernel (commit 54f8b58): it materializes a FULL scores[nPos]
+// row per head in GLOBAL memory (g_attn_scratch) and makes four passes over it (raw score
+// write, max, exp-in-place, weighted-V read). The flash kernel below replaces it on the
+// live Attention path; this one is RETAINED only as the fused-vs-naive microbench baseline
+// (#486) — fcuda_attention_f32 keeps it reachable from the Go side's attentionNaive.
 __global__ void k_attention(const float *Q, const float *K, const float *V, float *Out,
                             float *Scores, int nPos, int nH, int nKV, int hd, float scale) {
   int h = blockIdx.x;
@@ -470,6 +475,96 @@ extern "C" void fcuda_attention_f32(const float *dQ, const float *dK, const floa
     g_attn_scratch_cap = need;
   }
   k_attention<<<nH, 128, 0, g_stream>>>(dQ, dK, dV, dOut, g_attn_scratch, nPos, nH, nKV, hd, scale);
+}
+
+// ---- Flash / online-softmax decode attention (#486) ------------------------------
+// The fused replacement for k_attention. One block per query head; the FLASH_THREADS
+// threads of a block SPLIT the head dimension. The KV window is streamed in-place with a
+// RUNNING (max m, sum l, output accumulator acc) — the FlashAttention online-softmax — so:
+//   • NO scores[nPos] buffer is ever materialized (the naive kernel's g_attn_scratch is
+//     gone on this path); the only scratch is per-block SHARED memory (the query row +
+//     a reduction staging row), allocated by the launch and reused for every key, every
+//     layer and every token — there is NO per-call global allocation at all.
+//   • one streaming pass over K and V replaces the naive kernel's four passes over a
+//     global scores row, cutting the HBM traffic the decode attention pays.
+// causal/grp/scale are consumed as kernel PARAMS (grp = nH/nKV selects the KV head; the
+// cache holds exactly the attendable keys, so causality is by construction; scale folds
+// into the score). The math is the cpuref softmax(scale·q·k)·V reordered into the online
+// form — only the f32 reduction order differs, which is what keeps the lane Approx (the
+// recorded cudaFlashAttnCosineMin floor), not bit-identity.
+//
+// Online-softmax recurrence, per key j (every thread runs it identically off the reduced
+// score, so m and l stay replicated and consistent across the block):
+//   s      = scale · dot(q, K_j)
+//   m'     = max(m, s)
+//   corr   = exp(m − m')           // rescales the running sum/acc onto the new max
+//   p      = exp(s − m')
+//   l      = l·corr + p
+//   acc[d] = acc[d]·corr + p·V_j[d]   // each thread owns the dims d it strides
+// and out[d] = acc[d]/l after the window. Bit-faithful to softmax then ΣwV; no full row.
+#define FLASH_THREADS 128
+// FLASH_ACC_MAX bounds the head dims one thread carries = ceil(hd / FLASH_THREADS). 8 covers
+// hd ≤ 1024 (every real attention head dim is ≤ 256), so the per-thread acc lives in
+// registers/local memory, never a global scores row.
+#define FLASH_ACC_MAX 8
+__global__ void k_flash_attention(const float *Q, const float *K, const float *V, float *Out,
+                                  int nPos, int nH, int nKV, int hd, float scale) {
+  int h = blockIdx.x;
+  if (h >= nH) return;
+  int grp = nH / nKV;       // query heads per KV head (GQA/MQA group)
+  int kvh = h / grp;        // the KV head this query head reads
+  int w = nKV * hd;         // per-position stride in K/V
+  const float *qh = Q + (size_t)h * hd;
+  extern __shared__ float smem[];
+  float *qs = smem;                 // [hd]            : the query row, cached once in shared
+  float *red = smem + hd;           // [FLASH_THREADS] : dot-product reduction staging
+  int tid = threadIdx.x;
+  // cache the query row in shared memory (threads stride hd).
+  for (int d = tid; d < hd; d += FLASH_THREADS) qs[d] = qh[d];
+  __syncthreads();
+  // online-softmax running state. acc[k] is this thread's accumulator for owned dim
+  // d = tid + k*FLASH_THREADS; m and l are replicated across the block.
+  float m = -1e30f, l = 0.f;
+  float acc[FLASH_ACC_MAX];
+#pragma unroll
+  for (int k = 0; k < FLASH_ACC_MAX; k++) acc[k] = 0.f;
+  for (int j = 0; j < nPos; j++) {
+    const float *kj = K + (size_t)j * w + (size_t)kvh * hd;
+    // partial dot over this thread's strided dims, then a block reduction -> full score.
+    float partial = 0.f;
+    for (int d = tid; d < hd; d += FLASH_THREADS) partial += qs[d] * kj[d];
+    red[tid] = partial;
+    __syncthreads();
+    for (int s = FLASH_THREADS / 2; s > 0; s >>= 1) {
+      if (tid < s) red[tid] += red[tid + s];
+      __syncthreads();
+    }
+    float sc = red[0] * scale;        // every thread reads the reduced dot
+    __syncthreads();                  // WAR: finish all red[0] reads before next key reuses red
+    float mNew = fmaxf(m, sc);
+    float corr = expf(m - mNew);      // 0 on the first key (m = -inf): clears the empty acc
+    float p = expf(sc - mNew);        // expf (not __expf) so the only divergence from the
+    l = l * corr + p;                 // reference is f32 reduction order, not a faster-exp ulp
+
+    const float *vj = V + (size_t)j * w + (size_t)kvh * hd;
+    int k = 0;
+    for (int d = tid; d < hd; d += FLASH_THREADS, k++) acc[k] = acc[k] * corr + p * vj[d];
+    m = mNew;
+  }
+  float invL = l > 0.f ? 1.f / l : 0.f;
+  int k = 0;
+  for (int d = tid; d < hd; d += FLASH_THREADS, k++) Out[(size_t)h * hd + d] = acc[k] * invL;
+}
+// fcuda_flash_attention_f32 launches the flash kernel: one block per query head, FLASH_THREADS
+// threads, and just enough dynamic shared memory for the query row + the reduction row. Unlike
+// the naive entrypoint there is NO g_attn_scratch — the online form needs no nPos-sized buffer,
+// so nothing is allocated or grown per call. maxPos is accepted for a signature parallel to the
+// naive baseline (the microbench calls both) but is unused here.
+extern "C" void fcuda_flash_attention_f32(const float *dQ, const float *dK, const float *dV, float *dOut,
+                                          int nPos, int maxPos, int nH, int nKV, int hd, float scale) {
+  (void)maxPos;
+  size_t shmem = ((size_t)hd + FLASH_THREADS) * sizeof(float);
+  k_flash_attention<<<nH, FLASH_THREADS, shmem, g_stream>>>(dQ, dK, dV, dOut, nPos, nH, nKV, hd, scale);
 }
 
 // ---- argmax (first index of the max value — cpuref tie-break) -------------------

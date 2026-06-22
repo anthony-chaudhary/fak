@@ -198,7 +198,10 @@ func TestCUDAMatMulApproxMatchesRef(t *testing.T) {
 
 // TestCUDAForwardMatchesRef — the headline: a full multi-layer Llama decode forward,
 // greedily run for several tokens, on the GPU vs the CPU reference. The Approx gate:
-// every step's argmax must be EXACT (same next token) and the logit cosine ≥ 0.999.
+// every step's argmax must be EXACT (same next token) and the logit cosine ≥ the recorded
+// floor. The per-layer Attention is now the fused flash/online-softmax kernel (#486,
+// Caps.FusedAttn), so this end-to-end witness IS the flash kernel's forward-pass gate; the
+// recorded floor is cudaFlashAttnCosineMin (the same 0.999 the forward witness has used).
 func TestCUDAForwardMatchesRef(t *testing.T) {
 	cb := cudaOrSkip(t)
 	ref := Default()
@@ -218,8 +221,8 @@ func TestCUDAForwardMatchesRef(t *testing.T) {
 	}
 	checkPair := func(tag string) {
 		c := cosine(lref, lcu)
-		if c < 0.999 {
-			t.Fatalf("%s logit cosine %.6f < 0.999", tag, c)
+		if c < cudaFlashAttnCosineMin {
+			t.Fatalf("%s logit cosine %.6f < %.4f (flash-attn forward gate)", tag, c, cudaFlashAttnCosineMin)
 		}
 		aCu := cb.Argmax(mkResident(cb, []int{len(lcu)}, lcu)) // device argmax kernel
 		hRef, hCu := argmaxF32(lref), argmaxF32(lcu)
@@ -238,5 +241,5 @@ func TestCUDAForwardMatchesRef(t *testing.T) {
 		lcu = mCu.step(next)
 		checkPair("gen" + itoaC(step))
 	}
-	t.Logf("CUDA forward parity: %d prompt + %d greedy steps, argmax-exact, final cosine=%.8f", len(prompt), nGen, cosine(lref, lcu))
+	t.Logf("CUDA forward parity (fused flash attention, #486): %d prompt + %d greedy steps, argmax-exact, final cosine=%.8f gate=%.4f", len(prompt), nGen, cosine(lref, lcu), cudaFlashAttnCosineMin)
 }

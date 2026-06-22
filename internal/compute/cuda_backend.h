@@ -113,9 +113,21 @@ void fcuda_kv_write(float *dstBase, const float *src, int offset, int n);
 
 /* Decode attention: q[nH*hd] (one position), K/V [nPos, nKV*hd] row-major; causal by
  * construction (the cache holds exactly the attendable keys). grp = nH/nKV. out[nH*hd].
- * Allocates a scratch scores buffer internally (freed before return). */
+ *
+ * fcuda_attention_f32 is the NAIVE baseline (#486): it materializes a full scores[nH*nPos]
+ * row in a persistent global scratch (g_attn_scratch, grown once to nH*maxPos) and makes
+ * four passes over it. Retained only as the fused-vs-naive microbench baseline.
+ *
+ * fcuda_flash_attention_f32 is the FUSED replacement on the live Attention path (#486): a
+ * FlashAttention online-softmax kernel that streams the KV window with a running (max, sum,
+ * acc) so NO scores[nPos] buffer is materialized — its only scratch is per-block shared
+ * memory (query row + reduction row), so there is no per-call global allocation. maxPos is
+ * accepted for a signature parallel to the naive baseline but is unused. Same f32 result as
+ * the naive kernel up to reduction order (the Approx cudaFlashAttnCosineMin floor). */
 void fcuda_attention_f32(const float *dQ, const float *dK, const float *dV, float *dOut,
                          int nPos, int maxPos, int nH, int nKV, int hd, float scale);
+void fcuda_flash_attention_f32(const float *dQ, const float *dK, const float *dV, float *dOut,
+                               int nPos, int maxPos, int nH, int nKV, int hd, float scale);
 
 /* argmax over logits[n]: returns the SMALLEST index attaining the maximum value (the
  * cpuref first-max tie-break), copied back to the host as the single scalar fence. */

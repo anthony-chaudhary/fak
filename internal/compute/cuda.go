@@ -104,6 +104,25 @@ const (
 	cudaQ4KCosineMin = 0.995
 )
 
+// cudaFlashAttnCosineMin is the cuda backend's RECORDED Approx cosine floor for the fused
+// flash/online-softmax attention kernel (#486) — the device-vs-cpuref-f32 logit cosine a witness
+// must clear. The flash kernel computes the SAME math as the cpuref reference — softmax(scale·q·k)
+// then ΣwV — only reordered into the streaming online-softmax form (running max/sum, the
+// accumulator rescaled onto each new max instead of a single batched max+exp over a full scores
+// row). So the ONLY difference from the reference is f32 reduction order, the same class of drift
+// as the SGEMM lane (cuBLAS reorders the contraction); it carries no extra rounding the way the
+// quantized/fp16 lanes do (no narrowed operand). The floor is therefore set at the SAME 0.999 the
+// full forward-pass gate has always used — a conservative recorded value, not a measured pass: in
+// isolation the attention-only cosine should sit far tighter (near the 0.9999 SGEMM op gate), but
+// 0.999 is the floor the multi-layer forward witness (TestCUDAForwardMatchesRef, whose Attention is
+// now this flash kernel) is held to end-to-end.
+//
+// IMPORTANT (honest handoff, identical to the constants above): this RECORDS the threshold; it does
+// NOT assert the path passes it. The realized cosine + the fused-vs-naive speedup are measured on a
+// CUDA node by tools/run_486_acceptance_on_gpu.sh (the win32 build host has no CUDA toolkit / GPU).
+// Do not read a pass — or a speedup — from this value alone.
+const cudaFlashAttnCosineMin = 0.999
+
 // q8DeviceBlock is the Q8_0 per-block size the device narrow-at-H2D quant uses (llama.cpp block_q8_0
 // = 32, the cpuref default). The resident weight carries it in QuantSpec.Block so the GEMM kernel
 // reconstructs nblk = in/block; `in` must be divisible by it.
@@ -266,8 +285,10 @@ func (c *cudaBackend) Caps() Caps {
 	// transpose-repack) for tensor-core HGEMM; Upload(t, Q8_0) narrows an f32 weight to resident
 	// int8 codes + f32 scales, and a Q4_K host weight uploads its raw super-block bytes verbatim —
 	// MatMul/BatchedMatMul then run the native quantized device GEMMs (no dequant-to-f32), keeping
-	// the weight narrow in VRAM. FusedAttn remains a tracked seam.
-	return Caps{Async: true, DeviceMemory: true, GraphCompile: graphEnabled, UploadDtype: true}
+	// the weight narrow in VRAM. FusedAttn (#486): Attention lowers to ONE fused flash/online-softmax
+	// kernel (k_flash_attention) — tiled over the KV window with a running max/sum so no scores[nPos]
+	// row is materialized; the naive kernel is retained only as the microbench baseline.
+	return Caps{Async: true, DeviceMemory: true, GraphCompile: graphEnabled, UploadDtype: true, FusedAttn: true}
 }
 
 // ---- residency ------------------------------------------------------------------
@@ -660,7 +681,30 @@ func (c *cudaBackend) AddBias(dst, bias Tensor) {
 	C.fcuda_add_bias_f32(c.cf(dst), c.cf(bias), C.int(rows), C.int(width))
 }
 
+// Attention lowers the whole fused op to ONE flash/online-softmax kernel (#486, Caps.FusedAttn):
+// k_flash_attention streams the KV window with a running (max, sum, accumulator) so no scores[nPos]
+// row is ever materialized and no per-call scratch is allocated (the old g_attn_scratch is unused on
+// this path). causal/grp/scale arrive as kernel params: grp = nH/nKV selects the KV head; the cache
+// holds exactly the attendable keys, so causality is by construction; scale folds into the score.
 func (c *cudaBackend) Attention(q Tensor, kv KVStore, layer int, causal bool, grp int, scale float32) Tensor {
+	cudaMu.Lock()
+	defer cudaMu.Unlock()
+	ck := kv.(*cudaKV)
+	hd, nKV := ck.cfg.HeadDim, ck.cfg.NumKVHeads
+	nH := grp * nKV
+	w := nKV * hd
+	nPos := ck.K[layer].len / w
+	out, _ := c.devTr([]int{nH * hd}, F32)
+	C.fcuda_flash_attention_f32(c.cf(q),
+		(*C.float)(ck.K[layer].ptr), (*C.float)(ck.V[layer].ptr),
+		c.cf(out), C.int(nPos), C.int(ck.maxPos), C.int(nH), C.int(nKV), C.int(hd), C.float(scale))
+	return out
+}
+
+// attentionNaive runs the same op through the RETAINED naive kernel (full global scores[nH*nPos]
+// scratch, four passes). It exists only so the #486 microbench can time fused-vs-naive on identical
+// inputs; the live Attention path never calls it. Same arguments, same result up to reduction order.
+func (c *cudaBackend) attentionNaive(q Tensor, kv KVStore, layer int, grp int, scale float32) Tensor {
 	cudaMu.Lock()
 	defer cudaMu.Unlock()
 	ck := kv.(*cudaKV)
