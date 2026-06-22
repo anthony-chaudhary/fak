@@ -321,3 +321,12 @@ gpucheck_wsl
 # which carry the real-secret denylist by reference — the exact content the
 # PUBLIC-SCRUB-POLICY leak gate keeps out of this public tree. Never stage it.
 /.adjudicate/
+
+# --- credential-shaped stray files (the FILENAME is the secret) -------------------
+# A stray shell redirect (e.g. `cmd > "$TOKEN"`) can create a file whose NAME is a
+# live-shaped Anthropic OAuth token (sk-ant-oat01-...). The 46-byte content is
+# innocuous (a path), but the token-shaped filename would be written into git
+# history by any `git add -A`. Never stage it. (Rotate the token + delete the file
+# is an operator action — this rule only stops the leak vector.)
+sk-ant-*
+sk-ant-oat01-*
