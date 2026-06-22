@@ -63,6 +63,14 @@ type Row struct {
 	ResultDigest string `json:"result_digest,omitempty"` // content hash of the result payload
 	PrevHash     string `json:"prev_hash"`               // hash of the previous row ("" at genesis)
 	Hash         string `json:"hash"`                    // chainHash(PrevHash, this row)
+
+	// Correlation / bounded-disclosure fields — recorded and streamed, but NOT part
+	// of the hash-chain pre-image (chainHash lists the chained fields explicitly, so
+	// these are appended after Hash and EXISTING journals verify unchanged). The
+	// tamper-evidence guarantee covers only the decision fields above; these are a
+	// debugging convenience layered on top.
+	CallSeq uint64 `json:"call_seq,omitempty"` // the kernel's per-call submission id (ToolCall.SeqNo): the join key tying a call's DECIDE to its later QUARANTINE
+	Witness string `json:"witness,omitempty"`  // the bounded-disclosure claim the verdict surfaced (offending self-modify glob / tool.arg bound / require-witness claim)
 }
 
 // Journal is a hash-chained append-only ledger with an in-process live stream.
@@ -345,11 +353,13 @@ func rowFromEvent(ev abi.Event) (Row, bool) {
 		row.Tool = c.Tool
 		row.TraceID = c.TraceID
 		row.ArgsDigest = refDigest(c.Args)
+		row.CallSeq = c.SeqNo // join key: same call's DECIDE and QUARANTINE share it
 	}
 	if v := ev.Verdict; v != nil {
 		row.Verdict = verdictName(v.Kind)
 		row.Reason = abi.ReasonName(v.Reason)
 		row.By = v.By
+		row.Witness = witnessOf(v)
 	}
 	if r := ev.Result; r != nil {
 		row.ResultDigest = refDigest(r.Payload)
@@ -361,6 +371,21 @@ func rowFromEvent(ev abi.Event) (Row, bool) {
 // refDigest is the audit identity of a Ref's bytes WITHOUT resolving them: the
 // content hash if the backend stamped one, else a hash of the inline bytes, else
 // empty. Never materializes a blob (no resolver dependency on the hot path).
+// witnessOf extracts the bounded-disclosure claim a verdict surfaced — the
+// offending self-modify glob / arg bound (WitnessPayload.Claim) or the
+// require-witness gate's claim (Meta["claim"]). "" when the verdict disclosed
+// nothing. This is the one forensic field the live wire carried but the durable
+// row used to drop, leaving an audit unable to say WHICH glob/arg tripped a deny.
+func witnessOf(v *abi.Verdict) string {
+	if v == nil {
+		return ""
+	}
+	if wp, ok := v.Payload.(abi.WitnessPayload); ok && wp.Claim != "" {
+		return wp.Claim
+	}
+	return v.Meta["claim"]
+}
+
 func refDigest(r abi.Ref) string {
 	if r.Digest != "" {
 		return r.Digest
