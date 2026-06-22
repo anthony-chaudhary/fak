@@ -30,6 +30,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -45,6 +46,10 @@ SCHEMA = "fleet-dispatch-status/1"
 # FleetDOSDispatchWatchdog keeps the un-gated kernel supervisor alive; this card
 # tracks the DoS-safe issue dispatcher, so it reports the guarded task.
 WATCHDOG_TASK = "FleetIssueDispatch"
+
+RUNS_DIRNAME = ".dispatch-runs"
+# resolve-<N>-<stamp>.log written by issue_resolve_dispatch.spawn_issue_worker.
+_RESOLVE_LOG_RE = re.compile(r"resolve-(\d+)-(\d{8}-\d{6})\.log$")
 
 
 def repo_root(start: Path | None = None) -> Path:
@@ -95,6 +100,53 @@ def _last_json(text: str) -> dict[str, Any]:
     return {}
 
 
+def silent_workers(runs_dir: Path, *, alive: set[int] | None = None) -> list[dict[str, Any]]:
+    """Issue-resolution workers that exited having produced NOTHING — a 0-byte
+    ``resolve-<N>-<stamp>.log`` whose ``.pid`` process is dead.
+
+    A ``claude -p`` worker writes nothing to stdout until its final message, so a
+    0-byte log with a *live* pid is still-running (not silent) and is excluded. A
+    dead pid over an empty log is the "spun, produced nothing" residual the cooldown
+    self-corrects but leaves operator-invisible — this is the signal. Best effort:
+    psutil is optional (its absence means we cannot prove a pid dead, so we report
+    nothing rather than a false silent), exactly like
+    ``issue_resolve_dispatch.live_resolution_issues``. Newest first.
+    """
+    if not runs_dir.is_dir():
+        return []
+    if alive is None:
+        try:
+            import psutil  # type: ignore
+
+            alive = {p.pid for p in psutil.process_iter()}
+        except ImportError:
+            alive = None  # cannot prove liveness -> report no silents (no false alarms)
+    out: list[dict[str, Any]] = []
+    for log in runs_dir.glob("resolve-*.log"):
+        m = _RESOLVE_LOG_RE.search(log.name)
+        if not m:
+            continue
+        try:
+            if log.stat().st_size != 0:
+                continue  # produced output -> not silent
+        except OSError:
+            continue
+        pid_file = log.with_suffix(".pid")
+        if not pid_file.exists():
+            continue
+        try:
+            pid = int(pid_file.read_text(encoding="utf-8").strip())
+        except (OSError, ValueError):
+            continue
+        if alive is None:
+            continue  # no liveness oracle this run -> do not claim it is silent
+        if pid in alive:
+            continue  # still running -> not (yet) silent
+        out.append({"issue": int(m.group(1)), "stamp": m.group(2), "log": log.name, "pid": pid})
+    out.sort(key=lambda r: r["stamp"], reverse=True)
+    return out
+
+
 def watchdog_installed() -> dict[str, Any]:
     """Is the always-on watchdog scheduled task registered, and is it enabled?"""
     try:
@@ -134,12 +186,18 @@ def collect(root: Path, *, max_workers: int, fast: bool,
         [_py(), str(root / "tools" / "issue_closure_audit.py"), "--json",
          "--max-commits", str(closure_commits)], root, timeout=180)
 
+    # Pure-local, always run (no gh/dos): which spawned workers exited producing
+    # nothing. Cheap enough that --fast keeps it.
+    silent = silent_workers(root / RUNS_DIRNAME)
+
     return build_payload(root=root, pre=pre, sup=sup, wd=wd, backlog=backlog,
-                         closure=closure, max_workers=max_workers, fast=fast)
+                         closure=closure, max_workers=max_workers, fast=fast,
+                         silent=silent)
 
 
 def build_payload(*, root: Path, pre: dict, sup: dict, wd: dict, backlog: dict,
-                  closure: dict, max_workers: int, fast: bool) -> dict[str, Any]:
+                  closure: dict, max_workers: int, fast: bool,
+                  silent: list[dict[str, Any]] | None = None) -> dict[str, Any]:
     # --- dispatcher liveness / capacity ---
     cap = _int(pre.get("cap"))
     live = _int(pre.get("live"))
@@ -196,6 +254,11 @@ def build_payload(*, root: Path, pre: dict, sup: dict, wd: dict, backlog: dict,
     elif wd.get("installed"):
         reasons.append(f"always-on watchdog installed ({wd.get('status') or 'scheduled'})")
 
+    silent = silent or []
+    if silent:
+        nums = ", ".join(f"#{w['issue']}" for w in silent[:6])
+        reasons.append(f"{len(silent)} worker(s) exited producing nothing ({nums}) — inspect or re-scope")
+
     return {
         "schema": SCHEMA,
         "ok": ok,
@@ -229,6 +292,10 @@ def build_payload(*, root: Path, pre: dict, sup: dict, wd: dict, backlog: dict,
             "closure_rate": closure_rate,
             "counts": counts or None,
             "open_witnessed_closable": None if closure_na else open_witnessed,
+        },
+        "workers": {
+            "silent_count": len(silent),
+            "silent": silent,
         },
         "fast": fast,
     }
@@ -269,8 +336,114 @@ def render(p: dict[str, Any]) -> str:
             f"║ closure   : rate={c.get('closure_rate')}  "
             f"resolved={cnt.get('TRUE_RESOLVED')} claimed={cnt.get('CLAIMED_CLOSED')} "
             f"closable-now={c.get('open_witnessed_closable')} (OPEN_WITNESSED)")
+    w = p.get("workers") or {}
+    sc = w.get("silent_count") or 0
+    if sc:
+        nums = ", ".join(f"#{s['issue']}" for s in (w.get("silent") or [])[:6])
+        lines.append(f"║ workers   : {sc} silent (0-byte log, exited) [{nums}]")
     lines.append("╚═ " + " | ".join(p.get("reasons") or []))
     return "\n".join(lines)
+
+
+def render_md(payload: dict[str, Any], *, date: str) -> str:
+    """The committed, human-readable status surface: which issues are synced to
+    which lanes, how closure is progressing, and any worker that produced nothing.
+
+    This is the plan-doc-equivalent for a plan-empty repo whose backlog is GitHub
+    issues — an operator opens ONE file instead of grepping gitignored runtime.
+    Date is git-derived by the caller (deterministic; the renderer takes no clock).
+    """
+    d = payload.get("dispatcher") or {}
+    s = payload.get("supervisor") or {}
+    b = payload.get("backlog") or {}
+    c = payload.get("closure") or {}
+    w = payload.get("workers") or {}
+    a = d.get("account") or {}
+    wd = d.get("watchdog") or {}
+
+    out = [
+        f"# Issue dispatch status — {date}",
+        "",
+        "_Auto-generated by `tools/dispatch_status.py --md`. Do not hand-edit; "
+        "re-run the tool (or the `FleetDispatchStatusDoc` task) to refresh._",
+        "",
+        f"- **dispatcher**: `{payload.get('verdict')}` "
+        f"({'ok' if payload.get('ok') else 'ACTION'})",
+        f"- **workers**: {d.get('live')}/{d.get('cap')} live "
+        f"(headroom {d.get('headroom')}); host "
+        f"{'clean' if d.get('host_safe') else '**FLAGGED**'}",
+        f"- **switcher account**: `{a.get('tag') or '-'}` (t{a.get('tier')}, "
+        f"{a.get('model') or '?'}), available={a.get('available')}",
+        "- **always-on watchdog**: "
+        + ("installed (" + str(wd.get('status') or 'scheduled') + ")"
+           if wd.get("installed") else
+           ("**NOT installed**" if wd.get("installed") is False else "unknown")),
+        f"- **supervisor**: `{s.get('verdict')}` "
+        f"(alive {s.get('alive')}/{s.get('target')})",
+        "",
+        "## Backlog by lane (issue → lane sync)",
+        "",
+    ]
+    if b.get("na"):
+        out.append("_Backlog n/a this run (gh fold skipped or timed out)._")
+    else:
+        out += [
+            f"Open issues: **{b.get('open_issues')}** — routed {b.get('routed')}, "
+            f"unrouted {b.get('unrouted')}.",
+            "",
+            "| lane | open issues |",
+            "|---|---|",
+        ]
+        by_lane = b.get("by_lane") or {}
+        for lane, n in sorted(by_lane.items(), key=lambda kv: (-kv[1], kv[0])):
+            out.append(f"| {lane} | {n} |")
+
+    out += ["", "## Closure honesty", ""]
+    if c.get("na"):
+        out.append("_Closure audit n/a this run (gh/dos fold skipped or timed out)._")
+    else:
+        cnt = c.get("counts") or {}
+        out += [
+            f"`closure_rate` = **{c.get('closure_rate')}** "
+            f"(TRUE_RESOLVED / (TRUE_RESOLVED + CLAIMED_CLOSED)).",
+            "",
+            "| bucket | count |",
+            "|---|---|",
+            f"| TRUE_RESOLVED | {cnt.get('TRUE_RESOLVED', 0)} |",
+            f"| CLAIMED_CLOSED | {cnt.get('CLAIMED_CLOSED', 0)} |",
+            f"| OPEN_WITNESSED (closable now) | {c.get('open_witnessed_closable')} |",
+        ]
+
+    sc = w.get("silent_count") or 0
+    out += ["", "## Workers that produced nothing", ""]
+    if not sc:
+        out.append("None — every spawned worker either produced output or is still running.")
+    else:
+        out += [
+            f"**{sc}** worker(s) exited with a 0-byte log (spawned, committed nothing). "
+            "The anti-churn cooldown advances the picker past these, so the loop still "
+            "progresses — but each is worth an operator's eye (often an epic-shaped "
+            "issue too large to land in one shot).",
+            "",
+            "| issue | spawned (utc stamp) | log |",
+            "|---|---|---|",
+        ]
+        for sw in (w.get("silent") or []):
+            out.append(f"| #{sw.get('issue')} | {sw.get('stamp')} | `{sw.get('log')}` |")
+
+    out += ["", "---", "", "Reasons: " + "; ".join(payload.get("reasons") or [])]
+    return "\n".join(out) + "\n"
+
+
+def git_date(root: Path) -> str:
+    """The last-commit date (YYYY-MM-DD) — deterministic, no wall-clock in the tool."""
+    try:
+        proc = subprocess.run(["git", "log", "-1", "--format=%cs"], cwd=str(root),
+                              capture_output=True, text=True, timeout=15)
+        date = (proc.stdout or "").strip()
+        return date or "unknown"
+    except (OSError, subprocess.TimeoutExpired):
+        return "unknown"
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -282,13 +455,34 @@ def main(argv: list[str] | None = None) -> int:
                     help="skip the two gh-backed folds (backlog + closure); pure-local")
     ap.add_argument("--closure-commits", type=int, default=400,
                     help="git history budget for the closure audit (default: 400)")
+    ap.add_argument("--md", default="",
+                    help="write the committed markdown status doc to this path "
+                         "(forces the full fold; --fast is ignored when --md is set)")
     ap.add_argument("--json", action="store_true", help="emit machine-readable JSON")
     args = ap.parse_args(argv)
 
     root = Path(args.workspace).resolve() if args.workspace else repo_root()
-    payload = collect(root, max_workers=args.max_workers, fast=args.fast,
+    # The committed doc must carry the real backlog/closure tables, so --md always
+    # runs the full fold regardless of --fast.
+    fast = args.fast and not args.md
+    payload = collect(root, max_workers=args.max_workers, fast=fast,
                       closure_commits=args.closure_commits)
-    print(json.dumps(payload, indent=2) if args.json else render(payload))
+
+    if args.md:
+        md_path = Path(args.md)
+        if not md_path.is_absolute():
+            md_path = root / md_path
+        md_path.parent.mkdir(parents=True, exist_ok=True)
+        md_path.write_text(render_md(payload, date=git_date(root)), encoding="utf-8")
+        if not args.json:
+            print(f"wrote {md_path} ({payload.get('verdict')}, "
+                  f"open={ (payload.get('backlog') or {}).get('open_issues') }, "
+                  f"silent={ (payload.get('workers') or {}).get('silent_count') })")
+
+    if args.json:
+        print(json.dumps(payload, indent=2))
+    elif not args.md:
+        print(render(payload))
     return 0 if payload.get("ok") else 1
 
 
