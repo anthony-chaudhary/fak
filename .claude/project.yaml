@@ -1,0 +1,57 @@
+# .claude/project.yaml — read by the maintenance skills (release, plan-audit,
+# issue-triage). It maps the universal skill contracts onto this repo's helper
+# scripts so the skill text stays project-agnostic and the wiring lives here.
+#
+# fak is a Go module rooted at the repo root. It is NOT a Python package, so its
+# version source-of-truth is a bare `VERSION` file at the repo root (the vX.Y.Z
+# git tags are the shipped history). The helper scripts below are pure-stdlib and
+# live under `tools/`, so plain `python` resolves them with no venv.
+
+name: fak
+
+# Pure-stdlib helpers — no venv required.
+python: python
+
+helpers:
+  # /release Step 1 — emits the git+version JSON the release skill consumes.
+  release_context: tools/release_context.py
+  # /release decision gate — hold vs release, with the blocker taxonomy.
+  release_decide: tools/release_decide.py
+  # /release Steps 3-5 — dry-run-first mechanical bump/notes/commit helper.
+  release_cut: tools/release_cut.py
+  # /release Step 4 — bumps every file under `version_files`.
+  release_bump: tools/release_bump.py
+  # /release committed-ref dry-run witness.
+  release_dry_run: tools/release_dry_run.py
+  # /release Step 6 — verified tag-after-green helper.
+  release_tag: tools/release_tag.py
+  # /release Step 7 — creates the GitHub release page from the committed note.
+  release_publish: tools/release_publish.py
+  # /release operator status — read-only release readiness + stable lag fold.
+  release_status: tools/release_status.py
+  # /release --from-manifest — validate producer manifest + derive explicit pathspec.
+  release_manifest: tools/release_manifest.py
+  # /release Step 0.5 + guard — the single-writer release lock. acquire serializes
+  # concurrent /release runs so they don't race VERSION/tag; guard catches a
+  # `git add -A` sweep before commit.
+  release_lock: tools/release_lock.py
+  # /plan-audit — reconciles the plan surface(s) into one completion view.
+  plan_audit: tools/plan_audit.py
+  # /issue-triage — read-only fetch/classify/rank + proposed-actions for the
+  # open GitHub issue backlog. Applying actions is the skill's gated step.
+  issue_triage: tools/issue_triage.py
+
+# Where vX.Y.Z.md release notes are written.
+release_notes_dir: docs/releases
+
+# The single version-marker file the bumper keeps stamped.
+version_files:
+  - VERSION
+
+# Plan documents the audit globs. None at the public root today, so /plan-audit
+# no-ops cleanly; add PLAN-*.md / BUILD-*.md and it picks them up.
+plan_docs_glob: "{PLAN,BUILD}-*.md"
+
+# Where /plan-audit + /issue-triage write their dated operator snapshots
+# (created if missing; gitignored runtime — see .gitignore docs/_audits/).
+audits_dir: docs/_audits
