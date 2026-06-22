@@ -24,6 +24,15 @@ __pycache__/
 # Regenerable operator snapshots written by the /plan-audit skill (re-run anytime)
 docs/_audits/
 
+# Raw session-status / working-note `.txt` drops under docs/benchmarks are transient
+# operator notes (a session's live blockers, internal paths, bring-up state) — NOT the
+# curated public results docs, which are ALL `.md`. By default these belong in the
+# private notes repo (../fak-private), the same as a session's brainstorm/audit notes.
+# Ignoring the `.txt` class here makes that the default: a stray status note can never be
+# `git add`-ed into this public tree by accident (same private-by-default guard pattern
+# as the bench-node run dirs further below). Curated `.md` benchmark docs stay tracked.
+docs/benchmarks/*.txt
+
 # Local rendered exports; source markdown is tracked.
 docs/explainers/kv-cache-agentic-context.html
 docs/explainers/kv-cache-agentic-context.pdf
