@@ -171,6 +171,17 @@ block to every response) or asked directly (`/v1/fak/adjudicate`, verdict only �
 [MCP tools](../../examples/mcp/README.md) expose). Swap the mock for your real engine by
 adding `--base-url`; nothing else changes.
 
+**Don't take the snippets on faith — run them.** The same two checks (plus an allow-case)
+are a one-command, self-verifying script that starts the offline gate, asserts the
+verdicts, and tears it down — `PASS`/`FAIL` with a CI-usable exit code, still no model or
+key:
+
+```bash
+python3 examples/wire-proof/verify.py   # -> PASS, exit 0
+```
+
+→ [`examples/wire-proof/`](../../examples/wire-proof/README.md) (captured output included).
+
 ---
 
 ## What you get once it's in front
