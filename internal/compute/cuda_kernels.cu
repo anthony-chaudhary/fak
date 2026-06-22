@@ -39,6 +39,12 @@ static cudaStream_t g_stream = 0;
 static std::unordered_map<size_t, std::vector<void *>> g_pool; // free buffers, by exact byte size
 static std::unordered_map<void *, size_t> g_live;              // live ptr -> its byte size
 
+// host-transfer witness (#482): cumulative device->host bytes. Every d2h copy adds to it — the
+// Read fence (fcuda_d2h) adds the vector bytes, the single token-id copy in fcuda_argmax_f32
+// adds sizeof(int) — so the Go-side async test can prove a greedy step pulls only the argmax id
+// host-ward, not the full logits vector. Monotonic; the test resets it around each step.
+static size_t g_host_bytes = 0;
+
 extern "C" int fcuda_init(char *name, int namelen, int *sm, size_t *total_mem) {
   int n = 0;
   if (cudaGetDeviceCount(&n) != cudaSuccess || n == 0) return 1;
@@ -79,7 +85,7 @@ extern "C" void fcuda_free(void *d) {
   }
 }
 extern "C" void fcuda_h2d(void *d, const void *h, size_t n) { CK(cudaMemcpy(d, h, n, cudaMemcpyHostToDevice)); }
-extern "C" void fcuda_d2h(void *h, const void *d, size_t n) { CK(cudaMemcpy(h, d, n, cudaMemcpyDeviceToHost)); }
+extern "C" void fcuda_d2h(void *h, const void *d, size_t n) { CK(cudaMemcpy(h, d, n, cudaMemcpyDeviceToHost)); g_host_bytes += n; }
 // Device-to-device copies stay on the default stream but are ASYNC w.r.t. the host: a
 // synchronous cudaMemcpy fences the whole device, and RoPE + every KV append issues one,
 // so a 30-layer decode paid ~150 full device syncs per token (catastrophic on WSL, where a
@@ -87,6 +93,10 @@ extern "C" void fcuda_d2h(void *h, const void *d, size_t n) { CK(cudaMemcpy(h, d
 // the only host fence we keep is the final logits d2h in Read.
 extern "C" void fcuda_d2d(void *dst, const void *src, size_t n) { CK(cudaMemcpyAsync(dst, src, n, cudaMemcpyDeviceToDevice, g_stream)); }
 extern "C" void fcuda_sync(void) { CK(cudaDeviceSynchronize()); }
+
+// async host-transfer witness accessors (#482): see g_host_bytes above.
+extern "C" size_t fcuda_hostxfer_bytes(void) { return g_host_bytes; }
+extern "C" void fcuda_hostxfer_reset(void) { g_host_bytes = 0; }
 
 // y[P,out] = x[P,in] @ W[out,in]^T, all row-major. Column-major cuBLAS recipe:
 // treat row-major W[out,in] as col-major [in,out] (op=T), row-major X[P,in] as col-major
@@ -311,6 +321,7 @@ extern "C" int fcuda_argmax_f32(const float *dLogits, int n) {
   int *dIdx = (int *)fcuda_malloc(sizeof(int));
   k_argmax<<<1, 256, 0, g_stream>>>(dLogits, n, dIdx);
   CK(cudaMemcpy(&hIdx, dIdx, sizeof(int), cudaMemcpyDeviceToHost));
+  g_host_bytes += sizeof(int); // only the token id crosses host-ward — the #482 witness
   fcuda_free(dIdx);
   return hIdx;
 }

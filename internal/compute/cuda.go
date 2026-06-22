@@ -32,6 +32,7 @@ import "C"
 import (
 	"os"
 	"sync"
+	"sync/atomic"
 	"unsafe"
 )
 
@@ -68,15 +69,35 @@ func init() {
 
 var cudaDev *cudaBackend
 
-// cudaBuf is a device-resident Buffer: a VRAM pointer + byte length. Synchronous backend,
-// so Ready() is always true (the async seam would flip this).
+// cudaBuf is a device-resident Buffer: a VRAM pointer + byte length. Op OUTPUTS (allocated
+// via devTr) are ASYNC under #482 — enqueued on g_stream and NOT host-observable until a host
+// fence (Read/Argmax) drains the stream — so each records the backend's fence generation at
+// enqueue time and Ready() reports whether a later fence has bumped past it. Buffers that are
+// synchronous on return (weights, whose Upload H2D is a blocking cudaMemcpy; KV views; the
+// argmax scalar) carry be==nil and are always Ready.
 type cudaBuf struct {
-	ptr  unsafe.Pointer // device pointer (cudaMalloc)
-	n    int            // bytes
-	host uintptr        // source host pointer if this came from a cached Upload (0 otherwise)
+	ptr     unsafe.Pointer // device pointer (cudaMalloc)
+	n       int            // bytes
+	host    uintptr        // source host pointer if this came from a cached Upload (0 otherwise)
+	be      *cudaBackend   // non-nil => async op output; Ready() tracks be.fenceGen vs bornGen
+	bornGen uint64         // fence generation in which this async buffer was enqueued
 }
 
-func (b *cudaBuf) Ready() bool { return true }
+// Ready reports whether the buffer's producing kernel has been fenced host-ward. An async op
+// output is ready once a Read/Argmax has bumped the fence generation past the one it was
+// enqueued in: the single g_stream is FIFO and a host fence drains all prior work, so one
+// generation bump materializes every buffer enqueued before it. Synchronous buffers (be==nil)
+// are ready on return. This is the bit the model loop reads to know the logits are still
+// device-resident mid-step (#482) — it never gates device execution, which is stream-ordered.
+func (b *cudaBuf) Ready() bool {
+	if b == nil {
+		return false
+	}
+	if b.be == nil {
+		return true
+	}
+	return atomic.LoadUint64(&b.be.fenceGen) > b.bornGen
+}
 
 // uploadCache shares one VRAM copy per distinct host buffer across all sessions. A model's
 // weights are zero-copy views into one blob (m.tensor(name) returns the SAME pointer every
@@ -88,6 +109,11 @@ var uploadCache = map[uintptr]Tensor{}
 type cudaBackend struct {
 	name string
 	tier string
+	// fenceGen counts host fences (Read/Argmax — the ONLY two). Each async op output records
+	// the generation it was enqueued in (cudaBuf.bornGen); a fence bumps fenceGen, flipping
+	// every buffer enqueued before it to Ready (#482). Read/written atomically: producers hold
+	// cudaMu but Ready() readers (the model loop / the witness test) do not take the lock.
+	fenceGen uint64
 	// transient holds per-token op-output buffers (NOT weights or KV). Recycle() returns
 	// them all to the C-side pool at a token boundary so steady-state decode stops paying
 	// cudaMalloc per op. Guarded by cudaMu (every appender holds it).
@@ -149,9 +175,10 @@ func (c *cudaBackend) Name() string            { return c.name }
 func (c *cudaBackend) Tier() string            { return c.tier }
 func (c *cudaBackend) Class() CorrectnessClass { return Approx } // device GEMM != fdot order
 func (c *cudaBackend) Caps() Caps {
-	// Device-resident tensors are not host-addressable. The KV cache lives in VRAM. We do
-	// not yet advertise Async/FusedAttn/GraphCompile/UploadDtype — those are tracked seams.
-	return Caps{DeviceMemory: true}
+	// Async (#482): ops enqueue on g_stream and return unready Buffers; the SOLE host fences
+	// are Read and Argmax. DeviceMemory: resident tensors (incl. the KV cache) are not host-
+	// addressable. FusedAttn/GraphCompile/UploadDtype remain tracked seams.
+	return Caps{Async: true, DeviceMemory: true}
 }
 
 // ---- residency ------------------------------------------------------------------
@@ -178,6 +205,10 @@ func (c *cudaBackend) dev(shape []int, dt Dtype) (Tensor, *cudaBuf) {
 // not devTr, so they are never recycled out from under the resident-weight cache.
 func (c *cudaBackend) devTr(shape []int, dt Dtype) (Tensor, *cudaBuf) {
 	t, b := c.dev(shape, dt)
+	// Mark async: this output is enqueued on g_stream in the current fence generation, so it
+	// reports Ready()==false until the next Read/Argmax drains the stream (#482).
+	b.be = c
+	b.bornGen = atomic.LoadUint64(&c.fenceGen)
 	c.transient = append(c.transient, b)
 	return t, b
 }
@@ -218,17 +249,21 @@ func (c *cudaBackend) Host(t Tensor) ([]float32, bool) {
 	return nil, false // device tensor: not host-addressable
 }
 
-// Read is the host fence: device -> host f32.
+// Read is a host fence (#482): it copies device -> host f32 and, because that synchronous d2h
+// drains g_stream, bumps the fence generation so every async buffer enqueued before it flips
+// to Ready. It also moves the FULL vector host-ward — the costly path greedy decode avoids by
+// using Argmax instead (the witness counts these bytes).
 func (c *cudaBackend) Read(t Tensor) []float32 {
 	cudaMu.Lock()
 	defer cudaMu.Unlock()
 	if hb, ok := t.buf.(*hostBuf); ok {
-		return hb.f32
+		return hb.f32 // host-resident: nothing crosses the bus and no device work is fenced
 	}
 	db := t.buf.(*cudaBuf)
 	out := make([]float32, t.Numel())
 	if len(out) > 0 {
 		C.fcuda_d2h(unsafe.Pointer(&out[0]), db.ptr, C.size_t(len(out)*4))
+		atomic.AddUint64(&c.fenceGen, 1) // stream drained: prior enqueued work is now materialized
 	}
 	return out
 }
@@ -331,11 +366,28 @@ func (c *cudaBackend) Attention(q Tensor, kv KVStore, layer int, causal bool, gr
 	return out
 }
 
+// Argmax is the OTHER host fence (#482) and the one greedy decode uses: it runs the reduction
+// ON-DEVICE (k_argmax over the resident logits) and copies back only the single winning token
+// id — the full logits vector never crosses the bus. Like Read, the int copy drains g_stream,
+// so it bumps the fence generation (the logits it reduced are now Ready).
 func (c *cudaBackend) Argmax(logits Tensor) int {
 	cudaMu.Lock()
 	defer cudaMu.Unlock()
-	return int(C.fcuda_argmax_f32(c.cf(logits), C.int(logits.Numel())))
+	id := int(C.fcuda_argmax_f32(c.cf(logits), C.int(logits.Numel())))
+	atomic.AddUint64(&c.fenceGen, 1)
+	return id
 }
+
+// ---- async host-transfer witness (#482) -----------------------------------------
+//
+// HostXferBytes reports the cumulative bytes copied DEVICE->HOST since the last reset. The two
+// host fences are the only d2h transfers and both feed this counter: fcuda_d2h (a full Read)
+// adds the vector's bytes, while fcuda_argmax_f32 adds only sizeof(int). So over an Argmax-only
+// decode step it reads the size of one token id, whereas a full-logits Read reads vocab*4 —
+// the seam the witness test reads to prove only the argmax id crosses the bus per token.
+// ResetHostXfer zeroes it. These are used only by the -tags cuda witness/benchmarks.
+func (c *cudaBackend) HostXferBytes() uint64 { return uint64(C.fcuda_hostxfer_bytes()) }
+func (c *cudaBackend) ResetHostXfer()        { C.fcuda_hostxfer_reset() }
 
 // ---- AWQ (Activation-aware Weight Quantization) 4-bit matmul -------------------
 

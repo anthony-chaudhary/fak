@@ -81,8 +81,11 @@ func newSynth(be Backend, cfg synthCfg, host map[string][]float32) *synthModel {
 	return &synthModel{be: be, cfg: cfg, W: W, kv: kv, pos: 0, emb: host["emb"]}
 }
 
-// step runs one token through all layers (decode path), appends K/V, returns next logits.
-func (m *synthModel) step(id int) []float32 {
+// stepDev runs one token through all layers (decode path), appends K/V, and returns the
+// DEVICE-resident logits tensor WITHOUT a host Read — so a caller can fence it either way:
+// Read (full vector host-ward) or Argmax (on-device reduction, only the id crosses). step() is
+// exactly Read(stepDev()); the #482 async witness uses stepDev()+Argmax.
+func (m *synthModel) stepDev(id int) Tensor {
 	be, c := m.be, m.cfg
 	pos := m.pos
 	row := m.emb[id*c.H : (id+1)*c.H]
@@ -109,8 +112,11 @@ func (m *synthModel) step(id int) []float32 {
 	xf := be.RMSNorm(x, m.W["norm"], c.eps)
 	logits := be.MatMul(m.W["head"], xf)
 	m.pos++
-	return be.Read(logits)
+	return logits
 }
+
+// step runs one token through all layers (decode path), appends K/V, returns next logits.
+func (m *synthModel) step(id int) []float32 { return m.be.Read(m.stepDev(id)) }
 
 func synthHostWeights(cfg synthCfg) map[string][]float32 {
 	var seed lcg = 0x1234567

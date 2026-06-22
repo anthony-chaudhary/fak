@@ -32,6 +32,14 @@ void fcuda_d2h(void *h, const void *d, size_t bytes);
 void fcuda_d2d(void *dst, const void *src, size_t bytes);
 void fcuda_sync(void);
 
+/* async host-transfer witness (#482): cumulative bytes copied device->host since the last
+ * reset. The two host fences are the only d2h transfers and both add to it — fcuda_d2h (a
+ * full Read) adds the vector bytes, fcuda_argmax_f32 adds only sizeof(int) — so an Argmax-only
+ * decode step reads sizeof(int) here while a full-logits Read reads vocab*4. That is the
+ * witness that greedy decode pulls only the token id across the bus, never the logits vector. */
+size_t fcuda_hostxfer_bytes(void);
+void fcuda_hostxfer_reset(void);
+
 /* y[P,out] = x[P,in] @ W[out,in]^T   (all row-major f32) via cuBLAS SGEMM. */
 void fcuda_matmul_f32(const float *dW, const float *dX, float *dY, int out, int in, int P);
 
