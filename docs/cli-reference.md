@@ -136,7 +136,7 @@ fak agent     --offline | --base-url URL --model M --api-key-env VAR  # LIVE tur
 fak serve     --addr :8080 [--require-key-env VAR]     # OpenAI-compatible HTTP + MCP gateway (any-language agents)
 fak recall    --dir DIR                                # persist/inspect a finished session as a durable core image
 fak dream     --dir DIR --out-dir DIR                   # offline cleanup pass over a sleeping core image
-fak debug     --session DIR --cmd info|bt|x|ws|grep    # attach to a session core image; demand-page its working set
+fak debug     --session DIR --cmd report|info|bt|x|ws|grep|tombstone|context-query|context-diff   # attach to a session core image; demand-page its working set
 fak policy    --dump > policy.json | --check policy.json   # author/validate the deployable capability floor
 fak hook      < call.json                              # spawned-hook decide (the A/B baseline)
 ```
