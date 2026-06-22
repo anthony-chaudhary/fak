@@ -109,6 +109,16 @@ jobs:
         run: |
           set -euo pipefail
           TAG="${{ github.event.inputs.tag || github.ref_name }}"
+          # The tag push that triggered us ALSO fires release-cadence's
+          # `release_publish.py` step, which creates the release PAGE. We race it:
+          # without waiting, `gh release upload` 404s with "release not found"
+          # (issue #369). Wait up to ~2 min for the page to appear, then fail loud.
+          for i in $(seq 1 24); do
+            gh release view "$TAG" >/dev/null 2>&1 && break
+            echo "release $TAG not visible yet (attempt $i/24); waiting 5s..."
+            sleep 5
+          done
+          gh release view "$TAG" >/dev/null
           # Upload only the one archive (+ its checksum) this matrix leg built.
           # --clobber makes a re-run (dispatch backfill, retried matrix leg) idempotent.
           gh release upload "$TAG" "$ARCHIVE" "$ARCHIVE_SUM" --clobber
@@ -124,9 +134,21 @@ jobs:
       - name: Fold per-asset sums into one SHA256SUMS
         env:
           GH_TOKEN: ${{ github.token }}
+          # No checkout in this job, so `gh` cannot infer the repo from a git
+          # remote — it failed with "fatal: not a git repository" (issue #369).
+          # Pin the repo explicitly instead of paying for a full checkout.
+          GH_REPO: ${{ github.repository }}
         run: |
           set -euo pipefail
           TAG="${{ github.event.inputs.tag || github.ref_name }}"
+          # `needs: build` means the page should already exist, but guard anyway so
+          # a manual workflow_dispatch re-run can't race a freshly created release.
+          for i in $(seq 1 24); do
+            gh release view "$TAG" >/dev/null 2>&1 && break
+            echo "release $TAG not visible yet (attempt $i/24); waiting 5s..."
+            sleep 5
+          done
+          gh release view "$TAG" >/dev/null
           tmp="$(mktemp -d)"
           # Pull the per-asset .sha256 files back down and concatenate them. Each line
           # is already in `<hash>  <archive>` form, which the installer verifies against.

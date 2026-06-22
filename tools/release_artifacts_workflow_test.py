@@ -61,6 +61,20 @@ class ReleaseArtifactsWorkflowTest(unittest.TestCase):
         self.assertIn("sha256sum", self.text)
         self.assertIn("SHA256SUMS", self.text)
 
+    def test_waits_for_release_page_before_upload(self) -> None:
+        # Regression #369: the tag push fires THIS workflow and release-cadence's
+        # page-creation step (release_publish.py) concurrently; uploading before
+        # the release page exists 404s with "release not found". Every upload path
+        # must poll `gh release view` until the page appears before touching it.
+        self.assertIn("gh release view", self.text)
+        self.assertIn("not visible yet", self.text)
+
+    def test_checksums_job_resolves_repo_without_checkout(self) -> None:
+        # Regression #369: the aggregate-SHA256SUMS job has no checkout, so `gh`
+        # cannot infer the repo from a git remote ("fatal: not a git repository").
+        # It pins the repo via GH_REPO instead of paying for a full checkout.
+        self.assertIn("GH_REPO: ${{ github.repository }}", self.text)
+
     def test_uses_module_go_version(self) -> None:
         self.assertIn("go-version-file: go.mod", self.text)
 
