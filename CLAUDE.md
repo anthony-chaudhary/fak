@@ -9,6 +9,9 @@ The three that will bite you if you skip them:
   the trunk guard *refuses* off-trunk commits (`OFF_TRUNK`).
 - **Commit by explicit path** — `git commit -- <paths>`, never `git add -A` (shared
   multi-session tree). Sign off with `git commit -s` (DCO).
+- **Default is to ship** — once the tree is green (`make ci`), commit AND push; don't wait
+  to be asked. Stay on the trunk, never force-push, defer to the guard (`OFF_TRUNK` / a peer
+  merge in flight). Full default + verify command in [`AGENTS.md`](AGENTS.md).
 - **The Go module is the repository root** — run `go` commands from the clone root;
   `go install github.com/anthony-chaudhary/fak/cmd/fak@latest` resolves directly.
 

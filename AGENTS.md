@@ -60,6 +60,17 @@ later runs are instant. Full walkthrough: [`docs/repro-packet.md`](docs/repro-pa
 
 ## Hard rules (these WILL bite an agent — they are enforced below the agent layer)
 
+**Default: ship.** Once the tree is green, **commit AND push** — don't wait to be asked.
+Green = `make ci` (build + vet + test + claims-lint; on a native-Windows host run the test
+suite under WSL with `./test.ps1`, since native `go test` is blocked). The commit-message,
+file-admission, public-leak, and trunk guards then run automatically as git hooks at
+commit/push — so "the guard passed" means CI is green *and* the commit/push was accepted.
+The HOW below is unchanged and gates the WHEN: stay on the trunk, `git commit -s -- <paths>`
+(never `git add -A`), merge **in place** if the trunk diverged, wait out a peer's
+`MERGE_HEAD`, and **never force-push**. If a guard refuses (`OFF_TRUNK`), a peer merge is
+mid-flight, or a blocker stands — reconcile in place or STOP; the default does not fire
+until it clears.
+
 - **Work directly on the trunk (`main`). Never open a feature branch or new worktree.**
   The trunk guard *refuses* off-trunk commits (the `OFF_TRUNK` law). A dirty/diverged
   tree means reconcile **in place** or STOP — never escape into a side branch.

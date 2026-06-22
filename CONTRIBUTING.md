@@ -87,8 +87,13 @@ kernel), in addition to the CLA grant to Netra.
   clone with `python tools/install_trunk_guard.py` (arms the trunk guard + the
   public-leak scan).
 - **Commit small and by explicit path** (`git commit -- <paths>`, never `git add -A`).
-  This is a shared multi-session tree — never stage a peer's uncommitted files. Pull
-  before you start and again before each push; push promptly after each green commit.
+  This is a shared multi-session tree — never stage a peer's uncommitted files. **Default:
+  once the tree is green, commit AND push — you don't wait to be asked.** Green is `make ci`
+  (build + vet + test + claims-lint; tests run under WSL via `./test.ps1` on Windows), after
+  which the commit-message / file-admission / public-leak / trunk guards run as git hooks.
+  Pull before you start and again before each push; push promptly after each green commit, on
+  the trunk, with `git commit -s` (DCO) — never force-push. If a guard refuses (`OFF_TRUNK`),
+  a peer merge is in flight, or a blocker stands, reconcile in place or STOP first.
 - **Stamp every commit so it can be verified.** Fleet writes Conventional-Commits
   subjects (`feat(scope): …`, `fix(scope): …`, `docs(scope): …`) with a `(fak <leaf>)`
   trailer naming the lane the work lands in — e.g. `fix(gateway): treat same-tick ready
