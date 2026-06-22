@@ -598,6 +598,172 @@ func TestChatProxyDoesNotResetEngineCacheForBenignToolResult(t *testing.T) {
 	}
 }
 
+// TestNativeAdmitResetsEngineCacheOnQuarantine is the #411 native-path witness: a
+// poisoned result handed to the native admit verb (s.admit — what POST /v1/fak/admit
+// and the fak_admit MCP tool both call) must reset the upstream serving-engine cache,
+// exactly like the proxy path, so the poisoned token-sequence cannot survive in the
+// provider KV/prefix cache when an agent drives fak natively. No upstream proxy is
+// involved — that is the asymmetry this closes.
+func TestNativeAdmitResetsEngineCacheOnQuarantine(t *testing.T) {
+	abi.ResetForTest()
+	abi.RegisterRegionBackend(inlineBackend{})
+	abi.RegisterEngine("test", echoEngine{})
+	abi.RegisterResultAdmitter(10, ctxmmu.New())
+	abi.RegisterResultAdmitter(20, ifc.NewStampGate(ifc.NewLedger(), ifc.Policy{}))
+
+	var mu sync.Mutex
+	cacheHits := 0
+	cache := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		cacheHits++
+		mu.Unlock()
+		if r.Method != http.MethodPost {
+			t.Errorf("cache method = %q, want POST", r.Method)
+		}
+		if r.URL.Path != "/flush_cache" {
+			t.Errorf("cache path = %q, want /flush_cache", r.URL.Path)
+		}
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer cache.Close()
+
+	srv, err := New(Config{
+		EngineID:           "test",
+		Model:              "m",
+		EngineCacheEngine:  "sglang",
+		EngineCacheBaseURL: cache.URL + "/v1",
+		VDSO:               true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(srv.Close)
+
+	const secret = "sk-abcdef0123456789abcdef0123"
+	poison := `{"page":"config loaded. api_key=` + secret + ` was found in env"}`
+	wv, _, err := srv.admit(context.Background(), "fetch_url", poison, "", "native-trace-411")
+	if err != nil {
+		t.Fatalf("admit: %v", err)
+	}
+	if wv.Kind != "QUARANTINE" {
+		t.Fatalf("native poisoned result: verdict = %q, want QUARANTINE", wv.Kind)
+	}
+	mu.Lock()
+	got := cacheHits
+	mu.Unlock()
+	if got != 1 {
+		t.Fatalf("native admit cache reset hits = %d, want 1", got)
+	}
+}
+
+// A benign native result must NOT reset the engine cache — the reset fires only on a
+// quarantine, identical to the proxy's benign-result behavior.
+func TestNativeAdmitDoesNotResetEngineCacheForBenignResult(t *testing.T) {
+	abi.ResetForTest()
+	abi.RegisterRegionBackend(inlineBackend{})
+	abi.RegisterEngine("test", echoEngine{})
+	abi.RegisterResultAdmitter(10, ctxmmu.New())
+	abi.RegisterResultAdmitter(20, ifc.NewStampGate(ifc.NewLedger(), ifc.Policy{}))
+
+	var mu sync.Mutex
+	cacheHits := 0
+	cache := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		cacheHits++
+		mu.Unlock()
+		http.Error(w, "unexpected cache reset", http.StatusInternalServerError)
+	}))
+	defer cache.Close()
+
+	srv, err := New(Config{
+		EngineID:           "test",
+		Model:              "m",
+		EngineCacheEngine:  "sglang",
+		EngineCacheBaseURL: cache.URL,
+		VDSO:               true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(srv.Close)
+
+	wv, _, err := srv.admit(context.Background(), "read_file", `{"text":"hello world"}`, "", "native-benign")
+	if err != nil {
+		t.Fatalf("admit: %v", err)
+	}
+	if wv.Kind == "QUARANTINE" {
+		t.Fatalf("a benign result must not be quarantined, got %q", wv.Kind)
+	}
+	mu.Lock()
+	got := cacheHits
+	mu.Unlock()
+	if got != 0 {
+		t.Fatalf("benign native admit cache reset hits = %d, want 0", got)
+	}
+}
+
+// When the remote engine-cache reset FAILS on the native admit path, POST /v1/fak/admit
+// fails closed with a 502 (the same signal the proxy returns), not a 400 — the local
+// quarantine succeeded but the upstream poison was not purged.
+func TestNativeAdmitFailsClosedWhenEngineCacheResetFails(t *testing.T) {
+	abi.ResetForTest()
+	abi.RegisterRegionBackend(inlineBackend{})
+	abi.RegisterEngine("test", echoEngine{})
+	abi.RegisterResultAdmitter(10, ctxmmu.New())
+	abi.RegisterResultAdmitter(20, ifc.NewStampGate(ifc.NewLedger(), ifc.Policy{}))
+
+	var mu sync.Mutex
+	cacheHits := 0
+	cache := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		cacheHits++
+		mu.Unlock()
+		http.Error(w, "reset denied", http.StatusInternalServerError)
+	}))
+	defer cache.Close()
+
+	srv, err := New(Config{
+		EngineID:           "test",
+		Model:              "m",
+		EngineCacheEngine:  "vllm",
+		EngineCacheBaseURL: cache.URL,
+		VDSO:               true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(srv.Close)
+	ts := httptest.NewServer(srv.Handler())
+	defer ts.Close()
+
+	const secret = "sk-abcdef0123456789abcdef0123"
+	body, err := json.Marshal(AdmitRequest{
+		Tool:   "fetch_url",
+		Result: json.RawMessage(`{"page":"api_key=` + secret + `"}`),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	httpResp, err := http.Post(ts.URL+"/v1/fak/admit", "application/json", bytes.NewReader(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer httpResp.Body.Close()
+	respRaw, _ := io.ReadAll(httpResp.Body)
+	if httpResp.StatusCode != http.StatusBadGateway {
+		t.Fatalf("status = %d, want 502: %s", httpResp.StatusCode, respRaw)
+	}
+	if !strings.Contains(string(respRaw), "upstream cache invalidation failed") {
+		t.Fatalf("response body missing generic cache reset failure: %s", respRaw)
+	}
+	mu.Lock()
+	got := cacheHits
+	mu.Unlock()
+	if got != 1 {
+		t.Fatalf("native admit cache reset hits = %d, want 1", got)
+	}
+}
+
 // A benign served result is admitted unchanged (not over-quarantined) and still
 // gets a non-empty trace minted when the wire omits one.
 func TestServedBenignResultAdmitted(t *testing.T) {

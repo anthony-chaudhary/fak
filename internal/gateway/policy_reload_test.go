@@ -97,6 +97,71 @@ func TestTraceResetRouteInvokesConfiguredResetter(t *testing.T) {
 	}
 }
 
+func TestTraceObserveRouteReturnsTaintLevel(t *testing.T) {
+	srv := newTestServer(t)
+	gotTrace := ""
+	srv.observeTrace = func(_ context.Context, traceID string) (string, bool) {
+		gotTrace = traceID
+		return "tainted", true
+	}
+	ts := httptest.NewServer(srv.Handler())
+	defer ts.Close()
+
+	r, err := http.Get(ts.URL + "/v1/fak/trace/sess-9")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r.Body.Close()
+	if r.StatusCode != http.StatusOK {
+		t.Fatalf("trace observe status = %d, want 200", r.StatusCode)
+	}
+	var resp TraceObserveResponse
+	if err := json.NewDecoder(r.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if gotTrace != "sess-9" || resp.TraceID != "sess-9" || resp.Taint != "tainted" || !resp.Dangerous {
+		t.Fatalf("gotTrace=%q response=%+v, want observed taint level for sess-9", gotTrace, resp)
+	}
+}
+
+func TestTraceObserveRouteValidationAndDisabled(t *testing.T) {
+	srv := newTestServer(t)
+	ts := httptest.NewServer(srv.Handler())
+	defer ts.Close()
+
+	// Disabled (no observeTrace injected) => 404, not a silent clean reading.
+	r, err := http.Get(ts.URL + "/v1/fak/trace/sess-9")
+	if err != nil {
+		t.Fatal(err)
+	}
+	r.Body.Close()
+	if r.StatusCode != http.StatusNotFound {
+		t.Fatalf("disabled trace observe status = %d, want 404", r.StatusCode)
+	}
+
+	srv.observeTrace = func(context.Context, string) (string, bool) { return "trusted", false }
+
+	// Empty trace id on the subtree => 400.
+	r, err = http.Get(ts.URL + "/v1/fak/trace/")
+	if err != nil {
+		t.Fatal(err)
+	}
+	r.Body.Close()
+	if r.StatusCode != http.StatusBadRequest {
+		t.Fatalf("empty-id trace observe status = %d, want 400", r.StatusCode)
+	}
+
+	// POST to the subtree id-path is not the observe verb => 405 (observe is GET-only).
+	r, err = http.Post(ts.URL+"/v1/fak/trace/sess-9", "application/json", strings.NewReader(`{}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	r.Body.Close()
+	if r.StatusCode != http.StatusMethodNotAllowed {
+		t.Fatalf("POST trace observe status = %d, want 405", r.StatusCode)
+	}
+}
+
 func TestTraceResetRouteValidationAndDisabled(t *testing.T) {
 	srv := newTestServer(t)
 	ts := httptest.NewServer(srv.Handler())

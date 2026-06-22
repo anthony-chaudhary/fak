@@ -1035,6 +1035,30 @@ func resetTrace(_ context.Context, traceID string) error {
 	return nil
 }
 
+// observeTrace is the read-only complement of resetTrace (#411): it reports the
+// live IFC taint high-water mark for one trace so the gateway can serve
+// GET /v1/fak/trace/{trace_id} without importing IFC internals. An unseen trace
+// reads "trusted" — the ledger's own clean default.
+func observeTrace(_ context.Context, traceID string) (string, bool) {
+	lvl := ifc.Default.Level(strings.TrimSpace(traceID))
+	return taintLevelName(lvl), ifc.Dangerous(lvl)
+}
+
+// taintLevelName renders an abi.TaintLabel as its stable wire name. It mirrors
+// ifc's unexported taintName (the enum is not ordered by restrictiveness, so it is
+// switched, never formatted).
+func taintLevelName(t abi.TaintLabel) string {
+	switch t {
+	case abi.TaintTrusted:
+		return "trusted"
+	case abi.TaintTainted:
+		return "tainted"
+	case abi.TaintQuarantined:
+		return "quarantined"
+	}
+	return "unknown"
+}
+
 func applyRuntime(rt policy.Runtime) {
 	policy.ApplySources(rt)
 	ifc.ConfigureDefaultPolicy(ifcPolicy(rt))
@@ -1431,6 +1455,7 @@ func cmdServe(argv []string) {
 		Version:                     appversion.Current(),
 		ReloadPolicy:                policyReloader(*policyPath),
 		ResetTrace:                  resetTrace,
+		ObserveTrace:                observeTrace,
 		StartTime:                   t0,
 		StartupPhases:               startupPhases,
 	})

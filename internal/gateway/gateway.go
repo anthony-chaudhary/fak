@@ -117,6 +117,10 @@ type Config struct {
 	// ResetTrace clears one trace's process-local taint ledger mark. Nil disables
 	// the /v1/fak/trace/reset route.
 	ResetTrace TraceResetFunc
+	// ObserveTrace reports one trace's current IFC taint high-water mark (the
+	// read-only complement of ResetTrace). Nil disables the GET /v1/fak/trace/{id}
+	// observe route.
+	ObserveTrace TraceObserveFunc
 	// Logf is the structured log sink (default: stderr). MCP-over-stdio sets this
 	// to stderr so protocol bytes on stdout are never corrupted.
 	Logf func(format string, args ...any)
@@ -147,6 +151,21 @@ type PolicyReloadResponse struct {
 // trace state without importing IFC internals.
 type TraceResetFunc func(context.Context, string) error
 
+// TraceObserveFunc is injected by the host CLI so the gateway can read one trace's
+// live IFC taint high-water mark without importing IFC internals. It returns the
+// taint level name ("trusted"|"tainted"|"quarantined") and whether that level is
+// dangerous to feed a sensitive sink (Tainted or worse). An unseen trace reads
+// "trusted" — the ledger's own clean default.
+type TraceObserveFunc func(context.Context, string) (level string, dangerous bool)
+
+// TraceObserveResponse is the wire result of GET /v1/fak/trace/{trace_id}: the
+// current IFC taint high-water mark for a live/recent served session.
+type TraceObserveResponse struct {
+	TraceID   string `json:"trace_id"`
+	Taint     string `json:"taint"`
+	Dangerous bool   `json:"dangerous"`
+}
+
 // TraceResetRequest is the body of POST /v1/fak/trace/reset.
 type TraceResetRequest struct {
 	TraceID string `json:"trace_id"`
@@ -172,6 +191,7 @@ type Server struct {
 	traceSeq     uint64 // mints a non-empty TraceID when the wire omits one (atomic)
 	reloadPolicy PolicyReloadFunc
 	resetTrace   TraceResetFunc
+	observeTrace TraceObserveFunc
 
 	// startup is the one-time boot timeline (start -> ready, per-phase costs),
 	// exposed as fak_gateway_startup_* gauges. See startup.go.
@@ -296,6 +316,7 @@ func New(cfg Config) (*Server, error) {
 		logf:         logf,
 		reloadPolicy: cfg.ReloadPolicy,
 		resetTrace:   cfg.ResetTrace,
+		observeTrace: cfg.ObserveTrace,
 		startup:      startup,
 		planner:      planner,
 		engineCache:  remoteCache,
@@ -529,8 +550,32 @@ func (s *Server) traceFor(traceID string) string {
 // paged-out) result are rendered for the wire. It is the explicit fak_admit verb;
 // admitOp is the shared core the auto-proxy also drives under its own op label.
 func (s *Server) admit(ctx context.Context, tool, rawResult, witness, traceID string) (wv WireVerdict, env *ResultEnvelope, err error) {
-	return s.admitOp(ctx, "admit", tool, rawResult, witness, traceID)
+	wv, env, err = s.admitOp(ctx, "admit", tool, rawResult, witness, traceID)
+	if err != nil {
+		return wv, env, err
+	}
+	// Native-path parity with the proxy (#411). The proxy fires the remote
+	// engine-cache reset from admitInboundResults; the native admit routes
+	// (POST /v1/fak/admit, the fak_admit MCP tool) quarantined locally but never
+	// reset the upstream serving-engine cache, so a poisoned token-sequence could
+	// survive in the provider KV/prefix cache when an agent drives fak natively
+	// instead of through /v1/chat/completions. resetEngineCacheAfterQuarantine is
+	// the SAME reset the proxy fires (a no-op when no engine cache is configured);
+	// a remote-reset failure is surfaced fail-closed, wrapped so the HTTP handler
+	// maps it to a 502 rather than a client 400.
+	if wv.Kind == "QUARANTINE" {
+		if rerr := s.resetEngineCacheAfterQuarantine(ctx, []ResultAdmission{{Verdict: wv}}); rerr != nil {
+			return wv, env, fmt.Errorf("%w: %v", errEngineCacheReset, rerr)
+		}
+	}
+	return wv, env, nil
 }
+
+// errEngineCacheReset marks an admit failure that originated in the REMOTE
+// engine-cache reset (not the local admission). handleFakAdmit maps it to a 502 —
+// the same fail-closed signal the proxy returns on a reset failure — while a local
+// build/resolver error stays a 400 client error.
+var errEngineCacheReset = errors.New("engine cache reset failed")
 
 // admitOp is the shared result-side admission core: it builds an agent-scoped call,
 // puts the result bytes into a tainted Ref, and folds the kernel's ResultAdmitter

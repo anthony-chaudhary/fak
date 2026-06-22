@@ -44,6 +44,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/v1/fak/context/change", s.handleFakContextChange)
 	mux.HandleFunc("/v1/fak/policy/reload", s.handleFakPolicyReload)
 	mux.HandleFunc("/v1/fak/trace/reset", s.handleFakTraceReset)
+	mux.HandleFunc("/v1/fak/trace/", s.handleFakTraceObserve)
 	mux.HandleFunc("/v1/models", s.handleModels)
 	mux.HandleFunc("/mcp", s.handleMCPHTTP)
 	mux.HandleFunc("/healthz", s.handleHealth)
@@ -531,6 +532,15 @@ func (s *Server) handleFakAdmit(w http.ResponseWriter, r *http.Request) {
 	req.TraceID = useHTTPTrace(w, r, req.TraceID)
 	wv, env, err := s.admit(r.Context(), req.Tool, rawArgs(req.Result), req.Witness, req.TraceID)
 	if err != nil {
+		// A REMOTE engine-cache reset failure is a gateway/upstream fault — surface it
+		// as a 502 (the same fail-closed signal the proxy returns), with a generic
+		// message so the upstream error body never crosses the trust boundary. Any
+		// other admit error is a client-side 400.
+		if errors.Is(err, errEngineCacheReset) {
+			s.logf("gateway: native admit engine cache reset failed: %v", err)
+			writeErr(w, http.StatusBadGateway, "upstream cache invalidation failed")
+			return
+		}
 		writeErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
@@ -730,6 +740,31 @@ func (s *Server) handleFakTraceReset(w http.ResponseWriter, r *http.Request) {
 	}
 	s.logf("gateway: reset trace %s", traceID)
 	writeJSON(w, http.StatusOK, TraceResetResponse{Reset: true, TraceID: traceID})
+}
+
+// handleFakTraceObserve is the read-only complement of /v1/fak/trace/reset (#411):
+// GET /v1/fak/trace/{trace_id} returns the current IFC taint high-water mark for a
+// live/recent served session, so an operator can see whether a session's taint is
+// rising WITHOUT parsing stderr. It is mounted on the /v1/fak/trace/ subtree; the
+// exact /v1/fak/trace/reset route (POST) is matched first by the mux, so only the
+// observe id-path lands here. The observe implementation is injected by cmd/fak so
+// this package stays IFC-internals blind, mirroring resetTrace.
+func (s *Server) handleFakTraceObserve(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeErr(w, http.StatusMethodNotAllowed, "use GET")
+		return
+	}
+	if s.observeTrace == nil {
+		writeErr(w, http.StatusNotFound, "trace observe is not configured")
+		return
+	}
+	traceID := strings.TrimSpace(strings.TrimPrefix(r.URL.Path, "/v1/fak/trace/"))
+	if traceID == "" {
+		writeErr(w, http.StatusBadRequest, "trace_id is required")
+		return
+	}
+	level, dangerous := s.observeTrace(r.Context(), traceID)
+	writeJSON(w, http.StatusOK, TraceObserveResponse{TraceID: traceID, Taint: level, Dangerous: dangerous})
 }
 
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
