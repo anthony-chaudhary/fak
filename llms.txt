@@ -39,6 +39,16 @@
 - [Guided tutorial](docs/fak/tutorial.md): zero to first adjudicated tool call, with real output at every step.
 - [FAQ](docs/FAQ.md): direct answers to common questions (what is fak, how it differs from a firewall/guardrails/vLLM, threat model, prompt-injection handling).
 
+## Integrations (put fak in front of the agent you already run)
+
+You do not rewrite your agent to adopt fak — you repoint one base URL at `fak serve`, and every tool call it proposes passes through the capability floor first. fak fronts the OpenAI (`/v1/chat/completions`), Anthropic (`/v1/messages`), and MCP (`--stdio` / `/mcp`) wires, plus Gemini and xAI upstreams, so almost any agent or framework that lets you set a base URL drops in with no agent-side code change.
+
+- [Integration index](docs/integrations/README.md): the front door — which-agent-do-you-run routing, the universal "set the base URL" recipe (OpenAI SDK, Anthropic SDK, OpenAI Agents SDK, LangChain, LlamaIndex, Vercel AI SDK, any MCP client), and the 60-second offline proof.
+- [Claude Code / Anthropic API](docs/integrations/claude.md): wire Claude Code or any Anthropic SDK to the kernel-adjudicated gateway.
+- [Cursor](docs/integrations/cursor.md): governance for the Cursor IDE over MCP or the OpenAI-compatible proxy.
+- [OpenAI Codex / OpenAI API](docs/integrations/openai-codex.md): adjudicate every tool call from an OpenAI-compatible coding agent.
+- [MCP one-paste setup](examples/mcp/README.md): drop a project `.mcp.json` and call the five `fak_*` adjudication tools from any MCP client.
+
 ## Core concepts (the two flips)
 
 - [Policy in the kernel](docs/explainers/policy-in-the-kernel.md): why a default-deny check on the call path beats an external recognizer that fails open.
