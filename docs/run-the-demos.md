@@ -68,6 +68,15 @@ go run ./cmd/guarddemo  -selfcheck   # WITHOUT fak: 4 / 2 / 0 breaches · WITH f
 go run ./cmd/turntaxdemo -selfcheck   # turn-tax + safety-floor invariants per suite
 ```
 
+`guarddemo` also has a `-print` mode: the **30-second point with zero setup** — the
+WITHOUT-fak vs WITH-fak comparison rendered as a colored two-column diff right in the
+terminal, no browser, no port (honors `NO_COLOR`):
+
+```bash
+go run ./cmd/guarddemo -print                          # the red-team scenario, side by side
+go run ./cmd/guarddemo -print -scenario turntax-happy   # the clean control (0 breaches)
+```
+
 ## 3. With a real model (the live race)
 
 `ctxdemo` and `demorace` run a model **in-process** for the live race. Export a small one

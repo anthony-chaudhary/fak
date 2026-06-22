@@ -34,6 +34,11 @@
 //	#   turntax-airline → WITHOUT fak: 2 breaches · WITH fak: 0
 //	#   turntax-happy   → WITHOUT fak: 0 · WITH fak: 0  (the anti-fear-mongering control)
 //
+//	go run ./cmd/guarddemo -print
+//	# the 30-second point with ZERO setup: render the WITHOUT-fak vs WITH-fak
+//	# side-by-side as a colored two-column diff in the terminal (no browser, no
+//	# port). -scenario picks the trace; honors NO_COLOR.
+//
 //	go run ./cmd/guarddemo -selfcheck
 //	# browserless: replay every scenario through the kernel, assert the documented
 //	# safety-floor invariants, exit non-zero on any drift.
@@ -49,6 +54,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 
 	"github.com/anthony-chaudhary/fak/internal/demoui"
 	"github.com/anthony-chaudhary/fak/internal/turnbench"
@@ -183,6 +189,8 @@ func main() {
 	addr := flag.String("addr", "127.0.0.1:8151", "listen address")
 	jobs := flag.Int("jobs", 0, "cap GOMAXPROCS to an ABSOLUTE core count (0 = all cores). On a shared/active box pass e.g. 8 so the demo doesn't starve other work.")
 	selfcheck := flag.Bool("selfcheck", false, "run HEADLESS: replay each present scenario through the kernel (the same turnbench.RunWithCalls path the browser drives), assert the documented safety-floor invariants, print a witness table, and exit non-zero on any mismatch. No browser, no network — the CI / cross-platform dog-food of this demo's data path.")
+	print := flag.Bool("print", false, "render the WITHOUT-fak vs WITH-fak side-by-side as a colored TWO-COLUMN diff in the TERMINAL (no browser, no port) and exit. The 30-second point with zero setup. Honors NO_COLOR.")
+	scenario := flag.String("scenario", "guard-redteam", "scenario for -print (guard-redteam | turntax-airline | turntax-happy)")
 	flag.Parse()
 	if *jobs > 0 {
 		runtime.GOMAXPROCS(*jobs)
@@ -191,6 +199,9 @@ func main() {
 
 	if *selfcheck {
 		os.Exit(runSelfcheck())
+	}
+	if *print {
+		os.Exit(runPrint(*scenario))
 	}
 
 	mux := http.NewServeMux()
@@ -226,6 +237,209 @@ func listenAddr(addr string) string {
 		return "0.0.0.0:" + p
 	}
 	return addr
+}
+
+// ---------------------------------------------------------------------------
+// -print: the terminal twin of the browser side-by-side. Same ONE live replay,
+// rendered as a colored two-column diff so the moat lands in ~30s with zero setup
+// (no browser, no port). The outcome mapping mirrors the page's outcomes() exactly,
+// so the terminal and the browser tell the identical story.
+// ---------------------------------------------------------------------------
+
+// whatFor is the friendly one-liner for what a tool call is trying to do (mirrors
+// the page's WHAT map). An unknown tool falls back to its raw name.
+func whatFor(tool string) string {
+	switch tool {
+	case "fetch_policy":
+		return "fetch the refund policy doc"
+	case "get_user_details":
+		return "look up the customer"
+	case "search_direct_flight":
+		return "search flights"
+	case "book_flight":
+		return "book the flight"
+	case "delete_account":
+		return "delete the account"
+	case "convert_currency":
+		return "convert currency"
+	case "calculate":
+		return "add two numbers"
+	case "list_all_airports":
+		return "list airports"
+	default:
+		return tool
+	}
+}
+
+// destructiveDeny mirrors the page's regex: a denied tool whose name is write-shaped
+// is one the unmediated baseline would actually EXECUTE (the safety harm).
+func destructiveDeny(tool string) bool {
+	t := strings.ToLower(tool)
+	for _, p := range []string{"delete", "drop", "wipe", "remove", "exec", "run", "write", "cancel", "send", "patch", "update"} {
+		if strings.Contains(t, p) {
+			return true
+		}
+	}
+	return false
+}
+
+// outcome is one row's two-column reading: what the unmediated baseline did (left)
+// vs what fak did (right), and whether the baseline's action was a real breach.
+type outcome struct {
+	breach              bool
+	leftGlyph, leftText string
+	rightGlyph, rtext   string
+	leftKind, rightKind string // "breach" | "held" | "ran" -> color
+}
+
+// outcomeFor maps one live disposition to its two-column outcome — the SAME branch
+// order as the page's outcomes() (quarantine, then destructive/benign deny, else a
+// legitimate call that runs identically on both arms).
+func outcomeFor(d turnbench.CallDisposition) outcome {
+	switch {
+	case d.Axis == "safety-floor" && d.Class == "quarantine":
+		return outcome{breach: true,
+			leftGlyph: "x", leftText: "POISON ADMITTED to context", leftKind: "breach",
+			rightGlyph: "#", rtext: "paged out (quarantined)", rightKind: "held"}
+	case d.Axis == "safety-floor" && d.Class == "deny":
+		if destructiveDeny(d.Tool) {
+			return outcome{breach: true,
+				leftGlyph: "x", leftText: "EXECUTED (account deleted)", leftKind: "breach",
+				rightGlyph: "#", rtext: "REFUSED (deny-as-value)", rightKind: "held"}
+		}
+		return outcome{breach: false,
+			leftGlyph: "x", leftText: "ran (unsanctioned tool)", leftKind: "breach",
+			rightGlyph: "#", rtext: "REFUSED (capability floor)", rightKind: "held"}
+	default:
+		return outcome{breach: false,
+			leftGlyph: ".", leftText: "ran (legit)", leftKind: "ran",
+			rightGlyph: ".", rtext: "ran (allowed)", rightKind: "ran"}
+	}
+}
+
+// ansi colors, gated on a TTY + NO_COLOR (https://no-color.org).
+type palette struct{ red, green, dim, bold, reset string }
+
+func colors() palette {
+	noColor := os.Getenv("NO_COLOR") != ""
+	tty := false
+	if fi, err := os.Stdout.Stat(); err == nil {
+		tty = fi.Mode()&os.ModeCharDevice != 0
+	}
+	if noColor || !tty {
+		return palette{}
+	}
+	return palette{red: "\033[31m", green: "\033[32m", dim: "\033[2m", bold: "\033[1m", reset: "\033[0m"}
+}
+
+func (p palette) paint(code, s string) string {
+	if code == "" {
+		return s
+	}
+	return code + s + p.reset
+}
+
+// padTrim pads OR truncates a plain (un-colored) string to exactly w runes, so a
+// later color wrap never disturbs column alignment.
+func padTrim(s string, w int) string {
+	r := []rune(s)
+	if len(r) > w {
+		if w <= 1 {
+			return string(r[:w])
+		}
+		return string(r[:w-1]) + "…"
+	}
+	return s + strings.Repeat(" ", w-len(r))
+}
+
+// runPrint replays one scenario and renders the two-column diff to stdout. Returns a
+// process exit code (0 unless the replay errored / the fixture is absent).
+func runPrint(scenario string) int {
+	p := colors()
+	t, err := turnbench.LoadTrace(suitePath(scenario))
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "load trace %q: %v (run from the repo root)\n", scenario, err)
+		return 1
+	}
+	rep, calls, err := turnbench.RunWithCalls(context.Background(), t, turnbench.DefaultCostModel())
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "replay: %v\n", err)
+		return 1
+	}
+	breaches := rep.Safety.InjectionsAdmittedBaseline + rep.Safety.DestructiveExecutedBaseline
+
+	const lw, cw, rw = 34, 24, 34
+	kindColor := func(kind string) string {
+		switch kind {
+		case "breach":
+			return p.red
+		case "held":
+			return p.green
+		default:
+			return p.dim
+		}
+	}
+
+	fmt.Printf("\n  %s — scenario: %s (%d calls)\n", p.paint(p.bold, "fak · the safety floor, side by side"), scenario, len(calls))
+	fmt.Printf("  %s\n\n", p.paint(p.dim, "same agent · same attack · same tool calls — run twice"))
+	// header row — pad the PLAIN text to width, THEN paint (alignment-safe).
+	fmt.Printf("  %s  %s  %s\n",
+		p.paint(p.red, padTrim("WITHOUT fak", lw)),
+		padTrim("the tool call", cw),
+		p.paint(p.green, "WITH fak"))
+	fmt.Printf("  %s  %s  %s\n", strings.Repeat("─", lw), strings.Repeat("─", cw), strings.Repeat("─", rw))
+
+	for _, d := range calls {
+		o := outcomeFor(d)
+		left := padTrim(o.leftGlyph+" "+o.leftText, lw)
+		mid := padTrim(d.Tool, cw)
+		right := o.rightGlyph + " " + o.rtext
+		fmt.Printf("  %s  %s  %s\n",
+			p.paint(kindColor(o.leftKind), left),
+			p.paint(p.dim, mid),
+			p.paint(kindColor(o.rightKind), right))
+		// a faint second line naming the action under the call
+		fmt.Printf("  %s  %s\n", strings.Repeat(" ", lw), p.paint(p.dim, padTrim(whatFor(d.Tool), cw)))
+	}
+
+	fmt.Printf("  %s  %s  %s\n", strings.Repeat("─", lw), strings.Repeat("─", cw), strings.Repeat("─", rw))
+	passes := 0
+	for _, d := range calls {
+		if d.Axis == "control" {
+			passes++
+		}
+	}
+	breachWord := "breaches"
+	if breaches == 1 {
+		breachWord = "breach"
+	}
+	leftScore := fmt.Sprintf("WITHOUT fak: %d %s", breaches, breachWord)
+	rightScore := "WITH fak: 0 breaches"
+	// pad the plain left score across the left+gap+center span, THEN paint, so the
+	// right score lands under the WITH-fak column regardless of color.
+	fmt.Printf("  %s  %s\n",
+		p.paint(p.bold+p.red, padTrim(leftScore, lw+2+cw)),
+		p.paint(p.bold+p.green, rightScore))
+	if breaches > 0 {
+		inj, des := rep.Safety.InjectionsAdmittedBaseline, rep.Safety.DestructiveExecutedBaseline
+		fmt.Printf("  %s\n", p.paint(p.dim, fmt.Sprintf(
+			"fak refused %d destructive op%s and paged out %d injection%s — and still ran the %d legitimate call%s. "+
+				"A completion/integrity delta that holds on ANY backend (the refusal never reads a content detector).",
+			des, plural(des), inj, plural(inj), passes, plural(passes))))
+	} else {
+		fmt.Printf("  %s\n", p.paint(p.dim, fmt.Sprintf(
+			"A clean session breaches nothing on either arm (the anti-fear-mongering control): "+
+				"fak does not cry wolf — all %d legitimate calls ran. The gap only opens under a real attack.", passes)))
+	}
+	fmt.Println()
+	return 0
+}
+
+func plural(n int) string {
+	if n == 1 {
+		return ""
+	}
+	return "s"
 }
 
 // scenarioExpect is the documented safety-floor invariant for a known fixture — the
