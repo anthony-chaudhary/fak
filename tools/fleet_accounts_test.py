@@ -698,6 +698,110 @@ class FleetAccountsTest(unittest.TestCase):
         self.assertIn("gem8", tags)
 
 
+class WaveAllocationTest(unittest.TestCase):
+    """allocate_wave hands a parallel fan-out N DISTINCT rate-limit pools at once.
+
+    The provable-benefit witness: a fan-out that calls single-account resolve() N
+    times in a burst gets the SAME account N times (no session has registered yet to
+    move the live-load tie-break), so all N lanes share ONE usage pool and the
+    fan-out serializes. A wave allocates distinct pools instead -> N independent
+    per-account limits -> the concurrency multiplies."""
+
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        self.home = Path(self._tmp.name)
+        self.config_home = self.home / "config"
+        self.config_home.mkdir()
+        self.addCleanup(self._tmp.cleanup)
+
+    def _three_distinct(self) -> None:
+        login_dir(self.home, ".claude-gem5-acct", uuid="uuid-5", email="gem5@x.ai")
+        login_dir(self.home, ".claude-gem7-acct", uuid="uuid-7", email="gem7@x.ai")
+        login_dir(self.home, ".claude-gem8-acct", uuid="uuid-8", email="gem8@x.ai")
+
+    def test_wave_allocates_distinct_pools_and_underfills_honestly(self) -> None:
+        self._three_distinct()
+        w = fleet_accounts.allocate_wave(
+            8, task_class="t1", home=str(self.home),
+            config_home=str(self.config_home), registry={})
+        self.assertTrue(w["ok"])
+        self.assertEqual(w["granted"], 3)        # only 3 distinct pools exist
+        self.assertEqual(w["distinct_pools"], 3)
+        self.assertEqual(w["shortfall"], 5)      # asked 8, got 3 -> honest, never a dup
+        pools = [lane["pool"] for lane in w["lanes"]]
+        self.assertEqual(len(pools), len(set(pools)), "every lane must be a distinct pool")
+        self.assertEqual({lane["tag"] for lane in w["lanes"]}, {"gem5", "gem7", "gem8"})
+
+    def test_wave_beats_naive_resolve_burst(self) -> None:
+        # THE witness: identical roster, identical registry; the only change is wave vs
+        # a burst of resolve(). naive collapses to one pool, wave spreads across all three.
+        self._three_distinct()
+        kw = dict(home=str(self.home), config_home=str(self.config_home), registry={})
+        naive = {fleet_accounts.resolve_account(task_class="t1", **kw)["tag"]
+                 for _ in range(3)}
+        wave = {lane["tag"] for lane in fleet_accounts.allocate_wave(
+            3, task_class="t1", **kw)["lanes"]}
+        self.assertEqual(len(naive), 1, "naive burst piles all 3 lanes on one pool")
+        self.assertEqual(len(wave), 3, "wave gives 3 distinct pools = 3x the headroom")
+
+    def test_wave_excludes_duplicate_identity_dirs(self) -> None:
+        # Two dirs logged into ONE Anthropic account are ONE pool; a wave must not hand
+        # out both (that would re-collapse two lanes onto a single usage limit).
+        login_dir(self.home, ".claude-gem5-acct", uuid="uuid-5", email="gem5@x.ai")
+        login_dir(self.home, ".claude", uuid="uuid-5", email="gem5@x.ai")  # same account
+        login_dir(self.home, ".claude-gem8-acct", uuid="uuid-8", email="gem8@x.ai")
+        w = fleet_accounts.allocate_wave(
+            5, task_class="t1", home=str(self.home),
+            config_home=str(self.config_home), registry={})
+        self.assertEqual(w["granted"], 2, "3 dirs but only 2 distinct accounts")
+        pools = [lane["pool"] for lane in w["lanes"]]
+        self.assertEqual(sorted(pools), ["uuid:uuid-5", "uuid:uuid-8"])
+
+    def test_wave_lane_carries_full_resolve_record(self) -> None:
+        # Each lane is the flat resolve shape a front door pins (config_dir / oauth_token /
+        # tier), plus the pool key for distinctness auditing.
+        d = login_dir(self.home, ".claude-gem8-acct", uuid="uuid-8", email="gem8@x.ai")
+        (d / ".oauth-token").write_text("tok-8\n", encoding="utf-8")
+        w = fleet_accounts.allocate_wave(
+            1, task_class="t1", home=str(self.home),
+            config_home=str(self.config_home), registry={})
+        lane = w["lanes"][0]
+        for key in ("ok", "account", "tag", "product", "config_dir", "oauth_token",
+                    "selected_tier", "target_tier", "fallback_used", "pool"):
+            self.assertIn(key, lane)
+        self.assertEqual(lane["config_dir"], str(d))
+        self.assertEqual(lane["oauth_token"], "tok-8")
+        self.assertEqual(lane["selected_tier"], 1)
+        self.assertEqual(lane["pool"], "uuid:uuid-8")
+
+    def test_wave_skips_blocked_pool(self) -> None:
+        self._three_distinct()
+        reg = {"throttle": {".claude-gem7-acct": {"reset": "Dec 31, 11:59pm"}}}
+        w = fleet_accounts.allocate_wave(
+            3, task_class="t1", home=str(self.home),
+            config_home=str(self.config_home), registry=reg)
+        self.assertEqual(w["granted"], 2, "the throttled pool is not offered")
+        self.assertNotIn("gem7", {lane["tag"] for lane in w["lanes"]})
+        self.assertTrue(any(b.get("tag") == "gem7" for b in w["blocked_target_accounts"]))
+
+    def test_wave_respects_product_filter(self) -> None:
+        login_dir(self.home, ".claude-gem8-acct", uuid="uuid-8", email="gem8@x.ai")
+        opencode_dir(self.config_home, "opencode",
+                     config={"model": "zai-coding-plan/glm-5.2"})
+        claude_only = fleet_accounts.allocate_wave(
+            5, task_class="t1", product="claude", home=str(self.home),
+            config_home=str(self.config_home), registry={})
+        self.assertEqual({lane["product"] for lane in claude_only["lanes"]}, {"claude"})
+
+    def test_wave_zero_count_is_not_ok(self) -> None:
+        self._three_distinct()
+        w = fleet_accounts.allocate_wave(
+            0, task_class="t1", home=str(self.home),
+            config_home=str(self.config_home), registry={})
+        self.assertFalse(w["ok"])
+        self.assertEqual(w["granted"], 0)
+
+
 class IdentityReconciliationTest(unittest.TestCase):
     """The roster must see WHO each dir is logged into, not just its name -- so N dirs
     on one Anthropic account collapse to one routable worker."""

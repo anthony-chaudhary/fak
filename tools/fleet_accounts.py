@@ -53,6 +53,11 @@ CLI:
                                               # config_dir + oauth_token + tier (pin via
                                               # --account; dogfood via --faklocal-ok). The
                                               # single call every dispatch front door makes.
+    python tools/fleet_accounts.py wave --count 8 --explain  # allocate up to 8 DISTINCT
+                                              # available pools for a parallel fan-out (an
+                                              # ultracode wave); --explain prints the headroom
+                                              # multiplier (distinct_pools vs the naive 1).
+                                              # Omit --count for every distinct pool free now.
 """
 from __future__ import annotations
 
@@ -1372,6 +1377,148 @@ def resolve_account(pin: str | None = None, *, task_text: str = "",
         fallback_used=bool(route.get("fallback_used")))
 
 
+def _pool_key(row: dict) -> str:
+    """The RATE-LIMIT POOL a worker dir draws on -- the unit a wave must hand out
+    distinctly. Two Claude dirs logged into one Anthropic account share ONE usage
+    pool (their accountUuid), so they are the SAME pool even with different dir
+    names; that is the whole reason a wave keys on identity, not basename. A dir
+    with no login (or a non-Claude product with no uuid) is its own pool, keyed by
+    its dir basename."""
+    uuid = str(row.get("account_uuid") or "")
+    if uuid:
+        return f"uuid:{uuid}"
+    return f"dir:{row.get('account') or row.get('dir') or ''}"
+
+
+def allocate_wave(count: int, *, task_text: str = "", task_class: str = "auto",
+                  work_kind: str = "", product: str | None = None,
+                  allow_tier_fallback: bool = False, strict_tier: bool = False,
+                  home: str = USER, policy: dict | None = None,
+                  registry: dict | None = None,
+                  config_home: str | None = None) -> dict:
+    """Allocate up to ``count`` DISTINCT available accounts for a parallel fan-out
+    (an "ultracode" wave), balanced across the roster -- the primitive a wave needs
+    that single-account ``resolve_account`` cannot provide.
+
+    Why this exists. ``resolve_account`` picks the best ONE account, ranked by
+    fewest live sessions. A fan-out that calls it N times in a BURST gets the SAME
+    account N times, because no session has registered yet to move the live-load
+    tie-break -- so all N workers pile onto ONE rate-limit pool and the fan-out
+    silently SERIALIZES (witnessed: 3 calls -> the same tag thrice while 3 distinct
+    pools sat free). ``allocate_wave`` hands out DISTINCT pools in one call, so N
+    lanes draw on N independent per-account usage limits.
+
+    "Distinct" is by RATE-LIMIT POOL (``_pool_key``: the Anthropic ``accountUuid``
+    for a logged-in Claude dir, else the dir basename), never the dir name -- two
+    dirs on one account are one pool and must not both be handed out (that is the
+    same double-count the duplicate-identity reconciliation already guards, applied
+    to allocation). Duplicate-identity dirs are excluded up front via
+    ``routable_worker``.
+
+    Filling order mirrors ``route_account``: the target tier first (best quality),
+    each tier's pools ordered by ``_route_rank`` (operator room bias, then fewest
+    live, then fewest active). A tier-2 wave up-shifts into tier 1 to fill remaining
+    lanes unless ``strict_tier``; a tier-1 wave only spills into tier 2 when
+    ``allow_tier_fallback``. Every lane carries its own ``selected_tier`` and
+    ``fallback_used`` so a mixed-tier wave is legible.
+
+    Honest under-fill: if the roster can only safely back K < count distinct pools
+    right now, ``granted == K`` and ``shortfall == count - K`` -- never a silent
+    duplicate that would re-collapse two lanes onto one pool. ``distinct_pools`` (==
+    granted) is the wave's true concurrency multiplier vs the naive 1.
+
+    Returns a flat dict::
+
+        {ok, requested, granted, shortfall, distinct_pools, target_tier,
+         reason, lanes: [<resolve record + 'pool'>...], blocked_target_accounts}
+
+    Each ``lanes`` entry is the same flat shape ``resolve_account`` returns (so a
+    caller pins ``config_dir`` as CLAUDE_CONFIG_DIR and serves on ``oauth_token``),
+    plus a ``pool`` field carrying its ``_pool_key`` for distinctness auditing."""
+    pol = policy or load_policy()
+    n = max(0, int(count))
+
+    # Fold a stated work-kind into the routing class exactly as resolve_account does:
+    # an operator-stated kind (gardening/engineering) wins over the free-text heuristic.
+    cls, strict = task_class, strict_tier
+    wk = (work_kind or "").strip().lower()
+    if wk in GARDENING_WORK_KINDS or wk in ENGINEERING_WORK_KINDS:
+        cls, strict = wk, False
+
+    task = classify_task(task_text, cls, pol)
+    target = int(task["target_tier"])
+
+    rows = annotated_roster(home, pol, registry, config_home=config_home)
+    wanted_product = (product or "").lower()
+    workers = [
+        r for r in rows
+        if routable_worker(r)  # excludes duplicate-identity dirs (same pool as canonical)
+        and (not wanted_product or str(r.get("product") or "").lower() == wanted_product)
+    ]
+    available = [r for r in workers if r.get("available")]
+
+    # Tier fill order: target first, then the one permitted fallback tier -- identical
+    # policy to route_account, so a wave and a single resolve agree on what "tier 1 with
+    # fallback" means.
+    fallback_policy = str(pol.get("routing", {}).get("hard_tier1_fallback", "stop")).lower()
+    effective_allow_fallback = allow_tier_fallback or fallback_policy in (
+        "allow", "fallback", "tier2", "t2")
+    tier_order = [target]
+    if target == 2 and not strict:
+        tier_order.append(1)
+    elif effective_allow_fallback:
+        tier_order.append(2)
+
+    lanes: list[dict] = []
+    seen_pools: set[str] = set()
+    for tier in tier_order:
+        if len(lanes) >= n:
+            break
+        candidates = sorted(
+            (r for r in available if _as_int(r.get("model_tier"), 3) == tier),
+            key=_route_rank)
+        for r in candidates:
+            if len(lanes) >= n:
+                break
+            pool = _pool_key(r)
+            if pool in seen_pools:
+                continue  # a second dir on a pool already taken -> would re-serialize
+            seen_pools.add(pool)
+            lane = _flatten_resolved(
+                r, ok=True,
+                reason="wave lane (target tier)" if tier == target else "wave lane (fallback tier)",
+                selected_tier=r.get("model_tier"), target_tier=target,
+                fallback_used=tier != target)
+            lane["pool"] = pool
+            lanes.append(lane)
+
+    granted = len(lanes)
+    shortfall = max(0, n - granted)
+    blocked = [
+        _public_blocked(r) for r in workers
+        if _as_int(r.get("model_tier"), 3) == target and not r.get("available")
+    ]
+    if granted == 0:
+        reason = (f"no available account for a wave (target tier {target}"
+                  + (f", product {wanted_product}" if wanted_product else "") + ")")
+    elif shortfall:
+        reason = (f"granted {granted} of {n} distinct pools; {shortfall} short "
+                  f"(roster has no more distinct available pools at the requested tiers)")
+    else:
+        reason = f"granted {granted} distinct pools"
+    return {
+        "ok": granted > 0,
+        "requested": n,
+        "granted": granted,
+        "shortfall": shortfall,
+        "distinct_pools": granted,
+        "target_tier": target,
+        "reason": reason,
+        "lanes": lanes,
+        "blocked_target_accounts": blocked,
+    }
+
+
 def is_worker(account: str, home: str = USER, policy: dict | None = None) -> bool:
     """True iff ``account`` (a config-dir basename, any product) classifies as a worker.
 
@@ -1531,6 +1678,49 @@ def main(argv: list[str]) -> int:
             strict_tier=strict,
             faklocal_ok=_has_arg(argv, ("--faklocal-ok",)),
         )
+        print(json.dumps(doc, indent=1))
+        return 0 if doc.get("ok") else 1
+    elif mode == "wave":
+        # Allocate N DISTINCT available pools for a parallel fan-out (an ultracode wave).
+        # Same arg grammar as `resolve`, plus --count/-n N (omit -> every distinct pool
+        # free now). --explain reduces the output to the headroom witness: distinct_pools
+        # granted vs the naive 1, i.e. the fan-out's true concurrency multiplier.
+        tier, strict = _tier_arg(argv)
+        kind = _arg_value(argv, ("--work-kind", "--kind"), "").strip().lower()
+        task = _arg_value(argv, ("--task", "--goal", "--prompt"), "")
+        product = _arg_value(argv, ("--product",), "")
+        count_raw = _arg_value(argv, ("--count", "-n"), "")
+        explicit = bool(count_raw)
+        count = _as_int(count_raw, 0) if explicit else 10 ** 6
+        doc = allocate_wave(
+            count,
+            task_text=task,
+            task_class=tier,
+            work_kind=kind,
+            product=product or None,
+            allow_tier_fallback=_has_arg(argv, ("--allow-tier-fallback",)),
+            strict_tier=strict,
+        )
+        if not explicit:
+            # No count asked => report "all distinct pools available now", not a shortfall
+            # against the 10**6 sentinel.
+            doc["requested"] = doc["granted"]
+            doc["shortfall"] = 0
+            doc["reason"] = f"all {doc['granted']} distinct available pool(s)"
+        if _has_arg(argv, ("--explain",)):
+            doc = {
+                "ok": doc["ok"],
+                "requested": doc["requested"],
+                "granted": doc["granted"],
+                "shortfall": doc["shortfall"],
+                "distinct_pools": doc["distinct_pools"],
+                "target_tier": doc["target_tier"],
+                "naive_pools": 1 if doc["granted"] else 0,
+                "headroom_multiplier": doc["distinct_pools"],
+                "reason": doc["reason"],
+                "lane_tags": [l.get("tag") for l in doc["lanes"]],
+                "lane_pools": [l.get("pool") for l in doc["lanes"]],
+            }
         print(json.dumps(doc, indent=1))
         return 0 if doc.get("ok") else 1
     elif mode == "probe":
