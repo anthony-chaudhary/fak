@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/agent"
+	"github.com/anthony-chaudhary/fak/internal/journal"
 )
 
 // maxBody bounds an inbound request body (defense against an unbounded read from
@@ -38,6 +39,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/v1/fak/adjudicate", s.handleFakAdjudicate)
 	mux.HandleFunc("/v1/fak/admit", s.handleFakAdmit)
 	mux.HandleFunc("/v1/fak/changes", s.handleFakChanges)
+	mux.HandleFunc("/v1/fak/events", s.handleFakEvents)
 	mux.HandleFunc("/v1/fak/revoke", s.handleFakRevoke)
 	mux.HandleFunc("/v1/fak/context/change", s.handleFakContextChange)
 	mux.HandleFunc("/v1/fak/policy/reload", s.handleFakPolicyReload)
@@ -578,6 +580,61 @@ func (s *Server) handleFakChanges(w http.ResponseWriter, r *http.Request) {
 	}
 	events, cursor := s.changes(since)
 	writeJSON(w, http.StatusOK, ChangesResponse{Events: events, Cursor: cursor})
+}
+
+// activeJournal returns the process-global durable audit journal, or nil if
+// FAK_AUDIT_JOURNAL was unset at boot. Indirected through a var so a test can
+// inject an in-memory journal without process-global env setup.
+var activeJournal = journal.Active
+
+// EventsResponse is the drained durable audit-journal tail plus the client's next
+// cursor (mirrors ChangesResponse for the coherence feed).
+type EventsResponse struct {
+	Events []journal.Row `json:"events"`
+	Cursor uint64        `json:"cursor"`
+}
+
+// handleFakEvents drains the durable, hash-chained audit journal
+// (internal/journal) after the client's ?since= cursor — the Seq of the last row
+// it saw; 0 returns the whole retained tail. It mirrors the /v1/fak/changes
+// cursor protocol but over the persisted verdict ledger rather than the live
+// coherence bus. It serves the bounded in-memory tail without re-reading disk;
+// the full tamper-evident history is the on-disk JSONL. Returns 404 if no journal
+// is configured (FAK_AUDIT_JOURNAL unset at boot). GET or POST {"since":N}.
+func (s *Server) handleFakEvents(w http.ResponseWriter, r *http.Request) {
+	j := activeJournal()
+	if j == nil {
+		writeErr(w, http.StatusNotFound, "audit journal not enabled (set FAK_AUDIT_JOURNAL to a path)")
+		return
+	}
+	var since uint64
+	if r.Method == http.MethodPost {
+		var req ChangesRequest
+		if err := decodeJSON(w, r, &req); err != nil {
+			writeErr(w, http.StatusBadRequest, "malformed request body: "+err.Error())
+			return
+		}
+		since = req.Since
+	} else if v := r.URL.Query().Get("since"); v != "" {
+		n, err := strconv.ParseUint(v, 10, 64)
+		if err != nil {
+			writeErr(w, http.StatusBadRequest, "since must be a non-negative integer")
+			return
+		}
+		since = n
+	}
+	rows := j.Recent(0)
+	out := make([]journal.Row, 0, len(rows))
+	cursor := since
+	for _, row := range rows {
+		if row.Seq > since {
+			out = append(out, row)
+		}
+		if row.Seq > cursor {
+			cursor = row.Seq
+		}
+	}
+	writeJSON(w, http.StatusOK, EventsResponse{Events: out, Cursor: cursor})
 }
 
 // handleFakRevoke triggers a fleet-wide refutation of an external world-state witness.
