@@ -60,9 +60,19 @@ func RenderTrace(trace []traceEvent) []byte {
 	var b strings.Builder
 	b.WriteString("# fak agent per-call trace (fak arm then baseline arm)\n\n")
 	for _, e := range trace {
-		fmt.Fprintf(&b, "[turn %d] %-22s args=%s\n", e.Turn, e.Tool, oneLine(e.RawArgs, 80))
+		fmt.Fprintf(&b, "[%-8s turn %d] %-22s args=%s\n", e.Arm, e.Turn, e.Tool, oneLine(e.RawArgs, 80))
 		if e.Verdict != "" {
-			fmt.Fprintf(&b, "          verdict=%s\n", e.Verdict)
+			line := "          verdict=" + e.Verdict
+			if e.By != "" {
+				line += " by=" + e.By
+			}
+			if e.Reason != "" {
+				line += " reason=" + e.Reason
+			}
+			if e.Disposition != "" {
+				line += " disposition=" + e.Disposition
+			}
+			fmt.Fprintf(&b, "%s\n", line)
 		}
 		if e.Note != "" {
 			fmt.Fprintf(&b, "          note=%s\n", e.Note)

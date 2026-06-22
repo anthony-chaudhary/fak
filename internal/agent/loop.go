@@ -55,15 +55,59 @@ type RunResult struct {
 	BothCompleted bool       `json:"both_completed"` // the turn delta is comparable iff this is true
 	Live          bool       `json:"live"`           // true if a real network model drove it
 	Transcript    string     `json:"transcript_sha"` // hash of the fak-arm message log (live witness)
+	// Calls is the per-call decision trace for BOTH arms (fak arm first), embedded
+	// so a bad run is debuggable from the artifact alone — no separate --log file.
+	Calls []CallTrace `json:"calls,omitempty"`
 }
 
-// trace records one tool-call event for the human-readable run log.
+// trace records one tool-call event for the human-readable run log AND (via
+// toCallTrace) the structured per-call rows embedded in the JSON artifact.
 type traceEvent struct {
-	Turn    int
-	Tool    string
-	RawArgs string
-	Verdict string
-	Note    string
+	Turn        int
+	Arm         string // "fak" | "baseline"
+	Tool        string
+	RawArgs     string
+	Verdict     string // verdict KIND name (ALLOW/DENY/...) or "naive-exec" on the baseline arm
+	Reason      string // closed reason name on a deny ("" otherwise)
+	By          string // which rung decided ("" on the baseline arm)
+	Disposition string // RETRYABLE/WAIT/ESCALATE/TERMINAL on a deny
+	Note        string
+}
+
+// CallTrace is one tool call's adjudicated outcome, recorded per arm so a run is
+// debuggable straight from agent-report.json. The text run-log (RenderTrace) is
+// written only when --log is passed; these structured rows ALWAYS ride in the
+// artifact, so "which call got which verdict and why" never depends on an opt-in
+// side file. Args are a bounded preview, never embedded unbounded.
+type CallTrace struct {
+	Arm         string `json:"arm"`                   // "fak" | "baseline"
+	Turn        int    `json:"turn"`                  // 1-based model turn the call rode
+	Tool        string `json:"tool"`                  // the tool name the model emitted
+	Verdict     string `json:"verdict"`               // ALLOW/DENY/TRANSFORM/... or "naive-exec"
+	Reason      string `json:"reason,omitempty"`      // closed reason name on a deny
+	By          string `json:"by,omitempty"`          // which rung decided (fak arm)
+	Disposition string `json:"disposition,omitempty"` // deny loopback: RETRYABLE/WAIT/ESCALATE/TERMINAL
+	Args        string `json:"args,omitempty"`        // bounded preview of the call args
+	Note        string `json:"note,omitempty"`        // human annotation (vDSO hit / repaired / quarantined)
+}
+
+func (e traceEvent) toCallTrace() CallTrace {
+	return CallTrace{
+		Arm: e.Arm, Turn: e.Turn, Tool: e.Tool, Verdict: e.Verdict,
+		Reason: e.Reason, By: e.By, Disposition: e.Disposition,
+		Args: oneLine(e.RawArgs, 160), Note: e.Note,
+	}
+}
+
+func toCallTraces(evs []traceEvent) []CallTrace {
+	if len(evs) == 0 {
+		return nil
+	}
+	out := make([]CallTrace, 0, len(evs))
+	for _, e := range evs {
+		out = append(out, e.toCallTrace())
+	}
+	return out
 }
 
 // finalizeFak pulls the kernel-measured counters into the arm metrics. The fak
@@ -92,11 +136,14 @@ func execViaKernel(ctx context.Context, k *kernel.Kernel, tool, rawArgs string, 
 	}
 	tc := &abi.ToolCall{Tool: tool, Args: ref, Meta: metaFor(tool)}
 	r, v := k.Syscall(ctx, tc)
-	ev.Verdict = verdictName(v.Kind) + " by=" + v.By
+	ev.Verdict = verdictName(v.Kind)
+	ev.By = v.By
 	body := refBytes(ctx, r.Payload)
 
 	switch {
 	case v.Kind == abi.VerdictDeny:
+		ev.Reason = r.Meta["reason"]
+		ev.Disposition = r.Meta["disposition"]
 		ev.Note = "DENIED (deny-as-value): " + r.Meta["reason"] + "/" + r.Meta["disposition"]
 		// hand the model the structured deny so it can adapt without guessing.
 		dj, _ := json.Marshal(r.Meta)
@@ -168,6 +215,7 @@ func Run(ctx context.Context, p Planner, task string, maxTurns int) (*RunResult,
 	res.Transcript = hashEvents(fakLog)
 
 	full := append(fakLog, baseLog...)
+	res.Calls = toCallTraces(full)
 	return res, full, nil
 }
 
@@ -220,7 +268,7 @@ func RunArm(ctx context.Context, p Planner, task string, fak bool, maxTurns int,
 			tool := tc.Function.Name
 			rawArgs := tc.Function.Arguments
 			var content string
-			ev := traceEvent{Turn: turn + 1, Tool: tool, RawArgs: rawArgs}
+			ev := traceEvent{Turn: turn + 1, Arm: m.Arm, Tool: tool, RawArgs: rawArgs}
 			if fak {
 				content, ev = execViaKernel(ctx, k, tool, rawArgs, ev)
 			} else {
