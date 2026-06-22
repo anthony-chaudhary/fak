@@ -31,6 +31,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/gpulease"
 	"github.com/anthony-chaudhary/fak/internal/metalgemm"
 	"github.com/anthony-chaudhary/fak/internal/model"
+	"github.com/anthony-chaudhary/fak/internal/pathutil"
 	"github.com/anthony-chaudhary/fak/internal/tokenizer"
 )
 
@@ -45,6 +46,12 @@ func main() {
 	temp := flag.Float64("temp", 0, "sampling temperature (0 = greedy/argmax)")
 	seed := flag.Int64("seed", 1, "RNG seed for temperature sampling")
 	flag.Parse()
+
+	// Expand a leading ~ so `-hf ~/...`, `-gguf ~/...`, `-tok ~/...` open as intended
+	// (Go and most shells/PowerShell don't expand it for us).
+	*hf = pathutil.ExpandTilde(*hf)
+	*gguf = pathutil.ExpandTilde(*gguf)
+	*tokDir = pathutil.ExpandTilde(*tokDir)
 
 	if (*hf == "") == (*gguf == "") || *prompt == "" {
 		fmt.Fprintln(os.Stderr, "usage: fakchat (-hf <model-dir> | -gguf <model.gguf>) -p <prompt> [-tok <dir>] [-metal] [-n N] [-temp T]")

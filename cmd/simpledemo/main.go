@@ -39,6 +39,7 @@ import (
 
 	"github.com/anthony-chaudhary/fak/internal/ggufload"
 	"github.com/anthony-chaudhary/fak/internal/model"
+	"github.com/anthony-chaudhary/fak/internal/pathutil"
 	"github.com/anthony-chaudhary/fak/internal/tokenizer"
 )
 
@@ -57,8 +58,8 @@ func main() {
 	// Expand a leading ~ ourselves: Go's flag parsing and os.Open never do, and a
 	// quoted/PowerShell "-gguf ~/Downloads/model.gguf" reaches us as a literal "~"
 	// path that can't be opened (issue: "system cannot find the path specified").
-	*gguf = expandTilde(*gguf)
-	*tokDir = expandTilde(*tokDir)
+	*gguf = pathutil.ExpandTilde(*gguf)
+	*tokDir = pathutil.ExpandTilde(*tokDir)
 
 	// Try to auto-find a model if none specified
 	if *gguf == "" {
@@ -351,19 +352,6 @@ func tokenizerURLs() []string {
 		"https://huggingface.co/Qwen/Qwen2.5-0.5B-Instruct/resolve/main/tokenizer.json",
 		"https://hf-mirror.com/Qwen/Qwen2.5-0.5B-Instruct/resolve/main/tokenizer.json",
 	}
-}
-
-// expandTilde turns a leading "~" or "~/" (or "~\" on Windows) into the user's home
-// directory. The shell normally does this, but PowerShell and most quoting pass "~"
-// through literally, and neither Go's flag parsing nor os.Open expands it — so without
-// this "-gguf ~/Downloads/model.gguf" is read as a literal "~" directory and fails.
-func expandTilde(p string) string {
-	if p == "~" || strings.HasPrefix(p, "~/") || strings.HasPrefix(p, `~\`) {
-		if home, err := os.UserHomeDir(); err == nil {
-			return filepath.Join(home, p[1:])
-		}
-	}
-	return p
 }
 
 // ensureModelFile makes path exist, downloading the model named by its basename when

@@ -43,6 +43,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/metrics"
 	fakmodel "github.com/anthony-chaudhary/fak/internal/model"
 	"github.com/anthony-chaudhary/fak/internal/modelengine"
+	"github.com/anthony-chaudhary/fak/internal/pathutil"
 	"github.com/anthony-chaudhary/fak/internal/policy"
 	"github.com/anthony-chaudhary/fak/internal/recall"
 	"github.com/anthony-chaudhary/fak/internal/tokenizer"
@@ -1107,6 +1108,12 @@ func cmdServe(argv []string) {
 	tParse := time.Now()
 	_ = fs.Parse(argv)
 	parseDur := time.Since(tParse)
+
+	// Expand a leading ~ in the model/tokenizer paths: PowerShell and most quoting
+	// pass ~ through literally and Go never expands it, so `--gguf ~/...` (as the
+	// docs and the --tokenizer help itself show) would otherwise fail to open.
+	*ggufPath = pathutil.ExpandTilde(*ggufPath)
+	*tokPath = pathutil.ExpandTilde(*tokPath)
 
 	// --policy-check: validate the manifest and exit, binding no listener.
 	if *policyCheck {

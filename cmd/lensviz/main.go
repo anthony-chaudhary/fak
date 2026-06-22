@@ -33,6 +33,7 @@ import (
 
 	"github.com/anthony-chaudhary/fak/internal/ggufload"
 	"github.com/anthony-chaudhary/fak/internal/model"
+	"github.com/anthony-chaudhary/fak/internal/pathutil"
 	"github.com/anthony-chaudhary/fak/internal/tokenizer"
 )
 
@@ -47,6 +48,13 @@ func main() {
 	pos := flag.Int("pos", -1, "position to inspect (token index); -1 = last token (next-token prediction)")
 	htmlOut := flag.String("html", "", "also write the full layer×position heatmap to this HTML file")
 	flag.Parse()
+
+	// Expand a leading ~ in the path flags (Go/PowerShell don't), so `-hf ~/...`,
+	// `-gguf ~/...`, `-tok ~/...`, and `-html ~/out.html` resolve as intended.
+	*hf = pathutil.ExpandTilde(*hf)
+	*gguf = pathutil.ExpandTilde(*gguf)
+	*tokDir = pathutil.ExpandTilde(*tokDir)
+	*htmlOut = pathutil.ExpandTilde(*htmlOut)
 
 	if (*hf == "") == (*gguf == "") || *prompt == "" {
 		fmt.Fprintln(os.Stderr, "usage: lensviz (-hf <model-dir> | -gguf <model.gguf>) -p <prompt> [-tok <dir>] [-raw] [-k N] [-pos P] [-html out.html]")

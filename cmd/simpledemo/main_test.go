@@ -5,7 +5,6 @@ import (
 	"io"
 	"math/rand"
 	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -52,28 +51,6 @@ func TestModelDownloadDerivesURL(t *testing.T) {
 				t.Errorf("primary URL = %q, want suffix %q", urls[0], tc.canonical)
 			}
 		})
-	}
-}
-
-// TestExpandTilde pins ~ expansion: a leading ~ becomes $HOME, everything else is
-// untouched. This is what lets "-gguf ~/Downloads/model.gguf" find the file.
-func TestExpandTilde(t *testing.T) {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		t.Skipf("no home dir: %v", err)
-	}
-	cases := []struct{ in, want string }{
-		{"~/Downloads/model.gguf", filepath.Join(home, "Downloads", "model.gguf")},
-		{"~", home},
-		{"", ""},
-		{"/abs/path/model.gguf", "/abs/path/model.gguf"},
-		{"relative/model.gguf", "relative/model.gguf"},
-		{"a/~/b", "a/~/b"}, // ~ only expands as a prefix, never mid-path
-	}
-	for _, tc := range cases {
-		if got := expandTilde(tc.in); got != tc.want {
-			t.Errorf("expandTilde(%q) = %q, want %q", tc.in, got, tc.want)
-		}
 	}
 }
 
