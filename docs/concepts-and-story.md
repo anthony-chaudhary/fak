@@ -1,3 +1,8 @@
+---
+title: "fak Concepts & Story — Trust Layer for AI Agents"
+description: "The long-form story of fak: a default-deny capability floor plus result quarantine that makes tool-using AI agents behave like untrusted programs."
+---
+
 # fak — concepts & story (the unabridged front door)
 
 > This is the long-form companion to the [top-level README](../README.md). The README
@@ -51,7 +56,13 @@ which action was allowed, denied, quarantined, or replayed.
 For a **platform team**, `fak` is not trying to replace every model server. Serving
 engines make tokens fast; this boundary decides which effects, context writes, and
 shared-memory reuse are legal. It can front an existing OpenAI-compatible endpoint and
-still own the agentic control plane.
+still own the agentic control plane — and it does so as **one static Go binary**, not a
+sidecar fleet. The governance half of a governed-serving stack — the OpenAI/Anthropic/MCP
+wires, the capability floor, result quarantine, the trace-correlated audit log, auth, and
+Prometheus metrics — lives in a single process you deploy once, monitor once, and upgrade
+once, with no Python/CUDA toolchain and no dependency tree to manage. The same binary a
+developer runs on a laptop is the one you harden for a fleet; you add flags, not
+components. → [One binary is the whole surface](explainers/one-binary-one-surface.md).
 
 For a **researcher**, the interesting problem is coherence. The prompt is one view of an
 agent's address space. A tool result is a write into that address space. A reused tool

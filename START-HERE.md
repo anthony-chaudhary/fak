@@ -54,11 +54,13 @@ AI: Imagine a regular computer is like a light switch — it's either ON (1) or 
 
 ## What is fak?
 
-**fak** sits between your AI agents and the tools they call, and does two jobs:
+**fak** is **one Go binary** that sits between your AI agents and the tools they call.
+Everything runs inside that one process — the permission gate, the cache, the quarantine,
+the metrics — so there are no sidecars, no separate authorizer, and no multi-tier ops:
 
-- **Cheaper for fleets** — does the shared setup work once instead of every turn
+- **Self-contained** — one static Go binary, zero external dependencies, no complex setup
 - **Safer** — puts every action behind a permission gate the model can't talk past
-- **Self-contained** — one Go binary, no complex setup
+- **Cheaper for fleets** — does the shared setup work once instead of every turn
 
 For fleets of AI agents that share setup (long system prompts, tool lists), the savings
 compound: the first agent pays for the shared work, everyone after reads it for free.

@@ -5,8 +5,11 @@ this page gets you from a clean checkout to a running kernel — and to serving 
 behind it — with copy-pasteable commands that were run on a clean build before being
 written down.
 
-`fak` is **one Go binary**. There are four things you can do with it, in rising order
-of setup cost:
+`fak` is **one Go binary** — a single static artifact with zero external dependencies (no
+Python, no CUDA toolchain, no `go.sum`). That one binary *is* the whole governed-serving
+surface: the gateway, the policy gate, the result quarantine, and the audit/metrics
+surface in a single process. There are four things you can do with it, in rising order of
+setup cost — and **nothing new gets installed between them**:
 
 | Tier | What you get | Setup | Downloads |
 |---|---|---|---|

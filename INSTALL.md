@@ -1,7 +1,9 @@
 # Installing `fak`
 
 `fak` is the agent tool firewall (the Fused Agent Kernel) — one static Go binary you
-put in front of your model so every tool call is adjudicated before it runs. This page
+put in front of your model so every tool call is adjudicated before it runs. It has
+**zero external dependencies** (standard library only — there is no `go.sum`, no Python,
+no CUDA toolchain), so "install" really is just *get the binary onto the box*. This page
 is for an **external adopter**: you want `fak` on your machine or in your production
 image **without cloning the monorepo**.
 
@@ -126,7 +128,10 @@ For "put `fak` in front of my model in production", build the image from the
 [`Dockerfile`](Dockerfile) at the repo root. It's a two-stage build: the pure-Go binary
 is compiled static (`CGO_ENABLED=0`) and copied into a `distroless/static` base, so the
 final image is just that base plus one ~13 MB binary — no shell, no package manager, no
-libc, running as nonroot.
+libc, running as nonroot. (That's the *governance surface*. A GPU token engine like vLLM
+or SGLang ships a multi-GB image — roughly 8–12 GB compressed in current tags — because it
+bundles CUDA and PyTorch by design. `fak` *fronts* that engine rather than containing it,
+so its own image stays tiny and cold-starts instantly.)
 
 ```sh
 docker build -t fak .

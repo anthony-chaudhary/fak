@@ -37,6 +37,25 @@ context) also drives **performance** (do shared work once instead of every turn)
 > **In one line:** prompt-injection containment, capability security, and
 > cache-efficient inference for **self-hosted LLM agent fleets** — at one boundary.
 
+<!-- firewall explainer video — the boundary / how-it-works story (P1) as a ~44s reveal,
+     built by tools/hero_video_gen.py from the in-repo deterministic diagrams (nothing
+     generated). Same /visuals raw-URL convention as the hero video above. -->
+<div align="center">
+  <video
+    src="https://raw.githubusercontent.com/anthony-chaudhary/fak/main/visuals/agent-firewall-video.mp4"
+    poster="https://raw.githubusercontent.com/anthony-chaudhary/fak/main/visuals/agent-firewall-video-poster.png"
+    autoplay loop muted playsinline preload="metadata"
+    width="100%" style="max-width:960px;border-radius:12px"
+    aria-label="fak — the agent tool firewall: a ~44 second explainer reveal — the firewall card, the tool call as a syscall, the five-gate flow through the kernel, the two-gate security model, the Context MMU, shared-prefix KV, and the 2-D scheduler">
+    <img
+      src="https://raw.githubusercontent.com/anthony-chaudhary/fak/main/visuals/agent-firewall-video.gif"
+      alt="fak agent tool firewall — an animated ~44-second explainer"
+      width="100%" style="max-width:960px;border-radius:12px"/>
+  </video>
+  <br/>
+  <sub>How the boundary works — the agent tool firewall as a ~44-second reveal · <a href="https://raw.githubusercontent.com/anthony-chaudhary/fak/main/visuals/agent-firewall-video.mp4">full-resolution MP4</a></sub>
+</div>
+
 [**▶ Try the live demos**](demos.html){: .btn } ·
 [Get started](../GETTING-STARTED.md){: .btn } ·
 [See the showcase](showcase.html){: .btn } ·

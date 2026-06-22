@@ -1,9 +1,16 @@
+---
+title: "fak CLI Reference — Verbs of the Agent Kernel"
+description: "The fak CLI reference: every verb (serve, run, preflight, bench, turntax, agent, recall, dream, debug, policy, hook) for the in-process agent kernel."
+---
+
 # fak — the agent kernel
 
 `fak` is the runnable implementation of the Fused Agent Kernel: one Go binary
-that puts a policy and quarantine boundary between an AI agent and its tools.
-The practical use is gateway-first: keep your existing model or agent host, front
-it with `fak serve`, and make tool calls cross a reviewable capability floor
+that puts a policy and quarantine boundary between an AI agent and its tools — with
+zero external dependencies, so the gateway, the capability gate, the quarantine, the
+audit log, and the metrics all live in that single process (no Python/CUDA stack, no
+sidecars). The practical use is gateway-first: keep your existing model or agent host,
+front it with `fak serve`, and make tool calls cross a reviewable capability floor
 before anything dangerous executes.
 
 Under the hood, every tool call becomes a syscall-like request: adjudicated

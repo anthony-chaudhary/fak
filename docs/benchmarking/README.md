@@ -4,6 +4,12 @@
 > **[`fak/BENCHMARK-AUTHORITY.md`](../../BENCHMARK-AUTHORITY.md)**. Every claim
 > traces back to a commit and artifact file. Start there for authoritative numbers.
 
+> **Want to run them yourself?** The
+> **[fleet benchmark suite explainer](../explainers/fleet-benchmarks.md)** walks through
+> the five model-agnostic fleet demos (`fanbench`, `fleetbench`, `fak turntax`,
+> `radixbench`, `ctxdemo`) with one reproduce command each — no GPU, no model weights, no
+> API key — and the honest baseline for every headline number.
+
 This index organizes all benchmark-related documentation across the repo.
 
 ---
