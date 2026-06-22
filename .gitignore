@@ -295,10 +295,14 @@ gpucheck_wsl
 # internal/turnbench/stochastic_test.go writes experiments/turn-tax/turntax-{stochastic,
 # breakeven}.json (and reads them back as its own fixtures — "a new file" per the test),
 # and internal/kvmmu/kvmmu_test.go drops a kvmmu-report.json. Same regenerable-bench-output
-# class as /turntax-report.json above; ignore the whole report dirs so re-running the
+# class as /turntax-report.json above; ignore the regenerable *.json so re-running the
 # suite (any seed bump, any clone) leaves git status quiet. The .go SOURCES stay tracked.
-/experiments/turn-tax/
-/experiments/kvmmu/
+# Glob the .json class only (NOT the directory): a dir-slash ignore can't be re-included
+# from, but curated artifacts here — e.g. turntax-breakeven.png, produced by
+# tools/turntax_plot.py and CITED by TURN-TAX-RESULTS.md — must stay committable so the
+# ship-iff-cited gate (tools/public_evidence_manifest.py --check) can see them in CI.
+/experiments/turn-tax/*.json
+/experiments/kvmmu/*.json
 
 # --- scrub/adjudication session scratch (node-local; never commit) ----------------
 # .adjudicate/ holds one-off diffs + copies of the PRIVATE `fleet` repo's scrub
