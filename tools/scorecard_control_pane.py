@@ -1,0 +1,371 @@
+#!/usr/bin/env python3
+"""Unified scorecard debt control-pane — fold every *-debt into one tracked trend.
+
+The repo has seven deterministic scorecards, each emitting a debt integer plus a
+control-pane payload (``schema/ok/verdict/finding/reason/next_action``): docs,
+code, doc-appeal, seo, demo-quality, demo-robustness, repo-hygiene. They run
+independently and advisory. Nothing folds {doc_debt, code_debt, appeal_debt,
+seo_debt, demo_debt, robustness_debt, hygiene_debt} into one number, pins a
+per-metric baseline, and shows the trend commit-over-commit.
+
+This is that fold — the RSI checking layer for the whole scorecard family. It
+runs each scorecard, extracts the debt integer + grade, sums one portfolio
+``total_debt``, and compares against a pinned per-metric baseline so the answer
+to "is the repo getting better or worse" is one query.
+
+  python tools/scorecard_control_pane.py            # human snapshot + trend
+  python tools/scorecard_control_pane.py --json      # machine payload
+  python tools/scorecard_control_pane.py --pin       # pin today's debt as the baseline
+
+The baseline lives in a tracked file (``tools/scorecard_baseline.json``) so the
+trend is commit-over-commit and shared: re-pin after a debt drop to ratchet it
+down. Pure-stdlib Python, repo root like the other honesty gates. Issue #509.
+"""
+from __future__ import annotations
+
+import argparse
+import json
+import subprocess
+import sys
+from pathlib import Path
+from typing import Any
+
+SCHEMA = "fak-scorecard-control-pane/1"
+BASELINE_SCHEMA = "fak-scorecard-control-pane.baseline/1"
+BASELINE_REL = "tools/scorecard_baseline.json"
+
+# The scorecard family, in the canonical order the issue lists them. Each entry
+# binds the scorecard's script to the debt integer it emits; the runner folds
+# every debt key into one portfolio number.
+SCORECARDS: list[dict[str, str]] = [
+    {"key": "doc", "debt": "doc_debt", "script": "docs_scorecard.py", "label": "docs"},
+    {"key": "code", "debt": "code_debt", "script": "code_quality_scorecard.py", "label": "code"},
+    {"key": "appeal", "debt": "appeal_debt", "script": "doc_appeal_scorecard.py", "label": "doc-appeal"},
+    {"key": "seo", "debt": "seo_debt", "script": "seo_aeo_scorecard.py", "label": "seo"},
+    {"key": "demo", "debt": "demo_debt", "script": "demo_quality_scorecard.py", "label": "demo-quality"},
+    {"key": "robustness", "debt": "robustness_debt", "script": "demo_robustness_scorecard.py", "label": "demo-robustness"},
+    {"key": "hygiene", "debt": "hygiene_debt", "script": "repo_hygiene_scorecard.py", "label": "repo-hygiene"},
+]
+
+
+def repo_root(start: Path | None = None) -> Path:
+    here = (start or Path(__file__)).resolve()
+    return here.parent.parent
+
+
+def _git_line(args: list[str], root: Path) -> str:
+    try:
+        p = subprocess.run(["git", *args], cwd=str(root), capture_output=True,
+                           text=True, timeout=30)
+    except (OSError, subprocess.SubprocessError):
+        return ""
+    if p.returncode != 0:
+        return ""
+    return p.stdout.strip()
+
+
+def head_commit(root: Path) -> str:
+    return _git_line(["rev-parse", "--short", "HEAD"], root) or "unknown"
+
+
+# --- pure extraction / folding (the tested surface) ------------------------
+
+def find_int(payload: Any, key: str) -> int | None:
+    """First int value stored under ``key`` anywhere in the payload.
+
+    The debt integer lives under ``corpus.<debt>`` for most scorecards and
+    ``doc.<debt>`` for doc-appeal; a tolerant search keeps the fold from caring
+    which nesting a given scorecard chose.
+    """
+    if isinstance(payload, dict):
+        for nest in ("corpus", "doc"):
+            sub = payload.get(nest)
+            if isinstance(sub, dict) and isinstance(sub.get(key), bool) is False \
+                    and isinstance(sub.get(key), int):
+                return int(sub[key])
+        val = payload.get(key)
+        if isinstance(val, int) and not isinstance(val, bool):
+            return int(val)
+        for v in payload.values():
+            got = find_int(v, key)
+            if got is not None:
+                return got
+    elif isinstance(payload, list):
+        for v in payload:
+            got = find_int(v, key)
+            if got is not None:
+                return got
+    return None
+
+
+def find_grade(payload: Any) -> str | None:
+    """The portfolio grade a scorecard reports at corpus/doc level, if any."""
+    if isinstance(payload, dict):
+        for nest in ("corpus", "doc"):
+            sub = payload.get(nest)
+            if isinstance(sub, dict) and isinstance(sub.get("grade"), str):
+                return str(sub["grade"])
+        if isinstance(payload.get("grade"), str):
+            return str(payload["grade"])
+    return None
+
+
+def metric_from_payload(card: dict[str, str], payload: dict[str, Any] | None,
+                        error: str = "") -> dict[str, Any]:
+    debt_key = card["debt"]
+    if error or not isinstance(payload, dict):
+        return {
+            "key": card["key"],
+            "label": card["label"],
+            "debt_key": debt_key,
+            "debt": None,
+            "grade": None,
+            "ok": False,
+            "verdict": "ERROR",
+            "error": error or "no payload",
+        }
+    debt = find_int(payload, debt_key)
+    return {
+        "key": card["key"],
+        "label": card["label"],
+        "debt_key": debt_key,
+        "debt": debt,
+        "grade": find_grade(payload),
+        "ok": bool(payload.get("ok")),
+        "verdict": str(payload.get("verdict") or ""),
+        "error": "" if debt is not None else f"missing {debt_key} in payload",
+    }
+
+
+def fold(metrics: list[dict[str, Any]], baseline: dict[str, Any] | None,
+         *, workspace: str, commit: str) -> dict[str, Any]:
+    """Fold per-scorecard metrics into one control-pane payload + trend."""
+    measured = [m for m in metrics if isinstance(m.get("debt"), int)]
+    errors = [m for m in metrics if not isinstance(m.get("debt"), int)]
+    total_debt = sum(int(m["debt"]) for m in measured)
+
+    trend = compute_trend(metrics, baseline, total_debt)
+
+    by_debt = sorted(measured, key=lambda m: int(m["debt"]), reverse=True)
+    breakdown = ", ".join(f"{m['label']} {m['debt']}" for m in by_debt) or "none"
+
+    regressed = trend["direction"] == "regressed"
+    if errors:
+        ok, verdict, finding = False, "ACTION", "scorecard_unmeasured"
+        reason = (f"{len(errors)} scorecard(s) failed to report a debt integer "
+                  f"({', '.join(m['label'] for m in errors)}); portfolio debt "
+                  f"{total_debt} across {len(measured)} measured")
+        next_action = ("repair the failing scorecard(s) so the fold is complete; "
+                       "re-run python tools/scorecard_control_pane.py")
+    elif regressed:
+        ok, verdict, finding = False, "ACTION", "scorecard_regressed"
+        reason = (f"portfolio debt rose {trend['total_delta']:+d} to {total_debt} "
+                  f"vs baseline @{trend['baseline_commit']} ({breakdown}); "
+                  f"worsened: {', '.join(trend['worsened']) or 'see deltas'}")
+        next_action = ("retire the regressed metric(s) worst-first with the owning "
+                       "scorecard's skill, then re-pin: "
+                       "python tools/scorecard_control_pane.py --pin")
+    elif total_debt > 0:
+        ok, verdict, finding = False, "ACTION", "scorecard_debt"
+        reason = (f"portfolio debt {total_debt} across {len(measured)} scorecards "
+                  f"({breakdown}); trend {trend['summary']}")
+        next_action = ("retire debt worst-first (heaviest: "
+                       f"{by_debt[0]['label']} {by_debt[0]['debt']}) with that "
+                       "scorecard's skill; re-run to prove the portfolio drop")
+    else:
+        ok, verdict, finding = True, "OK", "all_clear"
+        reason = (f"zero portfolio debt across {len(measured)} scorecards; "
+                  f"trend {trend['summary']}")
+        next_action = "hold the line; re-pin the baseline to lock the clean state"
+
+    return {
+        "schema": SCHEMA,
+        "ok": ok,
+        "verdict": verdict,
+        "finding": finding,
+        "reason": reason,
+        "next_action": next_action,
+        "workspace": workspace,
+        "commit": commit,
+        "total_debt": total_debt,
+        "measured": len(measured),
+        "errored": len(errors),
+        "metrics": metrics,
+        "trend": trend,
+    }
+
+
+def compute_trend(metrics: list[dict[str, Any]], baseline: dict[str, Any] | None,
+                  total_debt: int) -> dict[str, Any]:
+    """Per-metric + portfolio delta vs a pinned baseline."""
+    base_metrics = {}
+    base_commit = ""
+    base_total = None
+    if isinstance(baseline, dict):
+        base_metrics = baseline.get("metrics") or {}
+        base_commit = str(baseline.get("commit") or "")
+        bt = baseline.get("total_debt")
+        base_total = int(bt) if isinstance(bt, int) and not isinstance(bt, bool) else None
+
+    if not base_metrics or base_total is None:
+        return {
+            "direction": "unpinned",
+            "summary": "unpinned (no baseline; run --pin)",
+            "total_delta": 0,
+            "baseline_commit": base_commit,
+            "baseline_total": base_total,
+            "deltas": {},
+            "worsened": [],
+            "improved": [],
+        }
+
+    deltas: dict[str, int] = {}
+    worsened: list[str] = []
+    improved: list[str] = []
+    for m in metrics:
+        if not isinstance(m.get("debt"), int):
+            continue
+        prior = base_metrics.get(m["key"])
+        if not isinstance(prior, int) or isinstance(prior, bool):
+            continue
+        delta = int(m["debt"]) - int(prior)
+        deltas[m["key"]] = delta
+        if delta > 0:
+            worsened.append(m["label"])
+        elif delta < 0:
+            improved.append(m["label"])
+
+    total_delta = total_debt - base_total
+    if total_delta > 0:
+        direction = "regressed"
+    elif total_delta < 0:
+        direction = "improved"
+    else:
+        direction = "flat"
+    summary = (f"{direction} {total_delta:+d} vs @{base_commit or 'baseline'} "
+               f"(was {base_total}, now {total_debt})")
+    return {
+        "direction": direction,
+        "summary": summary,
+        "total_delta": total_delta,
+        "baseline_commit": base_commit,
+        "baseline_total": base_total,
+        "deltas": deltas,
+        "worsened": worsened,
+        "improved": improved,
+    }
+
+
+def baseline_doc(payload: dict[str, Any]) -> dict[str, Any]:
+    """The baseline file body to pin from a folded control-pane payload."""
+    metrics = {
+        m["key"]: int(m["debt"])
+        for m in payload.get("metrics", [])
+        if isinstance(m.get("debt"), int)
+    }
+    return {
+        "schema": BASELINE_SCHEMA,
+        "commit": payload.get("commit", ""),
+        "total_debt": payload.get("total_debt", 0),
+        "metrics": metrics,
+        "_doc": ("Pinned per-metric scorecard-debt baseline for the unified "
+                 "control pane. Re-pin after a debt drop to ratchet the trend down: "
+                 "python tools/scorecard_control_pane.py --pin"),
+    }
+
+
+# --- live runner -----------------------------------------------------------
+
+def run_scorecard(root: Path, script: str, *, python: str, timeout: int) -> tuple[dict[str, Any] | None, str]:
+    script_path = root / "tools" / script
+    if not script_path.exists():
+        return None, f"missing scorecard: tools/{script}"
+    try:
+        proc = subprocess.run(
+            [python, str(script_path), "--json"],
+            cwd=str(root), capture_output=True, text=True,
+            encoding="utf-8", errors="replace", timeout=timeout,
+        )
+    except subprocess.TimeoutExpired:
+        return None, f"timed out after {timeout}s"
+    except (OSError, subprocess.SubprocessError) as exc:
+        return None, str(exc)
+    try:
+        return json.loads(proc.stdout), ""
+    except ValueError:
+        tail = (proc.stderr or proc.stdout or "").strip().splitlines()[-1:] or [""]
+        return None, f"non-JSON output (exit {proc.returncode}): {tail[0][:160]}"
+
+
+def collect(root: Path, *, python: str = "", timeout: int = 120) -> list[dict[str, Any]]:
+    python = python or sys.executable
+    metrics: list[dict[str, Any]] = []
+    for card in SCORECARDS:
+        payload, error = run_scorecard(root, card["script"], python=python, timeout=timeout)
+        metrics.append(metric_from_payload(card, payload, error))
+    return metrics
+
+
+def load_baseline(path: Path) -> dict[str, Any] | None:
+    try:
+        doc = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    return doc if isinstance(doc, dict) else None
+
+
+def render(payload: dict[str, Any]) -> str:
+    lines = [
+        f"scorecard control pane — {payload['verdict']} ({payload['finding']})",
+        f"  portfolio debt: {payload['total_debt']}  "
+        f"({payload['measured']} measured, {payload['errored']} errored)  @{payload['commit']}",
+        f"  trend: {payload['trend']['summary']}",
+        "",
+    ]
+    for m in payload["metrics"]:
+        debt = m["debt"] if m["debt"] is not None else f"ERR ({m['error']})"
+        grade = f" [{m['grade']}]" if m.get("grade") else ""
+        lines.append(f"  {m['label']:<16} {m['debt_key']:<16} {debt}{grade}")
+    lines.extend(["", f"  → {payload['next_action']}"])
+    return "\n".join(lines)
+
+
+def main(argv: list[str] | None = None) -> int:
+    ap = argparse.ArgumentParser(description="Unified scorecard debt control-pane (read-only unless --pin).")
+    ap.add_argument("--workspace", default="", help="workspace root (default: repo root)")
+    ap.add_argument("--json", action="store_true", help="emit machine-readable JSON")
+    ap.add_argument("--pin", action="store_true",
+                    help=f"pin the current debt as the baseline ({BASELINE_REL})")
+    ap.add_argument("--baseline", default="", help=f"baseline JSON path (default: {BASELINE_REL})")
+    ap.add_argument("--timeout", type=int, default=120, help="per-scorecard timeout seconds")
+    args = ap.parse_args(argv)
+
+    try:
+        sys.stdout.reconfigure(encoding="utf-8")  # type: ignore[attr-defined]
+    except Exception:  # noqa: BLE001
+        pass
+
+    root = Path(args.workspace).resolve() if args.workspace else repo_root()
+    baseline_path = Path(args.baseline).resolve() if args.baseline else (root / BASELINE_REL)
+
+    metrics = collect(root, timeout=args.timeout)
+    baseline = load_baseline(baseline_path)
+    payload = fold(metrics, baseline, workspace=str(root), commit=head_commit(root))
+
+    if args.pin:
+        doc = baseline_doc(payload)
+        baseline_path.parent.mkdir(parents=True, exist_ok=True)
+        baseline_path.write_text(json.dumps(doc, indent=2) + "\n", encoding="utf-8")
+        if not args.json:
+            print(f"pinned baseline @{doc['commit']} total_debt={doc['total_debt']} -> {baseline_path}")
+
+    if args.json:
+        print(json.dumps(payload, indent=2))
+    elif not args.pin:
+        print(render(payload))
+
+    return 0 if payload.get("ok") else 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

@@ -256,6 +256,25 @@ jobs:
             || echo "::warning title=hygiene-debt::repo hygiene-debt present (advisory) — see docs/REPO-HYGIENE-SCORECARD.md; retire worst-first (consolidate dupes, clear root clutter, move dated docs to docs/notes/, index orphans, cut AI-tells), then re-arm the HARD gate"
           echo "::endgroup::"
 
+      # Scorecard control pane: the RSI checking layer for the whole scorecard
+      # family. The six gates above each emit ONE debt integer (doc/code/appeal/
+      # seo/demo/robustness/hygiene); none folds them into a single portfolio
+      # number, pins a per-metric baseline, and shows the commit-over-commit
+      # trend. This aggregator does — so "is the repo getting better or worse"
+      # is one query. Same two tiers as its siblings:
+      #   * the tool's own unit tests are HARD (a real regression suite);
+      #   * the folded aggregate is ADVISORY (it sums the advisory siblings, so
+      #     portfolio-debt is > 0 while the family is retired); surfaced as a
+      #     ::warning:: with the trend vs the pinned baseline. Pure-stdlib Python.
+      - name: scorecard control pane (folds every *-debt + trend; tests HARD, aggregate advisory)
+        working-directory: ${{ github.workspace }}
+        run: |
+          python tools/scorecard_control_pane_test.py
+          echo "::group::scorecard-control-pane (advisory; folds the family + trend vs baseline)"
+          python tools/scorecard_control_pane.py \
+            || echo "::warning title=scorecard-debt::portfolio scorecard-debt present (advisory) — python tools/scorecard_control_pane.py; retire worst-first with the owning scorecard's skill, then re-pin the baseline (--pin)"
+          echo "::endgroup::"
+
       # Public-copy leak gate: the machine backstop for the redact-needle floor.
       # The local pre-commit hook (tools/githooks/pre-commit) only fires on a clone
       # that ran `install_trunk_guard.py`; an un-armed clone — or any path that

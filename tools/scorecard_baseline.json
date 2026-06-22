@@ -1,0 +1,15 @@
+{
+  "schema": "fak-scorecard-control-pane.baseline/1",
+  "commit": "7978fcd",
+  "total_debt": 44,
+  "metrics": {
+    "doc": 16,
+    "code": 10,
+    "appeal": 4,
+    "seo": 6,
+    "demo": 3,
+    "robustness": 0,
+    "hygiene": 5
+  },
+  "_doc": "Pinned per-metric scorecard-debt baseline for the unified control pane. Re-pin after a debt drop to ratchet the trend down: python tools/scorecard_control_pane.py --pin"
+}
