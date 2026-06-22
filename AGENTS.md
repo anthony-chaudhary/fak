@@ -62,7 +62,23 @@ later runs are instant. Full walkthrough: [`docs/repro-packet.md`](docs/repro-pa
 
 - **Work directly on the trunk (`main`). Never open a feature branch or new worktree.**
   The trunk guard *refuses* off-trunk commits (the `OFF_TRUNK` law). A dirty/diverged
-  tree means pull/merge in place or STOP — never escape into a side branch.
+  tree means reconcile **in place** or STOP — never escape into a side branch.
+  - *Diverged trunk (`git status` says "have diverged"):* `git fetch origin main`, then
+    `git merge origin/main` **in place** and resolve. This is a shared trunk — peers
+    routinely build the SAME feature under a different SHA, so most conflicts resolve to
+    the trunk **superset** and the merged tree often equals HEAD (verify:
+    `git diff --cached` is empty). Finish with a plain `git commit -s` — the merge commits
+    the index as-is; never `-a` / `git add -A`, which would sweep a peer's files into your
+    merge. Prefer **merge over rebase**: rebase replays every local commit and re-hits the
+    same conflict N times; merge resolves it once. After a clean `git push` the pushed tip
+    may sit *ahead* of your commit — a peer landed on the shared ref between commit and
+    push; that's expected, not a force.
+  - *A merge is mid-flight* (`git rev-parse -q --verify MERGE_HEAD` prints a SHA): a
+    path-scoped `git commit -- <paths>` then fails with *"cannot do a partial commit during
+    a merge."* If it is **your** merge, finish it promptly — peers are blocked until
+    `MERGE_HEAD` clears. If it is a **peer's**, do NOT abort or complete it:
+    `git restore --staged` your files, leave edits in the working tree, and wait for
+    `MERGE_HEAD` to clear, then commit by explicit path.
 - **Commit by explicit path** — `git commit -- <paths>`, never `git add -A`. This is a
   shared multi-session tree; never stage a peer's uncommitted files.
 - **Sign off every commit** — `git commit -s` (DCO). Use a Conventional-Commits subject
