@@ -67,6 +67,30 @@ roofline shows where), decode is bandwidth-bound (the `GiB/token` stream sets it
 
 ---
 
+## Scope — what this demo does and does not claim
+
+This demo shows one thing: **fak's in-kernel model engine** running a small GGUF model
+end to end, with every speed and memory number measured this run or counted from the
+model shape.
+
+It does **not** claim:
+
+- **It is not the security gate.** This binary only runs the model — it wires no policy,
+  tool-calling, or capability enforcement. fak's agent permission gate is a separate,
+  load-bearing layer ([the security model](../../docs/fak/security.md)); this demo neither
+  exercises nor proves it. To see the gate, run the [adjudication demo](../../examples/adjudication-demo/README.md).
+- **It is not a quality benchmark.** A 0.5B–3B model is the *point* (it runs on a laptop
+  with no GPU), so answers are limited — expect simple-prompt competence, not deep
+  reasoning, long-context recall, or reliable factual knowledge. The
+  [model table](#model-recommendations) and [Tips for Small Models](#tips-for-small-models)
+  below are the honest expectation-setters.
+- **The numbers describe *this* run on *your* box.** tok/s and GB/s are measured live and
+  vary with your CPU, threads, and model; they are not a portable performance claim.
+
+For the limits of fak as a whole, see the [FAQ](../../docs/fak/faq.md).
+
+---
+
 ## Commands
 
 | Command | What It Does |
@@ -176,6 +200,6 @@ This demo uses **fak's in-kernel model engine**:
 
 ## What's Next?
 
-- Explore the full fak system: `fak/GETTING-STARTED.md`
-- Learn about tool-calling agents: `docs/cli-reference.md`
+- Explore the full fak system: [GETTING-STARTED.md](../../GETTING-STARTED.md)
+- Learn about tool-calling agents (the gate this demo skips): [the CLI reference](../../docs/cli-reference.md)
 - Try different models from [HuggingFace](https://huggingface.co/models?search=gguf qwen2.5 instruct)

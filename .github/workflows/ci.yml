@@ -169,6 +169,26 @@ jobs:
             || echo "::warning title=docs-debt::reader-surface doc-debt present (advisory) — run /garden-docs, see docs/DOCS-SCORECARD.md"
           echo "::endgroup::"
 
+      # Demo-quality scorecard: the runnable-demos analogue of the docs scorecard.
+      # Grades every runnable demo (examples/* + cmd/simpledemo) on five axes
+      # (runnable · reproducible · honest_scope · self_contained · documented) and
+      # counts demo-debt (no one-command runner, no captured EXAMPLE-OUTPUT, no
+      # "what this does NOT claim" scope statement, state created without cleanup,
+      # missing title). Two tiers, matching how the gofmt / docs gates ratcheted:
+      #   * the tool's own unit tests are HARD (a real regression suite);
+      #   * the scorecard itself is ADVISORY for now — the public-scrub can drop a
+      #     demo's verify.py / EXAMPLE-OUTPUT.md, so demo-debt may be > 0 on the
+      #     public tree; surfaced as a ::warning:: until stable, then RATCHET to HARD.
+      # Pure-stdlib Python, repo root like the other honesty gates.
+      - name: demo-quality scorecard (5 axes + demo-debt; tests HARD, scorecard advisory)
+        working-directory: ${{ github.workspace }}
+        run: |
+          python tools/demo_quality_scorecard_test.py
+          echo "::group::demo-quality-scorecard (advisory until stable on the public tree)"
+          python tools/demo_quality_scorecard.py \
+            || echo "::warning title=demo-debt::demo-debt present (advisory) — see docs/DEMO-QUALITY-SCORECARD.md; retire worst-first (add a runner, capture EXAMPLE-OUTPUT, state scope), then re-arm the HARD gate"
+          echo "::endgroup::"
+
       # SEO/AEO discoverability gate (the docs scorecard's discovery-side twin).
       # The tool's own unit tests are HARD; the content checks are ADVISORY for now
       # (the docs site + FAQ structured data are landing across commits in a shared

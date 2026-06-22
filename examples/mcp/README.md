@@ -8,6 +8,32 @@ proposed tool call through the kernel **before** running it, run a tool *through
 the kernel, or screen a tool result it executed itself — each call adjudicated
 against a reviewable capability floor.
 
+## Prove it first (zero deps, no model/key/GPU)
+
+Before wiring fak into your editor, prove the MCP handshake works from a clean
+checkout. [`verify.py`](verify.py) drives the **real stdio transport** end to end
+and exits `0`/`1` (CI-usable) — it needs only the `fak` binary (or a Go toolchain
+to build it) and the Python standard library:
+
+```bash
+python examples/mcp/verify.py        # -> PASS / FAIL, exit 0 / 1
+```
+
+### What you see
+
+It spawns `fak serve --stdio --policy examples/dev-agent-policy.json`, then runs four
+checks (a `✓` means the check matched expectation):
+
+| | Check | MCP method |
+|---|---|---|
+| **A** | the JSON-RPC handshake negotiates a protocol and names the server (`fak-gateway`) | `initialize` |
+| **B** | discovery exposes the `fak_*` tools your agent will call | `tools/list` |
+| **C** | a shared-history mutation (`git_push`) is refused: **DENY / POLICY_BLOCK** | `tools/call` |
+| **D** | a read (`git_status`) is permitted (not a blanket deny): **ALLOW** | `tools/call` |
+
+A captured run, including the raw JSON-RPC frames, is in
+[`EXAMPLE-OUTPUT.md`](EXAMPLE-OUTPUT.md).
+
 ## One-paste setup (Claude Code)
 
 1. Get the binary onto your `PATH`: `go build -o fak ./cmd/fak` from `fak/`, or a
@@ -45,6 +71,22 @@ takes `{tool, arguments, read_only?, trace_id?, witness?}` (or `{tool, result,
 trace_id?}` for `fak_admit`). `fak serve` also exposes these over HTTP at
 `POST /mcp`, alongside the OpenAI `/v1/chat/completions` and Anthropic
 `/v1/messages` adjudication proxies.
+
+## Scope — what `verify.py` proves and what it does not
+
+`verify.py` exercises the **call-side capability gate over MCP stdio**: the JSON-RPC
+handshake, tool discovery (`tools/list`), and a verdict on a proposed call
+(`fak_adjudicate` returns DENY/POLICY_BLOCK vs ALLOW). It is the same layer as
+[`../adjudication-demo`](../adjudication-demo/README.md) and
+[`../wire-proof`](../wire-proof/README.md), driven over the transport an editor's MCP
+client actually uses.
+
+It does **not** exercise the result-side stack — the context-MMU quarantine and the
+IFC taint ledger reached via `fak_admit` / `fak_syscall` — nor the deliberately
+non-load-bearing result detector. For the full, honest scope see
+[`../../README.md`](../../README.md) and [`../../CLAIMS.md`](../../CLAIMS.md). The floor
+asserted here is [`../dev-agent-policy.json`](../dev-agent-policy.json): `git_push` is
+refused (POLICY_BLOCK), `git_status` is allowed.
 
 ## The other way: front your agent's model
 
