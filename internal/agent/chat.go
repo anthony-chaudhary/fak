@@ -19,13 +19,17 @@ package agent
 import (
 	"bytes"
 	"context"
+	"crypto/tls"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"os"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/cachemeta"
@@ -652,9 +656,12 @@ func (p *HTTPPlanner) Complete(ctx context.Context, messages []Message, tools []
 	}
 
 	url := adapter.Endpoint(p.BaseURL, modelID)
-	// Retry on a transport error OR a retryable status (429 rate-limit, 5xx
-	// overload) with exponential backoff — the live-API-limit failure mode. A 4xx
-	// other than 429 is a request error and is NOT retried.
+	// Retry on a TRANSIENT transport error OR a retryable status (429 rate-limit,
+	// 5xx overload) with exponential backoff — the live-API-limit failure mode. A
+	// 4xx other than 429 is a request error and is NOT retried. A DETERMINISTIC
+	// transport failure (connection refused, DNS NXDOMAIN, TLS handshake) is a
+	// misconfiguration that a retry cannot fix, so it fails fast without burning the
+	// ~8s backoff budget and is tagged so the gateway can surface its cause (#346).
 	const maxAttempts = 4
 	var lastErr error
 	for attempt := 0; attempt < maxAttempts; attempt++ {
@@ -674,6 +681,12 @@ func (p *HTTPPlanner) Complete(ctx context.Context, messages []Message, tools []
 		}
 		resp, err := p.Client.Do(req)
 		if err != nil {
+			// A deterministic dial-time failure (refused / NXDOMAIN / TLS) will not
+			// resolve on retry — retrying only adds ~8s of backoff latency to what is a
+			// configuration error. Fail fast and tag it as unreachable (#346).
+			if deterministicTransportError(err) {
+				return nil, &UpstreamUnreachableError{Err: err}
+			}
 			lastErr = err
 			continue
 		}
@@ -782,6 +795,68 @@ type UpstreamStatusError struct {
 
 func (e *UpstreamStatusError) Error() string {
 	return fmt.Sprintf("planner: HTTP %d: %s", e.Status, e.Body)
+}
+
+// UpstreamUnreachableError is returned by Complete when the upstream could not be
+// reached AT ALL — a deterministic dial-time transport failure (connection
+// refused, DNS NXDOMAIN, TLS handshake) that a retry cannot fix. Unlike a
+// transient timeout it is returned IMMEDIATELY, skipping the 4-attempt backoff
+// loop that otherwise stalls a misconfigured --base-url for ~8s (#346). The
+// gateway maps it to a distinct, actionable client signal (code
+// "upstream_unreachable") instead of the generic "upstream model error". Err
+// carries the underlying dial cause for the OPERATOR LOG; it is not forwarded
+// verbatim across the trust boundary.
+type UpstreamUnreachableError struct {
+	Err error
+}
+
+func (e *UpstreamUnreachableError) Error() string {
+	return fmt.Sprintf("planner: upstream unreachable: %v", e.Err)
+}
+
+func (e *UpstreamUnreachableError) Unwrap() error { return e.Err }
+
+// deterministicTransportError reports whether a transport error from Client.Do is
+// a configuration error a retry cannot fix: a refused connection (nothing
+// listening on the port — the canonical "wrong port / server not started"
+// misconfiguration), a DNS name that does not resolve (NXDOMAIN — a wrong host),
+// or a TLS handshake failure (a wrong scheme / untrusted cert). A plain timeout
+// or a reset mid-flight is NOT deterministic — it may be transient packet loss —
+// so it stays on the retry path.
+func deterministicTransportError(err error) bool {
+	if err == nil {
+		return false
+	}
+	// DNS name does not resolve (NXDOMAIN) — a wrong host. A *temporary* DNS
+	// failure (IsNotFound false) may clear, so it stays on the retry path.
+	var dnsErr *net.DNSError
+	if errors.As(err, &dnsErr) {
+		return dnsErr.IsNotFound
+	}
+	// TLS handshake failures — a wrong scheme (https to a plaintext port) or an
+	// untrusted certificate; neither is transient.
+	var recErr tls.RecordHeaderError
+	if errors.As(err, &recErr) {
+		return true
+	}
+	var certErr *tls.CertificateVerificationError
+	if errors.As(err, &certErr) {
+		return true
+	}
+	// Connection refused is the canonical "wrong port / server not started"
+	// misconfiguration. errors.Is(syscall.ECONNREFUSED) catches it on Linux/macOS;
+	// on Windows the OS errno (WSAECONNREFUSED) does NOT equal the BSD constant, so
+	// fall back to a dial-time, non-timeout *net.OpError — which also covers "no
+	// route to host" / "network unreachable", equally deterministic. A dial that
+	// TIMED OUT may be transient packet loss, so it is left to retry.
+	if errors.Is(err, syscall.ECONNREFUSED) {
+		return true
+	}
+	var opErr *net.OpError
+	if errors.As(err, &opErr) && opErr.Op == "dial" && !opErr.Timeout() {
+		return true
+	}
+	return false
 }
 
 // retryableStatus reports whether an HTTP status warrants a backoff retry: 429

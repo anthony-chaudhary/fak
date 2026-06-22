@@ -257,8 +257,8 @@ func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 		// upstream provider's raw body, which must not cross the trust boundary to a
 		// (possibly unauthenticated) downstream caller.
 		s.logf("gateway: upstream model error: %v", err)
-		status, msg := upstreamErrorStatus(err)
-		writeErr(w, status, msg)
+		status, code, msg := upstreamErrorStatus(err)
+		writeErrCode(w, status, code, msg)
 		return
 	}
 
@@ -318,22 +318,31 @@ func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, resp)
 }
 
-// upstreamErrorStatus maps a planner error to the HTTP status + client-facing
-// message the proxy should return. An *agent.UpstreamStatusError carries the
-// upstream provider's OWN status: a 4xx (a request error the client can act on —
-// an unknown model 404, a malformed argument 400) is SURFACED to the client with
-// that same status, so it is no longer masked as a misleading 200 or a generic 502
-// (#82); a 5xx (the upstream itself failed) becomes a 502 Bad Gateway, the honest
-// "my upstream is broken" signal. Any other planner error (transport failure,
-// response parse error) is also a 502. The provider's raw body is NEVER forwarded —
-// only the status crosses the boundary — so an upstream error message cannot leak
-// to a possibly-unauthenticated downstream caller.
-func upstreamErrorStatus(err error) (int, string) {
+// upstreamErrorStatus maps a planner error to the HTTP status, an OpenAI-style
+// error `code`, and a client-facing message the proxy should return. An
+// *agent.UpstreamUnreachableError (a deterministic dial failure — refused / DNS
+// NXDOMAIN / TLS) becomes a 502 with the distinct code "upstream_unreachable" so a
+// client can tell a misconfigured --base-url apart from a 5xx or a parse failure,
+// instead of the opaque code:null "upstream model error" (#346). An
+// *agent.UpstreamStatusError carries the upstream provider's OWN status: a 4xx (a
+// request error the client can act on — an unknown model 404, a malformed argument
+// 400) is SURFACED to the client with that same status, so it is no longer masked
+// as a misleading 200 or a generic 502 (#82); a 5xx (the upstream itself failed)
+// becomes a 502 Bad Gateway. Any other planner error (transient transport failure,
+// response parse error) is also a 502. The provider's raw body / underlying dial
+// detail is NEVER forwarded — only the status + classification cross the boundary —
+// so an upstream error message cannot leak to a possibly-unauthenticated caller.
+func upstreamErrorStatus(err error) (status int, code, msg string) {
+	var ue *agent.UpstreamUnreachableError
+	if errors.As(err, &ue) {
+		return http.StatusBadGateway, "upstream_unreachable",
+			"upstream unreachable — check that --base-url points at a running server"
+	}
 	var se *agent.UpstreamStatusError
 	if errors.As(err, &se) && se.Status >= 400 && se.Status < 500 {
-		return se.Status, fmt.Sprintf("upstream rejected the request (HTTP %d)", se.Status)
+		return se.Status, "", fmt.Sprintf("upstream rejected the request (HTTP %d)", se.Status)
 	}
-	return http.StatusBadGateway, "upstream model error"
+	return http.StatusBadGateway, "", "upstream model error"
 }
 
 func writeChatCompletionStream(w http.ResponseWriter, resp ChatResponse) {
@@ -811,8 +820,20 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 // status class so a client that branches on it (retry server_error, not
 // invalid_request_error) classifies a transient 502 correctly.
 func writeErr(w http.ResponseWriter, status int, msg string) {
+	writeErrCode(w, status, "", msg)
+}
+
+// writeErrCode is writeErr with an explicit OpenAI-style error `code`. An empty
+// code keeps the historical code:null shape; a non-empty code (e.g.
+// "upstream_unreachable") lets a client branch on the specific failure class
+// rather than guessing from the message text (#346).
+func writeErrCode(w http.ResponseWriter, status int, code, msg string) {
+	var codeVal any
+	if code != "" {
+		codeVal = code
+	}
 	writeJSON(w, status, map[string]any{
-		"error": map[string]any{"message": msg, "type": errType(status), "code": nil, "param": nil},
+		"error": map[string]any{"message": msg, "type": errType(status), "code": codeVal, "param": nil},
 	})
 }
 

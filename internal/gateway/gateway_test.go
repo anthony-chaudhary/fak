@@ -7,10 +7,12 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/abi"
 	"github.com/anthony-chaudhary/fak/internal/agent"
@@ -1749,6 +1751,74 @@ func TestChatProxyUnknownModelSurfacesUpstream404(t *testing.T) {
 	}
 	if strings.Contains(string(respRaw), "SECRET-UPSTREAM-DETAIL") {
 		t.Fatalf("upstream raw error body leaked across the trust boundary: %s", respRaw)
+	}
+}
+
+// TestChatProxyUnreachableUpstreamFailsFast proves the #346 fix: a misconfigured
+// --base-url pointed at a port nothing is listening on (connection refused) (a)
+// fails FAST instead of stalling ~8s on the 4-attempt retry/backoff loop, and (b)
+// surfaces the distinct, actionable code "upstream_unreachable" instead of the
+// opaque code:null "upstream model error" — without leaking the underlying dial
+// detail across the trust boundary.
+func TestChatProxyUnreachableUpstreamFailsFast(t *testing.T) {
+	abi.ResetForTest()
+	abi.RegisterRegionBackend(inlineBackend{})
+	abi.RegisterEngine("test", echoEngine{})
+	abi.RegisterAdjudicator(0, toolAdj{})
+
+	// A guaranteed-refused address: bind a loopback port, then release it so
+	// nothing is listening when the planner dials it.
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	refused := ln.Addr().String()
+	ln.Close()
+
+	srv, err := New(Config{EngineID: "test", Model: "m", BaseURL: "http://" + refused + "/v1", Provider: "openai", VDSO: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(srv.Close)
+	ts := httptest.NewServer(srv.Handler())
+	defer ts.Close()
+
+	body := []byte(`{"model":"m","messages":[{"role":"user","content":"hi"}]}`)
+	start := time.Now()
+	httpResp, err := http.Post(ts.URL+"/v1/chat/completions", "application/json", bytes.NewReader(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	elapsed := time.Since(start)
+	defer httpResp.Body.Close()
+	respRaw, _ := io.ReadAll(httpResp.Body)
+
+	// (a) Fast fail: the old path burned ~8.4s on 4 attempts (0 + 0.6 + 2.4 + 5.4s
+	// of backoff). A refused connection now returns on the first attempt, so well
+	// under any single backoff round.
+	if elapsed > 2*time.Second {
+		t.Fatalf("unreachable upstream took %s — want fast fail (no retry/backoff stall)", elapsed)
+	}
+	if httpResp.StatusCode != http.StatusBadGateway {
+		t.Fatalf("status = %d, want 502 for an unreachable upstream: %s", httpResp.StatusCode, respRaw)
+	}
+	// (b) Distinct, actionable code.
+	var env struct {
+		Error struct {
+			Code    string `json:"code"`
+			Message string `json:"message"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal(respRaw, &env); err != nil {
+		t.Fatalf("decode error envelope: %v (%s)", err, respRaw)
+	}
+	if env.Error.Code != "upstream_unreachable" {
+		t.Fatalf("error.code = %q, want %q: %s", env.Error.Code, "upstream_unreachable", respRaw)
+	}
+	// The raw dial detail (host:port, "connection refused") must not cross the
+	// trust boundary verbatim.
+	if strings.Contains(strings.ToLower(string(respRaw)), "connection refused") || strings.Contains(string(respRaw), refused) {
+		t.Fatalf("underlying dial detail leaked across the trust boundary: %s", respRaw)
 	}
 }
 
