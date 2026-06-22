@@ -1,4 +1,4 @@
-// Command fak is an agent tool firewall: one statically-linked Go binary that
+// Command fak is the Fused Agent Kernel: one statically-linked Go binary that
 // runs an agentic tool loop where every tool call passes through one in-process
 // policy and quarantine boundary (adjudicate -> vDSO -> pre-flight/grammar ->
 // dispatch -> context-MMU admit). Verbs:

@@ -1,5 +1,5 @@
 #!/bin/sh
-# install.sh — one-line installer for `fak`, the agent tool firewall.
+# install.sh — one-line installer for `fak`, the Fused Agent Kernel.
 #
 #   curl -fsSL https://raw.githubusercontent.com/anthony-chaudhary/fak/main/install.sh | sh
 #
