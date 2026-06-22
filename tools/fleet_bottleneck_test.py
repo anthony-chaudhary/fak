@@ -72,6 +72,25 @@ def emitted_families(snap):
     return {l.split()[2] for l in text.splitlines() if l.startswith("# TYPE ")}, text, ranked
 
 
+class AuditEmptyAlertTest(unittest.TestCase):
+    """FleetTokenWaste reads fleet_cache_hit_ratio_median, which is ABSENT (not
+    zero) when the session audit returns empty — so the alert silently dies in
+    exactly the broken-audit case. The surface must carry a companion alert that
+    fires on that absence (issue #308). This reads only the alerts file, so it is
+    independent of the Go-source cross-surface checks."""
+
+    def test_audit_empty_companion_alert_present(self):
+        alerts = _read(ALERTS)
+        self.assertIn("alert: FleetAuditEmpty", alerts,
+                      "missing the FleetAuditEmpty companion alert")
+        m = re.search(r"alert: FleetAuditEmpty.*?expr:\s*(.+)", alerts, re.DOTALL)
+        self.assertIsNotNone(m, "FleetAuditEmpty has no expr")
+        expr = m.group(1).splitlines()[0]
+        self.assertIn("absent(", expr, f"FleetAuditEmpty must use absent(): {expr!r}")
+        self.assertIn("fleet_cache_hit_ratio_median", expr,
+                      "FleetAuditEmpty must watch the FleetTokenWaste source metric")
+
+
 class ScorerTest(unittest.TestCase):
     def test_surface_and_api_error_classes_fire(self):
         ranked = fb.rank_bottlenecks(make_snap(surface=4, api_error=3))

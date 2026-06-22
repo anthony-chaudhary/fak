@@ -105,6 +105,21 @@ groups:
           summary: "Low prompt-cache reuse (token waste)"
           description: "Median per-session cache-hit {{ $value | printf \"%.2f\" }} below 0.80 for 30m — workers are re-reading context instead of reusing the prompt cache. Inspect the worst-cache sessions."
 
+      # Companion to FleetTokenWaste: fleet_cache_hit_ratio_median is only emitted
+      # when the session audit returns non-empty. When the audit is empty (no
+      # transcripts, no matching namespace, or a session_audit import failure) the
+      # metric is ABSENT, not zero — so `... < 0.8` matches no series and
+      # FleetTokenWaste goes silently dead in exactly the case that is hardest to
+      # notice. This fires on that absence so a broken audit pass is itself an alert.
+      - alert: FleetAuditEmpty
+        expr: absent(fleet_cache_hit_ratio_median)
+        for: 30m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Fleet audit pass is producing no metrics"
+          description: "fleet_cache_hit_ratio_median has been absent for 30m — the session-audit pass returned empty (no transcripts, no matching namespace, or a session_audit import failure), so FleetTokenWaste and every other audit-derived cost signal is silently dead. Confirm the audit runs and emits (python tools/session_audit.py)."
+
   - name: fleet_observability
     rules:
       - alert: FleetTelemetryStale
