@@ -33,7 +33,7 @@ func TestMetricsExposesCacheStream(t *testing.T) {
 		Payload: abi.Ref{Kind: abi.RefInline, Inline: []byte(`{"ok":true}`)}}
 
 	vdso.Default.Emit(abi.Event{Kind: abi.EvComplete, Call: call, Result: res}) // -> CacheFill
-	if _, ok := vdso.Default.Lookup(context.Background(), call); !ok {           // -> CacheHit
+	if _, ok := vdso.Default.Lookup(context.Background(), call); !ok {          // -> CacheHit
 		t.Fatalf("expected a tier-2 hit after the fill (no hit event would be folded)")
 	}
 

@@ -41,8 +41,8 @@ func TestStreamMetricsFoldsByPlaneTierKind(t *testing.T) {
 		got[r.Plane+"/"+r.Tier+"/"+r.Kind] = r.Count
 	}
 	for key, want := range map[string]uint64{
-		"tool_result/dram/fill":   1,
-		"tool_result/dram/hit":    2,
+		"tool_result/dram/fill":    1,
+		"tool_result/dram/hit":     2,
 		"kv_transfer/remote/fault": 1,
 	} {
 		if got[key] != want {

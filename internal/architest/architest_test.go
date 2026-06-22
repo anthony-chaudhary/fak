@@ -46,7 +46,7 @@ const modPrefix = "github.com/anthony-chaudhary/fak/internal/"
 var tier = map[string]int{
 	"abi": 0,
 
-	"appversion": 1, "blob": 1, "cachemeta": 1, "canon": 1, "compute": 1, "deletioncert": 1, "ggufload": 1, "gpulease": 1, "leakcheck": 1, "metalgemm": 1, "metrics": 1, "model": 1, "provenance": 1, "swebench": 1, "webbench": 1,
+	"appversion": 1, "blob": 1, "boundarylint": 1, "cachemeta": 1, "canon": 1, "compute": 1, "deletioncert": 1, "ggufload": 1, "gpulease": 1, "leakcheck": 1, "metalgemm": 1, "metrics": 1, "model": 1, "pathlint": 1, "pathutil": 1, "provenance": 1, "swebench": 1, "urllint": 1, "webbench": 1,
 
 	"adjudicator": 2, "ctxmmu": 2, "engine": 2, "enginecache": 2, "grammar": 2, "kernel": 2,
 	"preflight": 2, "vdso": 2, "plancfi": 2, "steward": 2, "witness": 2,
