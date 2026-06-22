@@ -54,18 +54,25 @@ if (-not $py) { throw "python not found on PATH" }
 $tick = Join-Path $Workspace 'tools\dispatch_status.py'
 if (-not (Test-Path $tick)) { throw "dispatch_status.py not found at $tick" }
 
-# Same schtasks /TR quoting discipline as register_resolve_progress / register_issue_dispatch:
-# the Program-Files python path's SPACE must survive both PowerShell's parser and
-# schtasks' /TR parser. So $py/$tick/$Workspace are single-quoted for PowerShell (the
-# call operator & needs the exe quoted) and the whole -Command payload is wrapped in
-# \"...\" so schtasks does not truncate at the first inner quote. End with
-# `; exit $LASTEXITCODE` so the task's LastTaskResult reflects PYTHON's exit code, not
-# powershell.exe's host status (which flaps to 1 on a non-terminating warning).
-$inner = "& '$py' '$tick' --workspace '$Workspace' --md '$DocPath' --json; exit `$LASTEXITCODE"
-$tr = "powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -Command \`"$inner\`""
-
-schtasks /Create /TN $TaskName /SC MINUTE /MO $EveryMinutes /TR $tr /RL LIMITED /F | Out-Null
-if ($LASTEXITCODE -ne 0) { throw "schtasks /Create failed ($LASTEXITCODE)" }
+# Register python.exe DIRECTLY via the ScheduledTasks cmdlets, NOT a
+# `powershell.exe -Command "..."` wrapper (same fix as register_resolve_progress /
+# register_issue_dispatch): a Program-Files python path has a SPACE, and the nested
+# quotes protecting it did not survive the PowerShell -> schtasks /TR handoff -- the
+# stored -Command truncated at "C:\Program", powershell exited 0 without launching
+# python, and the task logged LastResult=0 while the doc was never re-rendered (it
+# went stale while every run reported success). Splitting Execute from Argument
+# sidesteps the quoting; WorkingDirectory anchors the relative --md path, and python's
+# exit code becomes LastTaskResult directly.
+$pyArgs    = "`"$tick`" --workspace `"$Workspace`" --md `"$DocPath`" --json"
+$taskAction = New-ScheduledTaskAction -Execute $py -Argument $pyArgs -WorkingDirectory $Workspace
+$trigger   = New-ScheduledTaskTrigger -Once -At (Get-Date).AddMinutes(1) `
+               -RepetitionInterval (New-TimeSpan -Minutes $EveryMinutes) `
+               -RepetitionDuration (New-TimeSpan -Days 3650)
+$principal = New-ScheduledTaskPrincipal -UserId $env:USERNAME -LogonType Interactive -RunLevel Limited
+$settings  = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries `
+               -StartWhenAvailable -MultipleInstances IgnoreNew -ExecutionTimeLimit (New-TimeSpan -Minutes 10)
+Register-ScheduledTask -TaskName $TaskName -Action $taskAction -Trigger $trigger `
+               -Principal $principal -Settings $settings -Force | Out-Null
 
 Write-Output "installed $TaskName -- every $EveryMinutes min, renders $DocPath (read-only fold; commits nothing)"
 Write-Output "read the doc:   $Workspace\$DocPath"

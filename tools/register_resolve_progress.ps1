@@ -54,20 +54,24 @@ $tick = Join-Path $Workspace 'tools\issue_resolve_progress.py'
 if (-not (Test-Path $tick)) { throw "issue_resolve_progress.py not found at $tick" }
 
 # --close always (so the snapshot also reports closeable count); --live gates the
-# actual gh closes. Same schtasks /TR quoting discipline as register_issue_dispatch:
-# the Program-Files python path's space must survive both parsers, so $py/$tick/
-# $Workspace are single-quoted for PowerShell and the whole -Command payload is
-# wrapped in \"...\" so schtasks does not truncate at the first inner quote.
-$liveFlag = if ($Live) { ' --live' } else { '' }
-# End with `; exit $LASTEXITCODE` so the task's LastTaskResult reflects PYTHON's
-# exit code, not powershell.exe's own status. Without it, `-Command` returns the
-# host's status (which flaps to 1 on a non-terminating warning) and the task looks
-# failed even when the tick succeeded (exit 0) — the LastResult=1 red herring.
-$inner = "& '$py' '$tick' --workspace '$Workspace' --target $Target --close$liveFlag --json; exit `$LASTEXITCODE"
-$tr = "powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -Command \`"$inner\`""
-
-schtasks /Create /TN $TaskName /SC MINUTE /MO $EveryMinutes /TR $tr /RL LIMITED /F | Out-Null
-if ($LASTEXITCODE -ne 0) { throw "schtasks /Create failed ($LASTEXITCODE)" }
+# actual gh closes. Register python.exe DIRECTLY via the ScheduledTasks cmdlets, NOT
+# a `powershell.exe -Command "..."` wrapper: a Program-Files python path has a SPACE,
+# and the nested quotes protecting it did not survive the PowerShell -> schtasks /TR
+# handoff -- the stored -Command truncated at "C:\Program", powershell exited 0
+# without launching python, and the task logged LastResult=0 while the close arm
+# never ran (witnessed issues stayed open). Splitting Execute from Argument sidesteps
+# the quoting entirely, and python's exit code becomes LastTaskResult directly.
+$liveFlag  = if ($Live) { ' --live' } else { '' }
+$pyArgs    = "`"$tick`" --workspace `"$Workspace`" --target $Target --close$liveFlag --json"
+$taskAction = New-ScheduledTaskAction -Execute $py -Argument $pyArgs -WorkingDirectory $Workspace
+$trigger   = New-ScheduledTaskTrigger -Once -At (Get-Date).AddMinutes(1) `
+               -RepetitionInterval (New-TimeSpan -Minutes $EveryMinutes) `
+               -RepetitionDuration (New-TimeSpan -Days 3650)
+$principal = New-ScheduledTaskPrincipal -UserId $env:USERNAME -LogonType Interactive -RunLevel Limited
+$settings  = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries `
+               -StartWhenAvailable -MultipleInstances IgnoreNew -ExecutionTimeLimit (New-TimeSpan -Minutes 20)
+Register-ScheduledTask -TaskName $TaskName -Action $taskAction -Trigger $trigger `
+               -Principal $principal -Settings $settings -Force | Out-Null
 
 $mode = if ($Live) { "LIVE (closes witnessed issues)" } else { "SNAPSHOT-ONLY (records the curve, closes nothing)" }
 Write-Output "installed $TaskName -- every $EveryMinutes min, target $Target, current-user interactive, $mode"

@@ -61,24 +61,27 @@ $tick = Join-Path $Workspace ('tools\' + $tickName)
 if (-not (Test-Path $tick)) { throw "$tickName not found at $tick" }
 
 $liveFlag = if ($Live) { ' --live' } else { '' }
-# The python path lives under "C:\Program Files\..." on a standard install, so its
-# SPACE must survive both PowerShell's parser and schtasks' /TR parser. Two rules:
-#   1. Inside the -Command string, quote $py/$tick/$Workspace with SINGLE quotes so
-#      PowerShell takes the space literally (the call operator & needs the exe quoted).
-#   2. schtasks reads /TR as a double-quoted token; any double-quote INSIDE it must be
-#      escaped as \" or schtasks truncates at the first inner quote ("Invalid argument
-#      'C:\Program'"). So the whole -Command payload is wrapped in \"...\".
-# Passing $tr as ONE PowerShell argument (not a here-string split on spaces) keeps the
-# Program Files path intact end-to-end. This is the gap that left the old fleet-public
-# task working (python was on PATH sans spaces) but broke on a Program Files python.
-# End with `; exit $LASTEXITCODE` so the task's LastTaskResult reflects PYTHON's
-# exit (1 = a legitimate preflight REFUSE), not powershell.exe's own host status,
-# which flaps to 1 on a non-terminating warning and masks the real verdict.
-$inner = "& '$py' '$tick' --workspace '$Workspace' --max-workers $MaxWorkers$liveFlag --json; exit `$LASTEXITCODE"
-$tr = "powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -Command \`"$inner\`""
-
-schtasks /Create /TN $TaskName /SC MINUTE /MO $EveryMinutes /TR $tr /RL LIMITED /F | Out-Null
-if ($LASTEXITCODE -ne 0) { throw "schtasks /Create failed ($LASTEXITCODE)" }
+# Register the tick to run python.exe DIRECTLY via the ScheduledTasks cmdlets, NOT
+# through a `powershell.exe -Command "..."` wrapper. The wrapper was a SILENT-NO-OP
+# trap: a standard python install lives under "C:\Program Files\Python3xx\python.exe"
+# (a SPACE in the path), and the nested quotes needed to protect it did not survive
+# the PowerShell -> schtasks /TR handoff -- the stored -Command truncated at
+# "C:\Program", powershell.exe exited 0 without ever launching python, and the task
+# logged LastResult=0 while the tick never actually ran. Splitting Execute (the
+# program) from Argument (its args) sidesteps ALL nested quoting: Task Scheduler keeps
+# the program path in its own field (no quoting needed), and python's own exit code
+# becomes the task's LastTaskResult directly (so the `; exit $LASTEXITCODE` shim that
+# the old -Command form needed is gone too).
+$pyArgs    = "`"$tick`" --workspace `"$Workspace`" --max-workers $MaxWorkers$liveFlag --json"
+$taskAction = New-ScheduledTaskAction -Execute $py -Argument $pyArgs -WorkingDirectory $Workspace
+$trigger   = New-ScheduledTaskTrigger -Once -At (Get-Date).AddMinutes(1) `
+               -RepetitionInterval (New-TimeSpan -Minutes $EveryMinutes) `
+               -RepetitionDuration (New-TimeSpan -Days 3650)
+$principal = New-ScheduledTaskPrincipal -UserId $env:USERNAME -LogonType Interactive -RunLevel Limited
+$settings  = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries `
+               -StartWhenAvailable -MultipleInstances IgnoreNew -ExecutionTimeLimit (New-TimeSpan -Minutes 30)
+Register-ScheduledTask -TaskName $TaskName -Action $taskAction -Trigger $trigger `
+               -Principal $principal -Settings $settings -Force | Out-Null
 
 $runMode = if ($Live) { "LIVE (bounded autonomous spawning, cap=$MaxWorkers)" } else { "DRY-RUN (logs plans, spawns nothing)" }
 Write-Output "installed $TaskName -- every $EveryMinutes min, arm=$Mode ($tickName), current-user interactive, $runMode"
