@@ -43,6 +43,7 @@ concurrent = [
   "appversion", "boundarylint", "deletioncert", "demoui", "enginecache", "gpulease",
   "leakcheck", "metalgemm", "modelengine", "pathlint", "pathutil", "radixkv",
   "ratelimit", "rsiloop", "swebench", "toollint", "tracesink", "urllint", "webbench",
+  "answershape",
   # new-leaf:lane -- `python tools/new_leaf.py` inserts a generated leaf lane above
 ]
 exclusive = ["abi", "release", "global"]
@@ -59,6 +60,7 @@ autopick = [
   "appversion", "boundarylint", "deletioncert", "demoui", "enginecache", "gpulease",
   "leakcheck", "metalgemm", "modelengine", "pathlint", "pathutil", "radixkv",
   "ratelimit", "rsiloop", "swebench", "toollint", "tracesink", "urllint", "webbench",
+  "answershape",
   # new-leaf:lane
 ]
 
@@ -108,6 +110,7 @@ turnbench = ["internal/turnbench/**"]
 vdso = ["internal/vdso/**"]
 witness = ["internal/witness/**"]
 tokenizer = ["internal/tokenizer/**"]
+answershape = ["internal/answershape/**"]
 contextq = ["internal/contextq/**"]
 journal = ["internal/journal/**"]
 # reconciled 2026-06-22: real internal/ leaves that previously had NO lane (so a
