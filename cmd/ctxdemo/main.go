@@ -18,7 +18,10 @@
 //     re-prefill is a labelled worst-case reference only;
 //   - a per-agent CONTEXT TIMELINE — every agent's turns, with each tool result drawn
 //     to scale, so you can see the long context assemble unevenly; and
-//   - a LIVE wall-clock race of the same session through a real in-kernel model.
+//   - a LIVE wall-clock race of the same session through a real in-kernel model: the
+//     HEADLINE is fak vs the tuned warm-cache baseline (the SOTA serving baseline a
+//     prefix-caching stack gives you), with the cold no-cache loop shown only as a
+//     dim worst-case reference, never the headline.
 //
 // Same model, same tokens, same answers — the only difference is how much shared
 // setup the system makes the model re-read. That is the whole fak thesis.
@@ -359,12 +362,21 @@ func runRace(scn Scenario, sp spec, naiveMode string, emit emitter) {
 	warm(l)
 
 	w := v.Workload
+	// fak arm (live)
 	emit(event{"type": "start", "arm": "fak", "total_requests": scn.Agents * scn.Turns})
 	fak := liveArmFak(l, w, emit)
 	emit(event{"type": "done", "arm": "fak", "total_ms": fak.totalMS, "decode_ms": fak.decodeMS,
 		"tokens_prefilled": fak.prefillTk})
 
-	// decide naive: live for small scenarios, projected for the long grind
+	// tuned warm-cache arm (live) — the SOTA serving baseline (the HEADLINE comparison).
+	// Tractable to run live always (no quadratic re-prefill).
+	emit(event{"type": "start", "arm": "tuned", "total_requests": scn.Agents * scn.Turns})
+	tuned := liveArmTuned(l, w, emit)
+	emit(event{"type": "done", "arm": "tuned", "total_ms": tuned.totalMS, "decode_ms": tuned.decodeMS,
+		"tokens_prefilled": tuned.prefillTk})
+
+	// naive cold re-prefill arm — worst-case REFERENCE only (live for small scenarios,
+	// projected for the long grind).
 	project := naiveMode == "project"
 	if naiveMode != "live" && v.Tokens.NaiveReprefill > projectThreshold {
 		project = true
@@ -380,9 +392,13 @@ func runRace(scn Scenario, sp spec, naiveMode string, emit emitter) {
 	emit(event{"type": "done", "arm": "naive", "total_ms": naive.totalMS, "decode_ms": naive.decodeMS,
 		"tokens_prefilled": naive.prefillTk, "projected": project})
 
-	r := naive.totalMS / fak.totalMS
+	// HEADLINE = tuned/fak: fak vs the tuned warm-cache SOTA baseline. naive_ratio (A/C) is
+	// the worst-case reference, surfaced but never the headline.
+	r := tuned.totalMS / fak.totalMS
 	emit(event{"type": "result",
-		"fak_ms": fak.totalMS, "naive_ms": naive.totalMS, "ratio": r, "saved_ms": naive.totalMS - fak.totalMS,
+		"fak_ms": fak.totalMS, "tuned_ms": tuned.totalMS, "naive_ms": naive.totalMS,
+		"ratio": r, "naive_ratio": naive.totalMS / fak.totalMS,
+		"saved_ms": tuned.totalMS - fak.totalMS,
 		"naive_projected": project, "scenario": scn.ID, "model": sp.Name,
 		"tokens": v.Tokens})
 }

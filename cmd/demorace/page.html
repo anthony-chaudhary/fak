@@ -8,7 +8,8 @@
   :root{
     --bg:#0b0e14; --panel:#11151f; --panel2:#0e121b; --line:#1e2633;
     --txt:#cbd5e1; --dim:#64748b; --dim2:#94a3b8;
-    --fak:#22c55e; --fakg:#16a34a; --naive:#f59e0b; --naiveg:#b45309; --accent:#38bdf8;
+    --fak:#22c55e; --fakg:#16a34a; --tuned:#38bdf8; --tunedg:#0284c7;
+    --naive:#f59e0b; --naiveg:#b45309; --accent:#38bdf8;
   }
   *{box-sizing:border-box}
   body{background:var(--bg);color:var(--txt);font:13px/1.45 ui-monospace,Menlo,Consolas,"SF Mono",monospace;margin:0;padding:0}
@@ -33,14 +34,19 @@
   .lane{margin:10px 0}
   .lane .hd{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:5px}
   .lane .nm{font-weight:600}
+  .lane .nm small{font-weight:400;color:var(--dim);font-size:10px;margin-left:6px;text-transform:none;letter-spacing:0}
   .lane .ms{color:var(--dim2);font-variant-numeric:tabular-nums}
   .lane .meta{font-size:11px;color:var(--dim);margin-top:4px;font-variant-numeric:tabular-nums}
   .track{height:26px;background:var(--panel2);border:1px solid var(--line);border-radius:7px;overflow:hidden;position:relative}
   .fill{height:100%;width:0%;border-radius:6px 0 0 6px;transition:width .25s ease;display:flex;align-items:center;padding-left:9px;color:#06283a;font-weight:700;font-size:11px;white-space:nowrap}
   .fak .nm,.fak .fill{color:var(--fak)}
   .fak .fill{background:linear-gradient(90deg,var(--fak),var(--fakg));color:#042511}
-  .naive .nm,.naive .fill{color:var(--naive)}
-  .naive .fill{background:linear-gradient(90deg,var(--naive),var(--naiveg));color:#2a1602}
+  .tuned .nm,.tuned .fill{color:var(--tuned)}
+  .tuned .fill{background:linear-gradient(90deg,var(--tuned),var(--tunedg));color:#04222e}
+  /* naive is the worst-case REFERENCE, drawn dim so it never reads as the headline */
+  .naive .nm{color:var(--naive);opacity:.8}
+  .naive .fill{background:linear-gradient(90deg,var(--naive),var(--naiveg));color:#2a1602;opacity:.6}
+  .naive .track{opacity:.7}
   .idle{color:var(--dim)}
   .result{margin-top:14px;padding:13px 15px;background:var(--panel2);border:1px solid var(--line);border-radius:9px;display:none}
   .result.show{display:block}
@@ -48,6 +54,7 @@
   .result .grid{display:flex;gap:26px;flex-wrap:wrap;margin-top:6px}
   .result .cell{font-size:12px;color:var(--dim2)}
   .result .cell b{color:var(--txt);font-size:15px;display:block;font-variant-numeric:tabular-nums}
+  .result .ref{font-size:11px;color:var(--dim);margin-top:8px}
   .log{margin-top:12px;max-height:120px;overflow:auto;font-size:11px;color:var(--dim);background:var(--panel2);border:1px solid var(--line);border-radius:7px;padding:8px 10px;white-space:pre-wrap}
   .log:empty:before{content:"(event log)";color:#33415a}
   /* curve */
@@ -66,11 +73,11 @@
     <h1>fak · the reuse demo</h1>
     <span class="pill" id="ladderPill">ladder: …</span>
   </div>
-  <div class="sub">Same model · same tokens · same answers. fak prefills the shared agent setup <b style="color:var(--txt)">once</b> and reuses it; the naive loop makes the model re-read the <b style="color:var(--txt)">whole growing context every turn</b>. Watch the wall-clock gap open — that gap is the value.</div>
+  <div class="sub">Same model · same tokens · same answers. The headline race is <b style="color:var(--txt)">fak vs a tuned warm-cache baseline</b> — the real serving baseline a stack like vLLM / SGLang prefix-caching or provider prompt-caching gives you (prefix cached once per agent, only new tokens ingested). fak adds <b style="color:var(--txt)">cross-agent prefix sharing + batched decode</b> on top. The cold re-prefill loop is shown dim, as a worst-case reference only — not a baseline anyone ships.</div>
 
   <!-- LIVE RACE -->
   <div class="panel">
-    <h2>① Live race — fak vs naive <span class="tag">both arms run live, same model</span></h2>
+    <h2>① Live race — fak vs a tuned warm-cache baseline <span class="tag">SOTA serving baseline · both run live, same model</span></h2>
     <div class="row">
       <label>model <select id="model"></select></label>
       <span class="cfg">workload: P=<b id="cP">512</b> T=<b id="cT">5</b> C=<b id="cC">5</b> D=<b id="cD">16</b> R=<b id="cR">32</b> → <b id="cReqs">25</b> requests</span>
@@ -78,12 +85,17 @@
     </div>
 
     <div class="lane fak">
-      <div class="hd"><span class="nm">fak <span class="idle" id="fakState">idle</span></span><span class="ms" id="fakMs">—</span></div>
+      <div class="hd"><span class="nm">fak <small>prefix once · cloned · batched decode</small> <span class="idle" id="fakState">idle</span></span><span class="ms" id="fakMs">—</span></div>
       <div class="track"><div class="fill" id="fakFill"></div></div>
       <div class="meta" id="fakMeta">prefilled 0 · decoded 0</div>
     </div>
+    <div class="lane tuned">
+      <div class="hd"><span class="nm">tuned warm cache (SOTA) <small>per-agent KV · prefix once/agent · incremental</small> <span class="idle" id="tunedState">idle</span></span><span class="ms" id="tunedMs">—</span></div>
+      <div class="track"><div class="fill" id="tunedFill"></div></div>
+      <div class="meta" id="tunedMeta">prefilled 0 · decoded 0</div>
+    </div>
     <div class="lane naive">
-      <div class="hd"><span class="nm">naive (re-prefill every turn) <span class="idle" id="naiveState">idle</span></span><span class="ms" id="naiveMs">—</span></div>
+      <div class="hd"><span class="nm">naive re-prefill <small>worst-case reference — not a serving baseline</small> <span class="idle" id="naiveState">idle</span></span><span class="ms" id="naiveMs">—</span></div>
       <div class="track"><div class="fill" id="naiveFill"></div></div>
       <div class="meta" id="naiveMeta">prefilled 0 · decoded 0</div>
     </div>
@@ -91,21 +103,22 @@
     <div class="result" id="result">
       <div id="resultLine"></div>
       <div class="grid" id="resultGrid"></div>
+      <div class="ref" id="resultRef"></div>
     </div>
     <div class="log" id="log"></div>
   </div>
 
   <!-- CURVE -->
   <div class="panel">
-    <h2>② Reuse curve across the model ladder <span class="tag">fak arm LIVE · naive arm projected from measured prefill cost</span></h2>
+    <h2>② Reuse curve across the model ladder <span class="tag">fak + tuned warm-cache both LIVE · cold no-cache ref projected</span></h2>
     <div class="row">
-      <span class="cfg">same workload, smaller P=128 for tractability on CPU. As the model grows, the <b style="color:var(--txt)">absolute minutes saved</b> grow with it — the ratio holds.</span>
+      <span class="cfg">same workload, smaller P=128 for tractability on CPU. As the model grows, the <b style="color:var(--txt)">absolute minutes saved</b> over the tuned baseline grow with it — the ratio holds.</span>
       <button id="curveBtn" class="ghost">Build curve</button>
     </div>
     <div class="phase" id="curvePhase"></div>
     <div id="curve"><svg id="curveSvg"></svg></div>
-    <div class="legend"><span><span class="sw" style="background:var(--naive)"></span>naive (re-prefill)</span><span><span class="sw" style="background:var(--fak)"></span>fak (reuse)</span></div>
-    <div class="note" id="curveNote">Each rung: fak runs the session <b>live</b>; the naive bar is projected from that model's <b>measured</b> prefill cost (running the naive arm live at 3B would take ~an hour — it re-prefills the whole context every turn). The A/C ratio is timing-free and model-independent: it's fixed by the session shape.</div>
+    <div class="legend"><span><span class="sw" style="background:var(--fak)"></span>fak (reuse)</span><span><span class="sw" style="background:var(--tuned)"></span>tuned warm cache (SOTA)</span><span><span class="sw" style="background:var(--naive);opacity:.55"></span>naive re-prefill (reference)</span></div>
+    <div class="note" id="curveNote">Each rung: fak and the tuned warm-cache baseline both run <b>live</b> — the headline ratio above each pair is <b>fak vs tuned</b>. The dim cold-no-cache bar is projected from that model's <b>measured</b> prefill cost (running it live at 3B would take ~an hour — it re-prefills the whole context every turn) and is a worst-case reference only.</div>
   </div>
 
   <div class="sub" style="margin-top:18px;color:#33415a">fak in-kernel engine · pure-Go Q8 forward pass · tokens are real model output (anchor-quality on the 135M reference, chat-quality on the Qwen2.5 rungs). No network, no API, all on this box.</div>
@@ -121,17 +134,16 @@ fetch("/api/ladder").then(r=>r.json()).then(d=>{
   ladder=d.models||[];
   const sel=$("model");
   ladder.forEach(m=>{if(m.present){const o=document.createElement("option");o.value=m.name;o.textContent=m.name+" ("+m.params+")";sel.appendChild(o);}});
-  $("ladderPill").textContent="ladder: "+ladder.filter(m=>m.present).map(m=>m.params).join(" → ")+"  ·  timing-free A/C = "+(d.prefill_tok_ratio_a_over_c.ratio).toFixed(1)+"×";
+  const pr=d.prefill_tok_ratio||{};
+  $("ladderPill").textContent="ladder: "+ladder.filter(m=>m.present).map(m=>m.params).join(" → ")+"  ·  timing-free fak vs tuned = "+(pr.b_over_c||0).toFixed(1)+"×  (vs no-cache ref "+(pr.a_over_c||0).toFixed(0)+"×)";
 });
 
 // ---- race ----
 let raceES=null;
+const ARMS=["fak","tuned","naive"];
 function setFill(id,pct,label){const f=$(id);f.style.width=Math.min(100,pct)+"%";f.textContent=label||"";}
 function resetRace(){
-  ["fakState","naiveState"].forEach(id=>$(id).textContent="idle");
-  ["fakMs","naiveMs"].forEach(id=>$(id).textContent="—");
-  ["fakFill","naiveFill"].forEach(id=>setFill(id,0));
-  $("fakMeta").textContent="prefilled 0 · decoded 0";$("naiveMeta").textContent="prefilled 0 · decoded 0";
+  ARMS.forEach(a=>{$(a+"State").textContent="idle";$(a+"Ms").textContent="—";setFill(a+"Fill",0);$(a+"Meta").textContent="prefilled 0 · decoded 0";});
   $("result").classList.remove("show");$("log").textContent="";
 }
 $("raceBtn").onclick=()=>{
@@ -150,16 +162,18 @@ $("raceBtn").onclick=()=>{
     }
     if(e.type==="done"){
       $(e.arm+"State").innerHTML='<span class="doneBadge">done</span>';
-      setFill(e.arm+"Fill",100,e.arm==="fak"?"reuse":"re-prefill");
+      const tag=e.arm==="fak"?"reuse":(e.arm==="tuned"?"warm cache":"re-prefill");
+      setFill(e.arm+"Fill",100,tag);
     }
     if(e.type==="result"){
       $("result").classList.add("show");
-      $("resultLine").innerHTML='fak finished in <span style="color:var(--fak)">'+fmt(e.fak_ms/1000)+'</span> · naive took <span style="color:var(--naive)">'+fmt(e.naive_ms/1000)+'</span> → <span class="big">'+e.ratio.toFixed(1)+"×</span>";
+      $("resultLine").innerHTML='fak finished in <span style="color:var(--fak)">'+fmt(e.fak_ms/1000)+'</span> · the tuned warm-cache baseline took <span style="color:var(--tuned)">'+fmt(e.tuned_ms/1000)+'</span> → <span class="big">'+e.ratio.toFixed(1)+"×</span> faster than SOTA";
       $("resultGrid").innerHTML=
         '<div class="cell">fak<b>'+fmt(e.fak_ms/1000)+'</b></div>'+
-        '<div class="cell">naive<b>'+fmt(e.naive_ms/1000)+'</b></div>'+
-        '<div class="cell">time saved<b>'+fmt(e.saved_ms/1000)+'</b></div>'+
-        '<div class="cell">ratio<b>'+e.ratio.toFixed(1)+"×</b></div>";
+        '<div class="cell">tuned warm cache (SOTA)<b>'+fmt(e.tuned_ms/1000)+'</b></div>'+
+        '<div class="cell">time saved vs SOTA<b>'+fmt(e.saved_ms/1000)+'</b></div>'+
+        '<div class="cell">fak vs SOTA<b>'+e.ratio.toFixed(1)+"×</b></div>";
+      $("resultRef").innerHTML='reference: the cold no-cache re-prefill loop took <span style="color:var(--naive)">'+fmt(e.naive_ms/1000)+'</span> ('+e.naive_ratio.toFixed(1)+'× fak) — shown only as a worst-case anchor, not a serving baseline anyone ships.';
       $("raceBtn").disabled=false;raceES.close();raceES=null;
     }
     if(e.type==="error"){$("raceBtn").disabled=false;raceES.close();raceES=null;}
@@ -196,17 +210,20 @@ function drawCurve(){
   [1,10,60,600].forEach(v=>{if(v>curveMax*1.2)return;const yy=y(v);const l=document.createElementNS(ns,"line");l.setAttribute("x1",PAD.l);l.setAttribute("x2",W-PAD.r);l.setAttribute("y1",yy);l.setAttribute("y2",yy);l.setAttribute("stroke","#1e2633");svg.appendChild(l);
     const t=document.createElementNS(ns,"text");t.setAttribute("x",PAD.l-7);t.setAttribute("y",yy+3);t.setAttribute("fill","#475569");t.setAttribute("font-size","10");t.setAttribute("text-anchor","end");t.textContent=v<60?v+"s":Math.round(v/60)+"m";svg.appendChild(t);});
   curvePts.forEach((p,i)=>{
-    const cx=PAD.l+gw*(i+0.5),bw=Math.min(46,gw*0.32);
-    const hA=Math.max(2,y(0.3)-y(p.armA_ms/1000)),hC=Math.max(2,y(0.3)-y(p.armC_ms/1000));
-    // naive bar
-    const rA=document.createElementNS(ns,"rect");rA.setAttribute("x",cx-bw-2);rA.setAttribute("y",y(p.armA_ms/1000));rA.setAttribute("width",bw);rA.setAttribute("height",hA);rA.setAttribute("fill","#f59e0b");rA.setAttribute("rx","3");svg.appendChild(rA);
-    // fak bar
-    const rC=document.createElementNS(ns,"rect");rC.setAttribute("x",cx+2);rC.setAttribute("y",y(p.armC_ms/1000));rC.setAttribute("width",bw);rC.setAttribute("height",hC);rC.setAttribute("fill","#22c55e");rC.setAttribute("rx","3");svg.appendChild(rC);
+    const cx=PAD.l+gw*(i+0.5),bw=Math.min(30,gw*0.24);
+    const armB=(p.armB_ms!=null?p.armB_ms:p.armA_ms)/1000;
+    const yB=y(armB),yC=y(p.armC_ms/1000),yA=y(p.armA_ms/1000),y0=y(0.3);
+    // naive (faded reference) — leftmost, dim
+    const rA=document.createElementNS(ns,"rect");rA.setAttribute("x",cx-bw*1.6);rA.setAttribute("y",yA);rA.setAttribute("width",bw);rA.setAttribute("height",Math.max(2,y0-yA));rA.setAttribute("fill","#f59e0b");rA.setAttribute("opacity","0.4");rA.setAttribute("rx","3");svg.appendChild(rA);
+    // tuned warm cache (SOTA) — the headline competitor
+    const rB=document.createElementNS(ns,"rect");rB.setAttribute("x",cx-bw*0.5);rB.setAttribute("y",yB);rB.setAttribute("width",bw);rB.setAttribute("height",Math.max(2,y0-yB));rB.setAttribute("fill","#38bdf8");rB.setAttribute("rx","3");svg.appendChild(rB);
+    // fak
+    const rC=document.createElementNS(ns,"rect");rC.setAttribute("x",cx+bw*0.6);rC.setAttribute("y",yC);rC.setAttribute("width",bw);rC.setAttribute("height",Math.max(2,y0-yC));rC.setAttribute("fill","#22c55e");rC.setAttribute("rx","3");svg.appendChild(rC);
     // labels
     const lbl=document.createElementNS(ns,"text");lbl.setAttribute("x",cx);lbl.setAttribute("y",H-PAD.b+16);lbl.setAttribute("fill","#94a3b8");lbl.setAttribute("font-size","11");lbl.setAttribute("text-anchor","middle");lbl.textContent=p.params;svg.appendChild(lbl);
-    const rat=document.createElementNS(ns,"text");rat.setAttribute("x",cx);rat.setAttribute("y",(y(p.armA_ms/1000))-4);rat.setAttribute("fill","#e2e8f0");rat.setAttribute("font-size","11");rat.setAttribute("font-weight","700");rat.setAttribute("text-anchor","middle");rat.textContent=p.ratio.toFixed(1)+"×";svg.appendChild(rat);
-    const aMs=document.createElementNS(ns,"text");aMs.setAttribute("x",cx-bw/2-2);aMs.setAttribute("y",H-PAD.b+30);aMs.setAttribute("fill","#f59e0b");aMs.setAttribute("font-size","9");aMs.setAttribute("text-anchor","middle");aMs.textContent=fmt(p.armA_ms/1000);svg.appendChild(aMs);
-    const cMs=document.createElementNS(ns,"text");cMs.setAttribute("x",cx+bw/2+2);cMs.setAttribute("y",H-PAD.b+30);cMs.setAttribute("fill","#22c55e");cMs.setAttribute("font-size","9");cMs.setAttribute("text-anchor","middle");cMs.textContent=fmt(p.armC_ms/1000);svg.appendChild(cMs);
+    // headline ratio = fak vs tuned, set above the taller of the two headline bars
+    const rat=document.createElementNS(ns,"text");rat.setAttribute("x",cx);rat.setAttribute("y",Math.min(yB,yC)-4);rat.setAttribute("fill","#e2e8f0");rat.setAttribute("font-size","11");rat.setAttribute("font-weight","700");rat.setAttribute("text-anchor","middle");rat.textContent=p.ratio.toFixed(1)+"×";svg.appendChild(rat);
+    const bMs=document.createElementNS(ns,"text");bMs.setAttribute("x",cx);bMs.setAttribute("y",H-PAD.b+30);bMs.setAttribute("fill","#38bdf8");bMs.setAttribute("font-size","9");bMs.setAttribute("text-anchor","middle");bMs.textContent=fmt(armB);svg.appendChild(bMs);
   });
   const ax=document.createElementNS(ns,"text");ax.setAttribute("x",6);ax.setAttribute("y",PAD.t+8);ax.setAttribute("fill","#475569");ax.setAttribute("font-size","10");ax.textContent="wall-clock (log)";svg.appendChild(ax);
 }

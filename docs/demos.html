@@ -144,19 +144,22 @@
       <h3>🧩 Multi-agent context reuse</h3>
       <p>The fleet thesis made visible: a shared prefix prefilled <em>once</em> and cloned into N agents,
       with a per-agent timeline showing each tool result drawn to scale as the context grows unevenly.
-      Pick a scenario, read the exact prefill-token work each strategy does (naive re-prefill vs warm KV
-      vs fak), then run the live race through the real in-kernel model.</p>
+      Pick a scenario, read the exact prefill-token work each strategy does (warm KV vs fak, with cold
+      re-prefill as a worst-case reference), then run the live race — fak vs the warm-cache baseline —
+      through the real in-kernel model.</p>
       <span class="go">Open the reuse proof →</span>
     </a>
 
     <!-- demorace — live model, reuse race + curve (proxied via :80) -->
     <a class="card" href="http://136.111.250.205/demorace/" rel="noopener">
       <span class="pill live">live model · SmolLM2-135M</span>
-      <h3>🏁 Reuse race + the reuse curve</h3>
-      <p>A head-to-head live race over one 25-request multi-agent session: the naive arm re-prefills the
-      whole growing context every turn; the fak arm prefills the shared prefix once, clones it into the
-      agents, and batches decode. Same model, same tokens, same answers — the only difference is how much
-      shared setup the system makes the model re-read. Then build the reuse curve across the model ladder.</p>
+      <h3>🏁 Reuse race vs SOTA + the reuse curve</h3>
+      <p>A head-to-head live race over one 25-request multi-agent session. The headline is fak vs a
+      <em>tuned warm-cache baseline</em> — the per-agent KV / prefix-caching stack vLLM · SGLang · provider
+      prompt-caching give you: it caches the prefix once per agent and ingests only new tokens. fak prefills
+      the shared prefix once for the whole fleet, clones it into the agents, and batches decode. The cold
+      re-prefill loop runs dim alongside, as a worst-case reference only. Same model, same tokens, same
+      answers. Then build the reuse curve across the model ladder.</p>
       <span class="go">Run the live race →</span>
     </a>
 

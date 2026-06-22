@@ -9,6 +9,7 @@
     --bg:#f6f8fa; --panel:#ffffff; --panel2:#f0f3f6; --line:#d0d7de;
     --txt:#1f2328; --dim:#6e7781; --dim2:#57606a;
     --fak:#1a7f37; --fakg:#116329; --naive:#bf8700; --naiveg:#7d5300; --accent:#0969da;
+    --tuned:#0d9488; --tunedg:#0a6e64;
     --prefix:#6366f1; --decode:#9aa5b1;
     --t0:#0a85d1; --t1:#8250df; --t2:#bf3989; --t3:#bf8700;
   }
@@ -65,8 +66,11 @@
   .rtrack{height:26px;background:var(--panel2);border:1px solid var(--line);border-radius:7px;overflow:hidden;position:relative}
   .rfill{height:100%;width:0%;transition:width .25s ease;display:flex;align-items:center;padding-left:9px;font-weight:700;font-size:11px;white-space:nowrap}
   .fak .nm{color:var(--fak)}.fak .rfill{background:linear-gradient(90deg,var(--fak),var(--fakg));color:#042511}
-  .naive .nm{color:var(--naive)}.naive .rfill{background:linear-gradient(90deg,var(--naive),var(--naiveg));color:#2a1602}
+  .lane.tuned .nm{color:var(--tuned)}.lane.tuned .rfill{background:linear-gradient(90deg,var(--tuned),var(--tunedg));color:#ffffff}
+  /* naive race lane = dim worst-case reference, never the headline */
+  .lane.naive .nm{color:var(--naive);opacity:.85}.lane.naive .rfill{background:linear-gradient(90deg,var(--naive),var(--naiveg));color:#2a1602;opacity:.6}.lane.naive .rtrack{opacity:.75}
   .idle{color:var(--dim)}.doneBadge{color:var(--fak);font-weight:700}
+  .result .ref{font-size:11px;color:var(--dim);margin-top:8px}
   .tag{font-size:10px;border-radius:4px;padding:1px 6px;border:1px solid var(--line);color:var(--dim2);margin-left:6px}
   .result{margin-top:14px;padding:13px 15px;background:var(--panel2);border:1px solid var(--line);border-radius:9px;display:none}
   .result.show{display:block}
@@ -110,7 +114,7 @@
 
   <!-- ③ LIVE RACE -->
   <div class="panel">
-    <h2>③ Live race — fak vs the cold no-cache reference <span class="tag">real in-kernel model, this box</span></h2>
+    <h2>③ Live race — fak vs the tuned warm-cache baseline (SOTA) <span class="tag">real in-kernel model, this box</span></h2>
     <div class="row">
       <label>model <select id="model"></select></label>
       <span class="cfg" id="raceCfg"></span>
@@ -121,14 +125,19 @@
       <div class="rtrack"><div class="rfill" id="fakFill"></div></div>
       <div class="meta" id="fakMeta">prefilled 0 · decoded 0</div>
     </div>
+    <div class="lane tuned">
+      <div class="hd"><span class="nm">tuned warm cache (SOTA) <span class="tag">per-agent KV · prefix once/agent</span> <span class="idle" id="tunedState">idle</span></span><span class="ms" id="tunedMs">—</span></div>
+      <div class="rtrack"><div class="rfill" id="tunedFill"></div></div>
+      <div class="meta" id="tunedMeta">prefilled 0 · decoded 0</div>
+    </div>
     <div class="lane naive">
       <div class="hd"><span class="nm">no-cache re-prefill <span class="tag">worst-case ref</span> <span class="idle" id="naiveState">idle</span></span><span class="ms" id="naiveMs">—</span></div>
       <div class="rtrack"><div class="rfill" id="naiveFill"></div></div>
       <div class="meta" id="naiveMeta">prefilled 0 · decoded 0</div>
     </div>
-    <div class="result" id="result"><div id="resultLine"></div><div class="grid" id="resultGrid"></div></div>
+    <div class="result" id="result"><div id="resultLine"></div><div class="grid" id="resultGrid"></div><div class="ref" id="resultRef"></div></div>
     <div class="log" id="log"></div>
-    <div class="note">This race pits fak against the <b>cold no-cache re-prefill</b> loop — a <b>worst-case reference</b>, not a serving baseline (the honest baseline, a warm per-agent KV cache, is the token accounting in panel ①). The fak arm always runs <b>live</b>. For the long scenarios the no-cache arm would re-prefill tens of thousands of tokens and grind for minutes, so it is <b>projected from this run's measured prefill throughput</b> (the sessionbench method) and labelled as such — small scenarios run both arms fully live.</div>
+    <div class="note">The HEADLINE is fak vs the <b>tuned warm-cache baseline</b> (arm B: a persistent per-agent KV cache — what vLLM / SGLang prefix-caching or provider prompt-caching give you). Both run <b>fully live</b> here — the warm-cache arm has no quadratic re-prefill, so it never needs projecting. The dim <b>cold no-cache</b> loop is a <b>worst-case reference</b> only, not a serving baseline; on long scenarios it would grind for minutes, so it is <b>projected from this run's measured prefill throughput</b> (the sessionbench method) and labelled as such.</div>
   </div>
 
   <div class="sub" style="margin-top:18px;color:#afb8c1">fak in-kernel engine · pure-Go Q8 forward pass · tokens are real model output. No network, no API — all on this box.</div>
@@ -207,10 +216,10 @@ function drawTimeline(v){
 let es=null;
 function setFill(id,pct,label){const f=$(id);f.style.width=Math.min(100,pct)+"%";f.textContent=label||"";}
 function resetRace(){
-  ["fakState","naiveState"].forEach(id=>{$(id).textContent="idle";$(id).className="idle";});
-  ["fakMs","naiveMs"].forEach(id=>$(id).textContent="—");
-  ["fakFill","naiveFill"].forEach(id=>setFill(id,0));
-  $("fakMeta").textContent="prefilled 0 · decoded 0";$("naiveMeta").textContent="prefilled 0 · decoded 0";
+  ["fakState","tunedState","naiveState"].forEach(id=>{$(id).textContent="idle";$(id).className="idle";});
+  ["fakMs","tunedMs","naiveMs"].forEach(id=>$(id).textContent="—");
+  ["fakFill","tunedFill","naiveFill"].forEach(id=>setFill(id,0));
+  ["fakMeta","tunedMeta","naiveMeta"].forEach(id=>$(id).textContent="prefilled 0 · decoded 0");
   $("result").classList.remove("show");$("log").textContent="";
 }
 $("raceBtn").onclick=()=>{
@@ -229,18 +238,20 @@ $("raceBtn").onclick=()=>{
     }
     if(e.type==="done"){
       $(e.arm+"State").innerHTML='<span class="doneBadge">'+(e.projected?"projected":"done")+'</span>';
-      setFill(e.arm+"Fill",100,e.arm==="fak"?"reuse":(e.projected?"re-prefill (projected)":"re-prefill"));
+      const tag=e.arm==="fak"?"reuse":(e.arm==="tuned"?"warm cache":(e.projected?"re-prefill (projected)":"re-prefill"));
+      setFill(e.arm+"Fill",100,tag);
       $(e.arm+"Ms").textContent=fmt(e.total_ms/1000);
     }
     if(e.type==="result"){
       $("result").classList.add("show");
-      $("resultLine").innerHTML='fak <span class="big" style="color:var(--fak)">'+e.tokens.tuned_over_fak.toFixed(1)+'×</span> less prefill re-read than a <b>warm per-agent KV cache</b> (the cross-agent win) · cold no-cache wall-clock: fak '+fmt(e.fak_ms/1000)+' vs '+fmt(e.naive_ms/1000)+(e.naive_projected?' <span class="tag">no-cache projected</span>':'')+' = '+e.ratio.toFixed(1)+'× <span class="tag">worst-case ref</span>';
+      $("resultLine").innerHTML='fak finished in <span style="color:var(--fak)">'+fmt(e.fak_ms/1000)+'</span> · the tuned warm-cache baseline took <span style="color:var(--tuned)">'+fmt(e.tuned_ms/1000)+'</span> → <span class="big">'+e.ratio.toFixed(1)+'×</span> faster than SOTA';
       $("resultGrid").innerHTML=
-        '<div class="cell">fak-win vs warm KV<b>'+e.tokens.tuned_over_fak.toFixed(1)+'×</b></div>'+
+        '<div class="cell">fak vs tuned (live)<b>'+e.ratio.toFixed(1)+'×</b></div>'+
         '<div class="cell">fak wall-clock<b>'+fmt(e.fak_ms/1000)+'</b></div>'+
-        '<div class="cell">no-cache ref wall-clock<b>'+fmt(e.naive_ms/1000)+'</b></div>'+
-        '<div class="cell">no-cache speedup (ref)<b>'+e.ratio.toFixed(1)+'×</b></div>'+
-        '<div class="cell">no-cache re-read (ref)<b>'+e.tokens.naive_over_fak.toFixed(1)+'×</b></div>';
+        '<div class="cell">tuned warm cache (SOTA)<b>'+fmt(e.tuned_ms/1000)+'</b></div>'+
+        '<div class="cell">time saved vs SOTA<b>'+fmt(e.saved_ms/1000)+'</b></div>'+
+        '<div class="cell">exact prefill-tok vs warm KV<b>'+e.tokens.tuned_over_fak.toFixed(1)+'×</b></div>';
+      $("resultRef").innerHTML='reference: the cold no-cache loop took <span style="color:var(--naive)">'+fmt(e.naive_ms/1000)+'</span>'+(e.naive_projected?' <span class="tag">projected</span>':'')+' ('+e.naive_ratio.toFixed(1)+'× fak, '+e.tokens.naive_over_fak.toFixed(1)+'× the prefill re-read) — a worst-case anchor, not a serving baseline anyone ships.';
       $("raceBtn").disabled=false;es.close();es=null;
     }
     if(e.type==="error"){$("raceBtn").disabled=false;es.close();es=null;}

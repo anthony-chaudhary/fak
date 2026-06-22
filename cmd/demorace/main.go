@@ -1,17 +1,26 @@
 // Command demorace is the live, on-box demo of fak's value point: REUSE.
 //
-// It runs a head-to-head LIVE race between two ways of serving the SAME model over the
+// It runs a head-to-head LIVE race between three ways of serving the SAME model over the
 // SAME 25-request multi-agent session, and builds a reuse CURVE across a model-size ladder.
 //
 //	The session: C agents share one P-token prefix; each runs T turns, decoding D tokens
 //	per turn and ingesting R tool-result tokens between turns. Total requests = C·T (=25).
 //
-// The two arms (same model, same bit-identical kernels — the delta is PURE work-reuse):
+// The three arms (same model, same bit-identical kernels — the delta is PURE work-reuse):
 //
-//	arm "naive" (A) — the common local pattern: re-prefill the ENTIRE growing context every
-//	  turn, every agent. Prefill work is quadratic in T and ×C. Run FULLY LIVE here.
+//	arm "tuned" (B) — the SOTA serving baseline: a tuned warm per-agent KV cache (vLLM /
+//	  SGLang prefix caching, provider prompt-caching). The prefix is prefilled ONCE per
+//	  agent, then only the new tool-result tokens are ingested incrementally; serial decode.
+//	  No quadratic re-prefill, no cross-agent sharing, no batching. Run FULLY LIVE here.
 //	arm "fak"   (C) — prefix prefilled ONCE and cloned into C agents; batched decode (one
 //	  weight stream serves all C); incremental result ingestion. Run FULLY LIVE here.
+//	arm "naive" (A) — the cold re-prefill loop: re-prefill the ENTIRE growing context every
+//	  turn, every agent (quadratic in T, ×C). A worst-case REFERENCE only — NOT a serving
+//	  baseline anyone ships. Run live in the race; PROJECTED (faded) in the big-model curve.
+//
+// HEADLINE = B/C: fak vs the tuned warm-cache baseline — the honest competitive number
+// (cross-agent prefix reuse + batched decode ON TOP of a warm cache). The A/C number (vs
+// the cold loop) is shown only as the worst-case reference, never as the headline.
 //
 // Same model, same tokens, same answers; the only difference is how much shared setup the
 // system makes the model re-read. That is the whole fak thesis, made visible in real time.
@@ -297,8 +306,58 @@ func liveArmC(l *loaded, P, T, C, D, R int, emit emitter) (totalMS, decodeMS flo
 	return
 }
 
+// liveArmB runs the tuned warm-cache arm live — the SOTA serving baseline. Each agent
+// keeps a PERSISTENT per-agent KV cache: it prefills the shared prefix ONCE (so C times
+// across the fleet — no cross-agent sharing, no batching), then ingests only the NEW
+// tool-result tokens incrementally and decodes serially. This is the real baseline a
+// tuned single-tenant stack gives you — vLLM / SGLang prefix caching, provider prompt
+// caching, a persistent KV per session — so the fak-vs-tuned gap is the honest number
+// (cross-agent prefix reuse + batched decode on top of a warm cache), not the strawman
+// gap vs the cold re-prefill loop. Emits one "turn" event per (agent,turn).
+func liveArmB(l *loaded, P, T, C, D, R int, emit emitter) (totalMS, decodeMS float64) {
+	m, vocab := l.m, l.vocab
+	prefix := lcgIDs(P, vocab, 1)
+	ids0 := lcgIDs(C, vocab, 991)
+	start := time.Now()
+
+	var dcAcc, prefilledSoFar float64
+	done := 0
+	for a := 0; a < C; a++ {
+		s := m.NewSession()
+		s.Quant = true
+		s.Prefill(prefix) // prefix prefilled ONCE per agent (warm KV — never re-prefill the growing context)
+		prefilledSoFar += float64(P)
+		tok := ids0[a]
+		for t := 0; t < T; t++ {
+			t1 := time.Now()
+			for d := 0; d < D; d++ {
+				s.Step(tok)
+				tok = (tok*48271 + 1) % vocab
+			}
+			dcAcc += ms(time.Since(t1))
+			if t < T-1 {
+				s.Prefill(lcgIDs(R, vocab, uint64(50000+t*1000+a*97))) // ingest ONLY the new result tokens
+				prefilledSoFar += float64(R)
+			}
+			done++
+			emit(event{
+				"type": "turn", "arm": "tuned", "turn": t, "agent": a,
+				"requests_done": done, "total_requests": C * T,
+				"tokens_prefilled": int(prefilledSoFar), "tokens_decoded": done * D,
+				"elapsed_ms": ms(time.Since(start)),
+			})
+		}
+		s.Close()
+	}
+	totalMS = ms(time.Since(start))
+	decodeMS = dcAcc
+	return
+}
+
 // liveArmA runs the naive arm live: every (agent,turn) re-prefills the ENTIRE context so far
-// and decodes serially. Emits one "turn" event per (agent,turn).
+// and decodes serially. Emits one "turn" event per (agent,turn). This is a worst-case
+// REFERENCE only (the cold re-prefill loop) — NOT a serving baseline anyone ships; the
+// headline race is fak vs the tuned warm-cache arm B above.
 func liveArmA(l *loaded, P, T, C, D, R int, emit emitter) (totalMS, decodeMS float64) {
 	m, vocab := l.m, l.vocab
 	prefix := lcgIDs(P, vocab, 1)
@@ -389,14 +448,17 @@ func handleLadder(w http.ResponseWriter, r *http.Request) {
 		out = append(out, rs{s.Name, s.Dir, s.Kind, s.Present, s.Params})
 	}
 	// timing-free work-elimination ratio for the default workload, as the honest floor.
-	a, _, c := prefillTokens(512, 5, 5, 16, 32)
+	// HEADLINE = b/c (fak vs the tuned warm-cache baseline); a/c (vs the cold no-cache
+	// loop) is the worst-case reference only.
+	a, b, c := prefillTokens(512, 5, 5, 16, 32)
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]any{
 		"models":     out,
 		"gomaxprocs": gomax,
-		"prefill_tok_ratio_a_over_c": map[string]any{
-			"a": a, "c": c, "ratio": float64(a) / float64(c),
-			"note": "exact prefill-token work-elimination (timing-free): naive re-prefills the whole context every turn, fak reuses the shared prefix once.",
+		"prefill_tok_ratio": map[string]any{
+			"a": a, "b": b, "c": c,
+			"b_over_c": float64(b) / float64(c), "a_over_c": float64(a) / float64(c),
+			"note": "exact, timing-free prefill-token work-elimination. HEADLINE b/c = fak vs a tuned warm-cache (per-agent KV) baseline — the real serving baseline (vLLM/SGLang prefix caching, provider prompt-caching). a/c = vs the cold no-cache re-prefill loop, a worst-case reference, NOT a serving baseline.",
 		},
 	})
 }
@@ -483,14 +545,22 @@ func handleRace(w http.ResponseWriter, r *http.Request) {
 	cTotal, cDecode := liveArmC(l, P, T, C, D, R, s.emit)
 	s.emit(event{"type": "done", "arm": "fak", "total_ms": cTotal, "decode_ms": cDecode, "tokens_prefilled": P + C*(T-1)*R})
 
-	// naive arm (live) — the long grind
+	// tuned warm-cache arm (live) — the SOTA serving baseline (the HEADLINE comparison)
+	s.emit(event{"type": "start", "arm": "tuned", "total_requests": C * T})
+	bTotal, bDecode := liveArmB(l, P, T, C, D, R, s.emit)
+	s.emit(event{"type": "done", "arm": "tuned", "total_ms": bTotal, "decode_ms": bDecode, "tokens_prefilled": C * (P + (T-1)*R)})
+
+	// naive arm (live) — the cold re-prefill REFERENCE (the long grind; not a serving baseline)
 	s.emit(event{"type": "start", "arm": "naive", "total_requests": C * T})
 	aTotal, aDecode := liveArmA(l, P, T, C, D, R, s.emit)
 	s.emit(event{"type": "done", "arm": "naive", "total_ms": aTotal, "decode_ms": aDecode})
 
-	ratio := aTotal / cTotal
-	s.emit(event{"type": "result", "fak_ms": cTotal, "naive_ms": aTotal, "ratio": ratio,
-		"saved_ms": aTotal - cTotal, "fak_decode_ms": cDecode, "naive_decode_ms": aDecode,
+	// HEADLINE = B/C: fak vs the tuned warm-cache baseline. naive_ratio (A/C) is the
+	// worst-case reference, surfaced but never the headline.
+	ratio := bTotal / cTotal
+	s.emit(event{"type": "result", "fak_ms": cTotal, "tuned_ms": bTotal, "naive_ms": aTotal,
+		"ratio": ratio, "naive_ratio": aTotal / cTotal, "saved_ms": bTotal - cTotal,
+		"fak_decode_ms": cDecode, "tuned_decode_ms": bDecode, "naive_decode_ms": aDecode,
 		"model": name, "workload": map[string]int{"P": P, "T": T, "C": C, "D": D, "R": R}})
 }
 
@@ -519,7 +589,7 @@ func handleCurve(w http.ResponseWriter, r *http.Request) {
 		P, T, C, D, R = 128, 5, 3, 16, 16
 	}
 	maxCtx := P + (T-1)*(D+R)
-	s.emit(event{"type": "info", "msg": fmt.Sprintf("curve sweep: P=%d T=%d C=%d D=%d R=%d (maxCtx=%d). fak arm run LIVE; naive arm PROJECTED from measured prefill cost.", P, T, C, D, R, maxCtx)})
+	s.emit(event{"type": "info", "msg": fmt.Sprintf("curve sweep: P=%d T=%d C=%d D=%d R=%d (maxCtx=%d). HEADLINE fak vs tuned warm-cache — BOTH run LIVE; the cold no-cache arm is PROJECTED as a faded reference only.", P, T, C, D, R, maxCtx)})
 
 	for _, sp := range specs {
 		if !sp.Present {
@@ -547,8 +617,15 @@ func handleCurve(w http.ResponseWriter, r *http.Request) {
 		s.emit(event{"type": "phase", "model": sp.Name, "phase": "running fak arm live"})
 		cTotal, cDecode := liveArmC(l, P, T, C, D, R, func(e event) {})
 
-		// anchor the prefill model to the live prefix prefill (same time window as arm C),
-		// so cross-time contention does not bias the projected naive arm.
+		// tuned warm-cache arm, LIVE — the SOTA baseline. It is cheap to run (prefix once
+		// per agent + incremental ingestion, no quadratic re-prefill), so the HEADLINE
+		// fak-vs-tuned ratio is measured end-to-end, never projected.
+		s.emit(event{"type": "phase", "model": sp.Name, "phase": "running tuned warm-cache arm live"})
+		bTotal, _ := liveArmB(l, P, T, C, D, R, func(e event) {})
+
+		// naive cold re-prefill arm — PROJECTED reference only (quadratic in T, intractable
+		// to run live on the big rungs). Anchored to the live prefix prefill so cross-time
+		// contention does not bias it.
 		anchor := 1.0
 		if base := pm.cost(P); base > 0 {
 			anchor = cTotal / (base + 1) // coarse; armC total includes decode too — keep within reason
@@ -561,11 +638,12 @@ func handleCurve(w http.ResponseWriter, r *http.Request) {
 		if cTotal > 0 && aTotal < cTotal {
 			aTotal = cTotal // never let projection undersell the floor
 		}
-		ratio := aTotal / cTotal
+		ratio := bTotal / cTotal // HEADLINE: fak vs the tuned warm-cache baseline (both live)
 
 		s.emit(event{
 			"type": "point", "model": sp.Name, "params": sp.Params,
-			"armC_ms": cTotal, "armA_ms": aTotal, "ratio": ratio,
+			"armC_ms": cTotal, "armB_ms": bTotal, "armA_ms": aTotal,
+			"ratio": ratio, "naive_ratio": aTotal / cTotal,
 			"armC_decode_ms": cDecode, "armA_prefill_ms": aPrefill, "armA_decode_ms": aDecode,
 			"prefill_samples": pm, "live": true,
 		})
@@ -640,7 +718,7 @@ func main() {
 	}
 	fmt.Fprintf(os.Stderr, "demorace %s on http://%s (GOMAXPROCS=%d)\n", version, listenAddr(*addr), gomax)
 	fmt.Fprintf(os.Stderr, "ladder present: %s\n", strings.Join(present, ", "))
-	fmt.Fprintf(os.Stderr, "open the URL → 'Run live race' (fak vs naive, both LIVE) then 'Build curve'\n")
+	fmt.Fprintf(os.Stderr, "open the URL → 'Run live race' (HEADLINE fak vs tuned warm-cache, both LIVE; cold no-cache shown as reference) then 'Build curve'\n")
 	if err := http.ListenAndServe(listenAddr(*addr), mux); err != nil {
 		fmt.Fprintln(os.Stderr, "listen:", err)
 		os.Exit(1)

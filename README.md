@@ -31,7 +31,8 @@ reuse is still legal, and what survives a session boundary.**
 
 **▶ Try the live demos** — [three interactive demos running the real kernel on GCP](https://anthony-chaudhary.github.io/fak/demos.html):
 the turn-tax race (a SOTA loop vs fak's 1-shot kernel), the multi-agent context-reuse proof,
-and a live model reuse race — nothing to install, they run in your browser. Want your own copy?
+and a live model reuse race against a tuned warm-cache (SOTA) baseline — nothing to install,
+they run in your browser. Want your own copy?
 The self-contained one is one command — `go run ./cmd/turntaxdemo` —
 and [the full guide](https://anthony-chaudhary.github.io/fak/run-the-demos.html) covers local,
 headless, Docker, and your own cloud VM.

@@ -15,8 +15,8 @@ The three demos:
 | Demo | Command | Needs a model? |
 |------|---------|----------------|
 | **turntaxdemo** — turn-tax race (SOTA loop vs fak 1-shot) | `go run ./cmd/turntaxdemo` | no — self-contained |
-| **ctxdemo** — multi-agent context-reuse proof | `go run ./cmd/ctxdemo` | optional (live race needs one) |
-| **demorace** — reuse race + reuse curve | `go run ./cmd/demorace` | yes (live race) |
+| **ctxdemo** — multi-agent context-reuse proof (fak vs a tuned warm-cache SOTA baseline) | `go run ./cmd/ctxdemo` | optional (live race needs one) |
+| **demorace** — reuse race (fak vs a tuned warm-cache SOTA baseline) + reuse curve | `go run ./cmd/demorace` | yes (live race) |
 
 ## 1. Local — one command
 

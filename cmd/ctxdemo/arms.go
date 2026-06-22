@@ -96,10 +96,68 @@ func liveArmFak(l *loaded, w Workload, emit emitter) armResult {
 	}
 }
 
+// liveArmTuned runs the tuned warm-cache arm live — the SOTA serving baseline and the
+// HEADLINE comparison. Each agent keeps a PERSISTENT per-agent KV cache: the shared prefix
+// is prefilled ONCE per agent (so C times across the fleet — no cross-agent sharing, no
+// batching), then each turn decodes serially and ingests ONLY that turn's (distinct-sized)
+// tool result incrementally. This is the real baseline a tuned single-tenant stack gives
+// you — vLLM / SGLang prefix caching, provider prompt-caching, a persistent KV per session.
+// fak's win over THIS arm (cross-agent prefix reuse + batched decode on top of a warm
+// cache) is the honest number; the cold re-prefill arm below is only a worst-case
+// reference. No quadratic re-prefill, so it always runs live (never projected).
+func liveArmTuned(l *loaded, w Workload, emit emitter) armResult {
+	m, vocab := l.m, l.vocab
+	P, C, T, D := w.Scn.Prefix, w.Scn.Agents, w.Scn.Turns, w.Scn.Decode
+	prefix := lcgIDs(P, vocab, 1)
+	ids0 := lcgIDs(C, vocab, 991)
+
+	start := time.Now()
+	var decodeMS, prefillMS float64
+	prefilledTk, done := 0, 0
+	for c := 0; c < C; c++ {
+		s := m.NewSession()
+		s.Quant = true
+		tp := time.Now()
+		s.Prefill(prefix) // prefix prefilled ONCE per agent (warm KV — never re-prefill the growing context)
+		prefillMS += ms(time.Since(tp))
+		prefilledTk += P
+		tok := ids0[c]
+		for t := 0; t < T; t++ {
+			td := time.Now()
+			for d := 0; d < D; d++ {
+				s.Step(tok)
+				tok = (tok*48271 + 1) % vocab
+			}
+			decodeMS += ms(time.Since(td))
+			if t < len(w.Results[c]) {
+				tp := time.Now()
+				s.Prefill(lcgIDs(w.Results[c][t], vocab, uint64(50000+t*1000+c*97))) // ingest ONLY this turn's result
+				prefillMS += ms(time.Since(tp))
+				prefilledTk += w.Results[c][t]
+			}
+			done++
+			emit(event{
+				"type": "turn", "arm": "tuned", "turn": t, "agent": c,
+				"requests_done": done, "total_requests": C * T,
+				"tokens_prefilled": prefilledTk, "tokens_decoded": done * D,
+				"elapsed_ms": ms(time.Since(start)),
+			})
+		}
+		s.Close()
+	}
+	return armResult{
+		totalMS:   ms(time.Since(start)),
+		decodeMS:  decodeMS,
+		prefillMS: prefillMS,
+		prefillTk: prefilledTk,
+	}
+}
+
 // liveArmNaive runs the naive arm live: every (agent,turn) re-prefills the ENTIRE
 // context so far — prefix + every token generated and ingested in prior turns — then
 // decodes serially. Emits one "turn" event per (agent,turn). This is the multi-minute
-// grind; for long scenarios prefer projectNaive (the sessionbench method).
+// grind and a worst-case REFERENCE only — NOT a serving baseline; for long scenarios
+// prefer projectNaive (the sessionbench method).
 func liveArmNaive(l *loaded, w Workload, emit emitter) armResult {
 	m, vocab := l.m, l.vocab
 	P, C, T, D := w.Scn.Prefix, w.Scn.Agents, w.Scn.Turns, w.Scn.Decode
