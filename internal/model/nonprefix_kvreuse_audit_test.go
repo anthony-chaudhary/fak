@@ -311,6 +311,7 @@ func nonPrefixSegmentManifest(cfg Config, S []int) cachemeta.KVManifest {
 		PositionConvention: cachemeta.PositionRecomputeRequired,
 		Producer:           "issue-109-audit",
 		ProducerKeyID:      "audit-key",
+		AccessPolicy:       "fleet-internal", // §2.4 access-control axis — admissibility precondition for any third-party KV
 		IntegrityChecksum:  "audit-checksum",
 		Signature:          cachemeta.ManifestSignature{Algorithm: "hmac-sha256", Value: "deadbeef"},
 	}
