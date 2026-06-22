@@ -159,9 +159,9 @@ trace shape would make it useful?
 ```
 
 If they have a concrete failure mode, ask for a scrubbed or synthetic version via
-the [agent-tool boundary fixture issue form](../.github/ISSUE_TEMPLATE/agent-tool-boundary-fixture.yml).
+the [agent-tool boundary fixture issue form](https://github.com/anthony-chaudhary/fak/blob/main/.github/ISSUE_TEMPLATE/agent-tool-boundary-fixture.yml).
 If they want a framework or host integration, route them to the
-[adapter fixture issue form](../.github/ISSUE_TEMPLATE/framework-adapter-fixture.yml).
+[adapter fixture issue form](https://github.com/anthony-chaudhary/fak/blob/main/.github/ISSUE_TEMPLATE/framework-adapter-fixture.yml).
 
 ## Non-Claims
 

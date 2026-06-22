@@ -34,7 +34,7 @@ wall. If it misses, the result is still quarantined by policy; if it fires, that
 The security floor does not depend on it.
 
 → Background: [Policy in the kernel](../explainers/policy-in-the-kernel.md) ·
-[`README.md` "Security: the lock, not the screener"](../../README.md).
+[`README.md` "Security: the lock, not the screener"](https://github.com/anthony-chaudhary/fak/blob/main/README.md).
 
 ---
 
@@ -194,7 +194,7 @@ Stated plainly so you don't over-trust it:
   serving engine. For production serving, front a real engine via Tier 1.
 
 Per-capability status (`[SHIPPED]` / `[SIMULATED]` / `[STUB]`) is tracked honestly in
-[`fak/CLAIMS.md`](../../CLAIMS.md). To report a vulnerability, see the repository's
+[`fak/CLAIMS.md`](https://github.com/anthony-chaudhary/fak/blob/main/CLAIMS.md). To report a vulnerability, see the repository's
 security policy.
 
 ---

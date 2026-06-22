@@ -141,8 +141,8 @@ smuggle in claims the rest of the repo is careful not to make:
   is a correctness *reference* forward pass (proven bit-exact against HuggingFace), not a
   production serving engine: no continuous batching, paged attention, or multi-tenant
   scheduling. For chat-quality serving, front vLLM / SGLang / llama.cpp / Ollama / a cloud
-  provider. See [`CLAIMS.md`](../../CLAIMS.md) and the
-  [getting-started caveat](../../GETTING-STARTED.md#4-tier-2--run-the-fused-in-kernel-model).
+  provider. See [`CLAIMS.md`](https://github.com/anthony-chaudhary/fak/blob/main/CLAIMS.md) and the
+  [getting-started caveat](https://github.com/anthony-chaudhary/fak/blob/main/GETTING-STARTED.md#4-tier-2--run-the-fused-in-kernel-model).
 - **The cache-reuse win is self-host only**, and a few-fold vs a tuned warm-cache stack
   (the eye-catching multiples are vs the naive re-send-everything pattern). An app that
   merely *calls* a frontier API gets the safety floor but none of the reuse savings.
@@ -155,9 +155,9 @@ smuggle in claims the rest of the repo is careful not to make:
   capability gating, tool-result quarantine, or audit-by-default. Those are external
   layers you assemble, and `fak` is that layer as one binary.
 
-→ Every operational fact above is verifiable: [`go.mod`](../../go.mod) (zero deps),
-[`INSTALL.md`](../../INSTALL.md) (static targets, distroless image), the gateway routes in
-[`GETTING-STARTED.md`](../../GETTING-STARTED.md#3-tier-1--put-fak-in-front-of-a-real-model-the-practical-serving-path),
-and the claim tags in [`CLAIMS.md`](../../CLAIMS.md).
+→ Every operational fact above is verifiable: [`go.mod`](https://github.com/anthony-chaudhary/fak/blob/main/go.mod) (zero deps),
+[`INSTALL.md`](https://github.com/anthony-chaudhary/fak/blob/main/INSTALL.md) (static targets, distroless image), the gateway routes in
+[`GETTING-STARTED.md`](https://github.com/anthony-chaudhary/fak/blob/main/GETTING-STARTED.md#3-tier-1--put-fak-in-front-of-a-real-model-the-practical-serving-path),
+and the claim tags in [`CLAIMS.md`](https://github.com/anthony-chaudhary/fak/blob/main/CLAIMS.md).
 
 *Last updated: 2026-06-21*

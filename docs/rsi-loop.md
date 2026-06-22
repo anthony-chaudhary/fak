@@ -6,12 +6,12 @@ description: "How fak's rsiloop closes its recursive self-improvement loop: it d
 # The RSI closed loop (`rsiloop`)
 
 > fak's recursive-self-improvement loop, **closed**. `internal/shipgate` is the
-> non-forgeable keep-bit and [`cmd/rsicycle`](../cmd/rsicycle) is a *one-shot* that
-> takes the witnesses as flags. `internal/rsiloop` + [`cmd/rsiloop`](../cmd/rsiloop)
+> non-forgeable keep-bit and [`cmd/rsicycle`](https://github.com/anthony-chaudhary/fak/tree/main/cmd/rsicycle) is a *one-shot* that
+> takes the witnesses as flags. `internal/rsiloop` + [`cmd/rsiloop`](https://github.com/anthony-chaudhary/fak/tree/main/cmd/rsiloop)
 > are the **true loop**: they *derive* every witness from a real measurement the
 > loop runs itself, fork-isolated off `main`, so the loop author cannot forge the
 > numbers that drive a KEEP. This is the runnable assembly of the four-part process
-> the repo already names in [`EXTENDING.md`](../EXTENDING.md).
+> the repo already names in [`EXTENDING.md`](https://github.com/anthony-chaudhary/fak/blob/main/EXTENDING.md).
 
 ## The gap this closes
 
@@ -109,7 +109,7 @@ last recorded point, exiting `3` on a regression. Because the *improve* baseline
 also re-derived from `main` every run, a kept gain is always a gain over **latest
 main**, never a number that drifted from ground truth. (A regression caused by `main`
 getting *faster at the arm a number depends on* — the F1 tombstone case in
-[`BENCHMARK-AUTHORITY.md`](../BENCHMARK-AUTHORITY.md) — is exactly what the series
+[`BENCHMARK-AUTHORITY.md`](https://github.com/anthony-chaudhary/fak/blob/main/BENCHMARK-AUTHORITY.md) — is exactly what the series
 surfaces.)
 
 ## Extending it to a real subsystem

@@ -48,7 +48,7 @@ inversion are the same downward step.
 > **The gate sinks onto the wire.** Orange commands a hook on top (heavy solid
 > arrow), then merely proposes to a blue kernel the call threads through (light
 > dotted arrow). The latency drop and the control flip are the same downward
-> move. Source: [`visuals/gate-down-the-stack.mmd`](../../visuals/gate-down-the-stack.mmd).
+> move. Source: [`visuals/gate-down-the-stack.mmd`](https://github.com/anthony-chaudhary/fak/blob/main/visuals/gate-down-the-stack.mmd).
 
 ```mermaid
 %%{init: {'theme':'base','themeVariables':{'fontFamily':'Segoe UI, Helvetica, Arial, sans-serif','fontSize':'14px','lineColor':'#5B6B7B','primaryColor':'#DCE9FB','primaryTextColor':'#1B3A66','primaryBorderColor':'#3B6FB5','clusterBkg':'#F7F9FB','clusterBorder':'#AFC0CE'}}}%%
@@ -139,4 +139,4 @@ this fence. Three reads to head off:
 - **Turn ladder** (rung 1): `cmd/turntaxdemo/page.html:101-103` — naive agent round-trips per little thing; tuned agent skips needless calls but is still forced into round-trips to fix a bad argument or a repeated read; fak fixes it in one shot, inside the call.
 - **The DOS-as-hooks cost diagnosis** and the in-process / matcher-scope / TTL-cache fixes: [`docs/perf-dos-hook-cost.md`](../perf-dos-hook-cost.md).
 - **The ring-3 inversion in fuller form** (the model as untrusted ring-3 userspace, the harness as kernel): [`docs/notes/EXPLAINER-trust-floor-two-lenses-2026-06-17.md`](EXPLAINER-trust-floor-two-lenses-2026-06-17.md).
-- **Figure source:** [`visuals/gate-down-the-stack.mmd`](../../visuals/gate-down-the-stack.mmd). Inline render is canonical; to produce a standalone SVG/PNG see [`visuals/RENDERING-NOTE.md`](../../visuals/RENDERING-NOTE.md).
+- **Figure source:** [`visuals/gate-down-the-stack.mmd`](https://github.com/anthony-chaudhary/fak/blob/main/visuals/gate-down-the-stack.mmd). Inline render is canonical; to produce a standalone SVG/PNG see [`visuals/RENDERING-NOTE.md`](https://github.com/anthony-chaudhary/fak/blob/main/visuals/RENDERING-NOTE.md).

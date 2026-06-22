@@ -12,7 +12,7 @@ Read [`00-METHOD.md`](00-METHOD.md) first: it defines the discipline — every m
 "the proof shipped" in git evidence rather than an author's say-so.
 
 This section is the math-correctness companion to
-[`../../SUBSYSTEM-CHECKS.md`](../../SUBSYSTEM-CHECKS.md): that ledger proves a boundary is
+[`../../SUBSYSTEM-CHECKS.md`](https://github.com/anthony-chaudhary/fak/blob/main/SUBSYSTEM-CHECKS.md): that ledger proves a boundary is
 *alive*; this one proves the *math it computes is correct*, and refuses to call anything
 `PROVEN` on self-report.
 

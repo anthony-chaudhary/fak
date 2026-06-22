@@ -25,12 +25,12 @@ block is the real, unedited terminal output**. What you see here is what you wil
 - **Time:** ~15 minutes for Parts 1–2 (zero downloads). Part 3 (chat with a real model)
   adds a model download. Parts 4–6 add a model server you point fak at, the Claude Code
   wiring, and three worked workflows (~15 min more).
-- **Prereqs:** [Go 1.26+](https://go.dev/dl/) *or* a [prebuilt binary](../../INSTALL.md).
+- **Prereqs:** [Go 1.26+](https://go.dev/dl/) *or* a [prebuilt binary](https://github.com/anthony-chaudhary/fak/blob/main/INSTALL.md).
   Nothing else for Parts 1–2. Parts 4–6 add any one OpenAI-compatible model server
   (Ollama / llama-server / LM Studio) and the Claude Code CLI.
 - **Already know the pitch?** This is the *guided first session*. For the install
-  reference and the four usage tiers, see [`fak/GETTING-STARTED.md`](../../GETTING-STARTED.md);
-  for the idea, the [main README](../../README.md).
+  reference and the four usage tiers, see [`fak/GETTING-STARTED.md`](https://github.com/anthony-chaudhary/fak/blob/main/GETTING-STARTED.md);
+  for the idea, the [main README](https://github.com/anthony-chaudhary/fak/blob/main/README.md).
 
 > **One sentence of context.** `fak` treats the model like an untrusted program and a
 > tool call like a syscall: every call the agent wants to make passes *through* a kernel
@@ -41,7 +41,7 @@ block is the real, unedited terminal output**. What you see here is what you wil
 
 ## Map of this tutorial
 
-![The getting-started journey: get the binary, drive the kernel offline, front a model over HTTP, then optionally chat with a real local model — color-coded by the verdict you'll see at each step](../../visuals/52-getting-started-journey.png)
+![The getting-started journey: get the binary, drive the kernel offline, front a model over HTTP, then optionally chat with a real local model — color-coded by the verdict you'll see at each step](https://raw.githubusercontent.com/anthony-chaudhary/fak/main/visuals/52-getting-started-journey.png)
 
 | Part | What you do | Downloads | What you'll have seen |
 |---|---|---|---|
@@ -98,7 +98,7 @@ Either way, `fak version` prints the version and you're ready:
 > `examples/` — or pass absolute paths.
 
 For the full install matrix (Docker, manual download + checksum verify, `go install`
-status), see [`INSTALL.md`](../../INSTALL.md).
+status), see [`INSTALL.md`](https://github.com/anthony-chaudhary/fak/blob/main/INSTALL.md).
 
 ---
 
@@ -301,7 +301,7 @@ before production:
 # then load it on any verb with:  --policy floor.json
 ```
 
-The full manifest schema is in [`fak/POLICY.md`](../../POLICY.md); a fuller authoring
+The full manifest schema is in [`fak/POLICY.md`](https://github.com/anthony-chaudhary/fak/blob/main/POLICY.md); a fuller authoring
 walkthrough with patterns is in the [policy guide](policy-guide.md).
 
 ### 1.6 *(Optional)* the fusion-speedup gate
@@ -445,7 +445,7 @@ for an upstream:
 ```
 
 …and harden it with `--policy floor.json` and `--require-key-env FAK_TOKEN`. The full Tier 1
-serving path is in [`fak/GETTING-STARTED.md` §3](../../GETTING-STARTED.md) and
+serving path is in [`fak/GETTING-STARTED.md` §3](https://github.com/anthony-chaudhary/fak/blob/main/GETTING-STARTED.md) and
 [`server-quickstart.md`](server-quickstart.md).
 
 ✅ **End of Part 2.** You've fronted a model with an HTTP gate, run a syscall and an
@@ -457,7 +457,7 @@ adjudication over the wire, and seen the audit log.
 
 This part downloads a small model so you can see **real tokens**. Two ways:
 
-**A. The friendly chat REPL** ([Simple Demo](../../cmd/simpledemo/README.md)):
+**A. The friendly chat REPL** ([Simple Demo](https://github.com/anthony-chaudhary/fak/blob/main/cmd/simpledemo/README.md)):
 
 ```sh
 go run ./cmd/simpledemo -gguf ~/Downloads/Qwen2.5-1.5B-Instruct-Q8_0.gguf
@@ -486,13 +486,13 @@ Claude Code or any OpenAI client can talk to it locally:
 ```
 
 Pointing the real Claude Code CLI at a local model behind the kernel is its own one-command
-walkthrough: [`fak/DOGFOOD-CLAUDE.md`](../../DOGFOOD-CLAUDE.md) (and the
-[Claude Code setup notes](../../cmd/simpledemo/CLAUDE.md)). Where to get models and the
-size/RAM table are in the [Simple Demo README](../../cmd/simpledemo/README.md).
+walkthrough: [`fak/DOGFOOD-CLAUDE.md`](https://github.com/anthony-chaudhary/fak/blob/main/DOGFOOD-CLAUDE.md) (and the
+[Claude Code setup notes](https://github.com/anthony-chaudhary/fak/blob/main/cmd/simpledemo/CLAUDE.md)). Where to get models and the
+size/RAM table are in the [Simple Demo README](https://github.com/anthony-chaudhary/fak/blob/main/cmd/simpledemo/README.md).
 
 > **Honesty note.** The in-kernel model path is a *correctness reference* proven bit-exact
 > against HuggingFace, not a production chat engine. For chat-quality serving at scale, lean
-> on Part 2's Tier 1 proxy in front of a real serving engine. See [`fak/CLAIMS.md`](../../CLAIMS.md).
+> on Part 2's Tier 1 proxy in front of a real serving engine. See [`fak/CLAIMS.md`](https://github.com/anthony-chaudhary/fak/blob/main/CLAIMS.md).
 
 ---
 
@@ -629,7 +629,7 @@ For the full list (`FAK_DOGFOOD_*`, planner timeouts, account switcher), see the
 | Claude connects but every reply is empty | Check the `fak serve` terminal — if `/v1/models` is failing there, the upstream model server from Part 4 isn't running. Re-verify with `curl -s http://localhost:11434/v1/models`. |
 | `connection refused` on `:8080` | `fak serve` isn't running, or is on a different port. Confirm with `curl -s http://127.0.0.1:8080/healthz`. |
 | First reply takes >60 s and Claude times out | Expected on large local models (the system prompt is ~25 K tokens). Raise the timeout: `export FAK_DOGFOOD_TIMEOUT_S=900` (or `$env:FAK_DOGFOOD_TIMEOUT_S = "900"` on Windows). |
-| Model gives wrong / garbled answers | A 1.5 B model is weak — try `qwen2.5-coder:7b` or larger. Garbled tokens specifically: see the [Simple Demo troubleshooting](../../cmd/simpledemo/README.md#troubleshooting). |
+| Model gives wrong / garbled answers | A 1.5 B model is weak — try `qwen2.5-coder:7b` or larger. Garbled tokens specifically: see the [Simple Demo troubleshooting](https://github.com/anthony-chaudhary/fak/blob/main/cmd/simpledemo/README.md#troubleshooting). |
 | `address already in use` on `:8080` | Set `FAK_DOGFOOD_PORT=8090` (launcher), or pass a different `--addr` to `fak serve`. |
 
 ✅ **End of Part 5.** You have Claude Code talking to a local model through the fak kernel.
@@ -678,7 +678,7 @@ this for an agent pair-programming on a clone.
 
 The **Claude Code** tool surface is broader. It covers `Bash`, `Edit`, `Read`, and `Write`,
 plus search tools like `Glob` and `Grep`. For that, reach for
-[`examples/dogfood-claude-policy.json`](../../examples/dogfood-claude-policy.json). It
+[`examples/dogfood-claude-policy.json`](https://raw.githubusercontent.com/anthony-chaudhary/fak/main/examples/dogfood-claude-policy.json). It
 allows those tools while still denying `rm -rf`, `sudo`, and `git push`. It also blocks any
 write into `.git/`, `internal/kernel/`, or `VERSION`.
 
@@ -724,7 +724,7 @@ Every verdict you saw decodes the same way. Keep this handy:
 |---|---|---|
 | `verdict` / `kind` | `ALLOW` · `DENY` · `TRANSFORM` · `QUARANTINE` | the decision on this call |
 | `by` | `vdso` · `monitor` | served from the local fast-path (no engine call) vs. through the full path |
-| `reason` | `NONE` · `DEFAULT_DENY` · `POLICY_BLOCK` · `SECRET_EXFIL` · … | the **named** reason (closed vocabulary — see [`POLICY.md`](../../POLICY.md)) |
+| `reason` | `NONE` · `DEFAULT_DENY` · `POLICY_BLOCK` · `SECRET_EXFIL` · … | the **named** reason (closed vocabulary — see [`POLICY.md`](https://github.com/anthony-chaudhary/fak/blob/main/POLICY.md)) |
 | `disposition` | `TERMINAL` · … | whether the call is finally refused or eligible for repair |
 | `ifc_taint` | `trusted` · `quarantined` | whether the result may enter the model's context |
 | `trace_id` | `gw-N` | correlates the response, the HTTP log, and the verdict log |
@@ -753,18 +753,18 @@ summary: submits=12 vdso_hits=6 engine_calls=6 denies=0 transforms=0 quarantines
 | `address already in use` on `fak serve` | Another process owns the port — pick a different `--addr`. |
 | Windows: `An Application Control policy has blocked this file` during `go test` | OS quirk on freshly-built **test** binaries only — `go build`/`go run` are unaffected. Run the suite under WSL. Type the binary as `.\fak.exe`. |
 | `/v1/fak/syscall` returns an empty/odd result | Use the key `arguments`, not `args` — unknown keys are silently dropped. |
-| Garbled tokens from a real GGUF | Ensure you're on a build with the NEOX-rope GGUF fix; then try `-temp 0.3`. See the [Simple Demo troubleshooting](../../cmd/simpledemo/README.md#troubleshooting). |
+| Garbled tokens from a real GGUF | Ensure you're on a build with the NEOX-rope GGUF fix; then try `-temp 0.3`. See the [Simple Demo troubleshooting](https://github.com/anthony-chaudhary/fak/blob/main/cmd/simpledemo/README.md#troubleshooting). |
 
 ---
 
 ## Where to go next
 
-- **Make the policy yours** → [policy authoring guide](policy-guide.md) · [`POLICY.md`](../../POLICY.md)
+- **Make the policy yours** → [policy authoring guide](policy-guide.md) · [`POLICY.md`](https://github.com/anthony-chaudhary/fak/blob/main/POLICY.md)
 - **Run it in production** → [server quickstart](server-quickstart.md) · [server config](server-config.md) · [security best practices](security.md)
 - **See it observed** → [observability guide](observability.md) (`/metrics`, `/debug/vars`, the trace ids)
 - **Wire your language/agent** → [integration examples](../integrations/claude.md)
 - **Understand the two flips** → [Policy in the kernel](../explainers/policy-in-the-kernel.md) · [Addressable KV cache](../explainers/addressable-kv-cache.md)
-- **Check what's real** → [`fak/CLAIMS.md`](../../CLAIMS.md) (every capability tagged `[SHIPPED]`/`[SIMULATED]`/`[STUB]`)
+- **Check what's real** → [`fak/CLAIMS.md`](https://github.com/anthony-chaudhary/fak/blob/main/CLAIMS.md) (every capability tagged `[SHIPPED]`/`[SIMULATED]`/`[STUB]`)
 
 ---
 

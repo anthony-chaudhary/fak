@@ -523,7 +523,7 @@ Every fak-native response (and each entry in the `fak` extension) carries a
 | Field | Type | Notes |
 |---|---|---|
 | `kind` | string | `ALLOW` · `DENY` · `TRANSFORM` · `QUARANTINE` · `REQUIRE_WITNESS` · `DEFER` (an unknown registered kind renders as `KIND_<n>`, never a bare integer). |
-| `reason` | string | The closed refusal vocabulary, e.g. `POLICY_BLOCK`. Omitted when there is no reason. See [`fak/POLICY.md`](../../POLICY.md). |
+| `reason` | string | The closed refusal vocabulary, e.g. `POLICY_BLOCK`. Omitted when there is no reason. See [`fak/POLICY.md`](https://github.com/anthony-chaudhary/fak/blob/main/POLICY.md). |
 | `by` | string | Which adjudicator decided (forensics). |
 | `disposition` | string | The actionable deny-loopback class: `RETRYABLE` · `WAIT` · `ESCALATE` · `TERMINAL`. Present on a refusal; this is what lets a refusal cost a non-Go agent zero extra model turns. |
 | `detail` | object | Bounded disclosure — e.g. `{"claim": "<offending claim/glob>"}`. The deny channel is **not** a policy oracle. |
@@ -579,4 +579,4 @@ The whole `fak` object is omitted on a turn with no tool activity.
 - [policy-guide.md](policy-guide.md) — authoring the capability floor the verdicts enforce.
 - [observability.md](observability.md) — the `/metrics` and `/debug/vars` formats in depth.
 - [security.md](security.md) — hardening a network-reachable gateway.
-- [`fak/POLICY.md`](../../POLICY.md) — the policy schema and the full refusal vocabulary.
+- [`fak/POLICY.md`](https://github.com/anthony-chaudhary/fak/blob/main/POLICY.md) — the policy schema and the full refusal vocabulary.

@@ -105,7 +105,7 @@ scripts/fetch-model.sh               # downloads + exports SmolLM2-135M (~hundre
 Now `go run ./cmd/demorace` (or `ctxdemo`) detects the model and the live race lights up.
 The demos also auto-detect bigger rungs (Qwen2.5 0.5B–3B) if you export them under
 `~/.cache/fak-models/hf/`; missing rungs are simply skipped. See
-[Getting Started §4b](../GETTING-STARTED.md) for the full model-export options.
+[Getting Started §4b](https://github.com/anthony-chaudhary/fak/blob/main/GETTING-STARTED.md) for the full model-export options.
 
 ## 4. In a container
 

@@ -35,13 +35,13 @@ description: "Measures the turns-by-agents turn-tax surface across a 1-50 grid, 
 
 ## §1 — The headline surface (read-only fleet)
 
-![2-D fleet turn-tax heatmaps](../../experiments/fleet/fleet-heatmap.png)
+![2-D fleet turn-tax heatmaps](https://raw.githubusercontent.com/anthony-chaudhary/fak/main/experiments/fleet/fleet-heatmap.png)
 
 The same result as a **fleet-vs-baseline** comparison (the shared-cache fleet
 against the same agents run isolated, in **absolute** tool round-trips deleted —
 the shaded gap is the cross-agent uplift):
 
-![fleet vs baseline, absolute terms](../../experiments/fleet/fleet-compare.png)
+![fleet vs baseline, absolute terms](https://raw.githubusercontent.com/anthony-chaudhary/fak/main/experiments/fleet/fleet-compare.png)
 
 A **read/retrieval fleet** (research, monitoring, support-lookup): agents mostly
 read shared reference data (a small catalog of `shared_pool=8` popular routes),
@@ -132,7 +132,7 @@ count T·A, while the *cross* component is the saturating coupon term above.
 
 ## §4 — The catch: lookers vs bookers (the most important finding)
 
-![write-rate crossover and shared-pool slope law](../../experiments/fleet/fleet-axes.png)
+![write-rate crossover and shared-pool slope law](https://raw.githubusercontent.com/anthony-chaudhary/fak/main/experiments/fleet/fleet-axes.png)
 
 The shared cache lives under a **soundness rule**: a cache hit must equal a fresh
 call, so **any write bumps the world-version and invalidates the cache** (the kernel
@@ -163,7 +163,7 @@ runs under any eraser via `fleetbench --granularity`, and
 `TestFleet_FinerEraserPushesCrossoverOut` asserts the recovery on the live kernel.
 The eraser sweep (A=50, T=30, same generated work) makes the fix one glance:
 
-![the finer eraser fixes the write-crossover](../../experiments/fleet/fleet-eraser.png)
+![the finer eraser fixes the write-crossover](https://raw.githubusercontent.com/anthony-chaudhary/fak/main/experiments/fleet/fleet-eraser.png)
 
 | write rate | **global** (v0.1) | **namespace** | **resource** |
 |---:|---:|---:|---:|

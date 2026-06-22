@@ -57,7 +57,7 @@ context) also drives **performance** (do shared work once instead of every turn)
 </div>
 
 [**▶ Try the live demos**](demos.html){: .btn } ·
-[Get started](../GETTING-STARTED.md){: .btn } ·
+[Get started](https://github.com/anthony-chaudhary/fak/blob/main/GETTING-STARTED.md){: .btn } ·
 [See the showcase](showcase.html){: .btn } ·
 [Read the FAQ](FAQ.md){: .btn } ·
 [GitHub repository](https://github.com/anthony-chaudhary/fak){: .btn }
@@ -113,14 +113,14 @@ twice — tools wired directly vs. behind `fak` — and prints the before/after.
 | **The quick answers** | [FAQ](FAQ.md) |
 | **A guided first run** | [Tutorial](fak/tutorial.md) |
 | **The two core ideas** | [Policy in the kernel](explainers/policy-in-the-kernel.md) · [Addressable KV cache](explainers/addressable-kv-cache.md) |
-| **Every benchmark number** | [Benchmark authority](../BENCHMARK-AUTHORITY.md) |
+| **Every benchmark number** | [Benchmark authority](https://github.com/anthony-chaudhary/fak/blob/main/BENCHMARK-AUTHORITY.md) |
 | **Every machine fak runs on** | [Hardware matrix](HARDWARE-MATRIX.md) (4 platforms · 2 CPU ISAs · 4 GPU backends) |
-| **What's real, what's not** | [Claims ledger](../CLAIMS.md) |
-| **A machine-readable map (for LLMs)** | [llms.txt](../llms.txt) |
+| **What's real, what's not** | [Claims ledger](https://github.com/anthony-chaudhary/fak/blob/main/CLAIMS.md) |
+| **A machine-readable map (for LLMs)** | [llms.txt](https://github.com/anthony-chaudhary/fak/blob/main/llms.txt) |
 
 ---
 
-<sub>License: Apache-2.0 · [Report a vulnerability](../SECURITY.md) · Keywords: agent
+<sub>License: Apache-2.0 · [Report a vulnerability](https://github.com/anthony-chaudhary/fak/blob/main/SECURITY.md) · Keywords: agent
 kernel, agent tool firewall, AI agent security, prompt injection defense, tool
 poisoning, capability security, default-deny permission gate, KV cache, addressable
 KV cache, self-hosted LLM, LLM agent fleet, agentic AI, Go.</sub>

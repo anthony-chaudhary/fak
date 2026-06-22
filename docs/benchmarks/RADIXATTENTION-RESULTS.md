@@ -6,7 +6,7 @@ description: "Head-to-head of fak's KV-cache reuse against SGLang's RadixAttenti
 # Benchmarking fak against SGLang's KV-cache RadixAttention
 
 > **📊 AUTHORITY:** All benchmark numbers for RadixAttention are centrally indexed in
-> **[BENCHMARK-AUTHORITY.md](../../BENCHMARK-AUTHORITY.md)**. That document is the single source
+> **[BENCHMARK-AUTHORITY.md](https://github.com/anthony-chaudhary/fak/blob/main/BENCHMARK-AUTHORITY.md)**. That document is the single source
 > of truth with full traceability to commits and artifacts. This doc provides the detailed
 > context and explanation.
 >

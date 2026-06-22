@@ -86,7 +86,7 @@ Clear every item before a network-facing deploy. Sources for each are in
 
 ## 1. Container image (Docker)
 
-The repo ships a production [`Dockerfile`](../../Dockerfile) at its root. It is a
+The repo ships a production [`Dockerfile`](https://github.com/anthony-chaudhary/fak/blob/main/Dockerfile) at its root. It is a
 two-stage build: stage one compiles `cmd/fak` static (`CGO_ENABLED=0`); the final
 image is `gcr.io/distroless/static-debian12:nonroot` plus the single binary — no
 shell, no package manager, runs as `nonroot`, exposes `8080`.
@@ -196,7 +196,7 @@ docker compose up -d
 ```
 
 For Prometheus + Grafana, the repo already ships a ready stack at
-[`tools/grafana/docker-compose.yml`](../../tools/grafana/docker-compose.yml) that
+[`tools/grafana/docker-compose.yml`](https://github.com/anthony-chaudhary/fak/blob/main/tools/grafana/docker-compose.yml) that
 scrapes `fak serve` on `:8080`; see [observability.md](observability.md).
 
 ---
@@ -473,7 +473,7 @@ the policy file and `POST /v1/fak/policy/reload`.
 
 **Observability.** Scrape `/metrics` for verdict counts (`fak_verdict_total`),
 operation latency (`fak_operation_duration_seconds`), and startup/model-load
-timings. The repo's [`tools/grafana/`](../../tools/grafana/docker-compose.yml)
+timings. The repo's [`tools/grafana/`](https://github.com/anthony-chaudhary/fak/blob/main/tools/grafana/docker-compose.yml)
 stack wires Prometheus + Grafana to a `fak serve` on `:8080`. Full details in
 [observability.md](observability.md).
 
@@ -489,7 +489,7 @@ errors are covered in [server-troubleshooting.md](server-troubleshooting.md).
 - [security.md](security.md) — threat model and hardening for a network deploy
 - [observability.md](observability.md) — metrics, logs, and traces
 - [server-troubleshooting.md](server-troubleshooting.md) — when something breaks
-- [policy-guide.md](policy-guide.md) and [`fak/POLICY.md`](../../POLICY.md) —
+- [policy-guide.md](policy-guide.md) and [`fak/POLICY.md`](https://github.com/anthony-chaudhary/fak/blob/main/POLICY.md) —
   authoring the capability floor and the refusal vocabulary
-- [`Dockerfile`](../../Dockerfile) and [`install.sh`](../../install.sh) — the
+- [`Dockerfile`](https://github.com/anthony-chaudhary/fak/blob/main/Dockerfile) and [`install.sh`](https://github.com/anthony-chaudhary/fak/blob/main/install.sh) — the
   build and install sources this guide describes

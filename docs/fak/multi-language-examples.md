@@ -60,7 +60,7 @@ extension) carries:
 
 - `kind` — `ALLOW` · `DENY` · `TRANSFORM` · `QUARANTINE` · `REQUIRE_WITNESS` · `DEFER`.
 - `reason` — the closed refusal vocabulary (e.g. `POLICY_BLOCK`, `DEFAULT_DENY`, `SELF_MODIFY`);
-  omitted when there is none. See [`fak/POLICY.md`](../../POLICY.md).
+  omitted when there is none. See [`fak/POLICY.md`](https://github.com/anthony-chaudhary/fak/blob/main/POLICY.md).
 - `disposition` — the actionable deny-loopback class on a refusal: `RETRYABLE` · `WAIT` ·
   `ESCALATE` · `TERMINAL`. This is what lets a refusal cost a non-Go agent **zero** extra
   model turns — branch your retry logic on it (see [Retry logic](#retry-logic-disposition-aware)).
@@ -680,4 +680,4 @@ header.
 - [server-quickstart.md](server-quickstart.md) — start a gateway in five scenarios.
 - [server-config.md](server-config.md) — every flag and tuning env var.
 - [tutorial.md](tutorial.md) — zero-to-first-call with real captured output.
-- [`fak/POLICY.md`](../../POLICY.md) — the policy schema and the full refusal vocabulary.
+- [`fak/POLICY.md`](https://github.com/anthony-chaudhary/fak/blob/main/POLICY.md) — the policy schema and the full refusal vocabulary.

@@ -162,7 +162,7 @@ description: "Frequently asked questions about fak, the agent kernel: how its de
 
 Direct answers to the most common questions about `fak`, the agent kernel. Each
 answer is written to stand on its own. For the full story, start with the
-[README](../README.md); for runnable proof, see the [2-minute repro](repro-packet.md).
+[README](https://github.com/anthony-chaudhary/fak/blob/main/README.md); for runnable proof, see the [2-minute repro](repro-packet.md).
 
 ---
 
@@ -271,7 +271,7 @@ The win is in **reread-rate**, not raw GPU speed. On a 50-turn × 5-agent run it
 (~60× only against the naive re-send-everything baseline, not the headline). On real WebVoyager web-agent workloads (643 tasks) it eliminates **8.8–9.7×**
 of prefill, measured. The reuse win is **self-host only**. An app that merely *calls* a
 frontier API gets the safety floor but not the savings. Every number is traced to a
-commit and artifact in the [benchmark authority](../BENCHMARK-AUTHORITY.md).
+commit and artifact in the [benchmark authority](https://github.com/anthony-chaudhary/fak/blob/main/BENCHMARK-AUTHORITY.md).
 
 ## Is fak novel? What did the prior-art audit find?
 
@@ -280,7 +280,7 @@ A 29-claim prior-art audit scored **0/29 novel**. Every individual primitive
 prior art. The contribution is the **assembly**: putting them together as one in-process
 gate where the tool call is the checkpoint, so the security boundary and the reuse
 boundary become the same boundary. `fak` is built to survive a skeptic reading the code.
-See the [claims ledger](../CLAIMS.md), where every capability carries one
+See the [claims ledger](https://github.com/anthony-chaudhary/fak/blob/main/CLAIMS.md), where every capability carries one
 machine-checked tag.
 
 ## How do I install fak?
@@ -293,7 +293,7 @@ curl -fsSL https://raw.githubusercontent.com/anthony-chaudhary/fak/main/install.
 
 Or download a [prebuilt archive](https://github.com/anthony-chaudhary/fak/releases/latest)
 (`linux_amd64`, `darwin_amd64`, `darwin_arm64`, `windows_amd64`), or run it in a
-container. Full guide: [Getting Started](../GETTING-STARTED.md).
+container. Full guide: [Getting Started](https://github.com/anthony-chaudhary/fak/blob/main/GETTING-STARTED.md).
 
 ## Can I try fak without a model, API key, or GPU?
 
@@ -325,7 +325,7 @@ fak serve --addr 127.0.0.1:8080 --base-url http://localhost:11434/v1 --model qwe
 ```
 
 This is where most people should start; it is a complete product by itself. See the
-[getting started guide](../GETTING-STARTED.md).
+[getting started guide](https://github.com/anthony-chaudhary/fak/blob/main/GETTING-STARTED.md).
 
 ## How do I put fak in front of my agent or framework (Claude Code, Cursor, an SDK, or MCP)?
 
@@ -356,7 +356,7 @@ or go all-in on the fused kernel for the reuse wins on a self-hosted model.
 
 ## Where do I report a security vulnerability?
 
-See [SECURITY.md](../SECURITY.md) for the disclosure process. Please do not open a public
+See [SECURITY.md](https://github.com/anthony-chaudhary/fak/blob/main/SECURITY.md) for the disclosure process. Please do not open a public
 issue for an undisclosed vulnerability.
 
 ## Where can I learn more?
@@ -364,5 +364,5 @@ issue for an undisclosed vulnerability.
 - [Guided tutorial](fak/tutorial.md) — zero to first adjudicated call.
 - [Integration index](integrations/README.md) — put fak in front of the agent you already run (Claude Code, Cursor, an SDK, or MCP).
 - [Policy in the kernel](explainers/policy-in-the-kernel.md) and [Addressable KV cache](explainers/addressable-kv-cache.md) — the two core ideas.
-- [Benchmark authority](../BENCHMARK-AUTHORITY.md) — every number.
-- [llms.txt](../llms.txt) — a machine-readable map for LLMs and answer engines.
+- [Benchmark authority](https://github.com/anthony-chaudhary/fak/blob/main/BENCHMARK-AUTHORITY.md) — every number.
+- [llms.txt](https://github.com/anthony-chaudhary/fak/blob/main/llms.txt) — a machine-readable map for LLMs and answer engines.

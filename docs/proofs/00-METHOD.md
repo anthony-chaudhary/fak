@@ -10,7 +10,7 @@ every sub-module, the *theorem* the module must satisfy to be "math correct," gi
 proof, and binds that proof to a **deterministic witness** that a machine re-runs — never
 to an agent's say-so.
 
-It is the missing companion to [`../../SUBSYSTEM-CHECKS.md`](../../SUBSYSTEM-CHECKS.md).
+It is the missing companion to [`../../SUBSYSTEM-CHECKS.md`](https://github.com/anthony-chaudhary/fak/blob/main/SUBSYSTEM-CHECKS.md).
 That ledger answers *"is this boundary alive and mechanically checked?"* This section
 answers the strictly harder question one layer down: *"is the **math** the boundary
 computes actually **correct** — and how do we know, deterministically, rather than by

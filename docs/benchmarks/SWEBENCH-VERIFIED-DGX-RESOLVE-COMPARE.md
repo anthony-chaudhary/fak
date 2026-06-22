@@ -66,9 +66,9 @@ opposite completion, decided entirely by the floor.
 
 ## Method (exactly reproducible)
 
-One self-contained driver, [`tools/dgx_swebench_compare.py`](../../tools/dgx_swebench_compare.py),
+One self-contained driver, [`tools/dgx_swebench_compare.py`](https://github.com/anthony-chaudhary/fak/blob/main/tools/dgx_swebench_compare.py),
 launched detached on the DGX via the Slack control bridge
-([`cmd/dgxbridge`](../../cmd/dgxbridge)) and polled from a host-shared `/tmp` log:
+([`cmd/dgxbridge`](https://github.com/anthony-chaudhary/fak/tree/main/cmd/dgxbridge)) and polled from a host-shared `/tmp` log:
 
 1. **Serve** `Qwen/Qwen3.6-27B`, SGLang TP=8, `--mem-fraction-static 0.75`,
    **`--tool-call-parser qwen3_coder`**. Qwen3.6's chat template emits XML
@@ -76,7 +76,7 @@ launched detached on the DGX via the Slack control bridge
    generation to a single token (empty patches) — see [[qwen36-sglang-tool-call-parser]].
 2. **Front** with `fak serve --provider openai --base-url …:30000/v1` on `:8080`,
    `--policy <manifest>` for the allow arms
-   ([`tools/dgx_fak_gateway_repolicy.sh`](../../tools/dgx_fak_gateway_repolicy.sh)).
+   ([`tools/dgx_fak_gateway_repolicy.sh`](https://github.com/anthony-chaudhary/fak/blob/main/tools/dgx_fak_gateway_repolicy.sh)).
 3. **Tool-call self-test** both endpoints before the agent runs (proves SGLang
    returns OpenAI `tool_calls`, and shows the gateway's per-call verdict).
 4. Per arm: `mini-extra swebench --subset verified --split test
@@ -86,7 +86,7 @@ launched detached on the DGX via the Slack control bridge
    --dataset_name princeton-nlp/SWE-bench_Verified` (resolve denominator = the 1
    instance submitted, *not* the report's 500-set `total_instances`).
 
-Allow-arm policy: [`examples/swebench-coding-agent-policy.json`](../../examples/swebench-coding-agent-policy.json)
+Allow-arm policy: [`examples/swebench-coding-agent-policy.json`](https://raw.githubusercontent.com/anthony-chaudhary/fak/main/examples/swebench-coding-agent-policy.json)
 — `allow: ["bash"]`, `arg_rules` blocking `rm -rf`/`sudo`/`curl|sh`/`git push`,
 `sources: {"bash": "trusted_local"}`.
 

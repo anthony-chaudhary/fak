@@ -15,7 +15,7 @@ description: "The apples-to-apples batch-1 protocol, lever status, and residual 
 > see §4). So the real `tok/s`/ratio cells below are deliberately **`pending GPU run`**, each
 > annotated with the *exact* command + host needed to fill it. **No number in this doc is
 > invented.** The two things that *are* measured already — the `llama.cpp` GPU baseline and
-> the SmolLM2-135M head-to-head fak *can* run today — live in [`GPU.md`](../GPU.md) §3/§3b
+> the SmolLM2-135M head-to-head fak *can* run today — live in [`GPU.md`](https://github.com/anthony-chaudhary/fak/blob/main/GPU.md) §3/§3b
 > and are cited here, not restated as new.
 >
 > This is the protocol + lever-status + residual; it is **not** a parity claim. fak has not
@@ -32,7 +32,7 @@ description: "The apples-to-apples batch-1 protocol, lever status, and residual 
 ## 1. The apples-to-apples protocol (the peer contract)
 
 The peer protocol is **defined in code** by
-[`internal/model/bench_llamacpp.py`](../internal/model/bench_llamacpp.py) and the matching
+[`internal/model/bench_llamacpp.py`](https://github.com/anthony-chaudhary/fak/blob/main/internal/model/bench_llamacpp.py) and the matching
 `cmd/modelbench` flags. It is a **batch-1, single-stream, autoregressive** forward-pass
 benchmark — fak's actual claim regime, *not* GPU continuous-batching serving (vLLM/SGLang
 are a different regime, deliberately excluded; `bench_llamacpp.py:1-14`).
@@ -59,7 +59,7 @@ are a different regime, deliberately excluded; `bench_llamacpp.py:1-14`).
 3. **Same token ids** — the deterministic LCG sequence above, so timing differences are the
    forward pass, not the inputs.
 
-**The wired cross-engine harness.** [`tools/gcp_bench.py`](../tools/gcp_bench.py) runs *both*
+**The wired cross-engine harness.** [`tools/gcp_bench.py`](https://github.com/anthony-chaudhary/fak/blob/main/tools/gcp_bench.py) runs *both*
 peers on one provisioned GPU against the same model and folds them into one `result.json`
 (schema `fak.gcp-vm-bench.v2`, an `engines` map). It harmonizes the shape across engines so
 the rows are directly comparable (`gcp_bench.py:311-339`):
@@ -80,7 +80,7 @@ the rows are directly comparable (`gcp_bench.py:311-339`):
 
 ## 2. What is already measured (cited, not restated)
 
-Two real-run results already exist in [`GPU.md`](../GPU.md). They are the *bar* and the
+Two real-run results already exist in [`GPU.md`](https://github.com/anthony-chaudhary/fak/blob/main/GPU.md). They are the *bar* and the
 *fitting-model head-to-head*; #480's open target is the 7B number that neither yet provides.
 
 | Already measured | Where | What it is |

@@ -35,7 +35,7 @@ a trust boundary.*
 > This explainer is the expanded, standalone version of
 > `DISAGGREGATED-AGENT-MEMORY.md` (private companion — not published) §2.5. That doc is
 > the strategy note; this one is the teaching artifact you can hand someone cold.
-> Honesty discipline is the same as [`CLAIMS.md`](../CLAIMS.md): where it names
+> Honesty discipline is the same as [`CLAIMS.md`](https://github.com/anthony-chaudhary/fak/blob/main/CLAIMS.md): where it names
 > something unbuilt it says `[GAP]`.
 
 ---
@@ -155,7 +155,7 @@ cache is zero-copy" claims you hear are the *first* kind:
   a *separate* vLLM/CUDA process owns, in place, with no copy. The shipped path here
   is copy-CAS; the genuinely-shared-arena version is the unbuilt rung. The `Ref`/
   `Resolver`/`RegionBackend` seam is **frozen precisely so this is a backend swap**,
-  not a rewrite — see [`CLAIMS.md`](../CLAIMS.md) for the exact stub language.
+  not a rewrite — see [`CLAIMS.md`](https://github.com/anthony-chaudhary/fak/blob/main/CLAIMS.md) for the exact stub language.
 
 So the `●` and the open rung are the *same layer* at two different scopes: zero-copy
 inside an arena fak owns (done) vs zero-copy into an arena another engine owns (the
@@ -536,7 +536,7 @@ placement win cross the line into a semantics claim.
 - `DISAGGREGATED-AGENT-MEMORY.md` (private companion — not published) — the strategy note;
   §2.5 is the compact form of this explainer, §2 maps the six memory semantics (S1–S6)
   to shipped primitives, §3 the cross-agent / cross-tenant / cross-node axes.
-- [`CLAIMS.md`](../CLAIMS.md) — the honest claims ledger; the exact `[SHIPPED]`/`[STUB]`
+- [`CLAIMS.md`](https://github.com/anthony-chaudhary/fak/blob/main/CLAIMS.md) — the honest claims ledger; the exact `[SHIPPED]`/`[STUB]`
   language behind every primitive cited here.
 - `HYBRID-AI-MEMORY.md` (private companion — not published) — applies the four-word test to the
   **device↔cloud** seam: hybrid AI's "may this cell cross to the cloud" is a *semantics*

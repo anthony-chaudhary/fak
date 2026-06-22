@@ -8,17 +8,17 @@ description: "Navigation hub for the fak serve operator and integrator docs: ins
 The `docs/fak/` directory holds the **operator and integrator** docs for `fak serve` (the
 gateway) and for putting `fak` in front of a model. The conceptual docs (the two flips, the
 scaling laws, the explainers) live one level up in [`docs/`](../) and at the
-[repo root](../../README.md).
+[repo root](https://github.com/anthony-chaudhary/fak/blob/main/README.md).
 
-![The getting-started journey across the four tutorial parts](../../visuals/52-getting-started-journey.png)
+![The getting-started journey across the four tutorial parts](https://raw.githubusercontent.com/anthony-chaudhary/fak/main/visuals/52-getting-started-journey.png)
 
 ## Start here
 
 | If you want to… | Read |
 |---|---|
 | **Run `fak` for the first time** (guided, real output at every step) | [**tutorial.md**](tutorial.md) ⭐ |
-| Install the binary (Docker / prebuilt / source) | [`INSTALL.md`](../../INSTALL.md) · [`fak/GETTING-STARTED.md`](../../GETTING-STARTED.md) |
-| Just chat with a local model | [Simple Demo](../../cmd/simpledemo/README.md) |
+| Install the binary (Docker / prebuilt / source) | [`INSTALL.md`](https://github.com/anthony-chaudhary/fak/blob/main/INSTALL.md) · [`fak/GETTING-STARTED.md`](https://github.com/anthony-chaudhary/fak/blob/main/GETTING-STARTED.md) |
+| Just chat with a local model | [Simple Demo](https://github.com/anthony-chaudhary/fak/blob/main/cmd/simpledemo/README.md) |
 | Quick answers — what it is, how it differs, threat model | [faq.md](faq.md) |
 
 ## Run the server
@@ -38,7 +38,7 @@ scaling laws, the explainers) live one level up in [`docs/`](../) and at the
 | Topic | Doc |
 |---|---|
 | Build a capability floor (worked examples) | [policy-guide.md](policy-guide.md) |
-| The manifest schema + refusal vocabulary | [`fak/POLICY.md`](../../POLICY.md) |
+| The manifest schema + refusal vocabulary | [`fak/POLICY.md`](https://github.com/anthony-chaudhary/fak/blob/main/POLICY.md) |
 | Hardening a deployment (auth, network, threat model) | [security.md](security.md) |
 
 ## Integrate

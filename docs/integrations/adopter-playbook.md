@@ -17,7 +17,7 @@ shapes, each self-contained:
 | **C — Embed in CI** | author and check the capability floor with no model, no key, no GPU | [§C](#c--embed-the-kernel-in-ci) |
 
 The repo's own dogfood launcher (`scripts/dogfood-claude.sh`) wires all of this for a
-local model in one command — see [`../../DOGFOOD-CLAUDE.md`](../../DOGFOOD-CLAUDE.md).
+local model in one command — see [`../../DOGFOOD-CLAUDE.md`](https://github.com/anthony-chaudhary/fak/blob/main/DOGFOOD-CLAUDE.md).
 This playbook is the **bare-serve** path an external adopter follows by hand, without
 that launcher.
 
@@ -36,7 +36,7 @@ tool call and proxies the rest upstream. Work top to bottom.
 
 ### A.0 — Prerequisites
 
-- **The `fak` binary on your `PATH`.** Either a [release binary](../../GETTING-STARTED.md#1-get-the-binary)
+- **The `fak` binary on your `PATH`.** Either a [release binary](https://github.com/anthony-chaudhary/fak/blob/main/GETTING-STARTED.md#1-get-the-binary)
   (`go install github.com/anthony-chaudhary/fak/cmd/fak@latest`, or download from the
   releases page), or build from a clone: `go build -o fak ./cmd/fak` (Go 1.26+).
 - **An OpenAI-compatible (or Anthropic/Gemini/xAI) model server** already running and
@@ -58,7 +58,7 @@ fak serve --policy-check --policy policy.json   # the serve-path validator (also
 
 Shipped starting points (copy one and adapt): `examples/dev-agent-policy.json`,
 `examples/customer-support-readonly-policy.json`, `examples/repo-guard-policy.json`.
-Schema and authoring guide: [`../../POLICY.md`](../../POLICY.md).
+Schema and authoring guide: [`../../POLICY.md`](https://github.com/anthony-chaudhary/fak/blob/main/POLICY.md).
 
 ### A.2 — Set the auth-key env (production)
 
@@ -186,7 +186,7 @@ client; for HTTP transport instead of stdio, run `fak serve --addr 127.0.0.1:808
 
 Full input schemas come back from the MCP `tools/list` discovery call. The in-repo
 one-paste example (with a shipped `.mcp.json`) is
-[`../../examples/mcp/README.md`](../../examples/mcp/README.md).
+[`../../examples/mcp/README.md`](https://github.com/anthony-chaudhary/fak/blob/main/examples/mcp/README.md).
 
 ---
 
@@ -208,7 +208,7 @@ fak policy --check policy.json
 `preflight` exits non-zero on a denied verdict, so a CI step that expects `DENY` can
 assert it directly. A self-verifying, copy-run example (starts an offline gate, asserts
 the verdicts, tears it down, emits a CI-usable exit code) lives at
-[`../../examples/wire-proof/`](../../examples/wire-proof/README.md).
+[`../../examples/wire-proof/`](https://github.com/anthony-chaudhary/fak/blob/main/examples/wire-proof/README.md).
 
 ---
 
@@ -216,7 +216,7 @@ the verdicts, tears it down, emits a CI-usable exit code) lives at
 
 - [Integration index](README.md) — the front door: which-agent routing + the universal "set the base URL" recipe.
 - [Claude Code / Anthropic API guide](claude.md) — the full Claude guide (architecture, denial table, cloud providers, observability).
-- [MCP one-paste setup](../../examples/mcp/README.md) — the in-repo `.mcp.json` example and the `fak_*` tools.
-- [Getting started](../../GETTING-STARTED.md) — install the single static binary; the four run tiers.
-- [Policy / permissions](../../POLICY.md) — author, dump, and review the capability floor.
-- [Dogfood launcher](../../DOGFOOD-CLAUDE.md) — the one-command local-model variant of Shape A.
+- [MCP one-paste setup](https://github.com/anthony-chaudhary/fak/blob/main/examples/mcp/README.md) — the in-repo `.mcp.json` example and the `fak_*` tools.
+- [Getting started](https://github.com/anthony-chaudhary/fak/blob/main/GETTING-STARTED.md) — install the single static binary; the four run tiers.
+- [Policy / permissions](https://github.com/anthony-chaudhary/fak/blob/main/POLICY.md) — author, dump, and review the capability floor.
+- [Dogfood launcher](https://github.com/anthony-chaudhary/fak/blob/main/DOGFOOD-CLAUDE.md) — the one-command local-model variant of Shape A.

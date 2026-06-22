@@ -61,7 +61,7 @@ go -C fak run ./cmd/qwen35check -gguf ~/.cache/fak-models/gguf/Qwen3.6-27B.q4_k_
   -expect 248068,198,90700
 ```
 
-**VERDICT.** **REFUTED** (2026-06-20, this M3 Pro node, q4_k_m GGUF). fak's shipped decode is *forward-parity-PROVEN on llama* (Theorem 1) and *first-token-parity on Qwen3.6*, but its **greedy continuation on the hybrid-GDN model fails at token 3** — so fak is **not at correctness parity yet** on this arch. Recorded as a finding, not deleted (00-METHOD §4). Full status + the MLX-bar / swap-contamination measurement caveats: [`../../experiments/qwen36/QWEN36-PARITY-AND-MEASUREMENT-STATUS-2026-06-20.md`](../../experiments/qwen36/QWEN36-PARITY-AND-MEASUREMENT-STATUS-2026-06-20.md).
+**VERDICT.** **REFUTED** (2026-06-20, this M3 Pro node, q4_k_m GGUF). fak's shipped decode is *forward-parity-PROVEN on llama* (Theorem 1) and *first-token-parity on Qwen3.6*, but its **greedy continuation on the hybrid-GDN model fails at token 3** — so fak is **not at correctness parity yet** on this arch. Recorded as a finding, not deleted (00-METHOD §4). Full status + the MLX-bar / swap-contamination measurement caveats: [`../../experiments/qwen36/QWEN36-PARITY-AND-MEASUREMENT-STATUS-2026-06-20.md`](https://github.com/anthony-chaudhary/fak/blob/main/experiments/qwen36/QWEN36-PARITY-AND-MEASUREMENT-STATUS-2026-06-20.md).
 
 **DOS.** bound at ship (the REFUTED row binds to the commit that records it; the counter-witness artifacts are committed under `fak/experiments/qwen36/`).
 

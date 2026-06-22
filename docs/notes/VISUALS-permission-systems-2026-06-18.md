@@ -13,11 +13,11 @@ description: "Figures contrasting prompt fatigue, broad grants, classifier risk,
 Sources:
 
 - [`docs/permission-system-benchmark-methodology.md`](../permission-system-benchmark-methodology.md)
-- [`fak/experiments/permission-systems/permission-system-benchmark.md`](../../experiments/permission-systems/permission-system-benchmark.md)
-- [`fak/experiments/permission-systems/permission-source-audit.md`](../../experiments/permission-systems/permission-source-audit.md)
-- [`fak/experiments/api-host-bridge/api-host-bridge-gate.md`](../../experiments/api-host-bridge/api-host-bridge-gate.md)
-- [`fak/experiments/api-host-bridge/api-host-bridge-proof.md`](../../experiments/api-host-bridge/api-host-bridge-proof.md)
-- [`fak/experiments/api-host-bridge/api-host-bridge-verify-all.md`](../../experiments/api-host-bridge/api-host-bridge-verify-all.md)
+- [`fak/experiments/permission-systems/permission-system-benchmark.md`](https://github.com/anthony-chaudhary/fak/blob/main/experiments/permission-systems/permission-system-benchmark.md)
+- [`fak/experiments/permission-systems/permission-source-audit.md`](https://github.com/anthony-chaudhary/fak/blob/main/experiments/permission-systems/permission-source-audit.md)
+- [`fak/experiments/api-host-bridge/api-host-bridge-gate.md`](https://github.com/anthony-chaudhary/fak/blob/main/experiments/api-host-bridge/api-host-bridge-gate.md)
+- [`fak/experiments/api-host-bridge/api-host-bridge-proof.md`](https://github.com/anthony-chaudhary/fak/blob/main/experiments/api-host-bridge/api-host-bridge-proof.md)
+- [`fak/experiments/api-host-bridge/api-host-bridge-verify-all.md`](https://github.com/anthony-chaudhary/fak/blob/main/experiments/api-host-bridge/api-host-bridge-verify-all.md)
 
 | # | Figure | Point |
 |---|---|---|
@@ -33,7 +33,7 @@ Sources:
 Killer line: the incumbent choices trade between fatigue, over-broad authority,
 probabilistic recall, after-the-fact review, or no boundary.
 
-[SVG](../../visuals/35-permission-options-map.svg) - [PNG](../../visuals/35-permission-options-map.png) - [source](../../visuals/35-permission-options-map.mmd)
+[SVG](https://raw.githubusercontent.com/anthony-chaudhary/fak/main/visuals/35-permission-options-map.svg) - [PNG](https://raw.githubusercontent.com/anthony-chaudhary/fak/main/visuals/35-permission-options-map.png) - [source](https://github.com/anthony-chaudhary/fak/blob/main/visuals/35-permission-options-map.mmd)
 
 ```mermaid
 %%{init: {'theme':'base','themeVariables':{'fontFamily':'Segoe UI, Helvetica, Arial, sans-serif','fontSize':'14px','lineColor':'#5B6B7B','primaryColor':'#DCE9FB','primaryTextColor':'#1B3A66','primaryBorderColor':'#3B6FB5','clusterBkg':'#F7F9FB','clusterBorder':'#AFC0CE'}}}%%
@@ -84,7 +84,7 @@ flowchart LR
 Killer line: FAK/DOS is the only row with hard control over all six risky
 scenarios in the benchmark.
 
-[SVG](../../visuals/36-permission-risk-coverage.svg) - [PNG](../../visuals/36-permission-risk-coverage.png) - [source](../../visuals/36-permission-risk-coverage.mmd)
+[SVG](https://raw.githubusercontent.com/anthony-chaudhary/fak/main/visuals/36-permission-risk-coverage.svg) - [PNG](https://raw.githubusercontent.com/anthony-chaudhary/fak/main/visuals/36-permission-risk-coverage.png) - [source](https://github.com/anthony-chaudhary/fak/blob/main/visuals/36-permission-risk-coverage.mmd)
 
 ```mermaid
 %%{init: {'theme':'base','themeVariables':{'fontFamily':'Segoe UI, Helvetica, Arial, sans-serif','xyChart':{'backgroundColor':'#F7F9FB','titleColor':'#1B3A66','xAxisLabelColor':'#1B3A66','yAxisLabelColor':'#1B3A66','xAxisTitleColor':'#1B3A66','yAxisTitleColor':'#1B3A66','plotColorPalette':'#3B6FB5'}}}}%%
@@ -102,7 +102,7 @@ xychart-beta
 Killer line: the host stays swappable, but the tool boundary becomes executable
 policy owned by the gateway.
 
-[SVG](../../visuals/37-permission-two-gate-path.svg) - [PNG](../../visuals/37-permission-two-gate-path.png) - [source](../../visuals/37-permission-two-gate-path.mmd)
+[SVG](https://raw.githubusercontent.com/anthony-chaudhary/fak/main/visuals/37-permission-two-gate-path.svg) - [PNG](https://raw.githubusercontent.com/anthony-chaudhary/fak/main/visuals/37-permission-two-gate-path.png) - [source](https://github.com/anthony-chaudhary/fak/blob/main/visuals/37-permission-two-gate-path.mmd)
 
 ```mermaid
 %%{init: {'theme':'base','themeVariables':{'fontFamily':'Segoe UI, Helvetica, Arial, sans-serif','fontSize':'14px','lineColor':'#5B6B7B','primaryColor':'#DCE9FB','primaryTextColor':'#1B3A66','primaryBorderColor':'#3B6FB5','clusterBkg':'#F7F9FB','clusterBorder':'#AFC0CE'}}}%%
@@ -168,7 +168,7 @@ flowchart TB
 Killer line: the bridge proof is green and scope-bounded; it does not claim every
 API host on the internet or external paid/keyed state.
 
-[SVG](../../visuals/38-api-host-bridge-proof-stack.svg) - [PNG](../../visuals/38-api-host-bridge-proof-stack.png) - [source](../../visuals/38-api-host-bridge-proof-stack.mmd)
+[SVG](https://raw.githubusercontent.com/anthony-chaudhary/fak/main/visuals/38-api-host-bridge-proof-stack.svg) - [PNG](https://raw.githubusercontent.com/anthony-chaudhary/fak/main/visuals/38-api-host-bridge-proof-stack.png) - [source](https://github.com/anthony-chaudhary/fak/blob/main/visuals/38-api-host-bridge-proof-stack.mmd)
 
 ```mermaid
 %%{init: {'theme':'base','themeVariables':{'fontFamily':'Segoe UI, Helvetica, Arial, sans-serif','fontSize':'14px','lineColor':'#5B6B7B','primaryColor':'#DCE9FB','primaryTextColor':'#1B3A66','primaryBorderColor':'#3B6FB5','clusterBkg':'#F7F9FB','clusterBorder':'#AFC0CE'}}}%%

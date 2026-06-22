@@ -11,7 +11,7 @@ description: "Five model-agnostic fleet benchmarks you can reproduce in minutes 
 > they drive the real `fak` kernel (`k.Syscall`, the process-global vDSO cache, the
 > ctx-MMU, `NewBatchFromPrefix`) but need **no model weights, no GPU, and no API key**, so
 > the headline numbers reproduce on any laptop in minutes. Every figure here traces to
-> **[BENCHMARK-AUTHORITY.md](../../BENCHMARK-AUTHORITY.md)** (the single source of truth)
+> **[BENCHMARK-AUTHORITY.md](https://github.com/anthony-chaudhary/fak/blob/main/BENCHMARK-AUTHORITY.md)** (the single source of truth)
 > and the on-box witnessed run in
 > [`GLM52-PURE-KERNEL-AND-AGENT-TURN-DEMOS-RESULTS-2026-06-21.md`](../notes/GLM52-PURE-KERNEL-AND-AGENT-TURN-DEMOS-RESULTS-2026-06-21.md) §3.
 >
@@ -65,7 +65,7 @@ you). Both are shown — never just the flattering one.
 > These are the **kernel** demos. They are distinct from the **model-ladder** benchmarks
 > (`sessionbench`, `modelbench`, the live `radixbench -hf …` arm), which *do* need a real
 > checkpoint on disk to produce wall-clock tok/s — those are indexed in
-> [BENCHMARK-AUTHORITY.md](../../BENCHMARK-AUTHORITY.md). This page stays on the
+> [BENCHMARK-AUTHORITY.md](https://github.com/anthony-chaudhary/fak/blob/main/BENCHMARK-AUTHORITY.md). This page stays on the
 > model-agnostic floor so anyone can reproduce it.
 
 **Two honesty axes, kept strictly apart** (the same discipline runs through every demo):
@@ -256,7 +256,7 @@ scheduler lifts FCFS's **62.1% → 86.7%** (100% of the DFS-optimal bound the pa
   M3 arm64); add `-hf <snapshot> -lean` for the live wall-clock arm on a real checkpoint.
 
 **Full results:** [`docs/benchmarks/RADIXATTENTION-RESULTS.md`](../benchmarks/RADIXATTENTION-RESULTS.md)
-· authority: [RadixAttention model ladder](../../BENCHMARK-AUTHORITY.md).
+· authority: [RadixAttention model ladder](https://github.com/anthony-chaudhary/fak/blob/main/BENCHMARK-AUTHORITY.md).
 
 ---
 
@@ -338,11 +338,11 @@ Every number on this page obeys the same rules, enforced in CI and in the per-de
 
 ## Where to go deeper
 
-- **[BENCHMARK-AUTHORITY.md](../../BENCHMARK-AUTHORITY.md)** — the single source of truth;
+- **[BENCHMARK-AUTHORITY.md](https://github.com/anthony-chaudhary/fak/blob/main/BENCHMARK-AUTHORITY.md)** — the single source of truth;
   every number traces to a commit + artifact.
-- **[BENCHMARK-GOVERNANCE.md](../../BENCHMARK-GOVERNANCE.md)** — the DOS-centric process
+- **[BENCHMARK-GOVERNANCE.md](https://github.com/anthony-chaudhary/fak/blob/main/BENCHMARK-GOVERNANCE.md)** — the DOS-centric process
   that creates, verifies, and publishes a claim before it can appear here.
-- **[BENCHMARK-GALLERY.md](../../BENCHMARK-GALLERY.md)** — the four generated hero visuals
+- **[BENCHMARK-GALLERY.md](https://github.com/anthony-chaudhary/fak/blob/main/BENCHMARK-GALLERY.md)** — the four generated hero visuals
   (model-card style), each from one source-of-truth JSON with a `--check` CI drift gate.
 - **[Benchmarking index](../benchmarking/README.md)** — how to read the baselines, the
   measured-vs-modeled split, and the full tool inventory.

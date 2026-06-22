@@ -14,7 +14,7 @@ description: "One front door for fak's benchmark evidence: syscall latency, flee
 
 | Area | Evidence | Status |
 |---|---|---|
-| Syscall subsystem check | [`fak/STATUS.md`](../../STATUS.md), `fak/report.json`, `fak/baseline.json` | **Green, but narrow.** The current report records in-process adjudication at 2,365 ns p50 / 3,451 ns p99 vs a spawned-hook baseline of 13.203 ms p50, `gate_primary=pass` (~5,583x p50). This proves the syscall/adjudicator path is not paying a per-call process boundary; it is not a production-readiness or serving-throughput headline. |
+| Syscall subsystem check | [`fak/STATUS.md`](https://github.com/anthony-chaudhary/fak/blob/main/STATUS.md), `fak/report.json`, `fak/baseline.json` | **Green, but narrow.** The current report records in-process adjudication at 2,365 ns p50 / 3,451 ns p99 vs a spawned-hook baseline of 13.203 ms p50, `gate_primary=pass` (~5,583x p50). This proves the syscall/adjudicator path is not paying a per-call process boundary; it is not a production-readiness or serving-throughput headline. |
 | Fleet sweep | [`fak/FLEET-SWEEP-RESULTS.md`](../benchmarks/FLEET-SWEEP-RESULTS.md), `fak/experiments/fleet/*.csv` | **Measured on the real kernel.** The 50x50 read-fleet corner deletes 2,344/2,500 calls; the cross-agent bonus is +370 turns vs isolated agents. No-share controls are exactly zero. |
 | Write invalidation fix | `FLEET-ERASER-RESULTS.md` (private companion — not published), `fak/experiments/fleet/eraser/eraser-summary.csv` | **Built and measured.** Global invalidation turns negative around 1% writes; resource-scoped invalidation keeps +313 uplift at 1% writes and +235 at 10% writes. |
 | Single-goal fan-out | [`fak/FANOUT-BENCH-RESULTS.md`](../benchmarks/FANOUT-BENCH-RESULTS.md), `fak/experiments/fanout/fanbench-research.csv`, `fak/experiments/fanout/pscale/p1048576.json` | **Measured plus modeled.** At N=1024, the real shared-world path deletes +1,005 sibling-only tool-result calls; at fixed N=256, the prefix-scale ladder now reaches P=1,048,576 and the model claws back 89.8% of the prefix tax. Caveat: this is token-economics geometry, not yet a real 1M-token model wall-clock. |
@@ -27,19 +27,19 @@ description: "One front door for fak's benchmark evidence: syscall latency, flee
 The 2-D surface separates total fleet savings from the part that only appears when
 agents share one world epoch.
 
-![2-D fleet turn-tax heatmaps](../../experiments/fleet/fleet-heatmap.png)
+![2-D fleet turn-tax heatmaps](https://raw.githubusercontent.com/anthony-chaudhary/fak/main/experiments/fleet/fleet-heatmap.png)
 
 The plain-language companion shows the shared-cache fleet against the same agents
 run in isolated worlds; the shaded gap is the measured cross-agent uplift.
 
-![Fleet vs isolated baseline](../../experiments/fleet/fleet-compare.png)
+![Fleet vs isolated baseline](https://raw.githubusercontent.com/anthony-chaudhary/fak/main/experiments/fleet/fleet-compare.png)
 
 The write axis is the caution. Global invalidation is sound but too coarse; the
 resource eraser keeps the read-sharing benefit under realistic write rates.
 
-![Write-rate crossover and shared-pool slope law](../../experiments/fleet/fleet-axes.png)
+![Write-rate crossover and shared-pool slope law](https://raw.githubusercontent.com/anthony-chaudhary/fak/main/experiments/fleet/fleet-axes.png)
 
-![Scoped eraser recovery](../../experiments/fleet/fleet-eraser.png)
+![Scoped eraser recovery](https://raw.githubusercontent.com/anthony-chaudhary/fak/main/experiments/fleet/fleet-eraser.png)
 
 ## Fan-Out
 

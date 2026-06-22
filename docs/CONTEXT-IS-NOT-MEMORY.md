@@ -526,7 +526,7 @@ epic against fak's real seams (**#496**), grounded in `internal/abi`, `internal/
   `KVCache.Evict` (`Kraw` re-rotation) so a turn/session span is **forgotten on a clock the
   fact itself sets**, byte-identical to never-having-seen-it — the in-context forgetting a
   pressure-driven LRU cache structurally cannot do. (#502.)
-- **Close-out.** [`CLAIMS.md`](../CLAIMS.md) durability row + flip this doc's tag to `[SHIPPED]` for what
+- **Close-out.** [`CLAIMS.md`](https://github.com/anthony-chaudhary/fak/blob/main/CLAIMS.md) durability row + flip this doc's tag to `[SHIPPED]` for what
   landed. (#503.)
 
 The honest scope is on the tickets: rung 1 ships the inversion with a lexical classifier;
@@ -595,7 +595,7 @@ with rung 2's read gate; conflating the two would silently expire the existing r
 - `DISAGGREGATED-AGENT-MEMORY.md` (private companion — not published) — S1–S6 memory
   semantics; the durability classification here is the natural **S7** (promotion /
   truth-duration), upstream of all six.
-- [`CLAIMS.md`](../CLAIMS.md) — honesty ledger; the rung-1 durability gate (classifier +
+- [`CLAIMS.md`](https://github.com/anthony-chaudhary/fak/blob/main/CLAIMS.md) — honesty ledger; the rung-1 durability gate (classifier +
   `Verdict.Meta["durability"]` tag + `recall.Page.Durability` + default-expire promotion
   gate) is now `[SHIPPED]`; the TTL scheduler (rung 3), the `bounded` validity-window
   (rung 2), and Dream-time consolidation remain follow-on `[STUB]` rungs.

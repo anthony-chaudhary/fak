@@ -6,7 +6,7 @@ description: "The fused agent kernel's reread-elimination win at the >100k-token
 # ULTRA-LONG-CONTEXT-RESULTS — the exact work floor at >100k tokens (2026-06-22)
 
 > **📊 AUTHORITY:** This document's ultra-long-context floor numbers are centrally indexed in
-> **[BENCHMARK-AUTHORITY.md](../../BENCHMARK-AUTHORITY.md)**, the single source of truth. The
+> **[BENCHMARK-AUTHORITY.md](https://github.com/anthony-chaudhary/fak/blob/main/BENCHMARK-AUTHORITY.md)**, the single source of truth. The
 > floor is regenerable arithmetic — `go run ./cmd/longctxbench -ladder` — not a hand-entered number.
 
 > **What this answers.** The session value-stack (`SESSION-VALUE-STACK-RESULTS.md`) and the fleet

@@ -5,7 +5,7 @@ description: "The long-form story of fak: a default-deny capability floor plus r
 
 # fak — concepts & story (the unabridged front door)
 
-> This is the long-form companion to the [top-level README](../README.md). The README
+> This is the long-form companion to the [top-level README](https://github.com/anthony-chaudhary/fak/blob/main/README.md). The README
 > is the 3-page front door. Everything that used to make it long lives here.
 >
 > - The full parable and the persona framing.
@@ -13,7 +13,7 @@ description: "The long-form story of fak: a default-deny capability floor plus r
 > - The detailed "when does the reuse win kick in" tables.
 > - The honest-scope ledger in narrative form.
 >
-> Numbers trace to [`fak/CLAIMS.md`](../CLAIMS.md) and the results docs it links.
+> Numbers trace to [`fak/CLAIMS.md`](https://github.com/anthony-chaudhary/fak/blob/main/CLAIMS.md) and the results docs it links.
 
 ## The story that makes it click
 
@@ -192,12 +192,12 @@ So keep irreversible tools off the allow-list rather than leaning on argument-ma
 The floor is a **deployable manifest**: a declarative, version-tagged JSON file loaded at
 runtime (`fak serve --policy FILE`, also on `run`/`agent`/`preflight`; author/validate with `fak policy --dump|--check`). Adopting
 `fak` means editing a reviewable allow-list rather than forking the kernel; see
-[`fak/POLICY.md`](../POLICY.md). **Permissions as the floor; filters on top.**
+[`fak/POLICY.md`](https://github.com/anthony-chaudhary/fak/blob/main/POLICY.md). **Permissions as the floor; filters on top.**
 
 ## What's real, what's simulated, what's not built yet
 
 `fak` is built to survive a skeptic reading the code. Every capability in
-[`fak/CLAIMS.md`](../CLAIMS.md) carries exactly one machine-checked tag:
+[`fak/CLAIMS.md`](https://github.com/anthony-chaudhary/fak/blob/main/CLAIMS.md) carries exactly one machine-checked tag:
 
 - **SHIPPED & on the critical path:**
   - The in-process syscall chokepoint.
@@ -212,7 +212,7 @@ runtime (`fak serve --policy FILE`, also on `run`/`agent`/`preflight`; author/va
   a real GPU on the box now, but no power meter, so those stay illustrative. (The
   in-`fak` model's forward pass itself *does* run on real GPUs, AMD and NVIDIA,
   numerically exact; the NVIDIA path even hits decode-speed parity with llama.cpp on an
-  opt-in setting. See [`fak/GPU.md`](../GPU.md).)
+  opt-in setting. See [`fak/GPU.md`](https://github.com/anthony-chaudhary/fak/blob/main/GPU.md).)
 - **STUB (labeled):** zero-copy KV co-residence with an *external* serving engine and the
   fine-tuned syscall model are frozen ABI seams, not built in v0.1–0.2.
 - **Not novel, and we say so:** a 29-claim, 61-agent prior-art audit scored **0/29

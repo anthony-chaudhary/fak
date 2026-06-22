@@ -5,7 +5,7 @@ description: "Author a fak capability floor: write, check, and preflight a defau
 
 # Policy authoring guide (with worked examples)
 
-This is the **task-oriented** companion to [`fak/POLICY.md`](../../POLICY.md). POLICY.md
+This is the **task-oriented** companion to [`fak/POLICY.md`](https://github.com/anthony-chaudhary/fak/blob/main/POLICY.md). POLICY.md
 is the schema reference — the fields and their meaning. This page shows you how to *build a
 real capability floor for a real agent*, with **example manifests you can copy** and the
 **actual `fak` output each one produces** (every output block below was captured from a
@@ -160,7 +160,7 @@ mutate accounts**. For a read-heavy agent the danger is not what it runs but wha
 be talked into *exfiltrating* (an injection that says "paste the customer list into
 `export_customer_data`"). So every read-shaped tool is allow-listed, every irreversible or
 exfil-shaped tool is an explicit named deny, and the `ssn` field is redacted. Shipped at
-[`examples/customer-support-readonly-policy.json`](../../examples/customer-support-readonly-policy.json):
+[`examples/customer-support-readonly-policy.json`](https://raw.githubusercontent.com/anthony-chaudhary/fak/main/examples/customer-support-readonly-policy.json):
 
 ```json
 {
@@ -226,7 +226,7 @@ prod**. The distinctive lever here is **argument-level**: `plan_deploy` is allow
 is the job), but its `environment` argument is regex-blocked from `prod|production`, so the
 agent can plan a staging deploy and is refused — by value, not by tool name — the moment it
 aims the *same* tool at prod. Shipped at
-[`examples/devops-dryrun-policy.json`](../../examples/devops-dryrun-policy.json):
+[`examples/devops-dryrun-policy.json`](https://raw.githubusercontent.com/anthony-chaudhary/fak/main/examples/devops-dryrun-policy.json):
 
 ```json
 {
@@ -295,7 +295,7 @@ guards do real work here: `fetch_url` is blocked from `file://`/`ftp://`/`ssh://
 is refused by value), and `create_note` is confined to a `notes/**` glob so notes can't
 overwrite arbitrary repo paths. It runs under `admit_and_log` so a long batch crawl isn't
 wedged by one unlisted read-shaped tool. Shipped at
-[`examples/research-agent-policy.json`](../../examples/research-agent-policy.json):
+[`examples/research-agent-policy.json`](https://raw.githubusercontent.com/anthony-chaudhary/fak/main/examples/research-agent-policy.json):
 
 ```json
 {
@@ -430,7 +430,7 @@ The tool is on the allow-list; the *value* is off-limits. The two recurring patt
 ```
 
 Regexes are Go `regexp` (RE2) — case-insensitive via `(?i)`. Common shapes worth copying
-(from [`examples/repo-guard-policy.json`](../../examples/repo-guard-policy.json), which
+(from [`examples/repo-guard-policy.json`](https://raw.githubusercontent.com/anthony-chaudhary/fak/main/examples/repo-guard-policy.json), which
 guards a shell tool):
 
 ```jsonc
@@ -557,7 +557,7 @@ fallback to something more permissive.
 
 ## Honest scope — what the floor does and does *not* bound
 
-Carried verbatim from [`POLICY.md`](../../POLICY.md) because it matters:
+Carried verbatim from [`POLICY.md`](https://github.com/anthony-chaudhary/fak/blob/main/POLICY.md) because it matters:
 
 - ✅ **Bounds which tools run.** An irreversible tool you don't allow-list is refused
   *regardless of context* — including an injection that talks the model into calling it.
@@ -569,7 +569,7 @@ Carried verbatim from [`POLICY.md`](../../POLICY.md) because it matters:
   attacker-chosen recipients still leans on the *detection* layer (context-MMU +
   `normgate`). Keep exfil-shaped tools off the allow-list and let `DEFAULT_DENY` hold them.
   (Richer *structured* value predicates — path-resolution, numeric/range — are on the
-  [`POLICY.md`](../../POLICY.md) roadmap.)
+  [`POLICY.md`](https://github.com/anthony-chaudhary/fak/blob/main/POLICY.md) roadmap.)
 - ⚠️ `redact_fields` and `self_modify_globs` are **best-effort** key/substring hygiene, not a
   cryptographic guarantee — they inspect decoded args.
 
@@ -581,8 +581,8 @@ for why putting the check on the same call path (default-deny, fail-closed) is t
 
 ## See also
 
-- [`POLICY.md`](../../POLICY.md) — the field-by-field schema reference (`arg_rules`, IFC `sources`/`safe_sinks`, the closed reason vocabulary) and the roadmap.
-- [`examples/`](../../examples/) — the five worked manifests above plus `repo-guard-policy.json`, `dogfood-claude-policy.json`, and `policy.example.json`, all copy-ready.
+- [`POLICY.md`](https://github.com/anthony-chaudhary/fak/blob/main/POLICY.md) — the field-by-field schema reference (`arg_rules`, IFC `sources`/`safe_sinks`, the closed reason vocabulary) and the roadmap.
+- [`examples/`](https://github.com/anthony-chaudhary/fak/tree/main/examples) — the five worked manifests above plus `repo-guard-policy.json`, `dogfood-claude-policy.json`, and `policy.example.json`, all copy-ready.
 - [server-config.md](server-config.md) — the `/v1/fak/policy/reload` endpoint and gateway auth/network config.
 - [tutorial.md §1.5](tutorial.md) — authoring a floor in the guided first session.
 - [security.md](security.md) — hardening the deployed gateway (auth, network, defense-in-depth).

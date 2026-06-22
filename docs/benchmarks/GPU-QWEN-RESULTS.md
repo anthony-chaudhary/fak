@@ -143,8 +143,8 @@ follow-up (same as §6's prefill). Two levers shrink the per-token KV further: f
 ## 7. Reproduce
 
 > **Committed data + charts:** this 3B Q8 run is shipped as machine-readable data with inline
-> charts in [`experiments/gpu/`](../../experiments/gpu/) — [decode-vs-llama](../../experiments/gpu/figures/decode-vs-llama.svg)
-> · [prefill≈decode](../../experiments/gpu/figures/prefill-decode.svg). Every fak number there is fak's
+> charts in [`experiments/gpu/`](https://github.com/anthony-chaudhary/fak/tree/main/experiments/gpu) — [decode-vs-llama](https://raw.githubusercontent.com/anthony-chaudhary/fak/main/experiments/gpu/figures/decode-vs-llama.svg)
+> · [prefill≈decode](https://raw.githubusercontent.com/anthony-chaudhary/fak/main/experiments/gpu/figures/prefill-decode.svg). Every fak number there is fak's
 > **own** in-kernel CUDA forward pass; `llama.cpp` is the comparison baseline only.
 
 ```bash

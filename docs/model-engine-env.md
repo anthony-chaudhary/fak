@@ -127,6 +127,6 @@ Out of scope for the model/compute engine reference, and so deliberately omitted
 - **Gateway / serve** vars (`FAK_HTTP_*`, `FAK_PLANNER_*`, `FAK_RATELIMIT_*`,
   `FAK_MODEL_DIR`, …) — see [`serve-config.md`](serve-config.md).
 
-See also: [`experiments/gpu/README.md`](../experiments/gpu/README.md) and
+See also: [`experiments/gpu/README.md`](https://github.com/anthony-chaudhary/fak/blob/main/experiments/gpu/README.md) and
 [`docs/gpu-parity-tracking-480.md`](gpu-parity-tracking-480.md) for the GPU
 residency / parity context behind `FAK_GPU_BUDGET_MB` and the device paths.

@@ -13,7 +13,7 @@ description: "Shows how fak adjudicates every tool call before it runs, allowing
 > the real Claude Code dogfood (`fak/examples/dogfood-claude-policy.json`).
 
 Companion to `COMPARE-security-model-vs-guardrails` (private research companion)
-(why this layer, not a content guardrail) and [`fak/POLICY.md`](../../POLICY.md) (the
+(why this layer, not a content guardrail) and [`fak/POLICY.md`](https://github.com/anthony-chaudhary/fak/blob/main/POLICY.md) (the
 manifest schema + author/validate workflow). Generated 2026-06-18.
 
 ---
@@ -80,13 +80,13 @@ so a manifest edit that silently widens the floor fails CI.
 ## How to use / change it
 
 - The Claude Code dogfood (`fak/scripts/dogfood-claude.sh`, see
-  [`fak/DOGFOOD-CLAUDE.md`](../../DOGFOOD-CLAUDE.md)) loads this floor by default so
+  [`fak/DOGFOOD-CLAUDE.md`](https://github.com/anthony-chaudhary/fak/blob/main/DOGFOOD-CLAUDE.md)) loads this floor by default so
   interactive sessions work; override with `FAK_DOGFOOD_POLICY=<path>` or
   `FAK_DOGFOOD_POLICY=none` for the raw fail-closed kernel.
 - The floor is a JSON manifest, not a code change: `fak policy --dump` to start from
   the built-in default, edit, `--check`, then `--policy FILE`. Full schema +
-  closed refusal vocabulary in [`fak/POLICY.md`](../../POLICY.md).
+  closed refusal vocabulary in [`fak/POLICY.md`](https://github.com/anthony-chaudhary/fak/blob/main/POLICY.md).
 - Honest scope: the floor bounds *which tools run with which argument values*. It is
   the call-side capability deny — paired with the result-side containment
   (poisoned tool results held out of context) described in the top-level
-  [`README`](../../README.md) and `COMPARE-security-model-vs-guardrails` (private research companion).
+  [`README`](https://github.com/anthony-chaudhary/fak/blob/main/README.md) and `COMPARE-security-model-vs-guardrails` (private research companion).

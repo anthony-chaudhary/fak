@@ -280,7 +280,7 @@ cost, how many sessions must run before the efficiency saving alone recovers it.
 | 20% | 10.61 | 11 | 14 | $0.0573 | ~49 million |
 | 50% | 27.18 | 28 | 32 | $0.1468 | ~19 million |
 
-![turn-tax break-even curve](../../experiments/turn-tax/turntax-breakeven.png)
+![turn-tax break-even curve](https://raw.githubusercontent.com/anthony-chaudhary/fak/main/experiments/turn-tax/turntax-breakeven.png)
 
 *(Regenerate: `fak turntax --breakeven` then `python tools/turntax_plot.py`. Panel
 (a) is the MEASURED per-session win — real-kernel replay per point; panel (b) is the

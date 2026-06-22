@@ -496,9 +496,9 @@ CrewAI `BaseTool`, and the `tool` string you pass to `fak_adjudicate`. Anything 
 > filter the *arguments* of an allow-listed tool (argument-value predicates are a roadmap
 > item, not shipped). Keep irreversible / exfil-shaped operations **off** the allow-list
 > and let `DEFAULT_DENY` hold them, rather than allow-listing a broad tool and hoping to
-> constrain its arguments. Full discussion: [`fak/POLICY.md`](../../POLICY.md).
+> constrain its arguments. Full discussion: [`fak/POLICY.md`](https://github.com/anthony-chaudhary/fak/blob/main/POLICY.md).
 
-Ready-made starting points ship in [`fak/examples/`](../../examples/):
+Ready-made starting points ship in [`fak/examples/`](https://github.com/anthony-chaudhary/fak/tree/main/examples):
 `dev-agent-policy.json` (coding agent), `research-agent-policy.json` (read-only),
 `customer-support-readonly-policy.json`, and `devops-dryrun-policy.json`. Authoring
 details are in [policy-guide.md](policy-guide.md).
@@ -547,7 +547,7 @@ denied, `401`, `502`, streaming behavior) is in the
   LangChain, AutoGen, the OpenAI SDK, and llama.cpp.
 - [api-reference.md](api-reference.md) — every endpoint, the fak-native DTOs, the verdict
   object, and the `fak` response extension in full.
-- [policy-guide.md](policy-guide.md) · [`fak/POLICY.md`](../../POLICY.md) — authoring
+- [policy-guide.md](policy-guide.md) · [`fak/POLICY.md`](https://github.com/anthony-chaudhary/fak/blob/main/POLICY.md) — authoring
   the capability floor and the closed refusal vocabulary.
 - [server-quickstart.md](server-quickstart.md) · [server-config.md](server-config.md) —
   every `fak serve` flag and environment variable.
