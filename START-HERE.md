@@ -24,7 +24,17 @@ and runs on CPU — no GPU needed for small models.
 
 ## Quick: Try the chat demo (5 minutes)
 
-### 1. Download a model
+### 1. Get the code
+
+The demo lives inside this repo, so clone it first (this creates a `fak/` folder):
+
+```bash
+git clone https://github.com/anthony-chaudhary/fak.git && cd fak
+```
+
+Every command below runs from inside that `fak/` folder.
+
+### 2. Download a model
 
 Pick one:
 - **[Qwen2.5-1.5B-Q8](https://huggingface.co/mradermacher/Qwen2.5-1.5B-Instruct-GGUF/resolve/main/Qwen2.5-1.5B-Instruct-Q8_0.gguf)** (1.6 GB) — Fast, good quality
@@ -34,7 +44,7 @@ Also download: **[tokenizer.json](https://huggingface.co/mradermacher/Qwen2.5-1.
 
 Save both to the same folder (e.g., `~/Downloads/` or `C:\Users\You\Downloads\`).
 
-### 2. Run it
+### 3. Run it
 
 **Linux/macOS (one line):**
 ```bash
@@ -46,7 +56,7 @@ go run ./cmd/simpledemo -gguf ~/Downloads/Qwen2.5-1.5B-Instruct-Q8_0.gguf -tok ~
 go run ./cmd/simpledemo -gguf $env:USERPROFILE\Downloads\Qwen2.5-1.5B-Instruct-Q8_0.gguf -tok $env:USERPROFILE\Downloads
 ```
 
-### 3. Chat!
+### 4. Chat!
 
 ```
 You: Explain quantum computing like I'm 12
@@ -87,6 +97,7 @@ its commit and artifact.
 
 ## Requirements
 
+- **A clone of this repo** (`git clone https://github.com/anthony-chaudhary/fak.git`) — the demo runs from inside it
 - **Go 1.26+** (auto-downloads if you have an older version)
 - **4-8 GB RAM** (depends on model size)
 - That's it!
