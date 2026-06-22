@@ -239,3 +239,87 @@ func TestPolicyReplay_NoDivergenceControl(t *testing.T) {
 		}
 	}
 }
+
+// redactTrace is a 2-call trajectory whose first call carries a secret-shaped arg
+// ("password"). Both the served arm and the redact arm SERVE the call (a monitor REDACT
+// is a pass, not a deny/quarantine), so observedClass buckets both as "served" — the
+// exact-false trap the raw-verdict path (#501) has to catch.
+func redactTrace(t *testing.T) *Trace {
+	return &Trace{
+		SliceID: "policy-replay-redact",
+		Calls: []Call{
+			{Tool: "get_user_details", Args: rawArgs(t, map[string]any{"user_id": "u1", "password": "hunter2"})},
+			{Tool: "calculate", Args: rawArgs(t, map[string]any{"a": 240, "b": 60})},
+		},
+	}
+}
+
+// TestPolicyReplay_RedactTransformDivergence is the #501(a) proof: a redact-ONLY policy
+// difference must surface as bounded@i, not a false exact. The reference serves the
+// secret-shaped call verbatim; the redact arm rewrites "password" -> "[REDACTED]" before
+// dispatch. observedClass calls BOTH "served" (a redact is a pass), so the class witness
+// alone would (wrongly) report exact; the raw-verdict path catches the differing rewrite
+// and labels the arm bounded@0.
+func TestPolicyReplay_RedactTransformDivergence(t *testing.T) {
+	ctx := context.Background()
+	tr := redactTrace(t)
+	allow := map[string]bool{"get_user_details": true, "calculate": true}
+	arms := []PolicyArm{
+		// Reference: serves the secret-shaped call verbatim (no redact).
+		{Name: "served-raw", Policy: adjudicator.Policy{Allow: allow}},
+		// A DIFFERENT policy that does NOT redact and serves identically -> still exact.
+		{Name: "served-raw-copy", Policy: adjudicator.Policy{Allow: allow}},
+		// Redact arm: same allow set, but rewrites "password" before dispatch. The model
+		// would observe different args -> a redact divergence the class witness misses.
+		{Name: "redact-password", Policy: adjudicator.Policy{Allow: allow, RedactFields: []string{"password"}}},
+	}
+
+	rep, err := RunPolicyReplay(ctx, tr, arms, "served-raw", DefaultCostModel())
+	if err != nil {
+		t.Fatalf("RunPolicyReplay: %v", err)
+	}
+
+	raw := armByName(t, rep, "served-raw")
+	rawCopy := armByName(t, rep, "served-raw-copy")
+	redact := armByName(t, rep, "redact-password")
+
+	// The reference and an identical non-redacting policy replay exactly.
+	if raw.Replayability != "exact" || raw.FirstDivergence != -1 {
+		t.Errorf("served-raw vs itself must be exact, got %q (idx %d)", raw.Replayability, raw.FirstDivergence)
+	}
+	if rawCopy.Replayability != "exact" || rawCopy.FirstDivergence != -1 {
+		t.Errorf("served-raw-copy must replay exactly, got %q (idx %d)", rawCopy.Replayability, rawCopy.FirstDivergence)
+	}
+
+	// The CRUX: the redact arm must NOT read as a false exact. observedClass calls call 0
+	// "served" under both arms, so without the raw-verdict path this would be exact.
+	if redact.FirstDivergence != 0 {
+		t.Fatalf("redact-password must diverge at call 0 (the secret-shaped call), got idx %d (%q)",
+			redact.FirstDivergence, redact.Replayability)
+	}
+	if redact.Replayability != "bounded@0" {
+		t.Errorf("redact-password must be bounded@0, got %q", redact.Replayability)
+	}
+	if redact.DivergenceTool != "get_user_details" {
+		t.Errorf("redact divergence tool: want get_user_details, got %q", redact.DivergenceTool)
+	}
+	if redact.DivergenceNote == "" {
+		t.Errorf("a redact divergence must carry a witness note (no silent crossing)")
+	}
+
+	// Honesty split: 2 exact (reference + identical) + 1 bounded (the redact arm).
+	if rep.ExactArms != 2 || rep.BoundedArms != 1 {
+		t.Errorf("want 2 exact + 1 bounded, got exact=%d bounded=%d", rep.ExactArms, rep.BoundedArms)
+	}
+
+	// Anti-inflation: confirm the call's observed CLASS really is "served" under both arms
+	// (so the divergence is genuinely the redact, not a deny/quarantine the class witness
+	// would already catch). Both arms must serve call 0 with zero denies/quarantines.
+	if raw.Counters.Denies != 0 || redact.Counters.Denies != 0 {
+		t.Errorf("redact must be a PASS, not a deny: raw denies=%d redact denies=%d",
+			raw.Counters.Denies, redact.Counters.Denies)
+	}
+	if redact.Counters.Transforms < 1 {
+		t.Errorf("redact arm must record a monitor TRANSFORM, got transforms=%d", redact.Counters.Transforms)
+	}
+}

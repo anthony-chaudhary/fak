@@ -43,19 +43,29 @@
 // "replay last month's sessions" needs a payload-bearing trace sink first (filed
 // follow-up). The policy axis here is the adjudicator decision table (Allow / Deny /
 // arg-rules / self-modify / redact); vDSO, grammar repair, and ctx-MMU quarantine are
-// registered by OTHER drivers and are constant across arms. A monitor REDACT transform
-// currently classifies as a served result (classifyDisposition buckets it as a pass),
-// so a redact-induced divergence is NOT yet detected — a documented follow-up, not a
-// silent gap.
+// registered by OTHER drivers and are constant across arms.
+//
+// REDACT divergence (issue #501). A monitor REDACT transform still buckets as a served
+// result in classifyDisposition (it IS served — the call runs, just with rewritten
+// args), so observedClass alone reads two redact-differing arms as both "served" and
+// would call them exact. That is a FALSE exact: a live model would observe the rewritten
+// args/results and could branch. RunPolicyReplay closes this by carrying a RAW monitor
+// verdict alongside the disposition — it re-queries adjudicator.Default for each call's
+// VerdictTransform and resolves the rewritten args — and treats a redact whose rewritten
+// args DIFFER from the reference arm as a divergence, so the arm comes out bounded@i, not
+// a false exact. The raw-verdict path runs ONLY for monitor redacts; every other class is
+// witnessed by the observed-result class exactly as before.
 package turnbench
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
 	"runtime"
 	"time"
 
+	"github.com/anthony-chaudhary/fak/internal/abi"
 	"github.com/anthony-chaudhary/fak/internal/adjudicator"
 	"github.com/anthony-chaudhary/fak/internal/agent"
 	"github.com/anthony-chaudhary/fak/internal/appversion"
@@ -128,9 +138,11 @@ func (r *PolicyReplayReport) JSON() []byte {
 // divergence witness keys on this: two policies that produce the same observed-result
 // class for every recorded call are replay-equivalent on this trajectory.
 //
-// NOTE (documented limitation): a monitor REDACT transform lands in "served" today —
-// classifyDisposition buckets it as a pass — so a redact-induced divergence is not yet
-// detected. Surfacing it needs the raw monitor verdict (a filed follow-up).
+// NOTE: a monitor REDACT transform lands in "served" here — it IS served, just with
+// rewritten args. observedClass deliberately keeps it "served"; the redact-induced
+// divergence (where two arms rewrite the SAME call's args differently) is caught by the
+// raw-verdict path in RunPolicyReplay (redactFingerprint + firstRawDivergence), NOT by
+// this coarse result class. See the file doc (issue #501).
 func observedClass(d CallDisposition) string {
 	switch d.Class {
 	case "deny":
@@ -153,6 +165,74 @@ func firstDivergence(ref, arm []CallDisposition) (int, string) {
 	for i := 0; i < n; i++ {
 		if observedClass(arm[i]) != observedClass(ref[i]) {
 			return i, arm[i].Tool
+		}
+	}
+	return -1, ""
+}
+
+// redactFingerprint is the RAW monitor verdict captured per call for the redact-aware
+// divergence path (issue #501). isRedact is true iff the monitor emitted a VerdictTransform
+// for this call (a redact rewrite of the args); RewrittenArgs is the canonical bytes the
+// model would observe AFTER the rewrite (empty when isRedact is false). Comparing this
+// across arms catches a redact-only policy difference that observedClass buckets as a
+// uniform "served" and would otherwise read as a false exact.
+type redactFingerprint struct {
+	isRedact      bool
+	rewrittenArgs []byte
+}
+
+// captureRedactFingerprints re-queries the CURRENTLY-INSTALLED monitor policy (set by the
+// caller for this arm) for the raw verdict of every call, recording the monitor REDACT
+// rewrite where one fires. It does NOT run a second kernel replay — it is a read-only
+// adjudication query (the same Adjudicate the kernel's monitor link calls), so it adds no
+// engine/network work and stays deterministic. Args are Put through the active resolver
+// exactly as replay() does, so the verdict matches the one the replay's kernel saw.
+func captureRedactFingerprints(ctx context.Context, t *Trace) ([]redactFingerprint, error) {
+	res := abi.ActiveResolver()
+	out := make([]redactFingerprint, len(t.Calls))
+	for i, c := range t.Calls {
+		args := []byte(c.Args)
+		if len(args) == 0 {
+			args = []byte("{}")
+		}
+		ref, err := res.Put(ctx, args)
+		if err != nil {
+			return nil, err
+		}
+		v := adjudicator.Default.Adjudicate(ctx, &abi.ToolCall{Tool: c.Tool, Args: ref, Meta: c.Meta})
+		// Only a MONITOR redact transform rewrites the model-observed args. A grammar
+		// TRANSFORM (By=="grammar") is a constant-across-arms in-syscall repair, not a
+		// policy lever, so it is never a redact divergence point.
+		if v.Kind == abi.VerdictTransform && v.By == "monitor" {
+			if tp, ok := v.Payload.(abi.TransformPayload); ok {
+				b, err := res.Resolve(ctx, tp.NewArgs)
+				if err != nil {
+					return nil, err
+				}
+				out[i] = redactFingerprint{isRedact: true, rewrittenArgs: append([]byte(nil), b...)}
+			}
+		}
+	}
+	return out, nil
+}
+
+// firstRawDivergence finds the first call where this arm's redact verdict DIFFERS from the
+// reference's: either exactly one of them redacted the call, or both redacted it but to
+// DIFFERENT rewritten args. Such a call is served under both arms (so observedClass calls
+// it a match), yet the model would observe different args/results and could branch — a
+// divergence observedClass cannot see. Returns (-1, "") when the redact verdicts agree on
+// every call.
+func firstRawDivergence(t *Trace, ref, arm []redactFingerprint) (int, string) {
+	n := len(ref)
+	if len(arm) < n {
+		n = len(arm)
+	}
+	for i := 0; i < n; i++ {
+		if ref[i].isRedact != arm[i].isRedact {
+			return i, t.Calls[i].Tool
+		}
+		if ref[i].isRedact && arm[i].isRedact && !bytes.Equal(ref[i].rewrittenArgs, arm[i].rewrittenArgs) {
+			return i, t.Calls[i].Tool
 		}
 	}
 	return -1, ""
@@ -200,6 +280,7 @@ func RunPolicyReplay(ctx context.Context, t *Trace, arms []PolicyArm, refName st
 
 	results := make([]PolicyArmResult, len(arms))
 	disps := make([][]CallDisposition, len(arms))
+	fps := make([][]redactFingerprint, len(arms))
 	var wall int64
 	for i, arm := range arms {
 		adjudicator.Default.SetPolicy(arm.Policy)
@@ -209,16 +290,37 @@ func RunPolicyReplay(ctx context.Context, t *Trace, arms []PolicyArm, refName st
 		if err != nil {
 			return nil, fmt.Errorf("turnbench: replay arm %q: %w", arm.Name, err)
 		}
+		// Raw monitor verdict per call for the redact-aware divergence path (#501).
+		// The arm's policy is still installed, so the fingerprint matches the replay
+		// the kernel just ran; it is a read-only adjudication, not a second replay.
+		fp, err := captureRedactFingerprints(ctx, t)
+		if err != nil {
+			return nil, fmt.Errorf("turnbench: capture redact fingerprints arm %q: %w", arm.Name, err)
+		}
 		wall += dt
 		disps[i] = disp
+		fps[i] = fp
 		results[i] = PolicyArmResult{Name: arm.Name, Class: cb, Counters: kc, ReplayNs: dt}
 	}
 
-	// Divergence witness: each arm vs the reference's per-call observed-result class.
+	// Divergence witness: each arm vs the reference. Two witnesses fold together and
+	// the EARLIER divergence wins:
+	//   (1) the observed-result CLASS flip (served|denied|quarantined) — a deny where
+	//       the reference served, etc.; and
+	//   (2) the RAW redact verdict differing (#501) — a call both arms serve, but with
+	//       different rewritten args, which class (1) cannot see.
 	refDisp := disps[refIdx]
+	refFp := fps[refIdx]
 	exact, bounded := 0, 0
 	for i := range results {
 		idx, tool := firstDivergence(refDisp, disps[i])
+		ridx, rtool := firstRawDivergence(t, refFp, fps[i])
+		// Pick the earlier of the class-flip and the redact divergence. A redact
+		// divergence carries a distinct note so the witness names WHY it is bounded.
+		redact := false
+		if ridx >= 0 && (idx < 0 || ridx < idx) {
+			idx, tool, redact = ridx, rtool, true
+		}
 		results[i].FirstDivergence = idx
 		if idx < 0 {
 			results[i].ExactPrefix = len(t.Calls)
@@ -229,10 +331,18 @@ func RunPolicyReplay(ctx context.Context, t *Trace, arms []PolicyArm, refName st
 		results[i].ExactPrefix = idx
 		results[i].Replayability = fmt.Sprintf("bounded@%d", idx)
 		results[i].DivergenceTool = tool
-		results[i].DivergenceNote = fmt.Sprintf(
-			"call %d (%s) observed %q under this policy vs %q under reference %q; a live run "+
-				"would branch here — verdict counters are real, resolve-rate past this call is counterfactual",
-			idx, tool, observedClass(disps[i][idx]), observedClass(refDisp[idx]), arms[refIdx].Name)
+		if redact {
+			results[i].DivergenceNote = fmt.Sprintf(
+				"call %d (%s) is REDACTED differently under this policy than under reference %q "+
+					"(the model would observe different args/results); a live run would branch here — "+
+					"verdict counters are real, resolve-rate past this call is counterfactual",
+				idx, tool, arms[refIdx].Name)
+		} else {
+			results[i].DivergenceNote = fmt.Sprintf(
+				"call %d (%s) observed %q under this policy vs %q under reference %q; a live run "+
+					"would branch here — verdict counters are real, resolve-rate past this call is counterfactual",
+				idx, tool, observedClass(disps[i][idx]), observedClass(refDisp[idx]), arms[refIdx].Name)
+		}
 		bounded++
 	}
 
