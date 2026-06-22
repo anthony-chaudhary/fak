@@ -283,6 +283,11 @@ def default_safe_roots() -> tuple[str, ...]:
         "/var/tmp",
         f"{home}/.cache",
         f"{home}/Downloads",
+        # The agent's own state/memory tree (~/.claude/projects/<ws>/memory, plans,
+        # settings). Writing there is the agent persisting its own learnings, never a
+        # cross-project leak — the failure mode this guard exists to catch. Without it
+        # the hook blocks the agent from writing its own memory.
+        f"{home}/.claude",
     ]
     for var in ("TMPDIR", "TEMP", "TMP"):
         v = os.environ.get(var)

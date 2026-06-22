@@ -64,6 +64,19 @@ class CoreTests(unittest.TestCase):
         ):
             self.assertEqual(self._v("Bash", {"command": cmd}), [], cmd)
 
+    def test_claude_state_dir_is_a_safe_root(self):
+        # The agent's own memory/state tree (~/.claude/...) is on the production
+        # allow-list, so writing memory is never denied as a cross-project leak.
+        self.assertIn("/.claude", "".join(self.mod.default_safe_roots()))
+
+    def test_agent_memory_write_allowed(self):
+        # An absolute Write into the agent-memory tree, with .claude on safe_roots,
+        # must pass (it would otherwise be an out-of-workspace denial).
+        roots = SAFE + ("C:/Users/u/.claude",)
+        fp = "C:/Users/u/.claude/projects/C--Users-u-work-fak/memory/note.md"
+        v = self.mod.evaluate("Write", {"file_path": fp}, workspace_root=WS, safe_roots=roots)
+        self.assertEqual(v, [], fp)
+
     def test_grep_dash_o_is_not_an_output_path(self):
         # -o is overloaded: grep -o is only-matching, not a build output file.
         self.assertEqual(self._v("Bash", {"command": "grep -o ../foo internal/policy/x.go"}), [])
