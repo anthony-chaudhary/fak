@@ -80,7 +80,7 @@ description: "Frequently asked questions about fak, the agent kernel: how its de
       "name": "How much faster is fak for agent fleets?",
       "acceptedAnswer": {
         "@type": "Answer",
-        "text": "The win is in reread-rate, not raw GPU speed. On a 50-turn × 5-agent run it is about 4× fewer tokens than a tuned warm-cache stack (the honest few-fold vs. state of the art; ~60× vs. the naive re-send-everything pattern, which is easy to beat and not the headline). On real WebVoyager web-agent workloads (643 tasks) it eliminates 8.8–9.7× of prefill, measured. The reuse win is self-host only — an app that merely calls a frontier API gets the safety floor but not the savings. Every number is traced to a commit and artifact in the benchmark authority."
+        "text": "The win is in reread-rate, not raw GPU speed. On a 50-turn × 5-agent run it is about 4× fewer tokens than a tuned warm-cache stack — the apples-to-apples comparison (~60× only against the naive re-send-everything baseline, not the headline). On real WebVoyager web-agent workloads (643 tasks) it eliminates 8.8–9.7× of prefill, measured. The reuse win is self-host only — an app that merely calls a frontier API gets the safety floor but not the savings. Every number is traced to a commit and artifact in the benchmark authority."
       }
     },
     {
@@ -265,9 +265,8 @@ reference, not a production server. See
 ## How much faster is fak for agent fleets?
 
 The win is in **reread-rate**, not raw GPU speed. On a 50-turn × 5-agent run it is about
-**4× fewer tokens than a tuned warm-cache stack** (the honest few-fold vs. state of the
-art; ~60× vs. the naive re-send-everything pattern, which is easy to beat and not the
-headline). On real WebVoyager web-agent workloads (643 tasks) it eliminates **8.8–9.7×**
+**4× fewer tokens than a tuned warm-cache stack** — the apples-to-apples comparison
+(~60× only against the naive re-send-everything baseline, not the headline). On real WebVoyager web-agent workloads (643 tasks) it eliminates **8.8–9.7×**
 of prefill, measured. The reuse win is **self-host only** — an app that merely *calls* a
 frontier API gets the safety floor but not the savings. Every number is traced to a
 commit and artifact in the [benchmark authority](../BENCHMARK-AUTHORITY.md).
