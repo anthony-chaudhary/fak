@@ -121,6 +121,58 @@ structural one. Full walkthrough: [`../repro-packet.md`](../repro-packet.md).
 
 ---
 
+## See it adjudicate over the wire (same offline gate, the way your agent hits it)
+
+The check above is the CLI; your agent hits the *same* gate over HTTP. Start `fak serve`
+with **no `--base-url`** — it serves a deterministic offline mock planner, so this is
+still no model, no key, no GPU — and send it a normal OpenAI request. The response comes
+back with the kernel's verdict attached, and your agent code never changed:
+
+```bash
+fak serve --addr 127.0.0.1:8077 --policy examples/customer-support-readonly-policy.json &
+# from a clone, `go run ./cmd/fak serve …` works too
+
+# 1. A normal OpenAI Chat Completions request — exactly what your agent already sends.
+curl -s http://127.0.0.1:8077/v1/chat/completions \
+  -H 'content-type: application/json' \
+  -d '{"model":"mock","messages":[{"role":"user","content":"refund my last order"}]}'
+```
+
+The model proposes a tool call, and the kernel's inline adjudication rides along in a
+`fak` block (response abridged):
+
+```json
+{
+  "choices": [{ "message": { "tool_calls": [
+    { "id": "call_0", "type": "function",
+      "function": { "name": "get_user_details", "arguments": "{\"user_id\":\"mia_li_3668\"}" } }
+  ] }, "finish_reason": "tool_calls" }],
+  "fak": { "adjudications": [
+    { "tool_call_id": "call_0", "tool": "get_user_details", "admitted": true,
+      "verdict": { "kind": "ALLOW", "by": "monitor" } }
+  ] }
+}
+```
+
+`get_user_details` is on the allow-list, so the kernel **admitted** it and said so inline
+— the gate is just *there*, with no agent-side change. Ask it about a tool that is **not**
+sanctioned and it refuses by structure:
+
+```bash
+# 2. A verdict without executing — the path an MCP client takes before it runs a tool.
+curl -s http://127.0.0.1:8077/v1/fak/adjudicate \
+  -H 'content-type: application/json' \
+  -d '{"tool":"refund_payment","arguments":{"amount":500}}'
+# -> {"verdict":{"kind":"DENY","reason":"POLICY_BLOCK","by":"monitor","disposition":"TERMINAL"}, ...}
+```
+
+Same gate, two surfaces: transparently in front of the model (the proxy adds the `fak`
+block to every response) or asked directly (`/v1/fak/adjudicate`, verdict only — what the
+[MCP tools](../../examples/mcp/README.md) expose). Swap the mock for your real engine by
+adding `--base-url`; nothing else changes.
+
+---
+
 ## What you get once it's in front
 
 - **A reviewable allow-list** — which tools may run, as a JSON manifest in git, not a
