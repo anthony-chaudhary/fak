@@ -1,3 +1,8 @@
+---
+title: "fak GPU parity tracker: Go-CUDA tok/s vs llama.cpp"
+description: "The apples-to-apples batch-1 protocol, lever status, and residual for measuring fak's Go-CUDA throughput against the llama.cpp baseline on Qwen2.5-7B."
+---
+
 # GPU throughput-parity tracking — Go-CUDA tok/s vs `llama.cpp` (#480)
 
 > **Umbrella tracker for [#480](https://github.com/anthony-chaudhary/fak/issues/480)** —
@@ -15,6 +20,12 @@
 >
 > This is the protocol + lever-status + residual; it is **not** a parity claim. fak has not
 > yet measured Go-CUDA tok/s on the 7B target, and this doc says so plainly.
+>
+> **Refreshed 2026-06-22.** The device levers this tracker once listed as *not started* — #484
+> (fp16 HGEMM), #485 (Q8_0/Q4_K GEMM), #486 (flash attention) — **landed after the first write**
+> and are now **built + GPU-gated** (§3.1). The open work is no longer *writing kernels*; it is a
+> GPU run to record their numbers and an end-to-end real-7B decode. Every numeric parity cell
+> stays `pending GPU run`.
 
 ---
 
@@ -40,7 +51,7 @@ are a different regime, deliberately excluded; `bench_llamacpp.py:1-14`).
 
 **Apples-to-apples invariants** — all three must hold for a row to be comparable:
 
-1. **Same GPU host** — both engines run on the *same* card (4070 Laptop / lab DGX / a GCP
+1. **Same GPU host** — both engines run on the *same* card (4070 Laptop / GPU server / a GCP
    GPU VM), same driver, same VRAM budget.
 2. **Same model + same quantization** — the **Qwen2.5-7B-Instruct-Q4_K_M** GGUF (the GPU
    parity target chosen in `GPU-MODEL-PICK.md`; weights ~4.68 GB, fits 8 GB — see `GPU.md`
@@ -77,11 +88,17 @@ Two real-run results already exist in [`GPU.md`](../GPU.md). They are the *bar* 
 | `llama.cpp` CUDA baseline on Qwen2.5-7B-Q4_K_M, RTX 4070 | `GPU.md` §3 (`llama-bench -ngl 99`, median of 5) | the **bar to beat**: prefill `pp512` 2256 ± 45 t/s, decode `tg128` 48.0 ± 0.4 t/s; weights 4.36 GiB resident |
 | fak-CUDA **vs** `llama.cpp` on SmolLM2-135M (a model that *fully fits* the GPU) | `GPU.md` §3b (`FAK_CUDA_GRAPH=1`, decode median over 128 steps) | fak-CUDA reusable-graph path **≈120 tok/s decode — even with `llama.cpp` Q8_0 (120)**, at f32; output argmax-exact |
 
-**The gap #480 still owns:** fak-CUDA has **not** measured tok/s on **Qwen2.5-7B-Q4_K_M**.
-`GPU.md` §3 states why "by construction": the 7B head-to-head is gated on the loaders (GGUF +
-quant-on-load, #489) **plus** native quantized device GEMM (#485) — a 7B f32 blob (~28 GB)
-will not fit WSL's ~15 GB RAM, and there is no Q4_K device matmul yet. So the 7B cell is
-**both** GPU-gated (no GPU here) **and** lever-gated (#485 not started). Both must clear.
+**The gap #480 still owns:** fak-CUDA has **not** *measured* tok/s on **Qwen2.5-7B-Q4_K_M**.
+The two device levers that gated the 7B — native quantized GEMM (**#485**) and the K-quant GGUF
+load (**#489**) — **both landed after this doc's first write** (§3.1), so the 7B cell is no longer
+*lever-gated at the op level*: the Q4_K weight stays ≈4.7 GB resident (the #485 VRAM witness keeps
+it int4-narrow), well inside any GPU, and on a datacenter GPU even an f32 7B (~28 GB) fits — the
+WSL ~15 GB ceiling no longer bounds the run. **What remains is to *run* it:** execute the §4.2 /
+§4.3 commands on a GPU host (to record the realized cosines + tok/s), and wire the real Qwen2.5
+config through the model engine for an end-to-end decode (the op-level kernels are already proven
+by the synthetic-Llama forward gate `TestCUDAForwardMatchesRef`; a real-7B end-to-end serve is the
+open follow-up — the model loop still fetches f32 weights, so quant serving needs the loop to
+consume the resident Q4_K/F16 buffers). It is now **GPU-gated**, not lever-gated.
 
 ---
 
@@ -89,43 +106,45 @@ will not fit WSL's ~15 GB RAM, and there is no Q4_K device matmul yet. So the 7B
 
 ### 3.1 Status table (landed / built+gated / not-started + deciding evidence)
 
-Verified against `git log` and the working tree on **2026-06-21**. "Landed this session"
-means a commit referencing the issue is in `main`'s recent history.
+Verified against `git log` and the working tree on **2026-06-21**, re-verified **2026-06-22**
+(the #484/#485/#486 device-lever rows below, which landed after the first write). "Landed this
+session" means a commit referencing the issue is in `main`'s recent history.
 
 | # | Lever | Status | Deciding commit / `file:line` |
 |---|---|---|---|
 | **#482** | async backend — ops enqueue, fence **only** at Read/Argmax | ✅ **LANDED this session** | commit `1b9f68a`; `Caps{Async: true, …}` at `internal/compute/cuda.go:181`; fence-generation machinery `cuda.go:74-115` (`fenceGen`, `Ready()`); device-side Argmax + sync-vs-async tok/s delta in `tools/run_482_acceptance_on_gpu.sh` |
 | **#479** | device-resident KV Evict / Clone — **no host round-trip**, quarantine witness preserved | ✅ **LANDED this session** | commit `30438ad`; on-GPU compaction + single-rotation re-RoPE at `internal/compute/cuda.go:522-593`; `Host()` stays `(nil,false)` (resident); witness `tools/run_479_acceptance_on_gpu.sh` |
-| **#489** | GGUF loader + dequant-on-load (7B *loads*) | 🟡 **PARTIAL — landed this session** | commit `13ec795` (legacy Q4_0/Q4_1 32-elem dequant); leaf `internal/ggufload/` (`gguf.go`, `quant_q4k_loader.go`, `dequant_q40_test.go`). K-quant Q4_K device path is the remaining gate for 7B (joins #485). |
+| **#489** | GGUF loader + dequant-on-load (7B *loads*) | 🟢 **K-quant LANDED — Q4_K/Q6_K load + resident path** | commit `13ec795` (legacy Q4_0/Q4_1) **plus the K-quant path**: `internal/ggufload/gguf.go` decodes `Q4_K`(type 12)/`Q6_K`(14) (`dequantF32` at `gguf.go:1695`, sizes `:1653-1665`); `quant_q4k_loader.go` keeps the raw super-block bytes **resident** (`AddResidentQ4K`/`ResidentQ4KEligible`, no f32 materialization); `ComputeSource.Weight(name, want)` (`compute_source.go:70`) uploads at the requested resident dtype. The Q4_K geometry (`getScaleMinK4`) is the one #485's device tile reproduces. |
 | **#483** | CUDA Graphs / capture for the batch-1 decode step | 🟢 **BUILT + GATED — issue open, live worker extending** | reusable graph **ships** gated `FAK_CUDA_GRAPH=1`: `cuda.go:44,62,149,479`; `cudaGraphExecUpdate` instantiate-once at `internal/compute/cuda_kernels.cu:277-300`. Drove the SmolLM2 7.5→120 tok/s win (`GPU.md` §3b). Open residual: fixed-capacity KV (1024) → dynamic/ring. *Disjoint live-worker lane — not touched by this doc.* |
-| **#485** | native device matmul for **Q8_0 / Q4_K** (no dequant-to-f32) | 🔴 **NOT STARTED** | `cuda.go:181` advertises **no `UploadDtype`** (so `modelbench` rejects `-quant` on the cuda backend, `cmd/modelbench/main.go:352-357`); `GPU.md` §4 "No quantized device GEMM". **This is the gate for a 7B-on-fak-CUDA run.** |
-| **#484** | fp16 compute path (cuBLAS HGEMM / tensor cores) | 🔴 **NOT STARTED** | `GPU.md` §4 "F32 compute only (no fp16 / tensor cores)"; §3b names this the lever from the Q8_0 number to the F16 number (4070 tensor cores idle, ~2–4× on the table) |
-| **#486** | flash / paged-attention CUDA kernel for the Attention op | 🔴 **NOT STARTED** | `GPU.md` §4 "Naive decode attention (per-call scratch, one block/head) — no flash/paged attention" |
+| **#485** | native device matmul for **Q8_0 / Q4_K** (no dequant-to-f32) | 🟢 **BUILT + GATED** (landed after this doc's first write) | commits `e1513da` (native Q8_0/Q4_K device GEMM) + `a8cb3fc` (max-norm dominant-row fix, **caught on the 4070 GPU witness**). `cuda.go:291` now advertises `Caps{… UploadDtype:true …}`; `Upload(t, Q8_0/Q4_K)` narrows at H2D, dequant **fused into the GEMM tile** (`k_q8_gemm`/`k_q4k_gemm`), weight stays int8/int4-resident (VRAM witness). Gates `cudaQ8CosineMin=0.999` / `cudaQ4KCosineMin=0.995` (`cuda.go:103-104`); witness `cuda_quant_test.go`; acceptance `tools/run_485_acceptance_on_gpu.sh`. **The 7B device-GEMM gate is cleared in code; realized cosines/tok/s are the GPU residual.** |
+| **#484** | fp16 compute path (cuBLAS HGEMM / tensor cores) | 🟢 **BUILT + GATED** (landed after this doc's first write) | commit `f6eb11d`; `Upload(t, F16)` narrows weights to `__half` at H2D (+ ColMajor transpose-repack), GEMM via `cublasGemmEx` tensor-core HGEMM, F32 accumulate (`fcuda_matmul_f16`, `cuda_backend.h:62-66`). Gate `cudaFP16CosineMin=0.997` (`cuda.go:75`); witness `cuda_fp16_test.go`; acceptance `tools/run_484_acceptance_on_gpu.sh`. |
+| **#486** | flash / paged-attention CUDA kernel for the Attention op | 🟢 **BUILT + GATED** (landed after this doc's first write) | commit `49d445b`; `cuda.go:291` advertises `Caps{… FusedAttn:true}`; fused online-softmax `k_flash_attention` over the KV window (no `scores[nPos]` row materialized), across MHA/GQA/MQA. Gate `cudaFlashAttnCosineMin=0.999` (`cuda.go:124`); it is also the per-layer attention in the end-to-end forward gate `TestCUDAForwardMatchesRef` (`cuda_test.go:205`); acceptance `tools/run_486_acceptance_on_gpu.sh`. |
 | **#481** | native-Windows signed `-tags cuda` build (off the WSL workaround) | 🔴 **NOT STARTED** | only the WSL toolchain exists (`internal/compute/setup_cuda_wsl.sh`, `build_cuda.sh`); `GPU.md` §2 "A native Windows `-tags cuda` build (signed) is the portability follow-up" |
 
 **Issue-checkbox crosswalk** (the umbrella's living checklist in #480):
 
-- [ ] flash/paged attention kernel → **#486, not started**
-- [ ] native Q8_0/Q4_K device matmul → **#485, not started**
-- [ ] fp16 HGEMM / tensor cores → **#484, not started**
+- [x] flash/paged attention kernel → **#486, built + GPU-gated `49d445b`** (`Caps.FusedAttn`, `cuda_flash_test.go`)
+- [x] native Q8_0/Q4_K device matmul → **#485, built + GPU-gated `e1513da`/`a8cb3fc`** (`Caps.UploadDtype`, `cuda_quant_test.go`)
+- [x] fp16 HGEMM / tensor cores → **#484, built + GPU-gated `f6eb11d`** (`cublasGemmEx`, `cuda_fp16_test.go`)
 - [x] CUDA Graphs decode capture → **#483, shipped gated `FAK_CUDA_GRAPH=1`** (issue open: dynamic KV residual)
 - [x] async enqueue (fence only at Read/Argmax) → **#482, landed `1b9f68a`**
-- [x] enablers: device-resident Evict → **#479, landed `30438ad`**; quant-on-load + GGUF → **#489, partial `13ec795`**; native build → **#481, not started**
+- [x] enablers: device-resident Evict → **#479, landed `30438ad`**; quant-on-load + GGUF K-quant → **#489, Q4_K/Q6_K load + resident path `13ec795`+**; native build → **#481, not started**
 
 ### 3.2 The parity result matrix — the cells a real GPU run fills
 
 **Every cell below is `pending GPU run`.** None is estimated. The command that produces each
 is in §4.
 
-**Target model: Qwen2.5-7B-Instruct-Q4_K_M** (the #480 target). *Additionally lever-gated:
-needs #485 (Q4_K device matmul) + #489 K-quant load before fak-CUDA can run it end-to-end.*
+**Target model: Qwen2.5-7B-Instruct-Q4_K_M** (the #480 target). *Op-level levers cleared: #485
+(Q4_K device matmul) and #489 (K-quant load + resident path) landed (§3.1). Remaining: a GPU run
++ wiring the real Qwen2.5 config end-to-end through the model engine (the loop still fetches f32).*
 
 | Engine | Precision | Prefill t/s (P=512) | Decode t/s (D=128) | Ratio vs llama | Status |
 |---|---|---:|---:|---:|---|
 | `llama.cpp` (CUDA, `-ngl 99`) | Q4_K_M | 2256 ± 45 ✓ | 48.0 ± 0.4 ✓ | 1.00 (baseline) | **measured** — `GPU.md` §3 |
-| **fak-CUDA** (`-backend cuda`) | f32 | `pending GPU run` | `pending GPU run` | `pending` | **blocked**: GPU + #485/#489 |
-| fak-CUDA (after #485) | Q4_K | `pending GPU run` | `pending GPU run` | `pending` | **blocked**: #485 not started |
-| fak-CUDA (after #484) | f16 | `pending GPU run` | `pending GPU run` | `pending` | **blocked**: #484 not started |
+| **fak-CUDA** (`-backend cuda`) | f32 | `pending GPU run` | `pending GPU run` | `pending` | **GPU-gated** (kernels landed; needs a GPU host) |
+| fak-CUDA (Q4_K, #485 landed) | Q4_K | `pending GPU run` | `pending GPU run` | `pending` | **GPU-gated**: #485 built (`e1513da`), run `tools/run_485_acceptance_on_gpu.sh` |
+| fak-CUDA (f16, #484 landed) | f16 | `pending GPU run` | `pending GPU run` | `pending` | **GPU-gated**: #484 built (`f6eb11d`), run `tools/run_484_acceptance_on_gpu.sh` |
 
 > *Producing cmd (once a 7B-capable fak-CUDA path + a GPU host both exist):*
 > `python tools/gcp_bench.py --engine all` on the GPU host (§4), or the per-host
@@ -175,7 +194,7 @@ python tools/gcp_bench.py --tier a4-b200 --blackwell    # the flagship Blackwell
 → **Residual action:** raise the GCP GPU quota (or attach a reservation) for the project,
 then re-run the command above. Until then only `--dry-run` runs here.
 
-### 4.2 Per-host, on an *already-provisioned* GPU (4070 Laptop / lab DGX)
+### 4.2 Per-host, on an *already-provisioned* GPU (4070 Laptop / GPU server)
 
 On a host that already has a reachable NVIDIA GPU + CUDA toolkit, run the two peers directly
 with identical model/ids, then divide:
@@ -200,9 +219,12 @@ SKIP (a skip is not a pass), so a green run is real device evidence:
 ```bash
 bash tools/run_479_acceptance_on_gpu.sh   # on-GPU Evict == never-saw, no host round-trip
 bash tools/run_482_acceptance_on_gpu.sh   # async==sync argmax parity + sync-vs-async tok/s delta
+bash tools/run_484_acceptance_on_gpu.sh   # fp16 HGEMM == cpuref within cudaFP16CosineMin (0.997)
+bash tools/run_485_acceptance_on_gpu.sh   # Q8_0/Q4_K device GEMM cosines + VRAM witness + quant-vs-f32 tok/s
+bash tools/run_486_acceptance_on_gpu.sh   # fused flash attention == cpuref/naive within cudaFlashAttnCosineMin
 ```
 
-Both resolve the CUDA toolchain (`~/cudaenv` else PATH `nvcc`), build `libfakcuda.a`, and run
+Each resolves the CUDA toolchain (`~/cudaenv` else PATH `nvcc`), builds `libfakcuda.a`, and runs
 the `-tags cuda` witness; `run_482` additionally prints `sync decode … tok/s` /
 `async decode … tok/s` / `delta (async − sync)` — the **#482 tok/s evidence**, also
 `pending GPU run` here.
@@ -212,7 +234,7 @@ the `-tags cuda` witness; `run_482` additionally prints `sync decode … tok/s` 
 | Host | Reaches it | Use for |
 |---|---|---|
 | RTX 4070 Laptop (Anthony's box, WSL2+CUDA 12.6, sm_89) | `.\tools\fak_laptop_test.ps1 accept` then §4.2/§4.3 | the existing baseline + correctness gates (carries WSL per-call tax) |
-| Lab DGX | direct SSH; §4.2/§4.3 with `FAK_CUDA_ARCH=sm_90` | native-Linux numbers off the WSL floor |
+| GPU server | direct SSH; §4.2/§4.3 with `FAK_CUDA_ARCH=sm_90` | native-Linux numbers off the WSL floor |
 | GCP GPU VM (L4 sm_89 / B200 sm_100) | `tools/gcp_bench.py` once quota is raised (§4.1) | the one-command cross-engine `result.json` |
 
 ---
@@ -224,10 +246,14 @@ the `-tags cuda` witness; `run_482` additionally prints `sync decode … tok/s` 
    acceptance scripts (§4.3) detect this and exit `4` (INCONCLUSIVE — "a skip is not a pass").
 2. **GCP GPU quota walled.** `gcp_bench.py` STOPs at the quota gate (§4.1); only `--dry-run`
    runs here.
-3. **The 7B target is additionally lever-gated.** Even *with* a GPU, fak-CUDA cannot run
-   Qwen2.5-7B-Q4_K_M end-to-end until **#485** (native Q4_K device matmul) and the **#489**
-   K-quant load path land — both **not started** / **partial** (§3.1). A 7B f32 blob (~28 GB)
-   does not fit, and there is no int4 device GEMM yet (`GPU.md` §3, §4).
+3. **The 7B target's op-level levers have landed; the *run* hasn't.** The device GEMM (#485) and
+   K-quant load + resident path (#489) that gated Qwen2.5-7B-Q4_K_M **shipped after this doc's
+   first write** (§3.1): the int4 device GEMM exists (`e1513da`), the Q4_K weight loads + stays
+   resident (`internal/ggufload`, `AddResidentQ4K`), and the #485 VRAM witness keeps it int4-narrow
+   — so the ~28 GB-f32 / WSL-RAM argument no longer bounds it (it was the **dev-laptop** ceiling,
+   `GPU.md` §3; a datacenter GPU sidesteps it). What is still `pending GPU run` is (a) the realized
+   device cosines / tok/s and (b) wiring the real Qwen2.5 config end-to-end through the model engine
+   (the loop still fetches f32) — both need a GPU host, not another lever.
 
 A doc that says *"these numbers require executing X on host Y"* is the correct deliverable
 here; the one unacceptable outcome — an invented `tok/s` — is avoided. The moment a GPU host
@@ -242,10 +268,12 @@ by the named command and folded back into the §3.2 matrix and `GPU.md`'s house 
   `tools/gcp_bench.py:1-60, 311-339`.
 - **Measured baselines (cited, not restated):** `GPU.md` §3 (llama.cpp 7B baseline), §3b
   (fak-CUDA vs llama.cpp SmolLM2-135M); house style `docs/benchmarks/MODEL-BASELINE-RESULTS.md`.
-- **Lever evidence:** commits `1b9f68a` (#482), `30438ad` (#479), `13ec795` (#489);
-  `internal/compute/cuda.go`, `internal/compute/cuda_kernels.cu`, `internal/ggufload/`,
-  `cmd/modelbench/main.go`; acceptance gates `tools/run_479_acceptance_on_gpu.sh`,
-  `tools/run_482_acceptance_on_gpu.sh`.
+- **Lever evidence:** commits `1b9f68a` (#482), `30438ad` (#479), `13ec795` (#489), and —
+  **landed after the 2026-06-21 write** — `f6eb11d` (#484), `e1513da`/`a8cb3fc` (#485),
+  `49d445b` (#486); `internal/compute/cuda.go`, `internal/compute/cuda_kernels.cu`,
+  `internal/compute/cuda_{fp16,quant,flash}_test.go`, `internal/ggufload/`,
+  `cmd/modelbench/main.go`; acceptance gates `tools/run_{479,482,484,485,486}_acceptance_on_gpu.sh`.
 - **Residual:** `tools/gcp_bench.py` (quota STOP at `:542-543`); per-host commands §4.2.
-- Written 2026-06-21 on a host with no GPU; every numeric parity cell is `pending GPU run`
+- Written 2026-06-21 on a host with no GPU; **lever status refreshed 2026-06-22** (the #484/#485/#486
+  device levers landed and are now built + GPU-gated). Every numeric parity cell is `pending GPU run`
   by design.
