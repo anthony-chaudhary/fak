@@ -73,6 +73,14 @@ later runs are instant. Full walkthrough: [`docs/repro-packet.md`](docs/repro-pa
 - **Add a feature as a leaf, not a core edit.** `python tools/new_leaf.py <name> --tier
   <tier> [--register]` stamps a conforming skeleton; the frozen ABI (`fak/internal/abi`)
   is additive-only and human-owned. `internal/architest` fails the build on a bad import.
+- **Never `find /` (also `find ~`, `find /mnt`, `find /proc`) in Git Bash on Windows.**
+  `/` descends into `/proc/registry*` (the whole Windows Registry, x3 views) and `/mnt/c`
+  (all of `C:`, which holds self-referential junction loops); MSYS `find` can't detect the
+  cycles, so it recurses for hours and leaks millions of handles (it took down this box on
+  2026-06-21 — two orphaned finds held 98.8% of system handles). Search with `rg`
+  (`rg --files | rg <pat>`) or anchor **and** bound: `find /c/work/fak -xdev -maxdepth 8 …`,
+  `timeout`-wrapped. Backstop: `tools/runaway_process_reaper.ps1` reaps stragglers; audit
+  anytime with `tools/runaway_process_scan.ps1`.
 
 Check your setup first: `python tools/extend_preflight.py`. Full contributor contract:
 [`CONTRIBUTING.md`](CONTRIBUTING.md).
