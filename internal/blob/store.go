@@ -23,6 +23,7 @@ import (
 	"os"
 	"strconv"
 	"sync"
+	"sync/atomic"
 
 	"github.com/anthony-chaudhary/fak/internal/abi"
 )
@@ -59,8 +60,13 @@ type Store struct {
 	lruIndex map[string]*list.Element // digest -> its lru element (only unpinned, resident digests)
 	puts     int64
 	hits     int64 // Put of an already-present digest (dedup)
-	resolv   int64
-	evicted  int64 // digests dropped by the byte bound
+	// resolv is bumped from Resolve under the READ lock (Resolve is intentionally
+	// concurrent — it only reads the blob map), so the counter itself must be atomic:
+	// two readers holding the RLock would otherwise race on this plain increment. A
+	// concurrent K-arm replay (turnbench.RunPolicyReplay) resolves the same shared
+	// payload from several goroutines at once, which is exactly the path that trips it.
+	resolv  int64
+	evicted int64 // digests dropped by the byte bound
 }
 
 // New returns an empty store bounded by FAK_BLOB_MAX_BYTES (default DefaultMaxBytes).
@@ -213,7 +219,7 @@ func (s *Store) Resolve(ctx context.Context, r abi.Ref) ([]byte, error) {
 	case abi.RefBlob, abi.RefRegion:
 		s.mu.RLock()
 		defer s.mu.RUnlock()
-		s.resolv++
+		atomic.AddInt64(&s.resolv, 1) // RLock allows concurrent Resolvers; the counter must be atomic
 		b, ok := s.blobs[r.Digest]
 		if !ok {
 			return nil, fmt.Errorf("blob: unknown digest %s", r.Digest)
@@ -253,7 +259,9 @@ func (s *Store) PageIn(ctx context.Context, handle abi.Ref) (abi.Ref, error) {
 func (s *Store) Stats() (puts, dedupHits, resolves int64) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	return s.puts, s.hits, s.resolv
+	// resolv is bumped atomically under the READ lock by concurrent Resolvers, so it
+	// is read atomically here too (the RLock alone does not order it against them).
+	return s.puts, s.hits, atomic.LoadInt64(&s.resolv)
 }
 
 // Len reports the number of distinct blobs resident in the CAS.
