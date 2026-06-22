@@ -61,6 +61,28 @@ func nonTarget(v []float32, out, target int) []float32 {
 	return r
 }
 
+// dominantRow returns the output channel whose weight row has the largest L2 norm. With the
+// activation aligned to that row (alignActToRow), y[dominant] = |W[dominant]|², and by Cauchy-Schwarz
+// every cross term y[o] = W[o]·W[dominant] ≤ |W[o]|·|W[dominant]| ≤ |W[dominant]|², so the dominant
+// row is GUARANTEED to be the argmax. A hardcoded row only wins for zero-mean weights (symmetric Q8);
+// asymmetric Q4_K (w = d·q − m, a per-sub-block DC bias) lets a biased cross term beat a fixed row's
+// self term — which is exactly how TestCUDAQ4KMatMulApproxMatchesRef failed on the RTX 4070 GPU
+// witness (ref argmax 112 ≠ hardcoded 0). Selecting the max-norm row makes the "robust, quant-noise-
+// proof argmax-exact" claim hold for both quant paths.
+func dominantRow(w []float32, out, in int) int {
+	best, bestNorm := 0, float32(-1)
+	for o := 0; o < out; o++ {
+		var n float32
+		for _, v := range w[o*in : o*in+in] {
+			n += v * v
+		}
+		if n > bestNorm {
+			bestNorm, best = n, o
+		}
+	}
+	return best
+}
+
 // TestCUDAQ8MatMulApproxMatchesRef — native Q8_0 decode GEMV (P=1): an f32 weight narrowed to a
 // resident Q8_0 weight (int8 codes + f32 scales) at H2D, the activation quantized on-device, vs the
 // cpuref f32 fdot matmul on the SAME source f32 weight. The Approx gate is argmax-exact (the device
@@ -75,7 +97,7 @@ func TestCUDAQ8MatMulApproxMatchesRef(t *testing.T) {
 	g := &seed
 	out, in := 320, 256 // in divisible by 32 (Q8 block)
 	w := rscale(g, out*in, 0.2)
-	const target = 0
+	target := dominantRow(w, out, in)
 	x := alignActToRow(w, out, in, target)
 
 	yRef := ref.Read(ref.MatMul(mkResident(ref, []int{out, in}, w), mkResident(ref, []int{in}, x)))
@@ -261,7 +283,7 @@ func TestCUDAQ4KMatMulApproxMatchesRef(t *testing.T) {
 	out, in := 320, 256 // in divisible by 256 (one super-block per row)
 	raw := randQ4KBytes(g, out, in)
 	w := dequantQ4KWeight(raw, out, in) // the f32 reference weight (dequant of the bytes)
-	const target = 0
+	target := dominantRow(w, out, in)
 	x := alignActToRow(w, out, in, target)
 
 	yRef := ref.Read(ref.MatMul(mkResident(ref, []int{out, in}, w), mkResident(ref, []int{in}, x)))
