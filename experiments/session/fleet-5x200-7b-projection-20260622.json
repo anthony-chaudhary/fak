@@ -1,0 +1,117 @@
+{
+  "schema": "fak.fleet-10min-projection.v1",
+  "workload": {
+    "prefix": 2048,
+    "turns": 200,
+    "agents": 5,
+    "decode": 20,
+    "result": 12
+  },
+  "budget_s": 600.0,
+  "batch_eff": 5.0,
+  "batch_eff_raw": null,
+  "rate_cards": {
+    "llamacpp-metal-m3-measured": {
+      "rate": {
+        "prefill_tok_s": 392.1,
+        "decode_tok_s": 17.41,
+        "decode_batch_agg_tok_s": 44.0,
+        "note": "MEASURED M3 Pro llama-batched-bench 2026-06-22, Qwen2.5-7B Q8 (macbook-m3pro-7b-batched-ctx.log)"
+      },
+      "arms": {
+        "A_naive_stateless": {
+          "prefill_s": 13343.53481254782,
+          "decode_s": 1148.7650775416428,
+          "prefill_tokens": 5232000,
+          "lower_bound": true,
+          "total_s": 14492.299890089462
+        },
+        "B_per_agent_kv": {
+          "prefill_s": 56.56720224432542,
+          "decode_s": 1148.7650775416428,
+          "prefill_tokens": 22180,
+          "lower_bound": false,
+          "total_s": 1205.3322797859682
+        },
+        "C_fak_fused": {
+          "prefill_s": 35.67457281305789,
+          "decode_s": 454.54545454545456,
+          "prefill_tokens": 13988,
+          "lower_bound": false,
+          "total_s": 490.2200273585124
+        }
+      },
+      "fak_under_budget": true,
+      "fak_total_s": 490.2200273585124
+    },
+    "llamacpp-metal-m3": {
+      "rate": {
+        "prefill_tok_s": 192.92,
+        "decode_tok_s": 17.27,
+        "note": "llama.cpp b9707 Metal -ngl 99, M3 Pro, Q8_0 (QWEN25-7B-RESULTS.md)"
+      },
+      "arms": {
+        "A_naive_stateless": {
+          "prefill_s": 27120.049761559196,
+          "decode_s": 1158.0775911986104,
+          "prefill_tokens": 5232000,
+          "lower_bound": true,
+          "total_s": 28278.127352757805
+        },
+        "B_per_agent_kv": {
+          "prefill_s": 114.96993572465271,
+          "decode_s": 1158.0775911986104,
+          "prefill_tokens": 22180,
+          "lower_bound": false,
+          "total_s": 1273.0475269232631
+        },
+        "C_fak_fused": {
+          "prefill_s": 72.5067385444744,
+          "decode_s": 231.61551823972206,
+          "prefill_tokens": 13988,
+          "lower_bound": false,
+          "total_s": 304.12225678419645
+        }
+      },
+      "fak_under_budget": true,
+      "fak_total_s": 304.12225678419645
+    },
+    "fak-purego-m3": {
+      "rate": {
+        "prefill_tok_s": 16.1,
+        "decode_tok_s": 8.7,
+        "note": "fak in-kernel CPU Q8 NEON, M3 Pro (QWEN25-7B-RESULTS.md)"
+      },
+      "arms": {
+        "A_naive_stateless": {
+          "prefill_s": 324968.94409937883,
+          "decode_s": 2298.8505747126437,
+          "prefill_tokens": 5232000,
+          "lower_bound": true,
+          "total_s": 327267.79467409145
+        },
+        "B_per_agent_kv": {
+          "prefill_s": 1377.639751552795,
+          "decode_s": 2298.8505747126437,
+          "prefill_tokens": 22180,
+          "lower_bound": false,
+          "total_s": 3676.490326265439
+        },
+        "C_fak_fused": {
+          "prefill_s": 868.8198757763975,
+          "decode_s": 459.7701149425288,
+          "prefill_tokens": 13988,
+          "lower_bound": false,
+          "total_s": 1328.5899907189262
+        }
+      },
+      "fak_under_budget": false,
+      "fak_total_s": 1328.5899907189262
+    }
+  },
+  "verdict": {
+    "llamacpp-metal-m3-measured": true,
+    "llamacpp-metal-m3": true,
+    "fak-purego-m3": false
+  }
+}

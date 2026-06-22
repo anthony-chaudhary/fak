@@ -1,0 +1,8 @@
+measuring prefill cost at lengths [256 2048 2304 4352 6400 8448] ...
+  prefill(256) = 378 ms (676.4 tok/s)
+  prefill(2048) = 2726 ms (751.4 tok/s)
+  prefill(2304) = 3261 ms (706.6 tok/s)
+  prefill(4352) = 9159 ms (475.2 tok/s)
+  prefill(6400) = 18947 ms (337.8 tok/s)
+  prefill(8448) = 31792 ms (265.7 tok/s)
+cell T=200 C=5 P=2048: running arms B,C live (best of 1) ...

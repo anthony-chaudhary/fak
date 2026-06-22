@@ -22,6 +22,7 @@
 | RadixAttention token speedup | 7.50× | all four models (Q8) | Token count | `92896a4` | Same (`prefill_token_speedup`) |
 | RadixAttention hit rate | 86.7% (FCFS 62.1% → cache-aware) | all four models (Q8) | Cache hits | `92896a4` | Same (100% of optimal) |
 | **README headline: 50-turn × 5-agent reuse win** | **60.3× vs naive · 4.1× vs tuned** | Qwen2.5-1.5B Q8, T=50 A=5 P=2048 | Naive stateless / tuned per-agent KV | `2bbda6f` | `headline-qwen-50x5.json` |
+| **Fleet 5-agent × 200-turn 7B in <10 min (MEASURED, M3 Pro)** | **8.2 min · 2.5× vs single-stream · ≥30× vs naive** | Qwen2.5-7B Q8, T=200 A=5 P=2048 D=20 R=12, M3 Pro llama.cpp Metal | 5 single-stream sessions / naive re-prefill | _this commit_ | `session/macbook-m3pro-7b-batched-{bench,ctx}.log` (measured 17.41/44/392 t/s) + `fleet-5x200-7b-projection-20260622.json` + `FLEET-5X200-7B-10MIN-RESULTS.md`. Batched ≈ a tuned `llama-server --parallel`; fak's add is per-agent KV ownership + safety floor, not raw t/s |
 | **Session value-add (high-T ladder)** | **24.9× → 139.3×** | SmolLM2-135M Q8, T=64 → T=512 | Naive stateless | `92896a4` | `highT-smollm2-135m-*-fresh-20260619.json` |
 | Session value-add (1.5B "realistic model") | 7.2× → 10.0× | Qwen2.5-1.5B Q8, T=8 → T=16 | Naive stateless | `92896a4` | `smoke-qwen2.5-1.5b-T8-16-fresh-20260619.json` |
 | ~~Session value-add 11.2–14.5× (SmolLM2, P=512)~~ | ❌ STALE | SmolLM2-135M Q8 | Naive stateless | `5b0f40d` | superseded — see F1 below |

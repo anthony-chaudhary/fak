@@ -55,6 +55,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/appversion"
@@ -103,8 +104,45 @@ func readHFConfig(dir string) (model.Config, error) {
 	return cfg, nil
 }
 
-func loadModel(dir, hf string, lean bool) (*model.Model, string, error) {
+// syntheticShape maps a named model size to its HF Config, so sessionbench can run the
+// 3-arm value-stack on a box with NO HuggingFace export (no -hf/-dir/-lean). model.NewSynthetic
+// fills the layout with deterministic random weights; the logits are meaningless but the
+// throughput is FAITHFUL — the matmul/attention/quant work is weight-VALUE-independent (the same
+// rationale internal/model/synthetic_perf_test.go uses to report tok/s on a weightless box). So
+// the work-elimination ratios (B/C, A/C) and batched-vs-serial decode are measured on the real
+// kernel at the real model shape; only the absolute wall-clock is this-box, not the target host.
+func syntheticShape(name string) (model.Config, bool) {
+	switch strings.ToLower(strings.TrimSpace(name)) {
+	case "smollm2-135m", "135m", "smollm2":
+		return model.Config{
+			HiddenSize: 576, NumLayers: 30, NumHeads: 9, NumKVHeads: 3, HeadDim: 64,
+			IntermediateSize: 1536, VocabSize: 49152, RMSNormEps: 1e-5, RopeTheta: 10000,
+			TieWordEmbeddings: true, HiddenAct: "silu", ModelType: "llama",
+		}, true
+	case "qwen25-1.5b", "1.5b", "qwen25-1_5b", "qwen2.5-1.5b":
+		return model.Config{
+			HiddenSize: 1536, NumLayers: 28, NumHeads: 12, NumKVHeads: 2, HeadDim: 128,
+			IntermediateSize: 8960, VocabSize: 151936, RMSNormEps: 1e-6, RopeTheta: 1000000,
+			TieWordEmbeddings: true, EOSTokenID: 151643, HiddenAct: "silu", ModelType: "qwen2",
+		}, true
+	case "qwen25-7b", "7b", "qwen2.5-7b":
+		return model.Config{
+			HiddenSize: 3584, NumLayers: 28, NumHeads: 28, NumKVHeads: 4, HeadDim: 128,
+			IntermediateSize: 18944, VocabSize: 152064, RMSNormEps: 1e-6, RopeTheta: 1000000,
+			TieWordEmbeddings: false, EOSTokenID: 151643, HiddenAct: "silu", ModelType: "qwen2",
+		}, true
+	}
+	return model.Config{}, false
+}
+
+func loadModel(dir, hf, synthetic string, lean bool) (*model.Model, string, error) {
 	switch {
+	case synthetic != "":
+		cfg, ok := syntheticShape(synthetic)
+		if !ok {
+			return nil, "", fmt.Errorf("unknown -synthetic shape %q (smollm2-135m|qwen25-1.5b|qwen25-7b)", synthetic)
+		}
+		return model.NewSynthetic(cfg), synthetic + " [synthetic]", nil
 	case lean:
 		if hf == "" {
 			return nil, "", fmt.Errorf("-lean requires -hf")
@@ -395,6 +433,7 @@ type cell struct {
 func main() {
 	dir := flag.String("dir", "internal/model/.cache/smollm2-135m", "model export dir (-dir mode)")
 	hf := flag.String("hf", "", "HuggingFace snapshot dir (config.json + model.safetensors)")
+	synthetic := flag.String("synthetic", "", "run weightless on a synthetic model at a named shape (smollm2-135m|qwen25-1.5b|qwen25-7b) — no -hf/-dir needed; ratios faithful, absolute wall-clock is this-box")
 	lean := flag.Bool("lean", false, "memory-lean quantize-at-load (requires -hf; implies -quant)")
 	quantF := flag.Bool("quant", true, "use the Q8_0 quantized lane")
 	prefix := flag.Int("prefix", 2048, "shared prefix tokens (system prompt + tool schemas)")
@@ -418,7 +457,7 @@ func main() {
 	turns := parseInts(*turnsArg)
 	agents := parseInts(*agentsArg)
 
-	m, name, err := loadModel(*dir, *hf, *lean)
+	m, name, err := loadModel(*dir, *hf, *synthetic, *lean)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "load: %v\n", err)
 		os.Exit(1)
