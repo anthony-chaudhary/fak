@@ -83,6 +83,15 @@ go run ./cmd/turntaxdemo -print -suite turntax-happy     # efficiency: the anti-
 go run ./cmd/ctxdemo     -bars                           # reuse: tokens re-read — cold vs warm-cache vs fak
 ```
 
+Or play all three in one shot — **fak in 30 seconds**, then a built-in acceptance check
+that each comparison still reproduces its documented headline (a cross-platform gate, no
+model, no network):
+
+```bash
+bash tools/run_comparison_demos.sh        # play all three side-by-sides, then verify
+bash tools/run_comparison_demos.sh -q     # quiet: just the acceptance gate (CI-usable)
+```
+
 ## 3. With a real model (the live race)
 
 `ctxdemo` and `demorace` run a model **in-process** for the live race. Export a small one
