@@ -1,6 +1,6 @@
 ---
 title: "Run the fak demos yourself | local, headless, Docker, or your own cloud VM"
-description: "How to run the three interactive fak demos (turntaxdemo, demorace, ctxdemo) on your own machine or your own cloud host — locally with one go run, headless with no model, in a container, or self-hosted on a VM. No private infrastructure required."
+description: "How to run the interactive fak demos (guarddemo, turntaxdemo, demorace, ctxdemo) on your own machine or your own cloud host — locally with one go run, headless with no model, in a container, or self-hosted on a VM. No private infrastructure required."
 ---
 
 # Run the demos yourself
@@ -10,20 +10,27 @@ repo and runs anywhere Go runs. This page shows four ways to run them yourself �
 row that fits. Nothing here needs our infrastructure; the commands are the same ones the
 demo source documents at the top of each `main.go`.
 
-The three demos:
+The demos:
 
 | Demo | Command | Needs a model? |
 |------|---------|----------------|
+| **guarddemo** — the safety floor, side by side (WITHOUT fak vs WITH fak, same attack) | `go run ./cmd/guarddemo` | no — self-contained |
 | **turntaxdemo** — turn-tax race (SOTA loop vs fak 1-shot) | `go run ./cmd/turntaxdemo` | no — self-contained |
 | **ctxdemo** — multi-agent context-reuse proof (fak vs a tuned warm-cache SOTA baseline) | `go run ./cmd/ctxdemo` | optional (live race needs one) |
 | **demorace** — reuse race (fak vs a tuned warm-cache SOTA baseline) + reuse curve | `go run ./cmd/demorace` | yes (live race) |
+
+The first two are **self-contained** (no model, no GPU, no downloads): they replay a frozen,
+class-labeled tool-call trace through the *real* kernel, so they reproduce identically on any
+box. `guarddemo` is the fastest point to grasp — the moat in one side-by-side glance.
 
 ## 1. Local — one command
 
 ```bash
 git clone https://github.com/anthony-chaudhary/fak && cd fak
 
-# the self-contained one — no model, no GPU, no downloads:
+# the self-contained ones — no model, no GPU, no downloads:
+go run ./cmd/guarddemo             # → http://127.0.0.1:8151
+#   pick a scenario → "Run both agents"  (WITHOUT fak vs WITH fak, side by side)
 go run ./cmd/turntaxdemo            # → http://127.0.0.1:8150
 #   pick a suite → "Replay through the kernel"
 
@@ -50,6 +57,15 @@ go run ./cmd/ctxdemo -print -json     # the same, as JSON
 ```bash
 curl "http://127.0.0.1:8150/api/run?suite=turntax-airline" | jq .net
 # → {"turns_saved":9,"tokens_saved":11880, ...}
+```
+
+`guarddemo` and `turntaxdemo` both ship a browserless `-selfcheck` that replays every
+scenario through the *real* kernel (the same code path the browser drives) and asserts the
+documented invariants — CI-usable, no browser, no network:
+
+```bash
+go run ./cmd/guarddemo  -selfcheck   # WITHOUT fak: 4 / 2 / 0 breaches · WITH fak: 0 (per scenario)
+go run ./cmd/turntaxdemo -selfcheck   # turn-tax + safety-floor invariants per suite
 ```
 
 ## 3. With a real model (the live race)
@@ -108,6 +124,7 @@ Any always-on Linux VM works — there is nothing GCP-specific. The shape we run
 #  1. build the image (locally or with your cloud's build service) and push it to
 #     YOUR_REGISTRY, OR just `go build` the binaries on the VM if it has Go.
 #  2. run each demo on the host network (or publish the port), honoring $PORT:
+PORT=8151 ./guarddemo &
 PORT=8150 ./turntaxdemo &
 PORT=8153 ./ctxdemo &
 PORT=8147 ./demorace &

@@ -1,0 +1,289 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>fak · without vs with — the safety floor, side by side</title>
+<style>
+  :root{
+    --bg:#f6f8fa; --panel:#ffffff; --panel2:#f0f3f6; --line:#d0d7de;
+    --txt:#1f2328; --dim:#6e7781; --dim2:#57606a; --accent:#0969da;
+    --bad:#cf222e; --badbg:#fff0ee; --badln:#ffc1ba;
+    --good:#1a7f37; --goodbg:#eefbf1; --goodln:#aee2bd;
+    --neutral:#57606a; --neutralbg:#eef1f4;
+  }
+  *{box-sizing:border-box}
+  body{background:var(--bg);color:var(--txt);font:13px/1.45 ui-monospace,Menlo,Consolas,"SF Mono",monospace;margin:0;padding:0}
+  h1{font-size:18px;font-weight:600;margin:0}
+  a{color:var(--accent)}
+  .wrap{max-width:1080px;margin:0 auto;padding:22px 20px 60px}
+  .top{display:flex;align-items:baseline;gap:12px;flex-wrap:wrap;margin-bottom:6px}
+  .pill{font-size:11px;color:var(--dim2);border:1px solid var(--line);border-radius:20px;padding:2px 9px}
+  .sub{color:var(--dim);font-size:13px;margin-bottom:16px;line-height:1.6}
+  .panel{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:16px 18px;margin-bottom:16px}
+  .row{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:8px}
+  label{color:var(--dim2);font-size:11px}
+  select{background:var(--panel2);border:1px solid var(--line);color:var(--txt);border-radius:6px;padding:5px 8px;font:inherit}
+  button{background:var(--accent);color:#fff;border:none;border-radius:7px;padding:8px 16px;font:inherit;font-weight:600;cursor:pointer}
+  button:hover{filter:brightness(1.08)}
+  button:disabled{opacity:.45;cursor:default}
+  button.ghost{background:transparent;color:var(--accent);border:1px solid var(--accent)}
+  .cfg{color:var(--dim2);font-size:12px}
+
+  /* the two-column scoreboard */
+  .board{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin:4px 0 14px}
+  .score{border-radius:10px;padding:12px 14px;border:1px solid var(--line);background:var(--panel2)}
+  .score .hd{font-weight:700;font-size:13px;letter-spacing:.02em}
+  .score .desc{font-size:11px;color:var(--dim);margin-top:2px}
+  .score .big{font-size:34px;font-weight:800;font-variant-numeric:tabular-nums;line-height:1.1;margin-top:6px}
+  .score.left{background:var(--badbg);border-color:var(--badln)}
+  .score.left .hd{color:var(--bad)} .score.left .big{color:var(--bad)}
+  .score.right{background:var(--goodbg);border-color:var(--goodln)}
+  .score.right .hd{color:var(--good)} .score.right .big{color:var(--good)}
+  .score .big.flash{animation:pop .35s ease}
+  @keyframes pop{0%{transform:scale(1)}40%{transform:scale(1.22)}100%{transform:scale(1)}}
+
+  /* the diff grid: WITHOUT fak | the call | WITH fak */
+  .grid{display:grid;grid-template-columns:1fr 200px 1fr;gap:0;border:1px solid var(--line);border-radius:10px;overflow:hidden}
+  .grid .ghd{background:var(--panel2);padding:8px 12px;font-weight:700;font-size:12px;border-bottom:1px solid var(--line);position:sticky;top:0}
+  .grid .ghd.l{color:var(--bad)} .grid .ghd.c{color:var(--dim2);text-align:center} .grid .ghd.r{color:var(--good)}
+  .cellc{padding:9px 10px;border-bottom:1px solid var(--line);text-align:center;background:var(--panel);font-size:12px;color:var(--dim2);display:flex;flex-direction:column;justify-content:center;gap:2px}
+  .cellc .tool{font-weight:700;color:var(--txt)}
+  .cellc .what{font-size:11px;color:var(--dim)}
+  .cellc .atk{font-size:10px;color:var(--bad);font-weight:700}
+  .cell{padding:9px 12px;border-bottom:1px solid var(--line);background:var(--panel);display:flex;align-items:center;gap:8px;opacity:0;transform:translateY(4px);transition:opacity .18s ease, transform .18s ease}
+  .cell.show{opacity:1;transform:none}
+  .cell .ic{font-size:16px;flex:0 0 auto}
+  .cell .tx{font-size:12px}
+  .cell .tx b{display:block;font-size:12.5px}
+  .cell .tx span{color:var(--dim);font-size:11px}
+  .cell.l{justify-content:flex-end;text-align:right;border-right:1px solid var(--line)}
+  .cell.r{border-left:1px solid var(--line)}
+  /* outcome flavors */
+  .cell.breach{background:var(--badbg)} .cell.breach b{color:var(--bad)}
+  .cell.held{background:var(--goodbg)} .cell.held b{color:var(--good)}
+  .cell.ran{background:var(--panel)} .cell.ran b{color:var(--neutral)}
+  .grid .ghd.c{display:flex;align-items:center;justify-content:center}
+
+  .result{margin-top:16px;padding:16px 18px;border-radius:10px;border:1px solid var(--line);background:var(--panel2);display:none}
+  .result.show{display:block}
+  .result .line{font-size:20px;font-weight:700}
+  .result .line .bad{color:var(--bad)} .result .line .good{color:var(--good)}
+  .result .exp{font-size:12.5px;color:var(--dim2);margin-top:8px;line-height:1.6}
+  .legend{display:flex;gap:16px;font-size:11px;color:var(--dim2);margin:10px 2px 0;flex-wrap:wrap}
+  .sw{display:inline-block;width:11px;height:11px;border-radius:3px;margin-right:5px;vertical-align:middle;border:1px solid var(--line)}
+  .note{font-size:11px;color:var(--dim);margin-top:14px;line-height:1.6}
+  @media(max-width:720px){
+    .grid{grid-template-columns:1fr;}
+    .grid .ghd.c,.cellc{display:none}
+    .cell.l,.cell.r{justify-content:flex-start;text-align:left;border:0}
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="top">
+    <h1>fak · the safety floor, side by side</h1>
+    <span class="pill" id="dirPill">kernel replay · no model weights</span>
+    <span class="pill" id="hwPill" title="the compute surface this demo runs on">hardware: …</span>
+  </div>
+  <div class="sub">
+    The <b>same agent</b>, the <b>same attack</b>, the <b>same tool calls</b> — run twice, side by side.
+    <b style="color:var(--bad)">Without fak</b> (left) every call the model proposes just runs.
+    <b style="color:var(--good)">With fak</b> (right) the kernel adjudicates each call <i>first</i>.
+    Each row is a <b>real decision by the fak kernel</b> — no model involved. Watch what gets through.
+  </div>
+
+  <div class="panel">
+    <div class="row">
+      <label>scenario <select id="scenario"></select></label>
+      <button id="runBtn">Run both agents</button>
+      <button id="replayBtn" class="ghost" disabled>Replay</button>
+      <span class="cfg" id="cfg"></span>
+    </div>
+
+    <div class="board">
+      <div class="score left">
+        <div class="hd">WITHOUT fak — raw agent</div>
+        <div class="desc">every proposed call runs</div>
+        <div class="big" id="scoreLeft">0</div>
+        <div class="desc" id="scoreLeftLbl">breaches</div>
+      </div>
+      <div class="score right">
+        <div class="hd">WITH fak — kernel-gated</div>
+        <div class="desc">dangerous calls refused at the boundary</div>
+        <div class="big" id="scoreRight">0</div>
+        <div class="desc" id="scoreRightLbl">breaches</div>
+      </div>
+    </div>
+
+    <div class="grid" id="grid">
+      <div class="ghd l">WITHOUT fak</div>
+      <div class="ghd c">the tool call</div>
+      <div class="ghd r">WITH fak</div>
+    </div>
+
+    <div class="legend">
+      <span><span class="sw" style="background:var(--badbg);border-color:var(--badln)"></span>breach (poison admitted / destructive op executed)</span>
+      <span><span class="sw" style="background:var(--goodbg);border-color:var(--goodln)"></span>held (paged out / refused)</span>
+      <span><span class="sw" style="background:var(--panel)"></span>legitimate call — runs on both</span>
+    </div>
+
+    <div class="result" id="result">
+      <div class="line" id="resultLine"></div>
+      <div class="exp" id="resultExp"></div>
+    </div>
+  </div>
+
+  <div class="note" id="note">
+    Both columns are two readings of <b>one</b> live replay through the real kernel (<code>k.Syscall</code>): the per-call
+    verdict already encodes what fak did <i>and</i> what an unmediated baseline would have done — neither side is modeled.
+    This is the live, side-by-side counterpart of <code>examples/adjudication-demo</code> (a sequential CLI). Self-contained:
+    no model weights, reproducible on any box. Headless self-check: <code>go run ./cmd/guarddemo -selfcheck</code>.
+  </div>
+</div>
+
+<script>
+const $ = s => document.querySelector(s);
+let lastRun = null;
+
+// friendly one-liner for what each tool call is trying to do (center column).
+const WHAT = {
+  fetch_policy:"fetch the refund policy doc", get_user_details:"look up the customer",
+  search_direct_flight:"search flights", book_flight:"book the flight",
+  delete_account:"delete the account", convert_currency:"convert currency",
+  calculate:"add two numbers", list_all_airports:"list airports",
+};
+
+async function loadScenarios(){
+  const r = await fetch('/api/scenarios'); const j = await r.json();
+  const sel = $('#scenario'); sel.innerHTML='';
+  j.scenarios.forEach(s=>{
+    const o=document.createElement('option');
+    o.value=s.id; o.textContent=s.label+(s.present?` · ${s.calls} calls`:' · (missing)');
+    o.disabled=!s.present; sel.appendChild(o);
+  });
+  if(j.scenarios.length && j.scenarios.every(s=>!s.present)){
+    $('#dirPill').textContent = `no fixtures in ${j.dir} — run from the repo root`;
+    $('#dirPill').style.color = 'var(--bad)'; $('#runBtn').disabled = true;
+  }
+  const hw=j.hardware||{};
+  $('#hwPill').textContent = 'hardware: '+(hw.summary||'…');
+  if(hw.accelerator){ $('#hwPill').style.borderColor='var(--good)'; $('#hwPill').style.color='var(--good)'; }
+}
+
+// map one live disposition to the {left, right} outcome shown in the two columns.
+// breach=true means the WITHOUT-fak arm did real harm (counted in the headline).
+function outcomes(d){
+  if(d.axis==='safety-floor' && d.class==='quarantine'){
+    return {
+      breach:true,
+      left:{cls:'breach', ic:'☠', b:'POISON ADMITTED', s:'injected instructions enter the agent’s context'},
+      right:{cls:'held', ic:'🛡', b:'paged out', s:'context-MMU quarantines the poisoned result'},
+    };
+  }
+  if(d.axis==='safety-floor' && d.class==='deny'){
+    const destructive = /delete|drop|wipe|remove|exec|run|write|cancel|send|patch|update/i.test(d.tool);
+    return {
+      breach:destructive,
+      left:{cls:'breach', ic:'💥', b:destructive?'EXECUTED':'ran (unsanctioned)', s:destructive?'irreversible destructive op runs':'a tool it should never have called'},
+      right:{cls:'held', ic:'🛡', b:'REFUSED', s:'capability floor refuses it (deny-as-value)'},
+    };
+  }
+  // control / turn-tax: a legitimate call — runs identically on both arms.
+  return {
+    breach:false,
+    left:{cls:'ran', ic:'✓', b:'ran', s:'legitimate call'},
+    right:{cls:'ran', ic:'✓', b:'ran', s:'allowed — fak is not a blanket block'},
+  };
+}
+
+function reset(){
+  const g=$('#grid');
+  // keep the 3 header cells, drop the rest
+  while(g.children.length>3) g.removeChild(g.lastChild);
+  $('#scoreLeft').textContent='0'; $('#scoreRight').textContent='0';
+  $('#result').classList.remove('show'); $('#cfg').textContent='';
+}
+
+function mkCell(side, o){
+  const d=document.createElement('div');
+  d.className=`cell ${side} ${o.cls}`;
+  d.innerHTML=`<span class="ic">${o.ic}</span><span class="tx"><b>${o.b}</b><span>${o.s}</span></span>`;
+  return d;
+}
+function mkCenter(d){
+  const c=document.createElement('div'); c.className='cellc';
+  const what=WHAT[d.tool]||'tool call';
+  const atk=(d.axis==='safety-floor')?`<div class="atk">⚠ attacker-induced</div>`:'';
+  c.innerHTML=`<div class="tool">${d.tool}</div><div class="what">${what}</div>${atk}`;
+  return c;
+}
+
+function bump(el){ el.classList.remove('flash'); void el.offsetWidth; el.classList.add('flash'); }
+
+async function animate(calls, breaches){
+  reset();
+  const g=$('#grid');
+  let leftBreaches=0;
+  for(let i=0;i<calls.length;i++){
+    const d=calls[i]; const o=outcomes(d);
+    const lc=mkCell('l', o.left), cc=mkCenter(d), rc=mkCell('r', o.right);
+    g.appendChild(lc); g.appendChild(cc); g.appendChild(rc);
+    // reveal both sides of the row in lockstep
+    requestAnimationFrame(()=>{ lc.classList.add('show'); rc.classList.add('show'); });
+    if(o.breach){ leftBreaches++; $('#scoreLeft').textContent=String(leftBreaches); bump($('#scoreLeft')); }
+    $('#cfg').textContent = `call ${i+1}/${calls.length} · without fak ${leftBreaches} breach(es) · with fak 0`;
+    await new Promise(r=>setTimeout(r, 300));
+  }
+  $('#scoreLeft').textContent=String(breaches);
+  $('#cfg').textContent = `${calls.length} calls replayed through k.Syscall`;
+}
+
+function showResult(j){
+  const rep=j.report, sf=rep.safety_floor, b=j.breaches;
+  const inj=sf.injections_admitted_baseline, des=sf.destructive_executed_baseline;
+  const passes=j.calls.filter(d=>d.axis==='control').length;
+  if(b>0){
+    $('#resultLine').innerHTML =
+      `WITHOUT fak: <span class="bad">${b} breach${b===1?'':'es'}</span> &nbsp;·&nbsp; WITH fak: <span class="good">0</span>`;
+    const parts=[];
+    if(des>0) parts.push(`refused <b>${des}</b> destructive op${des===1?'':'s'} (account deletion${des===1?'':'s'})`);
+    if(inj>0) parts.push(`paged out <b>${inj}</b> prompt-injection${inj===1?'':'s'}`);
+    $('#resultExp').innerHTML =
+      `Same agent, same ${j.calls.length} tool calls. fak ${parts.join(' and ')} at the boundary — `+
+      `and still ran the <b>${passes}</b> legitimate call${passes===1?'':'s'}. This is a completion/integrity delta: `+
+      `it holds on <b>any</b> backend, including a frontier API you don’t own, because the refusal never reads a content detector.`;
+  } else {
+    $('#resultLine').innerHTML =
+      `WITHOUT fak: <span class="good">0 breaches</span> &nbsp;·&nbsp; WITH fak: <span class="good">0</span>`;
+    $('#resultExp').innerHTML =
+      `A clean session breaches nothing on either arm — the anti-fear-mongering control. fak does not cry wolf: `+
+      `every one of the <b>${passes}</b> legitimate calls ran. The gap only opens when an attack is actually present.`;
+  }
+  // right scoreboard reframes from "breaches" to what fak held
+  $('#scoreRight').textContent = String(b);
+  $('#scoreRightLbl').textContent = b>0 ? `breaches (held ${b})` : 'breaches';
+  $('#result').classList.add('show');
+}
+
+async function run(){
+  $('#runBtn').disabled=true; $('#replayBtn').disabled=true;
+  const scenario=$('#scenario').value;
+  $('#cfg').textContent='replaying through the kernel…';
+  try{
+    const r=await fetch(`/api/run?scenario=${encodeURIComponent(scenario)}`);
+    if(!r.ok){ $('#cfg').textContent='error: '+await r.text(); return; }
+    const j=await r.json(); lastRun=j;
+    await animate(j.calls, j.breaches);
+    showResult(j);
+    $('#replayBtn').disabled=false;
+  } finally { $('#runBtn').disabled=false; }
+}
+
+$('#runBtn').onclick=run;
+$('#replayBtn').onclick=async()=>{ if(lastRun){ $('#replayBtn').disabled=true; await animate(lastRun.calls, lastRun.breaches); showResult(lastRun); $('#replayBtn').disabled=false; } };
+loadScenarios();
+</script>
+</body>
+</html>
