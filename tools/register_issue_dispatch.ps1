@@ -35,6 +35,14 @@ param(
   #   loop -> issue_dispatch.py: spawns the generic /dos-dispatch-loop worker that
   #     resolves units from the PLAN portfolio (use when the repo ships PLAN-*.md).
   [ValidateSet('resolve','loop')] [string]$Mode = 'resolve',
+  # Worker backend (resolve mode only): claude = opus (t1); opencode = glm-5.2 (t2,
+  # a separate zai-coding-plan quota pool). Route a lane to opencode to relieve the
+  # opus weekly-quota ceiling. Pair with -Lane to dedicate a task to one lane.
+  [ValidateSet('claude','opencode')] [string]$Backend = 'claude',
+  [string]$Lane = '',
+  # Comma-separated lanes to drop from the busiest-pick (e.g. the opus task excludes
+  # 'docs' so the glm task owns it). Ignored when -Lane is set.
+  [string]$ExcludeLane = '',
   [switch]$Live
 )
 $ErrorActionPreference = 'Stop'
@@ -73,6 +81,12 @@ $liveFlag = if ($Live) { ' --live' } else { '' }
 # becomes the task's LastTaskResult directly (so the `; exit $LASTEXITCODE` shim that
 # the old -Command form needed is gone too).
 $pyArgs    = "`"$tick`" --workspace `"$Workspace`" --max-workers $MaxWorkers$liveFlag --json"
+# --backend / --lane are resolve-tick options only (the loop tick has neither).
+if ($Mode -eq 'resolve') {
+  if ($Backend -ne 'claude') { $pyArgs += " --backend $Backend" }
+  if ($Lane)                 { $pyArgs += " --lane $Lane" }
+  if ($ExcludeLane)          { $pyArgs += " --exclude-lane $ExcludeLane" }
+}
 $taskAction = New-ScheduledTaskAction -Execute $py -Argument $pyArgs -WorkingDirectory $Workspace
 $trigger   = New-ScheduledTaskTrigger -Once -At (Get-Date).AddMinutes(1) `
                -RepetitionInterval (New-TimeSpan -Minutes $EveryMinutes) `

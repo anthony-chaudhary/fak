@@ -71,7 +71,7 @@ class EvaluateTest(unittest.TestCase):
                prompt_chars=900) -> None:
         mod.issue_dispatch.refresh_registry = lambda root: {"ok": True}
         mod.issue_dispatch.preflight = lambda root, **kw: pre
-        mod.lane_issue_numbers = lambda root, lane: pick
+        mod.lane_issue_numbers = lambda root, lane, exclude=None: pick
         mod.live_resolution_issues = lambda runs_dir: set(live_issues or [])
         mod.recently_attempted_issues = lambda runs_dir, *, cooldown_min, **k: set(cooled or [])
         mod.issue_worker_prompt.build = lambda n, lane, *, workspace: {
@@ -190,7 +190,7 @@ class BackendRoutingTest(unittest.TestCase):
 
         mod.issue_dispatch.refresh_registry = lambda root: {"ok": True}
         mod.issue_dispatch.preflight = fake_pre
-        mod.lane_issue_numbers = lambda root, lane: {
+        mod.lane_issue_numbers = lambda root, lane, exclude=None: {
             "lane": "docs", "numbers": [260], "by_lane_count": {"docs": 1}}
         mod.live_resolution_issues = lambda runs_dir: set()
         mod.recently_attempted_issues = lambda runs_dir, *, cooldown_min, **k: set()
@@ -212,6 +212,29 @@ class BackendRoutingTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             mod.evaluate(ROOT, max_workers=2, work_kind="x", lane=None,
                          live=False, backend="gpt")
+
+
+class ExcludeLaneTest(unittest.TestCase):
+    ROUTER = {"lanes": {
+        "docs": {"issues": [{"number": 9}, {"number": 8}, {"number": 7}]},
+        "gateway": {"issues": [{"number": 6}, {"number": 5}]},
+    }}
+
+    def test_busiest_pick_skips_excluded_lane(self) -> None:
+        mod = load()
+        mod.issue_dispatch.run_json = lambda cmd, root, timeout: self.ROUTER
+        # without exclude: docs (3) is busiest
+        self.assertEqual(mod.lane_issue_numbers(ROOT, None)["lane"], "docs")
+        # excluding docs: gateway (2) wins
+        picked = mod.lane_issue_numbers(ROOT, None, exclude={"docs"})
+        self.assertEqual(picked["lane"], "gateway")
+        self.assertEqual(picked["excluded_lanes"], ["docs"])
+
+    def test_explicit_lane_ignores_exclude(self) -> None:
+        mod = load()
+        mod.issue_dispatch.run_json = lambda cmd, root, timeout: self.ROUTER
+        picked = mod.lane_issue_numbers(ROOT, "docs", exclude={"docs"})
+        self.assertEqual(picked["lane"], "docs")   # explicit wins over exclude
 
 
 class OpencodeConfigHomeTest(unittest.TestCase):

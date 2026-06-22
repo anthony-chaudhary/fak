@@ -69,10 +69,13 @@ def _py() -> str:
     return sys.executable or "python"
 
 
-def lane_issue_numbers(root: Path, explicit_lane: str | None) -> dict[str, Any]:
+def lane_issue_numbers(root: Path, explicit_lane: str | None,
+                       exclude: set[str] | None = None) -> dict[str, Any]:
     """Pick the lane (busiest, or explicit) and return its OPEN issue numbers,
     most-recent first. Reuses the same router fold issue_dispatch.pick_lane uses,
-    but keeps the per-issue numbers (which pick_lane discards)."""
+    but keeps the per-issue numbers (which pick_lane discards). ``exclude`` drops
+    lanes from the busiest-pick (e.g. an opus task excludes 'docs' so the glm task
+    owns it) -- ignored when an explicit lane is named."""
     router = issue_dispatch.run_json(
         [_py(), str(root / "tools" / "issue_lane_router.py"), "--json"],
         root, timeout=130)
@@ -88,14 +91,15 @@ def lane_issue_numbers(root: Path, explicit_lane: str | None) -> dict[str, Any]:
             except (TypeError, ValueError):
                 continue
         nums_by_lane[ln] = sorted(nums, reverse=True)
+    exclude = exclude or set()
     if explicit_lane:
         chosen = explicit_lane
-    elif nums_by_lane:
-        chosen = max(nums_by_lane, key=lambda k: len(nums_by_lane[k]))
     else:
-        chosen = None
+        eligible = {k: v for k, v in nums_by_lane.items() if k not in exclude}
+        chosen = max(eligible, key=lambda k: len(eligible[k])) if eligible else None
     return {"lane": chosen, "numbers": nums_by_lane.get(chosen or "", []),
             "by_lane_count": {k: len(v) for k, v in nums_by_lane.items()},
+            "excluded_lanes": sorted(exclude),
             "router_error": router.get("_error")}
 
 
@@ -234,13 +238,17 @@ def spawn_issue_worker(command: list[str], env: dict[str, str], cwd: Path,
     proc = subprocess.Popen(argv, cwd=str(cwd), env=env, stdin=subprocess.DEVNULL,
                             stdout=fh, stderr=subprocess.STDOUT, **kwargs)
     (out_log.with_suffix(".pid")).write_text(str(proc.pid), encoding="utf-8")
+    # Per-worker backend sidecar: makes each run's backend traceable from disk,
+    # independent of the (multi-task, last-writer) tick record.
+    (out_log.with_suffix(".backend")).write_text(backend, encoding="utf-8")
     return {"pid": proc.pid, "log": str(out_log), "issue": issue, "lane": lane,
             "backend": backend}
 
 
 def evaluate(root: Path, *, max_workers: int, work_kind: str, lane: str | None,
              live: bool, refresh: bool = True, cooldown_min: int = 120,
-             backend: str = "claude") -> dict[str, Any]:
+             backend: str = "claude",
+             exclude_lanes: set[str] | None = None) -> dict[str, Any]:
     if backend not in BACKENDS:
         raise ValueError(f"unknown backend {backend!r}; expected one of {BACKENDS}")
     product = _BACKEND_PRODUCT[backend]
@@ -250,7 +258,7 @@ def evaluate(root: Path, *, max_workers: int, work_kind: str, lane: str | None,
     pre_ok = pre.get("verdict") == "SPAWN_OK"
     acct = pre.get("account") or {}
 
-    pick = lane_issue_numbers(root, lane)
+    pick = lane_issue_numbers(root, lane, exclude=exclude_lanes)
     chosen_lane = pick.get("lane")
     runs_dir = root / RUNS_DIRNAME
     live_issues = live_resolution_issues(runs_dir)
@@ -320,10 +328,16 @@ def evaluate(root: Path, *, max_workers: int, work_kind: str, lane: str | None,
 
 
 def _record(runs_dir: Path, payload: dict[str, Any]) -> None:
+    # Scope the tick record by backend so concurrent tasks (e.g. the opus
+    # FleetIssueDispatch and the glm FleetIssueDispatchGlm) don't clobber each
+    # other's trace; also keep the legacy unscoped file (last-writer) for any
+    # manual reader that still expects it.
+    backend = payload.get("backend") or "claude"
+    blob = json.dumps(payload, indent=2)
     try:
         runs_dir.mkdir(parents=True, exist_ok=True)
-        (runs_dir / "last-resolve-tick.json").write_text(
-            json.dumps(payload, indent=2), encoding="utf-8")
+        (runs_dir / f"last-resolve-tick-{backend}.json").write_text(blob, encoding="utf-8")
+        (runs_dir / "last-resolve-tick.json").write_text(blob, encoding="utf-8")
     except OSError:
         pass
 
@@ -361,6 +375,10 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--backend", choices=BACKENDS, default="claude",
                     help="worker backend: claude (opus, t1) or opencode (glm-5.2, t2, "
                          "a separate quota pool). Default claude.")
+    ap.add_argument("--exclude-lane", default="",
+                    help="comma-separated lanes to drop from the busiest-pick (e.g. an "
+                         "opus task excludes 'docs' so a glm task owns it). Ignored when "
+                         "--lane is set.")
     ap.add_argument("--live", action="store_true",
                     help="actually spawn the worker (default: dry-run / plan only)")
     ap.add_argument("--no-refresh", action="store_true",
@@ -372,9 +390,11 @@ def main(argv: list[str] | None = None) -> int:
     args = ap.parse_args(argv)
 
     root = Path(args.workspace).resolve() if args.workspace else repo_root()
+    exclude_lanes = {s.strip() for s in args.exclude_lane.split(",") if s.strip()}
     payload = evaluate(root, max_workers=args.max_workers, work_kind=args.work_kind,
                        lane=args.lane, live=args.live, refresh=not args.no_refresh,
-                       cooldown_min=args.cooldown_min, backend=args.backend)
+                       cooldown_min=args.cooldown_min, backend=args.backend,
+                       exclude_lanes=exclude_lanes)
     print(json.dumps(payload, indent=2) if args.json else render(payload))
     return 0 if payload.get("ok") else 1
 
