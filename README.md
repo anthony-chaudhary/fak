@@ -355,10 +355,13 @@ curl -fsSL https://raw.githubusercontent.com/anthony-chaudhary/fak/main/install.
 
 Or grab a [prebuilt archive](https://github.com/anthony-chaudhary/fak/releases/latest)
 (`linux_amd64`, `darwin_amd64`, `darwin_arm64`, `windows_amd64`), or run it
-[in a container](GETTING-STARTED.md). Then:
+[in a container](GETTING-STARTED.md). Then — assuming a model server is already
+listening at `--base-url` (here it's Ollama's default port, so start it first with
+`ollama serve`; see [**Getting started**](GETTING-STARTED.md) to wire up the upstream):
 
 ```bash
 fak policy --dump > floor.json   # a starter allow-list you can edit + review
+# needs a model server at --base-url already running, e.g. `ollama serve`
 fak serve --addr 127.0.0.1:8080 --base-url http://localhost:11434/v1 --model qwen2.5:1.5b
 ```
 
