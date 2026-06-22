@@ -21,9 +21,9 @@ Design (deliberately conservative — see the audit that produced it):
     `metrics/` and `streams/` subtrees are never read. The tool REFUSES to run if
     pointed at a repo root (it must see a dir literally named `.dos`), so it can
     never sweep the repo's tracked top-level docs.
-  * DESTINATION defaults to the private fleet repo's gitignored `.dos-archive/`
-    (`../fleet/.dos-archive/fak/` relative to a `fak` clone). It is a BACKUP, not
-    a promotion into version control — the default destination is itself
+  * DESTINATION defaults to the private companion repo's gitignored `.dos-archive/`
+    (`../fak-private/.dos-archive/fak/` relative to a `fak` clone). It is a BACKUP,
+    not a promotion into version control — the default destination is itself
     gitignored, so this can never leak a `.dos` work-product into a tracked
     public commit. To instead track the archive (private repo only), the operator
     points `--to` at a tracked dir and commits it themselves; this tool NEVER runs
@@ -60,9 +60,11 @@ import tempfile
 RUNTIME_SUBDIRS = ("metrics", "streams")
 
 # Default archive location, relative to the .dos/ parent (the repo root). A `fak`
-# clone sits beside its private `fleet` source; the archive lands in fleet's
-# gitignored scratch so a backup can never become a public commit by accident.
-DEFAULT_ARCHIVE_REL = os.path.join("..", "fleet", ".dos-archive", "fak")
+# clone sits beside its private `fak-private` companion; the archive lands in
+# fak-private's gitignored scratch so a backup can never become a public commit by
+# accident. (Was `../fleet/...` before the fleet monorepo was sunset; fleet is kept
+# as a cold local archive but is no longer the live backup target.)
+DEFAULT_ARCHIVE_REL = os.path.join("..", "fak-private", ".dos-archive", "fak")
 
 
 def _eprint(*a):
