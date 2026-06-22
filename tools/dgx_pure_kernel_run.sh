@@ -56,6 +56,12 @@ export FAK_CUDA_ARCH="${FAK_CUDA_ARCH:-sm_80}"
 export CUDA_VISIBLE_DEVICES="${FAK_GPU:-1}"
 export PATH="/usr/local/go/bin:$CUDA_HOME/bin:$PATH"
 export GOTOOLCHAIN="${GOTOOLCHAIN:-auto}"
+# setsid + the bridge's non-interactive shell drop $HOME, so `go` aborts with
+# "GOCACHE is not defined and neither $XDG_CACHE_HOME nor $HOME are defined". Pin them.
+export HOME="${HOME:-/root}"
+export GOCACHE="${GOCACHE:-/tmp/gocache}"
+export GOPATH="${GOPATH:-/tmp/gopath}"
+mkdir -p "$GOCACHE" "$GOPATH"
 REPO_URL="${FAK_REPO_URL:-https://github.com/anthony-chaudhary/fak.git}"
 SRC="$WORK/src"
 
