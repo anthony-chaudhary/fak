@@ -1,0 +1,83 @@
+{
+  "version": "fak-policy/v1",
+  "posture": "fail_closed",
+  "allow": [
+    "run_read_query",
+    "list_tables",
+    "describe_table",
+    "read_repo",
+    "create_chart",
+    "export_csv_sanitized",
+    "transfer_to_analyst_queue"
+  ],
+  "allow_prefix": [
+    "read_",
+    "get_",
+    "search_",
+    "list_",
+    "lookup_",
+    "find_",
+    "describe_"
+  ],
+  "deny": {
+    "run_write_query": "POLICY_BLOCK",
+    "drop_table": "POLICY_BLOCK",
+    "alter_table": "POLICY_BLOCK",
+    "create_table": "POLICY_BLOCK",
+    "copy_to": "SECRET_EXFIL",
+    "pg_dump": "SECRET_EXFIL",
+    "shell": "POLICY_BLOCK",
+    "transfer_funds": "POLICY_BLOCK"
+  },
+  "self_modify_globs": [
+    ".git/",
+    ".dos/",
+    "policy.json",
+    "sql-analyst-policy.json",
+    "/etc/",
+    "id_rsa"
+  ],
+  "redact_fields": [
+    "password",
+    "secret",
+    "api_key",
+    "token",
+    "authorization",
+    "pii_email",
+    "pii_phone",
+    "ssn"
+  ],
+  "safe_sinks": [
+    "transfer_to_analyst_queue"
+  ],
+  "sources": {
+    "read_repo": "trusted_local",
+    "run_read_query": "trusted_local"
+  },
+  "arg_rules": [
+    {
+      "tool": "run_read_query",
+      "arg": "sql",
+      "deny_regex": "(?i)\\b(insert|update|delete|drop|alter|create|truncate|grant|revoke|copy|vacuum|set\\s+role)\\b",
+      "reason": "POLICY_BLOCK"
+    },
+    {
+      "tool": "run_read_query",
+      "arg": "limit",
+      "deny_regex": "^[0-9]{6,}",
+      "reason": "OVERSIZE"
+    },
+    {
+      "tool": "run_read_query",
+      "arg": "sql",
+      "max_bytes": 8000,
+      "reason": "OVERSIZE"
+    },
+    {
+      "tool": "run_read_query",
+      "arg": "schema",
+      "allow_glob": "public.*",
+      "reason": "POLICY_BLOCK"
+    }
+  ]
+}

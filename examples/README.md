@@ -13,6 +13,7 @@ go run ./cmd/fak policy --check examples/devops-dryrun-policy.json
 go run ./cmd/fak policy --check examples/dev-agent-policy.json
 go run ./cmd/fak policy --check examples/flight-booking-agent-policy.json
 go run ./cmd/fak policy --check examples/healthcare-phi-policy.json
+go run ./cmd/fak policy --check examples/sql-analyst-policy.json
 ```
 
 ## Templates
@@ -26,6 +27,7 @@ go run ./cmd/fak policy --check examples/healthcare-phi-policy.json
 | `devops-dryrun-policy.json` | Infra review without execution | plan/diff/template only; no apply, exec, delete, or production deploy | `go run ./cmd/fak preflight --policy examples/devops-dryrun-policy.json --tool terraform_apply --args "{}"` |
 | `flight-booking-agent-policy.json` | The README's canonical SFO→JFK booking agent (the [live A/B](../docs/benchmarks/LIVE-RESULTS.md) task) | search/book/read; refund, cancel, PNR-export, and fund transfer need a human; `read_policy` is `untrusted` (the booby-trap vector) | `go run ./cmd/fak preflight --policy examples/flight-booking-agent-policy.json --tool refund_payment --args "{}"` |
 | `healthcare-phi-policy.json` | HIPAA-style clinical agent — the heavy-PHI `redact_fields` + EHR/inbox provenance showcase | read EHR / search ICD / drug-interaction / note / appointment; export, email-PHI, and record-delete need a human; `read_patient_record` is `trusted_local` while `fetch_medical_literature` and `read_patient_message` are `untrusted` (the prompt-injection vector) | `go run ./cmd/fak preflight --policy examples/healthcare-phi-policy.json --tool export_patient_data --args "{}"` |
+| `sql-analyst-policy.json` | Internal-data / BI analyst — the heavy `arg_rules` showcase (SELECT-only SQL, row caps, schema allow-list) | read-only query / list / describe / chart / sanitized-CSV; write-query, DDL (`drop`/`alter`/`create_table`), `copy_to`/`pg_dump`, `shell`, and fund transfer are denied; the `run_read_query.sql` text is constrained to reject DDL/DML even when the tool name clears the allow-list | `go run ./cmd/fak preflight --policy examples/sql-analyst-policy.json --tool run_read_query --args '{"sql":"DROP TABLE customers"}'` |
 
 `refund_payment` returns **`DENY (POLICY_BLOCK)`** — the denied refund is meant to
 escalate to the `transfer_to_human_agents` safe sink, not silently fail. The ALLOW
@@ -71,6 +73,47 @@ go run ./cmd/fak preflight --policy examples/healthcare-phi-policy.json --tool s
 > that `redact_fields` matches arg keys **exactly** (no wildcard), so a PHI vocabulary
 > is enumerated explicitly — `phi_notes`, `phi_address`, … — rather than as a `phi_*`
 > glob.
+
+### `sql-analyst-policy.json` — the `arg_rules` showcase
+
+This is the heaviest `arg_rules` template: it constrains the **SQL text itself**, not
+just the tool name. `run_read_query` clears the name-level allow-list, but four
+argument predicates then narrow it — SELECT-only (DDL/DML keywords are denied), a body
+size cap, a row cap, and a schema allow-list:
+
+```bash
+go run ./cmd/fak preflight --policy examples/sql-analyst-policy.json --tool run_read_query --args '{"sql":"SELECT 1","schema":"public.users","limit":50}'
+go run ./cmd/fak preflight --policy examples/sql-analyst-policy.json --tool run_read_query --args '{"sql":"DROP TABLE customers"}'
+go run ./cmd/fak preflight --policy examples/sql-analyst-policy.json --tool run_write_query --args '{}'
+```
+
+return **`ALLOW`**, **`DENY (POLICY_BLOCK)`** (the `run_read_query.sql` arg-rule fires
+on `DROP` even though `run_read_query` itself is allowed), and **`DENY (POLICY_BLOCK)`**
+(`run_write_query` is an explicit deny — the tool an `allow run_query` mistake would
+have admitted). The row cap and schema allow-list also fire:
+
+```bash
+go run ./cmd/fak preflight --policy examples/sql-analyst-policy.json --tool run_read_query --args '{"sql":"SELECT 1","limit":100000}'
+go run ./cmd/fak preflight --policy examples/sql-analyst-policy.json --tool run_read_query --args '{"sql":"SELECT 1","schema":"secrets.creds"}'
+```
+
+return **`DENY (OVERSIZE)`** and **`DENY (POLICY_BLOCK)`**.
+
+> **The SQL `deny_regex` is a best-effort keyword guard, not a SQL parser.** It is the
+> regex-shaped analogue of a structural check: like `adjudication-demo/README.md` is
+> honest that `POLICY_BLOCK` regexes are softer than the structural `DEFAULT_DENY`
+> floor, this manifest's SELECT-only rule can be defeated by an attacker who hides a
+> keyword from the pattern (comments, casing tricks, `/**/` splitting, dialect quoting).
+> The load-bearing floor here is the **structural** layer — `run_write_query`,
+> `drop_table`, `alter_table`, `create_table`, `copy_to`, and `pg_dump` are denied as
+> whole tools, so the dangerous operations have no admitted tool to ride on at all. The
+> arg-rule is defense-in-depth on the one tool (`run_read_query`) that *must* take
+> free-form SQL. Two of the issue's idealized rules are expressed in the matchers the
+> engine actually has (`allow_glob` / `deny_regex` / `max_bytes`): the row cap is a
+> `deny_regex ^[0-9]{6,}` on `limit` (denies a six-or-more-digit limit) rather than a
+> numeric `max_value`, and the schema allow-list is a single `allow_glob public.*`
+> rather than a comma list — `allow_glob` is one `path.Match` glob, so list one schema
+> prefix per deployment.
 
 The useful adoption pattern is: copy the closest template, delete what you do not
 need, run `policy --check`, then run one or two `preflight` calls that prove the
