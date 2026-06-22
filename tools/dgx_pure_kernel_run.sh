@@ -41,7 +41,11 @@ if [ "${FAKPURE_BG:-}" != "1" ]; then
   mkdir -p "$WORK"
   rm -f "$WORK"/DONE.* 2>/dev/null || true
   cp -f "$SELF" "$WORK/run.sh" 2>/dev/null || true
-  FAKPURE_BG=1 nohup bash "$WORK/run.sh" >"$WORK/run.log" 2>&1 &
+  # setsid + </dev/null FULLY detaches the worker into its own session, so the control
+  # bridge that typed this command does NOT wait on the 20-min build and the session does
+  # not stay busy (a plain `nohup ... &` leaves the child in the bridge's process group,
+  # which wedges the session's readback until the build ends — the failure that cost hours).
+  FAKPURE_BG=1 setsid bash "$WORK/run.sh" </dev/null >"$WORK/run.log" 2>&1 &
   echo "LAUNCHED pid $! -> $WORK/run.log"
   exit 0
 fi
