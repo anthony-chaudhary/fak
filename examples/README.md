@@ -30,8 +30,11 @@ go run ./cmd/fak policy --check examples/sql-analyst-policy.json
 | `sql-analyst-policy.json` | Internal-data / BI analyst — the heavy `arg_rules` showcase (SELECT-only SQL, row caps, schema allow-list) | read-only query / list / describe / chart / sanitized-CSV; write-query, DDL (`drop`/`alter`/`create_table`), `copy_to`/`pg_dump`, `shell`, and fund transfer are denied; the `run_read_query.sql` text is constrained to reject DDL/DML even when the tool name clears the allow-list | `go run ./cmd/fak preflight --policy examples/sql-analyst-policy.json --tool run_read_query --args '{"sql":"DROP TABLE customers"}'` |
 
 `refund_payment` returns **`DENY (POLICY_BLOCK)`** — the denied refund is meant to
-escalate to the `transfer_to_human_agents` safe sink, not silently fail. The ALLOW
-side of the same floor:
+escalate to the `transfer_to_human_agents` safe sink, not silently fail.
+[`escalation-demo/`](escalation-demo/README.md) is the runnable artifact that exercises
+that path end-to-end (deny → catch → route to the declared `safe_sink` → redacted human
+ticket), so the `safe_sinks` field every template declares is no longer decorative. The
+ALLOW side of the same floor:
 
 ```bash
 go run ./cmd/fak preflight --policy examples/flight-booking-agent-policy.json --tool search_flights --args "{}"
