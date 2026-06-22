@@ -6,8 +6,13 @@ visitor hits the front door first, so a dead link there is an embarrassment. Thi
 resolves every relative markdown link in the front-door set and refuses any that
 does not point at a real file or directory.
 
+It also catches the *inline-code* reference class — `` `fak/GROWTH.md §2` `` or
+`` `POSITION-….md §5` `` — a doc citing a non-existent file as authority that the
+markdown-link regex never sees (issue #288). The first whitespace-delimited token
+of each inline-code span, when it names a repo `.md` file, must resolve too.
+
 Scope (front door): README, START-HERE, INSTALL, INDEX, AGENTS, CLAUDE,
-CONTRIBUTING, SECURITY, docs/index.md, docs/FAQ.md.
+CONTRIBUTING, SECURITY, CLA, docs/index.md, docs/FAQ.md.
 
 Modes:
   --audit-staged   check front-door files that are staged (added/modified) — the
@@ -26,14 +31,27 @@ import sys
 
 FRONT_DOOR = [
     "README.md", "START-HERE.md", "INSTALL.md", "INDEX.md", "AGENTS.md",
-    "CLAUDE.md", "CONTRIBUTING.md", "SECURITY.md",
+    "CLAUDE.md", "CONTRIBUTING.md", "SECURITY.md", "CLA.md",
     "docs/index.md", "docs/FAQ.md",
 ]
 LINK_RE = re.compile(r"\]\(([^)]+)\)")
+INLINE_RE = re.compile(r"`([^`]+)`")
+MD_TOKEN_RE = re.compile(r"\A[\w./-]+\.md\Z")
 
 
 def _git(args, root):
     return subprocess.run(["git", "-C", root] + args, capture_output=True, text=True)
+
+
+def _resolves(root, d, ref):
+    """True if a relative file reference points at a real path.
+
+    Honors the repo convention that a `fak/X` label denotes X at the repo root
+    (the repo root IS the fak Go module; there is no `fak/` subdirectory)."""
+    cands = [posixpath.normpath(posixpath.join(d, ref)), ref]
+    if ref.startswith("fak/"):
+        cands.append(ref[len("fak/"):])
+    return any(os.path.exists(os.path.join(root, c)) for c in cands)
 
 
 def _staged_frontdoor(root):
@@ -59,10 +77,35 @@ def _dead_links(root, f):
         path = link.split("#")[0].split("?")[0]
         if not path:
             continue
-        tgt = posixpath.normpath(posixpath.join(d, path))
-        if os.path.exists(os.path.join(root, tgt)):
+        if _resolves(root, d, path):
             continue
-        out.append((link, tgt))
+        out.append((link, path))
+    return out
+
+
+def _dead_inline_refs(root, f):
+    """Inline-code references (`fak/GROWTH.md §2`) that name a repo `.md` file but
+    do not resolve — the dead-reference class issue #288 was filed for: a doc
+    citing a non-existent file as authority, invisible to LINK_RE."""
+    fp = os.path.join(root, f)
+    try:
+        with open(fp, encoding="utf-8") as fh:
+            txt = fh.read()
+    except OSError:
+        return []
+    d = posixpath.dirname(f)
+    out, seen = [], set()
+    for span in INLINE_RE.findall(txt):
+        parts = span.split()
+        if not parts:
+            continue
+        ref = parts[0].split("#")[0]
+        if not MD_TOKEN_RE.match(ref) or ref in seen:
+            continue
+        seen.add(ref)
+        if _resolves(root, d, ref):
+            continue
+        out.append((span, ref))
     return out
 
 
@@ -92,16 +135,18 @@ def main() -> int:
     findings = []
     for f in files:
         for link, tgt in _dead_links(root, f):
-            findings.append((f, link, tgt))
+            findings.append((f, f"]({link})", tgt))
+        for span, ref in _dead_inline_refs(root, f):
+            findings.append((f, f"`{span}`", ref))
     if not findings:
         print(f"broken-link: clean ({scope}).")
         return 0
 
-    print(f"BROKEN_LINK: {len(findings)} dead relative link(s) in front-door docs:", file=sys.stderr)
-    for f, link, tgt in findings:
-        print(f"  {f}: ]({link})  ->  missing {tgt}", file=sys.stderr)
-    print("  fix: repoint to the real path, or remove the link (the target may have "
-          "been deleted/moved).", file=sys.stderr)
+    print(f"BROKEN_LINK: {len(findings)} dead reference(s) in front-door docs:", file=sys.stderr)
+    for f, cite, tgt in findings:
+        print(f"  {f}: {cite}  ->  missing {tgt}", file=sys.stderr)
+    print("  fix: repoint to the real path, or remove the reference (the target may "
+          "have been deleted/moved).", file=sys.stderr)
     if a.audit_staged:
         print("  override once: ALLOW_BAD_LINK=1 <git cmd>.", file=sys.stderr)
     return 1

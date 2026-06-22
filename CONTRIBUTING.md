@@ -7,10 +7,10 @@ trust kernel, not by trust. This file is the durable contract for everyone — h
 agent alike.
 
 This file is short on purpose; the deep public guides are `fak/ARCHITECTURE.md` (the
-extension model), `fak/GROWTH.md` (the layering gates), and **`fak/EXTENDING.md`** — the
-golden path if you're a researcher or team who wants to build an *optimization for a
-subsystem* (a faster kernel, a new cache backend, a smarter admission rung) on fak
-without forking the core.
+extension model and the layered-DAG tier gates, enforced by `internal/architest`) and
+**`fak/EXTENDING.md`** — the golden path if you're a researcher or team who wants to
+build an *optimization for a subsystem* (a faster kernel, a new cache backend, a smarter
+admission rung) on fak without forking the core.
 
 ## Licensing — read this before your first PR
 
