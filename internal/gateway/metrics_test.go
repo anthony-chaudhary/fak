@@ -151,6 +151,10 @@ func TestInferenceMetricsAccumulateAcrossTurns(t *testing.T) {
 		"fak_gateway_inference_prompt_tokens_total 150",
 		"fak_gateway_inference_completion_tokens_total 50",
 		"fak_gateway_inference_cached_prompt_tokens_total 8",
+		// Only the first turn got a provider cache read (8 tokens); the second got 0.
+		"fak_gateway_inference_cached_prompt_hits_total 1",
+		// 1 cache hit over 2 served turns.
+		"fak_gateway_inference_cached_prompt_hit_ratio 0.5",
 		"fak_gateway_inference_duration_seconds_total 3",
 		// 50 completion tokens / 3s wall-clock.
 		"fak_gateway_inference_output_tokens_per_second 16.666666666666668",

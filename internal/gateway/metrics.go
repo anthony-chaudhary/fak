@@ -50,6 +50,7 @@ type gatewayMetrics struct {
 	inferPromptTokens uint64
 	inferComplTokens  uint64
 	inferCachedTokens uint64
+	inferCachedHits   uint64 // served turns whose prompt got a provider cache READ (>0 cached tokens)
 	inferDecodeSecs   float64
 }
 
@@ -152,6 +153,7 @@ func (m *gatewayMetrics) observeInference(promptTok, complTok, cachedTok int, fi
 	}
 	if cachedTok > 0 {
 		m.inferCachedTokens += uint64(cachedTok)
+		m.inferCachedHits++ // this turn got a provider prompt-cache READ
 	}
 	if dur > 0 {
 		m.inferDecodeSecs += dur.Seconds()
@@ -420,6 +422,7 @@ type inferenceSnapshot struct {
 	promptTok  uint64
 	complTok   uint64
 	cachedTok  uint64
+	cachedHits uint64
 	decodeSecs float64
 }
 
@@ -435,6 +438,7 @@ func (m *gatewayMetrics) inferenceSnapshotData() inferenceSnapshot {
 		promptTok:  m.inferPromptTokens,
 		complTok:   m.inferComplTokens,
 		cachedTok:  m.inferCachedTokens,
+		cachedHits: m.inferCachedHits,
 		decodeSecs: m.inferDecodeSecs,
 	}
 }
@@ -464,7 +468,23 @@ func (m *gatewayMetrics) writeInferenceMetrics(b *strings.Builder) inferenceSnap
 
 	writeCounter(b, "fak_gateway_inference_prompt_tokens_total", "Prompt (input) tokens summed across served model turns.", int64(snap.promptTok))
 	writeCounter(b, "fak_gateway_inference_completion_tokens_total", "Completion (generated) tokens summed across served model turns.", int64(snap.complTok))
-	writeCounter(b, "fak_gateway_inference_cached_prompt_tokens_total", "Prompt tokens served from the provider/KV cache across served model turns (0 when no upstream reports a cache hit).", int64(snap.cachedTok))
+	writeCounter(b, "fak_gateway_inference_cached_prompt_tokens_total", "Prompt (input) tokens the upstream PROVIDER served from its own prompt cache (cache_read) across served turns, normalized across Anthropic/OpenAI/Gemini. This is provider-side reuse — distinct from the local fak_vdso_*/fak_cache_* caches — and reads 0 on the in-kernel path (no provider).", int64(snap.cachedTok))
+
+	// Provider prompt-cache HIT rate: the token total above carried no denominator,
+	// so a dashboard could see tokens-cached but not how OFTEN a turn hit the provider
+	// cache. cached_prompt_hits_total counts served turns with a provider cache read
+	// (>0 cached tokens); the ratio is hits/turns, mirroring fak_gateway_vdso_hit_ratio.
+	var inferTurns uint64
+	for _, n := range snap.reqs {
+		inferTurns += n
+	}
+	writeCounter(b, "fak_gateway_inference_cached_prompt_hits_total", "Served model turns whose prompt got a provider prompt-cache READ (cached tokens > 0). The hit COUNT behind the cached-prompt-tokens total above.", int64(snap.cachedHits))
+	writeHelpType(b, "fak_gateway_inference_cached_prompt_hit_ratio", "Fraction of served model turns that hit the provider prompt cache (cached_prompt_hits / turns; 0 until the first turn). The provider-cache analogue of fak_gateway_vdso_hit_ratio.", "gauge")
+	cacheHitRatio := 0.0
+	if inferTurns > 0 {
+		cacheHitRatio = float64(snap.cachedHits) / float64(inferTurns)
+	}
+	fmt.Fprintf(b, "fak_gateway_inference_cached_prompt_hit_ratio %s\n", promFloat(cacheHitRatio))
 
 	writeHelpType(b, "fak_gateway_inference_duration_seconds_total", "Cumulative wall-clock spent inside the planner generating completions (prefill+decode on the in-kernel path; round-trip on a proxy).", "counter")
 	fmt.Fprintf(b, "fak_gateway_inference_duration_seconds_total %s\n", promFloat(snap.decodeSecs))
