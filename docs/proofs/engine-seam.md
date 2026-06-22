@@ -112,6 +112,30 @@ are fail-closed/typed. It does **not** drive a live serving engine to observe a 
 
 **DOS** bound at ship.
 
+### Note — exact-span eviction path (#414)
+
+Theorem 2's fail-closed gate is the *default* for the public engines: `SupportsExactSpan`
+stays **hard-false** for SGLang and vLLM (no documented public HTTP surface evicts a single
+K/V span on the pinned versions — the non-goal), so with no extra configuration a quarantined
+span still collapses to one whole-prefix reset (or fails closed when exact-span is *required*).
+
+`enginecache.Client` now *also* carries a positive exact-span path for deployments that have
+an **independently witnessed** span/page eviction endpoint: set `ExactSpanEndpoint` and a
+quarantined span is projected by `cachemeta.ExactSpanTargets` (the planned K/V span **plus its
+dependent DSA `attention_index` entries**) into one POST that names exactly those spans
+(`Scope==exact_span`). fak claims nothing about the public engines here — the operator asserts
+the witnessed endpoint for their own deployment. The path stays fail-closed: a non-2xx eviction
+response is an error (the contaminated turn is not forwarded), and an empty named-span set is
+never reported as a precise eviction — it fails closed when exact-span is required, else degrades
+to the safe whole-prefix superset. Witnessed by
+`TestInvalidateExactSpanEvictsNamedSpansWhenEndpointConfigured`,
+`TestInvalidateExactSpanRequiredSucceedsWhenEndpointConfigured`,
+`TestInvalidateExactSpanFailsClosedOnEndpointError`,
+`TestInvalidateExactSpanRequiredFailsClosedWithoutNamedSpan`,
+`TestInvalidateExactSpanEndpointFallsBackToWholeResetWhenNotRequired`
+(`internal/enginecache/enginecache_test.go`) and `TestExactSpanTargetsProjectsNamedKVAndAttentionIndex`
+(`internal/cachemeta/external_invalidation_test.go`).
+
 ---
 
 ## THEOREM 3 — end-to-end "served fresh after invalidate" (the engine-side effect)

@@ -70,3 +70,60 @@ func TestPlanExternalInvalidationsRejectsEmptyPoisonedKV(t *testing.T) {
 		t.Fatalf("empty poisoned K/V should produce no directives: %+v", dirs)
 	}
 }
+
+func TestExactSpanTargetsProjectsNamedKVAndAttentionIndex(t *testing.T) {
+	remoteKV := FromKVPrefix(
+		KVPrefix{Tokens: []int{10, 20, 30, 40}, ModelID: "glm-5.2", TokenizerID: "glm-tokenizer", Owner: "radixkv"},
+		WithResidency(TierProvider, "sglang", "session-7"),
+	)
+	idx := FromAttentionIndex(
+		AttentionIndex{
+			Tokens:         []int{10, 20, 30, 40},
+			ModelID:        "glm-5.2",
+			TokenizerID:    "glm-tokenizer",
+			IndexerID:      "glm52-dsa-indexer:v1",
+			LayerGroup:     "layers-0-3",
+			Layers:         []int{0, 1, 2, 3},
+			DecisionDigest: DigestBytes([]byte("topk")),
+			ParentKV:       remoteKV.ID,
+			Causal:         true,
+		},
+		WithResidency(TierProvider, "sglang", "session-7"),
+	)
+
+	dirs := PlanExternalInvalidations(remoteKV.ID, []Entry{remoteKV, idx})
+	targets := ExactSpanTargets(dirs)
+	if len(targets) != 2 {
+		t.Fatalf("targets = %d, want kv span + attention index: %+v", len(targets), targets)
+	}
+	byKind := map[ExternalInvalidationKind]ExactSpanTarget{}
+	for _, tg := range targets {
+		byKind[tg.Kind] = tg
+		if tg.Digest == "" || tg.Unit == "" || tg.Length <= 0 {
+			t.Fatalf("exact-span target lost content-addressed identity: %+v", tg)
+		}
+	}
+	if tg := byKind[ExternalInvalidateKVSpan]; tg.Digest != remoteKV.ID.Digest || tg.MediaType != remoteKV.ID.MediaType || tg.Reason != "poisoned_kv" {
+		t.Fatalf("bad K/V span target: %+v", tg)
+	}
+	if tg := byKind[ExternalInvalidateAttentionIndex]; tg.Digest != idx.ID.Digest || tg.MediaType != idx.ID.MediaType || tg.Reason != "parent_kv_poisoned" {
+		t.Fatalf("bad attention-index target: %+v", tg)
+	}
+}
+
+func TestExactSpanTargetsSkipsDirectivesWithoutSpanIdentity(t *testing.T) {
+	// A coarse, identity-less whole-cache directive (the proxy-quarantine shape:
+	// Kind set but no Entry) yields no exact-span target, so a caller that requires
+	// exact-span eviction fails closed rather than "precisely evicting nothing".
+	dirs := []ExternalInvalidationDirective{{
+		Kind:   ExternalInvalidateKVSpan,
+		Plane:  PlaneKVPrefix,
+		Reason: "proxy_tool_result_quarantine",
+	}}
+	if targets := ExactSpanTargets(dirs); len(targets) != 0 {
+		t.Fatalf("identity-less directive must not project to an exact-span target: %+v", targets)
+	}
+	if targets := ExactSpanTargets(nil); targets != nil {
+		t.Fatalf("nil directives must project to nil targets: %+v", targets)
+	}
+}

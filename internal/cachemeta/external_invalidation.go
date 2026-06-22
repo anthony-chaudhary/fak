@@ -68,3 +68,42 @@ func PlanExternalInvalidations(poisonedKV EntryID, entries []Entry) []ExternalIn
 func isExternalResidency(t ResidencyTier) bool {
 	return t == TierRemote || t == TierProvider
 }
+
+// ExactSpanTarget is the payload-free identity of one precise cache object an
+// exact-span-capable engine must evict: the content-addressed K/V span (or its
+// dependent DSA attention_index), never the bytes. It is the projection of a
+// planned ExternalInvalidationDirective that an engine adapter serializes into an
+// exact-span eviction request.
+type ExactSpanTarget struct {
+	Kind      ExternalInvalidationKind
+	Digest    string
+	MediaType MediaType
+	Length    int64
+	Unit      LengthUnit
+	Reason    string
+}
+
+// ExactSpanTargets projects planned invalidation directives into the precise span
+// targets an exact-span-capable engine evicts. Only directives that name a valid,
+// content-addressed entry are included: a directive without span identity (e.g. a
+// coarse whole-cache reset request that carries no Entry) yields no exact-span
+// target. That is the fail-closed seam — a caller that requires exact-span
+// eviction but holds no named span gets an empty target set and must refuse,
+// never silently "precisely evict nothing." Directive order is preserved.
+func ExactSpanTargets(dirs []ExternalInvalidationDirective) []ExactSpanTarget {
+	var out []ExactSpanTarget
+	for _, d := range dirs {
+		if !d.Entry.Valid() {
+			continue
+		}
+		out = append(out, ExactSpanTarget{
+			Kind:      d.Kind,
+			Digest:    d.Entry.Digest,
+			MediaType: d.Entry.MediaType,
+			Length:    d.Entry.Length,
+			Unit:      d.Entry.Unit,
+			Reason:    d.Reason,
+		})
+	}
+	return out
+}

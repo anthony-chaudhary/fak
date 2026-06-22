@@ -5,6 +5,7 @@ package enginecache
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -38,6 +39,21 @@ type Client struct {
 	IdleTimeout   time.Duration
 	RequiredScope string
 	HTTPClient    *http.Client
+	// ExactSpanEndpoint, when non-empty, is an operator-supplied control endpoint
+	// that evicts exactly the named K/V span(s) plus their dependent DSA
+	// attention_index entries instead of resetting the whole prefix cache. It is
+	// empty by default: fak does not claim the public SGLang/vLLM HTTP surfaces
+	// expose exact-span eviction (SupportsExactSpan stays false for them), so this
+	// path is taken ONLY when an operator wires an independently witnessed endpoint
+	// for their deployment. A full URL (scheme+host) is used verbatim; a bare path
+	// resolves against the control base derived from BaseURL.
+	ExactSpanEndpoint string
+}
+
+// exactSpanRequest is the wire body of an exact-span eviction call: the precise,
+// payload-free span identities cachemeta planned, never the bytes.
+type exactSpanRequest struct {
+	Spans []cachemeta.ExactSpanTarget `json:"spans"`
 }
 
 // Result is the witnessed effect of an engine-cache invalidation attempt.
@@ -70,34 +86,80 @@ func (c Client) Invalidate(ctx context.Context, dirs []cachemeta.ExternalInvalid
 		return Result{
 			Engine:             engine,
 			Scope:              ScopeWholePrefixCache,
-			ExactSpanSupported: SupportsExactSpan(engine),
+			ExactSpanSupported: c.exactSpanCapable(engine),
 			Directives:         len(dirs),
 		}, err
 	}
-	endpoint, err := c.endpoint(engine)
+	if c.exactSpanCapable(engine) {
+		return c.invalidateExactSpan(ctx, engine, dirs)
+	}
+	return c.invalidateWholePrefix(ctx, engine, dirs)
+}
+
+// invalidateExactSpan evicts only the named K/V span(s) and their dependent DSA
+// attention_index entries, when an exact-span-capable engine is configured. It is
+// fail-closed: a non-2xx control response surfaces as an error (the caller must
+// not forward the contaminated turn), and an empty named-span set is NOT silently
+// reported as a precise eviction — it either fails closed (when exact-span is
+// required) or degrades to the safe whole-prefix reset superset.
+func (c Client) invalidateExactSpan(ctx context.Context, engine Engine, dirs []cachemeta.ExternalInvalidationDirective) (Result, error) {
+	targets := cachemeta.ExactSpanTargets(dirs)
+	if len(targets) == 0 {
+		if c.RequiredScope == ScopeExactSpan {
+			return Result{
+				Engine:             engine,
+				Scope:              ScopeExactSpan,
+				ExactSpanSupported: true,
+				Directives:         len(dirs),
+			}, fmt.Errorf("enginecache: exact-span eviction required but no named span in %d directive(s)", len(dirs))
+		}
+		// No span identity to evict precisely; the safe superset is a whole reset.
+		return c.invalidateWholePrefix(ctx, engine, dirs)
+	}
+	endpoint, err := c.exactSpanResolvedEndpoint()
 	if err != nil {
-		return res, err
+		return Result{Engine: engine, Scope: ScopeExactSpan, ExactSpanSupported: true, Directives: len(dirs)}, err
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(nil))
+	payload, err := json.Marshal(exactSpanRequest{Spans: targets})
 	if err != nil {
-		return res, err
+		return Result{Engine: engine, Scope: ScopeExactSpan, ExactSpanSupported: true, Directives: len(dirs)}, err
 	}
-	if c.AdminAPIKey != "" {
-		req.Header.Set("Authorization", "Bearer "+c.AdminAPIKey)
-	}
-	httpClient := c.HTTPClient
-	if httpClient == nil {
-		// A defensive default: the request is context-scoped, but a caller-supplied
-		// ctx without a deadline would otherwise inherit DefaultClient's no-timeout.
-		httpClient = &http.Client{Timeout: 10 * time.Second}
-	}
-	resp, err := httpClient.Do(req)
+	resp, err := c.post(ctx, endpoint, payload, "application/json")
 	if err != nil {
-		return res, err
+		return Result{Engine: engine, Endpoint: endpoint, Scope: ScopeExactSpan, ExactSpanSupported: true, Directives: len(dirs)}, err
 	}
 	defer resp.Body.Close()
 	raw, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
-	res = Result{
+	res := Result{
+		Engine:             engine,
+		Endpoint:           endpoint,
+		Scope:              ScopeExactSpan,
+		ExactSpanSupported: true,
+		Directives:         len(dirs),
+		StatusCode:         resp.StatusCode,
+		BodySummary:        strings.TrimSpace(string(raw)),
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return res, fmt.Errorf("enginecache: %s exact-span HTTP %d: %s", engine, resp.StatusCode, res.BodySummary)
+	}
+	return res, nil
+}
+
+// invalidateWholePrefix collapses any directive set to one documented
+// whole-prefix/radix-cache reset — the safe over-invalidation superset of the
+// named span. A non-2xx control response surfaces as an error.
+func (c Client) invalidateWholePrefix(ctx context.Context, engine Engine, dirs []cachemeta.ExternalInvalidationDirective) (Result, error) {
+	endpoint, err := c.endpoint(engine)
+	if err != nil {
+		return Result{}, err
+	}
+	resp, err := c.post(ctx, endpoint, nil, "")
+	if err != nil {
+		return Result{}, err
+	}
+	defer resp.Body.Close()
+	raw, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
+	res := Result{
 		Engine:             engine,
 		Endpoint:           endpoint,
 		Scope:              ScopeWholePrefixCache,
@@ -112,12 +174,57 @@ func (c Client) Invalidate(ctx context.Context, dirs []cachemeta.ExternalInvalid
 	return res, nil
 }
 
+// post issues the control-plane POST shared by both reset scopes. A nil body is
+// the empty whole-cache reset request; a non-empty body carries the exact-span
+// target list.
+func (c Client) post(ctx context.Context, endpoint string, body []byte, contentType string) (*http.Response, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(body))
+	if err != nil {
+		return nil, err
+	}
+	if c.AdminAPIKey != "" {
+		req.Header.Set("Authorization", "Bearer "+c.AdminAPIKey)
+	}
+	if contentType != "" {
+		req.Header.Set("Content-Type", contentType)
+	}
+	httpClient := c.HTTPClient
+	if httpClient == nil {
+		// A defensive default: the request is context-scoped, but a caller-supplied
+		// ctx without a deadline would otherwise inherit DefaultClient's no-timeout.
+		httpClient = &http.Client{Timeout: 10 * time.Second}
+	}
+	return httpClient.Do(req)
+}
+
+// exactSpanCapable reports whether this client can evict an exact span: either the
+// documented public engine exposes it (SupportsExactSpan — currently never), or an
+// operator wired a witnessed ExactSpanEndpoint for this deployment.
+func (c Client) exactSpanCapable(engine Engine) bool {
+	return strings.TrimSpace(c.ExactSpanEndpoint) != "" || SupportsExactSpan(engine)
+}
+
+func (c Client) exactSpanResolvedEndpoint() (string, error) {
+	raw := strings.TrimSpace(c.ExactSpanEndpoint)
+	if raw == "" {
+		return "", fmt.Errorf("enginecache: exact-span endpoint is not configured")
+	}
+	if u, err := url.Parse(raw); err == nil && u.Scheme != "" && u.Host != "" {
+		return raw, nil
+	}
+	base, err := controlBase(c.BaseURL)
+	if err != nil {
+		return "", err
+	}
+	return base.ResolveReference(&url.URL{Path: joinPath(base.Path, strings.TrimPrefix(raw, "/"))}).String(), nil
+}
+
 func (c Client) checkRequiredScope(engine Engine, nDirs int) error {
 	switch c.RequiredScope {
 	case "", ScopeWholePrefixCache:
 		return nil
 	case ScopeExactSpan:
-		if SupportsExactSpan(engine) {
+		if c.exactSpanCapable(engine) {
 			return nil
 		}
 		return fmt.Errorf("enginecache: exact-span eviction required for %d directive(s), but %s exposes only whole-prefix-cache reset", nDirs, engine)
