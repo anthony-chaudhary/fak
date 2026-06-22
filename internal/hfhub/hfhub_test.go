@@ -1,0 +1,194 @@
+package hfhub
+
+import (
+	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"net/http"
+	"net/http/httptest"
+	"os"
+	"strings"
+	"sync/atomic"
+	"testing"
+)
+
+func TestParseURI(t *testing.T) {
+	cases := []struct {
+		uri                  string
+		repo, revision, file string
+		wantErr              bool
+	}{
+		{"hf://mradermacher/Qwen2.5-1.5B-GGUF/model.Q8_0.gguf", "mradermacher/Qwen2.5-1.5B-GGUF", "main", "model.Q8_0.gguf", false},
+		{"hf://meta-llama/Llama-3.1-8B@main/orig/consolidated.00.pth", "meta-llama/Llama-3.1-8B", "main", "orig/consolidated.00.pth", false},
+		{"hf://Qwen/Qwen2.5-1.5B-Instruct@v1.0/config.json", "Qwen/Qwen2.5-1.5B-Instruct", "v1.0", "config.json", false},
+		{"hf://owner/repo/a/b/c.gguf", "owner/repo", "main", "a/b/c.gguf", false},
+		{"https://huggingface.co/x/y/z", "", "", "", true}, // not hf://
+		{"hf://owner/repo", "", "", "", true},              // no file
+		{"hf://owner//file", "", "", "", true},             // empty repo
+		{"hf://owner/repo@/file", "", "", "", true},        // empty revision
+		{"hf://owner/repo/", "", "", "", true},             // trailing slash, no file
+	}
+	for _, tc := range cases {
+		got, err := ParseURI(tc.uri)
+		if tc.wantErr {
+			if err == nil {
+				t.Errorf("ParseURI(%q): want error, got %+v", tc.uri, got)
+			}
+			continue
+		}
+		if err != nil {
+			t.Errorf("ParseURI(%q): unexpected error: %v", tc.uri, err)
+			continue
+		}
+		if got.Repo != tc.repo || got.Revision != tc.revision || got.File != tc.file {
+			t.Errorf("ParseURI(%q) = %+v, want {%s %s %s}", tc.uri, got, tc.repo, tc.revision, tc.file)
+		}
+	}
+}
+
+func TestResolveURL(t *testing.T) {
+	r := Ref{Repo: "owner/repo", Revision: "main", File: "a/b.gguf"}
+	want := "https://huggingface.co/owner/repo/resolve/main/a/b.gguf"
+	if got := r.ResolveURL(DefaultBaseURL); got != want {
+		t.Errorf("ResolveURL = %q, want %q", got, want)
+	}
+	// trailing slash on base must not double up
+	if got := r.ResolveURL("https://example.test/"); got != "https://example.test/owner/repo/resolve/main/a/b.gguf" {
+		t.Errorf("ResolveURL trailing-slash = %q", got)
+	}
+}
+
+// hubStub serves the resolve endpoint for one file, stamping the LFS sha256 on
+// X-Linked-Etag, and counts GETs so a cache hit is observable.
+type hubStub struct {
+	body     []byte
+	etag     string // value stamped on X-Linked-Etag (verbatim)
+	gets     atomic.Int32
+	heads    atomic.Int32
+	lastAuth atomic.Value // string
+}
+
+func (h *hubStub) handler() http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		h.lastAuth.Store(r.Header.Get("Authorization"))
+		if h.etag != "" {
+			w.Header().Set("X-Linked-Etag", h.etag)
+		}
+		if r.Method == http.MethodHead {
+			h.heads.Add(1)
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+		h.gets.Add(1)
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write(h.body)
+	}
+}
+
+func sha256hex(b []byte) string {
+	s := sha256.Sum256(b)
+	return hex.EncodeToString(s[:])
+}
+
+func TestDownloadVerifiesAndCaches(t *testing.T) {
+	body := []byte("GGUF\x00 pretend weights")
+	stub := &hubStub{body: body, etag: `"` + sha256hex(body) + `"`}
+	srv := httptest.NewServer(stub.handler())
+	defer srv.Close()
+
+	c := &Client{BaseURL: srv.URL, HTTP: srv.Client(), CacheDir: t.TempDir()}
+	ref := Ref{Repo: "owner/repo", Revision: "main", File: "model.gguf"}
+
+	path1, err := c.Download(context.Background(), ref, nil)
+	if err != nil {
+		t.Fatalf("Download: %v", err)
+	}
+	got, err := os.ReadFile(path1)
+	if err != nil {
+		t.Fatalf("read cached file: %v", err)
+	}
+	if string(got) != string(body) {
+		t.Fatalf("cached content = %q, want %q", got, body)
+	}
+	if n := stub.gets.Load(); n != 1 {
+		t.Fatalf("first download: got %d GETs, want 1", n)
+	}
+
+	// Second call must be a pure cache hit — no further GET.
+	path2, err := c.Download(context.Background(), ref, nil)
+	if err != nil {
+		t.Fatalf("second Download: %v", err)
+	}
+	if path2 != path1 {
+		t.Fatalf("cache path changed: %q != %q", path2, path1)
+	}
+	if n := stub.gets.Load(); n != 1 {
+		t.Fatalf("cache hit refetched: got %d GETs, want 1", n)
+	}
+}
+
+func TestDownloadSHA256Mismatch(t *testing.T) {
+	body := []byte("real bytes")
+	wrong := sha256hex([]byte("different bytes"))
+	stub := &hubStub{body: body, etag: `"` + wrong + `"`}
+	srv := httptest.NewServer(stub.handler())
+	defer srv.Close()
+
+	c := &Client{BaseURL: srv.URL, HTTP: srv.Client(), CacheDir: t.TempDir()}
+	ref := Ref{Repo: "owner/repo", Revision: "main", File: "model.gguf"}
+
+	_, err := c.Download(context.Background(), ref, nil)
+	if err == nil {
+		t.Fatal("Download: want sha256 mismatch error, got nil")
+	}
+	if !strings.Contains(err.Error(), "sha256 mismatch") {
+		t.Fatalf("error = %v, want sha256 mismatch", err)
+	}
+	// A failed verification must leave no cached (partial) file behind.
+	if _, statErr := os.Stat(c.CachePath(ref)); !os.IsNotExist(statErr) {
+		t.Fatalf("cache file present after mismatch: %v", statErr)
+	}
+}
+
+func TestDownloadSendsToken(t *testing.T) {
+	body := []byte("gated weights")
+	stub := &hubStub{body: body, etag: `"` + sha256hex(body) + `"`}
+	srv := httptest.NewServer(stub.handler())
+	defer srv.Close()
+
+	c := &Client{BaseURL: srv.URL, HTTP: srv.Client(), CacheDir: t.TempDir(), Token: "testtok"}
+	ref := Ref{Repo: "meta-llama/gated", Revision: "main", File: "model.gguf"}
+	if _, err := c.Download(context.Background(), ref, nil); err != nil {
+		t.Fatalf("Download: %v", err)
+	}
+	if auth, _ := stub.lastAuth.Load().(string); auth != "Bearer testtok" {
+		t.Fatalf("Authorization = %q, want %q", auth, "Bearer testtok")
+	}
+}
+
+func TestDownloadUnverifiedWhenNoEtag(t *testing.T) {
+	body := []byte("no oid stamped")
+	stub := &hubStub{body: body, etag: ""} // Hub stamps nothing
+	srv := httptest.NewServer(stub.handler())
+	defer srv.Close()
+
+	c := &Client{BaseURL: srv.URL, HTTP: srv.Client(), CacheDir: t.TempDir()}
+	ref := Ref{Repo: "owner/repo", Revision: "main", File: "small.json"}
+	p, err := c.Download(context.Background(), ref, nil)
+	if err != nil {
+		t.Fatalf("Download (unverified): %v", err)
+	}
+	got, _ := os.ReadFile(p)
+	if string(got) != string(body) {
+		t.Fatalf("content = %q, want %q", got, body)
+	}
+}
+
+func TestIsURI(t *testing.T) {
+	if !IsURI("hf://a/b/c") {
+		t.Error("IsURI hf:// = false")
+	}
+	if IsURI("/local/path.gguf") {
+		t.Error("IsURI local = true")
+	}
+}

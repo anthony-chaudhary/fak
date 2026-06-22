@@ -39,6 +39,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/contextq"
 	"github.com/anthony-chaudhary/fak/internal/gateway"
 	"github.com/anthony-chaudhary/fak/internal/ggufload"
+	"github.com/anthony-chaudhary/fak/internal/hfhub"
 	"github.com/anthony-chaudhary/fak/internal/ifc"
 	"github.com/anthony-chaudhary/fak/internal/kernel"
 	"github.com/anthony-chaudhary/fak/internal/metrics"
@@ -89,6 +90,8 @@ func main() {
 		cmdSwebench(os.Args[2:])
 	case "webbench":
 		cmdWebbench(os.Args[2:])
+	case "model":
+		cmdModel(os.Args[2:])
 	case "version", "-v", "--version":
 		fmt.Println(appversion.Current())
 	case "-h", "--help", "help":
@@ -100,11 +103,63 @@ func main() {
 	}
 }
 
+// cmdModel handles `fak model <subcommand>`. Today the only subcommand is
+// `load`, which resolves an hf:// URI to a locally cached file path (issue #294).
+func cmdModel(args []string) {
+	if len(args) == 0 {
+		fmt.Fprintln(os.Stderr, "usage: fak model load <hf://owner/repo[@rev]/file>")
+		os.Exit(2)
+	}
+	switch args[0] {
+	case "load":
+		cmdModelLoad(args[1:])
+	case "-h", "--help", "help":
+		fmt.Fprintln(os.Stderr, "usage: fak model load <hf://owner/repo[@rev]/file>")
+	default:
+		fmt.Fprintf(os.Stderr, "fak model: unknown subcommand %q\n", args[0])
+		os.Exit(2)
+	}
+}
+
+// cmdModelLoad downloads (or cache-hits) the file an hf:// URI names and prints
+// its local path. HF_TOKEN (or HUGGING_FACE_HUB_TOKEN) authorizes gated repos;
+// FAK_MODELS_DIR overrides the cache root. Progress goes to stderr so the printed
+// path on stdout stays scriptable: GGUF=$(fak model load hf://...).
+func cmdModelLoad(args []string) {
+	fs := flag.NewFlagSet("model load", flag.ExitOnError)
+	fs.Usage = func() {
+		fmt.Fprintln(os.Stderr, "usage: fak model load <hf://owner/repo[@rev]/file>")
+		fs.PrintDefaults()
+	}
+	_ = fs.Parse(args)
+	if fs.NArg() != 1 {
+		fs.Usage()
+		os.Exit(2)
+	}
+	uri := fs.Arg(0)
+	if !hfhub.IsURI(uri) {
+		fmt.Fprintf(os.Stderr, "fak model load: %q is not an hf:// URI (want hf://owner/repo[@rev]/file)\n", uri)
+		os.Exit(2)
+	}
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+	defer stop()
+	path, err := hfhub.FetchURI(ctx, uri, os.Stderr)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "fak model load: %v\n", err)
+		os.Exit(1)
+	}
+	fmt.Println(path)
+}
+
 func usage() {
 	fmt.Fprintf(os.Stderr, "fak - Agent Tool Firewall (Fused Agent Kernel, v%s)\n\n", appversion.Current())
 	fmt.Fprint(os.Stderr, `usage:
   fak run       --trace FILE [--engine inkernel] [--vdso=true] [--policy FILE]
   fak preflight --tool NAME --args JSON [--policy FILE]
+  fak model     load <hf://owner/repo[@rev]/file>
+                (resolve an hf:// URI to a locally cached file path: Hub download with
+                 HF_TOKEN auth and SHA256 verification against the Hub LFS oid. The
+                 cached path is printed on stdout; --gguf and the loaders accept it)
   fak bench     --suite NAME [--out report.json] [--baseline-n 30]
                 (transport A/B: in-process adjudication p50 vs spawned-hook p50)
   fak turntax   --suite NAME [--out turntax-report.json]
@@ -1268,6 +1323,20 @@ func cmdServe(argv []string) {
 	// docs and the --tokenizer help itself show) would otherwise fail to open.
 	*ggufPath = pathutil.ExpandTilde(*ggufPath)
 	*tokPath = pathutil.ExpandTilde(*tokPath)
+
+	// An hf:// --gguf resolves to a locally cached file before the loader sees it,
+	// so `fak serve --gguf hf://owner/repo/model.gguf` works without a manual
+	// `fak model load` first (issue #294). Download progress goes to stderr.
+	if hfhub.IsURI(*ggufPath) {
+		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+		resolved, err := hfhub.FetchURI(ctx, *ggufPath, os.Stderr)
+		stop()
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "fak serve: --gguf %v\n", err)
+			os.Exit(1)
+		}
+		*ggufPath = resolved
+	}
 
 	// --policy-check: validate the manifest and exit, binding no listener.
 	if *policyCheck {
