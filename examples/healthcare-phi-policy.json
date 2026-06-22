@@ -1,0 +1,72 @@
+{
+  "version": "fak-policy/v1",
+  "posture": "fail_closed",
+  "allow": [
+    "read_patient_record",
+    "search_icd",
+    "lookup_drug_interaction",
+    "create_clinical_note",
+    "schedule_appointment",
+    "transfer_to_human_clinician"
+  ],
+  "allow_prefix": [
+    "read_",
+    "get_",
+    "search_",
+    "list_",
+    "lookup_",
+    "find_",
+    "fetch_"
+  ],
+  "deny": {
+    "export_patient_data": "SECRET_EXFIL",
+    "email_phi": "POLICY_BLOCK",
+    "delete_medical_record": "POLICY_BLOCK",
+    "transfer_funds": "POLICY_BLOCK",
+    "rotate_credentials": "POLICY_BLOCK"
+  },
+  "self_modify_globs": [
+    ".git/",
+    ".dos/",
+    "policy.json",
+    "healthcare-phi-policy.json",
+    "/etc/",
+    "id_rsa"
+  ],
+  "redact_fields": [
+    "ssn",
+    "dob",
+    "mrn",
+    "icd10_code",
+    "insurance_id",
+    "passport_number",
+    "diagnosis",
+    "medication_list",
+    "phi_notes",
+    "phi_address",
+    "phi_phone",
+    "phi_email"
+  ],
+  "safe_sinks": [
+    "transfer_to_human_clinician"
+  ],
+  "sources": {
+    "read_patient_record": "trusted_local",
+    "fetch_medical_literature": "untrusted",
+    "read_patient_message": "untrusted"
+  },
+  "arg_rules": [
+    {
+      "tool": "create_clinical_note",
+      "arg": "body",
+      "max_bytes": 8000,
+      "reason": "OVERSIZE"
+    },
+    {
+      "tool": "schedule_appointment",
+      "arg": "provider",
+      "allow_glob": "in-network-*",
+      "reason": "POLICY_BLOCK"
+    }
+  ]
+}
