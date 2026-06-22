@@ -110,7 +110,10 @@ func run() (witnessRecord, error) {
 	v := vdso.Default
 
 	// A clean root epoch for this run so a prior process-global write cannot alias
-	// our keys. BumpWorld is the internal reset hook (does NOT touch the bus).
+	// our keys. BumpWorld bumps only the consistency epoch (worldVer) and does NOT
+	// touch the bus; trustEpoch and the revoked-witness ledger persist on the
+	// process-global vdso.Default, which is exactly why the assertions below compare
+	// trustEpoch RELATIVELY (before+1), never against a hardcoded 0.
 	v.BumpWorld()
 
 	// Subscribe to the integrity bus so we can prove the cross-agent broadcast

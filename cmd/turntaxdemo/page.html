@@ -179,13 +179,22 @@ async function loadSuites(){
     o.value=s.id; o.textContent=s.label+(s.present?` · ${s.calls} calls`:' · (missing)');
     o.disabled=!s.present; sel.appendChild(o);
   });
-  $('#dirPill').textContent = `kernel replay · GOMAXPROCS=${j.gomaxprocs}`;
+  // If NO fixture resolved (almost always a wrong-cwd run), say so IN THE PAGE — not just
+  // in stderr — and name the directory we looked in, so a doc command pasted from the wrong
+  // directory is diagnosable instead of showing an inert, unexplained dropdown.
+  if(j.suites.length && j.suites.every(s=>!s.present)){
+    $('#dirPill').textContent = `no fixtures in ${j.dir} — run \`go run ./cmd/turntaxdemo\` from the repo root`;
+    $('#dirPill').style.color = 'var(--naive)';
+    $('#runBtn').disabled = true;
+  } else {
+    $('#dirPill').textContent = `kernel replay · GOMAXPROCS=${j.gomaxprocs}`;
+  }
 }
 
 function reset(){
-  $('#trackNaive').innerHTML=''; $('#trackFak').innerHTML='';
-  $('#ctNaive').textContent='0 turns'; $('#ctFak').textContent='0 turns';
-  $('#metaNaive').textContent=''; $('#metaFak').textContent='';
+  $('#trackNaive').innerHTML=''; $('#trackTuned').innerHTML=''; $('#trackFak').innerHTML='';
+  $('#ctNaive').textContent='0 turns'; $('#ctTuned').textContent='0 turns'; $('#ctFak').textContent='0 turns';
+  $('#metaNaive').textContent=''; $('#metaTuned').textContent=''; $('#metaFak').textContent='';
   $('#result').classList.remove('show'); $('#safetybox').classList.remove('show');
   $('#log').textContent=''; $('#phase').textContent='';
 }

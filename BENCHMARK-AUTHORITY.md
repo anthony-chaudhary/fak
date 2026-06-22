@@ -169,8 +169,9 @@ not numeric.
 
 ### Verification
 
-- `go run ./cmd/causalbench -selfcheck` → exit 0 (all nine invariants hold); `main_test.go`
-  guards the same chain under `.\fak\test.ps1` → `ok cmd/causalbench`.
+- `go run ./cmd/causalbench -selfcheck` → exit 0 (all 12 guarded invariants hold — the
+  9-row table above is the headline subset); `main_test.go` guards the same chain via the
+  portable `go test ./cmd/causalbench/` → `ok cmd/causalbench` (on Windows: `.\fak\test.ps1`).
 - `dos_commit_audit 0fc39aa` binds the result commit (diff-witnessed: the demo, its test,
   and the committed JSON artifact).
 - The number is a correctness verdict (PASS / `max|Δ|=0`), not a wall-clock — hardware-

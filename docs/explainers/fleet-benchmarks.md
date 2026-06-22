@@ -13,7 +13,7 @@ description: "Five model-agnostic fleet benchmarks you can reproduce in minutes 
 > the headline numbers reproduce on any laptop in minutes. Every figure here traces to
 > **[BENCHMARK-AUTHORITY.md](../../BENCHMARK-AUTHORITY.md)** (the single source of truth)
 > and the on-box witnessed run in
-> [`GLM52-PURE-KERNEL-AND-AGENT-TURN-DEMOS-RESULTS-2026-06-21.md`](../../GLM52-PURE-KERNEL-AND-AGENT-TURN-DEMOS-RESULTS-2026-06-21.md) §3.
+> [`GLM52-PURE-KERNEL-AND-AGENT-TURN-DEMOS-RESULTS-2026-06-21.md`](../notes/GLM52-PURE-KERNEL-AND-AGENT-TURN-DEMOS-RESULTS-2026-06-21.md) §3.
 >
 > If you want the *why* behind the win first, read
 > [KV cache for agentic context](kv-cache-agentic-context.md) and
@@ -346,7 +346,7 @@ Every number on this page obeys the same rules, enforced in CI and in the per-de
   (model-card style), each from one source-of-truth JSON with a `--check` CI drift gate.
 - **[Benchmarking index](../benchmarking/README.md)** — how to read the baselines, the
   measured-vs-modeled split, and the full tool inventory.
-- **[GLM52 witnessed run §3](../../GLM52-PURE-KERNEL-AND-AGENT-TURN-DEMOS-RESULTS-2026-06-21.md)**
+- **[GLM52 witnessed run §3](../notes/GLM52-PURE-KERNEL-AND-AGENT-TURN-DEMOS-RESULTS-2026-06-21.md)**
   — the on-box reproduction these five numbers were taken from, closed by `go test` exit
   codes and benchmark output fields, not self-report.
 

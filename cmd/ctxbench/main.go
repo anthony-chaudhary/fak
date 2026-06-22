@@ -143,6 +143,7 @@ func main() {
 	byVerdict := map[string]int{}
 	byReason := map[string]int{}
 	leaked := 0
+	totalBytes := 0
 	for _, r := range cp.Results {
 		c := &abi.ToolCall{Tool: r.Tool, Args: abi.Ref{Kind: abi.RefInline}, Meta: map[string]string{}}
 		res := &abi.Result{Call: c, Status: abi.StatusOK,
@@ -171,8 +172,20 @@ func main() {
 			leaked++
 		}
 
+		// The honest byte count is the ORIGINAL payload the gate inspected — not
+		// res.Payload.Inline, which Admit pages out to a short pointer on quarantine
+		// (that would under-report the poison). A private corpus from
+		// extract_context_corpus.py declares `bytes` (= UTF-8 len of the same
+		// payload); the hand-authored public fixture omits it, so fall back to the
+		// source payload length rather than reporting a misleading 0B.
+		nbytes := r.Bytes
+		if nbytes == 0 {
+			nbytes = len(r.Payload)
+		}
+		totalBytes += nbytes
+
 		row := resultRow{
-			Name: r.Name, Tool: r.Tool, Bytes: r.Bytes,
+			Name: r.Name, Tool: r.Tool, Bytes: nbytes,
 			Verdict: verdictName(v.Kind), Reason: abi.ReasonName(v.Reason),
 			Quarantined: ctxmmu.Quarantined(res),
 			Markers:     markers, SecretShape: secret, LeakedAfter: leakedAfter,
@@ -203,10 +216,14 @@ func main() {
 
 	// ---- report ----
 	fmt.Printf("== ctxbench: fak security gates over corpus ==\n")
-	fmt.Printf("sources: %v\n\n", cp.Sources)
+	if len(cp.Sources) == 0 {
+		fmt.Printf("sources: (none listed in corpus)\n\n")
+	} else {
+		fmt.Printf("sources: %v\n\n", cp.Sources)
+	}
 
 	fmt.Printf("RESULT side — ctxmmu.Admit (write-time context-admission gate)\n")
-	fmt.Printf("  results admitted : %d  (%d bytes total)\n", total, sumBytes(cp.Results))
+	fmt.Printf("  results admitted : %d  (%d bytes total)\n", total, totalBytes)
 	for _, k := range sortedKeys(byVerdict) {
 		fmt.Printf("    %-11s %d\n", k, byVerdict[k])
 	}
@@ -240,9 +257,20 @@ func main() {
 	for _, k := range sortedKeys(callByVerdict) {
 		fmt.Printf("    %-11s %d\n", k, callByVerdict[k])
 	}
-	fmt.Printf("  catch rate       : %d/%d = %.1f%% (malformed calls caught pre-fire)\n", caught, ctotal, crate*100)
+	if ctotal == 0 {
+		// 0/0 is not a failed gate — there were simply no calls. Say so, rather than
+		// printing "0.0% caught", which reads as the gate having let everything through.
+		// (The public poison.json fixture is result-side only; pass -corpus for a call set.)
+		fmt.Printf("  catch rate       : n/a (corpus has no calls — this fixture is result-side only)\n")
+	} else {
+		fmt.Printf("  catch rate       : %d/%d = %.1f%% (malformed calls caught pre-fire)\n", caught, ctotal, crate*100)
+	}
 
 	if *out != "" {
+		var crateJSON any = crate
+		if ctotal == 0 {
+			crateJSON = nil // "no calls", not "0% caught" — let a consumer tell them apart
+		}
 		report := map[string]any{
 			"app_version": appversion.Current(),
 			"sources":     cp.Sources,
@@ -252,7 +280,7 @@ func main() {
 				"leak_after_admit": leaked, "rows": rows,
 			},
 			"call_side": map[string]any{
-				"adjudicated": ctotal, "caught": caught, "catch_rate": crate,
+				"adjudicated": ctotal, "caught": caught, "catch_rate": crateJSON,
 				"by_verdict": callByVerdict, "rows": crows,
 			},
 		}
@@ -260,19 +288,6 @@ func main() {
 		_ = os.WriteFile(*out, b, 0644)
 		fmt.Printf("\nwrote %s\n", *out)
 	}
-}
-
-func sumBytes(rs []struct {
-	Name    string `json:"name"`
-	Tool    string `json:"tool"`
-	Payload string `json:"payload"`
-	Bytes   int    `json:"bytes"`
-}) int {
-	n := 0
-	for _, r := range rs {
-		n += r.Bytes
-	}
-	return n
 }
 
 func sortedKeys(m map[string]int) []string {

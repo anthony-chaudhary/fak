@@ -49,8 +49,10 @@ func main() {
 
 func run(outPath string) error {
 	// ---- 1. A tiny model and a "conversation" with a secret in the middle --------
+	// Grouped-query attention (NumKVHeads < NumHeads) so the cert's ModelPath
+	// "gqa-rope" names the head grouping the demo actually runs, not MHA.
 	cfg := model.Config{
-		HiddenSize: 64, NumLayers: 4, NumHeads: 8, NumKVHeads: 8, HeadDim: 8,
+		HiddenSize: 64, NumLayers: 4, NumHeads: 8, NumKVHeads: 2, HeadDim: 8,
 		IntermediateSize: 128, VocabSize: 256, RMSNormEps: 1e-5, RopeTheta: 10000,
 	}
 	m := model.NewSynthetic(cfg)

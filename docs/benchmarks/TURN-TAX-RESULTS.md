@@ -35,12 +35,15 @@
 > `experiments/turn-tax/`.
 >
 > **Watch it live.** `go run ./cmd/turntaxdemo` (open `http://127.0.0.1:8150`)
-> replays a trace through the **real kernel** call-by-call and shows two lanes — the
-> baseline's turn counter ticking up on each aliased / duplicate / elidable call
-> while the fak lane stays flat — with the §1 safety floor on a deliberately separate
-> strip. It needs **no model weights** (the trace runs through `k.Syscall`, not a
-> model), so it reproduces identically on any box. Flip the suite to `turntax-happy`
-> and the counter stays at **0** — the §4 anti-inflation control, made watchable.
+> replays a trace through the **real kernel** call-by-call and shows three lanes — a
+> **naive** SOTA loop's counter ticking up on every aliased / duplicate / elidable call
+> (+9), a **tuned** framework that elides the optional calls but still pays the forced
+> error-recovery turns (+5), and the **fak** lane staying flat (0) — with the §1 safety
+> floor on a deliberately separate strip. It needs **no model weights** (the trace runs
+> through `k.Syscall`, not a model), so it reproduces identically on any box; add
+> `-selfcheck` to assert those numbers **headless** (no browser — the CI / cross-platform
+> dog-food). Flip the suite to `turntax-happy` and every counter stays at **0** — the §4
+> anti-inflation control, made watchable.
 
 ## §1 — The Measured Safety Floor (the moat; read this first)
 
