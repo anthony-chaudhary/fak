@@ -184,6 +184,94 @@ def test_scan_flags_long_function():
     info = cq.scan_go_file(src)
     assert info["long_funcs"] and info["long_funcs"][0][0] == "Big"
     assert info["long_funcs"][0][1] > cq.FUNC_SOFT_MAX
+    assert info["n_funcs"] == 1
+
+
+# --- scanner hardening: literals & comments (review findings 1, 7, 8) ------
+
+def test_code_only_blanks_string_and_rune_braces():
+    code, raw, blk = cq._code_only('\ts := "}" + \'{\'  // }', False, False)
+    assert "}" not in code and "{" not in code and raw is False and blk is False
+
+
+def test_code_only_raw_backtick_spans_lines():
+    code, raw, _ = cq._code_only("\tq := `SELECT {", False, False)
+    assert raw is True and "{" not in code
+    code2, raw2, _ = cq._code_only("} done`  + 1", True, False)
+    assert raw2 is False and "}" not in code2
+
+
+def test_code_only_block_comment_spans_lines():
+    code, _, blk = cq._code_only("a /* { ", False, False)
+    assert blk is True and "{" not in code
+    code2, _, blk2 = cq._code_only(" } */ b", False, True)
+    assert blk2 is False and "}" not in code2 and "b" in code2
+
+
+def test_scanner_not_gamed_by_brace_in_literal():
+    # the core gaming exploit: a `s := "}"` line near the top of a 250-line
+    # god-function used to collapse it to length ~3 and erase architecture debt.
+    body = '\ts := "}"\n' + "\tx := 1\n" * 250
+    src = "package x\nfunc Big() {\n" + body + "}\n"
+    info = cq.scan_go_file(src)
+    assert info["long_funcs"] and info["long_funcs"][0][0] == "Big"
+    assert info["long_funcs"][0][1] > cq.FUNC_HARD_MAX  # NOT collapsed
+
+
+def test_scanner_balanced_iface_in_signature_no_early_break():
+    src = ("package x\nfunc F(\n\tx interface{},\n\ty int,\n) {\n"
+           + "\tz := 1\n" * (cq.FUNC_SOFT_MAX + 5) + "}\n")
+    info = cq.scan_go_file(src)
+    assert info["long_funcs"] and info["long_funcs"][0][0] == "F"
+
+
+def test_scanner_func_inside_raw_string_not_counted():
+    src = "package x\nvar q = `\nfunc Fake() {\n`\n"
+    info = cq.scan_go_file(src)
+    assert info["n_funcs"] == 0
+    assert all(n != "Fake" for _, n, _ in info["exported"])
+
+
+# --- honesty: fenced code blocks (review finding 12) ----------------------
+
+def test_honesty_skips_fenced_examples():
+    txt = ("- [SHIPPED] real\n"
+           "```\n"
+           "- [ ] example inside a fence, not a ledger claim\n"
+           "```\n"
+           "- [STUB] also real\n")
+    k = cq.kpi_honesty(txt)
+    assert k["defects"] == [] and "2 claims" in k["detail"]
+
+
+# --- deps: replace directives (review finding 3) --------------------------
+
+def test_deps_replace_to_external_is_debt():
+    mod = "module x\n\ngo 1.26\n\nreplace github.com/a/b => github.com/a/b-fork v1.0.0\n"
+    k = cq.kpi_deps(mod, gosum_exists=False)
+    assert len(k["defects"]) == 1 and "replace" in k["defects"][0]
+
+
+def test_deps_local_replace_not_debt():
+    mod = "module x\n\ngo 1.26\n\nreplace github.com/a/b => ./vendorlocal\n"
+    k = cq.kpi_deps(mod, gosum_exists=False)
+    assert k["defects"] == []
+
+
+def test_external_replaces_block_and_local():
+    mod = ("module x\nreplace (\n"
+           "\tgithub.com/a/b => github.com/a/b-fork v1.2.3\n"
+           "\tgithub.com/c/d => ../localcd\n)\n")
+    assert cq._external_replaces(mod) == ["github.com/a/b-fork"]
+
+
+# --- tests KPI: real test funcs (review finding 2) ------------------------
+
+def test_testfunc_regex_distinguishes_real_from_empty():
+    assert cq._TESTFUNC_RE.search("package foo\n") is None
+    assert cq._TESTFUNC_RE.search("package foo\nfunc TestX(t *testing.T){}\n")
+    assert cq._TESTFUNC_RE.search("package foo\nfunc BenchmarkY(b *testing.B){}\n")
+    assert cq._TESTFUNC_RE.search("package foo\nfunc FuzzZ(f *testing.F){}\n")
 
 
 if __name__ == "__main__":

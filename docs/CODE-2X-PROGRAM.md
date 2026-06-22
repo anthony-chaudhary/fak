@@ -82,6 +82,38 @@ What moved it, and why each is genuine (not a gamed number):
   out of the `HEAD~20..HEAD` window as the trunk advances. The discipline is to
   never *add* residual — every commit here is `dos commit-audit`-clean.
 
+## Measure integrity (adversarial hardening pass)
+
+A quality measure is only worth trusting if it resists *gaming* — moving the
+number without improving the code. After pass 1, a 4-lens adversarial review (19
+agents: attack → independent verify) was run against the scorecard itself. It
+confirmed **12 real defects**; all were fixed (`tools/code_quality_scorecard.py`,
++11 unit tests, ruff-clean):
+
+- **Scanner un-gamed (HIGH).** The AST-free function-length scan counted raw
+  `{`/`}` after only stripping `//`, so one `s := "}"` line collapsed a 250-line
+  god-function to length ~3 (erasing architecture debt) — and a stray `{` in a
+  literal could forge one. Replaced with a literal/comment-aware lexer
+  (`_code_only`) that blanks string/rune/backtick/`/* */` spans across lines, and
+  a net-per-line depth scan that no longer early-breaks on a balanced
+  `interface{}` in a multi-line signature.
+- **Empty `_test.go` no longer credits a package (HIGH).** `tests` now requires a
+  real `Test`/`Benchmark`/`Fuzz`/`Example` function, not a bare `package foo`
+  marker file.
+- **Triviality gate fixed (HIGH).** The test-debt gate double-counted exported
+  funcs and folded in types/vars; now counts function declarations once.
+- **Toolchain/`dos` absence fails *open* (HIGH).** A missing `go`/`gofmt`/`dos`
+  now scores the KPI *skipped* (100, soft "unmeasured" note), not a build
+  failure — so a box without the toolchain doesn't grade the same tree lower.
+- **`deps` catches `replace`-to-external (MED)**, **`honesty` ignores `- [`
+  inside fenced code blocks (MED)**, and the determinism contract now documents
+  that `ship_integrity` is HEAD-relative (history, not tree).
+
+Three findings were *refuted* by the verify stage (a god-file split into two
+honest files is a legitimate fix, not gaming; CRLF gofmt handling; `//` inside a
+string) — so the score's anti-gaming posture is itself now witnessed, not
+asserted.
+
 ## Repeat it
 
 `/quality-score` (`.claude/skills/quality-score/SKILL.md`) is the repeatable RSI
