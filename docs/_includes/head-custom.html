@@ -1,4 +1,7 @@
-<!-- Injected into every themed page's <head> by the cayman layout ({% include head-custom.html %}).
-     Site-wide favicon (the brand dot) so Pages stops 404-ing on /favicon.ico. Inline SVG data
-     URI — no extra asset to fetch. The standalone docs/showcase.html carries its own copy. -->
+<!-- Site-wide favicon (the brand dot) so Pages stops 404-ing on /favicon.ico. Inline SVG data
+     URI, no extra asset to fetch; injected into every themed page head by the cayman layout's
+     head-custom hook. The standalone docs/showcase.html carries its own copy.
+     IMPORTANT: never write a Liquid tag in this file, not even inside an HTML comment — Liquid
+     parses tags inside comments, so a self-referencing include here recurses infinitely
+     ("stack level too deep in /_layouts/default.html"), which broke the Pages build at e6c3627. -->
 <link rel="icon" href="data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2032%2032'%3E%3Crect%20width='32'%20height='32'%20rx='7'%20fill='%23070a10'/%3E%3Ccircle%20cx='16'%20cy='16'%20r='8'%20fill='%2338bdf8'/%3E%3C/svg%3E" />
