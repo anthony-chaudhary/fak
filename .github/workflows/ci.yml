@@ -233,6 +233,29 @@ jobs:
             || echo "::warning title=seo-debt::SEO/AEO discoverability debt present (advisory) — add missing front-matter title/description; see tools/seo_aeo_scorecard.py"
           echo "::endgroup::"
 
+      # Repo-hygiene scorecard: the structural counterpart of the docs/code
+      # scorecards. Grades the whole git-tracked tree on four groups — verbosity,
+      # organization, indexing, accessibility — and counts hygiene-debt (a
+      # duplicate or oversized doc, root clutter, a misplaced dated note, an
+      # orphan no index links, an AI-tell phrase). It is the tree-wide MEASUREMENT
+      # of the same closed-vocabulary reasons the pre-commit gates enforce one
+      # commit at a time (DOC_PLACEMENT, FILE_ADMISSION, BROKEN_LINK) — it imports
+      # their rules so the number and the gate cannot drift. Same two tiers as its
+      # siblings:
+      #   * the tool's own unit tests are HARD (a real regression suite);
+      #   * the scorecard is ADVISORY while the last structural debt is retired
+      #     (a few dated docs to move, a benchmark-dir merge), then RATCHET to
+      #     HARD — it is deterministic over the tracked tree, so a clean tree
+      #     stays clean. Pure-stdlib Python, repo root like the other gates.
+      - name: repo-hygiene scorecard (4 groups + hygiene-debt; tests HARD, scorecard advisory)
+        working-directory: ${{ github.workspace }}
+        run: |
+          python tools/repo_hygiene_scorecard_test.py
+          echo "::group::repo-hygiene-scorecard (advisory while the last structural debt is retired)"
+          python tools/repo_hygiene_scorecard.py \
+            || echo "::warning title=hygiene-debt::repo hygiene-debt present (advisory) — see docs/REPO-HYGIENE-SCORECARD.md; retire worst-first (consolidate dupes, clear root clutter, move dated docs to docs/notes/, index orphans, cut AI-tells), then re-arm the HARD gate"
+          echo "::endgroup::"
+
       # Public-copy leak gate: the machine backstop for the redact-needle floor.
       # The local pre-commit hook (tools/githooks/pre-commit) only fires on a clone
       # that ran `install_trunk_guard.py`; an un-armed clone — or any path that

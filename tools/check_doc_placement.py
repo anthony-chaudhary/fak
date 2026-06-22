@@ -52,6 +52,8 @@ ALLOWED_ROOT_MD = {
     # common OSS root/meta docs (allowed if a maintainer adds one)
     "CODE_OF_CONDUCT.md", "CHANGELOG.md", "GOVERNANCE.md", "MAINTAINERS.md",
     "ROADMAP.md", "AUTHORS.md", "NOTICE.md", "SUPPORT.md", "HISTORY.md",
+    # legal/meta front-door docs README and the footer link by their root path
+    "TRADEMARK.md", "LICENSING.md",
 }
 NOTES_DIR = "docs/notes"
 
