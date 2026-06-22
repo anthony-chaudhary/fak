@@ -138,9 +138,13 @@ MIN_FAQ_QUESTIONS = 6  # below this, FAQ.md is too thin to seed a FAQPage
 # Dirs under docs/ that Jekyll does NOT publish as reader pages (mirrors the
 # _config.yml `exclude` list + Jekyll's own `_`-prefixed special dirs). A page in
 # one of these is not an indexable HTML surface, so it carries no SEO meta duty.
+# `launch` holds go-to-market distribution drafts (paste-ready Reddit/HN/X/YouTube
+# posts, the positioning brief, landscape research) — launch ops, not reader docs,
+# and excluded from publishing in _config.yml for the same reason planning/releases
+# are; this set must stay in sync with that `exclude` list.
 NONPUBLISHED_DIRS = {
     "benchmark", "benchmarking", "planning", "testing", "releases",
-    "stable-releases", "_includes", "_layouts", "_data", "_site",
+    "stable-releases", "launch", "_includes", "_layouts", "_data", "_site",
 }
 
 _LINK_RE = re.compile(r"\[(?P<text>[^\]]+)\]\((?P<target>[^)]+)\)")

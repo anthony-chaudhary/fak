@@ -842,6 +842,15 @@ def render(payload: dict[str, Any]) -> str:
 def render_markdown(payload: dict[str, Any], *, stamp: str | None = None) -> str:
     c = payload.get("corpus") or {}
     out: list[str] = []
+    # Jekyll front matter so the published snapshot carries a <title> + meta
+    # description (jekyll-seo-tag reads these) — the SEO/AEO scorecard counts a
+    # published page with no title/description as discoverability debt.
+    out.append("---")
+    out.append('title: "fak code-quality scorecard — the code-debt measuring stick"')
+    out.append('description: "fak\'s deterministic code-quality scorecard: ten KPIs folded into a '
+               'composite score and the headline code-debt metric, re-derived from disk and Go tooling."')
+    out.append("---")
+    out.append("")
     out.append("# Code-quality scorecard")
     out.append("")
     if stamp:

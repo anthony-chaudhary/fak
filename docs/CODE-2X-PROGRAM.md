@@ -1,3 +1,8 @@
+---
+title: "fak code-2x program — the code-debt trajectory ledger"
+description: "The durable trajectory ledger for fak's code-quality RSI loop: the baseline, the target, and what each pass actually moved to halve code-debt, with proof."
+---
+
 # The code-2x program — a consistent quality measure, baselined and halved
 
 > The durable ledger for the code-quality RSI loop. The living per-KPI snapshot

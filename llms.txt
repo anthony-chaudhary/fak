@@ -38,6 +38,8 @@
 - [Getting Started](GETTING-STARTED.md): install the single static binary and put the gate in front of your model.
 - [Guided tutorial](docs/fak/tutorial.md): zero to first adjudicated tool call, with real output at every step.
 - [FAQ](docs/FAQ.md): direct answers to common questions (what is fak, how it differs from a firewall/guardrails/vLLM, threat model, prompt-injection handling).
+- [Operator & integrator docs index](docs/fak/README.md): the hub for the `fak serve` doc set — install, run the gateway, author policy, integrate agents, and deploy.
+- [Operator FAQ](docs/fak/faq.md): operator-grade answers — what fail-closed and quarantine mean, how fak compares to vLLM/LangChain/E2B, how to debug a denied call, and the explicit limits.
 
 ## Integrations (put fak in front of the agent you already run)
 
@@ -48,6 +50,11 @@ You do not rewrite your agent to adopt fak — you repoint one base URL at `fak 
 - [Cursor](docs/integrations/cursor.md): governance for the Cursor IDE over MCP or the OpenAI-compatible proxy.
 - [OpenAI Codex / OpenAI API](docs/integrations/openai-codex.md): adjudicate every tool call from an OpenAI-compatible coding agent.
 - [MCP one-paste setup](examples/mcp/README.md): drop a project `.mcp.json` and call the five `fak_*` adjudication tools from any MCP client.
+- [Agent-framework integration](docs/fak/agent-framework-integration.md): a per-framework cookbook for putting fak in front of LangChain, LlamaIndex, AutoGen, CrewAI, and OpenAI-compatible agents (proxy or explicit adjudication).
+- [Agent-integration architecture](docs/fak/agent-integration-architecture.md): how an external agent connects through the gateway entry points, the frozen kernel ABI, the verdict types, and the capability floor.
+- [Migrating to fak](docs/fak/migration-guide.md): repoint one base URL to put fak's tool-call boundary in front of an existing OpenAI, Anthropic, LangChain, AutoGen, or llama.cpp stack.
+- [Multi-language client examples](docs/fak/multi-language-examples.md): runnable Python, JS/TS, Go, and Rust client code for calling a `fak serve` gateway across its OpenAI, Anthropic, and fak-native surfaces.
+- [Deployment guide](docs/fak/deployment-guide.md): production deployment of the `fak serve` gateway across Docker, Compose, Kubernetes, and bare metal, with an auth/policy/binding readiness checklist.
 
 ## Core concepts (the two flips)
 
@@ -56,6 +63,10 @@ You do not rewrite your agent to adopt fak — you repoint one base URL at `fak 
 - [KV cache for agentic context](docs/explainers/kv-cache-agentic-context.md): what a KV cache is and why agents stress it differently than chat.
 - [SOTA optimizations fak sits on top of](docs/explainers/sota-optimizations.md): the 10 already-shipped serving optimizations that define the honest baseline.
 - [One binary is the whole surface](docs/explainers/one-binary-one-surface.md): why the governed-serving surface as a single static Go binary beats assembling a multi-component Python/CUDA stack — operational surface, laptop to fleet, not throughput.
+- [Context is not memory](docs/CONTEXT-IS-NOT-MEMORY.md): why fak separates context from memory by how long a fact stays true, gating promotion at write time with an expire-by-default durability class.
+- [The four layers of agent memory](docs/MEMORY-LAYERS-EXPLAINER.md): routing, addressing, fusion, and semantics as four distinct KV-cache problems, and why fak's change lives only at the semantics layer.
+- [AWQ quantization support](docs/explainers/awq-quantization.md): fak's AWQ 4-bit activation-aware weight format, its dequantization formula, the LoadAWQ API, and the memory/accuracy trade-offs.
+- [Hardware portability via the compute HAL](docs/explainers/hardware-portability.md): how the `internal/compute` interface adds CUDA and Vulkan backends by registration instead of re-forking the in-kernel forward pass.
 
 ## Security
 
@@ -68,6 +79,9 @@ You do not rewrite your agent to adopt fak — you repoint one base URL at `fak 
 - [Benchmark authority](BENCHMARK-AUTHORITY.md): the single source of truth for every number, traced to commit + artifact.
 - [Hardware matrix](docs/HARDWARE-MATRIX.md): every machine fak has been profiled on — 4 distinct platforms spanning 2 CPU ISAs (arm64 + x86_64), 4 GPU backends (Apple Metal, AMD Vulkan, NVIDIA CUDA Ada + Ampere), and 4 operating systems. The deterministic metrics reproduce byte-for-byte across all of them.
 - [Web agent benchmark baselines](docs/webbench-baselines.md): real WebVoyager (643 tasks), 8.8–9.7× prefill elimination, measured.
+- [fak vs vLLM, SGLang & provider KV caching](docs/fak-vs-alternatives-comparison.md): how fak's cross-worker/cross-session fused KV cache differs from the per-session engines and the provider prompt caches, with measured token/cost ratios.
+- [Local-vs-frontier parity](docs/explainers/local-vs-frontier-parity.md): a measured A/B run on safety and cost for a small local model behind the kernel vs hosted frontier models, with the capability ramp called out honestly.
+- [Prefill elimination explained](docs/prefill-elimination-explained.md): a plain-language walkthrough of how reusing a shared prompt prefix hits a provider's KV cache to cut repeated input-token cost on multi-turn agent runs.
 
 ## Reference
 
@@ -77,7 +91,12 @@ You do not rewrite your agent to adopt fak — you repoint one base URL at `fak 
 - [Extending fak](EXTENDING.md): plug in an optimization → prove it correct → prove it faster → ship.
 - [Repro packet](docs/repro-packet.md): the full 2-minute, no-key/no-GPU walkthrough.
 - [Issue-dispatch loop](docs/dispatch-loop.md): the witness-gated GitHub-issue backlog driver (spawn → ship #N → witness → close), and its live view [docs/dispatch-status.md](docs/dispatch-status.md).
+- [Gateway API reference](docs/fak/api-reference.md): the complete HTTP reference for `fak serve` — its OpenAI, Anthropic Messages, fak-native, and MCP endpoints plus auth, rate limits, and ops routes.
+- [MCP tool-result wire](docs/mcp-tool-result.md): the gateway's MCP tool-result envelope — the SyscallResponse fields, the verdict object, and the closed refusal vocabulary, with one example per verdict class.
+- [Server troubleshooting](docs/fak/server-troubleshooting.md): diagnosing common `fak serve` failures — port conflicts, out-of-memory model loads, GPU/CUDA/Vulkan errors, and policy issues.
+- [Related tools & workflows](docs/fak/related-items.md): a catalog of fak's CLI verbs, the serve gateway, the test/CI runners, the demo scripts, and the policy templates, with usage examples.
 
 ## Optional
 
 - [Concepts and story](docs/concepts-and-story.md): the parable, personas, and when-the-win-kicks-in tables.
+- [Advanced topics: scaling & HA](docs/fak/advanced-topics.md): tuning, replication, multi-region, and high availability for `fak serve`, with sticky `trace_id` routing for information-flow-control correctness.

@@ -65,3 +65,9 @@ exclude:
   - testing/
   - releases/
   - stable-releases/
+  # Go-to-market distribution drafts (paste-ready Reddit/HN/X/YouTube posts, the
+  # positioning brief, landscape research). These are launch ops, not reader docs:
+  # indexing them creates duplicate content with the eventual external posts and
+  # would surface strategic positioning. The work they distribute lives in the
+  # real docs above; the drafts stay out of the index.
+  - launch/

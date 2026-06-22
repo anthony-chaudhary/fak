@@ -1,3 +1,8 @@
+---
+title: "fak code-quality scorecard — the code-debt measuring stick"
+description: "fak's deterministic code-quality scorecard: ten KPIs folded into a composite score and the headline code-debt metric, re-derived from disk and Go tooling."
+---
+
 # Code-quality scorecard
 
 <!-- code-quality-scorecard: 2026-06-22 · process: tools/code_quality_scorecard.py -->
