@@ -39,6 +39,7 @@ concurrent = [
   "vdso", "witness",
   "cmd", "experiments", "docs", "tools", "visuals", "claude", "ci",
   "tokenizer",
+  "contextq", "journal", "examples",
   # new-leaf:lane -- `python tools/new_leaf.py` inserts a generated leaf lane above
 ]
 exclusive = ["abi", "release", "global"]
@@ -51,6 +52,7 @@ autopick = [
   "vdso", "witness",
   "cmd", "experiments", "docs", "tools", "visuals", "claude", "ci",
   "tokenizer",
+  "contextq", "journal", "examples",
   # new-leaf:lane
 ]
 
@@ -89,9 +91,12 @@ turnbench = ["fak/internal/turnbench/**"]
 vdso = ["fak/internal/vdso/**"]
 witness = ["fak/internal/witness/**"]
 tokenizer = ["fak/internal/tokenizer/**"]
+contextq = ["fak/internal/contextq/**"]
+journal = ["fak/internal/journal/**"]
 # new-leaf:tree -- generated leaf trees inserted above this line
 cmd         = ["fak/cmd/**"]
 experiments = ["fak/experiments/**"]
+examples    = ["examples/**"]
 docs        = ["docs/**"]
 tools       = ["tools/**"]
 visuals     = ["visuals/**"]
