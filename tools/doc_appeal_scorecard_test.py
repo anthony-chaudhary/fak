@@ -76,6 +76,18 @@ def test_split_at_lowercase_fak_sentence_start() -> None:
     assert len(parts) == 2, parts
 
 
+def test_script_block_jsonld_is_not_scored_as_prose() -> None:
+    # A generated JSON-LD <script> block is machine content, not reader prose; its
+    # answer text (em-dashes, run-ons and all) must not inflate the score.
+    doc = das.parse(
+        "# T\n\n<script type=\"application/ld+json\">\n"
+        '{"text": "one — two — three — four, a, b, c, d, e, f run-on machine text"}\n'
+        "</script>\n\nReal short prose here.\n")
+    assert "machine text" not in doc.prose_text, doc.prose_text
+    v = das.axis_voice(doc)
+    assert not any("em-dash" in d for d in v["defects"]), v["defects"]
+
+
 def test_front_matter_is_not_scored_as_prose() -> None:
     # A long YAML `description:` is page metadata, not reader prose; it must not
     # appear in the prose corpus nor trip a clarity run-on/overlong defect.

@@ -269,6 +269,7 @@ def _classify_lines(text: str) -> list[tuple[int, str, str]]:
     out: list[tuple[int, str, str]] = []
     in_fence = False
     in_comment = False
+    in_script = False
     lines = text.split("\n")
     # A leading YAML front-matter block (--- … ---) is page metadata (title,
     # description), not reader prose. Mark it so no axis scores it — otherwise a
@@ -294,6 +295,20 @@ def _classify_lines(text: str) -> list[tuple[int, str, str]]:
             if "-->" not in s:
                 in_comment = True
             out.append((i, raw, "comment"))
+            continue
+        # A <script> / <style> block is machine content (e.g. generated JSON-LD
+        # structured data), not reader prose — skip it like a code fence, or its
+        # generated answer text gets scored as run-on prose.
+        low = s.lower()
+        if in_script:
+            if "</script>" in low or "</style>" in low:
+                in_script = False
+            out.append((i, raw, "script"))
+            continue
+        if low.startswith(("<script", "<style")):
+            if "</script>" not in low and "</style>" not in low:
+                in_script = True
+            out.append((i, raw, "script"))
             continue
         if s.startswith("```") or s.startswith("~~~"):
             in_fence = not in_fence
