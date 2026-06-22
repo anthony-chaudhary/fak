@@ -39,9 +39,19 @@ twitter:
 
 # Site-wide Open Graph / Twitter card image (the social preview). Absolute raw URL
 # so it resolves even though the Pages source root is /docs.
+#
+# scope must carry `type: pages` as well as the empty path: an empty-path scope with
+# no type matches EVERY build context, including the synthesized page Jekyll builds
+# when the cayman layout pulls in _includes/head-custom.html. Resolving front-matter
+# defaults against that context re-enters frontmatter_defaults infinitely -> the
+# "Liquid Exception: stack level too deep in /_layouts/default.html" SystemStackError
+# that broke the Pages build the moment the first _includes file landed. `type: pages`
+# still covers index.md + every docs/*.md page (where jekyll-seo-tag wants the OG
+# image), but excludes the include context, so the recursion can't form.
 defaults:
   - scope:
       path: ""
+      type: "pages"
     values:
       image: "https://raw.githubusercontent.com/anthony-chaudhary/fak/main/visuals/social-preview.png"
 

@@ -10,7 +10,7 @@ Rules:
   * SOFT junk  — *.log / *.tmp / report.json / agent-report.json — refused UNLESS
     under a data dir (fak/experiments/, fak/testdata/) where such files are real
     committed evidence, or on the small kept-exception allowlist.
-  * Large file — anything larger than MAX_BYTES (default 5 MiB) — refused (use
+  * Large file — anything larger than MAX_BYTES (default 10 MiB) — refused (use
     Git LFS, trim it, or override).
 
 Modes: --audit-staged (pre-commit, staged additions) | --audit-tree (CI/DoD).
@@ -24,7 +24,10 @@ import re
 import subprocess
 import sys
 
-DEFAULT_MAX_BYTES = 5 * 1024 * 1024
+# 10 MiB: large enough to admit the 1440p hero-video.mp4 (~9.4 MiB), which the live
+# Pages hero + README embed by raw URL (so it cannot be dropped), while still refusing
+# genuinely oversized blobs from a forever-history public tree.
+DEFAULT_MAX_BYTES = 10 * 1024 * 1024
 
 # Always-junk: never legitimately committed.
 HARD_JUNK = [
