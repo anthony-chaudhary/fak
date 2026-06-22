@@ -549,8 +549,12 @@ func (s *Session) token(id, pos int) []float32 {
 }
 
 func (s *Session) requireGLMDsaSession() {
-	if s.Backend != nil || s.Metal || s.PrecisionPolicy != nil {
-		panic("model: GLM-MoE-DSA Session uses CPU resident DSA cache only")
+	// #86 (partial): a compute.Backend is now PERMITTED — the GLM-MoE-DSA forward routes its
+	// dense GEMMs (MoE/FFN, projections, head) through the backend (backendKernel) while the DSA
+	// index-scoring + sparse-attention + KV stay host-resident (s.Cache.glm). Metal/PrecisionPolicy
+	// are still unwired and fail closed.
+	if s.Metal || s.PrecisionPolicy != nil {
+		panic("model: GLM-MoE-DSA Session: Metal/PrecisionPolicy paths are unwired (CPU resident DSA cache; compute.Backend GEMM offload is allowed)")
 	}
 	if s.Cache.glm == nil {
 		s.Cache.glm = newGLMDsaKVCache(s.M.Cfg)
@@ -558,6 +562,13 @@ func (s *Session) requireGLMDsaSession() {
 }
 
 func (s *Session) glmDsaHead(xf []float32) []float32 {
+	if s.Backend != nil {
+		// #86 (partial): the vocab projection (the largest single GEMM) runs on the backend.
+		// lmHeadMatHAL resolves the resident head weight (untied q8 / f32) + uploads it.
+		be := s.Backend
+		xt := be.Upload(compute.NewF32(be, []int{s.M.Cfg.HiddenSize}, xf), compute.F32)
+		return be.Read(be.MatMul(s.lmHeadMatHAL(), xt))
+	}
 	if s.Quant {
 		return s.headQ(xf)
 	}
@@ -659,6 +670,46 @@ type residentKernel struct{ m *Model }
 func (k residentKernel) prep(x []float32) any { return x }
 func (k residentKernel) mul(name string, x any, out, in int) []float32 {
 	return k.m.residentMatRows(name, x.([]float32), out, in)
+}
+
+// backendKernel routes matKernel GEMMs through a compute.Backend (the GPU pure kernels) instead of
+// the host residentMatRows. It is the GLM-MoE-DSA forward's device path (#86, partial): the heavy
+// dense GEMMs — MoE/FFN experts + router, and the attention projections — run on the backend, while
+// the DSA index-scoring + sparse-attention glue and the KV cache stay host-resident. The activation
+// stays host-side (prep returns x); mul uploads the resident weight (q8 -> k_q8_gemm, pure; f32 ->
+// the backend's f32 GEMM) and the activation, runs be.MatMul, and reads the result back to host, so
+// it is a drop-in for residentMatRows in the host data flow. The device↔host copy per GEMM keeps the
+// glue simple (correctness-first); a fully device-resident GLM-DSA forward is the next slice.
+type backendKernel struct{ s *Session }
+
+func (k backendKernel) prep(x []float32) any { return x }
+func (k backendKernel) mul(name string, x any, out, in int) []float32 {
+	s := k.s
+	be := s.Backend
+	xf := x.([]float32)
+	if len(xf) != in {
+		panic("model: backendKernel " + name + " activation length mismatch")
+	}
+	wt := s.glmDsaWeightHAL(name, out, in)
+	xt := be.Upload(compute.NewF32(be, []int{in}, xf), compute.F32)
+	y := be.Read(be.MatMul(wt, xt))
+	if len(y) != out {
+		panic("model: backendKernel " + name + " result length mismatch")
+	}
+	return y
+}
+
+// glmDsaWeightHAL uploads a resident GLM projection weight to the backend (cached in halW), mirroring
+// residentMatRows's dtype dispatch on the upload side: a q8-resident weight uploads codes+scales
+// (k_q8_gemm, pure — needs cuda.go uploadQ8Resident), an f32 weight uploads f32 (backend f32 GEMM).
+func (s *Session) glmDsaWeightHAL(name string, out, in int) compute.Tensor {
+	if qt, ok := s.M.q8w[name]; ok {
+		return s.weightHALQ8(name, qt)
+	}
+	if s.M.has(name) {
+		return s.weightHAL(name)
+	}
+	panic("model: glmDsaWeightHAL missing resident weight " + name + " (q4_k device GLM-DSA upload is a follow-up)")
 }
 
 // residentMatRows reads a projection by name from either the ordinary f32 store

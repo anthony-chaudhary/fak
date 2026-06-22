@@ -172,7 +172,14 @@ func (s *Session) decodeBandGLMDsa(id int, x []float32, lo, hi, pos int, isFirst
 	}
 	s.glmDsaSharedTopK = nil
 	eps := float32(cfg.RMSNormEps)
-	mat := residentKernel{m}
+	// #86 (partial): with a compute.Backend attached, route the MoE/FFN GEMMs through it (the GPU
+	// pure kernels) via backendKernel; otherwise the host residentKernel. The DSA attention step
+	// keeps its own host path (glmDsaAttentionStep) — only the matKernel-driven MLP/MoE moves to
+	// the device here. requireGLMDsaSession permits the backend; CPU sessions are unchanged.
+	var mat matKernel = residentKernel{m}
+	if s.Backend != nil {
+		mat = backendKernel{s}
+	}
 	for l := lo; l < hi; l++ {
 		layer := l
 		attnBody := func(xn []float32) []float32 {
