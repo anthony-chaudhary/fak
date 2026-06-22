@@ -1,6 +1,10 @@
 #!/usr/bin/env python3
 """Peek at a session's recent meaningful turns + any goal/loop directive."""
-import os, sys, json, glob, re
+import os
+import sys
+import json
+import glob
+import re
 
 USER = os.environ.get("FLEET_USER_HOME", os.path.expanduser("~"))
 
@@ -31,21 +35,25 @@ def text_of(content):
 sid = sys.argv[1]
 p = find(sid)
 if not p:
-    print("NOT FOUND", sid); sys.exit(1)
+    print("NOT FOUND", sid)
+    sys.exit(1)
 objs = []
 with open(p, encoding="utf-8", errors="replace") as f:
     for ln in f:
         ln = ln.strip()
         if ln:
-            try: objs.append(json.loads(ln))
-            except: pass
+            try:
+                objs.append(json.loads(ln))
+            except Exception:
+                pass
 # first user prompt (the original directive)
 goal = None
 for o in objs:
     if o.get("type") == "user":
         t = text_of((o.get("message") or {}).get("content"))
         if re.search(r"/goal|/loop|/dispatch|/next-up|<command-name>", t):
-            goal = t[:400]; break
+            goal = t[:400]
+            break
         if goal is None and t.strip():
             goal = t[:400]
 print(f"=== {sid} ===  ({len(objs)} records)  file={os.path.basename(os.path.dirname(p))}")

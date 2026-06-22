@@ -29,7 +29,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
 import platform
 import subprocess
 import sys
@@ -177,7 +176,6 @@ def main() -> int:
         print(json.dumps(snap, indent=2))
         return 0
 
-    need = int(args.require_gb * 1e9)
     deadline = time.time() + args.wait if args.wait else 0
     while True:
         snap = snapshot()

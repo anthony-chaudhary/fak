@@ -263,7 +263,8 @@ def main():
         out("|---|---:|---:|---|")
         for d in sfits:
             if d["popt"] is None:
-                out(f"| `{d['name']}` | — | — | failed |"); continue
+                out(f"| `{d['name']}` | — | — | failed |")
+                continue
             ps = ", ".join(f"{v:.4g}" for v in d["popt"])
             print(f"  shared_saved fit {d['name']:<28} adjR²={d['adj_r2']:.5f} rmse={d['rmse']:.2f} [{ps}]")
             out(f"| `{d['name']}` | {d['adj_r2']:.5f} | {d['rmse']:.2f} | {ps} |")

@@ -231,7 +231,7 @@ def cmd_collect(a) -> None:
     work = Path(a.workdir).resolve()
     audits = Path(a.audits_dir).resolve()
     audits.mkdir(parents=True, exist_ok=True)
-    rows, raw = [], {}
+    raw = {}
     for lane in a.lanes:
         d = _lane_dir(work, lane)
         rep = d / "REPORT.json"

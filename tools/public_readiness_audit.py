@@ -113,7 +113,7 @@ def check_frontdoor_present(root, tracked):
     out = []
     for rel in REQUIRED_FRONT_DOOR:
         if not (root / rel).exists():
-            out.append(Finding("frontdoor-present", "FAIL", f"required front-door file missing", rel))
+            out.append(Finding("frontdoor-present", "FAIL", "required front-door file missing", rel))
     return out
 
 

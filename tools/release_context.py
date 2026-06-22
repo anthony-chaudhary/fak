@@ -215,13 +215,13 @@ def prior_release_style(root: Path) -> dict | None:
                     rest = line.split(":", 1)[1].strip()
                     if rest.startswith("[") and rest.endswith("]"):
                         out["themes"] = [t.strip().strip('"').strip("'") for t in rest[1:-1].split(",") if t.strip()]
-    out["section_headings"] = [l[3:].strip() for l in text.splitlines() if l.startswith("## ")][:8]
+    out["section_headings"] = [line[3:].strip() for line in text.splitlines() if line.startswith("## ")][:8]
     return out
 
 
 def files_touched(tag: str | None) -> list[str]:
     raw = run(["git", "diff", "--name-only", f"{tag}..HEAD"]) if tag else run(["git", "ls-files"])
-    return [l for l in raw.splitlines() if l.strip()]
+    return [line for line in raw.splitlines() if line.strip()]
 
 
 def porcelain_status() -> list[tuple[str, str]]:

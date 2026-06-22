@@ -43,7 +43,13 @@ Usage:
       [--out profile.json] [--md summary.md]
   python tools/transcript_workload.py show profile.json     # human summary of a profile
 """
-import sys, os, json, argparse, math, statistics, collections
+import sys
+import os
+import json
+import argparse
+import math
+import statistics
+import collections
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import fleet_version

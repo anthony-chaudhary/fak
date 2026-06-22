@@ -17,7 +17,7 @@ it imports cleanly anywhere (including the test suite) with no auth.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Optional
 
 

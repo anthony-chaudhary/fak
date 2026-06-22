@@ -18,7 +18,12 @@ Liveness is mtime-based (a live agent appends within LIVE_MIN minutes).
 Usage:  python stopped_sessions.py [window_hours=10]
 Output: JSON {accounts:{throttle...}, rows:[...], decisions:{resume,defer,skip}}
 """
-import os, sys, json, glob, re, datetime as dt
+import os
+import sys
+import json
+import glob
+import re
+import datetime as dt
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))  # import sibling helper
 import fleet_accounts  # noqa: E402  -- account-policy layer (worker/excluded/non-account)
@@ -88,8 +93,10 @@ def classify(path):
     saw_tool_use = None          # name of an unmatched tool_use awaiting a result
     last_meaning = None          # last user/assistant record
     for o in objs:
-        cwd = o.get("cwd", cwd); git = o.get("gitBranch", git)
-        ver = o.get("version", ver); sid = o.get("sessionId", sid)
+        cwd = o.get("cwd", cwd)
+        git = o.get("gitBranch", git)
+        ver = o.get("version", ver)
+        sid = o.get("sessionId", sid)
         t = o.get("type")
         if t not in ("user", "assistant"):
             continue

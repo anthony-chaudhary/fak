@@ -10,7 +10,6 @@ Usage:
 """
 import argparse
 import json
-import os
 import re
 import shutil
 import sys
@@ -98,7 +97,7 @@ def migrate_qwen36(dry_run: bool) -> int:
     if not source_dir.exists():
         return 0
 
-    print(f"[migrate] Processing qwen36/...", file=sys.stderr)
+    print("[migrate] Processing qwen36/...", file=sys.stderr)
 
     for json_file in source_dir.glob("*.json"):
         if json_file.name.startswith("README") or json_file.name.endswith(".md"):
@@ -147,7 +146,7 @@ def migrate_fleet(dry_run: bool) -> int:
     if not source_dir.exists():
         return 0
 
-    print(f"[migrate] Processing fleet/...", file=sys.stderr)
+    print("[migrate] Processing fleet/...", file=sys.stderr)
 
     for file_path in list(source_dir.glob("*.json"))[:50]:  # Limit to 50 for now
         machine_id = DEFAULT_MACHINE
@@ -223,7 +222,7 @@ def migrate_agent_live(dry_run: bool) -> int:
     if not source_dir.exists():
         return 0
 
-    print(f"[migrate] Processing agent-live/...", file=sys.stderr)
+    print("[migrate] Processing agent-live/...", file=sys.stderr)
 
     for file_path in source_dir.glob("*.json"):
         if "README" in file_path.name:

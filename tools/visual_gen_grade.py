@@ -128,7 +128,6 @@ def diagram_kind(mmd: str) -> str:
         s = ln.strip()
         if not s or s.startswith("%%"):
             continue
-        head = s.split()[0].lower().rstrip("-beta").rstrip("-")
         if any(s.lower().startswith(k) for k in FLOW_KINDS):
             return "flow"
         if any(s.lower().startswith(k) for k in CHART_KINDS):

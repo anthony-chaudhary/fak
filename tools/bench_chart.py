@@ -8,11 +8,9 @@ Usage:
 """
 import argparse
 import json
-import os
 import sys
-from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Dict, List, Optional
 
 ROOT = Path(__file__).resolve().parents[1]
 BENCHMARK_DIR = ROOT / "fak" / "experiments" / "benchmark"

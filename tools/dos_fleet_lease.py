@@ -666,7 +666,7 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--store", default="", help="store path, or 'git' for the git-ref CAS backend (refs/dos-fleet-leases/*)")
     sub = ap.add_subparsers(dest="cmd", required=True)
 
-    p = sub.add_parser("publish", help="publish this node's held leases to the fleet store")
+    sub.add_parser("publish", help="publish this node's held leases to the fleet store")
 
     m = sub.add_parser("materialize", help="emit the live-lease union for `--leases`")
     m.add_argument("--scope", choices=["local", "global"], default="local")

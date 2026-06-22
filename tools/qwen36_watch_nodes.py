@@ -6,7 +6,6 @@ import argparse
 import datetime as dt
 import json
 import re
-import sys
 import time
 from dataclasses import dataclass
 from pathlib import Path

@@ -58,7 +58,7 @@ import re
 import sys
 from collections import deque
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
 SCHEMA = "fleet-docs-scorecard/1"
 
@@ -726,7 +726,7 @@ def render(payload: dict[str, Any]) -> str:
         "",
         (f"corpus: {c.get('n_docs', 0)} docs · mean {c.get('mean_score', 0)}/100 "
          f"· min {c.get('min_score', 0)} · DOC-DEBT {c.get('doc_debt', 0)}"),
-        (f"grades: " + " ".join(f"{g}:{c.get('grade_distribution', {}).get(g, 0)}"
+        ("grades: " + " ".join(f"{g}:{c.get('grade_distribution', {}).get(g, 0)}"
                                 for g in "ABCDF")),
         (f"coverage: {cov.get('overall_pct', 0)}% "
          f"(reach {cov.get('reachability_pct', 0)}% · topics {cov.get('topic_pct', 0)}%)"),

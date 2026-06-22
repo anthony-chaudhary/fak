@@ -18,7 +18,11 @@ Usage:
   python extract_context_corpus.py <session.jsonl> [--out corpus.json]
   python extract_context_corpus.py --glob "<dir>/*.jsonl" [--out corpus.json]   # aggregate
 """
-import sys, os, json, glob, argparse, collections
+import os
+import json
+import glob
+import argparse
+import collections
 
 
 def text_of(content):

@@ -31,7 +31,6 @@ import argparse
 import importlib.util
 import json
 import os
-import re
 import subprocess
 import sys
 
@@ -184,7 +183,7 @@ def audit_history(root, ref="main", as_json=False):
                 print(f"  OTHER REFS ONLY ({len(other)} hit(s) — e.g. local backup tags; contained unless tags are pushed):")
                 for h in other:
                     print(f"    {h['sha'][:12]} {h['path']}  [{h['label']}]  ~{h['masked']}")
-            print(f"  VERDICT: HISTORY-DIRTY — rewrite history before publishing (see issue #74).")
+            print("  VERDICT: HISTORY-DIRTY — rewrite history before publishing (see issue #74).")
         if mode != "full":
             print("  NOTE: sidecar absent — real-needle (literal) tier NOT run; run tools/pull_scan_needles.py for a full scan.", file=sys.stderr)
 

@@ -11,11 +11,9 @@ Usage:
 """
 import argparse
 import json
-import os
 import sys
-from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Dict, List, Optional
 
 ROOT = Path(__file__).resolve().parents[1]
 BENCHMARK_DIR = ROOT / "fak" / "experiments" / "benchmark"
@@ -26,7 +24,7 @@ def load_catalog() -> Optional[Dict]:
     """Load catalog, return None on error."""
     if not CATALOG_PATH.exists():
         print(f"[ERROR] Catalog not found at {CATALOG_PATH}", file=sys.stderr)
-        print(f"[ERROR] Run 'python tools/bench_catalog.py build' first", file=sys.stderr)
+        print("[ERROR] Run 'python tools/bench_catalog.py build' first", file=sys.stderr)
         return None
     try:
         with open(CATALOG_PATH, encoding="utf-8") as f:

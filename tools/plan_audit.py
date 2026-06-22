@@ -67,13 +67,13 @@ def _expand_glob(pattern: str) -> list[Path]:
 
 
 def count_units(lines: list[str]) -> int:
-    return sum(1 for l in lines if UNIT_ROW_RE.match(l) or UNIT_HEADING_RE.match(l))
+    return sum(1 for line in lines if UNIT_ROW_RE.match(line) or UNIT_HEADING_RE.match(line))
 
 
 def audit_plan(path: Path) -> dict:
     text = path.read_text(encoding="utf-8", errors="replace")
     lines = text.splitlines()
-    name = next((HEADING_RE.match(l).group(1).strip() for l in lines if HEADING_RE.match(l)), path.stem)
+    name = next((HEADING_RE.match(line).group(1).strip() for line in lines if HEADING_RE.match(line)), path.stem)
     total_units = count_units(lines)
     header = "\n".join(lines[:HEADER_LINES])
     shipped = bool(SHIPPED_RE.search(header))

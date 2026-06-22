@@ -13,7 +13,6 @@ import shutil
 import subprocess
 import sys
 import tempfile
-import time
 import unittest
 from pathlib import Path
 
@@ -195,7 +194,8 @@ class VerbWiringTest(unittest.TestCase):
 
     def test_materialize_local_ignores_store(self):
         # scope=local must read ONLY the local WAL — the shard-by-node fast path.
-        live = lambda ws: [rec("docs", host="A")]
+        def live(ws):
+            return [rec("docs", host="A")]
         # Even if the store has a foreign lease, local scope (store=None) never sees it.
         payload, code = fl.do_materialize(self.ws, None, scope="local", host="A", now=T0, live=live)
         self.assertEqual(code, fl.EXIT_OK)
@@ -205,13 +205,15 @@ class VerbWiringTest(unittest.TestCase):
     def test_materialize_global_unions_foreign(self):
         self.store.compare_and_swap(
             "B", None, fl.build_snapshot(host="B", leases=[rec("gateway", host="B", heartbeat_at=T0)], now=T0, prev_epoch=None))
-        live = lambda ws: [rec("docs", host="A")]
+        def live(ws):
+            return [rec("docs", host="A")]
         payload, code = fl.do_materialize(self.ws, self.store, scope="global", host="A", now=T0, live=live)
         self.assertEqual(code, fl.EXIT_OK)
         self.assertEqual(sorted(r["lane"] for r in payload["leases"]), ["docs", "gateway"])
 
     def test_publish_writes_local_held_set(self):
-        live = lambda ws: [rec("docs", host="A", heartbeat_at=T0)]
+        def live(ws):
+            return [rec("docs", host="A", heartbeat_at=T0)]
         payload, code = fl.do_publish(self.ws, self.store, host="A", now=T0, live=live)
         self.assertEqual(code, fl.EXIT_OK)
         self.assertTrue(payload["ok"])

@@ -147,7 +147,6 @@ def render_panel(out: list, p: dict, px: int, py: int) -> None:
 
         # monogram badge — on the bar if tall enough, else at the baseline
         by = (bt + 16) if bh >= 26 else (baseline - 16)
-        bf = "#ffffff" if subj and bh >= 26 else "#ffffff"
         btxt = ("#ffffff" if (subj and bh >= 26) else MUTED)
         bg = (fill if (subj and bh >= 26) else "#ffffff")
         bstroke = stroke if (subj and bh >= 26) else "#c2ccd6"

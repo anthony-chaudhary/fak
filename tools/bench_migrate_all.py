@@ -10,12 +10,10 @@ Usage:
 """
 import argparse
 import json
-import os
 import re
 import shutil
 import sys
 from datetime import datetime, timezone
-from hashlib import sha256
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -44,7 +42,7 @@ def load_json(path: Path) -> Optional[Dict]:
     try:
         with open(path, encoding="utf-8") as f:
             return json.load(f)
-    except (OSError, json.JSONDecodeError) as e:
+    except (OSError, json.JSONDecodeError):
         return None
 
 
@@ -380,9 +378,6 @@ def migrate_qwen(dry_run: bool) -> List[Dict]:
         return migrated
 
     # Migrate benchmark-style JSON files
-    patterns = ["*.json"]
-    exclude = ["README.md", ".md"]
-
     for json_file in source_dir.glob("*bench*.json"):
         data = load_json(json_file)
         if not data:
@@ -484,7 +479,7 @@ def main(argv: List[str]) -> int:
     if not args.dry_run:
         print("[migrate_all] Rebuilding catalog...", file=sys.stderr)
         if rebuild_catalog():
-            print(f"[migrate_all] Catalog updated", file=sys.stderr)
+            print("[migrate_all] Catalog updated", file=sys.stderr)
         else:
             print("[migrate_all] Failed to rebuild catalog", file=sys.stderr)
             return 1

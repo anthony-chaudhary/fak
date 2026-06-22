@@ -25,7 +25,14 @@ Usage:
 All numbers from token usage are EXACT. Cost uses the PRICING table below (an ASSUMPTION,
 clearly flagged) — edit it to match current rates; token counts are the ground truth.
 """
-import sys, os, json, glob, argparse, statistics, collections, datetime
+import sys
+import os
+import json
+import glob
+import argparse
+import statistics
+import collections
+import datetime
 
 # --- pricing assumption (USD per 1e6 tokens). EDIT to match real card; flagged in output. ---
 PRICING = {
@@ -186,8 +193,10 @@ def analyze(path):
             cr  = u.get("cache_read_input_tokens", 0) or 0
             cc  = u.get("cache_creation_input_tokens", 0) or 0
             stu = u.get("server_tool_use", {}) or {}
-            tok["input"] += inp; tok["output"] += out
-            tok["cache_read"] += cr; tok["cache_create"] += cc
+            tok["input"] += inp
+            tok["output"] += out
+            tok["cache_read"] += cr
+            tok["cache_create"] += cc
             tok["web_search"] += stu.get("web_search_requests", 0) or 0
             tok["web_fetch"]  += stu.get("web_fetch_requests", 0) or 0
             tok["iterations"] += len(u.get("iterations", []) or [])
@@ -472,11 +481,14 @@ def trend_scan(roots, ns_prefix, bucket, include_subagents, exclude_substr=None)
             u = msg.get("usage", {}) or {}
             B["assist_turns"] += 1
             B["models"][msg.get("model", "?")] += 1
-            inp = u.get("input_tokens", 0) or 0; out = u.get("output_tokens", 0) or 0
+            inp = u.get("input_tokens", 0) or 0
+            out = u.get("output_tokens", 0) or 0
             cr = u.get("cache_read_input_tokens", 0) or 0
             cc = u.get("cache_creation_input_tokens", 0) or 0
-            B["tok"]["input"] += inp; B["tok"]["output"] += out
-            B["tok"]["cache_read"] += cr; B["tok"]["cache_create"] += cc
+            B["tok"]["input"] += inp
+            B["tok"]["output"] += out
+            B["tok"]["cache_read"] += cr
+            B["tok"]["cache_create"] += cc
             B["cost"] += cost_usd(msg.get("model"), inp, cc, cr, out)
             for blk in (msg.get("content") or []):
                 if isinstance(blk, dict) and blk.get("type") == "tool_use":
@@ -556,7 +568,8 @@ def main():
     qt.add_argument("--exclude-bench", action="store_true",
                     help="drop Temp-agf*/Temp-bench* eval namespaces")
     qt.add_argument("--json", default=None)
-    q = sub.add_parser("deep"); q.add_argument("session")
+    q = sub.add_parser("deep")
+    q.add_argument("session")
     a = p.parse_args()
     {"discover": cmd_discover, "audit": cmd_audit, "trend": cmd_trend,
      "deep": cmd_deep}[a.cmd](a)

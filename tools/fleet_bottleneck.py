@@ -51,7 +51,15 @@ The registry signals are cheap and always computed; the token-spend pass reads
 full transcripts, so it is bounded and (in serve mode) refreshed on an interval —
 the HTTP handlers always serve the latest cached snapshot (the memory-sink pattern).
 """
-import os, sys, json, glob, argparse, datetime as dt, threading, time, html, math
+import os
+import sys
+import json
+import argparse
+import datetime as dt
+import threading
+import time
+import html
+import math
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 FLEET_DIR = os.path.dirname(HERE)
@@ -72,7 +80,8 @@ try:
 except Exception:  # pragma: no cover - audit is optional, registry signals still work
     session_audit = None
 
-NOW = lambda: dt.datetime.now(dt.timezone.utc)
+def NOW():
+    return dt.datetime.now(dt.timezone.utc)
 
 # --------------------------------------------------------------------------- #
 # Tunable thresholds. Every bottleneck score is a transparent function of these
@@ -95,10 +104,14 @@ def _reset_of(info):
 
 
 def severity_of(score):
-    if score >= CFG["sev_critical"]: return "CRITICAL"
-    if score >= CFG["sev_high"]:     return "HIGH"
-    if score >= CFG["sev_medium"]:   return "MEDIUM"
-    if score >= CFG["sev_low"]:      return "LOW"
+    if score >= CFG["sev_critical"]:
+        return "CRITICAL"
+    if score >= CFG["sev_high"]:
+        return "HIGH"
+    if score >= CFG["sev_medium"]:
+        return "MEDIUM"
+    if score >= CFG["sev_low"]:
+        return "LOW"
     return "OK"
 
 
@@ -266,7 +279,6 @@ def collect(audit=True, audit_days=1.5, audit_max=80):
     # action router then sent them to AUTO_RESUME (autonomous) or SURFACE (interactive).
     api_error = _of(lambda s: s.get("disp") == "STOPPED_APIERR")
     # fraction of in-flight workers sitting on a rate-limited account (the real hit)
-    n_active = len(active)
     workers_on_throttled = sum(1 for s in active if s.get("account") in throttled_accts)
 
     snap["registry"] = {
@@ -927,8 +939,8 @@ td.r,th.r{{text-align:right;font-variant-numeric:tabular-nums}}
     elif a and "error" in a:
         P(f'<div class="sec muted">token audit unavailable: {_esc(a["error"])}</div>')
 
-    P(f'<p class="muted" style="font-size:12px">Sources: tools/_registry/sessions.json '
-      f'(fleet_sessions.py) + session_audit.py · scoring tunable in fleet_bottleneck.py CFG.</p>')
+    P('<p class="muted" style="font-size:12px">Sources: tools/_registry/sessions.json '
+      '(fleet_sessions.py) + session_audit.py · scoring tunable in fleet_bottleneck.py CFG.</p>')
     P(f'<script>setTimeout(function(){{location.reload()}},{interval*1000});</script>')
     P('</main></body></html>')
     return "".join(parts)
@@ -1044,7 +1056,7 @@ def serve(port, audit, audit_days, audit_max, interval):
     print(f"  dashboard: http://localhost:{port}/")
     print(f"  health:    http://localhost:{port}/health")
     print(f"  metrics:   http://localhost:{port}/metrics  (Prometheus exposition)")
-    print(f"  api:       /latest  /bottlenecks")
+    print("  api:       /latest  /bottlenecks")
     try:
         srv.serve_forever()
     except KeyboardInterrupt:

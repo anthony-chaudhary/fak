@@ -14,7 +14,6 @@ import os
 import platform
 import shutil
 import shlex
-import socket
 import subprocess
 import sys
 import time

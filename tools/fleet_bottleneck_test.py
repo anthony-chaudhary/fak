@@ -69,7 +69,7 @@ def emitted_families(snap):
     """The set of metric family names render_prometheus emits for `snap`."""
     ranked = fb.rank_bottlenecks(snap)
     text = fb.render_prometheus(snap, ranked)
-    return {l.split()[2] for l in text.splitlines() if l.startswith("# TYPE ")}, text, ranked
+    return {line.split()[2] for line in text.splitlines() if line.startswith("# TYPE ")}, text, ranked
 
 
 class AuditEmptyAlertTest(unittest.TestCase):
@@ -116,14 +116,14 @@ class ScorerTest(unittest.TestCase):
 class PrometheusExpositionTest(unittest.TestCase):
     def test_exposition_is_well_formed(self):
         fams, text, _ = emitted_families(make_snap())
-        help_names = {l.split()[2] for l in text.splitlines() if l.startswith("# HELP ")}
+        help_names = {line.split()[2] for line in text.splitlines() if line.startswith("# HELP ")}
         self.assertEqual(fams, help_names, "every TYPE must have a matching HELP")
         line_re = re.compile(r'^[a-zA-Z_:][a-zA-Z0-9_:]*(\{[^}]*\})? -?[0-9].*$')
-        for l in text.splitlines():
-            if not l or l.startswith("#"):
+        for line in text.splitlines():
+            if not line or line.startswith("#"):
                 continue
-            self.assertRegex(l, line_re, f"malformed sample line: {l!r}")
-            base = l.split("{")[0].split(" ")[0]
+            self.assertRegex(line, line_re, f"malformed sample line: {line!r}")
+            base = line.split("{")[0].split(" ")[0]
             self.assertIn(base, fams, f"series {base} has no TYPE")
 
     def test_expected_families_present(self):
@@ -166,7 +166,7 @@ class PrometheusExpositionTest(unittest.TestCase):
         ranked["bottlenecks"].append({"id": "i", "title": "i", "layer": "L", "severity": "LOW", "score": float("inf")})
         ranked["bottlenecks"].append({"id": "n", "title": "n", "layer": "L", "severity": "LOW", "score": float("nan")})
         text = fb.render_prometheus(snap, ranked)  # must not raise
-        score_lines = [l for l in text.splitlines() if l.startswith("fleet_bottleneck_score{")]
+        score_lines = [line for line in text.splitlines() if line.startswith("fleet_bottleneck_score{")]
         self.assertEqual(len(score_lines), n_before, "non-finite scores must be dropped, not emitted")
 
     def test_snapshot_count_gauges_have_no_total_suffix(self):
@@ -182,22 +182,22 @@ class PrometheusExpositionTest(unittest.TestCase):
         # severity is a function of the score; as a label it churns the series every
         # threshold crossing. It must NOT appear on fleet_bottleneck_score.
         _, text, _ = emitted_families(make_snap())
-        score_lines = [l for l in text.splitlines() if l.startswith("fleet_bottleneck_score{")]
+        score_lines = [line for line in text.splitlines() if line.startswith("fleet_bottleneck_score{")]
         self.assertTrue(score_lines, "expected fleet_bottleneck_score series")
-        for l in score_lines:
-            self.assertNotIn("severity=", l, f"severity must not be a label on the score: {l!r}")
-            self.assertIn("id=", l)  # stable identity is still present
+        for line in score_lines:
+            self.assertNotIn("severity=", line, f"severity must not be a label on the score: {line!r}")
+            self.assertIn("id=", line)  # stable identity is still present
 
     def test_bottleneck_severity_is_a_separate_numeric_gauge(self):
         # severity is exposed as a stable-keyed numeric gauge (0..4), not a label.
         fams, text, _ = emitted_families(make_snap())
         self.assertIn("fleet_bottleneck_severity", fams)
-        sev_lines = [l for l in text.splitlines() if l.startswith("fleet_bottleneck_severity{")]
+        sev_lines = [line for line in text.splitlines() if line.startswith("fleet_bottleneck_severity{")]
         self.assertTrue(sev_lines)
-        for l in sev_lines:
-            val = float(l.rsplit(" ", 1)[1])
-            self.assertIn(val, {0.0, 1.0, 2.0, 3.0, 4.0}, f"severity must be 0..4: {l!r}")
-            self.assertNotIn("severity=", l)
+        for line in sev_lines:
+            val = float(line.rsplit(" ", 1)[1])
+            self.assertIn(val, {0.0, 1.0, 2.0, 3.0, 4.0}, f"severity must be 0..4: {line!r}")
+            self.assertNotIn("severity=", line)
 
     def test_fleet_version_fallback_does_not_crash_engine(self):
         # the import is guarded; app_version() must always return a usable string.

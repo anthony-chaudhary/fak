@@ -306,7 +306,7 @@ def kpi_headings(text: str) -> dict[str, Any]:
     soft: list[str] = []
     body = _strip_front_matter(text)
     levels = [len(m.group(1)) for m in _H_RE.finditer(body)]
-    h1s = [l for l in levels if l == 1]
+    h1s = [lvl for lvl in levels if lvl == 1]
     score = 100
     if len(h1s) == 0:
         defects.append("no H1 heading (a '# Title' line)")
@@ -800,7 +800,7 @@ def render(payload: dict[str, Any]) -> str:
          f"site checks: {c.get('site_checks_ok', '0/0')}  ·  "
          f"JSON-LD present: {', '.join(c.get('present_jsonld', [])) or 'none'}"),
         (f"discovery orphans (published, not front-door-reachable): {c.get('discovery_orphans', 0)}"),
-        (f"grades: " + " ".join(f"{g}:{c.get('grade_distribution', {}).get(g, 0)}" for g in "ABCDF")),
+        ("grades: " + " ".join(f"{g}:{c.get('grade_distribution', {}).get(g, 0)}" for g in "ABCDF")),
         f"next: {payload.get('next_action')}",
         "",
         "per-page (worst first):",

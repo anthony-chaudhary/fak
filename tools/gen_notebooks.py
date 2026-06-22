@@ -18,7 +18,10 @@ Why a generator instead of two hand-kept notebooks:
 Modular update path in one line: edit a builder -> run this -> commit; CI runs --check.
 """
 from __future__ import annotations
-import json, sys, pathlib, difflib
+import json
+import sys
+import pathlib
+import difflib
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 NB = ROOT / "notebooks"

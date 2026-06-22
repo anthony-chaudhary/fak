@@ -4,13 +4,11 @@
 Verifies that the benchmark catalog works with the Slack control bridge concept.
 """
 import json
-import os
 import subprocess
 import sys
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
 TOOLS = ROOT / "tools"

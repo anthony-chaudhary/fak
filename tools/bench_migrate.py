@@ -12,14 +12,12 @@ Usage:
 """
 import argparse
 import json
-import os
-import re
 import shutil
 import sys
 from datetime import datetime, timezone
 from hashlib import sha256
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Dict, List, Optional
 
 ROOT = Path(__file__).resolve().parents[1]
 BENCHMARK_DIR = ROOT / "fak" / "experiments" / "benchmark"
@@ -192,7 +190,7 @@ def migrate_fleet_nodes(dry_run: bool) -> List[Dict]:
                         dest_kernel = run_dir / "kernel.json"
                         with open(dest_kernel, "w", encoding="utf-8") as f:
                             json.dump(kernel_data, f, indent=2)
-                        print(f"  -> Converted q8kernel.txt + modelbench-q8.json to kernel.json", file=sys.stderr)
+                        print("  -> Converted q8kernel.txt + modelbench-q8.json to kernel.json", file=sys.stderr)
             else:
                 print(f"  [DRY RUN] Would create {dest_manifest}", file=sys.stderr)
 

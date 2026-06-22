@@ -100,7 +100,8 @@ PROBE_MIN_INTERVAL = float(args_get("--min-interval-min", "0"))
 def read_tail(path, tail_bytes=512 * 1024):
     try:
         with open(path, "rb") as f:
-            f.seek(0, os.SEEK_END); size = f.tell()
+            f.seek(0, os.SEEK_END)
+            size = f.tell()
             f.seek(max(0, size - tail_bytes))
             return f.read().decode("utf-8", "replace").splitlines()
     except OSError:
@@ -159,7 +160,9 @@ def classify(path):
             o = json.loads(ln)
         except json.JSONDecodeError:
             continue
-        cwd = o.get("cwd", cwd); git = o.get("gitBranch", git); sid = o.get("sessionId", sid)
+        cwd = o.get("cwd", cwd)
+        git = o.get("gitBranch", git)
+        sid = o.get("sessionId", sid)
         if o.get("type") not in ("user", "assistant"):
             continue
         m = o.get("message") or {}
@@ -295,7 +298,8 @@ def scan():
             age = (NOW - dt.datetime.fromtimestamp(st.st_mtime, dt.timezone.utc)).total_seconds() / 60.0
             if age > WINDOW_H * 60 or age > MAX_AGE:
                 continue
-            r = classify(path); r["account"] = acct
+            r = classify(path)
+            r["account"] = acct
             r["project"] = os.path.basename(os.path.dirname(path))
             rows.append(r)
             if r["throttle_reset"] and r["disp"] == "STOPPED_LIMIT" and fleet_accounts.throttle_is_active(r["throttle_reset"]):
@@ -751,13 +755,15 @@ def main():
         print("# AUTO-RESUMABLE (autonomous, dead, account available) — safe to run:\n")
         for r in auto:
             print(f"# [{r['disp']}] {r['project']} ({r['git']})  age={r['age_min']}m")
-            print(r["resume_cmd"]); print()
+            print(r["resume_cmd"])
+            print()
         if not auto:
             print("# (none right now)\n")
         print("# SURFACE — stopped but interactive; resume only if you mean to:\n")
         for r in surf:
             print(f"# [{r['disp']}] {r['project']} age={r['age_min']}m  -- {r['last'][:70]}")
-            print(r["resume_cmd"]); print()
+            print(r["resume_cmd"])
+            print()
         return
     # summary (uncapped within window; explicit truncation note)
     print(f"fleet_sessions @ {NOW.strftime('%Y-%m-%d %H:%M')}Z   window={WINDOW_H}h   {len(rows)} sessions\n")

@@ -15,12 +15,11 @@ Usage:
 """
 import argparse
 import json
-import os
 import re
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, List, Set
+from typing import Any, Dict, List
 
 # Paths (relative to repo root)
 ROOT = Path(__file__).resolve().parents[1]
@@ -119,7 +118,6 @@ def scan_runs() -> List[Dict]:
 
         # Extract summary metrics from associated files
         batch_path = run_dir / "batch.json"
-        kernel_path = run_dir / "kernel.json"
 
         peak_tok = None
         baseline_tok = None

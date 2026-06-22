@@ -259,7 +259,7 @@ def refine_body_findings(findings, file_lines):
             refined.append(f)
             continue
         if path not in closes_in_file:
-            closes_in_file[path] = any(RE_BODY_CLOSE.search(l) for l in file_lines[path])
+            closes_in_file[path] = any(RE_BODY_CLOSE.search(line) for line in file_lines[path])
         if not closes_in_file[path]:
             f = dict(f)
             f["hint"] = "file reads .Body but never .Body.Close() — confirm the body is closed on every path"

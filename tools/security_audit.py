@@ -89,7 +89,7 @@ def _workflows_mentioning(root: Path, needle: str) -> list[str]:
     for p in workflow_files(root):
         txt = p.read_text(encoding="utf-8", errors="replace")
         # strip whole-line YAML comments so a "# someday: govulncheck" note never counts.
-        live = "\n".join(l for l in txt.splitlines() if not l.lstrip().startswith("#"))
+        live = "\n".join(line for line in txt.splitlines() if not line.lstrip().startswith("#"))
         if needle in live:
             hits.append(p.relative_to(root).as_posix())
     return hits

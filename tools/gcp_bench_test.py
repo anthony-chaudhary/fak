@@ -335,7 +335,8 @@ class DriverScriptTest(unittest.TestCase):
     def test_write_lf_has_no_carriage_returns(self):
         # The real failure mode: write_text translates \n->\r\n on Windows and the
         # VM's bash rejects CRLF. write_lf must emit pure LF regardless of host OS.
-        import tempfile, os
+        import tempfile
+        import os
         body = self._driver(["llama", "fak-cpu", "fak-cuda"])
         self.assertIn("\n", body)
         d = tempfile.mkdtemp()
@@ -357,7 +358,9 @@ class SourceTarballLayoutTest(unittest.TestCase):
                         f"FAK_SRC {gcp_bench.FAK_SRC} has no go.mod")
 
     def test_tarball_contains_fak_go_mod_and_excludes_root_binary(self):
-        import tarfile, tempfile, os
+        import tarfile
+        import tempfile
+        import os
         d = tempfile.mkdtemp()
         dest = Path(d) / "src.tgz"
         gcp_bench.make_source_tarball(dest, dry_run=False)

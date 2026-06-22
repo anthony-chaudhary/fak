@@ -944,7 +944,7 @@ class FleetControlPaneTest(unittest.TestCase):
         self.assertEqual(doc["schema"], pane.LOOP_AUDIT_SCHEMA)
         self.assertTrue(doc["ok"])  # no broken loop
         self.assertEqual(doc["counts"], {"healthy": 1, "action": 1, "broken": 0, "total": 2})
-        by_name = {l["name"]: l for l in doc["loops"]}
+        by_name = {loop["name"]: loop for loop in doc["loops"]}
         self.assertEqual(by_name["surfacer"]["bucket"], "action")
         self.assertEqual(by_name["happy"]["bucket"], "healthy")
         # detail is a single clean line lifted from the payload, not a blob.
@@ -965,7 +965,7 @@ class FleetControlPaneTest(unittest.TestCase):
 
         self.assertFalse(doc["ok"])
         self.assertEqual(doc["counts"]["broken"], 1)
-        by_name = {l["name"]: l for l in doc["loops"]}
+        by_name = {loop["name"]: loop for loop in doc["loops"]}
         self.assertEqual(by_name["missing-cmd"]["bucket"], "broken")
         self.assertEqual(by_name["missing-cmd"]["state"], "UNAVAILABLE")
 
@@ -979,7 +979,7 @@ class FleetControlPaneTest(unittest.TestCase):
 
         doc = pane.loop_audit(config, names=["a", "ghost"])
 
-        self.assertEqual([l["name"] for l in doc["loops"]], ["a"])
+        self.assertEqual([loop["name"] for loop in doc["loops"]], ["a"])
         self.assertEqual(doc["counts"]["total"], 1)
         self.assertEqual(doc["missing"], ["ghost"])
 
@@ -994,7 +994,7 @@ class FleetControlPaneTest(unittest.TestCase):
 
         doc = pane.loop_audit(config)
 
-        names = {l["name"] for l in doc["loops"]}
+        names = {loop["name"] for loop in doc["loops"]}
         self.assertEqual(names, {"a"})  # disabled + self both excluded
 
     def test_main_loop_audit_exit_codes(self) -> None:

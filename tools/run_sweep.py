@@ -23,19 +23,19 @@ import sys
 import time
 from datetime import datetime
 from pathlib import Path
-from typing import List, Dict, Any, Optional
+from typing import List, Dict
 
 # Import sweep config module
 try:
     from sweep_config import (
-        load_profile, save_profile, list_profiles, get_profile_path,
+        load_profile, list_profiles, get_profile_path,
         SweepProfile, ModelConfig, WorkloadConfig, SweepResult
     )
 except ImportError:
     # Add tools directory to path if running directly
     sys.path.insert(0, str(Path(__file__).parent))
     from sweep_config import (
-        load_profile, save_profile, list_profiles, get_profile_path,
+        load_profile, list_profiles, get_profile_path,
         SweepProfile, ModelConfig, WorkloadConfig, SweepResult
     )
 
@@ -91,7 +91,6 @@ def run_api_model(model: ModelConfig, workload: WorkloadConfig,
     """Run sweep against an API model."""
     # TODO: Implement API model sweep
     # This would call the API endpoint with the workload and measure results
-    start = time.time()
 
     # Placeholder: simulate API call
     print(f"Would run API model {model.name} (trial {trial})")
@@ -289,7 +288,7 @@ def generate_summary(results: List[SweepResult], output_dir: Path, profile: Swee
         if r.error:
             f.write(f"\n**Error:** `{r.error}`\n")
 
-    print(f"\nSummary written to:")
+    print("\nSummary written to:")
     print(f"  JSON: {json_path}")
     print(f"  MD:   {md_path}")
 

@@ -34,12 +34,11 @@ from __future__ import annotations
 import argparse
 import datetime as dt
 import json
-import os
 import shutil
 import subprocess
 import sys
 from pathlib import Path
-from typing import Any, Callable, Mapping, Sequence
+from typing import Any, Callable, Sequence
 
 SCHEMA = "fak.glm52-serve-preflight.v1"
 ROOT = Path(__file__).resolve().parents[1]

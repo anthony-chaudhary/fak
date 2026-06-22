@@ -47,7 +47,7 @@ def main() -> int:
         capture_output=True, text=True,
     ).stdout.strip()
     print(f"core.hooksPath = {got}  (armed: {', '.join(armed)})")
-    print(f"  trunk guard active, blocking off-trunk branches")
+    print("  trunk guard active, blocking off-trunk branches")
     print("  leak-scan guard active, blocking redact-needles in staged content")
     print("  claim-honesty guard active (pre-push, advisory), surfacing CLAIM_UNWITNESSED via `dos review`")
     print("  override once:  FLEET_ALLOW_BRANCH=1 <git cmd>   |   FLEET_ALLOW_LEAK=1 <git cmd>   |   FLEET_ALLOW_RESIDUAL=1 git push")

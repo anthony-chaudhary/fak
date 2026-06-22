@@ -21,7 +21,7 @@ import os
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Dict, List, Optional
 import subprocess
 import time
 
@@ -204,7 +204,7 @@ def cmd_best_slack(args: argparse.Namespace, catalog: Dict) -> str:
 
     best = max(runs, key=lambda r: r.get("peak_tok_per_sec") or 0)
 
-    lines = [f"*Best Run by Peak Throughput:*"]
+    lines = ["*Best Run by Peak Throughput:*"]
     lines.append(format_slack_show(best))
 
     return "\n".join(lines)
@@ -226,7 +226,7 @@ def cmd_status(args: argparse.Namespace, catalog: Dict) -> str:
     # Find most recent run
     recent = sorted(runs, key=lambda r: r.get("timestamp", ""), reverse=True)[:1]
 
-    lines = [f"*Benchmark Catalog Status*"]
+    lines = ["*Benchmark Catalog Status*"]
     lines.append(f"[STATUS] {total_runs} runs across {total_machines} machines")
 
     if recent:
@@ -455,7 +455,7 @@ def run_benchmark_and_transfer(
                     print(f"[OK] Results downloaded: {downloaded_file.name}")
                     break
             else:
-                print(f"  Poll... (no results yet)")
+                print("  Poll... (no results yet)")
 
         except subprocess.TimeoutExpired:
             print("  Poll... (download timeout, retrying)")
@@ -465,7 +465,7 @@ def run_benchmark_and_transfer(
         return None
 
     # Step 3: Register the run in the catalog
-    print(f"\n[3/4] Registering run in catalog...")
+    print("\n[3/4] Registering run in catalog...")
 
     run_id = register_dgx_run(downloaded_file.parent, machine_id=machine_id)
     if run_id:
@@ -474,7 +474,7 @@ def run_benchmark_and_transfer(
         print("WARNING: Failed to register run in catalog", file=sys.stderr)
 
     # Step 4: Cleanup (optional)
-    print(f"\n[4/4] Transfer complete!")
+    print("\n[4/4] Transfer complete!")
     print(f"  Results: {downloaded_file.parent}")
     print(f"  Catalog: {CATALOG_PATH}")
     print(f"  Run ID: {run_id or 'unknown'}")
@@ -565,7 +565,7 @@ def download_and_register(
     print(f"[OK] Downloaded: {downloaded_file.name}")
 
     # Register in catalog
-    print(f"\n[2/2] Registering in catalog...")
+    print("\n[2/2] Registering in catalog...")
     run_id = register_dgx_run(downloaded_file.parent, machine_id=machine_id)
 
     if run_id:
@@ -598,10 +598,10 @@ def main(argv: List[str]) -> int:
     best_p.add_argument("--model", help="Filter by model")
 
     # summary
-    summary_p = sub.add_parser("summary", help="Summary statistics")
+    sub.add_parser("summary", help="Summary statistics")
 
     # status (for !status)
-    status_p = sub.add_parser("status", help="Quick status for Slack")
+    sub.add_parser("status", help="Quick status for Slack")
 
     # register-dgx (internal, for DGX scripts)
     register_p = sub.add_parser("register-dgx", help="Register a DGX run (internal)")

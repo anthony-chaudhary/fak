@@ -13,7 +13,6 @@ comparison; turn-agent bundles check the sweep manifest and JSON.
 """
 import argparse
 import json
-import os
 import shutil
 import subprocess
 import sys

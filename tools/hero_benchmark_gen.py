@@ -29,7 +29,6 @@ import argparse
 import json
 import os
 import re
-import sys
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DEFAULT_DATA = os.path.join(ROOT, "tools", "hero_benchmark.data.json")

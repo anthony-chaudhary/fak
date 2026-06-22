@@ -20,7 +20,8 @@ source. `METRICS` / `GATEWAY_METRICS` below are the contract —
 `fleet_bottleneck_test.py` asserts dashboard/alert references against emitted
 families.
 """
-import json, os
+import json
+import os
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 OUT = os.path.join(HERE, "dashboards", "fleet-bottleneck-overview.json")

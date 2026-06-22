@@ -75,7 +75,7 @@ def fetch_issue(number: int, *, workspace: Path, timeout: int = 60) -> dict[str,
 
 def _labels(issue: dict[str, Any]) -> str:
     labs = issue.get("labels") or []
-    names = [l.get("name") for l in labs if isinstance(l, dict) and l.get("name")]
+    names = [lab.get("name") for lab in labs if isinstance(lab, dict) and lab.get("name")]
     return ", ".join(names) if names else "(none)"
 
 

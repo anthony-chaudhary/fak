@@ -14,7 +14,9 @@ Mirrors the published evasions the repo's own COMPARE doc cites:
   - secret-format variants the regex never enumerated
 Plus verbatim POSITIVE CONTROLS that the gate must still catch.
 """
-import json, base64, os
+import json
+import base64
+import os
 
 results = []
 

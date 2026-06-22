@@ -119,7 +119,6 @@ def test_dirty():
     print("dirty tree:")
     with tempfile.TemporaryDirectory() as tmp:
         root = _make_repo(tmp, DIRTY)
-        tracked = mod.tracked_files(root)
         f = mod.run(root, list(mod.CHECKS))
         names = {x.check for x in f if x.level == "FAIL"}
         check("version-drift fires", any(x.check == "version-drift" and x.level == "FAIL" for x in f))

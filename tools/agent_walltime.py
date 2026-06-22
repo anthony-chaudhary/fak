@@ -39,7 +39,13 @@ Usage:
                            [--idle-cutoff SEC] [--top N] [--json OUT] [--md OUT]
                            [--session FILE]   # attribute ONE transcript in detail
 """
-import sys, os, json, glob, argparse, collections, datetime
+import sys
+import os
+import json
+import glob
+import argparse
+import collections
+import datetime
 
 DEFAULT_ROOTS = [
     os.path.join(os.environ.get("CLAUDE_CONFIG_DIR", os.path.expanduser("~/.claude")), "projects"),
@@ -177,7 +183,7 @@ def fold(path, idle_cutoff):
         dur = cur[1] - prev[1]
         if dur < 0:
             continue
-        kind_prev, kind_cur = prev[0], cur[0]
+        kind_cur = cur[0]
         # classify the GAP by what bookends it.
         if kind_cur == "assistant":
             # model produced this turn after the previous event.

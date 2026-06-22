@@ -47,8 +47,7 @@ import datetime as _dt
 import json
 from pathlib import Path
 import subprocess
-import sys
-from typing import Any, Optional
+from typing import Optional
 import urllib.error
 import urllib.request
 

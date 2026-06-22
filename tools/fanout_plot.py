@@ -121,7 +121,6 @@ def dashboard(cols, out, prefix=None):
     # (d) MODELED net $ saved per run
     ax = axes[1, 1]
     net = cols["net_dollars_saved"]
-    pos = net >= 0
     ax.plot(N, net, "-o", color=SHADE, ms=4)
     ax.axhline(0, color="#444", lw=1)
     ax.scatter([N[0]], [net[0]], color=NAIVE, zorder=5)

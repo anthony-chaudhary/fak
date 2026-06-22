@@ -10,7 +10,10 @@ split records.
 Run: python tools/transcript_workload_smoke_test.py   (exits non-zero on failure)
 Also importable as a pytest module (test_* functions).
 """
-import json, os, sys, tempfile
+import json
+import os
+import sys
+import tempfile
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import transcript_workload as tw

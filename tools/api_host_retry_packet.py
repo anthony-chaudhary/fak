@@ -253,7 +253,6 @@ def build_report(root: Path | None = None, paths: dict[str, str] | None = None) 
     if malformed_targets:
         artifact_errors["acceptance_target_rows"] = f"{malformed_targets} target rows are not JSON objects"
 
-    statuses = [str(a.get("status") or "") for a in actions]
     external = [a for a in actions if a["status"] in EXTERNAL_BLOCKERS]
     ready = [a for a in actions if a["status"] == "READY_FOR_LIVE_BRIDGE_RUN"]
     live_confirmed = [a for a in actions if a["status"] == "LIVE_BRIDGE_CONFIRMED"]

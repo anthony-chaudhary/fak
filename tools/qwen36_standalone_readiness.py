@@ -1017,7 +1017,7 @@ def slack_next_actions(
     ]
     live_probe_commands = [
         f"python -m slack_helpers.cli control --channel {channel} --probe",
-        f"sudo journalctl -u slack-control -f",
+        "sudo journalctl -u slack-control -f",
         f"sudo tail -f {transcript_file}",
     ]
     if missing:

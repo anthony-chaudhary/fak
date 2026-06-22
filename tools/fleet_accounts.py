@@ -1718,8 +1718,8 @@ def main(argv: list[str]) -> int:
                 "naive_pools": 1 if doc["granted"] else 0,
                 "headroom_multiplier": doc["distinct_pools"],
                 "reason": doc["reason"],
-                "lane_tags": [l.get("tag") for l in doc["lanes"]],
-                "lane_pools": [l.get("pool") for l in doc["lanes"]],
+                "lane_tags": [lane.get("tag") for lane in doc["lanes"]],
+                "lane_pools": [lane.get("pool") for lane in doc["lanes"]],
             }
         print(json.dumps(doc, indent=1))
         return 0 if doc.get("ok") else 1

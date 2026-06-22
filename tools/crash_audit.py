@@ -737,7 +737,7 @@ def _report(a: dict) -> str:
         if disp.get("evidence_doc"):
             L.append(f"    evidence: {disp['evidence_doc']}")
         if disp.get("tracking_issues"):
-            L.append(f"    tracking: #" + ", #".join(str(i) for i in disp["tracking_issues"]))
+            L.append("    tracking: #" + ", #".join(str(i) for i in disp["tracking_issues"]))
         L.append("    -> this fault has a recorded disposition; it is NOT an unexplained cause.")
     L.append("=" * 78)
     return "\n".join(L)
