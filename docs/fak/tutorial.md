@@ -12,9 +12,11 @@ cloud bill**. Every command below was run on a clean build, and **every output b
 the real, unedited terminal output** — what you see here is what you will see.
 
 - **Time:** ~15 minutes for Parts 1–2 (zero downloads). Part 3 (chat with a real model)
-  adds a model download.
+  adds a model download. Parts 4–6 add a model server you point fak at, the Claude Code
+  wiring, and three worked workflows (~15 min more).
 - **Prereqs:** [Go 1.26+](https://go.dev/dl/) *or* a [prebuilt binary](../../INSTALL.md).
-  Nothing else for Parts 1–2.
+  Nothing else for Parts 1–2. Parts 4–6 add any one OpenAI-compatible model server
+  (Ollama / llama-server / LM Studio) and the Claude Code CLI.
 - **Already know the pitch?** This is the *guided first session*. For the install
   reference and the four usage tiers, see [`fak/GETTING-STARTED.md`](../../GETTING-STARTED.md);
   for the idea, the [main README](../../README.md).
@@ -36,6 +38,9 @@ the real, unedited terminal output** — what you see here is what you will see.
 | **1** | Drive the kernel offline | **none** | a trace replay, a **DENY**, the injection **A/B**, your own policy |
 | **2** | Front a model over HTTP | **none** (synthetic engine) | `/healthz`, a syscall, an adjudication, the access log |
 | **3** | *(optional)* chat with a real local model | ~1 GB GGUF | live tokens from a model the kernel owns |
+| **4** | Point a real model server at the gateway | one model server | `/healthz` against a real Ollama / llama-server / LM Studio upstream |
+| **5** | Connect Claude Code | the Claude Code CLI | Claude talking to a local model through the fak kernel |
+| **6** | Example workflows | none | read-only / development / deployment policies on the same gateway |
 
 You can stop after any part — each one stands on its own.
 
@@ -475,6 +480,224 @@ size/RAM table are in the [Simple Demo README](../../cmd/simpledemo/README.md).
 > **Honesty note.** The in-kernel model path is a *correctness reference* proven bit-exact
 > against HuggingFace, not a production chat engine. For chat-quality serving at scale, use
 > Part 2's Tier 1 proxy in front of a real serving engine. See [`fak/CLAIMS.md`](../../CLAIMS.md).
+
+---
+
+## Part 4 — point a real model server at the gateway
+
+Part 2 used the synthetic engine so you needed zero downloads. To get **real tokens**
+behind the same gate, point `fak serve` at any OpenAI-compatible model server. Pick **one**
+of the three below — they all expose the same `/v1/*` wire, so the gateway config is
+identical. (This is the prerequisite for Part 5.)
+
+### 4.1 Ollama (macOS/Linux, easiest)
+
+[Install Ollama](https://ollama.com/), then:
+
+```sh
+ollama serve &                         # start the server (default port 11434)
+ollama pull qwen2.5:1.5b               # one-time model download (~1 GB)
+```
+
+### 4.2 llama-server (all platforms)
+
+`llama-server` ships with [llama.cpp](https://github.com/ggerganov/llama.cpp) and runs on
+Windows, macOS, and Linux. Point it at any local GGUF:
+
+```sh
+llama-server \
+  -m Qwen2.5-1.5B-Instruct-Q8_0.gguf \
+  --host 127.0.0.1 --port 8131 \
+  --ctx-size 32768 --n-gpu-layers 99
+```
+
+### 4.3 LM Studio (Windows/macOS)
+
+LM Studio is a GUI app: load a model from its catalog, then enable the **local server**
+(Developer tab → *Start Server*, default port `1234`). No CLI install needed — useful when
+you already pick models through a UI.
+
+### 4.4 Verify the model server
+
+Whichever you picked, confirm it answers before wiring fak:
+
+```sh
+curl -s http://localhost:11434/v1/models    # Ollama
+# curl -s http://127.0.0.1:8131/v1/models   # llama-server
+# curl -s http://localhost:1234/v1/models   # LM Studio
+```
+
+A JSON list of `{"data":[{"id":"…","object":"model"}], …}` means it's ready.
+
+### 4.5 Start `fak serve` in front of it
+
+```sh
+./fak serve --addr 127.0.0.1:8080 \
+  --base-url http://localhost:11434/v1 \
+  --model qwen2.5:1.5b \
+  --policy examples/dogfood-claude-policy.json
+```
+
+Verify the gateway (same `/healthz` you hit in Part 2):
+
+```sh
+curl -s http://127.0.0.1:8080/healthz
+# {"engine":"inkernel","model":"qwen2.5:1.5b","ok":true}
+```
+
+For the full serving matrix (auth, hot-reload, cloud upstreams), see
+[`server-quickstart.md`](server-quickstart.md).
+
+✅ **End of Part 4.** You have a real model behind the same kernel gate.
+
+---
+
+## Part 5 — connect Claude Code
+
+With `fak serve` running from Part 4 (and a model server behind it), wire the Claude Code
+CLI to it. Claude Code speaks the Anthropic Messages API; `fak serve` exposes it, so the
+whole job is pointing Claude's base URL at the gateway.
+
+### 5.1 The one-command path (recommended)
+
+The repo ships a launcher that builds `fak`, starts the model server, starts `fak serve`,
+and points Claude Code at it — in one command:
+
+```sh
+./scripts/dogfood-claude.sh                          # macOS/Linux — interactive
+.\scripts\dogfood-claude.ps1                         # Windows PowerShell — interactive
+```
+
+Add `--probe "Reply with exactly the word: pong"` for a one-shot smoke test that writes a
+witness to `experiments/agent-live/`. The launcher's full reference (presets, account
+switcher, large-model timeouts) is in [`docs/integrations/claude.md`](../integrations/claude.md).
+
+### 5.2 Manual wiring (macOS/Linux)
+
+If you started `fak serve` yourself (Part 4.5), set three env vars and launch Claude Code:
+
+```sh
+export ANTHROPIC_BASE_URL="http://127.0.0.1:8080"
+export ANTHROPIC_API_KEY="fak-local-dogfood"
+export ANTHROPIC_MODEL="qwen2.5:1.5b"
+claude --dangerously-skip-permissions
+```
+
+### 5.3 Manual wiring (Windows PowerShell)
+
+PowerShell uses `$env:` instead of `export`:
+
+```powershell
+$env:ANTHROPIC_BASE_URL = "http://127.0.0.1:8080"
+$env:ANTHROPIC_API_KEY  = "fak-local-dogfood"
+$env:ANTHROPIC_MODEL    = "qwen2.5:1.5b"
+claude --dangerously-skip-permissions
+```
+
+### 5.4 Environment variable reference (essentials)
+
+The four variables that matter for a first connection:
+
+| Variable | Purpose | Example |
+|---|---|---|
+| `ANTHROPIC_BASE_URL` | Where Claude Code sends requests — the fak gateway | `http://127.0.0.1:8080` |
+| `ANTHROPIC_API_KEY` | Auth header Claude sends; fak ignores it on loopback | `fak-local-dogfood` |
+| `ANTHROPIC_MODEL` | The model id `fak serve` advertised on `/healthz` | `qwen2.5:1.5b` |
+| `CLAUDE_CONFIG_DIR` | *(Optional)* isolated account dir, keeps fak state separate | `$HOME/.claude-faklocal` |
+
+For the full list (`FAK_DOGFOOD_*`, planner timeouts, account switcher), see the
+[environment reference in the Claude guide](../integrations/claude.md#environment-reference).
+
+### 5.5 Troubleshooting the first connection
+
+| Symptom | Fix |
+|---|---|
+| `claude: command not found` | Install Claude Code first (`npm i -g @anthropic-ai/claude-code`), or use the launcher (5.1) which handles the build + serve + wire in one shot. |
+| Claude connects but every reply is empty | Check the `fak serve` terminal — if `/v1/models` is failing there, the upstream model server from Part 4 isn't running. Re-verify with `curl -s http://localhost:11434/v1/models`. |
+| `connection refused` on `:8080` | `fak serve` isn't running, or is on a different port. Confirm with `curl -s http://127.0.0.1:8080/healthz`. |
+| First reply takes >60 s and Claude times out | Expected on large local models (the system prompt is ~25 K tokens). Raise the timeout: `export FAK_DOGFOOD_TIMEOUT_S=900` (or `$env:FAK_DOGFOOD_TIMEOUT_S = "900"` on Windows). |
+| Model gives wrong / garbled answers | A 1.5 B model is weak — try `qwen2.5-coder:7b` or larger. Garbled tokens specifically: see the [Simple Demo troubleshooting](../../cmd/simpledemo/README.md#troubleshooting). |
+| `address already in use` on `:8080` | Set `FAK_DOGFOOD_PORT=8090` (launcher), or pass a different `--addr` to `fak serve`. |
+
+✅ **End of Part 5.** You have Claude Code talking to a local model through the fak kernel.
+
+---
+
+## Part 6 — example workflows
+
+Three policy-shaped workflows, from safest to most privileged. Each one is a different
+`--policy examples/<file>.json` handed to the **same** `fak serve` command from Part 4.5 —
+the gateway code is identical, only the capability floor changes.
+
+### 6.1 Read-only agent (safe exploration)
+
+The agent can search and read but physically cannot mutate, refund, or exfiltrate. Use this
+to let an agent explore a support inbox, a knowledge base, or a codebase without risk.
+
+```sh
+./fak serve --addr 127.0.0.1:8080 \
+  --base-url http://localhost:11434/v1 --model qwen2.5:1.5b \
+  --policy examples/customer-support-readonly-policy.json
+```
+
+Try the same boundary you watched in Part 1 against this policy:
+
+```sh
+./fak preflight --policy examples/customer-support-readonly-policy.json \
+  --tool refund_payment --args "{}"
+# verdict=DENY reason=POLICY_BLOCK
+```
+
+Allowed: `read_customer_record`, `search_kb`, `create_support_ticket`. Denied: every write,
+refund, and credential rotation.
+
+### 6.2 Development agent (commits allowed, push denied)
+
+The agent can run the build, the tests, and `git diff`/`log`/`status`, and even ship a
+local release — but it cannot `git push`, `git merge`, `git tag`, or exfiltrate. Use this
+for an agent pair-programming on a clone.
+
+```sh
+./fak serve --addr 127.0.0.1:8080 \
+  --base-url http://localhost:11434/v1 --model qwen2.5:1.5b \
+  --policy examples/dev-agent-policy.json
+```
+
+For the **Claude Code** tool surface (`Bash`, `Edit`, `Read`, `Write`, `Glob`, `Grep`, …)
+use the broader [`examples/dogfood-claude-policy.json`](../../examples/dogfood-claude-policy.json),
+which allows those tools but still denies `rm -rf`, `sudo`, `git push`, and writes into
+`.git/`, `internal/kernel/`, or `VERSION`.
+
+### 6.3 Deployment agent (production dry-run)
+
+The agent can plan and validate but cannot apply. `terraform_apply`, `kubectl_delete`,
+`kubectl_exec`, and `deploy_production` are all `POLICY_BLOCK`. Use this for an agent that
+drafts changes for a human to review and merge.
+
+```sh
+./fak serve --addr 127.0.0.1:8080 \
+  --base-url http://localhost:11434/v1 --model qwen2.5:1.5b \
+  --policy examples/devops-dryrun-policy.json
+```
+
+Allowed: `plan_deploy`, `validate_terraform`, `helm_template`, `diff_infra`, `kubectl_get`,
+`create_change_request`. Denied: every mutating production action.
+
+To put **any** of the three on a network-facing host, also require an API key and bind
+publicly:
+
+```sh
+export FAK_GATEWAY_KEY="$(openssl rand -hex 32)"
+./fak serve --addr 0.0.0.0:8080 \
+  --base-url http://localhost:11434/v1 --model qwen2.5:1.5b \
+  --policy examples/devops-dryrun-policy.json \
+  --require-key-env FAK_GATEWAY_KEY
+```
+
+Clients then send `Authorization: Bearer $FAK_GATEWAY_KEY` (or `x-api-key:`). The full
+production hardening checklist is in [`security.md`](security.md).
+
+✅ **End of Part 6.** The same gateway, three different capability floors — pick by intent.
 
 ---
 
