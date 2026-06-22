@@ -1,0 +1,163 @@
+{
+  "_doc": "Single-stream CPU Q8 parity: fak in-kernel vs llama.cpp CPU, Qwen2.5-1.5B-Instruct Q8_0, Apple M3 Pro. The canonical SOTA-parity baseline cited by BENCHMARK-AUTHORITY.md. Read these ratios; do not hardcode. This is the HONEST FENCE row (fak trails single-stream raw throughput by design); fak's value is the fleet-reuse layer ON TOP, measured elsewhere.",
+  "schema": "fak-cpu-parity/1",
+  "date": "2026-06-21",
+  "machine": "node-macos-a / Apple M3 Pro (12 core, arm64) / 36GB unified / macOS 26.5",
+  "model": "Qwen2.5-1.5B-Instruct, Q8_0",
+  "regime": "single-stream, CPU-only, apples-to-apples (both engines CPU, same machine, same Q8 weights)",
+  "methodology": "fak arm: cmd/modelbench -hf <safetensors> -lean (quantize-at-load Q8_0), decode 32 steps x5 reps, prefill P=256 x3 reps, GOMAXPROCS=12. llama.cpp arm: llama-bench -ngl 0 (CPU) -t 12 -p 256 -n 32 -r 3 on the matching q8_0 GGUF. Both single-stream; no batching, no reuse. fak app_version 0.30.0; llama.cpp build 541bf3762.",
+  "metrics": {
+    "decode": {
+      "fak_tok_per_sec": 38.29,
+      "llamacpp_tok_per_sec": 53.335,
+      "fak_over_llamacpp": 0.7179
+    },
+    "prefill_p256": {
+      "fak_tok_per_sec": 242.019,
+      "llamacpp_tok_per_sec": 418.463,
+      "fak_over_llamacpp": 0.5784
+    }
+  },
+  "honesty_fence": "fak trails llama.cpp CPU single-stream (decode 0.72x, prefill@256 0.58x) \u2014 llama.cpp has the hand-tuned arm64 NEON GEMM fak's pure-Go kernel still lacks. This is the documented single-stream loss; fak's win is the cross-agent fleet-reuse layer (4.1x vs tuned warm-KV), not raw tok/s. Never cross-compare the two regimes.",
+  "arms": {
+    "fak": {
+      "app_version": "0.30.0",
+      "backend": {
+        "registered_backends": [
+          "cpu-ref"
+        ],
+        "selected": "legacy"
+      },
+      "budget": "default(GOMAXPROCS)",
+      "decode": {
+        "prompt_tokens": 16,
+        "decode_steps": 32,
+        "reps": 5,
+        "per_token_median_ms": 26.116446,
+        "tok_per_sec": 38.29004911311439
+      },
+      "engine": "fak-in-kernel Q8_0 (pure-Go, quantized weights+activations, int8\u00d7int8\u2192int32 dot)",
+      "go_threads": "GOMAXPROCS=12, matmul workers=12 (FAK_WORKERS / FAK_BUDGET / -budget to pin)",
+      "lean": true,
+      "load_ms": 4204.03825,
+      "model": "qwen2.5-1.5b-instruct (qwen2) [lean]",
+      "precision": "Q8_0",
+      "prefill": [
+        {
+          "tokens": 256,
+          "reps": 3,
+          "median_ms": 1057.770042,
+          "tok_per_sec": 242.01857666148575
+        }
+      ],
+      "quant_ms": 0.000125,
+      "quantized_at_load": true,
+      "source": "~/models/qwen2.5-1.5b-instruct/model.safetensors (quantize-at-load)",
+      "workers": 12
+    },
+    "llamacpp": [
+      {
+        "build_commit": "541bf3762",
+        "build_number": 8200,
+        "cpu_info": "Accelerate, Apple M3 Pro",
+        "gpu_info": "Apple M3 Pro",
+        "backends": "MTL,BLAS",
+        "model_filename": "~/.cache/fak-models/gguf/qwen2.5-1.5b-instruct-q8_0.gguf",
+        "model_type": "qwen2 1.5B Q8_0",
+        "model_size": 1888581632,
+        "model_n_params": 1777088000,
+        "n_batch": 2048,
+        "n_ubatch": 512,
+        "n_threads": 12,
+        "cpu_mask": "0x0",
+        "cpu_strict": false,
+        "poll": 50,
+        "type_k": "f16",
+        "type_v": "f16",
+        "n_gpu_layers": 0,
+        "n_cpu_moe": 0,
+        "split_mode": "layer",
+        "main_gpu": 0,
+        "no_kv_offload": false,
+        "flash_attn": false,
+        "devices": "auto",
+        "tensor_split": "0.00",
+        "tensor_buft_overrides": "none",
+        "use_mmap": false,
+        "use_direct_io": false,
+        "embeddings": false,
+        "no_op_offload": 0,
+        "no_host": false,
+        "n_prompt": 256,
+        "n_gen": 0,
+        "n_depth": 0,
+        "test_time": "2026-06-22T00:58:24Z",
+        "avg_ns": 611798514,
+        "stddev_ns": 5696372,
+        "avg_ts": 418.462702,
+        "stddev_ts": 3.912984,
+        "samples_ns": [
+          613779959,
+          616239500,
+          605376084
+        ],
+        "samples_ts": [
+          417.088,
+          415.423,
+          422.878
+        ]
+      },
+      {
+        "build_commit": "541bf3762",
+        "build_number": 8200,
+        "cpu_info": "Accelerate, Apple M3 Pro",
+        "gpu_info": "Apple M3 Pro",
+        "backends": "MTL,BLAS",
+        "model_filename": "~/.cache/fak-models/gguf/qwen2.5-1.5b-instruct-q8_0.gguf",
+        "model_type": "qwen2 1.5B Q8_0",
+        "model_size": 1888581632,
+        "model_n_params": 1777088000,
+        "n_batch": 2048,
+        "n_ubatch": 512,
+        "n_threads": 12,
+        "cpu_mask": "0x0",
+        "cpu_strict": false,
+        "poll": 50,
+        "type_k": "f16",
+        "type_v": "f16",
+        "n_gpu_layers": 0,
+        "n_cpu_moe": 0,
+        "split_mode": "layer",
+        "main_gpu": 0,
+        "no_kv_offload": false,
+        "flash_attn": false,
+        "devices": "auto",
+        "tensor_split": "0.00",
+        "tensor_buft_overrides": "none",
+        "use_mmap": false,
+        "use_direct_io": false,
+        "embeddings": false,
+        "no_op_offload": 0,
+        "no_host": false,
+        "n_prompt": 0,
+        "n_gen": 32,
+        "n_depth": 0,
+        "test_time": "2026-06-22T00:58:27Z",
+        "avg_ns": 603740486,
+        "stddev_ns": 60024769,
+        "avg_ts": 53.335327,
+        "stddev_ts": 5.015365,
+        "samples_ns": [
+          673038167,
+          570251792,
+          567931500
+        ],
+        "samples_ts": [
+          47.5456,
+          56.1156,
+          56.3448
+        ]
+      }
+    ]
+  }
+}
