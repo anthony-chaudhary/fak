@@ -170,6 +170,14 @@ def _glob_to_re(glob: str) -> re.Pattern[str]:
 def path_matches_lane(path: str, trees: dict[str, list[str]]) -> list[str]:
     """All lanes whose tree globs match `path` (normalized, repo-relative)."""
     p = path.replace("\\", "/").lstrip("./")
+    # Issue text names files in the `fak/internal/...` doc-link convention (AGENTS.md
+    # writes the repo as `fak/`), but the Go module is the repository ROOT and the
+    # dos.toml trees are repo-relative (`internal/...`, `cmd/...`). Strip a leading
+    # `fak/` so a doc-link path matches the real-layout tree. Without this, the
+    # 2026-06-22 dos.toml prefix correction (fak/internal/** -> internal/**) would
+    # have made path-confirmed routing silently go dark.
+    if p.startswith("fak/"):
+        p = p[len("fak/"):]
     hits = []
     for lane, globs in trees.items():
         for glob in globs:

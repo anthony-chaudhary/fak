@@ -40,6 +40,9 @@ concurrent = [
   "cmd", "experiments", "docs", "tools", "visuals", "claude", "ci",
   "tokenizer",
   "contextq", "journal", "examples",
+  "appversion", "boundarylint", "deletioncert", "demoui", "enginecache", "gpulease",
+  "leakcheck", "metalgemm", "modelengine", "pathlint", "pathutil", "radixkv",
+  "ratelimit", "rsiloop", "swebench", "toollint", "tracesink", "urllint", "webbench",
   # new-leaf:lane -- `python tools/new_leaf.py` inserts a generated leaf lane above
 ]
 exclusive = ["abi", "release", "global"]
@@ -53,56 +56,91 @@ autopick = [
   "cmd", "experiments", "docs", "tools", "visuals", "claude", "ci",
   "tokenizer",
   "contextq", "journal", "examples",
+  "appversion", "boundarylint", "deletioncert", "demoui", "enginecache", "gpulease",
+  "leakcheck", "metalgemm", "modelengine", "pathlint", "pathutil", "radixkv",
+  "ratelimit", "rsiloop", "swebench", "toollint", "tracesink", "urllint", "webbench",
   # new-leaf:lane
 ]
 
+# NOTE (2026-06-22, dos-effective-usage audit): these globs were prefixed
+# `fak/internal/...` / `fak/cmd/...`, but the Go module is the REPOSITORY ROOT
+# (AGENTS.md) -- the real tree is `internal/...` and `cmd/...` with NO `fak/`
+# segment. So every glob below matched ZERO files, and the arbiter's disjointness
+# rung was running on phantom trees: a worker editing the REAL path
+# internal/gateway/server.go was ADMITTED against a peer holding the gateway lane
+# (proven: `dos arbitrate --lane gateway --tree internal/gateway/server.go
+# --leases '[{"lane":"x","tree":["fak/internal/gateway/**"]}]'` -> acquire; the
+# same with the corrected `internal/gateway/**` lease -> refuse). The prefix is
+# stripped to the real layout, and the leaves that existed in internal/ but had no
+# lane are added, so arbitrate now actually detects same-tree collisions.
 [lanes.trees]
-adjudicator = ["fak/internal/adjudicator/**"]
-agent = ["fak/internal/agent/**"]
-agentdojo = ["fak/internal/agentdojo/**"]
-architest = ["fak/internal/architest/**"]
-bench = ["fak/internal/bench/**"]
-blob = ["fak/internal/blob/**"]
-canon = ["fak/internal/canon/**"]
-cachemeta = ["fak/internal/cachemeta/**"]
-compute = ["fak/internal/compute/**"]
-cdb = ["fak/internal/cdb/**"]
-ctxmmu = ["fak/internal/ctxmmu/**"]
-engine = ["fak/internal/engine/**"]
-gateway = ["fak/internal/gateway/**"]
-ggufload = ["fak/internal/ggufload/**"]
-grammar = ["fak/internal/grammar/**"]
-harvest = ["fak/internal/harvest/**"]
-ifc = ["fak/internal/ifc/**"]
-kernel = ["fak/internal/kernel/**"]
-kvmmu = ["fak/internal/kvmmu/**"]
-metrics = ["fak/internal/metrics/**"]
-model = ["fak/internal/model/**"]
-normgate = ["fak/internal/normgate/**"]
-plancfi = ["fak/internal/plancfi/**"]
-policy = ["fak/internal/policy/**"]
-preflight = ["fak/internal/preflight/**"]
-provenance = ["fak/internal/provenance/**"]
-recall = ["fak/internal/recall/**"]
-registrations = ["fak/internal/registrations/**"]
-shipgate = ["fak/internal/shipgate/**"]
-steward = ["fak/internal/steward/**"]
-turnbench = ["fak/internal/turnbench/**"]
-vdso = ["fak/internal/vdso/**"]
-witness = ["fak/internal/witness/**"]
-tokenizer = ["fak/internal/tokenizer/**"]
-contextq = ["fak/internal/contextq/**"]
-journal = ["fak/internal/journal/**"]
+adjudicator = ["internal/adjudicator/**"]
+agent = ["internal/agent/**"]
+agentdojo = ["internal/agentdojo/**"]
+architest = ["internal/architest/**"]
+bench = ["internal/bench/**"]
+blob = ["internal/blob/**"]
+canon = ["internal/canon/**"]
+cachemeta = ["internal/cachemeta/**"]
+compute = ["internal/compute/**"]
+cdb = ["internal/cdb/**"]
+ctxmmu = ["internal/ctxmmu/**"]
+engine = ["internal/engine/**"]
+gateway = ["internal/gateway/**"]
+ggufload = ["internal/ggufload/**"]
+grammar = ["internal/grammar/**"]
+harvest = ["internal/harvest/**"]
+ifc = ["internal/ifc/**"]
+kernel = ["internal/kernel/**"]
+kvmmu = ["internal/kvmmu/**"]
+metrics = ["internal/metrics/**"]
+model = ["internal/model/**"]
+normgate = ["internal/normgate/**"]
+plancfi = ["internal/plancfi/**"]
+policy = ["internal/policy/**"]
+preflight = ["internal/preflight/**"]
+provenance = ["internal/provenance/**"]
+recall = ["internal/recall/**"]
+registrations = ["internal/registrations/**"]
+shipgate = ["internal/shipgate/**"]
+steward = ["internal/steward/**"]
+turnbench = ["internal/turnbench/**"]
+vdso = ["internal/vdso/**"]
+witness = ["internal/witness/**"]
+tokenizer = ["internal/tokenizer/**"]
+contextq = ["internal/contextq/**"]
+journal = ["internal/journal/**"]
+# reconciled 2026-06-22: real internal/ leaves that previously had NO lane (so a
+# `(fak <leaf>)` ship-stamp bound to a phantom unit and edits were unprotected).
+appversion = ["internal/appversion/**"]
+boundarylint = ["internal/boundarylint/**"]
+deletioncert = ["internal/deletioncert/**"]
+demoui = ["internal/demoui/**"]
+enginecache = ["internal/enginecache/**"]
+gpulease = ["internal/gpulease/**"]
+leakcheck = ["internal/leakcheck/**"]
+metalgemm = ["internal/metalgemm/**"]
+modelengine = ["internal/modelengine/**"]
+pathlint = ["internal/pathlint/**"]
+pathutil = ["internal/pathutil/**"]
+radixkv = ["internal/radixkv/**"]
+ratelimit = ["internal/ratelimit/**"]
+rsiloop = ["internal/rsiloop/**"]
+swebench = ["internal/swebench/**"]
+toollint = ["internal/toollint/**"]
+tracesink = ["internal/tracesink/**"]
+urllint = ["internal/urllint/**"]
+webbench = ["internal/webbench/**"]
 # new-leaf:tree -- generated leaf trees inserted above this line
-cmd         = ["fak/cmd/**"]
-experiments = ["fak/experiments/**"]
+cmd         = ["cmd/**"]
+experiments = ["experiments/**"]
 examples    = ["examples/**"]
 docs        = ["docs/**"]
 tools       = ["tools/**"]
 visuals     = ["visuals/**"]
 claude      = [".claude/**"]
 ci          = [".github/**"]
-abi         = ["fak/internal/abi/**"]
+abi         = ["internal/abi/**"]
 release     = ["VERSION", "docs/releases/**"]
 global      = ["**/*"]
 

@@ -129,10 +129,16 @@ def add_leaf_lane(text: str, name: str) -> str:
     """Add the leaf's per-leaf concurrency lane to dos.toml: its name to the concurrent
     and autopick arrays (the `# new-leaf:lane` markers) and its disjoint tree to
     [lanes.trees] (the `# new-leaf:tree` marker). Idempotent."""
-    if f'"{name}/**"' in text or f'fak/internal/{name}/**' in text:
+    # The lane tree is matched against the LIVE workspace, whose Go module is the
+    # REPOSITORY ROOT (AGENTS.md) -- the real path is internal/<name>/, NOT
+    # fak/internal/<name>/. Emitting the `fak/` form makes the glob match zero
+    # files, so the arbiter cannot detect a collision on the leaf (dos-effective-
+    # usage audit, 2026-06-22). Idempotency keys on the real-layout tree line (and
+    # still treats a legacy `fak/internal/<name>/**` entry as already-present).
+    if f'["internal/{name}/**"]' in text or f'fak/internal/{name}/**' in text:
         return text
     text = insert_before_all_markers(text, "# new-leaf:lane", f'  "{name}",\n')
-    text = insert_before_marker(text, "# new-leaf:tree", f'{name} = ["fak/internal/{name}/**"]\n')
+    text = insert_before_marker(text, "# new-leaf:tree", f'{name} = ["internal/{name}/**"]\n')
     return text
 
 

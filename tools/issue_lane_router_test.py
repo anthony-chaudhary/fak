@@ -25,14 +25,19 @@ m = load()
 
 # A 6-lane subset mirroring dos doctor output (+ the exclusive abi lane).
 LANES = ["gateway", "compute", "docs", "tools", "experiments", "model", "abi"]
+# Real-layout trees (the Go module is the repo ROOT): `internal/...`, NOT
+# `fak/internal/...`. Mirrors the corrected `dos doctor --json` output after the
+# 2026-06-22 dos.toml prefix reconciliation. Issue bodies below still name files in
+# the `fak/internal/...` doc-link convention on purpose — path_matches_lane strips
+# the `fak/` so the doc-link still routes against these real-layout trees.
 TREES = {
-    "gateway": ["fak/internal/gateway/**"],
-    "compute": ["fak/internal/compute/**"],
+    "gateway": ["internal/gateway/**"],
+    "compute": ["internal/compute/**"],
     "docs": ["docs/**"],
     "tools": ["tools/**"],
-    "experiments": ["fak/experiments/**"],
-    "model": ["fak/internal/model/**"],
-    "abi": ["fak/internal/abi/**"],
+    "experiments": ["experiments/**"],
+    "model": ["internal/model/**"],
+    "abi": ["internal/abi/**"],
 }
 
 
@@ -47,18 +52,33 @@ def route(iss: dict) -> dict:
 
 class GlobTest(unittest.TestCase):
     def test_doublestar_matches_nested(self):
-        rx = m._glob_to_re("fak/internal/gateway/**")
-        self.assertTrue(rx.match("fak/internal/gateway/x.go"))
-        self.assertTrue(rx.match("fak/internal/gateway/sub/deep/x.go"))
+        rx = m._glob_to_re("internal/gateway/**")
+        self.assertTrue(rx.match("internal/gateway/x.go"))
+        self.assertTrue(rx.match("internal/gateway/sub/deep/x.go"))
 
     def test_no_partial_segment_match(self):
-        rx = m._glob_to_re("fak/internal/gateway/**")
-        self.assertFalse(rx.match("fak/internal/gatewayx/x.go"))
+        rx = m._glob_to_re("internal/gateway/**")
+        self.assertFalse(rx.match("internal/gatewayx/x.go"))
 
     def test_single_star_within_segment(self):
         rx = m._glob_to_re("VERSION")
         self.assertTrue(rx.match("VERSION"))
         self.assertFalse(rx.match("VERSION/x"))
+
+
+class PathNormalizationTest(unittest.TestCase):
+    """A doc-link `fak/internal/...` path and the real-layout `internal/...` path
+    must BOTH route to the same lane against the real-layout trees — the lockstep
+    half of the 2026-06-22 dos.toml prefix reconciliation."""
+
+    def test_doclink_prefix_routes_against_real_layout_trees(self):
+        self.assertEqual(m.path_matches_lane("fak/internal/gateway/x.go", TREES), ["gateway"])
+
+    def test_real_layout_path_routes(self):
+        self.assertEqual(m.path_matches_lane("internal/gateway/x.go", TREES), ["gateway"])
+
+    def test_non_fak_top_level_path_unaffected(self):
+        self.assertEqual(m.path_matches_lane("tools/issue_triage.py", TREES), ["tools"])
 
 
 class RoutingRungTest(unittest.TestCase):
