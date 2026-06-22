@@ -69,6 +69,7 @@ Dated working notes: research, audits, and run logs. Kept for the record, not th
 front page.
 
 - [Agentic caching SOTA (2026-06-19)](docs/notes/AGENTIC-CACHING-SOTA-2026-06-19.md)
+- [DOS effective-usage audit (2026-06-22)](docs/notes/DOS-EFFECTIVE-USAGE-AUDIT-2026-06-22.md)
 - [Gate down the stack (2026-06-22)](docs/notes/EXPLAINER-gate-down-the-stack-2026-06-22.md)
 - [Trust floor, two lenses (2026-06-17)](docs/notes/EXPLAINER-trust-floor-two-lenses-2026-06-17.md)
 - [GLM-5.2 five DGX benchmarks (2026-06-22)](docs/notes/GLM52-PERFORMANT-DGX-FIVE-BENCHMARKS-2026-06-22.md)
