@@ -1,0 +1,172 @@
+{
+  "reference": "fak OPTIMIZED (parallel + batched GEMM + fdot), native f32",
+  "ratio_meaning": "\u00d7 fak-opt = engine_time / optimized_fak_time; >1 slower than fak, <1 faster",
+  "q8_parity": {
+    "fak_q8_decode_1t_ms": 7.749909,
+    "fak_q8_decode_allcore_ms": 7.798409,
+    "fak_q8_prefill256_allcore_ms": 145.7846,
+    "llamacpp_q8_1t_decode_ms": 6.9141468757152325,
+    "llamacpp_q8_32t_decode_ms": 6.0475375003079535,
+    "llamacpp_q8_1t_prefill256_ms": 74.67800000449643,
+    "llamacpp_q8_32t_prefill256_ms": 82.87559999735095,
+    "decode_1t_fak_vs_llamacpp_q8_1t": 1.120877114604007,
+    "decode_allcore_fak_vs_llamacpp_q8_32t": 1.2895180889085662,
+    "prefill_allcore_fak_vs_llamacpp_q8_1t": 1.9521760088810922,
+    "fak_f32_to_q8_decode_speedup": 2.2685035398480164,
+    "fak_f32_to_q8_prefill_speedup": 4.687089720039016,
+    "note": "decode is memory-bound (1t\u2248allcore, 1t more reproducible); fak numbers re-measured 2026-06-17 on an IDLE box (CPU ~10%), native all-core, Q8 prefill on the Act-4 register-blocked tile GEMM (fak-q8.json)"
+  },
+  "rows": [
+    {
+      "engine": "fak OPTIMIZED (par+batch)",
+      "precision": "f32",
+      "threads": "all",
+      "decode_ms_per_tok": 17.580696,
+      "decode_tok_per_sec": 56.88056946095877,
+      "prefill256_ms": 683.3055,
+      "prefill256_tok_per_sec": 374.6494064514335,
+      "decode_x_fak_opt": 1.0,
+      "prefill256_x_fak_opt": 1.0
+    },
+    {
+      "engine": "fak serial (pre-parity)",
+      "precision": "f32",
+      "threads": 1,
+      "decode_ms_per_tok": 52.120596,
+      "decode_tok_per_sec": 19.18627331122614,
+      "prefill256_ms": 10974.7707,
+      "prefill256_tok_per_sec": 23.326227672346725,
+      "decode_x_fak_opt": 2.9646491811245697,
+      "prefill256_x_fak_opt": 16.061294252717122
+    },
+    {
+      "engine": "fak Q8_0 (1-thread)",
+      "precision": "Q8_0",
+      "threads": 1,
+      "decode_ms_per_tok": 7.749909,
+      "decode_tok_per_sec": 129.03377317075595,
+      "prefill256_ms": 931.8167,
+      "prefill256_tok_per_sec": 274.73214420819033,
+      "decode_x_fak_opt": 0.4408192371906095,
+      "prefill256_x_fak_opt": 1.3636897405333337
+    },
+    {
+      "engine": "fak Q8_0 (all-core)",
+      "precision": "Q8_0",
+      "threads": "all",
+      "decode_ms_per_tok": 7.798409,
+      "decode_tok_per_sec": 128.23128409910277,
+      "prefill256_ms": 145.7846,
+      "prefill256_tok_per_sec": 1756.015381597233,
+      "decode_x_fak_opt": 0.44357794480946605,
+      "prefill256_x_fak_opt": 0.21335200726468614
+    },
+    {
+      "engine": "HF transformers (eager)",
+      "precision": "f32",
+      "threads": 1,
+      "decode_ms_per_tok": 28.904062500259897,
+      "decode_tok_per_sec": 34.59721276173577,
+      "prefill256_ms": 515.1860999758355,
+      "prefill256_tok_per_sec": 496.90781644149075,
+      "decode_x_fak_opt": 1.6440795347499266,
+      "prefill256_x_fak_opt": 0.7539615881561549
+    },
+    {
+      "engine": "HF transformers (eager)",
+      "precision": "f32",
+      "threads": 32,
+      "decode_ms_per_tok": 35.2222437504679,
+      "decode_tok_per_sec": 28.391149839416915,
+      "prefill256_ms": 128.3879000111483,
+      "prefill256_tok_per_sec": 1993.9573743146414,
+      "decode_x_fak_opt": 2.0034612822193103,
+      "prefill256_x_fak_opt": 0.18789238490126056
+    },
+    {
+      "engine": "HF transformers (sdpa)",
+      "precision": "f32",
+      "threads": 32,
+      "decode_ms_per_tok": 32.34229374993447,
+      "decode_tok_per_sec": 30.919266510033047,
+      "prefill256_ms": 122.96409998089075,
+      "prefill256_tok_per_sec": 2081.9084597844712,
+      "decode_x_fak_opt": 1.8396480861698803,
+      "prefill256_x_fak_opt": 0.17995479325263844
+    },
+    {
+      "engine": "llama.cpp",
+      "precision": "Q4_K_M",
+      "threads": 1,
+      "decode_ms_per_tok": 7.106612500137999,
+      "decode_tok_per_sec": 140.71401810364384,
+      "prefill256_ms": 92.23830001428723,
+      "prefill256_tok_per_sec": 2775.4197547043573,
+      "decode_x_fak_opt": 0.4042281659462173,
+      "prefill256_x_fak_opt": 0.13498837637672642
+    },
+    {
+      "engine": "llama.cpp",
+      "precision": "Q4_K_M",
+      "threads": 32,
+      "decode_ms_per_tok": 4.267915624950547,
+      "decode_tok_per_sec": 234.30641274956957,
+      "prefill256_ms": 94.76029998040758,
+      "prefill256_tok_per_sec": 2701.553288169518,
+      "decode_x_fak_opt": 0.24276147115851085,
+      "prefill256_x_fak_opt": 0.1386792583703886
+    },
+    {
+      "engine": "llama.cpp",
+      "precision": "Q8_0",
+      "threads": 1,
+      "decode_ms_per_tok": 6.9141468757152325,
+      "decode_tok_per_sec": 144.63100335810486,
+      "prefill256_ms": 74.67800000449643,
+      "prefill256_tok_per_sec": 3428.0510991802944,
+      "decode_x_fak_opt": 0.39328061162739136,
+      "prefill256_x_fak_opt": 0.10928932959634662
+    },
+    {
+      "engine": "llama.cpp",
+      "precision": "Q8_0",
+      "threads": 32,
+      "decode_ms_per_tok": 6.0475375003079535,
+      "decode_tok_per_sec": 165.35656040976644,
+      "prefill256_ms": 82.87559999735095,
+      "prefill256_tok_per_sec": 3088.9670784667965,
+      "decode_x_fak_opt": 0.34398737685401953,
+      "prefill256_x_fak_opt": 0.12128630604810138
+    },
+    {
+      "engine": "llama.cpp",
+      "precision": "f16",
+      "threads": 1,
+      "decode_ms_per_tok": 10.543956249421171,
+      "decode_tok_per_sec": 94.8410612055505,
+      "prefill256_ms": 89.94180001900531,
+      "prefill256_tok_per_sec": 2846.2850415035664,
+      "decode_x_fak_opt": 0.5997462358385113,
+      "prefill256_x_fak_opt": 0.13162750778239793
+    },
+    {
+      "engine": "llama.cpp",
+      "precision": "f16",
+      "threads": 32,
+      "decode_ms_per_tok": 9.19447187516198,
+      "decode_tok_per_sec": 108.76100482741244,
+      "prefill256_ms": 88.60459999414161,
+      "prefill256_tok_per_sec": 2889.240513663244,
+      "decode_x_fak_opt": 0.5229867961519828,
+      "prefill256_x_fak_opt": 0.12967054998699937
+    }
+  ],
+  "parity_speedup": {
+    "decode_serial_ms": 52.120596,
+    "decode_opt_ms": 17.580696,
+    "decode_speedup": 2.9646491811245697,
+    "prefill256_serial_ms": 10974.7707,
+    "prefill256_opt_ms": 683.3055,
+    "prefill256_speedup": 16.061294252717122
+  }
+}

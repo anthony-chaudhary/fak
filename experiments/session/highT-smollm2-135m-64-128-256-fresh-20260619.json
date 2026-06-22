@@ -1,0 +1,154 @@
+{
+  "app_version": "0.24.0",
+  "cells": [
+    {
+      "turns": 64,
+      "agents": 2,
+      "prefix": 512,
+      "decode": 4,
+      "result": 8,
+      "arm_A_naive_stateless": {
+        "name": "A_naive_stateless",
+        "prefill_ms": 261688.30297925652,
+        "decode_ms": 6452.136331,
+        "total_ms": 268140.4393102565,
+        "live": false
+      },
+      "arm_B_per_agent_kv": {
+        "name": "B_per_agent_kv",
+        "prefill_ms": 7889.600832,
+        "decode_ms": 6452.136331,
+        "total_ms": 14341.737163,
+        "live": true
+      },
+      "arm_C_fak_fused": {
+        "name": "C_fak_fused",
+        "prefill_ms": 6143.559712,
+        "clone_ms": 3.921125,
+        "decode_ms": 4632.773001,
+        "total_ms": 10780.253838,
+        "live": true
+      },
+      "prefill_anchor": 0.9766476257303752,
+      "arm_A_prefill_raw_ms": 267945.46578,
+      "prefill_tokens": {
+        "a": 113920,
+        "b": 2032,
+        "c": 1520,
+        "a_over_c": 74.94736842105263,
+        "b_over_c": 1.3368421052631578
+      },
+      "net_value_add_vs_naive": 24.873295503030853,
+      "net_value_add_vs_tuned": 1.3303710078185638,
+      "turn_tax_A_over_B": 18.696510489819
+    },
+    {
+      "turns": 128,
+      "agents": 2,
+      "prefix": 512,
+      "decode": 4,
+      "result": 8,
+      "arm_A_naive_stateless": {
+        "name": "A_naive_stateless",
+        "prefill_ms": 893955.0886594352,
+        "decode_ms": 14855.203252,
+        "total_ms": 908810.2919114351,
+        "live": false
+      },
+      "arm_B_per_agent_kv": {
+        "name": "B_per_agent_kv",
+        "prefill_ms": 15813.968036,
+        "decode_ms": 14855.203252,
+        "total_ms": 30669.171287999998,
+        "live": true
+      },
+      "arm_C_fak_fused": {
+        "name": "C_fak_fused",
+        "prefill_ms": 12548.114709,
+        "clone_ms": 1.869958,
+        "decode_ms": 10485.15108,
+        "total_ms": 23035.135747,
+        "live": true
+      },
+      "prefill_anchor": 0.9796813470197536,
+      "arm_A_prefill_raw_ms": 912495.7736297597,
+      "prefill_tokens": {
+        "a": 326144,
+        "b": 3056,
+        "c": 2544,
+        "a_over_c": 128.2012578616352,
+        "b_over_c": 1.20125786163522
+      },
+      "net_value_add_vs_naive": 39.45322058845669,
+      "net_value_add_vs_tuned": 1.3314083157506125,
+      "turn_tax_A_over_B": 29.63269803990522
+    },
+    {
+      "turns": 256,
+      "agents": 2,
+      "prefix": 512,
+      "decode": 4,
+      "result": 8,
+      "arm_A_naive_stateless": {
+        "name": "A_naive_stateless",
+        "prefill_ms": 3944033.1507287747,
+        "decode_ms": 38068.350368,
+        "total_ms": 3982101.501096775,
+        "live": false
+      },
+      "arm_B_per_agent_kv": {
+        "name": "B_per_agent_kv",
+        "prefill_ms": 36760.674595000004,
+        "decode_ms": 38068.350368,
+        "total_ms": 74829.024963,
+        "live": true
+      },
+      "arm_C_fak_fused": {
+        "name": "C_fak_fused",
+        "prefill_ms": 29054.310293,
+        "clone_ms": 4.1065,
+        "decode_ms": 25343.196201,
+        "total_ms": 54401.612993999996,
+        "live": true
+      },
+      "prefill_anchor": 1.0123640312691928,
+      "arm_A_prefill_raw_ms": 3895864.559494643,
+      "prefill_tokens": {
+        "a": 1045504,
+        "b": 5104,
+        "c": 4592,
+        "a_over_c": 227.6794425087108,
+        "b_over_c": 1.1114982578397212
+      },
+      "net_value_add_vs_naive": 73.19822486763333,
+      "net_value_add_vs_tuned": 1.375492762893868,
+      "turn_tax_A_over_B": 53.21600145218739
+    }
+  ],
+  "decode_per_turn": 4,
+  "engine": "fak sessionbench (multi-agent session value stack, Q8=true)",
+  "go_threads": 12,
+  "live_validate": null,
+  "methodology": "arms B,C run end-to-end LIVE (attention growth captured); arm A re-prefill computed from prefillCost(L) measured at sampled lengths (O(L^2) prefill-attention captured) summed over exact per-turn contexts; arm A decode := arm B live decode (byte-identical serial work); validate runs arm A fully live",
+  "model": "smollm2-135m",
+  "prefill_model": {
+    "lens": [
+      256,
+      512,
+      1088,
+      1920,
+      2752,
+      3584
+    ],
+    "ms": [
+      464.797875,
+      982.6285,
+      2629.4525,
+      6116.318792,
+      11085.377041,
+      16886.10875
+    ]
+  },
+  "prefix": 512,
+  "result_per_turn": 8
+}

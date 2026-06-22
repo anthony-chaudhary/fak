@@ -1,0 +1,113 @@
+{
+  "app_version": "0.24.0",
+  "cells": [
+    {
+      "turns": 8,
+      "agents": 2,
+      "prefix": 512,
+      "decode": 8,
+      "result": 16,
+      "arm_A_naive_stateless": {
+        "name": "A_naive_stateless",
+        "prefill_ms": 131710.19312145404,
+        "decode_ms": 8159.921707,
+        "total_ms": 139870.11482845404,
+        "live": false
+      },
+      "arm_B_per_agent_kv": {
+        "name": "B_per_agent_kv",
+        "prefill_ms": 17953.196334,
+        "decode_ms": 8159.921707,
+        "total_ms": 26113.118041,
+        "live": true
+      },
+      "arm_C_fak_fused": {
+        "name": "C_fak_fused",
+        "prefill_ms": 11171.546542,
+        "clone_ms": 4.46375,
+        "decode_ms": 8233.703001,
+        "total_ms": 19409.713293,
+        "live": true
+      },
+      "prefill_anchor": 1.012123330675452,
+      "arm_A_prefill_raw_ms": 130132.553148,
+      "prefill_tokens": {
+        "a": 9536,
+        "b": 1248,
+        "c": 736,
+        "a_over_c": 12.956521739130435,
+        "b_over_c": 1.6956521739130435
+      },
+      "net_value_add_vs_naive": 7.206191699848414,
+      "net_value_add_vs_tuned": 1.3453634088669173,
+      "turn_tax_A_over_B": 5.356316109353355
+    },
+    {
+      "turns": 16,
+      "agents": 2,
+      "prefix": 512,
+      "decode": 8,
+      "result": 16,
+      "arm_A_naive_stateless": {
+        "name": "A_naive_stateless",
+        "prefill_ms": 308501.8146183503,
+        "decode_ms": 17416.887622,
+        "total_ms": 325918.7022403503,
+        "live": false
+      },
+      "arm_B_per_agent_kv": {
+        "name": "B_per_agent_kv",
+        "prefill_ms": 22423.409752,
+        "decode_ms": 17416.887622,
+        "total_ms": 39840.297374,
+        "live": true
+      },
+      "arm_C_fak_fused": {
+        "name": "C_fak_fused",
+        "prefill_ms": 15245.391249,
+        "clone_ms": 4.713792,
+        "decode_ms": 17398.564209,
+        "total_ms": 32648.66925,
+        "live": true
+      },
+      "prefill_anchor": 1.0061800489373172,
+      "arm_A_prefill_raw_ms": 306606.9685482,
+      "prefill_tokens": {
+        "a": 22144,
+        "b": 1504,
+        "c": 992,
+        "a_over_c": 22.322580645161292,
+        "b_over_c": 1.5161290322580645
+      },
+      "net_value_add_vs_naive": 9.98260295832273,
+      "net_value_add_vs_tuned": 1.2202732389774202,
+      "turn_tax_A_over_B": 8.18062925536913
+    }
+  ],
+  "decode_per_turn": 8,
+  "engine": "fak sessionbench (multi-agent session value stack, Q8=true)",
+  "go_threads": 12,
+  "live_validate": null,
+  "methodology": "arms B,C run end-to-end LIVE (attention growth captured); arm A re-prefill computed from prefillCost(L) measured at sampled lengths (O(L^2) prefill-attention captured) summed over exact per-turn contexts; arm A decode := arm B live decode (byte-identical serial work); validate runs arm A fully live",
+  "model": "qwen2.5-1.5b-instruct [lean]",
+  "prefill_model": {
+    "lens": [
+      256,
+      416,
+      512,
+      576,
+      736,
+      896
+    ],
+    "ms": [
+      3438.255209,
+      5792.573917,
+      6960.425708,
+      7749.397166,
+      10349.637583,
+      12486.538334
+    ]
+  },
+  "prefix": 512,
+  "result_per_turn": 16
+}

@@ -1,0 +1,53 @@
+{
+  "app_version": "0.24.0",
+  "backend": {
+    "registered_backends": [
+      "cpu-ref",
+      "vulkan"
+    ],
+    "selected": "legacy"
+  },
+  "decode": {
+    "prompt_tokens": 16,
+    "decode_steps": 64,
+    "reps": 3,
+    "per_token_median_ms": 5.65296,
+    "tok_per_sec": 176.89847442755652
+  },
+  "engine": "fak-in-kernel Q8_0 (pure-Go, quantized weights+activations, int8×int8→int32 dot)",
+  "go_threads": "GOMAXPROCS=32, matmul workers=8 (FAK_WORKERS to pin)",
+  "lean": false,
+  "load_ms": 105.5352,
+  "model": "smollm2-135m",
+  "precision": "Q8_0",
+  "prefill": [
+    {
+      "tokens": 16,
+      "reps": 3,
+      "median_ms": 16.5081,
+      "tok_per_sec": 969.2211702134106
+    },
+    {
+      "tokens": 64,
+      "reps": 3,
+      "median_ms": 39.5401,
+      "tok_per_sec": 1618.6099681083253
+    },
+    {
+      "tokens": 256,
+      "reps": 3,
+      "median_ms": 140.1653,
+      "tok_per_sec": 1826.4149543431934
+    },
+    {
+      "tokens": 512,
+      "reps": 3,
+      "median_ms": 337.0229,
+      "tok_per_sec": 1519.1846014024566
+    }
+  ],
+  "quant_ms": 149.2596,
+  "quantized_at_load": false,
+  "source": "internal/model/.cache/smollm2-135m",
+  "workers": 8
+}

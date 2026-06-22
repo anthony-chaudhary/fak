@@ -1,0 +1,67 @@
+{
+  "cases": [
+    {
+      "failures": [
+        "m3-resident-q4k-vs-metal P22: fak 0.44 < 1x llama 51.55",
+        "m3-resident-q4k-vs-metal decode: fak 0.9 < 1x llama 7.29"
+      ],
+      "fak": {
+        "decode": {
+          "decode_steps": 6,
+          "prompt_tokens": 22,
+          "tok_per_sec": 0.9
+        },
+        "engine": "fak in-kernel Gated-DeltaNet (resident Q4_K decode + Q8 fallback), Apple M3 Pro CPU",
+        "model": "Qwen3.6-27B q4_k_m",
+        "path": "fak/experiments/model-ladder/qwen36-m3-resident-q4k-perf-20260619.json",
+        "prefill": {
+          "22": 0.44
+        }
+      },
+      "label": "m3-resident-q4k-vs-metal",
+      "llama": {
+        "backends": "Metal",
+        "build_commit": "b9707",
+        "build_number": "b9707",
+        "decode": {
+          "n_gen": 96,
+          "tok_per_sec": 7.29
+        },
+        "model_type": "qwen35",
+        "path": "fak/experiments/model-ladder/qwen36-m3-llamacpp-metal-bar-20260619.json",
+        "prefill": {
+          "22": 51.55
+        }
+      },
+      "passed": false,
+      "rows": [
+        {
+          "fak_tok_per_sec": 0.44,
+          "kind": "prefill",
+          "llama_tok_per_sec": 51.55,
+          "metric": "prefill_P22",
+          "passed": false,
+          "ratio": 0.008535402521823473,
+          "tokens": 22
+        },
+        {
+          "fak_decode_steps": 6,
+          "fak_tok_per_sec": 0.9,
+          "kind": "decode",
+          "llama_n_gen": 96,
+          "llama_tok_per_sec": 7.29,
+          "metric": "decode",
+          "passed": false,
+          "ratio": 0.1234567901234568
+        }
+      ]
+    }
+  ],
+  "failures": [
+    "m3-resident-q4k-vs-metal P22: fak 0.44 < 1x llama 51.55",
+    "m3-resident-q4k-vs-metal decode: fak 0.9 < 1x llama 7.29"
+  ],
+  "min_ratio": 1.0,
+  "passed": false,
+  "schema": "fak.qwen36-perf-gate.v1"
+}

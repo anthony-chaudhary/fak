@@ -1,0 +1,37 @@
+{
+  "rung": "4c",
+  "date": "2026-06-19",
+  "host": "node-macos-a / M3 Pro / 36GB",
+  "endpoint": "llama-server b9707 Metal -ngl 99 on 127.0.0.1:8131 (operator test-bed, Qwen3.6-27B Q4_K_M, ctx 32768)",
+  "model": "lmstudio-community/Qwen3.6-27B-GGUF:Q4_K_M",
+  "fak_engine": "fak serve inkernel gateway (proxying to the endpoint; no 27B resident in fak -- memory-safe, one 27B in llama-server)",
+  "surfaces": {
+    "agent": {"status": "PASS"},
+    "gateway-openai": {
+      "status": "PASS",
+      "chat_response_excerpt": "OK",
+      "chat_http_status": 200,
+      "chat_perf": {
+        "duration_s": 19.944,
+        "prompt_tokens": 15,
+        "completion_tokens": 119,
+        "decode_tps": 5.967,
+        "e2e_total_tps": 6.719,
+        "baseline_decode_tps": 7.29,
+        "decode_vs_baseline": 0.818
+      },
+      "note": "model correctly replied 'OK' through the fak gateway at 5.97 tok/s decode = 82% of the 7.29 llama.cpp bar."
+    },
+    "mcp-http": {"status": "PASS"},
+    "claude-dogfood": {
+      "status": "PASS",
+      "claude_cli_version": "1.0.96",
+      "probe": "Reply with exactly the word: pong",
+      "reply_witnessed": "pong",
+      "gateway_log": "POST /v1/messages status 200 from claude-cli/1.0.96 (trace gw-3/gw-4, ~215s each)",
+      "note": "real Claude Code CLI headless turn through fak serve /v1/messages -> Qwen3.6-27B. 'pong' present in the run transcript. The raw transcript holds operator paths so it stays local; this file is the scrubbed public witness."
+    }
+  },
+  "summary": {"surfaces": 4, "passed": 4, "failed": 0},
+  "memgate_note": "Only one 27B resident throughout (in llama-server); fak serve proxies. No OOM risk -- the surface smoke does not load the 27B in fak."
+}

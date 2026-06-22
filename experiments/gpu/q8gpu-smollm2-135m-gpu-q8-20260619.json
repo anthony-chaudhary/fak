@@ -1,0 +1,63 @@
+{
+  "app_version": "0.24.0",
+  "backend": {
+    "caps": {
+      "Async": false,
+      "FusedAttn": false,
+      "FusedFFN": false,
+      "GraphCompile": false,
+      "UploadDtype": true,
+      "DeviceMemory": true
+    },
+    "class": "approx",
+    "registered_backends": [
+      "cpu-ref",
+      "vulkan"
+    ],
+    "selected": "vulkan",
+    "tier": "discrete:AMD Radeon RX 7600"
+  },
+  "decode": {
+    "prompt_tokens": 16,
+    "decode_steps": 64,
+    "reps": 3,
+    "per_token_median_ms": 40.616837,
+    "tok_per_sec": 24.62033171120637
+  },
+  "engine": "fak-in-kernel via compute HAL backend \"vulkan\"",
+  "go_threads": "GOMAXPROCS=32, matmul workers=8 (FAK_WORKERS to pin)",
+  "lean": false,
+  "load_ms": 102.5713,
+  "model": "smollm2-135m",
+  "precision": "Q8_0",
+  "prefill": [
+    {
+      "tokens": 16,
+      "reps": 3,
+      "median_ms": 1025.5479,
+      "tok_per_sec": 15.601416569620978
+    },
+    {
+      "tokens": 64,
+      "reps": 3,
+      "median_ms": 2907.6956,
+      "tok_per_sec": 22.010557088575574
+    },
+    {
+      "tokens": 256,
+      "reps": 3,
+      "median_ms": 10669.678,
+      "tok_per_sec": 23.993226412268488
+    },
+    {
+      "tokens": 512,
+      "reps": 3,
+      "median_ms": 20645.8795,
+      "tok_per_sec": 24.799137280637524
+    }
+  ],
+  "quant_ms": 154.0144,
+  "quantized_at_load": false,
+  "source": "internal/model/.cache/smollm2-135m",
+  "workers": 8
+}

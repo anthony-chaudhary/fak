@@ -1,0 +1,72 @@
+{
+  "app_version": "0.24.0",
+  "cells": [
+    {
+      "turns": 512,
+      "agents": 2,
+      "prefix": 512,
+      "decode": 4,
+      "result": 8,
+      "arm_A_naive_stateless": {
+        "name": "A_naive_stateless",
+        "prefill_ms": 20315576.87009713,
+        "decode_ms": 108797.294159,
+        "total_ms": 20424374.16425613,
+        "live": false
+      },
+      "arm_B_per_agent_kv": {
+        "name": "B_per_agent_kv",
+        "prefill_ms": 102713.971088,
+        "decode_ms": 108797.294159,
+        "total_ms": 211511.265247,
+        "live": true
+      },
+      "arm_C_fak_fused": {
+        "name": "C_fak_fused",
+        "prefill_ms": 78866.572613,
+        "clone_ms": 1.908,
+        "decode_ms": 67775.865192,
+        "total_ms": 146644.345805,
+        "live": true
+      },
+      "prefill_anchor": 0.9676629395221803,
+      "arm_A_prefill_raw_ms": 20994476.52725928,
+      "prefill_tokens": {
+        "a": 3663872,
+        "b": 9200,
+        "c": 8688,
+        "a_over_c": 421.71639042357276,
+        "b_over_c": 1.0589318600368325
+      },
+      "net_value_add_vs_naive": 139.27829301659813,
+      "net_value_add_vs_tuned": 1.44234176971444,
+      "turn_tax_A_over_B": 96.56400164031368
+    }
+  ],
+  "decode_per_turn": 4,
+  "engine": "fak sessionbench (multi-agent session value stack, Q8=true)",
+  "go_threads": 12,
+  "live_validate": null,
+  "methodology": "arms B,C run end-to-end LIVE (attention growth captured); arm A re-prefill computed from prefillCost(L) measured at sampled lengths (O(L^2) prefill-attention captured) summed over exact per-turn contexts; arm A decode := arm B live decode (byte-identical serial work); validate runs arm A fully live",
+  "model": "smollm2-135m",
+  "prefill_model": {
+    "lens": [
+      256,
+      512,
+      1856,
+      3456,
+      5056,
+      6656
+    ],
+    "ms": [
+      448.2705,
+      994.606375,
+      5972.529959,
+      15858.536625,
+      31460.2805,
+      51373.733334
+    ]
+  },
+  "prefix": 512,
+  "result_per_turn": 8
+}

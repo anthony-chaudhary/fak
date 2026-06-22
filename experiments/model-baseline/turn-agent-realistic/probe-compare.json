@@ -1,0 +1,44 @@
+{
+  "schema": "fak.llama-turn-agent-compare.v1",
+  "app_version": "0.8.0",
+  "fak": "fak/experiments/model-baseline/turn-agent-realistic/probe-fak-q8.json",
+  "llama": "fak/experiments/model-baseline/turn-agent-realistic/probe-llamacpp-q8.json",
+  "fak_engine": "fak fleetserve (cross-agent shared-prefix, Q8=true)",
+  "llama_engine": "llama.cpp turn-agent shared-prefix (SmolLM2-135M-Instruct-Q8_0.gguf)",
+  "baseline_policy": {
+    "headline_reference": "tuned-llama.cpp",
+    "baseline_role": "tuned_external_reference",
+    "candidate_tuning_label": "measured-current",
+    "candidate_tuning_multiplier": 1.0,
+    "naive_or_noreuse_role": "internal_ablation_only"
+  },
+  "prefix_len": 1024,
+  "decode_steps_per_turn": 32,
+  "result_tokens_between_turns": 64,
+  "cells_compared": 1,
+  "cells": [
+    {
+      "version": "0.8.0",
+      "turns": 10,
+      "agents": 8,
+      "fak_reuse_total_ms": 18318.2674,
+      "llama_total_ms": 29551.81950001861,
+      "fak_reuse_agent_turns_per_sec": 4.367225254065239,
+      "llama_agent_turns_per_sec": 2.7071091172558637,
+      "fak_vs_llama_agent_turns": 1.613243155300736,
+      "tuned_reference_agent_turns_per_sec": 2.7071091172558637,
+      "fak_current_vs_tuned_reference": 1.613243155300736,
+      "fak_current_gap_to_tuned_reference": 0.6198693586358859,
+      "fak_projected_agent_turns_per_sec": 4.367225254065239,
+      "fak_projected_vs_tuned_reference": 1.613243155300736,
+      "fak_reuse_agents_per_sec": 0.436722525406524,
+      "llama_agents_per_sec": 0.27071091172558637,
+      "fak_vs_llama_agents": 1.6132431553007363,
+      "tuned_reference_agents_per_sec": 0.27071091172558637,
+      "fak_current_agents_vs_tuned_reference": 1.6132431553007363,
+      "fak_projected_agents_per_sec": 0.436722525406524,
+      "fak_projected_agents_vs_tuned_reference": 1.6132431553007363,
+      "fak_reuse_speedup_vs_noreuse": 1.3705752269999072
+    }
+  ]
+}

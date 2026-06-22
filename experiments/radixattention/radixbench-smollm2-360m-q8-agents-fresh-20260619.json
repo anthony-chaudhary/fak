@@ -1,0 +1,51 @@
+{
+  "app_version": "0.24.0",
+  "axis": "cache hit rate (hardware/model-independent) — the metric SGLang's paper headlines; fak runs the same radix-tree + longest-prefix + LRU-leaf algorithm, so on the same workload it reaches the same reuse",
+  "engine": "fak radixbench — RadixAttention-style prefix cache (internal/radixkv) over the kernel-owned KV cache",
+  "go_threads": 12,
+  "model": "smollm2-360m-instruct",
+  "notes": "baseline=full prefill per request; declare-one-prefix=fak's pre-radix single-declared-prefix reuse; radix=internal/radixkv automatic longest-prefix discovery (incl. mid-run split). Live arm is a real kernel prefill per request, bit-identical to recompute (proven in internal/radixkv). Cache-aware order = lexicographic (== DFS == longest-shared-prefix-first), reproducing the paper's optimal-hit-rate-at-budget\u003e=maxlen result.",
+  "policy_eviction": {
+    "demonstrated": true,
+    "freed_tokens": 8,
+    "benign_sibling_kept": true,
+    "note": "verdict-driven span eviction (radixkv.EvictNode); shared system prefix + benign sibling preserved. LRU radix caches evict only under memory pressure."
+  },
+  "quant": true,
+  "scale": 1,
+  "sglang_published": {
+    "cache_hit_rate": "50%-99% across benchmarks (CONFIRMED vs NeurIPS 2024 PDF)",
+    "cacheaware_pct_optimal": "96% of optimal on average (DFS-order optimality)",
+    "latency": "up to 3.7x",
+    "source": "arXiv:2312.07104 / NeurIPS 2024 (724be4472168f31ba1c9ac630f15dec8)",
+    "throughput": "up to 6.4x (Llama-2 7B-70B fp16 vs Guidance/vLLM/LMQL)"
+  },
+  "workloads": [
+    {
+      "name": "agents",
+      "desc": "C concurrent agents share a system prefix; each has a private growing context, arrivals interleaved (ReAct shape)",
+      "params": "sys=128 step=24 agents=5 turns=6",
+      "sglang_published": "two-level reuse (shared system + per-agent chain); cache-aware scheduling recovers hit rate under interleaving",
+      "requests": 30,
+      "total_prompt_tokens": 6360,
+      "radix_reused_tokens": 5512,
+      "radix_computed_tokens": 848,
+      "cache_hit_rate": 0.8666666666666667,
+      "prefill_token_speedup": 7.5,
+      "radix_edge_splits": 1,
+      "declare_one_prefix_lcp": 128,
+      "declare_one_prefix_reused_tokens": 3712,
+      "declare_one_prefix_hit_rate": 0.5836477987421383,
+      "radix_reuse_over_declare_one": 1.4849137931034482,
+      "bounded_budget_tokens": 408,
+      "max_request_len": 272,
+      "bounded_fcfs_hit_rate": 0.6213836477987421,
+      "bounded_fcfs_evictions": 29,
+      "bounded_cacheaware_hit_rate": 0.8666666666666667,
+      "cacheaware_pct_of_optimal": 1,
+      "live_baseline_ms": 24582.945834,
+      "live_radix_ms": 4550.539,
+      "live_prefill_speedup": 5.4022052846926485
+    }
+  ]
+}

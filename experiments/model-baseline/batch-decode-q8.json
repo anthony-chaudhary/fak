@@ -1,0 +1,118 @@
+{
+  "baseline_b1_ms_per_tok": 14.161544,
+  "baseline_b1_tok_per_sec": 70.61376923307233,
+  "engine": "fak multi-user batched decode Q8_0 (pure-Go, register-blocked int8 tile GEMM)",
+  "go_threads": "GOMAXPROCS=16, matmul workers=16",
+  "model": "SmolLM2-135M",
+  "naive_serial_ms_per_tok": 52.1,
+  "peak": {
+    "agg_tok_per_sec": 862.1898553007143,
+    "batch": 512,
+    "speedup_vs_b1": 12.209939572194697,
+    "speedup_vs_naive_serial": 44.92009146116721
+  },
+  "points": [
+    {
+      "batch": 1,
+      "decode_steps": 12,
+      "reps": 5,
+      "step_ms": 83.38777,
+      "per_user_ms_per_tok": 83.38777,
+      "agg_tok_per_sec": 11.992166237327128,
+      "speedup_vs_b1": 0.16982758982522256,
+      "speedup_vs_naive_serial": 0.6247918609647434
+    },
+    {
+      "batch": 2,
+      "decode_steps": 12,
+      "reps": 5,
+      "step_ms": 162.458877,
+      "per_user_ms_per_tok": 81.2294385,
+      "agg_tok_per_sec": 12.310807737517477,
+      "speedup_vs_b1": 0.1743400454503942,
+      "speedup_vs_naive_serial": 0.6413930831246606
+    },
+    {
+      "batch": 4,
+      "decode_steps": 12,
+      "reps": 5,
+      "step_ms": 21.926586,
+      "per_user_ms_per_tok": 5.4816465,
+      "agg_tok_per_sec": 182.42694051869267,
+      "speedup_vs_b1": 2.5834471449408487,
+      "speedup_vs_naive_serial": 9.504443601023889
+    },
+    {
+      "batch": 8,
+      "decode_steps": 12,
+      "reps": 5,
+      "step_ms": 29.990864,
+      "per_user_ms_per_tok": 3.748858,
+      "agg_tok_per_sec": 266.74790029390283,
+      "speedup_vs_b1": 3.7775621269197175,
+      "speedup_vs_naive_serial": 13.897565605312337
+    },
+    {
+      "batch": 16,
+      "decode_steps": 12,
+      "reps": 5,
+      "step_ms": 43.389252,
+      "per_user_ms_per_tok": 2.71182825,
+      "agg_tok_per_sec": 368.7549165401607,
+      "speedup_vs_b1": 5.222138975799814,
+      "speedup_vs_naive_serial": 19.212131151742373
+    },
+    {
+      "batch": 32,
+      "decode_steps": 12,
+      "reps": 5,
+      "step_ms": 70.617235,
+      "per_user_ms_per_tok": 2.20678859375,
+      "agg_tok_per_sec": 453.14716726023045,
+      "speedup_vs_b1": 6.417263547631112,
+      "speedup_vs_naive_serial": 23.608967414258007
+    },
+    {
+      "batch": 64,
+      "decode_steps": 12,
+      "reps": 5,
+      "step_ms": 108.342364,
+      "per_user_ms_per_tok": 1.6928494375,
+      "agg_tok_per_sec": 590.7199883510018,
+      "speedup_vs_b1": 8.365507106712199,
+      "speedup_vs_naive_serial": 30.776511393087194
+    },
+    {
+      "batch": 128,
+      "decode_steps": 12,
+      "reps": 5,
+      "step_ms": 174.168955,
+      "per_user_ms_per_tok": 1.3606949609375,
+      "agg_tok_per_sec": 734.9185737492654,
+      "speedup_vs_b1": 10.407581718567466,
+      "speedup_vs_naive_serial": 38.289257692336726
+    },
+    {
+      "batch": 256,
+      "decode_steps": 12,
+      "reps": 5,
+      "step_ms": 310.088588,
+      "per_user_ms_per_tok": 1.211283546875,
+      "agg_tok_per_sec": 825.5705301866833,
+      "speedup_vs_b1": 11.691353388342042,
+      "speedup_vs_naive_serial": 43.0122246227262
+    },
+    {
+      "batch": 512,
+      "decode_steps": 12,
+      "reps": 5,
+      "step_ms": 593.836725,
+      "per_user_ms_per_tok": 1.159837353515625,
+      "agg_tok_per_sec": 862.1898553007143,
+      "speedup_vs_b1": 12.209939572194697,
+      "speedup_vs_naive_serial": 44.92009146116721
+    }
+  ],
+  "precision": "Q8_0",
+  "workers": 16
+}
