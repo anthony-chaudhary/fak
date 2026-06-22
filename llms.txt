@@ -9,6 +9,11 @@
 > context) also drives performance (reuse shared work once instead of every turn).
 > It is for teams running **self-hosted LLM agent fleets** who need prompt-injection
 > containment, capability security, and cache-efficient inference at the same time.
+> It ships as **one static Go binary with zero external dependencies** — the gateway,
+> the capability gate, the result quarantine, and the audit surface in a single
+> process — so the same artifact a developer runs on a laptop is what a platform team
+> hardens for a fleet (you add flags, not components). It does **not** replace the token
+> engine; it fronts one, owning the governance band that vLLM/SGLang leave open.
 
 ## What problem it solves
 
@@ -24,6 +29,7 @@
 - **What it is NOT:** it is **not** a faster model server. SOTA engines (vLLM, SGLang, llama.cpp) win raw throughput and front-of-prompt prefix-cache reuse, and `fak` does not try to beat them at that. `fak` owns the orthogonal questions: which effects are allowed, which results may enter memory, when reuse is still legal, and what survives a session boundary.
 - **Honest scope:** a 29-claim prior-art audit scored **0/29 novel** — every primitive is established; the contribution is the *assembly* into one in-process gate where the tool call is the checkpoint. The result *detector* is ~100% evadable by design (a bonus, never the floor); the floor is the capability lock plus the containment. Power/energy numbers are simulated. The cross-engine shared-KV-pool path is a labeled stub.
 - **Three adoption rungs:** (1) `fak serve` fronts any OpenAI-compatible server (Ollama, vLLM, cloud) with an allow-list, quarantine, and audit trail; (2) run the kernel offline to author and check policies with no model or network; (3) the fused kernel runs the model inside the kernel's address space so the KV cache is a kernel object.
+- **Operational surface (the single-binary thesis):** the governance + gateway half of a governed-serving stack — the OpenAI/Anthropic/MCP wires, the capability floor, result quarantine, audit + `X-Trace-Id` correlation, bearer/`x-api-key` auth, and Prometheus `/metrics` — collapsed into one static Go binary (standard library only; no `go.sum`, no Python, no CUDA toolchain). Where vLLM/SGLang are multi-process Python/CUDA engines you wrap in a reverse proxy + policy + audit layers, `fak` is that layer as a single process. Same binary on a laptop and in a fleet; you add flags (`--policy`, `--require-key-env`), not components. The contrast is operational surface, not throughput.
 
 ## Start here
 
@@ -39,6 +45,7 @@
 - [Addressable KV cache](docs/explainers/addressable-kv-cache.md): how mid-run causal span eviction stays bit-exact (`max|Δ| = 0`).
 - [KV cache for agentic context](docs/explainers/kv-cache-agentic-context.md): what a KV cache is and why agents stress it differently than chat.
 - [SOTA optimizations fak sits on top of](docs/explainers/sota-optimizations.md): the 10 already-shipped serving optimizations that define the honest baseline.
+- [One binary is the whole surface](docs/explainers/one-binary-one-surface.md): why the governed-serving surface as a single static Go binary beats assembling a multi-component Python/CUDA stack — operational surface, laptop to fleet, not throughput.
 
 ## Security
 
@@ -47,6 +54,7 @@
 
 ## Performance & benchmarks
 
+- [Fleet benchmark suite](docs/explainers/fleet-benchmarks.md): run the five headline fleet benchmarks yourself — fan-out to 1024 sub-agents, the 50×50 turn-tax sweep, the turn-tax A/B + safety floor, RadixAttention cache hit rate, and context-changing token accounting. Model-agnostic, no GPU/model/key; every number traced and fenced.
 - [Benchmark authority](BENCHMARK-AUTHORITY.md): the single source of truth for every number, traced to commit + artifact.
 - [Hardware matrix](docs/HARDWARE-MATRIX.md): every machine fak has been profiled on — 4 distinct platforms spanning 2 CPU ISAs (arm64 + x86_64), 4 GPU backends (Apple Metal, AMD Vulkan, NVIDIA CUDA Ada + Ampere), and 4 operating systems. The deterministic metrics reproduce byte-for-byte across all of them.
 - [Web agent benchmark baselines](docs/webbench-baselines.md): real WebVoyager (643 tasks), 8.8–9.7× prefill elimination, measured.
