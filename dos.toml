@@ -145,10 +145,21 @@ release     = ["VERSION", "docs/releases/**"]
 global      = ["**/*"]
 
 # Where fleet keeps the state DOS reads. fak/ carries no version constant; the bare
-# `VERSION` file at the root is the single marker (.claude/project.yaml). The primary
-# plan surface is the 100-unit MVP plan; BUILD-*.md is a secondary prose log.
+# `VERSION` file at the root is the single marker (.claude/project.yaml).
+#
+# Plan surface (2026-06-22, #517): the old `plans_glob = "PLAN-*.md"` matched ZERO
+# files -- there is no `PLAN-*.md` (nor `BUILD-*.md`) at the repo root -- so every
+# plan-facing surface (`dos next-up`, `dos replan`, the class-cycle/lifecycle skills)
+# resolved a phantom empty set while the config advertised a plan surface that does
+# not exist. The real plan-shaped docs live under `docs/**/*-plan.md` (e.g.
+# docs/serving/dual-track-serving-plan.md, docs/explainers/video-content-plan.md),
+# which is also dos 0.28.0's built-in default glob -- so this points the key at the
+# surface that actually exists, and `dos next-up` / `dos replan` now resolve a
+# NON-EMPTY set. There is still no `[lifecycle]` table (no in-tree lifecycle phase
+# machinery runs), so the lifecycle path stays intentionally inert; add one only when
+# a real lifecycle surface lands.
 [paths]
-plans_glob = "PLAN-*.md"
+plans_glob = "docs/**/*-plan.md"
 
 # How fleet stamps a shipped phase in commit subjects. Releases use the UNIVERSAL
 # "vX.Y.Z:" anchor which dos correctly classifies as a release-bump (not a phase
@@ -189,7 +200,14 @@ trailer_stamp = true
 # FLEET_WORKER_BACKEND=opencode is set on a node. The Claude launch shape lives
 # in the shim and is kept byte-identical to the historical direct template.
 [supervise]
-target = 4
+# target = 0 (2026-06-22, #517): NOTHING in-repo keeps a standing loop alive on the
+# live path, so a target of 4 was aspirational, not enforced -- zero loops are actually
+# kept alive. `dos loop` is emit-only (it PRINTS worker_launch_template below, it never
+# Popens), and the in-tree watchdog hardcodes its own argv (see the NOTE under the
+# template). Lowered to 0 so the declared count matches what is actually kept alive. The
+# keep-alive ARMING that would make a non-zero target real is tracked in #20; raise this
+# back to the desired standing-loop count when that lands.
+target = 0
 # NOTE (2026-06-20): in dos v0.28.0 this template is NOT exec'd by anything on the
 # live path -- `dos loop` is emit-only (it only PRINTS this string; the kernel never
 # Popens) and the in-tree enacting driver hardcodes its own `claude` argv. The real

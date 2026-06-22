@@ -292,6 +292,27 @@ jobs:
           echo "leak-scan $RANGE"
           python tools/scrub_public_copy.py --audit-range "$RANGE" --root .
 
+      # Bindable ship-stamp coverage (advisory, #517): the per-commit complement to
+      # the dos-review gate below. `dos review` witnesses each CLAIMED commit against
+      # its own diff; it does NOT report what FRACTION of recent commits carry a
+      # referee-bindable `(fak <leaf>)` stamp — so that coverage number was guessed,
+      # not watched. commit_stamp_doctor measures exactly that. Wired ADVISORY, in the
+      # same two-tier shape as the scorecard family above: the tool's own unit tests
+      # are HARD (a real regression suite), and the coverage check runs with
+      # `--min-coverage` as a ::warning:: FLOOR that never fails the build — so the
+      # number is tracked commit-over-commit without fighting the established stamping
+      # habit (off-lane stamps stay advisory-only per #517). Ratchet to HARD by dropping
+      # the `|| echo` once coverage sits durably above the floor. (#387 is the
+      # verify-referee that binds the `(fak <leaf>)` trailer this measures.)
+      - name: ship-stamp coverage (advisory; unit tests HARD, coverage a watched floor)
+        working-directory: ${{ github.workspace }}
+        run: |
+          python tools/commit_stamp_doctor_test.py
+          echo "::group::commit-stamp-doctor (bindable ship-stamp coverage, advisory)"
+          python tools/commit_stamp_doctor.py --min-coverage 60 \
+            || echo "::warning title=stamp-coverage::bindable ship-stamp coverage below the watched floor (advisory) — add a (fak <leaf>) trailer to recent ships; see tools/commit_stamp_doctor.py and #517"
+          echo "::endgroup::"
+
       # DOS trust-floor gate: the verdict IS the exit code. `dos review` fails the build
       # (exit 1) if any commit in the pushed range makes a code/test/doc claim its own diff
       # does not witness (a "fix: X" that didn't touch X, an empty "done"). This is DOS
