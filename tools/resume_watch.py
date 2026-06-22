@@ -170,7 +170,22 @@ def classify(sid: str, pid: int, prev: dict) -> dict:
     # "shipped, no further action" verdict closes the turn (then the GPU phrase is
     # just backstory).
     shipped = any(k in low for k in SHIPPED)
-    gpu_gated = any(k in low for k in GPU_GATE) and not shipped
+    # A GPU residual must be an OUTSTANDING action this session owns -- a run_48* script
+    # to execute, an explicit "residual ... on a cuda node", or the #47/#474 numeric gate.
+    # A weak token like "hardware-gated" / "on a gpu" alone is NOT enough: a session that
+    # *reports* it "correctly left GPU work untouched as hardware-gated" is DONE, not gated.
+    # GPU-specific: a CUDA/GPU acceptance script or an explicit GPU/CUDA-node residual.
+    # Deliberately NOT triggered by an arm64/m3 residual (run_*_acceptance_on_arm64.sh) --
+    # that's a different hardware gate (Apple-silicon node), not the DGX/GCP GPU path.
+    gpu_action = ("_on_gpu" in low or "gated by #47" in low
+                  or "run_485" in low or "run_486" in low or "run_484" in low
+                  or "run_483" in low or "run_482" in low or "run_479" in low
+                  or ("residual" in low and ("cuda node" in low or "gpu node" in low
+                                             or "on a gpu" in low)))
+    gpu_deferred_report = ("left untouched" in low or "correctly left" in low
+                           or "left alone" in low or "not run here" in low
+                           or "left for" in low)
+    gpu_gated = gpu_action and not shipped and not gpu_deferred_report
 
     if alive and grew:
         status = "WORKING"                 # still actively producing

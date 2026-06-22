@@ -86,12 +86,43 @@ def test_shipped_verdict_overrides_gpu_backstory():
     assert shipped and not gpu_gated
 
 
+def _gpu_gated(low):
+    """Mirror of classify()'s GPU-gated predicate for unit testing the wording rules."""
+    shipped = any(k in low for k in rw.SHIPPED)
+    gpu_action = ("_on_gpu" in low or "gated by #47" in low
+                  or "run_485" in low or "run_486" in low or "run_484" in low
+                  or "run_483" in low or "run_482" in low or "run_479" in low
+                  or ("residual" in low and ("cuda node" in low or "gpu node" in low
+                                             or "on a gpu" in low)))
+    gpu_deferred_report = ("left untouched" in low or "correctly left" in low
+                           or "left alone" in low or "not run here" in low
+                           or "left for" in low)
+    return gpu_action and not shipped and not gpu_deferred_report
+
+
 def test_real_gpu_residual_still_gates():
     low = ("residual: execute tools/run_486_acceptance_on_gpu.sh on a cuda node "
            "to obtain the cosine verdict.")
-    shipped = any(k in low for k in rw.SHIPPED)
-    gpu_gated = any(k in low for k in rw.GPU_GATE) and not shipped
-    assert gpu_gated and not shipped
+    assert _gpu_gated(low)
+
+
+def test_reporting_deferred_gpu_work_is_not_gated():
+    # a session that SAYS it left GPU work untouched is DONE, not a GPU residual.
+    low = ("gpu/cuda/vulkan issues were correctly left untouched as hardware-gated "
+           "on this box. head == origin/main, 21/21 closed.")
+    assert not _gpu_gated(low)
+
+
+def test_weak_gpu_token_alone_does_not_gate():
+    low = "i benchmarked this on a gpu last week; everything builds and tests pass."
+    assert not _gpu_gated(low)
+
+
+def test_arm64_residual_is_not_a_gpu_residual():
+    # an arm64/m3 acceptance residual is a DIFFERENT hardware gate, not GPU.
+    low = ("honest residual: run tools/run_478_acceptance_on_arm64.sh on an arm64 m3. "
+           "the run and the tok/s measure are the m3 residual.")
+    assert not _gpu_gated(low)
 
 
 if __name__ == "__main__":
