@@ -8,42 +8,40 @@ import (
 	"strconv"
 	"strings"
 	"testing"
-
-	"github.com/anthony-chaudhary/fak/internal/agent"
 )
 
 // fleet_test.go is the no-model / no-GPU / no-network witness for the fleet coding
-// agent: a scripted in-process planner stands in for the gateway model, and a temp
-// git repo stands in for the cloned instance. It proves the MECHANICS — tool
+// agent: a scripted in-process CodePlanner stands in for the gateway model, and a
+// temp git repo stands in for the cloned instance. It proves the MECHANICS — tool
 // dispatch, edits applied to a real worktree, the unified-diff capture in the exact
-// harness shape, the step cap, path-escape refusal, and the honest "no gateway"
+// harness shape, the step cap, path-escape refusal, and the honest "no planner"
 // error. Whether a REAL model resolves instances is the DGX/GPU residual, not this.
 
-// fakePlanner is an in-process agent.Planner whose per-turn completion is supplied
-// by fn(call, messages). It records the call count so a test can assert turn budget.
+// fakePlanner is an in-process CodePlanner whose per-turn response is supplied by
+// fn(call, messages). It records the call count so a test can assert turn budget.
 type fakePlanner struct {
 	model string
-	fn    func(call int, messages []agent.Message) *agent.Completion
+	fn    func(call int, messages []ChatMessage) ChatTurn
 	calls int
 }
 
 func (f *fakePlanner) Model() string { return f.model }
 
-func (f *fakePlanner) Complete(_ context.Context, messages []agent.Message, _ []agent.ToolDef, _ ...agent.SampleOpt) (*agent.Completion, error) {
-	c := f.fn(f.calls, messages)
+func (f *fakePlanner) Complete(_ context.Context, messages []ChatMessage, _ []ChatTool) (ChatTurn, error) {
+	t := f.fn(f.calls, messages)
 	f.calls++
-	return c, nil
+	return t, nil
 }
 
-func toolCallCompletion(id, name, args string) *agent.Completion {
-	return &agent.Completion{Message: agent.Message{
+func toolCallTurn(id, name, args string) ChatTurn {
+	return ChatTurn{Message: ChatMessage{
 		Role:      "assistant",
-		ToolCalls: []agent.ToolCall{{ID: id, Type: "function", Function: agent.Func{Name: name, Arguments: args}}},
+		ToolCalls: []ChatToolCall{{ID: id, Name: name, Args: args}},
 	}}
 }
 
-func finalCompletion(text string) *agent.Completion {
-	return &agent.Completion{Message: agent.Message{Role: "assistant", Content: text}}
+func finalTurn(text string) ChatTurn {
+	return ChatTurn{Message: ChatMessage{Role: "assistant", Content: text}}
 }
 
 func requireGit(t *testing.T) {
@@ -79,20 +77,19 @@ func TestFleetRunnerProducesPatch(t *testing.T) {
 	const buggy = "def add(a, b):\n    return a - b\n"
 	const fixed = "def add(a, b):\n    return a + b\n"
 
-	planner := &fakePlanner{model: "test-model", fn: func(call int, _ []agent.Message) *agent.Completion {
+	planner := &fakePlanner{model: "test-model", fn: func(call int, _ []ChatMessage) ChatTurn {
 		switch call {
 		case 0:
-			return toolCallCompletion("c1", "read_file", `{"path":"calc.py"}`)
+			return toolCallTurn("c1", "read_file", `{"path":"calc.py"}`)
 		case 1:
-			return toolCallCompletion("c2", "write_file", `{"path":"calc.py","content":`+strconv.Quote(fixed)+`}`)
+			return toolCallTurn("c2", "write_file", `{"path":"calc.py","content":`+strconv.Quote(fixed)+`}`)
 		default:
-			return toolCallCompletion("c3", "finish", `{}`)
+			return toolCallTurn("c3", "finish", `{}`)
 		}
 	}}
 
 	fr := &fleetRunner{
-		cfg:     RunConfig{MaxSteps: 10},
-		planner: planner,
+		cfg:     RunConfig{MaxSteps: 10, Planner: planner},
 		prepare: gitFixtureWith("calc.py", buggy),
 	}
 	in := Instance{
@@ -129,8 +126,8 @@ func TestRunCodingAgentRespectsStepCap(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "f.txt"), []byte("x"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	planner := &fakePlanner{fn: func(_ int, _ []agent.Message) *agent.Completion {
-		return toolCallCompletion("r", "read_file", `{"path":"f.txt"}`) // never calls finish
+	planner := &fakePlanner{fn: func(_ int, _ []ChatMessage) ChatTurn {
+		return toolCallTurn("r", "read_file", `{"path":"f.txt"}`) // never calls finish
 	}}
 	steps, err := runCodingAgent(context.Background(), planner, Instance{InstanceID: "x"}, dir, 4, false)
 	if err != nil {
@@ -144,15 +141,15 @@ func TestRunCodingAgentRespectsStepCap(t *testing.T) {
 	}
 }
 
-// TestRunCodingAgentStopsOnFinalAnswer: a completion with no tool calls ends the
-// loop, and edits issued before it are applied.
+// TestRunCodingAgentStopsOnFinalAnswer: a turn with no tool calls ends the loop,
+// and edits issued before it are applied.
 func TestRunCodingAgentStopsOnFinalAnswer(t *testing.T) {
 	dir := t.TempDir()
-	planner := &fakePlanner{fn: func(call int, _ []agent.Message) *agent.Completion {
+	planner := &fakePlanner{fn: func(call int, _ []ChatMessage) ChatTurn {
 		if call == 0 {
-			return toolCallCompletion("c", "write_file", `{"path":"a.txt","content":"hi"}`)
+			return toolCallTurn("c", "write_file", `{"path":"a.txt","content":"hi"}`)
 		}
-		return finalCompletion("done")
+		return finalTurn("done")
 	}}
 	steps, err := runCodingAgent(context.Background(), planner, Instance{}, dir, 10, false)
 	if err != nil {
@@ -166,16 +163,16 @@ func TestRunCodingAgentStopsOnFinalAnswer(t *testing.T) {
 	}
 }
 
-// TestFleetRunnerErrorsWithoutGateway: no injected planner + no gateway address is
-// an honest error, not a placeholder patch.
-func TestFleetRunnerErrorsWithoutGateway(t *testing.T) {
-	fr := &fleetRunner{cfg: RunConfig{GatewayAddr: ""}}
+// TestFleetRunnerErrorsWithoutPlanner: no injected planner is an honest error, not
+// a placeholder patch.
+func TestFleetRunnerErrorsWithoutPlanner(t *testing.T) {
+	fr := &fleetRunner{cfg: RunConfig{}}
 	_, err := fr.RunInstance(context.Background(), Instance{InstanceID: "x"})
 	if err == nil {
-		t.Fatal("expected an error when no gateway is configured")
+		t.Fatal("expected an error when no planner is configured")
 	}
-	if !strings.Contains(err.Error(), "no gateway") {
-		t.Errorf("err = %v, want a 'no gateway' message", err)
+	if !strings.Contains(err.Error(), "no planner") {
+		t.Errorf("err = %v, want a 'no planner' message", err)
 	}
 }
 
@@ -184,7 +181,7 @@ func TestFleetRunnerErrorsWithoutGateway(t *testing.T) {
 func TestExecToolRejectsEscape(t *testing.T) {
 	dir := t.TempDir()
 	res, fin := execTool(context.Background(), dir,
-		agent.ToolCall{Function: agent.Func{Name: "write_file", Arguments: `{"path":"../evil.txt","content":"x"}`}}, false)
+		ChatToolCall{Name: "write_file", Args: `{"path":"../evil.txt","content":"x"}`}, false)
 	if fin {
 		t.Error("write_file must not signal finish")
 	}
@@ -196,27 +193,12 @@ func TestExecToolRejectsEscape(t *testing.T) {
 	}
 }
 
-// TestExecToolRunGatedByAllowExec: the shell tool is refused unless allowExec.
-func TestExecToolRunGatedByAllowExec(t *testing.T) {
+// TestExecToolBashGatedByAllowExec: the shell (bash) tool is refused unless allowExec.
+func TestExecToolBashGatedByAllowExec(t *testing.T) {
 	dir := t.TempDir()
 	res, _ := execTool(context.Background(), dir,
-		agent.ToolCall{Function: agent.Func{Name: "run", Arguments: `{"cmd":"echo hi"}`}}, false)
+		ChatToolCall{Name: "bash", Args: `{"command":"echo hi"}`}, false)
 	if !strings.Contains(res, "disabled") {
-		t.Errorf("run tool should be disabled without allowExec, got %q", res)
-	}
-}
-
-func TestGatewayBaseURL(t *testing.T) {
-	cases := map[string]string{
-		"localhost:8080":        "http://localhost:8080/v1",
-		"http://h:9/v1":         "http://h:9/v1",
-		"https://api.x.com/v1/": "https://api.x.com/v1",
-		"":                      "",
-		"host:1/v1":             "http://host:1/v1",
-	}
-	for in, want := range cases {
-		if got := gatewayBaseURL(in); got != want {
-			t.Errorf("gatewayBaseURL(%q) = %q, want %q", in, got, want)
-		}
+		t.Errorf("bash tool should be disabled without allowExec, got %q", res)
 	}
 }

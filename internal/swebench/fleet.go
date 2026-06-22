@@ -8,21 +8,24 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
-
-	"github.com/anthony-chaudhary/fak/internal/agent"
 )
 
 // fleet.go is the fak-native SWE-bench solver: the "fleet" runner drives a real
-// coding-agent loop against a fak gateway (an OpenAI-compatible /v1/chat/completions
-// endpoint — `fak serve`, which may front SGLang OR serve the pure in-kernel engine
-// via `--gguf --engine inkernel`). The gateway ADJUDICATES the model's proposed tool
-// calls; this runner EXECUTES the allowed ones on a per-instance git worktree and
-// captures the resulting `git diff` as the prediction patch the official SWE-bench
-// harness grades.
+// coding-agent loop against an injected CodePlanner (in production an OpenAI-compatible
+// /v1/chat/completions client wired by cmd/fak — `fak serve`, which may front SGLang
+// OR serve the pure in-kernel engine via `--gguf --engine inkernel`). The gateway
+// ADJUDICATES the model's proposed tool calls; this runner EXECUTES the allowed ones
+// on a per-instance git worktree and captures the resulting `git diff` as the
+// prediction patch the official SWE-bench harness grades.
+//
+// LAYERING: swebench is a foundation tier, so it owns NO chat-client dependency —
+// the planner is an interface (CodePlanner) the integrator (cmd/fak, which owns the
+// single outbound HTTPPlanner) injects via RunConfig.Planner. This keeps the
+// layered-DAG (internal/architest) and the "agent is the one chat client" rule.
 //
 // What is witnessed here (fleet_test.go, no GPU / model / network): the loop mechanics
 // — tool dispatch, file edits applied to a real git repo, the unified-diff capture in
-// the exact harness shape, the step cap, and the honest "no gateway" error. What is
+// the exact harness shape, the step cap, and the honest "no planner" error. What is
 // NOT witnessed here and remains the GPU/DGX residual: whether a real model actually
 // RESOLVES instances (resolve-rate). Drive that with `fak swebench run --agent fleet`
 // against a live `fak serve` on the DGX, then grade with the Docker harness.
@@ -34,27 +37,63 @@ const codingSystemPrompt = "You are an autonomous software engineer. You are giv
 	"make edits. Make the smallest change that fixes the issue. Do not ask questions; act. When the fix is " +
 	"complete, call the finish tool."
 
-// fleetRunner executes instances via the fak gateway coding agent.
+// CodePlanner is the minimal model interface the fleet coding loop drives. It is
+// declared in swebench (foundation) so the harness depends on no chat client; an
+// integrator (cmd/fak) injects an HTTPPlanner-backed implementation via
+// RunConfig.Planner. The types below are the OpenAI-shaped subset the loop needs,
+// kept swebench-local for the same layering reason.
+type CodePlanner interface {
+	// Complete sends the running message list + tool catalog and returns the
+	// assistant's next message (tool calls or a final answer).
+	Complete(ctx context.Context, messages []ChatMessage, tools []ChatTool) (ChatTurn, error)
+	// Model reports the model id (for provenance).
+	Model() string
+}
+
+// ChatMessage is one chat-completions message (request or response).
+type ChatMessage struct {
+	Role       string         // system | user | assistant | tool
+	Content    string         // text content (final answer or tool result)
+	ToolCalls  []ChatToolCall // assistant tool calls
+	ToolCallID string         // for role=tool: the call this result answers
+	Name       string         // for role=tool: the tool name
+}
+
+// ChatToolCall is one function call the model emitted.
+type ChatToolCall struct {
+	ID   string // call id (echoed back on the tool result)
+	Name string // function name
+	Args string // raw JSON arguments string as the model emitted them
+}
+
+// ChatTool is one tool advertised to the model (an OpenAI function declaration).
+type ChatTool struct {
+	Name        string
+	Description string
+	Parameters  string // JSON Schema (raw JSON)
+}
+
+// ChatTurn is a planner's response for one turn.
+type ChatTurn struct {
+	Message ChatMessage
+}
+
+// fleetRunner executes instances via the injected coding-agent planner.
 //
-// planner and prepare are injectable so the loop is testable without a model,
-// a GPU, or network: a test supplies a scripted in-process planner and a
-// fixture worktree preparer. In production both are nil and are built from cfg
-// (the gateway HTTP planner + a real `git clone`/checkout).
+// prepare and workRoot are injectable so the loop is testable without a model,
+// a GPU, or network: a test supplies a scripted CodePlanner (RunConfig.Planner)
+// and a fixture worktree preparer. In production prepare is nil (a real `git
+// clone`/checkout) and Planner is wired by cmd/fak.
 type fleetRunner struct {
 	cfg      RunConfig
-	planner  agent.Planner                                            // nil => agent.NewHTTPPlanner from cfg.GatewayAddr
 	prepare  func(ctx context.Context, in Instance, dir string) error // nil => gitCheckoutWorkspace
 	workRoot string                                                   // parent for the per-instance temp dir ("" => os.TempDir)
 }
 
 func (f *fleetRunner) RunInstance(ctx context.Context, in Instance) (Prediction, error) {
-	planner := f.planner
+	planner := f.cfg.Planner
 	if planner == nil {
-		base := gatewayBaseURL(f.cfg.GatewayAddr)
-		if base == "" {
-			return Prediction{}, fmt.Errorf("fleet runner: no gateway configured (pass --gateway ADDR pointing at a running `fak serve`)")
-		}
-		planner = agent.NewHTTPPlanner(base, f.cfg.Model, os.Getenv("FAK_API_KEY"))
+		return Prediction{}, fmt.Errorf("fleet runner: no planner configured (the integrator must set RunConfig.Planner — cmd/fak builds one from --gateway pointing at a running `fak serve`)")
 	}
 	prepare := f.prepare
 	if prepare == nil {
@@ -99,12 +138,12 @@ func (f *fleetRunner) RunInstance(ctx context.Context, in Instance) (Prediction,
 // partial worktree diff is still a (possibly empty) prediction; only a planner
 // failure or context cancellation propagates. Exposed within the package so the
 // test can assert turn accounting directly.
-func runCodingAgent(ctx context.Context, p agent.Planner, in Instance, dir string, maxSteps int, allowExec bool) (int, error) {
+func runCodingAgent(ctx context.Context, p CodePlanner, in Instance, dir string, maxSteps int, allowExec bool) (int, error) {
 	if maxSteps <= 0 {
 		maxSteps = 50
 	}
 	tools := codingTools(allowExec)
-	messages := []agent.Message{
+	messages := []ChatMessage{
 		{Role: "system", Content: codingSystemPrompt},
 		{Role: "user", Content: codingTaskPrompt(in, allowExec)},
 	}
@@ -113,11 +152,11 @@ func runCodingAgent(ctx context.Context, p agent.Planner, in Instance, dir strin
 		if err := ctx.Err(); err != nil {
 			return step, err
 		}
-		comp, err := p.Complete(ctx, messages, tools)
+		turn, err := p.Complete(ctx, messages, tools)
 		if err != nil {
 			return step, fmt.Errorf("planner turn %d: %w", step+1, err)
 		}
-		msg := comp.Message
+		msg := turn.Message
 		messages = append(messages, msg)
 
 		if len(msg.ToolCalls) == 0 {
@@ -128,10 +167,10 @@ func runCodingAgent(ctx context.Context, p agent.Planner, in Instance, dir strin
 		finished := false
 		for _, tc := range msg.ToolCalls {
 			result, fin := execTool(ctx, dir, tc, allowExec)
-			messages = append(messages, agent.Message{
+			messages = append(messages, ChatMessage{
 				Role:       "tool",
 				ToolCallID: tc.ID,
-				Name:       tc.Function.Name,
+				Name:       tc.Name,
 				Content:    result,
 			})
 			if fin {
@@ -149,8 +188,8 @@ func runCodingAgent(ctx context.Context, p agent.Planner, in Instance, dir strin
 // fed back to the model plus whether it was the finish signal. Tool-level
 // failures (bad path, missing file) are returned AS results — the model sees the
 // error and adapts; they are not run-fatal.
-func execTool(ctx context.Context, dir string, tc agent.ToolCall, allowExec bool) (result string, finished bool) {
-	switch tc.Function.Name {
+func execTool(ctx context.Context, dir string, tc ChatToolCall, allowExec bool) (result string, finished bool) {
+	switch tc.Name {
 	case "finish":
 		return "ok: finishing", true
 
@@ -158,7 +197,7 @@ func execTool(ctx context.Context, dir string, tc agent.ToolCall, allowExec bool
 		var a struct {
 			Path string `json:"path"`
 		}
-		if err := json.Unmarshal([]byte(orEmptyObj(tc.Function.Arguments)), &a); err != nil {
+		if err := json.Unmarshal([]byte(orEmptyObj(tc.Args)), &a); err != nil {
 			return "error: invalid arguments: " + err.Error(), false
 		}
 		full, err := safeJoin(dir, a.Path)
@@ -176,7 +215,7 @@ func execTool(ctx context.Context, dir string, tc agent.ToolCall, allowExec bool
 			Path    string `json:"path"`
 			Content string `json:"content"`
 		}
-		if err := json.Unmarshal([]byte(orEmptyObj(tc.Function.Arguments)), &a); err != nil {
+		if err := json.Unmarshal([]byte(orEmptyObj(tc.Args)), &a); err != nil {
 			return "error: invalid arguments: " + err.Error(), false
 		}
 		full, err := safeJoin(dir, a.Path)
@@ -191,24 +230,24 @@ func execTool(ctx context.Context, dir string, tc agent.ToolCall, allowExec bool
 		}
 		return fmt.Sprintf("ok: wrote %d bytes to %s", len(a.Content), a.Path), false
 
-	case "run":
+	case "bash":
 		if !allowExec {
-			return "error: the run tool is disabled; enable with --allow-exec (use only in a sandboxed/containerized run)", false
+			return "error: the bash tool is disabled; enable with --allow-exec (use only in a sandboxed/containerized run)", false
 		}
 		var a struct {
-			Cmd string `json:"cmd"`
+			Command string `json:"command"`
 		}
-		if err := json.Unmarshal([]byte(orEmptyObj(tc.Function.Arguments)), &a); err != nil {
+		if err := json.Unmarshal([]byte(orEmptyObj(tc.Args)), &a); err != nil {
 			return "error: invalid arguments: " + err.Error(), false
 		}
-		if strings.TrimSpace(a.Cmd) == "" {
-			return "error: empty cmd", false
+		if strings.TrimSpace(a.Command) == "" {
+			return "error: empty command", false
 		}
-		out := runShell(ctx, dir, a.Cmd)
+		out := runShell(ctx, dir, a.Command)
 		return truncateOutput(out), false
 
 	default:
-		return "error: unknown tool " + tc.Function.Name, false
+		return "error: unknown tool " + tc.Name, false
 	}
 }
 
@@ -249,27 +288,20 @@ func gitCheckoutWorkspace(ctx context.Context, in Instance, dir string) error {
 
 // ---- tool catalog --------------------------------------------------------------
 
-func codingTools(allowExec bool) []agent.ToolDef {
-	defs := []agent.ToolDef{
-		toolDef("read_file", "Read a UTF-8 text file from the repository.",
-			`{"type":"object","properties":{"path":{"type":"string","description":"path relative to the repository root"}},"required":["path"]}`),
-		toolDef("write_file", "Create or overwrite a file with the given full content.",
-			`{"type":"object","properties":{"path":{"type":"string","description":"path relative to the repository root"},"content":{"type":"string","description":"the complete new file content"}},"required":["path","content"]}`),
-		toolDef("finish", "Signal that the fix is complete.",
-			`{"type":"object","properties":{}}`),
+func codingTools(allowExec bool) []ChatTool {
+	defs := []ChatTool{
+		{Name: "read_file", Description: "Read a UTF-8 text file from the repository.",
+			Parameters: `{"type":"object","properties":{"path":{"type":"string","description":"path relative to the repository root"}},"required":["path"]}`},
+		{Name: "write_file", Description: "Create or overwrite a file with the given full content.",
+			Parameters: `{"type":"object","properties":{"path":{"type":"string","description":"path relative to the repository root"},"content":{"type":"string","description":"the complete new file content"}},"required":["path","content"]}`},
+		{Name: "finish", Description: "Signal that the fix is complete.",
+			Parameters: `{"type":"object","properties":{}}`},
 	}
 	if allowExec {
-		defs = append(defs, toolDef("run", "Run a shell command in the repository root (e.g. to reproduce the bug or run tests).",
-			`{"type":"object","properties":{"cmd":{"type":"string","description":"the shell command"}},"required":["cmd"]}`))
+		defs = append(defs, ChatTool{Name: "bash", Description: "Run a shell command in the repository root (e.g. to reproduce the bug or run tests).",
+			Parameters: `{"type":"object","properties":{"command":{"type":"string","description":"the shell command"}},"required":["command"]}`})
 	}
 	return defs
-}
-
-func toolDef(name, desc, schema string) agent.ToolDef {
-	return agent.ToolDef{
-		Type:     "function",
-		Function: agent.ToolDefFunction{Name: name, Description: desc, Parameters: json.RawMessage(schema)},
-	}
 }
 
 func codingTaskPrompt(in Instance, allowExec bool) string {
@@ -289,32 +321,13 @@ func codingTaskPrompt(in Instance, allowExec bool) string {
 	}
 	b.WriteString("Edit the repository files to fix the issue. ")
 	if allowExec {
-		b.WriteString("You may use the run tool to reproduce and verify. ")
+		b.WriteString("You may use the bash tool to reproduce and verify. ")
 	}
 	b.WriteString("Make the smallest change that resolves it, then call finish.")
 	return b.String()
 }
 
 // ---- small helpers -------------------------------------------------------------
-
-// gatewayBaseURL normalizes a gateway address into an OpenAI-compatible base URL.
-// "localhost:8080" -> "http://localhost:8080/v1"; a full URL is preserved (and a
-// missing /v1 segment is appended). The OpenAI adapter then posts to
-// <base>/chat/completions.
-func gatewayBaseURL(addr string) string {
-	addr = strings.TrimSpace(addr)
-	if addr == "" {
-		return ""
-	}
-	if !strings.Contains(addr, "://") {
-		addr = "http://" + addr
-	}
-	addr = strings.TrimRight(addr, "/")
-	if !strings.Contains(addr, "/v1") {
-		addr += "/v1"
-	}
-	return addr
-}
 
 // safeJoin resolves a model-supplied relative path under root, refusing absolute
 // paths and any path that escapes the worktree (a poisoned `../../etc/passwd`).

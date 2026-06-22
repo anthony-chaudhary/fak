@@ -1,6 +1,9 @@
 {
   "version": "fak-policy/v1",
   "allow": [
+    "read_file",
+    "write_file",
+    "finish",
     "bash"
   ],
   "arg_rules": [
