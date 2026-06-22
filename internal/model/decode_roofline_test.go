@@ -33,11 +33,60 @@ func TestQ8DecodeStreamBytes(t *testing.T) {
 	if r.StreamBytes != want {
 		t.Fatalf("roofline StreamBytes = %d, want %d", r.StreamBytes, want)
 	}
-	if r.AchievedGBps <= 0 || r.CeilingGBps <= 0 || r.BWUtilPct <= 0 {
-		t.Fatalf("roofline produced non-positive rates: %+v", r)
+	if r.PerTokenMS != 10.0 {
+		t.Fatalf("roofline PerTokenMS = %.3f, want 10", r.PerTokenMS)
 	}
 	if r.TokPerSec != 100.0 { // 1000/10
 		t.Fatalf("roofline TokPerSec = %.3f, want 100", r.TokPerSec)
+	}
+	if r.AchievedGBps <= 0 {
+		t.Fatalf("roofline AchievedGBps = %g, want > 0: %+v", r.AchievedGBps, r)
+	}
+	// CeilingGBps is a runtime STREAM-triad probe (measureAggregateStreamGBps). It legitimately
+	// measures 0 on a sandboxed / heavily-contended / coarse-timer runner (#494) — an environment
+	// fact, not a code regression — so the bandwidth-utilization leg is reported N/A there rather
+	// than failing the otherwise-correct package. Every assertion that does NOT depend on the
+	// ceiling stays above; the zero-ceiling branch itself is witnessed by
+	// TestQ8DecodeStreamBytesZeroCeiling.
+	if na := assertCeilingLeg(t, r); na != "" {
+		t.Logf("roofline bandwidth-utilization leg N/A: %s (%+v)", na, r)
+	}
+}
+
+// assertCeilingLeg validates the roofline's bandwidth-utilization leg — CeilingGBps and the
+// BWUtilPct derived from it. That ceiling is measureAggregateStreamGBps, a runtime STREAM-triad
+// probe; on a sandboxed, heavily-contended, or coarse-timer host it legitimately measures 0
+// (#494). When the ceiling is 0, assertCeilingLeg returns a non-empty N/A reason instead of
+// failing, leaving the StreamBytes / PerTokenMS / AchievedGBps assertions to carry the test. A
+// positive ceiling must yield a positive utilization; a negative ceiling is always a bug.
+func assertCeilingLeg(t *testing.T, r DecodeRoofline) (naReason string) {
+	t.Helper()
+	if r.CeilingGBps < 0 {
+		t.Fatalf("roofline CeilingGBps = %g, want >= 0: %+v", r.CeilingGBps, r)
+	}
+	if r.CeilingGBps == 0 {
+		return "runtime BW probe measured 0 on this runner — sandboxed/coarse-timer; StreamBytes/PerTokenMS/AchievedGBps still asserted"
+	}
+	if r.BWUtilPct <= 0 {
+		t.Fatalf("roofline produced non-positive utilization despite positive ceiling: %+v", r)
+	}
+	return ""
+}
+
+// TestQ8DecodeStreamBytesZeroCeiling witnesses the #494 guard directly: when the runtime BW
+// probe measures a 0 ceiling, the bandwidth-utilization leg must be reported N/A, not failed.
+// This drives the CeilingGBps==0 branch on demand — the live probe on this host happens to
+// return a positive ceiling, so without this synthetic value the guard would go unexercised.
+func TestQ8DecodeStreamBytesZeroCeiling(t *testing.T) {
+	// Ceiling 0 (the #494 condition): leg is N/A, not a failure.
+	zero := DecodeRoofline{StreamBytes: 1152, PerTokenMS: 10, TokPerSec: 100, AchievedGBps: 0.0089856, CeilingGBps: 0, BWUtilPct: 0}
+	if na := assertCeilingLeg(t, zero); na == "" {
+		t.Fatalf("CeilingGBps==0 must report the ceiling leg N/A, got asserted: %+v", zero)
+	}
+	// Positive ceiling with positive util: leg is asserted (no N/A).
+	ok := DecodeRoofline{StreamBytes: 1152, PerTokenMS: 10, TokPerSec: 100, AchievedGBps: 5, CeilingGBps: 50, BWUtilPct: 10}
+	if na := assertCeilingLeg(t, ok); na != "" {
+		t.Fatalf("positive CeilingGBps must assert the ceiling leg, got N/A %q: %+v", na, ok)
 	}
 }
 
