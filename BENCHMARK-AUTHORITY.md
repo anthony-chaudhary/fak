@@ -46,6 +46,7 @@
 | **Pure-kernel admission latency (M3 Pro)** | **1.8–14 µs** scan · 3.3–15.8 µs Admit · 29–87 µs chain | ctxmmu / normgate+ctxmmu | per-result admission (cited "~1,300 ns" = cheapest scan layer only) | `bcad56e` | same (`MAC-M3PRO-KERNEL-BENCH-2026-06-20.md`) |
 | **Syscall boundary tax (M3 Pro, refreshed)** | **~2,849×** in-process vs spawned `fak hook` | in-process adjudication | process-per-decide baseline (n=100) | `bcad56e` | `report.json` + `experiments/mac-m3pro-kernel-20260620/report.json` |
 | **Causal invalidation-on-external-write** | **PASS · max\|Δ\|=0** (1 evicted, sibling warm, re-admit refused) | vDSO `Revoke` + cachemeta external-invalidation | blunt world-flush / stale serve | `0fc39aa` | `experiments/causal-invalidation-20260620/causalbench-witness-20260620.json` |
+| **Ultra-long-context work floor (>100k tokens, EXACT/contention-free)** | **single ~10× · 5-agent fleet ~40×+ vs naive (4.3× vs tuned)** | Qwen2.5-7B geometry, P=100k T=10 C=1/5 D=200 R=500 (arithmetic, no model) | Naive re-prefill (A/C ref) / warm per-agent KV (B/C) | _this commit_ | `session/ultra-long-context-floor-20260622.json` + `ULTRA-LONG-CONTEXT-RESULTS.md`. WORK floor (token = sessionbench `prefillTokens`; FLOP = O(L²)-aware), not a wall-clock; anchor token A/C 62.0× reproduces the committed 50×5 token floor; live wall-clock anchor at >100k is separately gated |
 
 > **The model-ladder thesis.** Live wall-clock ratio climbs toward the deterministic
 > 7.50× token-speedup ceiling as per-token compute grows (135M 4.58× → 360M 5.40× →

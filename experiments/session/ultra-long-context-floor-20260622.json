@@ -1,0 +1,225 @@
+{
+  "provenance": {
+    "app_version": "0.31.0",
+    "command": "turnbench.RunLongContextLadder",
+    "slice_id": "",
+    "workload_hash": "",
+    "go_version": "go1.26.3",
+    "os": "windows",
+    "generated_by": "fak/internal/turnbench (ultra-long-context work floor)"
+  },
+  "cost_model": {
+    "version": "fak.cost-model.v1",
+    "prompt_tokens_per_turn": 1200,
+    "completion_tokens_per_turn": 120,
+    "dollars_per_mtok_in": 3,
+    "dollars_per_mtok_out": 15,
+    "model_turn_latency_ms": 1500
+  },
+  "model_shape": {
+    "name": "qwen25-7b",
+    "hidden_size": 3584,
+    "num_layers": 28,
+    "num_heads": 28,
+    "num_kv_heads": 4,
+    "head_dim": 128,
+    "intermediate_size": 18944,
+    "vocab_size": 152064
+  },
+  "ultra_long_threshold": 100000,
+  "cells": [
+    {
+      "shape": {
+        "prefix": 2048,
+        "turns": 50,
+        "agents": 5,
+        "decode": 32,
+        "result": 64
+      },
+      "max_context_tokens": 6784,
+      "ultra_long": false,
+      "arm_A_naive_stateless": {
+        "prefill_tokens": 1100000,
+        "prefill_flops": 7711670665216000,
+        "decode_flops": 59292778496000,
+        "total_flops": 7770963443712000
+      },
+      "arm_B_per_agent_kv": {
+        "prefill_tokens": 25920,
+        "prefill_flops": 185137333534720,
+        "decode_flops": 59292778496000,
+        "total_flops": 244430112030720
+      },
+      "arm_C_fak_fused": {
+        "prefill_tokens": 17728,
+        "prefill_flops": 129998543388672,
+        "decode_flops": 59292778496000,
+        "total_flops": 189291321884672
+      },
+      "token_a_over_c": 62.04873646209386,
+      "token_b_over_c": 1.4620938628158844,
+      "flop_a_over_c": 41.052930299924434,
+      "flop_b_over_c": 1.2912906391960324,
+      "flop_a_over_b": 31.792169054585813,
+      "prefill_flop_a_over_c": 59.32120825507642,
+      "prefill_flop_b_over_c": 1.4241492920516274,
+      "exact": true,
+      "note": "exact contention-free work floor for the stated (model, session) shape; a real session with variable per-turn decode/result sizes is bounded between the floors for its min/max turn sizes. WORK floor only — no wall-clock, no resolve-rate, no quality claim."
+    },
+    {
+      "shape": {
+        "prefix": 100000,
+        "turns": 10,
+        "agents": 1,
+        "decode": 200,
+        "result": 500
+      },
+      "max_context_tokens": 106500,
+      "ultra_long": true,
+      "arm_A_naive_stateless": {
+        "prefill_tokens": 1031500,
+        "prefill_flops": 17412266790912000,
+        "decode_flops": 54495952896000,
+        "total_flops": 17466762743808000
+      },
+      "arm_B_per_agent_kv": {
+        "prefill_tokens": 104500,
+        "prefill_flops": 1778664738816000,
+        "decode_flops": 54495952896000,
+        "total_flops": 1833160691712000
+      },
+      "arm_C_fak_fused": {
+        "prefill_tokens": 104500,
+        "prefill_flops": 1778664738816000,
+        "decode_flops": 54495952896000,
+        "total_flops": 1833160691712000
+      },
+      "token_a_over_c": 9.870813397129186,
+      "token_b_over_c": 1,
+      "flop_a_over_c": 9.528222388128825,
+      "flop_b_over_c": 1,
+      "flop_a_over_b": 9.528222388128825,
+      "prefill_flop_a_over_c": 9.789515927831788,
+      "prefill_flop_b_over_c": 1,
+      "exact": true,
+      "note": "exact contention-free work floor for the stated (model, session) shape; a real session with variable per-turn decode/result sizes is bounded between the floors for its min/max turn sizes. WORK floor only — no wall-clock, no resolve-rate, no quality claim."
+    },
+    {
+      "shape": {
+        "prefix": 100000,
+        "turns": 10,
+        "agents": 5,
+        "decode": 200,
+        "result": 500
+      },
+      "max_context_tokens": 106500,
+      "ultra_long": true,
+      "arm_A_naive_stateless": {
+        "prefill_tokens": 5157500,
+        "prefill_flops": 87061333954560000,
+        "decode_flops": 272479764480000,
+        "total_flops": 87333813719040000
+      },
+      "arm_B_per_agent_kv": {
+        "prefill_tokens": 522500,
+        "prefill_flops": 8893323694080000,
+        "decode_flops": 272479764480000,
+        "total_flops": 9165803458560000
+      },
+      "arm_C_fak_fused": {
+        "prefill_tokens": 122500,
+        "prefill_flops": 2269128314880000,
+        "decode_flops": 272479764480000,
+        "total_flops": 2541608079360000
+      },
+      "token_a_over_c": 42.10204081632653,
+      "token_b_over_c": 4.26530612244898,
+      "flop_a_over_c": 34.36163680319723,
+      "flop_b_over_c": 3.6063008821045424,
+      "flop_a_over_b": 9.528222388128825,
+      "prefill_flop_a_over_c": 38.367743852847795,
+      "prefill_flop_b_over_c": 3.9192687499253704,
+      "exact": true,
+      "note": "exact contention-free work floor for the stated (model, session) shape; a real session with variable per-turn decode/result sizes is bounded between the floors for its min/max turn sizes. WORK floor only — no wall-clock, no resolve-rate, no quality claim."
+    },
+    {
+      "shape": {
+        "prefix": 100000,
+        "turns": 50,
+        "agents": 5,
+        "decode": 200,
+        "result": 500
+      },
+      "max_context_tokens": 134500,
+      "ultra_long": true,
+      "arm_A_naive_stateless": {
+        "prefill_tokens": 29287500,
+        "prefill_flops": 537980212940800000,
+        "decode_flops": 1502891622400000,
+        "total_flops": 539483104563200000
+      },
+      "arm_B_per_agent_kv": {
+        "prefill_tokens": 622500,
+        "prefill_flops": 11962328698880000,
+        "decode_flops": 1502891622400000,
+        "total_flops": 13465220321280000
+      },
+      "arm_C_fak_fused": {
+        "prefill_tokens": 222500,
+        "prefill_flops": 5338133319680000,
+        "decode_flops": 1502891622400000,
+        "total_flops": 6841024942080000
+      },
+      "token_a_over_c": 131.62921348314606,
+      "token_b_over_c": 2.797752808988764,
+      "flop_a_over_c": 78.85998211244224,
+      "flop_b_over_c": 1.9683045209283985,
+      "flop_a_over_b": 40.064929625445366,
+      "prefill_flop_a_over_c": 100.78058765550834,
+      "prefill_flop_b_over_c": 2.240919808948701,
+      "exact": true,
+      "note": "exact contention-free work floor for the stated (model, session) shape; a real session with variable per-turn decode/result sizes is bounded between the floors for its min/max turn sizes. WORK floor only — no wall-clock, no resolve-rate, no quality claim."
+    },
+    {
+      "shape": {
+        "prefix": 100000,
+        "turns": 10,
+        "agents": 40,
+        "decode": 200,
+        "result": 500
+      },
+      "max_context_tokens": 106500,
+      "ultra_long": true,
+      "arm_A_naive_stateless": {
+        "prefill_tokens": 41260000,
+        "prefill_flops": 696490671636480000,
+        "decode_flops": 2179838115840000,
+        "total_flops": 698670509752320000
+      },
+      "arm_B_per_agent_kv": {
+        "prefill_tokens": 4180000,
+        "prefill_flops": 71146589552640000,
+        "decode_flops": 2179838115840000,
+        "total_flops": 73326427668480000
+      },
+      "arm_C_fak_fused": {
+        "prefill_tokens": 280000,
+        "prefill_flops": 6560684605440000,
+        "decode_flops": 2179838115840000,
+        "total_flops": 8740522721280000
+      },
+      "token_a_over_c": 147.35714285714286,
+      "token_b_over_c": 14.928571428571429,
+      "flop_a_over_c": 79.93463686689023,
+      "flop_b_over_c": 8.389249705850746,
+      "flop_a_over_b": 9.528222388128825,
+      "prefill_flop_a_over_c": 106.16127942790645,
+      "prefill_flop_b_over_c": 10.844384973733769,
+      "exact": true,
+      "note": "exact contention-free work floor for the stated (model, session) shape; a real session with variable per-turn decode/result sizes is bounded between the floors for its min/max turn sizes. WORK floor only — no wall-clock, no resolve-rate, no quality claim."
+    }
+  ],
+  "single_ultra_long_idx": 1,
+  "multi_ultra_long_idx": 2,
+  "generated_by": "fak/internal/turnbench (ultra-long-context work floor)"
+}

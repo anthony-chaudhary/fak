@@ -151,6 +151,23 @@ anchors:
 So the line shape is calculated, while the callouts say which points are measured,
 measured-supported projections, or future workload targets.
 
+### The exact work floor at the >100k-token regime
+
+The setup-payment counts above are now backed by an **exact, contention-free work floor** at the
+ultra-long-context regime this thesis is really about (per-agent context ≥ 100k tokens) — the regime
+no *live* bench reaches, because the naive arm's O(T²) re-prefill is intractable to run there. The
+floor is closed-form arithmetic from the session shape and the model geometry (no model, no
+wall-clock), with a token floor identical to `sessionbench`'s `prefillTokens` (its anchor row
+reproduces the **62.0× token floor** in the table above) and an O(L²)-aware FLOP floor. It quantifies
+the §2 regimes directly: a **single >100k session ≈ 10× vs naive** (the turn-tax; B/C ≡ 1, no peer to
+share with), a **5-agent fleet each >100k ≈ 40×+ vs naive and ≈ 4× vs a warm cache**, and it proves
+the cross-agent win **B/C rises monotonically with the shared-prefix fraction toward the agent
+count** — why the standing ~2–4× bound (small prefix) and the larger agent-city win are the same law
+at different prefix fractions. See `internal/turnbench/longcontext.go`, `cmd/longctxbench`, and
+[`docs/benchmarks/ULTRA-LONG-CONTEXT-RESULTS.md`](benchmarks/ULTRA-LONG-CONTEXT-RESULTS.md);
+the levels, levers, and naming are worked out in
+[`docs/notes/RESEARCH-ultra-long-context-levels-and-naming-2026-06-22.md`](notes/RESEARCH-ultra-long-context-levels-and-naming-2026-06-22.md).
+
 ---
 
 ## 4. The coherence law: reuse is only a win while it is legal
