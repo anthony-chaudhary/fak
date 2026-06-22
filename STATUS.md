@@ -34,7 +34,7 @@ Fresh verification pass on 2026-06-18:
 |---|---|
 | `powershell -NoProfile -ExecutionPolicy Bypass -File scripts\ci.ps1` | **PASS** — `go build`, `go vet`, `go test ./...`, and claims lint all green; claims lint found 54 tagged claim lines, 0 violations. |
 | `python -m pytest tools` | **PASS** — 289 Python/tooling tests passed. |
-| `go run ./cmd/fak bench --suite tau2-smoke --out report.json` | **PASS as a subsystem sentinel** — `gate_primary=pass`; in-process p50 2,365 ns, p99 3,451 ns; spawned-hook p50 13,202,800 ns; p50 speedup about 5,583x; vDSO hit-rate 0.500. It proves the adjudicator path is not accidentally paying a per-call process boundary; it does not prove production readiness. |
+| `go run ./cmd/fak bench --suite tau2-smoke --out report.json` | **PASS as a subsystem sentinel** — `gate_primary=pass`; in-process p50 2,427 ns; spawned-hook p50 6,913,458 ns (n=100); p50 speedup about 2,849x; vDSO hit-rate 0.500. It proves the adjudicator path is not accidentally paying a per-call process boundary; it does not prove production readiness. |
 | `python tools\fak_phase0_gate.py fak\experiments\fleet-nodes\phase0-local-uncapped --json` | **FAIL, correctly open** — no clean-node provenance and peak batched-decode speedup is 40.975x, below the 45x Phase 0 bar. |
 | `go run ./cmd/modelbench -backend cpu-ref -require-non-reference ...` | **FAIL, correctly closed** — `cpu-ref` is rejected as a reference backend for Phase 1. |
 | `go run ./cmd/paritybench ... --require-phase1` | **FAIL, correctly open** — missing live local-GPU 7-9B rung. |
@@ -74,10 +74,10 @@ refused to credit a version-bump commit as a code ship is doing precisely its jo
 `fak bench --suite tau2-smoke` → current `report.json`:
 
 ```
-in-process adjudication p50 : 2,365 ns
-spawned-hook        p50     : 13.203 ms  (process-per-decide, this machine, n=30)
+in-process adjudication p50 : 2,427 ns
+spawned-hook        p50     : 6.913 ms  (process-per-decide, this machine, n=100)
 SUBSYSTEM CHECK (gate_primary): pass
-boundary-tax delta            : ~5,583x    (varies with machine load; always >>1)
+boundary-tax delta            : ~2,849x    (varies with machine load; always >>1)
 ```
 
 What it proves: the syscall/adjudicator path is resident and not accidentally
@@ -136,7 +136,7 @@ REFUTED unless their own evidence confirmed it. **Result: 7/7 CONFIRMED.**
 
 | Claim | Verdict | Decisive evidence the skeptic gathered |
 |---|---|---|
-| C1 syscall subsystem A/B is real + apples-to-apples | **CONFIRMED** | re-ran bench: 1295 ns vs 7,358,600 ns = **5,682×**, `gate_primary="pass"`; verified both arms call `kernel.Fold(abi.Adjudicators())` and the comparison is computed (`on < base`), not hardcoded. Scope: subsystem boundary-tax check, not product throughput. |
+| C1 syscall subsystem A/B is real + apples-to-apples | **CONFIRMED** | re-ran bench: 1295 ns vs 7,358,600 ns = **5,682×** (an earlier ad-hoc re-run; the canonical refreshed boundary-tax is ~2,849× at n=100 — see `BENCHMARK-AUTHORITY.md`), `gate_primary="pass"`; verified both arms call `kernel.Fold(abi.Adjudicators())` and the comparison is computed (`on < base`), not hardcoded. Scope: subsystem boundary-tax check, not product throughput. |
 | C2 deny never reaches dispatch | **CONFIRMED** | `TestDenyNeverReachesDispatch` PASS: engine `n==0` on deny, `Meta["disposition"]` set; Reap returns `DenyResult` before the engine call |
 | C3 MMU quarantines the poison fixture | **CONFIRMED** | manually admitted all 3 `poison.json` payloads: injection + secret → `Quarantine` (rewritten payload contains **zero** offending bytes), benign → `Allow` |
 | C4 no `os/exec` on the hot path | **CONFIRMED** | kernel imports only `{context,errors,fmt,sync,sync/atomic}`; `os/exec` appears only in `bench`+`shipgate` (not the dispatch path); `TestNoOsExecOnHotPath` PASS |
