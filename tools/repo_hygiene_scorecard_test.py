@@ -136,6 +136,38 @@ def test_reachable_md_bfs() -> None:
 
 # --- accessibility ---------------------------------------------------------
 
+def test_image_alt_defects_flags_empty_alt() -> None:
+    # markdown: empty bracket alt is a defect; populated alt is clean
+    md = "![](visuals/chart.png)\n\n![a real description](visuals/ok.png)"
+    miss = rh.image_alt_defects(md)
+    assert miss == ["visuals/chart.png"], miss
+
+
+def test_image_alt_defects_handles_html_img_multiline() -> None:
+    # an HTML <img> spanning lines with a real alt is clean; one without alt fails
+    good = '<img\n  src="a.png"\n  alt="a chart of throughput"/>'
+    bad = '<img src="b.png" width="100%"/>'
+    assert rh.image_alt_defects(good) == []
+    assert rh.image_alt_defects(bad) == ["b.png"]
+
+
+def test_image_alt_defects_clean_when_all_described() -> None:
+    txt = "![first](a.png) and [![badge alt](badge.svg)](https://x) and ![second](b.png)"
+    assert rh.image_alt_defects(txt) == []
+
+
+def test_alt_text_is_hard() -> None:
+    c = rh.kpi_alt_text([{"path": "docs/x.md", "missing": ["a.png", "b.svg"]}])
+    assert len(c["defects"]) == 2, c
+    assert any("a.png" in d for d in c["defects"])
+    assert c["score"] < 100
+
+
+def test_alt_text_clean_when_no_missing() -> None:
+    c = rh.kpi_alt_text([])
+    assert c["defects"] == [] and c["score"] == 100, c
+
+
 def test_ai_tells_are_hard() -> None:
     c = rh.kpi_ai_tells([{"path": "x.md", "hits": ["leverage", "in a nutshell"],
                           "emdash_over": 0}])
@@ -199,6 +231,30 @@ def test_payload_counts_debt_by_group() -> None:
     p = rh.build_payload(workspace=".", kpis=kpis)
     assert p["ok"] is False and p["corpus"]["hygiene_debt"] == 2, p
     assert p["corpus"]["debt_by_group"]["verbosity"] == 2, p
+
+
+def test_a11y_debt_rolls_up_accessibility_hard() -> None:
+    # a11y-debt is the accessibility group's HARD defects, broken out as a
+    # first-class integer (issue #510) — a slice of hygiene_debt, never extra.
+    kpis = [_clean_kpi(n) for n in rh.KPI_WEIGHTS]
+    by = {k["kpi"]: k for k in kpis}
+    by["alt_text"]["defects"] = ["img1", "img2"]
+    by["ai_tells"]["defects"] = ["tell1"]
+    by["root_hygiene"]["defects"] = ["stray"]  # a NON-accessibility defect
+    p = rh.build_payload(workspace=".", kpis=kpis)
+    c = p["corpus"]
+    assert c["a11y_debt"] == 3, c          # alt_text(2) + ai_tells(1), not root_hygiene
+    assert c["a11y_debt"] <= c["hygiene_debt"], c
+    assert c["hygiene_debt"] == 4, c
+
+
+def test_compare_reports_a11y_debt() -> None:
+    base = {"corpus": {"hygiene_debt": 30, "score": 60, "a11y_debt": 8,
+                       "debt_by_group": {g: 0 for g in rh.GROUPS}}}
+    cur = {"corpus": {"hygiene_debt": 9, "score": 88, "a11y_debt": 2,
+                      "debt_by_group": {g: 0 for g in rh.GROUPS}}}
+    out = rh.render_compare(base, cur)
+    assert "a11y-debt:    8 -> 2" in out, out
 
 
 def test_compare_reports_3x() -> None:

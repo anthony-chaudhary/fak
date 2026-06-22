@@ -12,7 +12,7 @@ written but linked from no index, so no reader ever finds it. None of that is a
 dead link or an overlong sentence, so nothing measured it — "keep the repo clean"
 was a vibe.
 
-This is that number. It scores the tracked tree on eleven mechanical KPIs in four
+This is that number. It scores the tracked tree on twelve mechanical KPIs in four
 groups, folds them into a weighted score and an A-F grade, and — the lever that
 makes "3x cleaner" a checkable target instead of a vibe — counts **hygiene-debt**:
 the total of concrete, re-derivable structural defects you fix by *deleting or
@@ -33,14 +33,20 @@ consolidating*, not by adding more.
     orphans        every reader-facing doc is reachable from some index
 
   ACCESSIBILITY — anyone can read it (incl. neurodivergent readers, non-experts)
+    alt_text       every doc image carries descriptive alt-text (HARD)
     ai_tells       cliché / LLM-scaffolding phrases that read machine-written (HARD)
     jargon         expert terms with no nearby plain gloss (SOFT)
     plain_language dense reading-ease, undefined acronyms, literal-reader idioms (SOFT)
 
-Two KPIs (``jargon``, ``plain_language``) are deliberately SOFT: they score (a
-jargon-dense, hard-to-read tree grades lower) but emit no hard debt, because the
-cheap way to move them is gaming, not clarity — the same WARN/HARD split the
-sibling scorecards draw.
+The accessibility group's HARD defects (``alt_text`` + ``ai_tells``) roll up into
+**a11y-debt** — the accessibility counterpart of hygiene-debt: an integer you
+drive down to make the tree readable by non-experts, screen-reader users,
+translators, and answer engines. It is reported next to hygiene-debt and tracked
+by ``--compare`` the same way. The two remaining KPIs (``jargon``,
+``plain_language``) are deliberately SOFT: they score (a jargon-dense,
+hard-to-read tree grades lower) but emit no hard debt, because the cheap way to
+move them is gaming, not clarity — the same WARN/HARD split the sibling
+scorecards draw.
 
 It does NOT drift from the commit gates. The root allowlist comes straight from
 ``check_doc_placement.ALLOWED_ROOT_MD`` and the junk patterns from
@@ -198,18 +204,20 @@ KPI_WEIGHTS: dict[str, float] = {
     "index_presence": 0.10,
     "index_integrity": 0.12,
     "orphans": 0.12,
-    # accessibility
-    "ai_tells": 0.08,
-    "jargon": 0.06,
-    "plain_language": 0.08,
+    # accessibility (group weight 0.22 unchanged; alt_text carved from the others
+    # so the composite still tops out at 100 with no rescale)
+    "alt_text": 0.06,
+    "ai_tells": 0.06,
+    "jargon": 0.04,
+    "plain_language": 0.06,
 }
 KPI_GROUP: dict[str, str] = {
     "redundancy": "verbosity", "bloat": "verbosity",
     "root_hygiene": "organization", "placement": "organization",
     "dir_discipline": "organization",
     "index_presence": "indexing", "index_integrity": "indexing", "orphans": "indexing",
-    "ai_tells": "accessibility", "jargon": "accessibility",
-    "plain_language": "accessibility",
+    "alt_text": "accessibility", "ai_tells": "accessibility",
+    "jargon": "accessibility", "plain_language": "accessibility",
 }
 
 _LINK_RE = re.compile(r"\[(?P<text>[^\]]+)\]\((?P<target>[^)]+)\)")
@@ -228,12 +236,30 @@ AI_TELL_PHRASES = [p for p in (list(CLICHE_PHRASES) + list(LLM_SCAFFOLD_PHRASES)
                    if p.lower() not in CONTEXT_SENSITIVE_TELLS]
 
 # Idioms / figurative phrases a literal reader (and a translator) stumbles on.
+# Kept to phrases that are unambiguously figurative in prose (after code is
+# stripped) so a literal-reader / translator stumble is real, not a false positive.
 LITERAL_IDIOMS = [
     "rule of thumb", "low-hanging fruit", "boils down to", "under the hood",
     "out of the box", "move the needle", "bite the bullet", "the elephant in the room",
     "ballpark", "a far cry", "hand-wavy", "bread and butter", "silver bullet",
     "wild goose chase", "back of the envelope",
+    # figurative-language expansion (issue #510): each is a translator/literal-reader
+    # trap with a plainer equivalent.
+    "tip of the iceberg", "apples to apples", "apples to oranges", "moving target",
+    "north star", "happy path", "raise the bar", "drop in the bucket",
+    "throw over the wall", "cut corners", "in the weeds", "on the same page",
+    "draw a line in the sand", "the lay of the land", "barking up the wrong tree",
+    "piece of cake", "the whole nine yards", "foot the bill", "yak shaving",
+    "the long pole in the tent", "boiling the ocean", "secret sauce",
 ]
+
+# Doc images: a markdown image carries its alt-text in the brackets; an HTML <img>
+# in its alt= attribute. An image with empty/missing alt is invisible to a screen
+# reader, a translator, and an answer engine — the alt_text HARD signal.
+_MD_IMG_RE = re.compile(r"!\[(?P<alt>[^\]]*)\]\((?P<src>[^)\s]+)")
+_HTML_IMG_RE = re.compile(r"<img\b[^>]*>", re.IGNORECASE | re.DOTALL)
+_HTML_ALT_RE = re.compile(r"\balt\s*=\s*([\"'])(?P<alt>.*?)\1", re.IGNORECASE | re.DOTALL)
+_HTML_SRC_RE = re.compile(r"\bsrc\s*=\s*([\"'])(?P<src>.*?)\1", re.IGNORECASE | re.DOTALL)
 
 
 # ---------------------------------------------------------------------------
@@ -540,6 +566,42 @@ def kpi_orphans(orphans: list[str], n_reader: int) -> dict[str, Any]:
             "defects": defects, "soft": []}
 
 
+def image_alt_defects(text: str) -> list[str]:
+    """Doc images whose alt-text is missing or empty — returns the offending image
+    sources. Markdown ``![alt](src)`` reads the bracket text; an HTML ``<img>``
+    reads its ``alt=`` attribute (the tag may span lines). The caller passes
+    prose-only text, so an image-syntax example inside a code fence is never
+    flagged. Deterministic: same text -> same list."""
+    out: list[str] = []
+    for m in _MD_IMG_RE.finditer(text):
+        if not m.group("alt").strip():
+            out.append(m.group("src").strip())
+    for m in _HTML_IMG_RE.finditer(text):
+        tag = m.group(0)
+        alt = _HTML_ALT_RE.search(tag)
+        if alt is None or not alt.group("alt").strip():
+            src = _HTML_SRC_RE.search(tag)
+            out.append(src.group("src").strip() if src else "<img>")
+    return out
+
+
+def kpi_alt_text(per_doc: list[dict[str, Any]]) -> dict[str, Any]:
+    """Every doc image needs alt-text — the surface a screen-reader user, a
+    translator, and an answer engine read instead of the pixels. Each image with
+    empty/missing alt is one unit of a11y-debt: add a descriptive alt, don't
+    delete the image. ``per_doc`` is a list of {path, missing:[src]}."""
+    defects: list[str] = []
+    for d in per_doc:
+        for src in d["missing"]:
+            defects.append(f"image without alt-text in {d['path']}: {src} "
+                           f"— add descriptive alt-text")
+    return {"kpi": "alt_text", "group": "accessibility",
+            "score": _clamp(100 - 6 * len(defects)),
+            "detail": (f"{len(defects)} image(s) missing alt-text"
+                       if defects else "every doc image carries alt-text"),
+            "defects": defects, "soft": []}
+
+
 def kpi_ai_tells(per_doc: list[dict[str, Any]]) -> dict[str, Any]:
     """Cliché and LLM-scaffolding phrases read machine-written and push away a
     reader who wants plain language. Each occurrence (capped per doc) is one unit
@@ -627,6 +689,10 @@ def build_payload(*, workspace: str, kpis: list[dict[str, Any]],
 
     corpus = {
         "score": score, "grade": grade, "hygiene_debt": hygiene_debt,
+        # a11y-debt: the accessibility group's HARD defects, broken out as a
+        # first-class integer to drive down (issue #510) — the accessibility
+        # counterpart of hygiene-debt. Always a slice of hygiene_debt, never extra.
+        "a11y_debt": debt_by_group["accessibility"],
         "soft_signals": n_soft,
         "debt_by_group": debt_by_group,
         "kpi_scores": {k["kpi"]: k["score"] for k in kpis},
@@ -780,7 +846,8 @@ def gather(root: Path) -> tuple[list[dict[str, Any]], list[str]]:
     orphan_pool = [f for f in reader if f.rsplit("/", 1)[-1] not in ROOT_META_EXEMPT]
     orphans = [f for f in orphan_pool if f not in reachable and f not in seeds]
 
-    # accessibility: ai_tells (HARD) + jargon (SOFT) + plain_language (SOFT)
+    # accessibility: alt_text (HARD) + ai_tells (HARD) + jargon (SOFT) + plain_language (SOFT)
+    alt_per_doc: list[dict[str, Any]] = []
     ai_per_doc: list[dict[str, Any]] = []
     naked_jargon: list[str] = []
     plain_signals: list[str] = []
@@ -788,6 +855,9 @@ def gather(root: Path) -> tuple[list[dict[str, Any]], list[str]]:
     for f in reader:
         prose = _prose_only(texts[f])
         low = prose.lower()
+        missing_alt = image_alt_defects(prose)
+        if missing_alt:
+            alt_per_doc.append({"path": f, "missing": missing_alt})
         hits: list[str] = []
         for ph, rx in _AI_TELL_RES:
             hits.extend(ph for _ in rx.finditer(low))
@@ -839,6 +909,7 @@ def gather(root: Path) -> tuple[list[dict[str, Any]], list[str]]:
         kpi_index_presence(present),
         kpi_index_integrity(dead_by_index),
         kpi_orphans(orphans, len(orphan_pool)),
+        kpi_alt_text(alt_per_doc),
         kpi_ai_tells(ai_per_doc),
         kpi_jargon(naked_jargon, len(reader)),
         kpi_plain_language(plain_signals, n_dense, n_acro_docs, n_idiom, len(reader)),
@@ -908,7 +979,8 @@ def render(payload: dict[str, Any]) -> str:
         f"  {payload.get('reason')}",
         "",
         (f"score {c.get('score', 0)}/100 (grade {c.get('grade', '?')}) "
-         f"· HYGIENE-DEBT {c.get('hygiene_debt', 0)} · {c.get('soft_signals', 0)} advisory"),
+         f"· HYGIENE-DEBT {c.get('hygiene_debt', 0)} (a11y-debt {c.get('a11y_debt', 0)}) "
+         f"· {c.get('soft_signals', 0)} advisory"),
         ("debt by group: " + "  ".join(
             f"{g}:{c.get('debt_by_group', {}).get(g, 0)}" for g in GROUPS)),
         "",
@@ -974,6 +1046,7 @@ def render_markdown(payload: dict[str, Any], *, stamp: str | None = None) -> str
     out.append("| Metric | Value |")
     out.append("|---|---|")
     out.append(f"| **Hygiene-debt (total HARD defects)** | **{c.get('hygiene_debt', 0)}** |")
+    out.append(f"| **a11y-debt (accessibility HARD defects)** | **{c.get('a11y_debt', 0)}** |")
     out.append(f"| Composite score | {c.get('score', 0)}/100 (grade {c.get('grade', '?')}) |")
     out.append(f"| Advisory (soft) signals | {c.get('soft_signals', 0)} |")
     g = c.get("debt_by_group", {})
@@ -982,7 +1055,8 @@ def render_markdown(payload: dict[str, Any], *, stamp: str | None = None) -> str
     out.append("")
     out.append("## Per-KPI")
     out.append("")
-    out.append("Eleven KPIs, each 0–100, in four groups. `debt` = units of HARD hygiene-debt. "
+    out.append("Twelve KPIs, each 0–100, in four groups. `debt` = units of HARD hygiene-debt. "
+               "The accessibility group's HARD KPIs (`alt_text`, `ai_tells`) sum to **a11y-debt**. "
                "`jargon` and `plain_language` are advisory (they score but emit no hard debt — "
                "gaming a gloss is not clarity).")
     out.append("")
@@ -1013,9 +1087,11 @@ def render_compare(baseline: dict[str, Any], current: dict[str, Any]) -> str:
     cur = current.get("corpus") or {}
     bd, cd = b.get("hygiene_debt", 0), cur.get("hygiene_debt", 0)
     bo, co = b.get("score", 0), cur.get("score", 0)
+    ba, ca = b.get("a11y_debt", 0), cur.get("a11y_debt", 0)
     ratio = "∞ (zero)" if cd == 0 else f"{bd / cd:.1f}×"
     lines = [
         f"hygiene-debt: {bd} -> {cd}   ({ratio} fewer defects)",
+        f"a11y-debt:    {ba} -> {ca}",
         f"score:        {bo}/100 -> {co}/100   (+{round(co - bo, 1)})",
     ]
     for gp in GROUPS:
