@@ -57,5 +57,21 @@ func BenchmarkQuantizeRowScalarVsNEON(b *testing.B) {
 			b.StopTimer()
 			b.ReportMetric(float64(width)*float64(b.N)/b.Elapsed().Seconds(), "float/s")
 		})
+
+		// vecneon: the #476-authored decode kernel (quantizeVecAsmNEON), pinned bit-equal to both
+		// scalar and the production row kernel by TestQuantizeVecQ8NEONMatchesScalar. Timing it
+		// alongside the other two shows the authored vec kernel carries no speed regression.
+		b.Run(fmt.Sprintf("vecneon/width%d", width), func(b *testing.B) {
+			if !detectDotProd() {
+				b.Skip("FEAT_DotProd (asimddp) not available — NEON quantizer inactive, scalar path only")
+			}
+			b.ReportAllocs()
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				quantizeVecAsmNEON(&x[0], &q[0], &d[0], nblk)
+			}
+			b.StopTimer()
+			b.ReportMetric(float64(width)*float64(b.N)/b.Elapsed().Seconds(), "float/s")
+		})
 	}
 }

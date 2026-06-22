@@ -15,10 +15,13 @@
 #   micro-bench below need real arm64 silicon. That RUN is the explicit residual handed off here.
 #
 # WHAT IT PROVES
-#   1. Equivalence (bit-match): the dispatched quantizeRowQ8 — the NEON kernel on a FEAT_DotProd
-#      part — produces BIT-IDENTICAL codes and scale bits to the scalar reference quantizeRowQ8scalar,
-#      over zero blocks, denormals, all-negative blocks, large dynamic range, and exact round-half
-#      boundaries. Tests:
+#   1. Equivalence (bit-match): the #476 NEON decode quantizer quantizeVecQ8NEON, and the dispatched
+#      quantizeRowQ8 (the NEON kernel on a FEAT_DotProd part), each produce BIT-IDENTICAL codes and
+#      scale bits to the scalar reference quantizeRowQ8scalar, over zero blocks, denormals,
+#      all-negative blocks, large dynamic range, and exact round-half boundaries. Tests:
+#        TestQuantizeVecQ8NEONMatchesScalar  (the #476-authored kernel; also a differential cross-
+#                                             check vs the production NEON row kernel, + the
+#                                             argmax-exact/cosine fallback the issue permits)
 #        TestQuantizeRowAsmMatchesScalar                         (quant_quantize_test.go)
 #        TestQuantizeVecQ8MatchesScalar                          (the decode-facing q8Vec)
 #        TestQuantizeVecQ8IntoReuseMatchesScalarAndClearsZeroBlocks
@@ -42,7 +45,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 MOD_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 PKG='./internal/model/'
-EQUIV_RE='^(TestQuantizeRowAsmMatchesScalar|TestQuantizeVecQ8MatchesScalar|TestQuantizeVecQ8IntoReuseMatchesScalarAndClearsZeroBlocks)$'
+EQUIV_RE='^(TestQuantizeVecQ8NEONMatchesScalar|TestQuantizeRowAsmMatchesScalar|TestQuantizeVecQ8MatchesScalar|TestQuantizeVecQ8IntoReuseMatchesScalarAndClearsZeroBlocks)$'
 BENCH_RE='^BenchmarkQuantizeRowScalarVsNEON$'
 BENCHTIME="${FAK_BENCHTIME:-200ms}"
 
