@@ -261,9 +261,10 @@ function showResult(j){
       `A clean session breaches nothing on either arm — the anti-fear-mongering control. fak does not cry wolf: `+
       `every one of the <b>${passes}</b> legitimate calls ran. The gap only opens when an attack is actually present.`;
   }
-  // right scoreboard reframes from "breaches" to what fak held
-  $('#scoreRight').textContent = String(b);
-  $('#scoreRightLbl').textContent = b>0 ? `breaches (held ${b})` : 'breaches';
+  // the WITH-fak scoreboard MUST stay 0 (that is the whole point); the count of
+  // attacks it held goes in the sublabel, never in the big number.
+  $('#scoreRight').textContent = '0';
+  $('#scoreRightLbl').textContent = b>0 ? `breaches · ${b} attack${b===1?'':'s'} held at the boundary` : 'breaches';
   $('#result').classList.add('show');
 }
 
