@@ -153,7 +153,7 @@ it into context when the situation calls for it).
 | "We're on step 3 of the wizard." | "I always want a confirmation before deletes." |
 | "It's raining here now." | "I live in Seattle." |
 | "The user just pasted a stack trace." | "This service deploys through staging first." |
-| "The current branch is `feature/x`." | "We work directly on `master` in this repo." |
+| "The current branch is `feature/x`." | "We work directly on `main` in this repo." |
 | "I'm tired, keep it short." | "Default to short answers unless I ask for detail." |
 
 Notice the *pattern* in the pairs, because it is the actual classifier:
