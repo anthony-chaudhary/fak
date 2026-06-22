@@ -214,6 +214,8 @@ func cmdPreflight(argv []string) {
 	tool := fs.String("tool", "", "tool name")
 	args := fs.String("args", "{}", "tool args as JSON")
 	policyPath := fs.String("policy", "", "load the capability floor from a manifest (default: built-in DefaultPolicy)")
+	explain := fs.Bool("explain", false, "print the full decision trace: every rung folded, what each returned, which won, and why")
+	asJSON := fs.Bool("json", false, "emit the decision trace as JSON (safe to log: args digest only, never raw args)")
 	_ = fs.Parse(argv)
 	if *tool == "" {
 		fmt.Fprintln(os.Stderr, "fak preflight: --tool is required")
@@ -224,6 +226,18 @@ func cmdPreflight(argv []string) {
 	ref, err := res.Put(ctx(), []byte(*args))
 	must(err)
 	tc := &abi.ToolCall{Tool: *tool, Args: ref}
+	// --explain/--json fold the SAME chain to the SAME verdict but additionally
+	// surface the per-rung Decision trace (the eight rungs preflight actually folds
+	// are invisible in the default one-liner). Default output is unchanged.
+	if *explain || *asJSON {
+		_, d := kernel.FoldExplain(ctx(), abi.AdjudicatorsFor(tc), tc)
+		if *asJSON {
+			fmt.Println(d.JSON())
+		} else {
+			fmt.Print(d.Text())
+		}
+		return
+	}
 	v := kernel.Fold(ctx(), abi.AdjudicatorsFor(tc), tc)
 	fmt.Printf("verdict=%s reason=%s by=%s\n", verdictName(v.Kind), abi.ReasonName(v.Reason), v.By)
 }
