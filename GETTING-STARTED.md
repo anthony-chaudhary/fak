@@ -243,7 +243,10 @@ Two gateway behaviors to know before you wire a real client to Tier 1:
   gateway adjudicates the **whole** upstream turn first, then re-serializes the
   finished result as a well-formed SSE event sequence. The wire is identical to a real
   stream (a client parses it the same way), but partial tokens are never emitted. The
-  stream carries the already-adjudicated turn rather than live decode.
+  stream carries the already-adjudicated turn rather than live decode. This is a
+  consequence of whole-turn adjudication, not a missing feature — a tool call cannot
+  be allowed/denied/repaired until its arguments fully arrive (see the honest-scope
+  note in `POLICY.md`). Expect full-turn latency, not token-by-token streaming.
 - **Auth.** `--require-key-env VAR` accepts the secret over **either** the
   `Authorization: Bearer <tok>` header (OpenAI/fak-native clients) **or** the
   `x-api-key: <tok>` header that Claude Code and the Anthropic SDKs send.

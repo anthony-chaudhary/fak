@@ -120,6 +120,16 @@ unknown code as `REASON_<n>` rather than failing.)
   hold them.
 - `redact_fields` and `self_modify_globs` are best-effort call-boundary hygiene,
   not a guarantee — they inspect decoded args by key/substring.
+- It adjudicates a **whole turn**, not a live token stream. The floor's verdict is
+  computed over the *complete* tool-call set the upstream proposed — a call cannot
+  be allowed/denied/repaired until its arguments have fully arrived, and a turn
+  where every call is refused rewrites the in-band content. So `fak serve` does
+  **not** pass through live decode: a `stream:true` request is adjudicated in full,
+  then re-serialized as a well-formed SSE sequence (the wire is identical to a real
+  stream; partial tokens are never emitted). This is a property of the enforcement
+  model, not a missing feature — adopters wiring an interactive harness to the
+  gateway should expect full-turn latency, not token-by-token streaming. See the
+  "SSE is buffered rather than token-streaming" note in `GETTING-STARTED.md`.
 
 ## Safety properties of the loader
 
