@@ -38,9 +38,10 @@ type CompareConfig struct {
 	DatasetPath string        // optional full dataset
 	Difficulty  string        // optional difficulty map
 	// Runner-specific configs.
-	FleetGateway string // fleet gateway address
-	DeepSWEModel string // deepswe model endpoint
-	DeepSWERepo  string // deepswe repo path
+	FleetGateway string      // fleet gateway address
+	FleetPlanner CodePlanner // injected by the integrator (cmd/fak) for the fleet runner
+	DeepSWEModel string      // deepswe model endpoint
+	DeepSWERepo  string      // deepswe repo path
 }
 
 // RunComparison executes both runners (or more) and builds the comparison.
@@ -137,6 +138,7 @@ func buildRunConfig(base CompareConfig, rt RunnerType, outDir string) RunConfig 
 		DatasetPath: base.DatasetPath,
 		Difficulty:  base.Difficulty,
 		GatewayAddr: base.FleetGateway,
+		Planner:     base.FleetPlanner,
 		Model:       base.DeepSWEModel,
 		DeepSWERepo: base.DeepSWERepo,
 	}

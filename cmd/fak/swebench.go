@@ -415,6 +415,9 @@ func cmdSwebenchRun(argv []string) {
 		Model:       *model,
 		AllowExec:   *allowExec,
 	}
+	if rt == swebench.RunnerFleet {
+		cfg.Planner = newFleetPlanner(*gateway, *model)
+	}
 
 	ctx := context.Background()
 	res, err := swebench.Run(ctx, cfg)
@@ -500,6 +503,12 @@ func cmdSwebenchCompareRunners(argv []string) {
 		Difficulty:   *difficulty,
 		FleetGateway: *gateway,
 		DeepSWEModel: *model,
+	}
+	for _, rt := range runnerTypes {
+		if rt == swebench.RunnerFleet {
+			cfg.FleetPlanner = newFleetPlanner(*gateway, *model)
+			break
+		}
 	}
 
 	ctx := context.Background()

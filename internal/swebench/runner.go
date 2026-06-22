@@ -34,8 +34,9 @@ type RunConfig struct {
 	DatasetPath string        // optional full dataset path (for real problem statements)
 	Difficulty  string        // optional difficulty map path
 	// Fleet-specific
-	GatewayAddr string // fak gateway address (default: localhost:8080)
-	AllowExec   bool   // allow the fleet agent's `run` (shell) tool — use ONLY in a sandboxed/containerized run
+	GatewayAddr string      // fak gateway address (default: localhost:8080) — used by the integrator to build Planner
+	AllowExec   bool        // allow the fleet agent's `run` (shell) tool — use ONLY in a sandboxed/containerized run
+	Planner     CodePlanner `json:"-"` // injected by the integrator (cmd/fak) for the fleet runner; nil => fleet errors
 	// DeepSWE-specific
 	DeepSWERepo string // path to R2E-Gym/DeepSWE repo (for local baseline)
 	Model       string // model endpoint or path (for DeepSWE)
