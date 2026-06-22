@@ -46,6 +46,12 @@ Exit: 0 = ok, 1 = a real error (bad source, refused root, write failure),
 This tool is intentionally git-free and side-effect-scoped to the archive +
 `.dos/`; it prints the suggested `git commit` line for a tracked-archive setup
 but never executes it.
+
+Sibling: `fak-private/tools/memory_sync.py` reuses this same conservative copy core
+to back up the AGENT MEMORY (`~/.claude/projects/<key>/memory/*.md`) into the private
+companion's *tracked* `agent-memory/` (auto-committed+pushed by a session-end Stop hook).
+Its top-of-file docstring has the full "how to adjust" maintenance notes for that path;
+keep the copy core (`_safe_copy`/`_newer`) in sync if you change it here.
 """
 from __future__ import annotations
 
