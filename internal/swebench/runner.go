@@ -35,6 +35,7 @@ type RunConfig struct {
 	Difficulty  string        // optional difficulty map path
 	// Fleet-specific
 	GatewayAddr string // fak gateway address (default: localhost:8080)
+	AllowExec   bool   // allow the fleet agent's `run` (shell) tool — use ONLY in a sandboxed/containerized run
 	// DeepSWE-specific
 	DeepSWERepo string // path to R2E-Gym/DeepSWE repo (for local baseline)
 	Model       string // model endpoint or path (for DeepSWE)
@@ -139,8 +140,13 @@ func Run(ctx context.Context, cfg RunConfig) (*RunResult, error) {
 			break
 		}
 
-		// Run the instance.
-		instCtx, cancel := context.WithTimeout(ctx, cfg.Timeout)
+		// Run the instance. A zero timeout means "no per-instance limit": a
+		// context.WithTimeout(ctx, 0) would carry an already-expired deadline and
+		// fail every instance, contradicting the documented "0 = no limit".
+		instCtx, cancel := ctx, func() {}
+		if cfg.Timeout > 0 {
+			instCtx, cancel = context.WithTimeout(ctx, cfg.Timeout)
+		}
 		pred, err := strat.RunInstance(instCtx, in)
 		cancel()
 
@@ -282,25 +288,7 @@ func (m *mockRunner) RunInstance(ctx context.Context, in Instance) (Prediction, 
 	}, nil
 }
 
-// fleetRunner executes instances via the fak gateway agent.
-type fleetRunner struct {
-	cfg RunConfig
-}
-
-func (f *fleetRunner) RunInstance(ctx context.Context, in Instance) (Prediction, error) {
-	// TODO: Implement actual fleet gateway agent execution.
-	// This would:
-	// 1. Clone the repo to base_commit
-	// 2. Start a fak session with the problem statement
-	// 3. Run the agent for up to MaxSteps turns
-	// 4. Capture the final patch diff
-	// For now, return a TODO placeholder.
-	return Prediction{
-		InstanceID:      in.InstanceID,
-		ModelNameOrPath: "fleet",
-		ModelPatch:      fmt.Sprintf("# TODO: run fleet agent for %s", in.InstanceID),
-	}, nil
-}
+// fleetRunner (the fak gateway coding agent) lives in fleet.go.
 
 // deepSWERunner executes instances via the DeepSWE baseline (R2E-Gym).
 type deepSWERunner struct {
@@ -308,14 +296,8 @@ type deepSWERunner struct {
 }
 
 func (d *deepSWERunner) RunInstance(ctx context.Context, in Instance) (Prediction, error) {
-	// TODO: Implement DeepSWE baseline execution.
-	// This would:
-	// 1. Call into R2E-Gym's replay/execution API
-	// 2. Or shell to the DeepSWE run script with the instance
-	// For now, return a placeholder indicating integration point.
-	return Prediction{
-		InstanceID:      in.InstanceID,
-		ModelNameOrPath: d.cfg.Model,
-		ModelPatch:      fmt.Sprintf("# TODO: run DeepSWE for %s", in.InstanceID),
-	}, nil
+	// The DeepSWE/R2E-Gym baseline is not wired yet. Return an error (the Run loop
+	// records it as a failed instance with an empty patch) rather than a placeholder
+	// patch that would masquerade as a real prediction in preds.json.
+	return Prediction{}, fmt.Errorf("deepswe runner not wired (model=%q): point --model at an R2E-Gym/DeepSWE endpoint (baseline integration pending)", d.cfg.Model)
 }

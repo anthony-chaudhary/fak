@@ -65,10 +65,12 @@ usage:
         (JSONL or JSON array) for real problem-statement token geometry.
 
   fak swebench run --agent AGENT [--filter FILTER] [--output DIR]
-        [--max-steps N] [--timeout DURATION] [--gateway ADDR] [--model MODEL]
+        [--max-steps N] [--timeout DURATION] [--gateway ADDR] [--model MODEL] [--allow-exec]
         Run an agent on SWE-bench instances and generate predictions.json.
-        AGENT: mock (dummy patches), fleet (gateway agent), deepswe (R2E-Gym baseline).
+        AGENT: mock (dummy patches), fleet (gateway coding agent → fak serve), deepswe (R2E-Gym baseline).
         FILTER: smoke (~5 instances), l3 (~50), full (all 500).
+        fleet drives a read/edit loop against a running 'fak serve' (point --gateway at it;
+        --allow-exec additionally enables the shell tool — sandbox/container only).
 
   fak swebench eval --predictions preds.json [--run-id ID] [--max-workers N] [--out FILE]
         Grade a predictions file into the SWE-bench Verified resolve-rate via the
@@ -382,7 +384,8 @@ func cmdSwebenchRun(argv []string) {
 	maxSteps := fs.Int("max-steps", 50, "max agent steps per instance")
 	timeout := fs.Duration("timeout", 10*time.Minute, "per-instance timeout (0 = no limit)")
 	gateway := fs.String("gateway", "localhost:8080", "fleet gateway address (for fleet agent)")
-	model := fs.String("model", "", "model endpoint or path (for deepswe)")
+	model := fs.String("model", "", "model id to request from the gateway (fleet) or endpoint/path (deepswe)")
+	allowExec := fs.Bool("allow-exec", false, "allow the fleet agent's shell (run) tool — use ONLY in a sandboxed/containerized run")
 	_ = fs.Parse(argv)
 
 	// Map agent string to RunnerType
@@ -410,6 +413,7 @@ func cmdSwebenchRun(argv []string) {
 		Difficulty:  *difficulty,
 		GatewayAddr: *gateway,
 		Model:       *model,
+		AllowExec:   *allowExec,
 	}
 
 	ctx := context.Background()
