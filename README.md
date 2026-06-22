@@ -215,6 +215,9 @@ injection reached the unprotected baseline 5/5 and `fak` walled it off 5/5.
 ## How far do you want to take it?
 
 Every rung is useful on its own — you get value even if you never buy the whole thesis.
+The 2-minute demo above is the offline rung (rung 2): it proves the gate is real with no
+model or network. If it convinced you, fronting your own model (rung 1) is the next step
+for most adopters — same gate, now in front of the model you already run.
 
 - **Front your existing model.** `fak serve` puts the gate in front of any
   OpenAI-compatible server (Ollama, vLLM, a cloud provider). Keep your model and your
