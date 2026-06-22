@@ -20,10 +20,13 @@ only the first is achievable today. This doc proves #1 on a real A100 and bounds
    multi-layer prompt+decode forward runs on the device with *every compute op being fak's own
    kernel* — Q8_0/Q4_K GEMM, fused flash attention, RMSNorm/RoPE/SwiGLU/Add/Argmax/KV-write —
    argmax-exact vs the CPU reference. In the Q8 path **cuBLAS is never called.** → §3, witnessed.
-2. **GLM-5.2's architecture on that GPU path: blocked in code, not by hardware.** GLM-MoE-DSA
-   *panics* the moment a `compute.Backend` is attached (`requireGLMDsaSession`, `kv.go:551`,
-   issue **#86**). GLM decode is **CPU-resident only**. So GLM cannot use the pure GPU path at
-   all today, on any GPU. → §4.
+2. **GLM-5.2's architecture on that GPU path: was hard-blocked (#86); this session lands the first
+   slice — witnessed on the A100.** Previously GLM-MoE-DSA *panicked* on any `compute.Backend`
+   (CPU-only). Now GLM-5.2's **MoE/FFN experts + router + vocab head run on the pure fak GPU kernel
+   (`k_q8_gemm`)** via a new `backendKernel`; on the A100 the GLM-MoE-DSA forward matches the CPU Q8
+   forward at **cosine = 1.000000, argmax-exact** (`TestCUDAGLMMoeDsaBackendForward`). The remaining
+   not-on-GPU piece is the **DSA sparse-attention** (learned-indexer top-k + sparse gather), still
+   host-side — the next #86/#413 slice. → §4.
 3. **Serving the *real* 753B GLM-5.2 on this DGX: does not fit, pure or not.** 8× A100-40GB =
    320 GB VRAM; INT4 GLM-5.2 ≈ 376 GB > 320 GB. The only way the full model "runs" here is
    **CPU/host offload** (llama.cpp, most weights in the DGX's ~1 TB RAM) — not the fak kernel and
@@ -152,16 +155,33 @@ commit on `origin/main`, each re-verified on the A100):
 Plus the two witness findings in §3 (Q4_K GEMV argmax-gate too tight for 4-bit; combined-suite
 graph-path panic) — filed, not hidden.
 
-## §4 — GLM-5.2 on the pure GPU path: blocked by #86 (code, not hardware)
+## §4 — GLM-5.2 on the GPU path: #86 was a hard block; this session lands the first slice (witnessed on the A100)
 
-`Session.requireGLMDsaSession()` (`internal/model/kv.go:551`) **panics** if `s.Backend != nil ||
-s.Metal || s.PrecisionPolicy != nil` — i.e. GLM-MoE-DSA refuses to run on *any* accelerated
-`compute.Backend`; it is **CPU-resident only**. So the §3 pure GPU path is unreachable for GLM by
-construction. This is issue **#86**, confirmed in `docs/model-arch-seam-status-487.md` (GLM-5.2
-row: accel decode "**no — #86**"). The GLM-MoE-DSA architecture itself (DSA sparse attention,
-learned indexer + IndexShare, MoE group-routing + shared experts, quant residency, bit-exact
-mid-run evict) **is** witnessed green in the kernel — but on the **CPU** (the prior doc's §1).
-<!-- FILL: GLM CPU witnesses re-run on the DGX node if done -->
+**Before this session:** `Session.requireGLMDsaSession()` *panicked* on any `s.Backend != nil` —
+GLM-MoE-DSA refused to run on *any* accelerated `compute.Backend`; CPU-resident only (issue **#86**;
+`docs/model-arch-seam-status-487.md` GLM-5.2 row: accel decode "no — #86").
+
+**This session (`93119eb`, on-device `cf9d9a1`):** the guard now PERMITS a backend, and GLM-5.2's
+**dense GEMMs route through it** — the **MoE/FFN experts + router** (a new `backendKernel` swapped
+into `decodeBandGLMDsa`'s `matKernel`) and the **vocab head** (`glmDsaHead`). With a lean
+(Q8-resident) model on the cuda backend those GEMMs run on **`k_q8_gemm` — the pure fak GPU kernel**.
+The MoE/FFN is the bulk of GLM-5.2's parameters, so most of its decode FLOPs now execute on the GPU.
+
+**Witnessed:**
+- `TestGLMMoeDsaBackendGEMMMatchesCPU` (cpu-ref): a GLM-MoE-DSA Prefill with MoE/FFN+head GEMMs
+  routed through the backend is **bit-exact (max|Δ| = 0), argmax-exact** vs the all-host CPU forward —
+  the routing is correct; the 23 prior GLM-DSA witnesses stay green.
+- **`TestCUDAGLMMoeDsaBackendForward` on the A100 (sm_80): PASS — GLM-MoE-DSA MoE/FFN+head GEMMs on
+  `k_q8_gemm`, `cosine = 1.000000`, `argmax cpu=40 cuda=40` (argmax-exact) vs the CPU Q8 forward.**
+  This is GLM-5.2's own architecture running its dense compute on the pure fak GPU kernel, on real
+  datacenter hardware.
+
+**What is still NOT on the GPU (the honest residual):** the **DSA-specific** work stays host-side in
+this slice — the learned-indexer top-k scoring (`glmDsaIndexStep`), the sparse attention
+gather/softmax/ΣwV (`glmDsaAttendCached`), and the DSA KV cache. A *fully* GPU GLM-DSA needs a fused
+sparse-attention CUDA kernel + device DSA-KV — the next slice of #86/#413. So today: GLM-5.2's
+**MoE/FFN/head = pure fak GPU kernel; DSA attention = host**. (The GLM arch also remains green
+end-to-end on CPU — the prior doc's §1.)
 
 ## §5 — The real 753B: why it doesn't fit, and what the ~6 GB on GPU0 actually is
 
@@ -182,14 +202,19 @@ mid-run evict) **is** witnessed green in the kernel — but on the **CPU** (the 
 - **Proven on the A100 (§3), live:** the pure fak CUDA kernel builds for sm_80 and runs a **full
   multi-layer decode forward end-to-end on real datacenter hardware — argmax-exact, cosine = 1.0**,
   with **zero cuBLAS in the Q8 path** (every op is k_q8_gemm / k_flash_attention / k_rmsnorm / …).
-  Flash attention, Q8 GEMV+prefill, and Q4_K prefill all match the CPU reference on the device.
+  Flash attention, Q8 GEMV+prefill, and Q4_K prefill all match the CPU reference on the device, and
+  **SmolLM2-135M Q8 decodes end-to-end at 127.8 tok/s** on the pure path.
+- **GLM-5.2 specifically, on the A100 (§4), live:** GLM-MoE-DSA's **MoE/FFN experts + router + vocab
+  head now run on the pure fak GPU kernel (`k_q8_gemm`)** — `TestCUDAGLMMoeDsaBackendForward`:
+  **cosine = 1.000000, argmax-exact** vs the CPU Q8 forward. The DSA sparse-attention stays host-side
+  (the labeled residual). This is the first slice of #86, landed + witnessed this session.
 - **Found on the A100 (labeled bugs, filed):** Q4_K GEMV argmax-exact gate too tight for 4-bit
   (kernel correct; test fixture); a combined-suite graph-path panic (1-D weight → MatMul). Neither
   is a kernel-correctness defect — the isolated kernels all pass.
-- **Not proven / blocked (labeled):** GLM-5.2 on the GPU path (**#86**, code blocker — GLM-DSA
-  panics on any `compute.Backend`); HF numeric DSA parity (#474/#413, oracle-gated); real 753B
-  serving (VRAM: INT4 ≈ 376 GB > 320 GB; plus the NCCL/offload reshape). Each is bounded exactly
-  above — none is closed by this run, and none is faked.
+- **Not proven / out of scope (labeled):** GLM-5.2's **DSA sparse-attention on the GPU** (needs a
+  fused sparse-attention CUDA kernel + device DSA-KV — #86/#413 next slice); HF numeric DSA parity
+  (#474/#413, oracle-gated); real 753B serving (VRAM: INT4 ≈ 376 GB > 320 GB; plus the NCCL/offload
+  reshape). Each is bounded exactly above — none is faked.
 
 _Reproduce: `bash tools/dgx_pure_kernel_run.sh` on an sm_80 CUDA node (or via the control bridge:
 `ship` it, `exec 'bash /tmp/dgx_pure_kernel_run.sh'`, poll `/tmp/fakpure/run.log` +
