@@ -151,7 +151,9 @@ go run ./cmd/fak preflight --policy examples/customer-support-readonly-policy.js
 go run ./cmd/fak agent --offline
 ```
 
-`refund_payment` returns **`DENY (POLICY_BLOCK)`**, refused with a named reason.
+`refund_payment` returns **`DENY (POLICY_BLOCK)`** — refused by the policy floor,
+citing one code from a [closed refusal vocabulary](POLICY.md#the-closed-refusal-vocabulary)
+(`DEFAULT_DENY`, `POLICY_BLOCK`, `SELF_MODIFY`, `LEASE_HELD`, …) instead of free text.
 `search_kb` returns **`ALLOW`**. Then `agent --offline` runs *the same task*
 twice, once with tools wired directly and once behind `fak`, and prints the
 before/after.
