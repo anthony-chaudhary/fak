@@ -125,20 +125,41 @@ def find_chrome() -> str | None:
 
 
 def render_svg(name: str, scale: int = 3) -> Path:
-    """Render visuals/<name>.svg -> BUILD/<name>@<scale>.png via headless Chrome.
-    Falls back to an existing visuals/<name>.png if Chrome is missing/fails."""
+    """Obtain a high-res raster for visuals/<name>.
+
+    Hand-authored cards carry a numeric root width (e.g. width="1200") and
+    rasterize crisply through headless Chrome. Mermaid decks instead emit
+    width="100%" + a max-width style, which headless Chrome sizes unreliably
+    (it can collapse to a tiny strip) — for those the committed visuals/<name>.png
+    IS the canonical "always-visible" render (text baked in), so we use it
+    directly. See visuals/RENDERING-NOTE.md."""
     out = BUILD / f"{name}@{scale}.png"
     if out.exists():
         return out
     svg = VISUALS / f"{name}.svg"
+    fallback = VISUALS / f"{name}.png"
+    txt = svg.read_text(encoding="utf-8", errors="ignore") if svg.exists() else ""
+    import re
+    root = re.search(r"<svg[^>]*>", txt)
+    # numeric only if the root width is digits closed by a quote (width="1200"),
+    # NOT a percentage (width="100%") — the "1" in "100%" must not count.
+    numeric_root = bool(root and re.search(r'\bwidth="\d[\d.]*"', root.group(0)))
+
+    # Mermaid (width="100%") -> prefer the canonical committed PNG.
+    if not numeric_root and fallback.exists():
+        return fallback
+
     chrome = find_chrome()
-    if chrome and svg.exists():
-        txt = svg.read_text(encoding="utf-8", errors="ignore")
-        import re
-        wm = re.search(r'width="(\d+)"', txt)
-        hm = re.search(r'height="(\d+)"', txt)
-        if wm and hm:
-            w, h = int(wm.group(1)), int(hm.group(1))
+    if chrome and numeric_root:
+        wm = re.search(r'\bwidth="(\d+(?:\.\d+)?)"', root.group(0))
+        hm = re.search(r'\bheight="(\d+(?:\.\d+)?)"', root.group(0))
+        w = round(float(wm.group(1))) if wm else None
+        h = round(float(hm.group(1))) if hm else None
+        if not (w and h):
+            vb = re.search(r'viewBox="\s*[-\d.]+\s+[-\d.]+\s+([\d.]+)\s+([\d.]+)', txt)
+            if vb:
+                w, h = round(float(vb.group(1))), round(float(vb.group(2)))
+        if w and h:
             cmd = [
                 chrome, "--headless", "--disable-gpu", "--hide-scrollbars",
                 f"--force-device-scale-factor={scale}",
@@ -149,8 +170,7 @@ def render_svg(name: str, scale: int = 3) -> Path:
             subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             if out.exists():
                 return out
-    # fallback: committed raster
-    fallback = VISUALS / f"{name}.png"
+    # last resort: committed raster, else a Chrome render of whatever we have
     if fallback.exists():
         return fallback
     raise FileNotFoundError(f"cannot obtain raster for {name} (no Chrome render, no {fallback})")
@@ -288,6 +308,40 @@ def reveal_wipe(base: Image.Image, bw: int, bh: int, frac: float,
     return box
 
 
+def scroll_progress(frac: float, hold: float) -> float:
+    """0..1 scroll position with a static hold at each end so the viewer can read
+    the top of the diagram before the pan starts and the bottom after it lands."""
+    if frac <= hold:
+        return 0.0
+    if frac >= 1 - hold:
+        return 1.0
+    return smoothstep((frac - hold) / max(1e-6, 1 - 2 * hold))
+
+
+def reveal_scroll(base: Image.Image, bw: int, bh: int, frac: float,
+                  bg: tuple[int, int, int], axis: str, hold: float = 0.13) -> Image.Image:
+    """Scale a tall (axis='v') or wide (axis='h') diagram to FILL the box on its
+    short axis, then pan it fully along its long axis — a steady scroll that reads
+    the whole diagram top-to-bottom (or left-to-right) instead of letterboxing it
+    into a thin strip. Holds at both ends so the start and end frames are legible."""
+    box = Image.new("RGB", (bw, bh), bg)
+    iw, ih = base.size
+    p = scroll_progress(frac, hold)
+    if axis == "v":
+        s = bw / iw
+        nw, nh = bw, max(1, round(ih * s))
+        cur = base.resize((nw, nh), LANCZOS)
+        travel = max(0, nh - bh)
+        box.paste(cur, (0, -round(travel * p)))
+    else:  # 'h'
+        s = bh / ih
+        nw, nh = max(1, round(iw * s)), bh
+        cur = base.resize((nw, nh), LANCZOS)
+        travel = max(0, nw - bw)
+        box.paste(cur, (-round(travel * p), 0))
+    return box
+
+
 # ---------------------------------------------------------------------------
 # Text helpers
 # ---------------------------------------------------------------------------
@@ -325,12 +379,30 @@ def draw_center(draw, cx, y, text, fnt, fill, max_w=None):
 # Plates  (static caption layer per scene)
 # ---------------------------------------------------------------------------
 # Content box for a chart on a visual/anim scene, on the 1920 grid; scaled by S().
+# The "full" box is for self-contained cards that carry their own title/caption —
+# they get nearly the whole frame and no headline plate stacked on top.
 CONTENT_1920 = (96, 206, 1824, 1002)
+FULL_CONTENT_1920 = (60, 58, 1860, 1014)
 
 
-def content_box():
-    x0, y0, x1, y1 = CONTENT_1920
+def content_box(full: bool = False):
+    x0, y0, x1, y1 = FULL_CONTENT_1920 if full else CONTENT_1920
     return (S(x0), S(y0), S(x1), S(y1))
+
+
+def _lum(c: tuple[int, int, int]) -> float:
+    return 0.299 * c[0] + 0.587 * c[1] + 0.114 * c[2]
+
+
+def is_dark(bg: tuple[int, int, int]) -> bool:
+    return _lum(bg) < 128
+
+
+def plate_full(scene, chart_bg) -> Image.Image:
+    """A bare frame the colour of the card's own background, so a self-contained
+    card (which already carries its title + caption + caveat) fills the frame
+    edge-to-edge with matching letterbox and no duplicated headline."""
+    return Image.new("RGB", (W, H), chart_bg)
 
 
 def wordmark(draw, cx, y, size):
@@ -627,7 +699,8 @@ class Scene:
     def _build(self):
         s = self.spec
         if self.kind == "visual":
-            x0, y0, x1, y1 = content_box()
+            self.full = bool(s.get("full"))
+            x0, y0, x1, y1 = content_box(self.full)
             bw, bh = x1 - x0, y1 - y0
             self.box = (x0, y0, bw, bh)
             if self.render_mode == "anim" and s.get("visual") == "60-hero-turntax-curves":
@@ -637,9 +710,19 @@ class Scene:
             else:
                 chart = load_visual(s["visual"])
                 self.chart_bg = corner_bg(chart)
-                chart = autotrim(chart, self.chart_bg)
-                self.base = contain(chart, round(bw * 0.998), round(bh * 0.998))
-                self.plate = plate_visual(s, self.chart_bg)
+                # self-contained cards are designed edge-to-edge — don't trim them.
+                if not self.full:
+                    chart = autotrim(chart, self.chart_bg)
+                if self.render_mode == "scroll":
+                    # keep full-res; reveal_scroll scales + pans the long axis.
+                    iw, ih = chart.size
+                    self.scroll_axis = s.get("scroll_axis") or (
+                        "v" if (ih / iw) > (bh / bw) else "h")
+                    self.base = chart
+                else:
+                    self.base = contain(chart, round(bw * 0.998), round(bh * 0.998))
+                self.plate = plate_full(s, self.chart_bg) if self.full else \
+                    plate_visual(s, self.chart_bg)
         elif self.kind == "title":
             self.plate = plate_title(s)
         elif self.kind == "closing":
@@ -656,6 +739,8 @@ class Scene:
                 chart = self.anim.render(bw, bh, frac, self.chart_bg)
             elif self.render_mode == "wipe":
                 chart = reveal_wipe(self.base, bw, bh, frac, self.chart_bg)
+            elif self.render_mode == "scroll":
+                chart = reveal_scroll(self.base, bw, bh, frac, self.chart_bg, self.scroll_axis)
             else:
                 chart = ken_burns(self.base, bw, bh, frac, self.motion, self.intensity, self.chart_bg)
             im.paste(chart, (x0, y0))
@@ -726,7 +811,7 @@ def ffmpeg_exe():
     return imageio_ffmpeg.get_ffmpeg_exe()
 
 
-def write_mp4(scenes, fps, out: Path, want_poster=False, crf=19):
+def write_mp4(scenes, fps, out: Path, want_poster=False, crf=19, poster: Path = OUT_POSTER):
     ff = ffmpeg_exe()
     cmd = [
         ff, "-y", "-f", "rawvideo", "-pix_fmt", "rgb24",
@@ -742,13 +827,18 @@ def write_mp4(scenes, fps, out: Path, want_poster=False, crf=19):
     starts, ends = build_timeline(scenes)
     poster_idx = None
     if want_poster:
-        for i, s in enumerate(scenes):
-            if s.spec.get("visual") == "60-hero-turntax-curves":
-                # land on the count-up's final readable beat, but BEFORE the
-                # cross-dissolve into the next scene starts (so no ghost bleed-through)
-                nxt_tin = scenes[i + 1].tin if i + 1 < len(scenes) else 0.0
-                poster_t = starts[i] + s.dur - nxt_tin - 0.15
-                poster_idx = round(poster_t * fps)
+        # prefer a scene flagged "poster": true; else the turn-tax count-up beat.
+        cands = ([i for i, s in enumerate(scenes) if s.spec.get("poster")] or
+                 [i for i, s in enumerate(scenes)
+                  if s.spec.get("visual") == "60-hero-turntax-curves"])
+        if cands:
+            i = cands[0]
+            s = scenes[i]
+            # land on the scene's final readable beat, but BEFORE the cross-dissolve
+            # into the next scene starts (so no ghost bleed-through)
+            nxt_tin = scenes[i + 1].tin if i + 1 < len(scenes) else 0.0
+            poster_t = starts[i] + s.dur - nxt_tin - 0.15
+            poster_idx = round(poster_t * fps)
     for f, frame in render(scenes, fps):
         proc.stdin.write(frame.tobytes())
         if poster_idx is not None and f == poster_idx:
@@ -762,8 +852,8 @@ def write_mp4(scenes, fps, out: Path, want_poster=False, crf=19):
     if want_poster:
         if poster_frame is None:
             poster_frame = next(fr for _, fr in render(scenes, fps, frange=(poster_idx or 0, (poster_idx or 0) + 1)))
-        poster_frame.save(OUT_POSTER)
-        print(f"wrote {OUT_POSTER}")
+        poster_frame.save(poster)
+        print(f"wrote {poster}")
 
 
 # A condensed highlight reel for the README GIF: the load-bearing beats only,
@@ -778,7 +868,17 @@ GIF_BEATS = {
 
 
 def condense(scene_specs):
+    # A storyboard can mark its own GIF beats with "gif": true (+ optional
+    # "gif_dur"); otherwise fall back to the hero deck's hardcoded beat list.
+    flagged = [sp for sp in scene_specs if sp.get("gif")]
     out = []
+    if flagged:
+        for sp in flagged:
+            c = dict(sp)
+            c["duration_s"] = float(sp.get("gif_dur", 2.4))
+            c["transition_dur_s"] = 0.5
+            out.append(c)
+        return out
     for sp in scene_specs:
         if sp["id"] in GIF_BEATS:
             c = dict(sp)
@@ -811,6 +911,8 @@ def main():
                     help="x264 quality (lower=better/bigger); 19 is a rich 1440p bitrate")
     ap.add_argument("--storyboard", default=str(STORYBOARD))
     ap.add_argument("--out", default=str(OUT_MP4))
+    ap.add_argument("--poster", default=None, help="poster png path (default: <out>-poster.png)")
+    ap.add_argument("--gif", default=None, help="gif path (default: <out>.gif)")
     args = ap.parse_args()
 
     spec = json.loads(Path(args.storyboard).read_text(encoding="utf-8"))
@@ -820,12 +922,17 @@ def main():
     SX = W / 1920.0
     fps = 15 if args.fast else spec.get("fps", 30)
 
-    print(f"building {len(spec['scenes'])} scenes -> {args.out}  ({W}x{H} @{fps}fps, crf {args.crf})")
-    scenes = [Scene(s) for s in spec["scenes"]]
+    # poster/gif default to the out stem so a second storyboard never clobbers
+    # the hero video's hero-video-poster.png / hero-video.gif.
     out = Path(args.out)
-    write_mp4(scenes, fps, out, want_poster=True, crf=args.crf)
+    poster = Path(args.poster) if args.poster else out.with_name(out.stem + "-poster.png")
+    gif = Path(args.gif) if args.gif else out.with_suffix(".gif")
+
+    print(f"building {len(spec['scenes'])} scenes -> {out}  ({W}x{H} @{fps}fps, crf {args.crf})")
+    scenes = [Scene(s) for s in spec["scenes"]]
+    write_mp4(scenes, fps, out, want_poster=True, crf=args.crf, poster=poster)
     if not args.no_gif:
-        build_gif(spec["scenes"], OUT_GIF)
+        build_gif(spec["scenes"], gif)
 
 
 if __name__ == "__main__":

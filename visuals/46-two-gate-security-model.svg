@@ -133,5 +133,5 @@
   <rect x="72" y="780" width="1456" height="80" rx="8" fill="#17202a"/>
   <text x="98" y="820" class="label" style="fill:#ffffff; font-size:18px;">The key difference:</text>
   <text x="350" y="820" class="body" style="fill:#ffffff; font-size:16px;">Single gate relies on recognition (can be fooled). Two gates use structure (fails closed) + recognition (bonus).</text>
-  <text x="98" y="850" class="small" style="fill:#dce9ef;">Real results: 5/5 injections reached unprotected baseline; 0/5 reached fak. See fak/LIVE-RESULTS.md</text>
+  <text x="98" y="850" class="small" style="fill:#dce9ef;">Real results: 5/5 injections reached unprotected baseline; 0/5 reached fak. See docs/benchmarks/LIVE-RESULTS.md</text>
 </svg>

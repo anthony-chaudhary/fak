@@ -300,6 +300,28 @@
   </figure>
 </div>
 
+<!-- ===================== FIREWALL EXPLAINER VIDEO ===================== -->
+<!-- The boundary / how-it-works story (P1) — a companion to the benchmark reveal above.
+     Built by tools/hero_video_gen.py from the in-repo deterministic diagrams; nothing generated. -->
+<div class="wrap" style="margin-top:14px">
+  <figure style="margin:0 0 6px;background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:10px;box-shadow:0 24px 60px rgba(0,0,0,.45)">
+    <video src="https://raw.githubusercontent.com/anthony-chaudhary/fak/main/visuals/agent-firewall-video.mp4"
+           poster="https://raw.githubusercontent.com/anthony-chaudhary/fak/main/visuals/agent-firewall-video-poster.png"
+           autoplay loop muted playsinline preload="metadata"
+           style="width:100%;display:block;border-radius:9px;background:#fbfcfd"
+           aria-label="fak — the agent tool firewall: a ~44 second explainer reveal of how the boundary works">
+      <img src="https://raw.githubusercontent.com/anthony-chaudhary/fak/main/visuals/agent-firewall-video.gif"
+           alt="fak agent tool firewall — an animated ~44-second explainer" style="width:100%;border-radius:9px"/>
+    </video>
+    <figcaption style="font-size:13px;color:var(--ink-dim);margin-top:9px;text-align:center">
+      How the boundary works as a ~44-second reveal — the firewall card, the tool call as a syscall,
+      the five-gate flow through the kernel, the two-gate security model, the Context MMU, shared-prefix
+      KV, and the 2-D scheduler. Every frame is a real in-repo diagram, nothing generated.
+      <a href="https://raw.githubusercontent.com/anthony-chaudhary/fak/main/visuals/agent-firewall-video.mp4" style="color:var(--fak)">full-resolution MP4 ↗</a>
+    </figcaption>
+  </figure>
+</div>
+
 <!-- ============================ THE KERNEL ============================ -->
 <section id="kernel">
   <div class="wrap reveal">
