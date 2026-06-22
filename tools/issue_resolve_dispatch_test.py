@@ -147,5 +147,83 @@ class EvaluateTest(unittest.TestCase):
         self.assertEqual(p["verdict"], "NO_LANE")
 
 
+class BuildWorkerCommandTest(unittest.TestCase):
+    def test_claude_command_shape(self) -> None:
+        mod = load()
+        self.assertEqual(
+            mod.build_worker_command("claude", "PROMPT", None),
+            ["claude", "-p", "--permission-mode", "bypassPermissions", "PROMPT"])
+
+    def test_opencode_command_pins_model_and_skips_permissions(self) -> None:
+        mod = load()
+        self.assertEqual(
+            mod.build_worker_command("opencode", "PROMPT", "zai-coding-plan/glm-5.2"),
+            ["opencode", "run", "--dangerously-skip-permissions",
+             "-m", "zai-coding-plan/glm-5.2", "PROMPT"])
+
+    def test_opencode_command_without_model(self) -> None:
+        mod = load()
+        self.assertEqual(
+            mod.build_worker_command("opencode", "PROMPT", None),
+            ["opencode", "run", "--dangerously-skip-permissions", "PROMPT"])
+
+    def test_unknown_backend_rejected(self) -> None:
+        mod = load()
+        with self.assertRaises(ValueError):
+            mod.build_worker_command("gpt", "x", None)
+
+
+class BackendRoutingTest(unittest.TestCase):
+    SPAWN_OK_OC = {
+        "verdict": "SPAWN_OK", "reason": "ok", "cap": 2, "live": 0,
+        "account": {"tag": "default", "tier": 2,
+                    "model": "zai-coding-plan/glm-5.2", "dir": "/cfg/opencode"},
+    }
+
+    def test_opencode_backend_routes_product_and_stamps_payload(self) -> None:
+        mod = load()
+        seen: dict = {}
+
+        def fake_pre(root, **kw):
+            seen.update(kw)
+            return self.SPAWN_OK_OC
+
+        mod.issue_dispatch.refresh_registry = lambda root: {"ok": True}
+        mod.issue_dispatch.preflight = fake_pre
+        mod.lane_issue_numbers = lambda root, lane: {
+            "lane": "docs", "numbers": [260], "by_lane_count": {"docs": 1}}
+        mod.live_resolution_issues = lambda runs_dir: set()
+        mod.recently_attempted_issues = lambda runs_dir, *, cooldown_min, **k: set()
+        mod.issue_worker_prompt.build = lambda n, lane, *, workspace: {
+            "prompt": f"resolve #{n}", "prompt_chars": 100, "title": f"t{n}"}
+        mod.spawn_issue_worker = lambda *a, **k: (_ for _ in ()).throw(
+            AssertionError("dry-run must not spawn"))
+
+        p = mod.evaluate(ROOT, max_workers=2, work_kind="gardening",
+                         lane="docs", live=False, backend="opencode")
+        self.assertEqual(seen.get("product"), "opencode")       # routed to glm pool
+        self.assertEqual(p["backend"], "opencode")
+        self.assertEqual(p["command"][0], "opencode")
+        self.assertIn("zai-coding-plan/glm-5.2", p["command"])   # model pinned/traced
+        self.assertTrue(p["ok"])
+
+    def test_unknown_backend_raises(self) -> None:
+        mod = load()
+        with self.assertRaises(ValueError):
+            mod.evaluate(ROOT, max_workers=2, work_kind="x", lane=None,
+                         live=False, backend="gpt")
+
+
+class OpencodeConfigHomeTest(unittest.TestCase):
+    def test_canonical_dir_uses_parent_as_xdg_home(self) -> None:
+        import tempfile
+        mod = load()
+        with tempfile.TemporaryDirectory() as d:
+            acct = Path(d) / "opencode"
+            acct.mkdir()
+            home = mod._opencode_config_home(str(acct), Path(d) / "runs")
+            self.assertEqual(Path(home), Path(d))   # parent is the XDG config home
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -107,9 +107,11 @@ def refresh_registry(root: Path) -> dict[str, Any]:
     return {"ok": "_error" not in doc, "error": doc.get("_error")}
 
 
-def preflight(root: Path, *, max_workers: int, work_kind: str) -> dict[str, Any]:
+def preflight(root: Path, *, max_workers: int, work_kind: str,
+              product: str = "claude") -> dict[str, Any]:
     return run_json([_py(), str(root / "tools" / "dispatch_preflight.py"), "--json",
-                     "--max-workers", str(max_workers), "--work-kind", work_kind],
+                     "--max-workers", str(max_workers), "--work-kind", work_kind,
+                     "--product", product],
                     root, timeout=120)
 
 

@@ -46,10 +46,19 @@ except (AttributeError, ValueError):
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import issue_dispatch  # noqa: E402  (refresh_registry/preflight/worker_env/spawn_detached)
 import issue_worker_prompt  # noqa: E402  (render the per-issue resolution prompt)
+import dispatch_worker  # noqa: E402  (child_env for the opencode backend)
 
 SCHEMA = "fleet-issue-resolve-dispatch/1"
 RUNS_DIRNAME = ".dispatch-runs"
 _LOG_ISSUE_RE = re.compile(r"resolve-(\d+)-")
+
+# Worker backends this tick can launch:
+#   claude   = opus (t1) -- the reference path, the established quota pool.
+#   opencode = glm-5.2 via the zai-coding-plan accounts (t2) -- a SEPARATE quota
+#              pool that sits idle. Routing a lane (e.g. docs, where glm is proven)
+#              to opencode relieves the opus weekly-quota throughput ceiling.
+BACKENDS = ("claude", "opencode")
+_BACKEND_PRODUCT = {"claude": "claude", "opencode": "opencode"}
 
 
 def repo_root() -> Path:
@@ -151,13 +160,69 @@ def pick_target_issue(numbers: list[int], skip: set[int]) -> int | None:
     return None
 
 
-def spawn_issue_worker(prompt: str, env: dict[str, str], cwd: Path,
-                       log_dir: Path, issue: int, lane: str) -> dict[str, Any]:
-    """Launch a detached ``claude -p "<prompt>"`` worker on one issue; record pid."""
+def build_worker_command(backend: str, prompt: str, model: str | None) -> list[str]:
+    """The argv for one detached issue-resolution worker, per backend. Both forms
+    run the SAME issue-resolution prompt (with its ``#N``-in-subject rule), so the
+    resulting commit is witnessable by the closure auditor regardless of backend."""
+    if backend == "claude":
+        return ["claude", "-p", "--permission-mode", "bypassPermissions", prompt]
+    if backend == "opencode":
+        cmd = ["opencode", "run", "--dangerously-skip-permissions"]
+        if model:
+            cmd += ["-m", model]  # pin the exact model so the run is reproducible/traced
+        cmd.append(prompt)
+        return cmd
+    raise ValueError(f"unknown backend {backend!r}; expected one of {BACKENDS}")
+
+
+def _opencode_config_home(account_dir: str, runs_dir: Path) -> str:
+    """opencode loads its config from ``$XDG_CONFIG_HOME/opencode``. The switcher's
+    account dir is either the canonical ``<config_home>/opencode`` (the default
+    account) or a sibling ``<config_home>/opencode-<tag>``. For the canonical dir the
+    parent IS the XDG home; for a sibling we mint a tiny pin dir whose ``opencode``
+    entry is a junction to the account, so opencode loads exactly that account -- we
+    never silently mis-attribute a run to the wrong account."""
+    p = Path(account_dir)
+    if p.name == "opencode":
+        return str(p.parent)
+    pin = runs_dir / ".opencode-pins" / p.name
+    link = pin / "opencode"
+    pin.mkdir(parents=True, exist_ok=True)
+    if not link.exists():
+        try:
+            os.symlink(account_dir, link, target_is_directory=True)
+        except OSError:
+            # Windows without symlink privilege: a directory junction needs none.
+            subprocess.run(["cmd", "/c", "mklink", "/J", str(link), account_dir],
+                           capture_output=True, text=True)
+    if not link.exists():
+        raise RuntimeError(f"could not pin opencode account dir {account_dir!r}")
+    return str(pin)
+
+
+def opencode_worker_env(account_dir: str | None, lane: str, workspace: Path,
+                        runs_dir: Path) -> dict[str, str]:
+    """Child env for an opencode/glm worker: the account pinned via XDG_CONFIG_HOME
+    (NOT CLAUDE_CONFIG_DIR / oauth token, which are claude-only), plus the same
+    self-describing dispatch vars the claude path stamps."""
+    env = dispatch_worker.child_env(lane, "opencode", workspace)
+    env.pop("CLAUDE_CONFIG_DIR", None)
+    env.pop("CLAUDE_CODE_OAUTH_TOKEN", None)
+    if account_dir:
+        env["XDG_CONFIG_HOME"] = _opencode_config_home(account_dir, runs_dir)
+    return env
+
+
+def spawn_issue_worker(command: list[str], env: dict[str, str], cwd: Path,
+                       log_dir: Path, issue: int, lane: str,
+                       backend: str) -> dict[str, Any]:
+    """Launch a detached worker (claude or opencode) on one issue; record pid.
+
+    The log keeps the backend-neutral ``resolve-<N>-<stamp>.log`` name so the close
+    arm, silent-worker scan, and in-flight de-dup all see it uniformly."""
     log_dir.mkdir(parents=True, exist_ok=True)
     stamp = dt.datetime.now(dt.timezone.utc).strftime("%Y%m%d-%H%M%S")
     out_log = log_dir / f"resolve-{issue}-{stamp}.log"
-    command = ["claude", "-p", "--permission-mode", "bypassPermissions", prompt]
     exe = shutil.which(command[0]) or command[0]
     argv = [exe, *command[1:]]
     kwargs: dict[str, Any] = {}
@@ -169,13 +234,19 @@ def spawn_issue_worker(prompt: str, env: dict[str, str], cwd: Path,
     proc = subprocess.Popen(argv, cwd=str(cwd), env=env, stdin=subprocess.DEVNULL,
                             stdout=fh, stderr=subprocess.STDOUT, **kwargs)
     (out_log.with_suffix(".pid")).write_text(str(proc.pid), encoding="utf-8")
-    return {"pid": proc.pid, "log": str(out_log), "issue": issue, "lane": lane}
+    return {"pid": proc.pid, "log": str(out_log), "issue": issue, "lane": lane,
+            "backend": backend}
 
 
 def evaluate(root: Path, *, max_workers: int, work_kind: str, lane: str | None,
-             live: bool, refresh: bool = True, cooldown_min: int = 120) -> dict[str, Any]:
+             live: bool, refresh: bool = True, cooldown_min: int = 120,
+             backend: str = "claude") -> dict[str, Any]:
+    if backend not in BACKENDS:
+        raise ValueError(f"unknown backend {backend!r}; expected one of {BACKENDS}")
+    product = _BACKEND_PRODUCT[backend]
     reg = issue_dispatch.refresh_registry(root) if refresh else {"skipped": True}
-    pre = issue_dispatch.preflight(root, max_workers=max_workers, work_kind=work_kind)
+    pre = issue_dispatch.preflight(root, max_workers=max_workers, work_kind=work_kind,
+                                   product=product)
     pre_ok = pre.get("verdict") == "SPAWN_OK"
     acct = pre.get("account") or {}
 
@@ -190,7 +261,7 @@ def evaluate(root: Path, *, max_workers: int, work_kind: str, lane: str | None,
     target = pick_target_issue(pick.get("numbers") or [], skip)
 
     payload: dict[str, Any] = {
-        "schema": SCHEMA, "workspace": str(root), "live": live,
+        "schema": SCHEMA, "workspace": str(root), "live": live, "backend": backend,
         "max_workers": max_workers, "registry_refresh": reg,
         "preflight": {"verdict": pre.get("verdict"), "reason": pre.get("reason"),
                       "cap": pre.get("cap"), "live": pre.get("live")},
@@ -220,24 +291,30 @@ def evaluate(root: Path, *, max_workers: int, work_kind: str, lane: str | None,
     rec = issue_worker_prompt.build(target, chosen_lane, workspace=root)
     payload["prompt_chars"] = rec.get("prompt_chars")
     payload["issue_title"] = rec.get("title")
-    command_preview = ["claude", "-p", "--permission-mode", "bypassPermissions",
-                       f"<resolve #{target} prompt, {rec.get('prompt_chars')} chars>"]
-    payload["command"] = command_preview
+    model = acct.get("model") if backend == "opencode" else None
+    preview_prompt = f"<resolve #{target} prompt, {rec.get('prompt_chars')} chars>"
+    payload["command"] = build_worker_command(backend, preview_prompt, model)
 
     if not live:
         payload.update({"ok": True, "action": "would_spawn", "verdict": "WOULD_SPAWN",
-                        "reason": (f"safe to spawn 1 issue-resolution worker on #{target} "
-                                   f"(lane '{chosen_lane}') under account '{acct.get('tag')}' "
-                                   f"(t{acct.get('tier')})")})
+                        "reason": (f"safe to spawn 1 {backend} issue-resolution worker on "
+                                   f"#{target} (lane '{chosen_lane}') under account "
+                                   f"'{acct.get('tag')}' (t{acct.get('tier')}, "
+                                   f"{acct.get('model') or backend})")})
         return payload
 
-    env = issue_dispatch.worker_env(acct.get("dir"), chosen_lane, root)
+    if backend == "claude":
+        env = issue_dispatch.worker_env(acct.get("dir"), chosen_lane, root)
+    else:
+        env = opencode_worker_env(acct.get("dir"), chosen_lane, root, runs_dir)
     env["FLEET_RESOLVE_ISSUE"] = str(target)
-    spawned = spawn_issue_worker(rec["prompt"], env, root, runs_dir, target, chosen_lane)
+    command = build_worker_command(backend, rec["prompt"], model)
+    spawned = spawn_issue_worker(command, env, root, runs_dir, target, chosen_lane, backend)
     payload.update({"ok": True, "action": "spawned", "verdict": "SPAWNED",
                     "spawned": spawned,
-                    "reason": (f"spawned issue-resolution worker pid {spawned['pid']} on "
-                               f"#{target} (lane '{chosen_lane}') under '{acct.get('tag')}'")})
+                    "reason": (f"spawned {backend} issue-resolution worker pid "
+                               f"{spawned['pid']} on #{target} (lane '{chosen_lane}') "
+                               f"under '{acct.get('tag')}' ({acct.get('model') or backend})")})
     _record(runs_dir, payload)
     return payload
 
@@ -255,7 +332,8 @@ def render(p: dict[str, Any]) -> str:
     a = p.get("account") or {}
     pf = p.get("preflight") or {}
     lines = [
-        f"issue-resolve-dispatch: {p.get('verdict')} ({'ok' if p.get('ok') else 'refuse'})  live={p.get('live')}",
+        f"issue-resolve-dispatch: {p.get('verdict')} ({'ok' if p.get('ok') else 'refuse'})  "
+        f"backend={p.get('backend')}  live={p.get('live')}",
         f"  preflight : {pf.get('verdict')} ({pf.get('live')}/{pf.get('cap')} live)",
         f"  account   : {a.get('tag') or '-'} (t{a.get('tier')})  {a.get('model') or ''}",
         f"  lane      : {p.get('lane') or '-'}  ({p.get('lane_issue_count')} issues)",
@@ -280,6 +358,9 @@ def main(argv: list[str] | None = None) -> int:
                     help="switcher work kind (engineering->t1, gardening->t2)")
     ap.add_argument("--lane", default=None,
                     help="explicit lane (default: the lane with the most open issues)")
+    ap.add_argument("--backend", choices=BACKENDS, default="claude",
+                    help="worker backend: claude (opus, t1) or opencode (glm-5.2, t2, "
+                         "a separate quota pool). Default claude.")
     ap.add_argument("--live", action="store_true",
                     help="actually spawn the worker (default: dry-run / plan only)")
     ap.add_argument("--no-refresh", action="store_true",
@@ -293,7 +374,7 @@ def main(argv: list[str] | None = None) -> int:
     root = Path(args.workspace).resolve() if args.workspace else repo_root()
     payload = evaluate(root, max_workers=args.max_workers, work_kind=args.work_kind,
                        lane=args.lane, live=args.live, refresh=not args.no_refresh,
-                       cooldown_min=args.cooldown_min)
+                       cooldown_min=args.cooldown_min, backend=args.backend)
     print(json.dumps(payload, indent=2) if args.json else render(payload))
     return 0 if payload.get("ok") else 1
 
