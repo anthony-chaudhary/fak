@@ -15,12 +15,12 @@ admission rung) on fak without forking the core.
 ## Licensing — read this before your first PR
 
 The fak kernel is **Apache-2.0** (`LICENSE`); the project keeps layered-licensing
-optionality open while Netra is the steward (see `CLA.md`). Two things gate every
-contribution:
+optionality open while Netra is the steward (see `CLA.md`). Every contribution is gated by
+two things — one binding today, one staged:
 
-1. **DCO sign-off on every commit** — the Developer Certificate of Origin
-   (<https://developercertificate.org/>). It certifies you wrote the change (or have the
-   right to submit it). Add it with:
+1. **DCO sign-off on every commit** *(binding today, enforced by a git hook)* — the
+   Developer Certificate of Origin (<https://developercertificate.org/>). It certifies you
+   wrote the change (or have the right to submit it). Add it with:
 
    ```
    git commit -s -m "your message"
@@ -29,11 +29,15 @@ contribution:
    which appends a `Signed-off-by: Your Name <you@example.com>` trailer. The name/email
    must match your commits.
 
-2. **CLA acceptance** — see `CLA.md`. The CLA grants Netra the copyright/patent license
+2. **CLA acceptance** *(staged; the text is a **draft pending Netra's legal review and not
+   yet binding**)* — see `CLA.md`. The CLA grants Netra the copyright/patent license
    (including the sublicense right) that keeps the project's layered-licensing optionality
-   open while Netra is the steward. Until an automated CLA-assistant is wired up, state in
-   your first PR: *"I have read the CLA Document and I hereby sign the CLA."* Corporate
-   contributors (employer owns the IP) need a Corporate CLA — contact Netra.
+   open while Netra is the steward. The sign-off ritual is staged now so the infrastructure
+   is ready before the first external PR, but the exact instrument may change on counsel's
+   review before it is declared final. Until an automated CLA-assistant is wired up, state
+   in your first PR: *"I have read the CLA Document and I hereby sign the CLA"* —
+   acknowledging that the text is a draft subject to revision. Corporate contributors
+   (employer owns the IP) need a Corporate CLA — contact Netra.
 
 > **Why both, and why now:** the DCO is cheap provenance; the CLA is the relicense-enabling
 > grant. Landing them *before the first external PR* is the one irreversible, time-sensitive
