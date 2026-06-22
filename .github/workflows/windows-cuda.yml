@@ -1,0 +1,91 @@
+# windows-cuda.yml — gated native-Windows `-tags cuda` build + sign + Approx gate (issue #481).
+#
+# This is a SEPARATE workflow from ci.yml ON PURPOSE: the default CI job (ci.yml ·
+# build-vet-test) builds `go build ./...` with NO build tags and stays pure-Go (DIRECTION
+# reviewer check 3). Nothing here touches that job, so the default build cannot regress from
+# this file. This workflow is the opt-in portability lane that ports the suite OFF the WSL
+# workaround (internal/compute/setup_cuda_wsl.sh + build_cuda.sh) onto a native Windows host.
+#
+# GATING: manual `workflow_dispatch` only — it never runs on push/PR, because it needs a
+# self-hosted Windows runner that actually has the CUDA Toolkit + an NVIDIA GPU + a signing
+# cert (GitHub-hosted windows runners have none of those). The job is additionally guarded to
+# the canonical repo so a fork without the runner does not queue a job that can never start.
+#
+# RUNNER: register a self-hosted runner with labels [self-hosted, windows, cuda] on a Windows
+# box that has: the CUDA Toolkit for Windows (sets CUDA_PATH), a cgo C compiler (mingw-w64 gcc
+# or clang in GNU mode), Go, and the Windows SDK (signtool). Put the code-signing cert's SHA-1
+# thumbprint in the repo secret WINDOWS_SIGN_CERT_THUMBPRINT (the cert itself stays in the
+# runner's Windows cert store — never in the repo).
+name: windows-cuda
+
+on:
+  workflow_dispatch:
+    inputs:
+      arch:
+        description: "CUDA SM arch (sm_89 Ada/L4 · sm_80 A100 · sm_90 H100 · sm_100 B200)"
+        default: sm_89
+        type: string
+      skip_sign:
+        description: "Build only, skip Authenticode signing (WDAC will still block fork/exec)"
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+jobs:
+  build-windows-cuda:
+    name: build · sign · Approx-gate (-tags cuda, native Windows)
+    # Self-hosted: only a runner with a real CUDA Toolkit + GPU can build/run this lane.
+    runs-on: [self-hosted, windows, cuda]
+    # No-op on forks that lack the labeled runner, so the job never queues forever.
+    if: ${{ github.repository == 'anthony-chaudhary/fak' }}
+    env:
+      GOTOOLCHAIN: auto
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: false
+
+      # Witness DIRECTION reviewer check 3 IN CI before doing anything cuda: the default
+      # `go build` must still produce the pure-Go artifact and pull zero cgo files.
+      - name: default build stays pure-Go (DIRECTION check 3)
+        shell: pwsh
+        run: |
+          go build ./cmd/fak
+          $cgo = (go list -f '{{.CgoFiles}}' ./internal/compute)
+          if ($cgo -ne '[]') { Write-Error "default build pulled cgo files: $cgo"; exit 1 }
+          Write-Host 'default build pure-Go: OK'
+
+      # Build the -tags cuda variant with the Windows CUDA Toolkit (nvcc) and code-sign it so
+      # WDAC permits fork/exec. The cert thumbprint comes from a repo secret -> env; the script
+      # reads it (FAK_SIGN_CERT_THUMBPRINT) and never hardcodes a cert. CUDA_PATH is provided by
+      # the runner's toolkit install; the script derives CGO_CFLAGS/CGO_LDFLAGS from it.
+      - name: build + sign native-Windows cuda variant (#481)
+        shell: pwsh
+        env:
+          FAK_CUDA_ARCH: ${{ inputs.arch }}
+          FAK_SIGN_CERT_THUMBPRINT: ${{ secrets.WINDOWS_SIGN_CERT_THUMBPRINT }}
+        run: |
+          $skip = "${{ inputs.skip_sign }}" -eq 'true'
+          if ($skip) {
+            ./tools/build_cuda_windows.ps1 -Output fak-cuda.exe -SkipSign
+          } else {
+            ./tools/build_cuda_windows.ps1 -Output fak-cuda.exe
+          }
+
+      # The acceptance gate from issue #481: the Approx gate passes natively on Windows, not
+      # only in WSL. Mirrors build_cuda.sh's `test` subcommand (default: graphs off).
+      - name: Approx gate (go test -tags cuda)
+        shell: pwsh
+        run: go test -tags cuda -count=1 -run 'CUDA|HALDevice' ./internal/compute/ ./internal/model/
+
+      - name: upload signed binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: fak-cuda-windows
+          path: fak-cuda.exe
+          if-no-files-found: error
