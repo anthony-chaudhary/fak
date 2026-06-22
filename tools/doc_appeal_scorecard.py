@@ -217,9 +217,15 @@ class Doc:
         # Prose blocks: consecutive prose/list/quote lines joined, inline markup
         # stripped — the unit for sentence + paragraph analysis.
         self.prose_blocks: list[tuple[int, str]] = []
+        # Block-start linenos of blocks that are genuine multi-item lists (>= 2
+        # bullets). A list is the *remedy* for a wall of text, not a wall itself —
+        # the scannability axis exempts these from the wall-of-text check. A lone
+        # giant bullet is NOT exempt (it's a paragraph wearing a dash).
+        self.list_blocks: set[int] = set()
 
         block_start = 0
         block_buf: list[str] = []
+        block_list_items = 0
         for lineno, raw, kind in self.lines:
             if kind == "heading":
                 m = _HEADING_RE.match(raw.strip())
@@ -230,16 +236,28 @@ class Doc:
             if kind in ("prose", "list", "quote"):
                 if not block_buf:
                     block_start = lineno
+                    block_list_items = 0
                 block_buf.append(_strip_inline(raw))
+                if kind == "list":
+                    block_list_items += 1
             else:
                 if block_buf:
                     self.prose_blocks.append((block_start, " ".join(block_buf).strip()))
+                    if block_list_items >= 2:
+                        self.list_blocks.add(block_start)
                     block_buf = []
         if block_buf:
             self.prose_blocks.append((block_start, " ".join(block_buf).strip()))
+            if block_list_items >= 2:
+                self.list_blocks.add(block_start)
 
         self.prose_text = " ".join(b for _, b in self.prose_blocks)
-        self.sentences = _split_sentences(self.prose_text)
+        # Split sentences PER BLOCK, not over the joined corpus. A block that ends
+        # without terminal punctuation (a colon lead-in to a table, a "→ link"
+        # pointer line) must not glue itself to the next block's opening sentence
+        # and masquerade as one giant overlong run-on — that is a measurement
+        # artifact, not a prose defect.
+        self.sentences = [s for _, b in self.prose_blocks for s in _split_sentences(b)]
         self.prose_words = _wordcount(self.prose_text)
 
 
@@ -276,6 +294,12 @@ def _classify_lines(text: str) -> list[tuple[int, str, str]]:
         if _HEADING_RE.match(s):
             out.append((i, raw, "heading"))
             continue
+        # A horizontal rule (---, ***, ___) is a section separator, not prose; if
+        # left as prose it has no terminal period and merges the sections it sits
+        # between into one phantom sentence.
+        if re.fullmatch(r"(?:-{3,}|\*{3,}|_{3,})", s):
+            out.append((i, raw, "hr"))
+            continue
         if s.startswith("|"):
             out.append((i, raw, "table"))
             continue
@@ -308,10 +332,17 @@ def _split_sentences(text: str) -> list[str]:
     """Split on .!? boundaries that are followed by space + a capital/quote/digit.
     A decimal like ``9.7×`` has no following space, so it is not a boundary;
     ``e.g.`` is usually followed by a lowercase word, so it is not either.
+
+    Also break at the house ``→`` "see also" pointer and the ``·`` inline-list
+    separator: those join clauses with no terminal period, so without an explicit
+    break a "→ link" pointer or a ``a · b · c`` link row reads as one run-on.
     """
     if not text.strip():
         return []
-    parts = re.split(r'(?<=[.!?])\s+(?=[A-Z0-9"“(])', text)
+    # The product name ``fak`` is lower-case and frequently opens a sentence; allow
+    # it as a sentence-start token so "… differs). `fak` can do this …" splits in
+    # two instead of reading as one phantom run-on.
+    parts = re.split(r'(?<=[.!?])\s+(?=[A-Z0-9"“(]|fak\b)|\s*[→·]\s*', text)
     return [p.strip() for p in parts if p.strip()]
 
 
@@ -535,9 +566,12 @@ def axis_scannability(doc: Doc) -> dict[str, Any]:
     soft: list[str] = []
     score = 100.0
 
-    # Wall-of-text paragraphs: a skimmer bounces off these. Each is HARD.
+    # Wall-of-text paragraphs: a skimmer bounces off these. Each is HARD. A genuine
+    # multi-item list is exempt — its bullets ARE the skim structure.
     walls = 0
     for ln, block in doc.prose_blocks:
+        if ln in doc.list_blocks:
+            continue
         w = _wordcount(block)
         if w > PARA_WALL_WORDS:
             walls += 1

@@ -41,6 +41,54 @@ def test_parse_classifies_heading_and_skips_code() -> None:
     assert "not prose()" not in doc.prose_text, doc.prose_text
 
 
+def test_split_breaks_at_arrow_pointer() -> None:
+    # A "→ link" pointer must not glue onto the prior sentence as one run-on.
+    parts = das._split_sentences("It is real today. → One binary is the whole surface")
+    assert len(parts) == 2, parts
+    assert all(das._wordcount(p) < 12 for p in parts), parts
+
+
+def test_split_breaks_at_middot_separator() -> None:
+    parts = das._split_sentences("the demos · run your own · the showcase · the docs site")
+    assert len(parts) == 4, parts
+
+
+def test_horizontal_rule_does_not_merge_sections() -> None:
+    # The two paragraphs sit either side of a --- rule; neither colon nor rule may
+    # fuse "first ends with a colon:" onto "Second para starts.".
+    doc = das.parse("# T\n\nFirst para ends with a colon:\n\n---\n\nSecond para starts here.\n")
+    assert not any("First" in s and "Second" in s for s in doc.sentences), doc.sentences
+    assert not any("---" in (raw) and kind == "prose" for _, raw, kind in doc.content), \
+        "--- leaked into prose content"
+
+
+def test_per_block_split_no_cross_block_merge() -> None:
+    # Block A ends in a colon (no period); Block B opens a new paragraph. They must
+    # remain separate sentences, not one phantom overlong run-on.
+    doc = das.parse("Author a policy and check the call:\n\nThe gate denies by structure.\n")
+    assert not any("Author" in s and "structure" in s for s in doc.sentences), doc.sentences
+
+
+def test_split_at_lowercase_fak_sentence_start() -> None:
+    # "(… differs). `fak` can do this" must split — fak is the product name and
+    # opens many sentences, but is lower-case so the capital-only rule misses it.
+    parts = das._split_sentences("Not one number differs. fak can do this because it owns it.")
+    assert len(parts) == 2, parts
+
+
+def test_multi_item_list_is_not_a_wall() -> None:
+    # A long but genuine multi-bullet list is scannable, not a wall of text.
+    items = "\n".join(f"- **Item {i}.** " + " ".join(["word"] * 40) for i in range(3))
+    s = das.axis_scannability(das.parse("# T\n\n" + items + "\n"))
+    assert not any("wall-of-text" in d for d in s["defects"]), s["defects"]
+
+
+def test_lone_giant_bullet_still_counts_as_wall() -> None:
+    # A single massive bullet is a paragraph wearing a dash — still a wall.
+    s = das.axis_scannability(das.parse("# T\n\n- " + " ".join(["word"] * 130) + "\n"))
+    assert any("wall-of-text" in d for d in s["defects"]), s["defects"]
+
+
 # --- clarity ---------------------------------------------------------------
 
 def test_clarity_flags_overlong_sentence() -> None:
