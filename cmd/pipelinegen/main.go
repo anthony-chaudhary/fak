@@ -34,6 +34,7 @@ import (
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/model"
+	"github.com/anthony-chaudhary/fak/internal/pathutil"
 )
 
 func main() {
@@ -44,6 +45,8 @@ func main() {
 	selfcheck := flag.Bool("selfcheck", false, "build a tiny in-memory GLM-DSA model and assert pipeline==monolithic (no -dir needed)")
 	incremental := flag.Bool("incremental", false, "use the incremental KV-resident decode path (per-stage band KV) instead of the O(n^2) re-forward")
 	flag.Parse()
+	// Expand a leading ~ in path flags (Go/PowerShell don't), so ~/... opens as intended.
+	*dir = pathutil.ExpandTilde(*dir)
 
 	if *dir == "" {
 		*selfcheck = true

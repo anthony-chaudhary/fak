@@ -60,6 +60,7 @@ import (
 
 	"github.com/anthony-chaudhary/fak/internal/appversion"
 	"github.com/anthony-chaudhary/fak/internal/model"
+	"github.com/anthony-chaudhary/fak/internal/pathutil"
 	"github.com/anthony-chaudhary/fak/internal/radixkv"
 )
 
@@ -465,6 +466,9 @@ func main() {
 	scale := flag.Int("scale", 1, "token-size multiplier for the workloads (1 = quick synthetic; larger for real models)")
 	out := flag.String("out", "", "write JSON report here (default stdout)")
 	flag.Parse()
+	// Expand a leading ~ in path flags (Go/PowerShell don't), so ~/... opens as intended.
+	*dir = pathutil.ExpandTilde(*dir)
+	*hf = pathutil.ExpandTilde(*hf)
 
 	var m *model.Model
 	var name string

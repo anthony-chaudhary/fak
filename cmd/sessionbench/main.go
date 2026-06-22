@@ -59,6 +59,7 @@ import (
 
 	"github.com/anthony-chaudhary/fak/internal/appversion"
 	"github.com/anthony-chaudhary/fak/internal/model"
+	"github.com/anthony-chaudhary/fak/internal/pathutil"
 )
 
 // bestLiveB / bestLiveC run the live arms `reps` times and keep the least-contended (min)
@@ -406,6 +407,9 @@ func main() {
 	valScale := flag.String("val-scale", "256,8,3,16,32", "live-validate P,T,C,D,R")
 	out := flag.String("out", "", "write JSON here (default stdout)")
 	flag.Parse()
+	// Expand a leading ~ in path flags (Go/PowerShell don't), so ~/... opens as intended.
+	*dir = pathutil.ExpandTilde(*dir)
+	*hf = pathutil.ExpandTilde(*hf)
 
 	quant := 0
 	if *quantF || *lean {

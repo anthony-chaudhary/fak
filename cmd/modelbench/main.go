@@ -40,6 +40,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/gpulease"
 	"github.com/anthony-chaudhary/fak/internal/metalgemm"
 	"github.com/anthony-chaudhary/fak/internal/model"
+	"github.com/anthony-chaudhary/fak/internal/pathutil"
 )
 
 // loadHF loads a HuggingFace snapshot directory (config.json + single-file or sharded
@@ -215,6 +216,10 @@ func main() {
 	phaseProfile := flag.Bool("phase-profile", false, "emit one-shot coarse Session phase profiles for prefill/decode without perturbing median timings")
 	budget := flag.Float64("budget", 0, "fractional core budget for this run: 0.75 = use up to 75% of the machine's logical cores (portable across box sizes; 75 or 0.75 both accepted). 0 = unset. FAK_WORKERS, if set, still overrides.")
 	flag.Parse()
+	// Expand a leading ~ in path flags (Go/PowerShell don't), so ~/... opens as intended.
+	*dir = pathutil.ExpandTilde(*dir)
+	*gguf = pathutil.ExpandTilde(*gguf)
+	*hf = pathutil.ExpandTilde(*hf)
 
 	// A -budget flag re-resolves the matmul worker count after init (the env-driven
 	// default was already read at package load). FAK_WORKERS is an explicit absolute

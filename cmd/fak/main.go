@@ -417,6 +417,7 @@ func cmdRecall(argv []string) {
 	out := fs.String("out", "recall-report.json", "report output path")
 	query := fs.String("query", "what refund fee did the user's account show?", "a follow-up question to demand-page a working set for")
 	_ = fs.Parse(argv)
+	*dir = pathutil.ExpandTilde(*dir) // a leading ~ is never expanded by Go; do it so --dir ~/img works
 
 	// The finished session. The poison/secret bytes mirror testdata/poison.json (the
 	// operator-authored adversarial fixture); the benign pages are airline-support
@@ -520,6 +521,7 @@ func cmdDream(argv []string) {
 	out := fs.String("out", "dream-report.json", "report output path")
 	dryRun := fs.Bool("dry-run", false, "report only; do not write a cleaned output image")
 	_ = fs.Parse(argv)
+	*dir = pathutil.ExpandTilde(*dir) // a leading ~ is never expanded by Go; do it so --dir ~/img works
 
 	if !imageExists(*dir) {
 		seedDreamDemo(*dir)
@@ -587,6 +589,7 @@ func cmdDebug(argv []string) {
 	out := fs.String("out", "cdb-report.json", "report output path (cmd=report)")
 	sid := fs.String("session-id", "", "core-image session id (default: derived from the source)")
 	_ = fs.Parse(argv)
+	*dir = pathutil.ExpandTilde(*dir) // a leading ~ is never expanded by Go; do it so --dir ~/img works
 
 	// Decide whether to ingest a fresh core image or attach to an existing one.
 	attachExisting := *session == "" && imageExists(*dir)

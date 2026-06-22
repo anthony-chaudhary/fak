@@ -15,6 +15,7 @@ import (
 
 	"github.com/anthony-chaudhary/fak/internal/ggufload"
 	"github.com/anthony-chaudhary/fak/internal/model"
+	"github.com/anthony-chaudhary/fak/internal/pathutil"
 	"github.com/anthony-chaudhary/fak/internal/tokenizer"
 )
 
@@ -36,6 +37,8 @@ func main() {
 	promptFlag := flag.String("prompt", "", "override the decode prompt (raw text; no chat template applied)")
 	loadMode := flag.String("load", "q8", "weight residency: q8 | q4k (f32 activations) | f32")
 	flag.Parse()
+	// Expand a leading ~ in path flags (Go/PowerShell don't), so ~/... opens as intended.
+	*gguf = pathutil.ExpandTilde(*gguf)
 	if *gguf == "" {
 		fmt.Fprintln(os.Stderr, "need -gguf")
 		os.Exit(2)

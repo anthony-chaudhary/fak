@@ -16,6 +16,7 @@ import (
 
 	"github.com/anthony-chaudhary/fak/internal/ggufload"
 	"github.com/anthony-chaudhary/fak/internal/model"
+	"github.com/anthony-chaudhary/fak/internal/pathutil"
 )
 
 // prompt_ids from llamacpp-qwen36-multitoken-oracle-20260619.json (ChatML "Say OK.").
@@ -28,6 +29,8 @@ func main() {
 	gguf := flag.String("gguf", "", "GGUF path")
 	membw := flag.Float64("membw", 0, "machine memory bandwidth GB/s; if >0, print the bandwidth-bound decode tok/s ceiling")
 	flag.Parse()
+	// Expand a leading ~ in path flags (Go/PowerShell don't), so ~/... opens as intended.
+	*gguf = pathutil.ExpandTilde(*gguf)
 	if *gguf == "" {
 		fmt.Fprintln(os.Stderr, "usage: q4kdiag -gguf <model.gguf> [-membw 100]")
 		os.Exit(2)

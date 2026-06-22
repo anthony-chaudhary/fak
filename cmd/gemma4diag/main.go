@@ -16,6 +16,7 @@ import (
 
 	"github.com/anthony-chaudhary/fak/internal/ggufload"
 	"github.com/anthony-chaudhary/fak/internal/model"
+	"github.com/anthony-chaudhary/fak/internal/pathutil"
 	"github.com/anthony-chaudhary/fak/internal/tokenizer"
 )
 
@@ -28,6 +29,8 @@ func main() {
 	sweep := flag.Bool("sweep", false, "sweep scale/rope_freqs/norm-gain hypotheses (one load) instead of per-layer stats")
 	topk := flag.Int("topk", 10, "top-k tokens to print per config")
 	flag.Parse()
+	// Expand a leading ~ in path flags (Go/PowerShell don't), so ~/... opens as intended.
+	*gguf = pathutil.ExpandTilde(*gguf)
 	if *gguf == "" {
 		fmt.Fprintln(os.Stderr, "need -gguf")
 		os.Exit(2)

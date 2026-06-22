@@ -19,6 +19,7 @@ import (
 
 	"github.com/anthony-chaudhary/fak/internal/compute"
 	"github.com/anthony-chaudhary/fak/internal/model"
+	"github.com/anthony-chaudhary/fak/internal/pathutil"
 )
 
 func readCfg(dir string) (model.Config, error) {
@@ -42,6 +43,8 @@ func main() {
 	n := flag.Int("n", 12, "greedy tokens to compare")
 	lean := flag.Bool("lean", false, "memory-lean Q8 load (sharded dir); reference is the CPU Q8 path (use for 2.5-3B that won't fit f32)")
 	flag.Parse()
+	// Expand a leading ~ in path flags (Go/PowerShell don't), so ~/... opens as intended.
+	*hf = pathutil.ExpandTilde(*hf)
 	if *hf == "" {
 		fmt.Fprintln(os.Stderr, "need -hf")
 		os.Exit(2)

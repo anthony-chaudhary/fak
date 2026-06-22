@@ -19,6 +19,7 @@ import (
 
 	"github.com/anthony-chaudhary/fak/internal/appversion"
 	"github.com/anthony-chaudhary/fak/internal/model"
+	"github.com/anthony-chaudhary/fak/internal/pathutil"
 )
 
 func table(p *model.Profile) string {
@@ -45,6 +46,8 @@ func main() {
 	steps := flag.Int("steps", 24, "decode steps to profile")
 	prefillP := flag.Int("prefill", 64, "prefill length to profile")
 	flag.Parse()
+	// Expand a leading ~ in path flags (Go/PowerShell don't), so ~/... opens as intended.
+	*dir = pathutil.ExpandTilde(*dir)
 
 	m, err := model.Load(*dir)
 	if err != nil {

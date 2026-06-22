@@ -28,6 +28,7 @@ import (
 
 	"github.com/anthony-chaudhary/fak/internal/appversion"
 	"github.com/anthony-chaudhary/fak/internal/model"
+	"github.com/anthony-chaudhary/fak/internal/pathutil"
 )
 
 // lcgIDs builds n deterministic token ids in [0,vocab) — same recurrence as modelbench so the
@@ -90,6 +91,8 @@ func main() {
 	workloadPromptCap := flag.Int("workload-prompt-cap", 0, "cap recorded workload prompt lengths for smoke runs (0 = full recorded length)")
 	budget := flag.Float64("budget", 0, "fractional core budget: 0.75 = use up to 75% of the machine's logical cores (portable; 75 or 0.75 accepted). 0 = unset. FAK_WORKERS still overrides.")
 	flag.Parse()
+	// Expand a leading ~ in path flags (Go/PowerShell don't), so ~/... opens as intended.
+	*dir = pathutil.ExpandTilde(*dir)
 
 	if *budget > 0 {
 		if os.Getenv("FAK_WORKERS") != "" {

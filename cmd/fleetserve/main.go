@@ -38,6 +38,7 @@ import (
 
 	"github.com/anthony-chaudhary/fak/internal/appversion"
 	"github.com/anthony-chaudhary/fak/internal/model"
+	"github.com/anthony-chaudhary/fak/internal/pathutil"
 )
 
 func lcgIDs(n, vocab, seed int) []int {
@@ -107,6 +108,8 @@ func main() {
 	tunePrefix := flag.Float64("tune-prefix", 1.0, "scale the shared prefix P")
 	turnCap := flag.Int("turn-cap", 0, "cap replayed turns (0 = full track); keeps sweeps tractable")
 	flag.Parse()
+	// Expand a leading ~ in path flags (Go/PowerShell don't), so ~/... opens as intended.
+	*dir = pathutil.ExpandTilde(*dir)
 
 	turnsGrid := parseInts(*turnsArg)
 	concs := parseInts(*concArg)

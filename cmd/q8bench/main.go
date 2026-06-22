@@ -30,6 +30,7 @@ import (
 
 	"github.com/anthony-chaudhary/fak/internal/appversion"
 	"github.com/anthony-chaudhary/fak/internal/model"
+	"github.com/anthony-chaudhary/fak/internal/pathutil"
 )
 
 // lcgIDs — bit-for-bit the recurrence in cmd/modelbench/main.go and bench_hf.py.
@@ -237,6 +238,8 @@ func main() {
 	decodePrompt := flag.Int("decode-prompt", 16, "prompt length before decode")
 	expDir := flag.String("exp", "experiments/model-baseline", "dir holding hf.json / hf-int8.json for the verdict")
 	flag.Parse()
+	// Expand a leading ~ in path flags (Go/PowerShell don't), so ~/... opens as intended.
+	*dir = pathutil.ExpandTilde(*dir)
 	prefillSizes := []int{16, 64, 256}
 
 	t0 := time.Now()

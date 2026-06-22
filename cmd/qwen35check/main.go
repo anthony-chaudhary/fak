@@ -20,6 +20,7 @@ import (
 
 	"github.com/anthony-chaudhary/fak/internal/ggufload"
 	"github.com/anthony-chaudhary/fak/internal/model"
+	"github.com/anthony-chaudhary/fak/internal/pathutil"
 )
 
 type topLogit struct {
@@ -165,6 +166,9 @@ func main() {
 	jsonOnly := flag.Bool("json", false, "write only the structured JSON result to stdout")
 	out := flag.String("out", "", "write the structured JSON result to this path")
 	flag.Parse()
+	// Expand a leading ~ in path flags (Go/PowerShell don't), so ~/... opens as intended.
+	*dir = pathutil.ExpandTilde(*dir)
+	*gguf = pathutil.ExpandTilde(*gguf)
 
 	var cfg model.Config
 	var m *model.Model
