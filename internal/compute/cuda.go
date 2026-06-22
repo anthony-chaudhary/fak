@@ -467,10 +467,16 @@ func (k *cudaKV) ValuesView(layer int) Tensor {
 	return makeTensor(k.be, F32, RowMajor, []int{n, w}, nil, &cudaBuf{ptr: k.V[layer].ptr, n: k.V[layer].len * 4})
 }
 
-// Evict: correctness-first host round-trip (read VRAM -> host, compact + single-rotation
-// re-RoPE survivors exactly as cpuKV.Evict, write back). The on-GPU Evict that keeps the
-// quarantine witness without a host round-trip is a tracked follow-up; this preserves the
-// numerics so the contract holds, just not the performance.
+// Evict compacts the cache ON-GPU — no host round-trip (#479). For every layer it shifts
+// the survivors of K/Kraw/V down past the [from,from+n) span, then re-derives the post-RoPE
+// K of each survivor whose absolute position changed by a SINGLE rotation of its (already
+// device-resident) Kraw at the NEW index — the very kernel AppendKV used, so a device evict
+// is bit-identical to a device run that never saw the span (the Approx-gate witness). The
+// prefix [0,from) is left byte-for-byte untouched; that asymmetry — only the suffix is
+// repositioned — is the write-time quarantine witness (MODEL-ARCH-SEAM §3, O1–O3): a span
+// evicted before the query attends vanishes, but one evicted after downstream tokens already
+// attended cannot be un-seen. The KV never leaves VRAM, so Host() on these tensors stays
+// (nil,false). The host round-trip this replaces lived on cpuKV.Evict / earlier cudaKV.
 func (k *cudaKV) Evict(from, n int) int {
 	cudaMu.Lock()
 	defer cudaMu.Unlock()
@@ -483,34 +489,62 @@ func (k *cudaKV) Evict(from, n int) int {
 	}
 	w := k.stride()
 	hd, nKV := k.cfg.HeadDim, k.cfg.NumKVHeads
-	for l := 0; l < k.cfg.NumLayers; l++ {
-		K := k.readDS(&k.K[l])
-		Kraw := k.readDS(&k.Kraw[l])
-		V := k.readDS(&k.V[l])
-		K = append(K[:from*w], K[end*w:]...)
-		Kraw = append(Kraw[:from*w], Kraw[end*w:]...)
-		V = append(V[:from*w], V[end*w:]...)
-		// re-RoPE survivors whose position changed (mirrors cpuKV.Evict)
-		newPos := append(append([]int(nil), k.pos[:from]...), k.pos[end:]...)
-		for i := range newPos {
-			if newPos[i] != i {
-				cos, sin := ropeRow(k.cfg.RopeTheta, hd, i)
-				for h := 0; h < nKV; h++ {
-					dst := K[i*w+h*hd : i*w+(h+1)*hd]
-					copy(dst, Kraw[i*w+h*hd:i*w+(h+1)*hd])
-					applyRope(dst, cos, sin)
-				}
-			}
+	fromF, endF := from*w, end*w
+	tailFloats := (len(k.pos) - end) * w // survivors after the span (shared by K/Kraw/V)
+	// survivor positions after compaction: prefix keeps its index, suffix shifts down.
+	newPos := append(append([]int(nil), k.pos[:from]...), k.pos[end:]...)
+	// One reused scratch buffer for the leftward shift: an in-place device-to-device copy of
+	// overlapping regions is undefined, so the tail is staged through disjoint VRAM. Stream
+	// ordering (everything on g_stream) serializes the per-layer reuse correctly.
+	var scratch unsafe.Pointer
+	if tailFloats > 0 {
+		scratch = unsafe.Pointer(C.fcuda_malloc(C.size_t(tailFloats * 4)))
+		if scratch == nil {
+			panic("compute: cuda Evict scratch allocation failed")
 		}
-		k.writeDS(&k.K[l], K)
-		k.writeDS(&k.Kraw[l], Kraw)
-		k.writeDS(&k.V[l], V)
+	}
+	for l := 0; l < k.cfg.NumLayers; l++ {
+		k.be.compactDS(&k.K[l], fromF, endF, tailFloats, scratch)
+		k.be.compactDS(&k.Kraw[l], fromF, endF, tailFloats, scratch)
+		k.be.compactDS(&k.V[l], fromF, endF, tailFloats, scratch)
+		for i := range newPos {
+			if newPos[i] == i {
+				continue // prefix survivor: position unchanged, post-RoPE K stays byte-for-byte
+			}
+			// K[i] <- Kraw[i] (disjoint buffers, no overlap) then one in-place rotation at i.
+			kRow := offsetF(k.K[l].ptr, i*w)
+			C.fcuda_d2d(kRow, offsetF(k.Kraw[l].ptr, i*w), C.size_t(w*4))
+			C.fcuda_rope_f32((*C.float)(kRow), C.int(i), C.int(nKV), C.int(hd), C.double(k.cfg.RopeTheta))
+		}
+	}
+	if scratch != nil {
+		C.fcuda_free(scratch)
 	}
 	k.pos = append(k.pos[:from], k.pos[end:]...)
 	for i := range k.pos {
 		k.pos[i] = i
 	}
 	return end - from
+}
+
+// offsetF advances a device pointer by nFloats f32 elements. The KV buffers are C-allocated
+// (cudaMalloc), not Go-managed memory, so this is the correct way to address a sub-row and
+// is outside the GC's purview (the vet unsafeptr concern is for Go-heap pointers, not these).
+func offsetF(p unsafe.Pointer, nFloats int) unsafe.Pointer {
+	return unsafe.Pointer(uintptr(p) + uintptr(nFloats)*4)
+}
+
+// compactDS removes the float span [fromF,endF) from a position-major device buffer in place
+// by shifting its tailFloats-long tail down through a caller-supplied disjoint scratch. A
+// direct leftward device-to-device copy would overlap (src and dst intersect), which
+// cudaMemcpy leaves undefined; staging through scratch is well-defined and never touches the
+// host. Both copies ride g_stream, so they stay ordered against each other and the re-RoPE.
+func (c *cudaBackend) compactDS(d *dslice, fromF, endF, tailFloats int, scratch unsafe.Pointer) {
+	if tailFloats > 0 {
+		C.fcuda_d2d(scratch, offsetF(d.ptr, endF), C.size_t(tailFloats*4))
+		C.fcuda_d2d(offsetF(d.ptr, fromF), scratch, C.size_t(tailFloats*4))
+	}
+	d.len -= endF - fromF
 }
 
 func (k *cudaKV) Clone() KVStore {
@@ -552,29 +586,6 @@ func (k *cudaKV) Free() {
 		free(&k.V[l])
 	}
 	k.pos = nil
-}
-
-func (k *cudaKV) readDS(d *dslice) []float32 {
-	out := make([]float32, d.len)
-	if d.len > 0 {
-		C.fcuda_d2h(unsafe.Pointer(&out[0]), d.ptr, C.size_t(d.len*4))
-	}
-	return out
-}
-
-func (k *cudaKV) writeDS(d *dslice, data []float32) {
-	need := len(data)
-	if need > d.cap {
-		if d.ptr != nil {
-			C.fcuda_free(d.ptr)
-		}
-		d.ptr = unsafe.Pointer(C.fcuda_malloc(C.size_t(need * 4)))
-		d.cap = need
-	}
-	if need > 0 {
-		C.fcuda_h2d(d.ptr, unsafe.Pointer(&data[0]), C.size_t(need*4))
-	}
-	d.len = need
 }
 
 // itoaC is a tiny int->string for the tier label (avoids importing strconv into the
