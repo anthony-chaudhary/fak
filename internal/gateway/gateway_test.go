@@ -2088,6 +2088,62 @@ func TestAnthropicMessagesForwardsMaxTokens(t *testing.T) {
 	}
 }
 
+// TestAnthropicMessagesForwardsSamplingParams completes the #62 proof on the wire
+// Claude Code actually speaks: max_tokens is already covered above, but the native
+// Anthropic proxy ALSO forwards temperature, top_p, and stop_sequences (messages.go),
+// and those were untested — a regression that silently dropped any of them on the
+// /v1/messages path (the external-adopter front door) would not have failed CI. This
+// asserts all three reach the planner seam when present, and that an omitted optional
+// (top_p / stop_sequences) leaves the option unset so the planner keeps its default —
+// the same non-breaking guarantee TestChatCompletionsOmittedMaxTokensIsDefault gives
+// the OpenAI wire.
+func TestAnthropicMessagesForwardsSamplingParams(t *testing.T) {
+	srv := newTestServer(t)
+	rp := &recordingPlanner{comp: &agent.Completion{
+		Message:      agent.Message{Role: agent.RoleAssistant, Content: "ok"},
+		FinishReason: "stop",
+	}}
+	srv.planner = rp
+	ts := httptest.NewServer(srv.Handler())
+	defer ts.Close()
+
+	// Present: a Claude-Code-shaped request carrying every sampling knob.
+	body := []byte(`{"model":"m","max_tokens":8192,"temperature":0.3,"top_p":0.9,"stop_sequences":["END","STOP"],"messages":[{"role":"user","content":"hi"}]}`)
+	r, err := http.Post(ts.URL+"/v1/messages", "application/json", bytes.NewReader(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	r.Body.Close()
+	if r.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", r.StatusCode)
+	}
+	if rp.got.Temperature == nil || *rp.got.Temperature != 0.3 {
+		t.Fatalf("planner got temperature = %v, want 0.3", rp.got.Temperature)
+	}
+	if rp.got.TopP == nil || *rp.got.TopP != 0.9 {
+		t.Fatalf("planner got top_p = %v, want 0.9", rp.got.TopP)
+	}
+	if len(rp.got.Stop) != 2 || rp.got.Stop[0] != "END" || rp.got.Stop[1] != "STOP" {
+		t.Fatalf("planner got stop = %v, want [END STOP]", rp.got.Stop)
+	}
+
+	// Omitted: top_p and stop_sequences absent must leave those options unset so the
+	// planner keeps its configured default rather than receiving a spurious zero/empty.
+	rp.got = agent.SampleParams{}
+	body = []byte(`{"model":"m","max_tokens":8192,"messages":[{"role":"user","content":"hi"}]}`)
+	r, err = http.Post(ts.URL+"/v1/messages", "application/json", bytes.NewReader(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	r.Body.Close()
+	if rp.got.TopP != nil {
+		t.Fatalf("omitted top_p must leave the option unset, got %v", *rp.got.TopP)
+	}
+	if rp.got.Stop != nil {
+		t.Fatalf("omitted stop_sequences must leave the option unset, got %v", rp.got.Stop)
+	}
+}
+
 // ---------------------------------------------------------------------------
 // test helpers
 // ---------------------------------------------------------------------------
