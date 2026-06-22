@@ -225,11 +225,11 @@ type Message struct {
 
 // File is one channel file (e.g. an uploaded transcript.jsonl).
 type File struct {
-	ID         string `json:"id"`
-	Name       string `json:"name"`
-	Created    int64  `json:"created"`
-	Size       int64  `json:"size"`
-	URLPrivate string `json:"url_private"`
+	ID          string `json:"id"`
+	Name        string `json:"name"`
+	Created     int64  `json:"created"`
+	Size        int64  `json:"size"`
+	URLPrivate  string `json:"url_private"`
 	URLDownload string `json:"url_private_download"`
 }
 

@@ -491,7 +491,7 @@ func runPrint(suite string) int {
 
 	fmt.Printf("  %s  %s  %s\n", strings.Repeat("─", lw), strings.Repeat("─", cw), strings.Repeat("─", rw))
 	forced := rep.TurnKinds.Forced // fak vs the TUNED agent — the honest headline
-	total := rep.Net.TurnsSaved     // fak vs the NAIVE two-pass loop — worst-case reference
+	total := rep.Net.TurnsSaved    // fak vs the NAIVE two-pass loop — worst-case reference
 	leftScore := fmt.Sprintf("tuned SOTA agent: %d forced round-trip%s", forced, plural(forced))
 	fmt.Printf("  %s  %s\n",
 		p.paint(p.bold+p.red, ttPad(leftScore, lw+2+cw)),

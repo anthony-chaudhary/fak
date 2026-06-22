@@ -27,10 +27,10 @@ func makeTranscript(t *testing.T, evs [][2]string) []byte {
 
 func TestTranscriptStdout_OnlyProcessOutput(t *testing.T) {
 	jsonl := makeTranscript(t, [][2]string{
-		{"stdin", "echo SHOULD_NOT_APPEAR"},          // stdin echo must be excluded
-		{"process_output", "real-output-line-1\n"},   // included
-		{"control_command", "!dump"},                  // excluded
-		{"process_output", "real-output-line-2\n"},   // included
+		{"stdin", "echo SHOULD_NOT_APPEAR"},        // stdin echo must be excluded
+		{"process_output", "real-output-line-1\n"}, // included
+		{"control_command", "!dump"},               // excluded
+		{"process_output", "real-output-line-2\n"}, // included
 	})
 	got := transcriptStdout(jsonl)
 	if strings.Contains(got, "SHOULD_NOT_APPEAR") {
@@ -60,9 +60,9 @@ func TestExtractBlock_IgnoresCommandEcho(t *testing.T) {
 	// nonce_DONE), then prints the real output, then the sentinels on their own.
 	stdout := strings.Join([]string{
 		"echo " + nonce + "; { uname ; } ; echo " + nonce + "_DONE", // command echo
-		nonce,                  // START sentinel (output)
-		"Linux dgx2 6.8.0",     // real output
-		nonce + "_DONE",        // END sentinel (output)
+		nonce,              // START sentinel (output)
+		"Linux dgx2 6.8.0", // real output
+		nonce + "_DONE",    // END sentinel (output)
 		"root@dgx2:/#",
 	}, "\n")
 	block, ok := extractBlock(stdout, nonce)
@@ -201,8 +201,8 @@ func makeThreadTranscript(t *testing.T, evs [][3]string) []byte {
 func TestTranscriptThreadTS_PrefersBridgeStart(t *testing.T) {
 	jsonl := makeThreadTranscript(t, [][3]string{
 		{"process_output", "noise", "9999.0000"}, // earlier, non-authoritative
-		{"bridge_start", "banner", "1234.5678"},   // authoritative
-		{"process_output", "more", "8888.0000"},   // later, non-authoritative
+		{"bridge_start", "banner", "1234.5678"},  // authoritative
+		{"process_output", "more", "8888.0000"},  // later, non-authoritative
 	})
 	if got := transcriptThreadTS(jsonl); got != "1234.5678" {
 		t.Fatalf("bridge_start thread should win, got %q", got)
@@ -253,9 +253,9 @@ func TestSelfTestReasons_DistinctAndWired(t *testing.T) {
 
 func TestShellQuote(t *testing.T) {
 	cases := map[string]string{
-		"/tmp/x.json":   "'/tmp/x.json'",
-		"a b":           "'a b'",
-		"it's":          `'it'\''s'`,
+		"/tmp/x.json": "'/tmp/x.json'",
+		"a b":         "'a b'",
+		"it's":        `'it'\''s'`,
 	}
 	for in, want := range cases {
 		if got := shellQuote(in); got != want {
