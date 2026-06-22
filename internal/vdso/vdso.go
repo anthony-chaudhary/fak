@@ -386,7 +386,9 @@ func (v *VDSO) Lookup(ctx context.Context, c *abi.ToolCall) (*abi.Result, bool) 
 			hk, href, hwit := e.key, e.ref, e.witness
 			v.mu.Unlock()
 			atomic.AddInt64(&v.hits, 1)
-			v.emitCache(CacheHit, hk, href, hwit)
+			// §2.5 consumer tracking: a HIT names the agent/turn that reused the entry
+			// (consumerOpt is nil for an anonymous call, so no empty consumer is recorded).
+			v.emitCache(CacheHit, hk, href, hwit, consumerOpt(c))
 			return &abi.Result{Call: c, Payload: ref, Status: abi.StatusOK,
 				Meta: map[string]string{"served_by": "vdso", "tier": "2"}}, true
 		}

@@ -153,3 +153,72 @@ func TestCacheEmission_PerToolWitnessAdapter(t *testing.T) {
 		t.Fatalf("adapter-witnessed entry should NOT hit after its witness was refuted")
 	}
 }
+
+// §2.5: consumer tracking — a tier-2 HIT must name the agent/turn that reused the
+// cached result, so a shared entry carries the causal consumer graph cachemeta needs.
+// The producing fill is anonymous (no consumer); only the consuming lookup attributes.
+func TestCacheEmission_ConsumerTracking(t *testing.T) {
+	v := New(8)
+	events, mu := collectEvents(v)
+	ctx := context.Background()
+
+	// Fill from a producing call (no consumer identity — it admitted, did not reuse).
+	producer := roCall("get_doc", `{"id":"y"}`)
+	v.Emit(completeEvent(producer, `{"body":"Y"}`))
+
+	// A consuming call names its agent/turn/session in the OPEN meta + a TraceID.
+	consumer := roCall("get_doc", `{"id":"y"}`)
+	consumer.TraceID = "trace-7"
+	consumer.Meta[MetaAgentID] = "agent-A"
+	consumer.Meta[MetaTurn] = "turn-3"
+	if _, ok := v.Lookup(ctx, consumer); !ok {
+		t.Fatalf("expected the cached entry to hit")
+	}
+
+	mu.Lock()
+	got := append([]CacheEvent(nil), *events...)
+	mu.Unlock()
+
+	var fill, hit *CacheEvent
+	for i := range got {
+		switch got[i].Kind {
+		case CacheFill:
+			fill = &got[i]
+		case CacheHit:
+			hit = &got[i]
+		}
+	}
+	if fill == nil || hit == nil {
+		t.Fatalf("want one fill and one hit event, got %+v", got)
+	}
+	// The producing fill records NO consumer (it was an admission, not a reuse).
+	if len(fill.Entry.Coherence.Consumers) != 0 {
+		t.Fatalf("fill event should carry no consumer, got %+v", fill.Entry.Coherence.Consumers)
+	}
+	// The hit names exactly the agent/turn/trace that reused the result.
+	cons := hit.Entry.Coherence.Consumers
+	if len(cons) != 1 {
+		t.Fatalf("hit event should carry exactly one consumer, got %+v", cons)
+	}
+	if cons[0].AgentID != "agent-A" || cons[0].ID != "turn-3" || cons[0].TraceID != "trace-7" {
+		t.Fatalf("consumer mis-attributed: %+v", cons[0])
+	}
+
+	// An ANONYMOUS lookup (no TraceID, no meta identity) attaches no empty consumer.
+	anon := roCall("get_doc", `{"id":"y"}`)
+	if _, ok := v.Lookup(ctx, anon); !ok {
+		t.Fatalf("expected the cached entry to hit on the anonymous lookup too")
+	}
+	mu.Lock()
+	got = append([]CacheEvent(nil), *events...)
+	mu.Unlock()
+	var lastHit *CacheEvent
+	for i := range got {
+		if got[i].Kind == CacheHit {
+			lastHit = &got[i]
+		}
+	}
+	if lastHit == nil || len(lastHit.Entry.Coherence.Consumers) != 0 {
+		t.Fatalf("anonymous hit should carry no consumer, got %+v", lastHit)
+	}
+}

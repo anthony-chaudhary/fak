@@ -33,6 +33,49 @@ type CacheEvent struct {
 // "per-tool witness adapters instead of relying mainly on internal epochs").
 type WitnessFunc func(c *abi.ToolCall, r *abi.Result) string
 
+// Consumer-attribution meta keys (§2.5: "which agent/turn consumed a cached tool
+// result"). These are OPTIONAL, OPEN ToolCall.Meta keys a caller may set so a tier-2
+// hit names the agent/turn that reused the result. They are forward-compatible: a
+// call that sets none is still attributed by its TraceID alone, and a call with no
+// identity at all attaches no (empty) consumer. The vDSO neither requires nor invents
+// them — it lowers exactly the identity the call already carries.
+const (
+	MetaAgentID = "agent_id"   // the agent that issued the consuming call
+	MetaTurn    = "turn"       // the model turn the consuming call rode
+	MetaSession = "session_id" // the session the consuming call belongs to
+)
+
+// consumerOf derives the cachemeta Consumer that reused a cached tool result from the
+// LOOKUP call's identity: its TraceID (the trace seam every call carries) plus the
+// OPEN agent/turn/session meta keys when present. ok=false when the call names no
+// identity at all, so an anonymous lookup attaches no empty consumer to the hit event
+// (the consumer graph stays a record of who actually reused a span, never noise).
+func consumerOf(c *abi.ToolCall) (cachemeta.Consumer, bool) {
+	if c == nil {
+		return cachemeta.Consumer{}, false
+	}
+	cons := cachemeta.Consumer{Kind: "agent", TraceID: c.TraceID}
+	if c.Meta != nil {
+		cons.AgentID = c.Meta[MetaAgentID]
+		if cons.ID = c.Meta[MetaTurn]; cons.ID == "" {
+			cons.ID = c.Meta[MetaSession]
+		}
+	}
+	if cons.TraceID == "" && cons.AgentID == "" && cons.ID == "" {
+		return cachemeta.Consumer{}, false
+	}
+	return cons, true
+}
+
+// consumerOpt is the cachemeta.Option that attributes a tier-2 hit to its consumer,
+// or nil when the consuming call names no identity (cachemeta.apply skips nil opts).
+func consumerOpt(c *abi.ToolCall) cachemeta.Option {
+	if cons, ok := consumerOf(c); ok {
+		return cachemeta.WithConsumer(cons)
+	}
+	return nil
+}
+
 // SetCacheEventSink installs an observer of tier-2 cache lifecycle events. It is
 // opt-in: a nil sink (the default) means the vDSO behavior is unchanged. Like the
 // coherence-bus subscribers, the sink is invoked AFTER the cache mutation and
@@ -75,14 +118,14 @@ func (v *VDSO) resolveWitness(c *abi.ToolCall, r *abi.Result) string {
 // installed sink, if any. It is safe to call with a key that fails to parse (the
 // event is dropped); in practice every emit site holds a well-formed tier-2 key.
 // Called OUTSIDE v.mu by every emit site.
-func (v *VDSO) emitCache(kind CacheEventKind, key string, ref abi.Ref, witness string) {
+func (v *VDSO) emitCache(kind CacheEventKind, key string, ref abi.Ref, witness string, opts ...cachemeta.Option) {
 	v.regMu.RLock()
 	sink := v.cacheSink
 	v.regMu.RUnlock()
 	if sink == nil {
 		return
 	}
-	entry, err := cachemeta.FromVDSOKey(key, ref, cachemeta.WithWitness(witness))
+	entry, err := cachemeta.FromVDSOKey(key, ref, append([]cachemeta.Option{cachemeta.WithWitness(witness)}, opts...)...)
 	if err != nil {
 		return
 	}
