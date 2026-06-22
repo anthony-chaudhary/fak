@@ -98,6 +98,15 @@ type PolicyArmResult struct {
 	Replayability   string `json:"replayability"` // "exact" | "bounded@<i>"
 	DivergenceTool  string `json:"divergence_tool,omitempty"`
 	DivergenceNote  string `json:"divergence_note,omitempty"`
+
+	// ResolveRateEstimate is the MODELED off-policy estimate of this arm's resolve-rate
+	// WITH a confidence interval (issue #505). It lives ALONGSIDE the measured floor
+	// counters above, NEVER replacing them: the Counters/Class fields and the bounded@i
+	// measured-refusal of the MEASURED resolve-rate stand exactly as before. For an EXACT
+	// arm this collapses to the measured served-fraction with a zero-width CI; for a
+	// bounded@i arm it is the bounded-doubly-robust projection whose CI widens with the
+	// post-frontier depth. Modeled=true on the estimate is the measured/modeled wall.
+	ResolveRateEstimate ResolveRateEstimate `json:"resolve_rate_estimate"`
 }
 
 // PolicyReplayReport is the spine artifact: K policies scored against ONE recorded
@@ -153,6 +162,22 @@ func observedClass(d CallDisposition) string {
 	default:
 		return "served"
 	}
+}
+
+// servedCount is the MEASURED served-fraction numerator for an arm: how many of the
+// arm's replayed calls the model would observe as "served" (a usable result), across the
+// WHOLE frozen trace. It is the direct-method plug-in the OPE estimator (ope.go) projects
+// the resolve-rate from — a real per-call count of the frozen replay, NOT a modeled number.
+// For an exact arm served/calls IS the measured resolve-rate; for a bounded arm it is the
+// max-likelihood continuation plug-in the bounded-DR estimate uses past the frontier.
+func servedCount(disp []CallDisposition) int {
+	n := 0
+	for _, d := range disp {
+		if observedClass(d) == "served" {
+			n++
+		}
+	}
+	return n
 }
 
 // firstDivergence returns the first call index where arm's observed-result class
@@ -397,6 +422,17 @@ func RunPolicyReplay(ctx context.Context, t *Trace, arms []PolicyArm, refName st
 			idx, tool, redact = ridx, rtool, true
 		}
 		results[i].FirstDivergence = idx
+		// The MODELED off-policy resolve-rate estimate (issue #505), computed from the
+		// arm's MEASURED served-fraction and its divergence frontier. This is a SEPARATE,
+		// clearly-labeled projection (Modeled=true) — it does NOT touch the measured
+		// Counters/Class above, and a bounded arm's MEASURED resolve-rate stays refused.
+		// frontier idx<0 means exact (depth 0) ⇒ the estimate collapses to the measured
+		// value with a zero-width CI.
+		results[i].ResolveRateEstimate = EstimateResolveRate(resolveRateInputs{
+			served:   servedCount(disps[i]),
+			calls:    len(t.Calls),
+			frontier: idx,
+		})
 		if idx < 0 {
 			results[i].ExactPrefix = len(t.Calls)
 			results[i].Replayability = "exact"
