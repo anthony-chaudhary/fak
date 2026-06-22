@@ -58,6 +58,7 @@
 - [Architecture](ARCHITECTURE.md): the registry seams and the frozen ABI.
 - [Extending fak](EXTENDING.md): plug in an optimization → prove it correct → prove it faster → ship.
 - [Repro packet](docs/repro-packet.md): the full 2-minute, no-key/no-GPU walkthrough.
+- [Issue-dispatch loop](docs/dispatch-loop.md): the witness-gated GitHub-issue backlog driver (spawn → ship #N → witness → close), and its live view [docs/dispatch-status.md](docs/dispatch-status.md).
 
 ## Optional
 
