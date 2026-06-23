@@ -43,7 +43,9 @@ env → build/start → `/healthz` → `ANTHROPIC_BASE_URL` wiring — plus the 
 Code MCP-server setup and the CI-embed shape, none of which need the dogfood launcher.
 
 Don't see your exact tool below? Read on — if it lets you set a base URL (almost all
-do), it already works.
+do), it already works. The [compatibility matrix](compatibility-matrix.md) is the full
+sourced list: 44 harnesses, frameworks, backends, and protocols, each with the exact key
+you set to repoint it.
 
 ---
 
@@ -107,6 +109,11 @@ export ANTHROPIC_BASE_URL="http://127.0.0.1:8080"
 **MCP clients** (the agent *asks* the kernel about a call, rather than being proxied):
 run `fak serve --stdio` as the server command. The one-paste setup and the five
 `fak_*` tools it exposes are in [`../../examples/mcp/README.md`](../../examples/mcp/README.md).
+
+**Need the exact key for *your* tool?** The [compatibility matrix](compatibility-matrix.md)
+lists 44 surveyed harnesses, frameworks, backends, and protocols — the wire each speaks,
+whether it takes a custom base URL, and the literal env var / arg / config field — each
+with a source link.
 
 ---
 
@@ -210,8 +217,10 @@ governance surface, not tokens per second. Full scope, claim by claim:
 ## Cross-references
 
 - [Agent memory (mem0 / OpenMemory / MCP)](agent-memory.md) — put the gate in front of a memory store: oversized and secret-shaped writes refused, a prompt-injected `delete_all` refused, every recalled memory trust-gated before it re-enters context.
+- [Compatibility matrix](compatibility-matrix.md) — 44 harnesses, frameworks, backends, and protocols, each with its wire, custom-base-URL support, and the exact repoint key, sourced.
 - [Getting started](../../GETTING-STARTED.md) — install the single static binary.
 - [Guided tutorial](../fak/tutorial.md) — zero to first adjudicated tool call, real output at every step.
+- [Debugging a verdict](debugging.md) — why was my call denied/transformed? Reproduce it offline with `fak preflight --explain`, then trace it across the live gateway.
 - [Policy / permissions](../../POLICY.md) — author, dump, and review the capability floor.
 - [FAQ](../FAQ.md) — what fak is, how it differs from a firewall / guardrails / vLLM, the threat model.
 - [llms.txt](../../llms.txt) — a machine-readable map for LLMs and answer engines.

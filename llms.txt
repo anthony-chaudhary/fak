@@ -50,6 +50,7 @@ You do not rewrite your agent to adopt fak — you repoint one base URL at `fak 
 - [Claude Code / Anthropic API](docs/integrations/claude.md): wire Claude Code or any Anthropic SDK to the kernel-adjudicated gateway.
 - [Cursor](docs/integrations/cursor.md): governance for the Cursor IDE over MCP or the OpenAI-compatible proxy.
 - [OpenAI Codex / OpenAI API](docs/integrations/openai-codex.md): adjudicate every tool call from an OpenAI-compatible coding agent.
+- [Compatibility matrix](docs/integrations/compatibility-matrix.md): 44 surveyed harnesses, frameworks, model backends, and interop protocols — the wire each speaks, whether it takes a custom base URL, and the exact repoint key, each with a source link.
 - [MCP one-paste setup](examples/mcp/README.md): drop a project `.mcp.json` and call the five `fak_*` adjudication tools from any MCP client.
 - [Agent-framework integration](docs/fak/agent-framework-integration.md): a per-framework cookbook for putting fak in front of LangChain, LlamaIndex, AutoGen, CrewAI, and OpenAI-compatible agents (proxy or explicit adjudication).
 - [Agent-integration architecture](docs/fak/agent-integration-architecture.md): how an external agent connects through the gateway entry points, the frozen kernel ABI, the verdict types, and the capability floor.
