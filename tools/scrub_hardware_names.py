@@ -93,6 +93,16 @@ PROSE_RULES: list[tuple[str, str]] = [
 # H100/A100"). Scrubbing the latter would falsify a citation, so the bare-A100 rule is
 # SKIPPED on any line carrying a competitor / third-party / generic-hardware marker.
 A100_BARE = (r"\bA100\b", "datacenter GPU")
+
+# CLEANUP: a multi-GPU phrase followed by a bare DGX ("8× A100-SXM4-40GB DGX",
+# "8xA100 DGX") rewrites in two steps -- the phrase consumes the A100 part, then the
+# trailing bare DGX becomes "GPU server" -- yielding a doubled "...datacenter server
+# GPU server". Collapse the adjacent duplicates as a final idempotent pass.
+CLEANUP_RULES: list[tuple[str, str]] = [
+    (r"datacenter server GPU server", "datacenter server"),
+    (r"GPU server GPU server", "GPU server"),
+    (r"datacenter GPU GPU server", "GPU server"),
+]
 COMPETITOR_MARKERS = re.compile(
     r"H100|Sarathi|vLLM|SGLang|TensorRT|DeepSpeed|Mooncake|DistServe|Falcon|Mistral|"
     r"Yi-|arxiv|OSDI|NSDI|MLSys|\b[1-4]\s*[x×]\s*A100\b",
@@ -145,6 +155,8 @@ def _rewrite_prose(text: str) -> str:
     # guard checks the ORIGINAL line so a marker inside a `code` span still counts.
     if not COMPETITOR_MARKERS.search(text):
         masked = re.sub(A100_BARE[0], A100_BARE[1], masked)
+    for pat, repl in CLEANUP_RULES:
+        masked = re.sub(pat, repl, masked)
     return _unmask(masked, spans)
 
 
