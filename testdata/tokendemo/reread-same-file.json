@@ -1,0 +1,13 @@
+{
+  "slice_id": "reread-same-file",
+  "_provenance": "operator-authored, frozen fixture for cmd/tokendemo. World = the coding-agent FILE world (cmd/tokendemo configureFileWorld): read_* / list_* / search_* are allow-listed, read-only+idempotent, and so vDSO tier-2 cacheable. Each call's `class` is the EXPECTED disposition; the demo derives the ACTUAL class from the live kernel verdict. `result_tokens` is the documented per-call result size; the SAME file always carries the SAME size.",
+  "_story": "WIN 2 (TOOL-SIDE) — reading the same file, with vs without tool-call understanding. config.yaml is read three times and main.go twice. WITHOUT tool-call understanding the tool RE-EXECUTES every read (re-fetch from disk / DB / API). WITH it, the kernel knows a re-read is the same idempotent call and serves it 1-shot from the content cache (tier-2) -> the tool runs ONCE per file, not once per read. HONEST BOUND: the cached content is still RETURNED to the model (the gateway re-materializes it), so this is a tool-side latency/compute/$ win, NOT a model-context cut; the model-side prefill/KV reuse is cmd/ctxdemo's axis. The first read of each file is the cold tool execution both arms pay (control); the LATER reads of the same file are the win (the tool is not re-run).",
+  "calls": [
+    { "tool": "read_file", "args": {"path": "config.yaml"}, "meta": {"readOnlyHint": "true", "idempotentHint": "true", "result_tokens": "180"}, "class": "pass", "note": "first read of config.yaml, cold -> engine; fills tier-2 (control)" },
+    { "tool": "list_dir", "args": {"path": "src/"}, "meta": {"readOnlyHint": "true", "idempotentHint": "true", "result_tokens": "90"}, "class": "pass", "note": "first listing, cold -> engine (control)" },
+    { "tool": "read_file", "args": {"path": "config.yaml"}, "meta": {"readOnlyHint": "true", "idempotentHint": "true", "result_tokens": "180"}, "class": "dedup", "note": "config.yaml AGAIN -> tier-2 content-cache hit; the tool is NOT re-run (WITHOUT fak it re-fetches the file)" },
+    { "tool": "read_file", "args": {"path": "src/main.go"}, "meta": {"readOnlyHint": "true", "idempotentHint": "true", "result_tokens": "540"}, "class": "pass", "note": "first read of main.go, cold -> engine; fills tier-2 (control)" },
+    { "tool": "read_file", "args": {"path": "config.yaml"}, "meta": {"readOnlyHint": "true", "idempotentHint": "true", "result_tokens": "180"}, "class": "dedup", "note": "config.yaml a THIRD time -> tier-2 hit; tool not re-run" },
+    { "tool": "read_file", "args": {"path": "src/main.go"}, "meta": {"readOnlyHint": "true", "idempotentHint": "true", "result_tokens": "540"}, "class": "dedup", "note": "main.go AGAIN -> tier-2 hit; tool not re-run (WITHOUT fak it re-fetches the file)" }
+  ]
+}

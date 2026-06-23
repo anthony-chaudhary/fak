@@ -1,0 +1,11 @@
+{
+  "slice_id": "clean-control",
+  "_provenance": "operator-authored, frozen fixture for cmd/tokendemo. The anti-inflation control: every call is a distinct, legitimate, allow-listed read. No mutating /bad call, no re-read of the same file -> nothing for either lever to save.",
+  "_story": "The honesty control. A clean coding session ingests the same tokens on BOTH arms (tokens_saved=0): fak does not cry wolf. The gap only opens on a refused bad call (prefilter-bad-calls) or a re-read (reread-same-file).",
+  "calls": [
+    { "tool": "read_file", "args": {"path": "config.yaml"}, "meta": {"readOnlyHint": "true", "idempotentHint": "true", "result_tokens": "180"}, "class": "pass", "note": "distinct legitimate read (control)" },
+    { "tool": "list_dir", "args": {"path": "src/"}, "meta": {"readOnlyHint": "true", "idempotentHint": "true", "result_tokens": "90"}, "class": "pass", "note": "distinct legitimate listing (control)" },
+    { "tool": "read_file", "args": {"path": "src/main.go"}, "meta": {"readOnlyHint": "true", "idempotentHint": "true", "result_tokens": "540"}, "class": "pass", "note": "distinct legitimate read (control)" },
+    { "tool": "search_code", "args": {"query": "func main"}, "meta": {"readOnlyHint": "true", "idempotentHint": "true", "result_tokens": "120"}, "class": "pass", "note": "distinct legitimate search (control)" }
+  ]
+}

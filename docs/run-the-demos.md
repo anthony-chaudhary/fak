@@ -16,12 +16,16 @@ The demos:
 |------|---------|----------------|
 | **guarddemo** — the safety floor, side by side (WITHOUT fak vs WITH fak, same attack) | `go run ./cmd/guarddemo` | no — self-contained |
 | **turntaxdemo** — turn-tax race (SOTA loop vs fak 1-shot) | `go run ./cmd/turntaxdemo` | no — self-contained |
+| **tokendemo** — tool-call token ledger (two meters: model-context tokens kept OUT by a prefiltered /bad call, and tool round-trips collapsed by a re-read served from cache) | `go run ./cmd/tokendemo -print` | no — self-contained |
 | **ctxdemo** — multi-agent context-reuse proof (fak vs a tuned warm-cache SOTA baseline) | `go run ./cmd/ctxdemo` | optional (live race needs one) |
 | **demorace** — reuse race (fak vs a tuned warm-cache SOTA baseline) + reuse curve | `go run ./cmd/demorace` | yes (live race) |
 
-The first two are **self-contained** (no model, no GPU, no downloads): they replay a frozen,
+The first three are **self-contained** (no model, no GPU, no downloads): they replay a frozen,
 class-labeled tool-call trace through the *real* kernel, so they reproduce identically on any
-box. `guarddemo` is the fastest point to grasp — the moat in one side-by-side glance.
+box. `guarddemo` is the fastest point to grasp — the moat in one side-by-side glance;
+`tokendemo` is the most concrete *clear win* — the model-context tokens a prefiltered /bad
+call keeps out of the model (plus the tool round-trips a cached re-read collapses), counted
+call by call.
 
 ## 1. Local — one command
 
@@ -68,12 +72,22 @@ documented invariants — CI-usable, no browser, no network:
 ```bash
 go run ./cmd/guarddemo  -selfcheck   # WITHOUT fak: 4 / 2 / 0 breaches · WITH fak: 0 (per scenario)
 go run ./cmd/turntaxdemo -selfcheck   # turn-tax + safety-floor invariants per suite
+go run ./cmd/tokendemo  -selfcheck   # token-ledger invariants per suite (incl. the clean control at 0)
 ```
 
-All three self-contained comparisons ship a terminal side-by-side: the **30-second point
+`tokendemo` is also fully headless (no browser at all): `-print` for the side-by-side,
+`-json` for the exact per-call ledger, `-selfcheck` for the invariants.
+
+```bash
+go run ./cmd/tokendemo -print -suite prefilter-bad-calls   # win 1 (model context): 4 /bad calls refused → 1,452 tok kept out of the model
+go run ./cmd/tokendemo -print -suite reread-same-file       # win 2 (tool-side): 3 re-reads served from cache → the tool ran 3×, not 6×
+go run ./cmd/tokendemo -json                                 # the exact per-call ledger (both meters), all suites
+```
+
+All four self-contained comparisons ship a terminal side-by-side: the **30-second point
 with zero setup** — rendered right in the terminal, no browser, no port (honors
 `NO_COLOR`). One per fak value axis: `guarddemo` the **safety** axis, `turntaxdemo` the
-**efficiency** axis, `ctxdemo` the **reuse** axis:
+**efficiency** axis, `ctxdemo` the **reuse** axis, `tokendemo` the **token** axis:
 
 ```bash
 go run ./cmd/guarddemo  -print                          # safety: WITHOUT fak vs WITH fak (4 breaches → 0)
@@ -81,9 +95,10 @@ go run ./cmd/guarddemo  -print -scenario turntax-happy   # safety: the clean con
 go run ./cmd/turntaxdemo -print                          # efficiency: tuned SOTA vs fak (5 forced turns → 0)
 go run ./cmd/turntaxdemo -print -suite turntax-happy     # efficiency: the anti-inflation control
 go run ./cmd/ctxdemo     -bars                           # reuse: tokens re-read — cold vs warm-cache vs fak
+go run ./cmd/tokendemo   -print                          # tokens: a prefiltered /bad call → 1,452 model-context tokens kept out
 ```
 
-Or play all three in one shot — **fak in 30 seconds**, then a built-in acceptance check
+Or play all four in one shot — **fak in 30 seconds**, then a built-in acceptance check
 that each comparison still reproduces its documented headline (a cross-platform gate, no
 model, no network):
 

@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
-# run_comparison_demos.sh — "fak in 30 seconds": the three side-by-side comparisons,
+# run_comparison_demos.sh — "fak in 30 seconds": the four side-by-side comparisons,
 # one after another, in your terminal — and a cross-platform acceptance gate for them.
 #
 # WHAT THIS IS
 #   fak has two value points (a security gate and a performance gate). This script plays
-#   the THREE self-contained, terminal side-by-side comparisons that make them visible —
+#   the FOUR self-contained, terminal side-by-side comparisons that make them visible —
 #   one per value axis — then verifies each still reproduces its documented headline:
 #
 #     safety      cmd/guarddemo  -print   WITHOUT fak vs WITH fak on the same attack
@@ -13,6 +13,9 @@
 #                                         vs fak's flat 0
 #     reuse       cmd/ctxdemo    -bars     prefill tokens the model must re-read:
 #                                         cold no-cache vs tuned warm-cache vs fak
+#     tokens      cmd/tokendemo  -print   two meters: model-context tokens kept OUT
+#                                         (a prefiltered /bad call) + tool round-trips
+#                                         collapsed (a re-read served from cache)
 #
 #   Every one is MODEL-AGNOSTIC: no weights, no GPU, no API key, no network. The numbers
 #   are deterministic (replayed through the real kernel, or exact timing-free token
@@ -25,7 +28,7 @@
 #   this whole script runs anywhere `go` does.
 #
 # USAGE
-#   bash tools/run_comparison_demos.sh            # play all three, then verify
+#   bash tools/run_comparison_demos.sh            # play all four, then verify
 #   bash tools/run_comparison_demos.sh -q         # quiet: verify only (the acceptance gate)
 #
 # Exit code: 0 = every comparison reproduced its documented headline; non-zero otherwise.
@@ -70,19 +73,22 @@ show() {
 
 if [ "$QUIET" -eq 0 ]; then
 	echo "==================================================================="
-	echo " fak in 30 seconds — three side-by-side comparisons, no model, no GPU"
+	echo " fak in 30 seconds — four side-by-side comparisons, no model, no GPU"
 	echo "==================================================================="
 	echo " go:    $(go version 2>/dev/null || echo 'go NOT FOUND')"
 	echo " uname: $(uname -sm 2>/dev/null || echo unknown)"
 	echo
-	echo "### 1/3 · SAFETY — WITHOUT fak vs WITH fak (same attack) ###########"
+	echo "### 1/4 · SAFETY — WITHOUT fak vs WITH fak (same attack) ###########"
 	show go run ./cmd/guarddemo -print
 	echo
-	echo "### 2/3 · EFFICIENCY — a tuned SOTA agent's wasted turns vs fak #####"
+	echo "### 2/4 · EFFICIENCY — a tuned SOTA agent's wasted turns vs fak #####"
 	show go run ./cmd/turntaxdemo -print
 	echo
-	echo "### 3/3 · REUSE — tokens the model must re-read (cold/warm/fak) #####"
+	echo "### 3/4 · REUSE — tokens the model must re-read (cold/warm/fak) #####"
 	show go run ./cmd/ctxdemo -bars
+	echo
+	echo "### 4/4 · TOKENS — model-context kept out + tool round-trips collapsed ##"
+	show go run ./cmd/tokendemo -print
 	echo
 fi
 
@@ -101,6 +107,12 @@ gate "turntaxdemo -selfcheck (all suites)"  "reproduced the documented turn-tax"
 # reuse: the exact, timing-free fak-vs-tuned token win.
 gate "ctxdemo reuse bars (fak re-reads less)" "fak makes the model re-read" \
 	go run ./cmd/ctxdemo -bars
+# tokens: a prefiltered /bad call keeps 1,452 model-context tokens out (win 1); a re-read
+# collapses tool round-trips (win 2). -selfcheck pins every suite's ledger invariants.
+gate "tokendemo prefilter win (1,452 model tok)" "fak keeps 1,452 tokens out of the model" \
+	go run ./cmd/tokendemo -print -suite prefilter-bad-calls
+gate "tokendemo -selfcheck (all suites)" "reproduced the documented ledger" \
+	go run ./cmd/tokendemo -selfcheck
 echo
 
 echo "== summary: $PASS passed, $FAIL failed =="
@@ -108,4 +120,4 @@ if [ "$FAIL" -ne 0 ]; then
 	echo "ACCEPTANCE FAILED"
 	exit 1
 fi
-echo "ACCEPTANCE PASSED — all three side-by-side comparisons reproduced their headline"
+echo "ACCEPTANCE PASSED — all four side-by-side comparisons reproduced their headline"
