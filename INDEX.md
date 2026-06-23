@@ -23,7 +23,7 @@ below, so the front door never has to grow to stay complete.
 
 Each turns a fuzzy goal into a number you can drive toward zero.
 
-- [Industry scorecard](docs/INDUSTRY-SCORECARD.md) — the one OUTWARD stick: fak vs the state of the art (vLLM/SGLang/llama.cpp), graded for honest parity / true gain / shown losses.
+- [Industry scorecard](docs/industry-scorecard/README.md) — the one OUTWARD stick: an industry-first taxonomy of the dimensions the LLM-serving field competes on (vLLM/SGLang/TensorRT-LLM/llama.cpp), with fak's honest position on each (mostly named gaps). Two driven numbers: **coverage** (of the field) and **parity-debt** (honesty of the rows). Modular folder, regenerated from `tools/industry_scorecard.data/`.
 - [Agent-readiness scorecard](docs/AGENT-READINESS-SCORECARD.md) — can an AI agent discover, adopt, and build on fak (friction-debt across the three steps an agent walks).
 - [Repo-hygiene scorecard](docs/REPO-HYGIENE-SCORECARD.md) — verbosity, organization, indexing, and accessibility of the whole tree.
 - [Code-quality scorecard](docs/CODE-QUALITY-SCORECARD.md) — the Go module's code-debt.

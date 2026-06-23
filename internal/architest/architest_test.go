@@ -65,6 +65,7 @@ var tier = map[string]int{
 	"rulesynth":    3, // refusal-log rule synthesizer (#537): composes harvest/policy/adjudicator/shipgate to propose+gate a new structural rule as a reviewable diff; imports tier-2 mechanisms, never the hot path.
 	"residency":    2,
 	"ctxresidency": 3,
+	"ctxplan":      1, // context planner: cost-based, forecast-driven O(1) view over a lossless history store; stdlib-only, imports nothing internal.
 	// new-leaf:tier — `python tools/new_leaf.py <name> --tier <name>` inserts the
 	// declaration for a generated leaf immediately ABOVE this line. Keep the marker last.
 }
