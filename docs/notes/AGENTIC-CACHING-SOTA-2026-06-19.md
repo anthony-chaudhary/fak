@@ -237,7 +237,11 @@ attach plan-template reuse than a normal agent harness: a reused plan can become
 an approved call graph, then every call still crosses the kernel.
 
 **Gap.** No `PlanePlanTemplate` or intent-key cache exists yet. The first version
-should be read-only/advisory and abstain aggressively.
+should be read-only/advisory and decline aggressively on any uncertainty.
+"Abstaining" is a typed non-Hit (`Miss` or `Revalidate`), never a `HIT` — the
+`cachemeta.LookupKind` vocabulary (hit/miss/revalidate/transform/quarantine/fault)
+defines no `ABSTAIN`, so abstention is expressed as a non-Hit, not as a verdict
+named ABSTAIN.
 
 ### 2.7 Memory views and compaction caches
 
