@@ -71,6 +71,15 @@ type Page struct {
 	Durability  string `json:"durability,omitempty"`  // rung-1 write-time class (#499/#496): turn|session|durable; auditable in manifest.json
 	Witness     string `json:"witness,omitempty"`     // external trust witness this page was admitted under
 	TrustEpoch  uint64 `json:"trust_epoch,omitempty"` // vdso trust epoch observed at record time
+
+	// Utility is the learned outcome-utility scalar (#540): the second-phase
+	// re-rank signal MemRL calls a Q-value, here learned ONLY from WITNESSED
+	// outcomes (Session.Credit) and provenance-gated. Default-neutral 0 (omitempty
+	// ⇒ a never-credited page is byte-identical in manifest.json to today). It is
+	// clamped to [0, UtilityMax]: a poisoned/refuted page can never accrue it, and
+	// the dream seal path zeroes it on witness revocation, so utility re-ranks only
+	// WITHIN the already-provenance-clean candidate set and never overrides a deny.
+	Utility float64 `json:"utility,omitempty"`
 }
 
 // Manifest is the persisted core image of a finished session: the page table, the
@@ -449,7 +458,8 @@ type Slice struct {
 func (s *Session) Recall(ctx context.Context, query string, k int) []Slice {
 	type scored struct {
 		p     Page
-		score int
+		score int     // phase 1: lexical/semantic relevance (a HARD filter)
+		rank  float64 // phase 2: relevance + learned outcome-utility (#540)
 	}
 	q := tokenize(query)
 	var cand []scored
@@ -457,15 +467,27 @@ func (s *Session) Recall(ctx context.Context, query string, k int) []Slice {
 		if p.Quarantined || s.Tombstoned(p.Step) {
 			continue
 		}
-		cand = append(cand, scored{p, overlap(q, tokenize(p.Descriptor))})
+		// Phase 1 is unchanged: the relevance filter. A score-0 page is NOT a
+		// candidate — utility can never resurrect an irrelevant page (it re-ranks
+		// WITHIN the relevant set, it does not widen it). This makes the filter a
+		// hard gate that phase 2 sits behind, exactly as quarantine does.
+		score := overlap(q, tokenize(p.Descriptor))
+		if score == 0 {
+			continue
+		}
+		// Phase 2: re-rank the relevant candidates by relevance PLUS learned
+		// utility. Utility is clamped to [0, UtilityMax] (clampUtility), so it can
+		// re-order across a bounded relevance gap — the MemRL "reject semantically-
+		// relevant noise" effect — but a single witnessed outcome can never let a
+		// barely-relevant page dominate a strongly-relevant one. At default-neutral
+		// utility (0) rank == float64(score), so the order is byte-identical to the
+		// pre-#540 lexical-only ranking.
+		cand = append(cand, scored{p, score, float64(score) + p.Utility})
 	}
-	sort.SliceStable(cand, func(i, j int) bool { return cand[i].score > cand[j].score })
+	sort.SliceStable(cand, func(i, j int) bool { return cand[i].rank > cand[j].rank })
 
 	var out []Slice
 	for i := 0; i < len(cand) && len(out) < k; i++ {
-		if cand[i].score == 0 {
-			break
-		}
 		b, err := s.Resolve(ctx, cand[i].p.Step)
 		if err != nil {
 			continue

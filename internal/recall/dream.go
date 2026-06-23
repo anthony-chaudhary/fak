@@ -289,6 +289,11 @@ func sealPage(p *Page, qid, reason, detail string) {
 	p.QID = qid
 	p.Reason = reason
 	p.Taint = uint8(abi.TaintQuarantined)
+	// Provenance gates the LEARNING (#540): a sealed page cannot RETAIN positive
+	// utility. Zeroing here covers both seal paths — witness-refuted and tightened
+	// re-screen — so any utility a page accrued while it looked clean is revoked
+	// the moment its witness is, never resurrected via the phase-2 re-rank.
+	p.Utility = 0
 	p.Descriptor = sealedDescriptor(*p, detail)
 }
 
