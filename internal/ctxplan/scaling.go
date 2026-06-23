@@ -88,9 +88,9 @@ type Point struct {
 	Turn           int     `json:"turn"`            // N
 	Resident       int     `json:"resident"`        // C(N): tokens that must sit in the live window
 	Store          int64   `json:"store"`           // lossless backing store on disk (cold)
-	RecallExact    float64 `json:"recall_exact"`    // P(an arbitrary past fact is recoverable byte-exact)
-	RetrieveFaults float64 `json:"retrieve_faults"` // expected demand-pages so far (Planned): (1-p_hit)*N
-	PromptCostCum  int64   `json:"prompt_cost_cum"` // cumulative resident tokens processed — the prefill/$ proxy
+	RecallExact    float64 `json:"recall_exact"`    // P(a past fact is recoverable byte-exact); for compaction this is the OLDEST surviving fact (worst case), a uniformly-random fact fares better
+	RetrieveFaults float64 `json:"retrieve_faults"` // expected demand-pages so far (Planned): (1-p_hit)*N. Each fault re-prefills ~TokensPerTurn tokens — a cost NOT folded into PromptCostCum here (see the scaling-rigor follow-on)
+	PromptCostCum  int64   `json:"prompt_cost_cum"` // cumulative RESIDENT tokens processed — the prefill/$ proxy. Excludes fault re-prefill AND the O(N)-per-turn re-planning compute: "O(1)" scopes the RESIDENT set, not the planning cost
 }
 
 // Model computes the regime's curve at each turn count in turns (which must be positive
@@ -136,11 +136,13 @@ func modelAt(r Regime, p Params, n int) Point {
 	return pt
 }
 
-// compactionRecall models the geometric decay of exact recall under compaction: a fact
-// laid down early has survived ~floor(b*N/W) compaction events by turn N (each time the
-// resident set refilled to W), retaining ρ per event. With ρ=1 (lossless summary — the
-// degenerate case) recall stays 1.0; with ρ<1 it decays toward 0, the irreversible loss
-// the planned view avoids.
+// compactionRecall models the geometric decay of exact recall under compaction for the
+// OLDEST surviving fact (the worst case): a fact laid down at turn ~0 has survived
+// ~floor(b*N/W) compaction events by turn N (each time the resident set refilled to W),
+// retaining ρ per event. A uniformly-random past fact fares strictly better (a recent fact
+// has survived few or no compactions), so this is the conservative bound, not the
+// population mean. With ρ=1 (lossless summary — the degenerate case) recall stays 1.0;
+// with ρ<1 it decays toward 0, the irreversible loss the planned view avoids.
 func compactionRecall(p Params, n int) float64 {
 	rho := p.Retain
 	if rho <= 0 {

@@ -1,6 +1,7 @@
 package ctxplan
 
 import (
+	"math"
 	"strconv"
 	"strings"
 	"unicode"
@@ -90,7 +91,13 @@ func (f Forecast) Benefit(c Span, maxStep int) float64 {
 	util := spanUtility(c)
 	dur := durabilityPrior(c.Durability)
 	rec := recency(c.Step, maxStep)
-	return w.Relevance*rel + w.Utility*util + w.Durability*dur + w.Recency*rec
+	b := w.Relevance*rel + w.Utility*util + w.Durability*dur + w.Recency*rec
+	// Single fail-closed choke point: a non-finite score (a poisoned signal, an Inf
+	// weight) collapses to 0 rather than poisoning the planner's sort or DP downstream.
+	if math.IsNaN(b) || math.IsInf(b, 0) {
+		return 0
+	}
+	return b
 }
 
 // relevance is the fraction of distinct forecast content-tokens that appear in the
@@ -122,7 +129,11 @@ func spanUtility(c Span) float64 {
 		return 0
 	}
 	u, err := strconv.ParseFloat(v, 64)
-	if err != nil || u <= 0 {
+	// Reject non-finite explicitly: ParseFloat("NaN") returns NaN with a NIL error, and
+	// NaN passes both `u <= 0` and `u > UtilityMax` as false, so without this guard a
+	// poisoned Attrs["utility"] would leak NaN into Benefit -> density -> the sort and the
+	// DP. Fail closed to the neutral 0.
+	if err != nil || math.IsNaN(u) || math.IsInf(u, 0) || u <= 0 {
 		return 0
 	}
 	if u > UtilityMax {

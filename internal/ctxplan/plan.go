@@ -2,6 +2,7 @@ package ctxplan
 
 import (
 	"fmt"
+	"math"
 	"sort"
 	"strings"
 )
@@ -20,6 +21,11 @@ type Candidate struct {
 // A zero-cost candidate is treated as infinitely dense (free to keep, so always taken if
 // it has any benefit); a zero-benefit candidate has density 0.
 func (c Candidate) density() float64 {
+	// Fail closed on a non-finite benefit: a NaN/Inf signal (e.g. a poisoned utility) must
+	// never sort ahead of a real candidate or corrupt the budgeted selection.
+	if math.IsNaN(c.Benefit) || math.IsInf(c.Benefit, 0) {
+		return 0
+	}
 	if c.Cost <= 0 {
 		if c.Benefit > 0 {
 			return inf
@@ -128,7 +134,14 @@ type Plan struct {
 // pins may be nil. The result is deterministic: every sort has a total tie-break, so the
 // same (candidates, budget, pins, objective) yields a byte-identical Plan.
 func Optimize(cands []Candidate, b Budget, pins map[string]bool, objective string) Plan {
-	p := Plan{Budget: b.Tokens, Objective: objective, Candidates: len(cands)}
+	// A negative budget is meaningless; clamp to 0 (nothing non-pinned fits) so the
+	// OverBudget branch below is reached ONLY when real pins overrun, never on a stray
+	// negative budget with no pins.
+	budgetTokens := b.Tokens
+	if budgetTokens < 0 {
+		budgetTokens = 0
+	}
+	p := Plan{Budget: budgetTokens, Objective: objective, Candidates: len(cands)}
 
 	var pinned, free []Candidate
 	for _, c := range cands {
@@ -152,12 +165,12 @@ func Optimize(cands []Candidate, b Budget, pins map[string]bool, objective strin
 		p.Benefit += c.Benefit
 	}
 	p.PinnedTokens = used
-	remaining := b.Tokens - used
+	remaining := budgetTokens - used
 	if remaining < 0 {
-		// The pins alone overrun the budget. They stay (correctness over thrift); the
-		// optimizer adds nothing more. A higher rung that must shrink pins reports this.
+		// The pins alone overrun the budget (used > budgetTokens >= 0 implies used > 0, so
+		// pins genuinely exist). They stay (correctness over thrift); the optimizer adds
+		// nothing more. A higher rung that must shrink pins reports this.
 		p.OverBudget = true
-		remaining = 0
 		for _, c := range free {
 			p.Elided = append(p.Elided, elisionOf(c, ElideOverBudget))
 		}
@@ -165,8 +178,11 @@ func Optimize(cands []Candidate, b Budget, pins map[string]bool, objective strin
 		return p
 	}
 
-	// Fill the remaining budget over the free candidates.
-	var chosen map[string]bool
+	// Fill the remaining budget over the free candidates. The knapsack returns a mask over
+	// `free` BY INDEX (not keyed by Cell.ID): selection and cost-charging are per ROW, so
+	// two candidates that happen to share an ID can never both ride in on one knapsack
+	// slot and double-charge the budget — the O(1) bound holds regardless of ID collisions.
+	var chosen []bool
 	switch objective {
 	case ObjExact:
 		chosen = knapsackExact(free, remaining)
@@ -174,8 +190,8 @@ func Optimize(cands []Candidate, b Budget, pins map[string]bool, objective strin
 		p.Objective = ObjGreedy
 		chosen = knapsackGreedy(free, remaining)
 	}
-	for _, c := range free {
-		if chosen[c.Cell.ID] {
+	for i, c := range free {
+		if chosen[i] {
 			p.Selected = append(p.Selected, selectionOf(c, false))
 			used += c.Cost
 			p.Benefit += c.Benefit
@@ -212,30 +228,35 @@ func finalize(p *Plan, used int) {
 // n). It is not optimal in general (the classic 0/1 counterexample exists), but it is
 // fast, replay-stable, and within a bounded gap of the exact optimum — the gap is what
 // the DP oracle measures in tests.
-func knapsackGreedy(cands []Candidate, budget int) map[string]bool {
-	order := make([]Candidate, len(cands))
-	copy(order, cands)
-	sort.SliceStable(order, func(i, j int) bool {
-		di, dj := order[i].density(), order[j].density()
+func knapsackGreedy(cands []Candidate, budget int) []bool {
+	// order indexes INTO cands (so the returned mask is by row, never by ID).
+	order := make([]int, len(cands))
+	for i := range cands {
+		order[i] = i
+	}
+	sort.SliceStable(order, func(a, b int) bool {
+		ca, cb := cands[order[a]], cands[order[b]]
+		di, dj := ca.density(), cb.density()
 		if di != dj {
 			return di > dj
 		}
-		if order[i].Benefit != order[j].Benefit {
-			return order[i].Benefit > order[j].Benefit
+		if ca.Benefit != cb.Benefit {
+			return ca.Benefit > cb.Benefit
 		}
-		if order[i].Cell.Step != order[j].Cell.Step {
-			return order[i].Cell.Step < order[j].Cell.Step
+		if ca.Cell.Step != cb.Cell.Step {
+			return ca.Cell.Step < cb.Cell.Step
 		}
-		return order[i].Cell.ID < order[j].Cell.ID
+		return ca.Cell.ID < cb.Cell.ID
 	})
-	chosen := map[string]bool{}
+	chosen := make([]bool, len(cands))
 	used := 0
-	for _, c := range order {
+	for _, idx := range order {
+		c := cands[idx]
 		if c.Benefit <= 0 {
 			continue // a span the forecast predicts no use for is not worth a resident slot
 		}
 		if used+c.Cost <= budget {
-			chosen[c.Cell.ID] = true
+			chosen[idx] = true
 			used += c.Cost
 		}
 	}
@@ -249,49 +270,71 @@ func knapsackGreedy(cands []Candidate, budget int) map[string]bool {
 // back to the greedy choice (so ObjExact never blows up); callers that need the oracle
 // keep their inputs small. Benefits are scaled to integers (BenefitScale) so the DP
 // compares total benefit exactly and deterministically.
-func knapsackExact(cands []Candidate, budget int) map[string]bool {
-	// Drop non-positive-benefit and over-budget-singleton items: they never help.
-	var items []Candidate
-	for _, c := range cands {
+func knapsackExact(cands []Candidate, budget int) []bool {
+	chosen := make([]bool, len(cands))
+	// Eligible items, each remembering its ORIGINAL index into cands so the returned mask
+	// is by row. Drop non-positive-benefit and over-budget-singleton items: they never help.
+	type item struct {
+		idx, cost int
+		val       int64
+	}
+	var items []item
+	for i, c := range cands {
 		if c.Benefit > 0 && c.Cost <= budget {
-			items = append(items, c)
+			items = append(items, item{idx: i, cost: c.Cost, val: scaleBenefit(c.Benefit)})
 		}
 	}
 	if budget <= 0 || len(items) == 0 {
-		return map[string]bool{}
+		return chosen
 	}
 	if int64(len(items))*int64(budget) > DPExactLimit {
 		return knapsackGreedy(cands, budget) // too large for the oracle; degrade to greedy
 	}
 	n := len(items)
-	val := make([]int64, n)
-	for i, c := range items {
-		val[i] = int64(c.Benefit * BenefitScale)
-	}
 	// dp[w] = best scaled benefit achievable with capacity w after considering items so
 	// far; take[i][w] records whether item i was taken at capacity w (for reconstruction).
 	dp := make([]int64, budget+1)
 	take := make([][]bool, n)
 	for i := 0; i < n; i++ {
 		take[i] = make([]bool, budget+1)
-		ci, vi := items[i].Cost, val[i]
+		ci, vi := items[i].cost, items[i].val
 		for w := budget; w >= ci; w-- {
-			if cand := dp[w-ci] + vi; cand > dp[w] {
-				dp[w] = cand
+			if c := dp[w-ci] + vi; c > dp[w] {
+				dp[w] = c
 				take[i][w] = true
 			}
 		}
 	}
-	chosen := map[string]bool{}
 	w := budget
 	for i := n - 1; i >= 0; i-- {
 		if take[i][w] {
-			chosen[items[i].Cell.ID] = true
-			w -= items[i].Cost
+			chosen[items[i].idx] = true
+			w -= items[i].cost
 		}
 	}
 	return chosen
 }
+
+// scaleBenefit turns a float benefit into the integer the DP compares. It ROUNDS (not
+// truncates, so near-ties rank correctly) and clamps to a safe ceiling so a pathological
+// (or maliciously large) benefit cannot overflow int64 and flip a huge-value item to a
+// negative DP value. A non-finite benefit (NaN/Inf) maps to 0 — fail-closed, the same
+// posture the benefit model uses (forecast.go), so a poisoned signal can never corrupt
+// the oracle's value table.
+func scaleBenefit(b float64) int64 {
+	if math.IsNaN(b) || b <= 0 {
+		return 0
+	}
+	v := math.Round(b * BenefitScale)
+	if v > maxScaledBenefit {
+		return maxScaledBenefit
+	}
+	return int64(v)
+}
+
+// maxScaledBenefit caps a single item's scaled benefit far below int64 overflow even
+// summed across a very large plan (1e15 * millions of items stays within int64's ~9.2e18).
+const maxScaledBenefit = 1_000_000_000_000_000
 
 // DPExactLimit bounds n*budget for the exact oracle so a stray ObjExact on a huge store
 // degrades to greedy instead of allocating a giant table. 2e7 cells is ~160MB of bool

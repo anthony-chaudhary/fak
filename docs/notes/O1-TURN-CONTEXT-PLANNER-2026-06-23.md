@@ -180,6 +180,13 @@ never resident; a pin cannot launder poison.
   the regime definitions, deterministic and testable — not a wall-clock run over real
   transcripts. An empirical pass over recorded `cdb` core images (resident tokens, fault
   rate, answer quality vs a compaction baseline) is the named measurement.
+- **"O(1)" scopes the RESIDENT set, not the total cost.** The closed-form curve omits two
+  real costs the planned regime still pays: each forecast MISS re-prefills ~`b` tokens to
+  page the span back in (a count today, not a token charge), and re-planning scores `O(N)`
+  candidates per turn (so per-turn planning is `O(N)`, cumulative `O(N²)`, unless the
+  candidate set is index-bounded). The headline bend is the *resident-token* curve; pricing
+  the fault tax and the planner compute is a named follow-on. Compaction's recall number is
+  the **oldest-fact worst case**, not the population mean.
 - **Greedy is the production planner.** The exact DP is a small-input oracle; the greedy
   optimality gap is measured, not assumed to be zero.
 

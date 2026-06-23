@@ -35,32 +35,39 @@ func Audit(p Plan) Witness {
 		Resident:   len(p.Selected),
 		Elided:     len(p.Elided),
 	}
+	// An empty ID anywhere breaks the partition: the disjointness check below is
+	// ID-keyed, so a span with no ID could be both resident AND elided undetected. A
+	// well-formed plan (and the adapters that build one) must address every span; a blank
+	// ID is treated as a partition failure, not waved through.
+	wellFormed := true
 	selectedIDs := make(map[string]bool, len(p.Selected))
 	for _, s := range p.Selected {
 		w.ResidentTokens += s.Cost
-		if s.ID != "" {
-			selectedIDs[s.ID] = true
+		if s.ID == "" {
+			wellFormed = false
+			continue
 		}
+		selectedIDs[s.ID] = true
 	}
 	disjoint := true
 	for _, e := range p.Elided {
 		w.ElidedTokens += e.Cost
+		if e.ID == "" {
+			wellFormed = false
+		}
 		if e.ID != "" && selectedIDs[e.ID] {
 			disjoint = false // a span both resident AND elided — a double-count, not a partition
 		}
 		if e.ID == "" && e.Digest == "" {
 			// No handle: this span cannot be paged back in. It was DESTROYED, not elided —
 			// the defining property of compaction. Record its (best-effort) identity.
-			id := e.Digest
-			if id == "" {
-				id = e.Reason // fall back to the reason so the report is not blank
-			}
+			id := e.Reason // fall back to the reason so the report is not blank
 			w.Unrecoverable = append(w.Unrecoverable, id)
 		} else {
 			w.Recoverable++
 		}
 	}
-	w.Partition = disjoint && (w.Resident+w.Elided == w.Candidates)
+	w.Partition = wellFormed && disjoint && (w.Resident+w.Elided == w.Candidates)
 	w.Faithful = w.Partition && len(w.Unrecoverable) == 0
 	return w
 }

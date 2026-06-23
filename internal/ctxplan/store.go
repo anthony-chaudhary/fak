@@ -58,6 +58,13 @@ func NormDurability(s string) string {
 // own seal error in this so a caller can branch on "the gate held" vs a lookup miss.
 var ErrSealed = errors.New("ctxplan: span sealed by the trust gate")
 
+// ErrTombstoned is returned by a Store.Materialize that refuses a page-in because the span
+// was suppressed by context control. Tombstone is a SEPARATE gate from seal (recall.Resolve
+// returns ErrTombstoned; memq's backend refuses both), and a Store MUST refuse a tombstoned
+// span on the documented demand-page path — otherwise a span the planner elided as
+// suppressed could be paged back in through the recovery handle, defeating the suppression.
+var ErrTombstoned = errors.New("ctxplan: span suppressed by context control")
+
 // Store is the history image the planner views: it supplies spans (SAFE metadata) and
 // trust-gated byte access. Materialize is the gated page-in — a sealed/refused span
 // returns an error wrapping ErrSealed, and its bytes never cross the gate. A real
@@ -150,6 +157,9 @@ func (m *MemStore) Materialize(_ context.Context, id string) ([]byte, error) {
 		}
 		if s.Sealed {
 			return nil, fmt.Errorf("%w: span %s", ErrSealed, id)
+		}
+		if s.Tombstoned {
+			return nil, fmt.Errorf("%w: span %s", ErrTombstoned, id)
 		}
 		b, ok := m.cas[s.Digest]
 		if !ok {

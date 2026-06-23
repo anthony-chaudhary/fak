@@ -85,8 +85,11 @@ func Materialize(ctx context.Context, store Store, f Forecast, budget Budget, co
 		body, err := store.Materialize(ctx, s.ID)
 		if err != nil {
 			reason := "page_in_refused"
-			if errors.Is(err, ErrSealed) {
+			switch {
+			case errors.Is(err, ErrSealed):
 				reason = "sealed_by_trust_gate"
+			case errors.Is(err, ErrTombstoned):
+				reason = "tombstoned_by_context_control"
 			}
 			v.Refused = append(v.Refused, Refusal{ID: s.ID, Step: s.Step, Role: s.Role, Reason: reason})
 			continue
