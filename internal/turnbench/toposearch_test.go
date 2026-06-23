@@ -3,6 +3,8 @@ package turnbench
 import (
 	"context"
 	"encoding/json"
+	"strconv"
+	"strings"
 	"testing"
 )
 
@@ -245,6 +247,64 @@ func TestTopologySearch_FrontierAndRevalidationFlag(t *testing.T) {
 	}
 	if len(rep.JSON()) == 0 {
 		t.Fatal("empty JSON artifact")
+	}
+}
+
+// TestTopologySearch_CSVRendersFrontierGrid proves the report emits a flat curve-fit grid (the
+// structural dual of FanoutSweep.CSV): a header plus exactly one row per scored genome, carrying
+// the credited/measured/refused savings split, the arbiter collision cost, and the divergence
+// flags — the consumable Pareto-frontier surface #541 specifies — produced at $0 model spend and
+// with no ragged rows. The CSV must blend nothing the JSON keeps apart.
+func TestTopologySearch_CSVRendersFrontierGrid(t *testing.T) {
+	ctx := context.Background()
+	cm := DefaultFanoutCostModel()
+	cfg := TopologySearchConfig{
+		Profile:       FanoutResearch,
+		FrontierWidth: 16,
+		Baseline:      TopologyGenome{Width: 4, SubTurns: 4, Lanes: 1},
+		WidthGrid:     []int{2, 8, 16, 32}, // 32 is past the frontier -> a bounded row
+		LaneGrid:      []int{1, 8, 32},
+		Trials:        4,
+		Seed:          5,
+	}
+	rep, err := RunTopologySearch(ctx, cfg, cm)
+	if err != nil {
+		t.Fatalf("RunTopologySearch: %v", err)
+	}
+
+	csv := string(rep.CSV())
+	lines := strings.Split(strings.TrimRight(csv, "\n"), "\n")
+	// Header + exactly one row per scored candidate.
+	if len(lines) != 1+len(rep.Candidates) {
+		t.Fatalf("CSV must be header + one row per candidate: got %d lines for %d candidates",
+			len(lines), len(rep.Candidates))
+	}
+	header := lines[0]
+	for _, col := range []string{
+		"credited_savings_tokens", "measured_savings_tokens", "refused_projected_savings_tokens",
+		"arbiter_collision_cost", "prefix_tokens_saved", "on_frontier",
+	} {
+		if !strings.Contains(header, col) {
+			t.Errorf("CSV header missing the %q column: %s", col, header)
+		}
+	}
+	// No ragged rows: every data row has the header's column count.
+	want := strings.Count(header, ",") + 1
+	for i, ln := range lines[1:] {
+		if got := strings.Count(ln, ",") + 1; got != want {
+			t.Errorf("CSV row %d has %d columns, want %d: %s", i, got, want, ln)
+		}
+	}
+	// Rows read as a surface: sorted by (width, then lanes) ascending.
+	prevW, prevL := -1, -1
+	for _, ln := range lines[1:] {
+		cols := strings.Split(ln, ",")
+		w, _ := strconv.Atoi(cols[1])
+		l, _ := strconv.Atoi(cols[3])
+		if w < prevW || (w == prevW && l < prevL) {
+			t.Errorf("CSV rows not sorted by (width,lanes): %q after width=%d lanes=%d", ln, prevW, prevL)
+		}
+		prevW, prevL = w, l
 	}
 }
 

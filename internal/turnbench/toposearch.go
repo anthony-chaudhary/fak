@@ -201,6 +201,40 @@ func (r *TopologySearchReport) JSON() []byte {
 	return append(b, '\n')
 }
 
+// CSV renders the searched genomes as a flat grid for curve-fitting the
+// savings-vs-arbiter-collision frontier (one row per scored topology) — the structural dual
+// of FanoutSweep.CSV and the consumable Pareto surface #541 specifies. The columns are the
+// headline fitness values: the divergence-gated CREDITED savings and its measured/refused
+// split first, then the arbiter collision cost, the measured components (exact prefix geometry
+// + real dedup), and the divergence/frontier flags last. Rows are sorted by (width, lanes) so
+// the grid reads as a surface. The two summands stay separately visible (credited vs the
+// refused post-frontier projection) exactly as the JSON keeps them apart — the CSV blends
+// nothing the report does not.
+func (r *TopologySearchReport) CSV() []byte {
+	var b []byte
+	b = append(b, "name,width,sub_turns,lanes,credited_savings_tokens,measured_savings_tokens,refused_projected_savings_tokens,arbiter_collision_cost,prefix_tokens_saved,dedup_turns,credited_width,frontier_width,bounded,needs_live_revalidation,on_frontier\n"...)
+	rows := append([]TopologyCandidate(nil), r.Candidates...)
+	sort.Slice(rows, func(i, j int) bool {
+		if rows[i].Genome.Width != rows[j].Genome.Width {
+			return rows[i].Genome.Width < rows[j].Genome.Width
+		}
+		if rows[i].Genome.Lanes != rows[j].Genome.Lanes {
+			return rows[i].Genome.Lanes < rows[j].Genome.Lanes
+		}
+		return rows[i].Name < rows[j].Name
+	})
+	for _, c := range rows {
+		f := c.Fitness
+		b = append(b, fmt.Sprintf("%s,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%v,%v,%v\n",
+			c.Name, c.Genome.Width, c.Genome.SubTurns, c.Genome.Lanes,
+			f.CreditedSavingsTokens, f.MeasuredSavingsTokens, f.RefusedProjectedSavingsTokens,
+			f.ArbiterCollisionCost, f.PrefixTokensSaved, f.DedupTurns,
+			f.CreditedWidth, f.FrontierWidth,
+			f.Bounded, c.NeedsLiveRevalidation, c.OnFrontier)...)
+	}
+	return b
+}
+
 // arbiterCollisionCost prices the serialization a (width, lanes) lane assignment induces on
 // the arbiter: round-robin `width` workers across `lanes` leaf-lanes, then count the worker
 // PAIRS forced to serialize because they share a lane — Σ C(size_j, 2). This is exactly
