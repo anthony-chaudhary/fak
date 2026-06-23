@@ -34,10 +34,13 @@
 //   - Schedule / NextDecoder: a single serial decode lane time-shared across
 //     models, with round-robin fairness and the load-bearing invariant that at most
 //     one model decodes per step. DecodeBandwidthBytes quantifies why.
-//   - AcceptGreedy: the greedy speculative-decoding accept rule — the cache-led
-//     "next-gen multi-token prediction" core. Its KEEP/EVICT counts map 1:1 onto the
-//     model leaf's bit-exact KV primitives (model.KVCache.Clone as the fork,
-//     model.KVCache.Evict as the bit-exact rollback of rejected drafts).
+//   - AcceptGreedy / AcceptTree: the cache-led "next-gen multi-token prediction"
+//     core. AcceptGreedy is the linear greedy speculative-decoding accept rule;
+//     AcceptTree generalizes it to a token TREE (Medusa / EAGLE-2 / SpecInfer style),
+//     where many candidate continuations share a KV prefix, are verified in one pass,
+//     and only the accepted path is kept. Their KEEP/EVICT counts map 1:1 onto the
+//     model leaf's bit-exact KV primitives (model.KVCache.Clone as the branch fork,
+//     model.KVCache.Evict as the bit-exact rollback of rejected drafts/branches).
 //   - PickDrafter / EffectiveTokensPerVerify: the ensemble-speculation policy (the
 //     idle co-resident models double as drafters for the active decoder) and the
 //     honest geometric-series model of the throughput it buys.

@@ -152,6 +152,17 @@ lane yields ~E tokens per bandwidth-bound pass instead of 1 — *before* subtrac
 draft cost. This is arithmetic, not a measurement; a real number needs the bench
 harness (#44).
 
+**The next-gen form is a token TREE, not a chain.** `polymodel.AcceptGreedy` is the
+linear case (one draft sequence). `polymodel.AcceptTree` generalizes it to a
+speculation **tree** (Medusa / EAGLE-2 / SpecInfer): many candidate continuations
+share a KV prefix, are verified in one pass, and only the accepted path is kept.
+A wide tree explores several futures for the price of one verify, raising the
+acceptance length per pass — and it *is* the caching idea made literal: a branch
+forks the cache (`KVCache.Clone`), rejected branches are removed bit-exactly
+(`KVCache.Evict`). `AcceptTree` is the deterministic accept/keep/evict core
+(witnessed); the tree-attention **verify execution** on the model (positional masks
+for the tree) is the same GAP class as the batched single-pass verify above.
+
 ## 6. Capability honesty table
 
 Legend: **[SHIPPED]** real & proven · **[PARTIAL]** real but incomplete ·

@@ -393,6 +393,73 @@ func AcceptGreedy(draft, targetArgmax []int) SpecResult {
 	return res
 }
 
+// TreeNode is one node of a speculation TREE (the Medusa / EAGLE-2 / SpecInfer form
+// of multi-token prediction). A path from the root to a node is one candidate
+// continuation; siblings are alternative next tokens that SHARE the parent's KV
+// prefix — the caching lever: a branch forks the cache with model.KVCache.Clone and
+// rejected branches are removed with model.KVCache.Evict. Token is the proposed token
+// at this node; TargetArgmax is the target model's argmax GIVEN the root→this-node
+// path (from the single tree-verify pass); Children are indices of child nodes.
+type TreeNode struct {
+	Token        int
+	TargetArgmax int
+	Children     []int
+}
+
+// SpecTree is a flat speculation tree. Index 0 is the ROOT — the current committed
+// position: its Token is ignored, its TargetArgmax is the target's argmax at the
+// current position (predicting the first new token), and its Children are the first
+// proposed tokens. Every other node is a proposed speculative token.
+type SpecTree struct {
+	Nodes []TreeNode
+}
+
+// TreeResult is the outcome of verifying a SpecTree: the accepted path (speculative
+// node indices, root excluded), the real tokens advanced, and the KEEP/EVICT split
+// over the speculative nodes.
+type TreeResult struct {
+	Path    []int // accepted speculative node indices, in descend order (root excluded)
+	Advance int   // real tokens committed (len(Path) + 1 correction/bonus)
+	KeepKV  int   // speculative KV positions to KEEP (== len(Path))
+	EvictKV int   // speculative KV positions to ROLL BACK (rejected branches) → KVCache.Evict
+}
+
+// AcceptTree is the TREE generalization of AcceptGreedy — the next-generation
+// multi-token-prediction accept. It walks from the root and, at each node, descends
+// to the child whose Token equals that node's TargetArgmax (the token the target
+// would itself have emitted); it stops at the first node with no matching child, and
+// the correction is that node's TargetArgmax. A LINEAR chain (each node one child)
+// reduces exactly to AcceptGreedy. The whole tree's KV was laid out by one verify
+// pass; afterward the accepted path is kept and every other (rejected-branch) node is
+// rolled back bit-exactly with model.KVCache.Evict — so a wide tree explores many
+// continuations for one verify pass and pays only for the branch it keeps. Over the
+// speculative nodes (all nodes except the root): KeepKV == len(Path), and
+// KeepKV + EvictKV == len(Nodes)-1.
+func AcceptTree(t SpecTree) TreeResult {
+	if len(t.Nodes) == 0 {
+		return TreeResult{}
+	}
+	var path []int
+	cur := 0
+	for {
+		want := t.Nodes[cur].TargetArgmax
+		next := -1
+		for _, c := range t.Nodes[cur].Children {
+			if c >= 0 && c < len(t.Nodes) && t.Nodes[c].Token == want {
+				next = c // first matching child wins (deterministic by child order)
+				break
+			}
+		}
+		if next < 0 {
+			break
+		}
+		path = append(path, next)
+		cur = next
+	}
+	numSpec := len(t.Nodes) - 1
+	return TreeResult{Path: path, Advance: len(path) + 1, KeepKV: len(path), EvictKV: numSpec - len(path)}
+}
+
 // PickDrafter chooses, among the OTHER resident models, the best speculator for the
 // active decoder — the "idle co-resident models become the speculation ensemble"
 // idea. Eligibility: a DIFFERENT model in the SAME non-empty Family (shared
