@@ -1,0 +1,77 @@
+{
+  "version": "fak-policy/v1",
+  "posture": "fail_closed",
+
+  "allow": [
+    "Bash",
+    "BashOutput",
+    "KillShell",
+    "Read",
+    "Edit",
+    "Write",
+    "NotebookEdit",
+    "Glob",
+    "Grep",
+    "LS",
+    "TodoWrite",
+    "Task",
+    "WebFetch",
+    "WebSearch",
+    "ExitPlanMode",
+    "Skill",
+    "SlashCommand",
+
+    "search_memory",
+    "list_memories",
+    "add_memories"
+  ],
+
+  "allow_prefix": [
+    "read_",
+    "get_",
+    "search_",
+    "list_",
+    "lookup_",
+    "find_"
+  ],
+
+  "deny": {
+    "delete_all_memories": "POLICY_BLOCK",
+    "delete_memory": "POLICY_BLOCK",
+    "reset_memory": "POLICY_BLOCK"
+  },
+
+  "arg_rules": [
+    { "tool": "add_memories", "arg": "text", "max_bytes": 8192, "reason": "OVERSIZE" },
+    { "tool": "add_memories", "arg": "text", "deny_regex": "-----BEGIN [A-Z ]*PRIVATE KEY-----|AKIA[0-9A-Z]{16}|sk-[A-Za-z0-9]{24,}|xoxb-[A-Za-z0-9-]{20,}", "reason": "SECRET_EXFIL" },
+
+    { "tool": "Bash", "arg": "command", "deny_regex": "\\brm\\s+-[A-Za-z]*[rRfF]", "reason": "POLICY_BLOCK" },
+    { "tool": "Bash", "arg": "command", "deny_regex": "\\bsudo\\b", "reason": "POLICY_BLOCK" },
+    { "tool": "Bash", "arg": "command", "deny_regex": "\\bmkfs\\b|\\bdd\\s+if=|>\\s*/dev/sd", "reason": "POLICY_BLOCK" },
+    { "tool": "Bash", "arg": "command", "deny_regex": ":\\(\\)\\s*\\{", "reason": "POLICY_BLOCK" },
+    { "tool": "Bash", "arg": "command", "deny_regex": "\\b(curl|wget)\\b[^|]*\\|\\s*(sudo\\s+)?(ba)?sh\\b", "reason": "POLICY_BLOCK" },
+    { "tool": "Bash", "arg": "command", "deny_regex": "\\bgit\\s+push\\b", "reason": "POLICY_BLOCK" }
+  ],
+
+  "self_modify_globs": [
+    "internal/abi/",
+    "internal/kernel/",
+    "internal/adjudicator/",
+    "internal/policy/",
+    "internal/registrations/",
+    ".git/",
+    ".ssh/",
+    ".dos/",
+    "VERSION",
+    "id_rsa",
+    "/etc/"
+  ],
+
+  "redact_fields": [
+    "password",
+    "secret",
+    "api_key",
+    "token",
+    "authorization"
+  ]
+}

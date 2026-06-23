@@ -209,6 +209,7 @@ governance surface, not tokens per second. Full scope, claim by claim:
 
 ## Cross-references
 
+- [Agent memory (mem0 / OpenMemory / MCP)](agent-memory.md) — put the gate in front of a memory store: oversized and secret-shaped writes refused, a prompt-injected `delete_all` refused, every recalled memory trust-gated before it re-enters context.
 - [Getting started](../../GETTING-STARTED.md) — install the single static binary.
 - [Guided tutorial](../fak/tutorial.md) — zero to first adjudicated tool call, real output at every step.
 - [Policy / permissions](../../POLICY.md) — author, dump, and review the capability floor.
