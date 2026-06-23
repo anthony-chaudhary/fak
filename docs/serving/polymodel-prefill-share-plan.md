@@ -184,7 +184,8 @@ Legend: **[SHIPPED]** real & proven · **[PARTIAL]** real but incomplete ·
 | Multi-model residency pool + serial decode lane + accept core | **[SHIPPED]** | `internal/polymodel/` (this work) |
 | Continuous-batching admit/evict loop | **[SEAM-ONLY]** | `internal/model/batch.go:1147` (comment); no scheduler |
 | Multiple models hosted in one process | **[GAP]** | single `modelengine.Default`, one `*model.Model` (`internal/modelengine/modelengine.go:54,226`); gateway binds one planner (`internal/gateway/gateway.go:253`) |
-| Multi-model weight residency / whole-model eviction on a backend | **[GAP]** | per-weight budget is single-model only (`internal/compute/vulkan.go:164`); `gpulease` is process-wide mutex (`internal/gpulease/lease.go:36`) |
+| Multi-model weight residency — policy + *model.Model binding | **[SHIPPED]** | `internal/residency` — `Manager` hosts many `*model.Model` under one weight-byte budget with LRU page-out, reusing `polymodel.Pool` as the budget + eviction policy and binding each residency descriptor to the weights it governs (off-defconfig, a library type like `polymodel`) |
+| Multi-model weight residency / whole-model eviction ON a backend | **[GAP]** | the policy + binding layer is shipped above; the real per-backend weight load/evict (per-weight budget `internal/compute/vulkan.go:164`; process-wide `gpulease` `lease.go:36`) is the deeper rung a future wiring drives through `Manager.Admit`/`Evict` |
 | Cross-model prefill share (served) | **[SHIPPED]** (verdict-layer + splice; off-defconfig) | `cachemeta.MaterializeVerdict` + `WithPrefillShare`/`PrefillSharePolicy` (ModelID-axis-only barrier lift, #534); `internal/spec.SplicePrefillShare`/`CrossModelPrefillShare` (the `KVCache.Clone` splice, bit-exact). Live multi-model backend residency (#531) still [GAP] |
 | `ProvisionalSink` implementation / `internal/spec` | **[SHIPPED]** | `internal/spec` — Sink + `OpSpecCommit`/`OpSpecSquash`; `Rollback`→bit-exact `KVCache.Evict`; lossless witness `go test ./internal/spec`. Off-defconfig, gated by `FAK_POLYMODEL`. Single-pass verify EXECUTION = #533 |
 
@@ -204,9 +205,14 @@ Ordered so each rung stands on a shipped one. None of these land in this doc.
 2. **Caller-side decode-lane scheduler over `StepBatch`/`Session`** — **#530**. Wire
    `polymodel` to actually drive a multi-model decode loop (single backend) — the
    continuous-batching seam the `batch.go:1147` comment invites.
-3. **Multi-model residency on a backend** — **#531**. Lift the single-`Default`
-   assumption (`modelengine.go`): a pool of `*model.Model`, weight-byte budget + LRU
-   page-out, reusing `polymodel.Pool` as the policy.
+3. **Multi-model residency on a backend** — **#531**. ✅ *policy + binding shipped.*
+   `internal/residency.Manager` lifts the single-`*model.Model` assumption
+   (`modelengine.Default` is one `*model.Model`): a pool of `*model.Model` under a
+   weight-byte budget with LRU page-out, reusing `polymodel.Pool` as the budget +
+   eviction policy and binding each residency descriptor to the weights it governs
+   (off-defconfig; witness `go test ./internal/residency`). The real per-backend weight
+   load/evict (the compute-HAL per-weight budget, the process-wide `gpulease`) is the
+   deeper rung a future wiring drives through `Manager.Admit`/`Evict`.
 4. **A `ProvisionalSink` + `internal/spec` implementation** — **#532**. ✅ *shipped.*
    `internal/spec` is the first `ProvisionalSink` registrant + the reserved
    `OpSpecCommit`/`OpSpecSquash` ops; its `Rollback` drives the bit-exact `KVCache.Evict`,

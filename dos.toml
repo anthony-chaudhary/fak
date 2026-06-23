@@ -45,6 +45,7 @@ concurrent = [
   "ratelimit", "rsiloop", "swebench", "toollint", "tracesink", "urllint", "webbench",
   "answershape",
   "codelint",
+  "residency",
   # new-leaf:lane -- `python tools/new_leaf.py` inserts a generated leaf lane above
 ]
 exclusive = ["abi", "release", "global"]
@@ -63,6 +64,7 @@ autopick = [
   "ratelimit", "rsiloop", "swebench", "toollint", "tracesink", "urllint", "webbench",
   "answershape",
   "codelint",
+  "residency",
   # new-leaf:lane
 ]
 
@@ -137,6 +139,7 @@ tracesink = ["internal/tracesink/**"]
 urllint = ["internal/urllint/**"]
 webbench = ["internal/webbench/**"]
 codelint = ["internal/codelint/**"]
+residency = ["internal/residency/**"]
 # new-leaf:tree -- generated leaf trees inserted above this line
 cmd         = ["cmd/**"]
 experiments = ["experiments/**"]
