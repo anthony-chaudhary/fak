@@ -127,6 +127,59 @@ func (m *gatewayMetrics) observeOperation(operation string, v WireVerdict, err e
 	m.mu.Unlock()
 }
 
+// AdjudicationSummary is a verdict roll-up over every kernel decision a gateway has
+// made — the tally `fak guard` prints when the wrapped agent exits, so an operator
+// sees what the kernel allowed vs blocked without scraping /metrics. It folds the
+// per-(operation, verdict, reason) operation counters into one record; every count is
+// the SAME number the fak_gateway_operations_total scrape would report, so the exit
+// line can never disagree with the metrics.
+type AdjudicationSummary struct {
+	Total       uint64 `json:"total"`
+	Allowed     uint64 `json:"allowed"`
+	Denied      uint64 `json:"denied"`
+	Transformed uint64 `json:"transformed"`
+	Quarantined uint64 `json:"quarantined"`
+	Errored     uint64 `json:"errored"`
+	// ByReason maps a deny/quarantine reason code to its count (the forensic "why").
+	ByReason map[string]uint64 `json:"by_reason,omitempty"`
+}
+
+// adjudicationSummary folds the live operation counters into a verdict roll-up.
+func (m *gatewayMetrics) adjudicationSummary() AdjudicationSummary {
+	sum := AdjudicationSummary{ByReason: map[string]uint64{}}
+	if m == nil {
+		return sum
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for key, c := range m.operations {
+		n := c.count
+		if n == 0 {
+			continue
+		}
+		sum.Total += n
+		switch key.verdict {
+		case "ALLOW":
+			sum.Allowed += n
+		case "TRANSFORM":
+			sum.Transformed += n
+		case "DENY":
+			sum.Denied += n
+			if key.reason != "" {
+				sum.ByReason[key.reason] += n
+			}
+		case "QUARANTINE":
+			sum.Quarantined += n
+			if key.reason != "" {
+				sum.ByReason[key.reason] += n
+			}
+		default: // "ERROR" or any future verdict kind: counted, never silently dropped.
+			sum.Errored += n
+		}
+	}
+	return sum
+}
+
 // observeInference records one served model-generation turn: its token accounting,
 // why decode stopped, and the wall-clock the planner spent producing it. promptTok /
 // complTok / cachedTok come straight from the planner's reported Usage; dur is the

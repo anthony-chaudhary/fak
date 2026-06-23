@@ -370,6 +370,18 @@ func (s *Server) MarkReady() {
 	s.startup.markReady(time.Now())
 }
 
+// AdjudicationSummary returns a verdict roll-up over every kernel decision this
+// gateway has made so far — proposed-call adjudication, direct syscalls, and inbound
+// result admission. It is the live tally `fak guard` prints on exit (what the kernel
+// allowed vs denied / repaired / quarantined), read straight from the same operation
+// counters /metrics exposes. Safe on a nil Server (returns the zero summary).
+func (s *Server) AdjudicationSummary() AdjudicationSummary {
+	if s == nil {
+		return AdjudicationSummary{ByReason: map[string]uint64{}}
+	}
+	return s.metrics.adjudicationSummary()
+}
+
 // SetModelLoadProfile records the boot-time weight-load breakdown the host captured
 // while eagerly loading a model (fak serve --gguf), exposing it as the
 // fak_model_load_* metric family. Passing nil clears it. Safe for concurrent use

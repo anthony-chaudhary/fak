@@ -88,6 +88,8 @@ func main() {
 		cmdDoctor(os.Args[2:])
 	case "serve":
 		cmdServe(os.Args[2:])
+	case "guard":
+		cmdGuard(os.Args[2:])
 	case "hook":
 		cmdHook()
 	case "swebench":
@@ -231,6 +233,16 @@ func usage() {
                  fails closed instead of using a whole-cache reset fallback. --stdio serves MCP (fak_adjudicate /
                  fak_syscall / fak_admit / fak_changes / fak_revoke /
                  fak_context_change) over stdin/stdout)
+  fak guard     [--provider anthropic|openai|gemini|xai] [--base-url URL] [--policy FILE]
+                [--api-key-env VAR] [--env VAR] [--dump-policy] [--quiet] -- <agent command...>
+                (RUN YOUR REAL AGENT THROUGH THE KERNEL: the one-command front door.
+                 Starts the gateway in-process on a private loopback port, injects its
+                 URL into the CHILD only (never your shell), execs the agent, and on
+                 exit prints what the kernel allowed vs blocked. Default upstream is the
+                 real Anthropic API in passthrough mode, so 'fak guard -- claude' wraps
+                 your normal Claude Code — your key + prompt cache flow through, every
+                 proposed tool call crosses the capability floor first. --dump-policy
+                 prints the built-in floor to edit; --policy FILE enforces your own)
   fak hook      < call.json     (spawned-hook decide; the A/B baseline transport)
   fak webbench  describe | eval | compare    (frontier web/browser agent benchmarking)
   fak swebench  describe | eval | compare    (SWE-bench Verified benchmarking)
