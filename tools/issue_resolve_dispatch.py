@@ -245,6 +245,166 @@ def spawn_issue_worker(command: list[str], env: dict[str, str], cwd: Path,
             "backend": backend}
 
 
+# --- Weekly-cap gate -------------------------------------------------------
+# A worker spawned on a quota-exhausted (but still logged-in) account dies
+# immediately with a ~65-byte banner, e.g.:
+#   You've hit your weekly limit · resets Jun 25, 1pm (America/Los_Angeles)
+#   You've hit your weekly limit · resets 4am (America/Los_Angeles)
+# The spawn preflight cannot see this — it checks host/headroom/account-logged-in,
+# NOT remaining quota — so absent this gate every tick re-spawns a doomed worker
+# for the entire (multi-day) reset window: it ships nothing and floods the logs.
+# These helpers read the banner back from recent worker logs and persist a hold so
+# the dispatcher stops spawning until the quota resets, turning a silent spin into
+# an honest WEEKLY_CAPPED hold. Everything here is FAIL-OPEN: any error resolves to
+# "not capped", so the gate can only ever ADD a refusal, never wedge the loop.
+
+_CAP_BANNER_RE = re.compile(r"hit your[\w\s]*limit", re.IGNORECASE)
+_CAP_RESET_RE = re.compile(r"resets\s+(.+?)\s*\(America/Los_Angeles\)", re.IGNORECASE)
+_CAP_RESET_FALLBACK_RE = re.compile(r"resets\s+([^\r\n]+)", re.IGNORECASE)
+_MONTHS = {m: i for i, m in enumerate(
+    ("jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"),
+    start=1)}
+# America/Los_Angeles is PDT (UTC-7) over the summer reset windows this gate sees;
+# a PT wall-clock time + this offset == UTC. (A ±1h DST error only nudges the hold
+# edge and self-corrects on the next probe — fine for a throttle.)
+_PT_TO_UTC = dt.timedelta(hours=7)
+
+
+def _backend_of_log(log: Path) -> str:
+    """The backend that produced a worker log, from its ``.backend`` sidecar;
+    legacy logs without one are the original ``claude`` backend."""
+    try:
+        return log.with_suffix(".backend").read_text(encoding="utf-8").strip() or "claude"
+    except OSError:
+        return "claude"
+
+
+def _scan_recent_cap_banner(runs_dir: Path, *, product: str, lookback_min: int,
+                            now_ts: float) -> dict[str, Any] | None:
+    """The most-recent worker log (this backend, mtime within ``lookback_min``,
+    tiny) whose body is the quota-limit banner → ``{reset_text, evidence_log}``,
+    else None. The size cap (a real worker log is large; the banner is ~65 bytes)
+    plus the specific phrase keep a prose log that merely mentions "limit" from
+    false-matching."""
+    if not runs_dir.is_dir():
+        return None
+    horizon = now_ts - lookback_min * 60
+    best: tuple[float, str, str] | None = None
+    for log in runs_dir.glob("resolve-*.log"):
+        try:
+            st = log.stat()
+        except OSError:
+            continue
+        if st.st_mtime < horizon or st.st_size > 512:
+            continue
+        if _backend_of_log(log) != product:
+            continue
+        try:
+            text = log.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+        if not _CAP_BANNER_RE.search(text):
+            continue
+        m = _CAP_RESET_RE.search(text) or _CAP_RESET_FALLBACK_RE.search(text)
+        reset_text = m.group(1).strip() if m else ""
+        if best is None or st.st_mtime > best[0]:
+            best = (st.st_mtime, reset_text, log.name)
+    if best is None:
+        return None
+    return {"reset_text": best[1], "evidence_log": best[2]}
+
+
+def _parse_reset_to_utc(reset_text: str, now_utc: dt.datetime) -> dt.datetime | None:
+    """Best-effort parse of a banner reset clause ('Jun 25, 1pm', '4am',
+    '11:30pm') as America/Los_Angeles wall-clock → a naive-UTC datetime, clamped to
+    (now, now+8d]. None when no time-of-day is present (caller falls back to a short
+    cooldown)."""
+    if not reset_text:
+        return None
+    t = reset_text.lower()
+    tm = re.search(r"(\d{1,2})(?::(\d{2}))?\s*(am|pm)", t)
+    if not tm:
+        return None
+    hour = int(tm.group(1)) % 12 + (12 if tm.group(3) == "pm" else 0)
+    minute = int(tm.group(2) or 0)
+    mo = re.search(r"(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\s+(\d{1,2})", t)
+    if mo:
+        month, day = _MONTHS[mo.group(1)], int(mo.group(2))
+        try:
+            cand = dt.datetime(now_utc.year, month, day, hour, minute) + _PT_TO_UTC
+        except ValueError:
+            return None
+        if cand < now_utc - dt.timedelta(days=1):
+            try:
+                cand = dt.datetime(now_utc.year + 1, month, day, hour, minute) + _PT_TO_UTC
+            except ValueError:
+                return None
+    else:
+        now_pt = now_utc - _PT_TO_UTC
+        cand_pt = now_pt.replace(hour=hour, minute=minute, second=0, microsecond=0)
+        if cand_pt <= now_pt:
+            cand_pt += dt.timedelta(days=1)
+        cand = cand_pt + _PT_TO_UTC
+    if cand <= now_utc:
+        return None
+    return min(cand, now_utc + dt.timedelta(days=8))
+
+
+def _iso_to_utc(s: str) -> dt.datetime | None:
+    try:
+        return dt.datetime.fromisoformat((s or "").replace("Z", ""))
+    except (ValueError, AttributeError):
+        return None
+
+
+def check_weekly_cap(runs_dir: Path, *, product: str, account_tag: str | None,
+                     now_ts: float | None = None, lookback_min: int = 45,
+                     fallback_min: int = 60) -> dict[str, Any]:
+    """Is ``account_tag`` quota-capped right now? Detects the limit banner from
+    recent worker logs and persists a hold in ``account-cap-<product>.json`` so it
+    survives the ticks AFTER spawns stop (no fresh banner is produced once we stop
+    launching doomed workers). Returns ``{"capped": bool, ...}``. FAIL-OPEN: any
+    exception → ``{"capped": False}``."""
+    try:
+        import time
+        now_ts = time.time() if now_ts is None else now_ts
+        now_utc = dt.datetime(1970, 1, 1) + dt.timedelta(seconds=now_ts)  # naive UTC
+        state_path = runs_dir / f"account-cap-{product}.json"
+        hit = _scan_recent_cap_banner(runs_dir, product=product,
+                                      lookback_min=lookback_min, now_ts=now_ts)
+        if hit:
+            until = (_parse_reset_to_utc(hit["reset_text"], now_utc)
+                     or now_utc + dt.timedelta(minutes=fallback_min))
+            state = {"product": product, "account": account_tag,
+                     "reset_text": hit["reset_text"], "evidence_log": hit["evidence_log"],
+                     "detected": now_utc.isoformat() + "Z", "until": until.isoformat() + "Z"}
+            try:
+                runs_dir.mkdir(parents=True, exist_ok=True)
+                state_path.write_text(json.dumps(state, indent=2), encoding="utf-8")
+            except OSError:
+                pass
+            return {"capped": True, "until": state["until"],
+                    "reset_text": hit["reset_text"], "source": "banner"}
+        # No fresh banner: honor a persisted, unexpired hold for THIS account.
+        if state_path.exists():
+            try:
+                state = json.loads(state_path.read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                return {"capped": False}
+            until = _iso_to_utc(state.get("until") or "")
+            if state.get("account") == account_tag and until and now_utc < until:
+                return {"capped": True, "until": state.get("until"),
+                        "reset_text": state.get("reset_text", ""), "source": "state"}
+            if until and now_utc >= until:
+                try:
+                    state_path.unlink()
+                except OSError:
+                    pass
+        return {"capped": False}
+    except Exception:
+        return {"capped": False}
+
+
 def evaluate(root: Path, *, max_workers: int, work_kind: str, lane: str | None,
              live: bool, refresh: bool = True, cooldown_min: int = 120,
              backend: str = "claude",
@@ -257,10 +417,32 @@ def evaluate(root: Path, *, max_workers: int, work_kind: str, lane: str | None,
                                    product=product)
     pre_ok = pre.get("verdict") == "SPAWN_OK"
     acct = pre.get("account") or {}
+    runs_dir = root / RUNS_DIRNAME
+
+    # Weekly-cap gate — BEFORE the lane router's gh work. A logged-in account can
+    # still be quota-exhausted; the preflight returns SPAWN_OK regardless. Without
+    # this, every tick spawns a worker that instantly dies on the limit banner,
+    # ships nothing, and floods the logs for the whole reset window. Read that
+    # banner back from recent worker logs and HOLD until the stated reset instead.
+    # Fail-open (check_weekly_cap can only return capped on positive evidence).
+    cap = (check_weekly_cap(runs_dir, product=product, account_tag=acct.get("tag"))
+           if pre_ok else {"capped": False})
+    if pre_ok and cap.get("capped"):
+        return {
+            "schema": SCHEMA, "workspace": str(root), "live": live, "backend": backend,
+            "max_workers": max_workers, "registry_refresh": reg,
+            "preflight": {"verdict": pre.get("verdict"), "reason": pre.get("reason"),
+                          "cap": pre.get("cap"), "live": pre.get("live")},
+            "account": {k: acct.get(k) for k in ("tag", "tier", "model", "dir")},
+            "weekly_cap": cap, "ok": False, "action": "weekly_capped",
+            "verdict": "WEEKLY_CAPPED",
+            "reason": (f"account '{acct.get('tag')}' is weekly-capped (resets "
+                       f"{cap.get('reset_text') or '?'}); holding spawn until "
+                       f"{cap.get('until')} — re-arm is automatic at the reset"),
+        }
 
     pick = lane_issue_numbers(root, lane, exclude=exclude_lanes)
     chosen_lane = pick.get("lane")
-    runs_dir = root / RUNS_DIRNAME
     live_issues = live_resolution_issues(runs_dir)
     cooled = recently_attempted_issues(runs_dir, cooldown_min=cooldown_min)
     # Skip both a live worker's issue AND a recently-attempted one (anti-churn), so

@@ -76,6 +76,7 @@ class EvaluateTest(unittest.TestCase):
         mod.recently_attempted_issues = lambda runs_dir, *, cooldown_min, **k: set(cooled or [])
         mod.issue_worker_prompt.build = lambda n, lane, *, workspace: {
             "prompt": f"resolve #{n}", "prompt_chars": prompt_chars, "title": f"title {n}"}
+        mod.check_weekly_cap = lambda runs_dir, **k: {"capped": False}  # hermetic: not capped
 
         def boom(*a, **k):
             raise AssertionError("dry-run must never spawn")
@@ -196,6 +197,7 @@ class BackendRoutingTest(unittest.TestCase):
         mod.recently_attempted_issues = lambda runs_dir, *, cooldown_min, **k: set()
         mod.issue_worker_prompt.build = lambda n, lane, *, workspace: {
             "prompt": f"resolve #{n}", "prompt_chars": 100, "title": f"t{n}"}
+        mod.check_weekly_cap = lambda runs_dir, **k: {"capped": False}
         mod.spawn_issue_worker = lambda *a, **k: (_ for _ in ()).throw(
             AssertionError("dry-run must not spawn"))
 
@@ -246,6 +248,123 @@ class OpencodeConfigHomeTest(unittest.TestCase):
             acct.mkdir()
             home = mod._opencode_config_home(str(acct), Path(d) / "runs")
             self.assertEqual(Path(home), Path(d))   # parent is the XDG config home
+
+
+class WeeklyCapGateTest(unittest.TestCase):
+    """The weekly-cap gate: detect the limit banner from recent worker logs, parse
+    the reset, persist a hold, and make evaluate() refuse with WEEKLY_CAPPED."""
+    BANNER = "You've hit your weekly limit · resets Jun 25, 1pm (America/Los_Angeles)"
+
+    def _write_worker(self, runs: Path, name: str, body: str, *, mtime: float,
+                      backend: str = "claude") -> None:
+        import os
+        log = runs / name
+        log.write_text(body, encoding="utf-8")
+        log.with_suffix(".backend").write_text(backend, encoding="utf-8")
+        os.utime(log, (mtime, mtime))
+
+    def test_scan_detects_recent_tiny_banner_only(self) -> None:
+        import tempfile
+        mod = load()
+        now = 1_000_000.0
+        with tempfile.TemporaryDirectory() as d:
+            runs = Path(d)
+            self._write_worker(runs, "resolve-517-a.log", self.BANNER, mtime=now - 60)      # fresh banner
+            self._write_worker(runs, "resolve-410-b.log", self.BANNER, mtime=now - 99999)   # stale (outside lookback)
+            self._write_worker(runs, "resolve-411-c.log",                                    # big prose mentioning "limit"
+                               "I fixed the rate limit handler; resets the cache.\n" * 50, mtime=now - 30)
+            hit = mod._scan_recent_cap_banner(runs, product="claude", lookback_min=45, now_ts=now)
+        self.assertIsNotNone(hit)
+        self.assertEqual(hit["reset_text"], "Jun 25, 1pm")
+        self.assertEqual(hit["evidence_log"], "resolve-517-a.log")
+
+    def test_scan_scoped_to_backend(self) -> None:
+        import tempfile
+        mod = load()
+        now = 1_000_000.0
+        with tempfile.TemporaryDirectory() as d:
+            runs = Path(d)
+            self._write_worker(runs, "resolve-1-x.log", self.BANNER, mtime=now - 60, backend="opencode")
+            # claude scan must NOT pick up an opencode worker's log
+            self.assertIsNone(mod._scan_recent_cap_banner(runs, product="claude", lookback_min=45, now_ts=now))
+            self.assertIsNotNone(mod._scan_recent_cap_banner(runs, product="opencode", lookback_min=45, now_ts=now))
+
+    def test_parse_reset_date_and_time_to_utc(self) -> None:
+        import datetime as dt
+        mod = load()
+        now = dt.datetime(2026, 6, 23, 8, 0, 0)
+        got = mod._parse_reset_to_utc("Jun 25, 1pm", now)
+        self.assertEqual(got, dt.datetime(2026, 6, 25, 20, 0, 0))   # 1pm PDT(-7) -> 20:00 UTC
+
+    def test_parse_reset_time_only_next_occurrence(self) -> None:
+        import datetime as dt
+        mod = load()
+        now = dt.datetime(2026, 6, 23, 8, 0, 0)        # 01:00 PT
+        got = mod._parse_reset_to_utc("4am", now)       # next 04:00 PT == 11:00 UTC same day
+        self.assertEqual(got, dt.datetime(2026, 6, 23, 11, 0, 0))
+
+    def test_parse_reset_unparseable_is_none(self) -> None:
+        import datetime as dt
+        mod = load()
+        self.assertIsNone(mod._parse_reset_to_utc("soon", dt.datetime(2026, 6, 23, 8, 0)))
+
+    def test_check_writes_and_then_honors_persisted_hold(self) -> None:
+        import tempfile
+        mod = load()
+        now = 1_000_000.0
+        with tempfile.TemporaryDirectory() as d:
+            runs = Path(d)
+            self._write_worker(runs, "resolve-517-a.log", self.BANNER, mtime=now - 60)
+            first = mod.check_weekly_cap(runs, product="claude", account_tag="smith", now_ts=now)
+            self.assertTrue(first["capped"])
+            self.assertEqual(first["source"], "banner")
+            self.assertTrue((runs / "account-cap-claude.json").exists())
+            # Later tick, banner now stale (no fresh evidence) but hold persists:
+            later = mod.check_weekly_cap(runs, product="claude", account_tag="smith",
+                                         now_ts=now + 3 * 3600)
+            self.assertTrue(later["capped"])
+            self.assertEqual(later["source"], "state")
+
+    def test_check_clears_expired_hold(self) -> None:
+        import tempfile
+        mod = load()
+        now = 1_000_000.0
+        with tempfile.TemporaryDirectory() as d:
+            runs = Path(d)
+            self._write_worker(runs, "resolve-517-a.log", self.BANNER, mtime=now - 60)
+            mod.check_weekly_cap(runs, product="claude", account_tag="smith", now_ts=now)
+            # Far past the Jun-25 reset -> hold expires, state cleared, spawning resumes.
+            future = 1_000_000.0 + 30 * 86400
+            out = mod.check_weekly_cap(runs, product="claude", account_tag="smith", now_ts=future)
+            self.assertFalse(out["capped"])
+            self.assertFalse((runs / "account-cap-claude.json").exists())
+
+    def test_check_failopen_on_missing_dir(self) -> None:
+        mod = load()
+        out = mod.check_weekly_cap(Path("/no/such/dir/xyz"), product="claude",
+                                   account_tag="smith", now_ts=1_000_000.0)
+        self.assertFalse(out["capped"])
+
+    def test_evaluate_refuses_when_capped(self) -> None:
+        mod = load()
+        pre = {"verdict": "SPAWN_OK", "reason": "ok", "cap": 2, "live": 0,
+               "account": {"tag": "smith-netra", "tier": 1, "model": "opus", "dir": "/a"}}
+        mod.issue_dispatch.refresh_registry = lambda root: {"ok": True}
+        mod.issue_dispatch.preflight = lambda root, **kw: pre
+        mod.check_weekly_cap = lambda runs_dir, **k: {
+            "capped": True, "until": "2026-06-25T20:00:00Z", "reset_text": "Jun 25, 1pm",
+            "source": "banner"}
+        # if the gate works, the lane router / spawn must never be reached:
+        mod.lane_issue_numbers = lambda *a, **k: (_ for _ in ()).throw(
+            AssertionError("capped tick must short-circuit before the lane router"))
+        mod.spawn_issue_worker = lambda *a, **k: (_ for _ in ()).throw(
+            AssertionError("capped tick must never spawn"))
+        p = mod.evaluate(ROOT, max_workers=2, work_kind="engineering", lane=None, live=True)
+        self.assertFalse(p["ok"])
+        self.assertEqual(p["verdict"], "WEEKLY_CAPPED")
+        self.assertEqual(p["action"], "weekly_capped")
+        self.assertIn("Jun 25, 1pm", p["reason"])
+        self.assertEqual(p["weekly_cap"]["until"], "2026-06-25T20:00:00Z")
 
 
 if __name__ == "__main__":

@@ -171,6 +171,35 @@ def _int(v: Any, d: int | None = None) -> int | None:
         return d
 
 
+def read_active_weekly_cap(runs_dir: Path, account_tag: str | None,
+                           now_ts: float | None = None) -> dict[str, Any] | None:
+    """The active weekly-cap hold for ``account_tag`` (if any), read from the
+    dispatcher's persisted state (``account-cap-*.json``, written by the
+    issue_resolve_dispatch weekly-cap gate). None when no unexpired hold matches.
+    Read-only / best-effort, so the card can show WHY a logged-in account is held."""
+    import datetime as _dt
+    import time as _time
+    try:
+        now_ts = _time.time() if now_ts is None else now_ts
+        now = _dt.datetime(1970, 1, 1) + _dt.timedelta(seconds=now_ts)
+    except Exception:
+        return None
+    if not runs_dir.is_dir():
+        return None
+    best: tuple[dict[str, Any], _dt.datetime] | None = None
+    for path in runs_dir.glob("account-cap-*.json"):
+        try:
+            st = json.loads(path.read_text(encoding="utf-8"))
+            until = _dt.datetime.fromisoformat((st.get("until") or "").replace("Z", ""))
+        except (OSError, ValueError):
+            continue
+        if now >= until or (account_tag and st.get("account") not in (None, account_tag)):
+            continue
+        if best is None or until < best[1]:
+            best = (st, until)
+    return best[0] if best else None
+
+
 def collect(root: Path, *, max_workers: int, fast: bool,
             closure_commits: int) -> dict[str, Any]:
     pre = run_json([_py(), str(root / "tools" / "dispatch_preflight.py"),
@@ -189,15 +218,18 @@ def collect(root: Path, *, max_workers: int, fast: bool,
     # Pure-local, always run (no gh/dos): which spawned workers exited producing
     # nothing. Cheap enough that --fast keeps it.
     silent = silent_workers(root / RUNS_DIRNAME)
+    weekly_cap = read_active_weekly_cap(root / RUNS_DIRNAME,
+                                        (pre.get("account") or {}).get("tag"))
 
     return build_payload(root=root, pre=pre, sup=sup, wd=wd, backlog=backlog,
                          closure=closure, max_workers=max_workers, fast=fast,
-                         silent=silent)
+                         silent=silent, weekly_cap=weekly_cap)
 
 
 def build_payload(*, root: Path, pre: dict, sup: dict, wd: dict, backlog: dict,
                   closure: dict, max_workers: int, fast: bool,
-                  silent: list[dict[str, Any]] | None = None) -> dict[str, Any]:
+                  silent: list[dict[str, Any]] | None = None,
+                  weekly_cap: dict[str, Any] | None = None) -> dict[str, Any]:
     # --- dispatcher liveness / capacity ---
     cap = _int(pre.get("cap"))
     live = _int(pre.get("live"))
@@ -249,6 +281,16 @@ def build_payload(*, root: Path, pre: dict, sup: dict, wd: dict, backlog: dict,
         verdict = "READY_TO_GROW"
         reasons.append(f"safe to spawn: {live}/{cap} live, account '{acct.get('tag')}' free")
 
+    # A logged-in-but-quota-capped account makes the preflight read SPAWN_OK while
+    # the dispatcher's weekly-cap gate is actually HOLDING. Surface that so the card
+    # says WEEKLY_CAPPED, not the misleading READY_TO_GROW. Holding is a healthy
+    # steady state (the t2 glm pool is unaffected), so ok stays True.
+    if weekly_cap and verdict == "READY_TO_GROW":
+        verdict = "WEEKLY_CAPPED"
+        reasons = [f"account '{acct.get('tag')}' weekly-capped — resets "
+                   f"{weekly_cap.get('reset_text') or '?'} (holding spawn until "
+                   f"{weekly_cap.get('until')}); the t2 glm/docs pool is unaffected"]
+
     if wd.get("installed") is False:
         reasons.append("always-on watchdog NOT installed (register_dos_dispatch_watchdog.ps1)")
     elif wd.get("installed"):
@@ -265,6 +307,7 @@ def build_payload(*, root: Path, pre: dict, sup: dict, wd: dict, backlog: dict,
         "verdict": verdict,
         "reasons": reasons,
         "workspace": str(root),
+        "weekly_cap": weekly_cap,
         "dispatcher": {
             "cap": cap,
             "live": live,
