@@ -26,8 +26,11 @@ description: "Explains fak's write-time content-addressed gate as both injection
   question **demand-pages only the working set it touches** (rung-0 re-output at *zero*
   model tokens) instead of `execv`-ing the whole history back into the context window.
 
-Same code. One reader calls it *injection containment*; the other calls it *working-set
-paging*. They are the same write-time content-addressed gate.
+Same code — one `ctxmmu.Admit` function (`internal/ctxmmu/mmu.go:134`). But the two
+lenses attach to *different sub-decisions* of that one gate, over *disjoint* page
+populations, so they never describe the same bytes: not one mechanism seen two ways, but
+two mechanisms that share a code path and a content-addressed store. The reconciliation
+below maps each lens to its sub-decision and resolves the overloaded word *durable*.
 
 ## The Rosetta table (one row, two vocabularies)
 
@@ -41,6 +44,47 @@ paging*. They are the same write-time content-addressed gate.
 | `recall` persist → reload, re-screen on `Resolve` | **durable taint** + **TOCTOU-closing re-check** on re-admit | **demand paging** from a frozen **core dump** (CRIU/`gdb`-attach analogy) |
 | CAS digest integrity check at `Load` | **tamper-evidence** (content addressing = a Merkle check) | a **checksum on the swap device**, fail-closed |
 | `vdso` tier-1/2 local serve | n/a (a perf path) | a **vDSO**: answer a read-only call locally, no engine round-trip |
+
+---
+
+## Reconciliation: one gate, two sub-decisions, two page populations
+
+The Rosetta table reads as if each row is *one thing seen two ways*. The code says
+something more precise: the write-time gate (`ctxmmu.Admit`, `internal/ctxmmu/mmu.go:134`)
+makes **three independent decisions**, and the two lenses attach to *different* ones over
+*disjoint* page classes:
+
+1. **Screen — Lens A's decision.** `ScreenBytes` + `canon.Scan` decide *quarantine vs.
+   allow*. A page that screens hot is **sealed**: bytes paged out, held behind a witness
+   `Clear()`, and — on recall reload — re-screened before any page-in. Lens A lives here
+   and only here.
+2. **Page-out-to-pointer — shared.** An oversize *benign* result is replaced in-place
+   with a `<2KB` pointer. Both lenses lean on it; it is not the crux.
+3. **Durability classification — Lens B's decision.** A *benign* result is stamped
+   `turn | session | durable`, and recall's promotion gate **expires it by default**,
+   promoting only a `durable` fact into the persisted core image. Lens B's rungs 0–2
+   live here.
+
+Two facts keep the lenses from colliding — stated here so the Rosetta table stops reading
+as a 1:1 synonym map:
+
+- **The page populations are disjoint.** A sealed page is never a demand-paging candidate:
+  recall's working-set query skips every quarantined page (`internal/recall/recall.go:467`,
+  `if p.Quarantined || …` → `continue`). So Lens A's sealed bytes and Lens B's demand-paged
+  bytes are *different bytes* — no page is ever both.
+- **The durability gate does not govern sealed bytes.** A quarantined page is *always*
+  recorded (`internal/recall/recall.go:226-228`: "sealed bytes never promote"); the
+  `turn|session|durable` class only ever governs *benign* promotion. So Lens A's "persists
+  across the session boundary" (the seal survives) and Lens B's "promoted into the
+  persisted core image" (a `durable` class) are two different persistence rules for two
+  different page classes.
+
+**Resolve the overloaded word *durable* before you cite either lens.** In Lens A,
+*durable* means the **quarantine seal survives the session boundary** — a security
+property of poisoned bytes. In Lens B rung 1, *durable* is a **promotion class**
+(`durable` vs `turn`/`session`) that earns a *benign* fact a place in the core image — a
+storage property. Same word, different decision, different page class: a coincidence of
+vocabulary, not a shared mechanism.
 
 ---
 
