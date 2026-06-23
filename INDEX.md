@@ -102,6 +102,7 @@ front page.
 - [A local model on the wire: first use case + when-it-makes-sense (2026-06-23)](docs/notes/RESEARCH-local-model-on-the-wire-2026-06-23.md) — small local model as a witnessed lossy proposer; first rung is a semantic poison screen behind ctxmmu's regex floor; outbound compression is blocked on the req.Raw passthrough.
 - [idea-scout triage: MCPPrivacyDetector — protocol-induced MCP-server leakage; prior art + a threat fak already gates at runtime (result-admit), static analyzer not adopted (2026-06-23)](docs/notes/RESEARCH-mcp-privacy-leakage-triage-2026-06-23.md)
 - [idea-scout triage: Tool-Guard / isolated planning — a threat axis fak does not yet gate (2026-06-23)](docs/notes/RESEARCH-tool-guard-isolated-planning-triage-2026-06-23.md)
+- [idea-scout triage: relinking at the compression boundary — fak immune (extractive compression + call-not-prompt floor); prior art + a guarded invariant for future generative summarizers (2026-06-23)](docs/notes/RESEARCH-relinking-compression-boundary-triage-2026-06-23.md)
 - [Ultra-long-context: levels, levers, naming (2026-06-22)](docs/notes/RESEARCH-ultra-long-context-levels-and-naming-2026-06-22.md)
 - [Scaling laws of agents (2026-06-19)](docs/notes/SCALING-LAWS-OF-AGENTS-2026-06-19.md)
 - [Capability floor, a security note (2026-06-18)](docs/notes/SECURITY-capability-floor-2026-06-18.md)
