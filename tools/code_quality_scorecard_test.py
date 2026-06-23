@@ -274,7 +274,23 @@ def test_testfunc_regex_distinguishes_real_from_empty():
     assert cq._TESTFUNC_RE.search("package foo\nfunc FuzzZ(f *testing.F){}\n")
 
 
+def main() -> int:
+    """Pure-stdlib runner: collects and runs every module-level test_* function so the
+    suite runs in the pytest-free CI exactly like its scorecard-family siblings
+    (observability/doc_appeal/...). `python -m pytest <file>` still discovers the same
+    tests; this only changes what a direct `python <file>` invocation does."""
+    tests = sorted((n, f) for n, f in globals().items()
+                   if n.startswith("test_") and callable(f))
+    failures = 0
+    for name, fn in tests:
+        try:
+            fn()
+        except Exception as exc:  # noqa: BLE001
+            failures += 1
+            print(f"  FAIL {name}: {exc}")
+    print(f"{len(tests) - failures}/{len(tests)} passed")
+    return 1 if failures else 0
+
+
 if __name__ == "__main__":
-    import subprocess
-    import sys
-    raise SystemExit(subprocess.call([sys.executable, "-m", "pytest", __file__, "-q"]))
+    raise SystemExit(main())

@@ -82,6 +82,19 @@ jobs:
           python tools/check_secret_shapes.py --audit-tree
           python tools/scrub_hardware_names.py --check
 
+      # Skill-frontmatter lint: the load-bearing Claude-only SKILL.md frontmatter keys
+      # (allowed-tools / disable-model-invocation / user-invocable) that opencode silently
+      # drops when a skill is cross-loaded into a mixed Claude+opencode fleet — so a
+      # read-only or operator-only skill can lose its capability boundary. The linter
+      # asserts every such load-bearing key is acknowledged. Its own unit tests run first
+      # (HARD), then --check over the skill tree. Pure-stdlib, green today, repo root like
+      # the other honesty gates — it ran in NO always-on gate at all before this.
+      - name: skill-frontmatter lint (load-bearing Claude-only SKILL.md keys acknowledged)
+        working-directory: ${{ github.workspace }}
+        run: |
+          python tools/skill_frontmatter_lint_test.py
+          python tools/skill_frontmatter_lint.py --check
+
       - name: release-substrate tests
         working-directory: ${{ github.workspace }}
         run: |
@@ -276,6 +289,24 @@ jobs:
           python tools/scorecard_control_pane.py \
             || echo "::warning title=scorecard-debt::portfolio scorecard-debt present (advisory) — python tools/scorecard_control_pane.py; retire worst-first with the owning scorecard's skill, then re-pin the baseline (--pin)"
           echo "::endgroup::"
+
+      # Scorecard regression suites (the six that ran in NO gate): the docs / demo-quality
+      # / demo-robustness / seo-aeo / repo-hygiene scorecards each run their own *_test.py
+      # HARD above, but six members of the same family — code-quality, doc-appeal, industry,
+      # agent-readiness, tooling-quality, observability — had no test step anywhere, so a
+      # regression in any of those tools (whose debt the control pane folds) failed nothing.
+      # Their suites are deterministic, pure-stdlib (the code-quality + tooling-quality
+      # runners were converted off the pytest subprocess to match their siblings), and green
+      # today; wired HARD here so the whole family is gated symmetrically.
+      - name: scorecard regression suites (code-quality · doc-appeal · industry · agent-readiness · tooling-quality · observability)
+        working-directory: ${{ github.workspace }}
+        run: |
+          python tools/code_quality_scorecard_test.py
+          python tools/doc_appeal_scorecard_test.py
+          python tools/industry_scorecard_test.py
+          python tools/agent_readiness_scorecard_test.py
+          python tools/tooling_quality_scorecard_test.py
+          python tools/observability_scorecard_test.py
 
       # Public-copy leak gate: the machine backstop for the redact-needle floor.
       # The local pre-commit hook (tools/githooks/pre-commit) only fires on a clone
