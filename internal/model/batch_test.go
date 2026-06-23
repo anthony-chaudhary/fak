@@ -584,3 +584,189 @@ func TestGenerateBatchMatchesSerial(t *testing.T) {
 		}
 	}
 }
+
+// TestRaggedBatchIdleLaneSkip is the load-bearing witness for the ragged-batch / idle-lane-skip
+// lever (#520): StepBatchActive compacts the batch dimension to the active lanes so a fleet
+// with K idle lanes does (C−K)/C of the full decode work, while staying bit-exact. It pins four
+// properties, each of which a naive "decode all lanes and discard the idle outputs" stub would
+// FAIL:
+//
+//  1. WORK — the projection MAC count of a ragged step is EXACTLY (C−K)/C of the full batch
+//     (an exact integer ratio; the compaction truly skipped the idle lanes' weight work).
+//  2. ALL-ACTIVE — StepBatchActive with every lane active is byte-identical to StepBatch (the
+//     existing TestBatchedDecodeMatchesSerial invariant, now via the ragged entry point).
+//  3. ACTIVE BIT-EXACT — every active lane's logits + KV cache are bit-for-bit identical to a
+//     full StepBatch reference, over multiple steps (no cross-lane contamination, compaction
+//     changed only which rows shared the weight stream).
+//  4. IDLE UNTOUCHED — idle lanes get nil logits and their KV cache is byte-identical to its
+//     pre-step state (no append, no position advance) so they re-activate cleanly later, and
+//     per-agent KV ownership (Evict/Clone) is preserved.
+//
+// Synthetic weights suffice: the properties are structural (matMulBatch row b == serial for
+// user b; lanes are independent), the same argument TestBatchedDecodeMatchesSerial relies on.
+func TestRaggedBatchIdleLaneSkip(t *testing.T) {
+	cfg := Config{
+		HiddenSize: 64, NumLayers: 3, NumHeads: 4, NumKVHeads: 2, HeadDim: 16,
+		IntermediateSize: 128, VocabSize: 200, RMSNormEps: 1e-5, RopeTheta: 10000,
+		TieWordEmbeddings: true, EOSTokenID: -1,
+	}
+	m := NewSynthetic(cfg)
+	V := cfg.VocabSize
+	const C = 6            // fleet size
+	const K = 2            // lanes idle every step
+	active := make([]bool, C)
+	idle := make([]int, 0, K)
+	for b := 0; b < C; b++ {
+		if b == 1 || b == 4 { // two idle lanes
+			active[b] = false
+			idle = append(idle, b)
+		} else {
+			active[b] = true
+		}
+	}
+	// Distinct prompts of distinct lengths => users sit at distinct absolute positions, so the
+	// per-user RoPE / per-user cache-length attention paths are all exercised at once.
+	prompts := make([][]int, C)
+	for b := 0; b < C; b++ {
+		n := 3 + b*2
+		p := make([]int, n)
+		for i := range p {
+			p[i] = (b*97 + i*31 + 5) % V
+		}
+		prompts[b] = p
+	}
+
+	// --- (1) WORK: K idle lanes do exactly (C−K)/C of the full-batch projection work. ---
+	fullBs := m.NewBatchSession(C)
+	fullBs.PrefillEach(prompts)
+	ragBs := m.NewBatchSession(C)
+	ragBs.PrefillEach(prompts)
+	ids := make([]int, C)
+	for b := 0; b < C; b++ {
+		ids[b] = (b*13 + 3) % V
+	}
+	fullBs.StepBatch(ids)
+	fullMACs := fullBs.LastStepMACs()
+	if fullMACs <= 0 {
+		t.Fatalf("full-batch LastStepMACs = %d, want > 0 (fast path must record)", fullMACs)
+	}
+	ragBs.StepBatchActive(ids, active)
+	raggedMACs := ragBs.LastStepMACs()
+	// Exact integer ratio: raggedMACs / fullMACs == (C-K) / C.
+	if raggedMACs*int64(C) != fullMACs*int64(C-K) {
+		t.Fatalf("work ratio broken: ragged=%d full=%d, want exactly %d/%d of full (got %.4f)",
+			raggedMACs, fullMACs, C-K, C, float64(raggedMACs)/float64(fullMACs))
+	}
+
+	// --- (2) ALL-ACTIVE: StepBatchActive(all true) is byte-identical to StepBatch. ---
+	aBs := m.NewBatchSession(C)
+	aBs.PrefillEach(prompts)
+	bBs := m.NewBatchSession(C)
+	bBs.PrefillEach(prompts)
+	allTrue := make([]bool, C)
+	for b := range allTrue {
+		allTrue[b] = true
+	}
+	la := aBs.StepBatch(ids)
+	lb := bBs.StepBatchActive(ids, allTrue)
+	for b := 0; b < C; b++ {
+		assertFloat32BitsEqual(t, "all-active lane "+itoa(b)+" logits", la[b], lb[b])
+	}
+	if aBs.LastStepMACs() != bBs.LastStepMACs() {
+		t.Fatalf("all-active MACs %d != StepBatch MACs %d", bBs.LastStepMACs(), aBs.LastStepMACs())
+	}
+
+	// --- (3)+(4) ACTIVE BIT-EXACT over many steps, IDLE lanes untouched. ---
+	// Reference: a full StepBatch every step (advances ALL lanes). Ragged: StepBatchActive
+	// (advances only the active lanes). Active lanes are INDEPENDENT of the idle ones (own
+	// cache, own attention), so they stay bit-identical to the reference even though the idle
+	// lanes diverge (reference advances them, ragged leaves them frozen).
+	refBs := m.NewBatchSession(C)
+	refBs.PrefillEach(prompts)
+	stepBs := m.NewBatchSession(C)
+	stepBs.PrefillEach(prompts)
+	// Snapshot the idle lanes' caches BEFORE the loop; they must never change under the ragged path.
+	idleSnap := make(map[int]*KVCache)
+	for _, b := range idle {
+		idleSnap[b] = stepBs.Seqs[b].Cache.Clone()
+	}
+	const steps = 5
+	for s := 0; s < steps; s++ {
+		next := make([]int, C)
+		for b := 0; b < C; b++ {
+			next[b] = (s*53 + b*17 + 1) % V
+		}
+		refLogits := refBs.StepBatch(next)
+		ragLogits := stepBs.StepBatchActive(next, active)
+		// active lanes: bit-identical logits + cache to the full-batch reference
+		for b := 0; b < C; b++ {
+			if !active[b] {
+				continue
+			}
+			assertFloat32BitsEqual(t, "step "+itoa(s)+" active lane "+itoa(b)+" logits", refLogits[b], ragLogits[b])
+			assertKVCacheBitsEqual(t, "step "+itoa(s)+" active lane "+itoa(b)+" cache", refBs.Seqs[b].Cache, stepBs.Seqs[b].Cache)
+		}
+		// idle lanes: nil logits, cache frozen byte-for-byte to the pre-loop snapshot
+		for _, b := range idle {
+			if ragLogits[b] != nil {
+				t.Fatalf("step %d idle lane %d got logits (len %d), want nil", s, b, len(ragLogits[b]))
+			}
+			assertKVCacheBitsEqual(t, "step "+itoa(s)+" idle lane "+itoa(b)+" cache (must be untouched)", idleSnap[b], stepBs.Seqs[b].Cache)
+		}
+	}
+	// After the loop the active lanes advanced `steps` tokens; the idle lanes did not advance at all.
+	for b := 0; b < C; b++ {
+		got := stepBs.Seqs[b].Cache.Len()
+		want := len(prompts[b])
+		if active[b] {
+			want += steps
+		}
+		if got != want {
+			t.Fatalf("lane %d (active=%v) cache len %d, want %d", b, active[b], got, want)
+		}
+	}
+}
+
+// TestRaggedBatchIdleLaneSkipQ8 confirms the compaction applies to the Q8_0 decode lane too:
+// the projection MAC ratio is still exactly (C−K)/C. (The Q8 path is not bit-identical to
+// serial by design — see TestBatchedDecodeQMatchesF32 — so this witness is the work ratio
+// alone, not a bit-equality gate.)
+func TestRaggedBatchIdleLaneSkipQ8(t *testing.T) {
+	cfg := Config{
+		HiddenSize: 64, NumLayers: 2, NumHeads: 4, NumKVHeads: 2, HeadDim: 16,
+		IntermediateSize: 128, VocabSize: 257, RMSNormEps: 1e-5, RopeTheta: 10000,
+		TieWordEmbeddings: true, EOSTokenID: -1,
+	}
+	m := NewSynthetic(cfg)
+	m.Quantize()
+	const C, K = 5, 2
+	active := []bool{true, false, true, true, false}
+	prompts := make([][]int, C)
+	for b := 0; b < C; b++ {
+		prompts[b] = make([]int, 4+b)
+		for i := range prompts[b] {
+			prompts[b][i] = (b*41 + i*17 + 5) % cfg.VocabSize
+		}
+	}
+	ids := make([]int, C)
+	for b := range ids {
+		ids[b] = (b*7 + 3) % cfg.VocabSize
+	}
+	fullBs := m.NewBatchSession(C)
+	fullBs.SetQuant(true)
+	fullBs.PrefillEach(prompts)
+	fullBs.StepBatch(ids)
+	fullMACs := fullBs.LastStepMACs()
+	if fullMACs <= 0 {
+		t.Fatalf("Q8 full-batch LastStepMACs = %d, want > 0", fullMACs)
+	}
+	ragBs := m.NewBatchSession(C)
+	ragBs.SetQuant(true)
+	ragBs.PrefillEach(prompts)
+	ragBs.StepBatchActive(ids, active)
+	raggedMACs := ragBs.LastStepMACs()
+	if raggedMACs*int64(C) != fullMACs*int64(C-K) {
+		t.Fatalf("Q8 work ratio broken: ragged=%d full=%d, want exactly %d/%d of full",
+			raggedMACs, fullMACs, C-K, C)
+	}
+}

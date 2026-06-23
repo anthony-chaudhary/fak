@@ -577,6 +577,15 @@ type BatchSession struct {
 	// ingestion phase in fleetserve). PrefillEach still returns fresh final logits; these
 	// buffers only replace per-layer temporaries that are fully consumed before return.
 	pbuf *batchRectPrefillBuf
+
+	// lastStepMACs is the exact MAC count of the B-proportional projection GEMMs (QKV +
+	// attention-output + SwiGLU gate/up/down + the LM head) of the most recent StepBatch /
+	// StepBatchActive — the weight-streaming decode work the batch dimension amortises and the
+	// ragged (active-lane-masked) path compacts. It scales EXACTLY with the active batch size,
+	// so a fleet with K of C lanes idle reports (C−K)/C of the full-batch count (#520). Closed
+	// form from the model shape, set once per step; does NOT include attention (per-user,
+	// cache-length-dependent). See LastStepMACs / recordStepMACs.
+	lastStepMACs int64
 }
 
 // batchDecodeBuf is the per-BatchSession reused-buffer set for batched decode. All fields
@@ -1123,6 +1132,10 @@ func (bs *BatchSession) StepBatch(ids []int) [][]float32 {
 	if len(ids) != len(bs.Seqs) {
 		panic("model: StepBatch id count != batch size")
 	}
+	// Reset the per-step MAC count: a serial-fallback step (a single lane, or a config the
+	// batched fast path does not cover) does no shared-weight batched projection work, so it
+	// honestly reports 0 rather than the previous call's stale count. stepBatchF32/Q set it.
+	bs.lastStepMACs = 0
 	if len(ids) == 1 || !batchDecodeFastPathOK(bs.M.Cfg, bs.Quant) {
 		if len(ids) == 1 {
 			return [][]float32{bs.Seqs[0].Step(ids[0])}
@@ -1137,6 +1150,104 @@ func (bs *BatchSession) StepBatch(ids []int) [][]float32 {
 		return bs.stepBatchQ(ids)
 	}
 	return bs.stepBatchF32(ids)
+}
+
+// LastStepMACs returns the exact multiply-accumulate count of the B-proportional projection
+// GEMMs (QKV + attention-output + SwiGLU gate/up/down + the LM head) performed by the most
+// recent StepBatch / StepBatchActive. This is the weight-streaming decode work the batch
+// dimension amortises and the ragged (active-lane-masked) path compacts: it scales EXACTLY
+// with the active batch size, so a fleet with K of C lanes idle reports (C−K)/C of the
+// full-batch count — the work-elimination the ragged path buys, witnessed as an exact integer
+// ratio (TestRaggedBatchIdleLaneSkip). Closed form from the model shape and the active B,
+// computed once per step; it does NOT include attention (per-user, cache-length-dependent),
+// so the projection count is the precise lever domain and yields the exact ratio #520 names.
+func (bs *BatchSession) LastStepMACs() int64 { return bs.lastStepMACs }
+
+// recordStepMACs stamps the B-proportional projection MAC count for a step of B active lanes.
+// Per layer the seven projections (q/k/v/o + gate/up/down) cost H·(2·nH·hd + 2·nKV·hd + 3·I)
+// MACs, the head costs H·VocabSize, and the panel multiplies both by B.
+func (bs *BatchSession) recordStepMACs(B int) {
+	cfg := bs.M.Cfg
+	H := int64(cfg.HiddenSize)
+	perLayer := H * (2*int64(cfg.NumHeads)*int64(cfg.HeadDim) +
+		2*int64(cfg.NumKVHeads)*int64(cfg.HeadDim) +
+		3*int64(cfg.IntermediateSize))
+	head := H * int64(cfg.VocabSize)
+	bs.lastStepMACs = int64(B) * (int64(cfg.NumLayers)*perLayer + head)
+}
+
+// StepBatchActive is the ragged-batch decode step (#520): it decodes ONLY the lanes whose
+// active[b] is true, compacting the batch dimension to the active count so a fleet with K of
+// C lanes idle this turn does (C−K)/C of the full batch's decode work. Idle lanes are left
+// untouched — no KV append, no position advance, no logits — so a lane blocked on a tool,
+// finished (EOS), or simply idle this turn can be reactivated on a later step without paying
+// for work it did not need. out[b] is the next-token logits for an active lane b and nil for
+// an idle one; a caller consumes the active logits before the next call (same aliasing
+// discipline as StepBatch).
+//
+// Correctness is the all-active invariant lifted to a subset. The compaction gathers the
+// active lanes into a contiguous sub-panel and runs the EXACT stepBatchF32/stepBatchQ
+// machinery over it (the same weight-stream-sharing GEMMs, the same per-user attention),
+// sharing each active lane's own *Session so the KV append and position advance land in the
+// right per-lane cache. For every active lane b the returned logits and the appended K/V/pos
+// are therefore bit-for-bit identical to a full StepBatch run with all lanes active and the
+// idle lanes' results discarded — compaction changes only WHICH rows share the weight stream,
+// never a single rounding (the same property that makes StepBatch bit-identical to serial
+// Step). When every lane is active this IS StepBatch (byte-identical), which the witness pins.
+// Per-agent KV ownership is preserved by construction: each lane's cache is its own object,
+// appended only when active, so Evict/Clone behave exactly as in the serial path.
+func (bs *BatchSession) StepBatchActive(ids []int, active []bool) [][]float32 {
+	C := len(bs.Seqs)
+	if len(ids) != C {
+		panic("model: StepBatchActive id count != batch size")
+	}
+	if len(active) != C {
+		panic("model: StepBatchActive active-mask length != batch size")
+	}
+	idx := make([]int, 0, C)
+	allActive := true
+	for b, a := range active {
+		if a {
+			idx = append(idx, b)
+		} else {
+			allActive = false
+		}
+	}
+	if allActive {
+		return bs.StepBatch(ids) // byte-identical to today's full batch
+	}
+	if len(idx) == 0 {
+		bs.lastStepMACs = 0 // no active lane decoded a token this step
+		return make([][]float32, C)
+	}
+	// Compact: a transient BatchSession over ONLY the active lanes, sharing each active lane's
+	// *Session (so KV append + position advance land in the right cache) and the reused
+	// scratch/dbuf (so compaction is not a buffer-realloc regression). The idle lanes' sessions
+	// are absent from sub.Seqs, so they are neither projected over nor attended — zero work on
+	// them, which is exactly the (C−K)/C compaction LastStepMACs witnesses.
+	sub := &BatchSession{
+		M:       bs.M,
+		Seqs:    make([]*Session, len(idx)),
+		Quant:   bs.Quant,
+		scratch: bs.scratch,
+		dbuf:    bs.dbuf,
+	}
+	subIDs := make([]int, len(idx))
+	for i, b := range idx {
+		sub.Seqs[i] = bs.Seqs[b]
+		subIDs[i] = ids[b]
+	}
+	subLogits := sub.StepBatch(subIDs)
+	// Propagate any grown/shared buffers + the active-step MAC count back to the parent session
+	// so a following StepBatch / StepBatchActive reuses them and LastStepMACs reflects this step.
+	bs.scratch = sub.scratch
+	bs.dbuf = sub.dbuf
+	bs.lastStepMACs = sub.lastStepMACs
+	out := make([][]float32, C)
+	for i, b := range idx {
+		out[b] = subLogits[i]
+	}
+	return out
 }
 
 // GenerateBatch greedily decodes up to n tokens for every user in lockstep after their
@@ -1300,6 +1411,7 @@ func (bs *BatchSession) stepBatchF32(ids []int) [][]float32 {
 		out[b] = Logits[b*cfg.VocabSize : (b+1)*cfg.VocabSize]
 		logitScaleInPlace(out[b], cfg) // Cohere/Gemma2; no-op for Llama
 	}
+	bs.recordStepMACs(B) // B-proportional projection MAC count for this step (see LastStepMACs)
 	return out
 }
 
@@ -1488,5 +1600,6 @@ func (bs *BatchSession) stepBatchQ(ids []int) [][]float32 {
 		out[b] = Logits[b*cfg.VocabSize : (b+1)*cfg.VocabSize]
 		logitScaleInPlace(out[b], cfg) // Cohere/Gemma2; no-op for Llama
 	}
+	bs.recordStepMACs(B) // B-proportional projection MAC count for this step (see LastStepMACs)
 	return out
 }
