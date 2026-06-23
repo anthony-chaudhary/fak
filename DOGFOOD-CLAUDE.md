@@ -409,5 +409,17 @@ on `http://127.0.0.1:8131/v1`) through the real Claude Code CLI:
   compared against the same secret in constant time, so an authenticated
   (non-loopback) gateway serves Claude Code directly. The dogfood still runs
   loopback with no key (the default), which needs none.
-- **Not token-streaming.** SSE is synthesized from the finished, already-adjudicated
-  turn — Claude Code can't see partial tokens, only that the stream is well-formed.
+- **Token-streaming (real API) / synthesized (local model).** When fak fronts the
+  **real Anthropic API** (`--provider anthropic`, the `fak guard -- claude` default),
+  `/v1/messages` now relays a **true live token stream**: text and thinking deltas reach
+  Claude Code the instant the model emits them (first token tracks the model, not the
+  whole turn), so the prompt-cache hit's fast prefill is *felt* instead of buffered away —
+  while every `tool_use` block is still held for kernel adjudication before the client
+  sees it (denied calls dropped, repaired args rewritten, survivors renumbered
+  contiguously). Witnessed live end-to-end (`claude-haiku-4-5` through fak): a warm cache
+  read of 23,428 tokens cut time-to-first-byte 1,129 ms → 760 ms, and a longer turn's
+  first token landed 323 ms before the turn finished. When fak fronts a **local
+  OpenAI-compatible model** on this wire, the SSE is still synthesized from the finished,
+  already-adjudicated turn (that upstream's true-streaming rung is the
+  `/v1/chat/completions` proxy). Witness:
+  `TestAnthropicMessagesPassthroughStreamsLiveAndAdjudicates`.

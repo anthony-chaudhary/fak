@@ -1282,3 +1282,37 @@ func TestForceAnthropicNonStreaming(t *testing.T) {
 		}
 	})
 }
+
+// TestForceAnthropicStreaming is the mirror of TestForceAnthropicNonStreaming for the
+// live-passthrough path: a body already carrying "stream":true is returned
+// byte-identical (the common case — the cache prefix is untouched), a body without the
+// flag has it set to true (so the upstream delivers SSE), and a non-object is unchanged.
+func TestForceAnthropicStreaming(t *testing.T) {
+	t.Run("stream_true_is_byte_identical", func(t *testing.T) {
+		raw := []byte(`{"model":"claude","stream":true,"system":[{"type":"text","text":"S","cache_control":{"type":"ephemeral"}}],"messages":[{"role":"user","content":"hi"}]}`)
+		got := forceAnthropicStreaming(raw)
+		if string(got) != string(raw) {
+			t.Errorf("body already streaming must be unchanged (cache prefix):\n got %s\nwant %s", got, raw)
+		}
+	})
+	t.Run("no_stream_field_is_set_true_and_content_survives", func(t *testing.T) {
+		raw := []byte(`{"model":"claude","messages":[{"role":"user","content":"hi"}]}`)
+		got := forceAnthropicStreaming(raw)
+		var obj map[string]any
+		if err := json.Unmarshal(got, &obj); err != nil {
+			t.Fatalf("result not valid JSON: %v", err)
+		}
+		if obj["stream"] != true {
+			t.Errorf("stream = %v, want true", obj["stream"])
+		}
+		if !strings.Contains(string(got), `"content":"hi"`) {
+			t.Errorf("message content lost: %s", got)
+		}
+	})
+	t.Run("non_object_is_unchanged", func(t *testing.T) {
+		raw := []byte(`not json`)
+		if string(forceAnthropicStreaming(raw)) != "not json" {
+			t.Error("a non-JSON body must be returned unchanged")
+		}
+	})
+}

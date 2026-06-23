@@ -148,6 +148,14 @@ func (s *Server) handleAnthropicMessages(w http.ResponseWriter, r *http.Request)
 	upstreamBeta := r.Header.Get("anthropic-beta")
 
 	if req.Stream {
+		// When fronting the REAL Anthropic API, relay a TRUE live token stream so the
+		// client's first token tracks the model (and the prompt-cache hit's fast prefill
+		// is felt, not buffered away). It returns false only if the upstream stream never
+		// opened and nothing was written — then fall back to the buffered synth path,
+		// which is also the path for a local/mock upstream that cannot stream this wire.
+		if s.anthropicPassthrough() && s.streamAnthropicPassthroughLive(w, r, req, reqTrace, upstreamKey, upstreamBeta) {
+			return
+		}
 		s.streamAnthropicPending(w, r, req, reqTrace, upstreamKey, upstreamBeta)
 		return
 	}
