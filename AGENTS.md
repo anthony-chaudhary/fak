@@ -113,6 +113,14 @@ until it clears.
   (`rg --files | rg <pat>`) or anchor **and** bound: `find /c/work/fak -xdev -maxdepth 8 …`,
   `timeout`-wrapped. Backstop: `tools/runaway_process_reaper.ps1` reaps stragglers; audit
   anytime with `tools/runaway_process_scan.ps1`.
+- **Writes that resolve *outside* the repo are refused (`OUT_OF_TREE_WRITE`).** The
+  `repo-guard` PreToolUse hook (`tools/repo_guard.py`, on by default on a fleet host) denies
+  a Bash/Write/Edit op whose target escapes the workspace — a `../sibling` path, an absolute
+  `/c/.../work/other-repo`, **and even a `> /dev/null` redirect** (it resolves outside the
+  tree). `work/` holds many sibling repos, so a one-level escape lands in *another* project.
+  Write scratch to a temp dir or an in-repo path, not `..` or `/dev/null`; the deliberate
+  exception is `FAK_REPO_GUARD=warn` (advisory) or `off`. Full doc:
+  [`docs/repo-guard.md`](docs/repo-guard.md).
 
 Check your setup first: `python tools/extend_preflight.py`. Full contributor contract:
 [`CONTRIBUTING.md`](CONTRIBUTING.md).
