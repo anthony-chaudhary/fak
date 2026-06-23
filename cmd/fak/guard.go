@@ -7,6 +7,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"log"
 	"net"
 	"net/http"
 	"os"
@@ -55,6 +56,7 @@ func cmdGuard(argv []string) {
 	policyPath := fs.String("policy", "", "capability-floor manifest to enforce (default: the built-in guard floor; see --dump-policy)")
 	envName := fs.String("env", "", "env var to inject the gateway URL into the child (default: chosen by --provider)")
 	requireKeyEnv := fs.String("require-key-env", "", "require this env var's bearer token on the gateway (loopback rarely needs it)")
+	logPath := fs.String("log", "", "write the gateway's per-request + per-verdict structured logs to this file (or '-' for stderr); default off to keep the agent's terminal clean")
 	dumpPolicy := fs.Bool("dump-policy", false, "print the built-in guard capability floor (an editable manifest) and exit")
 	quiet := fs.Bool("quiet", false, "suppress the startup banner and the exit audit summary")
 	fs.Usage = func() {
@@ -75,6 +77,16 @@ func cmdGuard(argv []string) {
 	if len(command) == 0 {
 		fs.Usage()
 		os.Exit(2)
+	}
+
+	// Observability sink for the gateway's structured per-request + per-verdict logs
+	// (event=gateway_http_request / event=gateway_operation, each carrying the trace_id).
+	// Default OFF (a no-op) so the wrapped agent's terminal stays clean; --log FILE (or
+	// '-' for stderr) turns the full stream back on. /metrics, /debug/vars, and the
+	// FAK_AUDIT_JOURNAL durable audit trail are independent of this — see the banner.
+	gwLogf, logCloser, logLabel := guardLogSink(*logPath, os.Stderr)
+	if logCloser != nil {
+		defer func() { _ = logCloser.Close() }()
 	}
 
 	// 1. Install the capability floor. An explicit --policy file wins; otherwise the
@@ -149,9 +161,9 @@ func cmdGuard(argv []string) {
 		ResetTrace:   resetTrace,
 		ObserveTrace: observeTrace,
 		StartTime:    t0,
-		// Keep the child's terminal clean: gateway request logs are not the UX of an
-		// interactive wrap. /metrics + /debug/vars still carry the full record.
-		Logf: func(string, ...any) {},
+		// Default OFF (clean terminal); --log routes the full structured stream to a file
+		// or stderr. /metrics + /debug/vars + the audit journal carry the record regardless.
+		Logf: gwLogf,
 	})
 	must(err)
 
@@ -186,7 +198,7 @@ func cmdGuard(argv []string) {
 	child.Env = append(os.Environ(), injectVar+"="+gwURL)
 
 	if !*quiet {
-		printGuardBanner(os.Stderr, gwURL, up, resolvedBase, floorSource, injectVar, command)
+		printGuardBanner(os.Stderr, gwURL, up, resolvedBase, floorSource, injectVar, logLabel, os.Getenv("FAK_AUDIT_JOURNAL"), command)
 		if up == "anthropic" && *apiKeyEnv == "" && os.Getenv("ANTHROPIC_API_KEY") == "" {
 			fmt.Fprintln(os.Stderr, "fak guard: note — ANTHROPIC_API_KEY is unset; Claude Code needs an API key when pointed at a custom")
 			fmt.Fprintln(os.Stderr, "           base URL (subscription OAuth is not forwarded). Export your key, or pass --policy/--provider.")
@@ -313,17 +325,48 @@ func guardLoopbackOnly(addr string) bool {
 	return ip != nil && ip.IsLoopback()
 }
 
-// printGuardBanner explains, in five lines, exactly what is now in front of the agent:
-// where the gateway is, what it proxies to, which floor is loaded, and the single env
-// var injected into the child. It goes to stderr so it never pollutes a `-p` JSON run
-// the child writes to stdout.
-func printGuardBanner(w io.Writer, gwURL, provider, baseURL, floorSource, injectVar string, command []string) {
+// printGuardBanner explains exactly what is now in front of the agent: where the
+// gateway is, what it proxies to, which floor is loaded, the single env var injected
+// into the child, and WHERE TO WATCH IT — the live metrics/debug endpoints, the durable
+// audit journal, and the structured log stream. It goes to stderr so it never pollutes a
+// `-p` JSON run the child writes to stdout.
+func printGuardBanner(w io.Writer, gwURL, provider, baseURL, floorSource, injectVar, logLabel, journalPath string, command []string) {
 	fmt.Fprintf(w, "fak guard — kernel-adjudicated: %s\n", strings.Join(command, " "))
 	fmt.Fprintf(w, "  gateway    : %s   (in-process; torn down when the command exits)\n", gwURL)
 	fmt.Fprintf(w, "  upstream   : %s   (via the %s wire)\n", baseURL, provider)
 	fmt.Fprintf(w, "  floor      : %s\n", floorSource)
 	fmt.Fprintf(w, "  wired via  : %s   (child only — your shell is untouched)\n", injectVar)
+	// Observability: the live scrape surfaces are on the gateway URL above (unauth on
+	// loopback); the audit journal and log stream survive the session only if asked for.
+	fmt.Fprintf(w, "  metrics    : %s/metrics  ·  %s/debug/vars  ·  %s/v1/fak/events\n", gwURL, gwURL, gwURL)
+	journal := journalPath
+	if strings.TrimSpace(journal) == "" {
+		journal = "off (set FAK_AUDIT_JOURNAL=/path/audit.jsonl for a durable hash-chained trail)"
+	}
+	fmt.Fprintf(w, "  audit log  : %s\n", journal)
+	fmt.Fprintf(w, "  gateway log: %s\n", logLabel)
 	fmt.Fprintln(w, "  every tool call the agent proposes crosses the capability floor before it runs.")
+}
+
+// guardLogSink builds the gateway's structured-log destination from the --log value.
+// "" (default) mutes it (a no-op) to keep the wrapped agent's terminal clean; "-" or
+// "stderr" streams it to stderr; any other value appends to that file. It returns the
+// log function, an optional closer (the opened file), and a human label for the banner.
+// A file that cannot be opened is fatal — an operator who asked for a log and silently
+// got none is worse than a loud failure.
+func guardLogSink(logPath string, stderr io.Writer) (logf func(string, ...any), closer io.Closer, label string) {
+	switch strings.TrimSpace(logPath) {
+	case "":
+		return func(string, ...any) {}, nil, "off (--log FILE or --log - to enable)"
+	case "-", "stderr":
+		lg := log.New(stderr, "fak-gateway ", log.LstdFlags|log.Lmsgprefix)
+		return lg.Printf, nil, "stderr"
+	default:
+		f, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+		must(err)
+		lg := log.New(f, "", log.LstdFlags)
+		return lg.Printf, f, logPath
+	}
 }
 
 // formatAuditSummary renders the exit roll-up of what the kernel decided while the

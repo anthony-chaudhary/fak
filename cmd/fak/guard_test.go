@@ -1,10 +1,14 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -79,6 +83,39 @@ func TestGuardEnvVar(t *testing.T) {
 		if got := guardEnvVar(tc.provider, tc.override); got != tc.want {
 			t.Errorf("guardEnvVar(%q,%q) = %q, want %q", tc.provider, tc.override, got, tc.want)
 		}
+	}
+}
+
+func TestGuardLogSink(t *testing.T) {
+	// Default "": muted no-op, no closer, an "off" label.
+	logf, closer, label := guardLogSink("", io.Discard)
+	if closer != nil || !strings.Contains(label, "off") {
+		t.Errorf(`empty --log should mute: closer=%v label=%q`, closer, label)
+	}
+	logf("must not panic %d", 1) // a no-op must still be callable
+
+	// "-" streams to the given stderr writer, no closer.
+	var buf bytes.Buffer
+	logf, closer, label = guardLogSink("-", &buf)
+	if closer != nil || label != "stderr" {
+		t.Errorf(`"-" should be the stderr sink with no closer: closer=%v label=%q`, closer, label)
+	}
+	logf("hello %s", "world")
+	if !strings.Contains(buf.String(), "hello world") {
+		t.Errorf("stderr sink did not capture the line: %q", buf.String())
+	}
+
+	// A path appends to a file and hands back a closer.
+	path := filepath.Join(t.TempDir(), "gw.log")
+	logf, closer, label = guardLogSink(path, io.Discard)
+	if closer == nil || label != path {
+		t.Fatalf("file sink: closer=%v label=%q want path %q", closer, label, path)
+	}
+	logf("verdict %s", "DENY")
+	_ = closer.Close()
+	b, _ := os.ReadFile(path)
+	if !strings.Contains(string(b), "verdict DENY") {
+		t.Errorf("file sink did not write the line: %q", string(b))
 	}
 }
 
