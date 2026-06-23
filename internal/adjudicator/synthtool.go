@@ -206,6 +206,7 @@ func execsAuthoredScript(cmd string, authored *sync.Map) bool {
 // interpreter head runs its first non-flag operand as a script; any other head is a
 // direct exec of the program named at position 0.
 func subcmdExecsAuthored(sub []string, authored *sync.Map) bool {
+	sub = stripExecPrefix(sub)
 	if len(sub) == 0 {
 		return false
 	}
@@ -221,6 +222,86 @@ func subcmdExecsAuthored(sub []string, authored *sync.Map) bool {
 	}
 	// Direct exec: the program itself is the (authored) script — `./t`, `/abs/t`.
 	return isAuthored(authored, head)
+}
+
+// stripExecPrefix drops the leading run-wrapper tokens that a real shell consumes
+// BEFORE the program word, so the true exec head is what subcmdExecsAuthored
+// inspects. Without this an agent launders a synth-tool past the #543 envelope by
+// the most ordinary prefix there is: `env python helper.py internal/abi/x.go` (the
+// `#!/usr/bin/env python3` shebang shape) parks `env` — not an interpreter — in head
+// position, and `FOO=1 python helper.py …` parks an assignment, so the guarded-tree
+// reach goes un-enveloped. Two prefix forms are folded, matching shell command-word
+// resolution:
+//
+//   - `VAR=val …` leading assignments (any number) — a token of the shape `name=…`
+//     with a non-empty name and no slash before the `=` (so a path like `a=b/c` or
+//     `./x` is never mistaken for an assignment);
+//   - a leading `env` and its own options/assignments: `env`, `env -i`, `env -u FOO`,
+//     `env --`, `env BAR=1` — consume env, then its flags (and `-u`'s argument) and
+//     assignments, stopping at the first plain program word, which becomes the head.
+//
+// Conservative by construction (the commandSelfModify stance): a mis-strip only ever
+// exposes a DIFFERENT token as the head, and synthToolSelfModify still fires only when
+// that head execs a LEDGER script AND the command names a guarded glob — so widening
+// what counts as the head can only tighten a command that already reaches a guarded
+// tree, never open an unrelated one.
+func stripExecPrefix(sub []string) []string {
+	for len(sub) > 0 {
+		tok := strings.Trim(sub[0], "\"'")
+		if isAssignment(tok) {
+			sub = sub[1:]
+			continue
+		}
+		if strings.ToLower(path.Base(normScriptPath(tok))) == "env" {
+			sub = stripEnvArgs(sub[1:])
+			continue
+		}
+		break
+	}
+	return sub
+}
+
+// isAssignment reports whether tok is a `name=value` shell assignment prefix: a
+// non-empty assignment-name (letters/digits/underscore) followed by `=`. A token
+// with a slash before the `=` is a path, not an assignment.
+func isAssignment(tok string) bool {
+	eq := strings.IndexByte(tok, '=')
+	if eq <= 0 {
+		return false
+	}
+	name := tok[:eq]
+	for _, r := range name {
+		if !(r == '_' || (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9')) {
+			return false
+		}
+	}
+	return true
+}
+
+// stripEnvArgs consumes `env`'s own arguments — its flags, the operand of a flag that
+// takes one (`-u NAME`), assignments, and the `--` end-of-options marker — returning
+// the tokens from the program word onward. Unknown flags are skipped as zero-arg
+// (env's real flag set is tiny: -i/-0/-u/-C/-S/-v); a `-u` consumes the next token.
+func stripEnvArgs(sub []string) []string {
+	for len(sub) > 0 {
+		tok := strings.Trim(sub[0], "\"'")
+		switch {
+		case tok == "--":
+			return sub[1:]
+		case tok == "-u" || tok == "--unset":
+			sub = sub[1:]
+			if len(sub) > 0 {
+				sub = sub[1:] // drop the variable name -u takes
+			}
+		case strings.HasPrefix(tok, "-"):
+			sub = sub[1:]
+		case isAssignment(tok):
+			sub = sub[1:]
+		default:
+			return sub // the program word
+		}
+	}
+	return sub
 }
 
 // splitSubcommands splits a command string into sub-commands on shell separators

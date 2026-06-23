@@ -2,6 +2,7 @@ package adjudicator
 
 import (
 	"context"
+	"encoding/json"
 	"sync"
 	"testing"
 
@@ -120,6 +121,47 @@ func TestSynthToolResetRunClearsLedger(t *testing.T) {
 	}
 }
 
+// TestSynthToolEnvAndAssignmentPrefix proves the run-wrapper prefix forms cannot
+// launder a synth-tool past the envelope: a leading `env` (the `#!/usr/bin/env`
+// shebang shape) or `VAR=val` assignment parks a non-interpreter token in head
+// position, but stripExecPrefix consumes it so the true interpreter head is seen and
+// the guarded-tree reach is still denied SELF_MODIFY.
+func TestSynthToolEnvAndAssignmentPrefix(t *testing.T) {
+	ctx := context.Background()
+	prefixes := []string{
+		"env python helper.py internal/abi/x.go",
+		"env -i python helper.py internal/abi/x.go",
+		"env -u FOO BAR=1 python helper.py internal/abi/x.go",
+		"/usr/bin/env python helper.py internal/abi/x.go",
+		"FOO=1 python helper.py internal/abi/x.go",
+		"FOO=1 BAR=2 python helper.py internal/abi/x.go",
+		"env -- python helper.py internal/abi/x.go",
+	}
+	for _, cmd := range prefixes {
+		a := New(synthPolicy())
+		if v := a.Adjudicate(ctx, inlineCall("write_file", `{"path":"helper.py","content":"x"}`)); v.Kind != abi.VerdictAllow {
+			t.Fatalf("authoring write: got %v, want Allow", v.Kind)
+		}
+		call := inlineCall("Bash", `{"command":`+jsonQuote(cmd)+`}`)
+		if v := a.Adjudicate(ctx, call); v.Kind != abi.VerdictDeny || v.Reason != abi.ReasonSelfModify {
+			t.Errorf("prefixed synth-exec %q into guarded tree: got %v/%s, want Deny/SELF_MODIFY", cmd, v.Kind, abi.ReasonName(v.Reason))
+		}
+	}
+
+	// Negative: a plain `env` invocation of a NON-authored script stays allowed — the
+	// prefix strip must not turn an unrelated run into a synth-tool deny.
+	a := New(synthPolicy())
+	if v := a.Adjudicate(ctx, inlineCall("Bash", `{"command":"env python internal/abi/gen.py"}`)); v.Kind != abi.VerdictAllow {
+		t.Errorf("env exec of non-authored script: got %v/%s, want Allow", v.Kind, abi.ReasonName(v.Reason))
+	}
+}
+
+// jsonQuote wraps s as a JSON string literal for inline call construction.
+func jsonQuote(s string) string {
+	b, _ := json.Marshal(s)
+	return string(b)
+}
+
 // TestExecsAuthoredScript unit-tests the synth->exec detector directly across the
 // invocation forms and the read/flag negatives.
 func TestExecsAuthoredScript(t *testing.T) {
@@ -136,12 +178,19 @@ func TestExecsAuthoredScript(t *testing.T) {
 		{"python -u helper.py", true},   // skip the -u flag, first operand is the script
 		{"node helper.py --flag", true}, // interpreter form with trailing args
 		{"/usr/bin/python3 helper.py", true},
-		{"./t", true},                      // direct exec of a chmod-authored binary
-		{"sh -c 'echo hi'; ./t now", true}, // second sub-command execs the authored binary
-		{"cat helper.py", false},           // a READ of the script, not an exec
-		{"python other.py", false},         // a different, non-authored script
-		{"pytest helper_test.py", false},   // pytest is neither interpreter nor authored
-		{"grep helper.py .", false},        // helper.py as a search target, not exec'd
+		{"./t", true},                         // direct exec of a chmod-authored binary
+		{"sh -c 'echo hi'; ./t now", true},    // second sub-command execs the authored binary
+		{"env python helper.py", true},        // env wrapper stripped -> interpreter head seen
+		{"env -i python helper.py", true},     // env flag stripped
+		{"env -u FOO python helper.py", true}, // -u consumes its arg, then the interpreter
+		{"FOO=1 python helper.py", true},      // leading assignment stripped
+		{"FOO=1 env BAR=2 ./t", true},         // assignment + env + assignment before a direct exec
+		{"env ./t now", true},                 // env wrapping a direct exec of the authored binary
+		{"cat helper.py", false},              // a READ of the script, not an exec
+		{"python other.py", false},            // a different, non-authored script
+		{"pytest helper_test.py", false},      // pytest is neither interpreter nor authored
+		{"grep helper.py .", false},           // helper.py as a search target, not exec'd
+		{"env cat helper.py", false},          // env wrapping a READ — still not an exec of the script
 		{"", false},
 	}
 	for _, c := range cases {
