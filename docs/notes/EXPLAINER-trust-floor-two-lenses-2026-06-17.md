@@ -195,7 +195,7 @@ core image : 4 pages (2 benign, 2 sealed), 442 bytes CAS — reloaded in a FRESH
 working set for "what refund fee?"         -> 1 benign page; poison present: false
 ```
 
-Witnesses: 8 `go test ./internal/recall/` functions pass; a 5-skeptic
+Witnesses: 37 `go test ./internal/recall/` functions pass; a 5-skeptic
 default-REFUTED adversarial panel returned **5/5 CONFIRMED**. Full honesty ledger
 (including the inherited detection ceiling and what's *not* built) in
 `fak/RECALL-RESULTS.md`; the in-run live A/B in `fak/LIVE-RESULTS.md`; the roadmap in
