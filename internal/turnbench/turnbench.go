@@ -61,14 +61,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"runtime"
 	"sort"
 	"strings"
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/abi"
 	"github.com/anthony-chaudhary/fak/internal/agent"
-	"github.com/anthony-chaudhary/fak/internal/appversion"
 	"github.com/anthony-chaudhary/fak/internal/ifc"
 	"github.com/anthony-chaudhary/fak/internal/kernel"
 	"github.com/anthony-chaudhary/fak/internal/metrics"
@@ -543,55 +541,14 @@ func Run(ctx context.Context, t *Trace, cm CostModel) (*Report, error) {
 // are derived from the SAME on-arm replay via classifyDisposition, so there is one
 // source of truth for "what the kernel did with each call". Callers that need only
 // the rolled-up Report use Run; the demo uses this.
+//
+// It installs the frozen AIRLINE tool world (agent.Configure) so the trace's tools
+// trigger the REAL rungs: convert_currency aliases -> grammar TRANSFORM, fetch_policy
+// refund doc -> ctxmmu quarantine, delete_account -> policy deny. A caller that needs
+// a DIFFERENT world (e.g. a coding-agent file world) calls RunWithWorld (world.go)
+// with its own installer; this is the airline-world shorthand.
 func RunWithCalls(ctx context.Context, t *Trace, cm CostModel) (*Report, []CallDisposition, error) {
-	cm = withCostModelVersion(cm)
-	// Install the agent's policy/grammar/engine world (idempotent) so the trace's
-	// tools trigger the REAL rungs: convert_currency aliases -> grammar TRANSFORM,
-	// fetch_policy refund doc -> ctxmmu quarantine, delete_account -> policy deny.
-	// (replay isolates the per-arm cross-call state — vDSO cache + IFC ledger.)
-	agent.Configure()
-
-	// The on-arm calibrates (its p50 is the reported 1-shot serve cost) and collects
-	// the per-call dispositions; the off-arm never needs either, so it skips both.
-	on, onClass, onSafety, localNs, disp, err := replay(ctx, t, true, true, true)
-	if err != nil {
-		return nil, nil, err
-	}
-
-	_, offClass, _, _, _, err := replay(ctx, t, false, false, false)
-	if err != nil {
-		return nil, nil, err
-	}
-
-	rep := &Report{
-		Provenance: Provenance{
-			AppVersion:   appversion.Current(),
-			Command:      "fak turntax --suite " + t.SliceID,
-			SliceID:      t.SliceID,
-			WorkloadHash: t.WorkloadHash(),
-			GoVersion:    runtime.Version(),
-			OS:           runtime.GOOS,
-			GeneratedBy:  "fak/internal/turnbench",
-		},
-		Calls:        len(t.Calls),
-		Cost:         cm,
-		Class:        onClass,
-		Counters:     on,
-		LocalServeNs: localNs,
-		Net:          netFor(onClass.turnsSaved(), cm),
-		TurnKinds:    TurnKinds{Forced: onClass.forcedTurns(), Elision: onClass.elisionTurns()},
-		VDSOOffNet:   netFor(offClass.turnsSaved(), cm),
-		Safety: SafetyFloor{
-			InjectionsAdmittedBaseline:  onSafety.poison,
-			InjectionsAdmittedFak:       0,
-			DestructiveExecutedBaseline: onSafety.destructiveExecuted,
-			DestructiveExecutedFak:      0,
-		},
-		Levers:      levers(onClass),
-		Sensitivity: sensitivity(onClass.turnsSaved(), cm),
-	}
-	rep.ConsistencyCheck = consistencyCheck(on, onClass)
-	return rep, disp, nil
+	return RunWithWorld(ctx, t, cm, agent.Configure)
 }
 
 // scoreTrace runs ONE vDSO-on replay with NO latency calibration and returns the
