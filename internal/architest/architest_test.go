@@ -51,7 +51,7 @@ var tier = map[string]int{
 	"adjudicator": 2, "ctxmmu": 2, "engine": 2, "enginecache": 2, "grammar": 2, "kernel": 2,
 	"preflight": 2, "vdso": 2, "plancfi": 2, "steward": 2, "witness": 2,
 	"harvest": 2, "shipgate": 2, "policy": 2, "modelengine": 2, "ratelimit": 2,
-	"journal": 2, "gitgate": 2,
+	"journal": 2, "gitgate": 2, "spec": 2, // spec: the ProvisionalSink/OpsSpec speculation mechanism; composes model+polymodel under abi (off-defconfig, gated by FAK_POLYMODEL).
 
 	"ifc": 3, "normgate": 3, "recall": 3, "kvmmu": 3, "radixkv": 3, "cdb": 3, "contextq": 3, "agentdojo": 3, "toollint": 3,
 
@@ -264,9 +264,13 @@ func selfRegisters(t *testing.T, internal, pkg string) bool {
 
 // regOffList names leaves that self-register but are intentionally wired NOT through the
 // defconfig (internal/registrations). `agent` registers the "localtools" engine from its
-// init() and is pulled in directly by cmd/fak, never blank-imported. A leaf added here is
+// init() and is pulled in directly by cmd/fak, never blank-imported. `spec` (the
+// speculation ProvisionalSink + OpsSpec ops) registers ONLY from its Enabled()-gated
+// Install(), never from init() and never from the defconfig — that off-defconfig absence
+// IS the strongest of its two safety gates (the kernel never even links the poly-model
+// lane until a rung flips FAK_POLYMODEL and calls Install; epic #529). A leaf added here is
 // a conscious "wired elsewhere" decision, the same review chokepoint as the tier table.
-var regOffList = map[string]bool{"agent": true}
+var regOffList = map[string]bool{"agent": true, "spec": true}
 
 // TestRequestPathLeavesRegistered closes the registration-completeness hole: a leaf whose
 // production init() calls abi.Register* MUST be either blank-imported by the defconfig
