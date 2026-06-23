@@ -74,17 +74,31 @@ GLM-DSA attention projections on backend "cpu-ref":
 `TestGLMMoeDsaBackendGEMMMatchesCPU` now also exercises the attention projections
 through the backend (its comment is updated to match).
 
-## §3 — On the A100 DGX: the same path runs on `k_q8_gemm`
+## §3 — On the A100 DGX: witnessed fresh today, the projections run on `k_q8_gemm`
 
 The same backend path, with a lean (Q8-resident) GLM-DSA model on the **cuda backend**,
 runs all eight projections on `k_q8_gemm` — the GPU pure kernel — alongside the MoE/FFN
-experts, router, and vocab head. The committed on-device witness for the MoE/FFN/head
-slice is `TestCUDAGLMMoeDsaBackendForward` (8× A100-40GB, sm_80): **cosine = 1.000000,
-argmax cpu = cuda (argmax-exact)** vs the CPU Q8 forward (commits `cf9d9a1` / `e3a92b7`,
-2026-06-21; see
-[`GLM52-PURE-KERNEL-ON-GPU-DGX-A100-2026-06-21.md`](GLM52-PURE-KERNEL-ON-GPU-DGX-A100-2026-06-21.md)).
-With this slice on `origin/main`, that **same witness re-run on an sm_80 node now drives
-the DSA attention projections through `k_q8_gemm` too**, not just MoE/FFN/head.
+experts, router, and vocab head. This was **re-run on the lab 8× A100-40GB DGX on
+2026-06-22 at the slice's HEAD (`498a4ab`)**, via the live Slack control bridge
+(`tools/dgx_glm_gpu_witness.sh`: clone `origin/main` → `nvcc -arch=sm_80` → isolated
+`-tags cuda` test). The node's own `go test` output (not self-report):
+
+```
+=== HEAD 498a4ab ===
+=== build libfakcuda.a (sm_80) === [cuda] OK build
+=== go test -tags cuda -run TestCUDAGLMMoeDsaBackendForward ./internal/model/ -v ===
+    glm_dsa_cuda_test.go:55: GLM-MoE-DSA forward with MoE/FFN+head + DSA attention
+      projections on cuda backend (k_q8_gemm): cosine=1.000000 argmax cpu=40 cuda=40
+      tier=sm_80 class=approx
+--- PASS: TestCUDAGLMMoeDsaBackendForward (0.26s)
+=== GLM GPU WITNESS DONE rc=0 ===
+```
+
+So GLM-5.2's forward — the MoE/FFN experts + router, the vocab head, **and now the DSA
+attention's dense projections** — executes on the pure fak CUDA kernel on real A100
+hardware, **cosine = 1.000000, argmax-exact** vs the CPU Q8 forward. (The prior MoE/FFN/head
+slice was committed `cf9d9a1` / `e3a92b7`, 2026-06-21; see
+[`GLM52-PURE-KERNEL-ON-GPU-DGX-A100-2026-06-21.md`](GLM52-PURE-KERNEL-ON-GPU-DGX-A100-2026-06-21.md).)
 
 **Reproduce on an sm_80 CUDA node** (clones `origin/main`, builds for sm_80, runs the
 isolated witness):
@@ -113,10 +127,11 @@ NCCL/offload reshape — the SGLang-serves + fak-fronts path, not the native eng
   compute backend (behavioral witness, all 8 shapes); the host path is byte-for-byte
   unchanged (full `internal/model` + GLM coherence suites green); `go build ./...` +
   `go vet` green.
-- **Proven on real A100 hardware (committed `cf9d9a1`/`e3a92b7`, reproducible via
-  `tools/dgx_glm_gpu_witness.sh`):** GLM-5.2's MoE/FFN/router/head on the pure fak CUDA
-  kernel, cosine = 1.0, argmax-exact; with this slice the same witness now also exercises
-  the DSA attention projections on `k_q8_gemm`.
+- **Proven on real A100 hardware, fresh on 2026-06-22 at HEAD `498a4ab`** (and
+  reproducible via `tools/dgx_glm_gpu_witness.sh`): GLM-5.2's MoE/FFN/router/head **plus
+  the DSA attention projections** on the pure fak CUDA kernel (`k_q8_gemm`), cosine =
+  1.000000, argmax-exact (`TestCUDAGLMMoeDsaBackendForward`, sm_80). The prior MoE/FFN/head
+  slice was committed `cf9d9a1`/`e3a92b7`.
 - **Not proven / out of scope (labeled):** GLM-5.2's DSA **sparse-attention glue** on the
   GPU (fused sparse kernel + device DSA-KV, #86/#413 next slice); HF numeric DSA parity
   (#474/#413, oracle-gated); real 753B serving (VRAM-gated + NCCL/offload reshape).
