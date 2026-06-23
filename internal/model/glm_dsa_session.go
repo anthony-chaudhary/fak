@@ -172,10 +172,13 @@ func (s *Session) decodeBandGLMDsa(id int, x []float32, lo, hi, pos int, isFirst
 	}
 	s.glmDsaSharedTopK = nil
 	eps := float32(cfg.RMSNormEps)
-	// #86 (partial): with a compute.Backend attached, route the MoE/FFN GEMMs through it (the GPU
-	// pure kernels) via backendKernel; otherwise the host residentKernel. The DSA attention step
-	// keeps its own host path (glmDsaAttentionStep) — only the matKernel-driven MLP/MoE moves to
-	// the device here. requireGLMDsaSession permits the backend; CPU sessions are unchanged.
+	// #86 (partial): with a compute.Backend attached, route the dense GEMMs through it (the GPU pure
+	// kernels) via backendKernel; otherwise the host residentKernel. Both the MoE/FFN GEMMs (mlpBody)
+	// AND the DSA attention's dense projections — q_a/q_b, kv_a/kv_b, indexer wq_b/wk/weights_proj,
+	// and o_proj (mat threaded into glmDsaAttentionStep) — run on the kernel; only the small DSA
+	// index-score dots + top-k selection + sparse softmax/ΣwV glue and the DSA KV cache stay
+	// host-resident (the genuinely sparse inner loop — the labeled #86/#413 residual). On the host
+	// path residentKernel.mul ≡ residentMatRows, so CPU sessions stay byte-for-byte unchanged.
 	var mat matKernel = residentKernel{m}
 	if s.Backend != nil {
 		mat = backendKernel{s}
@@ -183,7 +186,7 @@ func (s *Session) decodeBandGLMDsa(id int, x []float32, lo, hi, pos int, isFirst
 	for l := lo; l < hi; l++ {
 		layer := l
 		attnBody := func(xn []float32) []float32 {
-			out, topK, ok := m.glmDsaAttentionStep(s.Cache.glm, layer, pos, xn, s.glmDsaSharedTopK)
+			out, topK, ok := m.glmDsaAttentionStep(s.Cache.glm, layer, pos, xn, s.glmDsaSharedTopK, mat)
 			if !ok {
 				panic("model: glm_moe_dsa attention step failed")
 			}
@@ -209,7 +212,12 @@ func (s *Session) decodeBandGLMDsa(id int, x []float32, lo, hi, pos int, isFirst
 	return x, nil
 }
 
-func (m *Model) glmDsaAttentionStep(cache *glmDsaKVCache, layer, pos int, xn []float32, sharedTopK []int) ([]float32, []int, bool) {
+// glmDsaAttentionStep runs the GLM-MoE-DSA attention sublayer for one position. mat selects
+// where its dense projection GEMMs execute: residentKernel (host, byte-for-byte residentMatRows)
+// or backendKernel (the compute.Backend — q8 -> k_q8_gemm, the GPU pure kernel). The learned-index
+// score dots, top-k selection, and sparse softmax/ΣwV over the selected keys stay host-resident in
+// either case (the genuinely sparse glue), so only the projections move to the device.
+func (m *Model) glmDsaAttentionStep(cache *glmDsaKVCache, layer, pos int, xn []float32, sharedTopK []int, mat matKernel) ([]float32, []int, bool) {
 	cfg := m.Cfg
 	if cache == nil || !cfg.isGLMMoeDsa() || len(xn) != cfg.HiddenSize {
 		return nil, nil, false
@@ -225,23 +233,23 @@ func (m *Model) glmDsaAttentionStep(cache *glmDsaKVCache, layer, pos int, xn []f
 			return nil, nil, false
 		}
 		var ok bool
-		topK, ok = m.glmDsaIndexStep(cache, layer, pos, xn)
+		topK, ok = m.glmDsaIndexStep(cache, layer, pos, xn, mat)
 		if !ok {
 			return nil, nil, false
 		}
 	}
-	query, ok := m.glmDsaAppendAttentionKV(cache, layer, pos, xn)
+	query, ok := m.glmDsaAppendAttentionKV(cache, layer, pos, xn, mat)
 	if !ok {
 		return nil, nil, false
 	}
-	out, ok := m.glmDsaAttendCached(cache, layer, pos, query, topK)
+	out, ok := m.glmDsaAttendCached(cache, layer, pos, query, topK, mat)
 	if !ok {
 		return nil, nil, false
 	}
 	return out, topK, true
 }
 
-func (m *Model) glmDsaIndexStep(cache *glmDsaKVCache, layer, pos int, xn []float32) ([]int, bool) {
+func (m *Model) glmDsaIndexStep(cache *glmDsaKVCache, layer, pos int, xn []float32, mat matKernel) ([]int, bool) {
 	cfg := m.Cfg
 	H, qLora := cfg.HiddenSize, cfg.QLoraRank
 	indexHeads, indexDim := cfg.IndexNHeads, cfg.IndexHeadDim
@@ -249,16 +257,19 @@ func (m *Model) glmDsaIndexStep(cache *glmDsaKVCache, layer, pos int, xn []float
 	if H == 0 || qLora == 0 || indexHeads == 0 || indexDim == 0 || qkRope <= 0 || qkRope > indexDim || qkRope%2 != 0 {
 		return nil, false
 	}
+	// proj runs a named projection GEMM through the active kernel (host residentMatRows or the
+	// compute.Backend); residentKernel makes it byte-for-byte residentMatRows.
+	proj := func(name string, x []float32, out, in int) []float32 { return mat.mul(name, mat.prep(x), out, in) }
 
 	ap := layerPrefix(layer) + "self_attn."
-	qResid := m.residentMatRows(ap+"q_a_proj.weight", xn, qLora, H)
+	qResid := proj(ap+"q_a_proj.weight", xn, qLora, H)
 	addOptionalBias(qResid, m.tensorOptional(ap+"q_a_proj.bias"))
 	qResid = rmsnorm(qResid, m.tensor(ap+"q_a_layernorm.weight"), glmDsaInnerNormEps)
-	qFull := m.residentMatRows(ap+"indexer.wq_b.weight", qResid, indexHeads*indexDim, qLora)
+	qFull := proj(ap+"indexer.wq_b.weight", qResid, indexHeads*indexDim, qLora)
 
-	k := layernorm(m.residentMatRows(ap+"indexer.wk.weight", xn, indexDim, H),
+	k := layernorm(proj(ap+"indexer.wk.weight", xn, indexDim, H),
 		m.tensor(ap+"indexer.k_norm.weight"), m.tensor(ap+"indexer.k_norm.bias"), glmDsaInnerNormEps)
-	weights := m.residentMatRows(ap+"indexer.weights_proj.weight", xn, indexHeads, H)
+	weights := proj(ap+"indexer.weights_proj.weight", xn, indexHeads, H)
 	weightScale := float32(1.0 / math.Sqrt(float64(indexHeads)))
 	for i := range weights {
 		weights[i] *= weightScale
@@ -305,7 +316,7 @@ func (m *Model) glmDsaIndexStep(cache *glmDsaKVCache, layer, pos int, xn []float
 	return topK[0], true
 }
 
-func (m *Model) glmDsaAppendAttentionKV(cache *glmDsaKVCache, layer, pos int, xn []float32) ([]float32, bool) {
+func (m *Model) glmDsaAppendAttentionKV(cache *glmDsaKVCache, layer, pos int, xn []float32, mat matKernel) ([]float32, bool) {
 	cfg := m.Cfg
 	H, nH := cfg.HiddenSize, cfg.NumHeads
 	qLora, kvLora := cfg.QLoraRank, cfg.KVLoraRank
@@ -314,17 +325,18 @@ func (m *Model) glmDsaAppendAttentionKV(cache *glmDsaKVCache, layer, pos int, xn
 	if H == 0 || nH == 0 || qLora == 0 || kvLora == 0 || qkNope == 0 || qkRope == 0 || vHead == 0 || qkRope%2 != 0 {
 		return nil, false
 	}
+	proj := func(name string, x []float32, out, in int) []float32 { return mat.mul(name, mat.prep(x), out, in) }
 
 	ap := layerPrefix(layer) + "self_attn."
-	qResid := m.residentMatRows(ap+"q_a_proj.weight", xn, qLora, H)
+	qResid := proj(ap+"q_a_proj.weight", xn, qLora, H)
 	addOptionalBias(qResid, m.tensorOptional(ap+"q_a_proj.bias"))
 	qResid = rmsnorm(qResid, m.tensor(ap+"q_a_layernorm.weight"), glmDsaInnerNormEps)
-	qFull := m.residentMatRows(ap+"q_b_proj.weight", qResid, nH*qkHead, qLora)
+	qFull := proj(ap+"q_b_proj.weight", qResid, nH*qkHead, qLora)
 
-	compressedKV := m.residentMatRows(ap+"kv_a_proj_with_mqa.weight", xn, kvLora+qkRope, H)
+	compressedKV := proj(ap+"kv_a_proj_with_mqa.weight", xn, kvLora+qkRope, H)
 	addOptionalBias(compressedKV, m.tensorOptional(ap+"kv_a_proj_with_mqa.bias"))
 	kvLatent := rmsnorm(compressedKV[:kvLora], m.tensor(ap+"kv_a_layernorm.weight"), glmDsaInnerNormEps)
-	kvFull := m.residentMatRows(ap+"kv_b_proj.weight", kvLatent, nH*(qkNope+vHead), kvLora)
+	kvFull := proj(ap+"kv_b_proj.weight", kvLatent, nH*(qkNope+vHead), kvLora)
 	kRotRaw := compressedKV[kvLora:]
 
 	cos, sin := ropeRowForLayer(cfg, layer, pos)
@@ -358,7 +370,7 @@ func (m *Model) glmDsaAppendAttentionKV(cache *glmDsaKVCache, layer, pos int, xn
 	return query, true
 }
 
-func (m *Model) glmDsaAttendCached(cache *glmDsaKVCache, layer, pos int, query []float32, topK []int) ([]float32, bool) {
+func (m *Model) glmDsaAttendCached(cache *glmDsaKVCache, layer, pos int, query []float32, topK []int, mat matKernel) ([]float32, bool) {
 	cfg := m.Cfg
 	nH := cfg.NumHeads
 	qkHead := cfg.QKNopeHeadDim + cfg.QKRopeHeadDim
@@ -388,7 +400,7 @@ func (m *Model) glmDsaAttendCached(cache *glmDsaKVCache, layer, pos int, query [
 		}
 	}
 	ap := layerPrefix(layer) + "self_attn."
-	out := m.residentMatRows(ap+"o_proj.weight", attnConcat, H, nH*vHead)
+	out := mat.mul(ap+"o_proj.weight", mat.prep(attnConcat), H, nH*vHead)
 	addOptionalBias(out, m.tensorOptional(ap+"o_proj.bias"))
 	return out, true
 }

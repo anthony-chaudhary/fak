@@ -8,12 +8,16 @@ import (
 
 // TestGLMMoeDsaBackendGEMMMatchesCPU is the #86 (partial) witness: a GLM-MoE-DSA Prefill with a
 // compute.Backend attached routes its dense GEMMs — MoE/FFN experts + router (via the matKernel
-// swap in decodeBandGLMDsa) and the vocab head (glmDsaHead) — through the backend, while the DSA
-// index-scoring + sparse-attention + KV stay host-resident. Run against the cpu-ref backend it must
-// reproduce the all-host CPU forward argmax-exact (the GEMMs differ only in f32 reduction order:
-// cpu-ref MatMul's fdot tree vs the host matRows sequential dot). The SAME code path, with the cuda
-// backend + lean Q8 weights, runs those GEMMs on k_q8_gemm — GLM-5.2's MoE/FFN/head on the GPU pure
-// kernel (the on-device run is witnessed by tools/dgx_pure_kernel_run.sh on an sm_80 node).
+// swap in decodeBandGLMDsa), the vocab head (glmDsaHead), AND the DSA attention's dense projections
+// (q_a/q_b, kv_a/kv_b, indexer wq_b/wk/weights_proj, o_proj — mat threaded into glmDsaAttentionStep)
+// — through the backend, while only the sparse DSA glue (index-score dots, top-k, sparse softmax/
+// ΣwV) + KV stay host-resident. Run against the cpu-ref backend it must reproduce the all-host CPU
+// forward argmax-exact (the GEMMs differ only in f32 reduction order: cpu-ref MatMul's fdot tree vs
+// the host matRows sequential dot). The SAME code path, with the cuda backend + lean Q8 weights,
+// runs those GEMMs on k_q8_gemm — GLM-5.2's MoE/FFN/head AND its attention projections on the GPU
+// pure kernel (the on-device run is witnessed by tools/dgx_glm_gpu_witness.sh on an sm_80 node). The
+// shape-level proof that the attention projections reach the backend is
+// TestGLMMoeDsaBackendRoutesAttentionProjections.
 func TestGLMMoeDsaBackendGEMMMatchesCPU(t *testing.T) {
 	path, cfg := writeTinyGLMDsaSafetensors(t)
 	m, err := LoadSafetensors(path, cfg)
