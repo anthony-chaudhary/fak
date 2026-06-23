@@ -39,7 +39,7 @@ Thirteen KPIs, each 0–100, grouped by the step they gate. `debt` = units of HA
 | build | `extension_scaffold` | 100 | 0 | leaf scaffolder + EXTENDING.md present |
 | build | `guardrails_surfaced` | 100 | 0 | 5/5 enforced rules surfaced up front |
 | build | `contributor_contract` | 100 | 0 | CONTRIBUTING linked + green gate documented |
-| build | `machine_consumable` | 100 | 0 | 8/8 measurement tools expose --json (100%) |
+| build | `machine_consumable` | 100 | 0 | 9/9 measurement tools expose --json (100%) |
 
 ## Friction-debt work-list
 
