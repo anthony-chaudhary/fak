@@ -550,8 +550,12 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--workspace", default="", help="workspace root (default: repo root)")
     ap.add_argument("--max-workers", type=int, default=2,
                     help="hard cap on live workers, enforced by the preflight (default: 2)")
-    ap.add_argument("--work-kind", default="engineering",
-                    help="switcher work kind (engineering->t1, gardening->t2)")
+    ap.add_argument("--work-kind", default=None,
+                    help="switcher work kind (engineering->t1, gardening->t2). Default "
+                         "follows --backend: engineering for claude (t1 opus pool), "
+                         "gardening for opencode/glm (t2 pool). The opencode pool has NO "
+                         "t1 account, so an engineering route there REFUSE_NO_ACCOUNTs — "
+                         "which silently stalled the docs lane until this default landed.")
     ap.add_argument("--lane", default=None,
                     help="explicit lane (default: the lane with the most open issues)")
     ap.add_argument("--backend", choices=BACKENDS, default="claude",
@@ -573,7 +577,10 @@ def main(argv: list[str] | None = None) -> int:
 
     root = Path(args.workspace).resolve() if args.workspace else repo_root()
     exclude_lanes = {s.strip() for s in args.exclude_lane.split(",") if s.strip()}
-    payload = evaluate(root, max_workers=args.max_workers, work_kind=args.work_kind,
+    # The opencode/glm pool is tier 2 only; engineering routes to t1 and finds
+    # nothing there. Derive the work-kind from the backend unless set explicitly.
+    work_kind = args.work_kind or ("gardening" if args.backend == "opencode" else "engineering")
+    payload = evaluate(root, max_workers=args.max_workers, work_kind=work_kind,
                        lane=args.lane, live=args.live, refresh=not args.no_refresh,
                        cooldown_min=args.cooldown_min, backend=args.backend,
                        exclude_lanes=exclude_lanes)
