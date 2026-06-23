@@ -28,8 +28,8 @@ description: "The operability dimensions that matter in LLM serving, the current
 - **Leading systems:** vLLM benchmark_serving (request-rate sweep), NVIDIA GenAI-Perf (concurrency sweep)
 - **Source:** [https://tianpan.co/blog/2026-03-10-llm-latency-decomposition-ttft-vs-throughput](https://tianpan.co/blog/2026-03-10-llm-latency-decomposition-ttft-vs-throughput) (2026-03)
 - **fak:** no-claim — no number (stub)
-- **fak note:** REAL GAP fak should measure. fak has the harness to vary concurrency (it ran 1->128 on the DGX) but reports the throughput envelope, not the saturation diagnostic (P99 TTFT climbing while P50 stays flat as the queue builds). Since the gateway proxy adds queueing of its own, the TTFT-under-load curve is exactly what an honest operability claim needs; not yet measured, so no-claim.
-- **Trace:** The DGX concurrency sweep (conc 1->128, QWEN36-27B-DGX-RESULTS.md) varies LOAD but records completion-tokens/sec, not a TTFT/queueing curve: there is no committed P99-TTFT-vs-RPS saturation sweep showing the rate at which the SLO is crossed.
+- **fak note:** REAL GAP fak should measure. fak has the harness to vary concurrency (it ran 1->128 on the GPU server) but reports the throughput envelope, not the saturation diagnostic (P99 TTFT climbing while P50 stays flat as the queue builds). Since the gateway proxy adds queueing of its own, the TTFT-under-load curve is exactly what an honest operability claim needs; not yet measured, so no-claim.
+- **Trace:** The GPU server concurrency sweep (conc 1->128, QWEN36-27B-DGX-RESULTS.md) varies LOAD but records completion-tokens/sec, not a TTFT/queueing curve: there is no committed P99-TTFT-vs-RPS saturation sweep showing the rate at which the SLO is crossed.
 
 ### ○ Cold-start / autoscaling latency (scale-to-zero & scale-out) — fak: **no-claim**
 

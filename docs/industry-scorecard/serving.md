@@ -29,7 +29,7 @@ description: "The serving dimensions that matter in LLM serving, the current SOT
 - **Source:** [https://mlcommons.org/2025/04/llm-inference-v5/](https://mlcommons.org/2025/04/llm-inference-v5/) (2025-04)
 - **fak:** no-claim — no number (stub)
 - **fak note:** OUT OF SCOPE for a reuse kernel: MLPerf Inference ranks absolute aggregate tok/s on standardized Blackwell/Hopper hardware (GB200 NVL72 ~13,886 tok/s offline on Llama 3.1 405B). fak has no MLPerf submission and its own engine ceilings at ~7B (data.json model-size-ceiling), so it is not in this race; on big models it FRONTS SGLang/llama.cpp rather than serving them itself. No standardized fak tok/s exists.
-- **Trace:** No MLPerf submission or standardized-hardware aggregate tok/s in BENCHMARK-AUTHORITY.md. The only concurrent server number is the DGX A100 run (data.json 'served-throughput-vs-sglang', 1085.6 tok/s @ conc 64) which is fak-gateway-fronting-SGLang on non-MLPerf hardware/harness, not a standardized MLPerf result.
+- **Trace:** No MLPerf submission or standardized-hardware aggregate tok/s in BENCHMARK-AUTHORITY.md. The only concurrent server number is the GPU server run (data.json 'served-throughput-vs-sglang', 1085.6 tok/s @ conc 64) which is fak-gateway-fronting-SGLang on non-MLPerf hardware/harness, not a standardized MLPerf result.
 
 ### ○ Latency-vs-throughput Pareto frontier — fak: **no-claim**
 
@@ -40,7 +40,7 @@ description: "The serving dimensions that matter in LLM serving, the current SOT
 - **Source:** [https://arxiv.org/pdf/2403.02310](https://arxiv.org/pdf/2403.02310) (2024-03)
 - **fak:** no-claim — no number (stub)
 - **fak note:** fak has not recorded a latency-vs-throughput Pareto frontier (no P99 TTFT/TPOT vs request-rate). The adjacent committed evidence is a throughput-vs-concurrency sweep where fak trails raw SGLang (see peak-serving-throughput-per-gpu). Named as a gap, not a Pareto measurement.
-- **Trace:** experiments/qwen36/dgx-r4-20260622/compare.json + docs/benchmarks/QWEN36-27B-DGX-RESULTS.md: fak-gateway vs raw SGLang on 8xA100 / Qwen3.6-27B, concurrency sweep 1->128; fak/raw = 0.60x (conc 8) -> 0.75x (conc 64 peak, 1085.6 vs 1451.6 tok/s) -> 0.97x (conc 128).
+- **Trace:** experiments/qwen36/dgx-r4-20260622/compare.json + docs/benchmarks/QWEN36-27B-DGX-RESULTS.md: fak-gateway vs raw SGLang on 8-GPU datacenter server / Qwen3.6-27B, concurrency sweep 1->128; fak/raw = 0.60x (conc 8) -> 0.75x (conc 64 peak, 1085.6 vs 1451.6 tok/s) -> 0.97x (conc 128).
 
 ### ▼ Peak served throughput per accelerator (model-served-by-engine, MLPerf-grounded) — fak: **trails**
 
@@ -50,7 +50,7 @@ description: "The serving dimensions that matter in LLM serving, the current SOT
 - **Leading systems:** NVIDIA GB300/GB200 NVL72 (TensorRT-LLM), NVIDIA H200, MangoBoost/AMD MI300X
 - **Source:** [https://www.hpcwire.com/2025/09/10/mlperf-inference-v5-1-results-land-with-new-benchmarks-and-record-participation/](https://www.hpcwire.com/2025/09/10/mlperf-inference-v5-1-results-land-with-new-benchmarks-and-record-participation/) (2025-09-10)
 - **fak:** trails — 1085.6 tok/s @ conc 64 (peak) (shipped)
-- **fak note:** THE honest counter to the fleet 'lead' rows: this is the ONLY real concurrent-serving head-to-head against a LIVE SGLang process (same 8×A100 / 27B / load harness, fak-in-front vs raw). fak TRAILS — it is the gateway/adjudication TAX: 0.60× worst (conc 8) → 0.75× at peak (conc 64) → ~0.97× converged at saturation (conc 128). fak's value here is the adjudication/coherence/measurement plane, NOT raw tok/s; the 4.1× fleet 'lead' is reuse-WORK eliminated on fak's own kernel held constant, a different axis from a throughput race against a tuned engine.
+- **fak note:** THE honest counter to the fleet 'lead' rows: this is the ONLY real concurrent-serving head-to-head against a LIVE SGLang process (same 8-GPU datacenter server / 27B / load harness, fak-in-front vs raw). fak TRAILS — it is the gateway/adjudication TAX: 0.60× worst (conc 8) → 0.75× at peak (conc 64) → ~0.97× converged at saturation (conc 128). fak's value here is the adjudication/coherence/measurement plane, NOT raw tok/s; the 4.1× fleet 'lead' is reuse-WORK eliminated on fak's own kernel held constant, a different axis from a throughput race against a tuned engine.
 - **Trace:** experiments/qwen36/dgx-r4-20260622/compare.json · docs/benchmarks/QWEN36-27B-DGX-RESULTS.md
 
 ## Scheduling & routing (`scheduling`)
@@ -88,7 +88,7 @@ description: "The serving dimensions that matter in LLM serving, the current SOT
 - **Source:** [https://www.marktechpost.com/2025/10/01/mlperf-inference-v5-1-2025-results-explained-for-gpus-cpus-and-ai-accelerators/](https://www.marktechpost.com/2025/10/01/mlperf-inference-v5-1-2025-results-explained-for-gpus-cpus-and-ai-accelerators/) (2025-10)
 - **fak:** no-claim — no number (stub)
 - **fak note:** fak ships no ms-level P99 TTFT/TPOT tail-latency number; the only live head-to-head is a THROUGHPUT sweep (it trails raw SGLang 0.75× at peak — see peak-serving-throughput-per-gpu). An honest gap on the latency-tail axis, not a measured trail.
-- **Trace:** data.json row 'served-throughput-vs-sglang'; artifact experiments/qwen36/dgx-r4-20260622/compare.json; docs/benchmarks/QWEN36-27B-DGX-RESULTS.md s2. fak 1085.6 vs raw SGLang 1451.6 tok/s @ conc 64 on 8xA100, Qwen3.6-27B.
+- **Trace:** data.json row 'served-throughput-vs-sglang'; artifact experiments/qwen36/dgx-r4-20260622/compare.json; docs/benchmarks/QWEN36-27B-DGX-RESULTS.md s2. fak 1085.6 vs raw SGLang 1451.6 tok/s @ conc 64 on 8-GPU datacenter server, Qwen3.6-27B.
 
 ### ○ Time-to-first-token (TTFT) under realistic prefill — fak: **no-claim**
 
@@ -121,7 +121,7 @@ description: "The serving dimensions that matter in LLM serving, the current SOT
 - **Source:** [https://docs.nvidia.com/nim/benchmarking/llm/latest/metrics.html](https://docs.nvidia.com/nim/benchmarking/llm/latest/metrics.html) (2025-01)
 - **fak:** no-claim — no number (stub)
 - **fak note:** REAL GAP fak should measure. E2EL = TTFT + (out_len-1)xTPOT + overhead, reported as a sliding-window percentile by GenAI-Perf / vLLM. fak's gateway sits exactly on the request path (and adds a measured tax) so this is directly instrumentable, but no E2EL percentile has been committed; no-claim.
-- **Trace:** No E2EL percentile is committed anywhere. fak reports whole-run wall-clocks for fleet/session benchmarks (e.g. 19.0 min for a 50-turn x 5-agent run) and a concurrency throughput sweep on the DGX, but never a per-request end-to-end latency reported as a P50/P99 over a fixed output length with a warm-up/cool-down window.
+- **Trace:** No E2EL percentile is committed anywhere. fak reports whole-run wall-clocks for fleet/session benchmarks (e.g. 19.0 min for a 50-turn x 5-agent run) and a concurrency throughput sweep on the GPU server, but never a per-request end-to-end latency reported as a P50/P99 over a fixed output length with a warm-up/cool-down window.
 
 ### ○ Tail latency distribution (P50/P95/P99/P99.9) — fak: **no-claim**
 

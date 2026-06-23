@@ -17,7 +17,7 @@ description: "The cost dimensions that matter in LLM serving, the current SOTA b
 - **Leading systems:** DistServe (introduced goodput, P/D disaggregation), SGLang-PD, MuxWise (P/D multiplexing)
 - **Source:** [https://arxiv.org/abs/2401.09670](https://arxiv.org/abs/2401.09670) (2024-01)
 - **fak:** no-claim — no number (stub)
-- **fak note:** REAL GAP fak should measure. fak ships no goodput-under-SLA number (no TTFT/TPOT SLO attainment curve). The DGX run measured raw peak throughput at fixed concurrency, not requests meeting joint latency bounds. DistServe/MuxWise-style goodput is a standard serving-systems axis fak has zero evidence on; named as a gap, not parity.
+- **fak note:** REAL GAP fak should measure. fak ships no goodput-under-SLA number (no TTFT/TPOT SLO attainment curve). The GPU server run measured raw peak throughput at fixed concurrency, not requests meeting joint latency bounds. DistServe/MuxWise-style goodput is a standard serving-systems axis fak has zero evidence on; named as a gap, not parity.
 - **Trace:** No goodput/SLA-attainment number exists in BENCHMARK-AUTHORITY.md or CLAIMS.md. The only concurrent-serving head-to-head (data.json 'served-throughput-vs-sglang') reports peak tok/s, not SLO-bounded goodput.
 
 ### ○ SLO-constrained goodput (per-GPU) — fak: **no-claim**
@@ -28,7 +28,7 @@ description: "The cost dimensions that matter in LLM serving, the current SOTA b
 - **Leading systems:** DistServe, DynaServe, NVIDIA Dynamo, GenAI-Perf goodput mode
 - **Source:** [https://arxiv.org/html/2401.09670v1](https://arxiv.org/html/2401.09670v1) (2024-01)
 - **fak:** no-claim — no number (stub)
-- **fak note:** OUT OF SCOPE for a reuse kernel. SLO-constrained goodput is the metric of a full PD-disaggregating serving STACK (DistServe 4.48x goodput, GenAI-Perf goodput mode); fak is a kernel/adjudication plane that FRONTS such a stack (the DGX run is SGLang-serves + fak-adjudicates) and does not own the scheduler that goodput measures. no-claim.
+- **fak note:** OUT OF SCOPE for a reuse kernel. SLO-constrained goodput is the metric of a full PD-disaggregating serving STACK (DistServe 4.48x goodput, GenAI-Perf goodput mode); fak is a kernel/adjudication plane that FRONTS such a stack (the GPU server run is SGLang-serves + fak-adjudicates) and does not own the scheduler that goodput measures. no-claim.
 - **Trace:** No goodput-under-SLO number exists. CLAIMS.md labels continuous-batching [SIMULATED] (read-only telemetry, not on the live serving path) and the polymodel decode lane is explicitly SERIAL/off-mainline, so fak has no SLO-constrained per-GPU goodput measurement.
 
 ### ○ End-to-end effective request capacity / cost gain from the KV system under SLO — fak: **no-claim**
@@ -39,7 +39,7 @@ description: "The cost dimensions that matter in LLM serving, the current SOTA b
 - **Leading systems:** Mooncake, LMCache + vLLM, NVIDIA Dynamo
 - **Source:** [https://www.usenix.org/conference/fast25/presentation/qin](https://www.usenix.org/conference/fast25/presentation/qin) (2025-02)
 - **fak:** no-claim — no number (stub)
-- **fak note:** REAL GAP / honestly a non-win. fak has no Mooncake-style 'effective request capacity under SLO' number, and its one real concurrent-serving head-to-head (fak-gateway in front of SGLang on 8xA100) TRAILS raw SGLang (0.75x at peak) because the value added there is the adjudication/coherence/measurement plane, not throughput. So fak cannot claim the 59-498% capacity gain axis; conflating its reuse-work multipliers with SLO capacity would be dishonest.
+- **fak note:** REAL GAP / honestly a non-win. fak has no Mooncake-style 'effective request capacity under SLO' number, and its one real concurrent-serving head-to-head (fak-gateway in front of SGLang on 8-GPU datacenter server) TRAILS raw SGLang (0.75x at peak) because the value added there is the adjudication/coherence/measurement plane, not throughput. So fak cannot claim the 59-498% capacity gain axis; conflating its reuse-work multipliers with SLO capacity would be dishonest.
 - **Trace:** No SLO-bound effective-capacity figure exists. The fleet multipliers (60.3x naive / 4.1x tuned, headline-qwen-50x5.json) are work-ELIMINATION on fak's own kernel held constant, not SLO-bounded request capacity; the only live concurrent-serving head-to-head (data.json served-throughput-vs-sglang, compare.json) shows fak at 0.60x->0.75x->~0.97x of raw SGLang, i.e. a gateway TAX, not a capacity gain.
 
 ### ○ Inference unit economics ($ per 1M tokens) at realistic utilization — fak: **no-claim**

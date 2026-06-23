@@ -5,7 +5,7 @@
     "as_of": "2026-06-23",
     "fak_version": "0.31.0",
     "authority": "BENCHMARK-AUTHORITY.md",
-    "machine_note": "fak headline numbers measured on Apple M3 Pro (arm64) + RTX 4070 (WSL2) + A100 (DGX); SOTA refs sourced from vendor docs / papers / leaderboards (see _taxonomy.json source_url + source_date). Deterministic metrics are hardware-independent; live wall-clocks are within-run ratios (BENCHMARK-GOVERNANCE.md).",
+    "machine_note": "fak headline numbers measured on Apple M3 Pro (arm64) + RTX 4070 (WSL2) + datacenter GPU (GPU server); SOTA refs sourced from vendor docs / papers / leaderboards (see _taxonomy.json source_url + source_date). Deterministic metrics are hardware-independent; live wall-clocks are within-run ratios (BENCHMARK-GOVERNANCE.md).",
     "fresh_window_days": 150,
     "industry_review_window_days": 365
   },

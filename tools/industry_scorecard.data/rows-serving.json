@@ -89,7 +89,7 @@
       "status": "stub",
       "fak_commit": "",
       "fak_artifact": "",
-      "fak_doc": "No MLPerf submission or standardized-hardware aggregate tok/s in BENCHMARK-AUTHORITY.md. The only concurrent server number is the DGX A100 run (data.json 'served-throughput-vs-sglang', 1085.6 tok/s @ conc 64) which is fak-gateway-fronting-SGLang on non-MLPerf hardware/harness, not a standardized MLPerf result.",
+      "fak_doc": "No MLPerf submission or standardized-hardware aggregate tok/s in BENCHMARK-AUTHORITY.md. The only concurrent server number is the GPU server run (data.json 'served-throughput-vs-sglang', 1085.6 tok/s @ conc 64) which is fak-gateway-fronting-SGLang on non-MLPerf hardware/harness, not a standardized MLPerf result.",
       "apples_to_apples": false,
       "comparison_note": "OUT OF SCOPE for a reuse kernel: MLPerf Inference ranks absolute aggregate tok/s on standardized Blackwell/Hopper hardware (GB200 NVL72 ~13,886 tok/s offline on Llama 3.1 405B). fak has no MLPerf submission and its own engine ceilings at ~7B (data.json model-size-ceiling), so it is not in this race; on big models it FRONTS SGLang/llama.cpp rather than serving them itself. No standardized fak tok/s exists.",
       "measured_on": "2026-06-23"
@@ -110,7 +110,7 @@
       "status": "stub",
       "fak_commit": "",
       "fak_artifact": "",
-      "fak_doc": "data.json row 'served-throughput-vs-sglang'; artifact experiments/qwen36/dgx-r4-20260622/compare.json; docs/benchmarks/QWEN36-27B-DGX-RESULTS.md s2. fak 1085.6 vs raw SGLang 1451.6 tok/s @ conc 64 on 8xA100, Qwen3.6-27B.",
+      "fak_doc": "data.json row 'served-throughput-vs-sglang'; artifact experiments/qwen36/dgx-r4-20260622/compare.json; docs/benchmarks/QWEN36-27B-DGX-RESULTS.md s2. fak 1085.6 vs raw SGLang 1451.6 tok/s @ conc 64 on 8-GPU datacenter server, Qwen3.6-27B.",
       "apples_to_apples": true,
       "comparison_note": "fak ships no ms-level P99 TTFT/TPOT tail-latency number; the only live head-to-head is a THROUGHPUT sweep (it trails raw SGLang 0.75× at peak — see peak-serving-throughput-per-gpu). An honest gap on the latency-tail axis, not a measured trail.",
       "measured_on": "2026-06-23"
@@ -173,7 +173,7 @@
       "status": "stub",
       "fak_commit": "",
       "fak_artifact": "",
-      "fak_doc": "No E2EL percentile is committed anywhere. fak reports whole-run wall-clocks for fleet/session benchmarks (e.g. 19.0 min for a 50-turn x 5-agent run) and a concurrency throughput sweep on the DGX, but never a per-request end-to-end latency reported as a P50/P99 over a fixed output length with a warm-up/cool-down window.",
+      "fak_doc": "No E2EL percentile is committed anywhere. fak reports whole-run wall-clocks for fleet/session benchmarks (e.g. 19.0 min for a 50-turn x 5-agent run) and a concurrency throughput sweep on the GPU server, but never a per-request end-to-end latency reported as a P50/P99 over a fixed output length with a warm-up/cool-down window.",
       "apples_to_apples": false,
       "comparison_note": "REAL GAP fak should measure. E2EL = TTFT + (out_len-1)xTPOT + overhead, reported as a sliding-window percentile by GenAI-Perf / vLLM. fak's gateway sits exactly on the request path (and adds a measured tax) so this is directly instrumentable, but no E2EL percentile has been committed; no-claim.",
       "measured_on": "2026-06-23"
@@ -215,7 +215,7 @@
       "status": "stub",
       "fak_commit": "",
       "fak_artifact": "",
-      "fak_doc": "experiments/qwen36/dgx-r4-20260622/compare.json + docs/benchmarks/QWEN36-27B-DGX-RESULTS.md: fak-gateway vs raw SGLang on 8xA100 / Qwen3.6-27B, concurrency sweep 1->128; fak/raw = 0.60x (conc 8) -> 0.75x (conc 64 peak, 1085.6 vs 1451.6 tok/s) -> 0.97x (conc 128).",
+      "fak_doc": "experiments/qwen36/dgx-r4-20260622/compare.json + docs/benchmarks/QWEN36-27B-DGX-RESULTS.md: fak-gateway vs raw SGLang on 8-GPU datacenter server / Qwen3.6-27B, concurrency sweep 1->128; fak/raw = 0.60x (conc 8) -> 0.75x (conc 64 peak, 1085.6 vs 1451.6 tok/s) -> 0.97x (conc 128).",
       "apples_to_apples": false,
       "comparison_note": "fak has not recorded a latency-vs-throughput Pareto frontier (no P99 TTFT/TPOT vs request-rate). The adjacent committed evidence is a throughput-vs-concurrency sweep where fak trails raw SGLang (see peak-serving-throughput-per-gpu). Named as a gap, not a Pareto measurement.",
       "measured_on": "2026-06-23"
@@ -246,7 +246,7 @@
       "dim_id": "peak-serving-throughput-per-gpu",
       "axis": "Peak served throughput per accelerator (model-served-by-engine, MLPerf-grounded)",
       "category": "throughput",
-      "competitor": "Raw SGLang 0.5.10 (TP=8, no fak proxy), Qwen3.6-27B on an 8-GPU A100 server",
+      "competitor": "Raw SGLang 0.5.10 (TP=8, no fak proxy), Qwen3.6-27B on an 8-GPU datacenter server",
       "competitor_class": "sota",
       "competitor_value": 1451.6,
       "competitor_source": "experiments/qwen36/dgx-r4-20260622/compare.json (raw-SGLang vs fak-gateway, conc 1→128); QWEN36-27B-DGX-RESULTS.md §2",
@@ -259,7 +259,7 @@
       "fak_artifact": "experiments/qwen36/dgx-r4-20260622/compare.json",
       "fak_doc": "docs/benchmarks/QWEN36-27B-DGX-RESULTS.md",
       "apples_to_apples": true,
-      "comparison_note": "THE honest counter to the fleet 'lead' rows: this is the ONLY real concurrent-serving head-to-head against a LIVE SGLang process (same 8×A100 / 27B / load harness, fak-in-front vs raw). fak TRAILS — it is the gateway/adjudication TAX: 0.60× worst (conc 8) → 0.75× at peak (conc 64) → ~0.97× converged at saturation (conc 128). fak's value here is the adjudication/coherence/measurement plane, NOT raw tok/s; the 4.1× fleet 'lead' is reuse-WORK eliminated on fak's own kernel held constant, a different axis from a throughput race against a tuned engine.",
+      "comparison_note": "THE honest counter to the fleet 'lead' rows: this is the ONLY real concurrent-serving head-to-head against a LIVE SGLang process (same 8-GPU datacenter server / 27B / load harness, fak-in-front vs raw). fak TRAILS — it is the gateway/adjudication TAX: 0.60× worst (conc 8) → 0.75× at peak (conc 64) → ~0.97× converged at saturation (conc 128). fak's value here is the adjudication/coherence/measurement plane, NOT raw tok/s; the 4.1× fleet 'lead' is reuse-WORK eliminated on fak's own kernel held constant, a different axis from a throughput race against a tuned engine.",
       "measured_on": "2026-06-22"
     },
     {

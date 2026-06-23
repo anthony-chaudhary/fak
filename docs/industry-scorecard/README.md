@@ -5,8 +5,6 @@ description: "Industry-first competitive scorecard: a researched taxonomy of the
 
 # Industry scorecard — fak vs the LLM-serving field
 
-<!-- industry-scorecard: 2026-06-23 · process: tools/industry_scorecard.py · data: tools/industry_scorecard.data/ -->
-
 This is the **outward** measuring stick — the counterpart of the inward scorecards (hygiene, code, docs). It does not start from what fak happened to measure; it starts from the **industry**. The source of truth is a researched taxonomy of the dimensions a serious operator, buyer, or analyst uses to evaluate an LLM-serving system (`tools/industry_scorecard.data/_taxonomy.json`), each with the current SOTA bar and a dated source. fak is then positioned honestly on every dimension — and for most of them the honest answer is a **named gap**, not a win. Everything below is re-derived from the data by `tools/industry_scorecard.py`; no number is hand-typed.
 
 Two numbers are driven:
@@ -74,7 +72,7 @@ Two numbers are driven:
 | ▼ | trails | security | Prompt-injection defense and agent security (attack-success-rate vs utility-under-attack) | — | — | — | Tuned guardrail / defense stacks on a SOTA evasion battery (AgentDojo-style) |
 | ▼ | trails | single-stream | Single-stream (one chat) decode throughput on CPU | 8.7 tok/s | 17.3 tok/s | 0.50× | llama.cpp Metal (M3 Pro) |
 | ▼ | trails | single-stream | Single-stream prefill throughput, apples-to-apples CPU-vs-CPU | 0.12 × of llama.cpp CPU | 1 × of llama.cpp CPU | 0.12× | llama.cpp CPU, same box + Q8 weights (CPU-vs-CPU) |
-| ▼ | trails | throughput | Peak served throughput per accelerator (model-served-by-engine, MLPerf-grounded) | 1085.6 tok/s @ conc 64 (peak) | 1451.6 tok/s @ conc 64 (peak) | 0.75× | Raw SGLang 0.5.10 (TP=8, no fak proxy), Qwen3.6-27B on an 8-GPU A100 server |
+| ▼ | trails | throughput | Peak served throughput per accelerator (model-served-by-engine, MLPerf-grounded) | 1085.6 tok/s @ conc 64 (peak) | 1451.6 tok/s @ conc 64 (peak) | 0.75× | Raw SGLang 0.5.10 (TP=8, no fak proxy), Qwen3.6-27B on an 8-GPU datacenter server |
 | ○ | no-claim | agent-fleet | Cross-agent reuse marginal value vs a LIVE tuned shared-prefix engine (head-to-head) | — | — | — | SGLang RadixAttention / vLLM Automatic Prefix Caching (actual competing processes) |
 | ○ | no-claim | cost-efficiency | Goodput under an SLA (requests/s meeting TTFT and TPOT SLOs simultaneously) | — | — | — | DistServe (introduced goodput, P/D disaggregation); SGLang-PD; MuxWise (P/D multiplexing) |
 | ○ | no-claim | cost-efficiency | SLO-constrained goodput (per-GPU) | — | 4.48 SLO-attained req/s per GPU | — | DistServe; DynaServe; NVIDIA Dynamo; GenAI-Perf goodput mode |

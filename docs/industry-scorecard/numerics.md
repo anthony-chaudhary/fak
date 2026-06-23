@@ -94,7 +94,7 @@ description: "The numerics dimensions that matter in LLM serving, the current SO
 - **Leading systems:** NVIDIA GB200 NVL72 / B200 (TensorRT-LLM, NVFP4), AMD MI300X/MI355X (ROCm, FP8), MLPerf Inference v5.0/v5.1 submitters
 - **Source:** [https://developer.nvidia.com/blog/nvidia-blackwell-delivers-massive-performance-leaps-in-mlperf-inference-v5-0/](https://developer.nvidia.com/blog/nvidia-blackwell-delivers-massive-performance-leaps-in-mlperf-inference-v5-0/) (2025-04)
 - **fak:** no-claim — no number (stub)
-- **fak note:** OUT OF SCOPE for a reuse kernel. fak has never submitted to MLPerf and runs no accuracy-constrained throughput benchmark. Its closest real number — 1085.6 vs 1451.6 tok/s vs raw SGLang on 8×A100 (it TRAILS, the gateway tax) — is an ungated throughput race, not an MLPerf accuracy-gated result, so no MLPerf claim is made. Neutral accuracy-gated throughput is a vendor/submitter axis far from fak's reuse/adjudication value.
+- **fak note:** OUT OF SCOPE for a reuse kernel. fak has never submitted to MLPerf and runs no accuracy-constrained throughput benchmark. Its closest real number — 1085.6 vs 1451.6 tok/s vs raw SGLang on 8-GPU datacenter server (it TRAILS, the gateway tax) — is an ungated throughput race, not an MLPerf accuracy-gated result, so no MLPerf claim is made. Neutral accuracy-gated throughput is a vendor/submitter axis far from fak's reuse/adjudication value.
 - **Trace:** none — fak has no MLPerf Inference submission and no accuracy-gated throughput run; its only live concurrent head-to-head (served-throughput-vs-sglang) is a raw tok/s race fak TRAILS, with no 99%/99.9%-accuracy gate applied
 
 ### ○ Quantization format & low-precision datatype coverage — fak: **no-claim**
@@ -105,7 +105,7 @@ description: "The numerics dimensions that matter in LLM serving, the current SO
 - **Leading systems:** TensorRT-LLM, vLLM, NVIDIA Blackwell
 - **Source:** [https://docs.vllm.ai/projects/llm-compressor/en/latest/examples/quantization_w4a4_fp4/](https://docs.vllm.ai/projects/llm-compressor/en/latest/examples/quantization_w4a4_fp4/) (2025-01-01)
 - **fak:** no-claim — no number (in-flight)
-- **fak note:** REAL but partial gap. fak LOADS GGUF Q8_0/Q4_K and witnesses Q8 device GEMM (Vulkan 24.6 tok/s 1.49x vs f32; A100 k_q8_gemm cosine~1.0), and has an in-flight AVX2/AVX-512 int8 SIMD decode lane (~2.97x vs HF dynamic-int8, int8-simd-vs-hf row) — but its own engine still largely DEQUANTS to f32, and it has NO FP8 W8A8, NVFP4/MXFP4 W4A4, AWQ/GPTQ, or KV-cache quantization. The TensorRT-LLM/vLLM Blackwell-tensor-core NVFP4 path is entirely out of fak's reach. No shipped fak coverage-breadth number; the int8 lane is deliberately not yet [SHIPPED]. Verdict no-claim on coverage; the speed sub-claim lives in int8-simd-vs-hf.
+- **fak note:** REAL but partial gap. fak LOADS GGUF Q8_0/Q4_K and witnesses Q8 device GEMM (Vulkan 24.6 tok/s 1.49x vs f32; datacenter GPU k_q8_gemm cosine~1.0), and has an in-flight AVX2/AVX-512 int8 SIMD decode lane (~2.97x vs HF dynamic-int8, int8-simd-vs-hf row) — but its own engine still largely DEQUANTS to f32, and it has NO FP8 W8A8, NVFP4/MXFP4 W4A4, AWQ/GPTQ, or KV-cache quantization. The TensorRT-LLM/vLLM Blackwell-tensor-core NVFP4 path is entirely out of fak's reach. No shipped fak coverage-breadth number; the int8 lane is deliberately not yet [SHIPPED]. Verdict no-claim on coverage; the speed sub-claim lives in int8-simd-vs-hf.
 - **Trace:** CLAIMS: GGUF Q8_0/Q4_K loaded but DEQUANT-to-f32 on own engine; int8/Q8_0 SIMD lane is in-flight (not [SHIPPED]); no FP8/NVFP4/MXFP4/AWQ/GPTQ
 
 ### ▲ int8 / Q8_0 SIMD decode throughput vs the same-rung int8 peer — fak: **lead**
@@ -151,6 +151,6 @@ description: "The numerics dimensions that matter in LLM serving, the current SO
 - **Leading systems:** cuBLAS (NVIDIA tuned vendor GEMM)
 - **Source:** [https://docs.nvidia.com/cuda/cublas/](https://docs.nvidia.com/cuda/cublas/) (2026-06)
 - **fak:** parity — no number (shipped)
-- **fak note:** GLM-5.2's MoE/FFN experts + router + vocab head (the bulk of its params) run on fak's OWN k_q8_gemm kernel — cosine=1.000000, argmax-exact vs the CPU Q8 forward on a real A100, with ZERO cuBLAS dependency. Honest fence: the DSA sparse-attention + DSA-KV stay host-side (the next #86/#413 slice); the dense path is pure-GPU, the sparse-attention is not yet.
+- **fak note:** GLM-5.2's MoE/FFN experts + router + vocab head (the bulk of its params) run on fak's OWN k_q8_gemm kernel — cosine=1.000000, argmax-exact vs the CPU Q8 forward on a real datacenter GPU, with ZERO cuBLAS dependency. Honest fence: the DSA sparse-attention + DSA-KV stay host-side (the next #86/#413 slice); the dense path is pure-GPU, the sparse-attention is not yet.
 - **Trace:** 498a4ab · docs/notes/GLM52-PURE-KERNEL-ON-GPU-DGX-A100-2026-06-21.md
 

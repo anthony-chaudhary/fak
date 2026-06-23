@@ -38,7 +38,7 @@
       "status": "stub",
       "fak_commit": "",
       "fak_artifact": "",
-      "fak_doc": "No prefill-decode disaggregation is shipped or claimed. fak's own engine runs a single co-located forward; on the GPU server it fronts SGLang TP=8 (which itself is not run in a disaggregated config in the committed DGX artifacts).",
+      "fak_doc": "No prefill-decode disaggregation is shipped or claimed. fak's own engine runs a single co-located forward; on the GPU server it fronts SGLang TP=8 (which itself is not run in a disaggregated config in the committed GPU server artifacts).",
       "apples_to_apples": false,
       "comparison_note": "OUT OF SCOPE for a reuse kernel. PD-disaggregation with per-phase SLO isolation (DistServe 7.4x request rate / 12.6x tighter SLO; NVIDIA Dynamo Planner) is a serving-stack architecture; fak owns neither the prefill/decode scheduler nor the per-phase GPU pools. It is an adjudication/coherence plane that rides on whatever engine does this. no-claim.",
       "measured_on": "2026-06-23"
@@ -59,9 +59,9 @@
       "status": "stub",
       "fak_commit": "",
       "fak_artifact": "",
-      "fak_doc": "none — fak runs GLM-5.2 MoE experts on ONE A100 (CLAIMS Engine, commit 498a4ab), never EP across nodes",
+      "fak_doc": "none — fak runs GLM-5.2 MoE experts on ONE datacenter GPU (CLAIMS Engine, commit 498a4ab), never EP across nodes",
       "apples_to_apples": true,
-      "comparison_note": "OUT OF SCOPE for a single-box reuse kernel. fak DOES run GLM-5.2's MoE/FFN experts + router on its own pure k_q8_gemm GPU kernel (cosine=1.0, A100, commit 498a4ab) — but on a SINGLE device, with no expert-parallel sharding across nodes and the DSA sparse-attention still host-side. fak's own-engine ceiling is ~7B (model-size-ceiling row); giant-MoE EP is delegated to SGLang/DeepEP, which fak fronts. No fak EP number exists; verdict no-claim.",
+      "comparison_note": "OUT OF SCOPE for a single-box reuse kernel. fak DOES run GLM-5.2's MoE/FFN experts + router on its own pure k_q8_gemm GPU kernel (cosine=1.0, datacenter GPU, commit 498a4ab) — but on a SINGLE device, with no expert-parallel sharding across nodes and the DSA sparse-attention still host-side. fak's own-engine ceiling is ~7B (model-size-ceiling row); giant-MoE EP is delegated to SGLang/DeepEP, which fak fronts. No fak EP number exists; verdict no-claim.",
       "measured_on": "2026-06-23"
     },
     {
@@ -101,9 +101,9 @@
       "status": "stub",
       "fak_commit": "",
       "fak_artifact": "",
-      "fak_doc": "none — fak's own engine is single-box (CLAIMS GPU backends are all one device); the 8xA100 DGX run is SGLang-serves + fak-adjudicates",
+      "fak_doc": "none — fak's own engine is single-box (CLAIMS GPU backends are all one device); the 8-GPU datacenter server run is SGLang-serves + fak-adjudicates",
       "apples_to_apples": true,
-      "comparison_note": "OUT OF SCOPE for the reuse/adjudication kernel. fak's OWN engine runs on a single device (CPU, or one RTX 4070 / RX 7600 / M3 Pro / A100). The only multi-GPU run in the evidence (8xA100, Qwen3.6-27B) is SGLang doing the TP scale-out with fak as the in-front gateway/adjudication plane — and there fak TRAILS raw SGLang on throughput (served-throughput-vs-sglang row). fak has no own TPxPPxEPxDP scale-out number; verdict no-claim.",
+      "comparison_note": "OUT OF SCOPE for the reuse/adjudication kernel. fak's OWN engine runs on a single device (CPU, or one RTX 4070 / RX 7600 / M3 Pro / datacenter GPU). The only multi-GPU run in the evidence (8-GPU datacenter server, Qwen3.6-27B) is SGLang doing the TP scale-out with fak as the in-front gateway/adjudication plane — and there fak TRAILS raw SGLang on throughput (served-throughput-vs-sglang row). fak has no own TPxPPxEPxDP scale-out number; verdict no-claim.",
       "measured_on": "2026-06-23"
     }
   ]

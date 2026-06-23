@@ -18,7 +18,7 @@ description: "The models dimensions that matter in LLM serving, the current SOTA
 - **Source:** [https://docs.vllm.ai/en/stable/features/quantization/fp8/](https://docs.vllm.ai/en/stable/features/quantization/fp8/) (2026-01)
 - **fak:** trails — no number (shipped)
 - **fak note:** A real, disclosed head-to-head where fak TRAILS on coverage breadth. fak's hardware portability is genuine (CPU SIMD + Vulkan + CUDA, with bit-exact cross-platform reproduction), but its FORMAT coverage is narrow: f32 plus 8-bit Q8_0, with GGUF k-quant load-only. The SOTA stacks accelerate FP8 across Hopper/Ada/Blackwell + MI300X, NVFP4 on Blackwell, and broad GGUF k-quants (llama.cpp). fak has no hardware-accelerated FP8/INT4/FP4 GEMM on ANY device, so on the format×hardware coverage axis it clearly trails — named, not buried.
-- **Trace:** BENCHMARK-AUTHORITY.md + CLAIMS.md: fak runs f32 + Q8_0 on CPU (arm64/x86 SIMD), Vulkan (RX 7600), and CUDA (RTX 4070 sm_89, A100); GGUF q4_k_m load proven (Qwen3.6-27B) but slow. NO FP8/INT8-W8A8/INT4-accelerated/NVFP4/MXFP4 kernel on any target
+- **Trace:** BENCHMARK-AUTHORITY.md + CLAIMS.md: fak runs f32 + Q8_0 on CPU (arm64/x86 SIMD), Vulkan (RX 7600), and CUDA (RTX 4070 sm_89, datacenter GPU); GGUF q4_k_m load proven (Qwen3.6-27B) but slow. NO FP8/INT8-W8A8/INT4-accelerated/NVFP4/MXFP4 kernel on any target
 
 ### ▼ Hardware backend breadth (NVIDIA, AMD, Intel, TPU, AWS, Apple, CPU) — fak: **trails**
 
@@ -28,8 +28,8 @@ description: "The models dimensions that matter in LLM serving, the current SOTA
 - **Leading systems:** vLLM, llama.cpp, SGLang, MLC-LLM
 - **Source:** [https://github.com/vllm-project/vllm](https://github.com/vllm-project/vllm) (2026-01-01)
 - **fak:** trails — 4 distinct compute backends shipped (CPU + NVIDIA CUDA + AMD Vulkan + Apple Metal), all single-device (shipped)
-- **fak note:** REAL but narrow vs the SOTA breadth bar. fak ships four numerically-correct single-device backends: pure-Go CPU (x86 AVX/arm64) plus NVIDIA CUDA (RTX 4070 + 8xA100 sm_80), AMD Vulkan (RX 7600), and Apple Metal (M3 Pro), each argmax-exact / cosine=1.0 vs cpu-ref. But vLLM (TPU, Gaudi 2/3, Inferentia/Trainium, Ascend, Spyre) and llama.cpp (HIP, SYCL, CANN, OpenCL, WebGPU via MLC) span far more silicon, and fak's GPU paths are mostly f32 and throughput-immature (Vulkan ~58x slower than llama.cpp CPU; CUDA reaches parity only on a small model that fits VRAM). fak trails on breadth and on per-backend maturity; disclosed, not hidden.
-- **Trace:** CLAIMS Engine: pure-Go CPU; '-tags vulkan' RX 7600; '-tags cuda' RTX 4070 / A100; 'darwin && metal' M3 Pro — each numerically witnessed (cosine=1.0 / argmax-exact)
+- **fak note:** REAL but narrow vs the SOTA breadth bar. fak ships four numerically-correct single-device backends: pure-Go CPU (x86 AVX/arm64) plus NVIDIA CUDA (RTX 4070 + 8-GPU datacenter server sm_80), AMD Vulkan (RX 7600), and Apple Metal (M3 Pro), each argmax-exact / cosine=1.0 vs cpu-ref. But vLLM (TPU, Gaudi 2/3, Inferentia/Trainium, Ascend, Spyre) and llama.cpp (HIP, SYCL, CANN, OpenCL, WebGPU via MLC) span far more silicon, and fak's GPU paths are mostly f32 and throughput-immature (Vulkan ~58x slower than llama.cpp CPU; CUDA reaches parity only on a small model that fits VRAM). fak trails on breadth and on per-backend maturity; disclosed, not hidden.
+- **Trace:** CLAIMS Engine: pure-Go CPU; '-tags vulkan' RX 7600; '-tags cuda' RTX 4070 / datacenter GPU; 'darwin && metal' M3 Pro — each numerically witnessed (cosine=1.0 / argmax-exact)
 
 ## Model coverage (`model-coverage`)
 
@@ -41,7 +41,7 @@ description: "The models dimensions that matter in LLM serving, the current SOTA
 - **Leading systems:** SGLang, vLLM, TensorRT-LLM, llama.cpp
 - **Source:** [https://docs.sglang.io/basic_usage/deepseek_v3.html](https://docs.sglang.io/basic_usage/deepseek_v3.html) (2025-05-05)
 - **fak:** trails — 7 B params (max on own engine) (shipped)
-- **fak note:** fak's OWN engine ceiling is ~7B on 36 GB (GGUF dequant-to-f32 OOMs above; no MoE/sparse-activation; two arch families fail at load; f32 27B = 108 GB > 80 GB VRAM). Above 7B fak is NOT in the race on its own engine and must FRONT llama.cpp/SGLang — exactly what the 27B DGX run does (SGLang-serves + fak-adjudicates). A hard, disclosed capability ceiling that bounds where any fak engine 'win' can apply. apples_to_apples=false: fak's f32-dequant engine vs llama.cpp quantized/CPU and SGLang multi-GPU TP are different configs by construction.
+- **fak note:** fak's OWN engine ceiling is ~7B on 36 GB (GGUF dequant-to-f32 OOMs above; no MoE/sparse-activation; two arch families fail at load; f32 27B = 108 GB > 80 GB VRAM). Above 7B fak is NOT in the race on its own engine and must FRONT llama.cpp/SGLang — exactly what the 27B GPU server run does (SGLang-serves + fak-adjudicates). A hard, disclosed capability ceiling that bounds where any fak engine 'win' can apply. apples_to_apples=false: fak's f32-dequant engine vs llama.cpp quantized/CPU and SGLang multi-GPU TP are different configs by construction.
 - **Trace:** HERO-BENCHMARK-2026-06-21.md (honest fence) · CLAIMS.md
 
 ### ○ Multimodal / vision-language (VLM) model coverage — fak: **no-claim**
