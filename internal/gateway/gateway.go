@@ -66,8 +66,17 @@ type Config struct {
 	// Provider selects the upstream transcript wire when BaseURL is set
 	// (openai, anthropic, gemini, xai). Empty keeps the OpenAI-compatible default.
 	Provider string
-	// APIKey is the bearer token sent to the upstream model (proxy mode only).
+	// APIKey is the credential sent to the upstream model (proxy mode only). On the
+	// Anthropic wire its SCHEME is chosen by the token itself: an OAuth subscription
+	// token ("sk-ant-oat…", agent.IsAnthropicOAuthToken) goes as Authorization:
+	// Bearer + the oauth beta; a plain API key goes as x-api-key.
 	APIKey string
+	// PinUpstreamCredential makes the gateway authenticate the upstream with its OWN
+	// configured APIKey and IGNORE the inbound client's credential — the subscription
+	// path, where fak holds the real OAuth token and the wrapped client only sends a
+	// placeholder key to satisfy its own "do I have credentials" check. Default false
+	// keeps the transparent-hop passthrough (forward the client's own key upstream).
+	PinUpstreamCredential bool
 	// EngineCacheEngine optionally selects a self-hosted serving-engine cache reset
 	// endpoint to call when inbound tool-result admission quarantines bytes before
 	// an upstream proxy turn. Empty disables remote cache reset.
@@ -208,6 +217,11 @@ type Server struct {
 	planner     agent.Planner
 	engineCache *enginecache.Client
 
+	// pinUpstreamCredential, when set, makes the Anthropic passthrough authenticate
+	// upstream with the planner's OWN configured credential and ignore the inbound
+	// client's key (the subscription path — see Config.PinUpstreamCredential).
+	pinUpstreamCredential bool
+
 	// cacheStream is the unified cachemeta.Entry observability fold (fak_cache_*).
 	// New subscribes it to the process-global vDSO's live tier-2 cache-event sink so
 	// every fill/hit/evict/revoke on the strongest local cache is rendered on
@@ -323,6 +337,8 @@ func New(cfg Config) (*Server, error) {
 		cacheStream:  cacheStream,
 		feed:         newCoherenceFeed(0),
 		metrics:      newGatewayMetrics(time.Now()),
+
+		pinUpstreamCredential: cfg.PinUpstreamCredential,
 	}, nil
 }
 

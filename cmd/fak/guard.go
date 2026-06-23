@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	_ "embed"
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -13,6 +14,7 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
+	"path/filepath"
 	"sort"
 	"strings"
 	"time"
@@ -53,6 +55,8 @@ func cmdGuard(argv []string) {
 	baseURL := fs.String("base-url", "", "upstream provider base URL (default: the provider's public API, e.g. anthropic -> https://api.anthropic.com)")
 	model := fs.String("model", "", "upstream model id override (default: forward the client's own model id)")
 	apiKeyEnv := fs.String("api-key-env", "", "env var holding the UPSTREAM API key (default: forward the client's own key — passthrough)")
+	anthropicOAuth := fs.Bool("anthropic-oauth", false, "authenticate upstream with a Claude Pro/Max SUBSCRIPTION OAuth token instead of an API key (sourced from CLAUDE_CODE_OAUTH_TOKEN, <claude-config>/.oauth-token, or ~/.claude/.credentials.json). fak sends it as Authorization: Bearer + the oauth beta, ignores the client's own credential, and still adjudicates every tool call. NOTE: Anthropic's terms restrict subscription tokens to the official client — review them first.")
+	oauthTokenEnv := fs.String("oauth-token-env", "CLAUDE_CODE_OAUTH_TOKEN", "env var to read the subscription OAuth token from first (used with --anthropic-oauth)")
 	policyPath := fs.String("policy", "", "capability-floor manifest to enforce (default: the built-in guard floor; see --dump-policy)")
 	envName := fs.String("env", "", "env var to inject the gateway URL into the child (default: chosen by --provider)")
 	requireKeyEnv := fs.String("require-key-env", "", "require this env var's bearer token on the gateway (loopback rarely needs it)")
@@ -122,6 +126,29 @@ func cmdGuard(argv []string) {
 	if *apiKeyEnv != "" {
 		apiKey = os.Getenv(*apiKeyEnv)
 	}
+
+	// Subscription mode: fak HOLDS the OAuth token and sends it upstream as
+	// Authorization: Bearer + the oauth beta (the only scheme api.anthropic.com
+	// accepts an sk-ant-oat token under), ignoring whatever credential the wrapped
+	// client sends. The kernel still adjudicates every tool call. Anthropic's terms
+	// restrict subscription tokens to the official client — the operator opts in.
+	pinUpstream := false
+	oauthSource := ""
+	if *anthropicOAuth {
+		if up != "anthropic" {
+			fmt.Fprintf(os.Stderr, "fak guard: --anthropic-oauth applies only to --provider anthropic (got %q)\n", up)
+			os.Exit(2)
+		}
+		tok, src, terr := resolveAnthropicOAuthToken(*oauthTokenEnv)
+		if terr != nil {
+			fmt.Fprintf(os.Stderr, "fak guard: --anthropic-oauth: %v\n", terr)
+			os.Exit(2)
+		}
+		apiKey = tok
+		pinUpstream = true
+		oauthSource = src
+	}
+
 	requireKey, ok := resolveRequiredKey(*requireKeyEnv, os.Getenv)
 	if !ok {
 		fmt.Fprintf(os.Stderr, "fak guard: --require-key-env %s is set but empty — refusing to start a gateway with NO authentication (set it or drop the flag)\n", *requireKeyEnv)
@@ -148,19 +175,20 @@ func cmdGuard(argv []string) {
 	}
 
 	srv, err := gateway.New(gateway.Config{
-		EngineID:     "inkernel",
-		Model:        *model,
-		BaseURL:      resolvedBase,
-		Provider:     up,
-		APIKey:       apiKey,
-		RequireKey:   requireKey,
-		VDSO:         true,
-		Invalidation: "global",
-		Version:      appversion.Current(),
-		ReloadPolicy: policyReloader(*policyPath),
-		ResetTrace:   resetTrace,
-		ObserveTrace: observeTrace,
-		StartTime:    t0,
+		EngineID:              "inkernel",
+		Model:                 *model,
+		BaseURL:               resolvedBase,
+		Provider:              up,
+		APIKey:                apiKey,
+		PinUpstreamCredential: pinUpstream,
+		RequireKey:            requireKey,
+		VDSO:                  true,
+		Invalidation:          "global",
+		Version:               appversion.Current(),
+		ReloadPolicy:          policyReloader(*policyPath),
+		ResetTrace:            resetTrace,
+		ObserveTrace:          observeTrace,
+		StartTime:             t0,
 		// Default OFF (clean terminal); --log routes the full structured stream to a file
 		// or stderr. /metrics + /debug/vars + the audit journal carry the record regardless.
 		Logf: gwLogf,
@@ -198,11 +226,27 @@ func cmdGuard(argv []string) {
 	child.Stdin, child.Stdout, child.Stderr = os.Stdin, os.Stdout, os.Stderr
 	child.Env = append(os.Environ(), injectVar+"="+injectVal)
 
+	// Subscription mode: put the wrapped client in a deterministic state by handing it
+	// a PLACEHOLDER api key (only if it has none). Claude Code then talks to the gateway
+	// in x-api-key mode; the gateway IGNORES that placeholder (pinUpstream) and
+	// authenticates upstream with the real held OAuth token. Without this the client may
+	// instead forward its own subscription bearer — which the gateway also ignores in
+	// pinned mode — so either way the held token is what reaches Anthropic.
+	if pinUpstream && os.Getenv("ANTHROPIC_API_KEY") == "" {
+		child.Env = append(child.Env, "ANTHROPIC_API_KEY=fak-guard-oauth-placeholder")
+	}
+
 	if !*quiet {
 		printGuardBanner(os.Stderr, gwURL, up, resolvedBase, floorSource, injectVar, injectVal, logLabel, os.Getenv("FAK_AUDIT_JOURNAL"), command)
-		if up == "anthropic" && *apiKeyEnv == "" && os.Getenv("ANTHROPIC_API_KEY") == "" {
-			fmt.Fprintln(os.Stderr, "fak guard: note — ANTHROPIC_API_KEY is unset; Claude Code needs an API key when pointed at a custom")
-			fmt.Fprintln(os.Stderr, "           base URL (subscription OAuth is not forwarded). Export your key, or pass --policy/--provider.")
+		switch {
+		case pinUpstream:
+			fmt.Fprintf(os.Stderr, "fak guard: upstream auth — Claude Pro/Max SUBSCRIPTION OAuth token (from %s),\n", oauthSource)
+			fmt.Fprintln(os.Stderr, "           sent as Authorization: Bearer + the oauth beta. NOTE: Anthropic's terms restrict")
+			fmt.Fprintln(os.Stderr, "           subscription tokens to the official Claude Code client; you opted in with --anthropic-oauth.")
+		case up == "anthropic" && *apiKeyEnv == "" && os.Getenv("ANTHROPIC_API_KEY") == "":
+			fmt.Fprintln(os.Stderr, "fak guard: note — no ANTHROPIC_API_KEY set. If you are logged into a Claude Pro/Max")
+			fmt.Fprintln(os.Stderr, "           subscription, Claude Code forwards its OAuth token through the gateway (fak sends it")
+			fmt.Fprintln(os.Stderr, "           upstream as a bearer token); pass --anthropic-oauth to have fak hold the token itself.")
 		}
 	}
 
@@ -231,6 +275,81 @@ func cmdGuard(argv []string) {
 		fmt.Fprintf(os.Stderr, "fak guard: gateway error during the session: %v\n", serr)
 		os.Exit(1)
 	}
+}
+
+// resolveAnthropicOAuthToken finds a Claude Pro/Max SUBSCRIPTION OAuth token to
+// authenticate the upstream with, in priority order:
+//  1. the named env var (default CLAUDE_CODE_OAUTH_TOKEN) — a long-lived
+//     `claude setup-token` credential, the headless-friendly source;
+//  2. <claude-config>/.oauth-token — a long-lived setup-token file (what the fleet
+//     pins; preferred over the expiring interactive creds);
+//  3. <claude-config>/.credentials.json -> claudeAiOauth.accessToken — the
+//     interactive login token. This one EXPIRES; Claude Code refreshes it
+//     out-of-band (directly against Anthropic, not through the gateway), so a
+//     long session may outlive the snapshot fak read at startup — prefer a setup
+//     token for anything long-running.
+//
+// <claude-config> is $CLAUDE_CONFIG_DIR (first entry if it is a list) when set,
+// else ~/.claude. Returns the token and a human source label, or an error that
+// names every place it looked so the operator can fix the setup.
+func resolveAnthropicOAuthToken(tokenEnv string) (token, source string, err error) {
+	tried := make([]string, 0, 3)
+
+	if tokenEnv != "" {
+		tried = append(tried, "$"+tokenEnv)
+		if v := strings.TrimSpace(os.Getenv(tokenEnv)); v != "" {
+			return v, "$" + tokenEnv, nil
+		}
+	}
+
+	cfgDir := guardClaudeConfigDir()
+
+	setupPath := filepath.Join(cfgDir, ".oauth-token")
+	tried = append(tried, setupPath)
+	if b, rerr := os.ReadFile(setupPath); rerr == nil {
+		if v := strings.TrimSpace(string(b)); v != "" {
+			return v, setupPath, nil
+		}
+	}
+
+	credPath := filepath.Join(cfgDir, ".credentials.json")
+	tried = append(tried, credPath)
+	if b, rerr := os.ReadFile(credPath); rerr == nil {
+		var doc struct {
+			ClaudeAIOauth struct {
+				AccessToken string `json:"accessToken"`
+				ExpiresAt   int64  `json:"expiresAt"`
+			} `json:"claudeAiOauth"`
+		}
+		if json.Unmarshal(b, &doc) == nil {
+			if v := strings.TrimSpace(doc.ClaudeAIOauth.AccessToken); v != "" {
+				label := credPath
+				if exp := doc.ClaudeAIOauth.ExpiresAt; exp > 0 && exp < time.Now().UnixMilli() {
+					fmt.Fprintf(os.Stderr, "fak guard: WARNING — the OAuth token in %s expired; Claude Code normally refreshes it. Re-run `claude` once, or use `claude setup-token` for a long-lived token.\n", credPath)
+				}
+				return v, label, nil
+			}
+		}
+	}
+
+	return "", "", fmt.Errorf("no Claude subscription OAuth token found (looked in: %s). Log into Claude Code (`claude`), or create a long-lived one with `claude setup-token` and export it as %s", strings.Join(tried, ", "), tokenEnv)
+}
+
+// guardClaudeConfigDir resolves the directory that holds Claude Code's per-account
+// credentials: $CLAUDE_CONFIG_DIR (first path if it is an OS-list) when set, else
+// ~/.claude. A home that cannot be resolved degrades to the literal ".claude".
+func guardClaudeConfigDir() string {
+	if v := strings.TrimSpace(os.Getenv("CLAUDE_CONFIG_DIR")); v != "" {
+		if i := strings.IndexByte(v, os.PathListSeparator); i >= 0 {
+			v = v[:i]
+		}
+		return v
+	}
+	home, err := os.UserHomeDir()
+	if err != nil || home == "" {
+		return ".claude"
+	}
+	return filepath.Join(home, ".claude")
 }
 
 // guardDefaultBaseURL maps a provider to its public API base URL. The anthropic host

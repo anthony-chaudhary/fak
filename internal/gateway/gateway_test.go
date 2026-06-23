@@ -724,6 +724,70 @@ func TestAnthropicMessagesPassthroughPreservesCacheAndAdjudicates(t *testing.T) 
 	}
 }
 
+// TestAnthropicMessagesPinnedOAuthSubscription proves the subscription path: with
+// PinUpstreamCredential set and an OAuth token configured, the gateway authenticates
+// upstream with its OWN token sent as Authorization: Bearer + the oauth beta, IGNORES
+// the inbound client's placeholder credential, and forwards the client's inbound
+// anthropic-beta flags (unioned with the oauth beta). This is what makes
+// `fak guard --anthropic-oauth -- claude` reach Anthropic on a Pro/Max subscription.
+func TestAnthropicMessagesPinnedOAuthSubscription(t *testing.T) {
+	abi.ResetForTest()
+	abi.RegisterRegionBackend(inlineBackend{})
+	abi.RegisterEngine("test", echoEngine{})
+	abi.RegisterAdjudicator(0, toolAdj{})
+
+	inbound := []byte(`{"model":"claude-test","max_tokens":64,` +
+		`"system":[{"type":"text","text":"You are Claude Code, Anthropic's official CLI for Claude."}],` +
+		`"messages":[{"role":"user","content":"hi"}]}`)
+
+	var gotAuth, gotAPIKey, gotBeta string
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotAuth = r.Header.Get("Authorization")
+		gotAPIKey = r.Header.Get("x-api-key")
+		gotBeta = r.Header.Get("anthropic-beta")
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"content":[{"type":"text","text":"ok"}],"stop_reason":"end_turn","usage":{"input_tokens":1,"output_tokens":1}}`))
+	}))
+	defer upstream.Close()
+
+	srv, err := New(Config{
+		EngineID: "test", Model: "claude-test", BaseURL: upstream.URL, Provider: "anthropic",
+		APIKey: "sk-ant-oat01-server-subscription", PinUpstreamCredential: true, VDSO: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(srv.Close)
+	ts := httptest.NewServer(srv.Handler())
+	defer ts.Close()
+
+	req, _ := http.NewRequest("POST", ts.URL+"/v1/messages", bytes.NewReader(inbound))
+	req.Header.Set("Content-Type", "application/json")
+	// The wrapped client sends a PLACEHOLDER key (guard injects one) and its own betas.
+	req.Header.Set("x-api-key", "fak-guard-oauth-placeholder")
+	req.Header.Set("anthropic-beta", "claude-code-20250219,fine-grained-tool-streaming-2025-05-14")
+	httpResp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("post: %v", err)
+	}
+	defer httpResp.Body.Close()
+	if httpResp.StatusCode != 200 {
+		t.Fatalf("status = %d", httpResp.StatusCode)
+	}
+
+	if gotAuth != "Bearer sk-ant-oat01-server-subscription" {
+		t.Errorf("upstream Authorization = %q, want the held OAuth token as a bearer", gotAuth)
+	}
+	if gotAPIKey != "" {
+		t.Errorf("upstream x-api-key = %q, want empty — the inbound placeholder must be IGNORED, not forwarded", gotAPIKey)
+	}
+	for _, want := range []string{"oauth-2025-04-20", "claude-code-20250219", "fine-grained-tool-streaming-2025-05-14"} {
+		if !strings.Contains(gotBeta, want) {
+			t.Errorf("upstream anthropic-beta = %q, want it to contain %q", gotBeta, want)
+		}
+	}
+}
+
 func TestChatProxyLiftsTextToolCallsBeforeAdjudication(t *testing.T) {
 	abi.ResetForTest()
 	abi.RegisterRegionBackend(inlineBackend{})

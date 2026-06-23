@@ -308,6 +308,13 @@ type SampleParams struct {
 	// request — the transparent-hop credential on the passthrough path, where the
 	// inbound client authenticates directly against the real upstream with its own key.
 	UpstreamAPIKey string
+	// UpstreamBeta, when non-empty, is merged into the upstream "anthropic-beta"
+	// header (Anthropic wire only) — the inbound client's own beta flags forwarded
+	// on the passthrough hop so features it negotiated (extended thinking,
+	// fine-grained tool streaming, the oauth subscription path) survive. It is
+	// UNIONED with any scheme-required beta the adapter already set (e.g. the OAuth
+	// flag), deduped, so neither clobbers the other. A no-op off the Anthropic wire.
+	UpstreamBeta string
 }
 
 // SampleOpt is a functional option that mutates a SampleParams. The variadic
@@ -425,6 +432,60 @@ func WithUpstreamAPIKey(key string) SampleOpt {
 			sp.UpstreamAPIKey = key
 		}
 	}
+}
+
+// WithUpstreamBeta forwards the inbound client's "anthropic-beta" header to the
+// upstream on the passthrough hop (Anthropic wire only). An empty string is a no-op.
+func WithUpstreamBeta(beta string) SampleOpt {
+	return func(sp *SampleParams) {
+		if beta != "" {
+			sp.UpstreamBeta = beta
+		}
+	}
+}
+
+// forceAnthropicNonStreaming returns the raw Anthropic request body with its
+// top-level "stream" flag set to false, so the passthrough upstream returns a
+// buffered JSON body (which this non-streaming planner can parse) rather than an
+// SSE event stream. A body that carries NO stream field is returned UNCHANGED
+// (byte-identical), so the common non-streaming case keeps its exact cache prefix;
+// only a streaming body is re-marshalled, and the cached prefix is the
+// system/tools/messages content — unaffected by the top-level key order or the
+// stream flag. A body that does not parse as a JSON object is returned unchanged
+// (the planner then surfaces the upstream's own error).
+func forceAnthropicNonStreaming(raw []byte) []byte {
+	var obj map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &obj); err != nil {
+		return raw
+	}
+	if _, ok := obj["stream"]; !ok {
+		return raw
+	}
+	obj["stream"] = json.RawMessage("false")
+	out, err := json.Marshal(obj)
+	if err != nil {
+		return raw
+	}
+	return out
+}
+
+// mergeBeta unions two comma-separated "anthropic-beta" header values, preserving
+// first-seen order and dropping duplicates and blanks. Either side may be empty.
+// It is how a scheme-required flag (e.g. the OAuth beta the adapter sets) and the
+// inbound client's negotiated betas coexist in one header without one overwriting
+// the other.
+func mergeBeta(a, b string) string {
+	seen := map[string]bool{}
+	var out []string
+	for _, part := range strings.Split(a+","+b, ",") {
+		t := strings.TrimSpace(part)
+		if t == "" || seen[t] {
+			continue
+		}
+		seen[t] = true
+		out = append(out, t)
+	}
+	return strings.Join(out, ",")
 }
 
 // applySampleOpts folds a variadic option list into a single SampleParams. An
@@ -628,7 +689,15 @@ func (p *HTTPPlanner) Complete(ctx context.Context, messages []Message, tools []
 	// OpenAI/Gemini/xAI endpoint — only the anthropic→anthropic proxy forwards it.
 	var reqBody []byte
 	if len(sp.RawRequestBody) > 0 && adapter.Provider() == ProviderAnthropic {
-		reqBody = sp.RawRequestBody
+		// The upstream hop is NON-streaming: this planner buffers the whole completion
+		// (the gateway re-synthesizes an SSE stream to the client). Claude Code streams
+		// by default, so its raw body carries "stream":true — forwarded as-is, the real
+		// API replies with an SSE event stream the buffered ParseResponse cannot decode
+		// ("invalid character 'e'" on "event: message_start"). Force stream:false on the
+		// upstream copy. Cache-safe: Anthropic's cached prefix is the system/tools/
+		// messages CONTENT, not the top-level "stream" flag, and a body that does not
+		// carry a stream field is returned byte-identical (no re-marshal).
+		reqBody = forceAnthropicNonStreaming(sp.RawRequestBody)
 	} else {
 		reqBody, err = adapter.MarshalRequest(adapterRequest{
 			Model:          modelID,
@@ -674,7 +743,14 @@ func (p *HTTPPlanner) Complete(ctx context.Context, messages []Message, tools []
 		if err != nil {
 			return nil, err
 		}
-		for k, v := range adapter.Headers(apiKey) {
+		hdrs := adapter.Headers(apiKey)
+		// Passthrough hop (Anthropic wire): union the inbound client's anthropic-beta
+		// flags with any the auth scheme required (e.g. the OAuth beta), so the
+		// client's negotiated features survive without clobbering the scheme flag.
+		if sp.UpstreamBeta != "" && adapter.Provider() == ProviderAnthropic {
+			hdrs["anthropic-beta"] = mergeBeta(hdrs["anthropic-beta"], sp.UpstreamBeta)
+		}
+		for k, v := range hdrs {
 			if v != "" {
 				req.Header.Set(k, v)
 			}

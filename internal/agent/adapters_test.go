@@ -627,6 +627,94 @@ func TestHTTPPlannerUsesProviderAdapterAndPreSendQuarantine(t *testing.T) {
 	}
 }
 
+// TestAnthropicAdapterOAuthScheme proves the credential-scheme rule that makes a
+// Claude Pro/Max SUBSCRIPTION usable through the gateway: an OAuth token
+// ("sk-ant-oat…") is sent as Authorization: Bearer + the oauth beta — never as
+// x-api-key (which the real API 401s) — while a plain API key still goes as
+// x-api-key. It also proves WithUpstreamBeta unions the inbound client's betas
+// with the scheme-required oauth beta without either clobbering the other.
+func TestAnthropicAdapterOAuthScheme(t *testing.T) {
+	if !IsAnthropicOAuthToken("sk-ant-oat01-abc") {
+		t.Fatal("sk-ant-oat01- must be recognized as an OAuth token")
+	}
+	if IsAnthropicOAuthToken("sk-ant-api03-abc") {
+		t.Fatal("a plain API key must NOT be recognized as an OAuth token")
+	}
+
+	type captured struct {
+		auth, apiKey, beta, version string
+	}
+	run := func(t *testing.T, token string, opts ...SampleOpt) captured {
+		t.Helper()
+		var got captured
+		ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			got = captured{
+				auth:    r.Header.Get("Authorization"),
+				apiKey:  r.Header.Get("x-api-key"),
+				beta:    r.Header.Get("anthropic-beta"),
+				version: r.Header.Get("anthropic-version"),
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"content":[{"type":"text","text":"ok"}],"stop_reason":"end_turn","usage":{"input_tokens":1,"output_tokens":1}}`))
+		}))
+		defer ts.Close()
+		planner, err := NewProviderHTTPPlanner("anthropic", ts.URL, "claude-test", token)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := planner.Complete(context.Background(), adapterTestMessages(""), adapterTestTools(), opts...); err != nil {
+			t.Fatalf("complete: %v", err)
+		}
+		return got
+	}
+
+	t.Run("oauth_token_uses_bearer_and_beta", func(t *testing.T) {
+		got := run(t, "sk-ant-oat01-secret")
+		if got.auth != "Bearer sk-ant-oat01-secret" {
+			t.Errorf("Authorization = %q, want bearer", got.auth)
+		}
+		if got.apiKey != "" {
+			t.Errorf("x-api-key = %q, want empty (an OAuth token must not be sent as x-api-key)", got.apiKey)
+		}
+		if !strings.Contains(got.beta, AnthropicOAuthBeta) {
+			t.Errorf("anthropic-beta = %q, want it to contain %q", got.beta, AnthropicOAuthBeta)
+		}
+		if got.version == "" {
+			t.Errorf("anthropic-version must still be set")
+		}
+	})
+
+	t.Run("api_key_uses_x_api_key", func(t *testing.T) {
+		got := run(t, "sk-ant-api03-secret")
+		if got.apiKey != "sk-ant-api03-secret" {
+			t.Errorf("x-api-key = %q, want the API key", got.apiKey)
+		}
+		if got.auth != "" {
+			t.Errorf("Authorization = %q, want empty for an API key", got.auth)
+		}
+		if got.beta != "" {
+			t.Errorf("anthropic-beta = %q, want empty for a plain API key", got.beta)
+		}
+	})
+
+	t.Run("upstream_beta_unions_with_oauth_beta", func(t *testing.T) {
+		// The inbound client (Claude Code) negotiates its own betas; they must reach
+		// the upstream ALONGSIDE the oauth flag, deduped, with neither overwriting the
+		// other.
+		got := run(t, "sk-ant-oat01-secret", WithUpstreamBeta("claude-code-20250219,"+AnthropicOAuthBeta+",fine-grained-tool-streaming-2025-05-14"))
+		for _, want := range []string{AnthropicOAuthBeta, "claude-code-20250219", "fine-grained-tool-streaming-2025-05-14"} {
+			if !strings.Contains(got.beta, want) {
+				t.Errorf("anthropic-beta = %q, want it to contain %q", got.beta, want)
+			}
+		}
+		// dedup: the oauth flag must appear exactly once even though both the adapter
+		// and the inbound header carry it.
+		if n := strings.Count(got.beta, AnthropicOAuthBeta); n != 1 {
+			t.Errorf("anthropic-beta = %q, want %q exactly once, got %d", got.beta, AnthropicOAuthBeta, n)
+		}
+	})
+}
+
 func TestHTTPPlannerFoldsProviderCachedTokensIntoCachemeta(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/chat/completions" {
@@ -1159,4 +1247,38 @@ func BenchmarkTranscriptAdaptersParseToolCall(b *testing.B) {
 			}
 		})
 	}
+}
+
+// TestForceAnthropicNonStreaming proves the passthrough upstream is kept
+// non-streaming: a body carrying "stream":true is flipped to false (so the buffered
+// planner gets JSON, not SSE), a body with no stream field is returned byte-identical
+// (the cache-prefix-preserving common case), and message CONTENT survives the flip.
+func TestForceAnthropicNonStreaming(t *testing.T) {
+	t.Run("no_stream_field_is_byte_identical", func(t *testing.T) {
+		raw := []byte(`{"model":"claude","system":[{"type":"text","text":"S","cache_control":{"type":"ephemeral"}}],"messages":[{"role":"user","content":"hi"}]}`)
+		got := forceAnthropicNonStreaming(raw)
+		if string(got) != string(raw) {
+			t.Errorf("body without a stream field must be unchanged:\n got %s\nwant %s", got, raw)
+		}
+	})
+	t.Run("stream_true_is_flipped_false_and_content_survives", func(t *testing.T) {
+		raw := []byte(`{"model":"claude","stream":true,"messages":[{"role":"user","content":"hi"}]}`)
+		got := forceAnthropicNonStreaming(raw)
+		var obj map[string]any
+		if err := json.Unmarshal(got, &obj); err != nil {
+			t.Fatalf("result not valid JSON: %v", err)
+		}
+		if obj["stream"] != false {
+			t.Errorf("stream = %v, want false", obj["stream"])
+		}
+		if !strings.Contains(string(got), `"content":"hi"`) {
+			t.Errorf("message content lost: %s", got)
+		}
+	})
+	t.Run("non_object_is_unchanged", func(t *testing.T) {
+		raw := []byte(`not json`)
+		if string(forceAnthropicNonStreaming(raw)) != "not json" {
+			t.Error("a non-JSON body must be returned unchanged")
+		}
+	})
 }

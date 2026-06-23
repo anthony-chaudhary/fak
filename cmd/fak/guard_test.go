@@ -239,3 +239,47 @@ func TestGuardWaitHealthy(t *testing.T) {
 		t.Errorf("expected fast fail on a dead gateway, took %s", elapsed)
 	}
 }
+
+// TestResolveAnthropicOAuthToken proves the subscription-token sourcing precedence
+// used by `fak guard --anthropic-oauth`: the named env var wins, then the long-lived
+// <config>/.oauth-token setup token, then the interactive .credentials.json
+// accessToken; an empty setup makes it fail loud (never silently pick nothing).
+func TestResolveAnthropicOAuthToken(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("CLAUDE_CONFIG_DIR", dir)
+	const tokenEnv = "FAK_TEST_OAUTH_TOKEN"
+	t.Setenv(tokenEnv, "") // start clean
+
+	// Nothing present -> a loud error that names where it looked.
+	if _, _, err := resolveAnthropicOAuthToken(tokenEnv); err == nil {
+		t.Fatal("want an error when no token source exists")
+	}
+
+	// .credentials.json accessToken is the lowest file fallback.
+	cred := `{"claudeAiOauth":{"accessToken":"sk-ant-oat01-from-creds","expiresAt":` +
+		// far-future expiry so the test never trips the expired-token warning path
+		"32503680000000}}"
+	if err := os.WriteFile(filepath.Join(dir, ".credentials.json"), []byte(cred), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	tok, src, err := resolveAnthropicOAuthToken(tokenEnv)
+	if err != nil || tok != "sk-ant-oat01-from-creds" {
+		t.Fatalf("creds fallback: tok=%q src=%q err=%v", tok, src, err)
+	}
+
+	// .oauth-token (a long-lived setup token) outranks .credentials.json.
+	if err := os.WriteFile(filepath.Join(dir, ".oauth-token"), []byte("  sk-ant-oat01-setup\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	tok, _, err = resolveAnthropicOAuthToken(tokenEnv)
+	if err != nil || tok != "sk-ant-oat01-setup" {
+		t.Fatalf("setup-token precedence (trimmed): tok=%q err=%v", tok, err)
+	}
+
+	// The env var outranks every file source.
+	t.Setenv(tokenEnv, "sk-ant-oat01-from-env")
+	tok, src, err = resolveAnthropicOAuthToken(tokenEnv)
+	if err != nil || tok != "sk-ant-oat01-from-env" || src != "$"+tokenEnv {
+		t.Fatalf("env precedence: tok=%q src=%q err=%v", tok, src, err)
+	}
+}

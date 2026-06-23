@@ -98,6 +98,20 @@ func anthropicInboundKey(r *http.Request) string {
 	return ""
 }
 
+// anthropicUpstreamCredential resolves the credential the passthrough hop
+// authenticates upstream with. With PinUpstreamCredential set the gateway uses
+// its OWN configured key (returns "" so the planner falls back to its configured
+// APIKey) and IGNORES the inbound client's key — the subscription path, where fak
+// holds the real OAuth token and the wrapped client only sends a placeholder to
+// satisfy its own credential check. Otherwise it forwards the inbound client's own
+// key (the transparent hop).
+func (s *Server) anthropicUpstreamCredential(r *http.Request) string {
+	if s.pinUpstreamCredential {
+		return ""
+	}
+	return anthropicInboundKey(r)
+}
+
 // handleAnthropicMessages is the adjudication PROXY on the Anthropic wire. It
 // decodes the inbound Messages request into the canonical transcript, forwards it
 // to the configured model (the same HTTPPlanner/MockPlanner the OpenAI path uses),
@@ -125,17 +139,20 @@ func (s *Server) handleAnthropicMessages(w http.ResponseWriter, r *http.Request)
 	}
 	ctx := r.Context()
 	reqTrace := s.traceFor(r.Header.Get("X-Trace-Id"))
-	// In passthrough mode the inbound client's own credential is forwarded upstream
-	// (transparent hop). Extracted here, on the HTTP boundary, since the planner
-	// layer never sees the request headers.
-	upstreamKey := anthropicInboundKey(r)
+	// In passthrough mode the upstream credential is the client's own (transparent
+	// hop) UNLESS the gateway pins its own (the subscription path). The inbound
+	// anthropic-beta is forwarded so the client's negotiated betas survive the hop.
+	// Both extracted here, on the HTTP boundary, since the planner layer never sees
+	// the request headers.
+	upstreamKey := s.anthropicUpstreamCredential(r)
+	upstreamBeta := r.Header.Get("anthropic-beta")
 
 	if req.Stream {
-		s.streamAnthropicPending(w, r, req, reqTrace, upstreamKey)
+		s.streamAnthropicPending(w, r, req, reqTrace, upstreamKey, upstreamBeta)
 		return
 	}
 
-	turn, err := s.completeAnthropicTurn(ctx, req, reqTrace, "", "", upstreamKey)
+	turn, err := s.completeAnthropicTurn(ctx, req, reqTrace, "", "", upstreamKey, upstreamBeta)
 	if err != nil {
 		// Mirror the chat-completions posture: an upstream model failure is a gateway
 		// error, and the raw provider body must not cross the trust boundary.
@@ -151,7 +168,7 @@ func (s *Server) handleAnthropicMessages(w http.ResponseWriter, r *http.Request)
 	})
 }
 
-func (s *Server) completeAnthropicTurn(ctx context.Context, req *agent.AnthropicMessagesRequest, reqTrace, id, model, upstreamKey string) (*anthropicTurn, error) {
+func (s *Server) completeAnthropicTurn(ctx context.Context, req *agent.AnthropicMessagesRequest, reqTrace, id, model, upstreamKey, upstreamBeta string) (*anthropicTurn, error) {
 	// Arm the RESULT-side floor BEFORE the planner runs — the exact parity the
 	// OpenAI proxy has at http.go (#77). DecodeAnthropicMessagesRequest already
 	// turned each inbound Anthropic `tool_result` block into a canonical RoleTool
@@ -191,7 +208,7 @@ func (s *Server) completeAnthropicTurn(ctx context.Context, req *agent.Anthropic
 	// WithRawRequestBody makes the sampling opts above no-ops (the client's own values
 	// are already in req.Raw; re-injecting them would change the cached prefix bytes).
 	if s.anthropicPassthrough() {
-		opts = append(opts, agent.WithRawRequestBody(req.Raw), agent.WithUpstreamAPIKey(upstreamKey))
+		opts = append(opts, agent.WithRawRequestBody(req.Raw), agent.WithUpstreamAPIKey(upstreamKey), agent.WithUpstreamBeta(upstreamBeta))
 	}
 	comp, err := s.complete(ctx, req.Messages, req.Tools, opts...)
 	if err != nil {
@@ -349,10 +366,10 @@ func (s *Server) streamAnthropic(w http.ResponseWriter, id, model string, blocks
 	streamAnthropicBlocks(send, blocks, stop, usage)
 }
 
-func (s *Server) streamAnthropicPending(w http.ResponseWriter, r *http.Request, req *agent.AnthropicMessagesRequest, reqTrace, upstreamKey string) {
+func (s *Server) streamAnthropicPending(w http.ResponseWriter, r *http.Request, req *agent.AnthropicMessagesRequest, reqTrace, upstreamKey, upstreamBeta string) {
 	flusher, ok := w.(http.Flusher)
 	if !ok {
-		turn, err := s.completeAnthropicTurn(r.Context(), req, reqTrace, "", "", upstreamKey)
+		turn, err := s.completeAnthropicTurn(r.Context(), req, reqTrace, "", "", upstreamKey, upstreamBeta)
 		if err != nil {
 			s.logf("gateway: upstream model error (messages): %v", err)
 			writeErr(w, http.StatusBadGateway, "upstream model error")
@@ -391,7 +408,7 @@ func (s *Server) streamAnthropicPending(w http.ResponseWriter, r *http.Request, 
 	}
 	done := make(chan turnResult, 1)
 	go func() {
-		turn, err := s.completeAnthropicTurn(r.Context(), req, reqTrace, id, model, upstreamKey)
+		turn, err := s.completeAnthropicTurn(r.Context(), req, reqTrace, id, model, upstreamKey, upstreamBeta)
 		done <- turnResult{turn: turn, err: err}
 	}()
 

@@ -542,12 +542,41 @@ func (anthropicAdapter) Endpoint(baseURL, model string) string {
 	return joinEndpoint(baseURL, "/v1/messages")
 }
 
+// AnthropicOAuthBeta is the anthropic-beta flag that gates the OAuth (Claude
+// Pro/Max SUBSCRIPTION) code path on api.anthropic.com. The official Claude Code
+// client sends it alongside an "Authorization: Bearer <oauth-token>"; the gateway
+// mirrors that so a subscription token is accepted upstream.
+const AnthropicOAuthBeta = "oauth-2025-04-20"
+
+// IsAnthropicOAuthToken reports whether tok is an Anthropic OAuth access token (a
+// Claude Code SUBSCRIPTION credential), which carry the "sk-ant-oat" prefix.
+// Anthropic rejects these as an x-api-key ("invalid x-api-key") and accepts them
+// ONLY as a bearer token; a plain API key ("sk-ant-api…") is the inverse. The
+// prefix is the provider's own stable discriminator, so the gateway can pick the
+// right auth scheme with no extra configuration — which is what lets a forwarded
+// or server-held subscription token work through the same passthrough path as a
+// raw API key.
+func IsAnthropicOAuthToken(tok string) bool {
+	return strings.HasPrefix(tok, "sk-ant-oat")
+}
+
 func (anthropicAdapter) Headers(apiKey string) map[string]string {
 	h := map[string]string{
 		"Content-Type":      "application/json",
 		"anthropic-version": "2023-06-01",
 	}
-	if apiKey != "" {
+	switch {
+	case apiKey == "":
+		// No credential (loopback dogfood / mock) — send neither auth scheme.
+	case IsAnthropicOAuthToken(apiKey):
+		// A subscription OAuth token: Anthropic accepts it ONLY as a bearer token
+		// with the oauth beta flag set — sending it as x-api-key 401s with
+		// "invalid x-api-key". This is exactly what the official Claude Code client
+		// sends, and it is what makes a Claude Pro/Max subscription usable through
+		// the gateway.
+		h["Authorization"] = "Bearer " + apiKey
+		h["anthropic-beta"] = AnthropicOAuthBeta
+	default:
 		h["x-api-key"] = apiKey
 	}
 	return h
