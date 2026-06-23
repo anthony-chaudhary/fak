@@ -152,5 +152,5 @@ description: "The numerics dimensions that matter in LLM serving, the current SO
 - **Source:** [https://docs.nvidia.com/cuda/cublas/](https://docs.nvidia.com/cuda/cublas/) (2026-06)
 - **fak:** parity — no number (shipped)
 - **fak note:** GLM-5.2's MoE/FFN experts + router + vocab head (the bulk of its params) run on fak's OWN k_q8_gemm kernel — cosine=1.000000, argmax-exact vs the CPU Q8 forward on a real datacenter GPU, with ZERO cuBLAS dependency. Honest fence: the DSA sparse-attention + DSA-KV stay host-side (the next #86/#413 slice); the dense path is pure-GPU, the sparse-attention is not yet.
-- **Trace:** 498a4ab · docs/notes/GLM52-PURE-KERNEL-ON-GPU-DGX-A100-2026-06-21.md
+- **Trace:** 498a4ab · docs/notes/GLM52-PURE-KERNEL-ON-GPU-SERVER-2026-06-21.md
 

@@ -98,7 +98,7 @@ So GLM-5.2's forward — the MoE/FFN experts + router, the vocab head, **and now
 attention's dense projections** — executes on the pure fak CUDA kernel on real datacenter GPU
 hardware, **cosine = 1.000000, argmax-exact** vs the CPU Q8 forward. (The prior MoE/FFN/head
 slice was committed `cf9d9a1` / `e3a92b7`, 2026-06-21; see
-[`GLM52-PURE-KERNEL-ON-GPU-DGX-A100-2026-06-21.md`](GLM52-PURE-KERNEL-ON-GPU-DGX-A100-2026-06-21.md).)
+[`GLM52-PURE-KERNEL-ON-GPU-SERVER-2026-06-21.md`](GLM52-PURE-KERNEL-ON-GPU-SERVER-2026-06-21.md).)
 
 **Reproduce on an sm_80 CUDA node** (clones `origin/main`, builds for sm_80, runs the
 isolated witness):

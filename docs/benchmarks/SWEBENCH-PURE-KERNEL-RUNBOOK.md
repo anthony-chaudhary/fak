@@ -9,7 +9,7 @@ description: "The exact, end-to-end command sequence to resolve SWE-bench Verifi
 > coding model served by fak's **own** CUDA forward pass (`fak serve --gguf --engine
 > inkernel --backend cuda`), driven by fak's **own** coding agent (`fak swebench run
 > --agent fleet`), graded by the **official** SWE-bench harness. No SGLang, no vLLM, no
-> external agent in the loop — the differentiator the [Qwen3.6-27B results](QWEN36-27B-DGX-RESULTS.md)
+> external agent in the loop — the differentiator the [Qwen3.6-27B results](QWEN36-27B-GPU-SERVER-RESULTS.md)
 > deliberately do *not* claim (that run is SGLang-serves + fak-adjudicates).
 >
 > **Status: the path is ASSEMBLED in code and the harness is witnessed; the resolve-rate
@@ -113,7 +113,7 @@ pure-kernel proof.**
   is the goal.
 - **The long pole is operational, not algorithmic.** Reaching the GPU server today goes
   through the Slack control bridge, whose transcript readback (`!dump`) is unreliable
-  (`cmd/dgxbridge/HANDOFF-NEXT-AGENT.md`). A direct shell, or fixing that readback, is the
+  (tracked in private lab tooling). A direct shell, or fixing that readback, is the
   highest-risk GPU-server item — everything in steps 3–5 is blocked on *observing* the run, not on
   the kernel.
 

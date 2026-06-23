@@ -87,7 +87,7 @@ This is GLM-5.2's own architecture running its dense compute (the bulk of its
 parameters) on real datacenter hardware, bit-faithful to the CPU reference. Full
 ledger — including the "what is / isn't pure" op table and the two honestly-filed
 on-hardware findings — is
-[`GLM52-PURE-KERNEL-ON-GPU-DGX-A100-2026-06-21.md`](GLM52-PURE-KERNEL-ON-GPU-DGX-A100-2026-06-21.md).
+[`GLM52-PURE-KERNEL-ON-GPU-SERVER-2026-06-21.md`](GLM52-PURE-KERNEL-ON-GPU-SERVER-2026-06-21.md).
 
 ### The GPU server is reachable today (fresh, 2026-06-22)
 
@@ -109,7 +109,7 @@ right now** — the on-device proof is reproducible, not a frozen one-off.
 - **The real 753B does not fit pure on this GPU server.** INT4 GLM-5.2 ≈ 376 GB > 320 GB
   total datacenter GPU VRAM; the pure fak kernel has no CPU-offload and no TP/NCCL. Serving
   the flagship at scale is the SGLang/vLLM-serves + fak-fronts path
-  ([`QWEN36-27B-DGX-RESULTS.md`](../benchmarks/QWEN36-27B-DGX-RESULTS.md) is the
+  ([`QWEN36-27B-GPU-SERVER-RESULTS.md`](../benchmarks/QWEN36-27B-GPU-SERVER-RESULTS.md) is the
   analogous served-model rung), not the native engine — a tracked long arc.
 - **No fresh same-session GPU re-run was taken.** The live control sessions are
   shared fleet worker shells; re-running the GPU witness on one would risk colliding

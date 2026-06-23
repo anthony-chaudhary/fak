@@ -40,7 +40,7 @@ description: "The serving dimensions that matter in LLM serving, the current SOT
 - **Source:** [https://arxiv.org/pdf/2403.02310](https://arxiv.org/pdf/2403.02310) (2024-03)
 - **fak:** no-claim — no number (stub)
 - **fak note:** fak has not recorded a latency-vs-throughput Pareto frontier (no P99 TTFT/TPOT vs request-rate). The adjacent committed evidence is a throughput-vs-concurrency sweep where fak trails raw SGLang (see peak-serving-throughput-per-gpu). Named as a gap, not a Pareto measurement.
-- **Trace:** experiments/qwen36/dgx-r4-20260622/compare.json + docs/benchmarks/QWEN36-27B-DGX-RESULTS.md: fak-gateway vs raw SGLang on 8-GPU datacenter server / Qwen3.6-27B, concurrency sweep 1->128; fak/raw = 0.60x (conc 8) -> 0.75x (conc 64 peak, 1085.6 vs 1451.6 tok/s) -> 0.97x (conc 128).
+- **Trace:** experiments/qwen36/dgx-r4-20260622/compare.json + docs/benchmarks/QWEN36-27B-GPU-SERVER-RESULTS.md: fak-gateway vs raw SGLang on 8-GPU datacenter server / Qwen3.6-27B, concurrency sweep 1->128; fak/raw = 0.60x (conc 8) -> 0.75x (conc 64 peak, 1085.6 vs 1451.6 tok/s) -> 0.97x (conc 128).
 
 ### ▼ Peak served throughput per accelerator (model-served-by-engine, MLPerf-grounded) — fak: **trails**
 
@@ -51,7 +51,7 @@ description: "The serving dimensions that matter in LLM serving, the current SOT
 - **Source:** [https://www.hpcwire.com/2025/09/10/mlperf-inference-v5-1-results-land-with-new-benchmarks-and-record-participation/](https://www.hpcwire.com/2025/09/10/mlperf-inference-v5-1-results-land-with-new-benchmarks-and-record-participation/) (2025-09-10)
 - **fak:** trails — 1085.6 tok/s @ conc 64 (peak) (shipped)
 - **fak note:** THE honest counter to the fleet 'lead' rows: this is the ONLY real concurrent-serving head-to-head against a LIVE SGLang process (same 8-GPU datacenter server / 27B / load harness, fak-in-front vs raw). fak TRAILS — it is the gateway/adjudication TAX: 0.60× worst (conc 8) → 0.75× at peak (conc 64) → ~0.97× converged at saturation (conc 128). fak's value here is the adjudication/coherence/measurement plane, NOT raw tok/s; the 4.1× fleet 'lead' is reuse-WORK eliminated on fak's own kernel held constant, a different axis from a throughput race against a tuned engine.
-- **Trace:** experiments/qwen36/dgx-r4-20260622/compare.json · docs/benchmarks/QWEN36-27B-DGX-RESULTS.md
+- **Trace:** experiments/qwen36/dgx-r4-20260622/compare.json · docs/benchmarks/QWEN36-27B-GPU-SERVER-RESULTS.md
 
 ## Scheduling & routing (`scheduling`)
 
@@ -88,7 +88,7 @@ description: "The serving dimensions that matter in LLM serving, the current SOT
 - **Source:** [https://www.marktechpost.com/2025/10/01/mlperf-inference-v5-1-2025-results-explained-for-gpus-cpus-and-ai-accelerators/](https://www.marktechpost.com/2025/10/01/mlperf-inference-v5-1-2025-results-explained-for-gpus-cpus-and-ai-accelerators/) (2025-10)
 - **fak:** no-claim — no number (stub)
 - **fak note:** fak ships no ms-level P99 TTFT/TPOT tail-latency number; the only live head-to-head is a THROUGHPUT sweep (it trails raw SGLang 0.75× at peak — see peak-serving-throughput-per-gpu). An honest gap on the latency-tail axis, not a measured trail.
-- **Trace:** data.json row 'served-throughput-vs-sglang'; artifact experiments/qwen36/dgx-r4-20260622/compare.json; docs/benchmarks/QWEN36-27B-DGX-RESULTS.md s2. fak 1085.6 vs raw SGLang 1451.6 tok/s @ conc 64 on 8-GPU datacenter server, Qwen3.6-27B.
+- **Trace:** data.json row 'served-throughput-vs-sglang'; artifact experiments/qwen36/dgx-r4-20260622/compare.json; docs/benchmarks/QWEN36-27B-GPU-SERVER-RESULTS.md s2. fak 1085.6 vs raw SGLang 1451.6 tok/s @ conc 64 on 8-GPU datacenter server, Qwen3.6-27B.
 
 ### ○ Time-to-first-token (TTFT) under realistic prefill — fak: **no-claim**
 

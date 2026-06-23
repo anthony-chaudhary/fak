@@ -7423,10 +7423,14 @@ default; set `ANTHROPIC_API_KEY` to use API billing instead.)
 5. Tears the gateway down when Claude exits and prints what the kernel decided:
 
 ```
-fak guard: 128 kernel decision(s) — 121 allowed, 5 denied, 2 repaired, 0 quarantined
+fak guard: 131 kernel decision(s) — 121 allowed, 5 denied, 2 repaired, 0 quarantined, 3 deferred
   blocked: POLICY_BLOCK     x4
   blocked: SELF_MODIFY      x1
 ```
+
+(`deferred` and `escalated` only appear when nonzero: a `deferred` is a non-blocking
+admit — typically an inbound tool result let through the result-side floor — and is a
+normal outcome, not an error.)
 
 > **Your Claude Pro/Max subscription is the default — no API key needed.** When the
 > upstream is Anthropic and `ANTHROPIC_API_KEY` is unset, `fak guard` uses your
@@ -7514,6 +7518,127 @@ the same counters `/metrics` exposes, so the views never disagree:
 ```bash
 FAK_AUDIT_JOURNAL=~/fak-audit.jsonl fak guard --log ~/fak-gw.log -- claude
 ```
+
+### Prove it: the request really transited the gateway over your subscription
+
+You don't have to take the subscription-by-default behavior on faith. On any box with the
+`claude` binary and a Claude Pro/Max subscription, this proves end to end that a real
+`/v1/messages` request crossed the in-process kernel gateway and was authenticated with
+your subscription OAuth token. Copy-paste it.
+
+**Prerequisites:**
+
+- `claude` is on your `PATH` (`claude --version` works).
+- A subscription token is reachable, in the order `fak guard` reads them: the
+  `CLAUDE_CODE_OAUTH_TOKEN` env var (a `claude setup-token` value), then
+  `<claude-config>/.oauth-token`, then `<claude-config>/.credentials.json` (the
+  interactive login token, which expires — prefer a setup token for anything
+  long-running). If you have used `claude` interactively on this box, the third source
+  already exists.
+- `ANTHROPIC_API_KEY` is **unset**. With it set, guard uses API billing instead of the
+  subscription and this proof does not apply.
+
+Run one headless, machine-checkable turn from the repo root (the Go module is the repo
+root), with the gateway log and the audit journal on:
+
+```bash
+go build -o fak ./cmd/fak
+
+# --log, FAK_AUDIT_JOURNAL, and --anthropic-oauth are fak flags.
+# -p, --allowedTools, and --output-format AFTER `claude` are Claude Code flags.
+FAK_AUDIT_JOURNAL="$PWD/fak-audit.jsonl" \
+  ./fak guard --log "$PWD/gw.log" --anthropic-oauth -- \
+  claude -p "Run: echo hello-from-guard" \
+    --allowedTools "Bash(echo:*)" \
+    --output-format json
+```
+
+`--anthropic-oauth` is optional (it is already the default for `--provider anthropic` with
+no API key); passing it makes guard fail loud if no token is found instead of silently
+falling back to passthrough. The banner names the token source and ends
+`…, sent as a bearer token)`.
+
+**Check 1 — a real result came back over your subscription.** `claude … --output-format
+json` writes one envelope to stdout (the banner and exit summary go to stderr, so they do
+not pollute it):
+
+```json
+{ "type": "result", "is_error": false, "result": "hello-from-guard", "duration_api_ms": 1234 }
+```
+
+`"is_error": false` with a real `result` proves a turn completed against Anthropic through
+guard.
+
+**Check 2 — the request transited the gateway.** Each line in `gw.log` is a timestamped
+JSON record; find the `/v1/messages` POST:
+
+```bash
+grep '"route":"/v1/messages"' gw.log
+# 2026/06/23 12:00:00 {"event":"gateway_http_request","method":"POST",
+#   "route":"/v1/messages","status":200,"duration_ms":1180.4,
+#   "user_agent":"claude-cli/...","trace_id":"gw-3"}
+```
+
+A `200` on `route=/v1/messages` from a `claude-cli/...` user agent proves the bytes were
+Claude's and they passed through the in-process gateway. Cross-check that line's
+`duration_ms` against the `duration_api_ms` in the Check-1 JSON: they are the same upstream
+call seen from the two ends of the proxy. If Claude had reached Anthropic directly, there
+would be no `/v1/messages` line here at all.
+
+**Check 3 — no bypass: the `200` is only possible because the gateway swapped the
+credential.** When `ANTHROPIC_API_KEY` is unset, guard hands the child the **invalid**
+placeholder key `fak-guard-oauth-placeholder` (`cmd/fak/guard.go`) and injects only the
+gateway URL. So the child authenticates to the gateway with a key Anthropic would reject.
+The upstream `200` is therefore only possible because the gateway dropped that placeholder
+and authenticated upstream with your real held OAuth bearer. A direct
+`claude → api.anthropic.com` call carrying that placeholder would `401`. The `200` is the
+proof the swap happened.
+
+**Check 4 — the tool call was adjudicated and recorded.** The `--allowedTools
+"Bash(echo:*)"` turn asks the model to run `echo`. If the model proposes the tool call
+(Haiku reliably does for this prompt), the kernel adjudicates it and the exit summary on
+stderr counts it:
+
+```
+fak guard: 2 kernel decision(s) — 1 allowed, 0 denied, 0 repaired, 0 quarantined, 1 deferred
+```
+
+`allowed` is the proposed `Bash` call crossing the capability floor; `deferred` is its
+inbound tool result admitted through the result-side floor. The durable record is in
+`fak-audit.jsonl` — a hash-chained `DECIDE` row per decision:
+
+```bash
+grep '"verdict":"ALLOW"' fak-audit.jsonl
+# {"seq":1,"kind":"DECIDE","tool":"Bash","verdict":"ALLOW","by":"monitor","prev_hash":"","hash":"..."}
+```
+
+Each row carries `prev_hash`/`hash`, so an auditor re-verifies the chain end to end and
+proves no decision was dropped or altered. (If the model answers in text without calling
+the tool, you get `0 allowed` and no ALLOW row — re-run, or make the instruction more
+explicit.) Without `FAK_AUDIT_JOURNAL` set, the summary is in-memory only and this durable
+trail does not exist.
+
+Together: a real result (1), through the gateway (2), authenticated only because the
+gateway swapped in your OAuth token (3), with the tool call adjudicated and recorded (4).
+
+### Current limits on the subscription seat
+
+The proof above runs the default `fak guard -- claude` path. The honest limits and
+in-flight rungs on that seat:
+
+- **Streaming.** The Anthropic `/v1/messages` wire synthesizes the SSE from a
+  fully-buffered, already-adjudicated turn, so time-to-first-token equals full-generation
+  time here. Live token streaming is shipped on the OpenAI-compatible wire for content;
+  the Anthropic-wire rung is next.
+- **Audit journal is opt-in.** The hash-chained trail exists only when `FAK_AUDIT_JOURNAL`
+  is set (the proof above sets it). The in-memory exit summary is always on.
+- **KV poison-eviction is a no-op on a proxy/subscription seat, by design.** The model
+  lives upstream, so there is no local KV prefix to drop. A quarantined tool result is
+  still paged out before the model reads it; the in-kernel evictor is the local-model
+  (`--gguf`) path.
+- **The OpenAI-wire seat** (`fak guard --provider openai -- codex` / `opencode`) is
+  unit-tested for provider inference and the tool floor, but has no recorded live
+  gateway-transited proof yet. Running the four checks above against it is the open task.
 
 The rest of this guide covers the **local-model** dogfood path (point fak at
 ollama / a shim / a large local OpenAI-compatible server) and the manual two-terminal
@@ -16042,7 +16167,7 @@ No claim exists without a traceable source.
 > Source: `docs/HARDWARE-MATRIX.md`
 
 ---
-title: "fak hardware matrix: Metal, Vulkan, CUDA, A100"
+title: "fak hardware matrix: Metal, Vulkan, CUDA, datacenter GPU"
 description: "The hardware coverage matrix for fak: one pure-Go agent kernel profiled across four platforms — Apple Metal, AMD Vulkan, and NVIDIA CUDA on Ada and Ampere."
 ---
 
@@ -16188,7 +16313,7 @@ determinism check that proves the deterministic metrics are not arm64-specific.
 
 ## Platform 4 — an 8-GPU datacenter server · the multi-GPU serving lane
 
-The big-iron lane: ~320 GB of GPU on a DGX-class node, where the single-box memory
+The big-iron lane: ~320 GB of GPU on a GPU server-class node, where the single-box memory
 ceilings (`fak` faithful ≤ 7B on the 36 GB Mac) stop binding and the questions become
 multi-GPU serving and frontier-model readiness.
 
@@ -16200,7 +16325,7 @@ multi-GPU serving and frontier-model readiness.
 
 **What's documented here:**
 
-- **The model-ladder-on-A100 plan** — tiny smoke model → dense Qwen2.5 → hybrid
+- **The model-ladder-on-datacenter GPU plan** — tiny smoke model → dense Qwen2.5 → hybrid
   Gated-DeltaNet bridge → Qwen3.6-27B, de-risking multi-GPU serving and the
   fak-gateway-vs-raw comparison per rung. *(Tracked in the private gpu-server
   model-ladder runbook, not part of the public snapshot.)*
@@ -16209,13 +16334,13 @@ multi-GPU serving and frontier-model readiness.
   where `fak`'s gateway/baseline role and the shipped serving-readiness preflight gate
   apply. The runnable form of this finding ships publicly as
   [`tools/glm52_serve_preflight.py`](https://github.com/anthony-chaudhary/fak/blob/main/tools/glm52_serve_preflight.py) and
-  [`tools/glm52_serve.sh`](https://github.com/anthony-chaudhary/fak/blob/main/tools/glm52_serve.sh); the private DGX fast-loop and
+  [`tools/glm52_serve.sh`](https://github.com/anthony-chaudhary/fak/blob/main/tools/glm52_serve.sh); the private GPU server fast-loop and
   SGLang/vLLM-readiness notes are not part of the public snapshot.
 
 > **Honesty fence.** This lane is reported as the documented serving/readiness track, not
 > a published single-box throughput row — the per-rung wall-clock witnesses live behind
 > the same DOS verification discipline as everything else and are gated on the serving
-> work landing. No A100 tok/s figure is asserted here that isn't traced to an artifact in
+> work landing. No datacenter GPU tok/s figure is asserted here that isn't traced to an artifact in
 > `BENCHMARK-AUTHORITY.md`.
 
 ---
@@ -16442,7 +16567,7 @@ Current status: **Deterministic floor proven, live eval pending**
 - [ ] Side-by-side comparison: fak vs. baseline infrastructure
 - [ ] Success rate parity proof (same agent, same task, different infra)
 - [ ] End-to-end cost measurement (API spend + compute)
-- [ ] DGX-scale fleet runs (100+ concurrent agents)
+- [ ] GPU server-scale fleet runs (100+ concurrent agents)
 
 ### 📊 Metrics to Capture (Full Run)
 | Metric | Kind | Provenance | Status |
@@ -17621,8 +17746,8 @@ Honest ceiling, surfaced not hidden: the *detector* these drivers feed is ~100% 
 - [SHIPPED] **AMD GPU backend (Vulkan compute).** A `//go:build vulkan` `compute.Backend` (`internal/compute/vulkan*` + SPIR-V `shaders/*.comp`) runs the in-kernel model on a **real AMD Radeon RX 7600** (RDNA3, via the native Windows Vulkan loader), registered as an `Approx` peer so `cpu-ref` stays the Default. **Numerical parity witnessed:** the full SmolLM2-135M forward pass is argmax-exact with **prefill-logit cosine = 1.0** vs cpu-ref, and all 7 op kernels pass the Approx gate. Witness: `go test -tags vulkan ./internal/compute/ ./internal/model/` (TestVulkan*, TestHALVulkanForwardMatchesNative); `VULKAN-AMD-RESULTS.md`.
 - [SHIPPED] **llama.cpp parity — numerical YES, throughput NO.** The Vulkan f32 path is correct but ~58× slower than llama.cpp CPU (decode **394 ms/tok / 2.5 tok/s** on the RX 7600, after FFN-tail fusion, vs llama.cpp CPU Q8_0 ~6.9 ms/tok), because it issues one `vkQueueSubmit`+fence per primitive op (~300/token). Q8 device GEMM has since landed (**24.6 tok/s, ~1.49× vs the f32 GPU path**; and the CPU's small-model lead narrows from 7.2× at 135M to 1.16× at 1.5B as per-token compute grows — see `BENCHMARK-AUTHORITY.md`); the remaining levers (single command-buffer per forward pass, sub-buffer tensor allocation, async submission) are tracked follow-ups; the backend honestly advertises `Async=false`/`FusedAttn=false`/`GraphCompile=false`. Claiming throughput parity would be false. See `VULKAN-AMD-RESULTS.md` Rung 2.
 - [SHIPPED] **NVIDIA GPU backend (CUDA) — decode parity with llama.cpp.** A CUDA `compute.Backend` (`internal/compute/cuda*`, `cuda_kernels.cu`) runs the in-kernel forward pass on a **real RTX 4070** (WSL2 passthrough), argmax-exact vs cpu-ref. With the reusable CUDA graph (`FAK_CUDA_GRAPH=1`, kernel KV-append + cross-session weight share) decode reaches **~119–120 tok/s — dead even with `llama.cpp` Q8_0 (120 ± 15 tok/s)** on a model that fits the GPU, and at **higher precision (fak runs f32, 4× the bytes of llama.cpp's 8-bit Q8_0)** at ~46% GPU utilization — a 16× decode speedup (7.5 → 120). The parity is on a *small* model (a 7B f32 set won't fit WSL's ~15 GB RAM, so large-model parity is not claimed); fp16 is tracked in issue #34. Witness: `GPU.md` §3b (real bench output, `llama-bench` reference).
-- [SHIPPED] **NVIDIA datacenter GPU (8× A100-SXM4-40GB, sm_80) — pure-kernel witnesses + end-to-end decode.** The `-tags cuda` backend builds for `sm_80` (`nvcc` → `libfakcuda.a`, `go build` green) and, in isolation on a real A100, **passes** the pure-kernel device witnesses: `TestCUDAForwardMatchesRef` (full multi-layer decode forward, **argmax-exact, logit cosine = 1.0**, graphs off *and* `FAK_CUDA_GRAPH=1`), `TestCUDAFlashAttentionMatchesRef` (MHA/GQA/MQA cosine = 1.0), Q8_0 GEMV (cosine 0.99999970, argmax-exact) + batched (0.99999969), Q4_K batched (cosine 1.0), and the VRAM witness. End-to-end, **SmolLM2-135M Q8 decodes at 127.8 tok/s on the A100 through the pure `k_q8_gemm` + `k_flash_attention` path — zero cuBLAS** (`modelbench -backend cuda -lean`; required fixing the lean-Q8 resident-upload path, `cuda.go uploadQ8Resident`). **Honest findings (filed, not hidden):** the Q4_K **GEMV** argmax-exact gate is too tight for a 4-bit format (kernel correct — Q4_K batched passes at cosine 1.0); the combined `-tags cuda` suite panics under the graph pass (a 1-D weight reaches MatMul — a test-ordering/graph-path bug, not a kernel defect). Witness: `tools/dgx_pure_kernel_run.sh` + `tools/dgx_pure_kernel_bench.sh`; `docs/notes/GLM52-PURE-KERNEL-ON-GPU-DGX-A100-2026-06-21.md`.
-- [SHIPPED] **GLM-5.2 (glm_moe_dsa) dense compute on the GPU pure kernel — #86 first slice, A100-witnessed.** `requireGLMDsaSession` no longer panics on a `compute.Backend`; GLM-5.2's **MoE/FFN experts + router (via `backendKernel` in `decodeBandGLMDsa`) and the vocab head (`glmDsaHead`)** route through the backend, and on a lean Q8 model run on **`k_q8_gemm` — the pure fak GPU kernel** (the MoE/FFN is the bulk of GLM-5.2's params). Witnessed: `TestGLMMoeDsaBackendGEMMMatchesCPU` (cpu-ref, **bit-exact max|Δ|=0 + argmax-exact** vs all-host CPU; 23 prior GLM-DSA witnesses stay green) and **on the A100 `TestCUDAGLMMoeDsaBackendForward`: cosine = 1.000000, argmax-exact** vs the CPU Q8 forward (`tools/dgx_glm_gpu_witness.sh`). The DSA sparse-attention (learned-indexer top-k + sparse gather/softmax/ΣwV) + DSA KV stay **host-side** — a fused sparse-attention CUDA kernel + device DSA-KV is the next #86/#413 slice, bounded in the doc. So GLM-5.2's dense path is pure-GPU; its DSA attention is not yet.
+- [SHIPPED] **NVIDIA datacenter GPU (8-GPU datacenter server, sm_80) — pure-kernel witnesses + end-to-end decode.** The `-tags cuda` backend builds for `sm_80` (`nvcc` → `libfakcuda.a`, `go build` green) and, in isolation on a real datacenter GPU, **passes** the pure-kernel device witnesses: `TestCUDAForwardMatchesRef` (full multi-layer decode forward, **argmax-exact, logit cosine = 1.0**, graphs off *and* `FAK_CUDA_GRAPH=1`), `TestCUDAFlashAttentionMatchesRef` (MHA/GQA/MQA cosine = 1.0), Q8_0 GEMV (cosine 0.99999970, argmax-exact) + batched (0.99999969), Q4_K batched (cosine 1.0), and the VRAM witness. End-to-end, **SmolLM2-135M Q8 decodes at 127.8 tok/s on the datacenter GPU through the pure `k_q8_gemm` + `k_flash_attention` path — zero cuBLAS** (`modelbench -backend cuda -lean`; required fixing the lean-Q8 resident-upload path, `cuda.go uploadQ8Resident`). **Honest findings (filed, not hidden):** the Q4_K **GEMV** argmax-exact gate is too tight for a 4-bit format (kernel correct — Q4_K batched passes at cosine 1.0); the combined `-tags cuda` suite panics under the graph pass (a 1-D weight reaches MatMul — a test-ordering/graph-path bug, not a kernel defect). Witness: `tools/dgx_pure_kernel_run.sh` + `tools/dgx_pure_kernel_bench.sh`; `docs/notes/GLM52-PURE-KERNEL-ON-GPU-SERVER-2026-06-21.md`.
+- [SHIPPED] **GLM-5.2 (glm_moe_dsa) dense compute on the GPU pure kernel — #86 first slice, datacenter GPU-witnessed.** `requireGLMDsaSession` no longer panics on a `compute.Backend`; GLM-5.2's **MoE/FFN experts + router (via `backendKernel` in `decodeBandGLMDsa`) and the vocab head (`glmDsaHead`)** route through the backend, and on a lean Q8 model run on **`k_q8_gemm` — the pure fak GPU kernel** (the MoE/FFN is the bulk of GLM-5.2's params). Witnessed: `TestGLMMoeDsaBackendGEMMMatchesCPU` (cpu-ref, **bit-exact max|Δ|=0 + argmax-exact** vs all-host CPU; 23 prior GLM-DSA witnesses stay green) and **on the datacenter GPU `TestCUDAGLMMoeDsaBackendForward`: cosine = 1.000000, argmax-exact** vs the CPU Q8 forward (`tools/dgx_glm_gpu_witness.sh`). The DSA sparse-attention (learned-indexer top-k + sparse gather/softmax/ΣwV) + DSA KV stay **host-side** — a fused sparse-attention CUDA kernel + device DSA-KV is the next #86/#413 slice, bounded in the doc. So GLM-5.2's dense path is pure-GPU; its DSA attention is not yet.
 - [SHIPPED] **Apple Silicon GPU backend (Metal/MPS) — first light (issue #300 / C-001).** A `//go:build darwin && metal` `compute.Backend` (`internal/compute/metal*`) runs the in-kernel forward pass on a **real Apple M3 Pro** GPU, registered as an `Approx` peer so `cpu-ref` stays the Default. GEMM uses `MPSMatrixMultiplication`; the seven elementwise/reduction ops are runtime-compiled MSL compute kernels (compiled in-process by cgo's clang — no offline kernel build). **Numerical parity witnessed:** a full multi-layer synthetic Llama decode (6-token prompt + 8 greedy steps) is **argmax-exact** with **logit cosine = 1.0** vs cpu-ref, and the op-level MPS MatMul matches at cosine = 1.0 (max|Δ| = 1.9e-6). Throughput is **not** yet claimed: this synchronous (encode→commit→wait per op) first increment targets correctness; batched command buffers, async, and quantized device GEMM are tracked follow-ups (the Go MatMul refuses non-F32 weights). Witness: `CGO_ENABLED=1 go test -tags metal ./internal/compute/` (TestMetalMatMulApproxMatchesRef, TestMetalForwardMatchesRef).
 - [SHIPPED] Live-seam honesty: a run carries a real transcript hash XOR the explicit RED flag `live_seam_unverified` — never a silent skip (unit 46).
 - [SHIPPED] The live seam is now exercised end-to-end: `fak agent` drove this kernel with a real OpenAI-compatible model (gemini-2.5-flash / -flash-lite and local Qwen2.5-1.5B/0.5B), every run carrying a real `transcript_sha` (not the `live_seam_unverified` flag). The v0.1 `fak bench` remains a deterministic OFFLINE replay by design; the live A/B is the separate `fak agent` lane. Witness: `experiments/agent-live/*.json` (each `live:true`); see `LIVE-RESULTS.md`.
@@ -19722,7 +19847,7 @@ Read by the offline shim build scripts, not the running engine.
 
 | Variable | Type / units | Default | When to use | Source |
 |---|---|---|---|---|
-| `FAK_CUDA_ARCH` | `sm_XX` (e.g. `sm_80`, `sm_89`, `sm_90`; bare `89` also accepted) | `sm_89` (Ada / L4) | Target a different NVIDIA arch when building `libfakcuda` (e.g. `sm_80` for A100). | `internal/compute/build_cuda.sh:51` |
+| `FAK_CUDA_ARCH` | `sm_XX` (e.g. `sm_80`, `sm_89`, `sm_90`; bare `89` also accepted) | `sm_89` (Ada / L4) | Target a different NVIDIA arch when building `libfakcuda` (e.g. `sm_80` for datacenter GPU). | `internal/compute/build_cuda.sh:51` |
 | `FAK_NVCC_CCBIN` | filesystem path | `/usr/bin/g++` | Point `nvcc` at a specific host compiler. | `internal/compute/build_cuda.sh:55` |
 
 > `FAK_VULKAN_SPIRV` is set by `internal/compute/build_vulkan.ps1` after compiling

@@ -68,7 +68,7 @@ Artifacts: [`compare.json`](../../experiments/qwen36/dgx-r4-20260622/compare.jso
 
 ## 4. Reproduce
 
-The GPU server is reached only via the Slack control bridge (`cmd/dgxbridge`); the 27B rung is
+The GPU server is reached only via the Slack control bridge (private lab tooling); the 27B rung is
 added to the ladder by `tools/dgx_qwen36_27b_runner.py` (reuses `dgx_ladder_runner.run_rung`,
 sizes `--mem-fraction-static` to fit the GLM-occupied GPU0, and sets
 `SGLANG_ENABLE_TP_MEMORY_INBALANCE_CHECK=0`). On the GPU server:

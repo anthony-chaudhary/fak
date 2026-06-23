@@ -1,6 +1,6 @@
 # SWE-bench Verified resolve compare — fak-gateway vs raw-SGLang (GPU server, 2026-06-22)
 
-Artifacts for [`docs/benchmarks/SWEBENCH-VERIFIED-DGX-RESOLVE-COMPARE.md`](../../../docs/benchmarks/SWEBENCH-VERIFIED-DGX-RESOLVE-COMPARE.md).
+Artifacts for [`docs/benchmarks/SWEBENCH-VERIFIED-GPU-SERVER-RESOLVE-COMPARE.md`](../../../docs/benchmarks/SWEBENCH-VERIFIED-GPU-SERVER-RESOLVE-COMPARE.md).
 Instance: `astropy__astropy-12907` (SWE-bench Verified). Model: `Qwen/Qwen3.6-27B`,
 SGLang TP=8 bf16 (`--tool-call-parser qwen3_coder`), on the lab GPU server (8-GPU datacenter server).
 Agent: mini-swe-agent 2.2.8. Grader: `swebench.harness.run_evaluation` 4.1.0 (Docker).
@@ -36,4 +36,4 @@ just allow-listing the tool.
 `tools/dgx_swebench_compare.py` (driver), `tools/dgx_swebench_launch.sh` (detached
 launcher), `tools/dgx_fak_gateway_repolicy.sh` (re-policy the gateway),
 `examples/swebench-coding-agent-policy.json` (allow-bash policy). Drive via
-`cmd/dgxbridge`. See the doc for the exact command sequence.
+the private lab control bridge. See the doc for the exact command sequence.

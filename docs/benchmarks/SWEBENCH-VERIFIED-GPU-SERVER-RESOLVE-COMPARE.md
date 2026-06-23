@@ -68,7 +68,7 @@ opposite completion, decided entirely by the floor.
 
 One self-contained driver, [`tools/dgx_swebench_compare.py`](https://github.com/anthony-chaudhary/fak/blob/main/tools/dgx_swebench_compare.py),
 launched detached on the GPU server via the Slack control bridge
-([`cmd/dgxbridge`](https://github.com/anthony-chaudhary/fak/tree/main/cmd/dgxbridge)) and polled from a host-shared `/tmp` log:
+(private lab tooling) and polled from a host-shared `/tmp` log:
 
 1. **Serve** `Qwen/Qwen3.6-27B`, SGLang TP=8, `--mem-fraction-static 0.75`,
    **`--tool-call-parser qwen3_coder`**. Qwen3.6's chat template emits XML
