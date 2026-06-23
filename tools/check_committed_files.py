@@ -6,6 +6,9 @@ commit regenerable build/runtime junk (caches, compiled binaries, logs, demo
 outputs, editor scratch) and any oversized blob, so the tree and history stay lean.
 
 Rules:
+  * PRIVATE-only — the operator's private lab GPU-server *connection* subsystem
+    (the Slack control-bridge client + its lab orchestrator) — ALWAYS refused in
+    the PUBLIC tree; it lives only in the private canonical repo.
   * HARD junk  — caches/compiled/OS-cruft/editor-scratch — ALWAYS refused.
   * SOFT junk  — *.log / *.tmp / report.json / agent-report.json — refused UNLESS
     under a data dir (fak/experiments/, fak/testdata/) where such files are real
@@ -58,6 +61,27 @@ KEEP_EXCEPTIONS = {
     "fak/demorace-err.log",  # cited as evidence in docs/benchmarking/FINAL-ANALYSIS.md
 }
 
+# Private-only: paths that must NEVER be tracked in the PUBLIC tree. The operator's
+# lab GPU-server *connection* code — the Slack control-bridge client and its bench
+# orchestrator — speaks a private lab protocol and lives ONLY in the private
+# canonical repo (PUBLIC-SCRUB-POLICY.md PRIVATE-ONLY list). Under the hard-cut
+# model the public tree is edited directly, so the export-time scrubber's
+# DELETE_PATHS never run as a public gate, and connection code using placeholder
+# ids sails past the secret-needle scan — which is exactly how internal/dgxbridge +
+# cmd/dgxbridge leaked once. This is the public-tree enforcement of the same
+# move-to-private intent, keyed on the FLATTENED public path (no fak/ prefix): any
+# cmd//internal/ package carrying the `dgx` token (so a NEW dedicated connection
+# tool, e.g. cmd/dgxconn, is covered without an edit here) plus the named Slack-
+# housekeeping sibling. A match is ALWAYS refused, at commit-time and in CI: move
+# it to the private repo. (Scope is the CONNECTION subsystem; the lab automation
+# under tools/*dgx* and the dgx result dirs are a separate, larger relocation.)
+PRIVATE_ONLY = [
+    (re.compile(r"^(cmd|internal)/[^/]*dgx[^/]*/"),
+     "private lab GPU-server connection subsystem — belongs in the private repo, not the public tree"),
+    (re.compile(r"^cmd/slackgc/"),
+     "private lab Slack-housekeeping tool — belongs in the private repo, not the public tree"),
+]
+
 
 def _git(args, root):
     return subprocess.run(["git", "-C", root] + args, capture_output=True, text=True)
@@ -77,6 +101,10 @@ def _tracked(root):
 
 def _classify(path, root, max_bytes):
     """Return a violation reason string, or None if the path is allowed."""
+    # Privacy first: a private-only path is refused regardless of size/junk rules.
+    for rx, why in PRIVATE_ONLY:
+        if rx.search(path):
+            return why
     if path in KEEP_EXCEPTIONS:
         size = _size(root, path)
         return None if size is None or size <= max_bytes else f"large file ({size//1024} KiB > {max_bytes//1024} KiB)"
