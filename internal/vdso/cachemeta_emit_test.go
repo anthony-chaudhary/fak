@@ -113,6 +113,71 @@ func countOf(events []CacheEvent, k CacheEventKind) int {
 	return n
 }
 
+// §2.5: tier-3 (static-table) serves must ALSO emit a first-class cachemeta hit —
+// "tier-2 (and tier-3)" — attributed to the consuming agent/turn. A static answer is
+// args/epoch-independent and never evicted, so HIT is its only lifecycle event.
+func TestCacheEmission_Tier3StaticHit(t *testing.T) {
+	v := New(8)
+	events, mu := collectEvents(v)
+	ctx := context.Background()
+
+	v.RegisterStatic("list_airports", []byte(`{"airports":["SFO"]}`))
+
+	// A consuming call names its agent/turn/trace — the tier-3 hit must attribute it.
+	c := roCall("list_airports", `{}`)
+	c.TraceID = "trace-t3"
+	c.Meta[MetaAgentID] = "agent-Z"
+	c.Meta[MetaTurn] = "turn-9"
+	if _, ok := v.Lookup(ctx, c); !ok {
+		t.Fatalf("expected the tier-3 static answer to serve")
+	}
+
+	mu.Lock()
+	got := append([]CacheEvent(nil), *events...)
+	mu.Unlock()
+
+	var hit *CacheEvent
+	for i := range got {
+		if got[i].Kind == CacheHit {
+			hit = &got[i]
+		}
+	}
+	if hit == nil {
+		t.Fatalf("tier-3 serve emitted no CacheHit event, got %+v", got)
+	}
+	if hit.Entry.Plane != cachemeta.PlaneToolResult || hit.Entry.Derivation.Tool != "list_airports" {
+		t.Fatalf("tier-3 hit entry mis-shaped: plane=%s tool=%q", hit.Entry.Plane, hit.Entry.Derivation.Tool)
+	}
+	// A static answer is args/epoch-independent: no ArgsDigest, not write-epoch invalidated.
+	if hit.Entry.Derivation.ArgsDigest != "" {
+		t.Fatalf("tier-3 entry should carry no args digest, got %q", hit.Entry.Derivation.ArgsDigest)
+	}
+	if hit.Entry.Coherence.InvalidationMode != cachemeta.InvalidationNone {
+		t.Fatalf("tier-3 entry should not be write-epoch invalidated, got %q", hit.Entry.Coherence.InvalidationMode)
+	}
+	cons := hit.Entry.Coherence.Consumers
+	if len(cons) != 1 || cons[0].AgentID != "agent-Z" || cons[0].ID != "turn-9" || cons[0].TraceID != "trace-t3" {
+		t.Fatalf("tier-3 hit consumer mis-attributed: %+v", cons)
+	}
+
+	// An ANONYMOUS tier-3 serve attaches no empty consumer.
+	if _, ok := v.Lookup(ctx, roCall("list_airports", `{}`)); !ok {
+		t.Fatalf("expected the static answer to serve on the anonymous lookup too")
+	}
+	mu.Lock()
+	got = append([]CacheEvent(nil), *events...)
+	mu.Unlock()
+	var last *CacheEvent
+	for i := range got {
+		if got[i].Kind == CacheHit {
+			last = &got[i]
+		}
+	}
+	if last == nil || len(last.Entry.Coherence.Consumers) != 0 {
+		t.Fatalf("anonymous tier-3 hit should carry no consumer, got %+v", last)
+	}
+}
+
 // §2.5: a per-tool witness adapter governs admission instead of the internal epoch.
 // Registering one for get_doc makes a fill's cachemeta entry carry the adapter's
 // witness, and revoking that witness evicts the entry.

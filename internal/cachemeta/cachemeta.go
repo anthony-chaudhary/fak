@@ -459,6 +459,26 @@ func FromVDSOKey(key string, payload abi.Ref, opts ...Option) (Entry, error) {
 	return e, nil
 }
 
+// FromStaticTool adapts a vDSO tier-3 (static-table) answer into a tool-result
+// cache entry. Unlike a tier-2 entry, a tier-3 answer is args- AND epoch-independent
+// — it is a fixed table entry keyed by tool name alone, served unconditionally — so
+// it carries no ArgsDigest, no admission epoch, and is NOT write-epoch invalidated
+// (InvalidationNone: a write to the world never strands it). A witness option still
+// upgrades it to external-refutation invalidation, for a static tool that chooses to
+// govern its own freshness.
+func FromStaticTool(tool string, payload abi.Ref, opts ...Option) Entry {
+	e := FromRef(payload, WithResidency(TierDRAM, "vdso", "static"))
+	e.Plane = PlaneToolResult
+	e.Derivation.Producer = "vdso"
+	e.Derivation.Tool = tool
+	e.Coherence.InvalidationMode = InvalidationNone
+	apply(&e, opts)
+	if e.Validity.Witness != "" {
+		e.Coherence.InvalidationMode = InvalidationExternalRefutation
+	}
+	return e
+}
+
 // ContextPage is the field-only shape a durable recall/context-page adapter
 // lowers into. It mirrors the metadata needed from recall.Page without making
 // cachemeta import recall.

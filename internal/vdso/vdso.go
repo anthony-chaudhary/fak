@@ -358,11 +358,16 @@ func (v *VDSO) Lookup(ctx context.Context, c *abi.ToolCall) (*abi.Result, bool) 
 
 	// tier 3: static table.
 	v.mu.Lock()
-	if ans, ok := v.static[c.Tool]; ok {
-		v.mu.Unlock()
-		return v.served(ctx, c, ans, 3, abi.TaintTrusted), true
-	}
+	ans, ok := v.static[c.Tool]
 	v.mu.Unlock()
+	if ok {
+		res := v.served(ctx, c, ans, 3, abi.TaintTrusted)
+		// §2.5 tier-3 emission: a static-table serve is a first-class cachemeta hit,
+		// attributed to the consuming agent/turn (consumerOpt is nil for an anonymous
+		// call). Emitted OUTSIDE v.mu, after served() pinned the payload Ref.
+		v.emitStaticHit(c, res.Payload, consumerOpt(c))
+		return res, true
+	}
 
 	// tier 2: content-addressed cache, gated identically and world-versioned.
 	if metaTrue(c, "readOnlyHint") && metaTrue(c, "idempotentHint") && !destructive(c) {

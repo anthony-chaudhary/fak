@@ -131,3 +131,23 @@ func (v *VDSO) emitCache(kind CacheEventKind, key string, ref abi.Ref, witness s
 	}
 	sink(CacheEvent{Kind: kind, Entry: entry})
 }
+
+// emitStaticHit lowers a tier-3 (static-table) serve into a first-class cachemeta hit
+// event (§2.5: "tier-2 AND tier-3" emission). A tier-3 answer is args/epoch-independent,
+// so it has no parseable tier-2 key — the entry is built directly from the tool name via
+// cachemeta.FromStaticTool. Like emitCache it is called OUTSIDE v.mu, so the sink may
+// re-enter. Tier-3 is served unconditionally and never evicted, so HIT is its only
+// runtime lifecycle event; consumer attribution still applies (the consumerOpt names the
+// agent/turn that reused the static answer, exactly as for a tier-2 hit).
+func (v *VDSO) emitStaticHit(c *abi.ToolCall, ref abi.Ref, opts ...cachemeta.Option) {
+	if c == nil {
+		return
+	}
+	v.regMu.RLock()
+	sink := v.cacheSink
+	v.regMu.RUnlock()
+	if sink == nil {
+		return
+	}
+	sink(CacheEvent{Kind: CacheHit, Entry: cachemeta.FromStaticTool(c.Tool, ref, opts...)})
+}
