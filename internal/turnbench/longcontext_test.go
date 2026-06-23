@@ -207,7 +207,10 @@ func TestLongContextIdleFractionFloor(t *testing.T) {
 
 	// (1) Decode scales by the active fraction (1−f), exactly, in every arm.
 	active := 1.0 - f
-	for _, arm := range []struct{ name string; got, want float64 }{
+	for _, arm := range []struct {
+		name      string
+		got, want float64
+	}{
 		{"A", cellF.A.DecodeFLOPs, cell0.A.DecodeFLOPs * active},
 		{"B", cellF.B.DecodeFLOPs, cell0.B.DecodeFLOPs * active},
 		{"C", cellF.C.DecodeFLOPs, cell0.C.DecodeFLOPs * active},

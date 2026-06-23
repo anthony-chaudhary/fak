@@ -612,8 +612,8 @@ func TestRaggedBatchIdleLaneSkip(t *testing.T) {
 	}
 	m := NewSynthetic(cfg)
 	V := cfg.VocabSize
-	const C = 6            // fleet size
-	const K = 2            // lanes idle every step
+	const C = 6 // fleet size
+	const K = 2 // lanes idle every step
 	active := make([]bool, C)
 	idle := make([]int, 0, K)
 	for b := 0; b < C; b++ {

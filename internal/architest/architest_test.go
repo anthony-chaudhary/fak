@@ -58,12 +58,12 @@ var tier = map[string]int{
 	"agent": 4, "bench": 4, "turnbench": 4, "gateway": 4, "registrations": 4, "rsiloop": 4,
 	"tracesink": 4, // imports agent/turnbench/registrations (tier 4) — tier forced to 4
 
-	"tokenizer":   1,
-	"answershape": 1, // pure degeneration/verbosity metric over text; stdlib-only, imports nothing internal.
-	"codelint":    1,
-	"polymodel":   1, // multi-model residency + serial-decode-lane + cache-led MTP accept core; stdlib-only, imports nothing internal.
-	"rulesynth": 3, // refusal-log rule synthesizer (#537): composes harvest/policy/adjudicator/shipgate to propose+gate a new structural rule as a reviewable diff; imports tier-2 mechanisms, never the hot path.
-	"residency": 2,
+	"tokenizer":    1,
+	"answershape":  1, // pure degeneration/verbosity metric over text; stdlib-only, imports nothing internal.
+	"codelint":     1,
+	"polymodel":    1, // multi-model residency + serial-decode-lane + cache-led MTP accept core; stdlib-only, imports nothing internal.
+	"rulesynth":    3, // refusal-log rule synthesizer (#537): composes harvest/policy/adjudicator/shipgate to propose+gate a new structural rule as a reviewable diff; imports tier-2 mechanisms, never the hot path.
+	"residency":    2,
 	"ctxresidency": 3,
 	// new-leaf:tier — `python tools/new_leaf.py <name> --tier <name>` inserts the
 	// declaration for a generated leaf immediately ABOVE this line. Keep the marker last.
