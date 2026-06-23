@@ -11,6 +11,23 @@ two questions on YOUR OWN sessions, no model in the loop:
   2) SELF-REDUCE — apply a risk-ranked reducer and PROVE it halves the window, with an
      honest, tiered loss profile. (`ctxwin reduce --target 2.0`)
 
+TUNING — the reducer is a DIAL, not a switch. The same risk-ranked machinery serves the
+operator who wants nothing touched and the operator who wants a 30k stack trace gone:
+  - `--profile off`          disabled — every result kept verbatim (ratio 1.0).
+  - `--profile conservative` lossless + recoverable only (noise + exact-dedup + stale reads);
+                             NO windowing, so no unique current content is ever truncated.
+  - `--profile balanced`     the default — low-risk tiers + bounded windowing auto-tuned to 2x.
+  - `--profile aggressive`   small head-only windows + collapse error-shaped results to their
+                             first line (the message), dropping the stack/stderr body.
+  - `--profile hyper`        collapse a 30k error result to a one-line marker ("[…tool error
+                             — ~7500 tok elided]"), tiny per-tool budgets. Lossy BY CHOICE.
+  - Fine-grained overrides (compose with any profile): `--error-collapse off|head|oneline`,
+    `--per-tool Bash=200 --per-tool TodoWrite=off` (a per-tool token budget, or `off`/`none`
+    to EXEMPT a tool from all reduction), `--no-stale`, `--no-noise`.
+  The lossy levers (error-collapse, sub-floor per-tool budgets) are OPT-IN and OFF in the
+  default profile; an error body collapsed to a marker is NOT counted recoverable (no file
+  handle), so `recoverable_frac` drops honestly when you turn the aggression up.
+
 WHAT THE DATA SAYS (measured over the heaviest real sessions on this box; live transcripts,
 so exact numbers drift run to run):
   - The window is ~56% tool_result + ~34% tool_use INPUTS (the agent's Write/Edit/Workflow
@@ -60,8 +77,10 @@ prompt-cache that makes long sessions cheap.
 Usage:
   python tools/ctxwin.py baseline [--since-days N] [--root DIR ...] [--max N]
                                   [--json OUT] [--md OUT] [--all] [--now STR]
-  python tools/ctxwin.py reduce  [<session.jsonl> | --since-days N] [--target 2.0]
-                                  [--budget T] [--no-stale] [--no-noise] [--json OUT]
+  python tools/ctxwin.py reduce  [<session.jsonl> | --since-days N]
+                                  [--profile off|conservative|balanced|aggressive|hyper]
+                                  [--target 2.0] [--budget T] [--error-collapse off|head|oneline]
+                                  [--per-tool TOOL=BUDGET ...] [--no-stale] [--no-noise] [--json OUT]
   python tools/ctxwin.py selfcheck      # synthetic fixtures; assert ratio + no overclaim
 """
 import sys
@@ -79,9 +98,14 @@ POINTER_TOK = 18             # size of an elision pointer we leave behind ("[ctx
 DEDUP_POINTER_TOK = 14       # smaller pointer for a fully-redundant duplicate
 STALE_POINTER_TOK = 16       # pointer for a stale read superseded by a later write
 MIN_BUDGET = 256             # never window a result below this (amputation floor)
+ERROR_HEAD_TOK = 80          # tokens kept from an error's head in --error-collapse head
 EXCLUDE_NS_SUBSTR = ["pytest-of-USER", "AppData-Local-Temp", "workspace", "-ws", "test_"]
 NS_INCLUDE_PREFIX = "C--work"
 WRITE_TOOLS = {"Edit", "Write", "MultiEdit", "NotebookEdit"}
+# Control-plane tools whose result is small + load-bearing (a todo list, a user choice);
+# the aggressive/hyper presets EXEMPT these by default so aggression never guts them.
+DEFAULT_EXEMPT_TOOLS = ("TodoWrite", "AskUserQuestion", "ExitPlanMode")
+ERROR_COLLAPSE_MODES = ("off", "head", "oneline")
 
 def toks(s):
     return len(s) / CHARS_PER_TOK
@@ -183,8 +207,8 @@ def _normh(s):
 # flagged `stale` when a LATER tool_use writes the same file path.
 # --------------------------------------------------------------------------------------
 class Item:
-    __slots__ = ("kind", "tool", "path", "content", "toks", "h", "nh", "order", "stale")
-    def __init__(self, kind, tool, content, order, path=""):
+    __slots__ = ("kind", "tool", "path", "content", "toks", "h", "nh", "order", "stale", "is_error")
+    def __init__(self, kind, tool, content, order, path="", is_error=False):
         self.kind = kind          # text | thinking | tool_use | result
         self.tool = tool
         self.path = path
@@ -195,6 +219,9 @@ class Item:
         self.nh = _normh(content) if kind == "result" else None
         self.order = order
         self.stale = False
+        # `is_error` rides the tool_result block's structural flag (Claude Code sets it on a
+        # failed tool call) — the honest signal the error-collapse tier keys on.
+        self.is_error = is_error
 
 def _norm_path(p):
     return os.path.normcase(str(p)) if p else ""
@@ -216,6 +243,7 @@ def parse_window(path):
     use_input = {}            # tool_use_id -> full "name {input-json}" string (last/full wins)
     use_order = {}            # tool_use_id -> first event order (for supersession)
     results = {}              # tool_use_id -> content (last/most-complete wins)
+    result_err = {}           # tool_use_id -> structural is_error flag (sticky once true)
     result_order = []
     events = []               # (order, name, path) for supersession analysis
     nonresult = []
@@ -260,6 +288,10 @@ def parse_window(path):
                         if tu not in results:
                             result_order.append(tu)
                         results[tu] = s
+                        # the structural error flag is sticky — once any snapshot marks this
+                        # result an error, keep it (a later snapshot may drop the flag).
+                        if b.get("is_error"):
+                            result_err[tu] = True
             mid = m.get("id")
             if mid and mid in seen_mid:
                 continue
@@ -296,7 +328,8 @@ def parse_window(path):
         items.append(Item("tool_use", nm, use_input[tid], order, path=p)); order += 1
     for tu in result_order:
         name, p = use.get(tu, ("?", ""))
-        it = Item("result", name, results[tu], order, path=p); order += 1
+        it = Item("result", name, results[tu], order, path=p,
+                  is_error=result_err.get(tu, False)); order += 1
         # stale = a Read whose path is written by a LATER tool_use. The result's own event
         # order is its issuing tool_use's order (bound by tool_use_id, NOT a name+path
         # cursor — so a user message carrying several parallel results can't misorder them).
@@ -311,9 +344,11 @@ def parse_window(path):
 # count a budget). Every tier leaves a real, smaller string, so "never dropped to zero"
 # and "head+tail+pointer" are properties of the emitted bytes, not assertions.
 # --------------------------------------------------------------------------------------
-def window_content(s, budget_tok, path=""):
+def window_content(s, budget_tok, path="", head_frac=0.6):
     """Keep a head+tail summing to ~budget_tok and splice a real elision pointer in the
-    middle. Returns the rewritten string (always shorter than s when s exceeds budget)."""
+    middle. Returns the rewritten string (always shorter than s when s exceeds budget).
+    head_frac is the head's share of the budget; 1.0 => head-only (no tail), which aggressive
+    profiles use to keep the start of a result (the most load-bearing part) and drop the rest."""
     budget_chars = max(4 * (POINTER_TOK + 1), int(budget_tok * CHARS_PER_TOK))
     if len(s) <= budget_chars:
         return s
@@ -321,7 +356,8 @@ def window_content(s, budget_tok, path=""):
     elided_chars = len(s) - budget_chars  # provisional; pointer eats a little more
     ptr = f"\n…[ctxwin: elided ~{int(elided_chars / CHARS_PER_TOK)} tok{handle}]…\n"
     avail = max(2, budget_chars - len(ptr))
-    head = (avail * 6) // 10
+    head_frac = min(1.0, max(0.0, head_frac))
+    head = int(avail * head_frac)
     tail = avail - head
     return s[:head] + ptr + (s[-tail:] if tail > 0 else "")
 
@@ -330,6 +366,112 @@ def _stale_pointer(it):
 
 def _dedup_pointer(it):
     return f"[ctxwin: duplicate of an earlier {it.tool} payload — elided]"
+
+# --------------------------------------------------------------------------------------
+# error-collapse — the LOSSY, opt-in tier the operator dials up. A failed tool call's body
+# (a 30k stack trace, a stderr flood) is the example the user names; the structural is_error
+# flag on the tool_result is the honest signal. OFF by default; only the aggressive/hyper
+# presets (or `--error-collapse`) enable it. The regex is a TIGHT secondary for errors that
+# arrive without the flag — deliberately conservative, since a false positive guts real text.
+# --------------------------------------------------------------------------------------
+_ERR_HEAD = re.compile(
+    r"(?im)^\s{0,4}("
+    r"error[:\s]|traceback \(most recent call last\)|fatal:|panic:|exception[:\s]|"
+    r"[A-Za-z_]+(?:Error|Exception)[:\s]|command not found|no such file or directory|"
+    r"permission denied|segmentation fault|exit (?:code|status) [1-9])")
+
+def looks_like_error(it):
+    """True when a RESULT is error-shaped. Primary signal: the transcript's structural
+    is_error flag. Secondary: a tight error marker anchored at the head of the body."""
+    if it.kind != "result":
+        return False
+    if getattr(it, "is_error", False):
+        return True
+    return bool(_ERR_HEAD.search(it.content[:300]))
+
+def _error_oneline(content, tool, path):
+    n = int(toks(content))
+    handle = f"; re-fetch {os.path.basename(path)}" if path else ""
+    return f"[ctxwin: {tool or 'tool'} error — ~{n} tok elided{handle}]"
+
+def _error_head(content, tool, path, head_tok=ERROR_HEAD_TOK):
+    """Keep the first line (the error MESSAGE) up to head_tok, drop the stack/stderr body."""
+    head_chars = int(head_tok * CHARS_PER_TOK)
+    first = content.split("\n", 1)[0]
+    head = first if len(first) <= head_chars else content[:head_chars]
+    n = max(0, int(toks(content) - toks(head)))
+    handle = f"; re-fetch {os.path.basename(path)}" if path else ""
+    return head + f"\n…[ctxwin: error body elided ~{n} tok{handle}]…"
+
+def collapse_error(it, mode, content=None):
+    """Collapse an error-shaped result. Returns (new_content, recoverable_bool). 'head' keeps
+    the first line + a pointer; 'oneline' drops to a tiny marker (the '30k error -> "error"'
+    case). Recoverable ONLY when the result is file-backed; an error body is otherwise gone
+    from context here (the production CAS page-back is not counted, same rule as windowing).
+    `content` overrides it.content (so the reducer can collapse the noise-cleaned body)."""
+    body = it.content if content is None else content
+    new = (_error_oneline(body, it.tool, it.path) if mode == "oneline"
+           else _error_head(body, it.tool, it.path))
+    return new, bool(it.path)
+
+# --------------------------------------------------------------------------------------
+# Profile — the TUNING DIAL. One object carries which tiers run, the default per-item budget
+# (None => the caller auto-tunes to `target`), the head/tail split, the lossy error-collapse
+# mode, and per-tool budget overrides (value None => EXEMPT that tool from all reduction).
+# Named presets span `off` (ratio 1.0) -> `hyper` (collapse a 30k error to one line). The
+# default profile reproduces today's reducer byte-for-byte, so honesty invariants are intact.
+# --------------------------------------------------------------------------------------
+class Profile:
+    __slots__ = ("name", "noise", "stale", "dedup", "window", "budget", "target",
+                 "min_budget", "head_frac", "error_collapse", "per_tool")
+
+    def __init__(self, name, noise=True, stale=True, dedup=True, window=True, budget=None,
+                 target=2.0, min_budget=MIN_BUDGET, head_frac=0.6, error_collapse="off",
+                 per_tool=None):
+        self.name = name
+        self.noise = noise
+        self.stale = stale
+        self.dedup = dedup
+        self.window = window
+        self.budget = budget                 # fixed per-item budget; None => autotune to target
+        self.target = target                 # autotune target when budget is None
+        self.min_budget = min_budget          # amputation floor for the WINDOW tier (default path)
+        self.head_frac = head_frac            # head share of a windowed item (1.0 => head-only)
+        self.error_collapse = error_collapse  # off | head | oneline (lossy, opt-in)
+        self.per_tool = dict(per_tool or {})  # tool -> budget override; value None => exempt
+
+    def tool_budget(self, tool, default):
+        """The window budget for a tool: a per-tool override (which may be None = exempt) or
+        the default. A per-tool override is an EXPLICIT choice, so it bypasses the floor."""
+        return self.per_tool[tool] if tool in self.per_tool else default
+
+    def is_exempt(self, tool):
+        return tool in self.per_tool and self.per_tool[tool] is None
+
+
+def _exempt_map():
+    return {t: None for t in DEFAULT_EXEMPT_TOOLS}
+
+PROFILES = {
+    # off: nothing runs -> every result verbatim, ratio 1.0 (the "feature disabled" choice).
+    "off": lambda: Profile("off", noise=False, stale=False, dedup=False, window=False),
+    # conservative: lossless + recoverable only; NO windowing of unique current content.
+    "conservative": lambda: Profile("conservative", window=False),
+    # balanced: today's default — low-risk tiers + bounded windowing auto-tuned to 2x.
+    "balanced": lambda: Profile("balanced", target=2.0),
+    # aggressive: small head-only windows + collapse errors to their first line (the message).
+    "aggressive": lambda: Profile("aggressive", budget=500, target=3.0, min_budget=128,
+                                  head_frac=1.0, error_collapse="head", per_tool=_exempt_map()),
+    # hyper: collapse a 30k error to a one-line marker; tiny per-tool budgets. Lossy by choice.
+    "hyper": lambda: Profile("hyper", budget=200, target=4.0, min_budget=48, head_frac=1.0,
+                             error_collapse="oneline",
+                             per_tool={**_exempt_map(), "Bash": 120, "Read": 300, "Grep": 120}),
+}
+
+def make_profile(name):
+    if name not in PROFILES:
+        raise SystemExit(f"unknown profile {name!r}; use one of: {', '.join(PROFILES)}")
+    return PROFILES[name]()
 
 # --------------------------------------------------------------------------------------
 # the risk-ranked reducer — the heart of "self-reduce 2x". The reducible surface is BOTH
@@ -346,14 +488,22 @@ def _dedup_pointer(it):
 # pointer always survives). `recoverable` is MEASURED: removed bytes count as recoverable
 # only when a concrete re-fetch handle exists (a file path) or the bytes were redundant.
 # --------------------------------------------------------------------------------------
-def reduce_window(items, budget, min_budget=MIN_BUDGET, noise=True, stale=True, dedup=True, window=True):
+def reduce_window(items, budget, min_budget=MIN_BUDGET, noise=True, stale=True, dedup=True,
+                  window=True, profile=None):
+    # The reducer is profile-driven; the legacy scalar kwargs build an ad-hoc profile so every
+    # existing call site (and the default path) is byte-for-byte unchanged. A `profile` object
+    # carries the same knobs plus the opt-in lossy levers (error-collapse, per-tool budgets).
+    if profile is None:
+        profile = Profile("custom", noise=noise, stale=stale, dedup=dedup, window=window,
+                          min_budget=min_budget)
+    min_budget = profile.min_budget
     # Reducible surface = tool_results AND tool_use INPUTS (the agent-authored Write/Edit/
     # Workflow payloads are large context mass too, and are file-recoverable). text/thinking
     # are left untouched.
     reducible = [it for it in items if it.kind in ("result", "tool_use")]
     nonresult_tok = sum(it.toks for it in items if it.kind not in ("result", "tool_use"))
     baseline = nonresult_tok + sum(it.toks for it in reducible)
-    eff_budget = max(min_budget, budget) if window else 10 ** 12
+    eff_budget = max(min_budget, budget) if profile.window else 10 ** 12
 
     seen_h = set()
     kept = nonresult_tok
@@ -361,10 +511,15 @@ def reduce_window(items, budget, min_budget=MIN_BUDGET, noise=True, stale=True, 
     cnt = collections.Counter()       # items touched by tier
     removed_recoverable = 0.0         # removed bytes with a concrete re-fetch handle
     for it in reducible:
+        # EXEMPT: a per-tool override of None keeps this tool's payload verbatim (no tier
+        # touches it) — for small load-bearing control-plane results (a todo list, a choice).
+        if profile.is_exempt(it.tool):
+            kept += it.toks
+            continue
         content = it.content
         t0 = toks(content)
         # tier 0: noise — only result bodies (tool_use inputs are structured JSON args)
-        if noise and it.kind == "result":
+        if profile.noise and it.kind == "result":
             content = filter_noise(content)
             d = t0 - toks(content)
             if d > 0:
@@ -372,23 +527,37 @@ def reduce_window(items, budget, min_budget=MIN_BUDGET, noise=True, stale=True, 
                 removed_recoverable += d            # ANSI/whitespace are not information
         t1 = toks(content)
         # tier 1: stale read superseded by a later write -> pointer (results only)
-        if stale and it.stale:
+        if profile.stale and it.stale:
             new = _stale_pointer(it)
             d = max(0.0, t1 - toks(new))
             kept += toks(new); rm["stale"] += d; cnt["stale"] += 1
             removed_recoverable += d                # the file is re-readable
             continue
         # tier 2: exact duplicate -> pointer (hash the ORIGINAL content for determinism)
-        if dedup and it.h in seen_h:
+        if profile.dedup and it.h in seen_h:
             new = _dedup_pointer(it)
             d = max(0.0, t1 - toks(new))
             kept += toks(new); rm["dedup"] += d; cnt["dedup"] += 1
             removed_recoverable += d                # redundant: the bytes added no new info
             continue
         seen_h.add(it.h)
-        # tier 3: window -> real head+tail+pointer
-        if window and t1 > eff_budget:
-            new = window_content(content, eff_budget, it.path)
+        # tier 2.5: ERROR collapse (LOSSY, opt-in) -> first line or a one-line marker. Runs
+        # only when the profile turns it on AND the result is error-shaped. The dropped body
+        # is recoverable only if the result is file-backed (rare for an error) — so this
+        # honestly lowers recoverable_frac, the signal that aggression destroys information.
+        if profile.error_collapse != "off" and looks_like_error(it):
+            new, recov = collapse_error(it, profile.error_collapse, content=content)
+            d = max(0.0, t1 - toks(new))
+            if d > 0:                               # never INFLATE a small error
+                kept += toks(new); rm["error"] += d; cnt["error"] += 1
+                if recov:
+                    removed_recoverable += d
+                continue
+        # tier 3: window -> real head+tail+pointer. The budget is per-tool (an explicit
+        # override bypasses the floor; the default budget is floored at min_budget).
+        item_budget = profile.tool_budget(it.tool, eff_budget)
+        if profile.window and item_budget is not None and t1 > item_budget:
+            new = window_content(content, item_budget, it.path, head_frac=profile.head_frac)
             d = max(0.0, t1 - toks(new))
             kept += toks(new); rm["window"] += d; cnt["window"] += 1
             if it.path:                             # file-backed -> middle re-readable
@@ -403,38 +572,47 @@ def reduce_window(items, budget, min_budget=MIN_BUDGET, noise=True, stale=True, 
     ratio = round(baseline / d, 4) if d > 0 else None
     low = rm["noise"] + rm["stale"] + rm["dedup"]
     return {
+        "profile": profile.name,
         "baseline_tok": int(baseline),
         "reduced_tok": int(baseline - removed),
         "removed_tok": int(removed),
         "ratio": ratio,
-        "budget": eff_budget if window else None,
+        "budget": eff_budget if profile.window else None,
+        "error_collapse": profile.error_collapse,
+        "per_tool": dict(profile.per_tool),
         "n_reducible": len(reducible),
         "tiers": {
             "noise":  {"removed_tok": int(rm["noise"]),  "n": cnt["noise"],  "risk": "none (lossless)"},
             "stale":  {"removed_tok": int(rm["stale"]),  "n": cnt["stale"],  "risk": "low (evidence-based, recoverable)"},
             "dedup":  {"removed_tok": int(rm["dedup"]),  "n": cnt["dedup"],  "risk": "none (lossless)"},
+            "error":  {"removed_tok": int(rm["error"]),  "n": cnt["error"],  "risk": "LOSSY (opt-in; head/marker only, not file-recoverable)"},
             "window": {"removed_tok": int(rm["window"]), "n": cnt["window"], "risk": "bounded (recoverable)"},
         },
         "low_risk_removed_tok": int(low),
         "low_risk_ratio": round(baseline / (baseline - low), 4) if baseline - low > 0 else None,
         # MEASURED: fraction of removed bytes with a concrete re-fetch handle (file path or
-        # redundant). < 1.0 means some windowed non-file middles are CAS-recoverable only.
+        # redundant). < 1.0 means some windowed non-file middles / collapsed error bodies are
+        # CAS-recoverable only — the honest cost of turning aggression up.
         "recoverable_frac": round(removed_recoverable / removed, 4) if removed > 0 else 1.0,
+        # how much of the reduction came from the LOSSY error tier (0 in the default profile).
+        "lossy_removed_tok": int(rm["error"]),
     }
 
-def autotune(items, target, min_budget=MIN_BUDGET):
+def autotune(items, target, min_budget=MIN_BUDGET, profile=None):
     """Binary-search the LARGEST uniform window budget that still meets `target` (least
-    lossy). Low-risk tiers (noise+stale+dedup) always run. Bounded at min_budget — if even
-    min_budget can't reach target, returns the honest best (never fabricates the ratio)."""
-    lo, hi = float(min_budget), 64000.0
+    lossy). The profile's tiers (noise+stale+dedup, plus any opt-in error-collapse) always
+    run; only the default window budget is searched. Bounded at the profile's min_budget — if
+    even the floor can't reach target, returns the honest best (never fabricates the ratio)."""
+    mb = profile.min_budget if profile is not None else min_budget
+    lo, hi = float(mb), 64000.0
     # first: can we even reach target windowing at the floor?
-    floor = reduce_window(items, min_budget)
+    floor = reduce_window(items, mb, min_budget=mb, profile=profile)
     if floor["ratio"] is None or floor["ratio"] < target:
-        return floor, min_budget    # honest: target unreachable without amputation
+        return floor, mb            # honest: target unreachable without amputation
     best = floor
     for _ in range(30):
         mid = (lo + hi) / 2.0
-        r = reduce_window(items, mid)
+        r = reduce_window(items, mid, min_budget=mb, profile=profile)
         if r["ratio"] is not None and r["ratio"] >= target:
             best = r; lo = mid       # afford a larger (less lossy) budget
         else:
@@ -453,9 +631,11 @@ def cmd_baseline(args):
         return 2
     all_items = []
     agg_kind = collections.Counter(); agg_tool = collections.Counter()
+    agg_tool_excess = collections.Counter()   # per-tool windowing headroom over a 700-tok cap
     total = 0.0
     excess = collections.Counter(); dup = near = stale = noise = 0.0
     catn = xrepeat = 0.0          # line-level noise: cat-n prefixes; cross-result repeats
+    errmass = 0.0; errn = 0       # error-shaped result mass (the error-collapse tier's prize)
     rq = [0.0, 0.0, 0.0, 0.0]
     for s in sess:
         items, _ = parse_window(s["path"])
@@ -474,6 +654,8 @@ def cmd_baseline(args):
             if it.nh in snh: near += it.toks
             else: snh.add(it.nh)
             if it.stale: stale += it.toks
+            if looks_like_error(it):
+                errmass += it.toks; errn += 1
             noise += it.toks - toks(filter_noise(it.content))
             # cat -n line-number prefixes the Read tool prepends ("   123\t"): formatting,
             # not file content (but they ARE Edit-targeting signal — informational only).
@@ -490,6 +672,8 @@ def cmd_baseline(args):
         for it in reducible:
             for b in (2000, 1000, 700, 500):
                 if it.toks > b: excess[b] += it.toks - b
+            if it.toks > 700:                       # per-tool windowing headroom over a 700 cap
+                agg_tool_excess[it.tool or "?"] += it.toks - 700
         n = len(reducible) or 1
         for i, it in enumerate(sorted(reducible, key=lambda x: x.order)):
             rq[min(3, int(4 * i / n))] += it.toks
@@ -500,6 +684,20 @@ def cmd_baseline(args):
         return round(total / d, 3) if d > 0 else None
 
     tuned, B = autotune(all_items, 2.0)
+
+    # what each named profile achieves on THIS corpus — the tuning menu, measured. off=1.0,
+    # conservative=lossless+recoverable (no windowing), balanced=2x, aggressive/hyper add the
+    # lossy error tier. recoverable_frac drops as aggression rises — the honest cost.
+    def profile_report(name):
+        p = make_profile(name)
+        if p.budget is None and p.window:
+            rep, _ = autotune(all_items, p.target, profile=p)
+        else:
+            rep = reduce_window(all_items, p.budget if p.budget is not None else 0, profile=p)
+        return {"ratio": rep["ratio"], "recoverable_frac": rep["recoverable_frac"],
+                "lossy_removed_tok": rep["lossy_removed_tok"], "error_collapse": rep["error_collapse"]}
+    profiles_out = {nm: profile_report(nm) for nm in ("off", "conservative", "balanced", "aggressive", "hyper")}
+
     low = noise + stale + dup
     out = {
         "generated": args.now or "(stamp at commit)",
@@ -509,6 +707,15 @@ def cmd_baseline(args):
         "tool_result_pct_of_total": round(100 * agg_kind.get("result", 0) / total, 1),
         "result_mass_by_tool_pct": {k: round(100 * v / max(1, agg_kind.get("result", 1)), 1)
                                     for k, v in agg_tool.most_common(8)},
+        # per-tool windowing headroom: who carries the reducible mass over a 700-tok cap. This
+        # is the evidence for `--per-tool` tuning (cap the heavy tools, exempt the light ones).
+        "windowing_headroom_by_tool_pct": {k: round(100 * v / total, 1)
+                                           for k, v in agg_tool_excess.most_common(8)},
+        # error-shaped results (structural is_error flag or a tight error marker): the prize
+        # the `--error-collapse` lever targets — turning hyper on reclaims most of this.
+        "error_results": {"pct_of_total": round(100 * errmass / total, 2), "n": errn,
+                          "note": "is_error flag or a head error marker; --error-collapse hyper "
+                                  "reclaims most of this (LOSSY — not file-recoverable)"},
         "tiers": {
             "noise_lossless": {"pct": round(100 * noise / total, 2), "ratio": ratio(noise), "risk": "none"},
             "stale_reads":    {"pct": round(100 * stale / total, 2), "ratio": ratio(stale), "risk": "low (recoverable)"},
@@ -534,6 +741,8 @@ def cmd_baseline(args):
         "self_reduce_2x": {"target": 2.0, "found_budget_tok": B, "achieved_ratio": tuned["ratio"],
                            "low_risk_share_ratio": tuned["low_risk_ratio"],
                            "recoverable_frac": tuned["recoverable_frac"]},
+        # the TUNING MENU, measured on this corpus: ratio + the honest recoverable_frac cost.
+        "profiles": profiles_out,
     }
     if args.json:
         with open(args.json, "w", encoding="utf-8") as f:
@@ -590,6 +799,32 @@ def render_md(o):
         L.append(f"| {b} | {o['windowing_excess_pct'][f'cap@{b}']}% | {o['windowing_ratio'][f'cap@{b}']}× |")
     L.append(f"\n- **Recency:** reducible mass by quartile (oldest→newest) = {o['recency_quartile_pct']}%; "
              f"the oldest half holds **{o['oldest_half_pct']}%** — old items are the safest to collapse.")
+    if o.get("windowing_headroom_by_tool_pct"):
+        L.append("\n- **Windowing headroom by tool** (% of context held over a 700-tok cap — who "
+                 "to target with `--per-tool`): "
+                 + ", ".join(f"{k} {v}%" for k, v in o["windowing_headroom_by_tool_pct"].items()) + ".")
+    er = o.get("error_results")
+    if er:
+        L.append(f"- **Error-shaped results:** {er['pct_of_total']}% of the window across {er['n']} "
+                 "results carry a structural `is_error` flag or a head error marker. `--error-collapse "
+                 "hyper` reclaims most of this by collapsing a failed-call body to one line — **lossy, "
+                 "not file-recoverable**, so it is OFF in every profile but `aggressive`/`hyper`.")
+    pf = o.get("profiles")
+    if pf:
+        L.append("\n## Tuning menu — what each profile does to THIS corpus\n")
+        L.append("The reducer is a dial. `off` keeps everything; `hyper` collapses a 30k error to one "
+                 "line. `recoverable` is the honest cost — the fraction of removed bytes with a direct "
+                 "re-fetch handle, which falls as the lossy error tier kicks in.\n")
+        L.append("| profile | reduction | recoverable | lossy tok removed | error-collapse |\n|---|---|---|---|---|")
+        for nm in ("off", "conservative", "balanced", "aggressive", "hyper"):
+            p = pf.get(nm)
+            if not p:
+                continue
+            L.append(f"| `{nm}` | {p['ratio']}× | {round(100*p['recoverable_frac'])}% | "
+                     f"{p['lossy_removed_tok']:,} | {p['error_collapse']} |")
+        L.append("\n> Compose finer with `--error-collapse off|head|oneline` and `--per-tool Bash=200 "
+                 "--per-tool TodoWrite=off`. The lossy levers stay OFF unless you ask; `recoverable` is "
+                 "MEASURED per profile, never asserted.")
     sr = o["self_reduce_2x"]
     L.append("\n## Self-reduce to 2×\n")
     L.append(f"Low-risk tiers first (noise + stale + exact-dedup), then a uniform per-result budget of "
@@ -626,12 +861,17 @@ def cmd_reduce(args):
             items.extend(parse_window(s["path"])[0])
         label = f"{len(sess)} sessions"
 
-    kw = dict(noise=not args.no_noise, stale=not args.no_stale)
-    if args.budget:
-        rep = reduce_window(items, args.budget, **kw)
-        budget = rep["budget"]
+    prof = resolve_profile(args)
+    # budget/target resolution: an explicit --budget wins; else a profile with a fixed budget
+    # (aggressive/hyper) uses it unless --target was given; else auto-tune to the profile target.
+    if not prof.window:
+        rep = reduce_window(items, 0, profile=prof); budget = None
+    elif args.budget:
+        rep = reduce_window(items, args.budget, profile=prof); budget = rep["budget"]
+    elif prof.budget is not None and args.target is None:
+        rep = reduce_window(items, prof.budget, profile=prof); budget = rep["budget"]
     else:
-        rep, budget = autotune(items, args.target)
+        rep, budget = autotune(items, args.target if args.target is not None else prof.target, profile=prof)
     rep["scope"] = label
     if args.json:
         with open(args.json, "w", encoding="utf-8") as f:
@@ -639,27 +879,64 @@ def cmd_reduce(args):
         print(f"wrote {args.json}")
         return 0
     print(f"\n  ctxwin · self-reduce — {label}")
-    print(f"  window budget {budget} tok/result")
+    exempt = sorted(t for t, v in prof.per_tool.items() if v is None)
+    caps = sorted(f"{t}={v}" for t, v in prof.per_tool.items() if v is not None)
+    print(f"  profile {prof.name}  ·  window budget {budget} tok/result  ·  error-collapse {prof.error_collapse}")
+    if caps:   print(f"  per-tool caps: {', '.join(caps)}")
+    if exempt: print(f"  exempt tools: {', '.join(exempt)}")
     print(f"  ── baseline {rep['baseline_tok']:,} tok  →  reduced {rep['reduced_tok']:,} tok")
     if rep["ratio"]:
         print(f"  ── REDUCTION {rep['ratio']}×  (removed {rep['removed_tok']:,} tok; "
               f"low-risk tiers alone {rep['low_risk_ratio']}×)")
     tl = rep["tiers"]
-    for name in ("noise", "stale", "dedup", "window"):
+    for name in ("noise", "stale", "dedup", "error", "window"):
         ti = tl[name]
         if ti["n"]:
             print(f"     • {name:7s} {ti['n']:>4} results  −{ti['removed_tok']:>8,} tok   [{ti['risk']}]")
-    print(f"     • every result keeps a head+tail or pointer (nothing dropped to zero); "
-          f"{round(100*rep['recoverable_frac'])}% of removed bytes have a direct re-fetch handle "
-          "(file-backed/redundant)\n")
+    rf = round(100 * rep["recoverable_frac"])
+    if rep["lossy_removed_tok"] > 0:
+        print(f"     • LOSSY: the error tier dropped {rep['lossy_removed_tok']:,} tok with no file handle; "
+              f"only {rf}% of all removed bytes are directly re-fetchable (CAS page-back for the rest)\n")
+    else:
+        print(f"     • every result keeps a head+tail or pointer (nothing dropped to zero); "
+              f"{rf}% of removed bytes have a direct re-fetch handle (file-backed/redundant)\n")
     return 0
+
+
+def resolve_profile(args):
+    """Build the reducer profile from a named preset (default `balanced` = today's behavior),
+    then apply fine-grained overrides (`--no-noise/--no-stale/--error-collapse/--per-tool`)."""
+    prof = make_profile(getattr(args, "profile", None) or "balanced")
+    if getattr(args, "no_noise", False):
+        prof.noise = False
+    if getattr(args, "no_stale", False):
+        prof.stale = False
+    ec = getattr(args, "error_collapse", None)
+    if ec:
+        if ec not in ERROR_COLLAPSE_MODES:
+            raise SystemExit(f"--error-collapse must be one of {', '.join(ERROR_COLLAPSE_MODES)}")
+        prof.error_collapse = ec
+    for kv in (getattr(args, "per_tool", None) or []):
+        tool, _, raw = kv.partition("=")
+        tool = tool.strip()
+        raw = raw.strip().lower()
+        if not tool:
+            raise SystemExit(f"--per-tool expects TOOL=BUDGET (got {kv!r})")
+        if raw in ("off", "none", "exempt", ""):
+            prof.per_tool[tool] = None        # exempt this tool from all reduction
+        else:
+            try:
+                prof.per_tool[tool] = max(1, int(float(raw)))
+            except ValueError:
+                raise SystemExit(f"--per-tool budget must be a number or off (got {raw!r} for {tool})")
+    return prof
 
 # --------------------------------------------------------------------------------------
 # CLI: selfcheck — synthetic fixtures with KNOWN reducible structure. CI gate.
 # --------------------------------------------------------------------------------------
-def _mk(kind, tool, n_chars, salt="", path="", stale=False):
+def _mk(kind, tool, n_chars, salt="", path="", stale=False, is_error=False):
     body = (salt + "x" * max(0, n_chars - len(salt)))[:n_chars]
-    it = Item(kind, tool, body, 0, path=path)
+    it = Item(kind, tool, body, 0, path=path, is_error=is_error)
     it.stale = stale
     return it
 
@@ -751,8 +1028,76 @@ def runselfcheck():
     print(f"  tool_use-window    {'PASS' if ok else 'FAIL'}  windowed={r6['tiers']['window']['n']} ratio={r6['ratio']} recoverable={r6['recoverable_frac']}")
     fails += not ok
 
+    # 7: DEFAULT PROFILE == legacy path, byte-for-byte. The `balanced` preset must reproduce
+    # the pre-profile reducer exactly, so the honesty invariants carry over unchanged.
+    r_leg = reduce_window(f1, 1000)
+    r_bal = reduce_window(f1, 1000, profile=make_profile("balanced"))
+    ok = (r_leg["ratio"] == r_bal["ratio"] and r_leg["removed_tok"] == r_bal["removed_tok"]
+          and r_leg["recoverable_frac"] == r_bal["recoverable_frac"])
+    print(f"  default==legacy    {'PASS' if ok else 'FAIL'}  legacy={r_leg['ratio']} balanced={r_bal['ratio']}")
+    fails += not ok
+
+    # 8: PROFILE off — the "disabled" choice. Even a windowable corpus reduces 1.0x / removes 0.
+    r_off = reduce_window(f1, 1000, profile=make_profile("off"))
+    ok = r_off["ratio"] == 1.0 and r_off["removed_tok"] == 0
+    print(f"  profile-off        {'PASS' if ok else 'FAIL'}  ratio={r_off['ratio']} removed={r_off['removed_tok']}")
+    fails += not ok
+
+    # 9: PROFILE conservative — lossless + recoverable only, NO windowing. Stale reads still
+    # collapse (recoverable), but a big non-file result is kept verbatim (window tier silent).
+    fc = _seq([_mk("result", "Read", 16000, salt=f"s{i}", path=f"/f{i}", stale=True) for i in range(3)] +
+              [_mk("result", "Edit", 200, salt=f"e{i}", path=f"/f{i}") for i in range(3)] +
+              [_mk("result", "Bash", 16000, salt="bigbash")])
+    rc = reduce_window(fc, 1000, profile=make_profile("conservative"))
+    ok = (rc["tiers"]["window"]["n"] == 0 and rc["tiers"]["stale"]["n"] == 3
+          and rc["recoverable_frac"] == 1.0 and rc["ratio"] and rc["ratio"] > 1.0
+          and rc["lossy_removed_tok"] == 0)
+    print(f"  profile-conserv    {'PASS' if ok else 'FAIL'}  window={rc['tiers']['window']['n']} stale={rc['tiers']['stale']['n']} recoverable={rc['recoverable_frac']}")
+    fails += not ok
+
+    # 10: ERROR COLLAPSE materialization — the '30k error -> "error"' case, proven on bytes.
+    #     'head' keeps the first line (the message); 'oneline' drops to a tiny marker.
+    err = _mk("result", "Bash", 30000, salt="Error: connection refused\n", is_error=True)
+    head, recov_h = collapse_error(err, "head")
+    one, recov_o = collapse_error(err, "oneline")
+    ok = (head.startswith("Error: connection refused") and "error body elided" in head
+          and len(head) < len(err.content) and recov_h is False
+          and "error" in one.lower() and "elided" in one and len(one) < 64 and recov_o is False)
+    print(f"  error-materialize  {'PASS' if ok else 'FAIL'}  head_msg_kept={head.startswith('Error')} oneline_len={len(one)} recoverable={recov_o}")
+    fails += not ok
+
+    # 11: HYPER on a 30k error result — big reduction, but HONESTLY lossy (recoverable_frac low,
+    #     lossy_removed_tok > 0). The error tier fires once; nothing is counted re-fetchable.
+    f11 = _seq([_mk("result", "Bash", 30000, salt="Error: boom\n", is_error=True)])
+    r11 = reduce_window(f11, 200, profile=make_profile("hyper"))
+    ok = (r11["tiers"]["error"]["n"] == 1 and r11["lossy_removed_tok"] > 0
+          and r11["ratio"] and r11["ratio"] > 10.0 and r11["recoverable_frac"] < 0.5)
+    print(f"  hyper-error-lossy  {'PASS' if ok else 'FAIL'}  error_n={r11['tiers']['error']['n']} ratio={r11['ratio']} recoverable={r11['recoverable_frac']} lossy={r11['lossy_removed_tok']}")
+    fails += not ok
+
+    # 12: ERROR collapse NEVER fires on a non-error result, and NEVER inflates a small error.
+    f12a = _seq([_mk("result", "Bash", 8000, salt="normal output, no error here", path="/n")])
+    r12a = reduce_window(f12a, 100000, profile=make_profile("hyper"))   # huge budget: only error tier could fire
+    f12b = _seq([_mk("result", "Bash", 30, salt="Error: x\n", is_error=True)])   # tiny error < marker
+    r12b = reduce_window(f12b, 1000, profile=make_profile("hyper"))
+    ok = (r12a["tiers"]["error"]["n"] == 0 and r12b["reduced_tok"] <= r12b["baseline_tok"])
+    print(f"  error-no-falsepos  {'PASS' if ok else 'FAIL'}  nonerror_collapsed={r12a['tiers']['error']['n']} small_err_inflated={r12b['reduced_tok']>r12b['baseline_tok']}")
+    fails += not ok
+
+    # 13: PER-TOOL — an exempt tool is untouched; a tight per-tool cap windows that tool harder.
+    fe = _seq([_mk("result", "Bash", 8000, salt="bigexempt")])
+    r_ex = reduce_window(fe, 1000, profile=Profile("ex", per_tool={"Bash": None}))
+    fr = _seq([_mk("result", "Read", 8000, salt="rr", path="/x")])
+    r_def = reduce_window(fr, 1000, profile=Profile("d"))               # default 1000 budget
+    r_tight = reduce_window(fr, 1000, profile=Profile("t", per_tool={"Read": 100}))   # Read capped @100
+    ok = (r_ex["ratio"] == 1.0 and r_ex["removed_tok"] == 0
+          and r_tight["removed_tok"] > r_def["removed_tok"])
+    print(f"  per-tool           {'PASS' if ok else 'FAIL'}  exempt_removed={r_ex['removed_tok']} tight>{r_def['removed_tok']}={r_tight['removed_tok']}")
+    fails += not ok
+
     # invariants
-    for nm, r in (("f1", r1), ("f2", r2), ("f3", r3), ("f5", r5), ("f6", r6)):
+    for nm, r in (("f1", r1), ("f2", r2), ("f3", r3), ("f5", r5), ("f6", r6),
+                  ("rc", rc), ("r11", r11), ("r12a", r12a), ("r12b", r12b)):
         if not (r["reduced_tok"] <= r["baseline_tok"] and r["ratio"] and r["ratio"] >= 1.0):
             print(f"  INVARIANT FAIL on {nm}: {r}")
             fails += 1
@@ -762,7 +1107,8 @@ def runselfcheck():
         print(f"SELFCHECK FAILED — {fails} check(s) failed")
         return 1
     print("OK — risk-tiered reducer hits the documented ratios, never fabricates a reduction, "
-          "never guts a result below the floor")
+          "never guts a result below the floor; profiles span off-to-hyper, error-collapse is opt-in "
+          "and HONESTLY lossy (recoverable_frac drops), per-tool exempt/cap behaves, default==legacy")
     return 0
 
 # --------------------------------------------------------------------------------------
@@ -781,8 +1127,14 @@ def main(argv=None):
 
     r = sub.add_parser("reduce", help="apply the risk-tiered reducer and report the achieved ratio + loss profile")
     r.add_argument("transcript", nargs="?", default=None, help="a single .jsonl, or omit to use discovered sessions")
-    r.add_argument("--target", type=float, default=2.0, help="reduction target for auto-tune (default 2.0)")
+    r.add_argument("--profile", default=None, choices=list(PROFILES),
+                   help="aggressiveness preset: off | conservative | balanced (default) | aggressive | hyper")
+    r.add_argument("--target", type=float, default=None, help="reduction target for auto-tune (default: the profile's)")
     r.add_argument("--budget", type=float, default=None, help="fixed per-result token budget (skips auto-tune)")
+    r.add_argument("--error-collapse", dest="error_collapse", default=None, choices=ERROR_COLLAPSE_MODES,
+                   help="collapse error-shaped results: off | head (keep 1st line) | oneline (tiny marker)")
+    r.add_argument("--per-tool", dest="per_tool", action="append", default=None, metavar="TOOL=BUDGET",
+                   help="per-tool window budget, or TOOL=off to EXEMPT it (repeatable; e.g. Bash=200 TodoWrite=off)")
     r.add_argument("--no-stale", action="store_true", help="disable the stale-read tier")
     r.add_argument("--no-noise", action="store_true", help="disable the character-noise tier")
     r.add_argument("--since-days", type=float, default=None)

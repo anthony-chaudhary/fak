@@ -27,8 +27,14 @@ def _assistant_tooluse(mid, blocks):
 
 
 def _user_results(results):
-    """results: list of (toolu_id, content_str)."""
-    content = [{"type": "tool_result", "tool_use_id": tu, "content": s} for tu, s in results]
+    """results: list of (toolu_id, content_str) or (toolu_id, content_str, is_error)."""
+    content = []
+    for r in results:
+        tu, s = r[0], r[1]
+        block = {"type": "tool_result", "tool_use_id": tu, "content": s}
+        if len(r) > 2 and r[2]:
+            block["is_error"] = True
+        content.append(block)
     return {"type": "user", "message": {"content": content}}
 
 
@@ -179,6 +185,135 @@ def test_recoverable_frac_is_measured_not_constant():
     rf = C.reduce_window(C._seq([C._mk("result", "Read", 8000, salt="r", path="/x")]), 1000)
     assert rb["recoverable_frac"] < 1.0
     assert rf["recoverable_frac"] == 1.0
+
+
+def test_is_error_flag_captured_from_transcript():
+    # a failed Bash call carries is_error:true on its tool_result; parse_window must surface it
+    # so the error-collapse tier can key on the structural signal (not a guessy regex).
+    recs = [
+        _assistant_tooluse("m1", [("t1", "Bash", {"command": "boom"})]),
+        _user_results([("t1", "Traceback (most recent call last):\n" + "x" * 4000, True)]),
+        _assistant_tooluse("m2", [("t2", "Bash", {"command": "ok"})]),
+        _user_results([("t2", "fine")]),
+    ]
+    items, _ = C.parse_window(_write(recs))
+    by_cmd = {it.content[:10]: it for it in items if it.kind == "result"}
+    err = [it for it in items if it.kind == "result" and it.is_error]
+    assert len(err) == 1 and err[0].tool == "Bash"
+    assert C.looks_like_error(err[0]) is True
+    ok = [it for it in items if it.kind == "result" and not it.is_error][0]
+    assert C.looks_like_error(ok) is False         # "fine" is not error-shaped
+
+
+def test_profile_off_disables_reduction():
+    # the "disabled" choice — even a windowable corpus reduces exactly 1.0x / removes nothing.
+    items = C._seq([C._mk("result", "Read", 8000, salt=f"r{i}", path=f"/r{i}") for i in range(6)])
+    rep = C.reduce_window(items, 1000, profile=C.make_profile("off"))
+    assert rep["ratio"] == 1.0
+    assert rep["removed_tok"] == 0
+    assert rep["profile"] == "off"
+
+
+def test_profile_conservative_skips_windowing():
+    # lossless + recoverable only: a stale read collapses (re-fetchable) but a big unique
+    # non-file result is kept verbatim — no bounded-loss windowing, recoverable_frac == 1.0.
+    items = C._seq(
+        [C._mk("result", "Read", 16000, salt="s", path="/f", stale=True),
+         C._mk("result", "Edit", 200, salt="e", path="/f"),
+         C._mk("result", "Bash", 16000, salt="big")])
+    rep = C.reduce_window(items, 1000, profile=C.make_profile("conservative"))
+    assert rep["tiers"]["window"]["n"] == 0
+    assert rep["tiers"]["stale"]["n"] == 1
+    assert rep["recoverable_frac"] == 1.0
+    assert rep["lossy_removed_tok"] == 0
+    assert rep["ratio"] > 1.0
+
+
+def test_error_collapse_oneline_is_lossy_but_honest():
+    # the user's example: a 30k error result collapsed to a one-line marker. Big reduction,
+    # but recoverable_frac drops (no file handle) and lossy_removed_tok > 0 — honestly lossy.
+    items = C._seq([C._mk("result", "Bash", 30000, salt="Error: boom\n", is_error=True)])
+    rep = C.reduce_window(items, 200, profile=C.make_profile("hyper"))
+    assert rep["tiers"]["error"]["n"] == 1
+    assert rep["lossy_removed_tok"] > 0
+    assert rep["ratio"] > 10.0
+    assert rep["recoverable_frac"] < 0.5            # not file-recoverable -> honest low frac
+
+
+def test_error_collapse_head_keeps_message_line():
+    err = C._mk("result", "Bash", 30000, salt="Error: connection refused\n", is_error=True)
+    head, recov = C.collapse_error(err, "head")
+    one, recov2 = C.collapse_error(err, "oneline")
+    assert head.startswith("Error: connection refused")
+    assert "error body elided" in head and len(head) < len(err.content)
+    assert "error" in one.lower() and "elided" in one and len(one) < 64
+    assert recov is False and recov2 is False        # no path -> not re-fetchable
+
+
+def test_error_collapse_off_in_default_profile():
+    # the lossy lever is OFF unless asked: a 30k error under `balanced` is WINDOWED (head+tail),
+    # never collapsed to a marker. The error tier stays empty; nothing is lossy.
+    items = C._seq([C._mk("result", "Bash", 30000, salt="Error: boom\n", is_error=True)])
+    rep = C.reduce_window(items, 1000, profile=C.make_profile("balanced"))
+    assert rep["tiers"]["error"]["n"] == 0
+    assert rep["lossy_removed_tok"] == 0
+
+
+def test_error_collapse_never_false_positive_or_inflates():
+    # never collapse a non-error result, even under hyper + a huge budget...
+    clean = C._seq([C._mk("result", "Bash", 8000, salt="ordinary log output here", path="/n")])
+    r_clean = C.reduce_window(clean, 100000, profile=C.make_profile("hyper"))
+    assert r_clean["tiers"]["error"]["n"] == 0
+    # ...and never inflate a tiny error whose marker would cost more than the body.
+    tiny = C._seq([C._mk("result", "Bash", 30, salt="Error: x\n", is_error=True)])
+    r_tiny = C.reduce_window(tiny, 1000, profile=C.make_profile("hyper"))
+    assert r_tiny["reduced_tok"] <= r_tiny["baseline_tok"]
+
+
+def test_per_tool_exempt_and_tight_cap():
+    # exempt: an exempted tool's big payload is left verbatim (nothing removed).
+    fe = C._seq([C._mk("result", "Bash", 8000, salt="bigexempt")])
+    r_ex = C.reduce_window(fe, 1000, profile=C.Profile("ex", per_tool={"Bash": None}))
+    assert r_ex["ratio"] == 1.0 and r_ex["removed_tok"] == 0
+    # tight per-tool cap windows that tool harder than the default budget.
+    fr = C._seq([C._mk("result", "Read", 8000, salt="rr", path="/x")])
+    r_def = C.reduce_window(fr, 1000, profile=C.Profile("d"))
+    r_tight = C.reduce_window(fr, 1000, profile=C.Profile("t", per_tool={"Read": 100}))
+    assert r_tight["removed_tok"] > r_def["removed_tok"]
+
+
+def test_resolve_profile_parses_overrides():
+    import argparse
+    ns = argparse.Namespace(profile="aggressive", no_noise=True, no_stale=False,
+                            error_collapse="oneline",
+                            per_tool=["Bash=150", "TodoWrite=off", "Read=none"])
+    p = C.resolve_profile(ns)
+    assert p.name == "aggressive"
+    assert p.noise is False                          # --no-noise override applied
+    assert p.error_collapse == "oneline"             # override beat the preset's "head"
+    assert p.per_tool["Bash"] == 150
+    assert p.per_tool["TodoWrite"] is None           # exempt
+    assert p.per_tool["Read"] is None                # "none" -> exempt
+    assert p.is_exempt("TodoWrite") is True
+
+
+def test_make_profile_rejects_unknown():
+    try:
+        C.make_profile("turbo")
+    except SystemExit:
+        return
+    raise AssertionError("make_profile should reject an unknown profile name")
+
+
+def test_default_profile_matches_legacy_path():
+    # the `balanced` preset must reproduce the pre-profile reducer byte-for-byte.
+    items = C._seq([C._mk("result", "Read", 8000, salt=f"r{i}", path=f"/r{i}") for i in range(8)])
+    legacy = C.reduce_window(items, 800)
+    balanced = C.reduce_window(items, 800, profile=C.make_profile("balanced"))
+    assert legacy["ratio"] == balanced["ratio"]
+    assert legacy["removed_tok"] == balanced["removed_tok"]
+    assert legacy["recoverable_frac"] == balanced["recoverable_frac"]
+    assert legacy["tiers"]["window"]["n"] == balanced["tiers"]["window"]["n"]
 
 
 def test_selfcheck_passes():
