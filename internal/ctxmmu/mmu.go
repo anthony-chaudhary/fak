@@ -66,6 +66,7 @@ type MMU struct {
 	order     []string           // FIFO insertion order of held ids (bounded eviction)
 	orderHead int                // consumed-prefix index into order (compacted in place)
 	maxHeld   int                // cap on len(held); 0 in zero-value, set by constructors
+	pageOutID string             // keyed page-out codec id (default "blob"; FAK_PAGEOUT_BACKEND)
 }
 
 // New builds the registered-default-shaped gate with the standard quarantine-ledger
@@ -93,7 +94,29 @@ func NewWithLimit(maxHeld int) *MMU {
 	if maxHeld < 1 {
 		maxHeld = DefaultMaxHeld
 	}
-	return &MMU{held: map[string]abi.Ref{}, cleared: map[string]bool{}, maxHeld: maxHeld}
+	return &MMU{held: map[string]abi.Ref{}, cleared: map[string]bool{}, maxHeld: maxHeld, pageOutID: pageOutBackendID()}
+}
+
+// pageOutBackendID is the keyed page-out codec id the MMU pages cold/quarantined
+// bytes through. It defaults to "blob" (the in-memory v0.1 codec) and is
+// overridable at process start via FAK_PAGEOUT_BACKEND — the seam an operator uses
+// to spill page-out to a DURABLE codec (e.g. "blobfs", or the storedrv router's
+// id) so quarantined/cold bytes survive a process restart. Read once at
+// construction, never on the hot path; an empty value falls back to "blob".
+func pageOutBackendID() string {
+	if id := os.Getenv("FAK_PAGEOUT_BACKEND"); id != "" {
+		return id
+	}
+	return "blob"
+}
+
+// codecID returns the configured page-out codec id, falling back to "blob" for a
+// zero-value MMU (a struct literal that bypassed the constructors).
+func (m *MMU) codecID() string {
+	if m.pageOutID == "" {
+		return "blob"
+	}
+	return m.pageOutID
 }
 
 // NewWithHeldLimit is a back-compat alias for NewWithLimit (the pre-merge constructor
@@ -179,7 +202,7 @@ func (m *MMU) pageToPointer(ctx context.Context, orig abi.Ref, body []byte, hint
 }
 
 func (m *MMU) pageOut(ctx context.Context, body []byte) abi.Ref {
-	if b, ok := abi.PageOut("blob"); ok {
+	if b, ok := abi.PageOut(m.codecID()); ok {
 		inline := abi.Ref{Kind: abi.RefInline, Inline: body, Len: int64(len(body))}
 		if h, err := b.PageOut(ctx, inline); err == nil {
 			return h
@@ -241,7 +264,7 @@ func (m *MMU) PageIn(ctx context.Context, id string) ([]byte, error) {
 	if !cleared {
 		return nil, fmt.Errorf("ctxmmu: page-in of %s refused — no witness clear()", id)
 	}
-	if b, has := abi.PageOut("blob"); has {
+	if b, has := abi.PageOut(m.codecID()); has {
 		ref, err := b.PageIn(ctx, handle)
 		if err != nil {
 			return nil, err

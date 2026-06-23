@@ -16,6 +16,7 @@ import (
 
 	"github.com/anthony-chaudhary/fak/internal/abi"
 	"github.com/anthony-chaudhary/fak/internal/agent"
+	"github.com/anthony-chaudhary/fak/internal/memq"
 	"github.com/anthony-chaudhary/fak/internal/recall"
 )
 
@@ -1993,10 +1994,12 @@ func TestMCPStdioRoundtrip(t *testing.T) {
 	if got := resps[0].Result.(map[string]any)["protocolVersion"]; got != "2024-11-05" {
 		t.Errorf("initialize protocolVersion = %v", got)
 	}
-	// tools/list — fak_adjudicate, fak_syscall, fak_admit, fak_changes, fak_revoke, fak_context_change.
+	// tools/list — fak_adjudicate, fak_syscall, fak_admit, fak_changes, fak_revoke,
+	// fak_context_change, plus the memq memory-algebra trio fak_memory_drivers /
+	// fak_memory_explain / fak_memory_run.
 	tools := resps[1].Result.(map[string]any)["tools"].([]any)
-	if len(tools) != 6 {
-		t.Errorf("tools/list returned %d tools, want 6", len(tools))
+	if len(tools) != 9 {
+		t.Errorf("tools/list returned %d tools, want 9", len(tools))
 	}
 	// tools/call fak_syscall (allow) -> verdict ALLOW in the embedded text
 	sc := unwrapToolResult(t, resps[2])
@@ -2013,6 +2016,85 @@ func TestMCPStdioRoundtrip(t *testing.T) {
 	}
 	if dn.TraceID == "" {
 		t.Errorf("fak_adjudicate must return a non-empty trace_id for the follow-up fak_admit call")
+	}
+}
+
+// TestMCPMemoryAlgebraRoundtrip exercises the three memq tools through the live
+// tools/call dispatch path — the count assertion in TestMCPStdioRoundtrip only proves
+// they are advertised, not that an agent can drive them. drivers lists the registered
+// strategies, explain compiles a named driver to a plan WITHOUT a backend, and run
+// executes against the in-memory demo corpus under the fail-closed (dry-run) default.
+func TestMCPMemoryAlgebraRoundtrip(t *testing.T) {
+	srv := newTestServer(t)
+	ctx := context.Background()
+
+	// fak_memory_drivers — the registered strategy catalog, each with a compiled plan.
+	driversParams, _ := json.Marshal(map[string]any{"name": "fak_memory_drivers"})
+	res, rerr := srv.callTool(ctx, driversParams)
+	if rerr != nil {
+		t.Fatalf("fak_memory_drivers rpc error: %v", rerr.Message)
+	}
+	var drivers struct {
+		Drivers []MemoryDriverInfo `json:"drivers"`
+	}
+	decodeMCPText(t, res, &drivers)
+	if len(drivers.Drivers) == 0 {
+		t.Fatal("fak_memory_drivers returned no strategies")
+	}
+	has := map[string]bool{}
+	for _, d := range drivers.Drivers {
+		has[d.Name] = true
+		if len(d.Plan.Steps) == 0 {
+			t.Errorf("driver %q advertised with an empty plan", d.Name)
+		}
+	}
+	for _, want := range []string{"recall", "render", "clean", "compact", "dream"} {
+		if !has[want] {
+			t.Errorf("fak_memory_drivers missing built-in strategy %q", want)
+		}
+	}
+
+	// fak_memory_explain — a named driver compiles to a valid plan, no backend touched.
+	explainParams, _ := json.Marshal(map[string]any{
+		"name":      "fak_memory_explain",
+		"arguments": map[string]any{"driver": "render", "intent": "the task at hand"},
+	})
+	res, rerr = srv.callTool(ctx, explainParams)
+	if rerr != nil {
+		t.Fatalf("fak_memory_explain rpc error: %v", rerr.Message)
+	}
+	var plan memq.Plan
+	decodeMCPText(t, res, &plan)
+	if !plan.Valid || len(plan.Steps) == 0 {
+		t.Fatalf("fak_memory_explain(render) not a valid non-empty plan: %+v", plan)
+	}
+
+	// fak_memory_run — default (no apply) is a dry run against the demo corpus: it
+	// renders a working set but enacts zero effects.
+	runParams, _ := json.Marshal(map[string]any{
+		"name":      "fak_memory_run",
+		"arguments": map[string]any{"driver": "render", "intent": "the task at hand"},
+	})
+	res, rerr = srv.callTool(ctx, runParams)
+	if rerr != nil {
+		t.Fatalf("fak_memory_run rpc error: %v", rerr.Message)
+	}
+	var result memq.Result
+	decodeMCPText(t, res, &result)
+	if result.Stats.Rendered == 0 {
+		t.Errorf("fak_memory_run(render) rendered nothing: %+v", result.Stats)
+	}
+	if result.Stats.EffectsApplied != 0 {
+		t.Errorf("fak_memory_run without apply must enact zero effects, got %d", result.Stats.EffectsApplied)
+	}
+
+	// An unknown driver is an invalid-params rpc error, not a silent empty result.
+	badParams, _ := json.Marshal(map[string]any{
+		"name":      "fak_memory_run",
+		"arguments": map[string]any{"driver": "no-such-driver"},
+	})
+	if _, rerr := srv.callTool(ctx, badParams); rerr == nil {
+		t.Error("fak_memory_run with an unknown driver should be an rpc error")
 	}
 }
 

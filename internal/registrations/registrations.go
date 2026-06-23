@@ -12,6 +12,24 @@ import (
 	// Ref backend + MMU page-out codec (must be present so ActiveResolver works).
 	_ "github.com/anthony-chaudhary/fak/internal/blob"
 
+	// Optional DURABLE, on-disk content-addressed store (inert unless FAK_BLOB_DIR
+	// is set). Registers a page-out codec under id "blobfs" so a quarantined/cold
+	// result can spill to disk and survive a process restart; also the durable tier
+	// the storedrv router composes.
+	_ "github.com/anthony-chaudhary/fak/internal/blobfs"
+
+	// Optional REMOTE, HTTP object-store content-addressed blob driver (inert
+	// unless FAK_BLOB_HTTP_URL is set). Registers a page-out codec under id
+	// "blobhttp" — the disaggregated/cloud tier for content that must outlive a
+	// single host; pure net/http, no vendor SDK.
+	_ "github.com/anthony-chaudhary/fak/internal/blobhttp"
+
+	// Pluggable storage-driver ROUTER: composes the blob/blobfs/blobhttp tiers into
+	// one content-addressed namespace and (only when FAK_STORE opts in) becomes the
+	// abi RegionBackend so every Ref's bytes route to the tier that fits. Inert
+	// unless FAK_STORE is set — blob stays the live backend by default.
+	_ "github.com/anthony-chaudhary/fak/internal/storedrv"
+
 	// vDSO fast-path tiers.
 	_ "github.com/anthony-chaudhary/fak/internal/vdso"
 
@@ -87,5 +105,6 @@ import (
 	// (TL008)). Dormant + abstaining on a clean surface; without this line the
 	// invariant ships dark (the leaf's init() never runs). `fak lint` is the same
 	// rules run out of band.
+	_ "github.com/anthony-chaudhary/fak/internal/headroom"
 	_ "github.com/anthony-chaudhary/fak/internal/toollint"
 )

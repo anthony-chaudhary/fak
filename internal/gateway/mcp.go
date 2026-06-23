@@ -282,6 +282,28 @@ func (s *Server) callTool(ctx context.Context, params json.RawMessage) (any, *rp
 			return nil, &rpcError{Code: rpcInvalidParams, Message: err.Error()}
 		}
 		return mcpToolResult(resp), nil
+	case "fak_memory_drivers":
+		return mcpToolResult(map[string]any{"drivers": s.memoryDrivers()}), nil
+	case "fak_memory_explain":
+		var req MemoryRequest
+		if err := json.Unmarshal(p.Arguments, &req); err != nil {
+			return nil, &rpcError{Code: rpcInvalidParams, Message: "invalid fak_memory_explain arguments: " + err.Error()}
+		}
+		plan, err := s.memoryExplain(req)
+		if err != nil {
+			return nil, &rpcError{Code: rpcInvalidParams, Message: err.Error()}
+		}
+		return mcpToolResult(plan), nil
+	case "fak_memory_run":
+		var req MemoryRequest
+		if err := json.Unmarshal(p.Arguments, &req); err != nil {
+			return nil, &rpcError{Code: rpcInvalidParams, Message: "invalid fak_memory_run arguments: " + err.Error()}
+		}
+		res, err := s.memoryRun(ctx, req)
+		if err != nil {
+			return nil, &rpcError{Code: rpcInvalidParams, Message: err.Error()}
+		}
+		return mcpToolResult(res), nil
 	default:
 		return nil, &rpcError{Code: rpcInvalidParams, Message: "unknown tool: " + p.Name}
 	}
@@ -373,5 +395,35 @@ func toolDescriptors() []map[string]any {
   "required": ["image_dir", "step", "reason"]
 }`),
 		},
+		{
+			"name":        "fak_memory_drivers",
+			"description": "List the built-in memory STRATEGIES (recall/render/clean/compact/dream). Each is a composable query in the memq algebra (scan|filter|rank|limit|budget|render|tombstone|consolidate|reclassify|prune), not a hardcoded function — 'build SQL, not a specific query'. Returns each driver's name, doc, and compiled plan so you can see the pipeline and author your own.",
+			"inputSchema": json.RawMessage(`{"type":"object","properties":{}}`),
+		},
+		{
+			"name":        "fak_memory_explain",
+			"description": "EXPLAIN a memory query as a plan WITHOUT executing it — every step, which steps are effects, and which mutate durable state (and so are proposal-only). Pass {driver} for a built-in, or {query} with an inline authored memq Query ({intent, ops:[{kind,...}]}). This is the 'step through it before you run it' surface.",
+			"inputSchema": memoryInputSchema,
+		},
+		{
+			"name":        "fak_memory_run",
+			"description": "RUN a memory query against a backend: pick a built-in {driver} or supply an inline {query}; parameterize with {intent,k,budget}; point at a recall core image with {image_dir} (default: an in-memory demo corpus). Effects default to PROPOSED — set {apply:true} to enact the safe negative-only/storage mutations (tombstone, prune). Sealed spans are never rendered (the trust gate); consolidate/reclassify never persist this rung. Returns the per-step trace, the rendered set, proposed/applied effects, refusals, and stats.",
+			"inputSchema": memoryInputSchema,
+		},
 	}
 }
+
+// memoryInputSchema is the {driver|query, intent, k, budget, image_dir, apply} shape
+// shared by fak_memory_explain and fak_memory_run.
+var memoryInputSchema = json.RawMessage(`{
+  "type": "object",
+  "properties": {
+    "driver": {"type": "string", "description": "a built-in strategy name (see fak_memory_drivers); omit if you supply an inline query"},
+    "query": {"type": "object", "description": "an inline authored memq Query: {intent, ops:[{kind, pred?, by?, desc?, k?, bytes?, reason?}]}. Ops: scan|filter|rank|limit|budget|render|tombstone|consolidate|reclassify|prune"},
+    "intent": {"type": "string", "description": "the task intent (drives relevance ranking and default match terms)"},
+    "k": {"type": "integer", "description": "limit (driver-specific; 0 = driver default)"},
+    "budget": {"type": "integer", "description": "byte budget for the rendered/selected set (0 = unbounded)"},
+    "image_dir": {"type": "string", "description": "run (not explain): path to a recall core image; omit for the in-memory demo corpus"},
+    "apply": {"type": "boolean", "description": "run only: APPLY the safe negative-only/storage mutations (tombstone, prune). Default false = propose only (fail-closed)"}
+  }
+}`)

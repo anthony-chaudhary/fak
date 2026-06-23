@@ -47,13 +47,16 @@ var tier = map[string]int{
 	"abi": 0,
 
 	"appversion": 1, "blob": 1, "boundarylint": 1, "cachemeta": 1, "canon": 1, "compute": 1, "deletioncert": 1, "demoui": 1, "dgxbridge": 1, "ggufload": 1, "gpulease": 1, "hfhub": 1, "leakcheck": 1, "metalgemm": 1, "metrics": 1, "model": 1, "pathlint": 1, "pathutil": 1, "provenance": 1, "swebench": 1, "urllint": 1, "webbench": 1,
+	"blobfs": 1, "blobhttp": 1, // durable on-disk / remote-HTTP content-addressed Ref backends; attach to abi like blob (Resolver+PageOutBackend), import only abi+blob+stdlib.
 
 	"adjudicator": 2, "ctxmmu": 2, "engine": 2, "enginecache": 2, "grammar": 2, "kernel": 2,
 	"preflight": 2, "vdso": 2, "plancfi": 2, "steward": 2, "witness": 2,
 	"harvest": 2, "shipgate": 2, "policy": 2, "modelengine": 2, "ratelimit": 2,
 	"journal": 2, "gitgate": 2, "spec": 2, // spec: the ProvisionalSink/OpsSpec speculation mechanism; composes model+polymodel under abi (off-defconfig, gated by FAK_POLYMODEL).
+	"storedrv": 2, // content-addressed storage ROUTER: composes the blob/blobfs/blobhttp (tier-1) drivers into one namespace; the abi RegionBackend only when FAK_STORE opts in.
 
 	"ifc": 3, "normgate": 3, "recall": 3, "kvmmu": 3, "radixkv": 3, "cdb": 3, "contextq": 3, "agentdojo": 3, "toollint": 3,
+	"memq": 3, "headroom": 3, // memq: the memory-operation algebra composed over recall (tier 3). headroom: the context-compression seam over ctxmmu/abi (its doc.go declares composer/3).
 
 	"agent": 4, "bench": 4, "turnbench": 4, "gateway": 4, "registrations": 4, "rsiloop": 4,
 	"tracesink": 4, // imports agent/turnbench/registrations (tier 4) — tier forced to 4
@@ -895,6 +898,11 @@ func TestRequestPathDefaultBuildIsCgoFree(t *testing.T) {
 // at a time. `blob` ships the v0.1 default; it is the only legitimate registrant today.
 var regionBackendRole = map[string]string{
 	"blob": "the v0.1 default Ref/Resolver backend (content-addressed blob store)",
+	// The DELIBERATE, reviewed swap (storedrv/config.go init): the storage-driver router
+	// becomes the single live Ref backend, fanning across its blob/blobfs/blobhttp tiers.
+	// It registers ONLY when FAK_STORE opts in (unset => inert, blob stays live), and
+	// imports blob so blob's init runs first — the last-wins override is order-deterministic.
+	"storedrv": "the FAK_STORE-gated storage-driver router (fans Ref resolution across tiers; blob remains the unset default)",
 }
 
 // TestSingleRegionBackendRegistrant turns ARCHITECTURE.md's "Ref backend is a single

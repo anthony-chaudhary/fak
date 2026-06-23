@@ -76,6 +76,8 @@ func main() {
 		cmdRecall(os.Args[2:])
 	case "dream":
 		cmdDream(os.Args[2:])
+	case "memory":
+		cmdMemory(os.Args[2:])
 	case "debug":
 		cmdDebug(os.Args[2:])
 	case "policy":
@@ -92,6 +94,8 @@ func main() {
 		cmdServe(os.Args[2:])
 	case "guard":
 		cmdGuard(os.Args[2:])
+	case "headroom":
+		cmdHeadroom(os.Args[2:])
 	case "hook":
 		cmdHook()
 	case "swebench":
@@ -216,6 +220,16 @@ func usage() {
                 (offline "sleep" pass over a core image: re-screen, pre-seal
                  refuted witnesses, repair descriptors, surface duplicate aliases,
                  and write a pruned cleaned image)
+  fak memory    drivers | explain | run  [--driver NAME] [--query-file PLAN.json]
+                [--intent STR] [--k N] [--budget BYTES] [--dir IMAGE] [--apply]
+                (the MEMORY-OPERATION ALGEBRA — build SQL, not a specific query: an
+                 agent authors its OWN render/clean/compact/dream strategy as a
+                 composable Op pipeline (scan|filter|rank|limit|budget |
+                 render|tombstone|consolidate|reclassify|prune) instead of the kernel
+                 hardcoding one. 'drivers' lists the built-in strategies; 'explain'
+                 shows a plan without running it; 'run' executes it (mutations PROPOSED
+                 unless --apply). Default backend is the in-memory demo corpus; --dir
+                 runs over a recall core image)
   fak debug     [--session JSONL] [--dir DIR] [--cmd report|info|bt|x|ws|grep|tombstone|context-query|context-diff]
                 [--query STR] [--step N] [--grep PAT] [--k N] [--reason STR]
                 [--requested-by STR] [--out cdb-report.json]
@@ -252,6 +266,14 @@ func usage() {
                  your normal Claude Code — your key + prompt cache flow through, every
                  proposed tool call crosses the capability floor first. --dump-policy
                  prints the built-in floor to edit; --policy FILE enforces your own)
+  fak headroom  list | status | compress [--via NAME] [--model ID] [--emit] [FILE|-]
+                (the CONTEXT-COMPRESSION seam: shrink tool outputs/logs/files before
+                 they reach the model, reversibly. A pluggable AREA — one generic
+                 Compressor interface, swappable plugins: noop (off default), native
+                 (in-process structural, zero deps), headroom (bridge to a running
+                 'headroom proxy'). The selected plugin folds into the result path as
+                 a ResultAdmitter, so 'fak guard'/'fak serve' compress in-stream.
+                 Pick with FAK_COMPRESSOR; 'compress' proves the savings with no model)
   fak hook      < call.json     (spawned-hook decide; the A/B baseline transport)
   fak webbench  describe | eval | compare    (frontier web/browser agent benchmarking)
   fak swebench  describe | eval | compare    (SWE-bench Verified benchmarking)
