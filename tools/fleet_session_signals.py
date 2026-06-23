@@ -96,6 +96,65 @@ def weekly_reset(text: str) -> str | None:
     return limit_resets(text).get("weekly")
 
 
+_RESET_TIME_RE = re.compile(r"(\d{1,2})(?::(\d{2}))?\s*([ap])m\b", re.I)
+# IANA tz -> fixed UTC offset hours. The fleet's banners only ever name the US
+# Pacific zone; a small explicit table avoids a tzdata dependency on the stdlib-only
+# tool surface. PDT (DST, Mar-Nov) is UTC-7; the fleet runs year-round on Pacific.
+_TZ_OFFSET = {
+    "america/los_angeles": -7, "america/denver": -6, "america/chicago": -5,
+    "america/new_york": -4, "utc": 0,
+}
+
+
+def _reset_tz_offset(when: str) -> int:
+    m = re.search(r"\(([^)]+)\)", when or "")
+    if m:
+        return _TZ_OFFSET.get(m.group(1).strip().lower(), -7)
+    return -7  # default to Pacific -- the only zone the banners use
+
+
+def reset_passed(when: str, now_utc=None, anchor_utc=None) -> bool | None:
+    """Has a usage-limit reset window already elapsed?
+
+    ``when`` is a raw reset string from :func:`limit_reset`, e.g.
+    ``"6am (America/Los_Angeles)"`` or ``"7:10am (America/Los_Angeles)"``. A reset
+    banner names the NEXT occurrence of that wall-clock time, so this resolves the
+    window against the banner's own time (``anchor_utc`` -- the transcript's last
+    timestamp, when known) and reports whether ``now_utc`` is at/after it.
+
+    Returns True (resumable now), False (still capped), or None (unparseable -- the
+    caller should treat it conservatively as not-yet-passed). Pure + injectable so
+    it unit-tests without a clock; production passes ``now_utc=datetime.now(UTC)``.
+
+    This is the primitive the manifest-bound watcher lacked: without a past/future
+    verdict on the reset window, a reset-cleared session is indistinguishable from a
+    still-capped one, so a whole reset-passed cohort stays invisible until someone
+    eyeballs the clock.
+    """
+    from datetime import datetime, timezone, timedelta
+    m = _RESET_TIME_RE.search(when or "")
+    if not m:
+        return None
+    hour = int(m.group(1)) % 12
+    if m.group(3).lower() == "p":
+        hour += 12
+    minute = int(m.group(2) or 0)
+    off = _reset_tz_offset(when)
+    tz = timezone(timedelta(hours=off))
+    now_utc = now_utc or datetime.now(timezone.utc)
+    if now_utc.tzinfo is None:
+        now_utc = now_utc.replace(tzinfo=timezone.utc)
+    anchor = anchor_utc or now_utc
+    if anchor.tzinfo is None:
+        anchor = anchor.replace(tzinfo=timezone.utc)
+    # the reset is the FIRST occurrence of (hour:minute) in tz at/after the anchor
+    a_local = anchor.astimezone(tz)
+    reset_local = a_local.replace(hour=hour, minute=minute, second=0, microsecond=0)
+    if reset_local < a_local:
+        reset_local += timedelta(days=1)
+    return now_utc >= reset_local.astimezone(timezone.utc)
+
+
 def is_auth_error(text: str) -> bool:
     return bool(AUTH_RE.search(text or ""))
 

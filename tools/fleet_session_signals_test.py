@@ -81,5 +81,63 @@ class FleetSessionSignalsTest(unittest.TestCase):
         )
 
 
+class ResetPassedTest(unittest.TestCase):
+    """reset_passed -- the past/future verdict on a usage-limit window. Anchored to
+    the banner's own time so 'resets 6am' written at 06:30 means TOMORROW's 6am."""
+
+    def _utc(self, h, m=0):
+        from datetime import datetime, timezone
+        return datetime(2026, 6, 23, h, m, tzinfo=timezone.utc)
+
+    def test_future_reset_not_passed(self) -> None:
+        # banner written 09:00 PDT (16:00 UTC), resets 11am; now 10:18 PDT (17:18 UTC)
+        anchor = self._utc(16, 0)
+        now = self._utc(17, 18)
+        self.assertFalse(fleet_session_signals.reset_passed(
+            "11am (America/Los_Angeles)", now_utc=now, anchor_utc=anchor))
+
+    def test_past_reset_passed(self) -> None:
+        # same banner, now 11:05 PDT (18:05 UTC) -> elapsed
+        anchor = self._utc(16, 0)
+        now = self._utc(18, 5)
+        self.assertTrue(fleet_session_signals.reset_passed(
+            "11am (America/Los_Angeles)", now_utc=now, anchor_utc=anchor))
+
+    def test_reset_with_minutes(self) -> None:
+        # banner 06:00 PDT (13:00 UTC) resets 7:10am; now 08:20 PDT (15:20 UTC) -> passed
+        anchor = self._utc(13, 0)
+        self.assertTrue(fleet_session_signals.reset_passed(
+            "7:10am (America/Los_Angeles)", now_utc=self._utc(15, 20), anchor_utc=anchor))
+        # now 07:00 PDT (14:00 UTC) -> not yet
+        self.assertFalse(fleet_session_signals.reset_passed(
+            "7:10am (America/Los_Angeles)", now_utc=self._utc(14, 0), anchor_utc=anchor))
+
+    def test_banner_after_reset_time_rolls_to_next_day(self) -> None:
+        # banner written 06:30 PDT (13:30 UTC) saying 'resets 6am' => tomorrow 6am;
+        # now same-day 08:20 PDT is BEFORE tomorrow's 6am -> not passed.
+        anchor = self._utc(13, 30)
+        self.assertFalse(fleet_session_signals.reset_passed(
+            "6am (America/Los_Angeles)", now_utc=self._utc(15, 20), anchor_utc=anchor))
+
+    def test_pm_window(self) -> None:
+        anchor = self._utc(19, 0)  # 12:00 PDT
+        self.assertFalse(fleet_session_signals.reset_passed(
+            "3pm (America/Los_Angeles)", now_utc=self._utc(21, 0), anchor_utc=anchor))  # 14:00 PDT
+        self.assertTrue(fleet_session_signals.reset_passed(
+            "3pm (America/Los_Angeles)", now_utc=self._utc(22, 30), anchor_utc=anchor))  # 15:30 PDT
+
+    def test_unparseable_returns_none(self) -> None:
+        self.assertIsNone(fleet_session_signals.reset_passed("sometime soon"))
+        self.assertIsNone(fleet_session_signals.reset_passed(""))
+
+    def test_real_banner_string_parses(self) -> None:
+        when = fleet_session_signals.limit_reset(
+            "You've hit your session limit · resets 11am (America/Los_Angeles)")
+        self.assertEqual(when, "11am (America/Los_Angeles)")
+        self.assertIsNotNone(
+            fleet_session_signals.reset_passed(when, now_utc=self._utc(20, 0),
+                                               anchor_utc=self._utc(16, 0)))
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
