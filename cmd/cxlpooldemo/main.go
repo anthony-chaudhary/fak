@@ -5,11 +5,17 @@
 //
 // It runs entirely on the pure metadata/policy plane (internal/cachemeta): no tensors
 // are moved and no hardware is touched. Every number is a deterministic calculation
-// over representative tier/pool profiles, so the output is identical on every machine
-// and in CI. An operator overrides the profiles with their fabric's measured topology;
-// the logic is unchanged.
+// over tier/pool profiles, so the output is identical on every machine and in CI.
 //
-//	go run ./cmd/cxlpooldemo
+//	go run ./cmd/cxlpooldemo                          # representative default profiles
+//	go run ./cmd/cxlpooldemo -profiles cal.json       # YOUR measured tier/pool numbers
+//
+// The default profiles are representative order-of-magnitude stand-ins. The point of
+// -profiles is the design-win path: an operator measures their real fabric (a CXL
+// switch pool, a CMM-class expander) and feeds those latency/bandwidth/capacity/host
+// numbers in; fak's SAME cost model then reports the fleet economics on that hardware's
+// characteristics. It remains a cost model over the supplied profiles, not a hardware
+// measurement — see cmd/cxlpooldemo/calibration.example.json for the shape.
 //
 // What it demonstrates, in order:
 //  1. the pooling character of each tier — how many hosts can attend it, whether it is
@@ -23,6 +29,7 @@
 package main
 
 import (
+	"encoding/json"
 	"flag"
 	"fmt"
 	"io"
@@ -34,23 +41,73 @@ import (
 )
 
 func main() {
+	profilesPath := flag.String("profiles", "", "path to a JSON calibration file overriding tier/pool profiles with measured numbers (see cmd/cxlpooldemo/calibration.example.json)")
 	flag.Parse()
-	if err := run(os.Stdout); err != nil {
+
+	profiles := cachemeta.DefaultTierProfiles()
+	pools := cachemeta.DefaultPoolProfiles()
+	label := "representative default profiles"
+	if *profilesPath != "" {
+		raw, err := os.ReadFile(*profilesPath)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "cxlpooldemo:", err)
+			os.Exit(1)
+		}
+		l, err := applyCalibration(raw, profiles, pools)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "cxlpooldemo:", err)
+			os.Exit(1)
+		}
+		label = l
+	}
+	if err := run(os.Stdout, profiles, pools, label); err != nil {
 		fmt.Fprintln(os.Stderr, "cxlpooldemo:", err)
 		os.Exit(1)
 	}
 }
 
-func run(w io.Writer) error {
-	profiles := cachemeta.DefaultTierProfiles()
-	pools := cachemeta.DefaultPoolProfiles()
+// calibration is the JSON shape of a -profiles file: a human label plus partial
+// overrides of the tier and pool profiles, keyed by tier name. Only the tiers/fields a
+// caller measured need be present; everything else keeps its representative default.
+type calibration struct {
+	Label string                                            `json:"label"`
+	Tiers map[cachemeta.ResidencyTier]cachemeta.TierProfile `json:"tiers"`
+	Pools map[cachemeta.ResidencyTier]cachemeta.PoolProfile `json:"pools"`
+}
+
+// applyCalibration parses a JSON calibration and merges its overrides ONTO the supplied
+// default profile maps (mutating them in place), returning the human label. Each
+// override's Tier field is forced to its map key so the profile stays self-consistent.
+func applyCalibration(raw []byte, profiles map[cachemeta.ResidencyTier]cachemeta.TierProfile, pools map[cachemeta.ResidencyTier]cachemeta.PoolProfile) (string, error) {
+	var cal calibration
+	if err := json.Unmarshal(raw, &cal); err != nil {
+		return "", fmt.Errorf("parse calibration: %w", err)
+	}
+	for tier, p := range cal.Tiers {
+		p.Tier = tier
+		profiles[tier] = p
+	}
+	for tier, p := range cal.Pools {
+		p.Tier = tier
+		pools[tier] = p
+	}
+	label := cal.Label
+	if label == "" {
+		label = "operator-supplied measured profiles"
+	}
+	return label, nil
+}
+
+func run(w io.Writer, profiles map[cachemeta.ResidencyTier]cachemeta.TierProfile, pools map[cachemeta.ResidencyTier]cachemeta.PoolProfile, label string) error {
+	fmt.Fprintf(w, "Profiles: %s\n\n", label)
 	printTopology(w, pools)
 	printFleetEconomics(w, profiles, pools)
 	printTrustGate(w)
-	fmt.Fprintln(w, "All numbers above are a deterministic cost model over representative")
-	fmt.Fprintln(w, "tier/pool profiles on the metadata plane — no tensors moved, no hardware")
-	fmt.Fprintln(w, "touched. The placement plane decides what a pooled tier is WORTH and WHO")
-	fmt.Fprintln(w, "may reuse a cell in it; an engine adapter maps the physical CXL region.")
+	fmt.Fprintln(w, "All numbers above are a deterministic cost model over the tier/pool")
+	fmt.Fprintln(w, "profiles in use — no tensors moved, no hardware touched. The placement")
+	fmt.Fprintln(w, "plane decides what a pooled tier is WORTH and WHO may reuse a cell in it;")
+	fmt.Fprintln(w, "an engine adapter maps the physical CXL region. Re-run with -profiles to")
+	fmt.Fprintln(w, "compute the same economics over YOUR measured fabric numbers.")
 	return nil
 }
 
@@ -117,10 +174,17 @@ func printFleetEconomics(w io.Writer, profiles map[cachemeta.ResidencyTier]cache
 		Profile:              profiles[cachemeta.TierCXL],
 		Pool:                 pools[cachemeta.TierCXL],
 	})
-	fmt.Fprintf(w, "  -> a coherent CXL pool turns %d prefills into %d and %s of copies into %s:\n",
-		tenants, 1, humanBytes(r.PrivateResidentBytes), humanBytes(r.PooledResidentBytes))
-	fmt.Fprintf(w, "     %d prefill tokens saved and %s of memory deduplicated across the fleet.\n",
-		r.PrefillTokensSaved, humanBytes(r.BytesDeduplicated))
+	if r.Shareable {
+		fmt.Fprintf(w, "  -> a coherent CXL pool turns %d prefills into %d and %s of copies into %s:\n",
+			tenants, 1, humanBytes(r.PrivateResidentBytes), humanBytes(r.PooledResidentBytes))
+		fmt.Fprintf(w, "     %d prefill tokens saved and %s of memory deduplicated across the fleet.\n",
+			r.PrefillTokensSaved, humanBytes(r.BytesDeduplicated))
+	} else {
+		fmt.Fprintf(w, "  -> the CXL tier in these profiles is not fabric-shareable (hosts=%d, coherent=%v):\n",
+			pools[cachemeta.TierCXL].Hosts, pools[cachemeta.TierCXL].Coherent)
+		fmt.Fprintf(w, "     prefill saved %d, memory deduplicated %s.\n",
+			r.PrefillTokensSaved, humanBytes(r.BytesDeduplicated))
+	}
 	fmt.Fprintln(w)
 }
 

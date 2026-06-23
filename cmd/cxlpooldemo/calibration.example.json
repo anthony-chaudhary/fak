@@ -1,0 +1,36 @@
+{
+  "label": "CXL switch-pool calibration (measured-style numbers, not a fak hardware run)",
+
+  "_comment": [
+    "A -profiles override for `go run ./cmd/cxlpooldemo -profiles cmd/cxlpooldemo/calibration.example.json`.",
+    "Only the tiers/fields you measured need be present; every other tier keeps its",
+    "representative default. The numbers below stand in for a coherent, switch-pooled",
+    "CXL.mem expander shared across a pod (order-of-magnitude, public-spec style); replace",
+    "them with YOUR fabric's measured latency / bandwidth / capacity / host count. This",
+    "remains a deterministic COST MODEL over the supplied profiles — fak moves no bytes and",
+    "this is not a measurement of fak on any particular hardware.",
+    "TierProfile fields: ReadLatencyNanos, BandwidthMBPerSec, CapacityBytes, ByteAddressable,",
+    "Coherent, Persistent, Share (copy|mmap|cxl_hdm|rdma|dmabuf).",
+    "PoolProfile fields: Hosts, Coherent, Share."
+  ],
+
+  "tiers": {
+    "cxl": {
+      "ReadLatencyNanos": 596,
+      "BandwidthMBPerSec": 60000,
+      "CapacityBytes": 2199023255552,
+      "ByteAddressable": true,
+      "Coherent": true,
+      "Persistent": false,
+      "Share": "cxl_hdm"
+    }
+  },
+
+  "pools": {
+    "cxl": {
+      "Hosts": 8,
+      "Coherent": true,
+      "Share": "cxl_hdm"
+    }
+  }
+}
