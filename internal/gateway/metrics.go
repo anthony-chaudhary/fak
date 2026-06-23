@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/blob"
+	"github.com/anthony-chaudhary/fak/internal/cachemeta"
 	"github.com/anthony-chaudhary/fak/internal/kernel"
 	"github.com/anthony-chaudhary/fak/internal/vdso"
 )
@@ -212,6 +213,32 @@ func (m *gatewayMetrics) adjudicationSummary() AdjudicationSummary {
 		}
 	}
 	return sum
+}
+
+// providerCacheEvidence classifies the gateway's recorded provider prompt-cache
+// reuse through the cachemeta materialization bridge (issue #432, acceptance #3). A
+// provider cache_read is a `provider_prefix` materialization: COST/LATENCY telemetry
+// about a prefix the REMOTE engine kept resident, never a re-serveable LOCAL-trust
+// artifact. Routing the live telemetry through the same proven gate the kernel uses
+// (MaterializeVerdict(MatProviderPrefix, …)) makes the separation mechanical on the
+// live path — the verdict is structurally non-serveable (CanServe()==false) and
+// marked cost_latency_only — rather than a prose promise in a metric's HELP text.
+// cachedTok is the cumulative cache_read tokens observed across served turns.
+func providerCacheEvidence(cachedTok uint64) cachemeta.LookupVerdict {
+	entry := cachemeta.FromProviderCache(cachemeta.ProviderCache{CachedTokens: int64(cachedTok)})
+	return cachemeta.MaterializeVerdict(
+		cachemeta.MatProviderPrefix, entry, cachemeta.MaterializationKey{}, cachemeta.QualityEvidence{})
+}
+
+// ProviderCacheEvidence classifies the summary's provider prompt-cache reuse
+// (CachedPromptTokens) through the #432 bridge: provider cache is PERFORMANCE
+// evidence (cost/latency), never local TRUST. The returned verdict is structurally
+// non-serveable (CanServe()==false, Meta["provider_cache"]=="cost_latency_only"), so
+// a consumer that prints the cached-token saving (the `fak guard` exit summary) can
+// prove from the kernel's own gate that it is reporting performance, not trust — the
+// cache reuse can never be promoted to authority that a local result may be re-served.
+func (s AdjudicationSummary) ProviderCacheEvidence() cachemeta.LookupVerdict {
+	return providerCacheEvidence(s.CachedPromptTokens)
 }
 
 // observeInference records one served model-generation turn: its token accounting,
@@ -573,6 +600,19 @@ func (m *gatewayMetrics) writeInferenceMetrics(b *strings.Builder) inferenceSnap
 	writeCounter(b, "fak_gateway_inference_prompt_tokens_total", "Prompt (input) tokens summed across served model turns.", int64(snap.promptTok))
 	writeCounter(b, "fak_gateway_inference_completion_tokens_total", "Completion (generated) tokens summed across served model turns.", int64(snap.complTok))
 	writeCounter(b, "fak_gateway_inference_cached_prompt_tokens_total", "Prompt (input) tokens the upstream PROVIDER served from its own prompt cache (cache_read) across served turns, normalized across Anthropic/OpenAI/Gemini. This is provider-side reuse — distinct from the local fak_vdso_*/fak_cache_* caches — and reads 0 on the in-kernel path (no provider).", int64(snap.cachedTok))
+
+	// fak_gateway_provider_cache_local_trust — the #432 acceptance-3 invariant,
+	// exported live. The cached-prompt-tokens counter above is PERFORMANCE evidence
+	// (cost/latency); it is NEVER local trust. The value is DERIVED from the cachemeta
+	// provider_prefix materialization gate (the same gate the kernel uses), so it is
+	// structurally 0 — and would flip to 1 only if that proven gate ever regressed to
+	// treat a provider cache_read as a serveable local-trust hit.
+	providerLocalTrust := 0
+	if providerCacheEvidence(snap.cachedTok).CanServe() {
+		providerLocalTrust = 1
+	}
+	writeHelpType(b, "fak_gateway_provider_cache_local_trust", "Whether the upstream PROVIDER's prompt-cache reuse counts as LOCAL TRUST (#432 acceptance 3). Structurally 0: provider cache is performance evidence (cost/latency) only — derived live from the cachemeta provider_prefix materialization gate, not a prose promise. A 1 would mean the trust/performance separation regressed.", "gauge")
+	fmt.Fprintf(b, "fak_gateway_provider_cache_local_trust %d\n", providerLocalTrust)
 
 	// Provider prompt-cache HIT rate: the token total above carried no denominator,
 	// so a dashboard could see tokens-cached but not how OFTEN a turn hit the provider
