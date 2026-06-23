@@ -17,6 +17,7 @@ and runs on CPU — no GPU needed for small models.
 | **I'm a coding agent** (build/test/run + the rules) | [AGENTS.md](AGENTS.md) |
 | **Chat with a local AI** (most fun — needs a ~1.6 GB model download) | [Simple Demo](cmd/simpledemo/README.md) — 5 minutes |
 | **Follow a guided first session** (real output at every step) | [Tutorial](docs/fak/tutorial.md) — 15 minutes ⭐ |
+| **Learn every concept in order** (a prerequisite-based course you can join at any level) | [Learning path](LEARNING-PATH.md) — 98 courses, six levels ⭐ |
 | **Put a safety gate in front of my AI** | [Getting Started](GETTING-STARTED.md) — 10 minutes |
 | **I already run an agent** (Claude Code, Cursor, an SDK, or MCP) | [Integration index](docs/integrations/README.md) — repoint one base URL, no agent-side code change |
 | **Understand what fak actually does** | [Main README](README.md) |

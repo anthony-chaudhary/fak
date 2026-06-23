@@ -122,6 +122,7 @@ Check your setup first: `python tools/extend_preflight.py`. Full contributor con
 | If you want to… | Read |
 |---|---|
 | Every CLI verb + what's shipped | [`docs/cli-reference.md`](docs/cli-reference.md) |
+| Learn every concept in prerequisite order (a course, join at your level) | [`LEARNING-PATH.md`](LEARNING-PATH.md) |
 | Install / run tiers (offline → gateway → in-kernel model) | [`fak/GETTING-STARTED.md`](GETTING-STARTED.md) |
 | Put fak in front of *your* agent (Claude Code / Cursor / MCP) | [`docs/integrations/`](docs/integrations/) · [`fak/examples/mcp/`](examples/mcp/) |
 | The deployable capability floor (policy manifests) | [`fak/POLICY.md`](POLICY.md) · [`fak/examples/README.md`](examples/README.md) |

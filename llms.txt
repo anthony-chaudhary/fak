@@ -37,6 +37,7 @@
 - [Start Here](START-HERE.md): run a local AI model in under 10 minutes (no key, no GPU for small models).
 - [Getting Started](GETTING-STARTED.md): install the single static binary and put the gate in front of your model.
 - [Guided tutorial](docs/fak/tutorial.md): zero to first adjudicated tool call, with real output at every step.
+- [Learning path](LEARNING-PATH.md): a prerequisite-ordered course catalog — 98 courses across six levels (100→600). Find the row that matches your background, then walk every concept in dependency order. The course readings are the docs below; the path is the order to read them in.
 - [FAQ](docs/FAQ.md): direct answers to common questions (what is fak, how it differs from a firewall/guardrails/vLLM, threat model, prompt-injection handling).
 - [Operator & integrator docs index](docs/fak/README.md): the hub for the `fak serve` doc set — install, run the gateway, author policy, integrate agents, and deploy.
 - [Operator FAQ](docs/fak/faq.md): operator-grade answers — what fail-closed and quarantine mean, how fak compares to vLLM/LangChain/E2B, how to debug a denied call, and the explicit limits.

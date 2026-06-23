@@ -32,7 +32,7 @@ import sys
 # Keep this list small and deliberate; everything else goes to docs/notes/.
 ALLOWED_ROOT_MD = {
     # entry points
-    "README.md", "START-HERE.md", "INSTALL.md", "INDEX.md",
+    "README.md", "START-HERE.md", "INSTALL.md", "INDEX.md", "LEARNING-PATH.md",
     # contributor + agent contract
     "CONTRIBUTING.md", "CLA.md", "AGENTS.md", "CLAUDE.md",
     # policy / security

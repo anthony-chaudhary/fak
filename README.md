@@ -391,6 +391,7 @@ fak serve --addr 127.0.0.1:8080 --base-url http://localhost:11434/v1 --model qwe
 | **Architecture** (the registry seams, the frozen ABI) | [`fak/ARCHITECTURE.md`](ARCHITECTURE.md) |
 | **Build your optimization on fak** (researchers/teams: plug in → prove correct → prove faster → ship) | [`fak/EXTENDING.md`](EXTENDING.md) |
 | **First run, step by step** (guided session, real output at every step) | [`docs/fak/tutorial.md`](docs/fak/tutorial.md) ⭐ |
+| **Learn every concept in order** (a prerequisite-based course — join at your level, walk to mastery) | [`LEARNING-PATH.md`](LEARNING-PATH.md) ⭐ |
 | **Quick answers** (what is fak, how it differs from a firewall / guardrails / vLLM, the threat model) | [`docs/FAQ.md`](docs/FAQ.md) |
 | **A machine-readable map** (for LLMs & answer engines) | [`llms.txt`](llms.txt) |
 | **New here?** | [`START-HERE.md`](START-HERE.md) · [Simple demo](cmd/simpledemo/README.md) |

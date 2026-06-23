@@ -17,6 +17,7 @@ scaling laws, the explainers) live one level up in [`docs/`](../) and at the
 | If you want to… | Read |
 |---|---|
 | **Run `fak` for the first time** (guided, real output at every step) | [**tutorial.md**](tutorial.md) ⭐ |
+| **Learn every concept in prerequisite order** (a course you can join at any level) | [`LEARNING-PATH.md`](https://github.com/anthony-chaudhary/fak/blob/main/LEARNING-PATH.md) ⭐ |
 | Install the binary (Docker / prebuilt / source) | [`INSTALL.md`](https://github.com/anthony-chaudhary/fak/blob/main/INSTALL.md) · [`fak/GETTING-STARTED.md`](https://github.com/anthony-chaudhary/fak/blob/main/GETTING-STARTED.md) |
 | Just chat with a local model | [Simple Demo](https://github.com/anthony-chaudhary/fak/blob/main/cmd/simpledemo/README.md) |
 | Quick answers — what it is, how it differs, threat model | [faq.md](faq.md) |

@@ -32,7 +32,7 @@ import sys
 FRONT_DOOR = [
     "README.md", "START-HERE.md", "INSTALL.md", "INDEX.md", "AGENTS.md",
     "CLAUDE.md", "CONTRIBUTING.md", "SECURITY.md", "CLA.md",
-    "docs/index.md", "docs/FAQ.md",
+    "LEARNING-PATH.md", "docs/index.md", "docs/FAQ.md",
 ]
 LINK_RE = re.compile(r"\]\(([^)]+)\)")
 INLINE_RE = re.compile(r"`([^`]+)`")
