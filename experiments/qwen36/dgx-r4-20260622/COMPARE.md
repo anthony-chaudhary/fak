@@ -1,4 +1,4 @@
-# DGX endpoint comparison
+# GPU server endpoint comparison
 
 Metric used for peak selection: `completion_tokens_per_sec`
 

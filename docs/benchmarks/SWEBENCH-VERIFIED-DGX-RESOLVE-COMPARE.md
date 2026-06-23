@@ -1,21 +1,21 @@
 ---
-title: "SWE-bench Verified resolve: fak-gateway vs raw-SGLang on the DGX"
-description: "A real coding-agent SWE-bench Verified run on the lab A100 DGX, driving Qwen3.6-27B through both the fak adjudication gateway and raw SGLang, graded with the official harness. Headline: the same model resolves the instance through raw SGLang but is blocked by fak's capability/trust floor — overall completion is decided by the floor, not the model."
+title: "SWE-bench Verified resolve: fak-gateway vs raw-SGLang on the GPU server"
+description: "A real coding-agent SWE-bench Verified run on the lab GPU server, driving Qwen3.6-27B through both the fak adjudication gateway and raw SGLang, graded with the official harness. Headline: the same model resolves the instance through raw SGLang but is blocked by fak's capability/trust floor — overall completion is decided by the floor, not the model."
 ---
 
-# SWE-bench Verified — fak-gateway vs raw-SGLang, overall completion (DGX)
+# SWE-bench Verified — fak-gateway vs raw-SGLang, overall completion (GPU server)
 
 > **What this is.** The **resolve-rate / overall-completion** arm that
-> [`SWEBENCH-RESULTS.md`](SWEBENCH-RESULTS.md) marks *comparable but DGX-gated*.
+> [`SWEBENCH-RESULTS.md`](SWEBENCH-RESULTS.md) marks *comparable but GPU server-gated*.
 > A real `mini-swe-agent` coding agent solves the SWE-bench Verified instance
-> `astropy__astropy-12907` on the lab A100 DGX, driving **`Qwen/Qwen3.6-27B`**
+> `astropy__astropy-12907` on the lab GPU server, driving **`Qwen/Qwen3.6-27B`**
 > (SGLang TP=8, bf16) through several request paths, graded with the **official**
 > `swebench.harness.run_evaluation`. Every arm hits the *same* model weights; the
 > only variable is what sits in the request path.
 >
-> **Date:** 2026-06-22 · **Hardware:** lab A100 DGX (8× A100-40GB) ·
+> **Date:** 2026-06-22 · **Hardware:** lab GPU server (8-GPU datacenter server) ·
 > **Serving:** SGLang 0.5.10.post1 (TP=8, `--tool-call-parser qwen3_coder`) ·
-> **Agent:** mini-swe-agent 2.2.8 · **Harness:** swebench 4.1.0 (Docker on the DGX).
+> **Agent:** mini-swe-agent 2.2.8 · **Harness:** swebench 4.1.0 (Docker on the GPU server).
 
 ## Headline
 
@@ -67,7 +67,7 @@ opposite completion, decided entirely by the floor.
 ## Method (exactly reproducible)
 
 One self-contained driver, [`tools/dgx_swebench_compare.py`](https://github.com/anthony-chaudhary/fak/blob/main/tools/dgx_swebench_compare.py),
-launched detached on the DGX via the Slack control bridge
+launched detached on the GPU server via the Slack control bridge
 ([`cmd/dgxbridge`](https://github.com/anthony-chaudhary/fak/tree/main/cmd/dgxbridge)) and polled from a host-shared `/tmp` log:
 
 1. **Serve** `Qwen/Qwen3.6-27B`, SGLang TP=8, `--mem-fraction-static 0.75`,

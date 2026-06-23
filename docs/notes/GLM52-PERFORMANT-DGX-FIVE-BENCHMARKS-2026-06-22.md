@@ -1,32 +1,32 @@
 ---
-title: "GLM-5.2: performant, working on the DGX, and the five fleet benchmarks — assembled witnesses (2026-06-22)"
-description: "One honest assembly of the three GLM-5.2 goal axes — the architecture runs green in the pure fak kernel, the MoE/FFN/head executes on the pure CUDA kernel on a real A100 DGX (argmax-exact), and the five headline fleet benchmarks reproduce their authority numbers on-box — with the hardware-gated residuals labeled, not hidden."
+title: "GLM-5.2: performant, working on the GPU server, and the five fleet benchmarks — assembled witnesses (2026-06-22)"
+description: "One honest assembly of the three GLM-5.2 goal axes — the architecture runs green in the pure fak kernel, the MoE/FFN/head executes on the pure CUDA kernel on a real GPU server (argmax-exact), and the five headline fleet benchmarks reproduce their authority numbers on-box — with the hardware-gated residuals labeled, not hidden."
 ---
 
-# GLM-5.2 — performant, on the DGX, proven on the five benchmarks (2026-06-22)
+# GLM-5.2 — performant, on the GPU server, proven on the five benchmarks (2026-06-22)
 
 > **Goal (verbatim):** *glm 5.2 highly performant and actually working on dgx and
 > proven on the five benchmarks.*
 >
 > This note **assembles** evidence that already exists in the tree with a **fresh
 > on-box re-verification at `HEAD` (`3df9627`, 2026-06-22)** and a fresh
-> confirmation that the lab DGX is reachable today. It is closed by witnesses the
+> confirmation that the lab GPU server is reachable today. It is closed by witnesses the
 > author did not write — `go test`/`go build`/`go vet` exit codes, the benchmark
-> tools' own counters, the committed on-device A100 acceptance verdicts, and the
+> tools' own counters, the committed on-device datacenter GPU acceptance verdicts, and the
 > Slack-control bridge's own auth/round-trip probe — not by self-report. Every
 > hardware-gated residual is labeled.
 
 ## TL;DR — the honest three-axis split
 
-"GLM-5.2 highly performant + working on DGX + proven on the five benchmarks" is
+"GLM-5.2 highly performant + working on GPU server + proven on the five benchmarks" is
 three claims. Each is true **at the scope stated**, and each has a labeled
 residual that is *not* in scope today:
 
 | Axis | What is witnessed (today / committed) | The labeled residual |
 |---|---|---|
 | **GLM-5.2 actually working** | The `glm_moe_dsa` architecture runs **green in the pure fak kernel** — **35 GLM/DSA/MoE `--- PASS`** in `internal/model`, plus `agent`/`gateway`/`cachemeta` GLM coherence all `ok` (WSL go1.26, today). | HF *numeric* DSA parity is oracle-gated (`TestOptionalGLMMoeDsaOracle*` skip; #474/#413). |
-| **Highly performant + working on DGX** | On a real **8× A100 DGX**, GLM-5.2's **MoE/FFN experts + router + vocab head execute on the pure fak CUDA kernel (`k_q8_gemm`)** — `TestCUDAGLMMoeDsaBackendForward`: **cosine = 1.000000, argmax-exact** vs the CPU Q8 forward (committed `cf9d9a1`/`e3a92b7`, 2026-06-21). Pure-kernel decode **127.8 tok/s** end-to-end, **zero cuBLAS on the Q8 path**. The DGX bridge is **confirmed live + reachable today**. | GLM-5.2's **DSA sparse-attention is still host-side** on the GPU path (the next #86/#413 slice); serving the **real 753B** is VRAM-gated (INT4 ≈ 376 GB > 320 GB) and needs the multi-GPU NCCL/offload reshape. |
-| **Proven on the five benchmarks** | All **five headline fleet benchmarks reproduce their `BENCHMARK-AUTHORITY` numbers byte-for-byte on-box today** (table in §3). | The five are **model-agnostic kernel demos** (they measure the fleet-reuse + safety axis, not GLM tok/s); the GLM-specific throughput number is the A100 row above. |
+| **Highly performant + working on GPU server** | On a real **8-GPU datacenter server GPU server**, GLM-5.2's **MoE/FFN experts + router + vocab head execute on the pure fak CUDA kernel (`k_q8_gemm`)** — `TestCUDAGLMMoeDsaBackendForward`: **cosine = 1.000000, argmax-exact** vs the CPU Q8 forward (committed `cf9d9a1`/`e3a92b7`, 2026-06-21). Pure-kernel decode **127.8 tok/s** end-to-end, **zero cuBLAS on the Q8 path**. The GPU server bridge is **confirmed live + reachable today**. | GLM-5.2's **DSA sparse-attention is still host-side** on the GPU path (the next #86/#413 slice); serving the **real 753B** is VRAM-gated (INT4 ≈ 376 GB > 320 GB) and needs the multi-GPU NCCL/offload reshape. |
+| **Proven on the five benchmarks** | All **five headline fleet benchmarks reproduce their `BENCHMARK-AUTHORITY` numbers byte-for-byte on-box today** (table in §3). | The five are **model-agnostic kernel demos** (they measure the fleet-reuse + safety axis, not GLM tok/s); the GLM-specific throughput number is the datacenter GPU row above. |
 
 The one framing law carried from the suite: **fak does not race tokens-per-second
 against vLLM/SGLang/llama.cpp and never claims to.** "Highly performant" here means
@@ -69,15 +69,15 @@ wsl -d Ubuntu-24.04 -- bash -lc 'cd /mnt/c/work/fak && \
 
 ---
 
-## §2 — Highly performant + working on the DGX: GLM-5.2 on the pure fak CUDA kernel (A100)
+## §2 — Highly performant + working on the GPU server: GLM-5.2 on the pure fak CUDA kernel (datacenter GPU)
 
-### The committed on-device witness (8× A100 DGX, sm_80)
+### The committed on-device witness (8-GPU datacenter server GPU server, sm_80)
 
-On the lab 8-GPU A100 DGX, GLM-5.2's dense compute runs on the **pure fak GPU
+On the lab 8-GPU GPU server, GLM-5.2's dense compute runs on the **pure fak GPU
 kernel** — the MoE/FFN experts + router (a `backendKernel` swapped into
 `decodeBandGLMDsa`'s `matKernel`) and the vocab head route through `k_q8_gemm`:
 
-| On-device witness (A100, sm_80) | Result | Commit |
+| On-device witness (datacenter GPU, sm_80) | Result | Commit |
 |---|---|---|
 | `TestCUDAGLMMoeDsaBackendForward` (GLM-MoE-DSA MoE/FFN+head on `k_q8_gemm` vs CPU Q8) | **PASS — cosine = 1.000000, argmax cpu=40 cuda=40 (argmax-exact)** | `cf9d9a1` (on-device), `e3a92b7` (doc) |
 | `TestCUDAForwardMatchesRef` (full multi-layer decode forward, every op a fak kernel) | **PASS — argmax-exact, cosine = 1.0** (graphs off + `FAK_CUDA_GRAPH=1`) | same |
@@ -89,15 +89,15 @@ ledger — including the "what is / isn't pure" op table and the two honestly-fi
 on-hardware findings — is
 [`GLM52-PURE-KERNEL-ON-GPU-DGX-A100-2026-06-21.md`](GLM52-PURE-KERNEL-ON-GPU-DGX-A100-2026-06-21.md).
 
-### The DGX is reachable today (fresh, 2026-06-22)
+### The GPU server is reachable today (fresh, 2026-06-22)
 
 A read-only probe of the Slack control bridge from the build box at `HEAD`:
 
 - `control --probe` → **auth OK · channel OK · membership OK · history-read OK**.
 - the hub enumerates **multiple live `running` pipe-mode control sessions**, and a
-  live persistent control thread on the lab A100 DGX.
+  live persistent control thread on the lab GPU server.
 
-So the dispatch path the committed A100 witnesses were produced through is **live
+So the dispatch path the committed datacenter GPU witnesses were produced through is **live
 right now** — the on-device proof is reproducible, not a frozen one-off.
 
 ### Honest fences (labeled, not hidden)
@@ -106,15 +106,15 @@ right now** — the on-device proof is reproducible, not a frozen one-off.
   are on the pure GPU kernel; the DSA learned-indexer top-k + sparse gather/softmax
   remain CPU-resident — the next #86/#413 slice (a fused sparse-attention CUDA kernel
   + device DSA-KV).
-- **The real 753B does not fit pure on this DGX.** INT4 GLM-5.2 ≈ 376 GB > 320 GB
-  total A100-40GB VRAM; the pure fak kernel has no CPU-offload and no TP/NCCL. Serving
+- **The real 753B does not fit pure on this GPU server.** INT4 GLM-5.2 ≈ 376 GB > 320 GB
+  total datacenter GPU VRAM; the pure fak kernel has no CPU-offload and no TP/NCCL. Serving
   the flagship at scale is the SGLang/vLLM-serves + fak-fronts path
   ([`QWEN36-27B-DGX-RESULTS.md`](../benchmarks/QWEN36-27B-DGX-RESULTS.md) is the
   analogous served-model rung), not the native engine — a tracked long arc.
 - **No fresh same-session GPU re-run was taken.** The live control sessions are
   shared fleet worker shells; re-running the GPU witness on one would risk colliding
   with a peer's in-flight work, so this note rests the on-device claim on the
-  committed A100 acceptance (above) plus today's confirmed-live bridge, rather than
+  committed datacenter GPU acceptance (above) plus today's confirmed-live bridge, rather than
   hijacking a shared session.
 
 ---
@@ -152,7 +152,7 @@ axis and is the engine-agnostic moat.
   green in the pure fak kernel (35 model witnesses + 3 coherence packages); all five
   fleet benchmarks reproduce their authority numbers; `go build ./...` + `go vet`
   green.
-- **Proven on real A100 hardware (committed `cf9d9a1`/`e3a92b7`, reproducible via the
+- **Proven on real datacenter GPU hardware (committed `cf9d9a1`/`e3a92b7`, reproducible via the
   today-live bridge):** GLM-5.2's MoE/FFN/router/head on the pure fak CUDA kernel,
   cosine = 1.0, argmax-exact; 127.8 tok/s pure-kernel decode, zero cuBLAS on the Q8
   path.

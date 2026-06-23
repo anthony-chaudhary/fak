@@ -1,15 +1,15 @@
 ---
 title: "GLM-5.2 DSA attention projections now run on the pure fak kernel (2026-06-22)"
-description: "The next #86/#413 slice: GLM-5.2's DSA-attention dense projections (q_a/q_b, kv_a/kv_b, indexer wq_b/wk/weights_proj, o_proj) now route through the compute.Backend — so on the A100 DGX they execute on k_q8_gemm alongside the MoE/FFN/head, narrowing the host residual to the genuinely sparse glue."
+description: "The next #86/#413 slice: GLM-5.2's DSA-attention dense projections (q_a/q_b, kv_a/kv_b, indexer wq_b/wk/weights_proj, o_proj) now route through the compute.Backend — so on the GPU server they execute on k_q8_gemm alongside the MoE/FFN/head, narrowing the host residual to the genuinely sparse glue."
 ---
 
 # GLM-5.2: the DSA attention projections move onto the pure fak kernel (2026-06-22)
 
-> **Goal (verbatim):** *glm 5.2 pure fak kernel running on DGX machine.*
+> **Goal (verbatim):** *glm 5.2 pure fak kernel running on GPU server machine.*
 >
 > This note records one concrete slice toward that goal and the witnesses that
 > close it. It is grounded in `go test` exit codes (WSL go1.26) and a behavioral
-> recording-backend probe — not self-report. The on-device A100 verdict is the
+> recording-backend probe — not self-report. The on-device datacenter GPU verdict is the
 > committed witness referenced in §3 plus the reproduce command; any host-resident
 > residual is labeled, not hidden.
 
@@ -74,11 +74,11 @@ GLM-DSA attention projections on backend "cpu-ref":
 `TestGLMMoeDsaBackendGEMMMatchesCPU` now also exercises the attention projections
 through the backend (its comment is updated to match).
 
-## §3 — On the A100 DGX: witnessed fresh today, the projections run on `k_q8_gemm`
+## §3 — On the GPU server: witnessed fresh today, the projections run on `k_q8_gemm`
 
 The same backend path, with a lean (Q8-resident) GLM-DSA model on the **cuda backend**,
 runs all eight projections on `k_q8_gemm` — the GPU pure kernel — alongside the MoE/FFN
-experts, router, and vocab head. This was **re-run on the lab 8× A100-40GB DGX on
+experts, router, and vocab head. This was **re-run on the lab 8-GPU datacenter server GPU server on
 2026-06-22 at the slice's HEAD (`498a4ab`)**, via the live Slack control bridge
 (`tools/dgx_glm_gpu_witness.sh`: clone `origin/main` → `nvcc -arch=sm_80` → isolated
 `-tags cuda` test). The node's own `go test` output (not self-report):
@@ -95,7 +95,7 @@ experts, router, and vocab head. This was **re-run on the lab 8× A100-40GB DGX 
 ```
 
 So GLM-5.2's forward — the MoE/FFN experts + router, the vocab head, **and now the DSA
-attention's dense projections** — executes on the pure fak CUDA kernel on real A100
+attention's dense projections** — executes on the pure fak CUDA kernel on real datacenter GPU
 hardware, **cosine = 1.000000, argmax-exact** vs the CPU Q8 forward. (The prior MoE/FFN/head
 slice was committed `cf9d9a1` / `e3a92b7`, 2026-06-21; see
 [`GLM52-PURE-KERNEL-ON-GPU-DGX-A100-2026-06-21.md`](GLM52-PURE-KERNEL-ON-GPU-DGX-A100-2026-06-21.md).)
@@ -118,7 +118,7 @@ sparse-attention CUDA kernel + device DSA-KV) is the remaining slice of #86/#413
 labeled, not claimed.
 
 The flagship-scale residual is unchanged and out of scope here: the real 753B does not
-fit pure on an 8× A100-40GB DGX (INT4 ≈ 376 GB > 320 GB) and needs the multi-GPU
+fit pure on an 8-GPU datacenter server GPU server (INT4 ≈ 376 GB > 320 GB) and needs the multi-GPU
 NCCL/offload reshape — the SGLang-serves + fak-fronts path, not the native engine.
 
 ## What is proven vs not (labeled)
@@ -127,7 +127,7 @@ NCCL/offload reshape — the SGLang-serves + fak-fronts path, not the native eng
   compute backend (behavioral witness, all 8 shapes); the host path is byte-for-byte
   unchanged (full `internal/model` + GLM coherence suites green); `go build ./...` +
   `go vet` green.
-- **Proven on real A100 hardware, fresh on 2026-06-22 at HEAD `498a4ab`** (and
+- **Proven on real datacenter GPU hardware, fresh on 2026-06-22 at HEAD `498a4ab`** (and
   reproducible via `tools/dgx_glm_gpu_witness.sh`): GLM-5.2's MoE/FFN/router/head **plus
   the DSA attention projections** on the pure fak CUDA kernel (`k_q8_gemm`), cosine =
   1.000000, argmax-exact (`TestCUDAGLMMoeDsaBackendForward`, sm_80). The prior MoE/FFN/head

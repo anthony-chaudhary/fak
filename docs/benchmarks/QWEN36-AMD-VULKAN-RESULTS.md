@@ -1,3 +1,8 @@
+---
+title: "Qwen3.6-27B on AMD Radeon RX 7600 via Vulkan"
+description: "Witnessed run of Qwen3.6-27B Q4_K_M on an AMD/Vulkan Windows desktop, proving the model loads and serves all three fak surfaces despite a GDN perf caveat."
+---
+
 # Qwen3.6-27B on AMD/Vulkan Windows desktop
 
 Witnessed 2026-06-19 on `node-desktop-b`.
@@ -70,7 +75,7 @@ Artifacts:
 ## Standalone packet path
 
 For another AMD/Vulkan Windows test bench, generate and send the explicit Vulkan
-packet instead of using the NVIDIA wrapper. The broader multi-GPU serving plan is the A100 model ladder.
+packet instead of using the NVIDIA wrapper. The broader multi-GPU serving plan is the GPU model ladder.
 
 ```powershell
 python tools\qwen36_node_packet.py --profile vulkan --report-target auto

@@ -257,7 +257,7 @@ the `-tags cuda` witness; `run_482` additionally prints `sync decode … tok/s` 
 
 A doc that says *"these numbers require executing X on host Y"* is the correct deliverable
 here; the one unacceptable outcome — an invented `tok/s` — is avoided. The moment a GPU host
-clears (quota raised, or the 4070/DGX runs §4.2–4.3), every `pending GPU run` cell is filled
+clears (quota raised, or the 4070/GPU server runs §4.2–4.3), every `pending GPU run` cell is filled
 by the named command and folded back into the §3.2 matrix and `GPU.md`'s house style.
 
 ---

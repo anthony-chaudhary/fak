@@ -136,6 +136,6 @@ oracle to prove logits rather than just execution (#93).
 - ⏳ Recurrent-state eviction/quarantine, direct q4/chunked/device GDN performance work,
   and broader real-artifact llama.cpp/HF logit witnesses remain open.
 
-For DGX and standalone endpoint-backed test benches, use a multi-GPU A100 serving host.
+For GPU server and standalone endpoint-backed test benches, use a multi-GPU datacenter GPU serving host.
 
 _Witnessed 2026-06-18 and refreshed 2026-06-19 on Apple M3 Pro (36 GB). fak rows are fak's own forward pass._

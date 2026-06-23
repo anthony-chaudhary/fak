@@ -9,7 +9,7 @@ This infrastructure enables scalable, queryable, and visualizable benchmark resu
 The design builds on existing patterns:
 - Phase 0 node benchmark structure (`fak/experiments/fleet-nodes/`)
 - Model baseline comparisons (`fak/experiments/model-baseline/`)
-<!-- DGX endpoint-load artifacts excluded from the public copy (operator-private lab infra). -->
+<!-- GPU server endpoint-load artifacts excluded from the public copy (operator-private lab infra). -->
 
 ## 1. Storage Structure
 

@@ -1,3 +1,8 @@
+---
+title: "fak WebBench real measurements: WebVoyager status"
+description: "Summarizes fak's measured prefill work-elimination on the real 643-task WebVoyager dataset, reporting 8.8x to 9.7x net savings across worker counts."
+---
+
 # WebBench Real Measurements - Status Summary
 
 **Date:** 2026-06-20
@@ -119,8 +124,8 @@ The turn-tax is **structural** — every web agent pays it, every turn. That's 8
 3. Side-by-side: naive vs per-agent KV vs fak
 4. Measure actual $ per task vs SOTA baselines
 
-### DGX Scale (1-2 weeks)
-1. Deploy to DGX node
+### GPU server Scale (1-2 weeks)
+1. Deploy to GPU node
 2. Run at 100+ concurrent agents
 3. Measure cross-worker scaling
 4. Profile adjudication overhead

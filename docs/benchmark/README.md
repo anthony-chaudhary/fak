@@ -103,6 +103,6 @@ python tools/bench_cli.py list --machine <new-machine-id>
 ## Related Methodology Documents
 
 - [Production Benchmark Methodology](../production-benchmark-methodology.md) - Phase 0 kernel benchmarking
-<!-- DGX Benchmark Methodology excluded from the public copy (operator-private
+<!-- GPU server Benchmark Methodology excluded from the public copy (operator-private
      lab infra). See PUBLIC-SCRUB-POLICY.md PRIVATE-ONLY list. -->
 - [Permission System Benchmark](../permission-system-benchmark-methodology.md) - Security boundary comparison

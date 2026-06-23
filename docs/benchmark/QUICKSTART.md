@@ -231,4 +231,4 @@ python tools/bench_chart.py all
 
 - [Full Infrastructure Design](CROSS-MACHINE-INFRASTRUCTURE.md)
 - [Phase 0 Methodology](../production-benchmark-methodology.md)
-<!-- DGX Methodology excluded from the public copy (operator-private lab infra). -->
+<!-- GPU server Methodology excluded from the public copy (operator-private lab infra). -->

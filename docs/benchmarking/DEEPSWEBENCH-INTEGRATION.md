@@ -176,7 +176,7 @@ func (r *DeepSWERunner) RunTTS(ctx, instances) <-chan Result
 
 **Simplified approach for initial implementation**:
 - Use Together AI's hosted DeepSWE-Preview API (if available)
-- Or download and serve via VLLM on DGX
+- Or download and serve via VLLM on GPU server
 - Start with single-pass, add TTS later
 
 #### 4. Evaluation Harness

@@ -72,7 +72,7 @@ The same backend path runs the sparse attention on `k_dsa_sparse_attend` on a re
 on-device witness is `TestCUDAGLMMoeDsaBackendForward` — which also asserts the device
 sparse path is wired (a `compute.DSASparseBackend` type-assert that **fails** the test rather
 than silently falling back to host) — run via `tools/dgx_glm_gpu_witness.sh` on an sm_80+
-DGX, or the no-sudo WSL path (`~/cudaenv` CUDA 12.6, `FAK_CUDA_ARCH=sm_89`) on an Ada laptop.
+GPU server, or the no-sudo WSL path (`~/cudaenv` CUDA 12.6, `FAK_CUDA_ARCH=sm_89`) on an Ada laptop.
 
 **Captured on real hardware — the new `k_dsa_sparse_attend` on-device cosine (2026-06-23, RTX
 4070 Laptop, Ada/sm_89):** the full GLM-MoE-DSA forward — MoE/FFN/router/head + the DSA
@@ -96,7 +96,7 @@ Approx reduction-order class, no narrowed operand) and is held to
 attends the identical key set), the measured cosine lands at the same `1.000000` the dense
 path shows — now an **observed pass on real hardware**, no longer an expectation.
 
-**Also proven on real A100 (committed `498a4ab`):** the **dense** GLM-5.2 forward on
+**Also proven on real datacenter GPU (committed `498a4ab`):** the **dense** GLM-5.2 forward on
 `k_q8_gemm` is **argmax-exact, cosine = 1.000000** vs the CPU Q8 forward
 (`cosine=1.000000 argmax cpu=40 cuda=40 tier=sm_80`). The sm_89 sparse capture above and this
 sm_80 dense capture are two independent on-hardware witnesses across two GPU architectures.
@@ -118,7 +118,7 @@ top-k in device f32 risks a flipped selection vs the host f64 (the honesty bound
 slice deliberately preserves).
 
 The flagship-scale residual is unchanged and out of scope: the real 753B does not fit
-pure on an 8× A100-40GB DGX (INT4 ≈ 376 GB > 320 GB) — the SGLang-serves + fak-fronts
+pure on an 8-GPU datacenter server GPU server (INT4 ≈ 376 GB > 320 GB) — the SGLang-serves + fak-fronts
 path, not the native engine.
 
 ## What is proven vs not (labeled)
@@ -134,8 +134,8 @@ path, not the native engine.
   argmax-exact** (`cpu=40 cuda=40 tier=sm_89 class=approx`), `TestCUDAGLMMoeDsaBackendForward`
   PASS at HEAD `e1ccc66`; the `DSASparseBackend` type-assert confirms the sparse path ran
   on-device, not host. Reproduce via `build_cuda.sh build` + the `-tags cuda` test on any
-  sm_80+ node (DGX: `tools/dgx_glm_gpu_witness.sh`).
-- **Proven on real A100 hardware (committed `498a4ab`):** GLM-5.2's **dense** forward
+  sm_80+ node (GPU server: `tools/dgx_glm_gpu_witness.sh`).
+- **Proven on real datacenter GPU hardware (committed `498a4ab`):** GLM-5.2's **dense** forward
   (MoE/FFN/router/head + attention projections) on `k_q8_gemm`, cosine = 1.000000,
   argmax-exact (`tier=sm_80`).
 - **Out of scope (labeled):** device-resident DSA *selection* (index-score + top-k kernel

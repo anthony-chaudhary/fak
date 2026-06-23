@@ -35,7 +35,7 @@ Metal 7B forward actually delivers.
 > pure-Go **CPU** (8.7 t/s decode / 16 t/s prefill on this M3 Pro — its Metal *decode* lane is still
 > open, `internal/metalgemm`), so the identical 5×200 fleet **on fak's own forward is ~22–51 min,
 > well over the bar**. The pure fak kernel reaches sub-10-min only where its forward is GPU-class —
-> its **CUDA** path (A100 `sm_80`, or the committed RTX-4070 decode-parity result) — **not** on a
+> its **CUDA** path (datacenter GPU `sm_80`, or the committed RTX-4070 decode-parity result) — **not** on a
 > CPU-only Mac. So: *the fleet fits in 10 min on a MacBook's Metal forward with fak's reuse pattern;
 > the **pure-fak-kernel-on-a-Mac** version does not, until the Metal decode lane lands.* fak's
 > contribution is the reuse + batching + per-agent KV ownership + safety floor — not the raw t/s.
@@ -148,12 +148,12 @@ the *measured* curve over the exact per-turn contexts instead.
 | batched ≡ serial decode bit-for-bit (the win is reuse, not a numerics shortcut) | `go test ./internal/model -run 'TestBatchedDecodeMatchesSerial\|TestBatchFromPrefixMatchesIndependentPrefill'` | "fak computes something cheaper/wrong" |
 | synthetic-model throughput is faithful | `internal/model/synthetic_perf_test.go` | "random weights give bogus tok/s" |
 
-## DGX / A100 companion
+## GPU server / datacenter GPU companion
 
-The same fleet on the lab's **8× A100-SXM4-40GB** DGX (256 cores) is the bigger-iron companion —
-tracked separately; the A100's batched 7B throughput is far higher than the M3 Pro's, so the
+The same fleet on the lab's **8-GPU datacenter server** GPU server (256 cores) is the bigger-iron companion —
+tracked separately; the datacenter GPU's batched 7B throughput is far higher than the M3 Pro's, so the
 headroom under the 10-minute bar widens. (Status: dispatched via the control bridge; numbers land in
-a follow-up once the A100 7B batched-bench completes.)
+a follow-up once the datacenter GPU 7B batched-bench completes.)
 
 ## Bottom line
 

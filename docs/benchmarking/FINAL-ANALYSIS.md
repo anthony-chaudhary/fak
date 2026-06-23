@@ -127,7 +127,7 @@ both_completed: true
 - openai/gpt-4.1-nano ($0.10/$0.40 per M tok)
 - deepseek/deepseek-v4-flash ($0.14/$0.28 per M tok)
 
-<!-- glm52-dgx profile (sglang/vllm DGX endpoints) excluded from the public copy. -->
+<!-- glm52-dgx profile (sglang/vllm GPU server endpoints) excluded from the public copy. -->
 
 ---
 
@@ -241,7 +241,7 @@ The speedup COMPOUNDS with model size due to:
 
 ### Long Term
 1. **Commit GLM-5.2 docs** — The staged plan documents are ready
-<!-- A100/DGX integration excluded from the public copy (operator-private lab infra). -->
+<!-- datacenter GPU/GPU server integration excluded from the public copy (operator-private lab infra). -->
 2. **7B model support** — Complete GGUF loader for 7B Q4_K_M support
 
 ---

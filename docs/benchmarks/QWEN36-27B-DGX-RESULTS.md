@@ -1,11 +1,16 @@
-# Qwen3.6-27B on the A100 DGX — fak serving + coding-agent surfaces
+---
+title: "Qwen3.6-27B on 8-GPU Server: fak Gateway vs SGLang"
+description: "fak serving and coding-agent surfaces on Qwen3.6-27B with an 8-GPU SGLang backend, reporting gateway tax across a 1-to-128 concurrency sweep."
+---
 
-**Date:** 2026-06-22 · **Hardware:** lab A100 DGX (8× A100-SXM4-40GB) ·
+# Qwen3.6-27B on the GPU server — fak serving + coding-agent surfaces
+
+**Date:** 2026-06-22 · **Hardware:** lab GPU server (an 8-GPU datacenter server) ·
 **Serving:** SGLang 0.5.10.post1 (TP=8, bf16) · **torch** 2.9.1+cu128 ·
 **Model:** `Qwen/Qwen3.6-27B` (dense, hybrid Gated-DeltaNet).
 
-> This is the **Rung-4 headline** of `PLAN-model-ladder-dgx-a100`: the Qwen3.6-27B
-> stood up on the lab DGX and **used by a fak coding agent**, then load-compared against
+> This is the **Rung-4 headline** of `PLAN-model-ladder-gpu-server`: the Qwen3.6-27B
+> stood up on the GPU server and **used by a fak coding agent**, then load-compared against
 > raw SGLang across a concurrency sweep. The fak path here is **SGLang-serves +
 > fak-adjudicates** (`fak serve` gateway in front of SGLang) — *not* fak's native CUDA
 > engine, which cannot yet run a quantized / multi-GPU 27B. Every number traces to a
@@ -13,13 +18,13 @@
 
 ## 1. Used in a coding agent (the headline)
 
-All three fak surfaces **PASS** on the 27B, run on the A100 DGX
+All three fak surfaces **PASS** on the 27B, run on the GPU server
 (`tools/dgx_qwen36_surfaces.py` → `qwen36_surface_smoke.py` against the served endpoint):
 
 | Surface | Status | Note |
 |---|:---:|---|
 | **agent** (fak agent loop) | ✅ PASS | a fak coding-agent drives the 27B, every tool call adjudicated |
-| **gateway-openai** | ✅ PASS | single-stream decode **59.3 tok/s** (A100; cf. 2.7 tok/s on a laptop AMD RX 7600) |
+| **gateway-openai** | ✅ PASS | single-stream decode **59.3 tok/s** (datacenter GPU; cf. 2.7 tok/s on a laptop AMD RX 7600) |
 | **mcp-http** | ✅ PASS | MCP gateway over the 27B |
 
 Artifact: [`surface-smoke.json`](../../experiments/qwen36/dgx-r4-20260622/surface-smoke.json).
@@ -58,15 +63,15 @@ Artifacts: [`compare.json`](../../experiments/qwen36/dgx-r4-20260622/compare.jso
   compliant subset. This is a benchmark-harness artifact, **not** a serving failure (the
   model serves tokens fine; see the per-point `ok/requests` in the JSONs).
 - **Native-engine gap unchanged.** fak's own CUDA engine still can't load a quantized 27B
-  (no quantized device GEMM, no multi-GPU NCCL; f32 27B is 108 GB > 80 GB). The DGX path is
+  (no quantized device GEMM, no multi-GPU NCCL; f32 27B is 108 GB > 80 GB). The GPU server path is
   and remains llama.cpp/SGLang-serves + fak-fronts.
 
 ## 4. Reproduce
 
-The DGX is reached only via the Slack control-hub bridge (`cmd/dgxbridge`); the 27B rung is
+The GPU server is reached only via the Slack control bridge (`cmd/dgxbridge`); the 27B rung is
 added to the ladder by `tools/dgx_qwen36_27b_runner.py` (reuses `dgx_ladder_runner.run_rung`,
 sizes `--mem-fraction-static` to fit the GLM-occupied GPU0, and sets
-`SGLANG_ENABLE_TP_MEMORY_INBALANCE_CHECK=0`). On the DGX:
+`SGLANG_ENABLE_TP_MEMORY_INBALANCE_CHECK=0`). On the GPU server:
 
 ```bash
 # throughput sweep (fak-gateway vs raw SGLang)

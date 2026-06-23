@@ -1,5 +1,5 @@
 ---
-title: "fak hardware matrix: Metal, Vulkan, CUDA, A100"
+title: "fak hardware matrix: Metal, Vulkan, CUDA, datacenter GPU"
 description: "The hardware coverage matrix for fak: one pure-Go agent kernel profiled across four platforms — Apple Metal, AMD Vulkan, and NVIDIA CUDA on Ada and Ampere."
 ---
 
@@ -145,7 +145,7 @@ determinism check that proves the deterministic metrics are not arm64-specific.
 
 ## Platform 4 — an 8-GPU datacenter server · the multi-GPU serving lane
 
-The big-iron lane: ~320 GB of GPU on a DGX-class node, where the single-box memory
+The big-iron lane: ~320 GB of GPU on a GPU server-class node, where the single-box memory
 ceilings (`fak` faithful ≤ 7B on the 36 GB Mac) stop binding and the questions become
 multi-GPU serving and frontier-model readiness.
 
@@ -157,7 +157,7 @@ multi-GPU serving and frontier-model readiness.
 
 **What's documented here:**
 
-- **The model-ladder-on-A100 plan** — tiny smoke model → dense Qwen2.5 → hybrid
+- **The model-ladder-on-datacenter GPU plan** — tiny smoke model → dense Qwen2.5 → hybrid
   Gated-DeltaNet bridge → Qwen3.6-27B, de-risking multi-GPU serving and the
   fak-gateway-vs-raw comparison per rung. *(Tracked in the private gpu-server
   model-ladder runbook, not part of the public snapshot.)*
@@ -166,13 +166,13 @@ multi-GPU serving and frontier-model readiness.
   where `fak`'s gateway/baseline role and the shipped serving-readiness preflight gate
   apply. The runnable form of this finding ships publicly as
   [`tools/glm52_serve_preflight.py`](https://github.com/anthony-chaudhary/fak/blob/main/tools/glm52_serve_preflight.py) and
-  [`tools/glm52_serve.sh`](https://github.com/anthony-chaudhary/fak/blob/main/tools/glm52_serve.sh); the private DGX fast-loop and
+  [`tools/glm52_serve.sh`](https://github.com/anthony-chaudhary/fak/blob/main/tools/glm52_serve.sh); the private GPU server fast-loop and
   SGLang/vLLM-readiness notes are not part of the public snapshot.
 
 > **Honesty fence.** This lane is reported as the documented serving/readiness track, not
 > a published single-box throughput row — the per-rung wall-clock witnesses live behind
 > the same DOS verification discipline as everything else and are gated on the serving
-> work landing. No A100 tok/s figure is asserted here that isn't traced to an artifact in
+> work landing. No datacenter GPU tok/s figure is asserted here that isn't traced to an artifact in
 > `BENCHMARK-AUTHORITY.md`.
 
 ---

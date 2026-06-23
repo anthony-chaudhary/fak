@@ -94,7 +94,7 @@ All measured claims in [`fak/BENCHMARK-AUTHORITY.md`](../../BENCHMARK-AUTHORITY.
 - What actually erodes hit rate (not tool output itself!)
 - Why cache matters more for agents than chat
 
-<!-- DGX Benchmark Methodology excluded from the public copy (operator-private
+<!-- GPU server Benchmark Methodology excluded from the public copy (operator-private
      lab infra). See PUBLIC-SCRUB-POLICY.md PRIVATE-ONLY list. -->
 
 ### Production Benchmark Methodology

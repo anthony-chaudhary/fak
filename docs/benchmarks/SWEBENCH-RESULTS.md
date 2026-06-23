@@ -1,3 +1,8 @@
+---
+title: "SWE-bench Verified: fak vs bench, Comparable"
+description: "A fak-native SWE-bench Verified benchmark directly comparable to the bench tool on cost, cache-reuse, turns, and adjudication, with resolve-rate GPU server-gated."
+---
+
 # SWE-bench Verified — fak ↔ bench, directly comparable
 
 > **What this is.** A fak-native SWE-bench Verified benchmark whose results are
@@ -5,11 +10,11 @@
 > `<benchmark-checkout>`) that runs the same 500-instance task set against
 > an SGLang endpoint — on the four metrics fak is built to move. It runs **now, on
 > this Mac, with no GPU / Docker / network**, and scales to a real coding-agent
-> resolve run with a Qwen3.6-27B-class model on the DGX via the **identical**
+> resolve run with a Qwen3.6-27B-class model on the GPU server via the **identical**
 > upstream harness.
 >
 > **Status: the cost/cache comparison is SHIPPED & runnable; resolve-rate is wired
-> and DGX-gated.** `go build ./... && go vet ./... && go test ./internal/swebench/`
+> and GPU server-gated.** `go build ./... && go vet ./... && go test ./internal/swebench/`
 > green on this box (go1.26, darwin/arm64).
 
 ---
@@ -36,14 +41,14 @@ expressed in **bench's own metric vocabulary** (its `critical-metrics.md`: an
 
 Each is tagged **comparable** (bench measures an analog → a true head-to-head) or
 **fak-native** (fak's differentiator, no bench analog), and **computed**
-(deterministic arithmetic), **live** (measured here), or **gated** (DGX-only).
+(deterministic arithmetic), **live** (measured here), or **gated** (GPU server-only).
 
 | family | kind vs bench | provenance | headline (real 500-instance set) |
 |---|---|---|---|
 | **prefill / KV-reuse work-elimination** | **fak-native** (related to, not the same quantity as, server-side cache-hit) | computed | A/C **17.9×→23.4×** (workers 1→16); B/C **1.0×→1.31×** |
 | **turns + tokens** | comparable — agent-stream `actual_agent_steps` | computed | Σ steps **9 846**, median **22**; turn-tax A/B **17.9×** (fak-native lever) |
 | **in-process adjudication cost** | **fak-native** — bench has no analog | live (this Mac) | in-process p50 **~2.4 µs** vs spawn-per-hook **~5.8 ms** ⇒ **~2 400×** |
-| **resolve-rate + safety** | comparable — agent-stream `resolved_count` / `pass_rate_pct` | gated (DGX) | gated here (≈0 with the local 135M model); real number is a DGX/Qwen3.6-27B run |
+| **resolve-rate + safety** | comparable — agent-stream `resolved_count` / `pass_rate_pct` | gated (GPU server) | gated here (≈0 with the local 135M model); real number is a GPU server/Qwen3.6-27B run |
 
 ### The value-stack floor (deterministic, no model)
 
@@ -74,21 +79,21 @@ any measured wall-clock, so it cannot drift with machine load:
 > SGLang `kv_unified`+`seq_cp` server (which *also* reuses a shared prefix, so there
 > is no fair-comparator win to claim here). They are a *deterministic floor* (exact
 > token arithmetic), **not** a measured wall-clock; live TTFT/wall-clock is the gated
-> DGX number. The bucket-derived turn counts are **estimates** (labeled
+> GPU server number. The bucket-derived turn counts are **estimates** (labeled
 > `geometry_source: difficulty`) — a recorded `mini-swe-agent` trajectory supplies
-> real `actual_agent_steps` on the DGX path. The only **comparable** (true
+> real `actual_agent_steps` on the GPU server path. The only **comparable** (true
 > head-to-head) families are turns (`actual_agent_steps`) and resolve-rate.
 
 ---
 
-## Runnable now (this Mac) vs DGX
+## Runnable now (this Mac) vs GPU server
 
-| capability | here | DGX |
+| capability | here | GPU server |
 |---|---|---|
 | dataset ingest (500 ids + official difficulty buckets) | ✓ | ✓ + full problem-statement token geometry |
 | value-stack floor (prefill work-elimination, all 4 families' computed parts) | ✓ | ✓ |
 | in-process vs spawn-per-hook adjudication gate | ✓ (measured) | ✓ |
-| resolve-rate (official harness) | gated (no Docker) — prints the exact DGX command | ✓ with Docker + a capable model |
+| resolve-rate (official harness) | gated (no Docker) — prints the exact GPU server command | ✓ with Docker + a capable model |
 | live coding-agent solve (mini-swe-agent → `fak serve` → Qwen3.6-27B) | — | ✓ (roadmap: `fak serve` `/metrics` so bench scrapes fak like SGLang) |
 
 ---
@@ -104,7 +109,7 @@ go run ./cmd/fak swebench describe --workers 1,2,4,8
 go run ./cmd/fak swebench compare --workers 1,2,4,8 --with-adjudication \
   --md swebench-compare.md --out swebench-compare.json
 
-# grade predictions into the resolve-rate (gated here; prints the DGX command)
+# grade predictions into the resolve-rate (gated here; prints the GPU server command)
 go run ./cmd/fak swebench eval --predictions preds.json
 
 # side-by-side vs a real bench run

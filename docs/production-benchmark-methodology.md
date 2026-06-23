@@ -117,7 +117,7 @@ as the current point. If a fan-out or prefix-reuse ablation suggests a much
 higher internal ceiling, record it as candidate headroom until a tuned FAK
 artifact proves it.
 
-<!-- The "DGX endpoint-load extension" section (lab-DGX endpoint-load workflow,
+<!-- The "GPU server endpoint-load extension" section (lab-GPU server endpoint-load workflow,
      tools/dgx_*, docs/dgx-benchmark-methodology.md, and the private Benchmark
      harness) is excluded from the public copy -- operator-private lab infra. See
      PUBLIC-SCRUB-POLICY.md PRIVATE-ONLY list. -->

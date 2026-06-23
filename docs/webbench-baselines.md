@@ -177,7 +177,7 @@ Current status: **Deterministic floor proven, live eval pending**
 - [ ] Side-by-side comparison: fak vs. baseline infrastructure
 - [ ] Success rate parity proof (same agent, same task, different infra)
 - [ ] End-to-end cost measurement (API spend + compute)
-- [ ] DGX-scale fleet runs (100+ concurrent agents)
+- [ ] GPU server-scale fleet runs (100+ concurrent agents)
 
 ### 📊 Metrics to Capture (Full Run)
 | Metric | Kind | Provenance | Status |

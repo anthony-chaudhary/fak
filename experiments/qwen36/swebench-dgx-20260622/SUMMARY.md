@@ -1,8 +1,8 @@
-# SWE-bench Verified resolve compare — fak-gateway vs raw-SGLang (DGX, 2026-06-22)
+# SWE-bench Verified resolve compare — fak-gateway vs raw-SGLang (GPU server, 2026-06-22)
 
 Artifacts for [`docs/benchmarks/SWEBENCH-VERIFIED-DGX-RESOLVE-COMPARE.md`](../../../docs/benchmarks/SWEBENCH-VERIFIED-DGX-RESOLVE-COMPARE.md).
 Instance: `astropy__astropy-12907` (SWE-bench Verified). Model: `Qwen/Qwen3.6-27B`,
-SGLang TP=8 bf16 (`--tool-call-parser qwen3_coder`), on the lab A100 DGX (8×A100-40GB).
+SGLang TP=8 bf16 (`--tool-call-parser qwen3_coder`), on the lab GPU server (8-GPU datacenter server).
 Agent: mini-swe-agent 2.2.8. Grader: `swebench.harness.run_evaluation` 4.1.0 (Docker).
 
 Denominator note: the harness `report.json` `total_instances` is the whole 500-set,
