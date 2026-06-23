@@ -54,6 +54,13 @@ type VDSO struct {
 	pure   map[string]PureFunc // tier 1
 	static map[string][]byte   // tier 3
 
+	// shareable (principal.go) names tools whose result is identity-INDEPENDENT
+	// public knowledge (e.g. a shared policy doc): for them the per-principal cache
+	// dimension is dropped so the entry is shared ACROSS principals — the opt-in
+	// cross-tenant win. Guarded by v.mu, like pure/static: written at registration,
+	// read in keyLocked (which already holds v.mu). A nil map reads as "none".
+	shareable map[string]bool
+
 	cap      int
 	cache    map[string]*list.Element // tier 2: key -> LRU node
 	lru      *list.List               // front = most-recent
@@ -190,6 +197,7 @@ func New(capacity int) *VDSO {
 	return &VDSO{
 		pure:         map[string]PureFunc{},
 		static:       map[string][]byte{},
+		shareable:    map[string]bool{},
 		cap:          capacity,
 		cache:        map[string]*list.Element{},
 		lru:          list.New(),
@@ -417,7 +425,17 @@ func (v *VDSO) served(ctx context.Context, c *abi.ToolCall, out []byte, tierN in
 // epoch of every node on the read's root->leaf chain, joined with '.' so distinct
 // chains can never alias (e.g. [1,2] -> "1.2" never collides with [12] -> "12").
 func (v *VDSO) keyLocked(c *abi.ToolCall, args []byte) string {
-	base := c.Tool + ":" + v.argHashFor(args)
+	h := v.argHashFor(args)
+	// Per-principal isolation (principal.go): scope the hash to the caller's principal
+	// so a DIFFERENT principal can neither be served nor fill this entry — closing the
+	// cross-tenant cache leak + the hit/miss timing oracle. A nil/empty principal or a
+	// tool declared Shareable leaves h untouched, so the key is BYTE-IDENTICAL to the
+	// single-tenant v0.1 key (default sharing and cross-tenant PUBLIC sharing both
+	// preserved). v.shareable is read under v.mu, already held here — like v.pure.
+	if p := principalOf(c); p != "" && !v.shareable[c.Tool] {
+		h = scopeHash(p, h)
+	}
+	base := c.Tool + ":" + h
 	if v.GranularityOf() == Global {
 		return base + ":" + atou(atomic.LoadUint64(&v.worldVer))
 	}

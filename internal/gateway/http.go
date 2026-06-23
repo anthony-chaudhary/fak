@@ -529,12 +529,23 @@ func (s *Server) handleFakSyscall(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	wv, env, err := s.syscall(r.Context(), req.Tool, rawArgs(req.Arguments), req.ReadOnly, req.Witness, req.TraceID)
+	ctx := WithPrincipal(r.Context(), principalFor(r, req.Principal))
+	wv, env, err := s.syscall(ctx, req.Tool, rawArgs(req.Arguments), req.ReadOnly, req.Witness, req.TraceID)
 	if err != nil {
 		writeErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	writeJSON(w, http.StatusOK, SyscallResponse{Verdict: wv, Result: env, TraceID: req.TraceID})
+}
+
+// principalFor resolves a request's isolation principal: the X-Fak-Principal header
+// (set by an auth proxy / tenant router in front of the gateway) takes precedence, else
+// the request body's principal field. Empty => single-tenant (every caller shares).
+func principalFor(r *http.Request, bodyPrincipal string) string {
+	if h := strings.TrimSpace(r.Header.Get("X-Fak-Principal")); h != "" {
+		return h
+	}
+	return strings.TrimSpace(bodyPrincipal)
 }
 
 // handleFakAdmit runs a CLIENT-PRODUCED tool result through the kernel's

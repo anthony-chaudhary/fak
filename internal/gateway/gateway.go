@@ -551,6 +551,15 @@ func (s *Server) buildCall(ctx context.Context, tool, rawArgs string, readOnly b
 	if witness != "" {
 		meta["witness"] = witness
 	}
+	// Lower the request's isolation principal (a tenant / user / auth subject, carried
+	// request-scoped on ctx from the X-Fak-Principal header or the request's principal
+	// field) onto the call so the vDSO scopes its tier-2 cache entry PER PRINCIPAL: a
+	// different principal can neither be served nor fill the same (tool,args) entry,
+	// closing the cross-tenant cache leak + the hit/miss timing oracle. Empty =>
+	// single-tenant (every caller shares, the v0.1 behavior).
+	if p := principalFromContext(ctx); p != "" {
+		meta[vdso.MetaPrincipal] = p
+	}
 	// Thread a TraceID end-to-end: the IFC ledger + plan-CFI key their per-session
 	// state on it, so a served call MUST carry one. The wire supplies it for
 	// cross-call correlation; absent, we mint a fresh non-empty id rather than fall
@@ -567,6 +576,33 @@ func (s *Server) traceFor(traceID string) string {
 		return traceID
 	}
 	return "gw-" + itoa(atomic.AddUint64(&s.traceSeq, 1))
+}
+
+// principalCtxKey is the context key carrying a request's isolation principal.
+type principalCtxKey struct{}
+
+// WithPrincipal returns a context carrying the caller's isolation principal (a tenant /
+// user / auth subject). buildCall lowers it onto ToolCall.Meta[vdso.MetaPrincipal] so
+// the vDSO scopes tier-2 cache entries per principal — a different principal can neither
+// read nor fill the same (tool,args) entry, closing the cross-tenant cache leak + the
+// hit/miss timing oracle. An empty principal returns ctx unchanged (single-tenant: every
+// caller shares, the v0.1 behavior). Exported so a host embedding the gateway can set the
+// principal from its own auth context before calling Syscall.
+func WithPrincipal(ctx context.Context, principal string) context.Context {
+	principal = strings.TrimSpace(principal)
+	if principal == "" {
+		return ctx
+	}
+	return context.WithValue(ctx, principalCtxKey{}, principal)
+}
+
+// principalFromContext returns the request-scoped isolation principal, or "" if none.
+func principalFromContext(ctx context.Context) string {
+	if ctx == nil {
+		return ""
+	}
+	p, _ := ctx.Value(principalCtxKey{}).(string)
+	return p
 }
 
 // admit runs a CLIENT-PRODUCED tool result through the kernel's result-side stack

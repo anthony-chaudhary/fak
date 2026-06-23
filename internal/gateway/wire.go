@@ -124,6 +124,14 @@ type SyscallRequest struct {
 	// key their per-session state on it end-to-end. Optional: the gateway mints a
 	// fresh non-empty id when the wire omits it (never the empty shared trace).
 	TraceID string `json:"trace_id,omitempty"`
+	// Principal is the OPTIONAL isolation principal (a tenant / user / auth subject)
+	// this call is made on behalf of. When set (here or via the X-Fak-Principal header,
+	// which takes precedence), the vDSO scopes its tier-2 cache entry to it: a DIFFERENT
+	// principal can neither be served nor fill the same (tool,args) entry — closing the
+	// cross-tenant cache leak and the hit/miss timing oracle. Empty => single-tenant
+	// (every caller shares, v0.1 behavior). A tool declared vdso-Shareable ignores it
+	// (public, identity-independent reads stay cross-tenant shared).
+	Principal string `json:"principal,omitempty"`
 }
 
 // AdmitRequest is the body of POST /v1/fak/admit and the `arguments` of the

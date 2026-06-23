@@ -234,6 +234,7 @@ func (s *Server) callTool(ctx context.Context, params json.RawMessage) (any, *rp
 	case "fak_syscall":
 		req := decodeSyscallArgs(p.Arguments)
 		req.TraceID = s.traceFor(req.TraceID)
+		ctx = WithPrincipal(ctx, req.Principal)
 		wv, env, err := s.syscall(ctx, req.Tool, rawArgs(req.Arguments), req.ReadOnly, req.Witness, req.TraceID)
 		if err != nil {
 			return nil, &rpcError{Code: rpcInvalidParams, Message: err.Error()}
