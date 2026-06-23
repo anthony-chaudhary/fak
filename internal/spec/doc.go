@@ -39,13 +39,24 @@
 //     bit-exact. That is the native witness the plan calls for (the cmd/polymodelbench
 //     selfcheck made an in-tree test that goes through the ProvisionalSink seam).
 //
+// # The verify EXECUTION (rung #533, shipped)
+//
+// The verify step is the single-pass batched forward (model.VerifyForward), not kk
+// sequential Steps: a kk-token draft is verified in ONE pass, bit-identical to the
+// sequential verify (TestVerifyForwardChainMatchesSerial), so SpeculativeGreedy stays
+// token-identical to plain greedy. The TREE twin — model.VerifyForward with depth-based
+// positions (siblings share base+depth-1) and an ancestor attention mask (tree-attention
+// masks, Medusa/EAGLE-2/SpecInfer) — is driven by VerifyTree/SpeculativeTree through
+// AcceptTree; the accepted path is token-identical to greedy.
+//
 // # What it deliberately does NOT do (the honest boundary)
 //
-// The verify EXECUTION here is sequential target Steps (correctness-faithful, no
-// speedup): the single-pass batched / tree-attention verify that turns acceptance
-// into throughput is rung #533, and the AcceptTree token-tree layout needs it.
-// internal/spec moves real KV bytes but on a CPU synthetic model; multi-model
-// residency on a backend is rung #531. No tokens/sec number is produced (rung #535).
+// internal/spec moves real KV bytes but on a CPU synthetic model (PreNorm regime); the
+// single-pass verify is that regime only — no GPU, so no tokens/sec (the speedup is
+// EffectiveTokensPerVerify arithmetic; a measured number needs the bench harness #535),
+// and the tree recomputes the accepted path's KV (a tree-aware KV-compaction primitive is
+// the sequenced cost, not a correctness gap). Multi-model residency on a backend is rung
+// #531.
 //
 // # Off by default until ready (two safety layers)
 //

@@ -202,9 +202,11 @@ type Drafter interface {
 // token-identical to plain greedy decode of target — a property that holds ONLY if the
 // squash is bit-exact, which is exactly what the witness asserts.
 //
-// target must be a fresh, un-prefilled session (SpeculativeGreedy prefills it). The
-// verify here is sequential target Steps (correctness-faithful); the single-pass
-// batched verify that turns acceptance into throughput is rung #533.
+// target must be a fresh, un-prefilled session (SpeculativeGreedy prefills it). The verify
+// is the single-pass batched forward (rung #533, model.VerifyForward): all kk draft tokens
+// are verified in ONE pass instead of kk sequential Steps — bit-identical to the sequential
+// verify (TestVerifyForwardChainMatchesSerial), so the output stays token-identical to plain
+// greedy decode. The tree-attention-masked twin (AcceptTree) is VerifyTree below.
 func SpeculativeGreedy(ctx context.Context, sink *Sink, target *model.Session, prompt []int, n, k int, drafter Drafter) (out []int, drafted, accepted, rolledBack int) {
 	tl := target.Prefill(prompt)
 	out = make([]int, 0, n)
@@ -228,13 +230,15 @@ func SpeculativeGreedy(ctx context.Context, sink *Sink, target *model.Session, p
 		kk := len(drafts)
 		drafted += kk
 
-		// 2. The target verifies: its argmax at the current position (from tl) plus its
-		//    argmax after each drafted token fed sequentially → kk+1 argmaxes. Each Step
-		//    appends one provisional position to the target cache (positions [from, from+kk)).
+		// 2. The target verifies in ONE single-pass batched forward (#533): the argmax at
+		//    the committed position (from tl) plus the argmax after each drafted token, all
+		//    from one VerifyForward over the draft chain. VerifyForward is bit-identical to
+		//    kk sequential Steps (TestVerifyForwardChainMatchesSerial) and appends the same
+		//    kk provisional positions, so the promote/squash offsets below are unchanged.
 		targetArgmax := make([]int, 0, kk+1)
 		targetArgmax = append(targetArgmax, argmax(tl))
-		for j := 0; j < kk; j++ {
-			targetArgmax = append(targetArgmax, argmax(target.Step(drafts[j])))
+		for _, lg := range target.VerifyForward(drafts, nil, nil) {
+			targetArgmax = append(targetArgmax, argmax(lg))
 		}
 
 		// 3. polymodel.AcceptGreedy picks the accepted prefix and the keep/evict split.

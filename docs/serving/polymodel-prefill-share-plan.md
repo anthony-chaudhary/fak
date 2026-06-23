@@ -9,9 +9,10 @@
 >
 > **Scope:** design + a shipped deterministic core (`internal/polymodel`) and the
 > shipped `ProvisionalSink` rollback seam (`internal/spec`, rung #532 — CPU-lossless,
-> off-defconfig). The remaining GPU/engine wiring (real multi-model residency on a
-> backend, the single-pass verify EXECUTION, cross-model prefill share) is explicitly
-> sequenced, not claimed here.
+> off-defconfig), the cross-model prefill-share verdict + splice (#534), and the
+> single-pass verify EXECUTION — batched chain + tree-attention masks (#533,
+> `internal/model.VerifyForward`). The remaining GPU/engine wiring (real multi-model
+> residency on a backend) is explicitly sequenced, not claimed here.
 >
 > **Provenance:** every `[SHIPPED]/[PARTIAL]/[SEAM-ONLY]/[GAP]` mark carries a
 > `file:line` pointer verified against the working tree on 2026-06-22. Line numbers
@@ -146,8 +147,9 @@ existing moat:
   the first `ProvisionalSink` registrant + the reserved `OpSpecCommit`/`OpSpecSquash`
   ops, whose `Rollback` drives the bit-exact `KVCache.Evict`, with `polymodel.AcceptGreedy`
   as the accept decision — proven lossless by an in-tree witness (`go test ./internal/spec`).
-  Still sequenced: the single-pass *verify EXECUTION* that turns acceptance into
-  throughput (rung #533). `polymodel` is the policy/accounting brain `internal/spec` consults.
+  Now shipped: the single-pass *verify EXECUTION* that turns acceptance into throughput
+  (rung #533 — `internal/model.VerifyForward` + `internal/spec.VerifyTree`/`SpeculativeTree`,
+  batched chain + tree-attention masks). `polymodel` is the policy/accounting brain `internal/spec` consults.
 
 **The honest speedup model** (`polymodel.EffectiveTokensPerVerify`): with draft length
 K and per-token acceptance probability `a`, one verify advances
@@ -165,7 +167,9 @@ acceptance length per pass — and it *is* the caching idea made literal: a bran
 forks the cache (`KVCache.Clone`), rejected branches are removed bit-exactly
 (`KVCache.Evict`). `AcceptTree` is the deterministic accept/keep/evict core
 (witnessed); the tree-attention **verify execution** on the model (positional masks
-for the tree) is the same GAP class as the batched single-pass verify above.
+for the tree) is **shipped (#533, `internal/model.VerifyForward` with the ancestor
+mask)** — `spec.VerifyTree`/`SpeculativeTree` drive it end-to-end and prove the
+accepted path is token-identical to plain greedy decode.
 
 ## 6. Capability honesty table
 
@@ -187,7 +191,8 @@ Legend: **[SHIPPED]** real & proven · **[PARTIAL]** real but incomplete ·
 | Multi-model weight residency — policy + *model.Model binding | **[SHIPPED]** | `internal/residency` — `Manager` hosts many `*model.Model` under one weight-byte budget with LRU page-out, reusing `polymodel.Pool` as the budget + eviction policy and binding each residency descriptor to the weights it governs (off-defconfig, a library type like `polymodel`) |
 | Multi-model weight residency / whole-model eviction ON a backend | **[GAP]** | the policy + binding layer is shipped above; the real per-backend weight load/evict (per-weight budget `internal/compute/vulkan.go:164`; process-wide `gpulease` `lease.go:36`) is the deeper rung a future wiring drives through `Manager.Admit`/`Evict` |
 | Cross-model prefill share (served) | **[SHIPPED]** (verdict-layer + splice; off-defconfig) | `cachemeta.MaterializeVerdict` + `WithPrefillShare`/`PrefillSharePolicy` (ModelID-axis-only barrier lift, #534); `internal/spec.SplicePrefillShare`/`CrossModelPrefillShare` (the `KVCache.Clone` splice, bit-exact). Live multi-model backend residency (#531) still [GAP] |
-| `ProvisionalSink` implementation / `internal/spec` | **[SHIPPED]** | `internal/spec` — Sink + `OpSpecCommit`/`OpSpecSquash`; `Rollback`→bit-exact `KVCache.Evict`; lossless witness `go test ./internal/spec`. Off-defconfig, gated by `FAK_POLYMODEL`. Single-pass verify EXECUTION = #533 |
+| `ProvisionalSink` implementation / `internal/spec` | **[SHIPPED]** | `internal/spec` — Sink + `OpSpecCommit`/`OpSpecSquash`; `Rollback`→bit-exact `KVCache.Evict`; lossless witness `go test ./internal/spec`. Off-defconfig, gated by `FAK_POLYMODEL`. (Its verify step is now single-pass — see the row below.) |
+| Single-pass verify EXECUTION — batched chain + tree-attention masks | **[SHIPPED]** (off-defconfig) | `internal/model.VerifyForward(ids, pos, allow)` — the rung-#533 execution primitive. CHAIN (nil `pos`/nil `allow`): bit-identical to kk sequential `Session.Step` calls (same logits + appended K/Kraw/V/pos), so `spec.SpeculativeGreedy` verifies in ONE pass; TREE (depth-based `pos`, ancestor `allow`): tree-attention masks — each node attends only to its ancestor chain + prefix, never siblings. `spec.VerifyTree`/`SpeculativeTree` drive it through `AcceptTree`; accepted path token-identical to greedy. Witness: `go test ./internal/model ./internal/spec`. CPU PreNorm regime only — no GPU/tokens-per-sec (bench harness #535); tree recomputes the accepted path (no KV-compaction primitive yet) |
 
 ## 7. The child map / sequencing
 
@@ -220,7 +225,26 @@ Ordered so each rung stands on a shipped one. None of these land in this doc.
    #284 defer). `SpeculativeGreedy` is proven token-identical to plain greedy through the
    seam, even under an adversarial draft that forces a rollback every round (vacuity-guarded).
    Off-defconfig + `FAK_POLYMODEL`-gated. The **verify EXECUTION** (single-pass batched +
-   tree-attention masks) is the throughput half — **#533**.
+   tree-attention masks) is the throughput half — **#533, shipped** (see rung 4b below).
+4b. **The single-pass verify EXECUTION — batched chain + tree-attention masks** — **#533**. ✅ *shipped.*
+   `internal/model.VerifyForward(ids, pos, allow)` runs the PreNorm-standard batched forward
+   over the P candidate tokens in ONE pass and returns each position's next-token logits. The
+   CHAIN case (nil `pos`/nil `allow`) is bit-identical to kk sequential `Session.Step` calls
+   (same logits AND appended K/Kraw/V/pos in every layer), so `spec.SpeculativeGreedy`'s verify
+   loop is now a single `VerifyForward` instead of kk Steps — still token-identical to greedy.
+   The TREE case (depth-based `pos`: siblings share `base+depth-1`; ancestor `allow` mask) is
+   tree-attention: each node attends only to its ancestor chain + the committed prefix, never
+   to sibling branches. `spec.VerifyTree`/`SpeculativeTree` drive it through `AcceptTree` and
+   commit the accepted path (rewind the speculation with one bit-exact `KVCache.Evict`, recommit
+   the accepted chain as one `VerifyForward`); the accepted path is token-identical to plain
+   greedy decode. Witness: `go test ./internal/model` (`TestVerifyForwardChainMatchesSerial`,
+   `TestVerifyForwardTreeMaskIsolatesBranches`); `go test ./internal/spec`
+   (`TestSpeculativeGreedyLossless` now exercises the batched verify, `TestSpeculativeTreeLossless*`,
+   `TestVerifyTreeRewindsAndCommitsCleanly`). Honest fence: CPU synthetic PreNorm regime only —
+   no GPU, so no tokens/sec (the speedup is `EffectiveTokensPerVerify` arithmetic; a measured
+   number needs the bench harness #535); the chain falls back to sequential `Step`s on a
+   non-batched regime; the tree recomputes the accepted path's KV (a tree-aware KV-compaction
+   primitive is the sequenced cost, not a correctness gap).
 5. **Cross-model prefill share (verdict-layer)** — **#534**. ✅ *shipped.* Lift the exact-ModelID
    barrier for a declared-compatible family in `cachemeta` — the cheap structural unlock
    from [§4]. The DECISION half is `polymodel.CanShare` (same `Family` + byte-identical
@@ -232,7 +256,7 @@ Ordered so each rung stands on a shipped one. None of these land in this doc.
    off-defconfig polymodel leaf) that forks the provider's prefix bit-exactly into the
    consumer. Witness: `go test ./internal/cachemeta ./internal/spec` (the splice
    continuation is bit-exact to a direct prefill). The live multi-model *backend*
-   residency (#531) and the verify *execution* (#533) remain sequenced.
+   residency (#531) remains sequenced; the verify *execution* (#533) is shipped (rung 4b).
 6. **Bench harness numbers** — **#535**. ✅ *shipped.* Gate every speedup claim on a
    measured run (#44): E vs draft cost, decode-lane utilization, residency hit-rate.
    The harness is `cmd/polymodelbench -bench [-out FILE]` (`benchHarness` in
