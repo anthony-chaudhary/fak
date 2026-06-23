@@ -1,11 +1,13 @@
 #!/usr/bin/env python3
 """Unified scorecard debt control-pane — fold every *-debt into one tracked trend.
 
-The repo has seven deterministic scorecards, each emitting a debt integer plus a
+The repo has nine deterministic scorecards, each emitting a debt integer plus a
 control-pane payload (``schema/ok/verdict/finding/reason/next_action``): docs,
-code, doc-appeal, seo, demo-quality, demo-robustness, repo-hygiene. They run
-independently and advisory. Nothing folds {doc_debt, code_debt, appeal_debt,
-seo_debt, demo_debt, robustness_debt, hygiene_debt} into one number, pins a
+code, doc-appeal, seo, demo-quality, demo-robustness, repo-hygiene, the one
+OUTWARD-facing stick — industry-parity (fak vs SOTA) — and agent-readiness (can an
+agent discover, adopt, and build on fak). They run independently and advisory.
+Nothing folds {doc_debt, code_debt, appeal_debt, seo_debt, demo_debt,
+robustness_debt, hygiene_debt, parity_debt, friction_debt} into one number, pins a
 per-metric baseline, and shows the trend commit-over-commit.
 
 This is that fold — the RSI checking layer for the whole scorecard family. It
@@ -16,10 +18,18 @@ to "is the repo getting better or worse" is one query.
   python tools/scorecard_control_pane.py            # human snapshot + trend
   python tools/scorecard_control_pane.py --json      # machine payload
   python tools/scorecard_control_pane.py --pin       # pin today's debt as the baseline
+  python tools/scorecard_control_pane.py --check     # CI ratchet gate (fail only on regression)
 
 The baseline lives in a tracked file (``tools/scorecard_baseline.json``) so the
 trend is commit-over-commit and shared: re-pin after a debt drop to ratchet it
-down. Pure-stdlib Python, repo root like the other honesty gates. Issue #509.
+down. Pure-stdlib Python, repo root like the other honesty gates.
+
+``--check`` is the RSI ratchet the repo-3x epic (#506) names: it turns the one
+folded number into an enforceable gate. Unlike the default exit code (green only
+at ZERO debt), ``--check`` is GREEN while the portfolio holds at-or-below its
+pinned baseline and RED only when debt *regresses* above it (or a scorecard
+fails to report). That is the honest CI contract — debt may stay or fall, never
+silently rise — without demanding the whole family be at zero first. Issue #509.
 """
 from __future__ import annotations
 
@@ -45,6 +55,8 @@ SCORECARDS: list[dict[str, str]] = [
     {"key": "demo", "debt": "demo_debt", "script": "demo_quality_scorecard.py", "label": "demo-quality"},
     {"key": "robustness", "debt": "robustness_debt", "script": "demo_robustness_scorecard.py", "label": "demo-robustness"},
     {"key": "hygiene", "debt": "hygiene_debt", "script": "repo_hygiene_scorecard.py", "label": "repo-hygiene"},
+    {"key": "parity", "debt": "parity_debt", "script": "industry_scorecard.py", "label": "industry-parity"},
+    {"key": "agent", "debt": "friction_debt", "script": "agent_readiness_scorecard.py", "label": "agent-readiness"},
 ]
 
 
@@ -330,12 +342,38 @@ def render(payload: dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
+def check_gate(payload: dict[str, Any]) -> tuple[int, str]:
+    """The CI ratchet decision over a folded payload (pure: exit code + message).
+
+    The default exit code is green only at ZERO portfolio debt — too strict to
+    gate a repo that still carries real debt. This is the ratchet contract the
+    repo-3x epic (#506) wants instead: debt may hold or fall, never rise.
+
+      0  flat / improved   — the ratchet held (green even with nonzero debt)
+      1  regressed         — debt rose above the pinned baseline (or unmeasured)
+      2  unpinned          — no baseline to ratchet against; run --pin first
+    """
+    if int(payload.get("errored", 0)) > 0:
+        return 1, (f"RATCHET FAIL: {payload['errored']} scorecard(s) unmeasured — "
+                   f"{payload['reason']}")
+    trend = payload.get("trend") or {}
+    direction = trend.get("direction")
+    if direction == "unpinned":
+        return 2, ("RATCHET UNPINNED: no baseline to ratchet against; run "
+                   "`python tools/scorecard_control_pane.py --pin` to set one")
+    if direction == "regressed":
+        return 1, f"RATCHET FAIL: {trend['summary']}; worsened: {', '.join(trend['worsened']) or 'see deltas'}"
+    return 0, f"RATCHET OK: {trend['summary']} (debt {payload['total_debt']} held at-or-below baseline)"
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description="Unified scorecard debt control-pane (read-only unless --pin).")
     ap.add_argument("--workspace", default="", help="workspace root (default: repo root)")
     ap.add_argument("--json", action="store_true", help="emit machine-readable JSON")
     ap.add_argument("--pin", action="store_true",
                     help=f"pin the current debt as the baseline ({BASELINE_REL})")
+    ap.add_argument("--check", action="store_true",
+                    help="CI ratchet gate: exit non-zero only if debt regressed above baseline (#506)")
     ap.add_argument("--baseline", default="", help=f"baseline JSON path (default: {BASELINE_REL})")
     ap.add_argument("--timeout", type=int, default=120, help="per-scorecard timeout seconds")
     args = ap.parse_args(argv)
@@ -358,6 +396,14 @@ def main(argv: list[str] | None = None) -> int:
         baseline_path.write_text(json.dumps(doc, indent=2) + "\n", encoding="utf-8")
         if not args.json:
             print(f"pinned baseline @{doc['commit']} total_debt={doc['total_debt']} -> {baseline_path}")
+
+    if args.check:
+        code, message = check_gate(payload)
+        if args.json:
+            print(json.dumps({**payload, "gate_exit": code, "gate_message": message}, indent=2))
+        else:
+            print(message)
+        return code
 
     if args.json:
         print(json.dumps(payload, indent=2))

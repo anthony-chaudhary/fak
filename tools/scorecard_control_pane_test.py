@@ -41,7 +41,7 @@ def doc_card(debt: int, grade: str = "A") -> dict:
 
 
 def full_metrics(**debts: int) -> list[dict]:
-    """Build the 7 folded metric dicts from a debt-by-key map (default 0)."""
+    """Build the folded metric dict per SCORECARDS entry from a debt-by-key map (default 0)."""
     metrics = []
     for card in scp.SCORECARDS:
         if card["key"] == "appeal":
@@ -89,10 +89,10 @@ def test_metric_from_payload_marks_errors() -> None:
 # --- fold: portfolio sum + verdict ladder ----------------------------------
 
 def test_fold_sums_portfolio_debt() -> None:
-    metrics = full_metrics(doc=16, code=9, seo=6, hygiene=5, appeal=4, demo=3, robustness=0)
+    metrics = full_metrics(doc=16, code=9, seo=6, hygiene=5, appeal=4, demo=3, robustness=0, parity=0)
     out = scp.fold(metrics, None, workspace=".", commit="abc1234")
     assert out["total_debt"] == 43
-    assert out["measured"] == 7 and out["errored"] == 0
+    assert out["measured"] == len(scp.SCORECARDS) and out["errored"] == 0
     assert out["schema"] == scp.SCHEMA
 
 
@@ -153,6 +153,45 @@ def test_baseline_round_trip() -> None:
     # folding the same numbers against its own baseline reads flat.
     again = scp.fold(full_metrics(code=9, hygiene=5), doc, workspace=".", commit="pin02")
     assert again["trend"]["direction"] == "flat"
+
+
+# --- the CI ratchet gate (--check) -----------------------------------------
+
+def test_check_gate_green_when_flat() -> None:
+    base = baseline_from(code=5)
+    out = scp.fold(full_metrics(code=5), base, workspace=".", commit="now01")
+    code, msg = scp.check_gate(out)
+    assert code == 0 and "RATCHET OK" in msg
+
+
+def test_check_gate_green_when_improved_with_residual_debt() -> None:
+    # The point of the ratchet: green even with nonzero debt, as long as it fell.
+    base = baseline_from(code=9, doc=10)
+    out = scp.fold(full_metrics(code=2, doc=10), base, workspace=".", commit="now01")
+    code, msg = scp.check_gate(out)
+    assert code == 0 and out["total_debt"] > 0 and "RATCHET OK" in msg
+
+
+def test_check_gate_red_when_regressed() -> None:
+    base = baseline_from(seo=1)
+    out = scp.fold(full_metrics(seo=4), base, workspace=".", commit="now01")
+    code, msg = scp.check_gate(out)
+    assert code == 1 and "RATCHET FAIL" in msg and "seo" in msg
+
+
+def test_check_gate_unpinned_is_distinct_exit() -> None:
+    out = scp.fold(full_metrics(code=2), None, workspace=".", commit="now01")
+    code, msg = scp.check_gate(out)
+    assert code == 2 and "UNPINNED" in msg
+
+
+def test_check_gate_red_when_unmeasured() -> None:
+    base = baseline_from(code=2)
+    metrics = full_metrics(code=2)
+    metrics[0] = scp.metric_from_payload(scp.SCORECARDS[0], None, error="boom")
+    out = scp.fold(metrics, base, workspace=".", commit="now01")
+    code, msg = scp.check_gate(out)
+    assert code == 1 and "unmeasured" in msg
 
 
 # --- tolerant live smoke ----------------------------------------------------
