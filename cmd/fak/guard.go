@@ -75,6 +75,7 @@ func cmdGuard(argv []string) {
 	noAudit := fs.Bool("no-audit", false, "disable the durable decision journal for this session (it is ON by default — fak guard is the referee, and the journal is the verifiable record of what it allowed vs blocked)")
 	dumpPolicy := fs.Bool("dump-policy", false, "print the built-in guard capability floor (an editable manifest) and exit")
 	quiet := fs.Bool("quiet", false, "suppress the startup banner and the exit audit summary")
+	ctxViewBudget := fs.Int("ctx-view-budget", 0, "wire the ctxplan context PLANNER into the live guard loop: each buffered turn, re-materialize the forwarded history as an O(1) planned VIEW under this resident-token budget (a planned view in place of appending the whole transcript, #555). 0 (default) leaves the existing path byte-for-byte unchanged. OFF by default: it rewrites in-flight turn history, so gate it until you have watched a wrapped session. The streaming fast-path bypasses this; the buffered turn path is what gets planned.")
 	fs.Usage = func() {
 		fmt.Fprintln(os.Stderr, "usage: fak guard [flags] -- <agent command...>")
 		fmt.Fprintln(os.Stderr, "  e.g. fak guard -- claude")
@@ -230,7 +231,8 @@ func cmdGuard(argv []string) {
 		StartTime:             t0,
 		// Default OFF (clean terminal); --log routes the full structured stream to a file
 		// or stderr. /metrics + /debug/vars + the audit journal carry the record regardless.
-		Logf: gwLogf,
+		Logf:          gwLogf,
+		CtxViewBudget: *ctxViewBudget,
 	})
 	must(err)
 

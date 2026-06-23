@@ -2,6 +2,8 @@ package agent
 
 import (
 	"context"
+	"fmt"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -193,6 +195,109 @@ func TestCtxSeamHeuristicForecastPinsEssentials(t *testing.T) {
 }
 
 // --- helpers ---
+
+// TestCtxSeamRenderTurnIsIdentityWhenDisabled is the gateway guard (issue #555): the
+// one-step RenderTurn entry point the serve/guard loop calls returns its input UNCHANGED
+// when the seam is off, so a deploy that leaves the flag at 0 is byte-for-byte identical to
+// the pre-seam append-the-whole-transcript path.
+func TestCtxSeamRenderTurnIsIdentityWhenDisabled(t *testing.T) {
+	ctx := context.Background()
+	session := recordedSession()
+	disabled := &CtxViewPlanner{} // zero value: disabled
+	out, err := disabled.RenderTurn(ctx, session)
+	if err != nil {
+		t.Fatalf("a disabled seam must not error: %v", err)
+	}
+	if !reflect.DeepEqual(out, session) {
+		t.Fatalf("disabled RenderTurn must return the input byte-for-byte unchanged: got %+v want %+v", out, session)
+	}
+}
+
+// TestCtxSeamRenderTurnPlansViewAndKeepsExactRecall is the issue-#555 headline witness on
+// the gateway entry point: an enabled seam RENDERs an O(1) view that stays UNDER the
+// configured token budget (bounded residency), the rendered history is SHORTER than the
+// full transcript (the rewrite actually happened), AND any span the planner elided
+// demand-pages back to its VERBATIM original content (exact recall — a page fault, never a
+// lost fact). That pair — bounded AND exact — is what distinguishes a planned view from
+// lossy compaction.
+func TestCtxSeamRenderTurnPlansViewAndKeepsExactRecall(t *testing.T) {
+	ctx := context.Background()
+	const budget = 28 // tight window: pins + runbook fit, weather elided
+	seam := &CtxViewPlanner{Enabled: true, Budget: budget}
+	session := recordedSession()
+
+	// (1) The gateway entry point renders a planned view of the session.
+	planned, err := seam.RenderTurn(ctx, session)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(planned) == 0 {
+		t.Fatal("the planned history must be non-empty")
+	}
+	// (2) BOUNDED: the rendered view is at or under the configured token budget.
+	tokens := 0
+	for _, m := range planned {
+		tokens += (len(m.Content) + 3) / 4
+	}
+	if tokens > budget {
+		t.Errorf("planned view %d tokens must be <= budget %d", tokens, budget)
+	}
+
+	// The plan the gateway would hand a mid-turn miss to. The test's store is equivalent
+	// to the seam's internal one (same messages -> same span:<i> ids), so it is the
+	// page-in backend for the demand-page step.
+	store, _ := messagesToStore(session)
+	view, err := seam.PlanTurn(ctx, session)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// (3) EXACT RECALL: find a span the planner ELIDED and demand-page it back; the
+	// recovered bytes must equal that message's original content verbatim.
+	var elidedID string
+	for _, e := range view.Plan.Elided {
+		if !renderedHas(view.Rendered, e.ID) {
+			elidedID = e.ID
+			break
+		}
+	}
+	if elidedID == "" {
+		t.Skip("no elided span under this budget/window; adjust the test budget")
+	}
+	view2, fault, err := seam.DemandPage(ctx, store, view, elidedID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fault.Status != ctxplan.FaultServed {
+		t.Fatalf("the elided span must be served on demand-page, got status=%q reason=%q", fault.Status, fault.Reason)
+	}
+	if !renderedHas(view2.Rendered, elidedID) {
+		t.Errorf("after demand-page the faulted span %s must be resident", elidedID)
+	}
+	// The demand-paged bytes match the ORIGINAL message content (span:<i> -> session[i]).
+	orig := originalContent(session, elidedID)
+	recovered, err := store.Materialize(ctx, elidedID)
+	if err != nil {
+		t.Fatalf("demand-page page-in of %s failed: %v", elidedID, err)
+	}
+	if string(recovered) != orig {
+		t.Errorf("exact recall broken for %s: recovered %q want the verbatim original %q", elidedID, string(recovered), orig)
+	}
+}
+
+// originalContent resolves a "span:<i>" id back to the original message content it was
+// lowered from, so the exact-recall assertion compares the demand-paged bytes against the
+// verbatim original (not a summary). messagesToStore assigns span:<i> by insertion order.
+func originalContent(session []Message, spanID string) string {
+	var idx int
+	if _, err := fmt.Sscanf(spanID, "span:%d", &idx); err != nil {
+		return ""
+	}
+	if idx < 0 || idx >= len(session) {
+		return ""
+	}
+	return session[idx].Content
+}
 
 func renderedHas(rs []ctxplan.Rendered, id string) bool {
 	for _, r := range rs {

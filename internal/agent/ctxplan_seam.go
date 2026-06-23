@@ -80,25 +80,57 @@ func (p *CtxViewPlanner) PlanTurn(ctx context.Context, messages []Message) (ctxp
 	return ctxplan.Materialize(ctx, store, forecast, ctxplan.Budget{Tokens: p.Budget}, nil)
 }
 
+// RenderTurn is the one-step gateway entry point: lower the running messages into a
+// lossless ctxplan store, author the heuristic Forecast, Materialize the O(1) view under
+// the window Budget, and render it as the next turn's message history — the full "replace
+// append+compact with a planned view" pass in one call. It is what the gateway serve/guard
+// loop calls each turn to substitute a planned view for the forwarded history (issue #555).
+//
+// When the seam is disabled it returns its input UNCHANGED: the caller's existing history
+// is byte-for-byte identical, so a deploy that leaves the flag off sees no behavior change
+// at all — the guard a production deploy needs before an in-flight rewrite of turn history
+// ships. On a planner error the caller (the gateway's maybePlanMessages) falls back to the
+// full lossless history, so an experimental rewrite can never break a turn.
+func (p *CtxViewPlanner) RenderTurn(ctx context.Context, messages []Message) ([]Message, error) {
+	if !p.Enabled {
+		return messages, nil
+	}
+	store, pinned := messagesToStore(messages)
+	forecast := heuristicForecast(messages, pinned)
+	view, err := ctxplan.Materialize(ctx, store, forecast, ctxplan.Budget{Tokens: p.Budget}, nil)
+	if err != nil {
+		return nil, err
+	}
+	return renderPlanned(ctx, store, view), nil
+}
+
 // RenderHistory renders a planned View as the agent message list — the "renders a ctxplan
 // View as turn history" half of the seam. It pages each resident span's bytes in through
 // the store's trust gate (poison never enters context) and emits one Message per span in
-// step order. When the seam is disabled it returns its input unchanged (the guard).
+// step order. When the seam is disabled it returns ErrCtxSeamDisabled so the caller falls
+// back to append+compact unchanged.
 func (p *CtxViewPlanner) RenderHistory(ctx context.Context, store ctxplan.Store, v ctxplan.View) ([]Message, error) {
 	if !p.Enabled {
 		return nil, ErrCtxSeamDisabled
 	}
+	return renderPlanned(ctx, store, v), nil
+}
+
+// renderPlanned pages each resident span of a planned View in through the store's trust
+// gate and emits one Message per span in step order — the shared render loop behind both
+// RenderHistory (the two-step agent-loop API) and RenderTurn (the one-step gateway API).
+// A rendered span the gate declines mid-render stays out of context (the view's Refused
+// set already accounts for it); it is skipped rather than emit poison.
+func renderPlanned(ctx context.Context, store ctxplan.Store, v ctxplan.View) []Message {
 	out := make([]Message, 0, len(v.Rendered))
 	for _, r := range v.Rendered {
 		body, err := store.Materialize(ctx, r.ID)
 		if err != nil {
-			// A rendered span the gate declines mid-render stays out of context; the
-			// view's Refused set already accounts for it. Skip rather than emit poison.
 			continue
 		}
 		out = append(out, Message{Role: spanRoleToMessage(r.Role), Name: r.Role, Content: string(body)})
 	}
-	return out, nil
+	return out
 }
 
 // DemandPage is the mid-turn MISS handler — a thin pass-through to ctxplan.DemandPage

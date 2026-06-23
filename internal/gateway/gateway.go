@@ -143,6 +143,16 @@ type Config struct {
 	// ("planner-init", "vdso-config", "kernel-init") and exposes the union as
 	// fak_gateway_startup_phase_duration_seconds.
 	StartupPhases []StartupPhase
+	// CtxViewBudget, when > 0, wires the ctxplan context PLANNER into the live
+	// serve/guard loop: each buffered turn, the forwarded message history is lowered
+	// into a lossless ctxplan store and re-materialized as an O(1) planned VIEW under
+	// this resident-token budget, replacing the append-the-whole-transcript path with a
+	// planned view (issue #555). 0 (the default) leaves the existing path byte-for-byte
+	// unchanged — the guard a production deploy needs before an in-flight rewrite of turn
+	// history ships (the same posture as the agent seam's FAK_CTXPLAN_SEAM). The
+	// streaming fast-path bypasses this hook; the buffered turn path (the canonical path
+	// all three wires route through s.complete) is what gets planned.
+	CtxViewBudget int
 }
 
 // PolicyReloadFunc is injected by the host CLI so the gateway can expose a reload
@@ -216,6 +226,11 @@ type Server struct {
 	// in-package for tests.
 	planner     agent.Planner
 	engineCache *enginecache.Client
+
+	// ctxView, when non-nil, is the guarded ctxplan seam that re-plans each buffered
+	// turn's history into an O(1) resident view (issue #555). nil (CtxViewBudget == 0)
+	// leaves the forwarded history untouched; maybePlanMessages is an inert identity then.
+	ctxView *agent.CtxViewPlanner
 
 	// pinUpstreamCredential, when set, makes the Anthropic passthrough authenticate
 	// upstream with the planner's OWN configured credential and ignore the inbound
@@ -321,6 +336,13 @@ func New(cfg Config) (*Server, error) {
 		cacheStream.Observe(string(ev.Kind), ev.Entry)
 	})
 
+	// The ctxplan view planner is OFF unless the host set a resident-token budget. nil
+	// leaves maybePlanMessages an inert identity (the byte-for-byte-unchanged guard).
+	var ctxView *agent.CtxViewPlanner
+	if cfg.CtxViewBudget > 0 {
+		ctxView = &agent.CtxViewPlanner{Enabled: true, Budget: cfg.CtxViewBudget}
+	}
+
 	return &Server{
 		k:            k,
 		engineID:     engineID,
@@ -334,6 +356,7 @@ func New(cfg Config) (*Server, error) {
 		startup:      startup,
 		planner:      planner,
 		engineCache:  remoteCache,
+		ctxView:      ctxView,
 		cacheStream:  cacheStream,
 		feed:         newCoherenceFeed(0),
 		metrics:      newGatewayMetrics(time.Now()),
@@ -417,6 +440,26 @@ func (s *Server) modelLoadProfile() *ModelLoadProfile {
 	return s.modelLoad
 }
 
+// maybePlanMessages is the live-loop integration point for the ctxplan context PLANNER
+// (issue #555): when the view planner is enabled, each buffered turn's history is lowered
+// into a lossless store and re-materialized as an O(1) resident view under the configured
+// budget — a planned view in place of appending the whole transcript. When the planner is
+// off (the default) it returns the input UNCHANGED, so a deploy that leaves the flag off is
+// byte-for-byte identical to the pre-seam path. It is FAIL-SAFE: any planner error or empty
+// render falls back to the full lossless history, so an experimental rewrite can never
+// break or empty a turn — the planner only ever SHORTENS, and on doubt it shortens nothing.
+func (s *Server) maybePlanMessages(ctx context.Context, messages []agent.Message) []agent.Message {
+	if s.ctxView == nil || !s.ctxView.Enabled {
+		return messages
+	}
+	planned, err := s.ctxView.RenderTurn(ctx, messages)
+	if err != nil || len(planned) == 0 {
+		s.logf("gateway: ctxplan view planning fell back to full history: %v", err)
+		return messages
+	}
+	return planned
+}
+
 // complete runs the configured planner for one turn and records the inference
 // metrics that make real model work visible at /metrics — the token counts the
 // planner reports plus the wall-clock spent generating. Both /v1/chat/completions
@@ -425,6 +468,10 @@ func (s *Server) modelLoadProfile() *ModelLoadProfile {
 // that produced no tokens is not a generation); the error is returned untouched so
 // the caller's existing error handling is unchanged.
 func (s *Server) complete(ctx context.Context, messages []agent.Message, tools []agent.ToolDef, opts ...agent.SampleOpt) (*agent.Completion, error) {
+	// Re-plan the turn history into an O(1) resident view before the model sees it —
+	// the "replace append+compact with a planned view" rung (issue #555). Inert (an
+	// identity) unless CtxViewBudget > 0, so the default path is unchanged.
+	messages = s.maybePlanMessages(ctx, messages)
 	start := time.Now()
 	comp, err := s.planner.Complete(ctx, messages, tools, opts...)
 	dur := time.Since(start)
