@@ -531,7 +531,7 @@ evict  <span class="d">[ system ][ query ]</span>            <span class="k">que
         <div class="ex-q">linting agent code · the same boundary checks the code the model writes</div>
         <pre>agent writes   <span class="b">func (s *Store) Put(</span>      <span class="d">truncated — never parses</span>
   no check     <span class="d">lands, looks fine &#8594; go build fails 3 turns later &#8594; a recovery turn</span>
-  fak codelint <span class="k">store.go:3:8: expected ')', found 'EOF'</span>   <span class="d">stapled to the same turn's result</span>
+  fak codelint <span class="k">store.go:3:22: expected ')', found 'EOF'</span>  <span class="d">stapled to the same turn's result</span>
   agent        <span class="g">re-issues a correct write</span>          <span class="d">the breakage never reaches the build</span></pre>
         <p>A file write is just a tool call, so the boundary that adjudicates it can also ask whether the
         bytes parse. Go and JSON check in-process; Python and CUDA shell out off the hot path. The

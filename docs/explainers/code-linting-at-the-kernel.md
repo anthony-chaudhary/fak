@@ -106,8 +106,8 @@ back:
 
 ```
 codelint: the file you just wrote has errors — fix them before continuing:
-store.go:3:8: error: expected ')', found 'EOF' (go/GO_PARSE)
-store.go:3:8: error: expected 'IDENT', found 'EOF' (go/GO_PARSE)
+store.go:3:22: error: expected ')', found 'EOF' (go/GO_PARSE)
+store.go:3:22: error: expected ';', found 'EOF' (go/GO_PARSE)
 ```
 
 The agent reads the parse error on the same turn it made it, while the file is
@@ -120,8 +120,8 @@ You can watch the pack do exactly this with no model in the loop:
 ```bash
 printf 'package store\n\nfunc (s *Store) Put(\n' > /tmp/broken.go
 go run ./cmd/fak codelint /tmp/broken.go
-# codelint: 1 file(s) checked, 5 finding(s) (5 error, 0 warning)
-# /tmp/broken.go:3:8: error: expected ')', found 'EOF' (go/GO_PARSE)
+# codelint: 1 file(s) checked, 2 finding(s) (2 error, 0 warning)
+# /tmp/broken.go:3:22: error: expected ')', found 'EOF' (go/GO_PARSE)
 # ...
 echo "exit $?"   # -> 1
 ```
