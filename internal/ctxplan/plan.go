@@ -144,9 +144,9 @@ const (
 
 // Objectives.
 const (
-	ObjGreedy = "greedy-density" // sort by benefit/cost, take while it fits (the production planner)
-	ObjExact  = "exact-dp"       // 0/1-knapsack DP — the optimal-benefit oracle (small inputs only)
-	ObjCoverage = "coverage"     // submodular greedy: marginal benefit/cost, relevance discounted by covered intents (1-1/e)
+	ObjGreedy   = "greedy-density" // sort by benefit/cost, take while it fits (the production planner)
+	ObjExact    = "exact-dp"       // 0/1-knapsack DP — the optimal-benefit oracle (small inputs only)
+	ObjCoverage = "coverage"       // submodular greedy: marginal benefit/cost, relevance discounted by covered intents (1-1/e)
 )
 
 // Plan is the planner's chosen O(1) view: the resident Selected set, the cold-but-

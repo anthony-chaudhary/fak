@@ -19,9 +19,9 @@ type Fault struct {
 	ID     string `json:"id"`
 	Step   int    `json:"step"`
 	Role   string `json:"role,omitempty"`
-	Status string `json:"status"`            // served | resident | refused | absent
-	Reason string `json:"reason,omitempty"`  // set on refused (the gate's reason)
-	Tokens int    `json:"tokens,omitempty"`  // tokens paged in (served only)
+	Status string `json:"status"`           // served | resident | refused | absent
+	Reason string `json:"reason,omitempty"` // set on refused (the gate's reason)
+	Tokens int    `json:"tokens,omitempty"` // tokens paged in (served only)
 }
 
 // Fault dispositions — the closed vocabulary a DemandPage outcome may carry.

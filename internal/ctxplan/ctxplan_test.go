@@ -534,10 +534,10 @@ func TestLearnWeightsRaisesRelevantSignal(t *testing.T) {
 		return Span{ID: id, Step: 0, Role: "tool", Descriptor: desc, Durability: DurabilitySession}
 	}
 	spans := []Span{
-		mk("hit1", "alpha one"),   // relevant + needed
-		mk("hit2", "alpha two"),   // relevant + needed
-		mk("waste1", "beta one"),  // irrelevant + wasted
-		mk("waste2", "beta two"),  // irrelevant + wasted
+		mk("hit1", "alpha one"),  // relevant + needed
+		mk("hit2", "alpha two"),  // relevant + needed
+		mk("waste1", "beta one"), // irrelevant + wasted
+		mk("waste2", "beta two"), // irrelevant + wasted
 	}
 	o := Outcome{Hits: []string{"hit1", "hit2"}, Wasted: []string{"waste1", "waste2"}}
 
