@@ -442,7 +442,6 @@ Primary/external:
 
 Local:
 
-- `CACHE-first-class-cache-primitive-2026-06-18.md`
 - `AGENTIC-CACHING-SOTA-2026-06-19.md`
 - `MEMORY-COMPACTION-SOTA-2026-06-19.md`
 - `docs/explainers/kv-cache-agentic-context.md`

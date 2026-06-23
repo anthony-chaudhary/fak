@@ -300,7 +300,6 @@ revalidated, transformed, quarantined, or faulted.
 | `fak/internal/plancfi` | approved plan/tool graph enforcement after plan reuse |
 | `fak/internal/abi.Ref` | digest, taint, scope, inline/blob distinction |
 | `docs/explainers/kv-cache-agentic-context.md` | agent-specific prefix cache mechanics and failure modes |
-| `CACHE-first-class-cache-primitive-2026-06-18.md` | first metadata/object-model pass |
 | `MEMORY-COMPACTION-SOTA-2026-06-19.md` | virtual memory/view-cache direction |
 
 This is enough to justify treating agentic caching as a first-class workstream.
