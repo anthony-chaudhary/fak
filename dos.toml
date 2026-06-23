@@ -40,6 +40,7 @@ concurrent = [
   "cmd", "experiments", "docs", "tools", "visuals", "claude", "ci",
   "tokenizer",
   "contextq", "journal", "examples",
+  "spec", "rulesynth",
   "appversion", "boundarylint", "deletioncert", "demoui", "enginecache", "gpulease",
   "leakcheck", "metalgemm", "modelengine", "pathlint", "pathutil", "radixkv",
   "ratelimit", "rsiloop", "swebench", "toollint", "tracesink", "urllint", "webbench",
@@ -60,6 +61,7 @@ autopick = [
   "cmd", "experiments", "docs", "tools", "visuals", "claude", "ci",
   "tokenizer",
   "contextq", "journal", "examples",
+  "spec", "rulesynth",
   "appversion", "boundarylint", "deletioncert", "demoui", "enginecache", "gpulease",
   "leakcheck", "metalgemm", "modelengine", "pathlint", "pathutil", "radixkv",
   "ratelimit", "rsiloop", "swebench", "toollint", "tracesink", "urllint", "webbench",
@@ -119,6 +121,12 @@ tokenizer = ["internal/tokenizer/**"]
 answershape = ["internal/answershape/**"]
 contextq = ["internal/contextq/**"]
 journal = ["internal/journal/**"]
+# reconciled 2026-06-23 (#517): real internal/ packages (internal/spec, internal/rulesynth)
+# whose `(fak <leaf>)` ship-stamps the commit_stamp_doctor coverage meter flagged as
+# off-lane -- declared here so the referee can bind them (the "declare per-leaf lanes"
+# resolution of #517's drift #4; non-package scopes like the `guard` verb stay advisory).
+spec = ["internal/spec/**"]
+rulesynth = ["internal/rulesynth/**"]
 # reconciled 2026-06-22: real internal/ leaves that previously had NO lane (so a
 # `(fak <leaf>)` ship-stamp bound to a phantom unit and edits were unprotected).
 appversion = ["internal/appversion/**"]
