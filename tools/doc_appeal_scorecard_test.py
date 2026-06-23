@@ -204,13 +204,35 @@ def test_voice_contrast_frame_under_budget_ok() -> None:
     assert not any("contrast frame" in d for d in v["defects"]), v["defects"]
 
 
-# --- voice: bold-emphasis flood is SOFT, never debt ------------------------
+# --- voice: bold-emphasis flood is HARD in v2 (was SOFT) --------------------
 
-def test_voice_bold_flood_is_soft_not_debt() -> None:
-    bold = " ".join(f"**term{i}**" for i in range(9)) + " carry the weight of the sentence."
+def test_voice_bold_flood_is_hard_debt() -> None:
+    # v2 promoted the bold-emphasis flood from SOFT to HARD: it was the loudest
+    # machine tell left on the front page and only nudged the score. Each span past
+    # a generous budget is now one appeal-debt unit.
+    bold = " ".join(f"**term{i}**" for i in range(12)) + " carry the weight of the sentence here."
     v = _voice(bold)
-    assert any("bold span" in s for s in v["soft"]), v["soft"]
-    assert not any("bold span" in d for d in v["defects"]), v["defects"]
+    assert any("bold-emphasis past budget" in d for d in v["defects"]), v["defects"]
+    assert v["score"] < 100, v["detail"]
+
+
+def test_voice_bold_debt_is_capped() -> None:
+    # One device can never own the whole axis: a massive flood caps at BOLD_DEFECT_CAP
+    # debt units, the rest spilling to a SOFT note (mirrors the em-dash cap).
+    bold = " ".join(f"**t{i}**" for i in range(200)) + " and then real prose words follow on."
+    v = _voice(bold)
+    n_bold = sum(1 for d in v["defects"] if "bold-emphasis past budget" in d)
+    assert n_bold == das.BOLD_DEFECT_CAP, n_bold
+    assert any("further bold spans past budget" in s for s in v["soft"]), v["soft"]
+
+
+def test_voice_modest_bold_under_budget_ok() -> None:
+    # A handful of genuine emphases in real prose stays under budget — bold guides
+    # the eye, it isn't banned. Six spans in ~120 words is fine.
+    prose = ("# T\n\n" + " ".join(["word"] * 120) + " "
+             + " ".join(f"**k{i}**" for i in range(5)) + " close the paragraph cleanly.\n")
+    v = das.axis_voice(das.parse(prose))
+    assert not any("bold-emphasis past budget" in d for d in v["defects"]), v["defects"]
 
 
 # --- priority / scannability / organization --------------------------------

@@ -43,8 +43,10 @@ priority and voice weigh most, organization least.
 HARD defects (each one unit of appeal-debt, the work-list) are unambiguous and
 worth fixing: an overlong sentence, a run-on, a cliché phrase, an em-dash past a
 generous budget, the rhetorical "not X, it's Y" frame past a small budget, a
-buried lead, a missing one-line summary, a wall-of-text paragraph, a skipped
-heading level, more than one H1. SOFT signals (passive voice, hedging, low
+bold-emphasis flood past budget, a buried lead, a missing one-line summary, a
+dense lead (an essay of prose before the first section break), a wall-of-text
+paragraph, an unanchored lead (no H2 a skimmer can jump to), a skipped heading
+level, more than one H1. SOFT signals (passive voice, hedging, low
 sentence-length variety, a dominant section, inconsistent name-casing) lower the
 score but never count as debt — they are writing judgment, not mechanical fact,
 the same split the sibling scorecards draw between FAIL and ADVISORY.
@@ -88,36 +90,69 @@ AXIS_WEIGHTS: dict[str, float] = {
 }
 
 # ---------------------------------------------------------------------------
-# Calibration constants. Each is a deliberate threshold, not a magic number;
-# the comment says why. Tuned so a polished-but-dense front page (the current
-# README) shows real, fixable headroom rather than either 100 or 0.
+# Calibration constants (v2). Each is a deliberate threshold, not a magic
+# number; the comment says why.
+#
+# v1 was tuned so a polished-but-dense front page showed real headroom rather
+# than 100 or 0. The front door then got *polished against it* — split into
+# /appeal-score and /refresh-readme loops — until it saturated v1 (95/100 A, the
+# only debt four borderline-long sentences). A measuring stick that reads ~95 for
+# a doc with an 83-span bold flood and a 388-word unbroken lead has lost its
+# discriminating power exactly where the writing can still improve: priority,
+# voice, organization. v2 raises the bar to restore it. The honest standard for a
+# *front door* (not a body doc) is stricter than v1 assumed:
+#   - sentences/paragraphs carry tighter budgets (a cold reader skims, not reads);
+#   - the bold-emphasis flood is promoted SOFT -> HARD (it was the loudest machine
+#     tell left, hiding in the soft column);
+#   - a dense or structurally-unanchored lead is promoted SOFT -> HARD (front-load
+#     the value; don't make a skimmer wade an essay to reach the path to value).
+# Calibrated so the current front page lands in the low 50s — real, fixable
+# headroom again — and an improvement pass can prove it climbed back toward the
+# 90s, worst-axis-first. Organization stays high by design: the front page IS
+# well structured (one H1, a clean hierarchy, balanced sections), so the honest
+# headroom is in priority/voice/clarity/scannability, not manufactured org debt.
 # ---------------------------------------------------------------------------
 
-# Sentence length. A reader parses a ~20-word sentence in one breath; past ~30 it
-# starts to strain; past 40 it is a hard defect (split it). Calibrated for a
-# technical doc, which runs longer than chat prose.
-SENT_LONG = 30          # soft: counts toward the "% long" score penalty
-SENT_OVERLONG = 40      # HARD: one appeal-debt unit each, listed in the work-list
-SENT_RUNON_COMMAS = 5   # HARD: a sentence with >= this many commas reads as a run-on
+# Sentence length. A reader skims a ~18-word sentence in one breath; past ~26 it
+# starts to strain; past 32 it is a hard defect on a front door (split it). v1
+# used 30/40; a front page that an early adopter *skims* warrants the tighter cut.
+SENT_LONG = 26          # soft: counts toward the "% long" score penalty
+SENT_OVERLONG = 32      # HARD: one appeal-debt unit each, listed in the work-list
+SENT_RUNON_COMMAS = 4   # HARD: a sentence with >= this many commas reads as a run-on
 
-# Paragraph length. A prose block past ~110 words is a wall of text a skimmer
-# bounces off — HARD.
-PARA_WALL_WORDS = 110
+# Paragraph length. A prose block past ~80 words (≈5 lines) is a wall a front-door
+# skimmer bounces off — HARD. v1's 110 tolerated paragraphs no one skims.
+PARA_WALL_WORDS = 80
 
 # Voice budgets. A little of each device is fine — a flood is the machine-tell.
-EMDASH_PER_100W_BUDGET = 0.5   # em-dashes allowed per 100 prose words before debt
+EMDASH_PER_100W_BUDGET = 0.35  # em-dashes allowed per 100 prose words before debt
 EMDASH_DEFECT_CAP = 20         # cap em-dash debt so one axis can't be everything
-NOT_X_BUT_Y_BUDGET = 2         # the "not X, it's Y" frame allowed before debt
+NOT_X_BUT_Y_BUDGET = 1         # the "not X, it's Y" frame allowed before debt (one is punchy)
+# Bold-emphasis flood, promoted from SOFT to HARD in v2. Bolding a phrase in
+# nearly every sentence stops guiding the eye and reads machine-generated; it was
+# the single loudest tell left on the front page and v1 only nudged the score.
+BOLD_PER_100W_BUDGET = 1.0     # bold spans allowed per 100 prose words before debt
+BOLD_DEFECT_CAP = 24           # cap bold debt so one device can't dominate the axis
 
 # Early-adopter timing thresholds, measured in *content lines* (blanks, comments,
 # and code/badge scaffolding excluded — what a reader's eye actually lands on).
-LEAD_WINDOW_LINES = 14         # "above the fold": where the crisp one-liner must live
-DEF_MAX_WORDS = 25             # a one-line definition must be at most this many words
-FIRST_ACTION_MAX_LINE = 45     # a paste-able command / "try it" link should arrive by here
+LEAD_WINDOW_LINES = 12         # "above the fold": where the crisp one-liner must live
+DEF_MAX_WORDS = 20             # a one-line definition must be at most this many words
+FIRST_ACTION_MAX_LINE = 18     # a paste-able command / "try it" link should arrive by here
 
-# Flesch reading-ease floor for a technical doc. Below this it reads like a spec,
-# not an invitation. (Plain English ~60-70; dense technical prose ~30-45.)
-FLESCH_FLOOR = 35.0
+# Lead density: prose words after the H1 before the first section break. A front
+# door that makes a skimmer wade this far before a heading or an action has buried
+# its path to value — HARD past the floor, one more unit per step over (capped).
+LEAD_DENSE_HARD = 180          # words before the first break that is a HARD dense opener
+LEAD_DENSE_STEP = 100          # each additional this-many words over adds one debt unit
+LEAD_DENSE_CAP = 3             # cap dense-lead debt units
+# Structural anchor: content lines before the first H2. A long unanchored opener
+# (the reader's outline shows nothing until deep in) is an organization defect.
+ANCHOR_MAX_CONTENT = 12
+
+# Flesch reading-ease floor for a technical front door. Below this it reads like a
+# spec, not an invitation. (Plain English ~60-70; dense technical prose ~30-45.)
+FLESCH_FLOOR = 40.0
 
 # Marketing / AI-tell phrases an early adopter's eye snags on. Each occurrence in
 # PROSE (not code, not a heading) is one appeal-debt unit. Kept to genuine tells —
@@ -439,10 +474,10 @@ def axis_clarity(doc: Doc) -> dict[str, Any]:
     flesch = _flesch(doc.prose_text)
 
     score = 100.0
-    score -= min(30, 3 * overlong)
-    score -= min(16, 2 * runon)
-    if pct_long > 30:
-        score -= min(18, (pct_long - 30) * 0.5)
+    score -= min(44, 4 * overlong)
+    score -= min(18, 2.5 * runon)
+    if pct_long > 18:
+        score -= min(20, (pct_long - 18) * 0.6)
     if flesch < FLESCH_FLOOR:
         score -= min(18, (FLESCH_FLOOR - flesch) * 0.6)
         soft.append(f"reading-ease {flesch:.0f} below {FLESCH_FLOOR:.0f} (dense for a cold read)")
@@ -499,14 +534,23 @@ def axis_priority(doc: Doc) -> dict[str, Any]:
     elif first_action > FIRST_ACTION_MAX_LINE:
         defects.append(f"first paste-able action is deep (content line {first_action} "
                        f"> {FIRST_ACTION_MAX_LINE}) — early adopters want to *do* something sooner")
-        score -= 12
+        score -= 16
 
-    # 4. Lead density: a single giant opening block before the first heading break
-    # is a wall an early adopter bounces off (soft — also caught by scannability).
+    # 4. Lead density: a giant opening block of prose before the first section
+    # break makes an early adopter wade an essay to reach the path to value. HARD
+    # past the floor, one more unit per step over (capped) — front-load the value
+    # and push the framing down.
     fold_words = _words_before_first_break(doc)
-    if fold_words > 140:
+    if fold_words > LEAD_DENSE_HARD:
+        over = fold_words - LEAD_DENSE_HARD
+        units = 1 + min(LEAD_DENSE_CAP - 1, over // LEAD_DENSE_STEP)
+        for _ in range(units):
+            defects.append(f"dense lead: {fold_words} prose words before the first section break "
+                           f"(> {LEAD_DENSE_HARD}) — front-load the value, push the framing down")
+        score -= min(40, 16 + 9 * (units - 1))
+    elif fold_words > 120:
         soft.append(f"{fold_words}-word lead before the first section break (dense opener)")
-        score -= 8
+        score -= 6
 
     detail = (f"crisp-def {'at line ' + str(crisp_def[0]) if crisp_def else 'MISSING'} · "
               f"tldr {'yes' if has_tldr else 'no'} · "
@@ -556,12 +600,20 @@ def axis_voice(doc: Doc) -> dict[str, Any]:
     for _ in range(max(0, notxy - NOT_X_BUT_Y_BUDGET)):
         defects.append("over-leaned 'not X / X, not Y' contrast frame (vary the sentence shape)")
 
-    # SOFT: bold-emphasis flood. A little bold guides a skimmer's eye; bolding a
-    # phrase in every other sentence is a machine tic that stops guiding anything.
+    # HARD (v2): bold-emphasis flood. A little bold guides a skimmer's eye; bolding
+    # a phrase in nearly every sentence is a machine tic that stops guiding anything
+    # and reads generated. Each span past a generous budget is one debt unit, capped
+    # so this single device can't dominate the axis (mirrors the em-dash cap).
     bold_spans = len(_BOLD_RE.findall(doc.text))
-    bold_budget = max(6, int(doc.prose_words * 1.5 / 100))
-    if bold_spans > bold_budget:
-        soft.append(f"{bold_spans} bold spans (budget {bold_budget}) — emphasis flood reads machine-generated")
+    bold_budget = max(6, int(doc.prose_words * BOLD_PER_100W_BUDGET / 100))
+    bold_over = max(0, bold_spans - bold_budget)
+    bold_debt = min(BOLD_DEFECT_CAP, bold_over)
+    for _ in range(bold_debt):
+        defects.append(f"bold-emphasis past budget ({bold_spans} spans, budget {bold_budget}) — "
+                       f"a phrase bolded in nearly every line reads machine-generated; cut to the "
+                       f"few that truly guide the eye")
+    if bold_over > bold_debt:
+        soft.append(f"{bold_over - bold_debt} further bold spans past budget (capped at {BOLD_DEFECT_CAP})")
 
     # SOFT: hedging density.
     hedges = sum(len(re.findall(r"\b" + re.escape(h) + r"\b", low)) for h in HEDGE_WORDS)
@@ -582,9 +634,11 @@ def axis_voice(doc: Doc) -> dict[str, Any]:
     score -= 2 * len(scaffold_hits)
     score -= 1.5 * capped
     score -= 4 * max(0, notxy - NOT_X_BUT_Y_BUDGET)
+    score -= 1.7 * bold_debt
     score -= 3 * len(soft)
     detail = (f"{len(cliche_hits)} cliché · {len(scaffold_hits)} scaffold · "
-              f"{n_dash} em-dashes (budget {budget}) · {notxy} contrast-frame · {hedges} hedges")
+              f"{n_dash} em-dashes (budget {budget}) · {notxy} contrast-frame · "
+              f"{bold_spans} bold (budget {bold_budget}) · {hedges} hedges")
     return {"axis": "voice", "score": _clamp(score), "detail": detail,
             "defects": defects, "soft": soft}
 
@@ -605,7 +659,7 @@ def axis_scannability(doc: Doc) -> dict[str, Any]:
         if w > PARA_WALL_WORDS:
             walls += 1
             defects.append(f"wall-of-text paragraph (line {ln}, {w} words) — break it up")
-    score -= min(40, 8 * walls)
+    score -= min(54, 8 * walls)
 
     # Heading cadence: a long doc needs section anchors a skimmer can jump between.
     n_content = len(doc.content)
@@ -658,6 +712,19 @@ def axis_organization(doc: Doc) -> dict[str, Any]:
             defects.append(f"skipped heading level (H{prev}→H{level}) at line {ln}: “{_snip(txt, 40)}”")
         prev = level
     score -= min(24, 12 * skips)
+
+    # Unanchored lead (v2): content lines before the first H2 section anchor. A
+    # long opener with no heading to jump to leaves a skimmer's outline blank until
+    # deep in the page — a real organization defect, distinct from the prose-density
+    # one the priority axis catches. HARD past the budget.
+    h2_lines = [ln for lvl, _t, ln in doc.headings if lvl == 2]
+    if h2_lines:
+        before_first_h2 = sum(1 for ln, _r, _k in doc.content if ln < min(h2_lines))
+        if before_first_h2 > ANCHOR_MAX_CONTENT:
+            defects.append(f"unanchored lead: {before_first_h2} content lines before the first H2 "
+                           f"section anchor (> {ANCHOR_MAX_CONTENT}) — a skimmer's outline is blank "
+                           f"until deep in; add an early anchor or lift a section up")
+            score -= 16
 
     # Duplicate heading text — confuses navigation and anchors. SOFT.
     titles = [t.lower() for _, t, _ in doc.headings]
