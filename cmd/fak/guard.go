@@ -44,9 +44,12 @@ var guardDefaultPolicyJSON []byte
 // exit prints what the kernel allowed vs blocked before tearing the gateway down.
 //
 // The default upstream is the real Anthropic API in passthrough mode, so
-// `fak guard -- claude` wraps your normal Claude Code: your own key and prompt-cache
+// `fak guard -- claude` wraps your normal Claude Code: your credential and prompt-cache
 // breakpoints flow through untouched (the gateway forwards the request bytes verbatim),
-// but every tool call Claude proposes crosses the capability floor first.
+// but every tool call Claude proposes crosses the capability floor first. For
+// --provider anthropic with no API key set, fak uses your Claude Pro/Max SUBSCRIPTION
+// by default — it sources the OAuth token and sends it upstream as a bearer token
+// (set ANTHROPIC_API_KEY to use API billing instead; --anthropic-oauth forces it).
 func cmdGuard(argv []string) {
 	t0 := time.Now()
 	fs := flag.NewFlagSet("guard", flag.ExitOnError)
@@ -55,8 +58,8 @@ func cmdGuard(argv []string) {
 	baseURL := fs.String("base-url", "", "upstream provider base URL (default: the provider's public API, e.g. anthropic -> https://api.anthropic.com)")
 	model := fs.String("model", "", "upstream model id override (default: forward the client's own model id)")
 	apiKeyEnv := fs.String("api-key-env", "", "env var holding the UPSTREAM API key (default: forward the client's own key — passthrough)")
-	anthropicOAuth := fs.Bool("anthropic-oauth", false, "authenticate upstream with a Claude Pro/Max SUBSCRIPTION OAuth token instead of an API key (sourced from CLAUDE_CODE_OAUTH_TOKEN, <claude-config>/.oauth-token, or ~/.claude/.credentials.json). fak sends it as Authorization: Bearer + the oauth beta, ignores the client's own credential, and still adjudicates every tool call. NOTE: Anthropic's terms restrict subscription tokens to the official client — review them first.")
-	oauthTokenEnv := fs.String("oauth-token-env", "CLAUDE_CODE_OAUTH_TOKEN", "env var to read the subscription OAuth token from first (used with --anthropic-oauth)")
+	anthropicOAuth := fs.Bool("anthropic-oauth", false, "force the Claude Pro/Max SUBSCRIPTION OAuth token upstream (sourced from CLAUDE_CODE_OAUTH_TOKEN, <claude-config>/.oauth-token, or ~/.claude/.credentials.json) sent as Authorization: Bearer + the oauth beta. This is ALREADY the default for --provider anthropic when no API key is set; the flag forces it and fails loud if no token is found.")
+	oauthTokenEnv := fs.String("oauth-token-env", "CLAUDE_CODE_OAUTH_TOKEN", "env var to read the subscription OAuth token from first")
 	policyPath := fs.String("policy", "", "capability-floor manifest to enforce (default: the built-in guard floor; see --dump-policy)")
 	envName := fs.String("env", "", "env var to inject the gateway URL into the child (default: chosen by --provider)")
 	requireKeyEnv := fs.String("require-key-env", "", "require this env var's bearer token on the gateway (loopback rarely needs it)")
@@ -127,26 +130,35 @@ func cmdGuard(argv []string) {
 		apiKey = os.Getenv(*apiKeyEnv)
 	}
 
-	// Subscription mode: fak HOLDS the OAuth token and sends it upstream as
-	// Authorization: Bearer + the oauth beta (the only scheme api.anthropic.com
-	// accepts an sk-ant-oat token under), ignoring whatever credential the wrapped
-	// client sends. The kernel still adjudicates every tool call. Anthropic's terms
-	// restrict subscription tokens to the official client — the operator opts in.
+	// Subscription is the DEFAULT for Claude: when the upstream is Anthropic and no
+	// API key is configured, fak sources the Claude Pro/Max OAuth token and sends it
+	// upstream as Authorization: Bearer + the oauth beta (the scheme api.anthropic.com
+	// accepts an sk-ant-oat token under), holding the token itself and ignoring the
+	// client's credential. A configured API key (--api-key-env / ANTHROPIC_API_KEY)
+	// opts out (use API billing); --anthropic-oauth forces the subscription path and
+	// fails loud if no token is found.
 	pinUpstream := false
 	oauthSource := ""
-	if *anthropicOAuth {
-		if up != "anthropic" {
-			fmt.Fprintf(os.Stderr, "fak guard: --anthropic-oauth applies only to --provider anthropic (got %q)\n", up)
-			os.Exit(2)
-		}
+	if *anthropicOAuth && up != "anthropic" {
+		fmt.Fprintf(os.Stderr, "fak guard: --anthropic-oauth applies only to --provider anthropic (got %q)\n", up)
+		os.Exit(2)
+	}
+	autoOAuth := up == "anthropic" && apiKey == "" && os.Getenv("ANTHROPIC_API_KEY") == ""
+	if *anthropicOAuth || autoOAuth {
 		tok, src, terr := resolveAnthropicOAuthToken(*oauthTokenEnv)
-		if terr != nil {
+		switch {
+		case terr == nil:
+			apiKey = tok
+			pinUpstream = true
+			oauthSource = src
+		case *anthropicOAuth:
+			// Explicitly requested but nothing to use — fail loud.
 			fmt.Fprintf(os.Stderr, "fak guard: --anthropic-oauth: %v\n", terr)
 			os.Exit(2)
+		default:
+			// Auto attempt found no token (normal for an API-key user): fall back to
+			// plain passthrough — Claude Code forwards its own bearer if it is logged in.
 		}
-		apiKey = tok
-		pinUpstream = true
-		oauthSource = src
 	}
 
 	requireKey, ok := resolveRequiredKey(*requireKeyEnv, os.Getenv)
@@ -240,13 +252,9 @@ func cmdGuard(argv []string) {
 		printGuardBanner(os.Stderr, gwURL, up, resolvedBase, floorSource, injectVar, injectVal, logLabel, os.Getenv("FAK_AUDIT_JOURNAL"), command)
 		switch {
 		case pinUpstream:
-			fmt.Fprintf(os.Stderr, "fak guard: upstream auth — Claude Pro/Max SUBSCRIPTION OAuth token (from %s),\n", oauthSource)
-			fmt.Fprintln(os.Stderr, "           sent as Authorization: Bearer + the oauth beta. NOTE: Anthropic's terms restrict")
-			fmt.Fprintln(os.Stderr, "           subscription tokens to the official Claude Code client; you opted in with --anthropic-oauth.")
-		case up == "anthropic" && *apiKeyEnv == "" && os.Getenv("ANTHROPIC_API_KEY") == "":
-			fmt.Fprintln(os.Stderr, "fak guard: note — no ANTHROPIC_API_KEY set. If you are logged into a Claude Pro/Max")
-			fmt.Fprintln(os.Stderr, "           subscription, Claude Code forwards its OAuth token through the gateway (fak sends it")
-			fmt.Fprintln(os.Stderr, "           upstream as a bearer token); pass --anthropic-oauth to have fak hold the token itself.")
+			fmt.Fprintf(os.Stderr, "fak guard: upstream auth — Claude Pro/Max subscription (OAuth token from %s, sent as a bearer token)\n", oauthSource)
+		case up == "anthropic":
+			fmt.Fprintln(os.Stderr, "fak guard: upstream auth — passthrough (Claude Code forwards its own credential through the gateway)")
 		}
 	}
 

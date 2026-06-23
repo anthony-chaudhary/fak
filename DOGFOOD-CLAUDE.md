@@ -56,11 +56,11 @@ ANTHROPIC_BASE_URL=http://127.0.0.1:8080 claude   # your normal claude, now kern
    `WithUpstreamAPIKey`) under the scheme the token itself implies — a plain key as
    `x-api-key`, a Claude Pro/Max **subscription** OAuth token (`sk-ant-oat…`) as
    `Authorization: Bearer` + `anthropic-beta: oauth-2025-04-20` (the only scheme the
-   API accepts it under). fak holds no second secret. So a subscription works through
-   the gateway too: `fak guard -- claude` relays the client's own bearer, or
-   `fak guard --anthropic-oauth -- claude` has fak hold the token itself. ⚠️ Anthropic's
-   terms restrict subscription tokens to the official client — `--anthropic-oauth` is
-   opt-in and warns; review the terms before relying on it.
+   API accepts it under). fak holds no second secret. So a **subscription is the default**
+   for `fak guard -- claude` when no `ANTHROPIC_API_KEY` is set: fak sources the OAuth
+   token (`CLAUDE_CODE_OAUTH_TOKEN` → `<config>/.oauth-token` → `~/.claude/.credentials.json`)
+   and sends it upstream as a bearer token. Set `ANTHROPIC_API_KEY` to use API billing
+   instead; `--anthropic-oauth` forces the subscription path.
 
 2. **Prompt caching survives byte-for-byte.** Anthropic prompt caching is a *byte-exact
    prefix hash*. fak's canonical transcript is lossy (it flattens `system` blocks and

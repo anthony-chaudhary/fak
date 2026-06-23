@@ -41,9 +41,11 @@ The fastest way to put the kernel in front of the Claude Code you already run is
 terminal, no config-file edits:
 
 ```bash
-export ANTHROPIC_API_KEY=sk-ant-...     # your normal API key
-fak guard -- claude                      # your normal Claude Code, now kernel-adjudicated
+fak guard -- claude    # your normal Claude Code, kernel-adjudicated, on your subscription
 ```
+
+(No API key needed — `fak guard` uses your logged-in Claude Pro/Max subscription by
+default; set `ANTHROPIC_API_KEY` to use API billing instead.)
 
 `fak guard`:
 
@@ -52,7 +54,8 @@ fak guard -- claude                      # your normal Claude Code, now kernel-a
    directory — print it with `fak guard --dump-policy`, override with `--policy FILE`).
 3. Injects `ANTHROPIC_BASE_URL` into the **child process only** — your shell, your
    `settings.json`, and any other `claude` in another terminal are untouched.
-4. Proxies to the **real Anthropic API in passthrough mode**: your key and the
+4. Proxies to the **real Anthropic API in passthrough mode**: your credential
+   (subscription OAuth by default, or an API key if `ANTHROPIC_API_KEY` is set) and the
    `cache_control` prompt-cache breakpoints flow through byte-for-byte (no cost regression),
    while every tool call Claude proposes crosses the capability floor first.
 5. Tears the gateway down when Claude exits and prints what the kernel decided:
@@ -63,28 +66,20 @@ fak guard: 128 kernel decision(s) — 121 allowed, 5 denied, 2 repaired, 0 quara
   blocked: SELF_MODIFY      x1
 ```
 
-> **Subscription OAuth or API key — both work.** `fak guard` proxies to the real
-> Anthropic API in passthrough, and the upstream credential can be a plain API key OR a
-> Claude Pro/Max **subscription** OAuth token. fak picks the wire scheme from the token
-> itself: a subscription token (`sk-ant-oat…`) is sent as `Authorization: Bearer` plus
-> `anthropic-beta: oauth-2025-04-20` — the only scheme the API accepts it under (sent as
-> `x-api-key` it 401s with `invalid x-api-key`) — while a plain key is sent as `x-api-key`.
-> Two ways to use a subscription:
+> **Your Claude Pro/Max subscription is the default — no API key needed.** When the
+> upstream is Anthropic and `ANTHROPIC_API_KEY` is unset, `fak guard` uses your
+> **subscription**: it sources the OAuth token (from `CLAUDE_CODE_OAUTH_TOKEN`, then
+> `<claude-config>/.oauth-token`, then `~/.claude/.credentials.json`) and sends it
+> upstream as `Authorization: Bearer` + `anthropic-beta: oauth-2025-04-20` — the scheme
+> the API accepts an `sk-ant-oat…` token under (sent as `x-api-key` it 401s). So
+> `fak guard -- claude` just works on a logged-in subscription. fak holds the token and
+> ignores the client's own credential (it injects a placeholder key into the child).
 >
-> - **`fak guard -- claude`** (no flag): when you are logged into a subscription, Claude
->   Code forwards its own OAuth bearer through the gateway and fak relays it upstream.
-> - **`fak guard --anthropic-oauth -- claude`**: fak HOLDS the token itself (sourced from
->   `CLAUDE_CODE_OAUTH_TOKEN`, then `<claude-config>/.oauth-token`, then
->   `~/.claude/.credentials.json`), ignores the client's credential, and injects a
->   placeholder key into the child. Robust for headless/long runs — prefer a
->   `claude setup-token` (a long-lived token) since the interactive `.credentials.json`
->   one expires and Claude Code refreshes it out-of-band.
->
-> ⚠️ **Terms of service.** Anthropic restricts subscription OAuth tokens to the official
-> Claude Code client and has acted against third-party clients that reuse them.
-> `--anthropic-oauth` wraps the genuine `claude` binary as a transparent hop to the real
-> API, but proxied subscription use may still be detected — review Anthropic's terms
-> before relying on it. The flag is opt-in and prints this caveat at startup.
+> - **Long-running / headless:** prefer a `claude setup-token` (a long-lived token, read
+>   from `<claude-config>/.oauth-token` or `CLAUDE_CODE_OAUTH_TOKEN`) — the interactive
+>   `~/.claude/.credentials.json` token expires and Claude Code refreshes it out-of-band.
+> - **Use API billing instead:** set `ANTHROPIC_API_KEY` (or `--api-key-env`) and fak
+>   forwards that as `x-api-key`. `--anthropic-oauth` forces the subscription path.
 
 Wrap a different agent or upstream by naming it after `--` and switching the provider:
 
