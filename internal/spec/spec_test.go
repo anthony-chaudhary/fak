@@ -105,6 +105,35 @@ func (d *advDrafter) Draft(k int) []int {
 
 func (d *advDrafter) Commit(_ []int) { d.round++ }
 
+// scriptedPartialDrafter forces a PARTIAL acceptance every round (0 < Accepted < kk): its
+// first proposed token is the target's true next token (the precomputed greedy sequence
+// `want`, so it is accepted) and the rest are deliberately wrong (so they are rejected).
+// This is the offset-sensitive case the full-accept / full-reject subtests miss: the
+// squash evicts the tail span starting at from+Accepted with Accepted>0.
+type scriptedPartialDrafter struct {
+	want []int
+	pos  int
+}
+
+func (d *scriptedPartialDrafter) Draft(k int) []int {
+	drafts := make([]int, 0, k)
+	for j := 0; j < k; j++ {
+		idx := d.pos + j
+		w := 0
+		if idx < len(d.want) {
+			w = d.want[idx]
+		}
+		if j == 0 {
+			drafts = append(drafts, w) // the target's true next token → accepted
+		} else {
+			drafts = append(drafts, (w+1)%256) // guaranteed != the greedy token → rejected
+		}
+	}
+	return drafts
+}
+
+func (d *scriptedPartialDrafter) Commit(committed []int) { d.pos += len(committed) }
+
 func assertEqualTokens(t *testing.T, label string, got, want []int) {
 	t.Helper()
 	if len(got) < len(want) {
@@ -119,22 +148,35 @@ func assertEqualTokens(t *testing.T, label string, got, want []int) {
 }
 
 // assertContinuationsMatch proves a rolled-back session is bit-exact to a never-drafted
-// one BEHAVIORALLY: it greedily decodes `steps` tokens from each (the internal K/V
-// slices are unexported, so behavior is the observable). A non-bit-exact Evict leaves a
-// survivor's K rotated at the wrong position, which diverges the continuation within a
-// few steps. Both sessions must be at the same cached position on entry.
+// one by comparing the FULL LOGIT VECTORS (exact float32 equality), not just the argmax:
+// the internal K/V slices are unexported, but a single corrupted surviving-KV byte
+// changes the attention dot-products and therefore the logits, even when the argmax is
+// unchanged. (Argmax alone is too weak — the synthetic model is a fixed-point attractor,
+// so a zeroed survivor K still produces the same argmax; exact logits catch it.) Both
+// sessions must be at the same cached position on entry. The structural max|Δ|=0 proof of
+// Evict's survivor re-RoPE lives in internal/model/evict_test.go; this is the seam-level
+// behavioral check that the squash routed through the ProvisionalSink is lossless.
 func assertContinuationsMatch(t *testing.T, label string, a, b *model.Session, seed, steps int) {
 	t.Helper()
 	if a.Cache.Len() != b.Cache.Len() {
 		t.Fatalf("%s: cache length mismatch %d vs %d before continuation", label, a.Cache.Len(), b.Cache.Len())
 	}
 	la, lb := a.Step(seed), b.Step(seed)
-	for i := 0; i < steps; i++ {
-		ta, tb := argmax(la), argmax(lb)
-		if ta != tb {
-			t.Fatalf("%s: continuation diverged at step %d: %d vs %d (Evict was not bit-exact)", label, i, ta, tb)
+	for i := 0; i <= steps; i++ {
+		if len(la) != len(lb) {
+			t.Fatalf("%s: logit width mismatch at step %d: %d vs %d", label, i, len(la), len(lb))
 		}
-		la, lb = a.Step(ta), b.Step(tb)
+		for j := range la {
+			if la[j] != lb[j] {
+				t.Fatalf("%s: logits diverge at step %d, index %d: %v vs %v "+
+					"(the squash was not bit-exact — a surviving KV byte differs)", label, i, j, la[j], lb[j])
+			}
+		}
+		if i == steps {
+			break
+		}
+		t := argmax(la)
+		la, lb = a.Step(t), b.Step(t)
 	}
 }
 
@@ -183,6 +225,26 @@ func TestSpeculativeGreedyLossless(t *testing.T) {
 		t.Fatalf("adversarial-draft: %d speculations left unresolved (a leak)", sink.OpenCount())
 	}
 	t.Logf("adversarial draft: proposed %d, accepted %d, rolled back %d bit-exact spans", draftedB, acceptedB, rolledB)
+
+	// (c) Scripted PARTIAL acceptance: drafts[0] is the target's true next token
+	//     (accepted), the rest deliberately wrong (rejected) → 0 < Accepted < kk EVERY
+	//     round. This is the offset-sensitive squash (Evict at from+Accepted, Accepted>0)
+	//     that full-accept (a) and full-reject (b) never exercise. Output must STILL be
+	//     token-identical to greedy, with both an accept and a rollback every round.
+	gotC, draftedC, acceptedC, rolledC := SpeculativeGreedy(
+		context.Background(), sink, target.NewSession(), prompt, N, K,
+		&scriptedPartialDrafter{want: want})
+	assertEqualTokens(t, "partial-split", gotC, want)
+	if acceptedC == 0 || acceptedC >= draftedC {
+		t.Fatalf("partial-split: expected a partial accept (0 < accepted=%d < drafted=%d)", acceptedC, draftedC)
+	}
+	if rolledC == 0 {
+		t.Fatal("partial-split: expected rollbacks (a rejected suffix every round)")
+	}
+	if sink.OpenCount() != 0 {
+		t.Fatalf("partial-split: %d speculations left unresolved (a leak)", sink.OpenCount())
+	}
+	t.Logf("partial-split: proposed %d, accepted %d, rolled back %d (offset Evict at from+Accepted)", draftedC, acceptedC, rolledC)
 }
 
 // ---------------------------------------------------------------------------

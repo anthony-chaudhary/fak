@@ -79,7 +79,7 @@ var _ abi.ProvisionalSink = (*Sink)(nil)
 // fully-accepted round (no rejected span) or a fully-rejected one (no accepted span)
 // needs no special-casing at the call site.
 func (s *Sink) Open(txn abi.TxnID, epoch uint64, cache *model.KVCache, from, n int) {
-	if cache == nil || n <= 0 {
+	if cache == nil || n <= 0 || from < 0 {
 		return
 	}
 	s.mu.Lock()
@@ -114,7 +114,7 @@ func (s *Sink) Rollback(_ context.Context, txn abi.TxnID, epoch uint64) error {
 	return nil
 }
 
-// Open reports the number of unresolved speculations (open provisional spans). A
+// OpenCount reports the number of unresolved speculations (open provisional spans). A
 // drained lane leaves this at 0; a non-zero value after a decode loop means a
 // speculation was never resolved (a leak the witness suite asserts against).
 func (s *Sink) OpenCount() int {
@@ -214,10 +214,16 @@ func SpeculativeGreedy(ctx context.Context, sink *Sink, target *model.Session, p
 		from := target.Cache.Len()
 
 		// 1. The drafter proposes up to k tokens (clamped); k<=0 or an empty draft
-		//    degrades to plain greedy (verify advances by the correction alone).
+		//    degrades to plain greedy (verify advances by the correction alone). The
+		//    clamp bounds an over-eager drafter for EVERY k (a negative k clamps to 0,
+		//    so it cannot run an unbounded draft).
+		limit := k
+		if limit < 0 {
+			limit = 0
+		}
 		drafts := drafter.Draft(k)
-		if k >= 0 && len(drafts) > k {
-			drafts = drafts[:k]
+		if len(drafts) > limit {
+			drafts = drafts[:limit]
 		}
 		kk := len(drafts)
 		drafted += kk
