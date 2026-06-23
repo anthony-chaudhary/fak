@@ -43,6 +43,10 @@ if ($null -ne $py) {
         & $py "tools/$chk.py" --audit-tree
         if ($LASTEXITCODE -ne 0) { exit 1 }
     }
+    # hardware-name lint: no prose A100/DGX/SXM4 tell in the doc set (--check, not
+    # --audit-tree: the scrubber reads its own default doc set off the tracked *.md).
+    & $py "tools/scrub_hardware_names.py" --check
+    if ($LASTEXITCODE -ne 0) { exit 1 }
 } else {
     Write-Host "== index-sync + repo-hygiene (warn): python not found; gates skipped =="
 }

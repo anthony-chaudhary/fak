@@ -73,13 +73,14 @@ jobs:
         run: |
           awk '/^- \[/{n=0; if(index($0,"[SHIPPED]"))n++; if(index($0,"[SIMULATED]"))n++; if(index($0,"[STUB]"))n++; c++; if(n!=1){print "VIOLATION:",$0; bad++}} END{printf "claims-lint: %d lines, %d violations\n",c,bad; if(bad>0||c==0)exit 1}' CLAIMS.md
 
-      - name: repo-hygiene gates (doc-placement · links · file-admission · secret-shapes)
+      - name: repo-hygiene gates (doc-placement · links · file-admission · secret-shapes · hardware-names)
         working-directory: ${{ github.workspace }}
         run: |
           python tools/check_doc_placement.py --audit-tree
           python tools/check_links.py --audit-tree
           python tools/check_committed_files.py --audit-tree
           python tools/check_secret_shapes.py --audit-tree
+          python tools/scrub_hardware_names.py --check
 
       - name: release-substrate tests
         working-directory: ${{ github.workspace }}
