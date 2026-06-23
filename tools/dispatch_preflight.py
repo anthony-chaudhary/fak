@@ -22,7 +22,12 @@ ALL of which must pass:
                      default), so a throttled/auth-blocked account can't silently
                      eat the dispatch
   3. under_cap       live worker count < cap, where
-                     cap = min(dos [supervise].target, --max-workers) and
+                     cap = min(dos [supervise].target, --max-workers) when the
+                     target is POSITIVE (dos throttles the fleet down), else
+                     --max-workers when the target is zero/unset (the emit-only
+                     `dos loop` manages no standing loop, so the cron-armed
+                     self-spawner's own ceiling governs — a zero target is not a
+                     spawn kill switch) and
                      live = max(kernel's `dos loop` alive, an OS process scan for
                      live `dos-dispatch-loop` claudes) — the MAX so neither a
                      stale lease nor an unleased orphan can hide capacity
@@ -218,7 +223,18 @@ def evaluate(root: Path, *, max_workers: int, work_kind: str, product: str,
     kern = kernel_alive(root)
 
     target = kern.get("target")
-    cap = max_workers if target is None else min(max_workers, target)
+    # `dos [supervise].target` is the kernel's STANDING-LOOP population — the
+    # emit-only `dos loop` path, which never Popens, so it is honestly 0 in this
+    # repo (#517) until the keep-alive ARMING (#20) lands. The issue-dispatch cron
+    # (FleetIssueDispatch/Glm) is a SEPARATE, already-armed self-spawner that
+    # Popens its own workers; its ceiling is the operator's --max-workers, NOT the
+    # emit-only standing-loop target. So a POSITIVE target is a throttle-DOWN dial
+    # (dos asked for fewer than max_workers); a zero/unset target means "dos is not
+    # managing a standing loop" and the dispatcher's own --max-workers governs.
+    # target=0 is NOT a kill switch — disable the cron task, or trip the host /
+    # weekly-cap gate, to actually freeze spawning. (Before this, target=0 silently
+    # pinned cap to 0 and wedged the live issue-closer for ~12h after the #517 fix.)
+    cap = min(max_workers, target) if target else max_workers
     cap = max(0, cap)
     alive_kernel = kern.get("alive")
     alive_proc = proc_worker_count()
@@ -293,7 +309,9 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--workspace", default="", help="workspace root (default: repo root)")
     ap.add_argument("--max-workers", type=int, default=DEFAULT_MAX_WORKERS,
                     help=f"hard ceiling on live workers (default: {DEFAULT_MAX_WORKERS}); "
-                         "effective cap is min(this, dos [supervise].target)")
+                         "effective cap is min(this, dos [supervise].target) when that "
+                         "target is positive, else this (a zero/unset target lets the "
+                         "cron-armed self-spawner use its own ceiling)")
     ap.add_argument("--work-kind", default="engineering",
                     help="work kind for the switcher route (engineering→t1, gardening→t2)")
     ap.add_argument("--product", default="claude", help="worker product (default: claude)")

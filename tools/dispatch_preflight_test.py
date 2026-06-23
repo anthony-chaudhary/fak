@@ -152,6 +152,19 @@ class EvaluateVerdictTest(unittest.TestCase):
         p = run_eval(mod, max_workers=4)
         self.assertEqual(p["cap"], 4)
 
+    def test_cap_falls_back_to_max_workers_when_target_is_zero(self) -> None:
+        # Regression for the #517 wedge: `dos [supervise].target` is 0 in this repo
+        # (the emit-only `dos loop` keeps no standing loop alive), but the cron-armed
+        # issue-dispatch self-spawner must still spawn up to its own --max-workers. A
+        # zero target must NOT pin the cap to 0 — that silently froze the live
+        # issue-closer for ~12h. (A positive target below max_workers still throttles;
+        # see test_cap_is_min_of_max_workers_and_dos_target.)
+        mod = load()
+        patch_checks(mod, kernel={"alive": 0, "target": 0, "verdict": "AT_TARGET"}, procs=0)
+        p = run_eval(mod, max_workers=3)
+        self.assertEqual(p["cap"], 3)
+        self.assertEqual(p["verdict"], mod.OK_VERDICT)
+
 
 class RenderTest(unittest.TestCase):
     def test_render_does_not_raise_on_evaluate_output(self) -> None:
