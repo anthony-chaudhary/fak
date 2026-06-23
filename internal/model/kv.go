@@ -265,6 +265,15 @@ type Session struct {
 	// This is the end-to-end-correct, low-memory route toward the q4_k_m decode bar.
 	Q4K bool
 
+	// CPUOffloadExperts routes the MoE expert GEMMs (mlp.experts.* and mlp.shared_experts.*)
+	// to host RAM while the dense projections + router + attention run on Backend — the
+	// llama.cpp `--n-cpu-moe` hybrid. It is the path that lets a Q4_K model whose experts dwarf
+	// VRAM (GLM-5.2 Q4_K_M ≈ 424 GB) serve at all: experts live in the 1007 GB host RAM, the
+	// every-token dense FLOPs stay on the GPU. Only the GLM-DSA forward honors it today
+	// (glmDsaMatKernel, moe_offload.go); with Backend nil it is a no-op (everything already on
+	// host) and the forward stays byte-for-byte the resident path. See splitKernel.
+	CPUOffloadExperts bool
+
 	// PrecisionPolicy enables dynamic whole-token precision. When set, Prefill/Step
 	// speculatively run the Q8_0 path, inspect the returned distribution, and may roll the
 	// KV cache back to recompute the same token/span in f32. It is additive: nil preserves

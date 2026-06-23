@@ -179,10 +179,9 @@ func (s *Session) decodeBandGLMDsa(id int, x []float32, lo, hi, pos int, isFirst
 	// index-score dots + top-k selection + sparse softmax/ΣwV glue and the DSA KV cache stay
 	// host-resident (the genuinely sparse inner loop — the labeled #86/#413 residual). On the host
 	// path residentKernel.mul ≡ residentMatRows, so CPU sessions stay byte-for-byte unchanged.
-	var mat matKernel = residentKernel{m}
-	if s.Backend != nil {
-		mat = backendKernel{s}
-	}
+	// CPUOffloadExperts swaps in a splitKernel that keeps the expert GEMMs on host RAM while dense
+	// stays on the device (the --n-cpu-moe hybrid); see glmDsaMatKernel (moe_offload.go).
+	mat := s.glmDsaMatKernel()
 	for l := lo; l < hi; l++ {
 		layer := l
 		attnBody := func(xn []float32) []float32 {
