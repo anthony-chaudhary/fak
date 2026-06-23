@@ -2,6 +2,7 @@ package journal
 
 import (
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -102,6 +103,60 @@ func TestVerifyDetectsTampering(t *testing.T) {
 	}
 	if _, err := Verify(path); err == nil {
 		t.Fatal("Verify accepted a tampered journal")
+	}
+}
+
+// Enable is the programmatic default-on path fak guard uses: it must create a
+// missing parent directory, register a journal that actually records, leave a
+// chain that Verify accepts, and be idempotent (a second Enable — even with a
+// different path — is a no-op returning the FIRST journal, so the boot/first
+// enablement always wins and the ABI emitter is never double-registered).
+func TestEnableIsIdempotentCreatesDirAndVerifies(t *testing.T) {
+	// Save/restore the package global so this test never leaks `active` into the
+	// rest of the package's tests (Enable mutates a process-global).
+	activeMu.Lock()
+	saved := active
+	active = nil
+	activeMu.Unlock()
+	defer func() {
+		activeMu.Lock()
+		active = saved
+		activeMu.Unlock()
+	}()
+
+	dir := t.TempDir()
+	path := filepath.Join(dir, "nested", "deeper", "guard-audit.jsonl") // parent dirs do NOT exist yet
+
+	j, err := Enable(path)
+	if err != nil {
+		t.Fatalf("Enable: %v", err)
+	}
+	if j == nil || Active() != j {
+		t.Fatalf("Active() must be the journal Enable returned")
+	}
+	if j.Path() != path {
+		t.Fatalf("Path() = %q, want %q", j.Path(), path)
+	}
+
+	// A second Enable with a DIFFERENT path is a no-op: the first enablement wins.
+	j2, err := Enable(filepath.Join(dir, "other.jsonl"))
+	if err != nil {
+		t.Fatalf("second Enable: %v", err)
+	}
+	if j2 != j {
+		t.Fatal("Enable must be idempotent: the first/boot journal wins")
+	}
+	if _, err := os.Stat(filepath.Join(dir, "other.jsonl")); err == nil {
+		t.Fatal("idempotent Enable must NOT open the second path")
+	}
+
+	// It records a real decision and the on-disk chain verifies.
+	j.Emit(testDenyEvent("Bash", "trace-x", `{"command":"rm -rf /"}`))
+	if err := j.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+	if n, err := Verify(path); err != nil || n != 1 {
+		t.Fatalf("Verify = n=%d err=%v, want 1 nil", n, err)
 	}
 }
 

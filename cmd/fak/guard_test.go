@@ -16,6 +16,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/abi"
 	"github.com/anthony-chaudhary/fak/internal/adjudicator"
 	"github.com/anthony-chaudhary/fak/internal/gateway"
+	"github.com/anthony-chaudhary/fak/internal/journal"
 	"github.com/anthony-chaudhary/fak/internal/policy"
 )
 
@@ -304,6 +305,101 @@ func TestFormatAuditSummary(t *testing.T) {
 	// No cache hit → no cache line (the common first-turn / non-passthrough case).
 	if strings.Contains(clean, "provider cache") {
 		t.Errorf("a run with no provider cache read must not print a cache line:\n%s", clean)
+	}
+}
+
+// guardAuditPlan is the pure precedence behind the default-on decision journal:
+// a boot-time FAK_AUDIT_JOURNAL wins (nothing to enable), then --no-audit / --audit
+// off opt out, then --audit PATH, then the per-user default. Tested without
+// touching the process-global journal.
+func TestGuardAuditPlan(t *testing.T) {
+	def := guardDefaultAuditPath()
+	cases := []struct {
+		name       string
+		auditPath  string
+		noAudit    bool
+		bootActive bool
+		wantPath   string
+		wantOptOut bool
+	}{
+		{"boot env active wins (nothing to enable)", "/ignored.jsonl", false, true, "", false},
+		{"boot active beats --no-audit", "", true, true, "", false},
+		{"--no-audit opts out", "", true, false, "", true},
+		{"--audit off opts out", "off", false, false, "", true},
+		{"--audit OFF is case-insensitive + trimmed", "  OFF ", false, false, "", true},
+		{"explicit --audit path", "/tmp/a.jsonl", false, false, "/tmp/a.jsonl", false},
+		{"unset -> per-user default", "", false, false, def, false},
+		{"trimmed --audit path", "  /tmp/b.jsonl ", false, false, "/tmp/b.jsonl", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			gotPath, gotOpt := guardAuditPlan(tc.auditPath, tc.noAudit, tc.bootActive)
+			if gotPath != tc.wantPath || gotOpt != tc.wantOptOut {
+				t.Errorf("guardAuditPlan(%q,%v,%v) = (%q,%v), want (%q,%v)",
+					tc.auditPath, tc.noAudit, tc.bootActive, gotPath, gotOpt, tc.wantPath, tc.wantOptOut)
+			}
+		})
+	}
+}
+
+func TestGuardDefaultAuditPath(t *testing.T) {
+	p := guardDefaultAuditPath()
+	if p == "" {
+		t.Fatal("default audit path must not be empty (guard always has somewhere to write)")
+	}
+	if filepath.Base(p) != "guard-audit.jsonl" {
+		t.Errorf("default audit path = %q, want basename guard-audit.jsonl", p)
+	}
+	// Parent is a 'fak' dir under the user config root, or the '.fak' cwd fallback.
+	if parent := filepath.Base(filepath.Dir(p)); parent != "fak" && parent != ".fak" {
+		t.Errorf("default audit path parent dir = %q, want fak or .fak", parent)
+	}
+}
+
+// guardEnableAudit with an explicit path must register a live journal, name it in
+// the banner label, and produce a file the chain verifier accepts — the end-to-end
+// proof that the default-on trail is real on the cmd-layer wiring (the kernel-emit
+// linchpin is proven in internal/journal + internal/gateway).
+func TestGuardEnableAuditEnablesVerifiableTrail(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "sub", "guard-audit.jsonl") // parent dir must be auto-created
+	label, j := guardEnableAudit(path, false)
+	if j == nil {
+		t.Fatal("guardEnableAudit should enable a journal for an explicit --audit path")
+	}
+	// Close the handle so Windows can remove the TempDir, and flush the chain.
+	defer func() { _ = j.Close() }()
+
+	if journal.Active() != j {
+		t.Error("guardEnableAudit must register the journal as the process-active one")
+	}
+	if j.Path() != path {
+		t.Errorf("journal path = %q, want %q", j.Path(), path)
+	}
+	if !strings.Contains(label, path) || !strings.Contains(label, "hash-chained") {
+		t.Errorf("banner label = %q, want it to name the path + 'hash-chained'", label)
+	}
+
+	// Record one decision and prove the on-disk chain verifies (the same Verify the
+	// `fak audit verify` verb runs).
+	j.Emit(abi.Event{
+		Kind:    abi.EvDeny,
+		Call:    &abi.ToolCall{Tool: "Bash", TraceID: "t", Args: abi.Ref{Kind: abi.RefInline, Inline: []byte(`{"command":"rm -rf /"}`)}},
+		Verdict: &abi.Verdict{Kind: abi.VerdictDeny, Reason: abi.ReasonPolicyBlock, By: "test"},
+	})
+	if err := j.Flush(); err != nil {
+		t.Fatalf("Flush: %v", err)
+	}
+	if n, err := journal.Verify(path); err != nil || n != 1 {
+		t.Fatalf("journal.Verify(%q) = n=%d err=%v, want 1 nil", path, n, err)
+	}
+
+	// The exit roll-up names the rows appended this session, the path, and the verify
+	// command (seq0=0 so all rows count this session).
+	sum := formatJournalSummary(j, 0)
+	for _, want := range []string{"audit journal", "1 decision(s) appended", path, "fak audit verify"} {
+		if !strings.Contains(sum, want) {
+			t.Errorf("journal summary missing %q:\n%s", want, sum)
+		}
 	}
 }
 

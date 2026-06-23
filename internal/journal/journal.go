@@ -24,12 +24,18 @@
 //     each row as it is committed; Recent serves a bounded tail without re-reading
 //     the file.
 //
-// ENABLEMENT. The journal is OPT-IN and off by default: writing to disk on every
-// adjudication is an audit-deployment choice, not something a benchmark or a unit
-// test should pay for. Set FAK_AUDIT_JOURNAL=/path/to/journal.jsonl and the
-// package's init registers a persisting emitter against the frozen ABI (the
-// FAK_IFC-style env toggle the rest of the kernel uses). Unset => no emitter is
-// registered and this package is inert.
+// ENABLEMENT. The journal is off by default: writing to disk on every
+// adjudication is a deployment choice, not something a benchmark or a unit test
+// should pay for. Two ways to turn it on, both registering ONE persisting emitter
+// against the frozen ABI:
+//
+//   - FAK_AUDIT_JOURNAL=/path/to/journal.jsonl — the package's init enables it at
+//     boot (the FAK_IFC-style env toggle the rest of the kernel uses).
+//   - journal.Enable(path) — the programmatic equivalent, for a front door (fak
+//     guard) that decides AFTER init to default the audit trail on. Idempotent and
+//     boot-env-respecting (see Enable).
+//
+// Unset and never Enabled => no emitter is registered and this package is inert.
 package journal
 
 import (
@@ -40,6 +46,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"sync"
 	"time"
 
@@ -219,6 +226,15 @@ func (j *Journal) Stats() (seq, dropped, writeErrors uint64) {
 	j.mu.Lock()
 	defer j.mu.Unlock()
 	return j.seq, j.dropped, j.writeErr
+}
+
+// Path returns the file the journal appends to, or "" for an in-memory journal.
+// It lets a caller that enabled the journal report WHERE the durable trail lives
+// (the fak guard banner / exit summary) and what to run `fak audit verify` over.
+func (j *Journal) Path() string {
+	j.mu.Lock()
+	defer j.mu.Unlock()
+	return j.path
 }
 
 // ExportTo writes the journal as JSONL to w — the durable full history for a
@@ -544,26 +560,63 @@ func verifyStep(prev string, wantSeq uint64, row Row) (string, error) {
 // Registered instance — opt-in via FAK_AUDIT_JOURNAL.
 // ---------------------------------------------------------------------------
 
-var active *Journal
+var (
+	activeMu sync.Mutex
+	active   *Journal
+)
 
-// Active returns the registered durable journal, or nil if FAK_AUDIT_JOURNAL was
-// unset at boot (the gateway uses this to serve /v1/fak/events or 404).
-func Active() *Journal { return active }
+// Active returns the registered durable journal, or nil if none was enabled
+// (FAK_AUDIT_JOURNAL unset at boot and no programmatic Enable). The gateway uses
+// this to serve /v1/fak/events or 404.
+func Active() *Journal {
+	activeMu.Lock()
+	defer activeMu.Unlock()
+	return active
+}
+
+// Enable turns the durable decision journal ON at path AFTER init has run — the
+// programmatic equivalent of FAK_AUDIT_JOURNAL, for a front door (fak guard) that
+// decides to default the audit trail on. It creates the parent directory, opens
+// (creating, or CONTINUING an existing chain) a file-backed journal, registers it
+// as ONE persisting emitter against the frozen ABI, and returns it.
+//
+// It is IDEMPOTENT and boot-env-respecting: if a journal is already active
+// (FAK_AUDIT_JOURNAL won at boot, or a prior Enable ran) Enable is a no-op that
+// returns the existing journal — the emitter is never double-registered (the ABI
+// has no unregister) and the first/boot enablement always wins. A genuine open
+// failure is returned (never silently swallowed) so the caller can decide whether
+// to proceed without the trail.
+func Enable(path string) (*Journal, error) {
+	activeMu.Lock()
+	defer activeMu.Unlock()
+	if active != nil {
+		return active, nil
+	}
+	if dir := filepath.Dir(path); dir != "" && dir != "." {
+		if err := os.MkdirAll(dir, 0o700); err != nil {
+			return nil, fmt.Errorf("journal: create dir %s: %w", dir, err)
+		}
+	}
+	j, err := Open(path)
+	if err != nil {
+		return nil, err
+	}
+	active = j
+	abi.RegisterEmitter(j)
+	return j, nil
+}
 
 func init() {
 	path := os.Getenv("FAK_AUDIT_JOURNAL")
 	if path == "" {
-		return // off by default: no emitter registered, package inert
+		return // off unless a front door (fak guard) programmatically Enables it
 	}
-	j, err := Open(path)
-	if err != nil {
+	if _, err := Enable(path); err != nil {
 		// Fail loud but do not brick the kernel: a missing audit sidecar must not
 		// stop adjudication (the in-memory counters still hold). An auditor who
 		// requires fail-closed wires that as a separate posture (issue #12).
 		fmt.Fprintf(os.Stderr, "fak: audit journal disabled — %v\n", err)
 		return
 	}
-	active = j
-	abi.RegisterEmitter(j)
 	fmt.Fprintf(os.Stderr, "fak: audit journal -> %s (durable, hash-chained)\n", path)
 }

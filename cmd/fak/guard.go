@@ -22,6 +22,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/adjudicator"
 	"github.com/anthony-chaudhary/fak/internal/appversion"
 	"github.com/anthony-chaudhary/fak/internal/gateway"
+	"github.com/anthony-chaudhary/fak/internal/journal"
 	"github.com/anthony-chaudhary/fak/internal/policy"
 )
 
@@ -50,6 +51,12 @@ var guardDefaultPolicyJSON []byte
 // --provider anthropic with no API key set, fak uses your Claude Pro/Max SUBSCRIPTION
 // by default — it sources the OAuth token and sends it upstream as a bearer token
 // (set ANTHROPIC_API_KEY to use API billing instead; --anthropic-oauth forces it).
+//
+// It also turns the durable DECISION JOURNAL on by default: every verdict the kernel
+// reaches this session is appended to a tamper-evident, hash-chained file you can
+// later replay with `fak audit verify`. fak is the disinterested referee, and the
+// journal is the verifiable record of what it allowed vs blocked — a self-report is
+// not a witness. Point it with --audit PATH, or turn it off with --no-audit.
 func cmdGuard(argv []string) {
 	t0 := time.Now()
 	fs := flag.NewFlagSet("guard", flag.ExitOnError)
@@ -64,6 +71,8 @@ func cmdGuard(argv []string) {
 	envName := fs.String("env", "", "env var to inject the gateway URL into the child (default: chosen by --provider)")
 	requireKeyEnv := fs.String("require-key-env", "", "require this env var's bearer token on the gateway (loopback rarely needs it)")
 	logPath := fs.String("log", "", "write the gateway's per-request + per-verdict structured logs to this file (or '-' for stderr); default off to keep the agent's terminal clean")
+	auditPath := fs.String("audit", "", "write the durable, hash-chained DECISION JOURNAL to this file (default: a per-user path under your config dir; pass 'off' to disable). Every kernel verdict this session is appended as a tamper-evident JSONL row you can later replay with `fak audit verify`.")
+	noAudit := fs.Bool("no-audit", false, "disable the durable decision journal for this session (it is ON by default — fak guard is the referee, and the journal is the verifiable record of what it allowed vs blocked)")
 	dumpPolicy := fs.Bool("dump-policy", false, "print the built-in guard capability floor (an editable manifest) and exit")
 	quiet := fs.Bool("quiet", false, "suppress the startup banner and the exit audit summary")
 	fs.Usage = func() {
@@ -114,6 +123,22 @@ func cmdGuard(argv []string) {
 	must(err)
 	adjudicator.Default.SetPolicy(rt.Adjudicator)
 	applyRuntime(rt)
+
+	// 1b. Default the durable DECISION JOURNAL on. fak guard is the disinterested
+	//     referee; a tamper-evident, hash-chained record of every verdict is what
+	//     lets an auditor confirm after the fact what the kernel allowed and blocked
+	//     — the witness that makes the refereeing checkable rather than self-reported.
+	//     So it is ON by default (announced in the banner, not silent). The kernel's
+	//     EvDecide/EvDeny events on the proxy adjudication path are exactly what the
+	//     journal records, so a guard session produces a populated ledger. Precedence:
+	//     FAK_AUDIT_JOURNAL honored at boot wins; --no-audit / --audit off disables;
+	//     --audit PATH or a per-user default path otherwise. Enable BEFORE serving so
+	//     the emitter is registered before the first decision crosses the floor.
+	auditLabel, auditJournal := guardEnableAudit(*auditPath, *noAudit)
+	var auditSeq0 uint64
+	if auditJournal != nil {
+		auditSeq0, _, _ = auditJournal.Stats()
+	}
 
 	// 2. Resolve the upstream the gateway proxies to (and the key handling). An explicit
 	//    --provider wins; otherwise the wire is inferred from the wrapped agent's name so
@@ -260,7 +285,7 @@ func cmdGuard(argv []string) {
 		for _, kv := range injected[1:] {
 			injectNames += ", " + kv[0]
 		}
-		printGuardBanner(os.Stderr, gwURL, up, resolvedBase, floorSource, injectNames, injected[0][1], logLabel, os.Getenv("FAK_AUDIT_JOURNAL"), command)
+		printGuardBanner(os.Stderr, gwURL, up, resolvedBase, floorSource, injectNames, injected[0][1], logLabel, auditLabel, command)
 		switch {
 		case pinUpstream:
 			fmt.Fprintf(os.Stderr, "fak guard: upstream auth — Claude Pro/Max subscription (OAuth token from %s, sent as a bearer token)\n", oauthSource)
@@ -277,6 +302,12 @@ func cmdGuard(argv []string) {
 	if !*quiet {
 		fmt.Fprintln(os.Stderr)
 		fmt.Fprint(os.Stderr, formatAuditSummary(srv.AdjudicationSummary()))
+		fmt.Fprint(os.Stderr, formatJournalSummary(auditJournal, auditSeq0))
+	}
+	// Flush + fsync the durable trail before exit so a row returned to the agent is
+	// never lost to a buffered write (Close is safe on a nil/in-memory journal).
+	if auditJournal != nil {
+		_ = auditJournal.Close()
 	}
 	// Faithfully surface the child's exit code first (so `fak guard -- claude -p …`
 	// scripts see what the agent returned).
@@ -545,20 +576,17 @@ func guardLoopbackOnly(addr string) bool {
 // into the child, and WHERE TO WATCH IT — the live metrics/debug endpoints, the durable
 // audit journal, and the structured log stream. It goes to stderr so it never pollutes a
 // `-p` JSON run the child writes to stdout.
-func printGuardBanner(w io.Writer, gwURL, provider, baseURL, floorSource, injectVar, injectVal, logLabel, journalPath string, command []string) {
+func printGuardBanner(w io.Writer, gwURL, provider, baseURL, floorSource, injectVar, injectVal, logLabel, auditLabel string, command []string) {
 	fmt.Fprintf(w, "fak guard — kernel-adjudicated: %s\n", strings.Join(command, " "))
 	fmt.Fprintf(w, "  gateway    : %s   (in-process; torn down when the command exits)\n", gwURL)
 	fmt.Fprintf(w, "  upstream   : %s   (via the %s wire)\n", baseURL, provider)
 	fmt.Fprintf(w, "  floor      : %s\n", floorSource)
 	fmt.Fprintf(w, "  wired via  : %s=%s   (child only — your shell is untouched)\n", injectVar, injectVal)
 	// Observability: the live scrape surfaces are on the gateway URL above (unauth on
-	// loopback); the audit journal and log stream survive the session only if asked for.
+	// loopback); the audit journal is ON by default (auditLabel says where), the log
+	// stream survives the session only if asked for.
 	fmt.Fprintf(w, "  metrics    : %s/metrics  ·  %s/debug/vars  ·  %s/v1/fak/events\n", gwURL, gwURL, gwURL)
-	journal := journalPath
-	if strings.TrimSpace(journal) == "" {
-		journal = "off (set FAK_AUDIT_JOURNAL=/path/audit.jsonl for a durable hash-chained trail)"
-	}
-	fmt.Fprintf(w, "  audit log  : %s\n", journal)
+	fmt.Fprintf(w, "  audit log  : %s\n", auditLabel)
 	fmt.Fprintf(w, "  gateway log: %s\n", logLabel)
 	fmt.Fprintln(w, "  every tool call the agent proposes crosses the capability floor before it runs.")
 }
@@ -582,6 +610,90 @@ func guardLogSink(logPath string, stderr io.Writer) (logf func(string, ...any), 
 		lg := log.New(f, "", log.LstdFlags)
 		return lg.Printf, f, logPath
 	}
+}
+
+// guardAuditPlan is the PURE decision behind guard's default-on audit journal: it
+// returns the path to enable (""=> do not enable) and whether the off was an
+// explicit opt-out, given the flags and whether a journal is already active at
+// boot (FAK_AUDIT_JOURNAL). Kept side-effect-free so the precedence — boot env
+// wins, then --no-audit / --audit off, then --audit PATH, then the per-user
+// default — is unit-tested without touching the process-global journal.
+func guardAuditPlan(auditPath string, noAudit, bootActive bool) (enablePath string, optedOut bool) {
+	if bootActive {
+		return "", false // FAK_AUDIT_JOURNAL already registered an emitter; nothing to enable
+	}
+	if noAudit || strings.EqualFold(strings.TrimSpace(auditPath), "off") {
+		return "", true
+	}
+	p := strings.TrimSpace(auditPath)
+	if p == "" {
+		p = guardDefaultAuditPath()
+	}
+	return p, false
+}
+
+// guardDefaultAuditPath is where fak guard writes its durable decision journal
+// when the operator names none: <user-config>/fak/guard-audit.jsonl — a stable,
+// per-user, cross-platform location appended across sessions so the tamper-evident
+// chain CONTINUES rather than forking each run. Falls back to ".fak/guard-audit.jsonl"
+// under the working directory if no user config dir resolves.
+func guardDefaultAuditPath() string {
+	if dir, err := os.UserConfigDir(); err == nil && strings.TrimSpace(dir) != "" {
+		return filepath.Join(dir, "fak", "guard-audit.jsonl")
+	}
+	return filepath.Join(".fak", "guard-audit.jsonl")
+}
+
+// guardEnableAudit turns the durable, hash-chained decision journal ON for the
+// session per guardAuditPlan and returns a human label for the banner plus the
+// active journal (nil when disabled). A failure to open a REQUESTED path is fatal
+// (must) — an operator who asked for an audit trail and silently got none is worse
+// than a loud failure, mirroring guardLogSink's file-sink contract.
+func guardEnableAudit(auditPath string, noAudit bool) (label string, active *journal.Journal) {
+	// A boot-time FAK_AUDIT_JOURNAL already registered an emitter we cannot
+	// unregister; respect it (and note --no-audit cannot turn it off).
+	if j := journal.Active(); j != nil {
+		if p := j.Path(); p != "" {
+			return p + "  (durable, hash-chained; from FAK_AUDIT_JOURNAL)", j
+		}
+		return "active  (durable, hash-chained; from FAK_AUDIT_JOURNAL)", j
+	}
+	path, optedOut := guardAuditPlan(auditPath, noAudit, false)
+	if path == "" {
+		if optedOut {
+			return "off  (default-on; disabled by --no-audit / --audit off)", nil
+		}
+		return "off", nil
+	}
+	j, err := journal.Enable(path)
+	must(err)
+	return path + "  (durable, hash-chained — verify with: fak audit verify <path>)", j
+}
+
+// formatJournalSummary is the exit-roll-up line for the durable trail: how many
+// hash-chained rows this session appended, where, and the command to re-verify the
+// chain. Empty when no journal ran, so a --no-audit session stays quiet.
+func formatJournalSummary(j *journal.Journal, seq0 uint64) string {
+	if j == nil {
+		return ""
+	}
+	path := j.Path()
+	if path == "" {
+		return ""
+	}
+	if err := j.Flush(); err != nil {
+		return fmt.Sprintf("fak guard: audit journal — flush error: %v\n", err)
+	}
+	seq, _, writeErr := j.Stats()
+	var b strings.Builder
+	fmt.Fprintf(&b, "fak guard: audit journal — %d decision(s) appended this session; chain now holds %d hash-chained row(s) at %s",
+		seq-seq0, seq, path)
+	if writeErr > 0 {
+		fmt.Fprintf(&b, " (%d write error(s))", writeErr)
+	}
+	b.WriteByte('\n')
+	fmt.Fprintf(&b, "  verify the tamper-evident chain: fak audit verify %s\n", path)
+	return b.String()
 }
 
 // formatAuditSummary renders the exit roll-up of what the kernel decided while the
