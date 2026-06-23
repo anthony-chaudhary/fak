@@ -23,6 +23,18 @@ type Witness struct {
 	ElidedTokens   int      `json:"elided_tokens"` // tokens out of the window but still recoverable
 	Partition      bool     `json:"partition"`     // Resident+Elided == Candidates AND the two sets are disjoint
 	Faithful       bool     `json:"faithful"`      // Partition AND every elided span is recoverable
+
+	// Materialization reconciliation — set by Reconcile over the rendered+refused outcome of
+	// a Materialize pass (zero for a pure-plan Audit, which performs no page-in). Where Audit
+	// asks "did the PLAN drop a span?", Reconcile asks "did the PAGE-IN drop a selected span,
+	// and did the store hand back bytes that match the Span.Bytes the planner charged?". A View
+	// is honest only when the plan is Faithful AND the materialization Reconciled AND the
+	// CostContract held — otherwise the budget charged and the bytes rendered disagree.
+	Rendered     int      `json:"rendered"`                // spans actually paged into the view
+	Refused      int      `json:"refused"`                 // selected spans the gate declined at page-in
+	Reconciled   bool     `json:"reconciled"`              // Rendered+Refused == Selected (no selected span silently dropped)
+	CostContract bool     `json:"cost_contract"`           // every rendered span's Bytes == its declared Span.Bytes
+	CostDiverged []string `json:"cost_diverged,omitempty"` // rendered spans whose bytes != Span.Bytes (the contract break)
 }
 
 // Audit computes the faithfulness witness of a plan. It reads only the plan's own
@@ -87,6 +99,41 @@ func CompactionView(p Plan) Plan {
 		e.Digest = "" // the bytes are gone — no page-back-in handle
 		e.Reason = "compacted_away"
 		out.Elided[i] = e
+	}
+	return out
+}
+
+// Reconcile folds a plan's faithfulness witness with its materialization outcome: the
+// returned witness keeps the plan's Partition/Faithful verdict and ADDS the rendered+refused
+// reconciliation and the Span.Bytes cost contract. It is what Materialize stamps on a View
+// so the witness agrees with what actually happened at the page-in boundary, not just with
+// what the plan promised before it.
+//
+// Two properties are checked, one structural and one economic:
+//
+//  1. Reconciled — the page-in loop visits every selected span exactly once and routes each
+//     to Rendered or Refused, so a faithful materialization accounts for the WHOLE selected
+//     set with none silently dropped. The check is count-based (Rendered+Refused == Selected)
+//     so it holds under duplicate IDs, which the planner charges by row.
+//  2. CostContract — for every rendered span, the bytes the gate paged in (Rendered.Bytes)
+//     must equal the Span.Bytes the planner priced it at (declared[id]). A divergence means
+//     the budget charged ceil(Span.Bytes/4) while the render realized ceil(len(body)/4):
+//     the accounting is fictional, and the divergence is named in CostDiverged. A refused
+//     span carries no body, so its contract is vacuous (counted in Refused, never diverged).
+//
+// declared maps a span id to the Span.Bytes the planner saw; a rendered id missing from it
+// is itself a contract break (the store rendered a span it never reported).
+func Reconcile(p Plan, w Witness, rendered []Rendered, refused []Refusal, declared map[string]int64) Witness {
+	out := w // carry the plan's Candidates/Resident/Elided/Recoverable/Partition/Faithful as-is
+	out.Rendered = len(rendered)
+	out.Refused = len(refused)
+	out.Reconciled = len(rendered)+len(refused) == len(p.Selected)
+	out.CostContract = true
+	for _, r := range rendered {
+		if want, ok := declared[r.ID]; !ok || want != r.Bytes {
+			out.CostContract = false
+			out.CostDiverged = append(out.CostDiverged, r.ID)
+		}
 	}
 	return out
 }

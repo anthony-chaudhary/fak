@@ -55,8 +55,10 @@ func pinSet(pins []string) map[string]bool {
 
 // View is the materialized O(1) turn: the plan, the bytes actually rendered into the
 // fresh history (through the trust gate), any spans the gate refused on page-in, and the
-// faithfulness witness over the whole plan. Rendered is the resident view in step order —
-// the history the next turn continues from.
+// witness reconciled against that rendered+refused outcome. Rendered is the resident view
+// in step order — the history the next turn continues from. The Witness attests both that
+// the plan was faithful (no candidate destroyed) AND that the page-in accounted for every
+// selected span with bytes matching the Span.Bytes the planner charged.
 type View struct {
 	Plan     Plan       `json:"plan"`
 	Rendered []Rendered `json:"rendered"`
@@ -80,7 +82,14 @@ func Materialize(ctx context.Context, store Store, f Forecast, budget Budget, co
 		return View{}, err
 	}
 	p := PlanCells(spans, f, budget, cost)
-	v := View{Plan: p, Witness: Audit(p)}
+	// declared[id] = the Span.Bytes the planner priced each span at — the cost basis the
+	// page-in must honor. The planner charged ceil(Span.Bytes/4); the render realizes
+	// ceil(len(body)/4); the witness pins them equal so the budget is honest.
+	declared := make(map[string]int64, len(spans))
+	for _, s := range spans {
+		declared[s.ID] = s.Bytes
+	}
+	v := View{Plan: p}
 	for _, s := range p.Selected {
 		body, err := store.Materialize(ctx, s.ID)
 		if err != nil {
@@ -99,6 +108,10 @@ func Materialize(ctx context.Context, store Store, f Forecast, budget Budget, co
 			Bytes: int64(len(body)), Tokens: tokenEstimate(len(body)),
 		})
 	}
+	// The witness is reconciled with the rendered+refused outcome (not just the plan), so it
+	// attests that every selected span was accounted for at page-in and that the bytes the
+	// gate handed back match the Span.Bytes the planner charged.
+	v.Witness = Reconcile(p, Audit(p), v.Rendered, v.Refused, declared)
 	return v, nil
 }
 
