@@ -36,17 +36,38 @@ import (
 
 func main() {
 	selfcheck := flag.Bool("selfcheck", false, "run all checks and exit non-zero on any failure")
+	bench := flag.Bool("bench", false, "run the measured-numbers bench harness for #535 (E vs draft cost, decode-lane utilization, residency hit-rate) and print the report")
+	out := flag.String("out", "", "with -bench: write the report as JSON to this path (the reproducible artifact)")
 	flag.Parse()
 	quiet := *selfcheck
 
+	// The bench harness is the measured-numbers half (#535); the three -selfcheck
+	// witnesses are the correctness half. -bench runs the witnesses too (a measured
+	// run on a broken core is worthless), then emits the report.
 	ok := true
 	ok = hostMany(quiet) && ok
 	ok = decodeOne(quiet) && ok
 	ok = cacheLedMTP(quiet) && ok
 
+	var report BenchReport
+	if *bench {
+		report = benchHarness(quiet, &ok)
+	}
+
 	if !ok {
 		fmt.Fprintln(os.Stderr, "polymodelbench: FAIL")
 		os.Exit(1)
+	}
+	if *bench {
+		if *out != "" {
+			if err := writeJSON(*out, report); err != nil {
+				fmt.Fprintf(os.Stderr, "polymodelbench: -out %s: %v\n", *out, err)
+				os.Exit(1)
+			}
+			fmt.Printf("polymodelbench: report written to %s\n", *out)
+		}
+		fmt.Println("polymodelbench: OK — correctness witnesses + #535 bench harness (E/draft-cost, decode-lane utilization, residency hit-rate) all measured")
+		return
 	}
 	fmt.Println("polymodelbench: OK — host-many, decode-one, lossless cache-led MTP all verified")
 }

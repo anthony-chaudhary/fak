@@ -233,8 +233,27 @@ Ordered so each rung stands on a shipped one. None of these land in this doc.
    consumer. Witness: `go test ./internal/cachemeta ./internal/spec` (the splice
    continuation is bit-exact to a direct prefill). The live multi-model *backend*
    residency (#531) and the verify *execution* (#533) remain sequenced.
-6. **Bench harness numbers** — **#535**. Gate every speedup claim on a measured run
-   (#44): E vs draft cost, decode-lane utilization, residency hit-rate.
+6. **Bench harness numbers** — **#535**. ✅ *shipped.* Gate every speedup claim on a
+   measured run (#44): E vs draft cost, decode-lane utilization, residency hit-rate.
+   The harness is `cmd/polymodelbench -bench [-out FILE]` (`benchHarness` in
+   `cmd/polymodelbench/bench.go`): it drives the REAL polymodel primitives (`Pool`,
+   `Schedule`, `AcceptGreedy`, `model.KVCache.Evict`) over deterministic synthetic
+   workloads and emits every number as MEASURED, re-asserting the correctness
+   invariants (losslessness, `MaxConcurrentDecode==1`, pinned-survives,
+   budget-never-exceeded) on the measured runs — a number on a broken core is invalid,
+   so `*ok` lowers on any gate failure. The three axes: (a) **speculation** — the
+   acceptance rate is measured by running a real draft/target pair (and an adversarial
+   proposer that forces the bit-exact `Evict` rollback path), so E is reported as a
+   MEASURED spread `E ∈ [1, K+1]` bracketed by the two regimes' acceptance, never a
+   single curated point; (b) **decode lane** — tokens/step, decode steps, and
+   `MaxConcurrentDecode==1` off a real `Schedule`, plus the HBM traffic via
+   `DecodeBandwidthBytes`; (c) **residency** — a hot-set/cold-tail request stream
+   against a real `Pool` under a tight budget yields the measured hit-rate, eviction
+   count, and pinned-survival. Honest fence: these are deterministic synthetic-workload
+   measurements on the policy/accounting core — no GPU, so no tokens/sec-on-hardware
+   claim, only the acceptance/throughput/hit-rate numbers every speedup claim reduces
+   to. Witness: `go test ./cmd/polymodelbench`; reproduce the artifact: `polymodelbench
+   -bench -out report.json`.
 
 ## 7a. Safety — off by default until ready (feature-flag gating)
 
