@@ -44,6 +44,10 @@ Each turns a fuzzy goal into a number you can drive toward zero.
 - [DOS kernel transfer playbook](docs/dos-kernel-transfer-playbook.md) — moving the trust substrate to a new repo.
 - [Prefill visuals](docs/prefill-visuals.md) — the diagrams behind prefill reuse.
 
+## Operating the agent fleet
+
+- [`fleet` operator console](tools/FLEET.md) — one command to watch the agent fleet on a host: live session/account health, what stopped and why, which accounts are resumable, and what needs you. The session-health companion to `dos top`; install it onto PATH with `fleet install`.
+
 ## Benchmarks & methodology
 
 - [Benchmark authority](BENCHMARK-AUTHORITY.md) — the single source of truth for every number.
