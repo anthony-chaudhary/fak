@@ -139,5 +139,51 @@ class ResetPassedTest(unittest.TestCase):
                                                anchor_utc=self._utc(16, 0)))
 
 
+class TerminalFailureTest(unittest.TestCase):
+    """terminal_failure -- the shared failure taxonomy, keyed off the ERROR record only.
+    The discipline that stops a session being bucketed by what it *narrated*."""
+
+    def test_auth_error_record(self) -> None:
+        kind, detail = fleet_session_signals.terminal_failure(
+            "Not logged in · Please run /login")
+        self.assertEqual(kind, "AUTH")
+        self.assertEqual(detail, "auth/login required")
+
+    def test_limit_error_record_carries_reset_window(self) -> None:
+        kind, detail = fleet_session_signals.terminal_failure(
+            "You've hit your session limit · resets 11am (America/Los_Angeles)")
+        self.assertEqual(kind, "LIMIT")
+        self.assertEqual(detail, "11am (America/Los_Angeles)")
+
+    def test_transient_529_is_api_err(self) -> None:
+        kind, detail = fleet_session_signals.terminal_failure(
+            "API Error: Server is temporarily limiting requests "
+            "(not your usage limit) · Rate limited")
+        self.assertEqual(kind, "API_ERR")
+        self.assertEqual(detail, "")
+
+    def test_auth_outranks_limit_and_api(self) -> None:
+        # precedence is by remediation cost: a record carrying both an auth wall and a
+        # transient blip is the auth wall (the expensive one), never masked by the blip.
+        kind, _ = fleet_session_signals.terminal_failure(
+            "API Error: 401 Invalid authentication credentials · overloaded")
+        self.assertEqual(kind, "AUTH")
+
+    def test_empty_error_text_is_no_failure(self) -> None:
+        # No error record => no failure bucket. Never an inference from prose.
+        self.assertEqual(fleet_session_signals.terminal_failure(""), ("", ""))
+        self.assertEqual(fleet_session_signals.terminal_failure("   "), ("", ""))
+
+    def test_prose_about_auth_is_not_a_failure_when_passed_as_error(self) -> None:
+        # The 732edb34 shape: a worker narrating auth work. If this STRING were ever the
+        # error record it'd classify, but it is plain status prose with no error token,
+        # so the taxonomy returns no failure -- the caller must only feed it the error
+        # record, and even then mere discussion ("logged back in") is not a wall.
+        kind, _ = fleet_session_signals.terminal_failure(
+            "Closed the gem7 auth wall; gem7-netra is logged back in and the "
+            "auth-failure blind spot is now a tested monitor signal.")
+        self.assertEqual(kind, "")
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

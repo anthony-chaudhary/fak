@@ -186,3 +186,38 @@ def auth_block_reason(text: str) -> str:
 def needs_login_prompt(text: str) -> bool:
     """True only for blockers a human login/credential refresh can plausibly fix."""
     return auth_block_kind(text) == "auth" and bool(LOGIN_REQUIRED_RE.search(text or ""))
+
+
+# Closed failure taxonomy, ordered by recovery-remediation cost.
+FAILURE_KINDS = ("AUTH", "LIMIT", "API_ERR")
+
+
+def terminal_failure(err_text: str) -> tuple[str, str]:
+    """Classify a session's TERMINAL ERROR text into its failure mode -- the single
+    source of truth shared by ``resume_sweep.classify`` and the resume watchdogs, so
+    they can never disagree about what state a session is in.
+
+    Keyed off the ERROR record ONLY (the injected ``isApiErrorMessage`` / error turn),
+    NEVER the assistant prose. A session that merely *discusses* an auth wall, a 529, or
+    a usage limit in its final message (e.g. a worker editing the resume tooling itself)
+    is NOT in that failure state -- the same discipline ``resume_watch.terminal_auth_failure``
+    already applies. Precedence follows the remediation cost: AUTH (needs a human
+    ``/login``) outranks LIMIT (wait for the named reset) outranks API_ERR (transient,
+    retry now), so the most expensive-to-recover wall is never masked by a cheaper one.
+
+    Returns ``(kind, detail)``: ``kind`` is one of :data:`FAILURE_KINDS` or ``""``;
+    ``detail`` is the auth reason for AUTH, the reset window for LIMIT, else ``""``.
+    Empty/blank ``err_text`` (i.e. no error record at all) -> ``("", "")`` -- no error
+    record means no failure bucket, never an inference from prose.
+    """
+    t = (err_text or "").strip()
+    if not t:
+        return ("", "")
+    if needs_login_prompt(t) or is_auth_error(t):
+        return ("AUTH", auth_block_reason(t))
+    when = limit_reset(t)
+    if when:
+        return ("LIMIT", when)
+    if is_api_error(t):
+        return ("API_ERR", "")
+    return ("", "")

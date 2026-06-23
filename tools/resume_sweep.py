@@ -111,6 +111,12 @@ def _role(rec: dict):
     return rec.get("role")
 
 
+def _clip(text: str, width: int = 90) -> str:
+    """One-line, length-bounded evidence snippet for the observability fields."""
+    s = " ".join((text or "").split())
+    return s if len(s) <= width else s[: width - 1] + "…"
+
+
 def _load(path: str) -> list:
     out = []
     try:
@@ -199,14 +205,28 @@ def classify(sid: str, paths: list, live: set, now_utc) -> dict:
             last_a = r
         if r.get("type") == "error" or r.get("isApiErrorMessage"):
             last_e = r
-    blob = (_text(last_a) if last_a else "") + " " + (_text(last_e) if last_e else "")
+    # Adjudicate the FAILURE MODE off the error record ONLY -- never the assistant prose.
+    # The old code blended last_assistant + last_error into one `blob`, so a worker that
+    # merely *narrated* an auth wall / 529 / usage limit in its final turn was mis-bucketed
+    # into that failure (2026-06-23: gem7 732edb34 narrated "the gem7 auth wall ... logged
+    # back in" while its real error record was a transient 529 -> wrongly AUTH). The
+    # taxonomy now lives in one shared place (sig.terminal_failure), the same error-channel
+    # discipline resume_watch.terminal_auth_failure uses. For observability we also compute
+    # what the prose ALONE would have said and flag the divergence, so a prose-only
+    # false-positive the fix averted is visible instead of silent.
+    err_text = _text(last_e) if last_e else ""
+    prose_text = _text(last_a) if last_a else ""
+    kind, detail = sig.terminal_failure(err_text)
+    prose_kind, _ = sig.terminal_failure(prose_text)
+    prose_diverged = bool(prose_kind) and prose_kind != kind
 
+    reset = ""
     if sid in live:
         bucket = "LIVE"
-    elif sig.needs_login_prompt(blob) or sig.is_auth_error(blob):
+    elif kind == "AUTH":
         bucket = "AUTH"
-    elif sig.limit_reset(blob):
-        when = sig.limit_reset(blob)
+    elif kind == "LIMIT":
+        reset = detail
         anchor = _last_ts(best_recs)
         anchor_dt = None
         if anchor:
@@ -214,9 +234,9 @@ def classify(sid: str, paths: list, live: set, now_utc) -> dict:
                 anchor_dt = datetime.fromisoformat(anchor.replace("Z", "+00:00"))
             except ValueError:
                 anchor_dt = None
-        passed = sig.reset_passed(when, now_utc=now_utc, anchor_utc=anchor_dt)
+        passed = sig.reset_passed(detail, now_utc=now_utc, anchor_utc=anchor_dt)
         bucket = "LIMIT_RESET_PASSED" if passed else "LIMIT_RESET_FUTURE"
-    elif sig.is_api_error(blob):
+    elif kind == "API_ERR":
         bucket = "API_ERR"
     else:
         bucket = "OTHER"
@@ -224,7 +244,11 @@ def classify(sid: str, paths: list, live: set, now_utc) -> dict:
     return {
         "sid": sid, "bucket": bucket, "superset_account": acct, "project": proj,
         "is_superset": is_superset, "n_records": len(best_recs), "copies": len(paths),
-        "reset": sig.limit_reset(blob) or "",
+        "reset": reset,
+        # observability: the non-forgeable error text that drove the bucket, and whether
+        # the assistant prose alone would have disagreed (a prose false-positive averted).
+        "evidence": _clip(err_text) if bucket not in ("LIVE", "OTHER") else "",
+        "prose_diverged": prose_diverged,
         "cwd": cwd_for_slug(proj, os.getcwd()),
         "superset_path": best,
     }
@@ -315,6 +339,11 @@ def main(argv=None) -> int:
     if dropped_stub:
         print(f"  (dropped {dropped_stub} micro-stub session(s) below {args.min_records} records "
               f"-- raise/lower --min-records to see them)")
+    diverged = sum(1 for r in rows if r.get("prose_diverged"))
+    if diverged:
+        print(f"  (averted {diverged} prose-only false-positive(s): the final assistant prose "
+              f"alone would have mis-bucketed these, but the error channel overruled it "
+              f"-- shown as [prose≠err])")
     # grouped view: project x bucket, so a batch-spawned cohort reads as ONE line.
     grp = Counter((r["project"], r["bucket"], r["superset_account"]) for r in rows)
     if len([g for g in grp.values() if g >= 5]):
@@ -327,9 +356,10 @@ def main(argv=None) -> int:
         if "seat_ok" in r:
             seat = f" seat_ok={r['seat_ok']}"
         sup = "" if r["is_superset"] else " NON-SUPERSET!"
+        div = " [prose≠err]" if r.get("prose_diverged") else ""
         print(f"  {r['bucket']:18} {r['sid'][:8]} {r['superset_account']:22} "
               f"proj={r['project']:20} n={r['n_records']:<4} "
-              f"reset={r['reset'] or '-':28}{seat}{sup}")
+              f"reset={r['reset'] or '-':28}{seat}{sup}{div}")
     if not rows:
         print("  (no recently-crashed sessions in window)")
     # action hints

@@ -86,6 +86,58 @@ class ClassifyTest(unittest.TestCase):
                          ts="2026-06-23T17:00:00Z", err=True)]
             r = self._one(tmp, "s4", recs)
             self.assertEqual(r["bucket"], "AUTH")
+            self.assertIn("Please run /login", r["evidence"])  # observability: the error drives it
+
+    def test_prose_about_auth_does_not_override_error_channel(self):
+        # 2026-06-23 regression (gem7 732edb34): a worker editing the resume tooling
+        # narrated an auth wall ("please run /login ... logged back in") in its FINAL
+        # assistant turn, while its real (earlier) error record was a transient 529. The
+        # old code blended prose+error into one blob -> AUTH; the error channel says
+        # API_ERR. The detector must not flag the session that WROTE the detector.
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmp:
+            recs = [
+                _rec("assistant",
+                     "API Error: Server is temporarily limiting requests "
+                     "(not your usage limit) . Rate limited",
+                     ts="2026-06-23T17:00:00Z", err=True),
+                _rec("assistant",
+                     "Remediation for the gem7 wall was to please run /login on smith; "
+                     "gem7-netra is logged back in and the monitor signal is tested now.",
+                     ts="2026-06-23T17:59:00Z"),  # the real LAST turn, NOT an error
+            ]
+            r = self._one(tmp, "s_prose_auth", recs)
+            self.assertEqual(r["bucket"], "API_ERR")        # error channel, not prose
+            self.assertTrue(r["prose_diverged"])            # observability: averted FP
+            self.assertIn("Rate limited", r["evidence"])
+
+    def test_prose_login_does_not_override_limit_error(self):
+        # Assistant prose mentions /login but the error record is a usage-limit banner ->
+        # the session is LIMIT-capped (wait for the reset), not auth-walled.
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmp:
+            recs = [
+                _rec("assistant",
+                     "You've hit your session limit . resets 6am (America/Los_Angeles)",
+                     ts="2026-06-23T11:30:00Z", err=True),
+                _rec("assistant", "Next I'll please run /login to re-home this seat.",
+                     ts="2026-06-23T11:35:00Z"),  # prose, LAST turn
+            ]
+            r = self._one(tmp, "s_prose_login", recs)
+            self.assertEqual(r["bucket"], "LIMIT_RESET_PASSED")  # 6am < 11am now
+            self.assertTrue(r["prose_diverged"])
+
+    def test_prose_api_mention_without_error_record_is_other(self):
+        # A clean session that merely *mentions* a past API error in prose, with NO error
+        # record, is OTHER -- no error record means no failure bucket.
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmp:
+            recs = [_rec("assistant",
+                         "Earlier I hit an API Error 529 but retried and it's green now.",
+                         ts="2026-06-23T17:00:00Z")]
+            r = self._one(tmp, "s_prose_api", recs)
+            self.assertEqual(r["bucket"], "OTHER")
+            self.assertEqual(r["evidence"], "")
 
     def test_clean_session_is_other(self):
         import tempfile
