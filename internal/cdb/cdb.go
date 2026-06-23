@@ -229,10 +229,13 @@ type WorkingSet struct {
 // cdb owns the reference predicate (which pages the query touches) rather than
 // delegating to recall's ranker: deciding the working set is the debugger's whole job,
 // and a bag-of-words ranker that counts stopwords ("the", "set") would fault in pages a
-// real follow-up never references. So we rank benign pages by STOPWORD-FILTERED
-// extractive overlap, take the top-k with nonzero overlap, and page each in through the
-// SAME gated recall.Resolve — the selection is cdb's, the trust boundary is still
-// recall's. Sealed pages are never candidates.
+// real follow-up never references. So we rank benign pages in two phases — phase 1 is
+// the STOPWORD-FILTERED extractive overlap (a HARD filter: nonzero overlap to be a
+// candidate); phase 2 (#540) re-ranks the surviving candidates by relevance plus the
+// page's learned, witness-gated recall.Page.Utility, the SAME second phase recall.Recall
+// applies — then we take the top-k and page each in through the SAME gated recall.Resolve.
+// The selection is cdb's, the trust boundary is still recall's. Sealed pages are never
+// candidates, and utility re-ranks only WITHIN the provenance-clean set.
 func (im *Image) WorkingSet(ctx context.Context, query string, k int) WorkingSet {
 	info := im.Info()
 	pages := im.sess.Pages()
@@ -243,7 +246,8 @@ func (im *Image) WorkingSet(ctx context.Context, query string, k int) WorkingSet
 	qtok := contentTokens(query)
 	type scored struct {
 		p     recall.Page
-		score int
+		score int     // phase 1: stopword-filtered lexical overlap (a HARD filter)
+		rank  float64 // phase 2: relevance + learned outcome-utility (#540)
 	}
 	var cand []scored
 	for _, p := range pages {
@@ -253,11 +257,26 @@ func (im *Image) WorkingSet(ctx context.Context, query string, k int) WorkingSet
 		if im.sess.Tombstoned(p.Step) {
 			continue // agent-requested tombstones are absent from model-visible recall
 		}
-		if s := overlap(qtok, contentTokens(p.Descriptor)); s > 0 {
-			cand = append(cand, scored{p, s})
+		// Phase 1 (unchanged): a score-0 page is never a candidate, so the phase-2
+		// re-rank below sits BEHIND this hard filter — utility re-orders WITHIN the
+		// relevant set and can never widen it (quarantined/tombstoned pages stay out).
+		s := overlap(qtok, contentTokens(p.Descriptor))
+		if s == 0 {
+			continue
 		}
+		// Phase 2 (#540): re-rank the relevant candidates by relevance PLUS the page's
+		// learned outcome-utility — the SAME second phase recall.Recall (recall.go)
+		// applies, so the working set this debugger demand-pages and recall's own
+		// assembled set order consistently. recall.Page.Utility is the witness-gated,
+		// [0,recall.UtilityMax]-clamped scalar persisted in manifest.json: a quarantined
+		// or witness-refuted page can never carry it (recall.Session.Credit skips it and
+		// the dream seal path zeroes it), so this re-rank stays WITHIN the
+		// provenance-clean set and never resurrects a sealed page. At default-neutral
+		// utility (0) rank == float64(score), so the order is byte-identical to the
+		// pre-#540 lexical-only ranking for every never-credited session.
+		cand = append(cand, scored{p, s, float64(s) + p.Utility})
 	}
-	sort.SliceStable(cand, func(i, j int) bool { return cand[i].score > cand[j].score })
+	sort.SliceStable(cand, func(i, j int) bool { return cand[i].rank > cand[j].rank })
 
 	ws := WorkingSet{
 		Query: query, PagesTotal: info.Pages, PagesBenign: info.Benign,
