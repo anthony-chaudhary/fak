@@ -134,6 +134,13 @@ func (c *cpuBackend) MatMul(w, x Tensor) Tensor {
 		for o := 0; o < out; o++ {
 			y[o] = qdot8scalar(wc[o*in:o*in+in], ws[o*nblk:o*nblk+nblk], qx, dx, blk)
 		}
+	case Q4_K:
+		raw := i8AsBytes(c.i8(w))
+		rowBytes := (in / q4kSuper) * q4kSuperBlock
+		buf := make([]float32, q4kSuper)
+		for o := 0; o < out; o++ {
+			y[o] = q4kRowDot(raw[o*rowBytes:(o+1)*rowBytes], xf, buf)
+		}
 	default:
 		panic("compute: cpu-ref MatMul unsupported weight dtype " + w.Dtype.String())
 	}
@@ -169,6 +176,18 @@ func (c *cpuBackend) BatchedMatMul(w, X Tensor, P int) Tensor {
 		for o := 0; o < out; o++ {
 			for t := 0; t < P; t++ {
 				Y[t*out+o] = qgemm8cell(wc[o*in:o*in+in], ws[o*nblk:o*nblk+nblk], qx[t*in:t*in+in], dx[t*nblk:t*nblk+nblk], nblk, blk)
+			}
+		}
+	case Q4_K:
+		// Per-(o,t) GEMV — bit-identical to MatMul's Q4_K row dot for each row t, which is the
+		// q4kGemm correctness contract (Y[t,o] == q4kMatRows(X_t)[o]).
+		raw := i8AsBytes(c.i8(w))
+		rowBytes := (in / q4kSuper) * q4kSuperBlock
+		buf := make([]float32, q4kSuper)
+		for o := 0; o < out; o++ {
+			row := raw[o*rowBytes : (o+1)*rowBytes]
+			for t := 0; t < P; t++ {
+				Y[t*out+o] = q4kRowDot(row, Xf[t*in:t*in+in], buf)
 			}
 		}
 	default:
