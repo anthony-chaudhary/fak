@@ -34,6 +34,51 @@ This guide explains how to use **fak** as a kernel-adjudicated gateway for Claud
 
 ---
 
+## The one command: `fak guard`
+
+The fastest way to put the kernel in front of the Claude Code you already run is the
+`fak guard` verb. It is one cross-platform command — no shell script, no second
+terminal, no config-file edits:
+
+```bash
+export ANTHROPIC_API_KEY=sk-ant-...     # your normal API key
+fak guard -- claude                      # your normal Claude Code, now kernel-adjudicated
+```
+
+`fak guard`:
+
+1. Starts the gateway **in-process** on a private `127.0.0.1` port (the OS picks a free one).
+2. Loads a sensible secure capability floor embedded in the binary (so it works from any
+   directory — print it with `fak guard --dump-policy`, override with `--policy FILE`).
+3. Injects `ANTHROPIC_BASE_URL` into the **child process only** — your shell, your
+   `settings.json`, and any other `claude` in another terminal are untouched.
+4. Proxies to the **real Anthropic API in passthrough mode**: your key and the
+   `cache_control` prompt-cache breakpoints flow through byte-for-byte (no cost regression),
+   while every tool call Claude proposes crosses the capability floor first.
+5. Tears the gateway down when Claude exits and prints what the kernel decided:
+
+```
+fak guard: 128 kernel decision(s) — 121 allowed, 5 denied, 2 repaired, 0 quarantined
+  blocked: POLICY_BLOCK     x4
+  blocked: SELF_MODIFY      x1
+```
+
+> **Subscription vs API key.** Pointing Claude Code at a custom base URL uses
+> `ANTHROPIC_API_KEY`, not subscription OAuth — `fak guard` warns if the key is unset.
+
+Wrap a different agent or upstream by naming it after `--` and switching the provider:
+
+```bash
+fak guard --provider openai -- codex            # an OpenAI-compatible coding agent
+fak guard --policy my-floor.json -- claude      # enforce your own reviewed allow-list
+```
+
+The rest of this guide covers the **local-model** dogfood path (point fak at
+ollama / a shim / a large local OpenAI-compatible server) and the manual two-terminal
+wiring `fak guard` automates.
+
+---
+
 ## Quick Start (macOS/Linux)
 
 The dogfood launcher spins up the entire stack with one command:

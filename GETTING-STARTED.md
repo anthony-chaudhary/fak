@@ -400,6 +400,13 @@ whatever the caller proposed. `--base-url` (Tier 1 proxy) wins if both are set.
 
 ## Where to go next
 
+- **`fak guard -- claude`: the one-command front door.** Run the Claude Code (or any
+  agent) you already use, with the kernel adjudicating every tool call it proposes. It
+  starts the gateway in-process, injects the base URL into the child only (your shell is
+  untouched), proxies your real Anthropic key + prompt cache through in passthrough mode,
+  and prints what it allowed vs blocked on exit. No script, no second terminal, any OS.
+  Embedded secure floor (`fak guard --dump-policy` to see it). See
+  [`docs/integrations/claude.md`](docs/integrations/claude.md).
 - [`docs/fak/tutorial.md`](docs/fak/tutorial.md): **the guided first session**. It walks
   step by step through Tiers 0–2 with the real, captured output of every command
   (the friendliest on-ramp if this reference felt dense).
