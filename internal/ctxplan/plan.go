@@ -14,7 +14,21 @@ import (
 type Candidate struct {
 	Cell    Span    `json:"cell"`
 	Cost    int     `json:"cost"`    // resident token cost (see CostModel)
-	Benefit float64 `json:"benefit"` // Forecast.Benefit score
+	Benefit float64 `json:"benefit"` // Forecast.Benefit score (the ISOLATED, per-span score)
+
+	// Coverage geometry — precomputed by Candidates so the coverage objective can score
+	// MARGINAL benefit (a candidate's relevance discounted by the intents the resident set
+	// already covers) without re-scoring against the forecast. coverHit is the distinct
+	// forecast intent tokens this cell's role+descriptor match; coverQTotal is |intent
+	// tokens| (the relevance denominator); coverRelWeight is the relevance weight;
+	// coverRest is the weighted NON-relevance benefit (utility+durability+recency), the
+	// modular part the coverage objective keeps additive while it discounts relevance. A
+	// hand-built Candidate leaves them zero, and the coverage objective degrades to the
+	// isolated Benefit (no discounting) — fail-safe, never a mis-selection.
+	coverHit       map[string]bool
+	coverQTotal    int
+	coverRelWeight float64
+	coverRest      float64
 }
 
 // density is benefit per token — the planner's ORDER BY key (the greedy knapsack ratio).
@@ -125,12 +139,14 @@ const (
 	ElideOverBudget = "over_budget" // lost the knapsack: a denser span took the room
 	ElideSealed     = "sealed"      // quarantined by the trust gate — never a candidate
 	ElideTombstoned = "tombstoned"  // suppressed by context control — never a candidate
+	ElideDuplicate  = "duplicate"   // byte-identical to an already-resident span (equal Digest) — kept cold, recoverable
 )
 
 // Objectives.
 const (
 	ObjGreedy = "greedy-density" // sort by benefit/cost, take while it fits (the production planner)
 	ObjExact  = "exact-dp"       // 0/1-knapsack DP — the optimal-benefit oracle (small inputs only)
+	ObjCoverage = "coverage"     // submodular greedy: marginal benefit/cost, relevance discounted by covered intents (1-1/e)
 )
 
 // Plan is the planner's chosen O(1) view: the resident Selected set, the cold-but-
@@ -156,12 +172,20 @@ type Plan struct {
 //  1. SEALED / TOMBSTONED candidates are elided up front (they are never resident —
 //     the poison/suppression invariant). They keep their recovery handle for audit but
 //     can never be selected; a pin naming one is refused here too.
-//  2. PINNED candidates (ID in pins, and not sealed/tombstoned) are forced resident and
-//     charged to the budget FIRST. If the pins alone exceed the budget they STILL stay
-//     (a turn cannot proceed without them) and OverBudget is set; nothing else is added.
-//  3. The remaining budget is filled by a 0/1 knapsack over the rest — greedy-by-density
-//     (ObjGreedy, the deterministic production planner) or exact DP (ObjExact, the
-//     optimal-benefit oracle, used to bound the greedy gap on small inputs).
+//  2. DUPLICATE-DIGEST candidates are collapsed to one representative (the content-dedup
+//     phase). Two byte-identical spans (equal Digest) would otherwise both ride into the
+//     resident view and both charge the budget for the same bytes — pure redundancy. The
+//     non-representatives are elided as ElideDuplicate (recoverable via their Digest) so
+//     Audit still partitions them; a pin wins the representative slot when one is pinned.
+//  3. PINNED candidates (ID in pins, and not sealed/tombstoned/duplicate) are forced
+//     resident and charged to the budget FIRST. If the pins alone exceed the budget they
+//     STILL stay (a turn cannot proceed without them) and OverBudget is set; nothing else
+//     is added.
+//  4. The remaining budget is filled by a 0/1 knapsack over the rest — greedy-by-density
+//     (ObjGreedy, the deterministic production planner), exact DP (ObjExact, the optimal-
+//     benefit oracle, used to bound the greedy gap on small inputs), or the submodular
+//     coverage greedy (ObjCoverage, which discounts relevance by the intents already
+//     resident — the broad-coverage axis).
 //
 // pins may be nil. The result is deterministic: every sort has a total tie-break, so the
 // same (candidates, budget, pins, objective) yields a byte-identical Plan.
@@ -175,16 +199,30 @@ func Optimize(cands []Candidate, b Budget, pins map[string]bool, objective strin
 	}
 	p := Plan{Budget: budgetTokens, Objective: objective, Candidates: len(cands)}
 
-	var pinned, free []Candidate
+	var live []Candidate
 	for _, c := range cands {
 		switch {
 		case c.Cell.Sealed:
 			p.Elided = append(p.Elided, elisionOf(c, ElideSealed))
 		case c.Cell.Tombstoned:
 			p.Elided = append(p.Elided, elisionOf(c, ElideTombstoned))
-		case pins[c.Cell.ID]:
-			pinned = append(pinned, c)
 		default:
+			live = append(live, c)
+		}
+	}
+
+	// Content-dedup: collapse equal-Digest spans to one representative BEFORE the
+	// knapsack, so two byte-identical spans never both charge the budget. The duplicates
+	// are elided (ElideDuplicate) with their Digest recovery handle, so Audit still
+	// partitions every candidate and the originals stay one demand-page away.
+	live, dupElided := dedup(live, pins)
+	p.Elided = append(p.Elided, dupElided...)
+
+	var pinned, free []Candidate
+	for _, c := range live {
+		if pins[c.Cell.ID] {
+			pinned = append(pinned, c)
+		} else {
 			free = append(free, c)
 		}
 	}
@@ -218,6 +256,8 @@ func Optimize(cands []Candidate, b Budget, pins map[string]bool, objective strin
 	switch objective {
 	case ObjExact:
 		chosen = knapsackExact(free, remaining)
+	case ObjCoverage:
+		chosen = knapsackCoverage(free, remaining)
 	default:
 		p.Objective = ObjGreedy
 		chosen = knapsackGreedy(free, remaining)
@@ -376,6 +416,172 @@ const DPExactLimit = 20_000_000
 // BenefitScale turns a float benefit into an integer the DP can compare exactly. 1e6
 // keeps six significant digits — far finer than the benefit signals' resolution.
 const BenefitScale = 1_000_000
+
+// dedup is the content-dedup phase: it collapses equal-Digest candidates to ONE
+// representative and elides the rest as ElideDuplicate. Two byte-identical spans (equal
+// Digest) carry the same content, so keeping both resident charges the budget twice for
+// the same bytes and fills the view with redundant takes — exactly what a budget-bounded
+// resident view must not do. The representative is chosen to preserve caller intent: a
+// PINNED candidate wins (so a pin's content stays resident), else the lowest step then
+// lowest ID (the deterministic order the other planners use). A span with an empty Digest
+// is never deduped (no content address -> identity is unprovable; the row-vs-ID charging
+// guard handles a pure ID collision separately). The elided duplicates keep their Digest
+// recovery handle, so Audit still partitions them and they page back in on demand — a
+// duplicate is recoverable cold storage, never a destroyed fact.
+//
+// This runs BEFORE the knapsack, so the dedup decision is independent of objective: the
+// greedy, exact, and coverage planners all benefit from a non-redundant candidate set.
+func dedup(live []Candidate, pins map[string]bool) (representatives []Candidate, duplicates []Elision) {
+	// Group live indexes by Digest (non-empty only), remembering first-seen order so the
+	// representative pick is deterministic regardless of map iteration order.
+	groups := map[string][]int{}
+	order := []string{}
+	for i, c := range live {
+		d := c.Cell.Digest
+		if d == "" {
+			continue
+		}
+		if _, ok := groups[d]; !ok {
+			order = append(order, d)
+		}
+		groups[d] = append(groups[d], i)
+	}
+	elide := make([]bool, len(live))
+	for _, d := range order {
+		idxs := groups[d]
+		if len(idxs) <= 1 {
+			continue
+		}
+		best := idxs[0]
+		for _, idx := range idxs[1:] {
+			if betterRep(live[idx], live[best], pins) {
+				best = idx
+			}
+		}
+		for _, idx := range idxs {
+			if idx == best {
+				continue
+			}
+			elide[idx] = true
+			duplicates = append(duplicates, elisionOf(live[idx], ElideDuplicate))
+		}
+	}
+	for i, c := range live {
+		if !elide[i] {
+			representatives = append(representatives, c)
+		}
+	}
+	return
+}
+
+// betterRep reports whether a is a better dedup representative than b. A pinned candidate
+// wins (it preserves the caller's pin intent); among equals the lower step then lower ID
+// wins, matching the deterministic tie-break the other planners use.
+func betterRep(a, b Candidate, pins map[string]bool) bool {
+	pa, pb := pins[a.Cell.ID], pins[b.Cell.ID]
+	if pa != pb {
+		return pa // a pinned candidate is the better representative
+	}
+	if a.Cell.Step != b.Cell.Step {
+		return a.Cell.Step < b.Cell.Step
+	}
+	return a.Cell.ID < b.Cell.ID
+}
+
+// knapsackCoverage is the submodular greedy for the coverage objective: it maximizes a
+// monotone submodular benefit (the relevance term, discounted by the intents the resident
+// set already covers) subject to the token budget. At each step it takes the still-free
+// candidate that FITS and has the highest marginal-benefit/cost density, then folds that
+// candidate's covered intents into the resident set — so a span whose intents are already
+// covered scores zero marginal relevance and loses its slot to a span covering something
+// new. Greedy over a monotone submodular function under a cardinality/knapsack constraint
+// gives the classic (1-1/e) approximation. The non-relevance benefit terms stay modular
+// (additive) — only relevance is the coverage signal. O(n^2) worst case; the same
+// test/demo scale the exact oracle serves.
+//
+// It is deterministic: every selection round picks the max (density desc, marginal desc,
+// step asc, ID asc) with a total tie-break, so identical inputs yield a byte-identical
+// mask. Candidates without precomputed coverage geometry (a hand-built Candidate) degrade
+// to their isolated Benefit as the marginal — fail-safe, never a mis-selection.
+func knapsackCoverage(cands []Candidate, budget int) []bool {
+	chosen := make([]bool, len(cands))
+	covered := map[string]bool{}
+	used := 0
+	for {
+		best := -1
+		bestDensity := 0.0
+		bestMarg := 0.0
+		for i, c := range cands {
+			if chosen[i] {
+				continue
+			}
+			if used+c.Cost > budget {
+				continue // does not fit
+			}
+			marg := coverageMarginal(c, covered)
+			if marg <= 0 {
+				continue // no diminishing-returns gain -> not worth a resident slot
+			}
+			d := inf
+			if c.Cost > 0 {
+				d = marg / float64(c.Cost)
+			} // a zero-cost candidate is infinitely dense (free to keep)
+			if best < 0 || d > bestDensity ||
+				(d == bestDensity && coverageTieBreak(c, cands[best], marg, bestMarg)) {
+				best = i
+				bestDensity = d
+				bestMarg = marg
+			}
+		}
+		if best < 0 {
+			break
+		}
+		chosen[best] = true
+		for t := range cands[best].coverHit {
+			covered[t] = true
+		}
+		used += cands[best].Cost
+	}
+	return chosen
+}
+
+// coverageMarginal is the benefit of adding c to a resident set that already covers
+// `covered`: the relevance term counts only the intent tokens c covers that are NOT yet
+// covered (the diminishing-returns discount), plus the modular non-relevance benefit. A
+// candidate with no precomputed geometry degrades to its isolated Benefit (no discounting).
+// Fail-closed on a non-finite result: a poisoned signal collapses to 0 so it can never win
+// a slot over a clean candidate.
+func coverageMarginal(c Candidate, covered map[string]bool) float64 {
+	var marg float64
+	if c.coverQTotal > 0 {
+		fresh := 0
+		for t := range c.coverHit {
+			if !covered[t] {
+				fresh++
+			}
+		}
+		marg = c.coverRelWeight*float64(fresh)/float64(c.coverQTotal) + c.coverRest
+	} else {
+		marg = c.Benefit
+	}
+	if math.IsNaN(marg) || math.IsInf(marg, 0) {
+		return 0
+	}
+	return marg
+}
+
+// coverageTieBreak reports whether a should be preferred over b given equal density. It
+// breaks the tie by higher marginal benefit, then lower step, then lower ID — the same
+// deterministic total order the greedy planner uses.
+func coverageTieBreak(a, b Candidate, margA, margB float64) bool {
+	if margA != margB {
+		return margA > margB
+	}
+	if a.Cell.Step != b.Cell.Step {
+		return a.Cell.Step < b.Cell.Step
+	}
+	return a.Cell.ID < b.Cell.ID
+}
 
 func selectionOf(c Candidate, pinned bool) Selection {
 	return Selection{

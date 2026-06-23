@@ -546,3 +546,209 @@ func TestTokenizerCostWiresRealTokenizer(t *testing.T) {
 		t.Errorf("Candidates with a real-tokenizer CostModel must carry the tokenizer count 4, got %d", cands[0].Cost)
 	}
 }
+
+// --- issue #547: content-dedup the plan + discount marginal benefit (coverage objective) ---
+
+// TestDedupCollapsesEqualDigestChargesOnce is the content-dedup witness: two byte-identical
+// spans (equal Digest) both score the same benefit and would both ride into the resident
+// view, each charging the budget for the SAME bytes. The dedup phase collapses them to one
+// representative, eliding the other as ElideDuplicate — charged ONCE, and the elided
+// duplicate keeps its Digest recovery handle so Audit still partitions both and stays
+// faithful. Runs across every objective (the dedup phase is independent of the knapsack).
+func TestDedupCollapsesEqualDigestChargesOnce(t *testing.T) {
+	for _, obj := range []string{ObjGreedy, ObjExact, ObjCoverage} {
+		cands := []Candidate{
+			{Cell: Span{ID: "a", Step: 0, Digest: "DUP"}, Cost: 5, Benefit: 4.0},
+			{Cell: Span{ID: "b", Step: 1, Digest: "DUP"}, Cost: 5, Benefit: 4.0},
+		}
+		p := Optimize(cands, Budget{Tokens: 999}, nil, obj)
+		if len(p.Selected) != 1 {
+			t.Fatalf("%s: dedup should keep ONE representative resident, got %d: %+v", obj, len(p.Selected), p.Selected)
+		}
+		if p.CostUsed != 5 {
+			t.Errorf("%s: dedup should charge the duplicate's cost ONCE (5), got CostUsed=%d", obj, p.CostUsed)
+		}
+		// Exactly one ElideDuplicate, carrying its recovery handle.
+		ndup := 0
+		for _, e := range p.Elided {
+			if e.Reason == ElideDuplicate {
+				ndup++
+				if e.Digest == "" {
+					t.Errorf("%s: the elided duplicate must keep its digest recovery handle", obj)
+				}
+			}
+		}
+		if ndup != 1 {
+			t.Fatalf("%s: expected exactly 1 ElideDuplicate, got %d (elided=%+v)", obj, ndup, p.Elided)
+		}
+		// Partition + recoverability still hold: both candidates accounted for, neither destroyed.
+		w := Audit(p)
+		if !w.Faithful {
+			t.Errorf("%s: a deduped plan must stay faithful: %+v", obj, w)
+		}
+		if w.Resident+w.Elided != 2 {
+			t.Errorf("%s: dedup must partition both candidates, got resident=%d elided=%d", obj, w.Resident, w.Elided)
+		}
+	}
+}
+
+// TestDedupPrefersPinnedRepresentative checks the dedup+pin interaction: when two
+// equal-Digest spans compete, a PINNED one wins the representative slot (so the caller's
+// pin intent survives) and the non-pinned duplicate is elided — never both charged.
+func TestDedupPrefersPinnedRepresentative(t *testing.T) {
+	cands := []Candidate{
+		{Cell: Span{ID: "free", Step: 0, Digest: "DUP"}, Cost: 5, Benefit: 4.0},
+		{Cell: Span{ID: "pin", Step: 1, Digest: "DUP"}, Cost: 5, Benefit: 0.1}, // pinned, lower benefit, higher step
+	}
+	p := Optimize(cands, Budget{Tokens: 999}, map[string]bool{"pin": true}, ObjGreedy)
+	sel := map[string]bool{}
+	for _, s := range p.Selected {
+		sel[s.ID] = true
+	}
+	if !sel["pin"] {
+		t.Fatalf("the pinned duplicate must be the resident representative, got selected=%v", sel)
+	}
+	if sel["free"] {
+		t.Errorf("the non-pinned duplicate must be elided as a duplicate, not selected")
+	}
+	// The pin's content is resident exactly once.
+	if p.PinnedTokens != 5 {
+		t.Errorf("the pinned representative should charge 5 tokens once, got %d", p.PinnedTokens)
+	}
+}
+
+// TestDedupLeavesDistinctDigestsAlone is the negative control: spans with DISTINCT
+// digests (different content) are never collapsed — dedup only fires on byte-identical
+// spans. Guards against an over-aggressive dedup that would merge merely-similar content.
+func TestDedupLeavesDistinctDigestsAlone(t *testing.T) {
+	cands := []Candidate{
+		{Cell: Span{ID: "a", Step: 0, Digest: "d1"}, Cost: 5, Benefit: 4.0},
+		{Cell: Span{ID: "b", Step: 1, Digest: "d2"}, Cost: 5, Benefit: 4.0},
+	}
+	p := Optimize(cands, Budget{Tokens: 999}, nil, ObjGreedy)
+	for _, e := range p.Elided {
+		if e.Reason == ElideDuplicate {
+			t.Errorf("distinct-digest spans must never be deduped; found ElideDuplicate: %+v", e)
+		}
+	}
+	if len(p.Selected) != 2 {
+		t.Errorf("both distinct-content spans should be resident, got %d", len(p.Selected))
+	}
+}
+
+// TestCoverageObjectiveIsNotATripleTake is the coverage witness for the issue's second
+// scenario: three spans that ALL match the SAME intent each score full relevance in
+// isolation, so ObjGreedy takes all three (a redundant triple-take that fills the view
+// with copies of one fact). ObjCoverage discounts the 2nd and 3rd to zero marginal
+// relevance once the intent is covered, so it keeps exactly ONE and frees the budget for
+// other coverage — broad, not redundant. Pure-relevance weights make the discount decisive.
+func TestCoverageObjectiveIsNotATripleTake(t *testing.T) {
+	mk := func(id string, step int) Span {
+		return Span{ID: id, Step: step, Role: "tool", Descriptor: "alpha report " + id, Bytes: 20, Durability: DurabilityTurn}
+	}
+	spans := []Span{mk("a", 0), mk("b", 1), mk("c", 2)}
+	f := Forecast{Intents: []string{"alpha"}, Weights: Weights{Relevance: 1.0}} // pure-relevance: rest == 0
+	cands := Candidates(spans, f, nil)
+
+	greedy := Optimize(cands, Budget{Tokens: 999}, nil, ObjGreedy)
+	if len(greedy.Selected) != 3 {
+		t.Fatalf("greedy should take all three same-intent spans (the triple take), got %d", len(greedy.Selected))
+	}
+
+	cov := Optimize(cands, Budget{Tokens: 999}, nil, ObjCoverage)
+	if cov.Objective != ObjCoverage {
+		t.Errorf("plan objective should be coverage, got %s", cov.Objective)
+	}
+	if len(cov.Selected) != 1 {
+		t.Fatalf("coverage should keep ONE representative (the intent covered once, not triple-taken), got %d: %+v",
+			len(cov.Selected), cov.Selected)
+	}
+	// The two non-selected spans are elided (recoverable) and the plan stays faithful.
+	w := Audit(cov)
+	if !w.Faithful {
+		t.Errorf("coverage plan must stay faithful: %+v", w)
+	}
+	if w.Resident+w.Elided != 3 {
+		t.Errorf("coverage plan must partition all 3 candidates, got resident=%d elided=%d", w.Resident, w.Elided)
+	}
+}
+
+// TestCoverageDiversifiesWhereGreedyRedundantlyTakes is the decisive greedy-vs-coverage
+// contrast. Two intents (alpha, beta); three spans — A covers alpha, B covers beta, C
+// covers alpha AND carries a high learned-utility. Under ObjGreedy C's utility and its
+// alpha-twin A both outrank B on ISOLATED benefit, so greedy resident-loads {C, A} (alpha
+// twice, beta never). Under ObjCoverage, once alpha is covered the redundant alpha spans
+// lose their marginal relevance and B — the ONLY span covering beta — wins the remaining
+// slot: {C, B}, covering BOTH intents. That is the broad-coverage property the objective
+// exists for: the resident view spreads across intents instead of triple-taking one.
+func TestCoverageDiversifiesWhereGreedyRedundantlyTakes(t *testing.T) {
+	mk := func(id string, step int, desc, util string) Span {
+		return Span{
+			ID: id, Step: step, Role: "tool", Descriptor: desc, Bytes: 20,
+			Durability: DurabilityTurn, Attrs: map[string]string{"utility": util},
+		}
+	}
+	spans := []Span{
+		mk("a", 0, "alpha one", "0"),
+		mk("b", 1, "beta two", "0"),
+		mk("c", 2, "alpha three", "4"), // high utility + REDUNDANT alpha coverage
+	}
+	// Relevance and utility both weighted; durability/recency zeroed so the only
+	// modular signal separating C is its utility (the rest term).
+	f := Forecast{Intents: []string{"alpha beta"}, Weights: Weights{Relevance: 1.0, Utility: 0.5}}
+	cands := Candidates(spans, f, nil)
+
+	// Budget 10, each span costs 5 (ceil(20/4)) -> exactly two fit.
+	greedy := Optimize(cands, Budget{Tokens: 10}, nil, ObjGreedy)
+	cov := Optimize(cands, Budget{Tokens: 10}, nil, ObjCoverage)
+
+	gSel := selectedIDs(greedy)
+	cSel := selectedIDs(cov)
+
+	// Greedy redundantly takes both alpha spans; beta (b) is elided.
+	if !gSel["c"] || !gSel["a"] {
+		t.Fatalf("greedy should take the two highest-isolated-benefit spans {c,a}, got %v", gSel)
+	}
+	if gSel["b"] {
+		t.Errorf("greedy should ELIDE the beta span (lower isolated benefit), got it resident: %v", gSel)
+	}
+	// Coverage keeps one alpha span AND the beta span — beta is now resident, not elided.
+	if !cSel["b"] {
+		t.Fatalf("coverage should make the beta span resident (broad coverage), got %v", cSel)
+	}
+	if cSel["a"] && cSel["c"] {
+		t.Errorf("coverage should not take BOTH redundant alpha spans, got %v", cSel)
+	}
+	// Neither plan exceeds the budget.
+	if greedy.CostUsed > 10 || cov.CostUsed > 10 {
+		t.Errorf("plans must respect the budget: greedy=%d cov=%d", greedy.CostUsed, cov.CostUsed)
+	}
+}
+
+// TestCoverageIsDeterministic pins the replay-stability of the submodular greedy: identical
+// inputs yield a byte-identical plan (no randomness, no wall clock) — the same property the
+// greedy and exact planners already guarantee.
+func TestCoverageIsDeterministic(t *testing.T) {
+	mk := func(id string, step int, desc string) Span {
+		return Span{ID: id, Step: step, Role: "tool", Descriptor: desc, Bytes: 20, Durability: DurabilityTurn}
+	}
+	spans := []Span{
+		mk("a", 0, "alpha one"), mk("b", 1, "beta two"), mk("c", 2, "gamma three"), mk("d", 3, "delta four"),
+	}
+	f := Forecast{Intents: []string{"alpha beta gamma delta"}, Weights: Weights{Relevance: 1.0}}
+	cands := Candidates(spans, f, nil)
+	p1 := Optimize(cands, Budget{Tokens: 10}, nil, ObjCoverage)
+	p2 := Optimize(cands, Budget{Tokens: 10}, nil, ObjCoverage)
+	if !reflect.DeepEqual(p1, p2) {
+		t.Errorf("Optimize with ObjCoverage must be deterministic: identical inputs gave different plans")
+	}
+}
+
+// selectedIDs is a small helper that collects a plan's resident span IDs into a set.
+func selectedIDs(p Plan) map[string]bool {
+	s := make(map[string]bool, len(p.Selected))
+	for _, sel := range p.Selected {
+		s[sel.ID] = true
+	}
+	return s
+}

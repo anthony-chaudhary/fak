@@ -3,12 +3,17 @@ package ctxplan
 import (
 	"context"
 	"errors"
+	"strings"
 )
 
 // Candidates scores a set of spans against a forecast into planner candidates — the pure,
 // I/O-free step (no bytes are paged in; it reads only SAFE span metadata). It computes each
 // span's resident token Cost (via cost, or TokenCost if nil) and its Benefit (via the
-// forecast), normalizing recency against the largest step in the set.
+// forecast), normalizing recency against the largest step in the set. It ALSO precomputes
+// the coverage geometry (the intent tokens each span matches, plus the non-relevance
+// benefit split out) so the coverage objective can score MARGINAL relevance without
+// re-scoring against the forecast — a hand-built Candidate skips this and the coverage
+// objective degrades to the isolated Benefit.
 func Candidates(spans []Span, f Forecast, cost CostModel) []Candidate {
 	if cost == nil {
 		cost = TokenCost
@@ -19,12 +24,33 @@ func Candidates(spans []Span, f Forecast, cost CostModel) []Candidate {
 			maxStep = s.Step
 		}
 	}
+	w := f.Weights.orDefault()
+	q := tokenSet(strings.Join(f.Intents, " "))
 	out := make([]Candidate, 0, len(spans))
 	for _, s := range spans {
+		// The distinct forecast intent tokens this cell matches — the relevance geometry
+		// the coverage objective discounts as the resident set covers them.
+		hit := map[string]bool{}
+		if len(q) > 0 {
+			doc := tokenSet(s.Role + " " + s.Descriptor)
+			for t := range q {
+				if doc[t] {
+					hit[t] = true
+				}
+			}
+		}
+		// The weighted NON-relevance benefit (utility+durability+recency) — the modular
+		// part the coverage objective keeps additive while it discounts relevance.
+		sig := f.signals(s, maxStep)
+		rest := w.Utility*sig.Utility + w.Durability*sig.Durability + w.Recency*sig.Recency
 		out = append(out, Candidate{
-			Cell:    s,
-			Cost:    cost(s),
-			Benefit: f.Benefit(s, maxStep),
+			Cell:           s,
+			Cost:           cost(s),
+			Benefit:        f.Benefit(s, maxStep),
+			coverHit:       hit,
+			coverQTotal:    len(q),
+			coverRelWeight: w.Relevance,
+			coverRest:      rest,
 		})
 	}
 	return out
