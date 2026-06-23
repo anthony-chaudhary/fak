@@ -194,6 +194,28 @@ def test_check_gate_red_when_unmeasured() -> None:
     assert code == 1 and "unmeasured" in msg
 
 
+def test_main_check_wires_gate_exit_code() -> None:
+    """`main(['--check'])` must return check_gate's exit code, not the default
+    zero-debt verdict — the contract a CI gate (#506/#511) depends on. Drive it
+    with stubbed collect/baseline so the wiring is tested fast and deterministic,
+    not the live scorecards."""
+    orig_collect, orig_load = scp.collect, scp.load_baseline
+    try:
+        # regressed: current seo=4 above a baseline of seo=1 -> non-zero exit.
+        scp.collect = lambda root, timeout=120: full_metrics(seo=4)
+        scp.load_baseline = lambda p: baseline_from(seo=1)
+        assert scp.main(["--check"]) == 1
+        # improved: current debt below baseline -> green even though nonzero before.
+        scp.collect = lambda root, timeout=120: full_metrics(seo=0)
+        scp.load_baseline = lambda p: baseline_from(seo=5)
+        assert scp.main(["--check"]) == 0
+        # unpinned: no baseline -> the distinct exit 2.
+        scp.load_baseline = lambda p: None
+        assert scp.main(["--check"]) == 2
+    finally:
+        scp.collect, scp.load_baseline = orig_collect, orig_load
+
+
 # --- tolerant live smoke ----------------------------------------------------
 
 def test_live_collect_and_fold() -> None:
