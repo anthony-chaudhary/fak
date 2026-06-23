@@ -352,6 +352,32 @@ func TestPickDrafterCheapestSameFamily(t *testing.T) {
 	}
 }
 
+func TestCanShare(t *testing.T) {
+	base := Model{ID: "base", Family: "qwen", PrefixDigest: "sha-AAA"}
+	twin := Model{ID: "twin", Family: "qwen", PrefixDigest: "sha-AAA"} // same family + weights band
+	fork := Model{ID: "fork", Family: "qwen", PrefixDigest: "sha-BBB"} // same family, DIFFERENT weights
+	alien := Model{ID: "alien", Family: "llama", PrefixDigest: "sha-AAA"}
+	bare := Model{ID: "bare", Family: "qwen"} // no declared shareable band
+
+	cases := []struct {
+		name string
+		a, b Model
+		want bool
+	}{
+		{"identical band shares", base, twin, true},
+		{"self always shares", base, base, true},
+		{"different weights do NOT share (KV would differ)", base, fork, false},
+		{"different family does NOT share", base, alien, false},
+		{"empty digest never shares", base, bare, false},
+		{"empty digest never shares (reverse)", bare, twin, false},
+	}
+	for _, c := range cases {
+		if got := CanShare(c.a, c.b); got != c.want {
+			t.Fatalf("%s: CanShare(%s,%s)=%v, want %v", c.name, c.a.ID, c.b.ID, got, c.want)
+		}
+	}
+}
+
 func TestEffectiveTokensPerVerify(t *testing.T) {
 	const eps = 1e-9
 	check := func(k int, a, want float64) {

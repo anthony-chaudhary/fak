@@ -26,6 +26,14 @@ type Model struct {
 	Family      string
 	WeightBytes int64
 	Pinned      bool
+	// PrefixDigest is a content hash of the weights the PREFILL KV depends on (the
+	// shared lower-layer band). Two models with the same Family AND the same
+	// PrefixDigest produce byte-identical prefix KV for the same tokens, so one's
+	// already-computed prefix can be reused by the other — the cross-model prefill
+	// share the radix tree structurally allows (it keys on token ids) but the
+	// per-ModelID verdict barrier blocks. "" means "no declared shareable band"
+	// (this model never shares prefill with a different model). See CanShare.
+	PrefixDigest string
 }
 
 // Admission errors. Both error paths leave the pool UNCHANGED.
@@ -491,6 +499,26 @@ func PickDrafter(active ModelID, pool *Pool) ModelID {
 		}
 	}
 	return best
+}
+
+// CanShare reports whether the consumer model may REUSE the provider model's
+// already-computed prefix KV for the same token prefix — the cross-model prefill-share
+// gate, and the "especially the prefill" half of the design. It is true iff the two
+// declare the same NON-EMPTY Family (same tokenizer, so the tokens mean the same
+// thing) AND the same NON-EMPTY PrefixDigest (byte-identical prefill-relevant weights,
+// so the reused KV is BIT-IDENTICAL — reuse is lossless, not approximate). A model
+// trivially shares with itself. This is the verdict-layer unlock the plan names: lift
+// the cache's exact-ModelID barrier (internal/cachemeta) to an exact-(Family,
+// PrefixDigest) barrier, so a family of compatible models prefills a shared prefix
+// ONCE. It is the share DECISION only; the actual KV splice is model.KVCache.Clone at
+// the engine layer (a sequenced GAP), and a digest that lies yields a wrong cache — so
+// the digest must be a real content hash of the shared band, never a self-asserted tag.
+func CanShare(provider, consumer Model) bool {
+	if provider.ID == consumer.ID {
+		return true
+	}
+	return provider.Family != "" && provider.Family == consumer.Family &&
+		provider.PrefixDigest != "" && provider.PrefixDigest == consumer.PrefixDigest
 }
 
 // EffectiveTokensPerVerify is the expected number of REAL tokens a single target

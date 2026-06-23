@@ -206,6 +206,9 @@ Ordered so each rung stands on a shipped one. None of these land in this doc.
    as the accept decision.
 5. **Cross-model prefill share (verdict-layer).** Lift the exact-ModelID barrier for a
    declared-compatible family in `cachemeta` — the cheap structural unlock from [§4].
+   The DECISION half ships now as `polymodel.CanShare` (same `Family` + byte-identical
+   `PrefixDigest` ⇒ the reused KV is bit-identical, so reuse is lossless); the remaining
+   work is wiring it into `cachemeta`'s lookup verdict and the `KVCache.Clone` splice.
 6. **Bench harness numbers.** Gate every speedup claim on a measured run (#44): E vs
    draft cost, decode-lane utilization, residency hit-rate.
 

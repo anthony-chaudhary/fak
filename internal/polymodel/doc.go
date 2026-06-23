@@ -44,6 +44,12 @@
 //   - PickDrafter / EffectiveTokensPerVerify: the ensemble-speculation policy (the
 //     idle co-resident models double as drafters for the active decoder) and the
 //     honest geometric-series model of the throughput it buys.
+//   - CanShare: the cross-model prefill-share gate (the "especially the prefill" half)
+//     — model B may reuse model A's already-computed prefix KV iff they share a
+//     tokenizer (Family) and the prefill-relevant weights are byte-identical
+//     (PrefixDigest), so the reuse is lossless. It is the verdict-layer unlock that
+//     lifts the cache's exact-ModelID barrier; the KV splice itself is KVCache.Clone
+//     at the engine layer (a sequenced GAP).
 //
 // # What it deliberately does NOT do (the honest boundary)
 //
