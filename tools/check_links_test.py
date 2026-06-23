@@ -4,9 +4,12 @@
 Covers the markdown-link logic (`_dead_links`), the inline-code reference logic
 (`_dead_inline_refs`, added for issue #288 — a doc citing a non-existent file as
 authority via inline code like `` `POSITION-….md §5` ``, invisible to the
-markdown-link regex), and the `fak/X` -> repo-root resolution convention. Closes
-with a LIVE regression assertion that the real front-door set (the contributor
-onboarding + licensing docs) ships no dead reference.
+markdown-link regex), the scrub-private reference logic (`_scrub_private_refs`,
+added for issue #258 — a public front-door doc citing a file the scrubber deletes
+from every public copy, e.g. `` `CLAUDE.md` ``, invisible because the target
+exists in canonical), and the `fak/X` -> repo-root resolution convention. Closes
+with LIVE regression assertions that the real front-door set ships no dead or
+scrub-private reference.
 
 Run: `python tools/check_links_test.py`  (exit 0 = all pass),
 or `python -m pytest tools/check_links_test.py -q`.
@@ -84,7 +87,51 @@ def test_inline_ref_present_md_is_clean() -> None:
         assert cl._dead_inline_refs(str(root), "a.md") == []
 
 
-# --- live regression guard (the #288 invariant on the real tree) -----------
+# --- scrub-private references (issue #258) ---------------------------------
+
+def test_scrub_private_inline_ref_detected() -> None:
+    # The exact #258 shape: a public front-door doc cites CLAUDE.md (scrubbed
+    # from every public copy) via inline code. The file EXISTS in canonical, so
+    # _dead_inline_refs passes it — only the scrub-private check catches it.
+    with tempfile.TemporaryDirectory() as td:
+        root = Path(td)
+        _doc(root, "CLAUDE.md", "x")  # present in canonical -> not a "dead" ref
+        _doc(root, "CONTRIBUTING.md", "the deep guide is `CLAUDE.md`.")
+        assert cl._dead_inline_refs(str(root), "CONTRIBUTING.md") == []
+        bad = cl._scrub_private_refs(str(root), "CONTRIBUTING.md")
+        assert bad == [("`CLAUDE.md`", "CLAUDE.md")], bad
+
+
+def test_scrub_private_markdown_link_detected() -> None:
+    with tempfile.TemporaryDirectory() as td:
+        root = Path(td)
+        _doc(root, "CLAUDE.md", "x")
+        _doc(root, "CONTRIBUTING.md", "See [why](CLAUDE.md) for the WSL note.")
+        assert cl._dead_links(str(root), "CONTRIBUTING.md") == []
+        bad = cl._scrub_private_refs(str(root), "CONTRIBUTING.md")
+        assert bad == [("](CLAUDE.md)", "CLAUDE.md")], bad
+
+
+def test_scrub_private_fak_prefix_detected() -> None:
+    # The `fak/X` -> repo-root convention must not hide a scrub-private target.
+    with tempfile.TemporaryDirectory() as td:
+        root = Path(td)
+        _doc(root, "CLAUDE.md", "x")
+        _doc(root, "CONTRIBUTING.md", "the mirror is `fak/CLAUDE.md`.")
+        bad = cl._scrub_private_refs(str(root), "CONTRIBUTING.md")
+        assert bad and bad[0][1] == "fak/CLAUDE.md", bad
+
+
+def test_scrub_private_file_itself_exempt() -> None:
+    # A scrub-private file citing another scrub-private file is not a public
+    # leak (both die together) — must not be flagged.
+    with tempfile.TemporaryDirectory() as td:
+        root = Path(td)
+        _doc(root, "CLAUDE.md", "see PUBLIC-SCRUB-POLICY.md for the map.")
+        assert cl._scrub_private_refs(str(root), "CLAUDE.md") == []
+
+
+# --- live regression guard (the #288 + #258 invariants on the real tree) ---
 
 def test_issue_288_front_door_has_no_dead_reference() -> None:
     """No front-door doc may cite a non-existent file — by markdown link OR by
@@ -98,6 +145,20 @@ def test_issue_288_front_door_has_no_dead_reference() -> None:
         for span, ref in cl._dead_inline_refs(ROOT, f):
             findings.append(f"{f}: `{span}` -> {ref}")
     assert not findings, "dead references in front-door docs:\n" + "\n".join(findings)
+
+
+def test_issue_258_front_door_has_no_scrub_private_reference() -> None:
+    """No public front-door doc may cite a scrub-private file (CLAUDE.md /
+    PUBLIC-SCRUB-POLICY.md) — present in canonical but deleted from every public
+    copy, so the reference is dead in the export. This is the gate that would
+    have caught #258 (CONTRIBUTING.md -> CLAUDE.md)."""
+    findings = []
+    for f in cl.FRONT_DOOR:
+        if not (Path(ROOT) / f).exists():
+            continue
+        for cite, tgt in cl._scrub_private_refs(ROOT, f):
+            findings.append(f"{f}: {cite} -> scrub-private {tgt}")
+    assert not findings, "scrub-private references in front-door docs:\n" + "\n".join(findings)
 
 
 def test_issue_288_no_position_doc_cited_and_authorities_exist() -> None:

@@ -11,6 +11,12 @@ It also catches the *inline-code* reference class — `` `fak/GROWTH.md §2` `` 
 markdown-link regex never sees (issue #288). The first whitespace-delimited token
 of each inline-code span, when it names a repo `.md` file, must resolve too.
 
+It also catches the *scrub-private* reference class — a public front-door doc
+citing a file that is deleted from every public copy (``CLAUDE.md``, issue #258).
+The target EXISTS in the canonical repo, so the dead-link checks above pass it,
+but it ships a dead reference in the public export. Such a reference is flagged
+wherever it appears in a public front-door doc — markdown link or inline code.
+
 Scope (front door): README, START-HERE, INSTALL, INDEX, AGENTS, CLAUDE,
 CONTRIBUTING, SECURITY, CLA, docs/index.md, docs/FAQ.md.
 
@@ -37,6 +43,20 @@ FRONT_DOOR = [
 LINK_RE = re.compile(r"\]\(([^)]+)\)")
 INLINE_RE = re.compile(r"`([^`]+)`")
 MD_TOKEN_RE = re.compile(r"\A[\w./-]+\.md\Z")
+
+# Front-door-relevant `.md` files deleted from every PUBLIC copy that have NO
+# public role, so a public front-door doc must never cite them (issue #258:
+# CONTRIBUTING.md -> CLAUDE.md). The target EXISTS in canonical, so a plain
+# "does the target exist?" check passes it — but the reference is dead in the
+# public export. See scrub_public_copy.py DELETE_PATHS.
+#   - CLAUDE.md: "Claude Code mirror of AGENTS.md; private side only (symmetric)"
+#     — a pure mirror, so it is never the correct reference target.
+#   - PUBLIC-SCRUB-POLICY.md: the narrative map of what is hidden and why — pure
+#     private (absent from this tree today; a forward guard if ever written).
+# AGENTS.md is deliberately NOT here: it is the agent-orientation SOURCE (not a
+# mirror), so whether the public copy ships an agent-orientation page — and what
+# START-HERE/INDEX should point at — is a separate public/private policy decision.
+SCRUB_PRIVATE_MD = {"CLAUDE.md", "PUBLIC-SCRUB-POLICY.md"}
 
 
 def _git(args, root):
@@ -109,6 +129,49 @@ def _dead_inline_refs(root, f):
     return out
 
 
+def _targets_scrub_private(ref, d):
+    """True if a markdown-link target or inline-code token resolves to a
+    scrub-private `.md` file (deleted from the public copy). Honors the `fak/X`
+    -> repo-root and subdir-relative conventions, matching _resolves, so
+    `CLAUDE.md`, `./CLAUDE.md`, `fak/CLAUDE.md`, and a `docs/` doc's
+    `../CLAUDE.md` are all recognized."""
+    path = ref.split("#")[0].split("?")[0]
+    if not path:
+        return False
+    cands = [posixpath.normpath(posixpath.join(d, path)), path]
+    if path.startswith("fak/"):
+        cands.append(path[len("fak/"):])
+    return any(c in SCRUB_PRIVATE_MD for c in cands)
+
+
+def _scrub_private_refs(root, f):
+    """References to a scrub-private `.md` file. The target EXISTS in canonical,
+    so _dead_links / _dead_inline_refs pass it — but it ships a DEAD reference in
+    the public export (the issue #258 defect class: a public contributor doc
+    pointing at a file the scrubber deletes). Catches both `[x](CLAUDE.md)` links
+    and `` `CLAUDE.md` `` / `` `fak/CLAUDE.md` `` inline code. A scrub-private
+    file citing another scrub-private file is not a public leak (both die
+    together), so the scrub-private files themselves are exempt."""
+    if posixpath.basename(f) in SCRUB_PRIVATE_MD:
+        return []
+    fp = os.path.join(root, f)
+    try:
+        with open(fp, encoding="utf-8") as fh:
+            txt = fh.read()
+    except OSError:
+        return []
+    d = posixpath.dirname(f)
+    out = []
+    for link in LINK_RE.findall(txt):
+        if _targets_scrub_private(link, d):
+            out.append((f"]({link})", link.split("#")[0].split("?")[0]))
+    for span in INLINE_RE.findall(txt):
+        parts = span.split()
+        if parts and _targets_scrub_private(parts[0], d):
+            out.append((f"`{span}`", parts[0]))
+    return out
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     g = ap.add_mutually_exclusive_group(required=True)
@@ -138,6 +201,8 @@ def main() -> int:
             findings.append((f, f"]({link})", tgt))
         for span, ref in _dead_inline_refs(root, f):
             findings.append((f, f"`{span}`", ref))
+        for cite, tgt in _scrub_private_refs(root, f):
+            findings.append((f, cite, tgt))
     if not findings:
         print(f"broken-link: clean ({scope}).")
         return 0
@@ -145,8 +210,9 @@ def main() -> int:
     print(f"BROKEN_LINK: {len(findings)} dead reference(s) in front-door docs:", file=sys.stderr)
     for f, cite, tgt in findings:
         print(f"  {f}: {cite}  ->  missing {tgt}", file=sys.stderr)
-    print("  fix: repoint to the real path, or remove the reference (the target may "
-          "have been deleted/moved).", file=sys.stderr)
+    print("  fix: repoint to a file that ships publicly, or remove the reference "
+          "(the target may be missing, moved, or private-side-only/scrubbed).",
+          file=sys.stderr)
     if a.audit_staged:
         print("  override once: ALLOW_BAD_LINK=1 <git cmd>.", file=sys.stderr)
     return 1
