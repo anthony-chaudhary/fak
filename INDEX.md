@@ -78,6 +78,7 @@ Dated working notes: research, audits, and run logs. Kept for the record, not th
 front page.
 
 - [Agentic caching SOTA (2026-06-19)](docs/notes/AGENTIC-CACHING-SOTA-2026-06-19.md)
+- [Context-window baseline + self-reduce 2× (2026-06-23)](docs/notes/CTXWIN-CONTEXT-WINDOW-BASELINE-2026-06-23.md) — what a Claude Code session's context window is actually made of, and how much halves at low risk vs bounded-loss. The empirical pass over real transcripts (`tools/ctxwin.py`) the [O(1)-turn planner](docs/notes/O1-TURN-CONTEXT-PLANNER-2026-06-23.md) names as its missing measurement.
 - [DOS effective-usage audit (2026-06-22)](docs/notes/DOS-EFFECTIVE-USAGE-AUDIT-2026-06-22.md)
 - [Gate down the stack (2026-06-22)](docs/notes/EXPLAINER-gate-down-the-stack-2026-06-22.md)
 - [Trust floor, two lenses (2026-06-17)](docs/notes/EXPLAINER-trust-floor-two-lenses-2026-06-17.md)
@@ -96,6 +97,7 @@ front page.
 - [idea-scout triage: 'When AUC 0.998 Is Not Enough' — probe-AUC is not detection; evidence for detector-is-not-the-floor (2026-06-23)](docs/notes/RESEARCH-probe-auc-evaluation-protocol-triage-2026-06-23.md)
 - [Git operations in the kernel prefilter — what's possible (2026-06-22)](docs/notes/RESEARCH-git-in-kernel-prefilters-2026-06-22.md)
 - [Grammar-constrained tool-call decoding, upstream vs downstream (2026-06-22)](docs/notes/RESEARCH-grammar-constrained-tool-call-decoding-2026-06-22.md)
+- [A local model on the wire: first use case + when-it-makes-sense (2026-06-23)](docs/notes/RESEARCH-local-model-on-the-wire-2026-06-23.md) — small local model as a witnessed lossy proposer; first rung is a semantic poison screen behind ctxmmu's regex floor; outbound compression is blocked on the req.Raw passthrough.
 - [idea-scout triage: MCPPrivacyDetector — protocol-induced MCP-server leakage; prior art + a threat fak already gates at runtime (result-admit), static analyzer not adopted (2026-06-23)](docs/notes/RESEARCH-mcp-privacy-leakage-triage-2026-06-23.md)
 - [idea-scout triage: Tool-Guard / isolated planning — a threat axis fak does not yet gate (2026-06-23)](docs/notes/RESEARCH-tool-guard-isolated-planning-triage-2026-06-23.md)
 - [Ultra-long-context: levels, levers, naming (2026-06-22)](docs/notes/RESEARCH-ultra-long-context-levels-and-naming-2026-06-22.md)
