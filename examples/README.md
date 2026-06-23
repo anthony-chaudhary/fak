@@ -40,7 +40,12 @@ ALLOW side of the same floor:
 go run ./cmd/fak preflight --policy examples/flight-booking-agent-policy.json --tool search_flights --args "{}"
 ```
 
-returns **`ALLOW`**. A `book_flight` whose `fare_amount` is `$10,000` or more is also
+returns **`ALLOW`**. [`policy-hot-reload/`](policy-hot-reload/README.md) is the other
+runnable lifecycle artifact: it walks the served-gateway operator loop — edit the
+floor → `policy --check` → `POST /v1/fak/policy/reload` → re-test — and proves the
+verdict swaps **in-process** (same `start_time_unix`, IFC ledger intact, no restart).
+
+A `book_flight` whose `fare_amount` is `$10,000` or more is also
 refused (`deny_regex ^[0-9]{5,}` — the manifest's argument matchers are
 `allow_glob` / `deny_regex` / `max_bytes`, so the price cap is expressed as a regex
 rather than a numeric `max_value`):
