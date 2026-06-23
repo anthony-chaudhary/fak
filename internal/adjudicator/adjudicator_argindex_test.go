@@ -43,6 +43,47 @@ func TestArgPredicatesIndexedByTool(t *testing.T) {
 	}
 }
 
+// TestArgPredicatesCaseInsensitiveTool locks the multi-agent guarantee: a rule
+// authored against one tool casing ("Bash") still gates a differently-cased call
+// ("bash" / "BASH"), so a capability floor cannot fail OPEN just because an agent
+// names its shell tool in lowercase (Claude Code "Bash" vs OpenCode "bash").
+func TestArgPredicatesCaseInsensitiveTool(t *testing.T) {
+	p := Policy{
+		Allow: map[string]bool{"Bash": true, "bash": true, "BASH": true},
+		ArgPredicates: []ArgPredicate{{
+			Tool: "Bash", Arg: "command", Kind: ArgDenyRegex,
+			Re: regexp.MustCompile(`\brm\s+-rf\b`), Reason: abi.ReasonPolicyBlock,
+		}},
+	}
+	a := New(p)
+	ctx := context.Background()
+	for _, tool := range []string{"Bash", "bash", "BASH"} {
+		if v := a.Adjudicate(ctx, inlineCall(tool, `{"command":"rm -rf /"}`)); v.Kind != abi.VerdictDeny {
+			t.Errorf("%s rm -rf: got %v, want Deny (the Bash rule must gate every casing)", tool, v.Kind)
+		}
+		if v := a.Adjudicate(ctx, inlineCall(tool, `{"command":"ls -la"}`)); v.Kind != abi.VerdictAllow {
+			t.Errorf("%s benign: got %v, want Allow", tool, v.Kind)
+		}
+	}
+}
+
+// TestSelfModifyCamelCasePath locks that the self-modify glob check reads a camelCase
+// filePath argument (OpenCode / AI-SDK tools), not only snake_case file_path — else an
+// agent that names the arg differently could write into a guarded tree unchecked.
+func TestSelfModifyCamelCasePath(t *testing.T) {
+	a := New(Policy{
+		Allow:           map[string]bool{"write": true},
+		SelfModifyGlobs: []string{".ssh/", ".git/"},
+	})
+	ctx := context.Background()
+	if v := a.Adjudicate(ctx, inlineCall("write", `{"filePath":".ssh/authorized_keys","content":"x"}`)); v.Kind != abi.VerdictDeny || v.Reason != abi.ReasonSelfModify {
+		t.Errorf("write into .ssh via filePath: got %v/%s, want Deny/SELF_MODIFY", v.Kind, abi.ReasonName(v.Reason))
+	}
+	if v := a.Adjudicate(ctx, inlineCall("write", `{"filePath":"notes.txt","content":"x"}`)); v.Kind != abi.VerdictAllow {
+		t.Errorf("in-tree write via filePath: got %v, want Allow", v.Kind)
+	}
+}
+
 // BenchmarkAdjudicateArgScaling shows the per-call cost of adjudicating a
 // constrained tool stays FLAT as the number of unrelated-tool predicates grows —
 // the index makes it O(predicates-for-this-tool), not O(all predicates).

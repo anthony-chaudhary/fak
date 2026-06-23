@@ -156,13 +156,20 @@ func (a *Adjudicator) DeniedTools() []string {
 // within each tool (so first-violation-wins is unchanged). Returns nil for the
 // empty set (the common case), preserving Adjudicate's len()==0 fast path. Built
 // once per SetPolicy (rare), never per call.
+//
+// Keys are lower-cased: tool names are case-variant across agents (Claude Code's
+// "Bash" / "Edit" vs OpenCode's "bash" / "edit"), so a floor authored against one
+// casing must still gate the other — a deny rule that silently stopped applying to a
+// differently-cased tool would be a fail-OPEN hole. Lower-casing the index (and the
+// lookup) broadens deny coverage to every casing; it never narrows it.
 func indexArgPredicates(preds []ArgPredicate) map[string][]ArgPredicate {
 	if len(preds) == 0 {
 		return nil
 	}
 	m := make(map[string][]ArgPredicate, len(preds))
 	for _, pr := range preds {
-		m[pr.Tool] = append(m[pr.Tool], pr)
+		k := strings.ToLower(pr.Tool)
+		m[k] = append(m[k], pr)
 	}
 	return m
 }
@@ -200,7 +207,10 @@ func lowRiskReadShaped(tool string) bool {
 // targetPath best-effort extracts a path-like argument from the call for the
 // self-modify check, without trusting the model: it scans the decoded args.
 func targetPath(args map[string]any) string {
-	for _, k := range []string{"path", "file_path", "file", "target", "filename", "dir"} {
+	// Both snake_case (Claude Code: file_path) and camelCase (OpenCode / AI-SDK tools:
+	// filePath) path args are scanned, so the self-modify glob check is not silently
+	// bypassed by an agent that names the argument differently.
+	for _, k := range []string{"path", "file_path", "filePath", "filepath", "file", "target", "filename", "dir"} {
 		if v, ok := args[k]; ok {
 			if s, ok := v.(string); ok {
 				return s
@@ -215,7 +225,7 @@ func targetPath(args map[string]any) string {
 func (a *Adjudicator) Adjudicate(ctx context.Context, c *abi.ToolCall) abi.Verdict {
 	a.mu.RLock()
 	p := a.policy
-	argPreds := a.argByTool[c.Tool] // only the predicates targeting THIS tool
+	argPreds := a.argByTool[strings.ToLower(c.Tool)] // predicates targeting THIS tool (case-insensitive)
 	a.mu.RUnlock()
 
 	// Explicit provable refusal.
@@ -653,8 +663,8 @@ var interpreterEvalFlags = []string{
 func evalArgPredicates(preds []ArgPredicate, tool string, args map[string]any) (abi.Verdict, bool) {
 	for i := range preds {
 		pr := &preds[i]
-		if pr.Tool != tool {
-			continue
+		if !strings.EqualFold(pr.Tool, tool) {
+			continue // case-insensitive: a "Bash" rule still gates a "bash" call (matches the index)
 		}
 		val, present := argString(args, pr.Arg)
 		switch pr.Kind {
