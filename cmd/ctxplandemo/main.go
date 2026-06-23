@@ -29,6 +29,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/anthony-chaudhary/fak/internal/ctxplan"
 )
@@ -131,7 +132,87 @@ func run(budget int) error {
 		return fmt.Errorf("the exact oracle must never score below greedy (got %.3f < %.3f)", exact.Benefit, greedy.Benefit)
 	}
 
-	// ---- 6. The scaling law: the bent curve across the turn horizon --------------
+	// ---- 6. The learning loop: forecast + weights tuned from witnessed outcomes -----
+	// A Plan is a PREDICTION. After the turn runs we witness what actually happened —
+	// which resident spans the turn referenced (Hits), which elided spans it had to
+	// demand-page back in (Faults = forecast misses), and which resident spans it never
+	// touched (Wasted = over-resident). Forecast.Learn promotes the faulted content into
+	// the next forecast; Weights.Learn moves the cost constants toward the signals that
+	// actually predicted need. This is the online rung that keeps the planner honest as a
+	// session drifts, instead of frozen at the DefaultWeights seed. And the resident cost
+	// is now priced by a REAL tokenizer count (TokenizerCost), not the bytes/4 proxy.
+	fmt.Println("\n== The learning loop: forecast + weights tuned from witnessed outcomes ==")
+
+	// 6a. Wire a real-tokenizer CostModel. The leaf is stdlib-only (foundation tier), so
+	//     Tokenizer is a one-method socket a higher tier adapts internal/tokenizer.Encoder
+	//     into; here a deterministic word counter stands in so the demo stays file-free.
+	//     The planner prices selection in TOKENIZER units (Plan.CostUsed), which is the
+	//     honest budget accounting — and it differs from the bytes/4 proxy, which is the
+	//     whole point of a real tokenizer.
+	tokCost := ctxplan.TokenizerCost(wordCounter{})
+	allSpans := mustSpans(ctx, store)
+	maxStep := 0
+	for _, s := range allSpans {
+		if s.Step > maxStep {
+			maxStep = s.Step
+		}
+	}
+	tokPlan := ctxplan.PlanCells(allSpans, forecast, ctxplan.Budget{Tokens: budget}, tokCost)
+	if tokPlan.OverBudget || tokPlan.CostUsed > budget {
+		return fmt.Errorf("the real-tokenizer plan must respect the O(1) budget: used=%d over=%v budget=%d",
+			tokPlan.CostUsed, tokPlan.OverBudget, budget)
+	}
+	if !ctxplan.Audit(tokPlan).Faithful {
+		return fmt.Errorf("the real-tokenizer plan was not faithful: %+v", ctxplan.Audit(tokPlan))
+	}
+	fmt.Printf("  real-tokenizer CostModel: %d span(s), %d resident tokens (vs %d under the bytes/4 proxy) — priced by Tokenizer.Count\n",
+		len(tokPlan.Selected), tokPlan.CostUsed, view.Plan.CostUsed)
+
+	// 6b. Witness one turn's outcome against the plan.
+	outcome := ctxplan.Outcome{
+		Hits:   []string{"span:2"}, // the runbook was referenced (relevant + needed)
+		Faults: []string{"span:4"}, // the weather span was demand-paged (a forecast MISS)
+		Wasted: []string{"span:3"}, // the build log sat resident but unused
+	}
+	defW := ctxplan.DefaultWeights() // the forecast sets no weights -> the default seed is in effect
+	learned := forecast.Learn(outcome, allSpans)
+	tunedW := defW.Learn(outcome, allSpans, forecast, maxStep)
+
+	// The forecast learned: the faulted span's topic ("weather") is now predicted.
+	promotedWeather := false
+	for _, intent := range learned.Intents {
+		if intent == "weather" {
+			promotedWeather = true
+		}
+	}
+	if !promotedWeather {
+		return fmt.Errorf("Forecast.Learn did not promote the faulted span's content (weather) into the intents: %v", learned.Intents)
+	}
+	// The weights learned: relevance rose (the runbook's relevance predicted its hit; the
+	// build log's irrelevance predicted its waste), so the learner up-weighted relevance.
+	if !(tunedW.Relevance > defW.Relevance) {
+		return fmt.Errorf("Weights.Learn should raise relevance when relevance predicts need: default=%v tuned=%v", defW.Relevance, tunedW.Relevance)
+	}
+	fmt.Printf("  forecast learned: intents %v -> %v (promoted the faulted \"weather\" topic)\n",
+		forecast.Intents, learned.Intents)
+	fmt.Printf("  weights learned:  relevance %.3f -> %.3f  utility %.3f -> %.3f  durability %.3f -> %.3f  recency %.3f -> %.3f\n",
+		defW.Relevance, tunedW.Relevance, defW.Utility, tunedW.Utility, defW.Durability, tunedW.Durability, defW.Recency, tunedW.Recency)
+
+	// 6c. Close the loop: re-plan next turn with the learned forecast + tuned weights +
+	//     real-tokenizer cost, and prove it is still a faithful O(1) view.
+	learned.Weights = tunedW
+	nextPlan := ctxplan.PlanCells(allSpans, learned, ctxplan.Budget{Tokens: budget}, tokCost)
+	if nextPlan.OverBudget || nextPlan.CostUsed > budget {
+		return fmt.Errorf("the learned plan must respect the O(1) budget: used=%d over=%v budget=%d",
+			nextPlan.CostUsed, nextPlan.OverBudget, budget)
+	}
+	if !ctxplan.Audit(nextPlan).Faithful {
+		return fmt.Errorf("the learned plan was not faithful: %+v", ctxplan.Audit(nextPlan))
+	}
+	fmt.Printf("  next-turn plan: %d span(s), %d resident tokens, faithful=%v\n",
+		len(nextPlan.Selected), nextPlan.CostUsed, ctxplan.Audit(nextPlan).Faithful)
+
+	// ---- 7. The scaling law: the bent curve across the turn horizon --------------
 	fmt.Println("\n== Scaling law: resident tokens & exact-recall across the turn horizon ==")
 	fmt.Println("   params: 700 tokens/turn, W=8000-token working set, forecast hit 0.9, compaction retain 0.7")
 	params := ctxplan.Params{TokensPerTurn: 700, WorkingSet: 8000, ForecastHit: 0.9, Retain: 0.7}
@@ -172,3 +253,12 @@ func pinSet(pins []string) map[string]bool {
 	}
 	return s
 }
+
+// wordCounter is a deterministic ctxplan.Tokenizer (whitespace word count) used to WIRE a
+// real-tokenizer CostModel in the demo. It stands in for internal/tokenizer.Encoder: a
+// higher-tier adapter wraps that encoder into this one-method interface and passes
+// ctxplan.TokenizerCost(it) as the CostModel, pricing resident spans by a real BPE count
+// instead of the bytes/4 proxy. Kept file-free so the demo needs no tokenizer.json.
+type wordCounter struct{}
+
+func (wordCounter) Count(text string) int { return len(strings.Fields(text)) }
