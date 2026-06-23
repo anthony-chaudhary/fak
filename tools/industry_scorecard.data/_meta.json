@@ -1,0 +1,127 @@
+{
+  "_about": "META + category vocabulary for the fak INDUSTRY scorecard. Modular: the taxonomy lives in _taxonomy.json, the competitor registry in _competitors.json, and fak's position rows in rows-<group>.json. Edit a file, then `python tools/industry_scorecard.py` to re-grade and `--markdown-dir docs/industry-scorecard` to rebuild. Categories are the data-defined closed vocab: a row/dim with an undeclared category is MALFORMED.",
+  "meta": {
+    "title": "fak — Industry scorecard (industry-first, SOTA-only)",
+    "as_of": "2026-06-23",
+    "fak_version": "0.31.0",
+    "authority": "BENCHMARK-AUTHORITY.md",
+    "machine_note": "fak headline numbers measured on Apple M3 Pro (arm64) + RTX 4070 (WSL2) + A100 (DGX); SOTA refs sourced from vendor docs / papers / leaderboards (see _taxonomy.json source_url + source_date). Deterministic metrics are hardware-independent; live wall-clocks are within-run ratios (BENCHMARK-GOVERNANCE.md).",
+    "fresh_window_days": 150,
+    "industry_review_window_days": 365
+  },
+  "categories": [
+    {
+      "id": "throughput",
+      "group": "serving",
+      "name": "Throughput & batching"
+    },
+    {
+      "id": "cost-efficiency",
+      "group": "cost",
+      "name": "Cost & efficiency"
+    },
+    {
+      "id": "scheduling",
+      "group": "serving",
+      "name": "Scheduling & routing"
+    },
+    {
+      "id": "parallelism",
+      "group": "distributed",
+      "name": "Parallelism & disaggregation"
+    },
+    {
+      "id": "kv-cache",
+      "group": "memory",
+      "name": "KV cache & prefix reuse"
+    },
+    {
+      "id": "latency",
+      "group": "serving",
+      "name": "Latency & SLO"
+    },
+    {
+      "id": "speculative-decoding",
+      "group": "decoding",
+      "name": "Decoding acceleration"
+    },
+    {
+      "id": "operability",
+      "group": "operability",
+      "name": "Operability"
+    },
+    {
+      "id": "quantization",
+      "group": "numerics",
+      "name": "Quantization & precision"
+    },
+    {
+      "id": "numerical-correctness",
+      "group": "numerics",
+      "name": "Numerical correctness"
+    },
+    {
+      "id": "hardware-coverage",
+      "group": "models",
+      "name": "Hardware coverage"
+    },
+    {
+      "id": "structured-output",
+      "group": "decoding",
+      "name": "Structured output"
+    },
+    {
+      "id": "model-coverage",
+      "group": "models",
+      "name": "Model coverage"
+    },
+    {
+      "id": "request-routing",
+      "group": "agent",
+      "name": "Cache-aware routing"
+    },
+    {
+      "id": "security",
+      "group": "security",
+      "name": "Security & safety"
+    },
+    {
+      "id": "agent-fleet",
+      "group": "agent",
+      "name": "Agent / fleet serving"
+    },
+    {
+      "id": "single-stream",
+      "group": "serving",
+      "name": "Single-stream (one chat)"
+    }
+  ],
+  "required_axes": [
+    {
+      "category": "agent-fleet",
+      "min_rows": 1,
+      "why": "fak's product category — cross-agent fleet reuse"
+    },
+    {
+      "category": "kv-cache",
+      "min_rows": 1,
+      "why": "the prefix/KV reuse layer vs SGLang RadixAttention"
+    },
+    {
+      "category": "single-stream",
+      "min_rows": 1,
+      "must_include_verdict": "trails",
+      "why": "the regime fak does NOT target — its losses must be shown, not buried"
+    },
+    {
+      "category": "numerical-correctness",
+      "min_rows": 1,
+      "why": "numerical parity is the floor under every speed claim"
+    },
+    {
+      "category": "model-coverage",
+      "min_rows": 1,
+      "why": "an honest capability/size ceiling vs SOTA must be named"
+    }
+  ]
+}

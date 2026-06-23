@@ -1,0 +1,726 @@
+{
+  "_about": "SOTA-system registry. last_reviewed drives the industry-drift backlog (`--stale`).",
+  "systems": [
+    {
+      "name": "AgentDojo",
+      "kind": "serving-system",
+      "last_reviewed": "2026-06-23",
+      "url": "",
+      "notes": ""
+    },
+    {
+      "name": "AMD MI300X/MI355X",
+      "kind": "serving-system",
+      "last_reviewed": "2026-06-23",
+      "url": "",
+      "notes": ""
+    },
+    {
+      "name": "AMD MI355X",
+      "kind": "serving-system",
+      "last_reviewed": "2026-06-23",
+      "url": "",
+      "notes": ""
+    },
+    {
+      "name": "AWQ",
+      "kind": "serving-system",
+      "last_reviewed": "2026-06-23",
+      "url": "",
+      "notes": ""
+    },
+    {
+      "name": "Baseten",
+      "kind": "serving-system",
+      "last_reviewed": "2026-06-23",
+      "url": "",
+      "notes": ""
+    },
+    {
+      "name": "Claude Opus 4.5 + agent scaffold",
+      "kind": "serving-system",
+      "last_reviewed": "2026-06-23",
+      "url": "",
+      "notes": ""
+    },
+    {
+      "name": "Container/microVM sandboxes",
+      "kind": "serving-system",
+      "last_reviewed": "2026-06-23",
+      "url": "",
+      "notes": ""
+    },
+    {
+      "name": "cuBLAS",
+      "kind": "serving-system",
+      "last_reviewed": "2026-06-23",
+      "url": "",
+      "notes": ""
+    },
+    {
+      "name": "DeepSeek",
+      "kind": "serving-system",
+      "last_reviewed": "2026-06-23",
+      "url": "",
+      "notes": ""
+    },
+    {
+      "name": "DeepSeek-V2/V3",
+      "kind": "serving-system",
+      "last_reviewed": "2026-06-23",
+      "url": "",
+      "notes": ""
+    },
+    {
+      "name": "DeepSeek-V3 MTP",
+      "kind": "serving-system",
+      "last_reviewed": "2026-06-23",
+      "url": "",
+      "notes": ""
+    },
+    {
+      "name": "DistServe",
+      "kind": "serving-system",
+      "last_reviewed": "2026-06-23",
+      "url": "",
+      "notes": ""
+    },
+    {
+      "name": "DynaServe",
+      "kind": "serving-system",
+      "last_reviewed": "2026-06-23",
+      "url": "",
+      "notes": ""
+    },
+    {
+      "name": "EAGLE-2",
+      "kind": "serving-system",
+      "last_reviewed": "2026-06-23",
+      "url": "",
+      "notes": ""
+    },
+    {
+      "name": "EAGLE-3",
+      "kind": "serving-system",
+      "last_reviewed": "2026-06-23",
+      "url": "",
+      "notes": ""
+    },
+    {
+      "name": "Equinox / FairBatching",
+      "kind": "serving-system",
+      "last_reviewed": "2026-06-23",
+      "url": "",
+      "notes": ""
+    },
+    {
+      "name": "FailSafe",
+      "kind": "serving-system",
+      "last_reviewed": "2026-06-23",
+      "url": "",
+      "notes": ""
+    },
+    {
+      "name": "FairBatching",
+      "kind": "serving-system",
+      "last_reviewed": "2026-06-23",
+      "url": "",
+      "notes": ""
+    },
+    {
+      "name": "FP8/FP4 quantization",
+      "kind": "serving-system",
+      "last_reviewed": "2026-06-23",
+      "url": "",
+      "notes": ""
+    },
+    {
+      "name": "Gemini 3.x",
+      "kind": "serving-system",
+      "last_reviewed": "2026-06-23",
+      "url": "",
+      "notes": ""
+    },
+    {
+      "name": "GenAI-Perf goodput mode",
+      "kind": "serving-system",
+      "last_reviewed": "2026-06-23",
+      "url": "",
+      "notes": ""
+    },
+    {
+      "name": "GPT-5.x",
+      "kind": "serving-system",
+      "last_reviewed": "2026-06-23",
+      "url": "",
+      "notes": ""
+    },
+    {
+      "name": "GPTQ",
+      "kind": "serving-system",
+      "last_reviewed": "2026-06-23",
+      "url": "",
+      "notes": ""
+    },
+    {
+      "name": "GQA-based models",
+      "kind": "serving-system",
+      "last_reviewed": "2026-06-23",
+      "url": "",
+      "notes": ""
+    },
+    {
+      "name": "group-128 INT4",
+      "kind": "serving-system",
+      "last_reviewed": "2026-06-23",
+      "url": "",
+      "notes": ""
+    },
+    {
+      "name": "H2O",
+      "kind": "serving-system",
+      "last_reviewed": "2026-06-23",
+      "url": "",
+      "notes": ""
+    },
+    {
+      "name": "Hosted frontier APIs",
+      "kind": "serving-system",
+      "last_reviewed": "2026-06-23",
+      "url": "",
+      "notes": ""
+    },
+    {
+      "name": "HuggingFace",
+      "kind": "serving-system",
+      "last_reviewed": "2026-06-23",
+      "url": "",
+      "notes": ""
+    },
+    {
+      "name": "hybrid real-time/best-effort schedulers",
+      "kind": "serving-system",
+      "last_reviewed": "2026-06-23",
+      "url": "",
+      "notes": ""
+    },
+    {
+      "name": "HydraServe",
+      "kind": "serving-system",
+      "last_reviewed": "2026-06-23",
+      "url": "",
+      "notes": ""
+    },
+    {
+      "name": "IFC / capability allow-lists",
+      "kind": "serving-system",
+      "last_reviewed": "2026-06-23",
+      "url": "",
+      "notes": ""
+    },
+    {
+      "name": "JSONSchemaBench",
+      "kind": "serving-system",
+      "last_reviewed": "2026-06-23",
+      "url": "",
+      "notes": ""
+    },
+    {
+      "name": "KevlarFlow",
+      "kind": "serving-system",
+      "last_reviewed": "2026-06-23",
+      "url": "",
+      "notes": ""
+    },
+    {
+      "name": "KIVI",
+      "kind": "serving-system",
+      "last_reviewed": "2026-06-23",
+      "url": "",
+      "notes": ""
+    },
+    {
+      "name": "KServe",
+      "kind": "serving-system",
+      "last_reviewed": "2026-06-23",
+      "url": "",
+      "notes": ""
+    },
+    {
+      "name": "KVQuant",
+      "kind": "serving-system",
+      "last_reviewed": "2026-06-23",
+      "url": "",
+      "notes": ""
+    },
+    {
+      "name": "KVTuner",
+      "kind": "serving-system",
+      "last_reviewed": "2026-06-23",
+      "url": "",
+      "notes": ""
+    },
+    {
+      "name": "Lakera",
+      "kind": "serving-system",
+      "last_reviewed": "2026-06-23",
+      "url": "",
+      "notes": ""
+    },
+    {
+      "name": "LiteLLM",
+      "kind": "serving-system",
+      "last_reviewed": "2026-06-23",
+      "url": "",
+      "notes": ""
+    },
+    {
+      "name": "llama.cpp",
+      "kind": "serving-system",
+      "last_reviewed": "2026-06-23",
+      "url": "",
+      "notes": ""
+    },
+    {
+      "name": "LLGuidance",
+      "kind": "serving-system",
+      "last_reviewed": "2026-06-23",
+      "url": "",
+      "notes": ""
+    },
+    {
+      "name": "LLGuidance/Guidance",
+      "kind": "serving-system",
+      "last_reviewed": "2026-06-23",
+      "url": "",
+      "notes": ""
+    },
+    {
+      "name": "LLM-42",
+      "kind": "serving-system",
+      "last_reviewed": "2026-06-23",
+      "url": "",
+      "notes": ""
+    },
+    {
+      "name": "llm-compressor",
+      "kind": "serving-system",
+      "last_reviewed": "2026-06-23",
+      "url": "",
+      "notes": ""
+    },
+    {
+      "name": "llm-d",
+      "kind": "serving-system",
+      "last_reviewed": "2026-06-23",
+      "url": "",
+      "notes": ""
+    },
+    {
+      "name": "LMCache",
+      "kind": "serving-system",
+      "last_reviewed": "2026-06-23",
+      "url": "",
+      "notes": ""
+    },
+    {
+      "name": "MagicDec",
+      "kind": "serving-system",
+      "last_reviewed": "2026-06-23",
+      "url": "",
+      "notes": ""
+    },
+    {
+      "name": "MangoBoost/AMD MI300X",
+      "kind": "serving-system",
+      "last_reviewed": "2026-06-23",
+      "url": "",
+      "notes": ""
+    },
+    {
+      "name": "Medusa",
+      "kind": "serving-system",
+      "last_reviewed": "2026-06-23",
+      "url": "",
+      "notes": ""
+    },
+    {
+      "name": "Medusa-2",
+      "kind": "serving-system",
+      "last_reviewed": "2026-06-23",
+      "url": "",
+      "notes": ""
+    },
+    {
+      "name": "MELON",
+      "kind": "serving-system",
+      "last_reviewed": "2026-06-23",
+      "url": "",
+      "notes": ""
+    },
+    {
+      "name": "Meta Llama Guard 3",
+      "kind": "serving-system",
+      "last_reviewed": "2026-06-23",
+      "url": "",
+      "notes": ""
+    },
+    {
+      "name": "MLC-LLM",
+      "kind": "serving-system",
+      "last_reviewed": "2026-06-23",
+      "url": "",
+      "notes": ""
+    },
+    {
+      "name": "MLPerf Inference",
+      "kind": "serving-system",
+      "last_reviewed": "2026-06-23",
+      "url": "",
+      "notes": ""
+    },
+    {
+      "name": "MLPerf Inference v5.0 / v5.1 submitters",
+      "kind": "serving-system",
+      "last_reviewed": "2026-06-23",
+      "url": "",
+      "notes": ""
+    },
+    {
+      "name": "MLPerf Inference v5.0/v5.1 submitters",
+      "kind": "serving-system",
+      "last_reviewed": "2026-06-23",
+      "url": "",
+      "notes": ""
+    },
+    {
+      "name": "MLPerf Inference v5.1",
+      "kind": "serving-system",
+      "last_reviewed": "2026-06-23",
+      "url": "",
+      "notes": ""
+    },
+    {
+      "name": "MLPerf Inference v5.1 interactive scenario",
+      "kind": "serving-system",
+      "last_reviewed": "2026-06-23",
+      "url": "",
+      "notes": ""
+    },
+    {
+      "name": "ModelOpt accuracy harness",
+      "kind": "serving-system",
+      "last_reviewed": "2026-06-23",
+      "url": "",
+      "notes": ""
+    },
+    {
+      "name": "Mooncake",
+      "kind": "serving-system",
+      "last_reviewed": "2026-06-23",
+      "url": "",
+      "notes": ""
+    },
+    {
+      "name": "MOSS two-level microscaling",
+      "kind": "serving-system",
+      "last_reviewed": "2026-06-23",
+      "url": "",
+      "notes": ""
+    },
+    {
+      "name": "MuxWise",
+      "kind": "serving-system",
+      "last_reviewed": "2026-06-23",
+      "url": "",
+      "notes": ""
+    },
+    {
+      "name": "MX formats",
+      "kind": "serving-system",
+      "last_reviewed": "2026-06-23",
+      "url": "",
+      "notes": ""
+    },
+    {
+      "name": "Neural Magic / vLLM recovery-% methodology",
+      "kind": "serving-system",
+      "last_reviewed": "2026-06-23",
+      "url": "",
+      "notes": ""
+    },
+    {
+      "name": "NVFP4",
+      "kind": "serving-system",
+      "last_reviewed": "2026-06-23",
+      "url": "",
+      "notes": ""
+    },
+    {
+      "name": "NVIDIA",
+      "kind": "serving-system",
+      "last_reviewed": "2026-06-23",
+      "url": "",
+      "notes": ""
+    },
+    {
+      "name": "Ollama",
+      "kind": "serving-system",
+      "last_reviewed": "2026-06-23",
+      "url": "",
+      "notes": ""
+    },
+    {
+      "name": "OpenAI prompt caching",
+      "kind": "serving-system",
+      "last_reviewed": "2026-06-23",
+      "url": "",
+      "notes": ""
+    },
+    {
+      "name": "OpenAI Structured Outputs",
+      "kind": "serving-system",
+      "last_reviewed": "2026-06-23",
+      "url": "",
+      "notes": ""
+    },
+    {
+      "name": "Orca",
+      "kind": "serving-system",
+      "last_reviewed": "2026-06-23",
+      "url": "",
+      "notes": ""
+    },
+    {
+      "name": "P-EAGLE",
+      "kind": "serving-system",
+      "last_reviewed": "2026-06-23",
+      "url": "",
+      "notes": ""
+    },
+    {
+      "name": "PipeBoost",
+      "kind": "serving-system",
+      "last_reviewed": "2026-06-23",
+      "url": "",
+      "notes": ""
+    },
+    {
+      "name": "production SLO practice",
+      "kind": "serving-system",
+      "last_reviewed": "2026-06-23",
+      "url": "",
+      "notes": ""
+    },
+    {
+      "name": "QServe W4A8KV4",
+      "kind": "serving-system",
+      "last_reviewed": "2026-06-23",
+      "url": "",
+      "notes": ""
+    },
+    {
+      "name": "QuaRot",
+      "kind": "serving-system",
+      "last_reviewed": "2026-06-23",
+      "url": "",
+      "notes": ""
+    },
+    {
+      "name": "Quest",
+      "kind": "serving-system",
+      "last_reviewed": "2026-06-23",
+      "url": "",
+      "notes": ""
+    },
+    {
+      "name": "Ray Serve",
+      "kind": "serving-system",
+      "last_reviewed": "2026-06-23",
+      "url": "",
+      "notes": ""
+    },
+    {
+      "name": "Red Hat / Neural Magic llm-compressor",
+      "kind": "serving-system",
+      "last_reviewed": "2026-06-23",
+      "url": "",
+      "notes": ""
+    },
+    {
+      "name": "ReviveMoE",
+      "kind": "serving-system",
+      "last_reviewed": "2026-06-23",
+      "url": "",
+      "notes": ""
+    },
+    {
+      "name": "RunPod FlashBoot",
+      "kind": "serving-system",
+      "last_reviewed": "2026-06-23",
+      "url": "",
+      "notes": ""
+    },
+    {
+      "name": "Sarathi-Serve",
+      "kind": "serving-system",
+      "last_reviewed": "2026-06-23",
+      "url": "",
+      "notes": ""
+    },
+    {
+      "name": "ServerlessLLM",
+      "kind": "serving-system",
+      "last_reviewed": "2026-06-23",
+      "url": "",
+      "notes": ""
+    },
+    {
+      "name": "SGLang",
+      "kind": "serving-system",
+      "last_reviewed": "2026-06-23",
+      "url": "",
+      "notes": ""
+    },
+    {
+      "name": "SGLang-PD",
+      "kind": "serving-system",
+      "last_reviewed": "2026-06-23",
+      "url": "",
+      "notes": ""
+    },
+    {
+      "name": "SGLang-PD / vLLM disaggregated",
+      "kind": "serving-system",
+      "last_reviewed": "2026-06-23",
+      "url": "",
+      "notes": ""
+    },
+    {
+      "name": "sglang-router",
+      "kind": "serving-system",
+      "last_reviewed": "2026-06-23",
+      "url": "",
+      "notes": ""
+    },
+    {
+      "name": "SmoothQuant",
+      "kind": "serving-system",
+      "last_reviewed": "2026-06-23",
+      "url": "",
+      "notes": ""
+    },
+    {
+      "name": "SnapKV",
+      "kind": "serving-system",
+      "last_reviewed": "2026-06-23",
+      "url": "",
+      "notes": ""
+    },
+    {
+      "name": "speculative sampling",
+      "kind": "serving-system",
+      "last_reviewed": "2026-06-23",
+      "url": "",
+      "notes": ""
+    },
+    {
+      "name": "SpinQuant",
+      "kind": "serving-system",
+      "last_reviewed": "2026-06-23",
+      "url": "",
+      "notes": ""
+    },
+    {
+      "name": "Splitwise",
+      "kind": "serving-system",
+      "last_reviewed": "2026-06-23",
+      "url": "",
+      "notes": ""
+    },
+    {
+      "name": "StreamingLLM",
+      "kind": "serving-system",
+      "last_reviewed": "2026-06-23",
+      "url": "",
+      "notes": ""
+    },
+    {
+      "name": "TensorRT-LLM",
+      "kind": "serving-system",
+      "last_reviewed": "2026-06-23",
+      "url": "",
+      "notes": ""
+    },
+    {
+      "name": "Thinking Machines batch-invariant-ops",
+      "kind": "serving-system",
+      "last_reviewed": "2026-06-23",
+      "url": "",
+      "notes": ""
+    },
+    {
+      "name": "TokenLake",
+      "kind": "serving-system",
+      "last_reviewed": "2026-06-23",
+      "url": "",
+      "notes": ""
+    },
+    {
+      "name": "Tuned warm per-agent KV cache",
+      "kind": "serving-system",
+      "last_reviewed": "2026-06-23",
+      "url": "",
+      "notes": ""
+    },
+    {
+      "name": "vAttention",
+      "kind": "serving-system",
+      "last_reviewed": "2026-06-23",
+      "url": "",
+      "notes": ""
+    },
+    {
+      "name": "vLLM",
+      "kind": "serving-system",
+      "last_reviewed": "2026-06-23",
+      "url": "",
+      "notes": ""
+    },
+    {
+      "name": "vLLM/SGLang self-host on H100/H200",
+      "kind": "serving-system",
+      "last_reviewed": "2026-06-23",
+      "url": "",
+      "notes": ""
+    },
+    {
+      "name": "vLLM/SGLang sweeps",
+      "kind": "serving-system",
+      "last_reviewed": "2026-06-23",
+      "url": "",
+      "notes": ""
+    },
+    {
+      "name": "VTC",
+      "kind": "serving-system",
+      "last_reviewed": "2026-06-23",
+      "url": "",
+      "notes": ""
+    },
+    {
+      "name": "XGrammar",
+      "kind": "serving-system",
+      "last_reviewed": "2026-06-23",
+      "url": "",
+      "notes": ""
+    },
+    {
+      "name": "XGrammar-2",
+      "kind": "serving-system",
+      "last_reviewed": "2026-06-23",
+      "url": "",
+      "notes": ""
+    }
+  ]
+}

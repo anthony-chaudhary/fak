@@ -1,0 +1,48 @@
+{
+  "_about": "fak position rows for the 'security' group. dim_id links each to a _taxonomy.json dimension.",
+  "rows": [
+    {
+      "id": "prompt-injection-defense-agent-security",
+      "dim_id": "prompt-injection-defense-agent-security",
+      "axis": "Prompt-injection defense and agent security (attack-success-rate vs utility-under-attack)",
+      "category": "security",
+      "competitor": "Tuned guardrail / defense stacks on a SOTA evasion battery (AgentDojo-style)",
+      "competitor_class": "sota",
+      "competitor_value": null,
+      "competitor_source": "CLAIMS.md ('Honest ceiling … ~100% evadable … FP-prone'); internal/agentdojo ASR battery",
+      "fak_value": null,
+      "unit": "detection rate / FP rate",
+      "higher_is_better": true,
+      "verdict": "trails",
+      "status": "shipped",
+      "fak_commit": "",
+      "fak_artifact": "",
+      "fak_doc": "CLAIMS.md (security-substrate ceiling) · internal/agentdojo",
+      "apples_to_apples": true,
+      "comparison_note": "fak's OWN repeated concession: the detector these drivers feed is '~100% evadable on a SOTA evasion battery' and FP-prone on private real transcripts (it sealed 2/59 benign pages as false positives). Detection is DELIBERATELY non-load-bearing — fak's security guarantee is the STRUCTURAL capability floor + containment (which never run the detector), not a detection rate. This TRAILING row carries the honest concession so the security story is never read as a detection-rate win.",
+      "measured_on": "2026-06-23",
+      "qualitative": true
+    },
+    {
+      "id": "tool-sandboxing-structural-containment",
+      "dim_id": "tool-sandboxing-structural-containment",
+      "axis": "Tool/agent sandboxing, structural containment, and PII/exfil prevention",
+      "category": "security",
+      "competitor": "Container/microVM sandboxes; MELON (provable IPI defense); IFC / capability allow-lists",
+      "competitor_class": "sota",
+      "competitor_value": null,
+      "competitor_source": "https://arxiv.org/pdf/2502.05174 (2025-02-07)",
+      "fak_value": null,
+      "unit": "structural containment that holds when the model is fooled (capability/IFC/quarantine)",
+      "higher_is_better": true,
+      "verdict": "parity",
+      "status": "shipped",
+      "fak_commit": "",
+      "fak_artifact": "",
+      "fak_doc": "CLAIMS.md Adjudication (default-deny manifest, closed 12-reason vocab), Security substrate (IFC Ref.Taint sink-gated, kernel-authored provenance, plan-CFI), Context-MMU (quarantine/page-out), provable-deletion certificate (internal/deletioncert), causal-invalidation witness (commit 0fc39aa)",
+      "apples_to_apples": true,
+      "comparison_note": "fak's genuine security strength and arguably its second differentiator after reuse, but PARITY not lead because there is no audited containment leaderboard and the comparison is capability-presence, not a measured ASR-under-containment number. fak ships layered structural controls that hold even when the detector is fooled: a declarative default-deny capability allow-list (closed 12-reason vocab), IFC taint that sink-gates tainted->sink flows pre-call (FIDES/CaMeL-class), kernel-authored provenance (trust taken from the model), plan-CFI, context-MMU quarantine/page-out, and a self-signed provable-deletion certificate + byte-exact causal invalidation. This is the MELON/IFC/capability-allow-list family. Honest fences: self-signed v1 receipts, EvictedCount self-reported, no disposable-microVM tool sandbox, no third-party containment audit. Parity on the layered-containment posture; no number to claim lead.",
+      "measured_on": "2026-06-23"
+    }
+  ]
+}

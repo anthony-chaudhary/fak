@@ -1,0 +1,1561 @@
+{
+  "_about": "INDUSTRY-FIRST dimension catalog: the things the LLM-serving / agent-infra field competes on, researched from vendor docs / papers / leaderboards (NOT derived from what fak measured). Each carries the current SOTA bar + a dated source. The scorecard positions fak against every in_scope dimension.",
+  "dimensions": [
+    {
+      "id": "continuous-batching-aggregate-throughput",
+      "category": "throughput",
+      "dimension": "Continuous / in-flight (iteration-level) batching: max aggregate token throughput at high concurrency",
+      "why_it_matters": "Iteration-level batching admits and retires requests mid-flight so a long sequence never blocks short ones, and a fixed GPU serves far more simultaneous sequences. It is the single largest lever on tokens/s per GPU and on serving cost, so it is the first thing any operator benchmarks.",
+      "sota_systems": [
+        "vLLM (PagedAttention + continuous batching)",
+        "Orca (iteration-level scheduling, originator)",
+        "TensorRT-LLM (in-flight batching)"
+      ],
+      "sota_bar": "vLLM reports up to 24x higher throughput than HuggingFace TGI and Orca at the same latency by combining PagedAttention with continuous batching; field-typical gain over static batching is 2-4x at high concurrency with mixed output lengths.",
+      "best_value": 24,
+      "metric_unit": "x throughput vs prior static-batching baseline (Orca/TGI)",
+      "source_url": "https://arxiv.org/pdf/2309.06180",
+      "source_date": "2023-09",
+      "notes": "The 24x is the headline vLLM/PagedAttention SOSP'23 number vs Orca/TGI; the conservative, regime-independent figure operators cite today is 2-4x over static batching. EAGLE/throughput numbers are separate dimensions. Absolute tokens/s is hardware-bound (see MLPerf dimension).",
+      "in_scope": true
+    },
+    {
+      "id": "goodput-under-slo",
+      "category": "cost-efficiency",
+      "dimension": "Goodput under an SLA (requests/s meeting TTFT and TPOT SLOs simultaneously)",
+      "why_it_matters": "Raw throughput overcounts: a request that violates its latency SLO is wasted work. Goodput, the max request rate at which a target fraction of requests meet BOTH TTFT and TPOT SLOs, is the metric a buyer running an interactive product actually pays against. It exposes systems that win on aggregate tokens/s but collapse under tail-latency constraints.",
+      "sota_systems": [
+        "DistServe (introduced goodput, P/D disaggregation)",
+        "SGLang-PD",
+        "MuxWise (P/D multiplexing)"
+      ],
+      "sota_bar": "DistServe serves up to 7.4x more requests or holds a 12.6x tighter SLO than prior SOTA while keeping >90% of requests within latency bounds; MuxWise reports 1.3x (Llama-8B) to 1.62x (Llama-70B) higher goodput than SGLang-PD at the 99th-percentile SLO.",
+      "best_value": 7.4,
+      "metric_unit": "x more requests served within TTFT+TPOT SLO vs prior SOTA",
+      "source_url": "https://arxiv.org/abs/2401.09670",
+      "source_date": "2024-01",
+      "notes": "Goodput is the operator's real currency; the 7.4x is DistServe vs co-located baselines. MuxWise figure from arXiv 2504.14489 (2025-04). Numbers are workload- and SLO-specific.",
+      "in_scope": true
+    },
+    {
+      "id": "chunked-prefill-pd-interference",
+      "category": "scheduling",
+      "dimension": "Chunked / piggyback prefill and prefill-decode interference (stall-free batching)",
+      "why_it_matters": "When a long prefill shares an iteration with ongoing decodes it stalls every decode, spiking inter-token latency (TPOT/TBT). Chunked prefill splits a prefill into token-bounded chunks and piggybacks them onto decode batches so decodes never stall, decoupling the throughput/latency tradeoff. It is the core mechanism that lets a co-located engine hit a tight TPOT SLO at high load.",
+      "sota_systems": [
+        "Sarathi-Serve (chunked-prefill + stall-free scheduling)",
+        "vLLM (chunked prefill)",
+        "SGLang (chunked prefill)"
+      ],
+      "sota_bar": "Sarathi-Serve delivers up to 2.6x higher serving capacity (Mistral-7B, 1xA100), 3.7x (Yi-34B, 2xA100), and up to 5.6x (Falcon-180B with pipeline parallelism) under a TBT SLO vs vLLM, by capping per-iteration prefill work to a chunk size (typically 256-512 tokens).",
+      "best_value": 5.6,
+      "metric_unit": "x serving capacity under a TBT/TPOT SLO vs vLLM",
+      "source_url": "https://arxiv.org/abs/2403.02310",
+      "source_date": "2024-03",
+      "notes": "OSDI'24. The 5.6x is the Falcon-180B + pipeline-parallel case; 2.6-3.7x is the single/dual-A100 case. Chunk size is the operator's TPOT-vs-throughput knob.",
+      "in_scope": true
+    },
+    {
+      "id": "prefill-decode-disaggregation",
+      "category": "parallelism",
+      "dimension": "Prefill-decode disaggregation: independent scaling of compute-bound prefill and memory-bound decode",
+      "why_it_matters": "Prefill is compute-bound and decode is memory-bandwidth-bound; co-locating them forces one hardware/parallelism config to serve both and couples their scaling. Disaggregating onto separate instances (over a KV-cache transport) lets each phase scale and tune independently and removes interference entirely. It is now the default architecture for large-scale, SLO-tight deployments.",
+      "sota_systems": [
+        "DistServe",
+        "Splitwise",
+        "SGLang-PD / vLLM disaggregated",
+        "llm-d (vLLM + NIXL KV connector)"
+      ],
+      "sota_bar": "P/D disaggregation with SGLang serves up to 6.9x more goodput requests in chatbot scenarios and 2.23x more in heavy-decode scenarios within SLO; llm-d reports ~3x lower mean TTFT at 4 QPS and ~2x baseline QPS under SLO on H100 nodes.",
+      "best_value": 6.9,
+      "metric_unit": "x goodput requests within SLO vs co-located baseline",
+      "source_url": "https://rocm.blogs.amd.com/software-tools-optimization/disaggregation/README.html",
+      "source_date": "2025",
+      "notes": "Disaggregation vs aggregation is an active design debate (arXiv 2508.01989 argues for unifying both); gains are workload-dependent. llm-d figures from Red Hat / CNCF (2025).",
+      "in_scope": true
+    },
+    {
+      "id": "cache-aware-scheduling-routing",
+      "category": "scheduling",
+      "dimension": "Request scheduling and cache-aware routing (FCFS vs priority vs prefix/KV-cache-aware)",
+      "why_it_matters": "The scheduling discipline decides which requests batch together and where they route. A naive FCFS engine ignores that requests sharing a prefix (system prompts, RAG context, multi-turn chat, agents) can reuse KV cache; a cache-aware scheduler co-locates and orders them to maximize reuse. This directly multiplies effective throughput on shared-context workloads and trades off against load balance.",
+      "sota_systems": [
+        "SGLang (RadixAttention + cache-aware load balancer)",
+        "sglang-router",
+        "llm-d Endpoint Picker (prefix-cache-aware GAIE routing)"
+      ],
+      "sota_bar": "SGLang v0.4's cache-aware load balancer delivers up to 1.9x throughput and 3.8x prefix-cache hit-rate improvement; SGLang's prefix-sharing batch heuristic gives ~29% higher throughput than vLLM when requests share context. The core tension is cache affinity vs load balance.",
+      "best_value": 1.9,
+      "metric_unit": "x throughput from cache-aware routing vs cache-blind baseline",
+      "source_url": "https://www.lmsys.org/blog/2024-12-04-sglang-v0-4/",
+      "source_date": "2024-12",
+      "notes": "Cache affinity and load balancing are inherently conflicting (DualMap, arXiv 2602.06502); a popular prefix can hot-spot one instance. SGLang uses FCFS queueing with a prefix-sharing secondary batch heuristic.",
+      "in_scope": true
+    },
+    {
+      "id": "kv-cache-memory-efficiency-concurrency",
+      "category": "kv-cache",
+      "dimension": "KV-cache memory efficiency and max concurrent sequences (paging / fragmentation)",
+      "why_it_matters": "GPU memory left for KV cache, after weights, sets the hard ceiling on how many sequences can run concurrently, which caps batch size and therefore throughput. Pre-reserving max-context KV cache wastes 60-80% of memory to fragmentation; paged allocation cuts waste to under 4%, letting the same GPU hold far more concurrent sequences.",
+      "sota_systems": [
+        "vLLM (PagedAttention)",
+        "vAttention (paging without PagedAttention)",
+        "SGLang (token-level KV pool)"
+      ],
+      "sota_bar": "PagedAttention reduces KV-cache memory waste from 60-80% (reserve-for-max) to under 4%, enabling near-95% GPU memory utilization for KV cache and proportionally larger max batch size / concurrent-sequence counts on fixed hardware.",
+      "best_value": 4,
+      "metric_unit": "% KV-cache memory wasted (vs 60-80% under reserve-for-max)",
+      "source_url": "https://arxiv.org/pdf/2309.06180",
+      "source_date": "2023-09",
+      "notes": "Max concurrent sequences is the derived operator quantity; it scales inversely with per-token KV size and context length. vAttention (arXiv 2405.04437) achieves similar efficiency without paged kernels.",
+      "in_scope": true
+    },
+    {
+      "id": "absolute-tokens-per-second-mlperf",
+      "category": "throughput",
+      "dimension": "Absolute aggregate tokens/s at scale on standardized hardware (MLPerf Inference)",
+      "why_it_matters": "Cross-vendor, audited absolute throughput on a fixed model and SLO is what a buyer uses to compare full systems and compute cost-per-token. MLPerf Inference is the only neutral, reproducible apples-to-apples leaderboard with both offline (max throughput) and server (latency-constrained) scenarios, so it anchors the absolute SOTA bar that engine micro-benchmarks cannot.",
+      "sota_systems": [
+        "NVIDIA GB200 NVL72 (Blackwell)",
+        "NVIDIA HGX B200 / Blackwell Ultra",
+        "MLPerf Inference v5.0 / v5.1 submitters"
+      ],
+      "sota_bar": "MLPerf Inference v5.0: GB200 NVL72 hit ~13,886 tokens/s offline on Llama 3.1 405B (and ~30x the 8-Hopper server throughput); v5.1: Blackwell Ultra hit 5,842 tokens/s/GPU offline and 2,907 tokens/s/GPU server on the relevant LLM benchmark. Server-scenario SLOs: 405B at 6s TTFT / 175ms TPOT; new interactive scenario at 0.5s TTFT / 30ms TPOT.",
+      "best_value": 13886,
+      "metric_unit": "tokens/s (Llama 3.1 405B offline, GB200 NVL72, MLPerf v5.0)",
+      "source_url": "https://mlcommons.org/2025/04/llm-inference-v5/",
+      "source_date": "2025-04",
+      "notes": "v5.1 per-GPU figures from MarkTechPost/HPCwire (2025-09/10). Absolute tokens/s is meaningless without naming model, hardware, scenario, and SLO together; these are the audited reference points.",
+      "in_scope": true
+    },
+    {
+      "id": "interactive-latency-slo-tail",
+      "category": "latency",
+      "dimension": "Interactive latency SLO attainment: TTFT and TPOT/ITL tail under load",
+      "why_it_matters": "For chatbots, coding assistants, and agents the contract is felt latency: time-to-first-token and steady per-token cadence at the tail (p99), not the mean. A serving system is differentiated by how high it can push concurrency before TTFT or TPOT breach the SLO. This is the latency face of the same tradeoff goodput measures on the throughput side.",
+      "sota_systems": [
+        "MLPerf Inference v5.1 interactive scenario",
+        "TensorRT-LLM",
+        "Sarathi-Serve / vLLM chunked prefill"
+      ],
+      "sota_bar": "MLPerf v5.1 interactive scenario defines the current strict bar at 0.5s p99 TTFT and 30ms p99 TPOT (~1,600 words/min) for chatbot/coding/creative uses; the v5.0 405B server scenario uses 6s TTFT / 175ms TPOT. Systems are ranked by max throughput sustainable under these constraints.",
+      "best_value": 30,
+      "metric_unit": "ms p99 TPOT ceiling (MLPerf v5.1 interactive); 0.5s p99 TTFT",
+      "source_url": "https://www.marktechpost.com/2025/10/01/mlperf-inference-v5-1-2025-results-explained-for-gpus-cpus-and-ai-accelerators/",
+      "source_date": "2025-10",
+      "notes": "These SLO thresholds are the standardized definition of 'interactive'; vendor benchmarks should be read against them. p99 (not mean) is the operator-relevant statistic.",
+      "in_scope": true
+    },
+    {
+      "id": "prefix-caching-kv-reuse",
+      "category": "kv-cache",
+      "dimension": "Prefix caching / automatic KV reuse across requests (shared-context workloads)",
+      "why_it_matters": "Real workloads (long system prompts, RAG, few-shot, multi-turn chat, agent fleets) repeat large prefixes. Automatic prefix caching reuses the already-computed KV for shared prefixes, skipping that prefill entirely. On these workloads it is a large, distinct throughput and TTFT multiplier that is invisible to single-request benchmarks but dominates production economics.",
+      "sota_systems": [
+        "SGLang (RadixAttention)",
+        "vLLM (Automatic Prefix Caching)",
+        "TokenLake (segment-level prefix pool)"
+      ],
+      "sota_bar": "SGLang's RadixAttention prefix reuse yields ~29% higher throughput than vLLM on shared-context workloads, and cache-aware routing lifts prefix-cache hit rate up to 3.8x; the win scales with prefix-share fraction and is marginal when requests share no prefix.",
+      "best_value": 29,
+      "metric_unit": "% throughput gain on shared-context workloads (SGLang RadixAttention vs vLLM)",
+      "source_url": "https://www.spheron.network/blog/vllm-vs-tensorrt-llm-vs-sglang-benchmarks/",
+      "source_date": "2026",
+      "notes": "Distinct from raw continuous batching: a per-workload multiplier, not a constant. Hit rate and gain are entirely workload-dependent (zero on prefix-disjoint traffic).",
+      "in_scope": true
+    },
+    {
+      "id": "speculative-decoding-throughput-effect",
+      "category": "speculative-decoding",
+      "dimension": "Speculative decoding throughput effect across batch sizes (does it survive at high concurrency?)",
+      "why_it_matters": "Speculative decoding accelerates single-stream decode but consumes extra compute per step, so at the high batch sizes a busy server runs it can REDUCE throughput. The differentiating question for a serving operator is not the single-request speedup but whether the method still nets a throughput gain at production batch sizes; only newer drafters do.",
+      "sota_systems": [
+        "EAGLE-3",
+        "EAGLE-2 (regresses at batch)",
+        "vLLM / SGLang / TensorRT-LLM speculative backends"
+      ],
+      "sota_bar": "On a single H100 (SGLang), EAGLE-3 gives 1.81x throughput at batch 2 and still 1.38x at batch 64, whereas EAGLE-2 drops to 0.93x at batch 24 (a net loss); acceptance rates approach ~80% with ~1.74-2.4 accepted tokens/step.",
+      "best_value": 1.38,
+      "metric_unit": "x throughput at batch 64 (EAGLE-3, single H100); EAGLE-2 = 0.93x at batch 24",
+      "source_url": "https://docs.sglang.ai/backend/speculative_decoding.html",
+      "source_date": "2025",
+      "notes": "The load-bearing fact is the batch-size crossover: speculative decoding can be net-negative at high concurrency. The 0.93x EAGLE-2 figure is the cautionary data point for serving operators.",
+      "in_scope": true
+    },
+    {
+      "id": "fairness-isolation-multitenant",
+      "category": "operability",
+      "dimension": "Fairness, priority, and tenant isolation in batch formation / scheduling",
+      "why_it_matters": "A multi-tenant or mixed-SLA deployment must prevent one heavy or long-prefill tenant from starving others, and must honor priority classes (real-time vs best-effort). FCFS plus cache-affinity heuristics can create head-of-line blocking and load hot-spots; fairness-aware batch formation and priority preemption are the controls an operator needs to keep per-tenant SLOs while sharing a fleet.",
+      "sota_systems": [
+        "FairBatching (fairness-aware batch formation)",
+        "SGLang (FCFS + page-eviction preemption)",
+        "hybrid real-time/best-effort schedulers (e.g. arXiv 2504.09590)"
+      ],
+      "sota_bar": "No single audited cross-system number; SOTA is qualitative: FairBatching reformulates batch formation to bound per-request unfairness, and serving stacks add priority classes plus preemption (KV-page eviction with recompute-on-resume in SGLang) to isolate tenants. Buyers evaluate head-of-line-blocking behavior and priority-preemption support directly.",
+      "best_value": null,
+      "metric_unit": "qualitative (fairness/isolation guarantees; priority + preemption support)",
+      "source_url": "https://arxiv.org/pdf/2510.14392",
+      "source_date": "2025-10",
+      "notes": "An operator-side dimension a throughput-only scorecard omits. Cache-affinity routing actively worsens load balance (DualMap, arXiv 2602.06502), so fairness is a real, measured tension, not a nicety.",
+      "in_scope": true
+    },
+    {
+      "id": "time-to-first-token",
+      "category": "latency",
+      "dimension": "Time-to-first-token (TTFT) under realistic prefill",
+      "why_it_matters": "TTFT is the perceived responsiveness of an interactive system - the wait before any output appears. It is dominated by queueing delay plus prefill compute, so it is the headline latency metric for chat, voice, and copilot UX and the gating constraint in every serving SLO. Buyers compare TTFT at a fixed input length and concurrency because a single-user TTFT (just network + one forward pass) tells you almost nothing about production behavior.",
+      "sota_systems": [
+        "MLPerf Inference v5.1 (Llama3.1-405B interactive)",
+        "vLLM benchmark_serving",
+        "NVIDIA GenAI-Perf"
+      ],
+      "sota_bar": "MLPerf v5.1 interactive scenario fixes a 4.5s P99 TTFT bound for Llama3.1-405B (vs 6s P99 in the server scenario); production interactive serving targets are commonly ~200-450ms TTFT. TTFT is measured at fixed ISL and concurrency, excluding empty first responses.",
+      "best_value": 4.5,
+      "metric_unit": "seconds (P99 TTFT bound, MLPerf 405B interactive)",
+      "source_url": "https://mlcommons.org/2025/09/small-llm-inference-5-1/",
+      "source_date": "2025-09",
+      "notes": "MLPerf server scenario for Llama2-70B uses 2s TTFT / 200ms TPOT; the newer interactive scenario tightens to 450ms TTFT / 40ms TPOT (small models) and 4.5s TTFT for 405B. Single-concurrency TTFT is non-representative; measure at expected P95 concurrency.",
+      "in_scope": true
+    },
+    {
+      "id": "inter-token-latency-tpot",
+      "category": "latency",
+      "dimension": "Inter-token latency / time-per-output-token (ITL/TPOT)",
+      "why_it_matters": "After the first token, ITL/TPOT governs how fast text streams - the felt 'typing speed.' It must clear a per-user threshold (e.g. faster than human reading) and stay smooth; stalls produce visible jank even at good averages. TPOT excludes the first token by construction (denominator subtracts 1) so it isolates the decode phase from prefill.",
+      "sota_systems": [
+        "MLPerf Inference v5.1",
+        "vLLM benchmark_serving",
+        "NVIDIA GenAI-Perf"
+      ],
+      "sota_bar": "MLPerf v5.1 interactive requires 12.5 tokens/s/user (≈80ms TPOT) for Llama3.1-405B at 4.5s TTFT; server scenario allows 175ms P99 TPOT. Small-model interactive targets 40ms TPOT. ~200ms TPOT maps to ~240 wpm human reading speed.",
+      "best_value": 40,
+      "metric_unit": "ms per output token (MLPerf small-model interactive TPOT target)",
+      "source_url": "https://mlcommons.org/2025/04/llm-inference-v5/",
+      "source_date": "2025-04",
+      "notes": "vLLM reports ITL as the true per-token sum and TPOT as the decode-phase average; GenAI-Perf excludes TTFT from ITL while LLMPerf includes it - a known cross-tool definition mismatch operators must normalize before comparing.",
+      "in_scope": true
+    },
+    {
+      "id": "end-to-end-request-latency",
+      "category": "latency",
+      "dimension": "End-to-end request latency (E2EL)",
+      "why_it_matters": "E2EL is the full submit-to-final-token time and is what a downstream agent or pipeline actually budgets against. It bundles queueing, prefill, all decode steps, batching effects, and network, so it is the only metric that captures the compound cost of long generations and is the right unit for multi-step agent SLA math.",
+      "sota_systems": [
+        "NVIDIA GenAI-Perf",
+        "vLLM benchmark_serving (e2el percentile)"
+      ],
+      "sota_bar": "Qualitative: E2EL ≈ TTFT + (output_len-1)×TPOT plus scheduling/network overhead; serious harnesses report it as a percentile (P50/P99) at a fixed output length, using a sliding window that discards warm-up/cool-down requests for a stable measurement.",
+      "best_value": null,
+      "metric_unit": "ms or s (P50/P99 end-to-end)",
+      "source_url": "https://docs.nvidia.com/nim/benchmarking/llm/latest/metrics.html",
+      "source_date": "2025-01",
+      "notes": "GenAI-Perf defines request latency as the time difference between request sent and final token received; it uses a sliding-window stable-measurement technique to exclude warming/cooling requests.",
+      "in_scope": true
+    },
+    {
+      "id": "tail-latency-percentiles",
+      "category": "latency",
+      "dimension": "Tail latency distribution (P50/P95/P99/P99.9)",
+      "why_it_matters": "Averages hide the requests that ruin trust. A degrading P99 while P50 holds steady is the early-warning signature of queue buildup or KV-memory pressure. At scale a 1-in-100 bad request is a continuous problem (100/hr at 10k req/hr), so operators size capacity and write SLOs against tail percentiles, not means.",
+      "sota_systems": [
+        "MLPerf Inference (P99-based constraints)",
+        "vLLM benchmark_serving",
+        "production SLO practice"
+      ],
+      "sota_bar": "MLPerf encodes its latency SLOs at the 99th percentile (e.g. 6s TTFT / 175ms TPOT P99 for 405B server). Industry guidance treats a P99 that is many multiples of P50 (e.g. P50 400ms vs P99 4s) as a queueing/memory-pressure red flag requiring capacity or scheduler intervention.",
+      "best_value": 99,
+      "metric_unit": "percentile basis for SLO (P99)",
+      "source_url": "https://www.spheron.network/blog/llm-inference-slo-ttft-itl-latency-budget-guide-2026/",
+      "source_date": "2026-01",
+      "notes": "MLPerf reference: P99 TTFT/TPOT constraints per scenario; tail-latency divergence under load is the canonical signal that goodput is collapsing even while throughput still looks healthy.",
+      "in_scope": true
+    },
+    {
+      "id": "slo-constrained-goodput",
+      "category": "cost-efficiency",
+      "dimension": "SLO-constrained goodput (per-GPU)",
+      "why_it_matters": "Raw throughput (tokens/s) is gameable by sacrificing latency. Goodput - the max request rate served while still meeting the TTFT and TPOT SLO for >=X% (e.g. 90%) of requests, normalized per GPU - is the metric that actually maps to cost-per-served-user. It is the central buyer's KPI because it unifies latency and throughput into one defensible number.",
+      "sota_systems": [
+        "DistServe",
+        "DynaServe",
+        "NVIDIA Dynamo",
+        "GenAI-Perf goodput mode"
+      ],
+      "sota_bar": "DistServe reports up to 4.48x higher goodput (or 7.4x higher sustainable request rate / 12.6x tighter SLO at 90% attainment) over prior SOTA serving systems by disaggregating prefill and decode. GenAI-Perf can directly measure goodput against user-set TTFT/TPOT constraints.",
+      "best_value": 4.48,
+      "metric_unit": "x goodput vs prior SOTA at 90% SLO attainment",
+      "source_url": "https://arxiv.org/html/2401.09670v1",
+      "source_date": "2024-01",
+      "notes": "Goodput = completed requests/s meeting both TTFT and TPOT SLOs. Per-GPU normalization is what makes it a cost metric; vLLM and GenAI-Perf both expose goodput-with-SLO modes.",
+      "in_scope": true
+    },
+    {
+      "id": "latency-throughput-pareto",
+      "category": "throughput",
+      "dimension": "Latency-vs-throughput Pareto frontier",
+      "why_it_matters": "There is no single operating point - every system trades batch size against per-request latency. The buyer's real question is the shape of the whole frontier: how much throughput can I buy before TTFT/TPOT breaches my SLO, and how gracefully does the curve bend. A system that advances the frontier serves more users per GPU at the SAME latency guarantee.",
+      "sota_systems": [
+        "Sarathi-Serve (chunked prefill)",
+        "DynaServe",
+        "vLLM/SGLang sweeps"
+      ],
+      "sota_bar": "Qualitative/relative: frontier-advancing techniques (Sarathi-Serve chunked prefill, PD-disaggregation) push higher throughput at fixed latency SLO; the frontier is reported as a sweep of request rate vs P99 TTFT/TPOT rather than a single point. PD-colocation maximizes throughput but breaches latency SLO; disaggregation holds SLO but under-utilizes GPUs.",
+      "best_value": null,
+      "metric_unit": "throughput (tok/s or req/s) at fixed P99 latency SLO",
+      "source_url": "https://arxiv.org/pdf/2403.02310",
+      "source_date": "2024-03",
+      "notes": "Sarathi-Serve frames the explicit throughput-latency tradeoff via stall-free batching; serious evaluation requires the full curve, not a cherry-picked operating point.",
+      "in_scope": true
+    },
+    {
+      "id": "ttft-degradation-under-load",
+      "category": "operability",
+      "dimension": "Latency degradation under concurrency / load (saturation behavior)",
+      "why_it_matters": "TTFT and tail latency are flat at low load and explode past a knee point as the request queue grows. The location of that knee, and how steeply latency climbs past it, determine real capacity. Testing at concurrency=1 is meaningless; operators must characterize TTFT/P99 across a concurrency sweep up to and beyond their P95 concurrent-request count.",
+      "sota_systems": [
+        "vLLM benchmark_serving (request-rate sweep)",
+        "NVIDIA GenAI-Perf (concurrency sweep)"
+      ],
+      "sota_bar": "Qualitative: TTFT decomposes into queueing delay + prefill compute; at P50 queueing dominates and request latency grows sharply once RPS pushes the queue to build. The diagnostic is a load sweep showing the rate at which P99 TTFT crosses the SLO; P99 climbing while P50 is flat is the saturation signature.",
+      "best_value": null,
+      "metric_unit": "P99 TTFT vs concurrency / request rate (knee point)",
+      "source_url": "https://tianpan.co/blog/2026-03-10-llm-latency-decomposition-ttft-vs-throughput",
+      "source_date": "2026-03",
+      "notes": "Concurrency interacts with the batching scheduler; high concurrency exposes P99 behavior invisible at low load. Test at expected P95 concurrent request count, not single-user.",
+      "in_scope": true
+    },
+    {
+      "id": "prefill-decode-interference",
+      "category": "latency",
+      "dimension": "Prefill-decode interference & chunked-prefill TTFT/TPOT tension",
+      "why_it_matters": "When a long-context prefill shares a GPU batch with short interactive requests, it starves decode steps and spikes ITL/TPOT for everyone in the batch - and conversely, protecting decode can balloon TTFT. How a scheduler resolves this tension (chunked prefill, stall-free batching) is a primary differentiator of mixed-workload latency stability, which naive single-shape benchmarks never reveal.",
+      "sota_systems": [
+        "Sarathi-Serve",
+        "vLLM chunked prefill",
+        "SGLang"
+      ],
+      "sota_bar": "Chunked prefill interleaves long prefills with decode to remove ITL spikes; reported P95 improvement of ~68% at 32K-token inputs (2,800ms -> 890ms) while costing only a slight TTFT increase and ~5-20% throughput change depending on workload.",
+      "best_value": 68,
+      "metric_unit": "% P95 latency reduction at 32K input via chunked prefill",
+      "source_url": "https://www.spheron.network/blog/llm-serving-optimization-continuous-batching-paged-attention/",
+      "source_date": "2026-01",
+      "notes": "The core scheduler tradeoff: prioritizing TTFT hurts throughput; prioritizing throughput causes decode stalls and TPOT tail spikes. Sarathi-Serve's stall-free batching is the canonical academic framing (arXiv 2403.02310).",
+      "in_scope": true
+    },
+    {
+      "id": "prefix-cache-ttft-impact",
+      "category": "kv-cache",
+      "dimension": "Prefix/KV-cache reuse impact on TTFT (cache-hit latency)",
+      "why_it_matters": "Real workloads (shared system prompts, RAG documents, multi-turn chat) share long prefixes. Automatic prefix caching skips recomputing the shared KV, slashing prefill tokens and therefore TTFT on cache hits. The cache-hit vs cache-miss TTFT gap, and the hit rate under a realistic prompt mix, are decisive for chatbot/RAG/agent latency yet are absent from cold synthetic benchmarks.",
+      "sota_systems": [
+        "vLLM Automatic Prefix Caching (APC)",
+        "SGLang RadixAttention",
+        "llm-d distributed prefix cache"
+      ],
+      "sota_bar": "Qualitative: APC reuses exact KV pages via hash-based block matching, cutting prefill tokens and TTFT for repeated/long-prefix prompts with negligible steady-state overhead; overhead from hash compute grows with input length and concurrency. Distributed prefix-cache scheduling (llm-d) extends the win across replicas.",
+      "best_value": null,
+      "metric_unit": "TTFT reduction on cache hit (workload-dependent)",
+      "source_url": "https://docs.vllm.ai/en/latest/features/automatic_prefix_caching/",
+      "source_date": "2025-01",
+      "notes": "Must be measured at a realistic prefix-sharing ratio; reporting only cold (no-hit) TTFT understates production performance, while reporting only warm overstates it. Hit rate is the hidden variable.",
+      "in_scope": true
+    },
+    {
+      "id": "speculative-decoding-itl",
+      "category": "speculative-decoding",
+      "dimension": "Speculative decoding effect on ITL (acceptance-rate-bound)",
+      "why_it_matters": "Speculative decoding (EAGLE-3, Medusa, MTP) verifies multiple draft tokens per forward pass, cutting ITL/TPOT 2-4x WITHOUT touching TTFT - the cheapest way to hit aggressive per-user token-rate SLOs at low batch size. The realized speedup is bound by draft acceptance rate, which is workload-dependent, so acceptance rate is itself a first-class latency dimension.",
+      "sota_systems": [
+        "EAGLE-3",
+        "Medusa-2",
+        "TensorRT-LLM / vLLM speculative decoding"
+      ],
+      "sota_bar": "EAGLE-3 reports ~0.80-0.88 acceptance on coding/instruction tasks giving ~3-4x decode token-rate (ITL) gains on H100/H200, and outperforms EAGLE-2/Medusa-2 by 15-25% tokens/s at batch size 1. Speedup primarily reduces ITL, not TTFT.",
+      "best_value": 4,
+      "metric_unit": "x ITL/decode-rate speedup (EAGLE-3, batch 1)",
+      "source_url": "https://www.spheron.network/blog/eagle-3-speculative-decoding-gpu-cloud/",
+      "source_date": "2026-01",
+      "notes": "Speedup collapses toward 1x as acceptance rate drops on out-of-distribution prompts and as batch size grows (verification compute competes with throughput). Report acceptance rate alongside the speedup.",
+      "in_scope": true
+    },
+    {
+      "id": "phase-disaggregation-slo-isolation",
+      "category": "parallelism",
+      "dimension": "Prefill-decode disaggregation & per-phase SLO isolation",
+      "why_it_matters": "Prefill is compute-bound (TTFT-sensitive) and decode is memory-bandwidth-bound (TPOT-sensitive); colocating them couples their tails. Disaggregating onto separate GPU pools lets each phase scale and meet its own SLO independently, which has become the production standard for hitting tight TTFT AND tight TPOT simultaneously at scale.",
+      "sota_systems": [
+        "NVIDIA Dynamo",
+        "DistServe",
+        "llm-d",
+        "DeepSeek (production PD-disagg)"
+      ],
+      "sota_bar": "DistServe: up to 7.4x higher request rate / 12.6x tighter SLO at >90% attainment. NVIDIA Dynamo Planner monitors GPU capacity vs TTFT/ITL SLOs to decide per-request whether to serve disaggregated. PD-disaggregation is now supported across vLLM, SGLang, TensorRT-LLM, LMDeploy, Dynamo and deployed at production scale.",
+      "best_value": 7.4,
+      "metric_unit": "x higher sustainable request rate at SLO (DistServe)",
+      "source_url": "https://developer.nvidia.com/blog/introducing-nvidia-dynamo-a-low-latency-distributed-inference-framework-for-scaling-reasoning-ai-models/",
+      "source_date": "2025-03",
+      "notes": "Disaggregation cost is KV-cache transfer between prefill and decode nodes; the tradeoff vs colocation+chunked-prefill is itself an evaluation axis (DynaServe unifies both).",
+      "in_scope": true
+    },
+    {
+      "id": "cold-start-scaling-latency",
+      "category": "operability",
+      "dimension": "Cold-start / autoscaling latency (scale-to-zero & scale-out)",
+      "why_it_matters": "The first request after a scale-out or a scale-to-zero wake pays a model-load tax - weights fetched and loaded into GPU memory before any token streams - inflating TTFT by tens of seconds. For elastic/serverless deployments this dominates worst-case latency and decides whether scale-to-zero is even viable for interactive use, so cold-start TTFT and warm-up time are core operability dimensions buyers must score.",
+      "sota_systems": [
+        "RunPod FlashBoot",
+        "ServerlessLLM",
+        "HydraServe",
+        "PipeBoost"
+      ],
+      "sota_bar": "Naive serverless GPU cold starts are 30-120s (often >40s to first token). ServerlessLLM's multi-tier checkpoint loading cuts startup 6-8x; RunPod FlashBoot reports sub-250ms cold starts for most requests (≈half under 200ms), making scale-to-zero viable for real-time serving.",
+      "best_value": 250,
+      "metric_unit": "ms cold-start to readiness (FlashBoot, most requests)",
+      "source_url": "https://regolo.ai/scale-to-zero-cold-start-latency-why-serverless-gpu-breaks-real-time-ai-and-how-to-fix-it/",
+      "source_date": "2025-01",
+      "notes": "Cold-start latency drives the first-request TTFT penalty and effective-throughput dips during scale-out; vendor sub-250ms numbers depend on warm pools / cached weights and should be validated against true scale-from-zero.",
+      "in_scope": true
+    },
+    {
+      "id": "paged-kv-memory-utilization",
+      "category": "kv-cache",
+      "dimension": "Paged KV block management and memory utilization (anti-fragmentation)",
+      "why_it_matters": "KV cache is the dominant runtime memory consumer in LLM serving. Before paging, engines wasted 60-80% of KV memory to internal fragmentation and over-reservation, capping batch size and throughput. Block-based (paged) allocation determines how close an engine gets to theoretical KV capacity, which directly sets max concurrency and tokens/sec on fixed hardware. This is the foundational dimension every serious operator evaluates first.",
+      "sota_systems": [
+        "vLLM (PagedAttention)",
+        "SGLang",
+        "TensorRT-LLM"
+      ],
+      "sota_bar": "PagedAttention achieves ~96.3% KV-cache memory utilization (<4% waste) vs 20-40% for prior systems like Orca; eliminates the 60-80% fragmentation/over-reservation waste of contiguous-allocation engines",
+      "best_value": 96.3,
+      "metric_unit": "percent KV memory utilization",
+      "source_url": "https://arxiv.org/abs/2309.06180",
+      "source_date": "2023-09",
+      "notes": "Original PagedAttention/vLLM paper (Kwon et al., SOSP 2023). Block KV management is now table stakes across vLLM, SGLang, TensorRT-LLM; the differentiator has shifted to block size, copy-on-write sharing, and defrag policy.",
+      "in_scope": true
+    },
+    {
+      "id": "automatic-prefix-caching-hit-rate",
+      "category": "kv-cache",
+      "dimension": "Automatic prefix caching / RadixAttention prefix reuse and cache hit rate",
+      "why_it_matters": "Shared prompt prefixes (system prompts, few-shot exemplars, multi-turn history, RAG templates) are extremely common. Reusing their KV instead of recomputing prefill is the single largest throughput lever for prefix-heavy workloads. The hit rate an engine actually attains under a given workload, and whether reuse is automatic (no app changes), is a primary buyer differentiator between serving stacks.",
+      "sota_systems": [
+        "SGLang (RadixAttention)",
+        "vLLM (Automatic Prefix Caching)"
+      ],
+      "sota_bar": "SGLang RadixAttention delivers up to ~6.4x throughput on prefix-heavy workloads vs non-caching baselines; reported cache hit rates of 75-95% on few-shot/multi-turn workloads where naive paged engines stay far lower",
+      "best_value": 6.4,
+      "metric_unit": "x throughput on prefix-heavy workloads",
+      "source_url": "https://www.lmsys.org/blog/2024-01-17-sglang/",
+      "source_date": "2024-01",
+      "notes": "RadixAttention stores KV in a radix tree for automatic prefix discovery; vLLM APC's LRU eviction is shown to coincide with the RadixAttention policy for full-attention models. Hit-rate numbers are workload-dependent; third-party comparison figures (85-95% vs 15-25% few-shot) come from vendor/blog comparisons, treat as directional.",
+      "in_scope": true
+    },
+    {
+      "id": "non-prefix-kv-reuse-cacheblend",
+      "category": "kv-cache",
+      "dimension": "Non-prefix / cross-document KV reuse (RAG chunk caching)",
+      "why_it_matters": "Prefix caching only helps when the shared text is a literal prefix. RAG concatenates retrieved chunks in varying order, so prefix reuse misses most of the opportunity. Engines that can reuse KV for arbitrary cached chunks (recomputing only the small fraction needed to fix cross-attention) unlock a second, larger tier of reuse for the most common enterprise workload. This is a sharp differentiator that a naive prefix-only scorecard omits.",
+      "sota_systems": [
+        "LMCache (CacheBlend)"
+      ],
+      "sota_bar": "CacheBlend reuses KV for all chunks (prefix or not) with ~15% recomputation, cutting TTFT 2.2-3.3x and raising throughput 2.8-5x vs prefix caching, with negligible quality loss; LMCache reports 3-10x TTFT reduction overall",
+      "best_value": 4.5,
+      "metric_unit": "x TTFT speedup on RAG vs prefix caching",
+      "source_url": "https://blog.lmcache.ai/en/2024/10/09/beyond-prefix-caching-how-lmcache-speeds-up-rag-by-4-5x-by-one-line-of-change/",
+      "source_date": "2024-10",
+      "notes": "CacheBlend paper: arxiv.org/pdf/2405.16444. The 2.2-3.3x TTFT / 2.8-5x throughput figures are vs prefix caching; the 4.5x is the headline RAG number. Quality preservation is the honesty gate here.",
+      "in_scope": true
+    },
+    {
+      "id": "kv-offloading-tiered-capacity",
+      "category": "kv-cache",
+      "dimension": "KV-cache offloading to CPU/host/NVMe/remote (multi-tier hierarchy depth)",
+      "why_it_matters": "GPU HBM holds only a small KV working set. Offloading cold KV to CPU DRAM, local SSD/NVMe, and remote object/RDMA stores expands effective cache capacity by orders of magnitude, raising hit rates and enabling 'trade storage for compute'. The depth of the tier hierarchy, supported backends, and load bandwidth from each tier are what separate a production KV layer from a single-GPU cache.",
+      "sota_systems": [
+        "LMCache",
+        "Mooncake (Mooncake Store)"
+      ],
+      "sota_bar": "LMCache offloads across CPU RAM, local disk, Redis/Valkey, Mooncake, InfiniStore, S3, NIXL and GDS with far higher CPU-load bandwidth than vLLM native offload (claimed up to 7x faster access to ~100x more KV); Mooncake pools CPU/DRAM/SSD/RDMA into a disaggregated store",
+      "best_value": null,
+      "metric_unit": "qualitative (backends supported, load bandwidth)",
+      "source_url": "https://github.com/lmcache/lmcache",
+      "source_date": "2026-01",
+      "notes": "7x/100x figures from LMCache 2024 launch blog (blog.lmcache.ai/en/2024/09/17). Backend list from LMCache repo/docs (continuously updated). Differentiator = number of tiers, per-tier bandwidth, and prefetch intelligence.",
+      "in_scope": true
+    },
+    {
+      "id": "kv-quantization-fp8-int4",
+      "category": "quantization",
+      "dimension": "KV-cache quantization (FP8 / INT8 / INT4 KV)",
+      "why_it_matters": "Quantizing KV from BF16 to FP8 halves bytes-per-cached-token, directly doubling concurrency or context length at fixed HBM. INT8/INT4 push further. The buyer cares about the precision/accuracy/throughput trade: which formats are supported, whether attention runs in low precision (not just storage), and the measured accuracy delta. It is one of the cheapest capacity multipliers available.",
+      "sota_systems": [
+        "TensorRT-LLM",
+        "vLLM"
+      ],
+      "sota_bar": "FP8 KV halves per-token KV memory (BF16->FP8), enabling ~2-3x larger batch on H100 with FP8 KV recommended over INT8 on Hopper/Ada for accuracy; TensorRT-LLM supports FP8(E4M3)+INT8 KV and FP8 attention (use_fp8_context_fmha), vLLM supports FP8 E4M3/E5M2 KV",
+      "best_value": 2,
+      "metric_unit": "x KV memory reduction (BF16->FP8)",
+      "source_url": "https://blog.squeezebits.com/vllm-vs-tensorrtllm-8-kv-cache-quantization-35079",
+      "source_date": "2025-01",
+      "notes": "SqueezeBits vLLM-vs-TRT-LLM KV-quant deep dive. Note vLLM FP8 KV did not always improve throughput (can slightly degrade in prefill-heavy cases) per vllm.ai/blog/2026-04-22-fp8-kvcache; the win is memory/capacity, not always speed. vLLM lacked INT8 KV as of that comparison.",
+      "in_scope": true
+    },
+    {
+      "id": "kv-compression-eviction",
+      "category": "kv-cache",
+      "dimension": "KV compression / token eviction under a fixed cache budget",
+      "why_it_matters": "For very long contexts, even quantized KV is too large. Eviction/sparsity methods (keep attention-heavy or recent/sink tokens) shrink the resident KV to a fixed token budget, trading a controlled accuracy loss for memory and decode speed. Operators serving long-context or reasoning workloads must evaluate how aggressively a system can compress before quality breaks, and which algorithm it uses.",
+      "sota_systems": [
+        "H2O",
+        "StreamingLLM",
+        "SnapKV",
+        "Quest"
+      ],
+      "sota_bar": "No clean universal SOTA: H2O/StreamingLLM/SnapKV/Quest hold quality at moderate budgets but accuracy of all practical methods drops sharply below ~1024-token budgets, while oracle top-k stays near-lossless even at 256, exposing a real prediction gap",
+      "best_value": null,
+      "metric_unit": "qualitative (accuracy vs token budget)",
+      "source_url": "https://arxiv.org/pdf/2406.10774",
+      "source_date": "2024-06",
+      "notes": "Quest paper documents the budget/accuracy cliff and oracle gap. This dimension is mostly research-stage; few production engines enable lossy eviction by default because of the quality risk, which is itself a buyer signal.",
+      "in_scope": true
+    },
+    {
+      "id": "kv-transfer-disaggregation",
+      "category": "kv-cache",
+      "dimension": "KV-cache transfer for prefill/decode disaggregation (NIXL / NCCL / UCX)",
+      "why_it_matters": "Disaggregated serving splits prefill and decode onto separate GPUs, requiring the prefill KV to be shipped to the decode engine. The transport library, supported fabrics (NVLink/InfiniBand/RoCE/NVMe-oF/S3), and whether transfer is non-blocking and overlapped layer-by-layer with compute decide whether disaggregation adds TTFT or hides the cost. This is the connective tissue that makes large-scale disaggregation viable.",
+      "sota_systems": [
+        "NVIDIA NIXL",
+        "NVIDIA Dynamo",
+        "Mooncake"
+      ],
+      "sota_bar": "NIXL moves KV point-to-point over RDMA/InfiniBand, RoCE/UCX, TCP, NVMe-oF and S3 with non-blocking transfers; Dynamo overlaps layerwise KV generation with transfer so forward passes continue, hiding network latency to limit TTFT inflation from cold/cross-GPU transfers",
+      "best_value": null,
+      "metric_unit": "qualitative (fabrics, overlap, blocking behavior)",
+      "source_url": "https://developer.nvidia.com/blog/enhancing-distributed-inference-performance-with-the-nvidia-inference-transfer-library/",
+      "source_date": "2025-04",
+      "notes": "NIXL open-sourced at GTC 2025. Achieving full overlap depends on egress bandwidth vs prefill compute time. Mooncake's RDMA-based KVCache transfer is the production peer (FAST'25 best paper).",
+      "in_scope": true
+    },
+    {
+      "id": "kv-cache-aware-routing",
+      "category": "kv-cache",
+      "dimension": "KV-cache-aware / prefix-aware request routing across a fleet",
+      "why_it_matters": "A cache is only as good as the routing that lands a request on the GPU that already holds its KV. Across a multi-node fleet, a cache-aware router computes prefix/block overlap and balances it against load to maximize cluster-wide hit rate. Without it, replicas duplicate KV and recompute prefill. This is the dimension that turns per-engine caching into fleet-level economics.",
+      "sota_systems": [
+        "NVIDIA Dynamo (KV-aware router)",
+        "SGLang router",
+        "Baseten"
+      ],
+      "sota_bar": "Dynamo's KV-aware router scores request-to-cached-block overlap across all GPUs and routes to minimize recomputation while balancing load; Baseten reports ~2x faster inference using Dynamo KV-cache-aware routing",
+      "best_value": 2,
+      "metric_unit": "x inference speedup from cache-aware routing",
+      "source_url": "https://www.baseten.co/blog/how-baseten-achieved-2x-faster-inference-with-nvidia-dynamo/",
+      "source_date": "2025-01",
+      "notes": "Dynamo router supports vLLM/SGLang/TRT-LLM backends. SGLang switches between hit-rate and load routing via a threshold; current methods are largely heuristic (arxiv 2602.11688 GORGO critiques this), so 'routing quality under dynamic load' is an open differentiator.",
+      "in_scope": true
+    },
+    {
+      "id": "attention-arch-kv-footprint",
+      "category": "kv-cache",
+      "dimension": "Attention architecture impact on KV footprint (MQA/GQA/MLA bytes-per-token)",
+      "why_it_matters": "The model's attention design sets the floor on KV size before any serving trick applies. MQA/GQA share K/V heads; MLA compresses K/V into a low-rank latent. A 3-5x smaller KV footprint per token compounds with every other lever (paging, offload, quant) to multiply servable concurrency and context. Operators selecting models for serving cost must weigh this, and engines must implement the architecture's KV layout efficiently.",
+      "sota_systems": [
+        "DeepSeek-V2/V3 (MLA)",
+        "GQA-based models (Llama-3, Qwen)"
+      ],
+      "sota_bar": "DeepSeek MLA stores ~70 KB/token vs 192-328 KB/token for GQA models (~2.7-4.7x smaller); DeepSeek-V2 MLA cut KV size ~93.3% vs its 67B dense baseline",
+      "best_value": 4.7,
+      "metric_unit": "x KV bytes-per-token reduction (MLA vs GQA)",
+      "source_url": "https://arxiv.org/html/2502.14837v1",
+      "source_date": "2025-02",
+      "notes": "70 KB vs 192-328 KB/token figures from MLA analyses; 93.3% from DeepSeek-V2 report. Serving engines must support MLA's compressed-latent KV layout to realize the gain, so it is both a model and an engine dimension.",
+      "in_scope": true
+    },
+    {
+      "id": "effective-capacity-slo-gain",
+      "category": "cost-efficiency",
+      "dimension": "End-to-end effective request capacity / cost gain from the KV system under SLO",
+      "why_it_matters": "All the mechanisms above only matter if they raise the requests an operator can serve within latency SLOs on fixed hardware. The integrated, trace-driven gain (effective capacity, cost per token) is the bottom-line metric a buyer uses to compare whole KV-centric architectures rather than individual features. It captures the 'trade storage for compute' thesis at the system level.",
+      "sota_systems": [
+        "Mooncake",
+        "LMCache + vLLM",
+        "NVIDIA Dynamo"
+      ],
+      "sota_bar": "Mooncake's KVCache-centric disaggregated architecture raises effective request capacity 59%-498% on real Kimi traces while meeting SLOs; runs across thousands of nodes serving 100B+ tokens/day",
+      "best_value": 498,
+      "metric_unit": "percent increase in effective request capacity (max)",
+      "source_url": "https://www.usenix.org/conference/fast25/presentation/qin",
+      "source_date": "2025-02",
+      "notes": "Mooncake, USENIX FAST'25 best paper. 59-498% range is workload-dependent; the upper bound is the prefix-heavy regime. This is the integrative KPI that subsumes hit rate, offload, transfer, and routing.",
+      "in_scope": true
+    },
+    {
+      "id": "persistent-cross-instance-cache-coherence",
+      "category": "operability",
+      "dimension": "Cross-instance / persistent KV cache sharing and coherence",
+      "why_it_matters": "In production, the same KV should be reusable across engine instances, restarts, and prefill/decode roles, not trapped in one process's HBM. A shared, persistent, deduplicated KV store with peer-to-peer access raises fleet hit rate and survives autoscaling churn. Operators evaluate whether caching is per-process-ephemeral or a first-class shared substrate with consistent addressing.",
+      "sota_systems": [
+        "LMCache",
+        "Mooncake Store"
+      ],
+      "sota_bar": "LMCache enables KV reuse across different vLLM engine instances plus multi-GPU peer-to-peer KV sharing and disaggregated prefill/decode; Mooncake Store exposes a global, deduplicated KVCache pool addressable across the cluster",
+      "best_value": null,
+      "metric_unit": "qualitative (cross-instance reuse, dedup, persistence)",
+      "source_url": "https://arxiv.org/html/2510.09665v2",
+      "source_date": "2025-10",
+      "notes": "LMCache enterprise KV layer paper. Distinguishes a real KV 'layer/store' from a single-engine cache; key for autoscaling, blue/green deploys, and shared multi-tenant fleets where ephemeral caches lose all warmth on restart.",
+      "in_scope": true
+    },
+    {
+      "id": "fp8-weight-activation-accuracy-retention",
+      "category": "quantization",
+      "dimension": "FP8 (W8A8, E4M3) accuracy retention vs bf16 reference",
+      "why_it_matters": "FP8 W8A8 is the production default at vLLM/SGLang/TRT-LLM on Hopper+ and is the baseline every buyer assumes is 'free.' Operators need proof it is effectively lossless before turning it on fleet-wide, because it roughly halves memory and adds 1.4-1.8x serving throughput only if quality holds.",
+      "sota_systems": [
+        "vLLM (FP8 W8A8 dynamic/static)",
+        "TensorRT-LLM (ModelOpt)",
+        "SGLang",
+        "Red Hat / Neural Magic llm-compressor"
+      ],
+      "sota_bar": "FP8 W8A8 (E4M3) is effectively lossless across the full Llama-3.1 family (8B/70B/405B) over 500k+ evaluations; ~99% median accuracy recovery vs bf16. E4M3 consistently beats E5M2 for weights/activations (more mantissa, narrower range). Dynamic FP8 needs no calibration set.",
+      "best_value": 99,
+      "metric_unit": "% accuracy recovery vs bf16 (median)",
+      "source_url": "https://arxiv.org/abs/2411.02355",
+      "source_date": "2025-08",
+      "notes": "'Give Me BF16 or Give Me Death?' (ACL 2025). E4M3-vs-E5M2 detail from arXiv:2502.01070 (FP8 across accelerators, 2025-02). The headline finding: FP8 lossless, INT8 1-3% loss, INT4-weight more competitive than expected.",
+      "in_scope": true
+    },
+    {
+      "id": "int8-w8a8-smoothquant-accuracy",
+      "category": "quantization",
+      "dimension": "INT8 W8A8 (SmoothQuant) accuracy under activation outliers",
+      "why_it_matters": "INT8 W8A8 runs on far more hardware than FP8 (no FP8 tensor cores required) and dominates throughput in async continuous-batching serving. Its hard problem is activation outliers; how well a system tames them (SmoothQuant migration, per-channel/per-token dynamic scales) determines whether INT8 is viable for a given model.",
+      "sota_systems": [
+        "SmoothQuant (MIT HAN Lab)",
+        "vLLM INT8 W8A8",
+        "TensorRT-LLM",
+        "llm-compressor"
+      ],
+      "sota_bar": "Well-tuned INT8 W8A8 holds 1-3% per-task accuracy degradation vs bf16 across the Llama-3.1 family using SmoothQuant + dynamic per-token activation scales; ~1.56x speedup, ~2x memory cut with negligible loss on OPT/BLOOM/LLaMA/Mixtral.",
+      "best_value": 3,
+      "metric_unit": "% max per-task accuracy degradation vs bf16",
+      "source_url": "https://arxiv.org/abs/2411.02355",
+      "source_date": "2025-08",
+      "notes": "SmoothQuant original: arXiv:2211.10438 (ICML 2023, updated through 2024). INT8 is preferred over W4A16 when server-side throughput (not latency/memory) is the goal.",
+      "in_scope": true
+    },
+    {
+      "id": "int4-weight-only-awq-gptq",
+      "category": "quantization",
+      "dimension": "INT4 weight-only (W4A16: AWQ, GPTQ) accuracy and calibration sensitivity",
+      "why_it_matters": "W4A16 is the most cost-efficient choice for latency/memory-bound and synchronous single-stream serving, and is the dominant format for consumer/edge deployment. Buyers must know the accuracy floor and how sensitive it is to calibration data and algorithm choice (AWQ activation-aware vs GPTQ second-order), since results flip with implementation and calibration set size.",
+      "sota_systems": [
+        "AWQ (LMDeploy, vLLM)",
+        "GPTQ (vLLM, AutoGPTQ)",
+        "TensorRT-LLM W4A16"
+      ],
+      "sota_bar": "W4A16 INT4 keeps accuracy degradation in the negligible-to-moderate range (<4% on commonsense QA / math) and rivals 8-bit quantization; AWQ generally beats GPTQ on perplexity/throughput but a well-tuned GPTQ with a large calibration set can be more accurate on real-world tasks. Calibration set size materially shifts retention.",
+      "best_value": 4,
+      "metric_unit": "% accuracy degradation vs bf16 (typical upper bound)",
+      "source_url": "https://arxiv.org/abs/2411.02355",
+      "source_date": "2025-08",
+      "notes": "Calibration-sensitivity and AWQ-vs-GPTQ flip from the Microsoft Data Science INT4 guide (GPTQ vs AWQ vs Olive). W4A16 = best cost-efficiency for synchronous setups per the BF16 paper.",
+      "in_scope": true
+    },
+    {
+      "id": "fp4-nvfp4-mxfp4-blackwell",
+      "category": "quantization",
+      "dimension": "4-bit microscaling float (NVFP4 / MXFP4 / FP4) accuracy vs FP8 on Blackwell",
+      "why_it_matters": "FP4 on Blackwell doubles peak throughput vs FP8 and is the new frontier format MLPerf submissions now use for Llama-3.1-405B. The differentiator is NVFP4 (E4M3 per-16 block scale, FP32 second-level) vs MXFP4 (E8M0 per-32 power-of-two scale): block size and scale precision drive whether 4-bit holds MMLU/perplexity near FP8.",
+      "sota_systems": [
+        "NVIDIA Blackwell + TensorRT-LLM (ModelOpt NVFP4)",
+        "vLLM NVFP4",
+        "llama.cpp (NVFP4/MXFP4)"
+      ],
+      "sota_bar": "NVFP4 quantizing DeepSeek-R1 from FP8 to FP4 drops MMLU only 0.1 point (90.8 -> 90.7); NVFP4 reports ~88% lower quantization error than MXFP4 power-of-two scaling and MXFP4 needs up to 36% more tokens to reach comparable loss. FP4 gives 2x peak throughput vs FP8 while meeting MLPerf accuracy targets.",
+      "best_value": 0.1,
+      "metric_unit": "MMLU point drop, FP8 -> NVFP4 (DeepSeek-R1)",
+      "source_url": "https://developer.nvidia.com/blog/nvidia-blackwell-delivers-massive-performance-leaps-in-mlperf-inference-v5-0/",
+      "source_date": "2025-04",
+      "notes": "MMLU 0.1pt figure: Spheron FP4-on-Blackwell analysis. NVFP4-vs-MXFP4 error: emergentmind/Medium (Marie). NVFP4 is Blackwell-exclusive; MXFP4 is the OCP-standard cross-vendor 4-bit format.",
+      "in_scope": true
+    },
+    {
+      "id": "4bit-activation-rotation-quarot-spinquant",
+      "category": "quantization",
+      "dimension": "Full 4-bit (W4A4 + KV4) via rotation/outlier removal",
+      "why_it_matters": "The aggressive end of the design space: quantizing weights, activations, AND KV to 4 bits unlocks the largest memory/throughput wins but is gated entirely by activation-outlier handling. Hadamard/learned-rotation methods (QuaRot, SpinQuant) define how close W4A4 can get to full precision, which bounds what an operator can push without quality collapse.",
+      "sota_systems": [
+        "QuaRot (Hadamard rotation)",
+        "SpinQuant (learned rotation)",
+        "QServe W4A8KV4"
+      ],
+      "sota_bar": "QuaRot W4A4KV4 on Llama-2-70B loses at most 0.47 WikiText-2 perplexity and retains 99% of zero-shot accuracy (~3.5pt avg gap); SpinQuant narrows the W4A4KV4 gap to ~1.9 points (avg 64.0 on Llama-2-7B), with up to 3.33x prefill speedup / 3.89x decode memory saving.",
+      "best_value": 1.9,
+      "metric_unit": "avg accuracy point gap to full precision (W4A4KV4, SpinQuant)",
+      "source_url": "https://arxiv.org/html/2404.00456v1",
+      "source_date": "2024-04",
+      "notes": "QuaRot (arXiv:2404.00456). SpinQuant gap from comparison literature (AMXFP4 arXiv:2411.09909). QServe W4A8KV4 (arXiv:2405.04532) is the systems co-design variant.",
+      "in_scope": true
+    },
+    {
+      "id": "kv-cache-quantization-accuracy",
+      "category": "kv-cache",
+      "dimension": "KV-cache quantization (FP8 / INT8 / KIVI sub-4-bit) accuracy at long context",
+      "why_it_matters": "KV-cache dominates memory at long context and high concurrency; halving it (FP8) or going to 2-4 bits (KIVI/KVQuant) directly buys longer contexts or more concurrent requests at fixed hardware. The buyer question is exactly where it stays lossless vs where it degrades (prefill-heavy, head_dim=256, hybrid sliding-window layers).",
+      "sota_systems": [
+        "vLLM (--kv-cache-dtype fp8, E4M3)",
+        "KIVI (2-bit asymmetric)",
+        "KVTuner (mixed-precision)",
+        "KVQuant"
+      ],
+      "sota_bar": "vLLM FP8 KV-cache: negligible-to-minimal loss (<=1-2 points; Qwen3.5-27B fully recovers AUC@1M, <=0.7pt on reasoning) and is now the recommended default for long-context decode. KIVI K4V2 achieves ~5.3x near-lossless compression; sub-4-bit (KIVI 2-bit, KVQuant) pushes further. Lossy on prefill-heavy / head_dim=256 / short context.",
+      "best_value": 2,
+      "metric_unit": "max accuracy point loss, FP8 KV vs bf16 (long-context decode)",
+      "source_url": "https://vllm-project.github.io/2026/04/22/fp8-kvcache.html",
+      "source_date": "2026-04",
+      "notes": "vLLM FP8 KV-cache state-of post. KIVI/KVTuner: arXiv:2502.04420. INT8 KV not yet in vLLM as of the cited issue. Skip sliding-window layers via --kv-cache-dtype-skip-layers.",
+      "in_scope": true
+    },
+    {
+      "id": "quantization-granularity-scheme",
+      "category": "quantization",
+      "dimension": "Quantization granularity (per-tensor / per-channel / per-group / microscaling block size)",
+      "why_it_matters": "Granularity is the single biggest accuracy lever at a fixed bit-width and the hardest cost/quality knob: finer scales (per-channel, group-128, MX block-32, two-level) cut quantization error but add scale storage and GEMM overhead. It also determines hardware compatibility (MX needs block-32 tensor-core support). A scorecard that ignores granularity can't compare two 'INT4' or 'FP4' systems honestly.",
+      "sota_systems": [
+        "MX formats (OCP MXFP4/MXFP8, block-32)",
+        "NVFP4 (block-16, FP32 second-level)",
+        "group-128 INT4 (AWQ/GPTQ)",
+        "MOSS two-level microscaling"
+      ],
+      "sota_bar": "Per-block (block-32) microscaling beats per-tensor/per-channel; measured SNR gains of 3.0-3.4 dB over group-128 and 9.2-9.4 dB over per-tensor for two-level microscaling. Common group sizes 32/64/128; group-128 is the de-facto 4-bit weight-only default. NVFP4's block-16 + FP32 scale is finer than MXFP4's block-32 power-of-two.",
+      "best_value": 9.4,
+      "metric_unit": "dB SNR improvement, two-level MX block-32 vs per-tensor",
+      "source_url": "https://arxiv.org/html/2511.05811v2",
+      "source_date": "2025-11",
+      "notes": "MOSS (arXiv:2511.05811). Granularity taxonomy from Intel Neural Compressor MX docs and apxml granularity course. This is the dimension a naive bit-width-only scorecard omits.",
+      "in_scope": true
+    },
+    {
+      "id": "numerical-correctness-error-metric",
+      "category": "numerical-correctness",
+      "dimension": "Numerical-correctness error metric vs reference (perplexity, KL-divergence, recovery %)",
+      "why_it_matters": "Aggregate task scores (MMLU) hide quantization distortion because rare tokens barely move perplexity. Serious evaluation reports the deviation of the quantized model's token distribution from the bf16/fp16 reference (KL-divergence) plus generation-similarity, not just downstream accuracy. The choice of error metric is itself a differentiator buyers must scrutinize.",
+      "sota_systems": [
+        "llama.cpp (perplexity + KL-divergence tooling)",
+        "Neural Magic / vLLM recovery-% methodology",
+        "ModelOpt accuracy harness"
+      ],
+      "sota_bar": "Best practice pairs perplexity with KL-divergence against the FP16 baseline (llama.cpp emits both); KLD captures per-token distribution shift perplexity hides. Empirically: 5-bit GGUF is a strong near-lossless trade-off, 3-bit shows clear degradation; imatrix is essential below 3-bit, marginal at Q4_K_M+. Generation text-similarity is reported as a supplementary correctness check.",
+      "best_value": null,
+      "metric_unit": "KL-divergence (nats) / perplexity delta vs fp16 (no single SOTA value)",
+      "source_url": "https://github.com/ggml-org/llama.cpp/blob/master/tools/quantize/README.md",
+      "source_date": "2026-01",
+      "notes": "Unified GGUF eval: arXiv:2601.14277. KLD-vs-perplexity rationale widely documented. Set best_value=null: the SOTA is the methodology (report KLD + ppl + recovery), not one number.",
+      "in_scope": true
+    },
+    {
+      "id": "deterministic-bitexact-inference",
+      "category": "numerical-correctness",
+      "dimension": "Deterministic / bitwise-reproducible inference (batch invariance)",
+      "why_it_matters": "Quantized serving is system-nondeterministic: identical prompts give different outputs because reduction order changes with batch size (floating-point non-associativity in matmul/attention/norm). For eval reproducibility, RL training-inference consistency, debugging, and audit/compliance, operators increasingly require bitwise-identical outputs - a hard correctness property distinct from accuracy.",
+      "sota_systems": [
+        "Thinking Machines batch-invariant-ops (on vLLM FlexAttention)",
+        "vLLM batch-invariance mode",
+        "LLM-42 (deterministic speculation)"
+      ],
+      "sota_bar": "Batch-invariant kernels (invariant normalization, matmul, attention reductions) yield 1000/1000 bitwise-identical completions under dynamic batching, vs dozens of distinct outputs without; cost ~60% slower than default kernels. Now exposed as a vLLM batch-invariance feature.",
+      "best_value": 100,
+      "metric_unit": "% bitwise-identical completions across runs (deterministic mode)",
+      "source_url": "https://thinkingmachines.ai/blog/defeating-nondeterminism-in-llm-inference/",
+      "source_date": "2025-09",
+      "notes": "Thinking Machines 'Defeating Nondeterminism' + vLLM batch_invariance docs. Root cause = non-associativity in reduction schedules, not RNG. LLM-42 (arXiv:2601.17768) adds verified-speculation determinism.",
+      "in_scope": true
+    },
+    {
+      "id": "mlperf-accuracy-constrained-throughput",
+      "category": "quantization",
+      "dimension": "Accuracy-constrained throughput on a neutral benchmark (MLPerf Inference)",
+      "why_it_matters": "MLPerf Inference is the only vendor-neutral, audited benchmark that ties quantized throughput to a fixed accuracy bar (99% or 99.9% of FP reference), preventing quality-for-speed cheating. It is the buyer's apples-to-apples ground truth: a number only counts if it clears the accuracy gate, which is exactly how operators should read all quantization claims.",
+      "sota_systems": [
+        "NVIDIA GB200 NVL72 / B200 (TensorRT-LLM, NVFP4)",
+        "AMD MI300X/MI355X (ROCm, FP8)",
+        "MLPerf Inference v5.0/v5.1 submitters"
+      ],
+      "sota_bar": "MLPerf enforces 99%/99.9%-of-FP-reference accuracy gates per benchmark; under that gate Blackwell GB200 NVL72 delivered up to 3.4x higher per-GPU Llama-3.1-405B throughput vs an 8-GPU H200 system using FP4, with FP4 meeting the same accuracy target as FP8.",
+      "best_value": 3.4,
+      "metric_unit": "x per-GPU throughput gain (GB200 vs H200, accuracy-gated, Llama-3.1-405B)",
+      "source_url": "https://developer.nvidia.com/blog/nvidia-blackwell-delivers-massive-performance-leaps-in-mlperf-inference-v5-0/",
+      "source_date": "2025-04",
+      "notes": "MLPerf Inference v5.0. AMD v5.1 FP8 submissions: rocm.blogs.amd.com. The accuracy-gate framing (99/99.9%) is MLPerf's defining contribution to honest quantization evaluation.",
+      "in_scope": true
+    },
+    {
+      "id": "hardware-format-coverage",
+      "category": "hardware-coverage",
+      "dimension": "Hardware / format coverage and portability of quantized kernels",
+      "why_it_matters": "A quantization format is only useful where the serving stack has fast kernels for it. FP8 needs Hopper+/Ada or MI300X; NVFP4 is Blackwell-exclusive; MXFP4 is the cross-vendor OCP standard but kernel support lags. Buyers running heterogeneous fleets (NVIDIA + AMD + edge) must know which precision actually accelerates on their silicon vs silently falls back.",
+      "sota_systems": [
+        "vLLM (FP8 on Hopper/Ada/Blackwell + MI300X via hipBLASLt/aiter)",
+        "SGLang (FP8 MI300X)",
+        "TensorRT-LLM (NVFP4 Blackwell)",
+        "llama.cpp (broad CPU/GPU GGUF + FP4)"
+      ],
+      "sota_bar": "FP8 W8A8 is hardware-accelerated on NVIDIA Hopper/Ada/Blackwell and AMD MI300X (hipBLASLt FP8 GEMM + aiter attention); NVFP4 is Blackwell-only; MXFP4 acceleration on MI300X/MI355X is on the roadmap, not yet broadly shipped. GGUF k-quants give the widest CPU/consumer-GPU portability.",
+      "best_value": null,
+      "metric_unit": "qualitative format-x-accelerator support matrix",
+      "source_url": "https://docs.vllm.ai/en/stable/features/quantization/fp8/",
+      "source_date": "2026-01",
+      "notes": "AMD coverage: vLLM AMD roadmap issue #44092 + Spheron FP8 hardware guide. SGLang MXFP4-on-MI300X still a discussion (#13611). best_value=null: this is a coverage matrix, not a scalar.",
+      "in_scope": true
+    },
+    {
+      "id": "spec-decode-speedup",
+      "category": "speculative-decoding",
+      "dimension": "Speculative-decoding wall-clock speedup (single-stream / low-concurrency)",
+      "why_it_matters": "The headline reason operators turn on speculative decoding: how much faster each request finishes at interactive (batch~1) load. It directly sets the latency a chat/agent user feels, and is the number buyers compare across engines and draft methods.",
+      "sota_systems": [
+        "EAGLE-3 (SafeAILab)",
+        "vLLM",
+        "SGLang",
+        "P-EAGLE (vLLM)"
+      ],
+      "sota_bar": "EAGLE-3 reports up to 4.79x speedup on LLaMA-3.3-70B with no quality loss and is the de-facto industrial standard supported in vLLM and SGLang; vLLM's P-EAGLE reaches ~4-5x over standard decoding (20-30% over EAGLE-3 alone) on coding benchmarks",
+      "best_value": 4.79,
+      "metric_unit": "x speedup vs autoregressive decoding (batch~1)",
+      "source_url": "https://github.com/SafeAILab/EAGLE",
+      "source_date": "2025-09",
+      "notes": "EAGLE-3 accepted NeurIPS'25; P-EAGLE (parallel draft) figures from vLLM blog 2026-03-13 https://vllm.ai/blog/2026-03-13-p-eagle . Speedup is workload- and temperature-dependent.",
+      "in_scope": true
+    },
+    {
+      "id": "acceptance-length-rate",
+      "category": "speculative-decoding",
+      "dimension": "Draft acceptance length / acceptance rate (mean accepted tokens per verify step)",
+      "why_it_matters": "Acceptance length tau is the upstream driver of every spec-decode speedup; it is the engine-independent quality metric of a draft method and the thing that determines whether the verify-step overhead pays off. Operators tune draft depth/tree against measured tau on their own traffic.",
+      "sota_systems": [
+        "EAGLE-3",
+        "DeepSeek-V3 MTP",
+        "Medusa"
+      ],
+      "sota_bar": "EAGLE-class drafts reach ~0.6-0.8 per-token acceptance (tau ~3-5+ tokens/step with tree decoding); DeepSeek-V3 native MTP shows 85-90% acceptance of the 2nd token (~1.8x TPS); Medusa heads are lower, typically 0.55-0.70",
+      "best_value": 0.9,
+      "metric_unit": "fraction of drafted tokens accepted (2nd-token acceptance, DeepSeek-V3 MTP)",
+      "source_url": "https://arxiv.org/pdf/2412.19437",
+      "source_date": "2024-12",
+      "notes": "DeepSeek-V3 technical report (85-90% 2nd-token acceptance, 1.8x TPS). Acceptance is workload-dependent; real deployments commonly see lower tau than paper ideals.",
+      "in_scope": true
+    },
+    {
+      "id": "draft-method-coverage",
+      "category": "speculative-decoding",
+      "dimension": "Breadth of speculative methods supported (draft-model, EAGLE/-2/-3, Medusa, MTP, lookahead, n-gram/prompt-lookup)",
+      "why_it_matters": "No single draft method wins on every model/workload, so an engine's menu of methods is a portability and future-proofing axis. Buyers want one engine that covers self-speculative (MTP/Medusa), feature-level (EAGLE), retrieval (n-gram), and external-draft so they can pick per model without re-platforming.",
+      "sota_systems": [
+        "TensorRT-LLM",
+        "vLLM",
+        "SGLang"
+      ],
+      "sota_bar": "TensorRT-LLM supports draft-target, Medusa, ReDrafter, Lookahead, and EAGLE(-1/-2, EAGLE-3 via two-model/disaggregated); vLLM supports EAGLE/EAGLE-3, Medusa, MTP, n-gram/prompt-lookup; SGLang supports EAGLE/EAGLE3 and standard draft",
+      "best_value": null,
+      "metric_unit": "count of distinct speculative methods supported",
+      "source_url": "https://nvidia.github.io/TensorRT-LLM/advanced/speculative-decoding.html",
+      "source_date": "2025-12",
+      "notes": "Method support and quality vary by model and backend (PyTorch vs TRT engine); EAGLE-3 same checkpoints are cross-engine portable between vLLM and SGLang.",
+      "in_scope": true
+    },
+    {
+      "id": "ngram-prompt-lookup",
+      "category": "speculative-decoding",
+      "dimension": "Retrieval / prompt-lookup (n-gram) drafting for input-grounded tasks",
+      "why_it_matters": "A zero-draft-model, zero-extra-VRAM acceleration that works whenever the output echoes the input (summarization, RAG, code edit/refactor, structured rewrite). It is the cheapest spec-decode to deploy and a key differentiator for grounded agent workloads where outputs reuse prompt substrings.",
+      "sota_systems": [
+        "vLLM (ngram / prompt-lookup)",
+        "TensorRT-LLM (Lookahead)"
+      ],
+      "sota_bar": "Prompt-lookup decoding shows up to 2.8x speedup on summarization (CNN/DailyMail) and 2x-4x on input-grounded tasks with no quality change; requires no separate draft model",
+      "best_value": 2.8,
+      "metric_unit": "x speedup on input-grounded (summarization) workloads",
+      "source_url": "https://blog.vllm.ai/2024/10/17/spec-decode.html",
+      "source_date": "2024-10",
+      "notes": "Highly workload-sensitive: gains collapse when output does not overlap the prompt. vLLM exposes via speculative_model=[ngram].",
+      "in_scope": true
+    },
+    {
+      "id": "spec-decode-lossless-correctness",
+      "category": "speculative-decoding",
+      "dimension": "Output-distribution losslessness of speculation (greedy and stochastic)",
+      "why_it_matters": "Speculative decoding must not change what the model would have produced; rejection-sampling verification preserves the target distribution exactly at T=0 and T>0. An engine that silently alters outputs (or only matches at greedy) fails reproducibility, eval parity, and audit requirements - this is the honesty gate operators must verify, not assume.",
+      "sota_systems": [
+        "vLLM",
+        "speculative sampling (Leviathan et al.)"
+      ],
+      "sota_bar": "vLLM's implementation is algorithmically validated lossless via rejection sampling, preserving the target distribution under both greedy and sampled decoding up to hardware floating-point precision",
+      "best_value": null,
+      "metric_unit": "qualitative: distribution-preserving (yes/no), bitwise vs statistical",
+      "source_url": "https://docs.vllm.ai/en/latest/features/speculative_decoding/",
+      "source_date": "2025-06",
+      "notes": "Caveat: FP nondeterminism means 'lossless' is up to numeric precision, not bit-exact; some engine+model combos report greedy divergence (e.g. TensorRT-LLM Qwen3+EAGLE3 issue #10309).",
+      "in_scope": true
+    },
+    {
+      "id": "spec-decode-batch-scaling",
+      "category": "speculative-decoding",
+      "dimension": "Speculative-decoding behavior under high concurrency / large batch (break-even)",
+      "why_it_matters": "Spec decode helps latency at low load but can REGRESS throughput once the GPU is compute-bound - the single most common production footgun. Operators must know the break-even batch and whether the engine auto-disables or has a batch-robust drafter, or they pay for slowdowns at peak QPS.",
+      "sota_systems": [
+        "MagicDec",
+        "vLLM continuous batching",
+        "SGLang"
+      ],
+      "sota_bar": "Naive spec-decode break-even is ~8-16 concurrent requests; beyond ~32 it adds verify overhead with no benefit. MagicDec uses a fixed-window draft so the draft:target cost ratio falls as batch grows, restoring speedup at large batch for moderate-to-long contexts",
+      "best_value": 16,
+      "metric_unit": "break-even concurrency (requests) above which naive spec-decode hurts throughput",
+      "source_url": "https://arxiv.org/html/2408.11049v1",
+      "source_date": "2024-08",
+      "notes": "Break-even figures from Spheron/BentoML production guides; MagicDec (arXiv 2408.11049) is the SOTA technique for high-throughput long-context spec decode.",
+      "in_scope": true
+    },
+    {
+      "id": "constrained-decode-per-token-overhead",
+      "category": "structured-output",
+      "dimension": "Constrained/guided decoding per-token overhead (JSON-schema, regex, grammar/CFG)",
+      "why_it_matters": "Guaranteed-valid JSON/regex/grammar output is table stakes for tool-calling and structured APIs, but a slow mask-compute step throttles tokens/sec. The per-token mask overhead is the dominant cost in steady-state constrained generation and the number that decides whether structured output is 'free' or a tax.",
+      "sota_systems": [
+        "XGrammar",
+        "LLGuidance",
+        "SGLang",
+        "vLLM"
+      ],
+      "sota_bar": "XGrammar (default backend in vLLM/SGLang/TensorRT-LLM) achieves under 40 microseconds per-token overhead via precompiled bitmask FSM; SGLang is reported ~3x faster than vLLM on constrained workloads; LLGuidance is competitive/faster on unique (uncached) schemas",
+      "best_value": 40,
+      "metric_unit": "microseconds of overhead per generated token",
+      "source_url": "https://blog.squeezebits.com/70642",
+      "source_date": "2025-03",
+      "notes": "Overhead figures from SqueezeBits guided-decoding benchmark and XGrammar docs. Outlines' full-FSM expansion is materially slower than XGrammar/LLGuidance.",
+      "in_scope": true
+    },
+    {
+      "id": "grammar-compilation-latency",
+      "category": "structured-output",
+      "dimension": "Grammar/schema compilation latency and cache (cold-start for dynamic agentic schemas)",
+      "why_it_matters": "Agentic workloads change the schema/grammar per request (different tool sets, varying response protocols), so the one-time compile cost - not per-token mask - becomes the bottleneck. Compilation latency and cross-grammar caching determine whether constrained decoding is viable for high-churn tool-calling.",
+      "sota_systems": [
+        "XGrammar-2",
+        "XGrammar",
+        "LLGuidance/Guidance"
+      ],
+      "sota_bar": "XGrammar-2 compiles in ~10 ms vs >1000 ms for XGrammar (~80x faster), with >6x tool-calling compilation speedup via Earley-based adaptive mask cache + cross-grammar cache + JIT; integrated into vLLM and SGLang",
+      "best_value": 10,
+      "metric_unit": "milliseconds to compile a grammar/schema (cold)",
+      "source_url": "https://blog.mlc.ai/2026/05/04/xgrammar-2-fast-customizable-structured-generation",
+      "source_date": "2026-05",
+      "notes": "XGrammar-2 also in arXiv 2601.04426 and ACM 3786335.3813124. Original XGrammar 0.12-0.30s, Guidance <60ms; cache hit rate on shared substructures is the operator-relevant secondary metric.",
+      "in_scope": true
+    },
+    {
+      "id": "structured-output-validity-vs-quality",
+      "category": "structured-output",
+      "dimension": "Structured-output validity vs reasoning-quality tax (constraint-induced degradation)",
+      "why_it_matters": "Constrained decoding can guarantee 100% schema-valid output yet DEGRADE task accuracy by forcing answer fields before chain-of-thought. Buyers must weigh validity rate against the reasoning hit; this is the dimension a naive 'we always emit valid JSON' scorecard hides.",
+      "sota_systems": [
+        "JSONSchemaBench (Outlines/XGrammar/Guidance/llama.cpp/OpenAI/Gemini)",
+        "OpenAI Structured Outputs"
+      ],
+      "sota_bar": "Strict format constraints can cause ~10-30% reasoning degradation when the schema forces answer-before-reasoning; JSONSchemaBench (10K real schemas) is the standard cross-framework benchmark for validity/coverage; mitigation is deferring structure until reasoning completes",
+      "best_value": null,
+      "metric_unit": "% reasoning-accuracy delta vs unconstrained, plus % schema-valid",
+      "source_url": "https://arxiv.org/pdf/2501.10868",
+      "source_date": "2025-01",
+      "notes": "Degradation range and mechanism corroborated by 'The Format Tax' (arXiv 2604.03616) and Banerjee et al. 2025. Validity-only metrics are misleading without the paired quality delta.",
+      "in_scope": true
+    },
+    {
+      "id": "tool-call-parse-robustness",
+      "category": "structured-output",
+      "dimension": "Tool/function-call parsing coverage and robustness (per-model formats)",
+      "why_it_matters": "Agents live or die on correctly extracting structured tool calls from model output; each model family uses a different format (Hermes, llama3_json, mistral, pythonic, qwen3_coder XML). Wrong/absent parser yields malformed args or silent empty calls - so parser coverage and graceful failure are a core agent-serving differentiator.",
+      "sota_systems": [
+        "vLLM tool-call parsers",
+        "SGLang",
+        "XGrammar-2 (grammar-backed tool calling)"
+      ],
+      "sota_bar": "vLLM ships per-family parsers (hermes, llama3_json, mistral, pythonic, internlm, granite, plus qwen3/qwen3_coder); when constraints aren't enforced it falls back to extracting from raw text, so args can be malformed - making grammar-backed (constrained) tool calling the robustness frontier",
+      "best_value": null,
+      "metric_unit": "count of model-family parsers + valid-call rate / malformed-arg rate",
+      "source_url": "https://docs.vllm.ai/en/latest/features/tool_calling/",
+      "source_date": "2025-12",
+      "notes": "Known model-specific failure modes (Mistral-7B parallel calls, Hermes-2-Theta quality). Pairing the parser with constrained decoding (XGrammar-2) removes the raw-text-extraction failure path.",
+      "in_scope": true
+    },
+    {
+      "id": "sampler-coverage-correctness",
+      "category": "structured-output",
+      "dimension": "Sampler coverage and correctness (temperature, top-p, top-k, min-p)",
+      "why_it_matters": "Sampling controls the quality/diversity/coherence tradeoff and must be implemented correctly and identically across engines for eval parity. min-p in particular keeps outputs coherent at high temperature and is now an ecosystem default; missing or buggy samplers force operators to over-constrain temperature and lose quality.",
+      "sota_systems": [
+        "vLLM",
+        "llama.cpp",
+        "SGLang",
+        "TensorRT-LLM"
+      ],
+      "sota_bar": "min-p (dynamic confidence-scaled truncation) improves quality and diversity over top-p/top-k at high temperature on GPQA/GSM8K/AlpacaEval and is now natively supported across vLLM, llama.cpp, SGLang, HF Transformers, Ollama, ExLlamaV2; TensorRT-LLM supports top-k/top-p/combined plus beam search",
+      "best_value": null,
+      "metric_unit": "qualitative: samplers supported (temperature/top-p/top-k/min-p) + cross-engine parity",
+      "source_url": "https://arxiv.org/abs/2407.01082",
+      "source_date": "2024-07",
+      "notes": "Min-p paper (ICLR'25 oral); a critical-analysis rebuttal exists (arXiv 'Turning Down the Heat'), so 'correctness' includes faithfully reproducing the defined sampler semantics, not just claiming support.",
+      "in_scope": true
+    },
+    {
+      "id": "expert-parallelism-large-moe",
+      "category": "parallelism",
+      "dimension": "Large-scale expert parallelism (EP) for giant MoE models",
+      "why_it_matters": "Sparse MoE models (DeepSeek-V3/R1 671B, Qwen MoE, Mixtral) activate only a few experts per token, so naive tensor parallelism replicates expert weights and wastes memory bandwidth. Scaling EP across dozens of GPUs (one or few experts per device) is the only way to serve 600B+ MoE economically, and demands all-to-all expert dispatch, expert-load balancing, and overlap of comms with compute. EP scale and balance is the differentiating capability for frontier-MoE serving.",
+      "sota_systems": [
+        "SGLang",
+        "DeepSeek (DeepEP)",
+        "vLLM"
+      ],
+      "sota_bar": "SGLang runs DeepSeek-V3 671B at EP32 for prefill (4 nodes) and EP72 for decode (9 nodes) across 96 H100s with DP attention to eliminate KV duplication; first open-source implementation to nearly match DeepSeek's official large-scale-EP throughput.",
+      "best_value": 72,
+      "metric_unit": "expert-parallel degree (EP72 decode, single deployment)",
+      "source_url": "https://www.lmsys.org/blog/2025-05-05-large-scale-ep/",
+      "source_date": "2025-05-05",
+      "notes": "Uses DeepEP-style all-to-all dispatch + expert-load balancing. DP attention is the companion technique (data-parallel attention, expert-parallel FFN).",
+      "in_scope": true
+    },
+    {
+      "id": "data-parallel-attention",
+      "category": "parallelism",
+      "dimension": "Data-parallel (DP) attention / hybrid attention-FFN parallelism",
+      "why_it_matters": "When EP fans the FFN out across many GPUs, replicating the KV cache under tensor parallelism for attention duplicates memory and caps batch size. DP attention runs attention data-parallel (each rank owns distinct sequences, no KV duplication) while the MoE FFN stays expert-parallel. This is what lets a deployment hold large batches and long contexts at high EP without exploding KV memory, and it is a distinct, non-obvious axis from raw TP/PP/EP degrees.",
+      "sota_systems": [
+        "SGLang",
+        "vLLM"
+      ],
+      "sota_bar": "SGLang's DP Attention is the production technique that eliminates KV-cache duplication across devices for DeepSeek-V3, enabling the EP32/EP72 deployment to scale memory-efficiently; combined with PD disaggregation and MTP it delivers up to ~60% higher output throughput.",
+      "best_value": null,
+      "metric_unit": "qualitative (KV-duplication eliminated; ~60% output-throughput uplift in combined stack)",
+      "source_url": "https://www.lmsys.org/blog/2025-07-17-mtp/",
+      "source_date": "2025-07-17",
+      "notes": "The ~60% figure is the combined MTP+EP+PD uplift, not DP attention alone. DP attention is the enabling memory technique.",
+      "in_scope": true
+    },
+    {
+      "id": "multi-node-scale-out",
+      "category": "parallelism",
+      "dimension": "Multi-node scale-out (combined TP x PP x EP x DP across hosts)",
+      "why_it_matters": "Serving a frontier model means composing tensor, pipeline, expert, and data parallelism across many hosts and an InfiniBand/RoCE fabric. The relevant operator question is not 'does it run on 8 GPUs' but how many GPUs/nodes a single coherent deployment spans, what interconnect it requires, and how cleanly the parallelism dimensions compose. Datacenter-scale orchestration (rack-scale NVLink domains, cross-node fabric) is the table-stakes axis for frontier serving.",
+      "sota_systems": [
+        "SGLang",
+        "NVIDIA Dynamo",
+        "TensorRT-LLM",
+        "NVIDIA GB200/GB300 NVL72"
+      ],
+      "sota_bar": "Production open-source deployments span 96 H100 GPUs (12 nodes) for a single DeepSeek-V3 instance (SGLang); rack-scale GB200/GB300 NVL72 presents 72 Blackwell GPUs as one NVLink domain, and Dynamo is positioned as a datacenter-scale distributed inference framework orchestrating disaggregated pools across the cluster.",
+      "best_value": 96,
+      "metric_unit": "GPUs in a single coherent serving deployment (H100)",
+      "source_url": "https://docs.dynamo.nvidia.com/dynamo/design-docs/disaggregated-serving",
+      "source_date": "2025-03-18",
+      "notes": "Dynamo announced GTC 2025; GB200/GB300 NVL72 = 72-GPU NVLink domain. 96-GPU figure is the SGLang DeepSeek-V3 deployment.",
+      "in_scope": true
+    },
+    {
+      "id": "max-model-and-moe-coverage",
+      "category": "model-coverage",
+      "dimension": "Maximum parameter count & frontier-MoE architecture coverage",
+      "why_it_matters": "The first capability question for any serving stack is which models it can actually run. The hard end is the 671B-class sparse MoE (DeepSeek-V3/R1) plus Qwen MoE and Mixtral; supporting these requires MoE kernels, EP, FP8 weights, and MLA/MTP support, not just more memory. A stack that tops out at dense 70B is in a different market than one that serves 671B MoE at scale.",
+      "sota_systems": [
+        "SGLang",
+        "vLLM",
+        "TensorRT-LLM",
+        "llama.cpp"
+      ],
+      "sota_bar": "Production serving of DeepSeek-V3/R1 671B sparse MoE (37B activated) is supported by SGLang, vLLM, and TensorRT-LLM with dedicated MoE/MLA paths; llama.cpp covers the broadest open-weight architecture catalog (Llama 1/2/3, Mistral, Mixtral, Phi, Gemma, Qwen, DeepSeek, etc.) via GGUF, while MLC-LLM supports a curated, pre-compiled subset.",
+      "best_value": 671,
+      "metric_unit": "billion parameters (DeepSeek-V3/R1 MoE, served in production)",
+      "source_url": "https://docs.sglang.io/basic_usage/deepseek_v3.html",
+      "source_date": "2025-05-05",
+      "notes": "671B total / 37B activated. Architecture breadth (llama.cpp) vs frontier-MoE depth (SGLang/vLLM/TRT-LLM) are two distinct coverage stories.",
+      "in_scope": true
+    },
+    {
+      "id": "multimodal-vlm-coverage",
+      "category": "model-coverage",
+      "dimension": "Multimodal / vision-language (VLM) model coverage",
+      "why_it_matters": "A growing share of production traffic is image/video/audio + text (VLMs like Qwen-VL, Llama Vision, InternVL, Pixtral). Serving these adds a vision encoder, modality-aware batching, and image-token KV/prefix handling on top of the LLM path. Whether a stack treats VLMs as first-class (and reuses vision embeddings across requests) is a real differentiator versus text-only engines.",
+      "sota_systems": [
+        "SGLang",
+        "vLLM"
+      ],
+      "sota_bar": "SGLang is explicitly a serving framework 'for large language models and multimodal models' and extends RadixAttention prefix caching to multimodal inputs with vision-embedding reuse; vLLM also provides broad multimodal model support. Coverage spans the major open VLM families (Qwen-VL, Llama Vision, InternVL, Pixtral, etc.).",
+      "best_value": null,
+      "metric_unit": "qualitative (first-class VLM support + vision-embedding prefix reuse)",
+      "source_url": "https://github.com/sgl-project/sglang",
+      "source_date": "2026-01-01",
+      "notes": "VLM long-context prefill is a distinct cost (see MMInference, arXiv 2504.16083). Exact per-model coverage lists are version-dependent.",
+      "in_scope": true
+    },
+    {
+      "id": "long-context-capacity",
+      "category": "model-coverage",
+      "dimension": "Long-context serving (128K-1M tokens) & KV/prefix-cache reuse",
+      "why_it_matters": "Context windows have moved from 4K to 128K-1M. Serving long context is gated by KV-cache memory (linear in tokens), prefill cost (quadratic attention), and cache reuse. The operator-relevant axes are the max context the engine can hold per request, KV quantization / paging to fit it, and prefix-cache hit rates that recover the prefill cost on RAG / multi-turn / agent workloads.",
+      "sota_systems": [
+        "SGLang (RadixAttention)",
+        "vLLM (PagedAttention/prefix caching)"
+      ],
+      "sota_bar": "Million-token windows are production-ready (Qwen2.5-1M open weights; 128K-1M is mainstream). SGLang's RadixAttention prefix caching delivers up to ~6.4x gains on prefix-heavy RAG/multi-turn workloads and a ~29% throughput edge over vLLM on H100 (16.2K vs 12.5K tok/s) on shared-prefix traffic.",
+      "best_value": 6.4,
+      "metric_unit": "x throughput gain on prefix-heavy workloads (RadixAttention)",
+      "source_url": "https://particula.tech/blog/sglang-vs-vllm-inference-engine-comparison",
+      "source_date": "2026-01-01",
+      "notes": "1M-token open-weight = Qwen2.5-1M. The 6.4x / 29% figures are workload-dependent benchmark blog numbers, not a standardized result; treat as indicative.",
+      "in_scope": true
+    },
+    {
+      "id": "lora-multi-adapter-serving",
+      "category": "model-coverage",
+      "dimension": "LoRA / multi-LoRA hot-swap serving",
+      "why_it_matters": "Multi-tenant and per-customer customization is delivered cheaply by serving many LoRA adapters over one shared base model instead of one full model per tenant. The differentiating axes are how many adapters can be resident on GPU concurrently, how many can be cached in CPU (LRU), and whether adapters can be hot-swapped/updated at runtime without restarting (critical for async-RL weight updates). This is the economics of fine-tune-once-serve-many.",
+      "sota_systems": [
+        "vLLM",
+        "SGLang",
+        "TensorRT-LLM"
+      ],
+      "sota_bar": "vLLM serves multiple LoRA adapters concurrently over one base model with --max-loras (GPU-resident) plus an LRU CPU cache (--max-cpu-loras), and supports runtime hot-swap / in-place update (VLLM_ALLOW_RUNTIME_LORA_UPDATING, load_inplace) with negligible switch time; practical adapter count is bounded by GPU memory and adapter rank, not a fixed cap.",
+      "best_value": null,
+      "metric_unit": "qualitative (configurable resident + CPU-cached adapters, runtime hot-swap)",
+      "source_url": "https://docs.vllm.ai/en/latest/features/lora/",
+      "source_date": "2025-01-01",
+      "notes": "No single fixed maximum; max-loras/max-cpu-loras are tunable. Hot in-place update targets async-RL pipelines.",
+      "in_scope": true
+    },
+    {
+      "id": "embeddings-rerankers-coverage",
+      "category": "model-coverage",
+      "dimension": "Embedding & reranker (non-generative) model coverage",
+      "why_it_matters": "RAG and search stacks need an engine that also serves embedding and cross-encoder reranker models, ideally on the same serving fabric as the generative LLM (shared pooling, batching, an OpenAI-compatible /v1/embeddings + rerank API). A stack that only does autoregressive decode forces operators to run a second serving system for retrieval, so embedding/reranker coverage is a real platform-completeness axis.",
+      "sota_systems": [
+        "vLLM",
+        "SGLang",
+        "TensorRT-LLM"
+      ],
+      "sota_bar": "vLLM and SGLang both serve embedding and reranker/cross-encoder models alongside generative models with pooling support and OpenAI-compatible embeddings endpoints, covering the common open embedding/reranker families (BGE, E5, GTE, Qwen-embedding, etc.) on the same engine.",
+      "best_value": null,
+      "metric_unit": "qualitative (embeddings + rerank served on the same engine)",
+      "source_url": "https://docs.vllm.ai/en/latest/",
+      "source_date": "2026-01-01",
+      "notes": "Pooling/embedding/score tasks are documented runner types in vLLM; SGLang lists multimodal + embedding support. Exact model lists are version-dependent.",
+      "in_scope": true
+    },
+    {
+      "id": "hardware-backend-breadth",
+      "category": "hardware-coverage",
+      "dimension": "Hardware backend breadth (NVIDIA, AMD, Intel, TPU, AWS, Apple, CPU)",
+      "why_it_matters": "Vendor lock-in to a single accelerator is a top procurement risk. The buyer axis is how many silicon families a stack runs on with maintained, performant paths: NVIDIA Hopper/Blackwell, AMD ROCm (MI300X/MI355X), Intel Gaudi/XPU, Google TPU, AWS Inferentia/Trainium, Apple Metal, and CPU. Breadth determines portability and negotiating leverage; depth (kernel maturity per backend) determines whether the non-NVIDIA path is actually usable in production.",
+      "sota_systems": [
+        "vLLM",
+        "llama.cpp",
+        "SGLang",
+        "MLC-LLM"
+      ],
+      "sota_bar": "vLLM runs on NVIDIA, AMD ROCm (MI300X/MI325X/MI350X/MI355X), x86/ARM/PowerPC CPU, plus plugin backends for Google TPU, Intel Gaudi 2/3, AWS Inferentia/Trainium (Neuron), Apple Silicon, Huawei Ascend, IBM Spyre/Z, and more; llama.cpp targets the widest portability surface (CUDA, HIP/ROCm, Metal, Vulkan, SYCL, CANN, OpenCL, CPU SIMD on x86 AVX-512/AMX and ARM Neon/SVE/SME). MLC-LLM uniquely adds WebGPU/browser via TVM compilation.",
+      "best_value": null,
+      "metric_unit": "count/qualitative (vLLM ~10+ accelerator families; llama.cpp ~10+ compute backends)",
+      "source_url": "https://github.com/vllm-project/vllm",
+      "source_date": "2026-01-01",
+      "notes": "Some non-NVIDIA paths are Tech-Preview (e.g. Trainium/Inferentia in Red Hat AI Inference). Breadth != per-backend performance parity.",
+      "in_scope": true
+    },
+    {
+      "id": "quantization-datatype-coverage",
+      "category": "quantization",
+      "dimension": "Quantization format & low-precision datatype coverage",
+      "why_it_matters": "Low precision is how a frontier model fits and runs fast: FP8/FP4 on tensor cores, plus weight-only INT4 (AWQ/GPTQ) and KV-cache quantization. The relevant axes are which formats the engine supports, which the target hardware accelerates natively, and how much memory/throughput each buys at what accuracy. Quantization coverage tied to hardware generation (e.g. NVFP4 on Blackwell, FP8 on Hopper/MI300X) directly sets the cost-per-token frontier.",
+      "sota_systems": [
+        "TensorRT-LLM",
+        "vLLM",
+        "NVIDIA Blackwell"
+      ],
+      "sota_bar": "NVFP4 (4-bit FP, E2M1 + dual-level scaling) has native Blackwell tensor-core acceleration, reportedly matching FP8 accuracy at ~2.3x higher throughput than weight-only 4-bit (AWQ); vLLM/TensorRT-LLM support FP8 W8A8 (Hopper/Ada/MI300X), NVFP4/MXFP4 W4A4 on Blackwell, plus INT4 AWQ/GPTQ and KV-cache quantization. llama.cpp GGUF spans 1.58-bit to 8-bit integer plus fp16/bf16.",
+      "best_value": 2.3,
+      "metric_unit": "x throughput vs AWQ weight-only INT4 (NVFP4 on Blackwell)",
+      "source_url": "https://docs.vllm.ai/projects/llm-compressor/en/latest/examples/quantization_w4a4_fp4/",
+      "source_date": "2025-01-01",
+      "notes": "2.3x and FP8-parity-accuracy are NVIDIA/community-reported NVFP4 claims; accuracy is workload-sensitive (see arXiv NVFP4/MXFP4 sensitivity studies).",
+      "in_scope": true
+    },
+    {
+      "id": "fault-tolerance-resilience",
+      "category": "operability",
+      "dimension": "Multi-node fault tolerance & failure recovery (resilient serving)",
+      "why_it_matters": "At 96+ GPU scale a single GPU/node failure is a when, not an if, and tightly-coupled TP/EP means one failed rank can halt the whole instance. Operators evaluating large disaggregated/EP deployments need to know mean-time-to-recovery, whether the system degrades gracefully (reroute traffic, replicate KV, take only a failed replica offline) versus full restart. Resilience is a fast-emerging differentiator as deployments cross the single-node boundary.",
+      "sota_systems": [
+        "FailSafe (research)",
+        "KevlarFlow (research)",
+        "ReviveMoE (research)",
+        "NVIDIA Dynamo"
+      ],
+      "sota_bar": "Research systems define the bar: KevlarFlow reports ~20x lower mean-time-to-recovery via decoupled parallel init, dynamic traffic rerouting, and background KV-cache replication; FailSafe sustains high-performance tensor-parallel serving under irregular GPU availability; ReviveMoE targets fast recovery from hardware failures specifically in large-scale MoE inference. Production stacks (Dynamo) add dynamic GPU scheduling and rerouting but full resilient serving is still maturing.",
+      "best_value": 20,
+      "metric_unit": "x reduction in mean-time-to-recovery (KevlarFlow, research)",
+      "source_url": "https://arxiv.org/html/2601.22438v1",
+      "source_date": "2026-01-01",
+      "notes": "20x MTTR is a single-paper research claim, not a productionized standardized number; included to mark resilience as an emerging operator axis.",
+      "in_scope": true
+    },
+    {
+      "id": "cross-request-prefix-cache-reuse",
+      "category": "kv-cache",
+      "dimension": "Automatic cross-request prefix / KV-cache reuse (shared system prompts, agent scaffolds, few-shot)",
+      "metric_unit": "throughput multiplier vs no-reuse; cache hit-rate %",
+      "best_value": 6.4,
+      "sota_bar": "SGLang RadixAttention reports up to 6.4x higher throughput vs prior SOTA on workloads with reusable prefixes (agent control, multi-turn, few-shot) by maintaining an LRU radix-tree of KV blocks; vLLM ships equivalent automatic prefix caching via block hashing. The reuse multiplier is workload-dependent (rises with shared-prefix fraction).",
+      "sota_systems": [
+        "SGLang (RadixAttention)",
+        "vLLM (Automatic Prefix Caching)"
+      ],
+      "source_url": "https://www.lmsys.org/blog/2024-01-17-sglang/",
+      "source_date": "2024-01-17",
+      "why_it_matters": "Agent and fleet workloads repeat large identical prefixes (system prompts, tool schemas, few-shot exemplars). Reusing their KV across requests is the single largest lever on prefill cost and TTFT, and is now table-stakes; buyers compare hit-rate and the throughput gain it delivers.",
+      "notes": "vLLM APC design: https://docs.vllm.ai/en/stable/design/prefix_caching/ . The 6.4x is the paper's peak across reuse-heavy tasks, not a universal number.",
+      "in_scope": true
+    },
+    {
+      "id": "kv-aware-routing-locality",
+      "category": "request-routing",
+      "dimension": "Cache-aware request routing across replicas (route to the worker that already holds the prefix)",
+      "metric_unit": "TTFT / request-latency speedup; aggregate requests served multiplier",
+      "best_value": null,
+      "sota_bar": "NVIDIA Dynamo's KV-cache-aware Smart Router reports TTFT and average-request-latency speedups by routing to replicas already holding matching KV (measured on 100K real DeepSeek-R1 requests, 4K/800 in/out, 8x R1-Distill-Llama-70B on 2x HGX-H100); SGLang's cache-aware router and the Meta/vLLM router pioneered the pattern. Combined with disaggregation Dynamo cites up to 30x more requests served (DeepSeek-R1 671B on GB200 NVL72). Exact tokens/GPU/s not disclosed (projected).",
+      "sota_systems": [
+        "NVIDIA Dynamo (Smart Router)",
+        "SGLang router",
+        "vLLM production router"
+      ],
+      "source_url": "https://developer.nvidia.com/blog/introducing-nvidia-dynamo-a-low-latency-distributed-inference-framework-for-scaling-reasoning-ai-models/",
+      "source_date": "2025-03-18",
+      "why_it_matters": "At fleet scale a naive load balancer scatters requests so the same prefix is recomputed on every replica. Locality-aware routing turns single-node prefix caching into a fleet-wide property, the difference between a cache that works at 1 GPU and one that works at 100.",
+      "notes": "Dynamo numbers are vendor-stated and labeled projected/subject-to-change.",
+      "in_scope": true
+    },
+    {
+      "id": "peak-serving-throughput-per-gpu",
+      "category": "throughput",
+      "dimension": "Peak served throughput per accelerator (model-served-by-engine, MLPerf-grounded)",
+      "metric_unit": "tokens/sec per GPU and per rack",
+      "best_value": 1100000,
+      "sota_bar": "MLPerf Inference v5.1 / v5.0: ~1.1M tokens/s aggregate on one Azure ND GB300 v6 (GB300 NVL72) rack (unverified submission, beating 865K tok/s on GB200 NVL72); ~33,000 tok/s on a single H200 for Llama-2-70B (40% over H100). These are the buyer-citable upper bounds for engine+hardware throughput.",
+      "sota_systems": [
+        "NVIDIA GB300/GB200 NVL72 (TensorRT-LLM)",
+        "NVIDIA H200",
+        "MangoBoost/AMD MI300X"
+      ],
+      "source_url": "https://www.hpcwire.com/2025/09/10/mlperf-inference-v5-1-results-land-with-new-benchmarks-and-record-participation/",
+      "source_date": "2025-09-10",
+      "why_it_matters": "Throughput per GPU is the denominator of cost-per-token and the headline capacity number every operator sizes a fleet against. MLPerf is the only neutral, audited cross-vendor source, so it anchors the SOTA bar buyers actually trust over vendor blogs.",
+      "notes": "1.1M tok/s figure flagged unverified; H200 33K tok/s is the audited Llama-2-70B figure.",
+      "in_scope": true
+    },
+    {
+      "id": "cost-per-million-tokens",
+      "category": "cost-efficiency",
+      "dimension": "Inference unit economics ($ per 1M tokens) at realistic utilization",
+      "metric_unit": "USD per 1M tokens; GPU utilization %",
+      "best_value": 0.4,
+      "sota_bar": "GPT-4-equivalent quality now serves at ~$0.40 / 1M tokens vs ~$20 in late 2022 (≈10x/yr decline). Real production GPU utilization is only 30-60%, so realistic cost-per-token runs 2-3x above spreadsheet estimates; FP8/FP4 quantization roughly halves cost-per-token on H100/H200. Self-hosting a 7B breaks even only above ~50% utilization.",
+      "sota_systems": [
+        "Hosted frontier APIs",
+        "vLLM/SGLang self-host on H100/H200",
+        "FP8/FP4 quantization"
+      ],
+      "source_url": "https://introl.com/blog/inference-unit-economics-true-cost-per-million-tokens-guide",
+      "source_date": "2025-09-01",
+      "why_it_matters": "Cost-per-million-tokens at the utilization you can actually sustain is the metric finance signs off on. It folds throughput, batching, quantization, and utilization into one number and exposes the gap between marketing throughput and the bill.",
+      "notes": "Number is market-level, not a single audited bench; utilization caveat is the load-bearing part.",
+      "in_scope": true
+    },
+    {
+      "id": "energy-tokens-per-watt",
+      "category": "cost-efficiency",
+      "dimension": "Energy efficiency (Wh per token / tokens-per-watt) and power-capped throughput",
+      "metric_unit": "Wh per output token",
+      "best_value": null,
+      "sota_bar": "Empirical inference energy is ~0.0001-0.002 Wh per output token depending on model size; a ~500-token GPT-4o-class query is ~0.3 Wh (~3e-4 Wh/token). FP4/FP8 and Blackwell-class hardware are the main levers. No neutral audited tokens-per-watt leaderboard yet exists, so the bar is a measured range, not a single SOTA number.",
+      "sota_systems": [
+        "NVIDIA Blackwell (GB200/GB300, FP4)",
+        "AMD MI355X (FP4)"
+      ],
+      "source_url": "https://arxiv.org/pdf/2603.06630",
+      "source_date": "2026-03-01",
+      "why_it_matters": "Power, not GPUs, is becoming the binding constraint on fleet scale; tokens-per-watt sets the ceiling on how much serving a datacenter can host and increasingly drives both cost and siting decisions. Buyers with power budgets evaluate on it directly.",
+      "notes": "best_value null: ranges only, no audited per-watt leaderboard. MLPerf Power offers a partial neutral source.",
+      "in_scope": true
+    },
+    {
+      "id": "openai-compatible-api-and-structured-output",
+      "category": "operability",
+      "dimension": "OpenAI-compatible API surface + reliable structured output / tool-calling",
+      "metric_unit": "schema-conformance %; API parity (qualitative)",
+      "best_value": 98.2,
+      "sota_bar": "Guided/constrained decoding (XGrammar, LLGuidance) in vLLM and SGLang raises JSON-schema conformance from ~90-94% (free generation) to >96%, up to 98.2%, behind a drop-in OpenAI-compatible /v1/chat/completions surface with guided_json/regex/grammar/choice. OpenAI-compat is the de facto integration contract; LiteLLM unifies 100+ providers behind the same format.",
+      "sota_systems": [
+        "vLLM (XGrammar/guided decoding)",
+        "SGLang",
+        "LiteLLM (gateway)"
+      ],
+      "source_url": "https://blog.squeezebits.com/guided-decoding-performance-vllm-sglang",
+      "source_date": "2025-01-01",
+      "why_it_matters": "Agents depend on machine-parseable tool calls; a malformed JSON object breaks the loop. OpenAI-compatibility plus near-guaranteed schema conformance is what lets an operator swap engines/models without rewriting clients, a primary procurement criterion.",
+      "notes": "vLLM structured-output docs: https://docs.vllm.ai/en/v0.9.2/features/structured_outputs.html",
+      "in_scope": true
+    },
+    {
+      "id": "observability-metrics-tracing",
+      "category": "operability",
+      "dimension": "Production observability: Prometheus metrics (TTFT/TPOT/queue) + OpenTelemetry tracing",
+      "metric_unit": "qualitative (metric/trace coverage)",
+      "best_value": null,
+      "sota_bar": "vLLM v1 exposes a Prometheus /metrics endpoint with per-request TTFT (vllm:time_to_first_token_seconds), TPOT/inter-token latency, queue depth, running/waiting requests, KV-cache usage and prefix-cache hit-rate, plus OpenTelemetry distributed traces for per-request spans. This metric set (TTFT, TPOT, goodput, cache-hit) is the de facto observability contract serving systems are judged against.",
+      "sota_systems": [
+        "vLLM",
+        "SGLang",
+        "NVIDIA Dynamo"
+      ],
+      "source_url": "https://docs.vllm.ai/en/latest/design/metrics/",
+      "source_date": "2025-01-01",
+      "why_it_matters": "You cannot meet an SLO you cannot see. Per-request TTFT/TPOT histograms and KV/cache-hit telemetry are what drive autoscaling, capacity planning, and incident response; their absence is disqualifying for a production buyer.",
+      "notes": "These same vllm: metrics are the signals KEDA scales on (see autoscaling dimension).",
+      "in_scope": true
+    },
+    {
+      "id": "kubernetes-autoscaling-scale-to-zero",
+      "category": "operability",
+      "dimension": "Kubernetes-native deployment + LLM-aware autoscaling (metric-driven, scale-to-zero)",
+      "metric_unit": "qualitative (scale-to-zero, custom-metric scaling)",
+      "best_value": null,
+      "sota_bar": "KServe + KEDA autoscale vLLM on LLM-specific signals (e.g. vllm:num_requests_running) rather than CPU, supporting scale-from/to-zero with a default 5-min cooldown; the 2025-2026 production stack is vLLM + KServe/llm-d + Ray + Kueue + KEDA on K8s. Ray Serve and KServe provide canary, traffic-split, and multi-model endpoints. The SOTA bar is custom-LLM-metric autoscaling with scale-to-zero, not generic HPA.",
+      "sota_systems": [
+        "KServe + KEDA",
+        "Ray Serve",
+        "llm-d / vLLM on Kubernetes"
+      ],
+      "source_url": "https://developers.redhat.com/articles/2025/09/23/how-set-kserve-autoscaling-vllm-keda",
+      "source_date": "2025-09-23",
+      "why_it_matters": "Fleet economics live or die on elasticity: scaling on queue depth/running-requests (not CPU) and scaling idle models to zero is how operators avoid paying for idle GPUs. K8s-native lifecycle (canary, rollout, multi-model) is the deployment substrate buyers require.",
+      "notes": "KEDA scale-to-zero is Raw-deployment-mode only in KServe.",
+      "in_scope": true
+    },
+    {
+      "id": "multi-tenancy-fairness-slo",
+      "category": "operability",
+      "dimension": "Multi-tenant fairness, per-tenant quotas, and SLO attainment under contention",
+      "metric_unit": "fairness deviation; SLO-attainment % under load",
+      "best_value": null,
+      "sota_bar": "Virtual Token Counter (VTC) is the first work-conserving fair scheduler for LLM serving, tracking cumulative per-client input/output tokens to prevent any tenant monopolizing the batch; follow-ups (QLM, Prism, Equinox, FairBatching, PROSERVE) optimize multi-priority SLO attainment. At the gateway layer LiteLLM enforces per-key/project token budgets and spend caps. The SOTA bar is provable fairness + per-tenant SLO under contention, not raw throughput.",
+      "sota_systems": [
+        "VTC (Sheng et al.)",
+        "LiteLLM (virtual keys/budgets)",
+        "Equinox / FairBatching"
+      ],
+      "source_url": "https://arxiv.org/abs/2401.00588",
+      "source_date": "2024-01-01",
+      "why_it_matters": "A shared cluster serving many agents/tenants must stop a noisy neighbor from starving everyone else and must hold each tenant's latency SLO under load. Fairness, quotas, and SLO-attainment-under-contention are exactly the properties a multi-tenant platform buyer evaluates.",
+      "notes": "VTC arXiv 2401.00588; gateway-side quota enforcement is the LiteLLM complement.",
+      "in_scope": true
+    },
+    {
+      "id": "prompt-injection-defense-agent-security",
+      "category": "security",
+      "dimension": "Prompt-injection defense and agent security (attack-success-rate vs utility-under-attack)",
+      "metric_unit": "attack success rate %; utility-under-attack %; detector accuracy %",
+      "best_value": null,
+      "sota_bar": "AgentDojo (NeurIPS 2024; 97 tasks, 629 security cases) is the de facto agent-security benchmark: undefended GPT-4o keeps 69% benign utility but drops to 45% under attack with targeted ASR ~53% on the 'Important message' attack; strong defenses are needed to cut ASR while preserving utility. Detector guardrails: Llama Guard 3 ~99.7% on NotInject; Lakera Guard ~92.5% PINT / 98%+ vendor-stated detection at <50ms.",
+      "sota_systems": [
+        "AgentDojo (benchmark)",
+        "Meta Llama Guard 3",
+        "Lakera Guard"
+      ],
+      "source_url": "https://openreview.net/forum?id=m1YYAQjO3w",
+      "source_date": "2024-09-25",
+      "why_it_matters": "An agent that calls tools and reads untrusted content is an exfiltration surface; indirect prompt injection is the top agent-security risk. Buyers now require an ASR-vs-utility number, not a vibe, and adaptive attacks routinely break naive defenses, so the bar is benchmark-grounded.",
+      "notes": "ASR/utility numbers are model+attack specific; adaptive-attack papers (2503.00061) show defenses often regress.",
+      "in_scope": true
+    },
+    {
+      "id": "tool-sandboxing-structural-containment",
+      "category": "security",
+      "dimension": "Tool/agent sandboxing, structural containment, and PII/exfil prevention",
+      "metric_unit": "qualitative (isolation guarantee); residual exfil rate",
+      "best_value": null,
+      "sota_bar": "Defense-in-depth beyond detectors: disposable isolated-container/VM sandboxes contain a compromised tool call, and structural/information-flow controls (capability allow-lists, tool-result parsing, provable defenses like MELON, taint/IFC on PII) bound what a hijacked agent can reach or exfiltrate. No single audited containment leaderboard exists; the SOTA bar is layered containment that holds even when the model is fooled.",
+      "sota_systems": [
+        "Container/microVM sandboxes",
+        "MELON (provable IPI defense)",
+        "IFC / capability allow-lists"
+      ],
+      "source_url": "https://arxiv.org/pdf/2502.05174",
+      "source_date": "2025-02-07",
+      "why_it_matters": "Detectors are evadable, so the durable control is architectural: bound the blast radius so a successful injection still cannot read secrets, write outside scope, or exfiltrate PII. Structural containment is the property that survives an adaptive attacker and that security-conscious buyers actually demand.",
+      "notes": "Complements (does not replace) the detector/ASR dimension; few neutral numbers, so qualitative bar.",
+      "in_scope": true
+    },
+    {
+      "id": "served-model-capability-quality",
+      "category": "model-coverage",
+      "dimension": "Capability/quality of the served model (SWE-bench Verified, GPQA, AIME, LiveCodeBench)",
+      "metric_unit": "benchmark accuracy %",
+      "best_value": 80.6,
+      "sota_bar": "Frontier models served by these engines define the quality bar buyers cite: SWE-bench Verified ~80.6% (Gemini 3.1 Pro) / 79.2% (Claude Opus 4.5 + Live-SWE-agent, Nov 2025); GPQA Diamond effectively saturated ~93-94% (Gemini 3 Deep Think 93.8%, GPT-5.4 92.8%); AIME 2025 up to 100% (GPT-5.4). These are model-served-by-engine results, not engine claims.",
+      "sota_systems": [
+        "Gemini 3.x (SWE-bench/GPQA)",
+        "Claude Opus 4.5 + agent scaffold",
+        "GPT-5.x (AIME)"
+      ],
+      "source_url": "https://epoch.ai/benchmarks/swe-bench-verified",
+      "source_date": "2025-11-24",
+      "why_it_matters": "A serving stack only matters if it serves a model that can do the job; buyers pick the model on SWE-bench/GPQA/AIME first, then the engine to serve it. Engines must be framed as transport for these scores, and constrained decoding/scaffolding can move them, so the dimension belongs on the scorecard explicitly.",
+      "notes": "Numbers are model+scaffold specific and saturating fast; GPQA Diamond is near-saturated, weakening its discriminating power for 2026.",
+      "in_scope": true
+    },
+    {
+      "id": "cross-agent-fleet-serving",
+      "category": "agent-fleet",
+      "dimension": "Cross-agent fleet serving time (N agents × T turns): work eliminated by shared-prefix fusion",
+      "why_it_matters": "fak's product category. When a fleet of agents shares a large system/context prefix, fusing that prefix once across all agents eliminates re-prefill work that even a tuned per-agent cache repeats. This is the axis fak is built to win.",
+      "sota_systems": [
+        "SGLang RadixAttention",
+        "vLLM Automatic Prefix Caching",
+        "OpenAI prompt caching"
+      ],
+      "sota_bar": "A tuned warm per-agent KV cache (the SGLang / vLLM APC / OpenAI prompt-caching discipline) is the honest floor a serious operator already runs; fak measures the work eliminated ON TOP of it.",
+      "metric_unit": "min (fleet serving time) / × work eliminated",
+      "best_value": null,
+      "source_url": "https://docs.vllm.ai/en/latest/features/automatic_prefix_caching.html",
+      "source_date": "2024-12",
+      "in_scope": true,
+      "notes": ""
+    },
+    {
+      "id": "marginal-reuse-over-warm-cache",
+      "category": "agent-fleet",
+      "dimension": "Marginal value of cross-agent prefix fusion ON TOP of an already-warm per-agent cache",
+      "why_it_matters": "The honest few-fold: not the headline-vs-naive number, but the gain over the tuned warm-cache a real operator runs. This is the conservative claim a skeptic should be shown.",
+      "sota_systems": [
+        "Tuned warm per-agent KV cache"
+      ],
+      "sota_bar": "An already-hot per-agent KV cache (1×). fak's cross-agent fusion adds a conservative 2.4–2.7× on top, measured on its own kernel held constant.",
+      "metric_unit": "× over a warm per-agent cache",
+      "best_value": 1,
+      "source_url": "https://www.lmsys.org/blog/2024-01-17-sglang/",
+      "source_date": "2024-01",
+      "in_scope": true,
+      "notes": ""
+    },
+    {
+      "id": "marginal-reuse-vs-live-engine",
+      "category": "agent-fleet",
+      "dimension": "Cross-agent reuse marginal value vs a LIVE tuned shared-prefix engine (head-to-head)",
+      "why_it_matters": "A live SGLang/vLLM ALSO fuses a shared prefix once. The marginal win vs a real competing process — not vs fak's own warm-KV arm — is the number a buyer comparing engines actually wants, and fak has not measured it.",
+      "sota_systems": [
+        "SGLang RadixAttention",
+        "vLLM Automatic Prefix Caching"
+      ],
+      "sota_bar": "SGLang/vLLM fuse a shared prefix once across requests; on the WebVoyager-style workload the marginal-vs-tuned win is only ~1.0–1.10×.",
+      "metric_unit": "× over a live tuned engine",
+      "best_value": null,
+      "source_url": "https://arxiv.org/abs/2312.07104",
+      "source_date": "2024-01",
+      "in_scope": true,
+      "notes": ""
+    },
+    {
+      "id": "single-stream-decode-cpu",
+      "category": "single-stream",
+      "dimension": "Single-stream (one chat) decode throughput on CPU",
+      "why_it_matters": "The regime local/edge stacks (llama.cpp, Ollama, MLC) compete hardest on: one user, one chat, raw tokens/s on commodity hardware. fak explicitly does NOT target this — showing the loss keeps the scorecard honest.",
+      "sota_systems": [
+        "llama.cpp",
+        "Ollama",
+        "MLC-LLM"
+      ],
+      "sota_bar": "llama.cpp Metal/CPU leads single-stream decode on the same box (e.g. Qwen2.5-7B Q8 ~17.3 tok/s Metal, M3 Pro).",
+      "metric_unit": "tok/s",
+      "best_value": 17.3,
+      "source_url": "https://github.com/ggml-org/llama.cpp",
+      "source_date": "2026-06",
+      "in_scope": true,
+      "notes": ""
+    },
+    {
+      "id": "single-stream-prefill-cpu",
+      "category": "single-stream",
+      "dimension": "Single-stream prefill throughput, apples-to-apples CPU-vs-CPU",
+      "why_it_matters": "Prefill (prompt ingestion) speed on CPU is a core local-inference axis. fak's arm64 build lacks the register-blocked int8 GEMM tile that x86 already has — a disclosed, narrowing loss.",
+      "sota_systems": [
+        "llama.cpp"
+      ],
+      "sota_bar": "llama.cpp CPU sets the prefill bar on the same box + Q8 weights (1× reference); fak arm64 is ~0.12× until the int8 tile lands.",
+      "metric_unit": "× of llama.cpp CPU",
+      "best_value": 1,
+      "source_url": "https://github.com/ggml-org/llama.cpp",
+      "source_date": "2026-06",
+      "in_scope": true,
+      "notes": ""
+    },
+    {
+      "id": "single-stream-decode-gpu",
+      "category": "single-stream",
+      "dimension": "Single-stream decode throughput on a consumer GPU",
+      "why_it_matters": "Local GPU single-stream decode (the RTX-class laptop/desktop regime) is where llama.cpp's CUDA backend sets the bar; fak reaches parity here at higher precision via a reusable CUDA graph.",
+      "sota_systems": [
+        "llama.cpp (CUDA)"
+      ],
+      "sota_bar": "llama.cpp Q8_0 ~120 ± 15 tok/s on an RTX 4070 (-ngl 99).",
+      "metric_unit": "tok/s",
+      "best_value": 120,
+      "source_url": "https://github.com/ggml-org/llama.cpp",
+      "source_date": "2026-06",
+      "in_scope": true,
+      "notes": ""
+    },
+    {
+      "id": "int8-simd-decode-vs-peer",
+      "category": "quantization",
+      "dimension": "int8 / Q8_0 SIMD decode throughput vs the same-rung int8 peer",
+      "why_it_matters": "The execution speed of an int8-quantized model on CPU SIMD (AVX2/AVX-512) decides local-inference viability. fak's hand-written int8 GEMM beats the standard HuggingFace dynamic-int8 reference.",
+      "sota_systems": [
+        "HuggingFace dynamic-int8",
+        "llama.cpp Q8_0"
+      ],
+      "sota_bar": "HuggingFace dynamic-int8 is the standard same-rung CPU int8 reference (1×); llama.cpp Q8_0 CPU is the harder peer (~parity).",
+      "metric_unit": "× vs HF int8",
+      "best_value": 1,
+      "source_url": "https://huggingface.co/docs/transformers/main/quantization/overview",
+      "source_date": "2026-06",
+      "in_scope": true,
+      "notes": ""
+    },
+    {
+      "id": "vendor-gemm-free-correctness",
+      "category": "numerical-correctness",
+      "dimension": "Dense GPU compute correctness with ZERO vendor GEMM (cuBLAS-free)",
+      "why_it_matters": "Every mainstream stack depends on NVIDIA cuBLAS for its GEMMs. Running a real model's dense path on an owned, dependency-free kernel — and proving it bit-matches the vendor oracle — is a portability/auditability differentiator.",
+      "sota_systems": [
+        "cuBLAS (NVIDIA tuned vendor GEMM)"
+      ],
+      "sota_bar": "cuBLAS is the tuned vendor GEMM every other stack carries; matching it bit-for-bit (cosine=1.0) is parity by construction.",
+      "metric_unit": "cosine vs vendor-GEMM oracle",
+      "best_value": null,
+      "source_url": "https://docs.nvidia.com/cuda/cublas/",
+      "source_date": "2026-06",
+      "in_scope": true,
+      "notes": ""
+    }
+  ]
+}
