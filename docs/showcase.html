@@ -174,6 +174,22 @@
   .flip p{margin:0;color:var(--ink-soft);font-size:.96rem}
   .flip code{font-family:var(--mono);font-size:.86em;color:var(--ink);background:rgba(255,255,255,.05);padding:1px 6px;border-radius:5px}
 
+  /* worked examples — each idea shrunk to one readable example */
+  .examples{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:26px}
+  .ex{border:1px solid var(--line);border-radius:14px;padding:18px 18px 16px;background:var(--panel);display:flex;flex-direction:column}
+  .ex h4{margin:0;font-size:1.06rem;letter-spacing:-.01em}
+  .ex .ex-q{margin:4px 0 12px;color:var(--ink-dim);font-family:var(--mono);font-size:11.5px;letter-spacing:.02em}
+  .ex p{margin:0;color:var(--ink-soft);font-size:.94rem}
+  .ex pre{margin:0 0 13px;font-family:var(--mono);font-size:12px;line-height:1.55;color:var(--ink-soft);background:#05080d;border:1px solid var(--line);border-radius:10px;padding:13px 14px;overflow-x:auto;white-space:pre}
+  .ex pre .g{color:var(--next);font-weight:700}
+  .ex pre .w{color:var(--warn);font-weight:700}
+  .ex pre .b{color:#ff7b72;font-weight:700}
+  .ex pre .k{color:var(--fak)}
+  .ex pre .d{color:var(--ink-dim)}
+  .ex .ex-foot{margin-top:auto;padding-top:13px}
+  .ex .ex-foot a{color:var(--fak);font-weight:600;font-size:.9rem}
+  @media (max-width:760px){.examples{grid-template-columns:1fr}}
+
   /* metrics */
   .metrics{display:flex;gap:14px;flex-wrap:wrap;margin-top:24px}
   .metric{flex:1 1 150px;border:1px solid var(--line);border-radius:14px;padding:16px 18px;background:linear-gradient(180deg,var(--panel-2),var(--panel))}
@@ -243,6 +259,7 @@
     <a class="brand" href="#top"><span class="dot"></span><span class="mono">fak</span></a>
     <div class="nav-links">
       <a href="#kernel">the kernel</a>
+      <a href="#by-example">by example</a>
       <a href="#benchmark">benchmark</a>
       <a href="demos.html">live demos</a>
       <a href="#dogfood">built on DOS</a>
@@ -430,13 +447,95 @@ go run ./cmd/fak agent --offline
   </div>
 </section>
 
+<!-- ============================ EACH WIN, BY EXAMPLE ============================ -->
+<!-- The two flips + the cost collapse, each shrunk to one worked example. Numbers trace to
+     BENCHMARK-AUTHORITY.md and the explainer worked-example sections this links out to. The
+     monospace diagrams are plain text in <pre>; the colour spans add no width, so columns
+     align on the literal characters. -->
+<section id="by-example" style="padding-top:8px">
+  <div class="wrap reveal">
+    <div class="sec-head">
+      <span class="sec-num">02 — each win, in one example</span>
+    </div>
+    <h2 class="sec-head" style="margin:0">Four ideas, four worked examples</h2>
+    <p class="sec-sub">
+      The two flips and the cost collapse, each shrunk to one example you can read in ten seconds.
+      Every number traces to
+      <a href="https://github.com/anthony-chaudhary/fak/blob/main/BENCHMARK-AUTHORITY.md" style="color:var(--fak)">BENCHMARK-AUTHORITY.md</a>.
+    </p>
+
+    <div class="examples">
+
+      <!-- 1. KV eviction — the centrepiece (the one win shown nowhere else on the site) -->
+      <div class="ex">
+        <h4>Watch a turn vanish, bit-for-bit</h4>
+        <div class="ex-q">addressable KV cache · the security flip, made physical</div>
+        <pre>cache  <span class="d">[ system ][</span> <span class="b">POISONED result</span> <span class="d">][ query ]</span>   <span class="d">9 positions</span>
+gate   <span class="b">poison bytes &#8594; QUARANTINE</span>
+evict  <span class="d">[ system ][ query ]</span>            <span class="k">query slides to pos 5</span>
+
+       evicted vs never-saw   <span class="g">max|&#916;| = 0</span>  <span class="d">(bit-identical)</span>
+       poison  vs never-saw   <span class="w">max|&#916;| &gt; 0</span>  <span class="d">(a real erasure)</span></pre>
+        <p>One verdict removes the poisoned turn's K/V from the middle of the run and re-seats every
+        survivor, leaving the model's scratchpad identical to a run that never saw it. The model can't
+        attend to what isn't there.</p>
+        <div class="ex-foot"><a href="explainers/addressable-kv-cache.html#a-worked-example-watch-one-turn-vanish-bit-for-bit">Full walkthrough &#8594;</a></div>
+      </div>
+
+      <!-- 2. turn-tax — more tool calls, more saved (also runnable on the demos page) -->
+      <div class="ex">
+        <h4>The turn that never fires</h4>
+        <div class="ex-q">policy in the kernel · more tool calls &#8594; more saved</div>
+        <pre>one 14-call airline trace &#183; extra model round-trips
+  naive two-pass loop   <span class="b">+9</span>  <span class="d">re-prompt, re-issue, re-fetch</span>
+  tuned 2026 framework  <span class="w">+5</span>  <span class="d">still forced into recovery turns</span>
+  fak (1-shot kernel)   <span class="g"> 0</span>  <span class="d">repaired / served in-syscall</span>
+  safety floor          injection <span class="g">1&#8594;0</span> &#183; destructive ops <span class="g">1&#8594;0</span></pre>
+        <p>Each malformed, duplicate, or pure (side-effect-free) call is a round-trip the naive loop pays
+        and the kernel resolves inside the syscall the call arrived on. The more tool calls, the wider
+        the gap.</p>
+        <div class="ex-foot"><a href="demos.html">See it race live &#8594;</a></div>
+      </div>
+
+      <!-- 3. reuse — more agents, more reuse (consistent with the ~4x metric above) -->
+      <div class="ex">
+        <h4>Pay the shared prefix once</h4>
+        <div class="ex-q">addressable KV cache · more agents &#8594; more reuse</div>
+        <pre>5 agents &#215; 50 turns = 250 chances to re-read the setup
+  naive   re-prefills it   <span class="b">250&#215;</span>
+  tuned   warm per agent     <span class="w">5&#215;</span>
+  fak     prefill once        <span class="g">1&#215;</span>  <span class="d">cloned bit-identical</span>
+  &#8594; <span class="g">4.1&#215;</span> vs tuned &#183; <span class="g">62.0&#215;</span> fewer prefill tokens vs naive</pre>
+        <p>The shared system-prompt-plus-tools block is prefilled once for the whole fleet and reused.
+        It is a read-heavy win: if agents keep writing shared state, even ~1% writes can erase it.</p>
+        <div class="ex-foot"><a href="demos.html">See the reuse proof &#8594;</a></div>
+      </div>
+
+      <!-- 4. more hooks, sooner — why fail-closed is affordable -->
+      <div class="ex">
+        <h4>More hooks, sooner</h4>
+        <div class="ex-q">policy in the kernel · why fail-closed is affordable</div>
+        <pre>4 checks &#215; 1,000 tool calls = 4,000 checks
+  spawn a hook per check   <span class="b">&#8776; 28 s</span>   <span class="d">&#8594; systems fail OPEN</span>
+  run each in-process      <span class="g">&#8776; 10 ms</span>  <span class="d">&#8594; fail CLOSED is free</span>
+
+  one in-proc check <span class="k">~2.4 &#181;s</span> &#183; one spawned hook <span class="w">~6.9 ms</span></pre>
+        <p>Putting the gate on the call path is what lets "refuse if anything is wrong" be the default
+        instead of an aspiration. The more checks you want, the more the placement pays.</p>
+        <div class="ex-foot"><a href="explainers/policy-in-the-kernel.html#a-worked-example-the-cost-of-checking-everything-every-time">Full walkthrough &#8594;</a></div>
+      </div>
+
+    </div>
+  </div>
+</section>
+
 <!-- ============================ HERO BENCHMARK ============================ -->
 <!-- Chart numbers hand-ported from visuals/hero-benchmark.html; canonical source is
      tools/hero_benchmark.data.json (cost_collapse.arms = [78, 19]). -->
 <section id="benchmark" style="padding-top:8px">
   <div class="wrap reveal">
     <div class="sec-head">
-      <span class="sec-num">02 — the hero benchmark</span>
+      <span class="sec-num">03 — the hero benchmark</span>
     </div>
     <h2 class="sec-head" style="margin:0">Serving a 50 × 5 agent fleet — the cost collapse</h2>
     <p class="sec-sub">

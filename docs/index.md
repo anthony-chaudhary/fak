@@ -88,6 +88,25 @@ context) also drives **performance** (do shared work once instead of every turn)
   on a 50-turn × 5-agent run; 8.8–9.7× measured prefill elimination on real
   WebVoyager web-agent workloads.
 
+## See each win in one example
+
+Each idea shrinks to a single worked example. The numbers trace to the
+[benchmark authority](https://github.com/anthony-chaudhary/fak/blob/main/BENCHMARK-AUTHORITY.md);
+the live versions run on the [demos page](demos.html).
+
+- **A poisoned turn, removed mid-run.** Quarantine evicts a tool result's K/V from the *middle* of the
+  kept run and re-seats every survivor, leaving the cache bit-identical to one that never saw it
+  (`max|Δ| = 0`). → [Watch a turn vanish](explainers/addressable-kv-cache.md#a-worked-example-watch-one-turn-vanish-bit-for-bit)
+- **More tool calls, more turns saved.** On one 14-call agent trace a naive loop is forced into 9 extra
+  model round-trips and a tuned 2026 framework into 5; the kernel resolves them in-syscall, for 0. →
+  [The turn that never fires](concepts-and-story.md#three-worked-examples-more-turns-more-agents-more-tool-calls)
+- **Pay the shared prefix once.** 5 agents × 50 turns is 250 chances to re-read the setup: naive pays
+  250×, a tuned warm cache 5×, fak once: 4.1× vs tuned, 62.0× fewer prefill tokens. →
+  [The setup-payments table](concepts-and-story.md#three-worked-examples-more-turns-more-agents-more-tool-calls)
+- **More hooks, sooner.** Four checks across 1,000 tool calls is ~28 s of gate latency if you spawn a
+  hook per check, or ~10 ms in-process, which is what makes fail-closed the default. →
+  [The cost of checking everything](explainers/policy-in-the-kernel.md#a-worked-example-the-cost-of-checking-everything-every-time)
+
 ## What fak is not
 
 `fak` is **not** a faster model server. vLLM, SGLang, and llama.cpp win raw throughput
