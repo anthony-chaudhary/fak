@@ -154,6 +154,1446 @@ description: "Frequently asked questions about fak, the agent kernel: how its de
         "@type": "Answer",
         "text": "Guided tutorial — zero to first adjudicated call. Integration index — put fak in front of the agent you already run (Claude Code, Cursor, an SDK, or MCP). Policy in the kernel and Addressable KV cache — the two core ideas. Benchmark authority — every number. llms.txt — a machine-readable map for LLMs and answer engines."
       }
+    },
+    {
+      "@type": "Question",
+      "name": "Why does fak treat the language model as an untrusted program?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "fak treats the model as an untrusted program because its output is shaped by text it reads at runtime — including text an attacker can plant — so nothing the model proposes can count as authorization on its own. The core move puts the model in the position of ring-3 userspace: every effect it wants on the outside world becomes a syscall through a kernel the model does not control, adjudicated from evidence the model did not author, and a tool call is that syscall. The kernel decides allow, deny, transform, or quarantine from a policy floor and the call's own arguments, never from the model's say-so, so an injected instruction can ask for a dangerous action but cannot grant it."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "What does \"tool call = syscall\" actually mean in fak?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "It means every action an agent takes on the outside world is funneled through one in-process checkpoint the model cannot bypass, the way a user-space program reaches the OS only through calls like read() or write(). In fak that checkpoint is the kernel's Submit/Reap path: a proposed tool call is folded through a ranked adjudicator chain that returns one verdict, and a denied call is never enqueued or executed. Promoting the tool call to a syscall is what lets a single in-process gate mediate both which effects are allowed and which results may enter the model's context."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "What is the \"one boundary\" idea, and how can the same gate be both security and performance?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "The one-boundary idea is that the gate deciding whether a tool result may enter the model's context (a security act) is the same gate that pages that result's bytes to a content-addressed store for reuse (a performance act) — one write-time decision, two enforcement media. When a result is screened, the same code that holds a poisoned result out of context also stores a benign result once in a shared store so shared work isn't recomputed every turn, so the correctness metadata is the performance metadata. fak states this as a claim shown by example, not a proven law, and is honest about its edge: the convergence does not help raw GPU throughput (it pays for bit-exactness in memory), and the reuse win only materializes for read-heavy self-hosted fleets."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "If the poison detector is evadable by design, what actually protects me?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "The protection is structural — the capability lock and the quarantine policy — not the detector, which fak openly calls roughly 100% evadable by design and false-positive-prone. The result screener (ScreenBytes, covering secret patterns, injection markers, and byte-repeat pollution) sits on top of the wall as a helpful bonus: if it fires, that's a free catch; if it misses, the result is still held out of context by policy and an unlisted irreversible tool is still refused regardless of context. The honest floor is that the wall holds even when the detector misses, so keep exfil-shaped tools off the allow-list and don't rely on detection as the load-bearing layer."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "What does \"in-process\" or \"in the call path\" mean, and why is it load-bearing?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "In-process means the permission check runs in the same address space as the agent loop, on the same call path as the tool call, with no spawned hook, no socket round-trip, and no IPC on the decide path. This is what makes fail-closed affordable: there is no per-call process to spawn or socket to wedge on, so the gate can refuse by default without becoming a latency tax you are tempted to turn off. fak measures the in-process fold at p50 around 2.4µs versus around 5.8ms for a spawned hook (roughly 2,400×), but it is explicit that this is a subsystem regression sentinel rather than a fleet-speed headline; the point of the number is that the gate is cheap enough to always be on, with absence of process spawn proven by TestNoOsExecOnHotPath."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "What is the \"trust floor,\" and why is default-deny the starting point?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "The trust floor is the set of effects that are structurally possible at all: a zero or empty policy permits nothing, so every call is refused with DEFAULT_DENY until you explicitly allow-list a tool. Default-deny is the starting point because a refusal then does not depend on recognizing an attack — the lever simply was never built, so no context or injection can reach it. You raise the floor deliberately with allow, allow_prefix, and deny rules, and a loaded manifest replaces the floor rather than merging into it; fak policy --dump emits the full default to edit and fak policy --check validates a manifest before you deploy."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "Does fak stop a tool from being recognized as dangerous, or stop the dangerous thing from existing?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "It stops the dangerous thing from existing on the allow-list rather than trying to recognize each attack — the framing is to stop recognizing and start not building the lever. Because an irreversible tool that was never allow-listed has no code path to invoke, an injected instruction can describe the attack perfectly and still get a structural refusal; there is nothing to detect because there is nothing to call. This is why the lock holds against novel phrasings: it is a property of the policy floor, not of a pattern set an attacker can rephrase around."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "What is the honest limit of the capability lock — does it bound tool arguments too?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "The lock bounds tool names structurally but does not bound the resolved effect of an allow-listed tool's arguments. An allow-listed send_email with attacker-chosen recipients, or a coarse Bash running rm -rf /, is not stopped by the name-level floor — fak can inspect one decoded argument string with arg-rules (positive path globs, RE2 deny patterns, byte caps), but RE2 patterns are detection-shaped and evadable, and first-class argument-scoped capabilities (path, host, or amount as constraints) are roadmap, not shipped. The practical guidance is to keep exfil-shaped and irreversible tools off the allow-list entirely rather than trust an argument pattern to catch a bad value."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "How does adding a verdict like \"quarantine\" fit the same mental model as \"deny\"?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "Both are verdicts in one restrictiveness lattice the kernel folds to, so quarantine (result-side) and deny (call-side) are the same kind of object: a value the next loop turn consumes, not an exception. The adjudicator chain folds to the most-restrictive verdict across allow, defer, transform, quarantine, require-witness, and deny; an unknown verdict kind fails closed rather than panicking, and a refusal is returned as a structured result, never an HTTP error. That uniformity is why a result quarantine and a call denial share one wire shape and one audit path: the model proposed something, the kernel returned a verdict, and the loop reads it in-band."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "What exact path does a proposed tool call take through the kernel?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "A proposed tool call hits the in-process vDSO fast-path first; on a miss the kernel folds the adjudicator chain to one verdict, and only an allowed call is ever enqueued. There is no spawned hook and no inter-process call on the decide path. Submit consults the vDSO, and a hit returns Allow by=vdso with no adjudication and no engine call. On a miss, decide() folds the registered chain to a single verdict and routes it, and a denied call is never enqueued for execution. Reaping a result runs the separate result-side admission chain."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "What does \"default-deny\" actually mean in fak's adjudicator?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "Default-deny means any tool you did not explicitly allow-list is refused, regardless of context or injected text. A zero (empty) policy is the fail-closed floor: nothing is allowed, so every call returns DEFAULT_DENY. The fold reinforces this structurally — an empty chain folds to Deny/DEFAULT_DENY by=\"empty-policy\", and a chain where every rung defers folds to Deny/DEFAULT_DENY by=\"all-defer\". The default-deny-on-empty-policy guarantee is pinned by the TestFoldDefaultDenyEmptyPolicy witness."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "What is the closed refusal vocabulary, and what are the exact reason codes?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "fak refuses only with one of 12 codes from a closed vocabulary, never free text: DEFAULT_DENY, POLICY_BLOCK, SELF_MODIFY, LEASE_HELD, TRUST_VIOLATION, MALFORMED, MISROUTE, RATE_LIMITED, SECRET_EXFIL, UNWITNESSED, OVERSIZE, and UNKNOWN_TOOL (plus NONE, which is not a refusal). The set is the source of truth in internal/abi/reasons.go and is the same vocabulary the policy loader validates against. It is forward-compatible: an unknown code renders as REASON_<n> rather than panicking, so a newer rung can add a code without breaking an older reader."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "How do allow, allow_prefix, and deny work in a policy manifest?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "allow is an exact tool-name match, allow_prefix matches a tool name by prefix, and deny is a provable refusal by name whose value is a closed-vocabulary reason code. In the manifest these are the fields allow, allow_prefix, and deny (a map of tool name to reason name), and the default allow_prefix family is the read-only set read_ get_ search_ list_ lookup_ find_ calc. A loaded manifest replaces the floor rather than merging into a built-in default, so the manifest you load is the whole floor."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "What is the difference between fail_closed and admit_and_log posture?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "fail_closed (the default, zero value) refuses anything not allow-listed, while admit_and_log downgrades only a LOW-RISK, READ-SHAPED default-deny to an allow while recording what it would have denied. Under admit_and_log a downgraded call carries Meta{posture:\"admit_and_log\", would_deny:\"DEFAULT_DENY\"} so the would-be refusal is still auditable. It is not a blanket open door: explicit denies, self-modify, arg-rule violations, and any write-shaped default-deny still fail closed. The read-shaped test is name-based and conservative, and caller-supplied metadata cannot widen authority."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "Why is a policy refusal an HTTP 200 instead of a 4xx error?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "A refusal is a successful turn carried as a verdict value, so fak serve returns 200 OK with the verdict in the response body and never a non-2xx for a policy refusal. Over the gateway, adjudicateProposed keeps ALLOW and TRANSFORM calls, drops the rest, and records each decision in the fak response extension as a per-call ToolAdjudication/WireVerdict; for clients that do not read that extension, a deny summary is also written in-band. HTTP error statuses are reserved for malformed requests, auth failures, and upstream faults, so a client never treats \"the kernel said no\" as an exception."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "What does \"deny is a value, not an error\" mean inside the kernel loop?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "When the kernel denies a call it produces a structured Result the next loop turn consumes in-band, rather than raising an error. The DenyResult carries Status=StatusError, Outcome=OutcomeCommitted plus Meta{verdict:\"deny\", reason, disposition, by} and a bounded witness containing only the offending set. The disposition tells the loop what to do next: malformed and misroute denies are RETRYABLE, rate-limit and lease denies are WAIT, self-modify and trust denies are ESCALATE, and everything else is TERMINAL."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "Does the adjudication floor bound a tool's arguments, or only its name?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "The capability floor bounds tool names structurally; it does not bound the resolved effect of an allow-listed tool's arguments. An allow-listed send_email with attacker-chosen recipients is not stopped by the floor itself, so the guidance is to keep exfil-shaped tools off the allow-list entirely. fak does add arg-level predicates (issue #9) that can restrict an allowed tool by inspecting one decoded argument string, but those inspect a single value, not the resolved effect, and a satisfied predicate never grants an allow. Argument-scoped capabilities (path, host, amount as first-class constraints) are roadmap, not shipped."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "How do arg-level predicates restrict an allow-listed tool?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "Arg-level predicates (issue #9) are RESTRICT-ONLY rules keyed on a tool name plus an argument value, evaluated after name-deny and self-modify but before the affirmative allow, so an allow-listed tool with a malicious argument is refused at the floor instead of being waved through to detection. There are three kinds: allow_glob (positive — the value must be a non-escaping path under a glob, and a missing arg or ../ escape fails closed), deny_regex (negative RE2 match), and max_bytes (a string over N bytes is denied). A violation denies with the rule's reason (default POLICY_BLOCK) and a bounded witness of the bound that was violated, never the argument value itself."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "How does fak handle a malformed or wrongly-shaped tool call?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "Malformed calls are routed by two early rungs: grammar repair can rewrite a repairable call into a Transform, and an unrepairable one is denied with MISROUTE (a retryable disposition). The grammar rung defers well-formed calls, repairs malformed-but-repairable ones (a positional-to-named zip when arity matches, or an alias rename), and fails open with a Defer when no grammar exists for the tool so it never over-refuses. Below it, the preflight ladder does a static JSON parse (rung-0) and a schema required-fields and types check (rung-1); a failure there denies with MALFORMED."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "How does the adjudicator chain combine multiple rungs into one verdict?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "The chain folds to the single most-restrictive verdict, so a stricter rung can only tighten the outcome, never loosen it. Each verdict kind has a fold rank — Allow=0, Defer=1, Transform=2, Quarantine=3, RequireWitness=4, Deny=100 — and the highest non-defer rank wins; an unknown registered kind folds to 100, which is fail-closed. The default rungs are grammar repair, the preflight ladder, and the authoritative adjudicator monitor. Because the fold is order-independent, a rung's rank only orders the work, not the result."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "In what order does the adjudicator monitor decide a single call?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "Inside the authoritative monitor the decision walks a fixed order: explicit name-deny first, then self-modify on a path argument, then self-modify on a shell or command string, then arg-level predicates, then redaction transforms, then the affirmative allow or allow_prefix, and finally the default-deny catch-all. This ordering is why a malicious argument on an allowed tool is refused at the floor rather than reaching detection: the arg predicates run before the affirmative allow. The affirmative allow is the last thing consulted before the default-deny, so anything not explicitly permitted falls through to a refusal."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "Why does fak deny a write-shaped shell command that touches a guarded path?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "fak refuses a write-shaped command that targets a guarded glob with a SELF_MODIFY denial, because an agent editing its own policy or harness is the self-grading-homework failure the rung exists to stop. The shell-path form fires only when a command contains a guarded glob and a write verb or redirect; the write detection is a deliberately over-broad substring floor — covering sed -i, tee, cp/mv, git apply/checkout/restore, interpreter eval flags, >/>>, and many more — not a real shell parser. A plain read of a guarded file stays allowed, and the bias is intentional: a false refusal is cheap, while a false allow here is the failure mode the rung exists to stop."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "What happens if my policy manifest has a typo or an unknown field?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "fak fails loud on a bad manifest rather than silently falling back to a more permissive default. The loader uses strict field decoding, so a typo like allows for allow is a hard error (json: unknown field \"allows\"); an unknown deny reason errors with the list of offenders plus the full valid vocabulary; and an unknown posture, bad regex, or malformed arg rule each hard-error. On startup fak serve propagates that error as a fatal failure, so there is no silent fallback to a more permissive floor. A round-trip is exact: --dump piped into --check validates unchanged."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "How do I check what verdict a single tool call gets without running a server?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "fak preflight is the per-call oracle: it runs the adjudication rungs over one tool call and prints verdict=… reason=… by=… with no dispatch and no server. Pass the tool name, its arguments as JSON, and optionally a policy file; --explain or --json dumps the per-rung decision trace. This is the offline way to prove a policy refuses what you expect before you wire anything live."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "Does the vDSO fast-path skip the security check on a cache hit?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "No, a vDSO hit is sound by construction: a cache hit is defined to equal a fresh call, so serving it without re-adjudicating does not loosen the floor. The fast-path serves only repeat decisions that are pure functions of their inputs or are bound to the current world-version, and the write-shape veto is name-based and re-checked rather than trusted from an annotation. A write-shaped completion bumps the world-version so stale entries cannot be served. The kernel counts VDSOHits separately, so the hit ratio is observable on /metrics."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "What does the kernel do when a policy injects its own per-kernel adjudicator chain?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "By default the kernel folds the process-global adjudicator registry, but WithAdjudicators lets you inject a per-kernel chain so concurrent kernels can run independent policies. An empty or nil injected chain is a no-op fallback to the global registry; it never silently installs a default-deny-all in place of your real policy. The fold semantics are identical either way — most-restrictive-wins over whatever chain is in effect — so independent policies coexist without one kernel's floor leaking into another's."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "Why is running the adjudication check in-process load-bearing rather than just fast?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "Running the check in the same address space as the agent loop is what makes fail-closed affordable: there is no per-call process spawn or socket round-trip to wedge on, so refusing by default never costs a hook launch. The decide path is a fold over registries read with a single atomic pointer load (no mutex, zero allocations on the hot path), and a witness proves no os/exec spawn happens on it. The measured in-process versus spawned-hook gap is roughly 2,400–2,849×, but that figure is a subsystem regression sentinel for the decide path, not a fleet-speed headline."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "What is result quarantine in fak?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "Result quarantine is the write-time gate that decides whether a tool result is allowed to enter the model's context, holding poisoned, secret-shaped, or polluted results out entirely. It is the call-side adjudicator's dual: where the adjudicator screens proposed tool calls, the context-MMU (ctxmmu) screens tool results at the moment they would be written into the conversation. A result either enters as-is (Allow), is paged out to a small pointer because it is benign but oversize (Transform), or is held out of context because it looks like a secret, an injection, or pollution (Quarantine)."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "How does a quarantined result get held out of the model's context?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "fak pages the offending bytes out to a content-addressed blob store and replaces the result payload in-place with a tiny stub like {\"_quarantined\":true,\"id\":...,\"reason\":...,\"len\":...}, so the dangerous bytes are physically absent from context. The kernel mints a quarantine id, pins the bytes in the content-addressed store so the bounded cache cannot reclaim them before a gated read, and stamps the result's metadata with the quarantine id. The model only ever sees the stub pointer; the poison never reaches attention. If even writing the stub fails, the path fails closed to an inline reference tagged as quarantined rather than letting the bytes through."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "What does the result detector actually screen for?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "The screen, ScreenBytes, runs three first-match-wins checks over a result body: secret exfiltration, prompt injection, and byte-repeat pollution. Secret detection is an RE2 pattern matching shapes like sk-..., AKIA..., ghp_..., xox[baprs]-..., and PEM private-key blocks, returning SECRET_EXFIL. Injection detection is a lowercased substring scan over markers like \"ignore previous instructions\", \"you are now\", and \"reveal your system prompt\", returning TRUST_VIOLATION. Pollution detection is a byte-repeat predicate returning OVERSIZE. The same predicate backs both the post-tool admission gate and closed-API clients' pre-send transcript screening."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "How does the byte-repeat pollution predicate work?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "The pollution predicate flags a result whose body is at least 512 bytes and contains a 16-byte chunk repeated back-to-back more than 50 times. It takes the first 16 bytes, steps through the body in 16-byte strides counting consecutive equal chunks, and resets the run to zero on any mismatch — so only a contiguous, blatant repeat trips it. A 16-byte chunk repeated 60 times (960 bytes) is quarantined as OVERSIZE. This is a deliberately conservative binary seal: it catches the most obvious context-flooding pollution without wrongly sealing a benign result."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "What is the taint ledger and where does it live?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "The taint ledger is an in-process, process-local record of which results are held and which have been cleared, kept in memory under a single mutex. It holds maps of held ids to content-addressed references, a cleared set, a FIFO order list, and counters for total/quarantine/paged/evicted. It is in-memory only with no disk backing, so this live state is gone on process exit — the quarantined bytes live in the shared content-addressed store keyed by digest, but the live held/cleared maps reset on restart. The fak recall core-dump path is what persists quarantine state across the process boundary."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "Is the taint ledger bounded, or can it leak memory over a long-running process?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "The ledger is bounded to a default of 8192 held ids (overridable via FAK_CTXMMU_MAX_HELD), closing a real process-lifetime leak where every quarantine once minted a permanent entry with no removal path. When the cap is reached, the oldest ids are evicted FIFO: the content-addressed handle is unpinned, the id is dropped from the held and cleared maps, and the order list's backing array is compacted. An evicted id's bytes were never in context, so a later page-in of that id is refused exactly like an unknown id — correct fail-closed degradation, never a leak. A bad env value fails safe to the default."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "How do quarantined bytes ever get back into context if they were a false positive?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "Quarantined bytes page back in only on an explicit page-in request that comes after a witness clears the id, and both checks fail closed. Clearing records clearance only for an id that is currently held, keeping the cleared set a subset of the held set. Page-in refuses an id that was never held (\"no quarantined result\") and refuses an id that was held but never cleared (\"no witness clear()\"). So nothing re-enters context by accident; it takes a held id, an explicit clearance, and an explicit page-in, all three."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "How do I see quarantine decisions on the HTTP wire?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "Quarantine decisions surface in the fak response extension under result_admissions, one entry per inbound tool result the kernel screened. Each entry carries the tool call id, the tool name, and a verdict whose kind is one of ALLOW, DENY, TRANSFORM, QUARANTINE, REQUIRE_WITNESS, or DEFER; a quarantined result shows up as kind: \"QUARANTINE\" with its reason. The extension is omitted entirely on a turn with no tool activity. Claude Code reads content blocks but not the fak key, so the gateway also prepends a leading [fak] ... text block describing the quarantine."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "What happens to a poisoned tool result in the gateway proxy path?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "On the proxy path, the gateway screens every inbound tool-role message and, on a quarantine or transform, forwards the paged-out envelope so the poison never reaches the model. An un-admittable result is held out fail-closed with a stub carrying reason ADMIT_ERROR and a QUARANTINE/TERMINAL verdict. A quarantine also resets the relevant upstream KV span so a tuned engine's cache cannot keep serving the poisoned prefix. The counter fak_gateway_context_pollutions_blocked_total is the live \"context saved\" signal."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "How does result quarantine relate to the addressable KV cache?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "They are one decision enforced in two media: the quarantine verdict bars the bytes from text context, and the KV side bars the corresponding K/V from attention state. The result detector's verdict drives a write-time eviction of the tool-result span from the kernel-owned KV cache, leaving it bit-identical to a session that never saw the poison — verified at max|Δ| = 0 with a non-vacuity control showing the poison-vs-never delta is non-zero. This bridge is proven on a synthetic model in internal/kvmmu today and is not yet wired into the live fak agent HTTP loop, so treat the KV-eviction half as mechanism-proven, not production-served."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "Does quarantine survive a session boundary, or is it lost when the process exits?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "The live quarantine maps are process-local and reset on restart, but fak recall persists a finished session as a durable core image whose quarantine seals survive the boundary. A reloaded image refuses to page a quarantined slice into a new context unless a witness clearance ran and the bytes pass a fresh content re-screen against the full registered admitter chain — clearance alone cannot launder still-poisoned bytes. The re-screen folds the current detectors, so a session recorded under a weaker gate is re-caught by every screen the fleet ships now. A sealed page persists with a safe descriptor only (tool: [sealed: reason, N bytes]), never the poisoned bytes."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "What is the difference between the kernel's binary quarantine and fak answer-shape?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "The kernel's repeat predicate is a conservative binary seal — at least 512 bytes, a 16-byte chunk repeated more than 50 times — while fak answer-shape is a graded, tunable witness over the same concern. answer-shape emits a repeat fraction in [0,1] (the max of n-gram, repeated-line-block, short-period, and compression signals) judged against caller thresholds like --max-repeat and --max-chars, catching softer loops the kernel's binary gate deliberately admits. The two share the idea of degenerate repetition but not code: the kernel's is a fixed seal on the hot path, answer-shape's is an off-hot-path consumer witness with no kernel dependency."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "Does the audit log of a quarantine leak the poisoned bytes?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "No — the audit surfaces record names, verdicts, reasons, and content digests, never the poisoned bytes or result content. The stdout access log carries the tool name and verdict fields with no payload and no digest at all. The opt-in durable journal (enabled by FAK_AUDIT_JOURNAL) records the tool name, trace id, verdict, reason, and a result digest derived from the frozen reference — it never materializes a blob, so it leaks no payload into the log. A quarantine page's saved descriptor is safe sealed metadata only."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "What reason codes can a quarantine carry, and where do they come from?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "A quarantine carries one code from the kernel's closed 12-reason refusal vocabulary: secret-shaped results return SECRET_EXFIL, injection-shaped results return TRUST_VIOLATION, and byte-repeat pollution returns OVERSIZE. These come from the same fixed vocabulary the call-side adjudicator uses, so a result refusal is as structured and citable as a call refusal — never free-text. An unknown forward-compatible code renders as REASON_<n> and never panics. (On the gateway proxy path, a result that cannot be admitted at all is held out fail-closed with the wire-level marker ADMIT_ERROR, which is a fail-closed signal rather than a vocabulary code.)"
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "Does quarantine guarantee you catch every injection, or only contain the ones it flags?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "Quarantine makes the gate's decision durable and enforceable, but it does not improve the decision — a crafted injection that never trips the screen's marker set is never flagged and will resolve into context. The honest scope is that the structural floor (an unlisted irreversible tool stays refused; a flagged result stays sealed across the process boundary and re-screenable) is what holds, while the detection layer is explicitly evadable and the durable-seal guarantee is conditional on the gate having flagged the page in the first place. The lever to re-catch a missed injection is the re-screen on reload: once you tighten the markers, a reloaded session is re-judged by the stricter chain. Keep exfil-shaped and irreversible tools off the allow-list rather than relying on the detector."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "What is the difference between front-of-prompt prefix reuse and mid-run causal eviction?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "Prefix reuse extends a cached run forward from the front; mid-run causal eviction removes a span from the middle of a kept run and leaves the rest bit-identical to never having seen it. Every shipped engine does the first: vLLM's APC, SGLang's RadixAttention, and the OpenAI/Anthropic/Gemini prompt caches all reuse a contiguous run that starts at token 0, so changing context at position N invalidates everything after N. fak adds the second. Its KVCache.Evict(from, n) slices a span out of every layer's K/V tensors, compacts the absolute-position array, and re-derives each survivor's key from the stored pre-RoPE values in one clean rotation at its new position. RoPE is linear in position, so that single rotation is exact rather than a drift-accumulating shift."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "How does fak remove a single tool-result span from the middle of a kept run?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "fak keeps a ledger of named segments over the cache, and evicting one calls KVCache.Evict(seg.From, seg.Len) then shifts every later segment's offset down so the ledger tracks the compaction. The cache stores the pre-RoPE keys (Kraw) alongside the rotated keys, so after slicing the span out it re-rotates each survivor whose absolute position changed in a single clean RoPE step at its new index; values are unrotated and need no fix. The kvmmu gate evicts at write-time, before any later segment is prefilled, so the removed span is causally upstream of nothing and the result equals a run that never saw it. Removing a span after later tokens have attended to it can only be un-seen if nothing downstream attended yet, which the code states honestly."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "What does max|Δ| = 0 mean, and how is it actually verified?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "max|Δ| = 0 means the largest absolute difference between two logit vectors is exactly zero: the post-eviction cache produces bit-identical next-token logits to a cache that never saw the evicted span. It is verified by witness tests that compare full logit vectors, not just the greedy argmax, because an untrained transformer's argmax can collapse while the vector stays context-sensitive. TestWriteTimeEvictEqualsNeverSaw reads real poison bytes through the real gate, quarantines and evicts the span, then asserts max|Δ| evict-vs-never = 0.000e+00 with a non-vacuity control showing poison-vs-never = 3.257e-01 (greater than zero). TestLedgerRenumberAfterMiddleEvict evicts a middle span then a tail span and asserts the survivors equal a fresh prefill at max|Δ| = 0."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "Why can fak evict a span bit-exactly when llama.cpp's K-shift cannot?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "fak keeps the pre-RoPE keys and re-derives a moved survivor with one fresh rotation, so the result is exact; llama.cpp's K-shift composes rotations and drifts about 1e-6, which is enough to flip a greedy token. vLLM and SGLang store only post-RoPE keys, so for them an exact span removal means recomputing the tail rather than rotating in place. fak's applyRopeRow casts through float32 to pin the rotation against FMA fusion, so the single rotation is bit-identical across architectures and call sites. That is the structural reason the addressable cache exists: it is the one degree of freedom no shipped serving engine kept."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "Why does owning the cache as a kernel object enable mid-run eviction?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "Production engines rent the KV cache from a serving process behind an HTTP boundary, so policy can at best ask not to show a span; fak's KVCache lives in the kernel's own Go address space, so the gate can physically delete the span and the model becomes mechanically incapable of attending to it. One detector verdict drives two enforcement media: the context-MMU bars the bytes from the text context, and the kvmmu bars the K/V from the attention state. Holding the cache as a plain Go data structure (per-layer K/Kraw/V slices plus an absolute-position array) is what makes span eviction and cross-session splice real operations rather than API requests. This is the durable leg of the design: prefix-cost wins erode as hardware loosens, but \"provably remove this span and prove it is gone\" does not."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "What is a deletion certificate and what does it actually prove?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "A deletion certificate is a single portable, re-checkable receipt that binds a bit-exact KV-cache eviction to a tamper-evident audit journal. It proves three things under one ed25519 signature: that a named-span eviction ran (carrying the evicted count and span), that the equivalence was byte-identical (MaxAbsDelta == 0), and that it is anchored to a journal row whose Subject pins exactly which result was deleted. Verify fails closed on any tampered field: a signature mismatch, a non-zero delta (\"equivalence not bit-exact\"), an absent or broken journal chain, or a subject relabel each yields an invalid verdict. It is honest about its bounds: v1 is self-signed (integrity, not third-party independence), and it proves deletion only from the inference working set and agent memory, never from weights, embeddings, backups, or replicas."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "Is the deletion certificate's third-party verifiability shipped?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "No. The v1 deletion certificate is self-attesting: its ed25519 signature proves integrity, not issuer independence, and third-party validation through an RFC-3161 timestamp or a CT-log is a named but empty seam (ExternalAnchor). The certificate's other honesty caveat is that EvictedCount is a self-report from the Evict call, not an independent re-count of the cache. The tamper-evident journal it anchors to is real and proven, but the external anchor that would let an outside party verify the receipt without trusting the issuer is design-target plumbing, not built."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "What is content-addressed storage and how does it back the cache?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "Content-addressed storage (CAS) is a blob store where the sha256 digest is the identity, so a byte-identical payload is stored exactly once. fak's blob.Store backs the resolver, region backend, and page-out backend, so the vDSO tier-2 cache and the context-MMU page-out share one store; small payloads (256 bytes or under) stay inline. It is pin-aware: a digest a live holder will resolve later is pinned and never evicted, while transient call arguments and results are LRU-evictable once the footprint passes the byte bound (default 1 GiB), and eviction never breaks the \"cache hit equals a fresh call\" invariant. This is the cross-model reuse layer, since a KV cache is intra-model only; cross-model sharing happens at this semantic byte layer, not as shared K/V tensors."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "Can two different models share the same KV cache?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "No. KV reuse is intra-model only at the tensor layer, because head dimensions, RoPE, and vocabulary differ between models, so K/V bytes from one model are meaningless to another. What is shared across models is the content-addressed storage layer: tool results and their provenance are CAS blobs keyed by digest, a semantic byte-level reuse rather than shared attention state. Within a single model instance, cross-session prefix reuse comes from Clone/SessionFromPrefix and the radix tree; cross-worker residency moves are modeled by the cachemeta.KVTransfer metadata contract, whose live external engine is out of tree."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "How does radix prefix sharing relate to fak's addressable cache?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "fak's radixkv rebuilds SGLang's RadixAttention over the addressable cache, adding automatic longest-prefix discovery so callers don't have to declare the shared prefix. The tree is a compressed radix trie keyed on token-id runs; a Lookup walks to the longest cached prefix and splits an edge when divergence lands mid-run, so a real node boundary with a reusable cache exists there. The split is the interesting move: it truncates the child's cache via Clone plus Evict of the tail, which leaves no survivor to re-rotate, so the prefix is exact. TestReuseThroughSplitMatchesRecompute diverges two requests inside a compressed edge, splits, serves the second from the truncated clone plus a suffix prefill, and asserts the logits match a fresh full prefill at max|Δ| = 0."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "What can radixkv evict that an ordinary LRU prefix cache cannot?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "radixkv can evict a named subtree as policy, regardless of recency, which an opportunistic LRU cache structurally cannot offer. EvictToBudget is ordinary LRU leaf eviction with upward collapse (RadixAttention's policy verbatim, where leased nodes survive pressure), but EvictNode removes a specific subtree because a quarantine verdict said so, not because of memory pressure. TestPolicyEvictNode witnesses that capability. The honest cost: each node stores the full-prefix cache rather than SGLang's per-segment paged slabs, so it uses more memory, and Stats exposes both Tokens (the LRU metric) and PrefixTokens (the true resident footprint) so the gap is measurable rather than silent."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "How does fak prove that prefix reuse equals a full recompute?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "fak proves prefix reuse is exact with witness tests that compare a reused-prefix session against a full recompute at max|Δ| = 0 with identical argmax. Clone deep-copies a computed prefix and SessionFromPrefix starts a session on that clone so only the suffix is prefilled, and because the copy is exact the reusing session is bit-identical to one that prefilled the whole prefix. TestKVPrefixReuseMatchesRecompute pins reuse-equals-recompute, and TestCachedDecodeMatchesPrefill asserts cached decode equals a full forward pass to the last bit, failing if any difference appears. These exact-equality gates are the honesty check that the speedup comes from reuse, not from a numerics shortcut."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "What happens to the segment ledger when a middle span is evicted?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "When a middle span is evicted, the kvmmu ledger calls Cache.Evict(seg.From, seg.Len) and then renumbers: every later segment's From offset shifts down by the evicted length, so the ledger keeps tracking the physical compaction. Segments are addressed by name, not by position or token content, so a by-id eviction removes exactly that segment's range and the proof's bijection theorem guarantees no survivor is lost and no slot aliases another. TestLedgerRenumberAfterMiddleEvict evicts a middle segment of one length then a tail segment of a different length and asserts the surviving segments equal a fresh prefill at max|Δ| = 0; a stale offset would misfire precisely because the lengths differ."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "Is the quarantine-drives-KV-eviction bridge wired into the live fak agent loop yet?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "No: the kvmmu bridge that turns a quarantine verdict into a bit-exact KV-span eviction is proven on a synthetic model but is not yet wired into the live fak agent HTTP loop. The mechanism is real and witnessed (TestWriteTimeEvictEqualsNeverSaw runs the real ctxmmu gate over real poison bytes), but the witness uses a small synthetic Llama (hidden 32, two layers) to prove the wiring, while the HF numerics are proven separately by the internal/model oracle. No radixkv or kvmmu import appears under the kernel package today. The context-MMU side that bars poisoned bytes from the text context is shipped on the gateway path; the K/V-eviction half is the part still to be connected."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "Is arbitrary mid-sequence KV splicing (not just prefix or span removal) supported?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "No. Non-prefix, arbitrary mid-sequence KV splice (inserting or rearranging spans anywhere) is approximate and has zero implementation; it is a documented design target, audited with kill criteria, not built. What is shipped and bit-exact is the pair that matters in practice: front-of-prompt prefix reuse and removal of a span from the middle of a kept run. The queryable-context materialization with its five verdicts (HIT, FAULT, RECOMPUTE, REFUSE, ABSTAIN) is early and partly in flight, proven reachable on a synthetic demo image, with answer quality still unmeasured. Treat arbitrary splice as a roadmap item rather than a capability."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "What numbers can fak honestly claim for KV cache reuse, and against which baseline?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "On agent workloads fak matches SGLang's regime at an 86.7% cache hit rate and a 7.50× token speedup versus naive re-prefill, and it adds about 1.22× cross-worker reuse where SGLang is 0%. The cited bottom line is a 20-24× infrastructure cost reduction versus naive re-prefill and 1.13-1.22× cross-worker; the radixkv explainer cites a 77-88% hit rate across few-shot, chat, tree-of-thought, and agent workloads, inside SGLang's verified 50-99% band. Hit rate is a token count, so it is hardware-independent, which is the one axis where a Go cache on a laptop and a datacenter GPU engine compare honestly. The honest fence: the 1.22× cross-worker figure is a measured/projected fleet number, not a live multi-node deployment."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "Does a quarantined span ever physically leave the model's attention, or is it just hidden from view?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "When the kvmmu bridge evicts a quarantined span, the span physically leaves the model's attention state: its K/V columns are sliced out of every layer, so the model is mechanically incapable of attending to it, not merely \"not shown\" it. This is distinct from the context-MMU's text-side quarantine, which holds poisoned bytes out of the conversation by paging them to a stub pointer. The two are one decision enforced in two media: the context-MMU keeps the bytes out of the prompt, kvmmu keeps the K/V out of attention. The write-time path is the clean case, because evicting before any later token attended makes the result identical to never having seen the span; the after-the-write path carries the honest caveat that it can only un-see a span nothing downstream attended to yet."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "What is the cachemeta contract and why is its KV-residency layer not fully live?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "cachemeta is a payload-free metadata contract that names reusable objects and their validity, security, residency, and coherence metadata, plus typed lookup verdicts (Hit, Miss, Revalidate, Transform, Quarantine, Fault); it stores no payloads and owns no cache. A KVPrefix lowers to a position-prefix-aligned entry, radixkv nodes lower into it, and its attention-index metadata points at the K/V span whose eviction must invalidate a sparse-attention index. Its kvtransfer events (offload, restore, route, migrate) carry typed outcomes so a failed restore is never a silent recompute. The metadata contract itself is shipped and tested; the live external serving engine that would consume the cross-instance residency and invalidation directives is out of tree, which is why this layer is a contract rather than a running multi-node KV pool."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "What does `fak serve` actually do?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "fak serve fronts the kernel over HTTP, exposing three wire surfaces plus MCP on one port so an agent passes every proposed tool call through the capability floor without an agent-side code change. One http.ServeMux serves the OpenAI-compatible routes (/v1/chat/completions, /v1/embeddings, /v1/moderations, /v1/models), the native Anthropic Messages route (/v1/messages), the fak-native verbs under /v1/fak/, and /mcp. It defaults to --addr 127.0.0.1:8080; --stdio swaps HTTP for MCP-over-stdio. The gateway adjudicates a whole turn — it does not execute your tools; your own agent loop runs the calls that survive."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "What are the three wire surfaces `fak serve` exposes?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "fak serve speaks three protocol-compatible wire surfaces on one port: the OpenAI-compatible surface, the native Anthropic Messages surface, and the fak-native /v1/fak/ surface, with MCP available over /mcp or --stdio. The OpenAI surface covers /v1/chat/completions, /v1/embeddings, /v1/moderations, and /v1/models. The Anthropic surface covers /v1/messages and /v1/messages/count_tokens — the Claude-Code-facing wire. The fak-native surface is one POST, one verdict per endpoint: /v1/fak/adjudicate (verdict only), /v1/fak/syscall (adjudicate and execute), /v1/fak/admit (result-side screen), plus feeds, journal, revoke, and policy-reload routes."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "Why does pointing Claude Code at `http://127.0.0.1:8080/v1` give a 404?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "Anthropic SDKs append /v1 themselves, so an Anthropic base URL ending in /v1 becomes /v1/v1/messages and 404s — point Anthropic-wire clients at the origin http://127.0.0.1:8080 with no /v1. This is the single most common wiring mistake. OpenAI clients are the opposite: they do include /v1, so an OpenAI base URL is http://127.0.0.1:8080/v1. The same origin-vs-/v1 split applies to langchain-anthropic and any other Anthropic-wire client. For Claude Code, set ANTHROPIC_BASE_URL=http://127.0.0.1:8080."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "How does the gateway decide whether to proxy an upstream, run the in-kernel model, or mock?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "The gateway picks its planner backend by a fixed precedence: --base-url set means a live proxy in front of your upstream provider; otherwise --gguf (with no --base-url) loads the in-kernel model and decodes locally; otherwise it falls back to a deterministic scripted mock with a loud boot warning. The --provider flag (openai, anthropic, gemini, xai) selects the upstream wire when proxying. You can confirm which backend is live: /healthz reports the planner field as mock, proxy, inkernel, or unknown. The in-kernel path is a correctness reference, not a production serving engine — prefer fronting a real token engine for scale."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "How do I put `fak serve` in front of an existing upstream model?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "Pass --base-url URL (and --provider) to make /v1/chat/completions and /v1/messages a live adjudicating proxy in front of your upstream provider, with --api-key-env VAR naming the environment variable that holds the upstream bearer token. The flag names the env var, never the literal key value — fak reads the secret from the environment and forwards it upstream. With --base-url empty, the gateway runs offline against the scripted mock instead. The request model name passes through to the upstream verbatim, so your existing prompts and tool definitions stay unchanged."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "What happens if the upstream `--base-url` is down or unreachable?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "If the upstream cannot be reached — dial refused, DNS failure, or a TLS error — the gateway returns a 502 with the distinct code upstream_unreachable and a message telling you to check that --base-url points at a running server. An upstream 4xx is surfaced with that same status (an unknown model becomes 404, a bad argument 400); an upstream 5xx, transport error, or unparseable body maps to a generic 502. The raw provider body never crosses the trust boundary back to your client. If the upstream announces tool calls but none parse, the gateway fails closed with a 502 rather than serving a malformed turn."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "Does `fak serve` stream responses, and is the stream adjudicated before it reaches me?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "fak serve streams well-formed SSE, but it buffers the entire upstream turn first, adjudicates the complete proposed tool-call set, and only then synthesizes the stream — so raw upstream deltas never pass through before adjudication. The planner itself is non-streaming. On the OpenAI wire it emits an opening role chunk, the surviving tool-call chunk, content fragments split on word boundaries that reconcatenate byte-exact, a final chunk carrying finish_reason, usage, and the fak extension, then data: [DONE]. On the Anthropic wire it emits the message_start through message_stop block sequence with a real stop_reason and token counts, sending a keepalive ping every 15 seconds while the upstream is in flight."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "What is the `fak` response extension on a gateway reply?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "The fak extension is a top-level object on /v1/chat/completions and /v1/messages responses that reports every adjudication the kernel made on that turn; it is omitted entirely on a turn with no tool activity. It carries adjudications[] — one entry per proposed call including dropped ones, with repaired_arguments present only on a TRANSFORM verdict — and result_admissions[], one entry per inbound tool result the kernel screened. Each verdict is a WireVerdict with kind, reason, by, disposition, and detail. A result QUARANTINE overrides an otherwise-ALLOW submit, so the extension is where a fak-aware client learns a call was repaired, dropped, or held."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "Does Claude Code see the `fak` extension, or do I lose the verdicts on the Anthropic wire?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "Claude Code reads content blocks but not the fak extension key, so on the /v1/messages wire any drop, repair, or quarantine is also prepended as a leading [fak] … text block in the response. The structured fak extension is still emitted for fak-aware clients; the text block is a parallel surface so a client that only parses content still sees what the kernel did. This is built specifically for Claude Code on the native Anthropic wire — point it at the origin http://127.0.0.1:8080, and a denied or repaired call shows up in the visible text rather than silently vanishing."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "What does the gateway return to my client when policy denies a tool call?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "A policy refusal is a successful HTTP 200 carried as a verdict value, never a non-2xx error — the gateway reserves error statuses for malformed requests, auth failures, and upstream faults. On the served path the gateway keeps ALLOW and TRANSFORM calls and drops the rest; if no tool call survives, finish_reason becomes stop and a denySummary is written in-band so fak-unaware clients still see what happened. The full verdict for every proposed call, including the dropped ones, lands in the response body's fak extension. So your client never treats \"the kernel said no\" as an exception."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "Is there intelligent request routing or tiered serving inside the gateway?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "A tier-selection router exists in the codebase as a library, but it is not wired into the live serving path — the running gateway is single-tier, serving every request from the one engine named by its config. The router code implements size, latency, cost, and hybrid strategies with a health-aware fallback chain, and is explicitly additive: it touches no existing request path. It appears only in its own file and tests, never in a handler or the CLI. So treat tiered routing as a built-but-unwired library, not a feature of fak serve today."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "How do I reload the capability policy without restarting `fak serve`?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "POST to /v1/fak/policy/reload with no body to reload the manifest in place at runtime, returning {reloaded, source, summary}. The reload is replace-not-merge: the floor is replaced from source, not layered on top of the old one. The loader is injected by the host CLI (wired from --policy), so the gateway itself stays policy-schema blind. The route returns 404 if the deployment was not configured for reload, and 400 if the reload itself fails, with the error message included. A reloaded manifest that fails to parse never silently falls back to a more permissive default — it fails loud."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "What is the difference between `/v1/fak/adjudicate` and `/v1/fak/syscall`?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "/v1/fak/adjudicate returns a pre-execution verdict only, while /v1/fak/syscall adjudicates and then executes the call through the kernel. The adjudicate route runs k.Decide and returns repaired_arguments only on a TRANSFORM verdict — it is the production path for a client that wants the verdict before running the tool itself. The syscall route runs k.Syscall, the adjudicate-and-dispatch path. A companion route, /v1/fak/admit, runs the result-side floor (k.AdmitResult) to screen a result you already executed before it enters context. The fak-native body key is arguments, not args; unknown keys are silently dropped."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "How does the gateway screen tool results coming back from my client?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "When a request carries role:\"tool\" results, the gateway runs each one through the result-side floor before it reaches the model, and reports the outcome in result_admissions[]. On a QUARANTINE or TRANSFORM verdict it forwards the paged-out envelope content, so poisoned bytes never reach the model; a result it cannot admit is held out fail-closed with a {\"_quarantined\":true,…,\"reason\":\"ADMIT_ERROR\"} stub and a TERMINAL verdict. A quarantine also invalidates the matching upstream KV span. The detector behind this screen is roughly 100% evadable by design — the load-bearing protection is the quarantine policy that holds bytes out of context, not the detector that flagged them."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "Does the gateway require an API key, and how does auth work once enabled?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "Auth is off by default for loopback use; turn it on with --require-key-env VAR, after which every route except /healthz requires the secret held in that environment variable. The flag names the env var, not the literal key. The gateway accepts the secret as Authorization: Bearer <tok> or as x-api-key: <tok> (for Anthropic-wire clients) against one secret, compared in constant time over SHA-256 digests so it leaks neither bytes nor length. A bare Authorization value with no Bearer  prefix is rejected; an invalid or missing key returns 401. If the named env var is set but empty, the gateway refuses to start."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "Can the same gateway serve OpenAI clients and Anthropic clients at once?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "Yes — one fak serve process serves both the OpenAI-compatible /v1/chat/completions and the native Anthropic /v1/messages on the same port, and both share the same kernel boundary. Internally both routes call the same planner via one s.complete path and pass each proposed tool call through the same adjudicateProposed boundary; only the downstream wire format differs. The catch is the base-URL convention: OpenAI clients point at http://127.0.0.1:8080/v1, Anthropic clients at the origin http://127.0.0.1:8080 because their SDKs append /v1 themselves."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "Is `fak serve` also an MCP server, and what tools does it expose?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "Yes — fak serve is an MCP server over HTTP at /mcp and over stdio with --stdio, both serving the same JSON-RPC 2.0 dispatch. The stdio transport has no listener and no auth surface. It negotiates protocol versions 2024-11-05, 2025-03-26, and 2025-06-18, falling back to the first, and reports serverInfo.name as fak-gateway. It exposes the tools fak_adjudicate, fak_syscall, fak_admit, fak_changes, fak_revoke, and fak_context_change. A DENY is a valid tool result with isError:false; only genuine protocol faults become JSON-RPC errors."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "When does the Anthropic wire forward my request bytes untouched to the real Anthropic API?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "When the configured upstream is the real Anthropic API, the /v1/messages route forwards the client's original request bytes byte-for-byte and authenticates with the client's own x-api-key, a transparent hop. This passthrough preserves the cache_control prefix, so a real upstream cache hit reaches the client's cache_read_input_tokens accounting. The kernel boundary still runs: proposed tool calls are adjudicated and inbound results screened, but the downstream request body itself is not re-serialized in this anthropic-to-anthropic case. Note max_tokens is required on the /v1/messages wire, unlike the OpenAI surface."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "What is the in-kernel model engine?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "The in-kernel model engine is a from-scratch, pure-Go transformer forward pass that loads a GGUF or safetensors checkpoint directly into the process address space and runs decode in-process. It is a correctness reference, not a hardened production serving engine, so its load-bearing claim is bit-exact and argmax-exact agreement with a HuggingFace oracle rather than throughput. It ships as the inkernel engine (the default), where an allowed tool call is completed by a real greedy decode over the kernel-owned KV cache; with no real weights loaded it builds a tiny deterministic synthetic checkpoint so CI runs offline. Reach for a tuned engine like vLLM, SGLang, or llama.cpp when you need serving-grade tokens per second."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "Why does fak own a model engine at all if it isn't trying to be fast?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "fak carries its own engine so the KV cache can be a kernel-owned Go object instead of a tensor pool rented behind a serving engine's HTTP boundary. Owning the cache as a plain data structure is what makes provable span eviction and cross-session splice real operations: when a result is quarantined, the kernel can physically evict that span and the model becomes mechanically incapable of attending to it, verified byte-identical to never having seen it at max|Δ| = 0. The engine exists to make that boundary demonstrable end-to-end, not to win raw throughput; for production tokens you front a real engine."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "What exactly does \"bit-exact vs a HuggingFace oracle\" prove, and what is still unproven?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "It proves that, on Llama-family weights, fak's forward pass matches the HuggingFace reference to the last bit: on SmolLM2-135M the hidden-state cosine is 1.000000 at every checked layer, the argmax matches at every position, and the final-logit max|Δ| is about 4.4e-5. That parity is currently witnessed green for Llama only. Non-Llama families route through the same oracle harness but skip for want of on-node fixtures, so cross-family parity is honestly un-witnessed; real-GGUF-weight end-to-end parity is also open; and fak's greedy decode of Qwen3.6-27B is refuted, diverging from llama.cpp at the third token from accumulated f32 drift. First-token parity holds there, multi-token continuation does not."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "How does the engine load a GGUF file into the kernel's address space?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "The GGUF loader is a read-only parser that maps the checkpoint and dequantizes every supported block format to f32 before the model runs. internal/ggufload reads the file (no serializer), dequantizes F32, F16, BF16, Q8_0, Q4_K, Q5_K, Q6_K, Q5_0, Q5_1, Q2_K, and Q3_K blocks to f32, and normalizes GGUF tensor names to the canonical HuggingFace-Llama naming so the forward pass sees one layout. Layout and dequant correctness are proven on synthetic fixtures; end-to-end HuggingFace-oracle parity of real GGUF weights is gated behind an opt-in smoke flag and skips on the build box, so treat it as open. A safetensors path also exists, reinterpreting little-endian f32 tensors zero-copy and erroring if a tensor's dtype is not f32."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "What does the --gguf flag actually do when I run fak serve?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "fak serve --gguf preloads a GGUF checkpoint at boot into the inkernel engine and, with no --base-url set, serves /v1/chat/completions and /v1/messages directly from the in-kernel model using the GGUF's embedded tokenizer. There are three load modes: the default lean-Q8 profile, a resident-Q4_K path selected by FAK_Q4K=1 (the large-model decode lever), and a device f32 path used when you pass a --backend. You can also pass an hf:// URI and fak model load resolves it to a locally cached file with checksum verification. The engine is a correctness reference, so prefer fronting a real server with --base-url for production serving; the --gguf path is for self-host correctness and the cache-reuse wins, not throughput."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "Is the in-kernel model what serves my chat responses by default?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "Not unless you explicitly load real weights; by default the inkernel engine builds a small deterministic synthetic checkpoint so the kernel and CI run with no model export. That synthetic model is a 3-layer byte-level map with no natural-language tokenizer that decodes a fixed sixteen tokens, so it is not a chat surface; it exists to prove the kernel wiring at the tensor layer. To serve real generations you load weights via FAK_MODEL_DIR or fak serve --gguf, which run through the identical dispatch path. If you instead set --base-url, the gateway proxies an upstream provider and the in-kernel engine is not in the generation path at all."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "Why is the forward pass written in deliberately slow scalar Go?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "The primitives are intentionally scalar and in-order so the f32 bit-exact correctness rungs survive across architectures and call sites. The RMS-norm uses a serial sum-of-squares that must not be reordered, the matmul and dot products run in fixed order, and float32 casts pin the RoPE rotation against fused-multiply-add so it stays bit-identical everywhere. Faster approximations like fastExp32 and fastSilu exist but are used only by the Q8 decode path, never by the exact f32 serial-equivalence path. This is a correctness-first design choice and a direct reason the engine is not a throughput contender."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "Does the compute HAL let me run GGUF-quantized weights on a GPU backend?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "No; the compute HAL weight-fetch path is f32 only, so a GGUF leaf dequantizes to f32 before any device backend sees it. When you adopt a backend through Model.NewBackendSession, the session fetches f32 weights and uploads them as f32; the engine does not consume GGUF-quant directly on that path, and a quant-only manifest with no f32 blob makes the f32 fetch fail. Day one the only default-wired backend is cpu-ref, a scalar pure-Go reference held to max|Δ| = 0. The device backends (CUDA, Vulkan, Metal) register as correctness-witnessed Approx peers, not as a faster default."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "What do the GPU backends actually prove, and do they make fak faster?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "The GPU backends prove numerical correctness, not serving-grade speed, and several are slower than llama.cpp. The gpucheck witness loads a real f32 safetensors checkpoint, decodes the same prompt on the pure-Go f32 reference and through the HAL on a device backend, and asserts the two greedy token streams agree. On the record: AMD Vulkan is argmax-exact but roughly 58× slower than llama.cpp CPU at f32; NVIDIA CUDA on a small model that fits reaches a single-stream dead-even with llama.cpp Q8_0 but at f32, which is four times the bytes, and large-model parity is not claimed; Apple Metal is argmax-exact with throughput explicitly not yet claimed. These are correctness peers, so claiming throughput parity would be false."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "How does the engine connect a quarantined result to actually evicting it from the model's attention?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "Because the KV cache is a kernel-owned Go structure, one detector verdict drives two enforcement media: the context-MMU bars the poisoned bytes from text context, and the KV-MMU bars the corresponding K/V span from attention state. The cache keeps pre-RoPE keys, so removing a span from the middle re-derives each survivor's key in a single clean rotation at its new position, leaving the kept sequence byte-identical to never having seen the evicted span. This bridge is proven bit-exact on a synthetic model in internal/kvmmu and is honestly not yet wired into the live fak agent HTTP loop; the real-weights numerics are proven separately by the internal/model oracle. It is the durable, hard-to-commoditize leg: prefix-cost wins erode as hardware loosens, but provably removing a span and proving it is gone does not."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "When should I use the in-kernel engine versus fronting a real serving engine?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "Front a real engine (vLLM, SGLang, llama.cpp, or a cloud provider) for anything where tokens per second matters, and reach for the in-kernel engine when you specifically want the kernel-owned KV cache and its provable span eviction on a self-hosted model. Point fak serve --base-url <upstream/v1> at your existing OpenAI-compatible server to keep its throughput while gaining the capability floor, result quarantine, and audit trail; that is where most deployments should start. Drop --base-url and pass --gguf only when you want the in-kernel path's correctness reference and reuse behavior, accepting that it is not a tuned production server."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "What is a session in fak, and why is it called a core dump?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "A session in fak is a small page table over a content-addressed swap device, not a flat transcript replayed token by token. As an agent runs, the context-MMU already pages every heavy or poisoned tool result out to a content-addressed store at write time, so the finished session is just roles plus digests plus descriptors plus quarantine state pointing into that store. That is structurally a core dump: answering a follow-up demand-pages only the working set the query touches, and never re-executes the whole history back into context. recall.Session is the reloaded core image, recall.Recorder is the live in-process recorder that holds the MMU and an in-memory CAS until it persists."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "Does quarantine and taint state survive a process restart?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "The live quarantine and taint state is process-local and is gone when the process exits. The context-MMU keeps that state in plain in-memory maps under one mutex (held, cleared, an order list, and counters), allocated fresh on New() with no disk backing, so a restart starts clean. The quarantined bytes themselves live in a content-addressed store keyed by digest, so a page-in request for a dropped id just fails closed with \"no quarantined result\". This is exactly the gap fak recall closes by persisting the seal to disk; without recall, in-process held and cleared state and the in-memory CAS do not outlive the process."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "What does fak recall do?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "fak recall records a finished agent session through the write-time quarantine gate, persists it as a durable core image, then reloads it in a fresh process to prove the quarantine survived the boundary. The recorder drives the shipped context-MMU over each tool result (plus a de-obfuscating scan as defense-in-depth, fail-closed to quarantine), then writes two files: manifest.json (the page table: roles, digests, descriptors, and quarantine state) and cas.json (the content-addressed swap device). The whole pass is offline and deterministic. The CLI default runs an airline-support session with two benign results, one injection, and one secret leak, then reloads it."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "What does a fak core image actually contain on disk?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "A core image holds a manifest page table plus a content-addressed swap device, and nothing that re-injects poison. The manifest.json carries the version, session id, a world-version frozen at persist time, the list of pages, the cleared set, and any context-change tombstones. Each page records its step, role, descriptor, CAS digest, length, taint, quarantine flag and id, reason, durability class (turn, session, or durable), witness, and trust epoch. A quarantined page's descriptor carries only safe sealed metadata of the form tool: [sealed: reason, N bytes], never the poisoned bytes and never their de-obfuscated text. The cas.json is a digest-to-bytes map that does hold a copy of every byte, including the sealed poison, the way a real core dump holds the whole process image."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "What survives a session boundary, and what is lost?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "What survives is everything written into the on-disk core image; what is lost is the live in-process gate state. Surviving across the boundary: the page table, the frozen quarantine seals, the cleared clearance set, the tombstone context-changes, the witness and trust-epoch metadata, and the CAS bytes. Process-local and gone on restart: the live context-MMU maps (held, cleared, order, counters) and any recorder state you never persisted. The durability proof is that Load(dir) rebuilds a session with its own CAS loaded from disk plus a fresh MMU gate, so a resolve provably does not lean on the recording process being alive."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "Can a witness clearance alone un-quarantine a result after reload?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "No. A clearance alone cannot launder still-poisoned bytes; a reloaded quarantined page pages back into a new context only if a witness Clear() ran AND the bytes pass a fresh content re-screen. This is the recall moat (rung 4): two independent gates, so clearing the id is necessary but not sufficient. The re-screen folds the de-obfuscating scan plus the whole registered result-admitter chain, most-restrictive-wins, so a session recorded under a weaker gate is re-caught by every detector the fleet ships now. In the committed demo, the injection page stays refused even after a clearance because the re-screen re-quarantines it, while a genuinely benign cleared page does release, which proves the gate discriminates on content rather than hard-denying."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "How is fak recall different from RAG over a chat transcript?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "Naive RAG over history re-pastes transcript bytes ungated, while fak recall re-screens every page through the trust gate on the way back into context. A reloaded core image refuses to page a quarantined slice into a new window unless a witness clearance ran and the bytes pass a fresh content re-screen, so a poisoned result that an embedding ranker might happily surface is still walled off. The honest limit is that recall makes the gate's decision durable and re-screenable, it does not improve the decision itself: a crafted injection that never trips the detector's marker set at write time is never quarantined, and recall will resolve it. The re-screen is the lever that re-catches such a page once the patterns are tightened."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "What is the difference between the recall core dump and the audit journal?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "They are two independent durable surfaces: the recall core dump is the reloadable session image, while the journal is an append-only, tamper-evident decision ledger. The journal (internal/journal, opt-in via FAK_AUDIT_JOURNAL, off by default) writes one hash-chained JSONL row per audit event with a monotonic sequence number, tool name, trace id, verdict, reason, and content digests, where each row's hash chains over the previous one. It stores digests only, never argument or result bodies, so it leaks no payload. The journal is the regulated-audit surface; the recall image is the durable session memory. Recall persistence and the journal do not depend on each other."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "How do deletion certificates relate to persistence?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "A deletion certificate is a portable, re-checkable receipt that binds a bit-exact KV-cache eviction to the tamper-evident journal that recorded it, so a deletion claim survives as verifiable evidence. Under one ed25519 signature it carries the evicted count, the span, an equivalence record asserting MaxAbsDelta == 0 (the byte-identical claim), and an anchor row from the journal pinned to the result digest. Verify fails closed on a signature mismatch, any non-zero delta, an absent or broken journal chain, or a subject relabel. Honest bounds: the v1 signature is self-attesting (it proves integrity, not issuer independence; third-party RFC-3161 or CT-log anchoring is an open stub), and it proves deletion from the inference working set and agent memory only, not from weights, backups, or replicas."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "If I want a memory to be absent from future context, do I delete it from the core image?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "You file a tombstone, not a delete: the recall-side analogue of deletion is a negative-only, evidence-preserving tombstone. Session.RequestContextChange records a tombstone that suppresses future page-in for resolve, recall, and working-set ranking, but never deletes the CAS bytes or mutates the original page row, so the audit evidence stays intact. The tombstone is written into the manifest's context-changes and re-persisted, so it is durable across reloads. Operator and agent surfaces include fak debug --cmd tombstone, the HTTP route POST /v1/fak/context/change, and the MCP tool fak_context_change."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "What happens if the on-disk swap device is tampered with before reload?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "A tampered core image fails closed at load: recall.Load verifies that every CAS blob hashes to its digest key, and if any blob does not match it refuses the whole image. Because the store is content-addressed, the digest is the identity, so flipping a byte inside a stored blob under its unchanged key is detected. The witness TestCorruptCASFailsClosed decodes the CAS, flips a byte inside a stored blob, and asserts the load is rejected. This is the same integrity discipline a deletion certificate uses when it re-derives its anchor row from the journal."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "Is the recall core image zero-copy, and what is the storage tradeoff?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "It is durable, not zero-copy: cas.json holds a real copy of every byte the page table references, including the sealed poison. The sealed bytes are never paged into a context because the gate stands between them and any new window, but they are physically present on the swap device. This is a deliberate tradeoff that buys durability and a re-screenable seal across the process boundary; the zero-copy Ref and region-backend seam is frozen in the ABI but left unbuilt for now. A reload pages in only the working set a query touches, so resolving a follow-up does not materialize the whole image."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "What is the real headline serving number, 4x or 60x?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "The apples-to-apples serving number is about 4x (4.1x) fewer tokens than a tuned warm-cache stack; the 60x figure is only against a naive re-send-everything baseline and must never be quoted as the serving win. Both come from the same 50-turn x 5-agent fleet run (Qwen2.5-1.5B Q8, M3 Pro): net_value_add_vs_tuned = 4.12 against arm B (tuned per-agent warm KV), and net_value_add_vs_naive = 60.3 against arm A (naive stateless). Arm A is modeled from a prefill cost function and validated live within ~0.4%; arms B and C are live. Bit-identity gates confirm the arms emit identical tokens, so the win is reuse, not a numerics shortcut."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "Why does fak report both a vs-tuned number and a vs-naive number?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "Because they answer two different questions, and collapsing them into one would overclaim. The vs-tuned number (~4x on the 50x5 fleet) compares fak against a stack that already keeps a warm per-agent KV cache, so it isolates the marginal value fak adds on top of best practice. The vs-naive number (~60x) compares against re-sending the whole context every turn, which measures the total turn-tax a stateless setup pays. The benchmark authority pins every figure to a baseline letter (A = naive, B = tuned, C = fak) precisely so the two never blur."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "What does the 8.8-9.7x WebVoyager number actually measure?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "It is measured prefill work-elimination on the real 643-task WebVoyager dataset, swept across 1 to 8 workers, against a naive per-turn re-prefill baseline. At 1 worker it is 8.8x (170.9M vs 19.4M prefill tokens); at 8 workers it is 9.7x (1.37G vs 141.3M). The number is deterministic prefill-token arithmetic over the real task geometry (8,745 navigation turns, median 12 per task), not a wall-clock; live model runs are a separate pending phase."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "Is the WebVoyager win still 9.7x against a tuned warm-cache stack?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "No. The 9.7x is purely against the naive re-prefill baseline; against a tuned per-agent KV cache the marginal WebVoyager win is only about 1.0x to 1.10x (1 to 8 workers). This is the most important stratification caveat to keep straight: the turn-tax axis (vs naive) and the cross-worker reuse axis (vs tuned) are different measurements. WebVoyager turns are short, so once each agent already has a warm cache there is little additional shared prefix to reuse across workers."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "What is the 20-24x SWE-bench number, and against what baseline?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "It is a prefill/KV work-elimination floor of 17.9x to 23.4x (workers 1 to 16) on the 500-instance SWE-bench Verified set, measured against a naive re-prefill baseline. The per-worker rows are 17.9x at 1 worker, 22.1x at 4, 22.9x at 8, and 23.4x at 16; cross-worker reuse against a tuned cache is only 1.00x to 1.31x. This is a deterministic token floor computed from difficulty-bucket turn estimates, runs on a Mac with no GPU, and is not a head-to-head wall-clock against a tuned SGLang server. The actual code resolve-rate is a separate GPU-server run still pending."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "Where does the speedup actually come from if fak is not a faster GPU engine?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "The win comes from reread-rate, not GPU speed: fak does shared prefill work once and reuses it instead of re-processing the same context every turn. A multi-agent fleet that re-sends overlapping context pays a per-turn prefill tax; fak owns the KV cache as a kernel object, so a computed prefix is cloned and reused and a tool-result span can be evicted from the middle without recomputing the tail. Raw token throughput is still won by vLLM, SGLang, and llama.cpp; fak measures itself against those honestly and does not claim to beat them on tokens per second."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "Why is the reuse win self-host only?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "Because the savings come from owning the KV cache, which a frontier API does not expose. An app that merely calls a hosted provider gets fak's safety floor (the capability lock and result quarantine) but none of the prefill-reuse savings, since the KV state lives inside the provider's serving process. The frontier-scale agent-city numbers are explicitly design targets, not measurements. To get the reuse wins you run fak in front of a self-hosted model where the cache is a kernel-owned object."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "How fast is fak's policy adjudication?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "The decision itself is sub-millisecond: a captured access-log line shows a policy DENY adjudication at duration_ms = 0.511. The fold runs in-process with no hook spawn, no IPC, and no engine call on the decide path, which is why the per-call cost is below typical OS clock granularity; benchmarks use an inner calibration loop to time it. On a pure-kernel decide path the allow-verdict cost has been measured as low as ~362 ns, with the in-process boundary roughly 2,400x to 2,849x cheaper than spawning a fak hook process per call."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "Is the sub-millisecond adjudication number the same as the fleet speedup?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "No, they are unrelated measurements and should not be conflated. The ~0.5 ms adjudication is the cost of a single policy decision (a captured DENY log line); the in-process-vs-spawn ratio (~2,400x) is a subsystem regression sentinel for the decide path, not a serving-throughput headline. The fleet speedups (~4x vs tuned, 8.8-9.7x WebVoyager vs naive) are about prefill reuse across many turns. One is per-decision latency, the other is per-fleet token elimination."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "What does max|delta| = 0 mean for the benchmark numbers?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "It is the honesty gate proving the speedup is reuse, not a numerical shortcut: reused KV state is bit-for-bit identical to a full recompute, with maximum absolute logit difference of exactly zero. Witnesses cover causal invalidation (a sibling read stays byte-identical across an external write), RadixAttention split-reuse equaling recompute, and cached-decode equaling full prefill. Because the arms emit identical tokens, the token savings cannot be explained away as a cheaper-but-different computation; the answer is the same, computed once instead of every turn."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "Is the SWE-bench code resolve-rate measured yet?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "No, the resolve-rate is not yet measured; only the cost and cache-elimination arithmetic is shipped. The prefill/KV work-elimination floor (17.9x to 23.4x vs naive) runs deterministically on a Mac with no GPU, but the actual fraction of SWE-bench Verified instances that fak's agent resolves is a GPU-server run that is still pending. A local 135M model produces a resolve-rate near zero; the real number requires a larger model on the GPU server. Treat the 20-24x as a token floor, never as a claim about how many bugs get fixed."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "How big can the fleet win get on ultra-long contexts above 100k tokens?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "On contexts above 100k tokens the apples-to-apples fleet floor is about 4.3x versus a warm per-agent KV cache; against a naive re-prefill baseline the same work floor is roughly 10x for a single session and 40x+ for the fleet, though that easy baseline is never the serving win. The single-session win (9.9x token, 9.5x FLOP) is entirely the turn-tax, since one session has no cross-agent prefix to share. These are exact contention-free work floors from token and O(L^2) FLOP arithmetic, computed with the longctxbench -ladder command; a live wall-clock measurement above 100k is separately gated and still simulated."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "What is the right serving baseline if I already run a tuned SGLang server?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "Against a tuned SGLang server the realistic serving win is roughly 2x to 2.5x, not the 5x to 15x figures, which apply only versus naive single-tenant serving or the cache-favorable vDSO subset. The vDSO fast-path numbers in particular use a deliberately cache-favorable demo slice; on a real tau2-airline workload the addressable-vDSO purity is about 0.7%, so the vDSO is an upside secondary, never the headline. When you already have a warm-cache engine, the marginal value fak adds is the bounded 2x to 2.5x band plus the safety floor."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "Does fak's turn-tax saving claim a general speedup?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "No. The turn-tax demo that deletes 9 extra model turns runs on a deliberately cache-favorable 14-call airline slice (about 64% addressable) and is not a general speedup. On a real tau2-airline workload the addressable vDSO purity is about 0.7%, which works out to roughly 0.33 turns saved per session, so a self-host build does not amortize on efficiency alone. The durable, engine-agnostic part of that benchmark is the safety floor: injections admitted to context go 1 to 0 and destructive ops executed go 1 to 0, reproducible on any backend."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "What proves the modeled naive baseline is not inflated?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "The naive arm is validated live to within about 0.4%: the ratio of anchored-computed to live cost is 1.0039, so the README's \"within ~1%\" framing is conservative. The naive total of roughly 19.1 hours is modeled from a prefill cost function because running it live really does take about that long, while fak's fused arm at ~19.0 minutes is live. There is also an anti-inflation control: a clean 3-call happy-path workload saves exactly zero by construction and by test, so the harness cannot manufacture a win where none exists."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "Has the +1 retry-turn cost of an injection been seen live, or only modeled?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "It has been witnessed live, not just modeled: a real fak agent run against gemini-2.5-flash showed 7 versus 6 turns, exactly 1.00 retry-turn per error, across 3 of 3 trials. This measures the clean-recovery floor where an injected error costs one extra model turn, recorded in a committed artifact. The sample is small (n=3, one model), so it is presented as a floor rather than a general distribution; the broader turn-tax decomposition around it remains a transparent cost model on the baseline side."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "What is fak's threat model: who is the attacker and what are they assumed to control?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "fak's threat model treats the language model itself as the untrusted program and assumes the attacker controls everything the model reads: the prompt, retrieved documents, and tool results. The model is ring-3 userspace; the harness is the kernel adjudicating each tool call (the syscall) from evidence the model did not author. So the question is never \"did the model get fooled\" but \"can a fooled model still pull an irreversible lever or pull poison into its own context\" — and the answer is gated by structure, not by trusting model output. A refusal does not depend on catching the attack: a tool you never allow-listed is refused regardless of how convincing the injected text is."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "Why are two structural gates better than one well-trained classifier?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "Two independent structural gates raise the bar to a conjunctive one: an attacker must beat both, where a single classifier is one point of failure. fak's two gates are the lock (a default-deny capability floor — an irreversible tool that was never allow-listed cannot run, so no injected context changes the verdict) and the wall (result quarantine — poisoned bytes are held out of the model's context entirely). Neither gate is a detector you can talk past. The evadable screener that flags suspicious results sits on top of the wall as a bonus; if it misses, the result is still quarantined by policy, and if it fires, that is extra signal — the floor never depends on it."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "Which OWASP Agentic Top-10 and MCP Top-10 risks does fak target structurally?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "fak structurally targets Tool Poisoning (MCP03) and Memory Poisoning (T1) by containment and by a capability floor, not by per-attack recognition. For MCP03, untrusted tool results pass a write-time admission gate before they can enter the model's context; a result screened as secret-shaped, injection-shaped, or pollution is paged out to a tiny stub so the poisoned bytes never reach attention. For T1, recall's promotion gate refuses to fold a result into the durable session image unless it is classified durable, and a quarantined page stays sealed across the process boundary unless a witness clears it and a fresh content re-screen passes. The dangerous lever not existing and the poison never arriving are what carry the guarantee, not a model recognizing the attack."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "What does \"fail-closed\" actually mean inside fak's kernel?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "Fail-closed means that when the policy is silent, ambiguous, or broken, the decision defaults to deny rather than allow. A zero policy is the empty floor where every call is refused with DEFAULT_DENY; an empty adjudicator chain folds to DEFAULT_DENY; and if every rung defers, the verdict is still a deny. The fold is a most-restrictive-wins lattice where an unknown verdict kind ranks as a deny, so a new or malformed rung can only tighten the floor, never loosen it. Config loading is fail-loud to match: a typo'd field name or an unknown refusal reason is a hard startup error, never a silent fallback to a more permissive default."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "Can fak stop a malicious argument to a tool that IS on the allow-list?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "Not in the general case — fak bounds which tool NAMES can run, but it does not bound the resolved EFFECT of an allow-listed coarse tool's arguments, and the docs say so plainly. An allow-listed send_email with attacker-chosen recipients, or a coarse Bash running rm -rf, is the explicit gap. There are partial, restrict-only mitigations: arg-level predicates can deny by a path glob, a regex, or a max-byte bound on one decoded argument string, and the SELF_MODIFY floor refuses write-shaped calls that touch a guarded glob. But those inspect one decoded string, not the resolved effect, and the regex form is detection-shaped and evadable. The honest guidance is to keep exfil-shaped and destructive tools OFF the allow-list and reach for finer argument-scoped capabilities (path/host/amount as first-class constraints), which are roadmap, not shipped."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "If a tool call is admitted, does fak limit its blast radius?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "No — once a call is allow-listed and admitted, fak does not contain what that call then does in the outside world. The kernel decides whether the call may run and whether its RESULT may re-enter context; it does not sandbox the call's side effects, so an admitted delete_file deletes the file. Blast-radius containment is a defense-in-depth job for a separate layer: run the actual tool execution inside a sandbox (for example E2B) so an admitted-but-overbroad action is bounded by the sandbox, while fak governs the gate and the result. fak governs the syscall boundary; the sandbox governs the effect."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "Does fak protect against request-volume abuse, denial-of-service, or rate-based attacks?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "No — fak is not a rate limiter or a DoS shield, and request volume is outside what it structurally defends. The kernel's job is per-call adjudication and result admission, not traffic shaping; the closed refusal vocabulary even reserves a RATE_LIMITED reason code, but the floor is a permission decision, not a throughput governor. The gateway has operational hardening that is incidental, not a volume defense: a 4 MiB request-body cap, HTTP read/write/idle timeouts, and optional bearer-or-x-api-key auth gating every route except /healthz. For abuse by request volume, put fak behind your own rate limiter or reverse proxy, the same defense-in-depth posture you would use for any upstream."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "Why is the result detector deliberately built to be evadable?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "fak treats its result detector as roughly 100% evadable by design because the security guarantee is structural, and a guarantee that leaned on pattern-matching would be only as strong as the patterns. The screener is a first-match scan for secret-shaped strings, a fixed set of injection marker phrases, and blatant byte-repeat pollution; any of those is trivially reworded or obfuscated to slip past. So the load-bearing protection is the quarantine POLICY and the capability lock — neither runs the detector. If the screener fires it is a helpful bonus; if it misses, an unlisted irreversible tool is still refused and a poisoned result is still walled by policy. Building it to be beatable is the point: it keeps the floor honest by never letting the detector become load-bearing."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "How does fak keep poison out of the model's context without trusting the detector to catch it?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "fak quarantines a flagged tool result by physically replacing its bytes with a tiny stub before it can enter context, so the poison is absent from attention rather than merely \"not shown.\" At the write-time admission gate, a quarantined result's payload is paged out to a content-addressed blob store and the in-context payload becomes a small {\"_quarantined\":true,...} pointer; the real bytes only page back in after an explicit witness clear AND a fresh re-screen, both fail-closed. Because fak owns the KV cache as a kernel object, the matching K/V span can also be evicted so the model is mechanically incapable of attending to it — verified byte-identical to a session that never saw the poison at max|Δ| = 0. The KV-eviction bridge is proven on a synthetic model in the kvmmu package and is not yet wired into the live agent HTTP loop; the context-side page-out is on the shipped serving path."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "Does the audit log record tool arguments, results, or request bodies?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "No — fak's audit surfaces record tool NAMES, verdicts, dispositions, and timings, never request bodies, tool arguments, or result content. The stdout access log emits two JSON lines per request carrying the tool name plus verdict, reason, disposition, duration, status, route, and a trace_id, with no payload field at all. The opt-in durable decision journal goes one half-step further: it stores content DIGESTS (the frozen Ref hash) rather than blobs, so it can prove WHICH bytes were seen without leaking them. This is deliberate — the audit trail is reviewable and correlatable by trace_id across the access log, the response header, and the per-operation verdict log, without becoming a secondary place secrets pile up."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "How does a memory-poisoning attack survive a session boundary, and how does fak block it?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "fak blocks memory poisoning at the session boundary by sealing quarantined results into a durable core image and refusing to page them back into a new context without re-clearing them. When fak recall persists a finished session, a quarantined page is written with only a safe sealed descriptor (tool: [sealed: reason, N bytes]) — never the poisoned or obfuscated bytes — and on reload the rung-4 gate refuses to resolve that page unless a witness clear ran AND a fresh content re-screen passes, so clearance alone cannot launder still-poisoned bytes. The re-screen folds the whole registered admitter chain, so a session recorded under a weaker gate is re-caught by every detector the fleet ships now. The honest limit: recall makes the gate's decision durable and re-screenable, but it does not improve the original decision — an injection that never tripped the gate in the first place is never sealed."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "When a fak policy refuses a call, is that an error your agent has to handle?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "No — a refusal is a successful response carried as a value, not an exception, so your agent never treats \"the kernel said no\" as a crash. On the served path a denied tool call returns HTTP 200 with the verdict in the response body; HTTP error statuses are reserved for malformed requests, auth failures, and upstream faults. The denied call is simply dropped from the model's tool-call list for that turn, with the structured verdict (reason from the closed 12-code vocabulary plus a disposition like RETRYABLE, WAIT, ESCALATE, or TERMINAL) available in the fak response extension and, for Claude Code, also prepended as a leading [fak] text block. Deny-as-value is what lets the agent loop read the refusal in-band and adapt on the next turn rather than erroring out."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "What should I pair fak with for a complete agent security posture?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "Pair fak with a sandbox for blast radius, your own rate limiting for volume, and a tight allow-list scoped to safe tool names — fak is the governance gate, not the whole defense. fak structurally covers the syscall boundary (a default-deny capability floor that fails closed) and the context boundary (result quarantine that keeps poison out of attention), plus a payload-free audit trail. It does NOT contain what an admitted call does in the world, bound the arguments of a coarse allow-listed tool, or shed request-volume abuse. So run the actual tool execution inside a sandbox (for example E2B) to bound an over-broad admitted action, front the gateway with a reverse proxy or rate limiter for auth and volume, and keep exfil-shaped and destructive tools off the allow-list. fak makes the fail-closed decision affordable in-loop; defense-in-depth handles the effects it deliberately does not."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "How do I author a capability floor for fak?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "Run fak policy --dump to print the built-in default allow-list as a manifest, edit it to match the tools your agent should be permitted, then load it with --policy floor.json. The dump is the complete default floor, so you start from a working baseline and tighten rather than guess. A manifest has three core fields — allow (exact tool names), allow_prefix (read-only families like read_, get_, search_), and deny (tool name mapped to a refusal reason from the closed vocabulary). Validate any edit with fak policy --check floor.json, which prints the admitted floor and exits 1 on a bad file. The loaded manifest replaces the default floor wholesale; it is not merged on top of it."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "What happens if I make a typo in a policy manifest?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "A typo is a hard error at load time, not a silently weakened floor — fak refuses to start or reload rather than run with a policy it could not parse. The manifest loader rejects unknown fields, so writing allows instead of allow fails with invalid manifest: json: unknown field \"allows\". An unknown deny reason fails the same way, printing the offending value and the full list of the twelve valid reason codes. A bad posture, a malformed argument rule, or a different major schema version all hard-error too. Because policy load propagates a fatal error at startup, there is no fallback to a more permissive default."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "Does loading a policy add to the default allow-list or replace it?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "A loaded manifest replaces the default floor entirely — it is the whole capability floor, not an overlay on the built-in default. This is why fak policy --dump gives you the complete default to edit: you start from the full floor and adjust it, so nothing is silently inherited that you did not put in the file. The same replace-not-merge rule applies to a runtime reload through the gateway. Round-tripping is stable, so fak policy --dump piped into fak policy --check validates exactly."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "How do I require an API key on a network-facing fak deployment?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "Start the gateway with --require-key-env VAR, where VAR names an environment variable that holds the secret — the flag takes the variable name, never the secret value itself. Auth is off by default for loopback use, so this is the flag you add when binding somewhere reachable. Every route except /healthz then requires the token; clients send it as Authorization: Bearer <token> (OpenAI-style) or x-api-key: <token> (Anthropic-style), and both are compared in constant time over SHA-256 digests so neither the bytes nor the length leak. If the named variable is set but empty, the gateway refuses to start (exit 2) rather than come up unprotected."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "Why does --require-key-env take an environment variable name instead of the key itself?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "fak reads the secret from the named environment variable so the key never appears in the command line, the flag list, or process listings where it would be visible to other users. You pass --require-key-env FAK_TOKEN and put the actual secret in $FAK_TOKEN; the gateway resolves it at startup. The same pattern applies to the upstream provider key via --api-key-env, which names the variable holding your real provider key that fak forwards upstream. A named-but-empty required key variable is treated as a misconfiguration and fails closed at startup."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "Can I update the policy floor without restarting fak?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "Yes — POST /v1/fak/policy/reload (no body) re-reads the manifest from its source and replaces the floor in place, so you can tighten or loosen the allow-list on a running gateway. The reload is replace-not-merge, exactly like the initial load: the floor is rebuilt from the file, not patched. The endpoint returns {reloaded, source, summary} on success. It answers 404 if the deployment was not started with a policy to reload, and 400 (with the error message) if the new manifest fails to parse — a broken reload leaves the running floor untouched rather than weakening it."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "What happens to the policy floor and quarantine state when fak crashes and restarts?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "On restart the capability floor reloads from its manifest on disk, so a crash never leaves the gate silently bypassed — there is no permissive fallback path. Policy load is fatal on error, so the process either comes up with the floor you authored or does not come up at all. The in-memory quarantine and taint ledger is a different matter: the live result-screening state (the held and cleared maps inside the context-MMU) lives in process memory with no disk backing, so it resets on restart. That is fail-safe rather than a leak, because the bytes a quarantine held were never in model context to begin with. If you need quarantine decisions to survive a process boundary, persist the session with fak recall, which writes a durable core image that re-screens every page on reload."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "Should I run fak under a process supervisor like systemd?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "Yes — fak serve is a single static binary with no external dependencies, which makes it a clean fit for systemd, a container runtime, or any supervisor that restarts a process on exit. Because the floor reloads from its manifest on every startup and policy-load errors are fatal, a supervised restart re-establishes the same gate deterministically rather than drifting open. The binary binds its listener synchronously before marking itself ready, so a bind failure surfaces immediately instead of leaving a half-started service. Pass the secret and the policy by environment and flag (--require-key-env, --policy) so the unit file carries configuration, not secrets in the command line."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "Are the /metrics and /debug/vars endpoints exposed without authentication?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "They follow the gateway's auth policy: when you run with --require-key-env, both /metrics and /debug/vars require the bearer token, and only /healthz stays open. With auth off (the loopback default) they are reachable like any other route. /metrics serves Prometheus exposition and /debug/vars serves a single JSON snapshot of the same gateway, runtime, kernel, and metrics view. If you scrape metrics over a network, gate them behind auth and treat /healthz as the only intentionally public probe."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "What does fak bind to by default, and is that safe to leave?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "fak serve defaults to 127.0.0.1:8080 — loopback only — so out of the box it is reachable only from the same host and auth is off for low-friction local use. That default is safe to leave on a developer machine. If you bind to a non-loopback address without setting --require-key-env, the gateway prints a loud warning that it is reachable with no key, because that combination is almost always a mistake. The intended progression from laptop to fleet is adding flags (--policy, --require-key-env) rather than swapping components."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "How do I verify a policy floor before deploying it, without a model or network?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "Use fak policy --check floor.json to validate the manifest and print the admitted floor, and fak preflight --tool NAME --args JSON --policy floor.json to get the exact verdict a single call would receive — both run offline with no model, key, or GPU. --check enforces the closed refusal vocabulary and exits 1 on a bad file, so it composes as a CI gate. preflight is the per-call oracle: it prints verdict=… reason=… by=monitor, and --explain traces each rung. This lets you prove that a tool you expect denied (say, refund_payment) returns DENY and a read tool returns ALLOW before any traffic flows."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "How does fak return a policy denial over HTTP — is it an error status?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "A policy denial is a successful 200 carrying the verdict as a value, never a non-2xx error status. HTTP error codes are reserved for malformed requests, auth failures, and upstream faults — a 401 for a bad key, a 502 when the upstream provider is unreachable — so your client never has to treat \"the kernel said no\" as an exception. On the chat and messages wires, denied tool calls are dropped from the response and the surviving calls are returned, with the full per-call verdicts in the fak response extension (and, for Claude Code, also prepended as a [fak] text note). This is the deny-as-value contract: a refusal is in-band data, not a transport failure."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "How do I turn on a durable, tamper-evident audit log?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "Set the FAK_AUDIT_JOURNAL environment variable to a file path; the durable decision journal is opt-in and inert until you do. Once enabled, fak appends one hash-chained JSONL row per decision (DECIDE, DENY, QUARANTINE, and even VDSO_HIT), and the chain is tamper-evident — any after-the-fact byte mutation breaks verification at the first altered link. The journal records tool names, trace IDs, verdicts, reasons, and content digests only; it never materializes the argument or result bytes, so it leaks no payload. Separately, the gateway always emits a trace-correlated stdout access log that records names and verdicts but never arguments or result content. The /v1/fak/events route reads the journal back and returns 404 when the variable is unset."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "Can I tune fak's HTTP timeouts and request size limits for slow local inference?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "Yes — the gateway's read, write, and idle timeouts are each overridable with the FAK_HTTP_…_TIMEOUT_S environment variables, and setting one to 0 disables that timeout, which is the knob you want when a slow local CPU decode would otherwise trip the default 90-second write timeout. The defaults are a 10-second read-header timeout, 30-second read, 90-second write, and 120-second idle. The request body is capped at 4 MiB. These are operational dials, not policy: they govern transport, while --policy governs which effects are allowed."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "Do I have to rewrite my agent to put fak in front of it?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "No. In almost every case you change exactly one thing — the base URL your agent or framework already points at — and your prompts, tool definitions, and agent loop stay untouched. fak serve exposes three wire surfaces on one port, each byte-compatible with a protocol your client already speaks (OpenAI Chat Completions, Anthropic Messages, and fak-native/MCP), so migration is a redirect, not a refactor. Every tool call your model proposes is adjudicated against the capability floor before it reaches your loop, and you can confirm the gate is up with a health check."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "How do I wire Claude Code or the Anthropic SDK to fak?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "Point ANTHROPIC_BASE_URL at the gateway origin (no /v1 suffix) and set the API key to any throwaway value for loopback. Claude Code and the Anthropic SDK speak the native Anthropic Messages wire, which fak serve serves at /v1/messages; the SDK appends /v1 itself, so you give it the root. Claude Code reads content blocks but not the fak response extension, so any drop, repair, or quarantine is also prepended as a leading [fak] … text block so you can see what the gate did."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "Why does my Anthropic client get a 404 on /v1/v1/messages?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "Because Anthropic SDKs append /v1 themselves, so an Anthropic base URL must point at the gateway origin (http://127.0.0.1:8080), not at .../v1. Include /v1 and the SDK turns it into /v1/v1/messages, which the gateway doesn't route. This is the single most common wiring mistake and it applies to Claude Code, the Anthropic SDK, langchain-anthropic's ChatAnthropic, and any other Anthropic-wire client. OpenAI-wire clients are the opposite — they do include /v1 in the base URL."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "How do I wire the OpenAI SDK, LangChain, LlamaIndex, or the Vercel AI SDK to fak?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "Set the OpenAI base URL to http://127.0.0.1:8080/v1 and pass any throwaway API key; the framework code stays the same. The exact parameter name differs by client: the OpenAI SDK uses base_url and the Vercel AI SDK's createOpenAI uses baseURL, LangChain's ChatOpenAI uses base_url (older langchain-openai uses openai_api_base), and LlamaIndex uses api_base (with OpenAILike to skip model-name validation for a local model). The OpenAI Agents SDK and any other AsyncOpenAI-based client take the same base URL on the AsyncOpenAI you hand the framework."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "How do I run fak as an MCP server for Cursor or another MCP client?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "Run fak serve --stdio, which is an MCP server speaking newline-delimited JSON-RPC over stdin/stdout with no listener and no auth surface. For Cursor, add an mcpServers block whose command is the absolute path to fak with args [\"serve\",\"--stdio\", …]; both the fak path and any --policy path must be absolute. The same stdio dispatch is also reachable over HTTP by starting fak serve --addr 127.0.0.1:8080 and POSTing to /mcp. It exposes adjudication tools including fak_adjudicate, fak_syscall, fak_admit, fak_changes, and fak_revoke."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "What does the MCP fak_adjudicate tool do versus fak_syscall?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "fak_adjudicate returns a verdict only and does not execute anything, while fak_syscall adjudicates and then executes the call through the kernel. In a typical integration fak_adjudicate is the production path: your client asks for a verdict, and if the call is allowed your own code runs the tool. fak_admit is the result-side companion that screens a result you already executed through quarantine and taint before it enters context. A DENY is a valid tool result (isError:false), not a protocol error — only malformed JSON-RPC produces an error code."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "How do I migrate an existing llama.cpp setup to fak?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "Keep your llama-server running and point fak serve --base-url http://127.0.0.1:8131/v1 at it, then move your clients from :8131/v1 to :8080/v1. This is the recommended path: llama-server is OpenAI-compatible, so fak fronts it as a proxy and you gain the capability floor and result quarantine without touching the engine. There is a second option that drops --base-url and passes --gguf so fak loads the GGUF in-kernel with the embedded tokenizer, but that in-kernel path is a correctness reference, not a production chat engine, so prefer fronting llama-server for scale."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "How do I point fak at a hosted provider like OpenAI or Anthropic?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "Start fak serve with --provider, the provider's --base-url, and --api-key-env naming the environment variable that holds your real upstream key, then move your client's base URL to the gateway. The --api-key-env flag names an env var, never a literal key value; fak reads it and forwards the real key upstream while your client authenticates to fak with a throwaway local key. When the upstream is the real Anthropic API, the gateway can forward the client's original request bytes and its own x-api-key as a transparent hop so a real upstream cache hit still reaches the client's accounting."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "Will fak break if my model speaks tool calls differently?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "fak adjudicates the proposed tool calls your upstream model emits, so the upstream must actually produce well-formed tool calls for the gate to act on them. The gateway buffers the whole upstream turn, adjudicates the complete proposed-call set, then re-serializes a well-formed SSE stream, so raw pre-adjudication deltas never pass through. If your upstream announces tool calls but none parse, fak fails closed with a 502 rather than forwarding an unverified turn. A self-hosted model that doesn't emit tool calls in its provider's format is a model-side concern, the same as it would be without fak."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "How do I prove fak is adjudicating before I migrate my whole agent?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "Run a single call against a policy with no server, model, key, or GPU using fak preflight, which prints the verdict for one tool call. For an over-the-wire check, start the gateway and POST to /v1/fak/adjudicate, which returns a verdict only (no execution) as a 200 carrying the decision. One gotcha on that fak-native route: the JSON key is arguments, not args, and unknown keys are silently dropped. The repo also ships self-verifying scripts under examples/ that run the HTTP gate and a real stdio MCP handshake."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "What do I gain on the wire after migrating, and how is a refusal reported?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "You gain a top-level fak object on /v1/chat/completions and /v1/messages responses, present only on turns with tool activity, and a policy refusal arrives as a successful 200 carried as a value rather than an HTTP error. That fak extension has an adjudications array (one entry per proposed call, with repaired_arguments only when the verdict kind is TRANSFORM) and a result_admissions array (one per inbound result screened, where QUARANTINE means the bytes were paged out). HTTP error statuses are reserved for malformed requests, auth failures, and upstream faults, so your client never treats \"the kernel said no\" as an exception."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "Does fak replace vLLM, SGLang, or llama.cpp?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "No, fak sits in front of them; they are inference engines that turn prompts into tokens, and fak is the governance and gateway layer that decides which tool calls run and which results enter context. Point fak serve --base-url at a running OpenAI-compatible engine (vLLM, SGLang, or llama-server) and your clients move their base URL to fak; prompts, tool defs, and the agent loop stay unchanged. fak buffers each upstream turn, adjudicates the whole set of proposed tool calls, then re-serializes well-formed SSE, so raw pre-adjudication deltas never pass through. The engines win raw throughput and front-of-prompt prefix caching; fak owns capability, quarantine, and audit."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "How is fak's gate different from LangChain's tool-calling guards?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "A LangChain agent decides which tools to call inside the model loop, so a guard there is advisory; fak adds a structural deny floor underneath that the model cannot talk past. fak serve speaks the OpenAI and Anthropic wires, so you keep your chains, @tool/StructuredTool definitions, and AgentExecutor/LangGraph loop and change only the chat-model base URL. Every proposed tool call is adjudicated against a reviewable allow-list before it reaches your loop: a tool you never allow-listed is refused regardless of context or injection, and denied calls simply never appear in the model's tool-call list. Your process still runs the surviving tools; fak does not execute them for you."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "How does fak compare to an E2B-style sandbox for agent safety?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "A sandbox like E2B limits the blast radius of a tool once it runs, while fak decides whether the irreversible tool runs at all, before any effect. fak's capability lock is default-deny: a tool that was never allow-listed is refused at the kernel floor, so the dangerous lever is never pulled rather than pulled inside a container. It also gates the result side, holding poisoned or secret-shaped tool outputs out of the model's context entirely (paged to a stub pointer). The two compose: sandbox what does run, and let fak decide what is allowed to run and what may enter memory."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "Why use fak instead of a proprietary built-in agent guard from a platform like Replit?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "A platform's built-in guard is tied to that platform; fak is an open, self-hostable Apache-2.0 Go binary you run yourself in front of any model. Because it speaks the OpenAI, Anthropic, and MCP wires on one port, you point your existing agent's base URL at it and gain a reviewable capability floor, result quarantine, and a trace-correlated audit log without adopting a closed runtime. The policy is a manifest you author and version: fak policy --dump emits the default floor to edit, --check validates it against a closed refusal vocabulary, and a bad manifest is a hard error rather than a silent fall-back to permissive. You can inspect the code, run the offline proofs, and host it on a laptop CPU with no key, model, or GPU."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "What does fak give me that hand-rolled middleware around my model API does not?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "Custom middleware can log and block calls, but fak ships the hard parts as a kernel: deny-as-value, a closed refusal vocabulary, result quarantine, and a tamper-evident audit journal. A refusal is a successful HTTP 200 carried as a verdict value, not an exception, so your client never treats \"the kernel said no\" as a transport error; error statuses are reserved for malformed requests, auth failures, and upstream faults. Refusals draw from a fixed 12-code vocabulary (DEFAULT_DENY, POLICY_BLOCK, SELF_MODIFY, SECRET_EXFIL, and so on) rather than free text, and each verdict carries a bounded witness naming only the offending rule. The opt-in decision journal hash-chains each event and records content digests, never the arguments or result bytes."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "Isn't fak just a WAF or API gateway for LLM traffic?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "No, a WAF or API gateway screens traffic from the outside and typically fails open on a crash or timeout, whereas fak puts the permission check on the same in-process call path as the tool call and fails closed. There is no spawned hook and no inter-process round-trip on the decide path: a proposed call folds an in-process adjudicator chain to the most-restrictive verdict, and a tool that was never allow-listed cannot run no matter what the model was talked into. It also reaches places a network gateway cannot: it holds poisoned tool results out of the model's context and can evict a single span from the KV cache. The audit log records tool names, verdicts, and timings keyed by trace_id, never request bodies or arguments."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "Can a rate limiter or quota gateway do what fak's capability floor does?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "No, a rate limiter caps how often a tool is called, while fak's capability floor decides whether a given effect is permitted at all. The floor is by tool name and is default-deny: an unlisted irreversible tool is refused structurally, and the refusal does not depend on catching an attack. fak does have a rate-limit reason code (RATE_LIMITED) in its closed vocabulary, but that is one verdict among twelve, not the model. The honest scope is that the floor bounds tool names, not the resolved arguments of an allow-listed coarse tool, so you keep exfil-shaped tools off the allow-list and lean on the result-side quarantine for the rest."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "How does fak's result quarantine differ from a guardrails output-content filter?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "A typical output filter classifies text and blocks it when a classifier fires, so its protection is only as good as the classifier; fak's guarantee is structural and does not depend on the detector firing. At the moment a tool result would enter context, fak's gate either admits it, pages an oversized-but-benign result out to a sub-2KB pointer, or quarantines a secret/injection/pollution result so its bytes are physically absent from the model's context. The byte-pattern detector that flags suspicious results is treated as roughly 100% evadable by design and false-positive-prone; it is a bonus, never the floor. The load-bearing protection is the quarantine policy plus the default-deny capability lock, two independent gates an attacker must beat at once."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "When should I keep my serving engine and just add fak, versus using fak's in-kernel model?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "Keep your serving engine and front it with fak serve --base-url for any production workload; fak's in-kernel model is a correctness reference, not a hardened production server. The recommended path with llama.cpp, vLLM, or SGLang is to keep the engine running and point fak at its OpenAI-compatible endpoint, moving clients from the engine's URL to fak's. The in-kernel path (--gguf, no --base-url) loads a checkpoint directly and is bit-exact against a HuggingFace reference on a small llama model, but it has no continuous batching, paged attention, or multi-tenant scheduling, and several of its GPU backends are slower than llama.cpp. Use it to prove the math or for offline correctness work, not to serve a fleet."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "Does fak give me anything an inference engine's prompt cache doesn't?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "Yes, fak's KV cache is addressable, so policy can evict a single span from the middle of a kept run; every shipped engine cache (vLLM APC, SGLang RadixAttention, the OpenAI/Anthropic prompt caches) only reuses contiguously from the front. Change context at position N in a front-of-prompt cache and everything after N is recomputed. fak owns the cache as a kernel object and keeps the pre-RoPE keys, so it can remove a poisoned result or expired secret from the middle and leave the cache bit-for-bit identical to a run that never saw it, witnessed at max|Δ| = 0. The honest fence: this provable mid-run eviction is proven on a synthetic model in internal/kvmmu and is not yet wired into the live agent HTTP loop; the front-of-prompt prefix-reuse path is shipped."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "If vLLM already has an --api-key, why front it with fak?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "vLLM's --api-key is a single bearer token over its routes; fak adds a capability floor, result quarantine, and an audit surface on top of auth. Beyond auth, fak adjudicates each proposed tool call against a reviewable allow-list, quarantines poisoned tool results out of context, and emits a trace-correlated audit log and Prometheus metrics, none of which a bare API key provides. Its own auth is off by default for loopback but hardens with one flag, --require-key-env VAR, which gates every route except /healthz and accepts a bearer token or x-api-key compared in constant time over SHA-256 digests. You add flags, not new components."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "I already run an API gateway for auth and routing; where does fak fit alongside it?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "Your API gateway handles transport concerns (TLS, auth, routing, rate caps); fak sits on the agent's model path as the layer that understands tool calls and tool results, so the two stack rather than compete. A gateway sees opaque request bodies; fak decodes the turn, adjudicates each proposed tool call against the capability floor, screens inbound tool results for quarantine, and surfaces every verdict in a fak response extension plus an in-band note for clients that don't read it. It also ships intelligent tiered request routing as a library, but that router is explicitly not on the live serve request path today, so don't count on fak to replace your gateway's routing. Run your gateway at the edge and fak on the model path."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "What observability does fak give me, and how are the three surfaces correlated?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "fak serve exposes three correlated observability surfaces — a Prometheus /metrics endpoint, a live /debug/vars JSON snapshot, and a structured stdout access log — and a single trace_id threads all three together. The access log writes two JSON lines per request (gateway_operation carrying the verdict and gateway_http_request carrying transport details), /debug/vars gives you the same view as /metrics as one JSON object you can read right now, and every response carries an X-Trace-Id header that also appears in the access log and the per-operation verdict log. Point your scraper at /metrics, eyeball /debug/vars during an incident, and grep the access log by trace_id to follow one request across all three."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "What kernel counters does fak track, and what does the vDSO hit ratio tell me?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "fak tracks per-kernel counters for submits, vDSO hits, engine calls, denies, transforms, quarantines, and admitted results, surfaced on /metrics as fak_kernel_…_total plus the derived gauge fak_gateway_vdso_hit_ratio. The vDSO hit ratio is VDSOHits/Submits — the fraction of tool calls answered from the in-process fast path with no adjudication and no engine call — so a high ratio means a cache-friendly workload and a low one means most calls fell through to a full decision. denies, transforms, and quarantines count how often the floor refused a call, rewrote its arguments, or held a tool result out of context. The vDSO cache also exports its own view (fak_vdso_lookups_total, hits_total, hit_rate) plus miss attribution under a closed vocabulary (DESTRUCTIVE|MISSING_HINTS|RESOURCE_MISNAMED|WITNESS_REVOKED|NOT_CACHED)."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "How do I debug a tool call that fak denied?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "Run fak preflight to replay that exact call through the policy and print the verdict, the reason code, and which rung decided it — no server, model, or network required. Pass the tool name and JSON args (and your policy file) and it prints verdict=… reason=… by=monitor; add --explain or --json to dump the full per-rung Decision trace so you can see whether the grammar rung, the preflight ladder, or the adjudicator monitor refused it. The reason comes from a closed 12-code vocabulary (DEFAULT_DENY, POLICY_BLOCK, SELF_MODIFY, UNKNOWN_TOOL, and so on), so the refusal is citable rather than free text. A DEFAULT_DENY usually means the tool was never allow-listed; a POLICY_BLOCK or SELF_MODIFY means an explicit deny or a write-shaped self-modify rule fired."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "What do fak's refusal reason codes mean?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "Every refusal carries exactly one code from a closed 12-reason vocabulary, so you can route on it instead of parsing free text: DEFAULT_DENY, POLICY_BLOCK, SELF_MODIFY, LEASE_HELD, TRUST_VIOLATION, MALFORMED, MISROUTE, RATE_LIMITED, SECRET_EXFIL, UNWITNESSED, OVERSIZE, and UNKNOWN_TOOL. DEFAULT_DENY is the fail-closed floor — the tool was never allow-listed; POLICY_BLOCK is an explicit named deny; SELF_MODIFY fires on a write-shaped call that touches a guarded path or runs a mutating shell command; MALFORMED and MISROUTE flag broken or unrepairable call shapes. The vocabulary is forward-compatible: an unknown code renders as REASON_<n> and never panics. Each code also maps to a disposition (RETRYABLE, WAIT, ESCALATE, or TERMINAL) so the next agent turn knows whether retrying, waiting, or escalating is appropriate."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "Does fak's audit log record my tool arguments or result contents?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "No — the stdout access log records tool names, verdicts, reason codes, dispositions, and timings, but never request bodies, tool arguments, or result content. Each request emits a gateway_operation line with the tool name and verdict fields and a gateway_http_request line with duration_ms, status, bytes, and route, both stamped with trace_id; neither carries a payload or even a digest of one. This is a deliberate privacy guarantee: you can ship the access log to a central collector without leaking what the agent was working on. If you opt into the separate durable decision journal (via FAK_AUDIT_JOURNAL), it adds content digests (ArgsDigest/ResultDigest) and a tamper-evident hash chain — still digests only, never the raw bytes."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "What is the durable decision journal and how is it different from the access log?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "The decision journal is an opt-in, append-only, tamper-evident ledger that writes one hash-chained JSONL row per audit event (DECIDE, DENY, QUARANTINE, or VDSO_HIT), enabled by setting the FAK_AUDIT_JOURNAL environment variable; off by default, the package stays inert. Unlike the stdout access log, which stores no payload and no digest, the journal records the tool name, trace_id, verdict, reason, and content digests (never the blobs themselves), and each row's hash chains over the previous row so any post-hoc tampering breaks Verify at the first altered link. A vDSO fast-path hit is journaled like an engine call, so the audit trail is complete even for calls that never reached the model. Reopening the journal continues the chain rather than forking it, and each write is flushed to the OS file before returning so a crash loses no recorded row."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "How do I see what happened on a turn — was a tool call dropped or a result quarantined?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "Read the fak extension object on the gateway response: it carries an adjudications array (one entry per proposed tool call, including dropped ones) and a result_admissions array (one entry per inbound tool result the kernel screened). Each adjudication shows tool_call_id, tool, whether it was admitted, the verdict, and repaired_arguments only when the verdict kind is TRANSFORM; a quarantined result shows up under result_admissions with verdict.kind == \"QUARANTINE\", meaning its bytes were paged out and never reached the model. The object is omitted on turns with no tool activity. Because Claude Code reads content blocks but not the fak extension key, the same drops, repairs, and quarantines are also prepended to the message as a leading [fak] … text block so they remain visible on the Anthropic wire."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "How fast is fak's adjudication decision, and is the latency observable?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "The adjudication decision itself is sub-millisecond — a captured access-log line shows a policy DENY at duration_ms ≈ 0.511 — because the decision is an in-process fold with no spawned hook and no engine round-trip. That number is the adjudicate operation duration from a real captured access log, observable per request via the duration_ms field on each gateway_operation line and correlatable by trace_id. The in-process fold is often faster than the OS clock granularity, which is why fak bench uses an inner calibration loop to measure it. The honest fence: this is the decide-path latency, not a serving-throughput figure; fak bench's gate is a regression sentinel for the decide path that passes only if the in-process p50 beats the spawned-hook baseline."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "How can I check whether a candidate answer or tool result is degenerate before it reaches the model?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "Pipe the text through fak answer-shape, the consumer-facing witness that grades how repetitive (looping or degenerate) and how long (verbose or runaway) a piece of text is against thresholds you choose. It reports a single RepeatFraction in [0,1] — the max of four sub-signals (n-gram repeat, repeated-line-block, short-period tiling, and a compression-redundancy signal) so it trips on whichever way the text actually degenerated — plus a rune-length count, and exits 0 in shape, 1 degenerate, and 2 on a usage error so it composes as a pipeline gate. It reads stdin on - (or no source), is pure and deterministic, and runs off the hot path with no model, session, or kernel dependency. Tune it with --max-repeat, --max-chars, and --ngram; repetition fractions below a 24-rune floor are reported but never trip the verdict."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "What does fak doctor add over fak answer-shape?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "fak doctor runs the same answer-shape witness AND cross-checks the real kernel admit verdict on the same bytes, then turns each finding into an operator recommendation. It calls ctxmmu.ScreenBytes — the exact predicate the kernel's write-time gate uses — so its KernelAdmit field reports the gate's actual decision (for example SECRET_EXFIL, TRUST_VIOLATION, or OVERSIZE), not a parallel re-implementation. Note that the kernel's repeat gate is a conservative binary seal (it quarantines only a 16-byte chunk repeated more than 50 times in a body of at least 512 bytes), so doctor is most useful for catching the softer loops the binary gate deliberately admits, where the graded answer-shape signal still warns. It exits 0 healthy, 1 when there is at least one finding, and 2 on a usage error, so it drops into CI as a gate over a captured answer — the fak analogue of dos doctor."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "Is the in-kernel model engine ready to serve production traffic?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "No, the in-kernel model engine is a bit-exact correctness reference, not a tuned production serving engine, and the README and claims ledger say so plainly. It is a from-scratch pure-Go forward pass whose load-bearing claim is oracle correctness versus a HuggingFace reference, not throughput, and it has no continuous batching, no paged attention, and no multi-tenant scheduler. Forward-pass parity is proven for the llama family (SmolLM2-135M, argmax-exact at every position, final-logit max|Δ| about 6e-5); non-llama family parity is open, real-GGUF end-to-end parity is open, and a Qwen3.6-27B multi-token greedy decode was refuted because it diverges from llama.cpp at token index 2. For real serving, run fak serve in front of vLLM, SGLang, or llama.cpp instead."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "Why do the cache-reuse savings only apply to self-hosted models?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "Because the reuse win comes from owning the KV cache as a kernel object, and an app that merely calls a frontier API never holds that cache, so it gets the safety floor but none of the savings. The roughly 4x figure (versus a tuned warm-cache stack) and the 8.8x to 9.7x figure (measured prefill elimination on the real 643-task WebVoyager dataset, swept across worker counts) are reread-rate reductions over a cache fak controls. When you proxy to OpenAI or Anthropic, the provider owns prefix caching upstream, so fak is governing the wire rather than eliminating prefill. Front your existing API for the capability floor and result quarantine; go all-in on the fused kernel with a self-hosted model to also get the reuse wins. Every benchmark traces to a commit and artifact in the benchmark authority."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "What does the max|Δ|=0 bit-exactness proof actually guarantee, and what does it not?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "It guarantees that when policy evicts a tool-result span from the KV cache, the model's next-token logits are byte-identical to a run that never saw that span, proven at max|Δ| of exactly zero with a non-vacuity control that confirms keeping the poison genuinely moves the distribution. That is a strong but narrow claim: it shows reuse and eviction are a faithful shortcut, not a numerical approximation. It does not prove the model is correct, does not prove the detector caught the poison, and for the quarantine-drives-KV-eviction bridge specifically it is witnessed on a synthetic model in internal/kvmmu and is not yet wired into the live fak agent HTTP loop. The deletion certificate that binds such an eviction to an audit journal is also self-attesting in v1 (integrity, not third-party independence) and proves removal only from the inference working set, not from weights, embeddings, backups, or replicas."
+      }
     }
   ]
 }
@@ -165,6 +1605,12 @@ answer is written to stand on its own. For the full story, start with the
 [README](https://github.com/anthony-chaudhary/fak/blob/main/README.md); for runnable proof, see the [2-minute repro](repro-packet.md).
 
 ---
+
+**Jump to a topic:** [The essentials](#the-essentials) · [Core concepts and the mental model](#core-concepts-and-the-mental-model) · [The lock — how adjudication works](#the-lock-how-adjudication-works) · [The wall — how result quarantine works](#the-wall-how-result-quarantine-works) · [The addressable KV cache, in detail](#the-addressable-kv-cache-in-detail) · [Inside fak serve (the gateway)](#inside-fak-serve-the-gateway) · [The in-kernel model engine](#the-in-kernel-model-engine) · [Sessions, recall, and persistence](#sessions-recall-and-persistence) · [Performance and the numbers](#performance-and-the-numbers) · [Security and the threat model](#security-and-the-threat-model) · [Operations, configuration, and deployment](#operations-configuration-and-deployment) · [Integrations and migration](#integrations-and-migration) · [Comparisons with other tools](#comparisons-with-other-tools) · [Observability, audit, and debugging](#observability-audit-and-debugging) · [Limitations and honest scope](#limitations-and-honest-scope)
+
+## The essentials
+
+The most common questions, answered to stand on their own. The deeper topic sections below go into how each piece actually works.
 
 ## What is fak?
 
@@ -366,3 +1812,850 @@ issue for an undisclosed vulnerability.
 - [Policy in the kernel](explainers/policy-in-the-kernel.md) and [Addressable KV cache](explainers/addressable-kv-cache.md) — the two core ideas.
 - [Benchmark authority](https://github.com/anthony-chaudhary/fak/blob/main/BENCHMARK-AUTHORITY.md) — every number.
 - [llms.txt](https://github.com/anthony-chaudhary/fak/blob/main/llms.txt) — a machine-readable map for LLMs and answer engines.
+
+## Core concepts and the mental model
+
+The ideas the rest of the FAQ builds on: what an agent kernel is, why the model is treated as an untrusted program, and how one boundary carries both security and performance.
+
+## Why does fak treat the language model as an untrusted program?
+
+`fak` treats the model as an untrusted program because its output is shaped by text it reads at runtime — including text an attacker can plant — so nothing the model proposes can count as authorization on its own. The core move puts the model in the position of ring-3 userspace: every effect it wants on the outside world becomes a syscall through a kernel the model does not control, adjudicated from evidence the model did not author, and a tool call is that syscall. The kernel decides allow, deny, transform, or quarantine from a policy floor and the call's own arguments, never from the model's say-so, so an injected instruction can ask for a dangerous action but cannot grant it.
+
+## What does "tool call = syscall" actually mean in fak?
+
+It means every action an agent takes on the outside world is funneled through one in-process checkpoint the model cannot bypass, the way a user-space program reaches the OS only through calls like `read()` or `write()`. In `fak` that checkpoint is the kernel's `Submit`/`Reap` path: a proposed tool call is folded through a ranked adjudicator chain that returns one verdict, and a denied call is never enqueued or executed. Promoting the tool call to a syscall is what lets a single in-process gate mediate both which effects are allowed and which results may enter the model's context.
+
+## What is the "one boundary" idea, and how can the same gate be both security and performance?
+
+The one-boundary idea is that the gate deciding whether a tool result may enter the model's context (a security act) is the same gate that pages that result's bytes to a content-addressed store for reuse (a performance act) — one write-time decision, two enforcement media. When a result is screened, the same code that holds a poisoned result out of context also stores a benign result once in a shared store so shared work isn't recomputed every turn, so the correctness metadata is the performance metadata. `fak` states this as a claim shown by example, not a proven law, and is honest about its edge: the convergence does not help raw GPU throughput (it pays for bit-exactness in memory), and the reuse win only materializes for read-heavy self-hosted fleets.
+
+## If the poison detector is evadable by design, what actually protects me?
+
+The protection is structural — the capability lock and the quarantine policy — not the detector, which `fak` openly calls roughly 100% evadable by design and false-positive-prone. The result screener (`ScreenBytes`, covering secret patterns, injection markers, and byte-repeat pollution) sits on top of the wall as a helpful bonus: if it fires, that's a free catch; if it misses, the result is still held out of context by policy and an unlisted irreversible tool is still refused regardless of context. The honest floor is that the wall holds even when the detector misses, so keep exfil-shaped tools off the allow-list and don't rely on detection as the load-bearing layer.
+
+## What does "in-process" or "in the call path" mean, and why is it load-bearing?
+
+In-process means the permission check runs in the same address space as the agent loop, on the same call path as the tool call, with no spawned hook, no socket round-trip, and no IPC on the decide path. This is what makes fail-closed affordable: there is no per-call process to spawn or socket to wedge on, so the gate can refuse by default without becoming a latency tax you are tempted to turn off. `fak` measures the in-process fold at p50 around 2.4µs versus around 5.8ms for a spawned hook (roughly 2,400×), but it is explicit that this is a subsystem regression sentinel rather than a fleet-speed headline; the point of the number is that the gate is cheap enough to always be on, with absence of process spawn proven by `TestNoOsExecOnHotPath`.
+
+## What is the "trust floor," and why is default-deny the starting point?
+
+The trust floor is the set of effects that are structurally possible at all: a zero or empty policy permits nothing, so every call is refused with `DEFAULT_DENY` until you explicitly allow-list a tool. Default-deny is the starting point because a refusal then does not depend on recognizing an attack — the lever simply was never built, so no context or injection can reach it. You raise the floor deliberately with `allow`, `allow_prefix`, and `deny` rules, and a loaded manifest replaces the floor rather than merging into it; `fak policy --dump` emits the full default to edit and `fak policy --check` validates a manifest before you deploy.
+
+## Does fak stop a tool from being recognized as dangerous, or stop the dangerous thing from existing?
+
+It stops the dangerous thing from existing on the allow-list rather than trying to recognize each attack — the framing is to stop recognizing and start not building the lever. Because an irreversible tool that was never allow-listed has no code path to invoke, an injected instruction can describe the attack perfectly and still get a structural refusal; there is nothing to detect because there is nothing to call. This is why the lock holds against novel phrasings: it is a property of the policy floor, not of a pattern set an attacker can rephrase around.
+
+## What is the honest limit of the capability lock — does it bound tool arguments too?
+
+The lock bounds tool *names* structurally but does not bound the resolved effect of an allow-listed tool's arguments. An allow-listed `send_email` with attacker-chosen recipients, or a coarse `Bash` running `rm -rf /`, is not stopped by the name-level floor — `fak` can inspect one decoded argument string with arg-rules (positive path globs, RE2 deny patterns, byte caps), but RE2 patterns are detection-shaped and evadable, and first-class argument-scoped capabilities (path, host, or amount as constraints) are roadmap, not shipped. The practical guidance is to keep exfil-shaped and irreversible tools off the allow-list entirely rather than trust an argument pattern to catch a bad value.
+
+## How does adding a verdict like "quarantine" fit the same mental model as "deny"?
+
+Both are verdicts in one restrictiveness lattice the kernel folds to, so quarantine (result-side) and deny (call-side) are the same kind of object: a value the next loop turn consumes, not an exception. The adjudicator chain folds to the most-restrictive verdict across allow, defer, transform, quarantine, require-witness, and deny; an unknown verdict kind fails closed rather than panicking, and a refusal is returned as a structured result, never an HTTP error. That uniformity is why a result quarantine and a call denial share one wire shape and one audit path: the model proposed something, the kernel returned a verdict, and the loop reads it in-band.
+
+## The lock — how adjudication works
+
+The capability floor, end to end: the path a proposed tool call takes through the kernel, the closed refusal vocabulary it answers with, and exactly what the floor does and does not bound.
+
+## What exact path does a proposed tool call take through the kernel?
+
+A proposed tool call hits the in-process vDSO fast-path first; on a miss the kernel folds the adjudicator chain to one verdict, and only an allowed call is ever enqueued. There is no spawned hook and no inter-process call on the decide path. `Submit` consults the vDSO, and a hit returns `Allow by=vdso` with no adjudication and no engine call. On a miss, `decide()` folds the registered chain to a single verdict and routes it, and a denied call is never enqueued for execution. Reaping a result runs the separate result-side admission chain.
+
+## What does "default-deny" actually mean in fak's adjudicator?
+
+Default-deny means any tool you did not explicitly allow-list is refused, regardless of context or injected text. A zero (empty) policy is the fail-closed floor: nothing is allowed, so every call returns `DEFAULT_DENY`. The fold reinforces this structurally — an empty chain folds to `Deny/DEFAULT_DENY by="empty-policy"`, and a chain where every rung defers folds to `Deny/DEFAULT_DENY by="all-defer"`. The default-deny-on-empty-policy guarantee is pinned by the `TestFoldDefaultDenyEmptyPolicy` witness.
+
+## What is the closed refusal vocabulary, and what are the exact reason codes?
+
+`fak` refuses only with one of 12 codes from a closed vocabulary, never free text: `DEFAULT_DENY`, `POLICY_BLOCK`, `SELF_MODIFY`, `LEASE_HELD`, `TRUST_VIOLATION`, `MALFORMED`, `MISROUTE`, `RATE_LIMITED`, `SECRET_EXFIL`, `UNWITNESSED`, `OVERSIZE`, and `UNKNOWN_TOOL` (plus `NONE`, which is not a refusal). The set is the source of truth in `internal/abi/reasons.go` and is the same vocabulary the policy loader validates against. It is forward-compatible: an unknown code renders as `REASON_<n>` rather than panicking, so a newer rung can add a code without breaking an older reader.
+
+## How do allow, allow_prefix, and deny work in a policy manifest?
+
+`allow` is an exact tool-name match, `allow_prefix` matches a tool name by prefix, and `deny` is a provable refusal by name whose value is a closed-vocabulary reason code. In the manifest these are the fields `allow`, `allow_prefix`, and `deny` (a map of tool name to reason name), and the default `allow_prefix` family is the read-only set `read_ get_ search_ list_ lookup_ find_ calc`. A loaded manifest replaces the floor rather than merging into a built-in default, so the manifest you load is the whole floor.
+
+```bash
+fak policy --dump > floor.json   # emit the full default to edit
+fak policy --check floor.json    # validate + print the admitted floor
+```
+
+## What is the difference between fail_closed and admit_and_log posture?
+
+`fail_closed` (the default, zero value) refuses anything not allow-listed, while `admit_and_log` downgrades only a LOW-RISK, READ-SHAPED default-deny to an allow while recording what it would have denied. Under `admit_and_log` a downgraded call carries `Meta{posture:"admit_and_log", would_deny:"DEFAULT_DENY"}` so the would-be refusal is still auditable. It is not a blanket open door: explicit denies, self-modify, arg-rule violations, and any write-shaped default-deny still fail closed. The read-shaped test is name-based and conservative, and caller-supplied metadata cannot widen authority.
+
+## Why is a policy refusal an HTTP 200 instead of a 4xx error?
+
+A refusal is a successful turn carried as a verdict value, so `fak serve` returns `200 OK` with the verdict in the response body and never a non-2xx for a policy refusal. Over the gateway, `adjudicateProposed` keeps ALLOW and TRANSFORM calls, drops the rest, and records each decision in the `fak` response extension as a per-call `ToolAdjudication`/`WireVerdict`; for clients that do not read that extension, a deny summary is also written in-band. HTTP error statuses are reserved for malformed requests, auth failures, and upstream faults, so a client never treats "the kernel said no" as an exception.
+
+## What does "deny is a value, not an error" mean inside the kernel loop?
+
+When the kernel denies a call it produces a structured Result the next loop turn consumes in-band, rather than raising an error. The `DenyResult` carries `Status=StatusError, Outcome=OutcomeCommitted` plus `Meta{verdict:"deny", reason, disposition, by}` and a bounded witness containing only the offending set. The disposition tells the loop what to do next: malformed and misroute denies are `RETRYABLE`, rate-limit and lease denies are `WAIT`, self-modify and trust denies are `ESCALATE`, and everything else is `TERMINAL`.
+
+## Does the adjudication floor bound a tool's arguments, or only its name?
+
+The capability floor bounds tool *names* structurally; it does not bound the resolved *effect* of an allow-listed tool's arguments. An allow-listed `send_email` with attacker-chosen recipients is not stopped by the floor itself, so the guidance is to keep exfil-shaped tools off the allow-list entirely. `fak` does add arg-level predicates (issue #9) that can restrict an allowed tool by inspecting one decoded argument string, but those inspect a single value, not the resolved effect, and a satisfied predicate never *grants* an allow. Argument-scoped capabilities (path, host, amount as first-class constraints) are roadmap, not shipped.
+
+## How do arg-level predicates restrict an allow-listed tool?
+
+Arg-level predicates (issue #9) are RESTRICT-ONLY rules keyed on a tool name plus an argument value, evaluated after name-deny and self-modify but before the affirmative allow, so an allow-listed tool with a malicious argument is refused at the floor instead of being waved through to detection. There are three kinds: `allow_glob` (positive — the value must be a non-escaping path under a glob, and a missing arg or `../` escape fails closed), `deny_regex` (negative RE2 match), and `max_bytes` (a string over N bytes is denied). A violation denies with the rule's reason (default `POLICY_BLOCK`) and a bounded witness of the bound that was violated, never the argument value itself.
+
+## How does fak handle a malformed or wrongly-shaped tool call?
+
+Malformed calls are routed by two early rungs: grammar repair can rewrite a repairable call into a `Transform`, and an unrepairable one is denied with `MISROUTE` (a retryable disposition). The grammar rung defers well-formed calls, repairs malformed-but-repairable ones (a positional-to-named zip when arity matches, or an alias rename), and fails *open* with a `Defer` when no grammar exists for the tool so it never over-refuses. Below it, the preflight ladder does a static JSON parse (rung-0) and a schema required-fields and types check (rung-1); a failure there denies with `MALFORMED`.
+
+## How does the adjudicator chain combine multiple rungs into one verdict?
+
+The chain folds to the single most-restrictive verdict, so a stricter rung can only tighten the outcome, never loosen it. Each verdict kind has a fold rank — Allow=0, Defer=1, Transform=2, Quarantine=3, RequireWitness=4, Deny=100 — and the highest non-defer rank wins; an unknown registered kind folds to 100, which is fail-closed. The default rungs are grammar repair, the preflight ladder, and the authoritative adjudicator monitor. Because the fold is order-independent, a rung's rank only orders the work, not the result.
+
+## In what order does the adjudicator monitor decide a single call?
+
+Inside the authoritative monitor the decision walks a fixed order: explicit name-deny first, then self-modify on a path argument, then self-modify on a shell or command string, then arg-level predicates, then redaction transforms, then the affirmative allow or allow_prefix, and finally the default-deny catch-all. This ordering is why a malicious argument on an allowed tool is refused at the floor rather than reaching detection: the arg predicates run before the affirmative allow. The affirmative allow is the last thing consulted before the default-deny, so anything not explicitly permitted falls through to a refusal.
+
+## Why does fak deny a write-shaped shell command that touches a guarded path?
+
+`fak` refuses a write-shaped command that targets a guarded glob with a `SELF_MODIFY` denial, because an agent editing its own policy or harness is the self-grading-homework failure the rung exists to stop. The shell-path form fires only when a command contains a guarded glob *and* a write verb or redirect; the write detection is a deliberately over-broad substring floor — covering `sed -i`, `tee`, `cp`/`mv`, `git apply/checkout/restore`, interpreter eval flags, `>`/`>>`, and many more — not a real shell parser. A plain read of a guarded file stays allowed, and the bias is intentional: a false refusal is cheap, while a false allow here is the failure mode the rung exists to stop.
+
+## What happens if my policy manifest has a typo or an unknown field?
+
+`fak` fails loud on a bad manifest rather than silently falling back to a more permissive default. The loader uses strict field decoding, so a typo like `allows` for `allow` is a hard error (`json: unknown field "allows"`); an unknown deny reason errors with the list of offenders plus the full valid vocabulary; and an unknown posture, bad regex, or malformed arg rule each hard-error. On startup `fak serve` propagates that error as a fatal failure, so there is no silent fallback to a more permissive floor. A round-trip is exact: `--dump` piped into `--check` validates unchanged.
+
+## How do I check what verdict a single tool call gets without running a server?
+
+`fak preflight` is the per-call oracle: it runs the adjudication rungs over one tool call and prints `verdict=… reason=… by=…` with no dispatch and no server. Pass the tool name, its arguments as JSON, and optionally a policy file; `--explain` or `--json` dumps the per-rung decision trace. This is the offline way to prove a policy refuses what you expect before you wire anything live.
+
+```bash
+fak preflight --tool refund_payment --args '{}' --policy floor.json --explain
+```
+
+## Does the vDSO fast-path skip the security check on a cache hit?
+
+No, a vDSO hit is sound by construction: a cache hit is defined to equal a fresh call, so serving it without re-adjudicating does not loosen the floor. The fast-path serves only repeat decisions that are pure functions of their inputs or are bound to the current world-version, and the write-shape veto is name-based and re-checked rather than trusted from an annotation. A write-shaped completion bumps the world-version so stale entries cannot be served. The kernel counts `VDSOHits` separately, so the hit ratio is observable on `/metrics`.
+
+## What does the kernel do when a policy injects its own per-kernel adjudicator chain?
+
+By default the kernel folds the process-global adjudicator registry, but `WithAdjudicators` lets you inject a per-kernel chain so concurrent kernels can run independent policies. An empty or nil injected chain is a no-op fallback to the global registry; it never silently installs a default-deny-all in place of your real policy. The fold semantics are identical either way — most-restrictive-wins over whatever chain is in effect — so independent policies coexist without one kernel's floor leaking into another's.
+
+## Why is running the adjudication check in-process load-bearing rather than just fast?
+
+Running the check in the same address space as the agent loop is what makes fail-closed affordable: there is no per-call process spawn or socket round-trip to wedge on, so refusing by default never costs a hook launch. The decide path is a fold over registries read with a single atomic pointer load (no mutex, zero allocations on the hot path), and a witness proves no `os/exec` spawn happens on it. The measured in-process versus spawned-hook gap is roughly 2,400–2,849×, but that figure is a subsystem regression sentinel for the decide path, not a fleet-speed headline.
+
+## The wall — how result quarantine works
+
+The second, independent gate: how a suspicious tool result is held out of the model's context, why the wall holds even when the detector that flags it is fooled, and what that protects against.
+
+## What is result quarantine in fak?
+
+Result quarantine is the write-time gate that decides whether a tool result is allowed to enter the model's context, holding poisoned, secret-shaped, or polluted results out entirely. It is the call-side adjudicator's dual: where the adjudicator screens proposed tool *calls*, the context-MMU (`ctxmmu`) screens tool *results* at the moment they would be written into the conversation. A result either enters as-is (Allow), is paged out to a small pointer because it is benign but oversize (Transform), or is held out of context because it looks like a secret, an injection, or pollution (Quarantine).
+
+## How does a quarantined result get held out of the model's context?
+
+`fak` pages the offending bytes out to a content-addressed blob store and replaces the result payload in-place with a tiny stub like `{"_quarantined":true,"id":...,"reason":...,"len":...}`, so the dangerous bytes are physically absent from context. The kernel mints a quarantine id, pins the bytes in the content-addressed store so the bounded cache cannot reclaim them before a gated read, and stamps the result's metadata with the quarantine id. The model only ever sees the stub pointer; the poison never reaches attention. If even writing the stub fails, the path fails closed to an inline reference tagged as quarantined rather than letting the bytes through.
+
+## What does the result detector actually screen for?
+
+The screen, `ScreenBytes`, runs three first-match-wins checks over a result body: secret exfiltration, prompt injection, and byte-repeat pollution. Secret detection is an RE2 pattern matching shapes like `sk-...`, `AKIA...`, `ghp_...`, `xox[baprs]-...`, and PEM private-key blocks, returning `SECRET_EXFIL`. Injection detection is a lowercased substring scan over markers like "ignore previous instructions", "you are now", and "reveal your system prompt", returning `TRUST_VIOLATION`. Pollution detection is a byte-repeat predicate returning `OVERSIZE`. The same predicate backs both the post-tool admission gate and closed-API clients' pre-send transcript screening.
+
+## How does the byte-repeat pollution predicate work?
+
+The pollution predicate flags a result whose body is at least 512 bytes and contains a 16-byte chunk repeated back-to-back more than 50 times. It takes the first 16 bytes, steps through the body in 16-byte strides counting consecutive equal chunks, and resets the run to zero on any mismatch — so only a contiguous, blatant repeat trips it. A 16-byte chunk repeated 60 times (960 bytes) is quarantined as `OVERSIZE`. This is a deliberately conservative binary seal: it catches the most obvious context-flooding pollution without wrongly sealing a benign result.
+
+## What is the taint ledger and where does it live?
+
+The taint ledger is an in-process, process-local record of which results are held and which have been cleared, kept in memory under a single mutex. It holds maps of held ids to content-addressed references, a cleared set, a FIFO order list, and counters for total/quarantine/paged/evicted. It is in-memory only with no disk backing, so this live state is gone on process exit — the quarantined *bytes* live in the shared content-addressed store keyed by digest, but the live held/cleared maps reset on restart. The `fak recall` core-dump path is what persists quarantine state across the process boundary.
+
+## Is the taint ledger bounded, or can it leak memory over a long-running process?
+
+The ledger is bounded to a default of 8192 held ids (overridable via `FAK_CTXMMU_MAX_HELD`), closing a real process-lifetime leak where every quarantine once minted a permanent entry with no removal path. When the cap is reached, the oldest ids are evicted FIFO: the content-addressed handle is unpinned, the id is dropped from the held and cleared maps, and the order list's backing array is compacted. An evicted id's bytes were never in context, so a later page-in of that id is refused exactly like an unknown id — correct fail-closed degradation, never a leak. A bad env value fails safe to the default.
+
+## How do quarantined bytes ever get back into context if they were a false positive?
+
+Quarantined bytes page back in only on an explicit page-in request that comes *after* a witness clears the id, and both checks fail closed. Clearing records clearance only for an id that is currently held, keeping the cleared set a subset of the held set. Page-in refuses an id that was never held ("no quarantined result") and refuses an id that was held but never cleared ("no witness clear()"). So nothing re-enters context by accident; it takes a held id, an explicit clearance, and an explicit page-in, all three.
+
+## How do I see quarantine decisions on the HTTP wire?
+
+Quarantine decisions surface in the `fak` response extension under `result_admissions`, one entry per inbound tool result the kernel screened. Each entry carries the tool call id, the tool name, and a verdict whose `kind` is one of `ALLOW`, `DENY`, `TRANSFORM`, `QUARANTINE`, `REQUIRE_WITNESS`, or `DEFER`; a quarantined result shows up as `kind: "QUARANTINE"` with its reason. The extension is omitted entirely on a turn with no tool activity. Claude Code reads content blocks but not the `fak` key, so the gateway also prepends a leading `[fak] ...` text block describing the quarantine.
+
+## What happens to a poisoned tool result in the gateway proxy path?
+
+On the proxy path, the gateway screens every inbound tool-role message and, on a quarantine or transform, forwards the paged-out envelope so the poison never reaches the model. An un-admittable result is held out fail-closed with a stub carrying reason `ADMIT_ERROR` and a `QUARANTINE`/`TERMINAL` verdict. A quarantine also resets the relevant upstream KV span so a tuned engine's cache cannot keep serving the poisoned prefix. The counter `fak_gateway_context_pollutions_blocked_total` is the live "context saved" signal.
+
+## How does result quarantine relate to the addressable KV cache?
+
+They are one decision enforced in two media: the quarantine verdict bars the bytes from text context, and the KV side bars the corresponding K/V from attention state. The result detector's verdict drives a write-time eviction of the tool-result span from the kernel-owned KV cache, leaving it bit-identical to a session that never saw the poison — verified at `max|Δ| = 0` with a non-vacuity control showing the poison-vs-never delta is non-zero. This bridge is proven on a synthetic model in `internal/kvmmu` today and is not yet wired into the live `fak agent` HTTP loop, so treat the KV-eviction half as mechanism-proven, not production-served.
+
+## Does quarantine survive a session boundary, or is it lost when the process exits?
+
+The live quarantine maps are process-local and reset on restart, but `fak recall` persists a finished session as a durable core image whose quarantine seals survive the boundary. A reloaded image refuses to page a quarantined slice into a new context unless a witness clearance ran *and* the bytes pass a fresh content re-screen against the full registered admitter chain — clearance alone cannot launder still-poisoned bytes. The re-screen folds the current detectors, so a session recorded under a weaker gate is re-caught by every screen the fleet ships now. A sealed page persists with a safe descriptor only (`tool: [sealed: reason, N bytes]`), never the poisoned bytes.
+
+## What is the difference between the kernel's binary quarantine and fak answer-shape?
+
+The kernel's repeat predicate is a conservative *binary* seal — at least 512 bytes, a 16-byte chunk repeated more than 50 times — while `fak answer-shape` is a *graded*, tunable witness over the same concern. `answer-shape` emits a repeat fraction in `[0,1]` (the max of n-gram, repeated-line-block, short-period, and compression signals) judged against caller thresholds like `--max-repeat` and `--max-chars`, catching softer loops the kernel's binary gate deliberately admits. The two share the idea of degenerate repetition but not code: the kernel's is a fixed seal on the hot path, `answer-shape`'s is an off-hot-path consumer witness with no kernel dependency.
+
+## Does the audit log of a quarantine leak the poisoned bytes?
+
+No — the audit surfaces record names, verdicts, reasons, and content *digests*, never the poisoned bytes or result content. The stdout access log carries the tool name and verdict fields with no payload and no digest at all. The opt-in durable journal (enabled by `FAK_AUDIT_JOURNAL`) records the tool name, trace id, verdict, reason, and a result digest derived from the frozen reference — it never materializes a blob, so it leaks no payload into the log. A quarantine page's saved descriptor is safe sealed metadata only.
+
+## What reason codes can a quarantine carry, and where do they come from?
+
+A quarantine carries one code from the kernel's closed 12-reason refusal vocabulary: secret-shaped results return `SECRET_EXFIL`, injection-shaped results return `TRUST_VIOLATION`, and byte-repeat pollution returns `OVERSIZE`. These come from the same fixed vocabulary the call-side adjudicator uses, so a result refusal is as structured and citable as a call refusal — never free-text. An unknown forward-compatible code renders as `REASON_<n>` and never panics. (On the gateway proxy path, a result that cannot be admitted at all is held out fail-closed with the wire-level marker `ADMIT_ERROR`, which is a fail-closed signal rather than a vocabulary code.)
+
+## Does quarantine guarantee you catch every injection, or only contain the ones it flags?
+
+Quarantine makes the gate's decision durable and enforceable, but it does not improve the decision — a crafted injection that never trips the screen's marker set is never flagged and will resolve into context. The honest scope is that the structural floor (an unlisted irreversible tool stays refused; a flagged result stays sealed across the process boundary and re-screenable) is what holds, while the *detection* layer is explicitly evadable and the durable-seal guarantee is conditional on the gate having flagged the page in the first place. The lever to re-catch a missed injection is the re-screen on reload: once you tighten the markers, a reloaded session is re-judged by the stricter chain. Keep exfil-shaped and irreversible tools off the allow-list rather than relying on the detector.
+
+## The addressable KV cache, in detail
+
+How `fak` reaches into the middle of a kept model run and evicts a single span — a poisoned result, an expired secret — and leaves the cache bit-for-bit identical to a run that never saw it.
+
+## What is the difference between front-of-prompt prefix reuse and mid-run causal eviction?
+
+Prefix reuse extends a cached run forward from the front; mid-run causal eviction removes a span from the middle of a kept run and leaves the rest bit-identical to never having seen it. Every shipped engine does the first: vLLM's APC, SGLang's RadixAttention, and the OpenAI/Anthropic/Gemini prompt caches all reuse a contiguous run that starts at token 0, so changing context at position N invalidates everything after N. `fak` adds the second. Its `KVCache.Evict(from, n)` slices a span out of every layer's K/V tensors, compacts the absolute-position array, and re-derives each survivor's key from the stored pre-RoPE values in one clean rotation at its new position. RoPE is linear in position, so that single rotation is exact rather than a drift-accumulating shift.
+
+## How does fak remove a single tool-result span from the middle of a kept run?
+
+`fak` keeps a ledger of named segments over the cache, and evicting one calls `KVCache.Evict(seg.From, seg.Len)` then shifts every later segment's offset down so the ledger tracks the compaction. The cache stores the pre-RoPE keys (`Kraw`) alongside the rotated keys, so after slicing the span out it re-rotates each survivor whose absolute position changed in a single clean RoPE step at its new index; values are unrotated and need no fix. The kvmmu gate evicts at write-time, before any later segment is prefilled, so the removed span is causally upstream of nothing and the result equals a run that never saw it. Removing a span after later tokens have attended to it can only be un-seen if nothing downstream attended yet, which the code states honestly.
+
+## What does max|Δ| = 0 mean, and how is it actually verified?
+
+`max|Δ| = 0` means the largest absolute difference between two logit vectors is exactly zero: the post-eviction cache produces bit-identical next-token logits to a cache that never saw the evicted span. It is verified by witness tests that compare full logit vectors, not just the greedy argmax, because an untrained transformer's argmax can collapse while the vector stays context-sensitive. `TestWriteTimeEvictEqualsNeverSaw` reads real poison bytes through the real gate, quarantines and evicts the span, then asserts `max|Δ| evict-vs-never = 0.000e+00` with a non-vacuity control showing `poison-vs-never = 3.257e-01` (greater than zero). `TestLedgerRenumberAfterMiddleEvict` evicts a middle span then a tail span and asserts the survivors equal a fresh prefill at `max|Δ| = 0`.
+
+## Why can fak evict a span bit-exactly when llama.cpp's K-shift cannot?
+
+`fak` keeps the pre-RoPE keys and re-derives a moved survivor with one fresh rotation, so the result is exact; llama.cpp's K-shift composes rotations and drifts about 1e-6, which is enough to flip a greedy token. vLLM and SGLang store only post-RoPE keys, so for them an exact span removal means recomputing the tail rather than rotating in place. `fak`'s `applyRopeRow` casts through float32 to pin the rotation against FMA fusion, so the single rotation is bit-identical across architectures and call sites. That is the structural reason the addressable cache exists: it is the one degree of freedom no shipped serving engine kept.
+
+## Why does owning the cache as a kernel object enable mid-run eviction?
+
+Production engines rent the KV cache from a serving process behind an HTTP boundary, so policy can at best ask not to show a span; `fak`'s `KVCache` lives in the kernel's own Go address space, so the gate can physically delete the span and the model becomes mechanically incapable of attending to it. One detector verdict drives two enforcement media: the context-MMU bars the bytes from the text context, and the kvmmu bars the K/V from the attention state. Holding the cache as a plain Go data structure (per-layer K/Kraw/V slices plus an absolute-position array) is what makes span eviction and cross-session splice real operations rather than API requests. This is the durable leg of the design: prefix-cost wins erode as hardware loosens, but "provably remove this span and prove it is gone" does not.
+
+## What is a deletion certificate and what does it actually prove?
+
+A deletion certificate is a single portable, re-checkable receipt that binds a bit-exact KV-cache eviction to a tamper-evident audit journal. It proves three things under one ed25519 signature: that a named-span eviction ran (carrying the evicted count and span), that the equivalence was byte-identical (`MaxAbsDelta == 0`), and that it is anchored to a journal row whose `Subject` pins exactly which result was deleted. `Verify` fails closed on any tampered field: a signature mismatch, a non-zero delta ("equivalence not bit-exact"), an absent or broken journal chain, or a subject relabel each yields an invalid verdict. It is honest about its bounds: v1 is self-signed (integrity, not third-party independence), and it proves deletion only from the inference working set and agent memory, never from weights, embeddings, backups, or replicas.
+
+## Is the deletion certificate's third-party verifiability shipped?
+
+No. The v1 deletion certificate is self-attesting: its ed25519 signature proves integrity, not issuer independence, and third-party validation through an RFC-3161 timestamp or a CT-log is a named but empty seam (`ExternalAnchor`). The certificate's other honesty caveat is that `EvictedCount` is a self-report from the `Evict` call, not an independent re-count of the cache. The tamper-evident journal it anchors to is real and proven, but the external anchor that would let an outside party verify the receipt without trusting the issuer is design-target plumbing, not built.
+
+## What is content-addressed storage and how does it back the cache?
+
+Content-addressed storage (CAS) is a blob store where the sha256 digest is the identity, so a byte-identical payload is stored exactly once. `fak`'s `blob.Store` backs the resolver, region backend, and page-out backend, so the vDSO tier-2 cache and the context-MMU page-out share one store; small payloads (256 bytes or under) stay inline. It is pin-aware: a digest a live holder will resolve later is pinned and never evicted, while transient call arguments and results are LRU-evictable once the footprint passes the byte bound (default 1 GiB), and eviction never breaks the "cache hit equals a fresh call" invariant. This is the cross-model reuse layer, since a KV cache is intra-model only; cross-model sharing happens at this semantic byte layer, not as shared K/V tensors.
+
+## Can two different models share the same KV cache?
+
+No. KV reuse is intra-model only at the tensor layer, because head dimensions, RoPE, and vocabulary differ between models, so K/V bytes from one model are meaningless to another. What is shared across models is the content-addressed storage layer: tool results and their provenance are CAS blobs keyed by digest, a semantic byte-level reuse rather than shared attention state. Within a single model instance, cross-session prefix reuse comes from `Clone`/`SessionFromPrefix` and the radix tree; cross-worker residency moves are modeled by the `cachemeta.KVTransfer` metadata contract, whose live external engine is out of tree.
+
+## How does radix prefix sharing relate to fak's addressable cache?
+
+`fak`'s `radixkv` rebuilds SGLang's RadixAttention over the addressable cache, adding automatic longest-prefix discovery so callers don't have to declare the shared prefix. The tree is a compressed radix trie keyed on token-id runs; a `Lookup` walks to the longest cached prefix and splits an edge when divergence lands mid-run, so a real node boundary with a reusable cache exists there. The split is the interesting move: it truncates the child's cache via `Clone` plus `Evict` of the tail, which leaves no survivor to re-rotate, so the prefix is exact. `TestReuseThroughSplitMatchesRecompute` diverges two requests inside a compressed edge, splits, serves the second from the truncated clone plus a suffix prefill, and asserts the logits match a fresh full prefill at `max|Δ| = 0`.
+
+## What can radixkv evict that an ordinary LRU prefix cache cannot?
+
+`radixkv` can evict a named subtree as policy, regardless of recency, which an opportunistic LRU cache structurally cannot offer. `EvictToBudget` is ordinary LRU leaf eviction with upward collapse (RadixAttention's policy verbatim, where leased nodes survive pressure), but `EvictNode` removes a specific subtree because a quarantine verdict said so, not because of memory pressure. `TestPolicyEvictNode` witnesses that capability. The honest cost: each node stores the full-prefix cache rather than SGLang's per-segment paged slabs, so it uses more memory, and `Stats` exposes both `Tokens` (the LRU metric) and `PrefixTokens` (the true resident footprint) so the gap is measurable rather than silent.
+
+## How does fak prove that prefix reuse equals a full recompute?
+
+`fak` proves prefix reuse is exact with witness tests that compare a reused-prefix session against a full recompute at `max|Δ| = 0` with identical argmax. `Clone` deep-copies a computed prefix and `SessionFromPrefix` starts a session on that clone so only the suffix is prefilled, and because the copy is exact the reusing session is bit-identical to one that prefilled the whole prefix. `TestKVPrefixReuseMatchesRecompute` pins reuse-equals-recompute, and `TestCachedDecodeMatchesPrefill` asserts cached decode equals a full forward pass to the last bit, failing if any difference appears. These exact-equality gates are the honesty check that the speedup comes from reuse, not from a numerics shortcut.
+
+## What happens to the segment ledger when a middle span is evicted?
+
+When a middle span is evicted, the kvmmu ledger calls `Cache.Evict(seg.From, seg.Len)` and then renumbers: every later segment's `From` offset shifts down by the evicted length, so the ledger keeps tracking the physical compaction. Segments are addressed by name, not by position or token content, so a by-id eviction removes exactly that segment's range and the proof's bijection theorem guarantees no survivor is lost and no slot aliases another. `TestLedgerRenumberAfterMiddleEvict` evicts a middle segment of one length then a tail segment of a different length and asserts the surviving segments equal a fresh prefill at `max|Δ| = 0`; a stale offset would misfire precisely because the lengths differ.
+
+## Is the quarantine-drives-KV-eviction bridge wired into the live fak agent loop yet?
+
+No: the kvmmu bridge that turns a quarantine verdict into a bit-exact KV-span eviction is proven on a synthetic model but is not yet wired into the live `fak agent` HTTP loop. The mechanism is real and witnessed (`TestWriteTimeEvictEqualsNeverSaw` runs the real ctxmmu gate over real poison bytes), but the witness uses a small synthetic Llama (hidden 32, two layers) to prove the wiring, while the HF numerics are proven separately by the `internal/model` oracle. No `radixkv` or `kvmmu` import appears under the kernel package today. The context-MMU side that bars poisoned bytes from the text context is shipped on the gateway path; the K/V-eviction half is the part still to be connected.
+
+## Is arbitrary mid-sequence KV splicing (not just prefix or span removal) supported?
+
+No. Non-prefix, arbitrary mid-sequence KV splice (inserting or rearranging spans anywhere) is approximate and has zero implementation; it is a documented design target, audited with kill criteria, not built. What is shipped and bit-exact is the pair that matters in practice: front-of-prompt prefix reuse and removal of a span from the middle of a kept run. The queryable-context materialization with its five verdicts (HIT, FAULT, RECOMPUTE, REFUSE, ABSTAIN) is early and partly in flight, proven reachable on a synthetic demo image, with answer quality still unmeasured. Treat arbitrary splice as a roadmap item rather than a capability.
+
+## What numbers can fak honestly claim for KV cache reuse, and against which baseline?
+
+On agent workloads `fak` matches SGLang's regime at an 86.7% cache hit rate and a 7.50× token speedup versus naive re-prefill, and it adds about 1.22× cross-worker reuse where SGLang is 0%. The cited bottom line is a 20-24× infrastructure cost reduction versus naive re-prefill and 1.13-1.22× cross-worker; the radixkv explainer cites a 77-88% hit rate across few-shot, chat, tree-of-thought, and agent workloads, inside SGLang's verified 50-99% band. Hit rate is a token count, so it is hardware-independent, which is the one axis where a Go cache on a laptop and a datacenter GPU engine compare honestly. The honest fence: the 1.22× cross-worker figure is a measured/projected fleet number, not a live multi-node deployment.
+
+## Does a quarantined span ever physically leave the model's attention, or is it just hidden from view?
+
+When the kvmmu bridge evicts a quarantined span, the span physically leaves the model's attention state: its K/V columns are sliced out of every layer, so the model is mechanically incapable of attending to it, not merely "not shown" it. This is distinct from the context-MMU's text-side quarantine, which holds poisoned bytes out of the conversation by paging them to a stub pointer. The two are one decision enforced in two media: the context-MMU keeps the bytes out of the prompt, kvmmu keeps the K/V out of attention. The write-time path is the clean case, because evicting before any later token attended makes the result identical to never having seen the span; the after-the-write path carries the honest caveat that it can only un-see a span nothing downstream attended to yet.
+
+## What is the cachemeta contract and why is its KV-residency layer not fully live?
+
+`cachemeta` is a payload-free metadata contract that names reusable objects and their validity, security, residency, and coherence metadata, plus typed lookup verdicts (Hit, Miss, Revalidate, Transform, Quarantine, Fault); it stores no payloads and owns no cache. A `KVPrefix` lowers to a position-prefix-aligned entry, radixkv nodes lower into it, and its attention-index metadata points at the K/V span whose eviction must invalidate a sparse-attention index. Its `kvtransfer` events (offload, restore, route, migrate) carry typed outcomes so a failed restore is never a silent recompute. The metadata contract itself is shipped and tested; the live external serving engine that would consume the cross-instance residency and invalidation directives is out of tree, which is why this layer is a contract rather than a running multi-node KV pool.
+
+## Inside fak serve (the gateway)
+
+How the gateway speaks three wire protocols on one port, fronts an upstream model, adjudicates every proposed call, and re-emits a well-formed response with a decision record attached.
+
+## What does `fak serve` actually do?
+
+`fak serve` fronts the kernel over HTTP, exposing three wire surfaces plus MCP on one port so an agent passes every proposed tool call through the capability floor without an agent-side code change. One `http.ServeMux` serves the OpenAI-compatible routes (`/v1/chat/completions`, `/v1/embeddings`, `/v1/moderations`, `/v1/models`), the native Anthropic Messages route (`/v1/messages`), the fak-native verbs under `/v1/fak/`, and `/mcp`. It defaults to `--addr 127.0.0.1:8080`; `--stdio` swaps HTTP for MCP-over-stdio. The gateway adjudicates a whole turn — it does not execute your tools; your own agent loop runs the calls that survive.
+
+## What are the three wire surfaces `fak serve` exposes?
+
+`fak serve` speaks three protocol-compatible wire surfaces on one port: the OpenAI-compatible surface, the native Anthropic Messages surface, and the fak-native `/v1/fak/` surface, with MCP available over `/mcp` or `--stdio`. The OpenAI surface covers `/v1/chat/completions`, `/v1/embeddings`, `/v1/moderations`, and `/v1/models`. The Anthropic surface covers `/v1/messages` and `/v1/messages/count_tokens` — the Claude-Code-facing wire. The fak-native surface is one POST, one verdict per endpoint: `/v1/fak/adjudicate` (verdict only), `/v1/fak/syscall` (adjudicate and execute), `/v1/fak/admit` (result-side screen), plus feeds, journal, revoke, and policy-reload routes.
+
+## Why does pointing Claude Code at `http://127.0.0.1:8080/v1` give a 404?
+
+Anthropic SDKs append `/v1` themselves, so an Anthropic base URL ending in `/v1` becomes `/v1/v1/messages` and 404s — point Anthropic-wire clients at the origin `http://127.0.0.1:8080` with no `/v1`. This is the single most common wiring mistake. OpenAI clients are the opposite: they do include `/v1`, so an OpenAI base URL is `http://127.0.0.1:8080/v1`. The same origin-vs-`/v1` split applies to `langchain-anthropic` and any other Anthropic-wire client. For Claude Code, set `ANTHROPIC_BASE_URL=http://127.0.0.1:8080`.
+
+## How does the gateway decide whether to proxy an upstream, run the in-kernel model, or mock?
+
+The gateway picks its planner backend by a fixed precedence: `--base-url` set means a live proxy in front of your upstream provider; otherwise `--gguf` (with no `--base-url`) loads the in-kernel model and decodes locally; otherwise it falls back to a deterministic scripted mock with a loud boot warning. The `--provider` flag (`openai`, `anthropic`, `gemini`, `xai`) selects the upstream wire when proxying. You can confirm which backend is live: `/healthz` reports the `planner` field as `mock`, `proxy`, `inkernel`, or `unknown`. The in-kernel path is a correctness reference, not a production serving engine — prefer fronting a real token engine for scale.
+
+## How do I put `fak serve` in front of an existing upstream model?
+
+Pass `--base-url URL` (and `--provider`) to make `/v1/chat/completions` and `/v1/messages` a live adjudicating proxy in front of your upstream provider, with `--api-key-env VAR` naming the environment variable that holds the upstream bearer token. The flag names the env var, never the literal key value — fak reads the secret from the environment and forwards it upstream. With `--base-url` empty, the gateway runs offline against the scripted mock instead. The request model name passes through to the upstream verbatim, so your existing prompts and tool definitions stay unchanged.
+
+```bash
+fak serve --addr 127.0.0.1:8080 --provider openai --base-url https://api.openai.com/v1 --model gpt-4o --api-key-env OPENAI_API_KEY --policy floor.json
+```
+
+## What happens if the upstream `--base-url` is down or unreachable?
+
+If the upstream cannot be reached — dial refused, DNS failure, or a TLS error — the gateway returns a 502 with the distinct code `upstream_unreachable` and a message telling you to check that `--base-url` points at a running server. An upstream 4xx is surfaced with that same status (an unknown model becomes 404, a bad argument 400); an upstream 5xx, transport error, or unparseable body maps to a generic 502. The raw provider body never crosses the trust boundary back to your client. If the upstream announces tool calls but none parse, the gateway fails closed with a 502 rather than serving a malformed turn.
+
+## Does `fak serve` stream responses, and is the stream adjudicated before it reaches me?
+
+`fak serve` streams well-formed SSE, but it buffers the entire upstream turn first, adjudicates the complete proposed tool-call set, and only then synthesizes the stream — so raw upstream deltas never pass through before adjudication. The planner itself is non-streaming. On the OpenAI wire it emits an opening role chunk, the surviving tool-call chunk, content fragments split on word boundaries that reconcatenate byte-exact, a final chunk carrying `finish_reason`, `usage`, and the `fak` extension, then `data: [DONE]`. On the Anthropic wire it emits the `message_start` through `message_stop` block sequence with a real `stop_reason` and token counts, sending a keepalive ping every 15 seconds while the upstream is in flight.
+
+## What is the `fak` response extension on a gateway reply?
+
+The `fak` extension is a top-level object on `/v1/chat/completions` and `/v1/messages` responses that reports every adjudication the kernel made on that turn; it is omitted entirely on a turn with no tool activity. It carries `adjudications[]` — one entry per proposed call including dropped ones, with `repaired_arguments` present only on a TRANSFORM verdict — and `result_admissions[]`, one entry per inbound tool result the kernel screened. Each verdict is a `WireVerdict` with `kind`, `reason`, `by`, `disposition`, and `detail`. A result QUARANTINE overrides an otherwise-ALLOW submit, so the extension is where a fak-aware client learns a call was repaired, dropped, or held.
+
+## Does Claude Code see the `fak` extension, or do I lose the verdicts on the Anthropic wire?
+
+Claude Code reads content blocks but not the `fak` extension key, so on the `/v1/messages` wire any drop, repair, or quarantine is also prepended as a leading `[fak] …` text block in the response. The structured `fak` extension is still emitted for fak-aware clients; the text block is a parallel surface so a client that only parses content still sees what the kernel did. This is built specifically for Claude Code on the native Anthropic wire — point it at the origin `http://127.0.0.1:8080`, and a denied or repaired call shows up in the visible text rather than silently vanishing.
+
+## What does the gateway return to my client when policy denies a tool call?
+
+A policy refusal is a successful HTTP 200 carried as a verdict value, never a non-2xx error — the gateway reserves error statuses for malformed requests, auth failures, and upstream faults. On the served path the gateway keeps ALLOW and TRANSFORM calls and drops the rest; if no tool call survives, `finish_reason` becomes `stop` and a `denySummary` is written in-band so fak-unaware clients still see what happened. The full verdict for every proposed call, including the dropped ones, lands in the response body's `fak` extension. So your client never treats "the kernel said no" as an exception.
+
+## Is there intelligent request routing or tiered serving inside the gateway?
+
+A tier-selection router exists in the codebase as a library, but it is not wired into the live serving path — the running gateway is single-tier, serving every request from the one engine named by its config. The router code implements size, latency, cost, and hybrid strategies with a health-aware fallback chain, and is explicitly additive: it touches no existing request path. It appears only in its own file and tests, never in a handler or the CLI. So treat tiered routing as a built-but-unwired library, not a feature of `fak serve` today.
+
+## How do I reload the capability policy without restarting `fak serve`?
+
+POST to `/v1/fak/policy/reload` with no body to reload the manifest in place at runtime, returning `{reloaded, source, summary}`. The reload is replace-not-merge: the floor is replaced from source, not layered on top of the old one. The loader is injected by the host CLI (wired from `--policy`), so the gateway itself stays policy-schema blind. The route returns 404 if the deployment was not configured for reload, and 400 if the reload itself fails, with the error message included. A reloaded manifest that fails to parse never silently falls back to a more permissive default — it fails loud.
+
+## What is the difference between `/v1/fak/adjudicate` and `/v1/fak/syscall`?
+
+`/v1/fak/adjudicate` returns a pre-execution verdict only, while `/v1/fak/syscall` adjudicates and then executes the call through the kernel. The adjudicate route runs `k.Decide` and returns `repaired_arguments` only on a TRANSFORM verdict — it is the production path for a client that wants the verdict before running the tool itself. The syscall route runs `k.Syscall`, the adjudicate-and-dispatch path. A companion route, `/v1/fak/admit`, runs the result-side floor (`k.AdmitResult`) to screen a result you already executed before it enters context. The fak-native body key is `arguments`, not `args`; unknown keys are silently dropped.
+
+## How does the gateway screen tool results coming back from my client?
+
+When a request carries `role:"tool"` results, the gateway runs each one through the result-side floor before it reaches the model, and reports the outcome in `result_admissions[]`. On a QUARANTINE or TRANSFORM verdict it forwards the paged-out envelope content, so poisoned bytes never reach the model; a result it cannot admit is held out fail-closed with a `{"_quarantined":true,…,"reason":"ADMIT_ERROR"}` stub and a TERMINAL verdict. A quarantine also invalidates the matching upstream KV span. The detector behind this screen is roughly 100% evadable by design — the load-bearing protection is the quarantine policy that holds bytes out of context, not the detector that flagged them.
+
+## Does the gateway require an API key, and how does auth work once enabled?
+
+Auth is off by default for loopback use; turn it on with `--require-key-env VAR`, after which every route except `/healthz` requires the secret held in that environment variable. The flag names the env var, not the literal key. The gateway accepts the secret as `Authorization: Bearer <tok>` or as `x-api-key: <tok>` (for Anthropic-wire clients) against one secret, compared in constant time over SHA-256 digests so it leaks neither bytes nor length. A bare `Authorization` value with no `Bearer ` prefix is rejected; an invalid or missing key returns 401. If the named env var is set but empty, the gateway refuses to start.
+
+## Can the same gateway serve OpenAI clients and Anthropic clients at once?
+
+Yes — one `fak serve` process serves both the OpenAI-compatible `/v1/chat/completions` and the native Anthropic `/v1/messages` on the same port, and both share the same kernel boundary. Internally both routes call the same planner via one `s.complete` path and pass each proposed tool call through the same `adjudicateProposed` boundary; only the downstream wire format differs. The catch is the base-URL convention: OpenAI clients point at `http://127.0.0.1:8080/v1`, Anthropic clients at the origin `http://127.0.0.1:8080` because their SDKs append `/v1` themselves.
+
+## Is `fak serve` also an MCP server, and what tools does it expose?
+
+Yes — `fak serve` is an MCP server over HTTP at `/mcp` and over stdio with `--stdio`, both serving the same JSON-RPC 2.0 dispatch. The stdio transport has no listener and no auth surface. It negotiates protocol versions `2024-11-05`, `2025-03-26`, and `2025-06-18`, falling back to the first, and reports `serverInfo.name` as `fak-gateway`. It exposes the tools `fak_adjudicate`, `fak_syscall`, `fak_admit`, `fak_changes`, `fak_revoke`, and `fak_context_change`. A DENY is a valid tool result with `isError:false`; only genuine protocol faults become JSON-RPC errors.
+
+## When does the Anthropic wire forward my request bytes untouched to the real Anthropic API?
+
+When the configured upstream is the real Anthropic API, the `/v1/messages` route forwards the client's original request bytes byte-for-byte and authenticates with the client's own `x-api-key`, a transparent hop. This passthrough preserves the `cache_control` prefix, so a real upstream cache hit reaches the client's `cache_read_input_tokens` accounting. The kernel boundary still runs: proposed tool calls are adjudicated and inbound results screened, but the downstream request body itself is not re-serialized in this anthropic-to-anthropic case. Note `max_tokens` is required on the `/v1/messages` wire, unlike the OpenAI surface.
+
+## The in-kernel model engine
+
+The optional in-process engine that loads a GGUF and runs the forward pass inside the kernel — a bit-exact correctness reference, with its honest scope stated plainly.
+
+## What is the in-kernel model engine?
+
+The in-kernel model engine is a from-scratch, pure-Go transformer forward pass that loads a GGUF or safetensors checkpoint directly into the process address space and runs decode in-process. It is a correctness reference, not a hardened production serving engine, so its load-bearing claim is bit-exact and argmax-exact agreement with a HuggingFace oracle rather than throughput. It ships as the `inkernel` engine (the default), where an allowed tool call is completed by a real greedy decode over the kernel-owned KV cache; with no real weights loaded it builds a tiny deterministic synthetic checkpoint so CI runs offline. Reach for a tuned engine like vLLM, SGLang, or llama.cpp when you need serving-grade tokens per second.
+
+## Why does fak own a model engine at all if it isn't trying to be fast?
+
+`fak` carries its own engine so the KV cache can be a kernel-owned Go object instead of a tensor pool rented behind a serving engine's HTTP boundary. Owning the cache as a plain data structure is what makes provable span eviction and cross-session splice real operations: when a result is quarantined, the kernel can physically evict that span and the model becomes mechanically incapable of attending to it, verified byte-identical to never having seen it at `max|Δ| = 0`. The engine exists to make that boundary demonstrable end-to-end, not to win raw throughput; for production tokens you front a real engine.
+
+## What exactly does "bit-exact vs a HuggingFace oracle" prove, and what is still unproven?
+
+It proves that, on Llama-family weights, `fak`'s forward pass matches the HuggingFace reference to the last bit: on SmolLM2-135M the hidden-state cosine is 1.000000 at every checked layer, the argmax matches at every position, and the final-logit `max|Δ|` is about 4.4e-5. That parity is currently witnessed green for Llama only. Non-Llama families route through the same oracle harness but skip for want of on-node fixtures, so cross-family parity is honestly un-witnessed; real-GGUF-weight end-to-end parity is also open; and `fak`'s greedy decode of Qwen3.6-27B is refuted, diverging from llama.cpp at the third token from accumulated f32 drift. First-token parity holds there, multi-token continuation does not.
+
+## How does the engine load a GGUF file into the kernel's address space?
+
+The GGUF loader is a read-only parser that maps the checkpoint and dequantizes every supported block format to f32 before the model runs. `internal/ggufload` reads the file (no serializer), dequantizes F32, F16, BF16, Q8_0, Q4_K, Q5_K, Q6_K, Q5_0, Q5_1, Q2_K, and Q3_K blocks to f32, and normalizes GGUF tensor names to the canonical HuggingFace-Llama naming so the forward pass sees one layout. Layout and dequant correctness are proven on synthetic fixtures; end-to-end HuggingFace-oracle parity of real GGUF weights is gated behind an opt-in smoke flag and skips on the build box, so treat it as open. A safetensors path also exists, reinterpreting little-endian f32 tensors zero-copy and erroring if a tensor's dtype is not f32.
+
+## What does the --gguf flag actually do when I run fak serve?
+
+`fak serve --gguf` preloads a GGUF checkpoint at boot into the `inkernel` engine and, with no `--base-url` set, serves `/v1/chat/completions` and `/v1/messages` directly from the in-kernel model using the GGUF's embedded tokenizer. There are three load modes: the default lean-Q8 profile, a resident-Q4_K path selected by `FAK_Q4K=1` (the large-model decode lever), and a device f32 path used when you pass a `--backend`. You can also pass an `hf://` URI and `fak model load` resolves it to a locally cached file with checksum verification. The engine is a correctness reference, so prefer fronting a real server with `--base-url` for production serving; the `--gguf` path is for self-host correctness and the cache-reuse wins, not throughput.
+
+## Is the in-kernel model what serves my chat responses by default?
+
+Not unless you explicitly load real weights; by default the `inkernel` engine builds a small deterministic synthetic checkpoint so the kernel and CI run with no model export. That synthetic model is a 3-layer byte-level map with no natural-language tokenizer that decodes a fixed sixteen tokens, so it is not a chat surface; it exists to prove the kernel wiring at the tensor layer. To serve real generations you load weights via `FAK_MODEL_DIR` or `fak serve --gguf`, which run through the identical dispatch path. If you instead set `--base-url`, the gateway proxies an upstream provider and the in-kernel engine is not in the generation path at all.
+
+## Why is the forward pass written in deliberately slow scalar Go?
+
+The primitives are intentionally scalar and in-order so the f32 bit-exact correctness rungs survive across architectures and call sites. The RMS-norm uses a serial sum-of-squares that must not be reordered, the matmul and dot products run in fixed order, and float32 casts pin the RoPE rotation against fused-multiply-add so it stays bit-identical everywhere. Faster approximations like `fastExp32` and `fastSilu` exist but are used only by the Q8 decode path, never by the exact f32 serial-equivalence path. This is a correctness-first design choice and a direct reason the engine is not a throughput contender.
+
+## Does the compute HAL let me run GGUF-quantized weights on a GPU backend?
+
+No; the compute HAL weight-fetch path is f32 only, so a GGUF leaf dequantizes to f32 before any device backend sees it. When you adopt a backend through `Model.NewBackendSession`, the session fetches f32 weights and uploads them as f32; the engine does not consume GGUF-quant directly on that path, and a quant-only manifest with no f32 blob makes the f32 fetch fail. Day one the only default-wired backend is `cpu-ref`, a scalar pure-Go reference held to `max|Δ| = 0`. The device backends (CUDA, Vulkan, Metal) register as correctness-witnessed `Approx` peers, not as a faster default.
+
+## What do the GPU backends actually prove, and do they make fak faster?
+
+The GPU backends prove numerical correctness, not serving-grade speed, and several are slower than llama.cpp. The `gpucheck` witness loads a real f32 safetensors checkpoint, decodes the same prompt on the pure-Go f32 reference and through the HAL on a device backend, and asserts the two greedy token streams agree. On the record: AMD Vulkan is argmax-exact but roughly 58× slower than llama.cpp CPU at f32; NVIDIA CUDA on a small model that fits reaches a single-stream dead-even with llama.cpp Q8_0 but at f32, which is four times the bytes, and large-model parity is not claimed; Apple Metal is argmax-exact with throughput explicitly not yet claimed. These are correctness peers, so claiming throughput parity would be false.
+
+## How does the engine connect a quarantined result to actually evicting it from the model's attention?
+
+Because the KV cache is a kernel-owned Go structure, one detector verdict drives two enforcement media: the context-MMU bars the poisoned bytes from text context, and the KV-MMU bars the corresponding K/V span from attention state. The cache keeps pre-RoPE keys, so removing a span from the middle re-derives each survivor's key in a single clean rotation at its new position, leaving the kept sequence byte-identical to never having seen the evicted span. This bridge is proven bit-exact on a synthetic model in `internal/kvmmu` and is honestly not yet wired into the live `fak agent` HTTP loop; the real-weights numerics are proven separately by the `internal/model` oracle. It is the durable, hard-to-commoditize leg: prefix-cost wins erode as hardware loosens, but provably removing a span and proving it is gone does not.
+
+## When should I use the in-kernel engine versus fronting a real serving engine?
+
+Front a real engine (vLLM, SGLang, llama.cpp, or a cloud provider) for anything where tokens per second matters, and reach for the in-kernel engine when you specifically want the kernel-owned KV cache and its provable span eviction on a self-hosted model. Point `fak serve --base-url <upstream/v1>` at your existing OpenAI-compatible server to keep its throughput while gaining the capability floor, result quarantine, and audit trail; that is where most deployments should start. Drop `--base-url` and pass `--gguf` only when you want the in-kernel path's correctness reference and reuse behavior, accepting that it is not a tuned production server.
+
+## Sessions, recall, and persistence
+
+What a session holds, what is process-local and resets on restart, and how `fak recall` persists a finished session as a durable core dump.
+
+## What is a session in fak, and why is it called a core dump?
+
+A session in `fak` is a small page table over a content-addressed swap device, not a flat transcript replayed token by token. As an agent runs, the context-MMU already pages every heavy or poisoned tool result out to a content-addressed store at write time, so the finished session is just roles plus digests plus descriptors plus quarantine state pointing into that store. That is structurally a core dump: answering a follow-up demand-pages only the working set the query touches, and never re-executes the whole history back into context. `recall.Session` is the reloaded core image, `recall.Recorder` is the live in-process recorder that holds the MMU and an in-memory CAS until it persists.
+
+## Does quarantine and taint state survive a process restart?
+
+The live quarantine and taint state is process-local and is gone when the process exits. The context-MMU keeps that state in plain in-memory maps under one mutex (`held`, `cleared`, an order list, and counters), allocated fresh on `New()` with no disk backing, so a restart starts clean. The quarantined bytes themselves live in a content-addressed store keyed by digest, so a page-in request for a dropped id just fails closed with "no quarantined result". This is exactly the gap `fak recall` closes by persisting the seal to disk; without recall, in-process held and cleared state and the in-memory CAS do not outlive the process.
+
+## What does fak recall do?
+
+`fak recall` records a finished agent session through the write-time quarantine gate, persists it as a durable core image, then reloads it in a fresh process to prove the quarantine survived the boundary. The recorder drives the shipped context-MMU over each tool result (plus a de-obfuscating scan as defense-in-depth, fail-closed to quarantine), then writes two files: `manifest.json` (the page table: roles, digests, descriptors, and quarantine state) and `cas.json` (the content-addressed swap device). The whole pass is offline and deterministic. The CLI default runs an airline-support session with two benign results, one injection, and one secret leak, then reloads it.
+
+```bash
+fak recall --dir recall-image --out recall-report.json
+```
+
+## What does a fak core image actually contain on disk?
+
+A core image holds a manifest page table plus a content-addressed swap device, and nothing that re-injects poison. The `manifest.json` carries the version, session id, a world-version frozen at persist time, the list of pages, the cleared set, and any context-change tombstones. Each page records its step, role, descriptor, CAS digest, length, taint, quarantine flag and id, reason, durability class (turn, session, or durable), witness, and trust epoch. A quarantined page's descriptor carries only safe sealed metadata of the form `tool: [sealed: reason, N bytes]`, never the poisoned bytes and never their de-obfuscated text. The `cas.json` is a digest-to-bytes map that does hold a copy of every byte, including the sealed poison, the way a real core dump holds the whole process image.
+
+## What survives a session boundary, and what is lost?
+
+What survives is everything written into the on-disk core image; what is lost is the live in-process gate state. Surviving across the boundary: the page table, the frozen quarantine seals, the cleared clearance set, the tombstone context-changes, the witness and trust-epoch metadata, and the CAS bytes. Process-local and gone on restart: the live context-MMU maps (held, cleared, order, counters) and any recorder state you never persisted. The durability proof is that `Load(dir)` rebuilds a session with its own CAS loaded from disk plus a fresh MMU gate, so a resolve provably does not lean on the recording process being alive.
+
+## Can a witness clearance alone un-quarantine a result after reload?
+
+No. A clearance alone cannot launder still-poisoned bytes; a reloaded quarantined page pages back into a new context only if a witness `Clear()` ran AND the bytes pass a fresh content re-screen. This is the recall moat (rung 4): two independent gates, so clearing the id is necessary but not sufficient. The re-screen folds the de-obfuscating scan plus the whole registered result-admitter chain, most-restrictive-wins, so a session recorded under a weaker gate is re-caught by every detector the fleet ships now. In the committed demo, the injection page stays refused even after a clearance because the re-screen re-quarantines it, while a genuinely benign cleared page does release, which proves the gate discriminates on content rather than hard-denying.
+
+## How is fak recall different from RAG over a chat transcript?
+
+Naive RAG over history re-pastes transcript bytes ungated, while `fak recall` re-screens every page through the trust gate on the way back into context. A reloaded core image refuses to page a quarantined slice into a new window unless a witness clearance ran and the bytes pass a fresh content re-screen, so a poisoned result that an embedding ranker might happily surface is still walled off. The honest limit is that recall makes the gate's decision durable and re-screenable, it does not improve the decision itself: a crafted injection that never trips the detector's marker set at write time is never quarantined, and recall will resolve it. The re-screen is the lever that re-catches such a page once the patterns are tightened.
+
+## What is the difference between the recall core dump and the audit journal?
+
+They are two independent durable surfaces: the recall core dump is the reloadable session image, while the journal is an append-only, tamper-evident decision ledger. The journal (`internal/journal`, opt-in via `FAK_AUDIT_JOURNAL`, off by default) writes one hash-chained JSONL row per audit event with a monotonic sequence number, tool name, trace id, verdict, reason, and content digests, where each row's hash chains over the previous one. It stores digests only, never argument or result bodies, so it leaks no payload. The journal is the regulated-audit surface; the recall image is the durable session memory. Recall persistence and the journal do not depend on each other.
+
+## How do deletion certificates relate to persistence?
+
+A deletion certificate is a portable, re-checkable receipt that binds a bit-exact KV-cache eviction to the tamper-evident journal that recorded it, so a deletion claim survives as verifiable evidence. Under one ed25519 signature it carries the evicted count, the span, an equivalence record asserting `MaxAbsDelta == 0` (the byte-identical claim), and an anchor row from the journal pinned to the result digest. `Verify` fails closed on a signature mismatch, any non-zero delta, an absent or broken journal chain, or a subject relabel. Honest bounds: the v1 signature is self-attesting (it proves integrity, not issuer independence; third-party RFC-3161 or CT-log anchoring is an open stub), and it proves deletion from the inference working set and agent memory only, not from weights, backups, or replicas.
+
+## If I want a memory to be absent from future context, do I delete it from the core image?
+
+You file a tombstone, not a delete: the recall-side analogue of deletion is a negative-only, evidence-preserving tombstone. `Session.RequestContextChange` records a tombstone that suppresses future page-in for resolve, recall, and working-set ranking, but never deletes the CAS bytes or mutates the original page row, so the audit evidence stays intact. The tombstone is written into the manifest's context-changes and re-persisted, so it is durable across reloads. Operator and agent surfaces include `fak debug --cmd tombstone`, the HTTP route `POST /v1/fak/context/change`, and the MCP tool `fak_context_change`.
+
+## What happens if the on-disk swap device is tampered with before reload?
+
+A tampered core image fails closed at load: `recall.Load` verifies that every CAS blob hashes to its digest key, and if any blob does not match it refuses the whole image. Because the store is content-addressed, the digest is the identity, so flipping a byte inside a stored blob under its unchanged key is detected. The witness `TestCorruptCASFailsClosed` decodes the CAS, flips a byte inside a stored blob, and asserts the load is rejected. This is the same integrity discipline a deletion certificate uses when it re-derives its anchor row from the journal.
+
+## Is the recall core image zero-copy, and what is the storage tradeoff?
+
+It is durable, not zero-copy: `cas.json` holds a real copy of every byte the page table references, including the sealed poison. The sealed bytes are never paged into a context because the gate stands between them and any new window, but they are physically present on the swap device. This is a deliberate tradeoff that buys durability and a re-screenable seal across the process boundary; the zero-copy `Ref` and region-backend seam is frozen in the ABI but left unbuilt for now. A reload pages in only the working set a query touches, so resolving a follow-up does not materialize the whole image.
+
+## Performance and the numbers
+
+Every headline number with the baseline it is measured against — the apples-to-apples win versus a tuned warm-cache stack, never blurred with the larger figure against a naive re-send baseline.
+
+## What is the real headline serving number, 4x or 60x?
+
+The apples-to-apples serving number is about **4x** (4.1x) fewer tokens than a tuned warm-cache stack; the 60x figure is only against a naive re-send-everything baseline and must never be quoted as the serving win. Both come from the same 50-turn x 5-agent fleet run (Qwen2.5-1.5B Q8, M3 Pro): `net_value_add_vs_tuned = 4.12` against arm B (tuned per-agent warm KV), and `net_value_add_vs_naive = 60.3` against arm A (naive stateless). Arm A is modeled from a prefill cost function and validated live within ~0.4%; arms B and C are live. Bit-identity gates confirm the arms emit identical tokens, so the win is reuse, not a numerics shortcut.
+
+## Why does fak report both a vs-tuned number and a vs-naive number?
+
+Because they answer two different questions, and collapsing them into one would overclaim. The vs-tuned number (~4x on the 50x5 fleet) compares fak against a stack that already keeps a warm per-agent KV cache, so it isolates the marginal value fak adds on top of best practice. The vs-naive number (~60x) compares against re-sending the whole context every turn, which measures the total turn-tax a stateless setup pays. The benchmark authority pins every figure to a baseline letter (A = naive, B = tuned, C = fak) precisely so the two never blur.
+
+## What does the 8.8-9.7x WebVoyager number actually measure?
+
+It is measured prefill work-elimination on the real 643-task WebVoyager dataset, swept across 1 to 8 workers, against a naive per-turn re-prefill baseline. At 1 worker it is 8.8x (170.9M vs 19.4M prefill tokens); at 8 workers it is 9.7x (1.37G vs 141.3M). The number is deterministic prefill-token arithmetic over the real task geometry (8,745 navigation turns, median 12 per task), not a wall-clock; live model runs are a separate pending phase.
+
+## Is the WebVoyager win still 9.7x against a tuned warm-cache stack?
+
+No. The 9.7x is purely against the naive re-prefill baseline; against a tuned per-agent KV cache the marginal WebVoyager win is only about **1.0x to 1.10x** (1 to 8 workers). This is the most important stratification caveat to keep straight: the turn-tax axis (vs naive) and the cross-worker reuse axis (vs tuned) are different measurements. WebVoyager turns are short, so once each agent already has a warm cache there is little additional shared prefix to reuse across workers.
+
+## What is the 20-24x SWE-bench number, and against what baseline?
+
+It is a prefill/KV work-elimination floor of **17.9x to 23.4x** (workers 1 to 16) on the 500-instance SWE-bench Verified set, measured against a naive re-prefill baseline. The per-worker rows are 17.9x at 1 worker, 22.1x at 4, 22.9x at 8, and 23.4x at 16; cross-worker reuse against a tuned cache is only 1.00x to 1.31x. This is a deterministic token floor computed from difficulty-bucket turn estimates, runs on a Mac with no GPU, and is not a head-to-head wall-clock against a tuned SGLang server. The actual code resolve-rate is a separate GPU-server run still pending.
+
+## Where does the speedup actually come from if fak is not a faster GPU engine?
+
+The win comes from reread-rate, not GPU speed: fak does shared prefill work once and reuses it instead of re-processing the same context every turn. A multi-agent fleet that re-sends overlapping context pays a per-turn prefill tax; fak owns the KV cache as a kernel object, so a computed prefix is cloned and reused and a tool-result span can be evicted from the middle without recomputing the tail. Raw token throughput is still won by vLLM, SGLang, and llama.cpp; fak measures itself against those honestly and does not claim to beat them on tokens per second.
+
+## Why is the reuse win self-host only?
+
+Because the savings come from owning the KV cache, which a frontier API does not expose. An app that merely calls a hosted provider gets fak's safety floor (the capability lock and result quarantine) but none of the prefill-reuse savings, since the KV state lives inside the provider's serving process. The frontier-scale agent-city numbers are explicitly design targets, not measurements. To get the reuse wins you run fak in front of a self-hosted model where the cache is a kernel-owned object.
+
+## How fast is fak's policy adjudication?
+
+The decision itself is sub-millisecond: a captured access-log line shows a policy `DENY` adjudication at `duration_ms = 0.511`. The fold runs in-process with no hook spawn, no IPC, and no engine call on the decide path, which is why the per-call cost is below typical OS clock granularity; benchmarks use an inner calibration loop to time it. On a pure-kernel decide path the allow-verdict cost has been measured as low as ~362 ns, with the in-process boundary roughly 2,400x to 2,849x cheaper than spawning a `fak hook` process per call.
+
+## Is the sub-millisecond adjudication number the same as the fleet speedup?
+
+No, they are unrelated measurements and should not be conflated. The ~0.5 ms adjudication is the cost of a single policy decision (a captured `DENY` log line); the in-process-vs-spawn ratio (~2,400x) is a subsystem regression sentinel for the decide path, not a serving-throughput headline. The fleet speedups (~4x vs tuned, 8.8-9.7x WebVoyager vs naive) are about prefill reuse across many turns. One is per-decision latency, the other is per-fleet token elimination.
+
+## What does max|delta| = 0 mean for the benchmark numbers?
+
+It is the honesty gate proving the speedup is reuse, not a numerical shortcut: reused KV state is bit-for-bit identical to a full recompute, with maximum absolute logit difference of exactly zero. Witnesses cover causal invalidation (a sibling read stays byte-identical across an external write), RadixAttention split-reuse equaling recompute, and cached-decode equaling full prefill. Because the arms emit identical tokens, the token savings cannot be explained away as a cheaper-but-different computation; the answer is the same, computed once instead of every turn.
+
+## Is the SWE-bench code resolve-rate measured yet?
+
+No, the resolve-rate is not yet measured; only the cost and cache-elimination arithmetic is shipped. The prefill/KV work-elimination floor (17.9x to 23.4x vs naive) runs deterministically on a Mac with no GPU, but the actual fraction of SWE-bench Verified instances that fak's agent resolves is a GPU-server run that is still pending. A local 135M model produces a resolve-rate near zero; the real number requires a larger model on the GPU server. Treat the 20-24x as a token floor, never as a claim about how many bugs get fixed.
+
+## How big can the fleet win get on ultra-long contexts above 100k tokens?
+
+On contexts above 100k tokens the apples-to-apples fleet floor is about **4.3x versus a warm per-agent KV cache**; against a naive re-prefill baseline the same work floor is roughly 10x for a single session and 40x+ for the fleet, though that easy baseline is never the serving win. The single-session win (9.9x token, 9.5x FLOP) is entirely the turn-tax, since one session has no cross-agent prefix to share. These are exact contention-free work floors from token and O(L^2) FLOP arithmetic, computed with the `longctxbench -ladder` command; a live wall-clock measurement above 100k is separately gated and still simulated.
+
+## What is the right serving baseline if I already run a tuned SGLang server?
+
+Against a tuned SGLang server the realistic serving win is roughly **2x to 2.5x**, not the 5x to 15x figures, which apply only versus naive single-tenant serving or the cache-favorable vDSO subset. The vDSO fast-path numbers in particular use a deliberately cache-favorable demo slice; on a real tau2-airline workload the addressable-vDSO purity is about 0.7%, so the vDSO is an upside secondary, never the headline. When you already have a warm-cache engine, the marginal value fak adds is the bounded 2x to 2.5x band plus the safety floor.
+
+## Does fak's turn-tax saving claim a general speedup?
+
+No. The turn-tax demo that deletes 9 extra model turns runs on a deliberately cache-favorable 14-call airline slice (about 64% addressable) and is not a general speedup. On a real tau2-airline workload the addressable vDSO purity is about 0.7%, which works out to roughly 0.33 turns saved per session, so a self-host build does not amortize on efficiency alone. The durable, engine-agnostic part of that benchmark is the safety floor: injections admitted to context go 1 to 0 and destructive ops executed go 1 to 0, reproducible on any backend.
+
+## What proves the modeled naive baseline is not inflated?
+
+The naive arm is validated live to within about 0.4%: the ratio of anchored-computed to live cost is 1.0039, so the README's "within ~1%" framing is conservative. The naive total of roughly 19.1 hours is modeled from a prefill cost function because running it live really does take about that long, while fak's fused arm at ~19.0 minutes is live. There is also an anti-inflation control: a clean 3-call happy-path workload saves exactly zero by construction and by test, so the harness cannot manufacture a win where none exists.
+
+## Has the +1 retry-turn cost of an injection been seen live, or only modeled?
+
+It has been witnessed live, not just modeled: a real `fak agent` run against gemini-2.5-flash showed 7 versus 6 turns, exactly 1.00 retry-turn per error, across 3 of 3 trials. This measures the clean-recovery floor where an injected error costs one extra model turn, recorded in a committed artifact. The sample is small (n=3, one model), so it is presented as a floor rather than a general distribution; the broader turn-tax decomposition around it remains a transparent cost model on the baseline side.
+
+## Security and the threat model
+
+What `fak` is built to stop, why two structural gates beat one classifier, and — stated up front — what it explicitly cannot protect against.
+
+## What is fak's threat model: who is the attacker and what are they assumed to control?
+
+`fak`'s threat model treats the language model itself as the untrusted program and assumes the attacker controls everything the model reads: the prompt, retrieved documents, and tool results. The model is ring-3 userspace; the harness is the kernel adjudicating each tool call (the syscall) from evidence the model did not author. So the question is never "did the model get fooled" but "can a fooled model still pull an irreversible lever or pull poison into its own context" — and the answer is gated by structure, not by trusting model output. A refusal does not depend on catching the attack: a tool you never allow-listed is refused regardless of how convincing the injected text is.
+
+## Why are two structural gates better than one well-trained classifier?
+
+Two independent structural gates raise the bar to a conjunctive one: an attacker must beat both, where a single classifier is one point of failure. `fak`'s two gates are the lock (a default-deny capability floor — an irreversible tool that was never allow-listed cannot run, so no injected context changes the verdict) and the wall (result quarantine — poisoned bytes are held out of the model's context entirely). Neither gate is a detector you can talk past. The evadable screener that flags suspicious results sits on top of the wall as a bonus; if it misses, the result is still quarantined by policy, and if it fires, that is extra signal — the floor never depends on it.
+
+## Which OWASP Agentic Top-10 and MCP Top-10 risks does fak target structurally?
+
+`fak` structurally targets Tool Poisoning (MCP03) and Memory Poisoning (T1) by containment and by a capability floor, not by per-attack recognition. For MCP03, untrusted tool results pass a write-time admission gate before they can enter the model's context; a result screened as secret-shaped, injection-shaped, or pollution is paged out to a tiny stub so the poisoned bytes never reach attention. For T1, recall's promotion gate refuses to fold a result into the durable session image unless it is classified durable, and a quarantined page stays sealed across the process boundary unless a witness clears it and a fresh content re-screen passes. The dangerous lever not existing and the poison never arriving are what carry the guarantee, not a model recognizing the attack.
+
+## What does "fail-closed" actually mean inside fak's kernel?
+
+Fail-closed means that when the policy is silent, ambiguous, or broken, the decision defaults to deny rather than allow. A zero policy is the empty floor where every call is refused with `DEFAULT_DENY`; an empty adjudicator chain folds to `DEFAULT_DENY`; and if every rung defers, the verdict is still a deny. The fold is a most-restrictive-wins lattice where an unknown verdict kind ranks as a deny, so a new or malformed rung can only tighten the floor, never loosen it. Config loading is fail-loud to match: a typo'd field name or an unknown refusal reason is a hard startup error, never a silent fallback to a more permissive default.
+
+## Can fak stop a malicious argument to a tool that IS on the allow-list?
+
+Not in the general case — `fak` bounds which tool NAMES can run, but it does not bound the resolved EFFECT of an allow-listed coarse tool's arguments, and the docs say so plainly. An allow-listed `send_email` with attacker-chosen recipients, or a coarse `Bash` running `rm -rf`, is the explicit gap. There are partial, restrict-only mitigations: arg-level predicates can deny by a path glob, a regex, or a max-byte bound on one decoded argument string, and the `SELF_MODIFY` floor refuses write-shaped calls that touch a guarded glob. But those inspect one decoded string, not the resolved effect, and the regex form is detection-shaped and evadable. The honest guidance is to keep exfil-shaped and destructive tools OFF the allow-list and reach for finer argument-scoped capabilities (path/host/amount as first-class constraints), which are roadmap, not shipped.
+
+## If a tool call is admitted, does fak limit its blast radius?
+
+No — once a call is allow-listed and admitted, `fak` does not contain what that call then does in the outside world. The kernel decides whether the call may run and whether its RESULT may re-enter context; it does not sandbox the call's side effects, so an admitted `delete_file` deletes the file. Blast-radius containment is a defense-in-depth job for a separate layer: run the actual tool execution inside a sandbox (for example E2B) so an admitted-but-overbroad action is bounded by the sandbox, while `fak` governs the gate and the result. `fak` governs the syscall boundary; the sandbox governs the effect.
+
+## Does fak protect against request-volume abuse, denial-of-service, or rate-based attacks?
+
+No — `fak` is not a rate limiter or a DoS shield, and request volume is outside what it structurally defends. The kernel's job is per-call adjudication and result admission, not traffic shaping; the closed refusal vocabulary even reserves a `RATE_LIMITED` reason code, but the floor is a permission decision, not a throughput governor. The gateway has operational hardening that is incidental, not a volume defense: a 4 MiB request-body cap, HTTP read/write/idle timeouts, and optional bearer-or-`x-api-key` auth gating every route except `/healthz`. For abuse by request volume, put `fak` behind your own rate limiter or reverse proxy, the same defense-in-depth posture you would use for any upstream.
+
+## Why is the result detector deliberately built to be evadable?
+
+`fak` treats its result detector as roughly 100% evadable by design because the security guarantee is structural, and a guarantee that leaned on pattern-matching would be only as strong as the patterns. The screener is a first-match scan for secret-shaped strings, a fixed set of injection marker phrases, and blatant byte-repeat pollution; any of those is trivially reworded or obfuscated to slip past. So the load-bearing protection is the quarantine POLICY and the capability lock — neither runs the detector. If the screener fires it is a helpful bonus; if it misses, an unlisted irreversible tool is still refused and a poisoned result is still walled by policy. Building it to be beatable is the point: it keeps the floor honest by never letting the detector become load-bearing.
+
+## How does fak keep poison out of the model's context without trusting the detector to catch it?
+
+`fak` quarantines a flagged tool result by physically replacing its bytes with a tiny stub before it can enter context, so the poison is absent from attention rather than merely "not shown." At the write-time admission gate, a quarantined result's payload is paged out to a content-addressed blob store and the in-context payload becomes a small `{"_quarantined":true,...}` pointer; the real bytes only page back in after an explicit witness clear AND a fresh re-screen, both fail-closed. Because `fak` owns the KV cache as a kernel object, the matching K/V span can also be evicted so the model is mechanically incapable of attending to it — verified byte-identical to a session that never saw the poison at max|Δ| = 0. The KV-eviction bridge is proven on a synthetic model in the kvmmu package and is not yet wired into the live agent HTTP loop; the context-side page-out is on the shipped serving path.
+
+## Does the audit log record tool arguments, results, or request bodies?
+
+No — `fak`'s audit surfaces record tool NAMES, verdicts, dispositions, and timings, never request bodies, tool arguments, or result content. The stdout access log emits two JSON lines per request carrying the tool name plus verdict, reason, disposition, duration, status, route, and a `trace_id`, with no payload field at all. The opt-in durable decision journal goes one half-step further: it stores content DIGESTS (the frozen Ref hash) rather than blobs, so it can prove WHICH bytes were seen without leaking them. This is deliberate — the audit trail is reviewable and correlatable by `trace_id` across the access log, the response header, and the per-operation verdict log, without becoming a secondary place secrets pile up.
+
+## How does a memory-poisoning attack survive a session boundary, and how does fak block it?
+
+`fak` blocks memory poisoning at the session boundary by sealing quarantined results into a durable core image and refusing to page them back into a new context without re-clearing them. When `fak recall` persists a finished session, a quarantined page is written with only a safe sealed descriptor (`tool: [sealed: reason, N bytes]`) — never the poisoned or obfuscated bytes — and on reload the rung-4 gate refuses to resolve that page unless a witness clear ran AND a fresh content re-screen passes, so clearance alone cannot launder still-poisoned bytes. The re-screen folds the whole registered admitter chain, so a session recorded under a weaker gate is re-caught by every detector the fleet ships now. The honest limit: recall makes the gate's decision durable and re-screenable, but it does not improve the original decision — an injection that never tripped the gate in the first place is never sealed.
+
+## When a fak policy refuses a call, is that an error your agent has to handle?
+
+No — a refusal is a successful response carried as a value, not an exception, so your agent never treats "the kernel said no" as a crash. On the served path a denied tool call returns HTTP 200 with the verdict in the response body; HTTP error statuses are reserved for malformed requests, auth failures, and upstream faults. The denied call is simply dropped from the model's tool-call list for that turn, with the structured verdict (reason from the closed 12-code vocabulary plus a disposition like `RETRYABLE`, `WAIT`, `ESCALATE`, or `TERMINAL`) available in the `fak` response extension and, for Claude Code, also prepended as a leading `[fak]` text block. Deny-as-value is what lets the agent loop read the refusal in-band and adapt on the next turn rather than erroring out.
+
+## What should I pair fak with for a complete agent security posture?
+
+Pair `fak` with a sandbox for blast radius, your own rate limiting for volume, and a tight allow-list scoped to safe tool names — `fak` is the governance gate, not the whole defense. `fak` structurally covers the syscall boundary (a default-deny capability floor that fails closed) and the context boundary (result quarantine that keeps poison out of attention), plus a payload-free audit trail. It does NOT contain what an admitted call does in the world, bound the arguments of a coarse allow-listed tool, or shed request-volume abuse. So run the actual tool execution inside a sandbox (for example E2B) to bound an over-broad admitted action, front the gateway with a reverse proxy or rate limiter for auth and volume, and keep exfil-shaped and destructive tools off the allow-list. `fak` makes the fail-closed decision affordable in-loop; defense-in-depth handles the effects it deliberately does not.
+
+## Operations, configuration, and deployment
+
+Running `fak` in production: authoring and reloading the policy floor, requiring authentication, what happens on a crash, and what to put around it.
+
+## How do I author a capability floor for fak?
+
+Run `fak policy --dump` to print the built-in default allow-list as a manifest, edit it to match the tools your agent should be permitted, then load it with `--policy floor.json`. The dump is the complete default floor, so you start from a working baseline and tighten rather than guess. A manifest has three core fields — `allow` (exact tool names), `allow_prefix` (read-only families like `read_`, `get_`, `search_`), and `deny` (tool name mapped to a refusal reason from the closed vocabulary). Validate any edit with `fak policy --check floor.json`, which prints the admitted floor and exits 1 on a bad file. The loaded manifest replaces the default floor wholesale; it is not merged on top of it.
+
+```bash
+fak policy --dump > floor.json
+fak policy --check floor.json
+fak serve --policy floor.json --base-url http://localhost:11434/v1 --model qwen2.5:1.5b
+```
+
+## What happens if I make a typo in a policy manifest?
+
+A typo is a hard error at load time, not a silently weakened floor — `fak` refuses to start or reload rather than run with a policy it could not parse. The manifest loader rejects unknown fields, so writing `allows` instead of `allow` fails with `invalid manifest: json: unknown field "allows"`. An unknown deny reason fails the same way, printing the offending value and the full list of the twelve valid reason codes. A bad posture, a malformed argument rule, or a different major schema version all hard-error too. Because policy load propagates a fatal error at startup, there is no fallback to a more permissive default.
+
+## Does loading a policy add to the default allow-list or replace it?
+
+A loaded manifest replaces the default floor entirely — it is the whole capability floor, not an overlay on the built-in default. This is why `fak policy --dump` gives you the complete default to edit: you start from the full floor and adjust it, so nothing is silently inherited that you did not put in the file. The same replace-not-merge rule applies to a runtime reload through the gateway. Round-tripping is stable, so `fak policy --dump` piped into `fak policy --check` validates exactly.
+
+## How do I require an API key on a network-facing fak deployment?
+
+Start the gateway with `--require-key-env VAR`, where `VAR` names an environment variable that holds the secret — the flag takes the variable *name*, never the secret value itself. Auth is off by default for loopback use, so this is the flag you add when binding somewhere reachable. Every route except `/healthz` then requires the token; clients send it as `Authorization: Bearer <token>` (OpenAI-style) or `x-api-key: <token>` (Anthropic-style), and both are compared in constant time over SHA-256 digests so neither the bytes nor the length leak. If the named variable is set but empty, the gateway refuses to start (exit 2) rather than come up unprotected.
+
+```bash
+export FAK_TOKEN=$(openssl rand -hex 32)
+fak serve --addr 0.0.0.0:8080 --require-key-env FAK_TOKEN --base-url http://localhost:11434/v1 --model qwen2.5:1.5b
+```
+
+## Why does --require-key-env take an environment variable name instead of the key itself?
+
+`fak` reads the secret from the named environment variable so the key never appears in the command line, the flag list, or process listings where it would be visible to other users. You pass `--require-key-env FAK_TOKEN` and put the actual secret in `$FAK_TOKEN`; the gateway resolves it at startup. The same pattern applies to the upstream provider key via `--api-key-env`, which names the variable holding your real provider key that `fak` forwards upstream. A named-but-empty required key variable is treated as a misconfiguration and fails closed at startup.
+
+## Can I update the policy floor without restarting fak?
+
+Yes — `POST /v1/fak/policy/reload` (no body) re-reads the manifest from its source and replaces the floor in place, so you can tighten or loosen the allow-list on a running gateway. The reload is replace-not-merge, exactly like the initial load: the floor is rebuilt from the file, not patched. The endpoint returns `{reloaded, source, summary}` on success. It answers `404` if the deployment was not started with a policy to reload, and `400` (with the error message) if the new manifest fails to parse — a broken reload leaves the running floor untouched rather than weakening it.
+
+## What happens to the policy floor and quarantine state when fak crashes and restarts?
+
+On restart the capability floor reloads from its manifest on disk, so a crash never leaves the gate silently bypassed — there is no permissive fallback path. Policy load is fatal on error, so the process either comes up with the floor you authored or does not come up at all. The in-memory quarantine and taint ledger is a different matter: the live result-screening state (the held and cleared maps inside the context-MMU) lives in process memory with no disk backing, so it resets on restart. That is fail-safe rather than a leak, because the bytes a quarantine held were never in model context to begin with. If you need quarantine decisions to survive a process boundary, persist the session with `fak recall`, which writes a durable core image that re-screens every page on reload.
+
+## Should I run fak under a process supervisor like systemd?
+
+Yes — `fak serve` is a single static binary with no external dependencies, which makes it a clean fit for systemd, a container runtime, or any supervisor that restarts a process on exit. Because the floor reloads from its manifest on every startup and policy-load errors are fatal, a supervised restart re-establishes the same gate deterministically rather than drifting open. The binary binds its listener synchronously before marking itself ready, so a bind failure surfaces immediately instead of leaving a half-started service. Pass the secret and the policy by environment and flag (`--require-key-env`, `--policy`) so the unit file carries configuration, not secrets in the command line.
+
+## Are the /metrics and /debug/vars endpoints exposed without authentication?
+
+They follow the gateway's auth policy: when you run with `--require-key-env`, both `/metrics` and `/debug/vars` require the bearer token, and only `/healthz` stays open. With auth off (the loopback default) they are reachable like any other route. `/metrics` serves Prometheus exposition and `/debug/vars` serves a single JSON snapshot of the same gateway, runtime, kernel, and metrics view. If you scrape metrics over a network, gate them behind auth and treat `/healthz` as the only intentionally public probe.
+
+## What does fak bind to by default, and is that safe to leave?
+
+`fak serve` defaults to `127.0.0.1:8080` — loopback only — so out of the box it is reachable only from the same host and auth is off for low-friction local use. That default is safe to leave on a developer machine. If you bind to a non-loopback address without setting `--require-key-env`, the gateway prints a loud warning that it is reachable with no key, because that combination is almost always a mistake. The intended progression from laptop to fleet is adding flags (`--policy`, `--require-key-env`) rather than swapping components.
+
+## How do I verify a policy floor before deploying it, without a model or network?
+
+Use `fak policy --check floor.json` to validate the manifest and print the admitted floor, and `fak preflight --tool NAME --args JSON --policy floor.json` to get the exact verdict a single call would receive — both run offline with no model, key, or GPU. `--check` enforces the closed refusal vocabulary and exits 1 on a bad file, so it composes as a CI gate. `preflight` is the per-call oracle: it prints `verdict=… reason=… by=monitor`, and `--explain` traces each rung. This lets you prove that a tool you expect denied (say, `refund_payment`) returns `DENY` and a read tool returns `ALLOW` before any traffic flows.
+
+```bash
+fak policy --check floor.json
+fak preflight --tool refund_payment --args '{}' --policy floor.json --explain
+```
+
+## How does fak return a policy denial over HTTP — is it an error status?
+
+A policy denial is a successful `200` carrying the verdict as a value, never a non-2xx error status. HTTP error codes are reserved for malformed requests, auth failures, and upstream faults — a `401` for a bad key, a `502` when the upstream provider is unreachable — so your client never has to treat "the kernel said no" as an exception. On the chat and messages wires, denied tool calls are dropped from the response and the surviving calls are returned, with the full per-call verdicts in the `fak` response extension (and, for Claude Code, also prepended as a `[fak]` text note). This is the deny-as-value contract: a refusal is in-band data, not a transport failure.
+
+## How do I turn on a durable, tamper-evident audit log?
+
+Set the `FAK_AUDIT_JOURNAL` environment variable to a file path; the durable decision journal is opt-in and inert until you do. Once enabled, `fak` appends one hash-chained JSONL row per decision (`DECIDE`, `DENY`, `QUARANTINE`, and even `VDSO_HIT`), and the chain is tamper-evident — any after-the-fact byte mutation breaks verification at the first altered link. The journal records tool names, trace IDs, verdicts, reasons, and content *digests* only; it never materializes the argument or result bytes, so it leaks no payload. Separately, the gateway always emits a trace-correlated stdout access log that records names and verdicts but never arguments or result content. The `/v1/fak/events` route reads the journal back and returns `404` when the variable is unset.
+
+## Can I tune fak's HTTP timeouts and request size limits for slow local inference?
+
+Yes — the gateway's read, write, and idle timeouts are each overridable with the `FAK_HTTP_…_TIMEOUT_S` environment variables, and setting one to `0` disables that timeout, which is the knob you want when a slow local CPU decode would otherwise trip the default 90-second write timeout. The defaults are a 10-second read-header timeout, 30-second read, 90-second write, and 120-second idle. The request body is capped at 4 MiB. These are operational dials, not policy: they govern transport, while `--policy` governs which effects are allowed.
+
+## Integrations and migration
+
+Putting `fak` in front of the agent or framework you already run — usually a one-line base-URL change — and moving an existing stack over.
+
+## Do I have to rewrite my agent to put fak in front of it?
+
+No. In almost every case you change exactly one thing — the base URL your agent or framework already points at — and your prompts, tool definitions, and agent loop stay untouched. `fak serve` exposes three wire surfaces on one port, each byte-compatible with a protocol your client already speaks (OpenAI Chat Completions, Anthropic Messages, and fak-native/MCP), so migration is a redirect, not a refactor. Every tool call your model proposes is adjudicated against the capability floor before it reaches your loop, and you can confirm the gate is up with a health check.
+
+```bash
+fak serve --addr 127.0.0.1:8080 --base-url <upstream/v1> --model <id> --policy policy.json
+curl http://127.0.0.1:8080/healthz
+```
+
+## How do I wire Claude Code or the Anthropic SDK to fak?
+
+Point `ANTHROPIC_BASE_URL` at the gateway origin (no `/v1` suffix) and set the API key to any throwaway value for loopback. Claude Code and the Anthropic SDK speak the native Anthropic Messages wire, which `fak serve` serves at `/v1/messages`; the SDK appends `/v1` itself, so you give it the root. Claude Code reads content blocks but not the `fak` response extension, so any drop, repair, or quarantine is also prepended as a leading `[fak] …` text block so you can see what the gate did.
+
+```bash
+export ANTHROPIC_BASE_URL=http://127.0.0.1:8080
+export ANTHROPIC_API_KEY=fak-local
+```
+
+## Why does my Anthropic client get a 404 on /v1/v1/messages?
+
+Because Anthropic SDKs append `/v1` themselves, so an Anthropic base URL must point at the gateway origin (`http://127.0.0.1:8080`), not at `.../v1`. Include `/v1` and the SDK turns it into `/v1/v1/messages`, which the gateway doesn't route. This is the single most common wiring mistake and it applies to Claude Code, the Anthropic SDK, `langchain-anthropic`'s `ChatAnthropic`, and any other Anthropic-wire client. OpenAI-wire clients are the opposite — they do include `/v1` in the base URL.
+
+## How do I wire the OpenAI SDK, LangChain, LlamaIndex, or the Vercel AI SDK to fak?
+
+Set the OpenAI base URL to `http://127.0.0.1:8080/v1` and pass any throwaway API key; the framework code stays the same. The exact parameter name differs by client: the OpenAI SDK uses `base_url` and the Vercel AI SDK's `createOpenAI` uses `baseURL`, LangChain's `ChatOpenAI` uses `base_url` (older `langchain-openai` uses `openai_api_base`), and LlamaIndex uses `api_base` (with `OpenAILike` to skip model-name validation for a local model). The OpenAI Agents SDK and any other AsyncOpenAI-based client take the same base URL on the `AsyncOpenAI` you hand the framework.
+
+```python
+client = openai.OpenAI(base_url="http://127.0.0.1:8080/v1", api_key="fak-local")
+```
+
+## How do I run fak as an MCP server for Cursor or another MCP client?
+
+Run `fak serve --stdio`, which is an MCP server speaking newline-delimited JSON-RPC over stdin/stdout with no listener and no auth surface. For Cursor, add an `mcpServers` block whose `command` is the absolute path to `fak` with args `["serve","--stdio", …]`; both the `fak` path and any `--policy` path must be absolute. The same stdio dispatch is also reachable over HTTP by starting `fak serve --addr 127.0.0.1:8080` and POSTing to `/mcp`. It exposes adjudication tools including `fak_adjudicate`, `fak_syscall`, `fak_admit`, `fak_changes`, and `fak_revoke`.
+
+## What does the MCP fak_adjudicate tool do versus fak_syscall?
+
+`fak_adjudicate` returns a verdict only and does not execute anything, while `fak_syscall` adjudicates and then executes the call through the kernel. In a typical integration `fak_adjudicate` is the production path: your client asks for a verdict, and if the call is allowed your own code runs the tool. `fak_admit` is the result-side companion that screens a result you already executed through quarantine and taint before it enters context. A DENY is a valid tool result (`isError:false`), not a protocol error — only malformed JSON-RPC produces an error code.
+
+## How do I migrate an existing llama.cpp setup to fak?
+
+Keep your `llama-server` running and point `fak serve --base-url http://127.0.0.1:8131/v1` at it, then move your clients from `:8131/v1` to `:8080/v1`. This is the recommended path: `llama-server` is OpenAI-compatible, so `fak` fronts it as a proxy and you gain the capability floor and result quarantine without touching the engine. There is a second option that drops `--base-url` and passes `--gguf` so `fak` loads the GGUF in-kernel with the embedded tokenizer, but that in-kernel path is a correctness reference, not a production chat engine, so prefer fronting `llama-server` for scale.
+
+## How do I point fak at a hosted provider like OpenAI or Anthropic?
+
+Start `fak serve` with `--provider`, the provider's `--base-url`, and `--api-key-env` naming the environment variable that holds your real upstream key, then move your client's base URL to the gateway. The `--api-key-env` flag names an env var, never a literal key value; `fak` reads it and forwards the real key upstream while your client authenticates to `fak` with a throwaway local key. When the upstream is the real Anthropic API, the gateway can forward the client's original request bytes and its own `x-api-key` as a transparent hop so a real upstream cache hit still reaches the client's accounting.
+
+```bash
+fak serve --provider openai --base-url https://api.openai.com/v1 --api-key-env OPENAI_API_KEY
+```
+
+## Will fak break if my model speaks tool calls differently?
+
+`fak` adjudicates the proposed tool calls your upstream model emits, so the upstream must actually produce well-formed tool calls for the gate to act on them. The gateway buffers the whole upstream turn, adjudicates the complete proposed-call set, then re-serializes a well-formed SSE stream, so raw pre-adjudication deltas never pass through. If your upstream announces tool calls but none parse, `fak` fails closed with a `502` rather than forwarding an unverified turn. A self-hosted model that doesn't emit tool calls in its provider's format is a model-side concern, the same as it would be without `fak`.
+
+## How do I prove fak is adjudicating before I migrate my whole agent?
+
+Run a single call against a policy with no server, model, key, or GPU using `fak preflight`, which prints the verdict for one tool call. For an over-the-wire check, start the gateway and POST to `/v1/fak/adjudicate`, which returns a verdict only (no execution) as a `200` carrying the decision. One gotcha on that fak-native route: the JSON key is `arguments`, not `args`, and unknown keys are silently dropped. The repo also ships self-verifying scripts under `examples/` that run the HTTP gate and a real stdio MCP handshake.
+
+```bash
+fak preflight --policy policy.json --tool refund_payment --args '{}'
+```
+
+## What do I gain on the wire after migrating, and how is a refusal reported?
+
+You gain a top-level `fak` object on `/v1/chat/completions` and `/v1/messages` responses, present only on turns with tool activity, and a policy refusal arrives as a successful `200` carried as a value rather than an HTTP error. That `fak` extension has an `adjudications` array (one entry per proposed call, with `repaired_arguments` only when the verdict kind is `TRANSFORM`) and a `result_admissions` array (one per inbound result screened, where `QUARANTINE` means the bytes were paged out). HTTP error statuses are reserved for malformed requests, auth failures, and upstream faults, so your client never treats "the kernel said no" as an exception.
+
+## Comparisons with other tools
+
+Where `fak` sits next to inference engines, agent frameworks, sandboxes, and hand-rolled middleware. The recurring theme is layer, not rival.
+
+## Does fak replace vLLM, SGLang, or llama.cpp?
+
+No, `fak` sits in front of them; they are inference engines that turn prompts into tokens, and `fak` is the governance and gateway layer that decides which tool calls run and which results enter context. Point `fak serve --base-url` at a running OpenAI-compatible engine (vLLM, SGLang, or `llama-server`) and your clients move their base URL to `fak`; prompts, tool defs, and the agent loop stay unchanged. `fak` buffers each upstream turn, adjudicates the whole set of proposed tool calls, then re-serializes well-formed SSE, so raw pre-adjudication deltas never pass through. The engines win raw throughput and front-of-prompt prefix caching; `fak` owns capability, quarantine, and audit.
+
+```bash
+fak serve --addr 127.0.0.1:8080 --base-url http://localhost:8000/v1 --model qwen2.5-7b
+```
+
+## How is fak's gate different from LangChain's tool-calling guards?
+
+A LangChain agent decides which tools to call inside the model loop, so a guard there is advisory; `fak` adds a structural deny floor underneath that the model cannot talk past. `fak serve` speaks the OpenAI and Anthropic wires, so you keep your chains, `@tool`/`StructuredTool` definitions, and `AgentExecutor`/LangGraph loop and change only the chat-model base URL. Every proposed tool call is adjudicated against a reviewable allow-list before it reaches your loop: a tool you never allow-listed is refused regardless of context or injection, and denied calls simply never appear in the model's tool-call list. Your process still runs the surviving tools; `fak` does not execute them for you.
+
+## How does fak compare to an E2B-style sandbox for agent safety?
+
+A sandbox like E2B limits the blast radius of a tool once it runs, while `fak` decides whether the irreversible tool runs at all, before any effect. `fak`'s capability lock is default-deny: a tool that was never allow-listed is refused at the kernel floor, so the dangerous lever is never pulled rather than pulled inside a container. It also gates the result side, holding poisoned or secret-shaped tool outputs out of the model's context entirely (paged to a stub pointer). The two compose: sandbox what does run, and let `fak` decide what is allowed to run and what may enter memory.
+
+## Why use fak instead of a proprietary built-in agent guard from a platform like Replit?
+
+A platform's built-in guard is tied to that platform; `fak` is an open, self-hostable Apache-2.0 Go binary you run yourself in front of any model. Because it speaks the OpenAI, Anthropic, and MCP wires on one port, you point your existing agent's base URL at it and gain a reviewable capability floor, result quarantine, and a trace-correlated audit log without adopting a closed runtime. The policy is a manifest you author and version: `fak policy --dump` emits the default floor to edit, `--check` validates it against a closed refusal vocabulary, and a bad manifest is a hard error rather than a silent fall-back to permissive. You can inspect the code, run the offline proofs, and host it on a laptop CPU with no key, model, or GPU.
+
+## What does fak give me that hand-rolled middleware around my model API does not?
+
+Custom middleware can log and block calls, but `fak` ships the hard parts as a kernel: deny-as-value, a closed refusal vocabulary, result quarantine, and a tamper-evident audit journal. A refusal is a successful HTTP 200 carried as a verdict value, not an exception, so your client never treats "the kernel said no" as a transport error; error statuses are reserved for malformed requests, auth failures, and upstream faults. Refusals draw from a fixed 12-code vocabulary (`DEFAULT_DENY`, `POLICY_BLOCK`, `SELF_MODIFY`, `SECRET_EXFIL`, and so on) rather than free text, and each verdict carries a bounded witness naming only the offending rule. The opt-in decision journal hash-chains each event and records content digests, never the arguments or result bytes.
+
+## Isn't fak just a WAF or API gateway for LLM traffic?
+
+No, a WAF or API gateway screens traffic from the outside and typically fails open on a crash or timeout, whereas `fak` puts the permission check on the same in-process call path as the tool call and fails closed. There is no spawned hook and no inter-process round-trip on the decide path: a proposed call folds an in-process adjudicator chain to the most-restrictive verdict, and a tool that was never allow-listed cannot run no matter what the model was talked into. It also reaches places a network gateway cannot: it holds poisoned tool results out of the model's context and can evict a single span from the KV cache. The audit log records tool names, verdicts, and timings keyed by `trace_id`, never request bodies or arguments.
+
+## Can a rate limiter or quota gateway do what fak's capability floor does?
+
+No, a rate limiter caps how often a tool is called, while `fak`'s capability floor decides whether a given effect is permitted at all. The floor is by tool name and is default-deny: an unlisted irreversible tool is refused structurally, and the refusal does not depend on catching an attack. `fak` does have a rate-limit reason code (`RATE_LIMITED`) in its closed vocabulary, but that is one verdict among twelve, not the model. The honest scope is that the floor bounds tool names, not the resolved arguments of an allow-listed coarse tool, so you keep exfil-shaped tools off the allow-list and lean on the result-side quarantine for the rest.
+
+## How does fak's result quarantine differ from a guardrails output-content filter?
+
+A typical output filter classifies text and blocks it when a classifier fires, so its protection is only as good as the classifier; `fak`'s guarantee is structural and does not depend on the detector firing. At the moment a tool result would enter context, `fak`'s gate either admits it, pages an oversized-but-benign result out to a sub-2KB pointer, or quarantines a secret/injection/pollution result so its bytes are physically absent from the model's context. The byte-pattern detector that flags suspicious results is treated as roughly 100% evadable by design and false-positive-prone; it is a bonus, never the floor. The load-bearing protection is the quarantine policy plus the default-deny capability lock, two independent gates an attacker must beat at once.
+
+## When should I keep my serving engine and just add fak, versus using fak's in-kernel model?
+
+Keep your serving engine and front it with `fak serve --base-url` for any production workload; `fak`'s in-kernel model is a correctness reference, not a hardened production server. The recommended path with llama.cpp, vLLM, or SGLang is to keep the engine running and point `fak` at its OpenAI-compatible endpoint, moving clients from the engine's URL to `fak`'s. The in-kernel path (`--gguf`, no `--base-url`) loads a checkpoint directly and is bit-exact against a HuggingFace reference on a small llama model, but it has no continuous batching, paged attention, or multi-tenant scheduling, and several of its GPU backends are slower than llama.cpp. Use it to prove the math or for offline correctness work, not to serve a fleet.
+
+## Does fak give me anything an inference engine's prompt cache doesn't?
+
+Yes, `fak`'s KV cache is addressable, so policy can evict a single span from the middle of a kept run; every shipped engine cache (vLLM APC, SGLang RadixAttention, the OpenAI/Anthropic prompt caches) only reuses contiguously from the front. Change context at position N in a front-of-prompt cache and everything after N is recomputed. `fak` owns the cache as a kernel object and keeps the pre-RoPE keys, so it can remove a poisoned result or expired secret from the middle and leave the cache bit-for-bit identical to a run that never saw it, witnessed at `max|Δ| = 0`. The honest fence: this provable mid-run eviction is proven on a synthetic model in `internal/kvmmu` and is not yet wired into the live agent HTTP loop; the front-of-prompt prefix-reuse path is shipped.
+
+## If vLLM already has an --api-key, why front it with fak?
+
+vLLM's `--api-key` is a single bearer token over its routes; `fak` adds a capability floor, result quarantine, and an audit surface on top of auth. Beyond auth, `fak` adjudicates each proposed tool call against a reviewable allow-list, quarantines poisoned tool results out of context, and emits a trace-correlated audit log and Prometheus metrics, none of which a bare API key provides. Its own auth is off by default for loopback but hardens with one flag, `--require-key-env VAR`, which gates every route except `/healthz` and accepts a bearer token or `x-api-key` compared in constant time over SHA-256 digests. You add flags, not new components.
+
+## I already run an API gateway for auth and routing; where does fak fit alongside it?
+
+Your API gateway handles transport concerns (TLS, auth, routing, rate caps); `fak` sits on the agent's model path as the layer that understands tool calls and tool results, so the two stack rather than compete. A gateway sees opaque request bodies; `fak` decodes the turn, adjudicates each proposed tool call against the capability floor, screens inbound tool results for quarantine, and surfaces every verdict in a `fak` response extension plus an in-band note for clients that don't read it. It also ships intelligent tiered request routing as a library, but that router is explicitly not on the live serve request path today, so don't count on `fak` to replace your gateway's routing. Run your gateway at the edge and `fak` on the model path.
+
+## Observability, audit, and debugging
+
+The three correlated surfaces that tell you what the gate is doing, how to debug a denied call, and the consumer-side witnesses you can run over any answer.
+
+## What observability does fak give me, and how are the three surfaces correlated?
+
+`fak serve` exposes three correlated observability surfaces — a Prometheus `/metrics` endpoint, a live `/debug/vars` JSON snapshot, and a structured stdout access log — and a single `trace_id` threads all three together. The access log writes two JSON lines per request (`gateway_operation` carrying the verdict and `gateway_http_request` carrying transport details), `/debug/vars` gives you the same view as `/metrics` as one JSON object you can read right now, and every response carries an `X-Trace-Id` header that also appears in the access log and the per-operation verdict log. Point your scraper at `/metrics`, eyeball `/debug/vars` during an incident, and grep the access log by `trace_id` to follow one request across all three.
+
+```bash
+curl -s http://127.0.0.1:8080/metrics | grep fak_kernel
+```
+
+## What kernel counters does fak track, and what does the vDSO hit ratio tell me?
+
+`fak` tracks per-kernel counters for submits, vDSO hits, engine calls, denies, transforms, quarantines, and admitted results, surfaced on `/metrics` as `fak_kernel_…_total` plus the derived gauge `fak_gateway_vdso_hit_ratio`. The vDSO hit ratio is `VDSOHits/Submits` — the fraction of tool calls answered from the in-process fast path with no adjudication and no engine call — so a high ratio means a cache-friendly workload and a low one means most calls fell through to a full decision. `denies`, `transforms`, and `quarantines` count how often the floor refused a call, rewrote its arguments, or held a tool result out of context. The vDSO cache also exports its own view (`fak_vdso_lookups_total`, `hits_total`, `hit_rate`) plus miss attribution under a closed vocabulary (`DESTRUCTIVE|MISSING_HINTS|RESOURCE_MISNAMED|WITNESS_REVOKED|NOT_CACHED`).
+
+## How do I debug a tool call that fak denied?
+
+Run `fak preflight` to replay that exact call through the policy and print the verdict, the reason code, and which rung decided it — no server, model, or network required. Pass the tool name and JSON args (and your policy file) and it prints `verdict=… reason=… by=monitor`; add `--explain` or `--json` to dump the full per-rung Decision trace so you can see whether the grammar rung, the preflight ladder, or the adjudicator monitor refused it. The reason comes from a closed 12-code vocabulary (`DEFAULT_DENY`, `POLICY_BLOCK`, `SELF_MODIFY`, `UNKNOWN_TOOL`, and so on), so the refusal is citable rather than free text. A `DEFAULT_DENY` usually means the tool was never allow-listed; a `POLICY_BLOCK` or `SELF_MODIFY` means an explicit deny or a write-shaped self-modify rule fired.
+
+```bash
+fak preflight --tool refund_payment --args '{}' --policy floor.json --explain
+```
+
+## What do fak's refusal reason codes mean?
+
+Every refusal carries exactly one code from a closed 12-reason vocabulary, so you can route on it instead of parsing free text: `DEFAULT_DENY`, `POLICY_BLOCK`, `SELF_MODIFY`, `LEASE_HELD`, `TRUST_VIOLATION`, `MALFORMED`, `MISROUTE`, `RATE_LIMITED`, `SECRET_EXFIL`, `UNWITNESSED`, `OVERSIZE`, and `UNKNOWN_TOOL`. `DEFAULT_DENY` is the fail-closed floor — the tool was never allow-listed; `POLICY_BLOCK` is an explicit named deny; `SELF_MODIFY` fires on a write-shaped call that touches a guarded path or runs a mutating shell command; `MALFORMED` and `MISROUTE` flag broken or unrepairable call shapes. The vocabulary is forward-compatible: an unknown code renders as `REASON_<n>` and never panics. Each code also maps to a disposition (`RETRYABLE`, `WAIT`, `ESCALATE`, or `TERMINAL`) so the next agent turn knows whether retrying, waiting, or escalating is appropriate.
+
+## Does fak's audit log record my tool arguments or result contents?
+
+No — the stdout access log records tool names, verdicts, reason codes, dispositions, and timings, but never request bodies, tool arguments, or result content. Each request emits a `gateway_operation` line with the tool name and verdict fields and a `gateway_http_request` line with `duration_ms`, status, bytes, and route, both stamped with `trace_id`; neither carries a payload or even a digest of one. This is a deliberate privacy guarantee: you can ship the access log to a central collector without leaking what the agent was working on. If you opt into the separate durable decision journal (via `FAK_AUDIT_JOURNAL`), it adds content digests (`ArgsDigest`/`ResultDigest`) and a tamper-evident hash chain — still digests only, never the raw bytes.
+
+## What is the durable decision journal and how is it different from the access log?
+
+The decision journal is an opt-in, append-only, tamper-evident ledger that writes one hash-chained JSONL row per audit event (`DECIDE`, `DENY`, `QUARANTINE`, or `VDSO_HIT`), enabled by setting the `FAK_AUDIT_JOURNAL` environment variable; off by default, the package stays inert. Unlike the stdout access log, which stores no payload and no digest, the journal records the tool name, `trace_id`, verdict, reason, and content digests (never the blobs themselves), and each row's hash chains over the previous row so any post-hoc tampering breaks `Verify` at the first altered link. A vDSO fast-path hit is journaled like an engine call, so the audit trail is complete even for calls that never reached the model. Reopening the journal continues the chain rather than forking it, and each write is flushed to the OS file before returning so a crash loses no recorded row.
+
+## How do I see what happened on a turn — was a tool call dropped or a result quarantined?
+
+Read the `fak` extension object on the gateway response: it carries an `adjudications` array (one entry per proposed tool call, including dropped ones) and a `result_admissions` array (one entry per inbound tool result the kernel screened). Each adjudication shows `tool_call_id`, `tool`, whether it was `admitted`, the `verdict`, and `repaired_arguments` only when the verdict kind is `TRANSFORM`; a quarantined result shows up under `result_admissions` with `verdict.kind == "QUARANTINE"`, meaning its bytes were paged out and never reached the model. The object is omitted on turns with no tool activity. Because Claude Code reads content blocks but not the `fak` extension key, the same drops, repairs, and quarantines are also prepended to the message as a leading `[fak] …` text block so they remain visible on the Anthropic wire.
+
+## How fast is fak's adjudication decision, and is the latency observable?
+
+The adjudication decision itself is sub-millisecond — a captured access-log line shows a policy `DENY` at `duration_ms` ≈ 0.511 — because the decision is an in-process fold with no spawned hook and no engine round-trip. That number is the `adjudicate` operation duration from a real captured access log, observable per request via the `duration_ms` field on each `gateway_operation` line and correlatable by `trace_id`. The in-process fold is often faster than the OS clock granularity, which is why `fak bench` uses an inner calibration loop to measure it. The honest fence: this is the decide-path latency, not a serving-throughput figure; `fak bench`'s gate is a regression sentinel for the decide path that passes only if the in-process p50 beats the spawned-hook baseline.
+
+## How can I check whether a candidate answer or tool result is degenerate before it reaches the model?
+
+Pipe the text through `fak answer-shape`, the consumer-facing witness that grades how repetitive (looping or degenerate) and how long (verbose or runaway) a piece of text is against thresholds you choose. It reports a single `RepeatFraction` in `[0,1]` — the max of four sub-signals (n-gram repeat, repeated-line-block, short-period tiling, and a compression-redundancy signal) so it trips on whichever way the text actually degenerated — plus a rune-length count, and exits 0 in shape, 1 degenerate, and 2 on a usage error so it composes as a pipeline gate. It reads stdin on `-` (or no source), is pure and deterministic, and runs off the hot path with no model, session, or kernel dependency. Tune it with `--max-repeat`, `--max-chars`, and `--ngram`; repetition fractions below a 24-rune floor are reported but never trip the verdict.
+
+```bash
+some_model_output | fak answer-shape --max-repeat 0.5 --max-chars 8000
+```
+
+## What does fak doctor add over fak answer-shape?
+
+`fak doctor` runs the same answer-shape witness AND cross-checks the real kernel admit verdict on the same bytes, then turns each finding into an operator recommendation. It calls `ctxmmu.ScreenBytes` — the exact predicate the kernel's write-time gate uses — so its `KernelAdmit` field reports the gate's actual decision (for example `SECRET_EXFIL`, `TRUST_VIOLATION`, or `OVERSIZE`), not a parallel re-implementation. Note that the kernel's repeat gate is a conservative binary seal (it quarantines only a 16-byte chunk repeated more than 50 times in a body of at least 512 bytes), so `doctor` is most useful for catching the softer loops the binary gate deliberately admits, where the graded answer-shape signal still warns. It exits 0 healthy, 1 when there is at least one finding, and 2 on a usage error, so it drops into CI as a gate over a captured answer — the `fak` analogue of `dos doctor`.
+
+## Limitations and honest scope
+
+The fences, stated plainly — `fak` is built to survive a skeptic reading the code, so the boundaries of what it does are part of the documentation.
+
+## Is the in-kernel model engine ready to serve production traffic?
+
+No, the in-kernel model engine is a bit-exact correctness reference, not a tuned production serving engine, and the README and claims ledger say so plainly. It is a from-scratch pure-Go forward pass whose load-bearing claim is oracle correctness versus a HuggingFace reference, not throughput, and it has no continuous batching, no paged attention, and no multi-tenant scheduler. Forward-pass parity is proven for the llama family (SmolLM2-135M, argmax-exact at every position, final-logit `max|Δ|` about 6e-5); non-llama family parity is open, real-GGUF end-to-end parity is open, and a Qwen3.6-27B multi-token greedy decode was refuted because it diverges from llama.cpp at token index 2. For real serving, run `fak serve` in front of vLLM, SGLang, or llama.cpp instead.
+
+## Why do the cache-reuse savings only apply to self-hosted models?
+
+Because the reuse win comes from owning the KV cache as a kernel object, and an app that merely calls a frontier API never holds that cache, so it gets the safety floor but none of the savings. The roughly 4x figure (versus a tuned warm-cache stack) and the 8.8x to 9.7x figure (measured prefill elimination on the real 643-task WebVoyager dataset, swept across worker counts) are reread-rate reductions over a cache `fak` controls. When you proxy to OpenAI or Anthropic, the provider owns prefix caching upstream, so `fak` is governing the wire rather than eliminating prefill. Front your existing API for the capability floor and result quarantine; go all-in on the fused kernel with a self-hosted model to also get the reuse wins. Every benchmark traces to a commit and artifact in the benchmark authority.
+
+## What does the max|Δ|=0 bit-exactness proof actually guarantee, and what does it not?
+
+It guarantees that when policy evicts a tool-result span from the KV cache, the model's next-token logits are byte-identical to a run that never saw that span, proven at `max|Δ|` of exactly zero with a non-vacuity control that confirms keeping the poison genuinely moves the distribution. That is a strong but narrow claim: it shows reuse and eviction are a faithful shortcut, not a numerical approximation. It does not prove the model is correct, does not prove the detector caught the poison, and for the quarantine-drives-KV-eviction bridge specifically it is witnessed on a synthetic model in `internal/kvmmu` and is not yet wired into the live `fak agent` HTTP loop. The deletion certificate that binds such an eviction to an audit journal is also self-attesting in v1 (integrity, not third-party independence) and proves removal only from the inference working set, not from weights, embeddings, backups, or replicas.
