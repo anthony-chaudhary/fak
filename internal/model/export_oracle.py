@@ -334,6 +334,20 @@ def main():
         if getattr(cfg, "use_qk_norm", None) is not None:
             conf["qk_norm"] = bool(cfg.use_qk_norm)
 
+    # qwen3_5 (Qwen3.6 / Qwen3-Next) hybrid Gated-DeltaNet axes. The Go loader reads the
+    # flat linear_* keys + layer_types to build the linear-attention layers (the rest of
+    # the qwen35 detection — (1+w) RMSNorm, partial RoPE, qk-norm — is derived from the
+    # family + layer_types + rope_parameters already exported above). attn_output_gate is
+    # NOT a config knob in the transformers modeling — the attention module unconditionally
+    # chunks query/gate and applies a sigmoid output gate — so it is pinned True for the
+    # family, exactly as qk-norm is architectural for the qwen3/olmo2 families.
+    if str(getattr(cfg, "model_type", "")).startswith("qwen3_5"):
+        for src in ("linear_conv_kernel_dim", "linear_key_head_dim", "linear_value_head_dim",
+                    "linear_num_key_heads", "linear_num_value_heads", "full_attention_interval"):
+            if getattr(cfg, src, None) is not None:
+                conf[src] = int(getattr(cfg, src))
+        conf["attn_output_gate"] = bool(getattr(cfg, "attn_output_gate", True))
+
     with open(os.path.join(a.out, "config.json"), "w") as f:
         json.dump(conf, f, indent=2)
 

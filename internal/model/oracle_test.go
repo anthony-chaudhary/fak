@@ -32,6 +32,20 @@ const minimaxOracleExportHint = "from fak/: python internal/model/make_minimax_m
 	" && python internal/model/export_oracle.py --online --model " + minimaxOracleModel +
 	" --out internal/model/" + minimaxOracleDir + " --prompt-ids-json '" + minimaxOraclePromptIDsJSON + "'"
 
+// qwen3_5 (Qwen3.6 / Qwen3-Next) Gated-DeltaNet oracle (#447). No public tiny `qwen3_5`
+// checkpoint exists (only the 27B is published), so the fixture is built locally by
+// make_qwen35_tiny.py — a small text-only Qwen3_5ForCausalLM with 3 linear_attention
+// (Gated DeltaNet) layers + 1 gated full_attention layer, instantiable on a plain CPU
+// box with transformers>=5.10 (no GPU / 27B artifact node). This is the witness for the
+// "CPU reference first (bit-exact vs HF)" subtask: HF transformers (which we did NOT
+// author) is the reference the pure-Go qwen35 forward must reproduce to f32 tolerance.
+const qwen35OracleDir = ".cache/oracle-qwen35"
+const qwen35OracleModel = ".cache/qwen35-tiny"
+const qwen35OraclePromptIDsJSON = `[[785,6722,315,9621,374],[16,11,220,17,11,220,18,11,220,19,11],[750,912,2877,11,293,982,262,470]]`
+const qwen35OracleExportHint = "from fak/: python internal/model/make_qwen35_tiny.py " + qwen35OracleModel +
+	" && python internal/model/export_oracle.py --online --model " + qwen35OracleModel +
+	" --out internal/model/" + qwen35OracleDir + " --prompt-ids-json '" + qwen35OraclePromptIDsJSON + "'"
+
 type oraclePrompt struct {
 	Index     int              `json:"index"`
 	Text      string           `json:"text"`
@@ -1255,6 +1269,47 @@ func TestOptionalMiniMaxM3OracleForwardMatchesHFCacheless(t *testing.T) {
 	// checkCachedPrefill=false: only the cacheless Forward is wired for MiniMax-M3; the
 	// incremental Session/KV cache MSA path is a separate gate (as GLM DSA staged it).
 	assertForwardMatchesHFOracleMode(t, resolved, m, doc, false)
+}
+
+// TestOptionalQwen35HybridOracleForwardMatchesHF proves the pure-Go qwen35 forward —
+// the 3 Gated-DeltaNet linear-attention layers plus the gated full-attention layer
+// (output gate + per-head qk-norm + partial RoPE) — reproduces HF transformers to f32
+// tolerance on the tiny fixture: per-layer hidden-state cosine >= 0.9999 and argmax
+// parity at every position. It also asserts the loader DERIVED the qwen35 architectural
+// knobs from the exported config (the (1+w) RMSNorm, qk-norm, the sigmoid output gate,
+// partial rotary) and that the layer mix is genuinely hybrid — so the witness is not
+// vacuous. The fixture is gitignored; regenerate with qwen35OracleExportHint.
+func TestOptionalQwen35HybridOracleForwardMatchesHF(t *testing.T) {
+	const dir = qwen35OracleDir
+	m, doc := loadFixtureDir(t, dir, true)
+	cfg := m.Cfg
+	if !cfg.IsQwen35Hybrid() {
+		t.Fatalf("%s did not load as a qwen3_5 hybrid (layer_types=%v); regenerate: %s",
+			dir, cfg.LayerTypes, qwen35OracleExportHint)
+	}
+	// The hybrid knobs are architectural, not optional, so the loader must derive them;
+	// a missing one would silently change the math and make the parity check meaningless.
+	if !cfg.AttnOutputGate || !cfg.QKNorm || !cfg.NormGain1p {
+		t.Fatalf("%s qwen35 knobs not derived: attn_output_gate=%v qk_norm=%v norm_gain_1p=%v",
+			dir, cfg.AttnOutputGate, cfg.QKNorm, cfg.NormGain1p)
+	}
+	if cfg.PartialRotaryFactor <= 0 || cfg.PartialRotaryFactor >= 1 {
+		t.Fatalf("%s partial rotary factor not loaded from rope_parameters: %v", dir, cfg.PartialRotaryFactor)
+	}
+	nLinear := 0
+	for l := 0; l < cfg.NumLayers; l++ {
+		if cfg.isLinearAttnLayer(l) {
+			nLinear++
+		}
+	}
+	if nLinear == 0 || nLinear == cfg.NumLayers {
+		t.Fatalf("%s layer mix is vacuous: %d/%d linear_attention (need both mixers)", dir, nLinear, cfg.NumLayers)
+	}
+	resolved, _ := resolveOracleDir(dir)
+	// checkCachedPrefill=true: the qwen35 Session.Prefill recurrent path is fully wired
+	// (see TestQwen35HybridSessionMatchesForwardAndPersistsState), so the cached prefill
+	// must also reproduce the cacheless Forward last-position logits.
+	assertForwardMatchesHFOracle(t, resolved, m, doc)
 }
 
 func TestOptionalPhi3LongropeOracleCoversLongFactor(t *testing.T) {

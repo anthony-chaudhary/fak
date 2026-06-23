@@ -87,6 +87,16 @@ peak RSS 25,785,204,736 bytes.)
   maps the real qwen35 GGUF tensors, and `cmd/fakchat` now loads
   `Qwen3.6-27B.q4_k_m.gguf` through fak's GGUF->Q8 path and emits a token with no
   external model server. See `FAK-NATIVE-QWEN35-RESULTS.md`.
+- **CPU reference, bit-exact vs HF**: landed (#447). A tiny text-only `qwen3_5`
+  fixture (`internal/model/make_qwen35_tiny.py`: 3 Gated-DeltaNet + 1 gated
+  full-attention layer) is the f32 witness the pure-Go forward is proven against —
+  `TestOptionalQwen35HybridOracleForwardMatchesHF` reproduces HF transformers'
+  per-layer hidden states (cosine 1.000000, max|Δ| ~4e-9) and argmax at every
+  position. This confirms the hybrid arch math — Gated DeltaNet recurrence, the
+  sigmoid output gate, per-head qk-norm, partial RoPE, and the (1+w) RMSNorm — is
+  numerically correct, so the 27B token-3 drift below is a **scale / kernel-numerics
+  / quant** divergence, not a bug in the reference path. Runs on a plain CPU box
+  (transformers>=5.10), no GPU/27B artifact node needed.
 - **Remaining bar**: fak is not yet speed-parity with llama.cpp on the 27B artifact.
   The broader #93 real-artifact oracle now exists: llama.cpp b9707 returns
   `[248068, 198, 90700]` (`<think>\nThinking`) for the exact 22-token ChatML prompt,
