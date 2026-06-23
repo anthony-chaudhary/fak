@@ -118,6 +118,30 @@ what lets default-deny be the *default* instead of an aspiration. Security and t
 boundary's cost are the same design knob here, which is the [co-design
 thesis](../notes/EXPLAINER-trust-floor-two-lenses-2026-06-17.md) in miniature.
 
+### A worked example: the cost of checking everything, every time
+
+Put numbers on it. On one box (M3 Pro), a single in-process adjudication runs in
+~2.4 µs. The same check reached by spawning a `fak hook` process runs in ~6.9 ms.
+That is about **2,800× more expensive**, and all of the gap is boundary tax, not the
+decision itself (`report.json`).
+
+That ratio is not the headline; what it buys is. Say you want four independent checks
+on every tool call: allow-list, argument deny rule, secret scan, injection screen.
+The agent makes 1,000 tool calls in a session, so that is 4,000 checks.
+
+- **Spawn a hook per check:** 4,000 × 6.9 ms ≈ 28 seconds of pure gate latency,
+  stacked on top of the model. Nobody ships that. So real systems quietly fail open,
+  skipping or time-boxing the check, which leaves the gate weakest exactly when the
+  agent is busiest.
+- **Run each check in-process:** 4,000 × 2.4 µs ≈ 10 ms, lost in the noise next to a
+  single model call. Now "refuse if anything is wrong" costs nothing, so fail-closed
+  can be the default instead of an aspiration.
+
+This is why the placement is load-bearing, and why you want the gate on the call path
+early. The more checks you want and the more tool calls the agent makes, the harder an
+out-of-process gate pushes you toward failing open, and the more an in-process gate
+lets you add checks for free.
+
 ## The adjudicator is a chain, like an LSM — not one filter
 
 "The policy" is not a single `if` statement. It is a ranked chain of small

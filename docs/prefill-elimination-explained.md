@@ -204,6 +204,49 @@ graph TD
     end
 ```
 
+### Worked Example: 2 Agents × 3 Turns, Token by Token
+
+Round numbers, to see exactly where the duplication lives. Two agents work the same
+task. Each shares a **5,000-token** context (system prompt + tools + problem) and
+adds **500 new tokens** per turn. Three turns each.
+
+**A — Naive (re-send everything, every turn):**
+
+```
+Agent 1, Turn 1: send 5,500  → pay 5,500
+Agent 1, Turn 2: send 6,000  → pay 6,000   (re-reads the same 5,000)
+Agent 1, Turn 3: send 6,500  → pay 6,500   (re-reads the same 5,000)
+Agent 2, Turn 1: send 5,500  → pay 5,500   (the 5,000 Agent 1 already paid for)
+Agent 2, Turn 2: send 6,000  → pay 6,000
+Agent 2, Turn 3: send 6,500  → pay 6,500
+                              ─────────────
+                       total: 36,000 tokens paid
+```
+
+**C — fak (shared prefix, prefilled once, reused by all):**
+
+```
+Shared prefill (once):        5,000
+Agent 1, Turn 1: + 500  → pay   500   (prefix is a cache hit)
+Agent 1, Turn 2: + 500  → pay   500
+Agent 1, Turn 3: + 500  → pay   500
+Agent 2, Turn 1: + 500  → pay   500   (same shared prefix — no re-prefill)
+Agent 2, Turn 2: + 500  → pay   500
+Agent 2, Turn 3: + 500  → pay   500
+                              ─────────────
+                       total: 8,000 tokens paid
+```
+
+Same model, same answers: **36,000 → 8,000 tokens, a 4.5× cut on a tiny 2×3 shape.**
+Notice *where* the win comes from. The naive path paid for the 5,000-token prefix
+**six times** (once per agent-turn); fak paid for it **once**. Now scale the shape up:
+that "pay it once" line does not move, while the naive total climbs with every turn
+and every agent. At the real SWE-bench shapes below, the same structure is a 20–24×
+cut.
+
+*(Illustrative round numbers to show the mechanism; the measured numbers follow in
+Part 4.)*
+
 ---
 
 ## Part 4: The Numbers — What We Measured

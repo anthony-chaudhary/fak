@@ -149,6 +149,78 @@ So the useful one-liner is:
 > For read-heavy agent fleets, `fak` turns repeated setup work from "pay every agent,
 > every turn" into "pay once, reuse legally."
 
+## Three worked examples: more turns, more agents, more tool calls
+
+The tables above give the shape; here is what each axis looks like with real
+numbers. Treat the *ratios* as the signal — the absolute speeds are small-model,
+laptop-CPU numbers and beside the point.
+
+### More turns → the win compounds (the quadratic shows up)
+
+A naive loop re-prefills the entire transcript every turn, so its cost grows with
+the *square* of the turn count. `fak` prefills each turn's delta once. Hold the
+shape fixed (a 512-token prefix, 2 agents) and grow only the turn count `T`:
+
+| Turns `T` | `fak` vs naive (A/C) | Naive arm wall-clock | What the naive arm is doing |
+|---:|---:|---:|---|
+| 64 | **24.9×** | 268 s | re-reading a 64-deep transcript on turn 64 |
+| 128 | **39.5×** | 909 s | …a 128-deep one on turn 128 |
+| 256 | **73.2×** | 3,982 s | …a 256-deep one on turn 256 |
+| 512 | **139.3×** | 20,424 s (~5.7 h) | ~4× more work per doubling — the O(T²) signature |
+
+The naive arm's wall-clock roughly quadruples every time `T` doubles (268 → 909 →
+3,982 → 20,424 s). The gap is not a constant tax you pay once; it widens the longer
+the agent runs. Measured on SmolLM2-135M — the warm-cache and fused arms run live,
+the naive arm is modeled from the measured prefill curve and cross-checked to ~0.4%
+(`highT-smollm2-135m-*.json`, per
+[`BENCHMARK-AUTHORITY.md`](https://github.com/anthony-chaudhary/fak/blob/main/BENCHMARK-AUTHORITY.md)).
+
+### More agents → more rereads to delete
+
+The cross-agent saving is **zero with one agent** (nothing to share) and turns
+positive at the second. Think of it as *setup payments*: how many times the shared
+system-prompt-plus-tools block gets prefilled across the whole fleet.
+
+| Fleet shape | Agent-turns | Naive pays setup | Tuned warm-cache | `fak` |
+|---|---:|---:|---:|---:|
+| 1 agent × 1 turn | 1 | 1 | 1 | 1 |
+| 1 agent × 25 turns | 25 | 25 | 1 | 1 |
+| 5 agents × 50 turns | 250 | 250 | 5 | **1** |
+| 50 agents × 50 turns | 2,500 | 2,500 | 50 | **1** |
+
+The naive column *is* the agent-turn count: it pays for the shared setup on every
+turn of every agent. The tuned column pays once per agent (a warm per-agent cache).
+`fak` pays **once, total**, and clones that single prefill bit-identically into every
+agent. The 5×50 row is the published headline — **60.3× wall-clock vs naive, 4.1×
+vs the tuned warm-cache baseline, 62.0× fewer prefill tokens** (`headline-qwen-50x5.json`).
+
+The "but" from above still holds: this is a **read-heavy** result. If agents keep
+*writing* to the shared state, cross-agent reuse can go net-negative — even a ~1%
+write rate can flip it on the default setting.
+
+### More tool calls → the turn that never has to fire
+
+There is a second win that has nothing to do with prefill tokens: the **turn tax**.
+Every extra model round-trip an agent loop is *forced* into is a full
+prefill-plus-decode you pay for. The kernel can resolve some of those conditions
+inside the syscall the call already arrived on, so the round-trip never fires at all.
+
+Replay one real 14-call airline-support trace (`turntaxdemo`) through three lanes and
+count the extra round-trips each is forced into:
+
+| Lane | Extra round-trips | Why |
+|---|---:|---|
+| Naive two-pass loop | **+9** | a malformed arg → re-prompt; a duplicate read → re-issue; a pure/static call → round-trips when it could be served locally |
+| Tuned 2026 framework | **+5** | elides the optional pure/static calls, but is still forced into the recovery round-trips (bad arg, repeated read) |
+| `fak` (1-shot) | **0** | grammar-repairs the bad arg and serves the duplicate/pure call from the vDSO *in the same syscall* — the loop counter stays flat |
+
+So this win grows with **how many tool calls the agent makes**: each malformed,
+duplicate, or pure call is one more round-trip the naive loop pays and `fak` elides.
+On the same trace the safety floor moves the right way too — **1→0 injections** admitted
+to context and **1→0 destructive ops** executed. The turn-savings are a self-host,
+cache-favorable slice (you still get the safety floor when you only *call* a frontier
+API); witness in `TURN-TAX-RESULTS.md`, reproduce with `go run ./cmd/turntaxdemo -print`.
+
 ## Why this is the right layer
 
 The serious agent-security research has already concluded that **you can't build the
