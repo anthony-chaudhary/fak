@@ -56,7 +56,6 @@ Each turns a fuzzy goal into a number you can drive toward zero.
 
 Working docs that track a specific effort. Dated by design; they age out.
 
-- [Scaling laws of agents (2026-06-19)](docs/notes/SCALING-LAWS-OF-AGENTS-2026-06-19.md) — when the cache win kicks in as a fleet grows.
 - [GPU parity tracking (#480)](docs/notes/gpu-parity-tracking-480.md) — bringing the GPU path to parity.
 - [Model-arch seam status (#487)](docs/notes/model-arch-seam-status-487.md) — the model-architecture seam work.
 - [Trust-floor decomposition (#492)](docs/notes/trust-floor-decomposition-492.md) — splitting the trust floor into checkable parts.
@@ -88,6 +87,7 @@ front page.
 - [Grammar-constrained tool-call decoding, upstream vs downstream (2026-06-22)](docs/notes/RESEARCH-grammar-constrained-tool-call-decoding-2026-06-22.md)
 - [idea-scout triage: Tool-Guard / isolated planning — a threat axis fak does not yet gate (2026-06-23)](docs/notes/RESEARCH-tool-guard-isolated-planning-triage-2026-06-23.md)
 - [Ultra-long-context: levels, levers, naming (2026-06-22)](docs/notes/RESEARCH-ultra-long-context-levels-and-naming-2026-06-22.md)
+- [Scaling laws of agents (2026-06-19)](docs/notes/SCALING-LAWS-OF-AGENTS-2026-06-19.md)
 - [Capability floor, a security note (2026-06-18)](docs/notes/SECURITY-capability-floor-2026-06-18.md)
 - [Turn-state demos audit (2026-06-21)](docs/notes/TURN-STATE-DEMOS-AUDIT-AND-DOGFOOD-2026-06-21.md)
 - [Benchmarking visuals status (2026-06-18)](docs/notes/VISUALS-benchmarking-status-2026-06-18.md)
