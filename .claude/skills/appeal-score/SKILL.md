@@ -1,6 +1,6 @@
 ---
 name: appeal-score
-description: One repeatable pass that makes a doc read like a person wrote it, not a model. Runs the doc-appeal scorecard (tools/doc_appeal_scorecard.py), turns each HARD defect into a required edit (em-dash flood, run-on / overlong sentences, walls of text, stacked "X, not Y" contrast frames, LLM-scaffolding phrases) and each SOFT signal into a judgment call, retires appeal-debt worst-axis-first WITHOUT changing any claim, number, or link, re-measures to PROVE the debt dropped, and commits only the doc lane by explicit path. The prose-voice counterpart to refresh-readme (freshness) and quality-score (code). Use to de-LLM-ify the README or any reader-facing prose doc, or on a /loop cadence to keep the front door human.
+description: One repeatable pass that makes a doc read like a person wrote it, not a model. Runs the doc-appeal scorecard (tools/doc_appeal_scorecard.py), turns each HARD defect into a required edit (em-dash flood, bold-emphasis flood, run-on / overlong sentences, walls of text, stacked "X, not Y" contrast frames, a dense or unanchored lead, LLM-scaffolding phrases) and each SOFT signal into a judgment call, retires appeal-debt worst-axis-first WITHOUT changing any claim, number, or link, re-measures to PROVE the debt dropped, and commits only the doc lane by explicit path. The prose-voice counterpart to refresh-readme (freshness) and quality-score (code). Use to de-LLM-ify the README or any reader-facing prose doc, or on a /loop cadence to keep the front door human.
 ---
 
 # appeal-score — make the prose read human, and prove it
@@ -51,17 +51,27 @@ worst-axis-first:
 
 | Tell | Axis | The human fix |
 |---|---|---|
-| **Em-dash flood** (past ~1 per 200 words) | voice | Replace most with a period, comma, colon, or parentheses. Keep a few where the pause truly earns it. |
-| **Overlong sentence** (≥40 words) / **run-on** (≥5 commas) | clarity | Split into two. Pair list items with "and" to cut commas; turn a 6-item enumeration into a real bulleted list. |
-| **Wall of text** (a prose paragraph >110 words) | scannability | Break into 2–3 paragraphs, or lift the structure into a list/table. (A genuine multi-bullet list is exempt — it's already scannable.) |
-| **Stacked contrast frame** ("X, not Y" / "not X, it's Y" past a budget of 2) | voice | Vary the shape: "rather than", "but not", or just rewrite. One or two are punchy; a habit is a tic. |
+| **Em-dash flood** (past ~1 per 285 words) | voice | Replace most with a period, comma, colon, or parentheses. Keep a few where the pause truly earns it. |
+| **Overlong sentence** (≥32 words) / **run-on** (≥4 commas) | clarity | Split into two. Pair list items with "and" to cut commas; turn a 5-item enumeration into a real bulleted list. |
+| **Wall of text** (a prose paragraph >80 words) | scannability | Break into 2–3 paragraphs, or lift the structure into a list/table. (A genuine multi-bullet list is exempt — it's already scannable.) |
+| **Bold-emphasis flood** (past ~1 bold span per 100 words) | voice | Cut to the few emphases that truly guide the eye. A phrase bolded in nearly every line stops guiding anything and reads generated. (Capped, so one flood can't own the axis.) |
+| **Stacked contrast frame** ("X, not Y" / "not X, it's Y" past a budget of 1) | voice | Vary the shape: "rather than", "but not", or just rewrite. One is punchy; a habit is a tic. |
+| **Dense lead** (an essay of prose before the first section break) | priority | Front-load the value; push the framing down. Lift a "what it is / try it" line up so a skimmer reaches the path to value fast. |
+| **Unanchored lead** (no H2 section anchor near the top) | organization | Add an early heading or lift a section up so a skimmer's outline isn't blank until deep in the page. |
 | **LLM-scaffolding phrase** ("here's the thing", "at its core", "it's important to note", "when it comes to") | voice | Cut it, or say the thing plainly. A real Feynman move ("think of it as…", a concrete example) is good and is NOT a tell — keep those. |
 | **Cliché / marketing AI-tell** ("leverage", "seamless", "robust", "best-in-class") | voice | Use the plain word. |
 
-**SOFT signals** (passive-voice density, low sentence-length variety, a
-bold-emphasis flood, hedging, inconsistent name casing) lower the score but are
-**never** appeal-debt; they are writing judgment, not mechanical fact. Weigh
-them rather than grinding on them.
+**SOFT signals** (passive-voice density, low sentence-length variety, an
+emphasis-flood *overflow* past the cap, hedging, inconsistent name casing) lower
+the score but are **never** appeal-debt; they are writing judgment, not
+mechanical fact. Weigh them rather than grinding on them.
+
+> **v2 calibration (2026-06-23).** The thresholds above were tightened after the
+> front door saturated v1 (95/100, four trivial defects): a front page is *skimmed*,
+> so its sentence/paragraph budgets are stricter than a body doc's, the bold flood
+> was promoted SOFT→HARD, and a dense or unanchored lead is now HARD. The README
+> lands in the low 50s on v2 — real headroom again — and an appeal pass drives it
+> back toward the 90s, worst-axis-first.
 
 ---
 
