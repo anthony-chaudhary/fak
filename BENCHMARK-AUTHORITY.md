@@ -17,7 +17,7 @@
 
 | Claim | Number | Model | Baseline | Commit | Artifact |
 |---|---|---|---|---|---|
-| **fak CPU Q8 single-stream vs llama.cpp CPU (M3 Pro)** — CANONICAL | **decode 0.58× (41.9 vs 71.9) · prefill@256 0.45× (247.2 vs 547)** | Qwen2.5-1.5B Q8, M3 Pro | llama.cpp CPU −ngl 0 (71.9 / 547) | `3448d7b` | `model-ladder/qwen25-1.5b-q8-cpu-parity-m3pro.json` ← **single source; read, don't hardcode** |
+| **fak CPU Q8 single-stream vs llama.cpp CPU (M3 Pro)** — CANONICAL | **decode 0.55–0.73× (fak 38.1; llama 68.7 @−t6 → 52.4 @−t12) · prefill@256 0.58× (240.4 vs 412.5)** | Qwen2.5-1.5B Q8, M3 Pro (uncontended) | llama.cpp CPU −ngl 0, build 8200 (`541bf3762`) | _this commit_ | `model-ladder/qwen25-1.5b-q8-cpu-parity-m3pro.json` ← **single source; read, don't hardcode** — 2026-06-23 refresh (HEAD `374776a`, fak 0.31.0). Conservative fence = decode **0.55×** (each engine at its best thread config); equal 12-thread budget = 0.73×. The prior inline `0.58×/0.45× (71.9/547)` cited a non-existent commit and mixed a llama −t6 decode with an older-build prefill — reconciled in `docs/notes/MAC-BENCH-REFRESH-2026-06-23.md` |
 | **RadixAttention live speedup (model ladder)** | **4.58× → 6.95×** | SmolLM2-135M → Qwen2.5-1.5B Q8 | Full re-prefill | `92896a4` | `radixbench-*-agents-fresh-20260619.json` |
 | RadixAttention token speedup | 7.50× | all four models (Q8) | Token count | `92896a4` | Same (`prefill_token_speedup`) |
 | RadixAttention hit rate | 86.7% (FCFS 62.1% → cache-aware) | all four models (Q8) | Cache hits | `92896a4` | Same (100% of optimal) |

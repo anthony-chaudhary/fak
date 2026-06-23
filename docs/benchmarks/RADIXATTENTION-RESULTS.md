@@ -181,6 +181,15 @@ that actually matters against SGLang. (Artifacts: `radixbench-synthetic.json`,
 `radixbench-smollm2-135m-q8.json`; the latter is a heavily contended run, kept for the ratio,
 not the absolute ms.)
 
+> **Uncontended refresh (2026-06-23, M3 Pro, real 1.5B Q8).** The real-model live arm above
+> was SmolLM2-135M on a contended box. A fresh run on an idle Apple M3 Pro with the real
+> Qwen2.5-1.5B Q8 model reproduces the exact hit rates (88.2 / 79.5 / 77.2 / 86.7%) and the
+> scheduling theorem (agents FCFS 62.1% → cache-aware 86.7% = 100% of optimal), and lands the
+> live prefill speedups at **7.01× few-shot · 4.15× multi-turn · 3.69× ToT · 5.84× agents** —
+> inside the model-ladder band, now uncontended. Artifact:
+> `experiments/radixattention/radixbench-qwen2.5-1.5b-q8-m3pro-uncontended-20260623.json`; full
+> writeup in [`../notes/MAC-BENCH-REFRESH-2026-06-23.md`](../notes/MAC-BENCH-REFRESH-2026-06-23.md).
+
 ## The differentiator the LRU cannot offer
 
 RadixAttention evicts **only under memory pressure**, by LRU. Because fak owns the KV cache,

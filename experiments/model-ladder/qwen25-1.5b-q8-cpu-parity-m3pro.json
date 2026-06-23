@@ -1,163 +1,85 @@
 {
-  "_doc": "Single-stream CPU Q8 parity: fak in-kernel vs llama.cpp CPU, Qwen2.5-1.5B-Instruct Q8_0, Apple M3 Pro. The canonical SOTA-parity baseline cited by BENCHMARK-AUTHORITY.md. Read these ratios; do not hardcode. This is the HONEST FENCE row (fak trails single-stream raw throughput by design); fak's value is the fleet-reuse layer ON TOP, measured elsewhere.",
-  "schema": "fak-cpu-parity/1",
-  "date": "2026-06-21",
-  "machine": "node-macos-a / Apple M3 Pro (12 core, arm64) / 36GB unified / macOS 26.5",
+  "_doc": "Single-stream CPU Q8 parity: fak in-kernel vs llama.cpp CPU, Qwen2.5-1.5B-Instruct Q8_0, Apple M3 Pro. The canonical SOTA-parity baseline cited by BENCHMARK-AUTHORITY.md. Read these ratios; do not hardcode. This is the HONEST FENCE row (fak trails single-stream raw throughput by design); fak's value is the fleet-reuse layer ON TOP, measured elsewhere. 2026-06-23 refresh: re-measured uncontended on node-macos-a at HEAD 374776a (fak 0.31.0, same llama.cpp build 541bf3762/8200). Reproduces the prior baseline within noise AND adds a thread-count sensitivity arm (-t 6 vs -t 12) that explains a long-standing discrepancy with the stale BENCHMARK-AUTHORITY inline numbers (those cited a non-existent commit 3448d7b and a llama -t 6 decode + an older-build prefill).",
+  "schema": "fak-cpu-parity/2",
+  "date": "2026-06-23",
+  "prior_date": "2026-06-21",
+  "commit": "374776a",
+  "machine": "node-macos-a / Apple M3 Pro (12 core = 6P+6E, arm64) / 36GB unified / macOS 26.5",
   "model": "Qwen2.5-1.5B-Instruct, Q8_0",
-  "regime": "single-stream, CPU-only, apples-to-apples (both engines CPU, same machine, same Q8 weights)",
-  "methodology": "fak arm: cmd/modelbench -hf <safetensors> -lean (quantize-at-load Q8_0), decode 32 steps x5 reps, prefill P=256 x3 reps, GOMAXPROCS=12. llama.cpp arm: llama-bench -ngl 0 (CPU) -t 12 -p 256 -n 32 -r 3 on the matching q8_0 GGUF. Both single-stream; no batching, no reuse. fak app_version 0.30.0; llama.cpp build 541bf3762.",
+  "regime": "single-stream, CPU-only, apples-to-apples (both engines CPU, same machine, same Q8 weights, uncontended box)",
+  "methodology": "fak arm: cmd/modelbench -hf <safetensors> -lean (quantize-at-load Q8_0), decode 32 steps x10 reps, prefill P=256 x5 reps. llama.cpp arm: llama-bench -ngl 0 (CPU) -p 256 -n 32 -r 10 on the matching q8_0 GGUF. CANONICAL arm pins BOTH engines to the SAME thread budget (12). A SENSITIVITY arm re-runs both at 6 threads (P-cores only) — this is the load-bearing methodology fact below. fak app_version 0.31.0; llama.cpp build 541bf3762 (8200).",
   "metrics": {
+    "_canonical": "equal 12-thread budget for both engines (the apples-to-apples thread comparison the prior baseline used; reproduces 2026-06-21 within noise)",
     "decode": {
-      "fak_tok_per_sec": 38.29,
-      "llamacpp_tok_per_sec": 53.335,
-      "fak_over_llamacpp": 0.7179
+      "fak_tok_per_sec": 38.065806,
+      "llamacpp_tok_per_sec": 52.439120,
+      "fak_over_llamacpp": 0.7259,
+      "threads": 12
     },
     "prefill_p256": {
-      "fak_tok_per_sec": 242.019,
-      "llamacpp_tok_per_sec": 418.463,
-      "fak_over_llamacpp": 0.5784
+      "fak_tok_per_sec": 240.448069,
+      "llamacpp_tok_per_sec": 412.506876,
+      "fak_over_llamacpp": 0.5829,
+      "threads": 12
+    },
+    "_conservative_fence": "each engine at its OWN best thread config (fak decode peaks at 12 cores; llama decode peaks at 6 P-cores). This is the most-conservative, least-fak-flattering decode number — quote THIS when a single fence figure is wanted.",
+    "decode_each_at_best": {
+      "fak_tok_per_sec": 38.065806,
+      "fak_threads": 12,
+      "llamacpp_tok_per_sec": 68.704277,
+      "llamacpp_threads": 6,
+      "fak_over_llamacpp": 0.5541
+    },
+    "prefill_p256_each_at_best": {
+      "fak_tok_per_sec": 240.448069,
+      "fak_threads": 12,
+      "llamacpp_tok_per_sec": 412.506876,
+      "llamacpp_threads": 12,
+      "fak_over_llamacpp": 0.5829,
+      "note": "both engines' prefill peaks at 12 threads, so prefill each-at-best == same-thread@12"
     }
   },
-  "honesty_fence": "fak trails llama.cpp CPU single-stream (decode 0.72x, prefill@256 0.58x) \u2014 llama.cpp has the hand-tuned arm64 NEON GEMM fak's pure-Go kernel still lacks. This is the documented single-stream loss; fak's win is the cross-agent fleet-reuse layer (4.1x vs tuned warm-KV), not raw tok/s. Never cross-compare the two regimes.",
+  "thread_sensitivity": {
+    "finding": "llama.cpp single-stream DECODE is memory-bandwidth-bound and runs FASTER on P-cores only: 68.70 tok/s at -t 6 vs 52.44 at -t 12 (1.31x), and far more stable (stddev 0.19 vs 3.92 tok/s) — the 6 E-cores add contention without bandwidth. fak's pure-Go decode is compute-parallel and wants all 12 cores (38.07 @12 vs 21.81 @6, 1.75x). fak PREFILL is GEMM-bound and scales hard with cores (240.45 @12 vs 35.15 @6, 6.84x). Net: at equal 12-thread budget fak is 0.73x llama decode; at each-engine-best it is 0.55x. The prior BENCHMARK-AUTHORITY inline '0.58x decode (41.9 vs 71.9)' matched a llama -t 6 decode; its '0.45x prefill (247.2 vs 547)' matched an OLDER llama build (the current 541bf3762 build prefills 388-412, not 547).",
+    "fak_threads_6": {"decode_tok_per_sec": 21.807574, "prefill_p256_tok_per_sec": 35.148619},
+    "fak_threads_12": {"decode_tok_per_sec": 38.065806, "prefill_p256_tok_per_sec": 240.448069},
+    "llamacpp_threads_6": {"decode_tok_per_sec": 68.704277, "decode_stddev": 0.194091, "prefill_p256_tok_per_sec": 388.021537, "prefill_stddev": 1.273315},
+    "llamacpp_threads_12": {"decode_tok_per_sec": 52.439120, "decode_stddev": 3.918602, "prefill_p256_tok_per_sec": 412.506876, "prefill_stddev": 9.187045}
+  },
+  "honesty_fence": "fak trails llama.cpp CPU single-stream — decode 0.73x at equal 12-thread budget (0.55x if llama is given its best P-cores-only config), prefill@256 0.58x. llama.cpp has the hand-tuned arm64 NEON GEMM + Accelerate BLAS fak's pure-Go kernel still lacks. This is the documented single-stream loss; fak's win is the cross-agent fleet-reuse layer (4.1x vs tuned warm-KV), not raw tok/s. Never cross-compare the two regimes.",
+  "reconciliation_note": "The 2026-06-21 artifact reported decode 0.72x / prefill 0.58x at -t 12; BENCHMARK-AUTHORITY.md inline reported 0.58x / 0.45x citing commit 3448d7b (which does not exist in the public repo). This refresh resolves the conflict: both are real but measured different things (thread count + llama build). The canonical same-12-thread ratio is 0.73x/0.58x; the conservative each-at-best decode is 0.55x. See docs/notes/MAC-BENCH-REFRESH-2026-06-23.md.",
   "arms": {
-    "fak": {
-      "app_version": "0.30.0",
-      "backend": {
-        "registered_backends": [
-          "cpu-ref"
-        ],
-        "selected": "legacy"
-      },
-      "budget": "default(GOMAXPROCS)",
-      "decode": {
-        "prompt_tokens": 16,
-        "decode_steps": 32,
-        "reps": 5,
-        "per_token_median_ms": 26.116446,
-        "tok_per_sec": 38.29004911311439
-      },
-      "engine": "fak-in-kernel Q8_0 (pure-Go, quantized weights+activations, int8\u00d7int8\u2192int32 dot)",
-      "go_threads": "GOMAXPROCS=12, matmul workers=12 (FAK_WORKERS / FAK_BUDGET / -budget to pin)",
+    "fak_t12": {
+      "app_version": "0.31.0",
+      "backend": {"registered_backends": ["cpu-ref"], "selected": "legacy"},
+      "budget": "default(GOMAXPROCS=12)",
+      "decode": {"prompt_tokens": 16, "decode_steps": 32, "reps": 10, "per_token_median_ms": 26.270296, "tok_per_sec": 38.065806338839884},
+      "engine": "fak-in-kernel Q8_0 (pure-Go, quantized weights+activations, int8×int8→int32 dot)",
+      "go_threads": "GOMAXPROCS=12, matmul workers=12",
       "lean": true,
-      "load_ms": 4204.03825,
+      "load_ms": 3939.338583,
       "model": "qwen2.5-1.5b-instruct (qwen2) [lean]",
       "precision": "Q8_0",
-      "prefill": [
-        {
-          "tokens": 256,
-          "reps": 3,
-          "median_ms": 1057.770042,
-          "tok_per_sec": 242.01857666148575
-        }
-      ],
-      "quant_ms": 0.000125,
+      "prefill": [{"tokens": 256, "reps": 5, "median_ms": 1064.678959, "tok_per_sec": 240.44806919115604}],
       "quantized_at_load": true,
-      "source": "~/models/qwen2.5-1.5b-instruct/model.safetensors (quantize-at-load)",
+      "source": "~/.cache/fak-models/qwen2.5-1.5b-instruct/model.safetensors (quantize-at-load)",
       "workers": 12
     },
-    "llamacpp": [
-      {
-        "build_commit": "541bf3762",
-        "build_number": 8200,
-        "cpu_info": "Accelerate, Apple M3 Pro",
-        "gpu_info": "Apple M3 Pro",
-        "backends": "MTL,BLAS",
-        "model_filename": "~/.cache/fak-models/gguf/qwen2.5-1.5b-instruct-q8_0.gguf",
-        "model_type": "qwen2 1.5B Q8_0",
-        "model_size": 1888581632,
-        "model_n_params": 1777088000,
-        "n_batch": 2048,
-        "n_ubatch": 512,
-        "n_threads": 12,
-        "cpu_mask": "0x0",
-        "cpu_strict": false,
-        "poll": 50,
-        "type_k": "f16",
-        "type_v": "f16",
-        "n_gpu_layers": 0,
-        "n_cpu_moe": 0,
-        "split_mode": "layer",
-        "main_gpu": 0,
-        "no_kv_offload": false,
-        "flash_attn": false,
-        "devices": "auto",
-        "tensor_split": "0.00",
-        "tensor_buft_overrides": "none",
-        "use_mmap": false,
-        "use_direct_io": false,
-        "embeddings": false,
-        "no_op_offload": 0,
-        "no_host": false,
-        "n_prompt": 256,
-        "n_gen": 0,
-        "n_depth": 0,
-        "test_time": "2026-06-22T00:58:24Z",
-        "avg_ns": 611798514,
-        "stddev_ns": 5696372,
-        "avg_ts": 418.462702,
-        "stddev_ts": 3.912984,
-        "samples_ns": [
-          613779959,
-          616239500,
-          605376084
-        ],
-        "samples_ts": [
-          417.088,
-          415.423,
-          422.878
-        ]
-      },
-      {
-        "build_commit": "541bf3762",
-        "build_number": 8200,
-        "cpu_info": "Accelerate, Apple M3 Pro",
-        "gpu_info": "Apple M3 Pro",
-        "backends": "MTL,BLAS",
-        "model_filename": "~/.cache/fak-models/gguf/qwen2.5-1.5b-instruct-q8_0.gguf",
-        "model_type": "qwen2 1.5B Q8_0",
-        "model_size": 1888581632,
-        "model_n_params": 1777088000,
-        "n_batch": 2048,
-        "n_ubatch": 512,
-        "n_threads": 12,
-        "cpu_mask": "0x0",
-        "cpu_strict": false,
-        "poll": 50,
-        "type_k": "f16",
-        "type_v": "f16",
-        "n_gpu_layers": 0,
-        "n_cpu_moe": 0,
-        "split_mode": "layer",
-        "main_gpu": 0,
-        "no_kv_offload": false,
-        "flash_attn": false,
-        "devices": "auto",
-        "tensor_split": "0.00",
-        "tensor_buft_overrides": "none",
-        "use_mmap": false,
-        "use_direct_io": false,
-        "embeddings": false,
-        "no_op_offload": 0,
-        "no_host": false,
-        "n_prompt": 0,
-        "n_gen": 32,
-        "n_depth": 0,
-        "test_time": "2026-06-22T00:58:27Z",
-        "avg_ns": 603740486,
-        "stddev_ns": 60024769,
-        "avg_ts": 53.335327,
-        "stddev_ts": 5.015365,
-        "samples_ns": [
-          673038167,
-          570251792,
-          567931500
-        ],
-        "samples_ts": [
-          47.5456,
-          56.1156,
-          56.3448
-        ]
-      }
+    "fak_t6": {
+      "app_version": "0.31.0",
+      "budget": "6 (-budget 6, P-core sensitivity)",
+      "decode": {"prompt_tokens": 16, "decode_steps": 32, "reps": 10, "tok_per_sec": 21.807573979795894},
+      "prefill": [{"tokens": 256, "reps": 5, "tok_per_sec": 35.14861936377601}],
+      "precision": "Q8_0",
+      "workers": 6
+    },
+    "llamacpp_t12": [
+      {"build_commit": "541bf3762", "build_number": 8200, "cpu_info": "Accelerate, Apple M3 Pro", "backends": "MTL,BLAS", "model_filename": "~/.cache/fak-models/gguf/qwen2.5-1.5b-instruct-q8_0.gguf", "model_type": "qwen2 1.5B Q8_0", "n_threads": 12, "n_gpu_layers": 0, "n_prompt": 256, "n_gen": 0, "avg_ts": 412.506876, "stddev_ts": 9.187045},
+      {"build_commit": "541bf3762", "build_number": 8200, "n_threads": 12, "n_gpu_layers": 0, "n_prompt": 0, "n_gen": 32, "avg_ts": 52.439120, "stddev_ts": 3.918602}
+    ],
+    "llamacpp_t6": [
+      {"build_commit": "541bf3762", "build_number": 8200, "n_threads": 6, "n_gpu_layers": 0, "n_prompt": 256, "n_gen": 0, "avg_ts": 388.021537, "stddev_ts": 1.273315},
+      {"build_commit": "541bf3762", "build_number": 8200, "n_threads": 6, "n_gpu_layers": 0, "n_prompt": 0, "n_gen": 32, "avg_ts": 68.704277, "stddev_ts": 0.194091}
     ]
   }
 }

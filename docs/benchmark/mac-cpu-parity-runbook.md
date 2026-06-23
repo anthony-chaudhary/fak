@@ -11,13 +11,22 @@ measured separately — never cross-compare the two regimes.
 Both engines on **CPU only**, same machine, same Q8 weights, single stream (no batching, no
 reuse) — apples-to-apples:
 
-| Metric | fak (Q8) | llama.cpp CPU (Q8) | fak/llama.cpp |
+| Metric (equal 12-thread budget) | fak (Q8) | llama.cpp CPU (Q8) | fak/llama.cpp |
 |---|---:|---:|---:|
-| Decode | 38.3 tok/s | 53.3 tok/s | **0.72×** |
-| Prefill @256 | 242.0 tok/s | 418.5 tok/s | **0.58×** |
+| Decode | 38.1 tok/s | 52.4 tok/s | **0.73×** |
+| Prefill @256 | 240.4 tok/s | 412.5 tok/s | **0.58×** |
 
-*(Apple M3 Pro, Qwen2.5-1.5B-Instruct Q8_0; fak `0.30.0`; llama.cpp build `541bf3762`.
-Read the JSON's `metrics.*.fak_over_llamacpp` fields — do not hardcode the ratios.)*
+*(Apple M3 Pro, Qwen2.5-1.5B-Instruct Q8_0; fak `0.31.0`, HEAD `374776a`; llama.cpp build
+`541bf3762`/8200; 2026-06-23 refresh. Read the JSON's `metrics.*.fak_over_llamacpp` fields —
+do not hardcode the ratios.)*
+
+> **Thread-count matters, and it is the load-bearing caveat.** llama.cpp single-stream decode
+> is memory-bandwidth-bound and runs *faster* on P-cores only: **68.7 tok/s at `-t 6`** (and
+> far more stable) vs 52.4 at `-t 12`, because the 6 efficiency cores add contention without
+> bandwidth. fak's pure-Go decode is compute-parallel and wants all 12 (38.1 @12 vs 21.8 @6).
+> So at equal 12-thread budget fak is **0.73×** llama decode; with each engine at its own best
+> config the **conservative fence is 0.55×** (fak 38.1 @12 vs llama 68.7 @6). Quote the 0.55×
+> when one figure is wanted. Reconciliation: [`../notes/MAC-BENCH-REFRESH-2026-06-23.md`](../notes/MAC-BENCH-REFRESH-2026-06-23.md).
 
 The gap is the hand-tuned arm64 NEON GEMM llama.cpp has and fak's pure-Go kernel does not yet.
 It *narrows* with model size (decode 0.39× → 0.53× across the 1.5B→7B ladder) and closes as the

@@ -53,10 +53,15 @@
         "node-macos-a-sessionbench-20260619",
         "node-macos-a-qwen36-llamacpp-vulkan-qwen-20260619",
         "node-macos-a-qwen36-llamacpp-vulkan-qwen-20260619",
-        "node-macos-a-qwen36-llamacpp-qwen36-mult-20260619"
+        "node-macos-a-qwen36-llamacpp-qwen36-mult-20260619",
+        "node-macos-a-cpu-q8-parity-qwen25-1.5b-20260623",
+        "node-macos-a-radix-qwen25-1.5b-uncontended-20260623"
       ]
     },
     "by_model": {
+      "Qwen2.5-1.5B-Instruct": [
+        "node-macos-a-cpu-q8-parity-qwen25-1.5b-20260623"
+      ],
       "SmolLM2-135M": [
         "workstation-a-smollm2-135m-q8_0-20260618"
       ],
@@ -99,6 +104,9 @@
       ],
       "multi-agent-session": [
         "node-macos-a-sessionbench-20260619"
+      ],
+      "qwen2.5-1.5b-instruct": [
+        "node-macos-a-radix-qwen25-1.5b-uncontended-20260623"
       ],
       "qwen2.5-3b (qwen2) [lean]": [
         "workstation-a-gpu-qwen2.5-3b-(qwen2)-[lean]-20260619"
@@ -145,7 +153,9 @@
       "Q8_0": [
         "workstation-a-gpu-qwen2.5-3b-(qwen2)-[lean]-20260619",
         "gcp-g2-l4-nvidia-l4-20260620T155017Z",
-        "gcp-g2-l4-nvidia-l4-20260620T164719Z"
+        "gcp-g2-l4-nvidia-l4-20260620T164719Z",
+        "node-macos-a-cpu-q8-parity-qwen25-1.5b-20260623",
+        "node-macos-a-radix-qwen25-1.5b-uncontended-20260623"
       ],
       "n/a": [
         "node-agent-live-offline-mock-20260617",
@@ -205,7 +215,7 @@
       ]
     }
   },
-  "last_updated": "2026-06-22T13:17:28.519481+00:00",
+  "last_updated": "2026-06-23T09:56:46.270434+00:00",
   "machines": {
     "a100": {
       "arch": "x86_64",
@@ -246,10 +256,10 @@
       "gpu": "Apple M3 Pro 18-core GPU",
       "hostname": "node-macos-a",
       "id": "node-macos-a",
-      "last_run": "20260619T180836Z",
+      "last_run": "20260623T094617Z",
       "os": "macOS",
       "role": "bench-node",
-      "runs": 7
+      "runs": 9
     },
     "workstation-a": {
       "arch": "x86_64",
@@ -1033,6 +1043,38 @@
         "experiment"
       ],
       "timestamp": "20260619T180836Z"
+    },
+    {
+      "baseline_tok_per_sec": null,
+      "machine_id": "node-macos-a",
+      "model": "Qwen2.5-1.5B-Instruct",
+      "path": "experiments/benchmark/runs/by-machine/node-macos-a/20260623T094617Z-cpu-q8-parity",
+      "peak_tok_per_sec": 38.07,
+      "precision": "Q8_0",
+      "run_id": "node-macos-a-cpu-q8-parity-qwen25-1.5b-20260623",
+      "speedup": null,
+      "tags": [
+        "model-benchmark",
+        "cpu-q8-parity",
+        "decode"
+      ],
+      "timestamp": "20260623T094617Z"
+    },
+    {
+      "baseline_tok_per_sec": null,
+      "machine_id": "node-macos-a",
+      "model": "qwen2.5-1.5b-instruct",
+      "path": "experiments/benchmark/runs/by-machine/node-macos-a/20260623T094305Z-radix",
+      "peak_tok_per_sec": null,
+      "precision": "Q8_0",
+      "run_id": "node-macos-a-radix-qwen25-1.5b-uncontended-20260623",
+      "speedup": null,
+      "tags": [
+        "radix-benchmark",
+        "cache-hit-rate",
+        "uncontended"
+      ],
+      "timestamp": "20260623T094305Z"
     }
   ],
   "version": "1.0"
