@@ -60,6 +60,15 @@ type Policy struct {
 	// invoked with a malicious argument is refused AT THE FLOOR, not waved through
 	// to the (evadable) detection layer.
 	ArgPredicates []ArgPredicate
+	// LintWrites (opt-in, issue #536) turns on the in-process code-lint rung for
+	// whole-file writes: a write of unparseable Go/JSON is refused with MALFORMED
+	// before it lands — the in-kernel dual of codelint's advisory write-lint. Off
+	// by default, so an existing floor is byte-for-byte unchanged unless an
+	// operator asks for it. Only the Go and JSON grammars are consulted (they
+	// parse in-process via the stdlib, so architest's TestHotPathHasNoExec stays
+	// green); languages whose only checkers shell out (Python/CUDA) DEFER — fail
+	// open, never denying over a quality signal the decide path cannot produce.
+	LintWrites bool
 }
 
 // Posture selects the policy's default-deny behavior after all provable refusal
@@ -276,6 +285,26 @@ func (a *Adjudicator) Adjudicate(ctx context.Context, c *abi.ToolCall) abi.Verdi
 	if len(argPreds) > 0 {
 		if v, denied := evalArgPredicates(argPreds, c.Tool, args); denied {
 			return v
+		}
+	}
+
+	// LINT-WRITES (opt-in, #536): a whole-file write of unparseable code is a
+	// PROVABLE refusal — Deny(MALFORMED) with a bounded file:line:col witness,
+	// the in-kernel dual of codelint's advisory write-lint. Scoped to whole-file
+	// writes so a partial edit (a fragment that would never parse standalone) is
+	// never false-denied. The Go/JSON grammars parse in-process (stdlib, no exec,
+	// so the decide path stays subprocess-free); any other language has no
+	// in-process checker here and DEFERs (fail open — lint is a quality signal,
+	// not a security gate). Bounded disclosure: the witness names only the first
+	// finding, never the file content.
+	if p.LintWrites && wholeFileWrite(c.Tool) {
+		if w := lintWriteMalformed(targetPath(args), args); w != "" {
+			return abi.Verdict{
+				Kind:    abi.VerdictDeny,
+				Reason:  abi.ReasonMalformed,
+				By:      "monitor",
+				Payload: abi.WitnessPayload{Claim: w},
+			}
 		}
 	}
 

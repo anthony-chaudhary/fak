@@ -328,3 +328,32 @@ func TestReasonByNameInverse(t *testing.T) {
 		t.Error("ReasonByName should reject an unknown name")
 	}
 }
+
+// TestLintWritesLoadsAndRoundTrips: the opt-in write-lint rung (#536) is a real
+// operator surface — `lint_writes: true` in a manifest turns on
+// adjudicator.Policy.LintWrites, omitted means off, and FromPolicy/ToPolicy
+// round-trip it exactly so --dump/--check stay honest.
+func TestLintWritesLoadsAndRoundTrips(t *testing.T) {
+	on, err := Parse([]byte(`{"lint_writes":true,"allow":["write_file"]}`))
+	if err != nil {
+		t.Fatalf("Parse lint_writes:true: %v", err)
+	}
+	if !on.LintWrites {
+		t.Fatal("lint_writes:true must set Policy.LintWrites")
+	}
+
+	off, err := Parse([]byte(`{"allow":["write_file"]}`))
+	if err != nil {
+		t.Fatalf("Parse omitted lint_writes: %v", err)
+	}
+	if off.LintWrites {
+		t.Fatal("omitted lint_writes must default to false (off by default)")
+	}
+
+	for _, p := range []adjudicator.Policy{on, off} {
+		got, err := FromPolicy(p).ToPolicy()
+		if err != nil || !reflect.DeepEqual(got, p) {
+			t.Fatalf("lint_writes round-trip mismatch err=%v got=%+v want=%+v", err, got, p)
+		}
+	}
+}

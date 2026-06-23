@@ -131,7 +131,7 @@ unlinted, never an error. That is the whole contract.
 
 ## Where it's wired
 
-Two surfaces, today:
+Three surfaces, today:
 
 - `fak codelint PATH...` runs the packs over files or whole directories and exits
   non-zero on a hard error. It is the code-content dual of `fak lint`, which checks
@@ -143,12 +143,14 @@ Two surfaces, today:
   discovering the breakage downstream. It is off by default, so a benchmark run's
   numbers don't move unless you ask for it, and the write always lands — the
   diagnostic is advice, not a veto.
-
-The deeper integration — a write-scoped verdict in the adjudicator itself, so a
-broken write is refused with a `MALFORMED` reason the model can act on — is a natural
-next rung. It would route the lint through the kernel's existing out-of-process
-verification seam rather than forcing exec onto the decide path, keeping the rule
-above intact. The pieces are in place; the leaf is the part that was missing.
+- The adjudicator's opt-in `LintWrites` rung (#536) turns the advisory append into
+  a verdict: under the `lint_writes` manifest field (off by default), a whole-file
+  write of unparseable Go/JSON is refused with a `MALFORMED` reason and a bounded
+  `file:line:col` witness before it lands. Only the in-process Go/JSON grammars run
+  here — the rule that the decide path never shells out is why the Python/CUDA packs
+  stay on the advisory fleet path and a write in those languages (or a partial edit,
+  or any unlinted language) DEFERs rather than denies. Lint is a quality signal, so
+  the rung fails open everywhere it cannot produce a real opinion.
 
 ## Try every pack
 

@@ -74,6 +74,11 @@ type Manifest struct {
 	// form of adjudicator.ArgPredicate. They extend the floor from "which tool"
 	// to "which tool with which argument values". See ArgRule for the matchers.
 	ArgRules []ArgRule `json:"arg_rules,omitempty"`
+	// LintWrites (opt-in, issue #536) turns on the in-process code-lint rung for
+	// whole-file writes: a write of unparseable Go/JSON is refused with MALFORMED
+	// before it lands. Off by default; languages whose only checkers shell out
+	// (Python/CUDA) defer (fail open). Maps 1:1 to adjudicator.Policy.LintWrites.
+	LintWrites bool `json:"lint_writes,omitempty"`
 }
 
 // AuthorizeRule releases a tainted flow into one exact sink tool/class. It is
@@ -224,6 +229,7 @@ func (m Manifest) ToRuntime() (Runtime, error) {
 		return Runtime{}, err
 	}
 	p.ArgPredicates = argPreds
+	p.LintWrites = m.LintWrites
 	sources, err := compileSources(m.Sources)
 	if err != nil {
 		return Runtime{}, err
@@ -311,6 +317,7 @@ func FromPolicy(p adjudicator.Policy) Manifest {
 			m.ArgRules = append(m.ArgRules, r)
 		}
 	}
+	m.LintWrites = p.LintWrites
 	return m
 }
 
