@@ -35,9 +35,18 @@ export CGO_ENABLED=1
 export CGO_CFLAGS="-I$CUDA_HOME/include"
 export CGO_LDFLAGS="-L$PKG -L$CUDA_HOME/lib64 -Wl,-rpath,$CUDA_HOME/lib64"
 export LD_LIBRARY_PATH="$CUDA_HOME/lib64:${LD_LIBRARY_PATH:-}"
+# Two isolated runs (separate processes, so the global cuda graph/exec state never leaks between
+# them — the reason this witness avoids the full -tags cuda suite's combined-run graph-path panic):
+#   1) the all-device GLM-DSA forward (#86/#413): MoE/FFN + head + DSA projections + sparse attend.
+#   2) the --n-cpu-moe CPU-offload hybrid: experts host-resident, dense + router + DSA attention on
+#      the GPU (k_q8_gemm + k_dsa_sparse_attend), argmax-exact vs the all-host CPU Q8 reference.
 say "go test -tags cuda -run TestCUDAGLMMoeDsaBackendForward ./internal/model/ -v"
 go test -tags cuda -count=1 -v -run '^TestCUDAGLMMoeDsaBackendForward$' ./internal/model/
-rc=$?
-say "GLM GPU WITNESS DONE rc=$rc"
+rc1=$?
+say "go test -tags cuda -run TestCUDAGLMDsaCPUOffloadHybrid ./internal/model/ -v"
+go test -tags cuda -count=1 -v -run '^TestCUDAGLMDsaCPUOffloadHybrid$' ./internal/model/
+rc2=$?
+rc=$rc1; [ "$rc2" -ne 0 ] && rc=$rc2
+say "GLM GPU WITNESS DONE rc1=$rc1 (all-device forward) rc2=$rc2 (cpu-offload hybrid) -> rc=$rc"
 echo done >"$WORK/DONE.$rc"
 exit "$rc"
