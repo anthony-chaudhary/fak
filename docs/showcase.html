@@ -448,19 +448,19 @@ go run ./cmd/fak agent --offline
 </section>
 
 <!-- ============================ EACH WIN, BY EXAMPLE ============================ -->
-<!-- The two flips + the cost collapse, each shrunk to one worked example. Numbers trace to
-     BENCHMARK-AUTHORITY.md and the explainer worked-example sections this links out to. The
-     monospace diagrams are plain text in <pre>; the colour spans add no width, so columns
-     align on the literal characters. -->
+<!-- The two flips + the cost collapse + the same-boundary code check, each shrunk to one worked
+     example. Numbers trace to BENCHMARK-AUTHORITY.md and the explainer worked-example sections this
+     links out to (the 5th card is a correctness win, so it carries no number). The monospace diagrams
+     are plain text in <pre>; the colour spans add no width, so columns align on the literal chars. -->
 <section id="by-example" style="padding-top:8px">
   <div class="wrap reveal">
     <div class="sec-head">
       <span class="sec-num">02 — each win, in one example</span>
     </div>
-    <h2 class="sec-head" style="margin:0">Four ideas, four worked examples</h2>
+    <h2 class="sec-head" style="margin:0">Five ideas, five worked examples</h2>
     <p class="sec-sub">
-      The two flips and the cost collapse, each shrunk to one example you can read in ten seconds.
-      Every number traces to
+      The two flips and the cost collapse, plus the same boundary checking the code the agent itself
+      writes — each shrunk to one example you can read in ten seconds. Every number traces to
       <a href="https://github.com/anthony-chaudhary/fak/blob/main/BENCHMARK-AUTHORITY.md" style="color:var(--fak)">BENCHMARK-AUTHORITY.md</a>.
     </p>
 
@@ -523,6 +523,21 @@ evict  <span class="d">[ system ][ query ]</span>            <span class="k">que
         <p>Putting the gate on the call path is what lets "refuse if anything is wrong" be the default
         instead of an aspiration. The more checks you want, the more the placement pays.</p>
         <div class="ex-foot"><a href="explainers/policy-in-the-kernel.html#a-worked-example-the-cost-of-checking-everything-every-time">Full walkthrough &#8594;</a></div>
+      </div>
+
+      <!-- 5. codelint — the same boundary checks the agent's OWN output (a correctness win, no number) -->
+      <div class="ex" style="grid-column:1/-1">
+        <h4>The write that fixes itself</h4>
+        <div class="ex-q">linting agent code · the same boundary checks the code the model writes</div>
+        <pre>agent writes   <span class="b">func (s *Store) Put(</span>      <span class="d">truncated — never parses</span>
+  no check     <span class="d">lands, looks fine &#8594; go build fails 3 turns later &#8594; a recovery turn</span>
+  fak codelint <span class="k">store.go:3:8: expected ')', found 'EOF'</span>   <span class="d">stapled to the same turn's result</span>
+  agent        <span class="g">re-issues a correct write</span>          <span class="d">the breakage never reaches the build</span></pre>
+        <p>A file write is just a tool call, so the boundary that adjudicates it can also ask whether the
+        bytes parse. Go and JSON check in-process; Python and CUDA shell out off the hot path. The
+        diagnostic is advice clipped to the result, not a veto, so a checker that is ever wrong cannot
+        wedge the loop.</p>
+        <div class="ex-foot"><a href="explainers/code-linting-at-the-kernel.html#a-worked-example-the-write-that-fixes-itself">Full walkthrough &#8594;</a></div>
       </div>
 
     </div>
