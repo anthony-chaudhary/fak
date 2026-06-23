@@ -111,7 +111,8 @@ crafted injection that never trips the matcher is never quarantined. fak makes t
 *decision* durable and re-screenable; it does **not** make the *decision* smart. The
 detector is the next thing to harden — and the re-screen is the seam through which a
 better detector retroactively re-catches old evasions. Two things make this survivable
-rather than fatal: (1) a peer's `normgate` (a rank-5 normalized-view driver) already
+rather than fatal: (1) a peer's `normgate` (a normalized-view driver, rank 5 in the
+kernel's ordered result-gate chain — lower rank runs first) already
 fronts the base matcher — detection hardens by **composing drivers**, no kernel edit;
 and (2) detection is **deliberately non-load-bearing** — a miss only puts bytes in
 context, while the irreversible *action* is still refused on the call by a separate
