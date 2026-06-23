@@ -39,6 +39,7 @@ Each turns a fuzzy goal into a number you can drive toward zero.
 - [Partitioning](PARTITION.md) — how the kernel splits work across lanes and leaves.
 - [Extending fak](EXTENDING.md) — plug in an optimization, prove it correct, prove it faster.
 - [SOTA comparison](SOTA-COMPARISON.md) — where fak sits next to the state of the art.
+- [Interoperability stance](docs/integrations/interoperability.md) — why fak adopts whatever agent/model/framework you run (the one opinion kept is the floor) + the honest per-wire grade for the flagship harnesses and every interop protocol.
 - [Agent-to-agent value](docs/a2a-value-opportunities.md) — where the cross-agent cache pays off.
 - [Agent–machine link protocol](docs/agent-machine-link-protocol.md) — how an agent and a host node bind.
 - [DOS kernel transfer playbook](docs/dos-kernel-transfer-playbook.md) — moving the trust substrate to a new repo.

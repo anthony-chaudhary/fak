@@ -217,6 +217,7 @@ governance surface, not tokens per second. Full scope, claim by claim:
 ## Cross-references
 
 - [Agent memory (mem0 / OpenMemory / MCP)](agent-memory.md) — put the gate in front of a memory store: oversized and secret-shaped writes refused, a prompt-injected `delete_all` refused, every recalled memory trust-gated before it re-enters context.
+- [Interoperability stance](interoperability.md) — why fak adopts whatever agent/model/framework you run (the one opinion kept is the capability floor) and the honest per-wire grade for the flagship harnesses and every interop protocol.
 - [Compatibility matrix](compatibility-matrix.md) — 44 harnesses, frameworks, backends, and protocols, each with its wire, custom-base-URL support, and the exact repoint key, sourced.
 - [Getting started](../../GETTING-STARTED.md) — install the single static binary.
 - [Guided tutorial](../fak/tutorial.md) — zero to first adjudicated tool call, real output at every step.
