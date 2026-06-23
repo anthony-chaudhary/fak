@@ -63,14 +63,45 @@ fak guard: 128 kernel decision(s) — 121 allowed, 5 denied, 2 repaired, 0 quara
   blocked: SELF_MODIFY      x1
 ```
 
-> **Subscription vs API key.** Pointing Claude Code at a custom base URL uses
-> `ANTHROPIC_API_KEY`, not subscription OAuth — `fak guard` warns if the key is unset.
+> **Subscription OAuth vs API key.** `fak guard` authenticates upstream with an **API
+> key**, not a Claude Pro/Max subscription. Two reasons stack: Claude Code uses
+> `ANTHROPIC_API_KEY` (not its OAuth token) whenever `ANTHROPIC_BASE_URL` points at a
+> non-Anthropic host, and fak's upstream Anthropic client forwards the credential as the
+> `x-api-key` header — the API-key scheme — whereas an OAuth token must be presented as
+> `Authorization: Bearer` plus an `anthropic-beta: oauth-*` header. So export
+> `ANTHROPIC_API_KEY` (guard warns when it is unset). Subscription OAuth through a proxy
+> hop is a provider-side constraint, not a switch fak can flip.
 
 Wrap a different agent or upstream by naming it after `--` and switching the provider:
 
 ```bash
 fak guard --provider openai -- codex            # an OpenAI-compatible coding agent
 fak guard --policy my-floor.json -- claude      # enforce your own reviewed allow-list
+```
+
+### Observability
+
+`fak guard` mutes the gateway's request logs by default to keep your terminal clean, but
+the full record is one flag or one env var away — and every count it shows is read from
+the same counters `/metrics` exposes, so the views never disagree:
+
+- **`--log FILE`** (or `--log -` for stderr) streams every per-request and per-verdict
+  line — `event=gateway_http_request` and `event=gateway_operation`, each carrying the
+  `trace_id` that ties the request, its verdicts, and the metrics together.
+- **`FAK_AUDIT_JOURNAL=/path/audit.jsonl`** writes a durable, **hash-chained,
+  tamper-evident** row for every kernel decision that survives the session — the audit
+  trail of record. Each row is
+  `{"seq","kind":"DECIDE","tool","trace_id","verdict","reason","by","args_digest","prev_hash","hash","witness"}`;
+  an auditor re-verifies the chain to prove no row was dropped or altered.
+- **Live scrape** while the session runs, on the gateway URL the banner prints (the
+  loopback default is unauthenticated): `GET /metrics` (Prometheus — verdict counters,
+  HTTP latency, kernel counters, vDSO hit ratio), `GET /debug/vars` (expvar JSON),
+  `GET /v1/fak/events` (drain the journal tail after a `?since=` cursor).
+- **On exit**, the one-line summary: allowed / denied / repaired / quarantined with a
+  per-reason breakdown.
+
+```bash
+FAK_AUDIT_JOURNAL=~/fak-audit.jsonl fak guard --log ~/fak-gw.log -- claude
 ```
 
 The rest of this guide covers the **local-model** dogfood path (point fak at
