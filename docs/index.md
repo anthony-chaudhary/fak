@@ -112,6 +112,7 @@ twice — tools wired directly vs. behind `fak` — and prints the before/after.
 |---|---|
 | **The quick answers** | [FAQ](FAQ.md) |
 | **A guided first run** | [Tutorial](fak/tutorial.md) |
+| **What the words mean** (preflight vs inflight vs prefill) | [Glossary](glossary.md) |
 | **The two core ideas** | [Policy in the kernel](explainers/policy-in-the-kernel.md) · [Addressable KV cache](explainers/addressable-kv-cache.md) |
 | **Every benchmark number** | [Benchmark authority](https://github.com/anthony-chaudhary/fak/blob/main/BENCHMARK-AUTHORITY.md) |
 | **Every machine fak runs on** | [Hardware matrix](HARDWARE-MATRIX.md) (4 platforms · 2 CPU ISAs · 4 GPU backends) |

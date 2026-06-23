@@ -1,0 +1,133 @@
+---
+title: "fak glossary: preflight vs inflight (and the words that get conflated)"
+description: "What preflight, inflight, and prefill mean in fak — how to tell the before-gates (preflight) from the during-state signals (inflight), why each word is reused across the kernel, serving, and dispatch layers, and the kernel gate vocabulary (vDSO, adjudicator, fold, rung, monitor, admit)."
+---
+
+# Glossary: before-gates, during-state, and the words that get conflated
+
+A few words in this codebase look related but aren't, and a couple are reused at
+several layers with no shared code. That overload is the usual source of confusion.
+This page pins each one down.
+
+## The one distinction worth memorizing
+
+| word | timeline | can it refuse? | one-liner |
+|------|----------|----------------|-----------|
+| **preflight** | runs **BEFORE** a thing starts | **yes** — it's a gate | a check that decides whether to proceed |
+| **inflight** | observed **WHILE** a thing runs | **no** — it only watches | a count or lease over work already in motion |
+| **prefill** | a phase **INSIDE** a model run | n/a | a model's prompt-ingestion pass (not a check) |
+
+When you hit one of these, two questions resolve it every time:
+
+1. **Before, or during?** A gate that can say no (preflight) versus a reading of what's
+   already running (inflight).
+2. **Which layer?** The same word names different mechanisms in the kernel, the serving
+   gateway, and the dispatch fleet. The *path* tells you which.
+
+Everything below is just those two questions applied.
+
+## `preflight` — one metaphor, four mechanisms, no shared code
+
+All four mean "check before you commit," in the aviation sense. They share the
+metaphor and nothing else — the two Go ones and the two Python ones are unrelated code.
+
+| sense | layer | gates what | when it runs | refuses with |
+|-------|-------|------------|--------------|--------------|
+| **kernel rung ladder** | kernel | one *tool call* — rung 0 JSON-parses the args, rung 1 schema-checks required fields | inside the adjudicator chain at submit, on every call | `VerdictDeny` (else `VerdictDefer`) |
+| **`fak preflight` CLI** | CLI → kernel | the *whole* pre-dispatch chain over one call, offline | at policy-authoring time (no server, model, or network) | a printed verdict |
+| **serve-readiness gate** | serving | a *node* before you start an inference server (GPU arch vs the model's kernel floor, VRAM vs quant footprint, engines installed) | an operator runs it before a serve/bench job | `BLOCKED_ARCH` / `BLOCKED_MEMORY` / … |
+| **dispatch spawn gate** | dispatch fleet | *spawning another worker* — host healthy? account free? under the worker cap? | before every async worker launch | `REFUSE_HOST` / `REFUSE_AT_CAP` / … |
+
+- Kernel ladder: `internal/preflight` — `Ladder.Adjudicate`, `Ladder.caughtAt`, registered by `RegisterAdjudicator(10, …)`. Proof: [`docs/proofs/preflight.md`](proofs/preflight.md).
+- CLI: `cmd/fak/main.go` — `cmdPreflight` (see the subtlety below).
+- Serve-readiness: `tools/glm52_serve_preflight.py` — `evaluate_engine`; siblings `tools/extend_preflight.py` (contributor setup), `tools/qwen36_standalone_readiness.py`.
+- Dispatch spawn gate: `tools/dispatch_preflight.py` — `evaluate`; called from `tools/issue_dispatch.py`. Walkthrough: [`docs/dispatch-loop.md`](dispatch-loop.md).
+
+### The subtlety that trips everyone: `fak preflight` ≠ the `internal/preflight` package
+
+They share a name, but the CLI verb is **much broader** than the package. `fak preflight`
+folds the *entire* registered adjudicator chain over one call; the `internal/preflight`
+package is only **one rung** of that chain (rank 10). The chain, in execution order
+(taken straight from the `RegisterAdjudicator(rank, …)` calls):
+
+| rank | rung | package | role |
+|------|------|---------|------|
+| 5 | grammar | `internal/grammar` | repair/normalize a malformed call (positional→named); the cheapest rung |
+| 8 | rate-limit | `internal/ratelimit` | throttle call volume |
+| 10 | **preflight** | `internal/preflight` | JSON parse + schema well-formedness — *this* is the package |
+| 12 | engine residency | `internal/engine` | gate on engine/model residency |
+| 25 | plan-CFI | `internal/plancfi` | plan control-flow integrity (`RequireApproval` for risky steps) |
+| 30 | IFC sink-gate | `internal/ifc` | refuse a sensitive-sink call when tainted data is in flight |
+| 35 | git-gate *(optional)* | `internal/gitgate` | git-operation shape gate; skipped when `FAK_GITGATE=off` |
+| 40 | ship-gate | `internal/shipgate` | ship/commit gate |
+| 100 | **monitor** | `internal/adjudicator` | the authoritative capability/policy decision (allow/deny lists, self-modify, path redaction) |
+
+So it's **8 rungs always, 9 with git-gate on**. When a commit message or doc says
+"preflight," check whether it means rung 10 (the package) or the whole `fak preflight`
+fold (all of the above). The package's own proof doc notes this exact naming caveat.
+
+Two orderings live here and they are not the same:
+
+- **Execution rank** (5, 8, 10, … 100) decides the *order rungs run* — cheap checks first,
+  so a cheap deny short-circuits the expensive ones. It is an optimization.
+- **Fold rank** (`abi.FoldRank`) decides *which verdict wins* — the most-restrictive verdict
+  kind, default-deny. A rung-10 `Deny` beats a later `Allow` because `Deny` outranks `Allow`
+  in the lattice, **not** because rung 10 ran first. (`internal/kernel: Fold`.)
+
+## `inflight` — one idea ("what's moving now"), several uses
+
+| sense | layer | what's "in flight" | mechanism |
+|-------|-------|--------------------|-----------|
+| **gateway requests** | serving | HTTP requests accepted but not yet finished | an atomic gauge (`+1` accept / `-1` done) **plus** a live registry (route + start per request) sampled at scrape time for per-route counts and `max_age` — the only signal that catches a *wedged* request, since completion histograms can't see one that hasn't returned |
+| **radix KV-cache lease** | serving | a request whose cached prefix is still being served | refcount: `Lookup` leases the node (`refs++`), `Insert` hands the lease to the leaf, `Done` releases it; a node with `refs>0` is safe from LRU eviction, so its prefix can't be reclaimed mid-serve |
+| **"in-flight work"** | docs | a feature being built, not yet shipped | just prose — e.g. "the int8/Q8 SIMD lane is the active in-flight increment." No runtime meaning |
+
+- Gateway: `internal/gateway` — `gatewayMetrics.inflight`, `beginInflight`/`endInflight`, `inflightSnapshot`; metrics `fak_gateway_inflight_requests`, `…_by_route`, `…_max_age_seconds`. Ops view: [`docs/fak/observability.md`](fak/observability.md).
+- Radix lease: `internal/radixkv` — `node.refs`, `Tree.Lookup`/`Insert`/`Done`, `evictToBudget`.
+- Narrative: `CLAIMS.md`, `docs/cli-reference.md`.
+
+> **Watch for the bare idiom.** "In flight" also shows up as plain English where it names
+> *nothing*: the IFC sink-gate's doc reads "refuses a sensitive-sink call when tainted data
+> **is in flight**" (`internal/ifc: SinkGate`). That gate is `SinkGate` (rung 30 above), not
+> an "inflight" mechanism — the words just describe tainted data currently flowing. It's a
+> tidy illustration of why the path, not the word, tells you what's meant.
+
+## `prefill` is a different word, not a typo of `preflight`
+
+`prefill` (one `l`) is the model's **prompt-ingestion phase**: the batched forward pass that
+runs the prompt tokens through the transformer in parallel to produce the first logits, as
+opposed to `decode`, which emits one token at a time. It lives only in `internal/model`
+(`Session.Prefill`, `attnPrefillInto`) and never crosses paths with `preflight` — a grep for
+`prefill.*preflight` returns nothing. Keep them apart by role:
+
+- **prefiLL** **fiLLs** the KV cache — arithmetic, *during* generation.
+- **prefLIGHT** is a **fLIGHT** check — a gate, *before* the thing starts.
+
+## Adjacent kernel vocabulary (so the cluster stops blurring)
+
+- **vDSO** (`internal/vdso`) — a 3-tier local cache (pure / content / static) consulted
+  *before the entire adjudicator chain*. A hit answers a repeated call with no engine
+  round-trip and skips every rung. It's a cache, not a gate; preflight is a gate inside the
+  chain a vDSO *miss* falls through to.
+- **adjudicator / fold** (`internal/abi`, `internal/kernel`) — an adjudicator is one
+  stackable verdict-producer (preflight is one); the kernel *folds* all of their verdicts into
+  one by the most-restrictive lattice, default-deny.
+- **rung** — one ordered step inside the preflight ladder (rung 0 parse, rung 1 schema). On a
+  catch it stamps `(RungPassed, RungFailed)` into a hard-negative row; a clean pass stamps
+  nothing.
+- **monitor** (`internal/adjudicator`) — the rank-100 *authoritative* adjudicator. preflight
+  does cheap structural checks and `Defer`s a well-formed call to it; the monitor makes the
+  real policy decision.
+- **admit / admission** (`internal/kernel: AdmitResult`, `internal/ctxmmu: MMU.Admit`) — the
+  **after** to preflight's **before**. preflight screens a *call* before it fires; admit
+  screens a tool *result* after it returns, deciding whether the bytes enter the model's
+  context (allow / quarantine / transform). These are the project's "two gates": the
+  capability floor (pre-call) and the result quarantine (post-result).
+
+## Mnemonics
+
+- **preflight** — the **before** gate; it can **refuse** before the thing starts (a call
+  before dispatch, a node before serve, a worker before spawn).
+- **inflight** — the **during** state; what's running *right now* and not yet done (a live
+  request, a held KV lease). Observed, never refused.
+- **prefill** — a **model phase**, not a check; it fills the KV cache from the prompt.
