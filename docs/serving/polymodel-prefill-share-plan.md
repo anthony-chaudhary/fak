@@ -7,10 +7,11 @@
 > *orthogonal* axis to the disaggregated-serving epic (#50): that plan scales **one
 > model across many nodes**; this one packs **many models onto one kernel**.
 >
-> **Scope:** design + one shipped deterministic core (`internal/polymodel`). The
-> GPU/engine wiring (real multi-model residency on a backend, the verify pass, the
-> bit-exact rollback call, cross-model prefill share) is explicitly sequenced, not
-> claimed here.
+> **Scope:** design + a shipped deterministic core (`internal/polymodel`) and the
+> shipped `ProvisionalSink` rollback seam (`internal/spec`, rung #532 — CPU-lossless,
+> off-defconfig). The remaining GPU/engine wiring (real multi-model residency on a
+> backend, the single-pass verify EXECUTION, cross-model prefill share) is explicitly
+> sequenced, not claimed here.
 >
 > **Provenance:** every `[SHIPPED]/[PARTIAL]/[SEAM-ONLY]/[GAP]` mark carries a
 > `file:line` pointer verified against the working tree on 2026-06-22. Line numbers
@@ -136,14 +137,17 @@ existing moat:
   a rejected speculative span exactly. The precision-policy path already does exactly
   this shape — speculate in Q8, inspect, **roll the KV back** to recompute in f32
   (`internal/model/kv.go:272`) — so the rollback substrate is shipped and exercised.
-- **The ABI seam for it is frozen.** `abi.SpeculationContext` (`internal/abi/types.go:112`),
-  `abi.TxnID` (`:126`), `abi.Outcome` with `OutcomeSquashed`/`OutcomeRolledBack`
-  (`:128`), and the `abi.ProvisionalSink{Promote,Rollback}` interface (`:144`) ride
-  every `ToolCall.Spec` (`:164`); `abi.RegisterProvisionalSink` (`internal/abi/registry.go:552`)
-  and the reserved `OpsSpec` range (`registry.go:51`) are pre-allocated. **No
-  implementation exists** (no `internal/spec`) — `ARCHITECTURE.md`'s bake-in
-  walkthrough lists it as a *future* leaf, not a shipped one. `polymodel` is the
-  policy/accounting brain a `ProvisionalSink` implementation will consult.
+- **The ABI seam for it is frozen, and now has a registrant.** `abi.SpeculationContext`
+  (`internal/abi/types.go:112`), `abi.TxnID` (`:126`), `abi.Outcome` with
+  `OutcomeSquashed`/`OutcomeRolledBack` (`:128`), and the `abi.ProvisionalSink{Promote,Rollback}`
+  interface (`:144`) ride every `ToolCall.Spec` (`:164`); `abi.RegisterProvisionalSink`
+  (`internal/abi/registry.go:552`) and the reserved `OpsSpec` range (`registry.go:51`)
+  are pre-allocated. **`internal/spec` now implements that seam** (rung #532, shipped):
+  the first `ProvisionalSink` registrant + the reserved `OpSpecCommit`/`OpSpecSquash`
+  ops, whose `Rollback` drives the bit-exact `KVCache.Evict`, with `polymodel.AcceptGreedy`
+  as the accept decision — proven lossless by an in-tree witness (`go test ./internal/spec`).
+  Still sequenced: the single-pass *verify EXECUTION* that turns acceptance into
+  throughput (rung #533). `polymodel` is the policy/accounting brain `internal/spec` consults.
 
 **The honest speedup model** (`polymodel.EffectiveTokensPerVerify`): with draft length
 K and per-token acceptance probability `a`, one verify advances
@@ -182,7 +186,7 @@ Legend: **[SHIPPED]** real & proven · **[PARTIAL]** real but incomplete ·
 | Multiple models hosted in one process | **[GAP]** | single `modelengine.Default`, one `*model.Model` (`internal/modelengine/modelengine.go:54,226`); gateway binds one planner (`internal/gateway/gateway.go:253`) |
 | Multi-model weight residency / whole-model eviction on a backend | **[GAP]** | per-weight budget is single-model only (`internal/compute/vulkan.go:164`); `gpulease` is process-wide mutex (`internal/gpulease/lease.go:36`) |
 | Cross-model prefill share (served) | **[GAP]** | exact-ModelID barrier (`internal/cachemeta/manifest.go:107`) |
-| `ProvisionalSink` implementation / `internal/spec` | **[GAP]** | reserved range, no registrant |
+| `ProvisionalSink` implementation / `internal/spec` | **[SHIPPED]** | `internal/spec` — Sink + `OpSpecCommit`/`OpSpecSquash`; `Rollback`→bit-exact `KVCache.Evict`; lossless witness `go test ./internal/spec`. Off-defconfig, gated by `FAK_POLYMODEL`. Single-pass verify EXECUTION = #533 |
 
 ## 7. The child map / sequencing
 
@@ -203,11 +207,14 @@ Ordered so each rung stands on a shipped one. None of these land in this doc.
 3. **Multi-model residency on a backend** — **#531**. Lift the single-`Default`
    assumption (`modelengine.go`): a pool of `*model.Model`, weight-byte budget + LRU
    page-out, reusing `polymodel.Pool` as the policy.
-4. **A `ProvisionalSink` + `internal/spec` implementation** — **#532**. Implement the
-   frozen ABI seam: drive `Promote`/`Rollback` against `KVCache.Evict`, with
-   `polymodel.AcceptGreedy`/`AcceptTree` as the accept decision (the native verify/accept
-   #23 and #284 defer). The **verify EXECUTION** (single-pass batched + tree-attention
-   masks) is the throughput half — **#533**.
+4. **A `ProvisionalSink` + `internal/spec` implementation** — **#532**. ✅ *shipped.*
+   `internal/spec` is the first `ProvisionalSink` registrant + the reserved
+   `OpSpecCommit`/`OpSpecSquash` ops; its `Rollback` drives the bit-exact `KVCache.Evict`,
+   with `polymodel.AcceptGreedy` as the accept decision (the native verify/accept #23 and
+   #284 defer). `SpeculativeGreedy` is proven token-identical to plain greedy through the
+   seam, even under an adversarial draft that forces a rollback every round (vacuity-guarded).
+   Off-defconfig + `FAK_POLYMODEL`-gated. The **verify EXECUTION** (single-pass batched +
+   tree-attention masks) is the throughput half — **#533**.
 5. **Cross-model prefill share (verdict-layer)** — **#534**. Lift the exact-ModelID
    barrier for a declared-compatible family in `cachemeta` — the cheap structural unlock
    from [§4]. The DECISION half ships now as `polymodel.CanShare` (same `Family` +
