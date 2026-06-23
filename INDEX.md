@@ -79,6 +79,7 @@ front page.
 
 - [Agentic caching SOTA (2026-06-19)](docs/notes/AGENTIC-CACHING-SOTA-2026-06-19.md)
 - [Context-window baseline + self-reduce 2× (2026-06-23)](docs/notes/CTXWIN-CONTEXT-WINDOW-BASELINE-2026-06-23.md) — what a Claude Code session's context window is actually made of, and how much halves at low risk vs bounded-loss. The empirical pass over real transcripts (`tools/ctxwin.py`) the [O(1)-turn planner](docs/notes/O1-TURN-CONTEXT-PLANNER-2026-06-23.md) names as its missing measurement.
+- [Multiple-sink transmission for the cache lifecycle (2026-06-23)](docs/notes/MULTI-SINK-CACHE-LIFECYCLE-2026-06-23.md) — is one kernel op fanning Promote/Rollback across every registered `ProvisionalSink` useful for the KV/context cache lifecycle? Yes, but latent: one registrant today, the fan never exercised with >1 sink (now witnessed in `internal/spec`), and best-effort not atomic. Ranks which cache tiers should become sinks next.
 - [DOS effective-usage audit (2026-06-22)](docs/notes/DOS-EFFECTIVE-USAGE-AUDIT-2026-06-22.md)
 - [Gate down the stack (2026-06-22)](docs/notes/EXPLAINER-gate-down-the-stack-2026-06-22.md)
 - [Trust floor, two lenses (2026-06-17)](docs/notes/EXPLAINER-trust-floor-two-lenses-2026-06-17.md)
