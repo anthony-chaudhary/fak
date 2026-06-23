@@ -400,7 +400,19 @@ def main(argv: list[str] | None = None) -> int:
     if args.check:
         code, message = check_gate(payload)
         if args.json:
-            print(json.dumps({**payload, "gate_exit": code, "gate_message": message}, indent=2))
+            # Under --check the tool's contract IS the ratchet, not the raw fold:
+            # ok/verdict reflect "did the portfolio hold at-or-below baseline?"
+            # (green even with residual debt), not "is debt zero?". This is what a
+            # loop runner reads to fold the pane — keep gate_exit/gate_message for
+            # the literal exit code. #509.
+            gated = {
+                **payload,
+                "ok": code == 0,
+                "verdict": "OK" if code == 0 else "ACTION",
+                "gate_exit": code,
+                "gate_message": message,
+            }
+            print(json.dumps(gated, indent=2))
         else:
             print(message)
         return code

@@ -219,6 +219,18 @@
       "auto_recover": false,
       "action": "Read-only gofmt format-debt fold for the blocking gofmt CI gate (#38): formats every committed fak/**/*.go BLOB (git show HEAD:f | gofmt \u2014 the CI-equivalent LF check, immune to the local autocrlf/CRLF artifact that makes working-tree gofmt -l unreliable) and counts those not gofmt-clean. ok:false (ACTION) when >=1 committed .go file would FAIL the gofmt gate, i.e. the trunk is one push from a red CI build. ACTION means invoke /gofmt-sweep: format each listed file via the blob method, build, then commit lane-by-lane by explicit path with a (fak <lane>) trailer \u2014 never `gofmt -w .` (rewrites active WIP) and never `git add -A`. This is the format layer checking loop, the way readme-freshness is the front door; the commit-time half is the CI gofmt step. Runbook: .claude/skills/gofmt-sweep/SKILL.md.",
       "timeout_s": 120
+    },
+    "scorecard-control-pane": {
+      "enabled": true,
+      "status_cmd": [
+        "{python}",
+        "tools/scorecard_control_pane.py",
+        "--check",
+        "--json"
+      ],
+      "auto_recover": false,
+      "timeout_s": 180,
+      "action": "Read-only unified scorecard-debt fold \u2014 the one query for 'is the repo getting better or worse?' (#509). Runs every deterministic scorecard (docs, code, doc-appeal, seo, demo-quality, demo-robustness, repo-hygiene, industry-parity, agent-readiness), folds each debt integer into one portfolio total_debt, and ratchets it against the pinned per-metric baseline (tools/scorecard_baseline.json). This is the RSI checking layer for the whole scorecard family, sitting above the individual scorecard loops the way gardening-loops-audit sits above the gardening loops. ok:false (ACTION) ONLY when the ratchet TRIPS: portfolio debt regressed ABOVE its pinned baseline (debt may hold or fall \u2014 never silently rise), or a scorecard failed to report a debt integer, or no baseline is pinned yet. A nonzero-but-flat-or-improved portfolio is a PASS (green even with residual debt). ACTION here means retire the regressed metric(s) worst-first with the owning scorecard's skill (the trend payload names which worsened), then re-pin to ratchet the baseline down: python tools/scorecard_control_pane.py --pin. Never re-pin to hide a regression \u2014 that ratchets debt UP. Runbook: tools/scorecard_control_pane.py header."
     }
   }
 }

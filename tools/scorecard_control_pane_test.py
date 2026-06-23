@@ -216,6 +216,42 @@ def test_main_check_wires_gate_exit_code() -> None:
         scp.collect, scp.load_baseline = orig_collect, orig_load
 
 
+def test_main_check_json_ok_reflects_ratchet_not_raw_fold() -> None:
+    """`--check --json` must emit a top-level ok/verdict that reflect the RATCHET
+    (held vs regressed), not the raw fold (debt==0). A loop runner folds the pane
+    off this `ok` bool, so a green-but-nonzero portfolio must read ok:true. #509."""
+    import contextlib
+    import io
+    import json as _json
+
+    orig_collect, orig_load = scp.collect, scp.load_baseline
+    try:
+        # improved with residual debt: raw fold is ok:false (debt>0) but the
+        # ratchet HELD -> the emitted payload must be ok:true / verdict OK.
+        scp.collect = lambda root, timeout=120: full_metrics(seo=0)
+        scp.load_baseline = lambda p: baseline_from(seo=5)
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            code = scp.main(["--check", "--json"])
+        out = _json.loads(buf.getvalue())
+        assert code == 0
+        assert out["ok"] is True and out["verdict"] == "OK"
+        assert out["gate_exit"] == 0 and "RATCHET OK" in out["gate_message"]
+
+        # regressed: ratchet trips -> ok:false / verdict ACTION, exit 1.
+        scp.collect = lambda root, timeout=120: full_metrics(seo=4)
+        scp.load_baseline = lambda p: baseline_from(seo=1)
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            code = scp.main(["--check", "--json"])
+        out = _json.loads(buf.getvalue())
+        assert code == 1
+        assert out["ok"] is False and out["verdict"] == "ACTION"
+        assert out["gate_exit"] == 1
+    finally:
+        scp.collect, scp.load_baseline = orig_collect, orig_load
+
+
 # --- tolerant live smoke ----------------------------------------------------
 
 def test_live_collect_and_fold() -> None:
