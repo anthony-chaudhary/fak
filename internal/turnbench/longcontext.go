@@ -159,6 +159,21 @@ type SessionShape struct {
 	Agents int `json:"agents"` // C — concurrent agents
 	Decode int `json:"decode"` // D — assistant tokens decoded per turn
 	Result int `json:"result"` // R — tool-result tokens ingested per turn
+
+	// IdleFraction is the average fraction of the C lanes that are IDLE per decode step in a
+	// heterogeneous fleet (#520): agents blocked on a tool call, finished (EOS), or simply not
+	// producing this turn. A rectangular (static) batch decodes those idle lanes anyway — wasted
+	// weight work — while a ragged batch (model.StepBatchActive) skips them, so the decode work
+	// scales by the ACTIVE fraction (1−IdleFraction). This floor applies that scaling to the
+	// decode FLOPs of every arm equally: idle-skip is a win every serving system gets (a lane
+	// not generating does no useful decode, regardless of serving strategy), so it is NOT a
+	// fak-exclusive win and never inflates a cross-arm ratio on its own. What it DOES do is make
+	// the floor honest for idle-heavy fleets (the all-active DecodeFLOPs overstate the work) and,
+	// because decode shrinks while the arms' prefill strategies do not, raise the prefill-driven
+	// ratios (A/C, B/C) — reflecting that in an idle-heavy fleet the fused kernel's
+	// prefill-elimination advantage is a LARGER share of the (smaller) total work. Valid range
+	// [0,1); zero (the default) is the all-active worst case the rest of this file assumes.
+	IdleFraction float64 `json:"idle_fraction,omitempty"`
 }
 
 // MaxContextTokens is the peak per-agent context reached in the session: prefix + every
@@ -255,6 +270,20 @@ func ProjectLongContext(s ModelShape, sh SessionShape) LongContextCell {
 	prefixWork := s.PrefillWork(P)
 	Cf := float64(C)
 
+	// The idle-lane-skip lever (#520): in a heterogeneous fleet only the ACTIVE fraction
+	// (1−IdleFraction) of the C lanes decode each step, so the decode work scales by it. Applied
+	// to every arm (idle-skip is a win any serving system gets, never a fak-exclusive ratio win);
+	// see SessionShape.IdleFraction. Prefill/ingest are turn-structure costs and are NOT scaled
+	// (an idle agent still has its results ingested and its next turn prefilled). Clamped to [0,1]
+	// so a stray negative or >=1 stays a well-defined floor rather than a sign-flipped one.
+	decodeActive := 1.0 - sh.IdleFraction
+	if decodeActive < 0 {
+		decodeActive = 0
+	} else if decodeActive > 1 {
+		decodeActive = 1
+	}
+	decodeFLOPs := Cf * decodePerAgent * decodeActive
+
 	cell := LongContextCell{
 		Shape:            sh,
 		MaxContextTokens: sh.MaxContextTokens(),
@@ -262,17 +291,17 @@ func ProjectLongContext(s ModelShape, sh SessionShape) LongContextCell {
 		A: WorkFloor{
 			PrefillTokens: aTok,
 			PrefillFLOPs:  Cf * aPrefill, // A folds result ingest into the next re-prefill — no separate ingest
-			DecodeFLOPs:   Cf * decodePerAgent,
+			DecodeFLOPs:   decodeFLOPs,
 		},
 		B: WorkFloor{
 			PrefillTokens: bTok,
 			PrefillFLOPs:  Cf * (prefixWork + ingestPerAgent), // prefix per agent + incremental ingest
-			DecodeFLOPs:   Cf * decodePerAgent,
+			DecodeFLOPs:   decodeFLOPs,
 		},
 		C: WorkFloor{
 			PrefillTokens: cTok,
 			PrefillFLOPs:  prefixWork + Cf*ingestPerAgent, // prefix ONCE total + per-agent incremental ingest
-			DecodeFLOPs:   Cf * decodePerAgent,
+			DecodeFLOPs:   decodeFLOPs,
 		},
 		Exact: true,
 		Note: "exact contention-free work floor for the stated (model, session) shape; a real " +
@@ -377,6 +406,14 @@ func CanonicalLadder() []SessionShape {
 		{Prefix: 100_000, Turns: 50, Agents: 5, Decode: 200, Result: 500},
 		// agent-city: 40 agents sharing the 100k working set (the regime where B/C approaches C).
 		{Prefix: 100_000, Turns: 10, Agents: 40, Decode: 200, Result: 500},
+		// idle-heavy agent-city (#520): the SAME 40-agent city, but half the lanes idle each
+		// decode step (agents blocked on tool calls). The ragged batch (model.StepBatchActive)
+		// skips those lanes, so the decode floor drops to the active half — and because decode
+		// shrinks while the prefix-sharing prefill does not, the cross-agent win (B/C) rises,
+		// reflecting that in an idle-heavy fleet the fused kernel's prefill advantage is a larger
+		// share of the (smaller) total work. The all-active cell above is the conservative worst
+		// case; this cell is the same fleet under the idle-skip lever.
+		{Prefix: 100_000, Turns: 10, Agents: 40, Decode: 200, Result: 500, IdleFraction: 0.5},
 	}
 }
 

@@ -179,3 +179,97 @@ func TestNamedShapeUnknown(t *testing.T) {
 		t.Error("unknown shape must return ok=false")
 	}
 }
+
+// TestLongContextIdleFractionFloor is the witness for the idle-lane-skip lever in the work
+// floor (#520): an IdleFraction f scales the decode FLOPs of EVERY arm by (1−f) — the active
+// fraction of lanes a ragged batch decodes — while the prefill/ingest work is unchanged. It
+// pins three honest properties a wrong implementation would fail:
+//
+//  1. DECODE SCALES — DecodeFLOPs drop by exactly (1−f) vs the all-active shape (idle agents
+//     do no useful decode; the ragged batch skips them, so the decode floor is the active share).
+//  2. PREFILL UNCHANGED — the arms' PrefillFLOPs are byte-identical to the all-active shape
+//     (idleness is a within-turn-decode concept, not a turn-structure/prefill concept).
+//  3. CROSS-ARM DECODE INVARIANT — decode is still identical across all three arms (idle-skip
+//     is a win every serving system gets, so it never manufactures a fak-exclusive ratio win),
+//     and every ratio stays >= 1 (the floor only ever eliminates work).
+//
+// It also shows the lever's honest effect on the WIN: with decode shrunk, the prefill-driven
+// ratios A/C and B/C RISE (the fused kernel's prefill-elimination advantage is a larger share
+// of the smaller total) — the projected multi-agent lift "reflects" an idle-heavy fleet.
+func TestLongContextIdleFractionFloor(t *testing.T) {
+	s, _ := NamedShape("qwen25-7b")
+	base := SessionShape{Prefix: 100_000, Turns: 10, Agents: 5, Decode: 200, Result: 500}
+	const f = 0.5
+	idle := SessionShape{Prefix: base.Prefix, Turns: base.Turns, Agents: base.Agents, Decode: base.Decode, Result: base.Result, IdleFraction: f}
+
+	cell0 := ProjectLongContext(s, base)
+	cellF := ProjectLongContext(s, idle)
+
+	// (1) Decode scales by the active fraction (1−f), exactly, in every arm.
+	active := 1.0 - f
+	for _, arm := range []struct{ name string; got, want float64 }{
+		{"A", cellF.A.DecodeFLOPs, cell0.A.DecodeFLOPs * active},
+		{"B", cellF.B.DecodeFLOPs, cell0.B.DecodeFLOPs * active},
+		{"C", cellF.C.DecodeFLOPs, cell0.C.DecodeFLOPs * active},
+	} {
+		if math.Abs(arm.got-arm.want) > 1e-6*math.Max(1, math.Abs(arm.want)) {
+			t.Errorf("arm %s DecodeFLOPs idle=%g, want %g (=%g×active of all-active %g)",
+				arm.name, arm.got, arm.want, active, arm.want/active)
+		}
+	}
+
+	// (2) Prefill work is unchanged by decode idleness.
+	if cellF.A.PrefillFLOPs != cell0.A.PrefillFLOPs ||
+		cellF.B.PrefillFLOPs != cell0.B.PrefillFLOPs ||
+		cellF.C.PrefillFLOPs != cell0.C.PrefillFLOPs {
+		t.Errorf("prefill FLOPs changed under idle fraction: all-active A/B/C=%g/%g/%g idle=%g/%g/%g",
+			cell0.A.PrefillFLOPs, cell0.B.PrefillFLOPs, cell0.C.PrefillFLOPs,
+			cellF.A.PrefillFLOPs, cellF.B.PrefillFLOPs, cellF.C.PrefillFLOPs)
+	}
+
+	// (3) Decode is still identical across arms, and ratios stay >= 1 (floor only eliminates).
+	if cellF.A.DecodeFLOPs != cellF.B.DecodeFLOPs || cellF.B.DecodeFLOPs != cellF.C.DecodeFLOPs {
+		t.Errorf("idle decode FLOPs must match across arms: A=%g B=%g C=%g",
+			cellF.A.DecodeFLOPs, cellF.B.DecodeFLOPs, cellF.C.DecodeFLOPs)
+	}
+	for _, r := range []float64{cellF.FlopAOverC, cellF.FlopBOverC, cellF.FlopAOverB, cellF.TokenAOverC, cellF.TokenBOverC} {
+		if r < 1.0-1e-9 {
+			t.Errorf("idle-fraction ratio %.4f < 1 — the floor must never do MORE work", r)
+		}
+	}
+
+	// The lever's honest effect on the WIN: shrinking decode (equal across arms) while the
+	// prefill strategies differ RAISES the prefill-driven ratios. In an idle-heavy fleet the
+	// fused kernel's prefill-elimination advantage is a larger share of the smaller total.
+	if cellF.FlopBOverC <= cell0.FlopBOverC {
+		t.Errorf("idle B/C = %.4f should rise above all-active %.4f (decode shrunk ⇒ prefill share grows)",
+			cellF.FlopBOverC, cell0.FlopBOverC)
+	}
+	if cellF.FlopAOverC <= cell0.FlopAOverC {
+		t.Errorf("idle A/C = %.4f should rise above all-active %.4f", cellF.FlopAOverC, cell0.FlopAOverC)
+	}
+
+	// The all-active path (f=0, the default) is byte-identical to today's floor — adding the
+	// parameter changed nothing when it is unset.
+	cellZero := ProjectLongContext(s, SessionShape{Prefix: base.Prefix, Turns: base.Turns, Agents: base.Agents, Decode: base.Decode, Result: base.Result})
+	if cellZero.A.DecodeFLOPs != cell0.A.DecodeFLOPs || cellZero.C.TotalFLOPs != cell0.C.TotalFLOPs {
+		t.Error("IdleFraction=0 (default) must reproduce the all-active floor exactly")
+	}
+}
+
+// TestLongContextIdleFractionClamped proves the floor stays well-defined for an out-of-range
+// IdleFraction: negative clamps to all-active, >=1 clamps to zero decode (no active lanes).
+func TestLongContextIdleFractionClamped(t *testing.T) {
+	s, _ := NamedShape("smollm2-135m")
+	sh := SessionShape{Prefix: 2048, Turns: 5, Agents: 3, Decode: 32, Result: 64}
+	base := ProjectLongContext(s, sh)
+	neg := ProjectLongContext(s, SessionShape{Prefix: sh.Prefix, Turns: sh.Turns, Agents: sh.Agents, Decode: sh.Decode, Result: sh.Result, IdleFraction: -0.3})
+	full := ProjectLongContext(s, SessionShape{Prefix: sh.Prefix, Turns: sh.Turns, Agents: sh.Agents, Decode: sh.Decode, Result: sh.Result, IdleFraction: 1.5})
+	if neg.A.DecodeFLOPs != base.A.DecodeFLOPs {
+		t.Errorf("negative IdleFraction should clamp to all-active: %g != %g", neg.A.DecodeFLOPs, base.A.DecodeFLOPs)
+	}
+	if full.A.DecodeFLOPs != 0 || full.B.DecodeFLOPs != 0 || full.C.DecodeFLOPs != 0 {
+		t.Errorf("IdleFraction>=1 should zero the decode floor: A=%g B=%g C=%g",
+			full.A.DecodeFLOPs, full.B.DecodeFLOPs, full.C.DecodeFLOPs)
+	}
+}
