@@ -179,7 +179,11 @@ Ordered so each rung stands on a shipped one. None of these land in this doc.
 
 1. **`internal/polymodel` — the deterministic core.** ✅ *this work.* Residency pool,
    serial decode lane, speculative-accept arithmetic, ensemble drafter selection.
-   GPU-free, witness-proven.
+   GPU-free, witness-proven. **Runnable witness:** `cmd/polymodelbench -selfcheck`
+   hosts 10 synthetic models under a budget, drives the serial decode lane over real
+   `model.Session` decode, and proves greedy speculative decode is **token-identical to
+   plain greedy** even when an adversarial draft forces a rollback every round — the
+   end-to-end proof that the rejected-draft `KVCache.Evict` rollback is bit-exact.
 2. **Caller-side decode-lane scheduler over `StepBatch`/`Session`.** Wire `polymodel`
    to actually drive a multi-model decode loop (single backend) — the
    continuous-batching seam the `batch.go:1147` comment invites.
