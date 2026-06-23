@@ -92,6 +92,7 @@ func ResetForTest() {
 	reg.witnesses = map[string]WitnessResolver{}
 	reg.stewards = nil
 	reg.sinks = nil
+	reg.screens = nil
 	rebuildSnapshot()
 }
 
@@ -118,6 +119,7 @@ var reg = struct {
 	witnesses     map[string]WitnessResolver
 	stewards      []Steward
 	sinks         []ProvisionalSink
+	screens       []SemanticScreen // local-model-on-the-wire advisory chain (semscreen.go)
 }{
 	ops:          map[OpCode]Op{},
 	verdictKinds: map[VerdictKind]vkInfo{},
@@ -204,6 +206,7 @@ type snapshot struct {
 
 	stewards  []Steward
 	sinks     []ProvisionalSink
+	screens   []SemanticScreen  // local-model-on-the-wire advisory chain (registration order)
 	witnesses []WitnessResolver // id-sorted (deterministic gate order)
 
 	foldRanks map[VerdictKind]int // registered kinds only (core kinds use the switch)
@@ -245,6 +248,7 @@ func rebuildSnapshot() {
 		emitters:     append([]Emitter(nil), reg.emitters...),
 		stewards:     append([]Steward(nil), reg.stewards...),
 		sinks:        append([]ProvisionalSink(nil), reg.sinks...),
+		screens:      append([]SemanticScreen(nil), reg.screens...),
 		foldRanks:    make(map[VerdictKind]int, len(reg.verdictKinds)),
 		fallbacks:    make(map[VerdictKind]FallbackClass, len(reg.verdictKinds)),
 		caps:         make(map[Capability]bool, len(reg.caps)),

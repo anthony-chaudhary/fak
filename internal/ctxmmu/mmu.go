@@ -59,6 +59,7 @@ type MMU struct {
 	quarantine int64
 	paged      int64
 	evicted    int64 // held entries dropped by the maxHeld bound (observability)
+	screened   int64 // results additively quarantined by a registered SemanticScreen
 
 	mu        sync.Mutex
 	held      map[string]abi.Ref // id -> paged-out handle (quarantined bytes)
@@ -138,6 +139,25 @@ func (m *MMU) Admit(ctx context.Context, c *abi.ToolCall, r *abi.Result) abi.Ver
 	// 1-3. unsafe result bytes -> quarantine (unit 70/68/62).
 	if reason, ok := ScreenBytes(body); ok {
 		return m.quarantineResult(ctx, r, reason, body)
+	}
+	// 3b. SEMANTIC screen — the local-model-on-the-wire seam (RESEARCH-local-model-on
+	// -the-wire-2026-06-23.md). A registered abi.SemanticScreen may ADDITIVELY quarantine
+	// a result the regex floor admitted: the injection-shaped payload with no literal
+	// marker. It runs ONLY after the floor cleared the bytes, is strictly one-sided
+	// (Allow, or a stricter Quarantine — never weaker), and routes a hit through the SAME
+	// quarantineResult path so the held bytes keep the CAS-pin + PageIn-after-Clear
+	// witness. With no screen registered this ranges a nil slice — the inert v0.1 default.
+	// ScreenDigest is reserved for the rung-2 useful-page-out upgrade and is ignored here.
+	for _, sc := range abi.SemanticScreens() {
+		adv := sc.ScreenResult(ctx, c, body)
+		if adv.Disposition == abi.ScreenQuarantine {
+			reason := adv.Reason
+			if reason == abi.ReasonNone {
+				reason = abi.ReasonTrustViolation
+			}
+			atomic.AddInt64(&m.screened, 1)
+			return m.quarantineResult(ctx, r, reason, body)
+		}
 	}
 	// The result survived the screen — classify its WRITE-TIME DURABILITY (S7 rung 1,
 	// issue #496) and carry the class on the OPEN Verdict.Meta map so the durable
@@ -316,6 +336,11 @@ func (m *MMU) HeldLen() int {
 
 // Evicted reports the lifetime count of held entries dropped by the maxHeld bound.
 func (m *MMU) Evicted() int64 { return atomic.LoadInt64(&m.evicted) }
+
+// Screened reports the lifetime count of results additively quarantined by a
+// registered SemanticScreen (the local-model-on-the-wire seam) — i.e. results the
+// regex floor admitted but a semantic screen held out. Zero on the inert default.
+func (m *MMU) Screened() int64 { return atomic.LoadInt64(&m.screened) }
 
 // PollutionRate is quarantined/total (unit 66).
 func (m *MMU) PollutionRate() (quarantined, total int64, rate float64) {

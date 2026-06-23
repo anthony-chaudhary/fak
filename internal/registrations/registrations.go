@@ -47,6 +47,13 @@ import (
 	// Context-MMU write-time result admission.
 	_ "github.com/anthony-chaudhary/fak/internal/ctxmmu"
 
+	// Local-model-on-the-wire semantic screen (rung 1 of the witnessed-lossy-proposer
+	// spine). Registers an abi.SemanticScreen that the context-MMU consults AFTER its
+	// regex floor — an ADDITIVE, recoverable quarantine of injection-shaped results the
+	// literal-marker floor misses. INERT unless FAK_WIRE_SCREEN selects a screener, so
+	// the default build's abi.SemanticScreens() stays empty and the MMU is unchanged.
+	_ "github.com/anthony-chaudhary/fak/internal/wirescreen"
+
 	// Normalize-and-rescan admitter (rank 5, in front of ctxmmu): closes the
 	// obfuscation-evasion gap + provenance-gates trusted-local false positives.
 	_ "github.com/anthony-chaudhary/fak/internal/normgate"
