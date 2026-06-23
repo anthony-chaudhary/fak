@@ -79,6 +79,46 @@ fak guard --provider openai -- codex            # an OpenAI-compatible coding ag
 fak guard --policy my-floor.json -- claude      # enforce your own reviewed allow-list
 ```
 
+### OpenCode
+
+[OpenCode](https://opencode.ai) speaks the OpenAI-compatible wire, so guard fronts it the
+same way — over `--provider openai`:
+
+```bash
+export OPENAI_API_KEY=sk-...                       # or point --base-url at a local model
+fak guard --provider openai --api-key-env OPENAI_API_KEY -- opencode
+```
+
+guard injects `OPENAI_BASE_URL=http://127.0.0.1:<port>/v1` into OpenCode (the `/v1` matters
+— OpenAI-compatible clients append `/chat/completions`, so a bare host 404s). OpenCode's
+built-in tools are **lowercase** (`bash`, `read`, `write`, `edit`, `grep`, `glob`,
+`webfetch`, …), and the built-in floor already allows them and gates them the same as
+Claude Code's: a `bash` command of `rm -rf` is denied (the destructive-command rules match
+the tool name case-insensitively), and a `write`/`edit` into `.git/`, `.ssh/`, or a
+credential path is refused as `SELF_MODIFY` (the floor reads OpenCode's camelCase
+`filePath` argument, not only `file_path`).
+
+If OpenCode does not pick up `OPENAI_BASE_URL` in your setup, bind a **fixed** port and
+point an `opencode.json` provider at it instead — same kernel boundary, explicit wiring:
+
+```bash
+fak guard --provider openai --addr 127.0.0.1:8137 --api-key-env OPENAI_API_KEY -- opencode
+```
+
+```json
+{
+  "$schema": "https://opencode.ai/config.json",
+  "provider": {
+    "fak": {
+      "npm": "@ai-sdk/openai-compatible",
+      "name": "fak (kernel-adjudicated)",
+      "options": { "baseURL": "http://127.0.0.1:8137/v1" },
+      "models": { "your-model-id": { "name": "Your Model" } }
+    }
+  }
+}
+```
+
 ### Observability
 
 `fak guard` mutes the gateway's request logs by default to keep your terminal clean, but
