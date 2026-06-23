@@ -151,6 +151,12 @@ type AdmitRequest struct {
 // cursor (the Seq of the last event it saw); 0 returns everything retained.
 type ChangesRequest struct {
 	Since uint64 `json:"since,omitempty"`
+	// Principal scopes the drained feed to one isolation principal (here or via the
+	// X-Fak-Principal header, which takes precedence): a tenant sees only its OWN
+	// mutations plus global broadcasts (revocations), never a peer tenant's write tags —
+	// closing the cross-tenant metadata leak. Empty => see everything (single-tenant /
+	// admin, the v0.1 behavior).
+	Principal string `json:"principal,omitempty"`
 }
 
 // ChangesResponse is the drained feed slice plus the client's next cursor.

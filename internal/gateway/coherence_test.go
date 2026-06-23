@@ -85,7 +85,7 @@ func TestRevoke_EvictsAndPublishesToFeed(t *testing.T) {
 		t.Errorf("trust epoch did not advance on a refutation")
 	}
 
-	events, cursor := srv.changes(0)
+	events, cursor := srv.changes("", 0)
 	rv := findRevocation(events, wit)
 	if rv == nil {
 		t.Fatalf("revocation for %q not on the change feed", wit)
@@ -98,7 +98,7 @@ func TestRevoke_EvictsAndPublishesToFeed(t *testing.T) {
 	}
 
 	// Draining PAST the event's cursor returns nothing new for it.
-	after, _ := srv.changes(cursor)
+	after, _ := srv.changes("", cursor)
 	if findRevocation(after, wit) != nil {
 		t.Errorf("event for %q re-delivered after its cursor", wit)
 	}
@@ -113,7 +113,7 @@ func TestChanges_CapturesWriteMutation(t *testing.T) {
 	vdso.Default.Emit(abi.Event{Kind: abi.EvComplete, Call: wc,
 		Result: &abi.Result{Call: wc, Status: abi.StatusOK, Payload: abi.Ref{Kind: abi.RefInline, Inline: []byte(`{"ok":true}`)}}})
 
-	events, _ := srv.changes(0)
+	events, _ := srv.changes("", 0)
 	m := findMutation(events, tool)
 	if m == nil {
 		t.Fatalf("write mutation for %q not on the feed", tool)

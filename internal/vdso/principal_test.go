@@ -135,3 +135,29 @@ func TestPrincipal_ShareableSharesAcrossPrincipals(t *testing.T) {
 		t.Fatalf("shareable serve got %q", got)
 	}
 }
+
+// TestPrincipal_MutationCarriesPrincipal proves the write side: a destructive completion
+// publishes a coherence-bus Mutation stamped with the issuer's principal, so a
+// cross-tenant change feed can scope itself (a tenant must not learn which entities a
+// PEER tenant wrote — the resource Tags name them).
+func TestPrincipal_MutationCarriesPrincipal(t *testing.T) {
+	v := New(32)
+	var captured []Mutation
+	cancel := v.Subscribe(func(m Mutation) { captured = append(captured, m) })
+	defer cancel()
+
+	wc := &abi.ToolCall{
+		Tool: "book_flight", // write-shaped => a destructive completion => a published mutation
+		Args: abi.Ref{Kind: abi.RefInline, Inline: []byte(`{"origin":"SFO","destination":"JFK"}`)},
+		Meta: map[string]string{MetaPrincipal: "alice"},
+	}
+	v.Emit(abi.Event{Kind: abi.EvComplete, Call: wc,
+		Result: &abi.Result{Call: wc, Status: abi.StatusOK, Payload: abi.Ref{Kind: abi.RefInline, Inline: []byte(`{"ok":true}`)}}})
+
+	if len(captured) != 1 {
+		t.Fatalf("expected 1 published mutation, got %d", len(captured))
+	}
+	if captured[0].Principal != "alice" {
+		t.Fatalf("mutation Principal=%q, want alice (a write must carry its issuer)", captured[0].Principal)
+	}
+}

@@ -350,10 +350,11 @@ func (v *VDSO) bumpAndPublish(c *abi.ToolCall, tags []string) {
 	}
 	v.mutSeq++
 	m := Mutation{
-		Tool:     c.Tool,
-		Tags:     append([]string(nil), tags...),
-		WorldVer: atomic.LoadUint64(&v.worldVer),
-		Seq:      v.mutSeq,
+		Tool:      c.Tool,
+		Tags:      append([]string(nil), tags...),
+		WorldVer:  atomic.LoadUint64(&v.worldVer),
+		Seq:       v.mutSeq,
+		Principal: principalOf(c),
 	}
 	subs := append([]*subscription(nil), v.subs...)
 	v.mu.Unlock()
@@ -416,6 +417,12 @@ type Mutation struct {
 	Tags     []string // resource tags bumped (the invalidation scope)
 	WorldVer uint64   // root ("*") epoch after the write — a monotone global clock
 	Seq      uint64   // per-VDSO monotone mutation sequence (ordering without a wall clock)
+	// Principal is the isolation principal that issued the write (ToolCall.Meta
+	// [MetaPrincipal]), or "" for a single-tenant/system write. A cross-tenant change
+	// feed uses it to show a tenant only its OWN mutations: the resource Tags name WHICH
+	// entities changed, so streaming them across tenants would leak another tenant's
+	// write activity. "" is visible to everyone (single-tenant — the v0.1 behavior).
+	Principal string
 }
 
 type subscription struct {

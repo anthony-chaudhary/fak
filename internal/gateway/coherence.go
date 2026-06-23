@@ -40,6 +40,12 @@ type CoherenceEvent struct {
 	Evicted    int      `json:"evicted,omitempty"` // revocation: entries stranded
 	WorldVer   uint64   `json:"world_ver"`         // consistency clock at the event
 	TrustEpoch uint64   `json:"trust_epoch"`       // integrity clock at the event
+	// principal is the isolation principal that produced a mutation (unexported: an
+	// internal routing key, NOT wire-facing — emitting it would re-leak the very
+	// tenant identity the scoped drain exists to hide). "" for a global/system write or
+	// a revocation (integrity broadcast). drain() uses it to scope a tenant's feed to
+	// its own mutations; see drain.
+	principal string
 }
 
 // coherenceFeed is a bounded ring of CoherenceEvents filled by subscribing to the
@@ -64,7 +70,7 @@ func newCoherenceFeed(capacity int) *coherenceFeed {
 	f.cancels = append(f.cancels,
 		vdso.Default.Subscribe(func(m vdso.Mutation) {
 			f.add(CoherenceEvent{Kind: "mutation", Seq: m.Seq, Tool: m.Tool, Tags: m.Tags,
-				WorldVer: m.WorldVer, TrustEpoch: vdso.Default.TrustEpoch()})
+				WorldVer: m.WorldVer, TrustEpoch: vdso.Default.TrustEpoch(), principal: m.Principal})
 		}),
 		vdso.Default.SubscribeRevocations(func(rv vdso.Revocation) {
 			f.add(CoherenceEvent{Kind: "revocation", Seq: rv.Seq, Witness: rv.Witness,
@@ -83,15 +89,27 @@ func (f *coherenceFeed) add(ev CoherenceEvent) {
 	f.mu.Unlock()
 }
 
-// drain returns every retained event with Seq > sinceSeq (sinceSeq==0 => all retained),
-// plus the highest Seq now known (the client's next cursor).
-func (f *coherenceFeed) drain(sinceSeq uint64) ([]CoherenceEvent, uint64) {
+// drain returns every retained event with Seq > sinceSeq (sinceSeq==0 => all retained)
+// that is VISIBLE to the requesting principal, plus the highest Seq now known (the
+// client's next cursor). Visibility (closing the cross-tenant metadata leak — a mutation's
+// Tags name which entities another tenant changed):
+//
+//   - principal=="" — a single-tenant gateway, an admin drain, or the v0.1 caller that
+//     names no principal: sees ALL events (unchanged behavior).
+//   - principal==P — a tenant: sees only events it may learn of: its OWN mutations
+//     (ev.principal==P) plus principal-less events (ev.principal==""), which are global
+//     writes and REVOCATIONS — the latter are integrity broadcasts that must reach every
+//     consumer for causal eviction, and carry only a content-hash witness.
+//
+// The cursor advances over ALL retained events (not just the visible ones), so a tenant's
+// next-cursor stays monotone and it never re-scans another tenant's already-elapsed Seqs.
+func (f *coherenceFeed) drain(principal string, sinceSeq uint64) ([]CoherenceEvent, uint64) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	out := make([]CoherenceEvent, 0, len(f.ring))
 	cursor := sinceSeq
 	for _, ev := range f.ring {
-		if ev.Seq > sinceSeq {
+		if ev.Seq > sinceSeq && visibleTo(ev, principal) {
 			out = append(out, ev)
 		}
 		if ev.Seq > cursor {
@@ -99,6 +117,13 @@ func (f *coherenceFeed) drain(sinceSeq uint64) ([]CoherenceEvent, uint64) {
 		}
 	}
 	return out, cursor
+}
+
+// visibleTo reports whether a draining principal may see an event. An empty drainer
+// principal (single-tenant / admin) sees everything; a tenant sees principal-less events
+// (global writes + revocations) and its own mutations, never a peer tenant's.
+func visibleTo(ev CoherenceEvent, principal string) bool {
+	return principal == "" || ev.principal == "" || ev.principal == principal
 }
 
 func (f *coherenceFeed) close() {
@@ -111,9 +136,11 @@ func (f *coherenceFeed) close() {
 	}
 }
 
-// changes drains the change feed for events after the client's cursor.
-func (s *Server) changes(sinceSeq uint64) ([]CoherenceEvent, uint64) {
-	return s.feed.drain(sinceSeq)
+// changes drains the change feed for events after the client's cursor that are visible
+// to the requesting principal (a tenant sees only its own mutations + global broadcasts;
+// an empty principal sees everything — single-tenant / admin).
+func (s *Server) changes(principal string, sinceSeq uint64) ([]CoherenceEvent, uint64) {
+	return s.feed.drain(principal, sinceSeq)
 }
 
 // revoke triggers a fleet-wide refutation of an external world-state witness on the

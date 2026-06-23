@@ -604,6 +604,7 @@ func (s *Server) handleFakAdjudicate(w http.ResponseWriter, r *http.Request) {
 // client's ?since= (or {"since":N}) cursor. GET or POST.
 func (s *Server) handleFakChanges(w http.ResponseWriter, r *http.Request) {
 	var since uint64
+	var bodyPrincipal string
 	if r.Method == http.MethodPost {
 		var req ChangesRequest
 		if err := decodeJSON(w, r, &req); err != nil {
@@ -611,6 +612,7 @@ func (s *Server) handleFakChanges(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		since = req.Since
+		bodyPrincipal = req.Principal
 	} else if v := r.URL.Query().Get("since"); v != "" {
 		var n uint64
 		for _, c := range v {
@@ -622,7 +624,7 @@ func (s *Server) handleFakChanges(w http.ResponseWriter, r *http.Request) {
 		}
 		since = n
 	}
-	events, cursor := s.changes(since)
+	events, cursor := s.changes(principalFor(r, bodyPrincipal), since)
 	writeJSON(w, http.StatusOK, ChangesResponse{Events: events, Cursor: cursor})
 }
 

@@ -264,7 +264,7 @@ func (s *Server) callTool(ctx context.Context, params json.RawMessage) (any, *rp
 	case "fak_changes":
 		var req ChangesRequest
 		_ = json.Unmarshal(p.Arguments, &req)
-		events, cursor := s.changes(req.Since)
+		events, cursor := s.changes(req.Principal, req.Since)
 		return mcpToolResult(ChangesResponse{Events: events, Cursor: cursor}), nil
 	case "fak_revoke":
 		var req RevokeRequest

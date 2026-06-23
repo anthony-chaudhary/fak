@@ -143,3 +143,50 @@ func TestServed_ShareableToolSharesAcrossPrincipals(t *testing.T) {
 		t.Errorf("EngineCalls=%d, want 1 (alice warmed; bob shared the public read)", c.EngineCalls)
 	}
 }
+
+// emitWriteAs publishes a write-shaped completion to the process-global vDSO on behalf of
+// a principal (mirroring coherence_test's direct-bus pattern). The mutation lands on every
+// live server's change feed, stamped with the issuer principal.
+func emitWriteAs(tool, principal, args string) {
+	wc := &abi.ToolCall{Tool: tool, Args: abi.Ref{Kind: abi.RefInline, Inline: []byte(args)},
+		Meta: map[string]string{vdso.MetaPrincipal: principal}}
+	vdso.Default.Emit(abi.Event{Kind: abi.EvComplete, Call: wc,
+		Result: &abi.Result{Call: wc, Status: abi.StatusOK, Payload: abi.Ref{Kind: abi.RefInline, Inline: []byte(`{"ok":true}`)}}})
+}
+
+// TestChanges_ScopedPerPrincipal_NoCrossTenantTagLeak proves the change-feed counterpart
+// of the cache isolation: a tenant draining /v1/fak/changes sees its OWN writes but NOT a
+// peer tenant's (whose tool/tags would reveal which entities that tenant changed), while
+// an unscoped (admin / single-tenant) drain still sees everything — the v0.1 behavior.
+func TestChanges_ScopedPerPrincipal_NoCrossTenantTagLeak(t *testing.T) {
+	srv := newTestServer(t) // its feed subscribes to vdso.Default at New()
+
+	// Two tenants each issue a write naming a different entity. Unique tool names keep
+	// these distinguishable from any peer event already on the shared bus.
+	emitWriteAs("book_flight_zA", "alice", `{"origin":"SFO","destination":"JFK"}`)
+	emitWriteAs("book_flight_zB", "bob", `{"origin":"LAX","destination":"SEA"}`)
+
+	// Bob's scoped drain: his own write, never alice's.
+	bobEvents, _ := srv.changes("bob", 0)
+	if findMutation(bobEvents, "book_flight_zB") == nil {
+		t.Errorf("bob should see his own write on the feed")
+	}
+	if findMutation(bobEvents, "book_flight_zA") != nil {
+		t.Errorf("cross-tenant LEAK: bob's feed surfaced alice's write")
+	}
+
+	// Alice's scoped drain is the mirror.
+	aliceEvents, _ := srv.changes("alice", 0)
+	if findMutation(aliceEvents, "book_flight_zA") == nil {
+		t.Errorf("alice should see her own write")
+	}
+	if findMutation(aliceEvents, "book_flight_zB") != nil {
+		t.Errorf("cross-tenant LEAK: alice's feed surfaced bob's write")
+	}
+
+	// An unscoped (admin / single-tenant) drain still sees BOTH — back-compat.
+	all, _ := srv.changes("", 0)
+	if findMutation(all, "book_flight_zA") == nil || findMutation(all, "book_flight_zB") == nil {
+		t.Errorf("an unscoped drain must see all tenants' writes (single-tenant / admin back-compat)")
+	}
+}
