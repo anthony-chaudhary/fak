@@ -61,6 +61,7 @@ var tier = map[string]int{
 	"tokenizer":   1,
 	"answershape": 1, // pure degeneration/verbosity metric over text; stdlib-only, imports nothing internal.
 	"codelint": 1,
+	"polymodel": 1, // multi-model residency + serial-decode-lane + cache-led MTP accept core; stdlib-only, imports nothing internal.
 	// new-leaf:tier — `python tools/new_leaf.py <name> --tier <name>` inserts the
 	// declaration for a generated leaf immediately ABOVE this line. Keep the marker last.
 }
