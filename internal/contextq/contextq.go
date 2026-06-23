@@ -107,6 +107,13 @@ const (
 	// is verbatim from the source page, so FaithfulnessProbe = 1.0) and lossy
 	// only in coverage (Coverage = rendered / source bytes).
 	ViewSummary ViewType = "summary"
+	// ViewPlaybook is the ContextPlaybook view (#538): NOT a read-only projection
+	// of an immutable recorded page like the other views, but the rendered surface
+	// of an agent-edited, accumulating, counter-ranked strategy store (ACE, arXiv
+	// 2510.04618). It is materialized from ContextPlaybook.Snapshot; every bullet
+	// that enters it was admit-gated by ctxmmu and every counter on it was earned
+	// from an independent witness, never self-asserted. See playbook.go.
+	ViewPlaybook ViewType = "playbook"
 )
 
 // maxSummaryBytes bounds an extractive summary. A page smaller than this is
