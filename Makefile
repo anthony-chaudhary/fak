@@ -1,8 +1,8 @@
 # Makefile — portable build/test entrypoints (unit 12). On Windows without make,
 # use scripts/ci.ps1, which this mirrors.
-.PHONY: ci build vet test test-fast bench claims-lint model
+.PHONY: ci build vet test test-fast bench claims-lint index-sync model
 
-ci: build vet test claims-lint
+ci: build vet test claims-lint index-sync
 	@echo "CI OK"
 
 build:
@@ -36,3 +36,11 @@ model:
 # claims-lint: every "- [" line in CLAIMS.md carries exactly one tag.
 claims-lint:
 	@awk '/^- \[/{n=0; if(index($$0,"[SHIPPED]"))n++; if(index($$0,"[SIMULATED]"))n++; if(index($$0,"[STUB]"))n++; c++; if(n!=1){print "VIOLATION:",$$0; bad++}} END{printf "claims-lint: %d lines, %d violations\n",c,bad; if(bad>0||c==0)exit 1}' CLAIMS.md
+
+# index-sync (#511): the curated INDEX.md / llms.txt must not drift from the tree.
+# Two gates: the reciprocal orphan gate (dangling links + unlisted dated notes) and
+# the llms-full.txt check-mode drift gate. Python (like claims-lint), so it sits here.
+index-sync:
+	@python3 tools/check_index_sync.py --audit-tree
+	@python3 tools/gen_llms_full.py --check
+	@echo "index-sync OK"

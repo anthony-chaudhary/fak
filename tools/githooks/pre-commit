@@ -1,6 +1,6 @@
 #!/bin/sh
 # fleet pre-commit gates  --  DOS reasons: PUBLIC_LEAK, SECRET_SHAPE,
-# DOC_PLACEMENT, BROKEN_LINK, FILE_ADMISSION.
+# DOC_PLACEMENT, BROKEN_LINK, FILE_ADMISSION, INDEX_SYNC.
 #
 # A sequence of independent commit-boundary gates, each owned by a tools/check_*.py
 # (or the scrubber). git runs this BELOW the agent layer, so the gates bind Claude
@@ -20,6 +20,7 @@
 #   DOC_PLACEMENT   FLEET_DOC_GUARD    ALLOW_ROOT_DOC      tools/check_doc_placement.py
 #   BROKEN_LINK     FLEET_LINK_GUARD   ALLOW_BAD_LINK      tools/check_links.py
 #   FILE_ADMISSION  FLEET_FILE_GUARD   ALLOW_STRAY_FILE    tools/check_committed_files.py
+#   INDEX_SYNC      FLEET_INDEX_GUARD  ALLOW_INDEX_DRIFT   tools/check_index_sync.py
 #
 # The leak needle list (AUDIT_NEEDLES) is owned by tools/scrub_public_copy.py so the
 # commit gate and the export-time scrub cannot drift; the other gates own their own
@@ -69,6 +70,7 @@ run_gate SECRET_SHAPE   tools/check_secret_shapes.py   "${FLEET_SHAPE_GUARD:-blo
 run_gate DOC_PLACEMENT  tools/check_doc_placement.py   "${FLEET_DOC_GUARD:-block}"   "${ALLOW_ROOT_DOC:-0}"
 run_gate BROKEN_LINK    tools/check_links.py           "${FLEET_LINK_GUARD:-block}"  "${ALLOW_BAD_LINK:-0}"
 run_gate FILE_ADMISSION tools/check_committed_files.py "${FLEET_FILE_GUARD:-block}"  "${ALLOW_STRAY_FILE:-0}"
+run_gate INDEX_SYNC     tools/check_index_sync.py      "${FLEET_INDEX_GUARD:-block}" "${ALLOW_INDEX_DRIFT:-0}"
 
 if [ "$gate_failed" -ne 0 ]; then
 	echo "" >&2

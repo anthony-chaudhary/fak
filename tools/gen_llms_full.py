@@ -9,10 +9,12 @@ single fetch (per the https://llmstxt.org convention).
 This keeps the two in sync: edit llms.txt, re-run this script. Read-only except for
 writing llms-full.txt.
 
-Run:  python tools/gen_llms_full.py
+Run:  python tools/gen_llms_full.py           # write llms-full.txt
+      python tools/gen_llms_full.py --check    # CI: exit 1 if out of date (#511)
 """
 from __future__ import annotations
 
+import argparse
 import os
 import re
 import sys
@@ -54,10 +56,10 @@ def collect_targets(index_text: str):
     return out
 
 
-def main():
+def build_corpus():
+    """Build the llms-full.txt text from llms.txt. Returns (text, targets)."""
     with open(INDEX, encoding="utf-8") as f:
         index_text = f.read()
-
     targets = collect_targets(index_text)
 
     parts = []
@@ -90,11 +92,47 @@ def main():
         parts.append("")
 
     text = "\n".join(parts).rstrip() + "\n"
-    with open(OUT, "w", encoding="utf-8") as f:
+    return text, targets
+
+
+def main() -> int:
+    global ROOT, INDEX, OUT
+    ap = argparse.ArgumentParser(description="Generate llms-full.txt from the llms.txt index.")
+    ap.add_argument("--check", action="store_true",
+                    help="exit 1 if llms-full.txt is missing or out of date (CI drift gate, #511)")
+    ap.add_argument("--root", default=ROOT,
+                    help="repo root holding llms.txt / llms-full.txt (default: the repo root)")
+    args = ap.parse_args()
+
+    # Honor --root by repointing the module paths (so the build reads the requested
+    # tree and --check compares against its llms-full.txt; enables isolated tests).
+    ROOT = args.root
+    INDEX = os.path.join(args.root, "llms.txt")
+    OUT = os.path.join(args.root, "llms-full.txt")
+
+    text, targets = build_corpus()
+
+    if args.check:
+        try:
+            with open(OUT, encoding="utf-8") as f:
+                current = f.read()
+        except OSError:
+            print("llms-full.txt OUT OF DATE (missing); run: python tools/gen_llms_full.py")
+            return 1
+        # Normalize CRLF->LF so the check is byte-stable across Windows/POSIX: the
+        # write path forces LF, but this tolerates a CRLF copy an older run left.
+        if current.replace("\r\n", "\n") != text:
+            print("llms-full.txt OUT OF DATE; run: python tools/gen_llms_full.py")
+            return 1
+        print(f"llms-full.txt up to date ({len(targets)} documents, {len(text):,} bytes)")
+        return 0
+
+    with open(OUT, "w", encoding="utf-8", newline="\n") as f:
         f.write(text)
 
     print(f"wrote {OUT}: {len(targets)} documents, {len(text):,} bytes")
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())
