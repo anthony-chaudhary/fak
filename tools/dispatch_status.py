@@ -214,6 +214,13 @@ def collect(root: Path, *, max_workers: int, fast: bool,
     closure: dict[str, Any] = {"_skipped": "fast"} if fast else run_json(
         [_py(), str(root / "tools" / "issue_closure_audit.py"), "--json",
          "--max-commits", str(closure_commits)], root, timeout=180)
+    # The RATE fold (closed/hour vs target) — the observable the loop's goal is
+    # actually stated in. gh-backed, so it degrades to n/a under --fast/timeout
+    # exactly like backlog/closure; it never flips the dispatcher-health verdict
+    # (a below-target rate is information, not a broken dispatcher).
+    throughput: dict[str, Any] = {"_skipped": "fast"} if fast else run_json(
+        [_py(), str(root / "tools" / "dispatch_throughput.py"), "--json"],
+        root, timeout=140, ok_codes=set(range(0, 16)))
 
     # Pure-local, always run (no gh/dos): which spawned workers exited producing
     # nothing. Cheap enough that --fast keeps it.
@@ -223,13 +230,14 @@ def collect(root: Path, *, max_workers: int, fast: bool,
 
     return build_payload(root=root, pre=pre, sup=sup, wd=wd, backlog=backlog,
                          closure=closure, max_workers=max_workers, fast=fast,
-                         silent=silent, weekly_cap=weekly_cap)
+                         silent=silent, weekly_cap=weekly_cap, throughput=throughput)
 
 
 def build_payload(*, root: Path, pre: dict, sup: dict, wd: dict, backlog: dict,
                   closure: dict, max_workers: int, fast: bool,
                   silent: list[dict[str, Any]] | None = None,
-                  weekly_cap: dict[str, Any] | None = None) -> dict[str, Any]:
+                  weekly_cap: dict[str, Any] | None = None,
+                  throughput: dict[str, Any] | None = None) -> dict[str, Any]:
     # --- dispatcher liveness / capacity ---
     cap = _int(pre.get("cap"))
     live = _int(pre.get("live"))
@@ -254,6 +262,10 @@ def build_payload(*, root: Path, pre: dict, sup: dict, wd: dict, backlog: dict,
     closure_rate = closure.get("closure_rate")
     closure_na = "_skipped" in closure or ("_error" in closure and closure_rate is None)
     open_witnessed = _int(counts.get("OPEN_WITNESSED"), 0)
+
+    # --- throughput (closed/hour vs target) ---
+    throughput = throughput or {}
+    tp_na = "_skipped" in throughput or "_error" in throughput or not throughput.get("schema")
 
     # --- overall verdict ---
     # Healthy = host clean AND (can grow OR already at a healthy target). A flagged
@@ -301,6 +313,18 @@ def build_payload(*, root: Path, pre: dict, sup: dict, wd: dict, backlog: dict,
         nums = ", ".join(f"#{w['issue']}" for w in silent[:6])
         reasons.append(f"{len(silent)} worker(s) exited producing nothing ({nums}) — inspect or re-scope")
 
+    if not tp_na:
+        tp_verdict = throughput.get("verdict")
+        tp_rate = throughput.get("completed_rate_per_hour")
+        tp_target = throughput.get("target_per_hour")
+        win = throughput.get("primary_window_hours")
+        if tp_verdict in ("BELOW_TARGET", "AUDIT_ERROR"):
+            reasons.append(f"throughput {tp_rate}/h completed over {win}h — below the "
+                           f"{tp_target}/h target")
+        else:
+            reasons.append(f"throughput {tp_verdict} ({tp_rate}/h completed over {win}h, "
+                           f"target {tp_target}/h)")
+
     return {
         "schema": SCHEMA,
         "ok": ok,
@@ -335,6 +359,17 @@ def build_payload(*, root: Path, pre: dict, sup: dict, wd: dict, backlog: dict,
             "closure_rate": closure_rate,
             "counts": counts or None,
             "open_witnessed_closable": None if closure_na else open_witnessed,
+        },
+        "throughput": {
+            "na": tp_na,
+            "verdict": None if tp_na else throughput.get("verdict"),
+            "target_per_hour": None if tp_na else throughput.get("target_per_hour"),
+            "primary_window_hours": None if tp_na else throughput.get("primary_window_hours"),
+            "completed_rate_per_hour": None if tp_na else throughput.get("completed_rate_per_hour"),
+            "raw_rate_per_hour": None if tp_na else throughput.get("raw_rate_per_hour"),
+            "per_window": None if tp_na else (throughput.get("gh") or {}).get("per_window"),
+            "loop_per_window": None if tp_na else (throughput.get("loop") or {}).get("per_window"),
+            "last_loop_close_age_min": None if tp_na else (throughput.get("loop") or {}).get("last_loop_close_age_min"),
         },
         "workers": {
             "silent_count": len(silent),
@@ -379,6 +414,13 @@ def render(p: dict[str, Any]) -> str:
             f"║ closure   : rate={c.get('closure_rate')}  "
             f"resolved={cnt.get('TRUE_RESOLVED')} claimed={cnt.get('CLAIMED_CLOSED')} "
             f"closable-now={c.get('open_witnessed_closable')} (OPEN_WITNESSED)")
+    tp = p.get("throughput") or {}
+    if tp.get("na"):
+        lines.append("║ rate      : n/a (--fast or gh timeout)")
+    else:
+        lines.append(
+            f"║ rate      : {tp.get('verdict')}  {tp.get('completed_rate_per_hour')}/h completed "
+            f"over {tp.get('primary_window_hours')}h (target {tp.get('target_per_hour')}/h)")
     w = p.get("workers") or {}
     sc = w.get("silent_count") or 0
     if sc:
@@ -467,6 +509,38 @@ def render_md(payload: dict[str, Any], *, date: str) -> str:
             f"| CLAIMED_CLOSED | {cnt.get('CLAIMED_CLOSED', 0)} |",
             f"| OPEN_WITNESSED (closable now) | {c.get('open_witnessed_closable')} |",
         ]
+
+    tp = payload.get("throughput") or {}
+    out += ["", "## Throughput (closed issues per hour)", ""]
+    if tp.get("na"):
+        out.append("_Throughput n/a this run (gh fold skipped or timed out)._")
+    else:
+        out += [
+            f"`verdict` = **{tp.get('verdict')}** — **{tp.get('completed_rate_per_hour')}/h** "
+            f"completed over the trailing **{tp.get('primary_window_hours')}h** window "
+            f"(target **{tp.get('target_per_hour')}/h**). Graded on the *completed* "
+            "(resolved, not wontfix/dup) rate.",
+            "",
+            "| window | closed | completed | completed /h | loop-closed | loop /h |",
+            "|---|---|---|---|---|---|",
+        ]
+        pw = tp.get("per_window") or {}
+        lpw = tp.get("loop_per_window") or {}
+        for key in ("1h", "3h", "6h", "12h", "24h"):
+            g = pw.get(key)
+            if not g:
+                continue
+            lp = lpw.get(key) or {}
+            out.append(
+                f"| {key} | {g.get('closed')} | {g.get('completed')} | "
+                f"{g.get('completed_rate_per_hour')} | {lp.get('loop_closed', '-')} | "
+                f"{lp.get('loop_rate_per_hour', '-')} |")
+        last = tp.get("last_loop_close_age_min")
+        out += ["",
+                "Loop's last attributed close: "
+                + (f"{last} min ago." if last is not None else "**none on record**.")
+                + " A gh-rate far above the loop-rate means humans/peers are draining "
+                "the backlog, not the dispatcher."]
 
     sc = w.get("silent_count") or 0
     out += ["", "## Workers that produced nothing", ""]
