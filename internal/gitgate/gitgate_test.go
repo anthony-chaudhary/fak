@@ -19,10 +19,10 @@ import (
 func TestClassify(t *testing.T) {
 	g := New()
 	cases := []struct {
-		name    string
-		cmd     string
-		deny    bool
-		lawHas  string // substring the cited law must contain (deny cases only)
+		name   string
+		cmd    string
+		deny   bool
+		lawHas string // substring the cited law must contain (deny cases only)
 	}{
 		// ---- force-push ------------------------------------------------------
 		{"force long", "git push --force origin main", true, "force-push"},
