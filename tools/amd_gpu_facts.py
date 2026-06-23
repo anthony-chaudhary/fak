@@ -107,30 +107,47 @@ def amd_facts(name_filter: str = "") -> dict:
     used = facts.get("vram_used_bytes") or 0
     facts["vram_used_mib"] = round(used / (1024 * 1024), 1)
     facts["available"] = True
-    facts["note"] = "adapter_ram is WMI-WORD-capped (~4GB) for >4GB cards; vram_used_bytes is exact"
+    facts["note"] = (
+        "adapter_ram is WMI-WORD-capped (~4GB) for >4GB cards; vram_used_bytes is exact. "
+        "On AMD, Vulkan compute runs under the '3d' engine, so busiest_engine / total_util_pct "
+        "track GPU work — compute_util_pct (engtype_Compute) reads ~0 even mid-decode."
+    )
+    # Surface the busiest engine on the one-shot snapshot too (watch mode already shows it),
+    # so the honest "is the GPU working" signal travels with the JSON. On AMD Vulkan the headline
+    # compute_util_pct is misleading (~0), so a consumer that only reads it would think the card
+    # is idle while it decodes; busiest_engine is the field that actually tracks the work.
+    engs = sorted(facts.get("engines") or [], key=lambda e: e.get("util_pct", 0) or 0, reverse=True)
+    if engs:
+        facts["busiest_engine"] = engs[0].get("type")
+        facts["busiest_util_pct"] = engs[0].get("util_pct")
     return facts
 
 
-def main() -> int:
+def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description="AMD GPU state probe (nvidia-smi-equivalent on Windows)")
     ap.add_argument("--name", default="", help="only report a device whose name matches this substring")
     ap.add_argument("--watch", type=float, default=0.0, metavar="SEC",
                     help="sample every SEC seconds until interrupted (smi-style live view)")
-    args = ap.parse_args()
+    args = ap.parse_args(argv)
 
     if args.watch <= 0:
-        print(json.dumps(amd_facts(args.name), indent=2))
-        return 0 if amd_facts(args.name).get("available") else 1
+        # Probe ONCE: the printed snapshot and the exit code must describe the SAME sample.
+        # The old code re-probed for the return value, so a transient counter blip could print
+        # a healthy snapshot yet exit 1 (a TOCTOU), and every one-shot call paid the PowerShell
+        # launch + Get-Counter sampling cost twice.
+        facts = amd_facts(args.name)
+        print(json.dumps(facts, indent=2))
+        return 0 if facts.get("available") else 1
 
     # live-watch mode: one compact line per sample (the `nvidia-smi -l` analogue).
     try:
         while True:
             f = amd_facts(args.name)
             if f.get("available"):
-                # surface the busiest engine type — on AMD, Vulkan compute is usually NOT
-                # under engtype_Compute, so the busiest type is the honest "is it working" signal.
-                engs = sorted(f.get("engines") or [], key=lambda e: e.get("util_pct", 0), reverse=True)
-                busiest = f"{engs[0]['type']}={engs[0]['util_pct']}%" if engs else "n/a"
+                # On AMD, Vulkan compute is usually NOT under engtype_Compute, so the busiest
+                # engine (derived in amd_facts) is the honest "is it working" signal.
+                busiest = (f"{f['busiest_engine']}={f['busiest_util_pct']}%"
+                           if f.get("busiest_engine") else "n/a")
                 print(f"{time.strftime('%H:%M:%S')}  "
                       f"util(total)={f.get('total_util_pct'):>6}%  "
                       f"busiest={busiest:<18}  "

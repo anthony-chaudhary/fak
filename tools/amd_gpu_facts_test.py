@@ -32,6 +32,18 @@ class AmdFactsContract(unittest.TestCase):
         self.assertAlmostEqual(f["vram_used_mib"], 6_400_000_000 / (1024 * 1024), places=1)
         self.assertIn("WMI-WORD-capped", f["note"])
 
+    def test_busiest_engine_is_derived(self):
+        # On AMD, Vulkan compute lands under the '3d'/Graphics engine, NOT engtype_Compute, so
+        # compute_util_pct reads ~0 mid-decode. The probe must surface the busiest engine as the
+        # honest "is it working" signal — here Graphics(88) over Compute(0).
+        with mock.patch.object(g, "_pwsh", return_value=(True, _GOOD, "")):
+            f = g.amd_facts()
+        self.assertEqual(f["busiest_engine"], "Graphics")
+        self.assertEqual(f["busiest_util_pct"], 88.0)
+        # the note must warn that the headline compute_util_pct is misleading on AMD
+        self.assertIn("compute_util_pct", f["note"])
+        self.assertIn("3d", f["note"])
+
     def test_name_filter_matches(self):
         with mock.patch.object(g, "_pwsh", return_value=(True, _GOOD, "")):
             self.assertTrue(g.amd_facts("7600")["available"])
@@ -53,6 +65,22 @@ class AmdFactsContract(unittest.TestCase):
             f = g.amd_facts()
         self.assertFalse(f["available"])
         self.assertIn("parse failed", f["error"])
+
+    def test_one_shot_probes_once_and_exit_matches_snapshot(self):
+        # one-shot mode must probe exactly once so the printed JSON and the exit code describe
+        # the SAME sample (no TOCTOU) and the PowerShell cost isn't paid twice.
+        probe = mock.Mock(return_value=(True, _GOOD, ""))
+        with mock.patch.object(g, "_pwsh", probe):
+            rc = g.main([])
+        self.assertEqual(probe.call_count, 1)
+        self.assertEqual(rc, 0)
+
+    def test_one_shot_unavailable_exits_nonzero(self):
+        probe = mock.Mock(return_value=(False, "", "no PowerShell"))
+        with mock.patch.object(g, "_pwsh", probe):
+            rc = g.main([])
+        self.assertEqual(probe.call_count, 1)
+        self.assertEqual(rc, 1)
 
     def test_live_smoke_optional(self):
         """If we're really on this Windows box with the AMD driver, the probe should resolve a
