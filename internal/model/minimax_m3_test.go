@@ -258,6 +258,80 @@ func TestMiniMaxM3MSASparsityIsNonVacuous(t *testing.T) {
 	}
 }
 
+// TestMiniMaxM3DenseLayerUsesOAIMLPAtDenseWidth witnesses the first-k DENSE-layer FFN
+// path (#495 scope item 2). The real 60-layer MiniMax-M3 config carries
+// moe_layer_freq=[0,0,0,1,...] — its first 3 layers are dense OAI MLPs at
+// dense_intermediate_size (12288), NOT routed MoE. This builds a one-layer MiniMax model
+// with ONLY a dense mlp.{gate,up,down}_proj (no router, no experts) at DenseIntermediateSize
+// != IntermediateSize and proves: (a) ffnForLayer dispatches it to minimaxDenseFFN (not the
+// generic plain-SiLU denseSwiGLU, which would also read the wrong width); (b) the output
+// equals the SwiGLU-OAI closed form at the dense width to f32 bits; and (c) it genuinely
+// differs from the plain-SiLU SwiGLU the generic path would have applied.
+func TestMiniMaxM3DenseLayerUsesOAIMLPAtDenseWidth(t *testing.T) {
+	const H, denseI, moeI = 2, 3, 2 // dense width != routed-expert width on purpose
+	cfg := Config{
+		HiddenSize:            H,
+		NumLayers:             1,
+		IntermediateSize:      moeI, // routed-expert width — must NOT be used by the dense layer
+		DenseIntermediateSize: denseI,
+		VocabSize:             8,
+		RMSNormEps:            1e-5,
+		NumExperts:            2, // IsMoE() so ffnForLayer enters the MiniMax hybrid branch
+		NumExpertsPerTok:      2,
+		SwigluAlpha:           1.702,
+		SwigluLimit:           7.0,
+		ModelType:             "minimax_m3",
+		Architectures:         []string{"MiniMaxM3ForCausalLM"},
+	}
+	tensors := []NamedTensorF32{
+		{Name: layerName(0, "mlp.gate_proj.weight"), Shape: []int{denseI, H}, Data: []float32{
+			0.5, -0.25,
+			0.125, 0.75,
+			-0.4, 0.2,
+		}},
+		{Name: layerName(0, "mlp.up_proj.weight"), Shape: []int{denseI, H}, Data: []float32{
+			0.25, 0.5,
+			-0.5, 0.125,
+			0.3, -0.15,
+		}},
+		{Name: layerName(0, "mlp.down_proj.weight"), Shape: []int{H, denseI}, Data: []float32{
+			0.75, -0.25, 0.5,
+			0.5, 0.125, -0.3,
+		}},
+	}
+	m, err := NewFromF32Tensors(cfg, tensors)
+	if err != nil {
+		t.Fatalf("NewFromF32Tensors: %v", err)
+	}
+	if _, ok := m.ffnForLayer(0).(minimaxDenseFFN); !ok {
+		t.Fatalf("dense MiniMax layer FFN = %T, want minimaxDenseFFN", m.ffnForLayer(0))
+	}
+
+	mat := f32Kernel{m}
+	xn := []float32{0.75, -0.5}
+	g := mat.mul(layerName(0, "mlp.gate_proj.weight"), xn, denseI, H)
+	u := mat.mul(layerName(0, "mlp.up_proj.weight"), xn, denseI, H)
+
+	// (b) SwiGLU-OAI reference at the dense width.
+	gOAI := append([]float32(nil), g...)
+	uOAI := append([]float32(nil), u...)
+	swigluOAIInPlace(gOAI, uOAI, cfg)
+	wantOAI := mat.mul(layerName(0, "mlp.down_proj.weight"), mat.prep(gOAI), H, denseI)
+	assertFloat32BitsEqual(t, "dense OAI MLP delta",
+		wantOAI, minimaxDenseFFN{}.apply(m, 0, xn, mat))
+
+	// (c) plain-SiLU SwiGLU reference (silu(g)*u) — what the generic denseSwiGLU would
+	// have computed — must differ, proving the OAI gate is genuinely wired.
+	gSiLU := make([]float32, denseI)
+	for i := range gSiLU {
+		gSiLU[i] = float32(float64(g[i])/(1+math.Exp(float64(-g[i])))) * u[i]
+	}
+	wantSiLU := mat.mul(layerName(0, "mlp.down_proj.weight"), mat.prep(gSiLU), H, denseI)
+	if d, _ := maxAbsDiff(wantOAI, wantSiLU); d == 0 {
+		t.Fatalf("dense OAI MLP is bit-identical to plain-SiLU SwiGLU — OAI gate is vacuous")
+	}
+}
+
 // TestMiniMaxM3SwigluOAIActivation pins the SwiGLU-OAI gate to its closed form, including
 // the gate/up clamps at ±swiglu_limit.
 func TestMiniMaxM3SwigluOAIActivation(t *testing.T) {

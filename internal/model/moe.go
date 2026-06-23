@@ -56,8 +56,15 @@ func (m *Model) ffnForLayer(layer int) ffnKind {
 	if m.Cfg.isGLMMoeDsa() && m.has(routerName(layer)) {
 		return glmMoeFFN{}
 	}
-	if m.Cfg.isMiniMaxSparseAttn() && m.has(routerName(layer)) {
-		return minimaxMoeFFN{}
+	if m.Cfg.isMiniMaxSparseAttn() {
+		if m.has(routerName(layer)) {
+			return minimaxMoeFFN{}
+		}
+		// A first-k DENSE MiniMax layer (no router) is an OAI MLP at DenseIntermediateSize,
+		// not the generic plain-SiLU denseSwiGLU — see minimaxDenseFFN.
+		if m.has(layerName(layer, "mlp.gate_proj.weight")) {
+			return minimaxDenseFFN{}
+		}
 	}
 	if _, ok := m.manifest[routerName(layer)]; ok {
 		return moeFFN{}

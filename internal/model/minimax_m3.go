@@ -384,6 +384,34 @@ func expertMiniMaxOAI(m *Model, layer, expert int, xn any, mat matKernel) []floa
 	return out
 }
 
+// minimaxDenseFFN is the MiniMax-M3 FFN for the first-k DENSE layers (the layers whose
+// moe_layer_freq entry is 0: the real 60-layer checkpoint runs 3 dense layers before the
+// routed MoE layers). It is a single SwiGLU-OAI MLP — the SAME OAI gate as the experts and
+// the shared expert (HF MiniMaxM3VLDenseMLP), NOT the plain-SiLU denseSwiGLU other families
+// use — at DenseIntermediateSize, reading the layer's own mlp.{gate,up,down}_proj.weight
+// (no router, no experts). Without this a dense MiniMax layer would fall through to the
+// generic denseSwiGLU, which applies the wrong activation (plain SiLU, no gate/up clamp)
+// at the wrong width (IntermediateSize, the routed-expert width, not DenseIntermediateSize).
+type minimaxDenseFFN struct{}
+
+func (minimaxDenseFFN) apply(m *Model, layer int, xn any, mat matKernel) []float32 {
+	cfg := m.Cfg
+	H := cfg.HiddenSize
+	I := cfg.DenseIntermediateSize
+	if I == 0 {
+		I = cfg.IntermediateSize
+	}
+	p := func(s string) string { return layerName(layer, s) }
+	g := mat.mul(p("mlp.gate_proj.weight"), xn, I, H)
+	u := mat.mul(p("mlp.up_proj.weight"), xn, I, H)
+	m.addBiasIfPresent(g, p("mlp.gate_proj.bias"))
+	m.addBiasIfPresent(u, p("mlp.up_proj.bias"))
+	swigluOAIInPlace(g, u, cfg)
+	out := mat.mul(p("mlp.down_proj.weight"), mat.prep(g), H, I)
+	m.addBiasIfPresent(out, p("mlp.down_proj.bias"))
+	return out
+}
+
 // minimaxSharedExpertOAI runs the always-on shared expert (a dense SwiGLU-OAI MLP of
 // width SharedIntermediateSize) over xn. It is added to the routed-expert sum unscaled.
 func minimaxSharedExpertOAI(m *Model, layer int, xn any, mat matKernel) []float32 {

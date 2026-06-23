@@ -233,6 +233,13 @@ type Config struct {
 	SwigluLimit            float64 `json:"swiglu_limit,omitempty"`
 	SharedIntermediateSize int     `json:"shared_intermediate_size,omitempty"`
 
+	// DenseIntermediateSize is the FFN width of MiniMax-M3's first-k DENSE layers
+	// (the real checkpoint runs dense OAI MLPs on the layers whose moe_layer_freq
+	// entry is 0 before switching to routed MoE). The dense layer's mlp.{gate,up,
+	// down}_proj live at this width, NOT IntermediateSize (the routed-expert width).
+	// Defaults to IntermediateSize when zero, so a fully-MoE config is unaffected.
+	DenseIntermediateSize int `json:"dense_intermediate_size,omitempty"`
+
 	// DenseMLP selects GPT-NeoX's dense activation MLP:
 	// hidden -> dense_h_to_4h -> GELU -> dense_4h_to_h. False keeps the Llama SwiGLU.
 	DenseMLP bool `json:"dense_mlp,omitempty"`
