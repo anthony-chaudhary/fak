@@ -41,6 +41,7 @@ import (
 
 	"github.com/anthony-chaudhary/fak/internal/abi"
 	"github.com/anthony-chaudhary/fak/internal/cachemeta"
+	"github.com/anthony-chaudhary/fak/internal/ctxplan"
 	"github.com/anthony-chaudhary/fak/internal/model"
 )
 
@@ -233,6 +234,63 @@ func (c *Context) Compact(ctx context.Context, ids []string, summaryID, tool str
 	}
 	c.Append(summaryID, tool, summaryIDs)
 	return v, swapped
+}
+
+// ApplyPlan bridges a ctxplan.Plan to bit-exact KV eviction (issue #550): it
+// evicts every recorded segment whose id is in the plan's ELIDED set (and not
+// also in its SELECTED set), so the session's KV residency shrinks to the plan's
+// O(1) resident view. The eviction uses the proven model.KVCache.Evict (re-RoPE
+// + renumber), so the compacted cache is byte-identical to a run that only ever
+// prefilled the resident spans — an O(1) VIEW becomes an O(1) KV RESIDENCY.
+//
+// Why this bridge is load-bearing. ctxplan decides WHICH spans are resident (the
+// plan); without ApplyPlan that decision is an O(1) view over an O(N) KV cache —
+// the model's attention state still physically holds every elided span, so the
+// "O(1)" is a text-layer claim the KV layer does not honor. ApplyPlan makes the
+// kernel-owned cache AGREE with the plan: the elided spans are removed, and
+// because KVCache.Evict re-RoPEs and renumbers the survivors, the result equals a
+// run that only ever saw the resident set. The plan's faithfulness witness
+// (ctxplan.Audit) already guarantees every elided span carries a page-back-in
+// handle, so evicting it loses nothing — it pages back in on demand from the
+// lossless store, exactly as a forecast miss does.
+//
+// id correspondence is the adapter contract: a segment is evicted iff its
+// Segment.ID matches an elided ctxplan.Span.ID. The layer that lowers history
+// into both ctxplan.Spans and kvmmu segments MUST use the same ids (the same way
+// recall/cdb share page ids). A segment whose id is neither selected nor elided
+// is LEFT IN PLACE — the bridge evicts only what the plan decided to elide, never
+// what it did not consider; when the plan's candidates partition the whole ledger
+// (the faithful case), residency collapses to exactly the Selected set. A
+// selected span is never evicted even if a malformed plan also elides it (defense
+// in depth over ctxplan.Audit's disjointness check). Eviction runs in ledger
+// order so a multi-span elision renumbers correctly, exactly as Compact does.
+//
+// Honest fence: ApplyPlan only SHRINKS residency to match the view; it does not
+// page resident spans IN (that is the demand-fault path, ctxplan.Materialize).
+// Like the KV-quarantine bridge it is bit-exact on a synthetic model (the witness
+// test) and is not yet wired into the live agent HTTP loop.
+func (c *Context) ApplyPlan(plan ctxplan.Plan) (evicted int) {
+	elide := make(map[string]bool, len(plan.Elided))
+	for _, e := range plan.Elided {
+		if e.ID != "" {
+			elide[e.ID] = true
+		}
+	}
+	// A selected span stays resident even if a malformed plan also lists it as
+	// elided (faithful.go's disjointness check already forbids the overlap).
+	for _, s := range plan.Selected {
+		delete(elide, s.ID)
+	}
+	for _, seg := range c.segs {
+		if seg.Held {
+			continue
+		}
+		if elide[seg.ID] {
+			c.evict(seg)
+			evicted++
+		}
+	}
+	return evicted
 }
 
 // evict drops a segment's span from the kernel-owned cache and renumbers the
