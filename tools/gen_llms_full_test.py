@@ -64,17 +64,41 @@ def test_build_corpus_structure_and_version() -> None:
     # Every inlined doc carries a Source marker pointing at a tracked .md.
     import re
     sources = re.findall(r"^> Source: `([^`]+)`", text, re.M)
-    assert len(sources) == len(targets) == 52, (len(sources), len(targets))
+    # One Source marker per inlined target; the exact count tracks llms.txt as
+    # docs are added, so assert the alignment + a sane floor, not a frozen number.
+    assert len(sources) == len(targets) >= 50, (len(sources), len(targets))
     assert text.endswith("\n") and "\r" not in text  # LF, single trailing newline
 
 
 # --- --check drift gate (#511) --------------------------------------------
 
-def test_check_passes_on_real_repo() -> None:
-    """LIVE: the committed llms-full.txt is in sync with llms.txt (#511's gate)."""
-    r = subprocess.run([PY, str(ROOT / "tools/gen_llms_full.py"), "--check"],
-                       cwd=str(ROOT), capture_output=True, text=True)
-    assert r.returncode == 0, "llms-full.txt is stale; run: python tools/gen_llms_full.py\n" + r.stdout
+def test_check_passes_on_committed_tree() -> None:
+    """LIVE: the committed llms-full.txt (HEAD) is in sync with the committed
+    llms.txt + docs -- the property the #511 CI gate enforces. Materialised from
+    HEAD (not the working tree) into a temp root, so the assertion is stable under
+    concurrent working-tree edits on this multi-session tree."""
+    import tempfile
+    linked = [t for _, t in g.collect_targets(
+        subprocess.run(["git", "-C", str(ROOT), "show", "HEAD:llms.txt"],
+                       capture_output=True).stdout.decode("utf-8", "replace"))]
+
+    def head(rel):
+        r = subprocess.run(["git", "-C", str(ROOT), "show", f"HEAD:{rel}"],
+                           capture_output=True)
+        assert r.returncode == 0, f"HEAD:{rel} missing"
+        return r.stdout
+
+    with tempfile.TemporaryDirectory() as td:
+        Path(td, "llms.txt").write_bytes(head("llms.txt"))
+        Path(td, "llms-full.txt").write_bytes(head("llms-full.txt"))
+        Path(td, "VERSION").write_bytes(head("VERSION"))
+        for rel in linked:
+            p = Path(td, rel)
+            p.parent.mkdir(parents=True, exist_ok=True)
+            p.write_bytes(head(rel))
+        r = subprocess.run([PY, str(ROOT / "tools/gen_llms_full.py"), "--check", "--root", td],
+                           capture_output=True, text=True)
+        assert r.returncode == 0, "committed llms-full.txt is stale vs committed docs:\n" + r.stdout
 
 
 def test_check_fails_when_stale() -> None:

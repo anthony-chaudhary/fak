@@ -17562,6 +17562,7 @@ The lint witness (unit 96): every line beginning with `- [` carries one and only
 - [SHIPPED] A pure-Go SmolLM2-135M forward pass (134.5M params / 272 tensors) runs in-process with the **KV cache as a kernel-owned Go structure**; every rung is proven against a HuggingFace oracle — embedding exact, per-layer cos=1.000000, final-logits max|Δ|≈4.4e-5, KV-decode and KV-quarantine-evict token-for-token identical (max|Δ|=0). Witness: `go test ./internal/model` (oracle argmax-exact); `IN-KERNEL-MODEL-RESULTS.md`. Prior art: the kernel owning its KV cache for provable eviction (vs RadixAttention's LRU).
 - [SHIPPED] Parity lane: parallel matmul across output rows + batched prefill GEMM + an 8-accumulator `fdot`, each output **bit-identical** to the serial reference (`math.Float32bits` equality); decode now beats every same-precision HF f32 config and prefill closed ~16×, with no proven-correctness rung disturbed. Witness: `TestParallelMatchesSerial`, `TestPrefillBatchedMatchesSerial`; `MODEL-BASELINE-RESULTS.md` (Act 2).
 - [SHIPPED] KV-quarantine bridge: a ctxmmu `Quarantine` verdict on poison bytes mechanically **evicts that result's K/V span**, leaving the kernel-owned attention cache bit-identical (max|Δ|=0.0) to never-having-seen it, against a non-vacuous poison control (max|Δ|≈0.33). Witness: `go test ./internal/kvmmu` (green); `KV-QUARANTINE-BRIDGE-RESULTS.md`. (The bridge's witness uses a synthetic model; the numerics are proven separately by the HF oracle, and the live agent loop is not yet wired to it.)
+- [SHIPPED] Planned-elision → KV-eviction residency bridge (issue #550): `kvmmu.Context.ApplyPlan(plan ctxplan.Plan)` evicts every recorded K/V segment whose id is in the plan's ELIDED set (and not its SELECTED set), so the kernel-owned cache's RESIDENCY shrinks to the planner's O(1) resident VIEW — an O(1) view becomes an O(1) KV residency, byte-for-byte (the eviction is the proven `model.KVCache.Evict` re-RoPE+renumber). The plan's faithfulness witness (`ctxplan.Audit`) already guarantees every elided span carries a page-back-in handle, so evicting it loses nothing. Witness: `go test ./internal/kvmmu -run TestApplyPlan` — the post-plan next-token distribution is BIT-IDENTICAL (max|Δ|=0) to a reference that only ever prefilled the resident spans, with a non-vacuous control (keeping the elided spans perturbs the distribution). Honest fences: the witness uses a synthetic model (HF numerics proven separately by the `internal/model` oracle); the bridge only SHRINKS residency to match the view (paging a resident span back IN is the separate demand-fault path, `ctxplan.Materialize`); and it is not yet wired into the live agent HTTP loop.
 - [SHIPPED] Provable-deletion certificate (`internal/deletioncert`, demo `cmd/deletioncert`): a `DeletionCertificate` binds the evicted span, `EvictedCount`, the byte-exact equivalence (evicted == never-saw, max|Δ|=0), a tamper-evident hash-chained journal anchor, and the trust epoch under one ed25519 signature, and **fails closed** on any forged field, non-zero drift, or absent/rewritten anchor (re-verified live in the demo). Honest fences: it is a **self-signed v1** receipt (it attests the integrity of the recorded facts, not independence from the recorder); `EvictedCount` is a self-report; and the bound `max|Δ|=0` is checked as a **signed string, not re-measured** — the eviction's bit-exactness is proven separately by the KV-quarantine bridge above (synthetic model; HF numerics by the oracle). Witness: `go test ./internal/deletioncert`; `docs/proofs/deletioncert.md`; `go run ./cmd/deletioncert -selfcheck` exit 0.
 - [SHIPPED] The in-kernel model is wired as a `RegisterEngine` backend (`internal/modelengine`, id `inkernel`): an allowed tool call is completed by a real greedy Prefill+Step decode over the kernel-owned KV cache (`model.Session.Generate`) — selectable via `--engine inkernel`, one blank-import in `internal/registrations`. Closes the gap that `internal/agent`/`internal/engine` never imported `internal/model`. Lazily builds a deterministic synthetic checkpoint (runs with no model export); `FAK_MODEL_DIR` loads a real export through the identical dispatch path. Witness: `go test ./internal/modelengine` — a multi-call agent loop on `kernel.New("inkernel")` completes, the kernel's `EngineCalls` tally confirms one engine call per turn, decode is deterministic + input-driven (issue #14).
 - [SHIPPED] Poly-model serving core (`internal/polymodel`, foundation leaf, stdlib-only): the deterministic **"host many models, share the prefill, decode one"** mechanism — a weight-byte-budgeted multi-model residency `Pool` (LRU eviction of the coldest UNPINNED model, all-or-nothing admit), a single **SERIAL** decode-lane scheduler (`Schedule`/`NextDecoder`, the at-most-one-model-decodes-per-step invariant asserted), and the cache-led multi-token-prediction accept core (`AcceptGreedy`: the greedy speculative-decoding accept rule whose KEEP/EVICT counts map 1:1 onto the bit-exact `KVCache.Clone` fork + `KVCache.Evict` rollback; `AcceptTree` the next-gen token-TREE generalization (Medusa/EAGLE-2/SpecInfer: many candidate continuations share a KV prefix, verified in one pass, only the accepted path kept); `PickDrafter` ensemble drafter selection; `EffectiveTokensPerVerify` geometric-series speedup model), plus `CanShare`, the cross-model prefill-share gate (model B reuses model A's prefix KV iff same `Family` + byte-identical `PrefixDigest` ⇒ lossless reuse — the verdict-layer unlock that lifts the cache's exact-ModelID barrier; share DECISION plus the verdict-layer wiring + KVCache.Clone splice, shipped in #534 — `cachemeta.PrefillSharePolicy` lifts the ModelID barrier for a declared-compatible family (opt-in via `WithPrefillShare`, ModelID-axis-only, every other axis still verified), and `internal/spec.CrossModelPrefillShare` / `SplicePrefillShare` is the off-defconfig bridge + bit-exact Clone splice). It encodes the prefill(compute-bound)/decode(HBM-bandwidth-bound) asymmetry that makes "decode one" a hardware consequence, not a compromise. Honest fence: this is the policy/accounting brain ONLY — it runs no model, moves no KV bytes, touches no GPU, and is **off mainline by construction**: the leaf is NOT in the defconfig (`internal/registrations`), so the `fak` binary never links it (only `cmd/polymodelbench` does), and the eventual live-path wiring is gated behind `polymodel.Enabled()` (`FAK_POLYMODEL`, default off); real multi-model residency on a backend remains sequenced (the verify EXECUTION shipped in #533 — single-pass batched + tree-attention masks); served cross-model prefill share — the verdict-layer barrier lift + KVCache.Clone splice — shipped in #534 (`cachemeta.MaterializeVerdict` + `WithPrefillShare`; `internal/spec` bridge) in `docs/serving/polymodel-prefill-share-plan.md` (the frozen ABI MTP envelope — `abi.SpeculationContext`/`TxnID`/`Outcome`/`ProvisionalSink` — has no implementation behind it yet). Witness: `go test ./internal/polymodel` (residency budget-never-exceeded + pinned-never-evicted, serial-lane invariant, accept KEEP+EVICT conservation, drafter selection, speedup monotonicity); `go test ./internal/architest` (tier-1 layering); `go run ./cmd/polymodelbench -selfcheck` exit 0 — hosts 10 synthetic models under a budget, drives the serial decode lane over REAL `model.Session` decode, and proves greedy speculative decode is token-identical to plain greedy even when an adversarial draft forces a rollback every round (the bit-exact `KVCache.Evict` path, exercised 96 spans / vacuity-guarded).
@@ -18662,7 +18663,7 @@ description: "Auto-generated fak issue dispatch status: dispatcher and worker st
 
 _Auto-generated by `tools/dispatch_status.py --md`. Do not hand-edit; re-run the tool (or the `FleetDispatchStatusDoc` task) to refresh._
 
-- **dispatcher**: `READY_TO_GROW` (ok)
+- **dispatcher**: `WEEKLY_CAPPED` (ok)
 - **workers**: 0/2 live (headroom 2); host clean
 - **switcher account**: `smith-netra` (t1, opus), available=True
 - **always-on watchdog**: installed (Ready)
@@ -18670,11 +18671,11 @@ _Auto-generated by `tools/dispatch_status.py --md`. Do not hand-edit; re-run the
 
 ## Backlog by lane (issue → lane sync)
 
-Open issues: **396** — routed 364, unrouted 32.
+Open issues: **390** — routed 358, unrouted 32.
 
 | lane | open issues |
 |---|---|
-| docs | 146 |
+| docs | 140 |
 | tools | 37 |
 | gateway | 32 |
 | model | 30 |
@@ -18706,31 +18707,31 @@ Open issues: **396** — routed 364, unrouted 32.
 
 ## Closure honesty
 
-`closure_rate` = **0.7099** (TRUE_RESOLVED / (TRUE_RESOLVED + CLAIMED_CLOSED)).
+`closure_rate` = **0.7143** (TRUE_RESOLVED / (TRUE_RESOLVED + CLAIMED_CLOSED)).
 
 | bucket | count |
 |---|---|
-| TRUE_RESOLVED | 93 |
-| CLAIMED_CLOSED | 38 |
+| TRUE_RESOLVED | 100 |
+| CLAIMED_CLOSED | 40 |
 | OPEN_WITNESSED (closable now) | 0 |
 
 ## Throughput (closed issues per hour)
 
-`verdict` = **BELOW_TARGET** — **3.67/h** completed over the trailing **6h** window (target **10.0/h**). Graded on the *completed* (resolved, not wontfix/dup) rate.
+`verdict` = **BELOW_TARGET** — **3.17/h** completed over the trailing **6h** window (target **10.0/h**). Graded on the *completed* (resolved, not wontfix/dup) rate.
 
 | window | closed | completed | completed /h | loop-closed | loop /h |
 |---|---|---|---|---|---|
-| 1h | 3 | 3 | 3.0 | 0 | 0.0 |
-| 3h | 8 | 8 | 2.67 | 2 | 0.67 |
-| 6h | 22 | 22 | 3.67 | 12 | 2.0 |
-| 12h | 22 | 22 | 1.83 | 12 | 1.0 |
-| 24h | 70 | 70 | 2.92 | 38 | 1.58 |
+| 1h | 3 | 3 | 3.0 | 3 | 3.0 |
+| 3h | 10 | 10 | 3.33 | 5 | 1.67 |
+| 6h | 19 | 19 | 3.17 | 9 | 1.5 |
+| 12h | 31 | 31 | 2.58 | 17 | 1.42 |
+| 24h | 66 | 66 | 2.75 | 30 | 1.25 |
 
-Loop's last attributed close: 77.1 min ago. A gh-rate far above the loop-rate means humans/peers are draining the backlog, not the dispatcher.
+Loop's last attributed close: 1.9 min ago. A gh-rate far above the loop-rate means humans/peers are draining the backlog, not the dispatcher.
 
 ## Workers that produced nothing
 
-**22** worker(s) exited with a 0-byte log (spawned, committed nothing). The anti-churn cooldown advances the picker past these, so the loop still progresses — but each is worth an operator's eye (often an epic-shaped issue too large to land in one shot).
+**23** worker(s) exited with a 0-byte log (spawned, committed nothing). The anti-churn cooldown advances the picker past these, so the loop still progresses — but each is worth an operator's eye (often an epic-shaped issue too large to land in one shot).
 
 | issue | spawned (utc stamp) | log |
 |---|---|---|
@@ -18751,6 +18752,7 @@ Loop's last attributed close: 77.1 min ago. A gh-rate far above the loop-rate me
 | #531 | 20260623-103710 | `resolve-531-20260623-103710.log` |
 | #533 | 20260623-102210 | `resolve-533-20260623-102210.log` |
 | #534 | 20260623-100712 | `resolve-534-20260623-100712.log` |
+| #543 | 20260623-095523 | `resolve-543-20260623-095523.log` |
 | #536 | 20260623-094653 | `resolve-536-20260623-094653.log` |
 | #372 | 20260622-182830 | `resolve-372-20260622-182830.log` |
 | #260 | 20260622-181444 | `resolve-260-20260622-181444.log` |
@@ -18759,7 +18761,7 @@ Loop's last attributed close: 77.1 min ago. A gh-rate far above the loop-rate me
 
 ---
 
-Reasons: safe to spawn: 0/2 live, account 'smith-netra' free; always-on watchdog installed (Ready); 22 worker(s) exited producing nothing (#519, #517, #254, #543, #258, #540) — inspect or re-scope; throughput 3.67/h completed over 6h — below the 10.0/h target
+Reasons: account 'smith-netra' weekly-capped — resets 11am (holding spawn until 2026-06-23T18:00:00Z); the t2 glm/docs pool is unaffected; always-on watchdog installed (Ready); 23 worker(s) exited producing nothing (#519, #517, #254, #543, #258, #540) — inspect or re-scope; throughput 3.17/h completed over 6h — below the 10.0/h target
 
 ---
 
