@@ -63,14 +63,28 @@ fak guard: 128 kernel decision(s) — 121 allowed, 5 denied, 2 repaired, 0 quara
   blocked: SELF_MODIFY      x1
 ```
 
-> **Subscription OAuth vs API key.** `fak guard` authenticates upstream with an **API
-> key**, not a Claude Pro/Max subscription. Two reasons stack: Claude Code uses
-> `ANTHROPIC_API_KEY` (not its OAuth token) whenever `ANTHROPIC_BASE_URL` points at a
-> non-Anthropic host, and fak's upstream Anthropic client forwards the credential as the
-> `x-api-key` header — the API-key scheme — whereas an OAuth token must be presented as
-> `Authorization: Bearer` plus an `anthropic-beta: oauth-*` header. So export
-> `ANTHROPIC_API_KEY` (guard warns when it is unset). Subscription OAuth through a proxy
-> hop is a provider-side constraint, not a switch fak can flip.
+> **Subscription OAuth or API key — both work.** `fak guard` proxies to the real
+> Anthropic API in passthrough, and the upstream credential can be a plain API key OR a
+> Claude Pro/Max **subscription** OAuth token. fak picks the wire scheme from the token
+> itself: a subscription token (`sk-ant-oat…`) is sent as `Authorization: Bearer` plus
+> `anthropic-beta: oauth-2025-04-20` — the only scheme the API accepts it under (sent as
+> `x-api-key` it 401s with `invalid x-api-key`) — while a plain key is sent as `x-api-key`.
+> Two ways to use a subscription:
+>
+> - **`fak guard -- claude`** (no flag): when you are logged into a subscription, Claude
+>   Code forwards its own OAuth bearer through the gateway and fak relays it upstream.
+> - **`fak guard --anthropic-oauth -- claude`**: fak HOLDS the token itself (sourced from
+>   `CLAUDE_CODE_OAUTH_TOKEN`, then `<claude-config>/.oauth-token`, then
+>   `~/.claude/.credentials.json`), ignores the client's credential, and injects a
+>   placeholder key into the child. Robust for headless/long runs — prefer a
+>   `claude setup-token` (a long-lived token) since the interactive `.credentials.json`
+>   one expires and Claude Code refreshes it out-of-band.
+>
+> ⚠️ **Terms of service.** Anthropic restricts subscription OAuth tokens to the official
+> Claude Code client and has acted against third-party clients that reuse them.
+> `--anthropic-oauth` wraps the genuine `claude` binary as a transparent hop to the real
+> API, but proxied subscription use may still be detected — review Anthropic's terms
+> before relying on it. The flag is opt-in and prints this caveat at startup.
 
 Wrap a different agent or upstream by naming it after `--` and switching the provider:
 

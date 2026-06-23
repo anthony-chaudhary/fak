@@ -52,8 +52,15 @@ ANTHROPIC_BASE_URL=http://127.0.0.1:8080 claude   # your normal claude, now kern
    the *response's* proposed tool calls — it never mutates the request. So the
    `anthropic` backend does **not** pin a placeholder key or remap model tiers: Claude
    Code keeps using `claude-opus-4-8` (etc.) and its own credential. The inbound
-   `x-api-key` is forwarded verbatim to the upstream (`anthropicInboundKey` →
-   `WithUpstreamAPIKey`); fak holds no second secret.
+   credential is forwarded to the upstream (`anthropicInboundKey` →
+   `WithUpstreamAPIKey`) under the scheme the token itself implies — a plain key as
+   `x-api-key`, a Claude Pro/Max **subscription** OAuth token (`sk-ant-oat…`) as
+   `Authorization: Bearer` + `anthropic-beta: oauth-2025-04-20` (the only scheme the
+   API accepts it under). fak holds no second secret. So a subscription works through
+   the gateway too: `fak guard -- claude` relays the client's own bearer, or
+   `fak guard --anthropic-oauth -- claude` has fak hold the token itself. ⚠️ Anthropic's
+   terms restrict subscription tokens to the official client — `--anthropic-oauth` is
+   opt-in and warns; review the terms before relying on it.
 
 2. **Prompt caching survives byte-for-byte.** Anthropic prompt caching is a *byte-exact
    prefix hash*. fak's canonical transcript is lossy (it flattens `system` blocks and
