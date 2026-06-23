@@ -2,8 +2,35 @@ package polymodel
 
 import (
 	"errors"
+	"os"
 	"sort"
+	"strings"
 )
+
+// ---------------------------------------------------------------------------
+// Feature gate — the poly-model lane is OFF by default until it is production-ready.
+// ---------------------------------------------------------------------------
+
+// FlagEnv is the environment variable that turns the poly-model serving lane ON.
+const FlagEnv = "FAK_POLYMODEL"
+
+// Enabled reports whether the poly-model serving lane is turned on. It defaults to
+// OFF: this lane is a sequenced, not-yet-production feature, so even after its
+// integration rungs land (docs/serving/polymodel-prefill-share-plan.md) the wiring
+// MUST guard on Enabled() — set FAK_POLYMODEL=on (or 1/true/yes) to opt in. This is
+// the SECOND of two safety layers: the first is keeping this leaf OUT of the defconfig
+// (internal/registrations), so the kernel never even links it by default; this flag
+// gates the behavior once it is wired. Mirrors the FAK_AUDIT_JOURNAL (opt-in) and
+// FAK_GITGATE (opt-out) env-flag pattern. The pure helpers in this package (Pool,
+// Schedule, AcceptGreedy, …) do NOT consult it — they are deterministic library calls;
+// only the integration that puts the lane on a live request path must.
+func Enabled() bool {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv(FlagEnv))) {
+	case "on", "1", "true", "yes":
+		return true
+	}
+	return false
+}
 
 // ---------------------------------------------------------------------------
 // Residency — the "host many models" half.

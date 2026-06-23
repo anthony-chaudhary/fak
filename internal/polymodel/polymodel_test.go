@@ -401,6 +401,25 @@ func TestEffectiveTokensPerVerify(t *testing.T) {
 	}
 }
 
+func TestEnabledDefaultsOff(t *testing.T) {
+	t.Setenv(FlagEnv, "")
+	if Enabled() {
+		t.Fatal("poly-model lane must default OFF (not-yet-production feature)")
+	}
+	for _, on := range []string{"on", "ON", "1", "true", "yes"} {
+		t.Setenv(FlagEnv, on)
+		if !Enabled() {
+			t.Fatalf("FAK_POLYMODEL=%q must enable", on)
+		}
+	}
+	for _, off := range []string{"off", "0", "false", "no", "maybe"} {
+		t.Setenv(FlagEnv, off)
+		if Enabled() {
+			t.Fatalf("FAK_POLYMODEL=%q must stay OFF", off)
+		}
+	}
+}
+
 func mustAdmit(t *testing.T, p *Pool, m Model) {
 	t.Helper()
 	if _, err := p.Admit(m); err != nil {

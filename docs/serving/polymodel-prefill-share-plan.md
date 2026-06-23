@@ -212,6 +212,28 @@ Ordered so each rung stands on a shipped one. None of these land in this doc.
 6. **Bench harness numbers.** Gate every speedup claim on a measured run (#44): E vs
    draft cost, decode-lane utilization, residency hit-rate.
 
+## 7a. Safety — off by default until ready (feature-flag gating)
+
+This lane must not affect the shipped `fak` binary until each rung is production-ready.
+Two layers enforce that, matching fak's existing flag conventions:
+
+1. **Defconfig opt-in (the strongest gate).** A leaf reaches a live request path *only*
+   if it is blank-imported in `internal/registrations` (the "defconfig"; see
+   `architest`'s request-path closure). `internal/polymodel` is deliberately **NOT**
+   there, and nothing on the request path imports it — the `fak` binary does not even
+   link it today (only the standalone `cmd/polymodelbench` demo does). So the shipped
+   kernel's behavior is byte-unchanged.
+2. **Runtime env gate (the second layer, for when it is wired).** When an integration
+   rung *does* put the lane on a request path, that wiring **must** guard on
+   `polymodel.Enabled()` — the `FAK_POLYMODEL` env flag, **default off** (opt in with
+   `FAK_POLYMODEL=on`). This mirrors `FAK_AUDIT_JOURNAL` (a leaf that ships imported but
+   inert until its flag is set) and `FAK_GITGATE`. The pure helpers (`Pool`, `Schedule`,
+   `AcceptGreedy`, …) never consult the flag — they are deterministic library calls; only
+   the live-path integration does.
+
+The acceptance bar for moving any rung past these gates is a green `make ci` *and* a
+measured bench run (#44) — never a flag flip alone.
+
 ## 8. Non-goals
 
 - **Not chasing raw single-GPU tokens/sec vs vLLM/SGLang.** This is a *capacity +

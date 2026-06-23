@@ -62,4 +62,14 @@
 // ABI already carries the frozen seam for the speculative half (abi.SpeculationContext,
 // abi.TxnID, abi.Outcome, abi.ProvisionalSink); polymodel is the policy/accounting
 // brain that a ProvisionalSink implementation would consult.
+//
+// # Off by default until ready (two safety layers)
+//
+// This lane must not affect mainline until it is production-ready, so it is gated
+// twice: (1) the leaf is deliberately NOT blank-imported in the defconfig
+// (internal/registrations), so the kernel never even links it — the strongest gate;
+// (2) when the integration rungs DO wire it onto a request path, that wiring must
+// guard on Enabled() (the FAK_POLYMODEL env flag, default off). The pure helpers here
+// are always safe to call (deterministic library functions touching no global state);
+// only the live-path integration consults the flag.
 package polymodel
