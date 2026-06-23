@@ -184,9 +184,16 @@ never resident; a pin cannot launder poison.
   (`agent.CtxViewPlanner`, `FAK_CTXPLAN_SEAM`, off by default, #546). The residual is the
   **gateway**: `fak serve`/`fak guard` does not yet call the planner each turn to replace
   compaction (filed as #555).
-- **The forecast is authored, not learned.** Intents/pins are supplied; predicting them
-  from the trajectory (the real "preemptive planning") is a follow-on. The benefit
-  Weights are a sensible seed, not tuned.
+- **The forecast is authored from the trajectory, not a model.** `ctxplan.TrajectoryAuthor`
+  (#556) now AUTHORS `Forecast.Intents` from the recent trajectory (recency-weighted
+  content-token recurrence — recurrence dominates, recency breaks near-ties), the
+  deterministic, model-free seed of the "preemptive planning" rung, with a `Proposer`
+  interface seam for a model-backed predictor. It is the PROACTIVE peer of `Forecast.Learn`
+  (the REACTIVE fault→intent revision): Propose seeds from where the session has been;
+  Learn refines from where it was wrong. The residual is the MODEL on the wire: a local
+  model emitting predicted reference strings is the higher-tier follow-on, gated on the
+  outbound transform seam (wirescreen RUNG 4) that does not yet exist on the flagship
+  passthrough. The benefit Weights are a sensible seed, not tuned.
 - **The scaling model is closed-form, not measured.** The curve is exact arithmetic from
   the regime definitions, deterministic and testable — not a wall-clock run over real
   transcripts. An empirical pass over recorded `cdb` core images (resident tokens, fault
