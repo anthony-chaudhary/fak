@@ -210,11 +210,11 @@ func TestResidentRedundancyContentAddressed(t *testing.T) {
 	}
 
 	type rrow struct {
-		name           string
-		distinctBlobs  int
-		dedupSaved     int64
-		rawBytes       int64
-		redundancyPct  float64
+		name          string
+		distinctBlobs int
+		dedupSaved    int64
+		rawBytes      int64
+		redundancyPct float64
 	}
 	rows := make([]rrow, 0, len(arms))
 	for _, a := range arms {
