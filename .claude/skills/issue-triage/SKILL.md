@@ -6,6 +6,8 @@ user-invocable: true
 allowed-tools: Read, Bash, Grep, Glob
 argument-hint: "[--since-days N] [--scope priority|kind|area|orphans|stale|dup|question]   (apply: issue-actions-*.json)"
 output_root: docs/_audits
+metadata:
+  opencode: claude-only   # #422: read-only allowed-tools boundary is load-bearing and Claude-only — exclude from the opencode skills.paths scan
 ---
 
 # /issue-triage — classify, rank, and garden the open issue backlog

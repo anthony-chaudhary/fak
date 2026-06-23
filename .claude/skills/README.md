@@ -29,6 +29,40 @@ project-supplied.
 | [`quality-score`](quality-score/SKILL.md) | The CODE-quality RSI pass: run the code-quality scorecard, retire code-debt worst-first (gofmt, real tests, safe extraction), re-measure to prove the drop, ground the ship in DOS, commit by explicit path. Wraps `tools/code_quality_scorecard.py`. |
 | [`appeal-score`](appeal-score/SKILL.md) | The PROSE-voice pass: make a doc read human, not machine. Run the doc-appeal scorecard, retire appeal-debt (em-dash flood, run-ons, walls, stacked contrast frames, LLM-scaffolding) WITHOUT changing a claim/number/link, re-measure, commit the doc lane. Wraps `tools/doc_appeal_scorecard.py`. |
 
+## Cross-loading into opencode (#422)
+
+opencode scans `**/SKILL.md` too, but its skill loader honors only
+`name, description, license, compatibility, metadata` — **every other
+frontmatter field is silently dropped into inert `options`.** So these
+Claude-only fields lose their meaning when a skill is cross-loaded:
+
+| Field | What it does in Claude | What opencode does |
+|---|---|---|
+| `allowed-tools` | per-skill tool allowlist (a read-only skill stays read-only) | dropped — scope widens to the invoking *agent's* permission |
+| `disable-model-invocation` | gate so only the operator can invoke | dropped — the model can invoke it |
+| `user-invocable` | hide an auto-load-only skill from direct invocation | dropped — it becomes directly invocable |
+| `argument-hint`, `output_root` | UX / output-path hints | dropped (cosmetic) |
+
+A field is **load-bearing** when dropping it changes the access or invocation
+posture — a read-only `allowed-tools` allowlist, or `disable-model-invocation:
+true` / `user-invocable: false`. opencode's per-agent `permission:` lives on
+the agent, not the skill, so there is no per-skill equivalent.
+
+**Mitigation.** A skill whose Claude-only frontmatter is load-bearing must
+acknowledge the gap via the opencode-honored `metadata` field (it survives the
+cross-load):
+
+```yaml
+metadata:
+  opencode: claude-only       # exclude this skill from the opencode skills.paths scan
+  # or
+  opencode: agent-permission  # the boundary is re-expressed on the invoking agent's permission:
+```
+
+**Lint.** `python tools/skill_frontmatter_lint.py` flags every skill whose
+Claude-only frontmatter is load-bearing and not yet acknowledged;
+`--check` is the CI gate (exit 1 on an unacknowledged one).
+
 ## Conventions
 
 - **Per-project overrides.** A project can ship a wrapper `SKILL.md` at the same

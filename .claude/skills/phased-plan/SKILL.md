@@ -4,6 +4,8 @@ description: Ceremony rules for shipping a phase of a phased plan — when to re
 disable-model-invocation: true
 user-invocable: false
 allowed-tools: Read, Edit, Bash
+metadata:
+  opencode: claude-only   # #422: model-invocation/user-invocable gating is load-bearing and Claude-only — exclude from the opencode skills.paths scan
 ---
 
 # Phased-Plan Ceremony

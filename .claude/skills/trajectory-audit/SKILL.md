@@ -6,6 +6,8 @@ user-invocable: true
 allowed-tools: Read, Grep, Glob, Bash
 argument-hint: "[--since-days N] [--md OUT | --json OUT] [--all]   (drill: deep <session.jsonl>)"
 output_root: none
+metadata:
+  opencode: claude-only   # #422: read-only allowed-tools boundary is load-bearing and Claude-only — exclude from the opencode skills.paths scan
 ---
 
 # /trajectory-audit — cross-session token & cache-efficiency sweep
