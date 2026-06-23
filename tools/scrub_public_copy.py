@@ -25,6 +25,12 @@ import re
 import shutil
 import sys
 
+# Code-aware lab-hardware scrub (A100/DGX/SXM4 -> generic GPU terms) for doc PROSE.
+# scrub_public_copy lives in tools/, so this resolves on the same sys.path the script
+# (and its test) run under. Used as an export-time .md pass below; the same module's
+# --check is the repo-wide CI enforcement (tools/scrub_hardware_names.py).
+import scrub_hardware_names
+
 # Paths (relative to EXPORT_DIR) to delete entirely. Operator-private evidence,
 # operator-machine captures, or the committed memory mirror. These live ONLY on
 # the private side (see PUBLIC-SCRUB-POLICY.md).
@@ -247,11 +253,14 @@ CASE_INSENSITIVE_REPLACEMENTS = [
     # comments -- never a code identifier, which are hyphen/underscore-joined with
     # no space: cmd/dgxbridge, dgx_qwen36_*, dgx-r4-*, the FAK_DGX_REQ_ marker, the
     # GCP "NVIDIA_A100" quota keys, the asserted "NVIDIA A100-SXM4-40GB" preflight
-    # test fixtures. Bare "DGX"/"A100" are deliberately left alone for that reason.
-    # This is a softening pass (reduce + vague), so NO audit needle is added -- the
-    # residual technical "A100"/"sm_80"/"Ampere" arch references are legitimate and
-    # intentionally kept. Order: SKU + count forms first, then the machine brand,
-    # then the bare count, then the trailing-space "the A100 " catch-all last.
+    # test fixtures. These string rules SOFTEN the SKU/machine forms; bare "DGX"/"A100"
+    # in markdown PROSE is now scrubbed by the code-aware scrub_hardware_names.transform
+    # .md pass in the export loop below (word-bounded, code/link/path-masked, competitor-
+    # A100-guarded -- so it cannot corrupt those identifiers), and the repo-wide
+    # tools/scrub_hardware_names.py --check gate enforces it in CI. So NO audit needle is
+    # added here -- the residual technical "A100"/"sm_80"/"Ampere" in CODE/paths is
+    # legitimate and intentionally kept. Order: SKU + count forms first, then the machine
+    # brand, then the bare count, then the trailing-space "the A100 " catch-all last.
     ("8× NVIDIA A100-SXM4-40GB", "an 8-GPU datacenter server"),
     ("8×A100-SXM4-40GB", "an 8-GPU datacenter server"),
     ("8× A100-SXM4-40GB", "an 8-GPU datacenter server"),
@@ -821,6 +830,20 @@ def main() -> int:
                     changed = pat.sub(replacement, changed)
                     desc = f"{needle} -> {replacement} (case-insensitive)"
                     file_touches[desc] = file_touches.get(desc, 0) + len(hits)
+            # Code-aware bare-token pass for markdown PROSE: the CASE_INSENSITIVE
+            # rules above soften the SKU/machine forms ("8x A100-SXM4-40GB", "A100
+            # DGX") but deliberately leave BARE "DGX"/"A100" (a blind string-replace
+            # would corrupt FAK_DGX_REQ_, cmd/dgxbridge, etc.). scrub_hardware_names
+            # rewrites those safely -- word-bounded, skipping code/links/paths, and
+            # guarding competitor A100 citations -- so an exported doc is fully
+            # de-identified, not just softened. .md only (its tested domain).
+            if name.endswith(".md"):
+                scrubbed = scrub_hardware_names.transform(changed)
+                if scrubbed != changed:
+                    file_touches["lab GPU hardware (scrub_hardware_names)"] = (
+                        file_touches.get("lab GPU hardware (scrub_hardware_names)", 0) + 1
+                    )
+                    changed = scrubbed
             if changed != original:
                 with open(full, "w", encoding=enc) as f:
                     f.write(changed)
