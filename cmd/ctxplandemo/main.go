@@ -132,6 +132,57 @@ func run(budget int) error {
 		return fmt.Errorf("the exact oracle must never score below greedy (got %.3f < %.3f)", exact.Benefit, greedy.Benefit)
 	}
 
+	// ---- 5b. Non-redundant residency: content-dedup + the coverage objective --------
+	// Two planner properties that keep the resident view from filling with REDUNDANT
+	// takes of the same content (the core thesis is a BUDGET-BOUNDED view, so every slot
+	// spent on a duplicate is a slot stolen from a distinct fact):
+	//  (a) content-dedup collapses byte-identical spans (equal Digest) to one
+	//      representative — the duplicate is elided (recoverable) and charged ONCE; and
+	//  (b) the coverage objective (a submodular greedy, 1-1/e) discounts a candidate's
+	//      relevance by the intents already resident, so spans matching ONE intent no
+	//      longer triple-take the budget — the view spreads across intents instead.
+	fmt.Println("\n== Non-redundant residency: content-dedup + the coverage objective ==")
+
+	// (a) A byte-identical copy of the runbook: dedup must keep ONE and elide the other.
+	dupStore := ctxplan.NewMemStore()
+	runbook := []byte("auth token rotation runbook: 1) mint 2) roll 3) revoke old")
+	dupStore.Add("WebSearch", ctxplan.DurabilityDurable, runbook, false)
+	dupStore.Add("WebSearch", ctxplan.DurabilityDurable, runbook, false) // BYTE-IDENTICAL -> equal Digest
+	dupSpans, _ := dupStore.Spans(ctx)
+	dupCands := ctxplan.Candidates(dupSpans, forecast, nil)
+	dupPlan := ctxplan.Optimize(dupCands, ctxplan.Budget{Tokens: budget}, nil, ctxplan.ObjGreedy)
+	dupElided := 0
+	for _, e := range dupPlan.Elided {
+		if e.Reason == ctxplan.ElideDuplicate {
+			dupElided++
+		}
+	}
+	if len(dupPlan.Selected) != 1 || dupElided != 1 {
+		return fmt.Errorf("dedup should collapse the byte-identical pair to 1 resident + 1 ElideDuplicate, got %d resident / %d duplicates",
+			len(dupPlan.Selected), dupElided)
+	}
+	fmt.Printf("  content-dedup   : %d byte-identical spans -> %d resident, %d elided as duplicate (charged once, recoverable)\n",
+		len(dupSpans), len(dupPlan.Selected), dupElided)
+
+	// (b) Three spans that ALL match the SAME intent: greedy triple-takes, coverage keeps one.
+	covSpans := []ctxplan.Span{
+		{ID: "x1", Step: 0, Role: "tool", Descriptor: "alpha report one", Bytes: 20, Durability: ctxplan.DurabilityTurn},
+		{ID: "x2", Step: 1, Role: "tool", Descriptor: "alpha report two", Bytes: 20, Durability: ctxplan.DurabilityTurn},
+		{ID: "x3", Step: 2, Role: "tool", Descriptor: "alpha report three", Bytes: 20, Durability: ctxplan.DurabilityTurn},
+	}
+	covForecast := ctxplan.Forecast{Intents: []string{"alpha"}, Weights: ctxplan.Weights{Relevance: 1.0}} // pure-relevance
+	covCands := ctxplan.Candidates(covSpans, covForecast, nil)
+	tripleGreedy := ctxplan.Optimize(covCands, ctxplan.Budget{Tokens: 999}, nil, ctxplan.ObjGreedy)
+	singleCov := ctxplan.Optimize(covCands, ctxplan.Budget{Tokens: 999}, nil, ctxplan.ObjCoverage)
+	if len(tripleGreedy.Selected) != 3 {
+		return fmt.Errorf("greedy should triple-take the same-intent spans, got %d", len(tripleGreedy.Selected))
+	}
+	if len(singleCov.Selected) != 1 {
+		return fmt.Errorf("coverage should keep ONE (the intent covered once), got %d", len(singleCov.Selected))
+	}
+	fmt.Printf("  coverage objective: %d same-intent spans -> greedy takes %d, coverage takes %d (broad, not a triple-take)\n",
+		len(covSpans), len(tripleGreedy.Selected), len(singleCov.Selected))
+
 	// ---- 6. The learning loop: forecast + weights tuned from witnessed outcomes -----
 	// A Plan is a PREDICTION. After the turn runs we witness what actually happened —
 	// which resident spans the turn referenced (Hits), which elided spans it had to
