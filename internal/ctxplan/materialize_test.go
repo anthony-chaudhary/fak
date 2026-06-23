@@ -35,6 +35,12 @@ func TestMaterializeWitnessHoldsOnHappyPath(t *testing.T) {
 		t.Errorf("witness rendered/refused must mirror the view: rendered=%d/%d refused=%d/%d",
 			v.Witness.Rendered, len(v.Rendered), v.Witness.Refused, len(v.Refused))
 	}
+	// ResidentTokens is the REALIZED resident size (what the gate paged in), not the plan's
+	// selected cost — so on the clean path it equals the view's RenderedTokens exactly.
+	if v.Witness.ResidentTokens != v.RenderedTokens() {
+		t.Errorf("ResidentTokens must match RenderedTokens on the happy path: %d != %d",
+			v.Witness.ResidentTokens, v.RenderedTokens())
+	}
 }
 
 // refuseStore wraps a MemStore that refuses a named span at page-in — simulating a seal
@@ -84,6 +90,17 @@ func TestMaterializeWitnessReconcilesRefused(t *testing.T) {
 	}
 	if v.Witness.Refused != 1 {
 		t.Errorf("witness must report exactly 1 refused span, got %d", v.Witness.Refused)
+	}
+	// The refused span was SELECTED (so the plan's ResidentTokens counted it) but never
+	// rendered. The reconciled witness must NOT still count it resident: ResidentTokens
+	// drops to the tokens actually paged in (== RenderedTokens), the exact bug #548 names.
+	if v.Witness.ResidentTokens != v.RenderedTokens() {
+		t.Errorf("a refused span must not count as resident: ResidentTokens=%d != RenderedTokens=%d",
+			v.Witness.ResidentTokens, v.RenderedTokens())
+	}
+	if v.Witness.ResidentTokens == v.Plan.CostUsed {
+		t.Errorf("ResidentTokens must diverge from the plan's CostUsed once a selected span is refused: both=%d",
+			v.Witness.ResidentTokens)
 	}
 }
 
@@ -138,9 +155,13 @@ func TestReconcilePure(t *testing.T) {
 	declared := map[string]int64{"a": 10, "b": 20}
 
 	// Baseline: both rendered, bytes match -> everything holds.
-	w := Reconcile(p, pw, []Rendered{{ID: "a", Bytes: 10}, {ID: "b", Bytes: 20}}, nil, declared)
+	w := Reconcile(p, pw, []Rendered{{ID: "a", Bytes: 10, Tokens: 3}, {ID: "b", Bytes: 20, Tokens: 5}}, nil, declared)
 	if !w.Reconciled || !w.CostContract || !w.Faithful {
 		t.Fatalf("baseline reconcile must hold: %+v", w)
+	}
+	// ResidentTokens is reset to the realized rendered tokens (3+5), not the plan's cost.
+	if w.ResidentTokens != 8 {
+		t.Errorf("ResidentTokens must be the realized rendered tokens (3+5=8), got %d", w.ResidentTokens)
 	}
 
 	// A selected span that neither rendered nor refused -> not reconciled (silently dropped).

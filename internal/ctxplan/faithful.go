@@ -19,8 +19,8 @@ type Witness struct {
 	Elided         int      `json:"elided"`                  // spans kept cold (out of the view)
 	Recoverable    int      `json:"recoverable"`             // elided spans WITH a page-back-in handle
 	Unrecoverable  []string `json:"unrecoverable,omitempty"` // elided spans with NO handle (destroyed — a compaction tell)
-	ResidentTokens int      `json:"resident_tokens"`
-	ElidedTokens   int      `json:"elided_tokens"` // tokens out of the window but still recoverable
+	ResidentTokens int      `json:"resident_tokens"` // resident token cost: planned selected cost under Audit, REALIZED rendered tokens (== View.RenderedTokens()) after Reconcile
+	ElidedTokens   int      `json:"elided_tokens"`   // tokens out of the window but still recoverable
 	Partition      bool     `json:"partition"`     // Resident+Elided == Candidates AND the two sets are disjoint
 	Faithful       bool     `json:"faithful"`      // Partition AND every elided span is recoverable
 
@@ -109,6 +109,15 @@ func CompactionView(p Plan) Plan {
 // so the witness agrees with what actually happened at the page-in boundary, not just with
 // what the plan promised before it.
 //
+// The resident TOKEN accounting is reconciled too: ResidentTokens is reset to the tokens the
+// gate actually paged in (sum of Rendered.Tokens), so a span the planner selected but the
+// gate refused stops counting as resident. After Reconcile, ResidentTokens == sum of
+// Rendered.Tokens == View.RenderedTokens() — the resident size a caller trusts is the
+// realized one, not the planned one. (A pure-plan Audit, which performs no page-in, leaves
+// ResidentTokens at the plan's selected cost.) The plan's span COUNTS (Resident/Elided) and
+// the Partition/Faithful verdict stay as Audit set them — they describe the plan, which a
+// page-in refusal does not corrupt; the count-level reconciliation lives in Reconciled.
+//
 // Two properties are checked, one structural and one economic:
 //
 //  1. Reconciled — the page-in loop visits every selected span exactly once and routes each
@@ -124,9 +133,20 @@ func CompactionView(p Plan) Plan {
 // declared maps a span id to the Span.Bytes the planner saw; a rendered id missing from it
 // is itself a contract break (the store rendered a span it never reported).
 func Reconcile(p Plan, w Witness, rendered []Rendered, refused []Refusal, declared map[string]int64) Witness {
-	out := w // carry the plan's Candidates/Resident/Elided/Recoverable/Partition/Faithful as-is
+	// carry the plan's Candidates/Resident(span count)/Elided/Recoverable/Partition/Faithful
+	// as-is — they describe the plan, which the page-in does not change.
+	out := w
 	out.Rendered = len(rendered)
 	out.Refused = len(refused)
+	// ResidentTokens is the REALIZED resident size: the tokens the gate paged in, not the
+	// tokens the plan selected. Resetting it here is the rendered+refused reconciliation a
+	// caller trusts: a refused span (selected, then declined at page-in) no longer counts as
+	// resident, so ResidentTokens == View.RenderedTokens() after Reconcile.
+	realized := 0
+	for _, r := range rendered {
+		realized += r.Tokens
+	}
+	out.ResidentTokens = realized
 	out.Reconciled = len(rendered)+len(refused) == len(p.Selected)
 	out.CostContract = true
 	for _, r := range rendered {

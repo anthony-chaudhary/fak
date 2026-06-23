@@ -68,6 +68,21 @@
 // reported UNFAITHFUL. This is the gate that keeps "plan a view" honest against the
 // temptation to silently summarize.
 //
+// # The Span.Bytes cost contract (why the O(1) bound is honest, not advisory)
+//
+// The planner prices a span's resident cost from Span.Bytes (TokenCost = ceil(Bytes/4));
+// the renderer realizes ceil(len(body)/4) from the bytes the store actually pages in. Those
+// two token sources agree ONLY while every Store keeps Span.Bytes == len(Materialize(id)) for
+// a benign (non-sealed) span — the cost contract a Store implementation MUST hold. A real
+// adapter whose Span.Bytes understates the body (a paged-out pointer size, a tokenizer
+// estimate) would let the renderer blow past the budget the planner charged. Materialize's
+// witness enforces the contract per rendered span: Witness.CostContract falls false and
+// CostDiverged names the offender, so a store that hands back more bytes than it advertised
+// cannot make the budget accounting fictional SILENTLY. A Store that cannot keep the
+// contract makes the O(1) resident bound ADVISORY — the realized resident tokens may exceed
+// what the planner charged, and a caller seeing CostContract=false must treat the budget as
+// no longer guaranteed (re-plan or shed load), not as a soft warning.
+//
 // Tier: foundation (1) — see internal/architest. The core planner is a pure algorithm
 // over its own Span/Store types and imports nothing internal (stdlib only), exactly like
 // the other foundation leaves (answershape, codelint, polymodel). It is off the request
