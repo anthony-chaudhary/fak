@@ -30,6 +30,13 @@ import (
 	// unless FAK_STORE is set — blob stays the live backend by default.
 	_ "github.com/anthony-chaudhary/fak/internal/storedrv"
 
+	// Cross-engine zero-copy KV co-residence arena (#448): a RegionBackend whose Resolver
+	// hands out RefRegion handles into one arena where an EXTERNAL engine's KV and fak's
+	// tool args/results co-reside (Capability "zerocopy"), so the provable KV Evict/Clone
+	// quarantine holds against an engine fak does not itself run. Inert unless FAK_XENGINE_KV
+	// opts in — blob stays the live RegionBackend by default; imports blob for last-wins order.
+	_ "github.com/anthony-chaudhary/fak/internal/xenginekv"
+
 	// vDSO fast-path tiers.
 	_ "github.com/anthony-chaudhary/fak/internal/vdso"
 

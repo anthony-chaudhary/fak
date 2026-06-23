@@ -48,6 +48,7 @@ var tier = map[string]int{
 
 	"appversion": 1, "blob": 1, "boundarylint": 1, "cachemeta": 1, "canon": 1, "compute": 1, "deletioncert": 1, "demoui": 1, "ggufload": 1, "gpulease": 1, "hfhub": 1, "leakcheck": 1, "metalgemm": 1, "metrics": 1, "model": 1, "pathlint": 1, "pathutil": 1, "provenance": 1, "swebench": 1, "urllint": 1, "webbench": 1,
 	"blobfs": 1, "blobhttp": 1, // durable on-disk / remote-HTTP content-addressed Ref backends; attach to abi like blob (Resolver+PageOutBackend), import only abi+blob+stdlib.
+	"xenginekv": 1, // cross-engine zero-copy KV co-residence arena (#448): a RefRegion-issuing Resolver+RegionBackend+PageOutBackend; attaches to abi like blob, imports only abi+blob+stdlib (FAK_XENGINE_KV-gated).
 
 	"adjudicator": 2, "ctxmmu": 2, "engine": 2, "enginecache": 2, "grammar": 2, "kernel": 2,
 	"preflight": 2, "vdso": 2, "plancfi": 2, "steward": 2, "witness": 2,
@@ -903,6 +904,13 @@ var regionBackendRole = map[string]string{
 	// It registers ONLY when FAK_STORE opts in (unset => inert, blob stays live), and
 	// imports blob so blob's init runs first — the last-wins override is order-deterministic.
 	"storedrv": "the FAK_STORE-gated storage-driver router (fans Ref resolution across tiers; blob remains the unset default)",
+	// The DELIBERATE, reviewed zero-copy override (#448, xenginekv/register.go init): the
+	// cross-engine KV co-residence arena becomes the single live Ref backend, handing out
+	// RefRegion handles that resolve to VIEWS (Capability "zerocopy"). It registers ONLY when
+	// FAK_XENGINE_KV opts in (unset => inert, blob stays live), and imports blob so blob's
+	// init runs first — the last-wins override is order-deterministic. This is the documented
+	// zerocopy swap this gate's own comment anticipates.
+	"xenginekv": "the FAK_XENGINE_KV-gated cross-engine KV co-residence arena (zero-copy RefRegion views; blob remains the unset default)",
 }
 
 // TestSingleRegionBackendRegistrant turns ARCHITECTURE.md's "Ref backend is a single
