@@ -46,6 +46,31 @@ python tools/ctxcost.py trace --budget 8000 --jsonl trace.jsonl # the full per-t
 
 The inversion the whole approach rests on: append-only + cache optimizes the context to be *held still* so the cache survives, which makes it opaque on purpose; O(1) + history optimizes it to be *replayable and fully seen*, and pays for that by reconstructing each turn — which, as the rest of this doc shows, is not only affordable but usually cheaper.
 
+## Agent-navigable context: dynamic resolution
+
+Observability is passive — you can see every step. The active half is that the agent, or the system, can *navigate* the store: every node in the reconstructed view is a tombstone at some resolution, and one operation moves it up or down.
+
+```
+memory(ref, "expand",  budget)   # zoom in: return ~budget more tokens of this node,
+                                 #   leaving the still-elided middle as a child tombstone
+memory(ref, "contract")          # zoom out: drop the node back to a one-line tombstone
+```
+
+Say the planner left a large file read as a one-line tombstone because the forecast did not need it. Mid-reasoning the agent decides it does, calls `memory(ref, expand, 1000)`, and gets a 1,000-token head-and-tail window with the middle elided to a fresh child tombstone. If that is not enough it expands the child, then the child's child, drilling to any depth; when it is done it contracts the branch back to a tombstone and frees the budget. Two drivers share the one operation: the **system** sets each node's initial resolution from the turn's budget and forecast, and the **agent** overrides it from its own reasoning. For any node, up or down, on demand.
+
+Three properties make this more than a convenience:
+
+- **Resident stays O(1); the full history stays reachable.** A wall of tombstones costs almost nothing. On a real session of 17 tool-result nodes holding 8,992 tokens of content, the all-tombstone view is 133 tokens — 1.5% of the full. Expanding four nodes deep brings the resident view to about 4,100 tokens, and contracting drops it straight back to 133. You pay for resolution only where you spend it. This is the same "send dramatically less" the cost sections measure, taken to its conclusion: send tombstones, expand on demand.
+- **Nothing is lost; expansion is exact.** The store is lossless, so an expand returns the real bytes, never a lossy summary. A tombstone is the *smallest* rendering of a node, not a deletion — which is why "the agent sees everything that can be observed" is literally true: anything is one budgeted expand away, recursively.
+- **The exploration replays.** Every expand and contract is a recorded, budgeted journal event, so an agent's path through the store is deterministic and reproducible. You can replay exactly how it navigated and learn from it; the harness verifies that re-applying the journal reproduces the resident view byte-for-byte.
+
+```sh
+python tools/ctxnav.py demo --budget 1000 --steps 3   # watch an agent drill in and zoom back out
+python tools/ctxnav.py selfcheck                       # O(1) tombstones, expand/contract, recursion, replay
+```
+
+The live path for this is the lossless span store and demand-page in `internal/ctxplan` (a pruned span pages back in through the trust gate), surfaced to the model as a memory tool at the gateway. `tools/ctxnav.py` is the proof harness for the operation itself — the bytes `ctxplan` deliberately does not hold.
+
 ## How to validate it honestly
 
 The honest lever is that you do not have to guess the incumbent's bill. A Claude Code transcript records, for every assistant turn, the provider's own usage accounting:
