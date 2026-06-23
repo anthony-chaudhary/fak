@@ -141,7 +141,10 @@ cache-entry event stream as tool/context entries.
 
 **SOTA baseline.** SparseX targets non-prefix, cross-request, cross-turn, and
 cross-agent repeated segments, with RoPE alignment and sparse recomputation to
-repair context interactions. LMCache and CacheBlend-style systems make the same
+repair context interactions. MiniPIC takes the complementary position-repair
+angle: it stores unrotated K and applies RoPE inside attention at per-request
+logical positions, so a cached span can be reused at different positions without
+the post-RoPE position binding. LMCache and CacheBlend-style systems make the same
 direction clear: non-prefix reuse is real, but it is correction/quality work, not
 free exact prefix reuse.
 
@@ -462,5 +465,7 @@ Recent research:
 - "SparseX: Efficient Segment-Level KV Cache Sharing for Interleaved LLM
   Serving", arXiv:2606.01751:
   https://arxiv.org/html/2606.01751v2
+- "MiniPIC: Flexible Position-Independent Caching in <100LOC", arXiv:2606.13126:
+  https://arxiv.org/html/2606.13126v1
 - "Can I Buy Your KV Cache?", arXiv:2606.13361:
   https://arxiv.org/html/2606.13361v1
