@@ -78,9 +78,9 @@ front page.
 - [Trust floor, two lenses (2026-06-17)](docs/notes/EXPLAINER-trust-floor-two-lenses-2026-06-17.md)
 - [GLM-5.2 DSA attention projections on the pure kernel (2026-06-22)](docs/notes/GLM52-DSA-PROJECTIONS-ON-PURE-KERNEL-DGX-2026-06-22.md)
 - [GLM-5.2 DSA sparse attention on the pure kernel (2026-06-23)](docs/notes/GLM52-DSA-SPARSE-ATTENTION-ON-PURE-KERNEL-2026-06-23.md)
-- [GLM-5.2 five DGX benchmarks (2026-06-22)](docs/notes/GLM52-PERFORMANT-DGX-FIVE-BENCHMARKS-2026-06-22.md)
+- [GLM-5.2 five GPU server benchmarks (2026-06-22)](docs/notes/GLM52-PERFORMANT-DGX-FIVE-BENCHMARKS-2026-06-22.md)
 - [GLM-5.2 kernel + turn demos (2026-06-21)](docs/notes/GLM52-PURE-KERNEL-AND-AGENT-TURN-DEMOS-RESULTS-2026-06-21.md)
-- [GLM-5.2 pure kernel on DGX A100 (2026-06-21)](docs/notes/GLM52-PURE-KERNEL-ON-GPU-DGX-A100-2026-06-21.md)
+- [GLM-5.2 pure kernel on GPU server (2026-06-21)](docs/notes/GLM52-PURE-KERNEL-ON-GPU-DGX-A100-2026-06-21.md)
 - [Mac bench refresh: CPU Q8 parity + uncontended radix (2026-06-23)](docs/notes/MAC-BENCH-REFRESH-2026-06-23.md)
 - [The O(1) current turn: a planned view over the lossless history (2026-06-23)](docs/notes/O1-TURN-CONTEXT-PLANNER-2026-06-23.md) — cost-based, forecast-driven context planner; the middle ground between an unbounded transcript and lossy compaction.
 - [On-demand context KV reuse (2026-06-19)](docs/notes/ON-DEMAND-CONTEXT-KV-REUSE-2026-06-19.md)
