@@ -128,6 +128,12 @@ discovery over local KV, and `radixkv.CacheEntry()` lowers radix nodes into
 `cachemeta.Entry`. `cachemeta.FromKVPrefix()` already records model, tokenizer,
 position mode, residency, taint/scope, and lookup fault reasons.
 
+**Scope.** KV-prefix is tracked as a cache plane — `radixkv` is a local kernel
+primitive for exact prefix reuse and policy/quarantine span eviction — but fak
+does not try to out-perform provider prefix caching intra-session; the
+`EXPLAINER-trust-floor-two-lenses` note names that serving-platform play
+off-thesis.
+
 **Gap.** Live engine routing/offload events are not yet normalized into the same
 cache-entry event stream as tool/context entries.
 

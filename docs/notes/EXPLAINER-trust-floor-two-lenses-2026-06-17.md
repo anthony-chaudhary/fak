@@ -169,7 +169,12 @@ whole address space.
 **The honest perf boundary.** Commodity **prompt caching already banks ~94%** of the
 KV-reuse win *intra-session* (measured on this fleet's telemetry). So fak does **not**
 chase KV re-attach (off-thesis — the serving-platform trap; managed caching owns the
-hot 94%). Its durable, portable, **model-independent** unit of reuse is the **result
+hot 94%). That "off-thesis" is scoped, not blanket: fak does not try to out-perform
+provider prefix caching intra-session, but KV-prefix reuse *is* in scope as a kernel
+primitive — `internal/radixkv` ships a local RadixAttention-style prefix cache over
+the kernel-owned `KVCache`, for exact, addressable reuse and policy/quarantine-driven
+span eviction (`EvictNode`) that provider caches cannot offer. Its durable, portable,
+**model-independent** unit of reuse is the **result
 `Ref`** — which owns the *cross-session / cross-model* tail that prefix caching
 structurally can't, *and* carries the taint label caching throws away. The win is
 shrinking the working set and never re-billing the cold history, not making 350k tokens
