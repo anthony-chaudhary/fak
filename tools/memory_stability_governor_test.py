@@ -119,6 +119,25 @@ def main() -> int:
     p = g.build_payload(workspace=ws, trajectory=[])
     check("empty: ok", p["ok"] is True and p["verdict"] == g.STABLE)
 
+    # 9) Exit-code contract: the process exit is the FAIL-CLOSED signal (freeze or a
+    #    source error), NOT the stricter `ok` field. A merely-drifting-but-in-budget
+    #    store is a soft slope warning (verdict STABLE, ok False) and must exit 0 — a
+    #    drift trend must not masquerade as a hard breach.
+    steep = [_cycle(0), _cycle(1, divergence=0.10), _cycle(2, divergence=0.20),
+             _cycle(3, divergence=0.30)]
+    drifting = g.build_payload(workspace=ws, trajectory=steep, budget=10.0)
+    check("exit: drifting verdict STABLE", drifting["verdict"] == g.STABLE)
+    check("exit: drifting not frozen / in budget", drifting["metrics"]["frozen"] is False)
+    check("exit: drifting is the ok=False case", drifting["ok"] is False,
+          f"slope={drifting['metrics']['drift_slope']}")
+    check("exit: drifting-but-in-budget exits 0 (soft warning)", g.exit_code(drifting) == 0)
+    check("exit: stable flat exits 0", g.exit_code(g.build_payload(workspace=ws, trajectory=_benign())) == 0)
+    check("exit: FROZEN store exits 1 (fail-closed)",
+          g.exit_code(g.build_payload(workspace=ws, trajectory=_injected_drift())) == 1)
+    check("exit: unreadable trajectory exits 1",
+          g.exit_code(g.build_payload(workspace=ws, trajectory=[], error="boom")) == 1)
+    check("exit: empty trajectory exits 0", g.exit_code(g.build_payload(workspace=ws, trajectory=[])) == 0)
+
     print()
     if failures:
         print(f"FAILED: {len(failures)} check(s): {failures}")

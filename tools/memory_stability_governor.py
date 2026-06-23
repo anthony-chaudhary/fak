@@ -333,6 +333,21 @@ def render(payload: dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
+def exit_code(payload: dict[str, Any]) -> int:
+    """Process exit: non-zero ONLY when the governor fail-closed — it FROZE the store
+    (a real cumulative-drift breach) or could not source the trajectory.
+
+    A stable store exits 0, INCLUDING one that is merely drifting-but-in-budget: a
+    rising drift slope that has not yet breached the budget is a SOFT warning (verdict
+    stays ``STABLE_IN_BUDGET``, ``next_action`` says tighten the fold), not a refusal.
+    Only a freeze (or an unreadable trajectory) is the hard default-deny. ``ok`` in the
+    payload is the stricter "stable AND not trending" signal; the exit code tracks the
+    fail-closed contract, so a drift warning does not masquerade as a breach.
+    """
+    m = payload.get("metrics") or {}
+    return 1 if (m.get("frozen") or payload.get("error")) else 0
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(
         description="Memory-stability governor: replay-derived drift trajectory + "
@@ -355,9 +370,7 @@ def main(argv: list[str] | None = None) -> int:
     else:
         print(render(payload))
 
-    # Exit non-zero when the governor FROZE the store (a real drift breach) — the
-    # fail-closed default-deny. A stable / merely-drifting-but-in-budget store is ok.
-    return 0 if payload.get("ok") else 1
+    return exit_code(payload)
 
 
 if __name__ == "__main__":
