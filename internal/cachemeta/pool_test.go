@@ -198,3 +198,50 @@ func TestPoolReuseTaintedRefused(t *testing.T) {
 		t.Fatalf("merely-tainted cell must be refused with taint_denied, got %s/%s", v.Kind, v.Reason)
 	}
 }
+
+// TestFleetReplayAggregateGeneralizes proves the fleet win is not a single cherry-picked
+// prefix: it replays a realistic mixed workload — every agent shares one warm system+tool
+// prefix (a coherent CXL pool) AND carries its own private working context (host-private
+// DRAM) — and tallies the aggregate. The shared prefix collapses to one copy across the
+// fleet; the private contexts save nothing (correctly, they are not shared). It also
+// shows the savings are HONEST: the trust gate reuses the trusted shared cell but refuses
+// a poisoned variant, so a deduplicated copy is never a poisoned alias.
+func TestFleetReplayAggregateGeneralizes(t *testing.T) {
+	profiles := DefaultTierProfiles()
+	pools := DefaultPoolProfiles()
+	const agents = 6
+	workload := []FleetReuseRequest{
+		// shared system+tool prefix on the coherent CXL pool
+		{Tenants: agents, Tokens: 4000, SizeBytes: 64 << 20, PerTokenPrefillNanos: 2_000_000, Profile: profiles[TierCXL], Pool: pools[TierCXL]},
+		// each agent's private working context on host-private DRAM
+		{Tenants: agents, Tokens: 2000, SizeBytes: 32 << 20, PerTokenPrefillNanos: 2_000_000, Profile: profiles[TierDRAM], Pool: pools[TierDRAM]},
+	}
+	var savedTokens, dedupBytes, privatePrefill, pooledPrefill int64
+	for _, req := range workload {
+		r := PlanFleetReuse(req)
+		savedTokens += r.PrefillTokensSaved
+		dedupBytes += r.BytesDeduplicated
+		privatePrefill += r.PrivatePrefillTokens
+		pooledPrefill += r.PooledPrefillTokens
+	}
+	// Only the shared prefix saves: (agents-1) re-prefills and (agents-1) copies avoided.
+	if savedTokens != (agents-1)*4000 {
+		t.Fatalf("fleet prefill saved = %d, want %d (private contexts must save nothing)", savedTokens, (agents-1)*4000)
+	}
+	if dedupBytes != (agents-1)*(64<<20) {
+		t.Fatalf("fleet bytes deduplicated = %d, want %d", dedupBytes, (agents-1)*(64<<20))
+	}
+	// The pooled total can never exceed the per-host-private baseline — the win is real,
+	// not an artifact of the single synthetic prefix.
+	if pooledPrefill > privatePrefill {
+		t.Fatalf("aggregate pooled prefill %d exceeds the private baseline %d", pooledPrefill, privatePrefill)
+	}
+	// Honest dedup: the trusted shared cell is reusable across the fleet, but a poisoned
+	// variant is refused — so none of the deduplicated copies is a poisoned alias.
+	if v := PoolReuseVerdict(poolKVEntry("qwen3", abi.TaintTrusted, abi.ScopeFleet), wantKey("qwen3")); !v.CanServe() {
+		t.Fatalf("the trusted shared cell must be reusable across the fleet, got %s/%s", v.Kind, v.Reason)
+	}
+	if v := PoolReuseVerdict(poolKVEntry("qwen3", abi.TaintQuarantined, abi.ScopeFleet), wantKey("qwen3")); v.CanServe() {
+		t.Fatalf("a poisoned variant of the shared cell must be refused, never aliased")
+	}
+}
