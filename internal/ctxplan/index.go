@@ -101,8 +101,27 @@ func (ix *Index) Len() int { return len(ix.spans) }
 // posting lists (one per distinct content token), so each token keeps its OWN list of span
 // indices — appended in chronological (Add) order, which is deterministic across builds; a
 // Probe re-sorts the union into tier/recency order, so the per-list order is not relied on.
+//
+// # The unique-id addressing contract
+//
+// Add ADDRESSES the span by its id: ix.byID maps the id to this position, and Probe's pin
+// resolution + SetSealed/SetTombstoned (maintain.go) all key on it. An id is therefore a
+// span's stable, UNIQUE address — every shipped store assigns one (MemStore's "span:<n>",
+// recall's "page:<step>"). Adding a DUPLICATE id OVERWRITES the address (byID is last-wins),
+// so the index assumes ids are unique; a store that reuses an id is outside the addressing
+// contract (a colliding id makes a span unaddressable for mutation and ambiguous for
+// recovery, which StoreAudit detects and refuses to certify, storeaudit.go).
+//
+// The span is stored by value, but its one reference-type field (Attrs) is CLONED so the
+// index owns it: a caller that mutates its own Attrs map after Add cannot reach into the
+// index's stored metadata (Attrs["utility"] feeds Benefit, so a shared map would let a
+// post-Add mutation silently change a span's score without any flag flip). With Attrs cloned
+// and every other field a value type, the only mutation a recorded span undergoes through the
+// index API is a trust/suppression flag flip (SetSealed/SetTombstoned) — the structural
+// reason the maintenance surface is small and the incremental==batch equivalence holds.
 func (ix *Index) Add(s Span) {
 	i := len(ix.spans)
+	s.Attrs = cloneAttrs(s.Attrs)
 	ix.spans = append(ix.spans, s)
 	ix.byID[s.ID] = i
 
