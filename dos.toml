@@ -46,6 +46,7 @@ concurrent = [
   "answershape",
   "codelint",
   "residency",
+  "ctxresidency",
   # new-leaf:lane -- `python tools/new_leaf.py` inserts a generated leaf lane above
 ]
 exclusive = ["abi", "release", "global"]
@@ -65,6 +66,7 @@ autopick = [
   "answershape",
   "codelint",
   "residency",
+  "ctxresidency",
   # new-leaf:lane
 ]
 
@@ -140,6 +142,7 @@ urllint = ["internal/urllint/**"]
 webbench = ["internal/webbench/**"]
 codelint = ["internal/codelint/**"]
 residency = ["internal/residency/**"]
+ctxresidency = ["internal/ctxresidency/**"]
 # new-leaf:tree -- generated leaf trees inserted above this line
 cmd         = ["cmd/**"]
 experiments = ["experiments/**"]
