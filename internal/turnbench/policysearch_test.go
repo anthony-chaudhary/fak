@@ -372,6 +372,165 @@ func TestPolicySearch_Deterministic(t *testing.T) {
 	}
 }
 
+// stallCorpus is a frozen corpus engineered so the GREEDY single-incumbent chain provably
+// SKIPS a non-dominated stepping-stone: the egress sink appears as the harmful sink in TWO
+// traces and the destructive sink in ONE. The four reachable deny-set genomes score to four
+// DISTINCT Pareto points on (injections_admitted, denies):
+//
+//	{}                     -> (3, 0)   baseline: serves all three sinks
+//	{egress}               -> (1, 2)   catches both egress sinks (2 denies), serves destr
+//	{destructive}          -> (2, 1)   catches the destr sink (1 deny), serves both egress
+//	{egress,destructive}   -> (0, 3)   catches all three (3 denies)
+//
+// ALL FOUR are Pareto-non-dominated. The greedy hill-climb only ever GROWS one incumbent, so
+// it scores a single CHAIN — baseline, one singleton, then the pair — and NEVER isolates the
+// other singleton. The archive mode samples diverse parents and scores all four, so its
+// frontier is a strict superset and its diversity strictly higher. (No mode beats the others
+// on injections_admitted: the divergence gate caps catches at one-per-trace, so greedy is
+// already injections-optimal — the honest archive win is frontier richness, not a lower floor.)
+func stallCorpus(t *testing.T) []DivHistInput {
+	return []DivHistInput{
+		{Trace: injectionTrace(t, "egress-1", false), RefName: "baseline"},
+		{Trace: injectionTrace(t, "destructive-1", true), RefName: "baseline"},
+		{Trace: injectionTrace(t, "egress-2", false), RefName: "baseline"},
+	}
+}
+
+// frontierGenomes returns the set of deny-set genome keys on a report's Pareto frontier.
+func frontierGenomes(rep *PolicySearchReport) map[string]bool {
+	out := map[string]bool{}
+	for _, c := range rep.Frontier {
+		out[c.Genome["deny_added"]] = true
+	}
+	return out
+}
+
+// TestPolicySearch_ArchiveEscapesGreedyChain is the issue-#539 headline proof: on a corpus
+// where the greedy single-incumbent chain skips a non-dominated stepping-stone, the
+// archive-based diversity-preserving mode (same corpus + seed, same model-free oracle)
+// explores strictly MORE distinct genomes and reaches a strictly RICHER Pareto frontier — at
+// ZERO model spend, with every archived genome's fitness re-derivable from replay.
+func TestPolicySearch_ArchiveEscapesGreedyChain(t *testing.T) {
+	ctx := context.Background()
+	mk := func(archive bool) PolicySearchConfig {
+		return PolicySearchConfig{
+			Corpus:           stallCorpus(t),
+			Baseline:         permissiveBaseline(),
+			DenyCandidates:   []string{egressSinkTool, destructiveSinkTool},
+			Iterations:       24,
+			Seed:             20260623,
+			TopK:             4,
+			DiversityArchive: archive,
+		}
+	}
+
+	greedy, err := RunPolicySearch(ctx, mk(false), DefaultCostModel())
+	if err != nil {
+		t.Fatalf("greedy RunPolicySearch: %v", err)
+	}
+	arch, err := RunPolicySearch(ctx, mk(true), DefaultCostModel())
+	if err != nil {
+		t.Fatalf("archive RunPolicySearch: %v", err)
+	}
+
+	// The modes are labelled honestly.
+	if greedy.SearchMode != "greedy" {
+		t.Errorf("default mode must be %q, got %q", "greedy", greedy.SearchMode)
+	}
+	if arch.SearchMode != "archive-diversity" {
+		t.Errorf("archive mode must be %q, got %q", "archive-diversity", arch.SearchMode)
+	}
+
+	// Both modes are model-free — the whole point.
+	if greedy.ModelCallsSpent != 0 || arch.ModelCallsSpent != 0 {
+		t.Fatalf("both modes must spend ZERO model calls, got greedy=%d archive=%d",
+			greedy.ModelCallsSpent, arch.ModelCallsSpent)
+	}
+
+	// DIVERSITY: the archive scores strictly MORE distinct genomes than the greedy chain.
+	// The greedy chain visits exactly baseline + one singleton + the pair = 3; the archive
+	// visits all four reachable genomes.
+	if greedy.DistinctGenomes != 3 {
+		t.Errorf("greedy chain should score 3 distinct genomes (baseline + chain), got %d", greedy.DistinctGenomes)
+	}
+	if arch.DistinctGenomes <= greedy.DistinctGenomes {
+		t.Fatalf("archive must explore strictly MORE distinct genomes than greedy (%d), got %d",
+			greedy.DistinctGenomes, arch.DistinctGenomes)
+	}
+	if arch.DistinctGenomes != 4 {
+		t.Errorf("archive should reach all 4 reachable genomes, got %d", arch.DistinctGenomes)
+	}
+
+	// RICHER FRONTIER: the archive's Pareto frontier is a strict superset of greedy's — it
+	// surfaces a non-dominated stepping-stone the single-incumbent chain structurally skipped.
+	gf, af := frontierGenomes(greedy), frontierGenomes(arch)
+	for g := range gf {
+		if !af[g] {
+			t.Errorf("archive frontier must contain every greedy frontier genome; missing %q", g)
+		}
+	}
+	var extra []string
+	for a := range af {
+		if !gf[a] {
+			extra = append(extra, a)
+		}
+	}
+	if len(extra) == 0 {
+		t.Fatalf("archive frontier must STRICTLY exceed greedy's (a stepping-stone greedy skipped); greedy=%v archive=%v", gf, af)
+	}
+
+	// HONESTY GATE: every archived genome's fitness re-derives from replay over the same
+	// corpus — not self-reported. Each candidate was scored across all corpus cells, and
+	// re-running the oracle on the archive's best reproduces its fitness byte-for-byte.
+	for _, c := range arch.Candidates {
+		if c.Fitness.Cells != len(stallCorpus(t)) {
+			t.Errorf("archived candidate %q must be replayed over all %d corpus cells, got %d",
+				c.Name, len(stallCorpus(t)), c.Fitness.Cells)
+		}
+	}
+	rescored, err := scoreCandidate(ctx, stallCorpus(t), permissiveBaseline(), arch.Best.Name,
+		arch.Best.Genome, arch.Best.Policy)
+	if err != nil {
+		t.Fatalf("re-score best: %v", err)
+	}
+	if rescored.Fitness != arch.Best.Fitness {
+		t.Errorf("archive best fitness must re-derive from replay: got %+v want %+v",
+			rescored.Fitness, arch.Best.Fitness)
+	}
+}
+
+// TestPolicySearch_ArchiveDeterministic asserts the archive mode is a regenerable artifact:
+// the seeded parent-sampling + lever-toggling walk yields byte-identical JSON across runs, so
+// the diverse archive is reproducible, not a sample.
+func TestPolicySearch_ArchiveDeterministic(t *testing.T) {
+	ctx := context.Background()
+	mk := func() PolicySearchConfig {
+		return PolicySearchConfig{
+			Corpus:           stallCorpus(t),
+			Baseline:         permissiveBaseline(),
+			DenyCandidates:   []string{egressSinkTool, destructiveSinkTool},
+			Iterations:       24,
+			Seed:             4242,
+			TopK:             4,
+			DiversityArchive: true,
+		}
+	}
+	a, err := RunPolicySearch(ctx, mk(), DefaultCostModel())
+	if err != nil {
+		t.Fatalf("run a: %v", err)
+	}
+	b, err := RunPolicySearch(ctx, mk(), DefaultCostModel())
+	if err != nil {
+		t.Fatalf("run b: %v", err)
+	}
+	a.Provenance, b.Provenance = Provenance{}, Provenance{}
+	ja, _ := json.Marshal(a)
+	jb, _ := json.Marshal(b)
+	if string(ja) != string(jb) {
+		t.Errorf("archive search report drifted across runs:\n a=%s\n b=%s", ja, jb)
+	}
+}
+
 // containsKey reports whether the JSON string has a "<key>" field token. A loose substring
 // check is enough for the banned-axis assertion (the fitness struct is small + flat).
 func containsKey(jsonStr, key string) bool {

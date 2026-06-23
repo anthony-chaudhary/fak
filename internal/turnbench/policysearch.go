@@ -59,6 +59,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math"
 	"math/rand"
 	"runtime"
 	"sort"
@@ -163,6 +164,22 @@ type PolicySearchReport struct {
 	Seed       int64 `json:"seed"`        // the fixed math/rand seed (reproducible)
 	Iterations int   `json:"iterations"`  // candidates evaluated (== len(Candidates) minus baseline)
 	CorpusSize int   `json:"corpus_size"` // traces in the frozen corpus
+
+	// SearchMode names the strategy that produced Candidates: "greedy" (the default
+	// single-incumbent hill-climb, issue #503) or "archive-diversity" (the open-ended,
+	// diversity-preserving population search, issue #539). Both score every candidate by
+	// the SAME model-free replay oracle (scoreCandidate) at $0 model spend — the mode only
+	// changes which parent each child mutates off.
+	SearchMode string `json:"search_mode"`
+
+	// DistinctGenomes is the count of DISTINCT deny-set genomes the search actually scored
+	// — the honest diversity metric (issue #539). The greedy mode scores only a single
+	// monotone CHAIN (baseline + one child per accepted tool), so it skips low-cost sibling
+	// stepping-stones; the archive mode samples diverse parents and explores more of the
+	// genome lattice, so its DistinctGenomes is strictly higher and its Frontier strictly
+	// richer on the SAME corpus + seed. NOT a self-report: every genome counted here carries
+	// a replay-derived Fitness re-derivable by re-running scoreCandidate over the corpus.
+	DistinctGenomes int `json:"distinct_genomes"`
 
 	// ModelCallsSpent is ZERO — the whole point. The search scores every candidate as
 	// model-free replay; no engine decode runs during the search.
@@ -364,7 +381,19 @@ type PolicySearchConfig struct {
 
 	// Iterations bounds the number of candidate policies the search evaluates beyond the
 	// baseline. A small budget suffices on a small genome; the search is deterministic.
+	// In greedy mode it bounds the deny-candidate growth steps; in archive mode it bounds
+	// the number of child genomes mutated off sampled parents.
 	Iterations int
+
+	// DiversityArchive selects the search MODE (issue #539). false (default) keeps the
+	// existing single-incumbent greedy hill-climb (issue #503, the baseline). true switches
+	// to the archive-based, diversity-preserving population search: keep EVERY scored
+	// candidate as an archive and branch each child off a SAMPLED parent (probability
+	// proportional to its replay-derived fitness times an inverse-children-count term, the
+	// Darwin-Gödel-Machine selector), so under-explored stepping-stones keep branching and
+	// the search escapes the greedy chain's blind spots. The fitness oracle, the divergence
+	// gate, and the zero-model invariant are IDENTICAL across both modes.
+	DiversityArchive bool
 
 	// Seed seeds math/rand so the mutation order — and therefore the whole search and its
 	// frontier — is byte-identical on every run.
@@ -408,49 +437,19 @@ func RunPolicySearch(ctx context.Context, cfg PolicySearchConfig, cm CostModel) 
 		return nil, err
 	}
 
-	candidates := []SearchCandidate{baseline}
-
-	// Deterministic proposal order: a seeded permutation of the deny-candidate tools.
-	rng := rand.New(rand.NewSource(cfg.Seed))
-	order := rng.Perm(len(cfg.DenyCandidates))
-
-	// Hill-climb: grow the incumbent's deny set one tool at a time, keeping a proposal
-	// only when it strictly reduces InjectionsAdmitted. The incumbent's deny set is the
-	// running genome.
-	incumbentDeny := map[string]bool{}
-	incumbentFit := baseline.Fitness
-	iters := cfg.Iterations
-	if iters <= 0 || iters > len(order) {
-		iters = len(order)
+	// The search MODE: greedy single-incumbent hill-climb (#503, the default) or the
+	// archive-based diversity-preserving population search (#539). Both score every
+	// candidate by the SAME model-free replay oracle; the mode only changes parent choice.
+	mode := "greedy"
+	var candidates []SearchCandidate
+	if cfg.DiversityArchive {
+		mode = "archive-diversity"
+		candidates, err = runArchiveSearch(ctx, cfg, refPolicy, baseline)
+	} else {
+		candidates, err = runGreedySearch(ctx, cfg, refPolicy, baseline)
 	}
-	for step := 0; step < iters; step++ {
-		tool := cfg.DenyCandidates[order[step]]
-		if incumbentDeny[tool] {
-			continue
-		}
-		// Propose: the incumbent deny set PLUS this tool.
-		propDeny := map[string]bool{}
-		for k := range incumbentDeny {
-			propDeny[k] = true
-		}
-		propDeny[tool] = true
-
-		cand := candidateWithDenies(cfg.Baseline, propDeny)
-		name := fmt.Sprintf("cand-%02d-deny-%s", step, tool)
-		genome := map[string]string{"deny_added": denyListString(propDeny)}
-		sc, err := scoreCandidate(ctx, cfg.Corpus, refPolicy, name, genome, cand)
-		if err != nil {
-			return nil, err
-		}
-		candidates = append(candidates, sc)
-
-		// Keep the proposal as the new incumbent iff it strictly reduces admitted
-		// injections (the search's objective) without making destructive_executed worse.
-		if sc.Fitness.InjectionsAdmitted < incumbentFit.InjectionsAdmitted &&
-			sc.Fitness.DestructiveExecuted <= incumbentFit.DestructiveExecuted {
-			incumbentDeny = propDeny
-			incumbentFit = sc.Fitness
-		}
+	if err != nil {
+		return nil, err
 	}
 
 	// Stable candidate ordering (by name) for a regenerable artifact.
@@ -511,6 +510,8 @@ func RunPolicySearch(ctx context.Context, cfg PolicySearchConfig, cm CostModel) 
 		Seed:                   cfg.Seed,
 		Iterations:             len(candidates) - 1,
 		CorpusSize:             len(cfg.Corpus),
+		SearchMode:             mode,
+		DistinctGenomes:        distinctGenomes(candidates),
 		ModelCallsSpent:        0, // the whole point: the search is model-free replay
 		Baseline:               baseline,
 		Best:                   best,
@@ -522,6 +523,189 @@ func RunPolicySearch(ctx context.Context, cfg PolicySearchConfig, cm CostModel) 
 			"its divergence frontier before its task-completion is trusted — the floor counters " +
 			"(injections_admitted / destructive_executed / denies) are real kernel events and stand",
 	}, nil
+}
+
+// runGreedySearch is the issue-#503 baseline: a single-incumbent hill-climb over the
+// Deny-by-name genome. Starting from the empty deny set, each step proposes the incumbent
+// PLUS one not-yet-denied tool (in the seeded permutation order), scores it via the
+// model-free oracle, and KEEPS it as the new incumbent only when it strictly reduces
+// InjectionsAdmitted without raising DestructiveExecuted. It scores exactly ONE monotone
+// CHAIN of candidates (baseline + one child per accepted tool), so it never isolates a
+// low-cost sibling genome — the blind spot the archive mode (runArchiveSearch) escapes.
+// Returns baseline as candidate 0 followed by every proposal it scored.
+func runGreedySearch(ctx context.Context, cfg PolicySearchConfig, refPolicy adjudicator.Policy, baseline SearchCandidate) ([]SearchCandidate, error) {
+	candidates := []SearchCandidate{baseline}
+
+	// Deterministic proposal order: a seeded permutation of the deny-candidate tools.
+	rng := rand.New(rand.NewSource(cfg.Seed))
+	order := rng.Perm(len(cfg.DenyCandidates))
+
+	incumbentDeny := map[string]bool{}
+	incumbentFit := baseline.Fitness
+	iters := cfg.Iterations
+	if iters <= 0 || iters > len(order) {
+		iters = len(order)
+	}
+	for step := 0; step < iters; step++ {
+		tool := cfg.DenyCandidates[order[step]]
+		if incumbentDeny[tool] {
+			continue
+		}
+		// Propose: the incumbent deny set PLUS this tool.
+		propDeny := map[string]bool{}
+		for k := range incumbentDeny {
+			propDeny[k] = true
+		}
+		propDeny[tool] = true
+
+		cand := candidateWithDenies(cfg.Baseline, propDeny)
+		name := fmt.Sprintf("cand-%02d-deny-%s", step, tool)
+		genome := map[string]string{"deny_added": denyListString(propDeny)}
+		sc, err := scoreCandidate(ctx, cfg.Corpus, refPolicy, name, genome, cand)
+		if err != nil {
+			return nil, err
+		}
+		candidates = append(candidates, sc)
+
+		// Keep the proposal as the new incumbent iff it strictly reduces admitted
+		// injections (the search's objective) without making destructive_executed worse.
+		if sc.Fitness.InjectionsAdmitted < incumbentFit.InjectionsAdmitted &&
+			sc.Fitness.DestructiveExecuted <= incumbentFit.DestructiveExecuted {
+			incumbentDeny = propDeny
+			incumbentFit = sc.Fitness
+		}
+	}
+	return candidates, nil
+}
+
+// runArchiveSearch is the issue-#539 delta: an open-ended, diversity-preserving population
+// search over the SAME Deny-by-name genome and the SAME model-free replay oracle. It keeps
+// EVERY distinct scored genome as an archive and, each step, BRANCHES a child off a SAMPLED
+// parent rather than always the best — the Darwin-Gödel-Machine mechanism (arXiv:2505.22954,
+// jennyzzt/dgm `score_child_prop`): sample parent i with probability proportional to
+//
+//	sigmoid(10*(score_i - 0.5)) * 1/(1 + children_i)
+//
+// where score_i is the parent's REPLAY-DERIVED fitness mapped to [0,1] (fewer
+// InjectionsAdmitted vs the baseline) and children_i is how many children it has already
+// spawned. The inverse-children term keeps branching under-explored stepping-stones, so the
+// search escapes the greedy chain's blind spot and explores more of the genome lattice. The
+// child mutates ONE lever (toggle one tool's membership) off the parent's deny set; the
+// whole walk is driven by the seeded math/rand so the archive is byte-reproducible.
+//
+// THE HONESTY GATE (carried unchanged from #503/#502): every archived genome is scored by
+// scoreCandidate over the frozen corpus, so its fitness is a witnessed, replayable function
+// of (corpus, policy, seed) — never self-reported — and a stepping-stone's catches are still
+// credited ONLY at-or-before its divergence frontier. A diverse parent cannot be crowned on a
+// counterfactual branch, and ModelCallsSpent stays 0. Returns baseline as candidate 0
+// followed by every DISTINCT child genome it scored.
+func runArchiveSearch(ctx context.Context, cfg PolicySearchConfig, refPolicy adjudicator.Policy, baseline SearchCandidate) ([]SearchCandidate, error) {
+	iters := cfg.Iterations
+	if iters <= 0 {
+		iters = 4*len(cfg.DenyCandidates) + 4
+	}
+	rng := rand.New(rand.NewSource(cfg.Seed))
+	baseAdmitted := baseline.Fitness.InjectionsAdmitted
+
+	// The archive of DISTINCT genomes: baseline (empty deny set) is entry 0. children and
+	// denySets run parallel to archive (one slot per archived genome); seen dedups by the
+	// genome's sorted deny-list key so a re-derived genome is explored, not re-scored.
+	archive := []SearchCandidate{baseline}
+	children := []int{0}
+	denySets := []map[string]bool{{}}
+	seen := map[string]int{denyListString(map[string]bool{}): 0}
+
+	for step := 0; step < iters; step++ {
+		pi := selectArchiveParent(rng, archive, children, baseAdmitted)
+		children[pi]++
+
+		// Mutate ONE lever: toggle one deny-candidate tool's membership off the parent.
+		childDeny := map[string]bool{}
+		for k := range denySets[pi] {
+			childDeny[k] = true
+		}
+		tool := cfg.DenyCandidates[rng.Intn(len(cfg.DenyCandidates))]
+		if childDeny[tool] {
+			delete(childDeny, tool)
+		} else {
+			childDeny[tool] = true
+		}
+
+		key := denyListString(childDeny)
+		if _, ok := seen[key]; ok {
+			continue // already archived; the parent's branch still counts (children[pi]++)
+		}
+		cand := candidateWithDenies(cfg.Baseline, childDeny)
+		name := fmt.Sprintf("arch-%02d-deny-%s", step, key)
+		genome := map[string]string{"deny_added": key}
+		sc, err := scoreCandidate(ctx, cfg.Corpus, refPolicy, name, genome, cand)
+		if err != nil {
+			return nil, err
+		}
+		seen[key] = len(archive)
+		archive = append(archive, sc)
+		children = append(children, 0)
+		denySets = append(denySets, childDeny)
+	}
+	return archive, nil
+}
+
+// selectArchiveParent samples an archive index proportional to the Darwin-Gödel-Machine
+// child-proposal weight sigmoid(10*(score-0.5)) * 1/(1+children): empirical (replay-derived)
+// fitness times an inverse-children-count term that keeps branching under-explored
+// stepping-stones. The draw is deterministic given the seeded rng (a single Float64 over the
+// cumulative weights). Falls back to the last index if floating-point drift leaves the draw
+// just past the cumulative total.
+func selectArchiveParent(rng *rand.Rand, archive []SearchCandidate, children []int, baseAdmitted int) int {
+	weights := make([]float64, len(archive))
+	total := 0.0
+	for i := range archive {
+		s := fitnessScore(archive[i].Fitness, baseAdmitted)
+		w := sigmoid(10*(s-0.5)) / float64(1+children[i])
+		weights[i] = w
+		total += w
+	}
+	r := rng.Float64() * total
+	acc := 0.0
+	for i, w := range weights {
+		acc += w
+		if r <= acc {
+			return i
+		}
+	}
+	return len(archive) - 1
+}
+
+// fitnessScore maps a candidate's REPLAY-DERIVED fitness onto [0,1] for the DGM selector:
+// 1 when it admits zero injections, 0 when it admits as many as the permissive baseline,
+// linear between. It reads ONLY the honest floor axis (InjectionsAdmitted) — never a
+// resolve-rate. A baseline that already admits nothing yields a flat 1 for every candidate.
+func fitnessScore(fit SearchFitness, baseAdmitted int) float64 {
+	if baseAdmitted <= 0 {
+		return 1
+	}
+	s := float64(baseAdmitted-fit.InjectionsAdmitted) / float64(baseAdmitted)
+	if s < 0 {
+		return 0
+	}
+	if s > 1 {
+		return 1
+	}
+	return s
+}
+
+// sigmoid is the standard logistic 1/(1+e^-x), the DGM child-proposal squashing function.
+func sigmoid(x float64) float64 { return 1 / (1 + math.Exp(-x)) }
+
+// distinctGenomes counts the DISTINCT deny-set genomes among the scored candidates — the
+// honest diversity metric (#539). The greedy chain scores a strict subset of what the
+// archive does on the same corpus + seed, so its count is strictly lower.
+func distinctGenomes(cands []SearchCandidate) int {
+	seen := map[string]bool{}
+	for i := range cands {
+		seen[cands[i].Genome["deny_added"]] = true
+	}
+	return len(seen)
 }
 
 // candidateWithDenies returns a COPY of base with the given tools added to its Deny map
