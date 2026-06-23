@@ -157,12 +157,13 @@ fak-shaped (uses the boundary) rather than commodity.*
    fak, and exactly fak's pattern.
 
 2. **`dos_arbitrate` as universal fleet admission control.** Copilot `/fleet` *names* the
-   unsolved hazard — "subagents share a filesystem with **no file locking**, silent
-   overwrites possible." fak already solves this: lane/tree-disjointness admission
-   (`dos_arbitrate`). Expose it as an MCP tool / gateway endpoint any orchestrator (Copilot
-   `/fleet`, Cursor multi-agent, Devin MultiDevin) calls *before* dispatching parallel agents.
-   *Why fak-shaped:* shipped, differentiated, and the rest of the field is hitting the bug
-   fresh. "fak is the missing collision-safety layer for everyone's fleet."
+   unsolved hazard, verbatim (verified 2026-06-23): *"Sub-agents share a filesystem with no
+   file locking. If two agents write to the same file, the last one to finish wins—silently.
+   No error, no merge, just an overwrite."* fak already solves this: lane/tree-disjointness
+   admission (`dos_arbitrate`). Expose it as an MCP tool / gateway endpoint any orchestrator
+   (Copilot `/fleet`, Cursor multi-agent, Devin MultiDevin) calls *before* dispatching
+   parallel agents. *Why fak-shaped:* shipped, differentiated, and the rest of the field is
+   hitting the bug fresh. "fak is the missing collision-safety layer for everyone's fleet."
 
 3. **Network-safe gateway + remote-trigger control plane.** Finish the auth story
    (`Config.RequireKey` → mTLS / OAuth 2.1 / short-lived per-session tokens) so the gateway
@@ -173,6 +174,11 @@ fak-shaped (uses the boundary) rather than commodity.*
    **every remotely-triggered, unattended run is adjudicated by the floor and witnessed**
    (`dos_commit_audit` / `dos_verify` already exist). Fire-and-forget *with* a verifiable
    capability floor and a witnessed result is precisely what you want when nobody is watching.
+   The gap is real and felt: Anthropic's Routines docs (verified 2026-06-23) warn that
+   *"a green status… does not mean the task succeeded… open the run to confirm"* — i.e. the
+   platform itself ships fire-and-forget **without** a structural success witness, exactly the
+   hole `dos_verify` fills. (Routines also already run on a deny-by-default-egress cloud env —
+   `403` + `x-deny-reason: host_not_allowed` — corroborating the egress rung in #1.)
 
 4. **Execution-target abstraction so the boundary travels** — `local | worktree | container
    | microVM | remote-SSH` (the four targets Cursor 3.0's Agents Window unifies). `fak guard`
@@ -205,6 +211,14 @@ fak-shaped (uses the boundary) rather than commodity.*
 
 ## Sourcing & confidence
 
+- **Directly verified 2026-06-23 (WebFetch against primary)** — the three claims the strategy
+  rests on: (a) Copilot `/fleet`'s "shared filesystem, no file locking, silent overwrite"
+  hazard (github.blog `/fleet` post, quoted verbatim above → recommendation #2); (b) Claude
+  Code's deny-by-default egress via a unix-socket→validating proxy + git credentials kept
+  *outside* the sandbox + bubblewrap/Seatbelt + 84% prompt cut (anthropic.com/engineering →
+  recommendation #1); (c) Routines' three triggers and the literal
+  `POST …/v1/claude_code/routines/{id}/fire` bearer endpoint, plus its deny-by-default cloud
+  env and "green ≠ succeeded" caveat (code.claude.com/docs/en/routines → recommendation #3).
 - **High confidence** (vendor-primary, fetched): Cursor changelog 2.0→3.8; Copilot GA /
   `/fleet` / Agent HQ (github.blog); Codex Cloud/subagents (developers.openai.com); Jules
   beta + Tools/API (blog.google); Devin 2.0 + MultiDevin + v3 API (cognition.com /
@@ -217,8 +231,10 @@ fak-shaped (uses the boundary) rather than commodity.*
 - **Distrust / unverified numbers** (single-snippet): Daytona 850 K daily runs; E2B 375×
   growth / 24 h cap (competitor-sourced); "5 % solved sandboxing / 79 % use agents";
   OpenClaw 369 K★ / 3.2 M users. Not load-bearing for the strategy.
-- The **verify pass did not run** (session limit) — re-run it before quoting any single
-  date as authoritative.
+- The **automated verify pass did not run** (session limit); the three strategy-spine claims
+  above were instead verified by hand (WebFetch). The remaining *dates* are still
+  agent-reported-from-primaries — re-run the verify fan-out before quoting any single date as
+  authoritative.
 
 ## Verdict
 
