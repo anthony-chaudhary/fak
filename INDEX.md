@@ -27,6 +27,7 @@ Each turns a fuzzy goal into a number you can drive toward zero.
 - [Agent-readiness scorecard](docs/AGENT-READINESS-SCORECARD.md) — can an AI agent discover, adopt, and build on fak (friction-debt across the three steps an agent walks).
 - [Repo-hygiene scorecard](docs/REPO-HYGIENE-SCORECARD.md) — verbosity, organization, indexing, and accessibility of the whole tree.
 - [Code-quality scorecard](docs/CODE-QUALITY-SCORECARD.md) — the Go module's code-debt.
+- [Observability scorecard](docs/OBSERVABILITY-SCORECARD.md) — the observability plane (metrics, dashboards, alerts, traces, proofs, ship-audit), graded so every dashboard/alert/doc points at a metric the binary emits and every claim is verifiable.
 - [Demo-quality scorecard](docs/DEMO-QUALITY-SCORECARD.md) — are the demos runnable, honest, self-contained.
 - [Demo-robustness scorecard](docs/DEMO-ROBUSTNESS-SCORECARD.md) — do the demos survive bad input and odd environments.
 - [Code-2x program](docs/CODE-2X-PROGRAM.md) — the plan to halve code-debt, then halve it again.
@@ -79,6 +80,7 @@ front page.
 - [GLM-5.2 kernel + turn demos (2026-06-21)](docs/notes/GLM52-PURE-KERNEL-AND-AGENT-TURN-DEMOS-RESULTS-2026-06-21.md)
 - [GLM-5.2 pure kernel on DGX A100 (2026-06-21)](docs/notes/GLM52-PURE-KERNEL-ON-GPU-DGX-A100-2026-06-21.md)
 - [Mac bench refresh: CPU Q8 parity + uncontended radix (2026-06-23)](docs/notes/MAC-BENCH-REFRESH-2026-06-23.md)
+- [The O(1) current turn: a planned view over the lossless history (2026-06-23)](docs/notes/O1-TURN-CONTEXT-PLANNER-2026-06-23.md) — cost-based, forecast-driven context planner; the middle ground between an unbounded transcript and lossy compaction.
 - [On-demand context KV reuse (2026-06-19)](docs/notes/ON-DEMAND-CONTEXT-KV-REUSE-2026-06-19.md)
 - [Cloud/VM/remote-control agent landscape + fak strategy (2026-06-23)](docs/notes/RESEARCH-cloud-vm-remote-agent-landscape-2026-06-23.md)
 - [idea-scout triage: Doberman-Core as prior art (2026-06-23)](docs/notes/RESEARCH-doberman-prior-art-triage-2026-06-23.md)

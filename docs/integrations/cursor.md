@@ -376,8 +376,8 @@ curl http://127.0.0.1:8080/metrics
 Key metrics:
 - `fak_gateway_time_to_ready_seconds` - Startup time
 - `fak_vdso_hit_rate` - Cache hit rate
-- `fak_adjudication_denies_total` - Denied calls by reason
-- `fak_quarantine_total` - Quarantined results
+- `fak_gateway_operations_total{verdict="DENY"}` - Denied calls (by reason label)
+- `fak_kernel_quarantines_total` - Quarantined results
 
 ### Coherence feed (cross-agent changes)
 

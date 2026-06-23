@@ -465,7 +465,7 @@ Weight a small slice of traffic to a canary replica running the new build or new
 
 - **New policy floor, same binary:** the cleanest canary — start one replica with the new
   `--policy` file (or `POST /v1/fak/policy/reload` it on one replica), send it a traffic
-  slice, and compare its verdict mix. Watch `fak_verdict_total` by kind
+  slice, and compare its verdict mix. Watch `fak_gateway_operations_total` by `verdict`
   (`ALLOW`/`DENY`/`TRANSFORM`/`QUARANTINE`/`WITNESS`): a canary that suddenly denies far
   more (or far less) than the baseline is a misconfigured floor caught before full
   rollout.
@@ -474,8 +474,8 @@ Weight a small slice of traffic to a canary replica running the new build or new
 
 ```promql
 # canary vs baseline deny-rate, split by build version label
-sum by (version) (rate(fak_verdict_total{kind="DENY"}[5m]))
-  / sum by (version) (rate(fak_verdict_total[5m]))
+sum by (version) (rate(fak_gateway_operations_total{verdict="DENY"}[5m]))
+  / sum by (version) (rate(fak_gateway_operations_total[5m]))
 ```
 
 ### 5.3 Rate-limiting strategies

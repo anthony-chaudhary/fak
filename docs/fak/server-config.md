@@ -298,8 +298,8 @@ The `/metrics` endpoint exposes Prometheus metrics including:
 | `fak_gateway_time_to_ready_seconds` | gauge | Time from process start to ready (listener bound, model loaded). |
 | `fak_gateway_startup_phase_duration_seconds` | gauge | Per-phase startup duration (flag-parse, policy-load, model-load, etc.). |
 | `fak_model_load_*` | gauge | Model load profile breakdown (source, mode, total_seconds, tensors, bottleneck). |
-| `fak_verdict_total` | counter | Verdict counts by kind (ALLOW, DENY, TRANSFORM, QUARANTINE, WITNESS). |
-| `fak_operation_duration_seconds` | histogram | Operation latency by operation type (adjudicate, syscall, admit). |
+| `fak_gateway_operations_total` | counter | Kernel operation counts by operation, verdict (ALLOW, DENY, TRANSFORM, QUARANTINE, WITNESS), reason, disposition, and deciding adjudicator. |
+| `fak_gateway_operation_duration_seconds` | histogram | Operation latency by operation type (adjudicate, syscall, admit), verdict, and deciding adjudicator. |
 
 ---
 

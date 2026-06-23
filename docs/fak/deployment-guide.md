@@ -471,8 +471,8 @@ curl -s -X POST http://HOST:8080/v1/fak/adjudicate \
 or pull the new tag and restart the unit). Policy changes need no restart — rewrite
 the policy file and `POST /v1/fak/policy/reload`.
 
-**Observability.** Scrape `/metrics` for verdict counts (`fak_verdict_total`),
-operation latency (`fak_operation_duration_seconds`), and startup/model-load
+**Observability.** Scrape `/metrics` for verdict counts (`fak_gateway_operations_total`),
+operation latency (`fak_gateway_operation_duration_seconds`), and startup/model-load
 timings. The repo's [`tools/grafana/`](https://github.com/anthony-chaudhary/fak/blob/main/tools/grafana/docker-compose.yml)
 stack wires Prometheus + Grafana to a `fak serve` on `:8080`. Full details in
 [observability.md](observability.md).

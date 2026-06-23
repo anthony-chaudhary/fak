@@ -426,11 +426,11 @@ curl http://127.0.0.1:8080/metrics
 **Key metrics for coding agents:**
 
 ```
-fak_syscall_duration_seconds{verdict="ALLOW"}
-fak_syscall_duration_seconds{verdict="DENY"}
+fak_gateway_operation_duration_seconds{operation="syscall",verdict="ALLOW"}
+fak_gateway_operation_duration_seconds{operation="syscall",verdict="DENY"}
 fak_vdso_hits_total
-fak_quarantine_evictions_total
-fak_turn_tax_denials_total
+fak_kernel_quarantines_total
+fak_kernel_denies_total
 ```
 
 ### The `fak` response extension
