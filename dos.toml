@@ -40,7 +40,7 @@ concurrent = [
   "cmd", "experiments", "docs", "tools", "visuals", "claude", "ci",
   "tokenizer",
   "contextq", "journal", "examples",
-  "spec", "rulesynth",
+  "spec", "rulesynth", "wirescreen",
   "appversion", "boundarylint", "deletioncert", "demoui", "enginecache", "gpulease",
   "leakcheck", "metalgemm", "modelengine", "pathlint", "pathutil", "radixkv",
   "ratelimit", "rsiloop", "swebench", "toollint", "tracesink", "urllint", "webbench",
@@ -68,7 +68,7 @@ autopick = [
   "cmd", "experiments", "docs", "tools", "visuals", "claude", "ci",
   "tokenizer",
   "contextq", "journal", "examples",
-  "spec", "rulesynth",
+  "spec", "rulesynth", "wirescreen",
   "appversion", "boundarylint", "deletioncert", "demoui", "enginecache", "gpulease",
   "leakcheck", "metalgemm", "modelengine", "pathlint", "pathutil", "radixkv",
   "ratelimit", "rsiloop", "swebench", "toollint", "tracesink", "urllint", "webbench",
@@ -130,12 +130,18 @@ tokenizer = ["internal/tokenizer/**"]
 answershape = ["internal/answershape/**"]
 contextq = ["internal/contextq/**"]
 journal = ["internal/journal/**"]
-# reconciled 2026-06-23 (#517): real internal/ packages (internal/spec, internal/rulesynth)
-# whose `(fak <leaf>)` ship-stamps the commit_stamp_doctor coverage meter flagged as
-# off-lane -- declared here so the referee can bind them (the "declare per-leaf lanes"
-# resolution of #517's drift #4; non-package scopes like the `guard` verb stay advisory).
+# reconciled 2026-06-23 (#517): real internal/ packages (internal/spec, internal/rulesynth,
+# internal/wirescreen) whose `(fak <leaf>)` ship-stamps the commit_stamp_doctor coverage
+# meter flagged as off-lane -- declared here so the referee can bind them (the "declare
+# per-leaf lanes" resolution of #517's drift #4; non-package scopes like the `guard` verb
+# stay advisory). internal/wirescreen shipped (b63264c, `feat(wirescreen): ... (fak
+# wirescreen)`) after the first #517 pass, so it surfaced as the one remaining real
+# off-lane package; declaring its lane lets the referee bind its ship-stamp and lets
+# the arbiter detect a same-tree collision on it. (Its architest tier-map entry is a
+# separate internal/architest concern, tracked outside this dos.toml lane.)
 spec = ["internal/spec/**"]
 rulesynth = ["internal/rulesynth/**"]
+wirescreen = ["internal/wirescreen/**"]
 # reconciled 2026-06-22: real internal/ leaves that previously had NO lane (so a
 # `(fak <leaf>)` ship-stamp bound to a phantom unit and edits were unprotected).
 appversion = ["internal/appversion/**"]
