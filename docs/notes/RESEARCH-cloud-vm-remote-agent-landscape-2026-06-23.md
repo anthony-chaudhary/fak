@@ -106,7 +106,7 @@ proxies the real provider in passthrough, and is **torn down when the child exit
 via Python tools on Windows scheduled tasks — no remote spawn, no cross-machine coordination.
 Isolation today is **git-worktree only, and only for SWE-bench** (`internal/swebench/fleet.go`);
 there is **no network egress policy** (`internal/adjudicator/decide.go` gates only self-modify
-writes). Remote control is a **hard-coded Slack↔shell bridge** for the lab (`cmd/dgxbridge`),
+writes). Remote control is a **hard-coded Slack↔shell bridge** for the lab (private tooling),
 not a general control plane. `fak serve` is **single-model**.
 
 In one line: **the field moved compute into isolated cloud VMs and control onto phones;
@@ -168,7 +168,7 @@ fak-shaped (uses the boundary) rather than commodity.*
 3. **Network-safe gateway + remote-trigger control plane.** Finish the auth story
    (`Config.RequireKey` → mTLS / OAuth 2.1 / short-lived per-session tokens) so the gateway
    is safe off-loopback, then add a `/v1/fak/dispatch` trigger (Schedule / HTTP `/fire` /
-   GitHub-event — mirroring Anthropic Routines) and generalize `cmd/dgxbridge` from
+   GitHub-event — mirroring Anthropic Routines) and generalize the private lab bridge from
    "Slack↔one shell" to "chat↔adjudicated session."
    *Why fak-shaped:* the differentiator isn't "another way to fire an agent" — it's that
    **every remotely-triggered, unattended run is adjudicated by the floor and witnessed**
