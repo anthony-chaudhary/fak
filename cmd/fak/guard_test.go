@@ -265,6 +265,20 @@ func TestFormatAuditSummary(t *testing.T) {
 	if strings.Contains(clean, "deferred") || strings.Contains(clean, "escalated") {
 		t.Errorf("clean summary should not mention deferred/escalated:\n%s", clean)
 	}
+
+	// Provider prompt-cache reuse is surfaced when it happened: the daily `fak guard`
+	// session reads most of its prompt from Anthropic's cache (cache_control preserved
+	// byte-for-byte through the kernel hop), and the operator should see that saving.
+	cached := formatAuditSummary(gateway.AdjudicationSummary{Total: 2, Allowed: 2, CachedPromptTokens: 23428, CachedTurns: 1})
+	for _, want := range []string{"provider cache", "23428 prompt token(s) served from cache", "across 1 turn(s)"} {
+		if !strings.Contains(cached, want) {
+			t.Errorf("cached summary missing %q:\n%s", want, cached)
+		}
+	}
+	// No cache hit → no cache line (the common first-turn / non-passthrough case).
+	if strings.Contains(clean, "provider cache") {
+		t.Errorf("a run with no provider cache read must not print a cache line:\n%s", clean)
+	}
 }
 
 func TestGuardWaitHealthy(t *testing.T) {

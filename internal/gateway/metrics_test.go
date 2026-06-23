@@ -161,6 +161,33 @@ func TestRenderMetricsEmitsLiveInflightSignals(t *testing.T) {
 	}
 }
 
+// TestAdjudicationSummaryReportsProviderCache proves the exit summary `fak guard`
+// prints carries the provider prompt-cache reuse: the cumulative cache_read tokens and
+// the count of turns that got a hit, folded from the same inference counters /metrics
+// exposes — so the guard line can never overstate the saving.
+func TestAdjudicationSummaryReportsProviderCache(t *testing.T) {
+	m := newGatewayMetrics(time.Now())
+
+	// No turns yet → no cache reuse reported.
+	if s := m.adjudicationSummary(); s.CachedPromptTokens != 0 || s.CachedTurns != 0 {
+		t.Fatalf("idle summary must report no cache reuse, got %d tok / %d turns", s.CachedPromptTokens, s.CachedTurns)
+	}
+
+	// Two served turns: the first reads 4096 tokens from the provider cache, the second
+	// reads 1024; a third reads nothing.
+	m.observeInference(10, 5, 4096, "end_turn", time.Second)
+	m.observeInference(10, 5, 1024, "end_turn", time.Second)
+	m.observeInference(900, 5, 0, "end_turn", time.Second)
+
+	s := m.adjudicationSummary()
+	if s.CachedPromptTokens != 5120 {
+		t.Errorf("CachedPromptTokens = %d, want 5120 (4096+1024)", s.CachedPromptTokens)
+	}
+	if s.CachedTurns != 2 {
+		t.Errorf("CachedTurns = %d, want 2 (the two turns that hit the cache)", s.CachedTurns)
+	}
+}
+
 // TestInferenceMetricsAccumulateAcrossTurns exercises the model-generation family
 // directly: the kernel/vDSO counters stay 0 on a pure chat workload, so this is the
 // signal that makes a busy gateway look busy. Two turns must sum the token totals,

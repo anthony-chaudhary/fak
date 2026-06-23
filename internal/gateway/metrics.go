@@ -153,6 +153,14 @@ type AdjudicationSummary struct {
 	Errored uint64 `json:"errored"`
 	// ByReason maps a deny/quarantine reason code to its count (the forensic "why").
 	ByReason map[string]uint64 `json:"by_reason,omitempty"`
+	// CachedPromptTokens is the cumulative count of prompt (input) tokens the upstream
+	// PROVIDER served from its OWN prompt cache (cache_read) across this session's
+	// turns — the provider-side reuse `fak guard` preserves byte-for-byte by forwarding
+	// the client's cache_control prefix unchanged through the kernel hop. CachedTurns
+	// counts the turns that got such a hit. Surfaced in the guard exit summary so the
+	// operator SEES the cache reuse rather than having to scrape /metrics.
+	CachedPromptTokens uint64 `json:"cached_prompt_tokens"`
+	CachedTurns        uint64 `json:"cached_turns"`
 }
 
 // adjudicationSummary folds the live operation counters into a verdict roll-up.
@@ -161,6 +169,12 @@ func (m *gatewayMetrics) adjudicationSummary() AdjudicationSummary {
 	if m == nil {
 		return sum
 	}
+	// Provider prompt-cache reuse rides the inference counters (a separate lock from the
+	// operation ledger); read it first so the two critical sections never nest.
+	m.inferenceMu.Lock()
+	sum.CachedPromptTokens = m.inferCachedTokens
+	sum.CachedTurns = m.inferCachedHits
+	m.inferenceMu.Unlock()
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	for key, c := range m.operations {

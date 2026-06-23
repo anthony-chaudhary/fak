@@ -234,11 +234,13 @@ func cmdGuard(argv []string) {
 	// 5. Wire the child: inject ONLY the gateway URL into the child's environment —
 	//    never the parent shell, never settings.json. A `claude` in another terminal is
 	//    untouched.
-	injectVar := guardEnvVar(up, *envName)
-	injectVal := guardEnvValue(up, gwURL)
+	injected := guardInjectedEnv(up, *envName, gwURL)
 	child := exec.Command(command[0], command[1:]...)
 	child.Stdin, child.Stdout, child.Stderr = os.Stdin, os.Stdout, os.Stderr
-	child.Env = append(os.Environ(), injectVar+"="+injectVal)
+	child.Env = os.Environ()
+	for _, kv := range injected {
+		child.Env = append(child.Env, kv[0]+"="+kv[1])
+	}
 
 	// Subscription mode: put the wrapped client in a deterministic state by handing it
 	// a PLACEHOLDER api key (only if it has none). Claude Code then talks to the gateway
@@ -254,7 +256,11 @@ func cmdGuard(argv []string) {
 		if providerAutodetected {
 			fmt.Fprintf(os.Stderr, "fak guard: detected agent %q -> --provider %s (pass --provider to override)\n", strings.ToLower(filepath.Base(command[0])), up)
 		}
-		printGuardBanner(os.Stderr, gwURL, up, resolvedBase, floorSource, injectVar, injectVal, logLabel, os.Getenv("FAK_AUDIT_JOURNAL"), command)
+		injectNames := injected[0][0]
+		for _, kv := range injected[1:] {
+			injectNames += ", " + kv[0]
+		}
+		printGuardBanner(os.Stderr, gwURL, up, resolvedBase, floorSource, injectNames, injected[0][1], logLabel, os.Getenv("FAK_AUDIT_JOURNAL"), command)
 		switch {
 		case pinUpstream:
 			fmt.Fprintf(os.Stderr, "fak guard: upstream auth — Claude Pro/Max subscription (OAuth token from %s, sent as a bearer token)\n", oauthSource)
@@ -455,6 +461,24 @@ func guardEnvValue(provider, gwURL string) string {
 	return strings.TrimRight(gwURL, "/") + "/v1"
 }
 
+// guardInjectedEnv lists the environment variables guard sets in the child to point it at
+// the gateway. An explicit --env override yields exactly that one var (value follows the
+// wire's /v1 convention). The Anthropic wire is ANTHROPIC_BASE_URL. The OpenAI-compatible
+// wire gets BOTH conventional base-URL variables a client might read: OPENAI_BASE_URL (the
+// OpenAI SDK, Codex, OpenCode, the Vercel AI SDK) and OPENAI_API_BASE (LiteLLM-backed
+// clients and Aider). Setting both is harmless to a client that reads only one, and it
+// means more agents work under `fak guard` with no extra flag. Both pairs share one value
+// (guardEnvValue), so the gateway URL is injected once under two names.
+func guardInjectedEnv(provider, override, gwURL string) [][2]string {
+	val := guardEnvValue(provider, gwURL)
+	primary := guardEnvVar(provider, override)
+	pairs := [][2]string{{primary, val}}
+	if strings.TrimSpace(override) == "" && primary == "OPENAI_BASE_URL" {
+		pairs = append(pairs, [2]string{"OPENAI_API_BASE", val})
+	}
+	return pairs
+}
+
 // guardWaitHealthy blocks until the gateway answers 200 on /healthz, the Serve
 // goroutine returns early (its result is delivered on serveErr — e.g. a bound listener
 // that fails before /healthz can answer), or the deadline passes. The listener is
@@ -582,6 +606,14 @@ func formatAuditSummary(sum gateway.AdjudicationSummary) string {
 		fmt.Fprintf(&b, ", %d errored", sum.Errored)
 	}
 	b.WriteByte('\n')
+	// Make the provider prompt-cache reuse legible: with passthrough the client's
+	// cache_control prefix survives the kernel hop byte-for-byte, so a daily `fak guard`
+	// session reads most of its prompt from Anthropic's cache. Show it when it happened
+	// so the operator sees the saving rather than assuming the hop re-bills the prefix.
+	if sum.CachedPromptTokens > 0 {
+		fmt.Fprintf(&b, "fak guard: provider cache — %d prompt token(s) served from cache across %d turn(s) (cache_control preserved through the kernel hop)\n",
+			sum.CachedPromptTokens, sum.CachedTurns)
+	}
 	if len(sum.ByReason) > 0 {
 		reasons := make([]string, 0, len(sum.ByReason))
 		for r := range sum.ByReason {
