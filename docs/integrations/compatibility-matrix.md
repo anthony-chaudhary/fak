@@ -119,7 +119,7 @@ Where a row says **Partial** or **No**, or the repoint has a sharp edge, here's 
 - **llms.txt** — NOT a wire protocol and not a runtime boundary — it is a static discovery/context document (Markdown) served at the well-known path /llms.txt, path-based like robots.txt/sitemap.xml. No request/response, no streaming, no base URL to repoint. Informal community proposal, no formal version. A governance gateway has nothing live to sit on; at most it could rewrite the served file.
 ---
 
-## The bottom line
+## Summary
 
 Of the 44 targets, **38 expose a custom base URL outright** and 4 more do so partially —
 because the OpenAI-compatible wire has become the field's lingua franca, and `fak serve`
