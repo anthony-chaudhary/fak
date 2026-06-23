@@ -19,7 +19,13 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 ROOT = Path(__file__).resolve().parents[1]
-BENCHMARK_DIR = ROOT / "fak" / "experiments" / "benchmark"
+# The benchmark tree is rooted at <repo>/experiments/benchmark — NOT
+# fak/experiments/benchmark. The stale "fak/" prefix is a fossil from when the Go
+# module sat under a fak/ subdir; it pointed onboarding at a non-existent directory,
+# so save_specs() wrote specs.json to a dead path that `bench_catalog.py build` never
+# scans (the new machine silently never appeared in the catalog). Same fix already
+# applied to bench_catalog.py — keep the two roots identical.
+BENCHMARK_DIR = ROOT / "experiments" / "benchmark"
 MACHINES_DIR = BENCHMARK_DIR / "machines"
 
 
