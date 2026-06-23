@@ -50,6 +50,10 @@ def _env_flag(name: str) -> bool:
 LIVE = ("--live" in sys.argv) or _env_flag("FAK_LIVE")
 WINDOW_H = float(os.environ.get("FAK_WINDOW_H", "6"))
 MAX_PER_TICK = int(os.environ.get("FAK_MAX_PER_TICK", "2"))
+# The id of the session this watchdog is running inside (set by the Claude Code
+# harness). Used to refuse self-resume -- a live operator session can briefly look
+# like a stopped autonomous worker. Empty when run outside a Claude session (cron).
+SELF_SID = (os.environ.get("CLAUDE_CODE_SESSION_ID") or "").strip()
 PYTHON = sys.executable or "python3"
 # Source the claude binary from the fleet-wide convention (FLEET_CLAUDE_EXE), like
 # account_probe.py and the rest of the fleet; FAK_CLAUDE_EXE stays a back-compat
@@ -222,6 +226,15 @@ def main() -> int:
         sid = p.get("session", "")
         sid8 = sid[:8]
         acct = (p.get("account", "") or "").replace(".claude-", "").replace(".claude", "") or "default"
+        # Never resume the session this watchdog is running INSIDE. A live operator
+        # session (e.g. one driving a /goal) can momentarily carry a STOPPED_APIERR
+        # marker from a transient 529 mid-conversation; if it is also `autonomous`
+        # the classifier flags it AUTO_RESUME, and a self-resume races two `claude`
+        # processes on the same transcript. CLAUDE_CODE_SESSION_ID is the running
+        # session's own id -- skip it unconditionally.
+        if SELF_SID and sid == SELF_SID:
+            note(f"  SKIP {sid8} -- this is the live session running the watchdog (self-resume guard)")
+            continue
         if worker_accts and p.get("account") not in worker_accts:
             note(f"  SKIP {sid8} -- account {p.get('account')} is not an offered worker (policy/tombstoned)")
             continue

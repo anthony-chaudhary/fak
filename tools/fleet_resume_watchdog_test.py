@@ -80,6 +80,20 @@ def test_probe_mode_explicit_setting_is_honored():
     assert wd.resolve_probe_mode("none", live=True) == "none"
 
 
+def test_self_sid_reads_harness_session_id():
+    # The self-resume guard refuses to resume the session the watchdog runs inside.
+    # SELF_SID must mirror CLAUDE_CODE_SESSION_ID (the harness-set running-session id).
+    wd = _reload({"CLAUDE_CODE_SESSION_ID": "28f44d89-ecda-4213-a9b0-2e9612a5cd39"})
+    assert wd.SELF_SID == "28f44d89-ecda-4213-a9b0-2e9612a5cd39"
+
+
+def test_self_sid_empty_outside_a_claude_session():
+    # Run from cron (no harness session) -> empty, so the guard is inert and the
+    # watchdog resumes normally.
+    wd = _reload({"CLAUDE_CODE_SESSION_ID": None})
+    assert wd.SELF_SID == ""
+
+
 if __name__ == "__main__":
     import pytest
 
