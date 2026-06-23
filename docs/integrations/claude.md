@@ -61,10 +61,14 @@ default; set `ANTHROPIC_API_KEY` to use API billing instead.)
 5. Tears the gateway down when Claude exits and prints what the kernel decided:
 
 ```
-fak guard: 128 kernel decision(s) — 121 allowed, 5 denied, 2 repaired, 0 quarantined
+fak guard: 131 kernel decision(s) — 121 allowed, 5 denied, 2 repaired, 0 quarantined, 3 deferred
   blocked: POLICY_BLOCK     x4
   blocked: SELF_MODIFY      x1
 ```
+
+(`deferred` and `escalated` only appear when nonzero: a `deferred` is a non-blocking
+admit — typically an inbound tool result let through the result-side floor — and is a
+normal outcome, not an error.)
 
 > **Your Claude Pro/Max subscription is the default — no API key needed.** When the
 > upstream is Anthropic and `ANTHROPIC_API_KEY` is unset, `fak guard` uses your
@@ -152,6 +156,127 @@ the same counters `/metrics` exposes, so the views never disagree:
 ```bash
 FAK_AUDIT_JOURNAL=~/fak-audit.jsonl fak guard --log ~/fak-gw.log -- claude
 ```
+
+### Prove it: the request really transited the gateway over your subscription
+
+You don't have to take the subscription-by-default behavior on faith. On any box with the
+`claude` binary and a Claude Pro/Max subscription, this proves end to end that a real
+`/v1/messages` request crossed the in-process kernel gateway and was authenticated with
+your subscription OAuth token. Copy-paste it.
+
+**Prerequisites:**
+
+- `claude` is on your `PATH` (`claude --version` works).
+- A subscription token is reachable, in the order `fak guard` reads them: the
+  `CLAUDE_CODE_OAUTH_TOKEN` env var (a `claude setup-token` value), then
+  `<claude-config>/.oauth-token`, then `<claude-config>/.credentials.json` (the
+  interactive login token, which expires — prefer a setup token for anything
+  long-running). If you have used `claude` interactively on this box, the third source
+  already exists.
+- `ANTHROPIC_API_KEY` is **unset**. With it set, guard uses API billing instead of the
+  subscription and this proof does not apply.
+
+Run one headless, machine-checkable turn from the repo root (the Go module is the repo
+root), with the gateway log and the audit journal on:
+
+```bash
+go build -o fak ./cmd/fak
+
+# --log, FAK_AUDIT_JOURNAL, and --anthropic-oauth are fak flags.
+# -p, --allowedTools, and --output-format AFTER `claude` are Claude Code flags.
+FAK_AUDIT_JOURNAL="$PWD/fak-audit.jsonl" \
+  ./fak guard --log "$PWD/gw.log" --anthropic-oauth -- \
+  claude -p "Run: echo hello-from-guard" \
+    --allowedTools "Bash(echo:*)" \
+    --output-format json
+```
+
+`--anthropic-oauth` is optional (it is already the default for `--provider anthropic` with
+no API key); passing it makes guard fail loud if no token is found instead of silently
+falling back to passthrough. The banner names the token source and ends
+`…, sent as a bearer token)`.
+
+**Check 1 — a real result came back over your subscription.** `claude … --output-format
+json` writes one envelope to stdout (the banner and exit summary go to stderr, so they do
+not pollute it):
+
+```json
+{ "type": "result", "is_error": false, "result": "hello-from-guard", "duration_api_ms": 1234 }
+```
+
+`"is_error": false` with a real `result` proves a turn completed against Anthropic through
+guard.
+
+**Check 2 — the request transited the gateway.** Each line in `gw.log` is a timestamped
+JSON record; find the `/v1/messages` POST:
+
+```bash
+grep '"route":"/v1/messages"' gw.log
+# 2026/06/23 12:00:00 {"event":"gateway_http_request","method":"POST",
+#   "route":"/v1/messages","status":200,"duration_ms":1180.4,
+#   "user_agent":"claude-cli/...","trace_id":"gw-3"}
+```
+
+A `200` on `route=/v1/messages` from a `claude-cli/...` user agent proves the bytes were
+Claude's and they passed through the in-process gateway. Cross-check that line's
+`duration_ms` against the `duration_api_ms` in the Check-1 JSON: they are the same upstream
+call seen from the two ends of the proxy. If Claude had reached Anthropic directly, there
+would be no `/v1/messages` line here at all.
+
+**Check 3 — no bypass: the `200` is only possible because the gateway swapped the
+credential.** When `ANTHROPIC_API_KEY` is unset, guard hands the child the **invalid**
+placeholder key `fak-guard-oauth-placeholder` (`cmd/fak/guard.go`) and injects only the
+gateway URL. So the child authenticates to the gateway with a key Anthropic would reject.
+The upstream `200` is therefore only possible because the gateway dropped that placeholder
+and authenticated upstream with your real held OAuth bearer. A direct
+`claude → api.anthropic.com` call carrying that placeholder would `401`. The `200` is the
+proof the swap happened.
+
+**Check 4 — the tool call was adjudicated and recorded.** The `--allowedTools
+"Bash(echo:*)"` turn asks the model to run `echo`. If the model proposes the tool call
+(Haiku reliably does for this prompt), the kernel adjudicates it and the exit summary on
+stderr counts it:
+
+```
+fak guard: 2 kernel decision(s) — 1 allowed, 0 denied, 0 repaired, 0 quarantined, 1 deferred
+```
+
+`allowed` is the proposed `Bash` call crossing the capability floor; `deferred` is its
+inbound tool result admitted through the result-side floor. The durable record is in
+`fak-audit.jsonl` — a hash-chained `DECIDE` row per decision:
+
+```bash
+grep '"verdict":"ALLOW"' fak-audit.jsonl
+# {"seq":1,"kind":"DECIDE","tool":"Bash","verdict":"ALLOW","by":"monitor","prev_hash":"","hash":"..."}
+```
+
+Each row carries `prev_hash`/`hash`, so an auditor re-verifies the chain end to end and
+proves no decision was dropped or altered. (If the model answers in text without calling
+the tool, you get `0 allowed` and no ALLOW row — re-run, or make the instruction more
+explicit.) Without `FAK_AUDIT_JOURNAL` set, the summary is in-memory only and this durable
+trail does not exist.
+
+Together: a real result (1), through the gateway (2), authenticated only because the
+gateway swapped in your OAuth token (3), with the tool call adjudicated and recorded (4).
+
+### Current limits on the subscription seat
+
+The proof above runs the default `fak guard -- claude` path. The honest limits and
+in-flight rungs on that seat:
+
+- **Streaming.** The Anthropic `/v1/messages` wire synthesizes the SSE from a
+  fully-buffered, already-adjudicated turn, so time-to-first-token equals full-generation
+  time here. Live token streaming is shipped on the OpenAI-compatible wire for content;
+  the Anthropic-wire rung is next.
+- **Audit journal is opt-in.** The hash-chained trail exists only when `FAK_AUDIT_JOURNAL`
+  is set (the proof above sets it). The in-memory exit summary is always on.
+- **KV poison-eviction is a no-op on a proxy/subscription seat, by design.** The model
+  lives upstream, so there is no local KV prefix to drop. A quarantined tool result is
+  still paged out before the model reads it; the in-kernel evictor is the local-model
+  (`--gguf`) path.
+- **The OpenAI-wire seat** (`fak guard --provider openai -- codex` / `opencode`) is
+  unit-tested for provider inference and the tool floor, but has no recorded live
+  gateway-transited proof yet. Running the four checks above against it is the open task.
 
 The rest of this guide covers the **local-model** dogfood path (point fak at
 ollama / a shim / a large local OpenAI-compatible server) and the manual two-terminal
