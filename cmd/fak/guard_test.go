@@ -76,6 +76,53 @@ func TestGuardDefaultPolicyDeniesDangerAllowsBenign(t *testing.T) {
 	}
 }
 
+func TestGuardDetectProvider(t *testing.T) {
+	cases := []struct {
+		command        string
+		wantProvider   string
+		wantRecognized bool
+	}{
+		{"claude", "anthropic", true},
+		{"claude-code", "anthropic", true},
+		{"/usr/local/bin/claude", "anthropic", true},              // absolute path
+		{`C:\Program Files\claude\claude.exe`, "anthropic", true}, // Windows launcher
+		{"Claude", "anthropic", true},                             // case-insensitive
+		{"codex", "openai", true},
+		{"opencode", "openai", true},
+		{"opencode.cmd", "openai", true}, // the Windows .cmd worker
+		{"aider", "", false},             // reads OPENAI_API_BASE, not OPENAI_BASE_URL — left to --env on purpose
+		{"vim", "", false},
+		{"", "", false},
+	}
+	for _, tc := range cases {
+		p, ok := guardDetectProvider(tc.command)
+		if p != tc.wantProvider || ok != tc.wantRecognized {
+			t.Errorf("guardDetectProvider(%q) = (%q,%v), want (%q,%v)", tc.command, p, ok, tc.wantProvider, tc.wantRecognized)
+		}
+	}
+}
+
+func TestResolveGuardProvider(t *testing.T) {
+	cases := []struct {
+		flagValue      string
+		command        string
+		wantProvider   string
+		wantAutodetect bool
+	}{
+		{"openai", "claude", "openai", false},          // explicit flag wins over the name
+		{"  Anthropic ", "codex", "anthropic", false},  // explicit flag is normalized, still wins
+		{"", "codex", "openai", true},                  // empty flag -> inferred
+		{"", "claude", "anthropic", true},              // empty flag -> inferred (the common case)
+		{"", "some-unknown-agent", "anthropic", false}, // unrecognized -> anthropic fallback, NOT flagged as detected
+	}
+	for _, tc := range cases {
+		p, auto := resolveGuardProvider(tc.flagValue, tc.command)
+		if p != tc.wantProvider || auto != tc.wantAutodetect {
+			t.Errorf("resolveGuardProvider(%q,%q) = (%q,%v), want (%q,%v)", tc.flagValue, tc.command, p, auto, tc.wantProvider, tc.wantAutodetect)
+		}
+	}
+}
+
 func TestGuardEnvVar(t *testing.T) {
 	cases := []struct {
 		provider string

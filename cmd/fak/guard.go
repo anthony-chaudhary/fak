@@ -54,7 +54,7 @@ func cmdGuard(argv []string) {
 	t0 := time.Now()
 	fs := flag.NewFlagSet("guard", flag.ExitOnError)
 	addr := fs.String("addr", "", "gateway listen address (default: a private 127.0.0.1 port the OS picks)")
-	provider := fs.String("provider", "anthropic", "upstream wire the gateway proxies to: anthropic|openai|gemini|xai")
+	provider := fs.String("provider", "", "upstream wire the gateway proxies to: anthropic|openai|gemini|xai (default: auto-detected from the agent name — claude->anthropic, codex/opencode->openai — else anthropic)")
 	baseURL := fs.String("base-url", "", "upstream provider base URL (default: the provider's public API, e.g. anthropic -> https://api.anthropic.com)")
 	model := fs.String("model", "", "upstream model id override (default: forward the client's own model id)")
 	apiKeyEnv := fs.String("api-key-env", "", "env var holding the UPSTREAM API key (default: forward the client's own key — passthrough)")
@@ -115,8 +115,10 @@ func cmdGuard(argv []string) {
 	adjudicator.Default.SetPolicy(rt.Adjudicator)
 	applyRuntime(rt)
 
-	// 2. Resolve the upstream the gateway proxies to (and the key handling).
-	up := strings.ToLower(strings.TrimSpace(*provider))
+	// 2. Resolve the upstream the gateway proxies to (and the key handling). An explicit
+	//    --provider wins; otherwise the wire is inferred from the wrapped agent's name so
+	//    naming a known agent Just Works, with anthropic (Claude Code) as the fallback.
+	up, providerAutodetected := resolveGuardProvider(*provider, command[0])
 	resolvedBase := strings.TrimSpace(*baseURL)
 	if resolvedBase == "" {
 		resolvedBase = guardDefaultBaseURL(up)
@@ -249,6 +251,9 @@ func cmdGuard(argv []string) {
 	}
 
 	if !*quiet {
+		if providerAutodetected {
+			fmt.Fprintf(os.Stderr, "fak guard: detected agent %q -> --provider %s (pass --provider to override)\n", strings.ToLower(filepath.Base(command[0])), up)
+		}
 		printGuardBanner(os.Stderr, gwURL, up, resolvedBase, floorSource, injectVar, injectVal, logLabel, os.Getenv("FAK_AUDIT_JOURNAL"), command)
 		switch {
 		case pinUpstream:
@@ -358,6 +363,48 @@ func guardClaudeConfigDir() string {
 		return ".claude"
 	}
 	return filepath.Join(home, ".claude")
+}
+
+// resolveGuardProvider picks the upstream wire for a guard session. An explicit
+// --provider value (normalized) always wins. An empty value is inferred from the wrapped
+// agent's name via guardDetectProvider, and an unrecognized agent falls back to anthropic
+// (Claude Code, the historical default) — so an existing `fak guard -- claude` is
+// unchanged while `fak guard -- codex` now picks the OpenAI wire on its own. The bool
+// reports whether the wire was inferred, for the banner.
+func resolveGuardProvider(flagValue, command string) (provider string, autodetected bool) {
+	if v := strings.ToLower(strings.TrimSpace(flagValue)); v != "" {
+		return v, false
+	}
+	if detected, ok := guardDetectProvider(command); ok {
+		return detected, true
+	}
+	return "anthropic", false
+}
+
+// guardDetectProvider infers the upstream wire from the wrapped agent's command when the
+// operator passes no --provider, so naming a known agent (`fak guard -- codex`) Just
+// Works without also having to say `--provider openai`. The table is deliberately TIGHT:
+// it lists only the agents fak documents an integration for AND that read the
+// conventional ANTHROPIC_BASE_URL / OPENAI_BASE_URL endpoint variable guardEnvVar
+// injects. An agent that reads a DIFFERENT variable (Aider's OPENAI_API_BASE, an
+// IDE-extension settings panel) is left to an explicit --provider/--env on purpose,
+// rather than autodetected into a base URL it ignores. Matching is on the executable's
+// base name, lowercased, with any directory and a Windows .exe/.cmd/.bat/.ps1/.com
+// launcher suffix stripped, so an absolute path or a wrapped launcher still matches.
+func guardDetectProvider(command string) (provider string, recognized bool) {
+	base := strings.ToLower(filepath.Base(strings.TrimSpace(command)))
+	switch filepath.Ext(base) {
+	case ".exe", ".cmd", ".bat", ".ps1", ".com":
+		base = strings.TrimSuffix(base, filepath.Ext(base))
+	}
+	switch base {
+	case "claude", "claude-code":
+		return "anthropic", true
+	case "codex", "opencode":
+		return "openai", true
+	default:
+		return "", false
+	}
 }
 
 // guardDefaultBaseURL maps a provider to its public API base URL. The anthropic host
