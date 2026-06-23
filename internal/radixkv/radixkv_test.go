@@ -211,6 +211,93 @@ func TestPolicyEvictNode(t *testing.T) {
 	}
 }
 
+// TestEvictPrefixByTokenPath is the verdict-driven eviction seam for a caller that
+// holds the poisoned TOKEN SEQUENCE rather than a *node handle (the in-kernel planner,
+// which keeps no node refs). It must drop exactly the branch that cached the poison and
+// spare the benign sibling sharing the same preamble — the same governance EvictNode
+// gives, addressed by token path.
+func TestEvictPrefixByTokenPath(t *testing.T) {
+	tree := New(0)
+	pre := seq(1, 8)
+	good := cat(pre, seq(50, 4))
+	bad := cat(pre, seq(70, 4)) // shares `pre`, diverges into a poisoned tail
+
+	_, lg := servePure(tree, good)
+	tree.Done(lg)
+	_, lb := servePure(tree, bad)
+	tree.Done(lb)
+
+	freed := tree.EvictPrefix(bad) // quarantine: caller has the poisoned tokens, not a node
+	if freed != 4 {
+		t.Fatalf("EvictPrefix freed %d tokens, want 4 (bad's unique tail only)", freed)
+	}
+	if m := tree.MatchLen(bad); m != len(pre) {
+		t.Errorf("poisoned tail must be gone; matched %d, want %d (shared preamble survives)", m, len(pre))
+	}
+	if m := tree.MatchLen(good); m != len(good) {
+		t.Errorf("benign sibling must be intact, matched %d/%d", m, len(good))
+	}
+	if st := tree.Stats(); st.PolicyEvictions != 1 {
+		t.Errorf("policyEvictions=%d, want 1", st.PolicyEvictions)
+	}
+}
+
+// TestEvictPrefixMidEdgeDivergence covers the compressed-trie case the planner hits when
+// the poison diverges in the MIDDLE of a cached edge: passing tokens that match only
+// partway into a leaf's run must still evict that whole (poisoned) branch.
+func TestEvictPrefixMidEdgeDivergence(t *testing.T) {
+	tree := New(0)
+	full := cat(seq(1, 8), seq(50, 8)) // one cached leaf, no split yet
+	_, lf := servePure(tree, full)
+	tree.Done(lf)
+
+	// A poison token path that shares the first 8 tokens then diverges MID-EDGE.
+	poison := cat(seq(1, 8), seq(99, 1))
+	freed := tree.EvictPrefix(poison)
+	if freed != len(full) {
+		t.Fatalf("mid-edge EvictPrefix freed %d, want %d (the whole cached branch)", freed, len(full))
+	}
+	if m := tree.MatchLen(full); m != 0 {
+		t.Errorf("the poisoned branch must be fully gone, matched %d", m)
+	}
+}
+
+// TestEvictPrefixSparesUncachedPoison is the guard that keeps a clean shared prefix
+// intact: when the poison's continuation was NEVER cached (the cached path ends before
+// `tokens` is consumed), EvictPrefix is a no-op rather than wrongly dropping the clean
+// prefix the poison happens to extend.
+func TestEvictPrefixSparesUncachedPoison(t *testing.T) {
+	tree := New(0)
+	clean := seq(1, 8)
+	_, lc := servePure(tree, clean)
+	tree.Done(lc)
+
+	poison := cat(clean, seq(70, 4)) // clean is cached; the poisoned tail is not
+	if freed := tree.EvictPrefix(poison); freed != 0 {
+		t.Fatalf("EvictPrefix must not evict when the poison tail was never cached, freed %d", freed)
+	}
+	if m := tree.MatchLen(clean); m != len(clean) {
+		t.Errorf("the clean cached prefix must survive, matched %d/%d", m, len(clean))
+	}
+}
+
+// TestEvictPrefixEmptyAndCold: an empty token path, and a path nothing in the tree shares,
+// are both no-ops (fail-open).
+func TestEvictPrefixEmptyAndCold(t *testing.T) {
+	tree := New(0)
+	_, l := servePure(tree, seq(1, 8))
+	tree.Done(l)
+	if freed := tree.EvictPrefix(nil); freed != 0 {
+		t.Errorf("empty EvictPrefix freed %d, want 0", freed)
+	}
+	if freed := tree.EvictPrefix(seq(900, 4)); freed != 0 {
+		t.Errorf("cold-path EvictPrefix freed %d, want 0", freed)
+	}
+	if m := tree.MatchLen(seq(1, 8)); m != 8 {
+		t.Errorf("unrelated entry must be untouched, matched %d/8", m)
+	}
+}
+
 func TestNodeCacheEntryDescribesTokenPrefix(t *testing.T) {
 	tree := New(0)
 	req := []int{1, 2, 3, 5, 8}

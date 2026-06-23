@@ -299,6 +299,51 @@ func (t *Tree) EvictNode(n *node) int {
 	return freed
 }
 
+// EvictPrefix is verdict-driven eviction by TOKEN PATH: it walks the longest cached
+// prefix of `tokens` and evicts the deepest cached node on that path (its whole
+// subtree), returning the tokens freed. It is the EvictNode seam for a caller that
+// holds the poisoned token sequence rather than a *node handle — exactly the in-kernel
+// planner, which caches by token path and (because radixkv's node type is unexported)
+// keeps no node references to feed EvictNode directly. A quarantine verdict passes the
+// cached transcript THROUGH the poisoned span and the branch that cached it — and
+// everything built on it — is dropped, so no later request can reuse the poisoned KV.
+//
+// It is a no-op (returns 0) when nothing along `tokens` is cached PAST where it would
+// diverge — in particular, when the cached path ends BEFORE `tokens` is exhausted
+// (`tokens` extends into a region that was never prefilled+cached), nothing is evicted.
+// That guard is what keeps a clean shared prefix intact when the poison's continuation
+// was never cached. Sibling branches that diverged before the matched node are always
+// preserved (the benign-prefix guarantee), the same span-exact, sibling-sparing
+// governance EvictNode provides.
+//
+// Contract: `tokens` must END at or within the poisoned span (the caller — a quarantine
+// verdict — renders the transcript THROUGH the poisoned result, so a full match lands on
+// a node whose cached KV genuinely attended to the poison). A coincidental mid-edge
+// collision on the poison's first divergent token can conservatively evict a benign
+// sibling branch; that is at worst a cache miss (it re-prefills), never a poison replay.
+func (t *Tree) EvictPrefix(tokens []int) int {
+	if len(tokens) == 0 {
+		return 0
+	}
+	n, nlen, pc, oi := t.walk(tokens)
+	_ = oi
+	switch {
+	case pc != nil:
+		// `tokens` diverged MID-EDGE into child pc: the matched run tokens[nlen:nlen+oi)
+		// is on pc's edge, so pc's root→pc path includes those (poison) tokens. Evict pc's
+		// whole branch; pc's siblings (which diverged earlier) survive.
+		return t.EvictNode(pc)
+	case nlen == len(tokens) && n != t.root:
+		// The ENTIRE poisoned token path matched a cached node exactly: that node's KV
+		// attended to the poison. Evict it and its subtree.
+		return t.EvictNode(n)
+	default:
+		// nlen < len(tokens): the cached path ended before `tokens` was consumed — the
+		// poison continuation was never cached here, so there is nothing poisoned to drop.
+		return 0
+	}
+}
+
 func subtreeTokens(n *node) int {
 	total := len(n.key)
 	for _, c := range n.children {
