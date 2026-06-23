@@ -49,6 +49,12 @@ concurrent = [
   "headroom",
   "residency",
   "ctxresidency",
+  # reconciled 2026-06-23: real committed internal/ leaves that had NO lane, so a
+  # `(fak <leaf>)` ship-stamp bound to a phantom unit and the arbiter could not detect a
+  # same-tree collision on them (the same class the 2026-06-22 reconciliation above fixed).
+  # They landed by hand / during the new_leaf.py path-bug window, so the `# new-leaf:lane`
+  # auto-insert never fired. All are real, architest-tiered packages.
+  "blobfs", "blobhttp", "ctxplan", "dgxbridge", "gitgate", "hfhub", "memq", "polymodel", "storedrv",
   # new-leaf:lane -- `python tools/new_leaf.py` inserts a generated leaf lane above
 ]
 exclusive = ["abi", "release", "global"]
@@ -71,6 +77,7 @@ autopick = [
   "headroom",
   "residency",
   "ctxresidency",
+  "blobfs", "blobhttp", "ctxplan", "dgxbridge", "gitgate", "hfhub", "memq", "polymodel", "storedrv",
   # new-leaf:lane
 ]
 
@@ -154,6 +161,18 @@ codelint = ["internal/codelint/**"]
 headroom = ["internal/headroom/**"]
 residency = ["internal/residency/**"]
 ctxresidency = ["internal/ctxresidency/**"]
+# reconciled 2026-06-23: nine real committed internal/ leaves that had no lane (see the
+# matching note in [lanes].concurrent). Tiers per internal/architest: blobfs/blobhttp/
+# dgxbridge/hfhub/polymodel/ctxplan = tier 1, gitgate/storedrv = tier 2, memq = tier 3.
+blobfs = ["internal/blobfs/**"]
+blobhttp = ["internal/blobhttp/**"]
+ctxplan = ["internal/ctxplan/**"]
+dgxbridge = ["internal/dgxbridge/**"]
+gitgate = ["internal/gitgate/**"]
+hfhub = ["internal/hfhub/**"]
+memq = ["internal/memq/**"]
+polymodel = ["internal/polymodel/**"]
+storedrv = ["internal/storedrv/**"]
 # new-leaf:tree -- generated leaf trees inserted above this line
 cmd         = ["cmd/**"]
 experiments = ["experiments/**"]
