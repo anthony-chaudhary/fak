@@ -125,6 +125,69 @@ def test_arm64_residual_is_not_a_gpu_residual():
     assert not _gpu_gated(low)
 
 
+def test_auth_failure_detects_not_logged_in():
+    # the exact failure mode the 2026-06-23 pass hit: a re-resume can't fix it.
+    ok, reason = rw.auth_failure("Not logged in. Please run /login")
+    assert ok and reason == "auth/login required"
+
+
+def test_auth_failure_detects_oauth_expired():
+    ok, reason = rw.auth_failure("API Error: OAuth token has expired; re-authenticate.")
+    assert ok and reason == "auth/login required"
+
+
+def test_auth_failure_distinguishes_credit_and_access():
+    ok_c, reason_c = rw.auth_failure("Your credit balance is too low to run this.")
+    assert ok_c and reason_c == "credit balance too low"
+    ok_a, reason_a = rw.auth_failure("Your organization has disabled Claude subscription access.")
+    assert ok_a and reason_a == "Claude subscription access disabled"
+
+
+def test_auth_failure_ignores_clean_completion():
+    ok, reason = rw.auth_failure("All tests green; working tree clean. Nothing left to commit.")
+    assert not ok and reason == ""
+
+
+def test_auth_failure_not_triggered_by_transient_api_error():
+    # a transient 529 must stay RETRY, never get misrouted to AUTH_FAIL.
+    ok, _ = rw.auth_failure("API Error: 529 Overloaded. This is a server-side issue, try again.")
+    assert not ok
+
+
+def test_terminal_auth_failure_fires_on_error_record(tmp_path):
+    # the real gem7 failure shape: an assistant turn that is ALSO an API-error
+    # record ('Not logged in / Please run /login') -> AUTH_FAIL via the error channel.
+    rec = {"type": "assistant", "isApiErrorMessage": True,
+           "message": {"role": "assistant",
+                       "content": [{"type": "text", "text": "Not logged in. Please run /login"}]}}
+    p = _write(tmp_path, _asst("did some work first"), rec)
+    t = rw.scan_tail(p)
+    ok, reason = rw.terminal_auth_failure(t)
+    assert ok and reason == "auth/login required"
+
+
+def test_terminal_auth_failure_ignores_auth_prose_in_clean_turn(tmp_path):
+    # the false positive caught on live data: a worker editing the resume tooling
+    # ends on normal prose that MENTIONS '/login' -> NOT an auth failure (there is
+    # no error record), it completed cleanly.
+    p = _write(tmp_path, _asst(
+        "Added AUTH_FAIL detection for the 'Not logged in / Please run /login' case. "
+        "All tests green; nothing left to commit."))
+    t = rw.scan_tail(p)
+    assert t["last_err"] is None
+    ok, _ = rw.terminal_auth_failure(t)
+    assert not ok, "auth terms in plain prose must not trip AUTH_FAIL"
+
+
+def test_terminal_auth_failure_ignores_transient_error(tmp_path):
+    # a trailing 529 stays a transient (RETRY), never AUTH_FAIL.
+    p = _write(tmp_path, _asst("did work"),
+               _asst("API Error: 529 Overloaded. Try again."))
+    t = rw.scan_tail(p)
+    ok, _ = rw.terminal_auth_failure(t)
+    assert not ok
+
+
 if __name__ == "__main__":
     import pytest
 

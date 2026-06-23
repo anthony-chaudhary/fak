@@ -9,10 +9,15 @@ For each watched session it reports one of:
             requests input, with no following user turn -> needs an answer.
   DONE      PID gone AND last transcript record is a clean assistant completion.
   DEAD      PID gone AND last record is an error / mid-tool / abrupt cut.
+  AUTH_FAIL the resume's terminal turn is a login/credit/access wall ("Not logged
+            in / Please run /login", OAuth expired, 401, credit too low, ...). A
+            re-resume on the SAME account can't fix it: the account needs `claude
+            /login` AND a re-home to a healthy account. This is the silent-strand
+            the resume-once ledger would otherwise hide, so it is surfaced loudest.
 
-Sessions classified STALLED or DEAD are written to
+Sessions classified AUTH_FAIL / STALLED / RETRY / DEAD are written to
 tools/_registry/resume_watch_attention.json -- the operator's "look at these"
-list. WORKING/DONE need no action.
+list (AUTH_FAIL also gets its own key there). WORKING/DONE need no action.
 
 The watcher is READ-ONLY over the sessions: it never resumes or re-prompts (that
 would need an account+ledger decision). It exists to keep an eye on the pass and
@@ -33,6 +38,10 @@ import time
 from datetime import datetime, timezone
 
 HERE = os.path.dirname(os.path.abspath(__file__))
+if HERE not in sys.path:
+    sys.path.insert(0, HERE)
+import fleet_session_signals  # noqa: E402  -- shared auth/limit/api signal patterns
+
 REG = os.path.join(HERE, "_registry")
 MANIFEST = os.path.join(REG, "resume_watch_manifest.json")
 ATTENTION = os.path.join(REG, "resume_watch_attention.json")
@@ -127,6 +136,33 @@ def trailing_text(rec: dict) -> str:
     return ""
 
 
+def auth_failure(text: str) -> tuple[bool, str]:
+    """Did this terminal turn fail on a login/credit/access wall the resume can't
+    self-heal? This is the failure mode a re-resume on the SAME account can never
+    fix (the fleet hit it 2026-06-23: gem7-netra resumes wrote 'Not logged in /
+    Please run /login' while the account's interactive sessions kept working off a
+    cached token). Reuses the shared fleet signals so detection matches the
+    planner exactly. Returns (is_auth_fail, human_reason) -- reason names the
+    specific remediation (auth/login required vs credit vs subscription access)."""
+    text = text or ""
+    if fleet_session_signals.is_auth_error(text) or fleet_session_signals.needs_login_prompt(text):
+        return True, fleet_session_signals.auth_block_reason(text)
+    return False, ""
+
+
+def terminal_auth_failure(scan: dict) -> tuple[bool, str]:
+    """AUTH_FAIL iff the transcript's TERMINAL error record is a login/credit/access
+    wall. Reads the ERROR channel only (an injected ``isApiErrorMessage`` / error
+    record), NOT plain assistant prose -- a session that merely *discusses* '/login'
+    or auth in its final turn (e.g. a worker editing the resume tooling itself) is
+    DONE, not auth-failed. This mirrors how fleet_sessions keys auth off the actual
+    failure record, and is the guard that stops the AUTH_FAIL signal crying wolf."""
+    err = scan.get("last_err")
+    if not err:
+        return False, ""
+    return auth_failure(trailing_text(err))
+
+
 GPU_GATE = ("on a cuda node", "run_48", "_on_gpu", "gpu node",
             "hardware-gated", "cuda node", "gated by #47", "on a gpu")
 # explicit "I'm finished, nothing outstanding" -- overrides a GPU_GATE phrase that
@@ -166,6 +202,13 @@ def classify(sid: str, pid: int, prev: dict) -> dict:
                               or "rate" in trailing_text(err).lower()
                               or "api error" in trailing_text(err).lower()))
     asks = bool(asst) and any(k in low for k in ASK) and low.rstrip().endswith("?")
+    # Auth/login/credit/access wall: the resume did NOT take and a re-resume on the
+    # SAME account can never fix it (it needs `claude /login` + a re-home to a healthy
+    # account). Read off the ERROR channel only (not plain prose) so a "Not logged in /
+    # Please run /login" failure record is surfaced distinctly instead of being buried
+    # in the generic DEAD/RETRY bucket -- without flagging a session that merely
+    # discusses auth in its final message.
+    auth_is_fail, auth_reason = terminal_auth_failure(t)
     # a GPU residual only counts when it's the live outcome, not when an explicit
     # "shipped, no further action" verdict closes the turn (then the GPU phrase is
     # just backstory).
@@ -189,6 +232,8 @@ def classify(sid: str, pid: int, prev: dict) -> dict:
 
     if alive and grew:
         status = "WORKING"                 # still actively producing
+    elif auth_is_fail:
+        status = "AUTH_FAIL"               # login/credit/access wall -> needs /login + re-home
     elif transient:
         status = "RETRY"                   # hit a transient API error -> safe to re-resume
     elif err:
@@ -207,6 +252,7 @@ def classify(sid: str, pid: int, prev: dict) -> dict:
     return {"sid": sid, "pid": pid, "alive": alive, "status": status,
             "quiet_min": round(quiet_min, 1), "transcript": tpath,
             "size": size, "mtime": mtime, "records": t["records"],
+            "auth_reason": auth_reason,
             "tail": text[-300:].replace("\n", " ").strip()}
 
 
@@ -232,12 +278,15 @@ def main() -> int:
 
     json.dump(new_state, open(STATE, "w", encoding="utf-8"))
 
-    # RETRY/STALLED/DEAD need an action; GPU_GATED is surfaced for the operator
-    # but is not a failure (the residual is hardware-gated, not stuck).
-    ACT = ("RETRY", "STALLED", "DEAD", "UNKNOWN")
+    # RETRY/STALLED/DEAD need an action; AUTH_FAIL is the loudest -- the resume hit a
+    # login/credit/access wall, so a plain re-resume on the SAME account can't fix it
+    # (it needs `claude /login` AND a re-home to a healthy account); GPU_GATED is
+    # surfaced for the operator but is not a failure (residual is hardware-gated).
+    ACT = ("AUTH_FAIL", "RETRY", "STALLED", "DEAD", "UNKNOWN")
     attention = [r for r in rows if r["status"] in ACT]
     gpu = [r for r in rows if r["status"] == "GPU_GATED"]
-    json.dump({"ts": now_iso(), "attention": attention, "gpu_gated": gpu},
+    auth_fail = [r for r in rows if r["status"] == "AUTH_FAIL"]
+    json.dump({"ts": now_iso(), "attention": attention, "gpu_gated": gpu, "auth_fail": auth_fail},
               open(ATTENTION, "w", encoding="utf-8"), indent=1)
 
     if "--json" in sys.argv:
@@ -248,13 +297,26 @@ def main() -> int:
     c = Counter(r["status"] for r in rows)
     print(f"resume_watch {now_iso()}  " + "  ".join(f"{k}={v}" for k, v in sorted(c.items())))
     for r in sorted(rows, key=lambda x: x["status"]):
-        flag = "  <-- ACTION" if r["status"] in ACT else ("  (gpu)" if r["status"] == "GPU_GATED" else "")
+        if r["status"] == "AUTH_FAIL":
+            flag = "  <-- AUTH FAIL: needs `claude /login` + re-home (NOT a re-resume)"
+        elif r["status"] in ACT:
+            flag = "  <-- ACTION"
+        elif r["status"] == "GPU_GATED":
+            flag = "  (gpu)"
+        else:
+            flag = ""
         print(f"  {r['status']:9} {r['sid'][:8]} pid={r['pid']:<6} {r['disp']:14} "
               f"->{r['target']:14} quiet={r['quiet_min']}m{flag}")
-        if r["status"] in ("STALLED", "RETRY", "GPU_GATED") and r["tail"]:
+        if r["status"] in ("AUTH_FAIL", "STALLED", "RETRY", "GPU_GATED") and r["tail"]:
             print(f"           tail: {r['tail'][:170]}")
+    if auth_fail:
+        print(f"\n{len(auth_fail)} session(s) FAILED RESUME ON AUTH -- a re-resume on the same "
+              f"account WON'T help; the account needs `claude /login`, then re-home to a healthy one:")
+        for r in auth_fail:
+            print(f"  {r['sid'][:8]} on {r.get('target')}: {r.get('auth_reason') or 'auth/login required'}")
     if attention:
-        print(f"\n{len(attention)} session(s) need an action (RETRY=re-resume, STALLED=answer) -> {ATTENTION}")
+        print(f"\n{len(attention)} session(s) need an action (AUTH_FAIL=login+re-home, "
+              f"RETRY=re-resume, STALLED=answer) -> {ATTENTION}")
     if gpu:
         print(f"{len(gpu)} session(s) finished with a GPU-gated residual (operator/hardware) -> see attention file")
     if not attention and not gpu:
