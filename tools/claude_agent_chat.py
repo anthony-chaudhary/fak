@@ -752,6 +752,26 @@ def _register_gateway_teardown(proc: subprocess.Popen) -> None:
             pass
 
 
+# Windows process-creation flag for a DETACHED account-switcher launch.
+# CREATE_NEW_CONSOLE (the historical choice) pops a NEW VISIBLE console window for
+# every launched session — a switcher wave across N accounts flashed N windows on
+# screen. CREATE_NO_WINDOW gives the child its OWN console (so the interactive TUI
+# still renders and an npm ``claude.cmd``/``.bat`` shim, which REQUIRES a console,
+# still runs) but WITHOUT a window — the session runs hidden, no popup. (A bare
+# DETACHED_PROCESS would also hide it, but a .cmd shim dies with no console at all.)
+_CREATE_NO_WINDOW = 0x08000000
+
+
+def detached_creationflags(os_name: str = os.name) -> int:
+    """Windows ``creationflags`` for a detached, *hidden* account-switcher launch.
+
+    Returns CREATE_NO_WINDOW so the spawned Claude Code session survives this
+    launcher AND runs with no visible console window (no popup), while still
+    getting a console of its own — required for an npm ``.cmd`` shim and used by
+    the interactive TUI. Zero off Windows (callers use ``start_new_session``)."""
+    return _CREATE_NO_WINDOW if os_name == "nt" else 0
+
+
 def launch_packet(packet: dict[str, Any], detached: bool = False) -> int:
     gateway: subprocess.Popen | None = None
     if packet.get("glm", {}).get("enabled"):
@@ -768,11 +788,13 @@ def launch_packet(packet: dict[str, Any], detached: bool = False) -> int:
     try:
         if detached:
             if os.name == "nt":
-                creationflags = getattr(subprocess, "CREATE_NEW_CONSOLE", 0)
-                proc = subprocess.Popen(argv, cwd=cwd, env=env, creationflags=creationflags)
+                # CREATE_NO_WINDOW, never CREATE_NEW_CONSOLE: detach the session
+                # WITHOUT popping a visible console window (see detached_creationflags).
+                proc = subprocess.Popen(argv, cwd=cwd, env=env,
+                                        creationflags=detached_creationflags())
             else:
                 proc = subprocess.Popen(argv, cwd=cwd, env=env, start_new_session=True)
-            print(f"launched pid={proc.pid} account={packet['account'].get('tag')}")
+            print(f"launched pid={proc.pid} account={packet['account'].get('tag')} (hidden, no window)")
             # A detached session outlives this process; a launcher-managed gateway
             # cannot follow it, so refuse the combination rather than orphan-wire it.
             if gateway is not None:

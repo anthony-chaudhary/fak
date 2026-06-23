@@ -223,6 +223,24 @@ class ClaudeAgentChatTest(unittest.TestCase):
         self.assertEqual(args.tier, "2")
 
 
+class DetachedLaunchWindowTest(unittest.TestCase):
+    """A detached account-switcher launch must NOT pop a visible console window."""
+
+    _CREATE_NEW_CONSOLE = 0x00000010  # the historical, popup-producing flag
+
+    def test_windows_detached_uses_hidden_console_not_new_console(self) -> None:
+        flags = chat.detached_creationflags("nt")
+        # CREATE_NO_WINDOW => the child gets its own console but no visible window.
+        self.assertEqual(flags, chat._CREATE_NO_WINDOW)
+        self.assertEqual(flags, 0x08000000)
+        # Never the popup-producing CREATE_NEW_CONSOLE.
+        self.assertNotEqual(flags, self._CREATE_NEW_CONSOLE)
+
+    def test_non_windows_uses_no_creationflags(self) -> None:
+        # POSIX detaches via start_new_session; creationflags is a Windows-only concept.
+        self.assertEqual(chat.detached_creationflags("posix"), 0)
+
+
 class GlmBackendResolveTest(unittest.TestCase):
     """resolve_glm_backend: flag > env > built-in Z.ai default, per field."""
 
