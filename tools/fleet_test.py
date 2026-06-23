@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import sys
 import unittest
-from pathlib import Path
+from pathlib import Path, PurePosixPath, PureWindowsPath
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
@@ -57,6 +57,35 @@ class ExecCommandTest(unittest.TestCase):
         self.assertEqual(cmd[0], sys.executable)
         self.assertTrue(cmd[1].replace("\\", "/").endswith("C:/work/fak/tools/fleet_top.py"))
         self.assertEqual(cmd[2:], ["--once"])
+
+
+class PathHasTest(unittest.TestCase):
+    def test_windows_match_is_case_and_trailing_slash_insensitive(self):
+        cur = r"C:\Windows;C:\Users\u\.local\bin\;C:\tools"
+        self.assertTrue(fleet._path_has(cur, PureWindowsPath(r"C:\Users\u\.local\BIN"), sep=";", windows=True))
+
+    def test_absent_entry_is_false(self):
+        cur = r"C:\Windows;C:\tools"
+        self.assertFalse(fleet._path_has(cur, PureWindowsPath(r"C:\Users\u\.local\bin"), sep=";", windows=True))
+
+    def test_posix_is_case_sensitive_and_exact(self):
+        cur = "/usr/bin:/home/u/.local/bin:/bin"
+        self.assertTrue(fleet._path_has(cur, PurePosixPath("/home/u/.local/bin"), sep=":", windows=False))
+        self.assertFalse(fleet._path_has(cur, PurePosixPath("/home/u/.local/BIN"), sep=":", windows=False))
+
+    def test_empty_path_value(self):
+        self.assertFalse(fleet._path_has("", PurePosixPath("/x"), sep=":", windows=False))
+
+
+class EnsureOnPathDryRunTest(unittest.TestCase):
+    def test_already_visible_to_process_is_noop(self):
+        # platform='linux' keeps this hermetic: the POSIX branch short-circuits on the
+        # process PATH (no registry read, no profile write) when the dir is already there.
+        import os
+        first = os.environ.get("PATH", "").split(os.pathsep)[0] or "/usr/bin"
+        res = fleet.ensure_on_path(Path(first), platform="linux", apply=False)
+        self.assertTrue(res["already"])
+        self.assertFalse(res["changed"])
 
 
 class RepoRootTest(unittest.TestCase):

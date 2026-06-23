@@ -19,7 +19,7 @@ Verbs (everything after the verb is passed straight through to the tool):
     resume         account-correct resume commands         tools/fleet_sessions.py resume
     accounts       worker-account availability             tools/fleet_accounts.py
     pane           the full control pane                    tools/fleet_control_pane.py status
-    install        drop a `fleet` command on PATH
+    install        drop a `fleet` command on PATH (and add the bin dir to PATH; --no-path opts out)
     uninstall      remove the installed wrapper
     help           this list
 """
@@ -79,6 +79,86 @@ def exec_command(root: Path, tool: str, argv: list[str]) -> list[str]:
     return [sys.executable, str(root / "tools" / tool), *argv]
 
 
+def _norm_path_entry(value: str, *, windows: bool) -> str:
+    value = value.strip().strip('"').rstrip("\\/")
+    return value.lower() if windows else value
+
+
+def _path_has(path_value: str, bin_dir: Path, *, sep: str, windows: bool) -> bool:
+    """Is bin_dir already one of the entries in a PATH-shaped string? Pure, so the
+    'already there, do nothing' decision is unit-testable without touching the env."""
+    target = _norm_path_entry(str(bin_dir), windows=windows)
+    return any(
+        _norm_path_entry(part, windows=windows) == target
+        for part in (path_value or "").split(sep)
+        if part.strip()
+    )
+
+
+def _ps(expr: str) -> tuple[bool, str]:
+    try:
+        proc = subprocess.run(
+            ["powershell", "-NoProfile", "-NonInteractive", "-Command", expr],
+            capture_output=True, text=True, timeout=25,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return False, ""
+    return proc.returncode == 0, proc.stdout.strip()
+
+
+def _ensure_on_path_windows(bin_dir: Path, *, apply: bool, in_process: bool) -> dict:
+    # Check the PERSISTENT user+machine PATH, not this process's PATH: a Git Bash (or
+    # other) launcher can inject ~/.local/bin into the process env without it being in
+    # the registry, which is what the operator's PowerShell/cmd shells actually read.
+    ok_u, user = _ps("[Environment]::GetEnvironmentVariable('Path','User')")
+    if not ok_u:
+        return {"ok": False, "detail": "could not read the user PATH"}
+    ok_m, machine = _ps("[Environment]::GetEnvironmentVariable('Path','Machine')")
+    persistent = ";".join(p for p in ((machine if ok_m else ""), user) if p)
+    if _path_has(persistent, bin_dir, sep=";", windows=True):
+        return {"ok": True, "already": True, "changed": False, "needs_new_shell": not in_process}
+    if not apply:
+        return {"ok": True, "already": False, "changed": False, "would": True}
+    new = (user.rstrip(";") + ";" + str(bin_dir)) if (user and user.strip()) else str(bin_dir)
+    safe = new.replace("'", "''")
+    set_ok, _ = _ps(f"[Environment]::SetEnvironmentVariable('Path','{safe}','User')")
+    return {"ok": set_ok, "already": False, "changed": set_ok, "needs_new_shell": True,
+            "detail": "" if set_ok else "SetEnvironmentVariable failed"}
+
+
+def _ensure_on_path_posix(bin_dir: Path, *, apply: bool) -> dict:
+    profile = Path.home() / ".profile"
+    existing = profile.read_text(encoding="utf-8", errors="replace") if profile.exists() else ""
+    if str(bin_dir) in existing:
+        return {"ok": True, "already": True, "changed": False, "needs_new_shell": True}
+    if not apply:
+        return {"ok": True, "already": False, "changed": False, "would": True}
+    line = f'export PATH="{bin_dir}:$PATH"  # added by fleet install'
+    prefix = "" if (not existing or existing.endswith("\n")) else "\n"
+    with profile.open("a", encoding="utf-8") as fh:
+        fh.write(prefix + line + "\n")
+    return {"ok": True, "already": False, "changed": True, "needs_new_shell": True,
+            "detail": f"appended to {profile}"}
+
+
+def ensure_on_path(bin_dir: Path, *, platform: str | None = None, apply: bool = True) -> dict:
+    """Make bin_dir reachable as PATH so a bare `fleet` resolves from any shell.
+
+    A no-op if it is already visible to this process (and therefore to the shells it
+    spawns). Otherwise it appends to the persistent user PATH (Windows) or ~/.profile
+    (POSIX); the change is picked up by the NEXT shell, never the current process."""
+    platform = platform or sys.platform
+    windows = platform.startswith("win")
+    bin_dir = Path(bin_dir)
+    in_process = _path_has(os.environ.get("PATH", ""), bin_dir, sep=os.pathsep, windows=windows)
+    if windows:
+        # The persistent registry PATH is the source of truth on Windows, so always ask it.
+        return _ensure_on_path_windows(bin_dir, apply=apply, in_process=in_process)
+    if in_process:
+        return {"ok": True, "already": True, "changed": False, "needs_new_shell": False}
+    return _ensure_on_path_posix(bin_dir, apply=apply)
+
+
 def _run_tool(root: Path, tool: str, argv: list[str]) -> int:
     env = os.environ.copy()
     env.setdefault("PYTHONIOENCODING", "utf-8")
@@ -97,6 +177,7 @@ def _install(root: Path, argv: list[str], *, uninstall: bool) -> int:
     ap.add_argument("--force", action="store_true")
     ap.add_argument("--dry-run", action="store_true")
     ap.add_argument("--bin-dir", type=Path, default=None)
+    ap.add_argument("--no-path", action="store_true", help="install the wrapper but leave PATH alone")
     opts, _ = ap.parse_known_args(argv)
 
     common = dict(name="fleet", bin_dir=opts.bin_dir, system=opts.system,
@@ -112,11 +193,25 @@ def _install(root: Path, argv: list[str], *, uninstall: bool) -> int:
     for row in result.get("installed") or result.get("removed") or []:
         print(f"{row['action']}: {row['path']}")
     if result.get("installed"):
+        if not opts.no_path:
+            _report_path(ensure_on_path(Path(result["bin_dir"]), apply=not opts.dry_run),
+                         Path(result["bin_dir"]))
         print("try:    fleet            # the live fleet view")
         print("        fleet status     # one-shot snapshot")
-        if not result.get("on_path"):
-            print(f"note:   {result['bin_dir']} is not on PATH yet — add it to use `fleet` from anywhere")
     return 0
+
+
+def _report_path(res: dict, bin_dir: Path) -> None:
+    if res.get("already"):
+        tail = "  (open a new terminal)" if res.get("needs_new_shell") else ""
+        print(f"PATH:   {bin_dir} already on PATH{tail}")
+    elif res.get("would"):
+        print(f"PATH:   would add {bin_dir} to your user PATH")
+    elif res.get("changed"):
+        print(f"PATH:   added {bin_dir} to your user PATH — open a NEW terminal, then `fleet` works anywhere")
+    else:
+        print(f"PATH:   could not update automatically ({res.get('detail') or 'unknown'}); "
+              f"add {bin_dir} to PATH yourself")
 
 
 def _print_help() -> None:

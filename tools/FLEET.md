@@ -78,6 +78,10 @@ ATTENTION  2
 `fleet install` writes thin `fleet` wrappers (`.cmd` + `.ps1` on Windows, a shell
 script on POSIX) into `~/.local/bin` (or a system dir with `--system`). The wrappers
 pin `FLEET_ROOT` to this clone and call `tools/fleet.py`, so `fleet` works from any
-directory once that bin dir is on `PATH`. `--dry-run` shows the plan; `fleet uninstall`
-removes them. The installer refuses to clobber a non-`fleet` command of the same name
-unless you pass `--force`.
+directory. It also puts that bin dir on `PATH` for you — appending to the persistent
+user PATH on Windows (the registry value your shells read, not just the current
+process) or to `~/.profile` on POSIX — so a bare `fleet` resolves in the next terminal
+you open. Pass `--no-path` to skip that and manage PATH yourself. `--dry-run` shows the
+plan; `fleet uninstall` removes the wrappers (and leaves PATH untouched, since other
+tools share that bin dir). The installer refuses to clobber a non-`fleet` command of
+the same name unless you pass `--force`.
