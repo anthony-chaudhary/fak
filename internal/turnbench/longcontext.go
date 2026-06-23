@@ -245,8 +245,8 @@ func ProjectLongContext(s ModelShape, sh SessionShape) LongContextCell {
 	// the prefix ×C, C pays it once).
 	var aPrefill, decodePerAgent, ingestPerAgent float64
 	for t := 0; t < T; t++ {
-		Lt := P + t*(D+R) // context length at the START of turn t (before this turn's decode)
-		aPrefill += s.PrefillWork(Lt)        // naive: re-prefill the whole growing context
+		Lt := P + t*(D+R)                     // context length at the START of turn t (before this turn's decode)
+		aPrefill += s.PrefillWork(Lt)         // naive: re-prefill the whole growing context
 		decodePerAgent += s.AppendWork(Lt, D) // decode D tokens appended at Lt
 		if t < T-1 {
 			ingestPerAgent += s.AppendWork(Lt+D, R) // ingest R result tokens after the decode
