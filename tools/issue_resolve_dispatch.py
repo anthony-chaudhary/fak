@@ -217,6 +217,27 @@ def opencode_worker_env(account_dir: str | None, lane: str, workspace: Path,
     return env
 
 
+# Windows process-creation flags for a detached worker.
+#   DETACHED_PROCESS  — the child gets NO console at all (a true daemon).
+#   CREATE_NO_WINDOW  — the child gets a console, but it is HIDDEN (no window).
+# A .cmd/.bat launcher (e.g. opencode.CMD, the npm shim) is executed BY cmd.exe,
+# which REQUIRES a console: under DETACHED_PROCESS the batch wrapper dies at the
+# "Terminate batch job (Y/N)?" prompt producing ZERO output — that is exactly why
+# every dispatched glm/opencode worker was DOA (0-byte log) while the manual,
+# console-attached runs worked. A native launcher (claude) runs fine fully
+# detached, so it keeps DETACHED_PROCESS unchanged.
+_DETACHED_PROCESS = 0x00000008
+_CREATE_NO_WINDOW = 0x08000000
+
+
+def win_creationflags(exe: str) -> int:
+    """The Windows creationflags for spawning ``exe`` detached: a batch-file
+    launcher needs a (hidden) console, a native exe can be fully console-less."""
+    if str(exe).lower().endswith((".cmd", ".bat")):
+        return _CREATE_NO_WINDOW
+    return _DETACHED_PROCESS
+
+
 def spawn_issue_worker(command: list[str], env: dict[str, str], cwd: Path,
                        log_dir: Path, issue: int, lane: str,
                        backend: str) -> dict[str, Any]:
@@ -231,7 +252,7 @@ def spawn_issue_worker(command: list[str], env: dict[str, str], cwd: Path,
     argv = [exe, *command[1:]]
     kwargs: dict[str, Any] = {}
     if os.name == "nt":
-        kwargs["creationflags"] = 0x00000008  # DETACHED_PROCESS
+        kwargs["creationflags"] = win_creationflags(exe)
     else:
         kwargs["start_new_session"] = True
     fh = open(out_log, "w", encoding="utf-8")

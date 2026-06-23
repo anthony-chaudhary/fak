@@ -174,6 +174,22 @@ class BuildWorkerCommandTest(unittest.TestCase):
             mod.build_worker_command("gpt", "x", None)
 
 
+class WinCreationFlagsTest(unittest.TestCase):
+    def test_batch_launcher_gets_hidden_console_not_detached(self) -> None:
+        # Regression: opencode.CMD spawned DETACHED_PROCESS dies at the batch
+        # prompt producing 0 bytes — every glm worker was DOA. A .cmd/.bat needs a
+        # (hidden) console.
+        mod = load()
+        self.assertEqual(mod.win_creationflags(r"C:\npm\opencode.CMD"), mod._CREATE_NO_WINDOW)
+        self.assertEqual(mod.win_creationflags("opencode.cmd"), mod._CREATE_NO_WINDOW)
+        self.assertEqual(mod.win_creationflags("wrap.bat"), mod._CREATE_NO_WINDOW)
+
+    def test_native_launcher_stays_fully_detached(self) -> None:
+        mod = load()
+        self.assertEqual(mod.win_creationflags(r"C:\bin\claude.exe"), mod._DETACHED_PROCESS)
+        self.assertEqual(mod.win_creationflags("/usr/bin/claude"), mod._DETACHED_PROCESS)
+
+
 class BackendRoutingTest(unittest.TestCase):
     SPAWN_OK_OC = {
         "verdict": "SPAWN_OK", "reason": "ok", "cap": 2, "live": 0,
