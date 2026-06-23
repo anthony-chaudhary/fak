@@ -46,7 +46,7 @@ const modPrefix = "github.com/anthony-chaudhary/fak/internal/"
 var tier = map[string]int{
 	"abi": 0,
 
-	"appversion": 1, "blob": 1, "boundarylint": 1, "cachemeta": 1, "canon": 1, "compute": 1, "deletioncert": 1, "demoui": 1, "dgxbridge": 1, "ggufload": 1, "gpulease": 1, "hfhub": 1, "leakcheck": 1, "metalgemm": 1, "metrics": 1, "model": 1, "pathlint": 1, "pathutil": 1, "provenance": 1, "swebench": 1, "urllint": 1, "webbench": 1,
+	"appversion": 1, "blob": 1, "boundarylint": 1, "cachemeta": 1, "canon": 1, "compute": 1, "deletioncert": 1, "demoui": 1, "ggufload": 1, "gpulease": 1, "hfhub": 1, "leakcheck": 1, "metalgemm": 1, "metrics": 1, "model": 1, "pathlint": 1, "pathutil": 1, "provenance": 1, "swebench": 1, "urllint": 1, "webbench": 1,
 	"blobfs": 1, "blobhttp": 1, // durable on-disk / remote-HTTP content-addressed Ref backends; attach to abi like blob (Resolver+PageOutBackend), import only abi+blob+stdlib.
 
 	"adjudicator": 2, "ctxmmu": 2, "engine": 2, "enginecache": 2, "grammar": 2, "kernel": 2,
@@ -805,7 +805,7 @@ func TestFoldSitesOrderByFoldRank(t *testing.T) {
 // behind `cuda` / `darwin && metal` / `vulkan && windows` / `fakmetal`, none of
 // which a default build carries, so their cgo files are constraint-excluded. The
 // context is constructed explicitly (rather than reading the host's CGO_ENABLED /
-// GOOS / GOARCH) so the gate's verdict is the same on every node — a Mac, the DGX,
+// GOOS / GOARCH) so the gate's verdict is the same on every node — a Mac, a GPU server,
 // and this Windows box all judge the SAME default-tag closure.
 func defaultBuildContext() build.Context {
 	ctx := build.Default
