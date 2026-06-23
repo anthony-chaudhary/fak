@@ -90,7 +90,7 @@ func TestGuardDetectProvider(t *testing.T) {
 		{"codex", "openai", true},
 		{"opencode", "openai", true},
 		{"opencode.cmd", "openai", true}, // the Windows .cmd worker
-		{"aider", "", false},             // reads OPENAI_API_BASE, not OPENAI_BASE_URL — left to --env on purpose
+		{"aider", "openai", true},        // reads OPENAI_API_BASE, which guard now injects alongside OPENAI_BASE_URL
 		{"vim", "", false},
 		{"", "", false},
 	}
@@ -120,6 +120,32 @@ func TestResolveGuardProvider(t *testing.T) {
 		if p != tc.wantProvider || auto != tc.wantAutodetect {
 			t.Errorf("resolveGuardProvider(%q,%q) = (%q,%v), want (%q,%v)", tc.flagValue, tc.command, p, auto, tc.wantProvider, tc.wantAutodetect)
 		}
+	}
+}
+
+func TestGuardInjectedEnv(t *testing.T) {
+	const gw = "http://127.0.0.1:8137"
+
+	// Anthropic: exactly one var, the bare host (the client appends /v1/messages).
+	if got := guardInjectedEnv("anthropic", "", gw); len(got) != 1 || got[0] != [2]string{"ANTHROPIC_BASE_URL", gw} {
+		t.Errorf("anthropic injected = %v, want one ANTHROPIC_BASE_URL=%s", got, gw)
+	}
+
+	// OpenAI wire with no --env: BOTH conventional base-URL vars, each carrying /v1, so a
+	// client that reads OPENAI_API_BASE (Aider, LiteLLM) connects as well as one reading
+	// OPENAI_BASE_URL (Codex, OpenCode, the OpenAI SDK).
+	want := [][2]string{{"OPENAI_BASE_URL", gw + "/v1"}, {"OPENAI_API_BASE", gw + "/v1"}}
+	for _, p := range []string{"openai", "gemini", "xai", "other"} {
+		got := guardInjectedEnv(p, "", gw)
+		if len(got) != 2 || got[0] != want[0] || got[1] != want[1] {
+			t.Errorf("%s injected = %v, want %v", p, got, want)
+		}
+	}
+
+	// An explicit --env override yields exactly that one var (no OPENAI_API_BASE alias),
+	// still carrying the /v1 the OpenAI wire needs.
+	if got := guardInjectedEnv("openai", "MY_BASE", gw); len(got) != 1 || got[0] != [2]string{"MY_BASE", gw + "/v1"} {
+		t.Errorf("override injected = %v, want one MY_BASE=%s/v1", got, gw)
 	}
 }
 

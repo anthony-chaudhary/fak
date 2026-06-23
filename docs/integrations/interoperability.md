@@ -72,10 +72,12 @@ your shell untouched:
 fak guard -- claude       # Anthropic wire, your Claude Pro/Max subscription
 fak guard -- codex        # OpenAI wire, inferred from the agent name
 fak guard -- opencode     # OpenAI wire, lowercase-tool floor
+fak guard -- aider        # OpenAI wire, via the injected OPENAI_API_BASE
 ```
 
 An unrecognized agent keeps the Anthropic default, and `--provider` always overrides the
-guess.
+guess. On the OpenAI wire, guard sets both `OPENAI_BASE_URL` and `OPENAI_API_BASE`, so a
+client that reads either one connects.
 
 ## What "connects" honestly means
 

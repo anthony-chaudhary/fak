@@ -389,14 +389,15 @@ func resolveGuardProvider(flagValue, command string) (provider string, autodetec
 
 // guardDetectProvider infers the upstream wire from the wrapped agent's command when the
 // operator passes no --provider, so naming a known agent (`fak guard -- codex`) Just
-// Works without also having to say `--provider openai`. The table is deliberately TIGHT:
-// it lists only the agents fak documents an integration for AND that read the
-// conventional ANTHROPIC_BASE_URL / OPENAI_BASE_URL endpoint variable guardEnvVar
-// injects. An agent that reads a DIFFERENT variable (Aider's OPENAI_API_BASE, an
-// IDE-extension settings panel) is left to an explicit --provider/--env on purpose,
-// rather than autodetected into a base URL it ignores. Matching is on the executable's
-// base name, lowercased, with any directory and a Windows .exe/.cmd/.bat/.ps1/.com
-// launcher suffix stripped, so an absolute path or a wrapped launcher still matches.
+// Works without also having to say `--provider openai`. The table lists agents that read
+// a base-URL variable guard injects: ANTHROPIC_BASE_URL for the Anthropic wire, and
+// OPENAI_BASE_URL plus OPENAI_API_BASE for the OpenAI wire (guard sets both, so Aider,
+// which reads OPENAI_API_BASE rather than OPENAI_BASE_URL, connects too). An agent that
+// reads neither (Goose's split OPENAI_HOST + OPENAI_BASE_PATH, an IDE-extension settings
+// panel) is left to an explicit --provider/--env on purpose, rather than autodetected into
+// a base URL it ignores. Matching is on the executable's base name, lowercased, with any
+// directory and a Windows .exe/.cmd/.bat/.ps1/.com launcher suffix stripped, so an
+// absolute path or a wrapped launcher still matches.
 func guardDetectProvider(command string) (provider string, recognized bool) {
 	base := strings.ToLower(filepath.Base(strings.TrimSpace(command)))
 	switch filepath.Ext(base) {
@@ -406,7 +407,7 @@ func guardDetectProvider(command string) (provider string, recognized bool) {
 	switch base {
 	case "claude", "claude-code":
 		return "anthropic", true
-	case "codex", "opencode":
+	case "codex", "opencode", "aider":
 		return "openai", true
 	default:
 		return "", false
