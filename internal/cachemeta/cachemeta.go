@@ -159,7 +159,14 @@ type Residency struct {
 	Tier  ResidencyTier
 	Owner string
 	Lease string
+	// Share advertises how the resident payload can be handed to another consumer
+	// zero-copy (a coherent CXL region, a shared mmap, an RDMA region, a dma-buf), or
+	// the zero value (ShareCopy) when it must be copied. See hardware.go.
+	Share ShareDescriptor
 }
+
+// ZeroCopy reports whether this residency advertises a zero-copy share capability.
+func (r Residency) ZeroCopy() bool { return r.Share.ZeroCopy() }
 
 type ResidencyTier string
 
