@@ -18,7 +18,25 @@
     "WebSearch",
     "ExitPlanMode",
     "Skill",
-    "SlashCommand"
+    "SlashCommand",
+
+    "bash",
+    "read",
+    "write",
+    "edit",
+    "multiedit",
+    "patch",
+    "apply_patch",
+    "grep",
+    "glob",
+    "list",
+    "ls",
+    "webfetch",
+    "todowrite",
+    "todoread",
+    "task",
+    "skill",
+    "lsp"
   ],
 
   "allow_prefix": [

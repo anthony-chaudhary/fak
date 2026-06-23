@@ -56,6 +56,16 @@ func TestGuardDefaultPolicyDeniesDangerAllowsBenign(t *testing.T) {
 		{"write allowed in-tree", "Write", `{"file_path":"notes.txt","content":"hi"}`, abi.VerdictAllow},
 		{"write into .ssh refused", "Write", `{"file_path":".ssh/authorized_keys","content":"x"}`, abi.VerdictDeny},
 		{"unlisted tool fails closed", "exfiltrate_secrets", `{}`, abi.VerdictDeny},
+
+		// OpenCode (lowercase tool names; camelCase filePath) — the same floor must hold.
+		{"opencode bash rm -rf denied (case-insensitive arg rule)", "bash", `{"command":"rm -rf /tmp/x"}`, abi.VerdictDeny},
+		{"opencode bash sudo denied", "bash", `{"command":"sudo rm"}`, abi.VerdictDeny},
+		{"opencode bash benign allowed", "bash", `{"command":"go test ./..."}`, abi.VerdictAllow},
+		{"opencode read allowed", "read", `{"filePath":"README.md"}`, abi.VerdictAllow},
+		{"opencode write in-tree allowed", "write", `{"filePath":"notes.txt","content":"x"}`, abi.VerdictAllow},
+		{"opencode write into .ssh refused (camelCase filePath)", "write", `{"filePath":".ssh/authorized_keys","content":"x"}`, abi.VerdictDeny},
+		{"opencode edit into .git refused", "edit", `{"filePath":".git/config","oldString":"a","newString":"b"}`, abi.VerdictDeny},
+		{"opencode unlisted tool fails closed", "exfiltrate", `{}`, abi.VerdictDeny},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -136,6 +146,26 @@ func TestGuardLoopbackOnly(t *testing.T) {
 		if got := guardLoopbackOnly(tc.addr); got != tc.want {
 			t.Errorf("guardLoopbackOnly(%q) = %v, want %v", tc.addr, got, tc.want)
 		}
+	}
+}
+
+func TestGuardEnvValue(t *testing.T) {
+	gw := "http://127.0.0.1:8137"
+	// Anthropic clients append "/v1/messages" — the value must be the bare host.
+	if got := guardEnvValue("anthropic", gw); got != gw {
+		t.Errorf("anthropic value = %q, want bare host %q", got, gw)
+	}
+	// OpenAI-compatible clients (OpenCode, Codex, the OpenAI/AI SDKs) treat the value as
+	// ending in /v1 and append "/chat/completions" — so it MUST carry /v1 or the gateway
+	// 404s. This is the bug that made `--provider openai` unusable before.
+	for _, p := range []string{"openai", "gemini", "xai", "other"} {
+		if got := guardEnvValue(p, gw); got != gw+"/v1" {
+			t.Errorf("%s value = %q, want %s/v1", p, got, gw)
+		}
+	}
+	// A trailing slash on the host does not double up.
+	if got := guardEnvValue("openai", gw+"/"); got != gw+"/v1" {
+		t.Errorf("trailing-slash host = %q, want %s/v1", got, gw)
 	}
 }
 

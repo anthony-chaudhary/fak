@@ -193,12 +193,13 @@ func cmdGuard(argv []string) {
 	//    never the parent shell, never settings.json. A `claude` in another terminal is
 	//    untouched.
 	injectVar := guardEnvVar(up, *envName)
+	injectVal := guardEnvValue(up, gwURL)
 	child := exec.Command(command[0], command[1:]...)
 	child.Stdin, child.Stdout, child.Stderr = os.Stdin, os.Stdout, os.Stderr
-	child.Env = append(os.Environ(), injectVar+"="+gwURL)
+	child.Env = append(os.Environ(), injectVar+"="+injectVal)
 
 	if !*quiet {
-		printGuardBanner(os.Stderr, gwURL, up, resolvedBase, floorSource, injectVar, logLabel, os.Getenv("FAK_AUDIT_JOURNAL"), command)
+		printGuardBanner(os.Stderr, gwURL, up, resolvedBase, floorSource, injectVar, injectVal, logLabel, os.Getenv("FAK_AUDIT_JOURNAL"), command)
 		if up == "anthropic" && *apiKeyEnv == "" && os.Getenv("ANTHROPIC_API_KEY") == "" {
 			fmt.Fprintln(os.Stderr, "fak guard: note — ANTHROPIC_API_KEY is unset; Claude Code needs an API key when pointed at a custom")
 			fmt.Fprintln(os.Stderr, "           base URL (subscription OAuth is not forwarded). Export your key, or pass --policy/--provider.")
@@ -263,6 +264,21 @@ func guardEnvVar(provider, override string) string {
 	default:
 		return "OPENAI_BASE_URL"
 	}
+}
+
+// guardEnvValue is the base-URL VALUE injected into the child — and the two wires
+// disagree on the /v1 suffix, which is the difference between a working session and a
+// 404. Anthropic clients (Claude Code) append "/v1/messages" to ANTHROPIC_BASE_URL, so
+// it must be the bare host. OpenAI-compatible clients (OpenCode, Codex, the OpenAI SDK,
+// the Vercel AI SDK) treat OPENAI_BASE_URL as ending in "/v1" and append
+// "/chat/completions" — so the value MUST carry the /v1 the gateway serves its OpenAI
+// routes under. Without it the client calls "<host>/chat/completions" and the gateway
+// (which exposes "/v1/chat/completions") 404s.
+func guardEnvValue(provider, gwURL string) string {
+	if provider == "anthropic" {
+		return gwURL
+	}
+	return strings.TrimRight(gwURL, "/") + "/v1"
 }
 
 // guardWaitHealthy blocks until the gateway answers 200 on /healthz, the Serve
@@ -330,12 +346,12 @@ func guardLoopbackOnly(addr string) bool {
 // into the child, and WHERE TO WATCH IT — the live metrics/debug endpoints, the durable
 // audit journal, and the structured log stream. It goes to stderr so it never pollutes a
 // `-p` JSON run the child writes to stdout.
-func printGuardBanner(w io.Writer, gwURL, provider, baseURL, floorSource, injectVar, logLabel, journalPath string, command []string) {
+func printGuardBanner(w io.Writer, gwURL, provider, baseURL, floorSource, injectVar, injectVal, logLabel, journalPath string, command []string) {
 	fmt.Fprintf(w, "fak guard — kernel-adjudicated: %s\n", strings.Join(command, " "))
 	fmt.Fprintf(w, "  gateway    : %s   (in-process; torn down when the command exits)\n", gwURL)
 	fmt.Fprintf(w, "  upstream   : %s   (via the %s wire)\n", baseURL, provider)
 	fmt.Fprintf(w, "  floor      : %s\n", floorSource)
-	fmt.Fprintf(w, "  wired via  : %s   (child only — your shell is untouched)\n", injectVar)
+	fmt.Fprintf(w, "  wired via  : %s=%s   (child only — your shell is untouched)\n", injectVar, injectVal)
 	// Observability: the live scrape surfaces are on the gateway URL above (unauth on
 	// loopback); the audit journal and log stream survive the session only if asked for.
 	fmt.Fprintf(w, "  metrics    : %s/metrics  ·  %s/debug/vars  ·  %s/v1/fak/events\n", gwURL, gwURL, gwURL)
