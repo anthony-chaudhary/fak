@@ -124,12 +124,26 @@ func CheckResidentClaim(claim ResidentClaim, manifest KVManifest) LookupVerdict 
 // served. Imported "market" KV needs an attributable producer (Producer AND its
 // ProducerKeyID) and a declared AccessPolicy — digest/identity alone is never enough
 // to admit it (acceptance §2.4). Returns ("", true) when the manifest is admissible.
+//
+// It also enforces that the manifest carries the COMPLETE model-bound binding the
+// import contract requires (acceptance §2.4 criterion 1): source-text digest, model,
+// tokenizer, precision, position convention, integrity checksum, and a positive span
+// length. A KV artifact missing any of these axes is not actually model-bound — it
+// could not be a HIT against a resident span without silently dropping an identity
+// dimension — so it is refused (incomplete_binding) before lowering, never admitted
+// as "performance material" it cannot back. AdapterID is exempt: "" is the valid
+// base-model binding, not a missing axis.
 func ValidateManifest(m KVManifest) (LookupReason, bool) {
 	if m.Producer == "" || m.ProducerKeyID == "" {
 		return ReasonMissingProvenance, false
 	}
 	if m.AccessPolicy == "" {
 		return ReasonAccessControlReq, false
+	}
+	if m.SourceDigest == "" || m.ModelID == "" || m.TokenizerID == "" ||
+		m.Precision == "" || m.PositionConvention == PositionUnknown ||
+		m.IntegrityChecksum == "" || m.Tokens <= 0 {
+		return ReasonIncompleteBinding, false
 	}
 	return "", true
 }

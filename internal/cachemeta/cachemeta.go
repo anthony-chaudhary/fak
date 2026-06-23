@@ -266,6 +266,7 @@ const (
 	ReasonUnsignedArtifact   LookupReason = "unsigned_artifact"
 	ReasonMissingProvenance  LookupReason = "missing_provenance"
 	ReasonAccessControlReq   LookupReason = "access_control_required"
+	ReasonIncompleteBinding  LookupReason = "incomplete_binding"
 	ReasonIndexMismatch      LookupReason = "index_mismatch"
 	ReasonNonCausalIndex     LookupReason = "non_causal_index"
 )

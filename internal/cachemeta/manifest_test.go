@@ -170,6 +170,48 @@ func TestCheckResidentClaimRefusesMissingAccessControl(t *testing.T) {
 	}
 }
 
+// Acceptance §2.4 criterion 1: imported KV is admissible only with the COMPLETE
+// model-bound binding. A manifest missing any required binding axis (source digest,
+// model, tokenizer, precision, position convention, integrity checksum, positive span
+// length) is refused before lowering — it cannot be admitted as performance material
+// it cannot back. AdapterID="" (base model) is a valid binding, not a missing axis.
+func TestValidateManifestRequiresCompleteBinding(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		mutate func(*KVManifest)
+	}{
+		{"no source digest", func(m *KVManifest) { m.SourceDigest = "" }},
+		{"no model", func(m *KVManifest) { m.ModelID = "" }},
+		{"no tokenizer", func(m *KVManifest) { m.TokenizerID = "" }},
+		{"no precision", func(m *KVManifest) { m.Precision = "" }},
+		{"no position convention", func(m *KVManifest) { m.PositionConvention = PositionUnknown }},
+		{"no integrity checksum", func(m *KVManifest) { m.IntegrityChecksum = "" }},
+		{"zero span length", func(m *KVManifest) { m.Tokens = 0 }},
+		{"negative span length", func(m *KVManifest) { m.Tokens = -1 }},
+	} {
+		m := sampleManifest()
+		tc.mutate(&m)
+		if reason, ok := ValidateManifest(m); ok || reason != ReasonIncompleteBinding {
+			t.Fatalf("%s: want refuse(incomplete_binding), got reason=%q ok=%v", tc.name, reason, ok)
+		}
+		// The lowering checker must surface the same refusal, not a HIT — even when the
+		// resident claim mirrors the (incomplete) manifest exactly.
+		v := CheckResidentClaim(claimFor(m), m)
+		if v.Kind != LookupFault || v.Reason != ReasonIncompleteBinding {
+			t.Fatalf("%s: CheckResidentClaim must FAULT(incomplete_binding), got %+v", tc.name, v)
+		}
+	}
+}
+
+// A base-model adapter ("" = base) is a complete binding, not a missing axis.
+func TestValidateManifestAdmitsBaseModelAdapter(t *testing.T) {
+	m := sampleManifest()
+	m.AdapterID = ""
+	if reason, ok := ValidateManifest(m); !ok || reason != "" {
+		t.Fatalf("base-model adapter must be admissible, got reason=%q ok=%v", reason, ok)
+	}
+}
+
 // claimFor builds a fully-matching, signature-verified resident claim for a
 // manifest so a test can isolate the metadata gate from the binding/signature gates.
 func claimFor(m KVManifest) ResidentClaim {
