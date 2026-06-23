@@ -879,6 +879,9 @@ func routeForMetrics(path string) string {
 		if strings.HasPrefix(path, "/v1/fak/") {
 			return "/v1/fak/*"
 		}
+		if strings.HasPrefix(path, "/v1beta/") {
+			return "/v1beta/*"
+		}
 		return "other"
 	}
 }

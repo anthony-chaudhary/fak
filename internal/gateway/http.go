@@ -35,6 +35,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/v1/moderations", s.handleModerations)
 	mux.HandleFunc("/v1/messages", s.handleAnthropicMessages)
 	mux.HandleFunc("/v1/messages/count_tokens", s.handleAnthropicCountTokens)
+	mux.HandleFunc("/v1beta/", s.handleGeminiGenerateContent)
 	mux.HandleFunc("/v1/fak/syscall", s.handleFakSyscall)
 	mux.HandleFunc("/v1/fak/adjudicate", s.handleFakAdjudicate)
 	mux.HandleFunc("/v1/fak/admit", s.handleFakAdmit)
@@ -167,22 +168,30 @@ func (s *Server) withAuth(next http.Handler) http.Handler {
 	})
 }
 
-// gatewayCredential extracts the presented secret from either of the two auth
-// schemes a fak gateway fronts. The OpenAI/fak-native surfaces send
+// gatewayCredential extracts the presented secret from any of the auth schemes a
+// fak gateway fronts. The OpenAI/fak-native surfaces send
 // "Authorization: Bearer <tok>"; the native Anthropic surface (/v1/messages) is
 // driven by clients — Claude Code, the Anthropic SDKs — that authenticate with the
-// "x-api-key: <tok>" header instead. Accepting both is what lets an authenticated
-// (non-loopback) gateway serve Claude Code over ANTHROPIC_BASE_URL; without the
-// x-api-key arm every Claude Code request 401s even though the gateway speaks the
-// Anthropic wire. A bare Authorization value with no "Bearer " scheme is still
-// rejected (no scheme-stripping leniency); both schemes compare against the same
-// single secret in constant time at the call site.
+// "x-api-key: <tok>" header instead; the native Gemini surface
+// (/v1beta/models/{model}:generateContent) is driven by clients — Gemini CLI, the
+// google-genai SDKs — that authenticate with "x-goog-api-key: <tok>" (or, for raw
+// REST, "?key=<tok>"). Accepting all of them is what lets an authenticated
+// (non-loopback) gateway serve any native client wire over its base-URL redirect;
+// without the matching arm every such client 401s even though the gateway speaks
+// its wire. All schemes compare against the same single secret in constant time at
+// the call site.
 func gatewayCredential(r *http.Request) (string, bool) {
 	if tok, ok := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer "); ok {
 		return tok, true
 	}
 	if k := r.Header.Get("X-Api-Key"); k != "" {
 		return k, true
+	}
+	if g := r.Header.Get("X-Goog-Api-Key"); g != "" {
+		return g, true
+	}
+	if q := r.URL.Query().Get("key"); q != "" {
+		return q, true
 	}
 	return "", false
 }
