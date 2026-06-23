@@ -187,30 +187,35 @@ Legend: **[SHIPPED]** real & proven · **[PARTIAL]** real but incomplete ·
 ## 7. The child map / sequencing
 
 Ordered so each rung stands on a shipped one. None of these land in this doc.
+**Tracked as epic #529** (children #530–#535); each rung is gated per [§7a](#7a-safety--off-by-default-until-ready-feature-flag-gating).
 
-1. **`internal/polymodel` — the deterministic core.** ✅ *this work.* Residency pool,
-   serial decode lane, speculative-accept arithmetic, ensemble drafter selection.
-   GPU-free, witness-proven. **Runnable witness:** `cmd/polymodelbench -selfcheck`
-   hosts 10 synthetic models under a budget, drives the serial decode lane over real
+1. **`internal/polymodel` — the deterministic core.** ✅ *shipped.* Residency pool,
+   serial decode lane, speculative-accept arithmetic (`AcceptGreedy` + `AcceptTree`),
+   ensemble drafter selection, `CanShare`, the `FAK_POLYMODEL` gate. GPU-free,
+   witness-proven. **Runnable witness:** `cmd/polymodelbench -selfcheck` hosts 10
+   synthetic models under a budget, drives the serial decode lane over real
    `model.Session` decode, and proves greedy speculative decode is **token-identical to
    plain greedy** even when an adversarial draft forces a rollback every round — the
    end-to-end proof that the rejected-draft `KVCache.Evict` rollback is bit-exact.
-2. **Caller-side decode-lane scheduler over `StepBatch`/`Session`.** Wire `polymodel`
-   to actually drive a multi-model decode loop (single backend) — the
+2. **Caller-side decode-lane scheduler over `StepBatch`/`Session`** — **#530**. Wire
+   `polymodel` to actually drive a multi-model decode loop (single backend) — the
    continuous-batching seam the `batch.go:1147` comment invites.
-3. **Multi-model residency on a backend.** Lift the single-`Default` assumption
-   (`modelengine.go`): a pool of `*model.Model`, weight-byte budget + LRU page-out,
-   reusing `polymodel.Pool` as the policy.
-4. **A `ProvisionalSink` + `internal/spec` implementation.** Implement the frozen ABI
-   seam: drive `Promote`/`Rollback` against `KVCache.Evict`, with `polymodel.AcceptGreedy`
-   as the accept decision.
-5. **Cross-model prefill share (verdict-layer).** Lift the exact-ModelID barrier for a
-   declared-compatible family in `cachemeta` — the cheap structural unlock from [§4].
-   The DECISION half ships now as `polymodel.CanShare` (same `Family` + byte-identical
-   `PrefixDigest` ⇒ the reused KV is bit-identical, so reuse is lossless); the remaining
-   work is wiring it into `cachemeta`'s lookup verdict and the `KVCache.Clone` splice.
-6. **Bench harness numbers.** Gate every speedup claim on a measured run (#44): E vs
-   draft cost, decode-lane utilization, residency hit-rate.
+3. **Multi-model residency on a backend** — **#531**. Lift the single-`Default`
+   assumption (`modelengine.go`): a pool of `*model.Model`, weight-byte budget + LRU
+   page-out, reusing `polymodel.Pool` as the policy.
+4. **A `ProvisionalSink` + `internal/spec` implementation** — **#532**. Implement the
+   frozen ABI seam: drive `Promote`/`Rollback` against `KVCache.Evict`, with
+   `polymodel.AcceptGreedy`/`AcceptTree` as the accept decision (the native verify/accept
+   #23 and #284 defer). The **verify EXECUTION** (single-pass batched + tree-attention
+   masks) is the throughput half — **#533**.
+5. **Cross-model prefill share (verdict-layer)** — **#534**. Lift the exact-ModelID
+   barrier for a declared-compatible family in `cachemeta` — the cheap structural unlock
+   from [§4]. The DECISION half ships now as `polymodel.CanShare` (same `Family` +
+   byte-identical `PrefixDigest` ⇒ the reused KV is bit-identical, so reuse is lossless);
+   the remaining work is wiring it into `cachemeta`'s lookup verdict and the
+   `KVCache.Clone` splice.
+6. **Bench harness numbers** — **#535**. Gate every speedup claim on a measured run
+   (#44): E vs draft cost, decode-lane utilization, residency hit-rate.
 
 ## 7a. Safety — off by default until ready (feature-flag gating)
 
