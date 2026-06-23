@@ -164,7 +164,7 @@ graph-path panic) — filed, not hidden.
 
 **Before this session:** `Session.requireGLMDsaSession()` *panicked* on any `s.Backend != nil` —
 GLM-MoE-DSA refused to run on *any* accelerated `compute.Backend`; CPU-resident only (issue **#86**;
-`docs/model-arch-seam-status-487.md` GLM-5.2 row: accel decode "no — #86").
+`docs/notes/model-arch-seam-status-487.md` GLM-5.2 row: accel decode "no — #86").
 
 **This session (`93119eb`, on-device `cf9d9a1`):** the guard now PERMITS a backend, and GLM-5.2's
 **dense GEMMs route through it** — the **MoE/FFN experts + router** (a new `backendKernel` swapped

@@ -26,7 +26,7 @@ them on a GPU and record the number.
 
 | Piece | State | Evidence |
 |---|---|---|
-| Native quant GEMM (Q4_K/Q8_0), fp16 HGEMM, fused flash attention | **built + GPU-gated** | `internal/compute/cuda.go:291` `Caps{UploadDtype:true, FusedAttn:true}`; gates `cuda_quant_test.go` / `cuda_fp16_test.go` / `cuda_flash_test.go`; [parity tracker §3.1](../gpu-parity-tracking-480.md) |
+| Native quant GEMM (Q4_K/Q8_0), fp16 HGEMM, fused flash attention | **built + GPU-gated** | `internal/compute/cuda.go:291` `Caps{UploadDtype:true, FusedAttn:true}`; gates `cuda_quant_test.go` / `cuda_fp16_test.go` / `cuda_flash_test.go`; [parity tracker §3.1](../notes/gpu-parity-tracking-480.md) |
 | Q4_K GGUF load + device-resident path (no f32 materialization) | **landed** | `internal/ggufload/quant_q4k_loader.go` (`AddResidentQ4K`); `fak serve --gguf` + `FAK_Q4K=1` |
 | In-kernel serving from the native engine | **landed** | `fak serve --gguf --engine inkernel --backend cuda` (no `--base-url` ⇒ the model serves from fak's own decode) |
 | fak-native coding agent (the "fleet" runner) | **landed + witnessed (no model)** | `internal/swebench/fleet.go`; `fleet_test.go` proves the loop mechanics on a temp git repo |
@@ -125,6 +125,6 @@ pure-kernel proof.**
 - Coding agent: `internal/swebench/fleet.go` (+ `fleet_test.go`); the gateway adjudication
   proxy that drops denied calls: `internal/gateway/http.go`.
 - Policy: `examples/swebench-coding-agent-policy.json` (validated with `fak serve --policy-check`).
-- Kernel levers + acceptance gates: [`gpu-parity-tracking-480.md`](../gpu-parity-tracking-480.md);
+- Kernel levers + acceptance gates: [`gpu-parity-tracking-480.md`](../notes/gpu-parity-tracking-480.md);
   `tools/run_48{4,5,6}_acceptance_on_gpu.sh`.
 - Written on a host with no GPU; the resolve-rate cell is `pending GPU run` by design.

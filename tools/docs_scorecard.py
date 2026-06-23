@@ -99,7 +99,7 @@ CORE_DOCS: list[str] = [
     "docs/explainers/addressable-kv-cache.md",
     "docs/explainers/sota-optimizations.md",
     "EXPLAINER-trust-floor-two-lenses-2026-06-17.md",
-    "docs/SCALING-LAWS-OF-AGENTS-2026-06-19.md",
+    "docs/notes/SCALING-LAWS-OF-AGENTS-2026-06-19.md",
     # reference
     "fak/ARCHITECTURE.md",
     "fak/POLICY.md",

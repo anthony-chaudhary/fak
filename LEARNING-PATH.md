@@ -1007,7 +1007,7 @@ go test ./internal/deletioncert/ -count=1 -timeout 120s -run 'TestMintVerifyRoun
 - Explain why reread rate is the only safe term to attack, and only when legality permits
 - Explain why the measured 60.3x session result is not a '60x faster model' but a deletion of duplicate setup re-reads
 
-**Read:** [`docs/SCALING-LAWS-OF-AGENTS-2026-06-19.md`](docs/SCALING-LAWS-OF-AGENTS-2026-06-19.md)
+**Read:** [`docs/notes/SCALING-LAWS-OF-AGENTS-2026-06-19.md`](docs/notes/SCALING-LAWS-OF-AGENTS-2026-06-19.md)
 
 **Lab:**
 ```bash
@@ -1025,7 +1025,7 @@ go run ./cmd/longctxbench  (compute the contention-free work floor; compare naiv
 - Distinguish physical (residency) coherence from semantic (legality) coherence
 - Give an example where a hit passing every hardware coherence check is still the wrong answer (a git push invalidating cached git status)
 
-**Read:** [`docs/SCALING-LAWS-OF-AGENTS-2026-06-19.md`](docs/SCALING-LAWS-OF-AGENTS-2026-06-19.md)
+**Read:** [`docs/notes/SCALING-LAWS-OF-AGENTS-2026-06-19.md`](docs/notes/SCALING-LAWS-OF-AGENTS-2026-06-19.md)
 
 **Lab:**
 ```bash
@@ -1043,7 +1043,7 @@ Work Scenario B from the doc on paper: a byte-coherent hot KV span after a git p
 - Compute a Qwen2.5-7B KV geometry and show a 100k-token cache is ~143x too big for L2
 - Identify why the binding constraint at city scale is KV residency, not FLOPs, and name two meters that would prove a system scales
 
-**Read:** [`docs/SCALING-LAWS-OF-AGENTS-2026-06-19.md`](docs/SCALING-LAWS-OF-AGENTS-2026-06-19.md)
+**Read:** [`docs/notes/SCALING-LAWS-OF-AGENTS-2026-06-19.md`](docs/notes/SCALING-LAWS-OF-AGENTS-2026-06-19.md)
 
 **Lab:**
 ```bash

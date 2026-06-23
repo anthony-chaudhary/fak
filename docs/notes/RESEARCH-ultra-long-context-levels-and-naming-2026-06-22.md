@@ -13,7 +13,7 @@ Scope: the thinking behind the ultra-long-context proof (the exact work floor in
 *what-next*: the levels of the regime, the lever each level leans on, where compaction and
 compression plug in, and a verdict on the names. Measured/shipped is separated from frontier.
 
-Companion: [scaling-laws thesis](../SCALING-LAWS-OF-AGENTS-2026-06-19.md) (this note is the
+Companion: [scaling-laws thesis](SCALING-LAWS-OF-AGENTS-2026-06-19.md) (this note is the
 ultra-long-context specialization of its regimes 2 and 3).
 
 ---

@@ -13,8 +13,8 @@ Measured claims are separated from frontier hypotheses.
 
 Use with:
 
-- [README](../README.md)
-- [Performance spectrum visual](../visuals/41-performance-spectrum.svg)
+- [README](../../README.md)
+- [Performance spectrum visual](../../visuals/41-performance-spectrum.svg)
 - Session value-stack deck — `SESSION-VALUE-STACK-DECK.md` (private companion — not published)
 - Fleet value projection — `FLEET-VALUE-PROJECTION.md` (private companion — not published)
 - Implications memo — `IMPLICATIONS-fak-agentic-os-2026-06-18.md` (private companion — not published)
@@ -31,9 +31,9 @@ The better first-order law is:
 agent work ~= agents x turns x working-set size x reread rate x legality checks
 ```
 
-![Scaling laws of agents](../visuals/42-agent-scaling-laws.svg)
+![Scaling laws of agents](../../visuals/42-agent-scaling-laws.svg)
 
-![Calculated frontier spectrum](../visuals/44-agent-frontier-spectrum-data-chart.svg)
+![Calculated frontier spectrum](../../visuals/44-agent-frontier-spectrum-data-chart.svg)
 
 Where:
 
@@ -164,9 +164,9 @@ share with), a **5-agent fleet each >100k ≈ 40×+ vs naive and ≈ 4× vs a wa
 the cross-agent win **B/C rises monotonically with the shared-prefix fraction toward the agent
 count** — why the standing ~2–4× bound (small prefix) and the larger agent-city win are the same law
 at different prefix fractions. See `internal/turnbench/longcontext.go`, `cmd/longctxbench`, and
-[`docs/benchmarks/ULTRA-LONG-CONTEXT-RESULTS.md`](benchmarks/ULTRA-LONG-CONTEXT-RESULTS.md);
+[`docs/benchmarks/ULTRA-LONG-CONTEXT-RESULTS.md`](../benchmarks/ULTRA-LONG-CONTEXT-RESULTS.md);
 the levels, levers, and naming are worked out in
-[`docs/notes/RESEARCH-ultra-long-context-levels-and-naming-2026-06-22.md`](notes/RESEARCH-ultra-long-context-levels-and-naming-2026-06-22.md).
+[`docs/notes/RESEARCH-ultra-long-context-levels-and-naming-2026-06-22.md`](RESEARCH-ultra-long-context-levels-and-naming-2026-06-22.md).
 
 ---
 

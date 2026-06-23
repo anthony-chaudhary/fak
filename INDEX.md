@@ -56,10 +56,10 @@ Each turns a fuzzy goal into a number you can drive toward zero.
 
 Working docs that track a specific effort. Dated by design; they age out.
 
-- [Scaling laws of agents (2026-06-19)](docs/SCALING-LAWS-OF-AGENTS-2026-06-19.md) — when the cache win kicks in as a fleet grows.
-- [GPU parity tracking (#480)](docs/gpu-parity-tracking-480.md) — bringing the GPU path to parity.
-- [Model-arch seam status (#487)](docs/model-arch-seam-status-487.md) — the model-architecture seam work.
-- [Trust-floor decomposition (#492)](docs/trust-floor-decomposition-492.md) — splitting the trust floor into checkable parts.
+- [Scaling laws of agents (2026-06-19)](docs/notes/SCALING-LAWS-OF-AGENTS-2026-06-19.md) — when the cache win kicks in as a fleet grows.
+- [GPU parity tracking (#480)](docs/notes/gpu-parity-tracking-480.md) — bringing the GPU path to parity.
+- [Model-arch seam status (#487)](docs/notes/model-arch-seam-status-487.md) — the model-architecture seam work.
+- [Trust-floor decomposition (#492)](docs/notes/trust-floor-decomposition-492.md) — splitting the trust floor into checkable parts.
 
 ## Plans & media
 

@@ -13,7 +13,7 @@ description: "The fused agent kernel's reread-elimination win at the >100k-token
 > sweeps prove the reuse win *up to ~7k-token contexts* — because the naive arm's re-prefill is
 > O(T²) and intractable to run live much further (it is exactly why `sessionbench` already
 > *computes* its arm A). But the regime the kernel exists for — the "long agent session" and
-> "agent city" of the [scaling-laws thesis](../SCALING-LAWS-OF-AGENTS-2026-06-19.md), where each
+> "agent city" of the [scaling-laws thesis](../notes/SCALING-LAWS-OF-AGENTS-2026-06-19.md), where each
 > agent's context crosses **100k tokens** — was never measured. This document closes that gap the
 > honest way: not by faking a 100k wall-clock, but by proving the **work the fused kernel
 > eliminates** as a closed-form, contention-free **floor** derived from the session shape and the

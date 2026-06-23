@@ -83,7 +83,7 @@ All measured claims in [`fak/BENCHMARK-AUTHORITY.md`](../../BENCHMARK-AUTHORITY.
 ## Methodology
 
 ### General Benchmark Approach
-**[`docs/SCALING-LAWS-OF-AGENTS-2026-06-19.md`](../SCALING-LAWS-OF-AGENTS-2026-06-19.md)**
+**[`docs/notes/SCALING-LAWS-OF-AGENTS-2026-06-19.md`](../notes/SCALING-LAWS-OF-AGENTS-2026-06-19.md)**
 - Scaling thesis for agent systems
 - Why agents scale differently from chat
 - Saturation points and measurement needs
