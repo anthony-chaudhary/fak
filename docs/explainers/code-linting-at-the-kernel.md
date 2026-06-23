@@ -11,7 +11,7 @@ keywords:
   - tensor code
   - kernel boundary
   - SWE-bench
-date: 2026-06-22
+date: 2026-06-23
 ---
 
 # Linting agent code at the kernel
@@ -84,6 +84,51 @@ context, which a single agent-written file in isolation does not have, and would
 false positives on perfectly good code. The parse/compile tier is the one with no
 false positives, which is exactly the tier you want gating an automated loop.
 
+## A worked example: the write that fixes itself
+
+Say a coding agent is editing a Go file and fumbles a method signature. It
+calls `write_file` with content that stops mid-declaration:
+
+```go
+package store
+
+func (s *Store) Put(
+```
+
+In a normal loop that file just sits there. The agent moves on, and three turns
+later a `go build` fails. Now it has to stop, read a compiler error, trace its
+way back to this file, and spend a turn recovering — having long since paged the
+mistake out of its working context.
+
+With `--lint-writes` on, the SWE-bench fleet runs the Go pack the moment the
+write lands and staples the result onto the tool output the agent already gets
+back:
+
+```
+codelint: the file you just wrote has errors — fix them before continuing:
+store.go:3:8: error: expected ')', found 'EOF' (go/GO_PARSE)
+store.go:3:8: error: expected 'IDENT', found 'EOF' (go/GO_PARSE)
+```
+
+The agent reads the parse error on the same turn it made it, while the file is
+still in front of it, and re-issues a correct write. The breakage never reaches
+the build. And the write still landed — the diagnostic is advice clipped to the
+result, not a veto — so a checker that is ever wrong cannot wedge the loop.
+
+You can watch the pack do exactly this with no model in the loop:
+
+```bash
+printf 'package store\n\nfunc (s *Store) Put(\n' > /tmp/broken.go
+go run ./cmd/fak codelint /tmp/broken.go
+# codelint: 1 file(s) checked, 5 finding(s) (5 error, 0 warning)
+# /tmp/broken.go:3:8: error: expected ')', found 'EOF' (go/GO_PARSE)
+# ...
+echo "exit $?"   # -> 1
+```
+
+A clean file is silent and exits 0; a file in a language no pack owns is left
+unlinted, never an error. That is the whole contract.
+
 ## Where it's wired
 
 Two surfaces, today:
@@ -104,3 +149,21 @@ broken write is refused with a `MALFORMED` reason the model can act on — is a 
 next rung. It would route the lint through the kernel's existing out-of-process
 verification seam rather than forcing exec onto the decide path, keeping the rule
 above intact. The pieces are in place; the leaf is the part that was missing.
+
+## Try every pack
+
+```bash
+go build ./cmd/fak
+./fak codelint --list
+# codelint can lint: cuda, go, json, python
+./fak codelint --json ./path/to/changes   # machine-readable findings, e.g. for a CI gate
+```
+
+Go and JSON always have an opinion, because the Go standard library parses both
+with no external tool. Python and CUDA report for real wherever `python3` or
+`nvcc` is on PATH and stay quiet where they are not, so the one command is safe
+to drop into any host or CI image.
+
+To see where this sits in the kernel's design — why feeding errors back at the
+write boundary is the concrete payoff of the write gate — work through FAK 318 in
+the [learning path](https://github.com/anthony-chaudhary/fak/blob/main/LEARNING-PATH.md).
