@@ -83,6 +83,7 @@ front page.
 - [On-demand context KV reuse (2026-06-19)](docs/notes/ON-DEMAND-CONTEXT-KV-REUSE-2026-06-19.md)
 - [Cloud/VM/remote-control agent landscape + fak strategy (2026-06-23)](docs/notes/RESEARCH-cloud-vm-remote-agent-landscape-2026-06-23.md)
 - [idea-scout triage: Doberman-Core as prior art (2026-06-23)](docs/notes/RESEARCH-doberman-prior-art-triage-2026-06-23.md)
+- [idea-scout triage: 'When AUC 0.998 Is Not Enough' — probe-AUC is not detection; evidence for detector-is-not-the-floor (2026-06-23)](docs/notes/RESEARCH-probe-auc-evaluation-protocol-triage-2026-06-23.md)
 - [Git operations in the kernel prefilter — what's possible (2026-06-22)](docs/notes/RESEARCH-git-in-kernel-prefilters-2026-06-22.md)
 - [Grammar-constrained tool-call decoding, upstream vs downstream (2026-06-22)](docs/notes/RESEARCH-grammar-constrained-tool-call-decoding-2026-06-22.md)
 - [idea-scout triage: Tool-Guard / isolated planning — a threat axis fak does not yet gate (2026-06-23)](docs/notes/RESEARCH-tool-guard-isolated-planning-triage-2026-06-23.md)
