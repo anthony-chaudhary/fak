@@ -47,6 +47,62 @@ var SecretPatterns = []*regexp.Regexp{
 	regexp.MustCompile(`(?i)(token|secret|api[_-]?key|bearer|password|passwd)["'\s:=]{1,4}[A-Za-z0-9+/_-]{20,}`),
 }
 
+// combinedSecret is the single alternation over every SecretPatterns source.
+// Regex alternation is exactly OR, so combinedSecret.MatchString(v) is true iff
+// SOME individual pattern matches v — a drop-in for the per-pattern loop, but it
+// scans each view ONCE (one linear NFA pass) instead of len(SecretPatterns)
+// separate backtracking runs that each re-scan from every position. (Secret
+// screening on this path was ~60% of the fleet/turn workload's CPU, almost all in
+// regexp backtracking; collapsing 10 passes to 1 is the fix.)
+//
+// Each source is wrapped in a NON-CAPTURING group so its inline (?i) flag stays
+// scoped to that one alternative and can never leak case-insensitivity onto a
+// case-SENSITIVE pattern (e.g. the AWS `AKIA` prefix must stay uppercase-only).
+// Built FROM SecretPatterns, so adding a pattern to the slice automatically
+// extends the combined matcher and the two can never drift; the equivalence
+// (combined ≡ any-of-loop, including the flag scoping) is proven over a corpus in
+// canon_test.go.
+var combinedSecret = func() *regexp.Regexp {
+	alts := make([]string, len(SecretPatterns))
+	for i, re := range SecretPatterns {
+		alts[i] = "(?:" + re.String() + ")"
+	}
+	return regexp.MustCompile(strings.Join(alts, "|"))
+}()
+
+// secretAnchorsCI / secretAnchorsCS are the cheap NECESSARY-condition literals for
+// combinedSecret: every SecretPatterns entry begins with (or, for the keyword rule,
+// requires) a mandatory literal run, so a view can match SOME entry only if it
+// contains at least one anchor — case-insensitively for the (?i) patterns, case
+// sensitively for the rest. The gate therefore has ZERO false negatives: a view
+// with no anchor provably cannot match, so mightMatchSecret lets Scan skip the
+// expensive backtracking regex on the overwhelming common case (no credential in
+// the body). MUST cover every SecretPatterns entry; TestCombinedSecretEquivalence
+// proves it (a positive per pattern + lowercased-twin negatives for the
+// case-SENSITIVE prefixes, which must NOT be matched case-insensitively).
+var (
+	secretAnchorsCI = []string{"sk-", "token", "secret", "api", "bearer", "password", "passwd"}
+	secretAnchorsCS = []string{"AKIA", "ASIA", "AGPA", "AIDA", "AROA", "AIza", "ghp_", "gho_", "ghu_", "ghs_", "ghr_", "github_pat_", "xox", "-----BEGIN ", "eyJ"}
+)
+
+// mightMatchSecret reports whether v COULD match combinedSecret — a fast,
+// allocation-light over-approximation. False is conclusive (no SecretPatterns entry
+// can match, so the regex is safe to skip); true means "run the regex to decide".
+func mightMatchSecret(v string) bool {
+	for _, a := range secretAnchorsCS {
+		if strings.Contains(v, a) {
+			return true
+		}
+	}
+	lv := strings.ToLower(v)
+	for _, a := range secretAnchorsCI {
+		if strings.Contains(lv, a) {
+			return true
+		}
+	}
+	return false
+}
+
 // InjectionMarkers are the prompt-injection lexical tells, matched on the
 // lower-cased canonical views (so spacing/case/obfuscation is already undone).
 var InjectionMarkers = []string{
@@ -183,13 +239,8 @@ func Scan(body []byte) Findings {
 	var f Findings
 
 	for _, v := range []string{norm, dec, rev} {
-		for _, re := range SecretPatterns {
-			if re.MatchString(v) {
-				f.Secret = true
-				break
-			}
-		}
-		if f.Secret {
+		if mightMatchSecret(v) && combinedSecret.MatchString(v) {
+			f.Secret = true
 			break
 		}
 	}

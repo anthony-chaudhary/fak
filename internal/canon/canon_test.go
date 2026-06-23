@@ -75,3 +75,60 @@ func TestNormalizeUndoesObfuscation(t *testing.T) {
 		t.Fatalf("homoglyph not normalized to ascii: %q", got)
 	}
 }
+
+// anySecretPattern is the pre-optimization reference: the literal per-pattern loop
+// Scan used to run. combinedSecret must match a view IFF this oracle does.
+func anySecretPattern(v string) bool {
+	for _, re := range SecretPatterns {
+		if re.MatchString(v) {
+			return true
+		}
+	}
+	return false
+}
+
+// TestCombinedSecretEquivalence proves the perf optimization changed nothing: the
+// single alternation regex (one NFA pass) accepts a view exactly when the old
+// 10-regex loop did. The corpus carries a positive for every pattern, benign
+// negatives, AND the adversarial case-sensitivity probes that would fail if the
+// per-alternative (?:…) wrapper did not scope each inline (?i) flag — e.g. the
+// uppercase-only AWS/JWT/GitHub prefixes must NOT match their lowercased twins.
+func TestCombinedSecretEquivalence(t *testing.T) {
+	corpus := []string{
+		// one positive per pattern (case as the pattern requires)
+		"sk-abcdef0123456789abcdef0123",
+		"sk-proj-abcdef0123456789",
+		"AKIAZ4QF7K2NXP9LMQ8R",
+		"ASIAZ4QF7K2NXP9LMQ8R",
+		"AIzaSyD-9tT8d_xQ2mPaLk7vRz0nW4cYh3bUeKfG",
+		"ghp_ABCDEFG0aZbYcXdWeVuTs9R8q7P6o5",
+		"github_pat_11ABCDEFG0aZbYcXdWeVuTs9R8q7P6o5",
+		"xoxb-1234567890-abcdefghij",
+		"-----BEGIN RSA PRIVATE KEY-----",
+		"eyJhbGciOiJIUzI1Ni.eyJzdWIiOiIxMjM0.dozjgNryP4J3jVm",
+		`bearer  AbCdEf0123456789AbCdEf01`,
+		// adversarial: lowercased twins of the case-SENSITIVE prefixes must NOT match
+		// (proves the (?i) of the sk-/keyword patterns never leaks across the | ).
+		"akiaz4qf7k2nxp9lmq8r",
+		"aizasyd-9tt8d_xq2mpalk7vrz0nw4cyh3bukfg",
+		"GHP_ABCDEFG0AZBYCXDWEVUTS9R8Q7P6O5",
+		"-----begin rsa private key-----",
+		"EYJHBGCIOIJIUZI1NI.EYJZDWIIOIIXMJM0.DOZJGNRYP4J3JVM",
+		// benign / high-entropy-but-not-a-secret negatives
+		"commit da39a3ee5e6b4b0d3255bfef95601890afd80709 fixed the build",
+		"The refund policy allows a full refund within 24 hours.",
+		"color #1a2b3c and id 0xDEADBEEF were used",
+		"",
+		"plain ascii with no credential whatsoever",
+	}
+	for _, v := range corpus {
+		want := anySecretPattern(v)
+		// The exact fast path Scan now runs: skip the regex unless an anchor is
+		// present. Must equal the old loop for every input — a divergence here is a
+		// real secret-detection regression (false negative if got<want).
+		got := mightMatchSecret(v) && combinedSecret.MatchString(v)
+		if got != want {
+			t.Errorf("fast secret path disagrees with per-pattern loop on %q: fast=%v loop=%v (anchor=%v)", v, got, want, mightMatchSecret(v))
+		}
+	}
+}
