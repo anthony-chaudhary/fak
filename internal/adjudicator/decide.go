@@ -129,6 +129,13 @@ type Adjudicator struct {
 	// so the floor's per-call cost grew with total policy size, not the call's own
 	// rule count.
 	argByTool map[string][]ArgPredicate
+	// authored is the per-run ledger of agent-authored script paths (#543): the set
+	// of scripts THIS agent wrote earlier in the run, used to recognize a later
+	// `python helper.py` as a self-synthesized-tool invocation rather than an opaque
+	// binary exec (see synthtool.go). A sync.Map gives a lock-free concurrent set
+	// alongside the policy RWMutex; its zero value is a ready empty ledger, so New
+	// need not initialize it. Cleared at a task boundary via ResetRun.
+	authored sync.Map
 }
 
 // New builds an adjudicator with the given policy.
@@ -142,6 +149,20 @@ func (a *Adjudicator) SetPolicy(p Policy) {
 	a.policy = p
 	a.argByTool = indexArgPredicates(p.ArgPredicates)
 	a.mu.Unlock()
+}
+
+// ResetRun clears the per-run synthesized-tool ledger (#543). The authored-script
+// set is scoped to ONE agent run: a long-lived adjudicator (the registered Default
+// singleton, shared across runs) calls this at a task boundary so a script authored
+// in a prior run does not carry over and tighten an unrelated later exec. A
+// per-run adjudicator built with New(policy) starts with an empty ledger, so it
+// needs no reset. Over-retention is fail-safe (it only ever tightens), so a missed
+// reset never opens the floor — it is hygiene, not a security boundary.
+func (a *Adjudicator) ResetRun() {
+	a.authored.Range(func(k, _ any) bool {
+		a.authored.Delete(k)
+		return true
+	})
 }
 
 // DeniedTools returns the names of tools the policy provably refuses BY NAME (the
@@ -276,6 +297,27 @@ func (a *Adjudicator) Adjudicate(ctx context.Context, c *abi.ToolCall) abi.Verdi
 			Payload: abi.WitnessPayload{Claim: g},
 		}
 	}
+
+	// SYNTHESIZED-TOOL invocation (#543): an exec of a script THIS agent authored
+	// earlier this run is a self-synthesized tool, not an opaque binary. A
+	// `python helper.py` carries no write verb / no inline-eval flag / no `>`, so
+	// commandSelfModify above waves it through even when its command line reaches a
+	// guarded tree. Bind the synth-tool to the agent's envelope: treat it as
+	// write-shaped so one that reaches a guarded glob is denied SELF_MODIFY exactly
+	// as the equivalent direct write is — a self-written tool can do no more than a
+	// direct adjudicated call. Bounded disclosure: the witness names only the glob.
+	if g := synthToolSelfModify(args, &a.authored, p.SelfModifyGlobs); g != "" {
+		return abi.Verdict{
+			Kind:    abi.VerdictDeny,
+			Reason:  abi.ReasonSelfModify,
+			By:      "monitor",
+			Payload: abi.WitnessPayload{Claim: g},
+		}
+	}
+	// Record agent-authored scripts (the ledger half) so the NEXT exec is recognized
+	// as a synth-tool. Placed AFTER the self-modify deny rungs, so a write into a
+	// guarded tree (already denied above) never lands in the ledger.
+	noteAuthoredScript(args, c.Tool, &a.authored, p.SelfModifyGlobs)
 
 	// ARG-LEVEL value predicates (issue #9): the floor gates argument VALUES, not
 	// just the tool name. A constrained arg that fails its predicate is a PROVABLE
