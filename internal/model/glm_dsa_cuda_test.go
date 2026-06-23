@@ -10,11 +10,13 @@ import (
 )
 
 // TestCUDAGLMMoeDsaBackendForward is the on-device #86 (partial) witness: a lean (Q8-resident)
-// GLM-MoE-DSA Prefill with the cuda backend runs GLM-5.2's MoE/FFN experts+router and the vocab head
-// through k_q8_gemm on the GPU (backendKernel + glmDsaHead), while the DSA index-scoring + sparse
-// attention stay host-resident. It must match the all-host CPU Q8 forward argmax-exact within the
-// recorded Approx cosine floor (k_q8_gemm's reduction order differs from the host qMatRows). A skip
-// (no reachable GPU) is NOT a pass. Run on an sm_80+ node via tools/dgx_glm_gpu_witness.sh.
+// GLM-MoE-DSA Prefill with the cuda backend runs GLM-5.2's MoE/FFN experts+router, the vocab head,
+// AND the DSA attention's dense projections (q_a/q_b, kv_a/kv_b, indexer wq_b/wk/weights_proj,
+// o_proj — mat threaded into glmDsaAttentionStep) through k_q8_gemm on the GPU, while only the
+// sparse DSA glue (index-score dots, top-k, sparse softmax/ΣwV) + KV stay host-resident. It must
+// match the all-host CPU Q8 forward argmax-exact within the recorded Approx cosine floor
+// (k_q8_gemm's reduction order differs from the host qMatRows). A skip (no reachable GPU) is NOT a
+// pass. Run on an sm_80+ node via tools/dgx_glm_gpu_witness.sh.
 func TestCUDAGLMMoeDsaBackendForward(t *testing.T) {
 	be, ok := compute.Lookup("cuda")
 	if !ok {
@@ -50,7 +52,7 @@ func TestCUDAGLMMoeDsaBackendForward(t *testing.T) {
 		t.Fatalf("GLM-MoE-DSA cuda-backend forward cosine %.6f < %.4f vs CPU Q8", c, floor)
 	}
 	aCPU, aCu := glmDsaArgmax(lCPU), glmDsaArgmax(lCu)
-	t.Logf("GLM-MoE-DSA forward with MoE/FFN+head GEMMs on cuda backend (k_q8_gemm): cosine=%.6f argmax cpu=%d cuda=%d tier=%s class=%s",
+	t.Logf("GLM-MoE-DSA forward with MoE/FFN+head + DSA attention projections on cuda backend (k_q8_gemm): cosine=%.6f argmax cpu=%d cuda=%d tier=%s class=%s",
 		c, aCPU, aCu, be.Tier(), be.Class())
 	if aCPU != aCu {
 		t.Fatalf("GLM-MoE-DSA cuda-backend argmax %d != CPU Q8 argmax %d (cosine=%.6f)", aCu, aCPU, c)
