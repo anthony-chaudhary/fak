@@ -381,6 +381,35 @@ func (m *Model) glmDsaAttendCached(cache *glmDsaKVCache, layer, pos int, query [
 		return nil, false
 	}
 	scale := float32(1.0 / math.Sqrt(float64(qkHead)))
+	attnConcat := m.glmDsaSparseAttend(cache, layer, query, selected, nH, qkHead, vHead, scale, mat)
+	ap := layerPrefix(layer) + "self_attn."
+	out := mat.mul(ap+"o_proj.weight", mat.prep(attnConcat), H, nH*vHead)
+	addOptionalBias(out, m.tensorOptional(ap+"o_proj.bias"))
+	return out, true
+}
+
+// glmDsaSparseAttend computes the GLM-DSA attention output over the already-SELECTED causal
+// keys: per head, softmax(scale·dot(q_h, k_h))·v_h. When mat is a backendKernel whose backend
+// advertises device sparse attention (compute.DSASparseBackend — the cpu-ref and, on the GPU,
+// k_dsa_sparse_attend), it gathers the selected K/V rows contiguous and runs the attention math
+// ON THE KERNEL; otherwise it runs the byte-for-byte host loop. The selection itself (which keys)
+// is host-computed and fixed before this point, so the device path attends the SAME keys — its
+// only divergence is f32 reduction order (the Approx class), keeping the forward argmax-exact.
+// The host fallback is the exact loop glmDsaAttendCached carried before the device seam, so any
+// session without a sparse-capable backend is unchanged.
+func (m *Model) glmDsaSparseAttend(cache *glmDsaKVCache, layer int, query []float32, selected []int, nH, qkHead, vHead int, scale float32, mat matKernel) []float32 {
+	if sk, ok := mat.(dsaSparseKernel); ok {
+		nSel := len(selected)
+		selK := make([]float32, nSel*nH*qkHead)
+		selV := make([]float32, nSel*nH*vHead)
+		for i, keyPos := range selected {
+			copy(selK[i*nH*qkHead:(i+1)*nH*qkHead], cache.K[layer][keyPos*nH*qkHead:(keyPos+1)*nH*qkHead])
+			copy(selV[i*nH*vHead:(i+1)*nH*vHead], cache.V[layer][keyPos*nH*vHead:(keyPos+1)*nH*vHead])
+		}
+		if out, ok := sk.sparseAttend(query, selK, selV, nSel, nH, qkHead, vHead, scale); ok {
+			return out
+		}
+	}
 	attnConcat := make([]float32, nH*vHead)
 	for h := 0; h < nH; h++ {
 		qh := query[h*qkHead : (h+1)*qkHead]
@@ -399,10 +428,7 @@ func (m *Model) glmDsaAttendCached(cache *glmDsaKVCache, layer, pos int, query [
 			}
 		}
 	}
-	ap := layerPrefix(layer) + "self_attn."
-	out := mat.mul(ap+"o_proj.weight", mat.prep(attnConcat), H, nH*vHead)
-	addOptionalBias(out, m.tensorOptional(ap+"o_proj.bias"))
-	return out, true
+	return attnConcat
 }
 
 func glmDsaPositions(n int) []int {

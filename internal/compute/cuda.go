@@ -123,6 +123,22 @@ const (
 // Do not read a pass — or a speedup — from this value alone.
 const cudaFlashAttnCosineMin = 0.999
 
+// cudaDsaSparseAttnCosineMin is the cuda backend's RECORDED Approx cosine floor for the GLM-MoE-DSA
+// sparse-attention kernel (k_dsa_sparse_attend) — the device-vs-cpuref-f32 cosine a witness must
+// clear. The kernel computes the SAME math as model.glmDsaAttendCached — softmax(scale·q·k) then ΣwV,
+// over the host-SELECTED keys — only reordered into the same online-softmax form as the flash kernel.
+// Crucially, the key SELECTION (the f64 index-score dots + top-k) is computed HOST-side and handed in
+// as gathered rows, so the device attends the SAME keys as the reference: there is no risk of a flipped
+// top-k entry, and the ONLY difference from cpuref is f32 reduction order — the same class of drift as
+// the flash lane, with no narrowed operand. The floor is therefore set at the SAME 0.999 the flash and
+// full-forward gates use (a conservative recorded value; in isolation the cosine sits far tighter).
+//
+// IMPORTANT (honest handoff, identical to the constants above): this RECORDS the threshold; it does NOT
+// assert the path passes it. The realized cosine is measured on a CUDA node by the GLM-DSA on-device
+// witness (TestCUDAGLMMoeDsaBackendForward, run via tools/dgx_glm_gpu_witness.sh); the win32 build host
+// has no CUDA toolkit / GPU. Do not read a pass from this value alone.
+const cudaDsaSparseAttnCosineMin = 0.999
+
 // q8DeviceBlock is the Q8_0 per-block size the device narrow-at-H2D quant uses (llama.cpp block_q8_0
 // = 32, the cpuref default). The resident weight carries it in QuantSpec.Block so the GEMM kernel
 // reconstructs nblk = in/block; `in` must be divisible by it.
@@ -749,6 +765,23 @@ func (c *cudaBackend) Attention(q Tensor, kv KVStore, layer int, causal bool, gr
 	C.fcuda_flash_attention_f32(c.cf(q),
 		(*C.float)(ck.K[layer].ptr), (*C.float)(ck.V[layer].ptr),
 		c.cf(out), C.int(nPos), C.int(ck.maxPos), C.int(nH), C.int(nKV), C.int(hd), C.float(scale))
+	return out
+}
+
+// DSASparseAttend runs GLM-MoE-DSA's sparse attention (model.glmDsaAttendCached's inner loop) on the
+// device via k_dsa_sparse_attend: per query head, softmax(scale·q·selK)·selV over the nSel host-SELECTED
+// keys. q/selK/selV arrive device-resident (the model uploads the query + the host-gathered selected K/V
+// rows); selK is [nSel,nH*qkHead], selV [nSel,nH*vHead] (qkHead and vHead differ under MLA). It is the
+// optional compute.DSASparseBackend capability — the cuda backend advertises it, so a GLM-5.2 forward on
+// this backend runs its attention math on the pure GPU kernel, not host-resident. Approx vs the cpuref
+// reference (cudaDsaSparseAttnCosineMin); the selection (index scores + top-k) is host-side, so the
+// device attends the same keys and the divergence is only f32 reduction order.
+func (c *cudaBackend) DSASparseAttend(q, selK, selV Tensor, nSel, nH, qkHead, vHead int, scale float32) Tensor {
+	cudaMu.Lock()
+	defer cudaMu.Unlock()
+	out, _ := c.devTr([]int{nH * vHead}, F32)
+	C.fcuda_dsa_sparse_attend_f32(c.cf(q), c.cf(selK), c.cf(selV), c.cf(out),
+		C.int(nSel), C.int(nH), C.int(qkHead), C.int(vHead), C.float(scale))
 	return out
 }
 

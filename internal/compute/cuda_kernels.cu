@@ -567,6 +567,68 @@ extern "C" void fcuda_flash_attention_f32(const float *dQ, const float *dK, cons
   k_flash_attention<<<nH, FLASH_THREADS, shmem, g_stream>>>(dQ, dK, dV, dOut, nPos, nH, nKV, hd, scale);
 }
 
+// ---- GLM-MoE-DSA sparse attention over the host-selected key set ------------------
+// model.glmDsaAttendCached's inner loop on the device. GLM-5.2's attention is SPARSE: a learned
+// indexer picks the top-k keys a query attends, and the softmax(scale·q·k)·ΣwV runs over only
+// that selected set. The selection (the f64 index scores + top-k) is computed HOST-side and the
+// selected K/V rows are gathered contiguous, so this kernel attends exactly the same keys the
+// host loop would — its only divergence is the f32 reduction order (Approx, cudaDsaSparseAttnCosineMin).
+// Two things differ from k_flash_attention: (1) it streams the nSel GATHERED selected rows (per
+// position the gather laid all nH heads contiguous: head h at i*nH*kd + h*kd for K, i*nH*vd + h*vd
+// for V), not a contiguous causal window; (2) MLA's key width (kd = qkNope+qkRope) and value width
+// (vd) DIFFER, so it carries both instead of one hd. Same online-softmax form (running max/sum/acc),
+// so no scores[nSel] row is ever materialized. One block per query head; FLASH_THREADS threads split
+// the dims; the only scratch is per-block shared memory (the query row + a reduction row).
+__global__ void k_dsa_sparse_attend(const float *Q, const float *selK, const float *selV, float *Out,
+                                    int nSel, int nH, int kd, int vd, float scale) {
+  int h = blockIdx.x;
+  if (h >= nH) return;
+  const float *qh = Q + (size_t)h * kd;
+  extern __shared__ float smem[];
+  float *qs = smem;            // [kd]            : query row cached once in shared
+  float *red = smem + kd;      // [FLASH_THREADS] : dot-product reduction staging
+  int tid = threadIdx.x;
+  for (int d = tid; d < kd; d += FLASH_THREADS) qs[d] = qh[d];
+  __syncthreads();
+  // online-softmax running state; acc[k] owns value dim d = tid + k*FLASH_THREADS, m/l replicated.
+  float m = -1e30f, l = 0.f;
+  float acc[FLASH_ACC_MAX];
+#pragma unroll
+  for (int k = 0; k < FLASH_ACC_MAX; k++) acc[k] = 0.f;
+  for (int i = 0; i < nSel; i++) {
+    const float *ki = selK + (size_t)i * nH * kd + (size_t)h * kd;
+    float partial = 0.f;
+    for (int d = tid; d < kd; d += FLASH_THREADS) partial += qs[d] * ki[d];
+    red[tid] = partial;
+    __syncthreads();
+    for (int s = FLASH_THREADS / 2; s > 0; s >>= 1) {
+      if (tid < s) red[tid] += red[tid + s];
+      __syncthreads();
+    }
+    float sc = red[0] * scale;        // every thread reads the reduced dot
+    __syncthreads();                  // WAR: finish all red[0] reads before the next key reuses red
+    float mNew = fmaxf(m, sc);
+    float corr = expf(m - mNew);      // 0 on the first key (m = -inf): clears the empty acc
+    float p = expf(sc - mNew);
+    l = l * corr + p;
+    const float *vi = selV + (size_t)i * nH * vd + (size_t)h * vd;
+    int k = 0;
+    for (int d = tid; d < vd; d += FLASH_THREADS, k++) acc[k] = acc[k] * corr + p * vi[d];
+    m = mNew;
+  }
+  float invL = l > 0.f ? 1.f / l : 0.f;
+  int k = 0;
+  for (int d = tid; d < vd; d += FLASH_THREADS, k++) Out[(size_t)h * vd + d] = acc[k] * invL;
+}
+// fcuda_dsa_sparse_attend_f32 launches the sparse-attend kernel: one block per query head,
+// FLASH_THREADS threads, dynamic shared memory for the query row + the reduction row (sized on
+// the KEY width kd). No per-call global scratch (the online form needs no nSel-sized buffer).
+extern "C" void fcuda_dsa_sparse_attend_f32(const float *dQ, const float *dSelK, const float *dSelV,
+                                            float *dOut, int nSel, int nH, int kd, int vd, float scale) {
+  size_t shmem = ((size_t)kd + FLASH_THREADS) * sizeof(float);
+  k_dsa_sparse_attend<<<nH, FLASH_THREADS, shmem, g_stream>>>(dQ, dSelK, dSelV, dOut, nSel, nH, kd, vd, scale);
+}
+
 // ---- argmax (first index of the max value — cpuref tie-break) -------------------
 __global__ void k_argmax(const float *L, int n, int *outIdx) {
   __shared__ float vbest[256];

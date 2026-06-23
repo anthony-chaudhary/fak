@@ -699,6 +699,44 @@ func (k backendKernel) mul(name string, x any, out, in int) []float32 {
 	return y
 }
 
+// dsaSparseKernel is the OPTIONAL device path for GLM-MoE-DSA's sparse attention compute
+// (the per-head softmax(scale·q·k)·V over the host-selected keys). glmDsaAttendCached
+// type-asserts its matKernel for it and falls back to the host loop when absent — so only a
+// backendKernel whose compute.Backend implements compute.DSASparseBackend (the cpu-ref, and
+// the cuda backend via k_dsa_sparse_attend) takes the device path; residentKernel and a
+// backend without the capability leave the attention math byte-for-byte host-resident. The
+// KEY SELECTION (index scores + top-k) is computed host-side and handed in via the gathered
+// selK/selV, so the device's only divergence is the f32 reduction order over the same keys.
+type dsaSparseKernel interface {
+	// sparseAttend runs the device sparse attention over nSel gathered selected keys/values
+	// for one query position. q is [nH*qkHead]; selK [nSel,nH*qkHead]; selV [nSel,nH*vHead].
+	// It returns the [nH*vHead] attnConcat and ok=false (caller falls back to host) when the
+	// backend does not advertise compute.DSASparseBackend.
+	sparseAttend(q, selK, selV []float32, nSel, nH, qkHead, vHead int, scale float32) ([]float32, bool)
+}
+
+// sparseAttend routes GLM-DSA's sparse attention to the compute.Backend when it advertises
+// DSASparseBackend: it uploads the query + the host-gathered selected K/V rows, runs the
+// device op (q8/f32 -> k_dsa_sparse_attend on the cuda backend, the pure GPU kernel), and
+// reads the [nH*vHead] result back. A backend without the capability returns ok=false so the
+// caller keeps the host loop. Like backendKernel.mul this copies host↔device per call
+// (correctness-first); a fully device-resident DSA cache is the next slice.
+func (k backendKernel) sparseAttend(q, selK, selV []float32, nSel, nH, qkHead, vHead int, scale float32) ([]float32, bool) {
+	be := k.s.Backend
+	sb, ok := be.(compute.DSASparseBackend)
+	if !ok {
+		return nil, false
+	}
+	qt := be.Upload(compute.NewF32(be, []int{nH * qkHead}, q), compute.F32)
+	kt := be.Upload(compute.NewF32(be, []int{nSel * nH * qkHead}, selK), compute.F32)
+	vt := be.Upload(compute.NewF32(be, []int{nSel * nH * vHead}, selV), compute.F32)
+	out := be.Read(sb.DSASparseAttend(qt, kt, vt, nSel, nH, qkHead, vHead, scale))
+	if len(out) != nH*vHead {
+		panic("model: backendKernel sparseAttend result length mismatch")
+	}
+	return out, true
+}
+
 // glmDsaWeightHAL uploads a resident GLM projection weight to the backend (cached in halW), mirroring
 // residentMatRows's dtype dispatch on the upload side: a q8-resident weight uploads codes+scales
 // (k_q8_gemm, pure — needs cuda.go uploadQ8Resident), an f32 weight uploads f32 (backend f32 GEMM).

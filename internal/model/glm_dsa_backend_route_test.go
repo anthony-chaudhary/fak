@@ -16,12 +16,33 @@ import (
 // not perturb numerics (the argmax check below pins that).
 type recordingBackend struct {
 	compute.Backend
-	mu     sync.Mutex
-	shapes map[[2]int]int // [out,in] -> call count
+	mu          sync.Mutex
+	shapes      map[[2]int]int // [out,in] -> MatMul call count
+	sparseCalls int            // DSASparseAttend call count (the sparse-attention device op)
+	sparseSel   int            // total selected keys handed to DSASparseAttend (proves real work, not an empty call)
 }
 
 func newRecordingBackend(be compute.Backend) *recordingBackend {
 	return &recordingBackend{Backend: be, shapes: map[[2]int]int{}}
+}
+
+// DSASparseAttend records that GLM-DSA's sparse attention reached the backend device op (rather
+// than staying host-resident in glmDsaAttendCached) and delegates to the wrapped backend. It
+// makes recordingBackend itself a compute.DSASparseBackend, so the model's type-assert routes
+// the sparse attend here — direct, author-independent evidence the attention math ran on the
+// backend. Transparent: it forwards to the wrapped backend's exact arithmetic.
+func (r *recordingBackend) DSASparseAttend(q, selK, selV compute.Tensor, nSel, nH, qkHead, vHead int, scale float32) compute.Tensor {
+	r.mu.Lock()
+	r.sparseCalls++
+	r.sparseSel += nSel
+	r.mu.Unlock()
+	return r.Backend.(compute.DSASparseBackend).DSASparseAttend(q, selK, selV, nSel, nH, qkHead, vHead, scale)
+}
+
+func (r *recordingBackend) sparse() (calls, sel int) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.sparseCalls, r.sparseSel
 }
 
 func (r *recordingBackend) record(w compute.Tensor) {
@@ -113,4 +134,61 @@ func TestGLMMoeDsaBackendRoutesAttentionProjections(t *testing.T) {
 	}
 	t.Logf("GLM-DSA attention projections on backend %q: all 8 reached MatMul; argmax-exact (%d), max|Δ|=%.3e vs all-host",
 		rec.Name(), aBE, d)
+}
+
+// TestGLMMoeDsaBackendRoutesSparseAttention is the witness that GLM-5.2's DSA SPARSE-ATTENTION
+// compute — the per-head softmax(scale·q·k)·V over the top-k selected keys, the last piece of the
+// attention sublayer that stayed host-resident after the projections moved to the backend — now
+// executes on the compute.Backend via the DSASparseBackend seam (on the cuda backend:
+// k_dsa_sparse_attend, the pure GPU kernel). A recordingBackend wrapping cpu-ref proves the sparse
+// attend reached be.DSASparseAttend (real work: sparseSel > 0 selected keys), and the forward stays
+// argmax-exact vs the all-host reference — because the key SELECTION (index scores + top-k) is
+// host-computed, the device attends the SAME keys, so its only divergence is f32 reduction order.
+// What remains host-resident is now only the genuinely sparse SELECTION (the f64 index-score dots +
+// top-k) and the O(topK) key gather — the attention math itself is on the kernel.
+func TestGLMMoeDsaBackendRoutesSparseAttention(t *testing.T) {
+	path, cfg := writeTinyGLMDsaSafetensors(t)
+	m, err := LoadSafetensors(path, cfg)
+	if err != nil {
+		t.Fatalf("LoadSafetensors: %v", err)
+	}
+	if !m.Cfg.isGLMMoeDsa() {
+		t.Fatalf("model family = %q, want glm_moe_dsa", m.Cfg.archFamilyKey())
+	}
+	prompt := []int{3, 17, 5, 23}
+
+	rec := newRecordingBackend(compute.Default())
+	if _, ok := compute.Backend(rec).(compute.DSASparseBackend); !ok {
+		t.Fatalf("recordingBackend over %q is not a DSASparseBackend — sparse attend would fall back to host", rec.Name())
+	}
+	sBE := m.NewBackendSession(rec)
+	if sBE.Backend == nil {
+		t.Fatalf("NewBackendSession produced a nil-backend session")
+	}
+	lBE := sBE.Prefill(prompt)
+
+	// The sparse attention must have run on the backend (not host), over real selected keys.
+	calls, sel := rec.sparse()
+	if calls == 0 {
+		t.Fatalf("GLM-DSA sparse attention never reached the backend DSASparseAttend (still host-resident)")
+	}
+	if sel == 0 {
+		t.Fatalf("GLM-DSA sparse attention reached the backend but over 0 selected keys (empty/no-op routing)")
+	}
+
+	// Routing correctness: the backend forward (sparse attend on cpu-ref) must match all-host argmax-exact.
+	lCPU := m.NewSession().Prefill(prompt)
+	if len(lCPU) != cfg.VocabSize || len(lBE) != cfg.VocabSize {
+		t.Fatalf("logits shape cpu=%d be=%d want vocab=%d", len(lCPU), len(lBE), cfg.VocabSize)
+	}
+	aCPU, aBE := glmDsaArgmax(lCPU), glmDsaArgmax(lBE)
+	if aCPU != aBE {
+		t.Fatalf("GLM-DSA backend (incl. sparse attention) argmax %d != CPU argmax %d", aBE, aCPU)
+	}
+	d, at := maxAbsDiff(lCPU, lBE)
+	if d > 1e-3 {
+		t.Fatalf("GLM-DSA backend forward max|Δ|=%.3e at %d (> 1e-3 f32-order floor) — sparse-attend routing bug", d, at)
+	}
+	t.Logf("GLM-DSA sparse attention on backend %q: %d DSASparseAttend calls over %d selected keys; argmax-exact (%d), max|Δ|=%.3e vs all-host",
+		rec.Name(), calls, sel, aBE, d)
 }

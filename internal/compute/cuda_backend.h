@@ -129,6 +129,17 @@ void fcuda_attention_f32(const float *dQ, const float *dK, const float *dV, floa
 void fcuda_flash_attention_f32(const float *dQ, const float *dK, const float *dV, float *dOut,
                                int nPos, int maxPos, int nH, int nKV, int hd, float scale);
 
+/* GLM-MoE-DSA sparse attention (model.glmDsaAttendCached's inner loop) for ONE query position
+ * over nSel host-SELECTED, gathered, causal keys: per query head h, scores[i]=scale·dot(q_h,
+ * selK_i_h), softmax over i, out_h=Σ softmax_i·selV_i_h. selK is [nSel, nH*kd], selV [nSel, nH*vd]
+ * (the host gather laid all nH heads contiguous per selected position: head h at i*nH*kd+h*kd /
+ * i*nH*vd+h*vd). kd (qkNope+qkRope) and vd DIFFER under MLA, so both are carried. Online-softmax
+ * (running max/sum/acc) — no scores[nSel] row. The selection itself (index scores + top-k) is
+ * computed host-side, so this attends the SAME keys as the host loop; Approx vs cpuref only in f32
+ * reduction order (cudaDsaSparseAttnCosineMin). out[nH*vd]. */
+void fcuda_dsa_sparse_attend_f32(const float *dQ, const float *dSelK, const float *dSelV, float *dOut,
+                                 int nSel, int nH, int kd, int vd, float scale);
+
 /* argmax over logits[n]: returns the SMALLEST index attaining the maximum value (the
  * cpuref first-max tie-break), copied back to the host as the single scalar fence. */
 int fcuda_argmax_f32(const float *dLogits, int n);
