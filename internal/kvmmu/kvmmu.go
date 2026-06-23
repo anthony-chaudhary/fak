@@ -192,6 +192,49 @@ func (c *Context) Quarantine(id string) (evicted int, ok bool) {
 	return 0, false
 }
 
+// Compact is the kernel-mediated external-compaction seam (issue #522): it swaps a
+// set of recorded segments for a single summary segment, but ONLY after the summary
+// passes the SAME result-admit gate that screens tool output (ctxmmu / the folded
+// detector chain). A poisoned summary is REFUSED — the old spans stay in the cache
+// and the summary never enters — so compaction is a coherence-checked span swap,
+// not an opaque rewrite that could launder a poisoned summary back into context.
+// This is the kvmmu analogue of ctxmmu's write-time gate, applied to compaction.
+//
+// On a clean summary (anything but Quarantine — a benign oversize summary that the
+// gate pages to a pointer is still safe to swap in): each named id still present
+// and not already held is evicted (via the proven KVCache.Evict, which renumbers
+// the survivors), then the summary is appended as a new trusted segment. The
+// eviction order is the ledger order, so a multi-segment compaction renumbers
+// correctly. Returns the gate verdict and the count of segments actually evicted.
+// An unknown id, or one already held, is silently skipped.
+func (c *Context) Compact(ctx context.Context, ids []string, summaryID, tool string, summaryIDs []int, summaryBody []byte) (v abi.Verdict, swapped int) {
+	call := &abi.ToolCall{Tool: tool}
+	res := &abi.Result{
+		Call:    call,
+		Payload: abi.Ref{Kind: abi.RefInline, Inline: summaryBody, Len: int64(len(summaryBody))},
+	}
+	v = c.gate.Admit(ctx, call, res)
+	if v.Kind == abi.VerdictQuarantine {
+		return v, 0 // poisoned summary -> refuse the swap; keep the spans, drop nothing
+	}
+	want := make(map[string]struct{}, len(ids))
+	for _, id := range ids {
+		want[id] = struct{}{}
+	}
+	for _, s := range c.segs {
+		if s.Held {
+			continue
+		}
+		if _, ok := want[s.ID]; !ok {
+			continue
+		}
+		c.evict(s)
+		swapped++
+	}
+	c.Append(summaryID, tool, summaryIDs)
+	return v, swapped
+}
+
 // evict drops a segment's span from the kernel-owned cache and renumbers the
 // ledger so every segment after it shifts down by the evicted length — keeping
 // the ledger consistent with model.KVCache.Evict's own compaction.
