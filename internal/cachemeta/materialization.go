@@ -180,11 +180,21 @@ func SemanticShareable(e Entry) bool {
 //   - an approximate view (compressed_kv) additionally needs acceptable quality
 //     evidence; without it the verdict is an approximate-fault MISS, never a hit.
 //     (Acceptance #4.)
-func MaterializeVerdict(view MaterializationView, stored Entry, want MaterializationKey, q QualityEvidence) LookupVerdict {
+//
+// The trailing variadic opts carry the cross-model prefill-share decision (#534): a
+// WithPrefillShare policy lifts the exact-ModelID barrier for a declared-compatible
+// family. With no option (the default) the verdict is byte-identical to pre-#534.
+func MaterializeVerdict(view MaterializationView, stored Entry, want MaterializationKey, q QualityEvidence, opts ...MaterializeOption) LookupVerdict {
 	if view == MatProviderPrefix {
 		// Provider residency is observational; ProviderCacheVerdict makes the
 		// no-local-trust rule mechanical (CanServe() == false).
 		return ProviderCacheVerdict(stored)
+	}
+	var mo materializeOpts
+	for _, opt := range opts {
+		if opt != nil {
+			opt(&mo)
+		}
 	}
 	have := MaterializationKeyOf(stored)
 	if !have.Complete() || !want.Complete() {
@@ -192,13 +202,111 @@ func MaterializeVerdict(view MaterializationView, stored Entry, want Materializa
 		// possibly-mismatched KV span.
 		return Miss(ReasonModelMismatch)
 	}
+	crossModel := false
 	if ok, reason := have.Matches(want); !ok {
-		return Miss(reason)
+		// #534 — the cross-model prefill-share gate lifts ONLY the exact-ModelID
+		// barrier, and only when every OTHER binding axis still matches, so two
+		// declared-compatible-family models (same Family + byte-identical
+		// PrefixDigest ⇒ their prefix KV is bit-identical, so reuse is lossless) may
+		// serve each other's prefix KV. The KV splice itself is model.KVCache.Clone
+		// at the engine layer; this verdict is the metadata gate that unlocks it. A
+		// default-zero policy (no WithPrefillShare option) never shares, so callers
+		// that do not opt in get byte-identical behavior to before #534.
+		if reason == ReasonModelMismatch && mo.share.Allowed && matchesExceptModel(have, want) {
+			crossModel = true
+		} else {
+			return Miss(reason)
+		}
 	}
 	if view.IsApproximate() && !q.Acceptable() {
 		return Miss(ReasonApproxFault)
 	}
+	if crossModel {
+		return crossModelHit(stored, mo.share)
+	}
 	return Hit(stored)
+}
+
+// MaterializeOption mutates the cross-model prefill-share configuration of a
+// MaterializeVerdict call. It is the opt-in channel for #534: absent any option the
+// verdict keeps its pre-#534 exact-ModelID barrier.
+type MaterializeOption func(*materializeOpts)
+
+type materializeOpts struct {
+	share PrefillSharePolicy
+}
+
+// WithPrefillShare arms the cross-model prefill-share gate (#534). The policy's Allowed
+// field is the polymodel.CanShare(provider, consumer) verdict — computed by the caller,
+// since cachemeta never imports the off-defconfig polymodel leaf — and Family /
+// PrefixDigest ride along on a cross-model HIT's audit trail. Pass a zero policy (or no
+// option) to keep the exact-ModelID barrier.
+func WithPrefillShare(s PrefillSharePolicy) MaterializeOption {
+	return func(o *materializeOpts) { o.share = s }
+}
+
+// PrefillSharePolicy carries the cross-model prefill-share DECISION into cachemeta's
+// verdict layer (#534): a consumer model may reuse a provider model's already-computed
+// prefix KV when polymodel.CanShare(provider, consumer) is true — same Family (same
+// tokenizer) AND byte-identical PrefixDigest (same prefill-relevant weights) ⇒ the
+// prefix KV is bit-identical, so reuse is lossless, not approximate.
+//
+// cachemeta never imports polymodel (the poly-model leaf is deliberately off the
+// defconfig so the shipped fak binary never links it); the caller computes the CanShare
+// decision and passes it here, exactly as CheckResidentClaim consumes an
+// integrator-computed SignatureVerified. The verdict layer trusts Allowed but STILL
+// verifies every non-ModelID axis matches (matchesExceptModel), so a lying CanShare can
+// never relax the tokenizer/serializer/position/policy/admitter binding — it can only
+// lift the ModelID axis it is asserted for. Family and PrefixDigest are carried purely
+// for the cross-model HIT's audit trail.
+type PrefillSharePolicy struct {
+	// Allowed is the polymodel.CanShare(provider, consumer) verdict. A zero value
+	// (false) never shares — the exact-ModelID barrier stands.
+	Allowed bool
+	// Family is the declared-compatible family both models share ("" until a real
+	// share is asserted); carried on the HIT for traceability.
+	Family string
+	// PrefixDigest is the byte-identical content hash of the shared prefill band.
+	PrefixDigest string
+}
+
+// matchesExceptModel reports whether two materialization keys agree on every axis
+// EXCEPT ModelID — the precondition for the #534 cross-model lift. CanShare's contract
+// implies the tokenizer matches (Family = tokenizer group), but the verdict verifies the
+// rest directly so a bad share assertion cannot serve a span under a wrong serializer,
+// RoPE regime, policy, or admitter.
+func matchesExceptModel(a, b MaterializationKey) bool {
+	return a.TokenizerID == b.TokenizerID &&
+		a.SerializerID == b.SerializerID &&
+		a.PositionRegime == b.PositionRegime &&
+		a.PolicyVersion == b.PolicyVersion &&
+		a.AdmitterVersion == b.AdmitterVersion
+}
+
+// crossModelHit is the cross-model prefill-share HIT: the stored span serves the
+// consumer (after the engine-layer model.KVCache.Clone splice), stamped with the
+// share's audit trail. It is a serveable Hit (CanServe() == true); the marker is
+// observational, never a relaxation.
+func crossModelHit(stored Entry, share PrefillSharePolicy) LookupVerdict {
+	e := stored
+	labels := make(map[string]string, len(stored.Labels)+3)
+	for k, v := range stored.Labels {
+		labels[k] = v
+	}
+	labels["cross_model_share"] = "true"
+	if share.Family != "" {
+		labels["share_family"] = share.Family
+	}
+	labels["share_splice"] = "KVCache.Clone"
+	e.Labels = labels
+	v := Hit(e)
+	v.Meta = map[string]string{
+		"cross_model_share":      "true",
+		"splice":                 "model.KVCache.Clone",
+		"provider_family":        share.Family,
+		"provider_prefix_digest": share.PrefixDigest,
+	}
+	return v
 }
 
 // MaterializationBenchRow is ONE reportable benchmark row that places runtime

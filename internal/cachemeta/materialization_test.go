@@ -188,6 +188,64 @@ func TestProviderPrefixIsTelemetryNotTrust(t *testing.T) {
 	}
 }
 
+// TestCrossModelPrefillShareLiftsModelIDBarrierOnly witnesses #534: the exact-ModelID
+// barrier is lifted for a declared-compatible family, but ONLY opt-in, ONLY on the
+// ModelID axis, and the HIT carries the KVCache.Clone-splice audit trail. Without the
+// policy the verdict keeps its pre-#534 exact-ModelID refusal.
+func TestCrossModelPrefillShareLiftsModelIDBarrierOnly(t *testing.T) {
+	storedA := kvSpanUnder("model-A", "tok-A")
+	keyA := MaterializationKeyOf(storedA)
+	// A compatible-family consumer: identical EXCEPT for ModelID (the only axis a
+	// same-Family+same-PrefixDigest pair can differ on), with the caller asserting a
+	// lossless share.
+	keyB := keyA
+	keyB.ModelID = "model-B"
+	share := PrefillSharePolicy{Allowed: true, Family: "qwen", PrefixDigest: "sha-AAA"}
+
+	// (1) With the policy, the cross-model serve is a HIT, stamped as a Clone splice.
+	hit := MaterializeVerdict(MatKVSpan, storedA, keyB, QualityEvidence{}, WithPrefillShare(share))
+	if !hit.CanServe() {
+		t.Fatalf("a share-compatible consumer must HIT across ModelID: %+v", hit)
+	}
+	if hit.Meta["cross_model_share"] != "true" || hit.Meta["splice"] != "model.KVCache.Clone" {
+		t.Fatalf("cross-model HIT must mark the Clone splice + share: %+v", hit.Meta)
+	}
+	if hit.Entry.Labels["share_family"] != "qwen" {
+		t.Fatalf("cross-model HIT must carry the share family for audit: %+v", hit.Entry.Labels)
+	}
+
+	// (2) WITHOUT the policy, the same cross-model serve is still refused — the lift is
+	//     opt-in, byte-identical to pre-#534.
+	refuse := MaterializeVerdict(MatKVSpan, storedA, keyB, QualityEvidence{})
+	if refuse.CanServe() || refuse.Reason != ReasonModelMismatch {
+		t.Fatalf("without a share policy a cross-model serve must be model_mismatch: %+v", refuse)
+	}
+
+	// (3) The lift is ModelID-ONLY: a consumer that also differs in tokenizer is refused
+	//     even with a share policy — a lying CanShare can never relax the rest of the
+	//     binding (matchesExceptModel).
+	keyBadTok := keyB
+	keyBadTok.TokenizerID = "tok-Z"
+	bad := MaterializeVerdict(MatKVSpan, storedA, keyBadTok, QualityEvidence{}, WithPrefillShare(share))
+	if bad.CanServe() {
+		t.Fatalf("a tokenizer mismatch must NOT be lifted by a share policy: %+v", bad)
+	}
+
+	// (4) An Allowed:false policy never lifts (the caller did not assert a lossless share).
+	noShare := MaterializeVerdict(MatKVSpan, storedA, keyB, QualityEvidence{},
+		WithPrefillShare(PrefillSharePolicy{Allowed: false, Family: "qwen"}))
+	if noShare.CanServe() {
+		t.Fatalf("Allowed:false must not lift the barrier: %+v", noShare)
+	}
+
+	// (5) An approximate view still needs quality evidence even on a cross-model share —
+	//     the lift is exact-KV only; it does not waive the approximate-fault gate.
+	unmeasured := MaterializeVerdict(MatCompressedKV, storedA, keyB, QualityEvidence{}, WithPrefillShare(share))
+	if unmeasured.CanServe() || unmeasured.Reason != ReasonApproxFault {
+		t.Fatalf("a compressed cross-model share still needs quality evidence: %+v", unmeasured)
+	}
+}
+
 // TestMaterializationBenchRowCarriesProvenance witnesses acceptance #6: one
 // benchmark row reports provider cached tokens / local KV hits ALONGSIDE the
 // semantic-view witness that drove the materialization — never a bare number.

@@ -105,7 +105,7 @@ models share prefill?** The honest taxonomy:
 |---|---|---|---|
 | **Same model, same prefix** | the whole KV prefix | **[SHIPPED]** | `Clone`/`SessionFromPrefix`; RadixAttention reuse (`internal/radixkv/radixkv.go:72`) |
 | **Cross-model, same prefix, structurally** | the radix *tree* can already index one prefix node regardless of model | **[SEAM-ONLY]** | the tree keys on **token-ids only** (`radixkv.go:51,96,173`); model identity lives in the *verdict* layer, not the structure |
-| **Cross-model reuse, served** | actually serving model B from model A's KV | **[GAP]** | `cachemeta.CheckResidentClaim` requires an **exact ModelID match** before a HIT (`internal/cachemeta/manifest.go:107`) — a deliberate barrier, not a structural one |
+| **Cross-model reuse, served** | actually serving model B from model A's KV | **[SHIPPED]** (verdict + splice) | `cachemeta.MaterializeVerdict` lifts the exact-ModelID barrier via `WithPrefillShare` (#534); `internal/spec.SplicePrefillShare` is the bit-exact `KVCache.Clone` splice. The prefix cache was always model-agnostic at the data-structure level; the barrier was verdict-layer only |
 | **Shared lower-layer bands** (adapter / distilled siblings) | the prefill of layers two models genuinely share | **[GAP]** | the per-layer `KVCache.K[][]float32` (`kv.go:20`) makes layer-banded sharing *expressible*; correctness needs the models to share those layers' weights + RoPE convention |
 
 The key, non-obvious finding: **the prefix cache is model-agnostic at the data-structure
@@ -185,7 +185,7 @@ Legend: **[SHIPPED]** real & proven · **[PARTIAL]** real but incomplete ·
 | Continuous-batching admit/evict loop | **[SEAM-ONLY]** | `internal/model/batch.go:1147` (comment); no scheduler |
 | Multiple models hosted in one process | **[GAP]** | single `modelengine.Default`, one `*model.Model` (`internal/modelengine/modelengine.go:54,226`); gateway binds one planner (`internal/gateway/gateway.go:253`) |
 | Multi-model weight residency / whole-model eviction on a backend | **[GAP]** | per-weight budget is single-model only (`internal/compute/vulkan.go:164`); `gpulease` is process-wide mutex (`internal/gpulease/lease.go:36`) |
-| Cross-model prefill share (served) | **[GAP]** | exact-ModelID barrier (`internal/cachemeta/manifest.go:107`) |
+| Cross-model prefill share (served) | **[SHIPPED]** (verdict-layer + splice; off-defconfig) | `cachemeta.MaterializeVerdict` + `WithPrefillShare`/`PrefillSharePolicy` (ModelID-axis-only barrier lift, #534); `internal/spec.SplicePrefillShare`/`CrossModelPrefillShare` (the `KVCache.Clone` splice, bit-exact). Live multi-model backend residency (#531) still [GAP] |
 | `ProvisionalSink` implementation / `internal/spec` | **[SHIPPED]** | `internal/spec` — Sink + `OpSpecCommit`/`OpSpecSquash`; `Rollback`→bit-exact `KVCache.Evict`; lossless witness `go test ./internal/spec`. Off-defconfig, gated by `FAK_POLYMODEL`. Single-pass verify EXECUTION = #533 |
 
 ## 7. The child map / sequencing
@@ -215,12 +215,18 @@ Ordered so each rung stands on a shipped one. None of these land in this doc.
    seam, even under an adversarial draft that forces a rollback every round (vacuity-guarded).
    Off-defconfig + `FAK_POLYMODEL`-gated. The **verify EXECUTION** (single-pass batched +
    tree-attention masks) is the throughput half — **#533**.
-5. **Cross-model prefill share (verdict-layer)** — **#534**. Lift the exact-ModelID
+5. **Cross-model prefill share (verdict-layer)** — **#534**. ✅ *shipped.* Lift the exact-ModelID
    barrier for a declared-compatible family in `cachemeta` — the cheap structural unlock
-   from [§4]. The DECISION half ships now as `polymodel.CanShare` (same `Family` +
-   byte-identical `PrefixDigest` ⇒ the reused KV is bit-identical, so reuse is lossless);
-   the remaining work is wiring it into `cachemeta`'s lookup verdict and the
-   `KVCache.Clone` splice.
+   from [§4]. The DECISION half is `polymodel.CanShare` (same `Family` + byte-identical
+   `PrefixDigest` ⇒ the reused KV is bit-identical, so reuse is lossless); the verdict-
+   layer wiring is `cachemeta.PrefillSharePolicy` + `WithPrefillShare` threaded into
+   `MaterializeVerdict` (ModelID-axis-only lift; every other binding axis still
+   verified), and the `KVCache.Clone` splice is `internal/spec.SplicePrefillShare` /
+   `CrossModelPrefillShare` — the off-defconfig bridge (cachemeta never imports the
+   off-defconfig polymodel leaf) that forks the provider's prefix bit-exactly into the
+   consumer. Witness: `go test ./internal/cachemeta ./internal/spec` (the splice
+   continuation is bit-exact to a direct prefill). The live multi-model *backend*
+   residency (#531) and the verify *execution* (#533) remain sequenced.
 6. **Bench harness numbers** — **#535**. Gate every speedup claim on a measured run
    (#44): E vs draft cost, decode-lane utilization, residency hit-rate.
 
