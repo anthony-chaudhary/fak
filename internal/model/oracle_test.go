@@ -355,6 +355,67 @@ func TestOptionalQwen3OracleCoversQKNorm(t *testing.T) {
 	assertForwardMatchesHFOracle(t, resolved, m, doc)
 }
 
+// TestOptionalOLMo2OracleCoversPostNormFullProjQKNorm is the real-oracle witness
+// for the OLMo 2 row of the #474 matrix. OLMo 2 is the POST-norm family (the norm
+// runs AFTER each sub-layer on the raw residual, not before it) and it carries
+// qk-norms over the WHOLE q/k projection — not per-head, the way Qwen3/Gemma3 do.
+// Both axes are family-derived by the loader (BlockTopology=PostNorm in weights.go,
+// QKNorm=true + the full-projection branch of applyQKNormCfg in arch.go); this proves
+// the pure-Go forward reproduces HF for a real OLMo 2 decoder, not just the config.
+//
+// Reproduce the gitignored (~26MB) fixture on a plain CPU box (no GPU/artifact node):
+//
+//	from fak/: python internal/model/make_olmo2_tiny.py .cache/olmo2-tiny
+//	  && python internal/model/export_oracle.py --online --model .cache/olmo2-tiny \
+//	     --out internal/model/.cache/oracle-olmo2 \
+//	     --prompt-ids-json '[[785,6722,315,9621,374],[16,11,220,17,11,220,18,11,220,19,11],[750,912,2877,11,293,982,262,470]]'
+func TestOptionalOLMo2OracleCoversPostNormFullProjQKNorm(t *testing.T) {
+	const dir = ".cache/oracle-olmo2"
+	m, doc := loadFixtureDir(t, dir, true)
+	cfg := m.Cfg
+	if !strings.Contains(cfg.archFamilyKey(), "olmo2") {
+		t.Fatalf("%s family = %q, want olmo2", dir, cfg.archFamilyKey())
+	}
+	if cfg.BlockTopology != PostNorm {
+		t.Fatalf("%s topology = %v, want PostNorm", dir, cfg.BlockTopology)
+	}
+	if !cfg.QKNorm {
+		t.Fatalf("%s did not derive QKNorm=true from olmo2 metadata", dir)
+	}
+	// OLMo 2 is the POST-norm placement: no input_layernorm; the only per-layer
+	// norms are post_attention_layernorm + post_feedforward_layernorm.
+	for l := 0; l < cfg.NumLayers; l++ {
+		p := layerPrefix(l)
+		if _, ok := m.manifest[p+"input_layernorm.weight"]; ok {
+			t.Fatalf("%s layer %d unexpectedly has input_layernorm (OLMo2 is PostNorm)", dir, l)
+		}
+		for _, suffix := range []string{"post_attention_layernorm.weight", "post_feedforward_layernorm.weight"} {
+			if _, ok := m.manifest[p+suffix]; !ok {
+				t.Fatalf("%s layer %d missing %s", dir, l, suffix)
+			}
+		}
+		// qk-norm is over the FULL projection, not head_dim: q_norm is
+		// NumHeads*HeadDim, k_norm is NumKVHeads*HeadDim (distinguishing OLMo2
+		// from the per-head Qwen3/Gemma3 qk-norm).
+		qn, ok := m.manifest[p+"self_attn.q_norm.weight"]
+		if !ok {
+			t.Fatalf("%s layer %d missing self_attn.q_norm.weight", dir, l)
+		}
+		if len(qn.Shape) != 1 || qn.Shape[0] != cfg.NumHeads*cfg.HeadDim {
+			t.Fatalf("%s q_norm shape = %v, want full projection [%d]", dir, qn.Shape, cfg.NumHeads*cfg.HeadDim)
+		}
+		kn, ok := m.manifest[p+"self_attn.k_norm.weight"]
+		if !ok {
+			t.Fatalf("%s layer %d missing self_attn.k_norm.weight", dir, l)
+		}
+		if len(kn.Shape) != 1 || kn.Shape[0] != cfg.NumKVHeads*cfg.HeadDim {
+			t.Fatalf("%s k_norm shape = %v, want full kv projection [%d]", dir, kn.Shape, cfg.NumKVHeads*cfg.HeadDim)
+		}
+	}
+	resolved, _ := resolveOracleDir(dir)
+	assertForwardMatchesHFOracle(t, resolved, m, doc)
+}
+
 func TestOptionalQwen3MoEOracleCoversHybridDenseSparseLayers(t *testing.T) {
 	const dir = ".cache/oracle-qwen3moe"
 	m, doc := loadFixtureDir(t, dir, true)
