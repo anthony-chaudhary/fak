@@ -76,6 +76,29 @@ func (w Weights) orDefault() Weights {
 // fail-closed neutral default — an un-credited span gets no utility boost).
 const UtilityMax = 4.0
 
+// signal is the four normalized benefit features for one span — the per-cell analogue of
+// pg_statistic. Forecast.Benefit combines them with Weights; Weights.Learn uses the SAME
+// vector as its feature row so the scorer and the online learner can never drift apart
+// (the weight a span was scored with is the weight its outcome tunes).
+type signal struct {
+	Relevance  float64
+	Utility    float64
+	Durability float64
+	Recency    float64
+}
+
+// signals returns the four benefit features for c, normalizing recency against maxStep.
+// Relevance is 0 with no forecast intents; the others are content- or step-driven. It is
+// the shared scoring vocabulary Benefit and Weights.Learn both speak.
+func (f Forecast) signals(c Span, maxStep int) signal {
+	return signal{
+		Relevance:  f.relevance(c),
+		Utility:    spanUtility(c),
+		Durability: durabilityPrior(c.Durability),
+		Recency:    recency(c.Step, maxStep),
+	}
+}
+
 // Benefit scores one cell for the planner: the weighted sum of its relevance to the
 // forecast intents, its learned utility, its durability prior, and its recency, each
 // normalized to ~[0,1]. A SEALED or TOMBSTONED cell scores exactly 0 — it is never a
@@ -87,11 +110,8 @@ func (f Forecast) Benefit(c Span, maxStep int) float64 {
 		return 0
 	}
 	w := f.Weights.orDefault()
-	rel := f.relevance(c)
-	util := spanUtility(c)
-	dur := durabilityPrior(c.Durability)
-	rec := recency(c.Step, maxStep)
-	b := w.Relevance*rel + w.Utility*util + w.Durability*dur + w.Recency*rec
+	s := f.signals(c, maxStep)
+	b := w.Relevance*s.Relevance + w.Utility*s.Utility + w.Durability*s.Durability + w.Recency*s.Recency
 	// Single fail-closed choke point: a non-finite score (a poisoned signal, an Inf
 	// weight) collapses to 0 rather than poisoning the planner's sort or DP downstream.
 	if math.IsNaN(b) || math.IsInf(b, 0) {

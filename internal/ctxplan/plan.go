@@ -52,6 +52,38 @@ func TokenCost(c Span) int {
 	return int((c.Bytes + 3) / 4)
 }
 
+// Tokenizer counts the tokens of a text — the one-method contract a real BPE /
+// SentencePiece tokenizer satisfies. ctxplan defines it LOCALLY (the leaf imports nothing
+// internal, by the foundation-tier rule) so the planner can take a REAL per-span token
+// cost in place of the bytes/4 proxy: a higher-tier adapter wraps
+// internal/tokenizer.Encoder (or any tokenizer) into this interface and passes
+// TokenizerCost(it) as the CostModel. The planner only ever needs a monotone,
+// deterministic size proxy, so a real count is a strictly-more-honest CostModel, not a
+// correctness change.
+type Tokenizer interface {
+	Count(text string) int
+}
+
+// TokenizerCost returns a CostModel that prices a span by tokenizing its renderable text
+// (role + descriptor — the SAFE metadata the planner actually sees; the full resident body
+// is behind the store's gate and is a higher-tier concern) with tok. It is the
+// "real-tokenizer CostModel" wiring: pass a Tokenizer, get the CostModel the planner,
+// Candidates, and Materialize already accept. A nil tok falls back to TokenCost
+// (fail-closed to the documented bytes/4 proxy), so a caller with no tokenizer on hand
+// gets the original estimate with no special case. A non-positive count costs 0.
+func TokenizerCost(tok Tokenizer) CostModel {
+	if tok == nil {
+		return TokenCost
+	}
+	return func(c Span) int {
+		n := tok.Count(c.Role + " " + c.Descriptor)
+		if n < 0 {
+			return 0
+		}
+		return n
+	}
+}
+
 // Budget is the O(1) cap on the resident view: at most Tokens tokens may be resident.
 // It is the constant the whole concept rests on — the resident context stays bounded by
 // Tokens no matter how many turns the session runs.

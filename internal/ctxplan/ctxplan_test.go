@@ -5,6 +5,7 @@ import (
 	"errors"
 	"math"
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -411,5 +412,137 @@ func TestEmptyIDFailsPartition(t *testing.T) {
 	p := Plan{Candidates: 1, Selected: []Selection{{ID: "", Step: 0, Cost: 1}}}
 	if Audit(p).Faithful {
 		t.Error("a plan with an empty-ID span must not be reported Faithful")
+	}
+}
+
+// --- issue #549: learn the forecast, tune the weights, wire a real-tokenizer CostModel ---
+
+// TestLearnForecastPromotesFaultedContent is the forecast-learner witness: a span the
+// planner ELIDED that the turn then had to demand-page back in (a Fault — a forecast MISS)
+// has its content PROMOTED into the next forecast, so the span it missed is now predicted.
+// The original forecast must not already predict it (the precondition that makes the
+// before/after meaningful), and a Fault naming no span teaches nothing (fail-closed).
+func TestLearnForecastPromotesFaultedContent(t *testing.T) {
+	store := NewMemStore()
+	store.Add("Read", DurabilitySession, []byte("the gamma delta incident report"), false) // span:0
+	spans, _ := store.Spans(context.Background())
+
+	f := Forecast{Intents: []string{"auth token rotation"}}
+	// A span the forecast does NOT predict (no overlap with auth/token/rotation).
+	unpredicted := Span{ID: "g", Role: "tool", Descriptor: "the gamma runbook for the migration"}
+	if f.relevance(unpredicted) > 0 {
+		t.Fatalf("precondition: the original forecast must not predict the gamma span, got relevance %v", f.relevance(unpredicted))
+	}
+
+	// span:0 was elided but the turn needed it -> a forecast MISS.
+	learned := f.Learn(Outcome{Faults: []string{"span:0"}}, spans)
+	if learned.relevance(unpredicted) <= f.relevance(unpredicted) {
+		t.Fatalf("the learned forecast must now predict the faulted span's content (gamma); before=%v after=%v",
+			f.relevance(unpredicted), learned.relevance(unpredicted))
+	}
+	// A Fault that names no real span is a no-op (fail-closed): the forecast is untouched.
+	noop := f.Learn(Outcome{Faults: []string{"span:999"}}, spans)
+	if !reflect.DeepEqual(noop.Intents, f.Intents) {
+		t.Errorf("a Fault naming no span must leave the forecast unchanged, got %v", noop.Intents)
+	}
+}
+
+// TestLearnWeightsRaisesRelevantSignal is the weight-learner witness: when the forecast's
+// relevance signal is what separates needed spans (Hits) from wasted ones, one online
+// logistic step UP-WEIGHTS relevance. The four spans differ ONLY in relevance (same
+// durability, step 0 -> no recency, no utility attr), so the gradient has a clean sign.
+// Asserts the meaningful direction (relevance rises) and the bounds (clamp to [0,weightMax]).
+func TestLearnWeightsRaisesRelevantSignal(t *testing.T) {
+	f := Forecast{Intents: []string{"alpha"}}
+	mk := func(id, desc string) Span {
+		return Span{ID: id, Step: 0, Role: "tool", Descriptor: desc, Durability: DurabilitySession}
+	}
+	spans := []Span{
+		mk("hit1", "alpha one"),   // relevant + needed
+		mk("hit2", "alpha two"),   // relevant + needed
+		mk("waste1", "beta one"),  // irrelevant + wasted
+		mk("waste2", "beta two"),  // irrelevant + wasted
+	}
+	o := Outcome{Hits: []string{"hit1", "hit2"}, Wasted: []string{"waste1", "waste2"}}
+
+	def := DefaultWeights()
+	tuned := def.Learn(o, spans, f, 0)
+	if !(tuned.Relevance > def.Relevance) {
+		t.Fatalf("when relevance predicts need, the learned relevance weight must rise above the default %v, got %v",
+			def.Relevance, tuned.Relevance)
+	}
+	// Anti-correlated control: when relevance ANTI-correlates with need (relevant spans
+	// wasted, irrelevant spans needed), relevance is DOWN-weighted. Proves the learner
+	// tracks the sign of the correlation, not just always-up.
+	anti := Outcome{Hits: []string{"waste1", "waste2"}, Wasted: []string{"hit1", "hit2"}}
+	antiTuned := def.Learn(anti, spans, f, 0)
+	if !(antiTuned.Relevance < def.Relevance) {
+		t.Fatalf("when relevance anti-correlates with need, the learned relevance weight must fall below %v, got %v",
+			def.Relevance, antiTuned.Relevance)
+	}
+	// Bounds: every learned weight stays in [0, weightMax].
+	for _, w := range []float64{tuned.Relevance, tuned.Utility, tuned.Durability, tuned.Recency} {
+		if w < 0 || w > weightMax || math.IsNaN(w) {
+			t.Errorf("a learned weight must stay in [0,%v] and finite, got %v", weightMax, w)
+		}
+	}
+	// An Outcome naming no learnable span returns the effective weights unchanged.
+	noop := def.Learn(Outcome{}, spans, f, 0)
+	if noop != def {
+		t.Errorf("an empty Outcome must leave the effective weights unchanged, got %v", noop)
+	}
+}
+
+// TestLearnIsDeterministic pins the replay-stability of both learners: identical inputs
+// yield byte-identical forecasts and weights (no randomness, no wall clock).
+func TestLearnIsDeterministic(t *testing.T) {
+	store := NewMemStore()
+	store.Add("Read", DurabilitySession, []byte("the gamma delta incident report"), false)
+	store.Add("Bash", DurabilityTurn, []byte("alpha beta gamma"), false)
+	spans, _ := store.Spans(context.Background())
+	f := Forecast{Intents: []string{"auth token"}}
+	o := Outcome{Hits: []string{"span:1"}, Faults: []string{"span:0"}, Wasted: []string{"span:1"}}
+
+	l1 := f.Learn(o, spans)
+	l2 := f.Learn(o, spans)
+	if !reflect.DeepEqual(l1.Intents, l2.Intents) {
+		t.Errorf("Forecast.Learn must be deterministic: %v vs %v", l1.Intents, l2.Intents)
+	}
+	w1 := DefaultWeights().Learn(o, spans, f, 5)
+	w2 := DefaultWeights().Learn(o, spans, f, 5)
+	if w1 != w2 {
+		t.Errorf("Weights.Learn must be deterministic: %v vs %v", w1, w2)
+	}
+}
+
+// wordTokenizer is a deterministic stand-in Tokenizer (whitespace word count) for the
+// CostModel test — it stands in for internal/tokenizer.Encoder the way the demo does.
+type wordTokenizer struct{}
+
+func (wordTokenizer) Count(text string) int { return len(strings.Fields(text)) }
+
+// TestTokenizerCostWiresRealTokenizer is the real-tokenizer CostModel witness: TokenizerCost
+// prices a span by the tokenizer's real count (not the bytes/4 proxy), a nil tokenizer
+// falls back to TokenCost, and the planner actually consumes it through Candidates.
+func TestTokenizerCostWiresRealTokenizer(t *testing.T) {
+	tok := wordTokenizer{}
+	cm := TokenizerCost(tok)
+	s := Span{Role: "tool", Descriptor: "alpha beta gamma", Bytes: 1000}
+
+	if got := cm(s); got != 4 { // "tool alpha beta gamma"
+		t.Errorf("TokenizerCost must price by the real tokenizer count (4 words), got %d", got)
+	}
+	if cm(s) == TokenCost(s) { // bytes/4 of 1000 = 250, not 4
+		t.Error("a real-tokenizer cost must differ from the TokenCost bytes/4 proxy")
+	}
+	// Fail-closed fallback: a nil tokenizer is the documented bytes/4 proxy.
+	if TokenizerCost(nil)(s) != TokenCost(s) {
+		t.Error("a nil tokenizer must fall back to TokenCost")
+	}
+	// The planner consumes the real-tokenizer CostModel through Candidates: the candidate
+	// cost equals the tokenizer count, not the proxy.
+	cands := Candidates([]Span{s}, Forecast{}, cm)
+	if cands[0].Cost != 4 {
+		t.Errorf("Candidates with a real-tokenizer CostModel must carry the tokenizer count 4, got %d", cands[0].Cost)
 	}
 }
