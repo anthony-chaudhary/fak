@@ -2,6 +2,8 @@ package cdb
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -165,6 +167,59 @@ func TestWorkingSetUtilityAblation(t *testing.T) {
 	for _, p := range s.Pages() {
 		if p.Quarantined && p.Utility != 0 {
 			t.Fatalf("sealed page %d accrued utility %v", p.Step, p.Utility)
+		}
+	}
+}
+
+// TestWorkingSetNeutralUtilityIsByteIdentical is the safety guard for the #540 phase-2
+// change: for an uncredited session (the universal case), the WorkingSet order MUST be
+// exactly the pre-#540 lexical-only ranking — stable-descending by overlap score — and
+// the manifest MUST carry no utility key (omitempty), so existing core images are
+// unaffected on disk and in ranking. rank == float64(score)+0 makes phase 2 a no-op at
+// neutral utility; this asserts that property end to end through ingest/persist/attach.
+func TestWorkingSetNeutralUtilityIsByteIdentical(t *testing.T) {
+	ctx := context.Background()
+	const query = "refund fee balance ledger"
+
+	r := recall.NewRecorder("neutral-identity")
+	r.Record(ctx, "doc_top", []byte("refund fee balance ledger reconciliation")) // score 4
+	r.Record(ctx, "doc_tieA", []byte("refund fee notes"))                        // score 2 (recorded first of the tie)
+	r.Record(ctx, "doc_tieB", []byte("refund fee draft"))                        // score 2 (ties doc_tieA)
+	r.Record(ctx, "doc_low", []byte("refund only"))                              // score 1
+
+	dir := t.TempDir()
+	if err := r.Persist(dir); err != nil {
+		t.Fatalf("persist: %v", err)
+	}
+
+	// An uncredited session writes no utility key — byte-identical on disk to pre-#540.
+	mb, err := os.ReadFile(filepath.Join(dir, "manifest.json"))
+	if err != nil {
+		t.Fatalf("read manifest: %v", err)
+	}
+	if strings.Contains(string(mb), `"utility"`) {
+		t.Fatalf("uncredited session wrote a utility key (must be omitempty):\n%s", mb)
+	}
+
+	im, err := Attach(dir)
+	if err != nil {
+		t.Fatalf("attach: %v", err)
+	}
+	ws := im.WorkingSet(ctx, query, 0)
+
+	// Stable-descending by lexical score, ties preserved in record order: exactly the
+	// lexical-only ranking phase 1 alone would produce.
+	want := []int{0, 1, 2, 3}
+	if len(ws.Slices) != len(want) {
+		t.Fatalf("working set size = %d, want %d (all four benign pages are referenced)", len(ws.Slices), len(want))
+	}
+	for i, exp := range want {
+		if ws.Slices[i].Step != exp {
+			got := make([]int, len(ws.Slices))
+			for j, sl := range ws.Slices {
+				got[j] = sl.Step
+			}
+			t.Fatalf("neutral-utility ranking diverged from lexical-only: got %v want %v", got, want)
 		}
 	}
 }
