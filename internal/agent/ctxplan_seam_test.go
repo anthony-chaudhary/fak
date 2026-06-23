@@ -159,7 +159,7 @@ func TestCtxSeamRenderHistoryRoundTrips(t *testing.T) {
 func TestCtxSeamHeuristicForecastPinsEssentials(t *testing.T) {
 	session := []Message{
 		{Role: RoleSystem, Content: "system prompt"},
-		{Role: RoleUser, Content: "the active goal here"},      // span:1 (first user)
+		{Role: RoleUser, Content: "the active goal here"}, // span:1 (first user)
 		{Role: RoleTool, Name: "t", Content: "a result"},
 		{Role: RoleUser, Content: "follow up about the refund"}, // span:3 (last user)
 	}
