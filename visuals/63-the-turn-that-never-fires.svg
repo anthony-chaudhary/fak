@@ -1,0 +1,49 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="740" viewBox="0 0 1600 740" role="img" aria-labelledby="t d">
+  <title id="t">The turn that never fires</title>
+  <desc id="d">On one 14-call airline-support trace, a naive two-pass loop is forced into 9 extra model round-trips and a tuned 2026 framework into 5; fak resolves them inside the syscall for 0. The safety floor moves from 1 to 0 injections admitted and 1 to 0 destructive ops executed.</desc>
+  <defs>
+    <style>
+      .sans{font-family:Inter,ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+      .mono{font-family:"SFMono-Regular",ui-monospace,"Cascadia Code",Consolas,monospace}
+      .eyebrow{fill:#5b6a7a;font-size:24px;font-weight:700;letter-spacing:.04em}
+      .sub{fill:#46586a;font-size:26px;font-weight:600}
+      .lane{fill:#14202b;font-size:30px;font-weight:700}
+      .lanesub{fill:#5b6a7a;font-size:21px;font-weight:500}
+      .big{font-size:62px;font-weight:800}
+      .note{fill:#5b6a7a;font-size:23px;font-weight:500}
+      .safe{font-size:26px;font-weight:700}
+    </style>
+  </defs>
+
+  <rect width="1600" height="740" fill="#ffffff"/>
+  <text x="80" y="58" class="sans eyebrow">POLICY IN THE KERNEL · MORE TOOL CALLS → MORE SAVED</text>
+  <text x="80" y="108" class="sans sub">one 14-call airline trace · extra model round-trips each is forced into</text>
+
+  <!-- lane 1: naive -->
+  <g>
+    <text x="80" y="195" class="sans lane">naive two-pass loop</text>
+    <text x="80" y="226" class="sans lanesub">re-prompt a bad arg · re-issue a duplicate read · re-fetch a pure call</text>
+    <rect x="600" y="168" width="640" height="40" rx="8" fill="#e0625b"/>
+    <text x="1520" y="212" class="sans big" fill="#a3322c" text-anchor="end">+9</text>
+  </g>
+
+  <!-- lane 2: tuned -->
+  <g>
+    <text x="80" y="345" class="sans lane">tuned 2026 framework</text>
+    <text x="80" y="376" class="sans lanesub">elides the optional calls, but is still forced into the recovery turns</text>
+    <rect x="600" y="318" width="356" height="40" rx="8" fill="#e0a93f"/>
+    <text x="1520" y="362" class="sans big" fill="#b5792b" text-anchor="end">+5</text>
+  </g>
+
+  <!-- lane 3: fak -->
+  <g>
+    <text x="80" y="495" class="sans lane">fak (1-shot kernel)</text>
+    <text x="80" y="526" class="sans lanesub">grammar-repaired or served from the vDSO in the same syscall</text>
+    <rect x="600" y="468" width="10" height="40" rx="5" fill="#3fa45f"/>
+    <text x="1520" y="512" class="sans big" fill="#1f6b46" text-anchor="end">0</text>
+  </g>
+
+  <line x1="80" y1="588" x2="1520" y2="588" stroke="#e0e6ec" stroke-width="2"/>
+  <text x="80" y="642" class="sans safe"><tspan fill="#46586a">safety floor   </tspan><tspan fill="#1f6b46">injection 1→0</tspan><tspan fill="#9aa6b2">   ·   </tspan><tspan fill="#1f6b46">destructive ops 1→0</tspan></text>
+  <text x="80" y="688" class="sans note">Each malformed, duplicate, or pure (side-effect-free) call is one round-trip the kernel resolves in place.</text>
+</svg>

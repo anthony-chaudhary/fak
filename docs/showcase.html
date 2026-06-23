@@ -464,6 +464,25 @@ go run ./cmd/fak agent --offline
       <a href="https://github.com/anthony-chaudhary/fak/blob/main/BENCHMARK-AUTHORITY.md" style="color:var(--fak)">BENCHMARK-AUTHORITY.md</a>.
     </p>
 
+    <!-- worked-examples reveal — the four cards below, animated. Built by
+         tools/hero_video_gen.py from visuals/worked-examples-video.storyboard.json
+         (cards 62-65). Media lives in /visuals (outside the Pages /docs root), pulled
+         in by absolute raw URLs, same convention as the hero/firewall videos. -->
+    <figure style="margin:0 0 6px;background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:10px;box-shadow:0 24px 60px rgba(0,0,0,.45)">
+      <video src="https://raw.githubusercontent.com/anthony-chaudhary/fak/main/visuals/worked-examples-video.mp4"
+             poster="https://raw.githubusercontent.com/anthony-chaudhary/fak/main/visuals/worked-examples-video-poster.png"
+             autoplay loop muted playsinline preload="metadata"
+             style="width:100%;display:block;border-radius:9px;background:#fbfcfd"
+             aria-label="fak — four wins by example: a ~25-second reveal of the four worked examples — watch a poisoned turn vanish bit-for-bit (KV span eviction, max delta 0), the turn that never fires (turn-tax, +9/+5/0), pay the shared prefix once (4.1x vs tuned, 62.0x fewer prefill tokens), and more hooks sooner (~2.4us in-process vs ~6.9ms spawned)">
+        <img src="https://raw.githubusercontent.com/anthony-chaudhary/fak/main/visuals/worked-examples-video.gif"
+             alt="fak four worked examples — an animated ~25-second reveal" style="width:100%;border-radius:9px"/>
+      </video>
+      <figcaption style="font-size:13px;color:var(--ink-dim);margin-top:9px;text-align:center">
+        The four worked examples as a ~25-second reveal — each card below, animated.
+        <a href="https://raw.githubusercontent.com/anthony-chaudhary/fak/main/visuals/worked-examples-video.mp4" style="color:var(--fak)">full-resolution MP4 ↗</a>
+      </figcaption>
+    </figure>
+
     <div class="examples">
 
       <!-- 1. KV eviction — the centrepiece (the one win shown nowhere else on the site) -->

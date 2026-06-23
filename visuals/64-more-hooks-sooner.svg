@@ -1,0 +1,40 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="740" viewBox="0 0 1600 740" role="img" aria-labelledby="t d">
+  <title id="t">More hooks, sooner</title>
+  <desc id="d">Four independent checks across 1,000 tool calls is 4,000 checks. Spawning a hook process per check costs about 28 seconds of pure gate latency, so real systems fail open. Running each check in-process costs about 10 milliseconds, so fail-closed can be the default. One in-process check is about 2.4 microseconds; one spawned hook is about 6.9 milliseconds.</desc>
+  <defs>
+    <style>
+      .sans{font-family:Inter,ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+      .mono{font-family:"SFMono-Regular",ui-monospace,"Cascadia Code",Consolas,monospace}
+      .eyebrow{fill:#5b6a7a;font-size:24px;font-weight:700;letter-spacing:.04em}
+      .sub{fill:#46586a;font-size:27px;font-weight:600}
+      .lane{fill:#14202b;font-size:31px;font-weight:700}
+      .big{font-size:60px;font-weight:800}
+      .tag{font-size:26px;font-weight:700}
+      .note{fill:#5b6a7a;font-size:24px;font-weight:500}
+    </style>
+  </defs>
+
+  <rect width="1600" height="740" fill="#ffffff"/>
+  <text x="80" y="58" class="sans eyebrow">POLICY IN THE KERNEL · WHY FAIL-CLOSED IS AFFORDABLE</text>
+  <text x="80" y="112" class="sans sub">4 checks (allow-list · arg deny · secret · injection) × 1,000 tool calls = 4,000 checks</text>
+
+  <!-- spawned -->
+  <g>
+    <rect x="80" y="170" width="1440" height="150" rx="16" fill="#fbeeee" stroke="#e6c4c2" stroke-width="2"/>
+    <text x="116" y="232" class="sans lane">spawn a hook per check</text>
+    <text x="116" y="288" class="sans tag" fill="#a3322c">→ systems quietly fail OPEN</text>
+    <text x="1484" y="262" class="sans big" fill="#a3322c" text-anchor="end">≈ 28 s</text>
+  </g>
+
+  <!-- in-process -->
+  <g>
+    <rect x="80" y="350" width="1440" height="150" rx="16" fill="#e9f7ee" stroke="#bfe3cd" stroke-width="2"/>
+    <text x="116" y="412" class="sans lane">run each check in-process</text>
+    <text x="116" y="468" class="sans tag" fill="#1f6b46">→ fail CLOSED is the default</text>
+    <text x="1484" y="442" class="sans big" fill="#1f6b46" text-anchor="end">≈ 10 ms</text>
+  </g>
+
+  <text x="800" y="568" class="sans tag" fill="#46586a" text-anchor="middle">≈ 2,800× less gate latency — all of it boundary tax, not the decision</text>
+  <line x1="80" y1="610" x2="1520" y2="610" stroke="#e0e6ec" stroke-width="2"/>
+  <text x="80" y="668" class="sans note">one in-process check <tspan class="mono" fill="#1f6b46">~2.4 µs</tspan>   ·   one spawned hook <tspan class="mono" fill="#a3322c">~6.9 ms</tspan>   ·   Apple M3 Pro</text>
+</svg>

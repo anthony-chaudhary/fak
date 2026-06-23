@@ -1,0 +1,91 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="740" viewBox="0 0 1600 740" role="img" aria-labelledby="t d">
+  <title id="t">Watch a poisoned turn vanish, bit-for-bit</title>
+  <desc id="d">A poisoned tool result occupies cache positions 5 to 8. One quarantine verdict evicts the span from the middle of the run; the user query then lands at position 5 as if the poison was never written. The post-eviction distribution is bit-identical to a session that never saw the poison (max delta 0), while keeping the poison genuinely perturbs it (max delta greater than 0).</desc>
+  <defs>
+    <style>
+      .sans{font-family:Inter,ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+      .mono{font-family:"SFMono-Regular",ui-monospace,"Cascadia Code",Consolas,monospace}
+      .eyebrow{fill:#5b6a7a;font-size:24px;font-weight:700;letter-spacing:.04em}
+      .grp{font-size:23px;font-weight:700}
+      .cell{font-size:25px;font-weight:600;fill:#14202b}
+      .pos{fill:#9aa6b2;font-size:20px;font-weight:600}
+      .step{fill:#46586a;font-size:25px;font-weight:600}
+      .note{fill:#1f6b46;font-size:24px;font-weight:700}
+      .wit{font-size:27px;font-weight:700}
+      .witsub{fill:#5b6a7a;font-size:22px;font-weight:500}
+    </style>
+  </defs>
+
+  <rect width="1600" height="740" fill="#ffffff"/>
+  <text x="80" y="58" class="sans eyebrow">ADDRESSABLE KV CACHE · EVICT ONE SPAN FROM THE MIDDLE, BIT-FOR-BIT</text>
+
+  <!-- ============ BEFORE: 9 cached positions, poison in the middle ============ -->
+  <text x="80" y="128" class="sans step" font-weight="700">before</text>
+  <text x="520" y="118" class="sans grp" fill="#1b3a66" text-anchor="middle">system prefix</text>
+  <text x="1150" y="118" class="sans grp" fill="#a3322c" text-anchor="middle">POISONED tool result</text>
+
+  <!-- prefix cells 0..4 (blue) -->
+  <g>
+    <rect x="175"  y="138" width="130" height="80" rx="12" fill="#dce9fb" stroke="#3b6fb5" stroke-width="2"/>
+    <rect x="315"  y="138" width="130" height="80" rx="12" fill="#dce9fb" stroke="#3b6fb5" stroke-width="2"/>
+    <rect x="455"  y="138" width="130" height="80" rx="12" fill="#dce9fb" stroke="#3b6fb5" stroke-width="2"/>
+    <rect x="595"  y="138" width="130" height="80" rx="12" fill="#dce9fb" stroke="#3b6fb5" stroke-width="2"/>
+    <rect x="735"  y="138" width="130" height="80" rx="12" fill="#dce9fb" stroke="#3b6fb5" stroke-width="2"/>
+  </g>
+  <!-- poison cells 5..8 (red) -->
+  <g>
+    <rect x="875"  y="138" width="130" height="80" rx="12" fill="#fbdddd" stroke="#c9453f" stroke-width="2"/>
+    <rect x="1015" y="138" width="130" height="80" rx="12" fill="#fbdddd" stroke="#c9453f" stroke-width="2"/>
+    <rect x="1155" y="138" width="130" height="80" rx="12" fill="#fbdddd" stroke="#c9453f" stroke-width="2"/>
+    <rect x="1295" y="138" width="130" height="80" rx="12" fill="#fbdddd" stroke="#c9453f" stroke-width="2"/>
+  </g>
+  <!-- position numbers 0..8 -->
+  <g class="sans pos" text-anchor="middle">
+    <text x="240"  y="248">0</text><text x="380"  y="248">1</text><text x="520"  y="248">2</text>
+    <text x="660"  y="248">3</text><text x="800"  y="248">4</text><text x="940"  y="248">5</text>
+    <text x="1080" y="248">6</text><text x="1220" y="248">7</text><text x="1360" y="248">8</text>
+  </g>
+
+  <!-- ============ the verdict + eviction ============ -->
+  <text x="800" y="312" class="sans step" text-anchor="middle"><tspan fill="#a3322c" font-weight="700">byte-gate reads the result → QUARANTINE</tspan>   ·   <tspan class="mono" fill="#14202b">Cache.Evict(5, 4)</tspan></text>
+  <g transform="translate(800 338)">
+    <path d="M0 0 L0 42" stroke="#c9453f" stroke-width="3"/>
+    <path d="M0 50 L-12 28 L12 28 Z" fill="#c9453f"/>
+  </g>
+
+  <!-- ============ AFTER: 7 positions, query slid into the freed slots ============ -->
+  <text x="80" y="420" class="sans step" font-weight="700">after</text>
+  <text x="520" y="410" class="sans grp" fill="#1b3a66" text-anchor="middle">system prefix</text>
+  <text x="940" y="410" class="sans grp" fill="#1c5230" text-anchor="middle">query</text>
+
+  <!-- prefix cells 0..4 (blue) -->
+  <g>
+    <rect x="175" y="430" width="130" height="80" rx="12" fill="#dce9fb" stroke="#3b6fb5" stroke-width="2"/>
+    <rect x="315" y="430" width="130" height="80" rx="12" fill="#dce9fb" stroke="#3b6fb5" stroke-width="2"/>
+    <rect x="455" y="430" width="130" height="80" rx="12" fill="#dce9fb" stroke="#3b6fb5" stroke-width="2"/>
+    <rect x="595" y="430" width="130" height="80" rx="12" fill="#dce9fb" stroke="#3b6fb5" stroke-width="2"/>
+    <rect x="735" y="430" width="130" height="80" rx="12" fill="#dce9fb" stroke="#3b6fb5" stroke-width="2"/>
+  </g>
+  <!-- query cells now at positions 5,6 (green) — where the poison used to sit -->
+  <g>
+    <rect x="875"  y="430" width="130" height="80" rx="12" fill="#dbf3e1" stroke="#3fa45f" stroke-width="2"/>
+    <rect x="1015" y="430" width="130" height="80" rx="12" fill="#dbf3e1" stroke="#3fa45f" stroke-width="2"/>
+  </g>
+  <!-- the freed slots, shown as a faint dashed outline so the slide is visible -->
+  <g fill="none" stroke="#cdd5dd" stroke-width="2" stroke-dasharray="5 7">
+    <rect x="1155" y="430" width="130" height="80" rx="12"/>
+    <rect x="1295" y="430" width="130" height="80" rx="12"/>
+  </g>
+  <!-- position numbers 0..6 -->
+  <g class="sans pos" text-anchor="middle">
+    <text x="240"  y="540">0</text><text x="380"  y="540">1</text><text x="520"  y="540">2</text>
+    <text x="660"  y="540">3</text><text x="800"  y="540">4</text><text x="940"  y="540">5</text>
+    <text x="1080" y="540">6</text>
+  </g>
+  <text x="940" y="585" class="sans note" text-anchor="middle">query lands at pos 5, not 9 — the poison was never written</text>
+
+  <!-- ============ the witness ============ -->
+  <line x1="80" y1="628" x2="1520" y2="628" stroke="#e0e6ec" stroke-width="2"/>
+  <text x="80" y="678" class="sans wit"><tspan class="mono" fill="#1f6b46">evicted</tspan><tspan fill="#5b6a7a"> vs never-saw</tspan>   <tspan class="mono" fill="#1f6b46">max|Δ| = 0</tspan>   <tspan class="witsub">bit-identical, every logit</tspan></text>
+  <text x="80" y="716" class="sans wit"><tspan class="mono" fill="#b5792b">poison </tspan><tspan fill="#5b6a7a"> vs never-saw</tspan>   <tspan class="mono" fill="#b5792b">max|Δ| &gt; 0</tspan>   <tspan class="witsub">a real erasure, not a no-op</tspan></text>
+</svg>

@@ -92,7 +92,8 @@ context) also drives **performance** (do shared work once instead of every turn)
 
 Each idea shrinks to a single worked example. The numbers trace to the
 [benchmark authority](https://github.com/anthony-chaudhary/fak/blob/main/BENCHMARK-AUTHORITY.md);
-the live versions run on the [demos page](demos.html).
+the live versions run on the [demos page](demos.html). Or watch the four as a
+[~25-second reveal](showcase.html#by-example).
 
 - **A poisoned turn, removed mid-run.** Quarantine evicts a tool result's K/V from the *middle* of the
   kept run and re-seats every survivor, leaving the cache bit-identical to one that never saw it
