@@ -28,15 +28,20 @@ import (
 	"time"
 )
 
-// DefaultChannel is a PLACEHOLDER for the #dgx-control channel id. The real id is
-// operator infra kept out of source (per PUBLIC-SCRUB-POLICY) — pass it with the
-// -channel flag (or set FAK_SLACK_* env + your own default).
+// DefaultChannel is a PLACEHOLDER for the control channel id. The real id is operator
+// infra kept out of source (per PUBLIC-SCRUB-POLICY). Resolve it the dead-simple way:
+// ResolveChannel() reads FAK_SLACK_CHANNEL / SLACK_CHANNEL, then a CHANNEL= line in
+// .env.slack.local — so you never have to remember the -channel flag. The flag still
+// overrides everything when passed.
 const DefaultChannel = "C00000000000"
 
 const slackAPI = "https://slack.com/api/"
 
 // tokenEnvs is the resolution order, matching the Python tooling.
 var tokenEnvs = []string{"FAK_SLACK_BOT_TOKEN", "SLACK_BOT_TOKEN"}
+
+// channelEnvs is the channel-id resolution order (env first, then the env file).
+var channelEnvs = []string{"FAK_SLACK_CHANNEL", "SLACK_CHANNEL"}
 
 // Client is a minimal Slack Web API client scoped to the bridge's needs.
 type Client struct {
@@ -79,12 +84,31 @@ func ResolveToken() string {
 			return v
 		}
 	}
-	return tokenFromEnvFile()
+	return envFileValue("SLACK_BOT_TOKEN")
 }
 
-// tokenFromEnvFile walks up from the cwd looking for .env.slack.local with a
-// SLACK_BOT_TOKEN= line. This is the durable, gitignored persistence location.
-func tokenFromEnvFile() string {
+// ResolveChannel returns the control channel id from FAK_SLACK_CHANNEL / SLACK_CHANNEL,
+// then a FAK_SLACK_CHANNEL= / SLACK_CHANNEL= line in .env.slack.local. Returns "" if none
+// found, so callers can fall back to DefaultChannel (or an explicit -channel flag, which
+// should win over this).
+func ResolveChannel() string {
+	for _, e := range channelEnvs {
+		if v := strings.TrimSpace(os.Getenv(e)); v != "" {
+			return v
+		}
+	}
+	for _, k := range channelEnvs {
+		if v := envFileValue(k); v != "" {
+			return v
+		}
+	}
+	return ""
+}
+
+// envFileValue walks up from the cwd looking for .env.slack.local and returns the value
+// of the first `KEY=...` line for the given key (an optional `export ` prefix is
+// tolerated). This is the durable, gitignored persistence location.
+func envFileValue(key string) string {
 	dir, err := os.Getwd()
 	if err != nil {
 		return ""
@@ -94,7 +118,9 @@ func tokenFromEnvFile() string {
 		if b, err := os.ReadFile(p); err == nil {
 			for _, ln := range strings.Split(string(b), "\n") {
 				ln = strings.TrimSpace(ln)
-				if v, ok := strings.CutPrefix(ln, "SLACK_BOT_TOKEN="); ok {
+				ln = strings.TrimPrefix(ln, "export ")
+				ln = strings.TrimSpace(ln)
+				if v, ok := strings.CutPrefix(ln, key+"="); ok {
 					return strings.TrimSpace(v)
 				}
 			}

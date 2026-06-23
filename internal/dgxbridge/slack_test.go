@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -139,6 +141,37 @@ func TestFindControlSession_NewestForHost(t *testing.T) {
 	}
 	if cs == nil || cs.ThreadTS != "300.0" {
 		t.Fatalf("expected newest 300.0, got %+v", cs)
+	}
+}
+
+func TestResolveChannel_EnvWins(t *testing.T) {
+	t.Setenv("FAK_SLACK_CHANNEL", "CENV1")
+	t.Setenv("SLACK_CHANNEL", "CENV2")
+	if got := ResolveChannel(); got != "CENV1" {
+		t.Fatalf("FAK_SLACK_CHANNEL should win: got %q", got)
+	}
+}
+
+func TestResolveChannel_FromEnvFile(t *testing.T) {
+	// No env set -> must read CHANNEL= from .env.slack.local found by walking up from cwd.
+	t.Setenv("FAK_SLACK_CHANNEL", "")
+	t.Setenv("SLACK_CHANNEL", "")
+	dir := t.TempDir()
+	body := "SLACK_BOT_TOKEN=xoxb-x\nexport SLACK_BOT_TOKEN\nSLACK_CHANNEL=CFILE9\nexport SLACK_CHANNEL\n"
+	if err := os.WriteFile(filepath.Join(dir, ".env.slack.local"), []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cwd, _ := os.Getwd()
+	defer os.Chdir(cwd)
+	if err := os.Chdir(dir); err != nil {
+		t.Fatal(err)
+	}
+	if got := ResolveChannel(); got != "CFILE9" {
+		t.Fatalf("want CFILE9 from env file, got %q", got)
+	}
+	// The same file's token must still resolve through the shared walker.
+	if got := envFileValue("SLACK_BOT_TOKEN"); got != "xoxb-x" {
+		t.Fatalf("want token xoxb-x from env file, got %q", got)
 	}
 }
 

@@ -1,5 +1,15 @@
 # DGX bridge / benchmark harness — handoff for the next agent
 
+> **2026-06-23 update — discovery is FIXED and the live path is verified.** Three stacked
+> discovery bugs are resolved: (1) the channel now resolves from `.env.slack.local`
+> (`SLACK_CHANNEL=` / `FAK_SLACK_CHANNEL`) so no `-channel` flag is needed; (2) the hub's
+> new compact `*Sessions:*` reply header is recognized; (3) the new
+> `id status profile/mode | age | thread=...` line grammar parses. Verified end-to-end:
+> `go run ./cmd/dgxbridge exec '...'` (no flags) auto-picks the newest running session and
+> reads back real `nvidia-smi` from the lab DGX (8× A100-40GB). The readback / `!dump`
+> concern below was DOWNSTREAM of discovery and did not reproduce on the live pipe-mode
+> sessions. The real channel id + host live only in gitignored `.env.slack.local`.
+
 Status at leave-off (2026-06-20 ~16:10Z): the **pure-Go harness is built, tested green,
 and committed**; the **live run is blocked on the Slack control bridge's read path**,
 which is the thing to fix next for 10× clarity/observability.

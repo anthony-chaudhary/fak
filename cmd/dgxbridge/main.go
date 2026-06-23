@@ -34,7 +34,7 @@ import (
 func main() {
 	var (
 		token     = flag.String("token", "", "Slack bot token (default: env/.env.slack.local)")
-		channel   = flag.String("channel", dgxbridge.DefaultChannel, "Slack channel id (#dgx-control)")
+		channel   = flag.String("channel", "", "Slack control channel id (default: FAK_SLACK_CHANNEL/SLACK_CHANNEL env or .env.slack.local)")
 		threadTS  = flag.String("thread-ts", "", "control-session thread ts (default: auto-discover via -dgx-host)")
 		dgxHost   = flag.String("dgx-host", "", "DGX host to discover the live control thread for")
 		timeout   = flag.Duration("timeout", 4*time.Minute, "overall per-command timeout")
@@ -49,6 +49,17 @@ func main() {
 	if len(args) == 0 {
 		fmt.Fprintln(os.Stderr, "usage: dgxbridge [flags] <status|sessions|selftest|exec|readfile|pull|ship> [args]")
 		os.Exit(2)
+	}
+
+	// Resolve the channel the dead-simple way: explicit -channel wins, else the
+	// FAK_SLACK_CHANNEL/SLACK_CHANNEL env or a CHANNEL line in .env.slack.local, and only
+	// then the placeholder. The placeholder is never reachable, so fail fast with a clear
+	// hint instead of letting every Slack call return channel_not_found.
+	if *channel == "" {
+		*channel = dgxbridge.ResolveChannel()
+	}
+	if *channel == "" || *channel == dgxbridge.DefaultChannel {
+		fatal(fmt.Errorf("no Slack channel set: pass -channel <id>, or add SLACK_CHANNEL=<id> to .env.slack.local (or set FAK_SLACK_CHANNEL)"))
 	}
 
 	client, err := dgxbridge.NewClient(*token)
