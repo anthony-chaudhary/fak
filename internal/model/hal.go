@@ -128,6 +128,30 @@ func (s *Session) weightHALQ8(name string, qt *q8Tensor) compute.Tensor {
 	return t
 }
 
+// weightHALQ4K stages a resident Q4_K weight (raw GGUF super-block bytes) onto the backend, the
+// Q4_K twin of weightHALQ8. The cuda backend copies the raw super-blocks resident and serves them
+// with k_q4k_gemm (the dequant-fused tile, #485); the cpu-ref backend dequants them in its Q4_K
+// MatMul. Cached in halW so a device session uploads each weight to VRAM exactly once. This is what
+// lets the GLM-DSA forward run its dense projections from a memory-lean Q4_K model on the device —
+// the Q4_K majority of a 753B GLM-5.2 on the GPU, with only ~0.56 B/weight resident.
+func (s *Session) weightHALQ4K(name string, qt *q4kTensor) compute.Tensor {
+	key := "q4k:" + name
+	if s.halW != nil {
+		if t, ok := s.halW[key]; ok {
+			return t
+		}
+	}
+	if qt == nil {
+		panic("model: missing Q4_K tensor " + name)
+	}
+	src := compute.NewQ4K(compute.Default(), []int{qt.out, qt.in}, qt.raw)
+	t := s.Backend.Upload(src, compute.Q4_K)
+	if s.halW != nil {
+		s.halW[key] = t
+	}
+	return t
+}
+
 func (s *Session) matWeightHAL(name string) compute.Tensor {
 	if s.useHALQ8Weights() {
 		if qt, ok := s.M.q8w[name]; ok {

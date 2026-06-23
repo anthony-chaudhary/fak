@@ -753,10 +753,13 @@ func (s *Session) glmDsaWeightHAL(name string, out, in int) compute.Tensor {
 	if qt, ok := s.M.q8w[name]; ok {
 		return s.weightHALQ8(name, qt)
 	}
+	if qt, ok := s.M.q4kw[name]; ok {
+		return s.weightHALQ4K(name, qt) // raw Q4_K super-blocks -> k_q4k_gemm (cuda) / cpu-ref Q4_K
+	}
 	if s.M.has(name) {
 		return s.weightHAL(name)
 	}
-	panic("model: glmDsaWeightHAL missing resident weight " + name + " (q4_k device GLM-DSA upload is a follow-up)")
+	panic("model: glmDsaWeightHAL missing resident weight " + name + " (no f32/q8/q4_k residency)")
 }
 
 // residentMatRows reads a projection by name from either the ordinary f32 store
