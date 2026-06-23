@@ -305,9 +305,14 @@ type ChatResponse struct {
 }
 
 // ChatStreamResponse is the OpenAI-compatible SSE chunk shape emitted when the
-// downstream client requests stream=true. It is synthesized only after the full
-// upstream completion has been adjudicated, so the streamed delta carries the
-// same filtered/repaired tool calls as the non-streaming response.
+// downstream client requests stream=true. Two paths produce it. The LIVE path
+// (streamChatLive, taken for a no-tools request whose planner can stream the wire)
+// relays each upstream content fragment as its own chunk for a real
+// time-to-first-token, then emits a terminal finish/usage chunk. The BUFFERED path
+// (writeChatCompletionStream, taken for a tool-bearing request or a non-streaming
+// planner) synthesizes the chunks only after the whole turn is adjudicated. Either
+// way a tool-call delta carries only filtered/repaired calls — no un-adjudicated
+// call is ever streamed.
 type ChatStreamResponse struct {
 	ID      string             `json:"id"`
 	Object  string             `json:"object"`

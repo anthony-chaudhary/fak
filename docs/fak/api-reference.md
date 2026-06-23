@@ -161,7 +161,7 @@ does.
 | `temperature` | number | Forwarded. Optional. |
 | `top_p` | number | Forwarded. Optional. |
 | `stop` | string \| string[] | Either shape accepted. Optional. |
-| `stream` | bool | `true` ⇒ a synthetic SSE stream (see below). |
+| `stream` | bool | `true` ⇒ an SSE stream — live token pass-through when it is safe, else synthesized (see below). |
 
 **Response** (`ChatResponse`) — a standard `chat.completion` object plus the optional
 `fak` extension:
@@ -187,12 +187,22 @@ human-readable summary of the refusals is written into the message `content`.
 | `400` | Malformed JSON body. |
 | `502` | Upstream model error, or the upstream announced tool calls but **none** parsed (fail-closed: the gateway refuses to skip adjudication on a call the model intended to make). The upstream provider's raw error body never crosses the trust boundary. |
 
-**Streaming.** With `stream: true` the gateway buffers the whole upstream turn,
-adjudicates the complete proposed tool-call set, then emits a synthetic
-`text/event-stream`: an opening `role` + surviving-`tool_calls` chunk, content
-fragments (word-boundary segments that reconcatenate byte-for-byte), a final chunk
-carrying `finish_reason` + `usage` + the `fak` extension, and `data: [DONE]`. Raw
-upstream deltas are **never** passed through before adjudication.
+**Streaming.** With `stream: true` the gateway serves a `text/event-stream` by one of
+two paths, chosen so a tool call is **never** passed through before adjudication:
+
+- **Live pass-through** (a request with **no `tools`**, fronting a streaming-capable
+  upstream): each upstream content fragment is relayed as its own chunk the instant the
+  model emits it, so time-to-first-token tracks the model rather than the whole turn.
+  The opening chunk announces the `role`; a terminal chunk carries `finish_reason` +
+  `usage` + the `fak` extension; then `data: [DONE]`. Any tool call a model hallucinates
+  with no tools offered is still adjudicated before emission.
+- **Synthesized** (a **tool-bearing** request, or a non-streaming planner such as the
+  offline mock / in-kernel model): the gateway buffers the whole upstream turn,
+  adjudicates the complete proposed tool-call set, then emits the same chunk shape — an
+  opening `role` + surviving-`tool_calls` chunk, content fragments (word-boundary
+  segments that reconcatenate byte-for-byte), a final `finish_reason` + `usage` + `fak`
+  chunk, and `data: [DONE]`. Raw upstream tool-call deltas are never passed through
+  before adjudication.
 
 ---
 
