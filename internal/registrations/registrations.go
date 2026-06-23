@@ -53,6 +53,13 @@ import (
 	// dispatches. Inactive for non-ship tools (Defers).
 	_ "github.com/anthony-chaudhary/fak/internal/shipgate"
 
+	// Git gate: a structural git-shape prefilter (rank 35). Refuses the argv-
+	// decidable git hazards in a shell command — force-push, commit --amend, add
+	// -A, --no-verify, tag -f, rebase -i — BEFORE the doomed command runs, the in-
+	// kernel dual of tools/githooks/*. Defers on non-git calls and on state-
+	// dependent laws (OFF_TRUNK). Opt out with FAK_GITGATE=off.
+	_ "github.com/anthony-chaudhary/fak/internal/gitgate"
+
 	// AgentDojo ASR steward: the dynamic, ASR-scored replacement for the static
 	// poison.json fixture. Self-registers NewASRSteward() into abi.Stewards() so the
 	// adaptive attack battery (seeds + generative paraphrases) gates a live build

@@ -51,7 +51,7 @@ var tier = map[string]int{
 	"adjudicator": 2, "ctxmmu": 2, "engine": 2, "enginecache": 2, "grammar": 2, "kernel": 2,
 	"preflight": 2, "vdso": 2, "plancfi": 2, "steward": 2, "witness": 2,
 	"harvest": 2, "shipgate": 2, "policy": 2, "modelengine": 2, "ratelimit": 2,
-	"journal": 2,
+	"journal": 2, "gitgate": 2,
 
 	"ifc": 3, "normgate": 3, "recall": 3, "kvmmu": 3, "radixkv": 3, "cdb": 3, "contextq": 3, "agentdojo": 3, "toollint": 3,
 

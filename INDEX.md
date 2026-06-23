@@ -77,6 +77,7 @@ front page.
 - [GLM-5.2 kernel + turn demos (2026-06-21)](docs/notes/GLM52-PURE-KERNEL-AND-AGENT-TURN-DEMOS-RESULTS-2026-06-21.md)
 - [GLM-5.2 pure kernel on DGX A100 (2026-06-21)](docs/notes/GLM52-PURE-KERNEL-ON-GPU-DGX-A100-2026-06-21.md)
 - [On-demand context KV reuse (2026-06-19)](docs/notes/ON-DEMAND-CONTEXT-KV-REUSE-2026-06-19.md)
+- [Git operations in the kernel prefilter — what's possible (2026-06-22)](docs/notes/RESEARCH-git-in-kernel-prefilters-2026-06-22.md)
 - [Grammar-constrained tool-call decoding, upstream vs downstream (2026-06-22)](docs/notes/RESEARCH-grammar-constrained-tool-call-decoding-2026-06-22.md)
 - [Ultra-long-context: levels, levers, naming (2026-06-22)](docs/notes/RESEARCH-ultra-long-context-levels-and-naming-2026-06-22.md)
 - [Capability floor, a security note (2026-06-18)](docs/notes/SECURITY-capability-floor-2026-06-18.md)
