@@ -252,6 +252,82 @@ func TestScalingBendsTheCurve(t *testing.T) {
 	}
 }
 
+// TestScalingPricesFaultTaxAndPlannerCompute is the issue #544 witness: the two costs the
+// Planned regime pays that PromptCostCum deliberately excludes — the forecast-miss
+// re-prefill tax and the O(N)-per-turn planner compute — are now PRICED in the model as
+// reproducible numbers, not named omissions. Three properties, each isolated:
+//   - FaultTaxCum is RetrieveFaults·b (each miss re-prefills ~b tokens), LINEAR in N.
+//   - PlannerComputeCum is Σ i = N·(N+1)/2, QUADRATIC in N (the cost "O(1) resident" does
+//     not bound), and dominates the fault tax at scale.
+//   - Both are ZERO for Linear and Compaction (no forecast recovery, no cost-based planner).
+func TestScalingPricesFaultTaxAndPlannerCompute(t *testing.T) {
+	p := Params{TokensPerTurn: 700, WorkingSet: 8000, ForecastHit: 0.9, Retain: 0.7}
+	turns := []int{50, 100, 1000, 10000, 1000000}
+	cmp := Compare(p, turns)
+	small := Model(Planned, p, []int{100})[0]
+	large := Model(Planned, p, []int{1000000})[0]
+
+	// (1) Fault tax == round((1-p_hit)*b*N) (each miss re-prefills ~b tokens); it tracks
+	// RetrieveFaults*b within a token of float rounding (the two are computed via different
+	// associativity paths, so assert the relationship loosely, the closed form exactly).
+	wantTaxSmall := int64(math.Round((1 - p.ForecastHit) * p.TokensPerTurn * 100))
+	if small.FaultTaxCum != wantTaxSmall {
+		t.Errorf("FaultTaxCum at N=100 must equal round((1-p_hit)*b*N) = %d, got %d",
+			wantTaxSmall, small.FaultTaxCum)
+	}
+	if delta := small.FaultTaxCum - int64(small.RetrieveFaults*p.TokensPerTurn); delta < -1 || delta > 1 {
+		t.Errorf("FaultTaxCum (%d) must track RetrieveFaults*b (%.0f) within 1 token", small.FaultTaxCum, small.RetrieveFaults*p.TokensPerTurn)
+	}
+	// The fault tax is LINEAR in N: 10000x more turns -> 10000x the tax (within rounding).
+	if large.FaultTaxCum < small.FaultTaxCum*9000 {
+		t.Errorf("FaultTaxCum must grow ~linearly with N: small=%d large=%d (ratio <9000x)",
+			small.FaultTaxCum, large.FaultTaxCum)
+	}
+
+	// (2) Planner compute == N*(N+1)/2 (quadratic in N), and it DOMINATES the fault tax at
+	// scale -- the quadratic planning cost outruns the linear miss tax, which is the whole
+	// reason it is priced separately.
+	wantCpuSmall := int64(100 * 101 / 2)
+	if small.PlannerComputeCum != wantCpuSmall {
+		t.Errorf("PlannerComputeCum at N=100 must equal N*(N+1)/2 = %d, got %d",
+			wantCpuSmall, small.PlannerComputeCum)
+	}
+	if large.PlannerComputeCum <= large.FaultTaxCum {
+		t.Errorf("at scale the quadratic planner compute (%d) must dominate the linear fault tax (%d)",
+			large.PlannerComputeCum, large.FaultTaxCum)
+	}
+	// Quadratic growth: 10000x more turns -> ~1e8x the compute.
+	if large.PlannerComputeCum < small.PlannerComputeCum*1_000_000 {
+		t.Errorf("PlannerComputeCum must grow ~quadratically: small=%d large=%d",
+			small.PlannerComputeCum, large.PlannerComputeCum)
+	}
+
+	// (3) The other two regimes pay NEITHER cost: no forecast recovery, no cost-based planner.
+	for i, n := range turns {
+		lin := cmp.Linear[i]
+		c := cmp.Compaction[i]
+		if lin.FaultTaxCum != 0 || lin.PlannerComputeCum != 0 {
+			t.Errorf("linear at N=%d must price no fault tax / planner compute, got tax=%d cpu=%d",
+				n, lin.FaultTaxCum, lin.PlannerComputeCum)
+		}
+		if c.FaultTaxCum != 0 || c.PlannerComputeCum != 0 {
+			t.Errorf("compaction at N=%d must price no fault tax / planner compute, got tax=%d cpu=%d",
+				n, c.FaultTaxCum, c.PlannerComputeCum)
+		}
+	}
+
+	// (4) A perfect forecast prices the fault tax to zero (no misses -> no re-prefill); the
+	// planner compute is independent of forecast quality and stays quadratic.
+	perf := Params{TokensPerTurn: 700, WorkingSet: 8000, ForecastHit: 1.0, Retain: 0.7}
+	perfPt := Model(Planned, perf, []int{1000})[0]
+	if perfPt.FaultTaxCum != 0 {
+		t.Errorf("a perfect forecast (p_hit=1.0) must price the fault tax to zero, got %d", perfPt.FaultTaxCum)
+	}
+	if perfPt.PlannerComputeCum != int64(1000*1001/2) {
+		t.Errorf("planner compute must be independent of forecast quality, got %d", perfPt.PlannerComputeCum)
+	}
+}
+
 func TestScalingBigOLabels(t *testing.T) {
 	if Linear.ResidentBigO() != "Θ(N)" || Planned.ResidentBigO() != "Θ(1)" {
 		t.Error("resident big-O labels wrong")
