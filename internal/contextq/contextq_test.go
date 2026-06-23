@@ -8,7 +8,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/cdb"
 )
 
-func attachFixture(t *testing.T) *cdb.Image {
+func attachFixture(t testing.TB) *cdb.Image {
 	t.Helper()
 	ctx := context.Background()
 	rec, st, err := cdb.IngestSession(ctx, "../../testdata/cdb/session.jsonl", "contextq-fixture")
