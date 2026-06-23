@@ -135,6 +135,47 @@ To prevent benchmark inflation:
 
 ---
 
+## The Industry (Competitive) Scorecard — fak vs SOTA
+
+The authority records *fak's own* numbers; the **industry scorecard** is the
+referee that turns them into an honest competitive position. It is the
+outward-facing member of the scorecard family (alongside the inward
+repo-hygiene / code-quality / doc-appeal sticks), and it answers the one question
+the authority's tables don't: *where does fak stand against the field — parity
+with vLLM, true gain over the next-best alternative, and where does it lose?*
+
+It is **industry-first**: the source of truth is a researched taxonomy of the
+dimensions the field competes on, not the handful fak happened to measure — so the
+scorecard can never quietly omit the regimes where fak has no number. It is
+**modular**: a directory of small JSON files, one concern per file.
+
+| Piece | What it is |
+|---|---|
+| `tools/industry_scorecard.data/_taxonomy.json` | The industry-first dimension catalog: every dimension the LLM-serving / agent-infra field competes on (throughput, KV/prefix reuse, quant, decoding, distributed, models, agent-fleet, cost, ops, security), each with the current SOTA bar and a **dated source**. |
+| `tools/industry_scorecard.data/_competitors.json` | The SOTA-system registry (vLLM, SGLang, TensorRT-LLM, llama.cpp, …) with `last_reviewed` dates. |
+| `tools/industry_scorecard.data/rows-*.json` | fak's honest position on each dimension, grouped by category — mostly named `no-claim` gaps, with the measured leads / parities / losses traced to a commit/artifact. |
+| `tools/industry_scorecard.py` | The deterministic grader. Folds the honesty KPIs into **parity-debt** (of the rows that exist) and the taxonomy positioning into **coverage** (of the field), blended into the composite score. Also `--gaps` (coverage backlog) and `--stale` (industry-drift backlog). |
+| `docs/industry-scorecard/` | The generated modular doc folder (`--markdown-dir`): an index + one page per group + the dimension catalog + the update process. Indexed from `INDEX.md`. Never hand-edited. |
+| `/industry-score` skill | The **update process** on two cadences: as the industry moves (new dimension → coverage drops; stale SOTA bar → `--stale`) and as fak moves (a benchmark turns a `no-claim` into a measured row). |
+
+**The doctrine it enforces mechanically** (the same anti-inflation rules above, as
+checks): every win is vs a tuned/SOTA baseline, **never naive** (`baseline_sota`);
+every verdict matches its ratio, so a `lead` can't be claimed while trailing
+(`verdict_consistency`); a correctness oracle can only be parity and a theoretical
+ceiling can never be led; every contracted regime is covered **including its losses**
+(`axis_coverage` requires a `trails` row); every fak number traces to a
+commit/artifact/authority doc (`fak_traced`) and every competitor number is
+sourced (`competitor_sourced`); a non-comparable comparison is disclosed
+(`apples_disclosed`). Two numbers are driven: **parity-debt to zero** (every claimed
+comparison honest) and **coverage to 100%** (every industry dimension at least
+positioned) — and both stay there as new benchmarks land and the field moves.
+
+**How it relates to this process:** a new benchmark flows through Phases 1–4
+above into `BENCHMARK-AUTHORITY.md`; the `/industry-score` pass then **records**
+it as a competitive row (a win, a parity, or an honest loss) — it never measures
+or invents a number. The authority is the *numbers*, HERO is the *pitch*, the
+industry scorecard is the *referee*.
+
 ## Cross-Index: Related Skills
 
 > **📋 Skills Index:** the `.claude/skills/README.md` catalog (agent-side tooling — not
