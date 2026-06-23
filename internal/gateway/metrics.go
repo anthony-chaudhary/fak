@@ -139,7 +139,18 @@ type AdjudicationSummary struct {
 	Denied      uint64 `json:"denied"`
 	Transformed uint64 `json:"transformed"`
 	Quarantined uint64 `json:"quarantined"`
-	Errored     uint64 `json:"errored"`
+	// Deferred counts DEFER verdicts: a non-blocking admit (e.g. an inbound tool
+	// result the kernel let through while raising the session's taint watermark).
+	// It is NOT an error — the old default-bucket fold reported it under Errored,
+	// which made a perfectly healthy proxy_admit read as a failure in the exit
+	// summary `fak guard` prints (a tool-bearing turn always admits its result).
+	Deferred uint64 `json:"deferred"`
+	// Escalated counts REQUIRE_WITNESS verdicts: a call HELD pending a witness /
+	// human approval rather than allowed or denied outright. Also not an error.
+	Escalated uint64 `json:"escalated"`
+	// Errored counts genuine ERROR verdicts (and any unknown future kind) — a real
+	// adjudication failure, never silently dropped.
+	Errored uint64 `json:"errored"`
 	// ByReason maps a deny/quarantine reason code to its count (the forensic "why").
 	ByReason map[string]uint64 `json:"by_reason,omitempty"`
 }
@@ -173,7 +184,16 @@ func (m *gatewayMetrics) adjudicationSummary() AdjudicationSummary {
 			if key.reason != "" {
 				sum.ByReason[key.reason] += n
 			}
-		default: // "ERROR" or any future verdict kind: counted, never silently dropped.
+		case "DEFER":
+			// A non-blocking admit (the inbound result was let through, the call
+			// was not refused). Distinct from ALLOW only in that the kernel held a
+			// firm opinion in reserve; reporting it as "errored" alarmed the
+			// operator over a perfectly healthy decision.
+			sum.Deferred += n
+		case "REQUIRE_WITNESS":
+			// Held pending a witness / approval — an escalation, not an error.
+			sum.Escalated += n
+		default: // a genuine "ERROR", or an unknown future kind: counted, never silently dropped.
 			sum.Errored += n
 		}
 	}

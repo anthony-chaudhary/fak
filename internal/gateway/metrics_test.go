@@ -98,6 +98,46 @@ func TestInflightSnapshotSurfacesLiveRequests(t *testing.T) {
 	}
 }
 
+// TestAdjudicationSummaryClassifiesEveryVerdict proves the exit roll-up `fak guard`
+// prints buckets each verdict honestly: a DEFER (a non-blocking admit — what an
+// inbound tool_result earns on a tool-bearing turn) is "deferred", a REQUIRE_WITNESS
+// is "escalated", and ONLY a genuine ERROR (or unknown future kind) is "errored".
+// Regression for the live blemish where a healthy `fak guard -- claude` tool-use turn
+// reported its proxy_admit DEFER as "1 errored".
+func TestAdjudicationSummaryClassifiesEveryVerdict(t *testing.T) {
+	m := newGatewayMetrics(time.Now())
+	d := time.Millisecond
+	m.observeOperation("adjudicate", WireVerdict{Kind: "ALLOW"}, nil, d)
+	m.observeOperation("adjudicate", WireVerdict{Kind: "TRANSFORM"}, nil, d)
+	m.observeOperation("adjudicate", WireVerdict{Kind: "DENY", Reason: "POLICY_BLOCK"}, nil, d)
+	m.observeOperation("proxy_admit", WireVerdict{Kind: "QUARANTINE", Reason: "SECRET"}, nil, d)
+	m.observeOperation("proxy_admit", WireVerdict{Kind: "DEFER"}, nil, d) // a normal inbound-result admit
+	m.observeOperation("adjudicate", WireVerdict{Kind: "REQUIRE_WITNESS"}, nil, d)
+	m.observeOperation("adjudicate", WireVerdict{Kind: "ERROR"}, nil, d)                 // a genuine failure
+	m.observeOperation("adjudicate", WireVerdict{Kind: "ALLOW"}, io.ErrUnexpectedEOF, d) // err overrides kind -> ERROR
+
+	sum := m.adjudicationSummary()
+	if sum.Total != 8 {
+		t.Fatalf("Total = %d, want 8", sum.Total)
+	}
+	if sum.Allowed != 1 || sum.Transformed != 1 || sum.Denied != 1 || sum.Quarantined != 1 {
+		t.Errorf("allow/transform/deny/quarantine = %d/%d/%d/%d, want 1/1/1/1",
+			sum.Allowed, sum.Transformed, sum.Denied, sum.Quarantined)
+	}
+	if sum.Deferred != 1 {
+		t.Errorf("Deferred = %d, want 1 (a DEFER must NOT count as errored)", sum.Deferred)
+	}
+	if sum.Escalated != 1 {
+		t.Errorf("Escalated = %d, want 1 (a REQUIRE_WITNESS must NOT count as errored)", sum.Escalated)
+	}
+	if sum.Errored != 2 { // the explicit ERROR verdict + the err-tagged ALLOW
+		t.Errorf("Errored = %d, want 2 (only genuine failures)", sum.Errored)
+	}
+	if sum.ByReason["POLICY_BLOCK"] != 1 || sum.ByReason["SECRET"] != 1 {
+		t.Errorf("ByReason = %v, want POLICY_BLOCK=1 SECRET=1", sum.ByReason)
+	}
+}
+
 // TestRenderMetricsEmitsLiveInflightSignals proves the scrape surface reflects a
 // request that is still running; the case the user hit where a live request was
 // otherwise a black box.

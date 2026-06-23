@@ -246,6 +246,25 @@ func TestFormatAuditSummary(t *testing.T) {
 	if strings.Contains(clean, "blocked:") {
 		t.Errorf("clean summary should have no blocked lines:\n%s", clean)
 	}
+
+	// A DEFER (a non-blocking admit, e.g. a tool result let through on a tool-bearing
+	// turn) and a REQUIRE_WITNESS (a held call) are normal outcomes — they must be
+	// named as "deferred"/"escalated" and NEVER fold into "errored". This is the
+	// blemish a live `fak guard -- claude` tool-use turn surfaced: its healthy
+	// proxy_admit DEFER printed as "1 errored".
+	mixed := formatAuditSummary(gateway.AdjudicationSummary{Total: 3, Allowed: 1, Deferred: 1, Escalated: 1})
+	for _, want := range []string{"1 allowed", "1 deferred", "1 escalated"} {
+		if !strings.Contains(mixed, want) {
+			t.Errorf("mixed summary missing %q:\n%s", want, mixed)
+		}
+	}
+	if strings.Contains(mixed, "errored") {
+		t.Errorf("a deferred/escalated-only run must not report any errored:\n%s", mixed)
+	}
+	// With zero deferred/escalated the line stays short — neither word appears.
+	if strings.Contains(clean, "deferred") || strings.Contains(clean, "escalated") {
+		t.Errorf("clean summary should not mention deferred/escalated:\n%s", clean)
+	}
 }
 
 func TestGuardWaitHealthy(t *testing.T) {

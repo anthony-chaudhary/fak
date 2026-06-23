@@ -569,6 +569,15 @@ func formatAuditSummary(sum gateway.AdjudicationSummary) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "fak guard: %d kernel decision(s) — %d allowed, %d denied, %d repaired, %d quarantined",
 		sum.Total, sum.Allowed, sum.Denied, sum.Transformed, sum.Quarantined)
+	// Deferred (a non-blocking admit, e.g. a tool result let through) and escalated
+	// (held pending a witness) are normal, non-error outcomes — show them only when
+	// they happened so the common clean line stays short, and never under "errored".
+	if sum.Deferred > 0 {
+		fmt.Fprintf(&b, ", %d deferred", sum.Deferred)
+	}
+	if sum.Escalated > 0 {
+		fmt.Fprintf(&b, ", %d escalated", sum.Escalated)
+	}
 	if sum.Errored > 0 {
 		fmt.Fprintf(&b, ", %d errored", sum.Errored)
 	}
