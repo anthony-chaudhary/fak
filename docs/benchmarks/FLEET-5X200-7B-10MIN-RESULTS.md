@@ -29,6 +29,17 @@ The gap between row 1 and row 2 is **decode batching** (2.5×). The gap to row 3
 re-prefilling** (≥30×). Both are what the fak kernel does; the absolute minutes are what an M3 Pro's
 Metal 7B forward actually delivers.
 
+> ⚠️ **Which forward — read this before reading "under 10 minutes" as a fak claim.** The 8.2 min
+> above is the **host's Metal forward** (llama.cpp `-ngl 99`) running fak's *batched-and-shared
+> pattern*. It is **not** the *pure* fak kernel doing the matmuls. fak's **own** forward on a Mac is
+> pure-Go **CPU** (8.7 t/s decode / 16 t/s prefill on this M3 Pro — its Metal *decode* lane is still
+> open, `internal/metalgemm`), so the identical 5×200 fleet **on fak's own forward is ~22–51 min,
+> well over the bar**. The pure fak kernel reaches sub-10-min only where its forward is GPU-class —
+> its **CUDA** path (A100 `sm_80`, or the committed RTX-4070 decode-parity result) — **not** on a
+> CPU-only Mac. So: *the fleet fits in 10 min on a MacBook's Metal forward with fak's reuse pattern;
+> the **pure-fak-kernel-on-a-Mac** version does not, until the Metal decode lane lands.* fak's
+> contribution is the reuse + batching + per-agent KV ownership + safety floor — not the raw t/s.
+
 ## What we measured (the raw M3 Pro 7B numbers)
 
 `llama-batched-bench` on the 7B Q8, prefix length 2,048, generating at parallelism 1 / 2 / 5:
