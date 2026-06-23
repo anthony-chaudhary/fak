@@ -359,3 +359,9 @@ gpucheck_wsl
 # is an operator action — this rule only stops the leak vector.)
 sk-ant-*
 sk-ant-oat01-*
+
+# --- runtime demo artifact (regenerated on every run) -----------------------------
+# cmd/memqdemo writes memqdemo-report.json into its working dir on each run as the
+# machine-readable witness of that run; it is a build product, not source. Track the
+# code that emits it, not the emission.
+memqdemo-report.json
