@@ -23,6 +23,8 @@ below, so the front door never has to grow to stay complete.
 
 Each turns a fuzzy goal into a number you can drive toward zero.
 
+- [Industry scorecard](docs/INDUSTRY-SCORECARD.md) — the one OUTWARD stick: fak vs the state of the art (vLLM/SGLang/llama.cpp), graded for honest parity / true gain / shown losses.
+- [Agent-readiness scorecard](docs/AGENT-READINESS-SCORECARD.md) — can an AI agent discover, adopt, and build on fak (friction-debt across the three steps an agent walks).
 - [Repo-hygiene scorecard](docs/REPO-HYGIENE-SCORECARD.md) — verbosity, organization, indexing, and accessibility of the whole tree.
 - [Code-quality scorecard](docs/CODE-QUALITY-SCORECARD.md) — the Go module's code-debt.
 - [Demo-quality scorecard](docs/DEMO-QUALITY-SCORECARD.md) — are the demos runnable, honest, self-contained.
@@ -73,9 +75,11 @@ front page.
 - [Gate down the stack (2026-06-22)](docs/notes/EXPLAINER-gate-down-the-stack-2026-06-22.md)
 - [Trust floor, two lenses (2026-06-17)](docs/notes/EXPLAINER-trust-floor-two-lenses-2026-06-17.md)
 - [GLM-5.2 DSA attention projections on the pure kernel (2026-06-22)](docs/notes/GLM52-DSA-PROJECTIONS-ON-PURE-KERNEL-DGX-2026-06-22.md)
+- [GLM-5.2 DSA sparse attention on the pure kernel (2026-06-23)](docs/notes/GLM52-DSA-SPARSE-ATTENTION-ON-PURE-KERNEL-2026-06-23.md)
 - [GLM-5.2 five DGX benchmarks (2026-06-22)](docs/notes/GLM52-PERFORMANT-DGX-FIVE-BENCHMARKS-2026-06-22.md)
 - [GLM-5.2 kernel + turn demos (2026-06-21)](docs/notes/GLM52-PURE-KERNEL-AND-AGENT-TURN-DEMOS-RESULTS-2026-06-21.md)
 - [GLM-5.2 pure kernel on DGX A100 (2026-06-21)](docs/notes/GLM52-PURE-KERNEL-ON-GPU-DGX-A100-2026-06-21.md)
+- [Mac bench refresh: CPU Q8 parity + uncontended radix (2026-06-23)](docs/notes/MAC-BENCH-REFRESH-2026-06-23.md)
 - [On-demand context KV reuse (2026-06-19)](docs/notes/ON-DEMAND-CONTEXT-KV-REUSE-2026-06-19.md)
 - [idea-scout triage: Doberman-Core as prior art (2026-06-23)](docs/notes/RESEARCH-doberman-prior-art-triage-2026-06-23.md)
 - [Git operations in the kernel prefilter — what's possible (2026-06-22)](docs/notes/RESEARCH-git-in-kernel-prefilters-2026-06-22.md)
