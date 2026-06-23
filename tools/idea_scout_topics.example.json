@@ -1,0 +1,29 @@
+{
+  "_comment": "Example --config for tools/idea_scout.py. Without --config the tool uses its baked-in DEFAULT_TOPICS (this same shape) and DEFAULTS thresholds. Provide `topics` to REPLACE the topic set, `thresholds` to override any subset of the numeric knobs. Each topic: `key` (stable id, also the dedup/score group), `arxiv` (arXiv API query language: all:/ti:/abs: + AND/OR; omit to skip arXiv), `github` (gh search repos query; omit to skip GitHub), `terms` (relevance terms scored in title>abstract), `area` (an EXISTING repo label or it is dropped).",
+  "topics": [
+    {
+      "key": "prompt-injection-defense",
+      "arxiv": "abs:\"prompt injection\" AND (abs:agent OR abs:LLM OR abs:tool)",
+      "github": "prompt injection defense",
+      "terms": ["prompt injection", "indirect", "jailbreak", "guardrail", "defense", "tool", "agent", "untrusted", "quarantine"],
+      "area": "security"
+    },
+    {
+      "key": "kv-prefix-cache-reuse",
+      "arxiv": "(abs:\"KV cache\" OR abs:\"prefix cache\") AND (abs:reuse OR abs:inference)",
+      "github": "llm kv cache",
+      "terms": ["kv cache", "prefix cache", "reuse", "radix", "paged", "prefill", "speculative"],
+      "area": "prompt-caching"
+    }
+  ],
+  "thresholds": {
+    "recent_days": 180,
+    "min_score": 25,
+    "max_issues": 3,
+    "arxiv_per_topic": 8,
+    "github_per_topic": 6,
+    "min_stars": 25,
+    "dup_jaccard": 0.55,
+    "issue_scan_limit": 800
+  }
+}

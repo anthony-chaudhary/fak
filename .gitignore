@@ -166,6 +166,11 @@ tools/grafana/_*.json
 # run state they write is not.
 .dispatch-runs/
 
+# idea-scout seen-cache — node-local {source_id: record} of every candidate the
+# daily scout has filed, its durable anti-re-file rung (tools/idea_scout.py). The
+# SCRIPT is tracked; the cache it writes is local fleet state, not source.
+.idea-scout/
+
 # rsiloop benchmark baseline — regenerable per-node state (the measured baseline
 # + its pinned SHA, re-derived by `fak rsiloop`). Dotfile by convention; ignored
 # per the operator's "keep git status quiet for regenerable bench output" rule.
