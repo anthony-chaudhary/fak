@@ -96,6 +96,10 @@ reach and why. Do NOT fabricate a pass.
 
 read first: run `gh issue view {n}` for the live issue, then orient with \
 `AGENTS.md` (build/test/run + the hard rules) and `llms.txt` (the doc map). \
+Then run `python tools/memory_read.py` for the committed fleet memory (lane \
+quirks, known blockers, host gotchas) — a Claude worker gets this auto-injected, \
+an opencode worker does NOT, so this read is how both backends start warm (it is \
+a harmless no-op if the mirror is absent). \
 This issue routed to the `{lane}` lane (its file-tree). Labels: {labels}.
 
 issue body (verbatim, may be truncated — re-read live):
@@ -130,7 +134,10 @@ acceptance (your stop condition): a committed change on `main` whose subject \
 cites `#{n}` and whose gate you actually ran is green — OR a final report that \
 names the specific missing artifact/host capability and the smallest next step. \
 Honesty over a green-looking lie: the repo keeps a witness ledger and a \
-self-authored "done" is re-checked against git.
+self-authored "done" is re-checked against git. If you discovered a durable fact \
+worth keeping (a lane quirk, a host gotcha, a blocker), surface it explicitly in \
+your final message so an operator or Claude peer can record it to the memory \
+mirror — an opencode worker has no auto-memory write path of its own.
 
 workspace: {workspace}. lane: {lane}. issue: #{n}.
 """
