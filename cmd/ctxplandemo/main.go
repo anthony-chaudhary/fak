@@ -263,6 +263,56 @@ func run(budget int) error {
 	fmt.Printf("  next-turn plan: %d span(s), %d resident tokens, faithful=%v\n",
 		len(nextPlan.Selected), nextPlan.CostUsed, ctxplan.Audit(nextPlan).Faithful)
 
+	// ---- 6.5. The candidate INDEX: bounding the planner's per-turn COMPUTE ----------
+	// The budget bounds the resident TOKENS each turn; the index bounds the planner's own
+	// per-turn WORK. A full scan scores every one of N spans each turn (Σ i = N·(N+1)/2,
+	// Θ(N²) cumulative); the index probes a BOUNDED candidate set (an inverted token index +
+	// a recency tail + the durable set), so the planner scores O(c), not O(N) — the Postgres
+	// index access path. "O(1) current turn" then holds for the planner's own work, not just
+	// its resident output. A pruned span is a forecast MISS, never a lost fact (still in the
+	// lossless store, still gated).
+	fmt.Println("\n== Candidate index: bounded per-turn planner compute (the Postgres access path) ==")
+	noisy := ctxplan.NewMemStore()
+	noisy.Add("user", ctxplan.DurabilityDurable, []byte("I always deploy from the release branch, never main"), false)
+	noisy.Add("user", ctxplan.DurabilitySession, []byte("goal: rotate the auth token across all services"), false)
+	noisy.Add("WebSearch", ctxplan.DurabilityDurable, []byte("auth token rotation runbook: mint roll revoke"), false)
+	const noiseN = 5000
+	for i := 0; i < noiseN; i++ {
+		noisy.Add("Bash", ctxplan.DurabilityTurn, []byte(fmt.Sprintf("build log line %d compiled some files quietly", i)), false)
+	}
+	ix := ctxplan.BuildIndex(mustSpans(ctx, noisy))
+	idxForecast := ctxplan.Forecast{Intents: []string{"auth token rotation"}, Pins: []string{"span:0", "span:1"}}
+	probe := ix.Probe(idxForecast, ctxplan.ProbeOptions{})
+	fmt.Printf("  store has %d spans; a full scan scores all %d, the index probes %d (capped at MaxCandidates) — %.0fx fewer\n",
+		ix.Len(), ix.Len(), len(probe), float64(ix.Len())/float64(len(probe)))
+	idxPlan := ix.PlanCells(idxForecast, ctxplan.Budget{Tokens: budget}, nil, ctxplan.ProbeOptions{})
+	idxResident := map[string]bool{}
+	for _, s := range idxPlan.Selected {
+		idxResident[s.ID] = true
+	}
+	for _, must := range []string{"span:0", "span:1", "span:2"} {
+		if !idxResident[must] {
+			return fmt.Errorf("the index-bounded plan dropped the high-value span %s (buried under %d noise spans)", must, noiseN)
+		}
+	}
+	if !ctxplan.Audit(idxPlan).Faithful {
+		return fmt.Errorf("the index-bounded plan was not faithful: %+v", ctxplan.Audit(idxPlan))
+	}
+	if idxPlan.CostUsed > budget {
+		return fmt.Errorf("the index-bounded plan exceeded the O(1) budget: %d > %d", idxPlan.CostUsed, budget)
+	}
+	if len(probe) >= ix.Len() {
+		return fmt.Errorf("the index probe (%d) did not bound below the full scan (%d)", len(probe), ix.Len())
+	}
+	// The cumulative compute flatten across a million-turn horizon: Θ(N²) vs Θ(c·N).
+	const horizon = 1_000_000
+	fullScan := int64(horizon) * int64(horizon+1) / 2 // Σ i = N·(N+1)/2
+	bounded := ctxplan.IndexBoundedPlannerCompute(ctxplan.DefaultMaxCandidates, horizon)
+	fmt.Printf("  the high-value spans stay resident (buried under %d noise), plan faithful=%v within budget %d\n",
+		noiseN, ctxplan.Audit(idxPlan).Faithful, budget)
+	fmt.Printf("  cumulative planner compute @ 1M turns: full-scan %.2e ops Θ(N²) vs index-bounded %.2e ops Θ(c·N) — %.0fx less\n",
+		float64(fullScan), float64(bounded), float64(fullScan)/float64(bounded))
+
 	// ---- 7. The scaling law: the bent curve across the turn horizon --------------
 	fmt.Println("\n== Scaling law: resident tokens & exact-recall across the turn horizon ==")
 	fmt.Println("   params: 700 tokens/turn, W=8000-token working set, forecast hit 0.9, compaction retain 0.7")
