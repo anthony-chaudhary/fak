@@ -41,6 +41,9 @@ from datetime import datetime, timezone
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 FLEET_DIR = os.path.dirname(HERE)
+if HERE not in sys.path:
+    sys.path.insert(0, HERE)
+import fleet_session_signals  # noqa: E402  -- shared limit/auth banner detection
 
 
 def _env_flag(name: str) -> bool:
@@ -50,6 +53,14 @@ def _env_flag(name: str) -> bool:
 LIVE = ("--live" in sys.argv) or _env_flag("FAK_LIVE")
 WINDOW_H = float(os.environ.get("FAK_WINDOW_H", "6"))
 MAX_PER_TICK = int(os.environ.get("FAK_MAX_PER_TICK", "2"))
+# How many times a session may be auto-resumed before the gate gives up and leaves
+# it for a human. The original gate burned a session on the FIRST launch regardless
+# of outcome, so a resume that died 2s later on a usage-limit wall was permanently
+# stranded (only a manual `consolidate-resume-throttle-strand` ledger override
+# revived it). Now a resume that fails RECOVERABLY (limit wall / transient) stays
+# eligible up to this many attempts; a CLEAN finish or an unrecoverable auth wall
+# still burns it once. Override with FAK_MAX_ATTEMPTS.
+MAX_ATTEMPTS = int(os.environ.get("FAK_MAX_ATTEMPTS", "3"))
 # The id of the session this watchdog is running inside (set by the Claude Code
 # harness). Used to refuse self-resume -- a live operator session can briefly look
 # like a stopped autonomous worker. Empty when run outside a Claude session (cron).
@@ -162,6 +173,119 @@ def rehome_transcript(src_cfg: str, dst_cfg: str, project: str, sid: str) -> boo
     return True
 
 
+def _newest_transcript(sid: str) -> str | None:
+    """The most-recently-modified transcript for this session across ALL account
+    dirs (a re-home writes a fresh copy under the target). Mirrors resume_watch."""
+    import glob
+    home = os.path.expanduser("~")
+    pats = [p for p in glob.glob(os.path.join(home, ".claude*", "projects", "*", sid + ".jsonl"))
+            if os.path.isfile(p)]
+    return max(pats, key=os.path.getmtime) if pats else None
+
+
+def _record_text(rec: dict) -> str:
+    """Text of one transcript record's message content (str or block-list)."""
+    msg = rec.get("message") if isinstance(rec, dict) else None
+    content = msg.get("content") if isinstance(msg, dict) else (
+        rec.get("content") if isinstance(rec, dict) else None)
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        return "\n".join(b.get("text", "") for b in content
+                         if isinstance(b, dict) and b.get("type") == "text")
+    return ""
+
+
+def _terminal_text(path: str) -> str:
+    """Text of the transcript's TERMINAL user/assistant message record -- the last
+    real turn, ignoring trailing control/metadata records (mode/permission-mode/
+    last-prompt etc.). Classification must read only this: a usage-limit / 529
+    banner that sits 5 turns back is NOT the session's current outcome (a later
+    clean turn supersedes it), so concatenating the tail would misread a recovered,
+    cleanly-finished session as still-walled."""
+    try:
+        with open(path, encoding="utf-8") as fh:
+            lines = fh.readlines()
+    except Exception:
+        return ""
+    for ln in reversed(lines):
+        ln = ln.strip()
+        if not ln:
+            continue
+        try:
+            rec = json.loads(ln)
+        except ValueError:
+            continue
+        if (rec.get("type") in ("user", "assistant")
+                or (isinstance(rec.get("message"), dict)
+                    and rec["message"].get("role") in ("user", "assistant"))):
+            return _record_text(rec)
+    return ""
+
+
+def last_resume_outcome(sid: str) -> str:
+    """How did this session's LAST (resumed) turn end? Read from the transcript's
+    TERMINAL turn -- ground truth, never a self-report, and never an earlier turn a
+    later one superseded. Returns one of:
+      'recoverable' -- ended on a usage-limit wall (resumable after the reset) or a
+                        transient API error; another attempt is warranted.
+      'unrecoverable' -- an auth/login/credit/access wall; a re-resume can't fix it.
+      'progressed'  -- a normal/clean turn; the resume took. Burn it (resume-once).
+      'unknown'     -- no transcript / unreadable; treat as progressed (conservative,
+                        matches the old burn-once behavior so we never loop blindly).
+    """
+    tpath = _newest_transcript(sid)
+    if not tpath:
+        return "unknown"
+    text = _terminal_text(tpath)
+    if not text:
+        return "unknown"
+    if fleet_session_signals.is_auth_error(text) or fleet_session_signals.needs_login_prompt(text):
+        return "unrecoverable"
+    if fleet_session_signals.limit_reset(text):
+        return "recoverable"
+    low = text.lower()
+    if "overloaded" in low or "529" in text or ("api error" in low and "rate" in low):
+        return "recoverable"
+    return "progressed"
+
+
+def resume_blocked(sid: str, history: list[dict]) -> tuple[bool, str]:
+    """Outcome-aware once-gate. ``history`` is the prior ledger entries for ``sid``
+    (oldest first). Decides whether a NEW resume is blocked:
+
+      * no history            -> NOT blocked (first resume).
+      * any 'consolidate'/manual override or a confirmed clean finish -> blocked
+        (an operator settled it, or it genuinely completed).
+      * attempts >= MAX_ATTEMPTS -> blocked (give up, leave for a human).
+      * else look at how the LAST attempt actually ended: 'recoverable' (limit /
+        transient) -> NOT blocked (try again); 'unrecoverable' (auth) or
+        'progressed' (clean) -> blocked.
+
+    This replaces "any ledger row for the sid => never again" with "blocked unless
+    the last attempt failed recoverably and we are under the attempt cap" -- so a
+    resume that immediately hit a usage-limit wall is retried past the reset instead
+    of being permanently stranded."""
+    if not history:
+        return False, ""
+    # A manual override entry (operator-settled) is authoritative -- honor it.
+    if any(str(h.get("action", "")).startswith("consolidate") or h.get("manual_override")
+           for h in history):
+        return True, "operator-settled (manual ledger override)"
+    auto = [h for h in history if h.get("cause") or h.get("phase") in ("launched", "resumed")
+            or h.get("action") in (None, "", "auto-resume")]
+    attempts = len(auto) or len(history)
+    if attempts >= MAX_ATTEMPTS:
+        return True, f"attempt cap reached ({attempts}/{MAX_ATTEMPTS})"
+    outcome = last_resume_outcome(sid)
+    if outcome == "recoverable":
+        return False, f"last resume failed recoverably ({outcome}); attempt {attempts + 1}/{MAX_ATTEMPTS}"
+    if outcome == "unrecoverable":
+        return True, "last resume hit an auth/login wall -- re-resume can't fix it"
+    # progressed / unknown -> the resume took (or we can't prove it didn't): burn once.
+    return True, "already resumed once (resume took)"
+
+
 def main() -> int:
     os.makedirs(LOG_DIR, exist_ok=True)
 
@@ -207,14 +331,16 @@ def main() -> int:
     except Exception:
         pass
 
-    # durable resume-once ledger
+    # durable resume ledger -- grouped per session so the gate can reason about the
+    # OUTCOME and attempt count of prior resumes, not merely their existence.
     ledger_path = os.path.join(REG_DIR, "resume_ledger.jsonl")
-    resumed = {}
+    history: dict[str, list[dict]] = {}
     if os.path.exists(ledger_path):
         with open(ledger_path) as fh:
             for ln in fh:
                 try:
-                    resumed[json.loads(ln)["session"]] = True
+                    rec0 = json.loads(ln)
+                    history.setdefault(rec0["session"], []).append(rec0)
                 except Exception:
                     pass
 
@@ -238,8 +364,9 @@ def main() -> int:
         if worker_accts and p.get("account") not in worker_accts:
             note(f"  SKIP {sid8} -- account {p.get('account')} is not an offered worker (policy/tombstoned)")
             continue
-        if sid in resumed:
-            note(f"  SKIP {sid8} -- already resumed once (ledger)")
+        blocked, why = resume_blocked(sid, history.get(sid, []))
+        if blocked:
+            note(f"  SKIP {sid8} -- {why}")
             continue
         if not LIVE:
             note(f"  WOULD RESUME {sid8} acct={acct} proj={p.get('project')}")
@@ -267,15 +394,24 @@ def main() -> int:
                 cwd=wd, env=env, stdout=so, stderr=se,
                 start_new_session=True,
             )
-        # record in the durable ledger BEFORE anything else -- a crash can't double-resume
+        # Record the launch BEFORE anything else -- a crash can't double-LAUNCH in
+        # this tick. But the gate keys on OUTCOME, not mere presence: phase="launched"
+        # marks an attempt whose result is unknown until the next tick reads the
+        # transcript (resume_blocked -> last_resume_outcome). A resume that dies
+        # recoverably (limit/transient) stays eligible up to MAX_ATTEMPTS instead of
+        # being burned on launch; a clean finish / auth wall blocks it as before.
+        attempt = len([h for h in history.get(sid, []) if h.get("phase") in ("launched", "resumed")
+                       or h.get("cause")]) + 1
         rec = {"ts": now_iso(), "session": sid, "account": p.get("account"),
                "resume_account": p.get("resume_account"), "rehomed": bool(p.get("rehomed")),
-               "project": p.get("project"), "pid": proc.pid, "cause": p.get("disp")}
+               "project": p.get("project"), "pid": proc.pid, "cause": p.get("disp"),
+               "phase": "launched", "attempt": attempt}
         with open(ledger_path, "a") as fh:
             fh.write(json.dumps(rec) + "\n")
-        resumed[sid] = True
+        history.setdefault(sid, []).append(rec)
         launched += 1
-        note(f"  RESUMED {sid8} acct={acct} pid={proc.pid} (ledger-recorded; will not resume again)")
+        note(f"  RESUMED {sid8} acct={acct} pid={proc.pid} "
+             f"(attempt {attempt}/{MAX_ATTEMPTS}; re-eligible only if it fails recoverably)")
         toast("Resumed dead session", f"{sid8}  ({acct} / {p.get('project')})", "info")
 
     # 2. alert on true login-blocked accounts -- once per account blocker.
@@ -301,7 +437,7 @@ def main() -> int:
         with open(notified_path, "w") as fh:
             json.dump(notified, fh)
 
-    note(f"  done: launched={launched} resumed_total={len(resumed)}")
+    note(f"  done: launched={launched} sessions_in_ledger={len(history)}")
     return 0
 
 

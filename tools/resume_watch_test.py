@@ -188,6 +188,46 @@ def test_terminal_auth_failure_ignores_transient_error(tmp_path):
     assert not ok
 
 
+def _limit_err(reset="6am (America/Los_Angeles)"):
+    return {"type": "assistant", "isApiErrorMessage": True,
+            "message": {"role": "assistant", "content": [{"type": "text",
+                        "text": f"You've hit your session limit · resets {reset}"}]}}
+
+
+def test_classify_session_limit_is_LIMIT_not_DEAD(tmp_path, monkeypatch):
+    # the core fix: a usage-limit wall is recoverable after the named reset, so it
+    # must classify as LIMIT (with the reset window), NOT terminal DEAD.
+    p = _write(tmp_path, _asst("did real work"), _limit_err())
+    monkeypatch.setattr(rw, "newest_transcript", lambda sid: p)
+    r = rw.classify("115b3179", 0, {})
+    assert r["status"] == "LIMIT", f"session-limit wall must be LIMIT, got {r['status']}"
+    assert r["limit_reset"] == "6am (America/Los_Angeles)"
+
+
+def test_classify_transient_529_still_RETRY_not_LIMIT(tmp_path, monkeypatch):
+    # precedence guard: a transient 529 carries no 'limit ... resets' banner, so it
+    # stays RETRY -- the LIMIT branch must not swallow ordinary transient errors.
+    err = {"type": "assistant", "isApiErrorMessage": True,
+           "message": {"role": "assistant", "content": [{"type": "text",
+                       "text": "API Error: 529 Overloaded. Try again."}]}}
+    p = _write(tmp_path, _asst("did work"), err)
+    monkeypatch.setattr(rw, "newest_transcript", lambda sid: p)
+    r = rw.classify("deadbeef", 0, {})
+    assert r["status"] == "RETRY"
+    assert not r["limit_reset"]
+
+
+def test_classify_auth_wall_still_AUTH_FAIL_over_LIMIT(tmp_path, monkeypatch):
+    # an auth wall outranks LIMIT (a re-resume can't fix auth; a reset can't fix it either)
+    rec = {"type": "assistant", "isApiErrorMessage": True,
+           "message": {"role": "assistant", "content": [{"type": "text",
+                       "text": "Not logged in. Please run /login"}]}}
+    p = _write(tmp_path, _asst("work"), rec)
+    monkeypatch.setattr(rw, "newest_transcript", lambda sid: p)
+    r = rw.classify("cafef00d", 0, {})
+    assert r["status"] == "AUTH_FAIL"
+
+
 if __name__ == "__main__":
     import pytest
 

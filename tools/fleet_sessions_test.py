@@ -124,5 +124,75 @@ class RehomeDecisionTest(unittest.TestCase):
         self.assertNotEqual(entry["resume_config_dir"], entry["source_config_dir"])
 
 
+class RehomeSpreadTest(unittest.TestCase):
+    """A burst of throttled sessions must SPREAD across healthy accounts rather than
+    all stampede onto the one momentary least-loaded target (the 32->1 concentration
+    that wedged every resume onto smith-netra and made it limit-wall)."""
+
+    def _sids(self, n):
+        return [f"{i:08d}-2222-3333-4444-555555555555" for i in range(n)]
+
+    def test_burst_spreads_across_healthy_accounts(self) -> None:
+        sids = self._sids(4)
+        rows = [_row(".claude-owner-acct", "STOPPED_LIMIT", session=s) for s in sids]
+        throttle = {".claude-owner-acct": {"reset": "Jun 24, 8pm"}}
+        availability = [
+            _avail(".claude-aaa-acct", available=True, live=0),
+            _avail(".claude-bbb-acct", available=True, live=0),
+        ]
+        fleet_sessions.decide(rows, throttle, availability)
+        targets = [r["resume_account"] for r in rows]
+        # 4 sessions, 2 empty healthy accounts -> 2 each, never 4 onto one.
+        self.assertEqual(targets.count(".claude-aaa-acct"), 2)
+        self.assertEqual(targets.count(".claude-bbb-acct"), 2)
+
+    def test_burst_respects_per_account_cap(self) -> None:
+        # With one healthy account and REHOME_CAP=4, the 5th session past the cap
+        # must DEFER rather than pile onto an account that will itself limit-wall.
+        sids = self._sids(5)
+        rows = [_row(".claude-owner-acct", "STOPPED_LIMIT", session=s) for s in sids]
+        throttle = {".claude-owner-acct": {"reset": "Jun 24, 8pm"}}
+        availability = [_avail(".claude-solo-acct", available=True, live=0)]
+        fleet_sessions.decide(rows, throttle, availability)
+        actions = [r["action"] for r in rows]
+        self.assertEqual(actions.count("AUTO_RESUME"), fleet_sessions.REHOME_CAP)
+        self.assertEqual(actions.count("DEFER_THROTTLED"), 5 - fleet_sessions.REHOME_CAP)
+
+    def test_single_session_still_picks_least_loaded(self) -> None:
+        # the load-aware change must not regress the single-session least-loaded pick
+        rows = [_row(".claude-owner-acct", "STOPPED_LIMIT")]
+        throttle = {".claude-owner-acct": {"reset": "Jun 24, 8pm"}}
+        availability = [
+            _avail(".claude-busy-acct", available=True, live=3),
+            _avail(".claude-idle-acct", available=True, live=0),
+        ]
+        fleet_sessions.decide(rows, throttle, availability)
+        self.assertEqual(rows[0]["resume_account"], ".claude-idle-acct")
+
+    def test_proven_healthy_account_ranks_above_unproven(self) -> None:
+        # equal load: an account with a fresh positive verdict (probe) beats one whose
+        # `available` is merely the absence-of-evidence default ("none").
+        proven = _avail(".claude-proven-acct", available=True, live=0)
+        proven["verdict_source"] = "probe"
+        unproven = _avail(".claude-unproven-acct", available=True, live=0)
+        unproven["verdict_source"] = "none"
+        # list the unproven FIRST to prove ranking, not list order, decides.
+        cands = fleet_sessions._rehome_targets([unproven, proven], ".claude-owner-acct")
+        self.assertEqual(cands[0]["account"], ".claude-proven-acct")
+
+    def test_passive_verdict_ranks_above_carried(self) -> None:
+        # 'passive' (a real session row inside the window proves the account alive) is
+        # genuine positive evidence and must rank above a stale 'carried' verdict --
+        # even when the carried account's tag sorts first. (The earlier draft whitelisted
+        # a phantom 'registry' and dropped 'passive', so passive tied with carried.)
+        carried = _avail(".claude-aaa-acct", available=True, live=0)   # tag sorts first
+        carried["verdict_source"] = "carried"
+        passive = _avail(".claude-zzz-acct", available=True, live=0)   # tag sorts last
+        passive["verdict_source"] = "passive"
+        cands = fleet_sessions._rehome_targets([carried, passive], ".claude-owner-acct")
+        self.assertEqual(cands[0]["account"], ".claude-zzz-acct",
+                         "a proven-alive 'passive' account must beat a stale 'carried' one")
+
+
 if __name__ == "__main__":
     unittest.main()

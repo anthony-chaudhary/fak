@@ -513,17 +513,55 @@ def resume_cmd(r):
     return (f"{prefix}$env:CLAUDE_CONFIG_DIR='{cfg}'; "
             f"claude --resume {r['session']} -p '{RESUME_PROMPT}' --dangerously-skip-permissions")
 
-def _rehome_targets(availability, exclude_account):
+# How many sessions one account may be assigned IN A SINGLE re-home pass before
+# it is considered "full" and dropped from the candidate pool. A re-home adds a
+# fresh autonomous `claude --resume` to the target, and an account that is already
+# running near its session ceiling will itself hit the usage limit the moment the
+# burst lands -- which is exactly the 32->1 stampede that wedged every resume onto
+# one account. The cap is the in-pass admission ceiling: assigned + already-live
+# must stay under it. Override with FAK_REHOME_CAP for hosts with fatter accounts.
+REHOME_CAP = int(os.environ.get("FAK_REHOME_CAP", "4"))
+
+
+def _rehome_targets(availability, exclude_account, assigned=None):
     """Available Claude worker accounts a throttled session can move to, least
     loaded first. opencode accounts are excluded: a Claude transcript can only
-    resume under another Claude config dir, not an opencode one."""
-    cands = [
-        a for a in (availability or [])
-        if a.get("available")
-        and a.get("account") != exclude_account
-        and str(a.get("account", "")).startswith(".claude")
-    ]
-    cands.sort(key=lambda a: (int(a.get("live_sessions") or 0),
+    resume under another Claude config dir, not an opencode one.
+
+    ``assigned`` is the per-account count this pass has ALREADY re-homed onto each
+    target (account basename -> n). It is folded into the load so a burst of
+    throttled sessions spreads across healthy accounts instead of all picking the
+    same momentary least-loaded one: the snapshot's live/active counts are static
+    within a pass, so without this every caller computes the identical winner and
+    stampedes it. An account whose (already-live + just-assigned) load reaches
+    ``REHOME_CAP`` drops out of the pool entirely -- better to DEFER_THROTTLED and
+    wait for a reset than to pile a session onto an account that will limit-wall."""
+    assigned = assigned or {}
+    cands = []
+    for a in (availability or []):
+        acct = a.get("account", "")
+        if (not a.get("available")
+                or acct == exclude_account
+                or not str(acct).startswith(".claude")):
+            continue
+        base_load = int(a.get("live_sessions") or 0)
+        if base_load + assigned.get(acct, 0) >= REHOME_CAP:
+            continue                       # already at this pass's admission ceiling
+        cands.append(a)
+    # Rank by load (live + in-pass assigned) first, but break ties by PROVEN health:
+    # an account with a fresh positive verdict sorts ahead of one whose `available`
+    # is merely the absence-of-evidence default. account_availability stamps
+    # verdict_source as one of probe (a live probe just hit it), passive (a real
+    # session row inside the window proves it alive), or carried (a stale verdict
+    # carried forward with no fresh evidence). probe/passive are genuine positive
+    # evidence; carried/none are not -- so probe/passive sort ahead of carried/none.
+    # A target offered purely because nothing bad was recorded is the weakest kind of
+    # healthy, so it goes last among equals -- without ever being excluded when it is
+    # the only option (the load + cap gate already decides inclusion).
+    def _unproven(a):
+        return 0 if str(a.get("verdict_source") or "none") in ("probe", "passive") else 1
+    cands.sort(key=lambda a: (int(a.get("live_sessions") or 0) + assigned.get(a.get("account", ""), 0),
+                              _unproven(a),
                               int(a.get("active_sessions") or 0),
                               str(a.get("tag") or a.get("account") or "")))
     return cands
@@ -541,7 +579,15 @@ def decide(rows, throttle, availability=None):
     a resume_config_dir pointing at the target) instead of being parked until the
     owner's limit resets -- which for a weekly cap can be days. Re-home only fires
     when a healthy Claude worker account actually exists; otherwise the session
-    falls back to DEFER_THROTTLED and waits, exactly as before."""
+    falls back to DEFER_THROTTLED and waits, exactly as before.
+
+    Re-home spread: the availability snapshot is static within one pass, so a burst
+    of throttled sessions would all pick the same momentary least-loaded target and
+    stampede it. ``assigned`` tracks how many this pass has already routed to each
+    target and is fed back into ``_rehome_targets`` so the load it sees reflects the
+    in-flight decisions -- spreading the burst across healthy accounts and capping
+    each at REHOME_CAP so none is pushed over its own session limit."""
+    assigned: dict[str, int] = {}
     for r in rows:
         cwd_ok = bool(r["cwd"]) and os.path.isdir(r["cwd"])
         # resume target defaults to the owning account; re-home overrides it below
@@ -566,13 +612,14 @@ def decide(rows, throttle, availability=None):
             # session to a healthy account rather than waiting for the reset.
             resumable = r["autonomous"] and (
                 r["disp"] in DEAD or r["disp"] in ("STOPPED_LIMIT", "STOPPED_APIERR"))
-            targets = _rehome_targets(availability, r["account"]) if resumable else []
+            targets = _rehome_targets(availability, r["account"], assigned) if resumable else []
             if targets:
                 tgt = targets[0]
                 r["action"] = "AUTO_RESUME"         # INFRA: rate limit -> move to healthy acct
                 r["rehomed"] = True
                 r["resume_account"] = tgt["account"]
                 r["resume_config_dir"] = tgt.get("config_dir") or config_dir(tgt["account"])
+                assigned[tgt["account"]] = assigned.get(tgt["account"], 0) + 1
             else:
                 r["action"] = "DEFER_THROTTLED"     # no healthy account -> wait for reset
         elif r["disp"] == "INFRA_AUTH":

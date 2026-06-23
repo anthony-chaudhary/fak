@@ -197,10 +197,19 @@ def classify(sid: str, pid: int, prev: dict) -> dict:
     text = trailing_text(asst) if asst else ""
     low = text.lower()
     err = t["last_err"]
-    transient = bool(err and ("overloaded" in trailing_text(err).lower()
-                              or "529" in trailing_text(err)
-                              or "rate" in trailing_text(err).lower()
-                              or "api error" in trailing_text(err).lower()))
+    err_text = trailing_text(err) if err else ""
+    transient = bool(err and ("overloaded" in err_text.lower()
+                              or "529" in err_text
+                              or "rate" in err_text.lower()
+                              or "api error" in err_text.lower()))
+    # A usage-limit wall ("You've hit your session limit . resets 6am") is NOT a
+    # transient 529 and NOT an auth wall: the account is simply capped until the
+    # printed reset, then the session is resumable again. Detect it off the ERROR
+    # record (where the limit banner lands as an isApiErrorMessage turn) and carry
+    # the machine-readable reset window so it can be DEFERRED-until-reset rather than
+    # buried in the terminal DEAD bucket. Distinct from `transient` because the
+    # remediation is "wait for the named reset", not "re-resume now".
+    limit_reset = fleet_session_signals.limit_reset(err_text) if err else None
     asks = bool(asst) and any(k in low for k in ASK) and low.rstrip().endswith("?")
     # Auth/login/credit/access wall: the resume did NOT take and a re-resume on the
     # SAME account can never fix it (it needs `claude /login` + a re-home to a healthy
@@ -234,6 +243,8 @@ def classify(sid: str, pid: int, prev: dict) -> dict:
         status = "WORKING"                 # still actively producing
     elif auth_is_fail:
         status = "AUTH_FAIL"               # login/credit/access wall -> needs /login + re-home
+    elif limit_reset:
+        status = "LIMIT"                   # usage cap -> resumable after the named reset, not dead
     elif transient:
         status = "RETRY"                   # hit a transient API error -> safe to re-resume
     elif err:
@@ -252,7 +263,7 @@ def classify(sid: str, pid: int, prev: dict) -> dict:
     return {"sid": sid, "pid": pid, "alive": alive, "status": status,
             "quiet_min": round(quiet_min, 1), "transcript": tpath,
             "size": size, "mtime": mtime, "records": t["records"],
-            "auth_reason": auth_reason,
+            "auth_reason": auth_reason, "limit_reset": limit_reset,
             "tail": text[-300:].replace("\n", " ").strip()}
 
 
@@ -286,7 +297,12 @@ def main() -> int:
     attention = [r for r in rows if r["status"] in ACT]
     gpu = [r for r in rows if r["status"] == "GPU_GATED"]
     auth_fail = [r for r in rows if r["status"] == "AUTH_FAIL"]
-    json.dump({"ts": now_iso(), "attention": attention, "gpu_gated": gpu, "auth_fail": auth_fail},
+    # LIMIT is NOT a failure: the account is capped until the named reset, after which
+    # the session is resumable. Surfaced in its own band (with the reset window) so the
+    # operator/watchdog can defer-then-retry instead of treating it as a terminal DEAD.
+    limited = [r for r in rows if r["status"] == "LIMIT"]
+    json.dump({"ts": now_iso(), "attention": attention, "gpu_gated": gpu,
+               "auth_fail": auth_fail, "limit_deferred": limited},
               open(ATTENTION, "w", encoding="utf-8"), indent=1)
 
     if "--json" in sys.argv:
@@ -307,8 +323,13 @@ def main() -> int:
             flag = ""
         print(f"  {r['status']:9} {r['sid'][:8]} pid={r['pid']:<6} {r['disp']:14} "
               f"->{r['target']:14} quiet={r['quiet_min']}m{flag}")
-        if r["status"] in ("AUTH_FAIL", "STALLED", "RETRY", "GPU_GATED") and r["tail"]:
+        if r["status"] in ("AUTH_FAIL", "STALLED", "RETRY", "GPU_GATED", "LIMIT") and r["tail"]:
             print(f"           tail: {r['tail'][:170]}")
+    if limited:
+        print(f"\n{len(limited)} session(s) DEFERRED on a usage limit -- resumable after the "
+              f"named reset (NOT dead; do not re-home, just retry past the reset):")
+        for r in limited:
+            print(f"  {r['sid'][:8]} on {r.get('target')}: resets {r.get('limit_reset')}")
     if auth_fail:
         print(f"\n{len(auth_fail)} session(s) FAILED RESUME ON AUTH -- a re-resume on the same "
               f"account WON'T help; the account needs `claude /login`, then re-home to a healthy one:")
@@ -319,7 +340,7 @@ def main() -> int:
               f"RETRY=re-resume, STALLED=answer) -> {ATTENTION}")
     if gpu:
         print(f"{len(gpu)} session(s) finished with a GPU-gated residual (operator/hardware) -> see attention file")
-    if not attention and not gpu:
+    if not attention and not gpu and not limited:
         print("\nall watched sessions healthy (WORKING/DONE); no operator action needed.")
     return 0
 

@@ -94,6 +94,95 @@ def test_self_sid_empty_outside_a_claude_session():
     assert wd.SELF_SID == ""
 
 
+# ---- outcome-gated ledger (the resume-once-on-launch burn fix) -----------------
+
+def _write_jsonl(tmp_path, name, *records):
+    p = tmp_path / name
+    with open(p, "w", encoding="utf-8") as fh:
+        for r in records:
+            fh.write(__import__("json").dumps(r) + "\n")
+    return str(p)
+
+
+def _asst_err(text):
+    return {"type": "assistant", "isApiErrorMessage": True,
+            "message": {"role": "assistant", "content": [{"type": "text", "text": text}]}}
+
+
+def test_no_history_is_not_blocked():
+    wd = _reload({})
+    blocked, _ = wd.resume_blocked("sid-1", [])
+    assert not blocked, "first resume must be allowed"
+
+
+def test_recoverable_limit_outcome_stays_eligible(tmp_path, monkeypatch):
+    # a resume that died on a usage-limit wall must remain auto-retry-eligible
+    # (under the attempt cap) instead of being burned on launch.
+    wd = _reload({"FAK_MAX_ATTEMPTS": "3"})
+    p = _write_jsonl(tmp_path, "lim.jsonl",
+                     {"type": "assistant", "message": {"role": "assistant",
+                      "content": [{"type": "text", "text": "did work"}]}},
+                     _asst_err("You've hit your session limit · resets 6am (America/Los_Angeles)"))
+    monkeypatch.setattr(wd, "_newest_transcript", lambda sid: p)
+    assert wd.last_resume_outcome("sid-2") == "recoverable"
+    blocked, why = wd.resume_blocked("sid-2", [{"phase": "launched", "attempt": 1}])
+    assert not blocked, why
+
+
+def test_attempt_cap_eventually_blocks(tmp_path, monkeypatch):
+    wd = _reload({"FAK_MAX_ATTEMPTS": "2"})
+    p = _write_jsonl(tmp_path, "lim2.jsonl",
+                     _asst_err("You've hit your session limit · resets 6am"))
+    monkeypatch.setattr(wd, "_newest_transcript", lambda sid: p)
+    hist = [{"phase": "launched", "attempt": 1}, {"phase": "launched", "attempt": 2}]
+    blocked, why = wd.resume_blocked("sid-3", hist)
+    assert blocked and "cap" in why.lower()
+
+
+def test_auth_outcome_is_unrecoverable_and_blocks(tmp_path, monkeypatch):
+    wd = _reload({})
+    p = _write_jsonl(tmp_path, "auth.jsonl", _asst_err("Not logged in. Please run /login"))
+    monkeypatch.setattr(wd, "_newest_transcript", lambda sid: p)
+    assert wd.last_resume_outcome("sid-4") == "unrecoverable"
+    blocked, _ = wd.resume_blocked("sid-4", [{"phase": "launched", "attempt": 1}])
+    assert blocked, "an auth wall can't be fixed by a re-resume -> blocked"
+
+
+def test_clean_progress_burns_once(tmp_path, monkeypatch):
+    wd = _reload({})
+    p = _write_jsonl(tmp_path, "ok.jsonl",
+                     {"type": "assistant", "message": {"role": "assistant",
+                      "content": [{"type": "text", "text": "Finished and shipped, nothing left."}]}})
+    monkeypatch.setattr(wd, "_newest_transcript", lambda sid: p)
+    assert wd.last_resume_outcome("sid-5") == "progressed"
+    blocked, _ = wd.resume_blocked("sid-5", [{"phase": "launched", "attempt": 1}])
+    assert blocked, "a resume that took must not be resumed again"
+
+
+def test_stale_limit_banner_superseded_by_clean_finish_is_progressed(tmp_path, monkeypatch):
+    # the review's finding: a limit banner EARLIER in the tail, then a clean finish,
+    # must read as 'progressed' (the recovery superseded the wall) -- NOT 'recoverable'.
+    # Classification reads only the TERMINAL turn, so the stale banner doesn't win.
+    wd = _reload({})
+    p = _write_jsonl(
+        tmp_path, "superseded.jsonl",
+        _asst_err("You've hit your session limit · resets 6am (America/Los_Angeles)"),
+        {"type": "assistant", "message": {"role": "assistant",
+         "content": [{"type": "text", "text": "Recovered after the reset and shipped cleanly."}]}},
+        {"type": "mode", "mode": "default"},
+        {"type": "permission-mode"})
+    monkeypatch.setattr(wd, "_newest_transcript", lambda sid: p)
+    assert wd.last_resume_outcome("sid-7") == "progressed", \
+        "a clean turn after a limit banner supersedes it -> burn once, do not re-resume"
+
+
+def test_manual_override_is_authoritative():
+    wd = _reload({})
+    hist = [{"action": "consolidate-resume-throttle-strand-2026-06-23", "target": ".claude-gem7"}]
+    blocked, why = wd.resume_blocked("sid-6", hist)
+    assert blocked and "operator" in why.lower()
+
+
 if __name__ == "__main__":
     import pytest
 
