@@ -44,6 +44,10 @@ returns **`ALLOW`**. [`policy-hot-reload/`](policy-hot-reload/README.md) is the 
 runnable lifecycle artifact: it walks the served-gateway operator loop — edit the
 floor → `policy --check` → `POST /v1/fak/policy/reload` → re-test — and proves the
 verdict swaps **in-process** (same `start_time_unix`, IFC ledger intact, no restart).
+[`trace-reset/`](trace-reset/README.md) is the IFC-ledger surface on that same
+served lifecycle: at an operator-approved session boundary it clears one trace's
+taint high-water mark (`POST /v1/fak/trace/reset`) and proves the reset is
+per-trace — a neighbouring trace and the global forensic counters are untouched.
 
 A `book_flight` whose `fare_amount` is `$10,000` or more is also
 refused (`deny_regex ^[0-9]{5,}` — the manifest's argument matchers are
