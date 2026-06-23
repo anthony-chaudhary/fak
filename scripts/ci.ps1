@@ -31,8 +31,20 @@ if ($null -ne $py) {
     if ($LASTEXITCODE -ne 0) { exit 1 }
     & $py tools/gen_llms_full.py --check
     if ($LASTEXITCODE -ne 0) { exit 1 }
+
+    # repo-hygiene gates: the deterministic, no-network checks ci.yml runs HARD
+    # (doc placement, links, file admission, secret shapes), mirrored here so a local
+    # `scripts/ci.ps1` fails on the same things GH does. Pure-stdlib python, fast,
+    # audits the tracked tree. (gofmt is NOT mirrored: a native-Windows checkout under
+    # core.autocrlf=true is CRLF, so `gofmt -l` false-positives — the Makefile/WSL `make
+    # ci` and CI run the canonical LF gofmt gate.)
+    Write-Host "== repo-hygiene gates =="
+    foreach ($chk in @("check_doc_placement", "check_links", "check_committed_files", "check_secret_shapes")) {
+        & $py "tools/$chk.py" --audit-tree
+        if ($LASTEXITCODE -ne 0) { exit 1 }
+    }
 } else {
-    Write-Host "== index-sync (warn): python not found; gate skipped =="
+    Write-Host "== index-sync + repo-hygiene (warn): python not found; gates skipped =="
 }
 
 Write-Host "CI OK"

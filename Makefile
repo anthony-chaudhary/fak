@@ -1,8 +1,14 @@
 # Makefile — portable build/test entrypoints (unit 12). On Windows without make,
 # use scripts/ci.ps1, which this mirrors.
-.PHONY: ci build vet test test-fast bench claims-lint index-sync model
+.PHONY: ci build vet test test-fast bench claims-lint index-sync model gofmt-check hygiene
 
-ci: build vet test claims-lint index-sync
+# ci is THE local green gate (AGENTS.md: "Green = make ci"). It must stay aligned with
+# .github/workflows/ci.yml's HARD steps so a pre-push `make ci` fails on the same things
+# GH does, instead of a developer only discovering a gofmt/hygiene break after the push.
+# gofmt-check + hygiene are the deterministic, no-network CI gates that were previously
+# CI-only — wired in here to close that local↔CI drift. (Network/range gates — leak-scan,
+# dos-review — stay CI/githook-only; the release-substrate suite stays CI-only by weight.)
+ci: build gofmt-check vet test claims-lint index-sync hygiene
 	@echo "CI OK"
 
 build:
@@ -44,3 +50,27 @@ index-sync:
 	@python3 tools/check_index_sync.py --audit-tree
 	@python3 tools/gen_llms_full.py --check
 	@echo "index-sync OK"
+
+# gofmt-check: every committed .go file is gofmt-formatted — the local mirror of ci.yml's
+# HARD gofmt gate (G-001). Linux/WSL ONLY: a native-Windows checkout under
+# core.autocrlf=true rewrites .go to CRLF, which `gofmt -l` would flag as a false positive
+# (.gitattributes pins only *.sh/*.golden to LF), so scripts/ci.ps1 deliberately omits this
+# and relies on the WSL `make ci` / CI for the canonical LF check. Fix with `gofmt -w .`.
+gofmt-check:
+	@unformatted="$$(gofmt -l .)"; \
+	if [ -n "$$unformatted" ]; then \
+		echo "gofmt: not formatted (run 'gofmt -w .' from the repo root):"; \
+		echo "$$unformatted"; exit 1; \
+	fi; \
+	echo "gofmt: clean"
+
+# hygiene: the deterministic, no-network repo-hygiene gates ci.yml runs HARD — doc
+# placement, links, file admission, secret shapes — mirrored into the local gate so a
+# pre-push `make ci` catches them. Pure-stdlib python (like claims-lint / index-sync),
+# fast, and audits the git-tracked tree (so peer working-tree WIP doesn't affect it).
+hygiene:
+	@python3 tools/check_doc_placement.py --audit-tree
+	@python3 tools/check_links.py --audit-tree
+	@python3 tools/check_committed_files.py --audit-tree
+	@python3 tools/check_secret_shapes.py --audit-tree
+	@echo "hygiene OK"
