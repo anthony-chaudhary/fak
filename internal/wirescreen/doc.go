@@ -55,9 +55,26 @@
 // one demand-page fault. This is ctxplan #556. BLOCKER: needs the outbound transform seam
 // below to affect the flagship wire.
 //
-// RUNG 5 — PRE-SEND PII/SECRET REDACTION. Seam: a new outbound req.Raw transform that does
-// NOT exist yet. A model proposes spans to redact in place (replace with a placeholder)
-// before bytes leave the box. A compliance floor, not a token saver.
+// RUNG 5 — PRE-SEND PII/SECRET REDACTION (SHIPPED as the deterministic floor;
+// issue #572). Seam: this leaf's Redactor proposer + Apply/Restore (redactor.go),
+// the redaction peer of rung 1's Screener. A Redactor proposes [start,end) byte
+// spans to redact; Apply replaces each with a "[REDACTED:<kind>]" placeholder and
+// pins the UNREDACTED original in the shared CAS so an authorized Restore returns it
+// byte-exact (the same pageOut + PinResolved witness the MMU's quarantine uses). The
+// reference piiRedactor is a zero-model, high-precision regex + Luhn compliance floor
+// (credit cards, SSNs, AWS/GitHub/Slack/Stripe/Google keys, emails, bearer tokens,
+// PEM private keys). It is DEFAULT-INERT (FAK_WIRE_REDACT) and touches no ABI seam.
+//
+// Honest scope — this is a compliance floor, NOT a token saver. It is the floor
+// READY to be wired, not yet on the live wire: the flagship `fak guard -- claude`
+// Anthropic passthrough sends req.Raw VERBATIM, so the redaction cannot reach the
+// model there until the cache-prefix-preserving req.Raw transform (#555,
+// ctxplan-owned) lands; until then the redaction is reachable on the NON-passthrough
+// re-marshal path (QuarantineOutboundMessages-style). The model-backed Redactor is
+// the gated follow-on (needs weights + a measured span latency before default-on) —
+// the same fence the ctxplan forecast AUTHOR (CLAIMS.md) shipped the deterministic
+// seed under. This is the floor for the outbound surface, not a duplicate of ctxmmu's
+// inbound ScreenBytes quarantine (which removes a whole secret-bearing RESULT).
 //
 // THE OUTBOUND BLOCKER (gates rungs 2/4/5 on the flagship route): on the
 // `fak guard -- claude` Anthropic passthrough the upstream gets req.Raw VERBATIM (gateway
@@ -65,6 +82,8 @@
 // inbound rewrite targets req.Messages, which the passthrough never serializes, so any
 // "shrink/rewrite the outbound prompt" rung changes nothing the model reads on the live
 // route. Building a req.Raw transform that preserves the cache-prefix is the single seam
-// that unblocks the compressor and the forecaster. This is the same blocker the ctxwin
-// program hit (ctxplan #555).
+// that unblocks the digest (rung 2), the forecaster (rung 4/#556), and the redactor
+// (rung 5/#572) on the flagship wire. Until it lands those rungs are non-passthrough-only
+// (and rung 5's deterministic floor ships ready-to-wire). This is the same blocker the
+// ctxwin program hit (ctxplan #555).
 package wirescreen
