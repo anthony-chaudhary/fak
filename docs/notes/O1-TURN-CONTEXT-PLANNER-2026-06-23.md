@@ -102,6 +102,14 @@ dependency-free and builds standalone:
   (`Store.Materialize`), in step order. A selected span the gate refuses is reported,
   never rendered. The in-memory `MemStore` is the zero-setup reference `Store` for the
   demo and tests.
+- **`Index`** (`index.go`) — the candidate INDEX: the Postgres index access-path that
+  bounds the planner's per-turn COMPUTE the way the budget bounds its resident TOKENS.
+  `PlanCells` re-scans all *N* spans each turn (Θ(N²) cumulative), so `Index` maintains an
+  inverted token index + a recency tail + the durable set and `Probe(forecast)` returns a
+  candidate set bounded by `MaxCandidates` (default 128), independent of *N*. Cumulative
+  planning flattens Θ(N²) → Θ(c·N) (`IndexBoundedPlannerCompute`). Pruning is a forecast
+  miss, never a lost fact — a pruned span stays demand-pageable and the trust gate still
+  guards it.
 
 Witness:
 
@@ -168,11 +176,14 @@ never resident; a pin cannot launder poison.
 
 ## 6. Honest fences (what is NOT done)
 
-- **Not yet on the live loop, and not yet wired to a real store.** The spine plans +
-  materializes over its own `Store` (the in-memory `MemStore`). The adapters that lower a
-  `memq` backend, a `cdb`/`recall` core image, or a `contextq` view into a `ctxplan.Span`
-  are named follow-ons (so the leaf stays dependency-free today), and the gateway does not
-  yet call the planner each turn to replace compaction. Both are filed as issues.
+- **Wired to a real store and the KV cache; not yet on the gateway's live loop.** The
+  real-store adapter shipped (`recall.CtxStore`, the `recall` core image as a
+  `ctxplan.Store`, #545); the planned elision now drives a bit-exact KV eviction
+  (`kvmmu.ApplyPlan` — an O(1) view becomes an O(1) KV residency, #550); the empirical
+  resident-redundancy bench landed (#551); and a guarded agent-loop seam exists
+  (`agent.CtxViewPlanner`, `FAK_CTXPLAN_SEAM`, off by default, #546). The residual is the
+  **gateway**: `fak serve`/`fak guard` does not yet call the planner each turn to replace
+  compaction (filed as #555).
 - **The forecast is authored, not learned.** Intents/pins are supplied; predicting them
   from the trajectory (the real "preemptive planning") is a follow-on. The benefit
   Weights are a sensible seed, not tuned.
@@ -187,8 +198,14 @@ never resident; a pin cannot launder poison.
   `FaultTaxCum`; and re-planning scores `O(N)` candidates per turn (the store grows one span a
   turn), for a **quadratic** `Σ i = N·(N+1)/2` `PlannerComputeCum` — the cost "O(1) resident"
   deliberately does *not* bound (residency is constant; planning is not, unless the candidate
-  set is index-bounded, which would flatten this term — priced here at the unbounded worst
-  case the model runs today). The headline bend is still the *resident-token* curve; the two
+  set is index-bounded, which would flatten this term. The candidate index
+  (`ctxplan.Index`, `index.go`) now does exactly that: probing a bounded candidate set
+  (`MaxCandidates`, default 128) instead of re-scanning all *N* spans turns the Θ(N²) into
+  Θ(c·N) (`IndexBoundedPlannerCompute`), the compute analogue of the budget's `cumCapped`
+  on tokens, so "O(1) current turn" holds for the planner's own work too — real only with a
+  *persistent* index maintained across turns (a rebuild-per-turn is Θ(N) again; #558). The
+  closed-form `PlannerComputeCum` column keeps the pre-index Θ(N²) worst case for contrast.
+  The headline bend is still the *resident-token* curve; the two
   priced costs are shown beside it in `Compare.Table()` so the bend is read next to what it
   does not bound. Compaction's recall number is the **oldest-fact worst case**, not the
   population mean.
