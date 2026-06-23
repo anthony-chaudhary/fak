@@ -150,6 +150,13 @@ whole address space.
 - **Rung 0 — re-output a stored result: *zero* model tokens.** "Show me the test output
   from step 14" is a CAS lookup (`blob.Resolve(digest)`), O(1), byte-identical — the
   digest *is* the identity, so the bytes are provably the ones the dead session saw.
+- **Rung 1 — classify durability at write time: *zero* model tokens.** Each benign
+  result is stamped `turn` | `session` | `durable` as it's produced, and the gate
+  **expires by default** — only a `durable` fact is promoted into the persisted core
+  image, so a transient injected observation can't silently become a persistent
+  behavioral bias (the OWASP Memory-Poisoning T1 floor). This is also what lets Rungs 0
+  and 2 stay cheap: the candidate set was vetted for survival at write time, with no
+  model in the loop.
 - **Rung 2 — demand-page a working set.** A semantic follow-up ranks pages by an
   extractive descriptor and pages in only the **top-k** — assembling a ~10k-token
   window instead of replaying 350k.
