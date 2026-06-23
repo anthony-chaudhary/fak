@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -81,6 +82,26 @@ func TestGuardEnvVar(t *testing.T) {
 	}
 }
 
+func TestGuardLoopbackOnly(t *testing.T) {
+	cases := []struct {
+		addr string
+		want bool
+	}{
+		{"127.0.0.1:51711", true},
+		{"127.0.0.1:0", true},
+		{"[::1]:8080", true},
+		{"localhost:8080", true},
+		{"0.0.0.0:8080", false}, // all interfaces — the unauthenticated-exposure case
+		{":8080", false},        // bare port == all interfaces
+		{"192.168.1.5:8080", false},
+	}
+	for _, tc := range cases {
+		if got := guardLoopbackOnly(tc.addr); got != tc.want {
+			t.Errorf("guardLoopbackOnly(%q) = %v, want %v", tc.addr, got, tc.want)
+		}
+	}
+}
+
 func TestGuardDefaultBaseURL(t *testing.T) {
 	if got := guardDefaultBaseURL("anthropic"); got != "https://api.anthropic.com" {
 		t.Errorf("anthropic default = %q", got)
@@ -99,7 +120,7 @@ func TestFormatAuditSummary(t *testing.T) {
 		ByReason: map[string]uint64{"POLICY_BLOCK": 1, "SELF_MODIFY": 1},
 	})
 	for _, want := range []string{
-		"7 tool-call decision(s)", "4 allowed", "2 denied", "1 repaired", "0 quarantined",
+		"7 kernel decision(s)", "4 allowed", "2 denied", "1 repaired", "0 quarantined",
 		"POLICY_BLOCK", "SELF_MODIFY",
 	} {
 		if !strings.Contains(out, want) {
@@ -114,7 +135,9 @@ func TestFormatAuditSummary(t *testing.T) {
 }
 
 func TestGuardWaitHealthy(t *testing.T) {
-	// A live /healthz returns promptly.
+	never := make(chan error) // a Serve channel that never fires (gateway stays up)
+
+	// A live /healthz returns promptly, without consuming serveErr.
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/healthz" {
 			w.WriteHeader(http.StatusOK)
@@ -123,8 +146,8 @@ func TestGuardWaitHealthy(t *testing.T) {
 		w.WriteHeader(http.StatusNotFound)
 	}))
 	defer srv.Close()
-	if err := guardWaitHealthy(srv.URL, 2*time.Second); err != nil {
-		t.Errorf("expected healthy, got %v", err)
+	if err, consumed := guardWaitHealthy(srv.URL, never, 2*time.Second); err != nil || consumed {
+		t.Errorf("expected healthy/not-consumed, got err=%v consumed=%v", err, consumed)
 	}
 
 	// A 503 /healthz never becomes ready: the poll exhausts its (short) budget.
@@ -132,7 +155,20 @@ func TestGuardWaitHealthy(t *testing.T) {
 		w.WriteHeader(http.StatusServiceUnavailable)
 	}))
 	defer bad.Close()
-	if err := guardWaitHealthy(bad.URL, 200*time.Millisecond); err == nil {
-		t.Error("expected a not-ready error for a 503 gateway")
+	if err, consumed := guardWaitHealthy(bad.URL, never, 200*time.Millisecond); err == nil || consumed {
+		t.Errorf("expected not-ready/not-consumed for a 503 gateway, got err=%v consumed=%v", err, consumed)
+	}
+
+	// If Serve returns early (the gateway died), guardWaitHealthy fails FAST and reports
+	// it consumed serveErr — it does not poll a corpse for the whole timeout.
+	dead := make(chan error, 1)
+	dead <- errors.New("listener exploded")
+	start := time.Now()
+	err, consumed := guardWaitHealthy("http://127.0.0.1:1", dead, 5*time.Second)
+	if err == nil || !consumed {
+		t.Errorf("expected early-failure/consumed, got err=%v consumed=%v", err, consumed)
+	}
+	if elapsed := time.Since(start); elapsed > time.Second {
+		t.Errorf("expected fast fail on a dead gateway, took %s", elapsed)
 	}
 }

@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	_ "embed"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -126,6 +127,14 @@ func cmdGuard(argv []string) {
 	must(err)
 	gwURL := "http://" + ln.Addr().String()
 
+	// A gateway bound BEYOND loopback with no required key is an UNAUTHENTICATED kernel
+	// reachable off-host. `fak serve` warns about this in ListenAndServe, but guard binds
+	// its own listener and calls Serve() directly (to know the port up front), which skips
+	// that check — so re-assert it here rather than let the warning silently vanish.
+	if requireKey == "" && !guardLoopbackOnly(ln.Addr().String()) {
+		fmt.Fprintf(os.Stderr, "fak guard: WARNING — binding %s with no --require-key-env: the kernel gateway is reachable off-host with NO authentication. Bind a loopback --addr or set --require-key-env.\n", ln.Addr().String())
+	}
+
 	srv, err := gateway.New(gateway.Config{
 		EngineID:     "inkernel",
 		Model:        *model,
@@ -148,16 +157,21 @@ func cmdGuard(argv []string) {
 
 	// 4. Serve in the background. The gateway lives EXACTLY as long as the child: its
 	//    context is cancelled when the agent exits. We deliberately do NOT tear it down
-	//    on SIGINT — Ctrl-C belongs to the interactive child (it interrupts a turn), so
-	//    the parent IGNORES SIGINT and lets the freshly-exec'd child own it.
+	//    on Ctrl-C — that interrupt belongs to the interactive child (it cancels a turn),
+	//    so the parent IGNORES it and stays alive (which is what keeps the gateway up).
+	//    Cross-platform: on Unix the freshly exec'd child resets to SIG_DFL and installs
+	//    its own SIGINT handler; on Windows the console delivers CTRL_C_EVENT to every
+	//    process in the group, so the child receives and handles its own either way.
 	signal.Ignore(os.Interrupt)
 	ctx, cancel := context.WithCancel(context.Background())
 	serveErr := make(chan error, 1)
 	go func() { serveErr <- srv.Serve(ctx, ln) }()
 
-	if err := guardWaitHealthy(gwURL, 5*time.Second); err != nil {
+	if err, consumed := guardWaitHealthy(gwURL, serveErr, 5*time.Second); err != nil {
 		cancel()
-		<-serveErr
+		if !consumed {
+			<-serveErr // Serve returns once cancel() fires; drain it so no goroutine leaks.
+		}
 		fmt.Fprintf(os.Stderr, "fak guard: gateway did not become ready: %v\n", err)
 		os.Exit(1)
 	}
@@ -183,17 +197,25 @@ func cmdGuard(argv []string) {
 
 	// 6. Tear the gateway down and report what the kernel decided this session.
 	cancel()
-	<-serveErr
+	serr := <-serveErr
 	if !*quiet {
 		fmt.Fprintln(os.Stderr)
 		fmt.Fprint(os.Stderr, formatAuditSummary(srv.AdjudicationSummary()))
 	}
-	// Faithfully surface the child's exit code (so `fak guard -- claude -p …` scripts).
+	// Faithfully surface the child's exit code first (so `fak guard -- claude -p …`
+	// scripts see what the agent returned).
 	if runErr != nil {
 		if ee, isExit := runErr.(*exec.ExitError); isExit {
 			os.Exit(ee.ExitCode())
 		}
 		fmt.Fprintf(os.Stderr, "fak guard: could not run %q: %v\n", command[0], runErr)
+		os.Exit(1)
+	}
+	// The child succeeded — but if the gateway itself failed mid-session (Serve returned
+	// something other than a clean shutdown), the adjudication boundary was down for part
+	// of the run, so do not report a silent success. A clean teardown returns nil.
+	if serr != nil && !errors.Is(serr, http.ErrServerClosed) && !errors.Is(serr, context.Canceled) {
+		fmt.Fprintf(os.Stderr, "fak guard: gateway error during the session: %v\n", serr)
 		os.Exit(1)
 	}
 }
@@ -231,31 +253,64 @@ func guardEnvVar(provider, override string) string {
 	}
 }
 
-// guardWaitHealthy polls the gateway's unauthenticated /healthz until it answers 200
-// or the deadline passes. The listener is already bound (Serve got it pre-bound), so
-// this normally returns on the first poll; the loop just covers the goroutine-start
-// gap.
-func guardWaitHealthy(gwURL string, timeout time.Duration) error {
+// guardWaitHealthy blocks until the gateway answers 200 on /healthz, the Serve
+// goroutine returns early (its result is delivered on serveErr — e.g. a bound listener
+// that fails before /healthz can answer), or the deadline passes. The listener is
+// already bound (Serve got it pre-bound), so this normally returns on the first poll;
+// the loop covers the goroutine-start gap WITHOUT waiting the full timeout on a dead
+// gateway. The consumed return is true iff it drained serveErr (the early-exit case),
+// so the caller knows not to drain it again.
+func guardWaitHealthy(gwURL string, serveErr <-chan error, timeout time.Duration) (err error, consumed bool) {
 	deadline := time.Now().Add(timeout)
 	client := &http.Client{Timeout: 500 * time.Millisecond}
 	var lastErr error
 	for time.Now().Before(deadline) {
-		resp, err := client.Get(gwURL + "/healthz")
-		if err == nil {
+		// Did Serve already stop? Then the gateway is dead — fail now, do not poll a
+		// corpse for the rest of the timeout.
+		select {
+		case se := <-serveErr:
+			if se == nil {
+				se = errors.New("gateway stopped before it became ready")
+			}
+			return se, true
+		default:
+		}
+		resp, getErr := client.Get(gwURL + "/healthz")
+		if getErr == nil {
 			_ = resp.Body.Close()
 			if resp.StatusCode == http.StatusOK {
-				return nil
+				return nil, false
 			}
 			lastErr = fmt.Errorf("healthz returned %d", resp.StatusCode)
 		} else {
-			lastErr = err
+			lastErr = getErr
 		}
 		time.Sleep(50 * time.Millisecond)
 	}
 	if lastErr == nil {
 		lastErr = fmt.Errorf("timed out after %s", timeout)
 	}
-	return lastErr
+	return lastErr, false
+}
+
+// guardLoopbackOnly reports whether addr binds only the loopback interface. It mirrors
+// the gateway's own (unexported) loopbackOnly so guard can re-assert the no-auth warning
+// the gateway skips when handed a pre-bound listener. A bare ":port" (all interfaces)
+// and any routable IP are NOT loopback.
+func guardLoopbackOnly(addr string) bool {
+	host, _, err := net.SplitHostPort(addr)
+	if err != nil {
+		host = addr // no port present
+	}
+	host = strings.Trim(host, "[]")
+	if host == "" {
+		return false // ":port" => all interfaces
+	}
+	if host == "localhost" {
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
 }
 
 // printGuardBanner explains, in five lines, exactly what is now in front of the agent:
@@ -272,11 +327,14 @@ func printGuardBanner(w io.Writer, gwURL, provider, baseURL, floorSource, inject
 }
 
 // formatAuditSummary renders the exit roll-up of what the kernel decided while the
-// agent ran. It is one honest tally: every count came from the same operation counters
-// /metrics exposes, so the line can never overstate the protection.
+// agent ran. "kernel decision(s)" — not "tool calls" — because the tally folds BOTH
+// proposed-call adjudications AND inbound tool-result admissions (a quarantined result
+// is a kernel decision about a result the agent already ran, not a proposed call). It
+// is one honest count: every number came from the same operation counters /metrics
+// exposes, so the line can never overstate the protection.
 func formatAuditSummary(sum gateway.AdjudicationSummary) string {
 	var b strings.Builder
-	fmt.Fprintf(&b, "fak guard: %d tool-call decision(s) — %d allowed, %d denied, %d repaired, %d quarantined",
+	fmt.Fprintf(&b, "fak guard: %d kernel decision(s) — %d allowed, %d denied, %d repaired, %d quarantined",
 		sum.Total, sum.Allowed, sum.Denied, sum.Transformed, sum.Quarantined)
 	if sum.Errored > 0 {
 		fmt.Fprintf(&b, ", %d errored", sum.Errored)
