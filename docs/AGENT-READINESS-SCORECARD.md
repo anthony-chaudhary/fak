@@ -37,9 +37,9 @@ Thirteen KPIs, each 0–100, grouped by the step they gate. `debt` = units of HA
 | adopt | `honesty_ledger` | 100 | 0 | CLAIMS.md present, 0 untagged claim(s) |
 | adopt | `integration_recipes` | 100 | 0 | 4/4 agent families have an integration recipe |
 | build | `extension_scaffold` | 100 | 0 | leaf scaffolder + EXTENDING.md present |
-| build | `guardrails_surfaced` | 100 | 0 | 5/5 enforced rules surfaced up front |
+| build | `guardrails_surfaced` | 100 | 0 | 6/6 enforced rules surfaced up front |
 | build | `contributor_contract` | 100 | 0 | CONTRIBUTING linked + green gate documented |
-| build | `machine_consumable` | 100 | 0 | 9/9 measurement tools expose --json (100%) |
+| build | `machine_consumable` | 100 | 0 | 11/11 measurement tools expose --json (100%) |
 
 ## Friction-debt work-list
 

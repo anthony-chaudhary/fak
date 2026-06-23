@@ -62,7 +62,7 @@ Thirteen KPIs, each 0–100, grouped by the step they gate. Retire worst-step-fi
 | adopt | `honesty_ledger` | CLAIMS.md present, every `- [` claim carrying exactly one status tag (the `make claims-lint` rule). |
 | adopt | `integration_recipes` | A per-agent recipe under `docs/integrations/` for each family (Claude, Codex/OpenAI, Cursor, MCP). |
 | **build** | `extension_scaffold` | The additive path: `tools/new_leaf.py` + `EXTENDING.md` (add a leaf, don't edit core). |
-| build | `guardrails_surfaced` | Document each enforced rule in AGENTS.md: trunk-only, commit-by-path, DCO sign-off, tagged claims, leaf/ABI. |
+| build | `guardrails_surfaced` | Document each enforced rule in AGENTS.md: trunk-only, commit-by-path, DCO sign-off, tagged claims, leaf/ABI, the out-of-tree write guard. |
 | build | `contributor_contract` | `CONTRIBUTING.md` linked from the entry point + a one-command green gate (`make ci`). |
 | build | `machine_consumable` | **SOFT** — how much of the measurement family speaks `--json`. Scores; never hard debt. |
 

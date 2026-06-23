@@ -36,6 +36,7 @@ Work on the trunk; the trunk guard refuses OFF_TRUNK commits.
 Commit by explicit path (`git commit -- <paths>`), never `git add -A`.
 Sign off with `git commit -s` (DCO).
 Each claim in CLAIMS.md carries a tag. Add a feature as a leaf via new_leaf.py.
+Writes outside the repo are refused by the repo-guard (OUT_OF_TREE_WRITE).
 See CONTRIBUTING.md. Green = `make ci`.
 """
 

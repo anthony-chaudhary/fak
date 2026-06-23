@@ -41,8 +41,8 @@ more prose.
     extension_scaffold the additive extension path exists (new_leaf.py + EXTENDING)
     guardrails_surfaced the enforced rules that WILL bite an agent are documented up
                        front (trunk-only, commit-by-path, DCO sign-off, claim tag,
-                       leaf/ABI discipline) — an agent that knows them doesn't fight
-                       the guard
+                       leaf/ABI discipline, the out-of-tree write guard) — an agent
+                       that knows them doesn't fight the guard
     contributor_contract CONTRIBUTING.md is present + linked, and a one-command green
                        gate (make ci / make test) is documented (the feedback loop)
     machine_consumable an agent acts on structure, not prose — how much of the
@@ -132,6 +132,11 @@ GUARDRAIL_CLUSTERS: list[tuple[str, list[str]]] = [
     ("DCO sign-off", ["git commit -s", "sign off", "sign-off", "dco"]),
     ("tagged claims ledger", ["claims.md", "claims-lint", "[shipped]"]),
     ("leaf / frozen-ABI discipline", ["new_leaf", "as a leaf", "frozen abi", "additive-only"]),
+    # The repo-guard PreToolUse hook denies writes that resolve outside the repo
+    # (a ../sibling path, an absolute sibling, even `> /dev/null`). It is on by
+    # default and silently bites an agent's Bash/Write/Edit — so the entry point
+    # must teach it. (docs/repo-guard.md; surfaced 2026-06-23 after it bit a session.)
+    ("out-of-tree write guard", ["out_of_tree", "out-of-tree", "fak_repo_guard", "repo-guard", "outside the repo", "outside this repo"]),
 ]
 
 # The first-command signal: a canonical command an agent can paste with NO key,
