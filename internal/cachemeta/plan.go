@@ -12,7 +12,10 @@ import (
 // cache entry (Agentic Plan Caching). A template is keyed by task class, parameter
 // digest, plan-schema digest, tool-manifest digest, and policy version. §2.6's gap:
 // no PlanePlanTemplate / intent-key cache existed yet, and the first version must be
-// read-only/advisory and abstain aggressively.
+// read-only/advisory and decline aggressively on any uncertainty. Abstention here is
+// a typed non-Hit (Miss/Revalidate), never a HIT — the cachemeta LookupKind
+// vocabulary (hit/miss/revalidate/transform/quarantine/fault) defines no ABSTAIN, so
+// "abstain" is realized as Miss/Revalidate, not a verdict named ABSTAIN.
 //
 // A cached plan is NEVER an execution permit (refusal rule 5): a HIT yields a
 // candidate that must re-enter plancfi/adjudication before any tool effect. That is
