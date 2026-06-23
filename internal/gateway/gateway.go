@@ -660,7 +660,15 @@ func (s *Server) admitOp(ctx context.Context, operation, tool, rawResult, witnes
 // session is refused. messages is mutated in place (request-local). The per-result
 // admissions are returned for the fak response extension.
 func (s *Server) admitInboundResults(ctx context.Context, messages []agent.Message, traceID string) ([]ResultAdmission, error) {
+	// Snapshot each message's ORIGINAL content before admission rewrites any quarantined
+	// payload in place. The in-kernel poison-eviction hook needs the original (poisoned)
+	// bytes to render the token path that was actually cached, not the paged-out form.
+	origContent := make([]string, len(messages))
+	for i := range messages {
+		origContent[i] = messages[i].Content
+	}
 	var admissions []ResultAdmission
+	var quarantinedIdx []int
 	for i := range messages {
 		if messages[i].Role != agent.RoleTool {
 			continue
@@ -680,6 +688,7 @@ func (s *Server) admitInboundResults(ctx context.Context, messages []agent.Messa
 			admissions = append(admissions, ResultAdmission{
 				ToolCallID: messages[i].ToolCallID, Tool: messages[i].Name,
 				Verdict: WireVerdict{Kind: "QUARANTINE", Reason: "ADMIT_ERROR", Disposition: "TERMINAL"}})
+			quarantinedIdx = append(quarantinedIdx, i)
 			continue
 		}
 		// On a quarantine/transform the kernel paged the bytes out and rewrote the
@@ -688,16 +697,51 @@ func (s *Server) admitInboundResults(ctx context.Context, messages []agent.Messa
 		if envlp != nil && (wv.Kind == "QUARANTINE" || wv.Kind == "TRANSFORM") {
 			messages[i].Content = envlp.Content
 		}
+		if wv.Kind == "QUARANTINE" {
+			quarantinedIdx = append(quarantinedIdx, i)
+		}
 		admissions = append(admissions, ResultAdmission{
 			ToolCallID: messages[i].ToolCallID,
 			Tool:       messages[i].Name,
 			Verdict:    wv,
 		})
 	}
+	// Defense in depth (candidate #14): a result the kernel just quarantined may have been
+	// admitted as benign on an EARLIER turn and prefilled into the in-kernel KV cache. Drop
+	// any cached prefix that attended to it so a later turn re-prefills instead of replaying
+	// the poisoned KV. Fires on the SAME quarantine event as the external engine-cache reset.
+	s.evictInKernelPoison(messages, origContent, quarantinedIdx)
 	if err := s.resetEngineCacheAfterQuarantine(ctx, admissions); err != nil {
 		return admissions, err
 	}
 	return admissions, nil
+}
+
+// evictInKernelPoison drives the in-kernel RadixAttention cache's poison eviction when the
+// chat backend is the in-kernel planner (it implements agent.PoisonEvictor). A proxy/mock
+// planner — or an in-kernel planner with reuse disabled — does not implement the seam, so
+// this is a no-op there. The transcript is rendered with each message's ORIGINAL content so
+// the evicted token path matches what the cache actually prefilled before the verdict.
+func (s *Server) evictInKernelPoison(messages []agent.Message, origContent []string, quarantinedIdx []int) {
+	if len(quarantinedIdx) == 0 {
+		return
+	}
+	ev, ok := s.planner.(agent.PoisonEvictor)
+	if !ok {
+		return
+	}
+	restored := make([]agent.Message, len(messages))
+	copy(restored, messages)
+	for i := range restored {
+		if i < len(origContent) {
+			restored[i].Content = origContent[i]
+		}
+	}
+	for _, idx := range quarantinedIdx {
+		if freed := ev.EvictPoisoned(restored, idx); freed > 0 {
+			s.logf("gateway: in-kernel KV prefix evicted on tool-result quarantine msg=%d freed=%dtok", idx, freed)
+		}
+	}
 }
 
 func (s *Server) resetEngineCacheAfterQuarantine(ctx context.Context, admissions []ResultAdmission) error {
