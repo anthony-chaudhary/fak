@@ -15,11 +15,11 @@ This is the measuring stick for the repo-3x program — the structural counterpa
 
 | Metric | Value |
 |---|---|
-| **Hygiene-debt (total HARD defects)** | **5** |
+| **Hygiene-debt (total HARD defects)** | **3** |
 | **a11y-debt (accessibility HARD defects)** | **0** |
-| Composite score | 93.0/100 (grade A) |
-| Advisory (soft) signals | 148 |
-| Debt by group | verbosity:2 · organization:1 · indexing:2 · accessibility:0 |
+| Composite score | 93.3/100 (grade A) |
+| Advisory (soft) signals | 149 |
+| Debt by group | verbosity:2 · organization:1 · indexing:0 · accessibility:0 |
 
 ## Per-KPI
 
@@ -28,9 +28,8 @@ Twelve KPIs, each 0–100, in four groups. `debt` = units of HARD hygiene-debt. 
 | Group | KPI | Score | Debt | Detail |
 |---|---|---:|:--:|---|
 | verbosity | `bloat` | 70 | 2 | 2 oversized, 3 long |
-| indexing | `orphans` | 98 | 2 | 85/87 reader-facing docs reachable from an index (97.7%) |
 | organization | `dir_discipline` | 88 | 1 | 1 near-duplicate dir group(s) |
-| accessibility | `plain_language` | 62 | 0 | 14 dense doc(s), 64 doc(s) with undefined acronyms, 7 literal-reader idiom(s) |
+| accessibility | `plain_language` | 62 | 0 | 15 dense doc(s), 65 doc(s) with undefined acronyms, 7 literal-reader idiom(s) |
 | accessibility | `jargon` | 74 | 0 | 59 naked first-screen jargon term(s) (0.6/doc) |
 | accessibility | `ai_tells` | 85 | 0 | no AI-tell phrases |
 | verbosity | `redundancy` | 100 | 0 | no near-duplicate docs |
@@ -38,6 +37,7 @@ Twelve KPIs, each 0–100, in four groups. `debt` = units of HARD hygiene-debt. 
 | organization | `placement` | 100 | 0 | dated docs live under docs/notes/ |
 | indexing | `index_presence` | 100 | 0 | all expected index surfaces present |
 | indexing | `index_integrity` | 100 | 0 | every index entry resolves |
+| indexing | `orphans` | 100 | 0 | 88/88 reader-facing docs reachable from an index (100.0%) |
 | accessibility | `alt_text` | 100 | 0 | every doc image carries alt-text |
 
 ## Hygiene-debt work-list
@@ -45,10 +45,6 @@ Twelve KPIs, each 0–100, in four groups. `debt` = units of HARD hygiene-debt. 
 ### `bloat` (verbosity) — 2 defect(s), score 70
 - oversized doc LEARNING-PATH.md (2079 lines > 1000) — split into sections or trim
 - oversized doc docs/FAQ.md (2662 lines > 1000) — split into sections or trim
-
-### `orphans` (indexing) — 2 defect(s), score 98
-- orphan (reachable from no index/hub): GPU.md — index it or delete it
-- orphan (reachable from no index/hub): docs/bench-plan.md — index it or delete it
 
 ### `dir_discipline` (organization) — 1 defect(s), score 88
 - near-duplicate sibling dirs: ['docs/benchmark', 'docs/benchmarking', 'docs/benchmarks'] — merge into one

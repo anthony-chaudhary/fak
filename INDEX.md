@@ -35,6 +35,7 @@ Each turns a fuzzy goal into a number you can drive toward zero.
 ## Architecture & design
 
 - [Architecture](ARCHITECTURE.md) — the registry seams and the frozen ABI.
+- [GPU forward pass](GPU.md) — the in-kernel Llama decode on the GPU: a real on-box run witnessed against the CPU reference, with the honest gap to llama.cpp.
 - [Partitioning](PARTITION.md) — how the kernel splits work across lanes and leaves.
 - [Extending fak](EXTENDING.md) — plug in an optimization, prove it correct, prove it faster.
 - [SOTA comparison](SOTA-COMPARISON.md) — where fak sits next to the state of the art.
@@ -47,6 +48,7 @@ Each turns a fuzzy goal into a number you can drive toward zero.
 
 - [Benchmark authority](BENCHMARK-AUTHORITY.md) — the single source of truth for every number.
 - [Benchmark template](BENCHMARK-TEMPLATE.md) — the shape a new benchmark result doc must take.
+- [Hardware bench plan](docs/bench-plan.md) — auto-generated: the next highest-value test per bench-node (regenerate with `tools/bench_plan.py`, don't hand-edit).
 - [Web-agent baselines](docs/webbench-baselines.md) — the measured WebVoyager numbers.
 - [Web-agent blockers](docs/webbench-blockers.md) — what is not yet measured, and why.
 - [Web-agent measurement summary](docs/webbench-real-measurements-summary.md) — the rolled-up real-run numbers.
