@@ -63,6 +63,11 @@ type adapterRequest struct {
 	ResponseFormat json.RawMessage
 	LogitBias      map[int]float64
 	ExtraBody      json.RawMessage
+	// Stream asks the provider to deliver the completion as an incremental SSE token
+	// stream (the StreamingPlanner path). Only the OpenAI-compatible chat wire honors
+	// it; every other adapter ignores the field, so a streamed request to them is
+	// byte-identical to a buffered one.
+	Stream bool
 }
 
 // NewTranscriptAdapter returns the adapter for a provider.
@@ -127,16 +132,24 @@ func (a openAIAdapter) Headers(apiKey string) map[string]string {
 }
 
 type openAIRequest struct {
-	Model          string          `json:"model"`
-	Messages       []Message       `json:"messages"`
-	Tools          []ToolDef       `json:"tools,omitempty"`
-	ToolChoice     string          `json:"tool_choice,omitempty"`
-	Temperature    float64         `json:"temperature"`
-	MaxTokens      int             `json:"max_tokens,omitempty"`
-	TopP           *float64        `json:"top_p,omitempty"`
-	Stop           []string        `json:"stop,omitempty"`
-	ResponseFormat json.RawMessage `json:"response_format,omitempty"` // #560 structured/guided decode (OpenAI/xAI native)
-	LogitBias      map[int]float64 `json:"logit_bias,omitempty"`      // #560 per-token logit mask (OpenAI/xAI native)
+	Model          string               `json:"model"`
+	Messages       []Message            `json:"messages"`
+	Tools          []ToolDef            `json:"tools,omitempty"`
+	ToolChoice     string               `json:"tool_choice,omitempty"`
+	Temperature    float64              `json:"temperature"`
+	MaxTokens      int                  `json:"max_tokens,omitempty"`
+	TopP           *float64             `json:"top_p,omitempty"`
+	Stop           []string             `json:"stop,omitempty"`
+	ResponseFormat json.RawMessage      `json:"response_format,omitempty"` // #560 structured/guided decode (OpenAI/xAI native)
+	LogitBias      map[int]float64      `json:"logit_bias,omitempty"`      // #560 per-token logit mask (OpenAI/xAI native)
+	Stream         bool                 `json:"stream,omitempty"`          // true => SSE token stream (StreamingPlanner)
+	StreamOptions  *openAIStreamOptions `json:"stream_options,omitempty"`
+}
+
+// openAIStreamOptions carries the OpenAI/vLLM/SGLang stream control that asks the
+// server to emit a final usage chunk, so a streamed turn still reports token counts.
+type openAIStreamOptions struct {
+	IncludeUsage bool `json:"include_usage"`
 }
 
 type openAIResponse struct {
@@ -154,7 +167,7 @@ func (a openAIAdapter) MarshalRequest(r adapterRequest) ([]byte, error) {
 	if len(r.Tools) > 0 {
 		toolChoice = "auto"
 	}
-	return marshalWithExtraBody(openAIRequest{
+	req := openAIRequest{
 		Model:          r.Model,
 		Messages:       r.Messages,
 		Tools:          openAICompatibleTools(r.Tools),
@@ -165,7 +178,14 @@ func (a openAIAdapter) MarshalRequest(r adapterRequest) ([]byte, error) {
 		Stop:           r.Stop,
 		ResponseFormat: r.ResponseFormat,
 		LogitBias:      r.LogitBias,
-	}, r.ExtraBody)
+	}
+	if r.Stream {
+		// Ask for usage on the terminal chunk so a streamed turn still reports token
+		// counts (OpenAI/vLLM/SGLang honor stream_options.include_usage).
+		req.Stream = true
+		req.StreamOptions = &openAIStreamOptions{IncludeUsage: true}
+	}
+	return marshalWithExtraBody(req, r.ExtraBody)
 }
 
 func openAICompatibleTools(tools []ToolDef) []ToolDef {

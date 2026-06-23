@@ -617,7 +617,7 @@ func reservedExtraBodyKey(k string) bool {
 	switch strings.ToLower(strings.TrimSpace(k)) {
 	case "model", "messages", "input", "tools", "tool_choice", "temperature",
 		"max_tokens", "max_output_tokens", "top_p", "stop", "stop_sequences",
-		"stream", "store":
+		"stream", "stream_options", "store":
 		return true
 	default:
 		return false
@@ -647,84 +647,10 @@ func (p *HTTPPlanner) Model() string { return p.ModelID }
 // omitted field keeps the planner default, so a no-opt call is identical to the
 // pre-seam behavior.
 func (p *HTTPPlanner) Complete(ctx context.Context, messages []Message, tools []ToolDef, opts ...SampleOpt) (*Completion, error) {
-	adapter, err := p.transcriptAdapter()
+	call, err := p.prepareUpstream(messages, tools, false, opts...)
 	if err != nil {
 		return nil, err
 	}
-	safeMessages := messages
-	var quarantines []TranscriptQuarantine
-	if p.QuarantineTranscript {
-		safeMessages, quarantines = QuarantineOutboundMessages(messages)
-	}
-	// §A4 coherence shaping: after the safety quarantine, give the coherence layer a
-	// chance to break the provider prefix when a world witness has been refuted. nil hook
-	// = unchanged path. Applied to a copy-on-shape (the hook returns a new slice), so the
-	// caller's `messages` is never mutated.
-	if p.CoherenceShaper != nil {
-		safeMessages = p.CoherenceShaper(safeMessages)
-	}
-	// Resolve effective sampling against the planner defaults: a per-request value
-	// wins when present, otherwise the configured field stands.
-	sp := applySampleOpts(opts...)
-	// Request-model pass-through (#82): a client-supplied model wins for THIS turn,
-	// so it reaches the upstream request body (and, for Gemini, the URL) verbatim
-	// and an unknown model surfaces the provider's 404 rather than being silently
-	// served by the configured model. Empty keeps the planner's configured ModelID.
-	modelID := p.ModelID
-	if sp.Model != "" {
-		modelID = sp.Model
-	}
-	maxTokens := p.MaxTokens
-	if sp.MaxTokens != nil && *sp.MaxTokens > 0 {
-		maxTokens = *sp.MaxTokens
-	}
-	temperature := p.Temperature
-	if sp.Temperature != nil {
-		temperature = *sp.Temperature
-	}
-	// Passthrough: forward the client's ORIGINAL bytes verbatim so its prompt-cache
-	// prefix survives (a real upstream cache hit, not a re-billed prefix). Otherwise
-	// marshal a fresh body from the canonical transcript as usual. The provider gate
-	// is load-bearing: RawRequestBody is Anthropic-shaped, so it must NEVER reach an
-	// OpenAI/Gemini/xAI endpoint — only the anthropic→anthropic proxy forwards it.
-	var reqBody []byte
-	if len(sp.RawRequestBody) > 0 && adapter.Provider() == ProviderAnthropic {
-		// The upstream hop is NON-streaming: this planner buffers the whole completion
-		// (the gateway re-synthesizes an SSE stream to the client). Claude Code streams
-		// by default, so its raw body carries "stream":true — forwarded as-is, the real
-		// API replies with an SSE event stream the buffered ParseResponse cannot decode
-		// ("invalid character 'e'" on "event: message_start"). Force stream:false on the
-		// upstream copy. Cache-safe: Anthropic's cached prefix is the system/tools/
-		// messages CONTENT, not the top-level "stream" flag, and a body that does not
-		// carry a stream field is returned byte-identical (no re-marshal).
-		reqBody = forceAnthropicNonStreaming(sp.RawRequestBody)
-	} else {
-		reqBody, err = adapter.MarshalRequest(adapterRequest{
-			Model:          modelID,
-			Messages:       safeMessages,
-			Tools:          tools,
-			Temperature:    temperature,
-			MaxTokens:      maxTokens,
-			TopP:           sp.TopP,
-			TopK:           sp.TopK,
-			Stop:           sp.Stop,
-			ResponseFormat: sp.ResponseFormat,
-			LogitBias:      sp.LogitBias,
-			ExtraBody:      p.ExtraBody,
-		})
-		if err != nil {
-			return nil, err
-		}
-	}
-
-	// Transparent hop: when the inbound client supplied its own upstream credential
-	// (passthrough), authenticate this request with THAT key rather than the planner's.
-	apiKey := p.APIKey
-	if sp.UpstreamAPIKey != "" {
-		apiKey = sp.UpstreamAPIKey
-	}
-
-	url := adapter.Endpoint(p.BaseURL, modelID)
 	// Retry on a TRANSIENT transport error OR a retryable status (429 rate-limit,
 	// 5xx overload) with exponential backoff — the live-API-limit failure mode. A
 	// 4xx other than 429 is a request error and is NOT retried. A DETERMINISTIC
@@ -739,18 +665,11 @@ func (p *HTTPPlanner) Complete(ctx context.Context, messages []Message, tools []
 				return nil, err
 			}
 		}
-		req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(reqBody))
+		req, err := http.NewRequestWithContext(ctx, "POST", call.url, bytes.NewReader(call.body))
 		if err != nil {
 			return nil, err
 		}
-		hdrs := adapter.Headers(apiKey)
-		// Passthrough hop (Anthropic wire): union the inbound client's anthropic-beta
-		// flags with any the auth scheme required (e.g. the OAuth beta), so the
-		// client's negotiated features survive without clobbering the scheme flag.
-		if sp.UpstreamBeta != "" && adapter.Provider() == ProviderAnthropic {
-			hdrs["anthropic-beta"] = mergeBeta(hdrs["anthropic-beta"], sp.UpstreamBeta)
-		}
-		for k, v := range hdrs {
+		for k, v := range call.headers() {
 			if v != "" {
 				req.Header.Set(k, v)
 			}
@@ -775,14 +694,14 @@ func (p *HTTPPlanner) Complete(ctx context.Context, messages []Message, tools []
 			}
 			return nil, &UpstreamStatusError{Status: resp.StatusCode, Body: truncate(raw, 400)}
 		}
-		comp, err := adapter.ParseResponse(raw)
+		comp, err := call.adapter.ParseResponse(raw)
 		if err != nil {
-			return nil, fmt.Errorf("planner: %s: %w", adapter.Provider(), err)
+			return nil, fmt.Errorf("planner: %s: %w", call.adapter.Provider(), err)
 		}
 		comp = normalizeCompletionToolCalls(comp)
-		p.attachProviderCacheTelemetry(comp, reqBody, adapter.Provider())
+		p.attachProviderCacheTelemetry(comp, call.body, call.adapter.Provider())
 		comp.Raw = raw
-		comp.PreSendQuarantines = len(quarantines)
+		comp.PreSendQuarantines = call.quarantined
 		return comp, nil
 	}
 	return nil, fmt.Errorf("planner: failed after %d attempts: %w", maxAttempts, lastErr)
