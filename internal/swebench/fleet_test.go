@@ -8,6 +8,8 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+
+	"github.com/anthony-chaudhary/fak/internal/codelint"
 )
 
 // fleet_test.go is the no-model / no-GPU / no-network witness for the fleet coding
@@ -129,7 +131,7 @@ func TestRunCodingAgentRespectsStepCap(t *testing.T) {
 	planner := &fakePlanner{fn: func(_ int, _ []ChatMessage) ChatTurn {
 		return toolCallTurn("r", "read_file", `{"path":"f.txt"}`) // never calls finish
 	}}
-	steps, err := runCodingAgent(context.Background(), planner, Instance{InstanceID: "x"}, dir, 4, false)
+	steps, err := runCodingAgent(context.Background(), planner, Instance{InstanceID: "x"}, dir, 4, false, nil)
 	if err != nil {
 		t.Fatalf("runCodingAgent: %v", err)
 	}
@@ -151,7 +153,7 @@ func TestRunCodingAgentStopsOnFinalAnswer(t *testing.T) {
 		}
 		return finalTurn("done")
 	}}
-	steps, err := runCodingAgent(context.Background(), planner, Instance{}, dir, 10, false)
+	steps, err := runCodingAgent(context.Background(), planner, Instance{}, dir, 10, false, nil)
 	if err != nil {
 		t.Fatalf("runCodingAgent: %v", err)
 	}
@@ -181,7 +183,7 @@ func TestFleetRunnerErrorsWithoutPlanner(t *testing.T) {
 func TestExecToolRejectsEscape(t *testing.T) {
 	dir := t.TempDir()
 	res, fin := execTool(context.Background(), dir,
-		ChatToolCall{Name: "write_file", Args: `{"path":"../evil.txt","content":"x"}`}, false)
+		ChatToolCall{Name: "write_file", Args: `{"path":"../evil.txt","content":"x"}`}, false, nil)
 	if fin {
 		t.Error("write_file must not signal finish")
 	}
@@ -193,11 +195,44 @@ func TestExecToolRejectsEscape(t *testing.T) {
 	}
 }
 
+// TestExecToolLintsWriteWhenEnabled: with a linter (LintWrites on), a write of
+// broken code gets the kernel's language-server diagnostics appended to the
+// model-facing result so the agent self-corrects; with a nil linter (off) it does
+// not; a clean write is silent either way. Uses the in-process Go pack, so it needs
+// no external toolchain. The write itself always lands — the lint is advisory.
+func TestExecToolLintsWriteWhenEnabled(t *testing.T) {
+	dir := t.TempDir()
+	reg := codelint.DefaultRegistry()
+
+	broken := ChatToolCall{Name: "write_file", Args: `{"path":"bad.go","content":"package x\nfunc ("}`}
+	res, fin := execTool(context.Background(), dir, broken, false, reg)
+	if fin {
+		t.Error("write_file must not signal finish")
+	}
+	if !strings.Contains(res, "codelint:") || !strings.Contains(res, "GO_PARSE") {
+		t.Fatalf("want a GO_PARSE diagnostic appended to the write result, got %q", res)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "bad.go")); err != nil {
+		t.Errorf("the write is advisory — the broken file should still exist: %v", err)
+	}
+
+	resOff, _ := execTool(context.Background(), dir, broken, false, nil)
+	if strings.Contains(resOff, "codelint:") {
+		t.Errorf("LintWrites off (nil linter) must not append diagnostics, got %q", resOff)
+	}
+
+	clean := ChatToolCall{Name: "write_file", Args: `{"path":"ok.go","content":"package x\n\nfunc F() int { return 1 }\n"}`}
+	resClean, _ := execTool(context.Background(), dir, clean, false, reg)
+	if strings.Contains(resClean, "codelint:") {
+		t.Errorf("a clean write must be silent, got %q", resClean)
+	}
+}
+
 // TestExecToolBashGatedByAllowExec: the shell (bash) tool is refused unless allowExec.
 func TestExecToolBashGatedByAllowExec(t *testing.T) {
 	dir := t.TempDir()
 	res, _ := execTool(context.Background(), dir,
-		ChatToolCall{Name: "bash", Args: `{"command":"echo hi"}`}, false)
+		ChatToolCall{Name: "bash", Args: `{"command":"echo hi"}`}, false, nil)
 	if !strings.Contains(res, "disabled") {
 		t.Errorf("bash tool should be disabled without allowExec, got %q", res)
 	}

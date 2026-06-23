@@ -46,7 +46,7 @@ def doc_go(name: str, tier: str, n: int, summary: str) -> str:
         f"//\n"
         f"// Tier: {tier} ({n}) — see internal/architest. This package may import only\n"
         f"// packages whose tier is <= {n}; an upward import fails the architest gate.\n"
-        f"// See fak/GROWTH.md for the layering contract and how a leaf bakes in.\n"
+        f"// See AGENTS.md and internal/architest for the layering contract.\n"
         f"package {name}\n"
     )
 
@@ -162,10 +162,15 @@ def main() -> int:
         print("ERROR: 'root' is reserved for internal/abi; pick foundation or higher", file=sys.stderr)
         return 2
 
+    # The Go module is the REPOSITORY ROOT (AGENTS.md): the real tree is
+    # internal/<name>/, NOT fak/internal/<name>/. Emitting the `fak/` form made
+    # every target path point at a non-existent dir, so leaf creation aborted
+    # with FileNotFoundError (stale fak/-prefix bug class; the dos.toml glob was
+    # fixed 2026-06-22, these target paths were not).
     root = repo_root()
-    leaf_dir = root / "fak" / "internal" / name
-    architest = root / "fak" / "internal" / "architest" / "architest_test.go"
-    registrations = root / "fak" / "internal" / "registrations" / "registrations.go"
+    leaf_dir = root / "internal" / name
+    architest = root / "internal" / "architest" / "architest_test.go"
+    registrations = root / "internal" / "registrations" / "registrations.go"
     dos_toml = root / "dos.toml"
 
     report: dict = {"name": name, "tier": tier, "register": args.register, "dry_run": args.dry_run, "edits": []}
@@ -214,7 +219,7 @@ def main() -> int:
         ["dos.toml (concurrency lane)"] if new_dos is not None else []
     )
     report["next_steps"] = [
-        f"implement the leaf in fak/internal/{name}/{name}.go",
+        f"implement the leaf in internal/{name}/{name}.go",
         f".\\fak\\test.ps1 ./internal/{name}/ ./internal/architest/   # both green by construction",
         "the architest gate now enforces this leaf's tier on every CI run",
     ]

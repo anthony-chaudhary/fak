@@ -82,6 +82,8 @@ func main() {
 		cmdPolicy(os.Args[2:])
 	case "lint":
 		cmdLint(os.Args[2:])
+	case "codelint":
+		cmdCodelint(os.Args[2:])
 	case "answer-shape":
 		cmdAnswerShape(os.Args[2:])
 	case "doctor":
@@ -189,6 +191,13 @@ func usage() {
                  the model is shown but the kernel never enforces — once, instead of
                  the runtime silently papering over it every call. Exit 1 on an
                  error finding, or on any finding with --strict)
+  fak codelint  [--json] [--errors-only] [--list] PATH...
+                (the LANGUAGE-SERVER-PACK code linter: route each file to the pack
+                 that owns its extension and report parse/compile errors — the
+                 write-time check the kernel runs over CODE the agent produces
+                 (Go/JSON in-process, Python/CUDA via their toolchains, degrading
+                 to no-opinion where a checker is absent). The same Lint the
+                 SWE-bench fleet runs on every agent file write. Exit 1 on an error)
   fak answer-shape [--text - | --file PATH | --text STR] [--max-repeat 0.5] [--max-chars N] [--ngram 3] [--json]
                 (the DEGENERATION/VERBOSITY WITNESS: judge the SHAPE of a candidate
                  answer or tool result — how repetitive (looping) and how long

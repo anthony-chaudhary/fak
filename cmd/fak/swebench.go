@@ -65,12 +65,14 @@ usage:
         (JSONL or JSON array) for real problem-statement token geometry.
 
   fak swebench run --agent AGENT [--filter FILTER] [--output DIR]
-        [--max-steps N] [--timeout DURATION] [--gateway ADDR] [--model MODEL] [--allow-exec]
+        [--max-steps N] [--timeout DURATION] [--gateway ADDR] [--model MODEL] [--allow-exec] [--lint-writes]
         Run an agent on SWE-bench instances and generate predictions.json.
         AGENT: mock (dummy patches), fleet (gateway coding agent → fak serve), deepswe (R2E-Gym baseline).
         FILTER: smoke (~5 instances), l3 (~50), full (all 500).
         fleet drives a read/edit loop against a running 'fak serve' (point --gateway at it;
-        --allow-exec additionally enables the shell tool — sandbox/container only).
+        --allow-exec additionally enables the shell tool — sandbox/container only;
+        --lint-writes runs the kernel's language-server packs over each agent write and
+        feeds parse/compile errors back to the model).
 
   fak swebench eval --predictions preds.json [--run-id ID] [--max-workers N] [--out FILE]
         Grade a predictions file into the SWE-bench Verified resolve-rate via the
@@ -386,6 +388,7 @@ func cmdSwebenchRun(argv []string) {
 	gateway := fs.String("gateway", "localhost:8080", "fleet gateway address (for fleet agent)")
 	model := fs.String("model", "", "model id to request from the gateway (fleet) or endpoint/path (deepswe)")
 	allowExec := fs.Bool("allow-exec", false, "allow the fleet agent's shell (run) tool — use ONLY in a sandboxed/containerized run")
+	lintWrites := fs.Bool("lint-writes", false, "lint each agent file write with the kernel's language-server packs (codelint) and feed parse/compile errors back to the model")
 	_ = fs.Parse(argv)
 
 	// Map agent string to RunnerType
@@ -414,6 +417,7 @@ func cmdSwebenchRun(argv []string) {
 		GatewayAddr: *gateway,
 		Model:       *model,
 		AllowExec:   *allowExec,
+		LintWrites:  *lintWrites,
 	}
 	if rt == swebench.RunnerFleet {
 		cfg.Planner = newFleetPlanner(*gateway, *model)

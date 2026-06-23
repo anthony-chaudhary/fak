@@ -8,6 +8,8 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+
+	"github.com/anthony-chaudhary/fak/internal/codelint"
 )
 
 // fleet.go is the fak-native SWE-bench solver: the "fleet" runner drives a real
@@ -117,7 +119,14 @@ func (f *fleetRunner) RunInstance(ctx context.Context, in Instance) (Prediction,
 		return Prediction{}, fmt.Errorf("workspace %s is not a git repo after prepare: %w", dir, err)
 	}
 
-	if _, err := runCodingAgent(ctx, planner, in, dir, f.cfg.MaxSteps, f.cfg.AllowExec); err != nil {
+	// LintWrites turns on the kernel's language-server packs over every file the
+	// agent writes (off by default, so a benchmark run's behavior is unchanged
+	// unless the operator opts in). A nil linter disables the check entirely.
+	var linter *codelint.Registry
+	if f.cfg.LintWrites {
+		linter = codelint.DefaultRegistry()
+	}
+	if _, err := runCodingAgent(ctx, planner, in, dir, f.cfg.MaxSteps, f.cfg.AllowExec, linter); err != nil {
 		return Prediction{}, err
 	}
 
@@ -138,7 +147,7 @@ func (f *fleetRunner) RunInstance(ctx context.Context, in Instance) (Prediction,
 // partial worktree diff is still a (possibly empty) prediction; only a planner
 // failure or context cancellation propagates. Exposed within the package so the
 // test can assert turn accounting directly.
-func runCodingAgent(ctx context.Context, p CodePlanner, in Instance, dir string, maxSteps int, allowExec bool) (int, error) {
+func runCodingAgent(ctx context.Context, p CodePlanner, in Instance, dir string, maxSteps int, allowExec bool, linter *codelint.Registry) (int, error) {
 	if maxSteps <= 0 {
 		maxSteps = 50
 	}
@@ -166,7 +175,7 @@ func runCodingAgent(ctx context.Context, p CodePlanner, in Instance, dir string,
 
 		finished := false
 		for _, tc := range msg.ToolCalls {
-			result, fin := execTool(ctx, dir, tc, allowExec)
+			result, fin := execTool(ctx, dir, tc, allowExec, linter)
 			messages = append(messages, ChatMessage{
 				Role:       "tool",
 				ToolCallID: tc.ID,
@@ -188,7 +197,7 @@ func runCodingAgent(ctx context.Context, p CodePlanner, in Instance, dir string,
 // fed back to the model plus whether it was the finish signal. Tool-level
 // failures (bad path, missing file) are returned AS results — the model sees the
 // error and adapts; they are not run-fatal.
-func execTool(ctx context.Context, dir string, tc ChatToolCall, allowExec bool) (result string, finished bool) {
+func execTool(ctx context.Context, dir string, tc ChatToolCall, allowExec bool, linter *codelint.Registry) (result string, finished bool) {
 	switch tc.Name {
 	case "finish":
 		return "ok: finishing", true
@@ -228,7 +237,11 @@ func execTool(ctx context.Context, dir string, tc ChatToolCall, allowExec bool) 
 		if err := os.WriteFile(full, []byte(a.Content), 0o644); err != nil {
 			return "error: " + err.Error(), false
 		}
-		return fmt.Sprintf("ok: wrote %d bytes to %s", len(a.Content), a.Path), false
+		msg := fmt.Sprintf("ok: wrote %d bytes to %s", len(a.Content), a.Path)
+		if diag := lintWritten(ctx, linter, full, a.Path); diag != "" {
+			msg += "\n" + diag
+		}
+		return msg, false
 
 	case "bash":
 		if !allowExec {
@@ -249,6 +262,30 @@ func execTool(ctx context.Context, dir string, tc ChatToolCall, allowExec bool) 
 	default:
 		return "error: unknown tool " + tc.Name, false
 	}
+}
+
+// lintWritten runs the kernel's language-server packs over a file the agent just
+// wrote and returns a compact, model-facing block for any HARD (parse/compile)
+// error, so the coding agent sees its own broken code and fixes it on the next
+// turn — the same way a tool error is fed back. It is advisory: the write already
+// landed, and a clean file, an unlinted language, or an absent checker returns "".
+// A nil linter (LintWrites off) is a no-op. Lint is never run-fatal.
+func lintWritten(ctx context.Context, linter *codelint.Registry, full, shown string) string {
+	if linter == nil {
+		return ""
+	}
+	fs, err := linter.LintFile(ctx, full)
+	if err != nil || !codelint.HasError(fs) {
+		return ""
+	}
+	hard := make([]codelint.Finding, 0, len(fs))
+	for _, f := range fs {
+		if f.Severity == codelint.Error {
+			f.File = shown // address the diagnostic to the path the model used
+			hard = append(hard, f)
+		}
+	}
+	return "codelint: the file you just wrote has errors — fix them before continuing:\n" + codelint.Summary(hard)
 }
 
 // capturePatch stages every change in the worktree and returns the unified diff

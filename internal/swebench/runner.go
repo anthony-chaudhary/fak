@@ -36,6 +36,7 @@ type RunConfig struct {
 	// Fleet-specific
 	GatewayAddr string      // fak gateway address (default: localhost:8080) — used by the integrator to build Planner
 	AllowExec   bool        // allow the fleet agent's `run` (shell) tool — use ONLY in a sandboxed/containerized run
+	LintWrites  bool        // lint each agent file write with the kernel's language-server packs, feeding parse/compile errors back to the model (off => benchmark behavior unchanged)
 	Planner     CodePlanner `json:"-"` // injected by the integrator (cmd/fak) for the fleet runner; nil => fleet errors
 	// DeepSWE-specific
 	DeepSWERepo string // path to R2E-Gym/DeepSWE repo (for local baseline)
