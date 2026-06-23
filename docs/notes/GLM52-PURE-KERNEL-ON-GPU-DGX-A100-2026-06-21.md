@@ -1,9 +1,9 @@
 ---
-title: "GLM-5.2 pure fak kernel on an 8-GPU datacenter server GPU server (2026-06-21)"
+title: "GLM-5.2 pure fak kernel on an 8-GPU datacenter server (2026-06-21)"
 description: "On-device datacenter GPU witnesses for the pure fak CUDA kernel running end-to-end, the first GLM-MoE GPU slice, and the not-pure ledger bounding the 753B serving gap."
 ---
 
-# GLM-5.2 "pure fak kernel" on a real GPU (8-GPU datacenter server GPU server) — witnessed results + the not-pure ledger (2026-06-21)
+# GLM-5.2 "pure fak kernel" on a real GPU (8-GPU datacenter server) — witnessed results + the not-pure ledger (2026-06-21)
 
 > **Goal (verbatim):** *prove end-to-end GPU on GPU server or H100 spot etc. running GLM-5.2
 > pure our fak kernel 100% as much as possible, and note anything that's not pure that;

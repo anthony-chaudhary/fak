@@ -118,7 +118,7 @@ top-k in device f32 risks a flipped selection vs the host f64 (the honesty bound
 slice deliberately preserves).
 
 The flagship-scale residual is unchanged and out of scope: the real 753B does not fit
-pure on an 8-GPU datacenter server GPU server (INT4 ≈ 376 GB > 320 GB) — the SGLang-serves + fak-fronts
+pure on an 8-GPU datacenter server (INT4 ≈ 376 GB > 320 GB) — the SGLang-serves + fak-fronts
 path, not the native engine.
 
 ## What is proven vs not (labeled)

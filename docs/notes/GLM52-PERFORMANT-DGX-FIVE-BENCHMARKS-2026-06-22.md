@@ -25,7 +25,7 @@ residual that is *not* in scope today:
 | Axis | What is witnessed (today / committed) | The labeled residual |
 |---|---|---|
 | **GLM-5.2 actually working** | The `glm_moe_dsa` architecture runs **green in the pure fak kernel** — **35 GLM/DSA/MoE `--- PASS`** in `internal/model`, plus `agent`/`gateway`/`cachemeta` GLM coherence all `ok` (WSL go1.26, today). | HF *numeric* DSA parity is oracle-gated (`TestOptionalGLMMoeDsaOracle*` skip; #474/#413). |
-| **Highly performant + working on GPU server** | On a real **8-GPU datacenter server GPU server**, GLM-5.2's **MoE/FFN experts + router + vocab head execute on the pure fak CUDA kernel (`k_q8_gemm`)** — `TestCUDAGLMMoeDsaBackendForward`: **cosine = 1.000000, argmax-exact** vs the CPU Q8 forward (committed `cf9d9a1`/`e3a92b7`, 2026-06-21). Pure-kernel decode **127.8 tok/s** end-to-end, **zero cuBLAS on the Q8 path**. The GPU server bridge is **confirmed live + reachable today**. | GLM-5.2's **DSA sparse-attention is still host-side** on the GPU path (the next #86/#413 slice); serving the **real 753B** is VRAM-gated (INT4 ≈ 376 GB > 320 GB) and needs the multi-GPU NCCL/offload reshape. |
+| **Highly performant + working on GPU server** | On a real **8-GPU datacenter server**, GLM-5.2's **MoE/FFN experts + router + vocab head execute on the pure fak CUDA kernel (`k_q8_gemm`)** — `TestCUDAGLMMoeDsaBackendForward`: **cosine = 1.000000, argmax-exact** vs the CPU Q8 forward (committed `cf9d9a1`/`e3a92b7`, 2026-06-21). Pure-kernel decode **127.8 tok/s** end-to-end, **zero cuBLAS on the Q8 path**. The GPU server bridge is **confirmed live + reachable today**. | GLM-5.2's **DSA sparse-attention is still host-side** on the GPU path (the next #86/#413 slice); serving the **real 753B** is VRAM-gated (INT4 ≈ 376 GB > 320 GB) and needs the multi-GPU NCCL/offload reshape. |
 | **Proven on the five benchmarks** | All **five headline fleet benchmarks reproduce their `BENCHMARK-AUTHORITY` numbers byte-for-byte on-box today** (table in §3). | The five are **model-agnostic kernel demos** (they measure the fleet-reuse + safety axis, not GLM tok/s); the GLM-specific throughput number is the datacenter GPU row above. |
 
 The one framing law carried from the suite: **fak does not race tokens-per-second
@@ -71,7 +71,7 @@ wsl -d Ubuntu-24.04 -- bash -lc 'cd /mnt/c/work/fak && \
 
 ## §2 — Highly performant + working on the GPU server: GLM-5.2 on the pure fak CUDA kernel (datacenter GPU)
 
-### The committed on-device witness (8-GPU datacenter server GPU server, sm_80)
+### The committed on-device witness (8-GPU datacenter server, sm_80)
 
 On the lab 8-GPU GPU server, GLM-5.2's dense compute runs on the **pure fak GPU
 kernel** — the MoE/FFN experts + router (a `backendKernel` swapped into

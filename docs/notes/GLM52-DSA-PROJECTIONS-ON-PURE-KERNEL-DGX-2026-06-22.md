@@ -78,7 +78,7 @@ through the backend (its comment is updated to match).
 
 The same backend path, with a lean (Q8-resident) GLM-DSA model on the **cuda backend**,
 runs all eight projections on `k_q8_gemm` — the GPU pure kernel — alongside the MoE/FFN
-experts, router, and vocab head. This was **re-run on the lab 8-GPU datacenter server GPU server on
+experts, router, and vocab head. This was **re-run on the lab 8-GPU datacenter server on
 2026-06-22 at the slice's HEAD (`498a4ab`)**, via the live Slack control bridge
 (`tools/dgx_glm_gpu_witness.sh`: clone `origin/main` → `nvcc -arch=sm_80` → isolated
 `-tags cuda` test). The node's own `go test` output (not self-report):
@@ -118,7 +118,7 @@ sparse-attention CUDA kernel + device DSA-KV) is the remaining slice of #86/#413
 labeled, not claimed.
 
 The flagship-scale residual is unchanged and out of scope here: the real 753B does not
-fit pure on an 8-GPU datacenter server GPU server (INT4 ≈ 376 GB > 320 GB) and needs the multi-GPU
+fit pure on an 8-GPU datacenter server (INT4 ≈ 376 GB > 320 GB) and needs the multi-GPU
 NCCL/offload reshape — the SGLang-serves + fak-fronts path, not the native engine.
 
 ## What is proven vs not (labeled)
