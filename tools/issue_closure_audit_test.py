@@ -76,6 +76,35 @@ class BindingClassifierTest(unittest.TestCase):
         kinds = {r["kind"] for r in refs[50]}
         self.assertIn(m.RESOLVING, kinds)
 
+    def test_issue_noun_form_binds_resolving(self):
+        # The house close convention 'issue #N' (noun form, not a close-verb).
+        refs = m.parse_git_log(_log(("efc0e78", "feat(recall): persist index", "Close the false-exact gap (issue #501).")))
+        self.assertEqual(refs[501][0]["kind"], m.RESOLVING)
+
+    def test_issues_list_form_binds_all(self):
+        # 'issues #N, #M' must bind every number in the comma list.
+        refs = m.parse_git_log(_log(("e60b92e", "feat(agent): planner", "Lands the planner (issues #558, #565).")))
+        self.assertEqual(refs[558][0]["kind"], m.RESOLVING)
+        self.assertEqual(refs[565][0]["kind"], m.RESOLVING)
+
+    def test_bare_prose_hash_is_still_mention(self):
+        # The false-binding hazard: a bare '#499' with NO 'issue' anchor stays MENTION.
+        refs = m.parse_git_log(_log(("a1fd21a", "feat(journal): digests", "the #499 gap where journal stores digests")))
+        self.assertEqual(refs[499][0]["kind"], m.MENTION)
+
+    def test_issue_word_required_for_noun_binding(self):
+        # 'see #500 for context' has no 'issue' token and is body-only -> MENTION.
+        refs = m.parse_git_log(_log(("c0ffee1", "docs: note", "see #500 for context")))
+        self.assertEqual(refs[500][0]["kind"], m.MENTION)
+
+    def test_open_witnessed_discovered_via_issue_noun_form(self):
+        # The rung's real payoff: 'issue #N' on a witnessed commit surfaces a
+        # shipped-but-still-OPEN fix as OPEN_WITNESSED (closable now).
+        refs = m.parse_git_log(_log(("ship777", "feat(recall): candidate index", "Close the gap (issue #74).")))
+        self.assertEqual(refs[74][0]["kind"], m.RESOLVING)
+        g = m.grade_issue(_issue(74, state="OPEN"), refs[74], {"ship777": _audit()})
+        self.assertEqual(g["bucket"], m.OPEN_WITNESSED)
+
 
 class AuditParseTest(unittest.TestCase):
     def test_first_audit_record_from_array(self):
@@ -182,6 +211,19 @@ class PayloadTest(unittest.TestCase):
         p = self._payload(issues, refs, {"w1": _audit()})
         self.assertTrue(p["ok"])
         self.assertEqual(p["finding"], "shipped_but_open")
+
+    def test_claimed_reason_surfaces_closable_open_witnessed(self):
+        # When there is BOTH a claimed gap and shipped-but-open work, the claimed
+        # headline must still surface the OPEN_WITNESSED issues as closable now.
+        issues = [
+            _issue(2, state="CLOSED", reason="COMPLETED"),  # claimed (no commit)
+            _issue(74, state="OPEN"),                        # open_witnessed
+        ]
+        refs = {74: [{"sha": "w1", "subject": "fix", "kind": m.RESOLVING}]}
+        p = self._payload(issues, refs, {"w1": _audit()}, coverage={"complete": True, "notes": []})
+        self.assertEqual(p["finding"], "claimed_closed")
+        self.assertEqual(p["counts"][m.OPEN_WITNESSED], 1)
+        self.assertIn("closable now", p["reason"])
 
     def test_audit_error_is_not_ok(self):
         p = self._payload([], {}, {}, audit_error="gh failed")

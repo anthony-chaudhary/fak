@@ -52,6 +52,16 @@ _RESOLVE_RE = re.compile(r"\b(?:close|fixe?|resolve)[sd]?\s+#(\d+)\b", re.IGNORE
 # when it is genuinely glued; a normal 'Relates to #118' still matches (and is
 # classified MENTION because it is not a _RESOLVE_RE hit and not in the subject).
 _REF_RE = re.compile(r"(?<![\w-])#(\d+)\b")
+# House close convention (NOUN form): '(issue #N)' / '(issues #N, #M)'. The repo
+# writes this in commit bodies when a change resolves a ticket (e.g. efc0e78
+# '(issue #501)', e60b92e '(issues #558, #565)'). _RESOLVE_RE only catches the
+# VERB form (close/fix/resolve #N), so without this rung a genuinely-witnessed
+# close written in the noun form is mis-bucketed CLAIMED_CLOSED — or a shipped fix
+# whose issue is still OPEN is missed as OPEN_WITNESSED. The literal 'issue(s)'
+# anchor before the #N list keeps it TIGHT: a bare prose '#499' / 'the #500 gap'
+# is NOT bound (those stay MENTION), so the witness is never loosened — a
+# newly-bound commit still has to pass `dos commit-audit` to count as resolved.
+_ISSUE_NOUN_RE = re.compile(r"\bissues?\b[\s:]*((?:#\d+[\s,]*(?:and\s+)?)+)", re.IGNORECASE)
 
 RESOLVING = "resolving"
 MENTION = "mention"
@@ -118,26 +128,33 @@ def read_json_from_text(text: str) -> dict[str, Any]:
 def classify_refs(subject: str, body: str) -> dict[int, str]:
     """Classify every #N in one commit as RESOLVING or MENTION.
 
-    RESOLVING wins if EITHER the GitHub-closing form (close/fix/resolve #N, in
-    subject or body) matches, OR #N appears in the subject line. Otherwise the
-    reference is a MENTION (Relates-to, prose/bullet body refs) and never counts
-    toward TRUE_RESOLVED.
+    RESOLVING wins if ANY of: the GitHub-closing VERB form (close/fix/resolve #N,
+    in subject or body) matches; the repo's house NOUN form ('issue #N' / 'issues
+    #N, #M') matches; or #N appears in the subject line. Otherwise the reference
+    is a MENTION (Relates-to, bare prose/bullet body refs) and never counts toward
+    TRUE_RESOLVED. Binding tighter never loosens the witness — a newly-bound commit
+    still has to pass `dos commit-audit` to grade TRUE_RESOLVED / OPEN_WITNESSED.
     """
     subject = subject or ""
     body = body or ""
+    text = subject + "\n" + body
     out: dict[int, str] = {}
 
     subject_refs = {int(m) for m in _REF_RE.findall(subject)}
-    resolve_refs = {int(m) for m in _RESOLVE_RE.findall(subject + "\n" + body)}
+    resolve_refs = {int(m) for m in _RESOLVE_RE.findall(text)}
+    noun_refs: set[int] = set()
+    for run in _ISSUE_NOUN_RE.findall(text):
+        noun_refs.update(int(m) for m in _REF_RE.findall(run))
+    resolving = resolve_refs | subject_refs | noun_refs
 
-    for n in _REF_RE.findall(subject + "\n" + body):
+    for n in _REF_RE.findall(text):
         num = int(n)
-        if num in resolve_refs or num in subject_refs:
+        if num in resolving:
             out[num] = RESOLVING
         else:
             out.setdefault(num, MENTION)
     # A resolving classification always wins over a mention for the same issue.
-    for num in resolve_refs | subject_refs:
+    for num in resolving:
         out[num] = RESOLVING
     return out
 
@@ -387,14 +404,19 @@ def build_payload(
         ok = False
         verdict = "ACTION"
         finding = "claimed_closed"
+        open_witnessed = counts[OPEN_WITNESSED]
         reason = (
             f"{claimed} issue(s) are CLOSED with no diff-witnessed resolving commit "
             f"(closure_rate={closure_rate})"
+            + (f"; {open_witnessed} OPEN_WITNESSED issue(s) are closable now (fix shipped + witnessed)"
+               if open_witnessed else "")
             + (f"; NOTE partial coverage — {coverage_note}" if incomplete else "")
         )
         next_action = (
             "investigate the CLAIMED_CLOSED issues: each was closed without a DOS-witnessed "
             "commit — reopen, bind a (fak <leaf>) commit, or confirm it was a non-code close"
+            + ("; and close the OPEN_WITNESSED issues whose fix already shipped"
+               if open_witnessed else "")
         )
     elif incomplete:
         # No claimed gap *in what we saw* — but we did not see the whole backlog,
