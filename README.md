@@ -1,7 +1,7 @@
 # fak — the **F**used **A**gent **K**ernel
 
 <!-- readme-verified: 2026-06-24 vs VERSION 0.32.0 + BENCHMARK-AUTHORITY · process: tools/readme_freshness_audit.py + /refresh-readme · turn-tax hero front and center; breadth stills in BENCHMARK-GALLERY.md -->
-<!-- appeal-verified: 2026-06-23 · doc-appeal scorecard v2 (tools/doc_appeal_scorecard.py) 100/100 A, appeal-debt 0 · v2 raised the bar (bold-flood + dense/unanchored lead promoted SOFT→HARD); front door rebuilt from 54/F: lead front-loaded behind an early Try-it anchor, 8 walls broken, 15 long/run-on sentences split, bold flood 84→20, contrast-frame tic removed — every claim, number, and link held identical -->
+<!-- appeal-verified: 2026-06-24 · doc-appeal scorecard v2 (tools/doc_appeal_scorecard.py) → appeal-debt 0 · 2026-06-24 re-measure caught 2 residual (1 overlong 36-word sentence in flip-1, 1 81-word wall at the flip-1 lead) — sentence split, wall broken into first/second, em-dash budget held (8→7); every claim, number, and link identical · prior 2026-06-23: front door rebuilt from 54/F (lead front-loaded behind an early Try-it anchor, 8 walls broken, 15 long/run-on sentences split, bold flood 84→20, contrast-frame tic removed) -->
 
 > **fak in one line.** A single Go binary that sits between an AI agent and the
 > tools it calls. It treats every tool call like a syscall: checked against a
@@ -89,17 +89,18 @@ rather than hidden.
 
 **1. The permission policy runs *inside* the kernel.** Most agent safety bolts a
 recognizer onto the *outside* of the loop: a pre-tool hook, a sidecar, a second
-model asked "is this safe?". That has two weaknesses. The model can argue its way
-past a recognizer (prompt injection is exactly that). And when the outside thing
-crashes or times out, the call usually runs anyway — *fail-open* (the unsafe
-default: a broken check lets the action through). That lands precisely when
-you're under attack.
+model asked "is this safe?". That has two weaknesses.
 
-`fak` puts the check on the *same call path* as the tool call: one address space (the
-same program — no message hop to a separate process, no *IPC*), and *default-deny*
-(anything the policy doesn't name is refused). So the gate isn't something the
-agent talks to. It's something the call passes *through*, like `read()` through the
-OS kernel.
+First, the model can argue its way past a recognizer — prompt injection is
+exactly that. Second, when the outside thing crashes or times out, the call
+usually runs anyway: *fail-open* (the unsafe default, where a broken check lets
+the action through). That lands precisely when you're under attack.
+
+`fak` puts the check on the *same call path* as the tool call: one address space,
+the same program. There's no message hop to a separate process, no *IPC*. And the
+policy is *default-deny*: anything it doesn't name is refused. So the gate isn't
+something the agent talks to. It's something the call passes *through*, like
+`read()` through the OS kernel.
 
 Refusing an irreversible action doesn't depend on *catching* the attack; it
 depends on the lever never having been wired up. For thirty years, "more security"
