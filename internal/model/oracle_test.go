@@ -839,9 +839,17 @@ func TestOptionalGLMMoeDsaOracleReproducesDSAAttentionTrace(t *testing.T) {
 			}
 			for qi, row := range topK {
 				want := causalTopKPrefix(tr.TopKIndices[qi], qi)
-				if !sameInts(row, want) {
-					t.Fatalf("%s prompt %d layer %d top-k[%d] = %v, want HF causal subset %v",
-						dir, prompt.Index, tr.Layer, qi, row, want)
+				// Compare the SELECTED SET, not the tie-ORDER. fak breaks equal-score
+				// ties by ascending key position (dsaTopKIndices); HF's torch.topk uses
+				// an implementation-defined tie order, so on a score tie the two return
+				// the same keys in a different order. DSA attention over the selected
+				// keys is order-invariant (softmax + ΣwV), and the numeric attn-output
+				// trace below is the strict correctness guard (cos≈1, max|Δ|<1e-3). A
+				// genuine divergence that selected a DIFFERENT key still fails here
+				// (the sorted sets differ).
+				if !sameInts(sortedInts(row), sortedInts(want)) {
+					t.Fatalf("%s prompt %d layer %d top-k[%d] selected set = %v, want HF set %v",
+						dir, prompt.Index, tr.Layer, qi, sortedInts(row), sortedInts(want))
 				}
 			}
 			got, ok := glmDsaAttentionOutputFromTopK(m, tr.Layer, layerInput, seq, topK)
@@ -1074,6 +1082,14 @@ func sameInts(a, b []int) bool {
 		}
 	}
 	return true
+}
+
+// sortedInts returns an ascending copy, for comparing a selection as a SET
+// (order-insensitive) without mutating the caller's slice.
+func sortedInts(in []int) []int {
+	out := append([]int(nil), in...)
+	sort.Ints(out)
+	return out
 }
 
 // TestOptionalMiniMaxM3OracleDocumentsMSABoundary is the real-artifact boundary witness
