@@ -629,6 +629,132 @@ extern "C" void fcuda_dsa_sparse_attend_f32(const float *dQ, const float *dSelK,
   k_dsa_sparse_attend<<<nH, FLASH_THREADS, shmem, g_stream>>>(dQ, dSelK, dSelV, dOut, nSel, nH, kd, vd, scale);
 }
 
+// ---- GLM-MoE-DSA learned-indexer score + top-k selection ---------------------------
+// The LAST GLM-5.2 compute that was host-resident even after the dense projections and the
+// sparse-attention compute moved to the kernel: the learned indexer that picks WHICH keys a query
+// attends. For each cached key k (position k, valid iff k<=queryPos) and the one query, score(k) =
+// Σ_h weights[h]·relu(scale·dot(indexQ_h, indexK_k)). The per-head dot is accumulated in DOUBLE so
+// the device score equals the host f64 score bit-closely — the indexer drives a DISCRETE top-k, so
+// it must be reduction-FAITHFUL (selection-stable), not just cosine-close like the f32 GEMM lanes. A
+// single flipped selection would diverge the forward far past any cosine floor, so f64 here is what
+// lets the device attend the SAME keys the host would and keeps the downstream witness argmax-exact.
+//
+// k_dsa_index_score: one block per key, blockDim threads stride the (head,dim) work; the per-key
+// score lands in dScores[k]. Masked keys (k>queryPos) get -inf so the top-k never picks them.
+__global__ void k_dsa_index_score(const float *indexQ, const float *indexK, const float *weights,
+                                  double *dScores, int nKeys, int nH, int indexDim, int queryPos,
+                                  float scale) {
+  int k = blockIdx.x;
+  if (k >= nKeys) return;
+  if (k > queryPos) { if (threadIdx.x == 0) dScores[k] = -1e300; return; }
+  const float *key = indexK + (size_t)k * indexDim;
+  __shared__ double red[256];
+  double acc = 0.0;
+  // Each thread sums a slice of the (head,dim) grid: head h, dim d, contributing
+  //   weights[h]·relu(scale·Σ_d q·k) — but relu is per-HEAD, so accumulate per-head dots first.
+  // With nH and indexDim both small, one thread owns whole heads (stride blockDim over heads).
+  for (int h = threadIdx.x; h < nH; h += blockDim.x) {
+    const float *qh = indexQ + (size_t)h * indexDim;
+    double hd = 0.0;
+    for (int d = 0; d < indexDim; d++) hd += (double)qh[d] * (double)key[d];
+    double hs = hd * (double)scale;
+    if (hs < 0.0) hs = 0.0;
+    acc += (double)weights[h] * hs;
+  }
+  red[threadIdx.x] = acc;
+  __syncthreads();
+  for (int s = blockDim.x / 2; s > 0; s >>= 1) {
+    if (threadIdx.x < s) red[threadIdx.x] += red[threadIdx.x + s];
+    __syncthreads();
+  }
+  if (threadIdx.x == 0) dScores[k] = red[0];
+}
+
+// k_dsa_index_topk: single block. Repeats a max-reduction topK times, each pass picking the highest
+// remaining score (ties by LOWER position — the dsaTopKIndices order) and masking it out for the
+// next pass. nKeys is small (one decode step's causal window) and topK tiny, so the O(topK·nKeys)
+// host-equivalent selection is cheap on one block. Writes the selected positions to dSel[0..ret-1].
+__global__ void k_dsa_index_topk(const double *dScores, int nKeys, int queryPos, int topK,
+                                 int *dSel, int *dCount) {
+  __shared__ double vbest[256];
+  __shared__ int ibest[256];
+  __shared__ char taken[4096]; // nKeys per decode step stays well under this; guarded below.
+  int nValid = (queryPos + 1 < nKeys) ? queryPos + 1 : nKeys;
+  for (int i = threadIdx.x; i < nKeys && i < 4096; i += blockDim.x) taken[i] = 0;
+  __syncthreads();
+  int picked = 0;
+  int want = topK < nValid ? topK : nValid;
+  for (int pass = 0; pass < want; pass++) {
+    double bv = -1e300; int bi = -1;
+    for (int i = threadIdx.x; i < nValid; i += blockDim.x) {
+      if (i < 4096 && taken[i]) continue;
+      double v = dScores[i];
+      if (bi < 0 || v > bv || (v == bv && i < bi)) { bv = v; bi = i; }
+    }
+    vbest[threadIdx.x] = bv; ibest[threadIdx.x] = bi;
+    __syncthreads();
+    for (int s = blockDim.x / 2; s > 0; s >>= 1) {
+      if (threadIdx.x < s) {
+        double ov = vbest[threadIdx.x + s]; int oi = ibest[threadIdx.x + s];
+        int cur = ibest[threadIdx.x];
+        if (oi >= 0 && (cur < 0 || ov > vbest[threadIdx.x] || (ov == vbest[threadIdx.x] && oi < cur))) {
+          vbest[threadIdx.x] = ov; ibest[threadIdx.x] = oi;
+        }
+      }
+      __syncthreads();
+    }
+    if (threadIdx.x == 0) {
+      int sel = ibest[0];
+      dSel[picked] = sel;
+      if (sel >= 0 && sel < 4096) taken[sel] = 1;
+    }
+    __syncthreads();
+    picked++;
+  }
+  if (threadIdx.x == 0) *dCount = picked;
+}
+
+// DSA_TOPK_MAX_KEYS is the causal-window cap k_dsa_index_topk's shared `taken[]` mask can cover. A
+// decode step's nKeys is the causal window (one position's history), well under this for every context
+// the device path serves today; but to keep the boundary HONEST rather than silently degrading, the
+// host wrapper refuses (sentinel -1 → caller falls back to the host f64 loop) when nKeys exceeds it,
+// instead of running a topk whose un-maskable tail could re-select a position. Must match the literal
+// shared-array size in k_dsa_index_topk.
+#define DSA_TOPK_MAX_KEYS 4096
+
+// fcuda_dsa_index_select_f32 scores all keys (k_dsa_index_score, f64-accumulated) then selects the
+// top-k positions (k_dsa_index_topk) on the device, copying back only the small index list. The
+// f64 score scratch is allocated internally (sized [nKeys] doubles) so the caller never sees the
+// double dtype. Returns the number of positions written into host outIdx (= min(topK, #valid keys)),
+// or -1 to DECLINE (nKeys past the shared-mem top-k cap) so the caller keeps the host selection.
+extern "C" int fcuda_dsa_index_select_f32(const float *dIndexQ, const float *dIndexK,
+                                          const float *dWeights, int nKeys, int nH,
+                                          int indexDim, int queryPos, int topK, float scale,
+                                          int *outIdx) {
+  if (nKeys <= 0 || topK <= 0) return 0;
+  if (nKeys > DSA_TOPK_MAX_KEYS) return -1; // window past the maskable top-k tail: decline, host falls back
+  int threads = 256;
+  double *dScores = (double *)fcuda_malloc(sizeof(double) * (size_t)nKeys);
+  k_dsa_index_score<<<nKeys, threads, 0, g_stream>>>(dIndexQ, dIndexK, dWeights,
+                                                     dScores, nKeys, nH, indexDim,
+                                                     queryPos, scale);
+  int *dSel = (int *)fcuda_malloc(sizeof(int) * (size_t)topK);
+  int *dCount = (int *)fcuda_malloc(sizeof(int));
+  k_dsa_index_topk<<<1, threads, 0, g_stream>>>(dScores, nKeys, queryPos, topK, dSel, dCount);
+  int hCount = 0;
+  CK(cudaMemcpy(&hCount, dCount, sizeof(int), cudaMemcpyDeviceToHost));
+  if (hCount < 0) hCount = 0;
+  if (hCount > topK) hCount = topK;
+  if (hCount > 0) {
+    CK(cudaMemcpy(outIdx, dSel, sizeof(int) * (size_t)hCount, cudaMemcpyDeviceToHost));
+  }
+  g_host_bytes += sizeof(int) * (size_t)(hCount + 1); // only the index list crosses host-ward
+  fcuda_free(dScores);
+  fcuda_free(dSel);
+  fcuda_free(dCount);
+  return hCount;
+}
+
 // ---- argmax (first index of the max value — cpuref tie-break) -------------------
 __global__ void k_argmax(const float *L, int n, int *outIdx) {
   __shared__ float vbest[256];

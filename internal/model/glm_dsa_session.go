@@ -291,8 +291,29 @@ func (m *Model) glmDsaIndexStep(cache *glmDsaKVCache, layer, pos int, xn []float
 		return nil, false
 	}
 
-	scores := make([]float64, pos+1)
 	scale := 1.0 / math.Sqrt(float64(indexDim))
+
+	// Device path (OPTIONAL): when the active kernel's backend advertises compute.DSAIndexBackend,
+	// the indexer score + top-k SELECTION runs on the device (k_dsa_index_score + k_dsa_index_topk).
+	// The cache stores f64 that are losslessly-widened f32 (the keys/queries originated f32, see the
+	// float32To64 above), so narrowing back to f32 for the device is exact; the device accumulates
+	// the score dot in f64, so the selected positions are bit-identical to the host loop below — the
+	// selection-stability boundary is satisfied, not bypassed. Any non-conforming result falls back.
+	if ik, ok := mat.(dsaIndexKernel); ok {
+		nKeys := pos + 1
+		idxQ := make([]float32, indexHeads*indexDim)
+		for h := 0; h < indexHeads; h++ {
+			copy(idxQ[h*indexDim:(h+1)*indexDim], float64To32(indexQ[h]))
+		}
+		idxK := float64To32(cache.IndexK[layer][:nKeys*indexDim])
+		if sel, ok := ik.indexSelect(idxQ, idxK, weights, nKeys, indexHeads, indexDim, pos, cfg.IndexTopK, float32(scale)); ok {
+			if glmDsaValidSelection(sel, pos) {
+				return sel, true
+			}
+		}
+	}
+
+	scores := make([]float64, pos+1)
 	for keyPos := 0; keyPos <= pos; keyPos++ {
 		key := cache.IndexK[layer][keyPos*indexDim : (keyPos+1)*indexDim]
 		var score float64

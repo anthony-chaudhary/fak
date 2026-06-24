@@ -80,3 +80,106 @@ func (c *cpuBackend) DSASparseAttend(q, selK, selV Tensor, nSel, nH, qkHead, vHe
 	out := dsaSparseAttendHost(c.f32(q), c.f32(selK), c.f32(selV), nSel, nH, qkHead, vHead, scale)
 	return c.result([]int{nH * vHead}, out)
 }
+
+// DSAIndexBackend is the optional capability a backend implements to run GLM-MoE-DSA's learned
+// indexer SCORING + top-k SELECTION — the last GLM-5.2 compute still host-resident even when the
+// dense projections and the sparse-attention compute already run on the kernel. The host loop it
+// replaces is model.glmDsaIndexStep's per-key score (decode) / model.dsaIndexScores+dsaTopKIndices
+// (prefill): for each causal key, score = Σ_h weights[h]·relu(scale·dot(index_q[h], index_k)), then
+// keep the top-k key POSITIONS (score descending, ties broken by lower position — the exact
+// dsaTopKIndices order).
+//
+// WHY this can move to the device AND keep the witness argmax-exact (the honesty boundary that kept
+// the selection host-side until now): the score is a small dot over IndexHeadDim (8 in the fixture,
+// O(128) in the real model) accumulated in f64 — the SAME reduction the host uses — so the device
+// scores match the host f64 scores bit-closely, and the top-k is taken with the IDENTICAL total order
+// (score desc, position asc). The selected key SET is therefore bit-identical CPU↔device — there is
+// no flipped top-k entry — so a GLM-5.2 forward whose selection runs on the kernel attends exactly
+// the keys the host would, and the downstream sparse-attention stays argmax-exact. The cost is the
+// f64 score dots (cheap: A100 has native f64; IndexHeadDim is tiny), paid to make selection-stability
+// PROVABLE rather than gated. This is the difference from the f32-GEMM lanes, which are Approx by
+// design: the indexer drives a DISCRETE selection, so it must be reduction-faithful, not cosine-close.
+type DSAIndexBackend interface {
+	Backend
+	// DSAIndexSelect scores nKeys cached index-keys against one query's nH index-heads and returns
+	// the top-k selected key positions (length min(topK, nValid)) for that query at queryPos.
+	//   indexQ  [nH*indexDim]        — this query's per-head indexer query (post-RoPE, post-norm)
+	//   indexK  [nKeys*indexDim]     — the cached per-key indexer keys (post-RoPE, post-norm), key
+	//                                  k at k*indexDim; key position k is causally valid iff k<=queryPos
+	//   weights [nH]                 — this query's per-head indexer weights (already scaled)
+	// Score(k) = Σ_h weights[h]·relu(scale·Σ_d indexQ[h*indexDim+d]·indexK[k*indexDim+d]); keys with
+	// position > queryPos are masked out. Returns the top-k positions, score descending, ties by lower
+	// position (dsaTopKIndices order). The returned slice is host-resident (a small index list).
+	DSAIndexSelect(indexQ, indexK, weights Tensor, nKeys, nH, indexDim, queryPos, topK int, scale float32) []int
+}
+
+// dsaIndexSelectHost is the byte-for-byte CPU reference for the indexer score + top-k: the exact
+// arithmetic of model.glmDsaIndexStep's per-key loop (f64 dot, relu, weighted sum) followed by the
+// dsaTopKIndices total order (score descending, ties by lower position). Every device kernel is held
+// against it; because the device accumulates the score dot in f64 too, the selected positions match
+// bit-for-bit (selection-stable), not merely cosine-close.
+func dsaIndexSelectHost(indexQ, indexK, weights []float32, nKeys, nH, indexDim, queryPos, topK int, scale float32) []int {
+	cands := make([]dsaIndexCand, 0, nKeys)
+	for k := 0; k < nKeys; k++ {
+		if k > queryPos {
+			continue
+		}
+		key := indexK[k*indexDim : (k+1)*indexDim]
+		var score float64
+		for h := 0; h < nH; h++ {
+			qh := indexQ[h*indexDim : (h+1)*indexDim]
+			var hd float64
+			for d := 0; d < indexDim; d++ {
+				hd += float64(qh[d]) * float64(key[d])
+			}
+			hs := hd * float64(scale)
+			if hs < 0 {
+				hs = 0
+			}
+			score += float64(weights[h]) * hs
+		}
+		cands = append(cands, dsaIndexCand{pos: k, score: score})
+	}
+	// Stable order: score descending, ties by lower position (the dsaTopKIndices tie-break).
+	sortDSAIndexCands(cands)
+	n := topK
+	if n > len(cands) {
+		n = len(cands)
+	}
+	out := make([]int, n)
+	for i := 0; i < n; i++ {
+		out[i] = cands[i].pos
+	}
+	return out
+}
+
+// dsaIndexCand pairs a key position with its indexer score for the top-k sort.
+type dsaIndexCand struct {
+	pos   int
+	score float64
+}
+
+// sortDSAIndexCands sorts by score descending, ties by lower position — an insertion sort to keep
+// the cpu-ref dependency-free and the order byte-identical to model.dsaTopKIndices' sort.SliceStable.
+func sortDSAIndexCands(c []dsaIndexCand) {
+	for i := 1; i < len(c); i++ {
+		j := i
+		for j > 0 && dsaIndexCandLess(c[j], c[j-1]) {
+			c[j], c[j-1] = c[j-1], c[j]
+			j--
+		}
+	}
+}
+
+func dsaIndexCandLess(a, b dsaIndexCand) bool {
+	if a.score == b.score {
+		return a.pos < b.pos
+	}
+	return a.score > b.score
+}
+
+// DSAIndexSelect on the cpu-ref is the Reference implementation: byte-for-byte the host indexer
+// score + top-k. (The cpu-ref is the selection floor every device is checked against.)
+func (c *cpuBackend) DSAIndexSelect(indexQ, indexK, weights Tensor, nKeys, nH, indexDim, queryPos, topK int, scale float32) []int {
+	return dsaIndexSelectHost(c.f32(indexQ), c.f32(indexK), c.f32(weights), nKeys, nH, indexDim, queryPos, topK, scale)
+}

@@ -144,6 +144,21 @@ void fcuda_dsa_sparse_attend_f32(const float *dQ, const float *dSelK, const floa
  * cpuref first-max tie-break), copied back to the host as the single scalar fence. */
 int fcuda_argmax_f32(const float *dLogits, int n);
 
+/* GLM-MoE-DSA learned-indexer SCORE + top-k SELECTION for ONE query position, on-device.
+ * For each cached key k (0..nKeys-1) with position k<=queryPos: score(k) = Σ_h weights[h] *
+ * relu(scale * Σ_d indexQ[h*indexDim+d] * indexK[k*indexDim+d]); the per-key/per-head dot is
+ * accumulated in DOUBLE precision so the device scores match the host f64 scores bit-closely
+ * (selection-stable, not merely cosine-close — the indexer drives a discrete top-k, so it must be
+ * reduction-faithful). dIndexQ is [nH*indexDim], dIndexK [nKeys*indexDim], dWeights [nH], all
+ * device-resident. The kernel writes the per-key scores to dScores[nKeys] (device scratch), then a
+ * selection kernel picks the top-k positions (score descending, ties by lower position — the
+ * dsaTopKIndices order). The f64 score scratch is allocated internally. The selected positions are
+ * copied back into host outIdx[0..ret-1]; ret = min(topK, #valid keys) is returned. outIdx must have
+ * room for topK ints. */
+int fcuda_dsa_index_select_f32(const float *dIndexQ, const float *dIndexK, const float *dWeights,
+                               int nKeys, int nH, int indexDim, int queryPos,
+                               int topK, float scale, int *outIdx);
+
 /* AWQ (Activation-aware Weight Quantization) 4-bit kernels.
  * AWQ format: 4-bit weights packed 2 per byte (nibble-packed), per-channel scales.
  * Dequantization: weight = scale[o] * (code - 8), where 8 is the zero-point. */

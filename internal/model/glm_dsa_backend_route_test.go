@@ -20,6 +20,8 @@ type recordingBackend struct {
 	shapes      map[[2]int]int // [out,in] -> MatMul call count
 	sparseCalls int            // DSASparseAttend call count (the sparse-attention device op)
 	sparseSel   int            // total selected keys handed to DSASparseAttend (proves real work, not an empty call)
+	indexCalls  int            // DSAIndexSelect call count (the indexer score + top-k device op)
+	indexKeys   int            // total cached keys scored by DSAIndexSelect (proves real selection work)
 }
 
 func newRecordingBackend(be compute.Backend) *recordingBackend {
@@ -43,6 +45,24 @@ func (r *recordingBackend) sparse() (calls, sel int) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	return r.sparseCalls, r.sparseSel
+}
+
+// DSAIndexSelect records that GLM-DSA's learned-indexer score + top-k SELECTION reached the backend
+// device op (rather than staying host-resident in glmDsaIndexStep's f64 loop) and delegates to the
+// wrapped backend. It makes recordingBackend a compute.DSAIndexBackend, so the model's type-assert
+// routes the selection here — direct, author-independent evidence the indexer ran on the backend.
+func (r *recordingBackend) DSAIndexSelect(indexQ, indexK, weights compute.Tensor, nKeys, nH, indexDim, queryPos, topK int, scale float32) []int {
+	r.mu.Lock()
+	r.indexCalls++
+	r.indexKeys += nKeys
+	r.mu.Unlock()
+	return r.Backend.(compute.DSAIndexBackend).DSAIndexSelect(indexQ, indexK, weights, nKeys, nH, indexDim, queryPos, topK, scale)
+}
+
+func (r *recordingBackend) index() (calls, keys int) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.indexCalls, r.indexKeys
 }
 
 func (r *recordingBackend) record(w compute.Tensor) {

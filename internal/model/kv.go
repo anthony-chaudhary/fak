@@ -746,6 +746,47 @@ func (k backendKernel) sparseAttend(q, selK, selV []float32, nSel, nH, qkHead, v
 	return out, true
 }
 
+// dsaIndexKernel is the OPTIONAL device path for GLM-MoE-DSA's learned-indexer score + top-k
+// SELECTION — the last GLM-5.2 compute that stays host-resident even after the dense projections
+// AND the sparse-attention compute already run on the kernel. glmDsaIndexStep (the per-token DECODE
+// hot path, via decodeBandGLMDsa) type-asserts its matKernel for it and falls back to the host f64
+// score+top-k loop when absent — so only a backendKernel whose compute.Backend implements
+// compute.DSAIndexBackend (the cpu-ref, and the cuda backend via k_dsa_index_score + k_dsa_index_topk)
+// takes the device path. Because the device accumulates the score dot in f64 (matching the host
+// reduction over the same losslessly-widened-f32 operands) and selects with the identical total
+// order, the selected key SET is bit-identical CPU↔device — the selection-stability boundary that
+// previously kept this host-side is satisfied, not bypassed. (The whole-sequence Prefill index
+// helper glmDsaTopKIndicesNormed runs host-only and is the labeled residual for a later slice.)
+type dsaIndexKernel interface {
+	// indexSelect scores nKeys cached index-keys against one query's nH index-heads and returns the
+	// top-k selected key positions for the query at queryPos. indexQ is [nH*indexDim]; indexK is
+	// [nKeys*indexDim]; weights is [nH] (already scaled). It returns ok=false (caller falls back to
+	// the host loop) when the backend does not advertise compute.DSAIndexBackend.
+	indexSelect(indexQ, indexK, weights []float32, nKeys, nH, indexDim, queryPos, topK int, scale float32) ([]int, bool)
+}
+
+// indexSelect routes GLM-DSA's indexer score + top-k to the compute.Backend when it advertises
+// DSAIndexBackend: it uploads the per-head query, the cached index-keys, and the per-head weights,
+// runs the device op (k_dsa_index_score + k_dsa_index_topk on the cuda backend — f64-accumulated
+// scoring, on-device selection), and returns the selected positions. A backend without the
+// capability returns ok=false so the caller keeps the host f64 loop. The selection is bit-identical
+// to the host because the device scores in f64 and uses the same total order.
+func (k backendKernel) indexSelect(indexQ, indexK, weights []float32, nKeys, nH, indexDim, queryPos, topK int, scale float32) ([]int, bool) {
+	be := k.s.Backend
+	ib, ok := be.(compute.DSAIndexBackend)
+	if !ok {
+		return nil, false
+	}
+	if nKeys <= 0 || topK <= 0 || len(indexQ) != nH*indexDim || len(indexK) != nKeys*indexDim || len(weights) != nH {
+		return nil, false
+	}
+	qt := be.Upload(compute.NewF32(be, []int{nH * indexDim}, indexQ), compute.F32)
+	kt := be.Upload(compute.NewF32(be, []int{nKeys * indexDim}, indexK), compute.F32)
+	wt := be.Upload(compute.NewF32(be, []int{nH}, weights), compute.F32)
+	sel := ib.DSAIndexSelect(qt, kt, wt, nKeys, nH, indexDim, queryPos, topK, scale)
+	return sel, true
+}
+
 // glmDsaWeightHAL uploads a resident GLM projection weight to the backend (cached in halW), mirroring
 // residentMatRows's dtype dispatch on the upload side: a q8-resident weight uploads codes+scales
 // (k_q8_gemm, pure — needs cuda.go uploadQ8Resident), an f32 weight uploads f32 (backend f32 GEMM).

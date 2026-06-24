@@ -197,6 +197,27 @@ func glmDsaSelectedCausalKeys(row []int, queryPos, seq int) ([]int, bool) {
 	return selected, true
 }
 
+// glmDsaValidSelection guards a device-returned top-k selection before it is trusted: every position
+// must be causal (0..queryPos) and unique. A device that returned a malformed list (out of range or a
+// duplicate) is rejected so the caller falls back to the host f64 selection — the device path can only
+// ever MATCH the host, never silently corrupt the selection.
+func glmDsaValidSelection(sel []int, queryPos int) bool {
+	if len(sel) == 0 {
+		return false
+	}
+	seen := make(map[int]struct{}, len(sel))
+	for _, p := range sel {
+		if p < 0 || p > queryPos {
+			return false
+		}
+		if _, dup := seen[p]; dup {
+			return false
+		}
+		seen[p] = struct{}{}
+	}
+	return true
+}
+
 func glmDsaIndexerIsShared(cfg Config, layer int) bool {
 	return glmDsaIndexerKind(cfg, layer) == "shared"
 }

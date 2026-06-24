@@ -46,7 +46,14 @@ rc1=$?
 say "go test -tags cuda -run TestCUDAGLMDsaCPUOffloadHybrid ./internal/model/ -v"
 go test -tags cuda -count=1 -v -run '^TestCUDAGLMDsaCPUOffloadHybrid$' ./internal/model/
 rc2=$?
-rc=$rc1; [ "$rc2" -ne 0 ] && rc=$rc2
-say "GLM GPU WITNESS DONE rc1=$rc1 (all-device forward) rc2=$rc2 (cpu-offload hybrid) -> rc=$rc"
+# 3) the indexer SCORE + top-k SELECTION on the device (k_dsa_index_score + k_dsa_index_topk) — the
+#    last host-resident GLM-5.2 compute. A decode step must be argmax-exact vs the all-host Q8
+#    reference: the device scores in f64 and selects with the host's total order, so the selected key
+#    set is bit-identical (selection-stable, gated by SET EQUALITY, not a cosine).
+say "go test -tags cuda -run TestCUDAGLMMoeDsaIndexSelectMatches ./internal/model/ -v"
+go test -tags cuda -count=1 -v -run '^TestCUDAGLMMoeDsaIndexSelectMatches$' ./internal/model/
+rc3=$?
+rc=$rc1; [ "$rc2" -ne 0 ] && rc=$rc2; [ "$rc3" -ne 0 ] && rc=$rc3
+say "GLM GPU WITNESS DONE rc1=$rc1 (all-device forward) rc2=$rc2 (cpu-offload hybrid) rc3=$rc3 (index selection) -> rc=$rc"
 echo done >"$WORK/DONE.$rc"
 exit "$rc"

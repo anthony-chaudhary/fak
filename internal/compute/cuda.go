@@ -139,6 +139,22 @@ const cudaFlashAttnCosineMin = 0.999
 // has no CUDA toolkit / GPU. Do not read a pass from this value alone.
 const cudaDsaSparseAttnCosineMin = 0.999
 
+// cudaDsaIndexSelectionExact records the cuda backend's gate for the GLM-MoE-DSA indexer
+// score + top-k SELECTION kernel (k_dsa_index_score + k_dsa_index_topk). Unlike the GEMM /
+// attention lanes — which are Approx, held to a COSINE floor because f32 reduction order may drift
+// the values slightly — the indexer drives a DISCRETE top-k, so its gate is SET EQUALITY, not a
+// cosine: the device-selected key positions must equal the host f64 selection EXACTLY. The kernel
+// accumulates the per-key score dot in f64 (IndexHeadDim is tiny; A100 has native f64), so the
+// device score matches the host f64 score bit-closely and the same total order (score desc, ties by
+// lower position) yields the IDENTICAL set. true documents the contract the witness asserts; a
+// device that returned a different set would be a correctness defect, not an Approx drift.
+//
+// IMPORTANT (honest handoff, like the cosine constants): this RECORDS the contract; it does NOT
+// assert the path holds it. The realized selection equality is measured on a CUDA node by the
+// GLM-DSA on-device witness (TestCUDAGLMMoeDsaIndexSelectMatches, run via the dgx witness script);
+// the win32 build host has no CUDA toolkit / GPU. Do not read a pass from this value alone.
+const cudaDsaIndexSelectionExact = true
+
 // q8DeviceBlock is the Q8_0 per-block size the device narrow-at-H2D quant uses (llama.cpp block_q8_0
 // = 32, the cpuref default). The resident weight carries it in QuantSpec.Block so the GEMM kernel
 // reconstructs nblk = in/block; `in` must be divisible by it.
@@ -783,6 +799,39 @@ func (c *cudaBackend) DSASparseAttend(q, selK, selV Tensor, nSel, nH, qkHead, vH
 	C.fcuda_dsa_sparse_attend_f32(c.cf(q), c.cf(selK), c.cf(selV), c.cf(out),
 		C.int(nSel), C.int(nH), C.int(qkHead), C.int(vHead), C.float(scale))
 	return out
+}
+
+// DSAIndexSelect runs GLM-MoE-DSA's learned-indexer score + top-k SELECTION on the device via
+// k_dsa_index_score + k_dsa_index_topk: it scores every cached key against the query
+// (Σ_h weights[h]·relu(scale·dot)), masks keys past queryPos, and returns the top-k selected key
+// POSITIONS — the last GLM-5.2 compute that was host-resident even after the projections and the
+// sparse-attention math moved to the kernel. The per-key score dot is accumulated in f64 on-device,
+// so the selected set is bit-identical to the host f64 selection (selection-stable — the indexer
+// drives a discrete top-k, so it is held reduction-faithful, NOT to a cosine floor). It is the
+// optional compute.DSAIndexBackend capability; a backend without it leaves the selection host-side.
+// q/k/weights arrive device-resident; only the small index list crosses back to the host.
+func (c *cudaBackend) DSAIndexSelect(indexQ, indexK, weights Tensor, nKeys, nH, indexDim, queryPos, topK int, scale float32) []int {
+	cudaMu.Lock()
+	defer cudaMu.Unlock()
+	if nKeys <= 0 || topK <= 0 {
+		return nil
+	}
+	out := make([]C.int, topK)
+	n := int(C.fcuda_dsa_index_select_f32(c.cf(indexQ), c.cf(indexK), c.cf(weights),
+		C.int(nKeys), C.int(nH), C.int(indexDim), C.int(queryPos), C.int(topK), C.float(scale),
+		&out[0]))
+	atomic.AddUint64(&c.fenceGen, 1) // the index list crossed host-ward — same fence as Argmax
+	if n < 0 {
+		n = 0
+	}
+	if n > topK {
+		n = topK
+	}
+	sel := make([]int, n)
+	for i := 0; i < n; i++ {
+		sel[i] = int(out[i])
+	}
+	return sel
 }
 
 // attentionNaive runs the same op through the RETAINED naive kernel (full global scores[nH*nPos]
