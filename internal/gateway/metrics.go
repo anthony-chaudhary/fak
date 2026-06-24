@@ -13,6 +13,7 @@ import (
 
 	"github.com/anthony-chaudhary/fak/internal/blob"
 	"github.com/anthony-chaudhary/fak/internal/cachemeta"
+	"github.com/anthony-chaudhary/fak/internal/cacheobs"
 	"github.com/anthony-chaudhary/fak/internal/kernel"
 	"github.com/anthony-chaudhary/fak/internal/vdso"
 )
@@ -454,6 +455,7 @@ func (s *Server) renderMetrics() string {
 		b.WriteString(s.cacheStream.Snapshot().Prometheus())
 	}
 	writeBlobMetrics(&b)
+	writeKVPrefixMetrics(&b)
 	inf := m.writeInferenceMetrics(&b)
 
 	// Fleet-value (hero-axis) KPIs, derived live from the kernel counters + the
@@ -546,6 +548,32 @@ func writeBlobMetrics(b *strings.Builder) {
 		ratio = float64(dedupHits) / float64(puts)
 	}
 	fmt.Fprintf(b, "fak_blob_dedup_ratio %s\n", promFloat(ratio))
+}
+
+// writeKVPrefixMetrics renders the in-kernel KV-prefix reuse family from the process-global
+// cacheobs.Default tap (fed by the planner on every served in-kernel turn). It is the LIVE
+// measurement of the frozen-trajectory cache cliff (docs/explainers/frozen-trajectory-cache-cliff.md):
+// the reuse ratio is the realized cache-hit, and the per-regime turn buckets show when turns
+// leave the frozen append-only regime. This is the LOCAL-KV analogue of the provider-side
+// fak_gateway_inference_cached_prompt_* family — distinct signal (the in-kernel RadixAttention
+// prefix match, not a remote provider's cache_read), so the two never double-count. On a pure
+// proxy workload (no in-kernel model) the tap is never fed and these series stay 0.
+func writeKVPrefixMetrics(b *strings.Builder) {
+	s := cacheobs.Default.Snapshot()
+	writeCounter(b, "fak_gateway_kv_prefix_turns_total",
+		"In-kernel model turns observed for KV-prefix reuse (the planner reported a prompt-token count).", int64(s.Turns))
+	writeCounter(b, "fak_gateway_kv_prefix_prompt_tokens_total",
+		"Prompt (prefill) tokens summed across in-kernel turns — the denominator of the realized cache-hit.", int64(s.PromptTokens))
+	writeCounter(b, "fak_gateway_kv_prefix_reused_tokens_total",
+		"Prompt tokens served from the cached KV prefix (the RadixAttention match) across in-kernel turns — the prefill work the kernel did NOT redo. Distinct from the provider's cache_read (fak_gateway_inference_cached_prompt_tokens_total).", int64(s.ReusedTokens))
+	writeHelpType(b, "fak_gateway_kv_prefix_turns_by_regime_total",
+		"In-kernel turns by reuse regime — the live cliff distribution. frozen: reuse >= 0.90 (the append-only ceiling); partial: 0.10-0.90; cold: < 0.10 (a cold first prefill, or a head-mutated / fanned-out turn that left the frozen single-linear regime — see docs/explainers/frozen-trajectory-cache-cliff.md).", "counter")
+	fmt.Fprintf(b, "fak_gateway_kv_prefix_turns_by_regime_total{regime=\"frozen\"} %d\n", s.FrozenTurns)
+	fmt.Fprintf(b, "fak_gateway_kv_prefix_turns_by_regime_total{regime=\"partial\"} %d\n", s.PartialTurns)
+	fmt.Fprintf(b, "fak_gateway_kv_prefix_turns_by_regime_total{regime=\"cold\"} %d\n", s.ColdTurns)
+	writeHelpType(b, "fak_gateway_kv_prefix_reuse_ratio",
+		"Realized in-kernel KV-prefix cache-hit: reused / prompt tokens across served turns (0 until the first turn). A single append-only agent climbs toward ~1 (the frozen ceiling); flexibility, cold fan-out, or a divergent prefix drives it down — the frozen-trajectory cache cliff, measured live.", "gauge")
+	fmt.Fprintf(b, "fak_gateway_kv_prefix_reuse_ratio %s\n", promFloat(s.ReuseRatio))
 }
 
 type inferenceSnapshot struct {

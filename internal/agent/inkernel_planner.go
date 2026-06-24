@@ -25,6 +25,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/anthony-chaudhary/fak/internal/cacheobs"
 	"github.com/anthony-chaudhary/fak/internal/compute"
 	"github.com/anthony-chaudhary/fak/internal/kvmmu"
 	"github.com/anthony-chaudhary/fak/internal/model"
@@ -190,6 +191,10 @@ func (p *InKernelPlanner) Complete(_ context.Context, messages []Message, _ []To
 	}
 	log.Printf("inkernel_chat model=%s q4k=%v prompt=%dtok reused=%dtok prefill=%dtok/%.2fs/%.1ftok/s decode=%dtok/%.2fs/%.1ftok/s",
 		p.modelID, p.q4k, promptTok, matched, computed, prefillS, prefTPS, gen, decodeS, decTPS)
+	// Feed the process-global KV-prefix reuse tap so this turn's realized cache-hit
+	// (matched/prompt) reaches /metrics, not just this log line — the live measurement of
+	// the frozen-trajectory cache cliff (docs/explainers/frozen-trajectory-cache-cliff.md).
+	cacheobs.Default.Observe(promptTok, matched)
 
 	return &Completion{
 		Message:      Message{Role: "assistant", Content: sb.String()},
