@@ -9,7 +9,10 @@ description: "Explains fak's write-time content-addressed gate as both injection
 > optimization** to the other. This doc says it once in each language so either reader
 > gets it in 60 seconds, then gives you the Rosetta table that proves they're the same
 > thing. Everything here is closed by a witness in this repo (a `go test`, a committed
-> `*.json`, a code line) — see `fak/RECALL-RESULTS.md` and `fak/LIVE-RESULTS.md`.
+> `*.json`, a code line) — see `docs/benchmarks/RECALL-RESULTS.md` and
+> `docs/benchmarks/LIVE-RESULTS.md` — with one stated exception: the **~94%** intra-session
+> caching figure in Lens B is measured on this fleet's Claude-session telemetry, which is
+> not committed to this repo, so it is an observation, not an in-repo-witnessed claim.
 
 ## TL;DR (both lenses, one sentence each)
 
@@ -247,7 +250,7 @@ working set for "what refund fee?"         -> 1 benign page; poison present: fal
 Witnesses: 37 `go test ./internal/recall/` functions pass; a 5-skeptic
 default-REFUTED adversarial panel returned **5/5 CONFIRMED**. Full honesty ledger
 (including the inherited detection ceiling and what's *not* built) in
-`fak/RECALL-RESULTS.md`; the in-run live A/B in `fak/LIVE-RESULTS.md`; the roadmap in
+`docs/benchmarks/RECALL-RESULTS.md`; the in-run live A/B in `docs/benchmarks/LIVE-RESULTS.md`; the roadmap in
 `PLAN-rsi-loop-fleet-2026-06-19.md`.
 
 **See it drawn:** every diagram in this doc — the core-dump reframe, the
