@@ -1,6 +1,6 @@
 ---
-title: "GLM-5.2 on the pure fak engine: a real glm_moe_dsa checkpoint generates tokens that match HuggingFace, witnessed on an 8×A100 node (2026-06-23)"
-description: "Fresh on-hardware capture on an idle 8×A100-80GB (sm_80) datacenter node: fak loads a REAL glm_moe_dsa checkpoint (yujiepan/glm-5-tiny-random) and its forward is argmax-exact vs HuggingFace while Session.Generate matches HF greedy decode token-for-token; the full GLM-5.2 DSA forward runs bit-exact (cosine=1.0) on fak's own CUDA kernels; and SmolLM2-135M decodes at 131 tok/s through the pure k_q8_gemm path (zero cuBLAS). Also fixes an over-strict DSA top-k trace assertion (compare the selected SET, not the implementation-defined tie ORDER). The honest boundary — fak serving the full 753B natively — is unchanged: still the labeled multi-month gap."
+title: "GLM-5.2 on the pure fak engine: a real glm_moe_dsa checkpoint generates tokens that match HuggingFace, witnessed on an 8-GPU datacenter server node (2026-06-23)"
+description: "Fresh on-hardware capture on an idle 8-GPU datacenter server-80GB (sm_80) datacenter node: fak loads a REAL glm_moe_dsa checkpoint (yujiepan/glm-5-tiny-random) and its forward is argmax-exact vs HuggingFace while Session.Generate matches HF greedy decode token-for-token; the full GLM-5.2 DSA forward runs bit-exact (cosine=1.0) on fak's own CUDA kernels; and SmolLM2-135M decodes at 131 tok/s through the pure k_q8_gemm path (zero cuBLAS). Also fixes an over-strict DSA top-k trace assertion (compare the selected SET, not the implementation-defined tie ORDER). The honest boundary — fak serving the full 753B natively — is unchanged: still the labeled multi-month gap."
 ---
 
 # GLM-5.2 pure fak, end to end: real-checkpoint generation matches HuggingFace (2026-06-23)
@@ -11,7 +11,7 @@ description: "Fresh on-hardware capture on an idle 8×A100-80GB (sm_80) datacent
 > note records the on-device witnesses (grounded in `go test` exit codes and run logs, not
 > self-report) and is explicit about the one boundary that is still open.
 
-All runs are on a fresh, idle **8× NVIDIA A100-SXM4-80GB (sm_80, compute 8.0), CUDA 12.8,
+All runs are on a fresh, idle **8× NVIDIA datacenter GPU-80GB (sm_80, compute 8.0), CUDA 12.8,
 ~2 TB host RAM** datacenter node, at the then-current `origin/main`, Go 1.26.4.
 
 ## 1. A real glm_moe_dsa checkpoint generates tokens that match HuggingFace
@@ -54,7 +54,7 @@ tests, all rc=0):
 
 To show fak's own GPU kernel *generating* real tokens end-to-end (the closest real-model
 decode that loads today), `tools/dgx_pure_kernel_bench.sh` decoded SmolLM2-135M (a Llama
-family model) on the A100 through the pure `k_q8_gemm` path, **zero cuBLAS**: **decode 7.6
+family model) on the datacenter GPU through the pure `k_q8_gemm` path, **zero cuBLAS**: **decode 7.6
 ms/tok = 131.0 tok/s** (prefill 107–166 tok/s), `engine: fak-in-kernel via compute HAL
 backend "cuda"`, `tier=sm_80`.
 

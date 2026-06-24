@@ -25,7 +25,7 @@ Running arms B/C live at P=100k means a real ~100k-token prefill through the for
 The highest **committed live** context to date is per-agent PP=8192 / aggregate N_KV=42240 (B=5),
 in `macbook-m3pro-7b-batched-ctx.log` — short of the ≥100k regime. Only the llama.cpp Metal lane
 on a resident GPU reaches 100k in bench-tractable time, and the `node-macos-a` bench node was
-offline at authoring (its Tailscale peer showed `offline, last seen ~now`). The DGX bridge is
+offline at authoring (its Tailscale peer showed `offline, last seen ~now`). The GPU server bridge is
 not bench-ready (no llama.cpp/model). So the live anchor cannot be witnessed on any host reachable
 from this box today.
 

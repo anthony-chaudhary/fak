@@ -9,7 +9,7 @@ description: "The final #86/#413 slice: GLM-5.2's learned-indexer SCORE + top-k 
 >
 > This note records the slice that takes GLM-5.2's per-token decode from "everything on the
 > kernel except the host-resident learned-indexer selection" to "the selection too on the
-> kernel." It is grounded in `go test` exit codes and the A100 device's own run log — not
+> kernel." It is grounded in `go test` exit codes and the datacenter GPU device's own run log — not
 > self-report. §2 captures the indexer score + top-k SELECTION kernel running on a real GPU; the
 > gate is **set equality** (the device selection equals the host f64 selection bit-for-bit), the
 > right gate because the indexer drives a discrete top-k, not a continuous value.
@@ -79,11 +79,11 @@ The full `internal/model` GLM/DSA/MoE + `internal/compute` suites stay green, `-
 clean, and the cgo side **type-checks under `-tags cuda`** (`go vet -tags cuda ./internal/model/
 ./internal/compute/`).
 
-## §2 — On real A100 hardware: the selection kernel captured on-device
+## §2 — On real datacenter GPU hardware: the selection kernel captured on-device
 
-<!-- FILL ON DGX: paste the node's own `go test -tags cuda` log for TestCUDAGLMMoeDsaIndexSelectMatches
+<!-- FILL ON GPU server: paste the node's own `go test -tags cuda` log for TestCUDAGLMMoeDsaIndexSelectMatches
      (k_dsa_index_score + k_dsa_index_topk), cosine + argmax cpu=/cuda=, tier=sm_80. The run is
-     `bash tools/dgx_glm_gpu_witness.sh` on the lab 8x A100 node (rc3 = index selection). -->
+     `bash tools/dgx_glm_gpu_witness.sh` on the lab 8-GPU datacenter server node (rc3 = index selection). -->
 
 `TestCUDAGLMMoeDsaIndexSelectMatches` runs a lean GLM-DSA **decode step** on the cuda backend so
 `k_dsa_index_score` + `k_dsa_index_topk` execute on the GPU, and asserts the cuda backend is a
@@ -113,7 +113,7 @@ is:
   sparse-attention note.
 
 The flagship-scale residual is unchanged and out of scope: the real 753B does not fit pure on an 8×
-A100-40GB DGX (INT4 ≈ 376 GB > 320 GB) — the SGLang-serves + fak-fronts path, not the native engine.
+GPU server (INT4 ≈ 376 GB > 320 GB) — the SGLang-serves + fak-fronts path, not the native engine.
 
 ## What is proven vs not (labeled)
 
@@ -123,7 +123,7 @@ A100-40GB DGX (INT4 ≈ 376 GB > 320 GB) — the SGLang-serves + fak-fronts path
   decode step routes the selection to the backend and stays **argmax-exact, max|Δ| = 0**
   (`TestGLMMoeDsaBackendRoutesIndexSelection`); full `internal/model` + `internal/compute` suites
   green; `-race`/`gofmt` clean; cgo type-checks under `-tags cuda`.
-- **Proven on real A100 hardware (sm_80, 2026-06-23):** <!-- FILL: cosine + argmax from the node log -->
+- **Proven on real datacenter GPU hardware (sm_80, 2026-06-23):** <!-- FILL: cosine + argmax from the node log -->
   the indexer score + top-k SELECTION on `k_dsa_index_score` + `k_dsa_index_topk`, decode argmax-exact
   vs the CPU Q8 reference (`TestCUDAGLMMoeDsaIndexSelectMatches`, sm_80), the `DSAIndexBackend`
   type-assert confirming the selection ran on-device. With the prior slices, **every compute op in the
