@@ -61,6 +61,7 @@ var tier = map[string]int{
 
 	"agent": 4, "bench": 4, "turnbench": 4, "gateway": 4, "registrations": 4, "rsiloop": 4,
 	"tracesink": 4, // imports agent/turnbench/registrations (tier 4) — tier forced to 4
+	"ablate":    4, // the N-arm self-ablation sweep: a bench sibling; imports bench(4)+registrations(4)+metrics(1), off the hot path.
 
 	"tokenizer":    1,
 	"answershape":  1, // pure degeneration/verbosity metric over text; stdlib-only, imports nothing internal.
