@@ -297,6 +297,30 @@ def test_resolve_profile_parses_overrides():
     assert p.is_exempt("TodoWrite") is True
 
 
+def test_profiles_are_a_monotonic_dial():
+    # the "how aggressive" dial must be monotonic: each profile reduces at least as hard as the
+    # previous one on a reducible corpus. Guards a preset edit from inverting the order.
+    items = C._seq(
+        [C._mk("result", "Read", 8000, salt=f"rd{i}", path=f"/rd{i}") for i in range(8)] +
+        [C._mk("result", "Bash", 8000, salt=f"e{i} Error: boom", is_error=True) for i in range(3)] +
+        [C._mk("result", "Read", 8000, salt="st", path="/st", stale=True),
+         C._mk("result", "Edit", 100, salt="ed", path="/st")] +
+        [C._mk("result", "Grep", 8000, salt="dup"), C._mk("result", "Grep", 8000, salt="dup")])
+
+    def ratio(name):
+        p = C.make_profile(name)
+        if not p.window:
+            return C.reduce_window(items, 0, profile=p)["ratio"] or 1.0
+        if p.budget is None:
+            return C.autotune(items, p.target, profile=p)[0]["ratio"] or 1.0
+        return C.reduce_window(items, p.budget, profile=p)["ratio"] or 1.0
+
+    r = [ratio(n) for n in ("off", "conservative", "balanced", "aggressive", "hyper")]
+    assert r[0] == 1.0                                    # off is the identity
+    for i in range(4):
+        assert r[i] <= r[i + 1] + 1e-9, (i, r)            # non-decreasing aggression
+
+
 def test_make_profile_rejects_unknown():
     try:
         C.make_profile("turbo")
