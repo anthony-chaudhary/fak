@@ -36,7 +36,7 @@
         {"id": "llms-map", "kind": "path_exists", "target": "llms.txt", "need": "the llms.txt answer-engine / agent doc-map", "severity": "hard"},
         {"id": "llms-full", "kind": "path_exists", "target": "llms-full.txt", "need": "the inlined full doc-map an answer engine ingests", "severity": "hard"},
         {"id": "agent-recipe", "kind": "path_exists", "target": "docs/integrations/claude.md", "need": "a per-agent integration recipe", "severity": "hard"},
-        {"id": "readiness-scorecard", "kind": "path_exists", "target": "tools/agent_readiness_scorecard.py", "need": "the deep agent-readiness scorecard (13 KPIs, friction-debt) this row delegates to", "severity": "hard"}
+        {"id": "readiness-scorecard", "kind": "path_exists", "target": "tools/agent_readiness_scorecard.py", "need": "the deep agent-readiness scorecard (16 KPIs, friction-debt) this row delegates to", "severity": "hard"}
       ],
       "verdict": "served",
       "gaps": [

@@ -75,7 +75,7 @@ import sys
 from pathlib import Path
 from typing import Any
 
-SCHEMA = "fak-agent-readiness-scorecard/1"
+SCHEMA = "fak-agent-readiness-scorecard/2"
 GENERATED_SNAPSHOT = "docs/AGENT-READINESS-SCORECARD.md"
 
 # ---------------------------------------------------------------------------
@@ -159,6 +159,44 @@ ORIENTATION_DOCS = [AGENTS_FILE, "docs/integrations/README.md"]
 # "can an agent parse what these tools emit". A glob over the tracked tree.
 TOOL_FAMILY_GLOB = "tools/*scorecard*.py"
 
+# ---- paste-and-run success checks (do the docs actually WORK, not just exist) ----
+# The agent-facing docs whose fenced command blocks an agent literally pastes.
+# `fenced_paths_resolve` walks every fence here and checks each path operand is
+# real — a presence check tops out the instant a file exists; this asks whether
+# the commands inside it run from a clean clone.
+PASTE_DOCS = [AGENTS_FILE, "README.md", "GETTING-STARTED.md", "START-HERE.md"]
+PASTE_DOCS_GLOB = "docs/integrations"  # every *.md under here is also scanned.
+
+# Stale private-monorepo path prefixes that leak into a public clone. The repo is
+# the module ROOT (`git clone …/fak && cd fak`), so a fenced `cd fleet/fak` /
+# `fleet/fak/…` / `fak/fak/…` is a dead path the moment an agent pastes it. This
+# is the known fak/-subdir leak class (the module is the repo root, not `fak/`).
+STALE_PATH_PREFIXES = ("fleet/", "fak/fak/", "../fleet/", "fleet\\")
+# Literal "fill-me-in" stubs that read as runnable but can't be pasted. A slot an
+# agent is meant to ADAPT belongs in <angle brackets> (the honesty allowlist
+# below), never as a bare `/path/to/…` an agent might paste verbatim.
+PLACEHOLDER_LITERALS = ("/path/to/", "path/to/your", "/PATH/TO/")
+# Bracketed/ALLCAPS template slots are LEGITIMATE adapt-me markers — never flagged.
+_BRACKET_SLOT_RE = re.compile(r"<[^>]+>")
+_ENV_SLOT_RE = re.compile(r"^[A-Z][A-Z0-9_]{2,}$")
+# A path operand looks repo-relative (vs an URL, a flag, or an absolute host path)
+# when it contains a slash and starts with a known in-repo top-level dir or `./`.
+REPO_TOP_DIRS = ("examples/", "cmd/", "internal/", "docs/", "tools/", "scripts/",
+                 "pkg/", "test/", "testdata/")
+
+# `first_command_runs`: the 60-second proof must be runnable from a clean clone —
+# the policy file it names must exist, and it must be the no-key/no-model/no-GPU
+# form (preflight / --offline), NOT a `serve --api-key-env` form sold as step one.
+PROOF_POLICY_RE = re.compile(r"--policy\s+(\S+)")
+PROOF_NEEDS_KEY_TOKENS = ("--api-key-env", "api.openai.com", "OPENAI_API_KEY", "--provider ")
+
+# `platform_guidance_consistent`: the repo is developed on native Windows, where
+# `make` is absent and native `go test` is OS-blocked. If AGENTS.md sells `make ci`
+# as THE gate it must, in the same doc, name the native-Windows bridge so a Windows
+# agent isn't stranded. (scripts/ci.ps1 is the native gate; ./test.ps1 runs the
+# suite under WSL.)
+WINDOWS_BRIDGE_TOKENS = ("scripts/ci.ps1", "ci.ps1", "test.ps1", "wsl")
+
 # Identity: a one-line "<name> is a/an <kind>" an agent can lift as the answer to
 # "what is fak". Matched near the top of the orientation docs.
 IDENTITY_RE = re.compile(r"\bfak\b[^.\n]{0,60}?\bis\b[^.\n]{0,80}?"
@@ -181,24 +219,36 @@ KPI_GROUP: dict[str, str] = {
     "guardrails_surfaced": "build",
     "contributor_contract": "build",
     "machine_consumable": "build",
+    # paste-and-run success checks (do the docs WORK, not just exist):
+    "fenced_paths_resolve": "adopt",
+    "first_command_runs": "adopt",
+    "platform_guidance_consistent": "build",
 }
+# Sixteen KPIs across the three steps. The five "presence" originals per step keep
+# their relative ranking; the three success KPIs carry real weight (they measure
+# whether an agent who pastes the docs actually succeeds — the question presence
+# checks can't reach). Sum is exactly 1.0 (the score can reach 100); a regression
+# test asserts both the sum and that the weight set == the KPI set.
 KPI_WEIGHTS: dict[str, float] = {
-    # discover (0.34)
-    "agents_entrypoint": 0.11,
-    "agent_config": 0.07,
-    "llms_map": 0.06,
+    # discover (0.30)
+    "agents_entrypoint": 0.10,
+    "agent_config": 0.06,
+    "llms_map": 0.05,
     "entry_links_resolve": 0.05,
-    "identity_statement": 0.05,
-    # adopt (0.33)
-    "first_command": 0.10,
-    "honesty_ledger": 0.08,
-    "integration_recipes": 0.08,
-    "install_oneliner": 0.07,
+    "identity_statement": 0.04,
+    # adopt (0.37) — now carries the two headline success checks
+    "fenced_paths_resolve": 0.09,
+    "first_command": 0.06,
+    "first_command_runs": 0.06,
+    "honesty_ledger": 0.06,
+    "integration_recipes": 0.06,
+    "install_oneliner": 0.04,
     # build (0.33)
-    "guardrails_surfaced": 0.10,
-    "contributor_contract": 0.08,
-    "extension_scaffold": 0.08,
-    "machine_consumable": 0.07,
+    "guardrails_surfaced": 0.08,
+    "contributor_contract": 0.07,
+    "extension_scaffold": 0.06,
+    "platform_guidance_consistent": 0.06,
+    "machine_consumable": 0.06,
 }
 
 _LINK_RE = re.compile(r"\[(?P<text>[^\]]+)\]\((?P<target>[^)]+)\)")
@@ -249,6 +299,51 @@ def _fenced_blocks(text: str) -> list[str]:
         if in_fence:
             cur.append(raw)
     return blocks
+
+
+def _is_template_slot(tok: str) -> bool:
+    """A token an agent is meant to ADAPT, not paste: an <angle-bracket> slot or a
+    bare ALLCAPS env-var name. These are legitimate fill-me-in markers, never a
+    broken path — the honesty allowlist that keeps the check un-gameable."""
+    return bool(_BRACKET_SLOT_RE.search(tok)) or bool(_ENV_SLOT_RE.match(tok))
+
+
+def _path_operands(block: str) -> list[str]:
+    """The repo-relative-looking path operands in a fenced command block: the
+    argument to `cd`, and any bare token that starts with a known in-repo top-level
+    dir (examples/…, cmd/…, docs/…) or `./`. Skips URLs, flags, host-absolute paths,
+    and tokens that are really JSON string values or method names (a quote/bracket
+    survivor after trimming) — an agent pastes a *path* here, not a `"method"` value.
+    The unit the `fenced_paths_resolve` KPI checks for existence."""
+    ops: list[str] = []
+    for raw in block.split("\n"):
+        line = raw.strip()
+        if not line or line.startswith("#"):
+            continue
+        # Drop a trailing inline shell comment (`make ci   # … scripts/ci.ps1)`),
+        # whose prose path-mentions are documentation, not a pasted operand.
+        code = re.split(r"\s+#\s", line, maxsplit=1)[0] if not line.lstrip().startswith('"') else line
+        for tok in re.split(r"\s+", code):
+            raw_tok = tok.strip()
+            t = raw_tok.strip("\"'`,;\\")
+            # A genuine path operand is a bare shell token, never a JSON string value:
+            # a `"method": "tools/call",` value or an `"internal/"]` glob arrives
+            # quote-wrapped or bracket-laden — reject anything that did.
+            if not t or _is_template_slot(t) or any(ch in raw_tok for ch in '"[]{}'):
+                continue
+            low = t.lower()
+            is_repo_rel = (low.startswith("./") and "/" in low[2:]) or \
+                any(low.startswith(d) for d in REPO_TOP_DIRS) or \
+                any(low.startswith(p) for p in STALE_PATH_PREFIXES)
+            if is_repo_rel:
+                ops.append(t)
+        # `cd <dir>` — the operand is the next token whatever it looks like.
+        m = re.match(r"cd\s+(\S+)", code)
+        if m:
+            tgt = m.group(1).strip("\"'`")
+            if tgt and not _is_template_slot(tgt) and not tgt.startswith(("/", "~", "$")):
+                ops.append(tgt)
+    return ops
 
 
 def find_first_command(texts: dict[str, str]) -> tuple[bool, str]:
@@ -531,6 +626,78 @@ def kpi_machine_consumable(json_tools: int, total_tools: int,
 
 
 # ---------------------------------------------------------------------------
+# Paste-and-run success KPIs. The five presence checks per step top out the instant
+# a file exists; these three ask the question that decides whether an agent actually
+# succeeds — does the command in the fence run from a clean clone? Each takes facts
+# the impure shell already resolved against disk, so the check stays pure + testable.
+# ---------------------------------------------------------------------------
+
+def kpi_fenced_paths_resolve(bad_paths: list[str]) -> dict[str, Any]:
+    """Every path an agent pastes from a fenced block must resolve in a clean clone.
+    ``bad_paths`` is the list of '<doc>: <operand> — <why>' the shell found: a stale
+    private-monorepo prefix (`cd fleet/fak`, dead the moment a public clone pastes
+    it) or a repo-relative path that does not exist on disk, or a `/path/to/…`
+    fill-me-in literal sitting in a runnable command. Each is one unit of friction —
+    the gap a presence check is blind to between 'AGENTS.md mentions go build' and
+    'the command in the fence actually runs'."""
+    defects = [f"unresolvable fenced path: {b}" for b in bad_paths]
+    n = len(defects)
+    return {"kpi": "fenced_paths_resolve", "group": "adopt",
+            "score": _clamp(100 - 10 * n),
+            "detail": (f"{n} fenced command path(s) don't resolve from a clean clone" if n
+                       else "every fenced command path resolves from a clean clone"),
+            "defects": defects, "soft": []}
+
+
+def kpi_first_command_runs(found: bool, policy_ok: bool, policy_ref: str,
+                           needs_key: bool) -> dict[str, Any]:
+    """The 60-second proof must be RUNNABLE from a clean clone, not merely present.
+    Upgrades `first_command` (presence) to executability: the policy file the proof
+    names must exist on disk, and the command sold as step one must be the
+    no-key/no-model/no-GPU form (preflight / --offline) — a `serve --api-key-env`
+    form presented as the first command silently needs an API key, so an agent that
+    pastes it stalls. Each failure is one unit."""
+    defects: list[str] = []
+    if not found:
+        # `first_command` already books the absence as its own defect; here we only
+        # grade the runnability of a proof that IS present, to avoid double-counting.
+        return {"kpi": "first_command_runs", "group": "adopt", "score": 100,
+                "detail": "no first command to check (see first_command)",
+                "defects": [], "soft": []}
+    if not policy_ok:
+        defects.append(f"the first command names a policy that doesn't exist on disk: "
+                       f"{policy_ref or '<none parsed>'} — an agent that pastes it hits "
+                       "a missing-file error")
+    if needs_key:
+        defects.append("the first command sold as the no-setup proof secretly needs a key "
+                       "(--api-key-env / --provider) — it is not the no-key/no-model/no-GPU "
+                       "form an agent can run cold")
+    return {"kpi": "first_command_runs", "group": "adopt",
+            "score": _clamp(100 - 50 * len(defects)),
+            "detail": (f"{len(defects)} runnability gap(s) in the first command" if defects
+                       else f"the first command runs cold (policy {policy_ref} resolves, no key)"),
+            "defects": defects, "soft": []}
+
+
+def kpi_platform_guidance_consistent(sells_make: bool, has_bridge: bool) -> dict[str, Any]:
+    """The repo is developed on native Windows, where `make` is absent and native
+    `go test` is OS-blocked. If AGENTS.md sells `make ci` as THE green gate but never
+    names the native-Windows bridge (scripts/ci.ps1, or ./test.ps1 under WSL) in the
+    same doc, a Windows agent reads a gate it cannot run — a contradiction that costs
+    a turn. One unit when the gate is sold without its bridge."""
+    defects: list[str] = []
+    if sells_make and not has_bridge:
+        defects.append("AGENTS.md sells `make ci` as the green gate but names no "
+                       "native-Windows bridge (scripts/ci.ps1 / ./test.ps1 under WSL) — "
+                       "a Windows agent can't run the gate it's told to run")
+    return {"kpi": "platform_guidance_consistent", "group": "build",
+            "score": 100 if not defects else 40,
+            "detail": ("the green gate names its native-Windows bridge" if not defects
+                       else "make ci sold without a native-Windows bridge"),
+            "defects": defects, "soft": []}
+
+
+# ---------------------------------------------------------------------------
 # Fold: KPIs -> composite score, grade, friction-debt, control-pane payload.
 # ---------------------------------------------------------------------------
 
@@ -657,6 +824,65 @@ def _tool_has_json(text: str) -> bool:
     return '"--json"' in text or "'--json'" in text
 
 
+def _bad_fenced_paths(doc_texts: dict[str, str], root: Path) -> list[str]:
+    """For each agent-facing doc, walk every fenced block and flag the path operands
+    that won't resolve in a clean clone: a stale private-monorepo prefix, a
+    repo-relative path absent on disk, or a `/path/to/…` fill-me-in literal in a
+    runnable command. Returns '<doc>: <operand> — <why>' strings (the defect units
+    `kpi_fenced_paths_resolve` reports). The impure half: it touches disk so the KPI
+    stays pure."""
+    bad: list[str] = []
+    for doc, text in sorted(doc_texts.items()):
+        if not text:
+            continue
+        for block in _fenced_blocks(text):
+            for line in block.split("\n"):
+                low = line.lower()
+                for lit in PLACEHOLDER_LITERALS:
+                    if lit.lower() in low:
+                        bad.append(f"{doc}: `{lit}…` placeholder in a runnable command "
+                                   "— make it a real path or an <angle-bracket> slot")
+                        break
+            for op in _path_operands(block):
+                low = op.lower()
+                if any(low.startswith(p.lower()) for p in STALE_PATH_PREFIXES):
+                    bad.append(f"{doc}: `{op}` — stale private-monorepo path "
+                               "(a clean clone has no fleet/ parent; the module IS the repo root)")
+                    continue
+                # repo-relative operands must exist on disk in the clone.
+                clean = op[2:] if op.startswith("./") else op
+                if any(clean.lower().startswith(d) for d in REPO_TOP_DIRS):
+                    if not (root / clean).exists():
+                        bad.append(f"{doc}: `{op}` — repo-relative path does not exist on disk")
+    # de-dup while preserving order (the same stale path recurs across docs/blocks).
+    seen: set[str] = set()
+    uniq: list[str] = []
+    for b in bad:
+        if b not in seen:
+            seen.add(b)
+            uniq.append(b)
+    return uniq
+
+
+def _first_command_facts(texts: dict[str, str], root: Path) -> tuple[bool, bool, str, bool]:
+    """Resolve the runnability of the no-setup first command: (found, policy_ok,
+    policy_ref, needs_key). Finds the first fenced block in an adoption doc carrying
+    a FIRST_COMMAND token, reads the --policy operand it names, checks that file
+    exists on disk, and flags whether the block leans on a key/provider."""
+    for doc in FIRST_COMMAND_DOCS:
+        for block in _fenced_blocks(texts.get(doc, "")):
+            if not _has(block, *FIRST_COMMAND_TOKENS):
+                continue
+            m = PROOF_POLICY_RE.search(block)
+            policy_ref = m.group(1).strip("\"'`") if m else ""
+            policy_ok = True
+            if policy_ref and not _is_template_slot(policy_ref):
+                policy_ok = (root / policy_ref).exists()
+            needs_key = _has(block, *PROOF_NEEDS_KEY_TOKENS)
+            return True, policy_ok, policy_ref, needs_key
+    return False, True, "", False
+
+
 def gather(root: Path) -> list[dict[str, Any]]:
     """Read the git-tracked tree and run every pure KPI."""
     tracked = set(_git_lines(["ls-files"], root))
@@ -667,9 +893,18 @@ def gather(root: Path) -> list[dict[str, Any]]:
 
     # Read the orientation / adoption docs once.
     read_docs = set(IDENTITY_DOCS) | set(FIRST_COMMAND_DOCS) | set(INSTALL_DOCS) \
-        | set(ORIENTATION_DOCS) | {AGENTS_FILE, "README.md"}
+        | set(ORIENTATION_DOCS) | set(PASTE_DOCS) | {AGENTS_FILE, "README.md"}
     texts = {d: _safe_read(root / d) for d in read_docs}
     agents_text = texts.get(AGENTS_FILE, "")
+
+    # Every *.md under docs/integrations/ is an agent-facing doc whose fenced
+    # commands an agent pastes — scan them all for the success checks, not a fixed list.
+    paste_texts: dict[str, str] = {d: texts.get(d, "") for d in PASTE_DOCS}
+    integ_dir = root / PASTE_DOCS_GLOB
+    if integ_dir.is_dir():
+        for md in sorted(integ_dir.glob("*.md")):
+            rel = md.relative_to(root).as_posix()
+            paste_texts[rel] = _safe_read(md)
 
     # discover
     config_present = {label: any(present(p) for p in paths) for label, paths in AGENT_CONFIGS}
@@ -709,6 +944,12 @@ def gather(root: Path) -> list[dict[str, Any]]:
         else:
             missing_json.append(f)
 
+    # paste-and-run success facts (resolved against disk in the impure shell).
+    bad_paths = _bad_fenced_paths(paste_texts, root)
+    fcr_found, fcr_policy_ok, fcr_policy_ref, fcr_needs_key = _first_command_facts(texts, root)
+    sells_make = _has(agents_text, "make ci")
+    windows_bridge = _has(agents_text, *WINDOWS_BRIDGE_TOKENS)
+
     return [
         kpi_agents_entrypoint(agents_text if present(AGENTS_FILE) else None),
         kpi_agent_config(missing_agent_configs(config_present)),
@@ -716,12 +957,15 @@ def gather(root: Path) -> list[dict[str, Any]]:
         kpi_identity_statement(id_found, id_where),
         kpi_entry_links_resolve(dead_links),
         kpi_first_command(fc_found, fc_where),
+        kpi_first_command_runs(fcr_found, fcr_policy_ok, fcr_policy_ref, fcr_needs_key),
         kpi_install_oneliner(inst_found, inst_where),
         kpi_honesty_ledger(claims_present, untagged),
         kpi_integration_recipes(missing_recipes(recipe_present)),
+        kpi_fenced_paths_resolve(bad_paths),
         kpi_extension_scaffold(scaffold, extending),
         kpi_guardrails_surfaced(guard_missing),
         kpi_contributor_contract(contributing, contributing_linked, green_gate),
+        kpi_platform_guidance_consistent(sells_make, windows_bridge),
         kpi_machine_consumable(json_tools, len(tool_files), missing_json),
     ]
 
@@ -783,10 +1027,11 @@ def render_markdown(payload: dict[str, Any], *, stamp: str | None = None) -> str
     out: list[str] = []
     out.append("---")
     out.append('title: "fak agent-readiness scorecard — the friction-debt measuring stick"')
-    out.append('description: "fak\'s deterministic agent-readiness scorecard: thirteen KPIs across '
+    out.append('description: "fak\'s deterministic agent-readiness scorecard: KPIs across '
                'the three steps an AI agent walks — discover, adopt, build — folded into a '
                'composite score and the headline friction-debt metric, re-derived from the '
-               'git-tracked tree."')
+               'git-tracked tree. Presence KPIs ask does-the-affordance-exist; the '
+               'paste-and-run success KPIs ask does-an-agent-who-pastes-the-docs-succeed."')
     out.append("---")
     out.append("")
     out.append("# Agent-readiness scorecard — can an agent discover, adopt, and build on fak")
@@ -822,9 +1067,12 @@ def render_markdown(payload: dict[str, Any], *, stamp: str | None = None) -> str
     out.append("")
     out.append("## The three steps an agent walks")
     out.append("")
-    out.append("Thirteen KPIs, each 0–100, grouped by the step they gate. `debt` = units of HARD "
-               "friction-debt. `machine_consumable` is advisory (it scores but emits no hard debt — "
-               "a token is cheap to game).")
+    out.append(f"{len(payload.get('kpis', []))} KPIs, each 0–100, grouped by the step they gate. "
+               "`debt` = units of HARD friction-debt. Five presence KPIs per step ask "
+               "does-the-affordance-exist; the paste-and-run success KPIs "
+               "(`fenced_paths_resolve`, `first_command_runs`, `platform_guidance_consistent`) "
+               "ask does-an-agent-who-pastes-the-docs-actually-succeed. `machine_consumable` is "
+               "advisory (it scores but emits no hard debt — a token is cheap to game).")
     out.append("")
     out.append("| Step | KPI | Score | Debt | Detail |")
     out.append("|---|---|---:|:--:|---|")

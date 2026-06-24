@@ -180,6 +180,69 @@ def test_machine_consumable_is_soft() -> None:
 
 # --- fold to friction-debt --------------------------------------------------
 
+# --- the paste-and-run success KPIs (do the docs WORK, not just exist) ------
+
+def test_path_operands_extracts_paths_skips_noise() -> None:
+    block = ('cd fleet/fak\n'
+             'go build ./cmd/fak\n'
+             'go run ./cmd/fak preflight --policy examples/p.json\n'
+             'curl https://example.com/x\n'        # a URL, not a path
+             '  "method": "tools/call",\n'          # a JSON value, not a path
+             '"self_modify_globs": ["internal/"]\n' # a JSON glob, not a path
+             'make ci   # Windows: scripts/ci.ps1)\n')  # prose in a comment
+    ops = ar._path_operands(block)
+    assert "fleet/fak" in ops                 # the cd operand
+    assert "./cmd/fak" in ops                 # ./ repo-relative
+    assert "examples/p.json" in ops           # --policy operand
+    assert "https://example.com/x" not in ops
+    assert "tools/call" not in ops            # JSON value rejected (was quote-wrapped)
+    assert not any("internal" in o for o in ops)   # JSON glob rejected
+    assert not any("ci.ps1" in o for o in ops)     # inline-comment prose rejected
+
+
+def test_template_slots_are_not_paths() -> None:
+    assert ar._is_template_slot("<your-policy>")
+    assert ar._is_template_slot("YOUR_ENV_VAR")
+    assert not ar._is_template_slot("examples/p.json")
+    # a bracketed slot inside a cd is an adapt-me marker, never a broken path.
+    assert ar._path_operands("cd <your-clone>") == []
+
+
+def test_fenced_paths_resolve_kpi() -> None:
+    clean = ar.kpi_fenced_paths_resolve([])
+    assert clean["defects"] == [] and clean["score"] == 100 and clean["group"] == "adopt"
+    bad = ar.kpi_fenced_paths_resolve([
+        "docs/integrations/cursor.md: `fleet/fak` — stale private-monorepo path",
+        "docs/integrations/cursor.md: `/path/to/…` placeholder in a runnable command",
+    ])
+    assert len(bad["defects"]) == 2 and bad["score"] == 80
+
+
+def test_first_command_runs_kpi() -> None:
+    # present + policy resolves + no key => clean.
+    ok = ar.kpi_first_command_runs(True, True, "examples/p.json", False)
+    assert ok["defects"] == [] and ok["score"] == 100 and ok["group"] == "adopt"
+    # a named policy that doesn't exist => one defect.
+    miss = ar.kpi_first_command_runs(True, False, "examples/gone.json", False)
+    assert len(miss["defects"]) == 1 and "doesn't exist" in miss["defects"][0]
+    # a first command that secretly needs a key => one defect.
+    keyed = ar.kpi_first_command_runs(True, True, "examples/p.json", True)
+    assert len(keyed["defects"]) == 1 and "key" in keyed["defects"][0]
+    # no first command present => this KPI abstains (first_command books the absence).
+    absent = ar.kpi_first_command_runs(False, True, "", False)
+    assert absent["defects"] == [] and absent["score"] == 100
+
+
+def test_platform_guidance_consistent_kpi() -> None:
+    # sells make ci AND names the Windows bridge => clean.
+    assert ar.kpi_platform_guidance_consistent(True, True)["defects"] == []
+    # sells make ci but no bridge => one defect (a Windows agent is stranded).
+    bad = ar.kpi_platform_guidance_consistent(True, False)
+    assert len(bad["defects"]) == 1 and bad["score"] == 40 and bad["group"] == "build"
+    # doesn't sell make ci => nothing to reconcile, clean.
+    assert ar.kpi_platform_guidance_consistent(False, False)["defects"] == []
+
+
 def _clean_kpis() -> list[dict]:
     """Every KPI in its zero-defect (clean) state — the all-green tree."""
     return [
@@ -189,12 +252,15 @@ def _clean_kpis() -> list[dict]:
         ar.kpi_identity_statement(True, "AGENTS.md"),
         ar.kpi_entry_links_resolve([]),
         ar.kpi_first_command(True, "AGENTS.md"),
+        ar.kpi_first_command_runs(True, True, "examples/p.json", False),
         ar.kpi_install_oneliner(True, "AGENTS.md"),
         ar.kpi_honesty_ledger(True, []),
         ar.kpi_integration_recipes([]),
+        ar.kpi_fenced_paths_resolve([]),
         ar.kpi_extension_scaffold(True, True),
         ar.kpi_guardrails_surfaced([]),
         ar.kpi_contributor_contract(True, True, True),
+        ar.kpi_platform_guidance_consistent(True, True),
         ar.kpi_machine_consumable(8, 8, []),
     ]
 
@@ -204,18 +270,21 @@ def test_build_payload_zero_debt_is_ok() -> None:
     assert p["ok"] is True and p["verdict"] == "OK" and p["finding"] == "agent_ready"
     assert p["corpus"]["friction_debt"] == 0 and p["corpus"]["grade"] == "A"
     assert p["corpus"]["score"] == 100.0
-    # weights cover exactly the 13 KPIs and sum to 1.0 (the score can reach 100).
+    # weights cover exactly the KPI set and sum to 1.0 (the score can reach 100).
     assert abs(sum(ar.KPI_WEIGHTS.values()) - 1.0) < 1e-9
     assert set(ar.KPI_WEIGHTS) == {k["kpi"] for k in _clean_kpis()}
 
 
 def test_build_payload_debt_drives_action_with_group_attribution() -> None:
-    kpis = _clean_kpis()
-    # break one affordance in each step: a missing harness config (discover), a
-    # missing recipe (adopt), a missing scaffold piece (build) = 3 friction-debt.
-    kpis[1] = ar.kpi_agent_config(["Cursor (.cursorrules)"])
-    kpis[8] = ar.kpi_integration_recipes(["MCP client"])
-    kpis[9] = ar.kpi_extension_scaffold(True, False)
+    # break one affordance in each step (by name, not index, so a reorder can't
+    # silently un-test this): a missing harness config (discover), a missing recipe
+    # (adopt), a missing scaffold piece (build) = 3 friction-debt.
+    swap = {
+        "agent_config": ar.kpi_agent_config(["Cursor (.cursorrules)"]),
+        "integration_recipes": ar.kpi_integration_recipes(["MCP client"]),
+        "extension_scaffold": ar.kpi_extension_scaffold(True, False),
+    }
+    kpis = [swap.get(k["kpi"], k) for k in _clean_kpis()]
     p = ar.build_payload(workspace=".", kpis=kpis)
     assert p["ok"] is False and p["finding"] == "friction_debt"
     assert p["corpus"]["friction_debt"] == 3
@@ -251,7 +320,7 @@ def test_live_payload_is_well_formed() -> None:
     p = ar.collect(root)
     for field in ("schema", "ok", "verdict", "finding", "reason", "next_action", "corpus", "kpis"):
         assert field in p, f"missing {field}"
-    # exactly the 13 KPIs, each with the control-pane shape.
+    # exactly the weighted KPI set, each with the control-pane shape.
     assert len(p["kpis"]) == len(ar.KPI_WEIGHTS)
     for k in p["kpis"]:
         assert {"kpi", "group", "score", "detail", "defects", "soft"} <= set(k)

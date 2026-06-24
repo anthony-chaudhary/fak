@@ -71,7 +71,7 @@ Four tiers, ordered by how much effort the persona invests to understand fak:
 | build | `ai-agent` | AGENTS.md + llms.txt + a per-agent recipe (depth lives in `agent-readiness`) |
 
 The `ai-agent` row is intentionally thin: it **delegates** the deep audit to
-`tools/agent_readiness_scorecard.py` (13 KPIs, friction-debt). Don't duplicate that
+`tools/agent_readiness_scorecard.py` (16 KPIs, friction-debt). Don't duplicate that
 work here — keep this row the roster entry.
 
 The affordance **check kinds** (the fixed doctrine): `path_exists`,

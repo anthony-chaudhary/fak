@@ -47,8 +47,12 @@ affordance, **stop** — that's not a real gap.
 
 ## The three steps an agent walks (the groups, and the HARD defects each retires)
 
-Thirteen KPIs, each 0–100, grouped by the step they gate. Retire worst-step-first
-(the scorecard names the weakest step in `group_scores`).
+Sixteen KPIs, each 0–100, grouped by the step they gate. Retire worst-step-first
+(the scorecard names the weakest step in `group_scores`). Five **presence** KPIs per
+step ask *does the affordance exist*; three **paste-and-run success** KPIs ask the
+question presence can't reach — *does an agent who pastes the docs actually succeed*
+(a saturated presence-only score reads 100 while a cold agent still trips on a stale
+`cd fleet/fak` or a `/path/to/…` placeholder).
 
 | Step | KPI | The affordance to add when it's red |
 |---|---|---|
@@ -58,12 +62,15 @@ Thirteen KPIs, each 0–100, grouped by the step they gate. Retire worst-step-fi
 | discover | `identity_statement` | A one-sentence "fak is a/an …" near the top of AGENTS.md / llms.txt / README an agent can quote. |
 | discover | `entry_links_resolve` | Fix any dead local link in AGENTS.md or the integration index — a 404 on the orientation path. |
 | **adopt** | `first_command` | A copy-pasteable, **fenced**, no-key/no-model/no-GPU first command (the 30-second proof). |
+| adopt | `first_command_runs` | **SUCCESS** — the first command actually RUNS from a clean clone: the `--policy` it names exists on disk, and it's the no-key form (not a `serve --api-key-env` sold as step one). |
+| adopt | `fenced_paths_resolve` | **SUCCESS** — every path an agent pastes from a fenced block resolves in a clean clone: no stale `cd fleet/fak` private-monorepo prefix, no non-existent repo-relative path, no `/path/to/…` literal in a runnable line. |
 | adopt | `install_oneliner` | The `go install …@latest` one-liner (the module is at the repo root, so it resolves). |
 | adopt | `honesty_ledger` | CLAIMS.md present, every `- [` claim carrying exactly one status tag (the `make claims-lint` rule). |
 | adopt | `integration_recipes` | A per-agent recipe under `docs/integrations/` for each family (Claude, Codex/OpenAI, Cursor, MCP). |
 | **build** | `extension_scaffold` | The additive path: `tools/new_leaf.py` + `EXTENDING.md` (add a leaf, don't edit core). |
 | build | `guardrails_surfaced` | Document each enforced rule in AGENTS.md: trunk-only, commit-by-path, DCO sign-off, tagged claims, leaf/ABI, the out-of-tree write guard. |
 | build | `contributor_contract` | `CONTRIBUTING.md` linked from the entry point + a one-command green gate (`make ci`). |
+| build | `platform_guidance_consistent` | **SUCCESS** — if AGENTS.md sells `make ci` as the gate, it names the native-Windows bridge (`scripts/ci.ps1` / `./test.ps1` under WSL) so a Windows agent isn't told to run a gate it can't. |
 | build | `machine_consumable` | **SOFT** — how much of the measurement family speaks `--json`. Scores; never hard debt. |
 
 **SOFT signals** (a missing `llms-full.txt`, a tool without `--json`) lower the
