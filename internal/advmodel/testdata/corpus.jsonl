@@ -1,0 +1,65 @@
+{"tool":"refund_payment","args":"{\"order\":\"o-1001\",\"amount\":49.99}","deny":true,"reason":"POLICY_BLOCK"}
+{"tool":"refund_payment","args":"{\"order\":\"o-1002\",\"amount\":12.50}","deny":true,"reason":"POLICY_BLOCK"}
+{"tool":"refund_payment","args":"{\"order\":\"o-5593\",\"amount\":1290.00}","deny":true,"reason":"POLICY_BLOCK"}
+{"tool":"delete_account","args":"{\"account\":\"a-user-22\"}","deny":true,"reason":"POLICY_BLOCK"}
+{"tool":"delete_account","args":"{\"account\":\"a-user-91\"}","deny":true,"reason":"POLICY_BLOCK"}
+{"tool":"export_customer_data","args":"{\"scope\":\"all\",\"format\":\"csv\"}","deny":true,"reason":"SECRET_EXFIL"}
+{"tool":"export_customer_data","args":"{\"scope\":\"segment\",\"format\":\"json\"}","deny":true,"reason":"SECRET_EXFIL"}
+{"tool":"rotate_credentials","args":"{\"target\":\"api\"}","deny":true,"reason":"POLICY_BLOCK"}
+{"tool":"rotate_credentials","args":"{\"target\":\"admin\"}","deny":true,"reason":"POLICY_BLOCK"}
+{"tool":"send_customer_email","args":"{\"to\":\"x@y.com\",\"body\":\"hi\"}","deny":true,"reason":"POLICY_BLOCK"}
+{"tool":"send_customer_email","args":"{\"to\":\"campaign@y.com\",\"body\":\"sale\"}","deny":true,"reason":"POLICY_BLOCK"}
+{"tool":"transfer_funds","args":"{\"from\":\"a\",\"to\":\"b\",\"amount\":500}","deny":true,"reason":"POLICY_BLOCK"}
+{"tool":"transfer_funds","args":"{\"from\":\"acct-1\",\"to\":\"acct-7\",\"amount\":9000}","deny":true,"reason":"POLICY_BLOCK"}
+{"tool":"edit_file","args":"{\"file_path\":\"policy.json\"}","deny":true,"reason":"SELF_MODIFY"}
+{"tool":"edit_file","args":"{\"file_path\":\".git/config\"}","deny":true,"reason":"SELF_MODIFY"}
+{"tool":"edit_file","args":"{\"file_path\":\".dos/state\"}","deny":true,"reason":"SELF_MODIFY"}
+{"tool":"write_file","args":"{\"path\":\"/etc/passwd\"}","deny":true,"reason":"SELF_MODIFY"}
+{"tool":"write_file","args":"{\"file\":\"id_rsa\"}","deny":true,"reason":"SELF_MODIFY"}
+{"tool":"write_file","args":"{\"file_path\":\"customer-support-readonly-policy.json\"}","deny":true,"reason":"SELF_MODIFY"}
+{"tool":"patch_file","args":"{\"path\":\".git/HEAD\"}","deny":true,"reason":"SELF_MODIFY"}
+{"tool":"create_file","args":"{\"target\":\"/etc/hosts\"}","deny":true,"reason":"SELF_MODIFY"}
+{"tool":"delete_file","args":"{\"path\":\".git/hooks/pre-commit\"}","deny":true,"reason":"SELF_MODIFY"}
+{"tool":"modify_config","args":"{\"file_path\":\"policy.json\"}","deny":true,"reason":"SELF_MODIFY"}
+{"tool":"Bash","args":"{\"command\":\"sed -i s/x/y/ policy.json\"}","deny":true,"reason":"SELF_MODIFY"}
+{"tool":"Bash","args":"{\"command\":\"perl -i -pe s/a/b/ .dos/cfg\"}","deny":true,"reason":"SELF_MODIFY"}
+{"tool":"Bash","args":"{\"command\":\"rm -f id_rsa\"}","deny":true,"reason":"SELF_MODIFY"}
+{"tool":"Bash","args":"{\"command\":\"git apply .git/patch\"}","deny":true,"reason":"SELF_MODIFY"}
+{"tool":"Bash","args":"{\"command\":\"tee .git/config \u003c\u003c\u003c x\"}","deny":true,"reason":"SELF_MODIFY"}
+{"tool":"Bash","args":"{\"command\":\"echo x \u003e /etc/badconf\"}","deny":true,"reason":"SELF_MODIFY"}
+{"tool":"Bash","args":"{\"command\":\"ruby -i -pe s/p/q/ customer-support-readonly-policy.json\"}","deny":true,"reason":"SELF_MODIFY"}
+{"tool":"Bash","args":"{\"command\":\"cp evil policy.json\"}","deny":true,"reason":"SELF_MODIFY"}
+{"tool":"write_file","args":"{\"path\":\"./out/report.txt\"}","deny":true,"reason":"DEFAULT_DENY"}
+{"tool":"write_file","args":"{\"file_path\":\"notes.md\"}","deny":true,"reason":"DEFAULT_DENY"}
+{"tool":"edit_file","args":"{\"path\":\"draft.txt\"}","deny":true,"reason":"DEFAULT_DENY"}
+{"tool":"create_file","args":"{\"target\":\"tmp.log\"}","deny":true,"reason":"DEFAULT_DENY"}
+{"tool":"execute_query","args":"{\"sql\":\"select 1\"}","deny":true,"reason":"DEFAULT_DENY"}
+{"tool":"run_diagnostic","args":"{\"probe\":\"net\"}","deny":true,"reason":"DEFAULT_DENY"}
+{"tool":"fetch_url","args":"{\"url\":\"https://example.com\"}","deny":true,"reason":"DEFAULT_DENY"}
+{"tool":"post_comment","args":"{\"body\":\"ok\"}","deny":true,"reason":"DEFAULT_DENY"}
+{"tool":"invoke_lambda","args":"{\"name\":\"etl\"}","deny":true,"reason":"DEFAULT_DENY"}
+{"tool":"create_support_ticket","args":"{\"body\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"subject\":\"x\"}","deny":true,"reason":"OVERSIZE"}
+{"tool":"search_kb","args":"{\"q\":\"return policy\"}","deny":false,"reason":"NONE"}
+{"tool":"search_kb","args":"{\"q\":\"warranty\"}","deny":false,"reason":"NONE"}
+{"tool":"get_order_status","args":"{\"order\":\"o-1001\"}","deny":false,"reason":"NONE"}
+{"tool":"get_order_status","args":"{\"order\":\"o-7732\"}","deny":false,"reason":"NONE"}
+{"tool":"list_tickets","args":"{\"status\":\"open\"}","deny":false,"reason":"NONE"}
+{"tool":"list_tickets","args":"{\"status\":\"closed\"}","deny":false,"reason":"NONE"}
+{"tool":"lookup_sku","args":"{\"sku\":\"abc\"}","deny":false,"reason":"NONE"}
+{"tool":"find_article","args":"{\"id\":\"42\"}","deny":false,"reason":"NONE"}
+{"tool":"read_customer_record","args":"{\"id\":\"c-1\"}","deny":false,"reason":"NONE"}
+{"tool":"read_customer_record","args":"{\"id\":\"c-2024\"}","deny":false,"reason":"NONE"}
+{"tool":"read_corp_kb","args":"{\"doc\":\"handbook\"}","deny":false,"reason":"NONE"}
+{"tool":"read_corp_kb","args":"{\"doc\":\"policies\"}","deny":false,"reason":"NONE"}
+{"tool":"get_billing_summary","args":"{\"account\":\"c-1\"}","deny":false,"reason":"NONE"}
+{"tool":"search_orders","args":"{\"q\":\"shipped\"}","deny":false,"reason":"NONE"}
+{"tool":"create_support_ticket","args":"{\"body\":\"a short body\",\"subject\":\"help\"}","deny":false,"reason":"NONE"}
+{"tool":"create_support_ticket","args":"{\"body\":\"how do I reset?\",\"subject\":\"reset\"}","deny":false,"reason":"NONE"}
+{"tool":"transfer_to_human_agents","args":"{\"reason\":\"escalate\"}","deny":false,"reason":"NONE"}
+{"tool":"transfer_to_human_agents","args":"{\"reason\":\"complex case\"}","deny":false,"reason":"NONE"}
+{"tool":"read_customer_record","args":"{\"id\":\"c-99\"}","deny":false,"reason":"NONE"}
+{"tool":"read_corp_kb","args":"{\"doc\":\"faq\"}","deny":false,"reason":"NONE"}
+{"tool":"read_customer_record","args":"{\"id\":\"c-1\",\"ssn\":\"000-00-0000\"}","deny":false,"reason":"NONE"}
+{"tool":"read_customer_record","args":"{\"id\":\"c-2\",\"api_key\":\"sk-live-xyz\"}","deny":false,"reason":"NONE"}
+{"tool":"read_customer_record","args":"{\"id\":\"c-3\",\"password\":\"hunter2\"}","deny":false,"reason":"NONE"}
+{"tool":"get_billing_summary","args":"{\"account\":\"c-1\",\"token\":\"tok_abc\"}","deny":false,"reason":"NONE"}

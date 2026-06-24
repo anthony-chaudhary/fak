@@ -103,16 +103,12 @@ a build tag. Turning the highest-value ones into surfaces is the next frontier.
 ## What's next
 
 The product-scorecard pass surfaced four next steps that aren't already tracked. Each
-is filed; **#581 is resolved** (see *Resolved* below), leaving three open:
+is filed; **#581 and #580 are resolved** (see *Resolved* below), leaving two open:
 
 - **[#579](https://github.com/anthony-chaudhary/fak/issues/579)** — wire the model-side
   KV quarantine (evict + planned-elision) into the **live** agent/serve loop. Today the
   bit-exact eviction is proven only against a synthetic model; this makes the flagship
   KV-quarantine guarantee fire on a real run.
-- **[#580](https://github.com/anthony-chaudhary/fak/issues/580)** — train the fine-tuned
-  syscall/adjudication model from the harvest `LabelRow` corpus. The kernel already
-  harvests its own verdicts; nothing consumes them yet. This closes the RSI loop's
-  missing edge.
 - **[#582](https://github.com/anthony-chaudhary/fak/issues/582)** — generalize the
   product/durability **verdict ladder** itself into a domain-free DOS primitive: an
   evidence-bound readiness score that can't be gamed by editing the claim. The same
@@ -133,6 +129,19 @@ is filed; **#581 is resolved** (see *Resolved* below), leaving three open:
   passthrough (shipped), which lets the *upstream* engine's own prefix cache hit. The
   device-backend decode path (`--backend`) also bypasses the tree today (CPU-session-only
   reuse). Front-of-prompt reuse shipped; the separate mid-run KV-quarantine wiring is #579.
+- **[#580](https://github.com/anthony-chaudhary/fak/issues/580)** — *resolved by the
+  issue's "Train (or fine-tune) a small … model" branch.* The harvest-corpus consumer edge
+  is wired: `internal/advmodel` is a small fail-closed advisory adjudication model that
+  trains (`internal/advmodel/train.py`, deterministic, numpy-only) over a frozen,
+  floor-labeled content-bearing harvest corpus (`testdata/corpus.jsonl`, every label
+  re-witnessed against the REAL adjudicator floor) and writes a model artifact
+  (`testdata/adjudicator.json`); held-out precision/recall/F1 vs the stock reference are
+  committed in its meta. It is an opt-in `abi.Adjudicator` that may return only `Deny`
+  (corroborate) or `Defer` — never `Allow` — so under the kernel fold it can only tighten
+  a decision, never weaken the deterministic floor; default-off, ABI untouched. HONEST
+  SCOPE: it is a logistic-regression bag-of-tokens classifier (the "small model"), not a
+  fine-tune of the fused SmolLM2 forward pass — training a tuned LLM head onto that model
+  (GPU + weights + hours) stays a tracked STUB, as does AsyncLM's interrupt behavior.
 
 ## Regenerate / verify
 

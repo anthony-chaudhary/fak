@@ -65,6 +65,18 @@ You do not rewrite your agent to adopt fak — you repoint one base URL at `fak 
 - [Multi-language client examples](docs/fak/multi-language-examples.md): runnable Python, JS/TS, Go, and Rust client code for calling a `fak serve` gateway across its OpenAI, Anthropic, and fak-native surfaces.
 - [Deployment guide](docs/fak/deployment-guide.md): production deployment of the `fak serve` gateway across Docker, Compose, Kubernetes, and bare metal, with an auth/policy/binding readiness checklist.
 
+## Supported (what fak works with)
+
+The dedicated, cross-linked capability pages. Each lists one category of supported things, grounded in the repo and the sourced compatibility matrix.
+
+- [What fak supports (hub)](docs/supported/README.md): the index of every supported-things page — models, features, clouds, APIs/MCP, harnesses, engines.
+- [Models supported](docs/supported/models.md): any model you front through the gateway, plus the in-kernel reference engine's proven architectures (Llama, Qwen2/Qwen3, Gemma, GLM-MoE, GPT-OSS, SmolLM2).
+- [Features supported (with status)](docs/supported/features.md): every capability grouped by subsystem with its honest shipped/simulated/stub tag — a reader-friendly view of CLAIMS.md.
+- [Clouds & hosted providers](docs/supported/clouds.md): Anthropic, OpenAI, Gemini, and xAI native wires plus AWS Bedrock, Google Vertex AI, Azure OpenAI, OpenRouter, Together, Groq, and Fireworks over the OpenAI-compatible wire.
+- [APIs, wires & MCP](docs/supported/apis-and-protocols.md): OpenAI Chat Completions, OpenAI Responses, Anthropic Messages, Gemini generateContent, and xAI; MCP over stdio and HTTP; the fak-native endpoints; and the interop stance on A2A/AG-UI/ACP/ANP.
+- [Agent harnesses & frameworks](docs/supported/agent-harnesses.md): Claude Code, Cursor, OpenAI Codex, OpenCode, Aider, Cline, Roo, Goose, Zed, and frameworks like LangChain, LlamaIndex, CrewAI, AutoGen, and the Vercel AI SDK.
+- [Serving engines](docs/supported/engines.md): Ollama, vLLM, SGLang, llama.cpp, and LM Studio over the OpenAI-compatible wire, plus the in-kernel reference engine.
+
 ## Core concepts (the two flips)
 
 - [Policy in the kernel](docs/explainers/policy-in-the-kernel.md): why a default-deny check on the call path beats an external recognizer that fails open.
@@ -622,6 +634,8 @@ go run ./cmd/simpledemo -gguf $env:USERPROFILE\Downloads\Qwen2.5-1.5B-Instruct-Q
 
 ### 4. Chat!
 
+**What you'll see:** the model loads, then a `You:` prompt appears — type a question and the AI streams an answer back, like this:
+
 ```
 You: Explain quantum computing like I'm 12
 AI: Imagine a regular computer is like a light switch — it's either ON (1) or OFF (0)...
@@ -789,6 +803,8 @@ such as `report.json` and `agent-report.json`, into the current directory).
 ```bash
 ./fak run --trace testdata/tau2/tau2-smoke.json
 ```
+
+What you'll see: a per-call verdict table (each line shows the tool, its `verdict`, who decided it, and the `status`), capped by a one-line `summary:` of submit/hit/deny/transform/quarantine counts — like this:
 
 ```
 [ 0] get_user_details             verdict=ALLOW     by=monitor   status=OK
@@ -6690,6 +6706,7 @@ scaling laws, the explainers) live one level up in [`docs/`](../) and at the
 | Claude Code + Anthropic API setup | [`docs/integrations/claude.md`](../integrations/claude.md) |
 | OpenAI Codex / OpenAI-compatible clients | [`docs/integrations/openai-codex.md`](../integrations/openai-codex.md) |
 | Related work + prior art | [related-items.md](related-items.md) |
+| Where the paid layer is heading — hosted multi-tenant policy + audit plane (RFC, not built) | [hosted-control-plane.md](hosted-control-plane.md) |
 
 ## Status
 
@@ -7347,7 +7364,9 @@ governance surface, not tokens per second. Full scope, claim by claim:
 
 ## Cross-references
 
+- [What fak supports](../supported/README.md) — the dedicated capability pages: [models](../supported/models.md), [clouds & hosted providers](../supported/clouds.md), [APIs, wires & MCP](../supported/apis-and-protocols.md), [agent harnesses & frameworks](../supported/agent-harnesses.md), and [serving engines](../supported/engines.md).
 - [Agent memory (mem0 / OpenMemory / MCP)](agent-memory.md) — put the gate in front of a memory store: oversized and secret-shaped writes refused, a prompt-injected `delete_all` refused, every recalled memory trust-gated before it re-enters context.
+- [Harden any MCP server](harden-any-mcp.md) — drop fak in front of any MCP server: a context-MMU quarantines poisoned tool results out of context and a capability allow-list blocks tools you never wired.
 - [Interoperability stance](interoperability.md) — why fak adopts whatever agent/model/framework you run (the one opinion kept is the capability floor) and the honest per-wire grade for the flagship harnesses and every interop protocol.
 - [Compatibility matrix](compatibility-matrix.md) — 44 harnesses, frameworks, backends, and protocols, each with its wire, custom-base-URL support, and the exact repoint key, sourced.
 - [Getting started](../../GETTING-STARTED.md) — install the single static binary.
@@ -10124,6 +10143,8 @@ description: "How external coding agents integrate with the fak tool-call firewa
 
 This document describes how external coding agents integrate with the fak (Fused Agent Kernel) - the tool-call firewall and policy boundary that sits between an AI agent and its tools.
 
+*Who this is for:* engineers wiring a coding agent (Claude Code, an OpenAI/Anthropic-SDK client, or a custom MCP host) through the `fak serve` gateway, or embedding the kernel in Go. Assumes you can run `fak serve` and read Go. By the end you will know the gateway entry points, the frozen kernel ABI (`ToolCall`/`Verdict`), the capability-floor policy, and the extension hooks (adjudicators, engines, vDSO fast paths) for routing a tool call through adjudication.
+
 ## Overview
 
 ```
@@ -10635,6 +10656,7 @@ Every request gets a `TraceID` (or generates one). This threads through:
 - `DOGFOOD-CLAUDE.md` - Claude Code integration example
 - `../explainers/policy-in-the-kernel.md` - Policy architecture
 - `../explainers/addressable-kv-cache.md` - Addressable cache design
+- [agent-framework-integration.md](agent-framework-integration.md) - Next: wire a specific agent framework through the gateway
 
 ---
 
@@ -11134,6 +11156,12 @@ description: "Runnable client code for calling a fak serve gateway from Python, 
 ---
 
 # Multi-Language Integration Examples
+
+*For application developers who already have a `fak serve` gateway running and want to call
+it from a non-Go codebase. Prerequisite: a reachable gateway (see the
+[server quickstart](server-quickstart.md)) and basic familiarity with HTTP in your language.
+You will leave able to adjudicate a tool call, read a `verdict`, and wire disposition-aware
+retries from Python, JS/TS, Go, or Rust against the OpenAI, Anthropic, or fak-native surface.*
 
 Runnable client code for talking to a `fak serve` gateway from **Python**,
 **JavaScript / TypeScript**, **Go**, and **Rust**. Every snippet below targets the
@@ -11900,7 +11928,7 @@ Clear every item before a network-facing deploy. Sources for each are in
   metal use a dedicated service user (the systemd unit below uses `DynamicUser`).
 - [ ] **Version pinned.** Pin a release (`FAK_VERSION` for the installer, an image
   tag for containers) rather than tracking `latest`. This guide tracks
-  **v0.30.0**.
+  **v0.32.0**.
 
 ---
 
@@ -11920,13 +11948,13 @@ shell, no package manager, runs as `nonroot`, exposes `8080`.
 
 ```bash
 # From a clone (repo root, where the Dockerfile lives):
-docker build -t fak:0.30.0 .
+docker build -t fak:0.32.0 .
 
 # Stamp a specific version into the binary:
-docker build --build-arg APP_VERSION=0.30.0 -t fak:0.30.0 .
+docker build --build-arg APP_VERSION=0.32.0 -t fak:0.32.0 .
 
 # Without cloning — build straight from the Git remote:
-docker build -t fak:0.30.0 https://github.com/anthony-chaudhary/fak.git
+docker build -t fak:0.32.0 https://github.com/anthony-chaudhary/fak.git
 ```
 
 The default `CMD` is `serve --addr 0.0.0.0:8080` (containers must bind `0.0.0.0`,
@@ -11937,7 +11965,7 @@ not loopback). The `ENTRYPOINT` is the `fak` binary, so override the command to 
 
 ```bash
 # Reach a model server running on the host (Ollama here) from the container:
-docker run --rm -p 8080:8080 fak:0.30.0 serve --addr 0.0.0.0:8080 \
+docker run --rm -p 8080:8080 fak:0.32.0 serve --addr 0.0.0.0:8080 \
   --base-url http://host.docker.internal:11434/v1 \
   --model qwen2.5:1.5b
 ```
@@ -11958,7 +11986,7 @@ docker run --rm -p 8080:8080 \
   -e FAK_AUDIT_JOURNAL=/var/lib/fak/audit.jsonl \
   -v "$PWD/policy.json:/etc/fak/policy.json:ro" \
   -v fak-audit:/var/lib/fak \
-  fak:0.30.0 serve --addr 0.0.0.0:8080 \
+  fak:0.32.0 serve --addr 0.0.0.0:8080 \
     --provider openai --base-url https://api.openai.com/v1 \
     --model gpt-4o --api-key-env OPENAI_API_KEY \
     --policy /etc/fak/policy.json \
@@ -11984,7 +12012,7 @@ the observability stack:
 # compose.yaml
 services:
   fak:
-    image: fak:0.30.0          # built from the repo Dockerfile, pushed to your registry
+    image: fak:0.32.0          # built from the repo Dockerfile, pushed to your registry
     restart: unless-stopped
     ports:
       - "8080:8080"
@@ -12075,7 +12103,7 @@ spec:
         runAsNonRoot: true
       containers:
         - name: fak
-          image: REGISTRY/fak:0.30.0
+          image: REGISTRY/fak:0.32.0
           args:
             - serve
             - --addr=0.0.0.0:8080
@@ -12171,12 +12199,12 @@ SHA-256, installs to PATH — no Go, no clone):
 curl -fsSL https://raw.githubusercontent.com/anthony-chaudhary/fak/main/install.sh | sh
 ```
 
-Installer knobs (environment): `FAK_VERSION` pins a version (e.g. `0.30.0`;
+Installer knobs (environment): `FAK_VERSION` pins a version (e.g. `0.32.0`;
 default latest release), `FAK_INSTALL_DIR` sets the target (default
 `/usr/local/bin` if writable, else `~/.local/bin`).
 
 ```bash
-FAK_VERSION=0.30.0 FAK_INSTALL_DIR=/usr/local/bin \
+FAK_VERSION=0.32.0 FAK_INSTALL_DIR=/usr/local/bin \
   sh -c "$(curl -fsSL https://raw.githubusercontent.com/anthony-chaudhary/fak/main/install.sh)"
 fak version
 ```
@@ -12308,11 +12336,966 @@ errors are covered in [server-troubleshooting.md](server-troubleshooting.md).
 - [server-config.md](server-config.md) — every flag, env var, route, and default
 - [security.md](security.md) — threat model and hardening for a network deploy
 - [observability.md](observability.md) — metrics, logs, and traces
+- [hosted-control-plane.md](hosted-control-plane.md) — architecture brief (RFC) for a multi-tenant hosted policy + audit control plane over the audit stream the binary emits
 - [server-troubleshooting.md](server-troubleshooting.md) — when something breaks
 - [policy-guide.md](policy-guide.md) and [`fak/POLICY.md`](https://github.com/anthony-chaudhary/fak/blob/main/POLICY.md) —
   authoring the capability floor and the refusal vocabulary
 - [`Dockerfile`](https://github.com/anthony-chaudhary/fak/blob/main/Dockerfile) and [`install.sh`](https://github.com/anthony-chaudhary/fak/blob/main/install.sh) — the
   build and install sources this guide describes
+
+---
+
+# What fak supports (hub)
+
+> Source: `docs/supported/README.md`
+
+---
+title: "What fak supports — models, features, clouds, APIs, MCP, harnesses, engines"
+description: "The index of fak's supported-things pages: which models, features, clouds and hosted providers, APIs and wires, MCP, agent harnesses and frameworks, and serving engines fak works with — each a dedicated, cross-linked page grounded in the repo and the sourced compatibility matrix."
+---
+
+# What fak supports
+
+`fak` is an agent kernel: one Go binary that sits between an AI agent and the tools it
+calls. Two facts decide what it supports.
+
+1. **It fronts the wires your stack already speaks** — OpenAI Chat Completions, Anthropic
+   Messages, Gemini `generateContent`, and MCP, plus an xAI upstream. Anything that lets
+   you set a base URL drops the gate in front with no code change. So the supported set of
+   harnesses, clouds, and engines is wide by construction.
+2. **It governs, it does not generate.** For production tokens fak fronts an engine
+   (Ollama, vLLM, SGLang, llama.cpp, a cloud API). It also ships an in-kernel reference
+   engine that runs a model itself, as a correctness reference rather than a fast server.
+
+Each page below is the dedicated list for one category. Every row is grounded in the repo
+or in the sourced [compatibility matrix](../integrations/compatibility-matrix.md), and
+status follows the witnessed [claims ledger](https://github.com/anthony-chaudhary/fak/blob/main/CLAIMS.md).
+
+## The pages
+
+| Page | What it lists |
+|---|---|
+| [Models](models.md) | Any model you front through the gateway, plus the architectures the in-kernel engine runs and proves bit-exact (Llama, Qwen2/Qwen3, Gemma, GLM-MoE, GPT-OSS, SmolLM2). |
+| [Features](features.md) | Every capability grouped by subsystem with its honest status — shipped, simulated, or stub — mirroring the claims ledger. |
+| [Clouds & hosted providers](clouds.md) | Anthropic, OpenAI, Gemini, and xAI as native provider wires, plus AWS Bedrock, Google Vertex AI, Azure OpenAI, OpenRouter, Together, Groq, and Fireworks over the OpenAI-compatible wire. |
+| [APIs, wires & MCP](apis-and-protocols.md) | OpenAI Chat Completions, OpenAI Responses, Anthropic Messages, Gemini, xAI; MCP over stdio and HTTP; the fak-native endpoints; and the honest interop stance on A2A, AG-UI, ACP, ANP. |
+| [Agent harnesses & frameworks](agent-harnesses.md) | Claude Code, Cursor, OpenAI Codex, OpenCode, Aider, Cline, Roo, Goose, Zed, and frameworks like LangChain, LlamaIndex, CrewAI, AutoGen, and the Vercel AI SDK. |
+| [Serving engines](engines.md) | The token engines fak fronts — Ollama, vLLM, SGLang, llama.cpp, LM Studio — and the in-kernel reference engine. |
+
+## Related references (the sourced detail behind these pages)
+
+- [Compatibility matrix](../integrations/compatibility-matrix.md) — 44 surveyed harnesses, frameworks, backends, and protocols, each with the wire it speaks, whether it takes a custom base URL, and the exact repoint key, with a source link per row.
+- [Integration index](../integrations/README.md) — the "repoint one base URL" recipe and the 60-second offline proof.
+- [Hardware matrix](../HARDWARE-MATRIX.md) — every machine fak has been profiled on: 4 platforms, 2 CPU ISAs, 4 GPU backends (Apple Metal, AMD Vulkan, NVIDIA CUDA Ada + Ampere).
+- [CLI reference](../cli-reference.md) — every `fak` verb and what it does.
+- [Claims ledger](https://github.com/anthony-chaudhary/fak/blob/main/CLAIMS.md) · [Status](https://github.com/anthony-chaudhary/fak/blob/main/STATUS.md) — what is shipped, simulated, or stub, and what is on the critical path.
+- [llms.txt](https://github.com/anthony-chaudhary/fak/blob/main/llms.txt) — the machine-readable doc map for LLMs and answer engines.
+
+---
+
+# Models supported
+
+> Source: `docs/supported/models.md`
+
+---
+title: "Models supported by fak — in-kernel architectures and any model you front"
+description: "Which models fak supports: every model your serving engine or cloud exposes is fronted through the gateway unchanged, plus the model architectures the in-kernel reference engine runs and proves bit-exact (Llama, Qwen2/Qwen3, Gemma, GLM-MoE, GPT-OSS, SmolLM2)."
+---
+
+# Models supported by fak
+
+"Supported" means two different things here, so this page is split in two.
+
+The common case is the gateway. You point `fak serve` at whatever engine or cloud
+already serves your tokens, and fak adjudicates the tool calls regardless of which
+model produced them. Any model your upstream exposes works unchanged.
+
+The narrower case is the in-kernel reference engine. fak ships a pure-Go forward pass
+that runs a model itself, proven bit-exact against HuggingFace. That engine is a
+correctness reference, not a production-throughput server, and it covers a fixed set of
+architectures.
+
+---
+
+## Layer 1 — Models you front through the gateway
+
+This is the default and the headline rule. `fak serve` is an OpenAI-, Anthropic-, and
+MCP-compatible proxy. It adjudicates each tool call your agent proposes and then passes
+the request through to the model your upstream serves. **fak does not restrict by model
+id.** The model is the upstream's. If your engine or cloud exposes it, fak fronts it.
+
+So the supported model list at this layer is "whatever your upstream serves":
+
+| If your upstream serves… | fak fronts it because… |
+|---|---|
+| Claude, GPT, Gemini, Grok | the gateway speaks the OpenAI, Anthropic, and Gemini/xAI wires and proxies the request through |
+| Llama, Qwen, DeepSeek, Mistral, GLM, any open-weights model | served behind an OpenAI-compatible engine (Ollama, vLLM, SGLang, llama.cpp, LM Studio), so it is reached over the OpenAI-compatible wire |
+| a local GGUF on your own box | served by your local OpenAI-compatible server and fronted the same way |
+
+The mechanism is one fact: the gateway speaks the wires your agent already speaks
+(`/v1/chat/completions`, `/v1/messages`, Gemini/xAI providers, and MCP), so the same
+gate sits in front of whichever model serves your tokens. This is the [SHIPPED]
+`fak serve` gateway and the `fak guard` front door for it.
+
+Status: [SHIPPED]. Sourced in
+[Claims ledger](https://github.com/anthony-chaudhary/fak/blob/main/CLAIMS.md) (the
+Gateway section), the [Integration index](../integrations/README.md), and the
+[Compatibility matrix](../integrations/compatibility-matrix.md). For the exact wires and
+endpoints, see [APIs, wires & MCP](apis-and-protocols.md) and the
+[Gateway API reference](../fak/api-reference.md). For the providers fak fronts, see
+[Clouds & hosted providers](clouds.md) and [Serving engines](engines.md).
+
+When a tighter per-model claim is not sourced, treat it as **fronted via the
+OpenAI-compatible wire** — the [Compatibility matrix](../integrations/compatibility-matrix.md)
+is the surveyed list (44 harnesses, frameworks, backends, and protocols, each with the
+exact repoint key). fak's role at this layer is the governance surface, not tokens per
+second.
+
+---
+
+## Layer 2 — Models the in-kernel reference engine runs itself
+
+This is the narrow path: `fak`'s own pure-Go forward pass, selectable with
+`--engine inkernel` (the `inkernel` backend), the local-model `--gguf` path, or a real
+weight export pointed to by `FAK_MODEL_DIR`. Here the model runs inside the kernel, so
+the supported set is a fixed list of architectures.
+
+**Read this first: the in-kernel engine is a correctness reference, not a fast token
+server.** The honest scope, claim by claim, is in the
+[Claims ledger](https://github.com/anthony-chaudhary/fak/blob/main/CLAIMS.md) — the
+in-kernel forward pass is "correct, not fast" by origin, and the parity lane closed
+decode to same-precision-peer parity without disturbing any correctness rung. For a
+production token engine you use Layer 1 and front vLLM/SGLang/llama.cpp.
+
+### The proven oracle model
+
+| Model | Architecture | What is proven | Status |
+|---|---|---|---|
+| **SmolLM2-135M** (134.5M params / 272 tensors) | Llama-family decoder | A pure-Go forward pass runs in-process with the KV cache as a kernel-owned Go structure; every rung is proven against a HuggingFace oracle — embedding exact, per-layer cos=1.000000, final-logits max\|Δ\|≈4.4e-5, KV-decode and KV-quarantine-evict token-for-token identical | [SHIPPED] |
+
+This is the default fixture (`.cache/smollm2-135m`) and the headline witness behind the
+whole in-kernel claim. Source: the "In-kernel model" section of
+[CLAIMS.md](https://github.com/anthony-chaudhary/fak/blob/main/CLAIMS.md),
+`internal/model` `TestForwardMatchesHFOracle`, and
+[`IN-KERNEL-MODEL-RESULTS.md`](../benchmarks/IN-KERNEL-MODEL-RESULTS.md) /
+[`MODEL-BASELINE-RESULTS.md`](../benchmarks/MODEL-BASELINE-RESULTS.md).
+
+### Architectures the in-kernel engine runs
+
+The forward pass loads a checkpoint, derives its architecture axes from `model_type` /
+`architectures` metadata, and runs the family-specific block topology, normalization,
+activation, RoPE, and attention. Two levels of support are distinguished below, because
+they are not the same claim:
+
+- **Forward-pass proven** — the family has a HuggingFace oracle witness in
+  `internal/model` (`assertForwardMatchesHFOracle`), so its forward output is checked
+  bit-faithful against HF. The witness is weight-gated (it skips cleanly when the
+  gitignored export is absent), so it is "proven when the export is present," not run on
+  every CI box.
+- **Config + architecture-axis** — the loader parses the family's metadata and the
+  mechanical axes (block topology, norm, activation, RoPE scaling, MoE routing, sliding
+  windows) are implemented and unit-tested, but there is no committed HF forward oracle
+  for that exact family. Numeric forward correctness for these is not yet asserted by an
+  oracle.
+
+| Architecture | model_type / Architectures key | Support level | Witness / source |
+|---|---|---|---|
+| **Llama** (incl. Llama-3 RoPE scaling + EOS-list) | `llama` | Forward-pass proven | `internal/model` `TestForwardMatchesHFOracle`, `TestOptionalLlama3OracleCoversScalingAndEOSList`; default SmolLM2-135M oracle |
+| **Qwen2 / Qwen2.5** | `qwen2` (legacy projection-bias default) | Forward-pass proven | shares the Llama-shape forward; `config_test.go` `TestConfigDerivesQwenLegacyBias…`; oracle path in `internal/model` |
+| **Qwen3** (per-head qk-norm) | `qwen3` | Forward-pass proven | `TestOptionalQwen3OracleCoversQKNorm` |
+| **Qwen3-MoE** (hybrid dense + sparse layers) | `qwen3moe` | Forward-pass proven | `TestOptionalQwen3MoEOracleCoversHybridDenseSparseLayers` |
+| **Gemma2 / Gemma3** (sandwich-norm, (1+w) gain, tanh-GELU, local/global attention) | `gemma2`, `gemma3` | Forward-pass proven (Gemma3 oracle) | `TestOptionalGemma3OracleCoversLocalGlobalAttention`; Gemma axes in `arch.go` + `config_test.go` |
+| **GLM-MoE-DSA** (GLM-5.2 lineage; DSA sparse attention + MoE) | `glm_moe_dsa` | Forward-pass proven (cacheless + session-cache oracle); DSA forward is research-grade | `TestOptionalGLMMoeDsaOracleForwardMatchesHFCacheless`, `…SessionCacheMatchesHF` |
+| **GPT-OSS** (MoE, yarn RoPE, sliding-window layers, attention sinks) | `gpt_oss` | Config + architecture-axis | `config_test.go` `TestConfigDerivesArchitectureAxesFromMetadata` (gpt-oss case); attention-sink + softcap axes in `arch.go`. No committed HF forward oracle for this family |
+| **Mistral** (sliding-window attention) | `mistral` | Forward-pass proven (SWA oracle, when exported) | `TestOptionalMistralSWAOracleNonVacuous` |
+
+The mechanical-axis loader also parses several more families' metadata (OLMo2 post-norm,
+GPT-NeoX / Cohere / Falcon parallel-residual, MPT ALiBi, StableLM, DeepSeek-V2 MLA, MiniMax-M3
+MSA). Those are wiring-and-config support exercised on synthetic configs in
+`config_test.go` and `arch_test.go`; per-family numeric forward correctness needs a
+re-exported HF oracle, so they are not listed above as forward-pass-proven. DeepSeek-V2,
+for example, has an oracle that documents the MLA tensor boundary but does not assert a
+full forward. Treat any family not in the table above as parse-and-axis support, not a
+proven forward.
+
+### Load and quantization formats
+
+The in-kernel engine loads weights in these formats. The reference path is f32; the
+narrower-precision paths each have their own status.
+
+| Format | Bytes/param | Support level | Source |
+|---|---|---|---|
+| **f32** (HuggingFace safetensors / the reference export) | 4 | [SHIPPED] — the proven-correct reference path; every oracle rung is checked against it | `internal/model` oracle; CLAIMS "In-kernel model" |
+| **Q8_0 / int8 SIMD** (hand-written AVX2/AVX-512, CPUID-gated, scalar fallback; opt-in `Session.Quant`) | ~1.125 | In-flight increment, **not** [SHIPPED] — witnessed green in the working tree (argmax-exact vs the f32 oracle, decode near-parity with llama.cpp Q8_0), deliberately not given a SHIPPED row until the lane commits | CLAIMS "In-kernel model" (int8/Q8_0 lane note); `MODEL-BASELINE-RESULTS.md` Act 3 |
+| **Resident Q4_K** (raw q4_k blocks stay resident, decode streams ~1.8× fewer bytes; the Qwen3.6-27B route) | ~0.5 | Available via `FAK_Q4K` (the resident-Q4_K decode path) | [model-engine-env.md](../model-engine-env.md) (`FAK_Q4K`) |
+| **AWQ 4-bit** (activation-aware, symmetric, zero-point 8; safetensors only) | ~0.5625 | Implemented (`model.LoadAWQ`); CUDA kernel near-Q8 throughput, CPU scalar reference; oracle threshold cosine ≥0.95 | [awq-quantization.md](../explainers/awq-quantization.md) |
+
+Hardware coverage for these paths (Metal, Vulkan, CUDA Ada and Ampere, the CPU SIMD
+tiers) is in the [Hardware matrix](../HARDWARE-MATRIX.md). The `FAK_*` knobs that pick a
+load format, residency budget, and SIMD tier are in
+[model-engine-env.md](../model-engine-env.md).
+
+---
+
+## How to check what a build serves
+
+The served model id and engine are reported by the gateway, so you never have to guess
+what a running build is fronting or running:
+
+- `GET /v1/models` advertises the served model id.
+- `GET /healthz` returns `{"ok":true,"model":"…","engine":"…"}` — the `engine` field is
+  `inkernel` when the in-kernel reference engine is selected.
+- `fak serve --model <id>` (and `--engine inkernel` / `--base-url`) set what the gateway
+  serves; the [CLI reference](../cli-reference.md) lists the flags. For inbound tool
+  results and the MCP wire shape, see the [MCP tool-result wire](../mcp-tool-result.md).
+
+If a model is not in the Layer 2 table, you are almost certainly on Layer 1 — front it
+through the gateway over the OpenAI-compatible wire and it works unchanged. See the
+[FAQ](../FAQ.md) for the difference between fronting a model and running one in-kernel.
+
+## Related: the supported-things pages
+
+- [What fak supports (hub)](README.md) — the index of every "supported" page
+- [Features](features.md) — every capability with its shipped / simulated / stub status
+- [Clouds & hosted providers](clouds.md) — Anthropic, OpenAI, Gemini, xAI, Bedrock, Vertex, Azure, OpenRouter, Together, Groq, Fireworks
+- [APIs, wires & MCP](apis-and-protocols.md) — OpenAI Chat/Responses, Anthropic Messages, Gemini, xAI, MCP, fak-native endpoints
+- [Agent harnesses & frameworks](agent-harnesses.md) — Claude Code, Cursor, Codex, Aider, Cline, Roo, LangChain, LlamaIndex, CrewAI, …
+- [Serving engines](engines.md) — Ollama, vLLM, SGLang, llama.cpp, LM Studio, and the in-kernel reference engine
+
+## Reference (the witnessed sources behind this page)
+
+- [Compatibility matrix](../integrations/compatibility-matrix.md) — 44 sourced harnesses / frameworks / backends / protocols, each with the exact repoint key
+- [Integration index](../integrations/README.md) — the "repoint one base URL" recipe and the 60-second offline proof
+- [Claims ledger](https://github.com/anthony-chaudhary/fak/blob/main/CLAIMS.md) — every capability with one machine-checked tag (shipped / simulated / stub)
+- [Status](https://github.com/anthony-chaudhary/fak/blob/main/STATUS.md) · [CLI reference](../cli-reference.md) · [Hardware matrix](../HARDWARE-MATRIX.md) · [llms.txt](https://github.com/anthony-chaudhary/fak/blob/main/llms.txt)
+
+---
+
+# Features supported (with status)
+
+> Source: `docs/supported/features.md`
+
+---
+title: "Features supported by fak — capability gate, KV cache, gateway, with honest status"
+description: "Every fak capability grouped by subsystem with its honest shipped / simulated / stub status, a reader-friendly view of the CLAIMS.md ledger: adjudication and the capability floor, the tool vDSO fast path, the context-MMU result quarantine, the in-kernel model and addressable KV cache, the security substrate, the gateway, and the benchmarks."
+---
+
+# Features supported by fak
+
+This page lists every fak capability grouped by subsystem. It is the reader-friendly view of the [claims ledger](https://github.com/anthony-chaudhary/fak/blob/main/CLAIMS.md); it does not re-grade anything. Each row carries the same status the ledger assigns, and the ledger is the witnessed source of record.
+
+fak tags every capability with exactly one of three honest states:
+
+- **Shipped** — real code on the critical path, closed by a mechanical witness (a `go test`, a `go build`, a benchmark field, a file read-back). Reproducible now.
+- **Simulated** — a real seam with labeled stand-in numbers. There is no GPU or live serving engine on the build box, so the seam is real and the numbers are illustrative.
+- **Stub** — plumbing present, behavior deferred. Clearly labeled, returns a STUB or no-op result.
+
+## The product (one binary)
+
+| Feature | Status | What it does |
+|---|---|---|
+| One statically-linked `fak` binary | Shipped | Runs an agentic tool loop where every tool call crosses one in-process syscall boundary. |
+| Process-level fusion | Shipped | Harness, reference monitor, vDSO, pre-flight, and context-MMU collapsed into one Go address space. No spawned hook, no IPC on the decide path (`TestNoOsExecOnHotPath`). |
+| Frozen, additive-only ABI | Shipped | A machine-checked contract over the syscall envelope and the discriminated-union Verdict (`TestABIGoldenFreeze`). |
+| Zero data races | Shipped | The whole module passes the Go race detector in the `race-detector` CI job; the Windows build box has no cgo, so it runs via WSL/Linux/CI. |
+| In-process adjudication latency check | Shipped | A subsystem regression sentinel timing the in-process fold against a spawned-hook baseline on the same machine. Deliberately not a production-readiness or throughput headline. |
+
+## Adjudication and the capability floor
+
+| Feature | Status | What it does |
+|---|---|---|
+| Provable-deny / unprovable-defer | Shipped | Provable refusal returns Deny, anything unprovable returns Defer; default-deny on an empty policy. |
+| Structured 12-reason refusal | Shipped | Refusals come from a closed 12-reason vocabulary with a bounded-disclosure witness (a SELF_MODIFY deny returns only the offending glob). |
+| Deny-as-value | Shipped | A refusal carries a derived disposition (RETRYABLE / WAIT / ESCALATE / TERMINAL) the loop consumes. |
+| Batch adjudication | Shipped | Adjudicating a set of calls in one pass equals the serial result. |
+| Deployable capability floor | Shipped | The policy is a declarative, version-tagged JSON manifest loaded at runtime (`--policy FILE`); unknown fields, reasons, or versions are a fatal load error. `fak policy --dump`/`--check` authors and validates it. |
+| Git-shape prefilter | Shipped | A registered rung (`internal/gitgate`) refuses the argv-decidable git hazards (force-push, `commit --amend`, `add -A`, `--no-verify`, `tag -f`, `rebase -i`) at the call boundary, defers on state-dependent laws, and opts out with `FAK_GITGATE=off`. |
+| Default dev-agent floor + ship gate | Shipped | `adjudicator.DevAgentPolicy()` denies shared-history git mutations, escalates a spine write as SELF_MODIFY, and lifts a ship call to `require-witness` so an unwitnessed ship is refused and a git-corroborated ship is allowed. |
+
+## Tool vDSO fast path
+
+| Feature | Status | What it does |
+|---|---|---|
+| 3-tier local fast path | Shipped | Tier-1 pure registry (gated on read-only + idempotent hints, re-checked not trusted), tier-2 content-addressed world-versioned LRU cache, tier-3 static table. |
+| Arg-order-independent content keys | Shipped | Canonicalized JSON keys, so reordered arguments hit the same cache entry. |
+| Write-shaped invalidation | Shipped | A write-shaped completion bumps the world-version and invalidates the cache, so a hit equals a fresh call. |
+| Real-world vDSO hit-rate | Simulated | The demo trace is deliberately cache-favorable (~50% hits); measured addressable purity on real tau2-airline is ~0.7%. The vDSO is reported as an upside secondary, never the headline. |
+
+## Pre-flight ladder and grammar repair
+
+| Feature | Status | What it does |
+|---|---|---|
+| Rung-0 static parse + rung-1 schema check | Shipped | Cheapest-first, escalate-on-pass, with hard-negative label harvesting. |
+| Grammar rung (positional to named auto-repair) | Shipped | An in-syscall TRANSFORM with no model turn for arity-matched calls; unrepairable calls Deny(MISROUTE); fail-open on unknown grammar; content-addressed grammar dedup. |
+| Rung-2 dry-run + rung-3 sandbox probe | Stub | The offline/sandbox escalation rungs above rung-1 are not built in v0.1. |
+| Decode-time logit-mask (grammar-constrained generation) | Stub | The never-emit-a-malformed-call form requires owning the decode loop; not in v0.1. |
+
+## Context-MMU result quarantine
+
+| Feature | Status | What it does |
+|---|---|---|
+| Result-admit gate | Shipped | Secret-shaped and prompt-injection/poison results are quarantined out of context to a stub pointer; oversize benign results page out to a <2KB pointer; byte-repeat pollution is quarantined. |
+| Witness-gated page-in | Shipped | Page-in is gated on an explicit witness `Clear()`, with a pollution-rate counter and a content-addressed blob store shared with the vDSO. |
+| `normgate` canonicalize-and-rescan driver | Shipped | A ResultAdmitter in front of ctxmmu that strips zero-width/bidi/homoglyph evasions and decodes base64/hex before rescanning; lifts measured agent-evasion catch 0 to 20 of 24. One blank-import to enable. |
+| `headroom` (Rust) page-out codec | Simulated | The default page-out is pure-Go content-addressed; the headroom backend is an optional labeled seam, not on the critical path. |
+| Answer-shape degeneration witness | Shipped | `answershape.Measure` grades repeat-n, repeated-line coverage, and short-period tiling against caller thresholds; `fak answer-shape` is the pipeline gate and `fak doctor` cross-checks the kernel admit verdict. |
+
+## Codelint at the boundary
+
+| Feature | Status | What it does |
+|---|---|---|
+| Language-server packs over agent-written code | Shipped | `codelint` reports only hard parse/compile errors; ships Go + JSON in-process and Python + CUDA shelling out (no-opinion when the toolchain is absent); honors no in-content ignore comment and runs off the hot path. |
+| `fak codelint PATH...` write/definition-time check | Shipped | Routes each file to its owning pack and exits 1 on a hard error; the SWE-bench fleet runs the same packs over agent file writes when `--lint-writes` is set (advisory, off by default). |
+| Write-scoped codelint verdict in the adjudicator (#536) | Shipped | Under the opt-in `LintWrites` policy, a whole-file write of unparseable Go/JSON is refused with Deny(MALFORMED) and a bounded `file:line:col` witness; off by default, fail-open for languages whose checkers shell out. |
+
+## Durability gate (context is not memory)
+
+| Feature | Status | What it does |
+|---|---|---|
+| Rung-1 write-time durability classifier | Shipped | A cheap lexical/tense prior assigns a benign result a turn / session / durable class and stamps it on the additive `Verdict.Meta` map (not a model call), failing closed to `turn`. |
+| Zero ABI / golden-freeze cost | Shipped | The durability tag rides the additive `Meta` map, so the frozen ABI does not move. |
+| Rung-1 default-expire promotion gate | Shipped | A `PromotionMode` gates promotion into the persisted core image, so only a `durable`-classed benign fact crosses the durable boundary. Closes the benign over-promotion arm of OWASP Memory-Poisoning T1; it is not the adversarial-T1 floor. |
+| Two-commit honesty posture | Shipped | `PromotionWarn` (the default) stamps the class and counts would-refusals but still persists, so existing callers stay green; `PromotionEnforce` is opt-in. |
+| Rung-2 bitemporal validity (#501) | Stub | A `recall.Page` validity interval plus an as-of read gate that makes `bounded` the first temporally-enforced class. |
+| Rung-3 engine-integrated TTL (#502) | Stub | A `kvmmu.Segment` TTL over the bit-exact `model.KVCache.Evict`, so a span is forgotten on a clock the fact sets. |
+| Dream-time durability consolidation | Stub | Principled sleep-time promotion over the rung-1 class signal (S7 epic #496). |
+
+## Session core-dump and context debugger
+
+| Feature | Status | What it does |
+|---|---|---|
+| `recall` core image | Shipped | A finished session persists as a durable core image: a `manifest.json` page table over a `cas.json` content-addressed swap device, reloaded in a fresh process with every blob integrity-checked against its digest. |
+| Durable quarantine moat | Shipped | A page sealed at write time is refused on page-in across the process boundary unless a witness `Clear()` ran AND the bytes pass a fresh re-screen. |
+| `cdb` context debugger | Shipped | Turns a real Claude Code transcript into a core image through the same gate and binds an inspection surface (Info/Backtrace/Examine/WorkingSet/Grep). |
+| Demand-paging the working set | Shipped | A follow-up is answered by paging in only the pages it references; measured on a real 2.8 MB session (18 KB page table over a 1.2 MB swap device). |
+| Agent/requester context tombstones | Shipped | A negative-only request suppresses a page from future model-visible recall without deleting CAS bytes; exposed via `fak debug`, HTTP, and MCP. |
+| Inherited detection ceiling (surfaced) | Shipped | The same run sealed 2 of 59 pages as false positives; `cdb` makes the gate's decision durable and queryable, it does not improve the decision. |
+
+## In-kernel model and addressable KV cache
+
+| Feature | Status | What it does |
+|---|---|---|
+| Pure-Go SmolLM2-135M forward pass | Shipped | Runs in-process with the KV cache as a kernel-owned Go structure; every rung proven against a HuggingFace oracle (per-layer cos=1.000000, KV-decode token-for-token identical). |
+| Parity lane | Shipped | Parallel matmul, batched prefill GEMM, and an 8-accumulator `fdot`, each bit-identical to the serial reference; decode beats every same-precision HF f32 config. |
+| KV-quarantine bridge | Shipped | A ctxmmu Quarantine verdict mechanically evicts that result's K/V span, leaving the cache bit-identical (max|Δ|=0) to never-having-seen it (synthetic-model witness; live agent loop not yet wired). |
+| Planned-elision to KV-eviction residency bridge (#550) | Shipped | `kvmmu.Context.ApplyPlan` evicts every elided span so the cache's residency shrinks to the planner's O(1) view, bit-for-bit (synthetic-model witness; not yet wired into the live HTTP loop). |
+| Context-planner candidate index | Shipped | `ctxplan.Index` bounds the planner's per-turn compute (an inverted token index + recency tail + durable set), flattening cumulative planning from Θ(N²) to Θ(c·N); pruning is a forecast miss, never a lost fact. |
+| Provable-deletion certificate | Shipped | `deletioncert` binds the evicted span, count, byte-exact equivalence, a hash-chained anchor, and the trust epoch under one ed25519 signature, failing closed on any forged field (self-signed v1 receipt). |
+| In-kernel engine backend (`--engine inkernel`) | Shipped | The in-kernel model is wired as a `RegisterEngine` backend; an allowed tool call is completed by a real greedy decode over the kernel-owned KV cache. Builds a synthetic checkpoint with no export; `FAK_MODEL_DIR` loads a real one. |
+| Poly-model serving core | Shipped | The deterministic "host many models, share the prefill, decode one" policy/accounting brain (residency pool, serial decode lane, speculative-accept core, cross-model prefill-share gate). Runs no model and is off mainline by construction (`FAK_POLYMODEL`, default off). |
+| Single-pass batched + tree-attention verify | Shipped | `model.VerifyForward` turns the accept decision into a real one-pass forward over candidate tokens, token-identical to sequential decode; CPU synthetic regime, so no tokens/sec, off mainline (`FAK_POLYMODEL`). |
+| Multi-model weight-residency layer | Shipped | `internal/residency` lifts the single-model assumption with a weight-byte budget and LRU page-out, reusing `polymodel.Pool`'s policy; moves no weight bytes, off mainline (`FAK_POLYMODEL`). |
+| RadixAttention parity vs SGLang | Shipped | `internal/radixkv` rebuilds SGLang's radix-tree prefix reuse over the kernel-owned KVCache; measured 77.2–88.2% cache hit rate inside SGLang's 50–99% band, reuse-through-edge-split bit-identical to recompute. |
+| int8/Q8_0 SIMD lane | Simulated | Hand-written AVX2/AVX-512 lane (CPUID-gated, scalar fallback) is the active in-flight increment, witnessed green in the working tree but deliberately not given a Shipped row in the ledger until the implementation lane commits it. |
+
+GPU device compute is witnessed real on several backends (CUDA on an RTX 4070 and a datacenter sm_80 GPU, Vulkan on an AMD RX 7600, Metal on an Apple M3 Pro). See the [hardware matrix](../HARDWARE-MATRIX.md) and the [engines page](engines.md) for those rows.
+
+## Security substrate (the kernel stops believing the model)
+
+| Feature | Status | What it does |
+|---|---|---|
+| Information-flow control (IFC) | Shipped | `Ref.Taint` is source-stamped and a tainted-to-sink flow is sink-gated at adjudication time (rank-30, pre-call). |
+| Kernel-authored trust/provenance | Shipped | A classifier takes authorship of trust away from the model, with a hardened sink classifier. |
+| plan-CFI | Shipped | A plan control-flow-integrity adjudicator with a `RequireApproval` verdict; `internal/harvest` folds the verdict stream into a frozen label corpus. |
+| Effect-verifying witness gate | Shipped | An in-process `dos_verify` effect-verify backs a `require-witness` verdict that fails closed when unwitnessed. |
+| Dynamic attack battery | Shipped | `internal/agentdojo` is an ASR-gated AgentDojo-style red-team replacing the static poison fixture; 3 of 4 arrows shipped, the RL red-team generator is a documented seam. |
+| `normgate` admission driver | Shipped | The rank-5 canonicalize-and-decode ResultAdmitter; lifts agent-evasion catch 0 to 20 of 24 and cuts private-transcript false positives with 0 new FPs and 0 leaks. |
+
+## Gateway (`fak serve` / `fak guard`)
+
+| Feature | Status | What it does |
+|---|---|---|
+| `fak serve` OpenAI-compatible surface | Shipped | An HTTP surface (`/v1/chat/completions` adjudication proxy, `/v1/fak/{syscall,adjudicate}`, `/v1/models`, `/healthz`) plus MCP over stdio/HTTP; mints a tainted agent-scoped Ref so the IFC/secret/self-modify rungs stay armed; optional constant-time bearer auth. |
+| Served result-side stack (`fak_admit`) | Shipped | `POST /v1/fak/admit` runs a client-produced result through the context-MMU quarantine + IFC taint ledger, with a `TraceID` threaded end-to-end. |
+| `fak guard -- <agent>` front door | Shipped | Starts the in-process gateway on a private loopback port, injects its URL into the child only, execs the real agent, and prints a verdict roll-up from the same counters `/metrics` exposes. Default upstream is the Anthropic API in passthrough. |
+
+The gateway fronts any OpenAI-compatible upstream (a local engine or a cloud provider). The exact list of harnesses, wires, and backends that have been sourced is in the [compatibility matrix](../integrations/compatibility-matrix.md); the streaming and endpoint detail is in the [gateway API reference](../fak/api-reference.md) and the [MCP tool-result wire](../mcp-tool-result.md). One streaming caveat: `stream:true` SSE on the OpenAI proxy is synthesized from the finished, already-adjudicated turn (the Anthropic `/v1/messages` passthrough does live token streaming).
+
+## Engine and live seam
+
+| Feature | Status | What it does |
+|---|---|---|
+| OpenAI-compatible client | Shipped | A base-url-swappable `/v1/chat/completions` client with bounded timeout + backoff, cassette record/replay for offline runs, token-usage extraction, and a deterministic mock engine. |
+| Live seam honesty | Shipped | A run carries a real transcript hash XOR the explicit RED flag `live_seam_unverified`, never a silent skip. |
+| Live seam exercised end-to-end | Shipped | `fak agent` drove the kernel with a real OpenAI-compatible model (Gemini OpenAI-compat and local Qwen2.5), each run carrying a real `transcript_sha`. |
+| Hardware-aware cache placement | Shipped | `internal/cachemeta` models CXL/NUMA-far tiers, per-tier TTL, a zero-copy share descriptor, and a cost-driven `PlanPlacement` that demotes a hot prefix instead of evicting it. The payload-free policy plane; the engine adapter performs the physical movement. |
+| metrics-service scrape / KV-residency / token-per-watt | Simulated | Labeled SIMULATED telemetry; there is no watt source on the build box. |
+| Zero-copy KV co-residence with an external engine | Stub | The `Ref`/`Resolver`/`RegionBackend` seam is frozen so it is a backend swap later, but the shipped path is copy-CAS. The in-kernel model owns its own KV cache. |
+| Advisory adjudication model (harvest-corpus consumer) | Shipped | A small fail-closed classifier (`internal/advmodel`, #580) trained over the floor-labeled `internal/harvest` corpus; it can only corroborate a deny, never weaken the floor. Held-out P/R/F1 vs the stock reference are committed in the artifact meta. |
+| Fine-tuned syscall/adjudication LLM + AsyncLM | Stub | The advisory model above is a logistic-regression bag-of-tokens model, NOT a fine-tune of the fused SmolLM2 forward pass; the tuned LLM head (GPU + weights + hours) and AsyncLM's interrupt behavior remain unbuilt. |
+
+## Turn-tax and policy-replay benchmarks
+
+| Feature | Status | What it does |
+|---|---|---|
+| `fak turntax` | Shipped | Replays a class-labeled trace through the real kernel and prices the extra error-code model turn a SOTA loop fires vs fak's 1-shot adjudication; the fak side is live kernel events, a happy-path control saves exactly 0. |
+| Policy-replay spine | Shipped | Scores K policies against one recorded trajectory as model-free kernel replays (product to sum), every arm carrying an `exact` / `bounded@i` divergence witness so a counterfactual resolve-rate is refused. |
+| Divergence-witness hardening + histogram | Shipped | Captures a raw per-call monitor verdict so a redact-only policy diff comes out `bounded@i`, and emits the first-divergence distribution + exact-cell fraction. |
+| Payload-bearing trajectory sink | Shipped | `internal/tracesink` registers as an emitter and writes a payload-bearing, IFC-labeled trace so a content-inspecting policy can re-adjudicate a recorded run; recorder overhead ~1.5 µs/call. |
+| Per-kernel adjudicator-chain injection | Shipped | `RunPolicyReplay` fans its K arms across goroutines on fresh kernels instead of mutating the process-global policy, with results identical to the serial path. |
+| Fleet counterfactual replay | Shipped | Re-adjudicates a recorded corpus against candidate policies at $0 model and reports per-policy floor coverage; resolve-rate reported only for exact cells. |
+| OPE calibration past the divergence frontier | Shipped | A clearly-modeled off-policy resolve-rate estimate plus CI alongside the measured floor counters; IPS is explicitly refused for deterministic policies. |
+| Replay-as-fitness policy search | Shipped | A deterministic, model-free ($0) hill-climb over the policy genome scored entirely by replay on honest replayable axes; resolve-rate is not a fitness term. |
+| Lever-flip causal attribution | Shipped | Replays one trace through L kernels each with one rung ablated, producing an exact per-rung attribution table. |
+| World-pluggable replay + token-ledger demo | Shipped | `RunWithWorld` replays the same machinery against a different tool world; `cmd/tokendemo` scores a model-context win and a tool-side win as honestly-distinct meters. |
+| `fanbench` fan-out benchmark | Shipped | Sweeps one master goal to N sub-agents (N=1…1024) and reports from real kernel events the cross-agent tool-result dedup + shared-prefix KV-reuse geometry. |
+| `fanbench` token-multiplier economics | Simulated | The prefix-cache `tax_clawed_back`, latency, throughput, and saturation knee are a transparent knobbed cost model priced at documented prompt-cache multiples, reported apart from the measured halves. |
+| `longctxbench` ultra-long-context work floor | Shipped | Closed-form, contention-free token and FLOP floors for the >100k-token regime; eliminates ~10× vs naive re-prefill for one session, ~40×+ for a 5-agent fleet. |
+| `longctxbench` live wall-clock validation | Simulated | The live wall-clock validation at >100k needs a model resident on a bench node and is not run on the build box; the floor arithmetic stands independently. |
+
+## Stewards and the RSI ship-gate
+
+| Feature | Status | What it does |
+|---|---|---|
+| Single-invariant stewards | Shipped | Secret-in-context, lease-disjointness, kpi-regression, and vdso-soundness stewards fire only with an independently-authored witness; a meta-steward prunes never-firing stewards. |
+| RSI-as-ship-gate | Shipped | Keep-or-revert on a non-forgeable keep-bit (strict metric gain AND suite-green AND truth-clean), applied in an isolated git worktree, with an escalation breaker. |
+| RSI closed loop | Shipped | `internal/rsiloop` derives every keep-bit witness from a real run it performs itself, re-measuring the baseline from `main` every run; it never mutates `main`. |
+| Issue-dispatch closed loop | Shipped | The witness-gated GitHub-issue backlog driver: routes each open issue to its lane, passes the dispatch preflight gate, spawns one detached worker, and closes only via a per-SHA `dos commit-audit` re-run. |
+
+## The honest ceiling fak surfaces
+
+The result detector these drivers feed is approximately 100% evadable on a SOTA evasion battery and false-positive-prone on private real-transcript corpora. Detection is deliberately non-load-bearing. The load-bearing guarantee is the capability floor plus containment, which never run the detector. Improving detection is additive, not the moat. fak reports this ceiling rather than hiding it, and surfaces the same gate decision durably through `cdb` without claiming it improves the decision.
+
+For the witnessed source of record behind every row on this page, read the [claims ledger](https://github.com/anthony-chaudhary/fak/blob/main/CLAIMS.md) and the [status posture](https://github.com/anthony-chaudhary/fak/blob/main/STATUS.md).
+
+## Related: the supported-things pages
+
+- [What fak supports (hub)](README.md) — the index of every "supported" page
+- [Models](models.md) — in-kernel architectures + any model you front
+- [Clouds & hosted providers](clouds.md) — Anthropic, OpenAI, Gemini, xAI, Bedrock, Vertex, Azure, OpenRouter, Together, Groq, Fireworks
+- [APIs, wires & MCP](apis-and-protocols.md) — OpenAI Chat/Responses, Anthropic Messages, Gemini, xAI, MCP, fak-native endpoints
+- [Agent harnesses & frameworks](agent-harnesses.md) — Claude Code, Cursor, Codex, Aider, Cline, Roo, LangChain, LlamaIndex, CrewAI, …
+- [Serving engines](engines.md) — Ollama, vLLM, SGLang, llama.cpp, LM Studio, and the in-kernel reference engine
+
+## Reference (the witnessed sources behind this page)
+
+- [Compatibility matrix](../integrations/compatibility-matrix.md) — 44 sourced harnesses / frameworks / backends / protocols, each with the exact repoint key
+- [Integration index](../integrations/README.md) — the "repoint one base URL" recipe and the 60-second offline proof
+- [Claims ledger](https://github.com/anthony-chaudhary/fak/blob/main/CLAIMS.md) — every capability with one machine-checked tag (shipped / simulated / stub)
+- [Status](https://github.com/anthony-chaudhary/fak/blob/main/STATUS.md) · [CLI reference](../cli-reference.md) · [Hardware matrix](../HARDWARE-MATRIX.md) · [llms.txt](https://github.com/anthony-chaudhary/fak/blob/main/llms.txt)
+
+---
+
+# Clouds & hosted providers
+
+> Source: `docs/supported/clouds.md`
+
+---
+title: "Clouds and hosted providers fak supports"
+description: "The hosted model providers and cloud gateways fak serve sits in front of: Anthropic, OpenAI, Google Gemini, and xAI as native provider wires, plus AWS Bedrock, Google Vertex AI, Azure OpenAI, OpenRouter, Together AI, Groq, and Fireworks AI through the OpenAI-compatible wire."
+---
+
+# Clouds and hosted providers fak supports
+
+This page lists the hosted model providers and cloud gateways `fak serve` can sit in front of. `fak serve` is a gateway: it fronts whatever serves your tokens and runs every proposed tool call through the kernel before it reaches the model. So a cloud is "supported" when you can point fak's `--provider` and `--base-url` at it. Two tiers cover the field: native provider wires that fak speaks directly, and any cloud that exposes an OpenAI-compatible endpoint.
+
+## Tier 1: Native provider wires
+
+These are the `--provider` values `fak serve` and `fak guard` accept. Each value selects a transcript adapter that translates the canonical agent transcript into that provider's request and response wire. The values, wires, and aliases are sourced from `internal/agent/adapters.go` (the `Provider` constants and `ParseProvider`).
+
+| Provider | `--provider` value | Wire | Notes |
+|---|---|---|---|
+| OpenAI (GPT) | `openai` | OpenAI Chat Completions (`/chat/completions`) | The default when `--provider` is unset. Aliases: `gpt`, `chat-completions`, `openai-compatible`. This is also the wire every Tier 2 cloud below rides. |
+| OpenAI Responses | `openai-responses` | OpenAI Responses API (`/responses`) | The item-shaped GPT wire. Aliases: `responses`, `responses-api`. |
+| Anthropic (Claude) | `anthropic` | Anthropic Messages API (`/v1/messages`) | Alias: `claude`. Picks `x-api-key` for an `sk-ant-api…` key, or `Authorization: Bearer` + `anthropic-beta: oauth-2025-04-20` for a Claude Pro/Max subscription `sk-ant-oat…` token. |
+| Google Gemini | `gemini` | Gemini `generateContent` API | Alias: `google`. Auth via `x-goog-api-key`. Also served to clients as an inbound wire — see [APIs, wires & MCP](apis-and-protocols.md). |
+| xAI (Grok) | `xai` | OpenAI-compatible chat completions | Alias: `grok`. Shares the OpenAI chat adapter. |
+
+The native default front door for Claude Code is `fak guard -- claude`, which runs over the `anthropic` wire and uses your logged-in Claude Pro/Max subscription by default, no API key needed. See [Run Claude Code through the fak gateway](../integrations/claude.md).
+
+## Tier 2: Cloud gateways over the OpenAI-compatible wire
+
+Each cloud below serves tokens behind an OpenAI Chat Completions endpoint. You front it with `fak serve --provider openai --base-url <cloud /v1>`, then your agent points at fak instead of the cloud. Every row here is sourced from the "Model backends & gateways" section of the [compatibility matrix](../integrations/compatibility-matrix.md); follow the linked row for the exact upstream base URL and key, which this page does not restate.
+
+| Cloud | How fak fronts it | Custom base URL | Caveat |
+|---|---|---|---|
+| AWS Bedrock | `--provider openai` at the OpenAI-compatible `/openai/v1` surface, or front the native Converse/InvokeModel path | Partial | Base URL is region-templated, not arbitrary; the native path needs AWS SigV4 or a Bedrock bearer key, not a plain endpoint swap. See the [matrix row](../integrations/compatibility-matrix.md) and its [caveat](../integrations/compatibility-matrix.md#caveats-worth-knowing). |
+| Google Vertex AI | `--provider openai` at the OpenAI-compatible Chat Completions route (Gemini / MaaS models) | Partial | Base URL is fully templated by region and project; auth is a short-lived Google OAuth access token, not a static key. Claude on Vertex is the Anthropic Messages wire, not OpenAI. See the [matrix row](../integrations/compatibility-matrix.md) and its [caveat](../integrations/compatibility-matrix.md#caveats-worth-knowing). |
+| Azure OpenAI | `--provider openai` at the Azure endpoint (newer `<endpoint>/openai/v1`) | Yes | Azure dialect; deployment-named paths with an `api-version` query. See the [matrix row](../integrations/compatibility-matrix.md). |
+| OpenRouter | `--provider openai --base-url https://openrouter.ai/api/v1` | Yes | OpenAI Chat Completions with OpenRouter extensions. See the [matrix row](../integrations/compatibility-matrix.md). |
+| Together AI | `--provider openai --base-url https://api.together.xyz/v1` | Yes | OpenAI-compatible chat / completions / embeddings. See the [matrix row](../integrations/compatibility-matrix.md). |
+| Groq | `--provider openai --base-url https://api.groq.com/openai/v1` | Yes | OpenAI Chat Completions. See the [matrix row](../integrations/compatibility-matrix.md). |
+| Fireworks AI | `--provider openai --base-url https://api.fireworks.ai/inference/v1` | Yes | OpenAI Chat Completions. See the [matrix row](../integrations/compatibility-matrix.md). |
+
+Bedrock and Vertex are marked **Partial** because the repoint is templated and the auth is not a plain static key, exactly as the matrix caveats state. The other five expose a custom base URL outright.
+
+If your cloud is not in this table but exposes an OpenAI Chat Completions endpoint, fak fronts it the same way over `--provider openai`. The matrix surveys 44 targets and the rule holds across the field: if your tool or cloud can set a base URL, fak already fronts it.
+
+## How you point fak at a cloud
+
+The pattern mirrors the "Cloud providers" recipe in the [Claude Code guide](../integrations/claude.md): pick the provider wire, set the base URL to the cloud's endpoint, and read the key from an environment variable so the secret is never a command-line argument.
+
+```bash
+# A native provider wire (OpenAI here):
+fak serve \
+  --provider openai \
+  --base-url https://api.openai.com/v1 \
+  --api-key-env OPENAI_API_KEY \
+  --model gpt-4
+
+# Any OpenAI-compatible cloud — same flags, just a different /v1 base URL and key env:
+fak serve \
+  --provider openai \
+  --base-url https://api.groq.com/openai/v1 \
+  --api-key-env GROQ_API_KEY \
+  --model <cloud-model-id>
+```
+
+For a network-facing gateway, add `--require-key-env` for bearer-key auth and tune the timeouts; see [serve config](../serve-config.md).
+
+For a cloud, the win is the governance band in front of the API, not throughput. fak does not make a hosted provider faster. It puts a default-deny capability floor between your agent and the cloud, adjudicates every proposed tool call (allow, deny, repair, quarantine), and can write a hash-chained audit trail of each decision. The KV poison-evictor is a no-op on a proxy seat by design, because the model lives upstream and there is no local KV prefix to drop. See [Run Claude Code through the fak gateway](../integrations/claude.md) for the limits on a proxy seat.
+
+## Related: the supported-things pages
+
+- [What fak supports (hub)](README.md) — the index of every "supported" page
+- [Models](models.md) — in-kernel architectures + any model you front
+- [Features](features.md) — every capability with its shipped / simulated / stub status
+- [APIs, wires & MCP](apis-and-protocols.md) — OpenAI Chat/Responses, Anthropic Messages, Gemini, xAI, MCP, fak-native endpoints
+- [Agent harnesses & frameworks](agent-harnesses.md) — Claude Code, Cursor, Codex, Aider, Cline, Roo, LangChain, LlamaIndex, CrewAI, …
+- [Serving engines](engines.md) — Ollama, vLLM, SGLang, llama.cpp, LM Studio, and the in-kernel reference engine
+
+## Reference (the witnessed sources behind this page)
+
+- [Compatibility matrix](../integrations/compatibility-matrix.md) — 44 sourced harnesses / frameworks / backends / protocols, each with the exact repoint key
+- [Integration index](../integrations/README.md) — the "repoint one base URL" recipe and the 60-second offline proof
+- [Claims ledger](https://github.com/anthony-chaudhary/fak/blob/main/CLAIMS.md) — every capability with one machine-checked tag (shipped / simulated / stub)
+- [Status](https://github.com/anthony-chaudhary/fak/blob/main/STATUS.md) · [CLI reference](../cli-reference.md) · [Hardware matrix](../HARDWARE-MATRIX.md) · [llms.txt](https://github.com/anthony-chaudhary/fak/blob/main/llms.txt)
+
+---
+
+# APIs, wires & MCP
+
+> Source: `docs/supported/apis-and-protocols.md`
+
+---
+title: "APIs, wires, and MCP that fak supports"
+description: "The wire protocols fak speaks: OpenAI Chat Completions, the OpenAI Responses API, Anthropic Messages, Gemini generateContent, and xAI as provider wires; MCP over stdio and HTTP; the fak-native syscall / adjudicate / admit endpoints; plus the honest interop stance on A2A, AG-UI, ACP, and ANP."
+---
+
+# APIs, wires, and MCP that fak supports
+
+This page lists the protocols `fak serve` actually speaks. There are three groups:
+the model wires it speaks (inbound to clients and upstream to providers), the MCP
+and fak-native endpoints it serves, and the wider interop protocols it can or cannot
+sit on. Every row here is grounded in the gateway source and the
+[compatibility matrix](../integrations/compatibility-matrix.md); where the support is
+indirect, the row says so plainly rather than overclaim.
+
+`fak` is the governance and gateway band, not the token engine. It fronts whatever
+serves your tokens and adjudicates every tool call at the boundary. The throughput
+question belongs to the engine; the wire question belongs here.
+
+---
+
+## 1. Model wires fak speaks
+
+`fak serve` exposes three client wires (the surfaces your agent points at) and selects
+an upstream provider wire with `--provider`. A client speaks OpenAI Chat Completions,
+Anthropic Messages, or Gemini `generateContent` to reach fak, and fak then proxies on
+to OpenAI, Anthropic, Gemini, or xAI. The OpenAI Responses wire is upstream-only (no
+matching client endpoint yet), and xAI is reached through fak's OpenAI surface because
+it speaks the same shape.
+
+The provider names and their wire shapes are defined in
+[`internal/agent/adapters.go`](https://github.com/anthony-chaudhary/fak/blob/main/internal/agent/adapters.go);
+the client surfaces are in the gateway route table
+([Gateway API reference](../fak/api-reference.md)).
+
+| Wire | fak surface | `--provider` | Status |
+|---|---|---|---|
+| OpenAI Chat Completions | `POST /v1/chat/completions` (client + upstream) | `openai` | Shipped. The adjudicating chat proxy; the same wire fronts any OpenAI-compatible engine (Ollama, vLLM, SGLang, llama.cpp, LM Studio). |
+| OpenAI Responses API | upstream only (`POST /responses`) | `openai-responses` | Upstream provider wire. fak proxies *to* a Responses upstream but exposes Chat Completions and Messages to clients. A Responses-default client connects by selecting the chat-completions model. |
+| Anthropic Messages | `POST /v1/messages` (client + upstream) | `anthropic` | Shipped. The Claude-Code-facing proxy; `fak guard -- claude` is the one-command front door. Live token streaming on this wire is synthesized from a buffered, already-adjudicated turn (the live-streaming rung is OpenAI-wire today). |
+| Gemini `generateContent` | `POST /v1beta/models/<model>:generateContent` (and `:streamGenerateContent`) (client + upstream) | `gemini` | Shipped (#567, [`internal/gateway/gemini.go`](https://github.com/anthony-chaudhary/fak/blob/main/internal/gateway/gemini.go)). The Gemini-CLI / google-genai-facing proxy: repoint a Gemini-native client's base URL from `generativelanguage.googleapis.com` at the fak host, and every proposed `functionCall` is adjudicated before the client sees it. A `:streamGenerateContent` request synthesizes a well-formed Gemini SSE sequence from the buffered, already-adjudicated turn (the same posture as the Anthropic wire). |
+| xAI (Grok) | upstream only (OpenAI-compatible `/chat/completions`) | `xai` | Upstream provider wire. xAI uses the OpenAI-compatible chat shape, so the same adapter serves it; clients reach it through fak's OpenAI surface. |
+
+`--provider` aliases match the model family, so `gpt` / `chat-completions` /
+`openai-compatible` map to `openai`, `claude` maps to `anthropic`, `google` maps to
+`gemini`, and `grok` maps to `xai`
+([`ParseProvider`](https://github.com/anthony-chaudhary/fak/blob/main/internal/agent/adapters.go)).
+Authentication is wire-correct per provider: a bearer token for the OpenAI wire, an
+`x-api-key` (or an `sk-ant-oat` subscription token sent as a bearer with the OAuth
+beta flag) for Anthropic, and `x-goog-api-key` for Gemini.
+
+The OpenAI surface also carries two deterministic, self-contained helpers documented
+in the [Gateway API reference](../fak/api-reference.md): `POST /v1/embeddings` (a
+feature-hash projection, not a learned model) and `POST /v1/moderations` (a lexical
+baseline, not a learned safety model). Both are honest baselines for tests and cache
+keys, named as such.
+
+Any tool not listed above that lets you set a base URL connects through one of these
+wires. That covers most of the field. Rather than restate the list here, see the
+[compatibility matrix](../integrations/compatibility-matrix.md), which sources 44
+harnesses, frameworks, backends, and protocols, each with the exact repoint key.
+
+---
+
+## 2. MCP and the fak-native endpoints
+
+`fak serve` is also an MCP server. It speaks JSON-RPC 2.0 over two transports:
+stdio (`fak serve --stdio`, newline-delimited frames, no listener and no auth
+surface) and HTTP (`POST /mcp`, one JSON-RPC message per request). The same dispatch
+backs both. MCP clients (Claude Code, Cursor, or any MCP client) use this to ask the
+kernel about a call before running it, run a call through the kernel, or screen a
+result they ran themselves.
+
+A refusal is a value, not an error. A DENY or QUARANTINE rides inside the tool result
+with `isError: false`; a JSON-RPC error is reserved for protocol faults like a bad
+frame or an unknown method. The result envelope and the `SyscallResponse` fields are
+specified in the [MCP tool-result wire](../mcp-tool-result.md).
+
+### Served routes
+
+The principal served routes, from the Claude Code integration guide and the
+[Gateway API reference](../fak/api-reference.md):
+
+| Route | Purpose |
+|---|---|
+| `POST /v1/messages` | Anthropic Messages API (the Claude Code surface) |
+| `POST /v1/chat/completions` | OpenAI-compatible adjudication proxy |
+| `POST /v1beta/models/<model>:generateContent` · `:streamGenerateContent` | Gemini `generateContent` proxy (the Gemini CLI / google-genai surface) |
+| `POST /v1/fak/syscall` | Adjudicate and execute one tool call (dispatch to the registered engine) |
+| `POST /v1/fak/adjudicate` | Get a pre-execution verdict without executing |
+| `POST /v1/fak/admit` | Send a client-executed tool result through the result-side floor |
+| `GET·POST /v1/fak/changes` | Drain the cross-agent "what changed" feed (vDSO coherence) |
+| `GET·POST /v1/fak/events` | Drain the durable decision-journal tail (after a `?since=` cursor) |
+| `POST /v1/fak/revoke` | Refute a poisoned or stale world-state witness fleet-wide |
+| `POST /mcp` | MCP over HTTP (JSON-RPC 2.0) |
+| `GET /v1/models` | Advertise the served model id |
+| `GET /metrics` | Prometheus metrics |
+| `GET /healthz` | Liveness (the only auth-exempt route) |
+
+The reference also documents the additional fak-native routes `/v1/fak/context/change`
+(tombstone a recall page), `/v1/fak/policy/reload`, and `/v1/fak/trace/reset`, plus
+`/v1/messages/count_tokens` and `/debug/vars`.
+
+### The fak_* MCP tools
+
+The five MCP tools your agent calls (the `arguments` object mirrors the matching
+fak-native request DTO), from [`examples/mcp/README.md`](https://github.com/anthony-chaudhary/fak/blob/main/examples/mcp/README.md):
+
+| Tool | What it does | When you call it |
+|---|---|---|
+| `fak_adjudicate` | Verdict only (ALLOW / DENY / TRANSFORM / REQUIRE_WITNESS), no execution. A DENY carries a disposition; a TRANSFORM carries the repaired canonical arguments. | Before running a tool your own client executes (the production path) |
+| `fak_syscall` | Adjudicate and execute through the kernel (dispatch plus context-MMU result admission). Returns the verdict plus the admitted result. | When fak should run the tool for you |
+| `fak_admit` | Submit a result your client executed, to screen it through the result-side stack (context-MMU quarantine plus the IFC taint ledger) before it enters context. | After you run a tool, before you trust its output |
+| `fak_changes` | Drain the cross-agent "what changed" feed (typed mutations and revocations since your cursor). | To re-plan or evict your cache when another agent changed shared data |
+| `fak_revoke` | Refute an external world-state witness found poisoned or stale; every entry admitted under it is evicted fleet-wide. | When you discover a witness you relied on is bad |
+
+A sixth tool, `fak_context_change` (tombstone a recall page), is exposed over the
+`/mcp` HTTP transport and documented in the
+[MCP tool-result wire](../mcp-tool-result.md); the five above are the ones an agent
+reaches for during a normal session.
+
+---
+
+## 3. Interop protocols (the honest grade)
+
+The protocol landscape is wider than the model wire, and the boundaries differ. fak's
+position is consistent: it projects its floor, quarantine, and evidence onto the
+protocol that owns each boundary instead of reimplementing the protocol. Some of these
+are runtime boundaries a gateway can sit on; others are static files or stdio
+transports with nothing live to adjudicate. The grades below mirror the
+[interoperability stance](../integrations/interoperability.md) and the
+[compatibility matrix](../integrations/compatibility-matrix.md) caveats. Do not read a
+"needs an adapter" or "different boundary" row as first-party support.
+
+| Protocol | Boundary it owns | Grade | fak's position |
+|---|---|---|---|
+| MCP | agent ↔ tools/resources | Native / drop-in | fak *is* the stdio server (`fak serve --stdio`) and fronts MCP over HTTP (`POST /mcp`), exposing the `fak_*` adjudication tools. A runtime boundary fak sits on directly. |
+| OpenAI Responses | agent ↔ model | Partial | A runtime boundary. fak proxies *to* a Responses upstream (`--provider openai-responses`) but exposes Chat Completions and Messages to clients; a Responses-default client connects by selecting chat-completions. |
+| A2A (Agent2Agent) | agent ↔ agent | Needs an adapter | A runtime boundary fak does not yet speak natively. It projects a policy-filtered Agent Card from its reviewed method registry; the live HTTP edge is planned, not shipped. |
+| AG-UI | agent ↔ frontend/UI | Different boundary | Standardizes the UI event stream, not the tool-call boundary fak gates. Orthogonal, not blocked. |
+| ACP (BeeAI) | agent ↔ agent | Needs an adapter | Pre-alpha with an unsettled transport. fak would front it through the same registry once it stabilizes. |
+| ANP | agent ↔ agent (decentralized) | Needs an adapter | DID identity plus end-to-end encryption. A transparent middle proxy is structurally impossible, so fak would terminate the channel and hold its own DID. |
+| llms.txt | discovery / answer-engine context | Different boundary | A static Markdown file served at a fixed path, not a runtime wire. fak [ships one](https://github.com/anthony-chaudhary/fak/blob/main/llms.txt); there is nothing live to sit on. |
+
+The agent-to-agent stance has its own design notes, linked from each row in the
+[interoperability stance](../integrations/interoperability.md). The short version: fak
+exposes the three model client wires above (OpenAI, Anthropic, Gemini) directly; the
+remaining gaps are the agent-to-agent protocols (A2A, ACP, ANP), each a tracked
+adapter position rather than a closed door.
+
+---
+
+## Related: the supported-things pages
+
+- [What fak supports (hub)](README.md) — the index of every "supported" page
+- [Models](models.md) — in-kernel architectures + any model you front
+- [Features](features.md) — every capability with its shipped / simulated / stub status
+- [Clouds & hosted providers](clouds.md) — Anthropic, OpenAI, Gemini, xAI, Bedrock, Vertex, Azure, OpenRouter, Together, Groq, Fireworks
+- [Agent harnesses & frameworks](agent-harnesses.md) — Claude Code, Cursor, Codex, Aider, Cline, Roo, LangChain, LlamaIndex, CrewAI, …
+- [Serving engines](engines.md) — Ollama, vLLM, SGLang, llama.cpp, LM Studio, and the in-kernel reference engine
+
+## Reference (the witnessed sources behind this page)
+
+- [Compatibility matrix](../integrations/compatibility-matrix.md) — 44 sourced harnesses / frameworks / backends / protocols, each with the exact repoint key
+- [Integration index](../integrations/README.md) — the "repoint one base URL" recipe and the 60-second offline proof
+- [Claims ledger](https://github.com/anthony-chaudhary/fak/blob/main/CLAIMS.md) — every capability with one machine-checked tag (shipped / simulated / stub)
+- [Status](https://github.com/anthony-chaudhary/fak/blob/main/STATUS.md) · [CLI reference](../cli-reference.md) · [Hardware matrix](../HARDWARE-MATRIX.md) · [llms.txt](https://github.com/anthony-chaudhary/fak/blob/main/llms.txt)
+
+---
+
+# Agent harnesses & frameworks
+
+> Source: `docs/supported/agent-harnesses.md`
+
+---
+title: "Agent harnesses and frameworks fak supports"
+description: "The coding agents, IDEs, and agent frameworks fak fronts by repointing one base URL: Claude Code, Cursor, OpenAI Codex, OpenCode, Aider, Cline, Roo Code, Kilo Code, Goose, Zed, Continue.dev, Qwen Code, plus frameworks like LangChain, LlamaIndex, CrewAI, AutoGen, the OpenAI Agents SDK, Pydantic AI, and the Vercel AI SDK."
+---
+
+# Agent harnesses and frameworks fak supports
+
+`fak serve` speaks the wires your stack already speaks: OpenAI Chat Completions, Anthropic
+Messages, and MCP. So any harness that lets you set a base URL drops the gate in front with
+no code change. You point the tool at `fak`, the kernel adjudicates every tool call the
+agent proposes, and your agent, model, and prompts stay the same.
+
+This page lists the coding agents, IDEs, and frameworks that work this way. Every row is
+drawn from the [compatibility matrix](../integrations/compatibility-matrix.md), which
+surveyed 44 targets and found that **38 of them expose a custom base URL outright** (4 more
+do so partially). The matrix is the master source — it carries the exact repoint key and a
+source link for each row, so this page links there rather than duplicating long config
+strings.
+
+For the copy-paste recipe and the 60-second offline proof, start at the
+[integration index](../integrations/README.md).
+
+---
+
+## First-class guides
+
+These four have a dedicated walkthrough. Each guide names the wire, the repoint key, and a
+worked end-to-end setup.
+
+| Harness | Wire | Repoint key | Guide |
+|---|---|---|---|
+| Claude Code | Anthropic Messages | `ANTHROPIC_BASE_URL` (or `fak guard -- claude`) | [claude.md](../integrations/claude.md) |
+| Cursor | MCP, or OpenAI Chat Completions proxy | MCP server entry, or a custom OpenAI-compatible endpoint | [cursor.md](../integrations/cursor.md) |
+| OpenAI Codex | OpenAI Chat Completions | `OPENAI_BASE_URL` | [openai-codex.md](../integrations/openai-codex.md) |
+| OpenCode | OpenAI Chat Completions | `OPENAI_BASE_URL` (or `fak guard --provider openai -- opencode`) | [claude.md#opencode](../integrations/claude.md#opencode) |
+
+The one-command front door for Claude Code is `fak guard -- claude`: it starts the gateway
+in-process, injects the base URL into the child only, and proxies the real Anthropic API in
+passthrough. OpenCode fronts the same way over `--provider openai`. Both are covered in the
+[Claude Code guide](../integrations/claude.md).
+
+---
+
+## Coding agents and CLIs
+
+Interactive coding agents and CLIs, sourced row-by-row from the matrix. Each speaks a wire
+`fak serve` exposes, so the gate sits in front of whichever model serves the tool. The exact
+env var, flag, or config field for every row is in the
+[compatibility matrix](../integrations/compatibility-matrix.md).
+
+| Harness | Wire | Custom base URL |
+|---|---|---|
+| Aider | OpenAI Chat Completions (and others via LiteLLM); Anthropic Messages for Claude models | Yes |
+| Cline (VS Code) | OpenAI Chat Completions and Anthropic Messages | Yes |
+| Roo Code | OpenAI Chat Completions (OpenAI-native tool-calling); also an Anthropic provider | Yes |
+| Kilo Code | OpenAI Chat Completions (OpenAI Compatible provider) | Yes |
+| Goose (Block) | OpenAI Chat Completions and Anthropic Messages (pluggable provider layer) | Yes |
+| Zed editor | OpenAI Chat Completions (native + `openai_compatible`) and Anthropic Messages | Yes |
+| Continue.dev | OpenAI Chat Completions; also an `anthropic` provider for Claude | Yes |
+| Qwen Code | OpenAI Chat Completions (official OpenAI Node.js SDK) | Yes |
+| Gemini CLI (Google) | Gemini (native Generative Language API) | Partial |
+| OpenHands | Whatever LiteLLM normalizes to (OpenAI, Anthropic, etc.) | Yes |
+| Windsurf (Codeium / Devin Desktop) | Native/proprietary backend (Codeium / Cognition) | No |
+
+Two rows are honestly less than a clean repoint, exactly as the matrix grades them:
+
+- **Gemini CLI — Partial.** `GOOGLE_GEMINI_BASE_URL` repoints the Gemini-protocol endpoint,
+  not an arbitrary OpenAI/Anthropic wire. The dedicated base-URL PR was closed unmerged and
+  the var is undocumented in the official CLI config (it is read by the underlying SDK). See
+  the matrix caveats for the detail.
+- **Windsurf — No first-party path.** The official docs route model access through the
+  Codeium / Cognition backend and document no user-settable OpenAI- or Anthropic-compatible
+  base URL. Third-party proxies exist but are not first-party, so there is no runtime
+  boundary `fak` can sit on through a supported config key.
+
+---
+
+## Agent frameworks and SDKs
+
+Libraries you build agents with. Each repoints its OpenAI-compatible client at the gate;
+several also speak Anthropic or Gemini natively, which `fak serve` can front too. The exact
+constructor arg, env var, or config field for each is in the
+[compatibility matrix](../integrations/compatibility-matrix.md).
+
+| Framework | Wire | Custom base URL |
+|---|---|---|
+| LangChain (`ChatOpenAI`) | OpenAI Chat Completions | Yes |
+| LangGraph | OpenAI Chat Completions (via the underlying LangChain model) | Yes |
+| LlamaIndex | OpenAI Chat Completions | Yes |
+| CrewAI | OpenAI Chat Completions (routed through LiteLLM) | Yes |
+| AutoGen / AG2 | OpenAI Chat Completions | Yes |
+| OpenAI Agents SDK (Python) | OpenAI Responses API (default) / OpenAI Chat Completions | Yes |
+| Pydantic AI | OpenAI Chat Completions / Responses; also native Anthropic, Gemini | Yes |
+| smolagents (HuggingFace) | OpenAI Chat Completions (`OpenAIServerModel`); also LiteLLM, InferenceClient | Yes |
+| Google ADK | Gemini natively; OpenAI Chat Completions and others via the `LiteLlm` wrapper | Yes |
+| AWS Strands Agents | Bedrock Converse natively; OpenAI Chat Completions via `OpenAIModel`; LiteLLM | Yes |
+| Microsoft Semantic Kernel | OpenAI Chat Completions / Azure OpenAI; native Anthropic, Gemini | Partial |
+| Vercel AI SDK | Provider-abstracted; OpenAI and OpenAI-compatible; native Anthropic, Google | Yes |
+| Mastra (TypeScript) | Built on the Vercel AI SDK; OpenAI / OpenAI-compatible plus its own gateways | Yes |
+| DSPy | LiteLLM-backed; OpenAI Chat/Text Completions via `openai/<model>` | Yes |
+
+One row is Partial, as the matrix grades it:
+
+- **Semantic Kernel — Partial.** Python has no first-class `base_url` arg on
+  `OpenAIChatCompletion`; you inject a pre-built `AsyncOpenAI(base_url=...)` via the
+  `async_client` parameter. .NET added an `endpoint` arg later. See the matrix caveats.
+
+For any framework not in the table, the rule still holds: if it lets you set the model's
+base URL, `fak` fronts it via the OpenAI-compatible wire. The
+[universal recipe](../integrations/README.md#dont-see-your-framework-the-universal-recipe)
+in the integration index is the one-paste pattern, and the
+[compatibility matrix](../integrations/compatibility-matrix.md) is the sourced list.
+
+---
+
+## Related: the supported-things pages
+
+- [What fak supports (hub)](README.md) — the index of every "supported" page
+- [Models](models.md) — in-kernel architectures + any model you front
+- [Features](features.md) — every capability with its shipped / simulated / stub status
+- [Clouds & hosted providers](clouds.md) — Anthropic, OpenAI, Gemini, xAI, Bedrock, Vertex, Azure, OpenRouter, Together, Groq, Fireworks
+- [APIs, wires & MCP](apis-and-protocols.md) — OpenAI Chat/Responses, Anthropic Messages, Gemini, xAI, MCP, fak-native endpoints
+- [Serving engines](engines.md) — Ollama, vLLM, SGLang, llama.cpp, LM Studio, and the in-kernel reference engine
+
+## Reference (the witnessed sources behind this page)
+
+- [Compatibility matrix](../integrations/compatibility-matrix.md) — 44 sourced harnesses / frameworks / backends / protocols, each with the exact repoint key
+- [Integration index](../integrations/README.md) — the "repoint one base URL" recipe and the 60-second offline proof
+- [Claims ledger](https://github.com/anthony-chaudhary/fak/blob/main/CLAIMS.md) — every capability with one machine-checked tag (shipped / simulated / stub)
+- [Status](https://github.com/anthony-chaudhary/fak/blob/main/STATUS.md) · [CLI reference](../cli-reference.md) · [Hardware matrix](../HARDWARE-MATRIX.md) · [llms.txt](https://github.com/anthony-chaudhary/fak/blob/main/llms.txt)
+
+---
+
+# Serving engines
+
+> Source: `docs/supported/engines.md`
+
+---
+title: "Model serving engines fak supports"
+description: "The token engines fak serve fronts over the OpenAI-compatible wire — Ollama, vLLM, SGLang, llama.cpp (llama-server), and LM Studio — plus fak's own in-kernel reference engine. fak is the governance and gateway band in front of the engine, not the engine itself."
+---
+
+# Model serving engines fak supports
+
+fak does not generate tokens for production. It fronts an engine that does. The gateway
+speaks the OpenAI-compatible and Anthropic Messages wires, adjudicates every proposed tool
+call, and proxies the request to whatever serves the model.
+
+So "supported engine" has a precise meaning here. An engine is supported when
+
+```bash
+fak serve --provider openai --base-url <engine /v1>
+```
+
+puts the gate in front of it. The engine keeps serving tokens its own way; fak adds the
+capability floor, the result-side quarantine, and the audit trail in front. This page lists
+the local engines that wiring covers, then the one engine fak runs itself — the in-kernel
+reference engine — and finally the catch-all for anything else that speaks the wire.
+
+## 1. Local / self-hosted engines over the OpenAI-compatible wire
+
+These run on your own box and expose an OpenAI-compatible `/v1` surface. You point
+`fak serve --base-url` at the engine, then point your agent at fak. The base URLs below are
+the engine defaults from the [compatibility matrix](../integrations/compatibility-matrix.md)
+and the [Claude Code guide](../integrations/claude.md); swap host and port to match your
+own deployment.
+
+| Engine | Default base URL | fak wiring |
+|---|---|---|
+| [Ollama](https://docs.ollama.com/api/openai-compatibility) | `http://localhost:11434/v1` | `fak serve --provider openai --base-url http://<host>:11434/v1` (host/port via `OLLAMA_HOST`) |
+| [vLLM](https://docs.vllm.ai/en/stable/serving/openai_compatible_server/) | `http://localhost:8000/v1` | `fak serve --provider openai --base-url http://<host>:8000/v1` (server launched with `vllm serve`, host/port via `--host`/`--port`) |
+| [SGLang](https://docs.sglang.ai/backend/openai_api_completions.html) | `http://localhost:30000/v1` | `fak serve --provider openai --base-url http://<host>:30000/v1` (launched via `python3 -m sglang.launch_server`) |
+| [llama.cpp (llama-server)](https://github.com/ggml-org/llama.cpp/blob/master/tools/server/README.md) | `http://localhost:8080/v1` | `fak serve --provider openai --base-url http://<host>:8080/v1` (`llama-server -m model.gguf --host 0.0.0.0 --port 8080`) |
+| [LM Studio](https://lmstudio.ai/docs/developer/openai-compat) | `http://localhost:1234/v1` | `fak serve --provider openai --base-url http://<host>:1234/v1` (start the server in the Developer tab, port configurable in the app) |
+| A local transformers shim (Windows dogfood path) | set by the dogfood launcher | The committed [`dogfood-claude.ps1`](https://github.com/anthony-chaudhary/fak/blob/main/scripts/dogfood-claude.ps1) launcher starts a transformers-backed `local_shim.py` (expected at `experiments/agent-live/local_shim.py`) instead of Ollama, defaulting to `SmolLM2-135M` for CPU-friendly serving. The launcher is committed; the shim helper itself is not. |
+
+Once the engine answers, the wiring is the same for all of them. Verify the upstream with
+`curl http://<host>:<port>/v1/models`, start `fak serve` against it, then check fak's own
+health at `/healthz`. The [Claude Code guide](../integrations/claude.md) has the full
+manual two-terminal walkthrough, including the engine launch commands and the Claude Code
+environment variables; the `dogfood-claude.sh` / `dogfood-claude.ps1` launchers automate
+the same stack with one command.
+
+If the engine needs provider-specific request fields (for example vLLM or SGLang sampling
+knobs), pass them through with `FAK_PROVIDER_EXTRA_BODY_JSON`. The
+[serve config reference](../serve-config.md) covers that plus the auth, policy, and timeout
+knobs you set for a network-facing deploy — a slow local CPU model in particular needs the
+write and planner timeouts raised together.
+
+## 2. The in-kernel reference engine
+
+fak also ships an engine of its own: a pure-Go model runner fused into the kernel. You
+select it with `--engine inkernel`. Instead of proxying to an upstream, an allowed tool
+call is completed by a real greedy decode over a kernel-owned KV cache
+(`model.Session.Generate`), wired in as a `RegisterEngine` backend
+(`internal/modelengine`). [SHIPPED] in the [claims ledger](https://github.com/anthony-chaudhary/fak/blob/main/CLAIMS.md).
+
+What it is for:
+
+- **A correctness reference.** The forward pass is proven token-for-token against a
+  HuggingFace oracle — embedding exact, per-layer cosine 1.000000, final-logits max delta
+  about 4.4e-5. The parallel and batched paths are each bit-identical to the serial
+  reference. [SHIPPED]
+- **A kernel-owned KV cache.** The cache is a Go structure the kernel owns, not an opaque
+  arena inside a separate serving process. That ownership is what makes the
+  addressable-eviction proofs possible: a quarantine verdict on poison bytes evicts that
+  result's K/V span and leaves the cache bit-identical (max delta 0.0) to never having
+  seen it. [SHIPPED]
+- **A real dispatch path with or without a model export.** With no export it lazily builds
+  a deterministic synthetic checkpoint, so the engine runs out of the box. Set
+  `FAK_MODEL_DIR` to a real export to load it through the identical dispatch path. The GGUF
+  / device-residency knobs (`--gguf`, `FAK_Q4K`, `FAK_GPU_BUDGET_MB`, and the rest) live in
+  the [model/compute engine env reference](../model-engine-env.md).
+
+The honest fence: the in-kernel engine is a correctness reference, not a
+production-throughput server. The int8/Q8_0 SIMD lane is an in-flight increment, not yet a
+`[SHIPPED]` row, and the watt source / token-per-watt telemetry is labelled SIMULATED.
+When you need fast production serving, front one of the engines in section 1 instead. For
+the architectures the in-kernel engine runs and which rungs are proven bit-exact, see the
+[Models](models.md) page.
+
+## 3. Any other OpenAI-compatible server
+
+The list in section 1 is not a closed set. The OpenAI-compatible `/v1/chat/completions`
+wire is the field's common denominator, and fak's engine client is base-URL-swappable
+local-or-remote with bounded timeout and backoff. [SHIPPED] So any server that exposes that
+surface is fronted the same way — point `fak serve --provider openai --base-url` at its
+`/v1` and point your agent at fak.
+
+Rather than list engines the repo cannot source, the honest claim is the rule itself: if
+the server speaks the OpenAI-compatible wire, fak fronts it. The
+[compatibility matrix](../integrations/compatibility-matrix.md) is the sourced reference for
+that — its "Model backends & gateways" section carries each engine with its exact base URL
+and a source link, and the [integration index](../integrations/README.md) has the universal
+"repoint one base URL" recipe and a 60-second offline proof.
+
+One thing to keep honest in the comparison: against a fast engine, fak's difference is
+operational surface, not throughput. fak adds the capability floor, the result-side
+quarantine, and the decision journal in front of the tokens; it does not make the engine
+generate them faster.
+
+## Related: the supported-things pages
+
+- [What fak supports (hub)](README.md) — the index of every "supported" page
+- [Models](models.md) — in-kernel architectures + any model you front
+- [Features](features.md) — every capability with its shipped / simulated / stub status
+- [Clouds & hosted providers](clouds.md) — Anthropic, OpenAI, Gemini, xAI, Bedrock, Vertex, Azure, OpenRouter, Together, Groq, Fireworks
+- [APIs, wires & MCP](apis-and-protocols.md) — OpenAI Chat/Responses, Anthropic Messages, Gemini, xAI, MCP, fak-native endpoints
+- [Agent harnesses & frameworks](agent-harnesses.md) — Claude Code, Cursor, Codex, Aider, Cline, Roo, LangChain, LlamaIndex, CrewAI, …
+
+## Reference (the witnessed sources behind this page)
+
+- [Compatibility matrix](../integrations/compatibility-matrix.md) — 44 sourced harnesses / frameworks / backends / protocols, each with the exact repoint key
+- [Integration index](../integrations/README.md) — the "repoint one base URL" recipe and the 60-second offline proof
+- [Claims ledger](https://github.com/anthony-chaudhary/fak/blob/main/CLAIMS.md) — every capability with one machine-checked tag (shipped / simulated / stub)
+- [Status](https://github.com/anthony-chaudhary/fak/blob/main/STATUS.md) · [CLI reference](../cli-reference.md) · [Hardware matrix](../HARDWARE-MATRIX.md) · [llms.txt](https://github.com/anthony-chaudhary/fak/blob/main/llms.txt)
 
 ---
 
@@ -12844,6 +13827,8 @@ date: 2026-06-17
 
 **Short answer:** Appending a tool result to the conversation does *not*, by itself, break the KV cache — prefix caching is built for append-only growth and handles it well. What actually erodes the hit rate in agent loops is (1) **eviction during tool latency** (your cached prefix is thrown out while a tool runs for seconds to minutes) and (2) **head-mutation** — any change ahead of the stable part of the context (summarization, an injected timestamp, a changing tool list, reordering, unstable serialization). A changed tool *result* does not silently serve a stale answer either: the new result tokens are literally different, so the prefix matches only up to that point and the suffix is recomputed. The reason it matters so much more for agents than for chat is the **input:output ratio** — agents re-send a huge transcript to read against a few generated tokens, so the same cache discounts most of the bill.
 
+*For engineers building or operating agent loops (tool-use, multi-turn, long-context) who already know roughly what a KV cache is. By the end you'll know why append-only growth is the easy case, what really erodes the hit rate (latency-eviction and head-mutation), and how to prove where your cache breaks — including a copy-pasteable offline prefix-divergence script.*
+
 ## What is a KV cache, and why is reuse always a prefix?
 
 A transformer caches each token's attention **Key** and **Value** vectors so it never re-reads earlier tokens while decoding. Generation has two phases: **prefill** (process the whole prompt at once, build KV for every token — the expensive part for long contexts) and **decode** (emit one token at a time, each attending over all cached KV).
@@ -12961,7 +13946,7 @@ No — it erodes it a few points (for example, 96.7% to 92.6% as volume grew ~7�
 
 ---
 
-*The mechanism (causal attention, prefix-only reuse, the T²-vs-T stakes) is standard transformer inference. The specific figures — the ~96.7%→92.6% hit-rate erosion, the 239:1 input:output ratio, the 0.3%→87% UUID-to-tail case, and the share-of-spend table — are observed measurements, not illustrative. Diagrams in the companion one-page PDF are schematic.*
+*The mechanism (causal attention, prefix-only reuse, the T²-vs-T stakes) is standard transformer inference. The specific figures — the ~96.7%→92.6% hit-rate erosion, the ~94% cache-read share, the 239:1 input:output ratio, the 0.3%→87% UUID-to-tail case, and the share-of-spend table — are observed measurements, not illustrative. Diagrams in the companion one-page PDF are schematic.*
 
 **Related:** `agentic-serving-related-art.md` (private research companion) — the related-work map (where this mechanism sits vs the 2025–26 agentic-serving frontier, incl. the NVIDIA Dynamo mapping and the cross-agent correctness-gated-invalidation seam) · `FLEET-SWEEP-EXPLAINED.md` (private companion) — the cross-agent shared-cache measurement (the "result cache keyed on hash/mtime" point of §"Same tool call, changed file", measured at fleet scale).
 
@@ -12989,6 +13974,8 @@ date: 2026-06-23
 ---
 
 # The O(1) Context Window: When Sending Less Beats Caching More
+
+*Who this is for: engineers building long agent loops who are deciding between append-only-plus-prefix-cache and reconstructing a bounded context each turn. Prerequisite: a working grasp of prefix caching (see the companion [KV Cache](kv-cache-agentic-context.md) explainer). You'll come away able to say when the O(1) window is cheaper than a warm cache (it wins below the cache's own discount fraction, ~12%) and why it buys observability and deterministic replay — and how to check both against real billed usage with `tools/ctxcost.py`.*
 
 **Short answer:** An append-only agent loop keeps the whole transcript and re-sends it every turn, staying cheap only because the provider's prefix cache serves the repeated prefix at about one-tenth the price of fresh input. The contrarian design keeps the full history in a lossless store and sends a *bounded, freshly-reconstructed* context each turn. Reconstruction mutates the prefix, so you lose the cache hits — but you send dramatically less in the first place. Whether that nets out cheaper has a clean answer, and you can measure it without spending a dollar: a Claude Code transcript already records the *exact billed token accounting* of the append-only-with-cache regime per turn, so you only have to model the reconstruction against ground truth. The crossover turns out to be a near-identity: **the O(1) window wins exactly while it is smaller than the cache's effective input discount.** On real heavy agent sessions that discount is about 12%, so a reconstructed window under roughly 12% of the full context beats even a perfectly warm cache — and at a realistic 4K-token window it is about 4× cheaper than the warm cache and 28× cheaper than no cache, with a bounded prefill tail instead of an unbounded one. But cost is only the affordability proof. The real reason to keep history in a store and reconstruct each turn is **observability and deterministic replay** — every turn's context becomes a reconstructable function of a lossless store, so you can replay any step and see exactly what the model saw, while a cache, by demanding a byte-immutable prefix, structurally forbids the per-turn injection, reordering, and annotation that observability needs.
 
@@ -13418,6 +14405,12 @@ description: "fak delivers the entire governed agent-serving stack (API surface,
 > benchmarks never ask: **when you actually go to serve an agent safely, how many moving
 > parts is that, and who owns them?**
 
+*For platform and infra engineers weighing what to deploy and operate to serve a
+tool-using agent safely. No prior `fak` knowledge needed — only a working sense of how a
+serving engine (vLLM/SGLang) and a reverse proxy fit together. By the end you'll be able to
+name the governance + gateway band a token engine leaves empty, and why `fak` ships that
+whole band as one static Go binary that runs unchanged from laptop to fleet.*
+
 ## Serving an agent safely is a stack, not a component
 
 A model server turns prompts into tokens. That is one band of the problem. Engines
@@ -13592,6 +14585,8 @@ date: 2026-06-23
 ---
 
 # Linting agent code at the kernel
+
+*For anyone wiring a coding-agent loop on fak, or curious how the tool-call gate doubles as a code check. No setup needed to follow along; the worked example runs with a stock `go` toolchain and no model. By the end you'll know what a `codelint` pack is, why it lives off the decide path, and how a broken write gets fixed on the same turn it was made.*
 
 A coding agent's main move is to write a file. It reads some source, decides on an
 edit, and calls `write_file`. Nothing in a normal loop checks that the bytes it just
@@ -14966,6 +15961,8 @@ description: "Explains fak's AWQ support: the 4-bit activation-aware format, ~0.
 
 AWQ (Activation-aware Weight Quantization) is a 4-bit quantization method that achieves near-float performance by using activation-aware calibration to determine optimal per-channel scaling factors.
 
+*Who this is for:* engineers loading or serving AWQ-quantized safetensors with fak, or exporting their own AWQ checkpoints. Prerequisites: familiarity with 4-bit quantization basics (codes, scales, zero-points) and Go for the loader snippets. By the end you'll know fak's on-disk AWQ layout and dequant formula, how to call `model.LoadAWQ`, and how to produce a checkpoint with AutoAWQ.
+
 ## Overview
 
 AWQ reduces model memory footprint to ~0.5625 bytes per parameter (4-bit weights + per-channel scales) compared to:
@@ -15163,6 +16160,12 @@ description: "Explains the internal/compute HAL seam that lets fak's in-kernel f
 > audit→design→adversarial-verify→synthesis pass (CUDA / edge-NPU / dataflow-wafer / WASM
 > lenses); two of those four lenses (CUDA, and Vulkan as the discrete-GPU case) are now
 > built and witnessed on real hardware, not hypothetical.
+
+*Who this is for:* contributors adding or reasoning about a non-CPU backend (CUDA, Vulkan,
+NPU, dataflow, WASM) for fak's in-kernel forward pass. Prerequisites: familiarity with the
+`internal/model` forward pass and Go build tags. By the end you'll understand the seven
+host-CPU assumptions the `internal/compute` HAL neutralizes, how its type contract lets a
+new backend be a *registration* rather than a fork, and where each hardware class plugs in.
 
 ## 1. Why a *seam*, not a *port*
 
@@ -15974,7 +16977,7 @@ Every number on this page obeys the same rules, enforced in CI and in the per-de
 | RadixAttention token speedup | 7.50× | all four models (Q8) | Token count | `92896a4` | Same (`prefill_token_speedup`) |
 | RadixAttention hit rate | 86.7% (FCFS 62.1% → cache-aware) | all four models (Q8) | Cache hits | `92896a4` | Same (100% of optimal) |
 | **README headline: 50-turn × 5-agent reuse win** | **60.3× vs naive · 4.1× vs tuned** | Qwen2.5-1.5B Q8, T=50 A=5 P=2048 | Naive stateless / tuned per-agent KV | `2bbda6f` | `headline-qwen-50x5.json` |
-| **Fleet 5-agent × 200-turn 7B in <10 min — on a Metal forward (MEASURED, M3 Pro)** | **8.2 min (llama.cpp Metal forward + fak's reuse/batching pattern) · 2.5× vs single-stream · ≥30× vs naive. ⚠️ pure-fak OWN forward (pure-Go CPU, Metal-decode lane open) ≈ 22–51 min — over the bar; sub-10-min on fak's own forward needs its GPU/CUDA path** | Qwen2.5-7B Q8, T=200 A=5 P=2048 D=20 R=12, M3 Pro | 5 single-stream sessions / naive re-prefill | _this commit_ | `session/macbook-m3pro-7b-batched-{bench,ctx}.log` (measured 17.41/44/392 t/s) + `fleet-5x200-7b-projection-20260622.json` + `FLEET-5X200-7B-10MIN-RESULTS.md`. Batched ≈ a tuned `llama-server --parallel`; fak's add is per-agent KV ownership + safety floor, not raw t/s |
+| **Fleet 5-agent × 200-turn 7B in <10 min — on a Metal forward (MEASURED, M3 Pro)** | **8.2 min (llama.cpp Metal forward + fak's reuse/batching pattern) · 2.5× vs a tuned single-stream baseline · ≥30× vs naive. ⚠️ pure-fak OWN forward (pure-Go CPU, Metal-decode lane open) ≈ 22–51 min — over the bar; sub-10-min on fak's own forward needs its GPU/CUDA path** | Qwen2.5-7B Q8, T=200 A=5 P=2048 D=20 R=12, M3 Pro | 5 single-stream sessions / naive re-prefill | _this commit_ | `session/macbook-m3pro-7b-batched-{bench,ctx}.log` (measured 17.41/44/392 t/s) + `fleet-5x200-7b-projection-20260622.json` + `FLEET-5X200-7B-10MIN-RESULTS.md`. Batched ≈ a tuned `llama-server --parallel`; fak's add is per-agent KV ownership + safety floor, not raw t/s |
 | **Session value-add (high-T ladder)** | **24.9× → 139.3×** | SmolLM2-135M Q8, T=64 → T=512 | Naive stateless | `92896a4` | `highT-smollm2-135m-*-fresh-20260619.json` |
 | Session value-add (1.5B "realistic model") | 7.2× → 10.0× | Qwen2.5-1.5B Q8, T=8 → T=16 | Naive stateless | `92896a4` | `smoke-qwen2.5-1.5b-T8-16-fresh-20260619.json` |
 | ~~Session value-add 11.2–14.5× (SmolLM2, P=512)~~ | ❌ STALE | SmolLM2-135M Q8 | Naive stateless | `5b0f40d` | superseded — see F1 below |
@@ -15999,6 +17002,8 @@ Every number on this page obeys the same rules, enforced in CI and in the per-de
 | **Syscall boundary tax (M3 Pro, refreshed)** | **~2,849×** in-process vs spawned `fak hook` | in-process adjudication | process-per-decide baseline (n=100) | `bcad56e` | `report.json` + `experiments/mac-m3pro-kernel-20260620/report.json` |
 | **Causal invalidation-on-external-write** | **PASS · max\|Δ\|=0** (1 evicted, sibling warm, re-admit refused) | vDSO `Revoke` + cachemeta external-invalidation | blunt world-flush / stale serve | `0fc39aa` | `experiments/causal-invalidation-20260620/causalbench-witness-20260620.json` |
 | **Ultra-long-context work floor (>100k tokens, EXACT/contention-free)** | **single ~10× · 5-agent fleet ~40×+ vs naive (4.3× vs tuned)** | Qwen2.5-7B geometry, P=100k T=10 C=1/5 D=200 R=500 (arithmetic, no model) | Naive re-prefill (A/C ref) / warm per-agent KV (B/C) | _this commit_ | `session/ultra-long-context-floor-20260622.json` + `ULTRA-LONG-CONTEXT-RESULTS.md`. WORK floor (token = sessionbench `prefillTokens`; FLOP = O(L²)-aware), not a wall-clock; anchor token A/C 62.0× reproduces the committed 50×5 token floor; live wall-clock anchor at >100k is separately gated |
+
+| **Decode vs prefill worker-count scaling (x86_64 32-core, within-run ratio)** | **decode all-cores-default penalty 2.5× (1.5B) → 2.1× (3B) → 1.14× (7B); decode peaks ≤8–16w, prefill scales to all cores** | Qwen2.5-1.5B/3B/7B Q8, x86_64 32-core agent-host (contended) | best worker count vs 32w default — same box, same run | _this commit_ | `experiments/session/worker-scaling-desktop-x86-20260624.json` + `WORKER-SCALING-DESKTOP-X86-20260624.md`. WITHIN-RUN ratio only; absolute tok/s is contended agent-host, NOT comparable to the uncontended M3 Pro rows. CPU-threading analogue of the GPU launch-bound small-model artifact |
 
 > **The model-ladder thesis.** Live wall-clock ratio climbs toward the deterministic
 > 7.50× token-speedup ceiling as per-token compute grows (135M 4.58× → 360M 5.40× →
@@ -17319,6 +18324,13 @@ description: "Explains how a small local model behind the fak kernel matches a h
 *2026-06-17 · fak v0.25.x · status: workflow proven on the smallest models; capability
 ramp is the roadmap.*
 
+*Who this is for:* anyone deciding whether a small local model behind the fak kernel can
+stand in for a hosted frontier model. No setup needed to read it; to reproduce the table
+you'll want the HF cache and the `fak agent` A/B harness (see [Reproduce](#reproduce)). You'll
+leave knowing how the kernel splits a task into three axes — capability, safety, cost — why
+local + kernel already wins safety and cost, and how capability closes as you climb the model-size
+ladder an 8 GB GPU can hold.
+
 ## The pitch
 
 Run a **small open model on basic hardware** (an 8 GB GPU, or even CPU) behind the
@@ -18059,15 +19071,19 @@ The lint witness (unit 96): every line beginning with `- [` carries one and only
 - [SHIPPED] Context-planner candidate INDEX (`internal/ctxplan.Index`): the Postgres index access-path that bounds the planner's per-turn COMPUTE the way the budget bounds its per-turn resident TOKENS. `PlanCells` re-scans all N spans each turn, so cumulative re-planning is Θ(N²) (`scaling.go`'s `PlannerComputeCum`) — the one cost "O(1) resident" never bounded ("unless the candidate set is index-bounded, which would flatten this term"). `Index` maintains an inverted token index (the selective relevance scan), the append-order recency tail, and the durable set, so `Probe(forecast)` returns a candidate set bounded by `MaxCandidates` (default 128) — independent of N — and `Index.PlanCells` scores only that set. Cumulative planning flattens Θ(N²)→Θ(c·N) (`IndexBoundedPlannerCompute`), the compute analogue of `cumCapped`. Honest fences: pruning is a forecast MISS, never a lost fact — a pruned span stays in the lossless store, demand-pageable, and the trust gate still guards it (a sealed span that is probed still scores 0 and is elided sealed); exact set-equality with the full scan is NOT claimed — the full scan can fill leftover budget with low-benefit noise the index declines — but the index never drops an AVAILABLE span the full scan kept (pruning only frees budget). Witness: `go test ./internal/ctxplan` — `TestIndexPlanMatchesFullScan` (a full-scan-selected span the index also probed is kept; the high-value pins + top relevant span always kept; faithful + within budget), `TestProbeIsBoundedIndependentOfN` (probe size stable as N grows 100→5000), `TestInvertedIndexReachesBuriedSpan` (a relevant span 1000 deep, outside any recency window, is still found by CONTENT), `TestPrunedSpanStaysRecoverable`, `TestIndexSealedNeverSelected`, `TestProbeIsDeterministic`, `TestIndexBoundedPlannerComputeFlattensQuadratic`.
 - [SHIPPED] Index maintenance + store-level faithfulness (`ctxplan.Index.SetSealed`/`SetTombstoned`/`Spans`, `ctxplan.StoreAudit`, issues #558/#565): the two rungs that make the candidate index deployable and honesty-complete. (1) **Incremental maintenance** — the live loop maintains ONE index (Add O(tokens)/turn + flag flips), proven STRUCTURALLY IDENTICAL to a fresh `BuildIndex` over the final span set (`reflect.DeepEqual` over the whole index: span table, posting lists, durable set, id index), so the Θ(c·N) compute flatten is real on the loop and not a rebuild-per-turn Θ(N²). The only per-span mutation is a trust/suppression flag (`SetSealed`/`SetTombstoned`), because content is content-addressed/immutable and `Add`/`Spans` clone the one reference field (`Attrs`) so a caller cannot mutate the index's scoring inputs. (2) **Store-level faithfulness** — `StoreAudit` certifies resident∪elided∪pruned partitions the WHOLE store with every pruned span recoverable, lifting `Audit`'s probed-set partition to store scope so "index pruning is a forecast miss, never a lost fact" is a witness, not a comment. Honest fences: the recovery handle is the id, so the witness DETECTS duplicate store ids and refuses to certify (ambiguous handle, fail-closed — no shipped store hits it; `MemStore`/`recall` assign unique ids); the equivalence holds under that unique-id addressing contract. An adversarial review (4 independent reviewers) caught the original id-keyed reasoning vs the package's row-correct accounting and the Attrs aliasing — both fixed before ship. Witness: `go test ./internal/ctxplan` — `TestIncrementalEqualsBatch`, `TestSetTombstonedSuppresses`, `TestSetSealedSuppresses`, `TestAddClonesAttrsDefendsImmutability`, `TestStoreAuditPartitionsAndFaithful`, `TestStoreAuditDetectsCompaction`, `TestStoreAuditDetectsForeignSpan`, `TestStoreAuditRefusesDuplicateStoreIDs`.
 - [SHIPPED] Trajectory forecast AUTHOR — the general preemptive planner rung (issue #556, `ctxplan.Proposer`/`TrajectoryAuthor`): the piece that AUTHORS `Forecast.Intents` from the trajectory itself, closing the "the forecast is authored, not learned" fence (O1-TURN-CONTEXT-PLANNER-2026-06-23.md §6). Before this rung the only forecast authoring was a degenerate single-message heuristic in the agent adapter (`internal/agent/ctxplan_seam.go` — the LAST user message's content words), which sees one turn, lives in the wrong tier, and cannot be reused by the gateway or a demo. `TrajectoryAuthor.Propose(spans)` scans the recent trajectory tail and scores each content token by RECENCY-WEIGHTED RECURRENCE — a token that has appeared recently and repeatedly is the strongest predictor of what the next turns will touch (recurrence/momentum dominates, recency breaks near-ties) — emitting the top-K as the forecast's Intents. It is the PROACTIVE peer of `Forecast.Learn` (the REACTIVE fault→intent revision): Propose seeds the forecast from where the session has been; Learn refines it from where it was wrong. The `Proposer` interface is the one-method seam a MODEL-BACKED predictor satisfies through the same contract (wirescreen RUNG 4: "Seam: ctxplan.Forecast.Intents"), defined now so the model arm slots in without changing the planner. Honest fences: the shipped author is the deterministic, model-free SEED (the heuristicScreener analogue — RUNG 1 shipped its deterministic reference impl first; the model Screener is NEXT); the model-backed proposer is the higher-tier follow-on, gated on the outbound transform seam that does not yet exist on the flagship passthrough (so it cannot yet affect the live wire); it reasons over SAFE span metadata only (role+descriptor — the same vocabulary the planner scores), never sealed bytes; and it is off the live agent loop (the seam keeps its own heuristic; rewiring the seam is a separate follow-on). A MISS costs one demand-page fault, never a lost fact (the store is lossless), so a wrong author degrades efficiency, never correctness. Witness: `go test ./internal/ctxplan` — `TestAuthorDerivesIntentsFromTrajectory` (intents come from the spans' content, not fabricated), `TestAuthorPredictsRecurringTopic` (a token recurring across 3 spans outranks a one-off in the most-recent span — recurrence dominates), `TestAuthorRecencyBreaksNearTies` (equal-recurrence tokens: the more recent ranks higher), `TestAuthorIsDeterministic`, `TestAuthorPreemptsByKeepingPredictedSpanResident` (end-to-end: a trajectory-predicted runbook is pre-materialized resident by the planner under a tight budget — the preemptive property, with no hand-supplied intents), `TestAuthorFailClosedEmptyTrajectory`, `TestAuthorSkipsSealedAndTombstoned` (poison content is never predicted into context), `TestAuthorBoundsIntents`, `TestAuthorCarriesThroughPinsWeightsHorizon`, `TestAuthorSingleSpanPredictsItsTokens`, `TestProposerInterfaceIsSatisfied`.
+- [SHIPPED] Local-model-on-the-wire semantic-screen SPINE — the witnessed-lossy-proposer foundation of the whole wirescreen program (epic #568, rung 1; commit b63264c; `internal/abi/semscreen.go` + `internal/ctxmmu/mmu.go` + `internal/wirescreen/`): a small LOCAL model (or any cheap predicate) is wired as an ADDITIVE, one-sided screen CONSULTED AFTER the context-MMU's deterministic regex floor (`ScreenBytes`), never as the load-bearing answer. Three additive seams: (1) the frozen-ABI-adjacent `abi.SemanticScreen` interface (`ScreenResult`→`ScreenAdvice{Disposition,Reason,Digest,By}`; `RegisterSemanticScreen`/`SemanticScreens()`) with `ScreenQuarantine` WIRED and `ScreenDigest` RESERVED for rung 2 — the interface needs no change when later rungs land, and it is additive to the closed `VerdictKind`/`Reason` freeze; (2) `ctxmmu.MMU.Admit` consults `SemanticScreens()` after `ScreenBytes` and routes a `ScreenQuarantine` through the EXISTING `quarantineResult`, inheriting the CAS-pin + `PageIn`-refused-until-`Clear` witness (a wrong proposal costs one page-fault, never a lost fact), with the new `MMU.Screened()` counter; (3) the `internal/wirescreen` leaf — `Screener` interface, named registry + `Register`/`Active` selected by env `FAK_WIRE_SCREEN`, the `screenAdapter` bridging the selected screener to `abi.SemanticScreen`, the deterministic dependency-free `heuristicScreener` reference impl, and `doc.go`'s 5-rung roadmap. DEFAULT-INERT: an empty `FAK_WIRE_SCREEN` registers NOTHING with the ABI, so `abi.SemanticScreens()` stays empty and the MMU is exactly the v0.1 regex floor at zero added cost. Honest fences: strictly one-sided (a screen may only turn Allow→Quarantine, never weaken a floor); the `heuristicScreener` is the deterministic floor (NOT a model, so no latency gate applies); the model arm (#569, `model_screener.go`, build-tag `fakwiremodel`) is the gated follow-on whose classify latency is UNMEASURED, so its default-on stays BLOCKED until an end-to-end admit-latency number is recorded; and on the flagship `fak guard -- claude` Anthropic passthrough the byte-removal is DEAD (the model reads `req.Raw` verbatim), so the live value there is taint-gate hardening (a quarantine raises the IFC high-water mark `adjudicateProposed` reads) — byte removal reaches the wire only on the non-passthrough re-marshal path. Closes epic #568: all five rungs shipped (rung 2 #570, rung 3 #571, rung 4 #556, rung 5 #572; rung 1's model arm #569). Witness: `go test ./internal/wirescreen ./internal/abi` (`TestDefaultInertRegistersNoABIScreen` — empty `FAK_WIRE_SCREEN` registers nothing; `TestABIGoldenFreeze`; `TestHeuristicScreenerFlagsSemanticInjection`; `TestScreenAdapterQuarantinesViaSelectedScreener`); `FAK_WIRE_SCREEN=heuristic go test ./internal/wirescreen -run TestEndToEndWithHeuristicScreen` proves the end-to-end env→init→adapter→MMU→quarantine path and that `MMU.Screened()` increments only on a one-sided Allow→Quarantine.
 - [SHIPPED] Pre-send PII/secret redaction — the privacy-compressor rung of the local-model-on-the-wire spine (issue #572, wirescreen RUNG 5; `internal/wirescreen/redactor.go`): the deterministic, model-free COMPLIANCE FLOOR that proposes [start,end) byte spans to redact before bytes leave the box, and an `Apply` that replaces each with a `[REDACTED:<kind>]` placeholder while pinning the UNREDACTED original in the shared CAS so an authorized `Restore` returns it byte-exact (the same `abi.PageOut` + `PinResolved` witness `ctxmmu`'s quarantine uses — a wrong proposal costs one demand-page fault, never a lost fact). The reference `piiRedactor` is high-precision regex + Luhn detection (credit cards, US SSNs, AWS/GitHub/Slack/Stripe/Google keys, emails, bearer tokens, PEM private keys), precision-biased so a compliance floor does not break legit content. It is the Screener-STYLE redaction peer of RUNG 1 (a witnessed, one-sided, additive proposer) but emits SPANS rather than a quarantine bit, because a redaction is an in-place rewrite, not a whole-result hold-out. DEFAULT-INERT (`FAK_WIRE_REDACT`) and touches NO ABI seam (registers no SemanticScreen, no capability), so the default binary is unchanged and `TestABIGoldenFreeze` / `TestDefaultInertRegistersNoABIScreen` are unaffected. Honest fences: this is a compliance floor, NOT a token saver (a placeholder can be longer than the secret it scrubs); it is WIRED on the non-passthrough re-marshal path via `agent.RedactOutboundMessages` (called from `prepareUpstream`, `internal/agent/stream.go`, which runs `Apply` over each outbound message's content before the non-passthrough marshal), so the redaction DOES reach the wire there (OpenAI/xAI proxy, mock, local serve); the flagship `fak guard -- claude` Anthropic passthrough still sends `req.Raw` verbatim, so the redaction cannot reach the model on THAT route until the cache-prefix-preserving `req.Raw` transform (#555, ctxplan-owned) lands — that flagship-passthrough arm is the named, #555-gated follow-on, deferred in code + claim. MEASURED pre-send latency (the "measure before default-on" gate): end-to-end `Apply` on a ~480 B body carrying every pattern shape + ordinary prose is ~54 µs/op (classify ~52 µs + ~2 µs CAS witness pin; `BenchmarkApply`/`BenchmarkPropose`, `internal/wirescreen/redactor_bench_test.go`) — orders of magnitude under a turn; the gated model arm's NER-classify latency is UNMEASURED until weights land; the model-backed `Redactor` (native CPU 1-3B span task) is the gated follow-on that needs weights + a measured span latency before default-on — the SAME fence the forecast AUTHOR row above shipped the deterministic seed under. This is the floor for the OUTBOUND surface, not a duplicate of ctxmmu's INBOUND `ScreenBytes` quarantine (which removes a whole secret-bearing RESULT). Witness: `go test ./internal/wirescreen` (`TestPIIRedactor_DetectsSecretsAndPII`, `TestPIIRedactor_HighPrecision`, `TestPropose_CoalescesOverlaps`, `TestApply_RedactsSpansAndPinsOriginal`, `TestApply_NoSpansIsNoOp`, `TestDefaultInert_NoActiveRedactor`, `TestEndToEndWithPIIRedactor`).
 - [SHIPPED] Useful page-out digest — the rung-3 page-out upgrade of the local-model-on-the-wire spine (issue #570, wirescreen RUNG 2; `internal/wirescreen/digester.go` + `internal/ctxmmu/mmu.go`): the RESERVED `abi.ScreenDigest` disposition is now WIRED. `ctxmmu.MMU.Admit` captures a `ScreenDigest` advisory from the screen chain and, on the oversize page-out path, pages the body out to a stub that carries the authored digest INSTEAD of the v0.1 opaque `{_paged,ref,len}` pointer, so the model reads the gist without a demand-page fault. The original is pinned in CAS under the held ledger and a witness `Clear` + `PageIn` restores it BYTE-EXACT — the digest is lossy display, never the witness. The reference `heuristicDigester` is the deterministic, model-free floor (leading-lines truncation to a ~200-token cap), the digest peer of RUNG 1's `heuristicScreener`; the model-backed `Digester` (native CPU 1-3B, decode-bound) is the gated follow-on that needs weights + a measured digest latency before default-on. DEFAULT-INERT (`FAK_WIRE_SCREEN`) and touches NO closed ABI value (`ScreenDisposition` is the OPEN additive enum, not the `VerdictKind` freeze), so `TestABIGoldenFreeze` / `TestDefaultInertRegistersNoABIScreen` are unaffected. Honest fences: a `ScreenDigest` on a NON-oversize body is captured but NOT applied (the full bytes are strictly better than a lossy digest) — the digest only UPGRADES the oversize page-out; the opaque v0.1 pointer is unchanged when no digest is advised; and the digest reaches the model only on the NON-passthrough re-marshal path — on the flagship `fak guard -- claude` Anthropic passthrough the model reads `req.Raw` verbatim, so the digest is dead there until the cache-prefix-preserving `req.Raw` transform (#555, ctxplan-owned) lands. Witness: `go test ./internal/ctxmmu` (`TestAdmitScreenDigestProducesDigestStubAndByteExactRestore`, `TestScreenDigestOnSmallBodyIsAdmittedAsIs`, `TestOpaqueOversizeUnchangedWithoutDigest`); `go test ./internal/wirescreen` (`TestHeuristicDigesterAuthorsLeadingLines`, `TestActiveDigesterInertWithoutEnv`).
+- [SHIPPED] Multi-modal screenshot triage — perceptual-hash frame DEDUP (issue #571, wirescreen RUNG 3; `internal/wirescreen/phash.go`): the buildable arm of the multi-modal triage rung, ZERO model (pure-Go DCT perceptual hash, stdlib only — no vision encoder, no GPU). `phashDigester` decodes a base64/raw/JSON image block, computes a 64-bit DCT perceptual hash, and compares it against a bounded FIFO store of recently-seen frames; on a hit (a near-identical re-send) it authors an "unchanged, see frame#k" dedup POINTER that rides rung 2's `ScreenDigest` -> `ctxmmu.digestToPointer` reversible path — the duplicate pixels page into the SAME CAS and a witness `Clear` + `PageIn` restores them BYTE-EXACT, so a wrong "unchanged" call costs one demand-page fault, never a lost frame. On a miss (a new frame, an undecodable or sub-threshold image) it declines, so the body falls through to today's opaque oversize page-out / allow path — strictly one-sided, never a new refusal. The counter `Dedups()` (peer of `Flags()`/`Digests()`/`ctxmmu.MMU.Digested()`) increments on each collapse. DEFAULT-INERT: selected by `FAK_WIRE_SCREEN=phash` (the env gate) or a host registering `PhashScreen()` (the programmatic opt-in); with neither, `ActiveDigester()` is nil / nothing is registered and the MMU is the bare regex floor. Touches NO closed ABI value (`ScreenDisposition` is the OPEN additive enum) and NO `internal/ctxmmu` code (it reuses #570's machinery verbatim), so `TestABIGoldenFreeze` / `TestDefaultInertRegistersNoABIScreen` are unaffected. Honest fences: it reaches the model only on the NON-passthrough re-marshal path (flagship `fak guard -- claude` sends `req.Raw` verbatim, dead until #555); the OCR/VLM and crop-to-ROI arms are BLOCKED on a vision encoder (`internal/model` is text-only) and filed as future sub-tasks; and the Hamming-dedup threshold is deliberately tight (8/64) so a genuinely different screen is never collapsed. Witness: `go test ./internal/ctxmmu` (`TestPhashDedupCollapseAndByteExactRestore`, `TestPhashDedupNewAndDifferentFramesFallThrough`, `TestPhashDedupReSendNamesSamePriorFrame`); `go test ./internal/wirescreen` (`TestPerceptualHashStableAndSeparating`, `TestPhashDigesterDedupsIdenticalAndDeclinesNew`, `TestDedupsCounterIncrements`, `TestDecodeImageBlockHandlesWireShapes`, `TestPhashScreenBridgesToScreenDigest`).
 - [SHIPPED] Planned view MEASURED over the heaviest REAL session transcripts (issue #559, `cmd/ctxplanbench`): the empirical counterpart to `scaling.go`'s synthetic Params model. Where `scaling.go` takes a mean tokens/turn + a hit rate and COMPUTES the resident curve, `ctxplanbench` ingests the heaviest real Claude Code transcripts through the SHIPPED `cdb`→`recall` ingest (so a result the write-time gate quarantines is sealed here too), bridges each `recall.Page` into a `ctxplan.Span`, and replays the session turn-by-turn through the real planner (`ctxplan.Materialize`) and the real page-fault handler (`ctxplan.DemandPage`). On the 5 heaviest transcripts on this box (715 replayed turns, 8 sealed by the real gate): resident tokens — planned cum 5.24M vs linear 69.81M (**13.3× fewer resident**, peak held to the 8000-token working set except documented pin-overrun turns); fault rate — 31.7% of the 38,068 real lexical back-references were forecast MISSES, and **100% of the 12,083 misses were SERVED** (0 refused, 0 lost — every miss is a recoverable page fault); quality vs compaction — planned kept exact recall 715/715 turns (`Audit.Faithful` witnessed on the real plans) while compaction destroyed facts on 695/715 turns, so the 12,083 served faults are exactly the facts the planned regime recovers that compaction would permanently lose. Honest fences: the forecast is a deliberately cheap recency-window heuristic (last K turn descriptors as intents + durable pins), NOT an oracle — a stronger forecast would lower the 31.7% miss rate, and the point of measuring it is that every miss is served, never lost; the "reference" ground truth is real lexical descriptor overlap (the same extractive signal the planner's relevance uses), not a fabricated oracle; resident units are the bytes/4 proxy (`ctxplan.TokenCost`), so a real BPE tokenizer shifts absolutes, not the regime; and it is off the live path (a bench cmd, not wired into the agent loop). Witness: `go test ./cmd/ctxplanbench` (`TestReplayInvariants`, `TestReplayLooseBudgetHoldsEverything`); `go run ./cmd/ctxplanbench -selfcheck` exit 0; the real-transcript run `go run ./cmd/ctxplanbench -heaviest 5`.
+- [SHIPPED] Planner per-turn COMPUTE flatten MEASURED over the heaviest REAL session transcripts (issues #558/#559, `cmd/ctxplanbench` planning-cost arm): the empirical counterpart to `Index`'s `IndexBoundedPlannerCompute` model (claim above) — measuring the planner's OWN work, not just its resident output. The bench maintains ONE persistent `ctxplan.Index` across the replay (the `SessionPlanner` pattern) and per turn scores the bounded `Index.PlanCells` probe alongside the full-scan `Materialize` plan under the IDENTICAL forecast/budget/`Optimize(ObjGreedy)`, so the only variable is the candidate set (N vs c). On the 5 heaviest transcripts (851 replayed turns, W=8000, default cap c=128/recency 32): the per-turn probe never overran the cap on ANY of 851 turns (the Θ(c·N) bound held), cumulative candidate-scoring **100.1K full-scan vs 68.0K bounded (1.5× less planner work, growing with N** — 43-turn session 1.0× → 342-turn 1.7×, the Θ(N²)→Θ(c·N) shape); resident-token efficiency is PRESERVED under the bounded planner (bounded cum 6.29M vs full-scan 6.36M, within 1.2%; both ~12× below linear 76.97M). Mechanism equivalence witnessed end-to-end: probe=ALL candidates ⇒ **342/342 IDENTICAL plans** on the largest session. Honest fences: at the SHIPPED default width the bounded plan picks a DIFFERENT resident set than the full scan on most long-session turns (plan-agree 208/851) — the divergence is access-path COVERAGE, not the cap (a real session spreads selection-worthy benefit across more spans than recency/relevance/durability reach) — but every divergence is a bounded efficiency miss, NEVER a lost fact (15,530 back-reference faults, 100% served, 0 lost), and the cap/recency are a measured cost↔fidelity dial (recency 32→4096 lifts agreement 39→131/342 at ~equal cost; the named next lever is a utility access path); the flatten is Θ(N) in the horizon (modest at hundreds of turns, pays off on long sessions); resident units are the bytes/4 proxy; hardware-independent exact counts (reproduces on `node-macos-a`); off the live path (a bench cmd; the `SessionPlanner` it mirrors, #558, is the agent-seam home, unit-witnessed by `TestSessionPlannerBoundedMatchesStatelessFullScan`). Witness: `go test ./cmd/ctxplanbench` (`TestReplayInvariants` asserts the bound + plan-agreement at N<cap; `TestPlanningCostFlattenWhenBounded` forces the cap to bite and asserts the Θ(c·N) ceiling + a real flatten); `go run ./cmd/ctxplanbench -selfcheck` exit 0; the real run `-heaviest 5`; `docs/notes/CTXPLAN-PLANNING-COST-FLATTEN-2026-06-23.md`.
 - [SHIPPED] Provable-deletion certificate (`internal/deletioncert`, demo `cmd/deletioncert`): a `DeletionCertificate` binds the evicted span, `EvictedCount`, the byte-exact equivalence (evicted == never-saw, max|Δ|=0), a tamper-evident hash-chained journal anchor, and the trust epoch under one ed25519 signature, and **fails closed** on any forged field, non-zero drift, or absent/rewritten anchor (re-verified live in the demo). Honest fences: it is a **self-signed v1** receipt (it attests the integrity of the recorded facts, not independence from the recorder); `EvictedCount` is a self-report; and the bound `max|Δ|=0` is checked as a **signed string, not re-measured** — the eviction's bit-exactness is proven separately by the KV-quarantine bridge above (synthetic model; HF numerics by the oracle). Witness: `go test ./internal/deletioncert`; `docs/proofs/deletioncert.md`; `go run ./cmd/deletioncert -selfcheck` exit 0.
 - [SHIPPED] The in-kernel model is wired as a `RegisterEngine` backend (`internal/modelengine`, id `inkernel`): an allowed tool call is completed by a real greedy Prefill+Step decode over the kernel-owned KV cache (`model.Session.Generate`) — selectable via `--engine inkernel`, one blank-import in `internal/registrations`. Closes the gap that `internal/agent`/`internal/engine` never imported `internal/model`. Lazily builds a deterministic synthetic checkpoint (runs with no model export); `FAK_MODEL_DIR` loads a real export through the identical dispatch path. Witness: `go test ./internal/modelengine` — a multi-call agent loop on `kernel.New("inkernel")` completes, the kernel's `EngineCalls` tally confirms one engine call per turn, decode is deterministic + input-driven (issue #14).
 - [SHIPPED] Poly-model serving core (`internal/polymodel`, foundation leaf, stdlib-only): the deterministic **"host many models, share the prefill, decode one"** mechanism — a weight-byte-budgeted multi-model residency `Pool` (LRU eviction of the coldest UNPINNED model, all-or-nothing admit), a single **SERIAL** decode-lane scheduler (`Schedule`/`NextDecoder`, the at-most-one-model-decodes-per-step invariant asserted), and the cache-led multi-token-prediction accept core (`AcceptGreedy`: the greedy speculative-decoding accept rule whose KEEP/EVICT counts map 1:1 onto the bit-exact `KVCache.Clone` fork + `KVCache.Evict` rollback; `AcceptTree` the next-gen token-TREE generalization (Medusa/EAGLE-2/SpecInfer: many candidate continuations share a KV prefix, verified in one pass, only the accepted path kept); `PickDrafter` ensemble drafter selection; `EffectiveTokensPerVerify` geometric-series speedup model), plus `CanShare`, the cross-model prefill-share gate (model B reuses model A's prefix KV iff same `Family` + byte-identical `PrefixDigest` ⇒ lossless reuse — the verdict-layer unlock that lifts the cache's exact-ModelID barrier; share DECISION plus the verdict-layer wiring + KVCache.Clone splice, shipped in #534 — `cachemeta.PrefillSharePolicy` lifts the ModelID barrier for a declared-compatible family (opt-in via `WithPrefillShare`, ModelID-axis-only, every other axis still verified), and `internal/spec.CrossModelPrefillShare` / `SplicePrefillShare` is the off-defconfig bridge + bit-exact Clone splice). It encodes the prefill(compute-bound)/decode(HBM-bandwidth-bound) asymmetry that makes "decode one" a hardware consequence, not a compromise. Honest fence: this is the policy/accounting brain ONLY — it runs no model, moves no KV bytes, touches no GPU, and is **off mainline by construction**: the leaf is NOT in the defconfig (`internal/registrations`), so the `fak` binary never links it (only `cmd/polymodelbench` does), and the eventual live-path wiring is gated behind `polymodel.Enabled()` (`FAK_POLYMODEL`, default off); real multi-model residency on a backend remains sequenced (the verify EXECUTION shipped in #533 — single-pass batched + tree-attention masks); served cross-model prefill share — the verdict-layer barrier lift + KVCache.Clone splice — shipped in #534 (`cachemeta.MaterializeVerdict` + `WithPrefillShare`; `internal/spec` bridge) in `docs/serving/polymodel-prefill-share-plan.md` (the frozen ABI MTP envelope — `abi.SpeculationContext`/`TxnID`/`Outcome`/`ProvisionalSink` — has no implementation behind it yet). Witness: `go test ./internal/polymodel` (residency budget-never-exceeded + pinned-never-evicted, serial-lane invariant, accept KEEP+EVICT conservation, drafter selection, speedup monotonicity); `go test ./internal/architest` (tier-1 layering); `go run ./cmd/polymodelbench -selfcheck` exit 0 — hosts 10 synthetic models under a budget, drives the serial decode lane over REAL `model.Session` decode, and proves greedy speculative decode is token-identical to plain greedy even when an adversarial draft forces a rollback every round (the bit-exact `KVCache.Evict` path, exercised 96 spans / vacuity-guarded).
 - [SHIPPED] Single-pass batched + tree-attention verify execution (`internal/model.VerifyForward` + `internal/spec`, rung #533 of epic #529): the throughput half that turns the shipped accept DECISION (`polymodel.AcceptGreedy`/`AcceptTree`) + bit-exact rollback (`spec.Sink`→`KVCache.Evict`) into a real ONE-pass forward over the candidate tokens, instead of one decode step per candidate. `model.VerifyForward(ids, pos, allow)` runs the PreNorm-standard batched forward over P candidates and returns each position's next-token logits: with nil `pos`/nil `allow` it is the CHAIN verify — bit-identical to P sequential `Session.Step` calls (same per-position logits AND the same appended K/Kraw/V/pos in every layer, witnessed `TestVerifyForwardChainMatchesSerial`), so `spec.SpeculativeGreedy` now verifies a kk-token draft in ONE pass instead of kk Steps and stays token-identical to plain greedy; with depth-based `pos` (siblings share `base+depth-1`) and an ancestor `allow` mask it is the TREE verify — tree-attention masks, where each node attends only to its ancestor chain + the committed prefix and never to sibling branches (witnessed `TestVerifyForwardTreeMaskIsolatesBranches`). `spec.VerifyTree`/`SpeculativeTree` drive the tree through `polymodel.AcceptTree` and commit the accepted path (rewind the speculation with one bit-exact `KVCache.Evict`, recommit the accepted chain as one `VerifyForward`); the accepted path is token-identical to plain greedy decode (`TestSpeculativeTreeLosslessGreedyPath`: 21/63 accepted, distractor branches rejected by the mask; `TestSpeculativeTreeLosslessArbitrary`: lossless regardless of drafter quality; `TestVerifyTreeRewindsAndCommitsCleanly`: the target cache is byte-exact to a greedy session after the round). Honest fences: it runs on the CPU synthetic PreNorm regime (no GPU, so no tokens/sec — the speedup is the closed-form `EffectiveTokensPerVerify` arithmetic; a measured number needs the bench harness #535); the chain falls back to sequential `Step`s on a non-batched regime (always correct, just not single-pass); the tree recomputes the accepted path's KV rather than keeping it from the verify pass (a tree-aware KV-compaction primitive is the honest sequenced cost, not a correctness gap); off mainline by construction (NOT in the defconfig, `FAK_POLYMODEL`-gated, default off). Witness: `go test ./internal/model ./internal/spec`.
 - [SHIPPED] Multi-model weight-residency layer (`internal/residency`, mechanism leaf, rung #531): `Manager` lifts the single-`*model.Model` assumption (`modelengine.Default` is one `*model.Model`) — a pool of `*model.Model` under one weight-byte budget with LRU page-out, **reusing `polymodel.Pool` as the budget + eviction policy** and binding each residency descriptor (id / weightBytes / family / prefixDigest / pinned — the cross-model prefill-share and speculation keys) to the real in-kernel weights it governs. The budget test, the LRU victim choice, the pinned-exemption, and the all-or-nothing admit are ALL `polymodel.Pool`'s (Manager delegates, never re-implements), so every polymodel invariant holds here by construction; what this layer adds is the descriptor→weights binding and the page-out hand-back (an evicted resident's `*model.Model` is returned to the caller for release — the signal `polymodel.Pool` cannot give, since it owns no weights). Honest fence: it is the policy + binding layer ONLY — it moves no weight bytes and touches no GPU; the real per-backend weight load/evict (the compute-HAL per-weight budget `internal/compute/vulkan.go`, the process-wide `gpulease`) is the deeper rung a future wiring drives through `Admit`/`Evict`, and `WeightBytes` is caller-supplied at admit (the quantized footprint a real backend reports). It is **off mainline by construction**: NOT in the defconfig (`internal/registrations`) and registers nothing from `init()` (a library type a caller constructs, like `polymodel`), so the `fak` binary never links it; the eventual live-path wiring is gated behind `polymodel.Enabled()` (`FAK_POLYMODEL`, default off). Witness: `go test ./internal/residency` (budget-never-exceeded, LRU evicts coldest-unpinned WITH the weight handle handed back, pinned-never-evicted + ErrPinnedNoRoom fail-closed, all-or-nothing admit, re-admit-is-Touch, explicit Evict hand-back, nil-weights rejected, descriptor round-trip, concurrent-admit budget invariant under `-race`); `go test ./internal/architest` (tier-2 layering — composes model+polymodel under the root ABI).
 - [SHIPPED] RadixAttention parity vs SGLang: SGLang's KV-cache radix attention (radix tree of token sequences + runtime longest-prefix match + LRU-**leaf** eviction + reference counting + cache-aware/DFS scheduling) rebuilt over the kernel-owned KVCache as `internal/radixkv` — a pure CONSUMER of the proven `Clone`/`Evict`/`Prefill` (an edge split truncates a child's cache to the boundary via `Evict`-of-tail, re-RoPEing no survivor). Measured (`cmd/radixbench`): **77.2–88.2 % cache hit rate** across the few-shot / multi-turn-chat / tree-of-thought / agents shapes — inside SGLang's verified **50–99 %** band — with reuse-through-an-edge-split proven **bit-identical to recompute** (max|Δ|=0); cache-aware (≡ DFS) scheduling recovers the interleaved agents workload from **FCFS 62.1 % → 100 % of optimal** (paper: 96 % avg); the radix tree discovers **1.4–2.5×** more reuse than fak's pre-radix declare-one-prefix path; and `EvictNode` adds **policy-driven span eviction** the opportunistic LRU cannot. Witness: `go test ./internal/radixkv` (green); `experiments/radixattention/*.json`; `RADIXATTENTION-RESULTS.md`. SGLang numbers CONFIRMED verbatim vs the NeurIPS 2024 proceedings PDF (arXiv:2312.07104). Prior art line above ("vs RadixAttention's LRU") is now a measured comparison, not a slogan.
+- [SHIPPED] Cross-engine zero-copy KV co-residence SEAM (issue #448, `internal/xenginekv`): the frozen `RegisterRegionBackend`/`RegisterPageOutBackend` ABI seam now carries a real zero-copy backend, so the provable per-agent KV **Evict/Clone** quarantine — previously real only where fak owns the KV (its own in-kernel model, the rows above) and a stub against an engine fak does NOT run — holds against an EXTERNAL engine's KV. An `Arena` is one addressable region where an external engine's KV and fak's tool args/results CO-RESIDE: `Resolve` returns a VIEW that aliases the backing bytes (zero copy, the advertised `Capability "zerocopy"` — witnessed by address AND behaviour: a mutation through the view is seen by a later Resolve, which a copy could not be), `Evict` UNMAPS a span and ZEROES its bytes (after it the handle no longer resolves and a dangling view reads zeros — the cross-engine quarantine, the region-addressed dual of `model.KVCache.Evict`), `Clone` duplicates a resident span to a fresh handle (cross-engine prefix reuse, the dual of `KVCache.Clone`), and `PageOut`/`PageIn` hand the HANDLE across without moving bytes (the zero-movement an external engine's pinned KV pages need). DEFAULT-OFF: inert unless `FAK_XENGINE_KV` opts in (last-wins singleton swap; blob stays the live RegionBackend in every default build, imported first for deterministic order), declared in the `internal/architest` regionBackendRole gate. Honest fence: the arena is an in-process Go `[]byte` STAND-IN for what is, in production, a shared-memory / CUDA-IPC-imported handle onto the external engine's KV pages (`AttachArena` takes exactly such a buffer); the SEAM — the ABI boundary, the zero-copy Resolve, the Evict/Clone region primitives, the `zerocopy` capability, the opt-in backend swap — is shipped and tested, and what remains is the engine-specific TRANSPORT mapping a real vLLM/SGLang KV region into an Arena, which plugs in behind this exact frozen ABI with NO further ABI change (the remaining STUB under "What fak is NOT"). Witness: `go test ./internal/xenginekv` (`TestResolveIsZeroCopyView`, `TestEvictQuarantine`, `TestCloneIndependent`, `TestPageOutZeroMovement`, `TestBackendSeams`, `TestArenaBounded`, `TestInertByDefault`); `go test ./internal/architest` (the regionBackendRole singleton gate); `EXTENDING.md`/`ARCHITECTURE.md` ABI-swap rows.
 
 The int8/Q8_0 SIMD lane (hand-written AVX2/AVX-512 Go assembly, CPUID-gated, scalar fallback; opt-in `Session.Quant`, the f32 path byte-for-byte untouched) is the **active in-flight increment** — witnessed green in the working tree (decode near-parity with llama.cpp Q8_0 at ~7.7 ms/tok, argmax-exact vs the f32 oracle; `TestQuantMatchesF32Logits`, `TestQdot8AsmMatchesScalar`), with numbers in `MODEL-BASELINE-RESULTS.md` Act 3 + `experiments/model-baseline/INT8-RUNG-VERIFICATION.md` (which adds the same-rung HF int8 peer: fak ~2.97× faster than HF dynamic-int8). It is deliberately **not** given a `[SHIPPED]` row here until the implementation lane commits it.
 
@@ -18109,7 +19125,7 @@ Honest ceiling, surfaced not hidden: the *detector* these drivers feed is ~100% 
 
 ## Ultra-long-context work floor (`longctxbench` — per-agent context > 100k tokens)
 
-- [SHIPPED] `longctxbench` / `turnbench.RunLongContextLadder` compute the EXACT, contention-free work floor for the >100k-token regime as closed-form arithmetic from the session shape (P,T,C,D,R) and the model geometry — no model, no decode, no wall-clock — the regime sessionbench cannot run live because the naive arm's O(T²) re-prefill is intractable. Two floors: a TOKEN floor byte-identical to `cmd/sessionbench`'s `prefillTokens` (cross-validation), and an O(L²)-aware FLOP floor that counts the prefill-attention quadratic exactly (`n·prior + n²/2` query-key pairs per append). At the canonical ladder (Qwen2.5-7B geometry): a single >100k session eliminates **~10× vs naive re-prefill** (9.9× token / 9.5× FLOP, B/C ≡ 1.0 — no peer to share with), and a 5-agent fleet each >100k eliminates **~40×+ vs naive · ~4× vs a warm per-agent KV cache** (42.1× token / 34.4× FLOP / 4.3× B/C). A/C is vs the NAIVE re-prefill REFERENCE (not a serving baseline); B/C is vs the warm-cache serving baseline; both reported side by side. Decode-batching is a BANDWIDTH win (proven elsewhere) and is deliberately EXCLUDED so the floor isolates reread-elimination and never double-counts; B/C is therefore LOWER than the live sessionbench B/C by exactly that omitted term. The anchor row's token A/C of 62.0× reproduces the committed `62.0× token floor` for the 50×5 P=2048 session (independent correctness witness). Witness: `go test ./internal/turnbench` (`TestLongContextTokenFloorMatchesSessionbench`, `TestLongContextAntiInflation` — C=1 ⇒ B/C≡1, `TestLongContextHeadlineRegimes`, `TestLongContextBOverCMonotoneInPrefix`, `TestPrefillWorkQuadraticDominates`, `TestLongContextDecodeFLOPsInvariant`, `TestRunLongContextLadderDeterministicAndPicksRegimes`); `ULTRA-LONG-CONTEXT-RESULTS.md`; `experiments/session/ultra-long-context-floor-20260622.json`.
+- [SHIPPED] `longctxbench` / `turnbench.RunLongContextLadder` compute the EXACT, contention-free work floor for the >100k-token regime as closed-form arithmetic from the session shape (P,T,C,D,R) and the model geometry — no model, no decode, no wall-clock — the regime sessionbench cannot run live because the naive arm's O(T²) re-prefill is intractable. Two floors: a TOKEN floor byte-identical to `cmd/sessionbench`'s `prefillTokens` (cross-validation), and an O(L²)-aware FLOP floor that counts the prefill-attention quadratic exactly (`n·prior + n²/2` query-key pairs per append). At the canonical ladder (Qwen2.5-7B geometry): a single >100k session eliminates **~10× vs naive re-prefill · ~1× vs a warm cache** (9.9× token / 9.5× FLOP, B/C ≡ 1.0 — no peer to share with), and a 5-agent fleet each >100k eliminates **~40×+ vs naive · ~4× vs a tuned warm-cache per-agent KV** (42.1× token / 34.4× FLOP / 4.3× B/C). A/C is vs the NAIVE re-prefill REFERENCE (not a serving baseline); B/C is vs the warm-cache serving baseline; both reported side by side. Decode-batching is a BANDWIDTH win (proven elsewhere) and is deliberately EXCLUDED so the floor isolates reread-elimination and never double-counts; B/C is therefore LOWER than the live sessionbench B/C by exactly that omitted term. The anchor row's token A/C of 62.0× reproduces the committed `62.0× token floor` for the 50×5 P=2048 session (independent correctness witness). Witness: `go test ./internal/turnbench` (`TestLongContextTokenFloorMatchesSessionbench`, `TestLongContextAntiInflation` — C=1 ⇒ B/C≡1, `TestLongContextHeadlineRegimes`, `TestLongContextBOverCMonotoneInPrefix`, `TestPrefillWorkQuadraticDominates`, `TestLongContextDecodeFLOPsInvariant`, `TestRunLongContextLadderDeterministicAndPicksRegimes`); `ULTRA-LONG-CONTEXT-RESULTS.md`; `experiments/session/ultra-long-context-floor-20260622.json`.
 - [SIMULATED] The live WALL-CLOCK validation of the floor's ratios at >100k (the floor↔wall-clock loop sessionbench closes at small scale via `-validate`) needs a model resident on a GPU bench node and is not run on the build box; the floor itself is exact arithmetic, but the absolute wall-clock at this regime is a separate, gated measurement. Empirically gated: a 100k prefill in the pure-Go forward is intractable on a CPU host (measured ~120→29 t/s falling with context length on this box; only the llama.cpp Metal lane reaches 100k in bench-tractable time), so the anchor awaits a resident-GPU bench node. The step-by-step procedure to produce the live artifact and promote this line to SHIPPED is `experiments/session/ULTRA-LONG-LIVE-ANCHOR-NOTES.md` (#524). Witness: tracked in #524; the floor's WORK numbers (the SHIPPED line above) stand independently.
 
 ## Engine
@@ -18132,11 +19148,12 @@ Honest ceiling, surfaced not hidden: the *detector* these drivers feed is ~100% 
 - [SHIPPED] RSI-as-ship-gate: keep-or-revert on a non-forgeable keep-bit (strict metric gain AND suite-green AND truth-clean), applied in an isolated git worktree; a run of non-keeps trips an escalation breaker. Witness: `shipgate` tests (units 93–95).
 - [SHIPPED] RSI **closed loop** (`internal/rsiloop`, `cmd/rsiloop`): the true loop over `cmd/rsicycle`'s one-shot. Where `rsicycle` takes the keep-bit's witnesses (before/after/suite-green/truth-clean) AS FLAGS, `rsiloop` DERIVES every one from a real run it performs itself — it forks a detached worktree off `main`, rewrites the tunable (`DefaultCacheSize`), measures a deterministic KPI by running `cmd/kpiprobe` there, takes suite-green from a real build+vet and truth-clean from the worktree's git status, then folds through `shipgate.Evaluate` + `shipgate.Gate`. The baseline is re-measured from `main` every run (it competes against LATEST main, never a stale local number), and KEEPs recursively advance the running bar. `-mode track` records that `main` measurement to an append-only JSONL journal — the ongoing benchmark-against-main series, with vs-last-point regression detection (exit 3 to alert). The loop never mutates `main`: a kept candidate advances only the in-memory baseline + the journal; landing it is a separate gated step (EXTENDING.md "Land it"). Honesty fences: the demo KPI is a real but *deterministic* LRU hit-rate (wall-clock-free, reproduces bit-for-bit cross-platform — a legal witness per `docs/proofs/00-METHOD.md`), the suite-green gate defaults to `go build`+`go vet` (the native Windows-safe proxy; production overrides with the full WSL `go test` suite), and only the demo tunable is wired — a real subsystem optimization plugs in by supplying its own Proposer/Measurer. Witness: `internal/rsiloop` tests (keep/revert/escalate/breaker-reset, the keep-bit needing all three, journal round-trip + track/LastTrack) + `cmd/rsiloop` driver test; see [`docs/rsi-loop.md`](docs/rsi-loop.md).
 - [SHIPPED] Issue-dispatch **closed loop** (`tools/issue_*`, `tools/dispatch_*`): the witness-gated GitHub-issue backlog driver for a plan-empty repo. `issue_lane_router` routes each open `gh` issue to its `dos.toml` lane; `issue_resolve_dispatch` passes the `dispatch_preflight` DoS gate (host clean ∧ account free ∧ live < cap), picks the busiest lane's next fresh issue (anti-churn cooldown + in-flight de-dup), and spawns ONE detached `claude -p` worker rendered by `issue_worker_prompt` with the load-bearing `#N`-in-subject rule; the worker ships a commit citing `#N`; `issue_closure_audit` binds commit→issue and grades through `dos commit-audit` (`TRUE_RESOLVED`/`CLAIMED_CLOSED`/`OPEN_WITNESSED`); the deterministic `issue_resolve_witnessed` close arm re-runs `dos commit-audit` per-SHA at close time (no keep on a self-authored claim) and closes via `gh issue close` citing the SHA. The live-worker population is provably ≤ `cap = min(--max-workers, dos [supervise].target)` (the no-DoS proof), every tool is dry-run until `--live`, and the committed view is `docs/dispatch-status.md` (backlog-by-lane + closure honesty + silent-worker scan), refreshed by the loop. Witness: `tools/issue_lane_router_test.py`, `tools/issue_closure_audit` + `dispatch_status_test.py` (silent-worker classification, render_md tables) and the rest of the dispatch-tool test suite; see [`docs/dispatch-loop.md`](docs/dispatch-loop.md).
+- [SHIPPED] Harvest-corpus **advisory adjudication model** (`internal/advmodel`, #580): the consumer of the `internal/harvest` `LabelRow` corpus — the RSI loop's missing closing edge (the kernel harvested its own verdicts but nothing learned from them). A reproducible training run (`internal/advmodel/train.py`, numpy-only, deterministic) over a frozen, content-bearing corpus (`testdata/corpus.jsonl` — every label re-witnessed against the REAL adjudicator floor by `corpus_test.go`, and harvest-compatible by construction) trains a small logistic-regression classifier over a bag of call tokens and writes a model artifact (`testdata/adjudicator.json`); held-out precision/recall/F1 vs the stock reference (the inert model = the stock SmolLM2 emits no adjudication signal = F1 0) are printed and committed in the artifact `meta` (re-derivable by re-running train.py). The artifact loads as a fail-closed, opt-in `abi.Adjudicator` that may return ONLY `Deny` (corroborate) or `Defer` — never `Allow` — so under the kernel's restrictiveness fold (`kernel.Fold`) it can only tighten a decision, never weaken the deterministic floor; default-off (no self-registration; the frozen ABI is untouched). Witness: `internal/advmodel` tests (fail-closed-never-allows across benign/deny-worthy/inert, fold-safety under `kernel.Fold`, Go↔Python featurizer parity over all 65 corpus rows, corpus-matches-floor). HONEST SCOPE: this is a SMALL classifier (the issue's "small … model"), not a fine-tune of the fused SmolLM2 — see the retained STUB below; the 65-row corpus is a floor-grounded demo, and production accuracy needs a larger real harvest corpus.
 
 ## What fak is NOT
 
-- [STUB] No zero-copy KV co-residence with an *external* serving engine (vLLM owns the KV cache in Python/CUDA; ~120h, out of scope). The `Ref`/`Resolver`/`RegionBackend` seam is frozen so it is a backend swap later, but the shipped path is copy-CAS. (v0.2's in-kernel model owns *its own* KV cache — that is the fusion; sharing one KV arena with a separate serving process is the unbuilt stub.)
-- [STUB] No fine-tuned *syscall/adjudication* model and no AsyncLM interrupt behavior — the typed `LabelRow`/`VerdictKind` training targets exist (and `internal/harvest` now folds the live verdict stream into the corpus), but the model that would emit Verdicts from them is not trained. The model fused in v0.2 is a *stock* SmolLM2 reference forward pass, not a tuned adjudicator.
+- [STUB] No LIVE transport attaching a real *external* serving engine's KV region — vLLM/SGLang owns the KV in Python/CUDA, so importing its pinned pages into an `Arena` over CUDA-IPC / shared memory is the engine-specific transport still to build (`xenginekv.AttachArena` is the buffer entry point it plugs into; in-process the arena is a Go `[]byte` stand-in, not a mapped engine region). The cross-engine zero-copy KV co-residence SEAM itself shipped in #448 (`internal/xenginekv`, the SHIPPED row above) — the frozen `RegisterRegionBackend`/`RegisterPageOutBackend` ABI, the zero-copy Resolve view, and the region-addressed `Evict`/`Clone` quarantine that makes the per-agent KV-fusion hold against an engine fak does not itself run — so this remaining transport is a backend plug-in behind that frozen ABI, no further ABI change. (v0.2's in-kernel model owns *its own* KV cache — that is the original fusion; the seam above is its cross-engine dual.)
+- [STUB] No FINE-TUNED *syscall/adjudication* LLM and no AsyncLM interrupt behavior — the harvest-corpus consumer edge CLOSED (#580) by a SMALL classifier (`internal/advmodel`, the SHIPPED row above): it trains on the floor-labeled corpus and emits a fail-closed advisory signal, but it is a logistic-regression bag-of-tokens model, NOT a fine-tune of the fused SmolLM2 forward pass. The model fused in v0.2 remains a *stock* SmolLM2 reference forward pass; training/grafting a tuned adjudication head onto that fused model (GPU + base weights + multi-hour training) is still unbuilt, as is AsyncLM's interrupt behavior.
 - [SIMULATED] continuous-batching / token-per-watt are read-only SIMULATED telemetry (no watt source on the box). NOTE: "no GPU dependency" is no longer strictly true — the optional `-tags vulkan` AMD backend runs the model on a real RX 7600 — but it is OFF by default; the shipped pure-Go binary still has zero GPU dependency.
 
 ## Prior-art posture
@@ -18154,6 +19171,10 @@ Honest ceiling, surfaced not hidden: the *detector* these drivers feed is ~100% 
 > The deliverable's whole point: this status is **not a self-report**. Every line
 > below is closed by a witness the author did not write — a `go` exit code, a
 > benchmark field, a git tag, or the DOS truth syscall reading git ancestry.
+>
+> **Product standing** (which concepts a person can pick up and use today, and what's
+> next): [`docs/PRODUCT-STATUS.md`](docs/PRODUCT-STATUS.md) — 10 durable products, 100%
+> concept-catalog coverage, cross-checked against the tree by `tools/product_scorecard.py`.
 
 ## 0. 2026-06-18 benchmark/status refresh
 
@@ -18325,9 +19346,12 @@ confirmed it, which is why detection is reported as non-load-bearing.
 > ~100% evadable and FP-prone — so the load-bearing guarantee is the capability floor +
 > containment, not detection (which `normgate` improves but does not make a guarantee).
 
-What is STILL deferred (labeled, not hidden): no zero-copy KV co-residence with an
-*external* serving engine (copy-CAS backend behind the frozen `Ref` seam; the in-kernel
-model owns its own KV); **GPU device compute is now witnessed real** (`cuda` on RTX 4070,
+What is STILL deferred (labeled, not hidden): no LIVE transport mapping an *external*
+serving engine's KV region into the now-shipped cross-engine co-residence arena (the
+zero-copy SEAM itself landed in #448 — `internal/xenginekv`, opt-in `FAK_XENGINE_KV`, the
+region-addressed Evict/Clone quarantine behind the frozen `Ref`/`RegionBackend` seam; what
+remains is the CUDA-IPC / shared-memory import of a real vLLM/SGLang KV region, a backend
+plug-in behind that ABI with no further change); **GPU device compute is now witnessed real** (`cuda` on RTX 4070,
 `vulkan` on a Radeon RX 7600 — argmax-exact, cosine 1.0; `GPU.md`, `VULKAN-AMD-RESULTS.md`),
 while token-per-watt / metrics-service KV telemetry stays SIMULATED (no power meter on the
 box); rung-2/3 probes, decode-time logit-mask, SNAPSHOT/ROLLBACK wrap, and the
@@ -19158,38 +20182,34 @@ title: "fak issue dispatch status: fleet worker and backlog tracker"
 description: "Auto-generated fak issue dispatch status: dispatcher and worker state, open-issue backlog by lane, and closure-honesty rate across the fleet."
 ---
 
-# Issue dispatch status — 2026-06-23
+# Issue dispatch status — 2026-06-21
 
 _Auto-generated by `tools/dispatch_status.py --md`. Do not hand-edit; re-run the tool (or the `FleetDispatchStatusDoc` task) to refresh._
 
 - **dispatcher**: `READY_TO_GROW` (ok)
 - **workers**: 0/2 live (headroom 2); host clean
-- **switcher account**: `smith-netra` (t1, opus), available=True
+- **switcher account**: `gem8-netra` (t1, opus), available=True
 - **always-on watchdog**: installed (Ready)
-- **supervisor**: `PLAN_SURFACE_EMPTY` (alive 0/0)
+- **supervisor**: `PLAN_SURFACE_EMPTY` (alive 0/4)
 
 ## Backlog by lane (issue → lane sync)
 
-Open issues: **382** — routed 350, unrouted 32.
+Open issues: **465** — routed 430, unrouted 35.
 
 | lane | open issues |
 |---|---|
-| docs | 143 |
-| gateway | 28 |
-| model | 28 |
-| compute | 27 |
-| experiments | 26 |
-| tools | 26 |
-| cmd | 14 |
-| examples | 12 |
-| ctxplan | 8 |
-| policy | 7 |
+| docs | 196 |
+| gateway | 48 |
+| model | 40 |
+| compute | 37 |
+| tools | 30 |
+| experiments | 28 |
+| cmd | 17 |
 | engine | 5 |
+| policy | 5 |
+| ci | 4 |
 | bench | 2 |
-| ci | 2 |
-| contextq | 2 |
 | recall | 2 |
-| turnbench | 2 |
 | vdso | 2 |
 | witness | 2 |
 | adjudicator | 1 |
@@ -19202,65 +20222,31 @@ Open issues: **382** — routed 350, unrouted 32.
 | harvest | 1 |
 | kvmmu | 1 |
 | metrics | 1 |
-| modelengine | 1 |
 | steward | 1 |
+| tokenizer | 1 |
 
 ## Closure honesty
 
-`closure_rate` = **0.6395** (TRUE_RESOLVED / (TRUE_RESOLVED + CLAIMED_CLOSED)).
+`closure_rate` = **1.0** (TRUE_RESOLVED / (TRUE_RESOLVED + CLAIMED_CLOSED)).
 
 | bucket | count |
 |---|---|
-| TRUE_RESOLVED | 110 |
-| CLAIMED_CLOSED | 62 |
-| OPEN_WITNESSED (closable now) | 0 |
-
-## Throughput (closed issues per hour)
-
-`verdict` = **BELOW_TARGET** — **5.17/h** completed over the trailing **6h** window (target **10.0/h**). Graded on the *completed* (resolved, not wontfix/dup) rate.
-
-| window | closed | completed | completed /h | loop-closed | loop /h |
-|---|---|---|---|---|---|
-| 1h | 4 | 4 | 4.0 | 4 | 4.0 |
-| 3h | 15 | 15 | 5.0 | 15 | 5.0 |
-| 6h | 31 | 31 | 5.17 | 21 | 3.5 |
-| 12h | 48 | 48 | 4.0 | 29 | 2.42 |
-| 24h | 65 | 65 | 2.71 | 39 | 1.62 |
-
-Loop's last attributed close: 1.9 min ago. A gh-rate far above the loop-rate means humans/peers are draining the backlog, not the dispatcher.
+| TRUE_RESOLVED | 8 |
+| CLAIMED_CLOSED | 0 |
+| OPEN_WITNESSED (closable now) | 1 |
 
 ## Workers that produced nothing
 
-**22** worker(s) exited with a 0-byte log (spawned, committed nothing). The anti-churn cooldown advances the picker past these, so the loop still progresses — but each is worth an operator's eye (often an epic-shaped issue too large to land in one shot).
+**2** worker(s) exited with a 0-byte log (spawned, committed nothing). The anti-churn cooldown advances the picker past these, so the loop still progresses — but each is worth an operator's eye (often an epic-shaped issue too large to land in one shot).
 
 | issue | spawned (utc stamp) | log |
 |---|---|---|
-| #519 | 20260623-135210 | `resolve-519-20260623-135210.log` |
-| #517 | 20260623-134518 | `resolve-517-20260623-134518.log` |
-| #254 | 20260623-133709 | `resolve-254-20260623-133709.log` |
-| #543 | 20260623-133519 | `resolve-543-20260623-133519.log` |
-| #258 | 20260623-132209 | `resolve-258-20260623-132209.log` |
-| #540 | 20260623-131519 | `resolve-540-20260623-131519.log` |
-| #262 | 20260623-130709 | `resolve-262-20260623-130709.log` |
-| #263 | 20260623-125209 | `resolve-263-20260623-125209.log` |
-| #535 | 20260623-120709 | `resolve-535-20260623-120709.log` |
-| #536 | 20260623-115209 | `resolve-536-20260623-115209.log` |
-| #519 | 20260623-113710 | `resolve-519-20260623-113710.log` |
-| #520 | 20260623-112209 | `resolve-520-20260623-112209.log` |
-| #521 | 20260623-110711 | `resolve-521-20260623-110711.log` |
-| #522 | 20260623-105210 | `resolve-522-20260623-105210.log` |
-| #531 | 20260623-103710 | `resolve-531-20260623-103710.log` |
-| #534 | 20260623-100712 | `resolve-534-20260623-100712.log` |
-| #543 | 20260623-095523 | `resolve-543-20260623-095523.log` |
-| #536 | 20260623-094653 | `resolve-536-20260623-094653.log` |
-| #372 | 20260622-182830 | `resolve-372-20260622-182830.log` |
-| #260 | 20260622-181444 | `resolve-260-20260622-181444.log` |
 | #465 | 20260621-232003 | `resolve-465-20260621-232003.log` |
 | #465 | 20260621-225432 | `resolve-465-20260621-225432.log` |
 
 ---
 
-Reasons: safe to spawn: 0/2 live, account 'smith-netra' free; always-on watchdog installed (Ready); 22 worker(s) exited producing nothing (#519, #517, #254, #543, #258, #540) — inspect or re-scope; throughput 5.17/h completed over 6h — below the 10.0/h target
+Reasons: safe to spawn: 0/2 live, account 'gem8-netra' free; always-on watchdog installed (Ready); 2 worker(s) exited producing nothing (#465, #465) — inspect or re-scope
 
 ---
 
@@ -20298,6 +21284,8 @@ description: "Diagnose and fix common fak serve failures, covering port conflict
 
 Common startup failures, port conflicts, and resource issues when running `fak serve` or the in-kernel model engine.
 
+*For operators running `fak serve` who hit a startup or runtime error: match your error message to a symptom below, then run the diagnosis command and apply a fix. Assumes you already have `fak` installed and a model (or `--base-url`) to point it at — if not, start with the [server quickstart](server-quickstart.md).*
+
 ## Table of Contents
 
 - [Port Conflicts](#port-conflicts)
@@ -20742,6 +21730,8 @@ fak serve --gguf models/qwen.gguf --policy-check
 - [README](https://github.com/anthony-chaudhary/fak/blob/main/README.md) - Project overview
 - [Architecture](https://github.com/anthony-chaudhary/fak/blob/main/ARCHITECTURE.md) - System design
 
+Next: once the server is up, [Observability](observability.md) explains the `/metrics` and log surfaces this guide leans on for diagnosis.
+
 ---
 
 ## Still stuck?
@@ -21175,6 +22165,8 @@ description: "The long-form story of fak: a default-deny capability floor plus r
 > - The honest-scope ledger in narrative form.
 >
 > Numbers trace to [`fak/CLAIMS.md`](https://github.com/anthony-chaudhary/fak/blob/main/CLAIMS.md) and the results docs it links.
+
+*Who this is for: buyers, platform teams, and researchers deciding whether fak belongs in their agent stack — no code or install needed, just the README's gist. Read it to understand the two-gate trust model (a default-deny capability floor plus result quarantine), when the prefix-reuse performance win actually pays off, and exactly what is shipped versus simulated versus not-yet-built.*
 
 ## The story that makes it click
 
