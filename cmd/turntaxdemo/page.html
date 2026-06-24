@@ -9,7 +9,7 @@
     --bg:#f6f8fa; --panel:#ffffff; --panel2:#f0f3f6; --line:#d0d7de;
     --txt:#1f2328; --dim:#6e7781; --dim2:#57606a;
     --fak:#1a7f37; --fakg:#116329; --fakbg:#eefbf1; --fakln:#aee2bd;
-    --naive:#bf8700; --naiveg:#7d5300; --naivebg:#fff8e6; --naiveln:#e8d28a;
+    --err:#bf8700;
     --accent:#0969da;
     --tuned:#0d9488; --tunedg:#0b6b61; --tunedbg:#e9faf7; --tunedln:#9fded4;
     --safety:#8250df; --safetyg:#6639ba; --safetybg:#faf5ff; --safetyln:#d8c4f5;
@@ -33,22 +33,21 @@
   button.ghost{background:transparent;color:var(--accent);border:1px solid var(--accent)}
   .cfg{color:var(--dim2);font-size:12px}
 
-  /* the three-agent scoreboard (column counters) */
-  .board{display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin:4px 0 12px}
+  /* the two-agent scoreboard (column counters) */
+  .board{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin:4px 0 12px}
   .score{border-radius:10px;padding:10px 12px;border:1px solid var(--line)}
   .score .hd{font-weight:700;font-size:12.5px}
   .score .desc{font-size:11px;color:var(--dim);margin-top:2px;min-height:28px}
   .score .big{font-size:30px;font-weight:800;font-variant-numeric:tabular-nums;line-height:1.05;margin-top:4px}
-  .score.naive{background:var(--naivebg);border-color:var(--naiveln)} .score.naive .hd,.score.naive .big{color:var(--naiveg)}
   .score.tuned{background:var(--tunedbg);border-color:var(--tunedln)} .score.tuned .hd,.score.tuned .big{color:var(--tunedg)}
   .score.fak{background:var(--fakbg);border-color:var(--fakln)} .score.fak .hd,.score.fak .big{color:var(--fakg)}
   .score .big.flash{animation:pop .35s ease}
   @keyframes pop{0%{transform:scale(1)}40%{transform:scale(1.2)}100%{transform:scale(1)}}
 
-  /* the diff grid: the call | naive | tuned | fak */
-  .grid{display:grid;grid-template-columns:1.35fr 1fr 1fr 1fr;border:1px solid var(--line);border-radius:10px;overflow:hidden}
+  /* the diff grid: the call | tuned | fak */
+  .grid{display:grid;grid-template-columns:1.35fr 1fr 1fr;border:1px solid var(--line);border-radius:10px;overflow:hidden}
   .grid .ghd{background:var(--panel2);padding:8px 12px;font-weight:700;font-size:12px;border-bottom:1px solid var(--line)}
-  .grid .ghd.naive{color:var(--naiveg)} .grid .ghd.tuned{color:var(--tunedg)} .grid .ghd.fak{color:var(--fakg)} .grid .ghd.c{color:var(--dim2)}
+  .grid .ghd.tuned{color:var(--tunedg)} .grid .ghd.fak{color:var(--fakg)} .grid .ghd.c{color:var(--dim2)}
   .cellc{padding:8px 10px;border-bottom:1px solid var(--line);background:var(--panel);font-size:12px;color:var(--dim2)}
   .cellc .tool{font-weight:700;color:var(--txt)} .cellc .what{font-size:11px;color:var(--dim)}
   .cell{padding:8px 10px;border-bottom:1px solid var(--line);border-left:1px solid var(--line);background:var(--panel);font-size:12px;display:flex;align-items:center;gap:7px;opacity:0;transform:translateY(3px);transition:opacity .16s ease, transform .16s ease}
@@ -56,7 +55,6 @@
   .cell .ic{font-size:14px;flex:0 0 auto}
   .cell b{font-weight:700}
   /* flavors */
-  .cell.turnN{background:var(--naivebg)} .cell.turnN b{color:var(--naiveg)}
   .cell.turnT{background:var(--tunedbg)} .cell.turnT b{color:var(--tunedg)}
   .cell.elided{background:repeating-linear-gradient(45deg,#fafbfc,#fafbfc 6px,#f1f4f7 6px,#f1f4f7 12px);color:var(--dim)}
   .cell.shot{background:var(--fakbg)} .cell.shot b{color:var(--fakg)}
@@ -80,7 +78,7 @@
   .tag{font-size:10px;border-radius:4px;padding:1px 6px;border:1px solid var(--line);color:var(--dim2);margin-left:6px}
   @media(max-width:760px){
     .grid{grid-template-columns:1fr}
-    .grid .ghd.naive,.grid .ghd.tuned,.grid .ghd.fak,.grid .ghd.c{display:none}
+    .grid .ghd.tuned,.grid .ghd.fak,.grid .ghd.c{display:none}
     .cell{border-left:0}
     .board{grid-template-columns:1fr}
   }
@@ -96,9 +94,8 @@
   <div class="sub" style="font-size:13px">
     Every time an AI agent uses a tool, little things go wrong: a slightly-wrong argument, asking for the same
     thing twice, or calling a tool it didn't need. The usual fix is to send the whole chat back to the model
-    and try again — a <b>slow, pricey extra round-trip</b>. Below the <b>same</b> tool calls run through three agents,
+    and try again — a <b>slow, pricey extra round-trip</b>. Below the <b>same</b> tool calls run through two agents,
     <b>side by side</b>, one row per call:
-    <br>• <b style="color:var(--naive)">Naive agent</b> — an extra round-trip for <i>every</i> little thing.
     <br>• <b style="color:var(--tuned)">Tuned agent</b> (a 2026 framework) — skips the calls it didn't need, but is <i>still forced</i> into the round-trips to fix a bad argument or a repeated read.
     <br>• <b style="color:var(--fak)">fak</b> — fixes all of it <b>in one shot, inside the call</b>. No extra round-trips, even vs the tuned agent.
     <br>Each cell is a <b>real decision by the fak kernel</b> (no model). <span style="color:var(--safety)">Purple</span> = a separate <b>safety</b> win (blocked poison / dangerous commands), never counted as a turn.
@@ -119,12 +116,6 @@
     </div>
 
     <div class="board">
-      <div class="score naive">
-        <div class="hd">naive SOTA</div>
-        <div class="desc">an extra round-trip for every little thing</div>
-        <div class="big" id="ctNaive">0</div>
-        <div class="desc" style="min-height:0">extra round-trips</div>
-      </div>
       <div class="score tuned">
         <div class="hd">tuned SOTA (2026 framework)</div>
         <div class="desc">elides optional calls; still forced into error-recovery turns</div>
@@ -143,13 +134,11 @@
 
     <div class="grid" id="grid">
       <div class="ghd c">the tool call</div>
-      <div class="ghd naive">naive SOTA</div>
       <div class="ghd tuned">tuned SOTA</div>
       <div class="ghd fak">fak</div>
     </div>
 
     <div class="legend">
-      <span><span class="sw" style="background:var(--naivebg);border-color:var(--naiveln)"></span>naive pays an extra turn</span>
       <span><span class="sw" style="background:var(--tunedbg);border-color:var(--tunedln)"></span>tuned pays a forced turn</span>
       <span><span class="sw" style="background:#f1f4f7;border-style:dashed"></span>tuned elides the optional call</span>
       <span><span class="sw" style="background:var(--fakbg);border-color:var(--fakln)"></span>fak resolved in-syscall (no turn)</span>
@@ -157,8 +146,7 @@
     </div>
 
     <div class="result" id="result">
-      <div>fak skips <span class="big" id="bigTurns">0</span> <span style="color:var(--dim2)">slow model round-trips that the <b style="color:var(--naive)">naive</b> agent makes</span>
-        — and still <span class="big" style="color:var(--tuned)" id="bigTuned">0</span> <span style="color:var(--dim2)">that even a <b style="color:var(--tuned)">tuned</b> agent makes.</span></div>
+      <div>fak skips <span class="big" id="bigTurns">0</span> <span style="color:var(--dim2)">forced model round-trips that even a <b style="color:var(--tuned)">tuned</b> 2026 agent makes.</span></div>
       <div class="grid2">
         <div class="cell2">vs tuned SOTA (forced turns)<b id="rForced">0</b></div>
         <div class="cell2">optional calls a tuned agent skips<b id="rElision">0</b></div>
@@ -220,7 +208,7 @@ async function loadSuites(){
   });
   if(j.suites.length && j.suites.every(s=>!s.present)){
     $('#dirPill').textContent = `no fixtures in ${j.dir} — run \`go run ./cmd/turntaxdemo\` from the repo root`;
-    $('#dirPill').style.color = 'var(--naive)';
+    $('#dirPill').style.color = 'var(--err)';
     $('#runBtn').disabled = true;
   } else {
     $('#dirPill').textContent = `kernel replay · GOMAXPROCS=${j.gomaxprocs}`;
@@ -232,8 +220,8 @@ async function loadSuites(){
 
 function reset(){
   const g=$('#grid');
-  while(g.children.length>4) g.removeChild(g.lastChild); // keep the 4 header cells
-  $('#ctNaive').textContent='0'; $('#ctTuned').textContent='0'; $('#ctFak').textContent='0';
+  while(g.children.length>3) g.removeChild(g.lastChild); // keep the 3 header cells
+  $('#ctTuned').textContent='0'; $('#ctFak').textContent='0';
   $('#result').classList.remove('show'); $('#safetybox').classList.remove('show');
   $('#phase').textContent='';
 }
@@ -242,22 +230,21 @@ function reset(){
 function cells(c){
   const group=CLASS_GROUP[c.class]||'pass';
   if(group==='turn'){
-    // naive always pays; tuned pays only FORCED turns (it elides the optional pure/static).
-    const naive={cls:'turnN', ic:'+', b:'+1 round-trip', s:''};
+    // tuned pays only FORCED turns (it elides the optional pure/static).
     const tuned=c.forced
       ? {cls:'turnT', ic:'+', b:'+1 round-trip', s:'forced'}
       : {cls:'elided', ic:'–', b:'elided', s:'optional call skipped'};
     const fak={cls:'shot', ic:'✓', b:'1-shot', s:'resolved in-syscall'};
-    return {group, naive, tuned, fak, forced:!!c.forced};
+    return {group, tuned, fak, forced:!!c.forced};
   }
   if(group==='safety'){
     const harm = c.class==='deny' ? 'runs the destructive op' : 'admits poison to context';
     const breach={cls:'safety', ic:'⚠', b:'would breach', s:harm};
     const held={cls:'held', ic:'🛡', b:'blocked', s:c.class==='deny'?'refused (deny-as-value)':'paged out (quarantine)'};
-    return {group, naive:breach, tuned:breach, fak:held, forced:false};
+    return {group, tuned:breach, fak:held, forced:false};
   }
   const ran={cls:'ran', ic:'·', b:'ran', s:''};
-  return {group, naive:ran, tuned:ran, fak:ran, forced:false};
+  return {group, tuned:ran, fak:ran, forced:false};
 }
 
 function mkCenter(c){
@@ -277,43 +264,49 @@ function bump(el){ el.classList.remove('flash'); void el.offsetWidth; el.classLi
 async function animate(calls){
   reset();
   const g=$('#grid');
-  let nTurns=0, tTurns=0, nSafety=0;
+  let tTurns=0, nSafety=0;
   for(let i=0;i<calls.length;i++){
     const c=calls[i]; const o=cells(c);
-    const cc=mkCenter(c), nc=mkCell(o.naive), tc=mkCell(o.tuned), fc=mkCell(o.fak);
-    g.appendChild(cc); g.appendChild(nc); g.appendChild(tc); g.appendChild(fc);
+    const cc=mkCenter(c), tc=mkCell(o.tuned), fc=mkCell(o.fak);
+    g.appendChild(cc); g.appendChild(tc); g.appendChild(fc);
     // reveal the whole row in lockstep
-    requestAnimationFrame(()=>{ nc.classList.add('show'); tc.classList.add('show'); fc.classList.add('show'); });
-    if(o.group==='turn'){ nTurns++; $('#ctNaive').textContent=String(nTurns); bump($('#ctNaive'));
+    requestAnimationFrame(()=>{ tc.classList.add('show'); fc.classList.add('show'); });
+    if(o.group==='turn'){
       if(o.forced){ tTurns++; $('#ctTuned').textContent=String(tTurns); bump($('#ctTuned')); } }
     if(o.group==='safety'){ nSafety++; }
     $('#ctFak').textContent='0';
-    $('#phase').textContent=`call ${i+1}/${calls.length} · naive ${nTurns} · tuned ${tTurns} · fak 0`+(nSafety?` · safety ${nSafety} held`:'');
+    $('#phase').textContent=`call ${i+1}/${calls.length} · tuned ${tTurns} · fak 0`+(nSafety?` · safety ${nSafety} held`:'');
     await new Promise(r=>setTimeout(r, 230));
   }
-  $('#phase').textContent=`done · naive ${nTurns} extra round-trips · tuned ${tTurns} forced · fak 0`+(nSafety?` · ${nSafety} attack(s) blocked (separate axis)`:'');
+  $('#phase').textContent=`done · tuned ${tTurns} forced · fak 0`+(nSafety?` · ${nSafety} attack(s) blocked (separate axis)`:'');
 }
 
 function showReport(rep){
   const net=rep.net, tk=rep.turn_kinds, sf=rep.safety_floor;
-  $('#bigTurns').textContent = net.turns_saved;
-  $('#bigTuned').textContent = tk.forced;
-  $('#rForced').textContent = tk.forced;
+  // We compare only to the tuned 2026 SOTA agent, so the headline + savings are the
+  // FORCED subset scoped from the report's per-turn rate (net.<metric>/turns_saved),
+  // mirroring main.go runPrint. Guard turns_saved>0 (0 on the happy-path control).
+  const forced=tk.forced, ts=net.turns_saved;
+  const tunedTokens   = ts>0 ? forced*(net.tokens_saved/ts)     : 0;
+  const tunedDollars  = ts>0 ? forced*(net.dollars_saved/ts)    : 0;
+  const tunedLatencyMs= ts>0 ? forced*(net.latency_saved_ms/ts) : 0;
+  $('#bigTurns').textContent = forced;
+  $('#rForced').textContent = forced;
   $('#rElision').textContent = tk.elision;
-  $('#rTokens').textContent = net.tokens_saved.toLocaleString();
-  $('#rDollars').textContent = '$'+net.dollars_saved.toFixed(5);
-  $('#rLatency').textContent = (net.latency_saved_ms/1000).toFixed(1)+' s';
+  $('#rTokens').textContent = Math.round(tunedTokens).toLocaleString();
+  $('#rDollars').textContent = '$'+tunedDollars.toFixed(5);
+  $('#rLatency').textContent = (tunedLatencyMs/1000).toFixed(1)+' s';
   $('#rServe').textContent = rep.local_serve_ns+' ns';
   $('#result').classList.add('show');
   const inj=sf.injections_admitted_baseline, des=sf.destructive_executed_baseline;
   if(inj>0 || des>0){
     $('#safetyText').innerHTML =
-      `baseline (naive & tuned alike): <b style="color:var(--naive)">${inj}</b> injection(s) admitted to context, <b style="color:var(--naive)">${des}</b> destructive op(s) executed &nbsp;→&nbsp; `+
+      `baseline (a tuned 2026 agent): <b style="color:var(--err)">${inj}</b> injection(s) admitted to context, <b style="color:var(--err)">${des}</b> destructive op(s) executed &nbsp;→&nbsp; `+
       `fak: <b style="color:var(--fak)">0</b> / <b style="color:var(--fak)">0</b> (poison paged out, destructive denied). `+
       `A completion/integrity delta — it holds on <b>any</b> backend. See its own side-by-side: <code>guarddemo</code>.`;
     $('#safetybox').classList.add('show');
   }
-  $('#note').innerHTML = `consistency guard (kernel counters == per-call classification): <b style="color:${rep.consistency_check==='ok'?'var(--fak)':'var(--naive)'}">${rep.consistency_check}</b> · workload hash <code>${rep.provenance.workload_hash}</code> · vDSO ablation: turns saved ON=${rep.net.turns_saved} OFF=${rep.vdso_off_net.turns_saved} (Δ = live VDSOHits ${rep.kernel_counters.vdso_hits})`;
+  $('#note').innerHTML = `consistency guard (kernel counters == per-call classification): <b style="color:${rep.consistency_check==='ok'?'var(--fak)':'var(--err)'}">${rep.consistency_check}</b> · workload hash <code>${rep.provenance.workload_hash}</code> · vDSO ablation: turns saved ON=${rep.net.turns_saved} OFF=${rep.vdso_off_net.turns_saved} (Δ = live VDSOHits ${rep.kernel_counters.vdso_hits})`;
 }
 
 async function run(){

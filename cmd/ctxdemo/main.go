@@ -14,14 +14,12 @@
 //   - the EXACT, timing-free prefill-token work each strategy performs — the
 //     load-independent honest floor. The comparison baseline is a WARM per-agent KV
 //     cache (each agent already reuses its own KV across turns); fak's win is
-//     cross-agent prefix sharing ON TOP of that warm cache. The cold no-cache
-//     re-prefill is a labelled worst-case reference only;
+//     cross-agent prefix sharing ON TOP of that warm cache;
 //   - a per-agent CONTEXT TIMELINE — every agent's turns, with each tool result drawn
 //     to scale, so you can see the long context assemble unevenly; and
 //   - a LIVE wall-clock race of the same session through a real in-kernel model: the
 //     HEADLINE is fak vs the tuned warm-cache baseline (the SOTA serving baseline a
-//     prefix-caching stack gives you), with the cold no-cache loop shown only as a
-//     dim worst-case reference, never the headline.
+//     prefix-caching stack gives you).
 //
 // Same model, same tokens, same answers — the only difference is how much shared
 // setup the system makes the model re-read. That is the whole fak thesis.
@@ -71,12 +69,6 @@ const version = "fak-ctxdemo-v1"
 // "tick" so the page updates ~1×/s instead of freezing on a long load (tens of seconds
 // on the big rungs). Same cadence demorace uses.
 const heartbeat = 700 * time.Millisecond
-
-// projectThreshold: if the cold no-cache (naive) reference arm would re-prefill more
-// than this many tokens, project it from the fak arm's measured throughput instead of
-// running the (multi-minute) live grind. Small scenarios stay fully live so both arms
-// can be watched.
-const projectThreshold = 9000
 
 // ---------------------------------------------------------------------------
 // model ladder (same detection demorace uses; kept local so the demos stay
@@ -204,18 +196,16 @@ type scenarioView struct {
 }
 
 type tokens struct {
-	NaiveReprefill int     `json:"naive_reprefill"`
-	PerAgentKV     int     `json:"per_agent_kv"`
-	FakFused       int     `json:"fak_fused"`
-	NaiveOverFak   float64 `json:"naive_over_fak"`
-	TunedOverFak   float64 `json:"tuned_over_fak"`
-	ResultTokens   int     `json:"result_tokens"`
-	MaxContext     int     `json:"max_context"`
+	PerAgentKV   int     `json:"per_agent_kv"`
+	FakFused     int     `json:"fak_fused"`
+	TunedOverFak float64 `json:"tuned_over_fak"`
+	ResultTokens int     `json:"result_tokens"`
+	MaxContext   int     `json:"max_context"`
 }
 
 func viewOf(s Scenario) scenarioView {
 	w := s.Build()
-	a, b, c := w.prefillTokens()
+	_, b, c := w.prefillTokens()
 	// the longest single context any agent reaches (prefix + its decode + its results)
 	maxCtx := 0
 	for ci := 0; ci < s.Agents; ci++ {
@@ -231,8 +221,8 @@ func viewOf(s Scenario) scenarioView {
 	return scenarioView{
 		Scenario: s, Workload: w,
 		Tokens: tokens{
-			NaiveReprefill: a, PerAgentKV: b, FakFused: c,
-			NaiveOverFak: ratio(a, c), TunedOverFak: ratio(b, c),
+			PerAgentKV: b, FakFused: c,
+			TunedOverFak: ratio(b, c),
 			ResultTokens: w.totalResultTokens(), MaxContext: maxCtx,
 		},
 	}
@@ -304,9 +294,9 @@ func intArg(r *http.Request, k string) int {
 	return v
 }
 
-// handleRace streams a live A-vs-C race for one scenario. The fak arm always runs
-// live; the naive arm runs live for small scenarios and is projected (from the fak
-// arm's measured throughput) for the long ones, so even deep-research stays tractable.
+// handleRace streams a live race of fak vs the tuned warm-cache baseline (SOTA) for
+// one scenario. Both arms run fully live — the warm-cache arm has no quadratic
+// re-prefill, so even deep-research stays tractable.
 func handleRace(w http.ResponseWriter, r *http.Request) {
 	flusher, ok := w.(http.Flusher)
 	if !ok {
@@ -344,8 +334,6 @@ func handleRace(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	naiveMode := r.URL.Query().Get("naive") // "", "live", "project"
-
 	runMu.Lock()
 	defer runMu.Unlock()
 
@@ -353,11 +341,11 @@ func handleRace(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("X-Accel-Buffering", "no")
 	s := &sseWriter{w, flusher}
-	runRace(scn, sp, naiveMode, s.emit)
+	runRace(scn, sp, s.emit)
 }
 
 // runRace is the shared race engine used by the HTTP handler and the headless -race.
-func runRace(scn Scenario, sp spec, naiveMode string, emit emitter) {
+func runRace(scn Scenario, sp spec, emit emitter) {
 	v := viewOf(scn)
 	emit(event{"type": "plan", "view": v, "model": sp.Name})
 
@@ -395,31 +383,13 @@ func runRace(scn Scenario, sp spec, naiveMode string, emit emitter) {
 	emit(event{"type": "done", "arm": "tuned", "total_ms": tuned.totalMS, "decode_ms": tuned.decodeMS,
 		"tokens_prefilled": tuned.prefillTk})
 
-	// naive cold re-prefill arm — worst-case REFERENCE only (live for small scenarios,
-	// projected for the long grind).
-	project := naiveMode == "project"
-	if naiveMode != "live" && v.Tokens.NaiveReprefill > projectThreshold {
-		project = true
-	}
-	var naive armResult
-	emit(event{"type": "start", "arm": "naive", "total_requests": scn.Agents * scn.Turns, "projected": project})
-	if project {
-		emit(event{"type": "info", "msg": fmt.Sprintf("cold no-cache reference arm projected from fak's measured throughput (%d re-prefill tokens would grind for minutes live)", v.Tokens.NaiveReprefill)})
-		naive = projectNaive(w, fak, emit)
-	} else {
-		naive = liveArmNaive(l, w, emit)
-	}
-	emit(event{"type": "done", "arm": "naive", "total_ms": naive.totalMS, "decode_ms": naive.decodeMS,
-		"tokens_prefilled": naive.prefillTk, "projected": project})
-
-	// HEADLINE = tuned/fak: fak vs the tuned warm-cache SOTA baseline. naive_ratio (A/C) is
-	// the worst-case reference, surfaced but never the headline.
+	// HEADLINE = tuned/fak: fak vs the tuned warm-cache SOTA baseline.
 	r := tuned.totalMS / fak.totalMS
 	emit(event{"type": "result",
-		"fak_ms": fak.totalMS, "tuned_ms": tuned.totalMS, "naive_ms": naive.totalMS,
-		"ratio": r, "naive_ratio": naive.totalMS / fak.totalMS,
-		"saved_ms":        tuned.totalMS - fak.totalMS,
-		"naive_projected": project, "scenario": scn.ID, "model": sp.Name,
+		"fak_ms": fak.totalMS, "tuned_ms": tuned.totalMS,
+		"ratio":    r,
+		"saved_ms": tuned.totalMS - fak.totalMS,
+		"scenario": scn.ID, "model": sp.Name,
 		"tokens": v.Tokens})
 }
 
@@ -440,26 +410,25 @@ func printCatalog(asJSON bool) {
 	}
 	fmt.Printf("fak · ctxdemo — exact, timing-free prefill-token work per scenario module\n")
 	fmt.Printf("(baseline = a WARM per-agent KV cache; fak adds cross-agent prefix sharing on top.\n")
-	fmt.Printf(" the cold no-cache column is a worst-case reference only. decode excluded — generated, not re-read)\n\n")
-	fmt.Printf("%-15s %4s %4s %4s  %9s %9s %9s   %8s %7s  %8s\n",
-		"scenario", "C", "T", "P", "no-cache", "warmKV", "fak", "fak-win", "(ref×)", "maxCtx")
-	fmt.Printf("%s\n", strings.Repeat("-", 92))
+	fmt.Printf(" decode excluded — generated, not re-read)\n\n")
+	fmt.Printf("%-15s %4s %4s %4s  %9s %9s   %8s  %8s\n",
+		"scenario", "C", "T", "P", "warmKV", "fak", "fak-win", "maxCtx")
+	fmt.Printf("%s\n", strings.Repeat("-", 80))
 	for _, v := range views {
 		s, t := v.Scenario, v.Tokens
-		fmt.Printf("%-15s %4d %4d %4d  %9d %9d %9d   %7.1f× %6.1f×  %8d\n",
+		fmt.Printf("%-15s %4d %4d %4d  %9d %9d   %7.1f×  %8d\n",
 			s.ID, s.Agents, s.Turns, s.Prefix,
-			t.NaiveReprefill, t.PerAgentKV, t.FakFused, t.TunedOverFak, t.NaiveOverFak, t.MaxContext)
+			t.PerAgentKV, t.FakFused, t.TunedOverFak, t.MaxContext)
 	}
 	fmt.Printf("\nfak-win = WARM per-agent KV cache ÷ fak — fak's cross-agent prefix-sharing win (the honest baseline).\n")
-	fmt.Printf("(ref×)  = cold no-cache re-prefill ÷ fak — a worst-case reference, NOT a serving baseline.\n")
 }
 
 // ---------------------------------------------------------------------------
 // -bars: the reuse axis as a SIDE-BY-SIDE bar chart — the 30-second point with
 // zero setup. The token counts are exact and timing-free (no model), so each
-// scenario's three bars (cold no-cache / tuned warm-cache / fak) are drawn to
-// scale and the headline ratio is the honest fak-vs-tuned win. (The terminal twin
-// of cmd/guarddemo -print and cmd/turntaxdemo -print, for the reuse axis.)
+// scenario's two bars (tuned warm-cache / fak) are drawn to scale and the headline
+// ratio is the honest fak-vs-tuned win. (The terminal twin of cmd/guarddemo -print
+// and cmd/turntaxdemo -print, for the reuse axis.)
 // ---------------------------------------------------------------------------
 
 type barPalette struct{ red, amber, green, dim, bold, reset string }
@@ -537,10 +506,7 @@ func printBars(scenarioID string) int {
 	for _, s := range scens {
 		v := viewOf(s)
 		t := v.Tokens
-		max := t.NaiveReprefill
-		if t.PerAgentKV > max {
-			max = t.PerAgentKV
-		}
+		max := t.PerAgentKV
 		if t.FakFused > max {
 			max = t.FakFused
 		}
@@ -553,12 +519,11 @@ func printBars(scenarioID string) int {
 				p.paint(color, padTo(bar(n, max, width), width)),
 				p.paint(color, commaInt(n)))
 		}
-		row(p.red, "cold no-cache (reference)", t.NaiveReprefill)
 		row(p.amber, "tuned warm-cache (SOTA)", t.PerAgentKV)
 		row(p.green, "fak (cross-agent reuse)", t.FakFused)
 		fmt.Printf("    %s\n", p.paint(p.dim, fmt.Sprintf(
-			"→ fak makes the model re-read %.1f× fewer tokens than even a tuned warm-cache stack (%.1f× fewer than the cold no-cache loop — worst-case reference).",
-			t.TunedOverFak, t.NaiveOverFak)))
+			"→ fak makes the model re-read %.1f× fewer tokens than even a tuned warm-cache stack.",
+			t.TunedOverFak)))
 	}
 	fmt.Println()
 	return 0
@@ -606,7 +571,6 @@ func main() {
 	bars := flag.Bool("bars", false, "headless: render the prefill-token reuse comparison as a SIDE-BY-SIDE bar chart (no model, no server) and exit. The 30-second point with zero setup; honors NO_COLOR. -scenario picks one (default: all).")
 	scenario := flag.String("scenario", "", "with -bars, render just this scenario id (e.g. deep-research); empty = all")
 	race := flag.String("race", "", "headless: run a live race for this scenario id and exit (needs a model on disk)")
-	naive := flag.String("naive", "", "race naive arm mode: live | project (default: auto — live when small, projected when the grind would be minutes)")
 	P := flag.Int("P", 0, "override prefix tokens (0 = scenario default)")
 	C := flag.Int("C", 0, "override agent count")
 	T := flag.Int("T", 0, "override turn count")
@@ -649,7 +613,7 @@ func main() {
 			}
 		}
 		t0 := time.Now()
-		runRace(scn, sp, *naive, emit)
+		runRace(scn, sp, emit)
 		fmt.Fprintf(os.Stderr, "race wall-clock: %.1fs (GOMAXPROCS=%d)\n", time.Since(t0).Seconds(), gomax)
 		return
 	}

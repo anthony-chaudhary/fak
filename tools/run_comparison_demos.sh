@@ -12,7 +12,7 @@
 #     efficiency  cmd/turntaxdemo -print   a tuned 2026 SOTA agent's forced round-trips
 #                                         vs fak's flat 0
 #     reuse       cmd/ctxdemo    -bars     prefill tokens the model must re-read:
-#                                         cold no-cache vs tuned warm-cache vs fak
+#                                         tuned warm-cache vs fak
 #     tokens      cmd/tokendemo  -print   two meters: model-context tokens kept OUT
 #                                         (a prefiltered /bad call) + tool round-trips
 #                                         collapsed (a re-read served from cache)
@@ -84,7 +84,7 @@ if [ "$QUIET" -eq 0 ]; then
 	echo "### 2/4 · EFFICIENCY — a tuned SOTA agent's wasted turns vs fak #####"
 	show go run ./cmd/turntaxdemo -print
 	echo
-	echo "### 3/4 · REUSE — tokens the model must re-read (cold/warm/fak) #####"
+	echo "### 3/4 · REUSE — tokens the model must re-read (warm/fak) #####"
 	show go run ./cmd/ctxdemo -bars
 	echo
 	echo "### 4/4 · TOKENS — model-context kept out + tool round-trips collapsed ##"

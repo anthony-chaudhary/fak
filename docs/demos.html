@@ -180,9 +180,8 @@
       <h3>🧩 Multi-agent context reuse</h3>
       <p>The fleet thesis made visible: a shared prefix prefilled <em>once</em> and cloned into N agents,
       with a per-agent timeline showing each tool result drawn to scale as the context grows unevenly.
-      Pick a scenario, read the exact prefill-token work each strategy does (warm KV vs fak, with cold
-      re-prefill as a worst-case reference), then run the live race — fak vs the warm-cache baseline —
-      through the real in-kernel model.</p>
+      Pick a scenario, read the exact prefill-token work each strategy does (warm KV vs fak), then run
+      the live race — fak vs the warm-cache baseline — through the real in-kernel model.</p>
       <span class="go">Open the reuse proof →</span>
     </a>
 
@@ -193,9 +192,8 @@
       <p>A head-to-head live race over one 25-request multi-agent session. The headline is fak vs a
       <em>tuned warm-cache baseline</em> — the per-agent KV / prefix-caching stack vLLM · SGLang · provider
       prompt-caching give you: it caches the prefix once per agent and ingests only new tokens. fak prefills
-      the shared prefix once for the whole fleet, clones it into the agents, and batches decode. The cold
-      re-prefill loop runs dim alongside, as a worst-case reference only. Same model, same tokens, same
-      answers. Then build the reuse curve across the model ladder.</p>
+      the shared prefix once for the whole fleet, clones it into the agents, and batches decode. Same
+      model, same tokens, same answers. Then build the reuse curve across the model ladder.</p>
       <span class="go">Run the live race →</span>
     </a>
 
@@ -251,7 +249,7 @@
   <span class="dim">. ran</span>                                 book_flight             <span class="dim">. ran</span>
   ────────────────────────────────────  ──────────────────────  ──────────────────────────────
   <span class="warn">tuned SOTA agent: 5 forced round-trips</span>                        <span class="good">fak: 0 extra round-trips</span>
-  <span class="dim">vs even a TUNED 2026 agent, fak deletes 5 forced round-trips ≈ 7.5s and $0.0270/run (vs a naive loop, 9).</span></pre>
+  <span class="dim">vs even a TUNED 2026 agent, fak deletes 5 forced round-trips ≈ 7.5s and $0.0270 at hosted-flash rates (1.5s/turn).</span></pre>
     </div>
 
     <div class="diffwrap">
@@ -260,10 +258,9 @@
   prefill tokens the model must RE-READ per session — lower is better (decode excluded)
 
   deep-research  (C=4 agents · T=5 turns · P=1536 prefix · maxCtx=2,642)
-    <span class="bad">cold no-cache (reference)   ██████████████████████████████████████████  40,188</span>
-    <span class="warn">tuned warm-cache (SOTA)     ██████████                                  9,358</span>
-    <span class="good">fak (cross-agent reuse)     █████                                       4,750</span>
-    <span class="dim">→ fak makes the model re-read 2.0× fewer tokens than even a tuned warm-cache stack (8.5× fewer than cold).</span></pre>
+    <span class="warn">tuned warm-cache (SOTA)     ██████████████████████████████████████████  9,358</span>
+    <span class="good">fak (cross-agent reuse)     █████████████████████                       4,750</span>
+    <span class="dim">→ fak makes the model re-read 2.0× fewer tokens than even a tuned warm-cache stack.</span></pre>
     </div>
 
     <p class="runall">

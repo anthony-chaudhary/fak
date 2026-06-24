@@ -39,8 +39,7 @@ type Scenario struct {
 //	short prefix · many agents · few turns      → reuse is mostly cross-agent
 //	long prefix · few agents · many big results → reuse is mostly the turn tax
 //
-// All sizes are chosen so the fak arm runs live in a minute-ish on the 135M reference
-// (the naive arm is the multi-minute grind — that gap is the point; see arms.go).
+// All sizes are chosen so the fak arm runs live in a minute-ish on the 135M reference.
 func catalog() []Scenario {
 	return []Scenario{
 		{
@@ -64,7 +63,7 @@ func catalog() []Scenario {
 		},
 		{
 			ID: "deep-research", Label: "deep research — long context",
-			Desc:   "Research agents with a large tool-schema prefix that fetch and summarize the web. Big, growing results push every agent into LONG CONTEXT — exactly where naive re-prefill is quadratically expensive and reuse saves the most.",
+			Desc:   "Research agents with a large tool-schema prefix that fetch and summarize the web. Big, growing results push every agent into LONG CONTEXT — exactly where re-prefilling the growing context is quadratically expensive and reuse saves the most.",
 			Prefix: 1536, Agents: 4, Turns: 5, Decode: 32, Seed: 0x4EE7,
 			Tools: []Tool{
 				{Name: "web_search", MinTok: 64, MaxTok: 160},
@@ -85,7 +84,7 @@ func catalog() []Scenario {
 		},
 		{
 			ID: "fleet-5x50", Label: "FLEET — 5 agents × 50 turns (the headline fleet shape)",
-			Desc:   "The fleet-scale shape: 5 agents sharing one org prefix, each running 50 turns with a different-sized tool result every turn. Both reuse levers stack — one shared prefix across all five agents (cross-agent) AND incremental result ingestion instead of re-prefilling the whole growing context every turn (the turn tax). At 250 total requests this is where the naive re-prefill bill is largest and the kernel's win is biggest.",
+			Desc:   "The fleet-scale shape: 5 agents sharing one org prefix, each running 50 turns with a different-sized tool result every turn. Both reuse levers stack — one shared prefix across all five agents (cross-agent) AND incremental result ingestion instead of re-prefilling the whole growing context every turn (the turn tax). At 250 total requests this is where the re-prefill bill is largest and the kernel's win is biggest.",
 			Prefix: 1024, Agents: 5, Turns: 50, Decode: 24, Seed: 0xF1EE7_5050,
 			Tools: []Tool{
 				{Name: "kb_lookup", MinTok: 16, MaxTok: 40},
@@ -201,8 +200,8 @@ func (w Workload) maxAgentTail() int {
 // the work-elimination ratio cannot drift with machine load — this is the honest
 // floor the live wall-clock race is measured against.
 //
-//	a — NAIVE (stateless re-prefill): re-prefill the WHOLE growing context every
-//	    turn, every agent. The context at the start of turn t already contains the
+//	a — STATELESS re-prefill: re-prefill the WHOLE growing context every turn,
+//	    every agent. The context at the start of turn t already contains the
 //	    prefix plus everything generated and ingested in prior turns, so prior
 //	    decode tokens are paid for again and again. Quadratic in T, linear in C.
 //	b — PER-AGENT KV (the tuned single-engine baseline, e.g. llama.cpp per slot):
@@ -218,7 +217,7 @@ func (w Workload) prefillTokens() (a, b, c int) {
 	for ci := 0; ci < C; ci++ {
 		tail := 0
 		for t := 0; t < T; t++ {
-			a += P + tail // naive re-prefills prefix + everything generated/ingested so far
+			a += P + tail // stateless re-prefill: prefix + everything generated/ingested so far
 			if t < len(w.Results[ci]) {
 				tail += D + w.Results[ci][t]
 			}

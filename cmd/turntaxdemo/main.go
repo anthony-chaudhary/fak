@@ -2,23 +2,18 @@
 //
 // It replays a frozen, class-labeled tool-call trace through the REAL kernel
 // (internal/turnbench → k.Syscall), call by call, and streams each call's live
-// verdict to the browser so THREE lanes advance visibly:
+// verdict to the browser so TWO lanes advance visibly:
 //
-//	lane "naive SOTA (two-pass loop)" — the documented two-pass agent loop pays an
-//	  extra round-trip for EVERY little thing: a malformed (aliased) arg errors and
-//	  the model is re-prompted (+1 turn); a duplicate read is re-issued (+1 turn); a
-//	  pure/static tool call round-trips to the engine (+1 turn it could have elided).
-//	  The lane's turn counter TICKS UP on all of them (+9 on airline).
 //	lane "tuned SOTA (stronger agent + framework)" — a well-built 2026 framework
 //	  ELIDES the optional pure/static calls but is STILL FORCED into the recovery
 //	  round-trips (a bad arg, a repeated read), so it pays the FORCED turns only
-//	  (+5 on airline = the forced subset of the 9).
+//	  (+5 on airline).
 //	lane "fak (1-shot)"        — the kernel resolves the very same condition INSIDE
 //	  the syscall the call arrived on (grammar repair / vDSO local serve), so no
 //	  second model round-trip fires. The lane's turn counter STAYS FLAT (0).
 //
-// So the airline slice splits 9 = forced 5 + elision 4: fak saves all 9 over the
-// naive lane and the 5 forced over even the tuned lane (turn_kinds in the report).
+// So the airline slice's tuned agent pays the 5 forced round-trips; fak deletes all
+// of them and stays flat at 0 (turn_kinds in the report).
 //
 // Unlike cmd/demorace (which needs model weights on disk), this demo is FULLY
 // SELF-CONTAINED: the trace is replayed through the kernel, not a model, so it
@@ -32,7 +27,7 @@
 //
 //	go run ./cmd/turntaxdemo -addr 127.0.0.1:8150 -jobs 8
 //	# open http://127.0.0.1:8150  → pick a suite → "Replay through the kernel"
-//	#   turntax-airline → naive +9, tuned +5, fak 0  (every lever fires)
+//	#   turntax-airline → tuned +5, fak 0  (every lever fires)
 //	#   turntax-happy   → all stay at 0              (the anti-inflation control, watchable)
 //
 //	go run ./cmd/turntaxdemo -print
@@ -397,8 +392,7 @@ func runSelfcheck() int {
 // rendered as a colored two-column diff — a tuned 2026 SOTA agent (left) racking up
 // the FORCED model round-trips it must fire, beside fak (right) staying flat at 0 —
 // so the efficiency point lands in ~30s with zero setup (no browser, no port). The
-// HONEST headline is fak vs the TUNED agent (the forced turns); the naive two-pass
-// loop is the worst-case reference, surfaced in the summary, never the headline.
+// HONEST headline is fak vs the TUNED 2026 SOTA agent (the forced turns).
 // (Pairs with cmd/guarddemo -print, which does the same for the SAFETY axis.)
 // ---------------------------------------------------------------------------
 
@@ -491,7 +485,7 @@ func runPrint(suite string) int {
 
 	fmt.Printf("  %s  %s  %s\n", strings.Repeat("─", lw), strings.Repeat("─", cw), strings.Repeat("─", rw))
 	forced := rep.TurnKinds.Forced // fak vs the TUNED agent — the honest headline
-	total := rep.Net.TurnsSaved    // fak vs the NAIVE two-pass loop — worst-case reference
+	total := rep.Net.TurnsSaved    // per-turn normalizer only (the report's per-turn rate denominator)
 	leftScore := fmt.Sprintf("tuned SOTA agent: %d forced round-trip%s", forced, plural(forced))
 	fmt.Printf("  %s  %s\n",
 		p.paint(p.bold+p.red, ttPad(leftScore, lw+2+cw)),
@@ -505,10 +499,8 @@ func runPrint(suite string) int {
 	}
 	if forced > 0 {
 		fmt.Printf("  %s\n", p.paint(p.dim, fmt.Sprintf(
-			"vs even a TUNED 2026 agent, fak deletes %d forced round-trip%s ≈ %.1fs and $%.4f at hosted-flash rates (1.5s/turn). "+
-				"vs a naive two-pass loop it's %d (≈ %.1fs, $%.4f) — the worst-case reference, not the headline.",
-			forced, plural(forced), float64(forced)*perLatS, float64(forced)*perDollar,
-			total, rep.Net.LatencySavedMs/1000, rep.Net.DollarsSaved)))
+			"vs even a TUNED 2026 agent, fak deletes %d forced round-trip%s ≈ %.1fs and $%.4f at hosted-flash rates (1.5s/turn).",
+			forced, plural(forced), float64(forced)*perLatS, float64(forced)*perDollar)))
 		fmt.Printf("  %s\n", p.paint(p.dim, "the safety floor (poison paged out, destructive op refused) is a SEPARATE axis — see `guarddemo -print`."))
 	} else {
 		fmt.Printf("  %s\n", p.paint(p.dim,

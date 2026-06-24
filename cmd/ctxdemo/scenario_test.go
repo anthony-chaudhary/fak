@@ -14,10 +14,10 @@ func TestPrefillTokensHandComputed(t *testing.T) {
 	}
 	a, b, c := w.prefillTokens()
 
-	// naive, per agent: turn0 ctx=100; turn1 ctx=100+(10+20)=130; turn2 ctx=130+(10+20)=160.
-	// per agent = 100+130+160 = 390; two agents → 780.
+	// stateless re-prefill, per agent: turn0 ctx=100; turn1 ctx=100+(10+20)=130;
+	// turn2 ctx=130+(10+20)=160. per agent = 100+130+160 = 390; two agents → 780.
 	if a != 780 {
-		t.Errorf("naive re-prefill = %d, want 780", a)
+		t.Errorf("stateless re-prefill floor = %d, want 780", a)
 	}
 	// per-agent KV: each agent prefills prefix once (2×100) + all result tokens (4×20=80) → 280.
 	if b != 280 {
@@ -29,10 +29,9 @@ func TestPrefillTokensHandComputed(t *testing.T) {
 	}
 	// The value ordering the demo rests on: fak (c) does no more prefill work than the WARM
 	// per-agent KV baseline (b — the real serving baseline), which itself does no more than
-	// the cold no-cache reference (a). fak's headline win is b/c (vs the warm cache); a is
-	// only the worst-case reference.
+	// the stateless re-prefill floor (a). fak's headline win is b/c (vs the warm cache).
 	if !(c <= b && b <= a) {
-		t.Errorf("ordering violated: fak=%d perAgentKV=%d naive=%d (want fak<=perAgentKV<=naive)", c, b, a)
+		t.Errorf("ordering violated: fak=%d perAgentKV=%d floor=%d (want fak<=perAgentKV<=floor)", c, b, a)
 	}
 }
 
@@ -98,22 +97,18 @@ func TestResultsLengthIsTurnsMinusOne(t *testing.T) {
 
 func TestCatalogRatiosClimb(t *testing.T) {
 	// HEADLINE: every scenario must show fak doing strictly less prefill work than the WARM
-	// per-agent KV baseline (TunedOverFak > 1 — the real cross-agent serving win), and also
-	// strictly less than the cold no-cache reference (NaiveOverFak > 1). In cold no-cache
-	// re-read reduction the long-context scenario must beat the short-lookup one (the turn
-	// tax grows with context length).
-	get := func(id string) tokens { s, _ := findScenario(id); return viewOf(s).Tokens }
+	// per-agent KV baseline (TunedOverFak > 1 — the real cross-agent serving win). The
+	// stateless re-prefill floor (a from prefillTokens) grows with context length, so the
+	// long-context scenario must exceed the short-lookup one.
+	rawFloor := func(id string) int { s, _ := findScenario(id); a, _, _ := s.Build().prefillTokens(); return a }
 	for _, s := range catalog() {
 		tk := viewOf(s).Tokens
 		if tk.TunedOverFak <= 1.0 {
 			t.Errorf("%s: warmKV/fak = %.2f, want > 1 (the cross-agent serving win — the headline)", s.ID, tk.TunedOverFak)
 		}
-		if tk.NaiveOverFak <= 1.0 {
-			t.Errorf("%s: no-cache/fak = %.2f, want > 1 (worst-case reference)", s.ID, tk.NaiveOverFak)
-		}
 	}
-	if get("deep-research").NaiveOverFak <= get("support-bot").NaiveOverFak {
-		t.Errorf("expected deep-research no-cache reference reuse (%.2f) > support-bot (%.2f)",
-			get("deep-research").NaiveOverFak, get("support-bot").NaiveOverFak)
+	if rawFloor("deep-research") <= rawFloor("support-bot") {
+		t.Errorf("expected deep-research re-prefill floor (%d) > support-bot (%d)",
+			rawFloor("deep-research"), rawFloor("support-bot"))
 	}
 }

@@ -29,8 +29,8 @@ func lcgIDs(n, vocab int, seed uint64) []int {
 	return ids
 }
 
-// armResult carries the timing split so the naive arm can be PROJECTED from the fak
-// arm's measured prefill throughput when running it live would take many minutes.
+// armResult carries the timing split — total wall-clock plus the decode/prefill
+// breakdown and the prefill tokens this arm actually ingested.
 type armResult struct {
 	totalMS   float64
 	decodeMS  float64
@@ -103,8 +103,7 @@ func liveArmFak(l *loaded, w Workload, emit emitter) armResult {
 // tool result incrementally. This is the real baseline a tuned single-tenant stack gives
 // you — vLLM / SGLang prefix caching, provider prompt-caching, a persistent KV per session.
 // fak's win over THIS arm (cross-agent prefix reuse + batched decode on top of a warm
-// cache) is the honest number; the cold re-prefill arm below is only a worst-case
-// reference. No quadratic re-prefill, so it always runs live (never projected).
+// cache) is the honest number. No quadratic re-prefill, so it always runs live.
 func liveArmTuned(l *loaded, w Workload, emit emitter) armResult {
 	m, vocab := l.m, l.vocab
 	P, C, T, D := w.Scn.Prefix, w.Scn.Agents, w.Scn.Turns, w.Scn.Decode
@@ -151,92 +150,6 @@ func liveArmTuned(l *loaded, w Workload, emit emitter) armResult {
 		prefillMS: prefillMS,
 		prefillTk: prefilledTk,
 	}
-}
-
-// liveArmNaive runs the naive arm live: every (agent,turn) re-prefills the ENTIRE
-// context so far — prefix + every token generated and ingested in prior turns — then
-// decodes serially. Emits one "turn" event per (agent,turn). This is the multi-minute
-// grind and a worst-case REFERENCE only — NOT a serving baseline; for long scenarios
-// prefer projectNaive (the sessionbench method).
-func liveArmNaive(l *loaded, w Workload, emit emitter) armResult {
-	m, vocab := l.m, l.vocab
-	P, C, T, D := w.Scn.Prefix, w.Scn.Agents, w.Scn.Turns, w.Scn.Decode
-	prefix := lcgIDs(P, vocab, 1)
-	ids0 := lcgIDs(C, vocab, 991)
-
-	start := time.Now()
-	var decodeMS, prefillMS float64
-	prefilledTk, done := 0, 0
-	for c := 0; c < C; c++ {
-		ctx := append([]int(nil), prefix...)
-		tok := ids0[c]
-		for t := 0; t < T; t++ {
-			s := m.NewSession()
-			s.Quant = true
-			tp := time.Now()
-			s.Prefill(ctx) // re-prefill the WHOLE context so far
-			prefillMS += ms(time.Since(tp))
-			prefilledTk += len(ctx)
-			td := time.Now()
-			for d := 0; d < D; d++ {
-				s.Step(tok)
-				ctx = append(ctx, tok)
-				tok = (tok*48271 + 1) % vocab
-			}
-			decodeMS += ms(time.Since(td))
-			s.Close()
-			if t < len(w.Results[c]) {
-				ctx = append(ctx, lcgIDs(w.Results[c][t], vocab, uint64(50000+t*1000+c*97))...)
-			}
-			done++
-			emit(event{
-				"type": "turn", "arm": "naive", "turn": t, "agent": c,
-				"requests_done": done, "total_requests": C * T,
-				"tokens_prefilled": prefilledTk, "tokens_decoded": done * D,
-				"elapsed_ms": ms(time.Since(start)),
-			})
-		}
-	}
-	return armResult{
-		totalMS:   ms(time.Since(start)),
-		decodeMS:  decodeMS,
-		prefillMS: prefillMS,
-		prefillTk: prefilledTk,
-	}
-}
-
-// projectNaive estimates the naive arm's wall-clock WITHOUT running its multi-minute
-// grind, using THIS run's measured throughput — the sessionbench projection anchored
-// to the live fak arm:
-//   - naive prefill ms := naive prefill tokens ÷ (fak's measured prefill tok/ms)
-//   - naive decode  ms := C × the fak batched-decode ms (C serial agents vs 1 batched)
-//
-// The fak arm's prefills are mostly short, so its per-token rate is, if anything,
-// FASTER than the long-context re-prefills the naive arm pays — meaning this estimate
-// is conservative (it tends to UNDERstate the naive cost, never inflate it). It emits
-// synthetic per-turn progress so the UI advances, and the result is flagged projected.
-func projectNaive(w Workload, fak armResult, emit emitter) armResult {
-	C, T := w.Scn.Agents, w.Scn.Turns
-	naivePrefillTk, _, _ := w.prefillTokens()
-	rate := 1.0 // tok/ms; guard against a zero-time prefill
-	if fak.prefillMS > 0 && fak.prefillTk > 0 {
-		rate = float64(fak.prefillTk) / fak.prefillMS
-	}
-	prefillMS := float64(naivePrefillTk) / rate
-	decodeMS := float64(C) * fak.decodeMS
-	total := prefillMS + decodeMS
-	// synthetic progress: one event per (agent,turn), linear in the projected total
-	steps := C * T
-	for i := 1; i <= steps; i++ {
-		emit(event{
-			"type": "turn", "arm": "naive", "projected": true,
-			"requests_done": i, "total_requests": steps,
-			"tokens_prefilled": naivePrefillTk * i / steps,
-			"tokens_decoded":   (w.Scn.Decode) * i,
-			"elapsed_ms":       total * float64(i) / float64(steps),
-		})
-	}
-	return armResult{totalMS: total, decodeMS: decodeMS, prefillMS: prefillMS, prefillTk: naivePrefillTk}
 }
 
 // warm runs a tiny prefill+step so the first measured token doesn't eat lazy init.

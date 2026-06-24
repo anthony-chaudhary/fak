@@ -8,7 +8,7 @@
   :root{
     --bg:#f6f8fa; --panel:#ffffff; --panel2:#f0f3f6; --line:#d0d7de;
     --txt:#1f2328; --dim:#6e7781; --dim2:#57606a;
-    --fak:#1a7f37; --fakg:#116329; --naive:#bf8700; --naiveg:#7d5300; --accent:#0969da;
+    --fak:#1a7f37; --fakg:#116329; --accent:#0969da;
     --tuned:#0d9488; --tunedg:#0a6e64;
     --prefix:#6366f1; --decode:#9aa5b1;
     --t0:#0a85d1; --t1:#8250df; --t2:#bf3989; --t3:#bf8700;
@@ -45,7 +45,6 @@
   .bar .track{flex:1;height:22px;background:var(--panel2);border:1px solid var(--line);border-radius:6px;overflow:hidden}
   .bar .fill{height:100%;display:flex;align-items:center;padding-left:8px;font-size:11px;font-weight:700;white-space:nowrap;border-radius:5px 0 0 5px}
   .bar .val{width:120px;font-size:11px;color:var(--dim2);font-variant-numeric:tabular-nums}
-  .bar.naive .fill{background:linear-gradient(90deg,var(--naive),var(--naiveg));color:#2a1602}
   .bar.tuned .fill{background:linear-gradient(90deg,#8c96a0,#6e7781);color:#ffffff}
   .bar.fak .fill{background:linear-gradient(90deg,var(--fak),var(--fakg));color:#042511}
   /* context timeline */
@@ -67,8 +66,6 @@
   .rfill{height:100%;width:0%;transition:width .25s ease;display:flex;align-items:center;padding-left:9px;font-weight:700;font-size:11px;white-space:nowrap}
   .fak .nm{color:var(--fak)}.fak .rfill{background:linear-gradient(90deg,var(--fak),var(--fakg));color:#042511}
   .lane.tuned .nm{color:var(--tuned)}.lane.tuned .rfill{background:linear-gradient(90deg,var(--tuned),var(--tunedg));color:#ffffff}
-  /* naive race lane = dim worst-case reference, never the headline */
-  .lane.naive .nm{color:var(--naive);opacity:.85}.lane.naive .rfill{background:linear-gradient(90deg,var(--naive),var(--naiveg));color:#2a1602;opacity:.6}.lane.naive .rtrack{opacity:.75}
   .idle{color:var(--dim)}.doneBadge{color:var(--fak);font-weight:700}
   .result .ref{font-size:11px;color:var(--dim);margin-top:8px}
   .tag{font-size:10px;border-radius:4px;padding:1px 6px;border:1px solid var(--line);color:var(--dim2);margin-left:6px}
@@ -90,7 +87,7 @@
     <span class="pill" id="gmxPill">…</span>
     <span class="pill" id="hwPill" title="the compute surface this demo is actually running on — cores, matmul workers, and any GPU backend compiled into this build">hardware: …</span>
   </div>
-  <div class="sub">Many agents · many turns · long context · and a <b style="color:var(--txt)">different-sized tool result every turn</b>. The honest baseline is a <b style="color:var(--txt)">warm per-agent KV cache</b> — each agent already reuses its own KV across turns (what vLLM / SGLang / provider prompt-caching give you). fak's win is the step that cache can't take: <b style="color:var(--txt)">cross-agent prefix sharing</b> — one copy of the shared setup serves the whole fleet. A cold no-cache loop that re-reads the whole growing context every turn is shown only as a worst-case reference. Pick an agentic shape and watch the gap.</div>
+  <div class="sub">Many agents · many turns · long context · and a <b style="color:var(--txt)">different-sized tool result every turn</b>. The honest baseline is a <b style="color:var(--txt)">warm per-agent KV cache</b> — each agent already reuses its own KV across turns (what vLLM / SGLang / provider prompt-caching give you). fak's win is the step that cache can't take: <b style="color:var(--txt)">cross-agent prefix sharing</b> — one copy of the shared setup serves the whole fleet. Pick an agentic shape and watch the gap.</div>
 
   <!-- ① SCENARIO + EXACT TOKEN WORK -->
   <div class="panel">
@@ -133,14 +130,9 @@
       <div class="rtrack"><div class="rfill" id="tunedFill"></div></div>
       <div class="meta" id="tunedMeta">prefilled 0 · decoded 0</div>
     </div>
-    <div class="lane naive">
-      <div class="hd"><span class="nm">no-cache re-prefill <span class="tag">worst-case ref</span> <span class="idle" id="naiveState">idle</span></span><span class="ms" id="naiveMs">—</span></div>
-      <div class="rtrack"><div class="rfill" id="naiveFill"></div></div>
-      <div class="meta" id="naiveMeta">prefilled 0 · decoded 0</div>
-    </div>
-    <div class="result" id="result"><div id="resultLine"></div><div class="grid" id="resultGrid"></div><div class="ref" id="resultRef"></div></div>
+    <div class="result" id="result"><div id="resultLine"></div><div class="grid" id="resultGrid"></div></div>
     <div class="log" id="log"></div>
-    <div class="note">The HEADLINE is fak vs the <b>tuned warm-cache baseline</b> (arm B: a persistent per-agent KV cache — what vLLM / SGLang prefix-caching or provider prompt-caching give you). Both run <b>fully live</b> here — the warm-cache arm has no quadratic re-prefill, so it never needs projecting. The dim <b>cold no-cache</b> loop is a <b>worst-case reference</b> only, not a serving baseline; on long scenarios it would grind for minutes, so it is <b>projected from this run's measured prefill throughput</b> (the sessionbench method) and labelled as such.</div>
+    <div class="note">The HEADLINE is fak vs the <b>tuned warm-cache baseline</b> (a persistent per-agent KV cache — what vLLM / SGLang prefix-caching or provider prompt-caching give you). Both run <b>fully live</b> here — the warm-cache arm has no quadratic re-prefill, so it never needs projecting.</div>
   </div>
 
   <div class="sub" style="margin-top:18px;color:#afb8c1">fak in-kernel engine · pure-Go Q8 forward pass · tokens are real model output. No network, no API — all on this box.</div>
@@ -187,18 +179,17 @@ function select(i){
   toolColors={};s.tools.forEach((tl,k)=>toolColors[tl.name]=TCOL[k%TCOL.length]);
   drawBars(tk);drawTimeline(cur);
   $("toolLegend").innerHTML=s.tools.map(tl=>'<span><span class="sw" style="background:'+toolColors[tl.name]+'"></span>'+tl.name+' ('+tl.min_tok+'–'+tl.max_tok+' tok)</span>').join(" ");
-  $("floorNote").innerHTML="Baseline <b>warm per-agent KV</b> re-reads "+tk.per_agent_kv.toLocaleString()+" prefill tokens (the shared prefix once per agent) · <b>fak</b> "+tk.fak_fused.toLocaleString()+" (prefix once for the whole fleet). fak does <b style='color:var(--fak)'>"+tk.tuned_over_fak.toFixed(1)+"×</b> less prefill re-read than a warm per-agent KV cache — that is the cross-agent prefix-sharing win. <span style='color:var(--dim)'>(A cold no-cache loop re-reads "+tk.naive_reprefill.toLocaleString()+" tokens, "+tk.naive_over_fak.toFixed(1)+"× fak's — a worst-case reference, not a serving baseline.)</span>";
+  $("floorNote").innerHTML="Baseline <b>warm per-agent KV</b> re-reads "+tk.per_agent_kv.toLocaleString()+" prefill tokens (the shared prefix once per agent) · <b>fak</b> "+tk.fak_fused.toLocaleString()+" (prefix once for the whole fleet). fak does <b style='color:var(--fak)'>"+tk.tuned_over_fak.toFixed(1)+"×</b> less prefill re-read than a warm per-agent KV cache — that is the cross-agent prefix-sharing win.";
   $("raceCfg").innerHTML="scenario: <b>"+s.id+"</b> · "+(s.agents*s.turns)+" requests";
   resetRace();
 }
 
 function drawBars(tk){
-  const max=tk.naive_reprefill||1;
+  const max=tk.per_agent_kv||1;
   const mk=(cls,lbl,val)=>'<div class="bar '+cls+'"><div class="lbl">'+lbl+'</div><div class="track"><div class="fill" style="width:'+(val/max*100).toFixed(1)+'%">'+(val/max>0.12?val.toLocaleString():"")+'</div></div><div class="val">'+val.toLocaleString()+' tok</div></div>';
   $("bars").innerHTML=
     mk("tuned","warm per-agent KV (baseline)",tk.per_agent_kv)+
-    mk("fak","fak fused (cross-agent)",tk.fak_fused)+
-    mk("naive","no-cache re-prefill (worst-case ref)",tk.naive_reprefill);
+    mk("fak","fak fused (cross-agent)",tk.fak_fused);
 }
 
 function drawTimeline(v){
@@ -219,17 +210,17 @@ function drawTimeline(v){
     row2.innerHTML='<div class="who">agent '+a+'</div><div class="ctx">'+segs+'</div><div class="tk">'+total.toLocaleString()+' tok</div>';
     tl.appendChild(row2);
   });
-  $("tlNote").innerHTML="Each agent's context is the <b>same shared prefix</b> plus its own uneven trail of decode + tool results — every result a different size (that is the context <i>changing</i> per turn). A warm per-agent KV cache reads that shared prefix once <i>per agent</i>; fak reads it once for the <b>whole fleet</b> and only ingests the coloured tips. (A cold no-cache loop re-reads each whole row up to every turn boundary — the worst-case reference.)";
+  $("tlNote").innerHTML="Each agent's context is the <b>same shared prefix</b> plus its own uneven trail of decode + tool results — every result a different size (that is the context <i>changing</i> per turn). A warm per-agent KV cache reads that shared prefix once <i>per agent</i>; fak reads it once for the <b>whole fleet</b> and only ingests the coloured tips.";
 }
 
 // ---- live race (SSE) ----
 let es=null;
 function setFill(id,pct,label){const f=$(id);f.style.width=Math.min(100,pct)+"%";f.textContent=label||"";}
 function resetRace(){
-  ["fakState","tunedState","naiveState"].forEach(id=>{$(id).textContent="idle";$(id).className="idle";});
-  ["fakMs","tunedMs","naiveMs"].forEach(id=>$(id).textContent="—");
-  ["fakFill","tunedFill","naiveFill"].forEach(id=>setFill(id,0));
-  ["fakMeta","tunedMeta","naiveMeta"].forEach(id=>$(id).textContent="prefilled 0 · decoded 0");
+  ["fakState","tunedState"].forEach(id=>{$(id).textContent="idle";$(id).className="idle";});
+  ["fakMs","tunedMs"].forEach(id=>$(id).textContent="—");
+  ["fakFill","tunedFill"].forEach(id=>setFill(id,0));
+  ["fakMeta","tunedMeta"].forEach(id=>$(id).textContent="prefilled 0 · decoded 0");
   $("result").classList.remove("show");$("log").textContent="";$("raceStatus").textContent="";
 }
 $("raceBtn").onclick=()=>{
@@ -268,7 +259,6 @@ $("raceBtn").onclick=()=>{
         '<div class="cell">tuned warm cache (SOTA)<b>'+fmt(e.tuned_ms/1000)+'</b></div>'+
         '<div class="cell">time saved vs SOTA<b>'+fmt(e.saved_ms/1000)+'</b></div>'+
         '<div class="cell">exact prefill-tok vs warm KV<b>'+e.tokens.tuned_over_fak.toFixed(1)+'×</b></div>';
-      $("resultRef").innerHTML='reference: the cold no-cache loop took <span style="color:var(--naive)">'+fmt(e.naive_ms/1000)+'</span>'+(e.naive_projected?' <span class="tag">projected</span>':'')+' ('+e.naive_ratio.toFixed(1)+'× fak, '+e.tokens.naive_over_fak.toFixed(1)+'× the prefill re-read) — a worst-case anchor, not a serving baseline anyone ships.';
       $("raceStatus").textContent="✓ done · "+e.ratio.toFixed(1)+"× faster than the tuned warm-cache baseline"+(hwSummary?" · "+hwSummary:"");
       $("raceBtn").disabled=false;es.close();es=null;
     }
