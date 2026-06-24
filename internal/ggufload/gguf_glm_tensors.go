@@ -1,5 +1,13 @@
 package ggufload
 
+import (
+	"fmt"
+	"strconv"
+	"strings"
+
+	"github.com/anthony-chaudhary/fak/internal/model"
+)
+
 // gguf_glm_tensors.go — the glm_moe_dsa (GLM-5.2) per-layer GGUF tensor-name map, the
 // Pillar-1 "tensor names" slice of the native-753B track (docs/notes/
 // native-753b-track-staged-plan.md). It maps the 1:1 GLM-specific GGUF tensor suffixes to
@@ -86,4 +94,74 @@ func glmMoeDsaCanonicalSuffix(suffix string) (string, bool) {
 		glmGGUFIndexerWeights: "self_attn.indexer.weights_proj.weight",
 	}[suffix]
 	return mapped, ok
+}
+
+// Batched routed-expert GGUF tensors (deepseek2 convention): one [E,…] blob per layer that the
+// loader must SPLIT 1→E. CanonicalTensorNameArch leaves these unmapped on purpose — a single name
+// cannot become E per-expert names — so the split lives here + the loader (gguf_weightsource.go).
+const (
+	glmGGUFExpertsGate = "ffn_gate_exps.weight" // -> mlp.experts.<e>.gate_proj.weight
+	glmGGUFExpertsUp   = "ffn_up_exps.weight"   // -> mlp.experts.<e>.up_proj.weight
+	glmGGUFExpertsDown = "ffn_down_exps.weight" // -> mlp.experts.<e>.down_proj.weight
+)
+
+// glmMoeDsaBatchedExpert reports whether a glm_moe_dsa GGUF tensor name is a batched routed-expert
+// blob and, if so, returns its layer index and the per-expert canonical projection name
+// (gate_proj/up_proj/down_proj). These are the tensors the loader splits into E per-expert 2-D
+// tensors (mlp.experts.<e>.<proj>.weight) — the form internal/model's MoE forward consumes
+// (moe.go expertName). Detected from the GGUF name (not the canonical map) so the split happens
+// BEFORE CanonicalTensorNameArch, which deliberately returns no mapping for these.
+func glmMoeDsaBatchedExpert(name string) (layer int, proj string, ok bool) {
+	if !strings.HasPrefix(name, "blk.") {
+		return 0, "", false
+	}
+	rest := strings.TrimPrefix(name, "blk.")
+	dot := strings.IndexByte(rest, '.')
+	if dot <= 0 {
+		return 0, "", false
+	}
+	l, err := strconv.Atoi(rest[:dot])
+	if err != nil {
+		return 0, "", false
+	}
+	switch rest[dot+1:] {
+	case glmGGUFExpertsGate:
+		return l, "gate_proj", true
+	case glmGGUFExpertsUp:
+		return l, "up_proj", true
+	case glmGGUFExpertsDown:
+		return l, "down_proj", true
+	}
+	return 0, "", false
+}
+
+// splitGLMMoeDsaExperts expands a batched routed-expert tensor — already dequantized to f32, model
+// shape [E, out, in] (the GGUF stores [in, out, E]; modelShapeFromGGUFDims reverses it) — into E
+// per-expert canonical 2-D tensors model.layers.<layer>.mlp.experts.<e>.<proj>.weight of shape
+// [out, in]. Expert e is the contiguous block data[e*out*in : (e+1)*out*in], so the split is a pure
+// row-major reslice along the leading expert axis (bit-equal to manual slicing). Each expert's slice
+// is copied into its own backing array so a later quantize/normalize cannot alias across experts.
+func splitGLMMoeDsaExperts(layer int, proj string, shape []int, data []float32) ([]model.NamedTensorF32, error) {
+	if len(shape) != 3 {
+		return nil, fmt.Errorf("gguf: glm_moe_dsa batched expert tensor must be 3-D [E,out,in], got shape %v", shape)
+	}
+	e, out, in := shape[0], shape[1], shape[2]
+	if e <= 0 || out <= 0 || in <= 0 {
+		return nil, fmt.Errorf("gguf: glm_moe_dsa batched expert tensor has non-positive dim in [%d,%d,%d]", e, out, in)
+	}
+	per := out * in
+	if len(data) != e*per {
+		return nil, fmt.Errorf("gguf: glm_moe_dsa expert blob [%d,%d,%d] has %d values, want %d", e, out, in, len(data), e*per)
+	}
+	tensors := make([]model.NamedTensorF32, e)
+	for x := 0; x < e; x++ {
+		seg := make([]float32, per)
+		copy(seg, data[x*per:(x+1)*per])
+		tensors[x] = model.NamedTensorF32{
+			Name:  fmt.Sprintf("model.layers.%d.mlp.experts.%d.%s.weight", layer, x, proj),
+			Shape: []int{out, in},
+			Data:  seg,
+		}
+	}
+	return tensors, nil
 }

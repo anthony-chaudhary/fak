@@ -131,6 +131,35 @@ func (s *WeightSource) QuantModelProfile(p *LoadProfiler) (*model.Model, error) 
 	}
 	builder := model.NewQuantBuilder(cfg, cfg.TieWordEmbeddings)
 	for _, info := range s.File.Tensors {
+		// glm_moe_dsa batched routed experts: split the [E,out,in] blob 1->E into per-expert
+		// canonical tensors and add each (the quant builder narrows the 2-D matmul weights as
+		// usual). Handled before CanonicalTensorNameArch, which leaves these unmapped.
+		if cfg.ModelType == "glm_moe_dsa" {
+			if layer, proj, ok := glmMoeDsaBatchedExpert(info.Name); ok {
+				shape, err := modelShapeFromGGUFDims(info.Name, info.Dims)
+				if err != nil {
+					return nil, err
+				}
+				raw, _, err := s.TensorBytes(info.Name)
+				if err != nil {
+					return nil, err
+				}
+				data, err := dequantF32(info, raw)
+				if err != nil {
+					return nil, err
+				}
+				experts, err := splitGLMMoeDsaExperts(layer, proj, shape, data)
+				if err != nil {
+					return nil, err
+				}
+				for _, ex := range experts {
+					if err := builder.AddF32Tensor(ex.Name, ex.Shape, ex.Data); err != nil {
+						return nil, err
+					}
+				}
+				continue
+			}
+		}
 		var tensorStart time.Time
 		var tt LoadTensorStat
 		if p != nil {
@@ -218,6 +247,26 @@ func (s *WeightSource) F32Tensors() (model.Config, []model.NamedTensorF32, error
 	}
 	tensors := make([]model.NamedTensorF32, 0, len(s.File.Tensors))
 	for _, info := range s.File.Tensors {
+		// glm_moe_dsa batched routed experts: one [E,out,in] blob splits 1->E into per-expert
+		// canonical tensors. Handled before CanonicalTensorNameArch (which leaves them unmapped).
+		if cfg.ModelType == "glm_moe_dsa" {
+			if layer, proj, ok := glmMoeDsaBatchedExpert(info.Name); ok {
+				shape, err := modelShapeFromGGUFDims(info.Name, info.Dims)
+				if err != nil {
+					return model.Config{}, nil, err
+				}
+				data, _, err := s.TensorF32(info.Name)
+				if err != nil {
+					return model.Config{}, nil, err
+				}
+				experts, err := splitGLMMoeDsaExperts(layer, proj, shape, data)
+				if err != nil {
+					return model.Config{}, nil, err
+				}
+				tensors = append(tensors, experts...)
+				continue
+			}
+		}
 		name, ok := CanonicalTensorNameArch(info.Name, cfg.ModelType)
 		if !ok {
 			return model.Config{}, nil, fmt.Errorf("gguf: no canonical mapping for tensor %s", info.Name)
