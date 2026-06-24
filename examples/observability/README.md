@@ -21,8 +21,8 @@ and the env-knob doc ([#199](https://github.com/anthony-chaudhary/fak/issues/199
 
 It needs **only a Go toolchain** (to build `fak`) plus `curl`; `jq` is optional (the
 script falls back to `python3`, then to raw JSON). No model, API key, or GPU — `fak serve`
-with no `--base-url` runs a deterministic offline mock engine. Captured run:
-[`EXAMPLE-OUTPUT.md`](EXAMPLE-OUTPUT.md).
+with no `--base-url` runs a deterministic offline mock engine, and the whole run completes
+in a few seconds. Captured run: [`EXAMPLE-OUTPUT.md`](EXAMPLE-OUTPUT.md).
 
 ## A note on metric names
 
@@ -163,6 +163,15 @@ scrape_configs:
 `run.sh` demonstrates the `401 -> 200` transition at the end of its run.
 
 ---
+
+## What this does not claim
+
+This demo shows **what the two operator surfaces expose and how to query them** — it does
+**not** claim to be a complete monitoring stack. It does not ship alerting or recording
+rules or a production Grafana dashboard (that is [#66](https://github.com/anthony-chaudhary/fak/issues/66)),
+and it does not cover long-term storage, HA Prometheus, or SLO design. The metric *names*
+it asserts are the real ones (pinned by the green test below); the PromQL and dashboard
+around them are honest starting points, not an operations runbook.
 
 ## Files
 

@@ -45,7 +45,13 @@ go build ./...
 go run .
 ```
 
-Expected output (the end-to-end claim proof):
+The build-and-run **completes in a few seconds** and is **deterministic** — the same
+output every run, with no model, network, or randomness in the loop.
+
+## Expected output
+
+The end-to-end claim proof (a full captured run is in
+[`EXAMPLE-OUTPUT.md`](EXAMPLE-OUTPUT.md)):
 
 ```
 fak out-of-tree driver — ABI importable via pkg/abi
@@ -66,6 +72,16 @@ extdriver: OK — both vendor numbers claimed and the driver round-trip passed
 The `go.mod` here uses a `replace github.com/anthony-chaudhary/fak => ../..` so
 the example builds against this checkout. A real consumer would instead
 `require` a tagged fak version.
+
+## Scope — what this does *not* claim
+
+This is a **witness of the ABI seam**, not a benchmark or a kernel demo. It does **not**
+claim any performance result, does **not** exercise the gateway, serving, or the in-kernel
+model, and does **not** prove that the *core* `internal/abi` is importable (it can't be —
+that's the whole point; only the `pkg/abi` re-export is). It proves exactly one thing: an
+external module can claim both vendor number ranges and register a working `Adjudicator`
+through the public surface. The honesty ledger for the underlying capability is
+[`../../CLAIMS.md`](../../CLAIMS.md).
 
 ## CI note
 

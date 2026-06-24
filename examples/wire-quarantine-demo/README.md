@@ -46,8 +46,9 @@ FAK_BIN=./fak ./examples/wire-quarantine-demo/run.sh   # use a prebuilt binary
 (override with `FAK_DEMO_PORT`), runs `demo.py` over the wire, and tears down what it started.
 
 > **Determinism.** No model is involved, so there is nothing to vary: the kernel's
-> result-side verdicts are a pure function of the bytes you POST. The same result always
-> yields the same ALLOW/QUARANTINE.
+> result-side verdicts are **deterministic** and **reproducible** — a pure function of
+> the bytes you POST, so the same result always yields the same ALLOW/QUARANTINE on every
+> run. The whole demo builds, serves, runs, and tears down in a few seconds.
 
 ## What you see
 
