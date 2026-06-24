@@ -1,0 +1,105 @@
+{
+  "__comment": "Minimal Grafana dashboard over the four operator questions in README.md. Import against a Prometheus datasource scraping fak serve /metrics. Supersede with the full dashboard from issue #66 when it lands.",
+  "title": "fak — operator observability (minimal)",
+  "schemaVersion": 39,
+  "version": 1,
+  "editable": true,
+  "tags": ["fak", "observability"],
+  "templating": {
+    "list": [
+      {
+        "name": "datasource",
+        "type": "datasource",
+        "query": "prometheus",
+        "current": {}
+      }
+    ]
+  },
+  "panels": [
+    {
+      "id": 1,
+      "title": "Q1 · Is the floor firing? (deny rate by reason)",
+      "type": "timeseries",
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 },
+      "fieldConfig": { "defaults": { "unit": "ops" } },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (reason) (rate(fak_gateway_operations_total{verdict=\"DENY\"}[5m]))",
+          "legendFormat": "DENY · {{reason}}"
+        },
+        {
+          "refId": "B",
+          "expr": "sum by (reason) (rate(fak_gateway_operations_total{verdict=\"QUARANTINE\"}[5m]))",
+          "legendFormat": "QUARANTINE · {{reason}}"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "title": "Q2 · Is the cache hitting? (vDSO hit ratio)",
+      "type": "gauge",
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "min": 0,
+          "max": 1,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "red", "value": null },
+              { "color": "yellow", "value": 0.2 },
+              { "color": "green", "value": 0.5 }
+            ]
+          }
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "fak_gateway_vdso_hit_ratio",
+          "legendFormat": "vdso hit ratio"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "title": "Q3 · Is anything stuck inflight?",
+      "type": "timeseries",
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 8 },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "fak_gateway_inflight_requests",
+          "legendFormat": "inflight (all routes)"
+        },
+        {
+          "refId": "B",
+          "expr": "fak_gateway_inflight_requests_by_route",
+          "legendFormat": "inflight · {{route}}"
+        },
+        {
+          "refId": "C",
+          "expr": "fak_gateway_inflight_max_age_seconds",
+          "legendFormat": "oldest inflight age (s) — wedge alarm"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "title": "Kernel counters (denies / quarantines / vdso hits)",
+      "type": "timeseries",
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 8 },
+      "targets": [
+        { "refId": "A", "expr": "fak_kernel_denies_total", "legendFormat": "denies" },
+        { "refId": "B", "expr": "fak_kernel_quarantines_total", "legendFormat": "quarantines" },
+        { "refId": "C", "expr": "fak_kernel_vdso_hits_total", "legendFormat": "vdso hits" }
+      ]
+    }
+  ]
+}
