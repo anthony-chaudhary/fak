@@ -1,4 +1,4 @@
-# Security Policy
+# Netra Fused Agent Kernel (`fak`) — Security Policy
 
 `fak` is a security tool: it puts a permission gate and a result-quarantine on the
 same call path as every tool call, so an agent's effects pass *through* a kernel the

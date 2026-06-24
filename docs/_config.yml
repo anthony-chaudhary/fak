@@ -9,11 +9,11 @@
 # matter; jekyll-sitemap generates /sitemap.xml automatically. Both are allow-listed
 # on GitHub Pages. The pages-theme below invokes {% seo %} in its <head>.
 
-title: "fak — the agent kernel"
+title: "Netra Fused Agent Kernel (`fak`)"
 description: >-
-  fak is an agent kernel: an in-process, default-deny permission gate for AI agents
-  fused with an addressable, bit-exact KV cache. Prompt-injection and tool-poisoning
-  containment plus cache-efficient self-hosted LLM agent fleets, in Go.
+  Netra Fused Agent Kernel (`fak`): an in-process, default-deny permission gate for
+  AI agents fused with an addressable, bit-exact KV cache. Prompt-injection and
+  tool-poisoning containment plus cache-efficient self-hosted LLM agent fleets, in Go.
 author: Anthony Chaudhary
 lang: en
 
@@ -29,7 +29,7 @@ plugins:
 
 # jekyll-seo-tag extras
 social:
-  name: fak — the agent kernel
+  name: Netra Fused Agent Kernel (`fak`)
   links:
     - "https://github.com/anthony-chaudhary/fak"
 github:

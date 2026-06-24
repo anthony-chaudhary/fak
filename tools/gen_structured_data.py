@@ -75,8 +75,8 @@ def site_description() -> str:
     m = re.search(r"^description:\s*>-\s*\n((?:[ \t]+.*\n?)+)", cfg, re.MULTILINE)
     if m:
         return " ".join(line.strip() for line in m.group(1).splitlines() if line.strip())
-    return ("fak is an agent kernel: an in-process, default-deny permission gate for AI "
-            "agents fused with an addressable, bit-exact KV cache, written in Go.")
+    return ("Netra Fused Agent Kernel (`fak`): an in-process, default-deny permission "
+            "gate for AI agents fused with an addressable, bit-exact KV cache, in Go.")
 
 
 def social_image() -> str:
@@ -172,10 +172,10 @@ def build_site_schemas() -> list[dict]:
     url = site_url()
     desc = site_description()
     img = social_image()
-    name = "fak — the agent kernel"
+    name = "Netra Fused Agent Kernel (`fak`)"
     publisher = {
         "@type": "Organization",
-        "name": "fak",
+        "name": "Netra Systems",
         "url": url,
         "logo": img,
         "sameAs": [REPO_URL],
@@ -183,8 +183,8 @@ def build_site_schemas() -> list[dict]:
     software = {
         "@context": "https://schema.org",
         "@type": "SoftwareApplication",
-        "name": "fak",
-        "alternateName": ["the agent kernel", "agent tool firewall"],
+        "name": "Netra Fused Agent Kernel",
+        "alternateName": ["fak", "Fused Agent Kernel", "agent tool firewall"],
         "description": desc,
         "applicationCategory": "DeveloperApplication",
         "applicationSubCategory": "SecurityApplication",

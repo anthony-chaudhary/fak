@@ -1,4 +1,4 @@
-# LICENSING.md — the layered-licensing stack
+# Netra Fused Agent Kernel (`fak`) — the layered-licensing stack
 
 > This file replaces **decision-by-omission** (which silently defaults to
 > *donate-the-category*) with a deliberate, written choice. It is a statement of intent and

@@ -1,4 +1,4 @@
-# TRADEMARK.md — the "fak" wordmark and the "fak-certified" certification mark
+# Netra Fused Agent Kernel (`fak`) — the "fak" wordmark and "fak-certified" certification mark
 
 > **The one control lever a permissive license cannot erode.** Apache-2.0 §6 explicitly
 > does **not** grant trademark rights. So while anyone may use, fork, and commercialize the
