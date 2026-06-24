@@ -102,6 +102,17 @@ jobs:
           python tools/skill_frontmatter_lint_test.py
           python tools/skill_frontmatter_lint.py --check
 
+      # Context-tape visual renderer: the source-agnostic "how context assembles" tape
+      # (tools/context_tape.py) that reproduces the live demo panel for ANY data source —
+      # a synthetic scenario, a real session transcript, or an RSI keep/revert journal.
+      # The test locks the scenario-LCG PARITY with cmd/ctxdemo (per-agent totals), the
+      # EXACT per-turn usage bands (deduped on message.id), and well-formed/escaped SVG.
+      # Pure-stdlib and hermetic (no subprocess), green on Linux + Windows.
+      - name: context-tape visual renderer test (scenario parity · exact bands · well-formed SVG)
+        working-directory: ${{ github.workspace }}
+        run: |
+          python tools/context_tape_test.py
+
       - name: release-substrate tests
         working-directory: ${{ github.workspace }}
         run: |

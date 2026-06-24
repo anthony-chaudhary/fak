@@ -813,6 +813,7 @@ go test ./internal/codelint/ -count=1 -timeout 120s -run 'TestGoPackReportsParse
 ```bash
 Take a prompt with a per-request UUID at the head; move it to the tail and re-run the LCP analysis to reproduce the 0.3% -> 87% hit-rate jump described in the doc.
 python tools/cache_curve.py compound   # watch the frozen 99% ceiling collapse along the flex + tool-density axes
+python tools/context_tape.py trajectory <your-session>.jsonl --svg session.svg   # SEE the reused prefix dwarf the fresh tip, turn by turn, on YOUR own session (docs/explainers/context-tape-visuals.md)
 ```
 
 **Checkpoint:** Explain why a changed file causes a visible cache miss (recompute) rather than a silently stale answer, and the one condition (result cache keyed on call args alone) under which staleness CAN go silent; give the fix (key on content version).
