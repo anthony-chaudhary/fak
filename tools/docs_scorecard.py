@@ -64,7 +64,7 @@ SCHEMA = "fleet-docs-scorecard/1"
 
 # Repo-root-relative inputs (best-effort; a missing one degrades a check, never errors).
 VERSION_REL = "VERSION"
-AUTHORITY_REL = "fak/BENCHMARK-AUTHORITY.md"
+AUTHORITY_REL = "BENCHMARK-AUTHORITY.md"
 # Reachability is measured by link-BFS from the front doors. A core doc not
 # reachable from any of them is an "orphan". The doors THEMSELVES are entry
 # points, not destinations, so they are exempt from the orphan check (README is
@@ -88,30 +88,29 @@ CORE_DOCS: list[str] = [
     "INSTALL.md",
     "docs/index.md",
     # onboarding
-    "fak/GETTING-STARTED.md",
+    "GETTING-STARTED.md",
     "docs/fak/tutorial.md",
-    "fak/cmd/simpledemo/README.md",
+    "cmd/simpledemo/README.md",
     "docs/repro-packet.md",
-    "docs/adoption-playbook.md",
+    "docs/integrations/adopter-playbook.md",
     # conceptual
     "docs/concepts-and-story.md",
     "docs/explainers/policy-in-the-kernel.md",
     "docs/explainers/addressable-kv-cache.md",
     "docs/explainers/sota-optimizations.md",
-    "EXPLAINER-trust-floor-two-lenses-2026-06-17.md",
+    "docs/notes/EXPLAINER-trust-floor-two-lenses-2026-06-17.md",
     "docs/notes/SCALING-LAWS-OF-AGENTS-2026-06-19.md",
     # reference
-    "fak/ARCHITECTURE.md",
-    "fak/POLICY.md",
-    "fak/CLAIMS.md",
-    "fak/STATUS.md",
-    "fak/EXTENDING.md",
-    "fak/BENCHMARK-AUTHORITY.md",
+    "ARCHITECTURE.md",
+    "POLICY.md",
+    "CLAIMS.md",
+    "STATUS.md",
+    "EXTENDING.md",
+    "BENCHMARK-AUTHORITY.md",
     "docs/FAQ.md",
     # project meta
     "CONTRIBUTING.md",
     "SECURITY.md",
-    "fak/README.md",
 ]
 
 # Expected-topic coverage: a topic is COVERED if at least one of its candidate
@@ -119,14 +118,14 @@ CORE_DOCS: list[str] = [
 # hole in what a docs set must answer. Paths, not content-sniffing, so it is
 # deterministic and obvious to audit.
 EXPECTED_TOPICS: list[tuple[str, list[str]]] = [
-    ("install", ["INSTALL.md", "fak/GETTING-STARTED.md", "install.sh"]),
+    ("install", ["INSTALL.md", "GETTING-STARTED.md", "install.sh"]),
     ("quickstart", ["START-HERE.md", "docs/fak/tutorial.md"]),
-    ("architecture", ["fak/ARCHITECTURE.md"]),
-    ("security_threat_model", ["SECURITY.md", "fak/POLICY.md"]),
+    ("architecture", ["ARCHITECTURE.md"]),
+    ("security_threat_model", ["SECURITY.md", "POLICY.md"]),
     ("contributing", ["CONTRIBUTING.md"]),
     ("faq", ["docs/FAQ.md"]),
-    ("benchmarks_evidence", ["fak/BENCHMARK-AUTHORITY.md", "fak/CLAIMS.md"]),
-    ("extending_api", ["fak/EXTENDING.md"]),
+    ("benchmarks_evidence", ["BENCHMARK-AUTHORITY.md", "CLAIMS.md"]),
+    ("extending_api", ["EXTENDING.md"]),
     ("concepts", ["docs/concepts-and-story.md"]),
     ("license_cite", ["LICENSE", "CITATION.cff"]),
 ]
