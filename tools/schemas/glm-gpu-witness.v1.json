@@ -1,0 +1,108 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "benchmark/glm-gpu-witness.v1.json",
+  "title": "GLM GPU Witness Record",
+  "description": "Machine-readable record of an on-device GLM-5.2 (glm_moe_dsa) pure-kernel GPU witness run, parsed from the dgx_glm_gpu_witness.sh log. Each per-test cosine is the output of a `go test -tags cuda` gate that FAILS unless the cosine clears its floor, so the per-test rc (and overall rc) is a kernel-enforced assertion, not a hand-transcribed self-report. NOTE on DOS: `dos verify` binds the COMMIT that carries this record (git ancestry + stamp grammar); it does not open or re-check the cosine number. content_sha256 anchors the record to the exact raw log it was parsed from.",
+  "type": "object",
+  "required": [
+    "schema",
+    "utc",
+    "machine_id",
+    "head_sha",
+    "arch",
+    "model",
+    "tests",
+    "rc",
+    "verdict",
+    "content_sha256",
+    "log_bytes"
+  ],
+  "properties": {
+    "schema": {
+      "type": "string",
+      "const": "glm-gpu-witness/1"
+    },
+    "utc": {
+      "type": "string",
+      "format": "date-time",
+      "description": "ISO 8601 UTC stamp, injected by the caller (never read from the box wall clock, for determinism)"
+    },
+    "machine_id": {
+      "type": "string",
+      "description": "Catalog machine id. 'dgx' for the raw private record; 'a100' for the scrubbed public rollup."
+    },
+    "node": {
+      "type": "string",
+      "description": "Hardware hostname (private only; DROPPED in the public a100 rollup). A hardware name -- keep out of public *.md prose."
+    },
+    "head_sha": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{7,40}$",
+      "description": "origin/main short sha that was cloned + built on the box (git rev-parse --short HEAD)"
+    },
+    "head_subject": {
+      "type": "string",
+      "description": "Commit subject of head_sha (optional; populated when available)"
+    },
+    "arch": {
+      "type": "string",
+      "description": "CUDA compute capability the kernels were built for, e.g. sm_80"
+    },
+    "environment": {
+      "type": "object",
+      "description": "Generic, scrub-safe environment facts (no hardware hostname)",
+      "properties": {
+        "cuda_version": {"type": "string"},
+        "go_version": {"type": "string"},
+        "gpu_count": {"type": "integer", "minimum": 1},
+        "gpu_memory_gb": {"type": "integer", "minimum": 1},
+        "fak_cuda_arch": {"type": "string"}
+      }
+    },
+    "build": {
+      "type": "object",
+      "properties": {
+        "libfakcuda_bytes": {"type": "integer", "minimum": 1},
+        "ok": {"type": "boolean"}
+      }
+    },
+    "model": {
+      "type": "object",
+      "required": ["name", "precision"],
+      "properties": {
+        "name": {"type": "string", "description": "e.g. glm_moe_dsa"},
+        "precision": {"type": "string", "enum": ["f32", "f16", "bf16", "q8", "q4", "int8"]}
+      }
+    },
+    "tests": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": ["test_name", "rc", "verdict"],
+        "properties": {
+          "test_name": {"type": "string"},
+          "path_exercised": {"type": "string", "description": "Human description of what runs on the GPU for this test"},
+          "cosine": {"type": ["number", "null"], "description": "Device-vs-host cosine; null for set-equality-gated tests"},
+          "gate": {"type": ["number", "null"], "description": "Cosine floor the test enforces (class=approx), if known"},
+          "argmax_cpu": {"type": ["integer", "null"]},
+          "argmax_device": {"type": ["integer", "null"]},
+          "set_equality": {"type": ["boolean", "null"], "description": "For index-select: device key set == host key set"},
+          "tier": {"type": "string"},
+          "class": {"type": "string", "description": "e.g. approx or exact"},
+          "rc": {"type": "integer"},
+          "verdict": {"type": "string", "enum": ["PASS", "FAIL"]}
+        }
+      }
+    },
+    "rc": {"type": "integer", "description": "Overall rc (0 iff every test passed); matches the runner DONE.<rc> sentinel"},
+    "verdict": {"type": "string", "enum": ["PASS", "FAIL"]},
+    "content_sha256": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$",
+      "description": "SHA256 over the exact raw witness log this record was parsed from -- the diffable integrity anchor and the bridge split-fence detector"
+    },
+    "log_bytes": {"type": "integer", "minimum": 0},
+    "record_tool": {"type": "string", "description": "Emitter identity + version, e.g. glm_witness_record.py@1"}
+  }
+}
