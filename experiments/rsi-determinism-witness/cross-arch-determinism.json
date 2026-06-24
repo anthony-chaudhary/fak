@@ -1,0 +1,40 @@
+{
+  "$schema": "fak.rsi-determinism-witness.v1",
+  "what": "The RSI loop's keep/revert KPI (internal/rsiloop LRU hit-rate over a fixed reference trace) reproduces BIT-FOR-BIT across architecture, OS, Go toolchain, and fak version. This is the empirical backing for docs/rsi-loop.md's claim that 'the keep/revert decision is the same on a Mac and a Windows box, so a KEEP can't be a one-box fluke' and for tools/rsi_maturity_scorecard.py's deterministic_metric criterion.",
+  "collected_utc": "2026-06-24",
+  "metric": "lru_hit_rate over 528 accesses (cmd/kpiprobe -dump)",
+  "machines": [
+    {"id": "workstation-a", "arch": "x86_64", "os": "Windows", "go": "1.26.3", "fak_module": "main (tip)"},
+    {"id": "node-macos-a", "arch": "arm64", "os": "macOS", "go": "1.23.1", "fak_version": "0.31.0", "fak_head": "374776a"}
+  ],
+  "bit_identical": true,
+  "diff_lines": 0,
+  "curve": [
+    {"size": 1,  "kpi": 0.000000},
+    {"size": 2,  "kpi": 0.011364},
+    {"size": 3,  "kpi": 0.034091},
+    {"size": 4,  "kpi": 0.068182},
+    {"size": 5,  "kpi": 0.107955},
+    {"size": 6,  "kpi": 0.157197},
+    {"size": 7,  "kpi": 0.215909},
+    {"size": 8,  "kpi": 0.284091},
+    {"size": 9,  "kpi": 0.361742},
+    {"size": 10, "kpi": 0.467803},
+    {"size": 11, "kpi": 0.581439},
+    {"size": 12, "kpi": 0.706439},
+    {"size": 13, "kpi": 0.727273},
+    {"size": 14, "kpi": 0.774621},
+    {"size": 15, "kpi": 0.803030},
+    {"size": 16, "kpi": 0.823864}
+  ],
+  "closed_loop_witness_workstation-a": {
+    "note": "cmd/rsiloop -mode improve -candidates 6,8,8,10, baseline re-derived off latest main; every suite/truth/cand field DERIVED from a real detached-worktree measurement, not hand-fed",
+    "cycles": [
+      {"cycle": 1, "DefaultCacheSize": 6,  "base": 0.068182, "cand": 0.157197, "decision": "KEEP"},
+      {"cycle": 2, "DefaultCacheSize": 8,  "base": 0.157197, "cand": 0.284091, "decision": "KEEP"},
+      {"cycle": 3, "DefaultCacheSize": 8,  "base": 0.284091, "cand": 0.284091, "decision": "REVERT", "why": "no strict gain — reverted despite green suite + clean tree"},
+      {"cycle": 4, "DefaultCacheSize": 10, "base": 0.284091, "cand": 0.467803, "decision": "KEEP"}
+    ],
+    "summary": "cycles=4 kept=3 final_baseline=0.467803 escalated=false"
+  }
+}
