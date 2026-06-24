@@ -1,0 +1,45 @@
+{
+  "schema": "fak.qwen36-standup-samples.v1",
+  "generated_at": "2026-06-24T21:09:55Z",
+  "node": "gpu-server-lab",
+  "base_url": "http://127.0.0.1:30000/v1",
+  "model": "Qwen/Qwen3.6-27B",
+  "server": {
+    "stack": "sglang",
+    "tp": 8,
+    "mem_fraction_static": 0.85,
+    "max_model_len": 262144,
+    "owned_by": "sglang"
+  },
+  "decode_params": { "temperature": 0 },
+  "note": "TEXT fields are excerpts captured at standup (truncated ~500 chars for display); finish_reason=length because the sample max_tokens caps were small. Qwen3.6-27B is a reasoning model and emits an explicit 'Thinking Process' chain before its answer.",
+  "samples": [
+    {
+      "prompt": "What is the capital of France? Answer in one short sentence.",
+      "prompt_tokens": 23,
+      "completion_tokens": 64,
+      "duration_s": 1.47,
+      "e2e_tok_s": 43.5,
+      "finish_reason": "length",
+      "text_excerpt": "Thinking Process:  1.  **Identify the core question:** The user is asking for the capital of France. 2.  **Retrieve knowledge:** Access geographical knowledge about France.     *   Fact: The capital of France is Paris. 3.  **Analyze constraints:**"
+    },
+    {
+      "prompt": "Write a Python function fib(n) that returns the nth Fibonacci number.",
+      "prompt_tokens": 24,
+      "completion_tokens": 256,
+      "duration_s": 2.73,
+      "e2e_tok_s": 93.9,
+      "finish_reason": "length",
+      "text_excerpt": "Here's a thinking process:  1.  **Understand the User Request:** The user wants a Python function `fib(n)` that returns the nth Fibonacci number. Need to clarify what \"nth\" means: Usually, Fibonacci sequence starts with F(0) = 0, F(1) = 1, F(2) = 1, F(3) = 2, etc. ... Naive recursion is O(2^n), which is bad. Iterative is O(n) time and O(1) space."
+    },
+    {
+      "prompt": "In one sentence, explain why the sky is blue.",
+      "prompt_tokens": 21,
+      "completion_tokens": 96,
+      "duration_s": 1.23,
+      "e2e_tok_s": 78.2,
+      "finish_reason": "length",
+      "text_excerpt": "Here's a thinking process:  1.  **Analyze User Input:** Question: Why is the sky blue? Constraint: In one sentence. Goal: Provide a clear, accurate, and concise explanation within the constraint.  2.  **Identify Key Scientific Concept:** The sky appears blue due to Rayleigh scattering. Sunlight contains all colors of the visible spectrum."
+    }
+  ]
+}

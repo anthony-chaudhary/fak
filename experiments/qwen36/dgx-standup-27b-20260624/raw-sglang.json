@@ -1,0 +1,336 @@
+{
+  "schema": "fak.dgx-endpoint-bench.v1",
+  "app_version": "0.24.0",
+  "generated_at": "2026-06-24T21:13:16.514438Z",
+  "benchmark": {
+    "base_url": "http://127.0.0.1:30000/v1",
+    "model": "Qwen/Qwen3.6-27B",
+    "stack": "raw-sglang",
+    "hardware": "dgx-a100-40gb-tp8",
+    "concurrency": [
+      1,
+      4,
+      8,
+      16,
+      32,
+      64
+    ],
+    "requests_per_concurrency": 24,
+    "workload": "/srv/fleet/fak/experiments/agent-live/production-workload.json",
+    "prompt_cap": 0,
+    "completion_cap": 0,
+    "prompt_scale": 1.0,
+    "completion_scale": 1.0,
+    "workload_sha256": "8d818d350176c88d2e731b8720347ee7db10229424563b6d971d8ed87dea7c94",
+    "cases_sha256": "79137b9e599404f99e4e879719e862a98307a44b41615952625403feb049d919",
+    "request_template": "chat.completions.system_user.temperature0.max_tokens_case.marker.v2",
+    "system_prompt_sha256": "95f87392a1501408c04421c0644b65d837771a9a2170d4e5fb95d7e852feef4f",
+    "response_marker_required": false,
+    "response_marker_prefix": "FAK_DGX_REQ_",
+    "case_count": 6,
+    "dry_run": false
+  },
+  "provenance": {
+    "capture_host": "gpu-server-lab",
+    "platform": "Linux-6.8.0-124-generic-x86_64-with-glibc2.39",
+    "python": "3.12.3",
+    "argv": [
+      "/srv/fleet/tools/dgx_endpoint_load.py",
+      "--base-url",
+      "http://127.0.0.1:30000/v1",
+      "--model",
+      "Qwen/Qwen3.6-27B",
+      "--stack",
+      "raw-sglang",
+      "--hardware",
+      "dgx-a100-40gb-tp8",
+      "--concurrency",
+      "1,4,8,16,32,64",
+      "--requests-per-concurrency",
+      "24",
+      "--workload",
+      "/srv/fleet/fak/experiments/agent-live/production-workload.json",
+      "--api-key-env",
+      "NONE_LOCAL",
+      "--max-error-rate",
+      "0.98",
+      "--no-require-response-marker",
+      "--out",
+      "/tmp/fakgpu/bench-raw-sglang.json"
+    ],
+    "git": {
+      "rev": null,
+      "dirty": null
+    },
+    "env": {},
+    "nvidia_smi": {
+      "available": true,
+      "query": {
+        "ok": true,
+        "returncode": 0,
+        "stdout": "0, NVIDIA A100-SXM4-40GB, GPU-4d411923-efc8-9618-288d-535785f9e904, 40960, 580.159.03\n1, NVIDIA A100-SXM4-40GB, GPU-9b110c57-4598-ccca-84c4-42c50bbd52b4, 40960, 580.159.03\n2, NVIDIA A100-SXM4-40GB, GPU-4a3308ea-9b82-e4d2-bce9-aaf5e10ecd78, 40960, 580.159.03\n3, NVIDIA A100-SXM4-40GB, GPU-7009bce8-6342-f003-4d1c-fdf38b28a427, 40960, 580.159.03\n4, NVIDIA A100-SXM4-40GB, GPU-91414d2f-d903-46f6-688f-aaeef51d0f8f, 40960, 580.159.03\n5, NVIDIA A100-SXM4-40GB, GPU-64315e68-a056-4aab-4401-316b77e9e8cd, 40960, 580.159.03\n6, NVIDIA A100-SXM4-40GB, GPU-99d7fa53-fa9b-6b79-aedf-b6cf32289376, 40960, 580.159.03\n7, NVIDIA A100-SXM4-40GB, GPU-74ba046f-b64f-5462-17fc-30533124299b, 40960, 580.159.03",
+        "stderr": "",
+        "cmd": [
+          "/usr/bin/nvidia-smi",
+          "--query-gpu=index,name,uuid,memory.total,driver_version",
+          "--format=csv,noheader,nounits"
+        ]
+      },
+      "topo": {
+        "ok": true,
+        "returncode": 0,
+        "stdout": "\u001b[4mGPU0\tGPU1\tGPU2\tGPU3\tGPU4\tGPU5\tGPU6\tGPU7\tNIC0\tNIC1\tNIC2\tNIC3\tNIC4\tNIC5\tNIC6\tNIC7\tNIC8\tNIC9\tNIC10\tNIC11\tCPU Affinity\tNUMA Affinity\tGPU NUMA ID\u001b[0m\nGPU0\t X \tNV12\tNV12\tNV12\tNV12\tNV12\tNV12\tNV12\tPXB\tPXB\tSYS\tSYS\tSYS\tSYS\tSYS\tSYS\tSYS\tSYS\tSYS\tSYS\t48-63,176-191\t3\t\tN/A\nGPU1\tNV12\t X \tNV12\tNV12\tNV12\tNV12\tNV12\tNV12\tPXB\tPXB\tSYS\tSYS\tSYS\tSYS\tSYS\tSYS\tSYS\tSYS\tSYS\tSYS\t48-63,176-191\t3\t\tN/A\nGPU2\tNV12\tNV12\t X \tNV12\tNV12\tNV12\tNV12\tNV12\tSYS\tSYS\tPXB\tPXB\tSYS\tSYS\tSYS\tSYS\tSYS\tSYS\tSYS\tSYS\t16-31,144-159\t1\t\tN/A\nGPU3\tNV12\tNV12\tNV12\t X \tNV12\tNV12\tNV12\tNV12\tSYS\tSYS\tPXB\tPXB\tSYS\tSYS\tSYS\tSYS\tSYS\tSYS\tSYS\tSYS\t16-31,144-159\t1\t\tN/A\nGPU4\tNV12\tNV12\tNV12\tNV12\t X \tNV12\tNV12\tNV12\tSYS\tSYS\tSYS\tSYS\tSYS\tSYS\tPXB\tPXB\tSYS\tSYS\tSYS\tSYS\t112-127,240-255\t7\t\tN/A\nGPU5\tNV12\tNV12\tNV12\tNV12\tNV12\t X \tNV12\tNV12\tSYS\tSYS\tSYS\tSYS\tSYS\tSYS\tPXB\tPXB\tSYS\tSYS\tSYS\tSYS\t112-127,240-255\t7\t\tN/A\nGPU6\tNV12\tNV12\tNV12\tNV12\tNV12\tNV12\t X \tNV12\tSYS\tSYS\tSYS\tSYS\tSYS\tSYS\tSYS\tSYS\tPXB\tPXB\tSYS\tSYS\t80-95,208-223\t5\t\tN/A\nGPU7\tNV12\tNV12\tNV12\tNV12\tNV12\tNV12\tNV12\t X \tSYS\tSYS\tSYS\tSYS\tSYS\tSYS\tSYS\tSYS\tPXB\tPXB\tSYS\tSYS\t80-95,208-223\t5\t\tN/A\nNIC0\tPXB\tPXB\tSYS\tSYS\tSYS\tSYS\tSYS\tSYS\t X \tPXB\tSYS\tSYS\tSYS\tSYS\tSYS\tSYS\tSYS\tSYS\tSYS\tSYS\t\t\t\t\nNIC1\tPXB\tPXB\tSYS\tSYS\tSYS\tSYS\tSYS\tSYS\tPXB\t X \tSYS\tSYS\tSYS\tSYS\tSYS\tSYS\tSYS\tSYS\tSYS\tSYS\t\t\t\t\nNIC2\tSYS\tSYS\tPXB\tPXB\tSYS\tSYS\tSYS\tSYS\tSYS\tSYS\t X \tPXB\tSYS\tSYS\tSYS\tSYS\tSYS\tSYS\tSYS\tSYS\t\t\t\t\nNIC3\tSYS\tSYS\tPXB\tPXB\tSYS\tSYS\tSYS\tSYS\tSYS\tSYS\tPXB\t X \tSYS\tSYS\tSYS\tSYS\tSYS\tSYS\tSYS\tSYS\t\t\t\t\nNIC4\tSYS\tSYS\tSYS\tSYS\tSYS\tSYS\tSYS\tSYS\tSYS\tSYS\tSYS\tSYS\t X \tPIX\tSYS\tSYS\tSYS\tSYS\tSYS\tSYS\t\t\t\t\nNIC5\tSYS\tSYS\tSYS\tSYS\tSYS\tSYS\tSYS\tSYS\tSYS\tSYS\tSYS\tSYS\tPIX\t X \tSYS\tSYS\tSYS\tSYS\tSYS\tSYS\t\t\t\t\nNIC6\tSYS\tSYS\tSYS\tSYS\tPXB\tPXB\tSYS\tSYS\tSYS\tSYS\tSYS\tSYS\tSYS\tSYS\t X \tPXB\tSYS\tSYS\tSYS\tSYS\t\t\t\t\nNIC7\tSYS\tSYS\tSYS\tSYS\tPXB\tPXB\tSYS\tSYS\tSYS\tSYS\tSYS\tSYS\tSYS\tSYS\tPXB\t X \tSYS\tSYS\tSYS\tSYS\t\t\t\t\nNIC8\tSYS\tSYS\tSYS\tSYS\tSYS\tSYS\tPXB\tPXB\tSYS\tSYS\tSYS\tSYS\tSYS\tSYS\tSYS\tSYS\t X \tPXB\tSYS\tSYS\t\t\t\t\nNIC9\tSYS\tSYS\tSYS\tSYS\tSYS\tSYS\tPXB\tPXB\tSYS\tSYS\tSYS\tSYS\tSYS\tSYS\tSYS\tSYS\tPXB\t X \tSYS\tSYS\t\t\t\t\nNIC10\tSYS\tSYS\tSYS\tSYS\tSYS\tSYS\tSYS\tSYS\tSYS\tSYS\tSYS\tSYS\tSYS\tSYS\tSYS\tSYS\tSYS\tSYS\t X \tPIX\t\t\t\t\nNIC11\tSYS\tSYS\tSYS\tSYS\tSYS\tSYS\tSYS\tSYS\tSYS\tSYS\tSYS\tSYS\tSYS\tSYS\tSYS\tSYS\tSYS\tSYS\tPIX\t X \t\t\t\t\n\nLegend:\n\n  X    = Self\n  SYS  = Connection traversing PCIe as well as the SMP interconnect between NUMA nodes (e.g., QPI/UPI)\n  NODE = Connection traversing PCIe as well as the interconnect between PCIe Host Bridges within a NUMA node\n  PHB  = Connection traversing PCIe as well as a PCIe Host Bridge (typically the CPU)\n  PXB  = Connection traversing multiple PCIe bridges (without traversing the PCIe Host Bridge)\n  PIX  = Connection traversing at most a single PCIe bridge\n  NV#  = Connection traversing a bonded set of # NVLinks\n\nNIC Legend:\n\n  NIC0: mlx5_0\n  NIC1: mlx5_1\n  NIC2: mlx5_2\n  NIC3: mlx5_3\n  NIC4: mlx5_4\n  NIC5: mlx5_5\n  NIC6: mlx5_6\n  NIC7: mlx5_7\n  NIC8: mlx5_8\n  NIC9: mlx5_9\n  NIC10: mlx5_10\n  NIC11: mlx5_11",
+        "stderr": "",
+        "cmd": [
+          "/usr/bin/nvidia-smi",
+          "topo",
+          "-m"
+        ]
+      }
+    },
+    "auth": {
+      "api_key_env": "NONE_LOCAL",
+      "auth_header": false
+    },
+    "tags": {},
+    "models_probe": {
+      "ok": true,
+      "status": 200,
+      "json": {
+        "object": "list",
+        "data": [
+          {
+            "id": "Qwen/Qwen3.6-27B",
+            "object": "model",
+            "created": 1782335597,
+            "owned_by": "sglang",
+            "root": "Qwen/Qwen3.6-27B",
+            "parent": null,
+            "max_model_len": 262144
+          }
+        ]
+      },
+      "raw_prefix": "{\"object\":\"list\",\"data\":[{\"id\":\"Qwen/Qwen3.6-27B\",\"object\":\"model\",\"created\":1782335597,\"owned_by\":\"sglang\",\"root\":\"Qwen/Qwen3.6-27B\",\"parent\":null,\"max_model_len\":262144}]}"
+    }
+  },
+  "cases": [
+    {
+      "version": "0.24.0",
+      "name": "offline-mock-fak",
+      "source": "fak/experiments/agent-live/offline-mock.json",
+      "arm": "fak",
+      "prompt_tokens": 1501,
+      "completion_tokens": 184,
+      "recorded_prompt_tokens": 1501,
+      "recorded_completion_tokens": 184
+    },
+    {
+      "version": "0.24.0",
+      "name": "offline-mock-baseline",
+      "source": "fak/experiments/agent-live/offline-mock.json",
+      "arm": "baseline",
+      "prompt_tokens": 2555,
+      "completion_tokens": 232,
+      "recorded_prompt_tokens": 2555,
+      "recorded_completion_tokens": 232
+    },
+    {
+      "version": "0.24.0",
+      "name": "qwen-0.5b-fak",
+      "source": "fak/experiments/agent-live/local-qwen-0.5b.json",
+      "arm": "fak",
+      "prompt_tokens": 1640,
+      "completion_tokens": 229,
+      "recorded_prompt_tokens": 1640,
+      "recorded_completion_tokens": 229
+    },
+    {
+      "version": "0.24.0",
+      "name": "qwen-1.5b-fak",
+      "source": "fak/experiments/agent-live/local-qwen-1.5b.json",
+      "arm": "fak",
+      "prompt_tokens": 1690,
+      "completion_tokens": 269,
+      "recorded_prompt_tokens": 1690,
+      "recorded_completion_tokens": 269
+    },
+    {
+      "version": "0.24.0",
+      "name": "gemini-flash-fak",
+      "source": "fak/experiments/agent-live/gemini-2.5-flash-t1.json",
+      "arm": "fak",
+      "prompt_tokens": 4100,
+      "completion_tokens": 208,
+      "recorded_prompt_tokens": 4100,
+      "recorded_completion_tokens": 208
+    },
+    {
+      "version": "0.24.0",
+      "name": "gemini-flash-lite-fak",
+      "source": "fak/experiments/agent-live/gemini-2.5-flash-lite-t1.json",
+      "arm": "fak",
+      "prompt_tokens": 2942,
+      "completion_tokens": 204,
+      "recorded_prompt_tokens": 2942,
+      "recorded_completion_tokens": 204
+    }
+  ],
+  "points": [
+    {
+      "version": "0.24.0",
+      "concurrency": 1,
+      "requests": 24,
+      "ok": 24,
+      "errors": 0,
+      "error_rate": 0.0,
+      "elapsed_s": 26.533159822924063,
+      "latency_ms": {
+        "p50": 321.81605405639857,
+        "p95": 2903.721145493909,
+        "p99": 2948.911202889867,
+        "max": 2949.0159801207483
+      },
+      "prompt_tokens": 77962,
+      "completion_tokens": 2063,
+      "total_tokens": 80025,
+      "requests_per_sec": 0.9045285280822276,
+      "prompt_tokens_per_sec": 2938.285546097776,
+      "completion_tokens_per_sec": 77.75176472640148,
+      "total_tokens_per_sec": 3016.0373108241774,
+      "response_marker_required": false,
+      "response_marker_ok": 10,
+      "response_marker_errors": 0,
+      "error_samples": []
+    },
+    {
+      "version": "0.24.0",
+      "concurrency": 4,
+      "requests": 24,
+      "ok": 24,
+      "errors": 0,
+      "error_rate": 0.0,
+      "elapsed_s": 11.020551333902404,
+      "latency_ms": {
+        "p50": 278.5105365328491,
+        "p95": 4653.022150800097,
+        "p99": 4856.534753702581,
+        "max": 4905.614441959187
+      },
+      "prompt_tokens": 77962,
+      "completion_tokens": 2115,
+      "total_tokens": 80077,
+      "requests_per_sec": 2.177749485742066,
+      "prompt_tokens_per_sec": 7074.23772530929,
+      "completion_tokens_per_sec": 191.91417343101958,
+      "total_tokens_per_sec": 7266.15189874031,
+      "response_marker_required": false,
+      "response_marker_ok": 11,
+      "response_marker_errors": 0,
+      "error_samples": []
+    },
+    {
+      "version": "0.24.0",
+      "concurrency": 8,
+      "requests": 24,
+      "ok": 24,
+      "errors": 0,
+      "error_rate": 0.0,
+      "elapsed_s": 9.07625473709777,
+      "latency_ms": {
+        "p50": 323.5982364276424,
+        "p95": 6306.557419919409,
+        "p99": 6638.345608615782,
+        "max": 6737.071470124647
+      },
+      "prompt_tokens": 77962,
+      "completion_tokens": 2351,
+      "total_tokens": 80313,
+      "requests_per_sec": 2.644262495399535,
+      "prompt_tokens_per_sec": 8589.66636109744,
+      "completion_tokens_per_sec": 259.02754694517944,
+      "total_tokens_per_sec": 8848.693908042618,
+      "response_marker_required": false,
+      "response_marker_ok": 11,
+      "response_marker_errors": 0,
+      "error_samples": []
+    },
+    {
+      "version": "0.24.0",
+      "concurrency": 16,
+      "requests": 24,
+      "ok": 24,
+      "errors": 0,
+      "error_rate": 0.0,
+      "elapsed_s": 7.195515624945983,
+      "latency_ms": {
+        "p50": 5784.538932028227,
+        "p95": 6888.566645898391,
+        "p99": 6896.908825163264,
+        "max": 6898.995941970497
+      },
+      "prompt_tokens": 77962,
+      "completion_tokens": 3626,
+      "total_tokens": 81588,
+      "requests_per_sec": 3.335410726758052,
+      "prompt_tokens_per_sec": 10834.803794979634,
+      "completion_tokens_per_sec": 503.92497063436235,
+      "total_tokens_per_sec": 11338.728765613998,
+      "response_marker_required": false,
+      "response_marker_ok": 17,
+      "response_marker_errors": 0,
+      "error_samples": []
+    },
+    {
+      "version": "0.24.0",
+      "concurrency": 32,
+      "requests": 32,
+      "ok": 32,
+      "errors": 0,
+      "error_rate": 0.0,
+      "elapsed_s": 7.903989427955821,
+      "latency_ms": {
+        "p50": 7094.489158014767,
+        "p95": 7877.135418541729,
+        "p99": 7893.955913879909,
+        "max": 7896.75214397721
+      },
+      "prompt_tokens": 102945,
+      "completion_tokens": 5574,
+      "total_tokens": 108519,
+      "requests_per_sec": 4.048588411165935,
+      "prompt_tokens_per_sec": 13024.43543710866,
+      "completion_tokens_per_sec": 705.2134938699662,
+      "total_tokens_per_sec": 13729.648930978627,
+      "response_marker_required": false,
+      "response_marker_ok": 31,
+      "response_marker_errors": 0,
+      "error_samples": []
+    },
+    {
+      "version": "0.24.0",
+      "concurrency": 64,
+      "requests": 64,
+      "ok": 64,
+      "errors": 0,
+      "error_rate": 0.0,
+      "elapsed_s": 13.094960956834257,
+      "latency_ms": {
+        "p50": 12169.592407532036,
+        "p95": 13025.416030129418,
+        "p99": 13074.666896404233,
+        "max": 13085.55238111876
+      },
+      "prompt_tokens": 204941,
+      "completion_tokens": 10744,
+      "total_tokens": 215685,
+      "requests_per_sec": 4.8873761602625025,
+      "prompt_tokens_per_sec": 15650.371213443088,
+      "completion_tokens_per_sec": 820.4682729040677,
+      "total_tokens_per_sec": 16470.839486347155,
+      "response_marker_required": false,
+      "response_marker_ok": 61,
+      "response_marker_errors": 0,
+      "error_samples": []
+    }
+  ]
+}
