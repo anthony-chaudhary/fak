@@ -187,9 +187,13 @@ different axis:
   live model calls where tractable.** fanbench extends the same reuse story to the
   one-master-goal fan-out topology and very long shared prefixes, but its prefix-scaling
   dollar rows are modeled token economics.
-- **Task quality is still separate.** Wider fan-out and longer context can save repeated
-  work while still producing duplicated, irrelevant, or low-quality subagent output. A
-  real task-success / coverage@N lane is tracked in #106.
+- **Task quality is still separate — and now measured on a litmus axis (#429).** Wider
+  fan-out and longer context can save repeated work while still producing duplicated,
+  irrelevant, or low-quality subagent output. §5 makes this concrete: a controlled-litmus
+  coverage@N / realized@N / matched-budget-control lane
+  (`experiments/fanout/taskquality-litmus.json`) shows fan-out saving cost while a
+  matched-budget single agent matches or beats it on coverage. The real-model half of the
+  seam (#106) stays open.
 
 ---
 
@@ -246,10 +250,13 @@ path and added width buys little wall-clock — the unmapped high-N knee, made v
 
 This is a **latency/throughput** saturation. The *quality* inversion the literature
 reports (realized accuracy peaks then declines with an imperfect verifier; "more agents ≠
-better") is a **task-success** phenomenon and is **out of scope** here — fanbench measures
-kernel cost, not goal correctness (no ground-truth sub-results). See the research brief §5–6
-for that axis and the documented future seams (coverage@N / realized@N, MAST failure
-tagging, hierarchical depth>1, parallel-vs-sequential at matched budget).
+better") is a **task-success** phenomenon, on a different axis from this latency knee —
+fanbench's cost sweep measures kernel cost, not goal correctness (no ground-truth
+sub-results). That quality axis is now its own controlled-litmus lane in **§5** (#429:
+coverage@N / realized@N / matched-budget control with ground-truth atoms), which shows the
+realized-accuracy inversion the latency knee here cannot. See also the research brief §5–6
+for the published anchors and the remaining seams (MAST failure tagging, hierarchical
+depth>1, parallel-vs-sequential at matched budget).
 
 ---
 
@@ -277,7 +284,88 @@ keeps the old single-P run. `-prefixes smoke,small,medium,long,big` expands to
 `-model-config` (`max_position_embeddings` / `model_max_length`) when provided, otherwise
 `-model-context` (default 131,072).
 
-## §5 — Tracked limitations and next steps
+## §5 — Task-quality litmus: does fan-out improve the ANSWER? (#429)
+
+Everything above prices **kernel cost geometry** — reuse, dedup, prefix economics,
+latency. It is silent on the question a reader actually cares about: does fanning wider
+make the *answer better*? The research brief (§8) lists "real task success / coverage@N /
+realized@N" as an explicit out-of-scope seam precisely because cost geometry and task
+quality are **different axes** — and blending them is the most common multi-agent
+benchmark error. This section keeps them apart on purpose.
+
+`tools/fanout_taskquality.py` runs a **controlled litmus** task suite over the same flat
+fan-out: one master goal whose complete solution is a known ground-truth set of `G=12`
+sub-result *atoms*. N sub-agents (4 sub-turns each, homogeneous pool) draw atoms, an
+imperfect verifier/fold selects from their outputs, and a fraction are fed an adversarial
+tool result. Each task row is **joined to the real fanbench cost cell for the same N**
+(`coverage`/`realized` next to the MEASURED `cross_uplift` / `tax_clawed_back` /
+`parallel_speedup`), so the artifact literally connects a litmus task run to the
+fanbench-like N grid. Artifact: `experiments/fanout/taskquality-litmus.json` (+ `.csv`),
+64 seeded trials, medians. Reproduce / gate (byte-identical re-run, same discipline as the
+pscale probe): `python tools/fanout_taskquality.py --check`.
+
+> **HONEST FRAME — this is `[SIMULATED]`, NOT a real-model run.** The task *outcomes* are
+> a transparent knobbed model grounded in published anchors — homogeneous pools saturate
+> ~4 agents (Agent Forest, [arXiv:2402.05120](https://arxiv.org/html/2402.05120v1));
+> imperfect-verifier realized accuracy peaks then declines, compute-optimal K≤5
+> ([arXiv:2411.17501](https://arxiv.org/html/2411.17501v1)); step-repetition is the single
+> most frequent MAST failure mode at 15.7% ([arXiv:2503.13657](https://arxiv.org/abs/2503.13657));
+> naive MAS sits ~33–59% correct. The injection arms are grounded in the **real** quarantine
+> evidence in [`LIVE-RESULTS.md`](LIVE-RESULTS.md) (Gemini / local Qwen: poisoned tool output
+> reaches the naive baseline; fak quarantines it). The cost columns are joined **verbatim**
+> from the measured `fanbench-research.csv`. This lane proves the cost/quality **separation**;
+> it does **not** prove real-model quality.
+
+Medians over 64 trials (`experiments/fanout/taskquality-litmus.csv`):
+
+| N | coverage@N | realized@N | verifier_success | duplicate_work | inj_contained fak/naive | **matched-budget single-agent coverage** | (joined) tax_clawed_back | (joined) parallel_speedup |
+|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| 1   | 0.083 | 0.083 | 1.00  | 0.00 | 1.00 / —    | **0.250** | 0%    | 1.0   |
+| 4   | 0.250 | 0.167 | 1.00  | 0.25 | 1.00 / 0.00 | **0.500** | 54.8% | 3.0   |
+| 16  | 0.583 | 0.500 | 1.00  | 0.53 | 1.00 / 0.00 | **0.833** | 60.4% | 11.0  |
+| 64  | 0.917 | **0.667** | 1.00  | 0.82 | 1.00 / 0.00 | **1.000** | 61.4% | 29.0  |
+| 256 | 1.000 | 0.583 | 0.875 | 0.95 | 1.00 / 0.00 | **1.000** | 61.7% | 57.7  |
+
+Read five things — and note that **none of them is "wider fan-out makes a better answer"**:
+
+1. **Coverage@N grows, then SATURATES.** Distinct ground-truth atoms reached climbs
+   log-linearly (0.08 → 1.0 by N≈64) and then can rise no further — the homogeneous-pool
+   knee the literature reports at ~4 agents, made visible against the cost curve.
+2. **Realized@N PEAKS then DECLINES.** The verifier/fold is imperfect: by N=64 it surfaces
+   66.7% of atoms, but by N=256 the decoy pile from failed sub-agents crowds correct atoms
+   out of the finite fold, dropping realized to 58.3% and verifier precision to 0.875. More
+   agents past the knee make the *delivered* answer **worse**, not better — exactly the
+   inversion §3's latency knee could not show.
+3. **Duplicate work explodes.** 25% of competent outputs re-derive a covered atom at N=4,
+   95% at N=256 — the step-repetition failure mode. Wider fan-out buys mostly redundant work.
+4. **Injection containment is the real, decisive split.** Under the fak arm every
+   injection-exposed sub-agent is quarantined (1.00); under the naive arm none is (0.00 at
+   N≥4), and the lost work drags naive-arm coverage below fak's — the litmus echo of the
+   real weak-model rescue in `LIVE-RESULTS.md`. (At N=1–2 the naive cell is `—`/vacuous:
+   too few trials draw an injection to be meaningful.)
+5. **The matched-budget single-agent control matches or BEATS the fan-out at every N.**
+   Given the fan-out's *total* call budget as one sequential trajectory (no cross-agent
+   redundancy, no parallelism), the lone agent's coverage is **higher** at every width —
+   0.50 vs 0.25 at N=4, 0.83 vs 0.58 at N=16. This is the research brief's budget-controlled
+   design law: **at equal compute, fanning out does not win on task quality.**
+
+> **The one-line honest reading.** Fan-out's wins in §1–§3 are real and they are
+> **cost/latency/reuse** wins — the joined columns show 62% of the token tax clawed back
+> and a 57× parallel speedup at N=256. They are **not** quality wins: at matched budget a
+> single agent covers as much or more, realized accuracy inverts past the verifier knee,
+> and most of the added width is duplicate work. The kernel makes wide fan-out *cheaper to
+> run*; it does not make the *answer better*. The only quality axis where fak changes the
+> outcome here is **injection containment**, and that is a safety-floor result, not a
+> fan-out-width result.
+
+**What is still open (the real-model half).** This is a controlled litmus, not a live
+model sweep. A real `fak agent` fan-out across the N grid with real ground-truth tasks
+(the seam #429 also names) needs a model/host budget this no-GPU node does not have; the
+single live A/B that exists today (`LIVE-RESULTS.md`) is single-task, single-agent. The
+litmus pins the **metric definitions and the cost/quality separation**; flipping it to a
+measured real-model row is the open work.
+
+## §6 — Tracked limitations and next steps
 
 The limitations are now explicit GitHub issues rather than hidden caveats:
 
@@ -294,9 +382,15 @@ The limitations are now explicit GitHub issues rather than hidden caveats:
   shipped RadixAttention head-to-head and the measured llama.cpp `kv_unified`+`seq_cp`
   C-sweep, with vLLM recorded as a host ceiling. **Open:** a same-host fresh run of all
   three on one box (no small GGUF / no GPU / no prefix-cache server here).
-- #106 — align fanbench cost curves with real task success and the live `fak agent`
-  evidence: coverage@N, realized@N, verifier success, duplicate-work rate, and
-  matched-budget single-agent controls.
+- #429 / #106 — align fanbench cost curves with real task success and the live `fak agent`
+  evidence: coverage@N, realized@N, verifier success, duplicate-work rate, injection
+  containment, and matched-budget single-agent controls. **Litmus half landed (#429):**
+  `tools/fanout_taskquality.py` runs a controlled ground-truth task suite over the fan-out
+  N grid and joins the task metrics to the measured cost cells, with a matched-budget
+  single-agent control proving fan-out saves cost but not quality (§5; artifact
+  `experiments/fanout/taskquality-litmus.json`, gated by `--check`). **Open (#106):** a
+  real-model `fak agent` fan-out across the N grid — needs a model/host budget this no-GPU
+  node lacks.
 - #107 — make fanout plot regeneration reproducible; the 262K/524K/1M CSV/JSON
   artifacts exist, but this local node lacked `matplotlib`, so the PNGs were not
   regenerated in this pass.
