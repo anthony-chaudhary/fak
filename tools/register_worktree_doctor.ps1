@@ -81,9 +81,16 @@ $taskTrigger  = New-ScheduledTaskTrigger -Daily -At $At
 # StartWhenAvailable: a laptop asleep at $At still gets a catch-up run when it wakes.
 $taskSettings = New-ScheduledTaskSettingsSet -StartWhenAvailable -ExecutionTimeLimit (New-TimeSpan -Minutes 15) -MultipleInstances IgnoreNew
 $taskDesc     = "Keep this checkout at one-worktree-on-master, safely (worktree_doctor.py). Retains: $($AllowBranch -join ',')."
+# S4U (non-interactive, session 0), NOT the Register-ScheduledTask default (Interactive):
+# a console powershell.exe launched in the interactive session FLASHES a window on every
+# daily trigger -- one of the "random popup windows". -WindowStyle Hidden does NOT suppress
+# it (the flash is the session-1 console host spawning before the flag applies). S4U runs
+# the doctor windowless in session 0 yet still AS THIS USER, so its git fetch/prune still
+# work. Same pattern as register_runaway_reaper.ps1 / register_issue_dispatch.ps1.
+$taskPrincipal = New-ScheduledTaskPrincipal -UserId $env:USERNAME -LogonType S4U -RunLevel Limited
 
 Register-ScheduledTask -TaskName $TaskName -Action $taskAction -Trigger $taskTrigger -Settings $taskSettings `
-  -Description $taskDesc -Force | Out-Null
+  -Principal $taskPrincipal -Description $taskDesc -Force | Out-Null
 
 $mode = if ($ReportOnly) { 'REPORT-ONLY (no prune)' } else { 'PRUNE (safe: loss-free worktrees + git branch -d only)' }
 Write-Output "installed $TaskName - daily at $At, $mode"
