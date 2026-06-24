@@ -4,6 +4,13 @@ These files are starter floors for the gateway-first adoption path. They are not
 universal security policies; each one is a reviewable allow-list with a concrete
 deny witness an adopter can run before putting it in front of an agent.
 
+> **Looking for a vetted starting point?** [`presets/`](presets/README.md) is the
+> **curated, documented, round-trip-gated** preset pack — each manifest carries a
+> README describing what it allows, what it refuses, and the threat it encodes,
+> and a CI test asserts every preset round-trips exactly through
+> `fak policy --check`. It includes [`presets/coding-agent-safe.json`](presets/coding-agent-safe.json),
+> the hardened coding-agent floor built on the `gitgate` refusals (issue #578).
+
 Run checks from `fak/`:
 
 ```bash

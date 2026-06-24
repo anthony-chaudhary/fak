@@ -1,0 +1,182 @@
+{
+  "version": "fak-policy/v1",
+  "allow": [
+    "Bash",
+    "BashOutput",
+    "Edit",
+    "ExitPlanMode",
+    "Glob",
+    "Grep",
+    "KillShell",
+    "LS",
+    "NotebookEdit",
+    "Read",
+    "Skill",
+    "SlashCommand",
+    "Task",
+    "TodoWrite",
+    "WebFetch",
+    "WebSearch",
+    "Write"
+  ],
+  "allow_prefix": [
+    "read_",
+    "get_",
+    "search_",
+    "list_",
+    "lookup_",
+    "find_"
+  ],
+  "deny": {
+    "exfiltrate": "SECRET_EXFIL"
+  },
+  "self_modify_globs": [
+    "internal/abi/",
+    "internal/kernel/",
+    "internal/adjudicator/",
+    "internal/policy/",
+    "internal/registrations/",
+    ".git/",
+    ".ssh/",
+    ".dos/",
+    "VERSION",
+    "id_rsa",
+    "/etc/"
+  ],
+  "redact_fields": [
+    "password",
+    "secret",
+    "api_key",
+    "token",
+    "authorization"
+  ],
+  "arg_rules": [
+    {
+      "tool": "Bash",
+      "arg": "command",
+      "deny_regex": "git\\s+push\\b.{0,40}(--force|--force-with-lease)",
+      "reason": "POLICY_BLOCK"
+    },
+    {
+      "tool": "Bash",
+      "arg": "command",
+      "deny_regex": "git\\s+push\\b.{0,40}--no-verify",
+      "reason": "POLICY_BLOCK"
+    },
+    {
+      "tool": "Bash",
+      "arg": "command",
+      "deny_regex": "git\\s+push\\b.{0,40}--delete",
+      "reason": "POLICY_BLOCK"
+    },
+    {
+      "tool": "Bash",
+      "arg": "command",
+      "deny_regex": "git\\s+commit\\b.{0,40}--amend",
+      "reason": "POLICY_BLOCK"
+    },
+    {
+      "tool": "Bash",
+      "arg": "command",
+      "deny_regex": "git\\s+commit\\b.{0,40}--no-verify",
+      "reason": "POLICY_BLOCK"
+    },
+    {
+      "tool": "Bash",
+      "arg": "command",
+      "deny_regex": "git\\s+commit\\b.{0,40}--no-gpg-sign",
+      "reason": "POLICY_BLOCK"
+    },
+    {
+      "tool": "Bash",
+      "arg": "command",
+      "deny_regex": "git\\s+commit\\b.{0,40}(--all|-a\\b)",
+      "reason": "POLICY_BLOCK"
+    },
+    {
+      "tool": "Bash",
+      "arg": "command",
+      "deny_regex": "git\\s+add\\b.{0,40}(--all|-A\\b)",
+      "reason": "POLICY_BLOCK"
+    },
+    {
+      "tool": "Bash",
+      "arg": "command",
+      "deny_regex": "git\\s+add\\b.{0,40}(--update|-u\\b)",
+      "reason": "POLICY_BLOCK"
+    },
+    {
+      "tool": "Bash",
+      "arg": "command",
+      "deny_regex": "git\\s+tag\\b.{0,40}(--force|-f\\b)",
+      "reason": "POLICY_BLOCK"
+    },
+    {
+      "tool": "Bash",
+      "arg": "command",
+      "deny_regex": "git\\s+tag\\b.{0,40}(--delete|-d\\b)",
+      "reason": "POLICY_BLOCK"
+    },
+    {
+      "tool": "Bash",
+      "arg": "command",
+      "deny_regex": "git\\s+rebase\\b.{0,40}(--interactive|-i\\b)",
+      "reason": "POLICY_BLOCK"
+    },
+    {
+      "tool": "Bash",
+      "arg": "command",
+      "deny_regex": "\\brm\\s+-[A-Za-z]*[rRfF]",
+      "reason": "POLICY_BLOCK"
+    },
+    {
+      "tool": "Bash",
+      "arg": "command",
+      "deny_regex": "\\bsudo\\b",
+      "reason": "POLICY_BLOCK"
+    },
+    {
+      "tool": "Bash",
+      "arg": "command",
+      "deny_regex": "\\bmkfs\\b|\\bdd\\s+if=|\u003e\\s*/dev/sd",
+      "reason": "POLICY_BLOCK"
+    },
+    {
+      "tool": "Bash",
+      "arg": "command",
+      "deny_regex": ":\\(\\)\\s*\\{",
+      "reason": "POLICY_BLOCK"
+    },
+    {
+      "tool": "Bash",
+      "arg": "command",
+      "deny_regex": "\\b(curl|wget)\\b[^|]*\\|\\s*(sudo\\s+)?(ba)?sh\\b",
+      "reason": "POLICY_BLOCK"
+    },
+    {
+      "tool": "Bash",
+      "arg": "command",
+      "deny_regex": "-o\\s+\\.\\.[\\\\/]",
+      "reason": "POLICY_BLOCK"
+    },
+    {
+      "tool": "Bash",
+      "arg": "command",
+      "deny_regex": "--output[= ]\\s*\\.\\.[\\\\/]",
+      "reason": "POLICY_BLOCK"
+    },
+    {
+      "tool": "Bash",
+      "arg": "command",
+      "deny_regex": "\u003e\u003e?\\s*\\.\\.[\\\\/]",
+      "reason": "POLICY_BLOCK"
+    },
+    {
+      "tool": "Bash",
+      "arg": "command",
+      "deny_regex": "\\b(cp|mv|install|tee|rsync|ln)\\b[^|;\u0026]*\\s\\.\\.[\\\\/]",
+      "reason": "POLICY_BLOCK"
+    }
+  ],
+  "lint_writes": true
+}
