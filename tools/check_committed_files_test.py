@@ -76,6 +76,33 @@ def test_token_must_be_in_first_component_not_substring_elsewhere() -> None:
     assert cc._classify("internal/agent/dgx_notes.go", ROOT, MAX) is None
 
 
+# --- SECRET_FILES: credentials / keys are refused ---------------------------
+
+def test_sa_key_refused() -> None:
+    # The exact path tools/create_gcp_admin_sa.sh writes (must NEVER reach git):
+    # refused — here by the secrets/ rule, which wins first on the path.
+    assert cc._classify("secrets/gcp/fak-admin-proj.sa.json", ROOT, MAX) is not None
+    # A *.sa.json OUTSIDE secrets/ is refused by the key rule (message names the key).
+    r = cc._classify("deploy/fak-admin-proj.sa.json", ROOT, MAX)
+    assert r is not None and "key" in r.lower()
+    # the -sa-key/-gcp-key JSON conventions are refused too.
+    assert cc._classify("deploy/prod-sa-key.json", ROOT, MAX) is not None
+    assert cc._classify("x-gcp-key.json", ROOT, MAX) is not None
+
+
+def test_secrets_dir_refused() -> None:
+    # Anything under a secrets/ dir, at root or nested.
+    assert cc._classify("secrets/anything.txt", ROOT, MAX) is not None
+    assert cc._classify("internal/foo/secrets/bar.json", ROOT, MAX) is not None
+
+
+def test_ordinary_json_not_secret() -> None:
+    # A normal config/data json must NOT trip the SECRET rule (no false positives).
+    for p in ("internal/gateway/config.json", "experiments/x/report.json",
+              "fak/testdata/sample.json", "tools/bench_nodes.example.json"):
+        assert not any(rx.search(p) for rx, _ in cc.SECRET_FILES), p
+
+
 # --- live regression guard: the real tree is clean --------------------------
 
 def test_tracked_tree_has_no_private_only_path() -> None:
@@ -87,6 +114,16 @@ def test_tracked_tree_has_no_private_only_path() -> None:
     hits = [p for p in r.stdout.split()
             if any(rx.search(p) for rx, _ in cc.PRIVATE_ONLY)]
     assert not hits, "private-only paths tracked in the public tree:\n" + "\n".join(hits)
+
+
+def test_tracked_tree_has_no_secret_file() -> None:
+    """The whole tracked public tree must carry zero secret/key files — the
+    invariant the SECRET rule enforces (a leaked SA key is forever in history)."""
+    r = subprocess.run(["git", "-C", ROOT, "ls-files"], capture_output=True, text=True)
+    assert r.returncode == 0, "git ls-files failed"
+    hits = [p for p in r.stdout.split()
+            if any(rx.search(p) for rx, _ in cc.SECRET_FILES)]
+    assert not hits, "secret/key files tracked in the public tree:\n" + "\n".join(hits)
 
 
 def _run() -> int:

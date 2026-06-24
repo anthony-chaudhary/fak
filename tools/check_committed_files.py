@@ -6,6 +6,10 @@ commit regenerable build/runtime junk (caches, compiled binaries, logs, demo
 outputs, editor scratch) and any oversized blob, so the tree and history stay lean.
 
 Rules:
+  * SECRET — a cloud service-account key (*.sa.json), a -sa-key/-gcp-key JSON, or
+    anything under a secrets/ dir — ALWAYS refused (path-based, fail-closed). A
+    private key must never enter a forever-history public tree; rotate it and keep
+    it in a secret store / gitignored dir.
   * PRIVATE-only — the operator's private lab GPU-server *connection* subsystem
     (the Slack control-bridge client + its lab orchestrator) — ALWAYS refused in
     the PUBLIC tree; it lives only in the private canonical repo.
@@ -87,6 +91,22 @@ PRIVATE_ONLY = [
      "private lab Slack-housekeeping tool — belongs in the private repo, not the public tree"),
 ]
 
+# Secret files: credentials / private keys must NEVER enter a forever-history
+# public tree. Path-based and fail-closed (it fires even when the bytes are
+# unreadable), so it catches a key the content gates (check_secret_shapes.py, the
+# scrub leak-gate) would miss by filename. Mirrors the *.sa.json / secrets/
+# .gitignore globs and the private repo's convention — tools/create_gcp_admin_sa.sh
+# writes secrets/gcp/<sa>.sa.json. A match is ALWAYS refused: rotate the key and
+# keep it in a secret store or a gitignored dir, never in git.
+SECRET_FILES = [
+    (re.compile(r"(^|/)secrets/"),
+     "secrets dir — credentials never belong in git; keep them gitignored / in a secret store"),
+    (re.compile(r"\.sa\.json$"),
+     "GCP service-account key (*.sa.json) — never commit a key; rotate it and keep it gitignored"),
+    (re.compile(r"-(sa|gcp)-key\.json$"),
+     "cloud service-account key — never commit a key; rotate it and keep it gitignored"),
+]
+
 
 def _git(args, root):
     return subprocess.run(["git", "-C", root] + args, capture_output=True, text=True)
@@ -106,7 +126,11 @@ def _tracked(root):
 
 def _classify(path, root, max_bytes):
     """Return a violation reason string, or None if the path is allowed."""
-    # Privacy first: a private-only path is refused regardless of size/junk rules.
+    # Secrets first: a credential / key file is refused regardless of any other rule.
+    for rx, why in SECRET_FILES:
+        if rx.search(path):
+            return why
+    # Privacy next: a private-only path is refused regardless of size/junk rules.
     for rx, why in PRIVATE_ONLY:
         if rx.search(path):
             return why

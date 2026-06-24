@@ -168,6 +168,20 @@ def main() -> int:
         _git(repo, "add", "-A")
         _git(repo, "commit", "-q", "-m", "remove token")
 
+        # 7b) a GCP service-account key renamed off the *.sa.json convention is still
+        #     caught by its client_email shape (content, not the path rule). Assembled
+        #     from parts so the literal email never appears in this (non-self-ref) file.
+        sa_email = "fak-admin@example-proj" + ".iam.gserviceaccount" + ".com"
+        _write(repo, "creds.json", '{"client_email":"%s","private_key":"x"}\n' % sa_email)
+        _git(repo, "add", "-A")
+        _git(repo, "commit", "-q", "-m", "add renamed key")
+        rc, out = _audit_tree(repo)
+        check("audit-tree catches GCP SA-email shape", rc == 1, out)
+        check("audit-tree names the renamed key file", "creds.json" in out, out)
+        os.remove(os.path.join(repo, "creds.json"))
+        _git(repo, "add", "-A")
+        _git(repo, "commit", "-q", "-m", "remove renamed key")
+
         # 8) FULL mode: a pulled private needle in a tracked file is caught; the
         #    sidecar itself (ignored, untracked) is NOT scanned, so no self-hit.
         real = ".".join(["10", "11", "12", "13"])

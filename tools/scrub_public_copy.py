@@ -368,6 +368,15 @@ PRIVATE_MACHINE_PREFIXES = ("dgx",)
 # audit). SELF_REFERENTIAL files are exempt, as for the needles.
 AUDIT_REGEXES = [
     (re.compile(r"xox[bp]-\d{8,}-\d{8,}-[A-Za-z0-9]{16,}"), "live Slack token (xoxb/xoxp)"),
+    # GCP service-account identity shape. Every service-account JSON key (e.g. minted
+    # by tools/create_gcp_admin_sa.sh) carries its client_email
+    # `<sa>@<project>.iam.gserviceaccount.com`, so this catches a key body even when it
+    # is renamed off the *.sa.json convention into ANY file — the filename-independent
+    # backstop to the secrets/ + *.sa.json path-block in check_committed_files.py.
+    # (A generic PEM-block shape is intentionally NOT used: the repo's redaction tests,
+    # e.g. internal/canon + internal/wirescreen, carry fake PEM fixtures on purpose.)
+    (re.compile(r"[a-z0-9](?:[a-z0-9-]*[a-z0-9])?@[a-z0-9-]+\.iam\.gserviceaccount\.com"),
+     "GCP service-account email"),
 ]
 
 # Pulled-from-private REAL needle file (gitignored: tools/_registry is ignored).

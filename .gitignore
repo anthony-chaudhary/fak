@@ -104,6 +104,14 @@ fak/.*.log
 *.key
 *.p12
 *.pfx
+# GCP / cloud service-account JSON keys + any secrets dir — never tracked. The
+# *.sa.json convention + a secrets/ dir mirror tools/create_gcp_admin_sa.sh (and
+# the private repo); check_committed_files.py is the fail-closed commit-time block.
+secrets/
+**/secrets/
+*.sa.json
+*-sa-key.json
+*-gcp-key.json
 tools/fleet_endpoints.json
 tools/fleet_endpoints.local.json
 # Real bench-node registry (tailnet IPs / ssh users / host keys). The committed
