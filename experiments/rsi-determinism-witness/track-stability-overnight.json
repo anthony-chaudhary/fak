@@ -1,0 +1,151 @@
+{
+  "$schema": "fak.rsi-track-stability.v1",
+  "what": "Overnight `rsiloop -mode track` time series: main's deterministic demo KPI (LRU hit-rate at the committed DefaultCacheSize) re-measured every ~20 min while the shared trunk advanced. Demonstrates the vs-latest-main regression-watch property the RSI loop claims: the KPI held CONSTANT across every distinct main commit, so the overnight window saw zero main-KPI regression. Backs tools/rsi_maturity_scorecard.py vs_latest_main + the regression-gate (ci.yml rsiloop -mode track).",
+  "machine": "workstation-a (x86_64/Windows, go1.26.3)",
+  "collector": "detached, ~20 min cadence",
+  "points": 27,
+  "distinct_main_shas": 18,
+  "kpi_constant": [
+    0.068182
+  ],
+  "regressions": 0,
+  "sha_first": "3d8934e979",
+  "sha_last": "429b09d2c9",
+  "series": [
+    {
+      "iter": 1,
+      "sha": "3d8934e979",
+      "kpi": 0.068182
+    },
+    {
+      "iter": 2,
+      "sha": "f673dca50c",
+      "kpi": 0.068182
+    },
+    {
+      "iter": 3,
+      "sha": "45a04648f2",
+      "kpi": 0.068182
+    },
+    {
+      "iter": 4,
+      "sha": "7fadefb704",
+      "kpi": 0.068182
+    },
+    {
+      "iter": 5,
+      "sha": "7fadefb704",
+      "kpi": 0.068182
+    },
+    {
+      "iter": 6,
+      "sha": "7fadefb704",
+      "kpi": 0.068182
+    },
+    {
+      "iter": 7,
+      "sha": "62db30d1b3",
+      "kpi": 0.068182
+    },
+    {
+      "iter": 8,
+      "sha": "62db30d1b3",
+      "kpi": 0.068182
+    },
+    {
+      "iter": 9,
+      "sha": "e7431f5ace",
+      "kpi": 0.068182
+    },
+    {
+      "iter": 10,
+      "sha": "e7431f5ace",
+      "kpi": 0.068182
+    },
+    {
+      "iter": 11,
+      "sha": "e7431f5ace",
+      "kpi": 0.068182
+    },
+    {
+      "iter": 12,
+      "sha": "e7431f5ace",
+      "kpi": 0.068182
+    },
+    {
+      "iter": 13,
+      "sha": "e7431f5ace",
+      "kpi": 0.068182
+    },
+    {
+      "iter": 14,
+      "sha": "e7431f5ace",
+      "kpi": 0.068182
+    },
+    {
+      "iter": 15,
+      "sha": "e7431f5ace",
+      "kpi": 0.068182
+    },
+    {
+      "iter": 16,
+      "sha": "7889a5ba85",
+      "kpi": 0.068182
+    },
+    {
+      "iter": 17,
+      "sha": "fb88773c07",
+      "kpi": 0.068182
+    },
+    {
+      "iter": 18,
+      "sha": "96743781a1",
+      "kpi": 0.068182
+    },
+    {
+      "iter": 19,
+      "sha": "90f6f1dd61",
+      "kpi": 0.068182
+    },
+    {
+      "iter": 20,
+      "sha": "ab6f112d76",
+      "kpi": 0.068182
+    },
+    {
+      "iter": 21,
+      "sha": "a9d2ccbcba",
+      "kpi": 0.068182
+    },
+    {
+      "iter": 22,
+      "sha": "c53a01c2c2",
+      "kpi": 0.068182
+    },
+    {
+      "iter": 23,
+      "sha": "a7d0c89b27",
+      "kpi": 0.068182
+    },
+    {
+      "iter": 24,
+      "sha": "2834525408",
+      "kpi": 0.068182
+    },
+    {
+      "iter": 25,
+      "sha": "a20b36d2ed",
+      "kpi": 0.068182
+    },
+    {
+      "iter": 26,
+      "sha": "99dd442706",
+      "kpi": 0.068182
+    },
+    {
+      "iter": 27,
+      "sha": "429b09d2c9",
+      "kpi": 0.068182
+    }
+  ]
+}
