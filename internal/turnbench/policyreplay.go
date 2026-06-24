@@ -63,7 +63,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"runtime"
-	"sync"
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/abi"
@@ -302,17 +301,17 @@ func swapMonitor(base []abi.Adjudicator, mon *adjudicator.Adjudicator) []abi.Adj
 // policy; every arm carries a divergence witness against it, so no replayed number
 // silently crosses the measured/modeled wall.
 //
-// The arms replay CONCURRENTLY (issue #500). Each arm builds its OWN monitor
-// (adjudicator.New(arm.Policy)) and injects it into its kernel via
-// kernel.WithAdjudicators, so an arm NEVER mutates the process-global
-// adjudicator.Default — the per-kernel adjudicator injection is what lets K arms fan out
-// across goroutines instead of serializing on the shared monitor's policy. The result is
-// IDENTICAL to a serial run: each arm's verdict is a deterministic function of (its own
-// policy, the frozen trace), and the only remaining shared state (the localtools engine,
-// the CAS resolver, the vDSO world counter) is stateless or mutex-guarded and CONSTANT
-// across arms (the policy axis is the only thing that varies). agent.Configure() is
-// called once (idempotent) to install the engine/grammar/schemas; no global policy is
-// swapped, so there is nothing to restore.
+// The arms replay SERIALLY. Each arm builds its OWN monitor (adjudicator.New(arm.Policy))
+// and injects it into its kernel via kernel.WithAdjudicators, so an arm NEVER mutates the
+// process-global adjudicator.Default — each arm's verdict is a deterministic function of
+// (its own policy, the frozen trace). The arms once fanned out across goroutines (issue
+// #500), but replay() resets the process-global vDSO world counter AND the IFC taint ledger
+// at the start of every call; run concurrently those resets interleave and stomp each other
+// — a LOGICAL race the -race detector cannot see (the globals are mutex-guarded) that made
+// the verdict surface drift run-to-run. Serial replay keeps each arm's reset uncontended,
+// restoring the deterministic, regenerable report. agent.Configure() is called once
+// (idempotent) to install the engine/grammar/schemas; no global policy is swapped, so there
+// is nothing to restore.
 func RunPolicyReplay(ctx context.Context, t *Trace, arms []PolicyArm, refName string, cm CostModel) (*PolicyReplayReport, error) {
 	if t == nil || len(t.Calls) == 0 {
 		return nil, fmt.Errorf("turnbench: RunPolicyReplay needs a non-empty trace")
@@ -341,7 +340,6 @@ func RunPolicyReplay(ctx context.Context, t *Trace, arms []PolicyArm, refName st
 	results := make([]PolicyArmResult, len(arms))
 	disps := make([][]CallDisposition, len(arms))
 	fps := make([][]redactFingerprint, len(arms))
-	errs := make([]error, len(arms))
 
 	// The base chain is the FULL registered adjudicator chain (rank-sorted) — every rung
 	// the global-registry replay would fold: grammar repair, preflight, the IFC sink gate,
@@ -352,56 +350,46 @@ func RunPolicyReplay(ctx context.Context, t *Trace, arms []PolicyArm, refName st
 	// verdict-identical to the serial global-swap path, just without the shared mutable.
 	baseChain := abi.Adjudicators()
 
-	// Fan out: each arm runs in its own goroutine against its OWN injected monitor.
-	// Every goroutine writes ONLY its own index of the pre-sized result slices, so there
-	// is no shared mutable state between arms — the race detector run (the acceptance
-	// gate) is clean by construction. ReplayWallNs is the WALL SPAN of the whole fan-out
-	// (one clock read around wg.Wait): with the arms running concurrently the honest "how
-	// long did the K replays take" is the span they overlapped in, NOT the sum of the
-	// per-arm intervals (which would over-count concurrent time). The per-arm ReplayNs
-	// stays per-arm. NOTE: when the trace is tiny and the process warm, the whole fan-out
-	// can complete inside one tick of a coarse OS monotonic clock, so the span may read
-	// 0ns — a legitimate "sub-tick" measurement, not a missing one.
-	fanStart := time.Now()
-	var wg sync.WaitGroup
+	// Replay the arms SERIALLY. They used to fan out across goroutines (issue #500), but
+	// replay() resets two PROCESS-GLOBAL pieces of state at the start of EVERY call — the
+	// vDSO world counter (vdso.Default.BumpWorld) and the IFC taint ledger (ifc.Default.Reset)
+	// — to give each arm a clean slate. Run concurrently those resets INTERLEAVE: one arm
+	// wipes the IFC "has seen untrusted content" ledger midway through another arm's replay,
+	// so the verdict surface (quarantines/denies and the divergence frontier) drifted
+	// nondeterministically run-to-run. The report is meant to be a deterministic, regenerable
+	// artifact, and the fan-out broke that invariant. The globals are mutex-guarded, so this
+	// was a LOGICAL interleaving race the -race detector cannot see — it only surfaced as an
+	// ~80%-flaky TestFleetCounterfactual_Deterministic. Serial replay gives each arm an
+	// uncontended reset and restores determinism. The headline collapse (K agent+model runs ->
+	// 1 recording + K model-free replays) is unchanged; ReplayWallNs is now the serial SUM of
+	// the per-arm spans, still far below a single policy's model latency. A future concurrency
+	// win needs per-kernel vDSO/IFC isolation, not shared process-global resets.
+	replayStart := time.Now()
 	for i := range arms {
-		wg.Add(1)
-		go func(i int) {
-			defer wg.Done()
-			arm := arms[i]
-			// The arm's own monitor — the per-kernel adjudicator chain. This replaces the
-			// old process-global adjudicator.Default.SetPolicy(arm.Policy) swap: build a
-			// fresh chain that is the registered chain with the monitor rung substituted.
-			adj := adjudicator.New(arm.Policy)
-			chain := swapMonitor(baseChain, adj)
-			t0 := time.Now()
-			kc, cb, _, _, disp, err := replay(ctx, t, true, false, true, withAdjudicators(chain))
-			dt := time.Since(t0).Nanoseconds()
-			if err != nil {
-				errs[i] = fmt.Errorf("turnbench: replay arm %q: %w", arm.Name, err)
-				return
-			}
-			// Raw monitor verdict per call for the redact-aware divergence path (#501),
-			// queried against THIS arm's own monitor (not the global), so the fingerprint
-			// matches the replay the arm's kernel just ran; a read-only adjudication, not a
-			// second replay.
-			fp, err := captureRedactFingerprints(ctx, t, adj)
-			if err != nil {
-				errs[i] = fmt.Errorf("turnbench: capture redact fingerprints arm %q: %w", arm.Name, err)
-				return
-			}
-			disps[i] = disp
-			fps[i] = fp
-			results[i] = PolicyArmResult{Name: arm.Name, Class: cb, Counters: kc, ReplayNs: dt}
-		}(i)
-	}
-	wg.Wait()
-	wall := time.Since(fanStart).Nanoseconds()
-	for i := range arms {
-		if errs[i] != nil {
-			return nil, errs[i]
+		arm := arms[i]
+		// The arm's own monitor — the per-kernel adjudicator chain. This replaces the old
+		// process-global adjudicator.Default.SetPolicy(arm.Policy) swap: build a fresh chain
+		// that is the registered chain with the monitor rung substituted.
+		adj := adjudicator.New(arm.Policy)
+		chain := swapMonitor(baseChain, adj)
+		t0 := time.Now()
+		kc, cb, _, _, disp, err := replay(ctx, t, true, false, true, withAdjudicators(chain))
+		if err != nil {
+			return nil, fmt.Errorf("turnbench: replay arm %q: %w", arm.Name, err)
 		}
+		dt := time.Since(t0).Nanoseconds()
+		// Raw monitor verdict per call for the redact-aware divergence path (#501), queried
+		// against THIS arm's own monitor (not the global), so the fingerprint matches the
+		// replay the arm's kernel just ran; a read-only adjudication, not a second replay.
+		fp, err := captureRedactFingerprints(ctx, t, adj)
+		if err != nil {
+			return nil, fmt.Errorf("turnbench: capture redact fingerprints arm %q: %w", arm.Name, err)
+		}
+		disps[i] = disp
+		fps[i] = fp
+		results[i] = PolicyArmResult{Name: arm.Name, Class: cb, Counters: kc, ReplayNs: dt}
 	}
+	wall := time.Since(replayStart).Nanoseconds()
 
 	// Divergence witness: each arm vs the reference. Two witnesses fold together and
 	// the EARLIER divergence wins:

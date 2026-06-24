@@ -116,15 +116,16 @@ func TestPolicyReplay_SpineCollapsesPolicyComparison(t *testing.T) {
 	}
 	// The K replays must cost FAR less wall-time than even a single policy's worth of
 	// model turns (5 turns × 1.5s = 7.5s); in practice the 20 local syscalls are sub-ms.
-	// With the arms now fanned out concurrently the wall is the OVERLAP span, which only
-	// shrinks the bound — it can never approach the naive model latency.
+	// The arms replay serially (the concurrent fan-out reset shared vDSO/IFC globals and
+	// drifted — see RunPolicyReplay), so the wall is the SUM of the per-arm spans, still
+	// orders of magnitude below the naive model latency.
 	naiveLatency := time.Duration(rep.ModelTurnsNaive) * time.Duration(rep.Cost.ModelTurnLatencyMs) * time.Millisecond
 	if time.Duration(rep.ReplayWallNs) >= naiveLatency {
 		t.Errorf("replay wall %v should be << naive model latency %v", time.Duration(rep.ReplayWallNs), naiveLatency)
 	}
 	// The wall is a real measurement (never negative). It may legitimately read 0ns when
-	// the concurrent fan-out completes inside one tick of a coarse OS monotonic clock
-	// (Windows' timer is ~0.5-15ms; a warm sub-ms fan-out rounds to 0) — a sub-tick
+	// the whole serial replay completes inside one tick of a coarse OS monotonic clock
+	// (Windows' timer is ~0.5-15ms; a warm sub-ms replay rounds to 0) — a sub-tick
 	// measurement, not a missing one — so the lower bound is >=0, not >0.
 	if rep.ReplayWallNs < 0 {
 		t.Errorf("replay wall time must be a real (non-negative) measurement, got %d", rep.ReplayWallNs)
