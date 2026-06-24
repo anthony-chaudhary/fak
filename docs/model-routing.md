@@ -73,6 +73,87 @@ Subject  ──Route──▶  Decision { Plan }
   `--check` → `--manifest`), exactly like the capability-floor policy manifest.
 - **Combine** — folds member outputs deterministically (member order preserved).
 
+## How it works (the data flow)
+
+A routed call moves through the kernel in five steps. Steps 1–2 are the shipped
+pure spine; steps 3–5 are the wiring the epic tracks. The ordering is not
+cosmetic — it is what keeps the default-deny floor intact (see the contract below).
+
+```
+   the host (gateway / agent loop)                 the kernel
+   ───────────────────────────────                 ──────────
+1. classify ──▶ Subject{aspect, tool, tokens, latency, complexity, labels}
+2. Route(Subject) ──▶ Decision{ rule, Plan }            (pure, deterministic)
+                          │
+                          ├─ PICK  (1 member)
+                          │     3. set ToolCall.Engine = Plan.Primary()  ◀── BEFORE submit
+                          │     4. Kernel.Submit (adjudicate — residency PDP sees the engine) ─▶ Reap (dispatch)
+                          │
+                          └─ ENSEMBLE (N members)
+                                3. for each member: a ToolCall with Engine = member.Model
+                                4. N independent Submit (each adjudicated) ─▶ Reap (each dispatched)
+                                5. gather outputs IN MEMBER ORDER ─▶ Combine(reduce) ─▶ Result
+```
+
+1. **Classify.** The host turns the thing it is about to do into a `Subject` — the
+   aspect (a whole request, one tool call, a sub-query, a step), the tool name, an
+   estimated prompt length, a latency/complexity hint, and any labels (domain,
+   tenant, language).
+2. **Route.** `Manifest.Route(Subject)` walks the rules top-to-bottom; the first
+   `Match` that fires returns its `Plan`, else the fail-closed `Default`. This is
+   pure and side-effect-free — the same subject always yields the same decision.
+3. **Bind the engine (pre-submit).** For a single-model plan the host writes
+   `Plan.Primary()` to `abi.ToolCall.Engine`. For an ensemble it builds **N** tool
+   calls, one per member, each carrying its member model in `Engine`.
+4. **Adjudicate, then dispatch.** Each call goes through `Kernel.Submit`, which
+   folds the adjudicator chain (including the residency PDP that reads `Engine`)
+   *before* dispatching. The kernel's `routeFor` then resolves `Engine` to a
+   registered engine and runs the call.
+5. **Reduce (ensemble only).** The host gathers the members' outputs **in member
+   order** and folds them with `Combine(Plan.Reduce, votes)` into one `Result`.
+
+Today the spine produces the `Decision` (steps 1–2) and the fold (`Combine`, step
+5's math); steps 3–4 — writing `Engine` and executing — are the [STUB] wiring.
+
+## Manifest reference (`fak-route/v1`)
+
+A manifest is an ordered rule list plus a fail-closed default. `fak route --dump`
+prints a starter; `--check` validates one (unknown fields are rejected).
+
+**Top level**
+
+| Field | Type | Meaning |
+|---|---|---|
+| `version` | string | schema tag; omit for current, a different MAJOR is refused |
+| `default` | Plan | applied when no rule matches — **must** name ≥1 model (fail-closed) |
+| `rules` | [Rule] | evaluated top-to-bottom; **first match wins** |
+
+**Rule** = `{ name (unique), match, plan }`.
+
+**Match** (every set field must hold; unset = wildcard)
+
+| Field | Type | Meaning |
+|---|---|---|
+| `aspect` | string (open) | `request` / `tool_call` / `query` / `state` / `step` / your own stage |
+| `tool` | string | exact name, or a single trailing `*` prefix (`git_*`), or `*` for any |
+| `min_prompt_tokens` / `max_prompt_tokens` | int | token band; `max=0` is unbounded |
+| `latency` | enum | `interactive` / `batch` (closed) |
+| `min_complexity` | enum | floor: `low` < `medium` < `high` (closed) |
+| `labels` | map | every pair must equal the subject's label |
+
+**Plan** = `{ members, reduce, scout, reason }`
+
+| Field | Type | Meaning |
+|---|---|---|
+| `members` | [Member] | 1 = a PICK; >1 = an ENSEMBLE |
+| `reduce` | enum | required for an ensemble: `first` / `vote` / `best_of` / `all_reduce` / `concat` |
+| `scout` | string | optional cheap model that classifies the subject first |
+| `reason` | string | free-text note surfaced in the decision trace |
+
+**Member** = `{ model, weight (vote/aggregate weight, default 1), role (primary / drafter / verifier / judge / …) }`.
+
+**Reductions:** `first` (fastest-wins / fallback), `vote` (weighted majority, deterministic tie-break), `best_of` (highest `Vote.Score` from a judge), `all_reduce` (weighted numeric **mean** of scalar outputs — *not* a tensor all-reduce), `concat` (gather, member order).
+
 ## The 60-second proof (no key, no model, no GPU)
 
 ```bash
@@ -91,6 +172,38 @@ go run ./cmd/fak route --manifest examples/model-routing.example.json \
 go run ./cmd/fak route --dump                                   # the built-in starter manifest
 go run ./cmd/fak route --check examples/model-routing.example.json
 ```
+
+## The cost lens (usage saved vs the SOTA frontier)
+
+Routing earns its keep by *not* sending every aspect to one big model — so on every
+decision `fak route` prints a rough estimate of what the chosen plan costs against
+the SOTA baseline: one frontier model for everything (the naive default a
+request-level router reduces *from*).
+
+```bash
+go run ./cmd/fak route --latency interactive --prompt-tokens 100
+# usage (rough public list prices, overridable; not a bill): ~92% cheaper than
+# always-frontier -- plan ~$1.25 vs $15 /Mtok-out (saves ~$13.75/Mtok-out)
+
+go run ./cmd/fak route --aspect tool_call --tool write_file
+# usage ...: +100% vs one frontier call -- 2-model ensemble ~$30 vs $15 /Mtok-out
+# (a deliberate reliability spend) [unpriced, charged at frontier: guard-a, guard-b]
+
+go run ./cmd/fak route --check examples/model-routing.example.json   # a cost tag per rule
+```
+
+The math is deliberately rough and **honest by construction**:
+
+- Anchored to the repo's published price convention (Opus-class **$3 in / $15 out
+  per Mtok** — see `experiments/parity`, `cmd/fanbench`) and fully overridable:
+  `--prices small=0.25/1.25,large=3/15` and `--frontier MODEL` reprice the lens, so
+  the number is a transparent function of stated inputs, never a hidden claim.
+- An **ensemble costs more** than one frontier call, so its "savings" is negative —
+  reported as a deliberate reliability **premium**, never dressed up as a saving.
+- An **unpriced** model is charged at the conservative frontier rate *and* disclosed
+  — fak never invents a cheap number to flatter the route.
+- It is a **price-rate estimate** for choosing a policy, **not** a measured
+  speed/quality multiple (the same distinction this page draws above).
 
 ## The wiring contract (load-bearing — read before wiring dispatch)
 
