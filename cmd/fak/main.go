@@ -57,6 +57,8 @@ func main() {
 		cmdAttest(os.Args[2:])
 	case "bench":
 		cmdBench(os.Args[2:])
+	case "ablate":
+		cmdAblate(os.Args[2:])
 	case "turntax":
 		cmdTurnTax(os.Args[2:])
 	case "agent":
@@ -85,8 +87,6 @@ func main() {
 		cmdGuard(os.Args[2:])
 	case "audit":
 		cmdAudit(os.Args[2:])
-	case "traj":
-		cmdTraj(os.Args[2:])
 	case "headroom":
 		cmdHeadroom(os.Args[2:])
 	case "hook":
@@ -131,6 +131,9 @@ func usage() {
                  cached path is printed on stdout; --gguf and the loaders accept it)
   fak bench     --suite NAME [--out report.json] [--baseline-n 30]
                 (transport A/B: in-process adjudication p50 vs spawned-hook p50)
+  fak ablate    --sweep vdso[,...] [--suite NAME] [--baseline all-off] [--out FILE] [--json]
+                (self-ablation: replay one frozen trace under N feature configs;
+                 one row per arm, deltas off the kernel counters, same-trace guard)
   fak turntax   --suite NAME [--out turntax-report.json]
                 [--prompt-tokens N --completion-tokens N --turn-latency-ms F]
                 (TURN-TAX A/B: the extra error-code MODEL TURN a SOTA loop fires —
