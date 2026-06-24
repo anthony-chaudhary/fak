@@ -37,33 +37,12 @@ import (
 )
 
 func main() {
-	hf := flag.String("hf", "", "HuggingFace model dir (config.json + model.safetensors[.index.json])")
-	gguf := flag.String("gguf", "", "GGUF checkpoint path; loads through the memory-lean quant path")
-	tokDir := flag.String("tok", "", "tokenizer dir containing tokenizer.json (default: -hf dir/cache, or GGUF sidecar tokenizer.json)")
-	sys := flag.String("sys", "You are a helpful assistant.", "system prompt")
-	prompt := flag.String("p", "", "user prompt — REQUIRED")
-	maxNew := flag.Int("n", 256, "max new tokens to generate")
-	metal := flag.Bool("metal", false, "run prefill on the Metal GPU (requires -tags fakmetal; decode stays CPU Q8)")
-	temp := flag.Float64("temp", 0, "sampling temperature (0 = greedy/argmax)")
-	seed := flag.Int64("seed", 1, "RNG seed for temperature sampling")
-	quiet := flag.Bool("quiet", false, "suppress the hardware line and the load/prefill spinners (the model=… banner + token stream are unaffected)")
-	flag.Parse()
-
-	// Expand a leading ~ so `-hf ~/...`, `-gguf ~/...`, `-tok ~/...` open as intended
-	// (Go and most shells/PowerShell don't expand it for us).
-	*hf = pathutil.ExpandTilde(*hf)
-	*gguf = pathutil.ExpandTilde(*gguf)
-	*tokDir = pathutil.ExpandTilde(*tokDir)
-
-	if (*hf == "") == (*gguf == "") || *prompt == "" {
-		fmt.Fprintln(os.Stderr, "usage: fakchat (-hf <model-dir> | -gguf <model.gguf>) -p <prompt> [-tok <dir>] [-metal] [-n N] [-temp T]")
-		os.Exit(2)
-	}
+	fl := parseFlags()
 
 	// Show the real compute surface this build runs on (cores / matmul workers /
 	// accelerator) so the run is never silent about its hardware. On a CPU build the
 	// summary says so plainly rather than implying a GPU. -quiet suppresses it.
-	if !*quiet {
+	if !*fl.quiet {
 		fmt.Fprintln(os.Stderr, "hardware:", demoui.Probe().Summary)
 	}
 
@@ -71,13 +50,13 @@ func main() {
 	// the terminal shows a live "⠙ <label>… 12.3s" instead of freezing. It is a no-op
 	// under -quiet, and the returned stop func is always safe to defer.
 	spin := func(label string) func() {
-		if *quiet {
+		if *fl.quiet {
 			return func() {}
 		}
 		return demoui.Spinner(os.Stderr, label)
 	}
 
-	cfg, err := readModelConfig(*hf, *gguf)
+	cfg, err := readModelConfig(*fl.hf, *fl.gguf)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "config:", err)
 		os.Exit(1)
@@ -90,23 +69,115 @@ func main() {
 
 	// Metal prefill is heavy on unified memory (CPU model + f16 GPU copy); take a
 	// machine-wide lease so concurrent runs queue instead of stacking (see gpulease).
-	useMetal := *metal && !hybrid && metalgemm.Available()
-	if *metal && !useMetal {
+	useMetal := resolveMetal(*fl.metal, hybrid)
+	if useMetal {
+		release := acquireGPULease()
+		defer release()
+	}
+
+	m, quantLoaded, loadMS := loadModel(fl, cfg, hybrid, spin)
+
+	tok := loadTokenizer(fl, cfg)
+	stops := stopIDs(tok, cfg)
+
+	// ChatML prompt (Qwen / SmolLM2 family). Special tokens are parsed literally.
+	chat := "<|im_start|>system\n" + *fl.sys + "<|im_end|>\n" +
+		"<|im_start|>user\n" + *fl.prompt + "<|im_end|>\n" +
+		"<|im_start|>assistant\n"
+	ids, err := tok.Encode(chat)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "encode:", err)
+		os.Exit(1)
+	}
+
+	// Hybrid qwen3_5: cached decode. Linear-attention recurrent state and full-attention
+	// KV both live in the Session, so generation no longer reruns whole-sequence Forward.
+	if hybrid {
+		runHybrid(fl, cfg, m, tok, ids, stops, quantLoaded, loadMS, spin)
+		return
+	}
+
+	runStandard(fl, cfg, m, tok, ids, stops, useMetal, loadMS, spin)
+}
+
+// cliFlags holds the parsed command-line flags. Keeping them in one struct lets the
+// extracted helpers take a single *cliFlags rather than a long parameter list, with
+// no change to the flags or their defaults.
+type cliFlags struct {
+	hf      *string
+	gguf    *string
+	tokDir  *string
+	sys     *string
+	prompt  *string
+	maxNew  *int
+	metal   *bool
+	temp    *float64
+	seed    *int64
+	quiet   *bool
+	q4kLoad bool // FAK_Q4K env at parse time (resident Q4_K loader)
+}
+
+// parseFlags registers and parses the CLI flags, expands leading ~ in path flags, and
+// validates the required-flag combination — exiting 2 on a usage error, exactly as the
+// inline block did.
+func parseFlags() *cliFlags {
+	fl := &cliFlags{
+		hf:     flag.String("hf", "", "HuggingFace model dir (config.json + model.safetensors[.index.json])"),
+		gguf:   flag.String("gguf", "", "GGUF checkpoint path; loads through the memory-lean quant path"),
+		tokDir: flag.String("tok", "", "tokenizer dir containing tokenizer.json (default: -hf dir/cache, or GGUF sidecar tokenizer.json)"),
+		sys:    flag.String("sys", "You are a helpful assistant.", "system prompt"),
+		prompt: flag.String("p", "", "user prompt — REQUIRED"),
+		maxNew: flag.Int("n", 256, "max new tokens to generate"),
+		metal:  flag.Bool("metal", false, "run prefill on the Metal GPU (requires -tags fakmetal; decode stays CPU Q8)"),
+		temp:   flag.Float64("temp", 0, "sampling temperature (0 = greedy/argmax)"),
+		seed:   flag.Int64("seed", 1, "RNG seed for temperature sampling"),
+		quiet:  flag.Bool("quiet", false, "suppress the hardware line and the load/prefill spinners (the model=… banner + token stream are unaffected)"),
+	}
+	flag.Parse()
+
+	// Expand a leading ~ so `-hf ~/...`, `-gguf ~/...`, `-tok ~/...` open as intended
+	// (Go and most shells/PowerShell don't expand it for us).
+	*fl.hf = pathutil.ExpandTilde(*fl.hf)
+	*fl.gguf = pathutil.ExpandTilde(*fl.gguf)
+	*fl.tokDir = pathutil.ExpandTilde(*fl.tokDir)
+
+	if (*fl.hf == "") == (*fl.gguf == "") || *fl.prompt == "" {
+		fmt.Fprintln(os.Stderr, "usage: fakchat (-hf <model-dir> | -gguf <model.gguf>) -p <prompt> [-tok <dir>] [-metal] [-n N] [-temp T]")
+		os.Exit(2)
+	}
+	fl.q4kLoad = os.Getenv("FAK_Q4K") != ""
+	return fl
+}
+
+// resolveMetal decides whether Metal prefill actually runs and prints the same fallback
+// note as the inline block when -metal was requested but is unavailable.
+func resolveMetal(metal, hybrid bool) bool {
+	useMetal := metal && !hybrid && metalgemm.Available()
+	if metal && !useMetal {
 		if metalgemm.Compiled() {
 			fmt.Fprintln(os.Stderr, "metal: no usable device; falling back to CPU Q8 prefill")
 		} else {
 			fmt.Fprintln(os.Stderr, "metal: not compiled in (rebuild with -tags fakmetal); falling back to CPU Q8 prefill")
 		}
 	}
-	if useMetal {
-		lease, lerr := gpulease.Acquire(gpulease.Options{NoWait: os.Getenv("FAK_GPU_LEASE_NOWAIT") != ""})
-		if lerr != nil {
-			fmt.Fprintln(os.Stderr, "metal lease:", lerr)
-			os.Exit(1)
-		}
-		defer lease.Release()
-	}
+	return useMetal
+}
 
+// acquireGPULease takes the machine-wide GPU lease (honouring FAK_GPU_LEASE_NOWAIT) and
+// returns the release func to defer; it exits 1 on a lease error, as before.
+func acquireGPULease() func() {
+	lease, lerr := gpulease.Acquire(gpulease.Options{NoWait: os.Getenv("FAK_GPU_LEASE_NOWAIT") != ""})
+	if lerr != nil {
+		fmt.Fprintln(os.Stderr, "metal lease:", lerr)
+		os.Exit(1)
+	}
+	return lease.Release
+}
+
+// loadModel loads (and where needed quantizes) the weights, returning the model, whether
+// the weights arrived already quantized, and the load time in ms. It drives the "Loading
+// model" spinner and exits 1 on a load error, matching the inline block exactly.
+func loadModel(fl *cliFlags, cfg model.Config, hybrid bool, spin func(string) func()) (*model.Model, bool, float64) {
 	// Load weights. Llama family: quantize-at-load (Q8) so 1.5B–14B fit on 36 GB.
 	// GGUF streams through the quantized loader; HF hybrid still uses the validated f32 GDN path.
 	t0 := time.Now()
@@ -115,21 +186,21 @@ func main() {
 	// freezing. Stopped before the model=… banner prints below.
 	stopLoad := spin("Loading model")
 	var m *model.Model
+	var err error
 	quantLoaded := false
-	q4kLoad := os.Getenv("FAK_Q4K") != ""
-	if *gguf != "" {
-		if q4kLoad {
+	if *fl.gguf != "" {
+		if fl.q4kLoad {
 			// Direct-resident-Q4_K loader (plan P1): name-eligible Q4_K matmul tensors are
 			// held raw (no Q4→f32→Q8 round-trip), Q6_K minority + small tensors via Q8/f32.
-			m, err = ggufload.LoadModelQ4K(*gguf)
+			m, err = ggufload.LoadModelQ4K(*fl.gguf)
 		} else {
-			m, err = ggufload.LoadModelQuant(*gguf)
+			m, err = ggufload.LoadModelQuant(*fl.gguf)
 		}
 		quantLoaded = true
 	} else if hybrid {
-		m, err = model.LoadSafetensorsDir(*hf, cfg)
+		m, err = model.LoadSafetensorsDir(*fl.hf, cfg)
 	} else {
-		m, err = loadLean(*hf, cfg)
+		m, err = loadLean(*fl.hf, cfg)
 		quantLoaded = true
 	}
 	if err != nil {
@@ -142,18 +213,23 @@ func main() {
 	}
 	stopLoad()
 	loadMS := time.Since(t0).Seconds() * 1e3
+	return m, quantLoaded, loadMS
+}
 
-	// Tokenizer.
-	td := *tokDir
+// loadTokenizer resolves the tokenizer dir (explicit -tok, the -hf dir, the qwen2.5
+// cache, or the GGUF sidecar) and loads tokenizer.json — exiting 2 on a missing dir and
+// 1 on a load error, exactly as the inline block did.
+func loadTokenizer(fl *cliFlags, cfg model.Config) *tokenizer.Tokenizer {
+	td := *fl.tokDir
 	if td == "" {
-		if *hf != "" {
-			if _, err := os.Stat(filepath.Join(*hf, "tokenizer.json")); err == nil {
-				td = *hf
+		if *fl.hf != "" {
+			if _, err := os.Stat(filepath.Join(*fl.hf, "tokenizer.json")); err == nil {
+				td = *fl.hf
 			} else if home, herr := os.UserHomeDir(); herr == nil {
 				td = filepath.Join(home, ".cache", "fak-models", "tokenizers", "qwen2.5")
 			}
-		} else if _, err := os.Stat(filepath.Join(filepath.Dir(*gguf), "tokenizer.json")); err == nil {
-			td = filepath.Dir(*gguf)
+		} else if _, err := os.Stat(filepath.Join(filepath.Dir(*fl.gguf), "tokenizer.json")); err == nil {
+			td = filepath.Dir(*fl.gguf)
 		} else {
 			fmt.Fprintln(os.Stderr, "tokenizer: -tok is required with -gguf unless tokenizer.json is next to the GGUF")
 			os.Exit(2)
@@ -164,108 +240,110 @@ func main() {
 		fmt.Fprintln(os.Stderr, "tokenizer:", err)
 		os.Exit(1)
 	}
-	stops := stopIDs(tok, cfg)
+	return tok
+}
 
-	// ChatML prompt (Qwen / SmolLM2 family). Special tokens are parsed literally.
-	chat := "<|im_start|>system\n" + *sys + "<|im_end|>\n" +
-		"<|im_start|>user\n" + *prompt + "<|im_end|>\n" +
-		"<|im_start|>assistant\n"
-	ids, err := tok.Encode(chat)
-	if err != nil {
-		fmt.Fprintln(os.Stderr, "encode:", err)
-		os.Exit(1)
+// hybridBackend builds the human-readable backend label for the hybrid qwen3_5 path,
+// reflecting the quant tier (f32 / GGUF->Q8 / int4 / resident Q4_K) and Metal prefill.
+func hybridBackend(quantLoaded, q4, q4k bool) string {
+	backend := "fak in-kernel Gated-DeltaNet (f32, cached)"
+	if quantLoaded {
+		backend = "fak in-kernel Gated-DeltaNet (GGUF->Q8, cached)"
 	}
-
-	// Hybrid qwen3_5: cached decode. Linear-attention recurrent state and full-attention
-	// KV both live in the Session, so generation no longer reruns whole-sequence Forward.
-	if hybrid {
-		q4 := os.Getenv("FAK_Q4") != ""
-		q4k := q4kLoad
-		// The current FAK_Q4 path builds q4w from the resident Q8_0 copy, so the Q8_0 27B
-		// (~26 GB) is materialized at load before q4 frees it → ~28 GB peak. On a shared
-		// 36 GB fleet box that pressures peers, so it is gated behind FAK_Q4_FORCE. The
-		// memory-lean route (a direct GGUF→int4 loader that never builds Q8_0, ~15–20 GB
-		// peak) is the scoped next step — see QWEN36-NATIVE-PERF-PLAN-2026-06-19.md P1b.
-		if q4 && os.Getenv("FAK_Q4_FORCE") == "" {
-			fmt.Fprintln(os.Stderr, "FAK_Q4: the q8-intermediate path peaks ~28 GB; set FAK_Q4_FORCE=1 to acknowledge and run on this box, or wait for the lean GGUF→int4 loader (P1b).")
-			os.Exit(0)
-		}
-		if q4 {
-			m.QuantizeQ4() // build resident int4 weights (from q8w); decode streams ~1.8× fewer bytes
-		}
-		backend := "fak in-kernel Gated-DeltaNet (f32, cached)"
-		if quantLoaded {
-			backend = "fak in-kernel Gated-DeltaNet (GGUF->Q8, cached)"
-		}
-		if q4 {
-			backend = "fak in-kernel Gated-DeltaNet (Q8 prefill + int4 decode, cached)"
-		}
-		if q4k {
-			backend = "fak in-kernel Gated-DeltaNet (resident Q4_K decode + Q8 fallback, cached)"
-			if os.Getenv("FAK_METAL") != "" {
-				backend += " [Metal q4_k prefill]"
-			}
-		}
-		fmt.Fprintf(os.Stderr, "model=%s  load=%.0fms  prompt_tokens=%d  backend=%s\n",
-			cfg.ModelType, loadMS, len(ids), backend)
-		out := bufio.NewWriter(os.Stdout)
-		rng := rand.New(rand.NewSource(*seed))
-		s := m.NewSession()
-		s.Quant = quantLoaded
-		s.Q4 = q4
-		s.Q4K = q4k
-		// FAK_METAL routes the resident-Q4_K hybrid PREFILL's q4_k-majority GEMMs to the Metal
-		// q4_k dequant-GEMM (needs -tags fakmetal; a no-op flag on the pure-Go build). Decode
-		// stays CPU. See QWEN36-NATIVE-PERF-PLAN P5.
-		s.MetalQ4K = q4k && os.Getenv("FAK_METAL") != ""
-		var pp *model.PhaseProfiler
-		if os.Getenv("FAK_QPROFILE") != "" {
-			pp = model.NewPhaseProfiler()
-			s.PhaseProfiler = pp
-		}
-		// Prefill is a silent compute block (the model is "thinking" before the first
-		// token); spin so the terminal isn't frozen. Stopped before the decode stream.
-		stopPrefill := spin("Thinking")
-		tp := time.Now()
-		logits := s.Prefill(ids)
-		prefillS := time.Since(tp).Seconds()
-		stopPrefill()
-		if pp != nil {
-			printPhaseProfile("prefill", pp.Snapshot("prefill", len(ids), 0, time.Since(tp).Nanoseconds()))
-			pp.Reset() // separate the decode phase split from prefill's
-		}
-		tg := time.Now()
-		gen := 0
-		for ; gen < *maxNew; gen++ {
-			next := sample(logits, *temp, rng)
-			if stops[next] {
-				break
-			}
-			if piece, derr := tok.Decode([]int{next}); derr == nil {
-				out.WriteString(piece)
-				out.Flush()
-			}
-			logits = s.Step(next)
-		}
-		out.Flush()
-		decodeNanos := time.Since(tg).Nanoseconds()
-		decodeS := float64(decodeNanos) / 1e9
-		if pp != nil {
-			printPhaseProfile("decode", pp.Snapshot("decode", 0, gen, decodeNanos))
-		}
-		prefTPS := 0.0
-		if prefillS > 0 {
-			prefTPS = float64(len(ids)) / prefillS
-		}
-		decTPS := 0.0
-		if decodeS > 0 {
-			decTPS = float64(gen) / decodeS
-		}
-		fmt.Fprintf(os.Stderr, "\n---\nprefill: %d tok in %.2fs (%.1f tok/s)  |  cached qwen3_5 decode: %d tok in %.2fs (%.1f tok/s)\n",
-			len(ids), prefillS, prefTPS, gen, decodeS, decTPS)
-		return
+	if q4 {
+		backend = "fak in-kernel Gated-DeltaNet (Q8 prefill + int4 decode, cached)"
 	}
+	if q4k {
+		backend = "fak in-kernel Gated-DeltaNet (resident Q4_K decode + Q8 fallback, cached)"
+		if os.Getenv("FAK_METAL") != "" {
+			backend += " [Metal q4_k prefill]"
+		}
+	}
+	return backend
+}
 
+// runHybrid runs the cached qwen3_5 (Gated-DeltaNet) prefill+decode path: it honours the
+// FAK_Q4/FAK_Q4_FORCE/FAK_METAL/FAK_QPROFILE env gates, streams the decode to stdout, and
+// prints the timing summary — behaviour-identical to the inline hybrid block.
+func runHybrid(fl *cliFlags, cfg model.Config, m *model.Model, tok *tokenizer.Tokenizer, ids []int, stops map[int]bool, quantLoaded bool, loadMS float64, spin func(string) func()) {
+	q4 := os.Getenv("FAK_Q4") != ""
+	q4k := fl.q4kLoad
+	// The current FAK_Q4 path builds q4w from the resident Q8_0 copy, so the Q8_0 27B
+	// (~26 GB) is materialized at load before q4 frees it → ~28 GB peak. On a shared
+	// 36 GB fleet box that pressures peers, so it is gated behind FAK_Q4_FORCE. The
+	// memory-lean route (a direct GGUF→int4 loader that never builds Q8_0, ~15–20 GB
+	// peak) is the scoped next step — see QWEN36-NATIVE-PERF-PLAN-2026-06-19.md P1b.
+	if q4 && os.Getenv("FAK_Q4_FORCE") == "" {
+		fmt.Fprintln(os.Stderr, "FAK_Q4: the q8-intermediate path peaks ~28 GB; set FAK_Q4_FORCE=1 to acknowledge and run on this box, or wait for the lean GGUF→int4 loader (P1b).")
+		os.Exit(0)
+	}
+	if q4 {
+		m.QuantizeQ4() // build resident int4 weights (from q8w); decode streams ~1.8× fewer bytes
+	}
+	backend := hybridBackend(quantLoaded, q4, q4k)
+	fmt.Fprintf(os.Stderr, "model=%s  load=%.0fms  prompt_tokens=%d  backend=%s\n",
+		cfg.ModelType, loadMS, len(ids), backend)
+	out := bufio.NewWriter(os.Stdout)
+	rng := rand.New(rand.NewSource(*fl.seed))
+	s := m.NewSession()
+	s.Quant = quantLoaded
+	s.Q4 = q4
+	s.Q4K = q4k
+	// FAK_METAL routes the resident-Q4_K hybrid PREFILL's q4_k-majority GEMMs to the Metal
+	// q4_k dequant-GEMM (needs -tags fakmetal; a no-op flag on the pure-Go build). Decode
+	// stays CPU. See QWEN36-NATIVE-PERF-PLAN P5.
+	s.MetalQ4K = q4k && os.Getenv("FAK_METAL") != ""
+	var pp *model.PhaseProfiler
+	if os.Getenv("FAK_QPROFILE") != "" {
+		pp = model.NewPhaseProfiler()
+		s.PhaseProfiler = pp
+	}
+	// Prefill is a silent compute block (the model is "thinking" before the first
+	// token); spin so the terminal isn't frozen. Stopped before the decode stream.
+	stopPrefill := spin("Thinking")
+	tp := time.Now()
+	logits := s.Prefill(ids)
+	prefillS := time.Since(tp).Seconds()
+	stopPrefill()
+	if pp != nil {
+		printPhaseProfile("prefill", pp.Snapshot("prefill", len(ids), 0, time.Since(tp).Nanoseconds()))
+		pp.Reset() // separate the decode phase split from prefill's
+	}
+	tg := time.Now()
+	gen := 0
+	for ; gen < *fl.maxNew; gen++ {
+		next := sample(logits, *fl.temp, rng)
+		if stops[next] {
+			break
+		}
+		if piece, derr := tok.Decode([]int{next}); derr == nil {
+			out.WriteString(piece)
+			out.Flush()
+		}
+		logits = s.Step(next)
+	}
+	out.Flush()
+	decodeNanos := time.Since(tg).Nanoseconds()
+	decodeS := float64(decodeNanos) / 1e9
+	if pp != nil {
+		printPhaseProfile("decode", pp.Snapshot("decode", 0, gen, decodeNanos))
+	}
+	prefTPS := 0.0
+	if prefillS > 0 {
+		prefTPS = float64(len(ids)) / prefillS
+	}
+	decTPS := 0.0
+	if decodeS > 0 {
+		decTPS = float64(gen) / decodeS
+	}
+	fmt.Fprintf(os.Stderr, "\n---\nprefill: %d tok in %.2fs (%.1f tok/s)  |  cached qwen3_5 decode: %d tok in %.2fs (%.1f tok/s)\n",
+		len(ids), prefillS, prefTPS, gen, decodeS, decTPS)
+}
+
+// runStandard runs the Llama-family Q8 (optionally Metal-prefill) prefill+decode path: it
+// streams the decode to stdout and prints the timing summary — behaviour-identical to the
+// inline default block.
+func runStandard(fl *cliFlags, cfg model.Config, m *model.Model, tok *tokenizer.Tokenizer, ids []int, stops map[int]bool, useMetal bool, loadMS float64, spin func(string) func()) {
 	s := m.NewSession()
 	s.Quant = true
 	s.Metal = useMetal
@@ -287,11 +365,11 @@ func main() {
 
 	// Decode loop (timed, streamed).
 	out := bufio.NewWriter(os.Stdout)
-	rng := rand.New(rand.NewSource(*seed))
+	rng := rand.New(rand.NewSource(*fl.seed))
 	td0 := time.Now()
 	gen := 0
-	for ; gen < *maxNew; gen++ {
-		next := sample(logits, *temp, rng)
+	for ; gen < *fl.maxNew; gen++ {
+		next := sample(logits, *fl.temp, rng)
 		if stops[next] {
 			break
 		}

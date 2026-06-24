@@ -59,111 +59,9 @@ func main() {
 	backend := flag.String("backend", "", "Compute backend to run through, e.g. cuda (default: the pure-Go Q8 CPU path). Use to prove GPU usage on a build that registered an accelerator.")
 	flag.Parse()
 
-	// Expand a leading ~ ourselves: Go's flag parsing and os.Open never do, and a
-	// quoted/PowerShell "-gguf ~/Downloads/model.gguf" reaches us as a literal "~"
-	// path that can't be opened (issue: "system cannot find the path specified").
-	*gguf = pathutil.ExpandTilde(*gguf)
-	*tokDir = pathutil.ExpandTilde(*tokDir)
-
-	// Try to auto-find a model if none specified
-	if *gguf == "" {
-		foundModel, foundTok := findModel()
-		if foundModel != "" {
-			*gguf = foundModel
-			if *tokDir == "" && foundTok != "" {
-				*tokDir = foundTok
-			}
-			if !*quiet {
-				fmt.Fprintf(os.Stderr, "🤖 Found model: %s\n\n", filepath.Base(foundModel))
-			}
-		}
-	}
-
-	// Still no model? Auto-download or show help
-	if *gguf == "" {
-		if *autoDownload {
-			// Auto-download the default model
-			home, _ := os.UserHomeDir()
-			cacheDir := filepath.Join(home, ".cache", "fak-models")
-			ggufDir := filepath.Join(cacheDir, "gguf")
-			os.MkdirAll(ggufDir, 0755)
-
-			defaultModel := "Qwen2.5-0.5B-Instruct-Q8_0.gguf"
-			*gguf = filepath.Join(ggufDir, defaultModel)
-			*tokDir = filepath.Join(cacheDir, "tokenizers", "qwen2.5")
-
-			if !*quiet {
-				printWelcome()
-				fmt.Fprintln(os.Stderr, "")
-				fmt.Fprintln(os.Stderr, "📥 Downloading model (first time only)...")
-				fmt.Fprintf(os.Stderr, "   Model: %s\n", defaultModel)
-			}
-
-			// Try all URLs (primary + mirrors)
-			modelErr := downloadWithMirrors(modelURLs(defaultModel), *gguf, !*quiet)
-			if modelErr != nil {
-				fmt.Fprintf(os.Stderr, "❌ Download failed: %v\n", modelErr)
-				os.Exit(1)
-			}
-
-			if !*quiet {
-				fmt.Fprintln(os.Stderr, "   ✅ Download complete!")
-				fmt.Fprintln(os.Stderr, "")
-			}
-
-			// Download tokenizer
-			os.MkdirAll(*tokDir, 0755)
-			tokPath := filepath.Join(*tokDir, "tokenizer.json")
-			if _, err := os.Stat(tokPath); os.IsNotExist(err) {
-				if !*quiet {
-					fmt.Fprintln(os.Stderr, "📥 Downloading tokenizer...")
-				}
-				tokErr := downloadWithMirrors(tokenizerURLs(), tokPath, !*quiet)
-				if tokErr != nil {
-					fmt.Fprintf(os.Stderr, "⚠️  Tokenizer download failed: %v\n", tokErr)
-				}
-			}
-		} else {
-			// Show download instructions
-			if !*quiet {
-				printWelcome()
-			}
-			fmt.Fprintln(os.Stderr, "")
-			fmt.Fprintln(os.Stderr, "❌ No model found. You need to download a model first.")
-			fmt.Fprintln(os.Stderr, "")
-			fmt.Fprintln(os.Stderr, "📥 Quick options:")
-			fmt.Fprintln(os.Stderr, "")
-			fmt.Fprintln(os.Stderr, "  1. Auto-download (recommended):")
-			fmt.Fprintln(os.Stderr, "     go -C fak run ./cmd/simpledemo -download")
-			fmt.Fprintln(os.Stderr, "     # or from the fak directory:")
-			fmt.Fprintln(os.Stderr, "     go run ./cmd/simpledemo -download")
-			fmt.Fprintln(os.Stderr, "")
-			fmt.Fprintln(os.Stderr, "  2. Manual download (pick one):")
-			fmt.Fprintln(os.Stderr, "")
-			fmt.Fprintln(os.Stderr, "     FASTEST (500MB):")
-			fmt.Fprintf(os.Stderr, "     curl -L %s -o model.gguf\n", modelURL("Qwen2.5-0.5B-Instruct-Q8_0.gguf"))
-			fmt.Fprintln(os.Stderr, "")
-			fmt.Fprintln(os.Stderr, "     RECOMMENDED (1.6GB):")
-			fmt.Fprintf(os.Stderr, "     curl -L %s -o model.gguf\n", modelURL("Qwen2.5-1.5B-Instruct-Q8_0.gguf"))
-			fmt.Fprintln(os.Stderr, "")
-			fmt.Fprintln(os.Stderr, "  Then run: go -C fak run ./cmd/simpledemo -gguf model.gguf")
-			fmt.Fprintln(os.Stderr, "")
-			fmt.Fprintln(os.Stderr, "Or browse: https://huggingface.co/models?search=gguf qwen2.5 instruct")
-			fmt.Fprintln(os.Stderr, "")
-			os.Exit(1)
-		}
-	}
-
-	// An explicit -gguf path that isn't on disk: fetch it instead of failing. The
-	// user named the model they want, so "should auto download" means we go get it —
-	// no -download flag required. We derive the real HuggingFace URL from the
-	// filename; an unrecognizable name yields a friendly, actionable error.
-	if *gguf != "" {
-		if err := ensureModelFile(*gguf, !*quiet); err != nil {
-			fmt.Fprintf(os.Stderr, "❌ %v\n", err)
-			os.Exit(1)
-		}
-	}
+	// Resolve the model path: expand ~, auto-detect a local model, auto-download or
+	// print help when none is found, and fetch an explicit -gguf that isn't on disk.
+	resolveModelPath(gguf, tokDir, *autoDownload, *quiet)
 
 	// Load model
 	if !*quiet {
@@ -224,23 +122,51 @@ func main() {
 		fmt.Fprintln(os.Stderr, "")
 	}
 
-	// Chat loop. Rather than re-tokenize and re-prefill the WHOLE conversation each turn
-	// (which also duplicates it, at shifted positions, into a never-reset KV cache), we
-	// keep the cache resident and feed only the NEW turn: the system block once, then each
-	// user block. The KV prefix from prior turns is reused verbatim, so prefill recomputes
-	// only the suffix. cachedIDs tracks exactly what the cache holds, so the cache-hit %
-	// the stats report is measured, not estimated.
+	chatLoop(&session, m, tok, stops, stats, chatConfig{
+		sys:     *sys,
+		maxNew:  *maxNew,
+		temp:    *temp,
+		seed:    *seed,
+		quiet:   *quiet,
+		backend: *backend,
+	})
+}
+
+// chatConfig is the run-invariant set of flag values the incremental chat loop reads
+// per turn — bundled so chatLoop keeps a single, stable signature.
+type chatConfig struct {
+	sys     string
+	maxNew  int
+	temp    float64
+	seed    int64
+	quiet   bool
+	backend string
+}
+
+// chatLoop runs the interactive REPL: it reads a user line, handles the /exit and
+// /clear commands, ingests the new ChatML block into the resident KV cache, prefills
+// only the new suffix, streams the decoded reply, and prints the per-turn stats. It
+// takes session by pointer because /clear rebuilds it; the caller's deferred Close on
+// the same variable then closes whatever session the loop last left resident.
+//
+// Rather than re-tokenize and re-prefill the WHOLE conversation each turn (which also
+// duplicates it, at shifted positions, into a never-reset KV cache), it keeps the cache
+// resident and feeds only the NEW turn: the system block once, then each user block. The
+// KV prefix from prior turns is reused verbatim, so prefill recomputes only the suffix.
+// cachedIDs tracks exactly what the cache holds, so the cache-hit % the stats report is
+// measured, not estimated.
+func chatLoop(session **model.Session, m *model.Model, tok *tokenizer.Tokenizer, stops map[int]bool, stats modelStats, cfg chatConfig) {
 	input := bufio.NewReader(os.Stdin)
 	out := bufio.NewWriter(os.Stdout)
-	rng := rand.New(rand.NewSource(*seed)) // seeded once: turns continue one RNG stream, not N correlated ones
-	var cachedIDs []int                    // the exact token sequence resident in the KV cache, in order
+	rng := rand.New(rand.NewSource(cfg.seed)) // seeded once: turns continue one RNG stream, not N correlated ones
+	var cachedIDs []int                       // the exact token sequence resident in the KV cache, in order
 	firstTurn := true
 	turnNum := 0
 	cumReused, cumPrompt := 0, 0
 
 	for {
 		// Show prompt
-		if *quiet {
+		if cfg.quiet {
 			fmt.Fprint(os.Stderr, "> ")
 		} else {
 			fmt.Fprint(os.Stderr, "You: ")
@@ -258,8 +184,8 @@ func main() {
 			break
 		}
 		if userMsg == "/clear" {
-			session.Close()
-			session, _, _ = newSession(m, *backend) // backend already validated at startup
+			(*session).Close()
+			*session, _, _ = newSession(m, cfg.backend) // backend already validated at startup
 			cachedIDs = nil
 			firstTurn = true
 			cumReused, cumPrompt = 0, 0
@@ -276,7 +202,7 @@ func main() {
 		// boundaries — so the resident prefix stays bit-identical to a fresh prefill.
 		newText := userBlock(userMsg)
 		if firstTurn {
-			newText = systemBlock(*sys) + newText
+			newText = systemBlock(cfg.sys) + newText
 		}
 		newIDs, err := tok.Encode(newText)
 		if err != nil {
@@ -293,11 +219,11 @@ func main() {
 		// prefill returns — and only THEN print the "AI: " prefix — so the spinner (which
 		// clears its own line with a carriage return) never overlaps the streamed reply.
 		var stopThink func()
-		if !*quiet {
+		if !cfg.quiet {
 			stopThink = demoui.Spinner(os.Stderr, "Thinking")
 		}
 		tPrefill := time.Now()
-		logits := session.Prefill(newIDs)
+		logits := (*session).Prefill(newIDs)
 		prefillS := time.Since(tPrefill).Seconds()
 		if stopThink != nil {
 			stopThink()
@@ -305,19 +231,19 @@ func main() {
 		cachedIDs = append(cachedIDs, newIDs...)
 
 		// Show we're thinking
-		if !*quiet {
+		if !cfg.quiet {
 			fmt.Fprint(os.Stderr, "AI: ")
 		}
 
 		decodeStart := time.Now()
-		full, genIDs := decodeReply(session, tok, logits, stops, *maxNew, *temp, rng, out)
+		full, genIDs := decodeReply(*session, tok, logits, stops, cfg.maxNew, cfg.temp, rng, out)
 		decodeS := time.Since(decodeStart).Seconds()
 		cachedIDs = append(cachedIDs, genIDs...)
 
 		// Close the assistant turn in the cache so the NEXT user block continues a
 		// well-formed ChatML transcript and is reused as a prefix, not recomputed.
 		if closeIDs, e := tok.Encode(assistantTurnClose); e == nil && len(closeIDs) > 0 {
-			session.PrefillNoLogits(closeIDs)
+			(*session).PrefillNoLogits(closeIDs)
 			cachedIDs = append(cachedIDs, closeIDs...)
 		}
 
@@ -325,7 +251,7 @@ func main() {
 		// the model and build disagree the reply collapses into a loop ("2 2 2 …" or
 		// ".assistant.assistant…", issue #91); flag it so a first-time user isn't left
 		// staring at gibberish wondering whether the demo is broken.
-		if !*quiet && looksDegenerate(full) {
+		if !cfg.quiet && looksDegenerate(full) {
 			fmt.Fprintln(os.Stderr, "\n⚠️  That reply looks degenerate (stuck repeating). Make sure you're on a build")
 			fmt.Fprintln(os.Stderr, "   with the GGUF chat fixes, or try another model — see cmd/simpledemo/README.md.")
 		}
@@ -333,8 +259,8 @@ func main() {
 		// If decode stopped at the token budget instead of a stop token, the reply was cut
 		// off; say so. The turn is still closed in the cache above so the transcript stays
 		// well-formed for the next turn.
-		if !*quiet && len(genIDs) == *maxNew {
-			fmt.Fprintf(os.Stderr, "\n  ✂️  reply truncated at the -n %d token budget (raise -n for longer replies)\n", *maxNew)
+		if !cfg.quiet && len(genIDs) == cfg.maxNew {
+			fmt.Fprintf(os.Stderr, "\n  ✂️  reply truncated at the -n %d token budget (raise -n for longer replies)\n", cfg.maxNew)
 		}
 
 		firstTurn = false
@@ -345,7 +271,7 @@ func main() {
 		// Stats: prefill vs decode reported separately, the cache hit prefix reuse
 		// achieved, the analytic prefill operation count, the decode bandwidth, and the
 		// device — everything measured this run or counted from the model shape.
-		if !*quiet {
+		if !cfg.quiet {
 			printTurnStats(stats, turnStats{
 				turn:         turnNum,
 				promptTokens: promptTokens,
@@ -360,6 +286,133 @@ func main() {
 			})
 		}
 	}
+}
+
+// resolveModelPath resolves *gguf (and *tokDir) to a usable on-disk model before load.
+// It expands a leading ~, auto-detects a local model when none was given, and — when
+// still empty — either auto-downloads the default model (-download) or prints the help
+// text and exits. Finally it fetches an explicit -gguf that names a model not yet on
+// disk. It exits the process on a fatal download or no-model condition, matching the
+// inline behavior it replaced.
+func resolveModelPath(gguf, tokDir *string, autoDownload, quiet bool) {
+	// Expand a leading ~ ourselves: Go's flag parsing and os.Open never do, and a
+	// quoted/PowerShell "-gguf ~/Downloads/model.gguf" reaches us as a literal "~"
+	// path that can't be opened (issue: "system cannot find the path specified").
+	*gguf = pathutil.ExpandTilde(*gguf)
+	*tokDir = pathutil.ExpandTilde(*tokDir)
+
+	// Try to auto-find a model if none specified
+	if *gguf == "" {
+		foundModel, foundTok := findModel()
+		if foundModel != "" {
+			*gguf = foundModel
+			if *tokDir == "" && foundTok != "" {
+				*tokDir = foundTok
+			}
+			if !quiet {
+				fmt.Fprintf(os.Stderr, "🤖 Found model: %s\n\n", filepath.Base(foundModel))
+			}
+		}
+	}
+
+	// Still no model? Auto-download or show help
+	if *gguf == "" {
+		if autoDownload {
+			downloadDefaultModel(gguf, tokDir, quiet)
+		} else {
+			printNoModelHelp(quiet)
+			os.Exit(1)
+		}
+	}
+
+	// An explicit -gguf path that isn't on disk: fetch it instead of failing. The
+	// user named the model they want, so "should auto download" means we go get it —
+	// no -download flag required. We derive the real HuggingFace URL from the
+	// filename; an unrecognizable name yields a friendly, actionable error.
+	if *gguf != "" {
+		if err := ensureModelFile(*gguf, !quiet); err != nil {
+			fmt.Fprintf(os.Stderr, "❌ %v\n", err)
+			os.Exit(1)
+		}
+	}
+}
+
+// downloadDefaultModel fetches the default Qwen2.5-0.5B model (and its tokenizer) into
+// the fak-models cache, setting *gguf and *tokDir to the cached paths. It exits the
+// process if the model download fails; a failed tokenizer fetch is a non-fatal warning
+// because virtually every GGUF embeds its own tokenizer.
+func downloadDefaultModel(gguf, tokDir *string, quiet bool) {
+	home, _ := os.UserHomeDir()
+	cacheDir := filepath.Join(home, ".cache", "fak-models")
+	ggufDir := filepath.Join(cacheDir, "gguf")
+	os.MkdirAll(ggufDir, 0755)
+
+	defaultModel := "Qwen2.5-0.5B-Instruct-Q8_0.gguf"
+	*gguf = filepath.Join(ggufDir, defaultModel)
+	*tokDir = filepath.Join(cacheDir, "tokenizers", "qwen2.5")
+
+	if !quiet {
+		printWelcome()
+		fmt.Fprintln(os.Stderr, "")
+		fmt.Fprintln(os.Stderr, "📥 Downloading model (first time only)...")
+		fmt.Fprintf(os.Stderr, "   Model: %s\n", defaultModel)
+	}
+
+	// Try all URLs (primary + mirrors)
+	modelErr := downloadWithMirrors(modelURLs(defaultModel), *gguf, !quiet)
+	if modelErr != nil {
+		fmt.Fprintf(os.Stderr, "❌ Download failed: %v\n", modelErr)
+		os.Exit(1)
+	}
+
+	if !quiet {
+		fmt.Fprintln(os.Stderr, "   ✅ Download complete!")
+		fmt.Fprintln(os.Stderr, "")
+	}
+
+	// Download tokenizer
+	os.MkdirAll(*tokDir, 0755)
+	tokPath := filepath.Join(*tokDir, "tokenizer.json")
+	if _, err := os.Stat(tokPath); os.IsNotExist(err) {
+		if !quiet {
+			fmt.Fprintln(os.Stderr, "📥 Downloading tokenizer...")
+		}
+		tokErr := downloadWithMirrors(tokenizerURLs(), tokPath, !quiet)
+		if tokErr != nil {
+			fmt.Fprintf(os.Stderr, "⚠️  Tokenizer download failed: %v\n", tokErr)
+		}
+	}
+}
+
+// printNoModelHelp prints the "no model found" download instructions to stderr (the
+// banner first unless quiet). The caller exits after this — it explains both the
+// one-line auto-download and the manual curl options.
+func printNoModelHelp(quiet bool) {
+	if !quiet {
+		printWelcome()
+	}
+	fmt.Fprintln(os.Stderr, "")
+	fmt.Fprintln(os.Stderr, "❌ No model found. You need to download a model first.")
+	fmt.Fprintln(os.Stderr, "")
+	fmt.Fprintln(os.Stderr, "📥 Quick options:")
+	fmt.Fprintln(os.Stderr, "")
+	fmt.Fprintln(os.Stderr, "  1. Auto-download (recommended):")
+	fmt.Fprintln(os.Stderr, "     go -C fak run ./cmd/simpledemo -download")
+	fmt.Fprintln(os.Stderr, "     # or from the fak directory:")
+	fmt.Fprintln(os.Stderr, "     go run ./cmd/simpledemo -download")
+	fmt.Fprintln(os.Stderr, "")
+	fmt.Fprintln(os.Stderr, "  2. Manual download (pick one):")
+	fmt.Fprintln(os.Stderr, "")
+	fmt.Fprintln(os.Stderr, "     FASTEST (500MB):")
+	fmt.Fprintf(os.Stderr, "     curl -L %s -o model.gguf\n", modelURL("Qwen2.5-0.5B-Instruct-Q8_0.gguf"))
+	fmt.Fprintln(os.Stderr, "")
+	fmt.Fprintln(os.Stderr, "     RECOMMENDED (1.6GB):")
+	fmt.Fprintf(os.Stderr, "     curl -L %s -o model.gguf\n", modelURL("Qwen2.5-1.5B-Instruct-Q8_0.gguf"))
+	fmt.Fprintln(os.Stderr, "")
+	fmt.Fprintln(os.Stderr, "  Then run: go -C fak run ./cmd/simpledemo -gguf model.gguf")
+	fmt.Fprintln(os.Stderr, "")
+	fmt.Fprintln(os.Stderr, "Or browse: https://huggingface.co/models?search=gguf qwen2.5 instruct")
+	fmt.Fprintln(os.Stderr, "")
 }
 
 // newSession builds the generation session for the chosen compute path plus a human

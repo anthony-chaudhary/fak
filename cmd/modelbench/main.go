@@ -190,279 +190,280 @@ func capPositive(n, cap int) int {
 	return n
 }
 
-func main() {
-	dir := flag.String("dir", "internal/model/.cache/smollm2-135m", "model export dir (fak format: config/manifest/weights.f32)")
-	hf := flag.String("hf", "", "HuggingFace snapshot dir (config.json + model.safetensors, bf16/f32, loaded fully in Go); overrides -dir")
-	gguf := flag.String("gguf", "", "GGUF checkpoint path; default dequantizes to f32, -lean streams to Q8; overrides -hf and -dir")
-	lean := flag.Bool("lean", false, "memory-lean load: quantize big matmul weights at load and drop their f32 (with -hf or -gguf; implies -quant; fits much bigger models)")
-	name := flag.String("name", "", "model name for the report (default: derived from the source dir)")
-	out := flag.String("out", "", "write JSON result here (default stdout)")
-	prefillSizesCSV := flag.String("prefill-sizes", "16,64,256", "comma-separated prompt lengths for prefill timings")
-	prefillReps := flag.Int("prefill-reps", 5, "reps per prefill size (median)")
-	decodeReps := flag.Int("decode-reps", 5, "reps for decode (median over per-token)")
-	decodeSteps := flag.Int("decode-steps", 32, "tokens to decode")
-	decodePrompt := flag.Int("decode-prompt", 16, "prompt length before decode")
-	quant := flag.Bool("quant", false, "use the Q8_0 quantized forward path (else f32)")
-	metal := flag.Bool("metal", false, "run prefill projections on the Metal GPU backend (requires -tags fakmetal; implies -quant for the weight store)")
-	verify := flag.Bool("verify", false, "with -metal: cross-check the Metal prefill's last-token logits against the CPU Q8 path (argmax agreement + max|Δ|) and exit")
-	backendName := flag.String("backend", "legacy", "execution backend: legacy or a compute backend name")
-	requireNonReference := flag.Bool("require-non-reference", false, "fail unless -backend selects a non-reference compute backend")
-	workloadPath := flag.String("workload", "", "optional recorded agent workload JSON; emits workload_prefill/workload_decode")
-	workloadPrefillCap := flag.Int("workload-prefill-cap", 0, "cap recorded workload prompt lengths for smoke runs (0 = full recorded length)")
-	loadOnly := flag.Bool("load-only", false, "load the model, emit load time + peak RSS JSON, and exit without running inference")
-	loadProfile := flag.Bool("load-profile", false, "emit GGUF->Q8 quant-on-load phase profile (requires -gguf -lean; also enabled by -phase-profile)")
-	loadProfileTrace := flag.Bool("load-profile-trace", false, "with GGUF load profiling, stream per-tensor load timings to stderr while loading")
-	loadProfileTraceEvery := flag.Int("load-profile-trace-every", 25, "tensor interval for -load-profile-trace after the first tensor")
-	phaseProfile := flag.Bool("phase-profile", false, "emit one-shot coarse Session phase profiles for prefill/decode without perturbing median timings")
-	budget := flag.Float64("budget", 0, "fractional core budget for this run: 0.75 = use up to 75% of the machine's logical cores (portable across box sizes; 75 or 0.75 both accepted). 0 = unset. FAK_WORKERS, if set, still overrides.")
-	flag.Parse()
-	// Expand a leading ~ in path flags (Go/PowerShell don't), so ~/... opens as intended.
-	*dir = pathutil.ExpandTilde(*dir)
-	*gguf = pathutil.ExpandTilde(*gguf)
-	*hf = pathutil.ExpandTilde(*hf)
+// benchFlags holds every parsed command-line flag for the benchmark. Fields are
+// pointers (as returned by the flag package) so the existing in-place mutations
+// (e.g. -lean and -metal forcing -quant) keep working exactly as before.
+type benchFlags struct {
+	dir                   *string
+	hf                    *string
+	gguf                  *string
+	lean                  *bool
+	name                  *string
+	out                   *string
+	prefillSizesCSV       *string
+	prefillReps           *int
+	decodeReps            *int
+	decodeSteps           *int
+	decodePrompt          *int
+	quant                 *bool
+	metal                 *bool
+	verify                *bool
+	backendName           *string
+	requireNonReference   *bool
+	workloadPath          *string
+	workloadPrefillCap    *int
+	loadOnly              *bool
+	loadProfile           *bool
+	loadProfileTrace      *bool
+	loadProfileTraceEvery *int
+	phaseProfile          *bool
+	budget                *float64
+}
 
-	// A -budget flag re-resolves the matmul worker count after init (the env-driven
-	// default was already read at package load). FAK_WORKERS is an explicit absolute
-	// override, so honor it over a fractional -budget rather than silently ignoring it.
-	if *budget > 0 {
-		if os.Getenv("FAK_WORKERS") != "" {
-			fmt.Fprintf(os.Stderr, "[fak] FAK_WORKERS is set; ignoring -budget %g (absolute override wins)\n", *budget)
-		} else if err := model.SetWorkerBudget(*budget); err != nil {
-			fmt.Fprintln(os.Stderr, "budget:", err)
-			os.Exit(2)
-		}
+// parseFlags defines and parses the command-line flags, then expands a leading ~
+// in the path flags (Go/PowerShell don't), so ~/... opens as intended.
+func parseFlags() *benchFlags {
+	f := &benchFlags{
+		dir:                   flag.String("dir", "internal/model/.cache/smollm2-135m", "model export dir (fak format: config/manifest/weights.f32)"),
+		hf:                    flag.String("hf", "", "HuggingFace snapshot dir (config.json + model.safetensors, bf16/f32, loaded fully in Go); overrides -dir"),
+		gguf:                  flag.String("gguf", "", "GGUF checkpoint path; default dequantizes to f32, -lean streams to Q8; overrides -hf and -dir"),
+		lean:                  flag.Bool("lean", false, "memory-lean load: quantize big matmul weights at load and drop their f32 (with -hf or -gguf; implies -quant; fits much bigger models)"),
+		name:                  flag.String("name", "", "model name for the report (default: derived from the source dir)"),
+		out:                   flag.String("out", "", "write JSON result here (default stdout)"),
+		prefillSizesCSV:       flag.String("prefill-sizes", "16,64,256", "comma-separated prompt lengths for prefill timings"),
+		prefillReps:           flag.Int("prefill-reps", 5, "reps per prefill size (median)"),
+		decodeReps:            flag.Int("decode-reps", 5, "reps for decode (median over per-token)"),
+		decodeSteps:           flag.Int("decode-steps", 32, "tokens to decode"),
+		decodePrompt:          flag.Int("decode-prompt", 16, "prompt length before decode"),
+		quant:                 flag.Bool("quant", false, "use the Q8_0 quantized forward path (else f32)"),
+		metal:                 flag.Bool("metal", false, "run prefill projections on the Metal GPU backend (requires -tags fakmetal; implies -quant for the weight store)"),
+		verify:                flag.Bool("verify", false, "with -metal: cross-check the Metal prefill's last-token logits against the CPU Q8 path (argmax agreement + max|Δ|) and exit"),
+		backendName:           flag.String("backend", "legacy", "execution backend: legacy or a compute backend name"),
+		requireNonReference:   flag.Bool("require-non-reference", false, "fail unless -backend selects a non-reference compute backend"),
+		workloadPath:          flag.String("workload", "", "optional recorded agent workload JSON; emits workload_prefill/workload_decode"),
+		workloadPrefillCap:    flag.Int("workload-prefill-cap", 0, "cap recorded workload prompt lengths for smoke runs (0 = full recorded length)"),
+		loadOnly:              flag.Bool("load-only", false, "load the model, emit load time + peak RSS JSON, and exit without running inference"),
+		loadProfile:           flag.Bool("load-profile", false, "emit GGUF->Q8 quant-on-load phase profile (requires -gguf -lean; also enabled by -phase-profile)"),
+		loadProfileTrace:      flag.Bool("load-profile-trace", false, "with GGUF load profiling, stream per-tensor load timings to stderr while loading"),
+		loadProfileTraceEvery: flag.Int("load-profile-trace-every", 25, "tensor interval for -load-profile-trace after the first tensor"),
+		phaseProfile:          flag.Bool("phase-profile", false, "emit one-shot coarse Session phase profiles for prefill/decode without perturbing median timings"),
+		budget:                flag.Float64("budget", 0, "fractional core budget for this run: 0.75 = use up to 75% of the machine's logical cores (portable across box sizes; 75 or 0.75 both accepted). 0 = unset. FAK_WORKERS, if set, still overrides."),
 	}
-	if *loadProfile && (*gguf == "" || !*lean) {
+	flag.Parse()
+	*f.dir = pathutil.ExpandTilde(*f.dir)
+	*f.gguf = pathutil.ExpandTilde(*f.gguf)
+	*f.hf = pathutil.ExpandTilde(*f.hf)
+	return f
+}
+
+// applyBudget re-resolves the matmul worker count after init from a -budget flag (the
+// env-driven default was already read at package load). FAK_WORKERS is an explicit
+// absolute override, so honor it over a fractional -budget rather than silently ignoring it.
+func applyBudget(budget float64) {
+	if budget <= 0 {
+		return
+	}
+	if os.Getenv("FAK_WORKERS") != "" {
+		fmt.Fprintf(os.Stderr, "[fak] FAK_WORKERS is set; ignoring -budget %g (absolute override wins)\n", budget)
+	} else if err := model.SetWorkerBudget(budget); err != nil {
+		fmt.Fprintln(os.Stderr, "budget:", err)
+		os.Exit(2)
+	}
+}
+
+// validateFlags enforces the flag combinations that must hold before any load.
+func validateFlags(f *benchFlags) {
+	if *f.loadProfile && (*f.gguf == "" || !*f.lean) {
 		fmt.Fprintln(os.Stderr, "-load-profile requires -gguf and -lean")
 		os.Exit(2)
 	}
-	if *loadProfileTrace && (*gguf == "" || !*lean) {
+	if *f.loadProfileTrace && (*f.gguf == "" || !*f.lean) {
 		fmt.Fprintln(os.Stderr, "-load-profile-trace requires -gguf and -lean")
 		os.Exit(2)
 	}
-	prefillSizes, parseErr := parsePositiveInts(*prefillSizesCSV)
-	if parseErr != nil {
-		fmt.Fprintln(os.Stderr, "prefill-sizes:", parseErr)
-		os.Exit(2)
-	}
+}
 
-	var workload *model.BenchWorkload
-	if *workloadPath != "" {
-		var err error
-		workload, err = model.LoadBenchWorkload(*workloadPath)
-		if err != nil {
-			fmt.Fprintln(os.Stderr, "workload:", err)
-			os.Exit(1)
-		}
+// acquireMetalLease takes a machine-wide GPU lease so concurrent -metal runs QUEUE
+// instead of stacking residency on the same unified-memory pool (a jetsam cascade and
+// kernel watchdog panic on 2026-06-18). Default: wait for the lease; set
+// FAK_GPU_LEASE_NOWAIT=1 to fail fast instead. The lease is held for the whole process
+// and the OS drops it on exit, so an os.Exit path still frees it. Gate on Available()
+// (cheap, model-independent) so a -metal run that will fall back to CPU does not
+// needlessly serialize behind the GPU lease. Returns a release func to defer.
+func acquireMetalLease(metal bool) func() {
+	if !metal || !metalgemm.Available() {
+		return func() {}
 	}
-
-	// A -metal bench is heavy on unified memory (the CPU model PLUS its full f16 GPU
-	// copy); two or three launched at once across separate sessions stack their
-	// residency on the same pool and overran RAM — a jetsam cascade and kernel
-	// watchdog panic on 2026-06-18. Take a machine-wide lease before the load so
-	// concurrent -metal runs QUEUE instead of stacking. Default: wait for the lease;
-	// set FAK_GPU_LEASE_NOWAIT=1 to fail fast instead. The lease is held for the whole
-	// process and the OS drops it on exit, so an os.Exit path below still frees it.
-	// Gate on Available() (cheap, model-independent) so a -metal run that will fall
-	// back to CPU below does not needlessly serialize behind the GPU lease.
-	if *metal && metalgemm.Available() {
-		lease, lerr := gpulease.Acquire(gpulease.Options{NoWait: os.Getenv("FAK_GPU_LEASE_NOWAIT") != ""})
-		if lerr != nil {
-			fmt.Fprintln(os.Stderr, "metal:", lerr)
-			os.Exit(1)
-		}
-		defer lease.Release()
+	lease, lerr := gpulease.Acquire(gpulease.Options{NoWait: os.Getenv("FAK_GPU_LEASE_NOWAIT") != ""})
+	if lerr != nil {
+		fmt.Fprintln(os.Stderr, "metal:", lerr)
+		os.Exit(1)
 	}
+	return lease.Release
+}
 
-	wantLoadProfile := (*loadProfile || *loadProfileTrace || *phaseProfile) && *gguf != "" && *lean
-	var ggufLoadProfiler *ggufload.LoadProfiler
-	if wantLoadProfile {
-		ggufLoadProfiler = ggufload.NewLoadProfiler()
-		if *loadProfileTrace {
-			ggufLoadProfiler.Trace = os.Stderr
-			ggufLoadProfiler.Every = *loadProfileTraceEvery
-		}
+// newGGUFLoadProfiler builds the GGUF->Q8 quant-on-load profiler when one of the
+// profile flags is set on a -gguf -lean run, else returns nil.
+func newGGUFLoadProfiler(f *benchFlags) *ggufload.LoadProfiler {
+	wantLoadProfile := (*f.loadProfile || *f.loadProfileTrace || *f.phaseProfile) && *f.gguf != "" && *f.lean
+	if !wantLoadProfile {
+		return nil
 	}
+	lp := ggufload.NewLoadProfiler()
+	if *f.loadProfileTrace {
+		lp.Trace = os.Stderr
+		lp.Every = *f.loadProfileTraceEvery
+	}
+	return lp
+}
 
-	t0 := time.Now()
-	var (
-		m         *model.Model
-		err       error
-		modelName string
-	)
-	if *lean {
-		if *hf == "" && *gguf == "" {
+// loadModel selects the load path from the flags (lean GGUF/HF, plain GGUF/HF, or fak
+// dir format) and returns the model plus its report label. May set *f.quant for -lean.
+func loadModel(f *benchFlags, lp *ggufload.LoadProfiler) (*model.Model, string, error) {
+	if *f.lean {
+		if *f.hf == "" && *f.gguf == "" {
 			fmt.Fprintln(os.Stderr, "-lean requires -hf or -gguf")
 			os.Exit(2)
 		}
-		*quant = true // the lean model holds no f32 for the big weights; the f32 path would panic
-		if *gguf != "" {
-			m, modelName, err = loadGGUFLean(*gguf, ggufLoadProfiler)
-		} else {
-			m, modelName, err = loadHFLean(*hf)
+		*f.quant = true // the lean model holds no f32 for the big weights; the f32 path would panic
+		if *f.gguf != "" {
+			return loadGGUFLean(*f.gguf, lp)
 		}
-	} else if *gguf != "" {
-		m, modelName, err = loadGGUF(*gguf)
-	} else if *hf != "" {
-		m, modelName, err = loadHF(*hf)
-	} else {
-		m, err = model.Load(*dir)
-		modelName = filepath.Base(*dir)
+		return loadHFLean(*f.hf)
 	}
-	if err != nil {
-		fmt.Fprintln(os.Stderr, "load:", err)
-		os.Exit(1)
+	if *f.gguf != "" {
+		return loadGGUF(*f.gguf)
 	}
-	if *name != "" {
-		modelName = *name
+	if *f.hf != "" {
+		return loadHF(*f.hf)
 	}
-	loadNanos := time.Since(t0).Nanoseconds()
-	loadMS := float64(loadNanos) / 1e6
-	var ggufLoadProfile *ggufload.LoadProfile
-	if ggufLoadProfiler != nil {
-		ggufLoadProfile = ggufLoadProfiler.Snapshot("gguf-lean-q8", *gguf, loadNanos)
+	m, err := model.Load(*f.dir)
+	return m, filepath.Base(*f.dir), err
+}
+
+// runLoadOnly emits the load-time + peak-RSS report and is the whole job for -load-only.
+func runLoadOnly(f *benchFlags, modelName string, loadMS float64, ggufLoadProfile *ggufload.LoadProfile) {
+	peakRSS, rssErr := peakRSSBytes()
+	report := map[string]any{
+		"app_version":          appversion.Current(),
+		"engine":               "fak model load",
+		"model":                modelName,
+		"source":               loadSource(*f.hf, *f.gguf, *f.dir, *f.lean),
+		"load_ms":              loadMS,
+		"lean":                 *f.lean,
+		"quantized_at_load":    *f.lean,
+		"peak_rss_bytes":       peakRSS,
+		"peak_rss_unavailable": rssErr != nil,
 	}
-	if *loadOnly {
-		peakRSS, rssErr := peakRSSBytes()
-		report := map[string]any{
-			"app_version":          appversion.Current(),
-			"engine":               "fak model load",
-			"model":                modelName,
-			"source":               loadSource(*hf, *gguf, *dir, *lean),
-			"load_ms":              loadMS,
-			"lean":                 *lean,
-			"quantized_at_load":    *lean,
-			"peak_rss_bytes":       peakRSS,
-			"peak_rss_unavailable": rssErr != nil,
-		}
-		if rssErr != nil {
-			report["peak_rss_error"] = rssErr.Error()
-		}
-		if ggufLoadProfile != nil {
-			report["load_profile"] = ggufLoadProfile
-		}
-		writeReport(*out, report)
-		return
+	if rssErr != nil {
+		report["peak_rss_error"] = rssErr.Error()
 	}
-	vocab := m.Cfg.VocabSize
+	if ggufLoadProfile != nil {
+		report["load_profile"] = ggufLoadProfile
+	}
+	writeReport(*f.out, report)
+}
+
+// resolveBackend looks up the named compute backend (nil for "legacy") and enforces the
+// Q8-upload and non-reference gates. Returns the backend and the registered-backend list.
+func resolveBackend(f *benchFlags) (compute.Backend, []string) {
 	registeredBackends := compute.Registered()
 	var be compute.Backend
-	if *backendName != "legacy" {
+	if *f.backendName != "legacy" {
 		var ok bool
-		be, ok = compute.Lookup(*backendName)
+		be, ok = compute.Lookup(*f.backendName)
 		if !ok {
-			fmt.Fprintf(os.Stderr, "backend: unknown %q (registered: %v)\n", *backendName, registeredBackends)
+			fmt.Fprintf(os.Stderr, "backend: unknown %q (registered: %v)\n", *f.backendName, registeredBackends)
 			os.Exit(2)
 		}
 		// Q8 on a compute backend needs the device to accept quantized weight uploads
 		// (the wired Q8 HAL path keys off Caps().UploadDtype). A backend that can't —
 		// e.g. cpu-ref or an f32-only device — still refuses -quant rather than silently
 		// running the f32 path under a Q8 flag.
-		if *quant && !be.Caps().UploadDtype {
+		if *f.quant && !be.Caps().UploadDtype {
 			fmt.Fprintf(os.Stderr, "backend: %q is f32-only (no Q8 upload support); omit -quant\n", be.Name())
 			os.Exit(2)
 		}
-		if *requireNonReference && be.Class() == compute.Reference {
+		if *f.requireNonReference && be.Class() == compute.Reference {
 			fmt.Fprintf(os.Stderr, "backend: %q is %s; production Phase-1 gate requires a non-reference backend\n", be.Name(), be.Class())
 			os.Exit(2)
 		}
-	} else if *requireNonReference {
+	} else if *f.requireNonReference {
 		fmt.Fprintln(os.Stderr, "backend: -require-non-reference needs -backend to name a compute backend")
 		os.Exit(2)
 	}
+	return be, registeredBackends
+}
 
-	// Metal prefill needs the Q8 weight store (it dequantizes its f16 GPU copies from it) and
-	// a live device. Resolve availability before the quantize step so the report is honest.
-	if *metal {
-		*quant = true
-		if !metalgemm.Available() {
-			if metalgemm.Compiled() {
-				fmt.Fprintln(os.Stderr, "metal: no usable Metal device; falling back to CPU Q8 prefill")
-			} else {
-				fmt.Fprintln(os.Stderr, "metal: backend not compiled in (rebuild with -tags fakmetal); falling back to CPU Q8 prefill")
-			}
-			*metal = false
-		}
-	}
-
-	// Quantize once up front (off the timed path) when in Q8 mode. newSession stamps the
-	// Quant flag onto every session the benchmark creates so prefill+decode use it.
-	var quantMS float64
-	if *quant {
-		tq := time.Now()
-		m.Quantize()
-		quantMS = float64(time.Since(tq).Nanoseconds()) / 1e6
-	}
-	newSession := func() *model.Session {
-		if be != nil {
-			s := m.NewBackendSession(be)
-			s.Quant = *quant // routes the HAL through the Q8 weight path when the backend advertises UploadDtype
-			return s
-		}
-		s := m.NewSession()
-		s.Quant = *quant
-		s.Metal = *metal
-		return s
-	}
-
-	// -verify: prove the Metal prefill is numerically faithful before trusting its speed.
-	// Compare its last-token logits to the CPU Q8 path (already argmax-validated vs the HF
-	// oracle) on several prompt lengths: argmax must agree, and the logit max|Δ| should sit
-	// at the f16-vs-Q8 noise floor, not diverge.
-	if *verify {
-		if !*metal {
-			fmt.Fprintln(os.Stderr, "-verify requires -metal")
-			os.Exit(2)
-		}
-		allOK := true
-		for _, P := range []int{8, 32, 128, 256} {
-			ids := lcgIDs(P, vocab)
-			sc := m.NewSession()
-			sc.Quant = true
-			lc := sc.Prefill(ids)
-			sg := m.NewSession()
-			sg.Metal = true
-			lg := sg.Prefill(ids)
-			var maxAbs float64
-			ac, ag := argmax(lc), argmax(lg)
-			for i := range lc {
-				if d := math.Abs(float64(lc[i] - lg[i])); d > maxAbs {
-					maxAbs = d
-				}
-			}
-			ok := ac == ag
-			allOK = allOK && ok
-			fmt.Printf("P=%-4d argmax cpu=%-7d metal=%-7d agree=%-5v  max|Δlogit|=%.4f\n", P, ac, ag, ok, maxAbs)
-		}
-		if allOK {
-			fmt.Println("VERIFY OK — Metal prefill argmax-matches the CPU Q8 path on all lengths")
-		} else {
-			fmt.Println("VERIFY FAIL — Metal prefill diverges from the CPU Q8 path")
-			os.Exit(1)
-		}
+// resolveMetal validates the Metal prefill path: it needs the Q8 weight store (it
+// dequantizes its f16 GPU copies from it) and a live device. Resolve availability before
+// the quantize step so the report is honest, falling back to CPU Q8 when unavailable.
+func resolveMetal(f *benchFlags) {
+	if !*f.metal {
 		return
 	}
-
-	// Warm up: first forward pages in all the weights + JITs allocation paths.
-	// Time only steady-state, matching the HF side which also warms up.
-	{
-		s := newSession()
-		s.Prefill(lcgIDs(8, vocab))
-		s.Step(s.Cache.Len() % vocab)
-		s.Close()
+	*f.quant = true
+	if !metalgemm.Available() {
+		if metalgemm.Compiled() {
+			fmt.Fprintln(os.Stderr, "metal: no usable Metal device; falling back to CPU Q8 prefill")
+		} else {
+			fmt.Fprintln(os.Stderr, "metal: backend not compiled in (rebuild with -tags fakmetal); falling back to CPU Q8 prefill")
+		}
+		*f.metal = false
 	}
+}
 
-	engine := "fak-in-kernel (pure-Go, parallel matmul + batched prefill GEMM + fdot ILP)"
-	precision := "f32"
-	if *quant {
+// runVerify proves the Metal prefill is numerically faithful before trusting its speed.
+// Compare its last-token logits to the CPU Q8 path (already argmax-validated vs the HF
+// oracle) on several prompt lengths: argmax must agree, and the logit max|Δ| should sit
+// at the f16-vs-Q8 noise floor, not diverge. It is terminal (exits the process).
+func runVerify(f *benchFlags, m *model.Model, vocab int) {
+	if !*f.metal {
+		fmt.Fprintln(os.Stderr, "-verify requires -metal")
+		os.Exit(2)
+	}
+	allOK := true
+	for _, P := range []int{8, 32, 128, 256} {
+		ids := lcgIDs(P, vocab)
+		sc := m.NewSession()
+		sc.Quant = true
+		lc := sc.Prefill(ids)
+		sg := m.NewSession()
+		sg.Metal = true
+		lg := sg.Prefill(ids)
+		var maxAbs float64
+		ac, ag := argmax(lc), argmax(lg)
+		for i := range lc {
+			if d := math.Abs(float64(lc[i] - lg[i])); d > maxAbs {
+				maxAbs = d
+			}
+		}
+		ok := ac == ag
+		allOK = allOK && ok
+		fmt.Printf("P=%-4d argmax cpu=%-7d metal=%-7d agree=%-5v  max|Δlogit|=%.4f\n", P, ac, ag, ok, maxAbs)
+	}
+	if allOK {
+		fmt.Println("VERIFY OK — Metal prefill argmax-matches the CPU Q8 path on all lengths")
+	} else {
+		fmt.Println("VERIFY FAIL — Metal prefill diverges from the CPU Q8 path")
+		os.Exit(1)
+	}
+}
+
+// describeEngine derives the human-readable engine string, precision label, and the
+// backend sub-report from the resolved flags and backend.
+func describeEngine(f *benchFlags, be compute.Backend, registeredBackends []string) (engine, precision string, backendReport map[string]any) {
+	engine = "fak-in-kernel (pure-Go, parallel matmul + batched prefill GEMM + fdot ILP)"
+	precision = "f32"
+	if *f.quant {
 		engine = "fak-in-kernel Q8_0 (pure-Go, quantized weights+activations, int8×int8→int32 dot)"
 		precision = "Q8_0"
 	}
-	if *metal {
+	if *f.metal {
 		engine = "fak-in-kernel Metal prefill (MPS f16 GEMM on GPU; CPU Q8 decode)"
 		precision = "Q8_0 weights / f16 GPU GEMM"
 	}
-	backendReport := map[string]any{
+	backendReport = map[string]any{
 		"selected":            "legacy",
 		"registered_backends": registeredBackends,
 	}
@@ -476,45 +477,18 @@ func main() {
 			"registered_backends": registeredBackends,
 		}
 	}
-	report := map[string]any{
-		"app_version":       appversion.Current(),
-		"engine":            engine,
-		"model":             modelName,
-		"source":            loadSource(*hf, *gguf, *dir, *lean),
-		"precision":         precision,
-		"backend":           backendReport,
-		"load_ms":           loadMS,
-		"quant_ms":          quantMS,
-		"lean":              *lean,
-		"quantized_at_load": *lean,
-		"workers":           model.NumWorkers(),   // actual matmul parallelism these numbers were taken at
-		"budget":            model.WorkerBudget(), // how the worker count was resolved (FAK_WORKERS / FAK_BUDGET / -budget / default)
-		"go_threads":        fmt.Sprintf("GOMAXPROCS=%d, matmul workers=%d (FAK_WORKERS / FAK_BUDGET / -budget to pin)", runtime.GOMAXPROCS(0), model.NumWorkers()),
-	}
-	if ggufLoadProfile != nil {
-		report["load_profile"] = ggufLoadProfile
-	}
-	phaseReport := map[string]any{}
-	if workload != nil {
-		report["workload"] = map[string]any{
-			"path":             *workloadPath,
-			"schema":           workload.Schema,
-			"name":             workload.Name,
-			"source":           workload.Source,
-			"cases":            len(workload.Cases),
-			"prefill_cap":      *workloadPrefillCap,
-			"decode_steps_cap": *decodeSteps,
-			"token_ids":        "deterministic LCG IDs at recorded prompt/decode lengths; token values are cost-irrelevant for this compute benchmark",
-		}
-	}
+	return engine, precision, backendReport
+}
 
-	// ---- prefill: time Session.Prefill over P tokens (builds KV cache, last logits)
+// runPrefill times Session.Prefill over each P in prefillSizes (builds KV cache, last
+// logits) and records the median timings and any phase profiles into the report maps.
+func runPrefill(f *benchFlags, newSession func() *model.Session, vocab int, prefillSizes []int, report, phaseReport map[string]any) {
 	var prefills []prefillResult
 	var prefillPhases []*model.PhaseProfile
 	for _, p := range prefillSizes {
 		ids := lcgIDs(p, vocab)
-		ds := make([]time.Duration, *prefillReps)
-		for r := 0; r < *prefillReps; r++ {
+		ds := make([]time.Duration, *f.prefillReps)
+		for r := 0; r < *f.prefillReps; r++ {
 			s := newSession()
 			t := time.Now()
 			s.Prefill(ids)
@@ -523,11 +497,11 @@ func main() {
 		}
 		med := medianMS(ds)
 		prefills = append(prefills, prefillResult{
-			Tokens: p, Reps: *prefillReps, MedianMS: med,
+			Tokens: p, Reps: *f.prefillReps, MedianMS: med,
 			TokPerSec: float64(p) / (med / 1e3),
 		})
 		fmt.Fprintf(os.Stderr, "[fak] prefill P=%d: %.1f ms (%.1f tok/s)\n", p, med, float64(p)/(med/1e3))
-		if *phaseProfile {
+		if *f.phaseProfile {
 			s := newSession()
 			pp := model.NewPhaseProfiler()
 			s.PhaseProfiler = pp
@@ -541,112 +515,237 @@ func main() {
 		}
 	}
 	report["prefill"] = prefills
-	if *phaseProfile {
+	if *f.phaseProfile {
 		phaseReport["prefill"] = prefillPhases
 	}
+}
 
-	// ---- decode: prefill a short prompt, then time D incremental Step() calls
-	{
-		prompt := lcgIDs(*decodePrompt, vocab)
-		perTok := make([]time.Duration, 0, *decodeReps)
-		for r := 0; r < *decodeReps; r++ {
+// runDecode prefills a short prompt then times D incremental Step() calls, recording the
+// per-token median and any phase profile into the report maps.
+func runDecode(f *benchFlags, newSession func() *model.Session, vocab int, report, phaseReport map[string]any) {
+	prompt := lcgIDs(*f.decodePrompt, vocab)
+	perTok := make([]time.Duration, 0, *f.decodeReps)
+	for r := 0; r < *f.decodeReps; r++ {
+		s := newSession()
+		s.Prefill(prompt)
+		id := int(uint64(r*131+7) % uint64(vocab))
+		t := time.Now()
+		for i := 0; i < *f.decodeSteps; i++ {
+			logits := s.Step(id)
+			// pick next deterministically (argmax-free, value-irrelevant to cost)
+			id = (id*48271 + 1) % vocab
+			_ = logits
+		}
+		perTok = append(perTok, time.Since(t)/time.Duration(*f.decodeSteps))
+		s.Close()
+	}
+	med := medianMS(perTok)
+	report["decode"] = decodeResult{
+		PromptTokens: *f.decodePrompt, DecodeSteps: *f.decodeSteps, Reps: *f.decodeReps,
+		PerTokenMedMS: med, TokPerSec: 1.0 / (med / 1e3),
+	}
+	fmt.Fprintf(os.Stderr, "[fak] decode: %.1f ms/tok (%.1f tok/s)\n", med, 1.0/(med/1e3))
+	if *f.phaseProfile {
+		s := newSession()
+		s.Prefill(prompt)
+		pp := model.NewPhaseProfiler()
+		s.PhaseProfiler = pp
+		id := 7
+		t := time.Now()
+		for i := 0; i < *f.decodeSteps; i++ {
+			logits := s.Step(id)
+			id = (id*48271 + 1) % vocab
+			_ = logits
+		}
+		total := time.Since(t)
+		snap := pp.Snapshot("decode", *f.decodePrompt, *f.decodeSteps, total.Nanoseconds())
+		phaseReport["decode"] = snap
+		fmt.Fprint(os.Stderr, phaseTable(snap))
+		s.Close()
+	}
+}
+
+// runWorkload replays the recorded agent workload cases: a prefill timing and a decode
+// timing per case, at the recorded (capped) prompt/decode lengths, into the report.
+func runWorkload(f *benchFlags, newSession func() *model.Session, vocab int, workload *model.BenchWorkload, report map[string]any) {
+	var wp []prefillResult
+	for i, c := range workload.Cases {
+		n := capPositive(c.PromptTokens, *f.workloadPrefillCap)
+		ids := lcgIDsSeed(n, vocab, 0xC0FFEE+uint64(i)*977)
+		ds := make([]time.Duration, *f.prefillReps)
+		for r := 0; r < *f.prefillReps; r++ {
+			s := newSession()
+			t := time.Now()
+			s.Prefill(ids)
+			ds[r] = time.Since(t)
+			s.Close()
+		}
+		med := medianMS(ds)
+		wp = append(wp, prefillResult{
+			Name: c.Name, Source: c.Source, Tokens: n, RecordedTokens: c.PromptTokens,
+			Reps: *f.prefillReps, MedianMS: med, TokPerSec: float64(n) / (med / 1e3),
+		})
+		fmt.Fprintf(os.Stderr, "[fak workload] prefill %s P=%d recorded=%d: %.1f ms\n", c.Name, n, c.PromptTokens, med)
+	}
+	report["workload_prefill"] = wp
+
+	var wd []workloadDecodeResult
+	for i, c := range workload.Cases {
+		promptN := capPositive(c.PromptTokens, *f.workloadPrefillCap)
+		steps := capPositive(c.CompletionTokens, *f.decodeSteps)
+		prompt := lcgIDsSeed(promptN, vocab, 0xA11CE+uint64(i)*131)
+		perTok := make([]time.Duration, 0, *f.decodeReps)
+		for r := 0; r < *f.decodeReps; r++ {
 			s := newSession()
 			s.Prefill(prompt)
-			id := int(uint64(r*131+7) % uint64(vocab))
+			id := int((uint64(r+1)*2654435761 + uint64(i)) % uint64(vocab))
 			t := time.Now()
-			for i := 0; i < *decodeSteps; i++ {
+			for j := 0; j < steps; j++ {
 				logits := s.Step(id)
-				// pick next deterministically (argmax-free, value-irrelevant to cost)
 				id = (id*48271 + 1) % vocab
 				_ = logits
 			}
-			perTok = append(perTok, time.Since(t)/time.Duration(*decodeSteps))
+			perTok = append(perTok, time.Since(t)/time.Duration(steps))
 			s.Close()
 		}
 		med := medianMS(perTok)
-		report["decode"] = decodeResult{
-			PromptTokens: *decodePrompt, DecodeSteps: *decodeSteps, Reps: *decodeReps,
-			PerTokenMedMS: med, TokPerSec: 1.0 / (med / 1e3),
-		}
-		fmt.Fprintf(os.Stderr, "[fak] decode: %.1f ms/tok (%.1f tok/s)\n", med, 1.0/(med/1e3))
-		if *phaseProfile {
-			s := newSession()
-			s.Prefill(prompt)
-			pp := model.NewPhaseProfiler()
-			s.PhaseProfiler = pp
-			id := 7
-			t := time.Now()
-			for i := 0; i < *decodeSteps; i++ {
-				logits := s.Step(id)
-				id = (id*48271 + 1) % vocab
-				_ = logits
-			}
-			total := time.Since(t)
-			snap := pp.Snapshot("decode", *decodePrompt, *decodeSteps, total.Nanoseconds())
-			phaseReport["decode"] = snap
-			fmt.Fprint(os.Stderr, phaseTable(snap))
-			s.Close()
+		wd = append(wd, workloadDecodeResult{
+			Name: c.Name, Source: c.Source,
+			PromptTokens: promptN, RecordedPromptTokens: c.PromptTokens,
+			DecodeSteps: steps, RecordedDecodeTokens: c.CompletionTokens,
+			Reps: *f.decodeReps, PerTokenMedMS: med, TokPerSec: 1.0 / (med / 1e3),
+		})
+		fmt.Fprintf(os.Stderr, "[fak workload] decode %s prompt=%d recorded=%d steps=%d/%d: %.1f ms/tok\n",
+			c.Name, promptN, c.PromptTokens, steps, c.CompletionTokens, med)
+	}
+	report["workload_decode"] = wd
+}
+
+func main() {
+	f := parseFlags()
+	applyBudget(*f.budget)
+	validateFlags(f)
+
+	prefillSizes, parseErr := parsePositiveInts(*f.prefillSizesCSV)
+	if parseErr != nil {
+		fmt.Fprintln(os.Stderr, "prefill-sizes:", parseErr)
+		os.Exit(2)
+	}
+
+	var workload *model.BenchWorkload
+	if *f.workloadPath != "" {
+		var err error
+		workload, err = model.LoadBenchWorkload(*f.workloadPath)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "workload:", err)
+			os.Exit(1)
 		}
 	}
 
+	defer acquireMetalLease(*f.metal)()
+
+	ggufLoadProfiler := newGGUFLoadProfiler(f)
+
+	t0 := time.Now()
+	m, modelName, err := loadModel(f, ggufLoadProfiler)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "load:", err)
+		os.Exit(1)
+	}
+	if *f.name != "" {
+		modelName = *f.name
+	}
+	loadNanos := time.Since(t0).Nanoseconds()
+	loadMS := float64(loadNanos) / 1e6
+	var ggufLoadProfile *ggufload.LoadProfile
+	if ggufLoadProfiler != nil {
+		ggufLoadProfile = ggufLoadProfiler.Snapshot("gguf-lean-q8", *f.gguf, loadNanos)
+	}
+	if *f.loadOnly {
+		runLoadOnly(f, modelName, loadMS, ggufLoadProfile)
+		return
+	}
+	vocab := m.Cfg.VocabSize
+	be, registeredBackends := resolveBackend(f)
+	resolveMetal(f)
+
+	// Quantize once up front (off the timed path) when in Q8 mode. newSession stamps the
+	// Quant flag onto every session the benchmark creates so prefill+decode use it.
+	var quantMS float64
+	if *f.quant {
+		tq := time.Now()
+		m.Quantize()
+		quantMS = float64(time.Since(tq).Nanoseconds()) / 1e6
+	}
+	newSession := func() *model.Session {
+		if be != nil {
+			s := m.NewBackendSession(be)
+			s.Quant = *f.quant // routes the HAL through the Q8 weight path when the backend advertises UploadDtype
+			return s
+		}
+		s := m.NewSession()
+		s.Quant = *f.quant
+		s.Metal = *f.metal
+		return s
+	}
+
+	if *f.verify {
+		runVerify(f, m, vocab)
+		return
+	}
+
+	// Warm up: first forward pages in all the weights + JITs allocation paths.
+	// Time only steady-state, matching the HF side which also warms up.
+	{
+		s := newSession()
+		s.Prefill(lcgIDs(8, vocab))
+		s.Step(s.Cache.Len() % vocab)
+		s.Close()
+	}
+
+	engine, precision, backendReport := describeEngine(f, be, registeredBackends)
+	report := map[string]any{
+		"app_version":       appversion.Current(),
+		"engine":            engine,
+		"model":             modelName,
+		"source":            loadSource(*f.hf, *f.gguf, *f.dir, *f.lean),
+		"precision":         precision,
+		"backend":           backendReport,
+		"load_ms":           loadMS,
+		"quant_ms":          quantMS,
+		"lean":              *f.lean,
+		"quantized_at_load": *f.lean,
+		"workers":           model.NumWorkers(),   // actual matmul parallelism these numbers were taken at
+		"budget":            model.WorkerBudget(), // how the worker count was resolved (FAK_WORKERS / FAK_BUDGET / -budget / default)
+		"go_threads":        fmt.Sprintf("GOMAXPROCS=%d, matmul workers=%d (FAK_WORKERS / FAK_BUDGET / -budget to pin)", runtime.GOMAXPROCS(0), model.NumWorkers()),
+	}
+	if ggufLoadProfile != nil {
+		report["load_profile"] = ggufLoadProfile
+	}
+	phaseReport := map[string]any{}
 	if workload != nil {
-		var wp []prefillResult
-		for i, c := range workload.Cases {
-			n := capPositive(c.PromptTokens, *workloadPrefillCap)
-			ids := lcgIDsSeed(n, vocab, 0xC0FFEE+uint64(i)*977)
-			ds := make([]time.Duration, *prefillReps)
-			for r := 0; r < *prefillReps; r++ {
-				s := newSession()
-				t := time.Now()
-				s.Prefill(ids)
-				ds[r] = time.Since(t)
-				s.Close()
-			}
-			med := medianMS(ds)
-			wp = append(wp, prefillResult{
-				Name: c.Name, Source: c.Source, Tokens: n, RecordedTokens: c.PromptTokens,
-				Reps: *prefillReps, MedianMS: med, TokPerSec: float64(n) / (med / 1e3),
-			})
-			fmt.Fprintf(os.Stderr, "[fak workload] prefill %s P=%d recorded=%d: %.1f ms\n", c.Name, n, c.PromptTokens, med)
+		report["workload"] = map[string]any{
+			"path":             *f.workloadPath,
+			"schema":           workload.Schema,
+			"name":             workload.Name,
+			"source":           workload.Source,
+			"cases":            len(workload.Cases),
+			"prefill_cap":      *f.workloadPrefillCap,
+			"decode_steps_cap": *f.decodeSteps,
+			"token_ids":        "deterministic LCG IDs at recorded prompt/decode lengths; token values are cost-irrelevant for this compute benchmark",
 		}
-		report["workload_prefill"] = wp
-
-		var wd []workloadDecodeResult
-		for i, c := range workload.Cases {
-			promptN := capPositive(c.PromptTokens, *workloadPrefillCap)
-			steps := capPositive(c.CompletionTokens, *decodeSteps)
-			prompt := lcgIDsSeed(promptN, vocab, 0xA11CE+uint64(i)*131)
-			perTok := make([]time.Duration, 0, *decodeReps)
-			for r := 0; r < *decodeReps; r++ {
-				s := newSession()
-				s.Prefill(prompt)
-				id := int((uint64(r+1)*2654435761 + uint64(i)) % uint64(vocab))
-				t := time.Now()
-				for j := 0; j < steps; j++ {
-					logits := s.Step(id)
-					id = (id*48271 + 1) % vocab
-					_ = logits
-				}
-				perTok = append(perTok, time.Since(t)/time.Duration(steps))
-				s.Close()
-			}
-			med := medianMS(perTok)
-			wd = append(wd, workloadDecodeResult{
-				Name: c.Name, Source: c.Source,
-				PromptTokens: promptN, RecordedPromptTokens: c.PromptTokens,
-				DecodeSteps: steps, RecordedDecodeTokens: c.CompletionTokens,
-				Reps: *decodeReps, PerTokenMedMS: med, TokPerSec: 1.0 / (med / 1e3),
-			})
-			fmt.Fprintf(os.Stderr, "[fak workload] decode %s prompt=%d recorded=%d steps=%d/%d: %.1f ms/tok\n",
-				c.Name, promptN, c.PromptTokens, steps, c.CompletionTokens, med)
-		}
-		report["workload_decode"] = wd
 	}
-	if *phaseProfile {
+
+	runPrefill(f, newSession, vocab, prefillSizes, report, phaseReport)
+	runDecode(f, newSession, vocab, report, phaseReport)
+	if workload != nil {
+		runWorkload(f, newSession, vocab, workload, report)
+	}
+	if *f.phaseProfile {
 		report["phase_profile"] = phaseReport
 	}
 
-	writeReport(*out, report)
+	writeReport(*f.out, report)
 }
 
 func loadSource(hf, gguf, dir string, lean bool) string {
