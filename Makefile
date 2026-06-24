@@ -13,6 +13,11 @@ ci: build gofmt-check vet test claims-lint index-sync hygiene
 
 build:
 	go build ./...
+	# Drop the repo-guard PreToolUse hook binary into the (gitignored) tools/.bin so
+	# the Claude Code hook runs the Go guard instead of spawning Python per tool call
+	# (.claude/settings.json prefers this binary, falling back to tools/repo_guard.py
+	# until it exists). Part of `build` so every green gate self-propagates it.
+	go build -o tools/.bin/repoguard ./cmd/repoguard
 
 vet:
 	go vet ./...

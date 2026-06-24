@@ -14,7 +14,7 @@
       {
         "hooks": [
           {
-            "command": "python \"$CLAUDE_PROJECT_DIR/tools/repo_guard.py\" --hook",
+            "command": "B=\"$CLAUDE_PROJECT_DIR/tools/.bin/repoguard\"; for c in \"$B\" \"$B.exe\"; do [ -x \"$c\" ] && exec \"$c\" --hook; done; exec python \"$CLAUDE_PROJECT_DIR/tools/repo_guard.py\" --hook",
             "type": "command"
           }
         ],
