@@ -5,10 +5,10 @@ This is the operator gate between the read-only readiness card and a real
 worker dispatch tick. By default it only reports the exact bounded command
 it would run. Passing ``--live`` is the only path that can launch workers.
 
-For a canary the watchdog invokes the worker backend (tools/dispatch_worker.py, the
-same launcher dos.toml's [supervise].worker_launch_template names) DIRECTLY via
-sys.executable -- a single bounded, interpreter-portable tick that works on
-python3-only nodes -- instead of routing through ``dos loop --enact``. The
+For a canary the watchdog invokes the worker backend DIRECTLY for a single bounded
+tick -- the compiled Go launcher tools/.bin/dispatchworker when built (no interpreter
+spawn), else tools/dispatch_worker.py via this process's own sys.executable (portable
+to python3-only nodes) -- instead of routing through ``dos loop --enact``. The
 --enact/--max-ticks flags still exist on ``dos loop`` (that continuous population
 supervisor is kept alive separately by fleet_dos_dispatch_watchdog.{py,ps1}); this
 is a launch-shape choice, not a claim that the flags were removed.
@@ -33,15 +33,36 @@ NOOP_VERDICTS = {"AT_TARGET", "READY"}
 Runner = Callable[[list[str], Path, int], dict[str, Any]]
 
 
+def go_worker_binary(workspace: Path) -> Path | None:
+    """The compiled Go dispatch-worker (tools/.bin/dispatchworker[.exe]) if built.
+
+    Preferred over the Python launcher so the canary spawns NO interpreter -- and,
+    being interpreter-free, it can't ENOENT on a python3-only node the way a bare
+    `python` token does (#22). `make build` drops it there. Returns None when not
+    built, so the caller falls back to dispatch_worker.py. The launched worker's
+    `claude -p ... /dos-kernel:dos-dispatch-loop --lane X` command line is identical
+    either way, so dispatch_preflight's `dos-dispatch-loop` worker count is unchanged
+    (worker detection is launcher-agnostic; the cutover does not blind it)."""
+    base = Path(workspace) / "tools" / ".bin"
+    for name in ("dispatchworker.exe", "dispatchworker"):
+        p = base / name
+        if p.exists():
+            return p
+    return None
+
+
 def enact_command(workspace: Path, target: int, max_ticks: int, lane: str | None = None) -> list[str]:
     """Return the worker dispatch command for a canary tick.
 
-    The supervisor launches the worker backend (dispatch_worker.py, matching the
-    worker_launch_template in dos.toml) directly for a single bounded canary, rather
-    than driving `dos loop --enact` -- a launch-shape choice for interpreter
-    portability (sys.executable works on python3-only nodes), NOT because
-    --enact/--max-ticks were removed (they still exist on `dos loop`). The continuous
+    The supervisor launches the worker backend directly for a single bounded canary,
+    rather than driving `dos loop --enact` -- a launch-shape choice (NOT because
+    --enact/--max-ticks were removed; they still exist on `dos loop`). The continuous
     `dos loop --enact` supervisor is kept alive by fleet_dos_dispatch_watchdog.
+
+    Backend launcher: prefer the compiled Go binary (tools/.bin/dispatchworker), which
+    spawns no interpreter; fall back to dispatch_worker.py via THIS process's own
+    interpreter (sys.executable, never a bare "python" -- that ENOENTs on python3-only
+    nodes) when the binary is not built.
 
     Args:
         workspace: The workspace root
@@ -52,16 +73,11 @@ def enact_command(workspace: Path, target: int, max_ticks: int, lane: str | None
     Returns:
         The command list to execute.
     """
-    # For a single canary tick, invoke the worker backend directly (the same
-    # tools/dispatch_worker.py the dos.toml worker_launch_template names). Launch
-    # it with THIS process's own interpreter (sys.executable), not a bare "python"
-    # token: a bare "python" ENOENTs on nodes that only ship python3 (e.g. macOS),
-    # whereas sys.executable is the exact interpreter already running the watchdog,
-    # so the canary spawns on every node the watchdog itself runs on.
-    cmd = [
-        sys.executable,
-        str(workspace / "tools" / "dispatch_worker.py"),
-    ]
+    go_bin = go_worker_binary(workspace)
+    if go_bin is not None:
+        cmd = [str(go_bin), "--workspace", str(workspace)]
+    else:
+        cmd = [sys.executable, str(workspace / "tools" / "dispatch_worker.py")]
 
     # Add lane if specified
     if lane:

@@ -260,21 +260,22 @@ trailer_stamp = true
 # actually kept alive. The keep-alive ARMING that would make a non-zero target real is
 # tracked in #20; raise this back to the desired standing-loop count when that lands.
 target = 0
-# NOTE (updated 2026-06-24): `dos loop` WITHOUT `--enact` only PRINTS this template; but
-# `dos loop --enact` DOES Popen each spawn through it (`dos loop --help`: "Popen each
-# SPAWN via [supervise].worker_launch_template"). So the bare `python` token below IS on
-# the --enact exec path, and a bare `python` ENOENTs on python3-only nodes (the #22
-# residual). The other live spawner is tools/dos_supervisor_watchdog.py:enact_command,
-# which launches dispatch_worker.py via sys.executable. The interpreter-free CUTOVER
-# TARGET now exists: cmd/dispatchworker, a Go binary parity-tested against
-# dispatch_worker.py that `make build` drops at tools/.bin/dispatchworker. Switching this
-# template to `tools/.bin/dispatchworker --lane {lane}` removes the interpreter spawn AND
-# fixes #22 -- but the cutover MUST also update the process-detection markers that key on
-# the literal `dispatch_worker.py` (tools/dispatch_preflight.py, tools/dispatch_status.py)
-# so a Go-launched worker is still detected, else the double-spawn guard goes blind. Left
-# on the Python launcher until that follow-up lands. See
-# docs/MULTINODE-DOS-FAK-CROSSOVER-2026-06-20.md and the BARE-PYTHON-TEMPLATE issue.
-worker_launch_template = 'python tools/dispatch_worker.py --lane {lane}'
+# NOTE (cutover 2026-06-24): this template now names the interpreter-free Go launcher
+# cmd/dispatchworker (`make build` drops it at tools/.bin/dispatchworker), retiring the
+# bare-`python` token that ENOENTed on python3-only nodes (#22). `dos loop` WITHOUT
+# `--enact` only PRINTS this; `dos loop --enact` Popens it (`dos loop --help`: "Popen
+# each SPAWN via [supervise].worker_launch_template"), so the launcher IS on the --enact
+# exec path -- hence the Go binary. The other live spawner,
+# tools/dos_supervisor_watchdog.py:enact_command, likewise prefers the Go binary and
+# falls back to dispatch_worker.py via sys.executable when it is not built, so a node
+# without the binary still dispatches. The cutover is launcher-AGNOSTIC for worker
+# detection: dispatch_preflight.py counts the `dos-dispatch-loop` marker on the spawned
+# `claude -p` worker (identical whichever launcher started it), and dispatch_status /
+# fleet_dos_dispatch_watchdog key on run-dir PIDs and the `loop`/`--enact` supervisor
+# markers -- none key on the launcher's own name, so the double-spawn guard is unchanged.
+# A node that runs `--enact` must `make build` first (relative path, resolved from the
+# workspace). See docs/MULTINODE-DOS-FAK-CROSSOVER-2026-06-20.md.
+worker_launch_template = 'tools/.bin/dispatchworker --lane {lane}'
 
 # Dogfood: fleet's OWN architectural invariants, declared as DOS refusal vocabulary
 # (DATA -- no kernel edit), each with a deterministic floor that already runs in CI.

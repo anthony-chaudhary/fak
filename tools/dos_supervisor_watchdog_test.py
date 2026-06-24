@@ -67,14 +67,41 @@ class DosSupervisorWatchdogTest(unittest.TestCase):
         self.assertTrue(got["ok"])
         self.assertEqual(got["action"], "would_enact")
         self.assertTrue(got["safety"]["ok"])
-        # dos v0.28.0: the canary launches dispatch_worker.py directly (no
-        # `dos loop --enact`), via the watchdog's OWN interpreter (sys.executable)
-        # so it is portable to nodes that only ship python3 (e.g. macOS).
-        self.assertEqual(got["command"][0], sys.executable)
-        self.assertTrue(got["command"][1].endswith("dispatch_worker.py"))
+        # The canary launches the dispatch worker on the spawn lane -- the compiled
+        # Go binary tools/.bin/dispatchworker[.exe] when built, else dispatch_worker.py
+        # via this interpreter (both interpreter-portable). Branch-tolerant so the test
+        # is deterministic whether or not the binary happens to be built locally.
+        cmd0 = got["command"][0]
+        launches_worker = (
+            (cmd0 == sys.executable and got["command"][1].endswith("dispatch_worker.py"))
+            or cmd0.endswith("dispatchworker")
+            or cmd0.endswith("dispatchworker.exe")
+        )
+        self.assertTrue(launches_worker, got["command"])
         self.assertIn("--lane", got["command"])
         self.assertIn("adjudicator", got["command"])
         self.assertNotIn("result", got)
+
+    def test_enact_command_prefers_go_binary_else_python(self) -> None:
+        import tempfile
+
+        mod = load()
+        with tempfile.TemporaryDirectory() as d:
+            ws = Path(d)
+            # Binary absent -> fall back to dispatch_worker.py via sys.executable.
+            cmd = mod.enact_command(ws, 1, 1, lane="docs")
+            self.assertEqual(cmd[0], sys.executable)
+            self.assertTrue(cmd[1].endswith("dispatch_worker.py"))
+            self.assertIn("docs", cmd)
+            # Binary present -> prefer the Go launcher (no interpreter spawn).
+            bin_dir = ws / "tools" / ".bin"
+            bin_dir.mkdir(parents=True)
+            (bin_dir / "dispatchworker").write_text("#!/bin/sh\n", encoding="utf-8")
+            cmd2 = mod.enact_command(ws, 1, 1, lane="docs")
+            self.assertTrue(cmd2[0].endswith("dispatchworker"))
+            self.assertEqual(cmd2[1:3], ["--workspace", str(ws)])
+            self.assertIn("--lane", cmd2)
+            self.assertIn("docs", cmd2)
 
     def test_default_target_is_one_above_current_alive_count(self) -> None:
         mod = load()
