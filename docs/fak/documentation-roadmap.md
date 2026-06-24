@@ -7,7 +7,7 @@ description: "Tracks fak server and agent-integration documentation: which guide
 
 **Status:** Complete — all tracked documentation has shipped and is wired into the index
 
-**Last updated:** 2026-06-21
+**Last updated:** 2026-06-24
 
 ---
 
@@ -17,6 +17,25 @@ This roadmap tracks GitHub issues for remaining documentation work to achieve th
 
 1. **fak server documentation** — Gateway deployment, configuration, and operation
 2. **Agent integration documentation** — Integrating fak with coding agents and frameworks
+
+---
+
+## Issue #226 (E-005) — Documentation Completeness: reconciled ✅
+
+Umbrella epic **[#226 — "Documentation Completeness [E-005]"](https://github.com/anthony-chaudhary/fak/issues/226)**
+covers the same surface as this roadmap. Its four acceptance criteria are met by
+already-shipped artifacts, verified against file content (path count / headings),
+not just against this index:
+
+| Acceptance criterion | Shipped evidence |
+|---|---|
+| All public APIs documented | [`api-reference.md`](api-reference.md) (every `fak serve` endpoint) + [`openapi.yaml`](openapi.yaml) (OpenAPI 3.0.3, 19 paths, sourced from `v0.30.0`) |
+| User guides for each feature | [`tutorial.md`](tutorial.md), [`policy-guide.md`](policy-guide.md), [`observability.md`](observability.md), [`security.md`](security.md), [`advanced-topics.md`](advanced-topics.md), [`deployment-guide.md`](deployment-guide.md), [`multi-language-examples.md`](multi-language-examples.md), [`agent-framework-integration.md`](agent-framework-integration.md) |
+| Architecture completeness | [`../../ARCHITECTURE.md`](../../ARCHITECTURE.md), [`../../EXTENDING.md`](../../EXTENDING.md), [`agent-integration-architecture.md`](agent-integration-architecture.md) |
+| Migration from v0.x guides | [`migration-guide.md`](migration-guide.md) (OpenAI / Anthropic / LangChain / AutoGen / llama.cpp → `fak`). `fak` is itself `v0.30.0`, so no `v0`→`v1` breaking transition exists yet to document |
+
+The dependency called out in #226 — #336 (policy hot-reload operator walkthrough) —
+is also closed. Closes #226.
 
 ---
 
