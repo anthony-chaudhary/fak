@@ -1,12 +1,40 @@
 {
   "hooks": {
-    "PreToolUse": [
+    "PostToolUse": [
       {
-        "matcher": "Bash|Write|Edit|MultiEdit|NotebookEdit",
         "hooks": [
           {
-            "type": "command",
-            "command": "python \"$CLAUDE_PROJECT_DIR/tools/repo_guard.py\" --hook"
+            "command": "dos hook posttool --workspace .",
+            "type": "command"
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "hooks": [
+          {
+            "command": "python \"$CLAUDE_PROJECT_DIR/tools/repo_guard.py\" --hook",
+            "type": "command"
+          }
+        ],
+        "matcher": "Bash|Write|Edit|MultiEdit|NotebookEdit"
+      },
+      {
+        "hooks": [
+          {
+            "command": "dos hook pretool --workspace .",
+            "type": "command"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "command": "dos hook stop --workspace .",
+            "type": "command"
           }
         ]
       }
