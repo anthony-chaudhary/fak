@@ -30,25 +30,26 @@ type SemanticScreen interface {
 
 // ScreenDisposition is the advisory a SemanticScreen returns. It is an OPEN, additive
 // enum — NOT part of the closed VerdictKind freeze — that the MMU maps onto its own
-// dispositions. ScreenQuarantine is wired today (rung 1). ScreenDigest is RESERVED for
-// the rung-2 useful-page-out upgrade (a model-authored digest replacing the opaque
-// oversize pointer); the MMU accepts it in the seam but does not act on it yet, so the
-// interface needs no change when rung 2 lands.
+// dispositions. ScreenQuarantine is wired today (rung 1). ScreenDigest is wired as the
+// rung-3 useful-page-out (issue #570): the MMU maps it onto its oversize Transform so
+// the page-out stub carries the model-authored digest, with the original retained in CAS
+// and a witness PageIn-after-Clear restoring it byte-exact.
 type ScreenDisposition uint8
 
 const (
 	ScreenAllow      ScreenDisposition = iota // no opinion; the floor's decision stands
 	ScreenQuarantine                          // hold this result out (rung 1, wired)
-	ScreenDigest                              // RESERVED: page out to a useful digest (rung 2)
+	ScreenDigest                              // page out to a digest-bearing stub (rung 3, wired; issue #570)
 )
 
 // ScreenAdvice is one screen's advisory. Reason rides a ScreenQuarantine into the
 // MMU's existing ReasonTrustViolation/secret quarantine path; Digest carries the
-// rung-2 summary (reserved). By names the screen for observability/audit.
+// rung-3 summary that the oversize page-out stub displays. By names the screen for
+// observability/audit.
 type ScreenAdvice struct {
 	Disposition ScreenDisposition
 	Reason      ReasonCode // for ScreenQuarantine (ReasonNone defaults to ReasonTrustViolation)
-	Digest      string     // for ScreenDigest (rung 2; reserved, ignored today)
+	Digest      string     // for ScreenDigest (rung 3; the oversize page-out stub carries it)
 	By          string     // screen name, for observability
 }
 

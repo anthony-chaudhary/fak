@@ -33,13 +33,16 @@
 // high-water mark adjudicateProposed reads). It removes bytes only on the non-passthrough
 // re-marshal wire.
 //
-// RUNG 2 — USEFUL PAGE-OUT (digest). Seam: ScreenDigest in ScreenAdvice (already in the
-// interface) plus ctxmmu's oversize Transform branch (pageToPointer, mmu.go). Today an
-// oversize-benign result pages out to an OPAQUE {_paged,ref,len} pointer; a model authors
-// a ~200-token digest to put in the stub instead, with the original retained in CAS.
-// ctxmmu maps ScreenDigest onto its existing Transform. It only reaches the wire on the
-// non-passthrough re-marshal path; on the passthrough it is dead (see the outbound blocker
-// below).
+// RUNG 2 — USEFUL PAGE-OUT (digest; SHIPPED as the reference floor — issue #570). Seam:
+// ScreenDigest in ScreenAdvice (wired in the interface) plus ctxmmu's oversize Transform
+// branch (digestToPointer, mmu.go). Today an oversize-benign result pages out to an
+// OPAQUE {_paged,ref,len} pointer; when a Digester (digester.go, selected by
+// FAK_WIRE_SCREEN) authors a ~200-token digest, the stub carries the digest instead and
+// the original is pinned in CAS under the held ledger so a witness Clear + PageIn
+// restores it byte-exact. The reference heuristicDigester is the zero-model floor; the
+// model-backed Digester is the gated follow-on (needs weights + a measured digest
+// latency before default-on). It only reaches the wire on the non-passthrough re-marshal
+// path; on the passthrough it is dead until #555 lands (see the outbound blocker below).
 //
 // RUNG 3 — MULTI-MODAL SCREENSHOT TRIAGE. Seam: the same ctxmmu Transform branch, but the
 // body is a base64 image block. Reversible collapses: perceptual-hash dedup of an

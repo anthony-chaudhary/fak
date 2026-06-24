@@ -60,6 +60,7 @@ type MMU struct {
 	paged      int64
 	evicted    int64 // held entries dropped by the maxHeld bound (observability)
 	screened   int64 // results additively quarantined by a registered SemanticScreen
+	digested   int64 // oversize results paged out to a digest-bearing stub (rung 3, ScreenDigest)
 
 	mu        sync.Mutex
 	held      map[string]abi.Ref // id -> paged-out handle (quarantined bytes)
@@ -147,16 +148,32 @@ func (m *MMU) Admit(ctx context.Context, c *abi.ToolCall, r *abi.Result) abi.Ver
 	// (Allow, or a stricter Quarantine — never weaker), and routes a hit through the SAME
 	// quarantineResult path so the held bytes keep the CAS-pin + PageIn-after-Clear
 	// witness. With no screen registered this ranges a nil slice — the inert v0.1 default.
-	// ScreenDigest is reserved for the rung-2 useful-page-out upgrade and is ignored here.
+	//
+	// A screen may instead return ScreenDigest (rung 3, issue #570): it authors a lossy
+	// ~200-token summary that the oversize page-out stub below carries INSTEAD of an
+	// opaque {_paged,ref,len} pointer, so the model reads the gist without a demand-page
+	// fault. The first non-empty ScreenDigest advisory is captured here and applied in
+	// the oversize branch; a later screen may still return ScreenQuarantine (strictly
+	// stronger), which returns immediately. The original stays pinned in CAS and a gated
+	// PageIn (after a witness Clear) restores it byte-exact — the digest is lossy display,
+	// never the witness.
+	var digestAdv abi.ScreenAdvice
 	for _, sc := range abi.SemanticScreens() {
 		adv := sc.ScreenResult(ctx, c, body)
-		if adv.Disposition == abi.ScreenQuarantine {
+		switch adv.Disposition {
+		case abi.ScreenQuarantine:
 			reason := adv.Reason
 			if reason == abi.ReasonNone {
 				reason = abi.ReasonTrustViolation
 			}
 			atomic.AddInt64(&m.screened, 1)
 			return m.quarantineResult(ctx, r, reason, body)
+		case abi.ScreenDigest:
+			// Keep the first authored digest; continue scanning so a later screen can
+			// still escalate to a Quarantine (a held-out body is never digested).
+			if digestAdv.Digest == "" && adv.Digest != "" {
+				digestAdv = adv
+			}
 		}
 	}
 	// The result survived the screen — classify its WRITE-TIME DURABILITY (S7 rung 1,
@@ -167,8 +184,26 @@ func (m *MMU) Admit(ctx context.Context, c *abi.ToolCall, r *abi.Result) abi.Ver
 	// above) needs no class — sealed bytes never promote.
 	class := classifyDurability(c, body)
 
-	// 4. oversize-but-benign -> page out to a pointer (unit 65, Transform).
+	// 4. oversize-but-benign -> page out to a pointer (unit 65, Transform). If a
+	// screen authored a digest (rung 3, issue #570), the stub carries that summary
+	// instead of an opaque pointer and the original is pinned in CAS under the held
+	// ledger so a witness Clear + PageIn restores it byte-exact.
 	if len(body) > OversizeBytes {
+		if digestAdv.Digest != "" {
+			ptr, id, ok := m.digestToPointer(ctx, body, digestAdv.Digest, digestAdv.By)
+			if ok {
+				atomic.AddInt64(&m.paged, 1)
+				if r.Meta == nil {
+					r.Meta = map[string]string{}
+				}
+				r.Meta["pageout_id"] = id
+				return abi.Verdict{Kind: abi.VerdictTransform, By: "ctxmmu",
+					Payload: abi.TransformPayload{NewArgs: ptr},
+					Meta:    map[string]string{DurabilityKey: class, "digest_by": digestAdv.By}}
+			}
+			// A digest page-out refused (no CAS backend / stub too big) falls through
+			// to the opaque pointer — still a useful, reversible page-out.
+		}
 		ptr, ok := m.pageToPointer(ctx, r.Payload, body, "oversize")
 		if ok {
 			atomic.AddInt64(&m.paged, 1)
@@ -219,6 +254,45 @@ func (m *MMU) pageToPointer(ctx context.Context, orig abi.Ref, body []byte, hint
 		return abi.Ref{}, false
 	}
 	return ref, true
+}
+
+// digestToPointer is the rung-3 useful-page-out peer of pageToPointer (issue #570):
+// it pages body out to CAS, pins the original under the held lock (the witness),
+// records a held id so a gated PageIn (after a witness Clear) restores the original
+// byte-exact, and builds a stub that carries the model-authored DIGEST instead of an
+// opaque {_paged,ref,len} pointer. The model reads the gist from the digest without a
+// demand-page fault; the original — never the lossy digest — is the witness.
+//
+// It is strictly additive over pageToPointer: it only fires when a screen authored a
+// digest, and on failure (no CAS backend / stub too big) the caller falls back to the
+// opaque pointer. ok is false (and the returns zero) when the witness cannot be
+// established, so the page-out refuses rather than dropping bytes it cannot recover.
+func (m *MMU) digestToPointer(ctx context.Context, body []byte, digest, by string) (ptr abi.Ref, id string, ok bool) {
+	handle := m.pageOut(ctx, body)
+	if handle.Digest == "" {
+		return abi.Ref{}, "", false // no CAS backend -> refuse (never drop unwitnessed bytes)
+	}
+	// Build the stub first; if it overflows PointerMax we have not yet touched the
+	// ledger or the counter, so there is nothing to roll back.
+	stub := map[string]any{"_paged": true, "ref": handle.Digest, "len": len(body), "digest": digest}
+	if by != "" {
+		stub["digest_by"] = by
+	}
+	ref, putOK := putJSON(ctx, stub)
+	if !putOK || ref.Len >= PointerMax {
+		return abi.Ref{}, "", false
+	}
+	// Success: take the id sequence + lifetime count from the digested counter, then
+	// pin the original under the held lock so the bounded ledger's eviction cannot
+	// reclaim it before the gated PageIn resolves it — the same witness as quarantine.
+	id = fmt.Sprintf("d%d", atomic.AddInt64(&m.digested, 1))
+	m.mu.Lock()
+	m.held[id] = handle
+	m.order = append(m.order, id)
+	abi.PinResolved(handle)
+	m.evictExcessLocked()
+	m.mu.Unlock()
+	return ref, id, true
 }
 
 func (m *MMU) pageOut(ctx context.Context, body []byte) abi.Ref {
@@ -341,6 +415,12 @@ func (m *MMU) Evicted() int64 { return atomic.LoadInt64(&m.evicted) }
 // registered SemanticScreen (the local-model-on-the-wire seam) — i.e. results the
 // regex floor admitted but a semantic screen held out. Zero on the inert default.
 func (m *MMU) Screened() int64 { return atomic.LoadInt64(&m.screened) }
+
+// Digested reports the lifetime count of oversize-benign results paged out to a
+// digest-bearing stub via a ScreenDigest advisory (rung 3, issue #570) — the
+// useful-page-out peer of Screened(). Zero on the inert default (no screen registered
+// or none authored a digest).
+func (m *MMU) Digested() int64 { return atomic.LoadInt64(&m.digested) }
 
 // PollutionRate is quarantined/total (unit 66).
 func (m *MMU) PollutionRate() (quarantined, total int64, rate float64) {

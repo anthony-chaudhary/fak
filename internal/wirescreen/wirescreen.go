@@ -91,16 +91,30 @@ type screenAdapter struct{}
 
 func (screenAdapter) ScreenResult(ctx context.Context, c *abi.ToolCall, body []byte) abi.ScreenAdvice {
 	s := Active()
-	if s == nil {
-		return abi.ScreenAdvice{} // inert: no selected screener
+	if s != nil {
+		tool := ""
+		if c != nil {
+			tool = c.Tool
+		}
+		if flagged, _ := s.Flag(ctx, body, tool); flagged {
+			atomic.AddInt64(&flags, 1)
+			return abi.ScreenAdvice{Disposition: abi.ScreenQuarantine, Reason: abi.ReasonTrustViolation, By: "wirescreen:" + s.Name()}
+		}
 	}
-	tool := ""
-	if c != nil {
-		tool = c.Tool
-	}
-	if flagged, _ := s.Flag(ctx, body, tool); flagged {
-		atomic.AddInt64(&flags, 1)
-		return abi.ScreenAdvice{Disposition: abi.ScreenQuarantine, Reason: abi.ReasonTrustViolation, By: "wirescreen:" + s.Name()}
+	// Rung 3 (issue #570): a Digester — selected by the SAME FAK_WIRE_SCREEN gate — may
+	// author a lossy summary so the context-MMU's oversize page-out stub carries the
+	// gist instead of an opaque pointer. ScreenQuarantine (above) always wins: a body
+	// flagged as injection is held out, never digested. The MMU applies a ScreenDigest
+	// advisory only on the oversize path, so a small body is admitted as-is (the full
+	// bytes are strictly better than a lossy digest).
+	if d := ActiveDigester(); d != nil {
+		tool := ""
+		if c != nil {
+			tool = c.Tool
+		}
+		if digest, ok := d.Summarize(ctx, body, tool); ok && digest != "" {
+			return abi.ScreenAdvice{Disposition: abi.ScreenDigest, Digest: digest, By: "wirescreen:" + d.Name()}
+		}
 	}
 	return abi.ScreenAdvice{}
 }
@@ -109,10 +123,14 @@ func init() {
 	// The deterministic reference screener is always in the catalog so
 	// FAK_WIRE_SCREEN=heuristic works out of the box, but it is INERT unless selected.
 	Register("heuristic", heuristicScreener{})
+	// The rung-3 reference digester (issue #570) shares the "heuristic" selection name,
+	// so a single FAK_WIRE_SCREEN=heuristic opt-in activates both the semantic screen
+	// (rung 1) and the useful-page-out digest (rung 3). Inert unless selected.
+	RegisterDigester("heuristic", heuristicDigester{})
 	// Register the ABI adapter only when the operator opted in. This keeps the default
 	// build's abi.SemanticScreens() empty (zero MMU overhead); the adapter resolves the
-	// concrete screener lazily, so a model-backed screener registered by a later init()
-	// is still picked up.
+	// concrete screener + digester lazily, so siblings registered by a later init() are
+	// still picked up.
 	if strings.TrimSpace(os.Getenv("FAK_WIRE_SCREEN")) != "" {
 		abi.RegisterSemanticScreen(screenAdapter{})
 		abi.RegisterCapability("wirescreen.v1")
