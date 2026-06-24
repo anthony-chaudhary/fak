@@ -1,3 +1,8 @@
+---
+title: "fak Regenerable KV: text is the source, cache is a build artifact"
+description: "Design doc treating fak's KV cache as a regenerable artifact rebuilt from durable transcript text, so a model rollout becomes a backfill, not a cold start."
+---
+
 # Regenerable KV — the text is the source, the cache is a build artifact
 
 > **Design decision doc** for treating the KV cache as a *regenerable build artifact*

@@ -1,3 +1,8 @@
+---
+title: "Harden any MCP server against tool poisoning with fak"
+description: "fak hardens any MCP server against tool poisoning: a context-MMU quarantines poisoned results out of context and a capability allow-list blocks unwired tools."
+---
+
 # Harden any MCP server against tool poisoning
 
 MCP is exploding, and **tool poisoning is its named, unsolved problem** (the MCP

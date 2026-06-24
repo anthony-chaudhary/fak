@@ -1,3 +1,8 @@
+---
+title: "fak Demo-Quality Scorecard: Demos a Skeptic Can Run"
+description: "fak's demo-quality scorecard grades 5 demos on five deterministic axes into a demo-score (0-100, A-F) and a re-derivable demo-debt count."
+---
+
 # Demo-quality scorecard
 
 <!-- demo-quality-scorecard: 2026-06-22 · process: tools/demo_quality_scorecard.py -->

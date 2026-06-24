@@ -1,3 +1,8 @@
+---
+title: "A Local Model on the Wire Between Claude Code and the Anthropic API"
+description: "Design note on where a small local model fits the fak guard gateway, when an on-the-wire transform pays off, and why poison screening is the first use case."
+---
+
 # A local model on the wire, between Claude Code and the Anthropic API
 
 Status: design note, 2026-06-23. Explores where a small local model belongs in the

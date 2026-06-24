@@ -1,3 +1,8 @@
+---
+title: "Bounding fak's context-planner compute: from N-squared to linear"
+description: "fak's candidate-index flattens the context planner's per-turn compute over 851 real transcript turns: 1.5x less scoring work, resident within 1.2% of full-scan."
+---
+
 # The planner's own work, measured: bounding per-turn compute over real sessions
 
 _Generated: 2026-06-23 · issue #558/#559 · `cmd/ctxplanbench` · 5 heaviest sessions on this box, 851 replayed turns._

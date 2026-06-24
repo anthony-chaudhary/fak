@@ -1,3 +1,8 @@
+---
+title: "Hardware-Aware KV Cache: Tiers, Zero-Copy, Demote-Not-Evict"
+description: "fak's cachemeta plane plans where a KV span lives across HBM, DRAM, NUMA-far, CXL, disk, and remote tiers, with per-tier TTL and demote-not-evict placement."
+---
+
 # Hardware-aware cache: tiers, zero-copy, per-tier TTL, demote-not-evict
 
 > Status: the **policy/metadata plane** is shipped and tested (`internal/cachemeta`,

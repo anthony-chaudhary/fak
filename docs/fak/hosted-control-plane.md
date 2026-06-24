@@ -1,3 +1,8 @@
+---
+title: "fak Hosted Policy + Audit Control Plane Architecture Brief"
+description: "Architecture brief (RFC) for fak's open-core, multi-tenant hosted policy and audit control plane: a read-side aggregator over the audit stream the binary emits."
+---
+
 # Hosted Policy + Audit Control Plane — Architecture Brief
 
 > **Status: architecture brief (RFC), not a built feature. Adoption-gated** — sequenced
@@ -7,6 +12,8 @@
 > [#576](https://github.com/anthony-chaudhary/fak/issues/576). It describes a *destination*,
 > not the next thing to build. Nothing here is a shipped capability; every "what we already
 > have" claim is verified against the binary below.
+
+*For maintainers and technical reviewers weighing fak's open-core revenue path: read this to understand how the planned hosted policy + audit plane would aggregate the audit stream the `fak serve` binary already emits, where the free/paid line falls, and which capabilities are real today versus a destination. Prerequisite: a working sense of fak's default-deny capability floor and the `/v1/fak/events` audit surface (see [`observability.md`](observability.md)).*
 
 ## 1. The thesis (open-core)
 

@@ -1,3 +1,8 @@
+---
+title: "fak ctxplan measured on real session transcripts: 13.3x fewer tokens"
+description: "fak's ctxplan planner replayed over 715 turns of real Claude Code transcripts: 13.3x fewer resident tokens than linear, 31.7% faults all served, recall 715/715."
+---
+
 # Planned view measured over real session transcripts
 
 _Generated: 2026-06-23 · issue #559 · `cmd/ctxplanbench` · 5 heaviest sessions on this box, 715 replayed turns._

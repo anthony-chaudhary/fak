@@ -1267,17 +1267,33 @@ def render_taxonomy_page(data: dict[str, Any]) -> str:
     out.append("Every dimension the field competes on, researched industry-first (not derived from "
                "what fak measured). [← back to the index](README.md).")
     out.append("")
-    out.append("| Group | Category | Dimension | SOTA bar | Leading systems | Source | Date |")
-    out.append("|---|---|---|---|---|---|---|")
-    for d in sorted(dims, key=lambda x: (_group_of(x.get("category"), cat_group), x.get("category") or "", x.get("id") or "")):
-        grp = _group_of(d.get("category"), cat_group)
-        sys = ", ".join(d.get("sota_systems") or [])
-        src = d.get("source_url", "")
-        src_md = f"[link]({src})" if _nonempty(src) else "—"
-        bar = (d.get("sota_bar", "") or "").replace("|", "\\|")
-        out.append(f"| {grp} | {d.get('category')} | {d.get('dimension')} | {bar} | {sys} | "
-                   f"{src_md} | {d.get('source_date', '')} |")
+    out.append("Dimensions are grouped by the part of the stack they belong to. Each group is a section "
+               "below; follow the group link for the full per-dimension analysis with fak's position.")
     out.append("")
+    # One H2 section per group (sorted), each with its own sub-table. Section
+    # headings keep the long catalog crawlable and quotable; the data is unchanged
+    # (the former single table sorted by the same key, just split on group).
+    groups = sorted({_group_of(d.get("category"), cat_group) for d in dims})
+    for group in groups:
+        gdims = sorted(
+            (d for d in dims if _group_of(d.get("category"), cat_group) == group),
+            key=lambda x: (x.get("category") or "", x.get("id") or ""))
+        if not gdims:
+            continue
+        out.append(f"## {group}")
+        out.append("")
+        out.append(f"See the full [{group} analysis]({group}.md) for fak's honest position on each dimension.")
+        out.append("")
+        out.append("| Category | Dimension | SOTA bar | Leading systems | Source | Date |")
+        out.append("|---|---|---|---|---|---|")
+        for d in gdims:
+            sys = ", ".join(d.get("sota_systems") or [])
+            src = d.get("source_url", "")
+            src_md = f"[link]({src})" if _nonempty(src) else "—"
+            bar = (d.get("sota_bar", "") or "").replace("|", "\\|")
+            out.append(f"| {d.get('category')} | {d.get('dimension')} | {bar} | {sys} | "
+                       f"{src_md} | {d.get('source_date', '')} |")
+        out.append("")
     return "\n".join(out)
 
 

@@ -1,3 +1,8 @@
+---
+title: "fak Demo-Robustness Scorecard: Simplicity, Speed, Durability"
+description: "The fak demo-robustness scorecard grades 8 demos on simplicity, speed, and durability into a 0-100 robustness-score, A-F grade, and a robustness-debt count."
+---
+
 # Demo-robustness scorecard
 
 <!-- demo-robustness-scorecard: 2026-06-22 · process: tools/demo_robustness_scorecard.py -->

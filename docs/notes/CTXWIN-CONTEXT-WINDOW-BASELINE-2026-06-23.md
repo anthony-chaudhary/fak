@@ -1,3 +1,8 @@
+---
+title: "fak ctxwin: Claude Code Context-Window Baseline"
+description: "A measured fak ctxwin baseline of Claude Code sessions: tool results are 62.2% of the context window, low-risk tiers reduce 1.166x, and self-reduce reaches 2x."
+---
+
 # Context-window baseline — Claude Code sessions
 
 _Generated: 2026-06-23 · 20 heaviest sessions · 2,249,698 estimated context tokens (≈4 chars/tok)._

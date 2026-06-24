@@ -1,3 +1,8 @@
+---
+title: "fak dual-track serving: RIDE + NATIVE over one shared spine"
+description: "fak's authoritative dual-track serving plan: ride best-in-class engines (vLLM, SGLang) plus a native in-kernel engine, over one shared track-neutral spine."
+---
+
 # Dual-track serving plan — RIDE + NATIVE over one shared spine
 
 > **Authoritative decision doc** for the large-scale disaggregated-serving epic

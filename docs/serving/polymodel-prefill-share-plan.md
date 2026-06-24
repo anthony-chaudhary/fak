@@ -1,3 +1,8 @@
+---
+title: "Poly-model serving in fak: host many, share prefill, decode one"
+description: "fak's poly-model serving design: host tens of models in one kernel, share prefill across them, decode one at a time, and use idle models for speculative MTP."
+---
+
 # Poly-model serving — host many, share the prefill, decode one
 
 > **Design decision doc** for the multi-model axis of in-kernel serving: hosting

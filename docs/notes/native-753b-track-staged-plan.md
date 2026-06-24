@@ -1,3 +1,8 @@
+---
+title: "Native 753B GLM-5.2 Serving on fak: Staged glm_moe_dsa Plan"
+description: "The dependency-ordered, multi-month plan to serve GLM-5.2 753B (glm_moe_dsa) natively on fak: GGUF parse, quantized device GEMM, multi-GPU TP, and CPU offload."
+---
+
 # Native 753B serving — staged plan (GLM-5.2 `glm_moe_dsa`)
 
 _2026-06-23._ The track to make fak serve the **real** GLM-5.2 753B model natively,
@@ -106,7 +111,7 @@ means it needs nothing downstream and can land before the heavy pillars.
 | P3 Real cross-process NCCL | a non-cpu-ref `CollectiveBackend` (NCCL/RCCL or a TCP transport mirroring `pipeline_transport.go`) | a 2-GPU/2-process all-reduce of a device tensor matches cpu-ref — **only now may "multi-GPU" be claimed** | P3 Collective bridge; P3 MLA-aware TP |
 | P4 Device paging primitive | an upload→compute→free `pagedKernel` with an observable `pageIn` counter (the first honest "paged to device on demand") | GLM-DSA GEMM bit-equal to resident; weight absent from `halW` after; `pageIn`==1 | ships now (existing fixture); real win needs P2 |
 | P4 Async expert streaming | per-weight VRAM ring + async/pinned H2D so host-resident experts stream per-layer; serve loop auto-sizes the split | a >VRAM `glm_moe_dsa` serves on the GPU node at a measured tok/s within budget | P4 paging primitive; P2 Full-model; P1 E2E |
-| **Integration 753B serve** | real GGUF → mixed-precision device GEMM → multi-GPU TP/EP → CPU/NVMe-tiered offload, with a real-GGUF golden | native 753B `Generate` matches the real-oracle greedy at the agreed bar on the DGX | P3 Real NCCL; P4 Async streaming; all P1/P2 |
+| **Integration 753B serve** | real GGUF → mixed-precision device GEMM → multi-GPU TP/EP → CPU/NVMe-tiered offload, with a real-GGUF golden | native 753B `Generate` matches the real-oracle greedy at the agreed bar on the GPU server | P3 Real NCCL; P4 Async streaming; all P1/P2 |
 
 ## Risks / honesty ledger
 
@@ -126,7 +131,7 @@ means it needs nothing downstream and can land before the heavy pillars.
   primitive lands.
 - **Scale gap:** every correctness witness is tiny-oracle and f32; the CUDA quant cosines
   have never been recorded on hardware. The real cost is multi-month 753B serving on the
-  DGX.
+  GPU server.
 
 ## Load-bearing existing code (reuse, don't duplicate)
 

@@ -1,3 +1,8 @@
+---
+title: "Multiple-Sink Transmission for the fak KV Cache Lifecycle"
+description: "How fak's ProvisionalSink seam fans one OpSpecCommit or OpSpecSquash across registered KV/context caches per (Txn, Epoch), with honest best-effort semantics."
+---
+
 # Multiple-sink transmission for the cache lifecycle (2026-06-23)
 
 A working note on one question: is *multiple-sink transmission* — one kernel op fanning

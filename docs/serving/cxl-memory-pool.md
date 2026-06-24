@@ -1,3 +1,8 @@
+---
+title: "Multi-tenant CXL KV Memory Pool: Fleet Reuse + Trust Gate"
+description: "fak's payload-free plane prices CXL.mem pooled KV reuse across a fleet and gates cross-tenant cell reuse, failing closed on poisoned or wrong-model cells."
+---
+
 # Multi-tenant CXL memory pool: fleet reuse + a cross-tenant trust gate
 
 > Status: the **policy/metadata plane** is shipped and tested (`internal/cachemeta/pool.go`,

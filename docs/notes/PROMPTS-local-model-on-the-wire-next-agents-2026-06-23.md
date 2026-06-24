@@ -1,3 +1,8 @@
+---
+title: "Local-model-on-the-wire: handoff prompts for fak's wirescreen spine"
+description: "Handoff prompts to extend fak's witnessed-lossy-proposer spine: rungs for a model-backed poison screener, perceptual-hash frame dedup, and PII redaction."
+---
+
 # Handoff prompts: extending the local-model-on-the-wire spine
 
 > Tracking epic: #568  ·  Spine: commit `b63264c`  ·  Design note: `docs/notes/RESEARCH-local-model-on-the-wire-2026-06-23.md`

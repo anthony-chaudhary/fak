@@ -1,3 +1,8 @@
+---
+title: "fak Mac Bench Refresh: M3 Pro CPU Q8 Parity + RadixAttention"
+description: "A 2026-06-23 M3 Pro refresh re-measuring fak's single-stream CPU Q8 parity vs llama.cpp on Qwen2.5-1.5B and the first uncontended live RadixAttention 1.5B run."
+---
+
 # Mac bench refresh — CPU Q8 parity + uncontended radix on the M3 Pro (2026-06-23)
 
 Run on `node-macos-a` (Apple M3 Pro, 12 core = 6P+6E, 36 GB unified, macOS 26.5),
