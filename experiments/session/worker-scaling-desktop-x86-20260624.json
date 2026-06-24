@@ -1,0 +1,66 @@
+{
+  "schema": "fak-worker-scaling/1",
+  "title": "Decode vs prefill worker-count scaling on a 32-core x86_64 desktop",
+  "measured_at": "2026-06-24",
+  "machine": {
+    "role": "agent-host (desktop / node 'desktop' in HARDWARE-CATALOG, run-on-bench-nodes-by-default EXCLUDED)",
+    "arch": "x86_64",
+    "logical_cores": 32,
+    "os": "windows",
+    "go": "go1.26.3 windows/amd64",
+    "contention": "lightly contended: this is the live agent-host. ABSOLUTE tok/s here is NOT comparable to the uncontended Apple M3 Pro authority rows. The load-bearing claim is the WITHIN-RUN worker-count RATIO, which is robust to contention (governance: within-run ratios authoritative)."
+  },
+  "engine": "fak-in-kernel Q8_0 (pure-Go, quantized weights+activations, int8xint8->int32 dot)",
+  "harness": "cmd/modelbench -gguf <Q8 gguf> -lean, FAK_WORKERS pinned per row",
+  "finding": "decode (single-token GEMV, memory/overhead-bound) and prefill (batched GEMM, compute-bound) have OPPOSITE worker-count optima. The single global FAK_WORKERS / GOMAXPROCS default (all 32 cores) lands in decode's WORST regime on small models. The decode over-threading penalty is largest on small models and shrinks as the model grows (2.5x at 1.5B -> 1.14x at 7B) -- the CPU-threading analogue of the repo's documented GPU launch-bound small-model artifact.",
+  "models": [
+    {
+      "model": "Qwen2.5-1.5B-Instruct.Q8_0",
+      "decode_steps": 32, "decode_reps": 5,
+      "rows": [
+        {"workers": 4,  "decode_ms_per_tok": 66.3,  "decode_tok_s": 15.08, "prefill_p256_tok_s": 110.0},
+        {"workers": 8,  "decode_ms_per_tok": 55.2,  "decode_tok_s": 18.11, "prefill_p256_tok_s": 197.2},
+        {"workers": 16, "decode_ms_per_tok": 59.8,  "decode_tok_s": 16.73, "prefill_p256_tok_s": 400.3},
+        {"workers": 24, "decode_ms_per_tok": 67.9,  "decode_tok_s": 14.73, "prefill_p256_tok_s": 434.5},
+        {"workers": 32, "decode_ms_per_tok": 136.9, "decode_tok_s": 7.31,  "prefill_p256_tok_s": 320.0}
+      ],
+      "decode_peak": {"workers": 8, "tok_s": 18.11},
+      "decode_at_default_32w": {"tok_s": 7.31},
+      "decode_default_penalty_x": 2.48,
+      "prefill_peak": {"workers": 24, "tok_s": 434.5}
+    },
+    {
+      "model": "Qwen2.5-3B-Instruct-Q8_0",
+      "decode_steps": 16, "decode_reps": 3,
+      "rows": [
+        {"workers": 8,  "decode_ms_per_tok": 116.4, "decode_tok_s": 8.59, "prefill_p256_tok_s": 156.1},
+        {"workers": 16, "decode_ms_per_tok": 118.0, "decode_tok_s": 8.47, "prefill_p256_tok_s": 200.9},
+        {"workers": 32, "decode_ms_per_tok": 249.6, "decode_tok_s": 4.01, "prefill_p256_tok_s": 165.2}
+      ],
+      "decode_peak": {"workers": 8, "tok_s": 8.59},
+      "decode_at_default_32w": {"tok_s": 4.01},
+      "decode_default_penalty_x": 2.14,
+      "prefill_peak": {"workers": 16, "tok_s": 200.9}
+    },
+    {
+      "model": "Qwen2.5-7B-Instruct-Q8_0",
+      "decode_steps": 8, "decode_reps": 2,
+      "rows": [
+        {"workers": 8,  "decode_ms_per_tok": 273.0, "decode_tok_s": 3.66, "prefill_p256_tok_s": 52.3},
+        {"workers": 16, "decode_ms_per_tok": 266.6, "decode_tok_s": 3.75, "prefill_p256_tok_s": 89.1},
+        {"workers": 32, "decode_ms_per_tok": 304.7, "decode_tok_s": 3.28, "prefill_p256_tok_s": 109.0}
+      ],
+      "decode_peak": {"workers": 16, "tok_s": 3.75},
+      "decode_at_default_32w": {"tok_s": 3.28},
+      "decode_default_penalty_x": 1.14,
+      "prefill_peak": {"workers": 32, "tok_s": 109.0}
+    }
+  ],
+  "honest_fences": [
+    "Within-run worker RATIO is the claim; absolute tok/s is contended-agent-host and NOT comparable to the idle M3 Pro authority rows (canonical M3 Pro 1.5B Q8 decode = 38.1 tok/s).",
+    "The decode decline is intrinsic, not pure contention: it already appears at 16w/24w (1.5B: 18.1->16.7->14.7), both of which leave cores free; the 32w cliff is partly the many-thread barrier cost and partly contention amplification on a fully-subscribed box.",
+    "Single global worker count cannot optimize decode and prefill simultaneously; phase-aware (or model-size-aware) worker selection would recover up to ~2.5x decode on small models with no cost to prefill or to large-model decode.",
+    "internal/model already optimized the decode worker pool (parallel.go spin-then-park barrier) and ships internal/model/bench_scaling.sh to measure exactly this tension; this artifact is the x86_64 32-core data point for that tool's question."
+  ],
+  "reproduce": "for W in 4 8 16 24 32; do FAK_WORKERS=$W go run ./cmd/modelbench -gguf <Qwen2.5-1.5B-Q8.gguf> -lean -decode-steps 32 -decode-reps 5; done"
+}
