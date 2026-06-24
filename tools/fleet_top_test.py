@@ -29,6 +29,7 @@ def _doc():
             {"account": ".claude-bravo", "tag": "bravo", "available": False,
              "blocked": True, "throttled": True, "block_kind": "throttle",
              "block_reason": "rate limited", "reset": "Jun 26, 6pm",
+             "verdict_source": "passive", "verdict_age_min": 120.0,
              "config_dir": "/home/u/.claude-bravo"},
             {"account": ".claude-charlie", "tag": "charlie", "available": False,
              "blocked": True, "throttled": False, "block_kind": "auth",
@@ -85,6 +86,27 @@ class BuildSnapshotTest(unittest.TestCase):
             sorted(b["tag"] for b in acc["blocked"]), ["charlie", "delta"]
         )
 
+    def test_throttled_list_excludes_an_account_that_recovered(self):
+        """The day24 stale-throttle case: an account still carried in the throttle MAP
+        but now `available` in the accounts block (a newer successful turn cleared it)
+        must NOT render as throttled -- the throttled list is driven off availability,
+        not the raw map."""
+        doc = _doc()
+        # alpha is available; plant a stale throttle-map entry for it as if a 5-min-old
+        # limit banner were still cached. It must be ignored because alpha.available=True.
+        doc["throttle"][".claude-alpha"] = {"reset": "6pm", "age_min": 5.0}
+        snap = fleet_top.build_snapshot(
+            doc, workspace="C:/work/fak", window_h=10.0, now="2026-06-23T18:00:00Z")
+        throttled_tags = [t["tag"] for t in snap["accounts"]["throttled"]]
+        self.assertNotIn("alpha", throttled_tags)
+        self.assertEqual(throttled_tags, ["bravo"])
+
+    def test_throttled_entry_carries_freshness(self):
+        snap = self.snap
+        bravo = snap["accounts"]["throttled"][0]
+        self.assertEqual(bravo["verdict_source"], "passive")
+        self.assertEqual(bravo["verdict_age_min"], 120.0)
+
     def test_attention_ranks_resumable_first_and_carries_command(self):
         attn = self.snap["attention"]
         self.assertEqual(attn[0]["level"], "crit")
@@ -114,6 +136,13 @@ class RenderFrameTest(unittest.TestCase):
         self.assertIn("· snapshot", frame)
         # color off => no escape codes, so the frame stays diffable.
         self.assertNotIn("\x1b[", frame)
+
+    def test_throttled_line_shows_freshness(self):
+        frame = fleet_top.render_frame(self.snap, color=False, interval=None)
+        # the throttled line carries how stale its evidence is, so a cached expired
+        # throttle reads visibly differently from a live one.
+        self.assertIn("throttled  bravo  resets Jun 26, 6pm", frame)
+        self.assertIn("(passive, seen 120m ago)", frame)
 
     def test_live_footer_shows_cadence(self):
         frame = fleet_top.render_frame(self.snap, color=False, interval=5)

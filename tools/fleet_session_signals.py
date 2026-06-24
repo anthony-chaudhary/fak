@@ -155,6 +155,25 @@ def reset_passed(when: str, now_utc=None, anchor_utc=None) -> bool | None:
     return now_utc >= reset_local.astimezone(timezone.utc)
 
 
+# HTTP/transport status codes that show up in a terminal error banner. Captured as a
+# real field so "what status did this session last report?" is answerable directly
+# instead of eyeballing the prose -- the 429/529/503 the card otherwise discards.
+HTTP_STATUS_RE = re.compile(r"\b(401|403|429|500|502|503|529)\b")
+
+
+def http_status(text: str) -> str | None:
+    """The HTTP/transport status code named in an error banner, or None.
+
+    Returns the first code from :data:`HTTP_STATUS_RE` (401/403/429/500/502/503/529)
+    found in ``text``. This is the literal "last reported status" -- e.g. a 429 from
+    the API's transient rate limiter vs a 401 auth wall -- which the disposition
+    taxonomy folds away into STOPPED_APIERR / INFRA_AUTH. Pure string scan; the caller
+    decides what to do with the code. None when no status code is present (the common
+    case: a plain "session limit; resets 6pm" banner carries no HTTP code at all)."""
+    m = HTTP_STATUS_RE.search(text or "")
+    return m.group(1) if m else None
+
+
 def is_auth_error(text: str) -> bool:
     return bool(AUTH_RE.search(text or ""))
 

@@ -81,6 +81,37 @@ class FleetSessionSignalsTest(unittest.TestCase):
         )
 
 
+class HttpStatusTest(unittest.TestCase):
+    """http_status -- the literal transport code from a terminal banner, the field that
+    makes 'what status did this session last report?' answerable without prose-reading."""
+
+    def test_transient_529_is_captured(self) -> None:
+        self.assertEqual(
+            fleet_session_signals.http_status(
+                "API Error: 529 Server is temporarily limiting requests"),
+            "529",
+        )
+
+    def test_429_rate_limit(self) -> None:
+        self.assertEqual(fleet_session_signals.http_status("HTTP 429 Too Many Requests"), "429")
+
+    def test_401_auth_code(self) -> None:
+        self.assertEqual(
+            fleet_session_signals.http_status(
+                "API Error: 401 Invalid authentication credentials"),
+            "401",
+        )
+
+    def test_plain_session_limit_banner_has_no_http_code(self) -> None:
+        # the common case: a usage-limit banner names a reset, never an HTTP code.
+        self.assertIsNone(fleet_session_signals.http_status(
+            "You've hit your session limit · resets 6pm (America/Los_Angeles)"))
+
+    def test_empty_is_none(self) -> None:
+        self.assertIsNone(fleet_session_signals.http_status(""))
+        self.assertIsNone(fleet_session_signals.http_status("all good, no errors here"))
+
+
 class ResetPassedTest(unittest.TestCase):
     """reset_passed -- the past/future verdict on a usage-limit window. Anchored to
     the banner's own time so 'resets 6am' written at 06:30 means TOMORROW's 6am."""

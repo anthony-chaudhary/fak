@@ -163,11 +163,19 @@ def build_snapshot(
             "total": len(accounts),
             "usable": len(available),
             "available": [a.get("tag") for a in available],
+            # Drive the throttled LIST off the accounts block (throttled AND not available)
+            # rather than the raw throttle map: the accounts block has already cleared a
+            # throttle that a newer successful turn superseded (the day24 stale-throttle
+            # false-positive), so an account whose `available` is True can never appear
+            # here. Freshness (verdict_source/age) is carried so a 5-min-old expired-but-
+            # cached reset reads visibly differently from a live one.
             "throttled": [
                 {
                     "tag": a.get("tag"),
                     "reset": (throttle.get(a.get("account"), {}) or {}).get("reset")
                     or a.get("reset"),
+                    "verdict_source": a.get("verdict_source"),
+                    "verdict_age_min": a.get("verdict_age_min"),
                 }
                 for a in throttled
             ],
@@ -321,7 +329,14 @@ def render_frame(
     avail = acc.get("available") or []
     out.append(f"  {CHIP['green']} available  " + (", ".join(avail) if avail else ink("(none)", "31")))
     for t in acc.get("throttled") or []:
-        out.append(f"  {CHIP['red']} throttled  {t.get('tag')}  resets {t.get('reset') or '?'}")
+        fresh = ""
+        age = t.get("verdict_age_min")
+        if isinstance(age, (int, float)):
+            # how stale the throttle evidence is + where it came from; a carried verdict
+            # with no fresh row is the stale-latch case worth an operator's eye.
+            src = t.get("verdict_source") or "?"
+            fresh = ink(f"  ({src}, seen {age:g}m ago)", "2")
+        out.append(f"  {CHIP['red']} throttled  {t.get('tag')}  resets {t.get('reset') or '?'}{fresh}")
     for b in acc.get("blocked") or []:
         out.append(f"  {CHIP['red']} blocked    {b.get('tag')}  ({b.get('reason')})")
     out.append("")
