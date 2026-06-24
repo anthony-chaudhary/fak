@@ -72,6 +72,69 @@ func TestDeriveProbes(t *testing.T) {
 	}
 }
 
+func TestSatisfyGlob(t *testing.T) {
+	cases := map[string]string{
+		"public.*":     "public.x", // single-segment path.Match
+		"in-network-*": "in-network-x",
+		"notes/**":     "notes/x", // "**" path-containment
+		"./out/**":     "./out/x",
+	}
+	for glob, want := range cases {
+		if got := satisfyGlob(glob); got != want {
+			t.Fatalf("satisfyGlob(%q) = %q, want %q", glob, got, want)
+		}
+	}
+}
+
+// TestDeriveProbesSynthesizesAllowGlobArgs guards that an allow-listed tool gated
+// by a positive allow_glob arg_rule gets a derived ALLOW probe carrying SATISFYING
+// args (not the empty "{}" an allow_glob would refuse for a missing arg).
+func TestDeriveProbesSynthesizesAllowGlobArgs(t *testing.T) {
+	manifest := `{
+		"allow": ["run_read_query"],
+		"arg_rules": [
+			{"tool": "run_read_query", "arg": "schema", "allow_glob": "public.*", "reason": "POLICY_BLOCK"}
+		]
+	}`
+	probes, err := deriveProbes([]byte(manifest))
+	if err != nil {
+		t.Fatalf("deriveProbes: %v", err)
+	}
+	var found bool
+	for _, p := range probes {
+		if p.Origin == "allow" && p.Tool == "run_read_query" {
+			found = true
+			if p.Args == "{}" || !strings.Contains(p.Args, "public.") {
+				t.Fatalf("run_read_query allow probe args = %q, want synthesized to satisfy public.*", p.Args)
+			}
+		}
+	}
+	if !found {
+		t.Fatalf("no allow probe for run_read_query in %+v", probes)
+	}
+}
+
+// TestRunAttestArgGatedAllowProves is the end-to-end regression guard: a policy
+// whose allow tool is gated by an allow_glob arg_rule used to false-DRIFT (the
+// empty-args probe was DENIED for the missing arg). With synthesized args it
+// attests PROVEN against the real kernel fold.
+func TestRunAttestArgGatedAllowProves(t *testing.T) {
+	restorePolicy(t)
+	policy := writeTemp(t, "arg-gated.json", `{
+		"allow": ["run_read_query"],
+		"arg_rules": [
+			{"tool": "run_read_query", "arg": "schema", "allow_glob": "public.*", "reason": "POLICY_BLOCK"}
+		]
+	}`)
+	var out, errb bytes.Buffer
+	if code := runAttest(&out, &errb, []string{"--policy", policy}); code != 0 {
+		t.Fatalf("exit=%d stderr=%s out=%s", code, errb.String(), out.String())
+	}
+	if s := out.String(); !strings.Contains(s, "PROVEN") || !strings.Contains(s, "0 failed") {
+		t.Fatalf("expected PROVEN with 0 failed, got:\n%s", s)
+	}
+}
+
 func TestValidateProbe(t *testing.T) {
 	cases := []struct {
 		name    string

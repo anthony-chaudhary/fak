@@ -35,6 +35,7 @@ import (
 	"io"
 	"os"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/abi"
@@ -219,7 +220,13 @@ func deriveProbes(manifestBytes []byte) ([]probe, error) {
 	}
 
 	for _, tool := range sortedStrings(m.Allow) {
-		probes = append(probes, probe{Tool: tool, Args: "{}", Expect: "allow", Origin: "allow"})
+		// An allow-listed tool gated by a positive allow_glob arg_rule would be
+		// (correctly) DENIED for the missing arg if probed with empty args — so
+		// the derived ALLOW probe synthesizes args that satisfy those globs and
+		// exercises a genuinely-admissible call instead of a false drift. Other
+		// arg-value boundaries (deny_regex/max_bytes) the empty call already
+		// satisfies; arbitrary boundaries stay --probes territory (see header).
+		probes = append(probes, probe{Tool: tool, Args: synthAllowArgs(tool, m.ArgRules), Expect: "allow", Origin: "allow"})
 	}
 	for _, prefix := range sortedStrings(m.AllowPrefix) {
 		// A prefix is not a concrete tool; synthesize one that matches it so the
@@ -232,6 +239,41 @@ func deriveProbes(manifestBytes []byte) ([]probe, error) {
 		Expect: "deny", ExpectReason: "DEFAULT_DENY", Origin: "default_deny",
 	})
 	return probes, nil
+}
+
+// synthAllowArgs builds a minimal args JSON that SATISFIES every positive
+// allow_glob arg_rule gating an allow-listed tool, so the derived ALLOW probe
+// exercises a genuinely-admissible call rather than the empty-args call an
+// allow_glob refuses for a missing arg. Best-effort by design: the real kernel
+// verdict still decides pass/fail, so an imperfect synthesis can only leave the
+// probe drifting, never manufacture a false ALLOW. Tools with no gating glob keep
+// the empty "{}" args (the prior behaviour).
+func synthAllowArgs(tool string, rules []policy.ArgRule) string {
+	args := map[string]string{}
+	for _, r := range rules {
+		if r.Tool == tool && r.AllowGlob != "" {
+			args[r.Arg] = satisfyGlob(r.AllowGlob)
+		}
+	}
+	if len(args) == 0 {
+		return "{}"
+	}
+	b, err := json.Marshal(args)
+	if err != nil {
+		return "{}"
+	}
+	return string(b)
+}
+
+// satisfyGlob returns a literal value admitted by an adjudicator allow_glob,
+// mirroring adjudicator.pathUnderGlob's two cases: a "**" glob is path-
+// containment (a path under the prefix dir); otherwise it is a single
+// path.Match (the single-segment wildcards replaced by a literal).
+func satisfyGlob(glob string) string {
+	if i := strings.Index(glob, "**"); i >= 0 {
+		return glob[:i] + "x" // "notes/**" -> "notes/x", "./out/**" -> "./out/x"
+	}
+	return strings.NewReplacer("*", "x", "?", "x").Replace(glob) // "public.*" -> "public.x"
 }
 
 // validateProbe rejects a probe whose expectation the kernel could never satisfy
