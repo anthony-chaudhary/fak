@@ -2,10 +2,12 @@
 """sync_memory.py — mirror the node-local Claude Code auto-memory store into the
 repo (so it ships via git) and back (to seed a fresh node).
 
-The Claude Code harness keeps auto-memory under ``~/.claude/projects/<slug>/memory/``,
-which never leaves the machine. The repo carries a committed mirror at
-``.claude/memory/`` so that hard-won fleet knowledge ships with the tree like any other
-tracked file. This script copies the ``*.md`` memory files between the two stores.
+The Claude Code harness keeps auto-memory under
+``$CLAUDE_CONFIG_DIR/projects/<slug>/memory/`` (``~/.claude/projects/<slug>/memory/``
+when the config home is not relocated), which never leaves the machine. The repo
+carries a committed mirror at ``.claude/memory/`` so that hard-won fleet knowledge
+ships with the tree like any other tracked file. This script copies the ``*.md``
+memory files between the two stores.
 
     python tools/sync_memory.py --push    # home  -> repo   (run before committing memory)
     python tools/sync_memory.py --pull    # repo  -> home   (run when seeding a new node)
@@ -32,15 +34,29 @@ def repo_root() -> Path:
 
 
 def default_home_memory(root: Path) -> Path:
-    """Mirror the harness slug: non-alphanumerics in the project path become '-'.
+    """Resolve this node's Claude Code auto-memory store for ``root``.
 
-    e.g. C:\\projects\\fleet  ->  C--projects-fleet
+    Precedence mirrors how the harness itself resolves its config home, so the
+    mirror follows the SAME store the running agent writes to:
+
+      1. ``CLAUDE_MEMORY_DIR`` — an explicit memory-dir override (wins outright).
+      2. ``CLAUDE_CONFIG_DIR`` — a RELOCATED config home. The fleet runs every
+         agent under its own (``~/.claude-gem5-netra``, ``~/.claude-q-netra``, …),
+         so the store is ``$CLAUDE_CONFIG_DIR/projects/<slug>/memory``. Hardcoding
+         ``~/.claude`` here would mirror the WRONG (stale or foreign) store — or an
+         empty one — on every such node, the exact failure this guards against.
+      3. ``~/.claude/projects/<slug>/memory`` — the vanilla default.
+
+    ``<slug>`` is the harness project slug: every non-alphanumeric in the absolute
+    repo path becomes '-' (e.g. C:\\work\\fak -> C--work-fak).
     """
     env = os.environ.get("CLAUDE_MEMORY_DIR")
     if env:
         return Path(env)
+    config_dir = os.environ.get("CLAUDE_CONFIG_DIR")
+    base = Path(config_dir) if config_dir else Path.home() / ".claude"
     slug = re.sub(r"[^A-Za-z0-9]", "-", str(root))
-    return Path.home() / ".claude" / "projects" / slug / "memory"
+    return base / "projects" / slug / "memory"
 
 
 # README.md documents the mirror itself; it is not a memory fact, so it is never

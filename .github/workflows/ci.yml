@@ -147,6 +147,7 @@ jobs:
           python tools/scrub_public_copy_test.py
           python tools/check_committed_files_test.py
           python tools/memory_recall_audit_test.py
+          python tools/sync_memory_test.py
           python tools/gofmt_debt_audit_test.py
           python tools/safe_ff_sync_test.py
           python tools/release_decide_test.py
