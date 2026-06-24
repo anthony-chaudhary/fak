@@ -29,6 +29,11 @@ ratio and converts to $ by × input_$/Mtok):
   D  O(1) reconstruct + stable     keep a byte-stable head S (system+tools) cached (read 0.1×
      cached prefix                 after a one-time 1.25× write); reconstruct only the tail
                                    (W_t − S) fresh each turn. The hybrid.
+  E  fak OWNS the cache (PROJECTED, a COMPUTE axis, reported separately by kernel_projection()):
+     when fak runs the engine the KV cache is an addressable kernel object, so the bounded view
+     is reconstructed by REUSING + EVICTING cached spans (bit-exact, a single Kraw re-rotation,
+     no re-prefill) instead of re-sending a prompt. You get bounded AND cached at once. Not live
+     yet (the KV kernel is dormant on the proxy loop) — see kernel_projection() for the honest model.
 
 DEFAULT MULTIPLIERS (Anthropic, base-input units; verified via the claude-api skill):
   fresh 1.0 · cache-read 0.1 · cache-write-5m 1.25 · cache-write-1h 2.0 · output 5.0
@@ -314,6 +319,54 @@ def replay_session(turns, budget, stable_prefix=0, evict_frac=0.0, write_mult=M_
     }
 
 
+def kernel_projection(all_turns, budgets):
+    """The PROJECTED kernel-owned regime (E): what changes when fak runs the engine itself and
+    the KV cache is an addressable kernel object, not the provider's opaque prefix.
+
+    On a black-box API the wire prompt IS the cache key, so to bound the context you re-send a
+    smaller prompt and the provider RE-PREFILLS it (regime C). You must choose: bounded-but-
+    re-prefilled (C) or cached-but-unbounded (B). Owning the cache decouples them — reconstruction
+    becomes a cache operation (reuse survivor KV, evict pruned spans bit-exactly via a single
+    Kraw re-rotation, internal/model/kvcache.go Evict), NOT a re-prefill. So:
+
+      * PREFILL floor: the kernel prefills only the genuinely-NEW content per turn (fresh+write);
+        survivor KV is reused, eviction is ~free (O(survivors) RoPE rotations, no forward pass).
+        Σ(fresh+write) is the irreducible new-information floor. (A warm provider cache, B, also
+        prefills ~this floor — the kernel does NOT beat B on prefill; it beats C, which re-prefills
+        the whole window every turn.)
+      * DECODE/resident: decode attends over the RESIDENT set. B carries the full growing prefix
+        (resident ∝ prompt_t, unbounded); the kernel bounds resident to W (∝ min(prompt_t, W)).
+        The decode-attention proxy is Σ resident·out; the kernel's is a small fraction of B's.
+
+    UNITS/AXIS: this is GPU COMPUTE (prefill tokens + attention FLOPs), NOT the API-dollar bill of
+    regimes A–D. The two are not directly comparable; reported separately for exactly that reason.
+    STATUS: PROJECTED, not live. The KV kernel is dormant on the live proxy loop (gateway
+    PoisonEvictor is a no-op on the proxy planner); bit-exact eviction is proven on a synthetic
+    model (internal/kvmmu) but the bounded-reconstruct serve loop is unbuilt, and the general
+    mid-stream (already-attended) bit-exact reselect is the audited non-prefix-reuse research item
+    (exact+cheap today only for write-time evict / append-after-evict). Linear-attention layers
+    (Gated-DeltaNet) cannot evict a span and fail closed. Treat E as the CEILING owning the cache
+    buys, honestly labeled, not a measured win.
+    """
+    flat = [t for ts in all_turns for t in ts]
+    new = sum(t.fresh + t.write for t in flat)          # kernel prefill FLOOR (new info only)
+    prompt = sum(t.prompt for t in flat)                # A re-prefills the full prompt every turn
+    b_decode = sum(t.prompt * t.out for t in flat)      # B: decode over the unbounded prefix
+    out = {
+        "new_information_floor_tok": new,
+        "a_reprefill_tok": prompt,
+        "floor_frac_of_a": round(new / prompt, 4) if prompt else None,
+        "c_reprefill_tok": {},                          # proxy re-prefills the window each turn
+        "decode_attention_ratio_E_over_B": {},          # how much the kernel bounds decode vs B
+    }
+    for bud in budgets:
+        c_re = sum(min(t.prompt, bud) for t in flat)
+        e_decode = sum(min(t.prompt, bud) * t.out for t in flat)
+        out["c_reprefill_tok"][str(int(bud))] = c_re
+        out["decode_attention_ratio_E_over_B"][str(int(bud))] = round(e_decode / b_decode, 4) if b_decode else None
+    return out
+
+
 def trace_session(turns, budget, stable_prefix=0, evict_frac=0.0, write_mult=M_WRITE_5M):
     """The OBSERVABILITY ledger: one fully-inspectable, REPLAYABLE record per turn.
 
@@ -541,6 +594,7 @@ def cmd_replay(args):
         "C_beats_A_below_budget_tok": round(ax, 1) if ax is not None else None,
         "C_beats_A_as_frac_of_avg_prompt": round(axf, 4) if axf is not None else None,
     }
+    out["kernel_owned_projected"] = kernel_projection(all_turns, budgets)
 
     if args.json:
         with open(args.json, "w", encoding="utf-8") as f:
@@ -597,6 +651,39 @@ def render_md(o):
         L.append(f"- **vs no cache (A, the \"random API\"):** the O(1) window wins while under "
                  f"**{cx['C_beats_A_below_budget_tok']:,.0f} tok/turn** "
                  f"(**{cx['C_beats_A_as_frac_of_avg_prompt']*100:.1f}%** of the average full context).")
+    k = o.get("kernel_owned_projected")
+    if k:
+        L.append("\n## When fak owns the cache (regime E — projected, compute axis)\n")
+        L.append("On a black-box API the wire prompt *is* the cache key, so bounding the context means "
+                 "re-sending a smaller prompt and the provider RE-PREFILLS it (regime C). You must choose: "
+                 "bounded-but-re-prefilled (C) or cached-but-unbounded (B). When fak runs the engine, the KV "
+                 "cache is an addressable kernel object: reconstruction reuses survivor KV and evicts pruned "
+                 "spans bit-exactly (a single `Kraw` re-rotation, no forward pass), so you get **bounded AND "
+                 "cached at once**.\n")
+        floor = k["new_information_floor_tok"]
+        L.append(f"- **Prefill floor (lossless).** The kernel prefills only the genuinely-new content per turn; "
+                 f"survivor KV is reused, eviction is ~free. The session's irreducible new-information floor is "
+                 f"**{floor:,} tok** = {k['floor_frac_of_a']*100:.1f}% of what regime A re-prefills "
+                 f"({k['a_reprefill_tok']:,} tok every turn, caching nothing).")
+        re8 = k["c_reprefill_tok"].get("8000")
+        if re8:
+            L.append(f"  Regime C (proxy, cannot address the cache) re-prefills its window every turn — "
+                     f"{re8:,} tok at an 8K budget, **{re8/max(1,floor):.1f}× the floor**, because it re-sends "
+                     f"history it cannot reuse. The kernel removes that penalty by reusing cached survivors. "
+                     f"(At very small budgets C re-prefills *below* the floor only because it TRUNCATES new "
+                     f"content to fit — the lossy-bounded case the lossless kernel avoids. A warm provider cache "
+                     f"B also prefills ~the floor, so the kernel matches B on prefill and wins on decode + eviction.)")
+        dr4 = k["decode_attention_ratio_E_over_B"].get("4000")
+        if dr4 is not None:
+            L.append(f"- **Bounded decode.** B's decode attends over the unbounded growing prefix; the kernel "
+                     f"bounds the resident set, cutting the decode-attention proxy to **{dr4*100:.1f}% of B** at a "
+                     f"4K window — the part a warm cache cannot bound because it cannot evict.")
+        L.append("\n> Regime E is a **compute** axis (prefill + attention FLOPs), not the API-dollar bill of A–D; "
+                 "they are reported separately because they are not directly comparable. It is **projected, not "
+                 "live**: the KV kernel is dormant on the proxy loop, bit-exact eviction is proven on a synthetic "
+                 "model (`internal/kvmmu`) but the bounded-reconstruct serve loop is unbuilt, and the general "
+                 "mid-stream bit-exact reselect is the audited non-prefix-reuse research item. See "
+                 "[addressable-kv-cache.md](addressable-kv-cache.md).\n")
     L.append("\n> **TTFT** is a prefill-token proxy (decode time, identical across regimes, is "
              f"excluded); cache reads are charged READ_TIME_MULT={READ_TIME_MULT} of fresh time, the "
              "same 0.1× the cost model uses (set it to 0 for the cache-read-is-free view). A large "
@@ -766,6 +853,22 @@ def runselfcheck():
     ok = abs(cold - a) < 1e-6 and cold > warm
     print(f"  eviction: cold B == A > warm B      {'PASS' if ok else 'FAIL'}  "
           f"warm={warm:.0f} cold={cold:.0f} A={a:.0f}")
+    fails += not ok
+
+    # 7) kernel projection: the new-information floor <= C re-prefill <= A re-prefill, and the
+    #    bounded decode proxy is a fraction of B's unbounded one. (E gets bounded AND floor-prefill.)
+    kp = kernel_projection([turns], [4000])
+    floor = kp["new_information_floor_tok"]
+    c_re = kp["c_reprefill_tok"]["4000"]
+    a_re = kp["a_reprefill_tok"]
+    dr = kp["decode_attention_ratio_E_over_B"]["4000"]
+    # robust invariants only: the floor and C's re-prefill are both bounded by A's full re-prefill,
+    # and the bounded decode proxy never exceeds B's unbounded one. (floor vs C is budget-dependent:
+    # below a turn's new-content size, C re-prefills LESS than the floor because it TRUNCATES new
+    # content — the lossy-bounded case the kernel avoids by reusing survivors instead of re-sending.)
+    ok = floor <= a_re and c_re <= a_re and 0 < dr <= 1.0
+    print(f"  kernel: floor<=A, C<=A, decode bounded          {'PASS' if ok else 'FAIL'}  "
+          f"floor={floor:.0f} C={c_re:.0f} A={a_re:.0f} decodeE/B={dr}")
     fails += not ok
 
     print()
