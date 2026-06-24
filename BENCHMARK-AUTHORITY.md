@@ -11,6 +11,16 @@
 **Last updated:** 2026-06-21
 **Status:** Living document — update when new model results ship
 
+> **🔁 Provenance vs. public reproducibility (read before you `git show` a commit below).**
+> The **Commit** column records the *private-lineage* result commit each number first shipped in.
+> Those short-SHAs predate the public **v0.30.0** squash (`1029e37`) and **do not resolve in a
+> public clone** — treat them as provenance, not as a public reproduce handle. What an outsider
+> actually re-runs in this repo is the committed **artifact** (the JSON / `.md` under
+> `experiments/…` and `docs/benchmarks/…`, all tracked here) plus the **Reproduce** command. The
+> artifact + command are the verifiable anchor; the SHA is lineage. (A few historical paths below
+> dropped their old monorepo `fak/` subdir prefix — the real tracked path is `experiments/…` /
+> `docs/benchmarks/…`. Limitation shown plainly rather than left for you to trip on.)
+
 ---
 
 ## Quick Reference: Primary Numbers
@@ -65,7 +75,7 @@
 
 **Date:** 2026-06-20
 **Commit:** `bcad56e`
-**Files:** `fak/experiments/mac-m3pro-kernel-20260620/kernel-latency-mac-m3pro-20260620.json`, `fak/MAC-M3PRO-KERNEL-BENCH-2026-06-20.md`
+**Files:** `experiments/mac-m3pro-kernel-20260620/kernel-latency-mac-m3pro-20260620.json` *(the anchor)*, `MAC-M3PRO-KERNEL-BENCH-2026-06-20.md` *(narrative companion — not published in the public repo)*
 **Machine:** Mac15,7 — Apple M3 Pro, 12 core, arm64, darwin, go1.26.0. Medians of count=8 trials on an idle box.
 
 ### What this adds (and why)
@@ -121,7 +131,7 @@ silently removed.)
 
 **Date:** 2026-06-20
 **Commit:** `0fc39aa`
-**File:** `fak/experiments/causal-invalidation-20260620/causalbench-witness-20260620.json`
+**File:** `experiments/causal-invalidation-20260620/causalbench-witness-20260620.json`
 **Reproduce:** `go run ./cmd/causalbench -selfcheck` (zero files, exits non-zero on any violation)
 
 ### What this witnesses (and why it is the cheapest strategic proof)
@@ -188,8 +198,8 @@ not numeric.
 
 **Date:** 2026-06-19
 **Commit:** `2bbda6f`
-**File:** `fak/experiments/session/headline-qwen-50x5.json`
-**Chart:** `fak/experiments/session/chart1-headline-walltime.svg`
+**File:** `experiments/session/headline-qwen-50x5.json`
+**Chart:** `experiments/session/chart1-headline-walltime.svg`
 
 This is the number a first-time visitor sees in README §1: *"On a realistic 50-turn ×
 5-agent run (Apple M3 Pro, Qwen2.5-1.5B), fak did in ~19 minutes what the naive loop
@@ -248,7 +258,7 @@ diagnosis: `benchmark-run-opencode-20260619/BENCHMARK-RUN-OPENCODE-20260619.md` 
 
 **Date:** 2026-06-18
 **Commit:** `a200c3d`
-**File:** `fak/experiments/radixattention/radixbench-smollm2-135m-q8.json`
+**File:** `experiments/radixattention/radixbench-smollm2-135m-q8.json`
 
 ### What This Measures
 
@@ -292,7 +302,7 @@ On the synthetic 64-hidden/4-layer wiring model, the memcpy cost of cloning cach
 
 **Date:** 2026-06-19
 **Commit:** `92896a4`
-**Files:** `fak/experiments/radixattention/radixbench-{smollm2-135m,smollm2-360m,qwen2.5-0.5b,qwen2.5-1.5b}-q8-agents-fresh-20260619.json`
+**Files:** `experiments/radixattention/radixbench-{smollm2-135m,smollm2-360m,qwen2.5-0.5b,qwen2.5-1.5b}-q8-agents-fresh-20260619.json`
 
 ### What This Adds
 
@@ -336,7 +346,7 @@ green on every run.
 
 **Date:** 2026-06-19
 **Commit:** `92896a4`
-**Files:** `fak/experiments/session/highT-smollm2-135m-{64-128-256,512}-fresh-20260619.json`
+**Files:** `experiments/session/highT-smollm2-135m-{64-128-256,512}-fresh-20260619.json`
 
 ### What This Adds
 
@@ -378,8 +388,8 @@ model. This is disclosed in each JSON's `methodology` field.
 
 **Date:** 2026-06-19
 **Commit:** `60db592` (path unblocked by `84c2e6c`)
-**Files:** `fak/experiments/gpu/q8gpu-smollm2-135m-{gpu-q8,gpu-f32,cpu-q8}-20260619.json`
-**Doc:** `fak/experiments/gpu/VULKAN-Q8-RX7600-20260619.md`
+**Files:** `experiments/gpu/q8gpu-smollm2-135m-{gpu-q8,gpu-f32,cpu-q8}-20260619.json`
+**Doc:** `experiments/gpu/VULKAN-Q8-RX7600-20260619.md`
 
 ### What This Adds
 
@@ -426,8 +436,8 @@ real RX 7600 (Vulkan 1.4.349, native Windows), 64 decode steps / 3 reps.
 
 **Date:** 2026-06-19
 **Commit:** `7bf666b` (unblocked by the `8c74fd9` q8_matmul input-tiling fix)
-**Files:** `fak/experiments/gpu/crossover-qwen2.5-1.5b-{gpu,cpu}-q8-20260619.json`
-**Doc:** `fak/experiments/gpu/CROSSOVER-1P5B-RX7600-20260619.md`
+**Files:** `experiments/gpu/crossover-qwen2.5-1.5b-{gpu,cpu}-q8-20260619.json`
+**Doc:** `experiments/gpu/CROSSOVER-1P5B-RX7600-20260619.md`
 
 ### What This Adds
 
@@ -469,7 +479,7 @@ ceiling.
 
 ## Session Value-Stack Results (SmolLM2-135M Q8)
 
-**File:** `fak/SESSION-VALUE-STACK-RESULTS.md`
+**File:** `docs/benchmarks/SESSION-VALUE-STACK-RESULTS.md`
 
 ### What This Measures
 
@@ -512,12 +522,12 @@ The **11.2–14.5×** value-add is **vs naive stateless serving**, not vs SGLang
 
 ### SGLang RadixAttention Paper
 - **Source:** Lianmin Zheng et al., "SGLang: Efficient Execution of Structured Language Model Programs," arXiv:2312.07104; NeurIPS 2024
-- **fak replication:** `fak/RADIXATTENTION-RESULTS.md`
+- **fak replication:** `docs/benchmarks/RADIXATTENTION-RESULTS.md`
 - **Claim:** fak achieves 86.7% hit rate (inside SGLang's 50-99% band)
 
 ### SmolLM2-135M Reference
 - **Role:** In-kernel bit-exact anchor for GPU/CPU equivalence gates
-- **Proof:** `fak/IN-KERNEL-MODEL-DESIGN.md` R0–R14
+- **Proof:** `IN-KERNEL-MODEL-DESIGN.md` R0–R14 *(narrative companion — not published in the public repo; the bit-exact equivalence ships as tests, e.g. `TestHALVulkanForwardMatchesNative`)*
 - **Status:** Proven bit-for-bit vs HF oracle
 
 ---
