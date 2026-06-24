@@ -350,8 +350,12 @@ REFUSE(page_id, reason)
 ABSTAIN(query, reason)
 ```
 
-That matches the existing `cachemeta.LookupVerdict` shape and keeps trust,
-quality, and economics observable.
+That is *related to*, not the same set as, the existing `cachemeta.LookupVerdict`
+(`hit`/`miss`/`revalidate`/`transform`/`quarantine`/`fault`): the materializer's five
+kinds collapse the cache-plane lifecycle into materialization outcomes, and add two with
+no cachemeta analogue (`RECOMPUTE`, `ABSTAIN`). The two sets are reconciled — not unified
+— at the one place they meet, the KV-view gate `contextq.GateKVView`; see the mapping
+table in [`docs/proofs/contextq.md`](../proofs/contextq.md) (issue #227).
 
 ### Step 4: Add a context layout compiler experiment
 

@@ -24,6 +24,79 @@ carries a path caveat, because the summary path is *intentionally lossy*.
 
 ---
 
+## Verdict reconciliation — `contextq.MaterializationVerdict` ↔ `cachemeta.LookupVerdict`
+
+fak carries **two** typed verdict sets over reusable state, and they are not the same
+set. A reader who sees `MaterializationVerdict` and `LookupVerdict` and assumes one is
+an alias for the other will misread both (issue #227). This section is the
+reconciliation: the two sets, the one place they meet, and the honest asymmetries.
+
+**The two sets.**
+
+| set | type | layer | kinds | defined |
+|---|---|---|---|---|
+| cache-plane reuse | `cachemeta.LookupVerdict` (`LookupKind`) | the generic cache contract every plane emits | `hit` · `miss` · `revalidate` · `transform` · `quarantine` · `fault` (6, **no abstain**) | `internal/cachemeta/cachemeta.go:244` |
+| context materialization | `contextq.MaterializationVerdict` (`MaterializationKind`) | the on-demand context materializer | `HIT` · `FAULT` · `RECOMPUTE` · `REFUSE` · `ABSTAIN` (5, **no miss/revalidate/transform/quarantine**) | `internal/contextq/contextq.go:163` |
+
+They answer different questions. `LookupVerdict` asks *"may this cache entry be
+reused?"* and its six kinds cover the full cache-plane lifecycle (a clean serve, a miss,
+a must-recheck, a transform-then-serve, a hold-back, a residency fault).
+`MaterializationVerdict` asks *"how was this context piece materialized for this
+query?"* and its five kinds are the materialization outcome (served from cache, paged in
+fresh, rebuilt because stale, refused on trust/scope, or out of scope). The
+`cachemeta.MaterializeVerdict` *function* (`internal/cachemeta/materialization.go:187`)
+is a third name in this space: it is a function returning a `LookupVerdict`, not a type —
+do not confuse it with the `contextq.MaterializationVerdict` *type*.
+
+**Where they meet — exactly one lowering point.** The only place a cachemeta verdict
+must become a contextq verdict is the KV-view reuse gate `contextq.GateKVView`
+(`internal/contextq/kvview.go:110`): a model-bound KV span is a cachemeta cache entry,
+but it has to flow in the same `Result.Verdicts` stream as every snippet/summary view, so
+its reuse decision is lowered into a `MaterializationVerdict`. `GateKVView` does **not**
+call `cachemeta.MaterializeVerdict`; it reuses the shared binding primitives
+(`MaterializationKey.Matches` / `.Complete`, `QualityEvidence.Acceptable`) and emits
+contextq kinds directly. The mapping the gate implements (its only outputs are `HIT`,
+`REFUSE`, `ABSTAIN`):
+
+| cachemeta `LookupKind` (cache plane) | → `contextq.MaterializationKind` (at the KV gate) | why |
+|---|---|---|
+| `hit` | `HIT` | every binding axis matches (`kvview.go:151`) |
+| `miss` — model / tokenizer / serializer / position / policy / admitter mismatch, incomplete key, unproven approximate | `REFUSE` | fail-closed: a possibly-mismatched span is refused, never silently served (`kvview.go:133`,`:140`,`:146`) |
+| `transform` — provider-prefix residency (`ProviderCacheVerdict`) | `REFUSE` | provider residency is cost/latency telemetry, never local trust (`kvview.go:119`) |
+| `revalidate` | — not produced on the KV gate | KV staleness is a binding mismatch (`REFUSE`); the "stale but rebuildable" outcome is the derived-view path's `RECOMPUTE`, keyed on `PolicyVersion`, not a KV-axis revalidate |
+| `quarantine` | — surfaces as `REFUSE` | quarantine is the cachemeta / ctx-MMU eviction concern; at the materializer a held-back span is simply not served |
+| `fault` | — surfaces as `FAULT` (raw page) or `REFUSE` (KV view) | a residency fault on the raw page is a fresh page-in (`FAULT`); on a KV view it is a refusal |
+
+**The honest asymmetries (this is why "they match" was wrong).**
+
+- **`ABSTAIN` exists only in contextq.** `cachemeta.LookupKind` defines no abstain
+  (`docs/notes/AGENTIC-CACHING-SOTA-2026-06-19.md` §2.6); cachemeta expresses "not
+  applicable" as a non-`hit` (a `Miss`). contextq gives it a first-class kind: `ABSTAIN`
+  means *this gate does not apply to this view* (e.g. a non-local-KV view type,
+  `kvview.go:126`), deliberately distinct from `REFUSE` (a trust/binding denial). A
+  consumer reading the verdict stream can tell "would not serve" (`REFUSE`) from "had no
+  opinion" (`ABSTAIN`).
+- **`RECOMPUTE` exists only in contextq.** It is the derived-view path's "cached but
+  policy-stale, rebuild" verdict. cachemeta's nearest analogue is `revalidate`, but the
+  KV gate does not use it — on the KV axis a policy drift is a binding mismatch
+  (`REFUSE`), not a rebuild.
+- **`miss` / `revalidate` / `transform` / `quarantine` exist only in cachemeta.** They
+  describe cache-plane lifecycle states the materializer collapses: anything that is not
+  a clean `hit` becomes `REFUSE` (trust/binding failure), `FAULT` (must page/build),
+  `RECOMPUTE` (stale derived view), or `ABSTAIN` (out of scope) at the materializer
+  boundary.
+
+**Net.** The two sets are *reconciled, not unified*: `contextq.GateKVView` is the one
+function that lowers a cachemeta KV-reuse decision into the contextq verdict stream, the
+four cachemeta-only kinds collapse to the two contextq refusal-shaped kinds
+(`REFUSE` / `ABSTAIN`) at that boundary, and contextq's two extra kinds
+(`RECOMPUTE` / `ABSTAIN`) express materializer-specific outcomes with no cachemeta
+analogue. The design note's "matches the `cachemeta.LookupVerdict` shape"
+(`docs/notes/ON-DEMAND-CONTEXT-KV-REUSE-2026-06-19.md` §6 Step 3) was the aspiration;
+the shipped code is the related-but-distinct mapping above.
+
+---
+
 ## THEOREM 1 — materialization is byte-identical to the CDB image
 
 **THEOREM.** On-demand materialization (`contextq.Query`) reconstructs a context
