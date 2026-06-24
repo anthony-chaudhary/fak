@@ -148,8 +148,11 @@ def locate_owner(sid: str, home: str) -> dict | None:
 
 def _locate_matches(sid: str, home: str) -> list[dict]:
     """Every ``<home>/.claude*`` account dir holding this session's ``.jsonl``, each
-    as ``{config_dir, account, project, mtime, is_host}``. The raw input shared by
-    the owner pick and the duplicate-owner re-selection."""
+    as ``{config_dir, account, project, mtime, size, is_host}``. The raw input shared
+    by the owner pick and the duplicate-owner re-selection. ``size`` is the
+    transcript's byte length -- the cheap content-freshness signal the re-selection
+    uses to refuse pinning a copy that is missing turns the freshest one has (these
+    transcripts are append-only, so fewer turns == strictly smaller)."""
     matches: list[dict] = []
     for acct_dir in glob.glob(os.path.join(home, ".claude*")):
         if not os.path.isdir(acct_dir):
@@ -159,14 +162,15 @@ def _locate_matches(sid: str, home: str) -> list[dict]:
             continue
         for f in glob.glob(os.path.join(proj_root, "*", sid + ".jsonl")):
             try:
-                mtime = os.path.getmtime(f)
+                st = os.stat(f)
             except OSError:
                 continue
             matches.append({
                 "config_dir": acct_dir,
                 "account": os.path.basename(acct_dir),
                 "project": os.path.basename(os.path.dirname(f)),
-                "mtime": mtime,
+                "mtime": st.st_mtime,
+                "size": st.st_size,
                 "is_host": _is_host(acct_dir),
             })
     return matches
@@ -184,7 +188,34 @@ def _reselect_duplicate_owner(sid: str, owner: dict, home: str,
     ordering as the primary owner pick -- so an older copy is chosen ONLY when the
     freshest one is provably walled. This is the operator's failure: the resume was
     owned by a limited day24 (the re-home target, stamped newest) while q-netra (the
-    original copy) was serving."""
+    original copy) was serving.
+
+    Pinning that older copy is safe ONLY while it has the SAME content as the walled
+    freshest one -- the state right after a re-home, when both are byte-identical and
+    only the mtime differs. Once the session is actually USED on the freshest copy it
+    advances past the siblings, so a sibling that is content-behind (strictly smaller,
+    these transcripts being append-only) is missing the newest turns. Pinning it then
+    silently resumes a STALE transcript and loses the latest exchanges -- the
+    "resume pins badly" failure.
+
+    So this returns a TYPED decision rather than a bare owner:
+      * ``None``                               freshest serves (or is unprobeable), or
+                                               nothing better could be confirmed -- keep the
+                                               normal pick.
+      * ``{"mode": "pin", "owner": rec}``      a serving sibling whose content is at parity
+                                               with (or ahead of) the walled freshest -- pin
+                                               it, no copy needed.
+      * ``{"mode": "rehome", "source": rec,
+            "target": rec}``                   the freshest is walled and the only serving
+                                               siblings are content-BEHIND it. Re-home the
+                                               freshest's FULL content onto the least-stale
+                                               serving sibling and pin there. That sibling
+                                               already holds this session and serves, so the
+                                               move carries every turn AND is exempt from the
+                                               burst-spread re-home cap (it refreshes an
+                                               account in place rather than admitting a new
+                                               one) -- which would otherwise strand a busy
+                                               operator on PIN_BLOCKED until the reset."""
     matches = _locate_matches(sid, home)
     if len(matches) <= 1:
         return None
@@ -195,13 +226,25 @@ def _reselect_duplicate_owner(sid: str, owner: dict, home: str,
                        "config_dir": first["config_dir"]})
     if probed is None or probed.get("available"):
         return None  # freshest copy serves (or unprobeable) -> keep the normal pick
+
+    def _stamp(cand: dict) -> dict:
+        rec = dict(cand)
+        rec["dup_count"] = len(matches)
+        rec["all_accounts"] = sorted(m["account"] for m in matches)
+        return rec
+
+    behind_serving = None  # least-stale serving sibling that is content-behind the freshest
     for cand in ordered[1:]:
         p = probe_fn({"account": cand["account"], "config_dir": cand["config_dir"]})
-        if p is not None and p.get("available"):
-            rec = dict(cand)
-            rec["dup_count"] = len(matches)
-            rec["all_accounts"] = sorted(m["account"] for m in matches)
-            return rec
+        if p is None or not p.get("available"):
+            continue
+        if cand.get("size", 0) >= first.get("size", 0):
+            return {"mode": "pin", "owner": _stamp(cand)}  # at parity -> pin, no copy
+        if behind_serving is None:
+            behind_serving = cand  # freshest serving-but-stale sibling; carry content here
+    if behind_serving is not None:
+        return {"mode": "rehome", "source": _stamp(first),
+                "target": _stamp(behind_serving)}
     return None
 
 
@@ -267,12 +310,24 @@ def resolve(sid: str, home: str | None = None, *,
     # actually serves; if it does not, re-pick among the OTHER copies' accounts. This
     # is the operator's exact failure: resumed onto a limited day24 while q-netra (the
     # original owner) was serving. (#resume-resolver: bad re-home target as owner)
+    forced_target = None
     if (probe_owner and owner_status is None and owner.get("dup_count", 1) > 1
             and len(owner.get("all_accounts", [])) > 1):
-        better = _reselect_duplicate_owner(sid, owner, home, probe_fn)
-        if better is not None:
-            rec_owner_reselect = {"from": owner["account"], "to": better["account"]}
-            owner = better
+        decision = _reselect_duplicate_owner(sid, owner, home, probe_fn)
+        if decision and decision.get("mode") == "pin":
+            # A serving sibling at content-parity with the walled freshest -> pin it,
+            # no copy (the original optimisation: the re-home target was stamped newest
+            # but the original copy holds identical content and still serves).
+            rec_owner_reselect = {"from": owner["account"],
+                                  "to": decision["owner"]["account"]}
+            owner = decision["owner"]
+        elif decision and decision.get("mode") == "rehome":
+            # The freshest copy is walled but a serving sibling already holds this
+            # session AND is content-behind it. Keep the freshest as the copy SOURCE
+            # (owner is unchanged -- locate_owner already picked it) so every turn is
+            # carried, and force the landing onto that proven-serving sibling below.
+            forced_target = decision["target"]
+            rec_owner_reselect = None
         else:
             rec_owner_reselect = None
     else:
@@ -327,64 +382,77 @@ def resolve(sid: str, home: str | None = None, *,
         })
         return rec
 
-    # Owner blocked/throttled -> re-home onto the least-loaded healthy Claude
-    # worker, the same ranking the headless watchdog uses.
-    if availability is None:
-        availability = _discover_availability(home)
-    targets = fleet_sessions._rehome_targets(availability, owner["account"])
-    if not targets:
-        rec.update({
-            "action": "PIN_BLOCKED", "rehomed": False,
-            "pin_account": owner["account"], "pin_config_dir": owner["config_dir"],
-            "reason": (f"owner blocked ({block_reason}) and no healthy Claude "
-                       "worker available -- pin to owner; resume waits for reset"),
-        })
-        return rec
+    # Owner blocked/throttled -> re-home its FULL transcript onto a healthy Claude
+    # worker and pin there.
+    if forced_target is not None:
+        # The duplicate reselect found a serving sibling that ALREADY holds this
+        # session (e.g. q-netra still serving while the freshest copy's day24 is
+        # walled). It is proven-serving and already admitted, so land the freshest
+        # content there directly -- skipping the roster ranking AND the burst-spread
+        # re-home cap. That cap exists to stop a FLEET of throttled sessions piling
+        # onto one busy account; it must not strand a single operator's interactive
+        # resume on PIN_BLOCKED when an account already running their session serves.
+        tgt = forced_target
+        rec["rehome_to_sibling"] = forced_target["account"]
+    else:
+        # Re-home onto the least-loaded healthy Claude worker, the same ranking the
+        # headless watchdog uses.
+        if availability is None:
+            availability = _discover_availability(home)
+        targets = fleet_sessions._rehome_targets(availability, owner["account"])
+        if not targets:
+            rec.update({
+                "action": "PIN_BLOCKED", "rehomed": False,
+                "pin_account": owner["account"], "pin_config_dir": owner["config_dir"],
+                "reason": (f"owner blocked ({block_reason}) and no healthy Claude "
+                           "worker available -- pin to owner; resume waits for reset"),
+            })
+            return rec
 
-    # The roster's `available` is only "nothing bad was recorded" -- it can offer an
-    # account that is itself limited but never probed (so no throttle row exists). A
-    # re-home onto such a target just moves the session from one walled account to
-    # another. So live-probe candidates top-down and pick the first PROVEN-serving one;
-    # an account a probe confirms blocked is skipped. (#resume-resolver: re-homed onto
-    # day24, which was itself usage-limited.) Bounded so a fully-walled fleet does not
-    # probe forever; if every checked target is blocked we still fall back to the
-    # best-ranked one rather than stranding the resume.
-    tgt = targets[0]
-    if probe_owner:
-        checked: list[dict] = []
-        for cand in targets[:_MAX_TARGET_PROBES]:
-            probed = probe_fn({"account": cand["account"],
-                               "config_dir": cand.get("config_dir")
-                               or os.path.join(home, cand["account"])})
-            if probed is None:
-                tgt = cand  # cannot probe -> trust the ranking, take it
-                break
-            checked.append({"account": cand["account"],
-                            "available": probed.get("available"),
-                            "block_reason": probed.get("block_reason", "")})
-            if probed.get("available"):
-                tgt = cand
-                break
-        else:
-            # ran the whole bounded slice without a proven-serving target. If EVERY
-            # checked candidate probed as blocked, re-homing would only move the resume
-            # from one walled account to another -- so pin to the owner and wait for a
-            # reset instead (PIN_BLOCKED). Only when no candidate could be probed at all
-            # (checked empty) do we fall back to the best-ranked best-effort landing.
-            if checked and all(not c["available"] for c in checked):
+        # The roster's `available` is only "nothing bad was recorded" -- it can offer an
+        # account that is itself limited but never probed (so no throttle row exists). A
+        # re-home onto such a target just moves the session from one walled account to
+        # another. So live-probe candidates top-down and pick the first PROVEN-serving one;
+        # an account a probe confirms blocked is skipped. (#resume-resolver: re-homed onto
+        # day24, which was itself usage-limited.) Bounded so a fully-walled fleet does not
+        # probe forever; if every checked target is blocked we still fall back to the
+        # best-ranked one rather than stranding the resume.
+        tgt = targets[0]
+        if probe_owner:
+            checked: list[dict] = []
+            for cand in targets[:_MAX_TARGET_PROBES]:
+                probed = probe_fn({"account": cand["account"],
+                                   "config_dir": cand.get("config_dir")
+                                   or os.path.join(home, cand["account"])})
+                if probed is None:
+                    tgt = cand  # cannot probe -> trust the ranking, take it
+                    break
+                checked.append({"account": cand["account"],
+                                "available": probed.get("available"),
+                                "block_reason": probed.get("block_reason", "")})
+                if probed.get("available"):
+                    tgt = cand
+                    break
+            else:
+                # ran the whole bounded slice without a proven-serving target. If EVERY
+                # checked candidate probed as blocked, re-homing would only move the resume
+                # from one walled account to another -- so pin to the owner and wait for a
+                # reset instead (PIN_BLOCKED). Only when no candidate could be probed at all
+                # (checked empty) do we fall back to the best-ranked best-effort landing.
+                if checked and all(not c["available"] for c in checked):
+                    rec["target_probes"] = checked
+                    rec.update({
+                        "action": "PIN_BLOCKED", "rehomed": False,
+                        "pin_account": owner["account"],
+                        "pin_config_dir": owner["config_dir"],
+                        "reason": (f"owner blocked ({block_reason}) and every probed "
+                                   f"re-home target is also limited -- pin to owner; "
+                                   f"resume waits for reset"),
+                    })
+                    return rec
+                tgt = targets[0]
+            if checked:
                 rec["target_probes"] = checked
-                rec.update({
-                    "action": "PIN_BLOCKED", "rehomed": False,
-                    "pin_account": owner["account"],
-                    "pin_config_dir": owner["config_dir"],
-                    "reason": (f"owner blocked ({block_reason}) and every probed "
-                               f"re-home target is also limited -- pin to owner; "
-                               f"resume waits for reset"),
-                })
-                return rec
-            tgt = targets[0]
-        if checked:
-            rec["target_probes"] = checked
 
     tgt_cfg = tgt.get("config_dir") or os.path.join(home, tgt["account"])
     if not dry_run:

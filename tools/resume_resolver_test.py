@@ -145,6 +145,46 @@ class DuplicateOwnerReselectTests(unittest.TestCase):
             self.assertEqual(rec["pin_account"], self.TARGET)
             self.assertNotIn("owner_reselected", rec)
 
+    def test_rehomes_freshest_when_serving_sibling_is_behind(self) -> None:
+        # The reported "resume pins badly": the WALLED newest copy has MORE turns
+        # than the serving sibling (the session kept going on the now-throttled
+        # account). Pinning the older sibling would silently resume a STALE
+        # transcript and drop the latest exchanges. Instead the freshest copy must
+        # be re-homed (full content) onto a healthy account and pinned THERE.
+        with tempfile.TemporaryDirectory() as home:
+            serving = _write_session(home, self.ORIG)        # older, fewer turns
+            walled = _write_session(home, self.TARGET, sidecar=True)  # newest+bigger
+            with open(walled, "a", encoding="utf-8") as f:
+                f.write('{"type":"user"}\n{"type":"assistant"}\n')  # advance it
+            os.utime(serving, (1_000_000, 1_000_000))
+            os.utime(walled, (2_000_000, 2_000_000))          # walled = newest mtime
+
+            def probe(a: dict) -> dict:
+                if a["account"] == self.TARGET:               # walled freshest
+                    return {"available": False, "block_reason": "usage limit",
+                            "status_source": "probe", "block_kind": "usage"}
+                return {"available": True, "status_source": "probe"}
+
+            # The walled freshest must also read blocked from the registry so the
+            # downstream re-home fires; inject runtime_status (leaving owner_status
+            # unset keeps the reselect path -- which it gates on -- live).
+            orig_rs = resume_resolver.fleet_accounts.runtime_status
+            resume_resolver.fleet_accounts.runtime_status = (
+                lambda acct: {"available": False, "block_kind": "usage",
+                              "block_reason": "usage limit", "status_source": "registry"}
+                if acct == self.TARGET else {"available": True})
+            try:
+                rec = resume_resolver.resolve(
+                    SID, home, dry_run=True, probe_fn=probe,
+                    availability=[_avail(self.ORIG, True, home=home)])
+            finally:
+                resume_resolver.fleet_accounts.runtime_status = orig_rs
+
+            self.assertEqual(rec["action"], "REHOME")
+            self.assertEqual(rec["pin_account"], self.ORIG)
+            self.assertEqual(rec["source_config_dir"],
+                             os.path.join(home, self.TARGET))
+
     def test_single_owner_is_not_probed(self) -> None:
         # a non-duplicated session takes the fast path: no owner probe at all.
         with tempfile.TemporaryDirectory() as home:
