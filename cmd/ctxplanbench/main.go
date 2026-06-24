@@ -509,6 +509,7 @@ type recallStore struct {
 	upto  int
 }
 
+// Spans returns the visible prefix (pages [0,upto)) lowered into ctxplan.Spans — the session-in-progress view the replay grows turn by turn.
 func (s *recallStore) Spans(_ context.Context) ([]ctxplan.Span, error) {
 	n := s.upto
 	if n > len(s.pages) {
@@ -521,6 +522,7 @@ func (s *recallStore) Spans(_ context.Context) ([]ctxplan.Span, error) {
 	return out, nil
 }
 
+// Materialize resolves a span id's bytes through the recall session's re-screening Resolve, mapping a missing/sealed page to ErrSealed and a tombstoned one to ErrTombstoned.
 func (s *recallStore) Materialize(ctx context.Context, id string) ([]byte, error) {
 	step, ok := stepFromID(id)
 	if !ok {

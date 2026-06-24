@@ -283,6 +283,9 @@ func (c *cudaBackend) GraphBegin() bool {
 	defer cudaMu.Unlock()
 	return C.fcuda_graph_begin() == 0
 }
+
+// GraphEndLaunch instantiates, launches, and fences the captured CUDA graph for
+// the token — the replay half of GraphBegin.
 func (c *cudaBackend) GraphEndLaunch() {
 	cudaMu.Lock()
 	defer cudaMu.Unlock()
@@ -302,6 +305,7 @@ func (c *cudaBackend) GraphReset() {
 	C.fcuda_graph_reset()
 }
 
+// Name returns the registry id of this backend ("cuda").
 func (c *cudaBackend) Name() string            { return c.name }
 func (c *cudaBackend) Tier() string            { return c.tier }
 func (c *cudaBackend) Class() CorrectnessClass { return Approx } // device GEMM != fdot order
@@ -591,6 +595,9 @@ func (c *cudaBackend) uploadF16(t Tensor, f []float32, hp uintptr) Tensor {
 	return out
 }
 
+// Host returns a host-addressable f32 view only for a host-resident tensor; a device
+// (VRAM) tensor is not host-addressable, so it returns (nil, false) — the Caps.DeviceMemory
+// contract that forces the loop through Read.
 func (c *cudaBackend) Host(t Tensor) ([]float32, bool) {
 	if hb, ok := t.buf.(*hostBuf); ok && hb.f32 != nil {
 		return hb.f32, true
@@ -617,6 +624,8 @@ func (c *cudaBackend) Read(t Tensor) []float32 {
 	return out
 }
 
+// Free releases a tensor's VRAM — both the codes buffer and any Q8_0 scale side-channel —
+// and evicts its (host ptr, dtype, layout) entry from the upload cache so a re-upload re-stages.
 func (c *cudaBackend) Free(t Tensor) {
 	cudaMu.Lock()
 	defer cudaMu.Unlock()
@@ -651,6 +660,8 @@ func colMajorFlag(w Tensor) C.int {
 	return 0
 }
 
+// MatMul computes y = x @ Wᵀ as a decode GEMV (P=1), dispatching on the weight dtype to the
+// SGEMM (F32), tensor-core HGEMM (F16), or native Q8_0/Q4_K device GEMV; output is F32-resident.
 func (c *cudaBackend) MatMul(w, x Tensor) Tensor {
 	cudaMu.Lock()
 	defer cudaMu.Unlock()
@@ -687,6 +698,8 @@ func (c *cudaBackend) MatMul(w, x Tensor) Tensor {
 	}
 }
 
+// BatchedMatMul computes the prefill GEMM Y = X @ Wᵀ for P activation rows, dispatching on the
+// weight dtype to the SGEMM (F32), tensor-core HGEMM (F16), or native Q8_0/Q4_K device GEMM.
 func (c *cudaBackend) BatchedMatMul(w, X Tensor, P int) Tensor {
 	cudaMu.Lock()
 	defer cudaMu.Unlock()
@@ -721,6 +734,8 @@ func (c *cudaBackend) BatchedMatMul(w, X Tensor, P int) Tensor {
 	}
 }
 
+// RMSNorm runs the RMS-normalization kernel over each row of x (one weight-width row at a time),
+// returning a new F32-resident tensor of x's shape.
 func (c *cudaBackend) RMSNorm(x, weight Tensor, eps float32) Tensor {
 	cudaMu.Lock()
 	defer cudaMu.Unlock()
@@ -741,6 +756,8 @@ func (c *cudaBackend) RoPE(x Tensor, pos, nHeads, headDim int, theta float64) Te
 	return y
 }
 
+// SwiGLU computes silu(gate)*up element-wise on device, returning a new F32-resident tensor of
+// gate's shape.
 func (c *cudaBackend) SwiGLU(gate, up Tensor) Tensor {
 	cudaMu.Lock()
 	defer cudaMu.Unlock()
@@ -750,12 +767,15 @@ func (c *cudaBackend) SwiGLU(gate, up Tensor) Tensor {
 	return y
 }
 
+// AddInPlace adds src into dst element-wise on device (the residual dst += src).
 func (c *cudaBackend) AddInPlace(dst, src Tensor) {
 	cudaMu.Lock()
 	defer cudaMu.Unlock()
 	C.fcuda_add_f32(c.cf(dst), c.cf(src), C.int(dst.Numel()))
 }
 
+// AddBias adds the width-long bias vector into every row of dst on device (dst += bias broadcast
+// across rows).
 func (c *cudaBackend) AddBias(dst, bias Tensor) {
 	cudaMu.Lock()
 	defer cudaMu.Unlock()
@@ -925,6 +945,8 @@ func (c *cudaBackend) AWQBatchedMatMul(w, scales, X Tensor, P int) Tensor {
 // raise this (a future fixed-vs-ring tradeoff, tracked with the device-KV work).
 const cudaKVMaxPos = 1024
 
+// NewKV creates a device-resident KV store for cfg's geometry; under graph capture it
+// preallocates a fixed cudaKVMaxPos capacity (no mid-token cudaMalloc), otherwise it stays growable.
 func (c *cudaBackend) NewKV(cfg KVConfig) KVStore {
 	k := &cudaKV{be: c, cfg: cfg}
 	k.K = make([]dslice, cfg.NumLayers)
@@ -994,6 +1016,7 @@ func (k *cudaKV) AppendKV(layer int, kRaw, kRoPE, v Tensor, pos int) {
 	}
 }
 
+// Len reports the number of cached positions (entries per layer).
 func (k *cudaKV) Len() int   { return len(k.pos) }
 func (k *cudaKV) Pos() []int { return append([]int(nil), k.pos...) }
 
@@ -1002,6 +1025,9 @@ func (k *cudaKV) KeysView(layer int) Tensor {
 	n := k.K[layer].len / w
 	return makeTensor(k.be, F32, RowMajor, []int{n, w}, nil, &cudaBuf{ptr: k.K[layer].ptr, n: k.K[layer].len * 4})
 }
+
+// ValuesView returns a device handle onto the layer's cached values as a flat [pos, nKV*hd]
+// tensor (a VRAM view, not a host copy — Host on it stays (nil,false)).
 func (k *cudaKV) ValuesView(layer int) Tensor {
 	w := k.stride()
 	n := k.V[layer].len / w
@@ -1088,6 +1114,8 @@ func (c *cudaBackend) compactDS(d *dslice, fromF, endF, tailFloats int, scratch 
 	d.len -= endF - fromF
 }
 
+// Clone deep-copies the cache device-to-device (a fresh VRAM allocation per layer for K/Kraw/V
+// plus the position list), so a forked session reuses the prefix without sharing storage.
 func (k *cudaKV) Clone() KVStore {
 	cudaMu.Lock()
 	defer cudaMu.Unlock()
@@ -1110,6 +1138,7 @@ func (k *cudaKV) Clone() KVStore {
 	return n
 }
 
+// Free releases every layer's K/Kraw/V VRAM buffer and clears the position list.
 func (k *cudaKV) Free() {
 	cudaMu.Lock()
 	defer cudaMu.Unlock()

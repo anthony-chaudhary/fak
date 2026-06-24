@@ -159,18 +159,27 @@ func boolEnv(key string) bool {
 // abi.Resolver + abi.CASPinner + abi.PageOutBackend; this only adds the ID).
 type diskDriver struct{ s *blobfs.Store }
 
+// ID returns the disk tier's stable driver id, "blobfs".
 func (diskDriver) ID() string { return "blobfs" }
 func (d diskDriver) Put(ctx context.Context, b []byte) (abi.Ref, error) {
 	return d.s.Put(ctx, b)
 }
+
+// Resolve fetches the bytes for r from the on-disk blobfs store.
 func (d diskDriver) Resolve(ctx context.Context, r abi.Ref) ([]byte, error) {
 	return d.s.Resolve(ctx, r)
 }
+
+// Pin marks digest as retained in the disk store so it survives eviction.
 func (d diskDriver) Pin(digest string)   { d.s.Pin(digest) }
 func (d diskDriver) Unpin(digest string) { d.s.Unpin(digest) }
+
+// PageOut evicts r from the disk store, returning a handle that PageIn can later restore.
 func (d diskDriver) PageOut(ctx context.Context, r abi.Ref) (abi.Ref, error) {
 	return d.s.PageOut(ctx, r)
 }
+
+// PageIn restores a paged-out handle h back to a resolvable Ref from the disk store.
 func (d diskDriver) PageIn(ctx context.Context, h abi.Ref) (abi.Ref, error) {
 	return d.s.PageIn(ctx, h)
 }
@@ -179,19 +188,28 @@ func (d diskDriver) PageIn(ctx context.Context, h abi.Ref) (abi.Ref, error) {
 // abi.Resolver + abi.PageOutBackend + Deleter; this only re-states the ID).
 type httpDriver struct{ s *blobhttp.Store }
 
+// ID returns the HTTP tier's stable driver id, "blobhttp".
 func (httpDriver) ID() string { return "blobhttp" }
 func (h httpDriver) Put(ctx context.Context, b []byte) (abi.Ref, error) {
 	return h.s.Put(ctx, b)
 }
+
+// Resolve fetches the bytes for r from the remote HTTP object store.
 func (h httpDriver) Resolve(ctx context.Context, r abi.Ref) ([]byte, error) {
 	return h.s.Resolve(ctx, r)
 }
+
+// PageOut evicts r from the remote HTTP store, returning a handle that PageIn can later restore.
 func (h httpDriver) PageOut(ctx context.Context, r abi.Ref) (abi.Ref, error) {
 	return h.s.PageOut(ctx, r)
 }
+
+// PageIn restores a paged-out handle hd back to a resolvable Ref from the remote store.
 func (h httpDriver) PageIn(ctx context.Context, hd abi.Ref) (abi.Ref, error) {
 	return h.s.PageIn(ctx, hd)
 }
+
+// Delete removes the object with the given digest from the remote HTTP object store.
 func (h httpDriver) Delete(ctx context.Context, digest string) error {
 	return h.s.Delete(ctx, digest)
 }

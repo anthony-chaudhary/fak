@@ -80,6 +80,8 @@ const (
 	Resource
 )
 
+// String renders the granularity as "namespace", "resource", or "global" (the
+// default for Global and any unknown value).
 func (g Granularity) String() string {
 	switch g {
 	case Namespace:

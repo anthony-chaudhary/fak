@@ -54,6 +54,7 @@ func headroomTimeout() time.Duration {
 	return 2 * time.Second
 }
 
+// Name returns the compressor's registry key (HeadroomName, "headroom").
 func (headroomBridge) Name() string { return HeadroomName }
 
 // --- the /v1/compress wire shapes (verbatim field names from the headroom proxy
@@ -90,6 +91,9 @@ type hrResponse struct {
 // token math.
 const defaultModel = "claude-sonnet-4-5-20250929"
 
+// Compress POSTs the input bytes to the Headroom proxy's /v1/compress endpoint and
+// returns the compressed Output. It fails inert — passing the original bytes through
+// unchanged — whenever the proxy is unreachable, errors, or yields no net saving.
 func (h headroomBridge) Compress(ctx context.Context, in Input) (Output, error) {
 	model := in.Model
 	if model == "" {

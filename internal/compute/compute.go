@@ -76,6 +76,8 @@ func (d Dtype) Bytes() int {
 	}
 }
 
+// String renders the dtype as its short lowercase tag (e.g. "f32", "q8_0"),
+// or "dtype?" for an unknown value.
 func (d Dtype) String() string {
 	switch d {
 	case F32:
@@ -214,6 +216,7 @@ const (
 	Approx
 )
 
+// String renders the correctness class as "reference" or "approx".
 func (c CorrectnessClass) String() string {
 	if c == Reference {
 		return "reference"

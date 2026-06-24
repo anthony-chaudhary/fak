@@ -266,6 +266,9 @@ type RopeScaling struct {
 //   - flat default objects: {"rope_theta": 10000, "rope_type": "default"}
 type RopeParameters map[string]RopeScaling
 
+// UnmarshalJSON decodes both rope_parameters shapes: a Gemma3-style map keyed by layer
+// type ({"full_attention": {...}}) becomes that map; a flat default object decodes into
+// a single "default" entry.
 func (rp *RopeParameters) UnmarshalJSON(b []byte) error {
 	if len(b) == 0 || string(b) == "null" {
 		return nil
@@ -311,6 +314,8 @@ type eosToken struct {
 	ids []int
 }
 
+// UnmarshalJSON decodes eos_token_id in either HF shape — a JSON list of ids (Llama-3.x)
+// or a bare scalar id (older models) — into the ids slice.
 func (e *eosToken) UnmarshalJSON(b []byte) error {
 	if len(b) == 0 || string(b) == "null" {
 		return nil

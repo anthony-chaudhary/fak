@@ -117,12 +117,16 @@ func providerError(raw []byte) string {
 
 type openAIAdapter struct{ provider Provider }
 
+// Provider reports the provider this adapter speaks for — ProviderOpenAI or
+// ProviderXAI, since both ride the same chat-completions wire.
 func (a openAIAdapter) Provider() Provider { return a.provider }
 
 func (a openAIAdapter) Endpoint(baseURL, model string) string {
 	return joinEndpoint(baseURL, "/chat/completions")
 }
 
+// Headers sets Content-Type and, when apiKey is non-empty, an "Authorization:
+// Bearer" header for the OpenAI-compatible chat endpoint.
 func (a openAIAdapter) Headers(apiKey string) map[string]string {
 	h := map[string]string{"Content-Type": "application/json"}
 	if apiKey != "" {
@@ -162,6 +166,10 @@ type openAIResponse struct {
 	Error *apiError `json:"error"`
 }
 
+// MarshalRequest encodes the canonical request as an OpenAI chat-completions body,
+// normalizing tool schemas, forwarding the structured-decode carriers (response_format
+// /logit_bias), opting into a usage-bearing SSE stream when r.Stream is set, and
+// merging any provider ExtraBody.
 func (a openAIAdapter) MarshalRequest(r adapterRequest) ([]byte, error) {
 	toolChoice := ""
 	if len(r.Tools) > 0 {
@@ -292,6 +300,9 @@ func marshalWithExtraBody(base any, extra json.RawMessage) ([]byte, error) {
 	return json.Marshal(doc)
 }
 
+// ParseResponse decodes an OpenAI chat-completions response into a Completion,
+// taking the first choice's message/finish-reason, upgrading any legacy
+// function_call into a tool call, and carrying through usage and the echoed model.
 func (a openAIAdapter) ParseResponse(raw []byte) (*Completion, error) {
 	var cr openAIResponse
 	if err := json.Unmarshal(raw, &cr); err != nil {
@@ -337,12 +348,15 @@ func normalizeLegacyOpenAIFunctionCall(msg *Message, finish *string) {
 
 type openAIResponsesAdapter struct{}
 
+// Provider reports ProviderOpenAIResponses (the OpenAI Responses-API wire).
 func (openAIResponsesAdapter) Provider() Provider { return ProviderOpenAIResponses }
 
 func (openAIResponsesAdapter) Endpoint(baseURL, model string) string {
 	return joinEndpoint(baseURL, "/responses")
 }
 
+// Headers sets Content-Type and, when apiKey is non-empty, an "Authorization:
+// Bearer" header for the Responses endpoint.
 func (openAIResponsesAdapter) Headers(apiKey string) map[string]string {
 	h := map[string]string{"Content-Type": "application/json"}
 	if apiKey != "" {
@@ -421,6 +435,10 @@ type openAIResponsesResponse struct {
 	Error *apiError `json:"error"`
 }
 
+// MarshalRequest encodes the canonical request as a Responses-API body: messages
+// become input items, tools become function declarations, and the chat-style
+// response_format carrier is mapped onto the Responses `text.format` shape. The
+// Responses API has no `stop`, so Stop is dropped, and Store is forced false.
 func (openAIResponsesAdapter) MarshalRequest(r adapterRequest) ([]byte, error) {
 	toolChoice := ""
 	if len(r.Tools) > 0 {
@@ -491,6 +509,10 @@ func openAIResponsesTools(tools []ToolDef) []openAIResponsesTool {
 	return out
 }
 
+// ParseResponse decodes a Responses-API response into a Completion: it gathers
+// output_text parts as content and function_call items as tool calls, falls back to
+// the top-level output_text, derives the finish reason from the calls/status, and
+// maps the input/output/cached token details into Usage.
 func (openAIResponsesAdapter) ParseResponse(raw []byte) (*Completion, error) {
 	var rr openAIResponsesResponse
 	if err := json.Unmarshal(raw, &rr); err != nil {
@@ -556,6 +578,7 @@ func (openAIResponsesAdapter) ParseResponse(raw []byte) (*Completion, error) {
 
 type anthropicAdapter struct{}
 
+// Provider reports ProviderAnthropic (the Claude Messages API wire).
 func (anthropicAdapter) Provider() Provider { return ProviderAnthropic }
 
 func (anthropicAdapter) Endpoint(baseURL, model string) string {
@@ -580,6 +603,9 @@ func IsAnthropicOAuthToken(tok string) bool {
 	return strings.HasPrefix(tok, "sk-ant-oat")
 }
 
+// Headers sets Content-Type and anthropic-version, then picks the auth scheme by
+// credential shape: an OAuth (sk-ant-oat) subscription token rides as a Bearer with
+// the oauth beta flag, a plain API key as x-api-key, and an empty key sends neither.
 func (anthropicAdapter) Headers(apiKey string) map[string]string {
 	h := map[string]string{
 		"Content-Type":      "application/json",
@@ -661,6 +687,10 @@ type anthropicResponse struct {
 	Error *apiError `json:"error"`
 }
 
+// MarshalRequest encodes the canonical request as an Anthropic Messages body:
+// system messages are concatenated into the top-level `system` field, assistant
+// turns are lowered to thinking/text/tool_use blocks, tool results become tool_result
+// user blocks, and max_tokens defaults to 1024 when unset (the API requires it).
 func (anthropicAdapter) MarshalRequest(r adapterRequest) ([]byte, error) {
 	maxTokens := r.MaxTokens
 	if maxTokens <= 0 {
@@ -741,6 +771,10 @@ func textAndToolUseBlocks(m Message) []anthropicBlock {
 	return blocks
 }
 
+// ParseResponse decodes an Anthropic Messages response into a Completion: text blocks
+// become content, tool_use blocks become tool calls, and thinking/redacted_thinking
+// blocks (with their signature) are preserved so extended reasoning round-trips. It
+// maps the input/output and cache_read/cache_creation token counts into Usage.
 func (anthropicAdapter) ParseResponse(raw []byte) (*Completion, error) {
 	var ar anthropicResponse
 	if err := json.Unmarshal(raw, &ar); err != nil {
@@ -813,6 +847,7 @@ func (anthropicAdapter) ParseResponse(raw []byte) (*Completion, error) {
 
 type geminiAdapter struct{}
 
+// Provider reports ProviderGemini (the native generateContent API wire).
 func (geminiAdapter) Provider() Provider { return ProviderGemini }
 
 func (geminiAdapter) Endpoint(baseURL, model string) string {
@@ -823,6 +858,8 @@ func (geminiAdapter) Endpoint(baseURL, model string) string {
 	return joinEndpoint(baseURL, "/"+modelPath+":generateContent")
 }
 
+// Headers sets Content-Type and, when apiKey is non-empty, the Gemini
+// x-goog-api-key header.
 func (geminiAdapter) Headers(apiKey string) map[string]string {
 	h := map[string]string{"Content-Type": "application/json"}
 	if apiKey != "" {
@@ -908,6 +945,10 @@ type geminiResponsePart struct {
 	} `json:"functionCall,omitempty"`
 }
 
+// MarshalRequest encodes the canonical request as a Gemini generateContent body:
+// system messages become systemInstruction, assistant turns map to "model" contents
+// with functionCall parts, tool results map to functionResponse parts, and the
+// sampling controls (with uppercased tool-schema types) go in generationConfig.
 func (geminiAdapter) MarshalRequest(r adapterRequest) ([]byte, error) {
 	req := geminiRequest{
 		Contents: make([]geminiContent, 0, len(r.Messages)),
@@ -1010,6 +1051,10 @@ func uppercaseSchemaTypes(v any) any {
 	return v
 }
 
+// ParseResponse decodes a Gemini generateContent response into a Completion: the
+// first candidate's text parts become content and its functionCall parts become tool
+// calls, the finishReason is lowercased (or "tool_calls" when calls are present), and
+// the usageMetadata token counts (including cached content) map into Usage.
 func (geminiAdapter) ParseResponse(raw []byte) (*Completion, error) {
 	var gr geminiResponse
 	if err := json.Unmarshal(raw, &gr); err != nil {

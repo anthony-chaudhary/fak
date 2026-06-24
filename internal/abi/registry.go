@@ -609,6 +609,9 @@ type WitnessResolver interface {
 	Resolve(ctx context.Context, c *ToolCall, claim string) WitnessOutcome
 }
 
+// WitnessOutcome is a WitnessResolver's verdict on a claimed effect: abstain when there
+// is no evidence either way, confirmed when independently corroborated, refuted when
+// contradicted.
 type WitnessOutcome uint8
 
 const (
@@ -722,6 +725,8 @@ func ScopedFor(chain []Adjudicator, c *ToolCall) []Adjudicator {
 	return out
 }
 
+// FastPaths returns the registered vDSO fast-path tiers in tier order (the registry's own
+// immutable slice; do not mutate).
 func FastPaths() []FastPath { return loadSnapshot().fastpaths }
 
 // ResultAdmitters returns the write-time result-admission chain in rank order.
@@ -745,11 +750,14 @@ func ResultAdmittersFor(c *ToolCall) []ResultAdmitter {
 	return s.resultAdmits
 }
 
+// LookupOp returns the Op registered for an OpCode, and whether one is registered.
 func LookupOp(code OpCode) (Op, bool) {
 	o, ok := loadSnapshot().ops[code]
 	return o, ok
 }
 
+// Emitters returns every registered observer in registration order (the registry's own
+// immutable slice; do not mutate). Use EmittersFor to fan out a single event kind.
 func Emitters() []Emitter { return loadSnapshot().emitters }
 
 // EmittersFor returns the observers that should receive an event of the given
@@ -769,6 +777,8 @@ func EmittersFor(kind EventKind) []Emitter {
 	return s.allEmitters
 }
 
+// Stewards returns the registered single-invariant validators in registration order (the
+// registry's own immutable slice; do not mutate).
 func Stewards() []Steward { return loadSnapshot().stewards }
 
 func ProvisionalSinks() []ProvisionalSink { return loadSnapshot().sinks }

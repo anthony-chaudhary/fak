@@ -79,6 +79,7 @@ func init() {
 // goroutine-safe across sessions, so one verdict at a time is the conservative bound).
 type modelScreener struct{}
 
+// Name is the registry id of this screener ("model").
 func (modelScreener) Name() string { return "model" }
 
 // Flag implements Screener. It loads the model on first call; if no model is configured or

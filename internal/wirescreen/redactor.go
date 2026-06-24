@@ -265,6 +265,7 @@ func init() {
 // the floor for the outbound surface, not a duplicate of the inbound quarantine.
 type piiRedactor struct{}
 
+// Name returns "pii", the reference redactor's selection/audit id.
 func (piiRedactor) Name() string { return "pii" }
 
 // piiPatterns are the anchored, high-precision PII/secret shapes. Each carries its
@@ -291,6 +292,7 @@ var bearerRe = regexp.MustCompile(`(?i)\bbearer\s+[A-Za-z0-9._-]{20,}`)
 // between digits; luhnValid + boundary checks filter it to real card numbers.
 var ccCandidate = regexp.MustCompile(`(?:\d[ -]?){12,18}\d`)
 
+// Propose returns the disjoint spans in body matching the high-precision PII/secret patterns (keys, tokens, SSN, email, bearer, and Luhn-validated credit cards).
 func (piiRedactor) Propose(_ context.Context, body []byte, _ string) []Span {
 	var spans []Span
 	for _, p := range piiPatterns {

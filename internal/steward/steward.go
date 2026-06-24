@@ -28,6 +28,7 @@ type FuncSteward struct {
 	check Check
 }
 
+// NewSteward wraps a named Check as an abi.Steward.
 func NewSteward(name string, c Check) *FuncSteward              { return &FuncSteward{name, c} }
 func (s *FuncSteward) Name() string                             { return s.name }
 func (s *FuncSteward) Check(ctx context.Context) (bool, string) { return s.check(ctx) }
@@ -40,10 +41,12 @@ type Population struct {
 	fires map[string]int
 }
 
+// NewPopulation builds a Population seeded with the given stewards and a zeroed fire tally.
 func NewPopulation(stewards ...abi.Steward) *Population {
 	return &Population{st: stewards, fires: map[string]int{}}
 }
 
+// Add appends a steward to the population (concurrency-safe).
 func (p *Population) Add(s abi.Steward) {
 	p.mu.Lock()
 	p.st = append(p.st, s)

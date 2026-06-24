@@ -136,6 +136,8 @@ type Workload struct {
 	Tools   [][]string `json:"tool_names"` // [agent][turn] tool chosen, for the timeline viz
 }
 
+// Build expands the scenario into its deterministic Workload: a per-agent seeded LCG picks each
+// turn's tool and result-token count, yielding Turns-1 context-changing results per agent.
 func (s Scenario) Build() Workload {
 	C, T := s.Agents, s.Turns
 	rt := T - 1

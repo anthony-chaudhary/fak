@@ -113,6 +113,7 @@ var knownSuites = []struct{ ID, Label string }{
 // the engine exists only so the dedup path is GROUNDED in a real completion.
 type fileEngine struct{}
 
+// Caps reports the engine's capabilities; this demo file engine declares none.
 func (fileEngine) Caps() []abi.Capability { return nil }
 
 func (fileEngine) Complete(ctx context.Context, c *abi.ToolCall) (*abi.Result, error) {

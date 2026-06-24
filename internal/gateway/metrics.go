@@ -757,6 +757,9 @@ type statusRecorder struct {
 	bytes  int64
 }
 
+// WriteHeader records the FIRST status code written (later calls are ignored) and
+// forwards it to the wrapped ResponseWriter, so the metrics middleware can label the
+// request by the status actually sent.
 func (r *statusRecorder) WriteHeader(status int) {
 	if r.status != 0 {
 		return
@@ -765,6 +768,8 @@ func (r *statusRecorder) WriteHeader(status int) {
 	r.ResponseWriter.WriteHeader(status)
 }
 
+// Write forwards the body to the wrapped ResponseWriter (defaulting the status to 200
+// on the first write) and accumulates the byte count for the request log.
 func (r *statusRecorder) Write(p []byte) (int, error) {
 	if r.status == 0 {
 		r.WriteHeader(http.StatusOK)
@@ -774,6 +779,9 @@ func (r *statusRecorder) Write(p []byte) (int, error) {
 	return n, err
 }
 
+// Flush defaults the status to 200 if unset and flushes the wrapped ResponseWriter
+// when it implements http.Flusher, preserving streaming (SSE) behavior through the
+// recorder.
 func (r *statusRecorder) Flush() {
 	if r.status == 0 {
 		r.WriteHeader(http.StatusOK)

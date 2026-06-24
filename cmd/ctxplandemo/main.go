@@ -417,4 +417,5 @@ func pinSet(pins []string) map[string]bool {
 // instead of the bytes/4 proxy. Kept file-free so the demo needs no tokenizer.json.
 type wordCounter struct{}
 
+// Count returns the whitespace-delimited word count of text (the stand-in token cost).
 func (wordCounter) Count(text string) int { return len(strings.Fields(text)) }

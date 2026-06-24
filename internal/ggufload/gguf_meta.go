@@ -5,6 +5,7 @@ import (
 	"math"
 )
 
+// String reads a scalar GGUF string metadata value, returning ("",false) when the key is absent or not a TypeString.
 func (f *File) String(key string) (string, bool) {
 	v, ok := f.Metadata[key]
 	if !ok || v.Type != TypeString {
@@ -14,6 +15,7 @@ func (f *File) String(key string) (string, bool) {
 	return s, ok
 }
 
+// Uint64 reads any scalar GGUF integer metadata value as a uint64, returning (0,false) when the key is absent or negative.
 func (f *File) Uint64(key string) (uint64, bool) {
 	v, ok := f.Metadata[key]
 	if !ok {
@@ -22,6 +24,7 @@ func (f *File) Uint64(key string) (uint64, bool) {
 	return valueUint64(v)
 }
 
+// Float64 reads a scalar GGUF float metadata value (TypeFloat32 widened, or TypeFloat64), returning (0,false) otherwise.
 func (f *File) Float64(key string) (float64, bool) {
 	v, ok := f.Metadata[key]
 	if !ok {
@@ -50,6 +53,7 @@ func (f *File) Bool(key string) (bool, bool) {
 	return b, ok
 }
 
+// StringArray reads a GGUF metadata array of strings into []string, returning (nil,false) on a non-array or any non-string item.
 func (f *File) StringArray(key string) ([]string, bool) {
 	v, ok := f.Metadata[key]
 	if !ok || v.Type != TypeArray {

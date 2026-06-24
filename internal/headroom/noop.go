@@ -10,6 +10,7 @@ const NoopName = "noop"
 
 type noopCompressor struct{}
 
+// Name returns the identity compressor's registry key ("noop").
 func (noopCompressor) Name() string { return NoopName }
 
 func (noopCompressor) Compress(_ context.Context, in Input) (Output, error) {

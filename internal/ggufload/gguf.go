@@ -32,6 +32,8 @@ const (
 	blockMXFP4Bytes = 1 + qkMXFP4/2
 )
 
+// ValueType is the GGUF metadata value type tag (uint8/int32/string/array/... per the
+// GGUF spec) that prefixes each metadata value in the header.
 type ValueType uint32
 
 const (
@@ -50,6 +52,8 @@ const (
 	TypeFloat64 ValueType = 12
 )
 
+// TensorType is the GGUF tensor element/quantization encoding (F32, F16, the Q*_0/Q*_1
+// and K-quant blocks, BF16, MXFP4) that fixes a tensor's on-disk block layout.
 type TensorType uint32
 
 const (
@@ -69,11 +73,16 @@ const (
 	TensorMXFP4 TensorType = 39
 )
 
+// Value is one decoded GGUF metadata value: its ValueType tag and the Go value it
+// decoded to (a scalar, a string, or a slice for an array).
 type Value struct {
 	Type  ValueType
 	Value any
 }
 
+// TensorInfo is one tensor's directory entry from the GGUF header: its name, dims,
+// quant type, and offsets (the in-file data offset and the offset within the tensor
+// data section).
 type TensorInfo struct {
 	Name       string
 	Dims       []uint64
@@ -82,6 +91,8 @@ type TensorInfo struct {
 	FileOffset int64
 }
 
+// String renders the TensorType as its GGUF type name (e.g. "F32", "Q4_K", "MXFP4"),
+// falling back to "TensorType(n)" for an unrecognized code.
 func (t TensorType) String() string {
 	switch t {
 	case TensorF32:
@@ -117,6 +128,9 @@ func (t TensorType) String() string {
 	}
 }
 
+// File is a parsed GGUF header: the format version, the metadata key/value map, the
+// tensor directory, the data alignment, and the file offset where the tensor data
+// section begins.
 type File struct {
 	Version          uint32
 	Metadata         map[string]Value
@@ -125,6 +139,9 @@ type File struct {
 	TensorDataOffset int64
 }
 
+// WeightSource binds a parsed File to the readers that hold its tensor bytes, routing
+// each tensor to the shard file that actually contains it (single-file or split
+// checkpoint) and owning the open shard files so Close releases them all.
 type WeightSource struct {
 	File *File
 	r    io.ReaderAt

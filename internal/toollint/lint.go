@@ -23,6 +23,7 @@ const (
 	SevError
 )
 
+// String renders the severity as "error", "warn", or "info".
 func (s Severity) String() string {
 	switch s {
 	case SevError:

@@ -108,6 +108,7 @@ func NewWithLimit(maxHeld int) *Gate {
 	return &Gate{held: map[string]abi.Ref{}, cleared: map[string]bool{}, maxHeld: maxHeld}
 }
 
+// Caps reports the gate negotiates no optional capabilities (always nil).
 func (g *Gate) Caps() []abi.Capability { return nil }
 
 func (g *Gate) bytes(ctx context.Context, r abi.Ref) []byte {

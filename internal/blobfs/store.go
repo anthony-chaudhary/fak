@@ -438,9 +438,13 @@ func init() {
 // pageOutBackend adapts *Store to abi.PageOutBackend for the keyed registry.
 type pageOutBackend struct{ s *Store }
 
+// PageOut persists a Ref's bytes to the durable store and returns a bytes-absent
+// handle (abi.PageOutBackend, delegating to the underlying Store).
 func (b pageOutBackend) PageOut(ctx context.Context, r abi.Ref) (abi.Ref, error) {
 	return b.s.PageOut(ctx, r)
 }
+
+// PageIn re-materializes a paged-out handle from the durable store (abi.PageOutBackend).
 func (b pageOutBackend) PageIn(ctx context.Context, h abi.Ref) (abi.Ref, error) {
 	return b.s.PageIn(ctx, h)
 }

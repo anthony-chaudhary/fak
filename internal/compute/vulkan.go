@@ -74,6 +74,8 @@ type vulkanBuf struct {
 	scaleN   int
 }
 
+// Ready always reports true: Vulkan dispatches are submitted synchronously, so a
+// vulkanBuf handle is materialized as soon as it exists.
 func (b *vulkanBuf) Ready() bool { return true }
 
 type vulkanBackend struct {
@@ -95,6 +97,8 @@ type vulkanBackend struct {
 
 const vulkanGoPoolBucketCap = 64
 
+// Recycle returns every transient buffer from the current op cycle to the per-size
+// free pool (recycling or freeing each) and trims the shim's device pool if oversized.
 func (v *vulkanBackend) Recycle() {
 	vulkanMu.Lock()
 	defer vulkanMu.Unlock()
@@ -108,6 +112,8 @@ func (v *vulkanBackend) Recycle() {
 	C.fvk_trim_pool_if_over(512)
 }
 
+// Trim frees all pooled transient buffers and asks the C++ shim to release its idle
+// device-pool memory, reclaiming VRAM held only for reuse.
 func (v *vulkanBackend) Trim() {
 	vulkanMu.Lock()
 	defer vulkanMu.Unlock()
@@ -115,6 +121,7 @@ func (v *vulkanBackend) Trim() {
 	C.fvk_trim_pool()
 }
 
+// Name returns the backend's stable registry id ("vulkan").
 func (v *vulkanBackend) Name() string            { return v.name }
 func (v *vulkanBackend) Tier() string            { return v.tier }
 func (v *vulkanBackend) Class() CorrectnessClass { return Approx }
@@ -126,6 +133,8 @@ func (v *vulkanBackend) BeginBatch() {
 	C.fvk_batch_begin()
 }
 
+// FlushBatch submits the recorded command batch to the device, ending the batching
+// window opened by BeginBatch.
 func (v *vulkanBackend) FlushBatch() {
 	vulkanMu.Lock()
 	defer vulkanMu.Unlock()
@@ -230,6 +239,8 @@ func (v *vulkanBackend) devTr(shape []int, dt Dtype) (Tensor, *vulkanBuf) {
 	return t, b
 }
 
+// Upload copies host weight data to the device: a Q8_0 tensor (or an F32 one narrowed
+// to Q8_0 via as) goes through the int8 code+scale path, otherwise F32 is sent H2D as-is.
 func (v *vulkanBackend) Upload(t Tensor, as Dtype) Tensor {
 	vulkanMu.Lock()
 	defer vulkanMu.Unlock()
@@ -292,6 +303,8 @@ func (v *vulkanBackend) uploadQ8Locked(shape []int, codes []int8, scales []float
 	return makeTensor(v, Q8_0, RowMajor, append([]int(nil), shape...), q, buf)
 }
 
+// Host returns the host-addressable f32 view only when the tensor is backed by a host
+// buffer; a device-resident vulkanBuf is not host-addressable, so it returns (nil, false).
 func (v *vulkanBackend) Host(t Tensor) ([]float32, bool) {
 	if hb, ok := t.buf.(*hostBuf); ok && hb.f32 != nil {
 		return hb.f32, true
@@ -299,6 +312,8 @@ func (v *vulkanBackend) Host(t Tensor) ([]float32, bool) {
 	return nil, false
 }
 
+// Read returns the tensor as host f32: a host-backed buffer is returned directly, a
+// device buffer is copied D2H into a fresh slice (the device-to-host fence).
 func (v *vulkanBackend) Read(t Tensor) []float32 {
 	vulkanMu.Lock()
 	defer vulkanMu.Unlock()
@@ -313,6 +328,8 @@ func (v *vulkanBackend) Read(t Tensor) []float32 {
 	return out
 }
 
+// Free releases the tensor's device buffer (and its companion Q8 scale buffer, if any)
+// back to the shim and nils the handle; it is a no-op for a non-device tensor.
 func (v *vulkanBackend) Free(t Tensor) {
 	if db, ok := t.buf.(*vulkanBuf); ok && db.ptr != nil {
 		if db.scalePtr != nil {
@@ -365,6 +382,8 @@ func (v *vulkanBackend) q8WeightBufLocked(w Tensor, in int, op string) *vulkanBu
 	return wb
 }
 
+// MatMulArgmax fuses the final F32 projection and the argmax reduction in one shader,
+// returning the index of the largest logit without copying the logits host-ward.
 func (v *vulkanBackend) MatMulArgmax(w, x Tensor) int {
 	vulkanMu.Lock()
 	defer vulkanMu.Unlock()
@@ -378,6 +397,8 @@ func (v *vulkanBackend) MatMulArgmax(w, x Tensor) int {
 	return int(C.fvk_matmul_argmax_f32(v.vp(w), v.vp(x), C.int(out), C.int(in)))
 }
 
+// RMSNormMatMulArgmax fuses RMSNorm of x, the final F32 projection, and the argmax into
+// one shader, returning the top logit's index for greedy decode.
 func (v *vulkanBackend) RMSNormMatMulArgmax(w, x, normWeight Tensor, eps float32) int {
 	vulkanMu.Lock()
 	defer vulkanMu.Unlock()
@@ -395,6 +416,8 @@ func (v *vulkanBackend) RMSNormMatMulArgmax(w, x, normWeight Tensor, eps float32
 		C.int(out), C.int(in), C.float(eps)))
 }
 
+// BatchedMatMul computes the prefill GEMM Y = X @ Wᵀ over P input rows, dispatching the
+// F32 or Q8_0 shader by the weight's dtype.
 func (v *vulkanBackend) BatchedMatMul(w, X Tensor, P int) Tensor {
 	vulkanMu.Lock()
 	defer vulkanMu.Unlock()
@@ -411,6 +434,8 @@ func (v *vulkanBackend) BatchedMatMul(w, X Tensor, P int) Tensor {
 	return y
 }
 
+// EmbeddingRow returns one row of a 2D F32 embedding table as a new device tensor,
+// copied device-to-device so the lookup never round-trips through the host.
 func (v *vulkanBackend) EmbeddingRow(table Tensor, row int) Tensor {
 	vulkanMu.Lock()
 	defer vulkanMu.Unlock()
@@ -431,6 +456,8 @@ func (v *vulkanBackend) EmbeddingRow(table Tensor, row int) Tensor {
 	return y
 }
 
+// MatMulAddInPlace accumulates the F32 projection x @ Wᵀ into dst (dst += x @ Wᵀ),
+// the residual-add fused into the matmul for any P input rows.
 func (v *vulkanBackend) MatMulAddInPlace(dst, w, x Tensor) {
 	vulkanMu.Lock()
 	defer vulkanMu.Unlock()
@@ -448,6 +475,8 @@ func (v *vulkanBackend) MatMulAddInPlace(dst, w, x Tensor) {
 	C.fvk_matmul_add_f32(v.vp(w), v.vp(x), v.vp(dst), C.int(out), C.int(in), C.int(P))
 }
 
+// MatMul2 applies two projections sharing input x in one decode-only dispatch (all-F32
+// or all-Q8_0), returning both outputs — the fused gate/up FFN projection.
 func (v *vulkanBackend) MatMul2(w0, w1, x Tensor) (Tensor, Tensor) {
 	vulkanMu.Lock()
 	defer vulkanMu.Unlock()
@@ -484,6 +513,8 @@ func (v *vulkanBackend) MatMul2(w0, w1, x Tensor) (Tensor, Tensor) {
 	return y0, y1
 }
 
+// MatMul3 applies the Q, K, and V projections sharing input x in one decode-only
+// dispatch (all-F32 or all-Q8_0), returning the three attention projections.
 func (v *vulkanBackend) MatMul3(wq, wk, wv, x Tensor) (Tensor, Tensor, Tensor) {
 	vulkanMu.Lock()
 	defer vulkanMu.Unlock()
@@ -523,6 +554,8 @@ func (v *vulkanBackend) MatMul3(wq, wk, wv, x Tensor) (Tensor, Tensor, Tensor) {
 	return q, k, val
 }
 
+// RMSNormMatMul2 fuses RMSNorm of x with two projections sharing that normalized input
+// in one decode-only dispatch (all-F32 or all-Q8_0), returning both outputs.
 func (v *vulkanBackend) RMSNormMatMul2(w0, w1, x, normWeight Tensor, eps float32) (Tensor, Tensor) {
 	vulkanMu.Lock()
 	defer vulkanMu.Unlock()
@@ -565,6 +598,8 @@ func (v *vulkanBackend) RMSNormMatMul2(w0, w1, x, normWeight Tensor, eps float32
 	return y0, y1
 }
 
+// RMSNormMatMul3 fuses RMSNorm of x with the Q, K, and V projections in one decode-only
+// dispatch (all-F32 or all-Q8_0), returning the three normalized-then-projected outputs.
 func (v *vulkanBackend) RMSNormMatMul3(wq, wk, wv, x, normWeight Tensor, eps float32) (Tensor, Tensor, Tensor) {
 	vulkanMu.Lock()
 	defer vulkanMu.Unlock()
@@ -611,6 +646,8 @@ func (v *vulkanBackend) RMSNormMatMul3(wq, wk, wv, x, normWeight Tensor, eps flo
 	return q, k, val
 }
 
+// RMSNormMatMul fuses RMSNorm of x and a single F32 projection in one decode-only
+// dispatch, returning the normalized-then-projected output.
 func (v *vulkanBackend) RMSNormMatMul(w, x, normWeight Tensor, eps float32) Tensor {
 	vulkanMu.Lock()
 	defer vulkanMu.Unlock()
@@ -634,6 +671,8 @@ func (v *vulkanBackend) RMSNormMatMul(w, x, normWeight Tensor, eps float32) Tens
 	return y
 }
 
+// SwiGLUMatMulAddInPlace computes silu(gate)*up, projects it through the F32 or Q8_0
+// down weight, and accumulates the result into dst — the fused FFN down step.
 func (v *vulkanBackend) SwiGLUMatMulAddInPlace(dst, w, gate, up Tensor) {
 	vulkanMu.Lock()
 	defer vulkanMu.Unlock()
@@ -659,6 +698,8 @@ func (v *vulkanBackend) SwiGLUMatMulAddInPlace(dst, w, gate, up Tensor) {
 	}
 }
 
+// RMSNorm applies row-wise RMS normalization scaled by weight (eps in the denominator)
+// to each row of x, returning a new device tensor of the same shape.
 func (v *vulkanBackend) RMSNorm(x, weight Tensor, eps float32) Tensor {
 	vulkanMu.Lock()
 	defer vulkanMu.Unlock()
@@ -669,6 +710,8 @@ func (v *vulkanBackend) RMSNorm(x, weight Tensor, eps float32) Tensor {
 	return y
 }
 
+// RoPE applies rotary position embedding at position pos to each head of x, returning a
+// new device tensor (x is copied D2D first so the input is left unmodified).
 func (v *vulkanBackend) RoPE(x Tensor, pos, nHeads, headDim int, theta float64) Tensor {
 	vulkanMu.Lock()
 	defer vulkanMu.Unlock()
@@ -678,6 +721,8 @@ func (v *vulkanBackend) RoPE(x Tensor, pos, nHeads, headDim int, theta float64) 
 	return y
 }
 
+// RoPEInPlace applies rotary position embedding at position pos to x's buffer directly,
+// returning the same tensor (no copy) for the case where x may be overwritten.
 func (v *vulkanBackend) RoPEInPlace(x Tensor, pos, nHeads, headDim int, theta float64) Tensor {
 	vulkanMu.Lock()
 	defer vulkanMu.Unlock()
@@ -685,6 +730,8 @@ func (v *vulkanBackend) RoPEInPlace(x Tensor, pos, nHeads, headDim int, theta fl
 	return x
 }
 
+// SwiGLU computes the elementwise silu(gate)*up activation, returning a new device
+// tensor shaped like gate.
 func (v *vulkanBackend) SwiGLU(gate, up Tensor) Tensor {
 	vulkanMu.Lock()
 	defer vulkanMu.Unlock()
@@ -694,12 +741,14 @@ func (v *vulkanBackend) SwiGLU(gate, up Tensor) Tensor {
 	return y
 }
 
+// AddInPlace adds src into dst elementwise (dst += src) on the device — the residual add.
 func (v *vulkanBackend) AddInPlace(dst, src Tensor) {
 	vulkanMu.Lock()
 	defer vulkanMu.Unlock()
 	C.fvk_add_f32(v.vp(dst), v.vp(src), C.int(dst.Numel()))
 }
 
+// AddBias adds the width-length bias vector to every row of dst (broadcast over rows).
 func (v *vulkanBackend) AddBias(dst, bias Tensor) {
 	vulkanMu.Lock()
 	defer vulkanMu.Unlock()
@@ -708,6 +757,9 @@ func (v *vulkanBackend) AddBias(dst, bias Tensor) {
 	C.fvk_add_bias_f32(v.vp(dst), v.vp(bias), C.int(rows), C.int(width))
 }
 
+// Attention runs the fused scaled-dot-product attention for one layer over the cached
+// keys/values (grp query heads per KV head, scale applied to the scores), returning the
+// per-head context vectors as one device tensor.
 func (v *vulkanBackend) Attention(q Tensor, kv KVStore, layer int, causal bool, grp int, scale float32) Tensor {
 	vulkanMu.Lock()
 	defer vulkanMu.Unlock()
@@ -722,12 +774,16 @@ func (v *vulkanBackend) Attention(q Tensor, kv KVStore, layer int, causal bool, 
 	return out
 }
 
+// Argmax returns the index of the largest element of the device logits tensor via the
+// scalar-reduction shader, so greedy decode never copies the full vector host-ward.
 func (v *vulkanBackend) Argmax(logits Tensor) int {
 	vulkanMu.Lock()
 	defer vulkanMu.Unlock()
 	return int(C.fvk_argmax_f32(v.vp(logits), C.int(logits.Numel())))
 }
 
+// NewKV creates an empty device-resident KV cache sized for cfg.NumLayers, with the
+// pre-RoPE keys, post-RoPE keys, and values each held in their own per-layer slices.
 func (v *vulkanBackend) NewKV(cfg KVConfig) KVStore {
 	k := &vulkanKV{be: v, cfg: cfg}
 	k.K = make([]vslice, cfg.NumLayers)
@@ -784,6 +840,9 @@ func (k *vulkanKV) AppendKV(layer int, kRaw, kRoPE, val Tensor, pos int) {
 	}
 }
 
+// AppendKVRoPE appends one position, applying RoPE on-device: it stores the pre-RoPE key
+// (so Evict can reposition it), rotates it in place to form the post-RoPE key, and stores
+// that and the value row.
 func (k *vulkanKV) AppendKVRoPE(layer int, kRaw, val Tensor, pos, nHeads, headDim int, theta float64) {
 	vulkanMu.Lock()
 	defer vulkanMu.Unlock()
@@ -801,6 +860,7 @@ func (k *vulkanKV) AppendKVRoPE(layer int, kRaw, val Tensor, pos, nHeads, headDi
 	}
 }
 
+// Len reports the number of positions currently cached.
 func (k *vulkanKV) Len() int   { return len(k.pos) }
 func (k *vulkanKV) Pos() []int { return append([]int(nil), k.pos...) }
 
@@ -810,12 +870,17 @@ func (k *vulkanKV) KeysView(layer int) Tensor {
 	return makeTensor(k.be, F32, RowMajor, []int{n, w}, nil, &vulkanBuf{ptr: k.K[layer].ptr, n: k.K[layer].len * 4})
 }
 
+// ValuesView returns a flat [pos, nKV*hd] device tensor viewing the layer's cached value
+// rows, without copying the underlying storage.
 func (k *vulkanKV) ValuesView(layer int) Tensor {
 	w := k.stride()
 	n := k.V[layer].len / w
 	return makeTensor(k.be, F32, RowMajor, []int{n, w}, nil, &vulkanBuf{ptr: k.V[layer].ptr, n: k.V[layer].len * 4})
 }
 
+// Evict removes [from, from+n) from every layer and compacts the survivors, re-RoPE-ing
+// each shifted key from its stored pre-RoPE copy so the cache is byte-for-byte what it
+// would be had the span never been seen; it returns the number of positions removed.
 func (k *vulkanKV) Evict(from, n int) int {
 	vulkanMu.Lock()
 	defer vulkanMu.Unlock()
@@ -857,6 +922,8 @@ func (k *vulkanKV) Evict(from, n int) int {
 	return end - from
 }
 
+// Clone deep-copies the cache (each layer's key, pre-RoPE key, and value buffers copied
+// D2D into fresh device allocations) so a forked decode can reuse a shared prefix.
 func (k *vulkanKV) Clone() KVStore {
 	vulkanMu.Lock()
 	defer vulkanMu.Unlock()
@@ -879,6 +946,8 @@ func (k *vulkanKV) Clone() KVStore {
 	return n
 }
 
+// Free releases every per-layer key, pre-RoPE key, and value device buffer and clears
+// the position list, returning all VRAM the cache held.
 func (k *vulkanKV) Free() {
 	vulkanMu.Lock()
 	defer vulkanMu.Unlock()

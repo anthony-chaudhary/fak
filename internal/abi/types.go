@@ -71,6 +71,8 @@ type Ref struct {
 	Scope  ShareScope // Agent | Fleet | Tenant (default ScopeAgent)
 }
 
+// RefKind is the CLOSED discriminator for where a Ref's bytes live: inline,
+// in a content-addressed blob store, or in an addressable region.
 type RefKind uint8
 
 const (
@@ -230,6 +232,8 @@ type Verdict struct {
 // exactly one Kind. New registered kinds supply their own payload type.
 type VerdictPayload interface{ isVerdictPayload() }
 
+// TransformPayload is the VerdictTransform body: NewArgs is the rewritten,
+// adjudicator-approved Args the call proceeds with in place of the original.
 type TransformPayload struct{ NewArgs Ref } // Kind==VerdictTransform
 func (TransformPayload) isVerdictPayload()  {}
 
@@ -317,6 +321,8 @@ type SubmissionHandle struct {
 // model's supervised labels never drift into untyped mush.
 type Emitter interface{ Emit(ev Event) }
 
+// Event is one lifecycle transition handed to an Emitter: the call, its verdict and
+// result, an optional typed training Label, and OPEN non-label telemetry Fields.
 type Event struct {
 	Kind    EventKind
 	Call    *ToolCall
@@ -326,6 +332,8 @@ type Event struct {
 	Fields  map[string]any // OPEN; unknown ignored (non-label telemetry only)
 }
 
+// EventKind is the OPEN registered discriminator naming which lifecycle transition
+// an Event reports (e.g. EvComplete).
 type EventKind uint32
 
 // LabelRow is the frozen, typed self-labeling signal of the pre-flight ladder

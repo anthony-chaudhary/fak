@@ -100,6 +100,7 @@ type Ledger struct {
 	index map[string]*list.Element
 }
 
+// NewLedger returns a Ledger bounded by DefaultLedgerLimit traces.
 func NewLedger() *Ledger { return NewLedgerWithLimit(DefaultLedgerLimit) }
 
 // NewLedgerWithLimit builds a ledger with a bounded trace table. limit<=0 uses
@@ -248,6 +249,8 @@ const (
 	SinkDestructive                  // irreversibly mutates/deletes state
 )
 
+// String renders the sink class as its uppercase token ("EGRESS"/"EXEC"/"DESTRUCTIVE"),
+// or "NONE" for a non-sensitive call.
 func (s SinkClass) String() string {
 	switch s {
 	case SinkEgress:
@@ -478,6 +481,7 @@ type StampGate struct {
 	policy Policy
 }
 
+// NewStampGate builds a source-stamp ResultAdmitter over ledger l and policy p.
 func NewStampGate(l *Ledger, p Policy) *StampGate { return &StampGate{ledger: l, policy: p} }
 
 func (g *StampGate) Caps() []abi.Capability { return nil }
@@ -519,6 +523,7 @@ type SinkGate struct {
 	policy Policy
 }
 
+// NewSinkGate builds a sink-gate Adjudicator over ledger l and policy p.
 func NewSinkGate(l *Ledger, p Policy) *SinkGate { return &SinkGate{ledger: l, policy: p} }
 
 func (g *SinkGate) Caps() []abi.Capability { return nil }
@@ -615,6 +620,8 @@ func refBytes(ctx context.Context, r abi.Ref) []byte {
 // engine path would. Purely additive — a new Emitter registration, no kernel edit.
 type vdsoTaintEmitter struct{ ledger *Ledger }
 
+// Emit raises the trace's ledger high-water mark from the call's provenance on a vDSO
+// cache hit (EvVDSOHit), which bypasses StampGate — closing the cache taint-laundering hole.
 func (e vdsoTaintEmitter) Emit(ev abi.Event) {
 	if !enabled || ev.Kind != abi.EvVDSOHit || ev.Call == nil {
 		return

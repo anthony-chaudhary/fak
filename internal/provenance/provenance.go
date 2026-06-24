@@ -163,6 +163,8 @@ func sealed(r *abi.Result) bool {
 	return r.Meta != nil && r.Meta["quarantine_id"] != ""
 }
 
+// String renders the source class as "trusted_local", or "untrusted" for the
+// fail-closed default.
 func (s Source) String() string {
 	switch s {
 	case TrustedLocal:

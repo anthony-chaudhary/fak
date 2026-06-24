@@ -75,6 +75,8 @@ type Gate interface {
 // change here. This is the production gate.
 type FoldedGate struct{}
 
+// Admit runs the kernel's registered ResultAdmitter chain over the result and returns
+// the most-restrictive-wins folded verdict (the production KV-MMU decision).
 func (FoldedGate) Admit(ctx context.Context, c *abi.ToolCall, r *abi.Result) abi.Verdict {
 	best := abi.Verdict{Kind: abi.VerdictAllow, By: "default-admit"}
 	bestRank := abi.FoldRank(abi.VerdictAllow)

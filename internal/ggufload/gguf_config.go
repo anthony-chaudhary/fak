@@ -8,6 +8,10 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/model"
 )
 
+// Read parses a GGUF header from r — magic, version, the metadata key/value table, and the
+// tensor directory — and returns a *File with each tensor's aligned absolute file offset
+// resolved. It reads only the header (not the tensor data blob), and errors on a bad magic,
+// an unsupported version, or a misaligned tensor offset.
 func Read(r io.Reader) (*File, error) {
 	rr := &countingReader{r: r}
 	magic := make([]byte, 4)
@@ -108,6 +112,9 @@ func Read(r io.Reader) (*File, error) {
 	}, nil
 }
 
+// Config derives a model.Config from the file's metadata, reading the architecture-prefixed
+// GGUF keys (embedding_length, block_count, head counts, feed_forward_length, ...) and erroring
+// when a required key is missing.
 func (f *File) Config() (model.Config, error) {
 	arch, ok := f.String("general.architecture")
 	if !ok || arch == "" {

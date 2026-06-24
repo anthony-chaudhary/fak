@@ -12,6 +12,7 @@ const (
 	PrecisionQ8
 )
 
+// String renders the precision tier as "f32" or "q8_0" ("unknown" otherwise).
 func (p PrecisionTier) String() string {
 	switch p {
 	case PrecisionF32:

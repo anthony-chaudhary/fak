@@ -31,6 +31,7 @@ func NewASRSteward() *ASRSteward {
 	return &ASRSteward{attacks: ExpandedMatrix(), newDef: NewFullStack}
 }
 
+// Name is the steward's stable registry id ("agentdojo-asr-zero").
 func (s *ASRSteward) Name() string { return "agentdojo-asr-zero" }
 
 // Check runs the matrix and reports a violation iff the full-stack ASR exceeds

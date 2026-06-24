@@ -27,6 +27,7 @@ const (
 	Planned
 )
 
+// String renders the regime as "linear", "compaction", or "planned" ("unknown" otherwise).
 func (r Regime) String() string {
 	switch r {
 	case Linear:

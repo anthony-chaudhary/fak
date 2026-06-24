@@ -51,6 +51,8 @@ const (
 	CodeExec                  // make the agent run attacker-supplied code / shell
 )
 
+// String renders the attacker goal class as a slug ("exfil", "secret-leak",
+// "destructive", "code-exec"; "?" if unknown).
 func (v Vector) String() string {
 	switch v {
 	case Exfil:
@@ -76,6 +78,8 @@ const (
 	Paraphrased
 )
 
+// String renders the lexical-evasion level as a slug ("plain", "obfuscated",
+// "paraphrased"; "?" if unknown).
 func (a Adaptivity) String() string {
 	switch a {
 	case Plain:

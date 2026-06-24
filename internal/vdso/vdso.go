@@ -655,6 +655,7 @@ type tier struct {
 	n int
 }
 
+// Caps delegates to the wrapped VDSO, advertising nothing special.
 func (t tier) Caps() []abi.Capability { return t.v.Caps() }
 func (t tier) Lookup(ctx context.Context, c *abi.ToolCall) (*abi.Result, bool) {
 	// Only the first registered tier actually serves; the second registration is a

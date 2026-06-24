@@ -81,6 +81,7 @@ func NewDataset(insts []Instance) *Dataset {
 	return d
 }
 
+// Len returns the number of instances in the dataset.
 func (d *Dataset) Len() int { return len(d.Instances) }
 
 // Get returns the instance with id and whether it was present.

@@ -159,6 +159,7 @@ type attestation struct {
 	Summary     attSummary    `json:"summary"`
 }
 
+// JSON renders the attestation document as indented JSON.
 func (a attestation) JSON() []byte {
 	b, _ := json.MarshalIndent(a, "", "  ")
 	return b

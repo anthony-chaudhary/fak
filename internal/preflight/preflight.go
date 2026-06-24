@@ -107,6 +107,7 @@ func (l *Ladder) Schemas() map[string]Schema {
 	return out
 }
 
+// Caps reports the ladder's advertised capabilities; the rung ladder advertises none.
 func (l *Ladder) Caps() []abi.Capability { return nil }
 
 // Adjudicate runs the rungs cheapest-first.

@@ -83,6 +83,7 @@ type state struct {
 	pos  int // furthest step reached (Sequence mode)
 }
 
+// NewLedger returns an empty plan ledger (no plan declared for any trace).
 func NewLedger() *Ledger { return &Ledger{plans: map[string]*state{}} }
 
 // Declare approves a plan for a trace (the operator/agent's pre-commitment).
@@ -143,10 +144,13 @@ type Adjudicator struct {
 	OnDeviation abi.VerdictKind
 }
 
+// New builds a plan-CFI Adjudicator over ledger l, escalating a deviation to
+// RequireApproval by default (set OnDeviation to VerdictDeny for a strict hard-block).
 func New(l *Ledger) *Adjudicator {
 	return &Adjudicator{ledger: l, OnDeviation: VerdictRequireApproval}
 }
 
+// Caps advertises no capabilities (this adjudicator declares none).
 func (a *Adjudicator) Caps() []abi.Capability { return nil }
 
 func (a *Adjudicator) Adjudicate(ctx context.Context, c *abi.ToolCall) abi.Verdict {

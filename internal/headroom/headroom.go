@@ -156,6 +156,8 @@ const (
 	KindText
 )
 
+// String renders the content kind as its lowercase name ("json", "log", "code",
+// "text"), or "unknown" for KindUnknown.
 func (k ContentKind) String() string {
 	switch k {
 	case KindJSON:

@@ -239,6 +239,9 @@ func journalVerifier(rows []journal.Row) deletioncert.JournalVerifier {
 
 type rowVerifier []journal.Row
 
+// AnchorRow re-verifies the whole row chain and, if intact, returns the named row's
+// (prevHash, hash, true); a broken chain or missing seq returns ok=false so a tampered
+// journal fails the certificate's anchor binding closed.
 func (rv rowVerifier) AnchorRow(seq uint64) (string, string, bool) {
 	if _, err := journal.VerifyRows([]journal.Row(rv)); err != nil {
 		return "", "", false // chain broken -> nothing is anchorable

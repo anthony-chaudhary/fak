@@ -59,6 +59,9 @@ type Func struct {
 	Arguments string `json:"arguments"` // raw JSON string as emitted by the model
 }
 
+// UnmarshalJSON decodes a tool call's function object, keeping the arguments as the
+// RAW JSON string the model emitted: a JSON-string `arguments` is unquoted to its
+// inner text, an object/array is kept verbatim, and null/empty becomes "".
 func (f *Func) UnmarshalJSON(raw []byte) error {
 	var aux struct {
 		Name      string          `json:"name"`
@@ -105,6 +108,9 @@ type Message struct {
 	RedactedThinking  []string `json:"redacted_thinking,omitempty"`
 }
 
+// UnmarshalJSON decodes a chat message, flattening a `content` field that may be a
+// plain string OR an array of typed content parts into a single text Content while
+// carrying the tool-call, function-call, and Claude thinking fields through unchanged.
 func (m *Message) UnmarshalJSON(raw []byte) error {
 	var aux struct {
 		Role              string          `json:"role"`
@@ -200,6 +206,8 @@ type ToolDef struct {
 	Function ToolDefFunction `json:"function"`
 }
 
+// ToolDefFunction is the function half of a ToolDef: the tool name, its description,
+// and its parameter JSON Schema as advertised to the model.
 type ToolDefFunction struct {
 	Name        string          `json:"name"`
 	Description string          `json:"description"`
@@ -636,6 +644,7 @@ func plannerTimeout() time.Duration {
 	return d
 }
 
+// Model returns the planner's configured model id (for provenance).
 func (p *HTTPPlanner) Model() string { return p.ModelID }
 
 // Complete performs one chat-completions round-trip with one backoff retry on a
@@ -788,6 +797,8 @@ type UpstreamStatusError struct {
 	Body   string
 }
 
+// Error formats the upstream's HTTP status and truncated error body as
+// "planner: HTTP <status>: <body>".
 func (e *UpstreamStatusError) Error() string {
 	return fmt.Sprintf("planner: HTTP %d: %s", e.Status, e.Body)
 }
@@ -805,10 +816,12 @@ type UpstreamUnreachableError struct {
 	Err error
 }
 
+// Error formats the underlying dial-time cause as "planner: upstream unreachable: <err>".
 func (e *UpstreamUnreachableError) Error() string {
 	return fmt.Sprintf("planner: upstream unreachable: %v", e.Err)
 }
 
+// Unwrap returns the underlying dial-time transport error for errors.Is/As.
 func (e *UpstreamUnreachableError) Unwrap() error { return e.Err }
 
 // deterministicTransportError reports whether a transport error from Client.Do is

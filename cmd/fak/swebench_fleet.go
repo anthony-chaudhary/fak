@@ -25,6 +25,7 @@ func newFleetPlanner(gateway, model string) httpCodePlanner {
 	return httpCodePlanner{p: agent.NewHTTPPlanner(gatewayBaseURL(gateway), model, os.Getenv("FAK_API_KEY"))}
 }
 
+// Model returns the model id the underlying HTTP planner posts to the gateway.
 func (h httpCodePlanner) Model() string { return h.p.Model() }
 
 func (h httpCodePlanner) Complete(ctx context.Context, msgs []swebench.ChatMessage, tools []swebench.ChatTool) (swebench.ChatTurn, error) {

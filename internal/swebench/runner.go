@@ -273,6 +273,8 @@ func newRunnerStrategy(rt RunnerType, cfg RunConfig) (runnerStrategy, error) {
 // mockRunner generates dummy predictions for harness testing.
 type mockRunner struct{}
 
+// RunInstance returns a fixed dummy patch for the instance, for exercising the harness
+// without invoking a real agent.
 func (m *mockRunner) RunInstance(ctx context.Context, in Instance) (Prediction, error) {
 	// Generate a plausible-looking dummy patch.
 	patch := fmt.Sprintf(`# Mock patch for %s (fleet test harness)
@@ -297,6 +299,8 @@ type deepSWERunner struct {
 	cfg RunConfig
 }
 
+// RunInstance returns an error because the DeepSWE/R2E-Gym baseline is not yet wired;
+// the Run loop records it as a failed instance rather than emitting a placeholder patch.
 func (d *deepSWERunner) RunInstance(ctx context.Context, in Instance) (Prediction, error) {
 	// The DeepSWE/R2E-Gym baseline is not wired yet. Return an error (the Run loop
 	// records it as a failed instance with an empty patch) rather than a placeholder

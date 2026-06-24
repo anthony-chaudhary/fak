@@ -21,4 +21,6 @@ var errMmapUnsupported = errors.New("model: mmap unsupported on this platform")
 // its munmap/unmap-and-close logic without each platform declaring a bespoke struct.
 type closerFunc func() error
 
+// Close runs the wrapped teardown closure (the per-platform munmap/unmap-and-close)
+// and returns its error.
 func (f closerFunc) Close() error { return f() }

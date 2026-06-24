@@ -28,6 +28,7 @@ type hostBuf struct {
 	i8  []int8
 }
 
+// Ready reports the host buffer materialized; the CPU reference is synchronous so it is always true.
 func (h *hostBuf) Ready() bool    { return true }
 func (h *hostBuf) F32() []float32 { return h.f32 }
 func (h *hostBuf) I8() []int8     { return h.i8 }
@@ -85,6 +86,7 @@ func QuantizeQ8(be Backend, shape []int, w []float32, block int) Tensor {
 	return NewQ8(be, shape, codes, scale, block)
 }
 
+// Upload is identity for the CPU reference: host data is already resident, so it ignores `as` and returns t unchanged.
 func (c *cpuBackend) Upload(t Tensor, as Dtype) Tensor { return t } // identity: host data already resident
 func (c *cpuBackend) Free(Tensor)                      {}           // host GC owns it
 
@@ -95,6 +97,7 @@ func (c *cpuBackend) Host(t Tensor) ([]float32, bool) {
 	return nil, false
 }
 
+// Read returns the host f32 slice backing t (no fence needed on the synchronous reference), or nil if t holds no host buffer.
 func (c *cpuBackend) Read(t Tensor) []float32 {
 	if hb, ok := t.buf.(*hostBuf); ok {
 		return hb.f32
@@ -241,6 +244,7 @@ func (c *cpuBackend) SwiGLU(gate, up Tensor) Tensor {
 	return c.result(append([]int(nil), gate.Shape...), out)
 }
 
+// AddInPlace adds src into dst elementwise (the residual add: dst += src).
 func (c *cpuBackend) AddInPlace(dst, src Tensor) {
 	d, s := c.f32(dst), c.f32(src)
 	for i := range d {
@@ -248,6 +252,7 @@ func (c *cpuBackend) AddInPlace(dst, src Tensor) {
 	}
 }
 
+// AddBias adds the bias vector into dst elementwise (dst += bias).
 func (c *cpuBackend) AddBias(dst, bias Tensor) {
 	d, b := c.f32(dst), c.f32(bias)
 	for i := range d {
@@ -290,6 +295,7 @@ func (c *cpuBackend) Attention(q Tensor, kv KVStore, layer int, causal bool, grp
 	return c.result([]int{nH * hd}, out)
 }
 
+// Argmax returns the index of the first maximal logit (the greedy-decode reduction, matching argmaxF32).
 func (c *cpuBackend) Argmax(logits Tensor) int { return argmaxF32(c.f32(logits)) }
 
 // ---- KV store (verbatim wrap of the model's flat row-major cache) ----------------
@@ -328,6 +334,7 @@ func (k *cpuKV) AppendKV(layer int, kRaw, kRoPE, v Tensor, pos int) {
 	}
 }
 
+// Len returns the number of cached positions in the KV store.
 func (k *cpuKV) Len() int   { return len(k.pos) }
 func (k *cpuKV) Pos() []int { return append([]int(nil), k.pos...) }
 
@@ -336,6 +343,8 @@ func (k *cpuKV) KeysView(layer int) Tensor {
 	n := len(k.K[layer]) / w
 	return makeTensor(k.be, F32, RowMajor, []int{n, w}, nil, &hostBuf{f32: k.K[layer]})
 }
+
+// ValuesView returns the layer's cached values as a flat [pos, nKV*hd] host tensor view (zero-copy on the reference).
 func (k *cpuKV) ValuesView(layer int) Tensor {
 	w := k.stride()
 	n := len(k.V[layer]) / w
@@ -377,6 +386,7 @@ func (k *cpuKV) Evict(from, n int) int {
 	return end - from
 }
 
+// Clone deep-copies the KV store (every layer's K/Kraw/V and the shared pos) for prefix reuse.
 func (k *cpuKV) Clone() KVStore {
 	n := &cpuKV{be: k.be, cfg: k.cfg,
 		K: make([][]float32, len(k.K)), Kraw: make([][]float32, len(k.Kraw)), V: make([][]float32, len(k.V)),

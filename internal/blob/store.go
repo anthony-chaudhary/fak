@@ -339,11 +339,14 @@ func (s *Store) SetMaxBytes(n int64) {
 // backend adapts *Store to abi.RegionBackend.
 type backend struct{ s *Store }
 
+// Resolver returns the underlying Store as the abi.Resolver for this RegionBackend.
 func (b backend) Resolver() abi.Resolver { return b.s }
 func (b backend) Caps() []abi.Capability { return nil }
 func (b backend) PageOut(ctx context.Context, r abi.Ref) (abi.Ref, error) {
 	return b.s.PageOut(ctx, r)
 }
+
+// PageIn re-materializes a paged-out handle into an inline Ref via the underlying Store.
 func (b backend) PageIn(ctx context.Context, h abi.Ref) (abi.Ref, error) {
 	return b.s.PageIn(ctx, h)
 }

@@ -214,6 +214,7 @@ func metaFor(tool string) map[string]string {
 
 type localEngine struct{}
 
+// Caps reports no optional capabilities — the local toolset engine advertises none.
 func (localEngine) Caps() []abi.Capability { return nil }
 
 func (localEngine) Complete(ctx context.Context, c *abi.ToolCall) (*abi.Result, error) {

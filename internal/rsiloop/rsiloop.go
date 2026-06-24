@@ -152,6 +152,7 @@ func (j *Journal) Close() error {
 
 type nopWriteCloser struct{ io.Writer }
 
+// Close is a no-op so a bare io.Writer (e.g. stdout) satisfies io.WriteCloser without being closed.
 func (nopWriteCloser) Close() error { return nil }
 
 // Run drives the closed RSI loop. It measures the baseline from `main`, then folds

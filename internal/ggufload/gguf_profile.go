@@ -59,6 +59,8 @@ type LoadProfiler struct {
 	Every   int
 }
 
+// NewLoadProfiler returns an enabled load profiler that records per-phase timings and
+// keeps the top 16 slowest tensors by default.
 func NewLoadProfiler() *LoadProfiler {
 	return &LoadProfiler{stat: map[string]*LoadPhaseStat{}, TopN: 16}
 }
@@ -116,6 +118,9 @@ func (p *LoadProfiler) recordTensor(st LoadTensorStat) {
 	}
 }
 
+// Snapshot renders the accumulated timings into a LoadProfile: per-phase stats with
+// time percentages, the slowest phase as the bottleneck, and the TopN slowest tensors.
+// Returns nil for a nil (disabled) profiler.
 func (p *LoadProfiler) Snapshot(mode, source string, totalNanos int64) *LoadProfile {
 	if p == nil {
 		return nil

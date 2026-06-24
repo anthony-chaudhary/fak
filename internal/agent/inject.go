@@ -113,6 +113,7 @@ func NewInjectingPlanner(inner Planner, seed int64) *InjectingPlanner {
 	}
 }
 
+// Model returns the inner planner's model id with a "+inject" suffix, marking this as the fault-injecting wrapper for provenance.
 func (p *InjectingPlanner) Model() string { return p.Inner.Model() + "+inject" }
 
 // target returns the configured target tool, defaulting to convert_currency.

@@ -541,6 +541,8 @@ const (
 	ParallelResidual
 )
 
+// String renders the BlockTopology as its name (PreNorm/PostNorm/SandwichNorm/
+// ParallelResidual), falling back to "BlockTopology(n)" for an unknown value.
 func (t BlockTopology) String() string {
 	switch t {
 	case PreNorm:

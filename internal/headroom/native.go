@@ -24,6 +24,7 @@ const dupRunMin = 3
 
 type nativeCompressor struct{}
 
+// Name returns the compressor's registry key (NativeName, "native").
 func (nativeCompressor) Name() string { return NativeName }
 
 func (nativeCompressor) Compress(_ context.Context, in Input) (Output, error) {

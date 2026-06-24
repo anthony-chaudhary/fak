@@ -61,6 +61,7 @@ type RecurrentEvictUnsupportedError struct {
 	Layers []int
 }
 
+// Error reports that KVCache.Evict cannot quarantine a hybrid Gated-DeltaNet cache, naming the recurrent layers and advising a rebuild from a clean prefix.
 func (e *RecurrentEvictUnsupportedError) Error() string {
 	return "model: KVCache.Evict does not support Gated-DeltaNet recurrent state " +
 		"(hybrid linear-attention layers " + itoaSlice(e.Layers) + " hold an accumulated " +

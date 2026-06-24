@@ -58,6 +58,7 @@ type metalBuf struct {
 	host uintptr        // source host pointer if this came from a cached Upload (0 otherwise)
 }
 
+// Ready reports the buffer is materialized — always true on this synchronous backend.
 func (b *metalBuf) Ready() bool { return true }
 
 // metalUploadCache shares one device copy per distinct host buffer across all sessions — a
@@ -93,6 +94,7 @@ func (c *metalBackend) Recycle() {
 	c.transient = c.transient[:0]
 }
 
+// Name is the registry id of this backend ("metal").
 func (c *metalBackend) Name() string            { return c.name }
 func (c *metalBackend) Tier() string            { return c.tier }
 func (c *metalBackend) Class() CorrectnessClass { return Approx } // MPS GEMM != fdot order
@@ -159,6 +161,8 @@ func (c *metalBackend) Upload(t Tensor, as Dtype) Tensor {
 	return out
 }
 
+// Host returns a host-addressable f32 view only for a host-resident tensor; a
+// device (MTLBuffer) tensor returns (nil,false), since device memory is not host-addressable.
 func (c *metalBackend) Host(t Tensor) ([]float32, bool) {
 	if hb, ok := t.buf.(*hostBuf); ok && hb.f32 != nil {
 		return hb.f32, true
@@ -181,6 +185,8 @@ func (c *metalBackend) Read(t Tensor) []float32 {
 	return out
 }
 
+// Free releases the tensor's device buffer, evicting it from the upload cache so a
+// later re-upload of the same host buffer re-stages it. A no-op for a host tensor.
 func (c *metalBackend) Free(t Tensor) {
 	metalMu.Lock()
 	defer metalMu.Unlock()
@@ -209,6 +215,8 @@ func (c *metalBackend) MatMul(w, x Tensor) Tensor {
 	return y
 }
 
+// BatchedMatMul is the prefill GEMM Y = X @ Wᵀ over P rows on the MPS path; it refuses
+// non-F32 weights (quantized device GEMM is a tracked follow-up).
 func (c *metalBackend) BatchedMatMul(w, X Tensor, P int) Tensor {
 	metalMu.Lock()
 	defer metalMu.Unlock()
@@ -221,6 +229,8 @@ func (c *metalBackend) BatchedMatMul(w, X Tensor, P int) Tensor {
 	return y
 }
 
+// RMSNorm runs the per-row RMS normalization x*weight on the Metal compute kernel,
+// returning a new device tensor of x's shape.
 func (c *metalBackend) RMSNorm(x, weight Tensor, eps float32) Tensor {
 	metalMu.Lock()
 	defer metalMu.Unlock()
@@ -241,6 +251,8 @@ func (c *metalBackend) RoPE(x Tensor, pos, nHeads, headDim int, theta float64) T
 	return y
 }
 
+// SwiGLU computes silu(gate)*up elementwise on the Metal kernel, returning a new
+// device tensor of gate's shape.
 func (c *metalBackend) SwiGLU(gate, up Tensor) Tensor {
 	metalMu.Lock()
 	defer metalMu.Unlock()
@@ -250,12 +262,14 @@ func (c *metalBackend) SwiGLU(gate, up Tensor) Tensor {
 	return y
 }
 
+// AddInPlace adds src into dst on the device (the residual dst += src).
 func (c *metalBackend) AddInPlace(dst, src Tensor) {
 	metalMu.Lock()
 	defer metalMu.Unlock()
 	C.fmetal_add_f32(c.mb(dst), c.mb(src), C.int(dst.Numel()))
 }
 
+// AddBias broadcasts bias across every row of dst on the device (dst += bias per row).
 func (c *metalBackend) AddBias(dst, bias Tensor) {
 	metalMu.Lock()
 	defer metalMu.Unlock()
@@ -264,6 +278,9 @@ func (c *metalBackend) AddBias(dst, bias Tensor) {
 	C.fmetal_add_bias_f32(c.mb(dst), c.mb(bias), C.int(rows), C.int(width))
 }
 
+// Attention runs the fused scaled-dot-product attention kernel over the layer's
+// device-resident K/V for query q, returning the [nH*hd] context. It refuses a head
+// dim above 256 (the kernel's accumulator bound).
 func (c *metalBackend) Attention(q Tensor, kv KVStore, layer int, causal bool, grp int, scale float32) Tensor {
 	metalMu.Lock()
 	defer metalMu.Unlock()
@@ -282,6 +299,8 @@ func (c *metalBackend) Attention(q Tensor, kv KVStore, layer int, causal bool, g
 	return out
 }
 
+// Argmax returns the index of the largest logit, reduced on the device so greedy
+// decode never copies the full logits vector host-ward.
 func (c *metalBackend) Argmax(logits Tensor) int {
 	metalMu.Lock()
 	defer metalMu.Unlock()
@@ -346,6 +365,7 @@ func (k *metalKV) AppendKV(layer int, kRaw, kRoPE, v Tensor, pos int) {
 	}
 }
 
+// Len is the number of cached positions in this KV store.
 func (k *metalKV) Len() int   { return len(k.pos) }
 func (k *metalKV) Pos() []int { return append([]int(nil), k.pos...) }
 
@@ -354,6 +374,9 @@ func (k *metalKV) KeysView(layer int) Tensor {
 	n := k.K[layer].len / w
 	return makeTensor(k.be, F32, RowMajor, []int{n, w}, nil, &metalBuf{ptr: k.K[layer].ptr, n: k.K[layer].len * 4})
 }
+
+// ValuesView returns a [pos, nKV*hd] device-tensor handle over the layer's cached
+// value rows (no copy — it aliases the underlying device buffer).
 func (k *metalKV) ValuesView(layer int) Tensor {
 	w := k.stride()
 	n := k.V[layer].len / w
@@ -405,6 +428,8 @@ func (k *metalKV) Evict(from, n int) int {
 	return end - from
 }
 
+// Clone deep-copies the device-resident K/Kraw/V buffers and positions into a fresh
+// metalKV for prefix reuse, so the original and the copy share no device storage.
 func (k *metalKV) Clone() KVStore {
 	metalMu.Lock()
 	defer metalMu.Unlock()
@@ -427,6 +452,7 @@ func (k *metalKV) Clone() KVStore {
 	return n
 }
 
+// Free releases every K/Kraw/V device buffer this KV store holds and clears its positions.
 func (k *metalKV) Free() {
 	metalMu.Lock()
 	defer metalMu.Unlock()

@@ -24,6 +24,7 @@ type Hist struct {
 	samples []int64
 }
 
+// Record appends one latency sample (a time.Duration, stored as nanoseconds).
 func (h *Hist) Record(d time.Duration) { h.samples = append(h.samples, int64(d)) }
 func (h *Hist) RecordNs(ns int64)      { h.samples = append(h.samples, ns) }
 func (h *Hist) Count() int             { return len(h.samples) }
@@ -44,6 +45,7 @@ func (h *Hist) pct(p float64) int64 {
 	return s[idx]
 }
 
+// P50 returns the 50th-percentile (median) sample in nanoseconds, or 0 if empty.
 func (h *Hist) P50() int64 { return h.pct(50) }
 func (h *Hist) P99() int64 { return h.pct(99) }
 func (h *Hist) Mean() int64 {
@@ -81,6 +83,7 @@ func (h *Hist) Buckets() []Bucket {
 	return out
 }
 
+// Bucket is one log-spaced latency histogram bin: its threshold label and the sample count.
 type Bucket struct {
 	Label string `json:"label"`
 	Count int    `json:"count"`

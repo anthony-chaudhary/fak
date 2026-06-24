@@ -62,6 +62,8 @@ type EntryID struct {
 	Unit      LengthUnit
 }
 
+// Valid reports whether the identity is fully populated: a non-empty digest,
+// media type, and length unit, with a non-negative length.
 func (id EntryID) Valid() bool {
 	return id.Digest != "" && id.MediaType != "" && id.Unit != "" && id.Length >= 0
 }
@@ -134,6 +136,8 @@ const (
 	AdmissionDefer          AdmissionVerdict = "defer"
 )
 
+// AdmissionFromVerdict maps an abi.VerdictKind to its cache-facing
+// AdmissionVerdict, returning AdmissionUnknown for an unrecognized kind.
 func AdmissionFromVerdict(k abi.VerdictKind) AdmissionVerdict {
 	switch k {
 	case abi.VerdictAllow:
@@ -196,6 +200,8 @@ type Coherence struct {
 	InvalidationMode InvalidationMode
 }
 
+// InvalidationMode names what causes an entry to be evicted or refuted (LRU,
+// TTL, write-epoch, external refutation, or policy).
 type InvalidationMode string
 
 const (
@@ -231,6 +237,8 @@ type LookupVerdict struct {
 	Meta   map[string]string
 }
 
+// LookupKind is the category of a LookupVerdict: hit, miss, revalidate,
+// transform, quarantine, or fault.
 type LookupKind string
 
 const (
@@ -242,6 +250,8 @@ const (
 	LookupFault      LookupKind = "fault"
 )
 
+// LookupReason is the specific cause carried by a LookupVerdict (why it missed,
+// must revalidate, was denied, or faulted).
 type LookupReason string
 
 const (
@@ -271,30 +281,42 @@ const (
 	ReasonNonCausalIndex     LookupReason = "non_causal_index"
 )
 
+// Hit builds a hit verdict for e, with its handle set to the entry's ID.
 func Hit(e Entry) LookupVerdict {
 	return LookupVerdict{Kind: LookupHit, Entry: e, Handle: e.ID}
 }
 
+// Miss builds a miss verdict carrying the given reason and no entry.
 func Miss(reason LookupReason) LookupVerdict {
 	return LookupVerdict{Kind: LookupMiss, Reason: reason}
 }
 
+// Revalidate builds a verdict that the entry exists but must be re-checked
+// before serving, carrying the reason that triggered revalidation.
 func Revalidate(e Entry, reason LookupReason) LookupVerdict {
 	return LookupVerdict{Kind: LookupRevalidate, Reason: reason, Entry: e, Handle: e.ID}
 }
 
+// Transform builds a verdict that the entry may serve only after a transform,
+// carrying the reason the raw entry is not directly servable.
 func Transform(e Entry, reason LookupReason) LookupVerdict {
 	return LookupVerdict{Kind: LookupTransform, Reason: reason, Entry: e, Handle: e.ID}
 }
 
+// Quarantine builds a verdict that the entry is held back from serving, carrying
+// the reason it was quarantined.
 func Quarantine(e Entry, reason LookupReason) LookupVerdict {
 	return LookupVerdict{Kind: LookupQuarantine, Reason: reason, Entry: e, Handle: e.ID}
 }
 
+// Fault builds a verdict signaling a residency/approximation fault on the entry,
+// carrying the reason it could not be served.
 func Fault(e Entry, reason LookupReason) LookupVerdict {
 	return LookupVerdict{Kind: LookupFault, Reason: reason, Entry: e, Handle: e.ID}
 }
 
+// CanServe reports whether the verdict is a hit with a valid handle, i.e. the
+// payload may be reused.
 func (v LookupVerdict) CanServe() bool { return v.Kind == LookupHit && v.Handle.Valid() }
 
 // Option mutates an Entry during adapter construction.
@@ -304,22 +326,28 @@ func WithWitness(w string) Option {
 	return func(e *Entry) { e.Validity.Witness = w }
 }
 
+// WithEpoch sets the entry's admission epoch stamp.
 func WithEpoch(epoch string) Option {
 	return func(e *Entry) { e.Validity.AdmittedAtEpoch = epoch }
 }
 
+// WithTrustEpoch sets the entry's trust epoch.
 func WithTrustEpoch(epoch uint64) Option {
 	return func(e *Entry) { e.Validity.TrustEpoch = epoch }
 }
 
+// WithPolicyVersion sets the policy version that bounds the entry's validity.
 func WithPolicyVersion(v string) Option {
 	return func(e *Entry) { e.Validity.PolicyVersion = v }
 }
 
+// WithTTLMillis sets the entry's time-to-live in milliseconds.
 func WithTTLMillis(ms int64) Option {
 	return func(e *Entry) { e.Validity.TTLMillis = ms }
 }
 
+// WithAdmission sets the admission verdict and the identity that admitted the
+// entry.
 func WithAdmission(v AdmissionVerdict, by string) Option {
 	return func(e *Entry) {
 		e.Security.AdmissionVerdict = v
@@ -327,12 +355,15 @@ func WithAdmission(v AdmissionVerdict, by string) Option {
 	}
 }
 
+// WithResidency replaces the entry's residency record with the given tier,
+// owner, and lease.
 func WithResidency(t ResidencyTier, owner, lease string) Option {
 	return func(e *Entry) {
 		e.Residency = Residency{Tier: t, Owner: owner, Lease: lease}
 	}
 }
 
+// WithModel sets the model and tokenizer IDs the entry was derived under.
 func WithModel(modelID, tokenizerID string) Option {
 	return func(e *Entry) {
 		e.Derivation.ModelID = modelID
@@ -340,22 +371,29 @@ func WithModel(modelID, tokenizerID string) Option {
 	}
 }
 
+// WithSerializer sets the serializer ID the entry was derived under.
 func WithSerializer(id string) Option {
 	return func(e *Entry) { e.Derivation.SerializerID = id }
 }
 
+// WithPositionMode sets whether the entry's token/KV material may be relocated.
 func WithPositionMode(m PositionMode) Option {
 	return func(e *Entry) { e.Derivation.PositionMode = m }
 }
 
+// WithConsumer appends a consumer to the entry's coherence graph for causal
+// invalidation.
 func WithConsumer(c Consumer) Option {
 	return func(e *Entry) { e.Coherence.Consumers = append(e.Coherence.Consumers, c) }
 }
 
+// WithParent appends a parent entry ID to the entry's coherence graph.
 func WithParent(id EntryID) Option {
 	return func(e *Entry) { e.Coherence.Parents = append(e.Coherence.Parents, id) }
 }
 
+// WithLabel sets a label key/value on the entry, allocating the label map if
+// needed.
 func WithLabel(k, v string) Option {
 	return func(e *Entry) {
 		if e.Labels == nil {
@@ -417,6 +455,8 @@ func residencyOfRef(r abi.Ref) ResidencyTier {
 	}
 }
 
+// ErrBadVDSOKey is returned by ParseVDSOKey when a key is not the expected
+// three-part tool:args-digest:epoch-stamp form.
 var ErrBadVDSOKey = errors.New("cachemeta: bad vdso key")
 
 // VDSOKey is the parsed form of vDSO's tier-2 key:
@@ -427,6 +467,8 @@ type VDSOKey struct {
 	EpochStamp string
 }
 
+// ParseVDSOKey splits a tier-2 vDSO key into its tool, args-digest, and
+// epoch-stamp parts, returning ErrBadVDSOKey if any of the three is missing.
 func ParseVDSOKey(key string) (VDSOKey, error) {
 	parts := strings.Split(key, ":")
 	if len(parts) != 3 || parts[0] == "" || parts[1] == "" || parts[2] == "" {
@@ -497,6 +539,9 @@ type ContextPage struct {
 	TrustEpoch  uint64
 }
 
+// FromContextPage adapts a durable recall/context page into a context-page
+// Entry, mapping a quarantined page to AdmissionQuarantine and tagging it with
+// session/step/descriptor labels.
 func FromContextPage(p ContextPage, opts ...Option) Entry {
 	taint := p.Taint
 	admit := AdmissionAllow
@@ -554,6 +599,9 @@ type KVPrefix struct {
 	Owner       string
 }
 
+// FromKVPrefix adapts a KV-prefix span into a prefix-aligned KV-span Entry,
+// digesting the token IDs when no digest is supplied and admitting it as a
+// trusted, fleet-scoped borrow.
 func FromKVPrefix(p KVPrefix, opts ...Option) Entry {
 	length := p.Length
 	if length == 0 {
@@ -613,6 +661,9 @@ type MemoryView struct {
 	TTLMillis         int64
 }
 
+// FromMemoryView adapts a derived context view into a recomputable memory-view
+// Entry, recording its source refs as parents, deriving a digest when none is
+// given, and folding the faithfulness probe into a quality-delta metric.
 func FromMemoryView(v MemoryView, opts ...Option) Entry {
 	producer := v.Producer
 	if producer == "" {
@@ -669,11 +720,15 @@ func FromMemoryView(v MemoryView, opts ...Option) Entry {
 	return e
 }
 
+// DigestBytes returns the lowercase hex SHA-256 of b, the canonical content
+// digest for byte payloads.
 func DigestBytes(b []byte) string {
 	sum := sha256.Sum256(b)
 	return hex.EncodeToString(sum[:])
 }
 
+// DigestTokenIDs returns the lowercase hex SHA-256 over the token IDs encoded as
+// big-endian 64-bit words, a stable digest for a token sequence.
 func DigestTokenIDs(ids []int) string {
 	h := sha256.New()
 	var buf [8]byte
@@ -684,6 +739,9 @@ func DigestTokenIDs(ids []int) string {
 	return hex.EncodeToString(h.Sum(nil))
 }
 
+// DigestMemoryView returns a lowercase hex SHA-256 over the view ID, view type,
+// and each source ref's identity fields, null-separated so the digest is a
+// stable function of the view's identity and inputs.
 func DigestMemoryView(viewID, viewType string, sources []EntryID) string {
 	h := sha256.New()
 	_, _ = h.Write([]byte(viewID))

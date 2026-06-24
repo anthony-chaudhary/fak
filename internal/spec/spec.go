@@ -132,6 +132,7 @@ type op struct {
 	commit bool
 }
 
+// Code returns the reserved OpsSpec opcode this op handles (OpSpecCommit or OpSpecSquash).
 func (o op) Code() abi.OpCode { return o.code }
 
 // Invoke resolves the call's (Txn, Spec.Epoch) across every registered sink. It does

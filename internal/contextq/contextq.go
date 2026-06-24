@@ -32,6 +32,10 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/recall"
 )
 
+// Request is one context-materialization query: the search query and K, the byte
+// budget, scope, pin/exclude patterns, and the optional derived-view selector
+// (PreferView + ViewCache) that switches Query from the raw-page path to the
+// view-cache path.
 type Request struct {
 	Query string `json:"query"`
 	K     int    `json:"k,omitempty"`
@@ -58,6 +62,9 @@ type Request struct {
 	ViewCache *ViewCache `json:"-"`
 }
 
+// Result is the outcome of a Query: the selected frames, slice handles, built/served
+// views, per-page materialization verdicts (HIT/FAULT/RECOMPUTE/REFUSE/ABSTAIN),
+// refusals and omissions, the render plan, and the materializer's byte/fault stats.
 type Result struct {
 	Query       string                   `json:"query"`
 	BudgetBytes int64                    `json:"budget_bytes,omitempty"`
@@ -71,6 +78,9 @@ type Result struct {
 	Stats       Stats                    `json:"stats"`
 }
 
+// Stats accounts one Query's materialization: pages touched/total/benign, sealed and
+// tombstoned skips, bytes paged in vs rendered, residency, faults avoided, and the
+// view-cache hit/recompute counts.
 type Stats struct {
 	PagesTouched      int     `json:"pages_touched"`
 	PagesTotal        int     `json:"pages_total"`
@@ -87,6 +97,9 @@ type Stats struct {
 	PoisonInSet       bool    `json:"poison_in_set"`
 }
 
+// SliceRef is a handle to one materialized context slice: the source step/role, its
+// rendered byte and token size, the source cache entry and view id, and the
+// MaterializationKind (HIT/FAULT/RECOMPUTE) that produced it.
 type SliceRef struct {
 	Step           int                 `json:"step"`
 	Role           string              `json:"role"`
@@ -98,6 +111,9 @@ type SliceRef struct {
 	MaterializedBy MaterializationKind `json:"materialized_by"`
 }
 
+// ViewType names a derived-view rendering of a source page: snippet (the verbatim
+// raw page), summary (a bounded extractive head), or playbook (the agent-edited
+// strategy store). It is both the cache key axis and the PreferView selector.
 type ViewType string
 
 const (
@@ -120,6 +136,9 @@ const (
 // summarized whole (Coverage = 1.0).
 const maxSummaryBytes = 256
 
+// MemoryViewRecord is the metadata for one derived view: its id, type, source
+// page(s)/digests, producer, policy version, scope, taint, coverage and faithfulness
+// probe, and the cachemeta entry that addresses its rendered bytes.
 type MemoryViewRecord struct {
 	ViewID            string            `json:"view_id"`
 	ViewType          ViewType          `json:"view_type"`
@@ -136,6 +155,7 @@ type MemoryViewRecord struct {
 	Labels            map[string]string `json:"labels,omitempty"`
 }
 
+// Entry returns the cachemeta entry that addresses this view's rendered bytes.
 func (v MemoryViewRecord) Entry() cachemeta.Entry { return v.CacheEntry }
 
 type MaterializationKind string
@@ -156,6 +176,9 @@ type MaterializationVerdict struct {
 	Entry  cachemeta.EntryID   `json:"entry,omitempty"`
 }
 
+// Refusal records a referenced page the materializer would not serve (sealed,
+// tombstoned, excluded by request, or page-in refused) with the reason and source
+// entry; it pairs with a REFUSE verdict.
 type Refusal struct {
 	Step       int               `json:"step"`
 	Role       string            `json:"role"`
@@ -164,6 +187,9 @@ type Refusal struct {
 	Entry      cachemeta.EntryID `json:"entry,omitempty"`
 }
 
+// Omission records a query-relevant page that was NOT materialized for a benign
+// reason (not selected by the ranker, or the byte budget was exhausted) with the
+// reason and source entry.
 type Omission struct {
 	Step       int               `json:"step"`
 	Role       string            `json:"role"`
@@ -172,6 +198,9 @@ type Omission struct {
 	Entry      cachemeta.EntryID `json:"entry,omitempty"`
 }
 
+// RenderPlan is the prompt-assembly layout the materializer emits: the ordered render
+// items split into a stable prefix (reused/derived views) and a volatile tail (raw-page
+// faults), with the provider-cache and local-KV shape hints.
 type RenderPlan struct {
 	Target             string       `json:"target"`
 	Items              []RenderItem `json:"items"`
@@ -189,6 +218,9 @@ const (
 	RenderMemoryView = "memory_view"
 )
 
+// RenderItem is one entry in the render plan: its kind (raw_page vs memory_view), the
+// source step, view id and cache entry, its token estimate, and its prompt position
+// (stable_prefix vs working_set).
 type RenderItem struct {
 	Kind          string            `json:"kind"`
 	Step          int               `json:"step,omitempty"`
@@ -214,6 +246,8 @@ type viewCacheEntry struct {
 	payload []byte
 }
 
+// NewViewCache returns an empty, concurrency-safe ViewCache ready to back the
+// derived-view materialization path.
 func NewViewCache() *ViewCache {
 	return &ViewCache{store: make(map[string]viewCacheEntry)}
 }

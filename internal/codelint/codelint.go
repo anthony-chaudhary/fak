@@ -45,6 +45,7 @@ const (
 	Error
 )
 
+// String renders the severity as "error" or "warning".
 func (s Severity) String() string {
 	if s == Error {
 		return "error"
@@ -72,6 +73,7 @@ type Finding struct {
 	Detail   string   `json:"detail"`   // the human message
 }
 
+// String renders the finding as "file:line:col: severity: detail (pack/code)", omitting line/col when unknown.
 func (f Finding) String() string {
 	loc := f.File
 	if f.Line > 0 {

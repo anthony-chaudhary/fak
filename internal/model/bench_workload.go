@@ -19,6 +19,8 @@ type BenchWorkload struct {
 	Meta        json.RawMessage `json:"meta,omitempty"`
 }
 
+// BenchCase is one recorded run in a BenchWorkload: its prompt/completion token counts (the
+// compute the benchmark replays) plus the turn/tool-call provenance from the real agent run.
 type BenchCase struct {
 	Name             string `json:"name"`
 	Source           string `json:"source,omitempty"`
@@ -30,6 +32,8 @@ type BenchCase struct {
 	ToolCalls        int    `json:"tool_calls,omitempty"`
 }
 
+// LoadBenchWorkload reads and decodes a BenchWorkload JSON file, defaulting each unnamed case
+// and rejecting a workload with no cases or any case whose prompt/completion token count is <= 0.
 func LoadBenchWorkload(path string) (*BenchWorkload, error) {
 	b, err := os.ReadFile(path)
 	if err != nil {

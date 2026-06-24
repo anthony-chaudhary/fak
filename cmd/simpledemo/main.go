@@ -730,6 +730,8 @@ type progressWriter struct {
 	lastUpdate   time.Time
 }
 
+// Write forwards bytes to the wrapped writer, accumulates the running total, and
+// throttles a percent/throughput progress line to stderr at most every 500ms.
 func (p *progressWriter) Write(b []byte) (int, error) {
 	n, err := p.w.Write(b)
 	*p.written += int64(n)

@@ -62,6 +62,7 @@ type Rung struct {
 	denies   int64
 }
 
+// New builds an empty grammar Rung with its tool->digest and digest->grammar indexes.
 func New() *Rung {
 	return &Rung{byTool: map[string]string{}, byDigest: map[string]Grammar{}}
 }
@@ -123,6 +124,7 @@ func (r *Rung) LoadFromJSONSchema(tool string, schema []byte) error {
 	return nil
 }
 
+// Caps reports the rung's capabilities; the grammar rung declares none.
 func (r *Rung) Caps() []abi.Capability { return nil }
 
 // Adjudicate enforces the grammar.

@@ -39,6 +39,7 @@ type Finding struct {
 	Detail string // what was found and how to resolve it
 }
 
+// String renders the finding as "file:line: detail (CODE)".
 func (f Finding) String() string {
 	return fmt.Sprintf("%s:%d: %s (%s)", f.File, f.Line, f.Detail, f.Code)
 }

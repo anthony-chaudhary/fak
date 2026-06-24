@@ -35,6 +35,7 @@ type Corpus struct {
 	rows []abi.LabelRow
 }
 
+// NewCorpus returns an empty thread-safe corpus ready to collect LabelRows.
 func NewCorpus() *Corpus { return &Corpus{} }
 
 func (c *Corpus) add(r abi.LabelRow) {
@@ -104,6 +105,7 @@ func (c *Corpus) ByReason() map[string]int {
 // Corpus. Attach with kernel registration: abi.RegisterEmitter(h).
 type Harvester struct{ corpus *Corpus }
 
+// New returns a Harvester that folds adjudication events into c; register it with abi.RegisterEmitter.
 func New(c *Corpus) *Harvester { return &Harvester{corpus: c} }
 
 // Emit collects a LabelRow from each label-bearing event. An explicit typed

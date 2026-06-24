@@ -28,6 +28,8 @@ func LoadModelQuant(path string) (*model.Model, error) {
 	return LoadModelQuantProfile(path, nil)
 }
 
+// LoadModelQuantProfile is LoadModelQuant with an optional LoadProfiler that records
+// per-tensor and per-phase timings of the quant-on-load path. A nil profiler is a no-op.
 func LoadModelQuantProfile(path string, p *LoadProfiler) (*model.Model, error) {
 	t := loadProfileStart(p)
 	ws, err := OpenWeights(path)
@@ -39,6 +41,8 @@ func LoadModelQuantProfile(path string, p *LoadProfiler) (*model.Model, error) {
 	return ws.QuantModelProfile(p)
 }
 
+// NewWeightSource builds a WeightSource over a parsed GGUF File and its reader,
+// indexing tensors by name and erroring on a duplicate tensor name.
 func NewWeightSource(f *File, r io.ReaderAt, size int64) (*WeightSource, error) {
 	byName := make(map[string]int, len(f.Tensors))
 	for i, t := range f.Tensors {
@@ -50,6 +54,7 @@ func NewWeightSource(f *File, r io.ReaderAt, size int64) (*WeightSource, error) 
 	return &WeightSource{File: f, r: r, size: size, byName: byName}, nil
 }
 
+// Close closes every shard reader the source opened, returning the first close error.
 func (s *WeightSource) Close() error {
 	if len(s.closers) == 0 {
 		return nil
@@ -64,6 +69,7 @@ func (s *WeightSource) Close() error {
 	return firstErr
 }
 
+// Tensor looks up a tensor's TensorInfo by GGUF name, reporting whether it is present.
 func (s *WeightSource) Tensor(name string) (TensorInfo, bool) {
 	i, ok := s.byName[name]
 	if !ok {
@@ -72,6 +78,8 @@ func (s *WeightSource) Tensor(name string) (TensorInfo, bool) {
 	return s.File.Tensors[i], true
 }
 
+// TensorBytes reads a named tensor's raw (still-quantized) payload bytes from the
+// shard reader that holds it, bounds-checking the offset and length against the file.
 func (s *WeightSource) TensorBytes(name string) ([]byte, TensorInfo, error) {
 	info, ok := s.Tensor(name)
 	if !ok {
@@ -101,6 +109,7 @@ func (s *WeightSource) TensorBytes(name string) ([]byte, TensorInfo, error) {
 	return buf, info, nil
 }
 
+// TensorF32 reads a named tensor and dequantizes its payload to float32.
 func (s *WeightSource) TensorF32(name string) ([]float32, TensorInfo, error) {
 	raw, info, err := s.TensorBytes(name)
 	if err != nil {
@@ -110,6 +119,7 @@ func (s *WeightSource) TensorF32(name string) ([]float32, TensorInfo, error) {
 	return out, info, err
 }
 
+// Model builds an in-kernel model.Model from this source via the dequant-to-f32 path.
 func (s *WeightSource) Model() (*model.Model, error) {
 	cfg, tensors, err := s.F32Tensors()
 	if err != nil {
@@ -118,10 +128,16 @@ func (s *WeightSource) Model() (*model.Model, error) {
 	return model.NewFromF32Tensors(cfg, tensors)
 }
 
+// QuantModel builds an in-kernel model.Model via the memory-lean quant-on-load path
+// (matmul weights kept Q8_0), without profiling.
 func (s *WeightSource) QuantModel() (*model.Model, error) {
 	return s.QuantModelProfile(nil)
 }
 
+// QuantModelProfile builds an in-kernel model.Model via the quant-on-load path,
+// dequantizing each GGUF tensor only long enough to normalize and re-quantize it into
+// the model.QuantBuilder; glm_moe_dsa batched experts are split 1->E first, and an
+// optional LoadProfiler records per-phase timings. A nil profiler is a no-op.
 func (s *WeightSource) QuantModelProfile(p *LoadProfiler) (*model.Model, error) {
 	t := loadProfileStart(p)
 	cfg, err := s.File.Config()
@@ -240,6 +256,9 @@ func (s *WeightSource) QuantModelProfile(p *LoadProfiler) (*model.Model, error) 
 	return m, nil
 }
 
+// F32Tensors dequantizes every GGUF tensor to float32, mapping each to its canonical
+// HF name and normalizing its data, and returns the model Config plus the named f32
+// tensors (glm_moe_dsa batched experts split 1->E). It is the f32 path's Model builds on.
 func (s *WeightSource) F32Tensors() (model.Config, []model.NamedTensorF32, error) {
 	cfg, err := s.File.Config()
 	if err != nil {

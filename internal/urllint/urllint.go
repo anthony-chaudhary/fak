@@ -40,6 +40,8 @@ type Offense struct {
 	Snippet string
 }
 
+// String renders the offense as a "file:line: hardcoded download url ... must go
+// through the audited builder (UNVERIFIED_EXTERNAL_URL)" diagnostic line.
 func (o Offense) String() string {
 	return fmt.Sprintf("%s:%d: hardcoded download url %q must go through the audited builder (%s)",
 		o.File, o.Line, o.Snippet, ReasonUnverifiedExternalURL)

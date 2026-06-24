@@ -24,6 +24,7 @@ import (
 // surfaceSteward implements abi.Steward over the live tool surface.
 type surfaceSteward struct{}
 
+// Name returns "tool-surface-sound", this steward's stable id.
 func (surfaceSteward) Name() string { return "tool-surface-sound" }
 
 func (surfaceSteward) Check(context.Context) (violated bool, witness string) {

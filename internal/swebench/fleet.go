@@ -92,6 +92,9 @@ type fleetRunner struct {
 	workRoot string                                                   // parent for the per-instance temp dir ("" => os.TempDir)
 }
 
+// RunInstance solves one SWE-bench instance end to end: it prepares an isolated git worktree,
+// drives the coding-agent planner over it, captures the resulting diff, and returns it as a
+// Prediction. It errors when no planner is configured or any workspace/agent step fails.
 func (f *fleetRunner) RunInstance(ctx context.Context, in Instance) (Prediction, error) {
 	planner := f.cfg.Planner
 	if planner == nil {

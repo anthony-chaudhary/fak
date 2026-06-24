@@ -8,6 +8,8 @@ import (
 	"regexp"
 )
 
+// Open parses just the GGUF header/metadata at path and returns the parsed File,
+// closing the underlying file before returning (it does not retain a tensor reader).
 func Open(path string) (*File, error) {
 	f, err := os.Open(path)
 	if err != nil {
@@ -17,6 +19,10 @@ func Open(path string) (*File, error) {
 	return Read(f)
 }
 
+// OpenWeights opens a GGUF checkpoint for weight reads, transparently assembling a
+// merged WeightSource across every shard of a split checkpoint. It identifies the
+// config-carrying shard by general.architecture (not the split.no index, whose base
+// differs between HuggingFace and llama.cpp), so a caller may hand it any shard path.
 func OpenWeights(path string) (*WeightSource, error) {
 	f, gg, size, err := openAndRead(path)
 	if err != nil {

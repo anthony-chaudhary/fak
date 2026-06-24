@@ -43,6 +43,7 @@ type Usage struct {
 // the whole dispatch chain run with zero network.
 type Mock struct{ calls int64 }
 
+// Caps reports the engine's capabilities; the mock declares none.
 func (m *Mock) Caps() []abi.Capability { return nil }
 
 func (m *Mock) Complete(ctx context.Context, c *abi.ToolCall) (*abi.Result, error) {
@@ -119,8 +120,11 @@ func LoadCassette(path string) (*Cassette, error) {
 // CassetteEngine replays a cassette; on miss it errors (StatusError result).
 type CassetteEngine struct{ c *Cassette }
 
+// NewCassetteEngine wraps a loaded Cassette in an engine that replays its recorded
+// (tool, args) -> response interactions.
 func NewCassetteEngine(c *Cassette) *CassetteEngine { return &CassetteEngine{c} }
 
+// Caps reports the engine's capabilities; the cassette replayer declares none.
 func (e *CassetteEngine) Caps() []abi.Capability { return nil }
 
 func (e *CassetteEngine) Complete(ctx context.Context, c *abi.ToolCall) (*abi.Result, error) {
@@ -211,10 +215,13 @@ func init() {
 
 type residencyGate struct{}
 
+// Caps reports the residency gate's capabilities: engine.route and engine.residency.
 func (residencyGate) Caps() []abi.Capability {
 	return []abi.Capability{"engine.route", "engine.residency"}
 }
 
+// Adjudicate denies a tenant-scoped (or otherwise sensitivity-tagged) call routed to a
+// remote engine, deferring everything else — the engine-residency data-leak gate.
 func (residencyGate) Adjudicate(ctx context.Context, c *abi.ToolCall) abi.Verdict {
 	if c == nil || c.Engine == "" || !sensitiveRoute(c) || !remoteRoute(c.Engine) {
 		return abi.Verdict{Kind: abi.VerdictDefer, By: "engine-residency"}

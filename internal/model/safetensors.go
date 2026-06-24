@@ -133,6 +133,8 @@ func newSafetensorsFile(r io.ReaderAt, size int64, closer io.Closer) (*safetenso
 	return &safetensorsFile{r: r, closer: closer, hdr: hdr, dataBase: 8 + int64(hlen), size: size}, nil
 }
 
+// Close releases the underlying file or memory map (munmap on the mmap path, file
+// close otherwise); it is a no-op when the file holds no closer.
 func (sf *safetensorsFile) Close() error {
 	if sf.closer == nil {
 		return nil

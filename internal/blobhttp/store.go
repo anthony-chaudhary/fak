@@ -294,9 +294,12 @@ func init() {
 // pageOutBackend adapts *Store to abi.PageOutBackend for the keyed registry.
 type pageOutBackend struct{ s *Store }
 
+// PageOut satisfies abi.PageOutBackend by delegating to the wrapped Store's PageOut.
 func (b pageOutBackend) PageOut(ctx context.Context, r abi.Ref) (abi.Ref, error) {
 	return b.s.PageOut(ctx, r)
 }
+
+// PageIn satisfies abi.PageOutBackend by delegating to the wrapped Store's PageIn.
 func (b pageOutBackend) PageIn(ctx context.Context, h abi.Ref) (abi.Ref, error) {
 	return b.s.PageIn(ctx, h)
 }

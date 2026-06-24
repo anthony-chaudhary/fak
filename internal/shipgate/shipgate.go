@@ -26,6 +26,8 @@ const (
 	ESCALATE                 // too many consecutive non-keeps — hand to a human
 )
 
+// String renders the decision as "KEEP", "REVERT", or "ESCALATE" ("?" for an
+// unknown value).
 func (d Decision) String() string {
 	switch d {
 	case KEEP:

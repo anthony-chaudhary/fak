@@ -20,6 +20,7 @@ import (
 // the floor's blind spot, not the ceiling.
 type heuristicScreener struct{}
 
+// Name returns the screener's id, "heuristic".
 func (heuristicScreener) Name() string { return "heuristic" }
 
 // semanticMarkers are injection tells phrased to evade the literal-marker floor:
@@ -49,6 +50,8 @@ var semanticMarkers = []string{
 	"override your safety",
 }
 
+// Flag normalizes the body (lowercase, whitespace collapsed) and reports whether it
+// contains any semantic injection marker, returning the matched marker as the reason.
 func (heuristicScreener) Flag(_ context.Context, body []byte, _ string) (bool, string) {
 	norm := normalize(body)
 	for _, m := range semanticMarkers {

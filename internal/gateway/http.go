@@ -135,6 +135,7 @@ type noDelayTCPListener struct {
 	net.Listener
 }
 
+// Accept returns the next connection from the wrapped listener with Nagle disabled (TCP_NODELAY) on any *net.TCPConn, best-effort.
 func (l *noDelayTCPListener) Accept() (net.Conn, error) {
 	c, err := l.Listener.Accept()
 	if err != nil {

@@ -18,6 +18,7 @@ import (
 // either form of timeout — only the helpers that structurally cannot.
 type MissingHTTPTimeout struct{}
 
+// Code returns this rule's stable finding code, "MISSING_HTTP_TIMEOUT".
 func (MissingHTTPTimeout) Code() string { return "MISSING_HTTP_TIMEOUT" }
 
 var noTimeoutHelpers = map[string]bool{"Get": true, "Post": true, "Head": true, "PostForm": true}

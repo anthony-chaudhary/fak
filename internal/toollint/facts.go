@@ -26,6 +26,8 @@ const (
 	KindEngine
 )
 
+// String renders the Kind as its lowercase serving name ("pure"/"static"/"engine"),
+// returning "unknown" for KindUnknown or any unrecognized value.
 func (k Kind) String() string {
 	switch k {
 	case KindPure:

@@ -51,6 +51,7 @@ type Offense struct {
 	Flag string // flag name, e.g. "gguf"
 }
 
+// String renders the offense as a one-line "cmd/<dir> <func>(): -<flag> ... (CODE)" report.
 func (o Offense) String() string {
 	return fmt.Sprintf("cmd/%s %s(): -%s is a user path but never reaches pathutil.ExpandTilde (%s)",
 		o.Cmd, o.Func, o.Flag, ReasonUnexpandedUserPath)

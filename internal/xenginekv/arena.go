@@ -224,11 +224,15 @@ func (a *Arena) PageIn(ctx context.Context, handle abi.Ref) (abi.Ref, error) {
 // backend adapts an Arena to the abi RegionBackend + PageOutBackend seams.
 type backend struct{ a *Arena }
 
+// Resolver returns the arena as the abi.Resolver behind every RefRegion this backend issues.
 func (b backend) Resolver() abi.Resolver { return b.a }
 func (b backend) Caps() []abi.Capability { return []abi.Capability{CapZeroCopy} }
 func (b backend) PageOut(ctx context.Context, r abi.Ref) (abi.Ref, error) {
 	return b.a.PageOut(ctx, r)
 }
+
+// PageIn delegates to the arena's PageIn, returning the still-resolvable region handle
+// (the bytes never left the shared region).
 func (b backend) PageIn(ctx context.Context, h abi.Ref) (abi.Ref, error) {
 	return b.a.PageIn(ctx, h)
 }

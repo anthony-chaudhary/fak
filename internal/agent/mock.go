@@ -22,6 +22,8 @@ const DefaultTask = "Customer mia_li_3668 wants to book the cheapest direct flig
 // exactly as a real model would.
 type MockPlanner struct{ model string }
 
+// NewMockPlanner returns a deterministic offline planner reporting the given model
+// id, defaulting to "mock-deterministic" when model is empty.
 func NewMockPlanner(model string) *MockPlanner {
 	if model == "" {
 		model = "mock-deterministic"
@@ -29,6 +31,7 @@ func NewMockPlanner(model string) *MockPlanner {
 	return &MockPlanner{model: model}
 }
 
+// Model returns the model id this mock planner reports.
 func (m *MockPlanner) Model() string { return m.model }
 
 // state is the planner's read of the conversation so far.

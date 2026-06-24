@@ -335,18 +335,25 @@ func (r *Router) SelfCheck(ctx context.Context) error {
 // abi.CASPinner + abi.PageOutBackend, so memDriver only adds the ID.
 type memDriver struct{ s *blob.Store }
 
+// ID returns the hot-tier driver id "blob".
 func (memDriver) ID() string { return "blob" }
 func (m memDriver) Put(ctx context.Context, b []byte) (abi.Ref, error) {
 	return m.s.Put(ctx, b)
 }
+
+// Resolve materializes a Ref's bytes from the in-memory blob store.
 func (m memDriver) Resolve(ctx context.Context, r abi.Ref) ([]byte, error) {
 	return m.s.Resolve(ctx, r)
 }
+
+// Pin protects a digest from GC in the in-memory blob store (abi.CASPinner).
 func (m memDriver) Pin(digest string)   { m.s.Pin(digest) }
 func (m memDriver) Unpin(digest string) { m.s.Unpin(digest) }
 func (m memDriver) PageOut(ctx context.Context, r abi.Ref) (abi.Ref, error) {
 	return m.s.PageOut(ctx, r)
 }
+
+// PageIn re-materializes a paged-out handle from the in-memory blob store.
 func (m memDriver) PageIn(ctx context.Context, h abi.Ref) (abi.Ref, error) {
 	return m.s.PageIn(ctx, h)
 }

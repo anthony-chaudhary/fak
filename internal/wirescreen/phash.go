@@ -83,6 +83,7 @@ var (
 // model: pure-Go image hashing, stdlib only. Inert unless selected by FAK_WIRE_SCREEN=phash.
 type phashDigester struct{}
 
+// Name returns this digester's selector name, "phash".
 func (phashDigester) Name() string { return "phash" }
 
 // Summarize authors a dedup pointer ("unchanged, see frame#k") when body decodes to an
