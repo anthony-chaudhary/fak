@@ -248,15 +248,16 @@ func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// True streaming fast path: when the client asked to stream AND the request offers
-	// no tools — so there is no proposed tool call to hold for adjudication, the one
-	// thing that must stay buffered — AND the planner can stream this wire, forward the
-	// upstream tokens live for a real time-to-first-token instead of synthesizing the
-	// SSE from a fully-buffered turn. A tool-bearing or non-streaming-wire request
-	// falls through to the buffered path below, whose tail still synthesizes a stream
-	// for stream=true. streamChatLive returns false having written nothing when it
-	// cannot stream, so the fall-through is safe.
-	if req.Stream && len(req.Tools) == 0 {
+	// True streaming fast path: when the client asked to stream AND the planner can
+	// stream this wire, forward the upstream tokens live for a real time-to-first-token
+	// instead of synthesizing the SSE from a fully-buffered turn. Tool-bearing requests
+	// take this path too: CompleteStream HOLDS every proposed call off-wire for
+	// adjudication and the lift-guard keeps a text-form call from leaking into the live
+	// content, so the buffered path's trust posture is preserved (see streamChatLive). A
+	// non-streaming-wire request falls through to the buffered path below, whose tail
+	// still synthesizes a stream for stream=true. streamChatLive returns false having
+	// written nothing when it cannot stream, so the fall-through is safe.
+	if req.Stream {
 		if s.streamChatLive(ctx, w, req, reqModel, reqTrace, resultAdmissions) {
 			return
 		}

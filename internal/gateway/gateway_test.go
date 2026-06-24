@@ -1130,8 +1130,13 @@ func TestChatProxyOpenAICompatibleStreamModeStreamsAdjudicatedCalls(t *testing.T
 		if err := json.Unmarshal(raw, &req); err != nil {
 			t.Fatalf("decode upstream request: %v\n%s", err, raw)
 		}
-		if req.Stream != nil && *req.Stream {
-			t.Fatalf("gateway must not ask upstream for raw streaming deltas: %s", raw)
+		// Tool-bearing stream=true requests now take the LIVE path, which asks the
+		// upstream to stream. This server SIMULATES one that ignores stream:true and
+		// answers with a single buffered JSON body — the gateway's CompleteStream
+		// detects the non-event-stream content-type and parses it, holding every tool
+		// call for adjudication exactly as the true-SSE path does.
+		if req.Stream == nil || !*req.Stream {
+			t.Fatalf("gateway must ask upstream to stream for the live tool-bearing path: %s", raw)
 		}
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"choices":[{"message":{"role":"assistant","content":"checking","tool_calls":[{"id":"s1","type":"function","function":{"name":"allow_stream","arguments":"{\"x\":1}"}},{"id":"s2","type":"function","function":{"name":"deny_stream","arguments":"{}"}},{"id":"s3","type":"function","function":{"name":"transform_stream","arguments":"{\"secret\":\"y\"}"}}]},"finish_reason":"tool_calls"}],"usage":{"prompt_tokens":7,"completion_tokens":3,"total_tokens":10}}`))
@@ -1229,8 +1234,13 @@ func TestChatProxyOpenAICompatibleStreamModeStreamsAdjudicatedCalls(t *testing.T
 	if got := content.String(); got != "checking" {
 		t.Fatalf("reassembled streamed content = %q, want checking", got)
 	}
-	// The opening delta announces the surviving + repaired tool calls (never denied).
-	tools := first.Choices[0].Delta.ToolCalls
+	// The live path emits content first, then the surviving + repaired tool calls in a
+	// dedicated delta (never the denied one) — so collect tool calls across every chunk
+	// rather than only the opening one.
+	var tools []ChatDeltaToolCall
+	for _, c := range chunks {
+		tools = append(tools, c.Choices[0].Delta.ToolCalls...)
+	}
 	if len(tools) != 2 {
 		t.Fatalf("streamed tool calls = %d, want 2: %+v", len(tools), tools)
 	}

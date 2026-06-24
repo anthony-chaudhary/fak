@@ -17,14 +17,17 @@ import (
 // generation; this is the half that makes fak a real low-latency server in front of a
 // streaming upstream (a hosted OpenAI-compatible API, or a local vLLM/SGLang).
 //
-// The kernel's adjudication invariant is preserved by construction. The caller only
-// enters this path when the request declares NO tools (see handleChatCompletions), so
-// there is no proposed tool call to gate — the one thing that must stay buffered until
-// k.Decide runs. Any tool call a model hallucinates with no tools offered is STILL
-// routed through adjudicateProposed before a survivor is emitted, so nothing
-// un-adjudicated ever reaches the wire. Streamed content is the model's own prose,
-// which the buffered path forwards verbatim too, so streaming it live changes nothing
-// about the trust posture.
+// The kernel's adjudication invariant is preserved by construction even when tools
+// ARE offered. A tool call is the one thing that must stay buffered until k.Decide
+// runs, and CompleteStream HOLDS it: the native delta.tool_calls channel is
+// accumulated off-wire (never streamed), and every proposed call — native or one a
+// model emitted as content TEXT and LiftTextToolCalls recovered — is routed through
+// adjudicateProposed before a survivor is emitted. Streamed content is the model's
+// own prose, which the buffered path forwards verbatim too. The one residual hazard,
+// a model burying a call in CONTENT (where a denied call's raw text could leak before
+// lift strips it), is closed by liftGuard, which withholds any text-form dialect span
+// from the live stream so the bytes that reach the wire are a prefix of the buffered
+// post-lift content (see stream_lift_guard.go).
 //
 // It returns true once it owns the response (streamed a turn, or wrote a clean HTTP
 // error before any byte hit the wire); false when the configured planner cannot
@@ -63,15 +66,22 @@ func (s *Server) streamChatLive(ctx context.Context, w http.ResponseWriter, req 
 		w.WriteHeader(http.StatusOK)
 		return writeSSEData(w, chunk(ChatDelta{Role: agent.RoleAssistant}, nil, nil))
 	}
-	sink := func(contentDelta string) error {
+	emitContent := func(contentDelta string) error {
+		if contentDelta == "" {
+			return nil
+		}
 		if err := start(); err != nil {
 			return err
 		}
 		return writeSSEData(w, chunk(ChatDelta{Content: contentDelta}, nil, nil))
 	}
+	// The sink streams prose through the lift-guard so a text-form tool-call dialect a
+	// model buries in content never reaches the wire before adjudication. Whatever the
+	// guard withheld is reconciled against the buffered post-lift content below.
+	guard := newLiftGuard(emitContent)
 
 	began := time.Now()
-	comp, err := sp.CompleteStream(ctx, sink, req.Messages, req.Tools,
+	comp, err := sp.CompleteStream(ctx, guard.write, req.Messages, req.Tools,
 		agent.WithModel(req.Model),
 		agent.WithMaxTokens(req.MaxTokens),
 		agent.WithTemperature(req.Temperature),
@@ -103,10 +113,30 @@ func (s *Server) streamChatLive(ctx context.Context, w http.ResponseWriter, req 
 	// s.complete; this path bypasses it, so account here.
 	s.metrics.observeInference(comp.Usage.PromptTokens, comp.Usage.CompletionTokens, comp.Usage.CachedPromptTokens(), comp.FinishReason, time.Since(began))
 
+	// Tool-call conformance fail-closed: the upstream announced tool_calls but none
+	// survived parsing + the text-lift fallback. Proceeding would skip adjudication on
+	// a call the model intended to make — the exact silent no-op the buffered path
+	// refuses (handleChatCompletions). Fail closed here too: a clean 502 if nothing has
+	// streamed, else a terminal error frame so the client never reads a benign empty
+	// stop on a skipped call.
+	if comp.ToolCallsDropped && len(comp.Message.ToolCalls) == 0 {
+		if !started {
+			s.logf("gateway: upstream announced tool_calls but none parsed (stream conformance fail-closed); model=%s", s.model)
+			writeErr(w, http.StatusBadGateway, "upstream tool-call format not recognized; refusing to skip adjudication")
+			return true
+		}
+		s.logf("gateway: upstream announced tool_calls but none parsed mid-stream (conformance fail-closed); model=%s", s.model)
+		_ = writeSSEData(w, map[string]any{
+			"error": map[string]any{"message": "upstream tool-call format not recognized", "type": "server_error"},
+		})
+		writeSSEDone(w, flusher)
+		return true
+	}
+
 	// Adjudicate any proposed tool call BEFORE the client sees it — the load-bearing
-	// invariant, applied even though tools were absent (a model can still hallucinate
-	// a call). Only survivors are emitted.
-	kept, adjs, _ := s.adjudicateProposed(ctx, comp.Message.ToolCalls, reqTrace)
+	// invariant, applied whether or not tools were offered (a model can hallucinate a
+	// call even with none offered). Only survivors are emitted.
+	kept, adjs, dropped := s.adjudicateProposed(ctx, comp.Message.ToolCalls, reqTrace)
 	finish := comp.FinishReason
 	switch {
 	case len(kept) > 0:
@@ -122,6 +152,21 @@ func (s *Server) streamChatLive(ctx context.Context, w http.ResponseWriter, req 
 	// client always gets a well-formed role → finish → [DONE] sequence.
 	if err := start(); err != nil {
 		return true
+	}
+	// Flush the content the guard withheld: the buffered post-lift content beyond the
+	// prose already streamed. Concatenated with the live bytes this reproduces the
+	// buffered path's content exactly (modulo leading whitespace lift trims).
+	remaining := liftRemainder(guard.streamed(), comp.Message.Content)
+	if err := emitContent(remaining); err != nil {
+		return true
+	}
+	// Parity with the buffered path: when every proposed call was refused AND the turn
+	// carried no content of its own, give even a fak-unaware client an actionable note
+	// (which tools were denied and why) rather than an empty turn.
+	if len(kept) == 0 && dropped > 0 && guard.streamed() == "" && remaining == "" {
+		if err := emitContent(denySummary(adjs)); err != nil {
+			return true
+		}
 	}
 	if len(kept) > 0 {
 		if err := writeSSEData(w, chunk(ChatDelta{ToolCalls: streamToolCalls(kept)}, nil, nil)); err != nil {
