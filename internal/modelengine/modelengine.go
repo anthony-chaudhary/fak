@@ -228,4 +228,12 @@ var Default = New()
 func init() {
 	abi.RegisterEngine(EngineID, Default)
 	abi.RegisterCapability("engine.inkernel")
+	// Register the in-process model.Session adapter as the default KV-MMU enforcement
+	// backend (the existing model->abi seam this package already owns). The KV-MMU
+	// (internal/kvmmu) enforces its quarantine through whatever KVBackend is registered;
+	// this is the in-process default (last-wins), so a remote/zero-copy KV backend can
+	// override it by blank-import order with no kvmmu edit. Capability "kvbackend.v1"
+	// advertises the seam to negotiation.
+	abi.RegisterKVBackend(model.KVBackendFor)
+	abi.RegisterCapability("kvbackend.v1")
 }

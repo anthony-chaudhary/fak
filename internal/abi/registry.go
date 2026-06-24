@@ -88,6 +88,7 @@ func ResetForTest() {
 	reg.caps = map[Capability]bool{}
 	reg.engines = map[string]EngineDriver{}
 	reg.regionBackend = nil
+	reg.kvBackend = nil
 	reg.pageOut = map[string]PageOutBackend{}
 	reg.witnesses = map[string]WitnessResolver{}
 	reg.stewards = nil
@@ -114,7 +115,8 @@ var reg = struct {
 	reasons       map[ReasonCode]string
 	caps          map[Capability]bool
 	engines       map[string]EngineDriver
-	regionBackend RegionBackend // the Resolver provider (last registration wins)
+	regionBackend RegionBackend    // the Resolver provider (last registration wins)
+	kvBackend     KVBackendFactory // the KV-MMU enforcement backend factory (last registration wins)
 	pageOut       map[string]PageOutBackend
 	witnesses     map[string]WitnessResolver
 	stewards      []Steward
@@ -216,6 +218,7 @@ type snapshot struct {
 	engineIDs []string     // id-sorted
 	anyEngine EngineDriver // deterministic pick for Engine("") (engines[engineIDs[0]])
 	region    RegionBackend
+	kvBackend KVBackendFactory
 	pageOut   map[string]PageOutBackend
 	ops       map[OpCode]Op
 }
@@ -256,6 +259,7 @@ func rebuildSnapshot() {
 		pageOut:      make(map[string]PageOutBackend, len(reg.pageOut)),
 		ops:          make(map[OpCode]Op, len(reg.ops)),
 		region:       reg.regionBackend,
+		kvBackend:    reg.kvBackend,
 	}
 	for i, r := range reg.adjudicators {
 		s.adjudicators[i] = r.a
@@ -527,6 +531,20 @@ func RegisterRegionBackend(b RegionBackend) {
 	rebuildSnapshot()
 }
 
+// RegisterKVBackend sets the KV-MMU enforcement backend factory (the in-process
+// model.Session adapter now, a remote/zero-copy KV backend later). The last
+// registration wins, so a disaggregated KV driver overrides the default by
+// blank-import order — exactly like RegisterRegionBackend, but the registered value
+// is a per-session FACTORY (a KV cache is per-session state, not a stateless global
+// resolver). kvmmu.Context enforces its quarantine through the KVBackend the factory
+// builds, so inverting the enforcement medium is a registration, not a kvmmu edit.
+func RegisterKVBackend(f KVBackendFactory) {
+	reg.mu.Lock()
+	defer reg.mu.Unlock()
+	reg.kvBackend = f
+	rebuildSnapshot()
+}
+
 // RegisterPageOutBackend adds an MMU page-out codec (Go blob store default;
 // headroom sidecar later).
 func RegisterPageOutBackend(id string, b PageOutBackend) {
@@ -601,6 +619,32 @@ type PageOutBackend interface {
 	PageOut(ctx context.Context, r Ref) (Ref, error) // returns a handle Ref
 	PageIn(ctx context.Context, handle Ref) (Ref, error)
 }
+
+// KVBackend is the kernel-owned attention-cache the KV-MMU (internal/kvmmu)
+// ENFORCES a quarantine verdict on. It captures EXACTLY the operations the bridge
+// performs on a session's cache: read the live length, prefill a token span (and
+// read the next-token logits), evict a span by [from,len) (the re-RoPE / renumber
+// quarantine primitive, returning the count of positions removed), and report the
+// model id used to key the cachemeta entry. The in-process model.Session is the
+// v0.1 default (model registers a wrapping adapter); a remote/zero-copy backend —
+// the disaggregated-agent-memory direction — is an additive registration that
+// attaches the SAME way the region/page-out backends do, so the KV-MMU enforces
+// against an engine fak does not itself run with no edit to the kvmmu composer.
+type KVBackend interface {
+	Len() int                    // live cached positions
+	Prefill(ids []int) []float32 // prefill a span; return next-token logits
+	Evict(from, n int) int       // evict [from,from+n); return positions removed
+	ModelID() string             // model id for the cachemeta cache key
+}
+
+// KVBackendFactory adapts a session-like value (the in-process *model.Session in
+// v0.1) into a KVBackend. It is the per-session constructor seam: kvmmu.Context
+// enforces through a KVBackend INSTANCE (one per session), so the registry holds a
+// FACTORY that wraps a concrete session rather than a single process-global backend
+// (the region/page-out backends are stateless and global; a KV cache is per-session
+// state). The factory reports ok=false for a value it does not recognize, so a
+// mismatched session type fails closed instead of silently mis-enforcing.
+type KVBackendFactory func(session any) (KVBackend, bool)
 
 // WitnessResolver backs the require-witness verdict: confirm a claimed effect
 // from evidence the agent did not author. v0.1 registers a pass-through stub;
@@ -836,6 +880,19 @@ func ActiveResolver() Resolver {
 		return b.Resolver()
 	}
 	return nil
+}
+
+// KVBackendFor builds the KV-MMU enforcement backend for a session via the
+// registered KVBackendFactory (the in-process model.Session adapter by default).
+// It returns ok=false when no factory is registered, or when the registered factory
+// does not recognize the session value — both fail-closed, so the KV-MMU never
+// enforces against a backend it could not construct. This is the read side of the
+// RegisterKVBackend seam, the per-session dual of ActiveResolver.
+func KVBackendFor(session any) (KVBackend, bool) {
+	if f := loadSnapshot().kvBackend; f != nil {
+		return f(session)
+	}
+	return nil, false
 }
 
 // CASPinner is an OPTIONAL capability a Resolver may implement when its backing

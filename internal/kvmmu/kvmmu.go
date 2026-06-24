@@ -88,14 +88,22 @@ func (FoldedGate) Admit(ctx context.Context, c *abi.ToolCall, r *abi.Result) abi
 	return best
 }
 
-// Context tracks the K/V span each segment occupies in a model.Session's cache,
-// so a quarantine verdict on a segment evicts exactly that span and later
-// segments are renumbered to match the compacted cache. Construct with New (the
-// full registered detector chain) or NewWithGate (an explicit gate — e.g. a bare
-// ctxmmu.MMU for a deterministic test, or the live session gate the recall leaf
-// also persists, so byte-level and KV-level quarantine share one decision).
+// Context tracks the K/V span each segment occupies in a registered KV backend's
+// cache (the in-process model.Session by default), so a quarantine verdict on a
+// segment evicts exactly that span and later segments are renumbered to match the
+// compacted cache. Construct with New (the full registered detector chain) or
+// NewWithGate (an explicit gate — e.g. a bare ctxmmu.MMU for a deterministic test,
+// or the live session gate the recall leaf also persists, so byte-level and KV-level
+// quarantine share one decision).
+//
+// Enforcement goes through the abi.KVBackend interface (Len / Prefill / Evict /
+// ModelID), NOT a concrete model type: the seam that issue #385 inverts. The
+// session-typed constructors (New / NewWithGate) are a convenience that wraps a
+// *model.Session into the in-process backend; NewBackend / NewBackendWithGate take
+// an already-built abi.KVBackend (a remote/zero-copy KV backend, the disaggregated
+// direction) so enforcement can run against an engine fak does not itself host.
 type Context struct {
-	S           *model.Session
+	kv          abi.KVBackend
 	gate        Gate
 	segs        []*Segment
 	meta        []cachemeta.Entry
@@ -104,12 +112,27 @@ type Context struct {
 }
 
 // New wires the kernel's full registered detector chain over a session's
-// kernel-owned KV cache (the production gate).
-func New(s *model.Session) *Context { return &Context{S: s, gate: FoldedGate{}} }
+// kernel-owned KV cache (the production gate). Convenience wrapper: it adapts the
+// session into the in-process abi.KVBackend; enforcement runs through that interface.
+func New(s *model.Session) *Context { return NewWithGate(s, FoldedGate{}) }
 
-// NewWithGate enforces an explicit gate over the session's cache.
+// NewWithGate enforces an explicit gate over the session's cache. Convenience
+// wrapper that adapts the *model.Session into the in-process abi.KVBackend so the
+// enforcement path is the abi seam, not the concrete session.
 func NewWithGate(s *model.Session, gate Gate) *Context {
-	return &Context{S: s, gate: gate}
+	kv, _ := model.KVBackend(s) // in-process default; ok=false only for a nil session
+	return NewBackendWithGate(kv, gate)
+}
+
+// NewBackend wires the full registered detector chain over an already-built
+// abi.KVBackend — the pure-abi constructor with no concrete model dependency, so a
+// remote/zero-copy KV backend (the disaggregated-agent-memory direction) can be
+// enforced the SAME way the in-process session is.
+func NewBackend(kv abi.KVBackend) *Context { return NewBackendWithGate(kv, FoldedGate{}) }
+
+// NewBackendWithGate enforces an explicit gate over an already-built abi.KVBackend.
+func NewBackendWithGate(kv abi.KVBackend, gate Gate) *Context {
+	return &Context{kv: kv, gate: gate}
 }
 
 // Append prefills a labeled segment of token ids into the session's KV cache,
@@ -119,8 +142,8 @@ func NewWithGate(s *model.Session, gate Gate) *Context {
 // untrusted tool output. The caller decodes from the returned logits via
 // model.Session.Step (only the final chunk before a model turn needs them).
 func (c *Context) Append(id, tool string, ids []int) ([]float32, *Segment) {
-	from := c.S.Cache.Len()
-	logits := c.S.Prefill(ids)
+	from := c.kv.Len()
+	logits := c.kv.Prefill(ids)
 	seg := &Segment{ID: id, Tool: tool, From: from, Len: len(ids), KV: c.kvEntryID(ids)}
 	c.segs = append(c.segs, seg)
 	return logits, seg
@@ -128,11 +151,8 @@ func (c *Context) Append(id, tool string, ids []int) ([]float32, *Segment) {
 
 func (c *Context) kvEntryID(ids []int) cachemeta.EntryID {
 	modelID := ""
-	if c.S != nil && c.S.M != nil {
-		modelID = c.S.M.Cfg.ModelType
-		if modelID == "" && len(c.S.M.Cfg.Architectures) > 0 {
-			modelID = c.S.M.Cfg.Architectures[0]
-		}
+	if c.kv != nil {
+		modelID = c.kv.ModelID()
 	}
 	return cachemeta.FromKVPrefix(cachemeta.KVPrefix{
 		Tokens:  ids,
@@ -299,7 +319,7 @@ func (c *Context) ApplyPlan(plan ctxplan.Plan) (evicted int) {
 // ledger so every segment after it shifts down by the evicted length — keeping
 // the ledger consistent with model.KVCache.Evict's own compaction.
 func (c *Context) evict(seg *Segment) int {
-	n := c.S.Cache.Evict(seg.From, seg.Len)
+	n := c.kv.Evict(seg.From, seg.Len)
 	c.external = append(c.external, cachemeta.PlanExternalInvalidations(seg.KV, c.meta)...)
 	c.invalidateReferences(seg.KV)
 	for _, s := range c.segs {
@@ -352,8 +372,8 @@ func (c *Context) ExternalInvalidations() []cachemeta.ExternalInvalidationDirect
 	return append([]cachemeta.ExternalInvalidationDirective(nil), c.external...)
 }
 
-// CacheLen is the number of live K/V positions in the session cache.
-func (c *Context) CacheLen() int { return c.S.Cache.Len() }
+// CacheLen is the number of live K/V positions in the enforced KV backend's cache.
+func (c *Context) CacheLen() int { return c.kv.Len() }
 
 // Evicted counts the segments whose K/V has been evicted from the cache — the
 // KV-level analogue of ctxmmu's quarantine counter, derived from the ledger so it
