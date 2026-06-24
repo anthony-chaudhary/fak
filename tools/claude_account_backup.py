@@ -187,7 +187,17 @@ def cmd_list(_args: argparse.Namespace) -> int:
     blocks = _live_block_status()
     dirs = _load_roster_dirs()
     seen_emails: set[str] = set()
+    # which emails are held by MORE THAN ONE roster dir -- a duplicate identity (e.g.
+    # day24-netra + q-netra both logged into day24@). Keying a row by email alone hides
+    # one of those dirs; this set lets us flag both so neither vanishes.
+    email_to_names: dict[str, list[str]] = {}
+    for name, cdir in dirs.items():
+        email_to_names.setdefault(_email_of(cdir) or f"unknown-{name}", []).append(name)
+    shared = {e for e, names in email_to_names.items() if len(names) > 1}
+
     print(f"account backup audit  ({len(dirs)} roster dir(s)) -> {BACKUP_ROOT}")
+    # PER DIR, not per email: two dirs on one account must BOTH show (the q-netra/day24
+    # duplicate is exactly the thing that must never silently merge away).
     for name, cdir in dirs.items():
         email = _email_of(cdir) or f"unknown-{name}"
         seen_emails.add(email)
@@ -196,7 +206,8 @@ def cmd_list(_args: argparse.Namespace) -> int:
         # compact creds label: 'cred' / 'oauth' / 'cred+oauth' / 'NO CREDS'
         short = {".credentials.json": "cred", ".oauth-token": "oauth"}
         creds = "+".join(short[f] for f in have) if have else "NO CREDS"
-        # backup state
+        # backup state (keyed by email -- the backup tree is per-account, so two dirs
+        # on one account legitimately point at the same snapshots)
         snaps = backup_by_email.get(email)
         if snaps:
             backup = f"{len(snaps)} snapshot(s), newest {snaps[0].name}"
@@ -210,7 +221,9 @@ def cmd_list(_args: argparse.Namespace) -> int:
             status = "available"
         else:
             status = "status unknown"
-        print(f"  {email:<40} [{creds:<18}] {backup:<34} {status}")
+        dup = "  (!) shares account with " + ", ".join(
+            n for n in email_to_names[email] if n != name) if email in shared else ""
+        print(f"  {name:<26} {email:<40} [{creds:<18}] {backup:<34} {status}{dup}")
 
     # backups whose email is no longer in the roster (a removed/renamed account) --
     # still on disk and restorable, so surface them rather than hide them.

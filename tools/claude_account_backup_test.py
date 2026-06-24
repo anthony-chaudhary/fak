@@ -98,6 +98,28 @@ def test_list_shows_every_roster_account(tmp_path, monkeypatch, capsys):
     assert "BLOCKED" in out                    # with its live block status
 
 
+def test_list_shows_a_row_per_dir_even_when_two_share_an_account(tmp_path, monkeypatch, capsys):
+    """Two dirs logged into ONE account must BOTH show, each by its roster name,
+    and be flagged as sharing -- neither may merge away (the day24/q-netra case)."""
+    d1 = tmp_path / ".claude-day24-netra"
+    _write_account(d1, "day24@example.com", cred=True, oauth=True)
+    d2 = tmp_path / ".claude-q-netra"
+    _write_account(d2, "day24@example.com", cred=True, oauth=False)  # same email!
+
+    monkeypatch.setattr(b, "BACKUP_ROOT", tmp_path / "backups")
+    monkeypatch.setattr(b, "_load_roster_dirs",
+                        lambda: {"day24-netra": d1, "q-netra": d2})
+    monkeypatch.setattr(b, "_live_block_status", dict)
+    assert b.cmd_list(None) == 0
+    out = capsys.readouterr().out
+
+    # both dir names appear as their own rows
+    assert "day24-netra" in out
+    assert "q-netra" in out
+    # the shared-account collision is flagged on both, not silently merged
+    assert out.count("shares account with") == 2
+
+
 def test_list_degrades_when_fleet_status_unavailable(tmp_path, monkeypatch, capsys):
     """A broken/absent fleet_accounts must not crash the audit -- status degrades to
     'status unknown' and every account still lists."""
