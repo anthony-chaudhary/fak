@@ -988,6 +988,9 @@ def render_doc_index(payload: dict[str, Any], *, stamp: str | None = None) -> st
     out.append("")
     out.append("> Regenerate: `python tools/product_scorecard.py --markdown-dir docs/product-scorecard`.")
     out.append("")
+    out.append("> Person-facing snapshot (what you can run today + what's next): "
+               "[`docs/PRODUCT-STATUS.md`](../PRODUCT-STATUS.md).")
+    out.append("")
     out.append("## Headline")
     out.append("")
     out.append("| Metric | Value |")

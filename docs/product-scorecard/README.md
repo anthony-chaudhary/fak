@@ -11,6 +11,8 @@ The sibling scorecards grade fak's internals (code, docs) and its competitive st
 
 > Regenerate: `python tools/product_scorecard.py --markdown-dir docs/product-scorecard`.
 
+> Person-facing snapshot (what you can run today + what's next): [`docs/PRODUCT-STATUS.md`](../PRODUCT-STATUS.md).
+
 ## Headline
 
 | Metric | Value |

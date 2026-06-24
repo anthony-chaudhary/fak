@@ -3,6 +3,10 @@
 > The deliverable's whole point: this status is **not a self-report**. Every line
 > below is closed by a witness the author did not write — a `go` exit code, a
 > benchmark field, a git tag, or the DOS truth syscall reading git ancestry.
+>
+> **Product standing** (which concepts a person can pick up and use today, and what's
+> next): [`docs/PRODUCT-STATUS.md`](docs/PRODUCT-STATUS.md) — 10 durable products, 100%
+> concept-catalog coverage, cross-checked against the tree by `tools/product_scorecard.py`.
 
 ## 0. 2026-06-18 benchmark/status refresh
 
