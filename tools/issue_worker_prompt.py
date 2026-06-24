@@ -58,17 +58,26 @@ def fetch_issue(number: int, *, workspace: Path, timeout: int = 60) -> dict[str,
     minimal record (number only) so the prompt still renders — a worker can read
     the live issue itself with ``gh issue view`` as its first step."""
     try:
+        # gh emits UTF-8; force it. Without encoding=, Windows decodes with cp1252
+        # and a single non-cp1252 byte in the issue body (an em-dash, smart quote,
+        # or emoji — the house style is em-dash-heavy) raises UnicodeDecodeError in
+        # subprocess's reader thread, leaving proc.stdout None. errors="replace"
+        # keeps a stray byte on any platform from crashing the decode.
         proc = subprocess.run(
             ["gh", "issue", "view", str(number), "--json",
              "number,title,body,labels,state"],
-            cwd=str(workspace), capture_output=True, text=True, timeout=timeout)
+            cwd=str(workspace), capture_output=True, text=True,
+            encoding="utf-8", errors="replace", timeout=timeout)
     except (OSError, subprocess.TimeoutExpired) as exc:
         return {"number": number, "_error": str(exc)}
     if proc.returncode != 0:
-        return {"number": number, "_error": (proc.stderr or proc.stdout).strip()[-300:]}
+        return {"number": number, "_error": (proc.stderr or proc.stdout or "").strip()[-300:]}
     try:
         doc = json.loads(proc.stdout)
-    except ValueError:
+    except (ValueError, TypeError):
+        # ValueError: malformed JSON. TypeError: stdout is None (a reader-thread
+        # decode error on a node still on the old cp1252 path). Either way the
+        # docstring's promise holds — return the minimal record, never crash.
         return {"number": number, "_error": "gh issue view produced no JSON"}
     return doc if isinstance(doc, dict) else {"number": number}
 

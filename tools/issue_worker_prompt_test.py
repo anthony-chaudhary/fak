@@ -81,6 +81,72 @@ class RenderPromptTest(unittest.TestCase):
         self.assertIn("no body", p)
 
 
+class FetchIssueDecodeTest(unittest.TestCase):
+    """fetch_issue must decode gh output as UTF-8 and never crash — the docstring
+    promises a minimal record on ANY failure. A non-cp1252 byte in an issue body
+    (em-dash/smart-quote/emoji) used to raise UnicodeDecodeError in subprocess's
+    reader thread, leaving proc.stdout None, and `json.loads(None)` raised a
+    TypeError the old `except ValueError` did not catch — crashing the dispatcher.
+    """
+
+    class _Proc:
+        def __init__(self, returncode: int, stdout, stderr=None) -> None:
+            self.returncode = returncode
+            self.stdout = stdout
+            self.stderr = stderr
+
+    def test_forces_utf8_decoding(self) -> None:
+        mod = load()
+        seen: dict = {}
+
+        def fake_run(cmd, **kw):
+            seen.update(kw)
+            return self._Proc(0, '{"number": 5, "title": "t"}')
+
+        orig = mod.subprocess.run
+        mod.subprocess.run = fake_run
+        try:
+            doc = mod.fetch_issue(5, workspace=Path("."))
+        finally:
+            mod.subprocess.run = orig
+        # gh emits UTF-8; the shell-out must say so explicitly (not inherit cp1252).
+        self.assertEqual(seen.get("encoding"), "utf-8")
+        self.assertEqual(seen.get("errors"), "replace")
+        self.assertEqual(doc.get("title"), "t")
+
+    def test_survives_none_stdout_without_crashing(self) -> None:
+        mod = load()
+
+        def fake_run(cmd, **kw):
+            # Simulate a reader-thread decode error: rc 0 but stdout never decoded.
+            return self._Proc(0, None)
+
+        orig = mod.subprocess.run
+        mod.subprocess.run = fake_run
+        try:
+            doc = mod.fetch_issue(42, workspace=Path("."))
+        finally:
+            mod.subprocess.run = orig
+        # No TypeError — the minimal record is returned, honoring the contract.
+        self.assertEqual(doc["number"], 42)
+        self.assertIn("_error", doc)
+
+    def test_nonzero_returncode_with_none_streams_does_not_crash(self) -> None:
+        mod = load()
+
+        def fake_run(cmd, **kw):
+            return self._Proc(1, None, None)
+
+        orig = mod.subprocess.run
+        mod.subprocess.run = fake_run
+        try:
+            doc = mod.fetch_issue(7, workspace=Path("."))
+        finally:
+            mod.subprocess.run = orig
+        self.assertEqual(doc["number"], 7)
+        self.assertIn("_error", doc)
+
+
 class FetchIssueTest(unittest.TestCase):
     def test_build_record_shape_on_fetch_error(self) -> None:
         mod = load()

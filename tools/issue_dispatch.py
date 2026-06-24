@@ -67,7 +67,7 @@ def run_json(cmd: list[str], cwd: Path, timeout: int,
     ok_codes = ok_codes if ok_codes is not None else set(range(0, 16))
     try:
         proc = subprocess.run(cmd, cwd=cwd, capture_output=True, text=True,
-                              timeout=timeout)
+                              encoding="utf-8", errors="replace", timeout=timeout)
     except (OSError, subprocess.TimeoutExpired) as exc:
         return {"_error": str(exc), "_cmd": cmd}
     out = (proc.stdout or "").strip()

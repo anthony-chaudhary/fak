@@ -198,7 +198,8 @@ def _opencode_config_home(account_dir: str, runs_dir: Path) -> str:
         except OSError:
             # Windows without symlink privilege: a directory junction needs none.
             subprocess.run(["cmd", "/c", "mklink", "/J", str(link), account_dir],
-                           capture_output=True, text=True)
+                           capture_output=True, text=True,
+                           encoding="utf-8", errors="replace")
     if not link.exists():
         raise RuntimeError(f"could not pin opencode account dir {account_dir!r}")
     return str(pin)
