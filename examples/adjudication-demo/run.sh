@@ -12,7 +12,7 @@
 #
 # Requires: Go (to build fak), ollama (https://ollama.com), Python 3.
 # Env knobs:
-#   FAK_DEMO_MODEL   ollama model id behind the kernel   (default qwen2.5:14b)
+#   FAK_DEMO_MODEL   ollama model id behind the kernel   (default qwen2.5:7b)
 #   FAK_DEMO_PORT    kernel port                          (default 8080)
 #   FAK_BIN          prebuilt fak binary to use           (default: build ./cmd/fak)
 #   OLLAMA_HOST      ollama base                           (default 127.0.0.1:11434)
@@ -23,7 +23,7 @@ set -o pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
 FAK_DIR="$(cd "$HERE/../.." && pwd)"           # examples/adjudication-demo -> fak/
 PORT="${FAK_DEMO_PORT:-8080}"
-MODEL="${FAK_DEMO_MODEL:-qwen2.5:14b}"
+MODEL="${FAK_DEMO_MODEL:-qwen2.5:7b}"
 OLLAMA="${OLLAMA_HOST:-127.0.0.1:11434}"
 POLICY="$FAK_DIR/examples/dogfood-claude-policy.json"
 TMP="${TMPDIR:-/tmp}"; TMP="${TMP%/}"
@@ -47,7 +47,15 @@ if [ -z "$BIN" ]; then
 fi
 
 # 2) a tool-capable local model behind ollama (the kernel proxies to it)
-command -v ollama >/dev/null || { log "ollama not found — install from https://ollama.com"; exit 1; }
+command -v ollama >/dev/null || {
+  log "ollama not found. This demo proxies the kernel to a tool-capable model behind ollama."
+  log "  - install ollama (https://ollama.com), then re-run; or"
+  log "  - point the kernel at fak's OWN in-kernel forward instead (no ollama, no python model):"
+  log "      $BIN serve --addr 127.0.0.1:$PORT --gguf <path/to/Qwen2.5-7B-Instruct-Q8_0.gguf> --policy '$POLICY'"
+  log "      then in another shell:  FAK_DEMO_KERNEL=http://127.0.0.1:$PORT python3 '$HERE/demo.py' $*"
+  log "    (fetch a GGUF once with scripts/fetch-gguf.sh; see DOGFOOD-CLAUDE.md)"
+  exit 1
+}
 if ! curl -sf "http://$OLLAMA/api/tags" >/dev/null 2>&1; then
   log "starting 'ollama serve'"; ollama serve >"$TMP/fak-demo-ollama.log" 2>&1 & OLLAMA_PID=$!
   tries=0
@@ -58,7 +66,7 @@ if ! curl -sf "http://$OLLAMA/api/tags" >/dev/null 2>&1; then
   done
 fi
 if ! curl -s "http://$OLLAMA/api/tags" 2>/dev/null | grep -q "\"name\":\"$MODEL\""; then
-  log "pulling $MODEL (one-time; the 14B is ~9GB — set FAK_DEMO_MODEL for a smaller one)"
+  log "pulling $MODEL (one-time; the 7B is ~5GB — set FAK_DEMO_MODEL for a smaller/larger one)"
   ollama pull "$MODEL"
 fi
 
