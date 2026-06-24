@@ -18,13 +18,18 @@ import fleet_sessions  # noqa: E402
 
 
 def _row(account, disp, autonomous=True, cwd=None, project="C--work-fleet",
-         supervised=False, session="11111111-2222-3333-4444-555555555555"):
-    """A minimal session row shaped like classify() output for decide()."""
+         supervised=False, session="11111111-2222-3333-4444-555555555555",
+         task_sig="", records=1, seen_utc=""):
+    """A minimal session row shaped like classify() output for decide().
+
+    task_sig/records/seen_utc default to the no-dedup case (empty sig) so the
+    existing re-home tests are untouched; dedup tests set them explicitly."""
     return {
         "account": account, "disp": disp, "autonomous": autonomous,
         "supervised": supervised, "cwd": cwd if cwd is not None else os.getcwd(),
         "project": project, "session": session, "git": "master",
         "age_min": 5.0, "last": "", "throttle_reset": None,
+        "task_sig": task_sig, "records": records, "seen_utc": seen_utc,
     }
 
 
@@ -192,6 +197,218 @@ class RehomeSpreadTest(unittest.TestCase):
         cands = fleet_sessions._rehome_targets([carried, passive], ".claude-owner-acct")
         self.assertEqual(cands[0]["account"], ".claude-zzz-acct",
                          "a proven-alive 'passive' account must beat a stale 'carried' one")
+
+
+class OrgDisabledRehomeTest(unittest.TestCase):
+    """An org/subscription-disabled account (auth_block_kind == 'access') can't be
+    fixed by /login on the owner -- but the transcript re-homes onto a healthy,
+    non-org-disabled account WITH usage, exactly like the rate-limit path."""
+
+    def test_org_disabled_session_rehomes_to_healthy_account(self) -> None:
+        rows = [_row(".claude-orgdead-acct", "INFRA_ORG_DISABLED")]
+        availability = [
+            _avail(".claude-orgdead-acct", available=False),
+            _avail(".claude-good-acct", available=True, live=0),
+        ]
+        fleet_sessions.decide(rows, {}, availability)
+        r = rows[0]
+        self.assertEqual(r["action"], "AUTO_RESUME")
+        self.assertTrue(r["rehomed"])
+        self.assertEqual(r["resume_account"], ".claude-good-acct")
+        # re-homed org-disabled session gets a transcript-copy resume command
+        self.assertIn("Copy-Item", r["resume_cmd"])
+
+    def test_org_disabled_no_healthy_account_defers_no_usage(self) -> None:
+        # no usable seat -> DEFER_NO_USAGE, NOT BLOCKED_AUTH (re-login won't help).
+        rows = [_row(".claude-orgdead-acct", "INFRA_ORG_DISABLED")]
+        availability = [_avail(".claude-orgdead-acct", available=False)]
+        fleet_sessions.decide(rows, {}, availability)
+        r = rows[0]
+        self.assertEqual(r["action"], "DEFER_NO_USAGE")
+        self.assertFalse(r["rehomed"])
+
+    def test_org_disabled_target_pool_excludes_org_disabled_accounts(self) -> None:
+        # the only "available" account is itself blocked -> no target -> DEFER_NO_USAGE
+        rows = [_row(".claude-orgdead-acct", "INFRA_ORG_DISABLED")]
+        availability = [_avail(".claude-also-dead-acct", available=False)]
+        fleet_sessions.decide(rows, {}, availability)
+        self.assertEqual(rows[0]["action"], "DEFER_NO_USAGE")
+
+    def test_plain_auth_still_blocks(self) -> None:
+        # token-expiry / 401 auth keeps INFRA_AUTH -> BLOCKED_AUTH (genuinely needs /login)
+        rows = [_row(".claude-auth-acct", "INFRA_AUTH")]
+        availability = [_avail(".claude-good-acct", available=True)]
+        fleet_sessions.decide(rows, {}, availability)
+        self.assertEqual(rows[0]["action"], "BLOCKED_AUTH")
+        self.assertFalse(rows[0]["rehomed"])
+
+    def test_interactive_org_disabled_does_not_rehome(self) -> None:
+        rows = [_row(".claude-orgdead-acct", "INFRA_ORG_DISABLED", autonomous=False)]
+        availability = [_avail(".claude-good-acct", available=True)]
+        fleet_sessions.decide(rows, {}, availability)
+        self.assertEqual(rows[0]["action"], "DEFER_NO_USAGE")
+        self.assertFalse(rows[0]["rehomed"])
+
+
+class DedupTaskTest(unittest.TestCase):
+    """Identical repeating autonomous tasks (same task_sig across sids) resume ONE
+    primary; the rest defer so they never stampede a healthy seat."""
+
+    def setUp(self):
+        # isolate the ledger read so _ledger_blocked_sids finds an EMPTY ledger
+        self._tmp = __import__("tempfile").mkdtemp()
+        self._orig_reg = fleet_sessions.REG_DIR
+        fleet_sessions.REG_DIR = self._tmp
+
+    def tearDown(self):
+        fleet_sessions.REG_DIR = self._orig_reg
+        __import__("shutil").rmtree(self._tmp, ignore_errors=True)
+
+    def _sids(self, n):
+        return [f"{i:08d}-2222-3333-4444-555555555555" for i in range(n)]
+
+    def test_identical_autonomous_tasks_dedup_to_one_primary(self) -> None:
+        sids = self._sids(6)
+        rows = [_row(".claude-good-acct", "DEAD_MIDTOOL", session=s,
+                     task_sig="SAMESIG", records=100 + i) for i, s in enumerate(sids)]
+        availability = [_avail(".claude-good-acct", available=True, live=0)]
+        fleet_sessions.decide(rows, {}, availability)
+        actions = [r["action"] for r in rows]
+        self.assertEqual(actions.count("AUTO_RESUME"), 1)
+        self.assertEqual(actions.count("DEFER_DUPLICATE_TASK"), 5)
+        # the most-progressed copy (records=105, the last) is the primary
+        primary = next(r for r in rows if r["action"] == "AUTO_RESUME")
+        self.assertEqual(primary["records"], 105)
+
+    def test_dedup_primary_is_deterministic_across_reorder(self) -> None:
+        sids = self._sids(3)
+        mk = lambda order: [
+            _row(".claude-good-acct", "DEAD_MIDTOOL", session=sids[i],
+                 task_sig="SIG", records=r) for i, r in order]
+        avail = [_avail(".claude-good-acct", available=True, live=0)]
+        rows_a = mk([(0, 10), (1, 30), (2, 20)])
+        rows_b = mk([(2, 20), (0, 10), (1, 30)])   # different list order
+        fleet_sessions.decide(rows_a, {}, avail)
+        fleet_sessions.decide(rows_b, {}, avail)
+        pa = next(r["session"] for r in rows_a if r["action"] == "AUTO_RESUME")
+        pb = next(r["session"] for r in rows_b if r["action"] == "AUTO_RESUME")
+        self.assertEqual(pa, pb)                    # sort, not list order, decides
+        self.assertEqual(pa, sids[1])              # records=30 wins
+
+    def test_live_sibling_covers_task_all_duplicates_defer(self) -> None:
+        sids = self._sids(4)
+        rows = [_row(".claude-good-acct", "LIVE", session=sids[0], task_sig="SIG")]
+        rows += [_row(".claude-good-acct", "DEAD_MIDTOOL", session=s, task_sig="SIG")
+                 for s in sids[1:]]
+        avail = [_avail(".claude-good-acct", available=True, live=0)]
+        fleet_sessions.decide(rows, {}, avail)
+        # the LIVE one covers the task; ZERO resumable members auto-resume
+        self.assertEqual(sum(1 for r in rows if r["action"] == "AUTO_RESUME"), 0)
+        self.assertEqual(sum(1 for r in rows if r["action"] == "DEFER_DUPLICATE_TASK"), 3)
+        self.assertEqual(rows[0]["action"], "SKIP_LIVE")
+
+    def test_done_sibling_covers_task(self) -> None:
+        sids = self._sids(3)
+        rows = [_row(".claude-good-acct", "DONE", session=sids[0], task_sig="SIG")]
+        rows += [_row(".claude-good-acct", "DEAD_MIDTOOL", session=s, task_sig="SIG")
+                 for s in sids[1:]]
+        avail = [_avail(".claude-good-acct", available=True, live=0)]
+        fleet_sessions.decide(rows, {}, avail)
+        self.assertEqual(sum(1 for r in rows if r["action"] == "AUTO_RESUME"), 0)
+        self.assertEqual(sum(1 for r in rows if r["action"] == "DEFER_DUPLICATE_TASK"), 2)
+
+    def test_deferred_duplicate_does_not_consume_rehome_cap(self) -> None:
+        # 6 identical THROTTLED autonomous sessions + 1 healthy seat: only the primary
+        # re-homes; the 5 duplicates defer as DUP (not THROTTLED) and don't eat cap slots.
+        sids = self._sids(6)
+        rows = [_row(".claude-owner-acct", "STOPPED_LIMIT", session=s,
+                     task_sig="SIG", records=10 + i) for i, s in enumerate(sids)]
+        throttle = {".claude-owner-acct": {"reset": "x"}}
+        avail = [_avail(".claude-good-acct", available=True, live=0)]
+        fleet_sessions.decide(rows, throttle, avail)
+        actions = [r["action"] for r in rows]
+        self.assertEqual(actions.count("AUTO_RESUME"), 1)
+        self.assertEqual(actions.count("DEFER_DUPLICATE_TASK"), 5)
+        self.assertEqual(actions.count("DEFER_THROTTLED"), 0)
+
+    def test_org_disabled_duplicate_dedups_then_rehomes_primary(self) -> None:
+        sids = self._sids(4)
+        rows = [_row(".claude-orgdead-acct", "INFRA_ORG_DISABLED", session=s,
+                     task_sig="SIG", records=10 + i) for i, s in enumerate(sids)]
+        avail = [_avail(".claude-orgdead-acct", available=False),
+                 _avail(".claude-good-acct", available=True, live=0)]
+        fleet_sessions.decide(rows, {}, avail)
+        actions = [r["action"] for r in rows]
+        self.assertEqual(actions.count("AUTO_RESUME"), 1)       # dedup-then-rehome
+        self.assertEqual(actions.count("DEFER_DUPLICATE_TASK"), 3)
+        primary = next(r for r in rows if r["action"] == "AUTO_RESUME")
+        self.assertTrue(primary["rehomed"])
+        self.assertEqual(primary["resume_account"], ".claude-good-acct")
+
+    def test_distinct_tasks_same_cwd_not_deduped(self) -> None:
+        # same project+cwd, DIFFERENT task_sig -> both resume independently
+        sids = self._sids(2)
+        rows = [_row(".claude-good-acct", "DEAD_MIDTOOL", session=sids[0], task_sig="SIG_A"),
+                _row(".claude-good-acct", "DEAD_MIDTOOL", session=sids[1], task_sig="SIG_B")]
+        avail = [_avail(".claude-good-acct", available=True, live=0)]
+        fleet_sessions.decide(rows, {}, avail)
+        self.assertEqual(sum(1 for r in rows if r["action"] == "AUTO_RESUME"), 2)
+
+    def test_non_autonomous_identical_tasks_not_deduped(self) -> None:
+        # empty task_sig (the classify() output for non-autonomous rows) never dedups
+        sids = self._sids(3)
+        rows = [_row(".claude-good-acct", "DEAD_MIDTOOL", autonomous=False,
+                     session=s, task_sig="") for s in sids]
+        avail = [_avail(".claude-good-acct", available=True, live=0)]
+        fleet_sessions.decide(rows, {}, avail)
+        # none auto-resume (interactive) and none are mislabeled DEFER_DUPLICATE_TASK
+        self.assertEqual(sum(1 for r in rows if r["action"] == "DEFER_DUPLICATE_TASK"), 0)
+
+    def test_ledger_blocked_primary_hands_off_to_next(self) -> None:
+        # the most-progressed copy is ledger-blocked (hit the attempt cap); the next-best
+        # resumable copy must become primary instead of the task wedging.
+        sids = self._sids(3)
+        ledger = os.path.join(self._tmp, "resume_ledger.jsonl")
+        import json as _json
+        with open(ledger, "w", encoding="utf-8") as fh:
+            for _ in range(3):     # 3 launch rows for sids[2] -> >= MAX_ATTEMPTS
+                fh.write(_json.dumps({"session": sids[2], "phase": "launched"}) + "\n")
+        rows = [_row(".claude-good-acct", "DEAD_MIDTOOL", session=sids[0], task_sig="SIG", records=10),
+                _row(".claude-good-acct", "DEAD_MIDTOOL", session=sids[1], task_sig="SIG", records=20),
+                _row(".claude-good-acct", "DEAD_MIDTOOL", session=sids[2], task_sig="SIG", records=99)]
+        avail = [_avail(".claude-good-acct", available=True, live=0)]
+        fleet_sessions.decide(rows, {}, avail)
+        primary = next(r for r in rows if r["action"] == "AUTO_RESUME")
+        self.assertEqual(primary["session"], sids[1])   # records=20, not the blocked 99
+
+
+class TaskSigClassifyTest(unittest.TestCase):
+    """task_sig must come from the real first instruction, ignoring harness wrappers
+    and the fixed resume prompt a re-home injects."""
+
+    def test_first_instruction_skips_wrappers_and_resume_prompt(self) -> None:
+        head = [
+            {"type": "user", "message": {"content": "Caveat: local command output below"}},
+            {"type": "system", "message": {"content": "<system-reminder>be good</system-reminder>"}},
+            {"type": "user", "message": {"content": fleet_sessions.RESUME_PROMPT}},
+            {"type": "user", "message": {"content": "Resolve ONE diverged git repository safely, then STOP."}},
+        ]
+        instr = fleet_sessions._first_instruction(head)
+        self.assertEqual(instr, "Resolve ONE diverged git repository safely, then STOP.")
+
+    def test_resume_prompt_alone_yields_no_signature(self) -> None:
+        # a re-homed transcript whose head is ONLY the resume prompt must not collapse
+        # to a shared signature -- it yields an empty instruction.
+        head = [{"type": "user", "message": {"content": fleet_sessions.RESUME_PROMPT}}]
+        self.assertEqual(fleet_sessions._first_instruction(head), "")
+
+    def test_same_instruction_same_sig_diff_sid(self) -> None:
+        a = fleet_sessions._task_sig("proj", "/cwd", "do the thing")
+        b = fleet_sessions._task_sig("proj", "/cwd", "do the thing")
+        c = fleet_sessions._task_sig("proj", "/cwd", "do a DIFFERENT thing")
+        self.assertEqual(a, b)
+        self.assertNotEqual(a, c)
+        self.assertEqual(len(a), 16)
 
 
 if __name__ == "__main__":

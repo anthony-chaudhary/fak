@@ -31,6 +31,7 @@ import sys
 import json
 import glob
 import re
+import hashlib
 import datetime as dt
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))  # import sibling helper
@@ -54,6 +55,58 @@ AUTON_RE = re.compile(r"<command-name>/(goal|loop|dispatch|next-up|fanout)\b|"
 # supervised: owned by the job-fleet supervisor -> leave it to run_supervise_loop, don't --resume.
 SUPERVISED_RE = re.compile(r"JOB_SUPERVISED_WORKER|supervisor-spawned|/dispatch-loop\b", re.I)
 GOALCLEAR_RE = re.compile(r"goal (?:condition )?(?:met|satisfied|cleared)|hook (?:auto-)?clear", re.I)
+# Wrapper text that is NOT the session's real task instruction -- the harness injects
+# these ahead of (or around) the operator's actual first message. The first head record
+# whose text is none of these, once stripped, is the task identity used for dedup.
+_WRAPPER_RE = re.compile(
+    r"^\s*(?:Caveat:|<system-reminder|<command-name>|<command-message>|"
+    r"<command-args>|<local-command-stdout>|<user-memory|Codebase and user instructions)",
+    re.I)
+# A re-homed transcript opens with this exact synthetic resume prompt (see RESUME_PROMPT
+# below). It is identical across every re-home, so it must NOT be treated as a task
+# instruction -- otherwise every re-homed session in a project collapses to one signature.
+_RESUME_PROMPT_PREFIX = "Resume where you left off"
+
+
+def _first_instruction(head_records):
+    """The session's real first task instruction, for the dedup signature.
+
+    Walk the head records in order; return the first user/system text that is a
+    genuine instruction -- skipping harness wrappers (caveat / system-reminder /
+    command-* / local-command-stdout / memory blocks) and the fixed resume prompt a
+    re-home injects. A ``/goal``/``/loop`` directive's ARGUMENT is the truest task
+    identity, so when a command-args wrapper is present its payload is preferred.
+    Returns a normalized, whitespace-collapsed string (may be empty)."""
+    cmd_args = None
+    for ho in head_records:
+        if ho.get("type") not in ("user", "system"):
+            continue
+        mc = (ho.get("message") or {}).get("content", ho.get("content", ""))
+        txt = mc if isinstance(mc, str) else text_of(mc)
+        if not txt or not txt.strip():
+            continue
+        # capture a /goal|/loop argument payload if one is carried in the head
+        m = re.search(r"<command-args>(.*?)</command-args>", txt, re.S | re.I)
+        if m and m.group(1).strip():
+            cmd_args = " ".join(m.group(1).split())
+        stripped = txt.strip()
+        if _WRAPPER_RE.match(stripped):
+            continue
+        if stripped.startswith(_RESUME_PROMPT_PREFIX):
+            continue
+        return " ".join((cmd_args + " " + stripped).split()) if cmd_args else " ".join(stripped.split())
+    return cmd_args or ""
+
+
+def _task_sig(project, cwd, instruction):
+    """Stable 16-hex signature of a task identity. Same (project, cwd, instruction)
+    across different sids => the same recurring task => dedup candidates."""
+    if not instruction:
+        return ""
+    raw = f"{project}\0{cwd}\0{instruction[:400]}".encode("utf-8", "replace")
+    return hashlib.sha256(raw).hexdigest()[:16]
+
+
 # disposition -> (category, cause). category buckets: INFRA / AGENT / USER / HANGING / LIVE.
 CATEGORY = {
     "LIVE":          ("LIVE",    "live"),
@@ -64,6 +117,7 @@ CATEGORY = {
     "STOPPED_LIMIT": ("INFRA",   "rate_limit"),
     "STOPPED_APIERR":("INFRA",   "api_error"),
     "INFRA_AUTH":    ("INFRA",   "auth"),
+    "INFRA_ORG_DISABLED": ("INFRA", "org_disabled"),
     "PARKED_WAIT":   ("HANGING", "parked_on_task"),
     "STOPPED_QUIET": ("HANGING", "ambiguous_quiet"),
 }
@@ -213,12 +267,18 @@ def classify(path):
     elif fleet_session_signals.is_auth_error(lt):
         kind = fleet_session_signals.auth_block_kind(lt)
         if kind == "access":
-            reason = "stopped on a Claude subscription/access wall (not solved by /login)"
+            # Org/admin disabled subscription access for THIS account. A /login on the
+            # same account can't clear it -- but the transcript is intact and portable,
+            # so re-homing it onto a different, non-org-disabled account WITH usage DOES
+            # recover the work. Split it out from INFRA_AUTH so decide() can route it
+            # through the same re-home machinery the rate-limit path uses, instead of
+            # dead-ending at BLOCKED_AUTH.
+            disp = "INFRA_ORG_DISABLED"
+            reason = "stopped on a Claude subscription/access wall (re-home to a usable account; /login won't fix the owner)"
         elif kind == "credit":
-            reason = "stopped on account credit/billing state"
+            disp, reason = "INFRA_AUTH", "stopped on account credit/billing state"
         else:
-            reason = "stopped on an auth/login requirement (needs re-login)"
-        disp = "INFRA_AUTH"
+            disp, reason = "INFRA_AUTH", "stopped on an auth/login requirement (needs re-login)"
     elif fleet_session_signals.is_api_error(lt) and last_kind != "assistant_end":
         disp, reason = "STOPPED_APIERR", "stopped on an API/transport error (transient infra)"
     elif age <= LIVE_MIN:
@@ -244,6 +304,7 @@ def classify(path):
     # or it carries the supervised-worker marker. This avoids flagging interactive
     # sessions that merely DISCUSS goals/loops.
     autonomous = supervised = False
+    head_records = []          # parsed head objects, for the dedup task-signature
     for hl in read_head(path, 30):
         hl = hl.strip()
         if not hl:
@@ -252,6 +313,7 @@ def classify(path):
             ho = json.loads(hl)
         except json.JSONDecodeError:
             continue
+        head_records.append(ho)
         htxt = ""
         if ho.get("type") in ("user", "system"):
             mc = (ho.get("message") or {}).get("content", ho.get("content", ""))
@@ -262,6 +324,14 @@ def classify(path):
             supervised = True
             autonomous = True
     autonomous = autonomous or supervised
+    # task signature: the dedup identity of a recurring autonomous task. Computed for
+    # autonomous rows (the only ones we ever auto-resume / dedup) AND for LIVE/DONE rows
+    # so a live/done sibling can serve as task COVER for its duplicates. Never for plain
+    # interactive sessions -- their similar-looking prompts must not be deduped.
+    task_sig = ""
+    if autonomous or disp in ("LIVE", "DONE"):
+        task_sig = _task_sig(os.path.basename(os.path.dirname(path)), cwd or "",
+                             _first_instruction(head_records))
     return {"disp": disp, "category": category, "cause": cause, "reason": reason,
             "last_kind": last_kind, "age_min": round(age, 1),
             "seen_utc": mtime.isoformat(),
@@ -272,7 +342,8 @@ def classify(path):
             "pending_tool": pending,
             "session": sid or os.path.splitext(os.path.basename(path))[0],
             "cwd": cwd, "git": git, "last": lt[:200].replace("\n", " "), "path": path,
-            "autonomous": autonomous, "supervised": supervised}
+            "autonomous": autonomous, "supervised": supervised,
+            "task_sig": task_sig, "records": st.st_size}
 
 ACCT_POLICY = fleet_accounts.load_policy()
 
@@ -426,7 +497,7 @@ def merge_known_auth(rows):
 
 DEAD = {"DEAD_MIDTOOL", "DEAD_KILLED"}              # crashed/killed mid-work -> resumable
 STOPLIKE = DEAD | {"STOPPED_QUIET", "STOPPED_LIMIT", "STOPPED_APIERR", "INFRA_AUTH",
-                   "USER_CLOSED", "PARKED_WAIT"}
+                   "INFRA_ORG_DISABLED", "USER_CLOSED", "PARKED_WAIT"}
 REG_DIR = os.environ.get("FLEET_REG_DIR", os.path.join(os.path.dirname(os.path.abspath(__file__)), "_registry"))
 RESUME_PROMPT = ("Resume where you left off; re-establish any /goal or /loop "
                  "and continue toward it.")
@@ -566,6 +637,116 @@ def _rehome_targets(availability, exclude_account, assigned=None):
                               str(a.get("tag") or a.get("account") or "")))
     return cands
 
+def _ledger_blocked_sids(reg_dir=None):
+    """Sids the resume ledger shows are permanently blocked -- they hit the attempt
+    cap or an unrecoverable (auth) wall on their last launch. Read so the dedup
+    primary election can SKIP them: a poisoned primary must not bury its duplicates
+    forever. Mirrors the watchdog's per-sid gate, but read-only and ledger-derived,
+    so this classifier needs no import of the watchdog.
+
+    A sid is blocked when it has >= MAX_ATTEMPTS launch rows, OR a row marking a
+    manual/operator settle, OR its last recorded outcome is 'unrecoverable'. Absent
+    or unreadable ledger => empty set (fail-open: dedup still elects a primary)."""
+    reg_dir = reg_dir or REG_DIR
+    max_attempts = int(os.environ.get("FAK_MAX_ATTEMPTS", "3"))
+    path = os.path.join(reg_dir, "resume_ledger.jsonl")
+    launches: dict[str, int] = {}
+    blocked: set[str] = set()
+    try:
+        with open(path, encoding="utf-8") as fh:
+            for ln in fh:
+                ln = ln.strip()
+                if not ln:
+                    continue
+                try:
+                    rec = json.loads(ln)
+                except ValueError:
+                    continue
+                sid = rec.get("session")
+                if not sid:
+                    continue
+                if rec.get("manual_override") or str(rec.get("action", "")).startswith("consolidate"):
+                    blocked.add(sid)
+                if rec.get("outcome") == "unrecoverable":
+                    blocked.add(sid)
+                if rec.get("phase") in ("launched", "resumed") or rec.get("cause"):
+                    launches[sid] = launches.get(sid, 0) + 1
+    except OSError:
+        return set()
+    for sid, n in launches.items():
+        if n >= max_attempts:
+            blocked.add(sid)
+    return blocked
+
+
+def _resumable_disp(r):
+    """Whether a row's disposition is one the dedup pre-pass might auto-resume (so it
+    is a candidate to be a primary or a deferred duplicate). LIVE/DONE are NOT
+    resumable but participate as task COVER -- handled separately in _dedup_defer."""
+    return r.get("autonomous") and (
+        r["disp"] in DEAD
+        or r["disp"] in ("STOPPED_LIMIT", "STOPPED_APIERR", "INFRA_ORG_DISABLED"))
+
+
+def _dedup_defer(rows, reg_dir=None):
+    """Pre-pass: when several crashed sessions are the SAME recurring autonomous task
+    (same task_sig), resume only ONE and DEFER the rest. Stamps the losers'
+    ``action = "DEFER_DUPLICATE_TASK"`` BEFORE decide()'s per-row loop, so a deferred
+    duplicate never reaches _rehome_targets and never consumes a REHOME_CAP slot.
+
+    Steps, per the design:
+      (a) collapse same-sid rows (a re-home writes the same sid under two config
+          dirs) to the newest copy, so a re-homed primary is not its own phantom dup;
+      (b) group by task_sig, INCLUDING LIVE/DONE rows (cover check);
+      (c) if any member is LIVE or DONE the task is already covered -> defer every
+          resumable member, elect no primary;
+      (d) else elect a deterministic primary (records desc, seen_utc desc, sid asc),
+          excluding ledger-blocked sids, and defer the rest."""
+    blocked = _ledger_blocked_sids(reg_dir)
+    # (a) collapse same-sid -> newest (by seen_utc, then records) so dedup keys on the
+    #     live copy of a re-homed session, not a stale origin copy.
+    by_sid: dict[str, dict] = {}
+    for r in rows:
+        sid = r.get("session", "")
+        cur = by_sid.get(sid)
+        if cur is None or (r.get("seen_utc", ""), r.get("records", 0)) > (
+                cur.get("seen_utc", ""), cur.get("records", 0)):
+            by_sid[sid] = r
+    # (b) group by task_sig (skip empty sigs -- interactive / no-instruction rows)
+    groups: dict[str, list] = {}
+    for r in by_sid.values():
+        sig = r.get("task_sig") or ""
+        if sig:
+            groups.setdefault(sig, []).append(r)
+    for sig, members in groups.items():
+        resumable = [r for r in members if _resumable_disp(r)]
+        if len(resumable) <= 1:
+            continue                                   # nothing to dedup
+        covered = any(r["disp"] in ("LIVE", "DONE") for r in members)
+        if covered:
+            for r in resumable:                        # (c) live/done sibling covers it
+                r["action"] = "DEFER_DUPLICATE_TASK"
+            continue
+        # (d) elect primary: drop ledger-blocked sids (a poisoned primary must not bury
+        #     its duplicates), then rank most-progressed first. seen_utc is descending
+        #     (newer wins) and sid ascending as deterministic, time/random-free ties.
+        eligible = [r for r in resumable if r.get("session") not in blocked] or resumable
+        winner = min(eligible, key=lambda r: (
+            -int(r.get("records") or 0),
+            _desc(r.get("seen_utc", "")),
+            r.get("session", "")))
+        for r in resumable:
+            if r is not winner:
+                r["action"] = "DEFER_DUPLICATE_TASK"
+    return rows
+
+
+def _desc(s):
+    """Sort helper: make a string compare DESCENDING inside an ascending key tuple.
+    seen_utc is an ISO timestamp where NEWER should win, so invert its byte order."""
+    return tuple(-ord(c) for c in (s or ""))
+
+
 def decide(rows, throttle, availability=None):
     """Stamp each row with a deterministic action + an account-correct resume command.
     Only AUTONOMOUS, genuinely-DEAD (crashed/killed) sessions are auto-resumable.
@@ -586,7 +767,12 @@ def decide(rows, throttle, availability=None):
     stampede it. ``assigned`` tracks how many this pass has already routed to each
     target and is fed back into ``_rehome_targets`` so the load it sees reflects the
     in-flight decisions -- spreading the burst across healthy accounts and capping
-    each at REHOME_CAP so none is pushed over its own session limit."""
+    each at REHOME_CAP so none is pushed over its own session limit.
+
+    Dedup: identical repeating tasks (same task_sig across sids) are collapsed by the
+    ``_dedup_defer`` pre-pass to ONE primary; the rest are stamped DEFER_DUPLICATE_TASK
+    here and skip the decision ladder entirely, so they never consume a re-home slot."""
+    _dedup_defer(rows)                       # pre-pass: stamp duplicate-task losers
     assigned: dict[str, int] = {}
     for r in rows:
         cwd_ok = bool(r["cwd"]) and os.path.isdir(r["cwd"])
@@ -595,6 +781,11 @@ def decide(rows, throttle, availability=None):
         r["resume_account"] = r["account"]
         r["resume_config_dir"] = config_dir(r["account"])
         r["rehomed"] = False
+        if r.get("action") == "DEFER_DUPLICATE_TASK":
+            # already decided by the dedup pre-pass; the primary covers this task. Skip
+            # the ladder so this never re-homes or consumes an `assigned` cap slot.
+            r["resume_cmd"] = None
+            continue
         if "pytest" in r["project"] or not cwd_ok:
             r["action"] = "SKIP_EPHEMERAL"          # cwd gone / pytest temp
         elif r["disp"] == "LIVE":
@@ -622,6 +813,24 @@ def decide(rows, throttle, availability=None):
                 assigned[tgt["account"]] = assigned.get(tgt["account"], 0) + 1
             else:
                 r["action"] = "DEFER_THROTTLED"     # no healthy account -> wait for reset
+        elif r["disp"] == "INFRA_ORG_DISABLED":
+            # Owner account's org/subscription access is disabled. /login can't fix the
+            # owner -- but the transcript is portable, so re-home an autonomous session
+            # onto a healthy, non-org-disabled account WITH usage (the same machinery as
+            # the rate-limit path; _rehome_targets already excludes blocked accounts).
+            resumable = r["autonomous"]
+            targets = _rehome_targets(availability, r["account"], assigned) if resumable else []
+            if targets:
+                tgt = targets[0]
+                r["action"] = "AUTO_RESUME"         # INFRA: org-disabled -> move to a usable acct
+                r["rehomed"] = True
+                r["resume_account"] = tgt["account"]
+                r["resume_config_dir"] = tgt.get("config_dir") or config_dir(tgt["account"])
+                assigned[tgt["account"]] = assigned.get(tgt["account"], 0) + 1
+            else:
+                # No healthy usage-bearing seat. Distinct from BLOCKED_AUTH: re-login on
+                # the owner won't help, so this waits for a seat to free up, not a human.
+                r["action"] = "DEFER_NO_USAGE"
         elif r["disp"] == "INFRA_AUTH":
             r["action"] = "BLOCKED_AUTH"            # INFRA: needs human re-login; resume won't help
         elif r["disp"] == "STOPPED_APIERR" and r["autonomous"]:
@@ -698,10 +907,11 @@ def write_registry(rows, throttle, auth, probes=None):
     reg = {"schema": "fleet-sessions/3", "app_version": fleet_version.app_version(), "generated_utc": NOW.isoformat(),
            "window_h": WINDOW_H, "throttle": throttle, "auth": auth,
            "accounts": account_availability(throttle, rows, auth),
-            "sessions": [{k: r[k] for k in ("account", "project", "session", "cwd", "git",
+            "sessions": [{**{k: r[k] for k in ("account", "project", "session", "cwd", "git",
                           "category", "cause", "disp", "reason", "action", "autonomous",
                           "supervised", "age_min", "seen_utc", "throttle_reset",
-                          "throttle_weekly", "resume_cmd", "rehomed", "resume_account", "last")}
+                          "throttle_weekly", "resume_cmd", "rehomed", "resume_account", "last")},
+                          "task_sig": r.get("task_sig", "")}
                         for r in session_rows]}
     if probes:
         reg["probes"] = probes  # raw active-probe verdicts (evidence for the operator/UI)
@@ -824,7 +1034,8 @@ def main():
                 line += f"  | weekly {weekly}"
             print(line)
         print()
-    order = ["STOPPED_LIMIT", "STOPPED_APIERR", "INFRA_AUTH", "DEAD_MIDTOOL", "DEAD_KILLED",
+    order = ["STOPPED_LIMIT", "STOPPED_APIERR", "INFRA_AUTH", "INFRA_ORG_DISABLED",
+             "DEAD_MIDTOOL", "DEAD_KILLED",
              "USER_CLOSED", "STOPPED_QUIET", "PARKED_WAIT", "LIVE", "DONE"]
     counts, acts, cats = {}, {}, {}
     for r in rows:
@@ -846,7 +1057,9 @@ def main():
         for r in grp[:CAP]:
             thr = "  [THROTTLED]" if r["account"] in throttle else ""
             mark = {"AUTO_RESUME": " *AUTO", "SURFACE": " surface", "SUPERVISED": " (sup)",
-                    "DEFER_THROTTLED": " defer", "SKIP_DONE": " done",
+                    "DEFER_THROTTLED": " defer", "DEFER_NO_USAGE": " defer-no-usage",
+                    "DEFER_DUPLICATE_TASK": " dup-task", "BLOCKED_AUTH": " blocked-auth",
+                    "SKIP_DONE": " done",
                     "SKIP_USER_CLOSED": " user-closed"}.get(r["action"], "")
             if r.get("rehomed"):
                 rtag = r["resume_account"].replace(".claude-", "").replace(".claude", "default")
