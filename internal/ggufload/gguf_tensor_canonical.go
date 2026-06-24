@@ -322,6 +322,20 @@ func CanonicalTensorNameArch(name, arch string) (string, bool) {
 		return "", false
 	}
 	suffix := rest[dot+1:]
+	// glm_moe_dsa (GLM-5.2: MLA attention + DeepSeek-style MoE + a learned DSA indexer)
+	// carries per-layer tensors no Llama/Gemma family has — the MLA latent projections,
+	// the router + its score-correction bias, the shared experts, and the DSA indexer.
+	// Map those FIRST; anything not GLM-specific (attn_norm, ffn_norm, attn_output, and
+	// the leading-dense layers' ffn_gate/up/down) falls through to the shared base map
+	// below. The batched ROUTED experts (ffn_*_exps, one [E,…] blob per layer) are
+	// deliberately NOT mapped here — a single GGUF name cannot become E per-expert
+	// canonical tensors, so they stay an explicit "no canonical mapping" until the
+	// loader-side expert splitter lands (then a glm_moe_dsa GGUF loads end to end).
+	if arch == "glm_moe_dsa" {
+		if mapped, ok := glmMoeDsaCanonicalSuffix(suffix); ok {
+			return "model.layers." + layer + "." + mapped, true
+		}
+	}
 	// Gemma sandwich norm: ffn_norm is the PRE-feedforward norm and post_ffw_norm the
 	// POST-feedforward norm, distinct from the post-attention norm. The Llama default
 	// keeps ffn_norm == post_attention_layernorm (the single pre-MLP norm).
