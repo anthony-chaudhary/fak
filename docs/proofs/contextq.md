@@ -76,6 +76,17 @@ contextq kinds directly. The mapping the gate implements (its only outputs are `
   `kvview.go:126`), deliberately distinct from `REFUSE` (a trust/binding denial). A
   consumer reading the verdict stream can tell "would not serve" (`REFUSE`) from "had no
   opinion" (`ABSTAIN`).
+- **A *budget* refusal is `ABSTAIN`, not `REFUSE` — the two never share a counter
+  (issue #225).** One `REFUSE` token must not carry two unrelated reasons: a *budget*
+  refusal (the resident window is too small to hold the material) and a *security*
+  refusal (scope/taint). The shipped materializer resolves the overload by *kind*, not by
+  a parameterized reason: a budget-exhausted span is an `ABSTAIN`, reason
+  `budget_exhausted` (`contextq.go:403`, `:491`), recorded as an `Omission` — never a
+  `REFUSE`. `REFUSE` stays reserved for trust/scope denials (`excluded_by_request`,
+  `sealed_by_trust_gate`, `tombstoned_by_context_control`, `page_in_refused`). So a
+  reviewer counting refusals never has to decide whether a budget refusal and a taint
+  refusal are the same event: they are different verdict kinds and land in different
+  counters.
 - **`RECOMPUTE` exists only in contextq.** It is the derived-view path's "cached but
   policy-stale, rebuild" verdict. cachemeta's nearest analogue is `revalidate`, but the
   KV gate does not use it — on the KV axis a policy drift is a binding mismatch
