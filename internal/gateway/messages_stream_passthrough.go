@@ -40,6 +40,216 @@ type sseToolAccum struct {
 	args     strings.Builder
 }
 
+// anthropicPassthrough holds the per-request state of the live Anthropic /v1/messages
+// passthrough stream. It relays upstream SSE events to the client unchanged EXCEPT that
+// tool_use blocks are HELD off-wire, adjudicated as one batch at message_delta, and only
+// the survivors are emitted (renumbered to contiguous client-facing indices). The methods
+// below are the relay's moving parts; streamAnthropicPassthroughLive wires onEvent into
+// StreamAnthropicRaw and interprets the outcome.
+type anthropicPassthrough struct {
+	s        *Server
+	w        http.ResponseWriter
+	r        *http.Request
+	req      *agent.AnthropicMessagesRequest
+	reqTrace string
+	flusher  http.Flusher
+
+	send       func(string, any)
+	started    bool
+	wroteError bool
+
+	outIdx    int         // next contiguous client-facing content-block index
+	passIdx   map[int]int // upstream index -> client index (relayed blocks)
+	toolBuf   map[int]*sseToolAccum
+	toolOrder []int // upstream indices of held tool_use blocks, in arrival order
+
+	admitted     bool
+	resultAdms   []ResultAdmission
+	flushedTools bool
+	keptTools    int
+
+	promptTok, complTok, cacheRead int
+	finishReason                   string
+}
+
+// start opens the client SSE stream exactly once: it writes the event-stream headers and
+// the 200 status, then installs the SSE sender. Idempotent so onEvent can call it freely.
+func (p *anthropicPassthrough) start() {
+	if p.started {
+		return
+	}
+	p.started = true
+	h := p.w.Header()
+	h.Set("Content-Type", "text/event-stream")
+	h.Set("Cache-Control", "no-cache")
+	h.Set("Connection", "keep-alive")
+	h.Set("X-Accel-Buffering", "no")
+	p.w.WriteHeader(http.StatusOK)
+	p.send = anthropicSSESender(p.w, p.flusher)
+}
+
+// flushHeldTools adjudicates every buffered tool_use block as one batch (exact parity with
+// the buffered path's single adjudicateProposed call), emits the survivors as tool_use
+// blocks with our contiguous indices, and appends an in-band note when the kernel dropped
+// or repaired a call. Runs once, just before the terminal message_delta.
+func (p *anthropicPassthrough) flushHeldTools() {
+	if len(p.toolOrder) == 0 {
+		return
+	}
+	calls := make([]agent.ToolCall, 0, len(p.toolOrder))
+	for _, ui := range p.toolOrder {
+		ta := p.toolBuf[ui]
+		args := strings.TrimSpace(ta.args.String())
+		if args == "" {
+			args = "{}"
+		}
+		calls = append(calls, agent.ToolCall{
+			ID: ta.id, Type: "function",
+			Function: agent.Func{Name: ta.name, Arguments: args},
+		})
+	}
+	kept, adjs, dropped := p.s.adjudicateProposed(p.r.Context(), calls, p.reqTrace)
+	p.keptTools = len(kept)
+	// Render survivors through the SAME helper the buffered path uses, so the tool_use
+	// blocks (id preserved, input as a normalized object) are byte-shaped identically —
+	// only the framing differs.
+	for _, blk := range agent.AnthropicResponseBlocks(agent.Message{Role: agent.RoleAssistant, ToolCalls: kept}) {
+		oi := p.outIdx
+		p.outIdx++
+		p.send("content_block_start", map[string]any{
+			"type": "content_block_start", "index": oi,
+			"content_block": map[string]any{"type": "tool_use", "id": blk.ID, "name": blk.Name, "input": map[string]any{}},
+		})
+		p.send("content_block_delta", map[string]any{
+			"type": "content_block_delta", "index": oi,
+			"delta": map[string]any{"type": "input_json_delta", "partial_json": string(blk.Input)},
+		})
+		p.send("content_block_stop", map[string]any{"type": "content_block_stop", "index": oi})
+	}
+	if dropped > 0 || anyRepaired(adjs) {
+		if note := adjudicationNote(adjs); note != "" {
+			emitAnthropicTextBlock(p.send, &p.outIdx, note)
+		}
+	}
+}
+
+// onEvent is the per-SSE-event relay callback handed to StreamAnthropicRaw. It opens the
+// client stream on message_start (after arming the inbound result floor once), holds and
+// renumbers content blocks, batches held tool_use blocks at message_delta, and forwards
+// terminal frames. A returned error stops the upstream read; errPassthroughResponded marks
+// that a terminal HTTP response was already written.
+func (p *anthropicPassthrough) onEvent(ev agent.AnthropicSSEEvent) error {
+	switch ev.Event {
+	case "message_start":
+		// First event from the real API. Arm the result-side floor ONCE (so a
+		// tainted inbound result still refuses a later exfil call, exactly as the
+		// buffered path does), then open the client stream. Running admit here —
+		// only after the upstream opened — means an open failure falls back to the
+		// buffered path WITHOUT a double-admit on the same trace.
+		if !p.admitted {
+			p.admitted = true
+			adms, aerr := p.s.admitInboundResults(p.r.Context(), p.req.Messages, p.reqTrace)
+			if aerr != nil {
+				p.s.logf("gateway: result-floor error (messages stream): %v", aerr)
+				writeErr(p.w, http.StatusBadGateway, "upstream model error")
+				p.wroteError = true
+				return errPassthroughResponded
+			}
+			p.resultAdms = adms
+		}
+		p.start()
+		p.promptTok, p.cacheRead = anthropicStartUsage(ev.Data)
+		p.send("message_start", ev.Data)
+		// The model is about to read a quarantine stub where an inbound tool result
+		// was paged out — say so in-band, as a LEADING text block, before its prose.
+		if note := resultAdmissionNote(p.resultAdms); note != "" {
+			emitAnthropicTextBlock(p.send, &p.outIdx, note)
+		}
+
+	case "content_block_start":
+		var d struct {
+			Index        int `json:"index"`
+			ContentBlock struct {
+				Type string `json:"type"`
+				ID   string `json:"id"`
+				Name string `json:"name"`
+			} `json:"content_block"`
+		}
+		if json.Unmarshal(ev.Data, &d) != nil {
+			return nil
+		}
+		if d.ContentBlock.Type == "tool_use" {
+			p.toolBuf[d.Index] = &sseToolAccum{id: d.ContentBlock.ID, name: d.ContentBlock.Name}
+			p.toolOrder = append(p.toolOrder, d.Index)
+			return nil // HELD until adjudicated
+		}
+		oi := p.outIdx
+		p.outIdx++
+		p.passIdx[d.Index] = oi
+		relayWithIndex(p.send, "content_block_start", ev.Data, oi)
+
+	case "content_block_delta":
+		var d struct {
+			Index int `json:"index"`
+			Delta struct {
+				PartialJSON string `json:"partial_json"`
+			} `json:"delta"`
+		}
+		if json.Unmarshal(ev.Data, &d) != nil {
+			return nil
+		}
+		if ta, held := p.toolBuf[d.Index]; held {
+			ta.args.WriteString(d.Delta.PartialJSON) // accumulate off-wire
+			return nil
+		}
+		if oi, ok := p.passIdx[d.Index]; ok {
+			relayWithIndex(p.send, "content_block_delta", ev.Data, oi)
+		}
+
+	case "content_block_stop":
+		var d struct {
+			Index int `json:"index"`
+		}
+		if json.Unmarshal(ev.Data, &d) != nil {
+			return nil
+		}
+		if _, held := p.toolBuf[d.Index]; held {
+			return nil // emitted (or dropped) as a batch at message_delta
+		}
+		if oi, ok := p.passIdx[d.Index]; ok {
+			relayWithIndex(p.send, "content_block_stop", ev.Data, oi)
+		}
+
+	case "message_delta":
+		if !p.flushedTools {
+			p.flushedTools = true
+			p.flushHeldTools()
+		}
+		p.complTok, p.finishReason = relayMessageDelta(p.send, ev.Data, p.complTok, len(p.toolOrder) > 0, p.keptTools)
+
+	case "message_stop":
+		if p.started {
+			p.send("message_stop", ev.Data)
+		}
+
+	case "ping":
+		if p.started {
+			p.send("ping", ev.Data)
+		}
+
+	case "error":
+		if p.started {
+			p.send("error", ev.Data)
+			return nil
+		}
+		p.s.logf("gateway: upstream error before stream start (messages)")
+		writeErr(p.w, http.StatusBadGateway, "upstream model error")
+		p.wroteError = true
+		return errPassthroughResponded
+	}
+	return nil
+}
+
 // streamAnthropicPassthroughLive relays a live Anthropic Messages SSE stream from the
 // real upstream to the client, holding tool_use blocks for kernel adjudication. It
 // returns true once it owns the response (streamed a turn, or wrote a clean terminal
@@ -56,211 +266,26 @@ func (s *Server) streamAnthropicPassthroughLive(w http.ResponseWriter, r *http.R
 		return false // this writer cannot stream; let the caller use the buffered path
 	}
 
-	var (
-		send       func(string, any)
-		started    bool
-		wroteError bool
-
-		outIdx    int             // next contiguous client-facing content-block index
-		passIdx   = map[int]int{} // upstream index -> client index (relayed blocks)
-		toolBuf   = map[int]*sseToolAccum{}
-		toolOrder []int // upstream indices of held tool_use blocks, in arrival order
-
-		admitted     bool
-		resultAdms   []ResultAdmission
-		flushedTools bool
-		keptTools    int
-
-		promptTok, complTok, cacheRead int
-		finishReason                   string
-		began                          = time.Now()
-	)
-
-	start := func() {
-		if started {
-			return
-		}
-		started = true
-		h := w.Header()
-		h.Set("Content-Type", "text/event-stream")
-		h.Set("Cache-Control", "no-cache")
-		h.Set("Connection", "keep-alive")
-		h.Set("X-Accel-Buffering", "no")
-		w.WriteHeader(http.StatusOK)
-		send = anthropicSSESender(w, flusher)
+	p := &anthropicPassthrough{
+		s: s, w: w, r: r, req: req, reqTrace: reqTrace, flusher: flusher,
+		passIdx: map[int]int{},
+		toolBuf: map[int]*sseToolAccum{},
 	}
+	began := time.Now()
 
-	// flushHeldTools adjudicates every buffered tool_use block as one batch (exact
-	// parity with the buffered path's single adjudicateProposed call), emits the
-	// survivors as tool_use blocks with our contiguous indices, and appends an in-band
-	// note when the kernel dropped or repaired a call. Runs once, just before the
-	// terminal message_delta.
-	flushHeldTools := func() {
-		if len(toolOrder) == 0 {
-			return
-		}
-		calls := make([]agent.ToolCall, 0, len(toolOrder))
-		for _, ui := range toolOrder {
-			ta := toolBuf[ui]
-			args := strings.TrimSpace(ta.args.String())
-			if args == "" {
-				args = "{}"
-			}
-			calls = append(calls, agent.ToolCall{
-				ID: ta.id, Type: "function",
-				Function: agent.Func{Name: ta.name, Arguments: args},
-			})
-		}
-		kept, adjs, dropped := s.adjudicateProposed(r.Context(), calls, reqTrace)
-		keptTools = len(kept)
-		// Render survivors through the SAME helper the buffered path uses, so the
-		// tool_use blocks (id preserved, input as a normalized object) are byte-shaped
-		// identically — only the framing differs.
-		for _, blk := range agent.AnthropicResponseBlocks(agent.Message{Role: agent.RoleAssistant, ToolCalls: kept}) {
-			oi := outIdx
-			outIdx++
-			send("content_block_start", map[string]any{
-				"type": "content_block_start", "index": oi,
-				"content_block": map[string]any{"type": "tool_use", "id": blk.ID, "name": blk.Name, "input": map[string]any{}},
-			})
-			send("content_block_delta", map[string]any{
-				"type": "content_block_delta", "index": oi,
-				"delta": map[string]any{"type": "input_json_delta", "partial_json": string(blk.Input)},
-			})
-			send("content_block_stop", map[string]any{"type": "content_block_stop", "index": oi})
-		}
-		if dropped > 0 || anyRepaired(adjs) {
-			if note := adjudicationNote(adjs); note != "" {
-				emitAnthropicTextBlock(send, &outIdx, note)
-			}
-		}
-	}
-
-	onEvent := func(ev agent.AnthropicSSEEvent) error {
-		switch ev.Event {
-		case "message_start":
-			// First event from the real API. Arm the result-side floor ONCE (so a
-			// tainted inbound result still refuses a later exfil call, exactly as the
-			// buffered path does), then open the client stream. Running admit here —
-			// only after the upstream opened — means an open failure falls back to the
-			// buffered path WITHOUT a double-admit on the same trace.
-			if !admitted {
-				admitted = true
-				adms, aerr := s.admitInboundResults(r.Context(), req.Messages, reqTrace)
-				if aerr != nil {
-					s.logf("gateway: result-floor error (messages stream): %v", aerr)
-					writeErr(w, http.StatusBadGateway, "upstream model error")
-					wroteError = true
-					return errPassthroughResponded
-				}
-				resultAdms = adms
-			}
-			start()
-			promptTok, cacheRead = anthropicStartUsage(ev.Data)
-			send("message_start", ev.Data)
-			// The model is about to read a quarantine stub where an inbound tool result
-			// was paged out — say so in-band, as a LEADING text block, before its prose.
-			if note := resultAdmissionNote(resultAdms); note != "" {
-				emitAnthropicTextBlock(send, &outIdx, note)
-			}
-
-		case "content_block_start":
-			var d struct {
-				Index        int `json:"index"`
-				ContentBlock struct {
-					Type string `json:"type"`
-					ID   string `json:"id"`
-					Name string `json:"name"`
-				} `json:"content_block"`
-			}
-			if json.Unmarshal(ev.Data, &d) != nil {
-				return nil
-			}
-			if d.ContentBlock.Type == "tool_use" {
-				toolBuf[d.Index] = &sseToolAccum{id: d.ContentBlock.ID, name: d.ContentBlock.Name}
-				toolOrder = append(toolOrder, d.Index)
-				return nil // HELD until adjudicated
-			}
-			oi := outIdx
-			outIdx++
-			passIdx[d.Index] = oi
-			relayWithIndex(send, "content_block_start", ev.Data, oi)
-
-		case "content_block_delta":
-			var d struct {
-				Index int `json:"index"`
-				Delta struct {
-					PartialJSON string `json:"partial_json"`
-				} `json:"delta"`
-			}
-			if json.Unmarshal(ev.Data, &d) != nil {
-				return nil
-			}
-			if ta, held := toolBuf[d.Index]; held {
-				ta.args.WriteString(d.Delta.PartialJSON) // accumulate off-wire
-				return nil
-			}
-			if oi, ok := passIdx[d.Index]; ok {
-				relayWithIndex(send, "content_block_delta", ev.Data, oi)
-			}
-
-		case "content_block_stop":
-			var d struct {
-				Index int `json:"index"`
-			}
-			if json.Unmarshal(ev.Data, &d) != nil {
-				return nil
-			}
-			if _, held := toolBuf[d.Index]; held {
-				return nil // emitted (or dropped) as a batch at message_delta
-			}
-			if oi, ok := passIdx[d.Index]; ok {
-				relayWithIndex(send, "content_block_stop", ev.Data, oi)
-			}
-
-		case "message_delta":
-			if !flushedTools {
-				flushedTools = true
-				flushHeldTools()
-			}
-			complTok, finishReason = relayMessageDelta(send, ev.Data, complTok, len(toolOrder) > 0, keptTools)
-
-		case "message_stop":
-			if started {
-				send("message_stop", ev.Data)
-			}
-
-		case "ping":
-			if started {
-				send("ping", ev.Data)
-			}
-
-		case "error":
-			if started {
-				send("error", ev.Data)
-				return nil
-			}
-			s.logf("gateway: upstream error before stream start (messages)")
-			writeErr(w, http.StatusBadGateway, "upstream model error")
-			wroteError = true
-			return errPassthroughResponded
-		}
-		return nil
-	}
-
-	err := hp.StreamAnthropicRaw(r.Context(), req.Raw, upstreamKey, upstreamBeta, onEvent)
+	err := hp.StreamAnthropicRaw(r.Context(), req.Raw, upstreamKey, upstreamBeta, p.onEvent)
 	if err != nil {
 		switch {
-		case started:
+		case p.started:
 			// Client bytes already flowed; we cannot change the status. Emit a terminal
 			// error frame so the client's SSE parser ends cleanly, then own the response.
 			s.logf("gateway: upstream model error mid-stream (messages): %v", err)
-			send("error", map[string]any{
+			p.send("error", map[string]any{
 				"type":  "error",
 				"error": map[string]any{"type": "api_error", "message": "upstream model error"},
 			})
 			return true
-		case wroteError:
+		case p.wroteError:
 			return true // a clean terminal HTTP error was already written
 		default:
 			// The stream never opened and nothing was written — let the caller fall back
@@ -269,8 +294,8 @@ func (s *Server) streamAnthropicPassthroughLive(w http.ResponseWriter, r *http.R
 			return false
 		}
 	}
-	if started {
-		s.metrics.observeInference(promptTok, complTok, cacheRead, finishReason, time.Since(began))
+	if p.started {
+		s.metrics.observeInference(p.promptTok, p.complTok, p.cacheRead, p.finishReason, time.Since(began))
 		return true
 	}
 	// StreamAnthropicRaw returned nil but produced no events (no message_start) — treat
