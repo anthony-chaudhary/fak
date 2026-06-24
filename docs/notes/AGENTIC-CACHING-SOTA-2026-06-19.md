@@ -26,6 +26,15 @@ The local claim should be:
 > **An agentic cache hit is an authorization, state, and coherence verdict over
 > a running program, not a boolean reuse event.**
 
+> **Reconciliation with the earlier memo.** This broadens, and does not narrow,
+> the authorization-only headline of the first-class cache memo (2026-06-18: "A
+> cache hit is an authorization claim, not just a reuse event"). _State_ and
+> _coherence_ are added axes a reusable object must still prove, not a relaxation
+> of authorization. The one-axis headline is a strict subset, so the older claim
+> stays true inside the newer one; the agentic setting only forces the other two
+> axes onto equal footing, since a byte-identical span can still be stale or
+> incoherent.
+
 For chat serving, a cache hit often means "same prompt prefix" or "similar
 query." For an agent, a reusable object may be a KV span, a tool result, a
 memory view, a plan template, a policy verdict, a provider-resident prefix, or a
