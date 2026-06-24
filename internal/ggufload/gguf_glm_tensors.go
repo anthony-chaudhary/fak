@@ -15,23 +15,24 @@ import (
 // (self_attn.q_a_proj / kv_a_proj_with_mqa / kv_b_proj …, the indexer wq_b/wk/weights_proj,
 // the router mlp.gate.weight + its e_score_correction_bias, and mlp.shared_experts.*).
 //
-// PROVISIONAL KEY SPELLINGS — read this. No real GLM-5.2 GGUF exists on disk and upstream
-// llama.cpp ships no glm_moe_dsa converter yet, so the GGUF-side spellings here are NOT
-// validated against a real checkpoint. The MLA + MoE + shared-expert names follow llama.cpp's
-// established deepseek2.* convention (GLM-DSA attention IS DeepSeek MLA), so those are
-// high-confidence; the THREE DSA-indexer names have NO upstream precedent and are a best-guess
-// mirror of the canonical names — they are the single most fragile assumption and are pinned in
-// the named block below so the closing follow-on (a golden against a real GGUF header) only
-// re-pins this one block. This mirrors exactly how applyGLMMoeDsaConfig pinned the metadata-key
-// spellings in gguf_config.go.
+// VALIDATED KEY SPELLINGS (2026-06-24). The GGUF-side spellings were re-pinned against the real
+// community GLM-5.2-Q4_K_M GGUF on the lab GPU server (general.architecture "glm-dsa", llama.cpp
+// LLM_ARCH_GLM_DSA — fak normalizes that to "glm_moe_dsa", see canonicalGGUFArch). The MLA + MoE
+// + shared-expert names matched the guessed deepseek2.* convention; the DSA-indexer names did
+// NOT — the real file uses an "indexer." sub-namespace (indexer.attn_q_b / indexer.attn_k /
+// indexer.k_norm / indexer.proj), so the earlier best-guess attn_indexer_* names were corrected.
+//
+// KNOWN REMAINING GAP (next slice): the real file splits the KV-b up-projection into SEPARATE
+// blk.<L>.attn_k_b + blk.<L>.attn_v_b tensors, whereas fak's forward consumes ONE combined
+// self_attn.kv_b_proj.weight. Those two names are deliberately left unmapped here so a real load
+// fails LOUD rather than silently mis-shaping — the per-head 2→1 merge (DeepSeek [qkNope]+[vHead]
+// per head) is the next loader slice.
 //
 // NOT mapped here (by design): the batched ROUTED experts ffn_gate_exps / ffn_up_exps /
 // ffn_down_exps. Each is a single [E,…] blob that must split into E per-expert canonical
 // tensors (mlp.experts.<e>.{gate,up,down}_proj.weight) — a 1→E expansion CanonicalTensorNameArch
-// (one name in, one name out) structurally cannot express. Leaving them unmapped makes a
-// glm_moe_dsa GGUF that reaches the routed experts fail LOUD ("no canonical mapping") rather
-// than load a silently-wrong dense-shaped model; the loader-side expert splitter is the next
-// slice, after which the load completes end to end.
+// (one name in, one name out) structurally cannot express. The loader-side expert splitter
+// (glmMoeDsaBatchedExpert) handles that before CanonicalTensorNameArch is consulted.
 
 // glmMoeDsaGGUFSuffix is the provisional GGUF-side spelling of each 1:1 glm_moe_dsa per-layer
 // tensor (the part after "blk.<L>."). Grouped so the high-confidence deepseek2-convention
@@ -59,13 +60,15 @@ const (
 	glmGGUFSharedUp   = "ffn_up_shexp.weight"   // mlp.shared_experts.up_proj.weight
 	glmGGUFSharedDown = "ffn_down_shexp.weight" // mlp.shared_experts.down_proj.weight
 
-	// DSA learned indexer — PROVISIONAL, NO UPSTREAM CONVERTER. Best-guess mirror of the
-	// canonical self_attn.indexer.{wq_b,wk,k_norm,weights_proj} names. Re-pin against a real header.
-	glmGGUFIndexerWQB     = "attn_indexer_q_b.weight"     // indexer.wq_b
-	glmGGUFIndexerWK      = "attn_indexer_k.weight"       // indexer.wk
-	glmGGUFIndexerKNorm   = "attn_indexer_k_norm.weight"  // indexer.k_norm.weight (RMSNorm on the index key)
-	glmGGUFIndexerKNormB  = "attn_indexer_k_norm.bias"    // indexer.k_norm.bias
-	glmGGUFIndexerWeights = "attn_indexer_weights.weight" // indexer.weights_proj
+	// DSA learned indexer — VALIDATED 2026-06-24 against the real GLM-5.2 (glm-dsa) Q4_K_M
+	// GGUF on the lab GPU server (llama.cpp LLM_ARCH_GLM_DSA). The real spellings live under
+	// an "indexer." sub-namespace and use "proj" (not "weights"); these replace the earlier
+	// best-guess attn_indexer_* names, which the real file did NOT use.
+	glmGGUFIndexerWQB     = "indexer.attn_q_b.weight" // indexer.wq_b
+	glmGGUFIndexerWK      = "indexer.attn_k.weight"   // indexer.wk
+	glmGGUFIndexerKNorm   = "indexer.k_norm.weight"   // indexer.k_norm.weight (RMSNorm on the index key)
+	glmGGUFIndexerKNormB  = "indexer.k_norm.bias"     // indexer.k_norm.bias
+	glmGGUFIndexerWeights = "indexer.proj.weight"     // indexer.weights_proj
 )
 
 // glmMoeDsaCanonicalSuffix maps a glm_moe_dsa per-layer GGUF tensor suffix (after "blk.<L>.")

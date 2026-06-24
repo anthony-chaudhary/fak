@@ -79,11 +79,11 @@ func buildGLMOracleFixture() ([]model.NamedTensorF32, []byte) {
 		{"model.layers.0.self_attn.kv_a_layernorm.weight", "blk.0.attn_kv_a_norm.weight", []int{kvLora}},
 		{"model.layers.0.self_attn.kv_b_proj.weight", "blk.0.attn_kv_b.weight", []int{nH * (qkNope + vHd), kvLora}},
 		{"model.layers.0.self_attn.o_proj.weight", "blk.0.attn_output.weight", []int{H, nH * vHd}},
-		{"model.layers.0.self_attn.indexer.wq_b.weight", "blk.0.attn_indexer_q_b.weight", []int{idxHeads * idxDim, qLora}},
-		{"model.layers.0.self_attn.indexer.wk.weight", "blk.0.attn_indexer_k.weight", []int{idxDim, H}},
-		{"model.layers.0.self_attn.indexer.k_norm.weight", "blk.0.attn_indexer_k_norm.weight", []int{idxDim}},
-		{"model.layers.0.self_attn.indexer.k_norm.bias", "blk.0.attn_indexer_k_norm.bias", []int{idxDim}},
-		{"model.layers.0.self_attn.indexer.weights_proj.weight", "blk.0.attn_indexer_weights.weight", []int{idxHeads, H}},
+		{"model.layers.0.self_attn.indexer.wq_b.weight", "blk.0.indexer.attn_q_b.weight", []int{idxHeads * idxDim, qLora}},
+		{"model.layers.0.self_attn.indexer.wk.weight", "blk.0.indexer.attn_k.weight", []int{idxDim, H}},
+		{"model.layers.0.self_attn.indexer.k_norm.weight", "blk.0.indexer.k_norm.weight", []int{idxDim}},
+		{"model.layers.0.self_attn.indexer.k_norm.bias", "blk.0.indexer.k_norm.bias", []int{idxDim}},
+		{"model.layers.0.self_attn.indexer.weights_proj.weight", "blk.0.indexer.proj.weight", []int{idxHeads, H}},
 		{"model.layers.0.post_attention_layernorm.weight", "blk.0.ffn_norm.weight", []int{H}},
 		{"model.layers.0.mlp.gate.weight", "blk.0.ffn_gate_inp.weight", []int{E, H}},
 		{"model.layers.0.mlp.gate.e_score_correction_bias", "blk.0.exp_probs_b.bias", []int{E}},
@@ -157,9 +157,9 @@ func buildGLMOracleFixture() ([]model.NamedTensorF32, []byte) {
 	ku("glm_moe_dsa.attention.qk_nope_head_dim", qkNope)
 	ku("glm_moe_dsa.attention.qk_rope_head_dim", qkRope)
 	ku("glm_moe_dsa.attention.v_head_dim", vHd)
-	ku("glm_moe_dsa.index_n_heads", idxHeads)
-	ku("glm_moe_dsa.index_head_dim", idxDim)
-	ku("glm_moe_dsa.index_topk", 4)
+	ku("glm_moe_dsa.attention.indexer.head_count", idxHeads)
+	ku("glm_moe_dsa.attention.indexer.key_length", idxDim)
+	ku("glm_moe_dsa.attention.indexer.top_k", 4)
 	toks := make([]string, V)
 	for i := range toks {
 		toks[i] = "t" + itoaForTest(i)

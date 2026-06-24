@@ -177,7 +177,7 @@ func (f *File) Config() (model.Config, error) {
 		RopeTheta:             theta,
 		TieWordEmbeddings:     !f.hasTensor("output.weight") && !f.hasTensor("lm_head.weight"),
 		AttentionBias:         f.hasTensor("blk.0.attn_q.bias") || f.hasTensor("blk.0.attn_k.bias") || f.hasTensor("blk.0.attn_v.bias"),
-		ModelType:             arch,
+		ModelType:             canonicalGGUFArch(arch),
 		EOSTokenID:            eos,
 		MaxPositionEmbeddings: intValueOrZero(f, p+"context_length"),
 		HiddenAct:             "silu",
@@ -223,10 +223,24 @@ func (f *File) Config() (model.Config, error) {
 			return model.Config{}, err
 		}
 	}
-	if arch == "glm_moe_dsa" {
+	if canonicalGGUFArch(arch) == "glm_moe_dsa" {
 		applyGLMMoeDsaConfig(f, p, &cfg, ropeDim)
 	}
 	return cfg, nil
+}
+
+// canonicalGGUFArch normalizes a GGUF general.architecture string to fak's internal
+// model_type. The real GLM-5.2 (DSA) GGUF — validated against the on-disk community
+// Q4_K_M on the lab GPU server, 2026-06-24 — declares general.architecture = "glm-dsa"
+// (llama.cpp's LLM_ARCH_GLM_DSA), while fak's native forward and every downstream
+// cfg.ModelType check key on "glm_moe_dsa". Map the GGUF spelling to the internal one so
+// family detection (isGLMMoeDsa / IsMoE) and the canonical tensor-name branch resolve.
+// The metadata-key PREFIX (p) stays the file's own "glm-dsa." — only ModelType normalizes.
+func canonicalGGUFArch(arch string) string {
+	if arch == "glm-dsa" {
+		return "glm_moe_dsa"
+	}
+	return arch
 }
 
 // applyGemma4Config derives Google Gemma 4's architecture axes from GGUF metadata into
@@ -332,14 +346,13 @@ func applyGemma4Config(f *File, p string, cfg *model.Config) error {
 // Multi-head Latent Attention (MLA) plus a learned Dynamic Sparse Attention
 // (DSA) indexer. The MoE and MLA metadata mirror llama.cpp's deepseek2.*
 // convention (GLM-DSA attention IS DeepSeek MLA + an indexer), so a real
-// converter is most likely to spell them this way; the indexer scalars are
-// GLM-5.2-specific and have no upstream llama.cpp analogue yet.
+// converter spells them this way; the indexer scalars are GLM-5.2-specific.
 //
-// PROVISIONAL: no real GLM-5.2 GGUF exists on disk to pin these against, and
-// upstream llama.cpp may not yet ship a glm_moe_dsa converter. The spellings
-// are collected here as the single source of truth so the deliberate follow-on
-// — a golden against a REAL GLM-5.2 GGUF header — only has to re-pin this one
-// block. Every key is read relative to the "<arch>." metadata prefix.
+// VALIDATED 2026-06-24 against the community GLM-5.2-Q4_K_M GGUF (general.architecture
+// "glm-dsa", llama.cpp LLM_ARCH_GLM_DSA) on the lab GPU server: the MLA/MoE keys match the
+// deepseek2 convention as guessed, and the indexer scalars were re-pinned to the real
+// attention.indexer.* spellings (they were previously the wrong index_* best-guesses).
+// Every key is read relative to the file's own "<arch>." metadata prefix ("glm-dsa.").
 const (
 	glmKeyExpertCount        = "expert_count"
 	glmKeyExpertUsedCount    = "expert_used_count"
@@ -360,9 +373,13 @@ const (
 	glmKeyKeyLength   = "attention.key_length"
 	glmKeyValueLength = "attention.value_length"
 
-	glmKeyIndexNHeads  = "index_n_heads"
-	glmKeyIndexHeadDim = "index_head_dim"
-	glmKeyIndexTopK    = "index_topk"
+	// VALIDATED against the real GLM-5.2 (glm-dsa) Q4_K_M GGUF on the lab GPU server,
+	// 2026-06-24: the DSA-indexer scalars live under attention.indexer.* (the indexer head
+	// dim is its key_length). indexer_types has NO key in the real file — it is read only if
+	// present, else the per-layer indexer types are derived.
+	glmKeyIndexNHeads  = "attention.indexer.head_count"
+	glmKeyIndexHeadDim = "attention.indexer.key_length"
+	glmKeyIndexTopK    = "attention.indexer.top_k"
 	glmKeyIndexerTypes = "indexer_types"
 )
 

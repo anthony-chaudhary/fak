@@ -186,11 +186,11 @@ func glmMoeDsaFullGGUF(H, V, qLora, kvLora, qkNope, qkRope, vHead, nH, idxHeads,
 		{"blk.0.attn_kv_a_norm.weight", []uint64{uint64(kvLora)}},
 		{"blk.0.attn_kv_b.weight", []uint64{uint64(kvLora), uint64(nH * (qkNope + vHead))}},
 		{"blk.0.attn_output.weight", []uint64{uint64(nH * vHead), uint64(H)}},
-		{"blk.0.attn_indexer_q_b.weight", []uint64{uint64(qLora), uint64(idxHeads * idxDim)}},
-		{"blk.0.attn_indexer_k.weight", []uint64{uint64(H), uint64(idxDim)}},
-		{"blk.0.attn_indexer_k_norm.weight", []uint64{uint64(idxDim)}},
-		{"blk.0.attn_indexer_k_norm.bias", []uint64{uint64(idxDim)}},
-		{"blk.0.attn_indexer_weights.weight", []uint64{uint64(H), uint64(idxHeads)}},
+		{"blk.0.indexer.attn_q_b.weight", []uint64{uint64(qLora), uint64(idxHeads * idxDim)}},
+		{"blk.0.indexer.attn_k.weight", []uint64{uint64(H), uint64(idxDim)}},
+		{"blk.0.indexer.k_norm.weight", []uint64{uint64(idxDim)}},
+		{"blk.0.indexer.k_norm.bias", []uint64{uint64(idxDim)}},
+		{"blk.0.indexer.proj.weight", []uint64{uint64(H), uint64(idxHeads)}},
 		{"blk.0.ffn_norm.weight", []uint64{uint64(H)}},
 		{"blk.0.ffn_gate_inp.weight", []uint64{uint64(H), uint64(E)}},
 		{"blk.0.exp_probs_b.bias", []uint64{uint64(E)}},
@@ -234,9 +234,9 @@ func glmMoeDsaFullGGUF(H, V, qLora, kvLora, qkNope, qkRope, vHead, nH, idxHeads,
 	ku("glm_moe_dsa.attention.qk_nope_head_dim", uint32(qkNope))
 	ku("glm_moe_dsa.attention.qk_rope_head_dim", uint32(qkRope))
 	ku("glm_moe_dsa.attention.v_head_dim", uint32(vHead))
-	ku("glm_moe_dsa.index_n_heads", uint32(idxHeads))
-	ku("glm_moe_dsa.index_head_dim", uint32(idxDim))
-	ku("glm_moe_dsa.index_topk", 4)
+	ku("glm_moe_dsa.attention.indexer.head_count", uint32(idxHeads))
+	ku("glm_moe_dsa.attention.indexer.key_length", uint32(idxDim))
+	ku("glm_moe_dsa.attention.indexer.top_k", 4)
 	// vocab size derives from the token list; without it cfg.VocabSize=0 and the LM head
 	// produces width-0 logits. V deterministic placeholder tokens.
 	toks := make([]string, V)

@@ -64,9 +64,9 @@ func TestGLMMoeDsaConfig(t *testing.T) {
 		ku(w, "glm_moe_dsa.attention.q_lora_rank", 24)
 		ku(w, "glm_moe_dsa.attention.kv_lora_rank", 16)
 		// DSA learned-indexer axis.
-		ku(w, "glm_moe_dsa.index_n_heads", 4)
-		ku(w, "glm_moe_dsa.index_head_dim", 16)
-		ku(w, "glm_moe_dsa.index_topk", 8)
+		ku(w, "glm_moe_dsa.attention.indexer.head_count", 4)
+		ku(w, "glm_moe_dsa.attention.indexer.key_length", 16)
+		ku(w, "glm_moe_dsa.attention.indexer.top_k", 8)
 		ka(w, "glm_moe_dsa.indexer_types", []string{"full", "shared"})
 	}
 
@@ -164,5 +164,61 @@ func TestGLMMoeDsaConfig(t *testing.T) {
 			// package boundary, that the GGUF routes to the same DSA forward the JSON
 			// loader does — without reaching into the model package's unexported helper.
 		})
+	}
+}
+
+// TestGLMDsaArchNormalizes proves fak loads the REAL GLM-5.2 GGUF arch — general.architecture
+// = "glm-dsa" (llama.cpp LLM_ARCH_GLM_DSA), validated against the on-disk community Q4_K_M on
+// the lab GPU server 2026-06-24 — not just fak's internal "glm_moe_dsa" spelling: Config()
+// normalizes ModelType to "glm_moe_dsa" (so the native DSA forward + every cfg.ModelType check
+// fire) while reading the MoE/MLA/indexer keys under the file's own "glm-dsa." prefix, including
+// the re-pinned attention.indexer.* scalars (previously the wrong index_* best-guess keys).
+func TestGLMDsaArchNormalizes(t *testing.T) {
+	var kv bytes.Buffer
+	var n uint64
+	ks := func(k, v string) { writeKVString(&kv, k, v); n++ }
+	ku := func(k string, v uint32) { writeKVUint32(&kv, k, v); n++ }
+	kf := func(k string, v float32) { writeKVFloat32(&kv, k, v); n++ }
+	ks("general.architecture", "glm-dsa")
+	ku("general.alignment", 32)
+	ku("glm-dsa.embedding_length", 32)
+	ku("glm-dsa.block_count", 4)
+	ku("glm-dsa.attention.head_count", 4)
+	ku("glm-dsa.attention.head_count_kv", 2)
+	ku("glm-dsa.feed_forward_length", 64)
+	kf("glm-dsa.attention.layer_norm_rms_epsilon", 1e-5)
+	kf("glm-dsa.rope.freq_base", 10000)
+	ku("glm-dsa.expert_count", 4)
+	ku("glm-dsa.expert_used_count", 2)
+	ku("glm-dsa.expert_feed_forward_length", 48)
+	ku("glm-dsa.attention.q_lora_rank", 24)
+	ku("glm-dsa.attention.kv_lora_rank", 16)
+	ku("glm-dsa.attention.indexer.head_count", 4)
+	ku("glm-dsa.attention.indexer.key_length", 16)
+	ku("glm-dsa.attention.indexer.top_k", 8)
+
+	var b bytes.Buffer
+	writeMinimalHeader(&b, 0, n)
+	b.Write(kv.Bytes())
+	gg, err := Read(bytes.NewReader(b.Bytes()))
+	if err != nil {
+		t.Fatalf("Read: %v", err)
+	}
+	cfg, err := gg.Config()
+	if err != nil {
+		t.Fatalf("Config: %v", err)
+	}
+	if cfg.ModelType != "glm_moe_dsa" {
+		t.Fatalf("ModelType=%q, want glm_moe_dsa (the real arch \"glm-dsa\" must normalize)", cfg.ModelType)
+	}
+	if !cfg.IsMoE() {
+		t.Fatalf("IsMoE()=false, want true (NumExperts=%d)", cfg.NumExperts)
+	}
+	if cfg.QLoraRank != 24 || cfg.KVLoraRank != 16 {
+		t.Fatalf("MLA ranks under glm-dsa. prefix = q:%d kv:%d, want 24/16", cfg.QLoraRank, cfg.KVLoraRank)
+	}
+	if cfg.IndexNHeads != 4 || cfg.IndexHeadDim != 16 || cfg.IndexTopK != 8 {
+		t.Fatalf("DSA indexer (attention.indexer.* under glm-dsa.) = heads:%d dim:%d topk:%d, want 4/16/8",
+			cfg.IndexNHeads, cfg.IndexHeadDim, cfg.IndexTopK)
 	}
 }
