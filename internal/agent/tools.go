@@ -257,7 +257,17 @@ func Configure() {
 		Deny: map[string]abi.ReasonCode{
 			toolDelete: abi.ReasonPolicyBlock, // the agent must never delete an account
 		},
-		SelfModifyGlobs: []string{"internal/abi/", "internal/kernel/", ".dos/"},
+		// Self-modify floor: reuse the canonical DefaultPolicy glob set rather than a
+		// hand-maintained subset. The old inline list here ({internal/abi/,
+		// internal/kernel/, .dos/}) silently lagged the #172 Hole 2 extension — it did
+		// NOT cover the WITNESS machinery (internal/architest, internal/shipgate,
+		// internal/adjudicator, dos.toml), so on this in-kernel arm a write into the
+		// grader was unguarded even though the shell-write guard (commandSelfModify,
+		// wired in Adjudicate) was on the path. Sourcing the set from DefaultPolicy
+		// keeps the bench/dogfood arm's guarded trees in lock-step with the deployable
+		// floor the architest gate witnesses — both the direct-write and Bash-write
+		// paths now deny a self-edit into any witness tree.
+		SelfModifyGlobs: adjudicator.DefaultPolicy().SelfModifyGlobs,
 		RedactFields:    []string{"password", "secret", "api_key", "token"},
 	})
 

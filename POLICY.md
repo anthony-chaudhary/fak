@@ -75,7 +75,7 @@ through?"* before deploying.
 | `allow` | Tool names affirmatively permitted (exact match). |
 | `allow_prefix` | A call is permitted if its tool name **starts with** any of these — the read-only family (`read_`, `get_`, `search_`, …). |
 | `deny` | Explicit provable refusals: `tool → reason`. The reason **must** be a name from the closed refusal vocabulary (below). |
-| `self_modify_globs` | Path fragments that, in a *write-shaped* call's target argument, prove a `SELF_MODIFY` attempt (the agent editing its own kernel/config). |
+| `self_modify_globs` | Path fragments that prove a `SELF_MODIFY` attempt (the agent editing its own kernel/config). Checked on **both** write paths: a write-shaped call's target *argument* (`Edit`/`Write`), **and** a shell write whose target lives *inside the command string* (`Bash`: `sed -i`, a `>`/`>>` redirect, `tee`, `git apply`/`git checkout`, an in-place `perl -i`/`ruby -i`/`awk -i`, `python -c`/`node -e` inline writes, `find … -delete`, archive extraction). A shell *read* of a guarded file (`cat`/`grep`) is not a self-modify. |
 | `redact_fields` | Arg keys whose value is stripped (`[REDACTED]`, a `TRANSFORM`) before dispatch — secret hygiene at the call boundary. |
 | `arg_rules` | Per-tool **argument-value** denials: a list of `{ "tool", "arg", "deny_regex", "reason" }`. If an allow-listed `tool`'s decoded string `arg` matches `deny_regex` (RE2 — no backreferences), the call is refused with `reason` (a closed-vocabulary code). Regex-only and best-effort — it inspects one decoded string, not the resolved effect — but enough to deny `rm -rf`, `git push`, or a write whose path escapes the repo (`-o ../…`). See [`examples/dogfood-claude-policy.json`](examples/dogfood-claude-policy.json) and [`examples/repo-guard-policy.json`](examples/repo-guard-policy.json); the path-resolving structural complement is [`tools/repo_guard.py`](tools/repo_guard.py) (see [`docs/repo-guard.md`](docs/repo-guard.md)). |
 
@@ -119,7 +119,11 @@ unknown code as `REASON_<n>` rather than failing.)
   irreversible/exfil-shaped tools *off* the allow-list and let `DEFAULT_DENY`
   hold them.
 - `redact_fields` and `self_modify_globs` are best-effort call-boundary hygiene,
-  not a guarantee — they inspect decoded args by key/substring.
+  not a guarantee — they inspect decoded args by key/substring (and, for the shell
+  write path, the `Bash` `command` string by substring). The shell guard is a
+  conservative substring floor, not a full shell parser: it errs toward refusing a
+  guarded path named alongside a write verb (a false refusal into a kernel tree is
+  cheap; a false *allow* is the self-grading-homework failure the floor exists to stop).
 - It adjudicates a **whole turn**, not a live token stream. The floor's verdict is
   computed over the *complete* tool-call set the upstream proposed — a call cannot
   be allowed/denied/repaired until its arguments have fully arrived, and a turn
