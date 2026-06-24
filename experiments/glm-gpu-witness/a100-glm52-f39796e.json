@@ -1,0 +1,61 @@
+{
+  "arch": "sm_80",
+  "build": {
+    "libfakcuda_bytes": 217836,
+    "ok": true
+  },
+  "content_sha256": "9f56e46e2c37d91927bf4ce61861a581132daa1394e2d5f8afbcf248f9fd98ff",
+  "head_sha": "f39796e",
+  "log_bytes": 1796,
+  "machine_id": "a100",
+  "model": {
+    "name": "glm_moe_dsa",
+    "precision": "q8"
+  },
+  "rc": 0,
+  "record_tool": "glm_witness_record.py@1",
+  "schema": "glm-gpu-witness/1",
+  "tests": [
+    {
+      "argmax_cpu": 40,
+      "argmax_device": 40,
+      "class": "approx",
+      "cosine": 1.0,
+      "gate": null,
+      "path_exercised": "all-device GLM-5.2 DSA forward",
+      "rc": 0,
+      "set_equality": null,
+      "test_name": "TestCUDAGLMMoeDsaBackendForward",
+      "tier": "sm_80",
+      "verdict": "PASS"
+    },
+    {
+      "argmax_cpu": 40,
+      "argmax_device": 40,
+      "class": "approx",
+      "cosine": 1.0,
+      "gate": null,
+      "path_exercised": "cpu-offload hybrid",
+      "rc": 0,
+      "set_equality": null,
+      "test_name": "TestCUDAGLMDsaCPUOffloadHybrid",
+      "tier": "sm_80",
+      "verdict": "PASS"
+    },
+    {
+      "argmax_cpu": 40,
+      "argmax_device": 40,
+      "class": "approx",
+      "cosine": 1.0,
+      "gate": null,
+      "path_exercised": "device index score+topk",
+      "rc": 0,
+      "set_equality": null,
+      "test_name": "TestCUDAGLMMoeDsaIndexSelectMatches",
+      "tier": "sm_80",
+      "verdict": "PASS"
+    }
+  ],
+  "utc": "2026-06-24T20:27:33Z",
+  "verdict": "PASS"
+}
