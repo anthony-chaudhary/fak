@@ -13,6 +13,14 @@ CUDA, the model fetch) and then runs one or more *engines* against the SAME GPU 
 the SAME model, so the numbers are directly comparable. The engines today:
 
   * llama       -- llama.cpp(CUDA) llama-bench  (the baseline)
+  * vllm        -- vLLM (PagedAttention + continuous batching) offline throughput
+                   bench. A FIRST-CLASS SOTA-baseline peer to llama.cpp. vLLM loads
+                   the HF (bf16) form of the SAME model -- it does not consume the
+                   GGUF Q8 the llama/fak engines do -- so its row is a DIFFERENT
+                   precision, disclosed in the normalized `precision` field. Its
+                   number is an AGGREGATE continuous-batching throughput (vLLM's
+                   actual strength), not the single-stream slice, also disclosed.
+                   Opt-in (a ~5 GB install), so NOT pulled into the default `all`.
   * fak-cpu     -- fak's pure-Go Q8 engine via cmd/modelbench (CPU)
   * fak-cuda    -- fak's OWN engine on the CUDA backend via cmd/modelbench (f32;
                    the cuda backend does not yet advertise UploadDtype, so the
@@ -20,7 +28,8 @@ the SAME model, so the numbers are directly comparable. The engines today:
                    engine measured on a real datacenter GPU, head-to-head vs
                    llama.cpp on identical hardware.
 
-`--engine {llama,fak-cpu,fak-cuda,fak,all}` selects which run (default: all). Every
+`--engine {llama,vllm,fak-cpu,fak-cuda,fak,all}` selects which run (default: all;
+vLLM is opt-in via `--engine vllm` or a comma list like `llama,vllm`). Every
 engine writes a normalized {prefill,decode}_tok_per_sec row; the driver folds them
 into ONE result.json (schema fak.gcp-vm-bench.v2) with an `engines` map plus a
 back-compatible top-level headline (the llama baseline), and that result folds into
@@ -103,20 +112,28 @@ class Engine:
     needs_cuda: bool
 
 
-# The engine registry. ENGINE_ORDER is the run order (baseline first, then fak's
-# own engine), and also the headline preference (llama is the comparable baseline).
+# The engine registry. ENGINE_ORDER is the canonical run/headline order (baselines
+# first, then fak's own engine; llama is the comparable headline baseline). vLLM is a
+# first-class SOTA-baseline peer to llama.cpp and orders right after it, so a comma
+# list like `--engine llama,vllm` runs the engine head-to-head in a stable order.
 ENGINES: dict[str, Engine] = {
     "llama": Engine("llama", "llama.cpp (CUDA) baseline", needs_cuda=True),
+    "vllm": Engine("vllm", "vLLM (PagedAttention, continuous batching) baseline", needs_cuda=True),
     "fak-cpu": Engine("fak-cpu", "fak pure-Go Q8 engine (CPU)", needs_cuda=False),
     "fak-cuda": Engine("fak-cuda", "fak engine on the CUDA backend (f32)", needs_cuda=True),
 }
-ENGINE_ORDER = ["llama", "fak-cpu", "fak-cuda"]
+ENGINE_ORDER = ["llama", "vllm", "fak-cpu", "fak-cuda"]
+# `all` stays the CURATED fak-vs-llama.cpp default and deliberately EXCLUDES vLLM:
+# vLLM is a ~5 GB install on a different (server) serving paradigm, so pulling it
+# into every default run would change the cost/behaviour of existing benches. vLLM is
+# therefore opt-in -- select it explicitly (`--engine vllm`) or in a comma list.
+DEFAULT_ALL = ["llama", "fak-cpu", "fak-cuda"]
 
 
 def resolve_engines(spec: str) -> list[str]:
     """Map a --engine value to an ordered, de-duplicated list of engine keys."""
     if spec == "all":
-        return list(ENGINE_ORDER)
+        return list(DEFAULT_ALL)
     if spec == "fak":
         return ["fak-cpu", "fak-cuda"]
     if spec in ENGINES:
@@ -259,6 +276,31 @@ json.dump({"engine":key,"ok":True,"backend":rep.get("engine"),"precision":rep.ge
   open(out,"w"),indent=2)
 '''
 
+_PY_NORM_VLLM = r'''import json,sys
+raw=json.load(open(sys.argv[1])); model=sys.argv[2]; out=sys.argv[3]
+def g(*keys):
+    for k in keys:
+        v=raw.get(k)
+        if isinstance(v,(int,float)) and not isinstance(v,bool): return v
+    return None
+# vLLM `bench throughput` is an AGGREGATE continuous-batching number (vLLM's actual
+# strength), NOT a single-stream slice. Prefer the OUTPUT-token throughput; fall back
+# to total_tokens/elapsed (labelled). If no known key is present, ok=False -- the
+# combiner records a diagnosed miss, NEVER a fabricated number.
+decode=g("output_throughput","output_token_throughput","output_tokens_per_second","output_toks_per_s","tokens_per_second")
+note="vLLM AGGREGATE continuous-batching output tok/s"
+if decode is None:
+    tot=g("total_num_tokens","num_tokens","total_tokens"); el=g("elapsed_time","duration","elapsed_s","elapsed")
+    if tot and el and el>0:
+        decode=tot/el; note="vLLM AGGREGATE total tok/s (total_num_tokens/elapsed fallback)"
+json.dump({"engine":"vllm","ok":decode is not None,
+  "backend":"vLLM (PagedAttention, continuous batching)","precision":"bf16",
+  "prefill_tok_per_sec":None,"decode_tok_per_sec":decode,
+  "note":note+"; HF bf16 weights of the SAME model, NOT the GGUF Q8 the llama/fak rows use, and NOT single-stream -- vLLM's edge is concurrency",
+  "model":model,"raw":raw,"raw_artifact":sys.argv[1].split("/")[-1]},
+  open(out,"w"),indent=2)
+'''
+
 _PY_DIAG = r'''import json,sys,subprocess
 key,logf,out=sys.argv[1],sys.argv[2],sys.argv[3]
 def tail(p,n=60):
@@ -311,6 +353,24 @@ _ENGINE_BASH = {
   ./build/bin/llama-bench -m "$MODEL" -ngl 99 -p 512 -n 128 -o json > "$WORK/llama-bench.json"
   python3 "$WORK/norm_llama.py" "$WORK/llama-bench.json" "$GPUS" "$MODEL_FILE" "$WORK/engine-llama.json"
 }''',
+    # vLLM serves the HF (bf16) form of the SAME model (it does not load the GGUF Q8),
+    # via its offline `bench throughput` (no server needed). The number is AGGREGATE
+    # continuous-batching throughput -- vLLM's actual strength -- recorded honestly as
+    # bf16 + aggregate in the normalized row. A pip/build/arch mismatch fails THIS
+    # engine only (run_one diagnoses it); it never fabricates or blocks the others.
+    "vllm": r'''engine_vllm(){
+  cd "$WORK"
+  VLLM_MODEL="${MODEL_REPO%-GGUF}"
+  python3 -m pip install -q -U vllm >/dev/null 2>&1 || pip3 install -q -U vllm >/dev/null 2>&1 || pip install -q -U vllm
+  # Try the modern `vllm bench throughput` CLI, then the module entrypoint, writing a
+  # JSON the normalizer reads. input/output lengths mirror the llama-bench pp512/tg128.
+  vllm bench throughput --model "$VLLM_MODEL" --input-len 512 --output-len 128 \
+      --num-prompts 64 --dtype bfloat16 --output-json "$WORK/vllm-throughput.json" \
+    || python3 -m vllm.entrypoints.cli.main bench throughput --model "$VLLM_MODEL" \
+        --input-len 512 --output-len 128 --num-prompts 64 --dtype bfloat16 \
+        --output-json "$WORK/vllm-throughput.json"
+  python3 "$WORK/norm_vllm.py" "$WORK/vllm-throughput.json" "$VLLM_MODEL" "$WORK/engine-vllm.json"
+}''',
     "fak-cpu": r'''engine_fak_cpu(){
   cd "$SRC"
   go build -o "$WORK/bin/modelbench" ./cmd/modelbench
@@ -338,7 +398,8 @@ _ENGINE_BASH = {
   python3 "$WORK/norm_fak.py" fak-cuda "$WORK/fak-cuda-report.json" "$WORK/engine-fak-cuda.json"
 }''',
 }
-_ENGINE_FN = {"llama": "engine_llama", "fak-cpu": "engine_fak_cpu", "fak-cuda": "engine_fak_cuda"}
+_ENGINE_FN = {"llama": "engine_llama", "vllm": "engine_vllm",
+              "fak-cpu": "engine_fak_cpu", "fak-cuda": "engine_fak_cuda"}
 
 
 _DRIVER_PREAMBLE = r'''#!/usr/bin/env bash
@@ -357,6 +418,7 @@ fatal(){ python3 -c 'import json,sys;open(sys.argv[2],"w").write(json.dumps({"sc
 # (build_cuda.sh reads $CC for that), so it is deliberately named to never collide.
 CUDA_CC="@@CC@@"
 MODEL_FILE="@@HF_FILE@@"
+MODEL_REPO="@@HF_REPO@@"
 
 log "== fak GCP multi-engine bench (arch sm_$CUDA_CC) =="
 nvidia-smi -L || fatal "no GPU / driver"
@@ -399,6 +461,9 @@ NORMLLAMA
 cat > "$WORK/norm_fak.py" <<'NORMFAK'
 @@PY_NORM_FAK@@
 NORMFAK
+cat > "$WORK/norm_vllm.py" <<'NORMVLLM'
+@@PY_NORM_VLLM@@
+NORMVLLM
 cat > "$WORK/diag.py" <<'DIAGPY'
 @@PY_DIAG@@
 DIAGPY
@@ -450,6 +515,7 @@ def render_driver_script(engine_keys: list[str], hf_repo: str, hf_file: str, cc:
     body = body.replace("@@HF_FILE@@", hf_file)
     body = body.replace("@@PY_NORM_LLAMA@@", _PY_NORM_LLAMA.strip("\n"))
     body = body.replace("@@PY_NORM_FAK@@", _PY_NORM_FAK.strip("\n"))
+    body = body.replace("@@PY_NORM_VLLM@@", _PY_NORM_VLLM.strip("\n"))
     body = body.replace("@@PY_DIAG@@", _PY_DIAG.strip("\n"))
     body = body.replace("@@PY_COMBINE@@", _PY_COMBINE.strip("\n"))
 
@@ -752,7 +818,9 @@ def main(argv: Optional[list[str]] = None) -> int:
     ap.add_argument("--proof", action="store_true",
                     help="use the cheapest (L4) tier to prove the pipeline")
     ap.add_argument("--engine", default="all",
-                    help="which engine(s): llama, fak-cpu, fak-cuda, fak, all, or a comma list (default: all)")
+                    help="which engine(s): llama, vllm, fak-cpu, fak-cuda, fak, all, or a comma "
+                         "list (default: all). vLLM is opt-in (a ~5 GB install) -- it is NOT in "
+                         "'all'; run the engine head-to-head with e.g. --engine llama,vllm,fak-cuda")
     ap.add_argument("--zone", default=None, help="override zone (else tier default)")
     ap.add_argument("--project", default=os.environ.get("GCP_PROJECT") or None)
     ap.add_argument("--account", default=os.environ.get("GCP_ACCOUNT") or None)

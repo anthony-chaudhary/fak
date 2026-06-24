@@ -248,8 +248,11 @@ class ProvisionerLogicTest(unittest.TestCase):
 class EngineSelectionTest(unittest.TestCase):
     """The modular engine registry + --engine resolution."""
 
-    def test_all_is_every_engine_in_run_order(self):
+    def test_all_is_the_curated_default_and_excludes_vllm(self):
+        # `all` stays the fak-vs-llama.cpp default; vLLM is opt-in (a ~5 GB install), so
+        # it must NOT be pulled into every default run.
         self.assertEqual(gcp_bench.resolve_engines("all"), ["llama", "fak-cpu", "fak-cuda"])
+        self.assertNotIn("vllm", gcp_bench.resolve_engines("all"))
 
     def test_fak_alias_is_both_fak_engines(self):
         self.assertEqual(gcp_bench.resolve_engines("fak"), ["fak-cpu", "fak-cuda"])
@@ -261,12 +264,25 @@ class EngineSelectionTest(unittest.TestCase):
         # Order follows ENGINE_ORDER regardless of how the user listed them.
         self.assertEqual(gcp_bench.resolve_engines("fak-cuda,llama"), ["llama", "fak-cuda"])
 
+    def test_vllm_is_a_first_class_selectable_engine(self):
+        # vLLM is a first-class peer to llama.cpp: registered, CUDA-flagged, selectable
+        # alone or in a comma list, and ordered right after llama (the headline baseline).
+        self.assertIn("vllm", gcp_bench.ENGINES)
+        self.assertTrue(gcp_bench.ENGINES["vllm"].needs_cuda)
+        self.assertIn("vllm", gcp_bench.ENGINE_ORDER)
+        self.assertEqual(gcp_bench.resolve_engines("vllm"), ["vllm"])
+        # The canonical engine head-to-head, in stable order regardless of input order.
+        self.assertEqual(gcp_bench.resolve_engines("vllm,llama"), ["llama", "vllm"])
+        self.assertEqual(gcp_bench.resolve_engines("fak-cuda,vllm,llama"),
+                         ["llama", "vllm", "fak-cuda"])
+
     def test_unknown_engine_raises(self):
         with self.assertRaises(ValueError):
             gcp_bench.resolve_engines("nope")
 
     def test_engine_registry_flags_cuda_correctly(self):
         self.assertTrue(gcp_bench.ENGINES["llama"].needs_cuda)
+        self.assertTrue(gcp_bench.ENGINES["vllm"].needs_cuda)
         self.assertTrue(gcp_bench.ENGINES["fak-cuda"].needs_cuda)
         self.assertFalse(gcp_bench.ENGINES["fak-cpu"].needs_cuda)
 
@@ -315,6 +331,63 @@ class DriverScriptTest(unittest.TestCase):
     def test_fak_cpu_uses_lean_q8(self):
         body = self._driver(["fak-cpu"])
         self.assertIn("-gguf \"$MODEL\" -lean", body)
+
+    def test_vllm_engine_fragment_renders_and_discloses_precision(self):
+        body = self._driver(["llama", "vllm"])
+        self.assertNotIn("@@", body)
+        self.assertIn("engine_vllm()", body)
+        self.assertIn("run_one vllm engine_vllm", body)
+        self.assertIn("bench throughput", body)
+        self.assertIn("pip install -q -U vllm", body)
+        self.assertIn("norm_vllm.py", body)
+        # vLLM runs the HF (bf16) form of the SAME model, derived by stripping -GGUF.
+        self.assertIn("${MODEL_REPO%-GGUF}", body)
+        self.assertIn("--dtype bfloat16", body)
+        # The norm helper is written to the VM and discloses the precision/aggregate
+        # difference rather than silently passing it off as the llama/fak Q8 number.
+        self.assertIn('cat > "$WORK/norm_vllm.py"', body)
+        self.assertIn("precision", gcp_bench._PY_NORM_VLLM)
+
+    def test_vllm_normalizer_picks_output_throughput_and_never_fabricates(self):
+        # Exercise the real _PY_NORM_VLLM helper hermetically: a sample vLLM throughput
+        # JSON -> a normalized row with the output tok/s as decode, bf16 precision, and
+        # an honest aggregate/precision note. A JSON with no known key must mark ok=False
+        # (a diagnosed miss), NEVER invent a number.
+        import json
+        import os
+        import subprocess
+        import sys
+        import tempfile
+        d = tempfile.mkdtemp()
+        helper = Path(d) / "norm_vllm.py"
+        gcp_bench.write_lf(helper, gcp_bench._PY_NORM_VLLM.strip("\n") + "\n")
+
+        good = Path(d) / "vllm-throughput.json"
+        good.write_text(json.dumps({
+            "requests_per_second": 7.1, "output_throughput": 1234.5,
+            "total_token_throughput": 4567.8, "elapsed_time": 9.0,
+        }), encoding="utf-8")
+        out = Path(d) / "engine-vllm.json"
+        subprocess.run([sys.executable, str(helper), str(good), "Qwen/Qwen2.5-3B-Instruct", str(out)],
+                       check=True)
+        row = json.loads(out.read_text(encoding="utf-8"))
+        self.assertEqual(row["engine"], "vllm")
+        self.assertTrue(row["ok"])
+        self.assertEqual(row["decode_tok_per_sec"], 1234.5)
+        self.assertEqual(row["precision"], "bf16")
+        self.assertIsNone(row["prefill_tok_per_sec"])
+        self.assertIn("AGGREGATE", row["note"])
+
+        # No recognizable throughput key + no total/elapsed pair -> ok=False, not a fake.
+        empty = Path(d) / "empty.json"
+        empty.write_text(json.dumps({"requests_per_second": 7.1}), encoding="utf-8")
+        out2 = Path(d) / "engine-vllm-2.json"
+        subprocess.run([sys.executable, str(helper), str(empty), "m", str(out2)], check=True)
+        row2 = json.loads(out2.read_text(encoding="utf-8"))
+        self.assertFalse(row2["ok"])
+        self.assertIsNone(row2["decode_tok_per_sec"])
+        for p in (helper, good, out, empty, out2):
+            os.remove(p)
 
     def test_arch_threaded_from_compute_capability(self):
         body = self._driver(["fak-cuda"], cc="100")  # Blackwell sm_100

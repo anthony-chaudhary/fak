@@ -278,8 +278,8 @@
       "name": "llama.cpp",
       "kind": "serving-system",
       "last_reviewed": "2026-06-23",
-      "url": "",
-      "notes": ""
+      "url": "https://github.com/ggml-org/llama.cpp",
+      "notes": "GGUF CPU/GPU inference engine (GGML). The portable single-stream baseline fak measures decode/prefill parity against on CPU (Q8_0) and on a consumer GPU; its hand-tuned int8 GEMM is the throughput reference in LLAMACPP-HEADTOHEAD-RESULTS.md, and it is a first-class selectable engine in the GCP head-to-head bench (tools/gcp_bench.py)."
     },
     {
       "name": "LLGuidance",
@@ -579,8 +579,8 @@
       "name": "SGLang",
       "kind": "serving-system",
       "last_reviewed": "2026-06-23",
-      "url": "",
-      "notes": ""
+      "url": "https://arxiv.org/abs/2312.07104",
+      "notes": "RadixAttention prefix-cache reuse + cache-aware router (Zheng et al., NeurIPS 2024). Published 50–99% prefix cache-hit band (the band fak's 86.7% radix hit-rate is measured inside); compressed-FSM structured-output decoding. The reuse-mechanism peer fak's split-reuse parity is measured against, and the only LIVE concurrent-serving head-to-head fak has run (fak-gateway 0.75× raw SGLang at peak; QWEN36-27B-GPU-SERVER-RESULTS.md)."
     },
     {
       "name": "SGLang-PD",
@@ -649,8 +649,8 @@
       "name": "TensorRT-LLM",
       "kind": "serving-system",
       "last_reviewed": "2026-06-23",
-      "url": "",
-      "notes": ""
+      "url": "https://github.com/NVIDIA/TensorRT-LLM",
+      "notes": "NVIDIA's TensorRT-based LLM serving engine: in-flight (continuous) batching, paged KV, fused kernels, ModelOpt FP8 / NVFP4 quantization. The vendor SOTA throughput/latency bar on NVIDIA datacenter GPUs (a recurring MLPerf Inference submitter)."
     },
     {
       "name": "Thinking Machines batch-invariant-ops",
@@ -684,8 +684,8 @@
       "name": "vLLM",
       "kind": "serving-system",
       "last_reviewed": "2026-06-23",
-      "url": "",
-      "notes": ""
+      "url": "https://arxiv.org/abs/2309.06180",
+      "notes": "PagedAttention LLM serving engine (Kwon et al., SOSP 2023). Continuous / iteration-level batching + paged KV cache (~96% KV utilization, <4% waste); Automatic Prefix Caching (block-hash within-instance KV reuse, docs.vllm.ai/en/latest/features/automatic_prefix_caching); FP8 E4M3/E5M2 KV-cache dtype; XGrammar guided decoding; OpenAI-compatible server. The de facto open SOTA baseline this scorecard positions fak against on continuous batching, prefix caching, and the OpenAI API surface; the live gateway head-to-head is fak-fronts-vLLM vs raw-vLLM (the adjudication tax), the analog of the measured SGLang row."
     },
     {
       "name": "vLLM/SGLang self-host on H100/H200",

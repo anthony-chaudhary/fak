@@ -131,6 +131,40 @@ jobs:
         run: |
           python tools/context_tape_test.py
 
+      # vLLM first-class head-to-head harness: the gateway adjudication-tax witness
+      # (fak-fronts-vLLM vs raw-vLLM, the analog of the measured SGLang row) and the vLLM
+      # engine added to the GPU throughput bench (a first-class peer to llama.cpp). Both
+      # tests are hermetic + pure-stdlib — an in-process fake OpenAI server for the tax
+      # witness, and a rendered-driver / offline-normalizer exec for the bench engine; no
+      # GPU, no network, no real `fak serve`. They were in the un-gated tool-test tail, so
+      # a regression in the vLLM comparison harness went uncaught — gate them.
+      - name: vLLM head-to-head harness tests (adjudication-tax witness · gcp_bench vLLM engine)
+        working-directory: ${{ github.workspace }}
+        run: |
+          python tools/vllm_tax_witness_test.py
+          python tools/gcp_bench_test.py
+
+      # Tool-test no-blackhole gate (the systemic backstop the dispatch-loop step below
+      # calls for): the steps in this job hand-enumerate ~58 of 166 tools/*_test.py, so a
+      # NEWLY added tool test ran in NO gate at all (tool_coverage_audit.py only sees that a
+      # test EXISTS, not that it RUNS). gated_tool_tests.py discovers EVERY tools/*_test.py
+      # and accounts for each in exactly one bucket: gated-elsewhere (read live from THIS
+      # file, so it never drifts from the enumerated steps), quarantine (an explicit
+      # {name: reason} from a closed vocab — pytest / needs-network / needs-binary /
+      # needs-gpu / red), or HERMETIC (the default remainder — RUN here). Because the
+      # default is hermetic, a new test RUNS automatically; if it can't, the author must
+      # fix it or quarantine it with a reason — the no-future-blackhole forcing function.
+      # `--run` aggregates ALL failures (a red test never masks the rest). Its own unit
+      # tests run first (HARD), then the manifest self-check, then the ~88 hermetic tests
+      # that previously ran nowhere. Linux-authoritative (CI is ubuntu); the Windows/local
+      # mirror runs `--check` only (scripts/ci.ps1) since a few tests are platform-divergent.
+      - name: tool-test no-blackhole gate (discover + run every un-gated hermetic tools/*_test.py)
+        working-directory: ${{ github.workspace }}
+        run: |
+          python tools/gated_tool_tests_test.py
+          python tools/gated_tool_tests.py --check
+          python tools/gated_tool_tests.py --run
+
       - name: release-substrate tests
         working-directory: ${{ github.workspace }}
         run: |
