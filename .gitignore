@@ -131,6 +131,15 @@ fak/experiments/dgx/
 # registered in ANY clone (public or private) is then private by default and can
 # never be `git add`-ed into either repo by accident.
 fak/experiments/benchmark/runs/by-machine/dgx*/
+# DGX Slack control-bridge source is PRIVATE-ONLY. Its home is the private repo
+# fak-private (tools/dgxbridge/); fleet is the sunset archive. tools/check_committed_files.py
+# already REFUSES any cmd|internal/*dgx*/ path at commit (this is exactly how cmd/dgxbridge +
+# internal/dgxbridge leaked once); these ignore rules also keep a stray working copy out of
+# `git status` so an auto-ship never tries to add it. Un-prefixed to match this repo's
+# module-at-root layout — the fak/-prefixed rules above are inert in a public clone.
+cmd/*dgx*/
+internal/*dgx*/
+cmd/slackgc/
 fak/experiments/model-baseline/*.json
 fak/experiments/model-baseline/*.log
 fak/experiments/model-baseline/*.txt
