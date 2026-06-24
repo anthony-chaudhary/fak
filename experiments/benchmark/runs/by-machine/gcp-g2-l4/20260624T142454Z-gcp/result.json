@@ -1,0 +1,191 @@
+{
+  "schema": "fak.gcp-vm-bench.v2",
+  "gpus": "NVIDIA L4, 23034 MiB",
+  "model": "qwen2.5-3b-instruct-q8_0.gguf",
+  "arch": "sm_89",
+  "engines": {
+    "fak-cpu": {
+      "engine": "fak-cpu",
+      "ok": true,
+      "backend": "fak-in-kernel Q8_0 (pure-Go, quantized weights+activations, int8\u00d7int8\u2192int32 dot)",
+      "precision": "Q8_0",
+      "prefill_tok_per_sec": 24.365213209700773,
+      "decode_tok_per_sec": 6.543229128985165,
+      "workers": 8,
+      "load_ms": 23497.94946,
+      "raw": {
+        "app_version": "0.32.0",
+        "backend": {
+          "registered_backends": [
+            "cpu-ref"
+          ],
+          "selected": "legacy"
+        },
+        "budget": "default(GOMAXPROCS)",
+        "decode": {
+          "prompt_tokens": 16,
+          "decode_steps": 128,
+          "reps": 5,
+          "per_token_median_ms": 152.829739,
+          "tok_per_sec": 6.543229128985165
+        },
+        "engine": "fak-in-kernel Q8_0 (pure-Go, quantized weights+activations, int8\u00d7int8\u2192int32 dot)",
+        "go_threads": "GOMAXPROCS=8, matmul workers=8 (FAK_WORKERS / FAK_BUDGET / -budget to pin)",
+        "lean": true,
+        "load_ms": 23497.94946,
+        "model": "qwen2.5-3b-instruct-q8_0.gguf [gguf-lean]",
+        "precision": "Q8_0",
+        "prefill": [
+          {
+            "tokens": 512,
+            "reps": 5,
+            "median_ms": 21013.565348,
+            "tok_per_sec": 24.365213209700773
+          }
+        ],
+        "quant_ms": 0.000245,
+        "quantized_at_load": true,
+        "source": "/root/.cache/huggingface/hub/models--Qwen--Qwen2.5-3B-Instruct-GGUF/snapshots/7dabda4d13d513e3e842b20f0d435c732f172cbe/qwen2.5-3b-instruct-q8_0.gguf",
+        "workers": 8
+      },
+      "raw_artifact": "fak-cpu-report.json"
+    },
+    "fak-cuda": {
+      "engine": "fak-cuda",
+      "ok": false,
+      "error": "fak-cuda failed on VM",
+      "log_tail": "[cuda] nvcc compile kernels (sm_89) ...\n[cuda] built 217762 byte libfakcuda.a\n[cuda] go build -tags cuda ./internal/compute/ ...\n[cuda] OK build\n/tmp/bench-driver.sh: line 162: 17990 Killed                  LD_LIBRARY_PATH=\"/usr/local/cuda/lib64:${LD_LIBRARY_PATH:-}\" \"$WORK/bin/modelbench-cuda\" -gguf \"$MODEL\" -backend cuda -require-non-reference -prefill-sizes 512 -prefill-reps 5 -decode-steps 128 -decode-reps 5 -decode-prompt 16 -out \"$WORK/fak-cuda-report.json\"\n"
+    },
+    "llama": {
+      "engine": "llama",
+      "ok": true,
+      "backend": "llama.cpp CUDA",
+      "precision": "Q8_0",
+      "prefill_tok_per_sec": 6770.348633,
+      "decode_tok_per_sec": 70.91764,
+      "gpus": "NVIDIA L4, 23034 MiB",
+      "model": "qwen2.5-3b-instruct-q8_0.gguf",
+      "raw": [
+        {
+          "build_commit": "1191758",
+          "build_number": 1,
+          "cpu_info": "Intel(R) Xeon(R) CPU @ 2.20GHz",
+          "gpu_info": "NVIDIA L4",
+          "backends": "CUDA",
+          "model_filename": "/root/.cache/huggingface/hub/models--Qwen--Qwen2.5-3B-Instruct-GGUF/snapshots/7dabda4d13d513e3e842b20f0d435c732f172cbe/qwen2.5-3b-instruct-q8_0.gguf",
+          "model_type": "qwen2 3B Q8_0",
+          "model_size": 3610132480,
+          "model_n_params": 3397103616,
+          "n_batch": 2048,
+          "n_ubatch": 512,
+          "n_threads": 4,
+          "cpu_mask": "0x0",
+          "cpu_strict": false,
+          "poll": 50,
+          "type_k": "f16",
+          "type_v": "f16",
+          "n_gpu_layers": 99,
+          "n_cpu_moe": 0,
+          "split_mode": "layer",
+          "main_gpu": 0,
+          "no_kv_offload": false,
+          "flash_attn": -1,
+          "devices": "auto",
+          "tensor_split": "0.00",
+          "tensor_buft_overrides": "none",
+          "use_mmap": true,
+          "use_direct_io": false,
+          "embeddings": false,
+          "no_op_offload": 0,
+          "no_host": false,
+          "fit_target": 0,
+          "fit_min_ctx": 0,
+          "n_prompt": 512,
+          "n_gen": 0,
+          "n_depth": 0,
+          "test_time": "2026-06-24T14:19:30Z",
+          "avg_ns": 75692772,
+          "stddev_ns": 2600850,
+          "avg_ts": 6770.348633,
+          "stddev_ts": 224.234314,
+          "samples_ns": [
+            80182990,
+            75208314,
+            75142313,
+            73524792,
+            74405455
+          ],
+          "samples_ts": [
+            6385.39,
+            6807.76,
+            6813.74,
+            6963.64,
+            6881.22
+          ]
+        },
+        {
+          "build_commit": "1191758",
+          "build_number": 1,
+          "cpu_info": "Intel(R) Xeon(R) CPU @ 2.20GHz",
+          "gpu_info": "NVIDIA L4",
+          "backends": "CUDA",
+          "model_filename": "/root/.cache/huggingface/hub/models--Qwen--Qwen2.5-3B-Instruct-GGUF/snapshots/7dabda4d13d513e3e842b20f0d435c732f172cbe/qwen2.5-3b-instruct-q8_0.gguf",
+          "model_type": "qwen2 3B Q8_0",
+          "model_size": 3610132480,
+          "model_n_params": 3397103616,
+          "n_batch": 2048,
+          "n_ubatch": 512,
+          "n_threads": 4,
+          "cpu_mask": "0x0",
+          "cpu_strict": false,
+          "poll": 50,
+          "type_k": "f16",
+          "type_v": "f16",
+          "n_gpu_layers": 99,
+          "n_cpu_moe": 0,
+          "split_mode": "layer",
+          "main_gpu": 0,
+          "no_kv_offload": false,
+          "flash_attn": -1,
+          "devices": "auto",
+          "tensor_split": "0.00",
+          "tensor_buft_overrides": "none",
+          "use_mmap": true,
+          "use_direct_io": false,
+          "embeddings": false,
+          "no_op_offload": 0,
+          "no_host": false,
+          "fit_target": 0,
+          "fit_min_ctx": 0,
+          "n_prompt": 0,
+          "n_gen": 128,
+          "n_depth": 0,
+          "test_time": "2026-06-24T14:19:30Z",
+          "avg_ns": 1804911204,
+          "stddev_ns": 1180376,
+          "avg_ts": 70.91764,
+          "stddev_ts": 0.046337,
+          "samples_ns": [
+            1806839367,
+            1805232757,
+            1804328006,
+            1803979008,
+            1804176883
+          ],
+          "samples_ts": [
+            70.8419,
+            70.905,
+            70.9405,
+            70.9543,
+            70.9465
+          ]
+        }
+      ],
+      "raw_artifact": "llama-bench.json"
+    }
+  },
+  "ok": true,
+  "prefill_tok_per_sec": 6770.348633,
+  "decode_tok_per_sec": 70.91764,
+  "headline_engine": "llama"
+}

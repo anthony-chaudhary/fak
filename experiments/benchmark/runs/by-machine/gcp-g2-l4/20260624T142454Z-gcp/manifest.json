@@ -1,0 +1,40 @@
+{
+  "$schema": "benchmark/run-manifest.v1",
+  "run_id": "gcp-g2-l4-nvidia-l4-20260624T142454Z",
+  "machine_id": "gcp-g2-l4",
+  "timestamp": "20260624T142454Z",
+  "git": {
+    "rev": "unknown",
+    "branch": "master",
+    "dirty": false
+  },
+  "harness": {
+    "name": "fak-gcp-bench",
+    "version": "2"
+  },
+  "model": {
+    "name": "qwen2.5-3b-instruct-q8_0.gguf",
+    "precision": "Q8_0"
+  },
+  "config": {
+    "zone": "us-west1-a",
+    "machine_type": "g2-standard-8",
+    "accelerator": "type=nvidia-l4,count=1",
+    "engines": [
+      "llama",
+      "fak-cpu",
+      "fak-cuda"
+    ]
+  },
+  "tags": [
+    "gcp",
+    "gpu",
+    "ada",
+    "engine-llama",
+    "engine-fak-cpu",
+    "engine-fak-cuda"
+  ],
+  "artifacts": {
+    "gpu": "result.json"
+  }
+}
