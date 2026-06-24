@@ -1,0 +1,213 @@
+package ggufload
+
+import (
+	"bytes"
+	"os"
+	"path/filepath"
+	"testing"
+)
+
+// gguf_glm_full_fixture_test.go — the P1 loader capstone: a COMPLETE single-MoE-layer glm_moe_dsa
+// GGUF (every per-layer tensor the native glm_dsa forward consumes — the full MLA stack, the DSA
+// indexer incl. k_norm, the router + score-correction bias, the batched routed experts, the shared
+// experts, the norms, plus the global embed/norm/lm_head) loads through the real F32Tensors path
+// and resolves into the full canonical manifest, with the batched experts split 1->E. It proves the
+// glm_moe_dsa loader handles a whole checkpoint's tensor set — no "no canonical mapping" on any
+// tensor, no shape error, experts materialized — the loader half of the eventual GGUF-forward
+// oracle. (It asserts shapes, not a forward; the forward-vs-oracle is the remaining P1 rung.)
+
+func TestGLMMoeDsaGGUFFullFixtureLoads(t *testing.T) {
+	// tiny but structurally complete dims.
+	const (
+		H        = 4 // hidden
+		V        = 5 // vocab
+		qLora    = 6
+		kvLora   = 4
+		qkNope   = 2
+		qkRope   = 2
+		vHead    = 2
+		nH       = 2
+		idxHeads = 2
+		idxDim   = 4
+		E        = 3 // routed experts
+		I        = 8 // moe intermediate
+		sharedI  = 8 // shared-expert intermediate (MoEIntermediate * shared_count)
+	)
+	qkHead := qkNope + qkRope // 4
+
+	path := filepath.Join(t.TempDir(), "glm_full.gguf")
+	if err := os.WriteFile(path, glmMoeDsaFullGGUF(H, V, qLora, kvLora, qkNope, qkRope, vHead, nH, idxHeads, idxDim, E, I, sharedI), 0o644); err != nil {
+		t.Fatalf("write fixture: %v", err)
+	}
+	ws, err := OpenWeights(path)
+	if err != nil {
+		t.Fatalf("OpenWeights: %v", err)
+	}
+	defer ws.Close()
+
+	cfg, tensors, err := ws.F32Tensors()
+	if err != nil {
+		t.Fatalf("F32Tensors (a complete glm_moe_dsa GGUF must load every tensor): %v", err)
+	}
+	if cfg.ModelType != "glm_moe_dsa" {
+		t.Fatalf("ModelType=%q, want glm_moe_dsa", cfg.ModelType)
+	}
+	shapes := map[string][]int{}
+	for _, tt := range tensors {
+		shapes[tt.Name] = tt.Shape
+	}
+
+	want := map[string][]int{
+		"model.embed_tokens.weight":                            {V, H},
+		"model.norm.weight":                                    {H},
+		"lm_head.weight":                                       {V, H},
+		"model.layers.0.input_layernorm.weight":                {H},
+		"model.layers.0.self_attn.q_a_proj.weight":             {qLora, H},
+		"model.layers.0.self_attn.q_a_layernorm.weight":        {qLora},
+		"model.layers.0.self_attn.q_b_proj.weight":             {nH * qkHead, qLora},
+		"model.layers.0.self_attn.kv_a_proj_with_mqa.weight":   {kvLora + qkRope, H},
+		"model.layers.0.self_attn.kv_a_layernorm.weight":       {kvLora},
+		"model.layers.0.self_attn.kv_b_proj.weight":            {nH * (qkNope + vHead), kvLora},
+		"model.layers.0.self_attn.o_proj.weight":               {H, nH * vHead},
+		"model.layers.0.self_attn.indexer.wq_b.weight":         {idxHeads * idxDim, qLora},
+		"model.layers.0.self_attn.indexer.wk.weight":           {idxDim, H},
+		"model.layers.0.self_attn.indexer.k_norm.weight":       {idxDim},
+		"model.layers.0.self_attn.indexer.k_norm.bias":         {idxDim},
+		"model.layers.0.self_attn.indexer.weights_proj.weight": {idxHeads, H},
+		"model.layers.0.post_attention_layernorm.weight":       {H},
+		"model.layers.0.mlp.gate.weight":                       {E, H},
+		"model.layers.0.mlp.gate.e_score_correction_bias":      {E},
+		"model.layers.0.mlp.shared_experts.gate_proj.weight":   {sharedI, H},
+		"model.layers.0.mlp.shared_experts.up_proj.weight":     {sharedI, H},
+		"model.layers.0.mlp.shared_experts.down_proj.weight":   {H, sharedI},
+	}
+	// the batched routed experts must have split 1->E into per-expert tensors.
+	for e := 0; e < E; e++ {
+		p := "model.layers.0.mlp.experts." + itoaForTest(e) + "."
+		want[p+"gate_proj.weight"] = []int{I, H}
+		want[p+"up_proj.weight"] = []int{I, H}
+		want[p+"down_proj.weight"] = []int{H, I}
+	}
+
+	for name, ws := range want {
+		got, ok := shapes[name]
+		if !ok {
+			t.Errorf("canonical tensor %q missing from the loaded manifest", name)
+			continue
+		}
+		if len(got) != len(ws) {
+			t.Errorf("%q shape = %v, want %v", name, got, ws)
+			continue
+		}
+		for i := range ws {
+			if got[i] != ws[i] {
+				t.Errorf("%q shape = %v, want %v", name, got, ws)
+				break
+			}
+		}
+	}
+	if len(shapes) != len(want) {
+		t.Errorf("loaded %d canonical tensors, want exactly %d (the complete glm_moe_dsa layer + globals)", len(shapes), len(want))
+	}
+}
+
+// glmMoeDsaFullGGUF assembles a complete single-MoE-layer glm_moe_dsa GGUF. GGUF stores dims
+// low-to-high, so a canonical [out,in] tensor is written {in,out} and a batched [E,out,in] expert
+// blob is written {in,out,E}; modelShapeFromGGUFDims reverses them back. Tensor-data offsets are
+// the cumulative payload sizes aligned to general.alignment (32).
+func glmMoeDsaFullGGUF(H, V, qLora, kvLora, qkNope, qkRope, vHead, nH, idxHeads, idxDim, E, I, sharedI int) []byte {
+	qkHead := qkNope + qkRope
+	type tw struct {
+		name string
+		dims []uint64
+	}
+	// dims low-to-high (GGUF order).
+	ts := []tw{
+		{"token_embd.weight", []uint64{uint64(H), uint64(V)}},
+		{"output_norm.weight", []uint64{uint64(H)}},
+		{"output.weight", []uint64{uint64(H), uint64(V)}},
+		{"blk.0.attn_norm.weight", []uint64{uint64(H)}},
+		{"blk.0.attn_q_a.weight", []uint64{uint64(H), uint64(qLora)}},
+		{"blk.0.attn_q_a_norm.weight", []uint64{uint64(qLora)}},
+		{"blk.0.attn_q_b.weight", []uint64{uint64(qLora), uint64(nH * qkHead)}},
+		{"blk.0.attn_kv_a_mqa.weight", []uint64{uint64(H), uint64(kvLora + qkRope)}},
+		{"blk.0.attn_kv_a_norm.weight", []uint64{uint64(kvLora)}},
+		{"blk.0.attn_kv_b.weight", []uint64{uint64(kvLora), uint64(nH * (qkNope + vHead))}},
+		{"blk.0.attn_output.weight", []uint64{uint64(nH * vHead), uint64(H)}},
+		{"blk.0.attn_indexer_q_b.weight", []uint64{uint64(qLora), uint64(idxHeads * idxDim)}},
+		{"blk.0.attn_indexer_k.weight", []uint64{uint64(H), uint64(idxDim)}},
+		{"blk.0.attn_indexer_k_norm.weight", []uint64{uint64(idxDim)}},
+		{"blk.0.attn_indexer_k_norm.bias", []uint64{uint64(idxDim)}},
+		{"blk.0.attn_indexer_weights.weight", []uint64{uint64(H), uint64(idxHeads)}},
+		{"blk.0.ffn_norm.weight", []uint64{uint64(H)}},
+		{"blk.0.ffn_gate_inp.weight", []uint64{uint64(H), uint64(E)}},
+		{"blk.0.exp_probs_b.bias", []uint64{uint64(E)}},
+		{"blk.0.ffn_gate_exps.weight", []uint64{uint64(H), uint64(I), uint64(E)}},
+		{"blk.0.ffn_up_exps.weight", []uint64{uint64(H), uint64(I), uint64(E)}},
+		{"blk.0.ffn_down_exps.weight", []uint64{uint64(I), uint64(H), uint64(E)}},
+		{"blk.0.ffn_gate_shexp.weight", []uint64{uint64(H), uint64(sharedI)}},
+		{"blk.0.ffn_up_shexp.weight", []uint64{uint64(H), uint64(sharedI)}},
+		{"blk.0.ffn_down_shexp.weight", []uint64{uint64(sharedI), uint64(H)}},
+	}
+	align := func(x int) int { return (x + 31) / 32 * 32 }
+	numValues := func(dims []uint64) int {
+		n := 1
+		for _, d := range dims {
+			n *= int(d)
+		}
+		return n
+	}
+
+	// KV section.
+	var kv bytes.Buffer
+	nKV := 0
+	ks := func(k, v string) { writeKVString(&kv, k, v); nKV++ }
+	ku := func(k string, v uint32) { writeKVUint32(&kv, k, v); nKV++ }
+	kf := func(k string, v float32) { writeKVFloat32(&kv, k, v); nKV++ }
+	ks("general.architecture", "glm_moe_dsa")
+	ku("general.alignment", 32)
+	ku("glm_moe_dsa.embedding_length", uint32(H))
+	ku("glm_moe_dsa.block_count", 1)
+	ku("glm_moe_dsa.attention.head_count", uint32(nH))
+	ku("glm_moe_dsa.attention.head_count_kv", uint32(nH))
+	ku("glm_moe_dsa.feed_forward_length", uint32(I))
+	kf("glm_moe_dsa.attention.layer_norm_rms_epsilon", 1e-5)
+	ku("glm_moe_dsa.expert_count", uint32(E))
+	ku("glm_moe_dsa.expert_used_count", 2)
+	ku("glm_moe_dsa.expert_feed_forward_length", uint32(I))
+	ku("glm_moe_dsa.attention.q_lora_rank", uint32(qLora))
+	ku("glm_moe_dsa.attention.kv_lora_rank", uint32(kvLora))
+	ku("glm_moe_dsa.attention.qk_nope_head_dim", uint32(qkNope))
+	ku("glm_moe_dsa.attention.qk_rope_head_dim", uint32(qkRope))
+	ku("glm_moe_dsa.attention.v_head_dim", uint32(vHead))
+	ku("glm_moe_dsa.index_n_heads", uint32(idxHeads))
+	ku("glm_moe_dsa.index_head_dim", uint32(idxDim))
+	ku("glm_moe_dsa.index_topk", 4)
+
+	// tensor-info section with cumulative aligned offsets.
+	var ti bytes.Buffer
+	off := 0
+	for _, t := range ts {
+		writeTensorInfoForTest(&ti, t.name, t.dims, TensorF32, uint64(off))
+		off = align(off + numValues(t.dims)*4)
+	}
+
+	var b bytes.Buffer
+	writeMinimalHeader(&b, uint64(len(ts)), uint64(nKV))
+	b.Write(kv.Bytes())
+	b.Write(ti.Bytes())
+	padToAlignment(&b, 32)
+	dataStart := b.Len()
+	off = 0
+	seed := 0
+	for _, t := range ts {
+		padToLen(&b, dataStart+off)
+		n := numValues(t.dims)
+		for i := 0; i < n; i++ {
+			writeF32ForTest(&b, float32(seed%97)*0.25-12) // bounded, finite, deterministic
+			seed++
+		}
+		off = align(off + n*4)
+	}
+	return b.Bytes()
+}
