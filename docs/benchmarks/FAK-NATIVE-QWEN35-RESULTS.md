@@ -121,6 +121,68 @@ direct q4 residency (#96), GDN/full-attention phase profiling and acceleration (
 device prefill for the GDN/full-attention projections (#92), and a short llama.cpp/HF
 oracle to prove logits rather than just execution (#93).
 
+## Native parity witness commands (#442)
+
+These are the exact commands behind the `qwen35` correctness witnesses, with their
+boundaries. None of them need the 27B artifact or a GPU — the oracle is a **tiny,
+CPU-instantiable** `qwen3_5` fixture (the published Qwen3.6-27B is the only real size, so
+the fixture is built from the *real* HF `Qwen3_5ForCausalLM` modeling code with random
+weights, exactly as the GLM/OLMo2/MiniMax oracles are). The fixture and its export are
+gitignored; everything else is committed.
+
+**1 — build the tiny `qwen3_5` fixture and export the HF oracle** (needs `transformers>=5.10`
++ torch on a plain CPU box):
+
+```bash
+python internal/model/make_qwen35_tiny.py .cache/qwen35-tiny
+python internal/model/export_oracle.py --online \
+  --model .cache/qwen35-tiny --out internal/model/.cache/oracle-qwen35 \
+  --prompt-ids-json '[[785,6722,315,9621,374],[16,11,220,17,11,220,18,11,220,19,11],[750,912,2877,11,293,982,262,470]]'
+```
+
+**2 — run the in-kernel parity + tensor-name gates** (native `go test` is blocked on a
+native-Windows host by an OS Application-Control policy, so run the suite under WSL via
+`fak/test.ps1`; on Linux/macOS run `go test` directly):
+
+```powershell
+# from the repo root
+$env:FAK_ORACLE_DIRS = '.cache/oracle-qwen35'
+.\fak\test.ps1 -count=1 ./internal/model/ -run Qwen35
+go test ./internal/ggufload -run Qwen35 -count=1
+```
+
+When the oracle is present this proves, per fixed token-id prompt: the loader derives the
+hybrid `qwen3_5` knobs ((1+w) RMSNorm, qk-norm, sigmoid output gate, partial RoPE); each
+layer maps to its own mixer tensor names (`linear_attn.*` on the Gated-DeltaNet layers,
+`self_attn.{q,k,v,o}_proj` on the gated full-attention layer); per-layer hidden-state
+cosine ≥ 0.9999 vs HF; argmax parity at every position; and cached `Session.Prefill`
+reproduces the cacheless `Forward` last-position logits. Without the oracle every
+`TestOptionalQwen35…` case **skips** cleanly, so CI without weights stays green. The
+gates: `TestOptionalQwen35HybridOracleForwardMatchesHF` (in-kernel forward/cache parity)
+and `internal/ggufload`'s `TestQwen35GGUFConfigCanonicalizesHybridTensorsAndRunsForward`
++ `TestOptionalQwen35GGUFMapsEveryTensorName` (tiny- and real-GGUF tensor-name mapping).
+
+**3 — llama.cpp generated-token comparison** on the real 27B artifact (the parity bar,
+#88/#93). This is the documented command; it needs llama.cpp + the GGUF and is GPU/Metal
+host-gated, so it is a host-bound witness, not a CI gate:
+
+```sh
+# greedy raw-ChatML token ids on the shared prompt — compare against fak's own decode
+llama-cli -m Qwen3.6-27B.q4_k_m.gguf -p "<the shared 22-token ChatML smoke prompt>" \
+  -n 3 --temp 0 --top-k 1 --samplers greedy
+# fak's own decode for the same prompt:
+go run ./cmd/fakchat -gguf Qwen3.6-27B.q4_k_m.gguf -tok <tok-dir> -p "Say OK." -n 1
+```
+
+Pinned oracle/measurement artifacts:
+`experiments/qwen36/llamacpp-qwen36-multitoken-oracle-20260619.json` (llama.cpp b9707
+returns `[248068, 198, 90700]`) and
+`experiments/qwen36/native-gguf-q8-multitoken-parity-20260619.json` (fak's current
+GGUF→Q8 path returns `[248068, 198, 8160]` — first two tokens match, the third is the
+current real-artifact divergence). The tiny-fixture oracle proves the *architecture* is
+bit-faithful to HF; the 27B llama.cpp token comparison is the remaining real-artifact
+parity work, tracked open below.
+
 ## Status summary
 
 - ✅ Qwen3.6-27B runs end-to-end in chat **on this setup** in llama.cpp b9707 Metal —

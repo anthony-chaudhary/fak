@@ -1277,8 +1277,10 @@ func TestOptionalMiniMaxM3OracleForwardMatchesHFCacheless(t *testing.T) {
 // tolerance on the tiny fixture: per-layer hidden-state cosine >= 0.9999 and argmax
 // parity at every position. It also asserts the loader DERIVED the qwen35 architectural
 // knobs from the exported config (the (1+w) RMSNorm, qk-norm, the sigmoid output gate,
-// partial rotary) and that the layer mix is genuinely hybrid — so the witness is not
-// vacuous. The fixture is gitignored; regenerate with qwen35OracleExportHint.
+// partial rotary), that each layer maps to its OWN mixer tensor names (linear_attn.* on
+// the Gated-DeltaNet layers, self_attn.{q,k,v,o}_proj on the gated full-attention layer),
+// and that the layer mix is genuinely hybrid — so the witness is not vacuous. The fixture
+// is gitignored; regenerate with qwen35OracleExportHint.
 func TestOptionalQwen35HybridOracleForwardMatchesHF(t *testing.T) {
 	const dir = qwen35OracleDir
 	m, doc := loadFixtureDir(t, dir, true)
@@ -1296,10 +1298,40 @@ func TestOptionalQwen35HybridOracleForwardMatchesHF(t *testing.T) {
 	if cfg.PartialRotaryFactor <= 0 || cfg.PartialRotaryFactor >= 1 {
 		t.Fatalf("%s partial rotary factor not loaded from rope_parameters: %v", dir, cfg.PartialRotaryFactor)
 	}
+	// Tensor-name witness (#442): each layer's mixer must map to its OWN tensor set in
+	// the loaded manifest — the Gated-DeltaNet linear_attn.* family on linear layers, the
+	// standard self_attn.{q,k,v,o}_proj projections on full-attention layers — and never
+	// the other mixer's tensors. Forward (asserted below) reads every one of these, so a
+	// missing/misnamed tensor would already crash the parity pass; pinning the names here
+	// makes the loader's hybrid layer_types -> tensor mapping an explicit, legible witness.
 	nLinear := 0
 	for l := 0; l < cfg.NumLayers; l++ {
+		p := layerPrefix(l)
+		has := func(suffix string) bool { _, ok := m.manifest[p+suffix]; return ok }
 		if cfg.isLinearAttnLayer(l) {
 			nLinear++
+			for _, suffix := range []string{
+				"linear_attn.conv1d.weight", "linear_attn.A_log", "linear_attn.dt_bias",
+				"linear_attn.norm.weight", "linear_attn.in_proj_qkv.weight",
+				"linear_attn.in_proj_z.weight", "linear_attn.in_proj_b.weight",
+				"linear_attn.in_proj_a.weight", "linear_attn.out_proj.weight",
+			} {
+				if !has(suffix) {
+					t.Fatalf("%s linear-attn layer %d missing Gated-DeltaNet tensor %s%s", dir, l, p, suffix)
+				}
+			}
+			if has("self_attn.q_proj.weight") {
+				t.Fatalf("%s linear-attn layer %d unexpectedly has full-attention self_attn.q_proj (mixer leak)", dir, l)
+			}
+			continue
+		}
+		for _, suffix := range []string{"q_proj.weight", "k_proj.weight", "v_proj.weight", "o_proj.weight"} {
+			if !has("self_attn." + suffix) {
+				t.Fatalf("%s full-attn layer %d missing self_attn.%s", dir, l, suffix)
+			}
+		}
+		if has("linear_attn.conv1d.weight") {
+			t.Fatalf("%s full-attn layer %d unexpectedly has Gated-DeltaNet linear_attn.conv1d (mixer leak)", dir, l)
 		}
 	}
 	if nLinear == 0 || nLinear == cfg.NumLayers {

@@ -334,6 +334,30 @@ initial Anthropic SSE event quickly and keeps the stream alive with `ping` event
 while the non-streaming local model is still doing the long prefill. Without that,
 Claude Code can cancel an otherwise healthy local turn before the model returns.
 
+## Native parity witnesses (#442)
+
+This playbook fronts a local model *server*; the separate question "is fak's own
+in-kernel `qwen35` forward faithful to the reference?" is proven by CPU-only oracle
+gates that need no server, GPU, or 27B artifact. Re-run them with:
+
+```powershell
+# from the repo root — build the tiny qwen3_5 HF fixture once, then run the gates
+python internal/model/make_qwen35_tiny.py .cache/qwen35-tiny
+python internal/model/export_oracle.py --online --model .cache/qwen35-tiny \
+  --out internal/model/.cache/oracle-qwen35 \
+  --prompt-ids-json '[[785,6722,315,9621,374],[16,11,220,17,11,220,18,11,220,19,11],[750,912,2877,11,293,982,262,470]]'
+$env:FAK_ORACLE_DIRS = '.cache/oracle-qwen35'
+.\fak\test.ps1 -count=1 ./internal/model/ -run Qwen35
+go test ./internal/ggufload -run Qwen35 -count=1
+```
+
+Each `TestOptionalQwen35…` case skips cleanly without the fixture (CI stays green) and,
+when present, proves the hybrid config, per-layer mixer tensor names, hidden-state cosine
+≥ 0.9999 vs HF, argmax parity, and cached-prefill parity. The exact commands, the
+llama.cpp generated-token comparison on the real 27B artifact, and the honest boundaries
+live in
+[`docs/benchmarks/FAK-NATIVE-QWEN35-RESULTS.md`](benchmarks/FAK-NATIVE-QWEN35-RESULTS.md).
+
 ## Troubleshooting
 
 If the launcher cannot resolve the model, check `/v1/models` and either pass a
