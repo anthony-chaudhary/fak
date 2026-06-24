@@ -8,6 +8,16 @@ sibling was then ``rm -rf``'d while mistaken for build scratch, destroying it.
 Two failure modes, one structural cause -- a tool operating on a path that
 resolves OUTSIDE the workspace, into another project's tree.
 
+Scope -- this is the WRITE-TIME, filesystem-containment half of fak's public/private
+model, and it is *content-blind*: it judges only WHERE a path resolves, never WHAT is
+written. The complementary COMMIT-TIME, content-placement half keeps private *content*
+out of the PUBLIC tree's forever history -- ``check_committed_files.py`` (private-only
+paths like the lab GPU-connection subsystem; reason FILE_ADMISSION) and
+``scrub_public_copy.py`` (operator-private strings; reason PUBLIC_LEAK). The single
+out-of-tree write THIS guard deliberately permits is the same-named ``<ws>-private``
+companion repo (the operator's private store; see ``private_companion_roots``), so the
+agent can persist private memory there without tripping the escape rule.
+
 This is the structural counterpart to the regex-based FAK floor
 (``examples/repo-guard-policy.json``): a regex over a command string catches the
 ``../x`` *relative* escape family but cannot resolve an *absolute* path like
@@ -53,6 +63,15 @@ OUTPUT_FLAGS = frozenset({"--output", "-out"})
 BUILD_VERBS = frozenset({"go", "gcc", "g++", "cc", "clang", "clang++", "ld", "rustc", "gccgo", "tcc", "zig"})
 # Segment separators that start a fresh simple-command.
 _SEPARATORS = frozenset({"|", "||", "&&", ";", "&", "\n"})
+# The POSIX null / std-stream device sinks. Writing or redirecting to one of these can
+# never harm a sibling repo, so they are exempt even though they resolve outside the
+# workspace. Without this the universal ``... > /dev/null`` idiom trips the guard, which
+# pushes an operator to FAK_REPO_GUARD=off -- disabling the WHOLE gate to silence one
+# harmless redirect. (Windows ``NUL`` resolves relative-to-cwd and is already in-tree.)
+NULL_DEVICES = frozenset({
+    "/dev/null", "/dev/zero", "/dev/full", "/dev/random", "/dev/urandom",
+    "/dev/stdout", "/dev/stderr", "/dev/tty",
+})
 
 
 # --------------------------------------------------------------------------- #
@@ -157,8 +176,8 @@ def extract_targets(command: str) -> list[tuple[str, str]]:
     lenient shlex tokenization of each segment."""
     targets: list[tuple[str, str]] = []
     for seg in _split_segments(command):
-        # Redirections: > file / >> file (skip >&2, >/dev/null is handled by
-        # the scratch allow-list downstream).
+        # Redirections: > file / >> file (skip >&2; the null/std-stream device sinks
+        # like >/dev/null are exempted downstream via NULL_DEVICES).
         toks_raw = seg.split()
         for j, t in enumerate(toks_raw):
             if t in (">", ">>") and j + 1 < len(toks_raw):
@@ -220,6 +239,8 @@ def classify_command(
             continue
         if is_under(abs_target, ws):
             continue  # in-repo: fine
+        if abs_target in NULL_DEVICES:
+            continue  # the null / std-stream device sinks -- harmless, never a sibling
         if any(is_under(abs_target, s) for s in safe):
             continue  # scratch (tmp / ~/.cache / ...): fine
         why = "sibling of workspace" if _is_sibling(abs_target, ws) else "outside workspace"
@@ -244,6 +265,8 @@ def classify_write_path(
         )
     if is_under(abs_target, ws):
         return []
+    if abs_target in NULL_DEVICES:
+        return []  # the null / std-stream device sinks -- harmless, never a sibling
     if any(is_under(abs_target, normalize(s)) for s in safe_roots):
         return []
     why = "sibling of workspace" if _is_sibling(abs_target, ws) else "outside workspace"
@@ -306,15 +329,27 @@ def agent_state_roots(home: str, entries: list[str] | None = None) -> list[str]:
 
 
 def private_companion_roots(workspace_root: str) -> tuple[str, ...]:
-    """The workspace's OWN private companion repo — the same-named ``<ws>-private``
-    sibling (``fak`` -> ``fak-private``): the agent's durable private memory/notes
-    store. Bounded ON PURPOSE — ONLY the same-named ``-private`` sibling is admitted,
-    never an arbitrary sibling project (the ``OUT_OF_TREE_WRITE`` incident: a write
-    into the unrelated ``work/tools`` repo). A look-alike like ``fak-private-evil``
-    is a different path component and is NOT admitted."""
+    """The workspace's paired PRIVATE-COMPANION repo — the same-named ``<ws>-private``
+    sibling (``fak`` -> ``fak-private``): the operator's private repo, the designated home
+    for content that must never be public (the agent's durable memory/notes, the lab
+    GPU-connection subsystem, operator-private orchestration). It is the ONE out-of-tree
+    destination this guard treats as a safe write target — the write-time mirror of the
+    commit-time gates that keep that same private content OUT of the PUBLIC tree
+    (``check_committed_files.py`` FILE_ADMISSION / ``scrub_public_copy.py`` PUBLIC_LEAK).
+
+    Bounded ON PURPOSE — ONLY the same-named ``-private`` sibling is admitted, never an
+    arbitrary sibling project (the ``OUT_OF_TREE_WRITE`` incident: a write into the
+    unrelated ``work/tools`` repo). A look-alike like ``fak-private-evil`` is a different
+    path component and is NOT admitted. When the workspace IS the private repo (already
+    ``…-private``) there is no further companion — return ``()``: its own writes are
+    in-tree, and writing back into the PUBLIC sibling is not auto-safe (it goes through
+    the normal commit-time review, not a silent allow). Previously this returned the
+    nonexistent ``fak-private-private``, so the exception silently never applied there."""
     ws = normalize(workspace_root).rstrip("/")
     if not ws:
         return ()
+    if PurePosixPath(ws).name.endswith("-private"):
+        return ()  # already the private repo — no <ws>-private-private companion exists
     return (ws + "-private",)
 
 
@@ -326,10 +361,10 @@ def default_safe_roots() -> tuple[str, ...]:
         f"{home}/.cache",
         f"{home}/Downloads",
     ]
-    # The agent's own state/memory tree(s): ~/.claude AND per-account variants like
-    # ~/.claude-gem8-netra (see agent_state_roots). The workspace's <ws>-private
-    # companion is added at the call sites that know the workspace root (run_hook /
-    # --check), since it is workspace- not home-relative.
+    # The agent's own Claude Code harness state/memory tree(s): ~/.claude AND per-account
+    # variants like ~/.claude-gem8-netra (see agent_state_roots) -- distinct from the
+    # <ws>-private COMPANION REPO, which is added at the call sites that know the workspace
+    # root (run_hook / --check) since it is workspace- not home-relative.
     roots.extend(agent_state_roots(home))
     for var in ("TMPDIR", "TEMP", "TMP"):
         v = os.environ.get(var)
@@ -447,6 +482,10 @@ def _selftest() -> int:
         # the agent's own state/memory tree (per-account variant) + private companion.
         ("Write", {"file_path": "C:/Users/u/.claude-gem8-netra/projects/C--Users-u-work-fak/memory/note.md"}),
         ("Write", {"file_path": "C:/Users/u/work/fak-private/MEMORY-glm52-2026-06-21.md"}),
+        # the null / std-stream device sinks: harmless, never a sibling repo.
+        ("Bash", {"command": "make ci > /dev/null 2>&1"}),
+        ("Bash", {"command": "go test ./... > /dev/null"}),
+        ("Bash", {"command": "echo done >> /dev/stderr"}),
     ]
     fails = 0
     for tool, ti in deny:

@@ -19,7 +19,35 @@ description: "How fak's repo-guard refuses destructive or out-of-tree writes tha
 `fak-private/`, `fleet/`, `dos/`, `tools/`, …). A path that escapes the workspace
 root by one level lands in a *different project*. The guard refuses a
 **destructive or write** op whose target resolves outside the current repo — while
-never touching in-repo work or ordinary scratch (`/tmp`, `~/.cache`).
+never touching in-repo work, ordinary scratch (`/tmp`, `~/.cache`, the null/std-stream
+devices like `/dev/null`), or the **one** sibling it treats as a safe destination: the
+same-named `fak-private` companion (the operator's private store — see
+[Two layers](#two-layers-write-time-placement-vs-commit-time-content) below).
+
+## Two layers: write-time placement vs commit-time content
+
+repo-guard is the **write-time** gate, and it is *content-blind* — it judges only
+*where* a path resolves, never *what* is written. That is one half of fak's
+public/private model. The other half runs at **commit time**, on *content*, and keeps
+the private parts of the project out of the public repo's forever history:
+
+| Layer | When | Judges | Gate | Reason |
+|---|---|---|---|---|
+| **placement** (this guard) | write-time (PreToolUse) | *where* a path resolves | [`tools/repo_guard.py`](https://github.com/anthony-chaudhary/fak/blob/main/tools/repo_guard.py) | `OUT_OF_TREE_WRITE` |
+| **content** | commit-time (pre-commit / CI) | private-only *paths* (the lab GPU-connection subsystem) | [`tools/check_committed_files.py`](https://github.com/anthony-chaudhary/fak/blob/main/tools/check_committed_files.py) | `FILE_ADMISSION` |
+| **content** | commit-time (pre-commit / CI) | operator-private *strings* (IPs, hosts, SSH user) | [`tools/scrub_public_copy.py`](https://github.com/anthony-chaudhary/fak/blob/main/tools/scrub_public_copy.py) | `PUBLIC_LEAK` |
+
+`fak` is the canonical **public** repo; `fak-private` is the operator's paired
+**private** repo — the designated home for everything that must never be public
+(private memory/notes, the lab GPU-connection code, operator-private orchestration).
+The two layers meet at `fak-private`: repo-guard **lets you write** private content
+*into* it (it is the one allowed out-of-tree destination), while the commit-time gates
+**stop that same content** from being committed *into* public `fak`. Private content
+flows freely to the private repo and is structurally blocked from the public one.
+
+The FAK + DOS pair described next ("the two gates") are two implementations of this
+single **write-time** layer — a regex floor and a path-resolving backstop — not the
+commit-time content gates above.
 
 ## The two gates
 
@@ -74,9 +102,10 @@ fak preflight --tool Bash --args '{"command":"go build -o fak.exe ./cmd/fak"}' \
   --policy examples/repo-guard-policy.json          # => verdict=ALLOW (in-repo)
 
 # DOS floor — resolves the absolute sibling a regex can't:
-python tools/repo_guard.py --selftest               # => 22/22 passed
+python tools/repo_guard.py --selftest               # => 30/30 passed
 python tools/repo_guard.py --check "rm -rf /c/Users/you/work/tools"   # => DENY OUT_OF_TREE_WRITE
 python tools/repo_guard.py --check "rm -rf ./build"                   # => ALLOW
+python tools/repo_guard.py --check "make ci > /dev/null 2>&1"         # => ALLOW (null sink)
 
 # the reason is now in the DOS closed vocabulary:
 #   dos_refuse_reasons  ->  ... OUT_OF_TREE_WRITE ...

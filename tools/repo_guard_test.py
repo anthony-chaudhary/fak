@@ -116,6 +116,26 @@ class CoreTests(unittest.TestCase):
         ):
             self.assertTrue(self.mod.evaluate("Write", {"file_path": fp}, workspace_root=WS, safe_roots=roots), fp)
 
+    def test_null_devices_allowed(self):
+        # The universal "discard output" sinks are never a cross-project escape, so the
+        # guard must not deny them (denying /dev/null only teaches operators to set
+        # FAK_REPO_GUARD=off, disabling the whole gate). Windows NUL is in-tree already.
+        for cmd in (
+            "make ci > /dev/null 2>&1",
+            "go test ./... > /dev/null",
+            "echo done >> /dev/stderr",
+        ):
+            self.assertEqual(self._v("Bash", {"command": cmd}), [], cmd)
+        self.assertEqual(self._v("Write", {"file_path": "/dev/null"}), [])
+
+    def test_private_companion_empty_when_workspace_is_private(self):
+        # When the workspace IS the private repo, there is no <ws>-private-private
+        # companion; the function must return () rather than a nonexistent path.
+        self.assertEqual(self.mod.private_companion_roots("C:/Users/u/work/fak-private"), ())
+        self.assertEqual(self.mod.private_companion_roots("/c/work/fak-private"), ())
+        # the public side still gets its paired private companion.
+        self.assertEqual(self.mod.private_companion_roots(WS), ("C:/Users/u/work/fak-private",))
+
     def test_grep_dash_o_is_not_an_output_path(self):
         # -o is overloaded: grep -o is only-matching, not a build output file.
         self.assertEqual(self._v("Bash", {"command": "grep -o ../foo internal/policy/x.go"}), [])

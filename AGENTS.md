@@ -115,12 +115,14 @@ until it clears.
   anytime with `tools/runaway_process_scan.ps1`.
 - **Writes that resolve *outside* the repo are refused (`OUT_OF_TREE_WRITE`).** The
   `repo-guard` PreToolUse hook (`tools/repo_guard.py`, on by default on a fleet host) denies
-  a Bash/Write/Edit op whose target escapes the workspace — a `../sibling` path, an absolute
-  `/c/.../work/other-repo`, **and even a `> /dev/null` redirect** (it resolves outside the
-  tree). `work/` holds many sibling repos, so a one-level escape lands in *another* project.
-  Write scratch to a temp dir or an in-repo path, not `..` or `/dev/null`; the deliberate
-  exception is `FAK_REPO_GUARD=warn` (advisory) or `off`. Full doc:
-  [`docs/repo-guard.md`](docs/repo-guard.md).
+  a Bash/Write/Edit op whose target escapes the workspace — a `../sibling` path or an absolute
+  `/c/.../work/other-repo`. `work/` holds many sibling repos, so a one-level escape lands in
+  *another* project. Write scratch to a temp dir or an in-repo path, not `..`. Allowed
+  out-of-tree: the null/std-stream sinks (`> /dev/null`, `> /dev/stderr`) and the paired
+  `fak-private` companion repo. This is the **write-time** half of the public/private split;
+  the **commit-time** half — `FILE_ADMISSION` (`check_committed_files.py`) and `PUBLIC_LEAK`
+  (`scrub_public_copy.py`) — keeps private *content* out of the public history. Soften with
+  `FAK_REPO_GUARD=warn` (advisory) or `off`. Full doc: [`docs/repo-guard.md`](docs/repo-guard.md).
 
 Check your setup first: `python tools/extend_preflight.py`. Full contributor contract:
 [`CONTRIBUTING.md`](CONTRIBUTING.md).

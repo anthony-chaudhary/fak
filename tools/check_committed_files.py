@@ -75,6 +75,11 @@ KEEP_EXCEPTIONS = {
 # housekeeping sibling. A match is ALWAYS refused, at commit-time and in CI: move
 # it to the private repo. (Scope is the CONNECTION subsystem; the lab automation
 # under tools/*dgx* and the dgx result dirs are a separate, larger relocation.)
+#
+# Sibling gate: tools/repo_guard.py is the WRITE-TIME filesystem boundary
+# (OUT_OF_TREE_WRITE) and is content-blind — it judges only WHERE a path resolves; THIS
+# gate is the COMMIT-TIME content-placement boundary that judges WHAT a path is. They are
+# complementary halves of the public/private model (fak public, fak-private private).
 PRIVATE_ONLY = [
     (re.compile(r"^(cmd|internal)/[^/]*dgx[^/]*/"),
      "private lab GPU-server connection subsystem — belongs in the private repo, not the public tree"),
