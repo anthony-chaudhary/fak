@@ -127,6 +127,11 @@ func init() {
 	// so a single FAK_WIRE_SCREEN=heuristic opt-in activates both the semantic screen
 	// (rung 1) and the useful-page-out digest (rung 3). Inert unless selected.
 	RegisterDigester("heuristic", heuristicDigester{})
+	// The rung-3 multi-modal phash dedup digester (issue #571): a pure-Go perceptual-hash
+	// frame dedup, ZERO model. Selecting FAK_WIRE_SCREEN=phash activates it on its own
+	// (it does not compose with the heuristic text digest — an operator picks one arm).
+	// Inert unless selected; the programmatic opt-in peer is PhashScreen().
+	RegisterDigester("phash", phashDigester{})
 	// Register the ABI adapter only when the operator opted in. This keeps the default
 	// build's abi.SemanticScreens() empty (zero MMU overhead); the adapter resolves the
 	// concrete screener + digester lazily, so siblings registered by a later init() are
