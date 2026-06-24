@@ -1,0 +1,209 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Un-See It · the Lobotomy Cam · fak</title>
+<style>
+  :root{
+    --bg:#0a0c10; --panel:#11151c; --ink:#e7edf5; --dim:#8b97a8; --line:#1d2530;
+    --green:#36d399; --red:#ff5d6c; --blue:#5aa9ff; --amber:#ffce5a;
+    --glow-green:rgba(54,211,153,.35); --glow-red:rgba(255,93,108,.35);
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:radial-gradient(1200px 700px at 50% -10%,#121826,#0a0c10 60%);
+    color:var(--ink);font:15px/1.5 ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial}
+  .wrap{max-width:980px;margin:0 auto;padding:28px 20px 60px}
+  header h1{font-size:26px;margin:0 0 4px;letter-spacing:.2px}
+  header h1 .pulse{color:var(--red)}
+  header .sub{color:var(--dim);margin:0 0 18px;font-size:14px}
+  code{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+
+  .acts{display:flex;gap:8px;margin:0 0 14px}
+  .acts .chip{flex:1;padding:8px 10px;border:1px solid var(--line);border-radius:10px;background:var(--panel);
+    color:var(--dim);font-size:12.5px;text-align:center;transition:.25s}
+  .acts .chip b{display:block;color:var(--ink);font-size:13px;margin-bottom:2px}
+  .acts .chip.on{border-color:var(--blue);color:var(--ink);box-shadow:0 0 0 1px var(--blue) inset,0 6px 22px rgba(90,169,255,.12)}
+
+  .stage{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:22px;min-height:330px;
+    position:relative;overflow:hidden}
+  .scene-label{position:absolute;top:12px;right:16px;font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:var(--dim)}
+
+  .stripwrap{display:flex;align-items:flex-end;gap:14px;min-height:96px;margin:6px 0 4px}
+  .strip{display:flex;gap:7px;flex-wrap:wrap}
+  .cell{width:44px;height:54px;border-radius:9px;display:flex;flex-direction:column;align-items:center;justify-content:center;
+    border:1px solid var(--line);background:#0e1219;position:relative;transition:transform .35s,opacity .35s,box-shadow .35s,border-color .35s;
+    transform-origin:center bottom}
+  .cell .tok{font-family:ui-monospace,monospace;font-size:15px;font-weight:600}
+  .cell .pos{font-size:9.5px;color:var(--dim);margin-top:2px}
+  .cell.prefix{border-color:rgba(54,211,153,.5);color:var(--green);background:linear-gradient(180deg,rgba(54,211,153,.10),transparent)}
+  .cell.query{border-color:rgba(90,169,255,.5);color:var(--blue);background:linear-gradient(180deg,rgba(90,169,255,.10),transparent)}
+  .cell.poison{border-color:rgba(255,93,108,.55);color:var(--red);background:linear-gradient(180deg,rgba(255,93,108,.12),transparent)}
+  .cell.settling{animation:drop .4s ease}
+  .cell.flagged{box-shadow:0 0 0 2px var(--red) inset,0 0 24px var(--glow-red);animation:buzz .5s infinite}
+  .cell.evicting{animation:evict .6s forwards}
+  .cell.reroped{animation:shimmer .9s}
+  .cell.attended{box-shadow:0 0 0 1px var(--amber) inset}
+  .cell .ghost{position:absolute;inset:0;border-radius:9px;border:1px dashed rgba(255,93,108,.4);opacity:0}
+  @keyframes drop{from{transform:translateY(-14px);opacity:0}to{transform:none;opacity:1}}
+  @keyframes buzz{0%,100%{transform:translateY(0)}25%{transform:translateY(-1px) rotate(-1deg)}75%{transform:translateY(1px) rotate(1deg)}}
+  @keyframes evict{0%{transform:scaleY(1);opacity:1}55%{transform:scaleY(1.05);box-shadow:0 0 30px var(--glow-red)}
+    100%{transform:scaleY(0) translateY(10px);opacity:0;margin:0 -25px}}
+  @keyframes shimmer{0%{box-shadow:0 0 0 0 var(--glow-green)}40%{box-shadow:0 0 0 2px var(--green) inset,0 0 26px var(--glow-green);transform:translateY(-3px)}100%{box-shadow:none;transform:none}}
+
+  .marquee{height:0;overflow:hidden;transition:height .3s;margin-top:6px;border-radius:8px}
+  .marquee.show{height:26px;background:rgba(255,93,108,.07);border:1px solid rgba(255,93,108,.25)}
+  .marquee .track{white-space:nowrap;color:var(--red);font-family:ui-monospace,monospace;font-size:12px;line-height:26px;
+    padding-left:100%;animation:scroll 12s linear infinite}
+  @keyframes scroll{to{transform:translateX(-100%)}}
+
+  .caption{font-size:17px;margin:18px 0 4px;min-height:48px}
+  .sub{color:var(--dim);font-size:13.5px;min-height:20px}
+
+  .readouts{display:flex;gap:12px;flex-wrap:wrap;margin-top:16px;min-height:0}
+  .ro{flex:1;min-width:210px;border:1px solid var(--line);border-radius:11px;padding:12px 14px;background:#0e1219;
+    opacity:0;transform:translateY(8px);transition:.4s}
+  .ro.in{opacity:1;transform:none}
+  .ro .lab{font-size:11.5px;color:var(--dim);text-transform:uppercase;letter-spacing:.08em}
+  .ro .val{font-family:ui-monospace,monospace;font-size:24px;font-weight:700;margin-top:4px}
+  .ro .tag{font-size:11px;margin-top:3px;letter-spacing:.06em;text-transform:uppercase}
+  .ro.identical,.ro.bitexact{border-color:rgba(54,211,153,.5)} .ro.identical .val,.ro.bitexact .val{color:var(--green)}
+  .ro.identical .tag,.ro.bitexact .tag{color:var(--green)}
+  .ro.contaminated,.ro.flagged{border-color:rgba(255,93,108,.5)} .ro.contaminated .val,.ro.flagged .val{color:var(--red)}
+  .ro.contaminated .tag,.ro.flagged .tag{color:var(--red)}
+
+  .controls{display:flex;align-items:center;gap:10px;margin:18px 0 6px}
+  button{background:#162031;color:var(--ink);border:1px solid var(--line);border-radius:9px;padding:9px 14px;font-size:14px;cursor:pointer;transition:.15s}
+  button:hover{border-color:var(--blue)} button.play{background:var(--blue);color:#04122a;border-color:var(--blue);font-weight:600}
+  .controls .spacer{flex:1}
+  .controls .meta{color:var(--dim);font-size:12px}
+  input[type=range]{accent-color:var(--blue)}
+
+  details{margin-top:20px;border:1px solid var(--line);border-radius:12px;background:var(--panel);padding:6px 16px}
+  details summary{cursor:pointer;color:var(--ink);padding:8px 0;font-weight:600}
+  details ul{margin:6px 0 12px;padding-left:18px;color:var(--dim);font-size:13px}
+  details li{margin:6px 0}
+  footer{color:var(--dim);font-size:12px;margin-top:18px;display:flex;gap:14px;flex-wrap:wrap}
+  .hwline code{color:var(--ink)}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>Un-See It <span class="pulse">●</span> <span style="color:var(--dim);font-weight:400;font-size:18px">the Lobotomy Cam</span></h1>
+    <p class="sub">Watch the kernel <b>delete a poisoned tool result from the model's own KV cache</b> — and prove the next token is
+      bit-identical to a brain that never read it. Driving the <i>real</i> <code>ctxmmu</code> gate · <code>kvmmu</code> bridge · <code>model.KVCache.Evict</code>. No model weights, no GPU, no key.</p>
+  </header>
+
+  <div class="acts" id="acts">
+    <div class="chip" data-act="1"><b>Act 1</b>Un-See It · write-time evict</div>
+    <div class="chip" data-act="2"><b>Act 2</b>The Surgeon's Cut · re-RoPE</div>
+    <div class="chip" data-act="3"><b>Act 3</b>Too Late · the honest limit</div>
+  </div>
+
+  <div class="stage">
+    <div class="scene-label" id="scene">loading…</div>
+    <div class="stripwrap"><div class="strip" id="strip"></div></div>
+    <div class="marquee" id="marquee"><div class="track" id="track"></div></div>
+    <div class="caption" id="caption"></div>
+    <div class="sub" id="sub"></div>
+    <div class="readouts" id="readouts"></div>
+  </div>
+
+  <div class="controls">
+    <button class="play" id="play">▶ Play</button>
+    <button id="back">⏮</button>
+    <button id="step">Step ▸</button>
+    <div class="spacer"></div>
+    <span class="meta">speed</span>
+    <input type="range" id="speed" min="500" max="3200" value="1700" step="100">
+    <span class="meta" id="framemeta">—</span>
+  </div>
+
+  <details id="fences">
+    <summary>Honest fences — every red number on screen has a green test behind it</summary>
+    <ul id="fencelist"></ul>
+  </details>
+
+  <footer>
+    <span class="hwline" id="hw"></span>
+    <span id="ver"></span>
+    <span>Reproduce: <code>go run ./cmd/unseedemo -selfcheck</code></span>
+  </footer>
+</div>
+
+<script>
+const $ = s => document.querySelector(s);
+let EV=null, i=0, timer=null, playing=false;
+
+function actName(a){return {1:"act 1 · un-see it",2:"act 2 · the surgeon's cut",3:"act 3 · too late"}[a]||"";}
+
+function renderCells(cells){
+  const strip = $("#strip"); strip.innerHTML="";
+  (cells||[]).forEach(c=>{
+    const el=document.createElement("div");
+    el.className="cell "+c.kind+(c.state?(" "+c.state):"");
+    const tok=document.createElement("div"); tok.className="tok"; tok.textContent=c.glyph;
+    const pos=document.createElement("div"); pos.className="pos"; pos.textContent="p"+c.pos;
+    el.appendChild(tok); el.appendChild(pos);
+    strip.appendChild(el);
+  });
+}
+
+function renderReadouts(ros){
+  const box=$("#readouts"); box.innerHTML="";
+  (ros||[]).forEach((r,idx)=>{
+    const el=document.createElement("div");
+    el.className="ro "+r.verdict;
+    el.innerHTML='<div class="lab"></div><div class="val"></div><div class="tag"></div>';
+    el.querySelector(".lab").textContent=r.label;
+    el.querySelector(".val").textContent=r.value;
+    el.querySelector(".tag").textContent=r.verdict;
+    box.appendChild(el);
+    requestAnimationFrame(()=>setTimeout(()=>el.classList.add("in"), 80+idx*120));
+  });
+}
+
+function poisonVisible(frame){
+  return (frame.cells||[]).some(c=>c.state==="flagged"||c.state==="attended");
+}
+
+function show(idx){
+  if(!EV) return;
+  i=Math.max(0,Math.min(idx, EV.frames.length-1));
+  const f=EV.frames[i];
+  $("#scene").textContent=actName(f.act)+" · "+f.phase;
+  document.querySelectorAll(".acts .chip").forEach(ch=>ch.classList.toggle("on", +ch.dataset.act===f.act));
+  $("#caption").textContent=f.caption;
+  $("#sub").textContent=f.sub||"";
+  renderCells(f.cells);
+  renderReadouts(f.readouts);
+  const mq=$("#marquee");
+  if(poisonVisible(f)){ $("#track").textContent=EV.poison_text+"      ◂ the bytes the gate is reading ▸      "; mq.classList.add("show"); }
+  else mq.classList.remove("show");
+  $("#framemeta").textContent=(i+1)+" / "+EV.frames.length;
+}
+
+function next(){ if(i>=EV.frames.length-1){ pause(); return; } show(i+1); }
+function play(){ if(!EV) return; if(i>=EV.frames.length-1) show(0); playing=true; $("#play").textContent="⏸ Pause";
+  clearInterval(timer); const ms=+$("#speed").value; timer=setInterval(next, ms); }
+function pause(){ playing=false; $("#play").textContent="▶ Play"; clearInterval(timer); }
+
+$("#play").onclick=()=> playing?pause():play();
+$("#step").onclick=()=>{ pause(); next(); };
+$("#back").onclick=()=>{ pause(); show(0); };
+$("#speed").oninput=()=>{ if(playing) play(); };
+
+fetch("/api/events").then(r=>r.json()).then(d=>{
+  EV=d;
+  (d.fences||[]).forEach(t=>{ const li=document.createElement("li"); li.textContent=t; $("#fencelist").appendChild(li); });
+  const hw=d.hardware||{};
+  const cores = hw.cores||hw.Cores||hw.logical_cores||"";
+  $("#hw").innerHTML = "ran live on <code>"+ (cores? (cores+" cores"):"this machine") +"</code> — CPU only, no GPU/model/key";
+  $("#ver").textContent = d.version||"";
+  show(0);
+  setTimeout(play, 600);
+}).catch(e=>{ $("#caption").textContent="failed to load /api/events: "+e; });
+</script>
+</body>
+</html>
