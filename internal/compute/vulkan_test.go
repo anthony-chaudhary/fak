@@ -162,6 +162,38 @@ func TestVulkanQ8MatMulWideInput(t *testing.T) {
 	}
 }
 
+// TestVulkanQ8MatMulVocabHead exercises the q8_matmul OUTPUT-tiling path at LM-head scale —
+// the failure that motivated #471. The original shader launched one workgroup per activation
+// row and walked the whole output dimension inside it; a real ~49k-vocab LM head made that one
+// workgroup walk the entire vocabulary and tripped a device loss (VK_ERROR_DEVICE_LOST). The
+// fix splits the output into 256-wide groups (dispatch = P·ceil(out/256)), so the dispatch must
+// span many output groups and still match the CPU Q8 reference. out=49152,in=576 is the real
+// SmolLM2-135M tied LM head (192 output groups) — small dims (out≤64) never cross a group and so
+// never covered this path, which is why the bug shipped green and only surfaced on the real model.
+func TestVulkanQ8MatMulVocabHead(t *testing.T) {
+	v := vk(t)
+	if !v.haveQ8 {
+		t.Skip("vulkan device does not expose int8 arithmetic + 8-bit storage")
+	}
+	c := cpu()
+	var s lcg = 4915
+	const out, in = 49152, 576 // real SmolLM2-135M LM head: 192 output groups of 256
+	w := randVec(&s, out*in)
+	x := randVec(&s, in)
+	wq := QuantizeQ8(c, []int{out, in}, w, 32)
+	dwq := v.Upload(wq, Q8_0)
+	dx := v.Upload(NewF32(c, []int{in}, x), F32)
+
+	ref := c.Read(c.MatMul(wq, NewF32(c, []int{in}, x)))
+	got := v.Read(v.MatMul(dwq, dx))
+	if cos := cosine(ref, got); cos < 0.9999 {
+		t.Fatalf("q8 vocab-head matmul (out=%d,in=%d) cosine %.6f < 0.9999", out, in, cos)
+	}
+	if d := maxAbs(ref, got); d > 1e-3 {
+		t.Fatalf("q8 vocab-head matmul (out=%d,in=%d) max|Delta| %.4g > 1e-3", out, in, d)
+	}
+}
+
 func TestVulkanMatMulArgmaxMatchesVulkanMatMul(t *testing.T) {
 	v := vk(t)
 	c := cpu()
