@@ -733,7 +733,22 @@ def render_markdown(payload: dict[str, Any], *, stamp: str | None = None) -> str
     """The committed DEMO-QUALITY-SCORECARD.md body — a human-facing snapshot."""
     c = payload.get("corpus") or {}
     gd = c.get("grade_distribution", {})
-    out: list[str] = ["# Demo-quality scorecard", ""]
+    n_demos = c.get("n_demos", 0)
+    # YAML front-matter (SEO/AEO: a <title> tag + meta description on the published
+    # page). Emitted by the GENERATOR so it survives a regen — the doc is a generated
+    # artifact, so a hand-added front-matter block would be wiped on the next
+    # `--markdown` write. Title/description are derived from the live corpus.
+    out: list[str] = [
+        "---",
+        'title: "fak Demo-Quality Scorecard: Demos a Skeptic Can Run"',
+        ('description: "fak\'s demo-quality scorecard grades '
+         f'{n_demos} demos on five deterministic axes into a demo-score (0-100, A-F) '
+         'and a re-derivable demo-debt count."'),
+        "---",
+        "",
+        "# Demo-quality scorecard",
+        "",
+    ]
     if stamp:
         out.append(f"<!-- demo-quality-scorecard: {stamp} · process: tools/demo_quality_scorecard.py -->")
         out.append("")
