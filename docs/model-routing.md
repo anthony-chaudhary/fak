@@ -111,6 +111,32 @@ floor:
    outputs into the `Combine` `[]Vote` in `Plan.Members` order (not engine
    completion order), or the order-sensitive reductions stop being deterministic.
 
+## Routing presets (examples/routing-presets/)
+
+For adopters who want a starter that matches a single goal, the multi-rule
+mega-example above is split into **named, single-purpose presets** — the routing
+analogue of how `examples/presets/` ships ready-made capability floors. Copy the
+one that matches your intent, then `fak route --check` it. Each is a valid
+`fak-route/v1` manifest (a different schema + loader from the `fak-policy/v1`
+pack in `examples/presets/`, so it lives in its own directory); a round-trip test
+in `internal/modelroute` guards every preset against rot.
+
+| Preset | Goal | Shape |
+|---|---|---|
+| [`cost-saver.json`](../examples/routing-presets/cost-saver.json) | spend less | interactive/short + read-shaped tool calls → small; only `min_complexity: high` → large; default → small |
+| [`guard-writes.json`](../examples/routing-presets/guard-writes.json) | never ship a write unchecked | every `write_*` / `delete_*` tool call → a two-model `vote` ensemble; else a single default |
+| [`best-of-quality.json`](../examples/routing-presets/best-of-quality.json) | best answer on hard work | hard aspects → a drafters + judge `best_of` ensemble; medium → medium; cheap → small |
+| [`scout-then-route.json`](../examples/routing-presets/scout-then-route.json) | classify before you route | a cheap `scout` labels complexity first, then high → large / low → small |
+
+```bash
+go run ./cmd/fak route --check examples/routing-presets/cost-saver.json
+go run ./cmd/fak route --manifest examples/routing-presets/guard-writes.json --aspect tool_call --tool write_file
+```
+
+A `fak route --preset NAME` resolver (copy-by-name without spelling the path) is
+an optional follow-up; the presets are plain manifests today, so `--manifest
+<path>` already loads any of them.
+
 ## Roadmap (the GitHub issue series)
 
 The decision spine is the foundation; the rest is wiring, each a tracked issue:

@@ -1,0 +1,58 @@
+{
+  "version": "fak-route/v1",
+  "default": {
+    "members": [
+      {
+        "model": "small"
+      }
+    ],
+    "reason": "cost-saver: unmatched work defaults to the small/fast model"
+  },
+  "rules": [
+    {
+      "name": "hard-only-large",
+      "match": {
+        "min_complexity": "high"
+      },
+      "plan": {
+        "members": [
+          {
+            "model": "large"
+          }
+        ],
+        "reason": "only high-complexity work pays for the large model"
+      }
+    },
+    {
+      "name": "short-interactive",
+      "match": {
+        "aspect": "request",
+        "max_prompt_tokens": 4096,
+        "latency": "interactive"
+      },
+      "plan": {
+        "members": [
+          {
+            "model": "small"
+          }
+        ],
+        "reason": "short interactive turn -\u003e small model"
+      }
+    },
+    {
+      "name": "read-shaped-tool",
+      "match": {
+        "aspect": "tool_call",
+        "tool": "search_*"
+      },
+      "plan": {
+        "members": [
+          {
+            "model": "small"
+          }
+        ],
+        "reason": "cheap read-shaped tool call -\u003e small model"
+      }
+    }
+  ]
+}

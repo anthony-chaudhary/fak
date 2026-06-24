@@ -1,0 +1,45 @@
+{
+  "version": "fak-route/v1",
+  "default": {
+    "members": [
+      {
+        "model": "medium",
+        "role": "primary"
+      }
+    ],
+    "scout": "tiny-classifier",
+    "reason": "scout-then-route: a cheap scout classifies complexity first; unmatched work -\u003e balanced medium model"
+  },
+  "rules": [
+    {
+      "name": "scout-hard-large",
+      "match": {
+        "min_complexity": "high"
+      },
+      "plan": {
+        "members": [
+          {
+            "model": "large"
+          }
+        ],
+        "scout": "tiny-classifier",
+        "reason": "scout flagged a hard aspect -\u003e large model"
+      }
+    },
+    {
+      "name": "scout-easy-small",
+      "match": {
+        "min_complexity": "low"
+      },
+      "plan": {
+        "members": [
+          {
+            "model": "small"
+          }
+        ],
+        "scout": "tiny-classifier",
+        "reason": "scout flagged an easy aspect -\u003e small model"
+      }
+    }
+  ]
+}

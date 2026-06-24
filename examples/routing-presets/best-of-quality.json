@@ -1,0 +1,66 @@
+{
+  "version": "fak-route/v1",
+  "default": {
+    "members": [
+      {
+        "model": "medium",
+        "role": "primary"
+      }
+    ],
+    "reason": "best-of-quality: unmatched work defaults to the balanced medium model"
+  },
+  "rules": [
+    {
+      "name": "hard-best-of",
+      "match": {
+        "min_complexity": "high"
+      },
+      "plan": {
+        "members": [
+          {
+            "model": "drafter-a",
+            "role": "drafter"
+          },
+          {
+            "model": "drafter-b",
+            "role": "drafter"
+          },
+          {
+            "model": "judge",
+            "role": "judge"
+          }
+        ],
+        "reduce": "best_of",
+        "reason": "hard aspect: two drafters produce candidates, a judge scores them, the best answer wins"
+      }
+    },
+    {
+      "name": "medium-balanced",
+      "match": {
+        "min_complexity": "medium"
+      },
+      "plan": {
+        "members": [
+          {
+            "model": "medium"
+          }
+        ],
+        "reason": "moderate work -\u003e the balanced medium model"
+      }
+    },
+    {
+      "name": "cheap-small",
+      "match": {
+        "min_complexity": "low"
+      },
+      "plan": {
+        "members": [
+          {
+            "model": "small"
+          }
+        ],
+        "reason": "cheap aspect -\u003e small/fast model"
+      }
+    }
+  ]
+}

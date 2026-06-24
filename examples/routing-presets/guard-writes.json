@@ -1,0 +1,60 @@
+{
+  "version": "fak-route/v1",
+  "default": {
+    "members": [
+      {
+        "model": "default",
+        "role": "primary"
+      }
+    ],
+    "reason": "guard-writes: unmatched calls route to a single default model"
+  },
+  "rules": [
+    {
+      "name": "guard-write",
+      "match": {
+        "aspect": "tool_call",
+        "tool": "write_*"
+      },
+      "plan": {
+        "members": [
+          {
+            "model": "guard-a",
+            "weight": 1,
+            "role": "primary"
+          },
+          {
+            "model": "guard-b",
+            "weight": 1,
+            "role": "verifier"
+          }
+        ],
+        "reduce": "vote",
+        "reason": "write-shaped tool call: two guard models must agree (majority vote) before it proceeds"
+      }
+    },
+    {
+      "name": "guard-delete",
+      "match": {
+        "aspect": "tool_call",
+        "tool": "delete_*"
+      },
+      "plan": {
+        "members": [
+          {
+            "model": "guard-a",
+            "weight": 1,
+            "role": "primary"
+          },
+          {
+            "model": "guard-b",
+            "weight": 1,
+            "role": "verifier"
+          }
+        ],
+        "reduce": "vote",
+        "reason": "destructive-shaped tool call: two guard models must agree (majority vote) before it proceeds"
+      }
+    }
+  ]
+}
