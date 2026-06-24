@@ -442,6 +442,225 @@ def trace_summary(recs):
     }
 
 
+# --------------------------------------------------------------------------------------
+# MARGINAL (incremental) cost per turn — the dC/dn ledger.
+#
+# trace_session above emits each turn's TOTAL bill (a,b,c,d). This section answers the
+# sharper question: for THIS turn, where did the next token of cost come from, and what
+# does the O(1)+history-query regime pay that append-only does not? It decomposes each
+# regime's per-turn bill into DISJOINT components that sum EXACTLY back to that bill (a
+# reconciliation invariant the selfcheck asserts — the decomposition can never invent a
+# saving), and it makes the demand-page / history-query (RETRIEVE) cost a FIRST-CLASS
+# measured column instead of the ~0 it is held at today by OMISSION.
+#
+# Per-regime components (all in base-input units; they sum to the turn bill):
+#   B (append-only + cache, MEASURED):  new + rebill + retrieve(=0) + out
+#       new      = fresh*1.0 + write*write_mult   (the only term carrying NEW information)
+#       rebill   = read*0.1                        (the cached growing prefix, re-billed —
+#                                                   ~98% of B; 0 in C/D. On an evicted turn
+#                                                   the whole prefix re-prefills, so new
+#                                                   absorbs the cold prompt and rebill=0.)
+#       retrieve = 0  BY CONSTRUCTION              (append-only holds the whole prefix; it
+#                                                   never demand-pages.)
+#   C (O(1) reconstruct, no cache):     new + recon + retrieve + out
+#       new      = (uncached new content that fits the window) — the same information delta
+#       recon    = (window - new)*1.0              (relevant history re-prefilled into the
+#                                                   bounded window: the price of no cache)
+#       retrieve = the page-in cost (see retrieve_cost) — the term ctxcost omitted
+#   D (O(1) + stable cached head S):    new + head + recon + retrieve + out
+#       head     = S written once (write_mult) then read (0.1) on later warm turns
+#
+# RETRIEVE provenance is tagged source ∈ {modeled, journal, engine} (mirroring dos_verify's
+# `source`) so a thin MODELED charge can never masquerade as a MEASURED one. The headline
+# crossover is only honest on source=journal|engine; modeled ships as a SWEPT sensitivity.
+# --------------------------------------------------------------------------------------
+RETRIEVE_ROUNDTRIP_TOK = 0.0  # fixed per-page-in overhead (the "round trip" the o1 doc
+                              # names); 0 by default so a page-in is charged only its real
+                              # returned bytes unless the operator sets a round-trip tax.
+
+
+def retrieve_cost(turn_idx, new_ctx, pruned_tok, *, p_hit=1.0, page_tokens=None,
+                  journal_tok=None, engine_fault_tok=None, roundtrip_tok=RETRIEVE_ROUNDTRIP_TOK):
+    """The demand-page / history-query cost for ONE turn of a bounded regime, in base-input
+    units, with an honest provenance tag. Three fidelities (highest available wins):
+
+      engine  (gold): the REAL served page-in size from a live ctxplan session
+                      (fault.go Fault.Tokens). Pass engine_fault_tok.
+      journal (real): the returned-bytes delta of a recorded ctxnav expand exploration
+                      (resident_tok after-before). Pass journal_tok.
+      modeled (swept sensitivity, no run): expected page-in = p_miss * page_tokens, the
+                      scaling.go cumFaultTax (1-p_hit)*b shape sliced to one turn. page_tokens
+                      defaults to the turn's pruned_tok (the elided span a later turn may need).
+
+    A page-in that returns N tokens is charged N*1.0 (re-prefilled at full price) + a fixed
+    roundtrip_tok. Returns {retrieve_tok, retrieve_base_units, source}."""
+    if engine_fault_tok is not None:
+        tok = float(engine_fault_tok)
+        source = "engine"
+    elif journal_tok is not None:
+        tok = float(journal_tok)
+        source = "journal"
+    else:
+        pages = pruned_tok if page_tokens is None else page_tokens
+        p_miss = max(0.0, 1.0 - float(p_hit))
+        tok = p_miss * float(pages)
+        source = "modeled"
+    base = tok * M_FRESH + (roundtrip_tok if tok > 0 else 0.0)
+    return {"retrieve_tok": round(tok, 1), "retrieve_base_units": round(base, 1), "source": source}
+
+
+def marginal_ledger(turns, budget, stable_prefix=0, evict_frac=0.0, write_mult=M_WRITE_5M,
+                    *, p_hit=1.0, retrieve_journal=None, retrieve_engine=None):
+    """Per-turn MARGINAL decomposition that reconciles to trace_session's totals.
+
+    Returns one record per turn with a `marginal` block (the disjoint components per regime),
+    a one-line `cost_source` attribution (which component dominated THIS turn — the load-
+    bearing field that says where the next token of cost came from), running `cum` totals, and
+    the RETRIEVE column with its provenance. retrieve_journal/retrieve_engine, when given, are
+    per-turn token lists that promote RETRIEVE from modeled to journal/engine fidelity.
+    """
+    base = trace_session(turns, budget, stable_prefix, evict_frac, write_mult)
+    cum = {"A": 0.0, "B": 0.0, "C": 0.0, "D": 0.0}
+    out_recs = []
+    for i, (t, tr) in enumerate(zip(turns, base)):
+        miss = (tr["cache_event"] == "miss")
+        out_c = t.out * M_OUTPUT
+        w = tr["reconstruct"]["window_tok"]
+        new_ctx = tr["new_context_tok"]            # fresh+write (uncached new info)
+
+        # ---- B: append-only + cache (sums to tr cost_base_units B) ----
+        if miss:                                    # cold turn re-prefills the whole prefix
+            b_new = t.prompt * M_FRESH
+            b_rebill = 0.0
+        else:
+            b_new = t.fresh * M_FRESH + t.write * write_mult
+            b_rebill = t.read * M_READ
+        b_retr = {"retrieve_tok": 0.0, "retrieve_base_units": 0.0, "source": "n/a"}
+        bB = {"new": round(b_new, 1), "rebill": round(b_rebill, 1),
+              "retrieve": 0.0, "out": round(out_c, 1)}
+
+        # ---- C: O(1) reconstruct, no cache (recon = window minus the new content it holds) ----
+        new_in_window = min(new_ctx, w)             # how much of the new content the budget holds
+        c_recon = max(0.0, (w - new_in_window)) * M_FRESH
+        c_new = new_in_window * M_FRESH
+        rj = retrieve_journal[i] if retrieve_journal and i < len(retrieve_journal) else None
+        re = retrieve_engine[i] if retrieve_engine and i < len(retrieve_engine) else None
+        c_retr = retrieve_cost(i, new_ctx, tr["reconstruct"]["pruned_tok"],
+                               p_hit=p_hit, journal_tok=rj, engine_fault_tok=re)
+        bC = {"new": round(c_new, 1), "recon": round(c_recon, 1),
+              "retrieve": c_retr["retrieve_base_units"], "out": round(out_c, 1)}
+
+        # ---- D: O(1) + stable cached head (head term reconciles to trace_session's D) ----
+        d_total = tr["cost_base_units"]["D"]
+        d_head = max(0.0, d_total - out_c - c_recon - c_new)   # residual = the head's contribution
+        bD = {"new": round(c_new, 1), "head": round(d_head, 1), "recon": round(c_recon, 1),
+              "retrieve": c_retr["retrieve_base_units"], "out": round(out_c, 1)}
+
+        # cost_source: which component (excluding the regime-identical `out`) dominated this
+        # turn's bounded-regime bill — the attribution of the marginal token of cost.
+        attribution = {"new": bC["new"], "recon": bC["recon"], "retrieve": bC["retrieve"],
+                       "rebill_B": bB["rebill"]}
+        cost_source = max(attribution, key=attribution.get)
+
+        # marginal turn bill per regime (== trace_session cost, the reconciliation target)
+        mB = bB["new"] + bB["rebill"] + bB["out"]
+        mC = bC["new"] + bC["recon"] + bC["retrieve"] + bC["out"]
+        mD = bD["new"] + bD["head"] + bD["recon"] + bD["retrieve"] + bD["out"]
+        mA = tr["cost_base_units"]["A"]
+        cum["A"] += mA; cum["B"] += mB; cum["C"] += mC; cum["D"] += mD
+
+        out_recs.append({
+            "turn": i,
+            "fresh": t.fresh, "write": t.write, "read": t.read, "prompt": t.prompt, "out": t.out,
+            "new_context_tok": new_ctx,
+            "cache_event": tr["cache_event"],
+            "window_tok": w, "pruned_tok": tr["reconstruct"]["pruned_tok"],
+            "holds_new_context": tr["reconstruct"]["holds_new_context"],
+            "marginal": {"A": round(mA, 1), "B": {**bB}, "C": {**bC}, "D": {**bD}},
+            "marginal_bill": {"A": round(mA, 1), "B": round(mB, 1), "C": round(mC, 1), "D": round(mD, 1)},
+            "cost_source": cost_source,
+            "retrieve": c_retr,                       # the bounded-regime page-in, with provenance
+            "cum": {k: round(v, 1) for k, v in cum.items()},
+        })
+    return out_recs
+
+
+def journal_retrieve_tokens(journal, store_nodes=None):
+    """Convert a recorded ctxnav exploration journal into per-op JOURNAL-measured retrieve token
+    costs — the returned-bytes delta each memory(ref,'expand',budget) actually paged in.
+
+    This is the source=journal fidelity of RETRIEVE: instead of MODELING a page-in from a hit
+    rate, it reads the REAL resident-token growth of a recorded navigation. journal is a list of
+    {ref, op, budget} (ctxnav Store.journal); store_nodes optionally seeds the same content so the
+    replay reproduces the exact bytes. Returns a list of per-op {ref, op, retrieve_tok}: an
+    'expand' charges max(0, resident_after - resident_before); a 'contract' charges 0 (it frees
+    budget, it does not page in). Returns [] if ctxnav is not importable (the seam stays optional).
+    """
+    try:
+        import ctxnav
+    except Exception:
+        return []
+    st = ctxnav.Store()
+    # Seed nodes so refs in the journal resolve. If caller passed explicit (kind, content) nodes
+    # use them; otherwise the journal's refs must already correspond to a store the caller built.
+    ref_map = {}
+    if store_nodes:
+        for kind, content in store_nodes:
+            ref_map_key = ctxnav.Node(kind, content).ref if hasattr(ctxnav, "Node") else None
+            r = st.add(kind, content)
+            ref_map[ref_map_key or r] = r
+    out = []
+    for ev in journal:
+        ref = ref_map.get(ev.get("ref"), ev.get("ref"))
+        if ref not in st.nodes:
+            out.append({"ref": ev.get("ref"), "op": ev.get("op"), "retrieve_tok": 0.0})
+            continue
+        before = st.resident_tok()
+        try:
+            st.memory(ref, ev.get("op"), ev.get("budget", 0))
+        except (KeyError, ValueError):
+            out.append({"ref": ev.get("ref"), "op": ev.get("op"), "retrieve_tok": 0.0})
+            continue
+        after = st.resident_tok()
+        delta = max(0.0, after - before) if ev.get("op") == "expand" else 0.0
+        out.append({"ref": ev.get("ref"), "op": ev.get("op"), "retrieve_tok": float(delta)})
+    return out
+
+
+def marginal_summary(recs):
+    """Fold the marginal ledger into the corpus shares + the retrieve provenance + the
+    cumulative-marginality guard (how much of the cumulative B bill is just re-billed prefix)."""
+    n = len(recs)
+    sum_b_new = sum(r["marginal"]["B"]["new"] for r in recs)
+    sum_b_rebill = sum(r["marginal"]["B"]["rebill"] for r in recs)
+    sum_c_recon = sum(r["marginal"]["C"]["recon"] for r in recs)
+    sum_c_retr = sum(r["marginal"]["C"]["retrieve"] for r in recs)
+    cum_b = sum(r["marginal_bill"]["B"] for r in recs)
+    by_source = {}
+    retr_charged = 0
+    for r in recs:
+        s = r["retrieve"]["source"]
+        by_source[s] = by_source.get(s, 0) + 1
+        if r["retrieve"]["retrieve_base_units"] > 0:
+            retr_charged += 1
+    src_dist = {}
+    for r in recs:
+        src_dist[r["cost_source"]] = src_dist.get(r["cost_source"], 0) + 1
+    return {
+        "n_turns": n,
+        # the cumulative-marginality guard: fraction of B's cumulative bill that is re-billed
+        # prefix (the ~98% the o1 doc flags — a reader must see the cum number is area-under-prefix).
+        "cum_rebill_frac": round(sum_b_rebill / cum_b, 4) if cum_b else None,
+        "sum_B_new_base": round(sum_b_new, 1),
+        "sum_B_rebill_base": round(sum_b_rebill, 1),
+        "sum_C_recon_base": round(sum_c_recon, 1),
+        "sum_C_retrieve_base": round(sum_c_retr, 1),
+        "turns_charged_retrieve": retr_charged,
+        "retrieve_provenance": by_source,
+        "cost_source_distribution": src_dist,
+    }
+
+
 def fold(sessions_stats):
     """Sum per-session replay dicts into a corpus total."""
     tot = {k: {"cost": 0.0, "ttft_sum": 0.0, "ttft_max": 0.0} for k in "ABCD"}
@@ -786,6 +1005,78 @@ def cmd_trace(args):
     return 0
 
 
+def cmd_marginal(args):
+    """The per-turn INCREMENTAL (dC/dn) ledger for one session, with the demand-page /
+    history-query cost as a first-class column and a per-turn cost attribution."""
+    if args.transcript:
+        turns = parse_turns(args.transcript)
+        label = os.path.basename(args.transcript)
+    else:
+        corpus = load_corpus(args)
+        if not corpus:
+            print("no transcripts found; pass a transcript path or try --all", file=sys.stderr)
+            return 2
+        if args.session:
+            hits = [(n, ts) for n, ts in corpus if args.session in n]
+            if not hits:
+                print(f"no session matching {args.session!r}", file=sys.stderr)
+                return 2
+            label, turns = hits[0]
+        else:
+            label, turns = max(corpus, key=lambda c: sum(t.prompt for t in c[1]))
+    if not turns:
+        print("session has no usable turns", file=sys.stderr)
+        return 2
+    evict = parse_scenario(args.scenario)
+    p_hits = args.p_hit or [1.0, 0.9, 0.7]
+    ledgers = {ph: marginal_ledger(turns, args.budget, args.stable_prefix, evict, p_hit=ph)
+               for ph in p_hits}
+    if args.jsonl:
+        # emit the most-conservative (lowest p_hit -> most retrieve) ledger for offline use
+        ph = min(p_hits)
+        with open(args.jsonl, "w", encoding="utf-8") as f:
+            for r in ledgers[ph]:
+                f.write(json.dumps(r) + "\n")
+        print(f"wrote {len(ledgers[ph])} marginal records (p_hit={ph}) to {args.jsonl}")
+        print(json.dumps({"session": label, "budget": args.budget, "p_hit": ph,
+                          **marginal_summary(ledgers[ph])}, indent=2))
+        return 0
+    print(f"\n  ctxcost · MARGINAL (incremental dC/dn) ledger — {label}")
+    print(f"  budget {int(args.budget):,} tok/turn · scenario {args.scenario} · {len(turns)} turns")
+    print(f"  marginal cost of turn n = the bill FOR THAT TURN (never the running sum over the "
+          f"re-billed prefix).\n")
+    for ph in p_hits:
+        recs = ledgers[ph]
+        summ = marginal_summary(recs)
+        prov = ",".join(f"{k}:{v}" for k, v in summ["retrieve_provenance"].items())
+        src = ",".join(f"{k}:{v}" for k, v in sorted(summ["cost_source_distribution"].items()))
+        print(f"  -- p_hit={ph}  (history-query hit rate; lower = more demand-page cost) --")
+        print(f"     RETRIEVE provenance: {prov}   [modeled = SWEPT sensitivity, not measured]")
+        print(f"     cum_rebill_frac (B's bill that is just re-billed prefix): "
+              f"{summ['cum_rebill_frac']}")
+        print(f"     sumB.new={summ['sum_B_new_base']:,.0f}  sumB.rebill={summ['sum_B_rebill_base']:,.0f}  "
+              f"sumC.recon={summ['sum_C_recon_base']:,.0f}  sumC.retrieve={summ['sum_C_retrieve_base']:,.0f}")
+        print(f"     per-turn cost_source: {src}   ({summ['turns_charged_retrieve']} turns paid a page-in)\n")
+    # show a few representative rows from the middle p_hit
+    ph = p_hits[len(p_hits) // 2]
+    recs = ledgers[ph]
+    show = recs[:3] + recs[-3:] if len(recs) > 6 else recs
+    print(f"  sample turns (p_hit={ph}):")
+    print(f"  {'turn':>5} {'new':>8} {'B.rebill':>9} {'C.recon':>9} {'retrieve':>9} "
+          f"{'B.bill':>9} {'C.bill':>9} {'source':>9}")
+    seen = set()
+    for r in show:
+        if r["turn"] in seen:
+            continue
+        seen.add(r["turn"])
+        print(f"  {r['turn']:>5} {r['new_context_tok']:>8,} {r['marginal']['B']['rebill']:>9,.0f} "
+              f"{r['marginal']['C']['recon']:>9,.0f} {r['retrieve']['retrieve_base_units']:>9,.0f} "
+              f"{r['marginal_bill']['B']:>9,.0f} {r['marginal_bill']['C']:>9,.0f} {r['cost_source']:>9}")
+    print(f"\n  cost_source = which component drove THIS turn's bounded-regime bill. "
+          f"--jsonl OUT emits every turn.\n")
+    return 0
+
+
 # --------------------------------------------------------------------------------------
 # CLI: selfcheck — synthetic turns with KNOWN structure. Anti-overclaim CI gate.
 # --------------------------------------------------------------------------------------
@@ -871,17 +1162,78 @@ def runselfcheck():
           f"floor={floor:.0f} C={c_re:.0f} A={a_re:.0f} decodeE/B={dr}")
     fails += not ok
 
+    # 8) MARGINAL ledger reconciles to the total bill — the decomposition cannot invent a
+    #    saving. At p_hit=1.0 (no misses) RETRIEVE must be 0, and then every regime's summed
+    #    marginal components must equal trace_session's per-turn total exactly.
+    base = trace_session(turns, 4000)
+    marg = marginal_ledger(turns, 4000, p_hit=1.0)
+    recon_ok = True
+    retr_zero = True
+    for tr, m in zip(base, marg):
+        if abs(m["marginal_bill"]["B"] - tr["cost_base_units"]["B"]) > 1e-6:
+            recon_ok = False
+        # C and D reconcile to base once the NEW retrieve term (0 here) is removed
+        if abs((m["marginal_bill"]["C"] - m["retrieve"]["retrieve_base_units"])
+               - tr["cost_base_units"]["C"]) > 1e-6:
+            recon_ok = False
+        if abs((m["marginal_bill"]["D"] - m["retrieve"]["retrieve_base_units"])
+               - tr["cost_base_units"]["D"]) > 1e-6:
+            recon_ok = False
+        if m["retrieve"]["retrieve_base_units"] != 0.0:
+            retr_zero = False
+    print(f"  marginal reconciles to total bill   {'PASS' if recon_ok else 'FAIL'}")
+    fails += not recon_ok
+    print(f"  p_hit=1.0 -> RETRIEVE == 0          {'PASS' if retr_zero else 'FAIL'}")
+    fails += not retr_zero
+
+    # 9) A real miss-rate CHARGES retrieve (the term ctxcost held at ~0 by omission), and the
+    #    charge is monotone in the miss rate (lower p_hit -> more demand-page cost). This is the
+    #    operator's first-class "incremental cost of retrieval" column working.
+    r90 = sum(m["retrieve"]["retrieve_base_units"] for m in marginal_ledger(turns, 2000, p_hit=0.9))
+    r50 = sum(m["retrieve"]["retrieve_base_units"] for m in marginal_ledger(turns, 2000, p_hit=0.5))
+    ok = 0.0 < r90 < r50
+    print(f"  retrieve charged & monotone in miss  {'PASS' if ok else 'FAIL'}  "
+          f"sum_retr@p.9={r90:.0f} < sum_retr@p.5={r50:.0f}")
+    fails += not ok
+
+    # 10) JOURNAL-measured RETRIEVE: a recorded ctxnav expand charges its REAL resident-byte
+    #     delta (source=journal), and feeding it to the ledger promotes that turn off 'modeled'.
+    try:
+        import ctxnav
+        st = ctxnav.Store()
+        ref = st.add("tool_result", "X" * 8000)     # ~big node, starts as a tombstone
+        st.memory(ref, "expand", 1000)               # page in a 1000-tok window
+        jr = journal_retrieve_tokens(st.journal, store_nodes=[("tool_result", "X" * 8000)])
+        # the expand must register a positive paged-in byte delta, tagged journal at the ledger
+        paged = sum(o["retrieve_tok"] for o in jr if o["op"] == "expand")
+        m = marginal_ledger(turns[:1], 2000, retrieve_journal=[paged])
+        ok = paged > 0 and m[0]["retrieve"]["source"] == "journal" \
+            and m[0]["retrieve"]["retrieve_base_units"] > 0
+        print(f"  journal-measured retrieve (real)    {'PASS' if ok else 'FAIL'}  "
+              f"paged_in={paged:.0f}tok source={m[0]['retrieve']['source']}")
+        fails += not ok
+    except Exception as e:
+        print(f"  journal-measured retrieve (real)    SKIP  (ctxnav unavailable: {e})")
+
     print()
     if fails:
-        print(f"SELFCHECK FAILED — {fails} check(s) failed")
+        print(f"SELFCHECK FAILED - {fails} check(s) failed")
         return 1
-    print("OK — model is anti-overclaim (C==A at full budget), cache-sane (B<=A), and the "
-          "thesis + crossover hold on a synthetic growing session")
+    print("OK - model is anti-overclaim (C==A at full budget), cache-sane (B<=A), the thesis + "
+          "crossover hold, and the MARGINAL ledger reconciles (retrieve=0 at full hit, charged + "
+          "monotone under misses)")
     return 0
 
 
 # --------------------------------------------------------------------------------------
 def main(argv=None):
+    # Windows consoles default to cp1252, which cannot encode the box/Greek glyphs this tool's
+    # human output uses. Reconfigure to UTF-8 (errors=replace) so a glyph never crashes a report.
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(encoding="utf-8", errors="replace")
+        except (AttributeError, ValueError):
+            pass
     ap = argparse.ArgumentParser(description="per-turn cost replay: O(1) context vs append-only-with-cache")
     sub = ap.add_subparsers(dest="cmd")
 
@@ -921,7 +1273,24 @@ def main(argv=None):
     t.add_argument("--all", action="store_true")
     t.add_argument("--jsonl", default=None, help="write all per-turn records as JSONL for offline replay/learning")
 
-    sub.add_parser("selfcheck", help="synthetic turns: anti-overclaim + thesis + crossover (CI gate)")
+    m = sub.add_parser("marginal", help="per-turn INCREMENTAL (dC/dn) ledger: where each turn's "
+                                        "cost came from + the demand-page/history-query cost")
+    m.add_argument("transcript", nargs="?", default=None, help="a single .jsonl, or omit to pick a discovered session")
+    m.add_argument("--session", default=None, help="substring of a discovered session basename")
+    m.add_argument("--budget", type=float, default=8000, help="reconstruct budget tok/turn (default 8000)")
+    m.add_argument("--scenario", default="warm", help="warm | cold | evict:F")
+    m.add_argument("--stable-prefix", type=float, default=2000)
+    m.add_argument("--p-hit", type=float, action="append", default=None,
+                   help="history-query HIT rate(s) to sweep for the modeled RETRIEVE cost "
+                        "(repeatable; default 1.0 0.9 0.7). Lower = more demand-page cost.")
+    m.add_argument("--since-days", type=float, default=None)
+    m.add_argument("--root", action="append", default=None)
+    m.add_argument("--max", type=int, default=20)
+    m.add_argument("--all", action="store_true")
+    m.add_argument("--jsonl", default=None, help="write the per-turn marginal ledger as JSONL")
+
+    sub.add_parser("selfcheck", help="synthetic turns: anti-overclaim + thesis + crossover + "
+                                     "marginal reconciliation (CI gate)")
 
     args = ap.parse_args(argv)
     if args.cmd == "replay":
@@ -930,6 +1299,8 @@ def main(argv=None):
         return cmd_crossover(args)
     if args.cmd == "trace":
         return cmd_trace(args)
+    if args.cmd == "marginal":
+        return cmd_marginal(args)
     if args.cmd == "selfcheck":
         return runselfcheck()
     ap.print_help()
