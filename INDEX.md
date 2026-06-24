@@ -19,6 +19,19 @@ below, so the front door never has to grow to stay complete.
 - [llms.txt](llms.txt) — the answer-engine index (and its inlined `llms-full.txt`).
 - [Docs home](docs/index.md) — the published documentation landing page.
 
+## What fak supports
+
+The dedicated, cross-linked capability pages — what fak works with, each grounded in the
+repo and the sourced [compatibility matrix](docs/integrations/compatibility-matrix.md).
+
+- [What fak supports (hub)](docs/supported/README.md) — the index of every "supported" page.
+- [Models](docs/supported/models.md) — any model you front, plus the in-kernel architectures proven bit-exact.
+- [Features](docs/supported/features.md) — every capability with its shipped / simulated / stub status.
+- [Clouds & hosted providers](docs/supported/clouds.md) — Anthropic, OpenAI, Gemini, xAI, Bedrock, Vertex, Azure, OpenRouter, Together, Groq, Fireworks.
+- [APIs, wires & MCP](docs/supported/apis-and-protocols.md) — the wires fak speaks and the fak-native + MCP endpoints.
+- [Agent harnesses & frameworks](docs/supported/agent-harnesses.md) — Claude Code, Cursor, Codex, and the framework field.
+- [Serving engines](docs/supported/engines.md) — Ollama, vLLM, SGLang, llama.cpp, LM Studio, and the in-kernel engine.
+
 ## Measuring sticks (the scorecards)
 
 Each turns a fuzzy goal into a number you can drive toward zero.
@@ -77,6 +90,7 @@ Working docs that track a specific effort. Dated by design; they age out.
 Dated working notes: research, audits, and run logs. Kept for the record, not the
 front page.
 
+- [Agent optimization methods — field inventory, survey & index (2026-06-23)](docs/notes/RESEARCH-agent-optimization-methods-survey-2026-06-23.md) — 370 distinct methods across 16 families spanning the whole stack (reasoning, test-time compute, context/memory, retrieval, KV reuse, tools, planning, multi-agent, routing, serving, training, reliability), each with a one-line definition + what it optimizes + maturity, plus an alphabetical master index. The umbrella that cross-links the deep notes ([agentic caching](docs/notes/AGENTIC-CACHING-SOTA-2026-06-19.md), [scaling laws](docs/notes/SCALING-LAWS-OF-AGENTS-2026-06-19.md), [O(1) context economics](docs/explainers/o1-context-window-economics.md)).
 - [Agentic caching SOTA (2026-06-19)](docs/notes/AGENTIC-CACHING-SOTA-2026-06-19.md)
 - [Planned view measured over real transcripts (2026-06-23)](docs/notes/CTXPLAN-REAL-TRANSCRIPT-MEASUREMENT-2026-06-23.md) — the empirical counterpart to scaling.go's synthetic model: replays the heaviest real Claude Code sessions turn-by-turn through the real planner + page-fault handler. 13.3× fewer resident tokens than linear; 31.7% forecast-miss rate with 100% of misses served; exact recall 715/715 turns vs compaction losing facts on 695/715. Closes #559 (`cmd/ctxplanbench`).
 - [Planner per-turn compute flatten, measured (2026-06-23)](docs/notes/CTXPLAN-PLANNING-COST-FLATTEN-2026-06-23.md) — the sibling that measures the planner's OWN work, not just its output: a persistent `ctxplan.Index` bounds the per-turn probe (Θ(N²)→Θ(c·N)) over the same real sessions. 851 turns: peak-probe ≤ cap on every turn, 1.5× less planner work (growing with N), resident-token efficiency preserved (within 1.2%), and the honest cost↔fidelity finding — the bounded probe is byte-identical to the full scan when it sees the whole candidate set (342/342) but diverges at default width on long sessions (every divergence a served page-fault, never a lost fact). #558/#559 (`cmd/ctxplanbench`).
@@ -87,6 +101,7 @@ front page.
 - [Trust floor, two lenses (2026-06-17)](docs/notes/EXPLAINER-trust-floor-two-lenses-2026-06-17.md)
 - [GLM-5.2 DSA attention projections on the pure kernel (2026-06-22)](docs/notes/GLM52-DSA-PROJECTIONS-ON-PURE-KERNEL-GPU-SERVER-2026-06-22.md)
 - [GLM-5.2 DSA sparse attention on the pure kernel (2026-06-23)](docs/notes/GLM52-DSA-SPARSE-ATTENTION-ON-PURE-KERNEL-2026-06-23.md)
+- [GLM-5.2 DSA index selection on the pure kernel (2026-06-23)](docs/notes/GLM52-DSA-INDEX-SELECTION-ON-PURE-KERNEL-2026-06-23.md)
 - [GLM-5.2 full DSA forward on the pure kernel, sm_80 GPU server (2026-06-23)](docs/notes/GLM52-DSA-FULL-FORWARD-ON-PURE-KERNEL-GPU-SERVER-2026-06-23.md)
 - [GLM-5.2 five GPU server benchmarks (2026-06-22)](docs/notes/GLM52-PERFORMANT-GPU-SERVER-FIVE-BENCHMARKS-2026-06-22.md)
 - [GLM-5.2 kernel + turn demos (2026-06-21)](docs/notes/GLM52-PURE-KERNEL-AND-AGENT-TURN-DEMOS-RESULTS-2026-06-21.md)

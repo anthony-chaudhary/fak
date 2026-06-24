@@ -135,6 +135,7 @@ twice — tools wired directly vs. behind `fak` — and prints the before/after.
 | **What the words mean** (preflight vs inflight vs prefill) | [Glossary](glossary.md) |
 | **The two core ideas** | [Policy in the kernel](explainers/policy-in-the-kernel.md) · [Addressable KV cache](explainers/addressable-kv-cache.md) |
 | **Every benchmark number** | [Benchmark authority](https://github.com/anthony-chaudhary/fak/blob/main/BENCHMARK-AUTHORITY.md) |
+| **Everything fak supports** | [What fak supports](supported/README.md) — models · features · clouds · APIs/MCP · harnesses · engines |
 | **Every machine fak runs on** | [Hardware matrix](HARDWARE-MATRIX.md) (4 platforms · 2 CPU ISAs · 4 GPU backends) |
 | **What's real, what's not** | [Claims ledger](https://github.com/anthony-chaudhary/fak/blob/main/CLAIMS.md) |
 | **A machine-readable map (for LLMs)** | [llms.txt](https://github.com/anthony-chaudhary/fak/blob/main/llms.txt) |

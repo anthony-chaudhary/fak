@@ -59,6 +59,18 @@ You do not rewrite your agent to adopt fak — you repoint one base URL at `fak 
 - [Multi-language client examples](docs/fak/multi-language-examples.md): runnable Python, JS/TS, Go, and Rust client code for calling a `fak serve` gateway across its OpenAI, Anthropic, and fak-native surfaces.
 - [Deployment guide](docs/fak/deployment-guide.md): production deployment of the `fak serve` gateway across Docker, Compose, Kubernetes, and bare metal, with an auth/policy/binding readiness checklist.
 
+## Supported (what fak works with)
+
+The dedicated, cross-linked capability pages. Each lists one category of supported things, grounded in the repo and the sourced compatibility matrix.
+
+- [What fak supports (hub)](docs/supported/README.md): the index of every supported-things page — models, features, clouds, APIs/MCP, harnesses, engines.
+- [Models supported](docs/supported/models.md): any model you front through the gateway, plus the in-kernel reference engine's proven architectures (Llama, Qwen2/Qwen3, Gemma, GLM-MoE, GPT-OSS, SmolLM2).
+- [Features supported (with status)](docs/supported/features.md): every capability grouped by subsystem with its honest shipped/simulated/stub tag — a reader-friendly view of CLAIMS.md.
+- [Clouds & hosted providers](docs/supported/clouds.md): Anthropic, OpenAI, Gemini, and xAI native wires plus AWS Bedrock, Google Vertex AI, Azure OpenAI, OpenRouter, Together, Groq, and Fireworks over the OpenAI-compatible wire.
+- [APIs, wires & MCP](docs/supported/apis-and-protocols.md): OpenAI Chat Completions, OpenAI Responses, Anthropic Messages, Gemini generateContent, and xAI; MCP over stdio and HTTP; the fak-native endpoints; and the interop stance on A2A/AG-UI/ACP/ANP.
+- [Agent harnesses & frameworks](docs/supported/agent-harnesses.md): Claude Code, Cursor, OpenAI Codex, OpenCode, Aider, Cline, Roo, Goose, Zed, and frameworks like LangChain, LlamaIndex, CrewAI, AutoGen, and the Vercel AI SDK.
+- [Serving engines](docs/supported/engines.md): Ollama, vLLM, SGLang, llama.cpp, and LM Studio over the OpenAI-compatible wire, plus the in-kernel reference engine.
+
 ## Core concepts (the two flips)
 
 - [Policy in the kernel](docs/explainers/policy-in-the-kernel.md): why a default-deny check on the call path beats an external recognizer that fails open.
