@@ -109,7 +109,7 @@ means it needs nothing downstream and can land before the heavy pillars.
 | **P3 Collective bridge ✅** | `BackendCollective`: `model.Collective` wrapping `compute.CollectiveBackend` (the NCCL plug-in seam) — **shipped `41017e3`** | `BackendCollective == LocalCollective` at max\|Δ\|=0 ✅; `ForwardTP` equal both ways (cpu-ref) ✅ | ships now (de-risks seam); real use needs P1+P2 |
 | P3 MLA-aware TP + EP | an MLA-aware (not head-parallel) TP decomposition + expert-parallel placement; quant-aware sharding | `ForwardTP` sharding-invariant on a synthetic `glm_moe_dsa`+MoE quant model | P3 Collective bridge; P1 E2E; P2 Full-model |
 | P3 Real cross-process NCCL | a non-cpu-ref `CollectiveBackend` (NCCL/RCCL or a TCP transport mirroring `pipeline_transport.go`) | a 2-GPU/2-process all-reduce of a device tensor matches cpu-ref — **only now may "multi-GPU" be claimed** | P3 Collective bridge; P3 MLA-aware TP |
-| P4 Device paging primitive | an upload→compute→free `pagedKernel` with an observable `pageIn` counter (the first honest "paged to device on demand") | GLM-DSA GEMM bit-equal to resident; weight absent from `halW` after; `pageIn`==1 | ships now (existing fixture); real win needs P2 |
+| **P4 Device paging primitive ✅ (standalone)** | an upload→compute→free `pagedKernel` with an observable `pageIn` counter — **shipped `f54e01a`** (the first honest "paged to device on demand") | GEMM bit-equal to resident ✅; paged weight absent from `halW` ✅; `pageIn` counts each page-in ✅ — standalone primitive; halW-integration is P4 Async streaming | ships now (existing fixture); real win needs P2 |
 | P4 Async expert streaming | per-weight VRAM ring + async/pinned H2D so host-resident experts stream per-layer; serve loop auto-sizes the split | a >VRAM `glm_moe_dsa` serves on the GPU node at a measured tok/s within budget | P4 paging primitive; P2 Full-model; P1 E2E |
 | **Integration 753B serve** | real GGUF → mixed-precision device GEMM → multi-GPU TP/EP → CPU/NVMe-tiered offload, with a real-GGUF golden | native 753B `Generate` matches the real-oracle greedy at the agreed bar on the GPU server | P3 Real NCCL; P4 Async streaming; all P1/P2 |
 
@@ -127,8 +127,9 @@ means it needs nothing downstream and can land before the heavy pillars.
   quant-aware sharding is the biggest multi-month unknown.
 - **Claims discipline:** today's "CPU-offload" is compute-placement (the `--n-cpu-moe`
   equivalent), and all collectives are in-process. **Do not claim multi-GPU** until a
-  non-cpu-ref `CollectiveBackend` exists, nor "paged to device" until the `pageIn`
-  primitive lands.
+  non-cpu-ref `CollectiveBackend` exists. The `pageIn` primitive HAS landed (`f54e01a`,
+  standalone, bit-equal to resident), so the upload→compute→free rung is real — but **do not
+  claim a >VRAM serve** until it is wired into the live weight HAL with async streaming.
 - **Scale gap:** every correctness witness is tiny-oracle and f32. (The CUDA quant
   device-GEMM cosines are now **recorded on sm_80 hardware** — 2026-06-24, Q8_0 `0.99999980`
   / Q4_K `1.00000000`, both argmax-exact, weight 3.56×/7.11× smaller; see
