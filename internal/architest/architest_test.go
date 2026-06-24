@@ -70,7 +70,7 @@ var tier = map[string]int{
 	"residency":    2,
 	"ctxresidency": 3,
 	"ctxplan":      1, // context planner: cost-based, forecast-driven O(1) view over a lossless history store; stdlib-only, imports nothing internal.
-	"wirescreen":   2, // local-model-on-the-wire proposer spine: registers an abi.SemanticScreen that ctxmmu consults after its regex floor (#569) + the ScreenDigest useful-page-out (#570) + the pre-send redactor (#572); imports only abi.
+	"wirescreen":   2, // local-model-on-the-wire proposer spine: registers an abi.SemanticScreen that ctxmmu consults after its regex floor (#569) + the ScreenDigest useful-page-out (#570) + the pre-send redactor (#572); imports only abi by default — the -tags fakwiremodel model arm (#569) adds model/tokenizer/ggufload (all tier-1).
 	// new-leaf:tier — `python tools/new_leaf.py <name> --tier <name>` inserts the
 	// declaration for a generated leaf immediately ABOVE this line. Keep the marker last.
 }
