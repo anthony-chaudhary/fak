@@ -67,6 +67,7 @@ type upstreamCall struct {
 	apiKey       string
 	upstreamBeta string
 	quarantined  int
+	redacted     int // rung 5 (#572): messages whose content was span-redacted pre-send
 }
 
 // headers builds the per-request header set, applying the Anthropic-wire beta union
@@ -122,9 +123,18 @@ func (p *HTTPPlanner) prepareUpstream(messages []Message, tools []ToolDef, strea
 	// body is forced off or the buffered ParseResponse chokes on the SSE reply — the
 	// same fix Complete applied inline before the extraction.
 	var reqBody []byte
+	redactedN := 0
 	if len(sp.RawRequestBody) > 0 && adapter.Provider() == ProviderAnthropic {
 		reqBody = forceAnthropicNonStreaming(sp.RawRequestBody)
 	} else {
+		// Rung 5 (#572): span-level PII/secret redaction on the non-passthrough
+		// re-marshal path. The Anthropic passthrough above forwards req.Raw verbatim
+		// and never serializes these messages, so redaction runs ONLY here, where the
+		// re-marshal can carry it to the wire. Default-inert: with FAK_WIRE_REDACT
+		// unset, RedactOutboundMessages returns safeMessages unchanged at zero cost.
+		var redactions []TranscriptRedaction
+		safeMessages, redactions = RedactOutboundMessages(safeMessages)
+		redactedN = len(redactions)
 		reqBody, err = adapter.MarshalRequest(adapterRequest{
 			Model:          modelID,
 			Messages:       safeMessages,
@@ -156,6 +166,7 @@ func (p *HTTPPlanner) prepareUpstream(messages []Message, tools []ToolDef, strea
 		apiKey:       apiKey,
 		upstreamBeta: sp.UpstreamBeta,
 		quarantined:  len(quarantines),
+		redacted:     redactedN,
 	}, nil
 }
 

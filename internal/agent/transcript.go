@@ -6,6 +6,7 @@ import (
 
 	"github.com/anthony-chaudhary/fak/internal/abi"
 	"github.com/anthony-chaudhary/fak/internal/ctxmmu"
+	"github.com/anthony-chaudhary/fak/internal/wirescreen"
 )
 
 // TranscriptQuarantine records a tool-result payload held out immediately before
@@ -132,4 +133,77 @@ func quarantineStub(n int, q TranscriptQuarantine) string {
 		return `{"_quarantined":true,"boundary":"pre_send"}`
 	}
 	return string(b)
+}
+
+// TranscriptRedaction records one message whose content was span-redacted immediately
+// before an API request is serialized: the message index, the redactor that proposed the
+// spans, the CAS handle to the UNREDACTED original (wirescreen.Restore returns it
+// byte-exact), the spans, and the redacted length. It is the reversibility-witness peer
+// of TranscriptQuarantine for an in-place span rewrite (the local-model-on-the-wire
+// spine, rung 5 / issue #572): a quarantine HOLDS OUT a whole message; a redaction
+// REWRITES the flagged spans and keeps the surrounding bytes on the wire.
+type TranscriptRedaction struct {
+	Index      int               `json:"index"`
+	Tool       string            `json:"tool,omitempty"`
+	ToolCallID string            `json:"tool_call_id,omitempty"`
+	By         string            `json:"by"`
+	Original   abi.Ref           `json:"original"` // CAS handle; wirescreen.Restore(ctx, Original) returns the bytes byte-exact
+	Spans      []wirescreen.Span `json:"spans,omitempty"`
+	Len        int               `json:"len"` // redacted content length
+}
+
+// RedactOutboundMessages applies the active PII/secret redactor's span rewrite to the
+// outbound messages' content — the rung-5 wire point on the non-passthrough re-marshal
+// path (issue #572). When wirescreen.ActiveRedactor() selects a Redactor
+// (FAK_WIRE_REDACT), each message's content is passed through wirescreen.Apply and the
+// flagged spans are replaced with "[REDACTED:<kind>]" placeholders, while the UNREDACTED
+// original is pinned in the shared CAS so an authorized caller can Restore it byte-exact
+// (the same pageOut + PinResolved witness ctxmmu's quarantine uses). It is strictly
+// one-sided (only the flagged spans change; surrounding bytes are untouched) and fails
+// open on a miss (an unflagged PII span passes through — honest scope, not a bug).
+//
+// Default-inert: with no redactor active (FAK_WIRE_REDACT unset) the slice is returned
+// UNCHANGED and untouched at zero cost, so the default outbound path is byte-identical to
+// today and the inert contract the spine already holds is preserved.
+//
+// It does NOT ride the flagship `fak guard -- claude` Anthropic passthrough: that route
+// forwards req.Raw verbatim (stream.go, WithRawRequestBody) and never serializes these
+// messages, so a span rewrite here changes nothing the model reads on it until the
+// cache-prefix-preserving req.Raw transform (#555, ctxplan-owned) lands. It lands the
+// redaction only where it can reach the wire today — the non-passthrough re-marshal
+// (OpenAI/xAI proxy, mock, local serve).
+func RedactOutboundMessages(messages []Message) ([]Message, []TranscriptRedaction) {
+	return redactOutbound(wirescreen.ActiveRedactor(), messages)
+}
+
+// redactOutbound is the testable core of RedactOutboundMessages: it runs r over every
+// message's content. A nil r is the inert path (messages returned unchanged, zero cost).
+// Splitting it out lets the witness test drive a concrete redactor without env coupling.
+func redactOutbound(r wirescreen.Redactor, messages []Message) ([]Message, []TranscriptRedaction) {
+	if r == nil {
+		return messages, nil
+	}
+	ctx := context.Background()
+	out := append([]Message(nil), messages...)
+	var redactions []TranscriptRedaction
+	for i := range out {
+		if len(out[i].Content) == 0 {
+			continue
+		}
+		red, ok := wirescreen.Apply(ctx, r, []byte(out[i].Content), out[i].Name)
+		if !ok {
+			continue
+		}
+		out[i].Content = string(red.Redacted)
+		redactions = append(redactions, TranscriptRedaction{
+			Index:      i,
+			Tool:       out[i].Name,
+			ToolCallID: out[i].ToolCallID,
+			By:         red.By,
+			Original:   red.Original,
+			Spans:      red.Spans,
+			Len:        len(red.Redacted),
+		})
+	}
+	return out, redactions
 }

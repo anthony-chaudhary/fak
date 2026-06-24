@@ -48,8 +48,12 @@
 // body is a base64 image block. Reversible collapses: perceptual-hash dedup of an
 // unchanged frame (ZERO model, buildable now), OCR/VLM collapse-to-text, crop-to-ROI.
 // BLOCKER: no vision/OCR path exists (internal/model is text-only, no vision encoder), so
-// only the phash arm is buildable on this stack today. Ship phash first; the vision arms
-// wait on an encoder.
+// only the phash arm is buildable on this stack today. The phash arm SHIPPED (issue #571):
+// phash.go is a pure-Go DCT perceptual-hash Digester that dedups a re-sent frame to an
+// "unchanged, see frame#k" pointer, selected by FAK_WIRE_SCREEN=phash (or PhashScreen),
+// reusing rung 2's ScreenDigest -> digestToPointer reversible witness (the original pixels
+// page into the CAS and a Clear + PageIn restores them byte-exact). The vision arms (OCR/
+// VLM, crop-to-ROI) wait on an encoder.
 //
 // RUNG 4 — MODEL-AUTHORED RELEVANCE FORECAST. Seam: ctxplan.Forecast.Intents
 // (internal/ctxplan/forecast.go), a DIFFERENT call site (the context planner, not the
@@ -58,26 +62,38 @@
 // one demand-page fault. This is ctxplan #556. BLOCKER: needs the outbound transform seam
 // below to affect the flagship wire.
 //
-// RUNG 5 — PRE-SEND PII/SECRET REDACTION (SHIPPED as the deterministic floor;
-// issue #572). Seam: this leaf's Redactor proposer + Apply/Restore (redactor.go),
-// the redaction peer of rung 1's Screener. A Redactor proposes [start,end) byte
-// spans to redact; Apply replaces each with a "[REDACTED:<kind>]" placeholder and
-// pins the UNREDACTED original in the shared CAS so an authorized Restore returns it
-// byte-exact (the same pageOut + PinResolved witness the MMU's quarantine uses). The
-// reference piiRedactor is a zero-model, high-precision regex + Luhn compliance floor
-// (credit cards, SSNs, AWS/GitHub/Slack/Stripe/Google keys, emails, bearer tokens,
+// RUNG 5 — PRE-SEND PII/SECRET REDACTION (SHIPPED + WIRED on the non-passthrough
+// re-marshal path; issue #572). Seam: this leaf's Redactor proposer + Apply/Restore
+// (redactor.go), the redaction peer of rung 1's Screener, plus the agent wire point
+// agent.RedactOutboundMessages (internal/agent/transcript.go) called from prepareUpstream
+// (internal/agent/stream.go) on the NON-passthrough re-marshal hop. A Redactor proposes
+// [start,end) byte spans to redact; Apply replaces each with a "[REDACTED:<kind>]"
+// placeholder and pins the UNREDACTED original in the shared CAS so an authorized Restore
+// returns it byte-exact (the same pageOut + PinResolved witness the MMU's quarantine
+// uses). The reference piiRedactor is a zero-model, high-precision regex + Luhn compliance
+// floor (credit cards, SSNs, AWS/GitHub/Slack/Stripe/Google keys, emails, bearer tokens,
 // PEM private keys). It is DEFAULT-INERT (FAK_WIRE_REDACT) and touches no ABI seam.
 //
-// Honest scope — this is a compliance floor, NOT a token saver. It is the floor
-// READY to be wired, not yet on the live wire: the flagship `fak guard -- claude`
-// Anthropic passthrough sends req.Raw VERBATIM, so the redaction cannot reach the
-// model there until the cache-prefix-preserving req.Raw transform (#555,
-// ctxplan-owned) lands; until then the redaction is reachable on the NON-passthrough
-// re-marshal path (QuarantineOutboundMessages-style). The model-backed Redactor is
-// the gated follow-on (needs weights + a measured span latency before default-on) —
-// the same fence the ctxplan forecast AUTHOR (CLAIMS.md) shipped the deterministic
-// seed under. This is the floor for the outbound surface, not a duplicate of ctxmmu's
-// inbound ScreenBytes quarantine (which removes a whole secret-bearing RESULT).
+// Honest scope — this is a compliance floor, NOT a token saver. It is WIRED only where it
+// can reach the wire today: the non-passthrough re-marshal path (OpenAI/xAI proxy, mock,
+// local serve), where prepareUpstream runs RedactOutboundMessages over the outbound
+// messages before adapter.MarshalRequest. The flagship `fak guard -- claude` Anthropic
+// passthrough still sends req.Raw VERBATIM, so the redaction cannot reach the model there
+// until the cache-prefix-preserving req.Raw transform (#555, ctxplan-owned) lands — that
+// flagship wiring is the named, #555-gated follow-on, deferred in code + here. The
+// model-backed Redactor is the further gated follow-on (needs weights + a measured span
+// latency before default-on). This is the floor for the outbound surface, not a duplicate
+// of ctxmmu's inbound ScreenBytes quarantine (which removes a whole secret-bearing
+// RESULT).
+//
+// MEASURED pre-send latency (the "measure before you default it on" gate): end-to-end
+// Apply on a ~480 B body carrying every pattern shape + ordinary prose is ~54 µs/op
+// (classify ~52 µs + ~2 µs CAS witness pin; BenchmarkApply/BenchmarkPropose,
+// redactor_bench_test.go) — orders of magnitude under a turn, so the deterministic floor
+// clears the TTFB bar comfortably. The gated model arm's NER-classify latency is
+// UNMEASURED until weights land and is the number that decides its default-on.
+// Witness: go test ./internal/agent ./internal/wirescreen (TestRedactOutbound_*,
+// TestApply_RedactsSpansAndPinsOriginal, TestApply_NoSpansIsNoOp).
 //
 // THE OUTBOUND BLOCKER (gates rungs 2/4/5 on the flagship route): on the
 // `fak guard -- claude` Anthropic passthrough the upstream gets req.Raw VERBATIM (gateway
@@ -87,6 +103,7 @@
 // route. Building a req.Raw transform that preserves the cache-prefix is the single seam
 // that unblocks the digest (rung 2), the forecaster (rung 4/#556), and the redactor
 // (rung 5/#572) on the flagship wire. Until it lands those rungs are non-passthrough-only
-// (and rung 5's deterministic floor ships ready-to-wire). This is the same blocker the
-// ctxwin program hit (ctxplan #555).
+// (rung 5's deterministic floor is WIRED on the non-passthrough re-marshal path via
+// agent.RedactOutboundMessages; only its flagship-passthrough arm waits on #555). This is
+// the same blocker the ctxwin program hit (ctxplan #555).
 package wirescreen
