@@ -84,9 +84,16 @@ surface tokens get *different* K/V.
 
 That is why arbitrary mid-sequence KV reuse is
 **not exact**. It is also why "addressable as in mix-and-match KV lego bricks" stays
-fragile. The research community (CacheBlend, MiniPIC, SparseX, CacheSlide) is
-still chipping at it with corrective tricks. Those include position repair and
-selective recompute, plus quality probes and a fallback to exact recompute. It is
+fragile. The research community is still chipping at it with corrective tricks,
+and the four names that come up are not synonyms — each is a distinct system
+attacking non-prefix reuse a different way: **CacheBlend** blends externally
+cached KV into live attention with recalibrated weights; **MiniPIC**
+(position-independent caching, the "PIC" family) stores unrotated keys and
+applies RoPE at attention time, so a cached span is not bound to its original
+position; **SparseX** reuses KV at the segment level and repairs it with sparse
+recompute; **CacheSlide** shifts cached KV to a new position. The tricks they
+share are position repair and selective recompute, plus quality probes and a
+fallback to exact recompute. It is
 real work, but it buys a fault
 budget rather than a clean primitive, and **none of it has shipped in a production serving
 stack.** `fak` does not claim to have solved it either. Non-prefix splice is an
