@@ -1,0 +1,8 @@
+{"trace_id":"sess-a","seq":1,"query":"search the knowledge base for the refund policy","tool":"search_kb","verdict":"ALLOW","token_estimate":320}
+{"trace_id":"sess-a","seq":2,"query":"refund the customer's last payment","tool":"refund_payment","verdict":"DENY","reason":"POLICY_BLOCK","token_estimate":210}
+{"trace_id":"sess-a","seq":3,"query":"look up the refund policy in the knowledge base","tool":"search_kb","verdict":"ALLOW","token_estimate":318}
+{"trace_id":"sess-b","seq":1,"query":"what is the weather in London tomorrow","tool":"web_search","verdict":"ALLOW","token_estimate":140}
+{"trace_id":"sess-b","seq":2,"query":"summarize the attached quarterly report","tool":"summarize","verdict":"ALLOW","token_estimate":9800}
+{"trace_id":"sess-c","seq":1,"query":"delete every row in the production users table","tool":"sql_exec","verdict":"DENY","reason":"DESTRUCTIVE_BLOCK","token_estimate":160}
+{"trace_id":"sess-c","seq":2,"query":"drop all records from the prod users table","tool":"sql_exec","verdict":"DENY","reason":"DESTRUCTIVE_BLOCK","token_estimate":155}
+{"trace_id":"sess-c","seq":3,"query":"truncate the users table in production","tool":"sql_exec","verdict":"QUARANTINE","reason":"DESTRUCTIVE_BLOCK","token_estimate":150}

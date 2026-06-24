@@ -43,6 +43,10 @@ import (
 	// Opt-in audit journal (inert unless FAK_AUDIT_JOURNAL is set).
 	_ "github.com/anthony-chaudhary/fak/internal/journal"
 
+	// Opt-in trajectory recorder (inert unless FAK_TRAJECTORY is set): folds the
+	// adjudication stream into per-turn analysis rows the `fak traj` toolkit gardens.
+	_ "github.com/anthony-chaudhary/fak/internal/trajectory"
+
 	// Pre-flight rung ladder + grammar rung.
 	_ "github.com/anthony-chaudhary/fak/internal/grammar"
 	_ "github.com/anthony-chaudhary/fak/internal/preflight"
