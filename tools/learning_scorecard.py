@@ -700,7 +700,18 @@ def render_markdown(payload: dict[str, Any], *, stamp: str | None = None) -> str
     c = payload.get("corpus") or {}
     cov = payload.get("coverage") or {}
     gd = c.get("grade_distribution", {})
-    out: list[str] = ["# Learning-docs scorecard", ""]
+    out: list[str] = [
+        "---",
+        'title: "fak learning-docs scorecard — the learning-debt measuring stick"',
+        'description: "fak\'s deterministic learning-docs scorecard: does the teaching set '
+        "actually teach? Pedagogy KPIs (a how-to with no runnable command, a tutorial with no "
+        "worked output, an orphan lesson, an uncovered learning topic) folded into a composite "
+        'score and the headline learning-debt metric, re-derived from disk."',
+        "---",
+        "",
+        "# Learning-docs scorecard",
+        "",
+    ]
     if stamp:
         out += [f"<!-- learning-scorecard: {stamp} · process: tools/learning_scorecard.py -->", ""]
     out += [

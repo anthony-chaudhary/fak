@@ -1,3 +1,8 @@
+---
+title: "fak learning-docs scorecard — the learning-debt measuring stick"
+description: "fak's deterministic learning-docs scorecard: does the teaching set actually teach? Pedagogy KPIs (a how-to with no runnable command, a tutorial with no worked output, an orphan lesson, an uncovered learning topic) folded into a composite score and the headline learning-debt metric, re-derived from disk."
+---
+
 # Learning-docs scorecard
 
 <!-- learning-scorecard: 2026-06-24 · process: tools/learning_scorecard.py -->

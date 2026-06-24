@@ -43,6 +43,7 @@ Each turns a fuzzy goal into a number you can drive toward zero.
 - [Observability scorecard](docs/OBSERVABILITY-SCORECARD.md) — the observability plane (metrics, dashboards, alerts, traces, proofs, ship-audit), graded so every dashboard/alert/doc points at a metric the binary emits and every claim is verifiable.
 - [Demo-quality scorecard](docs/DEMO-QUALITY-SCORECARD.md) — are the demos runnable, honest, self-contained.
 - [Demo-robustness scorecard](docs/DEMO-ROBUSTNESS-SCORECARD.md) — do the demos survive bad input and odd environments.
+- [Learning-docs scorecard](docs/LEARNING-SCORECARD.md) — does the teaching set actually teach (learning-debt: a how-to with no runnable command, a tutorial with no worked output, an orphan lesson, an uncovered topic). Pedagogy counterpart of repo-hygiene (structure) and doc-appeal (voice).
 - [Code-2x program](docs/CODE-2X-PROGRAM.md) — the plan to halve code-debt, then halve it again.
 
 ## Architecture & design
