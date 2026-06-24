@@ -105,5 +105,58 @@ class DedupTest(unittest.TestCase):
         self.assertAlmostEqual(s["cost_usd"], 1_000 * 75.0 / 1e6, places=9)
 
 
+class WebActivityReportingTest(unittest.TestCase):
+    """The machine-wide web line must surface BOTH the server-tool web requests
+    (server_tool_use) AND the client WebSearch/WebFetch tool calls. Counting only
+    the former printed "0 / 0" even when a session used the client WebFetch tool,
+    directly contradicting the tool-mix table (which listed WebFetch). Lock the
+    two-mechanism report so the contradiction can't regress."""
+
+    def test_client_webfetch_is_not_hidden_by_zero_server_count(self) -> None:
+        sa = load()
+        # A session that used the CLIENT WebFetch tool with ZERO server_tool_use reqs.
+        recs = [_assistant("msg-1", out=100, cread=1_000, ccreate=100, tool="WebFetch")]
+        s = sa.analyze(_write_transcript(recs))
+        self.assertEqual(s["tools"].get("WebFetch"), 1)
+        self.assertEqual(s["tokens"]["web_fetch"], 0, "server-tool count is genuinely 0")
+        self.assertEqual(s["read_only_frac"], 1.0, "WebFetch is a read-only tool")
+        md = sa.report_md([s], sa.aggregate([s]))
+        self.assertIn("WebFetch 1", md, "client WebFetch must be visible in the report")
+        self.assertNotIn("Web search / fetch requests:** 0 / 0", md,
+                         "the misleading server-only line must be gone")
+
+    def test_server_tool_web_requests_surfaced(self) -> None:
+        sa = load()
+        r = _assistant("msg-1", out=100, cread=1_000, ccreate=100)
+        r["message"]["usage"]["server_tool_use"] = {
+            "web_search_requests": 3, "web_fetch_requests": 2}
+        s = sa.analyze(_write_transcript([r]))
+        self.assertEqual(s["tokens"]["web_search"], 3)
+        self.assertEqual(s["tokens"]["web_fetch"], 2)
+        md = sa.report_md([s], sa.aggregate([s]))
+        self.assertIn("search 3 / fetch 2", md)
+
+
+class ReadOnlyClassificationTest(unittest.TestCase):
+    def test_observation_tools_are_read_only(self) -> None:
+        sa = load()
+        # Monitor/TaskGet/etc. poll or query state; they must not count as
+        # side-effecting in the read-only fraction.
+        for t in ("Monitor", "TaskGet", "TaskList", "TaskOutput", "ReadMcpResourceTool"):
+            self.assertIn(t, sa.READ_ONLY_TOOLS)
+        # …while the mutating Task tools stay OUT.
+        for t in ("TaskCreate", "TaskUpdate", "TaskStop"):
+            self.assertNotIn(t, sa.READ_ONLY_TOOLS)
+
+    def test_monitor_counts_as_read_only_fraction(self) -> None:
+        sa = load()
+        recs = [
+            _assistant("m1", out=10, cread=100, ccreate=10, tool="Monitor"),
+            _assistant("m2", out=10, cread=100, ccreate=10, tool="Bash"),
+        ]
+        s = sa.analyze(_write_transcript(recs))
+        self.assertEqual(s["read_only_frac"], 0.5, "Monitor read-only, Bash not")
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -53,8 +53,12 @@ EXCLUDE_NS_SUBSTR = ["pytest-of-USER", "AppData-Local-Temp", "workspace", "-ws",
 NS_INCLUDE_PREFIX = "C--work"   # real project namespaces; override with --ns-prefix '' / --all
 
 READ_ONLY_TOOLS = {"Read", "Glob", "Grep", "LS", "NotebookRead", "WebFetch", "WebSearch",
-                   "TodoRead", "ToolSearch"}
-# Bash/Edit/Write/NotebookEdit/Task/Workflow/etc. are side-effecting or spawn.
+                   "TodoRead", "ToolSearch",
+                   # observation-only harness tools: poll/query state, never mutate it.
+                   "Monitor", "TaskGet", "TaskList", "TaskOutput",
+                   "ReadMcpResourceTool", "ListMcpResourcesTool", "ReadMcpResourceDirTool"}
+# Bash/Edit/Write/NotebookEdit/TaskCreate/TaskUpdate/TaskStop/Workflow/etc. are
+# side-effecting or spawn.
 
 def price_for(model):
     m = (model or "").lower()
@@ -325,7 +329,17 @@ def report_md(sessions, agg):
     L.append(f"- **Total context ingested:** {fmt_int(tot_in)}  →  **machine-wide I:O ratio = {tot_in/max(t['output'],1):.1f} : 1**")
     chf = t['cache_read']/max(tot_in,1)
     L.append(f"- **Cache-read share of all ingested context = {chf*100:.1f}%**  (this is the prompt-cache/KV reuse the harness ALREADY captures)")
-    L.append(f"- **Web search / fetch requests:** {fmt_int(t['web_search'])} / {fmt_int(t['web_fetch'])}")
+    # Two DIFFERENT mechanisms reach the web — report BOTH so the line can never
+    # appear to contradict the tool-mix table below (which lists the CLIENT tools):
+    #   - server_tool_use: the model's built-in web_search/web_fetch (billed server-side)
+    #   - the client WebSearch/WebFetch tools (tool_use blocks — these are what show
+    #     up in the tool mix). Counting only the former printed "0 / 0" even when a
+    #     session used the client WebFetch tool, which read as "no web activity".
+    ws_c = agg["tool_mix"].get("WebSearch", 0)
+    wf_c = agg["tool_mix"].get("WebFetch", 0)
+    L.append(f"- **Web requests — server-tool (`server_tool_use`, billed):** "
+             f"search {fmt_int(t['web_search'])} / fetch {fmt_int(t['web_fetch'])}  "
+             f"·  **client tool:** WebSearch {fmt_int(ws_c)} / WebFetch {fmt_int(wf_c)}")
     L.append(f"- **Multi-iteration count:** {fmt_int(t['iterations'])}")
     flag = "  _(⚠ cost uses an ASSUMED price table — edit PRICING; token counts above are exact)_" if PRICING_IS_ASSUMPTION else ""
     L.append(f"- **Estimated cost:** ${agg['total_cost_usd']:,.2f}{flag}\n")
