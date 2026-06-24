@@ -78,6 +78,7 @@ Each turns a fuzzy goal into a number you can drive toward zero.
 
 Working docs that track a specific effort. Dated by design; they age out.
 
+- [Issue tracker](https://github.com/anthony-chaudhary/fak/issues) — the live, always-current open-issue count. This index never hard-codes a count (it drifts); see the tracker for the current number.
 - [GPU parity tracking (#480)](docs/notes/gpu-parity-tracking-480.md) — bringing the GPU path to parity.
 - [Model-arch seam status (#487)](docs/notes/model-arch-seam-status-487.md) — the model-architecture seam work.
 - [Trust-floor decomposition (#492)](docs/notes/trust-floor-decomposition-492.md) — splitting the trust floor into checkable parts.
