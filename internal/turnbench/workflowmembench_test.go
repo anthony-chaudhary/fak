@@ -97,6 +97,20 @@ func TestWorkflowMemoryBench_MetricsPresent(t *testing.T) {
 	}
 }
 
+// TestWorkflowMemoryBench_Deterministic verifies that the workload is
+// deterministic: two runs against the same image and request produce byte-
+// identical aggregate metrics. The workload is model-free (no RNG, no wall-
+// clock), so every field of WorkflowMemoryReport must be identical across runs.
+func TestWorkflowMemoryBench_Deterministic(t *testing.T) {
+	im := attachWFMemImage(t)
+	ctx := context.Background()
+	r1 := contextq.RunWorkflowMemoryBench(ctx, im, wfmemReq)
+	r2 := contextq.RunWorkflowMemoryBench(ctx, im, wfmemReq)
+	if r1 != r2 {
+		t.Fatalf("workflow-memory workload is not deterministic:\n r1=%+v\n r2=%+v", r1, r2)
+	}
+}
+
 // BenchmarkWorkflowMemory is the go test -bench entry point for the
 // workflow-memory workload. It drives the deterministic 5-turn sequence
 // (cold-build -> warm-reuse -> policy-drift-recompute -> warm-reuse ->
