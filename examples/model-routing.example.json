@@ -1,0 +1,67 @@
+{
+  "version": "fak-route/v1",
+  "default": {
+    "members": [{ "model": "medium", "role": "primary" }],
+    "reason": "no rule matched; route to the balanced mid-tier model"
+  },
+  "rules": [
+    {
+      "name": "refund-guard-ensemble",
+      "match": { "aspect": "tool_call", "tool": "refund_payment" },
+      "plan": {
+        "members": [
+          { "model": "guard-a", "weight": 1, "role": "primary" },
+          { "model": "guard-b", "weight": 1, "role": "verifier" }
+        ],
+        "reduce": "vote",
+        "reason": "high-stakes write: two guard models must agree (majority vote) before the call proceeds"
+      }
+    },
+    {
+      "name": "read-tools-small",
+      "match": { "aspect": "tool_call", "tool": "search_*" },
+      "plan": {
+        "members": [{ "model": "small" }],
+        "reason": "cheap read-shaped tool call -> small/fast model"
+      }
+    },
+    {
+      "name": "legal-best-of",
+      "match": { "aspect": "query", "labels": { "domain": "legal" } },
+      "plan": {
+        "members": [
+          { "model": "drafter-a", "role": "drafter" },
+          { "model": "drafter-b", "role": "drafter" },
+          { "model": "judge", "role": "judge" }
+        ],
+        "reduce": "best_of",
+        "scout": "tiny-classifier",
+        "reason": "legal sub-query: two drafters, a judge scores, best answer wins; a tiny scout pre-classifies risk"
+      }
+    },
+    {
+      "name": "hard-reasoning-step",
+      "match": { "aspect": "step", "min_complexity": "high" },
+      "plan": {
+        "members": [{ "model": "large" }],
+        "reason": "a hard reasoning step -> the large model (only the hard aspects pay the large-model price)"
+      }
+    },
+    {
+      "name": "interactive-short",
+      "match": { "aspect": "request", "latency": "interactive", "max_prompt_tokens": 4096 },
+      "plan": {
+        "members": [{ "model": "small" }],
+        "reason": "short interactive turn -> small/fast model"
+      }
+    },
+    {
+      "name": "batch-bulk",
+      "match": { "aspect": "request", "latency": "batch", "min_prompt_tokens": 32768 },
+      "plan": {
+        "members": [{ "model": "large" }],
+        "reason": "large best-effort batch job -> the high-throughput large model"
+      }
+    }
+  ]
+}

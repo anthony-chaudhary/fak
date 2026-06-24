@@ -95,6 +95,8 @@ func main() {
 		cmdWebbench(os.Args[2:])
 	case "model":
 		cmdModel(os.Args[2:])
+	case "route":
+		cmdRoute(os.Args[2:])
 	case "version", "-v", "--version":
 		fmt.Println(appversion.Current())
 	case "-h", "--help", "help":
@@ -139,6 +141,18 @@ func usage() {
                  --check validates a manifest and prints the floor it admits. The
                  capability floor — WHICH tools may be called — is a deployable
                  file, not a Go edit: dump -> edit -> --check -> --policy)
+  fak route     [--manifest FILE] [--aspect request|tool_call|query|state|step|scout]
+                [--tool NAME --prompt-tokens N --latency interactive|batch --complexity low|medium|high --labels k=v,...]
+                [--simulate "<out>[@score],..."] [--json] | --dump | --check FILE
+                (the MODEL-ROUTING oracle — first-class per-aspect + ensemble model
+                 routing. For one classified SUBJECT (an aspect of a request: the
+                 whole request, a tool call, a sub-query, a state, a reasoning step)
+                 print which MODEL — or which ENSEMBLE of models + reduction
+                 (first|vote|best_of|all_reduce|concat) — the policy selects. The
+                 routing policy is a deployable JSON manifest: --dump -> edit ->
+                 --check -> --manifest, mirroring 'fak policy'. --simulate folds
+                 stand-in member outputs through the plan's reduction so the
+                 ensemble half runs end to end with no model in the loop)
   fak lint      [--json] [--strict] [--kernel-only]
                 (the STATIC TOOL LINTER: the definition-time dual of the kernel's
                  call-time re-checks. Reports a dead cache hint, an unreachable pure

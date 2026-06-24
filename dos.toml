@@ -56,6 +56,7 @@ concurrent = [
   # auto-insert never fired. All are real, architest-tiered packages.
   "blobfs", "blobhttp", "ctxplan", "dgxbridge", "gitgate", "hfhub", "memq", "polymodel", "storedrv",
   "advmodel",
+  "modelroute",
   # new-leaf:lane -- `python tools/new_leaf.py` inserts a generated leaf lane above
 ]
 exclusive = ["abi", "release", "global"]
@@ -80,6 +81,7 @@ autopick = [
   "ctxresidency",
   "blobfs", "blobhttp", "ctxplan", "dgxbridge", "gitgate", "hfhub", "memq", "polymodel", "storedrv",
   "advmodel",
+  "modelroute",
   # new-leaf:lane
 ]
 
@@ -182,6 +184,7 @@ memq = ["internal/memq/**"]
 polymodel = ["internal/polymodel/**"]
 storedrv = ["internal/storedrv/**"]
 advmodel = ["internal/advmodel/**"]
+modelroute = ["internal/modelroute/**"]
 # new-leaf:tree -- generated leaf trees inserted above this line
 cmd         = ["cmd/**"]
 experiments = ["experiments/**"]
