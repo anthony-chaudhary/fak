@@ -323,12 +323,14 @@ func usage() {
                  shows a plan without running it; 'run' executes it (mutations PROPOSED
                  unless --apply). Default backend is the in-memory demo corpus; --dir
                  runs over a recall core image)
-  fak debug     [--session JSONL] [--dir DIR] [--cmd report|info|bt|x|ws|grep|tombstone|context-query|context-diff]
+  fak debug     [--session JSONL] [--dir DIR] [--cmd report|html|info|bt|x|ws|grep|tombstone|context-query|context-diff]
                 [--query STR] [--step N] [--grep PAT] [--k N] [--reason STR]
-                [--requested-by STR] [--out cdb-report.json]
+                [--requested-by STR] [--out cdb-report.json|cdb-report.html]
                 (the CONTEXT DEBUGGER: attach to a finished session as a core dump and
                  demand-page only the working set a question touches. --session ingests
-                 a REAL Claude Code transcript; default is the committed fixture)
+                 a REAL Claude Code transcript; default is the committed fixture.
+                 --cmd html emits a self-contained static HTML inspection report — the
+                 shareable artifact a teammate opens in a browser)
   fak serve     [--addr 127.0.0.1:8080 | --stdio]
                 [--provider openai|anthropic|gemini|xai --base-url URL --model M --api-key-env VAR]
                 [--engine inkernel] [--gguf FILE] [--policy FILE] [--policy-check] [--require-key-env VAR] [--vdso=true]
@@ -805,7 +807,7 @@ func cmdDebug(argv []string) {
 	list := fs.Bool("list", false, "discover real Claude Code session transcripts on this machine and print the `fak debug --session <path>` to run for each (most-recent first)")
 	session := fs.String("session", "", "path to a Claude Code session .jsonl to ingest as a core image (default: the committed fixture)")
 	dir := fs.String("dir", "cdb-image", "directory for the persisted core image (attached if it already holds one and --session is empty)")
-	cmd := fs.String("cmd", "report", "report | info | bt | x | ws | grep | tombstone | context-query | context-diff")
+	cmd := fs.String("cmd", "report", "report | html | info | bt | x | ws | grep | tombstone | context-query | context-diff")
 	query := fs.String("query", "what refund fee did the user's account show?", "the follow-up question to demand-page a working set for (cmd=ws/report)")
 	step := fs.Int("step", 0, "page step to examine (cmd=x)")
 	grepPat := fs.String("grep", "", "descriptor pattern to search the page table for (cmd=grep)")
@@ -928,6 +930,8 @@ func cmdDebug(argv []string) {
 		fmt.Printf("\n(full JSON diff -> %s)\n", *out)
 	case "report":
 		debugReport(im, *dir, *session, *query, *out)
+	case "html":
+		debugHTMLReport(im, *dir, *session, *query, *out)
 	default:
 		fmt.Fprintf(os.Stderr, "fak debug: unknown --cmd %q\n", *cmd)
 		os.Exit(2)
@@ -1025,6 +1029,41 @@ func debugReport(im *cdb.Image, dir, session, query, out string) {
 		fmt.Printf("  step %d %-14s -> %s\n", e.Step, e.Role, e.Outcome)
 	}
 	fmt.Printf("\nreport written   : %s\n", out)
+}
+
+// debugHTMLReport emits the "context debugger as a product" artifact (#574): a
+// self-contained, static HTML inspection report over the attached core image —
+// the shareable thing a teammate opens in a browser (no fak install, no JS, no
+// external CSS). One document covers the page table (bt), the quarantine/seal
+// panel with honest reason codes + the evadable-detector fence, the
+// working-set residency view for the follow-up query, and demand-paged
+// examine previews of every benign page. Sealed pages are refused at the gate
+// by construction, so the report can never echo poison.
+//
+// The default --out (cdb-report.json) is auto-swapped to cdb-report.html so an
+// operator who runs `fak debug --cmd html` without --out still gets a usable
+// file; an explicit --out is honored verbatim.
+func debugHTMLReport(im *cdb.Image, dir, session, query, out string) {
+	if out == "" || out == "cdb-report.json" {
+		out = "cdb-report.html"
+	}
+	f, err := os.Create(out)
+	must(err)
+	defer f.Close()
+	source := session
+	if source == "" {
+		source = "synthetic committed fixture (testdata/cdb/session.jsonl)"
+	}
+	must(im.HTMLReport(ctx(), query, dir, source, f))
+	info := im.Info()
+	fmt.Printf("\n== fak debug html: %s  (core image %s/) ==\n", info.SessionID, dir)
+	fmt.Printf("page table        : %d pages = %d benign + %d sealed + %d tombstoned\n",
+		info.Pages, info.Benign, info.Sealed, info.Tombstoned)
+	fmt.Printf("swap device       : %d B raw, %d distinct blobs, dedup saved %d B\n",
+		info.CASBytes, info.DistinctBlobs, info.DedupSaved)
+	fmt.Printf("panels            : decomposition · backtrace timeline · quarantine/seal panel · working-set residency · examine\n")
+	fmt.Printf("honest fence      : sealed decisions are inherited (detector is evadable); cdb makes them durable, not more correct\n")
+	fmt.Printf("report written    : %s  (open in a browser)\n", out)
 }
 
 func printBacktrace(im *cdb.Image) {
