@@ -22,7 +22,7 @@ manifest schema + author/validate workflow). Generated 2026-06-18.
 
 ```
    model proposes a tool call                         the kernel adjudicates              effect
-   (untrusted, ring-3)                                 (BEFORE dispatch)                   (only if ALLOWED)
+   (untrusted, ring-3)                                 (BEFORE dispatch)                   (ALLOW and DENY)
  ┌──────────────────────────┐      tool_use      ┌──────────────────────────────┐
  │  "run: rm -rf /tmp/x"     │ ─────────────────▶ │  Deny[tool]?            ──┐    │
  │  "run: ls -la"            │                    │  self-modify glob?       │    │
