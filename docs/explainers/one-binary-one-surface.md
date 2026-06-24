@@ -11,6 +11,12 @@ description: "fak delivers the entire governed agent-serving stack (API surface,
 > benchmarks never ask: **when you actually go to serve an agent safely, how many moving
 > parts is that, and who owns them?**
 
+*For platform and infra engineers weighing what to deploy and operate to serve a
+tool-using agent safely. No prior `fak` knowledge needed — only a working sense of how a
+serving engine (vLLM/SGLang) and a reverse proxy fit together. By the end you'll be able to
+name the governance + gateway band a token engine leaves empty, and why `fak` ships that
+whole band as one static Go binary that runs unchanged from laptop to fleet.*
+
 ## Serving an agent safely is a stack, not a component
 
 A model server turns prompts into tokens. That is one band of the problem. Engines

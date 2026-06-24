@@ -23,6 +23,12 @@ description: "Explains the internal/compute HAL seam that lets fak's in-kernel f
 > lenses); two of those four lenses (CUDA, and Vulkan as the discrete-GPU case) are now
 > built and witnessed on real hardware, not hypothetical.
 
+*Who this is for:* contributors adding or reasoning about a non-CPU backend (CUDA, Vulkan,
+NPU, dataflow, WASM) for fak's in-kernel forward pass. Prerequisites: familiarity with the
+`internal/model` forward pass and Go build tags. By the end you'll understand the seven
+host-CPU assumptions the `internal/compute` HAL neutralizes, how its type contract lets a
+new backend be a *registration* rather than a fork, and where each hardware class plugs in.
+
 ## 1. Why a *seam*, not a *port*
 
 The in-kernel forward pass (`internal/model`) is correct and, on CPU, fast. But it was

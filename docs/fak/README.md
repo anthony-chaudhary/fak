@@ -53,6 +53,7 @@ scaling laws, the explainers) live one level up in [`docs/`](../) and at the
 | Claude Code + Anthropic API setup | [`docs/integrations/claude.md`](../integrations/claude.md) |
 | OpenAI Codex / OpenAI-compatible clients | [`docs/integrations/openai-codex.md`](../integrations/openai-codex.md) |
 | Related work + prior art | [related-items.md](related-items.md) |
+| Where the paid layer is heading — hosted multi-tenant policy + audit plane (RFC, not built) | [hosted-control-plane.md](hosted-control-plane.md) |
 
 ## Status
 

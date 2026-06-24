@@ -9,6 +9,8 @@ description: "Explains fak's AWQ support: the 4-bit activation-aware format, ~0.
 
 AWQ (Activation-aware Weight Quantization) is a 4-bit quantization method that achieves near-float performance by using activation-aware calibration to determine optimal per-channel scaling factors.
 
+*Who this is for:* engineers loading or serving AWQ-quantized safetensors with fak, or exporting their own AWQ checkpoints. Prerequisites: familiarity with 4-bit quantization basics (codes, scales, zero-points) and Go for the loader snippets. By the end you'll know fak's on-disk AWQ layout and dequant formula, how to call `model.LoadAWQ`, and how to produce a checkpoint with AutoAWQ.
+
 ## Overview
 
 AWQ reduces model memory footprint to ~0.5625 bytes per parameter (4-bit weights + per-channel scales) compared to:

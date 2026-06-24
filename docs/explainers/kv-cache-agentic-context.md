@@ -18,6 +18,8 @@ date: 2026-06-17
 
 **Short answer:** Appending a tool result to the conversation does *not*, by itself, break the KV cache — prefix caching is built for append-only growth and handles it well. What actually erodes the hit rate in agent loops is (1) **eviction during tool latency** (your cached prefix is thrown out while a tool runs for seconds to minutes) and (2) **head-mutation** — any change ahead of the stable part of the context (summarization, an injected timestamp, a changing tool list, reordering, unstable serialization). A changed tool *result* does not silently serve a stale answer either: the new result tokens are literally different, so the prefix matches only up to that point and the suffix is recomputed. The reason it matters so much more for agents than for chat is the **input:output ratio** — agents re-send a huge transcript to read against a few generated tokens, so the same cache discounts most of the bill.
 
+*For engineers building or operating agent loops (tool-use, multi-turn, long-context) who already know roughly what a KV cache is. By the end you'll know why append-only growth is the easy case, what really erodes the hit rate (latency-eviction and head-mutation), and how to prove where your cache breaks — including a copy-pasteable offline prefix-divergence script.*
+
 ## What is a KV cache, and why is reuse always a prefix?
 
 A transformer caches each token's attention **Key** and **Value** vectors so it never re-reads earlier tokens while decoding. Generation has two phases: **prefill** (process the whole prompt at once, build KV for every token — the expensive part for long contexts) and **decode** (emit one token at a time, each attending over all cached KV).
@@ -135,6 +137,6 @@ No — it erodes it a few points (for example, 96.7% to 92.6% as volume grew ~7�
 
 ---
 
-*The mechanism (causal attention, prefix-only reuse, the T²-vs-T stakes) is standard transformer inference. The specific figures — the ~96.7%→92.6% hit-rate erosion, the 239:1 input:output ratio, the 0.3%→87% UUID-to-tail case, and the share-of-spend table — are observed measurements, not illustrative. Diagrams in the companion one-page PDF are schematic.*
+*The mechanism (causal attention, prefix-only reuse, the T²-vs-T stakes) is standard transformer inference. The specific figures — the ~96.7%→92.6% hit-rate erosion, the ~94% cache-read share, the 239:1 input:output ratio, the 0.3%→87% UUID-to-tail case, and the share-of-spend table — are observed measurements, not illustrative. Diagrams in the companion one-page PDF are schematic.*
 
 **Related:** `agentic-serving-related-art.md` (private research companion) — the related-work map (where this mechanism sits vs the 2025–26 agentic-serving frontier, incl. the NVIDIA Dynamo mapping and the cross-agent correctness-gated-invalidation seam) · `FLEET-SWEEP-EXPLAINED.md` (private companion) — the cross-agent shared-cache measurement (the "result cache keyed on hash/mtime" point of §"Same tool call, changed file", measured at fleet scale).

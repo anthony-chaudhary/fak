@@ -15,6 +15,8 @@ description: "The long-form story of fak: a default-deny capability floor plus r
 >
 > Numbers trace to [`fak/CLAIMS.md`](https://github.com/anthony-chaudhary/fak/blob/main/CLAIMS.md) and the results docs it links.
 
+*Who this is for: buyers, platform teams, and researchers deciding whether fak belongs in their agent stack — no code or install needed, just the README's gist. Read it to understand the two-gate trust model (a default-deny capability floor plus result quarantine), when the prefix-reuse performance win actually pays off, and exactly what is shipped versus simulated versus not-yet-built.*
+
 ## The story that makes it click
 
 Picture a new, eager night-shift clerk (the AI agent) running a shop alone. You don't

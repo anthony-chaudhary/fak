@@ -16,6 +16,8 @@ date: 2026-06-23
 
 # Linting agent code at the kernel
 
+*For anyone wiring a coding-agent loop on fak, or curious how the tool-call gate doubles as a code check. No setup needed to follow along; the worked example runs with a stock `go` toolchain and no model. By the end you'll know what a `codelint` pack is, why it lives off the decide path, and how a broken write gets fixed on the same turn it was made.*
+
 A coding agent's main move is to write a file. It reads some source, decides on an
 edit, and calls `write_file`. Nothing in a normal loop checks that the bytes it just
 wrote even parse. The agent finds out a few turns later, when a build fails or a test

@@ -7,6 +7,8 @@ description: "How external coding agents integrate with the fak tool-call firewa
 
 This document describes how external coding agents integrate with the fak (Fused Agent Kernel) - the tool-call firewall and policy boundary that sits between an AI agent and its tools.
 
+*Who this is for:* engineers wiring a coding agent (Claude Code, an OpenAI/Anthropic-SDK client, or a custom MCP host) through the `fak serve` gateway, or embedding the kernel in Go. Assumes you can run `fak serve` and read Go. By the end you will know the gateway entry points, the frozen kernel ABI (`ToolCall`/`Verdict`), the capability-floor policy, and the extension hooks (adjudicators, engines, vDSO fast paths) for routing a tool call through adjudication.
+
 ## Overview
 
 ```
@@ -518,3 +520,4 @@ Every request gets a `TraceID` (or generates one). This threads through:
 - `DOGFOOD-CLAUDE.md` - Claude Code integration example
 - `../explainers/policy-in-the-kernel.md` - Policy architecture
 - `../explainers/addressable-kv-cache.md` - Addressable cache design
+- [agent-framework-integration.md](agent-framework-integration.md) - Next: wire a specific agent framework through the gateway

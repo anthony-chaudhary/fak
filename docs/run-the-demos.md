@@ -42,9 +42,11 @@ go run ./cmd/ctxdemo               # → http://127.0.0.1:8153
 go run ./cmd/demorace             # → http://127.0.0.1:8147
 ```
 
-Each server prints the URL it bound. On a shared/busy machine, cap the cores with
-`-jobs 8` (absolute) or `-budget 0.75` (a fraction of the box) so the demo doesn't starve
-other work.
+**What you'll see:** each server prints the loopback URL it bound — `guarddemo` on
+`http://127.0.0.1:8151`, `turntaxdemo` on `:8150`, `ctxdemo` on `:8153`, `demorace` on
+`:8147` (as shown in the comments above) — then waits; open that URL in a browser to drive
+the demo. On a shared/busy machine, cap the cores with `-jobs 8` (absolute) or
+`-budget 0.75` (a fraction of the box) so the demo doesn't starve other work.
 
 ## 2. Headless — exact accounting, no browser, no model
 
@@ -183,5 +185,8 @@ need `proxy_buffering off` and a long `proxy_read_timeout`.
 > environment.
 
 ---
+
+Next: ran a demo and want to drive the kernel yourself? Walk the
+[fak tutorial](fak/tutorial.md) — zero to your first adjudicated tool call, offline.
 
 ← Back to [the live demos](demos.html) · [the showcase](showcase.html) · [docs home](./)

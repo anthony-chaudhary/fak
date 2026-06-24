@@ -5,6 +5,8 @@ description: "How fak serve exposes Prometheus metrics, JSON access logs, and tr
 
 # Observability guide: metrics, logs, and traces
 
+*Who this is for: operators wiring `fak serve` into a Prometheus/Grafana stack or a SIEM. Prerequisites: a running `fak serve` and comfort with curl and PromQL. You'll learn how to scrape its metrics, read the per-request access log, and follow one request across all three surfaces by `trace_id` — while keeping request bodies and tool arguments out of your telemetry.*
+
 `fak serve` exposes three correlated observability surfaces, all on by default, all
 designed so you can run a security gate in production **without ever logging request
 bodies, tool arguments, or result content**. Every output block below was captured from a

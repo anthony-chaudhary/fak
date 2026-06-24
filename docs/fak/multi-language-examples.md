@@ -5,6 +5,12 @@ description: "Runnable client code for calling a fak serve gateway from Python, 
 
 # Multi-Language Integration Examples
 
+*For application developers who already have a `fak serve` gateway running and want to call
+it from a non-Go codebase. Prerequisite: a reachable gateway (see the
+[server quickstart](server-quickstart.md)) and basic familiarity with HTTP in your language.
+You will leave able to adjudicate a tool call, read a `verdict`, and wire disposition-aware
+retries from Python, JS/TS, Go, or Rust against the OpenAI, Anthropic, or fak-native surface.*
+
 Runnable client code for talking to a `fak serve` gateway from **Python**,
 **JavaScript / TypeScript**, **Go**, and **Rust**. Every snippet below targets the
 real wire surfaces documented in the [API reference](api-reference.md) and verified

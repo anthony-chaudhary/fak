@@ -61,7 +61,7 @@ guides). All are wired into [`README.md`](README.md).
 > [`agent-framework-integration.md`](agent-framework-integration.md)) rather than the
 > per-language / per-framework file tree the original *Documentation Structure Vision*
 > below sketched. The consolidated pages cover the same surface; the vision tree is kept
-> below as a historical record, not a live TODO.
+> below as a historical record, not a live to-do list.
 
 ---
 

@@ -7,6 +7,8 @@ description: "Diagnose and fix common fak serve failures, covering port conflict
 
 Common startup failures, port conflicts, and resource issues when running `fak serve` or the in-kernel model engine.
 
+*For operators running `fak serve` who hit a startup or runtime error: match your error message to a symptom below, then run the diagnosis command and apply a fix. Assumes you already have `fak` installed and a model (or `--base-url`) to point it at — if not, start with the [server quickstart](server-quickstart.md).*
+
 ## Table of Contents
 
 - [Port Conflicts](#port-conflicts)
@@ -450,6 +452,8 @@ fak serve --gguf models/qwen.gguf --policy-check
 - [GPU Support](https://github.com/anthony-chaudhary/fak/blob/main/GPU.md) - CUDA and Vulkan setup
 - [README](https://github.com/anthony-chaudhary/fak/blob/main/README.md) - Project overview
 - [Architecture](https://github.com/anthony-chaudhary/fak/blob/main/ARCHITECTURE.md) - System design
+
+Next: once the server is up, [Observability](observability.md) explains the `/metrics` and log surfaces this guide leans on for diagnosis.
 
 ---
 

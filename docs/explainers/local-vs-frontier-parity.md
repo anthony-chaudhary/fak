@@ -8,6 +8,13 @@ description: "Explains how a small local model behind the fak kernel matches a h
 *2026-06-17 · fak v0.25.x · status: workflow proven on the smallest models; capability
 ramp is the roadmap.*
 
+*Who this is for:* anyone deciding whether a small local model behind the fak kernel can
+stand in for a hosted frontier model. No setup needed to read it; to reproduce the table
+you'll want the HF cache and the `fak agent` A/B harness (see [Reproduce](#reproduce)). You'll
+leave knowing how the kernel splits a task into three axes — capability, safety, cost — why
+local + kernel already wins safety and cost, and how capability closes as you climb the model-size
+ladder an 8 GB GPU can hold.
+
 ## The pitch
 
 Run a **small open model on basic hardware** (an 8 GB GPU, or even CPU) behind the

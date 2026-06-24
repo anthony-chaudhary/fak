@@ -38,7 +38,7 @@ fak serve --addr 127.0.0.1:8080 \
   --model qwen2.5:1.5b
 ```
 
-Verify it's running:
+Verify it's running. **What you'll see:** each `curl` echoes a one-line JSON body — `healthz` reports `"ok":true` with the engine and model, and `/v1/models` lists the advertised model:
 
 ```bash
 curl -s http://127.0.0.1:8080/healthz

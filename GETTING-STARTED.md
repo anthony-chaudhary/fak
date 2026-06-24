@@ -112,6 +112,8 @@ such as `report.json` and `agent-report.json`, into the current directory).
 ./fak run --trace testdata/tau2/tau2-smoke.json
 ```
 
+What you'll see: a per-call verdict table (each line shows the tool, its `verdict`, who decided it, and the `status`), capped by a one-line `summary:` of submit/hit/deny/transform/quarantine counts — like this:
+
 ```
 [ 0] get_user_details             verdict=ALLOW     by=monitor   status=OK
 [ 1] get_reservation_details      verdict=ALLOW     by=monitor   status=OK

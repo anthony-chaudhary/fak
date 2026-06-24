@@ -17,6 +17,12 @@ protect against**. Every output block was captured from a clean build of `fak` v
 > floor. If you deploy `fak` expecting a content filter that catches clever attacks, you've
 > deployed the wrong layer. Deploy it for the lock and the wall.
 
+*Who this is for:* the operator standing up `fak serve` for anything past a loopback
+experiment. Prerequisites: you can already run the gateway and write a basic `--policy`
+(start with the [policy guide](policy-guide.md)). By the end you can review a capability
+floor, require auth, control network exposure, and state plainly what `fak` will and won't
+stop — and walk away with the deployment checklist at the foot of this page.
+
 ---
 
 ## 1. The threat model: two gates, not one classifier

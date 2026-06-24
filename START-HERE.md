@@ -59,6 +59,8 @@ go run ./cmd/simpledemo -gguf $env:USERPROFILE\Downloads\Qwen2.5-1.5B-Instruct-Q
 
 ### 4. Chat!
 
+**What you'll see:** the model loads, then a `You:` prompt appears — type a question and the AI streams an answer back, like this:
+
 ```
 You: Explain quantum computing like I'm 12
 AI: Imagine a regular computer is like a light switch — it's either ON (1) or OFF (0)...
