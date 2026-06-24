@@ -69,5 +69,53 @@ def test_dir_with_no_auth_files_is_skipped(tmp_path, monkeypatch):
     assert not (root / "empty_at_example.com").exists()
 
 
+def test_list_shows_every_roster_account(tmp_path, monkeypatch, capsys):
+    """list is roster-driven: a backed-up acct, an un-backed-up acct, and a
+    blocked acct must ALL appear -- none may silently vanish (the gem8 ask)."""
+    backed = tmp_path / ".claude-gem7-netra"
+    _write_account(backed, "gem7@example.com", cred=True, oauth=True)
+    nobackup = tmp_path / ".claude-gem8-netra"
+    _write_account(nobackup, "gem8@example.com", cred=False, oauth=True)
+
+    backup_root = tmp_path / "backups"
+    monkeypatch.setattr(b, "BACKUP_ROOT", backup_root)
+    # only gem7 gets a backup; gem8 is on the roster but never backed up
+    monkeypatch.setattr(b, "_load_roster_dirs", lambda: {"gem7-netra": backed})
+    assert b.cmd_backup(None) == 0
+    capsys.readouterr()
+
+    # now list against the full roster, with gem8 reported BLOCKED by the fleet
+    monkeypatch.setattr(b, "_load_roster_dirs",
+                        lambda: {"gem7-netra": backed, "gem8-netra": nobackup})
+    monkeypatch.setattr(b, "_live_block_status", lambda: {
+        "gem8@example.com": {"blocked": True, "reason": "usage limit; resets 8pm"}})
+    assert b.cmd_list(None) == 0
+    out = capsys.readouterr().out
+
+    assert "gem7@example.com" in out
+    assert "gem8@example.com" in out          # the un-backed-up account still shows
+    assert "NO BACKUP" in out                  # and is flagged as such
+    assert "BLOCKED" in out                    # with its live block status
+
+
+def test_list_degrades_when_fleet_status_unavailable(tmp_path, monkeypatch, capsys):
+    """A broken/absent fleet_accounts must not crash the audit -- status degrades to
+    'status unknown' and every account still lists."""
+    import fleet_accounts
+    monkeypatch.setattr(fleet_accounts, "annotated_roster",
+                        lambda *a, **k: (_ for _ in ()).throw(RuntimeError("boom")))
+    # _live_block_status swallows the failure -> empty map -> 'status unknown'
+    assert b._live_block_status() == {}
+
+    acct = tmp_path / ".claude-gem8-netra"
+    _write_account(acct, "gem8@example.com", cred=False, oauth=True)
+    monkeypatch.setattr(b, "BACKUP_ROOT", tmp_path / "backups")
+    monkeypatch.setattr(b, "_load_roster_dirs", lambda: {"gem8-netra": acct})
+    assert b.cmd_list(None) == 0
+    out = capsys.readouterr().out
+    assert "gem8@example.com" in out
+    assert "status unknown" in out
+
+
 if __name__ == "__main__":
     raise SystemExit(pytest.main([__file__, "-q"]))

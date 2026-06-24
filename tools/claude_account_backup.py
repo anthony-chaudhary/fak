@@ -138,19 +138,88 @@ def _backups_by_email() -> dict[str, list[Path]]:
     return out
 
 
+def _live_block_status() -> dict[str, dict]:
+    """Map login-email -> live block status from the fleet roster, best-effort.
+
+    A blocked (usage-limited / auth-disabled) account still EXISTS and still needs
+    its credentials protected, so `list` must show it -- not drop it. The status is
+    a courtesy column; a missing/broken fleet_accounts must never break the backup
+    audit, so any failure degrades to 'no status known' (empty dict).
+    """
+    try:
+        import fleet_accounts  # local sibling; imported lazily so backup never hard-deps it
+        rows = fleet_accounts.annotated_roster()
+    except Exception:  # noqa: BLE001 -- status is advisory; never crash the audit
+        return {}
+    out: dict[str, dict] = {}
+    for r in rows:
+        email = str(r.get("login_email") or "")
+        if not email:
+            continue
+        # a canonical/unique dir wins over a duplicate when both carry the same email
+        prior = out.get(email)
+        if prior is None or (prior.get("blocked") and not r.get("blocked")):
+            out[email] = {"blocked": bool(r.get("blocked")),
+                          "reason": str(r.get("block_reason") or "")}
+    return out
+
+
 def cmd_list(_args: argparse.Namespace) -> int:
+    """Audit EVERY roster account: its live creds, its backup state, its block status.
+
+    Roster-driven on purpose. The old list iterated only over emails that already
+    had a backup, so an account with nothing backed up (or no creds at all) silently
+    vanished -- you could not tell 'gem8 has no backup' from 'gem8 does not exist'.
+    Now every roster account shows a row, with NO BACKUP / blocked called out.
+    """
     by = _backups_by_email()
-    if not by:
-        print(f"(no backups yet under {BACKUP_ROOT})")
-        return 0
+    # index existing backups by the resolved email in their newest _source.json
+    backup_by_email: dict[str, list[Path]] = {}
     for email_safe, snaps in by.items():
-        meta = {}
+        email = email_safe.replace("_at_", "@")
         try:
             meta = json.loads((snaps[0] / "_source.json").read_text(encoding="utf-8"))
+            email = meta.get("email", email)
         except (OSError, json.JSONDecodeError):
             pass
-        email = meta.get("email", email_safe.replace("_at_", "@"))
-        print(f"{email}  ({len(snaps)} snapshot(s), newest {snaps[0].name})")
+        backup_by_email[email] = snaps
+
+    blocks = _live_block_status()
+    dirs = _load_roster_dirs()
+    seen_emails: set[str] = set()
+    print(f"account backup audit  ({len(dirs)} roster dir(s)) -> {BACKUP_ROOT}")
+    for name, cdir in dirs.items():
+        email = _email_of(cdir) or f"unknown-{name}"
+        seen_emails.add(email)
+        # live credentials present on disk right now
+        have = [fn for fn in (".credentials.json", ".oauth-token") if (cdir / fn).is_file()]
+        # compact creds label: 'cred' / 'oauth' / 'cred+oauth' / 'NO CREDS'
+        short = {".credentials.json": "cred", ".oauth-token": "oauth"}
+        creds = "+".join(short[f] for f in have) if have else "NO CREDS"
+        # backup state
+        snaps = backup_by_email.get(email)
+        if snaps:
+            backup = f"{len(snaps)} snapshot(s), newest {snaps[0].name}"
+        else:
+            backup = "NO BACKUP"
+        # live block status
+        bs = blocks.get(email)
+        if bs and bs.get("blocked"):
+            status = f"BLOCKED: {bs['reason']}" if bs.get("reason") else "BLOCKED"
+        elif bs is not None:
+            status = "available"
+        else:
+            status = "status unknown"
+        print(f"  {email:<40} [{creds:<18}] {backup:<34} {status}")
+
+    # backups whose email is no longer in the roster (a removed/renamed account) --
+    # still on disk and restorable, so surface them rather than hide them.
+    for email, snaps in backup_by_email.items():
+        if email not in seen_emails:
+            print(f"  {email:<40} [roster: gone        ] "
+                  f"{len(snaps)} snapshot(s), newest {snaps[0].name}  (not in roster)")
+    if not dirs and not backup_by_email:
+        print(f"(no roster accounts and no backups yet under {BACKUP_ROOT})")
     return 0
 
 
