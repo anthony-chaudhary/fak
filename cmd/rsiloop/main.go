@@ -41,6 +41,9 @@ func main() {
 	harness := flag.String("harness", "worktree", "which REAL subsystem the loop drives: "+
 		"worktree (rewrite DefaultCacheSize, measured in an isolated worktree) | "+
 		"rulesynth (synthesize an adjudicator deny-rule from the frozen near-miss corpus)")
+	dosObserve := flag.Bool("dos-observe", false, "also emit a `dos improve --observe` "+
+		"receipt of each keep/revert verdict to the DOS audit journal (record-only "+
+		"telemetry; never re-gates the loop; no-op when dos is absent) — #588")
 	flag.Parse()
 
 	h, herr := selectHarness(*harness, *repo, *baselineRef, *candidates, *probePkg, *suitePkgs)
@@ -60,7 +63,11 @@ func main() {
 	case "track":
 		os.Exit(runTrack(h, j, *journalPath))
 	case "improve":
-		os.Exit(runImprove(h, j, *k, *maxCycles))
+		var obs rsiloop.Observer
+		if *dosObserve {
+			obs = dosObserveReceipt(*repo, *k) // nil (a no-op) when dos is absent
+		}
+		os.Exit(runImprove(h, j, *k, *maxCycles, obs))
 	default:
 		fmt.Fprintf(os.Stderr, "unknown -mode %q (want improve|track)\n", *mode)
 		os.Exit(2)
@@ -97,9 +104,10 @@ func selectHarness(kind, repo, baselineRef, candidates, probePkg, suitePkgs stri
 	}
 }
 
-// runImprove drives the closed loop and prints a per-cycle trace + a summary.
-func runImprove(h rsiloop.Harness, j *rsiloop.Journal, k, maxCycles int) int {
-	res, err := rsiloop.Run(h, j, k, maxCycles)
+// runImprove drives the closed loop and prints a per-cycle trace + a summary. obs is an
+// optional telemetry sink (nil = none) that mirrors each verdict to the DOS journal.
+func runImprove(h rsiloop.Harness, j *rsiloop.Journal, k, maxCycles int, obs rsiloop.Observer) int {
+	res, err := rsiloop.RunObserved(h, j, k, maxCycles, obs)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "rsiloop:", err)
 		return 1

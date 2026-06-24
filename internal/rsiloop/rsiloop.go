@@ -155,6 +155,14 @@ type nopWriteCloser struct{ io.Writer }
 // Close is a no-op so a bare io.Writer (e.g. stdout) satisfies io.WriteCloser without being closed.
 func (nopWriteCloser) Close() error { return nil }
 
+// Observer receives each journal Row as it is produced — AFTER the keep/revert
+// decision is computed and journaled. It is a pure telemetry side-channel: Run reads
+// nothing back from it, so observing a verdict can NEVER move a KEEP to a REVERT or
+// vice-versa. It is the seam #588 uses to emit a `dos improve --observe` receipt of
+// each verdict without that external command re-gating the loop's own non-forgeable
+// keep-bit. A nil Observer is a no-op.
+type Observer func(Row)
+
 // Run drives the closed RSI loop. It measures the baseline from `main`, then folds
 // each candidate through shipgate's keep-bit and breaker, advancing the running
 // baseline on every KEEP (the recursion: the next candidate competes against the
@@ -165,6 +173,15 @@ func (nopWriteCloser) Close() error { return nil }
 // baseline and are journaled; landing the final kept change on main is a separate,
 // human/gated step (EXTENDING.md "Land it"). It stops early on ESCALATE.
 func Run(h Harness, j *Journal, k, maxCycles int) (Result, error) {
+	return RunObserved(h, j, k, maxCycles, nil)
+}
+
+// RunObserved is Run with a telemetry Observer invoked once per cycle, AFTER the row
+// is journaled. The observer sees the SAME Row the journal received and is called for
+// its side effect only — the keep-bit stays exactly where Run computes it (the loop's
+// decision is never read back from, nor re-gated by, the observer). This is the seam
+// #588 uses to emit a `dos improve --observe` receipt of every keep/revert verdict.
+func RunObserved(h Harness, j *Journal, k, maxCycles int, obs Observer) (Result, error) {
 	base, baseRef, err := h.BaselineMetric()
 	if err != nil {
 		return Result{}, fmt.Errorf("baseline measure: %w", err)
@@ -229,6 +246,9 @@ func Run(h Harness, j *Journal, k, maxCycles int) (Result, error) {
 		}
 		res.Rows = append(res.Rows, row)
 		res.Cycles++
+		if obs != nil {
+			obs(row) // telemetry only — Run ignores any effect; the verdict is already set
+		}
 
 		if ev.Kept() {
 			running = m.Metric // recursion: the kept gain is the new bar to beat
