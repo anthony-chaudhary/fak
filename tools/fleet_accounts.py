@@ -459,11 +459,35 @@ def _reset_text(info: dict | str | None) -> str | None:
     return str(reset) if reset else None
 
 
+# Claude's daily usage limit resets on a rolling window of at most ~5 hours, so a
+# BARE reset time (no date, e.g. "3pm") is always close to NOW -- a few hours ahead
+# at most. The next occurrence of that clock time is therefore the right anchor only
+# when it lands inside this bound; a bare time already PAST today has reset, it does
+# not mean "tomorrow". This is the slack we allow before declaring a passed bare time
+# expired (kept a little above 5h so a clock-skewed or just-observed boundary still
+# reads as future rather than flapping to expired).
+_DAILY_RESET_WINDOW = dt.timedelta(hours=6)
+
+
 def _reset_is_future(reset: str | None, now: dt.datetime | None = None) -> bool | None:
     """Best-effort parser for Claude's reset strings.
 
     Returns True for a reset that is still in the future, False for an expired
     parsed reset, and None when the format is unknown.
+
+    Two shapes occur in the wild:
+      * DATED weekly resets -- "Jun 25, 1pm" -- anchored to this year (rolled to
+        next year only when the parse lands implausibly far in the past).
+      * BARE daily resets -- "3pm", "12:30am" -- a clock time with no date. These
+        belong to the ~5h rolling daily window, so the answer is the NEAREST
+        occurrence around now, bounded by ``_DAILY_RESET_WINDOW``: today's
+        occurrence if it is still ahead; otherwise tomorrow's ONLY if that is
+        within the window; a bare time already past beyond the window has reset
+        (expired). The previous heuristic rolled any pre-6am time a full day
+        forward whenever observed after noon, so an already-passed "12:30am"
+        reset (~13h ago) was mis-read as "tomorrow 12:30am" and the account
+        stayed falsely throttled -- the resume-resolver then re-homed off a
+        healthy account. (#resume-resolver false throttle)
     """
     if not reset:
         return None
@@ -492,12 +516,19 @@ def _reset_is_future(reset: str | None, now: dt.datetime | None = None) -> bool 
             candidate = parsed.replace(year=now.year, tzinfo=now.tzinfo)
             if candidate < now and (now - candidate).days > 180:
                 candidate = candidate.replace(year=now.year + 1)
-        else:
-            candidate = parsed.replace(year=now.year, month=now.month, day=now.day,
-                                       tzinfo=now.tzinfo)
-            if candidate <= now and now.hour >= 12 and candidate.hour < 6:
-                candidate += dt.timedelta(days=1)
-        return candidate > now
+            return candidate > now
+        # Bare time: anchor to the nearest occurrence within the daily window.
+        candidate = parsed.replace(year=now.year, month=now.month, day=now.day,
+                                   tzinfo=now.tzinfo)
+        if candidate > now:
+            # today's occurrence is still ahead -- the live reset.
+            return True
+        # today's occurrence has passed; tomorrow's counts as future ONLY if it
+        # falls inside the rolling daily window. Otherwise the limit has reset.
+        tomorrow = candidate + dt.timedelta(days=1)
+        if tomorrow - now <= _DAILY_RESET_WINDOW:
+            return True
+        return False
     return None
 
 

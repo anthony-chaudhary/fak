@@ -50,6 +50,13 @@ def _avail(account: str, available: bool, *, live: int = 0, active: int = 0,
     }
 
 
+def _probe_all_ok(_acct: dict) -> dict:
+    """A target/owner probe stub that reports every account serving -- so the
+    target-confirmation probe is a no-op pass-through to the ranked winner. Tests
+    that care about the BLOCKED-target path inject their own stub instead."""
+    return {"available": True, "block_reason": "", "status_source": "probe"}
+
+
 class LocateOwnerTests(unittest.TestCase):
     def test_not_found(self) -> None:
         with tempfile.TemporaryDirectory() as home:
@@ -93,6 +100,64 @@ class LocateOwnerTests(unittest.TestCase):
             self.assertEqual(owner["account"], ".claude-gem8-acct")
 
 
+class DuplicateOwnerReselectTests(unittest.TestCase):
+    """A session duplicated across accounts (the signature of a prior re-home): the
+    newest-mtime copy is the re-home TARGET, which may be walled. The resolver probes
+    it and falls back to a copy whose account a live probe confirms serving -- the
+    operator's exact failure (resumed onto a limited day24 while q-netra served)."""
+
+    # Tags chosen so they cannot collide with the live session registry -> the
+    # default runtime_status (available=True) applies and the reselect path -- driven
+    # entirely by the injected probe_fn -- is what's under test.
+    ORIG = ".claude-rrorig-acct"
+    TARGET = ".claude-rrtarget-acct"
+
+    def test_reselects_serving_copy_when_newest_is_walled(self) -> None:
+        with tempfile.TemporaryDirectory() as home:
+            # ORIG is the original copy; TARGET is the newer re-home target.
+            orig = _write_session(home, self.ORIG)
+            target = _write_session(home, self.TARGET)
+            os.utime(orig, (1_000_000, 1_000_000))
+            os.utime(target, (2_000_000, 2_000_000))  # target newest -> picked first
+
+            def probe(a: dict) -> dict:
+                if a["account"] == self.TARGET:
+                    return {"available": False, "block_reason": "usage limit",
+                            "status_source": "probe", "block_kind": "usage"}
+                return {"available": True, "status_source": "probe"}
+
+            rec = resume_resolver.resolve(SID, home, dry_run=True, probe_fn=probe)
+            self.assertEqual(rec["action"], "PIN")
+            self.assertEqual(rec["pin_account"], self.ORIG)
+            self.assertEqual(rec["owner_reselected"],
+                             {"from": self.TARGET, "to": self.ORIG})
+
+    def test_keeps_newest_when_it_serves(self) -> None:
+        with tempfile.TemporaryDirectory() as home:
+            orig = _write_session(home, self.ORIG)
+            target = _write_session(home, self.TARGET)
+            os.utime(orig, (1_000_000, 1_000_000))
+            os.utime(target, (2_000_000, 2_000_000))
+            # newest (TARGET) serves -> no reselect, normal pin to it.
+            rec = resume_resolver.resolve(SID, home, dry_run=True,
+                                          probe_fn=_probe_all_ok)
+            self.assertEqual(rec["action"], "PIN")
+            self.assertEqual(rec["pin_account"], self.TARGET)
+            self.assertNotIn("owner_reselected", rec)
+
+    def test_single_owner_is_not_probed(self) -> None:
+        # a non-duplicated session takes the fast path: no owner probe at all.
+        with tempfile.TemporaryDirectory() as home:
+            _write_session(home, self.ORIG)
+            probed: list = []
+            rec = resume_resolver.resolve(
+                SID, home, dry_run=True,
+                probe_fn=lambda a: probed.append(a["account"]) or {"available": True})
+            self.assertEqual(rec["action"], "PIN")
+            self.assertEqual(rec["pin_account"], self.ORIG)
+            self.assertEqual(probed, [])  # single owner -> never probed
+
+
 class ResolveTests(unittest.TestCase):
     def test_pin_when_owner_available(self) -> None:
         with tempfile.TemporaryDirectory() as home:
@@ -122,6 +187,7 @@ class ResolveTests(unittest.TestCase):
                     _avail(".claude-gem5-acct", True, live=1, active=5, home=home),
                     _avail(".claude-jack-barker-claude-acct", True, live=0, active=6, home=home),
                 ],
+                probe_fn=_probe_all_ok,
                 rehome_fn=lambda *a: calls.append(a) or True)
             self.assertEqual(rec["action"], "REHOME")
             self.assertTrue(rec["rehomed"])
@@ -147,7 +213,8 @@ class ResolveTests(unittest.TestCase):
             rec = resume_resolver.resolve(
                 SID, home,
                 owner_status={"available": False, "block_reason": "usage limit"},
-                availability=[_avail(".claude-gem5-acct", True, home=home)])
+                availability=[_avail(".claude-gem5-acct", True, home=home)],
+                probe_fn=_probe_all_ok)
             self.assertEqual(rec["action"], "REHOME")
             dst = os.path.join(home, ".claude-gem5-acct", "projects", PROJECT)
             dst_jsonl = os.path.join(dst, SID + ".jsonl")
@@ -162,7 +229,8 @@ class ResolveTests(unittest.TestCase):
             rec = resume_resolver.resolve(
                 SID, home, dry_run=True,
                 owner_status={"available": False, "block_reason": "usage limit"},
-                availability=[_avail(".claude-gem5-acct", True, home=home)])
+                availability=[_avail(".claude-gem5-acct", True, home=home)],
+                probe_fn=_probe_all_ok)
             self.assertEqual(rec["action"], "REHOME")
             self.assertFalse(rec["rehomed"])
             self.assertTrue(rec["would_rehome"])
@@ -202,6 +270,144 @@ class ResolveTests(unittest.TestCase):
             self.assertFalse(rec["ok"])
             self.assertEqual(rec["action"], "NOT_FOUND")
             self.assertIsNone(rec["pin_config_dir"])
+
+
+class CarriedThrottleProbeTests(unittest.TestCase):
+    """The owner is reported throttled by a CARRIED registry block (a stale
+    bare-time reset that reads as future after it actually cleared). The resolver
+    live-probes the owner before abandoning it; a fresh OK probe means PIN, not
+    re-home -- the exact false-throttle that re-homed off a healthy q-netra."""
+
+    def test_carried_throttle_probe_ok_pins_owner(self) -> None:
+        with tempfile.TemporaryDirectory() as home:
+            _write_session(home, ".claude-gem8-acct")
+            calls: list = []
+            rec = resume_resolver.resolve(
+                SID, home,
+                owner_status={"available": False, "block_kind": "usage",
+                              "block_reason": "usage limit; resets 3pm",
+                              "status_source": "registry"},
+                availability=[_avail(".claude-gem5-acct", True, home=home)],
+                probe_fn=lambda owner: {"available": True, "block_reason": "",
+                                        "status_source": "probe"},
+                rehome_fn=lambda *a: calls.append(a) or True)
+            self.assertEqual(rec["action"], "PIN")
+            self.assertFalse(rec["rehomed"])
+            self.assertEqual(rec["pin_account"], ".claude-gem8-acct")
+            self.assertTrue(rec["owner_probe"]["available"])
+            self.assertEqual(calls, [])  # no copy -- owner is actually serving
+
+    def test_carried_throttle_probe_confirms_block_rehomes(self) -> None:
+        with tempfile.TemporaryDirectory() as home:
+            _write_session(home, ".claude-gem8-acct", sidecar=True)
+            def probe(a: dict) -> dict:
+                # owner's carried throttle is REAL (probe confirms block); the target
+                # serves, so we re-home onto it.
+                if a["account"] == ".claude-gem8-acct":
+                    return {"available": False, "block_reason": "usage limit confirmed",
+                            "status_source": "probe", "block_kind": "usage"}
+                return {"available": True, "status_source": "probe"}
+            rec = resume_resolver.resolve(
+                SID, home, dry_run=True,
+                owner_status={"available": False, "block_kind": "usage",
+                              "block_reason": "usage limit; resets 3pm",
+                              "status_source": "registry"},
+                availability=[_avail(".claude-gem5-acct", True, home=home)],
+                probe_fn=probe)
+            self.assertEqual(rec["action"], "REHOME")
+            self.assertEqual(rec["pin_account"], ".claude-gem5-acct")
+
+    def test_probe_confirmed_block_is_not_reprobed(self) -> None:
+        # a block already confirmed by a fresh probe (status_source=="probe") is
+        # trusted -- the OWNER is not re-probed (the target still is, to confirm it
+        # actually serves before landing the resume there).
+        with tempfile.TemporaryDirectory() as home:
+            _write_session(home, ".claude-gem8-acct")
+            probed: list = []
+            rec = resume_resolver.resolve(
+                SID, home, dry_run=True,
+                owner_status={"available": False, "block_kind": "usage",
+                              "block_reason": "usage limit", "status_source": "probe"},
+                availability=[_avail(".claude-gem5-acct", True, home=home)],
+                probe_fn=lambda a: probed.append(a["account"]) or {"available": True})
+            self.assertEqual(rec["action"], "REHOME")
+            self.assertNotIn(".claude-gem8-acct", probed)  # owner never re-probed
+            self.assertEqual(probed, [".claude-gem5-acct"])  # only the target
+
+    def test_auth_block_owner_not_reprobed(self) -> None:
+        # only a CARRIED usage throttle re-probes the OWNER; an auth/access block is a
+        # different, durable kind, so the owner goes straight to re-home (the target is
+        # still probed for serving-confirmation).
+        with tempfile.TemporaryDirectory() as home:
+            _write_session(home, ".claude-gem8-acct")
+            probed: list = []
+            rec = resume_resolver.resolve(
+                SID, home, dry_run=True,
+                owner_status={"available": False, "block_kind": "auth",
+                              "block_reason": "auth/login required",
+                              "status_source": "registry"},
+                availability=[_avail(".claude-gem5-acct", True, home=home)],
+                probe_fn=lambda a: probed.append(a["account"]) or {"available": True})
+            self.assertEqual(rec["action"], "REHOME")
+            self.assertNotIn(".claude-gem8-acct", probed)  # owner not re-probed
+
+    def test_no_probe_flag_trusts_carried_throttle(self) -> None:
+        with tempfile.TemporaryDirectory() as home:
+            _write_session(home, ".claude-gem8-acct")
+            probed: list = []
+            rec = resume_resolver.resolve(
+                SID, home, dry_run=True, probe_owner=False,
+                owner_status={"available": False, "block_kind": "usage",
+                              "block_reason": "usage limit", "status_source": "registry"},
+                availability=[_avail(".claude-gem5-acct", True, home=home)],
+                probe_fn=lambda a: probed.append(a["account"]) or {"available": True})
+            self.assertEqual(rec["action"], "REHOME")
+            self.assertEqual(probed, [])  # probe suppressed entirely by probe_owner=False
+
+    def test_all_targets_blocked_pins_owner(self) -> None:
+        # owner throttled AND every probed target also limited -> re-homing would just
+        # move the resume onto another walled account, so pin to the owner instead.
+        with tempfile.TemporaryDirectory() as home:
+            _write_session(home, ".claude-gem8-acct")
+            rec = resume_resolver.resolve(
+                SID, home, dry_run=True,
+                owner_status={"available": False, "block_kind": "auth",
+                              "block_reason": "auth/login required",
+                              "status_source": "registry"},
+                availability=[
+                    _avail(".claude-gem5-acct", True, home=home),
+                    _avail(".claude-gem7-acct", True, home=home),
+                ],
+                probe_fn=lambda a: {"available": False,
+                                    "block_reason": "usage limit confirmed",
+                                    "status_source": "probe", "block_kind": "usage"})
+            self.assertEqual(rec["action"], "PIN_BLOCKED")
+            self.assertEqual(rec["pin_account"], ".claude-gem8-acct")
+            self.assertTrue(rec["target_probes"])
+
+    def test_skips_blocked_target_to_next_serving(self) -> None:
+        # the top-ranked target probes BLOCKED; the resolver skips it and lands on the
+        # next candidate that a live probe confirms serving.
+        with tempfile.TemporaryDirectory() as home:
+            _write_session(home, ".claude-gem8-acct", sidecar=True)
+            def probe(a: dict) -> dict:
+                if a["account"] == ".claude-gem5-acct":
+                    return {"available": False, "block_reason": "limited",
+                            "status_source": "probe", "block_kind": "usage"}
+                return {"available": True, "status_source": "probe"}
+            rec = resume_resolver.resolve(
+                SID, home, dry_run=True,
+                owner_status={"available": False, "block_kind": "auth",
+                              "block_reason": "auth/login required",
+                              "status_source": "registry"},
+                # gem5 is least-loaded (ranked first) but limited; gem7 is next.
+                availability=[
+                    _avail(".claude-gem5-acct", True, live=0, home=home),
+                    _avail(".claude-gem7-acct", True, live=0, active=1, home=home),
+                ],
+                probe_fn=probe)
+            self.assertEqual(rec["action"], "REHOME")
+            self.assertEqual(rec["pin_account"], ".claude-gem7-acct")
 
 
 class MainCliTests(unittest.TestCase):

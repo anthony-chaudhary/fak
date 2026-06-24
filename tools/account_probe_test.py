@@ -186,7 +186,13 @@ class MergeRoundTripTest(unittest.TestCase):
         v = account_probe.probe_account(
             worker_row(account, "gem8"), runner=runner_returning(1, "", BANNER_LIMIT))
         row = account_probe.verdict_to_row(v)
-        throttle = {account: {"reset": row["throttle_reset"]}}
+        # The probe banner's bare reset ("7:50am") is clock-relative -- expired in the
+        # afternoon -- and merge_known_throttle drops EXPIRED throttles. This test is
+        # about carry-forward of a LIVE limit, so pin the reset to a clearly-future
+        # dated window; the bare-banner parse itself is covered by the classify tests.
+        live_reset = "Dec 31, 11pm (America/Los_Angeles)"
+        row["throttle_reset"] = live_reset
+        throttle = {account: {"reset": live_reset}}
         with mock.patch.object(fleet_accounts, "load_registry", return_value=prev_reg):
             merged = fleet_sessions.merge_known_throttle(throttle, rows=[row])
         self.assertIn(account, merged)

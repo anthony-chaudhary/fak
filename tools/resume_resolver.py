@@ -63,6 +63,54 @@ import fleet_accounts  # noqa: E402
 import fleet_resume_watchdog  # noqa: E402  (rehome_transcript -- the canonical copy)
 import fleet_sessions  # noqa: E402  (_rehome_targets -- the canonical target ranking)
 
+# How many ranked re-home candidates to live-probe before falling back to the
+# best-ranked one. Bounds the cost of confirming a target actually serves; a probe
+# is ~2-4s, so a handful covers the realistic healthy-account count without making a
+# fully-walled fleet probe every dir.
+_MAX_TARGET_PROBES = 4
+
+
+def _carried_throttle_block(owner_status: dict) -> bool:
+    """True when the owner is reported blocked by a usage throttle that was CARRIED
+    in the registry, not confirmed by a fresh live probe.
+
+    A carried throttle is the stale-block risk: the registry keeps a `reset` string
+    from whenever the limit was last seen, and a bare-time reset ("3pm") can read as
+    a future reset for hours after the limit actually cleared -- so the account is
+    really serving while the roster still calls it throttled. A re-home off such an
+    owner abandons a healthy account (and copies onto a target that may be no better).
+    runtime_status already DEFERS to a fresh probe (status_source=="probe"), so we
+    only re-probe when the block is the weaker, registry-carried usage kind."""
+    if owner_status.get("available", True):
+        return False
+    if owner_status.get("status_source") == "probe":
+        return False  # already confirmed live -- trust it, do not re-probe
+    return owner_status.get("block_kind") == "usage"
+
+
+def _probe_owner_available(owner: dict) -> dict | None:
+    """Live-probe the owner account, returning its fresh runtime_status, or None if
+    a probe could not be run. Used to confirm a CARRIED usage throttle before
+    re-homing off the owner -- a fresh OK probe overrides the stale carried block
+    (the same override runtime_status already applies to a probe row)."""
+    try:
+        import account_probe  # local import: only the re-home path needs the prober
+    except ImportError:
+        return None
+    row = {"kind": "worker", "account": owner["account"],
+           "tag": fleet_accounts.account_tag(owner["account"]),
+           "dir": owner["config_dir"], "product": "claude"}
+    try:
+        verdict = account_probe.probe_account(row)
+    except Exception:
+        return None
+    status = str(verdict.get("status") or "").upper()
+    if status == "OK":
+        return {"available": True, "block_reason": "", "status_source": "probe"}
+    reason = str(verdict.get("block_reason") or verdict.get("reason") or "blocked")
+    return {"available": False, "block_reason": reason, "status_source": "probe",
+            "block_kind": verdict.get("block_kind")}
+
 
 def _is_host(config_dir: str) -> bool:
     """True for the host ``~/.claude`` login -- the account ``c`` keeps OFF the
@@ -86,6 +134,22 @@ def locate_owner(sid: str, home: str) -> dict | None:
     lands at the exact path ``claude --resume`` will look under) plus a
     ``dup_count`` / ``all_accounts`` summary for the duplicate-fork note.
     """
+    matches = _locate_matches(sid, home)
+    if not matches:
+        return None
+    non_host = [m for m in matches if not m["is_host"]]
+    pool = non_host or matches
+    pool.sort(key=lambda m: m["mtime"], reverse=True)
+    owner = dict(pool[0])
+    owner["dup_count"] = len(matches)
+    owner["all_accounts"] = sorted(m["account"] for m in matches)
+    return owner
+
+
+def _locate_matches(sid: str, home: str) -> list[dict]:
+    """Every ``<home>/.claude*`` account dir holding this session's ``.jsonl``, each
+    as ``{config_dir, account, project, mtime, is_host}``. The raw input shared by
+    the owner pick and the duplicate-owner re-selection."""
     matches: list[dict] = []
     for acct_dir in glob.glob(os.path.join(home, ".claude*")):
         if not os.path.isdir(acct_dir):
@@ -105,15 +169,40 @@ def locate_owner(sid: str, home: str) -> dict | None:
                 "mtime": mtime,
                 "is_host": _is_host(acct_dir),
             })
-    if not matches:
+    return matches
+
+
+def _reselect_duplicate_owner(sid: str, owner: dict, home: str,
+                              probe_fn) -> dict | None:
+    """For a session duplicated across accounts (a prior re-home), confirm the
+    newest-mtime owner actually serves; if it does not, fall back to another copy's
+    account that a live probe confirms serving.
+
+    Returns the owner record to use (carrying ``dup_count`` / ``all_accounts``), or
+    ``None`` to keep the original pick (it serves, or nothing better could be
+    confirmed). Candidates are tried newest-mtime first, host LAST -- the same
+    ordering as the primary owner pick -- so an older copy is chosen ONLY when the
+    freshest one is provably walled. This is the operator's failure: the resume was
+    owned by a limited day24 (the re-home target, stamped newest) while q-netra (the
+    original copy) was serving."""
+    matches = _locate_matches(sid, home)
+    if len(matches) <= 1:
         return None
     non_host = [m for m in matches if not m["is_host"]]
-    pool = non_host or matches
-    pool.sort(key=lambda m: m["mtime"], reverse=True)
-    owner = dict(pool[0])
-    owner["dup_count"] = len(matches)
-    owner["all_accounts"] = sorted(m["account"] for m in matches)
-    return owner
+    ordered = sorted(non_host or matches, key=lambda m: m["mtime"], reverse=True)
+    first = ordered[0]
+    probed = probe_fn({"account": first["account"],
+                       "config_dir": first["config_dir"]})
+    if probed is None or probed.get("available"):
+        return None  # freshest copy serves (or unprobeable) -> keep the normal pick
+    for cand in ordered[1:]:
+        p = probe_fn({"account": cand["account"], "config_dir": cand["config_dir"]})
+        if p is not None and p.get("available"):
+            rec = dict(cand)
+            rec["dup_count"] = len(matches)
+            rec["all_accounts"] = sorted(m["account"] for m in matches)
+            return rec
+    return None
 
 
 def _discover_availability(home: str) -> list[dict]:
@@ -141,16 +230,25 @@ def resolve(sid: str, home: str | None = None, *,
             availability: list[dict] | None = None,
             owner_status: dict | None = None,
             dry_run: bool = False,
-            rehome_fn=None) -> dict:
+            rehome_fn=None,
+            probe_fn=None,
+            probe_owner: bool = True) -> dict:
     """Decide where ``claude --resume <sid>`` should run.
 
-    ``availability`` / ``owner_status`` / ``rehome_fn`` are injectable so the
-    decision is unit-testable without a live registry or real account dirs;
+    ``availability`` / ``owner_status`` / ``rehome_fn`` / ``probe_fn`` are injectable
+    so the decision is unit-testable without a live registry or real account dirs;
     production passes none and they are read from :mod:`fleet_accounts` and
     copied with :func:`fleet_resume_watchdog.rehome_transcript`.
+
+    ``probe_owner`` (default True) live-probes the owner before re-homing when its
+    block is a CARRIED usage throttle (not a fresh probe). This catches a stale
+    bare-time reset that reads as future for hours after the limit cleared -- without
+    it the resolver re-homes off a healthy account onto an arbitrary target. Set
+    False (or pass ``--no-probe``) to skip the probe and trust the carried status.
     """
     home = home or fleet_accounts.USER
     rehome_fn = rehome_fn or fleet_resume_watchdog.rehome_transcript
+    probe_fn = probe_fn or _probe_owner_available
 
     owner = locate_owner(sid, home)
     if owner is None:
@@ -159,6 +257,26 @@ def resolve(sid: str, home: str | None = None, *,
             "pin_config_dir": None,
             "reason": "no ~/.claude* account holds this session id",
         }
+
+    # A session present in MORE THAN ONE account dir is the signature of a prior
+    # re-home: locate_owner picks the newest-mtime copy, which is the re-home TARGET,
+    # not necessarily a serving account. The registry can report that target available
+    # purely because no limit was ever recorded for it (absence of evidence), so a
+    # naive pin lands the resume on a secretly-walled account while the true original
+    # owner is still serving. When the session is duplicated, confirm the chosen owner
+    # actually serves; if it does not, re-pick among the OTHER copies' accounts. This
+    # is the operator's exact failure: resumed onto a limited day24 while q-netra (the
+    # original owner) was serving. (#resume-resolver: bad re-home target as owner)
+    if (probe_owner and owner_status is None and owner.get("dup_count", 1) > 1
+            and len(owner.get("all_accounts", [])) > 1):
+        better = _reselect_duplicate_owner(sid, owner, home, probe_fn)
+        if better is not None:
+            rec_owner_reselect = {"from": owner["account"], "to": better["account"]}
+            owner = better
+        else:
+            rec_owner_reselect = None
+    else:
+        rec_owner_reselect = None
 
     if owner_status is None:
         owner_status = fleet_accounts.runtime_status(owner["account"])
@@ -173,14 +291,39 @@ def resolve(sid: str, home: str | None = None, *,
         "dup_count": owner.get("dup_count", 1),
         "all_accounts": owner.get("all_accounts", [owner["account"]]),
     }
+    if rec_owner_reselect:
+        rec["owner_reselected"] = rec_owner_reselect
+
+    # Before trusting a CARRIED usage throttle (one the registry kept, not a fresh
+    # probe), re-check the owner live -- a stale bare-time reset can keep an account
+    # marked throttled for hours after it actually cleared. A fresh OK probe means the
+    # owner is serving: pin to it and skip the needless re-home. (#resume-resolver
+    # false throttle: re-homed off a healthy q-netra whose "12:30am"/"3pm" reset had
+    # already passed.)
+    if probe_owner and not owner_available and _carried_throttle_block(owner_status):
+        probed = probe_fn(owner)
+        if probed is not None:
+            rec["owner_probe"] = {
+                "available": probed.get("available"),
+                "block_reason": probed.get("block_reason", ""),
+            }
+            owner_available = bool(probed.get("available"))
+            block_reason = str(probed.get("block_reason") or block_reason)
+            rec["owner_available"] = owner_available
+            if owner_available:
+                rec["owner_block_reason"] = ""
 
     # Owner reachable -> pin to it, no copy. This is the unchanged, safe default
     # (and exactly what the PS finder already returns).
     if owner_available:
+        pinned_reason = "owner account is available -- pin to it (no copy)"
+        if rec.get("owner_probe", {}).get("available"):
+            pinned_reason = ("owner's carried throttle was stale -- live probe OK, "
+                             "pin to owner (no re-home)")
         rec.update({
             "action": "PIN", "rehomed": False,
             "pin_account": owner["account"], "pin_config_dir": owner["config_dir"],
-            "reason": "owner account is available -- pin to it (no copy)",
+            "reason": pinned_reason,
         })
         return rec
 
@@ -198,7 +341,51 @@ def resolve(sid: str, home: str | None = None, *,
         })
         return rec
 
+    # The roster's `available` is only "nothing bad was recorded" -- it can offer an
+    # account that is itself limited but never probed (so no throttle row exists). A
+    # re-home onto such a target just moves the session from one walled account to
+    # another. So live-probe candidates top-down and pick the first PROVEN-serving one;
+    # an account a probe confirms blocked is skipped. (#resume-resolver: re-homed onto
+    # day24, which was itself usage-limited.) Bounded so a fully-walled fleet does not
+    # probe forever; if every checked target is blocked we still fall back to the
+    # best-ranked one rather than stranding the resume.
     tgt = targets[0]
+    if probe_owner:
+        checked: list[dict] = []
+        for cand in targets[:_MAX_TARGET_PROBES]:
+            probed = probe_fn({"account": cand["account"],
+                               "config_dir": cand.get("config_dir")
+                               or os.path.join(home, cand["account"])})
+            if probed is None:
+                tgt = cand  # cannot probe -> trust the ranking, take it
+                break
+            checked.append({"account": cand["account"],
+                            "available": probed.get("available"),
+                            "block_reason": probed.get("block_reason", "")})
+            if probed.get("available"):
+                tgt = cand
+                break
+        else:
+            # ran the whole bounded slice without a proven-serving target. If EVERY
+            # checked candidate probed as blocked, re-homing would only move the resume
+            # from one walled account to another -- so pin to the owner and wait for a
+            # reset instead (PIN_BLOCKED). Only when no candidate could be probed at all
+            # (checked empty) do we fall back to the best-ranked best-effort landing.
+            if checked and all(not c["available"] for c in checked):
+                rec["target_probes"] = checked
+                rec.update({
+                    "action": "PIN_BLOCKED", "rehomed": False,
+                    "pin_account": owner["account"],
+                    "pin_config_dir": owner["config_dir"],
+                    "reason": (f"owner blocked ({block_reason}) and every probed "
+                               f"re-home target is also limited -- pin to owner; "
+                               f"resume waits for reset"),
+                })
+                return rec
+            tgt = targets[0]
+        if checked:
+            rec["target_probes"] = checked
+
     tgt_cfg = tgt.get("config_dir") or os.path.join(home, tgt["account"])
     if not dry_run:
         copied = rehome_fn(owner["config_dir"], tgt_cfg, owner["project"], sid)
@@ -222,6 +409,10 @@ def resolve(sid: str, home: str | None = None, *,
             pass
 
     tgt_tag = tgt.get("tag") or tgt["account"]
+    target_confirmed = any(
+        c["account"] == tgt["account"] and c["available"]
+        for c in rec.get("target_probes", []))
+    confirm_note = " (live-probe OK)" if target_confirmed else ""
     rec.update({
         "action": "REHOME",
         "rehomed": not dry_run,
@@ -230,7 +421,7 @@ def resolve(sid: str, home: str | None = None, *,
         "source_config_dir": owner["config_dir"],
         "reason": (f"owner blocked ({block_reason}) -- "
                    f"{'would re-home' if dry_run else 're-homed'} transcript onto "
-                   f"{tgt_tag} and pin there"),
+                   f"{tgt_tag}{confirm_note} and pin there"),
     })
     return rec
 
@@ -246,12 +437,16 @@ def main(argv: list[str] | None = None) -> int:
                     help="user home holding the .claude* dirs (default: ~)")
     ap.add_argument("--dry-run", action="store_true",
                     help="decide and report but do NOT copy the transcript")
+    ap.add_argument("--no-probe", action="store_true",
+                    help="trust the carried throttle; do NOT live-probe the owner "
+                         "before re-homing (faster, but can re-home off a stale block)")
     ap.add_argument("--json", action="store_true",
                     help="emit the full decision record instead of the bare dir")
     args = ap.parse_args(argv)
 
     try:
-        rec = resolve(args.session, args.home, dry_run=args.dry_run)
+        rec = resolve(args.session, args.home, dry_run=args.dry_run,
+                      probe_owner=not args.no_probe)
     except Exception as exc:  # never crash the launcher -- it falls back on rc!=0
         print(f"[resume-resolver] internal error: {exc}", file=sys.stderr)
         return 2

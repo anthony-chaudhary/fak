@@ -939,5 +939,66 @@ class IdentityReconciliationTest(unittest.TestCase):
                          "CLI `json` available_accounts must not offer a duplicate dir")
 
 
+class ResetIsFutureTests(unittest.TestCase):
+    """Bare daily resets ("3pm", "12:30am") belong to a ~5h rolling window, so a
+    bare time already PAST today has reset -- it does NOT mean "tomorrow". The old
+    heuristic rolled any pre-6am time a full day forward when observed after noon,
+    so an already-passed "12:30am" read as future and the account stayed falsely
+    throttled (the resume-resolver then re-homed off a healthy account)."""
+
+    import datetime as _dt
+    try:
+        from zoneinfo import ZoneInfo as _ZoneInfo
+        LA = _ZoneInfo("America/Los_Angeles")
+    except Exception:  # pragma: no cover
+        LA = _dt.timezone.utc
+
+    def _at(self, h: int, m: int = 0) -> _dt.datetime:
+        return self._dt.datetime(2026, 6, 24, h, m, tzinfo=self.LA)
+
+    def test_passed_early_morning_reset_is_expired(self) -> None:
+        # THE BUG: "12:30am" seen at 1:22pm is ~13h in the past -> reset, not tomorrow.
+        self.assertFalse(
+            fleet_accounts._reset_is_future("12:30am (America/Los_Angeles)",
+                                            self._at(13, 22)))
+
+    def test_future_same_day_reset_is_future(self) -> None:
+        self.assertTrue(
+            fleet_accounts._reset_is_future("3pm (America/Los_Angeles)",
+                                            self._at(13, 22)))
+
+    def test_just_passed_bare_reset_is_expired(self) -> None:
+        # "1pm" seen at 1:22pm has passed; tomorrow's 1pm is ~23h away (outside the
+        # daily window) -> the limit has reset.
+        self.assertFalse(
+            fleet_accounts._reset_is_future("1pm (America/Los_Angeles)",
+                                            self._at(13, 22)))
+
+    def test_late_night_reset_rolls_into_window(self) -> None:
+        # "12:30am" seen at 10pm -> tomorrow 12:30am is 2.5h away, inside the daily
+        # window -> still a live future reset.
+        self.assertTrue(
+            fleet_accounts._reset_is_future("12:30am (America/Los_Angeles)",
+                                            self._at(22, 0)))
+
+    def test_dated_weekly_reset_future_and_past(self) -> None:
+        self.assertTrue(
+            fleet_accounts._reset_is_future("Jun 25, 1pm (America/Los_Angeles)",
+                                            self._at(13, 22)))
+        self.assertFalse(
+            fleet_accounts._reset_is_future("Jun 23, 8pm (America/Los_Angeles)",
+                                            self._at(13, 22)))
+
+    def test_throttle_is_active_delegates_to_reset(self) -> None:
+        # throttle_is_active is "active unless the reset parses as expired": a clearly
+        # past DATED reset clears it; an unparseable reset stays active (fail-safe).
+        self.assertFalse(fleet_accounts.throttle_is_active(
+            {"reset": "Jan 1, 1am (America/Los_Angeles)"}))  # long past -> expired
+        self.assertTrue(fleet_accounts.throttle_is_active(
+            {"reset": "sometime never"}))  # unparseable -> stay active
+        self.assertTrue(fleet_accounts.throttle_is_active(
+            {"reset": "Dec 31, 11pm (America/Los_Angeles)"}))  # year-end -> future
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
