@@ -44,6 +44,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/enginecache"
 	"github.com/anthony-chaudhary/fak/internal/kernel"
 	"github.com/anthony-chaudhary/fak/internal/model"
+	"github.com/anthony-chaudhary/fak/internal/modelroute"
 	"github.com/anthony-chaudhary/fak/internal/recall"
 	"github.com/anthony-chaudhary/fak/internal/tokenizer"
 	"github.com/anthony-chaudhary/fak/internal/vdso"
@@ -153,6 +154,18 @@ type Config struct {
 	// streaming fast-path bypasses this hook; the buffered turn path (the canonical path
 	// all three wires route through s.complete) is what gets planned.
 	CtxViewBudget int
+	// RouteManifest, when non-nil, makes the gateway classify each fak_syscall tool
+	// call into a modelroute.Subject and route it: for a single-model (PICK) plan the
+	// chosen model id is written to abi.ToolCall.Engine BEFORE Submit, so the kernel
+	// dispatches to it AND the residency PDP adjudicates the real route (a tenant /
+	// sensitive call bound for a remote model is denied at the boundary, never
+	// fail-open). nil (the default) leaves Engine unset -> the kernel default engine,
+	// byte-for-byte the pre-routing behavior. An ensemble (multi-member) plan is NOT
+	// fanned out here — that is issue #597; the gateway leaves Engine unset and defers
+	// to the kernel default until ensemble dispatch lands. New() validates a non-nil
+	// manifest and fails loud on a malformed one (a mis-routed model is a security
+	// boundary, never a silent default). Set by `fak serve --route-manifest` (#601).
+	RouteManifest *modelroute.Manifest
 }
 
 // PolicyReloadFunc is injected by the host CLI so the gateway can expose a reload
@@ -242,6 +255,11 @@ type Server struct {
 	// every fill/hit/evict/revoke on the strongest local cache is rendered on
 	// /metrics; Close detaches the sink. nil suppresses the family. See metrics.go.
 	cacheStream *cachemeta.StreamMetrics
+
+	// route, when non-nil, is the per-call model-routing policy buildCall consults to
+	// set abi.ToolCall.Engine PRE-submit (the load-bearing residency contract — see
+	// Config.RouteManifest and buildCall). nil leaves Engine unset (kernel default).
+	route *modelroute.Manifest
 }
 
 // New builds a Server. It validates that the ABI is wired (a resolver is
@@ -257,6 +275,14 @@ func New(cfg Config) (*Server, error) {
 	}
 	if !engineRegistered(engineID) {
 		return nil, fmt.Errorf("gateway: engine %q is not registered (have: %s)", engineID, strings.Join(abi.EngineIDs(), ", "))
+	}
+	// A misconfigured routing policy is a security boundary (it decides which model
+	// — local or remote — a tenant payload reaches), so validate it at New and fail
+	// loud rather than fall through to a silent default model at dispatch time.
+	if cfg.RouteManifest != nil {
+		if err := cfg.RouteManifest.Validate(); err != nil {
+			return nil, fmt.Errorf("gateway: route manifest: %w", err)
+		}
 	}
 	model := cfg.Model
 	if model == "" {
@@ -360,6 +386,7 @@ func New(cfg Config) (*Server, error) {
 		cacheStream:  cacheStream,
 		feed:         newCoherenceFeed(0),
 		metrics:      newGatewayMetrics(time.Now()),
+		route:        cfg.RouteManifest,
 
 		pinUpstreamCredential: cfg.PinUpstreamCredential,
 	}, nil
@@ -612,7 +639,75 @@ func (s *Server) buildCall(ctx context.Context, tool, rawArgs string, readOnly b
 	// cross-call correlation; absent, we mint a fresh non-empty id rather than fall
 	// back to the empty shared-default trace (which would pool every served session
 	// onto one taint high-water mark).
-	return &abi.ToolCall{Tool: tool, Args: ref, TraceID: s.traceFor(traceID), Meta: meta}, nil
+	tc := &abi.ToolCall{Tool: tool, Args: ref, TraceID: s.traceFor(traceID), Meta: meta}
+	// Per-call model routing (opt-in): classify this tool call into a routing Subject
+	// and, for a single-model PICK, bind the chosen model to Engine HERE — before the
+	// caller hands tc to k.Syscall. That is the load-bearing residency contract: the
+	// residency PDP reads c.Engine INSIDE the adjudication fold, so a route written
+	// any later (at Reap/dispatch) would adjudicate an empty Engine and fail open on a
+	// tenant payload bound for a remote model. nil manifest => Engine "" => kernel
+	// default (byte-for-byte the pre-routing path).
+	tc.Engine = s.routeEngine(tool, readOnly, meta)
+	return tc, nil
+}
+
+// routeEngine consults the optional per-call routing policy and returns the engine
+// route to bind to abi.ToolCall.Engine, or "" for the kernel default. It classifies
+// the call into a modelroute.Subject (aspect=tool_call, the tool name, and the
+// read-only / sensitivity / tenant signals the gateway already attests) and returns
+// Decision.Plan.Primary() for a single-model PICK. An ENSEMBLE plan is left to the
+// kernel default here (route ""): fanning N independently-adjudicated submits out is
+// issue #597, and collapsing an ensemble to one member would be a silent wrong
+// route. The returned route is the model id verbatim (Plan.Primary()'s documented
+// destination), NOT collapsed to a registered engine id — the string must keep the
+// model's remote-ness so the residency gate can deny a tenant/sensitive payload
+// bound for a remote model. A route to a model with no registered engine driver
+// fails LOUD at dispatch ("no engine registered for route"), never silently runs
+// elsewhere.
+func (s *Server) routeEngine(tool string, readOnly bool, meta map[string]string) string {
+	if s.route == nil {
+		return ""
+	}
+	d := s.route.Route(modelroute.Subject{
+		Aspect: modelroute.AspectToolCall,
+		Tool:   tool,
+		Labels: routeLabels(readOnly, meta),
+	})
+	if d.Plan.IsEnsemble() {
+		return "" // #597: ensemble fan-out; do not collapse to a single member here.
+	}
+	return d.Plan.Primary()
+}
+
+// routeLabels lowers the call signals the gateway honestly knows into the OPEN
+// Subject.Labels a manifest Match can route on: read_only (read- vs write-shaped),
+// and the sensitivity / tenant tags the residency floor also reads. Per-call prompt
+// token estimation and richer classification are a later signal-enrichment child
+// (#599 scout classification); the gateway routes on what it can attest today.
+func routeLabels(readOnly bool, meta map[string]string) map[string]string {
+	labels := map[string]string{"read_only": boolLabel(readOnly)}
+	if meta != nil {
+		sens := meta["sensitivity"]
+		if sens == "" {
+			sens = meta["data_sensitivity"]
+		}
+		if sens != "" {
+			labels["sensitivity"] = sens
+		}
+		if p := meta[vdso.MetaPrincipal]; p != "" {
+			labels["tenant"] = p
+		}
+	}
+	return labels
+}
+
+// boolLabel renders a bool as a routing-label string ("true"/"false") without
+// pulling strconv into this file (it formats ints via the local itoa).
+func boolLabel(b bool) string {
+	if b {
+		return "true"
+	}
+	return "false"
 }
 
 // traceFor returns the caller's TraceID, or mints a fresh, process-unique non-empty
