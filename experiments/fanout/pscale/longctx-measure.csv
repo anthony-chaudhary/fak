@@ -1,0 +1,10 @@
+prefix_tokens,reference_model,path,status,reason,context_ceiling_tokens,kv_cache_gib,kv_fits_host_ram,ttft_ms,prefill_ms
+262144,qwen25-7b,fak-in-kernel,skipped,CONTEXT_CEILING,512,14.0,True,,
+262144,qwen25-7b,llama.cpp,skipped,MODEL_UNAVAILABLE,,14.0,True,,
+262144,qwen25-7b,vllm-sglang,skipped,SERVER_UNAVAILABLE,,14.0,True,,
+524288,qwen25-7b,fak-in-kernel,skipped,CONTEXT_CEILING,512,28.0,True,,
+524288,qwen25-7b,llama.cpp,skipped,MODEL_UNAVAILABLE,,28.0,True,,
+524288,qwen25-7b,vllm-sglang,skipped,SERVER_UNAVAILABLE,,28.0,True,,
+1048576,qwen25-7b,fak-in-kernel,skipped,CONTEXT_CEILING,512,56.0,True,,
+1048576,qwen25-7b,llama.cpp,skipped,MODEL_UNAVAILABLE,,56.0,True,,
+1048576,qwen25-7b,vllm-sglang,skipped,SERVER_UNAVAILABLE,,56.0,True,,

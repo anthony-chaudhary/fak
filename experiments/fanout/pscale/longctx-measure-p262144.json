@@ -1,0 +1,55 @@
+{
+  "generated_by": "tools/fanout_longctx_probe.py",
+  "host": {
+    "cpu_count": 32,
+    "dedicated_gpu_vram_bytes": 0,
+    "platform": "win32",
+    "total_ram_bytes": 272252637184,
+    "total_ram_gib": 253.6
+  },
+  "kv_cache_bytes": 15032385536,
+  "kv_cache_gib": 14.0,
+  "kv_fits_host_ram": true,
+  "model_geometry": {
+    "dtype_bytes": 2,
+    "head_dim": 128,
+    "kv_bytes_per_token": 57344,
+    "kv_heads": 4,
+    "layers": 28
+  },
+  "note": "No silent extrapolation: the MODELED token economics for this P live in docs/benchmarks/FANOUT-BENCH-RESULTS.md (pscale table). This artifact records only what a REAL model path could measure on this host \u2014 here, a recorded ceiling, not a wall-clock number.",
+  "overall": "SKIPPED_NO_LONGCTX_PATH",
+  "paths": [
+    {
+      "context_ceiling_tokens": 512,
+      "detail": "selected checkpoint max_position_embeddings=512 < 262144 (512x short); config=internal/model/.cache/minimax-m3-tiny/config.json",
+      "measured_kv_bytes": null,
+      "path": "fak-in-kernel",
+      "prefill_ms": null,
+      "reason": "CONTEXT_CEILING",
+      "status": "skipped",
+      "ttft_ms": null
+    },
+    {
+      "detail": "llama.cpp present (C:\\Users\\USER\\AppData\\Local\\Microsoft\\WinGet\\Packages\\ggml.llamacpp_Microsoft.Winget.Source_8wekyb3d8bbwe\\llama-cli.EXE) but no .gguf with context >= 262144 found on host; KV for qwen25-7b at P=262144 is 14.0 GiB, host RAM 253.6 GiB (fits)",
+      "measured_kv_bytes": null,
+      "path": "llama.cpp",
+      "prefill_ms": null,
+      "reason": "MODEL_UNAVAILABLE",
+      "status": "skipped",
+      "ttft_ms": null
+    },
+    {
+      "detail": "no prefix-caching server reachable (none of 127.0.0.1:8000, 127.0.0.1:30000)",
+      "measured_kv_bytes": null,
+      "path": "vllm-sglang",
+      "prefill_ms": null,
+      "reason": "SERVER_UNAVAILABLE",
+      "status": "skipped",
+      "ttft_ms": null
+    }
+  ],
+  "prefix_tokens": 262144,
+  "reference_model": "qwen25-7b",
+  "schema": "fanout-longctx-measure/1"
+}

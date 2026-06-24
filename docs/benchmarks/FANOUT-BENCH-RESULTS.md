@@ -130,7 +130,44 @@ The impact is clean:
 4. **This is a strategy result, not a real 1M-token wall-clock result.** The pscale row
    prices a byte-identical shared prefix under a transparent cache model; it does not yet
    prove that a selected model/backend can actually hold and prefill a 1M-token context
-   within memory or latency targets. That validation is tracked in #104.
+   within memory or latency targets. That validation is tracked in #104 / #431.
+
+#### Measured-path probe — real wall-clock vs modeled economics (#431)
+
+The rows above are **modeled**. To keep that token economics strictly apart from what a
+real model can actually serve, `tools/fanout_longctx_probe.py` interrogates the three
+candidate long-context paths on the host and, for each target P, **either measures a real
+prefill or records the structured CEILING that stopped it — it never extrapolates the
+modeled curve into a wall-clock number.** It sizes the fp16 KV cache from real
+`qwen25-7b` geometry (mirrored from `internal/turnbench/longcontext.go`: 28 layers × 4 KV
+heads × 128 head-dim) so the memory ceiling is a quantity, not a guess. Artifacts:
+`experiments/fanout/pscale/longctx-measure-p262144.json`,
+`longctx-measure-p524288.json`, `longctx-measure-p1048576.json`, and the rolled-up
+`longctx-measure.csv`.
+
+On the reference host that produced the checked-in artifacts (win32, 253.6 GiB RAM, no
+dedicated GPU VRAM) every target P is `SKIPPED_NO_LONGCTX_PATH`:
+
+| candidate path | reason | recorded ceiling |
+|---|---|---|
+| fak in-kernel | `CONTEXT_CEILING` | selected checkpoint `max_position_embeddings=512` ≪ 262144 |
+| llama.cpp | `MODEL_UNAVAILABLE` | `llama-cli`/`llama-bench` present, but no GGUF with context ≥ P on host |
+| vLLM / SGLang | `SERVER_UNAVAILABLE` | no prefix-caching server reachable (127.0.0.1:8000 / :30000) |
+
+Two honest facts fall out, neither visible in the modeled table:
+
+1. **The blocker on this host is the missing long-context checkpoint, not memory.** The
+   KV cache is 14.0 GiB at P=262144, 28.0 GiB at 524288, and 56.0 GiB at 1048576 — all of
+   which **fit** this host's 253.6 GiB RAM (`kv_fits_host_ram: true`). A real 256K–1M
+   validation is gated on a checkpoint and a backend that *admit* the context length, not
+   on this host's memory.
+2. **The skip is recorded, never extrapolated.** `ttft_ms` / `prefill_ms` stay `null` for
+   a skipped path; the modeled dollars and tokens-saved live only in the pscale table
+   above. Re-run the probe on a host *with* a qualifying path — an in-kernel checkpoint
+   whose context ≥ P, a long-context GGUF for llama.cpp, or a running vLLM/SGLang
+   prefix-cache server — and the corresponding row flips to `measured` with the wall-clock
+   fields filled. The probe embeds only stable host facts (no wall-clock timestamp), so a
+   re-run on the same host reproduces the artifact byte-for-byte.
 
 ### Alignment with real model / live FAK runs
 
@@ -219,8 +256,12 @@ keeps the old single-P run. `-prefixes smoke,small,medium,long,big` expands to
 
 The limitations are now explicit GitHub issues rather than hidden caveats:
 
-- #104 — validate the 256K-1M prefix-scale points with real long-context model
-  wall-clock, KV memory, and failure ceilings.
+- #104 / #431 — validate the 256K-1M prefix-scale points with real long-context model
+  wall-clock, KV memory, and failure ceilings. **Fail/skip half landed (#431):**
+  `tools/fanout_longctx_probe.py` records a structured per-path ceiling instead of
+  extrapolating the modeled curve (artifacts under `experiments/fanout/pscale/`, see the
+  measured-path probe subsection in §1). **Open:** a host with a checkpoint/backend that
+  admits a 256K+ context, to flip a row from `skipped` to `measured` wall-clock.
 - #105 — add tuned shared-prefix serving baselines for vLLM/SGLang/llama.cpp so this
   remains an honest reuse-vs-reprefill claim, not an unproven vs-engine claim.
 - #106 — align fanbench cost curves with real task success and the live `fak agent`
