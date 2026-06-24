@@ -174,9 +174,12 @@ confirmed it, which is why detection is reported as non-load-bearing.
 > ~100% evadable and FP-prone — so the load-bearing guarantee is the capability floor +
 > containment, not detection (which `normgate` improves but does not make a guarantee).
 
-What is STILL deferred (labeled, not hidden): no zero-copy KV co-residence with an
-*external* serving engine (copy-CAS backend behind the frozen `Ref` seam; the in-kernel
-model owns its own KV); **GPU device compute is now witnessed real** (`cuda` on RTX 4070,
+What is STILL deferred (labeled, not hidden): no LIVE transport mapping an *external*
+serving engine's KV region into the now-shipped cross-engine co-residence arena (the
+zero-copy SEAM itself landed in #448 — `internal/xenginekv`, opt-in `FAK_XENGINE_KV`, the
+region-addressed Evict/Clone quarantine behind the frozen `Ref`/`RegionBackend` seam; what
+remains is the CUDA-IPC / shared-memory import of a real vLLM/SGLang KV region, a backend
+plug-in behind that ABI with no further change); **GPU device compute is now witnessed real** (`cuda` on RTX 4070,
 `vulkan` on a Radeon RX 7600 — argmax-exact, cosine 1.0; `GPU.md`, `VULKAN-AMD-RESULTS.md`),
 while token-per-watt / metrics-service KV telemetry stays SIMULATED (no power meter on the
 box); rung-2/3 probes, decode-time logit-mask, SNAPSHOT/ROLLBACK wrap, and the
