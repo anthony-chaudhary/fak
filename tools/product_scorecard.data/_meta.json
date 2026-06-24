@@ -1,0 +1,17 @@
+{
+  "schema": "fak-product-scorecard.data/1",
+  "meta": {
+    "as_of": "2026-06-24",
+    "fak_version": "v0.30.0",
+    "title": "fak product-concept scorecard — durable / real / useful-today",
+    "_doc": "Each row is one fak product concept (a CLAIMS.md '##' section), scored on whether a PERSON can pick it up and use it today. The scorecard cross-checks every row against the real tree (the CLAIMS tag the concept carries, whether the first command's cmd dir + verb resolve, whether the witness/entry paths exist), so the score cannot be gamed by editing data alone. Regenerate the doc: python tools/product_scorecard.py --markdown-dir docs/product-scorecard"
+  },
+  "categories": [
+    {"id": "security", "name": "Security floor", "group": "trust"},
+    {"id": "performance", "name": "Performance / reuse", "group": "throughput"},
+    {"id": "memory", "name": "Agent memory", "group": "trust"},
+    {"id": "model", "name": "In-kernel model", "group": "throughput"},
+    {"id": "tooling", "name": "Agent tooling", "group": "trust"},
+    {"id": "platform", "name": "Platform / adoption", "group": "adoption"}
+  ]
+}

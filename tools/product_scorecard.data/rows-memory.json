@@ -1,0 +1,76 @@
+{
+  "rows": [
+    {
+      "id": "recall-core-dump",
+      "concept": "Session core-dump (recall) — durable quarantine across the process boundary",
+      "category": "memory",
+      "surface": "subsystem",
+      "what_you_get": "A finished session persists as a durable core image (a page table over a content-addressed swap device), reloadable in a fresh process where a sealed page stays sealed — quarantine that survives a restart.",
+      "audience": "developer",
+      "maturity": "shipped",
+      "claims_section": "Session core-dump + context debugger",
+      "claims_tag": "SHIPPED",
+      "first_command": "",
+      "first_command_verb": "",
+      "needs_gpu": false,
+      "needs_key": false,
+      "witness_path": "internal/recall",
+      "witness": "TestQuarantineSurvivesTheSessionBoundary, TestClearIsNecessaryButNotSufficient",
+      "entry_doc": "docs/benchmarks/RECALL-RESULTS.md",
+      "verdict": "real-not-easy",
+      "gaps": [
+        "The durable core-image format/library is consumed by `fak debug`/cdb; it is not itself a one-command surface",
+        "Inherits the ~100% evadable + FP-prone detection ceiling (surfaced, not hidden)"
+      ],
+      "durability_note": "Every blob is integrity-checked against its digest address on load (a tampered swap device fails closed); a Clear() alone cannot launder poison."
+    },
+    {
+      "id": "cdb",
+      "concept": "Context debugger (cdb) over a real session transcript",
+      "category": "memory",
+      "surface": "product",
+      "what_you_get": "Point it at a real Claude Code transcript and inspect it like a core dump — Info/Backtrace/Examine/WorkingSet/Grep over the pages, driven through the same shipped admission gate.",
+      "audience": "developer",
+      "maturity": "shipped",
+      "claims_section": "Session core-dump + context debugger",
+      "claims_tag": "SHIPPED",
+      "first_command": "go run ./cmd/fak debug --session your-transcript.jsonl",
+      "first_command_verb": "debug",
+      "needs_gpu": false,
+      "needs_key": false,
+      "witness_path": "internal/cdb",
+      "witness": "internal/cdb tests; demand-paged a real 2.8 MB session to a 18 KB page table over a 1.2 MB swap (66x)",
+      "entry_doc": "docs/cli-reference.md",
+      "verdict": "durable-product",
+      "gaps": [
+        "Needs a session transcript to inspect (a real .jsonl path); a pure consumer of recall",
+        "Surfaces the gate's decision durably but does not improve the decision (inherits its FP ceiling)"
+      ],
+      "durability_note": "Registers nothing with the ABI (a pure consumer); content preserved byte-faithfully; the working set is a small resident slice paged in through the gate."
+    },
+    {
+      "id": "durability-gate",
+      "concept": "S7 write-time durability gate (context is not memory)",
+      "category": "memory",
+      "surface": "subsystem",
+      "what_you_get": "A cheap lexical classifier tags a benign result turn/session/durable, and a promotion gate keeps only durable-classed facts in the persisted image — an ephemeral observation no longer silently becomes a persistent bias.",
+      "audience": "researcher",
+      "maturity": "shipped",
+      "claims_section": "S7 write-time durability gate",
+      "claims_tag": "SHIPPED",
+      "first_command": "",
+      "first_command_verb": "",
+      "needs_gpu": false,
+      "needs_key": false,
+      "witness_path": "internal/recall",
+      "witness": "go test ./internal/recall (TestDurabilityPromotionGateBite: 3pm->turn->refused / prefers-afternoon->durable->promoted)",
+      "entry_doc": "docs/cli-reference.md",
+      "verdict": "real-not-easy",
+      "gaps": [
+        "Rung-1 lexical classifier only; rungs 2/3 (bitemporal as-of read, engine TTL) are STUB (#501/#502)",
+        "Closes the BENIGN over-promotion arm of memory-poisoning; durable-framed poison still classifies durable (the adversarial arm is the trust gate's job)"
+      ],
+      "durability_note": "Rides the additive Meta map so the frozen ABI does not move; the default PromotionWarn posture is non-behavior-changing (stamps + counts, still persists) until an operator opts into Enforce."
+    }
+  ]
+}

@@ -1,0 +1,123 @@
+{
+  "rows": [
+    {
+      "id": "one-static-binary",
+      "concept": "One static Go binary (the whole governed surface)",
+      "category": "platform",
+      "surface": "product",
+      "what_you_get": "A single dependency-free Go binary (no Python, no CUDA, no go.sum) that you `go build` and run — the gateway, policy gate, quarantine, audit log, and metrics all in one process.",
+      "audience": "platform",
+      "maturity": "shipped",
+      "claims_section": "The product",
+      "claims_tag": "SHIPPED",
+      "first_command": "go build ./cmd/fak",
+      "first_command_verb": "",
+      "needs_gpu": false,
+      "needs_key": false,
+      "witness_path": "go.mod",
+      "witness": "go build ./... exit 0; cross-platform CI (ubuntu/macos/windows); zero go.sum",
+      "entry_doc": "GETTING-STARTED.md",
+      "verdict": "durable-product",
+      "gaps": [
+        "Optional -tags vulkan/cuda backends add GPU dependencies (off by default)",
+        "Production serving (continuous batching, paged attention) still fronts an external engine"
+      ],
+      "durability_note": "CI builds + tests across three OSes on every push; the zero-dependency claim is structural (no go.sum entries in the default build)."
+    },
+    {
+      "id": "governed-gateway",
+      "concept": "Governed gateway (fak serve)",
+      "category": "platform",
+      "surface": "product",
+      "what_you_get": "Front any OpenAI-compatible model server with one command; every tool call the model proposes is denied / repaired / quarantined before your agent runs it, with /metrics and /healthz.",
+      "audience": "platform",
+      "maturity": "shipped",
+      "claims_section": "Gateway",
+      "claims_tag": "SHIPPED",
+      "first_command": "go run ./cmd/fak serve --addr 127.0.0.1:8080 --base-url http://localhost:11434/v1 --model qwen2.5:1.5b",
+      "first_command_verb": "serve",
+      "needs_gpu": false,
+      "needs_key": true,
+      "witness_path": "internal/gateway",
+      "witness": "internal/gateway tests; TestServedResultArmsResultSideStack; v0.2.1 adversarial hardening",
+      "entry_doc": "GETTING-STARTED.md",
+      "verdict": "usable-today",
+      "gaps": [
+        "Needs an upstream model server (ollama / vLLM / a provider) running; the offline feel is the no-server boundary (fak agent --offline / serve --stdio)",
+        "stream:true SSE is synthesized from the finished adjudicated turn, not true token-by-token streaming"
+      ],
+      "durability_note": "Gateway tests run on every commit; the wire client never supplies a Ref, so the IFC/secret/self-modify rungs stay armed on proxied calls."
+    },
+    {
+      "id": "mcp-server",
+      "concept": "MCP server (fak serve --stdio)",
+      "category": "platform",
+      "surface": "product",
+      "what_you_get": "Expose the kernel's verdict as MCP tools (fak_adjudicate, fak_admit, ...) over stdio so Claude Code or any MCP client can ask the kernel before it runs a tool — offline, no upstream model needed.",
+      "audience": "platform",
+      "maturity": "shipped",
+      "claims_section": "Gateway",
+      "claims_tag": "SHIPPED",
+      "first_command": "go run ./cmd/fak serve --stdio",
+      "first_command_verb": "serve",
+      "needs_gpu": false,
+      "needs_key": false,
+      "witness_path": "internal/gateway",
+      "witness": "internal/gateway tests; MCP spec-conformance + v0.2.1 hardening; examples/mcp/.mcp.json",
+      "entry_doc": "docs/cli-reference.md",
+      "verdict": "durable-product",
+      "gaps": [
+        "OpenAI-wire MCP bridging is unit-tested but has no captured end-to-end transcript"
+      ],
+      "durability_note": "The /mcp HTTP route and the stdio path exercise the same in-process kernel boundary tested on every build."
+    },
+    {
+      "id": "claude-code-passthrough",
+      "concept": "Claude Code passthrough (fak guard -- claude)",
+      "category": "platform",
+      "surface": "product",
+      "what_you_get": "One command wraps a real Claude Code session with the capability floor armed — your own key and prompt-cache breakpoints pass through untouched, and you get a verdict roll-up on exit.",
+      "audience": "platform",
+      "maturity": "shipped",
+      "claims_section": "Gateway",
+      "claims_tag": "SHIPPED",
+      "first_command": "go run ./cmd/fak guard -- claude",
+      "first_command_verb": "guard",
+      "needs_gpu": false,
+      "needs_key": true,
+      "witness_path": "cmd/fak",
+      "witness": "TestGuardDefaultPolicyDeniesDangerAllowsBenign, TestGuardEnvVar, TestFormatAuditSummary",
+      "entry_doc": "docs/integrations/claude.md",
+      "verdict": "usable-today",
+      "gaps": [
+        "Needs the claude CLI + an Anthropic key; the offline equivalent is `guard --dump-policy`",
+        "KV poison-eviction is a no-op on passthrough (the model lives upstream, no local KV to drop)"
+      ],
+      "durability_note": "The exit audit reads the same /metrics counters, so it cannot overstate the protection; the embedded floor works from any directory."
+    },
+    {
+      "id": "rsi-ship-gate",
+      "concept": "RSI ship-gate (stewards + keep-or-revert loop)",
+      "category": "platform",
+      "surface": "benchmark",
+      "what_you_get": "A runnable loop that evaluates a code candidate in an isolated worktree, measures a KPI, runs the suite, and KEEPS it only on a non-forgeable keep-bit (metric gain AND suite-green AND truth-clean).",
+      "audience": "developer",
+      "maturity": "shipped",
+      "claims_section": "Stewards + RSI ship-gate",
+      "claims_tag": "SHIPPED",
+      "first_command": "go run ./cmd/rsiloop",
+      "first_command_verb": "rsiloop",
+      "needs_gpu": false,
+      "needs_key": false,
+      "witness_path": "internal/rsiloop",
+      "witness": "internal/rsiloop tests (keep/revert/escalate/breaker-reset); internal/shipgate Evaluate/Gate",
+      "entry_doc": "docs/rsi-loop.md",
+      "verdict": "usable-today",
+      "gaps": [
+        "The demo KPI is a deterministic LRU hit-rate; a real subsystem optimization plugs in via a custom Proposer/Measurer",
+        "Suite-green defaults to go build+vet (a Windows-safe proxy); the full test suite is WSL-only"
+      ],
+      "durability_note": "The keep-bit is non-forgeable (witness + metrics); the loop never mutates main without an explicit gated land step; the journal is append-only."
+    }
+  ]
+}

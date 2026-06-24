@@ -1,0 +1,149 @@
+{
+  "rows": [
+    {
+      "id": "capability-floor",
+      "concept": "Default-deny capability floor",
+      "category": "security",
+      "surface": "product",
+      "what_you_get": "A reviewable JSON policy that declares which tools your agent may call; everything else is refused by structure, not by a model guess.",
+      "audience": "developer",
+      "maturity": "shipped",
+      "claims_section": "The product",
+      "claims_tag": "SHIPPED",
+      "first_command": "go run ./cmd/fak policy --dump",
+      "first_command_verb": "policy",
+      "needs_gpu": false,
+      "needs_key": false,
+      "witness_path": "internal/policy",
+      "witness": "TestRoundTrip, TestLoadedPolicyIsLoadBearing, TestUnknownDenyReasonRejected",
+      "entry_doc": "POLICY.md",
+      "verdict": "durable-product",
+      "gaps": [
+        "Arg-value deny rules are a best-effort regex blocklist with no guarantee; keep irreversible tools off the allow-list rather than leaning on argument matching",
+        "State-dependent git laws (OFF_TRUNK, MERGE_HEAD) are decided by a stateful prefilter outside the manifest"
+      ],
+      "durability_note": "Manifest is version-tagged; unknown fields/reasons/versions are a fatal load error (fail-loud). The loaded policy drives the real adjudication fold in tests, so the floor cannot silently go more-permissive."
+    },
+    {
+      "id": "adjudicator",
+      "concept": "In-process adjudicator (the DOS reference monitor)",
+      "category": "security",
+      "surface": "product",
+      "what_you_get": "A one-shot oracle that tells you ALLOW/DENY for any tool call against a policy, with a structured refusal reason from a closed vocabulary — no model in the loop.",
+      "audience": "platform",
+      "maturity": "shipped",
+      "claims_section": "Adjudication",
+      "claims_tag": "SHIPPED",
+      "first_command": "go run ./cmd/fak preflight --policy examples/customer-support-readonly-policy.json --tool refund_payment --args \"{}\"",
+      "first_command_verb": "preflight",
+      "needs_gpu": false,
+      "needs_key": false,
+      "witness_path": "internal/adjudicator",
+      "witness": "TestFoldDefaultDenyEmptyPolicy; closed 12-reason vocabulary + deny-as-value disposition",
+      "entry_doc": "docs/cli-reference.md",
+      "verdict": "durable-product",
+      "gaps": [
+        "The 12-reason vocabulary is closed; adding a reason is a kernel change, not a config edit",
+        "No per-reason refusal-density metric is exposed by default"
+      ],
+      "durability_note": "Default-deny on empty policy is load-bearing and witnessed; the fold is deterministic and tested at every adjudicator rank."
+    },
+    {
+      "id": "result-quarantine",
+      "concept": "Write-time result quarantine (context-MMU)",
+      "category": "security",
+      "surface": "product",
+      "what_you_get": "Run an agent turn and watch a poisoned tool result get held out of the model's context — the injection never reaches the model, and the task still completes.",
+      "audience": "developer",
+      "maturity": "shipped",
+      "claims_section": "Context-MMU",
+      "claims_tag": "SHIPPED",
+      "first_command": "go run ./cmd/fak agent --offline",
+      "first_command_verb": "agent",
+      "needs_gpu": false,
+      "needs_key": false,
+      "witness_path": "internal/ctxmmu",
+      "witness": "ctxmmu admit tests + testdata/poison.json; page-in gated on a witness Clear()",
+      "entry_doc": "docs/cli-reference.md",
+      "verdict": "durable-product",
+      "gaps": [
+        "The detector is ~100% evadable by design and FP-prone on real corpora; the structural page-out (not the detector) is the moat",
+        "Inbound results are re-screened only at the persist boundary, not continuously mid-session"
+      ],
+      "durability_note": "Quarantine survives the process boundary (recall) and a Clear() alone cannot launder poison — a fresh content re-screen is required on page-in."
+    },
+    {
+      "id": "normgate",
+      "concept": "Normalize-and-rescan admission driver",
+      "category": "security",
+      "surface": "subsystem",
+      "what_you_get": "A deterministic, model-free screen in front of the context-MMU that strips unicode tricks and decodes base64/hex so an attacker cannot smuggle a secret past the regex floor by re-encoding it.",
+      "audience": "developer",
+      "maturity": "shipped",
+      "claims_section": "Context-MMU",
+      "claims_tag": "SHIPPED",
+      "first_command": "",
+      "first_command_verb": "",
+      "needs_gpu": false,
+      "needs_key": false,
+      "witness_path": "internal/normgate",
+      "witness": "internal/normgate tests (6); cmd/ctxbench -chain measures 0->20/24 evasions caught",
+      "entry_doc": "docs/cli-reference.md",
+      "verdict": "real-not-easy",
+      "gaps": [
+        "4 of 24 evasions remain (pure-semantic paraphrase needs a classifier/IFC seam)",
+        "Enabled by one blank-import / FAK_WIRE_SCREEN, not a standalone surface a person runs on their own data"
+      ],
+      "durability_note": "Deterministic, model-free, stdlib-only; demonstrated by cmd/ctxbench -chain on a real red-team battery. It activates inside the live agent/serve path, so its product surface is the agent, not itself."
+    },
+    {
+      "id": "ifc-plan-cfi",
+      "concept": "Information-flow control + plan-CFI + effect-verifying witness gate",
+      "category": "security",
+      "surface": "subsystem",
+      "what_you_get": "The kernel stops believing the model: tainted data is sink-gated, a plan-CFI rung can require approval, and a 'ship' claim is refused unless corroborated by git evidence the agent did not author.",
+      "audience": "platform",
+      "maturity": "shipped",
+      "claims_section": "Security substrate",
+      "claims_tag": "SHIPPED",
+      "first_command": "",
+      "first_command_verb": "",
+      "needs_gpu": false,
+      "needs_key": false,
+      "witness_path": "internal/ifc",
+      "witness": "go test ./internal/ifc ./internal/plancfi ./internal/witness; TestDevAgentDefaultPath drives the real chain",
+      "entry_doc": "docs/cli-reference.md",
+      "verdict": "real-not-easy",
+      "gaps": [
+        "The IFC ledger is per-trace; cross-trace taint flow is not modeled",
+        "Activating it at full power needs operator policy + witness wiring; there is no one-command product surface",
+        "The fine-tuned syscall/adjudication model that would consume the LabelRow corpus is not trained"
+      ],
+      "durability_note": "Taint is stamped on the Ref at the call boundary (kernel-authored, not model-supplied); the witness gate fails closed when a claim is unwitnessed."
+    },
+    {
+      "id": "wirescreen",
+      "concept": "Local-model-on-the-wire screen (semantic + PII redaction + phash dedup)",
+      "category": "security",
+      "surface": "subsystem",
+      "what_you_get": "An additive, default-inert screen consulted after the regex floor that can quarantine a semantic injection, redact PII before bytes leave the box (with byte-exact restore), and collapse duplicate screenshots.",
+      "audience": "developer",
+      "maturity": "shipped",
+      "claims_section": "In-kernel model",
+      "claims_tag": "SHIPPED",
+      "first_command": "",
+      "first_command_verb": "",
+      "needs_gpu": false,
+      "needs_key": false,
+      "witness_path": "internal/wirescreen",
+      "witness": "internal/wirescreen tests (20+); TestDefaultInertRegistersNoABIScreen; TestABIGoldenFreeze",
+      "entry_doc": "docs/cli-reference.md",
+      "verdict": "real-not-easy",
+      "gaps": [
+        "Default-inert (FAK_WIRE_SCREEN); the model-backed arm is build-tag gated and its latency is unmeasured, so it stays default-off",
+        "Byte removal reaches the wire only on the non-passthrough re-marshal path; the flagship Anthropic passthrough sends raw bytes until #555 lands"
+      ],
+      "durability_note": "Deterministic heuristic floor is the shipped reference; the redactor pins the original in CAS so a wrong proposal costs one page-fault, never a lost fact."
+    }
+  ]
+}

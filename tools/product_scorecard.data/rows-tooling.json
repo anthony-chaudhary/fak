@@ -1,0 +1,148 @@
+{
+  "rows": [
+    {
+      "id": "preflight-ladder",
+      "concept": "Pre-flight ladder (static parse + schema validation)",
+      "category": "tooling",
+      "surface": "product",
+      "what_you_get": "A cheap, deterministic check that refuses a malformed tool call at the boundary — static parse first, then JSON-Schema validation, cheapest-first, before anything fires.",
+      "audience": "developer",
+      "maturity": "shipped",
+      "claims_section": "Pre-flight ladder + grammar rung",
+      "claims_tag": "SHIPPED",
+      "first_command": "go run ./cmd/fak preflight --tool search_kb --args \"{}\"",
+      "first_command_verb": "preflight",
+      "needs_gpu": false,
+      "needs_key": false,
+      "witness_path": "internal/preflight",
+      "witness": "internal/preflight tests (units 47-51): rung-0 static parse + rung-1 schema check",
+      "entry_doc": "docs/cli-reference.md",
+      "verdict": "durable-product",
+      "gaps": [
+        "Rung-2 dry-run and rung-3 sandbox probes are STUB (not built in v0.1)",
+        "Decode-time grammar-constrained generation requires owning the decode loop (deferred)"
+      ],
+      "durability_note": "Rung-0/rung-1 are in-process stdlib parsing/JSON-Schema validation with zero external deps, tested on every commit."
+    },
+    {
+      "id": "grammar-repair",
+      "concept": "Grammar rung (positional->named auto-repair, in-syscall)",
+      "category": "tooling",
+      "surface": "subsystem",
+      "what_you_get": "An in-process, model-free transform that repairs an arity-matched positional tool call into a named one without a model turn; unrepairable calls are denied with MISROUTE.",
+      "audience": "developer",
+      "maturity": "shipped",
+      "claims_section": "Pre-flight ladder + grammar rung",
+      "claims_tag": "SHIPPED",
+      "first_command": "",
+      "first_command_verb": "",
+      "needs_gpu": false,
+      "needs_key": false,
+      "witness_path": "internal/grammar",
+      "witness": "internal/grammar tests (units 52-57): positional repair, content-addressed grammar dedup",
+      "entry_doc": "docs/cli-reference.md",
+      "verdict": "real-not-easy",
+      "gaps": [
+        "A repair rung inside preflight, not a standalone surface a person runs directly",
+        "Static grammar table only; unrepairable calls do not auto-learn a new grammar"
+      ],
+      "durability_note": "Deterministic, in-process, stdlib-only; content-addressed dedup avoids duplicate repair overhead."
+    },
+    {
+      "id": "answer-shape",
+      "concept": "Answer-shape degeneration/verbosity witness",
+      "category": "tooling",
+      "surface": "product",
+      "what_you_get": "A pipeline gate that grades the SHAPE of any text (repetition, repeated-line blocks, short-period tiling) against tunable thresholds and exits 1 when it is degenerate — catch a looping model in CI.",
+      "audience": "developer",
+      "maturity": "shipped",
+      "claims_section": "Answer-shape",
+      "claims_tag": "SHIPPED",
+      "first_command": "echo \"na na na na na na na\" | go run ./cmd/fak answer-shape",
+      "first_command_verb": "answer-shape",
+      "needs_gpu": false,
+      "needs_key": false,
+      "witness_path": "internal/answershape",
+      "witness": "internal/answershape proofs_witness_test.go (determinism, threshold/floor load-bearing, repetition-monotone)",
+      "entry_doc": "docs/cli-reference.md",
+      "verdict": "durable-product",
+      "gaps": [
+        "A deterministic graded floor; a model-backed semantic detector is not built",
+        "Thresholds are tunable but there is no per-domain default calibration"
+      ],
+      "durability_note": "Pure-Go stdlib-only, deterministic cross-platform; cross-checked on every turn against the kernel's own admit verdict."
+    },
+    {
+      "id": "fak-doctor",
+      "concept": "Doctor (operator diagnostic over answer-shape + kernel admit)",
+      "category": "tooling",
+      "surface": "product",
+      "what_you_get": "Pipe text in and get operator recommendations plus the real kernel admit verdict on the same bytes — the fak analogue of `dos doctor`, an off-path read-only health check.",
+      "audience": "platform",
+      "maturity": "shipped",
+      "claims_section": "Answer-shape",
+      "claims_tag": "SHIPPED",
+      "first_command": "echo \"hello world\" | go run ./cmd/fak doctor",
+      "first_command_verb": "doctor",
+      "needs_gpu": false,
+      "needs_key": false,
+      "witness_path": "cmd/fak",
+      "witness": "cmd/fak doctor_test.go (exit-code + JSON contracts, kernel cross-check via ctxmmu.ScreenBytes)",
+      "entry_doc": "docs/cli-reference.md",
+      "verdict": "durable-product",
+      "gaps": [
+        "Read-only, off the live agent loop (advisory only)",
+        "Recommendations are rule-based, not model-scored"
+      ],
+      "durability_note": "No side effects; cross-checks the live kernel admit verdict byte-for-byte; deterministic exit codes for CI gating."
+    },
+    {
+      "id": "codelint-packs",
+      "concept": "Codelint (language packs over agent-written code)",
+      "category": "tooling",
+      "surface": "product",
+      "what_you_get": "Lint code your agent produced for HARD parse/compile errors — Go/JSON in-process, Python/CUDA via their toolchains — and exit 1 on a real error, the write-time code check at the kernel boundary.",
+      "audience": "developer",
+      "maturity": "shipped",
+      "claims_section": "Codelint",
+      "claims_tag": "SHIPPED",
+      "first_command": "go run ./cmd/fak codelint cmd/fak/main.go",
+      "first_command_verb": "codelint",
+      "needs_gpu": false,
+      "needs_key": false,
+      "witness_path": "internal/codelint",
+      "witness": "internal/codelint tests (Go/JSON parse-error, Python real-compile presence-gated)",
+      "entry_doc": "docs/cli-reference.md",
+      "verdict": "durable-product",
+      "gaps": [
+        "Parse/compile tier only, not semantic checks (a deliberate zero-false-positive floor)",
+        "Honors no in-content ignore comment (the model must not switch the gate off)"
+      ],
+      "durability_note": "Go/JSON check in-process via the stdlib (zero external deps); Python/CUDA degrade to no-opinion when absent; off the hot path by construction."
+    },
+    {
+      "id": "codelint-adjudicator",
+      "concept": "Write-scoped codelint verdict in the adjudicator",
+      "category": "tooling",
+      "surface": "subsystem",
+      "what_you_get": "An opt-in policy knob that refuses a whole-file write of unparseable Go/JSON with Deny(MALFORMED) + a bounded file:line:col witness before it lands — the in-kernel dual of the fleet's advisory lint.",
+      "audience": "platform",
+      "maturity": "shipped",
+      "claims_section": "Codelint",
+      "claims_tag": "SHIPPED",
+      "first_command": "",
+      "first_command_verb": "",
+      "needs_gpu": false,
+      "needs_key": false,
+      "witness_path": "internal/adjudicator",
+      "witness": "TestLintWritesDeniesBrokenGoWriteWhenEnabled, TestLintWritesOffByDefaultDoesNotDeny",
+      "entry_doc": "docs/cli-reference.md",
+      "verdict": "real-not-easy",
+      "gaps": [
+        "Off by default (lint_writes manifest field); an existing floor is byte-for-byte unchanged",
+        "Go/JSON only on the decide path (Python/CUDA shell out, so they DEFER fail-open)"
+      ],
+      "durability_note": "The adjudicator does not import codelint (that would put exec on the request path); the off-by-default knob preserves the ABI golden freeze."
+    }
+  ]
+}

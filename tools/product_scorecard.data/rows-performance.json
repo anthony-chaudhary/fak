@@ -1,0 +1,172 @@
+{
+  "rows": [
+    {
+      "id": "tool-vdso",
+      "concept": "Tool vDSO (3-tier local fast path)",
+      "category": "performance",
+      "surface": "subsystem",
+      "what_you_get": "A read-only/idempotent tool call can be served from a content-addressed local cache instead of re-executing, with automatic invalidation when the world changes.",
+      "audience": "developer",
+      "maturity": "shipped",
+      "claims_section": "Tool vDSO",
+      "claims_tag": "SHIPPED",
+      "first_command": "",
+      "first_command_verb": "",
+      "needs_gpu": false,
+      "needs_key": false,
+      "witness_path": "internal/vdso",
+      "witness": "internal/vdso tests (canonicalization, world-version invalidation)",
+      "entry_doc": "docs/cli-reference.md",
+      "verdict": "real-not-easy",
+      "gaps": [
+        "Measured real-world hit-rate on tau2-airline is ~0.7% — far below a useful threshold, so the vDSO is an UPSIDE secondary, never the headline (the hit-rate is SIMULATED in the demo)",
+        "No standalone surface a person runs; it is a mechanism inside the syscall path"
+      ],
+      "durability_note": "The 3-tier mechanism is deterministic and unit-proven; a cache hit equals a fresh call by construction (a write bumps the world-version)."
+    },
+    {
+      "id": "syscall-latency-check",
+      "concept": "Syscall adjudication latency sentinel (fak bench)",
+      "category": "performance",
+      "surface": "benchmark",
+      "what_you_get": "Run a frozen trace through the binary and watch in-process adjudication (~µs) vs a spawned-hook baseline (~ms) — a regression sentinel that the decide path never pays a per-call process boundary.",
+      "audience": "platform",
+      "maturity": "shipped",
+      "claims_section": "The syscall subsystem latency check",
+      "claims_tag": "SHIPPED",
+      "first_command": "go run ./cmd/fak bench --suite tau2-smoke",
+      "first_command_verb": "bench",
+      "needs_gpu": false,
+      "needs_key": false,
+      "witness_path": "cmd/fak",
+      "witness": "report.json gate_primary=='pass'; ~2.4 us in-process vs ~6.9 ms spawned (n=100)",
+      "entry_doc": "docs/cli-reference.md",
+      "verdict": "usable-today",
+      "gaps": [
+        "Deliberately NOT a production-readiness, model-quality, or serving-throughput headline — a subsystem regression sentinel only",
+        "The ratio is platform-specific (the spawn baseline is this machine)"
+      ],
+      "durability_note": "The gate is mechanical (in-process < spawn by construction); the vDSO hit-rate can never turn it red."
+    },
+    {
+      "id": "turn-tax-benchmark",
+      "concept": "Turn-tax benchmark (the round-trip that never fires)",
+      "category": "performance",
+      "surface": "benchmark",
+      "what_you_get": "Replay a real tool-call trace and count the extra error-recovery model round-trips a naive/tuned loop is forced into that the kernel resolves in the same syscall — with the safety floor on a separate axis.",
+      "audience": "researcher",
+      "maturity": "shipped",
+      "claims_section": "Turn-tax benchmark",
+      "claims_tag": "SHIPPED",
+      "first_command": "go run ./cmd/turntaxdemo -print",
+      "first_command_verb": "turntaxdemo",
+      "needs_gpu": false,
+      "needs_key": false,
+      "witness_path": "internal/turnbench",
+      "witness": "internal/turnbench tests incl. TestRun_HappyPathSavesNothing (anti-inflation control)",
+      "entry_doc": "docs/cli-reference.md",
+      "verdict": "usable-today",
+      "gaps": [
+        "The replayed trace is a cache-favorable slice; do not extrapolate the extra-turn count as a general agent speedup",
+        "The baseline turn cost is modeled; the fak side is live kernel counters"
+      ],
+      "durability_note": "The fak side is live kernel events (k.Syscall counters), not modeled; a clean control saves exactly 0 (anti-inflation guard)."
+    },
+    {
+      "id": "fanout-benchmark",
+      "concept": "Fan-out benchmark (fanbench, N=1..1024 sub-agents)",
+      "category": "performance",
+      "surface": "benchmark",
+      "what_you_get": "Sweep one master goal into N sub-agents and measure the cross-agent tool-result dedup and shared-prefix KV reuse the fan-out buys — the regime no public multi-agent benchmark maps (they top out at 5-7).",
+      "audience": "researcher",
+      "maturity": "shipped",
+      "claims_section": "Fan-out benchmark",
+      "claims_tag": "SHIPPED",
+      "first_command": "go run ./cmd/fanbench -profile research",
+      "first_command_verb": "fanbench",
+      "needs_gpu": false,
+      "needs_key": false,
+      "witness_path": "cmd/fanbench",
+      "witness": "TestFanoutNoShareZeroUplift, TestFanoutSingleAgentNoUplift, TestPrefixReuseFanoutWitness",
+      "entry_doc": "docs/benchmarks/FANOUT-BENCH-RESULTS.md",
+      "verdict": "usable-today",
+      "gaps": [
+        "The token-multiplier / tax-clawed-back values are a transparent SIMULATED cost model, reported apart from the measured dedup halves",
+        "N=1 is a net loss; the win is vs a stack that re-sends the prefix per sub-agent, NOT vs a tuned shared-prefix engine"
+      ],
+      "durability_note": "The measured cross-agent dedup is a real shared-vs-isolated path swap; the (N-1)*prefix geometry is exact, proven bit-identical."
+    },
+    {
+      "id": "longctx-bench",
+      "concept": "Ultra-long-context work floor (longctxbench, >100k tokens)",
+      "category": "performance",
+      "surface": "benchmark",
+      "what_you_get": "Compute the exact, contention-free reread-elimination work floor for the >100k-token regime as closed-form arithmetic from the session shape — no GPU, no live model required.",
+      "audience": "researcher",
+      "maturity": "shipped",
+      "claims_section": "Ultra-long-context work floor",
+      "claims_tag": "SHIPPED",
+      "first_command": "go run ./cmd/longctxbench -ladder",
+      "first_command_verb": "longctxbench",
+      "needs_gpu": false,
+      "needs_key": false,
+      "witness_path": "internal/turnbench",
+      "witness": "TestLongContextTokenFloorMatchesSessionbench, TestLongContextAntiInflation, TestPrefillWorkQuadraticDominates",
+      "entry_doc": "docs/cli-reference.md",
+      "verdict": "usable-today",
+      "gaps": [
+        "The absolute WALL-CLOCK validation at >100k is SIMULATED (intractable on CPU; awaits a resident-GPU bench node, #524) — only the arithmetic floor is shipped",
+        "Decode-batching bandwidth win is excluded to isolate reread-only"
+      ],
+      "durability_note": "The token floor is byte-identical to sessionbench's prefillTokens (cross-validation); the FLOP floor counts the prefill quadratic exactly — both deterministic and model-independent."
+    },
+    {
+      "id": "prefill-kv-reuse",
+      "concept": "Shared-prefix KV reuse (prefill once, clone bit-identically)",
+      "category": "performance",
+      "surface": "subsystem",
+      "what_you_get": "The kernel prefills a shared prompt prefix once and clones the KV bit-identically into every agent, so a read-heavy fleet does the shared setup work one time, not per agent per turn.",
+      "audience": "researcher",
+      "maturity": "shipped",
+      "claims_section": "Fan-out benchmark",
+      "claims_tag": "SHIPPED",
+      "first_command": "",
+      "first_command_verb": "",
+      "needs_gpu": false,
+      "needs_key": false,
+      "witness_path": "internal/model",
+      "witness": "TestPrefixReuseFanoutWitness, NewBatchFromPrefix clones bit-identical to an independent full prefill",
+      "entry_doc": "docs/benchmarks/FANOUT-BENCH-RESULTS.md",
+      "verdict": "real-not-easy",
+      "gaps": [
+        "The fleet-scale benefit depends on read-heavy shared-context workloads; a ~1% write rate can flip it net-negative",
+        "Cross-engine KV share (vLLM/SGLang) is a seam, not shipped"
+      ],
+      "durability_note": "The bit-identical clone is tested against a reference full-prefill; the (N-1)*prefix geometry is exact, model-independent arithmetic."
+    },
+    {
+      "id": "engine-openai-client",
+      "concept": "OpenAI-compatible engine client (record/replay + mock)",
+      "category": "performance",
+      "surface": "subsystem",
+      "what_you_get": "A base-url-swappable OpenAI-compatible client with bounded timeout/backoff, cassette record/replay for deterministic offline runs, and a deterministic mock engine.",
+      "audience": "developer",
+      "maturity": "shipped",
+      "claims_section": "Engine",
+      "claims_tag": "SHIPPED",
+      "first_command": "",
+      "first_command_verb": "",
+      "needs_gpu": false,
+      "needs_key": false,
+      "witness_path": "internal/engine",
+      "witness": "engine tests (units 39-45); deterministic mock + cassette replay",
+      "entry_doc": "docs/cli-reference.md",
+      "verdict": "real-not-easy",
+      "gaps": [
+        "metrics-service scrape / KV-residency / token-per-watt are SIMULATED telemetry (no watt source on the box)",
+        "A library the gateway/agent consume, not a standalone surface"
+      ],
+      "durability_note": "Cassette replay makes offline runs deterministic and CI-stable; a live run carries a real transcript hash XOR an explicit unverified flag."
+    }
+  ]
+}
