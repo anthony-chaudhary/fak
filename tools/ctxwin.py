@@ -17,10 +17,12 @@ operator who wants nothing touched and the operator who wants a 30k stack trace 
   - `--profile conservative` lossless + recoverable only (noise + exact-dedup + stale reads);
                              NO windowing, so no unique current content is ever truncated.
   - `--profile balanced`     the default — low-risk tiers + bounded windowing auto-tuned to 2x.
-  - `--profile aggressive`   small head-only windows + collapse error-shaped results to their
-                             first line (the message), dropping the stack/stderr body.
-  - `--profile hyper`        collapse a 30k error result to a one-line marker ("[…tool error
-                             — ~7500 tok elided]"), tiny per-tool budgets. Lossy BY CHOICE.
+  - `--profile aggressive`   push to 3x with a lower floor + head-only windows, and collapse
+                             error-shaped results to their first line (drop the stack/stderr).
+  - `--profile hyper`        push to 4x with the lowest floor; collapse a 30k error result to a
+                             one-line marker ("[…tool error — ~7500 tok elided]"). Lossy BY CHOICE.
+  The presets are a MONOTONIC dial — each reduces at least as hard as the one before it (higher
+  target + lower floor + the lossy error tier switching on), never less.
   - Fine-grained overrides (compose with any profile): `--error-collapse off|head|oneline`,
     `--per-tool Bash=200 --per-tool TodoWrite=off` (a per-tool token budget, or `off`/`none`
     to EXEMPT a tool from all reduction), `--no-stale`, `--no-noise`.
@@ -452,20 +454,27 @@ class Profile:
 def _exempt_map():
     return {t: None for t in DEFAULT_EXEMPT_TOOLS}
 
+# The presets are a MONOTONIC dial: each one reduces at least as hard as the one before it.
+# That ordering is by construction — every step raises the auto-tune target AND lowers the
+# amputation floor, so a higher tier can always window below where a lower one stops, and the
+# lossy error tier only switches ON as you climb. (A fixed per-item budget would break the
+# monotonicity — a corpus can need a budget below the fixed one to even hit 2x — so the
+# aggressive tiers auto-tune to a higher target instead, honoring the no-fabrication floor.)
 PROFILES = {
     # off: nothing runs -> every result verbatim, ratio 1.0 (the "feature disabled" choice).
     "off": lambda: Profile("off", noise=False, stale=False, dedup=False, window=False),
     # conservative: lossless + recoverable only; NO windowing of unique current content.
     "conservative": lambda: Profile("conservative", window=False),
-    # balanced: today's default — low-risk tiers + bounded windowing auto-tuned to 2x.
+    # balanced: the default — low-risk tiers + bounded windowing auto-tuned to 2x.
     "balanced": lambda: Profile("balanced", target=2.0),
-    # aggressive: small head-only windows + collapse errors to their first line (the message).
-    "aggressive": lambda: Profile("aggressive", budget=500, target=3.0, min_budget=128,
+    # aggressive: push to 3x with a lower floor + head-only windows, and collapse errors to
+    # their first line (the message). Strictly >= balanced (higher target, lower floor).
+    "aggressive": lambda: Profile("aggressive", target=3.0, min_budget=128,
                                   head_frac=1.0, error_collapse="head", per_tool=_exempt_map()),
-    # hyper: collapse a 30k error to a one-line marker; tiny per-tool budgets. Lossy by choice.
-    "hyper": lambda: Profile("hyper", budget=200, target=4.0, min_budget=48, head_frac=1.0,
-                             error_collapse="oneline",
-                             per_tool={**_exempt_map(), "Bash": 120, "Read": 300, "Grep": 120}),
+    # hyper: push to 4x with the lowest floor; collapse a 30k error to a one-line marker.
+    # Lossy by choice. Strictly >= aggressive. (Add per-tool caps with --per-tool if wanted.)
+    "hyper": lambda: Profile("hyper", target=4.0, min_budget=48, head_frac=1.0,
+                             error_collapse="oneline", per_tool=_exempt_map()),
 }
 
 def make_profile(name):
@@ -1093,6 +1102,29 @@ def runselfcheck():
     ok = (r_ex["ratio"] == 1.0 and r_ex["removed_tok"] == 0
           and r_tight["removed_tok"] > r_def["removed_tok"])
     print(f"  per-tool           {'PASS' if ok else 'FAIL'}  exempt_removed={r_ex['removed_tok']} tight>{r_def['removed_tok']}={r_tight['removed_tok']}")
+    fails += not ok
+
+    # 14: MONOTONIC DIAL — each profile must reduce at least as hard as the one before it, on a
+    #     reducible corpus (windowable reads + errors + stale + dup). off <= conservative <=
+    #     balanced <= aggressive <= hyper. This guards against a future preset edit (e.g. a fixed
+    #     budget looser than balanced's tuned one) silently inverting the "how aggressive" dial.
+    fm = _seq(
+        [_mk("result", "Read", 8000, salt=f"rd{i}", path=f"/rd{i}") for i in range(8)] +
+        [_mk("result", "Bash", 8000, salt=f"e{i} Error: boom", is_error=True) for i in range(3)] +
+        [_mk("result", "Read", 8000, salt="st", path="/st", stale=True),
+         _mk("result", "Edit", 100, salt="ed", path="/st")] +
+        [_mk("result", "Grep", 8000, salt="dup"), _mk("result", "Grep", 8000, salt="dup")] +
+        [_mk("text", "", 60)])
+    def _prof_ratio(name):
+        p = make_profile(name)
+        if not p.window:
+            return reduce_window(fm, 0, profile=p)["ratio"] or 1.0
+        if p.budget is None:
+            return autotune(fm, p.target, profile=p)[0]["ratio"] or 1.0
+        return reduce_window(fm, p.budget, profile=p)["ratio"] or 1.0
+    ratios = [_prof_ratio(n) for n in ("off", "conservative", "balanced", "aggressive", "hyper")]
+    ok = all(ratios[i] <= ratios[i + 1] + 1e-9 for i in range(4))
+    print(f"  monotonic-dial     {'PASS' if ok else 'FAIL'}  off..hyper ratios = {[round(x,3) for x in ratios]}")
     fails += not ok
 
     # invariants
