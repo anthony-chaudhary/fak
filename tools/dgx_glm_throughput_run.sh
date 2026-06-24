@@ -56,10 +56,37 @@ if ! bash internal/compute/build_cuda.sh build >> "$LOG" 2>&1; then
   printf '%s' '{"schema":"glm-throughput/1","error":"BUILD_FAIL"}' > "$JSONF"; emit 96; exit 96
 fi
 echo "[cuda] OK build" >> "$LOG"
+
+# CGO env for `go run -tags cuda`: derive the SAME resolved -I/-L/-rpath set that
+# internal/compute/build_cuda.sh uses (it discovers whichever include/lib64/targets dirs
+# actually exist, and pins CC/CXX). Hand-rolling a single -L$CUDA_HOME/lib64 was the prior
+# bug — on a layout without lib64 (or where nvcc lives under targets/) the link silently
+# missed -lfakcuda/-lcudart and glmdsatput started WITHOUT the cuda backend (exit 2,
+# "not registered"). Mirror build_cuda.sh exactly so the throughput binary links like the
+# witness tests do.
 PKG="$PWD/internal/compute"
-export CGO_ENABLED=1 CGO_CFLAGS="-I$CUDA_HOME/include"
-export CGO_LDFLAGS="-L$PKG -L$CUDA_HOME/lib64 -Wl,-rpath,$CUDA_HOME/lib64"
-export LD_LIBRARY_PATH="$CUDA_HOME/lib64:${LD_LIBRARY_PATH:-}"
+INC=""
+for d in "$CUDA_HOME/include" "$CUDA_HOME/targets/x86_64-linux/include"; do
+  [ -d "$d" ] && INC="$INC -I$d"
+done
+LIB="-L$PKG"; RPATH=""; LDPATH=""
+[ -d /usr/lib/wsl/lib ] && { RPATH="-Wl,-rpath,/usr/lib/wsl/lib"; LDPATH="/usr/lib/wsl/lib"; }
+for d in "$CUDA_HOME/lib64" "$CUDA_HOME/lib" "$CUDA_HOME/targets/x86_64-linux/lib"; do
+  if [ -d "$d" ]; then LIB="$LIB -L$d"; RPATH="${RPATH:+$RPATH }-Wl,-rpath,$d"; LDPATH="${LDPATH:+$LDPATH:}$d"; fi
+done
+export CGO_ENABLED=1
+export CC="${CC:-/usr/bin/gcc}" CXX="${CXX:-/usr/bin/g++}"
+export CGO_CFLAGS="$INC"
+export CGO_LDFLAGS="$LIB $RPATH"
+export LD_LIBRARY_PATH="${LDPATH:+$LDPATH:}${LD_LIBRARY_PATH:-}"
+echo "[cuda] CGO_LDFLAGS=$CGO_LDFLAGS" >> "$LOG"
+# Build the binary ONCE (not go run per config) so a link failure surfaces here, loudly,
+# before the sweep — and each config is a fast exec, not a recompile.
+if ! go build -tags cuda -o /tmp/fakgpu/glmdsatput ./cmd/glmdsatput >> "$LOG" 2>&1; then
+  echo "=== glmdsatput cuda BUILD/LINK FAILED (see above) ===" >> "$LOG"
+  printf '%s' '{"schema":"glm-throughput/1","error":"GLMDSATPUT_LINK_FAIL"}' > "$JSONF"; emit 95; exit 95
+fi
+echo "[cuda] OK glmdsatput binary" >> "$LOG"
 
 # The SWEEP ("all of it"): vary the dimensions that move the native per-token cost curve —
 # depth (layers), width (hidden/inter), and DSA selection size (index-topk). Each row is one
@@ -76,10 +103,10 @@ SWEEP=(
 for row in "${SWEEP[@]}"; do
   read -r L H HE I TK <<< "$row"
   echo "=== glmdsatput -json layers=$L hidden=$H heads=$HE inter=$I topk=$TK ===" >> "$LOG"
-  go run -tags cuda ./cmd/glmdsatput -backend cuda -json \
+  /tmp/fakgpu/glmdsatput -backend cuda -json \
     -layers "$L" -hidden "$H" -heads "$HE" -inter "$I" -index-topk "$TK" \
     -decode-prompt 512 -decode-steps 64 -decode-reps 5 >> "$LOG" 2>&1 \
-    || echo "=== run FAILED layers=$L hidden=$H (continuing) ===" >> "$LOG"
+    || echo "=== run FAILED layers=$L hidden=$H rc=$? (continuing) ===" >> "$LOG"
 done
 
 NRUNS=$(grep -c "GLMTPUT_JSON" "$LOG" || true)
