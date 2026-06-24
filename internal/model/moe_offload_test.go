@@ -234,3 +234,54 @@ func TestGLMDsaCPUOffloadHybridOverBackend(t *testing.T) {
 	}
 	t.Logf("GLM-DSA --n-cpu-moe hybrid on backend %q: experts host-offloaded (off the device), router+attention on device; argmax-exact, max|Δ|=%.3e vs all-host", recOff.Name(), d)
 }
+
+// TestGLMDsaCPUOffloadRoutesIndexSelection witnesses that the learned-indexer SCORE + top-k SELECTION
+// reaches the DEVICE through the --n-cpu-moe split (splitKernel.indexSelect), not just through the plain
+// all-device backendKernel. isExpertWeight keeps the index PROJECTIONS on the device under offload, so
+// the selection compute they feed must run there too; without the splitKernel forwarder the hybrid would
+// silently keep the indexer host-resident while every other DSA op ran on the kernel. A DECODE step
+// (where glmDsaIndexStep runs — Prefill uses the host-only whole-sequence index helper) over an
+// offload-backed recording session must increase DSAIndexSelect calls and stay argmax-exact vs all-host.
+func TestGLMDsaCPUOffloadRoutesIndexSelection(t *testing.T) {
+	path, cfg := writeTinyGLMDsaSafetensorsFixture(t, "F32", true, false, true /*withMoE*/, true /*withSharedExperts*/)
+	m, err := LoadSafetensors(path, cfg)
+	if err != nil {
+		t.Fatalf("LoadSafetensors: %v", err)
+	}
+	prompt := []int{3, 17, 5, 23}
+	const next = 11 // the token decoded after the prompt — this is where glmDsaIndexStep runs
+
+	rec := newRecordingBackend(compute.Default())
+	if _, ok := compute.Backend(rec).(compute.DSAIndexBackend); !ok {
+		t.Fatalf("recordingBackend over %q is not a DSAIndexBackend — the split's device side could not route index selection", rec.Name())
+	}
+	sOff := m.NewBackendSession(rec)
+	sOff.CPUOffloadExperts = true // drives the splitKernel path, not the plain backendKernel
+	sOff.Prefill(prompt)
+	callsBefore, _ := rec.index()
+	lOff := sOff.Step(next)
+
+	calls, keys := rec.index()
+	if calls == callsBefore {
+		t.Fatalf("GLM-DSA index selection never reached the backend through the --n-cpu-moe split during decode (splitKernel did not forward indexSelect — still host-resident)")
+	}
+	if keys == 0 {
+		t.Fatalf("GLM-DSA index selection reached the split backend but scored 0 keys (empty routing)")
+	}
+
+	sCPU := m.NewSession()
+	sCPU.Prefill(prompt)
+	lCPU := sCPU.Step(next)
+	if len(lCPU) != cfg.VocabSize || len(lOff) != cfg.VocabSize {
+		t.Fatalf("logits shape cpu=%d off=%d want vocab=%d", len(lCPU), len(lOff), cfg.VocabSize)
+	}
+	if a, ac := glmDsaArgmax(lOff), glmDsaArgmax(lCPU); a != ac {
+		t.Fatalf("GLM-DSA offload decode (incl. index selection through the split) argmax %d != CPU argmax %d (selection flipped a key)", a, ac)
+	}
+	d, at := maxAbsDiff(lCPU, lOff)
+	if d > 1e-3 {
+		t.Fatalf("GLM-DSA offload decode max|Δ|=%.3e at %d (> 1e-3 f32-order floor) — split index-selection routing bug", d, at)
+	}
+	t.Logf("GLM-DSA index selection through --n-cpu-moe split on %q: %d DSAIndexSelect calls over %d scored keys during decode; argmax-exact, max|Δ|=%.3e vs all-host",
+		rec.Name(), calls-callsBefore, keys, d)
+}

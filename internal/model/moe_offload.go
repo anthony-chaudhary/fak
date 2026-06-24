@@ -59,6 +59,23 @@ func (k splitKernel) sparseAttend(q, selK, selV []float32, nSel, nH, qkHead, vHe
 	return nil, false
 }
 
+// indexSelect forwards GLM-DSA's learned-indexer score + top-k SELECTION to the DEVICE side, the
+// symmetric partner of sparseAttend above: isExpertWeight keeps the learned-index PROJECTIONS on the
+// device under a `--n-cpu-moe` split (only the expert bulk goes host-resident), so the selection
+// COMPUTE they feed belongs on the device too — otherwise the offload hybrid would silently keep the
+// indexer host-resident while every other DSA op runs on the kernel. glmDsaIndexStep type-asserts the
+// active matKernel for dsaIndexKernel; routing through here keeps k_dsa_index_score + k_dsa_index_topk
+// reachable through the split. When the device kernel does not advertise DSAIndexBackend (the
+// no-backend degenerate split where device==host==residentKernel), this returns ok=false and the
+// caller keeps the host f64 score+top-k loop — which is what keeps the no-backend split selection-exact
+// with the plain host forward.
+func (k splitKernel) indexSelect(indexQ, indexK, weights []float32, nKeys, nH, indexDim, queryPos, topK int, scale float32) ([]int, bool) {
+	if dk, ok := k.device.(dsaIndexKernel); ok {
+		return dk.indexSelect(indexQ, indexK, weights, nKeys, nH, indexDim, queryPos, topK, scale)
+	}
+	return nil, false
+}
+
 // isExpertWeight is the default CPU-offload predicate: it selects the MoE expert and shared-expert
 // projection weights — the parameter bulk a `--n-cpu-moe` split sends to host RAM — and nothing else.
 // It deliberately does NOT match the router (mlp.gate.weight), the attention/MLA projections, the

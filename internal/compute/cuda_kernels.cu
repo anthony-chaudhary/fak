@@ -678,7 +678,8 @@ __global__ void k_dsa_index_topk(const double *dScores, int nKeys, int queryPos,
                                  int *dSel, int *dCount) {
   __shared__ double vbest[256];
   __shared__ int ibest[256];
-  __shared__ char taken[4096]; // nKeys per decode step stays well under this; guarded below.
+  __shared__ char taken[4096]; // == DSA_TOPK_MAX_KEYS; the host wrapper declines nKeys past it, so
+                               // every key the top-k sees here is maskable (no un-masked re-select tail).
   int nValid = (queryPos + 1 < nKeys) ? queryPos + 1 : nKeys;
   for (int i = threadIdx.x; i < nKeys && i < 4096; i += blockDim.x) taken[i] = 0;
   __syncthreads();

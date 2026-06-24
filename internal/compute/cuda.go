@@ -822,7 +822,10 @@ func (c *cudaBackend) DSAIndexSelect(indexQ, indexK, weights Tensor, nKeys, nH, 
 		&out[0]))
 	atomic.AddUint64(&c.fenceGen, 1) // the index list crossed host-ward — same fence as Argmax
 	if n < 0 {
-		n = 0
+		// The device DECLINED (nKeys past the shared-mem top-k cap): return an empty selection so the
+		// model's glmDsaValidSelection rejects it and keeps the host f64 score+top-k loop — the device
+		// path can only ever match the host selection, never silently degrade it on a long window.
+		return nil
 	}
 	if n > topK {
 		n = topK
