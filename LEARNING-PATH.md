@@ -805,12 +805,14 @@ go test ./internal/codelint/ -count=1 -timeout 120s -run 'TestGoPackReportsParse
 - Explain why a broken cache turns a linear loop into a quadratic one in latency and dollars
 - Show why caching matters far more at 239:1 input:output (agents) than at 2:1 (chat)
 - Name the failure modes (eviction during tool latency, head-mutation, injected timestamps, unstable JSON) and the zero-infra fix
+- Mark why the high public cache number is just the frozen-trajectory ceiling, and the three axes that bend it toward 0% — flexibility, per-turn tool density, and cross-agent fan-out (and why fan-out is a fleet metric, not one agent's hit %)
 
-**Read:** [`docs/explainers/kv-cache-agentic-context.md`](docs/explainers/kv-cache-agentic-context.md)
+**Read:** [`docs/explainers/kv-cache-agentic-context.md`](docs/explainers/kv-cache-agentic-context.md), [`docs/explainers/frozen-trajectory-cache-cliff.md`](docs/explainers/frozen-trajectory-cache-cliff.md)
 
 **Lab:**
 ```bash
 Take a prompt with a per-request UUID at the head; move it to the tail and re-run the LCP analysis to reproduce the 0.3% -> 87% hit-rate jump described in the doc.
+python tools/cache_curve.py compound   # watch the frozen 99% ceiling collapse along the flex + tool-density axes
 ```
 
 **Checkpoint:** Explain why a changed file causes a visible cache miss (recompute) rather than a silently stale answer, and the one condition (result cache keyed on call args alone) under which staleness CAN go silent; give the fix (key on content version).

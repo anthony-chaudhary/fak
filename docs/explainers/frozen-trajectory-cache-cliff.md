@@ -225,12 +225,69 @@ identical at the front of a frozen prompt. That is the
 [agent coherence kernel](../notes/SCALING-LAWS-OF-AGENTS-2026-06-19.md) thesis, and this
 cliff is why it is load-bearing rather than nice-to-have.
 
+## How fak works toward this
+
+The fix is not a better prefix cache; it is the same substrate the
+[regenerable-KV plan](../serving/regenerable-kv-plan.md) already names from a different angle.
+That plan treats the cliff as a *model rollout* — the nine-axis binding tuple invalidates
+every span at once. This note's cliff is the same fragility hit by *trajectory edits* and
+*fan-out* instead. One root underneath both: a prefix cache binds reuse to **byte-position in
+a frozen prompt**. The durable answer binds reuse to **content + identity** — the text is the
+source, the KV is a regenerable artifact — so an edit re-derives only the changed span and a
+fan-out clones the shared prefix once instead of paying it N times.
+
+Map each cliff axis to what is already shipped versus the open build:
+
+| Cliff axis | The frozen cache's failure | fak's answer | Status |
+|---|---|---|---|
+| Flexibility (edit / compact / RSI) | head-mutation invalidates the suffix | suffix-only regen on the live per-turn path (re-prefill only the divergent suffix), plus addressable, bit-exact span eviction (the KV-MMU, `max|Δ|=0`) so an edit removes exactly the touched span — [FAK 404/406](../../LEARNING-PATH.md), [addressable-kv-cache](addressable-kv-cache.md) | **shipped** (per-session, CPU path) |
+| Per-turn tool density | the 20-block / 4-breakpoint budget overruns | RadixAttention prefix tree keyed on token-ids (model-agnostic), on by default — [FAK 405](../../LEARNING-PATH.md) | **shipped** |
+| Cross-agent fan-out | concurrency wall → 0% cross-agent reuse; prefix paid N× | prefill the shared prefix once and clone it bit-identically into every agent (`max|Δ|=0`) — [pay-the-prefix-once](../../visuals/65-pay-the-prefix-once.svg) | **shipped** (this is the fan-out demo's "shared" path) |
+| Durable across rollout / fleet | every binding-axis bump cold-starts the whole fleet | text-as-source regenerable cache; backfill replaces the synchronized cold start | **plan** ([regenerable-KV R1–R8](../serving/regenerable-kv-plan.md)) |
+
+Three of the four axes already have a shipped supply-side answer; the unbuilt part is the
+durable, fleet-shared, regenerable tier — sequenced as R1–R8 in the regenerable-KV plan (give
+`SourceDigest` a consumer → durable text tier → regen-from-text → eager backfill → two-class
+scheduler → cross-regime integrity oracle → fleet quarantine). The honesty fence there
+transfers intact: never serve one regime's KV bytes to another — re-derive.
+
+The near-term step this demonstrator points at is its own: **turn the model into a meter.**
+`cache_curve.py` *predicts* the survival factors; the offline prefix-divergence analysis from
+[FAK 401](../../LEARNING-PATH.md) / [kv-cache-agentic-context](kv-cache-agentic-context.md)
+*measures* the flexibility factor on a real transcript (longest-common-prefix reuse per
+turn), and `session_audit.py` already reads the provider `cache_read` / `cache_creation`
+split. Wiring those into a measured survival-per-axis report makes the cliff falsifiable on a
+live workload and supplies the meters the scaling-laws note asks for (reread rate, legal
+cache-hit rate, residency pressure). That is the concrete next move — and the cache substrate
+it would measure is already the program above.
+
+## Learning points
+
+Three lessons worth carrying past this one doc:
+
+1. **A headline cache number is a workload-shape claim, not a caching claim.** "90%+ cache
+   hit" silently asserts *single, linear, append-only, sparse*. Quote the number with the
+   shape, or it misleads the instant the shape changes — which is the direction every agent
+   system is moving.
+2. **Flexibility and prefix caching are antagonistic by construction.** So the answer to the
+   cliff is not "tune the cache harder" but a different binding (content + identity +
+   world-version) — the addressable / regenerable-KV program, which is the *same* substrate a
+   model rollout needs. Two cliffs, one fix.
+3. **Keep fleet-aggregate and single-agent quantities apart, and verify a flattering number
+   adversarially.** An earlier draft of this demonstrator folded the fan-out reuse rate (a
+   fleet metric) into a single agent's cache-hit percentage via an undisclosed constant,
+   fabricating the headline collapse. A four-lens adversarial pass (math · mechanics ·
+   prior-art consistency · red-team) caught it; the fix reports fan-out as its own metric and
+   pins the math with tests so no constant can creep back. The general rule: a demo number
+   that is *more* impressive than the honest model is a defect, not a feature — run the
+   skeptic before you ship it.
+
 ## Reproduce it
 
 ```sh
-python tools/cache_curve.py curves      # frozen ceiling + the 3 decay axes
+python tools/cache_curve.py curves      # frozen ceiling + the 2 single-agent decay axes
 python tools/cache_curve.py fanout      # cross-agent reuse: default vs shared
-python tools/cache_curve.py compound    # the headline collapse
+python tools/cache_curve.py compound    # single-agent collapse, then the fleet fan-out
 python tools/cache_curve.py chart       # the decay, at a glance
 
 # the real measured ceiling on this machine:
