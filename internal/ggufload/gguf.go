@@ -1312,6 +1312,9 @@ func (f *File) Config() (model.Config, error) {
 			return model.Config{}, err
 		}
 	}
+	if arch == "glm_moe_dsa" {
+		applyGLMMoeDsaConfig(f, p, &cfg, ropeDim)
+	}
 	return cfg, nil
 }
 
@@ -1412,6 +1415,137 @@ func applyGemma4Config(f *File, p string, cfg *model.Config) error {
 	return nil
 }
 
+// GLM-5.2 (model_type "glm_moe_dsa") GGUF metadata keys.
+//
+// GLM-5.2's architecture is a Mixture-of-Experts FFN over DeepSeek-style
+// Multi-head Latent Attention (MLA) plus a learned Dynamic Sparse Attention
+// (DSA) indexer. The MoE and MLA metadata mirror llama.cpp's deepseek2.*
+// convention (GLM-DSA attention IS DeepSeek MLA + an indexer), so a real
+// converter is most likely to spell them this way; the indexer scalars are
+// GLM-5.2-specific and have no upstream llama.cpp analogue yet.
+//
+// PROVISIONAL: no real GLM-5.2 GGUF exists on disk to pin these against, and
+// upstream llama.cpp may not yet ship a glm_moe_dsa converter. The spellings
+// are collected here as the single source of truth so the deliberate follow-on
+// — a golden against a REAL GLM-5.2 GGUF header — only has to re-pin this one
+// block. Every key is read relative to the "<arch>." metadata prefix.
+const (
+	glmKeyExpertCount        = "expert_count"
+	glmKeyExpertUsedCount    = "expert_used_count"
+	glmKeyExpertFFNLength    = "expert_feed_forward_length"
+	glmKeyExpertSharedCount  = "expert_shared_count"
+	glmKeyExpertSharedFFNLen = "expert_shared_feed_forward_length"
+	glmKeyLeadingDenseBlocks = "leading_dense_block_count"
+	glmKeyExpertGroupCount   = "expert_group_count"
+	glmKeyExpertGroupUsed    = "expert_group_used_count"
+	glmKeyExpertWeightsScale = "expert_weights_scale"
+	glmKeyExpertWeightsNorm  = "expert_weights_norm"
+
+	glmKeyQLoraRank   = "attention.q_lora_rank"
+	glmKeyKVLoraRank  = "attention.kv_lora_rank"
+	glmKeyQKNopeDim   = "attention.qk_nope_head_dim"
+	glmKeyQKRopeDim   = "attention.qk_rope_head_dim"
+	glmKeyVHeadDim    = "attention.v_head_dim"
+	glmKeyKeyLength   = "attention.key_length"
+	glmKeyValueLength = "attention.value_length"
+
+	glmKeyIndexNHeads  = "index_n_heads"
+	glmKeyIndexHeadDim = "index_head_dim"
+	glmKeyIndexTopK    = "index_topk"
+	glmKeyIndexerTypes = "indexer_types"
+)
+
+// applyGLMMoeDsaConfig derives GLM-5.2's MoE + MLA + DSA-indexer axes from GGUF
+// metadata into the model.Config the generic block already populated. It reads
+// every key only if present, so it never overwrites a generic value with zero:
+// a MoE GLM-5.2 (expert_count>0) and a dense glm_moe_dsa variant (NumExperts==0,
+// the synthetic/pipelinegen form) both load correctly. The result mirrors, field
+// for field, the model.Config the JSON/safetensors loader already produces for
+// the same model (config_test.go TestConfigDerives...), so cfg.isGLMMoeDsa() and
+// cfg.IsMoE() fire and the existing native glm_dsa.go forward consumes it.
+//
+// ropeDim is the already-resolved rope.dimension_count; it is reused as the
+// qk_rope_head_dim fallback under the deepseek2 convention (where the rotary
+// portion of each latent head equals the global rope dimension).
+//
+// Scope (deliberate, per the staged native-753B plan): this is config parsing
+// ONLY. The GGUF MoE/MLA/indexer TENSOR-name mapping (CanonicalTensorNameArch)
+// and the batched-expert splitter are the next two slices; HeadDim semantics for
+// MLA are reconciled when the forward wiring lands.
+func applyGLMMoeDsaConfig(f *File, p string, cfg *model.Config, ropeDim int) {
+	// ---- MoE FFN axis -------------------------------------------------------
+	if v := intValueOrZero(f, p+glmKeyExpertCount); v > 0 {
+		cfg.NumExperts = v
+	}
+	if v := intValueOrZero(f, p+glmKeyExpertUsedCount); v > 0 {
+		cfg.NumExpertsPerTok = v
+	}
+	if v := intValueOrZero(f, p+glmKeyExpertFFNLength); v > 0 {
+		cfg.MoEIntermediateSize = v
+	}
+	if v := intValueOrZero(f, p+glmKeyExpertSharedCount); v > 0 {
+		cfg.NSharedExperts = v
+	}
+	if v := intValueOrZero(f, p+glmKeyExpertSharedFFNLen); v > 0 {
+		cfg.SharedIntermediateSize = v
+	}
+	if v := intValueOrZero(f, p+glmKeyLeadingDenseBlocks); v > 0 {
+		cfg.FirstKDenseReplace = v
+	}
+	if v := intValueOrZero(f, p+glmKeyExpertGroupCount); v > 0 {
+		cfg.NGroup = v
+	}
+	if v := intValueOrZero(f, p+glmKeyExpertGroupUsed); v > 0 {
+		cfg.TopKGroup = v
+	}
+	if v, ok := f.Float64(p + glmKeyExpertWeightsScale); ok {
+		cfg.RoutedScalingFactor = v
+	}
+	if v, ok := f.Bool(p + glmKeyExpertWeightsNorm); ok {
+		cfg.NormTopKProb = v
+	}
+
+	// ---- MLA (DeepSeek latent attention) axis -------------------------------
+	if v := intValueOrZero(f, p+glmKeyQLoraRank); v > 0 {
+		cfg.QLoraRank = v
+	}
+	if v := intValueOrZero(f, p+glmKeyKVLoraRank); v > 0 {
+		cfg.KVLoraRank = v
+	}
+	// qk_rope_head_dim: explicit key, else the resolved rope.dimension_count.
+	cfg.QKRopeHeadDim = intValueOrZero(f, p+glmKeyQKRopeDim)
+	if cfg.QKRopeHeadDim == 0 {
+		cfg.QKRopeHeadDim = ropeDim
+	}
+	// qk_nope_head_dim: explicit key, else attention.key_length - qk_rope_head_dim
+	// (deepseek2 stores n_embd_head_k = nope + rope under attention.key_length).
+	cfg.QKNopeHeadDim = intValueOrZero(f, p+glmKeyQKNopeDim)
+	if cfg.QKNopeHeadDim == 0 {
+		if kl := intValueOrZero(f, p+glmKeyKeyLength); kl > cfg.QKRopeHeadDim {
+			cfg.QKNopeHeadDim = kl - cfg.QKRopeHeadDim
+		}
+	}
+	// v_head_dim: explicit key, else attention.value_length.
+	cfg.VHeadDim = intValueOrZero(f, p+glmKeyVHeadDim)
+	if cfg.VHeadDim == 0 {
+		cfg.VHeadDim = intValueOrZero(f, p+glmKeyValueLength)
+	}
+
+	// ---- DSA learned-indexer axis (GLM-5.2-specific) ------------------------
+	if v := intValueOrZero(f, p+glmKeyIndexNHeads); v > 0 {
+		cfg.IndexNHeads = v
+	}
+	if v := intValueOrZero(f, p+glmKeyIndexHeadDim); v > 0 {
+		cfg.IndexHeadDim = v
+	}
+	if v := intValueOrZero(f, p+glmKeyIndexTopK); v > 0 {
+		cfg.IndexTopK = v
+	}
+	if types, ok := f.StringArray(p + glmKeyIndexerTypes); ok {
+		cfg.IndexerTypes = types
+	}
+}
+
 func intValueOrZero(f *File, key string) int {
 	if v, ok := f.Uint64(key); ok && v <= uint64(math.MaxInt) {
 		return int(v)
@@ -1449,6 +1583,19 @@ func (f *File) Float64(key string) (float64, bool) {
 	default:
 		return 0, false
 	}
+}
+
+// Bool reads a scalar GGUF boolean metadata value (TypeBool, one byte). GLM-5.2
+// encodes expert_weights_norm (the MoE top-k renormalization flag, HF's
+// norm_topk_prob) this way. Returns (false,false) when the key is absent or not
+// a scalar bool.
+func (f *File) Bool(key string) (bool, bool) {
+	v, ok := f.Metadata[key]
+	if !ok || v.Type != TypeBool {
+		return false, false
+	}
+	b, ok := v.Value.(bool)
+	return b, ok
 }
 
 func (f *File) StringArray(key string) ([]string, bool) {
