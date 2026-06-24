@@ -800,17 +800,28 @@ func (s *Server) admitInboundResults(ctx context.Context, messages []agent.Messa
 	return admissions, nil
 }
 
-// evictInKernelPoison drives the in-kernel RadixAttention cache's poison eviction when the
-// chat backend is the in-kernel planner (it implements agent.PoisonEvictor). A proxy/mock
-// planner — or an in-kernel planner with reuse disabled — does not implement the seam, so
-// this is a no-op there. The transcript is rendered with each message's ORIGINAL content so
-// the evicted token path matches what the cache actually prefilled before the verdict.
+// evictInKernelPoison drives the in-kernel poison eviction when the chat backend is the
+// in-kernel planner. It drives TWO complementary seams on the SAME quarantine event, each a
+// no-op on a planner that does not implement it (proxy/mock, or the seam left off):
+//
+//   - agent.PoisonEvictor — drops the reusable RadixAttention PREFIX node along the poisoned
+//     path so a later turn re-prefills instead of replaying the poisoned KV (candidate #14).
+//   - agent.KVSpanEvictor — the model-side KV-quarantine eviction BRIDGE (issue #579): it
+//     rebuilds the transcript's per-message K/V SPANS on a fresh model.Session over the loaded
+//     model and evicts the quarantined result's span via the proven model.KVCache.Evict
+//     (re-RoPE + renumber), so the live session's attention state is bit-identical to a run
+//     that never saw the poison — the flagship guarantee, now fired by a LIVE request and not
+//     only the synthetic-model unit witness. DEFAULT OFF (FAK_INKERNEL_KVMMU opts in).
+//
+// The transcript is rendered with each message's ORIGINAL content so the evicted token path
+// matches what the cache actually prefilled before the verdict paged the bytes out.
 func (s *Server) evictInKernelPoison(messages []agent.Message, origContent []string, quarantinedIdx []int) {
 	if len(quarantinedIdx) == 0 {
 		return
 	}
-	ev, ok := s.planner.(agent.PoisonEvictor)
-	if !ok {
+	prefixEv, hasPrefix := s.planner.(agent.PoisonEvictor)
+	spanEv, hasSpan := s.planner.(agent.KVSpanEvictor)
+	if !hasPrefix && !hasSpan {
 		return
 	}
 	restored := make([]agent.Message, len(messages))
@@ -821,8 +832,18 @@ func (s *Server) evictInKernelPoison(messages []agent.Message, origContent []str
 		}
 	}
 	for _, idx := range quarantinedIdx {
-		if freed := ev.EvictPoisoned(restored, idx); freed > 0 {
-			s.logf("gateway: in-kernel KV prefix evicted on tool-result quarantine msg=%d freed=%dtok", idx, freed)
+		if hasPrefix {
+			if freed := prefixEv.EvictPoisoned(restored, idx); freed > 0 {
+				s.logf("gateway: in-kernel KV prefix evicted on tool-result quarantine msg=%d freed=%dtok", idx, freed)
+			}
+		}
+		if hasSpan {
+			// Default-off bridge: a no-op (0,false) unless FAK_INKERNEL_KVMMU opted it in, so the
+			// served path is unchanged by default. When on, a non-zero freed span proves the live
+			// KVCache.Evict fired; reposition_exact records the bit-exact never-saw invariant.
+			if freed, exact := spanEv.EvictKVSpan(restored, idx); freed > 0 {
+				s.logf("gateway: in-kernel KV span evicted on tool-result quarantine msg=%d freed=%dpos reposition_exact=%v", idx, freed, exact)
+			}
 		}
 	}
 }

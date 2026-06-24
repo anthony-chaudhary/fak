@@ -26,6 +26,7 @@ import (
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/compute"
+	"github.com/anthony-chaudhary/fak/internal/kvmmu"
 	"github.com/anthony-chaudhary/fak/internal/model"
 	"github.com/anthony-chaudhary/fak/internal/radixkv"
 	"github.com/anthony-chaudhary/fak/internal/tokenizer"
@@ -63,6 +64,17 @@ type InKernelPlanner struct {
 	// sessions should set a budget; bounding the deep-chain footprint is tracked.
 	mu   sync.Mutex
 	tree *radixkv.Tree
+
+	// kvSpanEvict gates the model-side KV-quarantine eviction BRIDGE (internal/kvmmu)
+	// on the live serve path (issue #579). When on, a tool-result QUARANTINE drives a
+	// real model.KVCache.Evict of the result's K/V span over a fresh model.Session built
+	// from the loaded model — the bit-exact re-RoPE + renumber the kvmmu witnesses prove,
+	// now fired by a live request instead of only a synthetic-model unit test. DEFAULT OFF
+	// (FAK_INKERNEL_KVMMU=on opts in); off it is an inert no-op, so the served path is
+	// byte-for-byte the pre-bridge behavior. It is independent of and additive to the
+	// radixkv prefix-cache eviction above — that drops a reusable PREFIX node; this evicts
+	// the per-session SPAN and is the model-independent KV-MMU floor.
+	kvSpanEvict bool
 }
 
 // NewInKernelPlanner builds a planner over an already-loaded model + tokenizer.
@@ -86,6 +98,13 @@ func NewInKernelPlanner(m *model.Model, tok *tokenizer.Tokenizer, modelID string
 	// no device backend is wired — the device path keeps its current full-prefill behavior.
 	if os.Getenv("FAK_INKERNEL_RADIX") != "off" && backend == nil {
 		p.tree = radixkv.New(envInt("FAK_INKERNEL_RADIX_BUDGET", 0))
+	}
+	// The model-side KV-quarantine eviction bridge (#579) is OFF unless opted in, the same
+	// default-off / fail-open posture as the ctxplan seam (FAK_CTXPLAN_SEAM). It runs over a
+	// CPU model.Session, so like the radix tree it does not engage a device backend.
+	switch strings.ToLower(strings.TrimSpace(os.Getenv("FAK_INKERNEL_KVMMU"))) {
+	case "on", "1", "true", "yes":
+		p.kvSpanEvict = backend == nil
 	}
 	return p
 }
@@ -306,6 +325,169 @@ func (p *InKernelPlanner) EvictPoisoned(messages []Message, throughIdx int) int 
 		log.Printf("inkernel_chat poison-evict model=%s through_msg=%d freed=%dtok", p.modelID, throughIdx, freed)
 	}
 	return freed
+}
+
+// KVSpanEvictor is the model-side KV-quarantine eviction BRIDGE seam the gateway drives on
+// a tool-result QUARANTINE (issue #579). Where PoisonEvictor drops a reusable radixkv PREFIX
+// node, this enforces the kvmmu bridge: it rebuilds the transcript's per-message K/V spans on
+// a fresh model.Session over the LOADED model and EVICTS the quarantined result's span via the
+// proven model.KVCache.Evict (re-RoPE + renumber), so the session's attention state is
+// bit-identical to a run that never saw the poison. It is implemented by InKernelPlanner and
+// engaged ONLY when FAK_INKERNEL_KVMMU opts in; a proxy/mock planner — or the bridge left off
+// — does not implement it, so the gateway's type-assert simply skips it (fail-open default).
+type KVSpanEvictor interface {
+	// EvictKVSpan rebuilds messages[:throughIdx+1] as labeled per-message K/V segments on a
+	// fresh session over the loaded model, then quarantines (evicts) the segment for
+	// messages[throughIdx] — the quarantined tool result, rendered with its ORIGINAL content.
+	// It returns the number of K/V positions evicted (0 when the bridge is off or nothing
+	// matched) and whether the post-eviction cache is bit-exact to a session that only ever
+	// prefilled the survivor spans (the never-saw invariant the kvmmu witnesses certify).
+	EvictKVSpan(messages []Message, throughIdx int) (freed int, repositionExact bool)
+}
+
+// EvictKVSpan is the live-path KV-MMU bridge (#579): it lowers the transcript through the
+// poisoned message into per-message token spans, prefills them as labeled kvmmu segments over
+// a FRESH model.Session built from the loaded model, and quarantines the poison segment by id —
+// which drives the proven model.KVCache.Evict (re-RoPE + renumber). It then proves the
+// reposition was bit-exact by comparing the post-evict next-token logits against a reference
+// session that only ever prefilled the survivor spans: equal logits == "the cache is identical
+// to never having seen the poison" (the structural, model-independent guarantee — true for any
+// weights, which is why a synthetic checkpoint is a faithful witness of the wiring). It is
+// inert (returns 0,false) unless FAK_INKERNEL_KVMMU opted the bridge in, so the served path is
+// unchanged by default and FAILS OPEN on any encode/cache anomaly.
+func (p *InKernelPlanner) EvictKVSpan(messages []Message, throughIdx int) (freed int, repositionExact bool) {
+	if !p.kvSpanEvict || p.m == nil || p.tok == nil || throughIdx < 0 || throughIdx >= len(messages) {
+		return 0, false
+	}
+	// Lower each message into the incremental token span it adds to the cumulative transcript.
+	// Rendering renderTranscript(messages[:i+1]) and slicing past the previous cumulative length
+	// makes the per-segment spans concatenate to EXACTLY the full transcript token path — so the
+	// poison segment evicts precisely its own span and the survivors renumber correctly.
+	segIDs, poisonSeg, ok := p.lowerSegments(messages, throughIdx)
+	if !ok {
+		return 0, false
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	sess := p.m.NewSession()
+	sess.Quant, sess.Q4K = p.quant, p.q4k
+	// Fail OPEN on a cache whose eviction is formally unsupported (a hybrid Gated-DeltaNet
+	// recurrence: kvmmu's evict would panic KVCache.Evict). The byte-gate quarantine already
+	// paged the result out; the KV-MMU span eviction simply does not engage on such a model
+	// rather than crash the served turn. CanEvict reads the empty fresh cache's verdict, which
+	// is the model's structural capability — independent of contents.
+	if sess.Cache.CanEvict() != nil {
+		return 0, false
+	}
+	bridge := kvmmu.NewWithGate(sess, kvmmu.FoldedGate{})
+	for _, sg := range segIDs {
+		bridge.Append(sg.id, sg.tool, sg.ids)
+	}
+	freed, found := bridge.Quarantine(poisonSeg)
+	if !found || freed == 0 {
+		return 0, false
+	}
+	// Reference: a session that ONLY prefilled the survivor spans. Equal next-token logits
+	// (within the cross-path FMA tolerance, 0 on amd64) prove the evicted cache is the never-saw
+	// cache. This is the bit-exact reposition invariant, witnessed end-to-end on the live path.
+	repositionExact = p.repositionIsExact(sess, segIDs, poisonSeg)
+	log.Printf("inkernel_chat kvmmu-evict model=%s through_msg=%d freed=%dpos reposition_exact=%v",
+		p.modelID, throughIdx, freed, repositionExact)
+	return freed, repositionExact
+}
+
+// kvSegment is one lowered per-message K/V span: its kvmmu segment id (the message index +
+// tool-call id), the tool that produced it, and the incremental token ids it occupies.
+type kvSegment struct {
+	id   string
+	tool string
+	ids  []int
+}
+
+// lowerSegments renders messages[:throughIdx+1] into per-message incremental token spans and
+// returns the ordered segments plus the segment id of the poisoned message (messages[throughIdx]).
+// It fails (ok=false) if any encode errors or any incremental span is empty, so a degenerate
+// tokenization fails OPEN to no eviction rather than evicting the wrong span.
+func (p *InKernelPlanner) lowerSegments(messages []Message, throughIdx int) (segs []kvSegment, poisonID string, ok bool) {
+	prev := 0
+	for i := 0; i <= throughIdx; i++ {
+		cum, err := p.tok.Encode(renderTranscript(messages[:i+1]))
+		if err != nil || len(cum) <= prev {
+			return nil, "", false
+		}
+		span := append([]int(nil), cum[prev:]...)
+		prev = len(cum)
+		id := segIDFor(messages[i], i)
+		segs = append(segs, kvSegment{id: id, tool: segTool(messages[i]), ids: span})
+		if i == throughIdx {
+			poisonID = id
+		}
+	}
+	return segs, poisonID, len(segs) > 0
+}
+
+// repositionIsExact rebuilds a reference session that prefills ONLY the survivor spans (every
+// segment except the poison) and compares the bridge session's post-eviction next-token
+// distribution to the reference's. The evicted cache holds the survivor spans at compacted
+// positions; decoding one step from the same final survivor token on BOTH reads the
+// distribution each would continue from — equal (within the cross-path FMA tolerance) iff the
+// eviction's re-RoPE + renumber left the cache bit-identical to never having seen the poison.
+func (p *InKernelPlanner) repositionIsExact(evicted *model.Session, segs []kvSegment, poisonID string) bool {
+	var refIDs []int
+	for _, sg := range segs {
+		if sg.id == poisonID {
+			continue
+		}
+		refIDs = append(refIDs, sg.ids...)
+	}
+	if len(refIDs) == 0 || evicted.Cache.Len() != len(refIDs) {
+		return false
+	}
+	ref := p.m.NewSession()
+	ref.Quant, ref.Q4K = p.quant, p.q4k
+	ref.Prefill(refIDs)
+	last := refIDs[len(refIDs)-1]
+	return logitsClose(evicted.Step(last), ref.Step(last))
+}
+
+// logitsClose reports whether two next-token logit vectors are equal within the cross-path FMA
+// tolerance (0 on amd64; sub-1e-4 on arches where the gc compiler auto-fuses FMA). It is the
+// same max|Δ| reposition measure internal/model's rung-3 oracle and the kvmmu witnesses use.
+func logitsClose(a, b []float32) bool {
+	if len(a) != len(b) || len(a) == 0 {
+		return false
+	}
+	const tol = 1e-4
+	for i := range a {
+		d := float64(a[i] - b[i])
+		if d < 0 {
+			d = -d
+		}
+		if d > tol {
+			return false
+		}
+	}
+	return true
+}
+
+// segIDFor mints the stable kvmmu segment id for a message at index i: the message index keeps
+// distinct messages distinct, and the tool-call id (when present) ties the span to the result
+// the gateway admitted, so the poison segment is addressable by the same identity the admission
+// ledger carries.
+func segIDFor(m Message, i int) string {
+	if m.ToolCallID != "" {
+		return "m" + strconv.Itoa(i) + ":" + m.ToolCallID
+	}
+	return "m" + strconv.Itoa(i)
+}
+
+// segTool reports the producing tool name for the ledger/reporting (the tool result's Name, or
+// the role for a non-tool message).
+func segTool(m Message) string {
+	if m.Name != "" {
+		return m.Name
+	}
+	return m.Role
 }
 
 // evictPoisonedIDs drops the cached prefix lying along `ids` (a poisoned transcript token
