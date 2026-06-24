@@ -87,7 +87,10 @@ PRE="export PATH=\"$GO_BIN:\$PATH\"; export $TC; cd $REPO"
 
 # --- pinned host key (review: verify against registry, don't blind accept-new) ---
 KH="$(mktemp)"; trap 'rm -f "$KH"' EXIT
-SSH_OPTS=(-i "$SSH_KEY" -p "$SSH_PORT" -o BatchMode=yes -o ConnectTimeout=8 -o UserKnownHostsFile="$KH")
+# ServerAlive* aborts a session whose node went to sleep MID-COMMAND: without it a dead
+# connection hangs on the TCP keepalive default (minutes), freezing a long bench. 8s x 3
+# misses => the ssh gives up in ~24s and the runner can retry the node's next wake window.
+SSH_OPTS=(-i "$SSH_KEY" -p "$SSH_PORT" -o BatchMode=yes -o ConnectTimeout=8 -o ServerAliveInterval=8 -o ServerAliveCountMax=3 -o UserKnownHostsFile="$KH")
 if [ -n "$HOSTKEY" ]; then
   printf '[%s]:%s %s\n%s %s\n' "$IP" "$SSH_PORT" "$HOSTKEY" "$IP" "$HOSTKEY" > "$KH"
   SSH_OPTS+=(-o StrictHostKeyChecking=yes)
