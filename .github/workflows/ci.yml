@@ -312,17 +312,19 @@ jobs:
       # trend. This aggregator does — so "is the repo getting better or worse"
       # is one query. Same two tiers as its siblings:
       #   * the tool's own unit tests are HARD (a real regression suite);
-      #   * the folded aggregate is ADVISORY (it sums the advisory siblings, so
-      #     portfolio-debt is > 0 while the family is retired); surfaced as a
-      #     ::warning:: with the trend vs the pinned baseline. Pure-stdlib Python.
-      - name: scorecard control pane (folds every *-debt + trend; tests HARD, aggregate advisory)
+      #   * the folded aggregate is now a HARD ratchet (`--check`, #587): unlike
+      #     the default exit (green only at ZERO debt), `--check` is GREEN while
+      #     the portfolio holds at-or-below its pinned baseline and RED only when
+      #     debt *regresses* above it (or a scorecard goes unmeasured). The
+      #     pinned baseline (tools/scorecard_baseline.json) carries headroom over
+      #     today's debt, so a clean tree stays green; only a real regression
+      #     reds the trunk. Retire worst-first with the owning scorecard's skill,
+      #     then re-pin (`--pin`). Pure-stdlib Python.
+      - name: scorecard control pane (folds every *-debt + trend; HARD ratchet --check)
         working-directory: ${{ github.workspace }}
         run: |
           python tools/scorecard_control_pane_test.py
-          echo "::group::scorecard-control-pane (advisory; folds the family + trend vs baseline)"
-          python tools/scorecard_control_pane.py \
-            || echo "::warning title=scorecard-debt::portfolio scorecard-debt present (advisory) — python tools/scorecard_control_pane.py; retire worst-first with the owning scorecard's skill, then re-pin the baseline (--pin)"
-          echo "::endgroup::"
+          python tools/scorecard_control_pane.py --check
 
       # Scorecard regression suites (the six that ran in NO gate): the docs / demo-quality
       # / demo-robustness / seo-aeo / repo-hygiene scorecards each run their own *_test.py
