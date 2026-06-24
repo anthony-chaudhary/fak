@@ -159,7 +159,7 @@ no *live* bench reaches, because the naive arm's O(T²) re-prefill is intractabl
 floor is closed-form arithmetic from the session shape and the model geometry (no model, no
 wall-clock), with a token floor identical to `sessionbench`'s `prefillTokens` (its anchor row
 reproduces the **62.0× token floor** in the table above) and an O(L²)-aware FLOP floor. It quantifies
-the §2 regimes directly: a **single >100k session ≈ 10× vs naive** (the turn-tax; B/C ≡ 1, no peer to
+the §2 regimes directly: a **single >100k session ≈ 10× vs naive · ≈ 1× vs a warm cache** (the turn-tax; B/C ≡ 1, no peer to
 share with), a **5-agent fleet each >100k ≈ 40×+ vs naive and ≈ 4× vs a warm cache**, and it proves
 the cross-agent win **B/C rises monotonically with the shared-prefix fraction toward the agent
 count** — why the standing ~2–4× bound (small prefix) and the larger agent-city win are the same law
@@ -350,7 +350,7 @@ It rises from **1** (no shared prefix, nothing to share, the lone-agent case) to
 the **agent count C** (the prefix dominates). At a small 2k prefix it is ~1.3–1.5×; at
 a 100k shared prefix with 40 agents it climbs to **8.4× (FLOP) / 14.9× (token)**. Same
 formula, different prefix fraction. The single-agent case proves it from the other
-side: one agent at 100k gets **~10× vs the naive re-prefill loop but B/C ≡ 1.0** —
+side: one agent at 100k gets **~10× vs the naive re-prefill loop, ≈ 1× vs a warm cache (B/C ≡ 1.0)** —
 there is no peer to share with, so the entire win is *not re-reading its own context
 each turn*, and **zero** of it is cross-agent.
 
