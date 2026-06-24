@@ -12,6 +12,16 @@ form proved too long and litigated its own concessions twice; the split keeps th
 confident and quarantines the retreats into one ledger. Dated redirect stubs preserve any
 URL that was already public.
 
+```mermaid
+flowchart TD
+  Redirect["Dated redirect stub<br/>(preserves a public URL)"] --> Core["Core note:<br/>Expire by Default"]
+  Core --> PriorArt["Companion _prior-art:<br/>Prior art &amp; the gap"]
+  Core --> Topology["Companion _enforcement-topology:<br/>which layer decides"]
+  Core --> Review["Companion _adversarial-review:<br/>the concession ledger"]
+```
+
+*Modular post: a tight core note plus separable companion notes (prefixed `_`), with a dated redirect stub for the already-public URL.*
+
 ## Posts
 
 ### Expire by Default — durability as a write-time enforcement problem (2026-06-20)

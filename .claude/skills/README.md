@@ -7,6 +7,19 @@ read-only helper script beside it. The maintenance skills read `.claude/project.
 for this repo's helper-script wiring — the skill text is universal, the helpers are
 project-supplied.
 
+```mermaid
+flowchart TD
+  Pack["Project skill pack"] --> WF["Workflow / analysis<br/>(no project contract)"]
+  Pack --> MN["Maintenance<br/>(read .claude/project.yaml)"]
+  WF --> Analysis["tail-wag, phased-plan, clean-skill, memory-compact"]
+  MN --> Doc["docs: refresh-readme, appeal-score, curate-cluster"]
+  MN --> Plan["planning / ship: release, issue-triage, plan-audit"]
+  MN --> Quality["code: quality-score"]
+  MN --> Audit["read-only audit: trajectory-audit"]
+```
+
+*The page's two skill families — and, within Maintenance, the surface each skill tends.*
+
 ## Workflow / analysis (no project contract)
 
 | Skill | What it does |

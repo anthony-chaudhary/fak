@@ -11,6 +11,22 @@ honesty ledger ([`CLAIMS.md`](../../CLAIMS.md)); every CLI command was re-verifi
 the live binary. Nothing here is a substitute for the work being good — it's the
 distribution layer on top of work that already survives a skeptic reading the code.
 
+```mermaid
+flowchart TD
+  rule["One rule: lead with the fence<br/>(first comment = the prosecution)"]
+  primary["1. Land the primary first<br/>r/LocalLLaMA + demo + Colab"]
+  hn["2. Show HN, same day or next<br/>syscall-intuition title"]
+  follow["3. Let the rest follow the signal<br/>X thread + Lobsters + creator outreach"]
+  durable["4. Durable surfaces<br/>awesome-harness-engineering + awesome-mcp"]
+  rule --> primary
+  primary --> hn
+  hn --> follow
+  follow --> durable
+```
+
+*The launch sequence from "The sequence that actually works," governed by the one rule above.*
+
+
 ## The one rule that governs all of it
 
 **Lead with the fence — it's the hook, not the caveat.** Every audience targeted here

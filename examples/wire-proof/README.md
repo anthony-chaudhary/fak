@@ -6,6 +6,22 @@ over real HTTP, with **no model, no API key, no GPU, no ollama**. Just the `fak`
 (or a Go toolchain to build it) and the Python standard library. It **runs in a few
 seconds** — no model, no network, and no build at all when a `fak` binary is present.
 
+```mermaid
+flowchart LR
+  V["verify.py"] -->|"starts / tears down"| S["fak serve (offline mock planner)"]
+  V -->|"Check A"| A["POST /v1/chat/completions"]
+  V -->|"Check B"| B["POST /v1/fak/adjudicate"]
+  V -->|"Check C"| C["POST /v1/fak/adjudicate"]
+  A --> AR["verdict inline in a fak block"]
+  B --> BR["refund_payment refused by structure (DENY / POLICY_BLOCK)"]
+  C --> CR["search_kb allowed (not a blanket deny)"]
+  AR --> P["PASS / FAIL, exit 0 / 1"]
+  BR --> P
+  CR --> P
+```
+
+*verify.py drives `fak serve` through the three wire checks (A, B, C) against the capability floor, then reports PASS/FAIL.*
+
 ```bash
 python3 examples/wire-proof/verify.py        # -> PASS / FAIL, exit 0 / 1  (CI-usable)
 ```

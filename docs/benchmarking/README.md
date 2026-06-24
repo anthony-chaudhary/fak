@@ -12,6 +12,27 @@
 
 This index organizes all benchmark-related documentation across the repo.
 
+```mermaid
+flowchart TD
+    AUTH["BENCHMARK-AUTHORITY.md<br/>single source of truth"]
+    READ["How to read these benchmarks<br/>baselines, measured vs modeled"]
+    PRIMARY["Primary Results (measured)<br/>session value, RadixAttention, safety"]
+    SECONDARY["Secondary Results (measured)<br/>fan-out, fleet read-heavy"]
+    METHOD["Methodology<br/>scaling laws, KV cache, production"]
+    INFRA["Benchmark Infrastructure<br/>demorace, core benches, sweeps"]
+    GOV["Governance Process<br/>DOS-centric verification"]
+    REPRO["Contribute / Reproduce<br/>sessionbench, radixbench"]
+    AUTH --> READ
+    AUTH --> PRIMARY
+    AUTH --> SECONDARY
+    AUTH --> METHOD
+    AUTH --> INFRA
+    AUTH --> GOV
+    AUTH --> REPRO
+```
+
+*Every claim in this index traces back to `BENCHMARK-AUTHORITY.md`.*
+
 ---
 
 ## How to read these benchmarks

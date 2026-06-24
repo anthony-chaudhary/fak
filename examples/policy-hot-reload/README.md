@@ -6,6 +6,24 @@ running process swaps the floor under itself — the verdict for the same call
 changes, while the process, its warm vDSO cache, and its IFC taint ledger all
 survive. This example is the runnable proof of that operator loop.
 
+```mermaid
+flowchart LR
+  Op["Operator"]
+  Edit["Edit served file: A to B<br/>(also allow delete_account)"]
+  Chk["fak policy --check<br/>valid"]
+  Reload["POST /v1/fak/policy/reload<br/>reloaded:true"]
+  Srv["fak serve gateway<br/>SetPolicy() — no restart"]
+  Before["Same delete_account call<br/>floor A: DENY (POLICY_BLOCK)"]
+  After["Same delete_account call<br/>floor B: ALLOW"]
+  Keep["Survives the swap:<br/>warm vDSO cache, IFC ledger quarantined,<br/>start_time_unix + PID unchanged"]
+  Op --> Edit --> Chk --> Reload --> Srv
+  Before -.-> Srv
+  Srv --> After
+  Srv --> Keep
+```
+
+*Edit the floor, pre-flight check it, POST the reload — the same call's verdict flips A→B while the process and its state survive.*
+
 It is the deployment-surface companion to [`../../POLICY.md`](../../POLICY.md)
 ("The workflow" → the `fak serve … / curl … /policy/reload` block), which
 describes the motion; this directory *runs* it and asserts each step.

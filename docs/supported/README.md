@@ -8,6 +8,32 @@ description: "The index of fak's supported-things pages: which models, features,
 `fak` is an agent kernel: one Go binary that sits between an AI agent and the tools it
 calls. Two facts decide what it supports.
 
+```text
+            AI agent (harness / framework)
+                        │
+                        ▼
+        ┌───────────────────────────────────┐
+        │     fak — the agent kernel          │
+        │  fronts the wires your stack speaks │
+        │  (OpenAI · Anthropic · Gemini · MCP │
+        │   · xAI); governs, does not generate│
+        └───────────────────────────────────┘
+                        │
+        ┌───────────┬───┴───┬───────────┐
+        ▼           ▼       ▼           ▼
+  ┌─────────┐ ┌─────────┐ ┌──────┐ ┌──────────────┐
+  │ engine  │ │ cloud / │ │ APIs │ │ in-kernel     │
+  │ Ollama· │ │ hosted  │ │wires │ │ reference     │
+  │ vLLM·   │ │ provider│ │· MCP │ │ engine        │
+  │ SGLang· │ │         │ │      │ │ (correctness, │
+  │llama.cpp│ │         │ │      │ │  not a server)│
+  └─────────┘ └─────────┘ └──────┘ └──────────────┘
+   The pages below: Models · Features · Clouds · APIs/MCP ·
+   Harnesses · Serving engines — each grounded in the repo
+   and the sourced compatibility matrix.
+```
+*Index map: the kernel fronts the wires, then each page lists one supported category.*
+
 1. **It fronts the wires your stack already speaks** — OpenAI Chat Completions, Anthropic
    Messages, Gemini `generateContent`, and MCP, plus an xAI upstream. Anything that lets
    you set a base URL drops the gate in front with no code change. So the supported set of

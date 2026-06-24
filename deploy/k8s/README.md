@@ -16,6 +16,17 @@ fenced block. **The [deployment guide](../../docs/fak/deployment-guide.md) is th
 source of truth** for every flag, env var, route, and default — read it for the
 production-readiness checklist before exposing the gateway beyond loopback.
 
+```mermaid
+flowchart LR
+  Client["Client (Bearer key)"] --> Ingress["Ingress / LB (TLS terminates here)"]
+  Ingress --> Svc["Service :80"]
+  Svc --> Dep["Deployment: fak serve pods (proxy mode, hardened)"]
+  Secret["Secret: gateway + provider keys"] -.-> Dep
+  Policy["ConfigMap: policy floor"] -.-> Dep
+  Dep -->|"adjudicate every tool call"| Up["Upstream model: OpenAI / Anthropic / local"]
+  Dep -->|"/healthz only unauth route"| Probe["k8s liveness / readiness probes"]
+```
+
 ## What's here
 
 | File | What it is |

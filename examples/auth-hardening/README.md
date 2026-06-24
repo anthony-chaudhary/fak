@@ -6,6 +6,18 @@ is the runnable proof of the whole auth loop — an authed client succeeds, an
 unauthed client is rejected, **both** header shapes work, and the operator routes
 (`/metrics`, `/v1/fak/*`) inherit the same gate.
 
+```mermaid
+flowchart TD
+    Client["Client request"] --> Route{"Route is /healthz?"}
+    Route -->|"yes"| Open["200 (open readiness probe)"]
+    Route -->|"no (model + operator routes)"| Auth["withAuth gate (gatewayCredential)"]
+    Auth --> Cred{"Valid token?"}
+    Cred -->|"Bearer correct, or x-api-key correct"| Ok["200"]
+    Cred -->|"wrong / missing / bare Authorization"| Deny["401 authentication_error"]
+```
+
+*The auth decision flow: every route but `/healthz` passes the `withAuth` gate, where a valid `Bearer` or `x-api-key` token returns `200` and anything else returns `401`.*
+
 It is the deployment-surface companion to
 [`../../GETTING-STARTED.md`](../../GETTING-STARTED.md) §3 ("Auth" + "Harden it for
 real use"), which describes the flag; this directory *runs* it. (The doc reference

@@ -4,6 +4,38 @@ These files are starter floors for the gateway-first adoption path. They are not
 universal security policies; each one is a reviewable allow-list with a concrete
 deny witness an adopter can run before putting it in front of an agent.
 
+```mermaid
+flowchart LR
+  IDX["Policy manifest examples"]
+
+  subgraph SEC["Template floors (allow-list + deny witness)"]
+    direction TB
+    POL["policy.example.json"]
+    DEV["dev-agent-policy"]
+    CS["customer-support-readonly"]
+    RES["research-agent-policy"]
+    OPS2["devops-dryrun-policy"]
+    FLT["flight-booking-agent-policy"]
+    PHI["healthcare-phi-policy"]
+    SQL["sql-analyst-policy"]
+  end
+
+  subgraph OPS["Runnable lifecycle artifacts"]
+    direction TB
+    ESC["escalation-demo: deny &rarr; route to safe_sink"]
+    RLD["policy-hot-reload: reload in-process"]
+    TR["trace-reset: per-trace IFC clear"]
+  end
+
+  PRE["presets/: curated, round-trip-gated"]
+
+  IDX --> SEC
+  IDX --> OPS
+  IDX --> PRE
+```
+
+*Index map: the runnable policy examples, grouped into security template floors and operational lifecycle artifacts, plus the curated presets pack.*
+
 > **Looking for a vetted starting point?** [`presets/`](presets/README.md) is the
 > **curated, documented, round-trip-gated** preset pack — each manifest carries a
 > README describing what it allows, what it refuses, and the threat it encodes,

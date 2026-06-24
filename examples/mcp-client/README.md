@@ -8,6 +8,22 @@ Python client ([`client.py`](client.py)) that connects to fak, does the
 response shape so you can see exactly what comes back before you wire fak into
 your own (any-language) agent.
 
+```mermaid
+sequenceDiagram
+    participant C as MCP client (client.py)
+    participant K as fak serve (MCP server)
+    C->>K: initialize (offers protocolVersion)
+    K-->>C: negotiated protocolVersion
+    C->>K: tools/list (discovery)
+    K-->>C: six tool schemas
+    C->>K: 5 tool calls (adjudicate, syscall, admit, changes, revoke)
+    K-->>C: SyscallResponse envelope (isError:false, verdict incl. DENY)
+    C->>K: fak_context_change (path with no recall image)
+    K-->>C: JSON-RPC error -32602
+```
+
+*The protocol exchange over stdio (default) or HTTP: handshake, discovery, then all six tools — five returning a deny-as-value `SyscallResponse`, `fak_context_change` returning the error channel.*
+
 > Already use Claude Code / Cursor and just want the one-paste `.mcp.json` setup?
 > That's the sibling [`../mcp`](../mcp/README.md). A CI-grade pass/fail gate that
 > asserts a *verdict* over MCP stdio lives in that same [`../mcp/`](../mcp/README.md) demo.

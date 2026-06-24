@@ -5,6 +5,18 @@ every step that had to be done by hand the first time a node was used (a ~2-hour
 offline node, host-key trust, ssh user/key discovery, go-version mismatch, zsh-vs-bash,
 picking the right checkout, benches silently absent at a commit).
 
+```mermaid
+flowchart LR
+  Laptop["Laptop<br/>bench_node.sh node sub"] --> Reg["Registry<br/>bench_nodes.json (gitignored)"]
+  Reg --> SSH["SSH handshake<br/>BatchMode + pinned host key"]
+  SSH -->|"over Tailscale"| Node["Bench node<br/>go_bin on PATH, GOTOOLCHAIN=auto"]
+  Node --> Run["bash -s remote script<br/>tests / bench (ns/op)"]
+  Run --> Results["bench-runs/sanitized/ts-sub<br/>(gitignored)"]
+  Run --> Lineage["lineage.json<br/>version + date/time + machine"]
+```
+
+*Flow: the laptop resolves the node from the gitignored registry, opens a pinned-host-key SSH handshake over Tailscale, runs the remote script via `bash -s`, and writes gitignored results plus a `lineage.json` witness.*
+
 ## Usage
 
 ```bash

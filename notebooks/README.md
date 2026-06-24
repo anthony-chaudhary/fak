@@ -4,6 +4,23 @@ Lowest-friction way to see the agent kernel work: no local Go toolchain, no clon
 machine, a free GPU on demand. These are a hosted re-skin of [`GETTING-STARTED.md`](../GETTING-STARTED.md)'s
 tier ladder — every command already ships; the notebook just wraps it.
 
+```mermaid
+flowchart LR
+    GEN["tools/gen_notebooks.py<br/>(generates both notebooks)"]
+    QS["fak-quickstart.ipynb<br/>Colab / Kaggle (free T4)"]
+    IK["fak-inkernel.ipynb<br/>Lightning AI / RunPod"]
+    T0["Tier 0<br/>CPU, no GPU"]
+    T1["Tier 1<br/>front a real model on a GPU"]
+    T2["Tier 2<br/>fused in-kernel decode + stable endpoint"]
+    GEN --> QS
+    GEN --> IK
+    QS --> T0
+    T0 --> T1
+    IK --> T2
+```
+
+*The tier ladder and which generated notebook covers each rung.*
+
 | Notebook | Host | Tiers | Status |
 |---|---|---|---|
 | [`fak-quickstart.ipynb`](fak-quickstart.ipynb) | **Google Colab** / Kaggle (free T4) | 0 (CPU) + 1 (front a real model on a GPU) | runnable |

@@ -11,6 +11,26 @@ Read [`00-METHOD.md`](00-METHOD.md) first: it defines the discipline — every m
 **verdict** (`PROVEN` / `REFUTED` / `OPEN` / `SCOPED-OUT`), and a **DOS binding** that grounds
 "the proof shipped" in git evidence rather than an author's say-so.
 
+```text
+How every module earns its verdict (nothing is "PROVEN" by prose):
+
+┌───────────────────────────────────────────────────────────────┐
+│ theorem      a precise claim about what the module computes   │
+│    │                                                          │
+│    ▼                                                          │
+│ proof        the mathematical argument that the claim holds   │
+│    │                                                          │
+│    ▼                                                          │
+│ witness      a deterministic test the toolchain re-runs green │
+│    │                                                          │
+│    ▼                                                          │
+│ verdict      PROVEN · REFUTED · OPEN · SCOPED-OUT             │
+│    │                                                          │
+│    ▼                                                          │
+│ DOS binding  dos commit-audit ties the ship to git evidence   │
+└───────────────────────────────────────────────────────────────┘
+```
+
 This section is the math-correctness companion to
 [`../../SUBSYSTEM-CHECKS.md`](https://github.com/anthony-chaudhary/fak/blob/main/SUBSYSTEM-CHECKS.md): that ledger proves a boundary is
 *alive*; this one proves the *math it computes is correct*, and refuses to call anything

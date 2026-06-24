@@ -11,6 +11,31 @@ a default-deny capability floor before it runs**. Dangerous calls are denied by
 structure, malformed calls are repaired, and poisoned tool results are quarantined out
 of the model's context. Your agent, your model, your prompts — unchanged.
 
+```text
+  Your agent / client          fak serve              Upstream engine
+  (repoint one base URL)     (the gateway)            (serves your tokens)
+
+  ┌────────────────────┐
+  │ Claude Code  ──────┼──┐  Anthropic Messages
+  │  → claude.md       │  │  POST /v1/messages
+  └────────────────────┘  │
+  ┌────────────────────┐  │   ┌───────────────────────┐    ┌──────────────┐
+  │ OpenAI Codex ──────┼──┼──▶│  default-deny          │──▶ │ OpenAI-compat│
+  │  → openai-codex.md │  │   │  capability floor      │    │ (Ollama/vLLM │
+  └────────────────────┘  │   │  ┌──────────────────┐  │    │  /SGLang/    │
+  ┌────────────────────┐  │   │  │ allow · deny ·   │  │    │  llama.cpp)  │
+  │ Cursor (MCP /      │  │   │  │ repair ·         │  │    │  Anthropic / │
+  │  OpenAI proxy) ────┼──┤   │  │ quarantine       │  │    │  Gemini / xAI│
+  │  → cursor.md       │  │   │  └──────────────────┘  │    └──────────────┘
+  └────────────────────┘  │   └───────────────────────┘
+  ┌────────────────────┐  │  OpenAI Chat Completions
+  │ Any MCP client ────┼──┘  POST /v1/chat/completions
+  │  → examples/mcp/   │     MCP: --stdio / POST /mcp
+  └────────────────────┘
+```
+
+*Every client repoints one base URL; the same gate adjudicates each tool call before it reaches the upstream engine. Each guide above is linked under "Which agent do you run?".*
+
 The reason this works for so many agents is one fact: `fak serve` speaks the wires your
 agent already speaks.
 

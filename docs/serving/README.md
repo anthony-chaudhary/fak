@@ -11,6 +11,24 @@ explicitly what is built, what is a seam, and what is still a gap. The reuse ker
 (addressable, bit-exact KV cache + the default-deny capability floor) is the shared
 substrate every track below builds on.
 
+```text
+   The 5 serving plans (design / architecture briefs)
+ ┌────────────┐ ┌────────────┐ ┌────────────┐ ┌──────────┐ ┌──────────┐
+ │ Dual-track │ │ Poly-model │ │  Hardware- │ │Regener-  │ │Multi-    │
+ │  serving   │ │  prefill   │ │  aware KV  │ │able KV   │ │tenant CXL│
+ │ ride+native│ │  sharing   │ │   cache    │ │cache     │ │mem pool  │
+ └─────┬──────┘ └─────┬──────┘ └─────┬──────┘ └────┬─────┘ └────┬─────┘
+       │              │              │             │            │
+       └──────┬───────┴──────┬───────┴──────┬──────┴─────┬──────┘
+              ▼              ▼              ▼            ▼
+   ┌──────────────────────────────────────────────────────────┐
+   │              the shared reuse kernel substrate             │
+   │   addressable, bit-exact KV cache  +  default-deny floor   │
+   └──────────────────────────────────────────────────────────┘
+```
+*Five plans, one shared substrate: each track builds on the addressable,
+bit-exact KV cache and the default-deny capability floor.*
+
 | Plan | What it covers |
 |---|---|
 | [Dual-track serving](dual-track-serving-plan.md) | The authoritative sequencing contract: **ride** best-in-class engines (vLLM, SGLang) *and* grow a **native** in-kernel engine, over one shared, track-neutral spine. |

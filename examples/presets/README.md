@@ -6,6 +6,20 @@ copies, narrows, and witnesses with `fak policy --check` / `fak preflight`
 before putting it in front of an agent. The goal is a *good allow-list* instead
 of a blank one (issue #578).
 
+```mermaid
+flowchart LR
+  A["Adopter"] -->|"copy + narrow"| B["Preset manifest<br/>(fak-policy/v1)"]
+  B -->|"fak policy --check<br/>fak preflight"| C["Witness"]
+  B -.->|"TestPresetsRoundTrip<br/>(can't rot)"| D["Round-trip gate"]
+  C --> E["Capability floor"]
+  D --> E
+  E -->|"unlisted tool"| F["DEFAULT_DENY"]
+  E -->|"shape: gitgate / self-modify / IFC"| G["Structural refusals"]
+  E -->|"arg keywords"| H["deny_regex<br/>(best-effort)"]
+```
+
+*An adopter copies and narrows a preset, witnesses it, and the round-trip gate keeps it from rotting — together producing the capability floor whose refusals are DEFAULT_DENY, structural rungs, and best-effort deny_regex.*
+
 > **What a preset is, and is not.** A preset encodes the **capability floor** —
 > which tool *names* and *argument values* the agent may invoke. It is a
 > permissions floor, not a detection guarantee: it does not make the agent "safe"

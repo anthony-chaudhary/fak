@@ -2,6 +2,25 @@
 
 This directory holds one committed evidence file per `stable/*` tag.
 
+```mermaid
+flowchart LR
+  Rolling["Rolling tag vX.Y.Z<br/>(already shipped commit)"]
+  Candidate["stable.candidate<br/>(soak age + suggested codename)"]
+  Gate["Stable-release gate<br/>(proves substrate healthy)"]
+  Evidence["Evidence file<br/>docs/stable-releases/&lt;codename&gt;.md"]
+  Tag["stable/&lt;codename&gt; tag<br/>(promotes commit, no new artifact)"]
+  Rollback["Rollback<br/>git checkout stable/&lt;codename&gt;"]
+  Rolling --> Candidate
+  Candidate -->|soak window elapsed| Gate
+  Gate -->|freezes gate reading| Evidence
+  Gate --> Tag
+  Evidence -.-> Tag
+  Tag --> Rollback
+```
+
+*Promotion path: a rolling tag becomes a candidate, the gate proves the substrate healthy and freezes that reading into the evidence file, then the `stable/<codename>` tag promotes the same commit as a rollback anchor.*
+
+
 Rolling releases (`vX.Y.Z`) move quickly. Stable releases are sparse rollback
 anchors: a stable codename promotes an existing rolling tag only after the
 stable-release gate records why that tag is known good.

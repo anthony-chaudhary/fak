@@ -8,6 +8,22 @@ proposed tool call through the kernel **before** running it, run a tool *through
 the kernel, or screen a tool result it executed itself — each call adjudicated
 against a reviewable capability floor.
 
+```mermaid
+flowchart LR
+  Agent["Coding agent<br/>(Claude Code / Cursor / MCP client)"]
+  Kernel["fak MCP server<br/>fak serve --stdio"]
+  Tool["Tool"]
+
+  Agent -->|"fak_adjudicate: verdict only, before YOU run it"| Kernel
+  Agent -->|"fak_syscall: adjudicate AND execute"| Kernel
+  Agent -->|"fak_admit: screen a result you ran"| Kernel
+  Kernel -->|"ALLOW / DENY / TRANSFORM / REQUIRE_WITNESS"| Agent
+  Kernel -->|"fak_syscall dispatches"| Tool
+  Tool -->|"admitted result"| Kernel
+```
+
+*The MCP bridge: an agent routes a proposed call through the kernel before running it, runs a tool through the kernel, or screens a result it ran itself.*
+
 ## Prove it first (zero deps, no model/key/GPU)
 
 Before wiring fak into your editor, prove the MCP handshake works from a clean

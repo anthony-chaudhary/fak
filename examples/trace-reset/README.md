@@ -16,6 +16,26 @@ motion; this directory *runs* it and asserts each step. The sibling
 surface on the same served lifecycle — that one swaps the capability *floor*; this
 one clears the *taint ledger*.
 
+```mermaid
+sequenceDiagram
+    participant Op as Operator
+    participant Gw as fak serve gateway
+    participant A as Trace A taint mark
+    participant B as Trace B taint mark
+    participant G as Global kernel.quarantines
+    Op->>A: Observe A: trusted (clean default)
+    Op->>A: Admit untrusted result -> high-water rises: quarantined
+    Op->>B: Admit untrusted result -> quarantined (the neighbour)
+    Op->>G: Record forensic counter (no-rollback baseline)
+    Op->>Gw: POST /v1/fak/trace/reset for A -> reset:true
+    Gw->>A: Mark cleared to baseline: back to trusted
+    Op->>B: Observe B: still quarantined (reset is per-trace)
+    Op->>G: Re-read counter: unchanged (not a rollback)
+    Op->>Gw: POST reset with blank trace_id -> 400 (trace_id is required)
+```
+
+*The 11-step operator loop: trace A's high-water mark rises then resets to trusted, while neighbour trace B and the global forensic counter stay put.*
+
 ## Run it
 
 ```bash

@@ -5,6 +5,28 @@
 > several ways — including **watts per user** and the asymptotic limits (context per cold miss up to
 > **100M tokens**; fleets up to **1 billion agents**). All knobs in the script's `STACK` block.
 
+```mermaid
+flowchart TD
+  W["Waste = N . K . miss . P / rho_pre<br/>(linear in every factor)"]
+  P["Context P<br/>how leaky one agent is"]
+  N["Fleet N<br/>how many leaks you pay for"]
+  F["Frontier: N . miss . P = const<br/>(the product)"]
+  L1["per-run leak<br/>charts 1-2, 7"]
+  L2["watts per user<br/>chart 4"]
+  L3["grid / planetary wall<br/>charts 5-6"]
+  W --> P
+  W --> N
+  P --> F
+  N --> F
+  P --> L1
+  P --> L2
+  N --> L1
+  F --> L3
+```
+
+*The model: waste is linear in N, K, miss, P; the two axes P and N multiply into the frontier, re-expressed across the chart battery as per-run leak, watts/user, and the grid wall.*
+
+
 ## The model (one line)
 
 A two-pass agent loop re-prefills the **entire context `P`** on every cold KV-cache miss; inline keeps

@@ -7,6 +7,21 @@ pass `-temp 0` for **deterministic**, reproducible output (greedy/argmax — the
 gives the same answer). A reply **completes in a few seconds** (model load ~5 s), then
 streams at roughly 15–50 tokens/sec on a laptop CPU.
 
+```mermaid
+flowchart LR
+    You["You: a message"] --> Fmt["ChatML prompt<br/>formatting"]
+    Fmt --> Engine["fak in-kernel<br/>model engine"]
+    Model["Auto-found .gguf<br/>(Q8 weights)"] --> Engine
+    Engine --> Prefill["prefill<br/>(GEMM-bound)"]
+    KV["KV cache<br/>(reuse the suffix)"] -.->|"cache hit"| Prefill
+    Prefill --> Decode["decode<br/>(bandwidth-bound)"]
+    Decode --> KV
+    Decode --> Reply["AI: streamed reply<br/>+ measured per-turn stats"]
+```
+
+*Run flow per the page: your message is ChatML-formatted and run end to end inside fak's in-kernel engine; prefill is GEMM-bound and decode is bandwidth-bound, and a later turn reuses the prior turn straight out of the KV cache.*
+
+
 ## Quick Start
 
 **If you have a .gguf model:**
