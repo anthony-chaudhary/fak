@@ -103,7 +103,7 @@ a build tag. Turning the highest-value ones into surfaces is the next frontier.
 ## What's next
 
 The product-scorecard pass surfaced four next steps that aren't already tracked. Each
-is filed:
+is filed; **#581 is resolved** (see *Resolved* below), leaving three open:
 
 - **[#579](https://github.com/anthony-chaudhary/fak/issues/579)** — wire the model-side
   KV quarantine (evict + planned-elision) into the **live** agent/serve loop. Today the
@@ -113,13 +113,26 @@ is filed:
   syscall/adjudication model from the harvest `LabelRow` corpus. The kernel already
   harvests its own verdicts; nothing consumes them yet. This closes the RSI loop's
   missing edge.
-- **[#581](https://github.com/anthony-chaudhary/fak/issues/581)** — wire RadixAttention
-  prefix-tree KV reuse (77–88% hit rate, inside SGLang's published band) into the
-  `fak serve` mainline, or document why it stays an optional leaf.
 - **[#582](https://github.com/anthony-chaudhary/fak/issues/582)** — generalize the
   product/durability **verdict ladder** itself into a domain-free DOS primitive: an
   evidence-bound readiness score that can't be gamed by editing the claim. The same
   distrust DOS applies to agents, applied to a project's claims about itself.
+
+### Resolved
+
+- **[#581](https://github.com/anthony-chaudhary/fak/issues/581)** — *resolved by the
+  issue's own "or document why it stays an optional leaf" branch.* The RadixAttention
+  prefix-tree KV reuse **is wired into `fak serve`** on the in-kernel model path
+  (`fak serve --gguf …` with no `--base-url`) and is **on by default** since `68b67c6`:
+  `InKernelPlanner` looks up the longest cached KV prefix and re-prefills only the
+  divergent suffix every turn (`internal/agent/inkernel_planner.go`), bit-identical to a
+  full recompute. It stays an optional leaf for the **proxy governed-gateway mainline**
+  (`fak serve --base-url …`): there fak is an adjudication proxy in front of an upstream
+  that **owns** the KV cache, so fak holds no local `model.KVCache` for a radix tree to
+  index — the only prefix-reuse lever in proxy mode is the byte-faithful `cache_control`
+  passthrough (shipped), which lets the *upstream* engine's own prefix cache hit. The
+  device-backend decode path (`--backend`) also bypasses the tree today (CPU-session-only
+  reuse). Front-of-prompt reuse shipped; the separate mid-run KV-quarantine wiring is #579.
 
 ## Regenerate / verify
 

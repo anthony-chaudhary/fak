@@ -115,7 +115,8 @@
       "entry_doc": "ARCHITECTURE.md",
       "verdict": "real-not-easy",
       "gaps": [
-        "Off the default defconfig; an optional leaf, not wired into fak serve mainline",
+        "Wired into the in-kernel serve path (fak serve --gguf, no --base-url) on by default since 68b67c6; stays an optional leaf for the proxy governed-gateway mainline, where fak fronts an upstream that owns the KV (no local model.KVCache to index) — the proxy prefix lever is the byte-faithful cache_control passthrough (shipped)",
+        "Device-backend decode (backend != nil) bypasses the prefix tree; reuse is CPU-session-only today",
         "Measured on synthetic few-shot / multi-turn / tree-of-thought shapes; live production telemetry deferred"
       ],
       "durability_note": "SGLang numbers confirmed verbatim vs the NeurIPS 2024 proceedings; the eviction path is deterministic (no stochastic learner)."
