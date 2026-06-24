@@ -111,97 +111,14 @@ func cmdServe(argv []string) {
 	// The loaded *model.Model is ALSO kept for the gateway chat planner: with a tokenizer
 	// (explicit --tokenizer or the GGUF's embedded one) and no --base-url,
 	// /v1/chat/completions and /v1/messages serve it directly.
-	var (
-		loadProfile   *gateway.ModelLoadProfile
-		inKernelModel *fakmodel.Model
-		inKernelQ4K   bool
-	)
-	if *ggufPath != "" {
-		tLoad := time.Now()
-		switch {
-		case *backendName != "":
-			// A device backend (e.g. CUDA) consumes weights through the compute HAL
-			// Upload path, which today only narrows F32 host data to VRAM (the quantized
-			// H2D / UploadDtype seam is deferred — see internal/compute/cuda.go). The
-			// lean-Q8 and Q4_K loads keep ONLY quantized weights (no F32 manifest entry),
-			// which makes weightHAL panic ("missing tensor"). So when serving on a device
-			// we load the GGUF as F32 — the SAME path cmd/modelbench uses before
-			// NewBackendSession — leaving q8w nil so the HAL takes its proven F32 GEMV.
-			mm, err := ggufload.LoadModel(*ggufPath)
-			must(err)
-			modelengine.Preload(mm)
-			inKernelModel = mm
-			loadNanos := time.Since(tLoad).Nanoseconds()
-			loadProfile = toGatewayLoadProfile(&ggufload.LoadProfile{
-				Mode:       "gguf-f32-device",
-				Source:     *ggufPath,
-				TotalNanos: loadNanos,
-				TotalMS:    float64(loadNanos) / 1e6,
-				Phases:     []ggufload.LoadPhaseStat{{Phase: "f32-load", Calls: 1, Nanos: loadNanos, MS: float64(loadNanos) / 1e6, TimePct: 100}},
-				Bottleneck: "f32-load",
-			})
-			startupPhases = append(startupPhases, gateway.StartupPhase{Name: "model-load", Dur: time.Duration(loadNanos)})
-		case os.Getenv("FAK_Q4K") != "":
-			mm, err := ggufload.LoadModelQ4K(*ggufPath)
-			must(err)
-			modelengine.PreloadQ4K(mm)
-			inKernelModel, inKernelQ4K = mm, true
-			loadNanos := time.Since(tLoad).Nanoseconds()
-			// LoadModelQ4K does not thread a LoadProfiler (the direct-q4 path has no
-			// dequant/re-quant phases to break down), so surface the load as a single
-			// measured phase rather than an empty profile.
-			loadProfile = toGatewayLoadProfile(&ggufload.LoadProfile{
-				Mode:       "gguf-resident-q4k",
-				Source:     *ggufPath,
-				TotalNanos: loadNanos,
-				TotalMS:    float64(loadNanos) / 1e6,
-				Phases:     []ggufload.LoadPhaseStat{{Phase: "q4k-direct-load", Calls: 1, Nanos: loadNanos, MS: float64(loadNanos) / 1e6, TimePct: 100}},
-				Bottleneck: "q4k-direct-load",
-			})
-			startupPhases = append(startupPhases, gateway.StartupPhase{Name: "model-load", Dur: time.Duration(loadNanos)})
-		default:
-			prof := ggufload.NewLoadProfiler()
-			mm, err := ggufload.LoadModelQuantProfile(*ggufPath, prof)
-			must(err)
-			modelengine.Preload(mm)
-			inKernelModel = mm
-			loadNanos := time.Since(tLoad).Nanoseconds()
-			loadProfile = toGatewayLoadProfile(prof.Snapshot("gguf-lean-q8", *ggufPath, loadNanos))
-			startupPhases = append(startupPhases, gateway.StartupPhase{Name: "model-load", Dur: time.Duration(loadNanos)})
-		}
+	inKernelModel, inKernelQ4K, loadProfile, loadPhase := loadServeInKernelModel(*ggufPath, *backendName)
+	if loadPhase.Name != "" {
+		startupPhases = append(startupPhases, loadPhase)
 	}
 
-	// Tokenizer for the in-kernel chat planner. An explicit --tokenizer (dir or file,
-	// matching cmd/fakchat's resolution) takes precedence; otherwise, when --gguf is set,
-	// we fall back to the GGUF's embedded tokenizer below so /v1/chat/completions and
-	// /v1/messages serve real in-kernel chat by default. Only if neither yields a tokenizer
-	// (e.g. an SPM-only checkpoint, or no --gguf) does the gateway use the offline MockPlanner.
-	var inKernelTok *tokenizer.Tokenizer
-	if *tokPath != "" {
-		tokFile := *tokPath
-		if info, err := os.Stat(tokFile); err == nil && info.IsDir() {
-			tokFile = filepath.Join(tokFile, "tokenizer.json")
-		}
-		tok, err := tokenizer.LoadJSON(tokFile)
-		must(err)
-		inKernelTok = tok
+	inKernelTok, tokLoaded := resolveServeTokenizer(*tokPath, *ggufPath)
+	if tokLoaded {
 		startupPhases = append(startupPhases, gateway.StartupPhase{Name: "tokenizer-load", Dur: 0})
-	} else if *ggufPath != "" {
-		// No explicit --tokenizer: fall back to the tokenizer EMBEDDED in the GGUF,
-		// exactly like cmd/simpledemo. Virtually every GGUF carries its full vocab+merges,
-		// so `fak serve --gguf X` (no --base-url) serves real in-kernel chat out of the box
-		// instead of silently dropping /v1/chat/completions to the offline MockPlanner.
-		// The embedded vocab always matches the model, and no separate tokenizer.json or
-		// network fetch is required. If the GGUF embeds no usable BPE tokenizer (e.g. an
-		// SPM-only checkpoint), we leave inKernelTok nil and the gateway keeps its existing
-		// MockPlanner fallback — pass --tokenizer to override.
-		if tok, err := embeddedGGUFTokenizer(*ggufPath); err == nil {
-			inKernelTok = tok
-			startupPhases = append(startupPhases, gateway.StartupPhase{Name: "tokenizer-load", Dur: 0})
-		} else {
-			fmt.Fprintf(os.Stderr, "fak serve: --gguf set without --tokenizer and no embedded BPE tokenizer (%v);\n"+
-				"  /v1/chat/completions will use the offline mock planner. Pass --tokenizer <dir|file> for real chat.\n", err)
-		}
 	}
 
 	apiKey := ""
@@ -311,4 +228,99 @@ func toGatewayLoadProfile(p *ggufload.LoadProfile) *gateway.ModelLoadProfile {
 		})
 	}
 	return out
+}
+
+// loadServeInKernelModel eagerly loads the GGUF weights (when ggufPath is set) BEFORE the
+// listener binds, so the load counts toward time-to-ready and its phase breakdown reaches
+// /metrics rather than being a lazy cost on first request. It returns the resident model
+// (nil if no --gguf), whether the direct-resident-Q4_K path was taken, the load profile for
+// /metrics, and the model-load startup phase (zero Name when no load happened). The path
+// selection mirrors cmd/fakchat: a device --backend forces the F32 load (the compute HAL has
+// no quantized-upload seam yet), FAK_Q4K takes the direct-resident-Q4_K path, and the
+// default is the lean-Q8 round-trip; the Q8 path stays byte-identical when the env is unset.
+func loadServeInKernelModel(ggufPath, backendName string) (inKernelModel *fakmodel.Model, inKernelQ4K bool, loadProfile *gateway.ModelLoadProfile, phase gateway.StartupPhase) {
+	if ggufPath == "" {
+		return nil, false, nil, gateway.StartupPhase{}
+	}
+	tLoad := time.Now()
+	switch {
+	case backendName != "":
+		// A device backend (e.g. CUDA) consumes weights through the compute HAL Upload path,
+		// which today only narrows F32 host data to VRAM (the quantized H2D / UploadDtype seam
+		// is deferred — see internal/compute/cuda.go). The lean-Q8 and Q4_K loads keep ONLY
+		// quantized weights (no F32 manifest entry), which makes weightHAL panic ("missing
+		// tensor"). So when serving on a device we load the GGUF as F32 — the SAME path
+		// cmd/modelbench uses before NewBackendSession — so the HAL takes its proven F32 GEMV.
+		mm, err := ggufload.LoadModel(ggufPath)
+		must(err)
+		modelengine.Preload(mm)
+		loadNanos := time.Since(tLoad).Nanoseconds()
+		profile := toGatewayLoadProfile(&ggufload.LoadProfile{
+			Mode:       "gguf-f32-device",
+			Source:     ggufPath,
+			TotalNanos: loadNanos,
+			TotalMS:    float64(loadNanos) / 1e6,
+			Phases:     []ggufload.LoadPhaseStat{{Phase: "f32-load", Calls: 1, Nanos: loadNanos, MS: float64(loadNanos) / 1e6, TimePct: 100}},
+			Bottleneck: "f32-load",
+		})
+		return mm, false, profile, gateway.StartupPhase{Name: "model-load", Dur: time.Duration(loadNanos)}
+	case os.Getenv("FAK_Q4K") != "":
+		mm, err := ggufload.LoadModelQ4K(ggufPath)
+		must(err)
+		modelengine.PreloadQ4K(mm)
+		loadNanos := time.Since(tLoad).Nanoseconds()
+		// LoadModelQ4K does not thread a LoadProfiler (the direct-q4 path has no
+		// dequant/re-quant phases to break down), so surface the load as a single
+		// measured phase rather than an empty profile.
+		profile := toGatewayLoadProfile(&ggufload.LoadProfile{
+			Mode:       "gguf-resident-q4k",
+			Source:     ggufPath,
+			TotalNanos: loadNanos,
+			TotalMS:    float64(loadNanos) / 1e6,
+			Phases:     []ggufload.LoadPhaseStat{{Phase: "q4k-direct-load", Calls: 1, Nanos: loadNanos, MS: float64(loadNanos) / 1e6, TimePct: 100}},
+			Bottleneck: "q4k-direct-load",
+		})
+		return mm, true, profile, gateway.StartupPhase{Name: "model-load", Dur: time.Duration(loadNanos)}
+	default:
+		prof := ggufload.NewLoadProfiler()
+		mm, err := ggufload.LoadModelQuantProfile(ggufPath, prof)
+		must(err)
+		modelengine.Preload(mm)
+		loadNanos := time.Since(tLoad).Nanoseconds()
+		profile := toGatewayLoadProfile(prof.Snapshot("gguf-lean-q8", ggufPath, loadNanos))
+		return mm, false, profile, gateway.StartupPhase{Name: "model-load", Dur: time.Duration(loadNanos)}
+	}
+}
+
+// resolveServeTokenizer picks the in-kernel chat planner's tokenizer: an explicit
+// --tokenizer (a tokenizer.json or its directory, matching cmd/fakchat's resolution) wins;
+// otherwise, with --gguf set, the GGUF's EMBEDDED tokenizer is used so /v1/chat/completions
+// and /v1/messages serve real in-kernel chat by default (like cmd/simpledemo); otherwise it
+// returns nil, leaving the gateway's offline MockPlanner fallback. The bool reports whether
+// a tokenizer-load startup phase should be recorded.
+func resolveServeTokenizer(tokPath, ggufPath string) (*tokenizer.Tokenizer, bool) {
+	if tokPath != "" {
+		tokFile := tokPath
+		if info, err := os.Stat(tokFile); err == nil && info.IsDir() {
+			tokFile = filepath.Join(tokFile, "tokenizer.json")
+		}
+		tok, err := tokenizer.LoadJSON(tokFile)
+		must(err)
+		return tok, true
+	}
+	if ggufPath != "" {
+		// No explicit --tokenizer: fall back to the tokenizer EMBEDDED in the GGUF. Virtually
+		// every GGUF carries its full vocab+merges, so `fak serve --gguf X` (no --base-url)
+		// serves real in-kernel chat out of the box instead of silently dropping
+		// /v1/chat/completions to the offline MockPlanner. If the GGUF embeds no usable BPE
+		// tokenizer (e.g. an SPM-only checkpoint), we keep the MockPlanner fallback — pass
+		// --tokenizer to override.
+		if tok, err := embeddedGGUFTokenizer(ggufPath); err == nil {
+			return tok, true
+		} else {
+			fmt.Fprintf(os.Stderr, "fak serve: --gguf set without --tokenizer and no embedded BPE tokenizer (%v);\n"+
+				"  /v1/chat/completions will use the offline mock planner. Pass --tokenizer <dir|file> for real chat.\n", err)
+		}
+	}
+	return nil, false
 }
