@@ -33,8 +33,18 @@ Two properties make this the dominant felt cost:
    → ~5,000–39,000x
    ```
 
-   So each tool call pays **~6–50 ms** in `pretool` + again in `posttool` — a
-   floor of ~12–100 ms per tool call, **synchronous** (it blocks the turn).
+   That KPI is the kernel's own in-repo microbench (a warm Linux `Fold` decide).
+   The cost a fleet host actually pays is **higher** — measured at the hook
+   boundary on the Windows dev host with
+   [`tools/dos_hook_bench.py`](../tools/dos_hook_bench.py): `pretool` p50 ≈
+   **300 ms** and `posttool` p50 ≈ **270 ms**, a **~0.57 s per-tool-call floor**,
+   **synchronous** (it blocks the turn). Cold process startup dominates: the
+   kernel's *internal* work is p50 **2.2 ms** (`.dos/metrics/observations.jsonl`),
+   so **>99 %** of the wall-clock is spawn overhead — and **99.87 %** of those
+   spawns are `passthrough` no-ops that bought no verdict. The order-of-magnitude
+   gap from the 6–50 ms KPI is exactly the cold-spawn tax the in-process transport
+   (fix #3) removes; treating 6–50 ms as the per-call floor undercounts the felt
+   cost by ~10×.
 
 2. **No `matcher` → it fires on every tool**, including read-only ones
    (`Read`/`Grep`/`Glob`/`TodoWrite`) that mutate nothing and need no gate. In a
@@ -108,6 +118,11 @@ The KPI proves the in-process boundary is **5,000–39,000× faster**. Two shape
 
 - A microbench like the existing `fak bench` KPI but at the **hook** boundary:
   median wall-clock of `pretool`+`posttool` per tool call, before vs after.
+  **Shipped:** [`tools/dos_hook_bench.py`](../tools/dos_hook_bench.py) —
+  `python tools/dos_hook_bench.py` reports `pretool`/`posttool` p10/p50/p90/max,
+  the per-tool-call p50 floor, and the passthrough fraction from the observation
+  log. It is read-only and SKIPs cleanly when `dos` is off PATH, so it is the
+  reproducible witness for the before/after of any of the three fixes above.
 - Soundness unchanged: the gate's verdict on a gated write is **identical**
   cached vs uncached and matcher-scoped vs full (replay the frozen trace).
 - No new failure mode when the cache/daemon is absent — it must degrade to the
