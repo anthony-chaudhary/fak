@@ -61,8 +61,13 @@ Decoded (greedy), the kernel-core GPU model produces coherent English:
 | prefill P=16 / 64 / 256 | 25.3 / 25.7 / 25.1 | not batched on the device path yet (HAL loops single tokens) |
 | load | — | ~49 s to load 5.8 GB safetensors + quantize to Q8 (off the timed path) |
 
-Decode is **WSL-launch-bound** (~600 device ops/token × ~0.07 ms host launch tax), not
-GEMV-compute-bound; `llama.cpp` Q8 reaches ~32 tok/s on the same box. The lever is a
+This **25.1 tok/s decode is inside the 20-30 tok/s target** — it is the boost-clock run.
+A base-clock (1380 vs 3105 MHz) run of the same kernel regresses to ~11 tok/s and the 9.2
+tok/s of [#379](Q8-CLOCK-RESOLUTION-379.md); that gap is a GPU clock state, not the kernel
+(arithmetic + the boost-clock guard in [`Q8-CLOCK-RESOLUTION-379.md`](Q8-CLOCK-RESOLUTION-379.md)).
+
+The residual gap to `llama.cpp` Q8's ~32 tok/s on the same box is the **WSL launch tax**
+(~600 device ops/token × ~0.07 ms host launch tax), not GEMV compute. The lever there is a
 capture-safe CUDA graph, not a faster kernel — see `GPU-QWEN-RESULTS.md` §4.
 
 ## Reproduce
