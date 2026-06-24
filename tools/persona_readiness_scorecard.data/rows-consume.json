@@ -57,7 +57,7 @@
         {"id": "config-reference", "kind": "any_path_exists", "targets": ["docs/fak/server-config.md", "docs/serve-config.md", "POLICY.md"], "need": "a config reference (flags, env vars, policy schema)", "severity": "hard"},
         {"id": "frozen-abi", "kind": "path_exists", "target": "ARCHITECTURE.md", "need": "the frozen-ABI / layering discipline an integrator depends on for stability", "severity": "hard"},
         {"id": "extension-seams", "kind": "path_exists", "target": "EXTENDING.md", "need": "the additive extension seams (Register* + a leaf) for building on fak without forking", "severity": "hard"},
-        {"id": "module-root", "kind": "doc_mentions", "doc": "go.mod", "tokens": ["github.com/anthony-chaudhary/fak"], "need": "the Go module declared at the repo root so the install path resolves directly", "severity": "hard"}
+        {"id": "module-root", "kind": "doc_mentions", "doc": "GETTING-STARTED.md", "tokens": ["github.com/anthony-chaudhary/fak/cmd/fak"], "need": "the entry doc documents the EXACT installable path (module at repo root + cmd/fak), so `go install …@latest` resolves directly — a wrong/stale path fails this", "severity": "hard"}
       ],
       "verdict": "served",
       "gaps": [
