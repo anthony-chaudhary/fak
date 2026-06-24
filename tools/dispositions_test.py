@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import shutil
 import sys
 import tempfile
 import unittest
@@ -208,7 +209,7 @@ class BuildDispositionsTest(unittest.TestCase):
 
 
 class WriteSidecarTest(unittest.TestCase):
-    def test_round_trip(self) -> None:
+    def test_round_trip_in_gate_schema(self) -> None:
         mod = load()
         rows = [
             {"phase": "A", "live": True, "drop_reason": ""},
@@ -216,18 +217,44 @@ class WriteSidecarTest(unittest.TestCase):
         ]
         with tempfile.TemporaryDirectory() as td:
             path = Path(td) / ".dispositions-test.json"
-            mod.write_sidecar(rows, path)
+            mod.write_sidecar(rows, path, tag="test")
             self.assertTrue(path.exists())
             data = json.loads(path.read_text(encoding="utf-8"))
-            self.assertEqual(data, rows)
+            # REGRESSION GUARD (issue #383): dos gate rejects a bare list as a
+            # contract error -- the sidecar MUST be the oc3-dispositions-v1 object.
+            self.assertIsInstance(data, dict)
+            self.assertEqual(data["schema"], mod.SIDECAR_SCHEMA)
+            self.assertEqual(data["schema"], "oc3-dispositions-v1")
+            self.assertEqual(data["tag"], "test")
+            self.assertEqual(data["dispositions"], rows)
 
     def test_atomic_write_no_tmp_left_behind(self) -> None:
         mod = load()
         with tempfile.TemporaryDirectory() as td:
             path = Path(td) / ".dispositions-x.json"
-            mod.write_sidecar([], path)
+            mod.write_sidecar([], path, tag="x")
             leftovers = [p for p in Path(td).iterdir() if p.suffix == ".tmp"]
             self.assertEqual(leftovers, [])
+
+
+class GateIntegrationTest(unittest.TestCase):
+    """The end-to-end check that the mocked classify() tests cannot give: a
+    real `dos gate` must ACCEPT the written sidecar (not reject it as a contract
+    error) and read its verdict. This is the test that catches the #383 bug."""
+
+    @unittest.skipUnless(shutil.which("dos"), "dos not on PATH")
+    def test_real_dos_gate_accepts_written_sidecar(self) -> None:
+        mod = load()
+        with tempfile.TemporaryDirectory() as td:
+            path = Path(td) / ".dispositions-it.json"
+            mod.write_sidecar([{"phase": "X", "live": True, "drop_reason": ""}],
+                              path, tag="it")
+            res = mod._run(["dos", "gate", "--workspace", ".", str(path), "--json"], None)
+            # rc=2 is the "not a JSON object: list" contract error the bug produced.
+            self.assertNotEqual(res["returncode"], 2,
+                                f"dos gate rejected the sidecar schema: {res['stderr']}")
+            verdict = json.loads(res["stdout"]).get("verdict")
+            self.assertEqual(verdict, "LIVE")
 
 
 class ClassifyTest(unittest.TestCase):

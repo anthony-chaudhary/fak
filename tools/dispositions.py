@@ -28,6 +28,11 @@ from pathlib import Path
 from typing import Any, Callable, Sequence
 
 SCHEMA = "fleet-dispatch-dispositions/1"
+# The dos-gate contract: the sidecar FILE must be this object shape, not a bare
+# list. `dos gate` rejects a bare list as a contract error (rc=2) -- "disposition
+# sidecar ... is not a JSON object: list" -- which silently broke the worker's
+# gate step (issue #383: the snapshot used a real verb but the gate then failed).
+SIDECAR_SCHEMA = "oc3-dispositions-v1"
 SIDECAR_PREFIX = ".dispositions-"
 
 Runner = Callable[[Sequence[str]], dict[str, Any]]
@@ -122,10 +127,18 @@ def build_dispositions(
     return rows
 
 
-def write_sidecar(dispositions: list[dict[str, Any]], path: Path) -> None:
-    """Atomically write the dispositions list to a sidecar file."""
+def write_sidecar(dispositions: list[dict[str, Any]], path: Path, *, tag: str) -> None:
+    """Atomically write the dispositions to a sidecar in the dos-gate schema.
+
+    `dos gate` requires the ``oc3-dispositions-v1`` OBJECT
+    (``{schema, tag, dispositions}``), NOT a bare list -- a bare list is rejected
+    as a contract error (rc=2), which is the actual end-to-end break behind issue
+    #383 (the snapshot used a real verb, but the gate step then failed). The
+    ``tag`` binds the sidecar to its lane/packet.
+    """
+    payload = {"schema": SIDECAR_SCHEMA, "tag": tag, "dispositions": dispositions}
     tmp = path.with_name(f".{path.name}.{os.getpid()}.tmp")
-    tmp.write_text(json.dumps(dispositions, indent=2) + "\n", encoding="utf-8")
+    tmp.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
     tmp.replace(path)
 
 
@@ -236,7 +249,7 @@ def main(argv: list[str] | None = None) -> int:
     units = enumerate_units(plan, workspace=workspace)
     dispositions = build_dispositions(units, state_map, workspace=workspace)
     out_path = sidecar_path(args.tag, out_dir)
-    write_sidecar(dispositions, out_path)
+    write_sidecar(dispositions, out_path, tag=args.tag)
     gate = classify(out_path, workspace=workspace)
     payload = build_payload(
         plan_doc=plan,

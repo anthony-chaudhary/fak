@@ -152,6 +152,7 @@ jobs:
           python tools/issue_lane_router_test.py
           python tools/dos_supervisor_status_test.py
           python tools/dos_hook_bench_test.py
+          python tools/dispositions_test.py
 
       # Notebook anti-rot gate: the cloud-notebook quickstarts under notebooks/ are
       # GENERATED ARTIFACTS of tools/gen_notebooks.py. `--check` re-renders in memory and
