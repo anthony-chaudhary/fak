@@ -122,7 +122,57 @@ $Bin       = Join-Path $Root 'tools\.bin\fak.exe'
 $env:FLEET_USER_HOME = $UserHome
 
 function Log  { param([string]$m) Write-Host "[dogfood] $m" -ForegroundColor Cyan }
+function Warn { param([string]$m) Write-Host "[dogfood] $m" -ForegroundColor Yellow }
 function Die  { param([string]$m) Write-Host "[dogfood] $m" -ForegroundColor Red; exit 1 }
+
+# Build the kernel binary into $out, resilient to a transiently-broken shared trunk.
+# This is a live multi-session tree: a peer can have an uncommitted, half-written edit
+# in the working tree that doesn't compile yet (e.g. a new strconv use before the import
+# lands). A naive `go build` of the working tree would then dead-end every adopter on
+# someone else's WIP. So: try the working tree first (the normal, fast path); if that
+# fails, fall back to building the LAST COMMITTED trunk (HEAD) — which is by definition
+# the peer-clean shared state — from a throwaway `git archive` checkout. The fallback is
+# an honest, current binary (the committed trunk), never a stale prebuilt artifact. Set
+# FAK_DOGFOOD_NO_HEAD_FALLBACK=1 to refuse the fallback and fail hard instead (CI/strict).
+function Build-FakBinary {
+  param([Parameter(Mandatory)] [string]$out)
+  New-Item -ItemType Directory -Force (Split-Path -Parent $out) | Out-Null
+  Push-Location $FakDir
+  try {
+    & go build -o $out ./cmd/fak 2>&1 | ForEach-Object { Write-Host $_ }
+    if ($LASTEXITCODE -eq 0) { return }
+  } finally { Pop-Location }
+
+  if ($env:FAK_DOGFOOD_NO_HEAD_FALLBACK -in @('1','true','yes')) {
+    Die "go build failed (working tree) and FAK_DOGFOOD_NO_HEAD_FALLBACK is set"
+  }
+  Warn "working-tree build failed - a peer's uncommitted edit likely doesn't compile yet."
+  Warn "falling back to the last committed trunk (HEAD) so dogfood still works."
+  $head = Join-Path ([System.IO.Path]::GetTempPath()) ("fak-dogfood-head-" + [System.Guid]::NewGuid().ToString('N'))
+  New-Item -ItemType Directory -Force $head | Out-Null
+  $tarball = "$head.tar"
+  # Extract with Windows' own System32\tar.exe (bsdtar) — it handles drive-letter paths
+  # natively; the Git/MSYS tar on PATH reads a `C:` path as a remote host and dies. Fall
+  # back to whatever `tar` is on PATH only if the system one is somehow absent.
+  $systar = Join-Path $env:SystemRoot 'System32\tar.exe'
+  if (-not (Test-Path $systar)) { $systar = 'tar' }
+  try {
+    Push-Location $FakDir
+    # `git archive -o <file>` writes the tar itself (no fragile native-to-native pipe).
+    try { & git archive --format=tar -o $tarball HEAD; if ($LASTEXITCODE -ne 0) { Die "git archive HEAD failed - cannot build the committed trunk" } }
+    finally { Pop-Location }
+    & $systar -x -f $tarball -C $head; if ($LASTEXITCODE -ne 0) { Die "could not extract the committed-trunk archive" }
+    Push-Location $head
+    try {
+      & go build -o $out ./cmd/fak 2>&1 | ForEach-Object { Write-Host $_ }
+      if ($LASTEXITCODE -ne 0) { Die "even the committed trunk (HEAD) failed to build - this is a real break, not a peer's WIP" }
+    } finally { Pop-Location }
+    Log "built fak from the committed trunk (HEAD); your working-tree edit was skipped."
+  } finally {
+    Remove-Item -Recurse -Force $head -ErrorAction SilentlyContinue
+    Remove-Item -Force $tarball -ErrorAction SilentlyContinue
+  }
+}
 
 function Test-PortFree { param([int]$p)
   -not (Get-NetTCPConnection -LocalPort $p -State Listen -ErrorAction SilentlyContinue)
@@ -160,10 +210,7 @@ if ($Mode -eq 'install') {
 
   # Build + copy the repo CLI as fak.exe.
   Log "building fak -> $Bin"
-  New-Item -ItemType Directory -Force (Split-Path -Parent $Bin) | Out-Null
-  Push-Location $FakDir
-  try { & go build -o $Bin ./cmd/fak; if ($LASTEXITCODE -ne 0) { Die "go build failed" } }
-  finally { Pop-Location }
+  Build-FakBinary -out $Bin
   Copy-Item -Force $Bin (Join-Path $BinDir 'fak.exe')
 
   # Write the fak-dogfood.cmd shim -> this script, by absolute path.
@@ -197,10 +244,7 @@ try {
   # module root again, refuse rather than polluting (or clobbering) an external dir.
   if (-not $Bin.ToLowerInvariant().StartsWith($FakDir.ToLowerInvariant())) { Die "refusing to build outside the repo: $Bin (expected under $FakDir)" }
   Log "building fak -> $Bin"
-  New-Item -ItemType Directory -Force (Split-Path -Parent $Bin) | Out-Null
-  Push-Location $FakDir
-  try { & go build -o $Bin ./cmd/fak; if ($LASTEXITCODE -ne 0) { Die "go build failed" } }
-  finally { Pop-Location }
+  Build-FakBinary -out $Bin
 
   # ---- bring up the local model backend (skipped for --smoke) --------------
   # The 'anthropic' upstream needs no local model: fak proxies straight to the real

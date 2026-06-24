@@ -64,7 +64,33 @@ ROOT="$FAK_DIR"
 cd "$FAK_DIR"
 
 log()  { printf '\033[36m[dogfood]\033[0m %s\n' "$*" >&2; }
+warn() { printf '\033[33m[dogfood] %s\033[0m\n' "$*" >&2; }
 die()  { printf '\033[31m[dogfood] %s\033[0m\n' "$*" >&2; exit 1; }
+
+# Build the kernel binary into $1, resilient to a transiently-broken shared trunk.
+# This is a live multi-session tree: a peer can have an uncommitted, half-written edit
+# in the working tree that doesn't compile yet (e.g. a new strconv use before the import
+# lands). A naive `go build` would then dead-end every adopter on someone else's WIP. So:
+# try the working tree first (the normal, fast path); on failure fall back to building the
+# LAST COMMITTED trunk (HEAD) — the peer-clean shared state — from a throwaway `git archive`
+# checkout. The fallback is an honest, current binary (the committed trunk), never a stale
+# prebuilt. Set FAK_DOGFOOD_NO_HEAD_FALLBACK=1 to refuse the fallback and fail hard (CI/strict).
+build_fak() {
+  local out="$1"
+  mkdir -p "$(dirname "$out")"
+  if ( cd "$FAK_DIR" && go build -o "$out" ./cmd/fak ); then return 0; fi
+  case "${FAK_DOGFOOD_NO_HEAD_FALLBACK:-}" in
+    1|true|yes) die "go build failed (working tree) and FAK_DOGFOOD_NO_HEAD_FALLBACK is set" ;;
+  esac
+  warn "working-tree build failed - a peer's uncommitted edit likely doesn't compile yet."
+  warn "falling back to the last committed trunk (HEAD) so dogfood still works."
+  local head; head="$(mktemp -d "${TMPDIR:-/tmp}/fak-dogfood-head.XXXXXX")"
+  # shellcheck disable=SC2064
+  trap "rm -rf '$head'" RETURN
+  ( cd "$FAK_DIR" && git archive HEAD ) | tar -x -C "$head" || die "git archive HEAD failed - cannot build the committed trunk"
+  ( cd "$head" && go build -o "$out" ./cmd/fak ) || die "even the committed trunk (HEAD) failed to build - this is a real break, not a peer's WIP"
+  log "built fak from the committed trunk (HEAD); your working-tree edit was skipped."
+}
 
 PRESET="${FAK_DOGFOOD_PRESET:-}"
 if [ -z "$PRESET" ] && [ "$INVOKED_NAME" = "fak-qwen36-claude" ]; then
@@ -147,9 +173,8 @@ if [ "$MODE" = "install" ]; then
   target="$SCRIPT_DIR/$(basename "$SELF")"
   ln -sf "$target" "$bindir/$name"
   ln -sf "$target" "$bindir/$qwen_name"
-  mkdir -p "$(dirname "$BIN")"
   log "building fak -> $BIN"
-  go build -o "$BIN" ./cmd/fak
+  build_fak "$BIN"
   ln -sf "$BIN" "$bindir/fak"
   log "installed: $bindir/$name -> $target"
   log "installed: $bindir/$qwen_name -> $target"
@@ -212,8 +237,7 @@ fi
 # --- build the kernel binary --------------------------------------------------
 if [ -z "$ATTACHED" ]; then
 log "building fak -> $BIN"
-mkdir -p "$(dirname "$BIN")"
-go build -o "$BIN" ./cmd/fak
+build_fak "$BIN"
 fi
 
 # --- bring up the local model backend ----------------------------------------
