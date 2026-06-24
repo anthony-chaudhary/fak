@@ -5,7 +5,7 @@ disable-model-invocation: true
 user-invocable: false
 allowed-tools: Read, Edit, Bash
 metadata:
-  opencode: claude-only   # #422: model-invocation/user-invocable gating is load-bearing and Claude-only — exclude from the opencode skills.paths scan
+  opencode: agent-permission   # #422: model-invocation/user-invocable gate re-expressed in opencode.json as `permission.skill: {"phased-plan": "deny"}` (opencode auto-loads .claude/skills/** and can't exclude a skill; permission is the real lever)
 ---
 
 # Phased-Plan Ceremony

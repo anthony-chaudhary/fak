@@ -48,16 +48,38 @@ posture — a read-only `allowed-tools` allowlist, or `disable-model-invocation:
 true` / `user-invocable: false`. opencode's per-agent `permission:` lives on
 the agent, not the skill, so there is no per-skill equivalent.
 
+**You cannot exclude a skill from opencode's scan.** opencode *auto-discovers*
+every `.claude/skills/<name>/SKILL.md` by walking up to the worktree root; its
+`skills.paths` config only **adds** folders, it never subtracts one. So a
+load-bearing skill is **always loaded** under opencode and its frontmatter is
+**always dropped** — there is no "exclude from the scan." The boundary has to be
+re-expressed in opencode's own access-control surface: the per-agent (or global,
+in `opencode.json`) **`permission`** object.
+
+| Claude frontmatter | opencode `permission:` equivalent |
+|---|---|
+| `disable-model-invocation` / `user-invocable: false` | `permission.skill: { "<name>": "deny" }` — gates invocation by skill name |
+| read-only `allowed-tools` (no Write/Edit) | `permission.edit: "deny"` — read-only *agent* (covers edit/write/patch); per-agent, not per-skill |
+
 **Mitigation.** A skill whose Claude-only frontmatter is load-bearing must
 acknowledge the gap via the opencode-honored `metadata` field (it survives the
-cross-load):
+cross-load — though it is inert *data* to opencode, not a directive):
 
 ```yaml
 metadata:
-  opencode: claude-only       # exclude this skill from the opencode skills.paths scan
+  opencode: agent-permission  # the gate IS re-expressed in opencode.json `permission`
   # or
-  opencode: agent-permission  # the boundary is re-expressed on the invoking agent's permission:
+  opencode: claude-only       # NOT portable per-skill — documented Claude-only; an
+                              # opencode worker loses the boundary unless it runs under
+                              # a read-only agent (`permission.edit: "deny"`)
 ```
+
+This repo's `opencode.json` ports the one fully-portable gate — `phased-plan`
+(operator-only) is denied via `permission.skill: { "phased-plan": "deny" }`
+(`agent-permission`). The two read-only audit skills (`issue-triage`,
+`trajectory-audit`) carry a per-skill read-only boundary that opencode's
+per-*agent* permission can't express one-to-one, so they stay `claude-only`: run
+them under Claude, or under an opencode agent whose `permission.edit` is `deny`.
 
 **Lint.** `python tools/skill_frontmatter_lint.py` flags every skill whose
 Claude-only frontmatter is load-bearing and not yet acknowledged;

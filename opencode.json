@@ -3,5 +3,10 @@
   "instructions": ["CONTRIBUTING.md"],
   "skills": {
     "paths": [".claude/skills"]
+  },
+  "permission": {
+    "skill": {
+      "phased-plan": "deny"
+    }
   }
 }

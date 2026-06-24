@@ -24,12 +24,18 @@ opencode-honored ones, and flags the skills where a Claude-only field is
 
 A skill clears the flag by acknowledging the gap via the opencode-HONORED
 ``metadata`` field (which DOES survive the cross-load), pointing at the
-mitigation it took (issue #422 acceptance (a)/(b)):
+mitigation it took. NOTE: opencode auto-discovers every ``.claude/skills/*/
+SKILL.md`` and its ``skills.paths`` config only ADDS folders -- you cannot
+exclude a skill from the scan, so the boundary must be re-expressed in
+opencode's per-agent ``permission`` object (issue #422 acceptance (a)):
 
   metadata:
-    opencode: claude-only       # (b) excluded from the opencode skills.paths scan
+    opencode: agent-permission  # (a) boundary re-expressed in opencode.json `permission`
+    #                                 (e.g. `permission.skill: {"<name>": "deny"}`)
     # or
-    opencode: agent-permission  # (a) boundary re-expressed on the invoking agent
+    opencode: claude-only       # not portable per-skill (a read-only allowed-tools maps
+    #                             only to a per-AGENT `permission.edit: deny`); documented
+    #                             Claude-only -- an opencode worker loses the boundary
 
 Read-only; takes no lease; writes nothing.
 
@@ -203,9 +209,12 @@ def fold(records: list[dict], root: Path) -> dict:
         "next_action": (
             "none — no skill's Claude-only frontmatter is load-bearing-and-unacknowledged"
             if ok else
-            "for each flagged skill: port the boundary to the invoking agent's "
-            "permission and mark `metadata.opencode: agent-permission`, OR exclude it "
-            "from the opencode skills.paths scan and mark `metadata.opencode: claude-only`"
+            "for each flagged skill: re-express the boundary in opencode's per-agent "
+            "`permission` object (e.g. `permission.skill: {<name>: deny}` for an "
+            "invocation gate, `permission.edit: deny` for a read-only agent) and mark "
+            "`metadata.opencode: agent-permission`; if it cannot be ported per-skill, "
+            "mark `metadata.opencode: claude-only` (documented Claude-only -- opencode "
+            "auto-loads .claude/skills/** and cannot exclude a skill)"
         ),
     }
 
