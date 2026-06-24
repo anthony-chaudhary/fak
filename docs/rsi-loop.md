@@ -112,6 +112,17 @@ getting *faster at the arm a number depends on* — the F1 tombstone case in
 [`BENCHMARK-AUTHORITY.md`](https://github.com/anthony-chaudhary/fak/blob/main/BENCHMARK-AUTHORITY.md) — is exactly what the series
 surfaces.)
 
+**Enforced in CI (not just a cadence).** [`.github/workflows/ci.yml`](https://github.com/anthony-chaudhary/fak/blob/main/.github/workflows/ci.yml)
+runs `rsiloop -mode track` on every push, re-measuring the deterministic main KPI in
+a worktree off `HEAD` and comparing it against a committed baseline floor
+([`internal/rsiloop/testdata/main-kpi-baseline.jsonl`](https://github.com/anthony-chaudhary/fak/blob/main/internal/rsiloop/testdata/main-kpi-baseline.jsonl)),
+failing the build (exit `3`) on a **strict** drop. The track verdict mirrors
+`dos improve`'s REVERT (a non-improving candidate); wired this way it stops being
+inert telemetry and becomes a hard gate — a regression on the loop's own KPI now
+blocks the trunk. Because the KPI is wall-clock-free and RNG-free (a single integer
+`hits/total` division), the floor is bit-identical on the runner, so the gate fires
+only on a real drop (e.g. `DefaultCacheSize` lowered), never on platform noise.
+
 ## Extending it to a real subsystem
 
 The demo wires one tunable. A real optimization (a cache-eviction policy, a quant

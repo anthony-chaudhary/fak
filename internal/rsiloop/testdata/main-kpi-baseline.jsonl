@@ -1,0 +1,1 @@
+{"cycle":0,"mode":"track","candidate":"(baseline@HEAD)","metric_name":"lru_hit_rate","baseline":0.068182,"candidate_metric":0.068182,"measured":true,"lower_better":false,"improved":false,"suite_green":false,"truth_clean":false,"decision":"TRACK","kept":false,"breaker_nonkeeps":0,"baseline_ref":"be9596f8d4ee","ref_name":"HEAD"}

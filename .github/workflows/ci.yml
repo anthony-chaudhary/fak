@@ -431,6 +431,25 @@ jobs:
           git rev-parse "${RANGE%%..*}" >/dev/null 2>&1 || RANGE="HEAD~1..HEAD"
           dos review "$RANGE"   # positional range; exit 0 clean / 1 residual / 2 unreadable
 
+      # RSI main-KPI regression gate — the rsiloop track verdict made ENFORCING.
+      # internal/rsiloop is fak's closed recursive-self-improvement loop; its
+      # keep/revert/regression verdict IS the `dos improve` contract computed in-code
+      # (docs/rsi-loop.md — the exit codes "mirror the dos improve verdict"). The
+      # `improve` arm owns the non-forgeable keep-bit; the `track` arm re-measures the
+      # deterministic main KPI (lru_hit_rate at DefaultCacheSize — wall-clock-free and
+      # RNG-free per docs/proofs/00-METHOD.md, so the value is bit-identical on the
+      # runner: a single integer hits/total division) in a worktree off HEAD and exits 3
+      # on a STRICT drop vs the committed baseline floor — the same REVERT verdict
+      # `dos improve` renders for a non-improving candidate, here made a HARD gate.
+      # Until now that verdict was INERT (nothing ran it); this gives the DOS-shaped RSI
+      # verdict teeth (retires the rsi_maturity_scorecard regression_gate_in_ci gap). A
+      # failure means main's KPI genuinely regressed (e.g. DefaultCacheSize was lowered,
+      # or the reference trace broke) — a real defect, not flakiness.
+      - name: rsi regression gate (rsiloop track — main KPI must not regress)
+        run: |
+          cp internal/rsiloop/testdata/main-kpi-baseline.jsonl "${RUNNER_TEMP:-/tmp}/rsi-track.jsonl"
+          go run ./cmd/rsiloop -mode track -repo . -baseline-ref HEAD -journal "${RUNNER_TEMP:-/tmp}/rsi-track.jsonl"
+
   # E-001 (Go Race Detector Support): the data-race gate. The build-vet-test job
   # above runs `go test ./...` WITHOUT instrumentation; this job re-runs the SAME
   # suite under `-race`, which is the only thing that turns a benign-looking
