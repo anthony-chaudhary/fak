@@ -1,0 +1,53 @@
+{
+  "version": "fak-accounts/v1",
+  "accounts": [
+    {
+      "id": "local",
+      "kind": "local",
+      "base_url": "http://127.0.0.1:11434/v1",
+      "label": "on-box ollama / vLLM (OpenAI-compatible) — no key, residency-exempt"
+    },
+    {
+      "id": "openai-personal",
+      "kind": "openai",
+      "cred_env": "OPENAI_API_KEY",
+      "label": "your personal OpenAI account"
+    },
+    {
+      "id": "openai-work",
+      "kind": "openai",
+      "cred_env": "OPENAI_WORK_API_KEY",
+      "label": "a SECOND OpenAI account — the switch: same provider kind, a different credential"
+    },
+    {
+      "id": "codex",
+      "kind": "openai-responses",
+      "cred_env": "OPENAI_API_KEY",
+      "label": "OpenAI Responses API — codex's native wire (NOT plain chat-completions)"
+    },
+    {
+      "id": "claude-sub",
+      "kind": "anthropic",
+      "cred_env": "CLAUDE_CODE_OAUTH_TOKEN",
+      "label": "your Anthropic Pro/Max subscription (an sk-ant-oat token; the Bearer + oauth-2025-04-20 beta header is applied by the dispatch adapter, not by the roster)"
+    },
+    {
+      "id": "gemini",
+      "kind": "gemini",
+      "cred_env": "GEMINI_API_KEY",
+      "label": "your Google Gemini account"
+    }
+  ],
+  "default": "openai-personal",
+  "bindings": [
+    { "model": "small", "account": "local", "upstream_model": "llama3.2" },
+    { "model": "medium", "account": "openai-personal", "upstream_model": "gpt-5.5" },
+    { "model": "large", "account": "claude-sub", "upstream_model": "claude-opus-4-6" },
+    { "model": "guard-a", "account": "openai-work", "upstream_model": "gpt-5.5" },
+    { "model": "guard-b", "account": "claude-sub", "upstream_model": "claude-opus-4-6" },
+    { "model": "drafter-a", "account": "openai-personal", "upstream_model": "gpt-5.5" },
+    { "model": "drafter-b", "account": "gemini", "upstream_model": "gemini-3-pro" },
+    { "model": "judge", "account": "claude-sub", "upstream_model": "claude-opus-4-6" },
+    { "model": "tiny-classifier", "account": "local", "upstream_model": "llama3.2" }
+  ]
+}

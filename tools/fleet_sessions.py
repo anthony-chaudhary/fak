@@ -58,10 +58,22 @@ GOALCLEAR_RE = re.compile(r"goal (?:condition )?(?:met|satisfied|cleared)|hook (
 # Wrapper text that is NOT the session's real task instruction -- the harness injects
 # these ahead of (or around) the operator's actual first message. The first head record
 # whose text is none of these, once stripped, is the task identity used for dedup.
+# ``<local-command-`` (not just ``<local-command-stdout>``) so EVERY local-command
+# wrapper block is skipped. The harness opens a slash-command session with a
+# ``<local-command-caveat>Caveat: ...`` record whose text is IDENTICAL across every such
+# session; if that boilerplate is read as the first instruction, _task_sig collapses all
+# slash-command sessions to ONE signature and the dedup pre-pass DEFERs distinct /goal
+# workers as "duplicates" of one. Skipping the whole local-command-* family lets the walk
+# reach the real /goal directive. (#fleet-sessions: caveat-wrapper false-dedup collapse)
 _WRAPPER_RE = re.compile(
     r"^\s*(?:Caveat:|<system-reminder|<command-name>|<command-message>|"
-    r"<command-args>|<local-command-stdout>|<user-memory|Codebase and user instructions)",
+    r"<command-args>|<local-command-|<user-memory|Codebase and user instructions)",
     re.I)
+# Slash commands whose ARGUMENT defines the session's task. /effort, /model, etc. only
+# CONFIGURE the session and carry fleet-identical args ("ultracode"), so capturing their
+# command-args would re-collapse distinct workers; only these task-defining commands
+# contribute their payload to the signature.
+_TASK_CMD_RE = re.compile(r"<command-name>\s*/(goal|loop|dispatch|fanout|next-up)\b", re.I)
 # A re-homed transcript opens with this exact synthetic resume prompt (see RESUME_PROMPT
 # below). It is identical across every re-home, so it must NOT be treated as a task
 # instruction -- otherwise every re-homed session in a project collapses to one signature.
@@ -73,10 +85,12 @@ def _first_instruction(head_records):
 
     Walk the head records in order; return the first user/system text that is a
     genuine instruction -- skipping harness wrappers (caveat / system-reminder /
-    command-* / local-command-stdout / memory blocks) and the fixed resume prompt a
+    command-* / local-command-* / memory blocks) and the fixed resume prompt a
     re-home injects. A ``/goal``/``/loop`` directive's ARGUMENT is the truest task
-    identity, so when a command-args wrapper is present its payload is preferred.
-    Returns a normalized, whitespace-collapsed string (may be empty)."""
+    identity, so when a TASK-DEFINING command (/goal,/loop,/dispatch,/fanout,/next-up)
+    carries a command-args payload it is preferred; a config command's args (e.g.
+    /effort ultracode) are ignored, since they are identical fleet-wide and would
+    re-collapse distinct workers. Returns a normalized, whitespace-collapsed string."""
     cmd_args = None
     for ho in head_records:
         if ho.get("type") not in ("user", "system"):
@@ -85,10 +99,13 @@ def _first_instruction(head_records):
         txt = mc if isinstance(mc, str) else text_of(mc)
         if not txt or not txt.strip():
             continue
-        # capture a /goal|/loop argument payload if one is carried in the head
-        m = re.search(r"<command-args>(.*?)</command-args>", txt, re.S | re.I)
-        if m and m.group(1).strip():
-            cmd_args = " ".join(m.group(1).split())
+        # capture a /goal|/loop|... argument payload (the truest task identity); a config
+        # command like /effort carries fleet-identical args, so only task-defining commands
+        # contribute -- otherwise every /effort+/goal worker re-collapses to one signature.
+        if _TASK_CMD_RE.search(txt):
+            m = re.search(r"<command-args>(.*?)</command-args>", txt, re.S | re.I)
+            if m and m.group(1).strip():
+                cmd_args = " ".join(m.group(1).split())
         stripped = txt.strip()
         if _WRAPPER_RE.match(stripped):
             continue
