@@ -5,6 +5,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/anthony-chaudhary/fak/internal/model"
 )
 
 // gguf_glm_full_fixture_test.go — the P1 loader capstone: a COMPLETE single-MoE-layer glm_moe_dsa
@@ -111,6 +113,56 @@ func TestGLMMoeDsaGGUFFullFixtureLoads(t *testing.T) {
 	}
 }
 
+// TestGLMMoeDsaGGUFFullFixtureForwards is the forward-capability rung: the complete glm_moe_dsa
+// GGUF loads via Model() into a real model.Model and its native glm_dsa forward (MLA + DSA indexer
+// + MoE routing + shared experts) RUNS to finite logits of the right width — i.e. fak's own engine
+// loads a real-architecture glm_moe_dsa checkpoint from GGUF and can serve a forward over it. (This
+// proves the loaded model is forward-capable; the argmax-vs-safetensors oracle is the next rung.)
+func TestGLMMoeDsaGGUFFullFixtureForwards(t *testing.T) {
+	const (
+		H, V                = 4, 6
+		qLora, kvLora       = 6, 4
+		qkNope, qkRope, vHd = 2, 2, 2
+		nH                  = 2
+		idxHeads, idxDim    = 2, 4
+		E, I, sharedI       = 3, 8, 8
+	)
+	path := filepath.Join(t.TempDir(), "glm_fwd.gguf")
+	if err := os.WriteFile(path, glmMoeDsaFullGGUF(H, V, qLora, kvLora, qkNope, qkRope, vHd, nH, idxHeads, idxDim, E, I, sharedI), 0o644); err != nil {
+		t.Fatalf("write fixture: %v", err)
+	}
+	m, err := LoadModel(path)
+	if err != nil {
+		t.Fatalf("LoadModel a complete glm_moe_dsa GGUF: %v", err)
+	}
+	ids := []int{0, 1, 2, 3, 4} // seq >= index_topk(4) so the DSA indexer has enough keys
+	act := m.Forward(ids)
+	if act == nil || len(act.Logits) != len(ids) {
+		t.Fatalf("Forward returned %d logit rows, want %d", lenLogits(act), len(ids))
+	}
+	for pos, row := range act.Logits {
+		if len(row) != V {
+			t.Fatalf("logit row %d width = %d, want vocab %d", pos, len(row), V)
+		}
+		for i, v := range row {
+			if isNaNOrInf(v) {
+				t.Fatalf("logit[%d][%d] = %v (non-finite) — the glm_dsa forward produced garbage", pos, i, v)
+			}
+		}
+	}
+}
+
+func lenLogits(a *model.Activations) int {
+	if a == nil {
+		return 0
+	}
+	return len(a.Logits)
+}
+
+func isNaNOrInf(v float32) bool {
+	return v != v || v > 3.4e38 || v < -3.4e38
+}
+
 // glmMoeDsaFullGGUF assembles a complete single-MoE-layer glm_moe_dsa GGUF. GGUF stores dims
 // low-to-high, so a canonical [out,in] tensor is written {in,out} and a batched [E,out,in] expert
 // blob is written {in,out,E}; modelShapeFromGGUFDims reverses them back. Tensor-data offsets are
@@ -164,6 +216,7 @@ func glmMoeDsaFullGGUF(H, V, qLora, kvLora, qkNope, qkRope, vHead, nH, idxHeads,
 	ks := func(k, v string) { writeKVString(&kv, k, v); nKV++ }
 	ku := func(k string, v uint32) { writeKVUint32(&kv, k, v); nKV++ }
 	kf := func(k string, v float32) { writeKVFloat32(&kv, k, v); nKV++ }
+	ka := func(k string, vs []string) { writeKVStringArray(&kv, k, vs); nKV++ }
 	ks("general.architecture", "glm_moe_dsa")
 	ku("general.alignment", 32)
 	ku("glm_moe_dsa.embedding_length", uint32(H))
@@ -172,6 +225,7 @@ func glmMoeDsaFullGGUF(H, V, qLora, kvLora, qkNope, qkRope, vHead, nH, idxHeads,
 	ku("glm_moe_dsa.attention.head_count_kv", uint32(nH))
 	ku("glm_moe_dsa.feed_forward_length", uint32(I))
 	kf("glm_moe_dsa.attention.layer_norm_rms_epsilon", 1e-5)
+	kf("glm_moe_dsa.rope.freq_base", 10000)
 	ku("glm_moe_dsa.expert_count", uint32(E))
 	ku("glm_moe_dsa.expert_used_count", 2)
 	ku("glm_moe_dsa.expert_feed_forward_length", uint32(I))
@@ -183,6 +237,13 @@ func glmMoeDsaFullGGUF(H, V, qLora, kvLora, qkNope, qkRope, vHead, nH, idxHeads,
 	ku("glm_moe_dsa.index_n_heads", uint32(idxHeads))
 	ku("glm_moe_dsa.index_head_dim", uint32(idxDim))
 	ku("glm_moe_dsa.index_topk", 4)
+	// vocab size derives from the token list; without it cfg.VocabSize=0 and the LM head
+	// produces width-0 logits. V deterministic placeholder tokens.
+	toks := make([]string, V)
+	for i := range toks {
+		toks[i] = "t" + itoaForTest(i)
+	}
+	ka("tokenizer.ggml.tokens", toks)
 
 	// tensor-info section with cumulative aligned offsets.
 	var ti bytes.Buffer
