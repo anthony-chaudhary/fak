@@ -432,7 +432,15 @@ func resolveGuardProvider(flagValue, command string) (provider string, autodetec
 // directory and a Windows .exe/.cmd/.bat/.ps1/.com launcher suffix stripped, so an
 // absolute path or a wrapped launcher still matches.
 func guardDetectProvider(command string) (provider string, recognized bool) {
-	base := strings.ToLower(filepath.Base(strings.TrimSpace(command)))
+	base := strings.ToLower(strings.TrimSpace(command))
+	// Strip any directory component handling BOTH path separators regardless of the
+	// host OS. filepath.Base is host-specific — on the Linux CI runner it does not
+	// split a Windows backslash path, so a launcher like `C:\…\claude.exe` would
+	// fail to match there even though it works on a Windows dev box. LastIndexAny
+	// over `/` and `\` makes the match cross-platform.
+	if i := strings.LastIndexAny(base, `/\`); i >= 0 {
+		base = base[i+1:]
+	}
 	switch filepath.Ext(base) {
 	case ".exe", ".cmd", ".bat", ".ps1", ".com":
 		base = strings.TrimSuffix(base, filepath.Ext(base))
