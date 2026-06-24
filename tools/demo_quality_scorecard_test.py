@@ -319,6 +319,18 @@ def test_self_contained_no_create_no_defect() -> None:
     assert not a["defects"], a  # `go run` creates no durable artifact
 
 
+def test_self_contained_test_file_string_fixture_not_a_defect() -> None:
+    # A `*_test.py` whose only create-tokens are commands-as-data in a string
+    # fixture (a pinned `mkdir … && printf > …` chain, never executed) is a
+    # maintainer unit test, not a demo runner — so it is NOT a leaves-a-mess defect.
+    d = dq.Demo("examples/x", readme="# X\n\nRequires Python.\n",
+                scripts={"run.sh": "#!/bin/bash\nexec python demo.py\n",
+                         "demo_test.py": 'CHAIN = "mkdir -p {s} && printf hi > {s}/a.txt"\n'},
+                files={"README.md", "run.sh", "demo.py", "demo_test.py"})
+    a = dq.axis_self_contained(d)
+    assert not a["defects"], a
+
+
 def test_self_contained_missing_prereqs_is_soft() -> None:
     d = dq.Demo("examples/x", readme="# X\n\nRun:\n```\ngo run ./cmd/x\n```\n")
     a = dq.axis_self_contained(d)

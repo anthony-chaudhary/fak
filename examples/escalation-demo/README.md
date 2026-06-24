@@ -115,5 +115,5 @@ FAK_DEMO_POLICY=examples/healthcare-phi-policy.json ./examples/escalation-demo/r
 | `../customer-support-readonly-policy.json` | the policy the kernel enforces — declares the `safe_sink` exercised here |
 
 Related: [`../adjudication-demo/README.md`](../adjudication-demo/README.md) shows the deny side
-(a real model proposing calls the kernel refuses); [`../wire-proof/verify.py`](../wire-proof/verify.py)
+(a real model proposing calls the kernel refuses); the [`../wire-proof/`](../wire-proof/README.md) demo
 proves the same gate over HTTP with no model.

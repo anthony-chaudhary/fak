@@ -505,8 +505,14 @@ def axis_self_contained(demo: Demo) -> dict[str, Any]:
 
     # HARD: a shell/python script that creates durable state but never tears it
     # down. (.go is excluded — its `>`/`>>` are operators, not file redirects.)
+    # A `*_test.*` is also excluded: it is a maintainer unit test, not the runner
+    # a demo user pastes, so it is not a "leaves a mess for the user" signal — and
+    # its create-tokens are usually commands-as-data in string fixtures (a pinned
+    # `mkdir … && printf > …` chain) that are never executed, while its own I/O
+    # lifecycle is the test framework's concern (tmp_path / TemporaryDirectory).
     for name, body in demo.scripts.items():
-        if name.lower().endswith(TEARDOWN_SCAN_SUFFIXES):
+        low = name.lower()
+        if low.endswith(TEARDOWN_SCAN_SUFFIXES) and "_test." not in low:
             if _CREATE_RE.search(body) and not _CLEANUP_RE.search(body):
                 defects.append(f"`{name}` creates files/dirs (mktemp/mkdir/redirect) with no "
                                f"cleanup (no trap/atexit/rm/TemporaryDirectory) — it can leave a mess")

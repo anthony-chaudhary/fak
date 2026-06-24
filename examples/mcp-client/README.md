@@ -10,7 +10,7 @@ your own (any-language) agent.
 
 > Already use Claude Code / Cursor and just want the one-paste `.mcp.json` setup?
 > That's the sibling [`../mcp`](../mcp/README.md). A CI-grade pass/fail gate that
-> asserts a *verdict* over MCP stdio is [`../mcp/verify.py`](../mcp/verify.py).
+> asserts a *verdict* over MCP stdio lives in that same [`../mcp/`](../mcp/README.md) demo.
 > **This** example is the protocol-level walkthrough: any client, all six verbs.
 
 ## Run it
