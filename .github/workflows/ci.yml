@@ -372,6 +372,24 @@ jobs:
             || echo "::warning title=stamp-coverage::bindable ship-stamp coverage below the watched floor (advisory) — add a (fak <leaf>) trailer to recent ships; see tools/commit_stamp_doctor.py and #517"
           echo "::endgroup::"
 
+      # Witness-gradeable commit-subject coverage (advisory): the subject-verb twin
+      # of the ship-stamp coverage above. The DOS commit-audit witness ABSTAINs on a
+      # noun-led subject, and ABSTAIN-with-source is the DOMINANT cause of an issue
+      # grading CLAIMED_CLOSED instead of TRUE_RESOLVED (the closure auditor measured
+      # ~13/43). commit_subject_coverage folds check_commit_msg.verdict (the SAME verb
+      # set the commit-msg hook enforces) over recent ship subjects so that abstain
+      # rate is WATCHED, not guessed. Two-tier like its siblings: the tool's unit
+      # tests are HARD; the coverage check runs --min-coverage as a ::warning:: floor
+      # that never fails the build. Pure git-log read, no gh/dos.
+      - name: commit-subject coverage (advisory; unit tests HARD, witness-gradeability a watched floor)
+        working-directory: ${{ github.workspace }}
+        run: |
+          python tools/commit_subject_coverage_test.py
+          echo "::group::commit-subject-coverage (witness-gradeable subject fraction, advisory)"
+          python tools/commit_subject_coverage.py --min-coverage 75 \
+            || echo "::warning title=subject-coverage::witness-gradeable commit-subject coverage below the watched floor (advisory) — lead the description with a recognized verb (add/fix/implement/…); see tools/check_commit_msg.py"
+          echo "::endgroup::"
+
       # DOS trust-floor gate: the verdict IS the exit code. `dos review` fails the build
       # (exit 1) if any commit in the pushed range makes a code/test/doc claim its own diff
       # does not witness (a "fix: X" that didn't touch X, an empty "done"). This is DOS
