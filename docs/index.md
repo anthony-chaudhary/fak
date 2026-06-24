@@ -3,9 +3,9 @@ title: "fak — the agent kernel | default-deny permission gate + addressable KV
 description: "fak is an agent kernel for self-hosted LLM agent fleets: an in-process, default-deny permission gate fused with an addressable, bit-exact KV cache. Prompt-injection and tool-poisoning containment, capability security, and cache-efficient inference, in Go."
 ---
 
-# fak — the agent kernel
+# fak — the Fused Agent Kernel (agent kernel)
 
-**Treat the model like an untrusted program, and the tool call like a syscall.**
+**Treat the model like an untrusted program, and the tool call like a syscall — the model proposes, the kernel disposes.**
 
 <!-- hero video — the headline benchmarks as a ~40s reveal. Assets live in /visuals
      (outside the Pages /docs root), so they are referenced by absolute raw URL, the
@@ -37,23 +37,23 @@ context) also drives **performance** (do shared work once instead of every turn)
 > **In one line:** prompt-injection containment, capability security, and
 > cache-efficient inference for **self-hosted LLM agent fleets** — at one boundary.
 
-<!-- firewall explainer video — the boundary / how-it-works story (P1) as a ~44s reveal,
+<!-- agent-kernel explainer video — the boundary / how-it-works story (P1) as a ~44s reveal,
      built by tools/hero_video_gen.py from the in-repo deterministic diagrams (nothing
      generated). Same /visuals raw-URL convention as the hero video above. -->
 <div align="center">
   <video
-    src="https://raw.githubusercontent.com/anthony-chaudhary/fak/main/visuals/agent-firewall-video.mp4"
-    poster="https://raw.githubusercontent.com/anthony-chaudhary/fak/main/visuals/agent-firewall-video-poster.png"
+    src="https://raw.githubusercontent.com/anthony-chaudhary/fak/main/visuals/agent-kernel-video.mp4"
+    poster="https://raw.githubusercontent.com/anthony-chaudhary/fak/main/visuals/agent-kernel-video-poster.png"
     autoplay loop muted playsinline preload="metadata"
     width="100%" style="max-width:960px;border-radius:12px"
-    aria-label="fak — the agent tool firewall: a ~44 second explainer reveal — the firewall card, the tool call as a syscall, the five-gate flow through the kernel, the two-gate security model, the Context MMU, shared-prefix KV, and the 2-D scheduler">
+    aria-label="fak — the agent kernel: a ~44 second explainer reveal — the agent-kernel card, the tool call as a syscall, the five-gate flow through the kernel, the two-gate security model, the Context MMU, shared-prefix KV, and the 2-D scheduler">
     <img
-      src="https://raw.githubusercontent.com/anthony-chaudhary/fak/main/visuals/agent-firewall-video.gif"
-      alt="fak agent tool firewall — an animated ~44-second explainer"
+      src="https://raw.githubusercontent.com/anthony-chaudhary/fak/main/visuals/agent-kernel-video.gif"
+      alt="fak agent kernel — an animated ~44-second explainer"
       width="100%" style="max-width:960px;border-radius:12px"/>
   </video>
   <br/>
-  <sub>How the boundary works — the agent tool firewall as a ~44-second reveal · <a href="https://raw.githubusercontent.com/anthony-chaudhary/fak/main/visuals/agent-firewall-video.mp4">full-resolution MP4</a></sub>
+  <sub>How the boundary works — the agent kernel as a ~44-second reveal · <a href="https://raw.githubusercontent.com/anthony-chaudhary/fak/main/visuals/agent-kernel-video.mp4">full-resolution MP4</a></sub>
 </div>
 
 [**▶ Try the live demos**](demos.html){: .btn } ·
@@ -143,7 +143,8 @@ twice — tools wired directly vs. behind `fak` — and prints the before/after.
 
 ---
 
-<sub>License: Apache-2.0 · [Report a vulnerability](https://github.com/anthony-chaudhary/fak/blob/main/SECURITY.md) · Keywords: agent
-kernel, agent tool firewall, AI agent security, prompt injection defense, tool
-poisoning, capability security, default-deny permission gate, KV cache, addressable
-KV cache, self-hosted LLM, LLM agent fleet, agentic AI, Go.</sub>
+<sub>License: Apache-2.0 · [Report a vulnerability](https://github.com/anthony-chaudhary/fak/blob/main/SECURITY.md) · Keywords: Fused
+Agent Kernel, fak agent kernel, fak serve, fak-certified, agent kernel, agent tool
+firewall, AI agent security, prompt injection defense, tool poisoning, capability
+security, default-deny permission gate, treat the tool call like a syscall, KV cache,
+addressable KV cache, self-hosted LLM, LLM agent fleet, agentic AI, Go.</sub>

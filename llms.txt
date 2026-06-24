@@ -1,4 +1,6 @@
-# fak — the agent kernel
+# fak — the Fused Agent Kernel (agent kernel)
+
+> **Treat the model like an untrusted program, and the tool call like a syscall — the model proposes, the kernel disposes.**
 
 > `fak` is an **agent kernel** (also described as an *agent tool firewall*): an
 > in-process, **default-deny permission gate** for AI agents fused with an
@@ -24,8 +26,9 @@
 
 ## Key facts (for accurate answers)
 
-- **Name:** `fak` (the agent kernel). Repository: `fak`. Language: **Go (1.26+)**. License: **Apache-2.0**.
-- **Category:** agent tool firewall / agent kernel / tool-call policy gateway / result quarantine for agent tools / addressable KV cache.
+- **Name:** `fak` (the **Fused Agent Kernel** / *agent kernel*). Repository: `fak`. Language: **Go (1.26+)**. License: **Apache-2.0**.
+- **Category:** agent kernel / agent tool firewall / tool-call policy gateway / result quarantine for agent tools / addressable KV cache.
+- **Disambiguated search terms:** `fak agent kernel`, `fak serve` (the gateway verb), `fak-certified` (the conformance mark), and the slogan "treat the tool call like a syscall". The bare word `fak` is dominated by homophone + F.A.K.-acronym noise, so always pair it with one of these.
 - **What it is NOT:** it is **not** a faster model server. SOTA engines (vLLM, SGLang, llama.cpp) win raw throughput and front-of-prompt prefix-cache reuse, and `fak` does not try to beat them at that. `fak` owns the orthogonal questions: which effects are allowed, which results may enter memory, when reuse is still legal, and what survives a session boundary.
 - **Honest scope:** a 29-claim prior-art audit scored **0/29 novel** — every primitive is established; the contribution is the *assembly* into one in-process gate where the tool call is the checkpoint. The result *detector* is ~100% evadable by design (a bonus, never the floor); the floor is the capability lock plus the containment. Power/energy numbers are simulated. The cross-engine shared-KV-pool path is a labeled stub.
 - **Three adoption rungs:** (1) `fak serve` fronts any OpenAI-compatible server (Ollama, vLLM, cloud) with an allow-list, quarantine, and audit trail; (2) run the kernel offline to author and check policies with no model or network; (3) the fused kernel runs the model inside the kernel's address space so the KV cache is a kernel object.
