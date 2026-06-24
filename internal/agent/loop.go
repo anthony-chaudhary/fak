@@ -38,6 +38,13 @@ type ArmMetrics struct {
 	TaskCompleted       bool   `json:"task_completed"`       // the booking actually succeeded (the goal)
 	HitTurnCap          bool   `json:"hit_turn_cap"`
 	FinalAnswer         string `json:"final_answer"`
+
+	// StoppedBySession is the session-control stop reason when a wired session.Table
+	// ended this arm before maxTurns / a final answer (a closed token: PAUSED,
+	// DRAINING, BUDGET_TURNS_EXHAUSTED, ...). "" when the run ended the historical way
+	// (final answer or turn cap) or no table was wired. It makes "why did this arm
+	// stop" a field, not an inference — the whole point of first-class session state.
+	StoppedBySession string `json:"stopped_by_session,omitempty"`
 }
 
 // RunResult is the full A/B outcome.
@@ -221,7 +228,14 @@ func Run(ctx context.Context, p Planner, task string, maxTurns int) (*RunResult,
 
 // RunArm drives ONE arm of the loop: the same planner + task, with the kernel
 // either mediating every tool call (fak=true) or bypassed (the "now" baseline).
-func RunArm(ctx context.Context, p Planner, task string, fak bool, maxTurns int, log *[]traceEvent) (ArmMetrics, error) {
+//
+// An optional WithSessionTable option threads a per-session DRIVE state in: each turn
+// boundary the loop gates on the session's live run-state + budget + pace and ends
+// the arm cleanly (recording StoppedBySession) when the session is paused, drained,
+// stopped, or budget-exhausted. With no option, the loop is byte-for-byte the
+// historical fixed-maxTurns loop.
+func RunArm(ctx context.Context, p Planner, task string, fak bool, maxTurns int, log *[]traceEvent, opts ...RunOption) (ArmMetrics, error) {
+	cfg := resolveRunConfig(opts)
 	m := ArmMetrics{Arm: "baseline"}
 	if fak {
 		m.Arm = "fak"
@@ -239,13 +253,28 @@ func RunArm(ctx context.Context, p Planner, task string, fak bool, maxTurns int,
 	tools := ToolCatalog()
 
 	for turn := 0; turn < maxTurns; turn++ {
-		comp, err := p.Complete(ctx, messages, tools)
+		// Session-control gate (no-op when no table is wired): read the session's live
+		// drive state at the turn boundary. A non-proceed verdict ends the arm here —
+		// budget-exhausted / drained / stopped / paused — with the reason recorded, so a
+		// stop is taken at a CLEAN boundary, never mid-turn.
+		perTurnCap, proceed, stopReason := cfg.gateTurn(ctx)
+		if !proceed {
+			m.StoppedBySession = stopReason
+			if fak {
+				finalizeFak(k, &m)
+			}
+			return m, nil
+		}
+
+		comp, err := p.Complete(ctx, messages, tools, sampleOptsFor(perTurnCap)...)
 		if err != nil {
 			return m, fmt.Errorf("%s arm turn %d: %w", m.Arm, turn+1, err)
 		}
 		m.Turns++
 		m.PromptTokens += comp.Usage.PromptTokens
 		m.CompletionTokens += comp.Usage.CompletionTokens
+		// Report this turn's output usage to the session budget (no-op without a table).
+		cfg.debitTurn(comp.Usage.CompletionTokens)
 		asst := comp.Message
 		asst.Role = RoleAssistant
 		// Tool-call conformance: the model announced tool calls but none parsed.
