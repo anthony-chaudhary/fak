@@ -23,8 +23,8 @@ This guide covers both integration approaches.
 ### 1. Install fak
 
 ```bash
-# From the repo
-cd fleet/fak
+# From the repo (the Go module is the repo root)
+git clone https://github.com/anthony-chaudhary/fak && cd fak
 go build -o fak ./cmd/fak
 
 # Or via the installer
@@ -82,7 +82,7 @@ Or use an upstream provider:
   --base-url https://api.openai.com/v1 \
   --model gpt-4o \
   --api-key-env OPENAI_API_KEY \
-  --policy path/to/your-policy.json
+  --policy examples/dev-agent-policy.json
 ```
 
 ### Step 2: Configure Cursor for MCP
@@ -91,17 +91,20 @@ Or use an upstream provider:
 2. Navigate to **MCP Servers**
 3. Add a new MCP server configuration:
 
+Point `command` at the `fak` binary you built (an absolute path, or `fak` if it's on
+your `PATH`) and `--policy` at a shipped example to start (then adapt):
+
 ```json
 {
   "mcpServers": {
     "fak": {
-      "command": "/path/to/fak",
+      "command": "./fak",
       "args": [
         "serve",
         "--stdio",
         "--base-url", "http://localhost:11434/v1",
         "--model", "qwen2.5:1.5b",
-        "--policy", "/path/to/policy.json"
+        "--policy", "examples/customer-support-readonly-policy.json"
       ],
       "env": {
         "OPENAI_API_KEY": "your-key-here"
@@ -175,7 +178,7 @@ Cursor can use custom OpenAI-compatible endpoints. `fak` provides an OpenAI-comp
   --addr 127.0.0.1:8080 \
   --base-url http://localhost:11434/v1 \
   --model qwen2.5:1.5b \
-  --policy path/to/policy.json \
+  --policy examples/customer-support-readonly-policy.json \
   --vdso=true
 ```
 

@@ -49,7 +49,7 @@ This guide explains how to use **fak** as a kernel-adjudicated gateway for OpenA
 Start `fak serve` in front of the real OpenAI API:
 
 ```bash
-cd fleet/fak
+git clone https://github.com/anthony-chaudhary/fak && cd fak
 go build -o fak ./cmd/fak
 
 export OPENAI_API_KEY="sk-..."

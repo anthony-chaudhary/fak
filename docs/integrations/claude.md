@@ -289,7 +289,7 @@ wiring `fak guard` automates.
 The dogfood launcher spins up the entire stack with one command:
 
 ```bash
-cd fleet/fak
+git clone https://github.com/anthony-chaudhary/fak && cd fak
 ./scripts/dogfood-claude.sh --probe "Reply with exactly the word: pong"
 ```
 
@@ -324,7 +324,7 @@ fak serve --help                  # Repo CLI from PATH
 Windows uses the native PowerShell script — same flow, no Ollama dependency:
 
 ```powershell
-cd fleet\fak
+git clone https://github.com/anthony-chaudhary/fak; cd fak
 .\scripts\dogfood-claude.ps1 --probe "say pong"
 ```
 
@@ -415,8 +415,9 @@ curl http://127.0.0.1:8131/v1/models
 
 ### 2. Start `fak serve`
 
+From the repo root (the Go module is the repo root):
+
 ```bash
-cd fleet/fak
 go build -o fak ./cmd/fak
 
 ./fak serve \
