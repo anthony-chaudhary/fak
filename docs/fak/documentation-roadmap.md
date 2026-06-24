@@ -39,6 +39,35 @@ is also closed. Closes #226.
 
 ---
 
+## Issue #223 (E-006) — Migration Guides: reconciled ✅
+
+Epic **[#223 — "Migration Guides [E-006]"](https://github.com/anthony-chaudhary/fak/issues/223)**
+asks for per-framework migration guides. All four acceptance criteria are met by the
+already-shipped [`migration-guide.md`](migration-guide.md) — verified against section
+content (not just the index row in *Completed Documentation*) and against the built `fak`
+binary:
+
+| Acceptance criterion | Shipped evidence |
+|---|---|
+| OpenAI API migration guide | [`migration-guide.md` → Migrating from the OpenAI API](migration-guide.md#migrating-from-the-openai-api) — `--provider openai` proxy, SDK `base_url` swap, tool execution unchanged |
+| LangChain migration guide | [`migration-guide.md` → Migrating from LangChain](migration-guide.md#migrating-from-langchain) — `langchain-openai` + `langchain-anthropic` base-URL overrides, `@tool` / `AgentExecutor` unchanged |
+| AutoGen migration guide | [`migration-guide.md` → Migrating from AutoGen](migration-guide.md#migrating-from-autogen) — v0.4 `OpenAIChatCompletionClient` + v0.2 `config_list`, client-side tool exec |
+| llama.cpp migration guide | [`migration-guide.md` → Migrating from llama.cpp](migration-guide.md#migrating-from-llamacpp) — Option A (keep `llama-server`) + Option B (in-kernel `--gguf`) |
+
+Every command the guide tells an adopter to run — `fak serve --base-url` / `--provider` /
+`--api-key-env` / `--gguf` / `--require-key-env`, `fak policy --dump` / `--check`,
+`fak preflight` — resolves against the built `fak` binary, so the page documents real
+flags, not aspirational ones. The guide is indexed in [`README.md`](README.md) and
+cross-linked from `agent-framework-integration.md`, `faq.md`, and `LEARNING-PATH.md`.
+
+> **Dependency note (honest).** #223 lists #343 (session-reload walkthrough) as a
+> dependency. #343 remains **open**, but it tracks a *separate* recall-example concern:
+> the migration guides are self-contained base-URL redirects and neither reference nor
+> gate on session reload. The four guides above close #223 on their own merits; #343 is
+> followed on its own thread. Closes #223.
+
+---
+
 ## Completed Documentation ✅
 
 The following documentation already exists in `docs/fak/` and `docs/`:
