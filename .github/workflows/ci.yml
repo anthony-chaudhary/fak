@@ -151,6 +151,12 @@ jobs:
           python tools/issue_resolve_dispatch_test.py
           python tools/issue_lane_router_test.py
           python tools/dos_supervisor_status_test.py
+          python tools/dos_supervisor_watchdog_test.py
+          python tools/dos_supervisor_canary_test.py
+          python tools/dos_supervisor_canary_audit_test.py
+          python tools/dispatch_worker_test.py
+          python tools/dos_sync_test.py
+          python tools/fleet_dos_dispatch_watchdog_test.py
           python tools/dos_hook_bench_test.py
           python tools/dispositions_test.py
 
