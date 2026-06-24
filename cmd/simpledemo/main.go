@@ -59,8 +59,15 @@ func main() {
 	backend := flag.String("backend", "", "Compute backend to run through, e.g. cuda (default: the pure-Go Q8 CPU path). Use to prove GPU usage on a build that registered an accelerator.")
 	flag.Parse()
 
-	// Resolve the model path: expand ~, auto-detect a local model, auto-download or
-	// print help when none is found, and fetch an explicit -gguf that isn't on disk.
+	// Expand a leading ~ at the parse boundary so every downstream path — and the
+	// boundary lint that audits this convention — sees it done here, where the flags
+	// are declared. ExpandTilde is idempotent, so resolveModelPath/loadModel
+	// re-expanding it is a safe no-op.
+	*gguf = pathutil.ExpandTilde(*gguf)
+	*tokDir = pathutil.ExpandTilde(*tokDir)
+
+	// Resolve the model path: auto-detect a local model, auto-download or print help
+	// when none is found, and fetch an explicit -gguf that isn't on disk.
 	resolveModelPath(gguf, tokDir, *autoDownload, *quiet)
 
 	// Load model
