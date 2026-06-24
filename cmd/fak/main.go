@@ -107,7 +107,7 @@ func main() {
 }
 
 func usage() {
-	fmt.Fprintf(os.Stderr, "fak - Agent Tool Firewall (Fused Agent Kernel, v%s)\n\n", appversion.Current())
+	fmt.Fprintf(os.Stderr, "fak - the Fused Agent Kernel (v%s)\n\n", appversion.Current())
 	fmt.Fprint(os.Stderr, `usage:
   fak run       --trace FILE [--engine inkernel] [--vdso=true] [--policy FILE]
   fak preflight --tool NAME --args JSON [--policy FILE]
@@ -729,7 +729,7 @@ func lintExitCode(rep toollint.Report, strict bool) int {
 // requested, so it returns ok=true with an empty key. But when the flag names an
 // env var that is unset or empty, it returns ok=false: the operator asked for
 // auth and the secret did not land (typo, un-propagated CI env, k8s Secret
-// mis-mount, pod restarted without it). For an agent tool FIREWALL the safe
+// mis-mount, pod restarted without it). For an agent kernel the safe
 // default is to fail CLOSED — refuse to start — not to warn and silently serve
 // unauthenticated. The lookup is injected so the decision is unit-testable
 // without touching process env. (issue #213-class fail-open fix; see #255.)

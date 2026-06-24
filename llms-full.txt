@@ -8259,7 +8259,7 @@ This guide shows how to use `fak` as a tool-governance layer for Cursor AI agent
 
 ## Overview
 
-`fak` is an agent tool firewall: a single Go binary that sits between an AI agent and its tools, enforcing a capability floor (which tools may be called) and quarantine (whether tool results can enter the agent's context). Cursor is an AI-native IDE that can integrate with external tools through two primary mechanisms:
+`fak` is the Fused Agent Kernel: a single Go binary that sits between an AI agent and its tools, enforcing a capability floor (which tools may be called) and quarantine (whether tool results can enter the agent's context). Cursor is an AI-native IDE that can integrate with external tools through two primary mechanisms:
 
 1. **MCP (Model Context Protocol)** - Native protocol for tool and data source integration
 2. **OpenAI-compatible HTTP proxy** - Cursor can be configured to use custom OpenAI-compatible endpoints

@@ -1,6 +1,6 @@
 # Installing `fak`
 
-`fak` is the agent tool firewall (the Fused Agent Kernel) — one static Go binary you
+`fak` is the Fused Agent Kernel — one static Go binary you
 put in front of your model so every tool call is adjudicated before it runs. It has
 **zero external dependencies** (standard library only — there is no `go.sum`, no Python,
 no CUDA toolchain), so "install" really is just *get the binary onto the box*. This page

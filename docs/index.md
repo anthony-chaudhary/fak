@@ -27,7 +27,7 @@ description: "fak is an agent kernel for self-hosted LLM agent fleets: an in-pro
   <sub>The headline benchmarks as a ~40-second reveal · <a href="https://raw.githubusercontent.com/anthony-chaudhary/fak/main/visuals/hero-video.mp4">full-resolution MP4</a></sub>
 </div>
 
-`fak` is an **agent kernel** (an *agent tool firewall*): an in-process,
+`fak` is an **agent kernel** (also described as an *agent tool firewall*): an in-process,
 **default-deny permission gate** for AI agents, fused with an **addressable,
 bit-exact KV cache**, written in **Go**. Every tool call an agent makes passes
 through a kernel the model doesn't control — the same boundary that enforces
