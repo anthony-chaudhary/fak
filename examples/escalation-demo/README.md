@@ -26,6 +26,15 @@ thing that makes the capability lock tolerable in production:
 
 The four steps are **asserted**, and they gate the exit code (0 iff all four hold).
 
+## Scope — what this does **not** claim
+
+This demo shows the *graceful-deny* harness pattern (catch → route → redact → escalate); it
+does **not** claim to be a production escalation system. It does not prove the deny itself
+(that is `adjudication-demo/`), does not demonstrate the kernel-side IFC taint exemption (that
+is covered in `internal/ifc`), and does not exercise auth, rate-limiting, or a real ticketing
+backend — the "human queue" is a stand-in. It is a deterministic, model-free walkthrough of one
+discipline: the escalation route is itself adjudicated, so it cannot become a side-channel.
+
 ## The discipline: the escalation path is part of the policy
 
 Three rules this demo makes concrete — and the reason it is a runnable artifact and not prose:

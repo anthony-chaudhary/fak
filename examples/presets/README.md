@@ -37,6 +37,20 @@ part of this gate live in the parent [`../`](../README.md) `examples/` directory
 go run ./cmd/fak policy --check examples/presets/coding-agent-safe.json
 ```
 
+Each check **runs in a few seconds** (a `go run` of the validator over one manifest — no
+model, no network). The result is **deterministic**: `fak policy --check` and the
+`FromPolicy` round-trip are pure functions of the manifest bytes, so the same preset yields
+the **same verdict on every run**, and re-running is safe (idempotent — it writes nothing).
+
+## Scope — what this preset pack does **not** claim
+
+A preset is a curated *starting point*, not a finished policy. It does **not** claim to make
+any agent "safe", does **not** prove anything about content-level prompt injection, and is
+**not a security guarantee** — it is a capability *floor* you copy, narrow, and witness with
+`fak policy --check` / `fak preflight` before trusting it. The load-bearing refusals are the
+structural ones (`DEFAULT_DENY`, the in-kernel rungs); treat the `deny_regex` arg-rules as
+best-effort defense-in-depth, not a parser.
+
 ---
 
 ## `coding-agent-safe.json` — hardened coding agent (built on `gitgate`)

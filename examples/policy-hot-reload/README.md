@@ -16,10 +16,20 @@ describes the motion; this directory *runs* it and asserts each step.
 examples/policy-hot-reload/run.sh         # build fak, serve, run 10 witnesses, teardown
 ```
 
-Needs only Go (to build `fak`) and `curl` — **no model, key, or GPU**. The verdict
+Needs only Go (to build `fak`) and `curl` — **no model, key, or GPU**. It **runs in a
+few seconds** once `fak` is built — no model, no network. The verdict
 surface (`/v1/fak/adjudicate`) and the lifecycle routes do not touch an upstream,
 so the result is **deterministic** on every run. A captured run is in
 [`EXAMPLE-OUTPUT.md`](EXAMPLE-OUTPUT.md).
+
+## What you see
+
+The run prints the ten witnesses above in order, each tagged with its verdict. The tells
+that the hot-reload worked: the **same** `delete_account` call flips from `DENY`
+(`POLICY_BLOCK`) under floor **A** to `ALLOW` under floor **B**; the trace stays
+`quarantined` across the swap; and `start_time_unix` + PID are identical before and after
+(only `uptime_seconds` rises) — proof the process never restarted. The script ends with a
+one-line `PASS`/`FAIL` summary and gates the exit code on it.
 
 ## The operator loop the script walks
 
@@ -95,7 +105,13 @@ end-to-end in the sibling [`../auth-hardening/`](../auth-hardening/) example
 (witnesses 5–6 there gate `/metrics`; the policy reload route rides the identical
 gate).
 
-## What hot-reload does **not** change
+## Scope — what this demo does **not** claim (what hot-reload does **not** change)
+
+This demo proves the *operator loop* (edit → check → reload → swapped verdict, no restart, no
+dropped state); it does **not** claim that hot-reload is a security boundary on its own, and
+it does **not** demonstrate multi-node propagation or auth (auth is the sibling
+`auth-hardening/` example). Concretely, hot-reload itself:
+
 
 - **It replaces the whole floor, it does not merge.** The reloaded manifest *is*
   the new floor. Start from `fak policy --dump` so you never drop a baked-in

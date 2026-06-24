@@ -26,6 +26,16 @@ Needs only Python 3 (standard library — no `mcp` SDK, no `requests`) and the
 few seconds** and is **deterministic** — the same six responses on every run. A
 captured run is in [`EXAMPLE-OUTPUT.md`](EXAMPLE-OUTPUT.md).
 
+## What you see
+
+The client prints each step of the protocol exchange in order: the `initialize` handshake
+(with the negotiated `protocolVersion`), the `tools/list` discovery response, then one block
+per tool call showing the **response shape** that comes back. Five tools return a
+`SyscallResponse` envelope (`isError:false`, the verdict embedded — including a deny-as-value
+`DENY`); `fak_context_change` returns a JSON-RPC **error** (`-32602`) for a path with no
+recall image. The same six responses print on every run, so you can read the exact wire shape
+before porting the client into your own agent.
+
 ## The two transports
 
 fak exposes the **same** JSON-RPC dispatch over two transports — `client.py`

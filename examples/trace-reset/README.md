@@ -22,7 +22,8 @@ one clears the *taint ledger*.
 examples/trace-reset/run.sh         # build fak, serve, run 11 witnesses, teardown
 ```
 
-Needs only Go (to build `fak`) and `curl` — **no model, key, or GPU**. The admit,
+Needs only Go (to build `fak`) and `curl` — **no model, key, or GPU**. It **runs in a
+few seconds** once `fak` is built — no model, no network. The admit,
 observe, and reset routes do not touch an upstream, so the result is
 **deterministic** on every run. A captured run is in
 [`EXAMPLE-OUTPUT.md`](EXAMPLE-OUTPUT.md).
