@@ -1,0 +1,156 @@
+# Benchmark regression gate (E-003 / issue #231).
+#
+# Runs a curated CPU-only subset of the Go benchmark suite (adjudicator · abi ·
+# ctxmmu · wirescreen · contextq) and fails the build when any benchmark
+# regresses >= 20% against the last successful main-branch run, measured with
+# benchstat from golang.org/x/perf.
+#
+# GPU/Metal/arm64 benchmarks are intentionally excluded; this job targets only
+# pure-Go, CPU-only workloads that run reliably on ubuntu-latest.
+#
+# Baseline lifecycle:
+#   push to main  -> current results uploaded as the `bench-baseline` artifact
+#                    (90-day TTL, overwritten on each successful main push).
+#   PR / branch   -> downloads that artifact, runs benchstat, fails on >= 20%
+#                    regression; uploads its own short-lived artifact without
+#                    touching the main baseline.
+#   first ever run -> no prior artifact; comparison is skipped; baseline is
+#                    seeded for subsequent runs.
+#
+# To update the baseline after an intentional performance change:
+#   merge the change to main; the next successful run becomes the new baseline.
+name: bench
+
+on:
+  push:
+    branches: [main, master, fak-v0.1]
+  pull_request:
+
+permissions:
+  contents: read
+  actions: read   # gh run list / gh run download needs this
+
+jobs:
+  bench:
+    name: benchmark regression gate
+    runs-on: ubuntu-latest
+    env:
+      GOTOOLCHAIN: auto
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: false   # zero external deps -> no go.sum to key a cache on
+
+      - name: install benchstat
+        run: go install golang.org/x/perf/cmd/benchstat@latest
+
+      # Run only the CPU-safe benchmarks.  The regex is anchored (^...$) so it
+      # cannot accidentally pick up cuda/metal/arm64 variants with a shared prefix.
+      # -run='^$' prevents regular test functions from executing alongside the
+      # benchmarks, keeping the step fast and the output clean for benchstat.
+      - name: run benchmarks
+        run: |
+          go test \
+            -run='^$' \
+            -bench='^(BenchmarkDecide|BenchmarkAdjudicateArgScaling|BenchmarkRegistryReadScaling|BenchmarkScreenBytesBenign|BenchmarkAdmitBenign|BenchmarkPropose|BenchmarkApply|BenchmarkWorkflowMemory)$' \
+            -benchmem -count=6 -timeout=10m \
+            ./internal/adjudicator/... \
+            ./internal/abi/... \
+            ./internal/ctxmmu/... \
+            ./internal/wirescreen/... \
+            ./internal/contextq/... \
+            | tee bench-results.txt
+          echo "--- benchmark lines ---"
+          grep -E '^(Benchmark|goos|goarch|pkg|cpu)' bench-results.txt || true
+
+      # Download the baseline artifact from the last successful run on the main
+      # branch.  Uses the built-in gh CLI so no third-party action is required.
+      # On the first run (or if the 90-day artifact has expired) this step sets
+      # found=false and the comparison step is skipped.
+      - name: fetch baseline from last successful main run
+        id: baseline
+        run: |
+          echo "Searching for last successful bench run on main..."
+          RUN_ID=$(gh run list \
+            --repo "$GITHUB_REPOSITORY" \
+            --branch main \
+            --workflow bench.yml \
+            --status success \
+            --limit 1 \
+            --json databaseId \
+            -q '.[0].databaseId' 2>/dev/null || true)
+          if [ -n "$RUN_ID" ] && [ "$RUN_ID" != "null" ]; then
+            echo "Found run $RUN_ID -- downloading bench-baseline artifact..."
+            if gh run download "$RUN_ID" \
+                --repo "$GITHUB_REPOSITORY" \
+                --name bench-baseline \
+                --dir bench-prev 2>/dev/null; then
+              echo "found=true" >> "$GITHUB_OUTPUT"
+            else
+              echo "found=false" >> "$GITHUB_OUTPUT"
+              echo "Download failed (artifact may have expired) -- skipping comparison."
+            fi
+          else
+            echo "found=false" >> "$GITHUB_OUTPUT"
+            echo "No prior successful run found -- seeding baseline on this push."
+          fi
+
+      # Compare current results against the downloaded baseline.  benchstat is
+      # run in two-file mode: old (baseline) vs new (current).  The Python
+      # script fails the step if any benchmark shows a statistically-significant
+      # regression of >= 20%.  Rows marked with "~" are not statistically
+      # significant and are always skipped.
+      - name: compare against baseline (fail on >= 20% regression)
+        if: steps.baseline.outputs.found == 'true'
+        run: |
+          benchstat bench-prev/bench-results.txt bench-results.txt | tee benchstat-report.txt
+          cat benchstat-report.txt
+          python3 << 'PYEOF'
+          import sys, re
+
+          regressions = []
+          with open('benchstat-report.txt') as f:
+              for line in f:
+                  # "~" marks statistically-insignificant changes in both old
+                  # and new benchstat output formats; skip them entirely.
+                  if '~' in line:
+                      continue
+                  # Both output formats represent regressions as "+X.XX%".
+                  m = re.search(r'\+(\d+(?:\.\d+)?)%', line)
+                  if m and float(m.group(1)) >= 20.0:
+                      regressions.append(line.rstrip())
+
+          if regressions:
+              print("::error::Benchmark regression(s) >= 20% detected (statistically significant):")
+              for r in regressions:
+                  print("  " + r)
+              sys.exit(1)
+          else:
+              print("Benchmark check passed -- no statistically-significant regressions >= 20%.")
+          PYEOF
+
+      # Upload current results as the new baseline (main / fak-v0.1 pushes only).
+      # PRs upload a separate short-lived artifact to avoid overwriting the baseline
+      # before the change has been reviewed and merged.
+      - name: save benchmark baseline (main only)
+        if: >-
+          github.ref == 'refs/heads/main' ||
+          github.ref == 'refs/heads/master' ||
+          github.ref == 'refs/heads/fak-v0.1'
+        uses: actions/upload-artifact@v4
+        with:
+          name: bench-baseline
+          path: bench-results.txt
+          retention-days: 90
+
+      - name: upload PR benchmark results
+        if: github.event_name == 'pull_request'
+        uses: actions/upload-artifact@v4
+        with:
+          name: bench-pr-${{ github.event.number }}-${{ github.run_number }}
+          path: bench-results.txt
+          retention-days: 14
