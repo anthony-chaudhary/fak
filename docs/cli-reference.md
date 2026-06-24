@@ -140,6 +140,7 @@ fak debug     --session DIR --cmd report|info|bt|x|ws|grep|tombstone|context-que
 fak answer-shape --text - --max-repeat 0.5 [--max-chars N]   # degeneration/verbosity witness over a text; exit 1 when it loops/runs away
 fak doctor    --text - [--max-repeat 0.5] [--max-chars N]   # run the answer-shape witness + the kernel admit cross-check, then recommend
 fak policy    --dump > policy.json | --check policy.json   # author/validate the deployable capability floor
+fak attest    --policy FILE [--probes FILE] [--json]        # compliance attestation: prove the capability floor from preflight (exit 0 PROVEN / 1 drift / 2 usage)
 fak hook      < call.json                              # spawned-hook decide (the A/B baseline)
 ```
 
@@ -209,6 +210,7 @@ attaches through a registry.
 |---|---|---|---|
 | in-process adjudicator | `internal/adjudicator` | DOS reference monitor: provable-deny / unprovable-defer, structured 12-reason refusal, bounded-disclosure SELF_MODIFY witness, redact-transform | `go test`, `BenchmarkDecide` |
 | deployable policy | `internal/policy` | the capability floor as a declarative, version-tagged JSON manifest (`--policy FILE`); closed-vocab deny validation; fail-loud load; `--dump`↔`--check` round-trip; `fak policy` verb | `go test` (9, incl. `TestRoundTrip`) |
+| compliance attestation | `cmd/fak/attest.go` | `fak attest --policy FILE` proves the floor from preflight: runs the real adjudication fold over a probe set (derived from the manifest, or `--probes FILE`) and emits a re-checkable attestation — every deny enforced with its cited reason, every allow admitted, default-deny holds; exit 0 PROVEN / 1 drift | `go test ./cmd/fak` (attest_test.go) |
 | tool vDSO | `internal/vdso` | 3-tier local fast path (pure / content-cache / static), world-versioned, LRU, canonical keys | `go test` |
 | engine | `internal/engine` | OpenAI-compatible client, base_url-swappable, cassette replay, usage extraction, mock | `go test` |
 | pre-flight + grammar | `internal/preflight`,`internal/grammar` | rung ladder + JSON-schema; positional→named auto-repair; fail-open; grammar dedup; hard-negative harvest | `go test` |

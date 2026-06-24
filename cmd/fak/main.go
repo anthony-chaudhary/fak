@@ -67,6 +67,8 @@ func main() {
 		cmdRun(os.Args[2:])
 	case "preflight":
 		cmdPreflight(os.Args[2:])
+	case "attest":
+		cmdAttest(os.Args[2:])
 	case "bench":
 		cmdBench(os.Args[2:])
 	case "turntax":
@@ -251,6 +253,14 @@ func usage() {
 	fmt.Fprint(os.Stderr, `usage:
   fak run       --trace FILE [--engine inkernel] [--vdso=true] [--policy FILE]
   fak preflight --tool NAME --args JSON [--policy FILE]
+  fak attest    --policy FILE [--probes FILE] [--out FILE] [--json] [--quiet]
+                 (the COMPLIANCE ATTESTATION GENERATOR: prove the capability floor
+                  from preflight. Runs the real adjudication fold over a probe set
+                  and emits a re-checkable attestation. Default probes are DERIVED
+                  from the manifest — each deny must be DENIED with its cited reason,
+                  each allow/allow_prefix ALLOWED, and an unnamed tool DENIED
+                  DEFAULT_DENY. --probes FILE attests arg-value cases. Exit 0 if the
+                  floor is PROVEN, 1 if any probe drifts, 2 on usage error)
   fak model     load <hf://owner/repo[@rev]/file>
                 (resolve an hf:// URI to a locally cached file path: Hub download with
                  HF_TOKEN auth and SHA256 verification against the Hub LFS oid. The
