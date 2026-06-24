@@ -18,6 +18,7 @@ flowchart LR
     FLT["flight-booking-agent-policy"]
     PHI["healthcare-phi-policy"]
     SQL["sql-analyst-policy"]
+    PRF["protected-push-floor: arg-scoped git_push"]
   end
 
   subgraph OPS["Runnable lifecycle artifacts"]
@@ -53,6 +54,7 @@ go run ./cmd/fak policy --check examples/dev-agent-policy.json
 go run ./cmd/fak policy --check examples/flight-booking-agent-policy.json
 go run ./cmd/fak policy --check examples/healthcare-phi-policy.json
 go run ./cmd/fak policy --check examples/sql-analyst-policy.json
+go run ./cmd/fak policy --check examples/protected-push-floor-policy.json
 ```
 
 ## Templates
@@ -67,6 +69,7 @@ go run ./cmd/fak policy --check examples/sql-analyst-policy.json
 | `flight-booking-agent-policy.json` | The README's canonical SFO→JFK booking agent (the [live A/B](../docs/benchmarks/LIVE-RESULTS.md) task) | search/book/read; refund, cancel, PNR-export, and fund transfer need a human; `read_policy` is `untrusted` (the booby-trap vector) | `go run ./cmd/fak preflight --policy examples/flight-booking-agent-policy.json --tool refund_payment --args "{}"` |
 | `healthcare-phi-policy.json` | HIPAA-style clinical agent — the heavy-PHI `redact_fields` + EHR/inbox provenance showcase | read EHR / search ICD / drug-interaction / note / appointment; export, email-PHI, and record-delete need a human; `read_patient_record` is `trusted_local` while `fetch_medical_literature` and `read_patient_message` are `untrusted` (the prompt-injection vector) | `go run ./cmd/fak preflight --policy examples/healthcare-phi-policy.json --tool export_patient_data --args "{}"` |
 | `sql-analyst-policy.json` | Internal-data / BI analyst — the heavy `arg_rules` showcase (SELECT-only SQL, row caps, schema allow-list) | read-only query / list / describe / chart / sanitized-CSV; write-query, DDL (`drop`/`alter`/`create_table`), `copy_to`/`pg_dump`, `shell`, and fund transfer are denied; the `run_read_query.sql` text is constrained to reject DDL/DML even when the tool name clears the allow-list | `go run ./cmd/fak preflight --policy examples/sql-analyst-policy.json --tool run_read_query --args '{"sql":"DROP TABLE customers"}'` |
+| `protected-push-floor-policy.json` | Coding agent that may push **feature** branches via a structured `git_push` MCP tool | argument-scoped (issue #449): `git_push` is allowed, but a push whose `ref`/`branch` is a protected ref (`main`/`master`/`trunk`/`release/*`/…) or a force-push is denied **by argument value** — the structured route a Bash `git push` deny_regex never sees. Finer than dogfood's command-string regex and dev-agent's blunt name-level `git_push` deny | `go run ./cmd/fak preflight --policy examples/protected-push-floor-policy.json --tool git_push --args '{"ref":"main"}'` |
 
 `refund_payment` returns **`DENY (POLICY_BLOCK)`** — the denied refund is meant to
 escalate to the `transfer_to_human_agents` safe sink, not silently fail.
