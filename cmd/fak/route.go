@@ -49,12 +49,27 @@ func runRoute(stdout, stderr io.Writer, argv []string) int {
 	complexity := fs.String("complexity", "", "complexity: low|medium|high (empty = unconstrained)")
 	labels := fs.String("labels", "", "subject labels as k=v[,k=v...] (domain, lang, tenant, …)")
 	simulate := fs.String("simulate", "", "stand-in member outputs '<out>[@score],…' to fold through the plan's reduction")
+	frontier := fs.String("frontier", "", "SOTA baseline model for the rough usage estimate (default: an Opus-class frontier anchor, $3/$15 per Mtok)")
+	prices := fs.String("prices", "", "override the rough price book: model=in/out[,model=N,...] (e.g. small=0.25/1.25,large=3/15)")
 	asJSON := fs.Bool("json", false, "emit the decision (and any reduction) as JSON")
 	if err := fs.Parse(argv); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			return 0 // an explicit -h/--help is not a usage error
 		}
 		return 2
+	}
+
+	// The rough cost lens (usage saved vs the SOTA frontier baseline): the built-in
+	// ladder, overlaid with any --prices the operator supplies. Built before the
+	// switch so --check can show the surface's cost shape too.
+	book := modelroute.DefaultPrices()
+	if *prices != "" {
+		over, err := modelroute.ParsePrices(*prices)
+		if err != nil {
+			fmt.Fprintln(stderr, "fak route:", err)
+			return 2
+		}
+		book = book.Overlay(over)
 	}
 
 	switch {
@@ -68,7 +83,7 @@ func runRoute(stdout, stderr io.Writer, argv []string) int {
 			return 1
 		}
 		fmt.Fprintf(stdout, "OK  %s  (manifest valid; %d rule(s), fail-closed default -> %s)\n\n%s",
-			*check, len(m.Rules), m.Default.Primary(), routeSummary(m))
+			*check, len(m.Rules), m.Default.Primary(), routeSummary(m, book, *frontier))
 		return 0
 	}
 
@@ -93,6 +108,7 @@ func runRoute(stdout, stderr io.Writer, argv []string) int {
 		Labels:       parseLabels(*labels),
 	}
 	d := m.Route(subj)
+	sav := modelroute.EstimateSavings(d, book, *frontier)
 
 	var red *modelroute.Result
 	if *simulate != "" {
@@ -105,10 +121,10 @@ func runRoute(stdout, stderr io.Writer, argv []string) int {
 	}
 
 	if *asJSON {
-		fmt.Fprintln(stdout, routeJSON(d, red))
+		fmt.Fprintln(stdout, routeJSON(d, red, sav))
 		return 0
 	}
-	printRoute(stdout, d, red)
+	printRoute(stdout, d, red, sav)
 	return 0
 }
 
@@ -163,7 +179,7 @@ func simulateReduce(p modelroute.Plan, spec string) (modelroute.Result, error) {
 }
 
 // printRoute renders the decision (and any simulated reduction) for a human.
-func printRoute(w io.Writer, d modelroute.Decision, red *modelroute.Result) {
+func printRoute(w io.Writer, d modelroute.Decision, red *modelroute.Result, sav modelroute.Savings) {
 	s := d.Subject
 	fmt.Fprintln(w, "== fak route ==")
 	fmt.Fprintf(w, "subject     : aspect=%s tool=%s prompt_tokens=%d latency=%s complexity=%s%s\n",
@@ -184,6 +200,7 @@ func printRoute(w io.Writer, d modelroute.Decision, red *modelroute.Result) {
 	if d.Plan.Reason != "" {
 		fmt.Fprintf(w, "reason      : %s\n", d.Plan.Reason)
 	}
+	fmt.Fprintf(w, "%s\n", sav.Headline())
 	if red != nil {
 		fmt.Fprintf(w, "\n-- simulated reduction (stand-in member outputs) --\n")
 		fmt.Fprintf(w, "reduce=%s  members=%d\n", red.Reduce, red.Members)
@@ -200,7 +217,7 @@ func printRoute(w io.Writer, d modelroute.Decision, red *modelroute.Result) {
 }
 
 // routeJSON renders the decision (and any reduction) as a stable JSON object.
-func routeJSON(d modelroute.Decision, red *modelroute.Result) string {
+func routeJSON(d modelroute.Decision, red *modelroute.Result, sav modelroute.Savings) string {
 	type memberJSON struct {
 		Model  string  `json:"model"`
 		Weight float64 `json:"weight,omitempty"`
@@ -227,6 +244,7 @@ func routeJSON(d modelroute.Decision, red *modelroute.Result) string {
 		"scout":    d.Plan.Scout,
 		"members":  mems,
 		"reason":   d.Plan.Reason,
+		"usage":    sav,
 	}
 	if red != nil {
 		obj["reduction"] = map[string]any{
@@ -241,19 +259,46 @@ func routeJSON(d modelroute.Decision, red *modelroute.Result) string {
 	return string(b)
 }
 
-// routeSummary renders a manifest's rules as an operator-readable table.
-func routeSummary(m modelroute.Manifest) string {
+// routeSummary renders a manifest's rules as an operator-readable table, with a
+// rough cost tag per rule (cheaper / premium / baseline vs the SOTA frontier) so
+// the whole policy's spend shape is visible at --check time.
+func routeSummary(m modelroute.Manifest, book modelroute.PriceBook, frontier string) string {
 	var sb strings.Builder
 	sb.WriteString("routing surface:\n")
+	row := func(name, match, plan string, p modelroute.Plan) {
+		cost := costTag(modelroute.EstimateSavings(modelroute.Decision{Plan: p}, book, frontier))
+		sb.WriteString(fmt.Sprintf("  %-22s %-26s %-44s [%s]\n", name, match, plan, cost))
+	}
 	for _, r := range m.Rules {
 		plan := "PICK -> " + r.Plan.Primary()
 		if r.Plan.IsEnsemble() {
 			plan = fmt.Sprintf("ENSEMBLE(%s) -> %s", r.Plan.Reduce, strings.Join(r.Plan.Models(), "+"))
 		}
-		sb.WriteString(fmt.Sprintf("  %-22s %-26s %s\n", r.Name, matchStr(r.Match), plan))
+		row(r.Name, matchStr(r.Match), plan, r.Plan)
 	}
-	sb.WriteString(fmt.Sprintf("  %-22s %-26s PICK -> %s\n", "(default)", "*", m.Default.Primary()))
+	row("(default)", "*", "PICK -> "+m.Default.Primary(), m.Default)
+	fb := frontier
+	if fb == "" {
+		fb = "an Opus-class frontier ($3/$15 per Mtok)"
+	}
+	sb.WriteString(fmt.Sprintf("\ncost lens (rough, vs %s; overridable with --prices): "+
+		"save=cheaper than baseline, premium=ensemble runs more compute, n/e=$0 baseline\n", fb))
 	return sb.String()
+}
+
+// costTag is the compact per-rule cost label for the routeSummary table.
+func costTag(s modelroute.Savings) string {
+	if !s.Estimable {
+		return "n/e"
+	}
+	switch f := s.SavedOutFrac; {
+	case f > 0.005:
+		return fmt.Sprintf("save ~%.0f%%", f*100)
+	case f < -0.005:
+		return fmt.Sprintf("premium +%.0f%%", -f*100)
+	default:
+		return "baseline"
+	}
 }
 
 func matchStr(mt modelroute.Match) string {
