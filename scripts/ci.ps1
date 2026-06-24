@@ -48,7 +48,7 @@ if ($null -ne $py) {
     # core.autocrlf=true is CRLF, so `gofmt -l` false-positives — the Makefile/WSL `make
     # ci` and CI run the canonical LF gofmt gate.)
     Write-Host "== repo-hygiene gates =="
-    foreach ($chk in @("check_doc_placement", "check_links", "check_committed_files", "check_secret_shapes")) {
+    foreach ($chk in @("check_doc_placement", "check_links", "check_committed_files", "check_secret_shapes", "check_brand_consistency")) {
         & $py "tools/$chk.py" --audit-tree
         if ($LASTEXITCODE -ne 0) { exit 1 }
     }

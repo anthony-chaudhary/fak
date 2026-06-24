@@ -95,5 +95,6 @@ hygiene:
 	@python3 tools/check_links.py --audit-tree
 	@python3 tools/check_committed_files.py --audit-tree
 	@python3 tools/check_secret_shapes.py --audit-tree
+	@python3 tools/check_brand_consistency.py --audit-tree
 	@python3 tools/scrub_hardware_names.py --check
 	@echo "hygiene OK"

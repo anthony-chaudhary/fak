@@ -73,13 +73,19 @@ jobs:
         run: |
           awk '/^- \[/{n=0; if(index($0,"[SHIPPED]"))n++; if(index($0,"[SIMULATED]"))n++; if(index($0,"[STUB]"))n++; c++; if(n!=1){print "VIOLATION:",$0; bad++}} END{printf "claims-lint: %d lines, %d violations\n",c,bad; if(bad>0||c==0)exit 1}' CLAIMS.md
 
-      - name: repo-hygiene gates (doc-placement · links · file-admission · secret-shapes · hardware-names)
+      - name: repo-hygiene gates (doc-placement · links · file-admission · secret-shapes · brand-descriptor · hardware-names)
         working-directory: ${{ github.workspace }}
         run: |
           python tools/check_doc_placement.py --audit-tree
           python tools/check_links.py --audit-tree
           python tools/check_committed_files.py --audit-tree
           python tools/check_secret_shapes.py --audit-tree
+          # Brand-descriptor guard (#591): fak's PRIMARY noun stays "the Fused Agent
+          # Kernel" / "agent kernel"; a re-drift to "agent tool firewall" / "tool-call
+          # policy gateway" as the headline descriptor fails the build. Conservative --
+          # keyword/topic/alternateName lists and the named video asset are allowed, so a
+          # flag is worth a human look. Runs clean today (brand_debt: 0).
+          python tools/check_brand_consistency.py --audit-tree
           # Unit tests for two previously-untested load-bearing governance tools
           # (flagged by tools/tool_coverage_audit.py): the prose hardware-name leak
           # gate's prose/identifier boundary, and the new-leaf scaffolder's dos.toml
