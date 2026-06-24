@@ -208,6 +208,11 @@ The example below runs proxy-mode fak as a stateless `Deployment` — the secret
 hardened `securityContext` that matches the distroless `nonroot` image. Apply it to
 your cluster after pushing the image to a registry the cluster can pull from.
 
+> This manifest is also **committed at [`deploy/k8s/`](https://github.com/anthony-chaudhary/fak/tree/main/deploy/k8s)**
+> — apply it directly with `kubectl apply -k deploy/k8s` (or `kubectl apply -f
+> deploy/k8s/fak.yaml`) after filling the `Secret` and pointing `image:` at your
+> registry. See [`deploy/k8s/README.md`](https://github.com/anthony-chaudhary/fak/blob/main/deploy/k8s/README.md).
+
 > TLS belongs at the edge. Terminate TLS at your Ingress / load balancer and route
 > cleartext HTTP to the `Service` — fak speaks plain HTTP.
 
@@ -234,7 +239,7 @@ data:
       "version": "fak-policy/v1",
       "posture": "fail_closed",
       "allow_prefix": ["read_", "get_", "list_", "search_"],
-      "deny": { "bash": "SINK_EXEC", "write_file": "SINK_EGRESS" },
+      "deny": { "bash": "POLICY_BLOCK", "write_file": "POLICY_BLOCK" },
       "redact_fields": ["api_key", "token", "password"]
     }
 ---

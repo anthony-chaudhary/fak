@@ -15,11 +15,11 @@
         {"id": "observability-scorecard", "kind": "path_exists", "target": "tools/observability_scorecard.py", "need": "an observability scorecard that proves dashboards/alerts/metrics-doc stay honest", "severity": "hard"},
         {"id": "config-surface", "kind": "any_path_exists", "targets": ["docs/fak/server-config.md", "docs/serve-config.md"], "need": "a server-config reference (flags + env vars) for production tuning", "severity": "hard"},
         {"id": "rate-limit", "kind": "path_exists", "target": "internal/ratelimit", "need": "a throughput/cost governor (rate limiting) so a runaway agent can't blow the budget", "severity": "hard"},
-        {"id": "k8s-manifest", "kind": "any_path_exists", "targets": ["deploy/k8s", "deploy/kubernetes", "deploy/k8s/fak.yaml", "deploy/helm"], "need": "a copy-paste k8s manifest / Helm chart, not just a guide section", "severity": "soft"}
+        {"id": "k8s-manifest", "kind": "any_path_exists", "targets": ["deploy/k8s", "deploy/kubernetes", "deploy/k8s/fak.yaml", "deploy/helm"], "need": "a copy-paste k8s manifest / Helm chart, not just a guide section", "severity": "hard"}
       ],
       "verdict": "served",
       "gaps": [
-        "The deployment guide covers k8s, but ships no copy-paste manifest or Helm chart yet",
+        "Ships a raw k8s manifest (deploy/k8s/, apply with kubectl -k), not a Helm chart — Helm is a future option",
         "No root docker-compose.yml — Compose is documented inline in the guide"
       ]
     },

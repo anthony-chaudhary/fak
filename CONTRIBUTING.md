@@ -108,6 +108,29 @@ kernel), in addition to the CLA grant to Netra.
   `[lanes]` in `dos.toml`. This is **in addition to** the DCO sign-off above, which is the
   separate legal-provenance trailer.
 
+## Good first issues — where to start
+
+New here? Browse the [`good first issue`](https://github.com/anthony-chaudhary/fak/labels/good%20first%20issue)
+label for scoped, well-defined starter work. If nothing's open, these are the standing
+on-ramps — each is additive, ships green through `make ci`, and touches no enforced
+guard:
+
+- **Add a per-agent integration recipe** under [`docs/integrations/`](docs/integrations/)
+  for a harness that doesn't have one yet (the pattern is in the existing
+  `claude.md` / `cursor.md` recipes). The lowest-friction first PR.
+- **Stamp a new leaf** with `python tools/new_leaf.py <name> --tier <tier> [--register]`
+  and fill it in — the additive extension path that never edits core. Start from
+  [`EXTENDING.md`](EXTENDING.md).
+- **Retire one doc-debt item** the docs scorecard names —
+  `python tools/docs_scorecard.py --scope reachable` prints a work-list of concrete,
+  cold-reader defects (a dead link, a stale install pin, a missing title). Fix one,
+  regenerate with `--markdown`.
+- **Add a real test** for a package the code-quality scorecard flags untested —
+  `python tools/code_quality_scorecard.py` names them; a genuine test (never a stub)
+  is exactly the contribution that pays back.
+
+Pick one, read the entry doc it points to, and ship it small and by explicit path.
+
 ## Reporting issues
 
 Use the GitHub tracker. Security-sensitive reports (a way past the capability floor or the

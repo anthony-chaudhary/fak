@@ -2,7 +2,7 @@
   "schema": "fak-persona-readiness-scorecard.data/1",
   "meta": {
     "as_of": "2026-06-24",
-    "fak_version": "v0.31.0",
+    "fak_version": "v0.32.0",
     "title": "fak persona-readiness scorecard — is each top persona served?",
     "_doc": "Each row is one of the top-10 personas who land on fak, scored on whether the affordances that persona reaches for first actually exist in the tree. The scorecard cross-checks every affordance against the real tree (a path that exists, a doc that mentions a token, a command that resolves, a CLAIMS section that is tagged), so the score cannot be gamed by editing data alone: to lift a persona you ADD the real affordance. Regenerate the doc: python tools/persona_readiness_scorecard.py --markdown-dir docs/persona-scorecard"
   },

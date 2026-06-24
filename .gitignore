@@ -213,7 +213,11 @@ fak/.bench-baseline.json
 # PUBLIC-SCRUB-POLICY redact-needle the leak gate blocks), so it must be
 # redacted or kept in a private repo before it can ever land in fleet-public.
 # The deploy SCRIPTS/site live here untracked.
-/deploy/
+# Exception: deploy/k8s/ is the committed, secret-free Kubernetes manifest
+# (placeholders only — no private project id) the persona scorecard and the
+# deployment guide point to; it must be tracked so every clone has it.
+/deploy/*
+!/deploy/k8s/
 /.gcloudignore
 
 # Local nested test-clone used as a self-contained "bite test" fixture by

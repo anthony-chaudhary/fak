@@ -1,0 +1,19 @@
+# kustomization.yaml — apply the whole stack with `kubectl apply -k deploy/k8s`.
+#
+# This wraps the single self-contained manifest so you can patch the image, the
+# namespace, or the replica count without editing fak.yaml. The defaults match the
+# deployment guide (docs/fak/deployment-guide.md).
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - fak.yaml
+
+# Override the image without editing the manifest:
+#   images:
+#     - name: REGISTRY/fak
+#       newName: ghcr.io/your-org/fak
+#       newTag: "0.32.0"
+
+# Deploy into a dedicated namespace (create it first: kubectl create ns fak):
+#   namespace: fak

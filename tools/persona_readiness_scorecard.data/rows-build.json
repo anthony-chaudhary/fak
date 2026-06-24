@@ -15,11 +15,11 @@
         {"id": "green-gate", "kind": "doc_mentions", "doc": "AGENTS.md", "tokens": ["make ci"], "need": "a one-command green gate documented at the entry point (the feedback loop)", "severity": "hard"},
         {"id": "guardrails-surfaced", "kind": "doc_mentions", "doc": "AGENTS.md", "tokens": ["OFF_TRUNK", "OUT_OF_TREE_WRITE"], "match": "all", "need": "the enforced rules surfaced up front (trunk-only, out-of-tree write guard) so the guard teaches", "severity": "hard"},
         {"id": "issue-templates", "kind": "path_exists", "target": ".github/ISSUE_TEMPLATE", "need": "structured issue templates so a contribution starts well-formed", "severity": "hard"},
-        {"id": "good-first-issue", "kind": "doc_mentions", "doc": "CONTRIBUTING.md", "tokens": ["good first issue", "good-first-issue"], "match": "any", "need": "a 'good first issue' on-ramp so a first-timer has a starting point", "severity": "soft"}
+        {"id": "good-first-issue", "kind": "doc_mentions", "doc": "CONTRIBUTING.md", "tokens": ["good first issue", "good-first-issue"], "match": "any", "need": "a 'good first issue' on-ramp so a first-timer has a starting point", "severity": "hard"}
       ],
       "verdict": "served",
       "gaps": [
-        "No 'good first issue' on-ramp in CONTRIBUTING — a first-time contributor picks their own starting point"
+        "The CLA is a draft pending Netra's legal review (CONTRIBUTING.md) — the sign-off ritual is staged, not yet binding on an external PR"
       ]
     },
     {

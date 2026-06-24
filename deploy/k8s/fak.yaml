@@ -1,0 +1,122 @@
+# fak.yaml — copy-paste Kubernetes manifest for `fak serve` (proxy mode).
+#
+# This is the artifact the deployment guide's "3. Kubernetes" section describes,
+# committed so an SRE can `kubectl apply` it directly instead of copying out of a
+# fenced block. The guide (docs/fak/deployment-guide.md) is the source of truth for
+# every flag, env var, and route below; keep the two in sync.
+#
+# Apply order (or `kubectl apply -k deploy/k8s`):
+#   1. Fill the Secret (gateway-key, and the upstream provider key if hosted).
+#   2. Point `image:` at a registry your cluster can pull from (you build + push the
+#      repo Dockerfile; there is no public image yet).
+#   3. kubectl apply -f deploy/k8s/fak.yaml
+#
+# The one rule that bites first: a network-facing gateway MUST set --require-key-env
+# and a policy floor. /healthz is the only unauthenticated route (it drives the
+# probes); every other route requires the bearer key. TLS belongs at your Ingress /
+# load balancer — fak speaks plain HTTP.
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: fak-secrets
+type: Opaque
+stringData:
+  # Generate with: openssl rand -hex 32
+  # In production prefer `kubectl create secret generic fak-secrets ...` or an
+  # external secret manager over committing a filled value.
+  gateway-key: "REPLACE_WITH_A_STRONG_KEY"
+  # Upstream provider key, if fronting a hosted model:
+  openai-api-key: "REPLACE_WITH_PROVIDER_KEY"
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: fak-policy
+data:
+  policy.json: |
+    {
+      "version": "fak-policy/v1",
+      "posture": "fail_closed",
+      "allow_prefix": ["read_", "get_", "list_", "search_"],
+      "deny": { "bash": "POLICY_BLOCK", "write_file": "POLICY_BLOCK" },
+      "redact_fields": ["api_key", "token", "password"]
+    }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: fak
+  labels: { app: fak }
+spec:
+  replicas: 2
+  selector:
+    matchLabels: { app: fak }
+  template:
+    metadata:
+      labels: { app: fak }
+    spec:
+      # fak never calls the Kubernetes API, so it needs no service-account token.
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile: { type: RuntimeDefault }
+      containers:
+        - name: fak
+          # Build the repo Dockerfile and push to a registry the cluster can pull:
+          #   docker build -t REGISTRY/fak:0.32.0 . && docker push REGISTRY/fak:0.32.0
+          image: REGISTRY/fak:0.32.0
+          args:
+            - serve
+            - --addr=0.0.0.0:8080
+            - --provider=openai
+            - --base-url=https://api.openai.com/v1
+            - --model=gpt-4o
+            - --api-key-env=OPENAI_API_KEY
+            - --policy=/etc/fak/policy.json
+            - --require-key-env=FAK_GATEWAY_KEY
+          ports:
+            - containerPort: 8080
+          env:
+            - name: FAK_GATEWAY_KEY
+              valueFrom: { secretKeyRef: { name: fak-secrets, key: gateway-key } }
+            - name: OPENAI_API_KEY
+              valueFrom: { secretKeyRef: { name: fak-secrets, key: openai-api-key } }
+          volumeMounts:
+            - name: policy
+              mountPath: /etc/fak
+              readOnly: true
+          # /healthz answers 200 {"ok":true,...} once the listener is bound and the
+          # model is loaded — a valid liveness AND readiness signal (there is no
+          # separate /readyz), and always unauthenticated so probes need no token.
+          livenessProbe:
+            httpGet: { path: /healthz, port: 8080 }
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          readinessProbe:
+            httpGet: { path: /healthz, port: 8080 }
+            initialDelaySeconds: 3
+            periodSeconds: 5
+          # Starting points for proxy mode; tune from real /metrics. In-kernel mode
+          # (--gguf) needs a PersistentVolume for the weights, memory (and GPU) sized
+          # to the model, raised timeouts, and a longer initialDelaySeconds.
+          resources:
+            requests: { cpu: "250m", memory: "128Mi" }
+            limits:   { cpu: "1",    memory: "512Mi" }
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: ["ALL"] }
+      volumes:
+        - name: policy
+          configMap: { name: fak-policy }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: fak
+spec:
+  selector: { app: fak }
+  ports:
+    - port: 80
+      targetPort: 8080

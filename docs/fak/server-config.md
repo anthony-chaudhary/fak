@@ -237,8 +237,8 @@ Valid source classes: `trusted_local`, `untrusted`.
   "posture": "fail_closed",
   "allow_prefix": ["read_", "get_", "list_", "search_", "calc_"],
   "deny": {
-    "bash": "SINK_EXEC",
-    "write_file": "SINK_EGRESS"
+    "bash": "POLICY_BLOCK",
+    "write_file": "POLICY_BLOCK"
   },
   "self_modify_globs": ["*.go", "*.md", "CLAUDE.md"],
   "redact_fields": ["api_key", "token", "password"],

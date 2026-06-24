@@ -288,6 +288,24 @@ def test_live_tree_serves_every_persona_zero_debt() -> None:
     assert payload["ok"] is True and c["grade"] == "A"
 
 
+def test_live_operate_and_build_artifacts_are_hard_and_present() -> None:
+    """Lock in the two affordances promoted soft->hard once their real artifact landed:
+    the committed k8s manifest (deploy/k8s/) for the infra persona and the
+    'good first issue' on-ramp in CONTRIBUTING.md for the contributor. If either real
+    artifact is removed, its now-hard affordance goes unmet and persona-debt rises —
+    which is the point of promoting it. Guards against a silent regression of either."""
+    payload = _live_payload()
+    lb = {r["id"]: r for r in payload["corpus"]["leaderboard"]}
+    rows = {r["id"]: r for r in payload["_data"]["rows"]}
+    for pid, aff_id in (("infra-engineer", "k8s-manifest"),
+                        ("oss-contributor", "good-first-issue")):
+        aff = next(a for a in rows[pid]["affordances"] if a["id"] == aff_id)
+        assert aff["severity"] == "hard", f"{pid}/{aff_id} should be a hard sentinel now"
+        assert aff_id not in lb[pid]["missing"], (
+            f"{pid}/{aff_id} is an unmet hard affordance — its real artifact "
+            f"(deploy/k8s/ or the CONTRIBUTING good-first-issue on-ramp) regressed")
+
+
 def _run_all() -> int:
     fns = [v for k, v in sorted(globals().items())
            if k.startswith("test_") and callable(v)]
