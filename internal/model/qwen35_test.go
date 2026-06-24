@@ -1,6 +1,7 @@
 package model
 
 import (
+	"errors"
 	"math"
 	"testing"
 	"time"
@@ -57,6 +58,116 @@ func TestQwen35HybridSessionMatchesForwardAndPersistsState(t *testing.T) {
 	reuseLogits := reuse.Step(prompt[5])
 	recompute := m.NewSession().Prefill(prompt[:6])
 	assertFloat32BitsEqual(t, "hybrid cloned recurrent prefix", recompute, reuseLogits)
+}
+
+// TestQwen35HybridEvictReturnsTypedUnsupportedVerdictFailClosed pins the #444 boundary:
+// a hybrid Gated-DeltaNet session's KVCache.Evict / TryEvict / CanEvict surface a TYPED
+// unsupported verdict (RecurrentEvictUnsupportedError naming the recurrent layers) instead
+// of the old opaque package-internal panic, and the verdict fails CLOSED — the cache is
+// left byte-for-byte unchanged, so the partial softmax-KV deletion never happens silently.
+// Non-vacuous: it proves the verdict path AND that no state was mutated, AND it confirms an
+// ordinary (non-recurrent) cache still reports nil and evicts normally.
+func TestQwen35HybridEvictReturnsTypedUnsupportedVerdictFailClosed(t *testing.T) {
+	m := NewSynthetic(qwen35HybridTestCfg())
+	prefix := []int{3, 7, 11}
+	poison := []int{5, 17}
+	query := []int{19, 23}
+
+	s := m.NewSession()
+	s.Prefill(prefix)
+	s.Prefill(poison)
+	s.Prefill(query)
+
+	wantLayers := s.Cache.linear.recurrentLayers()
+	if len(wantLayers) == 0 {
+		t.Fatal("synthetic hybrid cache has no recurrent layers; test would be vacuous")
+	}
+
+	// Snapshot the full cache state BEFORE the eviction attempt so we can prove fail-closed.
+	snap := s.Cache.Clone()
+
+	// CanEvict is the witnessable predicate: a typed verdict naming the recurrent layers.
+	canErr := s.Cache.CanEvict()
+	var verdict *RecurrentEvictUnsupportedError
+	if !errors.As(canErr, &verdict) {
+		t.Fatalf("CanEvict() = %v, want *RecurrentEvictUnsupportedError", canErr)
+	}
+	if !eq(verdict.Layers, wantLayers) {
+		t.Fatalf("verdict.Layers = %v, want %v", verdict.Layers, wantLayers)
+	}
+
+	// TryEvict surfaces the SAME typed verdict, removes nothing, and mutates nothing.
+	removed, err := s.Cache.TryEvict(len(prefix), len(poison))
+	if removed != 0 {
+		t.Fatalf("TryEvict removed = %d, want 0 (fail-closed)", removed)
+	}
+	var tryVerdict *RecurrentEvictUnsupportedError
+	if !errors.As(err, &tryVerdict) {
+		t.Fatalf("TryEvict err = %v, want *RecurrentEvictUnsupportedError", err)
+	}
+	assertKVCacheUnchanged(t, "TryEvict fail-closed", snap, s.Cache)
+
+	// The convenience Evict wrapper panics the SAME typed value for an unchecked caller.
+	func() {
+		defer func() {
+			r := recover()
+			if r == nil {
+				t.Fatal("Evict on hybrid cache did not panic")
+			}
+			perr, ok := r.(*RecurrentEvictUnsupportedError)
+			if !ok {
+				t.Fatalf("Evict panic = %T (%v), want *RecurrentEvictUnsupportedError", r, r)
+			}
+			if !eq(perr.Layers, wantLayers) {
+				t.Fatalf("panic verdict.Layers = %v, want %v", perr.Layers, wantLayers)
+			}
+		}()
+		s.Cache.Evict(len(prefix), len(poison))
+	}()
+	assertKVCacheUnchanged(t, "Evict panic fail-closed", snap, s.Cache)
+
+	// An ordinary softmax-KV cache (no recurrent state) reports nil and evicts normally —
+	// the #444 boundary is specific to the hybrid path, softmax-KV eviction stays witnessed.
+	denseCfg := Config{
+		HiddenSize: 32, NumLayers: 2, NumHeads: 4, NumKVHeads: 2, HeadDim: 8,
+		IntermediateSize: 64, VocabSize: 97, RMSNormEps: 1e-5, RopeTheta: 10000,
+	}
+	dense := NewSynthetic(denseCfg).NewSession()
+	dense.Prefill([]int{1, 2, 3, 4, 5})
+	if err := dense.Cache.CanEvict(); err != nil {
+		t.Fatalf("dense CanEvict() = %v, want nil", err)
+	}
+	if removed, err := dense.Cache.TryEvict(1, 2); err != nil || removed != 2 {
+		t.Fatalf("dense TryEvict = (%d, %v), want (2, nil)", removed, err)
+	}
+}
+
+// assertKVCacheUnchanged proves a hybrid cache was left byte-for-byte identical to a
+// pre-attempt clone — the fail-closed guarantee of the #444 typed eviction verdict.
+func assertKVCacheUnchanged(t *testing.T, label string, want, got *KVCache) {
+	t.Helper()
+	if want.Len() != got.Len() {
+		t.Fatalf("%s: Len = %d, want %d", label, got.Len(), want.Len())
+	}
+	for l := range want.K {
+		assertFloat32BitsEqual(t, label+" K layer "+itoa(l), want.K[l], got.K[l])
+		assertFloat32BitsEqual(t, label+" Kraw layer "+itoa(l), want.Kraw[l], got.Kraw[l])
+		assertFloat32BitsEqual(t, label+" V layer "+itoa(l), want.V[l], got.V[l])
+	}
+	if (want.linear == nil) != (got.linear == nil) {
+		t.Fatalf("%s: linear cache nil mismatch", label)
+	}
+	if want.linear != nil {
+		for l := range want.linear.layers {
+			wl, gl := want.linear.layers[l], got.linear.layers[l]
+			for h := range wl.recurrent {
+				assertFloat32BitsEqual(t, label+" recurrent l"+itoa(l)+" h"+itoa(h), wl.recurrent[h], gl.recurrent[h])
+			}
+			for i := range wl.conv {
+				assertFloat32BitsEqual(t, label+" conv l"+itoa(l)+" r"+itoa(i), wl.conv[i], gl.conv[i])
+			}
+		}
+	}
 }
 
 func TestQwen35HybridQuantTokenLoopPersistsState(t *testing.T) {

@@ -158,6 +158,35 @@ func newLinearAttnLayerState(cfg Config) linearAttnLayerState {
 	return st
 }
 
+// recurrentLayers returns the indices of the layers that actually hold linear-attention
+// recurrent state, so the typed eviction verdict (RecurrentEvictUnsupportedError) can name
+// exactly which layers block a span eviction rather than asserting "some recurrent layer".
+func (c *linearAttnCache) recurrentLayers() []int {
+	if c == nil {
+		return nil
+	}
+	var out []int
+	for l := range c.layers {
+		if len(c.layers[l].recurrent) > 0 {
+			out = append(out, l)
+		}
+	}
+	return out
+}
+
+// itoaSlice renders []int as "[a b c]" for the typed eviction verdict's message, without
+// pulling fmt into this hot package.
+func itoaSlice(v []int) string {
+	s := "["
+	for i, n := range v {
+		if i > 0 {
+			s += " "
+		}
+		s += itoa(n)
+	}
+	return s + "]"
+}
+
 func (c *linearAttnCache) clone() *linearAttnCache {
 	if c == nil {
 		return nil

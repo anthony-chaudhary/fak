@@ -46,6 +46,39 @@ func (c *KVCache) Len() int { return len(c.pos) }
 // kvStride is the per-position width of one layer's K (and V) row.
 func (c *KVCache) kvStride() int { return c.cfg.NumKVHeads * c.cfg.HeadDim }
 
+// RecurrentEvictUnsupportedError is the typed verdict KVCache.Evict / TryEvict / CanEvict
+// return for a hybrid Gated-DeltaNet (Qwen3.5/3.6) cache. The linear-attention layers hold
+// an ACCUMULATED recurrent state (and a short-conv window), not a per-token K/V row, so a
+// middle span has no rows to compact and no checkpoint/journal to replay the deletion from.
+// Quarantining a span out of such a state is therefore a formally UNSUPPORTED operation
+// under the current cache. The verdict fails CLOSED — the cache is left byte-for-byte
+// unchanged — rather than silently dropping the softmax-KV rows of the full-attention
+// layers while leaving the poison fused into the recurrence (a quarantine that did not
+// quarantine). A caller that must quarantine a hybrid session rebuilds from a clean prefix
+// (re-prefill the survivor span) instead of evicting in place.
+type RecurrentEvictUnsupportedError struct {
+	// Layers are the linear-attention (recurrent) layer indices whose state blocks eviction.
+	Layers []int
+}
+
+func (e *RecurrentEvictUnsupportedError) Error() string {
+	return "model: KVCache.Evict does not support Gated-DeltaNet recurrent state " +
+		"(hybrid linear-attention layers " + itoaSlice(e.Layers) + " hold an accumulated " +
+		"recurrence with no per-token journal); rebuild from a clean prefix instead"
+}
+
+// CanEvict reports whether this cache supports span eviction. It returns nil for an
+// ordinary softmax-KV cache (and for the GLM-MoE-DSA cache, which compacts its DSA state)
+// and a typed *RecurrentEvictUnsupportedError for a hybrid Gated-DeltaNet cache. It is the
+// witnessable verdict callers consult BEFORE Evict so a recurrent model surfaces a typed
+// limitation at the boundary instead of crashing inside the package.
+func (c *KVCache) CanEvict() error {
+	if c.linear != nil {
+		return &RecurrentEvictUnsupportedError{Layers: c.linear.recurrentLayers()}
+	}
+	return nil
+}
+
 // Evict removes a contiguous span [from, from+n) of cached positions from EVERY
 // layer and compacts the survivors so the cache is byte-for-byte what it would be
 // if the span had NEVER been seen. This is the KV-level quarantine primitive.
@@ -57,7 +90,33 @@ func (c *KVCache) kvStride() int { return c.cfg.NumKVHeads * c.cfg.HeadDim }
 // from old position p to new position p' is exactly applying RoPE of (p'-p). Without
 // this, end-span eviction passes by luck but MIDDLE-span eviction is silently wrong.
 // (V is not rotated, so it never needs fixing.) Returns positions removed.
+//
+// Evict is the convenience form for the softmax-KV / GLM-DSA paths whose eviction is
+// always supported. For a hybrid Gated-DeltaNet cache it panics the typed
+// *RecurrentEvictUnsupportedError (a loud boundary for an unchecked caller); a caller that
+// can encounter a hybrid cache uses TryEvict (or CanEvict) to handle the verdict instead.
 func (c *KVCache) Evict(from, n int) int {
+	removed, err := c.TryEvict(from, n)
+	if err != nil {
+		panic(err)
+	}
+	return removed
+}
+
+// TryEvict is Evict with the unsupported verdict surfaced as a typed error rather than
+// panicked. It returns (0, *RecurrentEvictUnsupportedError) for a hybrid recurrent cache,
+// leaving the cache unchanged (fail-closed), and (removed, nil) otherwise.
+func (c *KVCache) TryEvict(from, n int) (int, error) {
+	if err := c.CanEvict(); err != nil {
+		return 0, err
+	}
+	return c.evictSupported(from, n), nil
+}
+
+// evictSupported performs the actual span compaction for caches whose eviction is
+// supported (ordinary softmax-KV and GLM-MoE-DSA). CanEvict has already cleared the
+// hybrid-recurrent boundary by the time this runs.
+func (c *KVCache) evictSupported(from, n int) int {
 	if from < 0 || n <= 0 || from >= len(c.pos) {
 		return 0
 	}
@@ -67,9 +126,6 @@ func (c *KVCache) Evict(from, n int) int {
 	}
 	if c.cfg.isGLMMoeDsa() {
 		return c.evictGLMDsa(from, end)
-	}
-	if c.linear != nil {
-		panic("model: KVCache.Evict does not support Gated-DeltaNet recurrent state")
 	}
 	w := c.kvStride()
 	hd, nKV := c.cfg.HeadDim, c.cfg.NumKVHeads
