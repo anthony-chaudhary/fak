@@ -209,29 +209,45 @@ the body.
   monotonic-restrictiveness semantics). The session table is the *drive* axes only; it links
   to the taint mark by shared TraceID, it does not duplicate it.
 
-## 7. Honest fences (what is unbuilt)
+## 7. Status — what shipped, what is the next track
 
-- **Nothing here is shipped.** `internal/session` does not exist; the gateway holds no session
-  map (`gateway.go:213`); `loop.go` still runs to a fixed `maxTurns`. This note is the design
-  + the proof that the seam to build it on (`ifc.Ledger` + `/v1/fak/trace` + `traceFor`) is
-  already live and load-bearing — so the build is *widen an existing pattern*, not invent one.
-- **The loop the design wires is the A/B harness loop, not the flagship serve path.**
-  `loop.go` is the benchmark harness; the served gateway turn is the `req.Raw` passthrough that
-  the ctxplan seam is also still gated behind (`#555`). The session guard lands on the harness
-  loop first (where it is testable end-to-end), and threads the gateway turn second — the same
-  "seam first, gateway second" sequencing the ctxplan note took.
-- **Priority is a field, not yet a contended scheduler.** Until a supervisor reads it, lowering
-  a session's priority does nothing on its own — there is one process, one loop. The value is
-  real (it persists, it streams on `/v1/fak/changes`); the *yield* it implies needs the
-  multi-session supervisor that does not exist in Go yet (it is DOS-kernel today, external).
-- **The two real budgets compose only on paper here.** Wiring `Pace.MaxTokensPerTurn` into
-  `SessionPlanner.Budget` and `FAK_BUDGET` is described in §4 but not implemented; the static
-  `model/budget.go` doc explicitly rejected live-load sensing, so making it per-session live is
-  a deliberate, measured change, not a free one.
+**Shipped (the spine).** `internal/session` exists: the `State` / `RunState` machine, the
+bounded-LRU `Table` (the `ifc.Ledger` twin), `Decide` (the per-turn gate), `Snapshot` (the
+scheduler's read), and the live control verbs (`Transition` / `SetBudget` / `SetPace` /
+`SetPriority` / `CompareAndSet`), each bumping a monotonic `Rev`. It is wired into the agent
+turn loop (`agent.RunArm` via the optional `WithSessionTable` option): each boundary gates on
+the session's live drive state and ends the arm cleanly — recording the closed stop reason on
+`ArmMetrics.StoppedBySession` — on pause / drain / stop / budget-exhaustion, with the per-turn
+pace cap lowered into the planner through `agent.WithMaxTokens`. No option wired ⇒ the loop is
+byte-for-byte the historical fixed-`maxTurns` path. Tested race-clean; gofmt + vet green.
+
+**The honest fences (the next track — the follow-on epic).**
+
+- **The gateway `/v1/fak/session` routes are not built yet.** The design (§3) is a mechanical
+  mirror of the `/v1/fak/trace` routes (a `Config`-injected observe + control func, a
+  `SessionState` DTO, the exact-path-plus-subtree mux pairing), blocked only by tree contention
+  (`gateway.go` was mid-edit by a peer when the spine landed), not by any design gap. With no
+  routes, the table is in-process only — readable/writable by Go callers, not yet over the wire.
+- **The loop wired is the A/B harness loop, not the flagship serve path.** `agent.RunArm` is the
+  benchmark harness; the served gateway turn is the `req.Raw` passthrough the ctxplan seam is
+  also still gated behind (`#555`). The guard lands on the harness loop first (testable
+  end-to-end), and threads the gateway turn second — the "seam first, gateway second" sequencing
+  the ctxplan note took.
+- **Priority is a field, not yet a contended scheduler.** `Snapshot` gives a scheduler its data
+  structure (every live session, sorted by priority), but nothing *reads* it yet — with one
+  process and one loop, lowering a session's priority records a value that no yield acts on. The
+  multi-session scheduler that consumes `Snapshot` (the scheduling intersection) is the epic's
+  load-bearing track.
+- **The two real budgets compose only on paper.** Wiring `Pace.MaxTokensPerTurn` into
+  `SessionPlanner.Budget` and the matmul-cores `FAK_BUDGET` (§4) is not implemented; the static
+  `model/budget.go` doc explicitly rejected live-load sensing, so making it per-session-live is a
+  deliberate, measured change.
+- **No persistence yet.** §5's `session.json` sibling beside the recall core image is unbuilt —
+  a process restart re-attaches a session at its defaults, not the budget/priority/run-state it
+  held. `Rev` does not yet stream on `/v1/fak/changes`.
 - **Boundary-only stop assumes a turn is short.** A `DRAINING` session with a long decode still
   finishes that decode before exiting. That is the *correct* trade (no torn turn) but it means
-  "stop" is not instantaneous — it is "stop at the next boundary," and the design owns that
-  word honestly rather than promising a mid-token kill.
+  "stop" is "stop at the next boundary," not a mid-token kill — the design owns that word.
 
 ## Related
 
