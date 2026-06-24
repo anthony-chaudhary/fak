@@ -22,7 +22,10 @@
 #   FAK_DOGFOOD_PRESET   qwen36-local preset    (auto when invoked as fak-qwen36-claude)
 #   FAK_DOGFOOD_PORT     fak serve port              (default 8080)
 #   FAK_DOGFOOD_MODEL    served model id             (default: first ollama model, else qwen2.5:1.5b)
-#   FAK_DOGFOOD_BACKEND  ollama | shim | openai | anthropic   (default ollama)
+#   FAK_DOGFOOD_BACKEND  ollama | shim | openai | anthropic
+#                          (default: auto - ollama if installed, else the in-tree python3
+#                           shim; with neither, an actionable hint, never a dead end. Pin a
+#                           value to force it and get an honest die if its deps are missing.)
 #                          anthropic = front the REAL Claude API (api.anthropic.com):
 #                          Claude Code -> fak (adjudicates) -> real Claude. Your own
 #                          key + real model tiers flow through; cache_control survives
@@ -114,6 +117,12 @@ case "$PRESET" in
 esac
 
 PORT="${FAK_DOGFOOD_PORT:-8080}"
+# BACKEND_PINNED records whether the operator EXPLICITLY chose a backend. When they did,
+# we honor it and fail loud if its deps are missing (explicit intent deserves an honest
+# error). When they did NOT (the common first-run case), the default backend is a
+# preference, not a demand — so a missing dep should cascade to the next available local
+# path rather than dead-end the adopter (see pick_auto_backend, called at backend bring-up).
+if [ -n "${FAK_DOGFOOD_BACKEND:-}" ]; then BACKEND_PINNED=1; else BACKEND_PINNED=""; fi
 BACKEND="${FAK_DOGFOOD_BACKEND:-$DEFAULT_BACKEND}"
 OLLAMA_HOST="${OLLAMA_HOST:-127.0.0.1:11434}"
 SHIM_PORT="${FAK_DOGFOOD_SHIM_PORT:-8099}"
@@ -244,7 +253,9 @@ fi
 # Keep an attach-adopted MODEL (set above) intact; otherwise honor FAK_DOGFOOD_MODEL.
 BASE_URL=""; MODEL="${MODEL:-${FAK_DOGFOOD_MODEL:-$DEFAULT_MODEL}}"; SHIM_PID=""
 start_ollama_backend() {
-  command -v ollama >/dev/null || die "ollama not found — install it, or use FAK_DOGFOOD_BACKEND=shim"
+  command -v ollama >/dev/null || die "FAK_DOGFOOD_BACKEND=ollama is pinned but ollama is not installed.
+       Install it (https://ollama.com), or unset FAK_DOGFOOD_BACKEND to auto-pick a backend,
+       or set FAK_DOGFOOD_BACKEND=shim (python3) / =anthropic (real Claude API)."
   if ! curl -sf "http://$OLLAMA_HOST/api/tags" >/dev/null 2>&1; then
     log "starting 'ollama serve'"
     nohup ollama serve >/tmp/fak-ollama.log 2>&1 &
@@ -392,7 +403,28 @@ fi
 # --smoke proves the WIRE with zero model dependency: front the offline mock planner.
 # When attached, the live kernel already owns its backend — don't start our own.
 # The 'anthropic' backend has no local model to start (the upstream is the real API).
+# pick_auto_backend cascades to the first LOCALLY-AVAILABLE backend when the operator did
+# NOT pin one, setting BACKEND directly (no command substitution, so a dead-end can `die`
+# the whole script, not just a subshell). Order: ollama (best agentic UX if installed) ->
+# shim (in-tree, needs only python3). It never downgrades a PINNED choice — that path keeps
+# its own honest die. If neither is available it emits an actionable hint listing every way
+# forward instead of a bare "ollama not found" dead end.
+pick_auto_backend() {
+  if command -v ollama >/dev/null 2>&1; then BACKEND=ollama; return; fi
+  if command -v python3 >/dev/null 2>&1; then
+    log "ollama not found - falling back to the in-tree transformers shim (python3)."
+    BACKEND=shim; return
+  fi
+  die "no local model backend available. Pick one:
+       - install ollama (https://ollama.com)        then re-run            [best agentic UX]
+       - install python3                            then re-run            [in-tree shim]
+       - FAK_DOGFOOD_BACKEND=anthropic ANTHROPIC_API_KEY=... $0   [front the real Claude API]
+       Or prove just the wire with no model:  $0 --smoke"
+}
+
 if [ -z "$ATTACHED" ] && [ "$MODE" != "smoke" ] && [ "$BACKEND" != "anthropic" ]; then
+  # An unpinned default is a preference, not a demand: resolve it to what's actually here.
+  if [ -z "$BACKEND_PINNED" ] && [ "$BACKEND" = "ollama" ]; then pick_auto_backend; fi
   case "$BACKEND" in
     ollama) start_ollama_backend ;;
     shim)   start_shim_backend ;;
