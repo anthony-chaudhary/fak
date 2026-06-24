@@ -218,24 +218,31 @@ def opencode_worker_env(account_dir: str | None, lane: str, workspace: Path,
 
 
 # Windows process-creation flags for a detached worker.
-#   DETACHED_PROCESS  — the child gets NO console at all (a true daemon).
+#   DETACHED_PROCESS  — the child gets NO console at all.
 #   CREATE_NO_WINDOW  — the child gets a console, but it is HIDDEN (no window).
-# A .cmd/.bat launcher (e.g. opencode.CMD, the npm shim) is executed BY cmd.exe,
-# which REQUIRES a console: under DETACHED_PROCESS the batch wrapper dies at the
-# "Terminate batch job (Y/N)?" prompt producing ZERO output — that is exactly why
-# every dispatched glm/opencode worker was DOA (0-byte log) while the manual,
-# console-attached runs worked. A native launcher (claude) runs fine fully
-# detached, so it keeps DETACHED_PROCESS unchanged.
-_DETACHED_PROCESS = 0x00000008
+# Every detached worker — batch shim OR native exe — gets CREATE_NO_WINDOW, never
+# DETACHED_PROCESS, for TWO reasons:
+#   1. A .cmd/.bat launcher (opencode.CMD, the npm shim) is run BY cmd.exe, which
+#      REQUIRES a console: under DETACHED_PROCESS the batch wrapper dies at the
+#      "Terminate batch job (Y/N)?" prompt producing ZERO output — every dispatched
+#      glm/opencode worker was DOA (0-byte log) until it got a (hidden) console.
+#   2. A native worker (claude.exe) given DETACHED_PROCESS has no console, so every
+#      console tool it spawns — git, gh, fak, the shell — pops its OWN visible
+#      window: the "random popup windows" seen during a dispatched run. CREATE_NO_WINDOW
+#      gives the worker one HIDDEN console the whole tool subtree inherits, so it
+#      still outlives this dispatcher but never flashes a window. (Same conclusion as
+#      claude_agent_chat.detached_creationflags.)
+_DETACHED_PROCESS = 0x00000008  # retained to document the rejected alternative
 _CREATE_NO_WINDOW = 0x08000000
 
 
 def win_creationflags(exe: str) -> int:
-    """The Windows creationflags for spawning ``exe`` detached: a batch-file
-    launcher needs a (hidden) console, a native exe can be fully console-less."""
-    if str(exe).lower().endswith((".cmd", ".bat")):
-        return _CREATE_NO_WINDOW
-    return _DETACHED_PROCESS
+    """The Windows creationflags for spawning ``exe`` detached: ALWAYS a HIDDEN
+    console (CREATE_NO_WINDOW). A .cmd/.bat shim needs a console to live; a native
+    exe needs one so its console grandchildren don't each pop a visible window.
+    ``exe`` is accepted for call-site stability but no longer branches the result."""
+    del exe  # both batch shims and native exes take the hidden-console path
+    return _CREATE_NO_WINDOW
 
 
 def spawn_issue_worker(command: list[str], env: dict[str, str], cwd: Path,

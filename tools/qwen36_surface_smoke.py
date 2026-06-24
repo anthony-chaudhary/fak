@@ -554,7 +554,12 @@ def start_gateway(args: argparse.Namespace, env: dict[str, str]) -> tuple[subpro
         return None, url, {"mode": "planned", "command": cmd, "url": url}
     popen_kwargs: dict[str, Any] = {}
     if os.name == "nt":
-        popen_kwargs["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP
+        # CREATE_NEW_PROCESS_GROUP isolates the gateway from a parent Ctrl+C; OR in
+        # CREATE_NO_WINDOW so `fak serve` runs with a HIDDEN console rather than
+        # flashing a visible one when this smoke runner is launched detached/windowless.
+        popen_kwargs["creationflags"] = (
+            subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.CREATE_NO_WINDOW
+        )
     else:
         popen_kwargs["start_new_session"] = True
     proc = subprocess.Popen(

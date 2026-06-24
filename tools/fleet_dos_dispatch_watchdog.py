@@ -148,7 +148,11 @@ def _detached_spawn(command: Sequence[str], workspace: Path) -> int | None:
     argv = [exe, *command[1:]]
     kwargs: dict[str, Any] = {}
     if os.name == "nt":
-        kwargs["creationflags"] = 0x00000008  # DETACHED_PROCESS
+        # CREATE_NO_WINDOW, not DETACHED_PROCESS: a supervisor with NO console
+        # (DETACHED_PROCESS) makes every console tool it (or its workers) spawns pop
+        # its OWN visible window. CREATE_NO_WINDOW gives one HIDDEN console the whole
+        # subtree inherits: it still outlives this tick, but no popup ever flashes.
+        kwargs["creationflags"] = 0x08000000  # CREATE_NO_WINDOW
     else:
         kwargs["start_new_session"] = True
     proc = subprocess.Popen(

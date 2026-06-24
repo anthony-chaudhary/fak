@@ -387,12 +387,20 @@ def main() -> int:
         env.pop("JOB_SUPERVISED_WORKER", None)
         out = os.path.join(LOG_DIR, f"resume-{sid8}-{int(time.time())}.log")
         wd = p.get("cwd") if p.get("cwd") and os.path.isdir(p.get("cwd")) else FLEET_DIR
+        spawn_kw = {}
+        if os.name == "nt":
+            # start_new_session is POSIX-only (silently ignored on Windows). Give the
+            # resumed session a HIDDEN console (CREATE_NO_WINDOW) so neither it nor the
+            # git/gh/fak/shell tools it spawns flashes a visible console window.
+            spawn_kw["creationflags"] = 0x08000000  # CREATE_NO_WINDOW
+        else:
+            spawn_kw["start_new_session"] = True
         with open(out, "ab") as so, open(out + ".err", "ab") as se:
             proc = subprocess.Popen(
                 [CLAUDE_EXE, "--resume", sid, "-p", RESUME_PROMPT,
                  "--dangerously-skip-permissions"],
                 cwd=wd, env=env, stdout=so, stderr=se,
-                start_new_session=True,
+                **spawn_kw,
             )
         # Record the launch BEFORE anything else -- a crash can't double-LAUNCH in
         # this tick. But the gate keys on OUTCOME, not mere presence: phase="launched"

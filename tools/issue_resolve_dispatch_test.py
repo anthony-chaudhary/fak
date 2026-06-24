@@ -184,10 +184,15 @@ class WinCreationFlagsTest(unittest.TestCase):
         self.assertEqual(mod.win_creationflags("opencode.cmd"), mod._CREATE_NO_WINDOW)
         self.assertEqual(mod.win_creationflags("wrap.bat"), mod._CREATE_NO_WINDOW)
 
-    def test_native_launcher_stays_fully_detached(self) -> None:
+    def test_native_launcher_also_gets_hidden_console(self) -> None:
+        # Regression: a native worker (claude.exe) spawned DETACHED_PROCESS has NO
+        # console, so the git/gh/fak/shell tools it spawns each pop a visible window
+        # — the "random popups" during a dispatched run. CREATE_NO_WINDOW gives it one
+        # hidden console the whole subtree inherits, so nothing flashes.
         mod = load()
-        self.assertEqual(mod.win_creationflags(r"C:\bin\claude.exe"), mod._DETACHED_PROCESS)
-        self.assertEqual(mod.win_creationflags("/usr/bin/claude"), mod._DETACHED_PROCESS)
+        self.assertEqual(mod.win_creationflags(r"C:\bin\claude.exe"), mod._CREATE_NO_WINDOW)
+        self.assertEqual(mod.win_creationflags("/usr/bin/claude"), mod._CREATE_NO_WINDOW)
+        self.assertNotEqual(mod.win_creationflags(r"C:\bin\claude.exe"), mod._DETACHED_PROCESS)
 
 
 class BackendRoutingTest(unittest.TestCase):

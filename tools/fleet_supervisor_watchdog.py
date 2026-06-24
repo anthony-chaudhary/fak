@@ -117,10 +117,18 @@ def main() -> int:
     # supervisor) and fully detached so it outlives this watchdog tick.
     env = dict(os.environ)
     env.pop("JOB_SUPERVISED_WORKER", None)
+    spawn_kw = {}
+    if os.name == "nt":
+        # start_new_session is POSIX-only (silently ignored on Windows). Give the
+        # supervise loop a HIDDEN console (CREATE_NO_WINDOW) so neither it nor the
+        # workers it spawns flashes a visible console window.
+        spawn_kw["creationflags"] = 0x08000000  # CREATE_NO_WINDOW
+    else:
+        spawn_kw["start_new_session"] = True
     with open(out, "ab") as so, open(out + ".err", "ab") as se:
         proc = subprocess.Popen(
             [py, "scripts/run_supervise_loop.py", "--target", str(TARGET)],
-            cwd=JOB_DIR, env=env, stdout=so, stderr=se, start_new_session=True,
+            cwd=JOB_DIR, env=env, stdout=so, stderr=se, **spawn_kw,
         )
 
     note(f"RESPAWN verdict_was={verdict} launched pid={proc.pid} target={TARGET} log={out}")

@@ -174,7 +174,12 @@ def spawn_detached(command: list[str], env: dict[str, str], cwd: Path,
     argv = [exe, *command[1:]]
     kwargs: dict[str, Any] = {}
     if os.name == "nt":
-        kwargs["creationflags"] = 0x00000008  # DETACHED_PROCESS
+        # CREATE_NO_WINDOW, not DETACHED_PROCESS: a worker with NO console
+        # (DETACHED_PROCESS) makes every console tool it spawns — git, gh, fak, the
+        # shell — pop its OWN visible window. CREATE_NO_WINDOW gives the worker one
+        # HIDDEN console the whole subtree inherits: it still outlives this tick, but
+        # no popup ever flashes. (Matches claude_agent_chat.detached_creationflags.)
+        kwargs["creationflags"] = 0x08000000  # CREATE_NO_WINDOW
     else:
         kwargs["start_new_session"] = True
     fh = open(out_log, "w", encoding="utf-8")
