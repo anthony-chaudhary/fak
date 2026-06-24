@@ -7,7 +7,7 @@ keeps ONE primary descriptor — "the Fused Agent Kernel" / "agent kernel" — a
 retires the other two as PRIMARY descriptors. It still ALLOWS them as:
   - AEO keyword / topic / alternateName / Category synonym-list entries,
   - "also described as …" analogies,
-  - references to the named `agent-firewall-video` asset and its card.
+  - references to the named `agent-kernel-video` asset and its card.
 
 This check FAILS only when a RETIRED descriptor is used as the PRIMARY noun for
 fak — a copula ("fak is an agent tool firewall") or a title/banner
@@ -16,7 +16,8 @@ conservative: when a line carries any legitimate-use marker it is allowed, so a
 flag is worth a human look rather than a wall of false positives.
 
 See issue #591 (this guard) and #589 (the brand epic). The video-campaign
-surfaces (#592) are exempt until they are re-themed off the firewall framing.
+surfaces were re-themed to the agent-kernel/syscall spine in #592 and are now
+scanned here like any other surface.
 
 Run:  python tools/check_brand_consistency.py --audit-tree
 Exit: 0 if clean, 1 if any primary-descriptor violation (so it can gate CI).
@@ -47,12 +48,11 @@ ALLOW_MARKERS = re.compile(
     r"\balt\b|explainer|reveal|\bcard\b|poster|\.mp4|\.gif|\.svg|agent-firewall|firewall card",
 )
 
-# Whole files / trees exempt: generated corpus, the video campaign (#592),
-# visual assets, and the generators that emit keyword/alternateName metadata.
+# Whole files / trees exempt: generated corpus, visual assets, and the
+# generators that emit keyword/alternateName metadata.
 EXEMPT_PREFIXES = ("visuals/",)
 EXEMPT_FILES = {
     "llms-full.txt",                             # generated; mirrors source on regen
-    "docs/explainers/video-content-plan.md",     # video campaign — tracked by #592
     "tools/check_brand_consistency.py",          # this file's own docstring examples
     "tools/check_brand_consistency_test.py",     # the test's synthetic samples
     "tools/gen_structured_data.py",              # emits alternateName/keywords lists

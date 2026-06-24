@@ -118,7 +118,7 @@ Source of truth = `docs/explainers/*` + `docs/share-kit.md` +
 
 | # | Point | One-liner (share-kit approved) | Source |
 |---|---|---|---|
-| **P1** | **Agent Tool Firewall** (the lead hook) | "Agents are programs. Give them permissions, quarantine, and proof." | `share-kit.md` |
+| **P1** | **The agent kernel** / syscall spine (the lead hook) | "Agents are programs. Give them permissions, quarantine, and proof." | `share-kit.md` |
 | **P2** | **Local + kernel ≈ frontier on safety & cost, now** | "Frontier-grade safety and ~$0 cost on a 1.5B local model; size buys capability." | `explainers/local-vs-frontier-parity.md` |
 | **P3** | **KV cache is the agent bill** | "Agents re-send the transcript every turn — ~239:1 input:output — so the cache deletes most of the spend." | `explainers/kv-cache-agentic-context.md` |
 | **P4** | **Hardware-portable forward pass** | "One forward-pass loop, many backends — CPU, CUDA, Vulkan, all witnessed on real silicon." | `explainers/hardware-portability.md` |
@@ -195,7 +195,7 @@ style) is a legitimate shippable option, not just a draft.
 
 Tiered so we ship the highest-leverage asset first and reuse footage downward.
 
-### Tier 0 — the one that must exist: "Agent Tool Firewall" (P1), ~75s, 16:9
+### Tier 0 — the one that must exist: "The agent kernel" (P1), ~75s, 16:9
 The trust hook. Storyboard in §6. Everything else reuses its title system and motifs.
 For a CLI/kernel product, a **fully terminal-native all-`ascii-video` cut** is a strong
 (and $0) house style — the boundary/quarantine flow reads naturally as animated ASCII;
@@ -223,7 +223,7 @@ Ship order: **Tier 0 → Tier 1 (P2, then P3, then P4) → Tier 2 shorts → Tie
 
 ---
 
-## 6. Deep storyboard — Video #0 "Agent Tool Firewall" (~75s)
+## 6. Deep storyboard — Video #0 "The agent kernel" (~75s)
 
 Aspect 16:9, target 75s. `[C]` = deterministic claim visual, `[A]` = generated
 atmosphere clip. VO is the on-screen-truth layer.
@@ -232,7 +232,7 @@ atmosphere clip. VO is the on-screen-truth layer.
 |---:|---|---|---|---|
 | 0–5 | Title sting | `[A]` I2V from an `image_generate` title card | "Agents are programs." text resolves | *(music only)* |
 | 5–16 | The problem | `[A]` T2V, abstract: an agent firing tool calls at "production" | dimmed icons: shell, refund, delete | "We're giving AI agents real tools — shells, payments, prod. Prompt text is not a permission system." `ATMOSPHERE` |
-| 16–34 | **The boundary** | `[C]` animate `visuals/39-agent-tool-firewall-card.svg` (I2V, subtle push-in) | `model proposes → fak policy boundary → admitted call → result quarantine → context` | "fak is an agent tool firewall. The model can *ask*. The boundary *decides*." `CLAIM` |
+| 16–34 | **The boundary** | `[C]` animate `visuals/39-agent-kernel-card.svg` (I2V, subtle push-in) | `model proposes → fak policy boundary → admitted call → result quarantine → context` | "fak is an agent kernel — the model proposes, the kernel disposes." `CLAIM` |
 | 34–50 | **Denied destructive call** | `[C]` real `fak preflight` terminal capture | `refund_payment → POLICY_BLOCK`; `search_kb → allow` | "The support agent can search the docs. It cannot refund money. Policy-denied tools don't run." `CLAIM` |
 | 50–66 | **Poisoned-policy A/B** | `[C]` the offline A/B table (from `fak agent --offline`) | baseline reads the poison; protected arm quarantines it | "Same task, same poison. The baseline ingests it; the protected arm never sees it." `CLAIM` |
 | 66–75 | Close + repro | `[C]` title + command | `go run ./cmd/fak agent --offline` | "Permissions first. Filters second. Bring a trace — the verdict replays." `CLAIM` |
@@ -265,7 +265,7 @@ shown 12–16s with a slow Ken-Burns), burns the SRT captions, and muxes VO + mu
 - **`visuals/` — 175 assets** (`NN-*.mmd` + rendered `.svg`/`.png`). These ARE the
   claim layer; most claim shots need zero new art. Key ones: `02-boundaries`,
   `05-preflight`, `06-context-mmu`, `07-kv-hierarchy`, `09-shared-prefix`,
-  `10-compute-tiers`, `39-agent-tool-firewall-card` (the share/hero card).
+  `10-compute-tiers`, `39-agent-kernel-card` (the share/hero card).
 - **`render-mermaid` skill** — to render any new diagram (e.g. a parity-table card) to
   PNG for animation.
 - **`docs/explain-impact-cumulative-2026-06-18.png`** — the P5 expansion chart.
@@ -300,7 +300,7 @@ shown 12–16s with a slow Ken-Burns), burns the SRT captions, and muxes VO + mu
 
 **Phase A — pipeline proof (no spend):** wire the 5-step pipeline end-to-end on the
 Tier-0 script using `comfy` local drafts; confirm ffmpeg concat + caption-burn + VO mux
-produces a 16:9 master and a 9:16 cut. Deliverable: a rough-cut "Agent Tool Firewall."
+produces a 16:9 master and a 9:16 cut. Deliverable: a rough-cut "The agent kernel."
 
 **Phase B — Tier 0 polish:** swap the 2 atmosphere drafts for a hosted final pass
 (Wan/Veo), capture the real `fak preflight` / `fak agent --offline` output for the claim

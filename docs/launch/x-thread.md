@@ -76,7 +76,7 @@ Prior-art audit, self-scored: 0/29 novel. Every primitive is established. The co
 ---
 
 **Post 7/8** — *the live demo / DENY split*
-`[VISUAL: visuals/39-agent-tool-firewall-card.svg OR visuals/agent-firewall-video.gif]`
+`[VISUAL: visuals/39-agent-kernel-card.svg OR visuals/agent-kernel-video.gif]`
 
 Run it yourself, no key/model/GPU:
 
@@ -174,4 +174,4 @@ The draft was **not** clean — it shipped a proof command that the binary refus
 - **Truncated winner line (P3):** quoted the actual `--explain` terminal string `=> [7] adjudicator.Adjudicator DENY DEFAULT_DENY by=monitor <- winner` instead of the draft's paraphrase.
 - **Tuned-gain band (P4):** rewrote "~1.5–4.1x" → "~1.5–4x (conservative headline: 4.1x)" in Post 5 and Bluesky, so 4.1x reads as the conservative single number the ledger names, not the max of a spread.
 
-Every remaining number traces to the ledger: max|Δ|=0 (bit-exact eviction, vs HF oracle, self-signed v1 cert / self-reported EvictedCount fenced); no-mid-run-eviction in vLLM/SGLang/OpenAI/Anthropic; two independent gates + ~100%-evadable-by-design detector; 8.8x→9.7x naive **always** paired with the tuned ~1.5–4x; ~13MB / zero-deps / no go.sum framed as operational surface not tok/s; 0/29 novel; self-host + read-heavy and not-a-token-engine fences intact; 643 WebVoyager tasks. No ~60x / agent-city projections and no simulated power/dollar numbers appear. All tagged visuals confirmed on disk (`social-preview.png` 46KB, plus `45-`, `46-`, `48-`, `39-`, `31-`, `29-`, `agent-firewall-video.gif`). `deletioncert -selfcheck` and the 8-rung count verified against the binary.
+Every remaining number traces to the ledger: max|Δ|=0 (bit-exact eviction, vs HF oracle, self-signed v1 cert / self-reported EvictedCount fenced); no-mid-run-eviction in vLLM/SGLang/OpenAI/Anthropic; two independent gates + ~100%-evadable-by-design detector; 8.8x→9.7x naive **always** paired with the tuned ~1.5–4x; ~13MB / zero-deps / no go.sum framed as operational surface not tok/s; 0/29 novel; self-host + read-heavy and not-a-token-engine fences intact; 643 WebVoyager tasks. No ~60x / agent-city projections and no simulated power/dollar numbers appear. All tagged visuals confirmed on disk (`social-preview.png` 46KB, plus `45-`, `46-`, `48-`, `39-`, `31-`, `29-`, `agent-kernel-video.gif`). `deletioncert -selfcheck` and the 8-rung count verified against the binary.
