@@ -390,6 +390,23 @@ jobs:
             || echo "::warning title=subject-coverage::witness-gradeable commit-subject coverage below the watched floor (advisory) — lead the description with a recognized verb (add/fix/implement/…); see tools/check_commit_msg.py"
           echo "::endgroup::"
 
+      # Load-bearing tool test-coverage (advisory): code_quality_scorecard grades GO
+      # only, so the python tools/ cluster (~196 modules, many a SKILL.md helper or a
+      # CI gate) had NO coverage gate -- exactly how the 470-line issue_triage.py
+      # shipped untested and invisible. tool_coverage_audit is the cheap STATIC
+      # complement (no test execution, zero added CI-time): it flags load-bearing
+      # modules (those a SKILL.md / ci.yml references) that have no sibling _test.py.
+      # Two-tier like its siblings: the unit tests are HARD, the coverage check runs
+      # --min-coverage as a ::warning:: floor. Pure filesystem read.
+      - name: tool test-coverage (advisory; unit tests HARD, load-bearing coverage a watched floor)
+        working-directory: ${{ github.workspace }}
+        run: |
+          python tools/tool_coverage_audit_test.py
+          echo "::group::tool-coverage-audit (load-bearing python tools/ test coverage, advisory)"
+          python tools/tool_coverage_audit.py --min-coverage 75 \
+            || echo "::warning title=tool-coverage::load-bearing tool test-coverage below the watched floor (advisory) — add a sibling _test.py for the named modules; see tools/tool_coverage_audit.py"
+          echo "::endgroup::"
+
       # DOS trust-floor gate: the verdict IS the exit code. `dos review` fails the build
       # (exit 1) if any commit in the pushed range makes a code/test/doc claim its own diff
       # does not witness (a "fix: X" that didn't touch X, an empty "done"). This is DOS
