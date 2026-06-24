@@ -132,6 +132,17 @@ class PayloadAndLaunchTest(unittest.TestCase):
         )
         self.assertFalse(payload["ok"])
 
+    def test_normalize_timeout_caps_by_default_and_opts_out_at_zero(self) -> None:
+        mod = load()
+        # The default cap bounds the unattended cadence gardener; 0/negative/None opt out.
+        self.assertEqual(mod.normalize_timeout(mod.DEFAULT_TIMEOUT_S), mod.DEFAULT_TIMEOUT_S)
+        self.assertEqual(mod.normalize_timeout(90), 90)
+        self.assertIsNone(mod.normalize_timeout(0))
+        self.assertIsNone(mod.normalize_timeout(-1))
+        self.assertIsNone(mod.normalize_timeout(None))
+        self.assertIsNotNone(mod.DEFAULT_TIMEOUT_S)
+        self.assertGreater(mod.DEFAULT_TIMEOUT_S, 0)
+
 
 if __name__ == "__main__":
     unittest.main()

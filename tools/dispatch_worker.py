@@ -44,6 +44,16 @@ SCHEMA = "fleet-dispatch-worker/1"
 BACKENDS = ("claude", "opencode")
 DEFAULT_BACKEND = "claude"
 
+# Default wall-clock cap on a spawned worker session (seconds). A dispatch worker
+# is a full agentic `claude -p` / `opencode run` session that runs UNATTENDED, so
+# an unbounded run (the old default=None) let a wedged or runaway session burn
+# tokens with nothing to stop it. The supervisor's dos.toml worker_launch_template
+# spawns this leaf with no --timeout-s, so this default is the only bound on that
+# production path (the watchdog canary wraps its own 120s). 30 min is generous for
+# a real lane/ticket yet bounds a runaway; the 120-min issue cooldown retries a
+# hard target later. Opt out with `--timeout-s 0` (normalized to None below).
+DEFAULT_TIMEOUT_S = 1800
+
 # The two launch shapes. Kept here (not read from dos.toml) on purpose: once
 # the template becomes ``python tools/dispatch_worker.py --lane {lane}`` this
 # module IS the source of truth for how each backend is invoked, so there is no
@@ -57,6 +67,17 @@ OPENCODE_MESSAGE = "dispatch lane {lane}"
 def repo_root(start: Path | None = None) -> Path:
     here = (start or Path(__file__)).resolve()
     return here.parent.parent
+
+
+def normalize_timeout(value: int | None) -> int | None:
+    """Map a CLI ``--timeout-s`` value to the launch timeout.
+
+    A positive value is the wall-clock cap; ``0``/negative/``None`` is the
+    explicit unbounded opt-out (``None`` -> ``subprocess.run`` waits forever).
+    """
+    if value and value > 0:
+        return value
+    return None
 
 
 def resolve_backend(explicit: str | None, env: dict[str, str] | None) -> str:
@@ -210,7 +231,9 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--backend", choices=BACKENDS, default=None, help="worker backend (default: env FLEET_WORKER_BACKEND or claude)")
     ap.add_argument("--workspace", default="", help="workspace root (default: repo root)")
     ap.add_argument("--dry-run", action="store_true", help="print the command instead of launching")
-    ap.add_argument("--timeout-s", type=int, default=None, help="child timeout in seconds (default: none)")
+    ap.add_argument("--timeout-s", type=int, default=DEFAULT_TIMEOUT_S,
+                    help=f"child wall-clock timeout in seconds (default: {DEFAULT_TIMEOUT_S}; "
+                         "use 0 for unbounded)")
     ap.add_argument("--json", action="store_true", help="emit machine-readable JSON")
     args = ap.parse_args(argv)
 
@@ -234,7 +257,7 @@ def main(argv: list[str] | None = None) -> int:
 
     command = build_command(args.lane, backend)
     env = child_env(args.lane, backend, workspace)
-    result = launch(command, workspace, env, timeout_s=args.timeout_s)
+    result = launch(command, workspace, env, timeout_s=normalize_timeout(args.timeout_s))
     payload = build_payload(
         lane=args.lane, backend=backend, workspace=workspace, dry_run=False, result=result
     )

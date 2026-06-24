@@ -64,6 +64,12 @@ DEFAULT_BACKEND = "claude"
 # the operator opts into a writing mode explicitly.
 DEFAULT_PERMISSION_MODE = "plan"
 
+# Default wall-clock cap on the spawned gardener session (seconds). The gardener
+# runs UNATTENDED on a cadence, so an unbounded run (the old default=None) let a
+# wedged session burn tokens unbounded. Plan-mode triage is light, so 30 min is
+# generous; opt out with `--timeout-s 0` (normalized to None below).
+DEFAULT_TIMEOUT_S = 1800
+
 
 def repo_root(start: Path | None = None) -> Path:
     here = (start or Path(__file__)).resolve()
@@ -170,6 +176,14 @@ def child_env(
 def resolve_exe(name: str) -> str:
     found = shutil.which(name)
     return found or name
+
+
+def normalize_timeout(value: int | None) -> int | None:
+    """Map a CLI ``--timeout-s`` value to the launch timeout: a positive value is
+    the wall-clock cap; ``0``/negative/``None`` is the explicit unbounded opt-out."""
+    if value and value > 0:
+        return value
+    return None
 
 
 Runner = Callable[[Sequence[str], Path, dict[str, str]], dict[str, Any]]
@@ -284,7 +298,9 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--as-of", default=None, help="date stamp (default: today UTC)")
     ap.add_argument("--live", action="store_true",
                     help="actually launch (default: dry-run; print the command)")
-    ap.add_argument("--timeout-s", type=int, default=None, help="child timeout in seconds")
+    ap.add_argument("--timeout-s", type=int, default=DEFAULT_TIMEOUT_S,
+                    help=f"child wall-clock timeout in seconds (default: {DEFAULT_TIMEOUT_S}; "
+                         "use 0 for unbounded)")
     ap.add_argument("--json", action="store_true", help="emit machine-readable JSON")
     args = ap.parse_args(argv)
 
@@ -314,7 +330,7 @@ def main(argv: list[str] | None = None) -> int:
         permission_mode=args.permission_mode, backend=args.backend,
     )
     env = child_env(model, workspace)
-    result = launch(command, workspace, env, timeout_s=args.timeout_s)
+    result = launch(command, workspace, env, timeout_s=normalize_timeout(args.timeout_s))
     payload = build_payload(
         model=model, backend=args.backend, workspace=workspace, dry_run=False,
         as_of=as_of, scope=args.scope, apply_mechanical=args.apply_mechanical,

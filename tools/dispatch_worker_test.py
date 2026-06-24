@@ -117,6 +117,18 @@ class DispatchWorkerTest(unittest.TestCase):
         # than raise (launch then surfaces FileNotFoundError as returncode 127).
         self.assertEqual(mod.resolve_exe("definitely-not-a-real-backend-xyz"), "definitely-not-a-real-backend-xyz")
 
+    def test_normalize_timeout_caps_by_default_and_opts_out_at_zero(self) -> None:
+        mod = load()
+        # The default cap bounds an unattended worker; 0/negative/None opt out.
+        self.assertEqual(mod.normalize_timeout(mod.DEFAULT_TIMEOUT_S), mod.DEFAULT_TIMEOUT_S)
+        self.assertEqual(mod.normalize_timeout(60), 60)
+        self.assertIsNone(mod.normalize_timeout(0))
+        self.assertIsNone(mod.normalize_timeout(-5))
+        self.assertIsNone(mod.normalize_timeout(None))
+        # The default is a real bound, not the old unbounded None.
+        self.assertIsNotNone(mod.DEFAULT_TIMEOUT_S)
+        self.assertGreater(mod.DEFAULT_TIMEOUT_S, 0)
+
 
 if __name__ == "__main__":
     unittest.main()
