@@ -50,10 +50,11 @@ from typing import Any
 
 SCHEMA = "fleet-readme-freshness-audit/1"
 
-# Repo-root-relative inputs.
+# Repo-root-relative inputs (the repo root is the Go module root, where
+# BENCHMARK-AUTHORITY.md lives alongside README.md and VERSION).
 README_REL = "README.md"
 VERSION_REL = "VERSION"
-AUTHORITY_REL = "fak/BENCHMARK-AUTHORITY.md"
+AUTHORITY_REL = "BENCHMARK-AUTHORITY.md"
 
 # How long a freshness stamp stays "fresh" before we WARN.
 DEFAULT_MAX_AGE_DAYS = 14
