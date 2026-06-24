@@ -7,6 +7,11 @@ the resident-token curve. That is a model — useful for the asymptotic claim, b
 measurement. This note records the measurement: the planned view replayed turn-by-turn over the
 heaviest REAL Claude Code transcripts on this box, reporting the three quantities the issue names.
 
+> **Companion:** this note measures the planner's **output** (resident tokens). Its sibling
+> [`CTXPLAN-PLANNING-COST-FLATTEN`](CTXPLAN-PLANNING-COST-FLATTEN-2026-06-23.md) measures the
+> planner's **own per-turn work** (the `Θ(N²)→Θ(c·N)` candidate-index flatten, #558), and the
+> honest cost↔fidelity dial that the bounded probe trades on real sessions.
+
 ## How (the honest construction)
 
 Each transcript is ingested through the shipped `cdb.IngestSession` → `recall` core image, so a

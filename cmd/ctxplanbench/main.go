@@ -71,11 +71,18 @@ func main() {
 	heaviest := flag.Int("heaviest", 0, "auto-discover and measure the N heaviest real transcripts under the claude projects dir")
 	budget := flag.Int("budget", 8000, "resident-token working-set cap W (the O(1) bound)")
 	window := flag.Int("window", 6, "forecast recency window K (last K turn descriptors as intents)")
+	probeCap := flag.Int("probe-cap", 0, "bounded-probe candidate cap c (0 = ctxplan default 128); the per-turn planner-compute bound")
+	probeRecency := flag.Int("probe-recency", 0, "bounded-probe recency tail (0 = ctxplan default 32)")
 	out := flag.String("out", "", "optional JSON report path")
 	flag.Parse()
 
+	// The bounded probe's tuning. The zero value is valid — ctxplan.ProbeOptions.orDefaults
+	// fills DefaultMaxCandidates/DefaultRecencyWindow — so an operator who passes nothing gets
+	// the shipped defaults, and -probe-cap N demonstrates the bound biting on a real session.
+	probe := ctxplan.ProbeOptions{MaxCandidates: *probeCap, RecencyWindow: *probeRecency}
+
 	if *selfcheck {
-		if err := runSelfcheck(*budget, *window); err != nil {
+		if err := runSelfcheck(*budget, *window, probe); err != nil {
 			fmt.Fprintln(os.Stderr, "selfcheck FAIL:", err)
 			os.Exit(1)
 		}
@@ -96,7 +103,7 @@ func main() {
 	ctx := context.Background()
 	results := make([]sessionResult, 0, len(paths))
 	for _, p := range paths {
-		r, err := measureFile(ctx, p, *budget, *window)
+		r, err := measureFile(ctx, p, *budget, *window, probe)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "  skip %s: %v\n", filepath.Base(p), err)
 			continue
@@ -160,6 +167,24 @@ type sessionResult struct {
 	CompactionLossTurns   int     `json:"compaction_loss_turns"`   // turns CompactionView destroyed ≥1 fact
 	CompactionRecallFinal float64 `json:"compaction_recall_final"` // ρ^k survival of the oldest fact at session end
 	FactsRecovered        int     `json:"facts_recovered"`         // == served: facts planned recovers, compaction loses
+
+	// PLANNING COST — the per-turn planner WORK (candidate-scoring ops), measured. The
+	// full-scan planner (ctxplan.Materialize → PlanCells) scores every span each turn (Σ N_t
+	// = Θ(N²)); a persistent ctxplan.Index probes a BOUNDED candidate set (≤ cap each turn, Σ
+	// = Θ(c·N), LINEAR). Both go through the same Optimize(ObjGreedy) under the same forecast
+	// and budget, so the ONLY difference is the candidate set — and the resident plan is
+	// compared turn-for-turn (PlanAgreeTurns). This is scaling.go's PlannerComputeCum vs
+	// IndexBoundedPlannerCompute, measured on the real session instead of modeled.
+	MaxCandidates      int   `json:"max_candidates"`       // the bounded-probe cap c (effective, after defaults)
+	RecencyWindow      int   `json:"recency_window"`       // the bounded-probe recency tail (effective)
+	FullScanCandCum    int64 `json:"fullscan_cand_cum"`    // Σ turn: candidates the full-scan planner scored (== N each turn) → Θ(N²)
+	ProbeCandCum       int64 `json:"probe_cand_cum"`       // Σ turn: candidates the bounded probe scored (≤ cap) → Θ(c·N)
+	PeakProbe          int   `json:"peak_probe"`           // max probe size over the session (≤ cap — the per-turn bound held)
+	PlanAgreeTurns     int   `json:"plan_agree_turns"`     // turns the bounded plan's resident set+cost == the full-scan plan's
+	BoundedTurns       int   `json:"bounded_turns"`        // turns the probe was actually smaller than N (cap bit) — the real fidelity test
+	BoundedAgreeTurns  int   `json:"bounded_agree_turns"`  // agreement among the BoundedTurns (the cap pruned, the plan held)
+	FullScanPlannedCum int64 `json:"fullscan_planned_cum"` // Σ full-scan resident tokens (the planned curve, matched entry point)
+	ProbePlannedCum    int64 `json:"probe_planned_cum"`    // Σ bounded resident tokens (== full-scan on agreement turns)
 }
 
 // runSelfcheck drives the WHOLE pipeline (ingest → recall reload → replay) over a small
@@ -167,7 +192,7 @@ type sessionResult struct {
 // It is the "did the bridge + the loop survive" gate, not a unit test of the planner (the
 // planner has its own). The transcript is built so a tight budget forces ≥1 forecast miss
 // that DemandPage must serve — exercising the recoverability claim end to end.
-func runSelfcheck(_, window int) error {
+func runSelfcheck(_, window int, probe ctxplan.ProbeOptions) error {
 	// A tight budget (enough for ~1 span) forces elision deterministically regardless of the
 	// operator's -budget flag: the selfcheck is a fixed known-answer pipeline gate, so it
 	// picks its own budget that the synthetic transcript is built to overflow.
@@ -191,7 +216,7 @@ func runSelfcheck(_, window int) error {
 		return err
 	}
 	ctx := context.Background()
-	r, err := measureFile(ctx, tpath, budget, window)
+	r, err := measureFile(ctx, tpath, budget, window, probe)
 	if err != nil {
 		return fmt.Errorf("measureFile: %w", err)
 	}
@@ -211,8 +236,24 @@ func runSelfcheck(_, window int) error {
 	if r.Served > r.Faults {
 		return fmt.Errorf("served (%d) > faults (%d) — DemandPage over-counted", r.Served, r.Faults)
 	}
+	// Planning-cost invariants. The synthetic transcript is short (N < cap), so the bounded
+	// probe sees every span: it must score no more than the full scan, never overrun its cap,
+	// and reach the IDENTICAL resident plan every turn (the bounded probe changes the planner's
+	// COST, not its answer — index.go's behavior-preservation, end to end here).
+	switch {
+	case r.ProbeCandCum > r.FullScanCandCum:
+		return fmt.Errorf("bounded probe scored more candidates (%d) than the full scan (%d) — impossible", r.ProbeCandCum, r.FullScanCandCum)
+	case r.PeakProbe > r.MaxCandidates:
+		return fmt.Errorf("peak probe (%d) exceeded the cap (%d) — the per-turn planner-compute bound broke", r.PeakProbe, r.MaxCandidates)
+	case r.PlanAgreeTurns != r.Turns:
+		return fmt.Errorf("bounded plan diverged from full-scan on %d/%d turns at N<cap — the probe must reach the same answer when it sees every span", r.Turns-r.PlanAgreeTurns, r.Turns)
+	case r.ProbePlannedCum != r.FullScanPlannedCum:
+		return fmt.Errorf("bounded resident tokens (%d) != full-scan (%d) on identical plans — the cost win was not free", r.ProbePlannedCum, r.FullScanPlannedCum)
+	}
 	fmt.Printf("  selfcheck replay: %d turns, peak-planned %d/%d, faithful %d/%d, %d ref → %d faults (%d served), oldest-recall %.3f\n",
 		r.Turns, r.PeakPlannedTok, r.Budget, r.PlannedFaithfulTurns, r.Turns, r.References, r.Faults, r.Served, r.CompactionRecallFinal)
+	fmt.Printf("  planning cost:     full-scan %d cand, bounded-probe %d cand (peak %d/%d), plan-agree %d/%d turns\n",
+		r.FullScanCandCum, r.ProbeCandCum, r.PeakProbe, r.MaxCandidates, r.PlanAgreeTurns, r.Turns)
 	return nil
 }
 
@@ -220,7 +261,7 @@ func runSelfcheck(_, window int) error {
 // write-time gate (so sealed decisions are real); Persist+Load lifts the result into a
 // recall.Session whose Resolve re-screens on page-in (the rung-4 floor), so ctxplan's
 // Materialize/DemandPage go through the real gate, not a stub.
-func measureFile(ctx context.Context, path string, budget, window int) (sessionResult, error) {
+func measureFile(ctx context.Context, path string, budget, window int, probe ctxplan.ProbeOptions) (sessionResult, error) {
 	rec, ist, err := cdb.IngestSession(ctx, path, filepath.Base(path))
 	if err != nil {
 		return sessionResult{}, fmt.Errorf("ingest %s: %w", filepath.Base(path), err)
@@ -238,7 +279,7 @@ func measureFile(ctx context.Context, path string, budget, window int) (sessionR
 		return sessionResult{}, fmt.Errorf("reload: %w", err)
 	}
 	pages := sess.Pages()
-	r := replay(ctx, sess, pages, budget, window)
+	r := replay(ctx, sess, pages, budget, window, probe)
 	r.Source = filepath.Base(path)
 	if r.Pages == 0 && ist.Pages > 0 {
 		r.Pages = ist.Pages // keep a non-zero denominator if every page re-quarantined on reload
@@ -247,8 +288,9 @@ func measureFile(ctx context.Context, path string, budget, window int) (sessionR
 }
 
 // replay is the turn-by-turn measurement core. It grows the store one benign span per turn,
-// plans the resident view with a recency-window forecast, and scores the three quantities.
-func replay(ctx context.Context, sess *recall.Session, pages []recall.Page, budget, window int) sessionResult {
+// plans the resident view with a recency-window forecast, and scores the four quantities
+// (resident tokens, fault rate, quality vs compaction, and the per-turn planning COST).
+func replay(ctx context.Context, sess *recall.Session, pages []recall.Page, budget, window int, probe ctxplan.ProbeOptions) sessionResult {
 	r := sessionResult{Budget: budget, Window: window}
 	store := &recallStore{sess: sess, pages: pages}
 	for _, p := range pages {
@@ -259,6 +301,21 @@ func replay(ctx context.Context, sess *recall.Session, pages []recall.Page, budg
 		}
 	}
 	r.Turns = r.Pages
+
+	// The PERSISTENT bounded index — maintained incrementally across turns (the SessionPlanner
+	// pattern, here over the recall-bridged spans the full scan also sees), so each turn probes
+	// a BOUNDED candidate set instead of re-scoring all N. r.MaxCandidates / r.RecencyWindow
+	// record the EFFECTIVE cap (ctxplan fills 0 with DefaultMaxCandidates / DefaultRecencyWindow).
+	index := ctxplan.NewIndex()
+	idxNext := 0 // pages already lowered into the persistent index (the append cursor)
+	r.MaxCandidates = probe.MaxCandidates
+	if r.MaxCandidates <= 0 {
+		r.MaxCandidates = ctxplan.DefaultMaxCandidates
+	}
+	r.RecencyWindow = probe.RecencyWindow
+	if r.RecencyWindow <= 0 {
+		r.RecencyWindow = ctxplan.DefaultRecencyWindow
+	}
 
 	var (
 		prevView     *ctxplan.View
@@ -274,6 +331,13 @@ func replay(ctx context.Context, sess *recall.Session, pages []recall.Page, budg
 			continue // a sealed span is never a resident candidate; it is not a "turn"
 		}
 		store.upto = t + 1
+		// Catch the persistent index up to include every span the full scan now sees (pages
+		// [idxNext, t], INCLUDING any sealed pages skipped between turns — they enter the index
+		// as Sealed spans exactly as recallStore.Spans surfaces them, so the two candidate
+		// universes are identical and the only difference measured below is the access PATH).
+		for ; idxNext <= t; idxNext++ {
+			index.Add(pageToSpan(pages[idxNext]))
+		}
 		spans, _ := store.Spans(ctx)
 		fc := recencyForecast(spans, window)
 		view, err := ctxplan.Materialize(ctx, store, fc, ctxplan.Budget{Tokens: budget}, nil)
@@ -281,6 +345,32 @@ func replay(ctx context.Context, sess *recall.Session, pages []recall.Page, budg
 			// Materialize only errors on a store failure; a cost overrun without OverBudget
 			// would be a planner bug. Either way, skip the turn rather than corrupt the tally.
 			continue
+		}
+
+		// --- planning cost: the full scan (view.Plan, == ctxplan.PlanCells over all N spans)
+		// vs the bounded probe over the persistent index, SAME forecast + budget + planner, so
+		// the only variable is the candidate set. view.Plan.Candidates is N; idxPlan.Candidates
+		// is the bounded probe size (≤ cap). The resident plans are compared turn-for-turn. ---
+		idxPlan := index.PlanCells(fc, ctxplan.Budget{Tokens: budget}, nil, probe)
+		r.FullScanCandCum += int64(view.Plan.Candidates)
+		r.ProbeCandCum += int64(idxPlan.Candidates)
+		if idxPlan.Candidates > r.PeakProbe {
+			r.PeakProbe = idxPlan.Candidates
+		}
+		r.FullScanPlannedCum += int64(view.Plan.CostUsed)
+		r.ProbePlannedCum += int64(idxPlan.CostUsed)
+		agree := sameResident(view.Plan, idxPlan)
+		if agree {
+			r.PlanAgreeTurns++
+		}
+		if idxPlan.Candidates < view.Plan.Candidates {
+			// The cap actually pruned candidates this turn — the real fidelity test of the
+			// bounded probe (a turn where it sees fewer spans than the full scan yet must still
+			// reach the same resident plan when the relevant+recent+durable set sufficed).
+			r.BoundedTurns++
+			if agree {
+				r.BoundedAgreeTurns++
+			}
 		}
 
 		// --- resident tokens (this turn's contribution) ---
@@ -380,6 +470,28 @@ func pow(base, exp float64) float64 {
 		out *= base
 	}
 	return out
+}
+
+// sameResident reports whether two plans keep the IDENTICAL resident set and charge the
+// identical budget — the order-independent equality the agreement tally needs. The bounded
+// probe is a SUBSET of the full candidate set, so when the budget-optimal selection is wholly
+// inside the probe the two plans match exactly; this is the turn-for-turn witness of that. It
+// compares resident span IDs (render order is irrelevant) and the total resident cost, so a
+// plan that selected a different span — or the same spans at a different cost — is not "same".
+func sameResident(a, b ctxplan.Plan) bool {
+	if len(a.Selected) != len(b.Selected) || a.CostUsed != b.CostUsed {
+		return false
+	}
+	seen := make(map[string]bool, len(a.Selected))
+	for _, s := range a.Selected {
+		seen[s.ID] = true
+	}
+	for _, s := range b.Selected {
+		if !seen[s.ID] {
+			return false
+		}
+	}
+	return true
 }
 
 // ---------------------------------------------------------------------------
@@ -608,6 +720,19 @@ func printSession(w *os.File, r sessionResult) {
 		r.References, r.Faults, r.FaultRate*100, r.Served, r.Refused)
 	fmt.Fprintf(w, "  quality vs compaction:  planned faithful %d/%d turns   compaction lost facts %d turns   oldest-fact recall %.3f\n",
 		r.PlannedFaithfulTurns, r.Turns, r.CompactionLossTurns, r.CompactionRecallFinal)
+	fmt.Fprintf(w, "  planning cost (cum):    full-scan %s cand   bounded-probe %s cand   (%s less planner work)   peak-probe %d/%d   plan-agree %d/%d (bounded %d/%d)\n",
+		human(r.FullScanCandCum), human(r.ProbeCandCum), ratioX(r.FullScanCandCum, r.ProbeCandCum), r.PeakProbe, r.MaxCandidates,
+		r.PlanAgreeTurns, r.Turns, r.BoundedAgreeTurns, r.BoundedTurns)
+}
+
+// ratioX renders num/den as a "N.Nx" speedup string, or "—" when the denominator is zero
+// (a degenerate session that never planned a turn). It is the planner-work reduction the
+// bounded probe buys, the candidate-scoring analogue of the resident-token ratio.
+func ratioX(num, den int64) string {
+	if den <= 0 {
+		return "—"
+	}
+	return fmt.Sprintf("%.1fx", float64(num)/float64(den))
 }
 
 type total struct {
@@ -625,6 +750,16 @@ type total struct {
 	PlannedFaithfulTurns int     `json:"planned_faithful_turns"`
 	CompactionLossTurns  int     `json:"compaction_loss_turns"`
 	FactsRecovered       int     `json:"facts_recovered"`
+
+	// PLANNING COST (cumulative across sessions).
+	FullScanCandCum    int64 `json:"fullscan_cand_cum"`
+	ProbeCandCum       int64 `json:"probe_cand_cum"`
+	PeakProbe          int   `json:"peak_probe"`
+	PlanAgreeTurns     int   `json:"plan_agree_turns"`
+	BoundedTurns       int   `json:"bounded_turns"`
+	BoundedAgreeTurns  int   `json:"bounded_agree_turns"`
+	FullScanPlannedCum int64 `json:"fullscan_planned_cum"`
+	ProbePlannedCum    int64 `json:"probe_planned_cum"`
 }
 
 func aggregate(rs []sessionResult) total {
@@ -643,6 +778,16 @@ func aggregate(rs []sessionResult) total {
 		t.PlannedFaithfulTurns += r.PlannedFaithfulTurns
 		t.CompactionLossTurns += r.CompactionLossTurns
 		t.FactsRecovered += r.FactsRecovered
+		t.FullScanCandCum += r.FullScanCandCum
+		t.ProbeCandCum += r.ProbeCandCum
+		t.PlanAgreeTurns += r.PlanAgreeTurns
+		t.BoundedTurns += r.BoundedTurns
+		t.BoundedAgreeTurns += r.BoundedAgreeTurns
+		t.FullScanPlannedCum += r.FullScanPlannedCum
+		t.ProbePlannedCum += r.ProbePlannedCum
+		if r.PeakProbe > t.PeakProbe {
+			t.PeakProbe = r.PeakProbe
+		}
 	}
 	if t.References > 0 {
 		t.FaultRate = float64(t.Faults) / float64(t.References)
@@ -663,6 +808,9 @@ func printAggregate(w *os.File, rs []sessionResult, budget, window int) {
 		t.References, t.Faults, t.FaultRate*100, t.Served, human(t.FaultTaxCum), t.Refused)
 	fmt.Fprintf(w, "  quality vs compaction:  planned faithful %d/%d turns   compaction lost facts %d turns   %d facts recovered compaction would lose\n",
 		t.PlannedFaithfulTurns, t.Turns, t.CompactionLossTurns, t.FactsRecovered)
+	fmt.Fprintf(w, "  planning cost (cum):    full-scan %s cand   bounded-probe %s cand   (%s less planner work)   peak-probe %d   plan-agree %d/%d turns (bounded %d/%d)\n",
+		human(t.FullScanCandCum), human(t.ProbeCandCum), ratioX(t.FullScanCandCum, t.ProbeCandCum), t.PeakProbe,
+		t.PlanAgreeTurns, t.Turns, t.BoundedAgreeTurns, t.BoundedTurns)
 }
 
 func human(n int64) string {
