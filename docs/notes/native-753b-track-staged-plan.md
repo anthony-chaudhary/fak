@@ -100,13 +100,13 @@ means it needs nothing downstream and can land before the heavy pillars.
 | Phase | Milestone | Acceptance | Depends on |
 |---|---|---|---|
 | **P1 Config parse** ✅ | `applyGLMMoeDsaConfig` reads MoE+MLA+DSA metadata into Config | `go test ./internal/ggufload -run TestGLMMoeDsaConfig` green | — (landed) |
-| P1 Tensor names | `CanonicalTensorNameArch` maps `ffn_*_exps`, `ffn_gate_inp` router, `ffn_*_shexp`, `exp_probs_b`, and the MLA/indexer attn tensors | every `glm_moe_dsa` GGUF tensor resolves; no "no canonical mapping" error | P1 Config parse |
-| P1 Expert splitter | a `[E,I,H]` `ffn_*_exps` blob splits into per-expert canonical 2-D tensors on load | synthetic `*_exps` loads bit-equal to manual slicing | P1 Tensor names |
+| P1 Tensor names (1:1 ✅) | `CanonicalTensorNameArch` maps the MLA/indexer attn tensors, `ffn_gate_inp` router, `exp_probs_b`, `ffn_*_shexp` — **shipped `b1c0f04`**; the batched `ffn_*_exps` stay unmapped (fail loud) for the splitter | the 1:1 names resolve (golden `TestGLMMoeDsaCanonicalTensorNames`); `ffn_*_exps` still "no canonical mapping" until the splitter | P1 Config parse |
+| P1 Expert splitter ◻ | a `[E,I,H]` `ffn_*_exps` blob splits into per-expert canonical 2-D tensors on load (wire into both loader loops) | synthetic `*_exps` loads bit-equal to manual slicing | P1 Tensor names (1:1) |
 | P1 E2E load + tiny-oracle | a tiny synthetic `glm_moe_dsa` GGUF round-trips through `Load` and its forward matches the safetensors tiny-oracle | GGUF-loaded argmax == safetensors-loaded argmax | P1 Expert splitter |
 | P2 Vulkan Q4_K GEMM | Vulkan `compute.Backend` gains a Q4_K dequant-fused GEMV→GEMM | Vulkan Q4_K MatMul vs cpu-ref at cosine floor + argmax-exact (AMD node) | ships now (kernel); real bytes need P1 |
-| P2 Metal HAL + CUDA witness | expose `metalgemm` Q4_K via the unified HAL; **run** the `-tags cuda` Q8_0/Q4_K gates to recorded numbers | Metal Q4_K via HAL with host-witnessed cosine; CUDA cosines recorded ≥ floors | P2 Vulkan Q4_K |
+| P2 Metal HAL + **CUDA witness (CUDA ✅)** | expose `metalgemm` Q4_K via the unified HAL (open); the `-tags cuda` Q8_0/Q4_K gates **run + recorded on an sm_80 node, 2026-06-24** | Metal Q4_K via HAL host-witnessed cosine (open); **CUDA recorded: Q8_0 `0.99999980`, Q4_K `1.00000000`, argmax-exact** — [witness](glm52-quant-device-gemm-on-gpu-witness.md) | P2 Vulkan Q4_K |
 | P2 Full-model quant forward | end-to-end mixed-precision (Q4_K + Q8_0/f32 sensitive) `glm_moe_dsa` forward witness | GGUF-loaded quant argmax matches f32-dequant ref on the tiny fixture | P1 E2E load; P2 Vulkan Q4_K |
-| P3 Collective bridge | `backendCollective`: `model.Collective` wrapping `compute.CollectiveBackend` (the NCCL plug-in seam) | `backendCollective == LocalCollective` at max\|Δ\|=0; `ForwardTP` equal both ways (cpu-ref) | ships now (de-risks seam); real use needs P1+P2 |
+| **P3 Collective bridge ✅** | `BackendCollective`: `model.Collective` wrapping `compute.CollectiveBackend` (the NCCL plug-in seam) — **shipped `41017e3`** | `BackendCollective == LocalCollective` at max\|Δ\|=0 ✅; `ForwardTP` equal both ways (cpu-ref) ✅ | ships now (de-risks seam); real use needs P1+P2 |
 | P3 MLA-aware TP + EP | an MLA-aware (not head-parallel) TP decomposition + expert-parallel placement; quant-aware sharding | `ForwardTP` sharding-invariant on a synthetic `glm_moe_dsa`+MoE quant model | P3 Collective bridge; P1 E2E; P2 Full-model |
 | P3 Real cross-process NCCL | a non-cpu-ref `CollectiveBackend` (NCCL/RCCL or a TCP transport mirroring `pipeline_transport.go`) | a 2-GPU/2-process all-reduce of a device tensor matches cpu-ref — **only now may "multi-GPU" be claimed** | P3 Collective bridge; P3 MLA-aware TP |
 | P4 Device paging primitive | an upload→compute→free `pagedKernel` with an observable `pageIn` counter (the first honest "paged to device on demand") | GLM-DSA GEMM bit-equal to resident; weight absent from `halW` after; `pageIn`==1 | ships now (existing fixture); real win needs P2 |
@@ -129,9 +129,12 @@ means it needs nothing downstream and can land before the heavy pillars.
   equivalent), and all collectives are in-process. **Do not claim multi-GPU** until a
   non-cpu-ref `CollectiveBackend` exists, nor "paged to device" until the `pageIn`
   primitive lands.
-- **Scale gap:** every correctness witness is tiny-oracle and f32; the CUDA quant cosines
-  have never been recorded on hardware. The real cost is multi-month 753B serving on the
-  GPU server.
+- **Scale gap:** every correctness witness is tiny-oracle and f32. (The CUDA quant
+  device-GEMM cosines are now **recorded on sm_80 hardware** — 2026-06-24, Q8_0 `0.99999980`
+  / Q4_K `1.00000000`, both argmax-exact, weight 3.56×/7.11× smaller; see
+  [the witness](glm52-quant-device-gemm-on-gpu-witness.md) — but that is a single-GEMM rung,
+  not the full model, and the correctness-first quant kernels are slower than f32 SGEMM in
+  raw FLOPs.) The real cost is still multi-month 753B serving on the GPU server.
 
 ## Load-bearing existing code (reuse, don't duplicate)
 
