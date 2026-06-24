@@ -139,6 +139,7 @@ fak dream     --dir DIR --out-dir DIR                   # offline cleanup pass o
 fak debug     --session DIR --cmd report|info|bt|x|ws|grep|tombstone|context-query|context-diff   # attach to a session core image; demand-page its working set
 fak answer-shape --text - --max-repeat 0.5 [--max-chars N]   # degeneration/verbosity witness over a text; exit 1 when it loops/runs away
 fak doctor    --text - [--max-repeat 0.5] [--max-chars N]   # run the answer-shape witness + the kernel admit cross-check, then recommend
+fak codelint  PATH...                                  # lint agent-written code (Go/JSON in-process, Python/CUDA via toolchain); exit 1 on a hard parse/compile error
 fak policy    --dump > policy.json | --check policy.json   # author/validate the deployable capability floor
 fak attest    --policy FILE [--probes FILE] [--json]        # compliance attestation: prove the capability floor from preflight (exit 0 PROVEN / 1 drift / 2 usage)
 fak hook      < call.json                              # spawned-hook decide (the A/B baseline)
@@ -153,6 +154,15 @@ word-n-gram repeat, repeated-line blocks, and short-period tiling, headlined as 
 doctor` wraps that witness into operator recommendations and additionally reports the
 real verdict the context-MMU would reach on the same bytes (`ctxmmu.ScreenBytes`) —
 the fak analogue of `dos doctor`.
+
+`fak codelint PATH...` is the write-/definition-time CODE check at the kernel
+boundary — the code-content dual of `fak preflight`'s tool-registry check. It routes
+each file (or every file under a directory) to the owning language pack: Go and JSON
+parse in-process via the stdlib, Python and CUDA shell out to their toolchains
+(degrading to no-opinion when the toolchain is absent). It reports only HARD
+parse/compile errors (the zero-false-positive tier — semantic checks are out of
+scope) and exits `1` so it gates a pipeline. Because the input is untrusted model
+output, it honors no in-content ignore comment, and it runs off the hot path.
 
 `run`, `preflight`, and `agent` take `--policy FILE` to load the capability floor
 from a declarative JSON **manifest** instead of the compiled-in default — so WHICH
