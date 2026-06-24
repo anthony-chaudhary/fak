@@ -1,6 +1,6 @@
 # fak — the **F**used **A**gent **K**ernel
 
-<!-- readme-verified: 2026-06-22 vs VERSION 0.31.0 + BENCHMARK-AUTHORITY · process: tools/readme_freshness_audit.py + /refresh-readme · turn-tax hero front and center; breadth stills in BENCHMARK-GALLERY.md -->
+<!-- readme-verified: 2026-06-24 vs VERSION 0.32.0 + BENCHMARK-AUTHORITY · process: tools/readme_freshness_audit.py + /refresh-readme · turn-tax hero front and center; breadth stills in BENCHMARK-GALLERY.md -->
 <!-- appeal-verified: 2026-06-23 · doc-appeal scorecard v2 (tools/doc_appeal_scorecard.py) 100/100 A, appeal-debt 0 · v2 raised the bar (bold-flood + dense/unanchored lead promoted SOFT→HARD); front door rebuilt from 54/F: lead front-loaded behind an early Try-it anchor, 8 walls broken, 15 long/run-on sentences split, bold flood 84→20, contrast-frame tic removed — every claim, number, and link held identical -->
 
 > **fak in one line.** A single Go binary that sits between an AI agent and the
@@ -34,11 +34,11 @@ in [Colab](https://colab.research.google.com/github/anthony-chaudhary/fak/blob/m
 
 ## The one move: treat the model like an untrusted program
 
-**Treat the model like an untrusted program, and the tool call like a syscall.**
-That one move is the whole idea. Everything an agent does to the outside world
-becomes a syscall that passes through a kernel the model doesn't control. That
-covers calling a tool, admitting a result into its memory, and reusing a cached
-answer.
+**Treat the model like an untrusted program, and the tool call like a syscall —
+the model proposes, the kernel disposes.** That one move is the whole idea.
+Everything an agent does to the outside world becomes a syscall that passes
+through a kernel the model doesn't control. That covers calling a tool, admitting
+a result into its memory, and reusing a cached answer.
 
 From the security seat, that kernel is a permission gate the agent can't talk its
 way past. From the performance seat, it does the shared work once instead of every
@@ -91,12 +91,15 @@ rather than hidden.
 recognizer onto the *outside* of the loop: a pre-tool hook, a sidecar, a second
 model asked "is this safe?". That has two weaknesses. The model can argue its way
 past a recognizer (prompt injection is exactly that). And when the outside thing
-crashes or times out, the call usually runs anyway. That fail-open lands precisely
-when you're under attack.
+crashes or times out, the call usually runs anyway — *fail-open* (the unsafe
+default: a broken check lets the action through). That lands precisely when
+you're under attack.
 
-`fak` puts the check on the *same call path* as the tool call: one address space,
-no IPC, default-deny. So the gate isn't something the agent talks to. It's
-something the call passes *through*, like `read()` through the OS kernel.
+`fak` puts the check on the *same call path* as the tool call: one address space (the
+same program — no message hop to a separate process, no *IPC*), and *default-deny*
+(anything the policy doesn't name is refused). So the gate isn't something the
+agent talks to. It's something the call passes *through*, like `read()` through the
+OS kernel.
 
 Refusing an irreversible action doesn't depend on *catching* the attack; it
 depends on the lever never having been wired up. For thirty years, "more security"
@@ -428,7 +431,8 @@ Cite this work: machine-readable metadata is in [`CITATION.cff`](CITATION.cff)
 
 License: [Apache-2.0](LICENSE).
 
-<sub>Topics: agent kernel · agent tool firewall · AI agent security · prompt
-injection defense · tool poisoning · capability security · default-deny permission
-gate · KV cache · addressable KV cache · LLM inference · LLM serving · self-hosted
-LLM · agentic AI · MCP tool security · Go.</sub>
+<sub>Topics: Fused Agent Kernel · fak agent kernel · fak serve · fak-certified ·
+agent kernel · agent tool firewall · AI agent security · prompt injection defense ·
+tool poisoning · capability security · default-deny permission gate · treat the tool
+call like a syscall · KV cache · addressable KV cache · LLM inference · LLM serving ·
+self-hosted LLM · agentic AI · MCP tool security · Go.</sub>
