@@ -253,22 +253,26 @@ trailer_stamp = true
 [supervise]
 # target = 0 (2026-06-22, #517): NOTHING in-repo keeps a standing loop alive on the
 # live path, so a target of 4 was aspirational, not enforced -- zero loops are actually
-# kept alive. `dos loop` is emit-only (it PRINTS worker_launch_template below, it never
-# Popens), and the in-tree watchdog hardcodes its own argv (see the NOTE under the
-# template). Lowered to 0 so the declared count matches what is actually kept alive. The
-# keep-alive ARMING that would make a non-zero target real is tracked in #20; raise this
-# back to the desired standing-loop count when that lands.
+# kept alive. `dos loop` WITHOUT `--enact` is emit-only (it only PRINTS the
+# worker_launch_template below); `dos loop --enact` DOES Popen it, but nothing in-repo
+# arms a standing `--enact` loop, and the in-tree watchdog hardcodes its own argv (see
+# the NOTE under the template). Lowered to 0 so the declared count matches what is
+# actually kept alive. The keep-alive ARMING that would make a non-zero target real is
+# tracked in #20; raise this back to the desired standing-loop count when that lands.
 target = 0
-# NOTE (2026-06-20): in dos v0.28.0 this template is NOT exec'd by anything on the
-# live path -- `dos loop` is emit-only (it only PRINTS this string; the kernel never
-# Popens) and the in-tree enacting driver hardcodes its own `claude` argv. The real
-# Mac/Linux spawner is tools/dos_supervisor_watchdog.py:enact_command, which launches
-# dispatch_worker.py via sys.executable (the running interpreter) -- so the bare
-# `python` token below is a printed/validated mirror, not a portable exec line, and is
-# intentionally left as-is (the template only substitutes {lane}, so it cannot reach
-# sys.executable; `python3` would ENOENT on Windows-bare-python nodes and `py -3` on
-# POSIX). If a future caller ever shlex-splits + exec's this string, switch to the
-# shim-as-exec-target shape (a dispatch_worker.cmd twin + the existing shebang). See
+# NOTE (updated 2026-06-24): `dos loop` WITHOUT `--enact` only PRINTS this template; but
+# `dos loop --enact` DOES Popen each spawn through it (`dos loop --help`: "Popen each
+# SPAWN via [supervise].worker_launch_template"). So the bare `python` token below IS on
+# the --enact exec path, and a bare `python` ENOENTs on python3-only nodes (the #22
+# residual). The other live spawner is tools/dos_supervisor_watchdog.py:enact_command,
+# which launches dispatch_worker.py via sys.executable. The interpreter-free CUTOVER
+# TARGET now exists: cmd/dispatchworker, a Go binary parity-tested against
+# dispatch_worker.py that `make build` drops at tools/.bin/dispatchworker. Switching this
+# template to `tools/.bin/dispatchworker --lane {lane}` removes the interpreter spawn AND
+# fixes #22 -- but the cutover MUST also update the process-detection markers that key on
+# the literal `dispatch_worker.py` (tools/dispatch_preflight.py, tools/dispatch_status.py)
+# so a Go-launched worker is still detected, else the double-spawn guard goes blind. Left
+# on the Python launcher until that follow-up lands. See
 # docs/MULTINODE-DOS-FAK-CROSSOVER-2026-06-20.md and the BARE-PYTHON-TEMPLATE issue.
 worker_launch_template = 'python tools/dispatch_worker.py --lane {lane}'
 

@@ -18,6 +18,9 @@ build:
 	# (.claude/settings.json prefers this binary, falling back to tools/repo_guard.py
 	# until it exists). Part of `build` so every green gate self-propagates it.
 	go build -o tools/.bin/repoguard ./cmd/repoguard
+	# Likewise the Go DOS dispatch-worker launcher — the interpreter-free cutover
+	# target for tools/dispatch_worker.py (parity-tested; see dos.toml [supervise]).
+	go build -o tools/.bin/dispatchworker ./cmd/dispatchworker
 
 vet:
 	go vet ./...
