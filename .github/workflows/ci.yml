@@ -69,6 +69,18 @@ jobs:
       - name: coverage report (total statement coverage)
         run: go tool cover -func=coverage.out | tail -1
 
+      # The out-of-tree driver example (#454) is a SEPARATE module under
+      # examples/extdriver, so the root `go build ./...` / `go test ./...` above
+      # do NOT descend into it. Build + run it explicitly here so it can't rot:
+      # `go run .` is self-checking (exits non-zero if the ABI round-trip fails),
+      # so this step is the witness that pkg/abi stays importable out-of-tree.
+      - name: examples/extdriver (out-of-tree pkg/abi driver builds + round-trips)
+        working-directory: examples/extdriver
+        run: |
+          go build ./...
+          go vet ./...
+          go run .
+
       - name: claims-lint (every "- [" line in CLAIMS.md carries exactly one tag)
         run: |
           awk '/^- \[/{n=0; if(index($0,"[SHIPPED]"))n++; if(index($0,"[SIMULATED]"))n++; if(index($0,"[STUB]"))n++; c++; if(n!=1){print "VIOLATION:",$0; bad++}} END{printf "claims-lint: %d lines, %d violations\n",c,bad; if(bad>0||c==0)exit 1}' CLAIMS.md
