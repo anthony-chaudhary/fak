@@ -19,10 +19,10 @@ type Witness struct {
 	Elided         int      `json:"elided"`                  // spans kept cold (out of the view)
 	Recoverable    int      `json:"recoverable"`             // elided spans WITH a page-back-in handle
 	Unrecoverable  []string `json:"unrecoverable,omitempty"` // elided spans with NO handle (destroyed — a compaction tell)
-	ResidentTokens int      `json:"resident_tokens"` // resident token cost: planned selected cost under Audit, REALIZED rendered tokens (== View.RenderedTokens()) after Reconcile
-	ElidedTokens   int      `json:"elided_tokens"`   // tokens out of the window but still recoverable
-	Partition      bool     `json:"partition"`     // Resident+Elided == Candidates AND the two sets are disjoint
-	Faithful       bool     `json:"faithful"`      // Partition AND every elided span is recoverable
+	ResidentTokens int      `json:"resident_tokens"`         // resident token cost: planned selected cost under Audit, REALIZED rendered tokens (== View.RenderedTokens()) after Reconcile
+	ElidedTokens   int      `json:"elided_tokens"`           // tokens out of the window but still recoverable
+	Partition      bool     `json:"partition"`               // Resident+Elided == Candidates AND the two sets are disjoint
+	Faithful       bool     `json:"faithful"`                // Partition AND every elided span is recoverable
 
 	// Materialization reconciliation — set by Reconcile over the rendered+refused outcome of
 	// a Materialize pass (zero for a pure-plan Audit, which performs no page-in). Where Audit

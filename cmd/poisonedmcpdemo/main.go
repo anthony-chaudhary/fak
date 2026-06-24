@@ -110,8 +110,8 @@ var resultScenarios = []resultScenario{
 	{
 		Label: "lookup_config (leaked secret)",
 		Tool:  "lookup_config",
-		Body: `{"db_host":"db.internal","region":"us-east","api_key":"` + fakeSecret + `"}`,
-		Trap: fakeSecret,
+		Body:  `{"db_host":"db.internal","region":"us-east","api_key":"` + fakeSecret + `"}`,
+		Trap:  fakeSecret,
 	},
 	{
 		Label:  "search_kb (benign policy text)",
@@ -143,13 +143,13 @@ type outcome struct {
 type descOutcome struct {
 	Label      string `json:"label"`
 	Tool       string `json:"tool"`
-	Denied     bool   `json:"denied"`     // true => allow-list refused the call by structure
-	WithFAK    string `json:"with_fak"`   // human-readable with-fak column
+	Denied     bool   `json:"denied"`      // true => allow-list refused the call by structure
+	WithFAK    string `json:"with_fak"`    // human-readable with-fak column
 	WithoutFAK string `json:"without_fak"` // human-readable without-fak column
 }
 
 type report struct {
-	Results      []outcome    `json:"results"`
+	Results      []outcome     `json:"results"`
 	Descriptions []descOutcome `json:"descriptions"`
 }
 

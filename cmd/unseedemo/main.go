@@ -107,18 +107,18 @@ func synthCfg() model.Config {
 
 // Witness is the set of numbers every output mode reports, all computed live in one run.
 type Witness struct {
-	Model           string  `json:"model"`
-	PrefixLen       int     `json:"prefix_len"`
-	PoisonLen       int     `json:"poison_span_len"`
-	QueryLen        int     `json:"query_len"`
-	GateVerdict     string  `json:"gate_verdict"`     // "QUARANTINE"
-	Quarantined     bool    `json:"quarantined"`      // the span was evicted from the cache
-	CacheBeforeEvict int    `json:"cache_before_evict"` // prefix+poison
-	CacheAfterEvict int     `json:"cache_after_evict"` // == prefix_len (poison span removed)
-	EvictVsNever    float64 `json:"maxabsdiff_evict_vs_never"`   // 0  (the headline)
-	PoisonVsNever   float64 `json:"maxabsdiff_poison_vs_never"`  // 0.3257 (contaminated control)
-	TooLateVsNever  float64 `json:"maxabsdiff_toolate_vs_never"` // >0 (the boundary)
-	RepositionResid float64 `json:"reposition_residual"`         // <= repTol (re-RoPE bit-exact)
+	Model            string  `json:"model"`
+	PrefixLen        int     `json:"prefix_len"`
+	PoisonLen        int     `json:"poison_span_len"`
+	QueryLen         int     `json:"query_len"`
+	GateVerdict      string  `json:"gate_verdict"`                // "QUARANTINE"
+	Quarantined      bool    `json:"quarantined"`                 // the span was evicted from the cache
+	CacheBeforeEvict int     `json:"cache_before_evict"`          // prefix+poison
+	CacheAfterEvict  int     `json:"cache_after_evict"`           // == prefix_len (poison span removed)
+	EvictVsNever     float64 `json:"maxabsdiff_evict_vs_never"`   // 0  (the headline)
+	PoisonVsNever    float64 `json:"maxabsdiff_poison_vs_never"`  // 0.3257 (contaminated control)
+	TooLateVsNever   float64 `json:"maxabsdiff_toolate_vs_never"` // >0 (the boundary)
+	RepositionResid  float64 `json:"reposition_residual"`         // <= repTol (re-RoPE bit-exact)
 }
 
 // Readout is a number the viz lights up on a reveal frame.
@@ -281,7 +281,7 @@ func buildFrames(w Witness) []Frame {
 
 	// ---- Act 1: Un-See It (write-time evict) ---------------------------------------------
 	add(Frame{Act: 1, Phase: "intro", Caption: "A poisoned tool result is about to be written to the model's KV cache.",
-		Sub: "We will watch the kernel delete it — and prove the model's next thought is bit-identical to one that never saw it.",
+		Sub:      "We will watch the kernel delete it — and prove the model's next thought is bit-identical to one that never saw it.",
 		CacheLen: 0, Cells: nil})
 	add(Frame{Act: 1, Phase: "prefill-prefix", Caption: "Trusted system prefix prefilled → 5 tokens resident.",
 		CacheLen: 5, Cells: buildCells("resident", "", "", false, false)})
