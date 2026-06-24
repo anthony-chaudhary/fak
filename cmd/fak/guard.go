@@ -141,53 +141,11 @@ func cmdGuard(argv []string) {
 		auditSeq0, _, _ = auditJournal.Stats()
 	}
 
-	// 2. Resolve the upstream the gateway proxies to (and the key handling). An explicit
-	//    --provider wins; otherwise the wire is inferred from the wrapped agent's name so
-	//    naming a known agent Just Works, with anthropic (Claude Code) as the fallback.
-	up, providerAutodetected := resolveGuardProvider(*provider, command[0])
-	resolvedBase := strings.TrimSpace(*baseURL)
-	if resolvedBase == "" {
-		resolvedBase = guardDefaultBaseURL(up)
-	}
-	if resolvedBase == "" {
-		fmt.Fprintf(os.Stderr, "fak guard: provider %q has no public default base URL — pass --base-url\n", up)
-		os.Exit(2)
-	}
-	apiKey := ""
-	if *apiKeyEnv != "" {
-		apiKey = os.Getenv(*apiKeyEnv)
-	}
-
-	// Subscription is the DEFAULT for Claude: when the upstream is Anthropic and no
-	// API key is configured, fak sources the Claude Pro/Max OAuth token and sends it
-	// upstream as Authorization: Bearer + the oauth beta (the scheme api.anthropic.com
-	// accepts an sk-ant-oat token under), holding the token itself and ignoring the
-	// client's credential. A configured API key (--api-key-env / ANTHROPIC_API_KEY)
-	// opts out (use API billing); --anthropic-oauth forces the subscription path and
-	// fails loud if no token is found.
-	pinUpstream := false
-	oauthSource := ""
-	if *anthropicOAuth && up != "anthropic" {
-		fmt.Fprintf(os.Stderr, "fak guard: --anthropic-oauth applies only to --provider anthropic (got %q)\n", up)
-		os.Exit(2)
-	}
-	autoOAuth := up == "anthropic" && apiKey == "" && os.Getenv("ANTHROPIC_API_KEY") == ""
-	if *anthropicOAuth || autoOAuth {
-		tok, src, terr := resolveAnthropicOAuthToken(*oauthTokenEnv)
-		switch {
-		case terr == nil:
-			apiKey = tok
-			pinUpstream = true
-			oauthSource = src
-		case *anthropicOAuth:
-			// Explicitly requested but nothing to use — fail loud.
-			fmt.Fprintf(os.Stderr, "fak guard: --anthropic-oauth: %v\n", terr)
-			os.Exit(2)
-		default:
-			// Auto attempt found no token (normal for an API-key user): fall back to
-			// plain passthrough — Claude Code forwards its own bearer if it is logged in.
-		}
-	}
+	// 2. Resolve the upstream wire + credential posture (provider autodetect, base URL,
+	//    API key, and the Claude subscription-OAuth default); see resolveGuardUpstream.
+	us := resolveGuardUpstream(*provider, command[0], *baseURL, *apiKeyEnv, *anthropicOAuth, *oauthTokenEnv)
+	up, providerAutodetected, resolvedBase := us.provider, us.autodetected, us.baseURL
+	apiKey, pinUpstream, oauthSource := us.apiKey, us.pinUpstream, us.oauthSource
 
 	requireKey, ok := resolveRequiredKey(*requireKeyEnv, os.Getenv)
 	if !ok {
@@ -262,22 +220,7 @@ func cmdGuard(argv []string) {
 	//    never the parent shell, never settings.json. A `claude` in another terminal is
 	//    untouched.
 	injected := guardInjectedEnv(up, *envName, gwURL)
-	child := exec.Command(command[0], command[1:]...)
-	child.Stdin, child.Stdout, child.Stderr = os.Stdin, os.Stdout, os.Stderr
-	child.Env = os.Environ()
-	for _, kv := range injected {
-		child.Env = append(child.Env, kv[0]+"="+kv[1])
-	}
-
-	// Subscription mode: put the wrapped client in a deterministic state by handing it
-	// a PLACEHOLDER api key (only if it has none). Claude Code then talks to the gateway
-	// in x-api-key mode; the gateway IGNORES that placeholder (pinUpstream) and
-	// authenticates upstream with the real held OAuth token. Without this the client may
-	// instead forward its own subscription bearer — which the gateway also ignores in
-	// pinned mode — so either way the held token is what reaches Anthropic.
-	if pinUpstream && os.Getenv("ANTHROPIC_API_KEY") == "" {
-		child.Env = append(child.Env, "ANTHROPIC_API_KEY=fak-guard-oauth-placeholder")
-	}
+	child := buildGuardChild(command, injected, pinUpstream)
 
 	if !*quiet {
 		if providerAutodetected {
@@ -296,37 +239,8 @@ func cmdGuard(argv []string) {
 		}
 	}
 
-	runErr := child.Run()
-
-	// 6. Tear the gateway down and report what the kernel decided this session.
-	cancel()
-	serr := <-serveErr
-	if !*quiet {
-		fmt.Fprintln(os.Stderr)
-		fmt.Fprint(os.Stderr, formatAuditSummary(srv.AdjudicationSummary()))
-		fmt.Fprint(os.Stderr, formatJournalSummary(auditJournal, auditSeq0))
-	}
-	// Flush + fsync the durable trail before exit so a row returned to the agent is
-	// never lost to a buffered write (Close is safe on a nil/in-memory journal).
-	if auditJournal != nil {
-		_ = auditJournal.Close()
-	}
-	// Faithfully surface the child's exit code first (so `fak guard -- claude -p …`
-	// scripts see what the agent returned).
-	if runErr != nil {
-		if ee, isExit := runErr.(*exec.ExitError); isExit {
-			os.Exit(ee.ExitCode())
-		}
-		fmt.Fprintf(os.Stderr, "fak guard: could not run %q: %v\n", command[0], runErr)
-		os.Exit(1)
-	}
-	// The child succeeded — but if the gateway itself failed mid-session (Serve returned
-	// something other than a clean shutdown), the adjudication boundary was down for part
-	// of the run, so do not report a silent success. A clean teardown returns nil.
-	if serr != nil && !errors.Is(serr, http.ErrServerClosed) && !errors.Is(serr, context.Canceled) {
-		fmt.Fprintf(os.Stderr, "fak guard: gateway error during the session: %v\n", serr)
-		os.Exit(1)
-	}
+	// 6. Run the wrapped agent, then tear the gateway down and report the session.
+	runGuardChildAndReport(child, srv, cancel, serveErr, *quiet, auditJournal, auditSeq0, command[0])
 }
 
 // resolveAnthropicOAuthToken finds a Claude Pro/Max SUBSCRIPTION OAuth token to
@@ -748,4 +662,134 @@ func formatAuditSummary(sum gateway.AdjudicationSummary) string {
 		}
 	}
 	return b.String()
+}
+
+// guardUpstream is the resolved upstream wire + credential posture for `fak guard`: which
+// provider the gateway proxies to, its base URL, the API key (if any), and — for Claude —
+// whether to hold a Pro/Max subscription OAuth token upstream (pinUpstream) and where it
+// came from (oauthSource).
+type guardUpstream struct {
+	provider     string
+	autodetected bool
+	baseURL      string
+	apiKey       string
+	pinUpstream  bool
+	oauthSource  string
+}
+
+// resolveGuardUpstream picks the upstream wire and credential posture: an explicit
+// --provider wins, else the wire is inferred from the wrapped agent's name (anthropic as
+// the fallback); the base URL defaults to the provider's public API. Subscription is the
+// DEFAULT for Claude — when the upstream is Anthropic and no API key is configured, it
+// sources the Pro/Max OAuth token and pins it upstream; --anthropic-oauth forces that and
+// fails loud if no token is found. It exits(2) on an unresolvable base URL or OAuth misuse.
+func resolveGuardUpstream(providerFlag, agentName, baseURLFlag, apiKeyEnv string, forceOAuth bool, oauthTokenEnv string) guardUpstream {
+	up, autodetected := resolveGuardProvider(providerFlag, agentName)
+	resolvedBase := strings.TrimSpace(baseURLFlag)
+	if resolvedBase == "" {
+		resolvedBase = guardDefaultBaseURL(up)
+	}
+	if resolvedBase == "" {
+		fmt.Fprintf(os.Stderr, "fak guard: provider %q has no public default base URL — pass --base-url\n", up)
+		os.Exit(2)
+	}
+	apiKey := ""
+	if apiKeyEnv != "" {
+		apiKey = os.Getenv(apiKeyEnv)
+	}
+
+	// Subscription is the DEFAULT for Claude: when the upstream is Anthropic and no
+	// API key is configured, fak sources the Claude Pro/Max OAuth token and sends it
+	// upstream as Authorization: Bearer + the oauth beta (the scheme api.anthropic.com
+	// accepts an sk-ant-oat token under), holding the token itself and ignoring the
+	// client's credential. A configured API key (--api-key-env / ANTHROPIC_API_KEY)
+	// opts out (use API billing); --anthropic-oauth forces the subscription path and
+	// fails loud if no token is found.
+	pinUpstream := false
+	oauthSource := ""
+	if forceOAuth && up != "anthropic" {
+		fmt.Fprintf(os.Stderr, "fak guard: --anthropic-oauth applies only to --provider anthropic (got %q)\n", up)
+		os.Exit(2)
+	}
+	autoOAuth := up == "anthropic" && apiKey == "" && os.Getenv("ANTHROPIC_API_KEY") == ""
+	if forceOAuth || autoOAuth {
+		tok, src, terr := resolveAnthropicOAuthToken(oauthTokenEnv)
+		switch {
+		case terr == nil:
+			apiKey = tok
+			pinUpstream = true
+			oauthSource = src
+		case forceOAuth:
+			// Explicitly requested but nothing to use — fail loud.
+			fmt.Fprintf(os.Stderr, "fak guard: --anthropic-oauth: %v\n", terr)
+			os.Exit(2)
+		default:
+			// Auto attempt found no token (normal for an API-key user): fall back to
+			// plain passthrough — Claude Code forwards its own bearer if it is logged in.
+		}
+	}
+	return guardUpstream{
+		provider: up, autodetected: autodetected, baseURL: resolvedBase,
+		apiKey: apiKey, pinUpstream: pinUpstream, oauthSource: oauthSource,
+	}
+}
+
+// buildGuardChild constructs the wrapped-agent command with ONLY the gateway URL injected
+// into its environment (never the parent shell). In pinned subscription mode it also hands
+// the client a placeholder ANTHROPIC_API_KEY (when it has none) so it talks x-api-key to the
+// gateway, which ignores the placeholder and authenticates upstream with the held token.
+func buildGuardChild(command []string, injected [][2]string, pinUpstream bool) *exec.Cmd {
+	child := exec.Command(command[0], command[1:]...)
+	child.Stdin, child.Stdout, child.Stderr = os.Stdin, os.Stdout, os.Stderr
+	child.Env = os.Environ()
+	for _, kv := range injected {
+		child.Env = append(child.Env, kv[0]+"="+kv[1])
+	}
+	// Subscription mode: hand the client a PLACEHOLDER api key (only if it has none) so
+	// it talks to the gateway in x-api-key mode; the gateway IGNORES the placeholder
+	// (pinUpstream) and authenticates upstream with the real held OAuth token. Without it
+	// the client may forward its own subscription bearer — also ignored in pinned mode —
+	// so either way the held token is what reaches Anthropic.
+	if pinUpstream && os.Getenv("ANTHROPIC_API_KEY") == "" {
+		child.Env = append(child.Env, "ANTHROPIC_API_KEY=fak-guard-oauth-placeholder")
+	}
+	return child
+}
+
+// runGuardChildAndReport runs the wrapped agent to completion, tears the gateway down,
+// prints the session's adjudication + journal summary (unless quiet), flushes the durable
+// trail, and exits with the child's own code — surfacing a gateway-mid-session failure as
+// a non-silent error so a clean child exit never hides a downed adjudication boundary.
+func runGuardChildAndReport(child *exec.Cmd, srv *gateway.Server, cancel context.CancelFunc, serveErr <-chan error, quiet bool, auditJournal *journal.Journal, auditSeq0 uint64, agentName string) {
+	runErr := child.Run()
+
+	// Tear the gateway down and report what the kernel decided this session.
+	cancel()
+	serr := <-serveErr
+	if !quiet {
+		fmt.Fprintln(os.Stderr)
+		fmt.Fprint(os.Stderr, formatAuditSummary(srv.AdjudicationSummary()))
+		fmt.Fprint(os.Stderr, formatJournalSummary(auditJournal, auditSeq0))
+	}
+	// Flush + fsync the durable trail before exit so a row returned to the agent is
+	// never lost to a buffered write (Close is safe on a nil/in-memory journal).
+	if auditJournal != nil {
+		_ = auditJournal.Close()
+	}
+	// Faithfully surface the child's exit code first (so `fak guard -- claude -p …`
+	// scripts see what the agent returned).
+	if runErr != nil {
+		if ee, isExit := runErr.(*exec.ExitError); isExit {
+			os.Exit(ee.ExitCode())
+		}
+		fmt.Fprintf(os.Stderr, "fak guard: could not run %q: %v\n", agentName, runErr)
+		os.Exit(1)
+	}
+	// The child succeeded — but if the gateway itself failed mid-session (Serve returned
+	// something other than a clean shutdown), the adjudication boundary was down for part
+	// of the run, so do not report a silent success. A clean teardown returns nil.
+	if serr != nil && !errors.Is(serr, http.ErrServerClosed) && !errors.Is(serr, context.Canceled) {
+		fmt.Fprintf(os.Stderr, "fak guard: gateway error during the session: %v\n", serr)
+		os.Exit(1)
+	}
 }
