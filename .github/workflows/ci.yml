@@ -120,6 +120,32 @@ jobs:
           python tools/release_dry_run.py --fast --json HEAD
           python tools/release_dry_run.py --json HEAD
 
+      # DOS dispatch-loop tool tests: the GitHub-issue-backlog dispatch machinery
+      # (the fleet's second DOS work surface, docs/dispatch-loop.md) shipped a full
+      # test cluster, but NONE of it ran in any gate -- CI enumerated only the
+      # release/scorecard suites, so a regression in the closure auditor, the
+      # throughput meter, the issue picker, the lane router, the supervisor-status
+      # fold, or the hook-cost bench failed NOTHING (115 of 147 tool tests were
+      # un-gated). These ten are pure-stdlib and hermetic -- every gh/dos/git/claude
+      # boundary is seamed (verified: 0 real external subprocess calls) and they are
+      # green on Linux + Windows -- so they wire in HARD here. (The remaining
+      # un-gated long tail, including ~12 currently-red tool tests, is a separate
+      # cleanup; a glob-discovering runner that auto-gates new tool tests is the
+      # systemic follow-up.)
+      - name: dos dispatch-loop tool tests (closure-audit · throughput · picker · lane-router · hook-bench)
+        working-directory: ${{ github.workspace }}
+        run: |
+          python tools/issue_closure_audit_test.py
+          python tools/issue_triage_test.py
+          python tools/dispatch_throughput_test.py
+          python tools/dispatch_status_test.py
+          python tools/dispatch_preflight_test.py
+          python tools/issue_dispatch_test.py
+          python tools/issue_resolve_dispatch_test.py
+          python tools/issue_lane_router_test.py
+          python tools/dos_supervisor_status_test.py
+          python tools/dos_hook_bench_test.py
+
       # Notebook anti-rot gate: the cloud-notebook quickstarts under notebooks/ are
       # GENERATED ARTIFACTS of tools/gen_notebooks.py. `--check` re-renders in memory and
       # fails on drift (a hand-edited .ipynb) OR a stale repo reference (a cell points at
