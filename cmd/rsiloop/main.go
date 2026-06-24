@@ -38,16 +38,16 @@ func main() {
 	maxCycles := flag.Int("max-cycles", 0, "cap on candidates tried (0 = all)")
 	probePkg := flag.String("probe", "./cmd/kpiprobe", "the KPI probe package path")
 	suitePkgs := flag.String("suite-pkgs", "./...", "package pattern the suite-green gate builds+vets")
+	harness := flag.String("harness", "worktree", "which REAL subsystem the loop drives: "+
+		"worktree (rewrite DefaultCacheSize, measured in an isolated worktree) | "+
+		"rulesynth (synthesize an adjudicator deny-rule from the frozen near-miss corpus)")
 	flag.Parse()
 
-	cfg := rsiloop.WorktreeConfig{
-		Repo:        *repo,
-		BaselineRef: *baselineRef,
-		Candidates:  parseInts(*candidates),
-		ProbePkg:    *probePkg,
-		SuitePkgs:   *suitePkgs,
+	h, herr := selectHarness(*harness, *repo, *baselineRef, *candidates, *probePkg, *suitePkgs)
+	if herr != nil {
+		fmt.Fprintln(os.Stderr, herr)
+		os.Exit(2)
 	}
-	h := rsiloop.NewWorktreeHarness(cfg)
 
 	j, err := rsiloop.NewJournal(*journalPath)
 	if err != nil {
@@ -64,6 +64,36 @@ func main() {
 	default:
 		fmt.Fprintf(os.Stderr, "unknown -mode %q (want improve|track)\n", *mode)
 		os.Exit(2)
+	}
+}
+
+// selectHarness builds the real subsystem the loop drives from the -harness flag.
+// Two are wired today, both folded through the SAME non-forgeable keep-bit (Run +
+// shipgate.Evaluate): the worktree harness rewrites the DefaultCacheSize literal and
+// measures the candidate in an isolated git worktree off main; the rulesynth harness
+// synthesizes an adjudicator deny-rule from the frozen near-miss corpus and proves it
+// against the real model-free adjudicator. A second REAL subsystem — not a second knob
+// on the same one — is what makes the loop a general improver rather than a cache-size
+// demo (#586).
+func selectHarness(kind, repo, baselineRef, candidates, probePkg, suitePkgs string) (rsiloop.Harness, error) {
+	switch kind {
+	case "worktree":
+		return rsiloop.NewWorktreeHarness(rsiloop.WorktreeConfig{
+			Repo:        repo,
+			BaselineRef: baselineRef,
+			Candidates:  parseInts(candidates),
+			ProbePkg:    probePkg,
+			SuitePkgs:   suitePkgs,
+		}), nil
+	case "rulesynth":
+		// The corpus is the committed frozen fixture (rulesynth_corpus.go), mined
+		// deterministically through the real Detect predicate so a KEEP reproduces
+		// bit-for-bit. The worktree flags (repo/baseline-ref/candidates) do not apply:
+		// this harness needs no git fork — its baseline is the zero-catch floor and its
+		// replay is a pure adjudicator call.
+		return rsiloop.NewRuleSynthHarness(rsiloop.FrozenRuleSynthCorpus()), nil
+	default:
+		return rsiloop.Harness{}, fmt.Errorf("unknown -harness %q (want worktree|rulesynth)", kind)
 	}
 }
 
