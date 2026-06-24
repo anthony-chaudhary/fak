@@ -1,6 +1,6 @@
 # Makefile — portable build/test entrypoints (unit 12). On Windows without make,
 # use scripts/ci.ps1, which this mirrors.
-.PHONY: ci build vet test test-fast bench claims-lint index-sync model gofmt-check hygiene
+.PHONY: ci build vet test test-fast bench claims-lint salience index-sync model gofmt-check hygiene
 
 # ci is THE local green gate (AGENTS.md: "Green = make ci"). It must stay aligned with
 # .github/workflows/ci.yml's HARD steps so a pre-push `make ci` fails on the same things
@@ -8,7 +8,7 @@
 # gofmt-check + hygiene are the deterministic, no-network CI gates that were previously
 # CI-only — wired in here to close that local↔CI drift. (Network/range gates — leak-scan,
 # dos-review — stay CI/githook-only; the release-substrate suite stays CI-only by weight.)
-ci: build gofmt-check vet test claims-lint index-sync hygiene
+ci: build gofmt-check vet test claims-lint salience index-sync hygiene
 	@echo "CI OK"
 
 build:
@@ -50,6 +50,20 @@ model:
 # claims-lint: every "- [" line in CLAIMS.md carries exactly one tag.
 claims-lint:
 	@awk '/^- \[/{n=0; if(index($$0,"[SHIPPED]"))n++; if(index($$0,"[SIMULATED]"))n++; if(index($$0,"[STUB]"))n++; c++; if(n!=1){print "VIOLATION:",$$0; bad++}} END{printf "claims-lint: %d lines, %d violations\n",c,bad; if(bad>0||c==0)exit 1}' CLAIMS.md
+
+# salience (dos-kernel docs/391): the first WIRED consumer of the `dos salience` verdict
+# (it was built-but-latent — nothing routed on it; see the usefulness audit in
+# docs/notes/DOS-SALIENCE-USEFULNESS-AUDIT-2026-06-24.md). It routes every CLAIMS.md claim
+# through dos.salience.partition — [SHIPPED]→LIVE, [SIMULATED]/[STUB]→PARKED — asserts the
+# no-loss invariant (nothing dropped ledger→fold) and cross-checks live/parked counts
+# against the ledger, so a true-but-parked claim is never silently lost. Also a cross-repo
+# regression sentinel: it pins the kernel's park-declared contract fak depends on. A real
+# gate where the dos kernel is importable (this trunk, the fleet hosts); an advisory SKIP
+# (exit 0) where it is not — so it joins `make ci` without breaking a box that lacks dos.
+# Intentionally NOT a HARD ci.yml step (CI is hermetic — no dos kernel); the pure logic is
+# gated there by tools/claims_salience_register_test.py.
+salience:
+	@python3 tools/claims_salience_register.py --check
 
 # index-sync (#511): the curated INDEX.md / llms.txt must not drift from the tree.
 # Two gates: the reciprocal orphan gate (dangling links + unlisted dated notes) and

@@ -25,8 +25,17 @@ $py = if (Get-Command python3 -ErrorAction SilentlyContinue) { "python3" }
       elseif (Get-Command python -ErrorAction SilentlyContinue) { "python" }
       else { $null }
 if ($null -ne $py) {
-    Write-Host "== index-sync =="
     Set-Location (Join-Path $PSScriptRoot "..")
+
+    # salience (dos-kernel docs/391): route CLAIMS.md through the `dos salience` verdict —
+    # the first wired consumer of that verb (was built-but-latent). Asserts the no-loss
+    # invariant + cross-checks live/parked counts against the ledger. Real gate where the
+    # dos kernel is importable; an advisory SKIP (exit 0) where it is not.
+    Write-Host "== salience (dos salience consumer) =="
+    & $py tools/claims_salience_register.py --check
+    if ($LASTEXITCODE -ne 0) { exit 1 }
+
+    Write-Host "== index-sync =="
     & $py tools/check_index_sync.py --audit-tree
     if ($LASTEXITCODE -ne 0) { exit 1 }
     & $py tools/gen_llms_full.py --check

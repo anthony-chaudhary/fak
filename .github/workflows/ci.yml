@@ -154,6 +154,17 @@ jobs:
           python tools/dos_hook_bench_test.py
           python tools/dispositions_test.py
 
+      # claims-salience-register: the first WIRED consumer of the `dos salience` verdict
+      # (dos-kernel docs/391) — it routes CLAIMS.md through dos.salience.partition into a
+      # no-loss parked register so a true-but-parked [SIMULATED]/[STUB] claim is never
+      # silently dropped (see docs/notes/DOS-SALIENCE-USEFULNESS-AUDIT-2026-06-24.md). The
+      # test is HERMETIC: the dos-gated live smoke skips when the kernel isn't importable
+      # (CI has none), so this gates the pure parsing / no-loss / cross-check logic. The
+      # for-real run lives in `make ci` + scripts/ci.ps1, where the dos kernel is present.
+      - name: claims-salience-register (dos salience consumer; hermetic logic gated)
+        working-directory: ${{ github.workspace }}
+        run: python tools/claims_salience_register_test.py
+
       # Notebook anti-rot gate: the cloud-notebook quickstarts under notebooks/ are
       # GENERATED ARTIFACTS of tools/gen_notebooks.py. `--check` re-renders in memory and
       # fails on drift (a hand-edited .ipynb) OR a stale repo reference (a cell points at

@@ -170,6 +170,18 @@ The verb only stops being latent when something *routes* on its output. Concrete
 options, smallest-first — recorded as decisions, **not** built here (building a producer with
 no consumer would just add another latent surface):
 
+> **UPDATE 2026-06-24 — #1 is now BUILT and WIRED.** The first option below shipped as
+> [`tools/claims_salience_register.py`](../../tools/claims_salience_register.py): it routes
+> every `CLAIMS.md` claim through `dos.salience.partition` (`[SHIPPED]`→LIVE,
+> `[SIMULATED]`/`[STUB]`→host-declared PARKED), asserts the no-loss invariant + cross-checks
+> the live/parked counts against the ledger, and surfaces the recoverable register at
+> [`docs/claims-salience-register.md`](../claims-salience-register.md). It uses the REAL
+> kernel verb (`import dos.salience`) and is wired into the green gate (`make ci` +
+> `scripts/ci.ps1`) — a real gate where the dos kernel is importable, an advisory SKIP where
+> it is not; the hermetic logic is gated in `ci.yml` by `claims_salience_register_test.py`.
+> So `dos salience` is no longer latent: a consumer now routes on the verdict. Options #2
+> (auto-derive the `default_on` bit) and #3 (fold into `fak doctor`) remain open.
+
 - **A `[STUB]`/`[SIMULATED]`-claim park register (CI advisory).** A fak tool reads every
   `[STUB]`/`[SIMULATED]` line in `CLAIMS.md` (each is true-but-not-LIVE by definition), feeds
   them through `salience.partition`, and asserts the no-loss invariant — every claim lands in
