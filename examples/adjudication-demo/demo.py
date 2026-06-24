@@ -61,6 +61,28 @@ def tool(name):
                        "required": ["command"]}}}]
 
 
+# How wide a proposed command renders before we abbreviate it. The whole point of
+# the demo is to show the FULL command the kernel allowed so an operator can review
+# every effect, so this is generous — and we collapse the noisy sandbox temp path
+# (the only long part) FIRST, so the command STRUCTURE (every `&&`-joined effect)
+# stays visible within it.
+MAX_CMD_DISPLAY = 120
+
+
+def display_command(command, sandbox):
+    """A faithful one-line rendering of the command the kernel allowed (issue #366).
+
+    Collapses the sandbox temp path to ``{sandbox}`` so the ``&&`` chain and every
+    effect stay visible, then caps at ``MAX_CMD_DISPLAY`` with a real ``…`` so any
+    truncation is EXPLICIT — never the old silent ``command[:56]`` slice that chopped
+    mid-path and hid a multi-effect chain behind an innocent-looking ``mkdir`` prefix.
+    """
+    shown = (command or "").replace(sandbox, "{sandbox}")
+    if len(shown) > MAX_CMD_DISPLAY:
+        shown = shown[: MAX_CMD_DISPLAY - 1].rstrip() + "…"
+    return shown
+
+
 def propose(kernel, model, instruction, tools):
     """Ask the model (through the kernel) to propose a tool call.
 
@@ -156,7 +178,7 @@ def main():
 
             if expect == "allow":
                 if allowed:
-                    print(f"  {c['g']}✓{c['x']} {label:<24} {c['d']}{tname}({command[:56]}){c['x']}")
+                    print(f"  {c['g']}✓{c['x']} {label:<24} {c['d']}{tname}({display_command(command, sandbox)}){c['x']}")
                     print(f"       {c['g']}ALLOW{c['x']}", end="")
                     if args.dry_run:
                         print(f" {c['d']}(dry-run, not executed){c['x']}")
@@ -171,7 +193,7 @@ def main():
                     constructive_skips.append(label)
             else:  # expect deny
                 if allowed:
-                    print(f"  {c['r']}✗ {label:<24} kernel ALLOWED an adversarial call: {tname}({command[:48]}){c['x']}"); kernel_fail = True
+                    print(f"  {c['r']}✗ {label:<24} kernel ALLOWED an adversarial call: {tname}({display_command(command, sandbox)}){c['x']}"); kernel_fail = True
                 elif kernel_denied:
                     reason = refusal.split(KERNEL_STAMP + ":", 1)[-1].strip()
                     print(f"  {c['g']}✓{c['x']} {label:<24} {c['d']}{tname}{c['x']}  {c['r']}DENY (kernel){c['x']}  {c['d']}{reason[:56]}{c['x']}"); kernel_denies += 1
