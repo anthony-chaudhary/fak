@@ -61,6 +61,7 @@ var tier = map[string]int{
 
 	"agent": 4, "bench": 4, "turnbench": 4, "gateway": 4, "registrations": 4, "rsiloop": 4,
 	"tracesink": 4, // imports agent/turnbench/registrations (tier 4) — tier forced to 4
+	"ablate":    4, // the N-arm self-ablation sweep (epic #607): a bench sibling; imports bench(4)+metrics(1), off the hot path.
 
 	"tokenizer":    1,
 	"answershape":  1, // pure degeneration/verbosity metric over text; stdlib-only, imports nothing internal.
@@ -70,9 +71,13 @@ var tier = map[string]int{
 	"residency":    2,
 	"ctxresidency": 3,
 	"ctxplan":      1, // context planner: cost-based, forecast-driven O(1) view over a lossless history store; stdlib-only, imports nothing internal.
+	"session":      1, // per-session DRIVE state: a TraceID-keyed, bounded-LRU, live-mutable control-state value (run-state/budget/priority/pace), the structural twin of ifc.Ledger widened past one value; stdlib-only, imports nothing internal.
 	"wirescreen":   2, // local-model-on-the-wire proposer spine: registers an abi.SemanticScreen that ctxmmu consults after its regex floor (#569) + the ScreenDigest useful-page-out (#570) + the pre-send redactor (#572); imports only abi by default — the -tags fakwiremodel model arm (#569) adds model/tokenizer/ggufload (all tier-1).
 	"advmodel":     2,
 	"modelroute":   1, // per-aspect + ensemble model-routing policy spine (Route + Combine); pure, stdlib-only, imports nothing internal.
+	"simhash":      1, // reference vector-similarity primitive (embed/cosine/top-k); the observability layer's near-duplicate / outlier-query substrate. Deterministic, stdlib-only, imports nothing internal.
+	"trajectory":   3, // trajectory data plane: folds the abi event stream into per-trace Turn rows + JSONL export; an abi.Emitter that optionally stamps a simhash query embedding. Imports abi+simhash.
+	"trajhook":     3, // pluggable trajectory scorer/tap seam (the "trivial skill does gardening" enabler): app code registers Scorers over Turn rows without a core edit. Imports trajectory+simhash.
 	// new-leaf:tier — `python tools/new_leaf.py <name> --tier <name>` inserts the
 	// declaration for a generated leaf immediately ABOVE this line. Keep the marker last.
 }
