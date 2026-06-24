@@ -56,6 +56,7 @@ category vocabulary and each category's rows evolve independently::
 Run from the repo ROOT::
 
     python tools/product_scorecard.py                 # human scorecard
+    python tools/product_scorecard.py --chart         # at-a-glance ASCII chart of the standing
     python tools/product_scorecard.py --json          # machine payload (control-pane / loop)
     python tools/product_scorecard.py --critical      # the most-critical-areas backlog (what to progress)
     python tools/product_scorecard.py --gaps          # the coverage backlog: concept sections with no row
@@ -762,6 +763,19 @@ _MARK = {"durable-product": "★", "usable-today": "●", "real-not-easy": "◐"
          "honest-stub": "○", "concept-only": "·"}
 
 
+def _bar(n: int, scale: int, width: int = 28, *, fill: str = "█", empty: str = "·") -> str:
+    """A horizontal bar `width` cells wide, length proportional to n/scale. Any
+    nonzero value shows at least a one-cell sliver so a real-but-small count is never
+    rendered as an empty bar."""
+    if scale <= 0:
+        return empty * width
+    cells = int(round(width * max(0, n) / scale))
+    cells = max(0, min(width, cells))
+    if n > 0 and cells == 0:
+        cells = 1
+    return fill * cells + empty * (width - cells)
+
+
 def render(payload: dict[str, Any]) -> str:
     c = payload.get("corpus") or {}
     cov = c.get("coverage") or {}
@@ -883,6 +897,67 @@ def render_compare(baseline: dict[str, Any], current: dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
+def render_chart(payload: dict[str, Any]) -> str:
+    """An at-a-glance ASCII chart of the product standing — what a person sees first.
+
+    Three views over the same data the rest of the scorecard derives: (1) the
+    verdict-ladder distribution as count-scaled bars (best -> roadmap); (2) the
+    per-category verdict mix, one cell per concept using the same mark vocabulary as
+    the ladder, so a category's product-vs-subsystem balance reads at a glance; (3)
+    the use-today split (laptop-offline / needs-gpu-key / no-command) and the coverage
+    gauge. Pure text + deterministic — two clones at one commit chart identically."""
+    c = payload.get("corpus") or {}
+    pos = c.get("standing") or {}
+    cov = c.get("coverage") or {}
+    lb = c.get("leaderboard") or []
+
+    lines: list[str] = [
+        (f"product standing chart — {c.get('rows', 0)} concepts · "
+         f"score {c.get('score', 0)}/100 (grade {c.get('grade', '?')}) · "
+         f"product-debt {c.get('product_debt', 0)}"),
+        "",
+        "verdict ladder (count of concepts, best -> roadmap):",
+    ]
+    maxn = max((pos.get(v, 0) for v in VERDICTS), default=0)
+    for v in VERDICTS:
+        n = pos.get(v, 0)
+        lines.append(f"  {_MARK.get(v, ' ')} {v:<15} {_bar(n, maxn)} {n}")
+    lines.append("")
+
+    # per-category verdict mix: one mark per concept, sorted best-verdict-first.
+    by_cat: dict[str, list[str]] = {}
+    for r in lb:
+        by_cat.setdefault(r.get("category") or "?", []).append(r.get("verdict"))
+    lines.append("verdict mix by category (each cell = one concept):")
+    for cat in sorted(by_cat):
+        verds = sorted(by_cat[cat], key=lambda v: VERDICT_RANK.get(v, 9))
+        spark = "".join(_MARK.get(v, " ") for v in verds)
+        durable = sum(1 for v in verds if v == "durable-product")
+        usable = sum(1 for v in verds if v == "usable-today")
+        lines.append(f"  {cat:<12} {spark:<16} ({len(verds)} concept(s); "
+                     f"{durable} durable, {usable} usable-today)")
+    lines.append("")
+
+    # use-today split: can a person actually run it, and offline?
+    laptop = sum(1 for r in lb if r.get("offline"))
+    needs = sum(1 for r in lb if (not r.get("offline")) and _nonempty(r.get("first_command")))
+    nocmd = sum(1 for r in lb if not _nonempty(r.get("first_command")))
+    total = len(lb)
+    lines.append("can a person run it today?")
+    lines.append(f"  laptop (offline)   {_bar(laptop, total)} {laptop}")
+    lines.append(f"  needs gpu/key/net  {_bar(needs, total)} {needs}")
+    lines.append(f"  no direct command  {_bar(nocmd, total)} {nocmd}")
+    lines.append("")
+
+    pct = cov.get("coverage_pct", 0.0)
+    gauge = _bar(int(round(pct)), 100, width=32)
+    lines.append(f"coverage  [{gauge}] {pct}%  "
+                 f"({cov.get('covered', 0)}/{cov.get('catalog_total', 0)} concept sections positioned)")
+    lines.append("")
+    lines.append("legend: " + "   ".join(f"{_MARK[v]} {v}" for v in VERDICTS))
+    return "\n".join(lines)
+
+
 def _front_matter(title: str, desc: str) -> list[str]:
     return ["---", f'title: "{title}"', f'description: "{desc}"', "---", ""]
 
@@ -928,6 +1003,14 @@ def render_doc_index(payload: dict[str, Any], *, stamp: str | None = None) -> st
     out.append("> **Read this right.** The score grades how *complete and honest the product map is* "
                "— not how much fak wins. A concept that is an honest `real-not-easy` subsystem or a "
                "labeled `honest-stub` is not a defect; an *overclaimed* verdict is.")
+    out.append("")
+    out.append("## Standing at a glance")
+    out.append("")
+    out.append("> Regenerate this chart in the terminal with `python tools/product_scorecard.py --chart`.")
+    out.append("")
+    out.append("```text")
+    out.append(render_chart(payload))
+    out.append("```")
     out.append("")
     out.append("## The verdict ladder")
     out.append("")
@@ -986,6 +1069,7 @@ def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description="Product-concept scorecard (read-only unless --markdown-dir).")
     ap.add_argument("--workspace", default="", help="workspace root (default: repo root)")
     ap.add_argument("--json", action="store_true", help="emit machine-readable JSON")
+    ap.add_argument("--chart", action="store_true", help="an at-a-glance ASCII chart of the product standing")
     ap.add_argument("--critical", action="store_true", help="the most-critical-areas backlog")
     ap.add_argument("--gaps", action="store_true", help="the coverage backlog (unpositioned concept sections)")
     ap.add_argument("--compare", default="", help="baseline JSON to prove product-debt dropped")
@@ -1022,6 +1106,8 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.json:
         print(json.dumps(payload, indent=2))
+    elif args.chart:
+        print(render_chart(payload))
     elif args.critical:
         print(render_critical(payload))
     elif args.gaps:

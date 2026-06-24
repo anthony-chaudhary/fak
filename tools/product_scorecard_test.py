@@ -254,8 +254,31 @@ def test_renderers_and_doc_folder() -> None:
     assert "backlog" in ps.render_gaps(p)
     files = ps.render_doc_folder(p, stamp="2026-06-24")
     assert "README.md" in files and "Product scorecard" in files["README.md"]
+    # the generated doc embeds the standing chart.
+    assert "Standing at a glance" in files["README.md"]
+    assert "verdict ladder" in files["README.md"]
     # compare renders a ratio line.
     assert "product-debt:" in ps.render_compare(p, p)
+
+
+def test_bar_proportional_and_sliver() -> None:
+    # full scale fills the width; zero is empty; any nonzero shows >= 1 cell.
+    assert ps._bar(10, 10, width=10) == "█" * 10
+    assert ps._bar(0, 10, width=10) == "·" * 10
+    assert ps._bar(1, 1000, width=10).count("█") == 1  # sliver, never lost
+    assert ps._bar(5, 0, width=4) == "·" * 4           # guarded against zero scale
+
+
+def test_render_chart_shows_ladder_categories_and_coverage() -> None:
+    t = tree(catalog=[{"section": "Adjudication", "norm": "adjudication"}])
+    p = ps.build_payload(workspace=".", data=_data([row()]), tree=t)
+    chart = ps.render_chart(p)
+    assert "verdict ladder" in chart
+    assert "verdict mix by category" in chart
+    assert "can a person run it today?" in chart
+    assert "coverage" in chart and "legend:" in chart
+    # the single durable-product row's mark + category appear.
+    assert ps._MARK["durable-product"] in chart and "security" in chart
 
 
 # --- the load-bearing live smoke: the shipped map is complete + honest ------

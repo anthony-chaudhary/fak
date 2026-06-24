@@ -5,7 +5,7 @@ description: "Inward product-concept scorecard: each fak concept positioned on t
 
 # Product scorecard — durable, real, useful-today
 
-<!-- product-scorecard: 2026-06-24 @v0.30.0 · process: tools/product_scorecard.py · data: tools/product_scorecard.data/ -->
+<!-- product-scorecard: 2026-06-24 · process: tools/product_scorecard.py · data: tools/product_scorecard.data/ -->
 
 The sibling scorecards grade fak's internals (code, docs) and its competitive standing (industry). This one asks the question a *person* asks: **of the concepts fak ships, which can I actually pick up and use this afternoon — and which are still a named gap, a research seam, or an overclaim?** The source of truth is the concept catalog in [`CLAIMS.md`](../../CLAIMS.md); every number below is re-derived from `tools/product_scorecard.data/` by `tools/product_scorecard.py` and cross-checked against the real tree (the CLAIMS tag a concept carries, whether its first command resolves, whether its witness/entry paths exist). No verdict is hand-typed.
 
@@ -22,6 +22,38 @@ The sibling scorecards grade fak's internals (code, docs) and its competitive st
 | As of | 2026-06-24 (fak v0.30.0) |
 
 > **Read this right.** The score grades how *complete and honest the product map is* — not how much fak wins. A concept that is an honest `real-not-easy` subsystem or a labeled `honest-stub` is not a defect; an *overclaimed* verdict is.
+
+## Standing at a glance
+
+> Regenerate this chart in the terminal with `python tools/product_scorecard.py --chart`.
+
+```text
+product standing chart — 35 concepts · score 100.0/100 (grade A) · product-debt 0
+
+verdict ladder (count of concepts, best -> roadmap):
+  ★ durable-product ████████████████············ 10
+  ● usable-today    █████████████··············· 8
+  ◐ real-not-easy   ████████████████████████████ 17
+  ○ honest-stub     ···························· 0
+  · concept-only    ···························· 0
+
+verdict mix by category (each cell = one concept):
+  memory       ★◐◐              (3 concept(s); 1 durable, 0 usable-today)
+  model        ●◐◐◐◐◐◐◐         (8 concept(s); 0 durable, 1 usable-today)
+  performance  ●●●●◐◐◐          (7 concept(s); 0 durable, 4 usable-today)
+  platform     ★★●●●            (5 concept(s); 2 durable, 3 usable-today)
+  security     ★★★◐◐◐           (6 concept(s); 3 durable, 0 usable-today)
+  tooling      ★★★★◐◐           (6 concept(s); 4 durable, 0 usable-today)
+
+can a person run it today?
+  laptop (offline)   █████████████··············· 16
+  needs gpu/key/net  ██·························· 2
+  no direct command  ██████████████·············· 17
+
+coverage  [████████████████████████████████] 100.0%  (18/18 concept sections positioned)
+
+legend: ★ durable-product   ● usable-today   ◐ real-not-easy   ○ honest-stub   · concept-only
+```
 
 ## The verdict ladder
 
