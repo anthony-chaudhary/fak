@@ -41,6 +41,7 @@ const (
 	// MLA latent attention (deepseek2 convention).
 	glmGGUFAttnQADown  = "attn_q_a.weight"       // q_a_proj   (down-projection to q_lora_rank)
 	glmGGUFAttnQADownB = "attn_q_a.bias"         // q_a_proj.bias (optional)
+	glmGGUFAttnQANorm  = "attn_q_a_norm.weight"  // q_a_layernorm (the RMSNorm on the q latent)
 	glmGGUFAttnQBUp    = "attn_q_b.weight"       // q_b_proj   (up-projection to heads)
 	glmGGUFAttnKVAMQA  = "attn_kv_a_mqa.weight"  // kv_a_proj_with_mqa
 	glmGGUFAttnKVAMQAB = "attn_kv_a_mqa.bias"    // kv_a_proj_with_mqa.bias (optional)
@@ -59,9 +60,11 @@ const (
 	glmGGUFSharedDown = "ffn_down_shexp.weight" // mlp.shared_experts.down_proj.weight
 
 	// DSA learned indexer — PROVISIONAL, NO UPSTREAM CONVERTER. Best-guess mirror of the
-	// canonical self_attn.indexer.{wq_b,wk,weights_proj} names. Re-pin against a real header.
+	// canonical self_attn.indexer.{wq_b,wk,k_norm,weights_proj} names. Re-pin against a real header.
 	glmGGUFIndexerWQB     = "attn_indexer_q_b.weight"     // indexer.wq_b
 	glmGGUFIndexerWK      = "attn_indexer_k.weight"       // indexer.wk
+	glmGGUFIndexerKNorm   = "attn_indexer_k_norm.weight"  // indexer.k_norm.weight (RMSNorm on the index key)
+	glmGGUFIndexerKNormB  = "attn_indexer_k_norm.bias"    // indexer.k_norm.bias
 	glmGGUFIndexerWeights = "attn_indexer_weights.weight" // indexer.weights_proj
 )
 
@@ -75,6 +78,7 @@ func glmMoeDsaCanonicalSuffix(suffix string) (string, bool) {
 	mapped, ok := map[string]string{
 		glmGGUFAttnQADown:  "self_attn.q_a_proj.weight",
 		glmGGUFAttnQADownB: "self_attn.q_a_proj.bias",
+		glmGGUFAttnQANorm:  "self_attn.q_a_layernorm.weight",
 		glmGGUFAttnQBUp:    "self_attn.q_b_proj.weight",
 		glmGGUFAttnKVAMQA:  "self_attn.kv_a_proj_with_mqa.weight",
 		glmGGUFAttnKVAMQAB: "self_attn.kv_a_proj_with_mqa.bias",
@@ -91,6 +95,8 @@ func glmMoeDsaCanonicalSuffix(suffix string) (string, bool) {
 
 		glmGGUFIndexerWQB:     "self_attn.indexer.wq_b.weight",
 		glmGGUFIndexerWK:      "self_attn.indexer.wk.weight",
+		glmGGUFIndexerKNorm:   "self_attn.indexer.k_norm.weight",
+		glmGGUFIndexerKNormB:  "self_attn.indexer.k_norm.bias",
 		glmGGUFIndexerWeights: "self_attn.indexer.weights_proj.weight",
 	}[suffix]
 	return mapped, ok

@@ -16,6 +16,7 @@ func TestGLMMoeDsaCanonicalTensorNames(t *testing.T) {
 	glm := map[string]string{
 		"blk.3.attn_q_a.weight":             "model.layers.3.self_attn.q_a_proj.weight",
 		"blk.3.attn_q_a.bias":               "model.layers.3.self_attn.q_a_proj.bias",
+		"blk.3.attn_q_a_norm.weight":        "model.layers.3.self_attn.q_a_layernorm.weight",
 		"blk.3.attn_q_b.weight":             "model.layers.3.self_attn.q_b_proj.weight",
 		"blk.3.attn_kv_a_mqa.weight":        "model.layers.3.self_attn.kv_a_proj_with_mqa.weight",
 		"blk.3.attn_kv_a_mqa.bias":          "model.layers.3.self_attn.kv_a_proj_with_mqa.bias",
@@ -29,6 +30,8 @@ func TestGLMMoeDsaCanonicalTensorNames(t *testing.T) {
 		"blk.3.ffn_down_shexp.weight":       "model.layers.3.mlp.shared_experts.down_proj.weight",
 		"blk.3.attn_indexer_q_b.weight":     "model.layers.3.self_attn.indexer.wq_b.weight",
 		"blk.3.attn_indexer_k.weight":       "model.layers.3.self_attn.indexer.wk.weight",
+		"blk.3.attn_indexer_k_norm.weight":  "model.layers.3.self_attn.indexer.k_norm.weight",
+		"blk.3.attn_indexer_k_norm.bias":    "model.layers.3.self_attn.indexer.k_norm.bias",
 		"blk.3.attn_indexer_weights.weight": "model.layers.3.self_attn.indexer.weights_proj.weight",
 	}
 	for gguf, want := range glm {
