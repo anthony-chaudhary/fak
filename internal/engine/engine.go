@@ -206,12 +206,20 @@ func itoa(n int) string {
 var MockEngine = &Mock{}
 
 func init() {
-	abi.RegisterAdjudicator(12, residencyGate{})
+	RegisterResidencyGate()
 	abi.RegisterEngine("mock", MockEngine)
 	abi.RegisterCapability("engine.route")
 	abi.RegisterCapability("engine.residency")
 	abi.RegisterCapability("engine.openai")
 }
+
+// RegisterResidencyGate installs the engine-residency adjudicator (rank 12) — the
+// same registration init() performs at boot. Exported so a test that resets the ABI
+// registry (abi.ResetForTest) can reinstall the REAL gate rather than a hand-rolled
+// double: e.g. internal/gateway proving a per-call model route written pre-submit is
+// still DENIED for a tenant payload bound for a remote engine. Idempotent (the
+// adjudicator registry is keyed by rank).
+func RegisterResidencyGate() { abi.RegisterAdjudicator(12, residencyGate{}) }
 
 type residencyGate struct{}
 
@@ -259,21 +267,50 @@ func sensitiveRoute(c *abi.ToolCall) bool {
 	}
 }
 
+// remoteRoute reports whether an engine route leaves this box — the residency
+// floor's "is this engine remote?" predicate. It is FAIL-CLOSED: only a route the
+// kernel can prove names a KNOWN on-box engine family (the fused in-kernel model,
+// the offline mock, a cassette replay, or a route an operator explicitly marked
+// local / on-device / kernel) is treated as local; EVERY other route is remote.
+//
+// This is the posture the model-routing wiring contract requires. A routing Plan
+// member may bind to ANY backend in the ecosystem — a LiteLLM proxy fronting 100+
+// providers, an OpenRouter model id, a direct provider wire (openai / anthropic /
+// gemini / xai), or a user's own gateway ("their thing") — and the kernel cannot
+// enumerate them. So an engine id the kernel cannot PROVE is local is assumed to
+// leave the box, and a tenant-scoped / sensitivity-tagged payload routed to it is
+// DENIED rather than leaked. The previous allow-list-of-remote-names form failed
+// OPEN for exactly the aggregator/custom routes this integration makes first-class
+// (e.g. "litellm/gpt-4o", "openrouter/…", "my-proxy" matched none of the known
+// remote substrings, so a sensitive payload sailed past the floor). An empty route
+// ("" => the in-kernel kernel default) is local.
 func remoteRoute(route string) bool {
 	route = strings.ToLower(strings.TrimSpace(route))
 	if route == "" {
-		return false
+		return false // empty => the in-kernel kernel default (on-box)
 	}
-	for _, local := range []string{"mock", "local", "inkernel", "cassette"} {
-		if route == local || strings.HasPrefix(route, local+":") || strings.HasPrefix(route, local+"-") {
-			return false
+	return !localRoute(route)
+}
+
+// localRoute reports whether an engine id names a KNOWN on-box engine family: the
+// fused in-kernel model, the offline mock, a cassette replay, or a route an
+// operator explicitly marked local / on-device / kernel. It matches a bare family
+// name ("inkernel"), a "family:instance" ("on-device:0"), a "family-suffix"
+// ("local-gpu"), or a "family/path" ("local/llama") form; anything else is remote
+// (fail-closed — see remoteRoute). A new on-box engine an operator wires SHOULD
+// carry one of these prefixes so the residency floor recognizes it as local.
+//
+// MIRROR: internal/modelroute.IsRemoteRoute keeps a tier-1 copy of this same
+// on-box family list (it cannot import this layer); the two MUST stay in sync so a
+// `fak route` residency label never disagrees with the floor that enforces it.
+func localRoute(route string) bool {
+	for _, local := range []string{"inkernel", "mock", "cassette", "local", "on-device", "ondevice", "kernel"} {
+		if route == local ||
+			strings.HasPrefix(route, local+":") ||
+			strings.HasPrefix(route, local+"-") ||
+			strings.HasPrefix(route, local+"/") {
+			return true
 		}
 	}
-	return route == "remote" ||
-		strings.HasPrefix(route, "remote:") ||
-		strings.HasPrefix(route, "remote-") ||
-		strings.Contains(route, "openai") ||
-		strings.Contains(route, "anthropic") ||
-		strings.Contains(route, "gemini") ||
-		strings.Contains(route, "xai")
+	return false
 }
