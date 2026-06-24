@@ -1,0 +1,101 @@
+{
+  "schema": "fanout-peer-baselines/1",
+  "curated_by": "hand-curated from checked-in artifacts (see sources[]); not a fresh on-host run — every number traces to a shipped artifact or a primary source. The host ceiling that blocks a same-host fresh tuned-engine run is recorded under host_ceiling[], mirroring tools/fanout_longctx_probe.py.",
+  "issue": "#430",
+  "what_this_is": "The apples-to-apples peer column for the fanbench shared-prefix lever. fanbench measures how much of the naive N-times prefix redundancy reuse removes (fak-vs-fak geometry) priced at provider prompt-cache multiples (modeled $). This file pins the THIRD axis the issue asks to keep separate: what a TUNED shared-prefix serving engine that already occupies the same lever does in wall-clock. It does NOT claim fanbench beats those engines.",
+  "host": {
+    "platform": "win32",
+    "cpu_count": 32,
+    "dedicated_gpu_vram_bytes": 0,
+    "total_ram_gib": 253.6,
+    "llama_cpp_python_version": "0.3.30"
+  },
+  "three_columns_kept_separate": {
+    "note": "These three are reported side by side in docs/benchmarks/FANOUT-BENCH-RESULTS.md and never blended. Reference cell: N=256 sub-agents.",
+    "col_a_fak_vs_fak_reuse_geometry": {
+      "status": "MEASURED (exact geometry, fak-vs-fak SHARED-vs-ISOLATED ablation)",
+      "N": 256,
+      "cross_uplift_calls": 251,
+      "prefix_tokens_saved_at_P2048": 522240,
+      "is_a_vs_engine_claim": false,
+      "source": "docs/benchmarks/FANOUT-BENCH-RESULTS.md §1; experiments/fanout/fanbench-research.csv"
+    },
+    "col_b_provider_prompt_cache_pricing": {
+      "status": "MODELED (transparent cache economics, never wall-clock)",
+      "N": 256,
+      "tax_clawed_back_pct": 61.7,
+      "cache_multiples": "Anthropic-style read 0.1x / write 1.25x",
+      "is_a_vs_engine_claim": false,
+      "source": "docs/benchmarks/FANOUT-BENCH-RESULTS.md §1 (tax_clawed_back)"
+    },
+    "col_c_tuned_engine_wall_clock": {
+      "status": "MEASURED on the engine's own regime (the peer column below)",
+      "claim": "These engines occupy the SAME prefix-reuse lever. fanbench does not out-throughput them; on the one CPU shared-prefix point measured head-to-head, llama.cpp is AHEAD of fak (preliminary). See peers[].",
+      "is_a_vs_engine_claim": true,
+      "source": "this file -> peers[]"
+    }
+  },
+  "peers": [
+    {
+      "engine": "llama.cpp",
+      "mechanism": "unified KV cache (kv_unified=true) + llama_memory_seq_cp — prefill the shared prefix once, share its cells into all C sequences (no copy-on-write), then batched-decode",
+      "shape": { "prefix_tokens": 1024, "decode_steps": 32, "metric": "agents/s (C / total_wall_clock, best of reps)" },
+      "measured": [
+        { "C": 8,  "llamacpp_agents_per_sec": 8.1,  "fak_agents_per_sec": 2.7 },
+        { "C": 16, "llamacpp_agents_per_sec": 12.3, "fak_agents_per_sec": 3.3 },
+        { "C": 32, "llamacpp_agents_per_sec": 17.2, "fak_agents_per_sec": 5.2 },
+        { "C": 64, "llamacpp_agents_per_sec": 11.9, "fak_agents_per_sec": 6.0 }
+      ],
+      "head_to_head_direction": "llama.cpp AHEAD of fak on this CPU shared-prefix point (17.2 vs 5.2 agents/s at C=32). fanbench makes no claim to beat it.",
+      "prefill_once_ms_at_P1024": 420,
+      "seqcp_share_ms": "0.4-5",
+      "kv_memory_behavior": "one unified KV arena; prefix cells shared across sequences (not duplicated). seq_cp shares cells with no COW — fak's Clone deep-copies instead, which costs fak performance but buys per-agent independent eviction of a poisoned span.",
+      "cache_hit_behavior": "prefill cost flat in C (the shared prefix is computed once); confirms prefix-once + share + batched decode.",
+      "status": "PRELIMINARY, settings-dependent, OPEN — single-config probe on non-default settings (kv_unified off by default; seq_cp asserts is_full on a partial buffer in this build). Not a settled conclusion. Needs multi-config + larger-scale + real llama-server parallel-slot verification.",
+      "runner": "internal/model/bench_llamacpp_shared_prefix.py",
+      "source": "docs/benchmarks/LLAMACPP-HEADTOHEAD-RESULTS.md Axis 4 (the measured Axis-4 table)"
+    },
+    {
+      "engine": "SGLang / RadixAttention",
+      "mechanism": "radix tree of token sequences + longest-prefix match + LRU-leaf eviction; discovers every shared subtree automatically (incl. mid-run divergence), prefills a byte-identical prefix once and reuses it across requests",
+      "shape": { "workload": "agents (ReAct: C concurrent agents share a system prefix) — the fanout shared-prefix topology", "metric": "cache hit rate (hw/model-independent) + live prefill speedup" },
+      "measured_fak_reproduction": {
+        "agents_cache_hit_rate": 0.867,
+        "cacheaware_pct_of_optimal": 1.0,
+        "live_prefill_speedup_real_model_contended": 4.87,
+        "live_prefill_speedup_m3_uncontended": 5.84,
+        "note": "fak runs the IDENTICAL radix-tree + longest-prefix + LRU-leaf algorithm (internal/radixkv) and lands inside SGLang's 50-99% hit band on the same workload shapes; the hit rate is a property of (workload, matching algorithm), hardware-independent."
+      },
+      "sglang_published": {
+        "cache_hit_rate": "50%-99%",
+        "cacheaware_pct_of_optimal": "96% average",
+        "throughput": "up to 6.4x (Llama-2 7B-70B fp16 vs Guidance/vLLM/LMQL)",
+        "latency": "up to 3.7x",
+        "source": "arXiv:2312.07104 / NeurIPS 2024 (724be4472168f31ba1c9ac630f15dec8)"
+      },
+      "regime_caveat": "SGLang is a GPU throughput engine; fanbench runs batch-1 on CPU. The fair, hardware-independent axis is cache hit rate, on which fak matches SGLang. fanbench does NOT claim to out-throughput SGLang in raw tok/s.",
+      "status": "SHIPPED (head-to-head landed)",
+      "runner": "cmd/radixbench (internal/radixkv)",
+      "source": "docs/benchmarks/RADIXATTENTION-RESULTS.md; experiments/radixattention/radixbench-smollm2-135m-q8.json; experiments/radixattention/radixbench-qwen2.5-1.5b-q8-m3pro-uncontended-20260623.json"
+    },
+    {
+      "engine": "vLLM Automatic Prefix Caching",
+      "mechanism": "PagedAttention block-level hashing — KV blocks of a shared prefix are deduplicated and reused across requests automatically",
+      "status": "NOT RUN ON THIS HOST (SERVER_UNAVAILABLE) — no prefix-caching server reachable (127.0.0.1:8000). Recorded as a ceiling, never extrapolated. Mirrors the vllm-sglang skip in tools/fanout_longctx_probe.py.",
+      "source": "https://docs.vllm.ai/en/stable/design/prefix_caching/ ; PagedAttention arXiv:2309.06180"
+    }
+  ],
+  "host_ceiling": [
+    {
+      "path": "llama.cpp same-host fresh run",
+      "reason": "MODEL_UNAVAILABLE",
+      "detail": "llama-cli/llama-bench/llama-server + llama_cpp 0.3.30 present, but no small GGUF on host to drive bench_llamacpp_shared_prefix.py for a fresh fanout-shaped point; the checked-in C-sweep above is the existing measured Axis-4 probe."
+    },
+    {
+      "path": "vLLM / SGLang same-host fresh run",
+      "reason": "SERVER_UNAVAILABLE",
+      "detail": "no prefix-caching server reachable (127.0.0.1:8000 / :30000); no GPU VRAM on host. The SGLang column above is the existing shipped radixbench head-to-head."
+    }
+  ],
+  "honesty_line": "No row here implies fanbench beats an engine that already shares the byte-identical prefix. The llama.cpp point has the tuned engine AHEAD of fak (preliminary); the SGLang point is a hit-rate match, not a throughput win; vLLM was not run. The fanbench win is reuse-vs-reprefill / vs-stateless (col A geometry, col B modeled $), not vs-tuned-engine wall-clock."
+}

@@ -208,6 +208,31 @@ not claim to beat those engines. The `cross_uplift` is a fak-vs-fak SHARED-vs-IS
 ablation (the fan-out's benefit over running the sub-agents apart), not a vs-competitor
 claim.
 
+### Three axes, kept strictly apart — fanbench geometry vs cache pricing vs tuned-engine wall-clock (#430)
+
+The over-claim guardrail above is now backed by a checked-in peer artifact
+(`experiments/fanout/peer-baselines.json`) so the three things this result mixes are never
+blended into one number. Reference cell `N=256`:
+
+| axis | what it is | value (N=256) | is it a vs-engine claim? |
+|---|---|---|---|
+| **A — fak-vs-fak reuse geometry** (MEASURED) | the SHARED−ISOLATED path-swap + exact prefill-tokens the kernel never redoes | `cross_uplift = +251` calls; `(N−1)·P = 522,240` prefix tokens saved (P=2048) | **No** — fak's fan-out vs the same sub-agents run apart |
+| **B — provider prompt-cache pricing** (MODELED) | the naive-N× tax clawed back at documented cache multiples | `tax_clawed_back = 61.7%` at Anthropic read 0.1× / write 1.25× | **No** — vs a stateless consumer that re-sends the prefix per sub-agent |
+| **C — tuned engine wall-clock** (MEASURED, peer artifact) | what an engine that already shares the byte-identical prefix does in wall-clock | llama.cpp `kv_unified`+`seq_cp`: **17.2 vs fak 5.2 agents/s** @ C=32, P=1024, D=32 — *llama.cpp ahead, preliminary*; SGLang RadixAttention: **86.7% agents hit-rate (fak matches), 4.87–5.84× live prefill speedup**, SGLang published up to 6.4× throughput / 3.7× latency (GPU regime); vLLM APC: *not run on this host (SERVER_UNAVAILABLE)* | **Yes** — and it does **not** favour fanbench |
+
+The honest reading of column C: the tuned engines occupy the **same** prefix-reuse lever.
+On the one CPU shared-prefix point measured head-to-head, **llama.cpp is ahead of fak**
+(17.2 vs 5.2 agents/s, flagged preliminary in
+[`LLAMACPP-HEADTOHEAD-RESULTS.md`](LLAMACPP-HEADTOHEAD-RESULTS.md) §Axis 4); against
+SGLang/RadixAttention fak **matches the cache-hit-rate** axis
+([`RADIXATTENTION-RESULTS.md`](RADIXATTENTION-RESULTS.md)) but does not out-throughput a GPU
+serving engine; vLLM's Automatic Prefix Caching was not runnable on this no-GPU host and is
+recorded as a ceiling, never extrapolated. So columns A and B (where fanbench's numbers
+live) are kept apart from column C (where the engines win or tie) — exactly so no reader
+mistakes the reuse-vs-reprefill geometry for a vs-engine throughput win. Full provenance,
+the per-C llama.cpp sweep, and the host ceiling that gates a same-host fresh run are in
+[`../../experiments/fanout/peer-baselines.json`](../../experiments/fanout/peer-baselines.json).
+
 ---
 
 ## §3 — The saturation knee (latency, not quality)
@@ -262,8 +287,13 @@ The limitations are now explicit GitHub issues rather than hidden caveats:
   extrapolating the modeled curve (artifacts under `experiments/fanout/pscale/`, see the
   measured-path probe subsection in §1). **Open:** a host with a checkpoint/backend that
   admits a 256K+ context, to flip a row from `skipped` to `measured` wall-clock.
-- #105 — add tuned shared-prefix serving baselines for vLLM/SGLang/llama.cpp so this
+- #430 — add tuned shared-prefix serving baselines for vLLM/SGLang/llama.cpp so this
   remains an honest reuse-vs-reprefill claim, not an unproven vs-engine claim.
+  **Addressed:** the three-axis table in §2 plus the checked-in peer artifact
+  `experiments/fanout/peer-baselines.json` pin column C (tuned-engine wall-clock) to the
+  shipped RadixAttention head-to-head and the measured llama.cpp `kv_unified`+`seq_cp`
+  C-sweep, with vLLM recorded as a host ceiling. **Open:** a same-host fresh run of all
+  three on one box (no small GGUF / no GPU / no prefix-cache server here).
 - #106 — align fanbench cost curves with real task success and the live `fak agent`
   evidence: coverage@N, realized@N, verifier success, duplicate-work rate, and
   matched-budget single-agent controls.
