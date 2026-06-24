@@ -113,7 +113,15 @@ func (m *Model) layer(l int, x [][]float32, rp rope) {
 	// Qwen3.5/Qwen3-Next hybrid: a linear_attention layer swaps the attention token mixer
 	// for the Gated-DeltaNet recurrent scan (qwen35.go), keeping the PreNorm + SwiGLU wiring.
 	if cfg.isLinearAttnLayer(l) {
-		linAttnSub := func(xn [][]float32) [][]float32 { return m.linearAttnSeq(l, xn) }
+		// FAK_GDN_BATCHED routes the Gated-DeltaNet prefill through the batched-projection
+		// path (issue #443); it is bit-identical to linearAttnSeq on the f32 path, certified
+		// by TestQwen35LinearAttnBatchedMatchesScalar, so the opt-in is witness-gated.
+		linAttnSub := func(xn [][]float32) [][]float32 {
+			if gdnBatchedPrefill {
+				return m.linearAttnSeqBatched(l, xn)
+			}
+			return m.linearAttnSeq(l, xn)
+		}
 		composeSeqSublayer(topo, x, attnNorm, eps, cfg, linAttnSub)
 		composeSeqSublayer(topo, x, m.mlpNorms(l), eps, cfg, mlpSub)
 		return
