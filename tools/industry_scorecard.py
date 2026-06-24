@@ -1091,6 +1091,53 @@ def _standing_line(pos: dict[str, Any]) -> str:
             f"{o.get('trails', 0)} trails · {o.get('no-claim', 0)} honest gap")
 
 
+def render_index_chart(payload: dict[str, Any]) -> str:
+    """An at-a-glance ASCII chart of fak's industry standing — what a reader sees first.
+
+    Three views over the same numbers the rest of the page derives: field coverage,
+    the standing split on the positioned axes (lead/parity/trails/no-claim, shown not
+    hidden), and per-group coverage. Pure text + deterministic — two clones at one
+    commit chart identically; no number here is hand-typed."""
+    c = payload.get("corpus") or {}
+    cov = c.get("coverage") or {}
+    pos = (c.get("positions") or {}).get("overall") or {}
+
+    def bar(n: int, maxn: int, width: int = 24) -> str:
+        n = max(0, int(n))
+        maxn = max(1, int(maxn))
+        fill = round(width * n / maxn)
+        return "█" * fill + "·" * (width - fill)
+
+    lines: list[str] = [
+        (f"industry standing chart — {c.get('dimensions', 0)} dimensions · "
+         f"{c.get('competitors', 0)} competitors · "
+         f"score {c.get('score', 0)}/100 (grade {c.get('grade', '?')}) · "
+         f"parity-debt {c.get('parity_debt', 0)}"),
+        "",
+        "coverage of the field (positioned / in-scope dimensions):",
+        (f"  positioned  [{bar(cov.get('covered', 0), cov.get('in_scope', 0) or 1, 32)}]"
+         f"  {cov.get('covered', 0)}/{cov.get('in_scope', 0)}  ({cov.get('coverage_pct', 0)}%)"),
+        "",
+        "standing on the positioned axes (shown, not hidden):",
+    ]
+    order = [("lead", "▲ lead"), ("parity", "≈ parity"),
+             ("trails", "▼ trails"), ("no-claim", "○ no-claim")]
+    maxn = max((int(pos.get(k, 0)) for k, _ in order), default=0)
+    for key, label in order:
+        n = int(pos.get(key, 0))
+        lines.append(f"  {label:<11} {bar(n, maxn)} {n}")
+    lines.append("")
+
+    by_group = cov.get("by_group") or {}
+    if by_group:
+        lines.append("coverage by group:")
+        gmax = max((int(v.get("total", 0)) for v in by_group.values()), default=0)
+        for g in sorted(by_group):
+            v = by_group[g]
+            cvd, tot = int(v.get("covered", 0)), int(v.get("total", 0))
+            lines.append(f"  {g:<14} {bar(cvd, gmax)} {cvd}/{tot}")
+    return "\n".join(lines)
+
 def render_index_page(payload: dict[str, Any], data: dict[str, Any],
                       *, stamp: str | None = None) -> str:
     c = payload.get("corpus") or {}
@@ -1153,6 +1200,12 @@ def render_index_page(payload: dict[str, Any], data: dict[str, Any],
     out.append("> **Read this right.** The score grades how *complete and honest fak's competitive map "
                "is* — not how much fak wins. fak is a focused reuse + trust kernel, so most dimensions "
                "are honest `no-claim` gaps (out-of-scope or not-yet-measured), shown plainly below.")
+    out.append("")
+    out.append("## Standing at a glance")
+    out.append("")
+    out.append("```text")
+    out.append(render_index_chart(payload))
+    out.append("```")
     out.append("")
     out.append("## Coverage by group")
     out.append("")

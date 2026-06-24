@@ -30,6 +30,33 @@ Two numbers are driven:
 
 > **Read this right.** The score grades how *complete and honest fak's competitive map is* — not how much fak wins. fak is a focused reuse + trust kernel, so most dimensions are honest `no-claim` gaps (out-of-scope or not-yet-measured), shown plainly below.
 
+## Standing at a glance
+
+```text
+industry standing chart — 87 dimensions · 103 competitors · score 98.8/100 (grade A) · parity-debt 0
+
+coverage of the field (positioned / in-scope dimensions):
+  positioned  [████████████████████████████████]  87/87  (100.0%)
+
+standing on the positioned axes (shown, not hidden):
+  ▲ lead      █······················· 3
+  ≈ parity    ████···················· 11
+  ▼ trails    ███····················· 8
+  ○ no-claim  ████████████████████████ 65
+
+coverage by group:
+  agent          ██████·················· 4/4
+  cost           ████████················ 5/5
+  decoding       █████████████████████··· 13/13
+  distributed    ████████················ 5/5
+  memory         █████████████████████··· 13/13
+  models         █████████████··········· 8/8
+  numerics       █████████████████████··· 13/13
+  operability    ██████████████·········· 9/9
+  security       ███····················· 2/2
+  serving        ████████████████████████ 15/15
+```
+
 ## Coverage by group
 
 | Group | Positioned / in-scope | Pages |
