@@ -73,7 +73,11 @@ if ($Config) { $pyArgs += " --config `"$Config`"" }
 
 $taskAction = New-ScheduledTaskAction -Execute $py -Argument $pyArgs -WorkingDirectory $Workspace
 $trigger    = New-ScheduledTaskTrigger -Daily -At $At
-$principal  = New-ScheduledTaskPrincipal -UserId $env:USERNAME -LogonType Interactive -RunLevel Limited
+# S4U (non-interactive, session 0), NOT Interactive: this tick executes python.exe
+# DIRECTLY, and a console exe launched in the interactive session flashes a console
+# window on EVERY trigger — the "random popup windows". S4U runs the tick windowless
+# yet still AS THIS USER (same profile/config/oauth), so the headless tick is unaffected.
+$principal  = New-ScheduledTaskPrincipal -UserId $env:USERNAME -LogonType S4U -RunLevel Limited
 $settings   = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries `
                 -StartWhenAvailable -MultipleInstances IgnoreNew -ExecutionTimeLimit (New-TimeSpan -Minutes 20)
 Register-ScheduledTask -TaskName $TaskName -Action $taskAction -Trigger $trigger `

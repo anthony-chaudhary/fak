@@ -91,7 +91,12 @@ $taskAction = New-ScheduledTaskAction -Execute $py -Argument $pyArgs -WorkingDir
 $trigger   = New-ScheduledTaskTrigger -Once -At (Get-Date).AddMinutes(1) `
                -RepetitionInterval (New-TimeSpan -Minutes $EveryMinutes) `
                -RepetitionDuration (New-TimeSpan -Days 3650)
-$principal = New-ScheduledTaskPrincipal -UserId $env:USERNAME -LogonType Interactive -RunLevel Limited
+# S4U (non-interactive, session 0), NOT Interactive: this tick executes python.exe
+# DIRECTLY, and a console exe launched in the interactive session flashes a console
+# window on EVERY trigger — the "random popup windows". S4U runs the tick windowless
+# yet still AS THIS USER (same profile/config/oauth), so the headless dispatch and the
+# workers it spawns are unaffected. (Same pattern as the FleetHeartbeat/S4U tasks.)
+$principal = New-ScheduledTaskPrincipal -UserId $env:USERNAME -LogonType S4U -RunLevel Limited
 $settings  = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries `
                -StartWhenAvailable -MultipleInstances IgnoreNew -ExecutionTimeLimit (New-TimeSpan -Minutes 30)
 Register-ScheduledTask -TaskName $TaskName -Action $taskAction -Trigger $trigger `

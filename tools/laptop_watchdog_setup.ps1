@@ -67,7 +67,10 @@ $Action = New-ScheduledTaskAction `
 $Trigger = New-ScheduledTaskTrigger -Once -At (Get-Date) -RepetitionInterval (New-TimeSpan -Minutes 5)
 
 # Principal (run as current user)
-$Principal = New-ScheduledTaskPrincipal -UserId $env:USERNAME -LogonType Interactive -RunLevel Highest
+# S4U (non-interactive, session 0), NOT Interactive: a console watchdog launched in the
+# interactive session flashes a console window every tick — the "random popup windows".
+# S4U runs it windowless yet still AS THIS USER (same profile/config/creds).
+$Principal = New-ScheduledTaskPrincipal -UserId $env:USERNAME -LogonType S4U -RunLevel Highest
 
 # Settings
 $Settings = New-ScheduledTaskSettingsSet `
