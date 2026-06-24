@@ -201,6 +201,44 @@ and the gateway writes `/tmp/fak-serve.log`. The Grafana stack provisions a
 dedicated **FAK Dogfood Slow Requests** dashboard for `/v1/messages` latency,
 in-flight requests, status mix, and kernel activity.
 
+### fak's OWN in-kernel forward (`-Kernel` / `gguf` backend)
+
+Every backend above puts a *separate* engine behind the kernel — ollama, the
+transformers shim, or a remote OpenAI/Anthropic upstream. The opt-in `gguf` backend
+(`FAK_DOGFOOD_BACKEND=gguf`, or the `-Kernel` alias on PowerShell) is the one that
+proves Claude Code doing agentic work against **fak's own decode**: `fak serve
+--gguf` loads a local GGUF resident and answers `/v1/messages` with fak's pure-Go
+in-kernel forward — **no Python shim, no proxy engine, no `--base-url`.** The
+launcher asserts `/healthz` reports `planner=inkernel`, so a tokenizer-less GGUF
+can't silently fall back to the mock planner.
+
+```powershell
+# Windows: -Kernel composes with --smoke / --probe
+$env:FAK_DOGFOOD_GGUF = "$env:USERPROFILE\.cache\fak-models\gguf\Qwen2.5-1.5B-Instruct.Q8_0.gguf"
+.\scripts\dogfood-claude.ps1 -Kernel --smoke              # wire + planner=inkernel asserted
+.\scripts\dogfood-claude.ps1 -Kernel --probe "say pong"   # one live CLI turn (slow on CPU — see caveat)
+```
+
+Witnessed (curl-level) by
+`experiments/agent-live/inkernel-toolcall-witness-2026-06-24.json`: fak's own
+forward of Qwen2.5-1.5B-Q8 returned `stop_reason: tool_use` with an **adjudicated**
+`list_files` block (verdict ALLOW by monitor) on the Anthropic wire — real
+Claude-Code-style tool use, on fak's pure kernel, end to end. `-Kernel --smoke`
+returns a genuinely-decoded reply (not the mock's canned `tool_use`) in seconds.
+
+> **Honest caveat — the CPU forward is too slow for a *full* Claude Code CLI turn.**
+> The wire, the kernel boundary, and the adjudication are proven above. But a real
+> `claude -p` turn sends its whole system prompt + every tool schema (~5–6K tokens),
+> and the pure-Go CPU forward prefills that far slower than the transformers shim
+> (no SIMD/BLAS). Measured on a 16-core Windows host: a `-Kernel --probe` on
+> Qwen2.5-1.5B-Q8 hit the **exact 900 s ceiling** (`/v1/messages` `duration_ms ≈
+> 900001`) without finishing — `dos verify-result` on the session transcript then
+> reports `DEAD EMPTY` (no terminal assistant record). So an *interactive* in-kernel
+> CLI turn is **GPU territory**: front the `gguf` backend with a GPU, or raise
+> `FAK_PLANNER_TIMEOUT_S` / `FAK_HTTP_WRITE_TIMEOUT_S` well past 900 s and wait many
+> minutes. The shim and `anthropic` backends are the CPU-fast paths for live CLI
+> work; `-Kernel --smoke` is the CPU-fast proof of the in-kernel wire.
+
 ## The capability floor (what's allowed, what's denied)
 
 With **no** policy the kernel default-denies *every* tool, so Claude Code can do

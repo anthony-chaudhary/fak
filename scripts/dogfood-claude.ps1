@@ -300,6 +300,16 @@ try {
   $TimeoutFloor = if ($KernelBackend) { '900' } else { '300' }
   if (-not $env:FAK_PLANNER_TIMEOUT_S)    { $env:FAK_PLANNER_TIMEOUT_S = $TimeoutFloor }
   if (-not $env:FAK_HTTP_WRITE_TIMEOUT_S) { $env:FAK_HTTP_WRITE_TIMEOUT_S = $TimeoutFloor }
+  # Claude Code's OWN client request timeout must outlast a slow CPU turn, or the harness
+  # aborts the request before fak's forward finishes prefilling the multi-thousand-token
+  # prompt — fatal exactly on the kernel (gguf) arm, whose pure-Go CPU forward is the
+  # slowest backend. Mirror the bash twin (scripts/dogfood-claude.sh): derive API_TIMEOUT_MS
+  # from the planner timeout (seconds -> ms) unless the operator already pinned it. The
+  # gateway also emits SSE pings during a slow generation, so the raised ceiling, not an
+  # idle disconnect, is what governs.
+  if (-not $env:API_TIMEOUT_MS -and [int]$env:FAK_PLANNER_TIMEOUT_S -gt 0) {
+    $env:API_TIMEOUT_MS = [string]([int]$env:FAK_PLANNER_TIMEOUT_S * 1000)
+  }
   $Port = Get-UsablePort $Port
   $serveArgs = @('serve', '--addr', "127.0.0.1:$Port", '--provider', $Provider)
   if ($Model)   { $serveArgs += @('--model', $Model) }
