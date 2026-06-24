@@ -1,0 +1,69 @@
+{
+  "rows": [
+    {
+      "id": "ml-researcher",
+      "persona": "ML researcher",
+      "who": "Wants to reproduce fak's determinism and benchmark results bit-for-bit, study the kernel from the research notes, and cite it.",
+      "job": "Reproduce the determinism witness and the benchmarks offline, read the research notes, and cite the work.",
+      "tier": "evaluate",
+      "effort": "deep",
+      "entry_doc": "docs/repro-packet.md",
+      "affordances": [
+        {"id": "determinism-witness", "kind": "path_exists", "target": "experiments/rsi-determinism-witness/cross-arch-determinism.json", "need": "a committed bit-identical cross-arch determinism witness (the reproducibility proof)", "severity": "hard"},
+        {"id": "repro-packet", "kind": "path_exists", "target": "docs/repro-packet.md", "need": "a reproduce-offline runbook (the allow/deny boundary, deterministic)", "severity": "hard"},
+        {"id": "citation", "kind": "path_exists", "target": "CITATION.cff", "need": "a machine-readable citation file", "severity": "hard"},
+        {"id": "research-notes", "kind": "path_exists", "target": "docs/notes", "need": "the research notes / explainers a researcher reads to study the kernel", "severity": "hard"},
+        {"id": "benchmark-data", "kind": "path_exists", "target": "experiments", "need": "committed raw benchmark/results data (not just summary prose)", "severity": "hard"},
+        {"id": "bench-runbook", "kind": "path_exists", "target": "docs/benchmark/QUICKSTART.md", "need": "a benchmark quickstart / methodology so a result can be re-run", "severity": "hard"},
+        {"id": "citable-doi", "kind": "doc_mentions", "doc": "CITATION.cff", "tokens": ["doi"], "need": "a citable DOI / archival deposit (Zenodo) so the work has a stable academic handle", "severity": "soft"}
+      ],
+      "verdict": "served",
+      "gaps": [
+        "CITATION.cff has no DOI yet (no Zenodo/archival deposit) — the citation is repo-URL only",
+        "Full native-753B serving is a multi-month track; most committed results are tiny-scale witnesses + GPU-kernel cosines"
+      ]
+    },
+    {
+      "id": "benchmark-engineer",
+      "persona": "Benchmark / eval engineer",
+      "who": "Runs fak's benchmarks and compares the numbers against the SOTA field (vLLM / SGLang / TensorRT-LLM / llama.cpp).",
+      "job": "Run a benchmark command, read the measured numbers, and see fak's honest position vs the field.",
+      "tier": "evaluate",
+      "effort": "moderate",
+      "entry_doc": "docs/bench-plan.md",
+      "affordances": [
+        {"id": "runnable-bench", "kind": "command_resolves", "command": "go run ./cmd/fanbench", "need": "a runnable benchmark command (the fan-out benchmark) that resolves to a real cmd dir", "severity": "hard"},
+        {"id": "bench-ci", "kind": "path_exists", "target": ".github/workflows/bench.yml", "need": "a benchmark-regression CI gate so the numbers don't silently rot", "severity": "hard"},
+        {"id": "industry-scorecard", "kind": "path_exists", "target": "tools/industry_scorecard.py", "need": "the industry scorecard (fak vs the SOTA field, with parity-debt)", "severity": "hard"},
+        {"id": "industry-doc", "kind": "path_exists", "target": "docs/industry-scorecard/README.md", "need": "the generated competitive standing doc with dated SOTA sources", "severity": "hard"},
+        {"id": "bench-plan", "kind": "path_exists", "target": "docs/bench-plan.md", "need": "a hardware bench plan / coverage matrix with exact go run invocations", "severity": "hard"},
+        {"id": "bench-runbook", "kind": "path_exists", "target": "docs/benchmark/QUICKSTART.md", "need": "a benchmark quickstart so a result is reproducible", "severity": "hard"}
+      ],
+      "verdict": "served",
+      "gaps": [
+        "Cross-machine GPU benchmarks need real hardware (DGX/GCP) — the laptop path is CPU-parity + tiny-scale witnesses"
+      ]
+    },
+    {
+      "id": "decision-maker",
+      "persona": "Evaluator / decision-maker",
+      "who": "An eng manager or tech lead deciding in ten minutes whether fak is real, honest, and worth a deeper look.",
+      "job": "See what fak is, what's proven, how it compares, and its license — fast, with no overclaim.",
+      "tier": "evaluate",
+      "effort": "minimal",
+      "entry_doc": "README.md",
+      "affordances": [
+        {"id": "identity", "kind": "doc_mentions", "doc": "README.md", "tokens": ["fak in one line"], "need": "a quotable one-sentence identity near the top of the front page", "severity": "hard"},
+        {"id": "honesty-ledger", "kind": "path_exists", "target": "CLAIMS.md", "need": "an honesty ledger tagging every claim shipped/simulated/stub", "severity": "hard"},
+        {"id": "competitive-comparison", "kind": "any_path_exists", "targets": ["docs/industry-scorecard/README.md", "docs/fak-vs-alternatives-comparison.md"], "need": "an honest comparison vs the SOTA field", "severity": "hard"},
+        {"id": "license", "kind": "path_exists", "target": "LICENSE", "need": "a clear open-source license", "severity": "hard"},
+        {"id": "product-scorecard", "kind": "path_exists", "target": "docs/product-scorecard/README.md", "need": "a durable/real/useful-today product map so a buyer can see what is shippable now", "severity": "hard"},
+        {"id": "benchmark-authority", "kind": "path_exists", "target": "BENCHMARK-AUTHORITY.md", "need": "headline numbers traced to a commit + artifact (no naked claims)", "severity": "hard"}
+      ],
+      "verdict": "served",
+      "gaps": [
+        "No one-page pricing / TCO sheet — adoption cost is inferred from the deployment guide + the one-binary story"
+      ]
+    }
+  ]
+}

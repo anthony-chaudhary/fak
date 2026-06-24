@@ -1,0 +1,49 @@
+{
+  "rows": [
+    {
+      "id": "infra-engineer",
+      "persona": "Infra / platform engineer (SRE)",
+      "who": "Runs fak serve in production: wants a container image, metrics, health checks, resource limits, and a deployment story.",
+      "job": "Deploy fak serve with /metrics, /healthz, rate limits, and a container image — and a guide for Docker, Compose, and k8s.",
+      "tier": "operate",
+      "effort": "moderate",
+      "entry_doc": "docs/fak/deployment-guide.md",
+      "affordances": [
+        {"id": "container-image", "kind": "path_exists", "target": "Dockerfile", "need": "a root Dockerfile that builds fak to a minimal/distroless image", "severity": "hard"},
+        {"id": "deployment-guide", "kind": "path_exists", "target": "docs/fak/deployment-guide.md", "need": "a production deployment guide (Docker / Compose / k8s / bare metal) with a readiness checklist", "severity": "hard"},
+        {"id": "observability-endpoints", "kind": "doc_mentions", "doc": "docs/fak/deployment-guide.md", "tokens": ["/metrics", "/healthz"], "match": "any", "need": "the deploy guide documents the Prometheus /metrics and /healthz endpoints", "severity": "hard"},
+        {"id": "observability-scorecard", "kind": "path_exists", "target": "tools/observability_scorecard.py", "need": "an observability scorecard that proves dashboards/alerts/metrics-doc stay honest", "severity": "hard"},
+        {"id": "config-surface", "kind": "any_path_exists", "targets": ["docs/fak/server-config.md", "docs/serve-config.md"], "need": "a server-config reference (flags + env vars) for production tuning", "severity": "hard"},
+        {"id": "rate-limit", "kind": "path_exists", "target": "internal/ratelimit", "need": "a throughput/cost governor (rate limiting) so a runaway agent can't blow the budget", "severity": "hard"},
+        {"id": "k8s-manifest", "kind": "any_path_exists", "targets": ["deploy/k8s", "deploy/kubernetes", "deploy/k8s/fak.yaml", "deploy/helm"], "need": "a copy-paste k8s manifest / Helm chart, not just a guide section", "severity": "soft"}
+      ],
+      "verdict": "served",
+      "gaps": [
+        "The deployment guide covers k8s, but ships no copy-paste manifest or Helm chart yet",
+        "No root docker-compose.yml — Compose is documented inline in the guide"
+      ]
+    },
+    {
+      "id": "security-engineer",
+      "persona": "Security engineer",
+      "who": "Evaluates fak's capability-floor and containment claims before trusting it in front of an agent; reads the threat model and the refusal vocabulary.",
+      "job": "Audit what fak denies/contains, confirm the refusals are a closed vocabulary, the audit trail is tamper-evident, and the CI scans for CVEs.",
+      "tier": "operate",
+      "effort": "deep",
+      "entry_doc": "SECURITY.md",
+      "affordances": [
+        {"id": "threat-model", "kind": "path_exists", "target": "SECURITY.md", "need": "a threat model that states what is in scope and what is out (detector evasion is out by design)", "severity": "hard"},
+        {"id": "security-ci", "kind": "path_exists", "target": ".github/workflows/security-audit.yml", "need": "a security-audit workflow (govulncheck + posture/leak audit) on push/PR/schedule", "severity": "hard"},
+        {"id": "refusal-vocab", "kind": "path_exists", "target": "internal/abi/reasons.go", "need": "a CLOSED refusal vocabulary so a deny cites a code, never free text", "severity": "hard"},
+        {"id": "audit-journal", "kind": "path_exists", "target": "internal/journal", "need": "an append-only, hash-chained (tamper-evident) decision journal", "severity": "hard"},
+        {"id": "policy-spec", "kind": "path_exists", "target": "POLICY.md", "need": "the deployable capability-floor spec (the dump→edit→check→load policy workflow)", "severity": "hard"},
+        {"id": "honesty-ledger", "kind": "path_exists", "target": "CLAIMS.md", "need": "an honesty ledger where every claim carries one status tag", "severity": "hard"},
+        {"id": "review-tooling", "kind": "path_exists", "target": "tools/security_audit.py", "need": "security-review tooling (CI wiring + secret-leak scanner checks)", "severity": "hard"}
+      ],
+      "verdict": "served",
+      "gaps": [
+        "No third-party security audit / pentest report yet — the posture is self-attested via SECURITY.md + the CI gates"
+      ]
+    }
+  ]
+}

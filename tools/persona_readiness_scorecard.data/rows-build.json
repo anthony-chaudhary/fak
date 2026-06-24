@@ -1,0 +1,47 @@
+{
+  "rows": [
+    {
+      "id": "oss-contributor",
+      "persona": "Open-source contributor",
+      "who": "Wants to add a feature and ship it green without tripping an enforced guard; reads CONTRIBUTING + EXTENDING and runs the green gate.",
+      "job": "Add a feature as a leaf and ship it green, knowing the enforced rules up front so the guard teaches instead of ambushes.",
+      "tier": "build",
+      "effort": "deep",
+      "entry_doc": "CONTRIBUTING.md",
+      "affordances": [
+        {"id": "contributor-contract", "kind": "path_exists", "target": "CONTRIBUTING.md", "need": "a contributor contract", "severity": "hard"},
+        {"id": "extending-guide", "kind": "path_exists", "target": "EXTENDING.md", "need": "the build-on-fak guide (the Register* seams + the leaf path)", "severity": "hard"},
+        {"id": "leaf-scaffold", "kind": "path_exists", "target": "tools/new_leaf.py", "need": "a scaffolder that stamps a conforming leaf (add a leaf, don't edit core)", "severity": "hard"},
+        {"id": "green-gate", "kind": "doc_mentions", "doc": "AGENTS.md", "tokens": ["make ci"], "need": "a one-command green gate documented at the entry point (the feedback loop)", "severity": "hard"},
+        {"id": "guardrails-surfaced", "kind": "doc_mentions", "doc": "AGENTS.md", "tokens": ["OFF_TRUNK", "OUT_OF_TREE_WRITE"], "match": "all", "need": "the enforced rules surfaced up front (trunk-only, out-of-tree write guard) so the guard teaches", "severity": "hard"},
+        {"id": "issue-templates", "kind": "path_exists", "target": ".github/ISSUE_TEMPLATE", "need": "structured issue templates so a contribution starts well-formed", "severity": "hard"},
+        {"id": "good-first-issue", "kind": "doc_mentions", "doc": "CONTRIBUTING.md", "tokens": ["good first issue", "good-first-issue"], "match": "any", "need": "a 'good first issue' on-ramp so a first-timer has a starting point", "severity": "soft"}
+      ],
+      "verdict": "served",
+      "gaps": [
+        "No 'good first issue' on-ramp in CONTRIBUTING — a first-time contributor picks their own starting point"
+      ]
+    },
+    {
+      "id": "ai-agent",
+      "persona": "AI coding agent",
+      "who": "An autonomous coding agent (Claude Code, OpenAI Codex, Cursor, an MCP client) that lands in the repo cold and must discover, adopt, and build on fak.",
+      "job": "Discover what fak is, adopt it, and build on it cold — the deep audit of this is the agent-readiness scorecard.",
+      "tier": "build",
+      "effort": "minimal",
+      "entry_doc": "AGENTS.md",
+      "delegates_to": "tools/agent_readiness_scorecard.py",
+      "affordances": [
+        {"id": "agents-entrypoint", "kind": "path_exists", "target": "AGENTS.md", "need": "the agents.md machine-read entry point", "severity": "hard"},
+        {"id": "llms-map", "kind": "path_exists", "target": "llms.txt", "need": "the llms.txt answer-engine / agent doc-map", "severity": "hard"},
+        {"id": "llms-full", "kind": "path_exists", "target": "llms-full.txt", "need": "the inlined full doc-map an answer engine ingests", "severity": "hard"},
+        {"id": "agent-recipe", "kind": "path_exists", "target": "docs/integrations/claude.md", "need": "a per-agent integration recipe", "severity": "hard"},
+        {"id": "readiness-scorecard", "kind": "path_exists", "target": "tools/agent_readiness_scorecard.py", "need": "the deep agent-readiness scorecard (13 KPIs, friction-debt) this row delegates to", "severity": "hard"}
+      ],
+      "verdict": "served",
+      "gaps": [
+        "Depth lives in agent-readiness (discover/adopt/build, friction-debt) — this row is the roster entry, not the full 13-KPI audit"
+      ]
+    }
+  ]
+}

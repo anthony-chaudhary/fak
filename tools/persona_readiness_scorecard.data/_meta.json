@@ -1,0 +1,27 @@
+{
+  "schema": "fak-persona-readiness-scorecard.data/1",
+  "meta": {
+    "as_of": "2026-06-24",
+    "fak_version": "v0.31.0",
+    "title": "fak persona-readiness scorecard — is each top persona served?",
+    "_doc": "Each row is one of the top-10 personas who land on fak, scored on whether the affordances that persona reaches for first actually exist in the tree. The scorecard cross-checks every affordance against the real tree (a path that exists, a doc that mentions a token, a command that resolves, a CLAIMS section that is tagged), so the score cannot be gamed by editing data alone: to lift a persona you ADD the real affordance. Regenerate the doc: python tools/persona_readiness_scorecard.py --markdown-dir docs/persona-scorecard"
+  },
+  "tiers": [
+    {"id": "consume", "name": "Consume / build-on", "note": "download, point an agent at it, embed it"},
+    {"id": "operate", "name": "Operate / trust", "note": "deploy it, secure it, run it in production"},
+    {"id": "evaluate", "name": "Study / decide", "note": "reproduce it, benchmark it, decide to adopt"},
+    {"id": "build", "name": "Contribute / extend", "note": "add a leaf, or be the agent that builds on it"}
+  ],
+  "required_personas": [
+    {"id": "free-tier-dev", "name": "Free-tier solo dev", "tier": "consume"},
+    {"id": "app-developer", "name": "App developer / vibe-coder", "tier": "consume"},
+    {"id": "backend-integrator", "name": "Backend integrator", "tier": "consume"},
+    {"id": "infra-engineer", "name": "Infra / platform engineer (SRE)", "tier": "operate"},
+    {"id": "security-engineer", "name": "Security engineer", "tier": "operate"},
+    {"id": "ml-researcher", "name": "ML researcher", "tier": "evaluate"},
+    {"id": "benchmark-engineer", "name": "Benchmark / eval engineer", "tier": "evaluate"},
+    {"id": "decision-maker", "name": "Evaluator / decision-maker", "tier": "evaluate"},
+    {"id": "oss-contributor", "name": "Open-source contributor", "tier": "build"},
+    {"id": "ai-agent", "name": "AI coding agent", "tier": "build"}
+  ]
+}

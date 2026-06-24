@@ -1,16 +1,17 @@
 #!/usr/bin/env python3
 """Unified scorecard debt control-pane — fold every *-debt into one tracked trend.
 
-The repo has ten deterministic scorecards, each emitting a debt integer plus a
+The repo has eleven deterministic scorecards, each emitting a debt integer plus a
 control-pane payload (``schema/ok/verdict/finding/reason/next_action``): docs,
 code, doc-appeal, seo, demo-quality, demo-robustness, repo-hygiene, the one
 OUTWARD-facing stick — industry-parity (fak vs SOTA) — agent-readiness (can an
-agent discover, adopt, and build on fak), and product (can a PERSON pick up each
-fak concept and use it today — durable / real / useful-today). They run
-independently and advisory. Nothing folds {doc_debt, code_debt, appeal_debt,
-seo_debt, demo_debt, robustness_debt, hygiene_debt, parity_debt, friction_debt,
-product_debt} into one number, pins a per-metric baseline, and shows the trend
-commit-over-commit.
+agent discover, adopt, and build on fak), product (can a PERSON pick up each fak
+concept and use it today — durable / real / useful-today), and persona (are the
+top-10 personas who land on fak — free-tier dev through researcher — each served).
+They run independently and advisory. Nothing folds {doc_debt, code_debt,
+appeal_debt, seo_debt, demo_debt, robustness_debt, hygiene_debt, parity_debt,
+friction_debt, product_debt, persona_debt} into one number, pins a per-metric
+baseline, and shows the trend commit-over-commit.
 
 This is that fold — the RSI checking layer for the whole scorecard family. It
 runs each scorecard, extracts the debt integer + grade, sums one portfolio
@@ -60,6 +61,7 @@ SCORECARDS: list[dict[str, str]] = [
     {"key": "parity", "debt": "parity_debt", "script": "industry_scorecard.py", "label": "industry-parity"},
     {"key": "agent", "debt": "friction_debt", "script": "agent_readiness_scorecard.py", "label": "agent-readiness"},
     {"key": "product", "debt": "product_debt", "script": "product_scorecard.py", "label": "product"},
+    {"key": "persona", "debt": "persona_debt", "script": "persona_readiness_scorecard.py", "label": "persona"},
 ]
 
 

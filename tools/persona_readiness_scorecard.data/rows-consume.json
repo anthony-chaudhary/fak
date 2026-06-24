@@ -1,0 +1,68 @@
+{
+  "rows": [
+    {
+      "id": "free-tier-dev",
+      "persona": "Free-tier solo dev",
+      "who": "Will download a prebuilt binary and run it; will NOT clone, build from source, or read the docs. Spends seconds, not minutes.",
+      "job": "Download a binary and watch it deny a tool call in under a minute — no toolchain, no key, no GPU.",
+      "tier": "consume",
+      "effort": "minimal",
+      "entry_doc": "README.md",
+      "affordances": [
+        {"id": "release-binaries", "kind": "path_exists", "target": ".github/workflows/release-artifacts.yml", "need": "a CI job that cross-compiles and uploads prebuilt binaries to GitHub Releases", "severity": "hard"},
+        {"id": "install-script", "kind": "path_exists", "target": "install.sh", "need": "a curl|sh installer that fetches the right prebuilt binary and verifies its checksum", "severity": "hard"},
+        {"id": "download-pointer", "kind": "doc_mentions", "doc": "README.md", "tokens": ["releases/latest", "install.sh", "prebuilt"], "match": "any", "need": "a no-toolchain download path on the front page (release archive or install.sh)", "severity": "hard"},
+        {"id": "offline-first-run", "kind": "fenced_command", "docs": ["README.md", "GETTING-STARTED.md", "docs/cli-reference.md"], "tokens": ["fak preflight", "fak agent --offline", "cmd/fak preflight"], "need": "a copy-pasteable no-key/no-GPU first command in a fenced block", "severity": "hard"},
+        {"id": "static-binary-claim", "kind": "claim_section", "section": "The product", "tags": ["SHIPPED"], "need": "the honesty ledger backs the one-static-binary, no-dependencies claim", "severity": "hard"},
+        {"id": "package-manager", "kind": "doc_mentions", "doc": "README.md", "tokens": ["brew install", "winget", "scoop install"], "match": "any", "need": "a package-manager install (Homebrew/winget/scoop) for the dev who will not even curl", "severity": "soft"}
+      ],
+      "verdict": "served",
+      "gaps": [
+        "No Homebrew/winget/scoop package yet — the lowest-effort install is curl|sh or a release archive",
+        "The single command runs a demo/preflight; a polished one-window TUI would lower the bar further"
+      ]
+    },
+    {
+      "id": "app-developer",
+      "persona": "App developer / vibe-coder",
+      "who": "Builds an app or agent and wants to point an existing AI harness (Claude Code, Cursor, an MCP client) at fak with no hand-wiring.",
+      "job": "Drop fak in front of my agent so every tool call is governed, using a config my harness already auto-loads.",
+      "tier": "consume",
+      "effort": "moderate",
+      "entry_doc": "docs/integrations/README.md",
+      "affordances": [
+        {"id": "integrations-index", "kind": "path_exists", "target": "docs/integrations/README.md", "need": "an integration index that routes 'which agent do you run?' to a recipe", "severity": "hard"},
+        {"id": "mcp-dropin", "kind": "path_exists", "target": "examples/mcp/.mcp.json", "need": "a drop-in .mcp.json that wires fak serve --stdio with no setup", "severity": "hard"},
+        {"id": "claude-recipe", "kind": "path_exists", "target": "docs/integrations/claude.md", "need": "a Claude Code integration recipe", "severity": "hard"},
+        {"id": "cursor-recipe", "kind": "path_exists", "target": "docs/integrations/cursor.md", "need": "a Cursor integration recipe", "severity": "hard"},
+        {"id": "examples-policies", "kind": "path_exists", "target": "examples/mcp/README.md", "need": "a worked example with a real policy a developer can copy", "severity": "hard"},
+        {"id": "quickstart", "kind": "any_path_exists", "targets": ["START-HERE.md", "GETTING-STARTED.md"], "need": "a quickstart that gets from clone to a running kernel", "severity": "hard"}
+      ],
+      "verdict": "served",
+      "gaps": [
+        "Recipes cover Claude/Cursor/Codex/MCP; a brand-new harness still needs its own recipe written"
+      ]
+    },
+    {
+      "id": "backend-integrator",
+      "persona": "Backend integrator",
+      "who": "Embeds fak (the binary, fronting a model server) into a real service and needs a stable interface plus a way to extend it.",
+      "job": "Install fak into a service, front my model server, and depend on a frozen interface I can build a leaf onto.",
+      "tier": "consume",
+      "effort": "moderate",
+      "entry_doc": "GETTING-STARTED.md",
+      "affordances": [
+        {"id": "install-oneliner", "kind": "doc_mentions", "doc": "GETTING-STARTED.md", "tokens": ["go install", "@latest"], "match": "all", "need": "the go install ...@latest one-liner (the module is at the repo root, so it resolves)", "severity": "hard"},
+        {"id": "cli-reference", "kind": "path_exists", "target": "docs/cli-reference.md", "need": "a CLI reference documenting every verb and flag", "severity": "hard"},
+        {"id": "config-reference", "kind": "any_path_exists", "targets": ["docs/fak/server-config.md", "docs/serve-config.md", "POLICY.md"], "need": "a config reference (flags, env vars, policy schema)", "severity": "hard"},
+        {"id": "frozen-abi", "kind": "path_exists", "target": "ARCHITECTURE.md", "need": "the frozen-ABI / layering discipline an integrator depends on for stability", "severity": "hard"},
+        {"id": "extension-seams", "kind": "path_exists", "target": "EXTENDING.md", "need": "the additive extension seams (Register* + a leaf) for building on fak without forking", "severity": "hard"},
+        {"id": "module-root", "kind": "doc_mentions", "doc": "go.mod", "tokens": ["github.com/anthony-chaudhary/fak"], "need": "the Go module declared at the repo root so the install path resolves directly", "severity": "hard"}
+      ],
+      "verdict": "served",
+      "gaps": [
+        "Integration is binary-first (front it, register a leaf); the internal/ packages are not a published importable Go API — by design (the spine is frozen)"
+      ]
+    }
+  ]
+}
