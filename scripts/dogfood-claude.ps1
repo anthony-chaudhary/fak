@@ -19,6 +19,9 @@
 
 .PARAMETER (positional)
   (none)            interactive Claude Code on the local model
+  -Kernel           OPT-IN: use fak's OWN in-kernel pure-Go forward (--gguf), no Python
+                    shim / no proxy engine. Alias for FAK_DOGFOOD_BACKEND=gguf; composes
+                    with --probe/--smoke/--print-env (e.g. `-Kernel --probe "..."`).
   --probe "<text>"  ONE headless live turn (witnessable proof), then exit
   --smoke           curl the wire end-to-end (no model needed), then exit
   --print-env       print the env lines for your own `claude` invocation
@@ -30,12 +33,19 @@
   Knobs (env):
     FAK_DOGFOOD_PORT       fak serve port                 (default 8080, auto-bumped if busy)
     FAK_DOGFOOD_SHIM_PORT  transformers shim port         (default 8190, auto-bumped if busy)
-    FAK_DOGFOOD_MODEL      served model id                (default HuggingFaceTB/SmolLM2-135M-Instruct; empty for anthropic)
-    FAK_DOGFOOD_BACKEND    shim | ollama | anthropic      (default shim)
+    FAK_DOGFOOD_MODEL      served model id                (default SmolLM2-135M; qwen2.5-7b-q8 for gguf; empty for anthropic)
+    FAK_DOGFOOD_BACKEND    shim | ollama | gguf | anthropic   (default shim)
+                             gguf = fak's OWN in-kernel pure-Go forward (the -Kernel alias):
+                             Claude Code -> fak serve --gguf (fak's decode, NO Python, NO
+                             proxy) -> back. The path that proves agentic work on fak's own
+                             kernel. Loads FAK_DOGFOOD_GGUF; requires a tokenizer-bearing
+                             GGUF (Qwen2.5 GGUFs embed one); CPU prefill is slow so the
+                             timeouts auto-raise to 900s. Asserts /healthz planner=inkernel.
                              anthropic = front the REAL Claude API (api.anthropic.com):
                              Claude Code -> fak (adjudicates) -> real Claude. Your own
                              key + real model tiers flow through; cache_control survives
                              byte-for-byte. Override the upstream with FAK_DOGFOOD_BASE_URL.
+    FAK_DOGFOOD_GGUF       gguf backend: local .gguf to load  (default <home>\.cache\fak-models\gguf\Qwen2.5-7B-Instruct-Q8_0.gguf)
     FAK_DOGFOOD_ACCOUNT    account tag for the switcher    (default: isolated .claude-faklocal)
     FAK_DOGFOOD_BINDIR     --install target dir on PATH    (default: <home>\bin)
     FAK_PLANNER_TIMEOUT_S  upstream model round-trip cap   (default 60; raise for big CPU models)
@@ -49,6 +59,16 @@
 $ErrorActionPreference = 'Stop'
 
 # ---- parse mode ------------------------------------------------------------
+# -Kernel / --kernel is an alias for FAK_DOGFOOD_BACKEND=gguf (fak's own in-kernel
+# forward). Pre-scan and strip it so it composes with --probe/--smoke/--print-env, e.g.
+# `dogfood-claude.ps1 -Kernel --probe "..."`. Leaves the default (shim) untouched when absent.
+$argv = @()
+foreach ($a in $args) {
+  if ($a -eq '-Kernel' -or $a -eq '--kernel') { $env:FAK_DOGFOOD_BACKEND = 'gguf' }
+  else { $argv += $a }
+}
+$args = $argv
+
 $Mode = 'run'
 $ProbePrompt = 'Reply with exactly the word: pong'
 $RunArgs = @()
@@ -79,14 +99,23 @@ $Root = $FakDir
 $Port      = if ($env:FAK_DOGFOOD_PORT)      { [int]$env:FAK_DOGFOOD_PORT }      else { 8080 }
 $ShimPort  = if ($env:FAK_DOGFOOD_SHIM_PORT) { [int]$env:FAK_DOGFOOD_SHIM_PORT } else { 8190 }
 $Backend   = if ($env:FAK_DOGFOOD_BACKEND)   { $env:FAK_DOGFOOD_BACKEND }   else { 'shim' }
+# The 'gguf' (kernel) backend is the OPT-IN sibling: it runs `fak serve --gguf` — fak's
+# OWN pure-Go in-kernel forward, NO Python shim, NO proxy engine, NO --base-url. This is
+# the path that proves Claude Code doing agentic work against fak's own kernel. It is OFF
+# by default (default stays 'shim'); set FAK_DOGFOOD_BACKEND=gguf or pass -Kernel.
+$KernelBackend = ($Backend -eq 'gguf')
 # The 'anthropic' upstream fronts the REAL Claude API — Claude Code keeps its own
 # real model tiers (claude-opus-4-8, etc.), so the single-model override is OFF and
 # the default 'model' is empty. Local backends still map every tier onto one model.
 $AnthropicUpstream = ($Backend -eq 'anthropic')
-$DefaultModel = if ($AnthropicUpstream) { '' } else { 'HuggingFaceTB/SmolLM2-135M-Instruct' }
+$DefaultModel = if ($AnthropicUpstream) { '' } elseif ($KernelBackend) { 'qwen2.5-7b-q8' } else { 'HuggingFaceTB/SmolLM2-135M-Instruct' }
 $Model     = if ($env:FAK_DOGFOOD_MODEL)     { $env:FAK_DOGFOOD_MODEL }     else { $DefaultModel }
 $Account   = if ($env:FAK_DOGFOOD_ACCOUNT)   { $env:FAK_DOGFOOD_ACCOUNT }   else { 'faklocal' }
 $UserHome  = if ($env:FLEET_USER_HOME)       { $env:FLEET_USER_HOME }       else { $env:USERPROFILE }
+# Kernel backend: the local GGUF the in-kernel forward loads, and the bearer secret the
+# kernel requires (must equal ANTHROPIC_API_KEY so Claude Code's x-api-key authenticates).
+$Gguf      = if ($env:FAK_DOGFOOD_GGUF)       { $env:FAK_DOGFOOD_GGUF }       else { Join-Path $UserHome '.cache\fak-models\gguf\Qwen2.5-7B-Instruct-Q8_0.gguf' }
+$KeyEnv    = 'FAK_DOGFOOD_KEY'
 $Python    = if ($env:FAK_PYTHON)            { $env:FAK_PYTHON }            else { 'python' }
 $Bin       = Join-Path $Root 'tools\.bin\fak.exe'
 # The account switcher (tools/fleet_accounts.py) globs FLEET_USER_HOME/.claude*.
@@ -184,7 +213,14 @@ try {
     $BaseUrl  = if ($env:FAK_DOGFOOD_BASE_URL) { $env:FAK_DOGFOOD_BASE_URL } else { 'https://api.anthropic.com' }
     Log "upstream = REAL Claude API ($BaseUrl) - fak adjudicates every tool call on your live turns"
   }
-  if ($Mode -ne 'smoke' -and -not $AnthropicUpstream) {
+  if ($KernelBackend) {
+    # fak's OWN in-kernel forward: no shim, no proxy, no --base-url. `fak serve --gguf`
+    # loads the GGUF resident and serves /v1/messages with fak's pure-Go decode. Verify the
+    # weights exist before we try to bind (the eager load happens before the listener does).
+    if (-not (Test-Path $Gguf)) { Die "gguf not found: $Gguf  (set FAK_DOGFOOD_GGUF to a local .gguf, e.g. a Qwen2.5 Q8)" }
+    Log "kernel backend: fak's OWN in-kernel forward over $Gguf (no shim, no proxy)"
+  }
+  if ($Mode -ne 'smoke' -and -not $AnthropicUpstream -and -not $KernelBackend) {
     if ($Backend -eq 'shim') {
       if (-not (Get-Command $Python -ErrorAction SilentlyContinue)) { Die "python ('$Python') not found - install Python 3 or set FAK_PYTHON" }
       $ShimPort = Get-UsablePort $ShimPort
@@ -214,12 +250,25 @@ try {
   # box, which would trip the planner's 60s and the gateway's 90s WriteTimeout and
   # cut the turn off with a 502. Default both generous (300s) unless the operator
   # already set them. fak serve inherits these from this process env via Start-Process.
-  if (-not $env:FAK_PLANNER_TIMEOUT_S)    { $env:FAK_PLANNER_TIMEOUT_S = '300' }
-  if (-not $env:FAK_HTTP_WRITE_TIMEOUT_S) { $env:FAK_HTTP_WRITE_TIMEOUT_S = '300' }
+  # The in-kernel 7B Q8 CPU forward is much slower than the SmolLM shim — a real Claude
+  # Code turn (a multi-thousand-token tool prompt prefilled on CPU) can take minutes — so
+  # the kernel arm raises the floor higher (900s) to avoid a 502 mid-turn.
+  $TimeoutFloor = if ($KernelBackend) { '900' } else { '300' }
+  if (-not $env:FAK_PLANNER_TIMEOUT_S)    { $env:FAK_PLANNER_TIMEOUT_S = $TimeoutFloor }
+  if (-not $env:FAK_HTTP_WRITE_TIMEOUT_S) { $env:FAK_HTTP_WRITE_TIMEOUT_S = $TimeoutFloor }
   $Port = Get-UsablePort $Port
   $serveArgs = @('serve', '--addr', "127.0.0.1:$Port", '--provider', $Provider)
   if ($Model)   { $serveArgs += @('--model', $Model) }
   if ($BaseUrl) { $serveArgs += @('--base-url', $BaseUrl) }
+  if ($KernelBackend) {
+    # The required-key value MUST equal ANTHROPIC_API_KEY (Claude Code sends it as
+    # x-api-key, which the gateway authenticates against this secret). Set it in THIS
+    # process env BEFORE Start-Process so `fak serve` inherits it (an unset/empty
+    # required-key env makes serve exit 2). Pin both to one source below in the wiring block.
+    $kernelKey = if ($env:ANTHROPIC_API_KEY) { $env:ANTHROPIC_API_KEY } else { 'fak-local-dogfood' }
+    Set-Item -Path "Env:$KeyEnv" -Value $kernelKey
+    $serveArgs += @('--gguf', $Gguf, '--require-key-env', $KeyEnv)
+  }
   if ($env:FAK_DOGFOOD_POLICY) { $serveArgs += @('--policy', $env:FAK_DOGFOOD_POLICY) }
   Log "starting kernel: fak $($serveArgs -join ' ')"
   $serveOut = Join-Path $env:TEMP 'fak-dogfood-serve.out.log'
@@ -227,11 +276,25 @@ try {
   $serve = Start-Process -FilePath $Bin -ArgumentList $serveArgs -PassThru -NoNewWindow `
     -RedirectStandardOutput $serveOut -RedirectStandardError $serveErr
   $script:children += $serve
-  if (-not (Wait-Url "http://127.0.0.1:$Port/healthz" 30)) {
+  # The kernel arm loads the GGUF eagerly BEFORE the listener binds, so /healthz is
+  # unreachable until the (slow, CPU) load completes — give it far longer than the shim.
+  $HealthTimeout = if ($KernelBackend) { 600 } else { 30 }
+  if (-not (Wait-Url "http://127.0.0.1:$Port/healthz" $HealthTimeout)) {
     Get-Content $serveErr -Tail 20 -ErrorAction SilentlyContinue | Write-Host
     Die "fak serve did not become healthy on :$Port"
   }
-  Log "kernel healthy: $((Invoke-WebRequest "http://127.0.0.1:$Port/healthz" -UseBasicParsing).Content)"
+  $hzBody = (Invoke-WebRequest "http://127.0.0.1:$Port/healthz" -UseBasicParsing).Content
+  Log "kernel healthy: $hzBody"
+  if ($KernelBackend) {
+    # A GGUF lacking an embedded BPE tokenizer would SILENTLY drop to the offline
+    # MockPlanner (scripted text), not fak's forward. Turn that into a hard failure: the
+    # whole point of this backend is the in-kernel forward, so refuse anything else.
+    $planner = try { ($hzBody | ConvertFrom-Json).planner } catch { '' }
+    if ($planner -ne 'inkernel') {
+      Die "kernel backend expected planner=inkernel but /healthz reports planner='$planner' — the GGUF may lack an embedded tokenizer (pass FAK_DOGFOOD_TOKENIZER / --tokenizer) or fell back to the mock planner"
+    }
+    Log "verified: planner=inkernel (fak's OWN pure-Go forward is serving the wire)"
+  }
 
   # ---- resolve the account dir through the switcher ------------------------
   # ONE call to the switcher's canonical front door: `resolve --faklocal-ok` pins the
@@ -274,6 +337,9 @@ try {
     Log "  ANTHROPIC_BASE_URL = $($env:ANTHROPIC_BASE_URL)   (native /v1/messages on the kernel)"
     Log "  CLAUDE_CONFIG_DIR  = $($env:CLAUDE_CONFIG_DIR)    (account: $Account)"
     Log "  model (all tiers)  = $Model"
+    if ($KernelBackend) {
+      Log "  forward            = fak's OWN in-kernel pure-Go decode over $Gguf  (NO Python, NO proxy)"
+    }
   }
   if (-not $env:CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC) { $env:CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC = '1' }
 
@@ -282,12 +348,17 @@ try {
       # Use Invoke-WebRequest, NOT curl.exe: when PowerShell passes a JSON `-d`
       # argument to a native exe it strips the inner double-quotes, so curl would
       # send unquoted keys and the kernel rejects the body. Native PS HTTP avoids it.
+      # Send the bearer as x-api-key (Claude Code's header) so the smoke also passes when
+      # the backend requires auth (the gguf/kernel arm does; the shim default does not).
+      $smokeHdr = @{ 'x-api-key' = $env:ANTHROPIC_API_KEY }
       $wire = {
         param([string]$body)
-        try { (Invoke-WebRequest -Uri "$($env:ANTHROPIC_BASE_URL)/v1/messages" -Method Post -ContentType 'application/json' -Body $body -UseBasicParsing).Content }
+        try { (Invoke-WebRequest -Uri "$($env:ANTHROPIC_BASE_URL)/v1/messages" -Method Post -ContentType 'application/json' -Headers $smokeHdr -Body $body -UseBasicParsing).Content }
         catch {
-          $resp = $_.Exception.Response
-          if ($resp) { (New-Object System.IO.StreamReader($resp.GetResponseStream())).ReadToEnd() }
+          # PowerShell 7's error record carries the response body directly; older builds
+          # expose a .Response stream. Try the modern path first so a non-2xx (e.g. a 401
+          # surfaces a readable body instead of crashing on a missing GetResponseStream.
+          if ($_.ErrorDetails -and $_.ErrorDetails.Message) { $_.ErrorDetails.Message }
           else { "[wire error] $($_.Exception.Message)" }
         }
       }

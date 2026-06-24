@@ -15,6 +15,7 @@ package agent
 
 import (
 	"context"
+	"encoding/json"
 	"log"
 	"math"
 	"math/rand"
@@ -120,7 +121,7 @@ func (p *InKernelPlanner) Model() string { return p.modelID }
 // per-request Stop sequence ends the turn early (string-suffix stop, orthogonal to
 // the token-ID <|im_end|>/EOS stops). All five per-request sampling controls the
 // HTTP wires forward are now honored on the in-kernel path too.
-func (p *InKernelPlanner) Complete(_ context.Context, messages []Message, _ []ToolDef, opts ...SampleOpt) (*Completion, error) {
+func (p *InKernelPlanner) Complete(_ context.Context, messages []Message, tools []ToolDef, opts ...SampleOpt) (*Completion, error) {
 	sp := applySampleOpts(opts...)
 	maxNew := p.maxNew
 	if sp.MaxTokens != nil && *sp.MaxTokens > 0 {
@@ -143,7 +144,7 @@ func (p *InKernelPlanner) Complete(_ context.Context, messages []Message, _ []To
 		topK = *sp.TopK
 	}
 
-	chat := renderChatML(messages)
+	chat := renderChatMLTools(messages, tools)
 	ids, err := p.tok.Encode(chat)
 	if err != nil {
 		return nil, err
@@ -196,11 +197,27 @@ func (p *InKernelPlanner) Complete(_ context.Context, messages []Message, _ []To
 	// the frozen-trajectory cache cliff (docs/explainers/frozen-trajectory-cache-cliff.md).
 	cacheobs.Default.Observe(promptTok, matched)
 
-	return &Completion{
+	comp := &Completion{
 		Message:      Message{Role: "assistant", Content: sb.String()},
 		FinishReason: finishReason,
 		Usage:        Usage{PromptTokens: promptTok, CompletionTokens: gen, TotalTokens: promptTok + gen},
-	}, nil
+	}
+	// Lift the model's text-form <tool_call> emissions into structured Message.ToolCalls
+	// (Hermes dialect == Qwen2.5 native), set FinishReason="tool_calls", and flag a
+	// claimed-but-unparseable call — the SAME normalization every proxy adapter runs, so
+	// the in-kernel forward becomes a first-class tool-calling planner. Without this the
+	// gateway adjudicates nothing (it reads Message.ToolCalls) and the Anthropic wire never
+	// emits a tool_use block, so Claude Code's agent loop has nothing to execute.
+	comp = normalizeCompletionToolCalls(comp)
+	// Fail closed on a TRUNCATED tool call: the in-kernel finishReason is "stop"/"length"
+	// (never "tool_calls"), so normalizeCompletionToolCalls cannot infer a drop from the
+	// finish reason. If decode emitted an unclosed <tool_call> opener that the lift could
+	// not recover, mark ToolCallsDropped so the conformance gate refuses the turn rather
+	// than silently leaking a half-formed call into Claude Code's context.
+	if len(comp.Message.ToolCalls) == 0 && strings.Contains(comp.Message.Content, "<tool_call>") {
+		comp.ToolCallsDropped = true
+	}
+	return comp, nil
 }
 
 // generateReused runs prefill + decode for an already-encoded prompt, REUSING the longest
@@ -544,18 +561,81 @@ func checkStop(text string, stop []string) (string, bool) {
 
 // renderChatML renders the transcript as Qwen/SmolLM2 ChatML, terminating with an
 // open assistant turn for generation. System messages fold into one leading system
-// block. tool / tool-call messages render as plain-text turns so the model sees
-// prior tool I/O as context (no structured tool-call emission from this planner).
+// block. It is the zero-tools form: renderChatMLTools(messages, nil). The eviction /
+// reuse paths use this (and renderTranscript) so their token path is byte-identical to
+// the pre-tool-calling behavior — protecting the radix prefix invariant.
 func renderChatML(messages []Message) string {
-	return renderTranscript(messages) + "<|im_start|>assistant\n"
+	return renderChatMLTools(messages, nil)
 }
 
-// renderTranscript renders the messages as complete ChatML turns (system messages folded
-// into one leading block) WITHOUT the trailing open assistant turn. renderChatML appends
-// that open turn for generation; the poison-eviction path uses the bare transcript so its
-// token path ends exactly on a turn boundary (the atomic <|im_end|> special token),
-// keeping it a clean token-prefix of any cached turn that began with these messages.
+// renderChatMLTools is renderChatML with tool support: it advertises the tool JSON
+// schemas to the model and renders prior tool-call / tool-result history in Qwen2.5's
+// canonical <tool_call>/<tool_response> ChatML. It terminates with an open assistant
+// turn for generation. When tools is empty AND no message carries a structured tool
+// call or tool result, its output is byte-for-byte identical to the old renderChatML.
+func renderChatMLTools(messages []Message, tools []ToolDef) string {
+	return renderTranscriptTools(messages, tools) + "<|im_start|>assistant\n"
+}
+
+// renderTranscript renders the messages as complete ChatML turns WITHOUT the trailing
+// open assistant turn. The zero-tools form: renderTranscriptTools(messages, nil). The
+// poison-eviction path uses this so its token path ends exactly on a turn boundary (the
+// atomic <|im_end|> special token), keeping it a clean token-prefix of any cached turn
+// that began with these messages.
 func renderTranscript(messages []Message) string {
+	return renderTranscriptTools(messages, nil)
+}
+
+// toolSpecBlock renders the canonical Qwen2.5 tool-spec preamble for the folded system
+// block: the <tools>…</tools> signatures plus the "emit a <tool_call> json object"
+// instruction. It is deterministic (schemas in declaration order) so it is a stable part
+// of every token-prefix when folded into the single leading system block — the constraint
+// that keeps radix KV reuse valid across a tool-using session.
+func toolSpecBlock(tools []ToolDef) string {
+	if len(tools) == 0 {
+		return ""
+	}
+	var b strings.Builder
+	b.WriteString("\n\n# Tools\n\nYou are provided with function signatures within <tools></tools> XML tags:\n<tools>")
+	for _, t := range tools {
+		fn := t.Function
+		params := fn.Parameters
+		if len(params) == 0 {
+			params = json.RawMessage("{}")
+		}
+		// Marshal one OpenAI-style {"type":"function","function":{…}} signature per tool.
+		// Build it from a stable field order via json.Marshal of a map alternative would
+		// re-sort keys; use an explicit struct so the rendering is deterministic.
+		sig := struct {
+			Type     string `json:"type"`
+			Function struct {
+				Name        string          `json:"name"`
+				Description string          `json:"description"`
+				Parameters  json.RawMessage `json:"parameters"`
+			} `json:"function"`
+		}{Type: "function"}
+		sig.Function.Name = fn.Name
+		sig.Function.Description = fn.Description
+		sig.Function.Parameters = params
+		enc, err := json.Marshal(sig)
+		if err != nil {
+			// A malformed tool schema must not corrupt the prompt; skip it (the gateway
+			// validates schemas upstream, so this is belt-and-suspenders).
+			continue
+		}
+		b.WriteString("\n")
+		b.Write(enc)
+	}
+	b.WriteString("\n</tools>\n\nFor each function call, return a json object with function name and arguments within <tool_call></tool_call> XML tags:\n<tool_call>\n{\"name\": <function-name>, \"arguments\": <args-json-object>}\n</tool_call>")
+	return b.String()
+}
+
+// renderTranscriptTools is the single rendering core. When tools is non-empty it folds
+// the tool-spec block into the leading system block; assistant tool calls render as
+// canonical <tool_call> blocks and role=tool messages render as <tool_response> user
+// turns. With nil tools and no structured tool call/result on any message, the output is
+// byte-for-byte identical to the historical renderTranscript.
+func renderTranscriptTools(messages []Message, tools []ToolDef) string {
 	var b strings.Builder
 	var sys []string
 	for _, m := range messages {
@@ -563,9 +643,14 @@ func renderTranscript(messages []Message) string {
 			sys = append(sys, m.Content)
 		}
 	}
-	if len(sys) > 0 {
+	spec := toolSpecBlock(tools)
+	// Emit a leading system block when there is any system text OR a tool spec to
+	// advertise. The spec folds into the SAME block (after the system text) so it is part
+	// of every token-prefix.
+	if len(sys) > 0 || spec != "" {
 		b.WriteString("<|im_start|>system\n")
 		b.WriteString(strings.Join(sys, "\n"))
+		b.WriteString(spec)
 		b.WriteString("<|im_end|>\n")
 	}
 	for _, m := range messages {
@@ -574,14 +659,23 @@ func renderTranscript(messages []Message) string {
 		case "system":
 			continue
 		case "tool":
-			// A tool result reads as user-supplied context to the model.
+			// A tool result reads as user-supplied context to the model. When the result
+			// carries a tool name, wrap it in Qwen's canonical <tool_response> grammar so a
+			// tool-trained model recognizes the multi-turn tool flow; otherwise keep the
+			// historical bare "name: content" form (byte-identical to the pre-tool path).
 			role = "user"
 			if m.Name != "" {
-				content = m.Name + ": " + content
+				content = "<tool_response>\n" + m.Name + ": " + content + "\n</tool_response>"
 			}
 		case "assistant":
 			for _, tc := range m.ToolCalls {
-				content += "\n[tool_call " + tc.Function.Name + " " + tc.Function.Arguments + "]"
+				// Canonical Qwen2.5 <tool_call> block: arguments as a JSON VALUE, not a
+				// quoted string, so it round-trips cleanly through LiftTextToolCalls.
+				args := strings.TrimSpace(tc.Function.Arguments)
+				if args == "" || !json.Valid([]byte(args)) {
+					args = "{}"
+				}
+				content += "\n<tool_call>\n{\"name\": " + strconv.Quote(tc.Function.Name) + ", \"arguments\": " + args + "}\n</tool_call>"
 			}
 		}
 		b.WriteString("<|im_start|>")

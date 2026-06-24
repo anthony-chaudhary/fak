@@ -1,0 +1,16 @@
+{
+  "what": "fak's OWN in-kernel pure-Go forward emits an adjudicated tool_use on the Anthropic /v1/messages wire Claude Code drives",
+  "date": "2026-06-24",
+  "host": "windows-x86-64 CPU (no GPU)",
+  "serve": "fak serve --gguf Qwen2.5-1.5B-Instruct.Q8_0.gguf --require-key-env (no --base-url, no shim, no proxy)",
+  "healthz": {"engine": "inkernel", "planner": "inkernel", "model": "mock-label-but-inkernel-forward"},
+  "request": "POST /v1/messages with x-api-key, one user turn + a list_files tool schema",
+  "response": {
+    "stop_reason": "tool_use",
+    "content": [{"type": "tool_use", "id": "call_text_0", "name": "list_files", "input": {"path": "."}}],
+    "fak_adjudication": {"tool": "list_files", "admitted": true, "verdict": {"kind": "ALLOW", "by": "monitor"}}
+  },
+  "before_this_change": "stop_reason was always end_turn; the tool call stayed as TEXT in content (InKernelPlanner.Complete never set Message.ToolCalls), so Claude Code's agent loop had nothing to execute",
+  "the_fix": "renderChatMLTools injects the tool JSON-schema into the folded system block + renders canonical <tool_call>/<tool_response> ChatML; InKernelPlanner.Complete runs normalizeCompletionToolCalls to lift the model's text-form Hermes <tool_call> to a structured call (fail-closed on a truncated call). The id prefix call_text_ is the lift's signature.",
+  "note": "1.5B used for a fast load; the path is model-independent (7B Q8 is the agentically-usable ceiling per BENCHMARK-AUTHORITY.md)."
+}
