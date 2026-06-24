@@ -85,6 +85,8 @@ func main() {
 		cmdGuard(os.Args[2:])
 	case "audit":
 		cmdAudit(os.Args[2:])
+	case "traj":
+		cmdTraj(os.Args[2:])
 	case "headroom":
 		cmdHeadroom(os.Args[2:])
 	case "hook":
@@ -97,6 +99,8 @@ func main() {
 		cmdModel(os.Args[2:])
 	case "route":
 		cmdRoute(os.Args[2:])
+	case "routebench":
+		cmdRoutebench(os.Args[2:])
 	case "version", "-v", "--version":
 		fmt.Println(appversion.Current())
 	case "-h", "--help", "help":
@@ -153,6 +157,17 @@ func usage() {
                  --check -> --manifest, mirroring 'fak policy'. --simulate folds
                  stand-in member outputs through the plan's reduction so the
                  ensemble half runs end to end with no model in the loop)
+  fak routebench [--corpus FILE] [--routed FILE] [--single FILE] [--frontier MODEL]
+                 [--prices ...] [--latencies ...] [--json] | --dump-corpus
+                 (the OFFLINE ROUTING BENCHMARK: run a corpus of recorded cases
+                  through TWO manifests — a per-aspect + ensemble policy vs a
+                  single-model baseline (the SOTA shape) — and print the delta on
+                  COST / LATENCY / QUALITY. Each case carries the stand-in OUTPUT
+                  every candidate model produces (like 'fak route --simulate'),
+                  so it reuses the pure Route + Combine halves and is deterministic
+                  end to end — no key, no GPU, no network. Default: the built-in
+                  8-case demo corpus + DefaultManifest vs a one-frontier-model
+                  baseline. Every figure is a ROUGH lens, never a bill or SLA)
   fak lint      [--json] [--strict] [--kernel-only]
                 (the STATIC TOOL LINTER: the definition-time dual of the kernel's
                  call-time re-checks. Reports a dead cache hint, an unreachable pure

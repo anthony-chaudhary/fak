@@ -1,0 +1,64 @@
+{
+  "version": "fak-route/v1",
+  "default": {
+    "members": [
+      {
+        "model": "default",
+        "role": "primary"
+      }
+    ],
+    "reason": "no rule matched; fail-closed default model"
+  },
+  "rules": [
+    {
+      "name": "interactive-short",
+      "match": {
+        "max_prompt_tokens": 4096,
+        "latency": "interactive"
+      },
+      "plan": {
+        "members": [
+          {
+            "model": "small"
+          }
+        ],
+        "reason": "short interactive turn -\u003e small/fast model"
+      }
+    },
+    {
+      "name": "hard-reasoning",
+      "match": {
+        "min_complexity": "high"
+      },
+      "plan": {
+        "members": [
+          {
+            "model": "large"
+          }
+        ],
+        "reason": "high-complexity work -\u003e large model"
+      }
+    },
+    {
+      "name": "guard-writes",
+      "match": {
+        "aspect": "tool_call",
+        "tool": "write_*"
+      },
+      "plan": {
+        "members": [
+          {
+            "model": "guard-a",
+            "weight": 1
+          },
+          {
+            "model": "guard-b",
+            "weight": 1
+          }
+        ],
+        "reduce": "vote",
+        "reason": "write-shaped tool call -\u003e two-model guard ensemble (vote)"
+      }
+    }
+  ]
+}

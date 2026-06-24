@@ -1,0 +1,12 @@
+{
+  "version": "fak-route/v1",
+  "default": {
+    "members": [
+      {
+        "model": "frontier",
+        "role": "primary"
+      }
+    ],
+    "reason": "single-model baseline: every aspect routes to one frontier model (the SOTA shape)"
+  }
+}

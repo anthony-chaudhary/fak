@@ -131,6 +131,7 @@ never the gate.
 fak run       --trace testdata/tau2/tau2-smoke.json    # replay a trace through the kernel
 fak preflight --tool create_user --args '{"_positional":["alice"]}'   # rung-only check
 fak bench     --suite tau2-smoke --out report.json     # A/B vDSO ablation -> report.json (the ns gate)
+fak ablate    --sweep vdso                             # N-arm self-ablation: one frozen trace, feature on/off, deltas off the kernel counters
 fak turntax   --suite turntax-airline                  # price the extra error-code MODEL turn the 1-shot kernel deletes
 fak agent     --offline | --base-url URL --model M --api-key-env VAR  # LIVE turn-count A/B (see LIVE-RESULTS.md)
 fak serve     --addr :8080 [--require-key-env VAR]     # OpenAI-compatible HTTP + MCP gateway (any-language agents)
@@ -141,6 +142,8 @@ fak answer-shape --text - --max-repeat 0.5 [--max-chars N]   # degeneration/verb
 fak doctor    --text - [--max-repeat 0.5] [--max-chars N]   # run the answer-shape witness + the kernel admit cross-check, then recommend
 fak codelint  PATH...                                  # lint agent-written code (Go/JSON in-process, Python/CUDA via toolchain); exit 1 on a hard parse/compile error
 fak policy    --dump > policy.json | --check policy.json   # author/validate the deployable capability floor
+fak route     --aspect tool_call --tool refund_payment [--manifest FILE] [--simulate "a,b,b"]   # which model/ensemble routes this aspect; --dump/--check author the routing manifest
+fak routebench [--corpus FILE] [--routed F] [--single F] [--json]            # offline routing benchmark: per-aspect+ensemble vs single-model on cost/latency/quality (no model in the loop)
 fak attest    --policy FILE [--probes FILE] [--json]        # compliance attestation: prove the capability floor from preflight (exit 0 PROVEN / 1 drift / 2 usage)
 fak hook      < call.json                              # spawned-hook decide (the A/B baseline)
 ```
@@ -167,6 +170,29 @@ output, it honors no in-content ignore comment, and it runs off the hot path.
 `run`, `preflight`, and `agent` take `--policy FILE` to load the capability floor
 from a declarative JSON **manifest** instead of the compiled-in default — so WHICH
 tools the agent may call is a reviewable file, not a Go edit. See `POLICY.md`.
+
+`fak route` is the same idea applied to model selection: which MODEL — or which
+ENSEMBLE of models + a reduction — serves a given **aspect** of a request. Where a
+SOTA router picks one model for the whole request, fak routes at every level — a
+single tool call, a sub-query, a reasoning step — each to a different model, with
+first-class ensembles (`vote` / `best_of` / `all_reduce` / `concat`), all from one
+reviewable JSON manifest (`--dump` → edit → `--check` → `--manifest`). The routing
+**decision** + the ensemble **reduce** are shipped and pure (witnessed by
+`go test`); executing a decision on live engines is the wiring tracked in the
+model-routing epic. `--simulate` folds stand-in member outputs through the chosen
+plan's reduction so the ensemble half runs end to end with no model in the loop. See
+[`docs/model-routing.md`](model-routing.md).
+
+`fak routebench` is the offline measuring instrument: it runs a corpus of recorded
+cases through TWO manifests — a per-aspect + ensemble policy vs a single-model
+baseline (the SOTA shape) — and prints the delta on **cost / latency / quality**.
+Each case carries the stand-in OUTPUT every candidate model produces (like `fak
+route --simulate`), so it reuses the pure `Route` + `Combine` halves and is
+deterministic end to end — no key, no GPU. Default (no args): the built-in 8-case
+demo corpus + `DefaultManifest` vs a one-frontier-model baseline; `--corpus` /
+`--routed` / `--single` load your own, `--dump-corpus` emits the starter corpus to
+edit. Every figure is a ROUGH lens, never a bill or a measured SLA. See
+[`docs/model-routing.md`](model-routing.md#the-offline-routing-benchmark-fak-routebench).
 
 `scripts/ci.ps1` (or `make ci`) runs build + vet + test + the CLAIMS lint as one gate.
 
@@ -230,6 +256,7 @@ attaches through a registry.
 | session core-dump + debugger + dream cleanup | `internal/recall`,`internal/cdb` | persist a finished session as a page-table-over-CAS core image; `fak debug` attaches to it (incl. a REAL transcript) and demand-pages only the working set a question touches; agent/requester tombstones suppress unwanted memories from future context without deleting audit bytes; `fak dream` auto-cleans the sleeping image by re-screening, pre-sealing refuted witnesses, and pruning dead CAS bytes | `go test` + `recall-report.json`,`cdb-report.json`,`dream-report.json` |
 | in-kernel model | `internal/model` | a pure-Go SmolLM2-135M forward pass the kernel owns (KV cache as a Go structure), every rung proven bit-for-bit vs HuggingFace, then made parity-fast (parallel matmul + batched GEMM, decoding faster than same-precision HF f32); an int8/Q8 SIMD lane at near-parity with llama.cpp Q8_0 is the active **in-flight** extension | `go test` (oracle argmax-exact); `MODEL-BASELINE-RESULTS.md` |
 | gateway | `internal/gateway` | `fak serve`: OpenAI-compatible HTTP (`/v1/chat/completions` adjudication proxy, `/v1/fak/*`) + MCP over stdio/HTTP, so any-language agents route tool calls through the syscall boundary; mints a tainted agent-scoped `Ref` from raw bytes (IFC/secret/self-modify rungs stay armed) | `go test`; v0.2.1 adversarial-review hardening |
+| model routing (decision) | `internal/modelroute` | `fak route`: per-aspect + ensemble model routing as a pure, deterministic policy — `Route(Subject)→Decision` (a tool call / sub-query / step routes to its own model or ensemble) + `Combine(reduction,votes)→Result` (`first`/`vote`/`best_of`/`all_reduce`/`concat`); version-tagged JSON manifest, `--dump`↔`--check`. Live dispatch is the wiring tracked in the model-routing epic | `go test` (`internal/modelroute`, `cmd/fak` route tests); `docs/model-routing.md` |
 | dispatch fusion | `internal/kernel` | one in-process chain; no `os/exec` on the hot path | `go test` (ABSENCE proof) |
 | KPI + A/B bench | `internal/metrics`,`internal/bench` | vDSO ablation; the primary gate; provenance + identical-workload guard | `report.json`, `baseline.json` |
 | turn-tax bench | `internal/turnbench` | `fak turntax`: prices the extra error-code MODEL turn (malformed/duplicate/poison) a SOTA loop fires vs the 1-shot kernel, per lever, safety floor on its own axis | `go test` (incl. happy-path=0 control); `TURN-TAX-RESULTS.md` |

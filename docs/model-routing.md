@@ -2,6 +2,8 @@
 
 > **Status.** The routing **decision** spine and the ensemble **reduce** are
 > [SHIPPED] (`internal/modelroute`, `fak route`, witnessed by `go test`). The
+> **offline routing benchmark** (`fak routebench` — per-aspect + ensemble vs
+> single-model on cost/quality/latency, no model in the loop) is [SHIPPED]. The
 > **live multi-model dispatch** that executes a decision on real engines is
 > [STUB] — tracked as a GitHub issue series. See [`CLAIMS.md`](../CLAIMS.md).
 
@@ -250,16 +252,72 @@ A `fak route --preset NAME` resolver (copy-by-name without spelling the path) is
 an optional follow-up; the presets are plain manifests today, so `--manifest
 <path>` already loads any of them.
 
+## The offline routing benchmark (`fak routebench`)
+
+The survey above frames per-aspect + ensemble routing as a *categorical*
+capability gap and is explicit that any "10x" is "a target to be measured, never
+an inferred or borrowed number". `fak routebench` is the measuring instrument. It
+runs a **corpus** of recorded cases through **two** manifests — a routed policy
+(per-aspect + ensemble) and a single-model baseline (the SOTA shape: one frontier
+model for everything) — and prints the delta on three axes:
+
+- **cost** — reuses the `fak route` cost lens (rough $/Mtok-out summed over
+  members); per-aspect routing pays the frontier rate only on hard aspects, an
+  ensemble pays it on every member (a deliberate premium).
+- **latency** — a rough per-call latency summed over members (the latency
+  analogue of the cost lens); an ensemble does *N* members' work, so its total
+  compute is the sum (a parallel dispatch's wall-clock is bounded by the max,
+  which this lens deliberately does not assume).
+- **quality** — the fraction of cases whose folded output equals the expected
+  answer; an ensemble can *win* here (a `vote`/`best_of` that folds to the right
+  answer where a single model errs) and a downgrade can *lose* (a cheap model
+  wrong where the frontier was right).
+
+**Offline means offline.** Each case carries the stand-in OUTPUT every candidate
+model produces for it (a recorded answer, never a live model call) — exactly as
+`fak route --simulate` already does — so the benchmark reuses the two pure,
+already-witnessed halves of the package (`Route` + `Combine`) over fixed votes.
+It is **deterministic end to end**: no key, no GPU, no network. It measures what
+the *policy* does to a *recorded workload*, not what a non-bit-exact engine would
+do live (that is the [STUB] dispatch half). Every figure is a **rough lens**, never
+a bill or a measured SLA.
+
+```bash
+# the built-in 8-case demo corpus + DefaultManifest vs a one-frontier-model baseline
+fak routebench
+
+# your own corpus + manifests (the demo corpus + the two baseline manifests ship as fixtures)
+fak routebench --corpus examples/routing-bench/demo-corpus.json \
+               --routed examples/routing-bench/routed.json \
+               --single examples/routing-bench/single-model.json
+
+fak routebench --dump-corpus > my-corpus.json   # the starter corpus to edit
+fak routebench --json                            # machine-readable comparison
+```
+
+The built-in demo corpus is an **honest trade, not a rigged win**: per-aspect
+routing is cheaper and faster on the easy aspects (they hit the small/mid tier),
+the two-model `vote` ensemble is a deliberate *premium* that *rescues* one case the
+single model gets wrong, and a downgrade to the default *loses* one case the
+single model got right — so on the demo the quality deltas offset (cost ~20%
+cheaper, total compute ~10% less, quality tied). The corpus is a recorded fixture
+to make the benchmark runnable now, **not** a claim about real traffic. A
+round-trip test in `internal/modelroute` guards every committed fixture against rot
+and re-asserts the documented numbers.
+
 ## Roadmap (the GitHub issue series)
 
-The decision spine is the foundation; the rest is wiring, each a tracked issue:
+The decision spine is the foundation; the offline benchmark (`fak routebench`) is
+shipped; the rest is wiring, each a tracked issue:
 
 - Wire a single-model route into the kernel/gateway: set `ToolCall.Engine` from
   `Decision.Plan.Primary()` **pre-submit** (honoring the residency ordering).
 - Execute an ensemble Plan in the gateway: N adjudicated submits + `Combine`.
 - Per-tool-call routing inside the agent loop (`agent.execViaKernel`).
 - Scout-model live classification (a cheap model fills `Subject.Complexity`/labels).
-- Telemetry → learned routing (cost/latency/quality feedback, RouteLLM-style but per-aspect).
+- Telemetry → learned routing (LIVE cost/latency/quality feedback feeding the
+  policy, RouteLLM-style but per-aspect — the offline benchmark measures a recorded
+  corpus; this is its live, self-improving counterpart).
 - Manifest hot-reload + `fak serve --route-manifest`.
 - Free-text ensemble reductions (a judge/verifier model for `best_of` beyond scalar scores).
 - Routing observability (per-aspect decisions in `/metrics` + the decision journal).

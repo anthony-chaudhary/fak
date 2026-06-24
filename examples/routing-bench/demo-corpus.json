@@ -1,0 +1,101 @@
+[
+  {
+    "subject": {
+      "aspect": "request",
+      "prompt_tokens": 1024,
+      "latency": "interactive"
+    },
+    "outputs": {
+      "frontier": "Paris",
+      "small": "Paris"
+    },
+    "expected": "Paris",
+    "note": "short interactive turn -\u003e small model"
+  },
+  {
+    "subject": {
+      "aspect": "request",
+      "prompt_tokens": 8192,
+      "latency": "interactive"
+    },
+    "outputs": {
+      "default": "41",
+      "frontier": "42"
+    },
+    "expected": "42",
+    "note": "downgrade to default loses a case the frontier got right"
+  },
+  {
+    "subject": {
+      "aspect": "step",
+      "complexity": "high"
+    },
+    "outputs": {
+      "frontier": "9",
+      "large": "9"
+    },
+    "expected": "9",
+    "note": "high-complexity step -\u003e large model (frontier tier, no saving)"
+  },
+  {
+    "subject": {
+      "aspect": "step",
+      "complexity": "low"
+    },
+    "outputs": {
+      "default": "ok",
+      "frontier": "ok"
+    },
+    "expected": "ok",
+    "note": "easy step -\u003e default (mid tier)"
+  },
+  {
+    "subject": {
+      "aspect": "tool_call",
+      "tool": "write_file"
+    },
+    "outputs": {
+      "frontier": "deny",
+      "guard-a": "approve",
+      "guard-b": "approve"
+    },
+    "expected": "approve",
+    "note": "ensemble rescues a case the single model got wrong"
+  },
+  {
+    "subject": {
+      "aspect": "tool_call",
+      "tool": "write_keys"
+    },
+    "outputs": {
+      "frontier": "approve",
+      "guard-a": "approve",
+      "guard-b": "deny"
+    },
+    "expected": "approve",
+    "note": "split ensemble ties via the deterministic vote tie-break"
+  },
+  {
+    "subject": {
+      "aspect": "query"
+    },
+    "outputs": {
+      "default": "rome",
+      "frontier": "rome"
+    },
+    "expected": "rome",
+    "note": "unmatched query -\u003e fail-closed default"
+  },
+  {
+    "subject": {
+      "aspect": "tool_call",
+      "tool": "delete_file"
+    },
+    "outputs": {
+      "default": "done",
+      "frontier": "done"
+    },
+    "expected": "done",
+    "note": "delete tool call -\u003e default (only write_* is guarded)"
+  }
+]

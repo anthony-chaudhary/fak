@@ -183,12 +183,12 @@ func validLatency(l Latency) bool {
 // OPEN signals (domain, language, tenant, taint, …) a deployment matches on
 // without a code change.
 type Subject struct {
-	Aspect       Aspect
-	Tool         string // the tool name when Aspect == AspectToolCall
-	PromptTokens int    // estimated prompt length in tokens
-	Latency      Latency
-	Complexity   Complexity
-	Labels       map[string]string
+	Aspect       Aspect            `json:"aspect,omitempty"`
+	Tool         string            `json:"tool,omitempty"`          // the tool name when Aspect == AspectToolCall
+	PromptTokens int               `json:"prompt_tokens,omitempty"` // estimated prompt length in tokens
+	Latency      Latency           `json:"latency,omitempty"`
+	Complexity   Complexity        `json:"complexity,omitempty"`
+	Labels       map[string]string `json:"labels,omitempty"`
 }
 
 // ---------------------------------------------------------------------------
