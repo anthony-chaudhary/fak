@@ -129,6 +129,7 @@ front page.
 - [Ultra-long-context: levels, levers, naming (2026-06-22)](docs/notes/RESEARCH-ultra-long-context-levels-and-naming-2026-06-22.md)
 - [Scaling laws of agents (2026-06-19)](docs/notes/SCALING-LAWS-OF-AGENTS-2026-06-19.md)
 - [Capability floor, a security note (2026-06-18)](docs/notes/SECURITY-capability-floor-2026-06-18.md)
+- [Session control state as a first-class value (2026-06-24)](docs/notes/SESSION-CONTROL-STATE-AS-FIRST-CLASS-2026-06-24.md) — make a served session's DRIVE state (run-state, planner budget, priority, pace) a TraceID-keyed value read each turn and written live, instead of re-derived from git commits + a 0-byte-log scan. Generalizes the existing `ifc.Ledger` + `/v1/fak/trace` seam, which already proves the live-mutable per-session pattern for one bit (taint), from a bit to a small struct. Design + honest fences; nothing shipped.
 - [Turn-state demos audit (2026-06-21)](docs/notes/TURN-STATE-DEMOS-AUDIT-AND-DOGFOOD-2026-06-21.md)
 - [Benchmarking visuals status (2026-06-18)](docs/notes/VISUALS-benchmarking-status-2026-06-18.md)
 - [Permission-systems visuals (2026-06-18)](docs/notes/VISUALS-permission-systems-2026-06-18.md)
