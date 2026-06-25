@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/anthony-chaudhary/fak/internal/abi"
+	"github.com/anthony-chaudhary/fak/internal/blob"
 )
 
 // ---------------------------------------------------------------------------
@@ -177,8 +178,23 @@ func (p *recordingPinner) Unpin(d string)                                       
 // recordingBackend wraps a recordingPinner as a RegionBackend.
 type recordingBackend struct{ r *recordingPinner }
 
-func (b recordingBackend) Resolver() abi.Resolver    { return b.r }
-func (b recordingBackend) Caps() []abi.Capability    { return nil }
+func (b recordingBackend) Resolver() abi.Resolver { return b.r }
+func (b recordingBackend) Caps() []abi.Capability { return nil }
+
+type defaultBlobBackend struct{}
+
+func (defaultBlobBackend) Resolver() abi.Resolver { return blob.Default }
+func (defaultBlobBackend) Caps() []abi.Capability { return nil }
+
+func installRecordingPinner(t *testing.T) *recordingPinner {
+	t.Helper()
+	p := newRecordingPinner()
+	abi.RegisterRegionBackend(recordingBackend{p})
+	t.Cleanup(func() {
+		abi.RegisterRegionBackend(defaultBlobBackend{})
+	})
+	return p
+}
 
 func blobRef(digest string) abi.Ref {
 	return abi.Ref{Kind: abi.RefBlob, Digest: digest, Len: 1}
@@ -187,10 +203,7 @@ func blobRef(digest string) abi.Ref {
 // TestDischarge_NotWitnessedIsNoop proves discharge is a no-op when the stop is NOT
 // witnessed — nothing is unpinned, even with a live CASPinner registered.
 func TestDischarge_NotWitnessedIsNoop(t *testing.T) {
-	abi.ResetForTest()
-	defer abi.ResetForTest()
-	p := newRecordingPinner()
-	abi.RegisterRegionBackend(recordingBackend{p})
+	p := installRecordingPinner(t)
 
 	goal := Root{ID: "goal-A", Spans: []abi.Ref{blobRef("d1"), blobRef("d2")}}
 
@@ -212,10 +225,7 @@ func TestDischarge_NotWitnessedIsNoop(t *testing.T) {
 // TestDischarge_WitnessedUnpinsOwnSpans proves a witnessed discharge unpins the goal's
 // spans through the CASPinner seam.
 func TestDischarge_WitnessedUnpinsOwnSpans(t *testing.T) {
-	abi.ResetForTest()
-	defer abi.ResetForTest()
-	p := newRecordingPinner()
-	abi.RegisterRegionBackend(recordingBackend{p})
+	p := installRecordingPinner(t)
 
 	goal := Root{ID: "goal-A", Spans: []abi.Ref{blobRef("d1"), blobRef("d2")}}
 	witnessed := StopWitnessFunc(func(id string) bool { return id == "goal-A" })
@@ -237,10 +247,7 @@ func TestDischarge_WitnessedUnpinsOwnSpans(t *testing.T) {
 // discharged goal shares with ANOTHER live root is RETAINED (not unpinned); only the
 // spans held solely by the discharged goal are freed.
 func TestDischarge_NoOpWhenOtherRootHolds(t *testing.T) {
-	abi.ResetForTest()
-	defer abi.ResetForTest()
-	p := newRecordingPinner()
-	abi.RegisterRegionBackend(recordingBackend{p})
+	p := installRecordingPinner(t)
 
 	// goal-A holds d1 (solely) and d2 (shared with goal-B). goal-B is still live.
 	goalA := Root{ID: "goal-A", Spans: []abi.Ref{blobRef("d1"), blobRef("d2")}}
@@ -266,10 +273,7 @@ func TestDischarge_NoOpWhenOtherRootHolds(t *testing.T) {
 // TestDischarge_InlineRefsNotUnpinned proves inline refs (no backend digest) are never
 // unpinned — they carry their own bytes and were never pinned.
 func TestDischarge_InlineRefsNotUnpinned(t *testing.T) {
-	abi.ResetForTest()
-	defer abi.ResetForTest()
-	p := newRecordingPinner()
-	abi.RegisterRegionBackend(recordingBackend{p})
+	p := installRecordingPinner(t)
 
 	goal := Root{ID: "g", Spans: []abi.Ref{
 		{Kind: abi.RefInline, Inline: []byte("x")}, // inline → no digest → skip
