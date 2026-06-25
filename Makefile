@@ -1,6 +1,6 @@
 # Makefile — portable build/test entrypoints (unit 12). On Windows without make,
 # use scripts/ci.ps1, which this mirrors.
-.PHONY: ci build vet test test-fast bench status status-check garden garden-check dogfood-recent claims-lint salience index-sync model gofmt-check hygiene demo-audit demo-tool-tests demo-scorecards demo-smoke demo-headless-smoke demo-live-status demo-https-status demo-published-status demo-published-check demo-readiness-status gated-tests cuda-check cuda-build cuda-test cuda-accept
+.PHONY: ci build vet test test-fast bench status status-check garden garden-check dogfood-recent vcache-gate claims-lint salience index-sync model gofmt-check hygiene demo-audit demo-tool-tests demo-scorecards demo-smoke demo-headless-smoke demo-live-status demo-https-status demo-published-status demo-published-check demo-readiness-status gated-tests cuda-check cuda-build cuda-test cuda-accept
 
 # ci is THE local green gate (AGENTS.md: "Green = make ci"). It must stay aligned with
 # .github/workflows/ci.yml's HARD steps so a pre-push `make ci` fails on the same things
@@ -85,6 +85,15 @@ garden-check:
 
 dogfood-recent:
 	@python3 tools/recent_feature_dogfood.py
+
+# vcache-gate: the repeatable vCache scorecard dogfood gate (#791). The recent-feature
+# dogfood packet RUNS the score for daily visibility; this is the dedicated, fast,
+# deterministic GATE that asserts the 2x scorecard floor on both paths (default is
+# 2x-ready; an unreachable threshold fails) and exits non-zero on a regression. No
+# network, no telemetry -- the planned star-anchor proof is deterministic.
+vcache-gate:
+	@python3 tools/vcache_scorecard_gate_test.py
+	@python3 tools/vcache_scorecard_gate.py
 
 # model: export the real SmolLM2-135M weights the in-kernel engine (--engine inkernel)
 # loads from FAK_MODEL_DIR. One-time; needs Python. See GETTING-STARTED.md §4b.
