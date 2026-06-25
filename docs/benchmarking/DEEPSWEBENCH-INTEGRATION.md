@@ -147,9 +147,51 @@ type Result struct {
 
 #### 3. DeepSWE Integration
 
-**File**: `fak/cmd/swebench/runner/deepswe.go`
+**File**: `internal/swebench/runner.go`
 
-DeepSWE has two modes we need to support:
+The current DeepSWE path is an external adapter contract. `RunnerDeepSWE` does
+not fabricate patches: it shells to a configured adapter and records the instance
+as failed when no adapter is present.
+
+Adapter selection:
+
+- `FAK_DEEPSWE_RUNNER` names the adapter executable.
+- `FAK_DEEPSWE_RUNNER_ARGS` supplies optional whitespace-separated arguments.
+- If `FAK_DEEPSWE_RUNNER` is unset, `DeepSWERepo` may point at a checkout
+  containing `fak-deepswe-runner` (or the Windows `.exe`/`.cmd`/`.bat` variants).
+
+Request contract:
+
+```json
+{
+  "schema": "fak.swebench.deepswe-request.v1",
+  "runner": "deepswe",
+  "model": "DeepSWE-Preview-or-endpoint",
+  "max_steps": 50,
+  "instance": {
+    "instance_id": "django__django-10000",
+    "repo": "django/django",
+    "base_commit": "..."
+  }
+}
+```
+
+The adapter receives this JSON on stdin. It must write either a canonical
+SWE-bench prediction object or a unified diff to stdout. JSON output is preferred:
+
+```json
+{
+  "instance_id": "django__django-10000",
+  "model_name_or_path": "DeepSWE-Preview",
+  "model_patch": "diff --git ..."
+}
+```
+
+The runner rejects mismatched instance ids and empty patches. This keeps the
+official SWE-bench grader as the scoring source while making the DeepSWE/R2E-Gym
+baseline pluggable.
+
+DeepSWE has two modes the adapter should support:
 
 **Single Pass (Pass@1)**:
 ```go
@@ -175,9 +217,9 @@ func (r *DeepSWERunner) RunTTS(ctx, instances) <-chan Result
 ```
 
 **Simplified approach for initial implementation**:
-- Use Together AI's hosted DeepSWE-Preview API (if available)
-- Or download and serve via VLLM on GPU server
-- Start with single-pass, add TTS later
+- Wrap Together AI's hosted DeepSWE-Preview API if available.
+- Or download and serve via VLLM on a GPU server.
+- Start with single-pass adapter output, then add TTS selection later.
 
 #### 4. Evaluation Harness
 

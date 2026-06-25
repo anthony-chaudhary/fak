@@ -172,7 +172,8 @@ That requires the raw Opus arm on identical task ids and budget.
 
 ## Packet D: DeepSWE external coding benchmark
 
-Status: `negative-witness` until the adapter is implemented.
+Status: `adapter-contract-shipped`; real DeepSWE/R2E-Gym execution is still
+gated on an external adapter and task run.
 
 Why it matters: DeepSWE is fresher than SWE-bench Verified and already reports
 cost, output tokens, and steps. It is a clean place to test whether fak as a
@@ -181,12 +182,19 @@ harness improves safe pass per dollar with the same base model.
 Current tree evidence:
 
 - `internal/swebench.RunnerDeepSWE` exists.
-- `deepSWERunner.RunInstance` currently returns
-  `deepswe runner not wired`.
+- `deepSWERunner.RunInstance` shells to a configured adapter instead of returning
+  the old `deepswe runner not wired` placeholder.
+- Adapter selection is `FAK_DEEPSWE_RUNNER` plus optional
+  `FAK_DEEPSWE_RUNNER_ARGS`, or a `fak-deepswe-runner` executable in
+  `DeepSWERepo`.
+- The adapter receives `fak.swebench.deepswe-request.v1` JSON on stdin and must
+  emit canonical SWE-bench prediction JSON or a unified diff on stdout.
 
-Negative witness command:
+Configured witness command shape:
 
 ```powershell
+$env:FAK_DEEPSWE_RUNNER = "C:\path\to\fak-deepswe-runner.exe"
+$env:FAK_DEEPSWE_RUNNER_ARGS = "--single-pass"
 go run ./cmd/fak swebench run `
   --agent deepswe `
   --filter smoke `
@@ -198,13 +206,16 @@ go run ./cmd/fak swebench run `
 
 Evidence that would count now:
 
-- The run records failed instances with the explicit `deepswe runner not wired`
-  error.
+- With no adapter configured, the run fails closed with `deepswe adapter not
+  configured`, not a synthetic placeholder patch.
+- With an adapter configured, the run emits `predictions.json` entries whose
+  `instance_id` matches the requested SWE-bench task id and whose `model_patch`
+  is adapter-authored.
 
 Adapter completion bar:
 
-- Add a DeepSWE/R2E-Gym runner that accepts a base URL/model and emits
-  SWE-bench-compatible predictions.
+- Point the contract at a real DeepSWE/R2E-Gym single-pass runner that accepts
+  the model/base URL and emits SWE-bench-compatible predictions.
 - Run the same task ids through raw DeepSWE and `fak serve`.
 - Report pass@1, cost, output tokens, steps, safe-pass, and kernel verdicts.
 
