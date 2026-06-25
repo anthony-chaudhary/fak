@@ -80,6 +80,27 @@ func TestIncrementalDecoderMatchesOneShotDecode(t *testing.T) {
 	}
 }
 
+func TestIncrementalDecoderMatchesMetaspaceByteFallbackDecode(t *testing.T) {
+	space := string(metaspaceRune)
+	tokens := []string{"a", "b", space, space + "b", "<0xE2>", "<0x82>", "<0xAC>"}
+	tok, err := FromGGML(tokens, []string{space + " b"}, nil, "gemma4")
+	if err != nil {
+		t.Fatalf("FromGGML: %v", err)
+	}
+	ids := []int{0, 3, 4, 5, 6}
+	got := decodeIncremental(t, tok, ids)
+	want, err := tok.Decode(ids)
+	if err != nil {
+		t.Fatalf("Decode: %v", err)
+	}
+	if got != want {
+		t.Fatalf("incremental metaspace decode = %q, want one-shot %q", got, want)
+	}
+	if got != "a b\u20ac" {
+		t.Fatalf("metaspace byte fallback decode = %q, want %q", got, "a b\u20ac")
+	}
+}
+
 func TestIncrementalDecoderFinalizeFlushesDanglingUTF8Bytes(t *testing.T) {
 	tok := byteVocabTokenizer()
 	dec := tok.NewIncrementalDecoder()
