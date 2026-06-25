@@ -15,6 +15,7 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strings"
 	"time"
@@ -23,6 +24,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/agent"
 	"github.com/anthony-chaudhary/fak/internal/appversion"
 	"github.com/anthony-chaudhary/fak/internal/gateway"
+	"github.com/anthony-chaudhary/fak/internal/guard"
 	"github.com/anthony-chaudhary/fak/internal/journal"
 	"github.com/anthony-chaudhary/fak/internal/policy"
 	"github.com/anthony-chaudhary/fak/internal/session"
@@ -86,6 +88,7 @@ func cmdGuard(argv []string) {
 	restartOnBudget := fs.Bool("restart-on-budget", false, "on context-budget exhaustion, stop and relaunch the wrapped child under the continuation trace, writing a carryover seed JSON and exposing it via FAK_RESET_* env vars (requires --context-budget-tokens)")
 	restartLimit := fs.Int("restart-limit", 0, "maximum child relaunches for --restart-on-budget; 0 means unlimited")
 	restartSeedDir := fs.String("restart-seed-dir", "", "directory for --restart-on-budget carryover seed JSON files (default: OS temp dir, one private directory per reset)")
+	landlockHooks := fs.Bool("landlock-hooks", false, "LINUX-ONLY defense-in-depth: run the spawned agent under a Landlock profile that makes the git hook surface (.git/hooks + core.hooksPath) READ-ONLY while the rest of the tree stays writable, so a laundered write cannot drop an executable hook. OFF by default; fails OPEN (logs + spawns unrestricted) on a kernel without Landlock or on a non-Linux host. Also settable via "+guard.EnvOptIn+"=1.")
 	fs.Usage = func() {
 		fmt.Fprintln(os.Stderr, "usage: fak guard [flags] -- <agent command...>")
 		fmt.Fprintln(os.Stderr, "  e.g. fak guard -- claude")
@@ -94,6 +97,12 @@ func cmdGuard(argv []string) {
 		fs.PrintDefaults()
 	}
 	_ = fs.Parse(argv)
+
+	// The --landlock-hooks flag and FAK_GUARD_LANDLOCK env are equivalent; normalize the
+	// flag into the env so buildGuardChild (called from two paths) consults one source.
+	if *landlockHooks {
+		_ = os.Setenv(guard.EnvOptIn, "1")
+	}
 
 	if *dumpPolicy {
 		os.Stdout.Write(guardDefaultPolicyJSON)
@@ -841,6 +850,11 @@ func resolveGuardUpstream(providerFlag, agentName, baseURLFlag, apiKeyEnv string
 // the client a placeholder ANTHROPIC_API_KEY (when it has none) so it talks x-api-key to the
 // gateway, which ignores the placeholder and authenticates upstream with the held token.
 func buildGuardChild(command []string, injected [][2]string, pinUpstream bool, extraEnv ...[2]string) *exec.Cmd {
+	// Landlock hook-floor (opt-in, Linux): rewrite the agent argv so the child is launched
+	// through the fak re-exec trampoline, which applies the read-only-.git/hooks ruleset to
+	// itself before exec'ing the agent. Off by default, no-op on non-Linux or when the hook
+	// dirs cannot be resolved — the original command is used unchanged.
+	command = maybeLandlockCommand(command)
 	child := exec.Command(command[0], command[1:]...)
 	child.Stdin, child.Stdout, child.Stderr = os.Stdin, os.Stdout, os.Stderr
 	child.Env = os.Environ()
@@ -861,6 +875,47 @@ func buildGuardChild(command []string, injected [][2]string, pinUpstream bool, e
 		child.Env = append(child.Env, "ANTHROPIC_API_KEY=fak-guard-oauth-placeholder")
 	}
 	return child
+}
+
+// maybeLandlockCommand rewrites the agent argv to run through the fak Landlock trampoline
+// when the hook-floor is opted in (guard.OptedIn) AND the host is Linux. It resolves the
+// repo's git dir, work-tree root, and hooks dir with git's OWN resolution — never by string-
+// concatenating "<root>/.git/hooks", which would break linked worktrees and submodules where
+// .git is a file. On any miss — not opted in, not Linux, fak's own path unresolvable, no git
+// dir, no hook dir to protect — it returns command unchanged (the floor degrades to today's
+// behavior, never blocking the spawn). The trampoline itself fails open at runtime on a
+// kernel without Landlock.
+func maybeLandlockCommand(command []string) []string {
+	if runtime.GOOS != "linux" || !guard.OptedIn(os.Getenv) {
+		return command
+	}
+	fakBin, err := os.Executable()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "fak guard: landlock hook-floor not applied — cannot resolve fak binary (%v); spawning agent unrestricted\n", err)
+		return command
+	}
+	gitOut := func(args ...string) string {
+		out, err := exec.Command("git", args...).Output()
+		if err != nil {
+			return ""
+		}
+		return strings.TrimSpace(string(out))
+	}
+	gitDir := gitOut("rev-parse", "--absolute-git-dir")
+	if gitDir == "" {
+		fmt.Fprintln(os.Stderr, "fak guard: landlock hook-floor not applied — not in a git repo; spawning agent unrestricted")
+		return command
+	}
+	repoRoot := gitOut("rev-parse", "--show-toplevel")
+	hooksPath := gitOut("rev-parse", "--git-path", "hooks")
+	bare := gitOut("rev-parse", "--is-bare-repository") == "true"
+
+	spec := guard.ResolveSpec(repoRoot, gitDir, hooksPath, bare)
+	if len(spec.ReadOnlyDirs) == 0 {
+		fmt.Fprintln(os.Stderr, "fak guard: landlock hook-floor not applied — no hook dir resolved; spawning agent unrestricted")
+		return command
+	}
+	return guard.TrampolineArgv(fakBin, spec, command)
 }
 
 type guardBudgetRestartEvent struct {

@@ -37,6 +37,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/bench"
 	"github.com/anthony-chaudhary/fak/internal/gateway"
 	"github.com/anthony-chaudhary/fak/internal/ggufload"
+	"github.com/anthony-chaudhary/fak/internal/guard"
 	"github.com/anthony-chaudhary/fak/internal/ifc"
 	"github.com/anthony-chaudhary/fak/internal/kernel"
 	"github.com/anthony-chaudhary/fak/internal/metrics"
@@ -115,6 +116,15 @@ func main() {
 		cmdServeWiring(os.Args[2:])
 	case "guard":
 		cmdGuard(os.Args[2:])
+	case guard.TrampolineVerb:
+		// Hidden: the Landlock hook-floor re-exec trampoline (Linux). `fak guard
+		// --landlock-hooks` re-execs itself into this verb, which applies the
+		// read-only-.git/hooks ruleset to itself and then execs the real agent. Not
+		// listed in usage() — an internal implementation detail of the spawn seam.
+		if err := guard.LandlockTrampoline(os.Args[2:]); err != nil {
+			fmt.Fprintf(os.Stderr, "fak: %v\n", err)
+			os.Exit(127)
+		}
 	case "audit":
 		cmdAudit(os.Args[2:])
 	case "headroom":
