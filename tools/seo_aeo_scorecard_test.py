@@ -10,10 +10,12 @@ or `python -m pytest tools/seo_aeo_scorecard_test.py -q`.
 """
 from __future__ import annotations
 
+import json
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+import gen_structured_data as gsd  # noqa: E402
 import seo_aeo_scorecard as sc  # noqa: E402
 
 
@@ -318,6 +320,36 @@ def test_valid_jsonld_array_and_graph(tmp_path: Path) -> None:
         encoding="utf-8")
     site = sc.site_checks(tmp_path)
     assert "WebSite" in site["present_jsonld"] and "Organization" in site["present_jsonld"], site
+
+
+def test_index_breadcrumb_block_is_valid_and_idempotent() -> None:
+    block = gsd.render_breadcrumb_block()
+    m = sc._JSONLD_BLOCK_RE.search(block)
+    assert m, block
+    data = json.loads(m.group(1))
+    assert data["@type"] == "BreadcrumbList", data
+    assert [it["position"] for it in data["itemListElement"]] == [1, 2], data
+
+    page = "---\ntitle: Home\n---\n\n# fak\n\nbody\n"
+    once = gsd.append_block(page, gsd.BREADCRUMB_BEGIN, gsd.BREADCRUMB_END, block)
+    twice = gsd.append_block(once, gsd.BREADCRUMB_BEGIN, gsd.BREADCRUMB_END, block)
+    assert once == twice
+    assert once.endswith(block + "\n")
+
+
+def test_site_checks_counts_breadcrumb_from_index_page(tmp_path: Path) -> None:
+    inc = tmp_path / "docs" / "_includes"
+    inc.mkdir(parents=True)
+    (inc / "head-custom.html").write_text(
+        '<script type="application/ld+json">{"@type":"SoftwareApplication"}</script>'
+        '<script type="application/ld+json">{"@type":"WebSite"}</script>',
+        encoding="utf-8")
+    (tmp_path / "docs" / "index.md").write_text(gsd.render_breadcrumb_block(), encoding="utf-8")
+
+    site = sc.site_checks(tmp_path)
+    by = {c["name"]: c for c in site["checks"]}
+    assert "BreadcrumbList" in site["present_jsonld"], site
+    assert by["jsonld_BreadcrumbList"]["ok"] is True, by["jsonld_BreadcrumbList"]
 
 
 def test_faq_nonquestion_h2_not_counted(tmp_path: Path) -> None:
