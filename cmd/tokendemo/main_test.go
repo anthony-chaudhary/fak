@@ -173,3 +173,12 @@ func TestResultTokensAnnotation(t *testing.T) {
 		}
 	}
 }
+
+func TestJSONDefaultsToAllSuites(t *testing.T) {
+	if got := selectedSuiteForJSON("prefilter-bad-calls", false); got != "all" {
+		t.Fatalf("implicit -json suite = %q, want all", got)
+	}
+	if got := selectedSuiteForJSON("clean-control", true); got != "clean-control" {
+		t.Fatalf("explicit -json suite = %q, want clean-control", got)
+	}
+}

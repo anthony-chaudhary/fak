@@ -596,7 +596,7 @@ func main() {
 	case *timing:
 		os.Exit(runTimingPrint(selectedSuite, time.Duration(*engineDelayMS)*time.Millisecond))
 	case *asJSON:
-		os.Exit(runJSON(*suite))
+		os.Exit(runJSON(selectedSuiteForJSON(*suite, suiteSet)))
 	case *print:
 		os.Exit(runPrint(*suite))
 	default:
@@ -610,6 +610,13 @@ func main() {
 		fmt.Fprintf(os.Stderr, "  go run ./cmd/tokendemo -selfcheck\n")
 		os.Exit(2)
 	}
+}
+
+func selectedSuiteForJSON(suite string, explicitlySet bool) string {
+	if !explicitlySet {
+		return "all"
+	}
+	return suite
 }
 
 // runJSON emits the ledger(s) as JSON. suite "" / "all" emits every present suite.
