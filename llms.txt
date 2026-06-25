@@ -55,6 +55,8 @@ You do not rewrite your agent to adopt fak — you repoint one base URL at `fak 
 - [Cursor](docs/integrations/cursor.md): governance for the Cursor IDE over MCP or the OpenAI-compatible proxy.
 - [OpenAI Codex / OpenAI API](docs/integrations/openai-codex.md): adjudicate every tool call from an OpenAI-compatible coding agent.
 - [Compatibility matrix](docs/integrations/compatibility-matrix.md): 44 surveyed harnesses, frameworks, model backends, and interop protocols — the wire each speaks, whether it takes a custom base URL, and the exact repoint key, each with a source link.
+- [fak + LiteLLM](docs/integrations/litellm.md): the three topologies — fak in front of a LiteLLM proxy, fak as a governed node behind it, and fak's per-aspect routing dispatching through it — and why supporting LiteLLM is one OpenAI wire, not a hundred adapters; fail-closed residency across every backend.
+- [Routers & gateways](docs/integrations/routers.md): OpenRouter, Portkey, LiteLLM Router, Unify, Martian — fak as a complement (govern the tool-call boundary + route per aspect with ensembles) to request-level routers, with the honest categorical positioning.
 - [MCP one-paste setup](examples/mcp/README.md): drop a project `.mcp.json` and call the five `fak_*` adjudication tools from any MCP client.
 - [Agent-framework integration](docs/fak/agent-framework-integration.md): a per-framework cookbook for putting fak in front of LangChain, LlamaIndex, AutoGen, CrewAI, and OpenAI-compatible agents (proxy or explicit adjudication).
 - [Agent-integration architecture](docs/fak/agent-integration-architecture.md): how an external agent connects through the gateway entry points, the frozen kernel ABI, the verdict types, and the capability floor.
@@ -76,6 +78,7 @@ The dedicated, cross-linked capability pages. Each lists one category of support
 
 ## Core concepts (the two flips)
 
+- [Engineering is building loops (fak is the kernel)](docs/explainers/engineering-is-building-loops.md): the synthesis — modern engineering is increasingly the act of building agentic loops (observe → orient → decide → act → verify), and fak is the in-process kernel they run on, safe and fast for the same reason. The loops-all-the-way-down map from the inner tool-call syscall up through the turn, session, and fleet loops to the loop that improves the loop.
 - [Policy in the kernel](docs/explainers/policy-in-the-kernel.md): why a default-deny check on the call path beats an external recognizer that fails open.
 - [Addressable KV cache](docs/explainers/addressable-kv-cache.md): how mid-run causal span eviction stays bit-exact (`max|Δ| = 0`).
 - [KV cache for agentic context](docs/explainers/kv-cache-agentic-context.md): what a KV cache is and why agents stress it differently than chat.
