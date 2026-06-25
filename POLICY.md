@@ -64,7 +64,8 @@ through?"* before deploying.
   "allow_prefix": ["read_", "get_", "search_", "list_"],
   "deny":         { "delete_account": "POLICY_BLOCK", "exfiltrate": "SECRET_EXFIL" },
   "self_modify_globs": [".git/", ".dos/", "policy.json"],
-  "redact_fields":     ["password", "secret", "api_key", "token"]
+  "redact_fields":     ["password", "secret", "api_key", "token"],
+  "rate_limit":   { "max_calls": 50, "max_cost": 0, "key": "trace", "retry_after_ms": 1000 }
 }
 ```
 
@@ -78,6 +79,7 @@ through?"* before deploying.
 | `self_modify_globs` | Path fragments that prove a `SELF_MODIFY` attempt (the agent editing its own kernel/config). Checked on **both** write paths: a write-shaped call's target *argument* (`Edit`/`Write`), **and** a shell write whose target lives *inside the command string* (`Bash`: `sed -i`, a `>`/`>>` redirect, `tee`, `git apply`/`git checkout`, an in-place `perl -i`/`ruby -i`/`awk -i`, `python -c`/`node -e` inline writes, `find … -delete`, archive extraction). A shell *read* of a guarded file (`cat`/`grep`) is not a self-modify. |
 | `redact_fields` | Arg keys whose value is stripped (`[REDACTED]`, a `TRANSFORM`) before dispatch — secret hygiene at the call boundary. |
 | `arg_rules` | Per-tool **argument-value** denials: a list of `{ "tool", "arg", "deny_regex", "reason" }`. If an allow-listed `tool`'s decoded string `arg` matches `deny_regex` (RE2 — no backreferences), the call is refused with `reason` (a closed-vocabulary code). Regex-only and best-effort — it inspects one decoded string, not the resolved effect — but enough to deny `rm -rf`, `git push`, or a write whose path escapes the repo (`-o ../…`). See [`examples/dogfood-claude-policy.json`](examples/dogfood-claude-policy.json) and [`examples/repo-guard-policy.json`](examples/repo-guard-policy.json); the path-resolving structural complement is [`tools/repo_guard.py`](tools/repo_guard.py) (see [`docs/repo-guard.md`](docs/repo-guard.md)). |
+| `rate_limit` | Declarative throughput/cost cap (issue #699). An object `{ "max_calls", "max_cost", "key", "retry_after_ms" }` applied to the governor at boot and on `--policy` hot-reload. `max_calls` is a per-key admitted-call quota, `max_cost` a cumulative-cost budget (arg bytes ≈ tokens); set either or both (at least one is required). `key` is the bucketing dimension `trace` (default) / `tool` / `global`. An over-cap call is refused with `RATE_LIMITED`, whose disposition is `WAIT` carrying an advisory `retry_after` — back off like HTTP 429, not a reservation (this is a fixed-ceiling quota with no time window, so the hint is advisory; `retry_after_ms` overrides the default). Omit the block entirely to leave the limiter inert. The `FAK_RATELIMIT_*` env vars are the fallback when no `--policy` is given; a policy load is authoritative over them. |
 
 **Anything not in `allow` / `allow_prefix` and not explicitly denied resolves to
 the fail-closed `DEFAULT_DENY`.** An *empty* manifest (`{}`) is valid — it is the
