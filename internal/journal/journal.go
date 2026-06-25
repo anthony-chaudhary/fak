@@ -482,6 +482,44 @@ func recoverHead(path string) (seq uint64, lastHash string, err error) {
 	return seq, lastHash, nil
 }
 
+// ReadRows reads all committed rows from a journal file, in order — the READ side
+// of the durable log for a CONSUMER (a live guard-tail pane, an exporter) that wants
+// the rows as data, not an integrity check (use Verify for that). It is deliberately
+// robust for a live reader: a MISSING file is the empty journal (nil, nil) — tailing
+// a not-yet-written journal is a valid "no rows yet" state, not an error — and a torn
+// final line (a crash mid-append) is tolerated by stopping at the last well-formed
+// row (mirroring recoverHead), so a reader never errors on a half-written tail.
+// Genuine I/O errors (permission, a read fault) are returned. Verify, not ReadRows,
+// is the surface that detects in-the-middle tampering.
+func ReadRows(path string) ([]Row, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("journal: read %s: %w", path, err)
+	}
+	defer f.Close()
+	var out []Row
+	sc := bufio.NewScanner(f)
+	sc.Buffer(make([]byte, 0, 64*1024), 8*1024*1024)
+	for sc.Scan() {
+		line := sc.Bytes()
+		if len(line) == 0 {
+			continue
+		}
+		var r Row
+		if err := json.Unmarshal(line, &r); err != nil {
+			break // torn final line: stop at the last well-formed row (Verify catches real corruption)
+		}
+		out = append(out, r)
+	}
+	if err := sc.Err(); err != nil {
+		return out, fmt.Errorf("journal: scan %s: %w", path, err)
+	}
+	return out, nil
+}
+
 // Verify re-reads a journal file and validates the hash chain end to end. It
 // returns the number of rows checked and a non-nil error naming the FIRST broken
 // link (a recomputed hash mismatch, a prev-hash discontinuity, or a sequence
