@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"path/filepath"
 	"sort"
 	"strings"
 
@@ -51,7 +50,7 @@ func runAblate(stdout, stderr io.Writer, argv []string) int {
 
 	path := *tracePath
 	if path == "" {
-		path = filepath.Join(traceDir(), *suite+".json")
+		path = resolveSuite(traceDir(), *suite)
 	}
 	t, err := bench.LoadTrace(path)
 	if err != nil {

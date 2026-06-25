@@ -24,6 +24,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -451,7 +452,7 @@ func cmdBench(argv []string) {
 
 	path := *tracePath
 	if path == "" {
-		path = filepath.Join(traceDir(), *suite+".json")
+		path = resolveSuite(traceDir(), *suite)
 	}
 	t, err := bench.LoadTrace(path)
 	must(err)
@@ -514,7 +515,7 @@ func cmdTurnTax(argv []string) {
 
 	path := *tracePath
 	if path == "" {
-		path = filepath.Join(turnTaxDir(), *suite+".json")
+		path = resolveSuite(turnTaxDir(), *suite)
 	}
 	t, err := turnbench.LoadTrace(path)
 	must(err)
@@ -1221,6 +1222,46 @@ func turnTaxDir() string {
 		}
 	}
 	return filepath.Join("testdata", "turntax")
+}
+
+// resolveSuite turns a --suite NAME into its trace path under dir, but FAILS LOUD
+// and actionable when the file is absent: a cold-start user (or agent) who follows
+// the help's `--suite NAME` and guesses a name (e.g. "default") otherwise hits a raw
+// `open testdata\...\NAME.json: cannot find the file specified` with no hint of what
+// IS valid. Instead we list the available suites (the *.json basenames in dir) so the
+// next command is obvious. An explicit --trace PATH bypasses this (the caller owns it).
+// Returns the path unchanged when the file exists; exits 2 with the suite list when not.
+func resolveSuite(dir, suite string) string {
+	path := filepath.Join(dir, suite+".json")
+	if _, err := os.Stat(path); err == nil {
+		return path
+	}
+	avail := availableSuites(dir)
+	if len(avail) == 0 {
+		fmt.Fprintf(os.Stderr, "fak: unknown suite %q — no suites found under %s (pass --trace PATH to load a trace directly)\n", suite, dir)
+	} else {
+		fmt.Fprintf(os.Stderr, "fak: unknown suite %q — available: %s (or pass --trace PATH)\n", suite, strings.Join(avail, ", "))
+	}
+	os.Exit(2)
+	return path // unreachable
+}
+
+// availableSuites lists the suite NAMES (the *.json basenames, extension stripped)
+// in dir, sorted, so an unknown-suite error can name the real choices. Empty on a
+// missing/unreadable dir (the caller reports that case).
+func availableSuites(dir string) []string {
+	ents, err := os.ReadDir(dir)
+	if err != nil {
+		return nil
+	}
+	var out []string
+	for _, e := range ents {
+		if name := e.Name(); !e.IsDir() && strings.HasSuffix(name, ".json") {
+			out = append(out, strings.TrimSuffix(name, ".json"))
+		}
+	}
+	sort.Strings(out)
+	return out
 }
 
 func verdictName(k abi.VerdictKind) string {
