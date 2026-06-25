@@ -158,6 +158,80 @@ Caveats, stated: only the demo tunable (`DefaultCacheSize`) is wired today; a re
 
 Notice the discipline repeats. The RSI keep-bit, the fleet's per-SHA close, the syscall's provable refusal — they are the same rule at three scales: a decision a participant cannot move by narrating a number.
 
+## Below the tool call: loops inside the syscall
+
+A tool call is not the bottom of the stack. It is the body of smaller loops, and the smallest one runs one token at a time inside the kernel's own address space. The decode loop that *emits* a tool call is `Session.Generate` plus `Session.Step` in `internal/model/kv.go`: prefill the prompt once, then loop, taking `argmax(logits)` for each next token and advancing the KV cache. Greedy, synchronous, owned by fak at the Go call site. The honest edge: this is greedy only. The ABI reserves an async/speculative seam but no engine returns it, and turning it on would re-open the greedy-path proofs.
+
+Under the decode loop is the forward pass: embed, then the attention and MLP layer stack, then a final norm to logits (`Session.token` and `Session.Prefill` in `internal/model/kv.go`). The live decode path can be kernel-selected by flag (f32, Q8_0, Q4_K). The correctness oracle is a separate, cacheless `Forward` (`internal/model/forward.go`) that runs CPU f32 only; it is proven bit-exact against a HuggingFace argmax oracle on SmolLM2-135M, the llama family. Other model families and the GPU and Q8 device paths are held to the weaker argmax-exact plus logit-cosine gate, not bit-identity, and several family oracles are still open for want of fixtures.
+
+Under the forward pass is the KV cache as a first-class kernel object. `KVCache` in `internal/model/kvcache.go` keeps the pre-RoPE keys in `Kraw` so `Evict` can compact the survivors and re-rotate them to their new positions, landing bit-exact to a cache that never saw the evicted span. This is the same RoPE-is-linear trick the turn loop relies on, exposed one rung lower. The boundary is honest where it stops: recurrent-state hybrids such as Gated-DeltaNet cannot evict mid-span and fail loud with `RecurrentEvictUnsupportedError`, never silent corruption.
+
+Under that is the compute HAL (`internal/compute`). It lifts seven CPU-monoculture assumptions into the type system, so adding a GPU, XPU, or NPU is a new `Backend` registration rather than an edit to the forward loop. The CPU reference backend is byte-identical by design (`cpuBackend.Class()` returns `Reference` in `internal/compute/cpuref.go`); every device backend (CUDA, Vulkan, Metal) is `Approx` class, held only to argmax-exact plus a per-backend empirical cosine threshold. A new device needs its own correctness study, not just a recompile.
+
+The bottom rung is borrowed, and this is the firm ceiling. The hardware scheduling loop — device-firmware kernel queuing, occupancy, VRAM paging, graph replay — belongs to CUDA, Vulkan, and Metal. fak exposes the device through the `Backend` interface and gates the correctness class of the results. It does not own or prove the launch queue or device-memory allocation. So the honest reach below the tool call is narrow and clear: fak owns the decode loop, the forward pass, and the KV cache as in-process kernel objects; it ships the HAL contract; it sits on the hardware loop.
+
+## Beyond RSI: loops that pick the work and improve the improver
+
+RSI is not the top of the ladder either. Above it sit loops that improve the kernel indirectly, and the honest tags matter more here because several are conceptual.
+
+The first is meta-RSI: a loop that would tune the improvement *policy* itself, not just one tunable. In fak this is mostly conceptual. The mechanical piece is real — `shipgate.Gate` in `internal/shipgate/shipgate.go` counts consecutive non-keeps and returns `ESCALATE` after K — but on escalation the loop exits to a human, and nothing yet feeds that judgment back to retune fak's own keep-gate. Treat meta-RSI as conceptual with a shipped escalation breaker.
+
+The intake loop picks the work. `tools/idea_scout.py` scans arXiv and GitHub for ideas adjacent to agent-kernel work, dedups three ways, and files cap-bounded triage issues that feed the dispatch backlog. It runs dry-run by default, with a transparent integer relevance score and a gitignored seen-cache. This is the loop that decides what the fleet works on next.
+
+The multi-surface scorecard family applies RSI's discipline to surfaces that are not code. `tools/scorecard_control_pane.py` folds a family of deterministic per-surface scorecards (docs, code, appeal, seo, industry, product, persona, agent-readiness, and more) into one debt integer, with `--check` as the CI ratchet against a pinned baseline. Every score is re-derived from disk and the Go toolchain on each run, so a number cannot be edited into looking better. It is the same no-narration rule, pointed at repo health.
+
+Two loops at the top are conceptual and must be labeled as such. The ecosystem and conformance loop names a frozen, additive-only ABI (`internal/abi/testdata/abi_v0.1.golden`, machine-checked by `TestABIGoldenFreeze`) and a `fak-certified` mark documented in `GOVERNANCE.md` and `TRADEMARK.md`, but the conformance suite a third party would run is declared, not shipped, and the second-implementation trigger has not occurred. The market loop is instrumentation only: `tools/industry_scorecard.py --stale` surfaces SOTA bars due a re-check against a dated, sourced taxonomy, but the action of updating fak to match the field is human-directed, never autonomous. fak surfaces the gap and escalates; it does not auto-reposition.
+
+## The orthogonal loops: the same rule at every ring
+
+The five nested loops are one axis: scale, or how much of the stack lives in one address space. There is a second axis the nesting hides. Some concerns are not a rung — they are threads that recur at *every* rung. Reading the loops this way turns one ladder into a grid.
+
+```
+                 TWO AXES, NOT ONE LADDER
+
+   VERTICAL = SCALE (how much of the stack is one address space)
+   ORTHOGONAL = INVARIANTS that recur at EVERY scale (->)
+
+                 trust   cost   memory  observ.  human
+   SCALE         /witness /econ  /durab  /feedbk  /govern
+   -----------   ------   ----   ------  -------  -----
+   ecosystem  =  [CONCEPTUAL: frozen ABI + fak-certified mark]
+   meta-RSI   =  [CONCEPTUAL: enforce-tune; ESCALATE breaker is shipped]
+   RSI        =  keep-bit  ->  ->  ->  ->  ->   (shipgate.Evaluate)
+   fleet      =  per-SHA   ->  ->  ->  ->  ->   (dos commit-audit)
+   session    =  sealed    ->  ->  ->  ->  ->   (internal/recall)
+   turn       =  Clear+    ->  ->  ->  ->  ->   (ctxplan / ctxmmu)
+              =  rescreen
+   tool-call  =  provable  ->  ->  ->  ->  ->   (adjudicator)
+              =  refusal
+   ...........................................................
+   = = = = = = = = = below the tool call = = = = = = = = = = =
+   decode     =  OWNED    Session.Generate / Step   (kv.go)
+   forward    =  OWNED    Prefill / token           (kv.go, forward.go)
+   KV cache   =  OWNED    Evict + Kraw re-RoPE       (kvcache.go)
+   compute HAL=  SHIPPED  Backend; CPU=Reference,    (internal/compute)
+              =           CUDA/Vulkan/Metal=Approx
+   hardware   =  BORROWED device firmware schedules; fak only
+              =           registers the device + gates correctness
+
+   VERTICAL  -> how DEEP fak owns the stack (one address space)
+   ORTHOGONAL-> the SAME rule, EVERY ring (trust is one of 5 threads)
+   distinctive = the CROSSING POINT: most scales, same invariant,
+                 one kernel. (0/29 primitives novel; assembly is it.)
+```
+
+There are five threads. Trust and witness is the one the rest of this doc traces: provable refusal at the syscall, quarantine `Clear()`-plus-rescreen at the turn, sealed pages at the session, per-SHA `dos commit-audit` at the fleet, the non-forgeable keep-bit (`shipgate.Evaluate`) at RSI. It takes two forms — the witness discipline at the inner, fleet, and RSI rings (a decision no participant can move by narrating a number) and the structural containment gate at the turn and session rings (a sealed page opens only on `Clear()` and a fresh re-screen, never on a say-so) — but both are structural, not a promise.
+
+Cost and economy thread the same ladder: O(1) bounded context reconstruction at the turn (`internal/ctxplan`), shared-prefix reuse across a session, and per-aspect or ensemble model routing at the call (`internal/modelroute`). Today the routing is deterministic over the request's shape, and cost is a post-hoc lens (`EstimateSavings`); cost-guided live dispatch is named as future wiring, not shipped.
+
+Memory and durability are the time axis: results are classified at write time, and in enforce mode the gate refuses to promote ephemeral observations into the durable image (audit-only by default — `Admit` in `internal/ctxmmu/mmu.go`, `Page.Durability` in `internal/recall/recall.go`). The same `Evict` primitive that contains poison is the one a TTL-driven forgetting policy would ride.
+
+Observability and feedback thread through the typed per-turn `Turn` record carried at every scale (`internal/trajectory/trajectory.go`), feeding the scorer seam and the measured witnesses RSI keeps on. Human governance recurs as the operator's hand on the loop: policy authored by a person, not the model; dry-run-until-`--live` at the fleet; the `ESCALATE` verdict that hands control back at RSI.
+
+The reframe is two sentences. The vertical axis is *how much of the stack is one address space*: fak owns from the KV and decode loop up through the fleet and RSI loops in a single in-process kernel, borrowing only the hardware scheduler below and leaving the ecosystem loop above as aspiration. The orthogonal axis is *the same rule, every ring*: the observe, decide, act, and verify shape repeats across the scales, and trust is only one of the threads doing it.
+
+This is also the cleanest statement of what makes fak distinctive, and it stays inside the prior-art honesty the repo leads with (0 of 29 primitives novel). Plenty of systems own a deep vertical slice — a serving engine owns decode and the KV cache. Plenty enforce one cross-cutting policy — a guardrail enforces trust. fak is the one substrate present at the most scales while carrying the same trust-and-reuse invariant through all of them. The contribution is the crossing point, not either axis alone.
+
 ## Why an engineer should care
 
 You can build all of this yourself. People do. But every one of those loops re-implements the same dangerous, expensive scaffolding, and the failure modes are quiet: an action that should have been refused, a context full of poison, a "kept" change that was never better, a closed issue that was never fixed.
