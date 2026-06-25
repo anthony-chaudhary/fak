@@ -1,0 +1,85 @@
+# Garden bundle gate + cadence — the default-on fold over the gardening passes.
+#
+# `tools/garden_bundle.py` folds the repo's three read-only self-maintenance
+# orchestrators — the scorecard control pane (13-scorecard portfolio ratchet), the
+# fresh-status cross-domain rollup, and the fleet loop-audit — into ONE
+# `schema/ok/verdict/finding/reason/next_action` control-pane verdict, so "is the
+# garden tended?" is one query. It was a hand-run command; this workflow makes the
+# fold default-on, mirroring dogfood-coverage.yml:
+#
+#   * GATE     — `--check` exits 1 when a GATING member regressed (today only the
+#                scorecard ratchet gates) or a member failed to RUN. Advisory panes
+#                (fresh-status, loop-audit surfacing a condition) do NOT fail the
+#                build — a pass surfacing a condition is the pass working. The
+#                hermetic proof that the fold/gate logic is correct is
+#                `tools/garden_bundle_test.py` (run first, below).
+#   * CADENCE  — `schedule:` re-runs it daily so the rolled-up verdict can't silently
+#                rot, and the `--json` payload is written to the run's step summary
+#                so the garden state is surfaced over time without anyone re-running.
+#
+# Members are pure-stdlib Python over the git-tracked tree — no `fak` binary, no
+# network, no GPU — so the gate is deterministic. Full design:
+# docs/notes/GARDENING-BUNDLE-DEFAULT-ON-2026-06-25.md.
+name: garden
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+  schedule:
+    # Daily at 06:23 UTC — an off-the-hour minute so the fleet's scheduled jobs
+    # don't all land on :00 (dogfood-coverage is 07:13). The cadence half: the
+    # garden verdict is re-emitted to the step summary daily so it's tracked.
+    - cron: "23 6 * * *"
+
+permissions:
+  contents: read
+
+jobs:
+  garden:
+    name: garden bundle gate + payload
+    runs-on: ubuntu-latest
+    env:
+      GOTOOLCHAIN: auto
+    defaults:
+      run:
+        working-directory: .
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: false
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+
+      # The fold/gate logic FIRST: this asserts the bundle gates RED on a regressed
+      # gating member and stays green on an advisory-only condition, so a green
+      # `--check` below is a real signal and not a tool that always passes.
+      - name: garden bundle self-test
+        run: python tools/garden_bundle_test.py
+
+      # The GATE: exit 1 when a gating member regressed or a pass failed to run.
+      - name: garden bundle gate (--check)
+        run: python tools/garden_bundle.py --check
+
+      # The CADENCE payload: surface the human report + control-pane JSON to the run
+      # summary so the garden verdict is tracked over time (esp. on the daily cron).
+      - name: garden bundle payload -> step summary
+        if: always()
+        run: |
+          {
+            echo "## garden bundle"
+            echo '```'
+            python tools/garden_bundle.py || true
+            echo '```'
+            echo '<details><summary>control-pane payload</summary>'
+            echo
+            echo '```json'
+            python tools/garden_bundle.py --json || true
+            echo '```'
+            echo '</details>'
+          } >> "$GITHUB_STEP_SUMMARY"

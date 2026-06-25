@@ -14,6 +14,10 @@ PANE=
 INTERVAL_MIN=5
 LIVE_RESUME=0
 JSON_OUT=0
+# MODE selects what the recurring tick runs:
+#   control (default) — `fleet_control_pane.py tick`, the 5-min keep-alive
+#   garden            — the default-on gardening bundle, ledger-wrapped + admit-gated
+MODE=control
 
 if [ "${1:-}" = "install" ] || [ "${1:-}" = "remove" ] || [ "${1:-}" = "status" ]; then
   ACTION=$1
@@ -46,12 +50,16 @@ while [ "$#" -gt 0 ]; do
       LIVE_RESUME=1
       shift
       ;;
+    --mode)
+      MODE=$2
+      shift 2
+      ;;
     --json)
       JSON_OUT=1
       shift
       ;;
     -h|--help)
-      echo "usage: $0 [install|remove|status] [--task-name NAME] [--python PYTHON] [--pane PATH] [--interval-min N] [--live-resume] [--json]"
+      echo "usage: $0 [install|remove|status] [--task-name NAME] [--python PYTHON] [--pane PATH] [--interval-min N] [--live-resume] [--mode control|garden] [--json]"
       exit 0
       ;;
     *)
@@ -67,9 +75,32 @@ if [ -z "$PANE" ]; then
   PANE=$script_dir/fleet_control_pane.py
 fi
 
+# In garden mode the tick runs the gardening bundle, not the keep-alive pane, so it
+# gets its own task/unit/runner names (the two ticks coexist) and a daily default
+# cadence unless the caller overrode --interval-min.
+case "$MODE" in
+  control)
+    reg_runner_name=control_pane_tick.sh
+    unit_base=fleet-control-pane-tick
+    ;;
+  garden)
+    if [ "$TASK_NAME" = "FleetControlPaneTick" ]; then
+      TASK_NAME=FakGardenTick
+    fi
+    if [ "$INTERVAL_MIN" = "5" ]; then
+      INTERVAL_MIN=1440
+    fi
+    reg_runner_name=garden_tick.sh
+    unit_base=fak-garden-tick
+    ;;
+  *)
+    echo "unknown --mode: $MODE (want control|garden)" >&2
+    exit 2
+    ;;
+esac
+
 reg_dir=$script_dir/_registry
-runner=$reg_dir/control_pane_tick.sh
-unit_base=fleet-control-pane-tick
+runner=$reg_dir/$reg_runner_name
 service_name=$unit_base.service
 timer_name=$unit_base.timer
 unit_dir=${XDG_CONFIG_HOME:-${HOME:-}/.config}/systemd/user
@@ -146,6 +177,24 @@ remove_cron_block() {
 
 write_runner() {
   mkdir -p "$reg_dir"
+  if [ "$MODE" = "garden" ]; then
+    # The garden tick is ledger-wrapped and admit-gated: fak_loop_run.sh records
+    # fire/admit/start/end in .fak/loops.jsonl and runs the bundle through the
+    # governor (cadence floor / pause / FAK_GARDEN=off all take effect). Fail-open
+    # to a bare `make garden` if the wrapper is absent, same contract as dispatch.
+    wrapper=$script_dir/fak_loop_run.sh
+    {
+      echo "#!/bin/sh"
+      echo "cd $(sh_quote "$repo_dir") || exit 1"
+      echo "if [ -x $(sh_quote "$wrapper") ]; then"
+      echo "  exec $(sh_quote "$wrapper") garden/default cron -- make garden"
+      echo "else"
+      echo "  exec make garden"
+      echo "fi"
+    } > "$runner"
+    chmod +x "$runner"
+    return
+  fi
   live_arg=
   if [ "$LIVE_RESUME" = "1" ]; then
     live_arg=" --live-resume"
@@ -200,7 +249,13 @@ install_cron() {
   esac
   if [ "$INTERVAL_MIN" -lt 60 ]; then
     cron_expr="*/$INTERVAL_MIN * * * *"
+  elif [ "$INTERVAL_MIN" -ge 1440 ]; then
+    # Daily (or longer) — fire once a day at an off-the-hour minute so a garden
+    # tick doesn't pile onto the top of the hour with the 5-min control ticks.
+    cron_expr="23 6 * * *"
   else
+    # Hourly granularity for the 60..1439 band (cron can't express arbitrary
+    # multi-hour intervals portably; round to the top of each hour).
     cron_expr="0 * * * *"
   fi
   old=$(mktemp)

@@ -1,6 +1,6 @@
 # Makefile — portable build/test entrypoints (unit 12). On Windows without make,
 # use scripts/ci.ps1, which this mirrors.
-.PHONY: ci build vet test test-fast bench status status-check dogfood-recent claims-lint salience index-sync model gofmt-check hygiene demo-audit demo-tool-tests demo-scorecards demo-smoke demo-headless-smoke demo-live-status demo-https-status demo-published-status demo-published-check demo-readiness-status gated-tests cuda-check cuda-build cuda-test cuda-accept
+.PHONY: ci build vet test test-fast bench status status-check garden garden-check dogfood-recent claims-lint salience index-sync model gofmt-check hygiene demo-audit demo-tool-tests demo-scorecards demo-smoke demo-headless-smoke demo-live-status demo-https-status demo-published-status demo-published-check demo-readiness-status gated-tests cuda-check cuda-build cuda-test cuda-accept
 
 # ci is THE local green gate (AGENTS.md: "Green = make ci"). It must stay aligned with
 # .github/workflows/ci.yml's HARD steps so a pre-push `make ci` fails on the same things
@@ -65,6 +65,23 @@ status:
 
 status-check:
 	@python3 tools/fresh_status.py --check
+
+# garden: the default-on gardening bundle — ONE read-only fold over the repo's
+# self-maintenance passes (the scorecard control pane + fresh status), so "run the
+# gardening" is one command instead of three. This is the fold over the folds:
+# scorecard_control_pane folds the scorecard FAMILY, fresh_status folds the four
+# domains, and THIS folds those into one verdict. Read-only — it measures and
+# reports, never fixes (auto-fix is a later witness-gated rung). NOT in the hard `ci`
+# chain: like `status` it folds slow members, and the scorecard ratchet already gates
+# in ci.yml. Skipped when FAK_GARDEN is off (the env-side governor brake). Add --deep
+# for the slower fleet loop-audit member. garden-check is the gate (non-zero only when
+# a gating member regressed or a pass failed to run). Full design:
+# docs/notes/GARDENING-BUNDLE-DEFAULT-ON-2026-06-25.md.
+garden:
+	@python3 tools/garden_bundle.py
+
+garden-check:
+	@python3 tools/garden_bundle.py --check
 
 dogfood-recent:
 	@python3 tools/recent_feature_dogfood.py

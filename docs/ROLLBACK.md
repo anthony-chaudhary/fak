@@ -88,6 +88,25 @@ back:
   Re-pin only **down**, after a real recovery — never up to hide a regression. The `main-kpi-baseline`
   and `scorecard_baseline` files are the committed floors a `git revert` of a bad re-pin restores.
 
+- **The garden bundle + its brake.** `tools/garden_bundle.py --check` (`make garden-check`) folds
+  the read-only gardening passes — the scorecard ratchet above plus the fresh-status rollup — into
+  one verdict, and a scheduled host tick (`tools/register_control_pane_tick.sh --mode garden`) runs
+  it on a daily cadence through the loop ledger. It is read-only (it never commits), so the rollback
+  is just to **stop it**: export `FAK_GARDEN=off` on the host (the env-side brake), or set the loop
+  paused in the live governor policy:
+
+  ```bash
+  # one-off: skip the bundle on this host
+  FAK_GARDEN=off make garden
+  # durable: pause the garden tick in the governor (live policy is .fak/loop-policy.json,
+  # seeded from the tracked template tools/loop-policy.default.json)
+  fak loop control --loop garden/default --pause     # or edit "paused": true in the policy
+  ```
+
+  The `min_interval_seconds` floor (12h, from the template) is the cadence brake that keeps a
+  flapping scheduler from piling up ticks. Remove the tick entirely with
+  `tools/register_control_pane_tick.sh remove --mode garden`.
+
 ## 5. Restore session / fleet state (`fak snapshot`)
 
 For live state that the code-level layers above don't reach — a running session, a whole fleet
