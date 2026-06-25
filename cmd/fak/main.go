@@ -131,6 +131,12 @@ func main() {
 		cmdRoutebench(os.Args[2:])
 	case "accounts":
 		cmdAccounts(os.Args[2:])
+	case "garden":
+		cmdGarden(os.Args[2:])
+	case "savings-vector":
+		cmdSavingsVector(os.Args[2:])
+	case "dogfood-issues":
+		cmdDogfoodIssues(os.Args[2:])
 	case "version", "-v", "--version":
 		fmt.Println(appversion.Current())
 	case "-h", "--help", "help":

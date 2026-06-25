@@ -43,6 +43,8 @@ func cmdSwebench(argv []string) {
 		cmdSwebenchCompare(rest)
 	case "compare-runners":
 		cmdSwebenchCompareRunners(rest)
+	case "sota-snapshot":
+		os.Exit(runSwebenchSotaSnapshot(os.Stdout, os.Stderr, rest))
 	case "-h", "--help", "help":
 		swebenchUsage()
 	default:

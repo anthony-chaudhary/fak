@@ -100,6 +100,11 @@ var tier = map[string]int{
 	"agenttopo":    2, // declared agent communication DAG over comm.Group + modelroute folds.
 	"promptmmu":    1, // cache-prefix-preserving inbound prompt MMU: splices tools[] past the last cache_control breakpoint; stdlib-only, off the hot path, no agent/gateway import (decode is a callback).
 	"loopmgr":      1, // durable loop-event JSONL ledger + read fold: SHA-256 hash chain over armed/fire/admit/start/heartbeat/end/witness/notify events. stdlib-only, off the hot path; schedules/spawns/notifies/authorizes nothing — those stay in the producers.
+	"pythongate":   2, // NEW-PYTHON-TOOL de-Python ratchet: scans tracked tools/*.py (git ls-files) against a frozen grandfathered baseline and refuses any new .py (NEW_PYTHON_TOOL). A tool-shaped witness leaf (reads tree, folds, emits offenses); shells to git off the hot path, imports nothing internal.
+	"gardenbundle": 3, // the garden bundle: a read-only fold-over-folds that runs the grandfathered Python gardening passes (scorecard control pane + fresh status, +loop-audit under --deep), reads each control-pane payload, and folds one schema/ok/verdict/finding envelope. Composer: composes other tools' outputs (shelling out off the hot path), imports nothing internal.
+	"savingsvector": 1, // pure four-account saving-decomposition lens over a turnbench Report's already-measured fields (local_cpu/gpu_prefill/context_window/wall_clock, labeled per axis); stdlib-only, imports nothing internal, off the hot path.
+	"swebenchsota":  2, // SWE-bench SOTA leaderboard snapshot: a tool-shaped leaf that extracts the embedded leaderboard JSON (regex+unescape), folds the per-group SOTA, and emits a versioned snapshot. net/http fetch off the hot path; imports nothing internal.
+	"dogfoodissues": 3, // dogfood-action-issues backlog bridge: folds a recent-feature dogfood report.json into scorecard ACTION items, derives a stable dedup key per item, renders the marker-stamped issue body, and (only on --live) composes the external `gh` CLI to create/update one issue per item. Composer: shells out off the hot path, imports nothing internal.
 	// new-leaf:tier — `python tools/new_leaf.py <name> --tier <name>` inserts the
 	// declaration for a generated leaf immediately ABOVE this line. Keep the marker last.
 }
