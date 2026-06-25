@@ -44,6 +44,13 @@ children — the issues actually tagged `track/B-performance` with a `B-00x` slu
 
 This doc keys everything off the **live** numbers above.
 
+> **Operator action (the one GitHub-side fix):** for #306's *"closes when all children
+> close"* mechanism to actually fire, repoint the epic body's checkbox list from the stale
+> ids to the live ones — `#280→#289, #282→#287, #285→#284, #287→#282, #290→#279,
+> #292→#277, #294→#275, #297→#272`. Until then the epic tracks the wrong (and partly
+> closed/Track-A) issues and will never auto-close from its children. This in-repo tracker
+> is the authoritative map in the meantime.
+
 ---
 
 ## 1. Honest status — each child, verified against the working tree (2026-06-25)
