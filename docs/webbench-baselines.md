@@ -1,6 +1,6 @@
 ---
-title: "fak WebBench Baselines: 8.8x Prefill Cut on WebVoyager"
-description: "fak's measured WebVoyager efficiency: on the real 643-task set it cuts 8.8–9.7× of per-turn prefill work, so an agent keeps its success rate at lower cost."
+title: "fak WebBench Baselines: 8.8x Prefill Cut on WebVoyager (modeled)"
+description: "fak's modeled WebVoyager prefill geometry: over the real 643-task set, a closed-form model puts the work-elimination at 8.8–9.7× vs the naive re-prefill floor (1.0–1.1× vs a tuned per-agent-KV stack). Not a wall-clock measurement."
 ---
 
 # Frontier WebBench Baselines & SOTA Comparison
@@ -9,27 +9,40 @@ description: "fak's measured WebVoyager efficiency: on the real 643-task set it 
 
 ---
 
-## ⚠️ Measurement Status: REAL MEASUREMENTS ACHIEVED ✅
+## Provenance: MODELED geometry over the real 643-task set
 
-**REAL WebVoyager measurements now available.** Theoretical results preserved below for comparison.
+These numbers are a **deterministic geometry model** computed over the real
+WebVoyager task set — **not a wall-clock measurement**. The task *set* is real
+(643 official tasks); the per-turn token geometry is derived from each task's
+difficulty, and the prefill cost is a closed-form integer formula
+(`internal/webbench/geometry.go::ComputeArms`). `fak webbench describe` prints the
+table under the honest header *"prefill-token work-elimination (deterministic
+floor, no model)."* Reproduce it yourself:
+`fak webbench describe --dataset testdata/webbench/webvoyager-converted.jsonl --workers 1,2,4,8`.
 
 | Component | Source | Status |
 |-----------|--------|--------|
-| Cost arm formulas (A/B/C) | Mathematical computation | ✅ Correct |
+| Cost arm formulas (A/B/C) | Closed-form integer geometry | ✅ Correct |
 | CLI implementation | Code execution | ✅ Shipped |
-| Real WebVoyager dataset | **643 tasks from official source** | ✅ Measured |
-| Real measurements | **8.8x - 9.7x on WebVoyager** | ✅ REAL |
-| Theoretical (mock) | 5 tasks, example.com | Legacy reference |
+| WebVoyager task set | **643 tasks from official source** | ✅ Real dataset |
+| Prefill numbers | **8.8x – 9.7x vs the naive floor** | ⚙️ Modeled (no wall-clock) |
+| Mock-geometry legacy | 5 tasks, example.com | Legacy reference |
 
-**What this proves:** The framework works AND delivers real measured gains on the actual WebVoyager benchmark.
+**What this shows:** the CLI works and the prefill-token *work-elimination* a
+fused resident KV buys over a naive re-prefill harness, computed over the real
+task set. The headline 8.8x–9.7x is the **A/C ratio vs the naive re-prefill
+floor**; the honest cross-worker reuse number (vs a tuned per-agent-KV stack) is
+**B/C = 1.00x–1.10x** (see the table below). It is **not** a measured throughput
+or wall-clock gain.
 
-**Real vs Theoretical:**
-- Real WebVoyager: **8.8x - 9.7x** elimination (measured)
-- Theoretical: 15.6x - 16.6x (mock data, conservative assumptions)
+**Modeled vs legacy mock:**
+- Real 643-task set: **8.8x – 9.7x** vs naive floor (modeled geometry)
+- Legacy mock: 15.6x – 16.6x (5 mock tasks, more conservative assumptions)
 
-The real number is lower because actual WebVoyager tasks have fewer turns (median 12) than the conservative assumptions used for theoretical modeling.
+The real-set number is lower because actual WebVoyager tasks have fewer turns
+(median 12) than the assumptions used for the legacy mock geometry.
 
-![WebBench prefill elimination — measured 8.8×–9.7× prefill-token elimination on real WebVoyager across worker counts, fak's fused resident KV vs naive per-turn re-prefill](https://raw.githubusercontent.com/anthony-chaudhary/fak/main/visuals/51-webbench-prefill-elimination.svg)
+![WebBench prefill elimination — modeled 8.8×–9.7× prefill-token elimination vs the naive floor over the real 643-task WebVoyager set, fak's fused resident KV vs naive per-turn re-prefill](https://raw.githubusercontent.com/anthony-chaudhary/fak/main/visuals/51-webbench-prefill-elimination.svg)
 
 ---
 
@@ -98,9 +111,9 @@ Running any of the above SOTA agents **through fak** delivers:
 
 ---
 
-### ✅ REAL MEASUREMENTS: WebVoyager (643 tasks)
+### ⚙️ MODELED over the official WebVoyager set (643 tasks)
 
-**Measured on the official WebVoyager dataset** (downloaded 2026-06-20 from [MinorJerry/WebVoyager](https://github.com/MinorJerry/WebVoyager)):
+**Modeled geometry over the official WebVoyager dataset** (downloaded 2026-06-20 from [MinorJerry/WebVoyager](https://github.com/MinorJerry/WebVoyager)) — closed-form prefill-token arithmetic, no wall-clock:
 
 | Workers | A naive | B per-agent KV | **C fak fused** | A/C (net) | B/C (cross-worker) | A/B (turn-tax) |
 |---------|---------|----------------|-------------|-----------|---------------------|----------------|
@@ -115,13 +128,13 @@ Running any of the above SOTA agents **through fak** delivers:
 - Difficulty: easy (87), medium (430), hard (126)
 - Categories: shopping (86), information (85), general (343), media (44), travel (42), search (43)
 
-**Methodology:** Real WebVoyager tasks processed through `fak webbench describe`. Geometry derived from actual task descriptions using standard WebVoyager-style turn estimates by difficulty. This is a **MEASURED** result on the **REAL** benchmark dataset.
+**Methodology:** Real WebVoyager tasks processed through `fak webbench describe`. Geometry derived from each task's difficulty using standard WebVoyager-style turn estimates; the prefill cost is then a closed-form integer formula (`internal/webbench/geometry.go::ComputeArms`). This is a **MODELED** prefill-token work floor over the **real** task set — **not** a wall-clock measurement. The 8.8x–9.7x is the A/C ratio vs the naive re-prefill floor; the cross-worker reuse number vs a tuned per-agent-KV stack is B/C = 1.00x–1.10x.
 
 ### Real Breakdown
 
 | Metric | Meaning | Real Value |
 |--------|---------|------------|
-| **A/C (Net Elimination)** | Measured on WebVoyager | **8.8x - 9.7x** |
+| **A/C (vs naive floor)** | Modeled over WebVoyager set | **8.8x - 9.7x** |
 | **B/C (Cross-Worker Reuse)** | Cross-worker prefix reuse | **1.00x - 1.10x** |
 | **A/B (Turn-Tax)** | Re-prefill vs KV persistence | **8.8x** (worker-independent) |
 

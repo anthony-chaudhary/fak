@@ -129,7 +129,7 @@ fak webbench eval --predictions webvoyager-preds.json
 
 **The framework is complete and ready.** We have:
 - ✅ Real WebVoyager dataset (643 tasks)
-- ✅ Real prefill measurements (8.8x-9.7x)
+- ✅ Modeled prefill geometry (8.8x-9.7x vs the naive floor — closed-form, no wall-clock)
 - ✅ Token counting framework
 - ✅ Full documentation
 
@@ -144,8 +144,8 @@ fak webbench eval --predictions webvoyager-preds.json
 
 ## Why Stop Here?
 
-We proved the core claim with REAL measurements:
-- **8.8x structural waste** measured on ACTUAL WebVoyager data
+We modeled the core claim over the real task set:
+- **8.8x structural waste** (modeled geometry vs the naive floor) over the real WebVoyager data
 - The framework works
 - The turn-tax is real
 

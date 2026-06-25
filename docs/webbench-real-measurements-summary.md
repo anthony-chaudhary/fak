@@ -1,12 +1,20 @@
 ---
-title: "fak WebBench real measurements: WebVoyager status"
-description: "Summarizes fak's measured prefill work-elimination on the real 643-task WebVoyager dataset, reporting 8.8x to 9.7x net savings across worker counts."
+title: "fak WebBench modeled geometry: WebVoyager status"
+description: "Summarizes fak's modeled prefill work-elimination over the real 643-task WebVoyager dataset — a closed-form geometry model (not a wall-clock measurement) reporting 8.8x to 9.7x vs the naive floor across worker counts."
 ---
 
-# WebBench Real Measurements - Status Summary
+# WebBench Modeled Geometry — Status Summary
+
+> **Provenance.** The numbers below are a deterministic geometry MODEL over the
+> real 643-task WebVoyager set — closed-form prefill-token arithmetic
+> (`internal/webbench/geometry.go::ComputeArms`), **not a wall-clock
+> measurement**. The task set is real; the per-task turn geometry is
+> difficulty-derived; the 8.8x–9.7x is the A/C ratio vs the naive re-prefill
+> floor (B/C vs a tuned per-agent-KV stack is 1.0x–1.1x). The filename retains
+> "real-measurements" only because inbound links cite it by path.
 
 **Date:** 2026-06-20
-**Status:** ✅ **MAJOR MILESTONE ACHIEVED** - Real WebVoyager measurements complete
+**Status:** ✅ Modeled prefill geometry over the real WebVoyager set complete
 
 ---
 
@@ -17,9 +25,9 @@ description: "Summarizes fak's measured prefill work-elimination on the real 643
 - **Converted:** Created webbench-convert tool to transform to webbench format
 - **Validated:** 643 tasks successfully processed with metadata (difficulty, category, domain)
 
-### 2. Real Prefill Work-Elimination Measurements
+### 2. Modeled Prefill Work-Elimination
 
-**Measured on actual WebVoyager dataset (643 tasks):**
+**Modeled geometry over the actual WebVoyager dataset (643 tasks) — no wall-clock:**
 
 | Workers | A naive | B per-agent KV | C fak fused | A/C (net) | B/C (cross-worker) | A/B (turn-tax) |
 |---------|---------|----------------|-------------|-----------|---------------------|----------------|
@@ -28,7 +36,7 @@ description: "Summarizes fak's measured prefill work-elimination on the real 643
 | 4 | 683.7 M | 77.5 M | 71.6 M | **9.5x** | 1.08x | **8.8x** |
 | 8 | 1.37 G | 155.1 M | 141.3 M | **9.7x** | 1.10x | **8.8x** |
 
-**This is a REAL MEASURED RESULT on the ACTUAL WebVoyager benchmark dataset.**
+**This is a MODELED prefill-token work floor over the real WebVoyager task set — the A/C ratio vs the naive re-prefill floor, not a wall-clock measurement.**
 
 ### 3. Infrastructure Shipped
 
@@ -44,7 +52,7 @@ description: "Summarizes fak's measured prefill work-elimination on the real 643
 
 All docs updated with:
 - Real vs theoretical comparison
-- Honest status badges (THEORETICAL → MEASURED)
+- Honest status badges (mock-geometry → real-set modeled)
 - Updated README with real numbers
 - Full WebVoyager results report
 
@@ -55,7 +63,7 @@ All docs updated with:
 | Metric | Theoretical (mock) | Real (WebVoyager) | Reason |
 |--------|-------------------|-------------------|--------|
 | Dataset | 5 tasks (example.com) | 643 tasks (real websites) | Real vs synthetic |
-| Median turns | Assumed higher | 12 (measured) | Actual WebVoyager geometry |
+| Median turns | Assumed higher | 12 (from the real set) | Difficulty-derived WebVoyager geometry |
 | A/C Net Elimination | 15.6x - 16.6x | **8.8x - 9.7x** | Fewer turns = lower cumulative waste |
 
 **Key insight:** The real number is lower but still VERY significant. An 8.8x structural waste is enormous at scale.
@@ -150,4 +158,4 @@ The turn-tax is **structural** — every web agent pays it, every turn. That's 8
 
 ---
 
-**Bottom line:** We have REAL, MEASURED prefill work-elimination (8.8x-9.7x) on the ACTUAL WebVoyager benchmark. What remains is the full harness evaluation with live models to get end-to-end cost numbers. The framework is proven and ready.
+**Bottom line:** We have a MODELED prefill work-elimination floor (8.8x-9.7x vs the naive re-prefill baseline) computed over the real 643-task WebVoyager set — closed-form geometry, not a wall-clock measurement. What remains is the full harness evaluation with live models to get end-to-end measured cost numbers. The CLI and geometry model are shipped.
