@@ -13,9 +13,10 @@ discoverability surface instead of the prose:
        heading hierarchy, no dead links bleeding crawl budget.
   AEO  (Answer Engine Optimization) — the signals an LLM answer engine
        (ChatGPT, Perplexity, Google AI Overviews, Claude) ingests and cites:
-       JSON-LD structured data (SoftwareApplication, FAQPage, WebSite), an
-       `llms.txt` + `llms-full.txt` corpus, a self-contained "what is X" answer
-       on the first screen, an FAQ in real question/answer structure.
+       JSON-LD structured data (SoftwareApplication, FAQPage, WebSite,
+       BreadcrumbList), an `llms.txt` + `llms-full.txt` corpus, a self-contained
+       "what is X" answer on the first screen, an FAQ in real question/answer
+       structure, and generated machine artifacts that match the visible docs.
 
 Like the docs scorecard, the headline metric is an integer you drive toward zero:
 **seo-debt** — the count of concrete, re-derivable discoverability defects (a
@@ -40,7 +41,8 @@ Two layers fold into one payload:
   SITE-LEVEL (the once-per-corpus infrastructure, each a unit of debt if absent):
     robots_ok · sitemap_plugin · seo_tag_plugin · canonical_url · og_image
     structured_data (one defect per missing expected JSON-LD @type)
-    llms_txt · llms_full (present AND fresh vs llms.txt) · faq_structured
+    llms_txt · llms_full (present AND fresh vs llms.txt) · llms_full_sources
+    faq_structured · faq_jsonld_sync · breadcrumb_jsonld_shape
     citation_links (every llms.txt-map + self-repo github link resolves live)
 
   PRESENCE vs SUCCESS. The first generation of KPIs above asked "is the meta/
@@ -84,7 +86,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
-SCHEMA = "fak-seo-aeo-scorecard/2"
+SCHEMA = "fak-seo-aeo-scorecard/3"
 
 # Repo-root-relative inputs (best-effort; a missing one degrades a check, never errors).
 CONFIG_REL = "docs/_config.yml"
@@ -126,9 +128,10 @@ EVIDENCE_DIRS = {"proofs", "benchmarks", "notes"}
 # Expected JSON-LD @types for AEO. Each missing HARD type is one unit of seo-debt;
 # answer engines lean on these to identify and cite the project. SoftwareApplication
 # (what the project IS), FAQPage (the Q&A an engine quotes), WebSite (the site
-# identity + search action) are required; Organization/BreadcrumbList are a bonus.
-JSONLD_TYPES_HARD = ["SoftwareApplication", "FAQPage", "WebSite"]
-JSONLD_TYPES_SOFT = ["Organization", "BreadcrumbList"]
+# identity + search action), and BreadcrumbList (where a crawler places the docs
+# surface in the site hierarchy) are required; Organization is a bonus.
+JSONLD_TYPES_HARD = ["SoftwareApplication", "FAQPage", "WebSite", "BreadcrumbList"]
+JSONLD_TYPES_SOFT = ["Organization"]
 
 # Per-KPI weights for the per-page score. description + title weigh most — they ARE
 # the search result (the blue link + the snippet) and the first thing an engine
@@ -221,6 +224,120 @@ def _collect_jsonld_types(data: Any) -> set[str]:
         for v in data:
             out |= _collect_jsonld_types(v)
     return out
+
+
+def _jsonld_has_type(data: Any, typ: str) -> bool:
+    if not isinstance(data, dict):
+        return False
+    t = data.get("@type")
+    if isinstance(t, str):
+        return t == typ
+    if isinstance(t, list):
+        return typ in {x for x in t if isinstance(x, str)}
+    return False
+
+
+def _iter_jsonld_objects(data: Any):
+    """Yield every dict object in a parsed JSON-LD value."""
+    if isinstance(data, dict):
+        yield data
+        for v in data.values():
+            yield from _iter_jsonld_objects(v)
+    elif isinstance(data, list):
+        for v in data:
+            yield from _iter_jsonld_objects(v)
+
+
+def _jsonld_objects_with_type(values: list[Any], typ: str) -> list[dict[str, Any]]:
+    return [obj for data in values for obj in _iter_jsonld_objects(data)
+            if _jsonld_has_type(obj, typ)]
+
+
+def _jsonld_url(value: Any) -> str:
+    if isinstance(value, str):
+        return value
+    if isinstance(value, dict):
+        for key in ("@id", "url", "item"):
+            v = value.get(key)
+            if isinstance(v, str):
+                return v
+    return ""
+
+
+def breadcrumb_shape_ok(values: list[Any]) -> tuple[bool, str]:
+    """A BreadcrumbList must be more than a present @type: it needs ordered
+    ListItems with absolute URLs, or crawlers cannot place the page reliably."""
+    for bc in _jsonld_objects_with_type(values, "BreadcrumbList"):
+        items = bc.get("itemListElement")
+        if not isinstance(items, list) or len(items) < 2:
+            continue
+        ok = True
+        for want_pos, item in enumerate(items, 1):
+            if not isinstance(item, dict) or not _jsonld_has_type(item, "ListItem"):
+                ok = False
+                break
+            if item.get("position") != want_pos:
+                ok = False
+                break
+            name = item.get("name")
+            url = _jsonld_url(item.get("item"))
+            if not isinstance(name, str) or not name.strip() or not url.startswith(("https://", "http://")):
+                ok = False
+                break
+        if ok:
+            return True, f"BreadcrumbList has {len(items)} ordered absolute ListItem entries"
+    return False, "BreadcrumbList JSON-LD missing or structurally invalid"
+
+
+def faq_jsonld_sync_ok(values: list[Any], faq_text: str) -> tuple[bool, str]:
+    """The FAQPage block must mirror the visible FAQ questions, not merely exist."""
+    visible = [h.strip() for h in _H2_RE.findall(faq_text) if _is_question(h)]
+    questions: list[str] = []
+    answers_ok = True
+    for faq in _jsonld_objects_with_type(values, "FAQPage"):
+        entities = faq.get("mainEntity")
+        if not isinstance(entities, list):
+            continue
+        for ent in entities:
+            if not isinstance(ent, dict) or not _jsonld_has_type(ent, "Question"):
+                answers_ok = False
+                continue
+            q = ent.get("name")
+            if isinstance(q, str):
+                questions.append(q.strip())
+            ans = ent.get("acceptedAnswer")
+            if isinstance(ans, dict):
+                text = ans.get("text")
+                if not isinstance(text, str) or len(text.strip()) < 20:
+                    answers_ok = False
+            else:
+                answers_ok = False
+    if visible and questions == visible and answers_ok:
+        return True, f"FAQPage JSON-LD mirrors {len(visible)} visible FAQ questions"
+    return False, (f"FAQPage JSON-LD stale or incomplete "
+                   f"({len(questions)} schema questions vs {len(visible)} visible questions)")
+
+
+def llms_full_source_audit(root: Path) -> dict[str, Any]:
+    """Every local markdown target in llms.txt must appear as a Source block in
+    llms-full.txt. This makes the one-fetch corpus a coverage check, not just a
+    freshness substring check."""
+    llms = _safe_read(root / LLMS_REL)
+    llms_full = _safe_read(root / LLMS_FULL_REL)
+    targets: list[str] = []
+    seen: set[str] = set()
+    for m in _LINK_RE.finditer(llms):
+        target = m.group("target").strip()
+        if target.startswith(("http://", "https://", "mailto:", "#", "tel:")):
+            continue
+        rel = target.split("#", 1)[0].split("?", 1)[0].strip()
+        if not rel.endswith(".md") or rel in seen:
+            continue
+        seen.add(rel)
+        targets.append(rel.replace("\\", "/"))
+    sources = set(re.findall(r"^> Source: `([^`]+)`\s*$", llms_full, re.MULTILINE))
+    missing = [t for t in targets if t not in sources]
+    return {"targets": targets, "sources": sorted(sources), "missing": missing}
 
 
 # ---------------------------------------------------------------------------
@@ -696,6 +813,7 @@ def site_checks(root: Path) -> dict[str, Any]:
     # valid JSON, because an answer engine / Rich Results rejects malformed JSON-LD.
     # (The review caught the old regex-only scan certifying broken blocks as present.)
     blob = "\n".join([head, index, showcase, faq])
+    jsonld_values: list[Any] = []
     present_types: set[str] = set()
     invalid_blocks = 0
     for m in _JSONLD_BLOCK_RE.finditer(blob):
@@ -705,6 +823,7 @@ def site_checks(root: Path) -> dict[str, Any]:
         except (ValueError, TypeError):
             invalid_blocks += 1
             continue
+        jsonld_values.append(data)
         present_types |= _collect_jsonld_types(data)
     add("jsonld_valid", invalid_blocks == 0, True,
         "every JSON-LD block parses as valid JSON",
@@ -717,6 +836,11 @@ def site_checks(root: Path) -> dict[str, Any]:
         add(f"jsonld_{t}", t in present_types, False,
             f"JSON-LD {t} present (bonus)",
             f"no JSON-LD {t} (optional, a citation bonus)")
+
+    breadcrumb_ok, breadcrumb_detail = breadcrumb_shape_ok(jsonld_values)
+    add("breadcrumb_jsonld_shape", breadcrumb_ok, True,
+        breadcrumb_detail,
+        breadcrumb_detail)
 
     # llms.txt: present + carries an explicit facts block answer engines anchor on.
     llms_ok = bool(llms) and re.search(r"(?i)key facts", llms) is not None
@@ -737,6 +861,12 @@ def site_checks(root: Path) -> dict[str, Any]:
         add("llms_full", fresh, True,
             "llms-full.txt present and fresh (inlines current llms.txt)",
             "llms-full.txt is STALE (does not contain current llms.txt; re-run tools/gen_llms_full.py)")
+    llms_sources = llms_full_source_audit(root)
+    missing_sources = llms_sources["missing"]
+    add("llms_full_sources", not missing_sources, True,
+        f"llms-full.txt includes all {len(llms_sources['targets'])} llms.txt source documents",
+        f"llms-full.txt misses {len(missing_sources)} llms.txt source document(s): "
+        f"{', '.join(missing_sources[:3])}{'...' if len(missing_sources) > 3 else ''}")
 
     # faq_structured: FAQ.md present with enough QUESTION-SHAPED H2s to seed a
     # FAQPage. Only headings that read as questions count (end with '?' or lead
@@ -745,6 +875,10 @@ def site_checks(root: Path) -> dict[str, Any]:
     add("faq_structured", q >= MIN_FAQ_QUESTIONS, True,
         f"FAQ.md has {q} question sections (seeds FAQPage)",
         f"FAQ.md missing or thin ({q} question H2s; need >= {MIN_FAQ_QUESTIONS})")
+    faq_sync_ok, faq_sync_detail = faq_jsonld_sync_ok(jsonld_values, faq)
+    add("faq_jsonld_sync", faq_sync_ok, True,
+        faq_sync_detail,
+        faq_sync_detail)
 
     # citation_links (SUCCESS): every link an answer engine follows from the
     # curated surfaces must resolve to a LIVE target — the llms.txt map AND every
@@ -778,6 +912,7 @@ def site_checks(root: Path) -> dict[str, Any]:
         "soft": soft,
         "present_jsonld": sorted(present_types),
         "citation": cit,
+        "llms_full_sources": llms_sources,
     }
 
 

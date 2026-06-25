@@ -350,6 +350,49 @@ def test_site_checks_counts_breadcrumb_from_index_page(tmp_path: Path) -> None:
     by = {c["name"]: c for c in site["checks"]}
     assert "BreadcrumbList" in site["present_jsonld"], site
     assert by["jsonld_BreadcrumbList"]["ok"] is True, by["jsonld_BreadcrumbList"]
+    assert by["jsonld_BreadcrumbList"]["hard"] is True, by["jsonld_BreadcrumbList"]
+    assert by["breadcrumb_jsonld_shape"]["ok"] is True, by["breadcrumb_jsonld_shape"]
+
+
+def test_breadcrumb_shape_rejects_unordered_relative_items() -> None:
+    values = [{
+        "@type": "BreadcrumbList",
+        "itemListElement": [
+            {"@type": "ListItem", "position": 2, "name": "Docs", "item": "/fak/"},
+            {"@type": "ListItem", "position": 1, "name": "Home", "item": "https://example.com/"},
+        ],
+    }]
+    ok, detail = sc.breadcrumb_shape_ok(values)
+    assert ok is False and "invalid" in detail, (ok, detail)
+
+
+def test_faq_jsonld_sync_detects_stale_schema(tmp_path: Path) -> None:
+    (tmp_path / "docs").mkdir()
+    visible = "# FAQ\n\n" + "\n\n".join(
+        f"## What is question {i}?\n\nThis is a visible answer with enough prose."
+        for i in range(6)
+    )
+    stale_schema = (
+        '<script type="application/ld+json">'
+        '{"@type":"FAQPage","mainEntity":[{"@type":"Question","name":"What is question 0?",'
+        '"acceptedAnswer":{"@type":"Answer","text":"This answer is long enough."}}]}'
+        '</script>\n'
+    )
+    (tmp_path / "docs" / "FAQ.md").write_text(stale_schema + visible, encoding="utf-8")
+    by = {c["name"]: c for c in sc.site_checks(tmp_path)["checks"]}
+    assert by["faq_structured"]["ok"] is True, by["faq_structured"]
+    assert by["faq_jsonld_sync"]["ok"] is False, by["faq_jsonld_sync"]
+
+
+def test_llms_full_sources_detects_missing_source(tmp_path: Path) -> None:
+    (tmp_path / "docs").mkdir()
+    (tmp_path / "docs" / "a.md").write_text("# A", encoding="utf-8")
+    (tmp_path / "llms.txt").write_text("Key facts: x\n\n- [A](docs/a.md)", encoding="utf-8")
+    (tmp_path / "llms-full.txt").write_text(
+        "# corpus\n\nKey facts: x\n\n- [A](docs/a.md)\n", encoding="utf-8")
+    by = {c["name"]: c for c in sc.site_checks(tmp_path)["checks"]}
+    assert by["llms_full"]["ok"] is True, by["llms_full"]
+    assert by["llms_full_sources"]["ok"] is False, by["llms_full_sources"]
 
 
 def test_faq_nonquestion_h2_not_counted(tmp_path: Path) -> None:
@@ -396,8 +439,8 @@ def test_kpi_weights_sum_to_one() -> None:
     assert "links_crawlable" in sc.KPI_WEIGHTS, sc.KPI_WEIGHTS
 
 
-def test_schema_is_v2() -> None:
-    assert sc.SCHEMA.endswith("/2"), sc.SCHEMA
+def test_schema_is_v3() -> None:
+    assert sc.SCHEMA.endswith("/3"), sc.SCHEMA
 
 
 def test_headings_ignores_code_fence_hashes() -> None:
