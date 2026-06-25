@@ -45,6 +45,7 @@ type RungVerdict struct {
 	Rank     int    `json:"rank"`             // FoldRank(kind): restrictiveness-lattice position
 	Deferred bool   `json:"deferred"`         // Kind==DEFER: this rung abstained, did not participate
 	Winner   bool   `json:"winner"`           // this rung's verdict was the folded result
+	Elided   bool   `json:"elided,omitempty"` // this rung did NOT run: a max-rank verdict short-circuited the fold before it
 }
 
 // Decision is the full, explainable trace of one adjudication fold. It is the
@@ -92,6 +93,7 @@ func FoldExplain(ctx context.Context, chain []abi.Adjudicator, c *abi.ToolCall) 
 		indeterminateIdx := -1
 		sawConclusive := false
 		sawIndeterminate := false
+		brokeAt := -1 // index of the max-rank verdict that short-circuited the fold, or -1
 		d.Rungs = make([]RungVerdict, 0, len(chain))
 		for i, a := range chain {
 			rv := a.Adjudicate(ctx, c)
@@ -121,9 +123,18 @@ func FoldExplain(ctx context.Context, chain []abi.Adjudicator, c *abi.ToolCall) 
 				bestRank, best, bestIdx = rank, rv, i
 				sawConclusive = true
 				if isMaxFoldRank(rank) {
+					brokeAt = i
 					break
 				}
 			}
+		}
+		// A max-rank conclusive verdict short-circuits the fold (Fold does the same): the
+		// rungs after it did NOT run — they were ELIDED by the decision. Record them
+		// (un-evaluated, so no By/Kind) instead of dropping them, so the trace answers
+		// "which rung DECIDED and which were skipped" — the chain-level dual of a
+		// RungProfile eliding sub-rungs inside a single adjudicator.
+		for i := brokeAt + 1; brokeAt >= 0 && i < len(chain); i++ {
+			d.Rungs = append(d.Rungs, RungVerdict{Index: i, Rung: rungType(chain[i]), Elided: true})
 		}
 		switch {
 		case sawConclusive:
@@ -249,6 +260,10 @@ func (d Decision) Text() string {
 		marker := "  "
 		if r.Winner {
 			marker = "=>"
+		}
+		if r.Elided {
+			fmt.Fprintf(&b, "   [%d] %-26s %-9s   (elided: a max-rank verdict decided before this rung)\n", r.Index, r.Rung, "ELIDED")
+			continue
 		}
 		fmt.Fprintf(&b, "%s [%d] %-26s %-9s", marker, r.Index, r.Rung, r.Kind)
 		if r.Reason != "" {

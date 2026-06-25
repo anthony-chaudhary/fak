@@ -108,14 +108,19 @@ func TestFoldExplainShortCircuitMatchesFold(t *testing.T) {
 	if !reflect.DeepEqual(v, want) {
 		t.Fatalf("FoldExplain verdict = %+v, Fold = %+v", v, want)
 	}
-	if len(d.Rungs) != 2 {
-		t.Fatalf("FoldExplain rungs = %d, want 2", len(d.Rungs))
+	// The short-circuited tail is RECORDED as elided (#668) — it still was NOT
+	// evaluated (tailN stays 0), so the trace shows all three rungs: 2 run + 1 elided.
+	if len(d.Rungs) != 3 {
+		t.Fatalf("FoldExplain rungs = %d, want 3 (2 run + 1 elided)", len(d.Rungs))
 	}
 	if atomic.LoadInt32(&tailN) != 0 {
 		t.Fatalf("short-circuited tail was called %d times", tailN)
 	}
 	if !d.Rungs[1].Winner || d.Rungs[1].Kind != "DENY" {
 		t.Fatalf("winning rung = %+v, want rung[1] DENY", d.Rungs[1])
+	}
+	if !d.Rungs[2].Elided {
+		t.Fatalf("short-circuited tail rung should be marked Elided, got %+v", d.Rungs[2])
 	}
 }
 
