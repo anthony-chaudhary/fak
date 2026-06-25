@@ -158,5 +158,27 @@ class ReadOnlyClassificationTest(unittest.TestCase):
         self.assertEqual(s["read_only_frac"], 0.5, "Monitor read-only, Bash not")
 
 
+class DiscoverNamespaceDefaultTest(unittest.TestCase):
+    def test_default_discovers_all_non_excluded_namespaces(self) -> None:
+        sa = load()
+        self.assertEqual(sa.NS_INCLUDE_PREFIX, "", "default namespace filter must not be operator-specific")
+
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            for ns in ("-Users-USER-Documents-GitHub-fleet", "C--work-fak", "AppData-Local-Temp-fixture"):
+                nsdir = root / ns
+                nsdir.mkdir()
+                (nsdir / f"{ns}.jsonl").write_text("{}\n", encoding="utf-8")
+
+            found = sa.discover([str(root)])
+            names = {r["ns"] for r in found}
+            self.assertIn("-Users-USER-Documents-GitHub-fleet", names)
+            self.assertIn("C--work-fak", names)
+            self.assertNotIn("AppData-Local-Temp-fixture", names)
+
+            narrowed = sa.discover([str(root)], ns_prefix="C--work")
+            self.assertEqual({r["ns"] for r in narrowed}, {"C--work-fak"})
+
+
 if __name__ == "__main__":
     unittest.main()

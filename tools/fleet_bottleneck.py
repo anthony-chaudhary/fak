@@ -169,7 +169,7 @@ def _token_audit(days, cap):
     if session_audit is None:
         return None
     try:
-        files = session_audit.discover(session_audit.DEFAULT_ROOTS, since_days=days)
+        files = session_audit.discover(session_audit.DEFAULT_ROOTS, since_days=days, ns_prefix="")
         files = files[:cap]
         sess = [session_audit.analyze(f["path"]) for f in files]
         sess = [s for s in sess if "error" not in s]

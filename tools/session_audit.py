@@ -50,7 +50,7 @@ DEFAULT_ROOTS = [
 ]
 # transient test-fixture / temp-workspace namespaces — never "our own sessions"
 EXCLUDE_NS_SUBSTR = ["pytest-of-USER", "AppData-Local-Temp", "workspace", "-ws", "test_"]
-NS_INCLUDE_PREFIX = "C--work"   # real project namespaces; override with --ns-prefix '' / --all
+NS_INCLUDE_PREFIX = ""   # all non-excluded namespaces by default; narrow with --ns-prefix PREFIX
 
 READ_ONLY_TOOLS = {"Read", "Glob", "Grep", "LS", "NotebookRead", "WebFetch", "WebSearch",
                    "TodoRead", "ToolSearch",
@@ -162,7 +162,8 @@ def analyze(path):
     seen_msg_ids = set()
 
     try:
-        lines = open(path, encoding="utf-8").read().splitlines()
+        with open(path, encoding="utf-8") as f:
+            lines = f.read().splitlines()
     except Exception as e:
         return {"path": path, "error": str(e)}
 
