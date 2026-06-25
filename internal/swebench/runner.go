@@ -1,11 +1,15 @@
 package swebench
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"runtime"
+	"strings"
 	"time"
 )
 
@@ -299,11 +303,143 @@ type deepSWERunner struct {
 	cfg RunConfig
 }
 
-// RunInstance returns an error because the DeepSWE/R2E-Gym baseline is not yet wired;
-// the Run loop records it as a failed instance rather than emitting a placeholder patch.
+type deepSWERequest struct {
+	Schema    string   `json:"schema"`
+	Instance  Instance `json:"instance"`
+	Model     string   `json:"model,omitempty"`
+	MaxSteps  int      `json:"max_steps,omitempty"`
+	Repo      string   `json:"repo,omitempty"`
+	Runner    string   `json:"runner"`
+	StartedAt string   `json:"started_at"`
+}
+
+type deepSWEResponse struct {
+	InstanceID      string `json:"instance_id"`
+	ModelNameOrPath string `json:"model_name_or_path"`
+	ModelPatch      string `json:"model_patch"`
+	Patch           string `json:"patch,omitempty"`
+	Error           string `json:"error,omitempty"`
+}
+
+// RunInstance executes a configured DeepSWE/R2E-Gym adapter. The adapter receives
+// a JSON request on stdin and must return either a SWE-bench prediction JSON object
+// or a unified diff on stdout. Missing adapter configuration is a failed instance,
+// not a synthetic prediction.
 func (d *deepSWERunner) RunInstance(ctx context.Context, in Instance) (Prediction, error) {
-	// The DeepSWE/R2E-Gym baseline is not wired yet. Return an error (the Run loop
-	// records it as a failed instance with an empty patch) rather than a placeholder
-	// patch that would masquerade as a real prediction in preds.json.
-	return Prediction{}, fmt.Errorf("deepswe runner not wired (model=%q): point --model at an R2E-Gym/DeepSWE endpoint (baseline integration pending)", d.cfg.Model)
+	exe, args, workdir, err := d.adapterCommand()
+	if err != nil {
+		return Prediction{}, err
+	}
+	req := deepSWERequest{
+		Schema:    "fak.swebench.deepswe-request.v1",
+		Instance:  in,
+		Model:     d.cfg.Model,
+		MaxSteps:  d.cfg.MaxSteps,
+		Repo:      d.cfg.DeepSWERepo,
+		Runner:    string(RunnerDeepSWE),
+		StartedAt: time.Now().UTC().Format(time.RFC3339),
+	}
+	payload, err := json.Marshal(req)
+	if err != nil {
+		return Prediction{}, fmt.Errorf("deepswe request encode: %w", err)
+	}
+
+	cmd := exec.CommandContext(ctx, exe, args...)
+	if workdir != "" {
+		cmd.Dir = workdir
+	}
+	cmd.Stdin = bytes.NewReader(payload)
+	cmd.Env = append(os.Environ(),
+		"FAK_SWEBENCH_INSTANCE_ID="+in.InstanceID,
+		"FAK_SWEBENCH_REPO="+in.RepoFull(),
+		"FAK_SWEBENCH_BASE_COMMIT="+in.BaseCommit,
+		"FAK_DEEPSWE_MODEL="+d.cfg.Model,
+		"FAK_DEEPSWE_MAX_STEPS="+fmt.Sprint(d.cfg.MaxSteps),
+	)
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+
+	if err := cmd.Run(); err != nil {
+		msg := strings.TrimSpace(stderr.String())
+		if msg != "" {
+			return Prediction{}, fmt.Errorf("deepswe adapter failed: %w: %s", err, msg)
+		}
+		return Prediction{}, fmt.Errorf("deepswe adapter failed: %w", err)
+	}
+	return parseDeepSWEPrediction(in, d.cfg.Model, stdout.Bytes())
+}
+
+func (d *deepSWERunner) adapterCommand() (exe string, args []string, workdir string, err error) {
+	if exe = strings.TrimSpace(os.Getenv("FAK_DEEPSWE_RUNNER")); exe != "" {
+		return exe, splitCommandArgs(os.Getenv("FAK_DEEPSWE_RUNNER_ARGS")), strings.TrimSpace(d.cfg.DeepSWERepo), nil
+	}
+	if d.cfg.DeepSWERepo == "" {
+		return "", nil, "", fmt.Errorf("deepswe adapter not configured: set FAK_DEEPSWE_RUNNER or pass DeepSWERepo with a fak-deepswe-runner executable")
+	}
+	for _, name := range deepSWEAdapterNames() {
+		candidate := filepath.Join(d.cfg.DeepSWERepo, name)
+		if info, statErr := os.Stat(candidate); statErr == nil && !info.IsDir() {
+			return candidate, nil, d.cfg.DeepSWERepo, nil
+		}
+	}
+	return "", nil, "", fmt.Errorf("deepswe adapter not found in %s: expected one of %s", d.cfg.DeepSWERepo, strings.Join(deepSWEAdapterNames(), ", "))
+}
+
+func deepSWEAdapterNames() []string {
+	if runtime.GOOS == "windows" {
+		return []string{"fak-deepswe-runner.exe", "fak-deepswe-runner.cmd", "fak-deepswe-runner.bat", "fak-deepswe-runner"}
+	}
+	return []string{"fak-deepswe-runner"}
+}
+
+func splitCommandArgs(s string) []string {
+	return strings.Fields(strings.TrimSpace(s))
+}
+
+func parseDeepSWEPrediction(in Instance, model string, raw []byte) (Prediction, error) {
+	text := strings.TrimSpace(string(raw))
+	if text == "" {
+		return Prediction{}, fmt.Errorf("deepswe adapter returned empty stdout")
+	}
+	var resp deepSWEResponse
+	if err := json.Unmarshal([]byte(text), &resp); err == nil {
+		if resp.Error != "" {
+			return Prediction{}, fmt.Errorf("deepswe adapter returned error: %s", resp.Error)
+		}
+		patch := resp.ModelPatch
+		if patch == "" {
+			patch = resp.Patch
+		}
+		return normalizeDeepSWEPrediction(in, model, Prediction{
+			InstanceID:      resp.InstanceID,
+			ModelNameOrPath: resp.ModelNameOrPath,
+			ModelPatch:      patch,
+		})
+	}
+	return normalizeDeepSWEPrediction(in, model, Prediction{
+		InstanceID:      in.InstanceID,
+		ModelNameOrPath: model,
+		ModelPatch:      text,
+	})
+}
+
+func normalizeDeepSWEPrediction(in Instance, model string, pred Prediction) (Prediction, error) {
+	if pred.InstanceID == "" {
+		pred.InstanceID = in.InstanceID
+	}
+	if pred.InstanceID != in.InstanceID {
+		return Prediction{}, fmt.Errorf("deepswe adapter returned instance_id %q for %q", pred.InstanceID, in.InstanceID)
+	}
+	if pred.ModelNameOrPath == "" {
+		if model != "" {
+			pred.ModelNameOrPath = model
+		} else {
+			pred.ModelNameOrPath = string(RunnerDeepSWE)
+		}
+	}
+	if strings.TrimSpace(pred.ModelPatch) == "" {
+		return Prediction{}, fmt.Errorf("deepswe adapter returned empty patch for %s", in.InstanceID)
+	}
+	return pred, nil
 }
