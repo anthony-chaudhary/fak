@@ -199,6 +199,7 @@ var registry = []Bench{
 			"--telemetry  -  provider cache-read JSONL to score observed savings",
 			"--anchors-file  -  JSONL/JSON/CSV ranked anchor workload",
 			"--index-out  -  write the selected fak.vcache.anchor_index.v1 artifact",
+			"--plan-out  -  write the selected fak.vcache.dev_plan.v1 artifact",
 			"--two-x  -  multiplier gate required for success",
 		},
 		Doc: "docs/cli-reference.md",

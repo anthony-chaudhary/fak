@@ -139,8 +139,9 @@ and cap-bounded.
 
 When a new local feature lands, run the same dogfood packet instead of inventing a
 one-off proof. It exercises the current loop ledger, vCache score/refutation
-surface, prompt-tool-pruning tests, code-slop scorecard, and dogfood coverage
-scorecard, then writes a JSON evidence bundle under `.fak/recent-feature-dogfood/`.
+surface, benchmark catalog, avoided-call economics tests, prompt-tool-pruning
+tests, code-slop scorecard, and dogfood coverage scorecard, then writes a JSON
+evidence bundle under `.fak/recent-feature-dogfood/`.
 
 ```bash
 # quick local run

@@ -46,14 +46,16 @@ const modPrefix = "github.com/anthony-chaudhary/fak/internal/"
 var tier = map[string]int{
 	"abi": 0,
 
-	"accounts": 1, "appversion": 1, "blob": 1, "boundarylint": 1, "cachemeta": 1, "cacheobs": 1, "canon": 1, "compute": 1, "deletioncert": 1, "demoui": 1, "ggufload": 1, "gpulease": 1, "hfhub": 1, "leakcheck": 1, "metalgemm": 1, "metrics": 1, "model": 1, "pathlint": 1, "pathutil": 1, "provenance": 1, "swebench": 1, "urllint": 1, "webbench": 1,
+	"benchcatalog": 1, // pure benchmark registry used by fak benchmarks and scorecards; stdlib-only, off the hot path.
+	"callavoid":    1, // pure avoided-call economics/accounting primitive; stdlib-only, folded by higher layers.
+	"accounts":     1, "appversion": 1, "blob": 1, "boundarylint": 1, "cachemeta": 1, "cacheobs": 1, "canon": 1, "compute": 1, "deletioncert": 1, "demoui": 1, "ggufload": 1, "gpulease": 1, "hfhub": 1, "leakcheck": 1, "metalgemm": 1, "metrics": 1, "model": 1, "pathlint": 1, "pathutil": 1, "provenance": 1, "swebench": 1, "urllint": 1, "webbench": 1,
 	"blobfs": 1, "blobhttp": 1, // durable on-disk / remote-HTTP content-addressed Ref backends; attach to abi like blob (Resolver+PageOutBackend), import only abi+blob+stdlib.
 	"xenginekv": 1, // cross-engine zero-copy KV co-residence arena (#448): a RefRegion-issuing Resolver+RegionBackend+PageOutBackend; attaches to abi like blob, imports only abi+blob+stdlib (FAK_XENGINE_KV-gated).
 
 	"adjudicator": 2, "ctxmmu": 2, "engine": 2, "enginecache": 2, "grammar": 2, "kernel": 2,
 	"preflight": 2, "vdso": 2, "plancfi": 2, "steward": 2, "witness": 2,
 	"harvest": 2, "shipgate": 2, "policy": 2, "modelengine": 2, "ratelimit": 2,
-	"journal": 2, "gitgate": 2, "spec": 2, // spec: the ProvisionalSink/OpsSpec speculation mechanism; composes model+polymodel under abi (off-defconfig, gated by FAK_POLYMODEL).
+	"journal": 2, "gitgate": 2, "safecommit": 2, "spec": 2, // spec: the ProvisionalSink/OpsSpec speculation mechanism; composes model+polymodel under abi (off-defconfig, gated by FAK_POLYMODEL).
 	"storedrv": 2, // content-addressed storage ROUTER: composes the blob/blobfs/blobhttp (tier-1) drivers into one namespace; the abi RegionBackend only when FAK_STORE opts in.
 
 	"ifc": 3, "normgate": 3, "recall": 3, "kvmmu": 3, "radixkv": 3, "cdb": 3, "contextq": 3, "agentdojo": 3, "toollint": 3,

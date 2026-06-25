@@ -16,7 +16,7 @@ func TestVCacheBenchmarkIsDiscoverableOfflineGate(t *testing.T) {
 	if !strings.Contains(b.Run, "fak vcache bench --json") {
 		t.Fatalf("vcache run = %q, want vcache bench JSON gate", b.Run)
 	}
-	for _, want := range []string{"--telemetry", "--anchors-file", "--index-out", "--two-x"} {
+	for _, want := range []string{"--telemetry", "--anchors-file", "--index-out", "--plan-out", "--two-x"} {
 		if !containsFlag(b.Flags, want) {
 			t.Fatalf("vcache flags = %v, missing %s", b.Flags, want)
 		}
