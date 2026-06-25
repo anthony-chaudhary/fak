@@ -59,8 +59,9 @@ provider calibration/warming remain tracked by #716-#718, and Codex/OpenAI cache
 token telemetry remains tracked by #727.
 prove runs the deterministic star-anchor token-savings proof. Exit 0 means PROVEN;
 exit 1 means REFUTED; exit 2 means usage error.
-prove-telemetry replays provider usage JSONL, such as Claude Code probe output or
-OpenAI Responses/Chat usage objects, and proves realized savings from observed
+prove-telemetry replays provider usage JSONL, such as Claude Code probe output,
+OpenAI Responses/Chat usage objects, Codex CLI token_count rows, or codex exec
+--json turn.completed usage rows, and proves realized savings from observed
 cache counters.
 prove-recall runs the deterministic M4 cost-gate proof (the §11.0 headline): a
 single ~10-token unit recalled from a long warm prefix is almost always a net LOSS,
@@ -344,6 +345,7 @@ func defaultCodexOpenAIStatus() vcacheCodexOpenAIStatus {
 		CachedTokenFields: []string{
 			"usage.input_tokens_details.cached_tokens",
 			"usage.prompt_tokens_details.cached_tokens",
+			"usage.cached_input_tokens",
 			"payload.info.last_token_usage.cached_input_tokens",
 		},
 		Issue: "https://github.com/anthony-chaudhary/fak/issues/727",
@@ -404,6 +406,7 @@ type vcacheTelemetryJSONLRow struct {
 type vcacheOpenAIUsage struct {
 	InputTokens         float64                   `json:"input_tokens"`
 	PromptTokens        float64                   `json:"prompt_tokens"`
+	CachedInputTokens   float64                   `json:"cached_input_tokens"`
 	InputTokensDetails  vcacheCachedTokensDetails `json:"input_tokens_details"`
 	PromptTokensDetails vcacheCachedTokensDetails `json:"prompt_tokens_details"`
 }
@@ -498,7 +501,7 @@ func (r vcacheTelemetryJSONLRow) hasClaudeCounters() bool {
 
 func (u vcacheOpenAIUsage) openAITokens() (float64, float64) {
 	total := firstNonZero(u.InputTokens, u.PromptTokens)
-	cached := firstNonZero(u.InputTokensDetails.CachedTokens, u.PromptTokensDetails.CachedTokens)
+	cached := firstNonZero(u.InputTokensDetails.CachedTokens, u.PromptTokensDetails.CachedTokens, u.CachedInputTokens)
 	return total, cached
 }
 

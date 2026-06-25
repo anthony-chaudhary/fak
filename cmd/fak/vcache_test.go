@@ -223,6 +223,24 @@ func TestReadVCacheTelemetryOpenAIChatUsage(t *testing.T) {
 	}
 }
 
+func TestReadVCacheTelemetryCodexExecUsage(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "codex-exec.jsonl")
+	if err := os.WriteFile(path, []byte(`{"type":"turn.completed","usage":{"input_tokens":24763,"cached_input_tokens":24448,"output_tokens":122}}`+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	rows, err := readVCacheTelemetry(path, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) != 1 {
+		t.Fatalf("rows=%d, want 1", len(rows))
+	}
+	if rows[0].InputTokens != 315 || rows[0].CacheReadInputTokens != 24448 || rows[0].CacheCreationInputTokens != 0 {
+		t.Fatalf("row=%+v, want Codex exec total split into uncached=315 cached=24448", rows[0])
+	}
+}
+
 func TestRunVCacheProveTelemetryCodexTokenCountEvents(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "codex-session.jsonl")
 	if err := os.WriteFile(path, []byte(strings.Join([]string{
