@@ -5,8 +5,6 @@ description: "fak's demo-quality scorecard grades 32 demos on five deterministic
 
 # Demo-quality scorecard
 
-The fak demo-quality scorecard is a deterministic measuring stick for "demos a skeptic can run" — demos you can launch in one command and reproduce without a model, an API key, or a babysitter. It grades 32 demos across five axes (runnable, reproducible, honest_scope, self_contained, documented), folding them into a demo-score (0–100, A–F) and a demo-debt integer that counts concrete, re-derivable demo defects. Every number is re-derived from disk by `tools/demo_quality_scorecard.py`, never hand-entered, so the score cannot be gamed by editing the doc. At the current snapshot all 32 demos grade A and demo-debt is 0.
-
 <!-- demo-quality-scorecard: 2026-06-25 · process: tools/demo_quality_scorecard.py -->
 
 > Regenerate: `python tools/demo_quality_scorecard.py --markdown --stamp DATE > docs/DEMO-QUALITY-SCORECARD.md`
