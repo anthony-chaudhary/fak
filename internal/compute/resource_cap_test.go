@@ -25,6 +25,57 @@ func TestSingleResourceCapExceeded(t *testing.T) {
 	}
 }
 
+func TestQ8RowChunksForCap(t *testing.T) {
+	t.Run("unknown cap keeps single upload", func(t *testing.T) {
+		chunks, chunked, ok := q8RowChunksForCap(5, 32, 32, 0)
+		if !ok || chunked {
+			t.Fatalf("q8RowChunksForCap unknown cap ok=%v chunked=%v, want ok=true chunked=false", ok, chunked)
+		}
+		if len(chunks) != 1 || chunks[0] != (q8RowChunk{start: 0, rows: 5}) {
+			t.Fatalf("chunks=%+v, want one full chunk", chunks)
+		}
+	})
+
+	t.Run("under cap keeps single upload", func(t *testing.T) {
+		chunks, chunked, ok := q8RowChunksForCap(2, 32, 32, 96)
+		if !ok || chunked {
+			t.Fatalf("q8RowChunksForCap under cap ok=%v chunked=%v, want ok=true chunked=false", ok, chunked)
+		}
+		if len(chunks) != 1 || chunks[0] != (q8RowChunk{start: 0, rows: 2}) {
+			t.Fatalf("chunks=%+v, want one full chunk", chunks)
+		}
+	})
+
+	t.Run("over cap splits by output rows", func(t *testing.T) {
+		chunks, chunked, ok := q8RowChunksForCap(5, 32, 32, 96)
+		if !ok || !chunked {
+			t.Fatalf("q8RowChunksForCap over cap ok=%v chunked=%v, want ok=true chunked=true", ok, chunked)
+		}
+		want := []q8RowChunk{{start: 0, rows: 3}, {start: 3, rows: 2}}
+		if len(chunks) != len(want) {
+			t.Fatalf("len(chunks)=%d want %d: %+v", len(chunks), len(want), chunks)
+		}
+		for i := range want {
+			if chunks[i] != want[i] {
+				t.Fatalf("chunk[%d]=%+v want %+v", i, chunks[i], want[i])
+			}
+			if codeBytes := chunks[i].rows * 32; codeBytes > 96 {
+				t.Fatalf("chunk[%d] code bytes=%d exceeds cap", i, codeBytes)
+			}
+			if scaleBytes := chunks[i].rows * 4; scaleBytes > 96 {
+				t.Fatalf("chunk[%d] scale bytes=%d exceeds cap", i, scaleBytes)
+			}
+		}
+	})
+
+	t.Run("single row over cap is impossible", func(t *testing.T) {
+		chunks, chunked, ok := q8RowChunksForCap(2, 128, 32, 64)
+		if ok || !chunked || len(chunks) != 0 {
+			t.Fatalf("q8RowChunksForCap row over cap chunks=%+v chunked=%v ok=%v, want impossible chunked plan", chunks, chunked, ok)
+		}
+	})
+}
+
 func TestFormatVulkanResourceCapErrorNamesBufferAndCaps(t *testing.T) {
 	got := formatVulkanResourceCapError("Q8_0 weight code buffer [8192,524288]", 4<<30, 2<<30, 2<<30, 3<<30)
 	for _, want := range []string{

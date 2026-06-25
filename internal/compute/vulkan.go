@@ -84,6 +84,18 @@ type vulkanBuf struct {
 	n                   int
 	scalePtr            unsafe.Pointer
 	scaleN              int
+	q8Chunks            []vulkanQ8Chunk
+	budgetedWeightBytes int64
+	hostVisibleWeight   bool
+}
+
+type vulkanQ8Chunk struct {
+	rowStart            int
+	rows                int
+	ptr                 unsafe.Pointer
+	n                   int
+	scalePtr            unsafe.Pointer
+	scaleN              int
 	budgetedWeightBytes int64
 	hostVisibleWeight   bool
 }
@@ -388,6 +400,17 @@ func (v *vulkanBackend) uploadQ8Locked(shape []int, codes []int8, scales []float
 	if len(scales) != out*(in/block) {
 		panic("compute: vulkan Q8 scale length does not match shape")
 	}
+	chunks, chunked, ok := q8RowChunksForCap(out, in, block, v.maxBufferBytes)
+	if !ok {
+		rowBytes := in
+		if scaleRowBytes := (in / block) * F32.Bytes(); scaleRowBytes > rowBytes {
+			rowBytes = scaleRowBytes
+		}
+		panic(formatVulkanResourceCapError("Q8_0 weight row "+shapeText(shape), rowBytes, v.maxBufferBytes, v.maxStorageBufferRange, v.maxMemoryAllocationSize))
+	}
+	if chunked {
+		return v.uploadQ8ChunksLocked(shape, codes, scales, block, chunks)
+	}
 	// The code buffer is the bulk of the weight (in*out bytes) — it's the budget's subject.
 	// The scale buffer is ~1/32 the size; keep it device-local so the hot per-block scales
 	// stay fast even when the codes spill host-visible.
@@ -409,6 +432,44 @@ func (v *vulkanBackend) uploadQ8Locked(shape []int, codes []int8, scales []float
 		budgetedWeightBytes: codeBuf.budgetedWeightBytes,
 		hostVisibleWeight:   codeBuf.hostVisibleWeight,
 	}
+	return makeTensor(v, Q8_0, RowMajor, append([]int(nil), shape...), q, buf)
+}
+
+func (v *vulkanBackend) uploadQ8ChunksLocked(shape []int, codes []int8, scales []float32, block int, chunks []q8RowChunk) Tensor {
+	out, in := shape[0], shape[1]
+	scaleCols := in / block
+	shapeName := shapeText(shape)
+	buf := &vulkanBuf{q8Chunks: make([]vulkanQ8Chunk, 0, len(chunks))}
+	for i, chunk := range chunks {
+		codeStart := chunk.start * in
+		codeEnd := codeStart + chunk.rows*in
+		scaleStart := chunk.start * scaleCols
+		scaleEnd := scaleStart + chunk.rows*scaleCols
+		codeLabel := "Q8_0 weight code chunk " + strconv.Itoa(i) + " rows " + strconv.Itoa(chunk.start) + ":" + strconv.Itoa(chunk.start+chunk.rows) + " " + shapeName
+		scaleLabel := "Q8_0 weight scale chunk " + strconv.Itoa(i) + " rows " + strconv.Itoa(chunk.start) + ":" + strconv.Itoa(chunk.start+chunk.rows) + " " + shapeName
+		codeBuf := v.dallocWeightFor(codeEnd-codeStart, codeLabel)
+		scaleBuf := v.dallocFor((scaleEnd-scaleStart)*F32.Bytes(), scaleLabel)
+		if codeEnd > codeStart {
+			C.fvk_h2d(codeBuf.ptr, unsafe.Pointer(&codes[codeStart]), C.size_t(codeEnd-codeStart))
+		}
+		if scaleEnd > scaleStart {
+			C.fvk_h2d(scaleBuf.ptr, unsafe.Pointer(&scales[scaleStart]), C.size_t((scaleEnd-scaleStart)*F32.Bytes()))
+		}
+		buf.q8Chunks = append(buf.q8Chunks, vulkanQ8Chunk{
+			rowStart:            chunk.start,
+			rows:                chunk.rows,
+			ptr:                 codeBuf.ptr,
+			n:                   codeBuf.n,
+			scalePtr:            scaleBuf.ptr,
+			scaleN:              scaleBuf.n,
+			budgetedWeightBytes: codeBuf.budgetedWeightBytes,
+			hostVisibleWeight:   codeBuf.hostVisibleWeight,
+		})
+	}
+	if out > 0 && len(buf.q8Chunks) == 0 {
+		panic("compute: vulkan Q8 chunk upload produced no chunks")
+	}
+	q := &QuantSpec{Block: block, Axis: 2, Bits: 8, Symmetric: true}
 	return makeTensor(v, Q8_0, RowMajor, append([]int(nil), shape...), q, buf)
 }
 
@@ -442,7 +503,37 @@ func (v *vulkanBackend) Read(t Tensor) []float32 {
 func (v *vulkanBackend) Free(t Tensor) {
 	vulkanMu.Lock()
 	defer vulkanMu.Unlock()
-	if db, ok := t.buf.(*vulkanBuf); ok && db.ptr != nil {
+	if db, ok := t.buf.(*vulkanBuf); ok {
+		for i := range db.q8Chunks {
+			chunk := &db.q8Chunks[i]
+			if chunk.scalePtr != nil {
+				C.fvk_free(chunk.scalePtr)
+				chunk.scalePtr = nil
+				chunk.scaleN = 0
+			}
+			if chunk.ptr != nil {
+				C.fvk_free(chunk.ptr)
+				chunk.ptr = nil
+				chunk.n = 0
+			}
+			if chunk.budgetedWeightBytes > 0 {
+				v.dlUsed -= chunk.budgetedWeightBytes
+				if v.dlUsed < 0 {
+					v.dlUsed = 0
+				}
+				chunk.budgetedWeightBytes = 0
+			}
+			if chunk.hostVisibleWeight {
+				if v.hostvisN > 0 {
+					v.hostvisN--
+				}
+				chunk.hostVisibleWeight = false
+			}
+		}
+		db.q8Chunks = nil
+		if db.ptr == nil {
+			return
+		}
 		if db.scalePtr != nil {
 			C.fvk_free(db.scalePtr)
 			db.scalePtr = nil
@@ -486,8 +577,34 @@ func (v *vulkanBackend) MatMul(w, x Tensor) Tensor {
 
 func (v *vulkanBackend) q8MatMulLocked(w, x, y Tensor, out, in, P int) {
 	wb := v.q8WeightBufLocked(w, in, "Q8 MatMul")
+	if len(wb.q8Chunks) > 0 {
+		v.q8MatMulChunksLocked(wb, x, y, out, in, P)
+		return
+	}
 	C.fvk_q8_matmul_f32(wb.ptr, wb.scalePtr, v.vp(x), v.vp(y),
 		C.int(out), C.int(in), C.int(P))
+}
+
+func (v *vulkanBackend) q8MatMulChunksLocked(wb *vulkanBuf, x, y Tensor, out, in, P int) {
+	for _, chunk := range wb.q8Chunks {
+		tmpShape := []int{P, chunk.rows}
+		if P == 1 {
+			tmpShape = []int{chunk.rows}
+		}
+		_, tmpBuf := v.devTr(tmpShape, F32)
+		C.fvk_q8_matmul_f32(chunk.ptr, chunk.scalePtr, v.vp(x), tmpBuf.ptr,
+			C.int(chunk.rows), C.int(in), C.int(P))
+		v.copyQ8ChunkOutputLocked(y.buf.(*vulkanBuf), tmpBuf, out, chunk.rowStart, chunk.rows, P)
+	}
+}
+
+func (v *vulkanBackend) copyQ8ChunkOutputLocked(dst, src *vulkanBuf, out, rowStart, rows, P int) {
+	bytes := rows * F32.Bytes()
+	for p := 0; p < P; p++ {
+		dstOff := (p*out + rowStart) * F32.Bytes()
+		srcOff := p * rows * F32.Bytes()
+		C.fvk_d2d_range(dst.ptr, C.size_t(dstOff), src.ptr, C.size_t(srcOff), C.size_t(bytes))
+	}
 }
 
 func (v *vulkanBackend) q8WeightBufLocked(w Tensor, in int, op string) *vulkanBuf {
@@ -500,7 +617,15 @@ func (v *vulkanBackend) q8WeightBufLocked(w Tensor, in int, op string) *vulkanBu
 	// The q8_matmul shader tiles the input in windows of SHARED_CAP floats, so any
 	// 32-divisible input dim is supported (e.g. a 1.5B FFN down_proj with in=8960).
 	wb := w.buf.(*vulkanBuf)
-	if wb.scalePtr == nil {
+	if len(wb.q8Chunks) > 0 {
+		for _, chunk := range wb.q8Chunks {
+			if chunk.ptr == nil || chunk.scalePtr == nil {
+				panic("compute: vulkan " + op + " missing Q8 chunk device buffers")
+			}
+		}
+		return wb
+	}
+	if wb.ptr == nil || wb.scalePtr == nil {
 		panic("compute: vulkan " + op + " missing device scale buffer")
 	}
 	return wb
@@ -624,6 +749,11 @@ func (v *vulkanBackend) MatMul2(w0, w1, x Tensor) (Tensor, Tensor) {
 		}
 		wb0 := v.q8WeightBufLocked(w0, in, "Q8 MatMul2")
 		wb1 := v.q8WeightBufLocked(w1, in, "Q8 MatMul2")
+		if len(wb0.q8Chunks) > 0 || len(wb1.q8Chunks) > 0 {
+			v.q8MatMulLocked(w0, x, y0, out0, in, P)
+			v.q8MatMulLocked(w1, x, y1, out1, in, P)
+			return y0, y1
+		}
 		C.fvk_q8_matmul2_f32(wb0.ptr, wb0.scalePtr, wb1.ptr, wb1.scalePtr,
 			v.vp(x), v.vp(y0), v.vp(y1),
 			C.int(out0), C.int(out1), C.int(in), C.int(P))
@@ -665,6 +795,12 @@ func (v *vulkanBackend) MatMul3(wq, wk, wv, x Tensor) (Tensor, Tensor, Tensor) {
 		wbq := v.q8WeightBufLocked(wq, in, "Q8 MatMul3")
 		wbk := v.q8WeightBufLocked(wk, in, "Q8 MatMul3")
 		wbv := v.q8WeightBufLocked(wv, in, "Q8 MatMul3")
+		if len(wbq.q8Chunks) > 0 || len(wbk.q8Chunks) > 0 || len(wbv.q8Chunks) > 0 {
+			v.q8MatMulLocked(wq, x, q, qOut, in, P)
+			v.q8MatMulLocked(wk, x, k, kOut, in, P)
+			v.q8MatMulLocked(wv, x, val, vOut, in, P)
+			return q, k, val
+		}
 		C.fvk_q8_matmul3_f32(wbq.ptr, wbq.scalePtr, wbk.ptr, wbk.scalePtr, wbv.ptr, wbv.scalePtr,
 			v.vp(x), v.vp(q), v.vp(k), v.vp(val),
 			C.int(qOut), C.int(kOut), C.int(vOut), C.int(in), C.int(P))
@@ -709,6 +845,13 @@ func (v *vulkanBackend) RMSNormMatMul2(w0, w1, x, normWeight Tensor, eps float32
 		}
 		wb0 := v.q8WeightBufLocked(w0, in, "Q8 RMSNormMatMul2")
 		wb1 := v.q8WeightBufLocked(w1, in, "Q8 RMSNormMatMul2")
+		if len(wb0.q8Chunks) > 0 || len(wb1.q8Chunks) > 0 {
+			xn, _ := v.devTr([]int{in}, F32)
+			C.fvk_rmsnorm_f32(v.vp(x), v.vp(normWeight), v.vp(xn), C.int(P), C.int(in), C.float(eps))
+			v.q8MatMulLocked(w0, xn, y0, out0, in, P)
+			v.q8MatMulLocked(w1, xn, y1, out1, in, P)
+			return y0, y1
+		}
 		C.fvk_rmsnorm_q8_matmul2_f32(wb0.ptr, wb0.scalePtr, wb1.ptr, wb1.scalePtr,
 			v.vp(x), v.vp(normWeight), v.vp(y0), v.vp(y1),
 			C.int(out0), C.int(out1), C.int(in), C.int(P), C.float(eps))
@@ -756,6 +899,14 @@ func (v *vulkanBackend) RMSNormMatMul3(wq, wk, wv, x, normWeight Tensor, eps flo
 		wbq := v.q8WeightBufLocked(wq, in, "Q8 RMSNormMatMul3")
 		wbk := v.q8WeightBufLocked(wk, in, "Q8 RMSNormMatMul3")
 		wbv := v.q8WeightBufLocked(wv, in, "Q8 RMSNormMatMul3")
+		if len(wbq.q8Chunks) > 0 || len(wbk.q8Chunks) > 0 || len(wbv.q8Chunks) > 0 {
+			xn, _ := v.devTr([]int{in}, F32)
+			C.fvk_rmsnorm_f32(v.vp(x), v.vp(normWeight), v.vp(xn), C.int(P), C.int(in), C.float(eps))
+			v.q8MatMulLocked(wq, xn, q, qOut, in, P)
+			v.q8MatMulLocked(wk, xn, k, kOut, in, P)
+			v.q8MatMulLocked(wv, xn, val, vOut, in, P)
+			return q, k, val
+		}
 		C.fvk_rmsnorm_q8_matmul3_f32(wbq.ptr, wbq.scalePtr, wbk.ptr, wbk.scalePtr, wbv.ptr, wbv.scalePtr,
 			v.vp(x), v.vp(normWeight), v.vp(q), v.vp(k), v.vp(val),
 			C.int(qOut), C.int(kOut), C.int(vOut), C.int(in), C.int(P), C.float(eps))
@@ -816,6 +967,18 @@ func (v *vulkanBackend) SwiGLUMatMulAddInPlace(dst, w, gate, up Tensor) {
 		C.fvk_swiglu_matmul_add_f32(v.vp(w), v.vp(gate), v.vp(up), v.vp(dst), C.int(out), C.int(in), C.int(P))
 	case Q8_0:
 		wb := v.q8WeightBufLocked(w, in, "Q8 SwiGLUMatMulAddInPlace")
+		if len(wb.q8Chunks) > 0 {
+			sw, _ := v.devTr(append([]int(nil), gate.Shape...), F32)
+			C.fvk_swiglu_f32(v.vp(gate), v.vp(up), v.vp(sw), C.int(gate.Numel()))
+			projShape := []int{P, out}
+			if P == 1 {
+				projShape = []int{out}
+			}
+			proj, _ := v.devTr(projShape, F32)
+			v.q8MatMulLocked(w, sw, proj, out, in, P)
+			C.fvk_add_f32(v.vp(dst), v.vp(proj), C.int(dst.Numel()))
+			return
+		}
 		C.fvk_swiglu_q8_matmul_add_f32(wb.ptr, wb.scalePtr, v.vp(gate), v.vp(up), v.vp(dst), C.int(out), C.int(in), C.int(P))
 	default:
 		panic("compute: vulkan SwiGLUMatMulAddInPlace unsupported weight dtype " + w.Dtype.String())
