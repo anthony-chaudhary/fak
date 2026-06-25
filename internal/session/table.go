@@ -276,6 +276,23 @@ func (t *Table) SetTurnIntent(trace string, intent TurnIntent) (State, bool) {
 	return t.putLocked(cur), true
 }
 
+// SetGoal records the session's active goal root (issue #849, the reachability-layer
+// epic #844). A terminal session rejects the change. The table only RECORDS it — a
+// scheduler reading Snapshot decides whether to rank by it, and behaves identically
+// when the goal is zero. The goal never gates correctness; it is a retention/ranking
+// root only. Setting it bumps Rev like any other write, so a /v1/fak/changes cursor
+// sees the goal update and a concurrent reader observes a monotonic version.
+func (t *Table) SetGoal(trace string, goal Goal) (State, bool) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	cur := t.getLocked(trace)
+	if cur.Run.terminal() {
+		return cur, false
+	}
+	cur.Goal = goal
+	return t.putLocked(cur), true
+}
+
 // CompareAndSet applies want only if the session's current Rev equals expectRev —
 // the optimistic-concurrency guard a stale operator UI is checked against, so a
 // newer transition is never silently clobbered. want's TraceID and Rev are ignored

@@ -177,7 +177,47 @@ type State struct {
 	// but MUST degrade to the GPU-visible decision when it is absent or stale — a hint
 	// that gates correctness is a bug. The zero value is "no opinion".
 	Intent TurnIntent `json:"intent,omitempty,omitzero"`
-	Rev    uint64     `json:"rev"`
+	// Goal is the session's active root descriptor (issue #849, the reachability-layer
+	// epic #844). It is the cross-session bridge for the in-window goal pin
+	// (internal/agent/ctxplan_session.go's goalPin, #845): a structural root a scheduler
+	// reading Snapshot can rank a session by — an opaque id/digest plus an optional
+	// Priority and Budget, NO transcript and NO model judgment. The zero value is "no
+	// goal set", and a session with no goal behaves exactly as today. Advisory only: a
+	// goal field that gated any decision would be a bug. Zero readers required — the
+	// field is inert until a consumer (the scheduler, #627) acts on it.
+	Goal Goal   `json:"goal,omitempty,omitzero"`
+	Rev  uint64 `json:"rev"`
+}
+
+// Goal is the structural root descriptor carried on State (issue #849). It names the
+// session's active goal so a scheduler reading Table.Snapshot can rank by it — the
+// cross-session counterpart of the in-window goal pin (#845) that today lives only in
+// SessionPlanner.pins(). It is deliberately data-only: an opaque ID (a digest or
+// /goal id, never the goal text or a transcript), an optional scheduling Priority, and
+// an optional token Budget. Every field defaults to the safe "no opinion" zero value.
+//
+// FENCE: advisory, never trust. A goal root affects RETENTION/ranking, never the
+// answer — a scheduler MAY order a session by it but MUST behave identically when it
+// is absent. No consumer exists until the snapshot-reading scheduler (#627) reads it;
+// this carries the data structure so the root is defined ahead of its first reader.
+type Goal struct {
+	// ID is the opaque goal/root identifier — a digest or the /goal id, structural only.
+	// "" means no goal is set (the zero value). NEVER the goal text or a transcript.
+	ID string `json:"id,omitempty"`
+	// Priority is the OPTIONAL scheduling rank this goal lends its session (lower yields
+	// first, matching State.Priority's convention). 0 = no opinion; the scheduler falls
+	// back to State.Priority.
+	Priority int `json:"priority,omitempty"`
+	// Budget is the OPTIONAL token budget the goal is granted. 0 = no opinion.
+	Budget int `json:"budget,omitempty"`
+}
+
+// IsZero reports whether the goal carries no root — the safe default a scheduler reads
+// as "this session has no active goal to rank by". A consumer checks this before acting
+// on any field, so an unset goal is never mistaken for a positive root. It also drives
+// the `omitzero` JSON tag so a goal-less State marshals byte-identically to today.
+func (g Goal) IsZero() bool {
+	return g.ID == "" && g.Priority == 0 && g.Budget == 0
 }
 
 // TurnIntent is the read-only, advisory hint set the adjudicator/session layer emits
