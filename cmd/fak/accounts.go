@@ -237,8 +237,14 @@ func copyTree(src, dst string) (int, error) {
 }
 
 func printAccountsTable(w io.Writer, reg accounts.Registry) {
+	// Reconcile groups the seats by the account each truly resolves to, so the table can
+	// flag a seat that is really a duplicate of another (one rate-limit bucket presented
+	// as several) and a seat whose setup token belongs to a different login than its own.
+	rec := reg.Reconcile()
 	tw := tabwriter.NewWriter(w, 0, 2, 2, ' ', 0)
 	fmt.Fprintln(tw, "NAME\tSTATUS\tIDENTITY\tCREDS\tREHOME\tFLAG")
+	dupes, twins := 0, 0
+	accountSet := map[string]bool{}
 	for _, h := range reg.Homes {
 		name := h.Name
 		if h.Default {
@@ -264,14 +270,42 @@ func printAccountsTable(w io.Writer, reg accounts.Registry) {
 		if h.RehomeTo != "" {
 			rehome = "-> " + h.RehomeTo
 		}
-		flag := ""
-		switch {
-		case !h.Active():
-			flag = "TOMBSTONED"
-		case h.NameLie():
-			flag = "WARN name<>identity"
+		// Flags accumulate (a seat can be both a name-lie AND a duplicate): tombstone,
+		// name<>identity, dup->canonical, and the token-twin split-identity warning.
+		var flags []string
+		if !h.Active() {
+			flags = append(flags, "TOMBSTONED")
 		}
-		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\n", name, status, ident, creds, rehome, flag)
+		if h.NameLie() {
+			flags = append(flags, "WARN name<>identity")
+		}
+		if si, ok := rec[h.Name]; ok {
+			if si.Account != "" {
+				accountSet[si.Account] = true
+			}
+			if si.Role == accounts.RoleDuplicate {
+				dupes++
+				flags = append(flags, "dup -> "+si.Canonical)
+			}
+			if len(si.TokenTwin) > 0 {
+				twins++
+				flags = append(flags, "token-twin -> "+strings.Join(si.TokenTwin, ","))
+			}
+		}
+		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\n", name, status, ident, creds, rehome, strings.Join(flags, "; "))
 	}
 	tw.Flush()
+	// A one-line reconcile summary when there is anything to collapse or warn about, so
+	// the operator sees "N seats are really M accounts" instead of inferring it per row.
+	if dupes > 0 || twins > 0 {
+		fmt.Fprintf(w, "reconcile: %d active seat(s) resolve to %d distinct account(s)",
+			len(rec), len(accountSet))
+		if dupes > 0 {
+			fmt.Fprintf(w, "; %d duplicate seat(s) collapse onto their canonical", dupes)
+		}
+		if twins > 0 {
+			fmt.Fprintf(w, "; %d seat(s) carry another login's setup token (token-twin)", twins)
+		}
+		fmt.Fprintln(w)
+	}
 }

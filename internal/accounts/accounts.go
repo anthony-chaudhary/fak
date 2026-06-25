@@ -526,13 +526,14 @@ func canonicalSeat(group []Home) Home {
 	return best
 }
 
-// canonRank scores a seat's fitness to be its account's canonical home: a truthful name
-// dominates, then a named (non-"default") seat, then live credentials.
+// canonRank scores a seat's fitness to be its account's canonical home: a name that
+// names the login dominates (the more tokens it matches, the better), then a named
+// (non-"default") seat beats the generic ~/.claude, then live credentials. Using the
+// MATCH COUNT rather than the NameLie boolean keeps an org-suffixed truthful name
+// (gem8-netra logged into gem8@…) ahead of the role-named "default", which NameLie —
+// special-cased never-a-lie — would otherwise tie with or beat.
 func canonRank(h Home) int {
-	rank := 0
-	if !h.NameLie() {
-		rank += 4
-	}
+	rank := h.nameMatch() * 8
 	if !strings.EqualFold(h.Name, "default") {
 		rank += 2
 	}
@@ -540,6 +541,28 @@ func canonRank(h Home) int {
 		rank++
 	}
 	return rank
+}
+
+// nameMatch counts how many of a seat's identity-bearing name tokens appear in its login
+// email's local part — a positive signal that the NAME tells the truth about WHO the dir
+// is logged into. 0 for "default" (a role, not an identity claim) and for a name that
+// shares nothing with the login.
+func (h Home) nameMatch() int {
+	if h.Identity.Email == "" || strings.EqualFold(h.Name, "default") {
+		return 0
+	}
+	local := h.Identity.Email
+	if at := strings.IndexByte(local, '@'); at >= 0 {
+		local = local[:at]
+	}
+	localNorm := normAlnum(local)
+	n := 0
+	for _, tok := range nameTokens(h.Name) {
+		if t := normAlnum(tok); t != "" && strings.Contains(localNorm, t) {
+			n++
+		}
+	}
+	return n
 }
 
 // ---------------------------------------------------------------------------
