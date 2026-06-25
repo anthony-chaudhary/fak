@@ -401,6 +401,18 @@ func (s *Session) Prefill(ids []int) []float32 {
 		}
 		return s.glmDsaHead(last)
 	}
+	if s.M.Cfg.isMiniMaxSparseAttn() {
+		// MiniMax-M3 MSA: the incremental cache path runs the lightning-indexer block
+		// selection per position over the cached K/V (minimax_m3_session.go), so cached
+		// decode/prefix-reuse agree with the cacheless Forward. It must precede the generic
+		// MoE token-loop below, which would otherwise run dense GQA on the sparse layers.
+		s.requireMiniMaxSession()
+		var last []float32
+		for _, id := range ids {
+			last = s.tokenHiddenMiniMax(id, s.Cache.Len())
+		}
+		return s.head(last)
+	}
 	if s.Q4 {
 		// Resident int4 prefill: the batched Q8 GEMM has no int4 twin yet, so prefill runs
 		// the shared per-token blockStep with the int4 kernel. Slower than batched but uses
@@ -495,6 +507,13 @@ func (s *Session) PrefillNoLogits(ids []int) {
 		}
 		return
 	}
+	if s.M.Cfg.isMiniMaxSparseAttn() {
+		s.requireMiniMaxSession()
+		for _, id := range ids {
+			s.tokenHiddenMiniMax(id, s.Cache.Len())
+		}
+		return
+	}
 	if s.Q4 {
 		for _, id := range ids {
 			s.tokenHiddenQ(id, s.Cache.Len())
@@ -563,6 +582,10 @@ func (s *Session) Step(id int) []float32 {
 	if s.M.Cfg.isGLMMoeDsa() {
 		s.requireGLMDsaSession()
 		return s.glmDsaHead(s.tokenHiddenGLMDsa(id, s.Cache.Len()))
+	}
+	if s.M.Cfg.isMiniMaxSparseAttn() {
+		s.requireMiniMaxSession()
+		return s.head(s.tokenHiddenMiniMax(id, s.Cache.Len()))
 	}
 	if s.Backend != nil {
 		return s.token(id, s.halKV.Len())

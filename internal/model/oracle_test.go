@@ -1282,9 +1282,77 @@ func TestOptionalMiniMaxM3OracleForwardMatchesHFCacheless(t *testing.T) {
 		t.Fatalf("%s family = %q, want minimax_m3 sparse", dir, m.Cfg.archFamilyKey())
 	}
 	resolved, _ := resolveOracleDir(dir)
-	// checkCachedPrefill=false: only the cacheless Forward is wired for MiniMax-M3; the
-	// incremental Session/KV cache MSA path is a separate gate (as GLM DSA staged it).
-	assertForwardMatchesHFOracleMode(t, resolved, m, doc, false)
+	// checkCachedPrefill=true: the incremental Session/KV-cache MSA path
+	// (minimax_m3_session.go, #496) now reproduces the cacheless Forward, so the cached
+	// Prefill is asserted here alongside the per-layer/logit parity.
+	assertForwardMatchesHFOracleMode(t, resolved, m, doc, true)
+}
+
+// TestOptionalMiniMaxM3OracleSessionCacheMatchesHF is the rung-2 witness for MiniMax-M3
+// (#496): the incremental Session/KV-cache MSA path — per-step lightning-indexer projection
+// over the cached K/V, per-query block selection over the cached index keys, and masked GQA
+// over the admitted cached keys — must agree with the cacheless Forward (and HF greedy) on
+// the tiny oracle. It mirrors TestOptionalGLMMoeDsaOracleSessionCacheMatchesHF: split
+// Prefill/Step, PrefillNoLogits/Step, SessionFromPrefix/Step, and greedy Generate all
+// reproduce the last-token distribution / continuation. Skipped until a tiny minimax_m3
+// oracle is exported (a GPU/artifact-node step).
+func TestOptionalMiniMaxM3OracleSessionCacheMatchesHF(t *testing.T) {
+	const dir = minimaxOracleDir
+	m, doc := loadFixtureDir(t, dir, true)
+	if !m.Cfg.isMiniMaxSparseAttn() {
+		t.Fatalf("%s family = %q, want minimax_m3 sparse", dir, m.Cfg.archFamilyKey())
+	}
+	for _, prompt := range doc.Prompts {
+		if len(prompt.Ids) < 2 {
+			continue
+		}
+		full := m.Forward(prompt.Ids).Logits[len(prompt.Ids)-1]
+
+		split := m.NewSession()
+		split.Prefill(prompt.Ids[:len(prompt.Ids)-1])
+		got := split.Step(prompt.Ids[len(prompt.Ids)-1])
+		if split.Cache.Len() != len(prompt.Ids) {
+			t.Fatalf("%s prompt %d MSA cache length = %d, want %d",
+				dir, prompt.Index, split.Cache.Len(), len(prompt.Ids))
+		}
+		if d, at := maxAbsDiff(got, full); d > 1e-4 {
+			t.Fatalf("%s prompt %d split Prefill/Step disagrees with cacheless Forward: max|delta|=%.3e at %d",
+				dir, prompt.Index, d, at)
+		}
+
+		noLogits := m.NewSession()
+		noLogits.PrefillNoLogits(prompt.Ids[:len(prompt.Ids)-1])
+		got = noLogits.Step(prompt.Ids[len(prompt.Ids)-1])
+		if noLogits.Cache.Len() != len(prompt.Ids) {
+			t.Fatalf("%s prompt %d MSA PrefillNoLogits cache length = %d, want %d",
+				dir, prompt.Index, noLogits.Cache.Len(), len(prompt.Ids))
+		}
+		if d, at := maxAbsDiff(got, full); d > 1e-4 {
+			t.Fatalf("%s prompt %d PrefillNoLogits/Step disagrees with cacheless Forward: max|delta|=%.3e at %d",
+				dir, prompt.Index, d, at)
+		}
+
+		prefix := m.NewSession()
+		prefix.PrefillNoLogits(prompt.Ids[:len(prompt.Ids)-1])
+		reuse := m.SessionFromPrefix(prefix.Cache)
+		got = reuse.Step(prompt.Ids[len(prompt.Ids)-1])
+		if reuse.Cache.Len() != len(prompt.Ids) {
+			t.Fatalf("%s prompt %d MSA prefix-clone cache length = %d, want %d",
+				dir, prompt.Index, reuse.Cache.Len(), len(prompt.Ids))
+		}
+		if d, at := maxAbsDiff(got, full); d > 1e-4 {
+			t.Fatalf("%s prompt %d SessionFromPrefix/Step disagrees with cacheless Forward: max|delta|=%.3e at %d",
+				dir, prompt.Index, d, at)
+		}
+
+		if len(prompt.GreedyIds) > 0 {
+			gotIDs := m.NewSession().Generate(prompt.Ids, len(prompt.GreedyIds))
+			if !sameInts(gotIDs, prompt.GreedyIds) {
+				t.Fatalf("%s prompt %d MSA Generate = %v, want HF greedy %v",
+					dir, prompt.Index, gotIDs, prompt.GreedyIds)
+			}
+		}
+	}
 }
 
 // TestOptionalQwen35HybridOracleForwardMatchesHF proves the pure-Go qwen35 forward —

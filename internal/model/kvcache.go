@@ -16,6 +16,7 @@ type KVCache struct {
 	pos    []int // absolute position of each cached entry (shared across layers)
 	linear *linearAttnCache
 	glm    *glmDsaKVCache
+	msa    *minimaxKVCache // MiniMax-M3 lightning-indexer key cache (sparse layers only)
 }
 
 // NewKVCache allocates an empty cache for a model. Kraw (pre-RoPE K) is kept so that
@@ -30,6 +31,7 @@ func NewKVCache(cfg Config) *KVCache {
 		V:      make([][]float32, cfg.NumLayers),
 		linear: newLinearAttnCache(cfg),
 		glm:    newGLMDsaKVCache(cfg),
+		msa:    newMinimaxKVCache(cfg),
 	}
 }
 
@@ -128,6 +130,11 @@ func (c *KVCache) evictSupported(from, n int) int {
 		c.Kraw[l] = append(c.Kraw[l][:from*w], c.Kraw[l][end*w:]...)
 		c.V[l] = append(c.V[l][:from*w], c.V[l][end*w:]...)
 	}
+	// MiniMax-M3 MSA keeps its main K/V in the rows just compacted; the per-layer
+	// lightning-indexer key cache is compacted in lock-step and re-RoPEd below.
+	if c.msa != nil {
+		c.msa.evict(c.cfg, from, end)
+	}
 	// c.pos still holds each survivor's ORIGINAL absolute position; its new position
 	// is its new index i. Where they differ, re-derive K[i] from the PRE-RoPE Kraw[i]
 	// in one rotation at position i — bit-exact to a prefill that never saw the span.
@@ -146,6 +153,7 @@ func (c *KVCache) evictSupported(from, n int) int {
 					applyRopeRow(dst, cos, sin)                 // single rotation at new pos
 				}
 			}
+			c.msa.rerotateSurvivor(c.cfg, i) // nil-safe: re-RoPE the survivor's index key
 		}
 		c.pos[i] = i
 	}
@@ -193,6 +201,9 @@ func (c *KVCache) CloneWithReserve(extraPositions int) *KVCache {
 	if c.glm != nil {
 		n.glm = c.glm.cloneWithReserve(c.cfg, extraPositions)
 	}
+	if c.msa != nil {
+		n.msa = c.msa.cloneWithReserve(c.cfg, extraPositions)
+	}
 	for l := range c.K {
 		n.K[l] = cloneFloat32WithReserve(c.K[l], extraFloats)
 		n.Kraw[l] = cloneFloat32WithReserve(c.Kraw[l], extraFloats)
@@ -216,6 +227,9 @@ func (c *KVCache) Reserve(extraPositions int) {
 	}
 	if c.glm != nil {
 		c.glm.reserve(c.cfg, extraPositions)
+	}
+	if c.msa != nil {
+		c.msa.reserve(c.cfg, extraPositions)
 	}
 }
 

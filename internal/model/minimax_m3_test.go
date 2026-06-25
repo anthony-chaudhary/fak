@@ -332,6 +332,144 @@ func TestMiniMaxM3DenseLayerUsesOAIMLPAtDenseWidth(t *testing.T) {
 	}
 }
 
+// TestMiniMaxM3MSASessionCacheMatchesCacheless proves the incremental Session/KV-cache MSA
+// path (minimax_m3_session.go) reproduces the cacheless Forward on a synthetic MiniMax-M3
+// with a MIX of dense full_attention and block-sparse minimax_m3_sparse layers and a tight
+// index budget (so the sparse selection genuinely drops causal keys). It is the host-side
+// (no-HF) analogue of TestOptionalMiniMaxM3OracleSessionCacheMatchesHF: split Prefill/Step,
+// PrefillNoLogits/Step, SessionFromPrefix/Step, and greedy Generate must all agree with the
+// cacheless Forward, and the cache must carry a lightning-indexer key for the sparse layers
+// only (witnessing the MSA path actually ran, not a dense fall-through).
+func TestMiniMaxM3MSASessionCacheMatchesCacheless(t *testing.T) {
+	cfg := miniMaxM3TestConfig([]string{"full_attention", "minimax_m3_sparse", "minimax_m3_sparse"})
+	m := newSyntheticMiniMaxM3(cfg)
+
+	// A prompt longer than IndexBlockSize*IndexTopKBlocks so the sparse layers admit a
+	// strict subset of the causal keys.
+	prompt := []int{3, 17, 5, 23, 11, 7, 41, 2}
+	last := m.Forward(prompt).Logits[len(prompt)-1]
+
+	check := func(name string, got []float32) {
+		t.Helper()
+		if d, at := maxAbsDiff(got, last); d > 1e-4 {
+			t.Fatalf("%s disagrees with cacheless Forward: max|Δ|=%.3e at %d", name, d, at)
+		}
+	}
+
+	// split Prefill / Step
+	split := m.NewSession()
+	split.Prefill(prompt[:len(prompt)-1])
+	got := split.Step(prompt[len(prompt)-1])
+	if split.Cache.Len() != len(prompt) {
+		t.Fatalf("split cache len = %d, want %d", split.Cache.Len(), len(prompt))
+	}
+	check("split Prefill/Step", got)
+
+	// the MSA path must populate an index key for the sparse layers (1,2) and none for the
+	// dense layer (0) — proof the sparse layers ran MSA, not a dense fall-through.
+	if split.Cache.msa == nil {
+		t.Fatal("MiniMax session did not allocate the MSA index cache")
+	}
+	if n := len(split.Cache.msa.IndexK[0]); n != 0 {
+		t.Fatalf("dense layer 0 has %d index-key floats, want 0", n)
+	}
+	for _, l := range []int{1, 2} {
+		if n, want := len(split.Cache.msa.IndexK[l]), len(prompt)*cfg.IndexHeadDim; n != want {
+			t.Fatalf("sparse layer %d index-key floats = %d, want %d", l, n, want)
+		}
+	}
+
+	// PrefillNoLogits / Step
+	noLogits := m.NewSession()
+	noLogits.PrefillNoLogits(prompt[:len(prompt)-1])
+	got = noLogits.Step(prompt[len(prompt)-1])
+	if noLogits.Cache.Len() != len(prompt) {
+		t.Fatalf("PrefillNoLogits cache len = %d, want %d", noLogits.Cache.Len(), len(prompt))
+	}
+	check("PrefillNoLogits/Step", got)
+
+	// SessionFromPrefix (prefix-clone reuse) / Step
+	prefix := m.NewSession()
+	prefix.PrefillNoLogits(prompt[:len(prompt)-1])
+	reuse := m.SessionFromPrefix(prefix.Cache)
+	got = reuse.Step(prompt[len(prompt)-1])
+	if reuse.Cache.Len() != len(prompt) {
+		t.Fatalf("SessionFromPrefix cache len = %d, want %d", reuse.Cache.Len(), len(prompt))
+	}
+	check("SessionFromPrefix/Step", got)
+
+	// greedy Generate must track the cacheless greedy continuation.
+	const gen = 6
+	wantIDs := cachelessGreedyMiniMax(m, prompt, gen)
+	gotIDs := m.NewSession().Generate(prompt, gen)
+	if !sameInts(gotIDs, wantIDs) {
+		t.Fatalf("session Generate = %v, want cacheless greedy %v", gotIDs, wantIDs)
+	}
+}
+
+// cachelessGreedyMiniMax greedily continues prompt by n tokens using ONLY the cacheless
+// Forward (re-running the whole sequence each step), the reference the session Generate
+// must match.
+func cachelessGreedyMiniMax(m *Model, prompt []int, n int) []int {
+	cur := append([]int(nil), prompt...)
+	out := make([]int, 0, n)
+	for i := 0; i < n; i++ {
+		next := argmax(m.Forward(cur).Logits[len(cur)-1])
+		out = append(out, next)
+		if m.Cfg.IsEOS(next) {
+			break
+		}
+		cur = append(cur, next)
+	}
+	return out
+}
+
+// TestMiniMaxM3MSASessionEvictionReRoPEs witnesses the index-cache eviction contract: after
+// a MIDDLE-span Evict the lightning-indexer key of every repositioned survivor is re-RoPEd
+// at its NEW absolute position in a single rotation — bit-exact to re-RoPEing the cached
+// post-k_norm/pre-RoPE raw. This is the MSA analogue of assertGLMDsaCacheReroped and proves
+// minimaxKVCache.rerotateSurvivor is wired into KVCache.Evict for the index keys (the main
+// K is covered by the shared softmax-KV reposition the standard cache already proves).
+func TestMiniMaxM3MSASessionEvictionReRoPEs(t *testing.T) {
+	cfg := miniMaxM3TestConfig([]string{"full_attention", "minimax_m3_sparse", "minimax_m3_sparse"})
+	m := newSyntheticMiniMaxM3(cfg)
+
+	s := m.NewSession()
+	s.Prefill([]int{3, 17, 5, 23, 11, 7, 41, 2})
+	// Evict a middle span so survivors after it shift to lower positions and must re-RoPE.
+	if removed := s.Cache.Evict(2, 3); removed != 3 || s.Cache.Len() != 5 {
+		t.Fatalf("middle evict removed %d (want 3), cache len %d (want 5)", removed, s.Cache.Len())
+	}
+
+	c := s.Cache
+	if c.msa == nil {
+		t.Fatal("evicted MiniMax cache lost its MSA index cache")
+	}
+	rot := cfg.rotaryDim()
+	idxDim := cfg.IndexHeadDim
+	for l := 0; l < cfg.NumLayers; l++ {
+		if !cfg.isMSALayer(l) {
+			if n := len(c.msa.IndexK[l]); n != 0 {
+				t.Fatalf("dense layer %d has %d index floats after evict, want 0", l, n)
+			}
+			continue
+		}
+		if n, want := len(c.msa.IndexK[l]), c.Len()*idxDim; n != want {
+			t.Fatalf("layer %d index floats after evict = %d, want %d", l, n, want)
+		}
+		for pos := 0; pos < c.Len(); pos++ {
+			cos, sin := ropeRowForLayer(cfg, l, pos)
+			off := pos * idxDim
+			want := append([]float32(nil), c.msa.IndexKraw[l][off:off+idxDim]...)
+			applyRopeRow(want[:rot], cos, sin)
+			got := c.msa.IndexK[l][off : off+idxDim]
+			if d, at := maxAbsDiff(want, got); d != 0 {
+				t.Fatalf("layer %d pos %d index key not re-RoPEd: max|Δ|=%.3e at %d", l, pos, d, at)
+			}
+		}
+	}
+}
+
 // TestMiniMaxM3SwigluOAIActivation pins the SwiGLU-OAI gate to its closed form, including
 // the gate/up clamps at ±swiglu_limit.
 func TestMiniMaxM3SwigluOAIActivation(t *testing.T) {
