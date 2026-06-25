@@ -278,6 +278,126 @@ func TestVulkanTransientRecycleReusesBuffer(t *testing.T) {
 	v.Trim()
 }
 
+func TestVulkanHostVisibleBufferDoesNotRecycleAsDeviceLocal(t *testing.T) {
+	v := vk(t)
+	host := v.dallocHostVis(4096)
+	if !v.debugBufferHostVisible(host) {
+		t.Fatal("host-visible allocation did not report HOST_VISIBLE memory")
+	}
+	v.Free(makeTensor(v, F32, RowMajor, []int{1024}, nil, host))
+
+	dev := v.dalloc(4096)
+	if !v.debugBufferDeviceLocal(dev) {
+		t.Fatal("device-local allocation reused a host-visible buffer from the recycle pool")
+	}
+	v.Free(makeTensor(v, F32, RowMajor, []int{1024}, nil, dev))
+	v.Trim()
+}
+
+func TestVulkanTransientRecycleDropsHostVisibleBuffer(t *testing.T) {
+	v := vk(t)
+	host := v.dallocHostVis(4096)
+	if !v.debugBufferHostVisible(host) {
+		t.Fatal("host-visible allocation did not report HOST_VISIBLE memory")
+	}
+	v.transient = append(v.transient, host)
+	v.Recycle()
+	if host.ptr != nil {
+		t.Fatal("Recycle must invalidate stale transient tensor handles")
+	}
+
+	dev := v.dallocTransient(4096)
+	if !v.debugBufferDeviceLocal(dev) {
+		t.Fatal("transient pool returned a host-visible buffer for a device-local transient")
+	}
+	v.Free(makeTensor(v, F32, RowMajor, []int{1024}, nil, dev))
+	v.Trim()
+}
+
+func TestVulkanBatchedHostVisibleFreeDoesNotRecycleAsDeviceLocal(t *testing.T) {
+	v := vk(t)
+	host := v.dallocHostVis(4096)
+	v.BeginBatch()
+	v.Free(makeTensor(v, F32, RowMajor, []int{1024}, nil, host))
+	v.FlushBatch()
+
+	dev := v.dalloc(4096)
+	if !v.debugBufferDeviceLocal(dev) {
+		t.Fatal("batched host-visible free recycled into a later device-local allocation")
+	}
+	v.Free(makeTensor(v, F32, RowMajor, []int{1024}, nil, dev))
+	v.Trim()
+}
+
+func TestVulkanBudgetedWeightFreeReleasesDeviceLocalBytes(t *testing.T) {
+	v := vk(t)
+	if !v.haveQ8 {
+		t.Skip("vulkan device does not expose int8 arithmetic + 8-bit storage")
+	}
+	oldBudget, oldUsed, oldHostvis := v.budgetBytes, v.dlUsed, v.hostvisN
+	defer func() {
+		v.budgetBytes, v.dlUsed, v.hostvisN = oldBudget, oldUsed, oldHostvis
+		v.Trim()
+	}()
+	v.budgetBytes, v.dlUsed, v.hostvisN = 64, 0, 0
+
+	c := cpu()
+	var s lcg = 365
+	shape := []int{2, 32} // Q8 code buffer is 64 bytes.
+	w := randVec(&s, shape[0]*shape[1])
+	dw := v.Upload(NewF32(c, shape, w), Q8_0)
+	db := dw.buf.(*vulkanBuf)
+	if db.budgetedWeightBytes != 64 {
+		t.Fatalf("budget charge=%d want 64", db.budgetedWeightBytes)
+	}
+	if v.dlUsed != 64 {
+		t.Fatalf("dlUsed after first upload=%d want 64", v.dlUsed)
+	}
+	if v.hostvisN != 0 {
+		t.Fatalf("first weight unexpectedly spilled host-visible; hostvisN=%d", v.hostvisN)
+	}
+	v.Free(dw)
+	if v.dlUsed != 0 {
+		t.Fatalf("dlUsed after Free=%d want 0", v.dlUsed)
+	}
+	if db.budgetedWeightBytes != 0 {
+		t.Fatalf("freed buffer retained budget charge %d", db.budgetedWeightBytes)
+	}
+
+	dw2 := v.Upload(NewF32(c, shape, w), Q8_0)
+	if v.hostvisN != 0 {
+		t.Fatalf("second weight spilled host-visible after budget release; hostvisN=%d", v.hostvisN)
+	}
+	v.Free(dw2)
+}
+
+func TestVulkanBudgetAccountingUsesActualResidency(t *testing.T) {
+	v := vk(t)
+	oldBudget, oldUsed, oldHostvis := v.budgetBytes, v.dlUsed, v.hostvisN
+	defer func() {
+		v.budgetBytes, v.dlUsed, v.hostvisN = oldBudget, oldUsed, oldHostvis
+		v.Trim()
+	}()
+	v.budgetBytes, v.dlUsed, v.hostvisN = 64, 0, 0
+
+	host := v.dallocHostVis(64)
+	v.accountWeightPlacement(host, 64)
+	if v.dlUsed != 0 {
+		t.Fatalf("host-visible weight charged dlUsed=%d, want 0", v.dlUsed)
+	}
+	if v.hostvisN != 1 {
+		t.Fatalf("host-visible weight count=%d, want 1", v.hostvisN)
+	}
+	hb := host
+	v.Free(makeTensor(v, F32, RowMajor, []int{16}, nil, host))
+	if v.hostvisN != 0 {
+		t.Fatalf("host-visible weight count after Free=%d, want 0", v.hostvisN)
+	}
+	if hb.hostVisibleWeight {
+		t.Fatal("freed host-visible weight retained accounting flag")
+	}
+}
+
 func TestVulkanMatMulAddInPlaceApprox(t *testing.T) {
 	v := vk(t)
 	c := cpu()

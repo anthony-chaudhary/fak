@@ -68,15 +68,45 @@ func vulkanBudgetBytes() int64 {
 var vulkanDev *vulkanBackend
 
 type vulkanBuf struct {
-	ptr      unsafe.Pointer
-	n        int
-	scalePtr unsafe.Pointer
-	scaleN   int
+	ptr                 unsafe.Pointer
+	n                   int
+	scalePtr            unsafe.Pointer
+	scaleN              int
+	budgetedWeightBytes int64
+	hostVisibleWeight   bool
 }
 
 // Ready always reports true: Vulkan dispatches are submitted synchronously, so a
 // vulkanBuf handle is materialized as soon as it exists.
 func (b *vulkanBuf) Ready() bool { return true }
+
+func (v *vulkanBackend) debugBufferHostVisible(b *vulkanBuf) bool {
+	return b != nil && b.ptr != nil && C.fvk_debug_buffer_is_host_visible(b.ptr) != 0
+}
+
+func (v *vulkanBackend) debugBufferDeviceLocal(b *vulkanBuf) bool {
+	return b != nil && b.ptr != nil && C.fvk_debug_buffer_is_device_local(b.ptr) != 0
+}
+
+func (v *vulkanBackend) VulkanDebugResidencyBudget() (budgetBytes, dlUsed int64, hostvisN int) {
+	vulkanMu.Lock()
+	defer vulkanMu.Unlock()
+	return v.budgetBytes, v.dlUsed, v.hostvisN
+}
+
+func (v *vulkanBackend) VulkanDebugSetResidencyBudget(budgetBytes int64) (oldBudgetBytes, oldDLUsed int64, oldHostvisN int) {
+	vulkanMu.Lock()
+	defer vulkanMu.Unlock()
+	oldBudgetBytes, oldDLUsed, oldHostvisN = v.budgetBytes, v.dlUsed, v.hostvisN
+	v.budgetBytes, v.dlUsed, v.hostvisN = budgetBytes, 0, 0
+	return oldBudgetBytes, oldDLUsed, oldHostvisN
+}
+
+func (v *vulkanBackend) VulkanDebugRestoreResidencyBudget(budgetBytes, dlUsed int64, hostvisN int) {
+	vulkanMu.Lock()
+	defer vulkanMu.Unlock()
+	v.budgetBytes, v.dlUsed, v.hostvisN = budgetBytes, dlUsed, hostvisN
+}
 
 type vulkanBackend struct {
 	name          string
@@ -172,11 +202,26 @@ func (v *vulkanBackend) dallocHostVis(nbytes int) *vulkanBuf {
 // device-local. Caller holds vulkanMu.
 func (v *vulkanBackend) dallocWeight(nbytes int) *vulkanBuf {
 	if v.budgetBytes > 0 && v.dlUsed+int64(nbytes) > v.budgetBytes {
-		v.hostvisN++
-		return v.dallocHostVis(nbytes)
+		buf := v.dallocHostVis(nbytes)
+		v.accountWeightPlacement(buf, nbytes)
+		return buf
 	}
-	v.dlUsed += int64(nbytes)
-	return v.dalloc(nbytes)
+	buf := v.dalloc(nbytes)
+	v.accountWeightPlacement(buf, nbytes)
+	return buf
+}
+
+func (v *vulkanBackend) accountWeightPlacement(buf *vulkanBuf, nbytes int) {
+	if v.budgetBytes == 0 || buf == nil || buf.ptr == nil {
+		return
+	}
+	if v.debugBufferDeviceLocal(buf) {
+		v.dlUsed += int64(nbytes)
+		buf.budgetedWeightBytes = int64(nbytes)
+		return
+	}
+	v.hostvisN++
+	buf.hostVisibleWeight = true
 }
 
 func (v *vulkanBackend) dallocTransient(nbytes int) *vulkanBuf {
@@ -185,6 +230,10 @@ func (v *vulkanBackend) dallocTransient(nbytes int) *vulkanBuf {
 		if len(bucket) > 0 {
 			b := bucket[len(bucket)-1]
 			v.freeTransient[nbytes] = bucket[:len(bucket)-1]
+			if !v.debugBufferDeviceLocal(b) {
+				C.fvk_free(b.ptr)
+				return v.dalloc(nbytes)
+			}
 			return b
 		}
 	}
@@ -197,6 +246,10 @@ func (v *vulkanBackend) recycleTransientLocked(b *vulkanBuf) {
 	}
 	if v.freeTransient == nil {
 		v.freeTransient = make(map[int][]*vulkanBuf)
+	}
+	if !v.debugBufferDeviceLocal(b) {
+		C.fvk_free(b.ptr)
+		return
 	}
 	bucket := v.freeTransient[b.n]
 	owner := &vulkanBuf{ptr: b.ptr, n: b.n}
@@ -299,7 +352,14 @@ func (v *vulkanBackend) uploadQ8Locked(shape []int, codes []int8, scales []float
 		C.fvk_h2d(scaleBuf.ptr, unsafe.Pointer(&scales[0]), C.size_t(len(scales)*F32.Bytes()))
 	}
 	q := &QuantSpec{Block: block, Axis: 2, Bits: 8, Symmetric: true}
-	buf := &vulkanBuf{ptr: codeBuf.ptr, n: codeBuf.n, scalePtr: scaleBuf.ptr, scaleN: scaleBuf.n}
+	buf := &vulkanBuf{
+		ptr:                 codeBuf.ptr,
+		n:                   codeBuf.n,
+		scalePtr:            scaleBuf.ptr,
+		scaleN:              scaleBuf.n,
+		budgetedWeightBytes: codeBuf.budgetedWeightBytes,
+		hostVisibleWeight:   codeBuf.hostVisibleWeight,
+	}
 	return makeTensor(v, Q8_0, RowMajor, append([]int(nil), shape...), q, buf)
 }
 
@@ -331,6 +391,8 @@ func (v *vulkanBackend) Read(t Tensor) []float32 {
 // Free releases the tensor's device buffer (and its companion Q8 scale buffer, if any)
 // back to the shim and nils the handle; it is a no-op for a non-device tensor.
 func (v *vulkanBackend) Free(t Tensor) {
+	vulkanMu.Lock()
+	defer vulkanMu.Unlock()
 	if db, ok := t.buf.(*vulkanBuf); ok && db.ptr != nil {
 		if db.scalePtr != nil {
 			C.fvk_free(db.scalePtr)
@@ -339,6 +401,19 @@ func (v *vulkanBackend) Free(t Tensor) {
 		}
 		C.fvk_free(db.ptr)
 		db.ptr = nil
+		if db.budgetedWeightBytes > 0 {
+			v.dlUsed -= db.budgetedWeightBytes
+			if v.dlUsed < 0 {
+				v.dlUsed = 0
+			}
+			db.budgetedWeightBytes = 0
+		}
+		if db.hostVisibleWeight {
+			if v.hostvisN > 0 {
+				v.hostvisN--
+			}
+			db.hostVisibleWeight = false
+		}
 	}
 }
 

@@ -17,6 +17,7 @@
 #ifndef FAK_VULKAN_BACKEND_H
 #define FAK_VULKAN_BACKEND_H
 #include <stddef.h>
+#include <stdint.h>
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -54,6 +55,11 @@ void fvk_sync(void);
 void fvk_trim_pool(void);
 /* Drop recycled buffers when the pool grows past max_buffers; intended for token boundaries. */
 void fvk_trim_pool_if_over(size_t max_buffers);
+/* Debug-only introspection for backend tests. Returns the VkMemoryPropertyFlags that the
+ * opaque buffer was actually allocated with, or 0 for nil. */
+uint32_t fvk_debug_buffer_props(const void *d);
+int fvk_debug_buffer_is_host_visible(const void *d);
+int fvk_debug_buffer_is_device_local(const void *d);
 
 /* y[P,out] = x[P,in] @ W[out,in]^T   (all row-major f32). */
 void fvk_matmul_f32(const void *dW, const void *dX, void *dY, int out, int in, int P);

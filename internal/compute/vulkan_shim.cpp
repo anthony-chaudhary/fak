@@ -60,9 +60,13 @@ struct Buffer {
     VkBuffer       buf = VK_NULL_HANDLE;
     VkDeviceMemory mem = VK_NULL_HANDLE;
     size_t         bytes = 0;
+    VkMemoryPropertyFlags props = 0;
 };
 
-// size-bucketed free list (mirrors the CUDA g_pool/g_live arena).
+// size-bucketed free list for device-local buffers (mirrors the CUDA g_pool/g_live arena).
+// Host-visible buffers are deliberately not pooled here: the residency-budget path may
+// allocate cold weights host-visible, and reusing one as a later device-local tensor would
+// silently downgrade residency.
 std::unordered_map<size_t, std::vector<Buffer*>> g_pool;
 size_t g_poolCount = 0;
 
@@ -218,6 +222,7 @@ Buffer* allocBuffer(size_t bytes, VkMemoryPropertyFlags props, VkBufferUsageFlag
     // First attempt; on out-of-memory / too-many-allocations, drain the recycle pool (which
     // holds buffers nothing references right now) and retry before considering a slower
     // host-visible storage fallback for device-local tensors.
+    VkMemoryPropertyFlags actualProps = props;
     VkResult r = tryAlloc(props, &b->mem);
     if (allocPressure(r)) {
         drainPool();
@@ -233,6 +238,7 @@ Buffer* allocBuffer(size_t bytes, VkMemoryPropertyFlags props, VkBufferUsageFlag
                 "fak-vulkan: device-local alloc(%zu bytes) failed VkResult=%d; using host-visible storage\n",
                 bytes, (int)r);
             r = fr;
+            actualProps = fallback;
         }
     }
     if (r == VK_ERROR_FEATURE_NOT_PRESENT) {
@@ -255,6 +261,7 @@ Buffer* allocBuffer(size_t bytes, VkMemoryPropertyFlags props, VkBufferUsageFlag
         delete b;
         return nullptr;
     }
+    b->props = actualProps;
     return b;
 }
 
@@ -744,12 +751,18 @@ void fvk_free(void* d) {
     // Park it and recycle only after the batch flushes, so it can't be handed back out and
     // rebound mid-batch.
     if (g_batching) { g_batchFreed.push_back(b); return; }
+    if (b->props & VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT) {
+        destroyBuffer(b);
+        clearDescriptorBindingCache();
+        return;
+    }
     auto& bucket = g_pool[b->bytes];
     if (bucket.size() < POOL_BUCKET_CAP) {
         bucket.push_back(b); // recycle for reuse
         ++g_poolCount;
     } else {
         destroyBuffer(b);    // bucket full — return the allocation to the driver
+        clearDescriptorBindingCache();
     }
 }
 
@@ -803,6 +816,21 @@ void fvk_batch_flush(void) { batchFlush(); }
 void fvk_sync(void) { if (g_dev) vkDeviceWaitIdle(g_dev); }
 
 int fvk_have_q8(void) { return g_have_q8; }
+
+uint32_t fvk_debug_buffer_props(const void* d) {
+    if (!d) return 0;
+    return (uint32_t)B((void*)d)->props;
+}
+
+int fvk_debug_buffer_is_host_visible(const void* d) {
+    if (!d) return 0;
+    return (B((void*)d)->props & VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT) != 0;
+}
+
+int fvk_debug_buffer_is_device_local(const void* d) {
+    if (!d) return 0;
+    return (B((void*)d)->props & VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT) != 0;
+}
 
 void fvk_trim_pool(void) {
     if (!g_dev) return;
