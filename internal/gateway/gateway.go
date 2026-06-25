@@ -46,6 +46,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/model"
 	"github.com/anthony-chaudhary/fak/internal/modelroute"
 	"github.com/anthony-chaudhary/fak/internal/recall"
+	"github.com/anthony-chaudhary/fak/internal/rungobs"
 	"github.com/anthony-chaudhary/fak/internal/tokenizer"
 	"github.com/anthony-chaudhary/fak/internal/vdso"
 )
@@ -333,6 +334,13 @@ type Server struct {
 	// /metrics; Close detaches the sink. nil suppresses the family. See metrics.go.
 	cacheStream *cachemeta.StreamMetrics
 
+	// rungObs is the passive rung-decision distribution counter (fak_kernel_decisions_total).
+	// New registers it as a global abi.Emitter subscribed to EvDecide/EvDeny/EvVDSOHit;
+	// it re-folds each decided call off the hot path to bucket it by winning rung. nil
+	// (older/non-gateway construction paths) suppresses the metric family. It is passive:
+	// it never touches the verdict or Counters, so the decide/deny hot path is unchanged.
+	rungObs *rungobs.Observer
+
 	// route, when non-nil, is the per-call model-routing policy buildCall consults to
 	// set abi.ToolCall.Engine PRE-submit (the load-bearing residency contract — see
 	// Config.RouteManifest and buildCall). nil leaves Engine unset (kernel default).
@@ -439,6 +447,14 @@ func New(cfg Config) (*Server, error) {
 		cacheStream.Observe(string(ev.Kind), ev.Entry)
 	})
 
+	// Passive rung-decision observability (issue #693): register a rungobs Emitter that
+	// folds the kernel's verdict stream into a per-(rung,kind,reason) histogram,
+	// exposed on /metrics as fak_kernel_decisions_total. It subscribes to ONLY
+	// EvDecide/EvDeny/EvVDSOHit, so it adds zero work to the every-syscall event path,
+	// and it is passive (re-folds off the hot path; never mutates verdict or Counters).
+	rungObs := rungobs.New()
+	abi.RegisterEmitter(rungObs)
+
 	// The ctxplan view planner is OFF unless the host set a resident-token budget. nil
 	// leaves maybePlanMessages an inert identity (the byte-for-byte-unchanged guard).
 	var ctxView *agent.CtxViewPlanner
@@ -464,6 +480,7 @@ func New(cfg Config) (*Server, error) {
 		engineCache:    remoteCache,
 		ctxView:        ctxView,
 		cacheStream:    cacheStream,
+		rungObs:        rungObs,
 		feed:           newCoherenceFeed(0),
 		metrics:        newGatewayMetrics(time.Now()),
 		route:          cfg.RouteManifest,

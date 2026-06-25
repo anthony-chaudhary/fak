@@ -53,6 +53,7 @@ concurrent = [
   # `(fak <leaf>)` ship-stamp bound to a phantom unit and the arbiter could not detect a
   # same-tree collision on them (the same class the 2026-06-22 reconciliation above fixed).
   "a2achan",
+  "rungobs",
   # They landed by hand / during the new_leaf.py path-bug window, so the `# new-leaf:lane`
   # auto-insert never fired. All are real, architest-tiered packages.
   "blobfs", "blobhttp", "ctxplan", "dgxbridge", "gitgate", "hfhub", "memq", "polymodel", "storedrv",
@@ -61,6 +62,7 @@ concurrent = [
   "sessionimage",
   "a2achan",
   "snapshot",
+  "rungobs",
   # new-leaf:lane -- `python tools/new_leaf.py` inserts a generated leaf lane above
 ]
 exclusive = ["abi", "release", "global"]
@@ -89,6 +91,7 @@ autopick = [
   "sessionimage",
   "a2achan",
   "snapshot",
+  "rungobs",
   # new-leaf:lane
 ]
 
@@ -195,6 +198,7 @@ modelroute = ["internal/modelroute/**"]
 sessionimage = ["internal/sessionimage/**"]
 a2achan = ["internal/a2achan/**"]
 snapshot = ["internal/snapshot/**"]
+rungobs = ["internal/rungobs/**"]
 # new-leaf:tree -- generated leaf trees inserted above this line
 cmd         = ["cmd/**"]
 experiments = ["experiments/**"]
