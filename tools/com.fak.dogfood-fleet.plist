@@ -1,0 +1,79 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  launchd cadence for the always-on GUARDED dogfood fleet on node-macos-a
+  (issue #729). The sibling com.fak.serve-gateway.plist keeps the shared
+  `fak serve` gateway alive 24/7; THIS unit is the other half of the dogfood
+  loop: it periodically fires ONE guarded dispatch tick so a real worker runs
+  THROUGH the kernel (fak guard fronting the worker) and records kernel verdicts
+  in a durable, per-lane DECISION JOURNAL under .dispatch-runs/guard-audit/.
+
+  That journal is the witness tools/dogfood_coverage.py counts as
+  `audit_journal_evidence` — the one soft KPI between the current grade B and
+  grade A (issue #731). Configuring the gateway proves the wire is BUILT;
+  running a guarded tick proves the wire is EXERCISED. Until a guarded worker
+  journals on this node, coverage holds at B; once it does, A.
+
+  Why a cadence (StartInterval) and not KeepAlive: issue_dispatch.py is a single
+  BOUNDED, preflight-gated tick (it refuses if the host guard is dirty / no
+  account is free / the live worker cap is hit), not a daemon. Firing it every
+  30 min keeps a guarded worker journaling without ever exceeding the cap.
+  Dry-run is the default; this unit passes the live-spawn flag so the tick
+  actually spawns (and journals).
+
+  Pair with com.fak.serve-gateway.plist + tools/mac_keep_awake.sh (caffeinate):
+  the M-series node sleeps ~every 25 min, which would starve the cadence. See
+  docs/fak/node-macos-a-activation.md for the full activation runbook.
+
+  This is a TEMPLATE: replace the __PLACEHOLDER__ tokens with absolute paths for
+  this node, then install it as a per-user agent:
+
+      sed -e "s#__PYTHON__#$(command -v python3)#" \
+          -e "s#__REPO__#$(cd "$(dirname "$0")/.." && pwd)#" \
+          tools/com.fak.dogfood-fleet.plist \
+        > ~/Library/LaunchAgents/com.fak.dogfood-fleet.plist
+      launchctl load -w ~/Library/LaunchAgents/com.fak.dogfood-fleet.plist
+
+  Tail it, or unload it, with:
+
+      tail -f tools/_watchdog/launchd_dogfood_fleet.log
+      launchctl unload -w ~/Library/LaunchAgents/com.fak.dogfood-fleet.plist
+-->
+<plist version="1.0">
+  <dict>
+    <key>Label</key>
+    <string>com.fak.dogfood-fleet</string>
+
+    <key>ProgramArguments</key>
+    <array>
+      <string>__PYTHON__</string>
+      <string>__REPO__/tools/issue_dispatch.py</string>
+      <string>--live</string>
+      <string>--max-workers</string>
+      <string>1</string>
+    </array>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+      <!-- Dogfood guard default-ON is the whole point of this node; make it
+           explicit so a stray opt-out elsewhere can't silently unwrap the fleet. -->
+      <key>FLEET_DOGFOOD_GUARD</key>
+      <string>1</string>
+    </dict>
+
+    <key>WorkingDirectory</key>
+    <string>__REPO__</string>
+
+    <!-- Fire one guarded tick every 30 minutes (preflight-gated, so a busy/dirty
+         host just refuses that tick rather than piling up workers). -->
+    <key>StartInterval</key>
+    <integer>1800</integer>
+
+    <key>RunAtLoad</key>
+    <true/>
+
+    <key>StandardOutPath</key>
+    <string>__REPO__/tools/_watchdog/launchd_dogfood_fleet.log</string>
+    <key>StandardErrorPath</key>
+    <string>__REPO__/tools/_watchdog/launchd_dogfood_fleet.err</string>
+  </dict>
+</plist>
