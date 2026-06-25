@@ -1,6 +1,9 @@
 package ctxplan
 
-import "sort"
+import (
+	"math"
+	"sort"
+)
 
 // index.go — the candidate INDEX: the planner's access path, the piece that bounds the
 // per-turn planning COMPUTE the way the budget bounds the per-turn resident TOKENS.
@@ -93,6 +96,25 @@ func BuildIndex(spans []Span) *Index {
 
 // Len reports the number of indexed spans (the "table" size, N).
 func (ix *Index) Len() int { return len(ix.spans) }
+
+// docFreq is df(t): the number of spans whose posting list contains token t — the
+// per-token posting statistic (the pg_statistic the package doc anticipates). It is
+// O(1): the posting list length is maintained incrementally by Add, so no scan and
+// no extra state is needed for selectivity. A token never indexed has df 0.
+func (ix *Index) docFreq(t string) int { return len(ix.posting[t]) }
+
+// idf is the inverse-document-frequency weight of an intent token: a measure of how
+// SELECTIVE the token is over the current index. A token in few spans (rare,
+// discriminating) earns a high weight; a token in nearly every span (common, noise —
+// "the", "read") earns ~0. Using the smoothed form log((N+1)/(df+1)) + 1 so the
+// weight is always >= 1 (a matched token always contributes), never NaN/Inf, and
+// monotonically decreasing in df. With N spans and df(t) matches, idf collapses to a
+// pure function of the current index, so a Probe stays deterministic.
+func (ix *Index) idf(t string) float64 {
+	n := float64(len(ix.spans))
+	df := float64(ix.docFreq(t))
+	return math.Log((n+1)/(df+1)) + 1
+}
 
 // Add indexes one span in O(tokens(span)) time: it appends to the heap, records the id,
 // appends the span's index to the posting list of every distinct content token in its
@@ -208,10 +230,17 @@ func (ix *Index) Probe(f Forecast, opts ProbeOptions) []Span {
 			mark(i, tierPin)
 		}
 	}
-	// tier 1 — relevance: walk each intent token's posting list (the inverted index).
+	// tier 1 — relevance: walk each intent token's posting list (the inverted index),
+	// accumulating an IDF/selectivity score per span. A span matched by a RARE intent
+	// token (high idf) outscores one matched only by a common token, so when the cap
+	// bites the least-selective relevance hits drop first (#564) — the planner's
+	// pg_statistic analogue. relScore stays 0 for spans reached only by another tier.
+	relScore := make([]float64, len(ix.spans))
 	for t := range tokenSet(joinIntents(f.Intents)) {
+		w := ix.idf(t)
 		for _, j := range ix.posting[t] {
 			mark(j, tierRelevance)
+			relScore[j] += w
 		}
 	}
 	// tier 2 — recency: the most-recent RecencyWindow spans (the append-order tail).
@@ -239,17 +268,25 @@ func (ix *Index) Probe(f Forecast, opts ProbeOptions) []Span {
 	// of a tier; the final slice is re-sorted into render order below.
 	type hit struct {
 		idx, tier, step int
+		score           float64 // IDF selectivity; non-zero only for a span on the relevance tier
 		id              string
 	}
 	hits := make([]hit, 0, len(ix.spans))
 	for i, tier := range best {
 		if tier != tierNone {
-			hits = append(hits, hit{idx: i, tier: tier, step: ix.spans[i].Step, id: ix.spans[i].ID})
+			hits = append(hits, hit{idx: i, tier: tier, step: ix.spans[i].Step, score: relScore[i], id: ix.spans[i].ID})
 		}
 	}
 	sort.Slice(hits, func(a, b int) bool {
 		if hits[a].tier != hits[b].tier {
 			return hits[a].tier < hits[b].tier
+		}
+		// Within the relevance tier, the more SELECTIVE span (higher summed IDF) ranks
+		// first, so a cap drops the least-discriminating relevance hits before the most
+		// (#564). score is 0 for every other tier, so this clause is a no-op there and the
+		// recency tiebreak below decides as before — a behavior-preserving refinement.
+		if hits[a].score != hits[b].score {
+			return hits[a].score > hits[b].score
 		}
 		if hits[a].step != hits[b].step {
 			return hits[a].step > hits[b].step // freshest first within a tier
