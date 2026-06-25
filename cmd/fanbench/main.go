@@ -26,7 +26,7 @@
 // Usage:
 //
 //	fanbench [--profile research|write-heavy|no-share]
-//	         [--agents 1,2,4,...,1024]   (explicit) | [--agent-max 1024 --grid log|full]
+//	         [--agents 1,2,4,...,1024]   (explicit) | [--agent-max 1024 --grid log|full|canonical]
 //	         [--sub-turns 4]             (explicit grid, comma-separated)
 //	         [--trials 12] [--seed N]
 //	         [--prefix 2048] | [--prefixes smoke,small,medium,long,big|all|1024,8k,max]
@@ -62,7 +62,7 @@ func main() {
 	profileName := fs.String("profile", "research", "workload profile: research | write-heavy | no-share")
 	agentsArg := fs.String("agents", "", "explicit fan-out grid, comma-separated (overrides --agent-max/--grid)")
 	agentMax := fs.Int("agent-max", 1024, "max fan-out width N (generated grid)")
-	gridKind := fs.String("grid", "log", "generated grid: log (powers-of-two ladder to max) | full (1..max)")
+	gridKind := fs.String("grid", "log", "generated grid: log (powers-of-two ladder to max) | full (1..max) | canonical (D-001: 1,100,500,1000)")
 	subTurnsArg := fs.String("sub-turns", "4", "turns per sub-agent, comma-separated grid")
 	trials := fs.Int("trials", 12, "seeded trials per cell (more = tighter order stats)")
 	seed := fs.Int64("seed", 0x5EED_F1EE, "root seed (whole sweep is reproducible)")
@@ -167,7 +167,7 @@ func profileByName(name string) (turnbench.FanoutProfile, bool) {
 // buildAgentGrid returns the explicit list if given, else a generated grid up to max.
 // "log" is a powers-of-two ladder (1,2,4,8,...,max) that always includes 1 and max —
 // the right spacing for a fan-out curve that spans three orders of magnitude; "full"
-// is 1..max.
+// is 1..max. "canonical" is the D-001 acceptance ladder.
 func buildAgentGrid(explicit string, max int, kind string) []int {
 	if strings.TrimSpace(explicit) != "" {
 		return parseInts(explicit)
@@ -175,7 +175,10 @@ func buildAgentGrid(explicit string, max int, kind string) []int {
 	if max < 1 {
 		max = 1
 	}
-	if strings.ToLower(kind) == "full" {
+	switch strings.ToLower(kind) {
+	case "canonical", "acceptance", "d001":
+		return []int{1, 100, 500, 1000}
+	case "full":
 		out := make([]int, 0, max)
 		for i := 1; i <= max; i++ {
 			out = append(out, i)

@@ -67,6 +67,9 @@ func TestBuildAgentGrid(t *testing.T) {
 	if got := buildAgentGrid("1,4,16", 1024, "log"); !reflect.DeepEqual(got, []int{1, 4, 16}) {
 		t.Fatalf("explicit grid = %v", got)
 	}
+	if got := buildAgentGrid("", 1024, "canonical"); !reflect.DeepEqual(got, []int{1, 100, 500, 1000}) {
+		t.Fatalf("canonical grid = %v", got)
+	}
 	// log ladder always includes 1 and max
 	got := buildAgentGrid("", 1000, "log")
 	if got[0] != 1 || got[len(got)-1] != 1000 {
