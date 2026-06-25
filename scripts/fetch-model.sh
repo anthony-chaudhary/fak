@@ -93,7 +93,53 @@ mkdir -p "$OUT"
 export HF_HUB_OFFLINE=0 TRANSFORMERS_OFFLINE=0
 
 echo "fetch-model: exporting $MODEL -> $OUT" >&2
-python "$EXPORT_PY" --model "$MODEL" --out "$OUT"
+# The HF download happens inside export_oracle.py (transformers from_pretrained,
+# which itself verifies the LFS sha256). Catch its failure here so a down / renamed /
+# rate-limited source ends in one clear, actionable message instead of a bare die.
+if ! python "$EXPORT_PY" --model "$MODEL" --out "$OUT"; then
+  echo "fetch-model: export failed for '$MODEL'." >&2
+  echo "  The HuggingFace download may be down, rate-limited, or the model id is wrong." >&2
+  echo "  Re-run when online (the HF cache makes repeats offline-safe), or point" >&2
+  echo "  FAK_EXPORT_MODEL at a local checkpoint dir or an alternate HF id." >&2
+  exit 1
+fi
+
+# Post-export integrity: manifest.json records nbytes per tensor written into
+# weights.f32, so a truncated / partial export shows up as a size mismatch. Verify
+# before declaring done — delete the bad blob and exit non-zero rather than leave a
+# corrupt artifact the engine would only trip over later.
+echo "fetch-model: verifying exported weights against manifest..." >&2
+python - "$OUT" <<'PY'
+import json, os, sys
+out = sys.argv[1]
+man_path = os.path.join(out, "manifest.json")
+w_path = os.path.join(out, "weights.f32")
+try:
+    with open(man_path) as f:
+        manifest = json.load(f)
+except OSError as e:
+    sys.stderr.write(f"fetch-model: INTEGRITY FAIL - cannot read {man_path}: {e}\n")
+    sys.exit(1)
+expected = sum(int(v["nbytes"]) for v in manifest.values())
+try:
+    actual = os.path.getsize(w_path)
+except OSError as e:
+    sys.stderr.write(f"fetch-model: INTEGRITY FAIL - cannot stat {w_path}: {e}\n")
+    sys.exit(1)
+if actual != expected:
+    try:
+        os.remove(w_path)
+    except OSError:
+        pass
+    sys.stderr.write(
+        f"fetch-model: INTEGRITY FAIL - weights.f32 is {actual} bytes but manifest.json "
+        f"sums to {expected} ({len(manifest)} tensors). Export was truncated/corrupt; "
+        f"deleted the bad blob. Delete {out} and re-run.\n")
+    sys.exit(1)
+sys.stderr.write(
+    f"fetch-model: verified weights.f32 ({actual} bytes) matches manifest "
+    f"({len(manifest)} tensors).\n")
+PY
 
 echo
 echo "fetch-model: done. To serve the real weights:"
