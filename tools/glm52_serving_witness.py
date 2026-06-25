@@ -2,8 +2,10 @@
 """GLM-5.2 full-size serving witness runner.
 
 This script does not claim this checkout can serve the 753B checkpoint locally.
-It records the reproducible external-engine evidence needed for issue #130 when
-run on, or against, a provisioned SGLang/vLLM node:
+It records the reproducible external-engine evidence needed for issue #130 / #413
+(witness the full-size GLM-5.2 checkpoint serving behind fak; runbook:
+docs/serving/glm52-full-size-serving-witness.md) when run on, or against, a
+provisioned SGLang/vLLM/llama.cpp node:
 
 - direct OpenAI-compatible upstream chat
 - fak gateway chat over the same upstream
