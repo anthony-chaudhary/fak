@@ -161,6 +161,71 @@ func TestPerCallEngineRouteOverridesKernelDefault(t *testing.T) {
 	}
 }
 
+func TestTestHandlePollIsNonConsuming(t *testing.T) {
+	setup()
+	abi.RegisterAdjudicator(0, fakeAdj{abi.Verdict{Kind: abi.VerdictAllow}})
+	abi.RegisterEngine("e", &countEngine{})
+	k := New("e")
+	ctx := context.Background()
+
+	h, v := k.Submit(ctx, call("read_x", "{}"))
+	if v.Kind != abi.VerdictAllow {
+		t.Fatalf("Submit verdict=%v, want Allow", v.Kind)
+	}
+	if got := k.TestHandle(h); got != abi.StatusPending {
+		t.Fatalf("TestHandle before Reap=%v, want StatusPending", got)
+	}
+	reapedAfterPoll, err := k.Reap(ctx, h)
+	if err != nil {
+		t.Fatalf("Reap after TestHandle failed: %v", err)
+	}
+	if got := k.TestHandle(h); got != abi.StatusOK {
+		t.Fatalf("TestHandle after Reap=%v, want StatusOK", got)
+	}
+
+	h2, v := k.Submit(ctx, call("read_x", "{}"))
+	if v.Kind != abi.VerdictAllow {
+		t.Fatalf("second Submit verdict=%v, want Allow", v.Kind)
+	}
+	reapedWithoutPoll, err := k.Reap(ctx, h2)
+	if err != nil {
+		t.Fatalf("Reap without TestHandle failed: %v", err)
+	}
+	if !reflect.DeepEqual(effectOf(reapedAfterPoll), effectOf(reapedWithoutPoll)) {
+		t.Fatalf("poll changed Reap result\n with poll: %+v\nno poll:   %+v", effectOf(reapedAfterPoll), effectOf(reapedWithoutPoll))
+	}
+}
+
+func TestTestHandleReadyAndDeniedAreLocallyComplete(t *testing.T) {
+	setup()
+	abi.RegisterFastPath(1, fakeFP{hit: true})
+	k := New("e")
+	h, v := k.Submit(context.Background(), call("read_cached", "{}"))
+	if v.Kind != abi.VerdictAllow {
+		t.Fatalf("fast path Submit verdict=%v, want Allow", v.Kind)
+	}
+	if got := k.TestHandle(h); got != abi.StatusOK {
+		t.Fatalf("ready fast-path TestHandle=%v, want StatusOK", got)
+	}
+	if _, err := k.Reap(context.Background(), h); err != nil {
+		t.Fatalf("ready fast-path handle must remain reapable: %v", err)
+	}
+
+	setup()
+	abi.RegisterAdjudicator(0, fakeAdj{abi.Verdict{Kind: abi.VerdictDeny, Reason: abi.ReasonPolicyBlock}})
+	k = New("e")
+	h, v = k.Submit(context.Background(), call("write_x", "{}"))
+	if v.Kind != abi.VerdictDeny {
+		t.Fatalf("denied Submit verdict=%v, want Deny", v.Kind)
+	}
+	if got := k.TestHandle(h); got != abi.StatusOK {
+		t.Fatalf("denied TestHandle=%v, want StatusOK", got)
+	}
+	if _, err := k.Reap(context.Background(), h); err != nil {
+		t.Fatalf("denied handle must remain reapable: %v", err)
+	}
+}
+
 func TestDenyNeverReachesDispatch(t *testing.T) {
 	setup()
 	abi.RegisterAdjudicator(0, fakeAdj{abi.Verdict{Kind: abi.VerdictDeny, Reason: abi.ReasonPolicyBlock}})

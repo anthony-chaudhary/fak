@@ -413,6 +413,22 @@ func (k *Kernel) store(seq uint64, p *pendingCall) {
 	k.mu.Unlock()
 }
 
+// TestHandle is the concrete-kernel non-consuming poll for a submitted handle.
+// It borrows MPI_Test's request-poll shape only: polling drives no progress engine
+// and does not dispatch a tool. StatusPending means this process still has an
+// admitted call that must run its engine round-trip via Reap. Already-ready fast
+// path hits, denied calls, and unknown/reaped handles are locally complete from
+// the poller's point of view and report StatusOK; Reap remains the consuming path.
+func (k *Kernel) TestHandle(h abi.SubmissionHandle) abi.Status {
+	k.mu.Lock()
+	p := k.pending[h.Seq]
+	k.mu.Unlock()
+	if p == nil || p.ready != nil || p.denied {
+		return abi.StatusOK
+	}
+	return abi.StatusPending
+}
+
 // ErrDenied is returned by Reap for a call that adjudication refused.
 var ErrDenied = errors.New("kernel: call denied by adjudicator")
 
