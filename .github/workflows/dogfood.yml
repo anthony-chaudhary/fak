@@ -1,0 +1,94 @@
+# Recent-feature dogfood gate + evidence (issue #798).
+#
+# `tools/recent_feature_dogfood.py` runs the recently-shipped fak features against a
+# clean checkout — the loop ledger, the vCache score/refutation surfaces, the benchmark
+# catalog, the code-slop + dogfood-coverage scorecards, and the focused Go unit tests —
+# and folds them into one machine payload (`report.json`) plus a `vcache-score.json`
+# artifact. It was a local-only runner; nothing ran it on a clean box or gated on it.
+# This workflow closes both halves:
+#
+#   * GATE     — the runner exits 1 when a REQUIRED probe fails, which fails the build.
+#                Scorecards may still report ACTION/debt (an unmet improvement target)
+#                while the packet PASSES, because a scorecard probe's allowed exits
+#                include its debt code — the gate fires only on an invalid machine
+#                payload, preserving the local semantics.
+#   * EVIDENCE — `report.json` and the vCache score artifact are uploaded as build
+#                artifacts and the human report is written to the run's step summary,
+#                so the dogfood evidence is published, not just produced locally.
+#
+# The runner resolves a `fak` binary from `tools/.bin/fak` (the same path
+# `resolve_fak_bin` probes), so the job BUILDS one there first — the green gate then
+# asserts the recently-shipped CLI surfaces actually run on a clean runner.
+name: dogfood
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+  workflow_dispatch: {}
+  schedule:
+    # Daily at 06:41 UTC — an off-the-hour minute so the fleet's scheduled jobs don't
+    # all land on :00. Keeps the recent-feature evidence fresh without a manual run.
+    - cron: "41 6 * * *"
+
+permissions:
+  contents: read
+
+jobs:
+  recent-feature-dogfood:
+    name: recent-feature dogfood gate + evidence
+    runs-on: ubuntu-latest
+    env:
+      GOTOOLCHAIN: auto
+    defaults:
+      run:
+        working-directory: .
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: false
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+
+      # Build a real `fak` into tools/.bin/ — the path the runner resolves — so the
+      # recently-shipped CLI surfaces (loop, vcache, benchmarks) run from a binary, not
+      # `go run`, and the gate proves they work on a clean checkout.
+      - name: build fak (so the dogfood runner resolves the CLI)
+        run: go build -o tools/.bin/fak ./cmd/fak
+
+      # The GATE: run the dogfood packet into a fixed evidence dir. The runner exits 1
+      # iff a REQUIRED probe fails (an invalid machine payload), which fails the build.
+      # Scorecard ACTION/debt does NOT fail the packet — its probe's allowed exits cover
+      # the debt code — so this preserves the local pass semantics.
+      - name: recent-feature dogfood gate (--json; required probes must pass)
+        run: |
+          python tools/recent_feature_dogfood.py \
+            --out-dir .fak/recent-feature-dogfood/ci \
+            --json | tee dogfood-report.json
+
+      # Publish the evidence: the report and the vCache score artifact the packet wrote.
+      - name: upload dogfood evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: recent-feature-dogfood
+          path: |
+            dogfood-report.json
+            .fak/recent-feature-dogfood/ci/**
+          if-no-files-found: warn
+
+      # Surface the human report on the run summary so the evidence is readable inline.
+      - name: dogfood report -> step summary
+        if: always()
+        run: |
+          {
+            echo "## recent-feature dogfood"
+            echo '```'
+            python tools/recent_feature_dogfood.py --out-dir .fak/recent-feature-dogfood/ci-summary || true
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
