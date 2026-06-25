@@ -70,6 +70,32 @@ func TestWatcherPicksUpChange(t *testing.T) {
 	}
 }
 
+// TestWatcherDoesNotMissEditBetweenLoadAndWatch covers the startup race: the host
+// loads the initial manifest, then constructs the watcher. If the file changes in
+// that window, the watcher must not seed the NEW bytes as already-installed.
+func TestWatcherDoesNotMissEditBetweenLoadAndWatch(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "route.json")
+	writeManifestFile(t, path, "alpha")
+	m, err := LoadManifest(path)
+	if err != nil {
+		t.Fatalf("load initial manifest: %v", err)
+	}
+	live := NewLive(&m)
+
+	writeManifestFile(t, path, "beta")
+	w := NewWatcher(path, live, time.Millisecond, nil)
+	if got := routedModel(live); got != "alpha" {
+		t.Fatalf("pre-reload route = %q, want alpha", got)
+	}
+	ev := w.Reload()
+	if !ev.Reloaded || ev.Err != nil {
+		t.Fatalf("reload event = %+v, want the beta edit applied", ev)
+	}
+	if got := routedModel(live); got != "beta" {
+		t.Fatalf("post-reload route = %q, want beta", got)
+	}
+}
+
 // TestWatcherIdenticalContentIsNoOp: re-reading the same bytes does not swap or count
 // a reload, so a touch / no-op write is not a spurious policy change.
 func TestWatcherIdenticalContentIsNoOp(t *testing.T) {
