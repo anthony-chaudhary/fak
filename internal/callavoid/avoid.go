@@ -30,6 +30,14 @@ const neverBreakEven = int(^uint(0) >> 1)
 // silent: Account reports how many fan-outs were clamped.
 const DefaultMaxRedirectFanout = 1024
 
+// ValidateFloor is the minimum cost charged to a memo hit / stale validation: a
+// vDSO entry is cheap to re-validate (a world-version check) but NEVER free. At the
+// old zero floor a StaleMiss priced exactly 1 (validate 0 + re-run 1 + capture 0),
+// so a window of pure cache thrash read break-even instead of the strict loss it is
+// (a stale miss is overhead a naive agent never paid). The floor also caps a
+// pure-cache window's amplification at 1/ValidateFloor (=100x) instead of +Inf.
+const ValidateFloor = 0.01
+
 // ---------------------------------------------------------------------------
 // ProveMemo — the skeptical economics gate (the local-tool-call dual of
 // vcachechain.ProveRecall's §11.0 cost gate).
@@ -219,20 +227,30 @@ type TurnReport struct {
 // for a hundred naive round-trips is exactly where an avoiding kernel reaches states a
 // naive path cannot, or would reach far slower.
 func Account(t Tally) TurnReport {
-	v := nonNeg(t.ValidateCost)
+	// A memo hit / stale validation pays at least ValidateFloor — cheap, never free —
+	// so a stale miss is always a strict loss and a pure-cache window is finite (#817).
+	v := math.Max(ValidateFloor, nonNeg(t.ValidateCost))
 	c := nonNeg(t.CaptureCost)
 	fanoutCap := t.MaxRedirectFanout
 	if fanoutCap <= 0 {
 		fanoutCap = DefaultMaxRedirectFanout
 	}
 
-	executed := float64(t.Execute)*(1+c) +
-		float64(t.MemoHit)*v +
-		float64(t.StaleMiss)*(v+1+c)
-	naive := float64(t.Execute) +
-		float64(t.MemoHit) +
-		float64(t.Repair) +
-		float64(t.StaleMiss)
+	// Non-negative guards on the scalar count fields (defense-in-depth, symmetric with
+	// the Redirects/cost guards below): a negative count can never inflate the ratio.
+	execute := nonNegInt(t.Execute)
+	memoHit := nonNegInt(t.MemoHit)
+	repair := nonNegInt(t.Repair)
+	staleMiss := nonNegInt(t.StaleMiss)
+	hardDeny := nonNegInt(t.HardDeny)
+
+	executed := float64(execute)*(1+c) +
+		float64(memoHit)*v +
+		float64(staleMiss)*(v+1+c)
+	naive := float64(execute) +
+		float64(memoHit) +
+		float64(repair) +
+		float64(staleMiss)
 
 	pruned := 0
 	capped := 0
@@ -249,7 +267,7 @@ func Account(t Tally) TurnReport {
 	naive += float64(pruned)
 	// HardDeny adds 0 to both sides; it is symmetric and intentionally not credited.
 
-	raw := t.Execute + t.MemoHit + t.Repair + t.StaleMiss + t.HardDeny + len(t.Redirects)
+	raw := execute + memoHit + repair + staleMiss + hardDeny + len(t.Redirects)
 	amp := safeRatio(naive, executed)
 
 	rep := TurnReport{
@@ -259,10 +277,10 @@ func Account(t Tally) TurnReport {
 		EffectiveTurns:   naive,
 		AvoidedTurns:     naive - executed,
 		Amplification:    amp,
-		MemoHits:         t.MemoHit,
-		Repairs:          t.Repair,
-		StaleMisses:      t.StaleMiss,
-		HardDenies:       t.HardDeny,
+		MemoHits:         memoHit,
+		Repairs:          repair,
+		StaleMisses:      staleMiss,
+		HardDenies:       hardDeny,
 		ProductiveDenies: len(t.Redirects),
 		RedirectPruned:   pruned,
 		RedirectCapped:   capped,
@@ -307,9 +325,9 @@ func turnActionsAndRisks(t Tally, rep TurnReport) (actions, risks []string) {
 	if rep.RedirectCapped > 0 {
 		risks = append(risks, fmt.Sprintf("%d redirect fan-out(s) were clamped to the cap; the reported amplification is a LOWER bound, not inflated", rep.RedirectCapped))
 	}
-	if t.StaleMiss > 0 && t.StaleMiss*2 >= t.MemoHit {
+	if rep.StaleMisses > 0 && rep.StaleMisses*2 >= rep.MemoHits {
 		risks = append(risks, fmt.Sprintf("stale misses (%d) rival hits (%d): the world mutates faster than the cache amortizes — run ProveMemo for this class; a global world-version may be over-invalidating",
-			t.StaleMiss, t.MemoHit))
+			rep.StaleMisses, rep.MemoHits))
 		actions = append(actions, "narrow the vDSO world-version to the written scope so an unrelated write stops invalidating stable read entries")
 	}
 	switch rep.Status {
@@ -353,6 +371,13 @@ func nonNeg(x float64) float64 {
 		return 0
 	}
 	return x
+}
+
+func nonNegInt(n int) int {
+	if n < 0 {
+		return 0
+	}
+	return n
 }
 
 func clamp01(x float64) float64 {

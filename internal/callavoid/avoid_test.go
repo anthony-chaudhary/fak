@@ -107,17 +107,18 @@ func TestProveMemoBreakEvenMonotone(t *testing.T) {
 // 2.5x amplification — a naive agent would have spent 10 round-trips for the same end.
 func TestAccountAmplification(t *testing.T) {
 	r := Account(Tally{Execute: 4, MemoHit: 6})
-	if !approx(r.ExecutedTurns, 4) || !approx(r.EffectiveTurns, 10) {
-		t.Fatalf("executed=%v effective=%v, want 4 and 10", r.ExecutedTurns, r.EffectiveTurns)
+	// Each memo hit pays the ValidateFloor (0.01), never free: executed = 4 + 6*0.01 = 4.06.
+	if !approx(r.ExecutedTurns, 4.06) || !approx(r.EffectiveTurns, 10) {
+		t.Fatalf("executed=%v effective=%v, want 4.06 and 10", r.ExecutedTurns, r.EffectiveTurns)
 	}
-	if !approx(r.Amplification, 2.5) {
-		t.Errorf("amplification = %v, want 2.5", r.Amplification)
+	if !approx(r.Amplification, 10.0/4.06) {
+		t.Errorf("amplification = %v, want %v", r.Amplification, 10.0/4.06)
 	}
 	if r.Status != "amplifying" || r.Grade != "B" {
 		t.Errorf("status/grade = %s/%s, want amplifying/B", r.Status, r.Grade)
 	}
-	if r.RawTurns != 10 || !approx(r.AvoidedTurns, 6) {
-		t.Errorf("raw=%d avoided=%v, want 10 and 6", r.RawTurns, r.AvoidedTurns)
+	if r.RawTurns != 10 || !approx(r.AvoidedTurns, 10-4.06) {
+		t.Errorf("raw=%d avoided=%v, want 10 and %v", r.RawTurns, r.AvoidedTurns, 10-4.06)
 	}
 	if r.Schema != "fak.callavoid.turns.v1" {
 		t.Errorf("schema = %q", r.Schema)
@@ -163,16 +164,54 @@ func TestAccountStaleMissRegresses(t *testing.T) {
 	}
 }
 
-// TestAccountAllAvoidedIsInfinite: a window where every call was served locally and
-// validation is free has infinite amplification (and grade A) — the ideal "no tool
-// call" extreme. It must not divide-by-zero.
+// TestAccountAllAvoidedIsFinite: a window where every call was served locally is the
+// ideal "no tool call" extreme — maximally amplifying (grade A) but FINITE, not +Inf:
+// a memo hit still pays the ValidateFloor (a world-version check is never free), so a
+// pure-cache window caps at 1/ValidateFloor = 100x (#817). It must not divide-by-zero.
 func TestAccountAllAvoided(t *testing.T) {
 	r := Account(Tally{MemoHit: 5})
-	if !math.IsInf(r.Amplification, 1) {
-		t.Errorf("all-avoided amplification = %v, want +Inf", r.Amplification)
+	if math.IsInf(r.Amplification, 1) {
+		t.Errorf("all-avoided amplification = +Inf, want finite (a memo hit pays ValidateFloor)")
+	}
+	if !approx(r.Amplification, 1.0/ValidateFloor) {
+		t.Errorf("all-avoided amplification = %v, want %v (1/ValidateFloor)", r.Amplification, 1.0/ValidateFloor)
 	}
 	if r.Grade != "A" || r.Status != "amplifying" {
 		t.Errorf("grade/status = %s/%s, want A/amplifying", r.Grade, r.Status)
+	}
+}
+
+// TestAccountStaleMissDefaultCostsRegress: at the DEFAULT zero costs a stale miss must
+// still read as a net loss (#817). A stale miss is overhead a naive agent never paid;
+// the ValidateFloor makes it strictly >1 paid (validate 0.01 + re-run 1), so the window
+// regresses instead of reading the old, wrong break-even (which priced it at exactly 1).
+func TestAccountStaleMissDefaultCostsRegress(t *testing.T) {
+	r := Account(Tally{StaleMiss: 4})
+	// executed = 4*(ValidateFloor + 1 + 0) = 4.04 ; naive = 4 ; amp = 4/4.04 < 1.
+	if !approx(r.ExecutedTurns, 4*(ValidateFloor+1)) {
+		t.Errorf("executed = %v, want %v", r.ExecutedTurns, 4*(ValidateFloor+1))
+	}
+	if r.Status != "regressing" {
+		t.Errorf("status = %s, want regressing (a stale miss is a strict loss)", r.Status)
+	}
+	if r.Amplification >= 1 {
+		t.Errorf("amplification = %v, want < 1", r.Amplification)
+	}
+}
+
+// TestAccountNonNegativeCountGuards: a negative scalar count can never inflate the
+// ratio — it is floored to zero, symmetric with the existing Redirects/cost guards (#817).
+func TestAccountNonNegativeCountGuards(t *testing.T) {
+	r := Account(Tally{Execute: -3, MemoHit: -2, Repair: -1, StaleMiss: -4, HardDeny: -5})
+	if r.RawTurns != 0 {
+		t.Errorf("raw turns = %d, want 0 (all negative counts floored)", r.RawTurns)
+	}
+	if r.MemoHits != 0 || r.StaleMisses != 0 || r.HardDenies != 0 || r.Repairs != 0 {
+		t.Errorf("guarded counts = memo:%d stale:%d hard:%d repair:%d, want all 0",
+			r.MemoHits, r.StaleMisses, r.HardDenies, r.Repairs)
+	}
+	if r.Status != "break_even" {
+		t.Errorf("status = %s, want break_even (an empty window after guarding)", r.Status)
 	}
 }
 
