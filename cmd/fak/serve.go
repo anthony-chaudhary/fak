@@ -20,6 +20,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/hfhub"
 	fakmodel "github.com/anthony-chaudhary/fak/internal/model"
 	"github.com/anthony-chaudhary/fak/internal/modelengine"
+	"github.com/anthony-chaudhary/fak/internal/modelroute"
 	"github.com/anthony-chaudhary/fak/internal/pathutil"
 	"github.com/anthony-chaudhary/fak/internal/policy"
 	"github.com/anthony-chaudhary/fak/internal/session"
@@ -78,6 +79,7 @@ func cmdServe(argv []string) {
 	vdso := fs.Bool("vdso", true, "enable the vDSO dedup fast path")
 	invalidation := fs.String("invalidation", "global", "vDSO tier-2 invalidation granularity for the live fleet: global|namespace|resource")
 	requireKeyEnv := fs.String("require-key-env", "", "env var holding a bearer token to REQUIRE on every request (default: no auth)")
+	routeManifest := fs.String("route-manifest", "", "model-routing policy to install: each fak_syscall call is classified into a modelroute.Subject and a single-model (PICK) plan binds abi.ToolCall.Engine before Submit, so the residency PDP adjudicates the real route (#601). Empty (default) leaves Engine unset → the kernel default engine, byte-for-byte the pre-routing behavior. A malformed manifest fails startup loud (a mis-routed model is a security boundary, never a silent default).")
 	ggufPath := fs.String("gguf", "", "load these GGUF weights into the in-kernel engine at boot; the load is part of the measured startup sequence and its phase breakdown is exposed on /metrics. Default path is lean-Q8 (Q4→f32→Q8 round-trip); set FAK_Q4K=1 for the direct-resident-Q4_K path (Qwen3.6-27B q4_k_m, the P1/P2 decode lever)")
 	tokPath := fs.String("tokenizer", "", "OPTIONAL override for the in-kernel CHAT planner's tokenizer. With --gguf and no --base-url, /v1/chat/completions AND /v1/messages already serve the in-kernel model (real ChatML chat) using the GGUF's EMBEDDED tokenizer; pass this only to override it (e.g. an SPM-only checkpoint with no embedded BPE tokenizer, or a custom vocab). Accepts a tokenizer.json or its directory. e.g. ~/.cache/fak-models/tokenizers/qwen3.6")
 	ctxViewBudget := fs.Int("ctx-view-budget", 0, "wire the ctxplan context PLANNER into the live serve loop: each buffered turn, re-materialize the forwarded history as an O(1) planned VIEW under this resident-token budget (a planned view in place of appending the whole transcript, #555). 0 (default) leaves the existing path byte-for-byte unchanged. OFF by default: it rewrites in-flight turn history, so gate it until you have watched a real session. The streaming fast-path bypasses this; the buffered turn path is what gets planned.")
@@ -87,6 +89,9 @@ func cmdServe(argv []string) {
 	resetOnBudget := fs.Bool("reset-on-budget", false, "on context-budget exhaustion, re-arm the continuation trace with a carryover seed and continue transparently instead of returning 409 (requires --context-budget-tokens)")
 	budgetWebhook := fs.String("budget-webhook", "", "POST a JSON event to this URL when a served session's context budget crosses the warning threshold (--budget-warn-fraction) or is exhausted (the reset trigger), so an operator/monitor is notified before exhaustion (#743). Empty = off. Needs --context-budget-tokens to have a budget to watch.")
 	budgetWarnFraction := fs.Float64("budget-warn-fraction", 0.8, "consumed share (0..1) of the context budget at which --budget-webhook fires its pre-exhaustion warning (default 0.8 = 80%); <=0 or >=1 disables the warning while the exhaustion event still fires")
+	notifyNative := fs.Bool("notify-native", true, "emit a one-line native notification to stderr when a served session hits a PAUSED/DRAINING/STOPPED or budget boundary, carrying the closed stop-reason token — the SIGCHLD-equivalent so a waiting agent is never silent (#761); default on")
+	notifyWebhook := fs.String("notify-webhook", "", "POST a JSON StopEvent to this URL on each served-session terminal/paused/budget boundary (#761), carrying the closed reason token; empty = off. Extends the #743 budget webhook to the full stop-reason vocabulary.")
+	notifySlack := fs.String("notify-slack", "", "POST a Slack incoming-webhook payload ({\"text\":…}) on each served-session boundary (#761); empty = off")
 	tParse := time.Now()
 	_ = fs.Parse(argv)
 	parseDur := time.Since(tParse)
@@ -196,11 +201,27 @@ func cmdServe(argv []string) {
 			ContextTokensLeft: *contextBudgetTokens,
 		})
 	}
-	// Wire the optional operator webhook: a pre-exhaustion warning at the configured
-	// consumed share and an event on exhaustion (the reset trigger), #743. Off unless a
-	// URL is given, so the served path is unchanged by default.
+	// Wire the optional operator webhook (#743) and the tiered stop-reason push notifier
+	// (#761). The #743 budget webhook stays byte-identical when it is the only thing set:
+	// combineBudgetObservers returns the lone observer unchanged, so WatchBudget is called
+	// once exactly as before. The notifier (native default-on; webhook/Slack opt-in) adds a
+	// SECOND budget fan-out plus the run-state TRANSITION observer that covers
+	// PAUSED/DRAINING/STOPPED — the rest of the closed stop-reason vocabulary the budget seam
+	// alone never sees. newNotifier returns nil when no sink is configured, leaving the
+	// transition seam its byte-identical no-op default.
+	notifier := newNotifier(*notifyNative, os.Stderr, *notifyWebhook, *notifySlack)
+	if notifier != nil {
+		serveSessions.WatchTransitions(notifier.transitionObserver())
+	}
+	var budgetObs session.BudgetObserver
 	if obs := budgetWebhookObserver(*budgetWebhook); obs != nil {
-		serveSessions.WatchBudget(*budgetWarnFraction, obs)
+		budgetObs = obs
+	}
+	if notifier != nil {
+		budgetObs = combineBudgetObservers(budgetObs, notifier.budgetObserver())
+	}
+	if budgetObs != nil {
+		serveSessions.WatchBudget(*budgetWarnFraction, budgetObs)
 	}
 
 	// Resolve the optional in-kernel chat decode backend. Lookup (not Pick) so a typo
@@ -216,6 +237,22 @@ func cmdServe(argv []string) {
 		}
 		chatBackend = be
 		fmt.Printf("fak: in-kernel chat decode → device backend %q\n", be.Name())
+	}
+
+	// Resolve the optional model-routing policy. Off by default: an empty --route-manifest
+	// leaves routeMan nil, so gateway.New gets a nil RouteManifest and Engine stays unset —
+	// byte-for-byte the pre-routing behavior. A malformed file fails loud here rather than
+	// silently default-routing every call to the kernel default (a mis-routed model is a
+	// security boundary). gateway.New also re-validates the loaded manifest.
+	var routeMan *modelroute.Manifest
+	if *routeManifest != "" {
+		loaded, err := modelroute.LoadManifest(*routeManifest)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "fak serve: --route-manifest:", err)
+			os.Exit(1)
+		}
+		routeMan = &loaded
+		fmt.Printf("fak: model-routing policy loaded from %s\n", *routeManifest)
 	}
 
 	srv, err := gateway.New(gateway.Config{
@@ -260,6 +297,11 @@ func cmdServe(argv []string) {
 		// is nothing to admit), so it is a no-op until a real floor is in place — never an
 		// over-drop. Behavior-preserving: a pruned tool stays DEFAULT_DENY at the kernel.
 		ToolFloorDenies: adjudicator.Default.NeverAdmits,
+		// Model-routing policy (#601). nil (the default, no --route-manifest) leaves
+		// ToolCall.Engine unset → the kernel default engine, byte-for-byte the pre-routing
+		// path. When set, each fak_syscall call is classified and a PICK plan binds the
+		// chosen model before Submit so the residency PDP adjudicates the real route.
+		RouteManifest: routeMan,
 	})
 	must(err)
 	srv.SetModelLoadProfile(loadProfile)
