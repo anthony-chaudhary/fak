@@ -61,6 +61,31 @@ required.
 
 See [docs/integrations/claude.md](docs/integrations/claude.md).
 
+### Long sessions: shed history, keep the cache hit
+
+The same wrap is also where a 100k+-token session stops getting expensive. Add one
+flag and `fak` shrinks the OLD turns of a growing Claude Code conversation while
+keeping the `cache_control` prefix **byte-identical**, so the provider's prompt-cache
+hit survives instead of breaking:
+
+```bash
+fak guard --compact-history-budget 8000 -- claude
+```
+
+Why it matters: a long session re-sends the whole transcript every turn, and the
+provider only discounts it while the cached prefix stays byte-for-byte the same. The
+naive fix — summarize and re-serialize — reorders the body and *busts* the cache, so
+a long session costs **more**. `fak` instead drops the un-cacheable middle turns by
+splicing on the original bytes (a memcpy, never a re-marshal), and falls back to doing
+nothing on any ambiguity, so it never breaks a turn.
+
+It is honest about what it can prove. Byte-identity guarantees the prefix is *reusable*;
+only the provider's `cache_read_input_tokens` proves it was *actually reused*. So `fak`
+checks itself against the bill: `/metrics` reports `fak_gateway_compaction_*` — what it
+*claimed* to shed next to the provider's real cache_read on each compacted turn — and the
+`fak guard` exit line summarizes it. A fire whose cache_read craters is the cache breaking,
+and you will see it rather than silently overpay. Tracking: [#745](https://github.com/anthony-chaudhary/fak/issues/745).
+
 ### Codex, Cursor, MCP hosts
 
 For current Codex CLI/IDE sessions, use the MCP path first:
