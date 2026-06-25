@@ -30,9 +30,7 @@ package modelengine
 
 import (
 	"context"
-	"encoding/json"
 	"os"
-	"strconv"
 	"sync"
 
 	"github.com/anthony-chaudhary/fak/internal/abi"
@@ -129,50 +127,39 @@ func (e *Engine) PreloadQ4K(m *model.Model) {
 // PreloadQ4K installs preloaded resident-Q4_K weights on the registered Default engine.
 func PreloadQ4K(m *model.Model) { Default.PreloadQ4K(m) }
 
-// Caps advertises the in-kernel engine capability. A worker that doesn't know it
+// Caps advertises the in-kernel engine capability AND the lifecycle seam
+// (EngineLifecycleCap) the Engine implements via Admit, so a consumer can negotiate
+// streaming/cancel without a type assertion. A worker that doesn't know either cap
 // simply never negotiates it; the engine is still selectable by id.
-func (e *Engine) Caps() []abi.Capability { return []abi.Capability{"engine.inkernel"} }
+func (e *Engine) Caps() []abi.Capability {
+	return []abi.Capability{"engine.inkernel", abi.EngineLifecycleCap}
+}
 
 // Complete runs the call's arguments through a real in-kernel-model decode and
 // returns the generated tokens as the result. This is the EngineDriver seam: the
 // kernel folds adjudication at Submit, then dispatches an ALLOWED call here at Reap.
+//
+// It is now a thin one-shot shim OVER the admit/step/stream lifecycle (Admit): it
+// drains the per-step token stream and returns the assembled turn. The decode, the
+// payload, and the Meta are byte-identical to the pre-lifecycle buffered path
+// (TestCompleteRunsRealDecode / TestDecodeIsDeterministicAndInputDriven pin that),
+// so every existing one-shot caller — the kernel's Reap dispatch included — is
+// unchanged while the engine has gained a real per-step, cancellable contract.
 func (e *Engine) Complete(ctx context.Context, c *abi.ToolCall) (*abi.Result, error) {
-	m := e.model()
-	in := refBytes(ctx, c.Args)
-	prompt := tokenize(c.Tool, in, m.Cfg.VocabSize)
-
-	sess := m.NewSession()
-	if e.q4k {
-		// Resident-Q4_K preload: engage the Q4_K decode kernel (the q4_k_m majority
-		// streams raw, Q6_K minority via Q8). Mirrors cmd/fakchat's s.Q4K = q4kLoad.
-		sess.Quant = true
-		sess.Q4K = true
+	req, err := e.Admit(ctx, c)
+	if err != nil {
+		return nil, err
 	}
-	gen := sess.Generate(prompt, genTokens)
-
-	body, _ := json.Marshal(struct {
-		Tool   string `json:"tool"`
-		Engine string `json:"engine"`
-		Model  string `json:"model"`
-		Tokens []int  `json:"generated_tokens"`
-	}{
-		Tool:   c.Tool,
-		Engine: EngineID,
-		Model:  "smollm2-inkernel",
-		Tokens: gen,
-	})
-
-	ref := putBytes(ctx, body)
-	return &abi.Result{
-		Call:    c,
-		Payload: ref,
-		Status:  abi.StatusOK,
-		Meta: map[string]string{
-			"engine":        EngineID,
-			"input_tokens":  strconv.Itoa(len(prompt)),
-			"output_tokens": strconv.Itoa(len(gen)),
-		},
-	}, nil
+	for range req.Tokens() { // one-shot caller wants only the finished turn; drain the stream
+	}
+	res, err := req.Result()
+	if err != nil {
+		return nil, err
+	}
+	if res != nil && res.Call == nil {
+		res.Call = c // preserve the pre-shim Result.Call binding
+	}
+	return res, nil
 }
 
 // tokenize turns a tool name + argument bytes into a bounded prompt of token ids.
