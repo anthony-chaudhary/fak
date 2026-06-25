@@ -72,6 +72,14 @@ type Page struct {
 	Witness     string `json:"witness,omitempty"`     // external trust witness this page was admitted under
 	TrustEpoch  uint64 `json:"trust_epoch,omitempty"` // vdso trust epoch observed at record time
 
+	// Syndrome is the ECC-style per-page metadata integrity check word (#783): a
+	// truncated hash binding the integrity-critical fields (Digest/Len/Taint/
+	// Quarantined/QID) so a silent flip of any one — which the body digest does NOT
+	// cover — is detectable. Default-neutral (omitempty ⇒ a page persisted before
+	// this rung is byte-identical in manifest.json and classifies FaultUnchecked).
+	// See syndrome.go for computeSyndrome + ClassifyFault (#785).
+	Syndrome string `json:"syndrome,omitempty"`
+
 	// Utility is the learned outcome-utility scalar (#540): the second-phase
 	// re-rank signal MemRL calls a Q-value, here learned ONLY from WITNESSED
 	// outcomes (Session.Credit) and provenance-gated. Default-neutral 0 (omitempty
@@ -257,13 +265,21 @@ func (r *Recorder) RecordWithWitness(ctx context.Context, tool string, rawBody [
 	return v
 }
 
-// Manifest snapshots the current page table + clearance state.
+// Manifest snapshots the current page table + clearance state. Each page is
+// stamped with its ECC-style integrity syndrome (#783) here — the single chokepoint
+// where every field is final — so both record paths (benign + sealed) carry a check
+// word without duplicating the call, and a later load can classify metadata
+// corruption (#785, ClassifyFault) it would otherwise miss.
 func (r *Recorder) Manifest() Manifest {
+	pages := make([]Page, len(r.pages))
+	for i, p := range r.pages {
+		pages[i] = stampSyndrome(p)
+	}
 	return Manifest{
 		Version:   ManifestVersion,
 		SessionID: r.id,
 		WorldVer:  uint64(len(r.pages)), // frozen marker; a finished session never writes again
-		Pages:     append([]Page(nil), r.pages...),
+		Pages:     pages,
 		Cleared:   r.mmu.Cleared(),
 	}
 }
