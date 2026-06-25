@@ -7,16 +7,16 @@
 
 **Overall:** OK (all_green) — rollup is green; nothing required
 
-- **git:** HEAD `7322da0` on `main`, 32 dirty file(s), +1/-0 vs upstream
-- **benchmarks:** 55 runs / 5 machines; newest 20260625T050017Z (0.4d ago); provenance 0 measured / 4 modeled / 51 unknown
+- **git:** HEAD `42a677e` on `HEAD`, 6 dirty file(s)
+- **benchmarks:** 55 runs / 5 machines; newest 20260625T050017Z (0.5d ago); provenance 10 measured / 6 modeled / 21 functional / 18 unknown
 
 ## Panes
 
 | Pane | Verdict | Detail |
 |---|---|---|
-| git | OK | 7322da0 (main), 32 dirty, +1/-0 vs upstream |
-| benchmarks | OK | 55 runs / 5 machines; newest 20260625T050017Z (0.4d ago); 0 measured / 4 modeled / 51 unknown |
+| git | OK | 42a677e (HEAD), 6 dirty |
+| benchmarks | OK | 55 runs / 5 machines; newest 20260625T050017Z (0.5d ago); 10 measured / 6 modeled / 21 functional / 18 unknown |
 | work | SKIP | 0 phased plans tracked in this clone (valid zero-state) |
 | industry | OK | parity-debt 0 vs SOTA, grade A |
 
-_Provenance discipline: a benchmark whose model/tags name no wall-clock or closed-form word is tagged **unknown**, never silently counted as measured — the same honesty floor `tools/check_provenance_labels.py` enforces._
+_Provenance discipline (`tools/bench_provenance.py`, authority-grounded + adversarially verified): **measured** = a real wall-clock; **modeled** = a closed-form work floor; **functional** = a correctness / agent-live / load-only witness that is NOT a throughput number; **unknown** = the fail-closed residue, surfaced loudly and never silently counted as measured — the same honesty floor `tools/check_provenance_labels.py` enforces._

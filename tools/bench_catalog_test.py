@@ -133,5 +133,72 @@ class TestNonDestructiveBuild(unittest.TestCase):
                              "path-less runs must not collapse onto a shared empty key")
 
 
+class TestProvenanceStamp(unittest.TestCase):
+    """The scan-time provenance stamp: a run's artifact engine field is read at
+    build time (on a bench node, where artifacts are local) and the 4-way verdict
+    is stamped onto the catalog run so it survives the artifacts being gitignored."""
+
+    def _build_with_run(self, td: Path, artifacts: dict, tags=None, run_id="run-x"):
+        bench = td / "experiments" / "benchmark"
+        (bench / "machines").mkdir(parents=True)
+        run_dir = bench / "runs" / "by-machine" / "m1" / "20260101T000000Z-x"
+        run_dir.mkdir(parents=True)
+        manifest = {"run_id": run_id, "timestamp": "20260101T000000Z",
+                    "model": {"name": "SmolLM2-135M", "precision": "Q8_0"},
+                    "tags": tags or []}
+        (run_dir / "manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
+        for name, body in artifacts.items():
+            (run_dir / name).write_text(json.dumps(body), encoding="utf-8")
+        seed = {"$schema": "benchmark/catalog.v1", "version": "1.0", "last_updated": None,
+                "machines": {}, "runs": [],
+                "index": {"by_model": {}, "by_precision": {}, "by_date": {}}}
+        (bench / "catalog.json").write_text(json.dumps(seed), encoding="utf-8")
+        saved = (bc.ROOT, bc.BENCHMARK_DIR, bc.MACHINES_DIR, bc.RUNS_DIR, bc.CATALOG_PATH)
+        try:
+            bc.ROOT, bc.BENCHMARK_DIR = td, bench
+            bc.MACHINES_DIR = bench / "machines"
+            bc.RUNS_DIR = bench / "runs" / "by-machine"
+            bc.CATALOG_PATH = bench / "catalog.json"
+            return bc.build_catalog()
+        finally:
+            (bc.ROOT, bc.BENCHMARK_DIR, bc.MACHINES_DIR, bc.RUNS_DIR, bc.CATALOG_PATH) = saved
+
+    def test_scan_engine_fields_reads_engine_strings(self):
+        with tempfile.TemporaryDirectory() as td:
+            td = Path(td)
+            run_dir = td / "run"
+            run_dir.mkdir()
+            (run_dir / "a.json").write_text(json.dumps({"engine": "fak radixbench decode"}),
+                                            encoding="utf-8")
+            (run_dir / "b.json").write_text(json.dumps({"generated_by": "fak model load"}),
+                                            encoding="utf-8")
+            (run_dir / "c.json").write_text(json.dumps({"nothing": 1}), encoding="utf-8")
+            engines = bc.scan_engine_fields(run_dir)
+            self.assertIn("fak radixbench decode", engines)
+            self.assertIn("fak model load", engines)
+            self.assertEqual(len(engines), 2, "only artifacts with an engine field count")
+
+    def test_decode_engine_stamps_measured(self):
+        with tempfile.TemporaryDirectory() as td:
+            cat = self._build_with_run(
+                Path(td),
+                artifacts={"01-decode.json": {"engine": "fak-in-kernel Q8_0 ... decode"}},
+                tags=["experiment"],   # weak tag -- the engine field is what proves measured
+            )
+            self.assertEqual(len(cat["runs"]), 1)
+            self.assertEqual(cat["runs"][0].get("provenance"), "measured",
+                             "a decode engine artifact must stamp the run measured")
+
+    def test_load_only_engine_stamps_functional(self):
+        with tempfile.TemporaryDirectory() as td:
+            cat = self._build_with_run(
+                Path(td),
+                artifacts={"03-loadonly.json": {"engine": "fak model load"}},
+                tags=["safetensors-load-rss"],
+            )
+            self.assertEqual(cat["runs"][0].get("provenance"), "functional",
+                             "a load-only run is functional, not a throughput number")
+
+
 if __name__ == "__main__":
     unittest.main()

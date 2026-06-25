@@ -27,10 +27,13 @@ re-measure:
   * git        — HEAD sha + branch + dirty count + ahead/behind vs upstream. The
                  "crystal clear on git" center. A HARD pane (git is ground truth).
   * benchmarks — experiments/benchmark/catalog.json: run/machine counts, newest-run
-                 staleness, and a per-benchmark provenance tag
-                 (measured | modeled | unknown). UNKNOWN is surfaced loudly, never
-                 silently treated as measured — the same honesty discipline the
-                 check_provenance_labels.py gate enforces. A HARD pane.
+                 staleness, and a per-benchmark provenance tag via the shared
+                 bench_provenance classifier (measured | modeled | functional |
+                 unknown). FUNCTIONAL separates correctness/agent-live/load-only
+                 witnesses from throughput numbers; UNKNOWN is the fail-closed
+                 residue, surfaced loudly and never silently treated as measured —
+                 the same honesty discipline the check_provenance_labels.py gate
+                 enforces. A HARD pane.
   * work       — tools/plan_audit.py --json (plans shipped vs remaining). A SOFT
                  pane: zero plans is a valid zero-state, not an error; if the plan
                  surface is absent it degrades to SKIP without tripping the rollup.
@@ -57,6 +60,9 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import bench_provenance  # noqa: E402
+
 SCHEMA = "fak-fresh-status/1"
 CATALOG_REL = "experiments/benchmark/catalog.json"
 AUTHORITY_REL = "BENCHMARK-AUTHORITY.md"
@@ -65,13 +71,6 @@ AUTHORITY_REL = "BENCHMARK-AUTHORITY.md"
 # one freshness gate. Generous (the bench cadence is per-major-refresh, not
 # per-commit); the point is to catch a catalog that quietly stopped being fed.
 STALE_DAYS = 30
-
-# Provenance vocabulary, mirrored from BENCHMARK-AUTHORITY.md's own row language
-# (and the known-modeled families in check_provenance_labels.py). A run/claim is
-# MODELED if any closed-form word appears, MEASURED if any wall-clock word does,
-# else UNKNOWN — and unknown is surfaced loudly, never folded into measured.
-MODELED_WORDS = ("modeled", "geometry", "closed-form", "projection", "projected", "synthetic")
-MEASURED_WORDS = ("measured", "wall-clock", "wall clock")
 
 
 def repo_root(start: Path | None = None) -> Path:
@@ -132,20 +131,10 @@ def git_pane(root: Path) -> dict[str, Any]:
 
 
 # --- benchmark pane: pure folds over the catalog ----------------------------
-
-def classify_provenance(text: str) -> str:
-    """measured | modeled | unknown from a free-text blob (run tags/model/name).
-
-    Modeled wins over measured when both appear (a row that says "modeled from the
-    measured baseline" is, as a whole, a modeled number — the conservative call
-    the provenance gate makes). Empty/ambiguous text is UNKNOWN, never measured.
-    """
-    low = text.lower()
-    if any(w in low for w in MODELED_WORDS):
-        return "modeled"
-    if any(w in low for w in MEASURED_WORDS):
-        return "measured"
-    return "unknown"
+# Provenance is classified by the shared, authority-grounded bench_provenance
+# module (4-way: measured | modeled | functional | unknown), so the rollup, the
+# catalog stamp, and any future consumer all read one verdict. See that module's
+# docstring for the taxonomy and the priority ladder.
 
 
 def _parse_run_ts(ts: str) -> datetime | None:
@@ -173,25 +162,25 @@ def fold_benchmarks(catalog: dict[str, Any] | None, *, now: datetime,
     """Fold catalog.json into the benchmark pane (pure — no I/O).
 
     Counts runs/machines, finds the newest run, computes staleness, and tags each
-    run measured/modeled/unknown from its model+tags text. A malformed/absent
-    catalog is a HARD ERROR (the benchmark surface is a load-bearing claim).
+    run measured/modeled/functional/unknown via the shared bench_provenance
+    classifier (catalog `provenance` stamp first, else tags/run_id, fail-closed to
+    unknown). A malformed/absent catalog is a HARD ERROR (the benchmark surface is
+    a load-bearing claim).
     """
+    empty_prov = {t: 0 for t in bench_provenance.TAGS}
     if not isinstance(catalog, dict):
         return {
             "key": "benchmarks", "label": "benchmarks", "ok": False, "verdict": "ERROR",
             "reason": "catalog.json missing or unreadable — no benchmark rollup",
             "runs": None, "machines": None, "newest": None, "age_days": None,
-            "provenance": {"measured": 0, "modeled": 0, "unknown": 0},
+            "provenance": empty_prov,
         }
     runs = catalog.get("runs") or []
     machines = catalog.get("machines") or {}
-    prov = {"measured": 0, "modeled": 0, "unknown": 0}
+    prov = bench_provenance.classify_all(runs)
     newest_dt: datetime | None = None
     newest_ts = ""
     for r in runs:
-        text = " ".join([str(r.get("model") or ""), " ".join(r.get("tags") or []),
-                         str(r.get("run_id") or "")])
-        prov[classify_provenance(text)] += 1
         dt = _parse_run_ts(str(r.get("timestamp") or ""))
         if dt and (newest_dt is None or dt > newest_dt):
             newest_dt, newest_ts = dt, str(r.get("timestamp"))
@@ -201,8 +190,7 @@ def fold_benchmarks(catalog: dict[str, Any] | None, *, now: datetime,
         age_days = round((now - newest_dt).total_seconds() / 86400.0, 1)
         stale = age_days > stale_days
     n_runs, n_machines = len(runs), len(machines)
-    prov_line = (f"{prov['measured']} measured / {prov['modeled']} modeled / "
-                 f"{prov['unknown']} unknown")
+    prov_line = bench_provenance.summary_line(prov)
     if not runs:
         return {
             "key": "benchmarks", "label": "benchmarks", "ok": False, "verdict": "ACTION",
@@ -369,6 +357,44 @@ def load_catalog(root: Path) -> dict[str, Any] | None:
         return None
 
 
+def enrich_catalog_engines(root: Path, catalog: dict[str, Any] | None) -> dict[str, Any] | None:
+    """Stamp each run's local artifact engine fields onto ``artifact_engines``.
+
+    The catalog's per-run ``provenance`` stamp is written on a bench node and can be
+    clobbered when a peer rebuilds the (shared) catalog from a clone with different
+    local artifacts. So the rollup does NOT depend on that stamp surviving: when a
+    run's artifact dir IS local here, we read its engine fields directly and let the
+    classifier apply the highest-trust signal (Rule 1) at fold time. A run whose
+    artifacts are gitignored/remote keeps whatever stamp the catalog carries (or
+    falls back to tags/run_id). Mutates a shallow copy; the on-disk catalog is
+    untouched (this tool is read-only).
+    """
+    if not isinstance(catalog, dict):
+        return catalog
+    out = dict(catalog)
+    runs = []
+    for r in catalog.get("runs") or []:
+        r = dict(r)
+        rel = str(r.get("path") or "").replace("\\", "/")
+        run_dir = (root / rel) if rel else None
+        if run_dir and run_dir.is_dir():
+            engines = []
+            for jf in sorted(run_dir.glob("*.json")):
+                try:
+                    m = json.loads(jf.read_text(encoding="utf-8"))
+                except (OSError, ValueError):
+                    continue
+                if isinstance(m, dict):
+                    eng = m.get("engine") or m.get("generated_by")
+                    if isinstance(eng, str) and eng:
+                        engines.append(eng)
+            if engines:
+                r["artifact_engines"] = engines
+        runs.append(r)
+    out["runs"] = runs
+    return out
+
+
 def collect(root: Path, *, python: str = "", timeout: int = 60,
             now: datetime | None = None) -> list[dict[str, Any]]:
     """Collect all four domain panes from the live tree (git + 1 file read + 2
@@ -376,7 +402,7 @@ def collect(root: Path, *, python: str = "", timeout: int = 60,
     python = python or sys.executable
     now = now or datetime.now(timezone.utc)
     git = git_pane(root)
-    bench = fold_benchmarks(load_catalog(root), now=now)
+    bench = fold_benchmarks(enrich_catalog_engines(root, load_catalog(root)), now=now)
     plan_payload, plan_err = run_tool(root, "plan_audit.py", "--json", python=python, timeout=timeout)
     work = fold_work(plan_payload, plan_err)
     ind_payload, ind_err = run_tool(root, "industry_scorecard.py", "--json", python=python, timeout=timeout)
@@ -425,8 +451,7 @@ def render_doc(payload: dict[str, Any], *, date: str) -> str:
            if g.get('ahead') is not None else ""),
         f"- **benchmarks:** {b.get('runs')} runs / {b.get('machines')} machines; "
         f"newest {b.get('newest')} ({b.get('age_days')}d ago); provenance "
-        f"{prov.get('measured', 0)} measured / {prov.get('modeled', 0)} modeled / "
-        f"{prov.get('unknown', 0)} unknown",
+        f"{bench_provenance.summary_line(prov)}",
         "",
         "## Panes",
         "",
@@ -434,9 +459,13 @@ def render_doc(payload: dict[str, Any], *, date: str) -> str:
         "|---|---|---|",
         *rows,
         "",
-        "_Provenance discipline: a benchmark whose model/tags name no wall-clock or"
-        " closed-form word is tagged **unknown**, never silently counted as measured"
-        " — the same honesty floor `tools/check_provenance_labels.py` enforces._",
+        "_Provenance discipline (`tools/bench_provenance.py`, authority-grounded +"
+        " adversarially verified): **measured** = a real wall-clock; **modeled** = a"
+        " closed-form work floor; **functional** = a correctness / agent-live /"
+        " load-only witness that is NOT a throughput number; **unknown** = the"
+        " fail-closed residue, surfaced loudly and never silently counted as"
+        " measured — the same honesty floor `tools/check_provenance_labels.py`"
+        " enforces._",
         "",
     ]
     return "\n".join(lines)

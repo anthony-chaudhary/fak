@@ -24,29 +24,10 @@ import fresh_status as fs  # noqa: E402
 NOW = datetime(2026, 6, 25, 12, 0, 0, tzinfo=timezone.utc)
 
 
-# --- provenance classification (the fail-closed honesty floor) --------------
-
-def test_provenance_measured() -> None:
-    assert fs.classify_provenance("decode measured wall-clock 38 t/s") == "measured"
-    assert fs.classify_provenance("Wall-Clock parity run") == "measured"
-
-
-def test_provenance_modeled() -> None:
-    assert fs.classify_provenance("webvoyager geometry closed-form 9.7x") == "modeled"
-    assert fs.classify_provenance("synthetic kernel projection") == "modeled"
-
-
-def test_provenance_modeled_wins_over_measured() -> None:
-    # "modeled from the measured baseline" is, as a whole, a MODELED number — the
-    # conservative call the provenance gate makes.
-    assert fs.classify_provenance("modeled from the measured baseline") == "modeled"
-
-
-def test_provenance_unknown_is_fail_closed() -> None:
-    # The load-bearing case: text that names NEITHER word is unknown, never
-    # silently measured. A real catalog run tag like "radix-benchmark" lands here.
-    assert fs.classify_provenance("radix-benchmark engine-fak-cpu qwen2.5") == "unknown"
-    assert fs.classify_provenance("") == "unknown"
+# --- provenance is delegated to bench_provenance (4-way) --------------------
+# The classifier itself is exhaustively tested in bench_provenance_test.py
+# (taxonomy + the adversarially-verified ground-truth table). Here we only assert
+# fold_benchmarks consumes it correctly and reports the 4-way split.
 
 
 # --- catalog freshness / staleness math -------------------------------------
@@ -63,14 +44,22 @@ def _catalog(*runs: dict, machines: int = 2) -> dict:
 
 
 def test_fold_benchmarks_counts_and_provenance() -> None:
+    # One run of each category, using real tags from the verified taxonomy:
+    # radix-benchmark -> measured, turn-tax -> modeled, parity -> functional,
+    # bare experiment -> unknown (fail-closed).
     cat = _catalog(
-        {"timestamp": "20260625T050017Z", "model": "qwen", "tags": ["measured", "decode"]},
-        {"timestamp": "20260624T050017Z", "model": "webvoyager", "tags": ["geometry"]},
-        {"timestamp": "20260623T050017Z", "model": "agent-workload", "tags": ["experiment"]},
+        {"timestamp": "20260625T050017Z", "model": "qwen", "tags": ["radix-benchmark"],
+         "run_id": "radix-x"},
+        {"timestamp": "20260624T050017Z", "model": "webvoyager", "tags": ["turn-tax"],
+         "run_id": "turn-tax-x"},
+        {"timestamp": "20260623T050017Z", "model": "experiment", "tags": ["parity"],
+         "run_id": "parity-x"},
+        {"timestamp": "20260622T050017Z", "model": "experiment", "tags": ["experiment"],
+         "run_id": "bare-x"},
     )
     pane = fs.fold_benchmarks(cat, now=NOW)
-    assert pane["runs"] == 3 and pane["machines"] == 2
-    assert pane["provenance"] == {"measured": 1, "modeled": 1, "unknown": 1}
+    assert pane["runs"] == 4 and pane["machines"] == 2
+    assert pane["provenance"] == {"measured": 1, "modeled": 1, "functional": 1, "unknown": 1}
     assert pane["verdict"] == "OK" and pane["ok"] is True
     # newest run is the 06-25 one, ~0.3d old
     assert pane["newest"] == "20260625T050017Z" and pane["age_days"] < 1
@@ -91,6 +80,47 @@ def test_fold_benchmarks_missing_catalog_is_hard_error() -> None:
 def test_fold_benchmarks_empty_runs_is_action() -> None:
     pane = fs.fold_benchmarks(_catalog(machines=1), now=NOW)
     assert pane["runs"] == 0 and pane["verdict"] == "ACTION"
+    # the provenance histogram on the error/empty paths must carry all four keys
+    assert set(pane["provenance"]) == {"measured", "modeled", "functional", "unknown"}
+
+
+def test_fold_benchmarks_functional_separates_from_throughput() -> None:
+    # The whole point of the 4-way split: an agent-live / parity / load-only run is
+    # FUNCTIONAL (a witness), not lumped into measured or hidden in unknown.
+    cat = _catalog(
+        {"timestamp": "20260625T050017Z", "tags": ["agent-live"], "run_id": "a"},
+        {"timestamp": "20260625T050017Z", "tags": ["safetensors-load-rss"], "run_id": "b"},
+        {"timestamp": "20260625T050017Z", "tags": ["parity"], "run_id": "c"},
+    )
+    pane = fs.fold_benchmarks(cat, now=NOW)
+    assert pane["provenance"]["functional"] == 3
+    assert pane["provenance"]["measured"] == 0 and pane["provenance"]["unknown"] == 0
+
+
+def test_enrich_catalog_engines_stamps_from_local_artifacts() -> None:
+    # enrich_catalog_engines reads a run's local artifact engine fields so a run
+    # with a decode artifact classifies measured even if its tags say agent-live --
+    # robust to the catalog `provenance` stamp being clobbered by a peer rebuild.
+    import json as _json
+    import tempfile
+    from pathlib import Path as _Path
+    with tempfile.TemporaryDirectory() as td:
+        root = _Path(td)
+        run_dir = root / "experiments" / "benchmark" / "runs" / "by-machine" / "m" / "r"
+        run_dir.mkdir(parents=True)
+        (run_dir / "01-decode.json").write_text(
+            _json.dumps({"engine": "fak-in-kernel Q8_0 ... decode"}), encoding="utf-8")
+        catalog = {"runs": [{"run_id": "r", "tags": ["agent-live"],
+                             "path": "experiments/benchmark/runs/by-machine/m/r"}],
+                   "machines": {"m": {}}}
+        enriched = fs.enrich_catalog_engines(root, catalog)
+        run = enriched["runs"][0]
+        assert run.get("artifact_engines") == ["fak-in-kernel Q8_0 ... decode"]
+        # the on-disk catalog object is not mutated (read-only tool)
+        assert "artifact_engines" not in catalog["runs"][0]
+        # and the classifier now reads the engine (measured), not the agent-live tag
+        import bench_provenance as bp
+        assert bp.classify(run) == "measured"
 
 
 # --- work pane: SOFT (zero / absent -> SKIP, never a failure) ---------------
@@ -149,7 +179,7 @@ def _panes(git_v="OK", bench_v="OK", work_v="SKIP", ind_v="OK", *, bench_stale=F
          "ahead": 0, "behind": 0},
         {"key": "benchmarks", "label": "benchmarks", "verdict": bench_v,
          "ok": bench_v == "OK", "reason": "55 runs", "stale": bench_stale,
-         "provenance": {"measured": 1, "modeled": 1, "unknown": 1}, "runs": 55,
+         "provenance": {"measured": 1, "modeled": 1, "functional": 1, "unknown": 1}, "runs": 55,
          "machines": 5, "newest": "x", "age_days": 1},
         {"key": "work", "label": "work", "verdict": work_v, "ok": work_v != "ACTION",
          "reason": "0 plans"},

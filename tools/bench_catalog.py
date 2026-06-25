@@ -21,6 +21,17 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List
 
+# The shared 4-way provenance classifier. Stamped onto each run at scan time (on a
+# bench node, where the per-run artifacts are still local) so the measured/modeled/
+# functional/unknown verdict survives even after those artifacts are gitignored on a
+# driver clone. Imported defensively: a clone missing the module still builds, just
+# without the stamp (the consumer re-derives from tags/run_id).
+try:
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    import bench_provenance  # noqa: E402
+except ImportError:  # pragma: no cover - defensive
+    bench_provenance = None  # type: ignore[assignment]
+
 # Paths (relative to repo root). The Go module — and the benchmark tree — is the
 # repository root: experiments/benchmark/, NOT fak/experiments/benchmark/. The
 # stale "fak/" prefix is a fossil from when the module sat under a fak/ subdir; it
@@ -131,6 +142,27 @@ def extract_gpu_name(specs: Dict) -> str:
     return "none"
 
 
+def scan_engine_fields(run_dir: Path) -> List[str]:
+    """Collect the ``engine`` (or ``generated_by``) strings from a run's artifacts.
+
+    The per-bench result JSONs (e.g. ``01-qwen25-1.5b-q8-decode.json``) name the
+    engine that produced them — "fak-in-kernel ... decode", "fak radixbench", "fak
+    model load". That is the highest-trust provenance signal (Rule 1), but it lives
+    only in the bench-node-local artifact, so we read it here at scan time and let
+    the caller stamp the derived verdict onto the catalog run.
+    """
+    engines: List[str] = []
+    if not run_dir.is_dir():
+        return engines
+    for jf in sorted(run_dir.glob("*.json")):
+        data = load_json(jf)
+        if isinstance(data, dict):
+            eng = data.get("engine") or data.get("generated_by")
+            if isinstance(eng, str) and eng:
+                engines.append(eng)
+    return engines
+
+
 def scan_runs() -> List[Dict]:
     """Scan all run directories for manifest.json files."""
     runs = []
@@ -162,7 +194,7 @@ def scan_runs() -> List[Dict]:
                 if peak_tok and baseline_tok:
                     speedup = peak_tok / baseline_tok
 
-        runs.append({
+        run = {
             "run_id": manifest.get("run_id", run_dir.name),
             "machine_id": machine_id,
             "timestamp": manifest.get("timestamp"),
@@ -173,7 +205,13 @@ def scan_runs() -> List[Dict]:
             "baseline_tok_per_sec": baseline_tok,
             "speedup": speedup,
             "path": str(run_dir.relative_to(ROOT))
-        })
+        }
+        # Stamp the provenance verdict from the (now-local) artifact engine fields,
+        # so it travels with the catalog after the artifacts are gitignored away.
+        if bench_provenance is not None:
+            engines = scan_engine_fields(run_dir)
+            run["provenance"] = bench_provenance.classify(run, artifact_engines=engines)
+        runs.append(run)
     return runs
 
 
