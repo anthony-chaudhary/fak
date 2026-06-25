@@ -239,6 +239,14 @@ type Caps struct {
 	UploadDtype  bool // Upload honors `as` (narrows weights at H2D); CPU reference ignores it
 	DeviceMemory bool // resident tensors are NOT host-addressable (Host returns false)
 	Collective   bool // implements CollectiveBackend (AllReduceSum/AllGather/ReduceScatter over device tensors — the tensor-parallel cross-rank seam)
+	// CapacityProbe advertises that the backend implements DeviceCapacity — it can REPORT
+	// the finite, exhaustible size of the memory it owns (total/free bytes). It is the
+	// report half of the hardware-CAPACITY bridge, the eighth assumption the HAL lifts at
+	// the type level (the first seven are hardware SHAPE; this one is hardware LIMIT). The
+	// core interface assumes it absent: DeviceMemoryInfo/FitsOnDevice fail OPEN (unknown,
+	// proceed) on a backend that does not set it, so the portable floor never blocks. See
+	// capacity.go and docs/explainers/hardware-limits-and-capacity.md.
+	CapacityProbe bool
 }
 
 // ---- KV store -------------------------------------------------------------------

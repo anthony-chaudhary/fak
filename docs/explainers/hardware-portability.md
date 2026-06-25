@@ -96,10 +96,12 @@ Two cross-cutting guard rails (judge grafts):
   every future device) is held to the looser argmax-exact + logit-cosine gate, with a
   per-backend cosine threshold. It is *mechanically impossible* to expect bit-identity of a
   device or to silently promote one to reference.
-- **`Caps`** (`Async`, `FusedAttn`, `FusedFFN`, `GraphCompile`, `UploadDtype`, `DeviceMemory`)
-  are optional capabilities a backend advertises; the core interface assumes none, the loop
-  falls back to the core when a cap is absent → every backend combination is correct by
-  construction.
+- **`Caps`** (`Async`, `FusedAttn`, `FusedFFN`, `GraphCompile`, `UploadDtype`, `DeviceMemory`,
+  `Collective`, `CapacityProbe`) are optional capabilities a backend advertises; the core
+  interface assumes none, the loop falls back to the core when a cap is absent → every backend
+  combination is correct by construction. (`CapacityProbe` is the newest — it reports the
+  device's *size*, the eighth assumption; see
+  [hardware-limits-and-capacity.md](hardware-limits-and-capacity.md).)
 
 ## 3. The CPU reference is *verbatim*
 
@@ -154,6 +156,7 @@ design panel: the deferrals are deliberate, not forgotten.
 | bf16→f32 widening at load | `Dtype` field now present; end-to-end narrow is future | `ReadAs(Dtype)` + native-narrow `WeightSource` |
 | synchronous return-by-value | day-1 simplicity + bit-identity | `Caps.Async` + `Buffer.Ready()` futures; `GraphCompile` record-replay |
 | optimized model package not yet fully wired to the seam | the safe first slice is a per-token HAL session path; the legacy batched/Q8 paths remain the production default | fold `prefillBatched`, Q8, and batch decode through `Backend` once the per-token gate stays green |
+| **finite device capacity** — OOM is a `dalloc` panic, `Caps.DeviceMemory` is a *shape* bool (not a size), and `cuda.go` discarded the `totalGlobalMem` it probed | the seven lifts above are all hardware *shape*; capacity is a hardware *limit* — a different category, treated in its own explainer | `compute.DeviceCapacity` (report) + `FitsOnDevice`, bridging to the `cachemeta` placement plane and an engine adapter. See **[hardware-limits-and-capacity.md](hardware-limits-and-capacity.md)** — the eighth assumption |
 
 ## 6. How each hardware class plugs in (and what each adversarial lens demanded)
 

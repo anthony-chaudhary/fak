@@ -169,8 +169,9 @@ func init() {
 	}
 	graphEnabled = os.Getenv("FAK_CUDA_GRAPH") == "1"
 	cudaDev = &cudaBackend{
-		name: "cuda",
-		tier: "sm_" + itoaC(int(sm)),
+		name:     "cuda",
+		tier:     "sm_" + itoaC(int(sm)),
+		totalMem: int64(total), // KEEP the device VRAM total — it used to be read and discarded
 	}
 	Register(cudaDev)
 }
@@ -240,6 +241,10 @@ var uploadCache = map[ucKey]Tensor{}
 type cudaBackend struct {
 	name string
 	tier string
+	// totalMem is the device's total VRAM in bytes (totalGlobalMem from fcuda_init), KEPT so
+	// the backend can satisfy DeviceCapacity — fak's one programmatic "does this fit on this
+	// device?" number, which init() previously read into a local and threw away.
+	totalMem int64
 	// fenceGen counts host fences (Read/Argmax — the ONLY two). Each async op output records
 	// the generation it was enqueued in (cudaBuf.bornGen); a fence bumps fenceGen, flipping
 	// every buffer enqueued before it to Ready (#482). Read/written atomically: producers hold
@@ -324,7 +329,20 @@ func (c *cudaBackend) Caps() Caps {
 	// the weight narrow in VRAM. FusedAttn (#486): Attention lowers to ONE fused flash/online-softmax
 	// kernel (k_flash_attention) — tiled over the KV window with a running max/sum so no scores[nPos]
 	// row is materialized; the naive kernel is retained only as the microbench baseline.
-	return Caps{Async: true, DeviceMemory: true, GraphCompile: graphEnabled, UploadDtype: true, FusedAttn: true}
+	// CapacityProbe (capacity.go): the backend can REPORT its VRAM ceiling (DeviceMemory),
+	// the report half of the hardware-capacity bridge. It is the one number this backend has
+	// always held (totalGlobalMem) but used to discard.
+	return Caps{Async: true, DeviceMemory: true, GraphCompile: graphEnabled, UploadDtype: true, FusedAttn: true, CapacityProbe: true}
+}
+
+// DeviceMemory reports the CUDA device's total VRAM — the totalGlobalMem fcuda_init already
+// probes, now KEPT instead of read-into-a-local-and-discarded. free is FreeUnknown until a
+// cudaMemGetInfo query is wired (the tracked follow-up); a caller's FitsOnDevice therefore
+// checks against the total ceiling, which already catches a model that cannot fit the whole
+// device. known is true whenever a device initialized (totalMem>0). This makes the cuda
+// backend the first producer into the capacity bridge (DeviceCapacity, capacity.go).
+func (c *cudaBackend) DeviceMemory() (total, free int64, known bool) {
+	return c.totalMem, FreeUnknown, c.totalMem > 0
 }
 
 // ---- residency ------------------------------------------------------------------
