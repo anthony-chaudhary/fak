@@ -580,8 +580,20 @@ def spawn_issue_worker(command: list[str], env: dict[str, str], cwd: Path,
 # "not capped", so the gate can only ever ADD a refusal, never wedge the loop.
 
 _CAP_BANNER_RE = re.compile(r"hit your[\w\s]*limit", re.IGNORECASE)
+# A SESSION limit is a short rolling window (resets in hours); a WEEKLY limit is a
+# multi-day quota wall. They share the "hit your … limit" banner but must NOT share
+# the hold: treating a transient session limit as a weekly hold — and projecting a
+# bare time-of-day reset that already passed a full day forward — falsely walls an
+# account that actually has room (the gem8 false-cap). Classify the banner so a
+# session limit gets a short cooldown bounded to its real reset.
+_CAP_WEEKLY_RE = re.compile(r"weekly\s+limit", re.IGNORECASE)
+_CAP_SESSION_RE = re.compile(r"session\s+limit", re.IGNORECASE)
 _CAP_RESET_RE = re.compile(r"resets\s+(.+?)\s*\(America/Los_Angeles\)", re.IGNORECASE)
 _CAP_RESET_FALLBACK_RE = re.compile(r"resets\s+([^\r\n]+)", re.IGNORECASE)
+# A session-limit hold never exceeds this even if its reset clause parses to a far
+# future moment (a stale, already-passed bare time-of-day must not become a ~24h
+# wall). Weekly limits keep the full parsed reset.
+_SESSION_HOLD_MAX_MIN = 90
 _MONTHS = {m: i for i, m in enumerate(
     ("jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"),
     start=1)}
@@ -610,7 +622,7 @@ def _scan_recent_cap_banner(runs_dir: Path, *, product: str, lookback_min: int,
     if not runs_dir.is_dir():
         return None
     horizon = now_ts - lookback_min * 60
-    best: tuple[float, str, str] | None = None
+    best: tuple[float, str, str, str] | None = None
     for log in runs_dir.glob("resolve-*.log"):
         try:
             st = log.stat()
@@ -628,11 +640,21 @@ def _scan_recent_cap_banner(runs_dir: Path, *, product: str, lookback_min: int,
             continue
         m = _CAP_RESET_RE.search(text) or _CAP_RESET_FALLBACK_RE.search(text)
         reset_text = m.group(1).strip() if m else ""
+        # weekly is the conservative (longer) hold; default to weekly only when the
+        # banner explicitly says so, treat an explicit "session limit" as session,
+        # and an unlabelled "limit" as session too (the safer short hold — a real
+        # weekly cap will re-banner and upgrade on the next doomed spawn).
+        if _CAP_WEEKLY_RE.search(text):
+            kind = "weekly"
+        elif _CAP_SESSION_RE.search(text):
+            kind = "session"
+        else:
+            kind = "session"
         if best is None or st.st_mtime > best[0]:
-            best = (st.st_mtime, reset_text, log.name)
+            best = (st.st_mtime, reset_text, log.name, kind)
     if best is None:
         return None
-    return {"reset_text": best[1], "evidence_log": best[2]}
+    return {"reset_text": best[1], "evidence_log": best[2], "kind": best[3]}
 
 
 def _parse_reset_to_utc(reset_text: str, now_utc: dt.datetime) -> dt.datetime | None:
@@ -694,9 +716,17 @@ def check_weekly_cap(runs_dir: Path, *, product: str, account_tag: str | None,
         hit = _scan_recent_cap_banner(runs_dir, product=product,
                                       lookback_min=lookback_min, now_ts=now_ts)
         if hit:
+            kind = hit.get("kind") or "session"
             until = (_parse_reset_to_utc(hit["reset_text"], now_utc)
                      or now_utc + dt.timedelta(minutes=fallback_min))
-            state = {"product": product, "account": account_tag,
+            # A session limit is a short rolling window — never hold longer than
+            # _SESSION_HOLD_MAX_MIN even if its bare time-of-day reset parsed to a
+            # far-future moment (the stale-banner-pushed-a-day-forward false cap).
+            # A weekly limit keeps the full parsed reset.
+            if kind == "session":
+                session_cap = now_utc + dt.timedelta(minutes=_SESSION_HOLD_MAX_MIN)
+                until = min(until, session_cap)
+            state = {"product": product, "account": account_tag, "kind": kind,
                      "reset_text": hit["reset_text"], "evidence_log": hit["evidence_log"],
                      "detected": now_utc.isoformat() + "Z", "until": until.isoformat() + "Z"}
             try:
@@ -704,7 +734,7 @@ def check_weekly_cap(runs_dir: Path, *, product: str, account_tag: str | None,
                 state_path.write_text(json.dumps(state, indent=2), encoding="utf-8")
             except OSError:
                 pass
-            return {"capped": True, "until": state["until"],
+            return {"capped": True, "until": state["until"], "kind": kind,
                     "reset_text": hit["reset_text"], "source": "banner"}
         # No fresh banner: honor a persisted, unexpired hold for THIS account.
         if state_path.exists():

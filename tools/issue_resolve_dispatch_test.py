@@ -738,6 +738,65 @@ class WeeklyCapGateTest(unittest.TestCase):
                                    account_tag="smith", now_ts=1_000_000.0)
         self.assertFalse(out["capped"])
 
+    # --- session vs weekly: a transient SESSION limit must not become a ~24h wall ---
+    SESSION_BANNER = "You've hit your session limit · resets 6:10am (America/Los_Angeles)"
+
+    def test_scan_classifies_session_vs_weekly(self) -> None:
+        import tempfile
+        mod = load()
+        now = 1_000_000.0
+        with tempfile.TemporaryDirectory() as d:
+            runs = Path(d)
+            self._write_worker(runs, "resolve-1-a.log", self.SESSION_BANNER, mtime=now - 60)
+            hit = mod._scan_recent_cap_banner(runs, product="claude", lookback_min=45, now_ts=now)
+            self.assertEqual(hit["kind"], "session")
+        with tempfile.TemporaryDirectory() as d:
+            runs = Path(d)
+            self._write_worker(runs, "resolve-2-b.log", self.BANNER, mtime=now - 60)
+            hit = mod._scan_recent_cap_banner(runs, product="claude", lookback_min=45, now_ts=now)
+            self.assertEqual(hit["kind"], "weekly")
+
+    def test_session_limit_hold_is_bounded_not_a_day(self) -> None:
+        # The gem8 false-cap: a "session limit · resets 6:10am" whose 6:10am already
+        # passed today must NOT push the hold to 6:10am TOMORROW. A session hold is
+        # bounded to _SESSION_HOLD_MAX_MIN, so the account is free again within ~90m,
+        # not ~24h.
+        import tempfile, datetime as dt
+        mod = load()
+        # now = a time where 6:10am PT has already passed today (e.g. 13:00 UTC = 06:00 PT
+        # is before, so use 15:00 UTC = 08:00 PT, well past 06:10 PT).
+        now_utc = dt.datetime(2026, 6, 25, 15, 0, 0)
+        now_ts = (now_utc - dt.datetime(1970, 1, 1)).total_seconds()
+        with tempfile.TemporaryDirectory() as d:
+            runs = Path(d)
+            self._write_worker(runs, "resolve-438-x.log", self.SESSION_BANNER, mtime=now_ts - 60)
+            out = mod.check_weekly_cap(runs, product="claude", account_tag="gem8-netra",
+                                       now_ts=now_ts)
+            self.assertTrue(out["capped"])
+            self.assertEqual(out["kind"], "session")
+            until = dt.datetime.fromisoformat(out["until"].replace("Z", ""))
+            held_min = (until - now_utc).total_seconds() / 60.0
+            self.assertLessEqual(held_min, mod._SESSION_HOLD_MAX_MIN + 1)
+            self.assertGreater(held_min, 0)
+
+    def test_weekly_limit_keeps_full_hold(self) -> None:
+        # A genuine weekly limit is NOT bounded by the session cap — it holds to its
+        # parsed multi-day reset.
+        import tempfile, datetime as dt
+        mod = load()
+        now_utc = dt.datetime(2026, 6, 23, 8, 0, 0)
+        now_ts = (now_utc - dt.datetime(1970, 1, 1)).total_seconds()
+        with tempfile.TemporaryDirectory() as d:
+            runs = Path(d)
+            self._write_worker(runs, "resolve-9-w.log", self.BANNER, mtime=now_ts - 60)
+            out = mod.check_weekly_cap(runs, product="claude", account_tag="smith",
+                                       now_ts=now_ts)
+            self.assertTrue(out["capped"])
+            self.assertEqual(out["kind"], "weekly")
+            until = dt.datetime.fromisoformat(out["until"].replace("Z", ""))
+            # Jun 25 1pm PDT == Jun 25 20:00 UTC, ~2 days out — far beyond the session cap.
+            self.assertEqual(until, dt.datetime(2026, 6, 25, 20, 0, 0))
+
     def test_evaluate_refuses_when_capped(self) -> None:
         mod = load()
         pre = {"verdict": "SPAWN_OK", "reason": "ok", "cap": 2, "live": 0,
