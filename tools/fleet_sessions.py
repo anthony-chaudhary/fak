@@ -654,6 +654,21 @@ def _rehome_targets(availability, exclude_account, assigned=None):
                               str(a.get("tag") or a.get("account") or "")))
     return cands
 
+def _owner_available(availability, account):
+    """True when this session's CURRENT owner account reads available in the
+    freshness-stamped snapshot. Used to detect a STALE STOPPED_LIMIT banner: a
+    transcript copied off a once-throttled owner carries that owner's old "limit
+    reached" line, so decide() can read STOPPED_LIMIT for a session whose owner has
+    since cleared. The static counterpart of resume_resolver's carried-throttle
+    re-probe -- account_availability already folds a fresh probe row into `available`,
+    so an available owner means the limit lifted: resume in place, don't re-home.
+    Conservative when the snapshot is absent (availability is None) -> False, which
+    preserves the pre-existing re-home/defer behavior."""
+    for a in (availability or []):
+        if a.get("account") == account:
+            return bool(a.get("available"))
+    return False
+
 def _ledger_blocked_sids(reg_dir=None):
     """Sids the resume ledger shows are permanently blocked -- they hit the attempt
     cap or an unrecoverable (auth) wall on their last launch. Read so the dedup
@@ -818,18 +833,32 @@ def decide(rows, throttle, availability=None):
         elif r["disp"] == "STOPPED_LIMIT" or r["account"] in throttle:
             # Owning account is rate-limited. Re-home an autonomous, resumable
             # session to a healthy account rather than waiting for the reset.
-            resumable = r["autonomous"] and (
-                r["disp"] in DEAD or r["disp"] in ("STOPPED_LIMIT", "STOPPED_APIERR"))
-            targets = _rehome_targets(availability, r["account"], assigned) if resumable else []
-            if targets:
-                tgt = targets[0]
-                r["action"] = "AUTO_RESUME"         # INFRA: rate limit -> move to healthy acct
-                r["rehomed"] = True
-                r["resume_account"] = tgt["account"]
-                r["resume_config_dir"] = tgt.get("config_dir") or config_dir(tgt["account"])
-                assigned[tgt["account"]] = assigned.get(tgt["account"], 0) + 1
+            #
+            # Stale-banner guard (mirrors resume_resolver's carried-throttle re-probe,
+            # #621): a STOPPED_LIMIT disp can be a stale "limit reached" line carried
+            # inside a transcript copied off a once-throttled owner. When a row enters
+            # this branch ONLY on that disp -- its CURRENT owner is NOT in the throttle
+            # map -- and the owner reads available in the freshness-stamped snapshot, the
+            # limit has cleared: resume IN PLACE on the healthy owner instead of re-homing
+            # it away. Re-homing a healthy owner is what stranded 5/15 sessions in the
+            # 2026-06-24 incident; the throttle map stays authoritative, so an owner that
+            # is genuinely throttled still re-homes.
+            if (r["account"] not in throttle and r["disp"] == "STOPPED_LIMIT"
+                    and r["autonomous"] and _owner_available(availability, r["account"])):
+                r["action"] = "AUTO_RESUME"         # INFRA: stale limit banner -> resume in place
             else:
-                r["action"] = "DEFER_THROTTLED"     # no healthy account -> wait for reset
+                resumable = r["autonomous"] and (
+                    r["disp"] in DEAD or r["disp"] in ("STOPPED_LIMIT", "STOPPED_APIERR"))
+                targets = _rehome_targets(availability, r["account"], assigned) if resumable else []
+                if targets:
+                    tgt = targets[0]
+                    r["action"] = "AUTO_RESUME"     # INFRA: rate limit -> move to healthy acct
+                    r["rehomed"] = True
+                    r["resume_account"] = tgt["account"]
+                    r["resume_config_dir"] = tgt.get("config_dir") or config_dir(tgt["account"])
+                    assigned[tgt["account"]] = assigned.get(tgt["account"], 0) + 1
+                else:
+                    r["action"] = "DEFER_THROTTLED" # no healthy account -> wait for reset
         elif r["disp"] == "INFRA_ORG_DISABLED":
             # Owner account's org/subscription access is disabled. /login can't fix the
             # owner -- but the transcript is portable, so re-home an autonomous session

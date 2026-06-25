@@ -106,6 +106,53 @@ class RehomeDecisionTest(unittest.TestCase):
         self.assertEqual(r["resume_account"], r["account"])
         self.assertNotIn("Copy-Item", r["resume_cmd"] or "")
 
+    def test_stale_limit_banner_on_healthy_owner_resumes_in_place(self) -> None:
+        # #621: a STOPPED_LIMIT disp carried in a re-homed transcript whose CURRENT
+        # owner is NOT throttled and reads available must resume IN PLACE -- not re-home
+        # off the healthy owner (the bug that stranded 5/15 in the 2026-06-24 incident).
+        rows = [_row(".claude-jack-barker-claude-acct", "STOPPED_LIMIT")]
+        availability = [
+            _avail(".claude-jack-barker-claude-acct", available=True),
+            _avail(".claude-other-acct", available=True),
+        ]
+        fleet_sessions.decide(rows, {}, availability)  # owner NOT in the throttle map
+        r = rows[0]
+        self.assertEqual(r["action"], "AUTO_RESUME")
+        self.assertFalse(r["rehomed"])
+        self.assertEqual(r["resume_account"], r["account"])
+        self.assertNotIn("Copy-Item", r["resume_cmd"] or "")
+
+    def test_stale_limit_banner_unavailable_owner_still_rehomes(self) -> None:
+        # The stale-banner guard only fires for a CURRENTLY-available owner. A
+        # STOPPED_LIMIT owner that is not in the throttle map but reads unavailable
+        # in the snapshot is not a cleared limit -- re-home onto a healthy account.
+        rows = [_row(".claude-owner-acct", "STOPPED_LIMIT")]
+        availability = [
+            _avail(".claude-owner-acct", available=False),
+            _avail(".claude-healthy-acct", available=True),
+        ]
+        fleet_sessions.decide(rows, {}, availability)
+        r = rows[0]
+        self.assertEqual(r["action"], "AUTO_RESUME")
+        self.assertTrue(r["rehomed"])
+        self.assertEqual(r["resume_account"], ".claude-healthy-acct")
+
+    def test_genuinely_throttled_owner_rehomes_even_if_snapshot_shows_available(self) -> None:
+        # The throttle map stays authoritative: an owner IN the throttle map re-homes
+        # even when a stale snapshot still lists it available, so the guard cannot be
+        # tricked into pinning a session onto a genuinely rate-limited account.
+        rows = [_row(".claude-gem8-acct", "STOPPED_LIMIT")]
+        throttle = {".claude-gem8-acct": {"reset": "Jun 24, 8pm"}}
+        availability = [
+            _avail(".claude-gem8-acct", available=True),
+            _avail(".claude-jack-barker-claude-acct", available=True),
+        ]
+        fleet_sessions.decide(rows, throttle, availability)
+        r = rows[0]
+        self.assertEqual(r["action"], "AUTO_RESUME")
+        self.assertTrue(r["rehomed"])
+        self.assertEqual(r["resume_account"], ".claude-jack-barker-claude-acct")
+
     def test_least_loaded_healthy_account_wins(self) -> None:
         rows = [_row(".claude-gem8-acct", "STOPPED_LIMIT")]
         throttle = {".claude-gem8-acct": {"reset": "Jun 24, 8pm"}}
