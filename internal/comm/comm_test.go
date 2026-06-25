@@ -17,6 +17,7 @@ type recordingKernel struct {
 	verdict abi.Verdict
 	mu      sync.Mutex
 	calls   []*abi.ToolCall
+	reaps   []abi.SubmissionHandle
 	submits int64
 }
 
@@ -37,7 +38,10 @@ func (k *recordingKernel) Submit(ctx context.Context, c *abi.ToolCall) (abi.Subm
 }
 
 func (k *recordingKernel) Reap(ctx context.Context, h abi.SubmissionHandle) (*abi.Result, error) {
-	return nil, nil
+	k.mu.Lock()
+	k.reaps = append(k.reaps, h)
+	k.mu.Unlock()
+	return &abi.Result{Status: abi.StatusOK}, nil
 }
 
 func (k *recordingKernel) Syscall(ctx context.Context, c *abi.ToolCall) (*abi.Result, abi.Verdict) {
@@ -233,6 +237,121 @@ func TestSpawnMembership(t *testing.T) {
 	}
 }
 
+func TestBroadcastRoutesThroughSubmitAndScopeBound(t *testing.T) {
+	k := allowKernel()
+	g, _ := New("w", "", members("c", "a", "b"))
+	payload := abi.Ref{Kind: abi.RefInline, Inline: []byte("shared"), Len: 6, Scope: abi.ScopeFleet, Taint: abi.TaintTainted}
+
+	req, err := g.Broadcast(context.Background(), k, payload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if req.Tool != ToolBroadcast || req.State != abi.StatusPending || len(req.Handles) != 3 {
+		t.Fatalf("Broadcast request=%+v, want tool %q pending with 3 handles", req, ToolBroadcast)
+	}
+	if len(k.calls) != 3 {
+		t.Fatalf("Submit count=%d, want 3", len(k.calls))
+	}
+	wantRanks := []string{"0", "1", "2"}
+	for r, c := range k.calls {
+		if c.Tool != ToolBroadcast {
+			t.Fatalf("call %d tool=%q, want %q", r, c.Tool, ToolBroadcast)
+		}
+		if c.Meta["rank"] != wantRanks[r] {
+			t.Fatalf("call %d rank meta=%q", r, c.Meta["rank"])
+		}
+		if c.Args.Scope != abi.ScopeFleet || c.Args.Taint != abi.TaintTainted || string(c.Args.Inline) != "shared" {
+			t.Fatalf("call %d args=%+v, want unchanged fleet-scoped payload", r, c.Args)
+		}
+	}
+
+	private := abi.Ref{Kind: abi.RefInline, Inline: []byte("private"), Len: 7, Scope: abi.ScopeAgent, Taint: abi.TaintTainted}
+	k = allowKernel()
+	if _, err := g.Broadcast(context.Background(), k, private); !errors.Is(err, ErrScopeWiden) {
+		t.Fatalf("private Broadcast err=%v, want ErrScopeWiden", err)
+	}
+	if len(k.calls) != 0 {
+		t.Fatalf("private Broadcast made %d submits, want 0", len(k.calls))
+	}
+}
+
+func TestScatterRoutesOneGoalPerMember(t *testing.T) {
+	k := allowKernel()
+	g, _ := New("w", "", members("a", "b"))
+	goals := []abi.Ref{
+		{Kind: abi.RefInline, Inline: []byte("goal-a"), Len: 6, Scope: abi.ScopeAgent, Taint: abi.TaintTainted},
+		{Kind: abi.RefInline, Inline: []byte("goal-b"), Len: 6, Scope: abi.ScopeAgent, Taint: abi.TaintTrusted},
+	}
+
+	req, err := g.Scatter(context.Background(), k, goals)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if req.Tool != ToolScatter || req.State != abi.StatusPending || len(req.Handles) != 2 {
+		t.Fatalf("Scatter request=%+v", req)
+	}
+	for r, c := range k.calls {
+		if c.Tool != ToolScatter {
+			t.Fatalf("call %d tool=%q, want %q", r, c.Tool, ToolScatter)
+		}
+		if string(c.Args.Inline) != string(goals[r].Inline) || c.Args.Scope != goals[r].Scope || c.Args.Taint != goals[r].Taint {
+			t.Fatalf("call %d args=%+v, want rank goal %+v", r, c.Args, goals[r])
+		}
+	}
+}
+
+func TestBarrierRoutesThroughSubmitWithWitnessMeta(t *testing.T) {
+	k := allowKernel()
+	g, _ := New("w", "", members("a", "b", "c"))
+
+	req, err := g.Barrier(context.Background(), k)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if req.Tool != ToolBarrier || req.State != abi.StatusPending || len(req.Handles) != 3 {
+		t.Fatalf("Barrier request=%+v", req)
+	}
+	for r, c := range k.calls {
+		if c.Tool != ToolBarrier {
+			t.Fatalf("call %d tool=%q, want %q", r, c.Tool, ToolBarrier)
+		}
+		if c.Meta["witness"] != "dos-witness-claim" {
+			t.Fatalf("call %d witness meta=%q, want dos-witness-claim", r, c.Meta["witness"])
+		}
+		if c.Args.Scope != abi.ScopeAgent || c.Args.Taint != abi.TaintTainted {
+			t.Fatalf("call %d args scope/taint=%v/%v, want ScopeAgent/Tainted", r, c.Args.Scope, c.Args.Taint)
+		}
+	}
+}
+
+func TestNonBlockingCollectiveReapUsesRankHandles(t *testing.T) {
+	k := allowKernel()
+	g, _ := New("w", "", members("a", "b"))
+	payload := abi.Ref{Kind: abi.RefInline, Inline: []byte("shared"), Len: 6, Scope: abi.ScopeFleet, Taint: abi.TaintTainted}
+
+	req, err := g.IBroadcast(context.Background(), k, payload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if req.State != abi.StatusPending {
+		t.Fatalf("IBroadcast state=%v, want StatusPending", req.State)
+	}
+	if _, err := req.Reap(context.Background(), k); err != nil {
+		t.Fatal(err)
+	}
+	if req.State != abi.StatusOK {
+		t.Fatalf("Reap state=%v, want StatusOK", req.State)
+	}
+	if len(k.reaps) != len(req.Handles) {
+		t.Fatalf("Reap count=%d, want %d", len(k.reaps), len(req.Handles))
+	}
+	for i, h := range req.Handles {
+		if k.reaps[i] != h {
+			t.Fatalf("reap %d handle=%+v, want %+v", i, k.reaps[i], h)
+		}
+	}
+}
+
 // TestGatherRoutesThroughSubmitInRankOrder is the wiring contract: a Gather expands to
 // exactly N independently-adjudicated Submit calls (no floor bypass), in rank order,
 // and the fold is rank-ordered into Combine.
@@ -265,6 +384,29 @@ func TestGatherRoutesThroughSubmitInRankOrder(t *testing.T) {
 	}
 }
 
+func TestIGatherCombinesAfterRankOrderedSubmit(t *testing.T) {
+	k := allowKernel()
+	g, _ := New("w", "", members("b", "a"))
+
+	req, err := g.IGather(context.Background(), k, []string{"oa", "ob"}, modelroute.ReduceConcat)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if req.Tool != ToolGather || req.State != abi.StatusPending || len(req.Handles) != 2 {
+		t.Fatalf("IGather request=%+v", req.CollectiveRequest)
+	}
+	got, err := req.ReapCombine(context.Background(), k)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Output != "oa\nob" {
+		t.Fatalf("IGather concat=%q, want rank-ordered output", got.Output)
+	}
+	if req.State != abi.StatusOK {
+		t.Fatalf("ReapCombine state=%v, want StatusOK", req.State)
+	}
+}
+
 // TestGatherFailsClosedOnDeny proves a refused Submit fails the whole Gather — no
 // collective silently drops a refused call.
 func TestGatherFailsClosedOnDeny(t *testing.T) {
@@ -287,5 +429,11 @@ func TestGatherArityAndNilKernel(t *testing.T) {
 	}
 	if _, err := g.Gather(context.Background(), nil, []string{"a", "b"}, modelroute.ReduceConcat); !errors.Is(err, ErrNoKernel) {
 		t.Fatalf("nil kernel err=%v, want ErrNoKernel", err)
+	}
+	if _, err := g.Scatter(context.Background(), allowKernel(), []abi.Ref{{}}); !errors.Is(err, ErrArity) {
+		t.Fatalf("scatter arity mismatch err=%v, want ErrArity", err)
+	}
+	if _, err := g.Barrier(context.Background(), nil); !errors.Is(err, ErrNoKernel) {
+		t.Fatalf("barrier nil kernel err=%v, want ErrNoKernel", err)
 	}
 }

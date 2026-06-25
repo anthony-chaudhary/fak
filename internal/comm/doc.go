@@ -14,21 +14,31 @@
 //
 // The adjudication floor. A group op that admits a tool call routes it through
 // abi.Kernel.Submit (the adjudication chokepoint) — there is no collective that is
-// exempt from refusal. [Group.Gather] folds member outputs through modelroute.Combine
-// in RANK order, satisfying Combine's "votes in member order" contract on STRUCTURE:
-// the layout is deterministic even though a member agent's text is not.
+// exempt from refusal. [Group.Broadcast] copies an abi.Ref through unchanged and
+// refuses to broadcast a ScopeAgent/private Ref to a multi-member group; the Ref's
+// Taint+Scope are the share bound, never widened by the collective. [Group.Scatter]
+// submits one per-rank goal Ref. [Group.Gather] folds member outputs through
+// modelroute.Combine in RANK order, satisfying Combine's "votes in member order"
+// contract on STRUCTURE: the layout is deterministic even though a member agent's
+// text is not. [Group.Barrier] is a dos-witness-claim-shaped arrival fold: one
+// adjudicated read-back descriptor per rank, not a scheduler lock. The I* variants
+// return the existing abi.SubmissionHandle set with StatusPending and complete via
+// Kernel.Reap; no ABI edit is needed.
 //
-// Honesty caveat (borrow the term, disclaim the scope). This is NOT MPI. A Group
-// moves ZERO bytes and runs NO collective; it inherits no interconnect, message-rate,
-// or collective-latency property. It is explicitly NOT model.DistComm
-// (internal/model/dist_collective.go): that is a REAL cross-process tensor collective
-// whose ranks are tensor-parallel host-float32 shards of ONE model (already disclaimed
-// in-file as not-NCCL / not-multi-GPU). A comm.Group's ranks index DETACHED OS
-// processes that communicate only through git and leases, never through a comm.
-// Determinism here is pinned to the group LAYOUT/partition only — rank assignment,
-// split-color→lane binding, and the rank order handed to Combine — never to a member
-// agent's non-bit-exact output. (This copies the modelroute.ReduceAllReduce
-// borrow-the-distributed-systems-term / disclaim-the-scope template.)
+// Honesty caveat (borrow the term, disclaim the scope). This is NOT MPI. These are
+// adjudicated agent collectives borrowing collective NAMES and rank-order STRUCTURE:
+// Broadcast is a scope-bounded context share, Scatter is a per-rank goal fan-out,
+// Gather concatenates/folds agent outputs (not tensors), and Barrier is a witness
+// read-back fold (not a hardware sync). This package inherits no interconnect,
+// message-rate, progress, or collective-latency property. It is explicitly NOT
+// model.DistComm (internal/model/dist_collective.go): that is a REAL cross-process
+// tensor collective whose ranks are tensor-parallel host-float32 shards of ONE model
+// (already disclaimed in-file as not-NCCL / not-multi-GPU). A comm.Group's ranks
+// index DETACHED OS processes that communicate only through git and leases, never
+// through a comm. Determinism here is pinned to the group LAYOUT/partition and the
+// rank order handed to Submit/Combine — never to a member agent's non-bit-exact
+// output. (This copies the modelroute.ReduceAllReduce borrow-the-distributed-systems
+// term / disclaim-the-scope template.)
 //
 // Tier: mechanism (2) — see internal/architest. This package may import only
 // packages whose tier is <= 2; an upward import fails the architest gate.

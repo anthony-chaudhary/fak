@@ -14,9 +14,20 @@ import (
 // Ready reports that the comm leaf is linked into the build.
 func Ready() bool { return true }
 
-// ToolGather is the synthetic tool name a Gather submits per member so the fold is
-// adjudicated at the floor like any other call.
-const ToolGather = "comm.gather"
+const (
+	// ToolBroadcast is the synthetic tool name a Broadcast submits per member so
+	// the context-share shape is adjudicated at the floor like any other call.
+	ToolBroadcast = "comm.broadcast"
+	// ToolScatter is the synthetic tool name a Scatter submits per member so each
+	// rank's goal slice crosses the adjudication floor independently.
+	ToolScatter = "comm.scatter"
+	// ToolGather is the synthetic tool name a Gather submits per member so the
+	// fold is adjudicated at the floor like any other call.
+	ToolGather = "comm.gather"
+	// ToolBarrier is the synthetic tool name a Barrier submits per member so the
+	// witness read-back fold is represented as N adjudicated arrivals.
+	ToolBarrier = "comm.barrier"
+)
 
 var (
 	// ErrEmptyGroup is returned when a Group is built with no members.
@@ -28,11 +39,75 @@ var (
 	ErrNoMember = errors.New("comm: no such member")
 	// ErrNoKernel is returned when a group op that admits a call has no kernel.
 	ErrNoKernel = errors.New("comm: nil kernel")
-	// ErrDenied is returned when the adjudication floor refuses a gather submission.
-	ErrDenied = errors.New("comm: gather denied")
-	// ErrArity is returned when a gather's output count does not match the group size.
+	// ErrDenied is returned when the adjudication floor refuses a collective
+	// submission.
+	ErrDenied = errors.New("comm: collective denied")
+	// ErrArity is returned when a collective's per-rank input count does not match
+	// the group size.
 	ErrArity = errors.New("comm: output count does not match group size")
+	// ErrScopeWiden is returned when Broadcast would share a private Ref across
+	// more than one member.
+	ErrScopeWiden = errors.New("comm: broadcast would widen Ref scope")
 )
+
+// CollectiveRequest is the non-blocking I* handle for a collective expansion. It
+// records the per-rank SubmissionHandle set produced by Kernel.Submit. Reap folds
+// over those handles in rank order; no ABI edit is needed because the existing
+// SubmissionHandle/StatusPending/Reap seam already carries the async identity.
+type CollectiveRequest struct {
+	Tool    string                 `json:"tool"`
+	Handles []abi.SubmissionHandle `json:"handles"`
+	State   abi.Status             `json:"state"`
+}
+
+// Reap blocks on every submitted rank in deterministic rank order. It leaves
+// State as StatusPending if any result still reports pending; otherwise it marks
+// the request OK once all handles have completed.
+func (r *CollectiveRequest) Reap(ctx context.Context, k abi.Kernel) ([]*abi.Result, error) {
+	if k == nil {
+		return nil, ErrNoKernel
+	}
+	results := make([]*abi.Result, 0, len(r.Handles))
+	pending := false
+	for _, h := range r.Handles {
+		res, err := k.Reap(ctx, h)
+		if err != nil {
+			return results, err
+		}
+		if res != nil && res.Status == abi.StatusPending {
+			pending = true
+		}
+		results = append(results, res)
+	}
+	if pending {
+		r.State = abi.StatusPending
+	} else {
+		r.State = abi.StatusOK
+	}
+	return results, nil
+}
+
+// GatherRequest is the non-blocking Gather handle. The rank-ordered votes are
+// fixed at Submit time so Combine can run deterministically after the caller has
+// reaped the underlying handles.
+type GatherRequest struct {
+	CollectiveRequest
+	Votes  []modelroute.Vote
+	Reduce modelroute.Reduction
+}
+
+// Combine folds the gathered votes in rank order.
+func (r GatherRequest) Combine() (modelroute.Result, error) {
+	return modelroute.Combine(r.Reduce, r.Votes)
+}
+
+// ReapCombine reaps the per-rank handles and then folds the gathered votes.
+func (r *GatherRequest) ReapCombine(ctx context.Context, k abi.Kernel) (modelroute.Result, error) {
+	if _, err := r.CollectiveRequest.Reap(ctx, k); err != nil {
+		return modelroute.Result{}, err
+	}
+	return r.Combine()
+}
 
 // Member is one agent in a Group. ID is the stable identity rank is computed over
 // (a lane id, a process tag, a trace id — any value unique within the group). Lane
@@ -203,6 +278,54 @@ func (g *Group) Lanes() []string {
 	return out
 }
 
+// Broadcast adjudicates a scope-bounded context share once per member. The payload
+// Ref is copied through unchanged: its Taint/Scope remain the bound on the share.
+// A private ScopeAgent payload cannot be broadcast to a multi-member group because
+// that would widen it across agents before the floor sees the call.
+func (g *Group) Broadcast(ctx context.Context, k abi.Kernel, payload abi.Ref) (CollectiveRequest, error) {
+	return g.IBroadcast(ctx, k, payload)
+}
+
+// IBroadcast is the non-blocking Broadcast variant. It returns the per-rank
+// SubmissionHandles with State=StatusPending; callers can complete them via Reap.
+func (g *Group) IBroadcast(ctx context.Context, k abi.Kernel, payload abi.Ref) (CollectiveRequest, error) {
+	if err := g.checkBroadcastScope(payload); err != nil {
+		return CollectiveRequest{}, err
+	}
+	return g.submitCollective(ctx, k, ToolBroadcast, func(rank int, m Member) abi.Ref {
+		return payload
+	}, nil)
+}
+
+// Scatter adjudicates one per-member goal slice per rank. goals[r] is the Ref
+// handed to the member at rank r; the Ref's Taint/Scope ride unchanged.
+func (g *Group) Scatter(ctx context.Context, k abi.Kernel, goals []abi.Ref) (CollectiveRequest, error) {
+	return g.IScatter(ctx, k, goals)
+}
+
+// IScatter is the non-blocking Scatter variant.
+func (g *Group) IScatter(ctx context.Context, k abi.Kernel, goals []abi.Ref) (CollectiveRequest, error) {
+	if len(goals) != len(g.members) {
+		return CollectiveRequest{}, fmt.Errorf("%w: %d goals for %d members", ErrArity, len(goals), len(g.members))
+	}
+	return g.submitCollective(ctx, k, ToolScatter, func(rank int, m Member) abi.Ref {
+		return goals[rank]
+	}, nil)
+}
+
+// Barrier adjudicates one witness-read-back arrival per member. It is not a
+// hardware sync; it is a deterministic fold over N independent floor crossings.
+func (g *Group) Barrier(ctx context.Context, k abi.Kernel) (CollectiveRequest, error) {
+	return g.IBarrier(ctx, k)
+}
+
+// IBarrier is the non-blocking Barrier variant.
+func (g *Group) IBarrier(ctx context.Context, k abi.Kernel) (CollectiveRequest, error) {
+	return g.submitCollective(ctx, k, ToolBarrier, func(rank int, m Member) abi.Ref {
+		return barrierArgs(g.wave, rank, len(g.members), m)
+	}, map[string]string{"witness": "dos-witness-claim"})
+}
+
 // Gather adjudicates each member's output through the kernel (one Submit per member,
 // the adjudication floor — no fan-out bypasses the chokepoint) and folds the results
 // in RANK order through modelroute.Combine. outputs[r] is the output produced by the
@@ -214,39 +337,83 @@ func (g *Group) Lanes() []string {
 // member whose Submit is refused fails the whole Gather closed — there is no
 // collective that silently drops a refused call.
 func (g *Group) Gather(ctx context.Context, k abi.Kernel, outputs []string, reduce modelroute.Reduction) (modelroute.Result, error) {
+	req, err := g.IGather(ctx, k, outputs, reduce)
+	if err != nil {
+		return modelroute.Result{}, err
+	}
+	return req.Combine()
+}
+
+// IGather is the non-blocking Gather variant. It submits every member output
+// through the floor in rank order, records the returned handles, and leaves the
+// rank-ordered Combine fold for ReapCombine/Combine.
+func (g *Group) IGather(ctx context.Context, k abi.Kernel, outputs []string, reduce modelroute.Reduction) (GatherRequest, error) {
 	if k == nil {
-		return modelroute.Result{}, ErrNoKernel
+		return GatherRequest{}, ErrNoKernel
 	}
 	if len(outputs) != len(g.members) {
-		return modelroute.Result{}, fmt.Errorf("%w: %d outputs for %d members", ErrArity, len(outputs), len(g.members))
+		return GatherRequest{}, fmt.Errorf("%w: %d outputs for %d members", ErrArity, len(outputs), len(g.members))
 	}
 	votes := make([]modelroute.Vote, len(g.members))
+	req, err := g.submitCollective(ctx, k, ToolGather, func(rank int, m Member) abi.Ref {
+		return gatherArgs(g.wave, rank, len(g.members), m, outputs[rank])
+	}, nil)
+	if err != nil {
+		return GatherRequest{}, err
+	}
 	for r, m := range g.members {
-		if err := g.adjudicateMember(ctx, k, r, m, outputs[r]); err != nil {
-			return modelroute.Result{}, err
-		}
 		votes[r] = modelroute.Vote{
 			Member: modelroute.Member{Model: m.ID, Weight: m.Weight, Role: m.Lane},
 			Output: outputs[r],
 		}
 	}
-	return modelroute.Combine(reduce, votes)
+	return GatherRequest{CollectiveRequest: req, Votes: votes, Reduce: reduce}, nil
 }
 
-// adjudicateMember submits one comm.gather call for the member at rank r and refuses
-// the gather if the floor does not Allow it.
-func (g *Group) adjudicateMember(ctx context.Context, k abi.Kernel, rank int, m Member, output string) error {
-	args := gatherArgs(g.wave, rank, len(g.members), m, output)
-	call := &abi.ToolCall{
-		Tool: ToolGather,
-		Args: args,
-		Meta: map[string]string{"comm": "true", "readOnlyHint": "true", "idempotentHint": "true"},
-	}
-	_, verdict := k.Submit(ctx, call)
-	if verdict.Kind != abi.VerdictAllow {
-		return fmt.Errorf("%w: rank %d (%s) by %s", ErrDenied, rank, abi.ReasonName(verdict.Reason), verdict.By)
+func (g *Group) checkBroadcastScope(payload abi.Ref) error {
+	if len(g.members) > 1 && payload.Scope == abi.ScopeAgent {
+		return ErrScopeWiden
 	}
 	return nil
+}
+
+func (g *Group) submitCollective(ctx context.Context, k abi.Kernel, tool string, args func(int, Member) abi.Ref, meta map[string]string) (CollectiveRequest, error) {
+	if k == nil {
+		return CollectiveRequest{}, ErrNoKernel
+	}
+	req := CollectiveRequest{Tool: tool, State: abi.StatusPending}
+	for r, m := range g.members {
+		call := &abi.ToolCall{
+			Tool: tool,
+			Args: args(r, m),
+			Meta: collectiveMeta(g.wave, r, len(g.members), m, meta),
+		}
+		h, verdict := k.Submit(ctx, call)
+		if verdict.Kind != abi.VerdictAllow {
+			return req, fmt.Errorf("%w: %s rank %d (%s) by %s", ErrDenied, tool, r, abi.ReasonName(verdict.Reason), verdict.By)
+		}
+		req.Handles = append(req.Handles, h)
+	}
+	return req, nil
+}
+
+func collectiveMeta(wave string, rank, size int, m Member, extra map[string]string) map[string]string {
+	meta := map[string]string{
+		"comm":           "true",
+		"readOnlyHint":   "true",
+		"idempotentHint": "true",
+		"wave":           wave,
+		"rank":           fmt.Sprintf("%d", rank),
+		"size":           fmt.Sprintf("%d", size),
+		"member":         m.ID,
+	}
+	if m.Lane != "" {
+		meta["lane"] = m.Lane
+	}
+	for k, v := range extra {
+		meta[k] = v
+	}
+	return meta
 }
 
 // gatherArgs encodes the per-member gather descriptor as an inline, agent-scoped,
@@ -260,6 +427,25 @@ func gatherArgs(wave string, rank, size int, m Member, output string) abi.Ref {
 		"id":     m.ID,
 		"lane":   m.Lane,
 		"outlen": len(output),
+	}
+	encoded, _ := json.Marshal(body)
+	return abi.Ref{
+		Kind:   abi.RefInline,
+		Inline: encoded,
+		Len:    int64(len(encoded)),
+		Scope:  abi.ScopeAgent,
+		Taint:  abi.TaintTainted,
+	}
+}
+
+func barrierArgs(wave string, rank, size int, m Member) abi.Ref {
+	body := map[string]any{
+		"wave":    wave,
+		"rank":    rank,
+		"size":    size,
+		"id":      m.ID,
+		"lane":    m.Lane,
+		"barrier": "arrived",
 	}
 	encoded, _ := json.Marshal(body)
 	return abi.Ref{
