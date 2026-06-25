@@ -126,6 +126,49 @@ histogram_quantile(0.99,
 fak_gateway_up == 0
 ```
 
+### Per-rung decision distribution — which adjudication rung is actually deciding
+
+The flat `fak_kernel_*_total` counters tell you HOW MANY calls were denied,
+transformed, or served by the vDSO. They do not say WHICH rung did it — and that is
+the first question a graduated capability floor raises: is the deny path dominated by
+the name-level deny-map, by the witness gate, or by fail-closed default-deny? Is the
+vDSO carrying real load or hitting 0%? `fak_kernel_decisions_total` answers that:
+
+```
+# HELP fak_kernel_decisions_total Kernel decisions by winning adjudication rung, verdict kind, and reason (passive; re-derived off the hot path).
+# TYPE fak_kernel_decisions_total counter
+fak_kernel_decisions_total{rung="vdso",kind="ALLOW",reason=""} 813
+fak_kernel_decisions_total{rung="adjudicator.Adjudicator",kind="ALLOW",reason=""} 41
+fak_kernel_decisions_total{rung="adjudicator.Adjudicator",kind="DENY",reason="POLICY_BLOCK"} 12
+fak_kernel_decisions_total{rung="adjudicator.Adjudicator",kind="TRANSFORM",reason=""} 3
+fak_kernel_decisions_total{rung="adjudicator.Adjudicator",kind="DENY",reason="SELF_MODIFY"} 1
+```
+
+`rung` is the concrete adjudicator type that the fold selected as the winner (the
+answer to "which rung decided"), `kind` is the verdict (`ALLOW`/`DENY`/`TRANSFORM`/…),
+and `reason` is the named refusal (empty for non-denials). A vDSO-served call ran no
+adjudication, so it lands in a single `rung="vdso"` bucket — never misattributed to a
+structural rung. To drill down on ONE call's full ladder, use `fak preflight --explain`
+(the single-call forensic trace this aggregate is the dual of).
+
+```promql
+# deny rate broken down by which rung refused
+sum by (rung, reason) (rate(fak_kernel_decisions_total{kind="DENY"}[5m]))
+
+# vDSO effectiveness: share of all decisions served without adjudication
+sum(rate(fak_kernel_decisions_total{rung="vdso"}[5m]))
+  / sum(rate(fak_kernel_decisions_total[5m]))
+```
+
+**Honesty boundary — re-derived, not ground truth.** The winning rung is re-derived
+*off the hot path* by re-folding the call's chain (`kernel.FoldExplain`), not read off
+the decision event. Today that re-fold is exact, because the hot path folds the same
+process-global registry chain. It would diverge only for a kernel built with an
+injected `WithAdjudicators` chain the global registry cannot reproduce — the documented
+escalation trigger for carrying the rung identity on the event itself (Rung B), which is
+deliberately not done here. Like the other `fak_kernel_*_total` counters, this one is
+in-memory and process-local: it resets on restart and is not persisted.
+
 ---
 
 ## 3. The live JSON snapshot (`GET /debug/vars`)
