@@ -1,0 +1,24 @@
+{
+  "schema": "fak-combined-dogfood/1",
+  "wire": "one `fak serve --provider anthropic --base-url <mock> --compact-history-budget` instance",
+  "floor": {
+    "deny_call": "git_push",
+    "deny_response_excerpt": "{\"verdict\": {\"kind\": \"DENY\", \"reason\": \"POLICY_BLOCK\", \"by\": \"monitor\", \"disposition\": \"TERMINAL\"}, \"trace_id\": \"gw-2\"}",
+    "allow_call": "git_status",
+    "allow_response_excerpt": "{\"verdict\": {\"kind\": \"ALLOW\", \"by\": \"monitor\"}, \"trace_id\": \"gw-3\"}",
+    "pass": true
+  },
+  "lever": {
+    "inbound_est_tokens": 93220,
+    "off_forwarded_tokens": 93220,
+    "on_forwarded_tokens": 5275,
+    "tokens_shed": 87945,
+    "percent_shed": 94.3,
+    "cache_prefix_byte_identical": true,
+    "off_prefix_sha256": "0e1612e54d3b284c664ea584d0e284d88a36c6891d56f60a1a7f6a301acb5a1f",
+    "on_prefix_sha256": "0e1612e54d3b284c664ea584d0e284d88a36c6891d56f60a1a7f6a301acb5a1f",
+    "compaction_stub_present": true,
+    "pass": true
+  },
+  "verdict": "PASS"
+}
