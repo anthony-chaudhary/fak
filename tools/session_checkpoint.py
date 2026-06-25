@@ -19,8 +19,19 @@ GRACEFUL boundary and gives ZERO coverage of a real crash. The crash-survivor is
 PERIODIC writer (``--source periodic``, driven by a scheduled task), which writes BEFORE
 the crash. The two writers produce different-fidelity records on purpose:
 
-  * periodic  -- runs in session 0 with NO session context: git/host truth only
-                 (branch, HEAD, dirty paths, stamp). This is the FLOOR that survives a crash.
+  * periodic  -- runs in session 0 with NO stdin, so it has no Stop event to read. It
+                 DISCOVERS the active transcript POINTER from disk (the newest
+                 recently-touched ``.jsonl`` for this repo under
+                 ``~/.claude*/projects/<slug>/``) and carries it in the record alongside
+                 the git/host truth. Because the periodic tick is the ONLY writer that
+                 survives a hard crash, giving it the pointer CLOSES THE WITHIN-TURN
+                 COVERAGE GAP: a mid-LONG-TURN crash leaves a survivor record that points
+                 at what was in flight, even though the Stop hook (which has the pointer
+                 from its event JSON) only fires at turn-end (#634). The pointer is a PATH
+                 only -- no transcript content is read, so there is no new leak surface
+                 beyond the route gates that already handle a host path. Degrades to
+                 git/host truth only when no live session exists (``--no-discover``).
+                 This is the FLOOR that survives a crash.
   * stop      -- receives the Stop event JSON on stdin: adds the transcript pointer and a
                  one-line in-flight note. This is the CEILING, only at a clean boundary.
 
@@ -48,15 +59,17 @@ writes only the one checkpoint file (private route) or one gh edit (public route
 
 CLI
 ---
-    python tools/session_checkpoint.py --source periodic         # scheduled tick (route=private)
+    python tools/session_checkpoint.py --source periodic         # scheduled tick (route=private; discovers transcript ptr)
     python tools/session_checkpoint.py --hook                    # Stop-hook (reads event JSON on stdin)
     python tools/session_checkpoint.py --route both --public-target 123
     python tools/session_checkpoint.py --source periodic --dry-run --json
     python tools/session_checkpoint.py --source periodic --no-push
+    python tools/session_checkpoint.py --source periodic --no-discover   # pure git/host floor (pre-#634)
 """
 from __future__ import annotations
 
 import argparse
+import glob
 import json
 import os
 import platform
@@ -64,6 +77,7 @@ import re
 import subprocess
 import sys
 import tempfile
+import time
 from typing import Any
 
 try:
@@ -184,6 +198,41 @@ def git_status(repo: str = REPO_ROOT) -> dict[str, Any]:
         "dirty_paths": dirty,
         "dirty_count": len(dirty),
     }
+
+
+def discover_active_transcript(repo: str, *, home: str | None = None,
+                               max_age_seconds: int = 7200) -> str | None:
+    """Find the NEWEST recently-active Claude Code transcript POINTER for ``repo``, so the
+    periodic crash-survivor can carry the same pointer the Stop hook gets from its event
+    JSON -- closing the within-turn coverage gap (#634).
+
+    Claude Code writes one append-only ``.jsonl`` per session under
+    ``<home>/.claude*/projects/<slug(cwd)>/<sid>.jsonl``, where ``slug(cwd)`` collapses every
+    non-alphanumeric in the cwd to ``-`` (so ``C:\\work\\fak`` -> ``C--work-fak``). We glob
+    EVERY account dir (``.claude`` + ``.claude-*``), keep only transcripts touched within
+    ``max_age_seconds`` (a long-dead session's transcript must NOT become the survivor
+    pointer), and return the newest by mtime.
+
+    Returns the PATH only (no transcript content is ever read), so there is no new leak
+    surface -- a host path is exactly what the PRIVATE route already permits and the PUBLIC
+    route's scrub transform already rewrites. Degrades to ``None`` when no live transcript
+    exists, so the caller falls back to git/host truth only and the FLOOR is preserved.
+
+    ``home`` defaults to ``$FAK_CHECKPOINT_HOME`` then ``~``; the env override is the
+    testability seam (and helps an operator whose claude config lives off the default path)."""
+    h = home or os.environ.get("FAK_CHECKPOINT_HOME") or os.path.expanduser("~")
+    slug = re.sub(r"[^A-Za-z0-9]", "-", os.path.normpath(repo))
+    now = time.time()
+    candidates: list[str] = []
+    for p in glob.glob(os.path.join(h, ".claude*", "projects", slug, "*.jsonl")):
+        try:
+            if now - os.path.getmtime(p) <= max_age_seconds:
+                candidates.append(p)
+        except OSError:
+            continue
+    if not candidates:
+        return None
+    return max(candidates, key=os.path.getmtime)
 
 
 def _git_commit_push(archive: str, do_push: bool, *, message: str) -> int:
@@ -389,14 +438,20 @@ def _read_stop_event() -> dict[str, Any]:
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description="Durable session work-status checkpoint to GitHub.")
     ap.add_argument("--source", choices=["stop", "periodic"], default="periodic",
-                    help="stop = clean-end (session context); periodic = crash-survivor (git/host only)")
+                    help="stop = clean-end (session context from the event); "
+                         "periodic = crash-survivor (git/host truth + discovered transcript pointer)")
     ap.add_argument("--hook", action="store_true",
                     help="Stop-hook mode: read the Stop event JSON on stdin (implies --source stop)")
     ap.add_argument("--route", choices=["private", "public", "both"], default="private")
     ap.add_argument("--public-target", default=os.environ.get("FAK_CHECKPOINT_PUBLIC_TARGET"),
                     help="gh issue number or gist id for the public route")
-    ap.add_argument("--transcript", default=None, help="session transcript path (stop mode)")
+    ap.add_argument("--transcript", default=None,
+                    help="session transcript path (explicit override; else stop reads the event, "
+                         "periodic DISCOVERS it from disk)")
     ap.add_argument("--in-flight", default=None, help="one-line in-flight note (stop mode)")
+    ap.add_argument("--no-discover", action="store_true",
+                    help="periodic source: do NOT auto-discover the active transcript pointer "
+                         "(stay pure git/host truth -- the pre-#634 floor)")
     ap.add_argument("--no-push", action="store_true", help="commit locally but do not push")
     ap.add_argument("--dry-run", action="store_true", help="render + route decisions, write/post nothing")
     ap.add_argument("--json", action="store_true", help="machine-readable result")
@@ -410,6 +465,15 @@ def main(argv: list[str] | None = None) -> int:
         transcript = transcript or ev.get("transcript_path") or ev.get("transcript")
         # The Stop event may carry the active goal/condition; surface it as the in-flight note.
         in_flight = in_flight or ev.get("goal") or ev.get("stop_hook_condition")
+    elif source == "periodic" and not args.no_discover and not transcript:
+        # Close the within-turn coverage gap (#634): the periodic crash-survivor has no
+        # stdin/Stop event, so DISCOVER the active transcript pointer from disk. Now a
+        # mid-LONG-TURN crash leaves a survivor record that points at what was in flight,
+        # even though the Stop hook (which carries the pointer) only fires at turn-end.
+        # Degrades to None (pure git/host floor) when no live session exists.
+        discovered = discover_active_transcript(REPO_ROOT)
+        if discovered:
+            transcript = discovered
 
     rec = build_record(source=source, transcript=transcript, in_flight=in_flight,
                        stamp=_now_iso(), host=platform.node())

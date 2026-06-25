@@ -8,8 +8,10 @@ that --dry-run / mocked push+gh write/post nothing real.
 """
 import json
 import os
+import re
 import subprocess
 import sys
+import time
 
 import pytest
 
@@ -163,7 +165,10 @@ def test_dry_run_writes_nothing(tmp_path):
 
 # --- CLI smoke ---------------------------------------------------------------------
 def test_cli_dry_run_json_smoke(capsys):
-    rc = sc.main(["--source", "periodic", "--route", "private", "--dry-run", "--json"])
+    # --no-discover keeps the smoke test on the PURE floor (deterministic: no dependence
+    # on whether a live transcript happens to exist on the host running the tests).
+    rc = sc.main(["--source", "periodic", "--route", "private", "--dry-run", "--json",
+                  "--no-discover"])
     out = capsys.readouterr().out
     doc = json.loads(out)
     assert doc["record"]["schema"] == sc.SCHEMA
@@ -176,6 +181,90 @@ def test_cli_refusal_exits_nonzero(monkeypatch, capsys):
     rc = sc.main(["--route", "private", "--in-flight", f"x {PLANTED_NEEDLE}",
                   "--no-push", "--json"])
     assert rc == 3  # loud, non-zero, on a gate refusal
+
+
+# --- within-turn coverage: the periodic crash-survivor discovers the transcript (#634) -
+def _slug(repo):
+    return re.sub(r"[^A-Za-z0-9]", "-", os.path.normpath(repo))
+
+
+def _make_transcript(home, repo, account=".claude", sid="11111111-1111-1111-1111-111111111111",
+                     content="{}\n"):
+    proj = os.path.join(home, account, "projects", _slug(repo))
+    os.makedirs(proj, exist_ok=True)
+    p = os.path.join(proj, sid + ".jsonl")
+    with open(p, "w", encoding="utf-8") as f:
+        f.write(content)
+    return p
+
+
+def test_discover_finds_newest_recent_transcript_across_accounts(tmp_path):
+    home = tmp_path / "home"
+    repo = str(tmp_path / "fak")
+    old = _make_transcript(str(home), repo, account=".claude", sid="a" * 32)
+    new = _make_transcript(str(home), repo, account=".claude-q-netra", sid="b" * 32)
+    # Force a deterministic ordering: `new` is touched AFTER `old`.
+    os.utime(old, (time.time() - 60, time.time() - 60))
+    os.utime(new, None)
+    got = sc.discover_active_transcript(repo, home=str(home))
+    assert got == new  # newest wins, across both account dirs
+
+
+def test_discover_returns_none_when_no_live_transcript(tmp_path):
+    repo = str(tmp_path / "fak")
+    assert sc.discover_active_transcript(repo, home=str(tmp_path / "home")) is None
+
+
+def test_discover_ignores_wrong_project_slug(tmp_path):
+    home = tmp_path / "home"
+    repo = str(tmp_path / "fak")
+    other = str(tmp_path / "OTHER-repo")
+    _make_transcript(str(home), other)  # different slug
+    assert sc.discover_active_transcript(repo, home=str(home)) is None
+
+
+def test_discover_recency_filter_drops_stale_dead_session(tmp_path):
+    # A long-dead session's transcript must NOT become the survivor pointer: a stale mtime
+    # past max_age_seconds is excluded, so we degrade to the pure git/host floor (None).
+    home = tmp_path / "home"
+    repo = str(tmp_path / "fak")
+    p = _make_transcript(str(home), repo)
+    stale = time.time() - 10000  # ~2.7h ago, beyond the 2h default max_age
+    os.utime(p, (stale, stale))
+    assert sc.discover_active_transcript(repo, home=str(home)) is None
+    # ...and a tight max_age also excludes a 5-minute-old transcript.
+    fresh = _make_transcript(str(home), repo, sid="c" * 32)
+    os.utime(fresh, (time.time() - 300, time.time() - 300))
+    assert sc.discover_active_transcript(repo, home=str(home), max_age_seconds=60) is None
+
+
+def test_cli_periodic_discovers_transcript_pointer(monkeypatch, capsys):
+    # The periodic crash-survivor has no stdin/Stop event, yet its record CARRIES the
+    # transcript pointer discovered from disk -- the within-turn coverage gap (#634).
+    # main() discovers against REPO_ROOT, so the fixture transcript must live under the
+    # slug for sc.REPO_ROOT (portable: whatever path the repo actually has on this host).
+    import tempfile
+    with tempfile.TemporaryDirectory() as td:
+        p = _make_transcript(td, sc.REPO_ROOT)
+        monkeypatch.setenv("FAK_CHECKPOINT_HOME", td)
+        rc = sc.main(["--source", "periodic", "--route", "private", "--dry-run", "--json"])
+        doc = json.loads(capsys.readouterr().out)
+        assert rc == 0
+        assert doc["record"]["transcript"] == p
+
+
+def test_cli_no_discover_keeps_pure_floor(monkeypatch, capsys):
+    # --no-discover is the explicit escape hatch back to the pre-#634 git/host-only floor,
+    # even when a live transcript is sitting on disk right next to it.
+    import tempfile
+    with tempfile.TemporaryDirectory() as td:
+        _make_transcript(td, sc.REPO_ROOT)
+        monkeypatch.setenv("FAK_CHECKPOINT_HOME", td)
+        rc = sc.main(["--source", "periodic", "--no-discover", "--route", "private",
+                      "--dry-run", "--json"])
+        doc = json.loads(capsys.readouterr().out)
+        assert rc == 0
+        assert "transcript" not in doc["record"]
 
 
 if __name__ == "__main__":
