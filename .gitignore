@@ -405,3 +405,15 @@ sk-ant-oat01-*
 # machine-readable witness of that run; it is a build product, not source. Track the
 # code that emits it, not the emission.
 memqdemo-report.json
+
+# Trajectory-audit drops written by tools/session_audit.py (the /trajectory-audit skill,
+# `audit --json OUT`). These carry PRIVATE operator telemetry — per-session dollar costs,
+# local namespace breakdown (e.g. C--work-job, C--WINDOWS-system32), and tool-mix counts —
+# the same go-to-market/operator-private class as the dispatch-status doc and SEO scores
+# above, so they must NEVER land in this public tree. `audit-sessions.json` is the name a
+# large-window audit lands at; the dated `trajectory-audit-YYYYMMDD.{md,json}` form is the
+# skill's documented --md/--json example. The committed analysis lives in the explainer
+# docs/notes that cite specific numbers; the raw machine-local dump is not source.
+/audit-sessions.json
+/trajectory-audit-*.json
+/trajectory-audit-*.md
