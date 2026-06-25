@@ -26,7 +26,12 @@ from typing import Any, Callable
 SCHEMA = "fak-claude-historical-guard-audit/1"
 DEFAULT_POLICY = "examples/dogfood-claude-policy.json"
 DEFAULT_NS = "C--work-fak"
-DEFAULT_ROOT = os.path.join(os.environ.get("USERPROFILE", os.path.expanduser("~")), ".claude", "projects", DEFAULT_NS)
+# Resolve the config home the way the fleet relocates it: CLAUDE_CONFIG_DIR wins
+# (each agent runs under its own ~/.claude-<account>), else the vanilla ~/.claude.
+# Hardcoding ~/.claude here would audit the WRONG (stale or foreign) store.
+_CONFIG_DIR = os.environ.get("CLAUDE_CONFIG_DIR")
+_CLAUDE_HOME = _CONFIG_DIR if _CONFIG_DIR else os.path.join(os.environ.get("USERPROFILE", os.path.expanduser("~")), ".claude")
+DEFAULT_ROOT = os.path.join(_CLAUDE_HOME, "projects", DEFAULT_NS)
 
 
 def now_utc() -> str:
