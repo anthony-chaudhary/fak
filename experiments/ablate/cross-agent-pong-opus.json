@@ -1,0 +1,361 @@
+{
+  "schema": "fak.cross-agent-ablation.v1",
+  "regime": "B (nondeterministic; external model varies; the WorkloadHash guard does NOT apply)",
+  "provenance": {
+    "app_version": "0.32.0",
+    "command": "python tools/cross_agent_ablate.py run --task pong --k 5",
+    "os": "win32",
+    "generated_by": "tools/cross_agent_ablate.py",
+    "wall_clock_utc": "2026-06-25T01:20:11Z"
+  },
+  "task": {
+    "id": "pong",
+    "prompt": "Create a file named RESULT.txt in the current directory containing exactly the single word PONG and nothing else. Use your file tools. Then reply done.",
+    "success_check": "RESULT.txt strip()=='PONG'"
+  },
+  "k_reps": 5,
+  "headline_model": "claude-opus-4-8",
+  "validity": {
+    "success_gate": "no 'saved' number unless both.completed && both.success",
+    "variance": "mean +/- CI95 (Student-t) over K>=5 reps; external models are nondeterministic",
+    "model_named": "each arm names its model; kernel-efficiency refused unless model held constant",
+    "decompose": "kernel-efficiency (model constant) and agent-capability (model varies) as TWO numbers"
+  },
+  "arms": [
+    {
+      "arm": "claude_code",
+      "model": "claude-opus-4-8",
+      "models_seen": [
+        "claude-opus-4-8"
+      ],
+      "reps": 5,
+      "completed_reps": 5,
+      "success_reps": 5,
+      "success_rate": 1.0,
+      "metrics": {
+        "output_tokens": {
+          "mean": 126.8,
+          "ci95": 13.9741,
+          "n": 5
+        },
+        "input_tokens": {
+          "mean": 2503.0,
+          "ci95": 0.0,
+          "n": 5
+        },
+        "provider_cache_read_tokens": {
+          "mean": 42619.4,
+          "ci95": 4.0799,
+          "n": 5
+        },
+        "cache_creation_tokens": {
+          "mean": 6955.4,
+          "ci95": 18.1101,
+          "n": 5
+        },
+        "total_input_tokens": {
+          "mean": 52077.8,
+          "ci95": 21.4022,
+          "n": 5
+        },
+        "turns": {
+          "mean": 2.0,
+          "ci95": 0.0,
+          "n": 5
+        },
+        "wall_seconds": {
+          "mean": 8.2747,
+          "ci95": 2.3289,
+          "n": 5
+        }
+      },
+      "raw_reps": [
+        {
+          "arm": "claude_code",
+          "model": "claude-opus-4-8",
+          "completed": true,
+          "success": true,
+          "turns": 2,
+          "tokens": {
+            "input": 2503,
+            "output": 138,
+            "provider_cache_read": 42621,
+            "cache_create": 6969
+          },
+          "tools": {},
+          "wall_seconds": 11.531
+        },
+        {
+          "arm": "claude_code",
+          "model": "claude-opus-4-8",
+          "completed": true,
+          "success": true,
+          "turns": 2,
+          "tokens": {
+            "input": 2503,
+            "output": 118,
+            "provider_cache_read": 42617,
+            "cache_create": 6943
+          },
+          "tools": {},
+          "wall_seconds": 7.765
+        },
+        {
+          "arm": "claude_code",
+          "model": "claude-opus-4-8",
+          "completed": true,
+          "success": true,
+          "turns": 2,
+          "tokens": {
+            "input": 2503,
+            "output": 140,
+            "provider_cache_read": 42621,
+            "cache_create": 6971
+          },
+          "tools": {},
+          "wall_seconds": 6.6784
+        },
+        {
+          "arm": "claude_code",
+          "model": "claude-opus-4-8",
+          "completed": true,
+          "success": true,
+          "turns": 2,
+          "tokens": {
+            "input": 2503,
+            "output": 121,
+            "provider_cache_read": 42623,
+            "cache_create": 6955
+          },
+          "tools": {},
+          "wall_seconds": 7.6572
+        },
+        {
+          "arm": "claude_code",
+          "model": "claude-opus-4-8",
+          "completed": true,
+          "success": true,
+          "turns": 2,
+          "tokens": {
+            "input": 2503,
+            "output": 117,
+            "provider_cache_read": 42615,
+            "cache_create": 6939
+          },
+          "tools": {},
+          "wall_seconds": 7.7417
+        }
+      ]
+    },
+    {
+      "arm": "claude_code+fak",
+      "model": "claude-opus-4-8",
+      "models_seen": [
+        "claude-opus-4-8"
+      ],
+      "reps": 5,
+      "completed_reps": 5,
+      "success_reps": 5,
+      "success_rate": 1.0,
+      "metrics": {
+        "output_tokens": {
+          "mean": 124.0,
+          "ci95": 10.4608,
+          "n": 5
+        },
+        "input_tokens": {
+          "mean": 2144.0,
+          "ci95": 0.0,
+          "n": 5
+        },
+        "provider_cache_read_tokens": {
+          "mean": 72506.2,
+          "ci95": 46.4049,
+          "n": 5
+        },
+        "cache_creation_tokens": {
+          "mean": 6413.2,
+          "ci95": 45.9208,
+          "n": 5
+        },
+        "total_input_tokens": {
+          "mean": 81063.4,
+          "ci95": 91.7912,
+          "n": 5
+        },
+        "turns": {
+          "mean": 2.0,
+          "ci95": 0.0,
+          "n": 5
+        },
+        "wall_seconds": {
+          "mean": 6.1219,
+          "ci95": 0.9387,
+          "n": 5
+        }
+      },
+      "raw_reps": [
+        {
+          "arm": "claude_code+fak",
+          "model": "claude-opus-4-8",
+          "completed": true,
+          "success": true,
+          "turns": 2,
+          "tokens": {
+            "input": 2144,
+            "output": 121,
+            "provider_cache_read": 72573,
+            "cache_create": 6478
+          },
+          "tools": {},
+          "wall_seconds": 5.2235,
+          "adjudication": {
+            "allowed": 1,
+            "denied": 0,
+            "repaired": 0,
+            "quarantined": 0,
+            "deferred": 0,
+            "vdso_hits": 0,
+            "journal_rows": 1,
+            "journal": "guard-audit.jsonl"
+          }
+        },
+        {
+          "arm": "claude_code+fak",
+          "model": "claude-opus-4-8",
+          "completed": true,
+          "success": true,
+          "turns": 2,
+          "tokens": {
+            "input": 2144,
+            "output": 119,
+            "provider_cache_read": 72488,
+            "cache_create": 6389
+          },
+          "tools": {},
+          "wall_seconds": 5.5735,
+          "adjudication": {
+            "allowed": 1,
+            "denied": 0,
+            "repaired": 0,
+            "quarantined": 0,
+            "deferred": 0,
+            "vdso_hits": 0,
+            "journal_rows": 1,
+            "journal": "guard-audit.jsonl"
+          }
+        },
+        {
+          "arm": "claude_code+fak",
+          "model": "claude-opus-4-8",
+          "completed": true,
+          "success": true,
+          "turns": 2,
+          "tokens": {
+            "input": 2144,
+            "output": 121,
+            "provider_cache_read": 72492,
+            "cache_create": 6397
+          },
+          "tools": {},
+          "wall_seconds": 7.1576,
+          "adjudication": {
+            "allowed": 1,
+            "denied": 0,
+            "repaired": 0,
+            "quarantined": 0,
+            "deferred": 0,
+            "vdso_hits": 0,
+            "journal_rows": 1,
+            "journal": "guard-audit.jsonl"
+          }
+        },
+        {
+          "arm": "claude_code+fak",
+          "model": "claude-opus-4-8",
+          "completed": true,
+          "success": true,
+          "turns": 2,
+          "tokens": {
+            "input": 2144,
+            "output": 139,
+            "provider_cache_read": 72488,
+            "cache_create": 6409
+          },
+          "tools": {},
+          "wall_seconds": 6.2234,
+          "adjudication": {
+            "allowed": 1,
+            "denied": 0,
+            "repaired": 0,
+            "quarantined": 0,
+            "deferred": 0,
+            "vdso_hits": 0,
+            "journal_rows": 1,
+            "journal": "guard-audit.jsonl"
+          }
+        },
+        {
+          "arm": "claude_code+fak",
+          "model": "claude-opus-4-8",
+          "completed": true,
+          "success": true,
+          "turns": 2,
+          "tokens": {
+            "input": 2144,
+            "output": 120,
+            "provider_cache_read": 72490,
+            "cache_create": 6393
+          },
+          "tools": {},
+          "wall_seconds": 6.4317,
+          "adjudication": {
+            "allowed": 1,
+            "denied": 0,
+            "repaired": 0,
+            "quarantined": 0,
+            "deferred": 0,
+            "vdso_hits": 0,
+            "journal_rows": 1,
+            "journal": "guard-audit.jsonl"
+          }
+        }
+      ],
+      "adjudication_totals": {
+        "allowed": 5,
+        "denied": 0,
+        "repaired": 0,
+        "quarantined": 0,
+        "deferred": 0,
+        "vdso_hits": 0,
+        "journal_rows": 5
+      }
+    }
+  ],
+  "comparison": {
+    "baseline_arm": "claude_code",
+    "treatment_arm": "claude_code+fak",
+    "gated": true,
+    "variance_ok": true,
+    "kernel_efficiency": {
+      "model": "claude-opus-4-8",
+      "output_tokens_ratio": 0.9779,
+      "total_input_tokens_ratio": 1.5566,
+      "turns_ratio": 1.0,
+      "saved_output_tokens": 2.8,
+      "saved_total_input_tokens": -28985.6,
+      "note": "model held constant -> the delta is the kernel's, not the model's; +saved = kernel cheaper, -saved = kernel overhead"
+    },
+    "agent_capability": {
+      "baseline": {
+        "arm": "claude_code",
+        "success_rate": 1.0
+      },
+      "treatment": {
+        "arm": "claude_code+fak",
+        "success_rate": 1.0
+      },
+      "note": "success rate is the MODEL's capability and varies across reps; with both arms on one model it is ~held here, so kernel-efficiency is the live number"
+    }
+  }
+}
