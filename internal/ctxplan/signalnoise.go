@@ -1,5 +1,7 @@
 package ctxplan
 
+import "math"
+
 // CONTEXT SIGNAL-TO-NOISE (#563 frontier; the metric the cache-hit number cannot give).
 //
 // Provider cache-hit % is a DENOMINATOR ARTIFACT, not a quality signal. It is
@@ -121,6 +123,103 @@ func ComputeSignalNoise(p Plan, o Outcome) SignalNoise {
 		}
 	}
 	// Fault cost: an Outcome.Faults id names an ELIDED span (paged out, then needed).
+	if len(o.Faults) > 0 {
+		faulted := make(map[string]bool, len(o.Faults))
+		for _, id := range o.Faults {
+			faulted[id] = true
+		}
+		for _, el := range p.Elided {
+			if faulted[el.ID] {
+				c := el.Cost
+				if c < 0 {
+					c = 0
+				}
+				sn.FaultTokens += c
+			}
+		}
+	}
+	return sn
+}
+
+// SpanMass is the WITNESSED attention mass a turn placed on one resident span — the
+// rung-1→2 upgrade of the inferred boolean hit. Mass is normalized to [0,1]: it is the
+// fraction of the span's resident cost that pulled weight this turn, the continuous a_s
+// the #851 formula calls for. ID names a span by Cell.ID, the same key Plan.Selected and
+// Outcome.Hits carry. A mass outside [0,1] is clamped on read (fail-closed: a malformed
+// witness can never push a span past pure-signal or below pure-noise).
+type SpanMass struct {
+	ID   string  `json:"id"`
+	Mass float64 `json:"mass"`
+}
+
+// Attribution is the per-span attention-mass witness for one turn — the self-contained
+// shape ComputeSignalNoise's witnessed twin consumes. It is deliberately local to ctxplan
+// and depends on nothing else: the kvmmu span-attribution accumulator (#853) adapts INTO
+// this map rather than this type reaching across the lane. An empty/nil Attribution means
+// "no attention witness available" — the caller falls back to the rung-0 boolean path
+// (ComputeSignalNoise), which is how offline / API-only sessions still get an S/N number.
+type Attribution map[string]float64
+
+// clampMass folds an attention mass into [0,1] — a malformed witness (negative, or >1 from
+// a normalization slip) can never make a span more than pure signal or less than pure noise.
+func clampMass(m float64) float64 {
+	if m < 0 {
+		return 0
+	}
+	if m > 1 {
+		return 1
+	}
+	return m
+}
+
+// SignalNoiseFromAttention folds a Plan and a WITNESSED per-span attention Attribution into
+// the same token-weighted S/N breakdown ComputeSignalNoise produces — but with the binary
+// a_s ∈ {0,1} hit replaced by the continuous attention mass a_s ∈ [0,1] the #851 formula
+// calls for. A resident span's cost is SPLIT by its mass: round(mass·cost) tokens count as
+// signal (the share that pulled weight) and the remainder as noise (the share that idled),
+// so a half-attended span is half signal, half noise — granularity the boolean hit cannot
+// express.
+//
+// Pins stay pure signal regardless of mass: a pin is signal by construction (the turn
+// cannot proceed without it), the same rule ComputeSignalNoise applies, so a pinned span's
+// full cost is signal even at mass 0. A resident span the Attribution does not name is
+// UNACCOUNTED (the witness saw no attention on it AND did not label it noise) — it sits in
+// the denominator as honest unknown, exactly like an unlabeled span in the boolean path, so
+// the witnessed ratio never over-claims. Fault cost is read from the same Outcome the
+// boolean path uses (attention attribution covers RESIDENT spans only; an elided-then-
+// faulted span has no resident mass to witness), so the under-resident axis is identical.
+//
+// The function is pure and deterministic: same (plan, attribution, outcome) yields the same
+// breakdown. Same SignalNoise struct out, so Ratio() / FaultRatio() / Grade() are unchanged.
+func SignalNoiseFromAttention(p Plan, attribution Attribution, o Outcome) SignalNoise {
+	var sn SignalNoise
+	for _, sel := range p.Selected {
+		c := sel.Cost
+		if c < 0 {
+			c = 0
+		}
+		sn.ResidentTokens += c
+		if sel.Pinned {
+			// A pin is signal by construction — never split, never idle (matches the boolean path).
+			sn.SignalTokens += c
+			continue
+		}
+		mass, witnessed := attribution[sel.ID]
+		if !witnessed {
+			// No attention witnessed this resident span: honest unknown, like an unlabeled span.
+			sn.UnaccountedTokens += c
+			continue
+		}
+		// Split the span's cost by witnessed mass: the attended share is signal, the rest noise.
+		signal := int(math.Round(clampMass(mass) * float64(c)))
+		if signal > c {
+			signal = c
+		}
+		sn.SignalTokens += signal
+		sn.NoiseTokens += c - signal
+	}
+	// Fault cost is identical to the boolean path: attention covers resident spans only, so an
+	// elided-then-faulted span (no resident mass) is read from the Outcome's Faults, as before.
 	if len(o.Faults) > 0 {
 		faulted := make(map[string]bool, len(o.Faults))
 		for _, id := range o.Faults {

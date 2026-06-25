@@ -130,6 +130,156 @@ func TestSignalNoise_Unaccounted(t *testing.T) {
 	}
 }
 
+// TestSignalNoiseFromAttention_SplitsByMass: the witnessed a_s ∈ [0,1] splits a span's
+// cost — round(mass·cost) is signal, the remainder noise — granularity the boolean hit
+// (all-or-nothing) cannot express. A half-attended span is half signal, half noise.
+func TestSignalNoiseFromAttention_SplitsByMass(t *testing.T) {
+	p := Plan{Selected: []Selection{
+		sel("hot", 1000, false),  // fully attended
+		sel("half", 1000, false), // half attended
+		sel("cold", 1000, false), // never attended (witnessed mass 0)
+	}}
+	attr := Attribution{"hot": 1.0, "half": 0.5, "cold": 0.0}
+	sn := SignalNoiseFromAttention(p, attr, Outcome{})
+
+	if sn.SignalTokens != 1500 { // 1000 + 500 + 0
+		t.Errorf("signal = %d, want 1500 (1.0+0.5+0.0 of 1000 each)", sn.SignalTokens)
+	}
+	if sn.NoiseTokens != 1500 { // 0 + 500 + 1000
+		t.Errorf("noise = %d, want 1500", sn.NoiseTokens)
+	}
+	if sn.ResidentTokens != 3000 {
+		t.Errorf("resident = %d, want 3000", sn.ResidentTokens)
+	}
+	if !approx(sn.Ratio(), 0.5) {
+		t.Errorf("ratio = %v, want 0.5", sn.Ratio())
+	}
+}
+
+// TestSignalNoiseFromAttention_PinIsSignalAtZeroMass: a pin stays pure signal even when the
+// witness placed zero attention on it — same pin-is-signal rule the boolean path applies.
+func TestSignalNoiseFromAttention_PinIsSignalAtZeroMass(t *testing.T) {
+	p := Plan{Selected: []Selection{
+		sel("pin", 500, true), // pinned, witnessed mass 0
+		sel("seen", 500, false),
+	}}
+	attr := Attribution{"pin": 0.0, "seen": 1.0}
+	sn := SignalNoiseFromAttention(p, attr, Outcome{})
+	if sn.SignalTokens != 1000 {
+		t.Errorf("pin must be signal at mass 0: signal=%d, want 1000", sn.SignalTokens)
+	}
+	if sn.NoiseTokens != 0 {
+		t.Errorf("noise=%d, want 0", sn.NoiseTokens)
+	}
+}
+
+// TestSignalNoiseFromAttention_DivergesFromInferred is the THESIS test for #854: attention
+// sees what lexical overlap misses. The boolean path (rung 0) marks a lexically-similar
+// span as Hit -> signal; the witnessed path sees the turn never ATTENDED it (mass 0) and
+// drops it from signal to noise. Both ratios are computed side by side and asserted to
+// DIVERGE — proving the witness is not a no-op relabel of the inferred metric.
+func TestSignalNoiseFromAttention_DivergesFromInferred(t *testing.T) {
+	// "decoy" is lexically similar to the query (so the bench's lexical-overlap heuristic
+	// flags it Hit) but the model never actually attended to it.
+	p := Plan{Selected: []Selection{
+		sel("real", 1000, false),  // genuinely used
+		sel("decoy", 1000, false), // lexically similar, NEVER attended
+	}}
+
+	// Rung 0: the inferred boolean path. Lexical overlap marks BOTH as hits.
+	inferred := ComputeSignalNoise(p, Outcome{Hits: []string{"real", "decoy"}})
+	// Rung 1→2: the witnessed path. Attention saw all weight on "real", none on "decoy".
+	witnessed := SignalNoiseFromAttention(p, Attribution{"real": 1.0, "decoy": 0.0}, Outcome{})
+
+	if !approx(inferred.Ratio(), 1.0) {
+		t.Fatalf("inferred ratio = %v, want 1.0 (lexical overlap marks both spans signal)", inferred.Ratio())
+	}
+	if !approx(witnessed.Ratio(), 0.5) {
+		t.Fatalf("witnessed ratio = %v, want 0.5 (only the truly-attended span is signal)", witnessed.Ratio())
+	}
+	if approx(inferred.Ratio(), witnessed.Ratio()) {
+		t.Fatalf("witness must DIVERGE from inferred: both %v — attention added no information", inferred.Ratio())
+	}
+	// The decoy moved from signal (inferred) to noise (witnessed): the whole point of #854.
+	if witnessed.NoiseTokens != 1000 {
+		t.Errorf("the lexically-similar-but-unattended span must be noise: noise=%d, want 1000", witnessed.NoiseTokens)
+	}
+	if inferred.NoiseTokens != 0 {
+		t.Errorf("inferred path counts the decoy as signal (its blind spot): noise=%d, want 0", inferred.NoiseTokens)
+	}
+	t.Logf("side by side: inferred S/N = %.3f (decoy counted as signal) vs witnessed S/N = %.3f (decoy is noise)",
+		inferred.Ratio(), witnessed.Ratio())
+}
+
+// TestSignalNoiseFromAttention_UnattributedIsUnaccounted: a resident span the Attribution
+// does not name (no witness on it) is honest unknown — denominator only, not signal/noise —
+// so the witnessed ratio cannot over-claim when the witness is partial.
+func TestSignalNoiseFromAttention_UnattributedIsUnaccounted(t *testing.T) {
+	p := Plan{Selected: []Selection{
+		sel("seen", 100, false),
+		sel("unwitnessed", 100, false), // not in the attribution map at all
+	}}
+	sn := SignalNoiseFromAttention(p, Attribution{"seen": 1.0}, Outcome{})
+	if sn.UnaccountedTokens != 100 {
+		t.Errorf("unwitnessed resident span must be unaccounted: %d, want 100", sn.UnaccountedTokens)
+	}
+	if sn.SignalTokens != 100 || sn.NoiseTokens != 0 {
+		t.Errorf("an absent-from-witness span must not become signal or noise: sig=%d noise=%d", sn.SignalTokens, sn.NoiseTokens)
+	}
+	if !approx(sn.Ratio(), 0.5) {
+		t.Errorf("ratio = %v, want 0.5 (unaccounted in denominator)", sn.Ratio())
+	}
+}
+
+// TestSignalNoiseFromAttention_FaultAxisMatchesInferred: fault cost (under-resident) is read
+// from the same Outcome the boolean path uses — attention covers resident spans only, so the
+// witnessed and inferred paths report IDENTICAL fault cost for the same elided-faulted span.
+func TestSignalNoiseFromAttention_FaultAxisMatchesInferred(t *testing.T) {
+	p := Plan{
+		Selected: []Selection{sel("a", 100, false)},
+		Elided:   []Elision{{ID: "needed", Cost: 5000, Reason: ElideOverBudget}},
+	}
+	o := Outcome{Faults: []string{"needed"}}
+	witnessed := SignalNoiseFromAttention(p, Attribution{"a": 1.0}, o)
+	inferred := ComputeSignalNoise(p, Outcome{Hits: []string{"a"}, Faults: []string{"needed"}})
+	if witnessed.FaultTokens != 5000 || inferred.FaultTokens != 5000 {
+		t.Errorf("fault cost must match across paths: witnessed=%d inferred=%d, want 5000 each",
+			witnessed.FaultTokens, inferred.FaultTokens)
+	}
+}
+
+// TestSignalNoiseFromAttention_ClampsMalformedMass: a witness mass outside [0,1] is clamped,
+// so a normalization slip can never push a span past pure signal or below pure noise.
+func TestSignalNoiseFromAttention_ClampsMalformedMass(t *testing.T) {
+	p := Plan{Selected: []Selection{sel("over", 100, false), sel("under", 100, false)}}
+	sn := SignalNoiseFromAttention(p, Attribution{"over": 1.7, "under": -0.3}, Outcome{})
+	if sn.SignalTokens != 100 { // over clamps to 1.0 -> 100; under clamps to 0 -> 0
+		t.Errorf("clamped signal = %d, want 100", sn.SignalTokens)
+	}
+	if sn.NoiseTokens != 100 {
+		t.Errorf("clamped noise = %d, want 100", sn.NoiseTokens)
+	}
+}
+
+// TestSignalNoise_BooleanPathUnchanged: the rung-0 fallback (ComputeSignalNoise) is the
+// byte-identical offline path — with no attention witness available, the caller uses it and
+// gets exactly today's behavior. This pins that the witnessed addition did not perturb it.
+func TestSignalNoise_BooleanPathUnchanged(t *testing.T) {
+	p := Plan{Selected: []Selection{
+		sel("a", 100, false),
+		sel("b", 100, false),
+		sel("blob", 9000, false),
+	}}
+	o := Outcome{Hits: []string{"a", "b"}, Wasted: []string{"blob"}}
+	sn := ComputeSignalNoise(p, o)
+	if sn.SignalTokens != 200 || sn.NoiseTokens != 9000 || sn.ResidentTokens != 9200 {
+		t.Errorf("boolean fallback perturbed: %+v", sn)
+	}
+	if !approx(sn.Ratio(), 200.0/9200.0) {
+		t.Errorf("boolean ratio = %v, want %v", sn.Ratio(), 200.0/9200.0)
+	}
+}
+
 func TestSignalNoise_EmptyAndGrades(t *testing.T) {
 	// Empty resident view: nothing to curate => ratio 1.0 (fail-to-best).
 	if got := ComputeSignalNoise(Plan{}, Outcome{}).Ratio(); !approx(got, 1.0) {
