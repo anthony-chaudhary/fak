@@ -77,6 +77,7 @@ func cmdGuard(argv []string) {
 	noAudit := fs.Bool("no-audit", false, "disable the durable decision journal for this session (it is ON by default — fak guard is the referee, and the journal is the verifiable record of what it allowed vs blocked)")
 	dumpPolicy := fs.Bool("dump-policy", false, "print the built-in guard capability floor (an editable manifest) and exit")
 	quiet := fs.Bool("quiet", false, "suppress the startup banner and the exit audit summary")
+	debugStats := fs.Bool("debug-stats", false, "print ONE compact, payload-free line per served turn to stderr: request/cache_read/cache_creation tokens, the compaction action, and the resetScore SHADOW health (healthy_cache|cache_decay|stale_prefix|cooldown|unknown_provider). Independent of --log; default off to keep the wrapped agent's terminal clean (#793).")
 	ctxViewBudget := fs.Int("ctx-view-budget", 0, "wire the ctxplan context PLANNER into the live guard loop: each buffered turn, re-materialize the forwarded history as an O(1) planned VIEW under this resident-token budget (a planned view in place of appending the whole transcript, #555). 0 (default) leaves the existing path byte-for-byte unchanged. OFF by default: it rewrites in-flight turn history, so gate it until you have watched a wrapped session. The streaming fast-path bypasses this; the buffered turn path is what gets planned.")
 	compactHistoryBudget := fs.Int("compact-history-budget", 0, "compact OLD conversation turns in the OUTBOUND Anthropic request body down to this resident-token budget while keeping the cache_control prefix BYTE-IDENTICAL, so the upstream prompt-cache hit survives. This reaches the flagship `fak guard -- claude` passthrough (where the body is forwarded verbatim, #555). 0 (default) = OFF, body forwarded byte-for-byte. Anthropic passthrough only.")
 	sessionID := fs.String("session-id", "guard", "default trace/session id for wrapped agents that omit X-Trace-Id or MCP trace_id")
@@ -251,6 +252,7 @@ func cmdGuard(argv []string) {
 		// Default OFF (clean terminal); --log routes the full structured stream to a file
 		// or stderr. /metrics + /debug/vars + the audit journal carry the record regardless.
 		Logf:                 gwLogf,
+		DebugStatsf:          debugStatsSink(*debugStats),
 		CtxViewBudget:        *ctxViewBudget,
 		CompactHistoryBudget: *compactHistoryBudget,
 		// Inbound twin of #555: prune tool DEFINITIONS the floor can never admit from the
@@ -327,15 +329,15 @@ func cmdGuard(argv []string) {
 
 // resolveAnthropicOAuthToken finds a Claude Pro/Max SUBSCRIPTION OAuth token to
 // authenticate the upstream with, in priority order:
-//  1. the named env var (default CLAUDE_CODE_OAUTH_TOKEN) — a long-lived
-//     `claude setup-token` credential, the headless-friendly source;
-//  2. <claude-config>/.oauth-token — a long-lived setup-token file (what the fleet
-//     pins; preferred over the expiring interactive creds);
-//  3. <claude-config>/.credentials.json -> claudeAiOauth.accessToken — the
-//     interactive login token. This one EXPIRES; Claude Code refreshes it
-//     out-of-band (directly against Anthropic, not through the gateway), so a
-//     long session may outlive the snapshot fak read at startup — prefer a setup
-//     token for anything long-running.
+//  1. the named env var (default CLAUDE_CODE_OAUTH_TOKEN) — the explicit
+//     headless/automation override;
+//  2. <claude-config>/.credentials.json -> claudeAiOauth.accessToken — the active
+//     Claude Code login token. This mirrors the credential direct Claude Code is
+//     using right now, which matters because a stale or org-disallowed setup token
+//     can exist beside a working interactive login;
+//  3. <claude-config>/.oauth-token — a long-lived setup-token file. This remains
+//     the fallback for headless homes with no interactive login, and callers that
+//     want to force a specific setup token can still put it in tokenEnv.
 //
 // <claude-config> is $CLAUDE_CONFIG_DIR (first entry if it is a list) when set,
 // else ~/.claude. Returns the token and a human source label, or an error that
@@ -351,14 +353,6 @@ func resolveAnthropicOAuthToken(tokenEnv string) (token, source string, err erro
 	}
 
 	cfgDir := guardClaudeConfigDir()
-
-	setupPath := filepath.Join(cfgDir, ".oauth-token")
-	tried = append(tried, setupPath)
-	if b, rerr := os.ReadFile(setupPath); rerr == nil {
-		if v := strings.TrimSpace(string(b)); v != "" {
-			return v, setupPath, nil
-		}
-	}
 
 	credPath := filepath.Join(cfgDir, ".credentials.json")
 	tried = append(tried, credPath)
@@ -377,6 +371,14 @@ func resolveAnthropicOAuthToken(tokenEnv string) (token, source string, err erro
 				}
 				return v, label, nil
 			}
+		}
+	}
+
+	setupPath := filepath.Join(cfgDir, ".oauth-token")
+	tried = append(tried, setupPath)
+	if b, rerr := os.ReadFile(setupPath); rerr == nil {
+		if v := strings.TrimSpace(string(b)); v != "" {
+			return v, setupPath, nil
 		}
 	}
 

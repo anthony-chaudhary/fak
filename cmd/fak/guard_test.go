@@ -541,9 +541,10 @@ func TestGuardWaitHealthy(t *testing.T) {
 }
 
 // TestResolveAnthropicOAuthToken proves the subscription-token sourcing precedence
-// used by `fak guard --anthropic-oauth`: the named env var wins, then the long-lived
-// <config>/.oauth-token setup token, then the interactive .credentials.json
-// accessToken; an empty setup makes it fail loud (never silently pick nothing).
+// used by `fak guard --anthropic-oauth`: the named env var wins, then the active
+// interactive .credentials.json accessToken, then the long-lived
+// <config>/.oauth-token setup token; an empty setup makes it fail loud (never
+// silently pick nothing).
 func TestResolveAnthropicOAuthToken(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("CLAUDE_CONFIG_DIR", dir)
@@ -555,7 +556,8 @@ func TestResolveAnthropicOAuthToken(t *testing.T) {
 		t.Fatal("want an error when no token source exists")
 	}
 
-	// .credentials.json accessToken is the lowest file fallback.
+	// .credentials.json accessToken is the first file fallback because it mirrors
+	// the credential direct Claude Code is currently using.
 	cred := `{"claudeAiOauth":{"accessToken":"sk-ant-oat01-from-creds","expiresAt":` +
 		// far-future expiry so the test never trips the expired-token warning path
 		"32503680000000}}"
@@ -567,13 +569,14 @@ func TestResolveAnthropicOAuthToken(t *testing.T) {
 		t.Fatalf("creds fallback: tok=%q src=%q err=%v", tok, src, err)
 	}
 
-	// .oauth-token (a long-lived setup token) outranks .credentials.json.
+	// .oauth-token (a long-lived setup token) remains a fallback, but must not
+	// shadow a working active-login token.
 	if err := os.WriteFile(filepath.Join(dir, ".oauth-token"), []byte("  sk-ant-oat01-setup\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	tok, _, err = resolveAnthropicOAuthToken(tokenEnv)
-	if err != nil || tok != "sk-ant-oat01-setup" {
-		t.Fatalf("setup-token precedence (trimmed): tok=%q err=%v", tok, err)
+	tok, src, err = resolveAnthropicOAuthToken(tokenEnv)
+	if err != nil || tok != "sk-ant-oat01-from-creds" || src != filepath.Join(dir, ".credentials.json") {
+		t.Fatalf("active-login token precedence: tok=%q src=%q err=%v", tok, src, err)
 	}
 
 	// The env var outranks every file source.

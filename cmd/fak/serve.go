@@ -54,6 +54,18 @@ func (f *repeatedStringFlag) Values() []string {
 	return out
 }
 
+// debugStatsSink returns the per-turn debug sink for `--debug-stats` (#793): a stderr
+// line-writer when on, nil (the no-op default) when off. The gateway emits one compact,
+// payload-free line per served turn through it.
+func debugStatsSink(on bool) func(string, ...any) {
+	if !on {
+		return nil
+	}
+	return func(format string, args ...any) {
+		fmt.Fprintf(os.Stderr, format+"\n", args...)
+	}
+}
+
 func cmdServe(argv []string) {
 	// t0 anchors the boot timeline exposed as fak_gateway_time_to_ready_seconds; it
 	// must be the FIRST statement so flag parse + policy + weight load are accounted.
@@ -93,6 +105,7 @@ func cmdServe(argv []string) {
 	notifyNative := fs.Bool("notify-native", true, "emit a one-line native notification to stderr when a served session hits a PAUSED/DRAINING/STOPPED or budget boundary, carrying the closed stop-reason token — the SIGCHLD-equivalent so a waiting agent is never silent (#761); default on")
 	notifyWebhook := fs.String("notify-webhook", "", "POST a JSON StopEvent to this URL on each served-session terminal/paused/budget boundary (#761), carrying the closed reason token; empty = off. Extends the #743 budget webhook to the full stop-reason vocabulary.")
 	notifySlack := fs.String("notify-slack", "", "POST a Slack incoming-webhook payload ({\"text\":…}) on each served-session boundary (#761); empty = off")
+	debugStats := fs.Bool("debug-stats", false, "print ONE compact, payload-free line per served turn to stderr: request/cache_read/cache_creation tokens, the compaction action, and the resetScore SHADOW health (healthy_cache|cache_decay|stale_prefix|cooldown|unknown_provider). Independent of --log (#793); default off.")
 	tParse := time.Now()
 	_ = fs.Parse(argv)
 	parseDur := time.Since(tParse)
@@ -292,6 +305,7 @@ func cmdServe(argv []string) {
 		StartupPhases:               startupPhases,
 		CtxViewBudget:               *ctxViewBudget,
 		CompactHistoryBudget:        *compactHistoryBudget,
+		DebugStatsf:                 debugStatsSink(*debugStats),
 		// Inbound twin of #555: prune tool DEFINITIONS the installed floor can never admit
 		// from the Anthropic passthrough's tools[], cache-prefix-preserving. The predicate
 		// reads adjudicator.Default (the floor serve installs via applyPolicy) under its lock,

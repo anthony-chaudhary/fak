@@ -196,6 +196,15 @@ type Config struct {
 	// Logf is the structured log sink (default: stderr). MCP-over-stdio sets this
 	// to stderr so protocol bytes on stdout are never corrupted.
 	Logf func(format string, args ...any)
+	// DebugStatsf is the OPTIONAL per-turn human debug sink (#793). When non-nil, every
+	// served turn renders ONE compact, payload-free line — request/cache_read/cache_creation
+	// tokens, the compaction action, and the resetScore SHADOW health (one of the five
+	// healthy_cache/cache_decay/stale_prefix/cooldown/unknown_provider states) — so an
+	// operator can watch turn-by-turn cache & compaction behavior live. nil (the default)
+	// emits nothing; it is independent of Logf (the JSON --log stream), so --debug-stats
+	// works with a clean --log-off terminal. `fak guard --debug-stats` / `fak serve
+	// --debug-stats` wire it to stderr.
+	DebugStatsf func(format string, args ...any)
 	// StartTime is the process-start instant the boot timeline is measured from. The
 	// zero value defaults to time.Now() at New — set it from the host CLI's first
 	// statement so phases timed BEFORE New (policy load, flag parse) are accounted
@@ -431,7 +440,8 @@ type Server struct {
 	requireKey     string
 	version        string
 	logf           func(format string, args ...any)
-	feed           *coherenceFeed // the cross-agent "what changed" feed (vdso coherence bus)
+	debugStatsf    func(format string, args ...any) // optional per-turn human debug sink (#793); nil = off
+	feed           *coherenceFeed                   // the cross-agent "what changed" feed (vdso coherence bus)
 	metrics        *gatewayMetrics
 	traceSeq       uint64 // mints a non-empty TraceID when the wire omits one (atomic)
 	reloadPolicy   PolicyReloadFunc
@@ -650,6 +660,7 @@ func New(cfg Config) (*Server, error) {
 		requireKey:           cfg.RequireKey,
 		version:              version,
 		logf:                 logf,
+		debugStatsf:          cfg.DebugStatsf,
 		reloadPolicy:         cfg.ReloadPolicy,
 		resetTrace:           cfg.ResetTrace,
 		observeTrace:         cfg.ObserveTrace,

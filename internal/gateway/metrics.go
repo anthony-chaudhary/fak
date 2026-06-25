@@ -397,7 +397,17 @@ func (m *gatewayMetrics) observeInference(promptTok, complTok, cachedTok int, fi
 }
 
 func (s *Server) logInferenceTurn(traceID, wire string, stream bool, usage agent.Usage, finishReason string, dur time.Duration, compacted bool) {
-	if s == nil || s.logf == nil {
+	if s == nil {
+		return
+	}
+	// The per-turn human debug render (#793) fires independently of the JSON --log sink, so
+	// --debug-stats works on a clean (--log off) terminal. It is a no-op unless debugStatsf is
+	// wired, and reuses the #792 rolling health (read-only peek; no double-roll).
+	if s.debugStatsf != nil {
+		s.renderTurnDebugStats(traceID, wire, stream, finishReason,
+			usage.PromptTokens, usage.CompletionTokens, usage.CacheReadInputTokens, usage.CacheCreationInputTokens, compacted)
+	}
+	if s.logf == nil {
 		return
 	}
 	ev := map[string]any{

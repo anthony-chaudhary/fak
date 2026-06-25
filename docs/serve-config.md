@@ -205,6 +205,7 @@ feeds it; unreachable on the shipped binary).
 | `routemanifest` | wired | `--route-manifest` | `RouteManifest` | `internal/gateway/gateway.go:1127` | binds ToolCall.Engine before Submit; flag wired (was DEAD_WIRED before this pass) |
 | `ctxview` | off-by-default (wired) | `--ctx-view-budget` | `CtxViewBudget` | `internal/gateway/gateway.go:807` | re-materializes history as an O(1) planned ctxplan view under the budget; off at 0 |
 | `compacthistory` | off-by-default (wired) | `--compact-history-budget` | `CompactHistoryBudget` | `internal/gateway/messages.go:365` | compacts old turns in the Anthropic outbound body, cache prefix byte-identical; off at 0 |
+| `debugstats` | off-by-default (wired) | `--debug-stats` | `DebugStatsf` | `internal/gateway/metrics.go:404` | emits one compact payload-free per-turn cache/compaction/resetScore line to stderr; off by default |
 | `resetonbudget` | off-by-default (wired) | `--reset-on-budget` | `ResetOnBudget` | `internal/gateway/session_admit.go:108` | distills a carryover seed and continues transparently on budget exhaustion; needs --context-budget-tokens |
 | `budgetwebhook` | off-by-default (wired) | `--budget-webhook` | _(observer seam)_ | `internal/session/usage.go:73` | POSTs a pre-exhaustion warning + exhaustion event; wired via WatchBudget, off when URL empty |
 | `notifier` | wired | `--notify-native / --notify-webhook / --notify-slack` | _(observer seam)_ | `cmd/fak/serve.go (WatchTransitions)` | #761 stop-reason push notifier; native default-on (was DEAD_WIRED before this pass) |
