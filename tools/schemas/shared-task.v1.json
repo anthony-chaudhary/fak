@@ -1,0 +1,27 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "fak/shared-task.v1.json",
+  "title": "Shared Task Record",
+  "type": "object",
+  "required": ["schema", "task_id", "rev", "state", "title", "body_ref", "artifacts", "notes", "open_decisions", "updated_by", "updated_at"],
+  "properties": {
+    "schema": {"type": "string", "const": "fak.shared-task.v1"},
+    "task_id": {"type": "string", "pattern": "^task_[A-Za-z0-9_.-]+$"},
+    "rev": {"type": "string", "pattern": "^sha256:.+"},
+    "state": {"type": "string"},
+    "title": {"type": "string", "minLength": 1},
+    "body_ref": {"$ref": "#/definitions/body_ref"},
+    "artifacts": {"type": "array", "items": {"$ref": "#/definitions/artifact_ref"}},
+    "notes": {"type": "array", "items": {"$ref": "#/definitions/note"}},
+    "open_decisions": {"type": "array", "items": {"$ref": "#/definitions/decision"}},
+    "updated_by": {"$ref": "#/definitions/actor"},
+    "updated_at": {"type": "string"}
+  },
+  "definitions": {
+    "actor": {"type": "object", "required": ["kind", "id"], "properties": {"kind": {"type": "string"}, "id": {"type": "string", "minLength": 1}}},
+    "body_ref": {"type": "object", "required": ["kind", "digest", "bytes", "taint", "scope", "durability"], "properties": {"kind": {"type": "string"}, "digest": {"type": "string", "pattern": "^sha256:.+"}, "bytes": {"type": "integer", "minimum": 0}, "taint": {"type": "string", "enum": ["trusted", "tainted", "quarantined"]}, "scope": {"type": "string", "enum": ["agent", "fleet", "tenant", "public"]}, "durability": {"type": "string", "enum": ["turn", "session", "bounded", "durable"]}, "store": {"type": "string"}, "deletion_certificate": {"type": "string"}}},
+    "artifact_ref": {"type": "object", "required": ["artifact_id", "ref", "media_type", "taint", "scope", "store"], "properties": {"artifact_id": {"type": "string"}, "ref": {"type": "string", "pattern": "^sha256:.+"}, "media_type": {"type": "string"}, "taint": {"type": "string", "enum": ["trusted", "tainted", "quarantined"]}, "scope": {"type": "string", "enum": ["agent", "fleet", "tenant", "public"]}, "store": {"type": "string"}, "deletion_certificate": {"type": "string"}}},
+    "note": {"type": "object", "required": ["note_id", "kind", "body_ref", "author", "created_at"], "properties": {"note_id": {"type": "string"}, "kind": {"type": "string", "enum": ["comment", "progress"]}, "body_ref": {"$ref": "#/definitions/body_ref"}, "author": {"$ref": "#/definitions/actor"}, "created_at": {"type": "string"}}},
+    "decision": {"type": "object", "required": ["decision_id", "state", "reason"], "properties": {"decision_id": {"type": "string"}, "state": {"type": "string"}, "reason": {"type": "string"}}}
+  }
+}

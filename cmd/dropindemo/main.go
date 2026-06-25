@@ -151,7 +151,7 @@ func handleGallery(w http.ResponseWriter, r *http.Request) {
 func main() {
 	const defaultAddr = "127.0.0.1:8154"
 	addr := flag.String("addr", defaultAddr, "listen address")
-	basePath := demoui.BasePathFlag(flag.CommandLine, "/dropindemo")
+	basePath := demoui.BasePathFlag(flag.CommandLine, "/dropin")
 	print := flag.Bool("print", false, "render the drop-in entry-point gallery as a colored table in the TERMINAL (no browser, no port) and exit. The 30-second point with zero setup. Honors NO_COLOR.")
 	selfcheck := flag.Bool("selfcheck", false, "run HEADLESS: resolve every entry point through internal/dropin (the same path the browser drives), assert the documented drop-in invariants, print a witness table, and exit non-zero on any mismatch. No browser, no network — the CI / cross-platform dog-food of this demo's data path.")
 	agent := flag.String("agent", "", "print exactly what `fak guard -- <agent>` would wire for this one agent (the single-agent dry run), then exit. Any command name works, not only the autodetected ones.")

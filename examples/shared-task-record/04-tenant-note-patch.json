@@ -1,0 +1,31 @@
+{
+  "schema": "fak.shared-patch.v1",
+  "task_id": "task_shared_demo",
+  "base_rev": "sha256:taskrev002",
+  "actor": {"kind": "human", "id": "tenant-editor"},
+  "scope": "tenant",
+  "durability": "session",
+  "ops": [
+    {
+      "op": "append",
+      "path": "/notes",
+      "value": {
+        "note_id": "note_tenant_history",
+        "kind": "comment",
+        "body_ref": {
+          "kind": "external",
+          "digest": "sha256:notebodytenant001",
+          "bytes": 128,
+          "taint": "tainted",
+          "scope": "tenant",
+          "durability": "session",
+          "store": "l3-kv",
+          "deletion_certificate": "sha256:deletenote001"
+        },
+        "author": {"kind": "human", "id": "tenant-editor"},
+        "created_at": "2026-06-25T00:04:00Z"
+      }
+    }
+  ],
+  "message": "Add a tenant-scoped note."
+}

@@ -1,0 +1,17 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "fak/shared-artifact-ref.v1.json",
+  "title": "Shared Artifact Ref",
+  "type": "object",
+  "required": ["schema", "artifact_id", "ref", "media_type", "taint", "scope", "store"],
+  "properties": {
+    "schema": {"type": "string", "const": "fak.shared-artifact-ref.v1"},
+    "artifact_id": {"type": "string"},
+    "ref": {"type": "string", "pattern": "^sha256:.+"},
+    "media_type": {"type": "string"},
+    "taint": {"type": "string", "enum": ["trusted", "tainted", "quarantined"]},
+    "scope": {"type": "string", "enum": ["agent", "fleet", "tenant", "public"]},
+    "store": {"type": "string"},
+    "deletion_certificate": {"type": "string"}
+  }
+}

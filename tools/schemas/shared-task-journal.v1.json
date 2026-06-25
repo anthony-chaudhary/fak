@@ -1,0 +1,14 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "fak/shared-task-journal.v1.json",
+  "title": "Shared Task Journal",
+  "type": "object",
+  "required": ["schema", "task_id", "initial", "entries", "digest"],
+  "properties": {
+    "schema": {"type": "string", "const": "fak.shared-task-journal.v1"},
+    "task_id": {"type": "string", "pattern": "^task_[A-Za-z0-9_.-]+$"},
+    "initial": {"type": "object"},
+    "entries": {"type": "array", "items": {"type": "object", "required": ["event", "record"], "properties": {"event": {"type": "object"}, "record": {"type": "object"}, "record_digest": {"type": "string", "pattern": "^sha256:.+"}}}},
+    "digest": {"type": "string", "pattern": "^sha256:.+"}
+  }
+}

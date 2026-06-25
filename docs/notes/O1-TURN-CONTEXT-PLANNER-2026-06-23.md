@@ -110,6 +110,13 @@ dependency-free and builds standalone:
   planning flattens Θ(N²) → Θ(c·N) (`IndexBoundedPlannerCompute`). Pruning is a forecast
   miss, never a lost fact — a pruned span stays demand-pageable and the trust gate still
   guards it.
+- **`Layout`** (`layout.go`) — the flexible O(1) window profile: a caller can independently
+  tune the **base** area (system/developer/task pins), **current** area (newest entry or
+  entries), **recent** area (last *N* entries before current), and **deep** area (old history
+  reached by relevance/durability). Each area has its own `MaxSpans`, optional `MaxTokens`,
+  and precision (`exact`, `planned`, or `pointer`), with a final `MaxCandidates` cap, so
+  user/system policy can choose "more recent verbatim, less deep history" or "deep pointers
+  only" while keeping per-turn planning O(1) and resident bytes under the same `Budget`.
 
 Witness:
 
@@ -181,9 +188,18 @@ never resident; a pin cannot launder poison.
   `ctxplan.Store`, #545); the planned elision now drives a bit-exact KV eviction
   (`kvmmu.ApplyPlan` — an O(1) view becomes an O(1) KV residency, #550); the empirical
   resident-redundancy bench landed (#551); and a guarded agent-loop seam exists
-  (`agent.CtxViewPlanner`, `FAK_CTXPLAN_SEAM`, off by default, #546). The residual is the
-  **gateway**: `fak serve`/`fak guard` does not yet call the planner each turn to replace
-  compaction (filed as #555).
+  (`agent.CtxViewPlanner`, `FAK_CTXPLAN_SEAM`, off by default, #546). The PERSISTENT
+  per-session index now exists on the seam too (`agent.SessionPlanner`,
+  `CtxViewPlanner.NewSession`, #558 half b): it maintains ONE `ctxplan.Index` + lossless
+  store across turns, ingesting only each turn's new spans (O(tokens) per turn) and probing
+  the bounded candidate set (`Index.PlanCells`) instead of rebuilding a fresh store +
+  full-scan every turn — so the Θ(c·N) flatten is real on the loop, not a rebuild-per-turn
+  Θ(N²). The index PERSISTS alongside the recall core image (`ctxplan.IndexImage`,
+  `recall.PersistIndex`/`LoadIndex`, a sibling `index.json` next to `manifest.json`/`cas.json`,
+  #558 half a), so a resumed session re-attaches its index instead of rebuilding it. The
+  residual is the **gateway**: `fak serve`/`fak guard` does not yet thread a per-session
+  planner through each turn to replace compaction (filed as #555, gated on the `req.Raw`
+  passthrough transform — the seam mechanism is wired first, the gateway/`req.Raw` second).
 - **The forecast is authored from the trajectory, not a model.** `ctxplan.TrajectoryAuthor`
   (#556) now AUTHORS `Forecast.Intents` from the recent trajectory (recency-weighted
   content-token recurrence — recurrence dominates, recency breaks near-ties), the

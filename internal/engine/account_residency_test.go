@@ -37,16 +37,22 @@ func TestEngineRouteAgreesWithResidencyFloor(t *testing.T) {
 	}
 }
 
-// TestLocalRoutePrefixWinsOverDeceptiveName pins the correct-by-design collision case
-// the security review flagged: a LOCAL account whose id/upstream happens to contain a
-// remote keyword ("openai") still routes local, because remoteRoute checks the local
-// prefix FIRST and short-circuits. The inverse — a remote account named "local-ish" —
-// is impossible because Validate rejects a reserved-token account id and a remote
-// route always leads with its <kind>: keyword, never the account id.
+// TestLocalRoutePrefixWinsOverDeceptiveName pins both directions of the
+// account-id-vs-locality collision the security review flagged. The route's LEADING
+// prefix is the sole locality signal, and EngineRoute always leads with "local:" (for a
+// local kind) or the validated "<kind>:" keyword (for a remote kind) — never the account
+// id. So the account id's spelling can never flip the floor's decision.
 func TestLocalRoutePrefixWinsOverDeceptiveName(t *testing.T) {
+	// A LOCAL account whose id contains a remote keyword still routes LOCAL.
 	tg := modelroute.Target{Kind: modelroute.KindLocal, Account: "openai-mirror", UpstreamModel: "gpt-clone"}
 	route := tg.EngineRoute() // "local:openai-mirror/gpt-clone"
 	if remoteRoute(route) {
 		t.Fatalf("a local-prefixed route must read as on-box even when it contains 'openai': %q", route)
+	}
+	// A REMOTE account named "local" still routes REMOTE — the openai: kind prefix leads.
+	remote := modelroute.Target{Kind: modelroute.KindOpenAI, Account: "local", UpstreamModel: "gpt-5.5"}
+	rroute := remote.EngineRoute() // "openai:local/gpt-5.5"
+	if !remoteRoute(rroute) {
+		t.Fatalf("a remote account named 'local' must still route remote (kind leads): %q", rroute)
 	}
 }

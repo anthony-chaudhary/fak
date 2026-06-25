@@ -123,7 +123,7 @@ import (
 	// (TL008)). Dormant + abstaining on a clean surface; without this line the
 	// invariant ships dark (the leaf's init() never runs). `fak lint` is the same
 	// rules run out of band.
+	_ "github.com/anthony-chaudhary/fak/internal/a2achan"
 	_ "github.com/anthony-chaudhary/fak/internal/headroom"
 	_ "github.com/anthony-chaudhary/fak/internal/toollint"
-	_ "github.com/anthony-chaudhary/fak/internal/a2achan"
 )

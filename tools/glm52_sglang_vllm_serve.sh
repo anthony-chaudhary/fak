@@ -21,6 +21,9 @@
 # Usage (on the serving node):
 #   ENGINE=sglang bash tools/glm52_sglang_vllm_serve.sh
 #   ENGINE=vllm   bash tools/glm52_sglang_vllm_serve.sh
+#   export GLM52_TOOL_CALL_PARSER=replace-with-parser-name
+#   ENGINE=vllm ENGINE_ARGS="--enable-auto-tool-choice --tool-call-parser ${GLM52_TOOL_CALL_PARSER}" \
+#       bash tools/glm52_sglang_vllm_serve.sh
 # then, once healthy, capture the #130 evidence from any box:
 #   python tools/glm52_serving_witness.py --base-url http://<node>:8000/v1 \
 #       --model zai-org/GLM-5.2 --engine-cache-engine "${ENGINE}"
@@ -46,6 +49,7 @@ TP="${TP:-8}"                       # tensor-parallel size = GPU count
 PORT="${PORT:-8000}"
 CTX="${CTX:-131072}"               # served context; GLM-5.2 supports up to 1M
 PREFLIGHT="${PREFLIGHT:-1}"         # set 0 to bypass the gate (NOT recommended)
+ENGINE_ARGS="${ENGINE_ARGS:-}"      # extra engine-specific flags, recorded in the shell command
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 log(){ echo "[$(date +%T)] $*"; }
@@ -93,6 +97,7 @@ if [ "${ENGINE}" = "sglang" ]; then
     --reasoning-parser glm45 --tool-call-parser glm47 \
     --mem-fraction-static 0.85 \
     ${SG_QFLAGS} \
+    ${ENGINE_ARGS} \
     --speculative-algorithm EAGLE \
     --speculative-num-steps 5 \
     --speculative-eagle-topk 1 \
@@ -112,6 +117,7 @@ else
     --max-model-len "${CTX}" \
     --trust-remote-code \
     ${VL_QFLAGS} \
+    ${ENGINE_ARGS} \
     --host 0.0.0.0 --port "${PORT}" \
     > "${HERE}/glm52-vllm-server.log" 2>&1 &
 fi

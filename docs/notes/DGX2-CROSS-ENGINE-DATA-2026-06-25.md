@@ -1,6 +1,6 @@
 ---
 title: "dgx2 data collection — what runs, how it compares, what's next"
-description: "A run log from the A100-40GB×8 node: the live stock-SGLang Qwen3.6-27B serving numbers measured there, the three real serving/kernel points now on the board with their category boundaries kept honest, why the native fak sweep belongs on the 80GB node, and the prioritized next steps."
+description: "A run log from the datacenter GPU×8 node: the live stock-SGLang Qwen3.6-27B serving numbers measured there, the three real serving/kernel points now on the board with their category boundaries kept honest, why the native fak sweep belongs on the 80GB node, and the prioritized next steps."
 ---
 
 # dgx2 cross-engine data: what runs, how it compares, what's next
@@ -8,7 +8,7 @@ description: "A run log from the A100-40GB×8 node: the live stock-SGLang Qwen3.
 _2026-06-25._ A companion run-log to
 [GLM52-NATIVE-THROUGHPUT-AND-BENCHMARK-PLAN](GLM52-NATIVE-THROUGHPUT-AND-BENCHMARK-PLAN-2026-06-25.md).
 That note set the honest comparison framework and recorded fak's native kernel
-numbers on the 80GB node. This one records **what the 40GB node ("dgx2", A100-SXM4-40GB
+numbers on the 80GB node. This one records **what the 40GB node ("dgx2", datacenter GPU
 ×8) actually has running**, the **real stock-engine serving number measured on it**,
 and the next steps the data points to.
 
@@ -19,7 +19,7 @@ and the next steps the data points to.
 
 ## 1. What is actually running on the 40GB node
 
-A snapshot of the node found all eight A100-40GB GPUs ~92% resident (≈37.7 GB/GPU,
+A snapshot of the node found all eight datacenter GPU GPUs ~92% resident (≈37.7 GB/GPU,
 util 0% — loaded but idle), held by **one process group**:
 
 - **A stock SGLang server in 8-way tensor parallel** (`sglang::scheduler_TP0..TP7`),
@@ -34,7 +34,7 @@ so the native kernel curve belongs there — which is exactly where it already r
 
 ## 2. The number measured on the 40GB node (real serving)
 
-**SGLang stock · `Qwen/Qwen3.6-27B` · A100-40GB×8 (tp8) · bf16 · 256-token completions:**
+**SGLang stock · `Qwen/Qwen3.6-27B` · datacenter GPU×8 (tp8) · bf16 · 256-token completions:**
 
 | metric | value |
 |---|---:|
@@ -50,7 +50,7 @@ clean baseline data point for "what a stock engine does on this hardware class."
 
 ## 3. How the three numbers compare (and why two of them can't be put side by side)
 
-Three serving/kernel numbers now exist on A100-class hardware. **Only same-category
+Three serving/kernel numbers now exist on datacenter GPU-class hardware. **Only same-category
 rows are comparable:**
 
 | source | node | model / weights | precision | decode tok/s | category |

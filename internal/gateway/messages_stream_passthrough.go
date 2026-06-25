@@ -52,6 +52,7 @@ type anthropicPassthrough struct {
 	r        *http.Request
 	req      *agent.AnthropicMessagesRequest
 	reqTrace string
+	turn     servedSessionTurn
 	flusher  http.Flusher
 
 	send       func(string, any)
@@ -68,8 +69,8 @@ type anthropicPassthrough struct {
 	flushedTools bool
 	keptTools    int
 
-	promptTok, complTok, cacheRead int
-	finishReason                   string
+	promptTok, complTok, cacheRead, cacheCreate int
+	finishReason                                string
 }
 
 // start opens the client SSE stream exactly once: it writes the event-stream headers and
@@ -158,7 +159,7 @@ func (p *anthropicPassthrough) onEvent(ev agent.AnthropicSSEEvent) error {
 			p.resultAdms = adms
 		}
 		p.start()
-		p.promptTok, p.cacheRead = anthropicStartUsage(ev.Data)
+		p.promptTok, p.cacheRead, p.cacheCreate = anthropicStartUsage(ev.Data)
 		p.send("message_start", ev.Data)
 		// The model is about to read a quarantine stub where an inbound tool result
 		// was paged out — say so in-band, as a LEADING text block, before its prose.
@@ -256,7 +257,7 @@ func (p *anthropicPassthrough) onEvent(ev agent.AnthropicSSEEvent) error {
 // error). It returns false ONLY when the upstream stream never opened and NOTHING was
 // written to the client — so the caller can fall back to the buffered path with exactly
 // one upstream generation having been attempted.
-func (s *Server) streamAnthropicPassthroughLive(w http.ResponseWriter, r *http.Request, req *agent.AnthropicMessagesRequest, reqTrace, upstreamKey, upstreamBeta string) bool {
+func (s *Server) streamAnthropicPassthroughLive(w http.ResponseWriter, r *http.Request, req *agent.AnthropicMessagesRequest, reqTrace string, sessionTurn servedSessionTurn, upstreamKey, upstreamBeta string) bool {
 	hp, ok := s.planner.(*agent.HTTPPlanner)
 	if !ok {
 		return false
@@ -267,7 +268,7 @@ func (s *Server) streamAnthropicPassthroughLive(w http.ResponseWriter, r *http.R
 	}
 
 	p := &anthropicPassthrough{
-		s: s, w: w, r: r, req: req, reqTrace: reqTrace, flusher: flusher,
+		s: s, w: w, r: r, req: req, reqTrace: reqTrace, turn: sessionTurn, flusher: flusher,
 		passIdx: map[int]int{},
 		toolBuf: map[int]*sseToolAccum{},
 	}
@@ -296,6 +297,12 @@ func (s *Server) streamAnthropicPassthroughLive(w http.ResponseWriter, r *http.R
 	}
 	if p.started {
 		s.metrics.observeInference(p.promptTok, p.complTok, p.cacheRead, p.finishReason, time.Since(began))
+		s.debitServedSessionTurn(r.Context(), p.turn, agent.Usage{
+			PromptTokens:             p.promptTok,
+			CompletionTokens:         p.complTok,
+			CacheReadInputTokens:     p.cacheRead,
+			CacheCreationInputTokens: p.cacheCreate,
+		})
 		return true
 	}
 	// StreamAnthropicRaw returned nil but produced no events (no message_start) — treat
@@ -376,20 +383,21 @@ func relayMessageDelta(send func(string, any), data json.RawMessage, complTok in
 	return complTok, finish
 }
 
-// anthropicStartUsage extracts the input + cache-read token counts from a message_start
+// anthropicStartUsage extracts the input/cache token counts from a message_start
 // event's usage block (Anthropic reports input_tokens as the uncached remainder and
-// cache_read_input_tokens separately), for inference metrics.
-func anthropicStartUsage(data json.RawMessage) (input, cacheRead int) {
+// cache_read/cache_creation separately), for inference metrics and session budgets.
+func anthropicStartUsage(data json.RawMessage) (input, cacheRead, cacheCreate int) {
 	var ms struct {
 		Message struct {
 			Usage struct {
-				InputTokens          int `json:"input_tokens"`
-				CacheReadInputTokens int `json:"cache_read_input_tokens"`
+				InputTokens              int `json:"input_tokens"`
+				CacheReadInputTokens     int `json:"cache_read_input_tokens"`
+				CacheCreationInputTokens int `json:"cache_creation_input_tokens"`
 			} `json:"usage"`
 		} `json:"message"`
 	}
 	if json.Unmarshal(data, &ms) != nil {
-		return 0, 0
+		return 0, 0, 0
 	}
-	return ms.Message.Usage.InputTokens, ms.Message.Usage.CacheReadInputTokens
+	return ms.Message.Usage.InputTokens, ms.Message.Usage.CacheReadInputTokens, ms.Message.Usage.CacheCreationInputTokens
 }

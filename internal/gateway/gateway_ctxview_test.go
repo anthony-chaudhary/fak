@@ -53,12 +53,12 @@ func TestCtxViewOffIsByteForByteUnchanged(t *testing.T) {
 
 	// The default, disabled state: no planner wired at all.
 	off := &Server{} // ctxView == nil
-	if got := off.maybePlanMessages(ctx, in); !reflect.DeepEqual(got, in) {
+	if got := off.maybePlanMessages(ctx, "t1", in); !reflect.DeepEqual(got, in) {
 		t.Fatalf("OFF (nil planner) must return the input byte-for-byte unchanged: got %+v want %+v", got, in)
 	}
 	// An explicitly disabled planner is the same inert identity.
 	disabled := &Server{ctxView: &agent.CtxViewPlanner{Enabled: false, Budget: 1024}}
-	if got := disabled.maybePlanMessages(ctx, in); !reflect.DeepEqual(got, in) {
+	if got := disabled.maybePlanMessages(ctx, "t1", in); !reflect.DeepEqual(got, in) {
 		t.Fatalf("a disabled planner must be an identity: got %+v want %+v", got, in)
 	}
 }
@@ -76,7 +76,7 @@ func TestCtxViewOnRewritesHistoryUnderBudget(t *testing.T) {
 	}
 	session := ctxViewSession()
 
-	planned := on.maybePlanMessages(ctx, session)
+	planned := on.maybePlanMessages(ctx, "session-A", session)
 
 	// The rewrite happened: the planned history differs from the full transcript.
 	if reflect.DeepEqual(planned, session) {
@@ -101,5 +101,59 @@ func TestCtxViewOnRewritesHistoryUnderBudget(t *testing.T) {
 	if messageTokens(session) <= budget {
 		t.Fatalf("test session must exceed the budget for the rewrite to be meaningful: full=%d budget=%d",
 			messageTokens(session), budget)
+	}
+}
+
+// TestSessionPlannerPathMatchesStateless is the equivalence witness at the GATEWAY seam: a
+// keyed request (the per-session incremental planner, O(c·N)) renders the SAME history a
+// trace-less request (the stateless full-scan, O(N²)) does, for the same budget. The cost
+// changed; the output did not. (The deeper per-turn equivalence is proven in
+// internal/agent/ctxplan_session_test.go; this pins it at the gateway's own hook.)
+func TestSessionPlannerPathMatchesStateless(t *testing.T) {
+	ctx := context.Background()
+	const budget = 28
+	session := ctxViewSession()
+
+	stateless := &Server{ctxView: &agent.CtxViewPlanner{Enabled: true, Budget: budget}, logf: func(string, ...any) {}}
+	keyed := &Server{ctxView: &agent.CtxViewPlanner{Enabled: true, Budget: budget}, logf: func(string, ...any) {}}
+
+	want := stateless.maybePlanMessages(ctx, "", session)   // empty trace -> stateless path
+	got := keyed.maybePlanMessages(ctx, "trace-X", session) // keyed -> per-session planner
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("per-session path must match the stateless path:\n got=%+v\nwant=%+v", got, want)
+	}
+}
+
+// TestSessionPlannersDoNotCrossContaminate: two distinct traces get independent persistent
+// planners — feeding session B's turns to trace "b" never pollutes trace "a"'s view. The
+// per-session index is the whole point; a shared/stateless instance would cross sessions.
+func TestSessionPlannersDoNotCrossContaminate(t *testing.T) {
+	ctx := context.Background()
+	const budget = 28
+	s := &Server{ctxView: &agent.CtxViewPlanner{Enabled: true, Budget: budget}, logf: func(string, ...any) {}}
+
+	sessionA := ctxViewSession()
+	sessionB := []agent.Message{
+		{Role: agent.RoleSystem, Content: "You are a billing agent."},
+		{Role: agent.RoleUser, Content: "summarize the invoice disputes from last quarter"},
+		{Role: agent.RoleTool, Name: "Read", Content: "dispute log: 14 open, 3 escalated, 2 refunded"},
+	}
+
+	// Drive trace "b" first so its planner is populated, then assert trace "a" still renders
+	// from A's history alone (a fresh per-session planner, not B's index).
+	_ = s.maybePlanMessages(ctx, "b", sessionB)
+	gotA := s.maybePlanMessages(ctx, "a", sessionA)
+
+	// A reference server that only ever saw A reproduces the same A-view — proof "a" was not
+	// contaminated by B's prior turns.
+	ref := &Server{ctxView: &agent.CtxViewPlanner{Enabled: true, Budget: budget}, logf: func(string, ...any) {}}
+	wantA := ref.maybePlanMessages(ctx, "a", sessionA)
+	if !reflect.DeepEqual(gotA, wantA) {
+		t.Fatalf("trace 'a' view was contaminated by trace 'b':\n got=%+v\nwant=%+v", gotA, wantA)
+	}
+
+	// And the two traces hold distinct planners.
+	if s.sessionPlannerFor("a") == s.sessionPlannerFor("b") {
+		t.Fatal("distinct traces must hold distinct per-session planners")
 	}
 }

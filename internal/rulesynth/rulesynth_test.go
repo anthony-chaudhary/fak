@@ -11,11 +11,12 @@ import (
 var guarded = []string{"internal/adjudicator/", "internal/abi/", "dos.toml"}
 
 // TestDetectFlagsUnrecognizedWriteAsNearMiss: a write reaching a guarded tree by a verb
-// the floor does NOT recognize (`ruby -e 'File.write(...)'` — only `ruby -i` is in
-// shellWriteVerbs) slips the floor, so Detect captures it as a near-miss.
+// the floor does NOT recognize (`php -r 'file_put_contents(...)'`; `ruby -e` was the
+// prior allele, now closed in interpreterEvalFlags) slips the floor, so Detect captures
+// it as a near-miss.
 func TestDetectFlagsUnrecognizedWriteAsNearMiss(t *testing.T) {
 	c := Call{Tool: "Bash", Arg: "command",
-		Command: `ruby -e 'File.write("internal/adjudicator/decide.go","x")'`}
+		Command: `php -r 'file_put_contents("internal/adjudicator/decide.go", $x);'`}
 	nm, ok := Detect(c, guarded)
 	if !ok {
 		t.Fatalf("expected a near-miss for an unrecognized write verb into a guarded tree")
@@ -37,7 +38,7 @@ func TestDetectIgnoresRecognizedWrite(t *testing.T) {
 // TestDetectIgnoresUnguardedCommand: a write by an unrecognized verb that touches NO
 // guarded tree is out of scope — there is nothing to guard.
 func TestDetectIgnoresUnguardedCommand(t *testing.T) {
-	c := Call{Tool: "Bash", Arg: "command", Command: `ruby -e 'File.write("/tmp/out.txt","x")'`}
+	c := Call{Tool: "Bash", Arg: "command", Command: `php -r 'file_put_contents("/tmp/out.txt", $x);'`}
 	if _, ok := Detect(c, guarded); ok {
 		t.Fatalf("a write that names no guarded tree must not be a near-miss")
 	}

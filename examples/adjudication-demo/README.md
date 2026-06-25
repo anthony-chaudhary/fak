@@ -26,24 +26,28 @@ This demo drives a **real local model** behind `fak serve` and shows both sides:
 ## Prerequisites
 
 - **Go** (to build `fak`), **[ollama](https://ollama.com)**, and **Python 3** (stdlib only).
-- A **tool-capable** local model — the launcher pulls `qwen2.5:14b` (~9 GB) on first run;
-  override with `FAK_DEMO_MODEL`. ("Tool-capable" = the model can emit OpenAI tool calls.)
+- A **tool-capable** local model — the launcher pulls `qwen2.5:7b` (~5 GB) on first run
+  unless you override `FAK_DEMO_MODEL`. ("Tool-capable" = the model can emit OpenAI tool calls.)
 
 ## Run it
 
 ```bash
 ./examples/adjudication-demo/run.sh            # build kernel, serve a model, run the demo
 ./examples/adjudication-demo/run.sh --dry-run  # show verdicts without executing anything
-FAK_DEMO_MODEL=qwen2.5:7b ./examples/adjudication-demo/run.sh   # smaller/faster model
+FAK_DEMO_MODEL=qwen2.5:14b ./examples/adjudication-demo/run.sh  # stronger/larger model
 ```
 
 `run.sh` tears down everything *it* started (kernel, and ollama if it had to launch it).
 
-> **Runtime & determinism.** The first run pulls `qwen2.5:14b` (~9 GB), which **takes
-> minutes**; after that a full run **takes a few seconds to a couple of minutes** of
-> local inference (hardware-dependent). Because a *real model* proposes the calls, its
-> proposals vary run to run — but the **kernel's verdicts are deterministic**: the same
-> `(policy, proposed call)` always yields the same ALLOW/DENY.
+**Runtime & determinism.** The first run pulls `qwen2.5:7b` (~5 GB) unless you choose
+another `FAK_DEMO_MODEL`, which **takes minutes**; after that a full run usually
+**completes in 30 seconds to 2 minutes** of local inference, depending on hardware and
+model size. Because a *real model* proposes the calls, its proposals vary run to run —
+but the **kernel's verdicts are deterministic**: the same `(policy, proposed call)`
+always yields the same ALLOW/DENY.
+
+Windows users: run the `.sh` launcher from WSL or Git Bash; the demo itself is
+plain `fak serve` plus stdlib Python and Ollama, and there is no native `.ps1` wrapper yet.
 
 ## What you see
 

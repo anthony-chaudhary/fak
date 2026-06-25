@@ -12,13 +12,13 @@ description: "How fak's fused KV cache compares to vLLM, SGLang, llama.cpp and p
 
 ## Executive Summary
 
-| Approach | Multi-Agent | Cross-Worker | Cross-Session | Infrastructure Efficiency | When It Wins |
-|----------|-------------|--------------|---------------|---------------------------|--------------|
-| **Server-Side Only** (Anthropic/OpenAI) | ❌ | ❌ | ❌ | Baseline | Single-agent, single-session |
-| **Per-Session Frameworks** (vLLM, SGLang, llama.cpp) | ❌ | ❌ | Limited | 1x vs naive | Single-agent, multi-turn |
-| **fak Fused** | ✅ | ✅ | ✅ | **20-24x vs naive** | Multi-agent fleets, shared context |
+| Approach | Multi-Agent | Cross-Worker | Cross-Session | Prefix reuse (vs a *tuned* engine) | When It Wins |
+|----------|-------------|--------------|---------------|------------------------------------|--------------|
+| **Server-Side Only** (Anthropic/OpenAI) | ❌ | ❌ | ❌ | Intra-session prompt caching | Single-agent, single-session |
+| **Per-Session Frameworks** (vLLM APC, SGLang, llama.cpp) | ❌ | ❌ | Limited | Per-instance prefix-once — **≈ matches fak within one instance** | Single-agent, multi-turn |
+| **fak Fused** | ✅ | ✅ | ✅ | **+ cross-worker/session sharing: ~1.1–1.2× at 4 workers (2k prefix), rising toward the agent count as the shared-prefix fraction grows** | Multi-agent fleets, shared context |
 
-**Bottom line:** fak's value stack delivers **20-24x infrastructure cost reduction** vs naive re-prefill and **1.13-1.22x cross-worker reuse** — benefits that multiply with fleet size.
+**Bottom line.** The realistic SOTA here is a *tuned* prefix-caching engine (vLLM Automatic Prefix Caching, SGLang RadixAttention, provider prompt caching, llama.cpp `seq_cp`) — it already prefills a shared prefix once per instance and batches decode, so on raw within-instance work it is **~parity with fak**. fak's *incremental* infra win over that SOTA is **cross-worker / cross-session prefix sharing — ~1.1–1.2× at 4 workers on a small 2k prefix, climbing toward the agent count as the shared-prefix fraction grows** — plus addressable mid-run eviction and a default-deny safety floor those engines structurally don't offer. The eye-catching **20–24× is only versus a *naive* re-prefill-every-turn loop — a worst case no serving stack ships, and never the SOTA comparison.**
 
 ---
 
@@ -186,6 +186,12 @@ Total cached: 5,000 + 100×500 = 55,000 tokens (10x less)
 - **B/C (Cross-Worker Reuse):** Shared prefix gives 1.22x benefit at 4 workers (the value stack)
 - **A/B (Turn-Tax):** 19.7x — re-prefill vs KV persistence, worker-independent
 
+> **Which of these is the SOTA comparison? Only B/C.** A/C and A/B are measured against the *naive*
+> re-prefill loop — a worst case no serving stack ships. A tuned prefix-caching engine (vLLM APC,
+> SGLang RadixAttention, provider prompt caching) eliminates the *same* turn-tax fak does, so against
+> that SOTA fak's incremental infra win is the **cross-worker / cross-session B/C reuse** (1.1–1.2×
+> at 4 workers on a 2k prefix, larger as the shared-prefix fraction grows), **not** the 20–24× floor.
+
 ### Cost Comparison (Claude 4.5 Opus at $3/M input)
 
 | Approach | Input Tokens | Cost |
@@ -194,9 +200,9 @@ Total cached: 5,000 + 100×500 = 55,000 tokens (10x less)
 | Per-Agent KV | 211.6K | $0.63 |
 | **fak Fused** | **174.1K** | **$0.52** |
 
-**Per benchmark run:** fak saves $11.99 vs naive
+**Per benchmark run (vs the realistic SOTA):** against a warm per-agent KV cache fak saves **$0.11** (the cross-worker shared-prefix delta at 4 workers). The **$11.99 "vs naive"** figure is vs the re-prefill-every-turn floor a tuned engine already eliminates — not a SOTA comparison.
 
-**At scale (500 instances):** fak saves ~$2,000 per run
+**At scale (500 instances):** the cross-worker delta grows with the shared-prefix fraction and agent count (see the B/C trend), not the naive multiple.
 
 ---
 
@@ -222,11 +228,11 @@ Total cached: 5,000 + 100×500 = 55,000 tokens (10x less)
 
 ### When fak Provides the MOST Value
 
-| Pattern | Multiplier |
-|---------|------------|
-| Multi-agent + high-turn (50×5 agents, 50 turns each) | **60.3×** vs naive |
-| Fan-out (N=1024 sub-agents) | **72.8×** parallel speedup |
-| Fleet-scale (100+ agents) | **1.13-1.22x** cross-worker reuse |
+| Pattern | vs tuned warm-cache SOTA (the honest number) | (vs naive floor — not SOTA) |
+|---------|----------------------------------------------|------------------------------|
+| Multi-agent + high-turn (50×5 agents, 50 turns each) | **~4.1×** | 60.3× |
+| Fan-out (N=1024 sub-agents) | shared-prefix reuse; ~parity throughput vs a batched engine | 72.8× parallel-vs-serial (a fleet metric, not a SOTA win) |
+| Fleet-scale (100+ agents) | **1.13–1.22×** cross-worker reuse (rises with shared-prefix fraction) | — |
 
 ---
 
@@ -240,8 +246,8 @@ Total cached: 5,000 + 100×500 = 55,000 tokens (10x less)
 | **Cross-session persistence** | ❌ | ❌ | ✅ |
 | **Shared prefix** | Per-session | Per-instance | **Global** |
 | **Addressable eviction** | ❌ | Limited | ✅ |
-| **Cache efficiency vs naive** | 1x | 5-10x | **20-24x** |
-| **Cross-worker reuse** | 0% | 0% | **1.13-1.22x** |
+| **Prefix-once vs naive re-prefill** (floor; a tuned engine matches fak) | 1× | ~7.5×+ | ~7.5×+ |
+| **Cross-worker reuse** (the real delta vs a tuned engine) | 0% | 0% | **1.13–1.22×** |
 | **Fan-out support** | ❌ | ❌ | ✅ (N=1024 measured) |
 | **Safety floor** | ❌ | ❌ | ✅ (quarantine, deny) |
 
@@ -255,7 +261,7 @@ Total cached: 5,000 + 100×500 = 55,000 tokens (10x less)
 | Per-session (vLLM) | 2M×100 agents | **$600** |
 | **fak Fused** | **500K×100 agents** | **$150** |
 
-**Savings:** fak saves $2,850 vs naive, $450 vs per-session — on **one benchmark run**.
+**Savings:** measured against the realistic SOTA — a tuned per-session prefix-caching engine (vLLM) — fak saves **$450 on one benchmark run** from cross-worker/session sharing. (Against server-side-only caching it is $2,850; there is no naive re-prefill row here — that floor would be larger still and is not the SOTA comparison.)
 
 ---
 

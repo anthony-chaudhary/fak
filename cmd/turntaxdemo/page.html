@@ -199,7 +199,7 @@ const WHAT = {
 };
 
 async function loadSuites(){
-  const r = await fetch('/api/suites'); const j = await r.json();
+  const r = await fetch('api/suites'); const j = await r.json();
   const sel = $('#suite'); sel.innerHTML='';
   j.suites.forEach(s=>{
     const o=document.createElement('option');
@@ -314,7 +314,7 @@ async function run(){
   const suite=$('#suite').value, lat=$('#lat').value;
   const stopWait=startWait();
   try{
-    const r=await fetch(`/api/run?suite=${encodeURIComponent(suite)}&latency_ms=${lat}`);
+    const r=await fetch(`api/run?suite=${encodeURIComponent(suite)}&latency_ms=${lat}`);
     if(!r.ok){ stopWait(); $('#cfg').textContent='error: '+await r.text(); return; }
     const j=await r.json(); lastRun=j;
     stopWait();

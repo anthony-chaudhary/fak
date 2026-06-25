@@ -92,6 +92,36 @@ fak guard --provider openai -- codex            # an OpenAI-compatible coding ag
 fak guard --policy my-floor.json -- claude      # enforce your own reviewed allow-list
 ```
 
+### Long-context reset budget
+
+`fak guard` can also seed a stable served-session budget for wrapped Claude Code:
+
+```bash
+fak guard --context-budget-tokens 150000 --reset-on-budget -- claude
+```
+
+The gateway uses a stable default trace id (`guard`) for child requests that do not send
+`X-Trace-Id`, then debits the normalized provider context usage after each served turn
+(`input_tokens` plus Anthropic cache read/write counters). With `--reset-on-budget`, when
+the budget is exhausted the gateway mints a continuation id, distills the refused
+transcript into a carryover seed, re-arms the continuation trace with a fresh 150k budget,
+and retries the live request under that new trace.
+
+Without `--reset-on-budget`, the session moves to draining and the next request receives
+`409` with the normal `error` envelope plus `session.continuation_id` and a `reset`
+directive:
+`restart_fresh_session`, dump the session image, start a fresh process, rehydrate the
+planned view, and reuse provider cache only where legal.
+
+The transparent reset is an in-gateway re-arm, not an OS-process kill switch. A wrapper
+that wants a hard child-process relaunch should use the 409 directive mode, persist the
+session image, and start a fresh Claude process under the new window id.
+
+For a cooperative MCP wrapper, use `fak_session_reset` instead of waiting for a proxied
+request boundary. Pass the trace id, the wrapper's observed `context_tokens`, and the
+messages to distill; fak debits the budget, accepts only a budget-drained session, and
+returns `seed_messages` plus the fresh continuation trace for the new Claude window.
+
 ### OpenCode
 
 [OpenCode](https://opencode.ai) speaks the OpenAI-compatible wire, so guard fronts it the

@@ -148,7 +148,7 @@ const tps=(dec,ms)=>ms>0?dec/(ms/1000):0;
 const tpsFmt=v=>v>=1000?(v/1000).toFixed(1)+"k tok/s":Math.round(v)+" tok/s";
 let scenarios=[], cur=null, toolColors={}, hwSummary="";
 
-fetch("/api/scenarios").then(r=>r.json()).then(d=>{
+fetch("api/scenarios").then(r=>r.json()).then(d=>{
   scenarios=d.scenarios||[];
   $("gmxPill").textContent="GOMAXPROCS "+d.gomaxprocs;
   const hw=d.hardware||{}; hwSummary=hw.summary||"";
@@ -226,7 +226,7 @@ function resetRace(){
 $("raceBtn").onclick=()=>{
   if(!cur)return; if(es)es.close();
   resetRace();$("raceBtn").disabled=true;
-  const url="/api/race?scenario="+encodeURIComponent(cur.scenario.id)+"&model="+encodeURIComponent($("model").value||"");
+  const url="api/race?scenario="+encodeURIComponent(cur.scenario.id)+"&model="+encodeURIComponent($("model").value||"");
   es=new EventSource(url);
   es.onmessage=ev=>{
     const e=JSON.parse(ev.data);appendLog(e);

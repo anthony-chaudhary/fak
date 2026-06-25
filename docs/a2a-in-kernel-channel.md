@@ -108,6 +108,27 @@ surfaces. Request/reply (correlated `Send` + a reply channel) and shared-state (
 existing `Ref` CAS pool) are the natural further options; they compose from the same
 primitives.
 
+## Where it sits in the shared-state ladder
+
+`a2achan` is the **live message** rung of fak's shared-state story. It proves that
+an addressed value can move between agents under the same floor as a tool call. It
+does **not** by itself make a mutable shared whiteboard, durable mailbox, or
+collaborative editor.
+
+The next rungs add separate contracts:
+
+- a live shared object needs a stable object name, version base, and deterministic
+  update/conflict rule;
+- a durable handoff needs a session-image-backed mailbox or task store so a
+  `Session`/`Window` message survives a process boundary;
+- a disaggregated tier needs digest/provenance/deletion witnesses over bytes held
+  outside this process or engine;
+- a user-level collaborative surface needs human-authored patches with base
+  digests, scope, durability, and typed conflicts.
+
+See [Shared state ladder](shared-state-ladder.md) for the vocabulary that keeps
+those layers separate.
+
 ## Try it (no key, no model)
 
 ```bash

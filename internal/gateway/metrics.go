@@ -943,10 +943,13 @@ func requestTraceID(r *http.Request) string {
 	return strings.TrimSpace(r.Header.Get(traceHeader))
 }
 
-func useHTTPTrace(w http.ResponseWriter, r *http.Request, preferred string) string {
+func (s *Server) useHTTPTrace(w http.ResponseWriter, r *http.Request, preferred string) string {
 	traceID := strings.TrimSpace(preferred)
 	if traceID == "" {
 		traceID = requestTraceID(r)
+	}
+	if traceID == "" && s != nil {
+		traceID = s.traceFor("")
 	}
 	if traceID != "" {
 		r.Header.Set(traceHeader, traceID)

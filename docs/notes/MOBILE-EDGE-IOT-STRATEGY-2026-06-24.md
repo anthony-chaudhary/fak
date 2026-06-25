@@ -22,7 +22,7 @@ framework, MLC, llama.cpp, ONNX Runtime. Sell them the half of the on-device-age
 stack those platforms deliberately left thin. That half is an adversarial
 capability gate the model can't argue past, plus a tamper-evident audit trail that
 already matches the law landing in August 2026. It is pure-Go, CPU-only, ~13 MB,
-and runs the same on a Raspberry Pi as on a DGX. The compute half is not fak's
+and runs the same on a Raspberry Pi as on a GPU server. The compute half is not fak's
 fight, and the strategy below never pretends it is.
 
 This note is honest about the gap. fak's security, audit, and gate story is

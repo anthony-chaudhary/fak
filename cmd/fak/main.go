@@ -14,12 +14,14 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
 	"io"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -39,6 +41,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/policy"
 	"github.com/anthony-chaudhary/fak/internal/ratelimit"
 	"github.com/anthony-chaudhary/fak/internal/session"
+	"github.com/anthony-chaudhary/fak/internal/sessionreset"
 	"github.com/anthony-chaudhary/fak/internal/tokenizer"
 	"github.com/anthony-chaudhary/fak/internal/toollint"
 	"github.com/anthony-chaudhary/fak/internal/turnbench"
@@ -70,6 +73,8 @@ func main() {
 		cmdRecall(os.Args[2:])
 	case "session":
 		cmdSession(os.Args[2:])
+	case "task":
+		cmdTask(os.Args[2:])
 	case "snapshot":
 		cmdSnapshot(os.Args[2:])
 	case "dream":
@@ -112,6 +117,8 @@ func main() {
 		cmdRoute(os.Args[2:])
 	case "routebench":
 		cmdRoutebench(os.Args[2:])
+	case "accounts":
+		cmdAccounts(os.Args[2:])
 	case "version", "-v", "--version":
 		fmt.Println(appversion.Current())
 	case "-h", "--help", "help":
@@ -182,6 +189,12 @@ func usage() {
                   end to end — no key, no GPU, no network. Default: the built-in
                   8-case demo corpus + DefaultManifest vs a one-frontier-model
                   baseline. Every figure is a ROUGH lens, never a bill or SLA)
+  fak accounts  <list|resolve|discover|validate> [--registry FILE] [--home DIR] [--json]
+                (the CONFIG-HOME REGISTRY: every CLAUDE_CONFIG_DIR seat with its
+                 DISK-TRUE identity (a dir named for one account but logged into
+                 another is FLAGGED), plus tombstone -> auto-rehome so anything
+                 pinned to a retired seat resolves to a live one. resolve <name>
+                 prints the config dir to use, following the rehome chain)
   fak lint      [--json] [--strict] [--kernel-only]
                 (the STATIC TOOL LINTER: the definition-time dual of the kernel's
                  call-time re-checks. Reports a dead cache hint, an unreachable pure
@@ -246,13 +259,18 @@ func usage() {
                  --cmd html emits a self-contained static HTML inspection report — the
                  shareable artifact a teammate opens in a browser)
   fak session   ls | status <id> | stop <id> | pause <id> | resume <id> | throttle <id> |
-                run <id> <state> | budget <id> [--turns N] | pace <id> [--max-tokens N] |
+                run <id> <state> | budget <id> [--turns N] [--tokens N] [--context-tokens N] |
+                pace <id> [--max-tokens N] |
                 priority <id> <N>   [--addr URL] [--key K] [--if-rev N] [--json]
                 (the OPERATOR control surface: read a served session's live DRIVE state
                  and CANCEL or UPDATE it in flight, over the /v1/fak/session(s) routes)
+  fak task      sample [--json] [--done N --total N --unit UNIT]
+                (the PROCESS-LOCAL TASK MANAGER snapshot: current hardware/runtime
+                 sample plus task/step/concept progress and ETA when progress is known)
   fak serve     [--addr 127.0.0.1:8080 | --stdio]
                 [--provider openai|anthropic|gemini|xai --base-url URL --model M --api-key-env VAR]
                 [--engine inkernel] [--gguf FILE] [--policy FILE] [--policy-check] [--require-key-env VAR] [--vdso=true]
+                [--session-id ID --context-budget-tokens N [--reset-on-budget]]
                 [--invalidation global|namespace|resource]
                 [--engine-cache-engine sglang|vllm --engine-cache-base-url URL --engine-cache-admin-key-env VAR]
                 [--engine-cache-require-exact-span]
@@ -269,8 +287,9 @@ func usage() {
                  tool result, before the upstream turn. --engine-cache-require-exact-span
                  fails closed instead of using a whole-cache reset fallback. --stdio serves MCP (fak_adjudicate /
                  fak_syscall / fak_admit / fak_changes / fak_revoke /
-                 fak_context_change) over stdin/stdout)
+                 fak_session_reset / fak_context_change) over stdin/stdout)
   fak guard     [--provider anthropic|openai|gemini|xai] [--base-url URL] [--policy FILE]
+                [--session-id ID --context-budget-tokens N [--reset-on-budget]]
                 [--api-key-env VAR] [--env VAR] [--audit FILE|off] [--no-audit] [--dump-policy] [--quiet] -- <agent command...>
                 (RUN YOUR REAL AGENT THROUGH THE KERNEL: the one-command front door.
                  Starts the gateway in-process on a private loopback port, injects its
@@ -654,6 +673,103 @@ func listSessions(_ context.Context) []gateway.SessionState {
 	return out
 }
 
+// decideSession is the served request-boundary hook: it applies session.Table.Decide
+// to the process-local DRIVE table so served model requests honor run-state,
+// turn-budget, token-budget, and pace controls before the upstream request runs.
+func decideSession(_ context.Context, traceID string) gateway.SessionVerdict {
+	return toGatewaySessionVerdict(serveSessions.Decide(strings.TrimSpace(traceID)))
+}
+
+// debitSession records post-response token usage for a served request. The next
+// Decide observes normal token-budget exhaustion at the following turn boundary;
+// context-budget exhaustion drains immediately with a continuation id.
+func debitSession(_ context.Context, traceID string, usage gateway.SessionUsage) gateway.SessionState {
+	return toGatewaySessionState(serveSessions.DebitUsage(strings.TrimSpace(traceID), session.Usage{
+		OutputTokens:  usage.CompletionTokens,
+		ContextTokens: usage.ContextTokens,
+	}))
+}
+
+// resetServedSessionOnBudget is the host-owned "human-like reset" hook the gateway
+// calls after a context-budget drain. It distills the refused request transcript into
+// a compact carryover seed, re-arms the continuation trace with a fresh context budget,
+// and hands both back to the gateway so the live request can continue transparently.
+func resetServedSessionOnBudget(freshContextTokens int) gateway.ResetOnBudgetFunc {
+	if freshContextTokens <= 0 {
+		return nil
+	}
+	return func(_ context.Context, traceID string, messages []agent.Message) (string, []agent.Message, bool) {
+		traceID = strings.TrimSpace(traceID)
+		st := serveSessions.Get(traceID)
+		child := strings.TrimSpace(st.ContinuationID)
+		if traceID == "" || child == "" {
+			return "", nil, false
+		}
+		seed := sessionreset.BuildSeed(sessionreset.Input{
+			Trace:          traceID,
+			Messages:       resetMsgs(messages),
+			FreshBudgetTok: freshContextTokens,
+		})
+		if strings.TrimSpace(seed.Recap) == "" {
+			return "", nil, false
+		}
+		serveSessions.Recontinue(traceID, child, session.Budget{
+			TurnsLeft:         session.Unbounded,
+			TokensLeft:        session.Unbounded,
+			ContextTokensLeft: freshContextTokens,
+		})
+		return child, []agent.Message{{Role: agent.RoleSystem, Content: seed.Recap}}, true
+	}
+}
+
+func resetMsgs(messages []agent.Message) []sessionreset.Msg {
+	out := make([]sessionreset.Msg, 0, len(messages))
+	for _, m := range messages {
+		out = append(out, sessionreset.Msg{Role: m.Role, Content: m.Content})
+	}
+	return out
+}
+
+// budgetWebhookObserver returns the session.BudgetObserver that wires the operator
+// webhook (#743): it POSTs each pre-exhaustion warning and each exhaustion (reset-trigger)
+// event to rawURL as JSON, so an external monitor is notified BEFORE a served session
+// drains, not only after. It is fire-and-forget and fail-open — the POST runs on its own
+// goroutine under a short timeout, and any transport error is logged to stderr but never
+// blocks or fails the served turn that produced the event. An empty URL returns nil (the
+// no-op seam: behavior is byte-identical to today).
+func budgetWebhookObserver(rawURL string) session.BudgetObserver {
+	rawURL = strings.TrimSpace(rawURL)
+	if rawURL == "" {
+		return nil
+	}
+	ua := "fak/" + appversion.Current()
+	client := &http.Client{Timeout: 5 * time.Second}
+	return func(ev session.BudgetEvent) {
+		body, err := json.Marshal(ev)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "fak: budget webhook encode failed: %v\n", err)
+			return
+		}
+		go func() {
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			req, err := http.NewRequestWithContext(ctx, http.MethodPost, rawURL, bytes.NewReader(body))
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "fak: budget webhook build failed: %v\n", err)
+				return
+			}
+			req.Header.Set("Content-Type", "application/json")
+			req.Header.Set("User-Agent", ua)
+			resp, err := client.Do(req)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "fak: budget webhook POST to %s failed: %v\n", rawURL, err)
+				return
+			}
+			_ = resp.Body.Close()
+		}()
+	}
+}
+
 // controlSession is the write side of /v1/fak/session (#620): it applies one control
 // verb (run|budget|pace|priority) to a live session's DRIVE state. The (ok=false,
 // err=nil) return is a terminal/CAS refusal (the route maps it to 409); a non-nil
@@ -693,7 +809,11 @@ func applySessionControl(tbl *session.Table, traceID, verb string, req gateway.S
 		if req.Budget == nil {
 			return session.State{}, false, errors.New("budget is required")
 		}
-		b := session.Budget{TurnsLeft: req.Budget.TurnsLeft, TokensLeft: req.Budget.TokensLeft}
+		b := session.Budget{
+			TurnsLeft:         req.Budget.TurnsLeft,
+			TokensLeft:        req.Budget.TokensLeft,
+			ContextTokensLeft: req.Budget.ContextTokensLeft,
+		}
 		if req.IfRev > 0 {
 			return casApply(tbl, traceID, req.IfRev, func(s *session.State) { s.Budget = b })
 		}
@@ -752,13 +872,31 @@ func transitionReason(to session.RunState, reason string) string {
 // else is a 1:1 field copy.
 func toGatewaySessionState(s session.State) gateway.SessionState {
 	return gateway.SessionState{
-		TraceID:  s.TraceID,
-		Run:      s.Run.String(),
-		Budget:   gateway.SessionBudget{TurnsLeft: s.Budget.TurnsLeft, TokensLeft: s.Budget.TokensLeft},
-		Priority: s.Priority,
-		Pace:     gateway.SessionPace{MaxTokensPerTurn: s.Pace.MaxTokensPerTurn, MinTurnGapMs: s.Pace.MinTurnGapMs},
-		Reason:   s.Reason,
-		Rev:      s.Rev,
+		TraceID: s.TraceID,
+		Run:     s.Run.String(),
+		Budget: gateway.SessionBudget{
+			TurnsLeft:         s.Budget.TurnsLeft,
+			TokensLeft:        s.Budget.TokensLeft,
+			ContextTokensLeft: s.Budget.ContextTokensLeft,
+		},
+		Priority:       s.Priority,
+		Pace:           gateway.SessionPace{MaxTokensPerTurn: s.Pace.MaxTokensPerTurn, MinTurnGapMs: s.Pace.MinTurnGapMs},
+		Reason:         s.Reason,
+		ContinuationID: s.ContinuationID,
+		ParentTrace:    s.ParentTrace,
+		Generation:     s.Generation,
+		Rev:            s.Rev,
+	}
+}
+
+func toGatewaySessionVerdict(v session.Verdict) gateway.SessionVerdict {
+	return gateway.SessionVerdict{
+		Proceed:   v.Proceed,
+		MaxTokens: v.MaxTokens,
+		MinGapMs:  v.MinGapMs,
+		State:     toGatewaySessionState(v.State),
+		Stop:      v.Stop,
+		Reason:    v.Reason,
 	}
 }
 

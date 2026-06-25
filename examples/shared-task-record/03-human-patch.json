@@ -1,0 +1,23 @@
+{
+  "schema": "fak.shared-patch.v1",
+  "task_id": "task_shared_demo",
+  "base_rev": "sha256:taskrev002",
+  "actor": {
+    "kind": "human",
+    "id": "operator"
+  },
+  "scope": "fleet",
+  "durability": "session",
+  "ops": [
+    {
+      "op": "append",
+      "path": "/open_decisions",
+      "value": {
+        "decision_id": "dec_release_owner",
+        "state": "input_required",
+        "reason": "release owner must approve the public note"
+      }
+    }
+  ],
+  "message": "Pause publication until the release owner approves."
+}

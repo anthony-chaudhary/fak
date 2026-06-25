@@ -521,6 +521,25 @@ func FromStaticTool(tool string, payload abi.Ref, opts ...Option) Entry {
 	return e
 }
 
+// FromMiss adapts a vDSO fast-path MISS into a tool-result cache entry that names
+// the attempted lookup. A miss has no payload, so the entry carries no digest — only
+// the tool that was looked up and the lookup reason that produced the miss (recorded
+// in Security.Reason). It is the observable, first-class form of the LookupMiss
+// verdict (cachemeta.Miss): a consumer of the cache event stream sees WHY the fast
+// path declined to serve, in the same stream as fills/hits/evictions. Residency is
+// TierRecompute — the answer is not resident and must be recomputed by the engine.
+func FromMiss(tool string, reason LookupReason, opts ...Option) Entry {
+	e := Entry{
+		Plane:      PlaneToolResult,
+		Derivation: Derivation{Producer: "vdso", Tool: tool},
+		Security:   Security{Reason: string(reason)},
+		Residency:  Residency{Tier: TierRecompute, Owner: "vdso"},
+		Coherence:  Coherence{InvalidationMode: InvalidationNone},
+	}
+	apply(&e, opts)
+	return e
+}
+
 // ContextPage is the field-only shape a durable recall/context-page adapter
 // lowers into. It mirrors the metadata needed from recall.Page without making
 // cachemeta import recall.

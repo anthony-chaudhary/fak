@@ -1,0 +1,15 @@
+{
+  "schema": "fak.shared-patch-result.v1",
+  "task_id": "task_shared_demo",
+  "base_rev": "sha256:taskrev001",
+  "current_rev": "sha256:taskrev001",
+  "verdict": "quarantined",
+  "reason": "ARTIFACT_WITNESS_MISSING",
+  "quarantine": {
+    "quarantine_id": "q_art_remote_trace",
+    "artifact_id": "art_remote_trace",
+    "subject_kind": "artifact",
+    "subject_id": "art_remote_trace",
+    "safe_summary": "ref is held out of context until a deletion/witness certificate exists"
+  }
+}

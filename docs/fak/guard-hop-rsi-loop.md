@@ -1,5 +1,12 @@
 # Guard-hop RSI loop — driving kernel-in-the-loop overhead toward 0 (issue #733)
 
+Audience: maintainers tuning the guarded dogfood fleet after the always-on
+gateway path is installed. Prerequisite: start with
+[always-on-dogfood-server.md](always-on-dogfood-server.md) and the Tier-1/Tier-2
+activation runbooks. You will be able to run the guard-hop RSI planner, keep it
+in plan mode until real measurements exist, and verify that it cannot fabricate
+a keep-bit.
+
 The dogfood default fronts every worker with `fak guard`, so each tool call crosses the
 kernel. Issue [#734](https://github.com/anthony-chaudhary/fak/issues/734) *measures* that
 hop's overhead; this loop *minimises* it — a recursive-self-improvement (RSI) loop fed by
@@ -64,5 +71,5 @@ python tools/guard_hop_rsi.py --check plan.json          # honesty gate
 ## Refs
 
 - `tools/guard_hop_bench.py` — the #734 measurement source the loop reads
-- `docs/benchmarks/GUARD-HOP-OVERHEAD-PENDING.md` — the overhead row this loop drives down
+- [`docs/benchmarks/GUARD-HOP-OVERHEAD-PENDING.md`](../benchmarks/GUARD-HOP-OVERHEAD-PENDING.md) — the overhead row this loop drives down
 - `tools/com.fak.dogfood-fleet.plist` — the #729 fleet that produces the live telemetry

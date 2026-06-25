@@ -28,17 +28,29 @@ N/10") instead of a vibe.
 Two layers fold into one payload:
 
   PER-PAGE (each published Pages surface, 0-100, weighted into a score + A-F):
-    title         front-matter `title:` present, a sane title-tag length
-    description   front-matter `description:` present, in the 70-160 char band
-    headings      exactly one H1, no skipped heading level, real sections
-    links         every local link target resolves on disk (crawl integrity)
-    answerability the first screen is a self-contained plain-language answer
-                  (the chunk an answer engine quotes), not bare scaffolding
+    title          front-matter `title:` present, a sane title-tag length
+    description    front-matter `description:` present, in the 70-160 char band
+    headings       exactly one H1, no skipped heading level, real sections
+    links          every local link target resolves on disk (crawl integrity)
+    links_crawlable a local .md link must resolve to a Jekyll-PUBLISHED page a
+                   crawler can actually fetch — not a disk file the site excludes
+    answerability  the first screen is a self-contained plain-language answer
+                   (the chunk an answer engine quotes), not bare scaffolding
 
   SITE-LEVEL (the once-per-corpus infrastructure, each a unit of debt if absent):
     robots_ok · sitemap_plugin · seo_tag_plugin · canonical_url · og_image
     structured_data (one defect per missing expected JSON-LD @type)
     llms_txt · llms_full (present AND fresh vs llms.txt) · faq_structured
+    citation_links (every llms.txt-map + self-repo github link resolves live)
+
+  PRESENCE vs SUCCESS. The first generation of KPIs above asked "is the meta/
+  link/JSON-LD PRESENT" — which tops out the instant a field exists. The newer
+  SUCCESS KPIs ask "does it WORK for the consumer who relies on it": does a link
+  resolve to a page a crawler can FETCH (links_crawlable), is the title/meta
+  UNIQUE across the corpus so an engine can tell the pages apart (meta_distinct,
+  folded corpus-wide), does a citation link point to a LIVE target
+  (citation_links). A page can score a perfect 100 on the presence checks while a
+  reader who follows its links lands on a 404 — that gap is what these close.
 
 `ok` is False iff any HARD defect exists — these are the work-list. Soft signals
 (a too-short title, a thin page, an optional schema type) lower a score but never
@@ -71,7 +83,7 @@ from collections import deque
 from pathlib import Path
 from typing import Any
 
-SCHEMA = "fak-seo-aeo-scorecard/1"
+SCHEMA = "fak-seo-aeo-scorecard/2"
 
 # Repo-root-relative inputs (best-effort; a missing one degrades a check, never errors).
 CONFIG_REL = "docs/_config.yml"
@@ -119,14 +131,18 @@ JSONLD_TYPES_SOFT = ["Organization", "BreadcrumbList"]
 
 # Per-KPI weights for the per-page score. description + title weigh most — they ARE
 # the search result (the blue link + the snippet) and the first thing an engine
-# reads. answerability is real but a judgment call, so it weighs least.
+# reads. links + links_crawlable together carry crawl integrity (a real link that
+# 404s on the live site is as bad as a dead one). answerability is real but a
+# judgment call, so it weighs least. The sum MUST be 1.0 (asserted in the tests).
 KPI_WEIGHTS: dict[str, float] = {
-    "title": 0.25,
-    "description": 0.30,
-    "headings": 0.15,
-    "links": 0.20,
+    "title": 0.22,
+    "description": 0.26,
+    "headings": 0.13,
+    "links": 0.17,
+    "links_crawlable": 0.12,
     "answerability": 0.10,
 }
+assert abs(sum(KPI_WEIGHTS.values()) - 1.0) < 1e-9, "per-page KPI weights must sum to 1.0"
 
 # Title-tag and meta-description length laws (chars). Outside the band is a SOFT
 # nudge (it still renders, just sub-optimally); ABSENT is the HARD defect.
@@ -158,6 +174,16 @@ _JSONLD_BLOCK_RE = re.compile(
 )
 _QUESTION_RE = re.compile(
     r"(?i)^(how|what|why|when|where|who|which|is|are|can|does|do|should|will)\b")
+
+# Self-referential links into the project's OWN repo (a github.com/.../fak blob,
+# tree, or raw URL on a real branch). The per-page `links` KPI skips ALL http(s),
+# so it is blind to a self-repo link that rots when a file moves — yet that link
+# is in-repo and resolvable offline. The captured group is the repo-relative path;
+# the URL is terminated on the first delimiter so it never swallows trailing HTML
+# attribute junk (`...mp4">full-resolution`) from a <video>/<a> tag.
+SELF_REPO_RE = re.compile(
+    r"https?://(?:github\.com|raw\.githubusercontent\.com)/anthony-chaudhary/fak/"
+    r"(?:(?:blob|tree|raw)/)?(?:main|master|HEAD)/([^)\s\"'<>`#?]+)")
 
 
 def _is_question(heading: str) -> bool:
@@ -308,7 +334,11 @@ def kpi_headings(text: str) -> dict[str, Any]:
     """SEO heading hygiene: exactly one H1, no skipped level, real sections."""
     defects: list[str] = []
     soft: list[str] = []
-    body = _strip_front_matter(text)
+    # Strip fenced code first: a shell comment (`# install deps`) or a `### step`
+    # inside a ```code``` fence is NOT a markdown heading. Counting it inflated H1
+    # tallies on 40 core pages and fabricated H1->H3 "skip" signals (17 of 18 were
+    # fence noise). kpi_links already strips fences; headings must too.
+    body = _FENCE_RE.sub(" ", _strip_front_matter(text))
     levels = [len(m.group(1)) for m in _H_RE.finditer(body)]
     h1s = [lvl for lvl in levels if lvl == 1]
     score = 100
@@ -365,6 +395,49 @@ def kpi_links(text: str, root: Path, doc_rel: str) -> dict[str, Any]:
             "detail": (f"all {total} local link(s) resolve" if not dead
                        else f"{len(dead)}/{total} local link(s) dead"),
             "defects": defects, "soft": []}
+
+
+def kpi_links_crawlable(text: str, root: Path, doc_rel: str) -> dict[str, Any]:
+    """SUCCESS check, the crawl-integrity twin of `links`: a local link that
+    EXISTS on disk is not the same as one a crawler can FETCH. A markdown link to
+    a `.md` page under docs/ that Jekyll EXCLUDES from publishing (it lives in a
+    NONPUBLISHED_DIRS subtree) resolves on disk — so `links` scores it 100 — yet
+    it is a hard 404 on the live site and a dangling citation for an answer engine
+    following it. That is the HARD defect. A link that resolves to a directory
+    (no canonical page on the published site, though GitHub renders a listing) is
+    a SOFT nudge: it works on one surface, not the other."""
+    base = (root / doc_rel).parent
+    text = _FENCE_RE.sub(" ", text)
+    crawl404: list[str] = []
+    dirlinks: list[str] = []
+    seen: set[str] = set()
+    for m in _LINK_RE.finditer(text):
+        target = m.group("target").strip()
+        if target.startswith(("http://", "https://", "mailto:", "#", "tel:")):
+            continue
+        pp = target.split("#", 1)[0].split("?", 1)[0].strip()
+        if not pp or pp in seen:
+            continue
+        seen.add(pp)
+        resolved = (root / pp.lstrip("/")) if pp.startswith("/") else (base / pp)
+        if not resolved.exists():
+            continue  # dead-on-disk is the existing `links` KPI's job, not double-counted
+        try:
+            tgt = resolved.resolve().relative_to(root.resolve()).as_posix()
+        except ValueError:
+            continue
+        if resolved.is_dir():
+            dirlinks.append(pp)
+            continue
+        if pp.endswith(".md") and tgt.startswith("docs/") and not _published(root, tgt):
+            crawl404.append(f"{pp} (target {tgt} is excluded from publishing — 404 on the live site)")
+    defects = [f"crawl-404: {c}" for c in sorted(crawl404)]
+    soft = [f"directory link (no canonical published page): {d}/" for d in sorted(dirlinks)]
+    score = 100 - 25 * len(crawl404)
+    detail = ("every local link is crawlable on the published site" if not crawl404
+              else f"{len(crawl404)} link(s) resolve on disk but 404 on the live site")
+    return {"kpi": "links_crawlable", "score": _clamp(score), "detail": detail,
+            "defects": defects, "soft": soft}
 
 
 def kpi_answerability(text: str) -> dict[str, Any]:
@@ -448,6 +521,7 @@ def score_page(text: str, doc_rel: str, root: Path) -> dict[str, Any]:
         kpi_description(fm),
         kpi_headings(text),
         kpi_links(text, root, doc_rel),
+        kpi_links_crawlable(text, root, doc_rel),
         kpi_answerability(text),
     ]
     by_name = {k["kpi"]: k for k in kpis}
@@ -460,6 +534,9 @@ def score_page(text: str, doc_rel: str, root: Path) -> dict[str, Any]:
         "grade": grade_letter(score),
         "kpis": {k["kpi"]: k["score"] for k in kpis},
         "kpi_detail": {k["kpi"]: k["detail"] for k in kpis},
+        # raw meta strings the corpus-level meta_distinct pass dedups across pages.
+        "meta": {"title": fm.get("title", "").strip(),
+                 "description": fm.get("description", "").strip()},
         "defects": defects,
         "soft": soft,
         "n_defects": len(defects),
@@ -470,9 +547,87 @@ def missing_page_entry(doc_rel: str) -> dict[str, Any]:
     return {
         "path": doc_rel, "score": 0.0, "grade": "F",
         "kpis": {k: 0 for k in KPI_WEIGHTS}, "kpi_detail": {},
+        "meta": {"title": "", "description": ""},
         "defects": [f"missing: core page {doc_rel} does not exist on disk"],
         "soft": [], "n_defects": 1,
     }
+
+
+def apply_corpus_meta_distinct(pages: list[dict[str, Any]]) -> int:
+    """Cross-page SUCCESS check, folded AFTER per-page scoring: every page's title
+    AND description must be UNIQUE across the scored corpus. Duplicate `<title>` /
+    meta-description is the canonical "present but unsuccessful" defect a per-page
+    check is STRUCTURALLY blind to — it scores each page in isolation, so two pages
+    that ship the identical `<title>` each score a clean 100, yet search dedups
+    them (it can't tell them apart, picks one, drops the rest). Each side of a
+    duplicate gets one HARD defect, so it folds into seo_debt_in_pages. Returns the
+    number of duplicate-defects added."""
+    added = 0
+    for field in ("title", "description"):
+        groups: dict[str, list[dict[str, Any]]] = {}
+        for d in pages:
+            v = (d.get("meta") or {}).get(field, "").strip().lower()
+            if v:
+                groups.setdefault(v, []).append(d)
+        for group in groups.values():
+            if len(group) < 2:
+                continue
+            paths = [g["path"] for g in group]
+            for d in group:
+                peers = [p for p in paths if p != d["path"]]
+                shown = ", ".join(peers[:3]) + ("…" if len(peers) > 3 else "")
+                d["defects"].append(
+                    f"meta_distinct: {field} is not unique — duplicates {shown} "
+                    "(search can't tell the pages apart)")
+                d["n_defects"] = len(d["defects"])
+                added += 1
+    return added
+
+
+def citation_link_audit(root: Path) -> dict[str, Any]:
+    """AEO citation integrity (the SUCCESS twin of the `llms_txt` presence check):
+    every link an answer engine FOLLOWS from the curated surfaces must resolve to
+    a LIVE target. Three reads, all offline:
+
+      dead_map   — a link in the curated llms.txt map that no longer resolves.
+      dead_self  — a self-referential github.com/.../fak blob|tree|raw link,
+                   anywhere in the published corpus, that points at a moved/renamed
+                   path (the per-page `links` KPI skips ALL http(s), so it is blind
+                   to self-repo link rot — yet the path is in-repo and checkable).
+      llms_full_unresolved — inlined links in llms-full.txt that don't resolve in
+                   the flat one-fetch corpus. This is a SOFT advisory, not a gate:
+                   the fix lives in gen_llms_full.py (rewrite inlined relative
+                   links to absolute), and a forced regen here would sweep a peer's
+                   uncommitted docs into a scoped commit on the shared trunk."""
+    def _local_dead(text: str, base: Path) -> list[str]:
+        out: list[str] = []
+        for m in _LINK_RE.finditer(text):
+            u = m.group("target").strip()
+            if u.startswith(("http://", "https://", "mailto:", "#", "tel:")):
+                continue
+            pp = u.split("#", 1)[0].split("?", 1)[0].strip()
+            if not pp:
+                continue
+            res = (root / pp.lstrip("/")) if pp.startswith("/") else (base / pp)
+            if not res.exists():
+                out.append(pp)
+        return out
+
+    dead_map = sorted(set(_local_dead(_safe_read(root / LLMS_REL), root)))
+
+    dead_self: set[str] = set()
+    for rel in enumerate_pages(root, "published"):
+        txt = _FENCE_RE.sub(" ", _safe_read(root / rel))
+        for m in SELF_REPO_RE.finditer(txt):
+            p = m.group(1).rstrip("/")
+            if not (root / p).exists():
+                dead_self.add(f"{rel} -> {p}")
+
+    llms_full = _safe_read(root / LLMS_FULL_REL)
+    llms_full_unresolved = len(_local_dead(llms_full, root))
+
+    return {"dead_map": dead_map, "dead_self": sorted(dead_self),
+            "llms_full_unresolved": llms_full_unresolved}
 
 
 # ---------------------------------------------------------------------------
@@ -590,6 +745,25 @@ def site_checks(root: Path) -> dict[str, Any]:
         f"FAQ.md has {q} question sections (seeds FAQPage)",
         f"FAQ.md missing or thin ({q} question H2s; need >= {MIN_FAQ_QUESTIONS})")
 
+    # citation_links (SUCCESS): every link an answer engine follows from the
+    # curated surfaces must resolve to a LIVE target — the llms.txt map AND every
+    # self-referential github link in the corpus. One HARD defect if any is dead.
+    cit = citation_link_audit(root)
+    n_dead = len(cit["dead_map"]) + len(cit["dead_self"])
+    add("citation_links", n_dead == 0, True,
+        "every llms.txt-map + self-repo github link resolves to a live target",
+        f"{n_dead} citation link(s) dead — a stale link sends an answer engine/reader "
+        "to a 404 (see corpus.citation)")
+    # llms-full.txt navigability (SUCCESS): the flat one-fetch corpus must not
+    # contain local links whose original source-document base path was lost during
+    # inlining. The generator rewrites inlined local links to absolute repo URLs,
+    # so any remaining unresolved local link is a real answer-engine citation gap.
+    add("llms_full_navigable", cit["llms_full_unresolved"] == 0, True,
+        "llms-full.txt inlined links all resolve in the flat corpus",
+        f"{cit['llms_full_unresolved']} inlined link(s) in llms-full.txt don't resolve in the "
+        "flat one-fetch corpus (fix = gen_llms_full.py rewrites inlined relative links "
+        "to absolute, then regenerate)")
+
     hard_defects = [c["defect"] for c in checks if not c["ok"] and c["hard"]]
     soft = [c["defect"] for c in checks if not c["ok"] and not c["hard"]]
     n_ok = sum(1 for c in checks if c["ok"])
@@ -602,6 +776,7 @@ def site_checks(root: Path) -> dict[str, Any]:
         "defects": hard_defects,
         "soft": soft,
         "present_jsonld": sorted(present_types),
+        "citation": cit,
     }
 
 
@@ -722,6 +897,12 @@ def build_payload(*, workspace: str, pages: list[dict[str, Any]],
     meta_pct = round(100 * full_meta / max(1, n), 1)
     # The headline 0-100: half the page mean, half the site infrastructure score.
     overall = round(0.5 * mean_score + 0.5 * site["score"], 1)
+    # SUCCESS-KPI breakdown (the presence-not-success defects the deepened scorecard
+    # surfaces): links that 404 on the live site, non-unique meta, dead citations.
+    crawl_404 = sum(1 for d in pages for x in d["defects"] if "links_crawlable: crawl-404" in x)
+    meta_duplicates = sum(1 for d in pages for x in d["defects"] if x.startswith("meta_distinct:"))
+    citation = site.get("citation") or {}
+    citation_dead = len(citation.get("dead_map", [])) + len(citation.get("dead_self", []))
 
     corpus = {
         "n_pages": n,
@@ -736,6 +917,10 @@ def build_payload(*, workspace: str, pages: list[dict[str, Any]],
         "seo_debt": total_defects,
         "seo_debt_in_pages": page_defects,
         "seo_debt_in_site": site_defects,
+        "crawl_404": crawl_404,
+        "meta_duplicates": meta_duplicates,
+        "citation_dead": citation_dead,
+        "llms_full_unresolved": citation.get("llms_full_unresolved", 0),
         "present_jsonld": site.get("present_jsonld", []),
         "discovery_orphans": len(orphans),
         "orphan_pages": orphans,
@@ -754,7 +939,9 @@ def build_payload(*, workspace: str, pages: list[dict[str, Any]],
                   f"({page_defects} in-page + {site_defects} site); overall {overall}/100, "
                   f"meta coverage {meta_pct}%, site {site['n_ok']}/{site['n_total']}")
         next_action = ("retire seo-debt worst-first (corpus.worst + site defects): add missing "
-                       "front-matter title/description, JSON-LD types, llms-full.txt; re-run to prove the drop")
+                       "front-matter title/description, JSON-LD types, llms-full.txt; repoint a "
+                       "crawl-404 link to a published page or an absolute URL; dedup a non-unique "
+                       "title/description; fix a dead citation link; re-run to prove the drop")
 
     return {
         "schema": SCHEMA, "ok": ok, "verdict": verdict, "finding": finding,
@@ -780,6 +967,10 @@ def collect(workspace: Path, *, scope: str = "core") -> dict[str, Any]:
             pages.append(d)
             continue
         pages.append(score_page(text, rel, root))
+    # Corpus-level SUCCESS pass: dedup title/description across the whole scored
+    # set (a per-page KPI can't see another page's meta). Must run BEFORE
+    # build_payload folds n_defects into seo-debt.
+    apply_corpus_meta_distinct(pages)
     site = site_checks(root)
     orphans = discovery_orphans(root)
     return build_payload(workspace=str(root), pages=pages, site=site, scope=scope,
@@ -804,18 +995,21 @@ def render(payload: dict[str, Any]) -> str:
          f"site checks: {c.get('site_checks_ok', '0/0')}  ·  "
          f"JSON-LD present: {', '.join(c.get('present_jsonld', [])) or 'none'}"),
         (f"discovery orphans (published, not front-door-reachable): {c.get('discovery_orphans', 0)}"),
+        (f"success KPIs: crawl-404 {c.get('crawl_404', 0)}  ·  meta-duplicates {c.get('meta_duplicates', 0)}"
+         f"  ·  dead citations {c.get('citation_dead', 0)}  ·  llms-full unresolved {c.get('llms_full_unresolved', 0)} (advisory)"),
         ("grades: " + " ".join(f"{g}:{c.get('grade_distribution', {}).get(g, 0)}" for g in "ABCDF")),
         f"next: {payload.get('next_action')}",
         "",
         "per-page (worst first):",
-        f"  {'score':>5} {'gr':>2} {'def':>3}  {'ttl':>3} {'dsc':>3} {'hdg':>3} {'lnk':>3} {'ans':>3}  path",
+        f"  {'score':>5} {'gr':>2} {'def':>3}  {'ttl':>3} {'dsc':>3} {'hdg':>3} {'lnk':>3} {'crl':>3} {'ans':>3}  path",
     ]
     for d in sorted(payload.get("pages", []), key=lambda x: (x["score"], -x["n_defects"])):
         k = d.get("kpis", {})
         lines.append(
             f"  {d['score']:>5} {d['grade']:>2} {d['n_defects']:>3}  "
             f"{k.get('title','-'):>3} {k.get('description','-'):>3} {k.get('headings','-'):>3} "
-            f"{k.get('links','-'):>3} {k.get('answerability','-'):>3}  {d['path']}")
+            f"{k.get('links','-'):>3} {k.get('links_crawlable','-'):>3} "
+            f"{k.get('answerability','-'):>3}  {d['path']}")
     lines.append("")
     lines.append("site-level checks:")
     for ch in site.get("checks", []):
@@ -878,14 +1072,15 @@ def render_markdown(payload: dict[str, Any], *, stamp: str | None = None) -> str
     out.append("")
     out.append("## Per-page scores")
     out.append("")
-    out.append("| Score | Grade | Debt | title | desc | head | link | ans | Page |")
-    out.append("|---:|:--:|:--:|:--:|:--:|:--:|:--:|:--:|---|")
+    out.append("| Score | Grade | Debt | title | desc | head | link | crawl | ans | Page |")
+    out.append("|---:|:--:|:--:|:--:|:--:|:--:|:--:|:--:|:--:|---|")
     for d in sorted(payload.get("pages", []), key=lambda x: (x["score"], -x["n_defects"])):
         k = d.get("kpis", {})
         out.append(
             f"| {d['score']} | {d['grade']} | {d['n_defects']} | "
             f"{k.get('title','-')} | {k.get('description','-')} | {k.get('headings','-')} | "
-            f"{k.get('links','-')} | {k.get('answerability','-')} | `{d['path']}` |")
+            f"{k.get('links','-')} | {k.get('links_crawlable','-')} | "
+            f"{k.get('answerability','-')} | `{d['path']}` |")
     out.append("")
     out.append("## Site-level checks")
     out.append("")

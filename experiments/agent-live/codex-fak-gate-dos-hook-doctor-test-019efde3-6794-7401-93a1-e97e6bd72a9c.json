@@ -1,0 +1,27 @@
+{
+  "command_argc": 2,
+  "command_digest": "98f64c303b5ef80620e5bf5d47291116328332a3e466dc74fc75e225ab32989b",
+  "command_executable": "python",
+  "command_exit_code": 0,
+  "command_label": "dos-hook-doctor-test",
+  "command_output_dropped": [
+    "stdout",
+    "stderr"
+  ],
+  "command_redacted": true,
+  "created_at": "2026-06-25T10:08:41.543399Z",
+  "dry_run": false,
+  "executed": true,
+  "expect_deny": false,
+  "policy": "examples/dev-agent-policy.json",
+  "preflight": {
+    "by": "monitor",
+    "exit_code": 0,
+    "reason": "NONE",
+    "stderr": "fak: loaded capability floor from examples/dev-agent-policy.json",
+    "stdout": "verdict=ALLOW reason=NONE by=monitor",
+    "verdict": "ALLOW"
+  },
+  "status": "PASS",
+  "tool": "run_tests"
+}

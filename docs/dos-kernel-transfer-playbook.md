@@ -61,6 +61,145 @@ print(n)
 PY
 ```
 
+### Codex session witness
+
+For a specific Codex thread, the dogfood witness folds the same stream and
+observation evidence into its saved JSON under `checks.dos_session_audit`:
+
+```powershell
+python tools\codex_dogfood_witness.py `
+  --session $env:USERPROFILE\.codex\sessions\YYYY\MM\DD\rollout-...jsonl `
+  --thread-id <codex-thread-id> `
+  --fak-bin .\fak.exe
+```
+
+That report records the per-session `.dos/streams/<thread>.jsonl` step count, the
+timestamp-window fold over `.dos/metrics/observations.jsonl`, the
+`tree_known=false` admission-warning rate, delegate count, stop blocks, and a short
+recommendation list. It copies only timestamps, tool names, counts, latencies, and
+hash digests; it does not copy prompts, tool arguments, tool results, diffs, or model
+text. The observation join is explicitly a timestamp window, so concurrent sessions
+in the same window can contribute rows.
+
+For a multi-session Codex pass, use the rollup:
+
+```powershell
+python tools\codex_dos_recent_audit.py `
+  --repo-root . `
+  --codex-home $env:USERPROFILE\.codex `
+  --limit 10 `
+  --since-days 7 `
+  --check-latest `
+  --out experiments\agent-live\codex-dos-recent-audit.json
+```
+
+The rollup matches Codex session IDs to DOS stream files, reports aggregate
+unknown-footprint and delegate rates across the recent sessions, and, with
+`--check-latest`, compares the locally installed `dos-kernel` package with PyPI's
+`https://pypi.org/pypi/dos-kernel/json` `info.version`.
+
+Freshness is not the same as fast-path wiring. The same report also includes
+`codex_hook_fast_path`: it reads the cached DOS hook manifest under the Codex home
+and reports whether Codex-dialect hooks use the bundled native launcher or the
+slower Python CLI hook path. It records only manifest-relative paths and mode
+counts, not hook command bodies.
+
+If that check is `WARN`, inspect the repair plan first:
+
+```powershell
+python tools\codex_dos_hook_doctor.py --codex-home $env:USERPROFILE\.codex
+```
+
+The dry-run prints both current hook modes and projected hook modes after apply.
+Treat `projected_codex_command_modes: {"native_launcher": N}` with zero projected
+`python_cli` hooks as the proof that the repair would clear the Codex fast-path
+warning.
+
+Then apply it explicitly:
+
+```powershell
+python tools\codex_dos_hook_doctor.py --codex-home $env:USERPROFILE\.codex --apply
+```
+
+The doctor rewrites cached DOS hook manifests to call the bundled native
+PowerShell launcher first and leaves the Python CLI hook as the delegate fallback.
+It writes a sibling backup before changing a manifest. Like the audit, its report
+copies only manifest-relative paths and mode counts, never hook command bodies.
+
+After a repair, the rollup adds two post-repair lenses:
+
+- `post_repair_observations` folds only Codex hook observations after the repaired
+  manifest timestamp, so pre-repair delegates do not keep masquerading as current
+  fast-path failures.
+- `post_repair_command_shapes` reads local Codex session arguments only for the
+  same DOS-matched threads included in `sessions_audited`, classifies command
+  shape, then drops the command bodies. `shell_no_write_target_detected` means the
+  remaining DOS warning is opacity from shell-based read/inspect calls, not an
+  observed write target. `shell_out_of_tree_write_target` is the category that
+  needs immediate repo-guard review. If mutating shell families are present, the
+  report includes a sanitized `mutating_shell_sessions` list with thread id,
+  session filename, and category counts only.
+
+Add `--fail-on-warn` when this should act as a local transfer gate instead of an
+observational report. The default budget is the playbook's 2% unknown-footprint
+line; override it with `--max-unknown-tree-rate` and cap native-hook fallbacks with
+`--max-delegates`.
+
+When you need a post-repair risk gate that keeps the residual shell-opacity debt
+visible but does not fail on it, use:
+
+```powershell
+python tools\codex_dos_recent_audit.py `
+  --repo-root . `
+  --codex-home $env:USERPROFILE\.codex `
+  --limit 10 `
+  --since-days 7 `
+  --fail-on-actionable-warn `
+  --max-delegates 0
+```
+
+That gate still fails on an unrepaired fast path, post-repair delegates, stop
+failures, unparseable shell commands, `shell_out_of_tree_write_target`, or
+mutating opaque shell families such as `git_write`. It does not turn
+`shell_no_write_target_detected` into a pass for the strict transfer gate; it
+reports read/inspect opacity as `actionability.residual: ["HOST_SHELL_OPACITY",
+...]`.
+
+To make the remaining host-opacity debt issue-ready without copying commands or
+prompts, emit the sanitized packet. It includes shell shape, family, and mutating
+family categories, not raw command text:
+
+```powershell
+python tools\codex_dos_recent_audit.py `
+  --repo-root . `
+  --codex-home $env:USERPROFILE\.codex `
+  --limit 10 `
+  --since-days 7 `
+  --check-latest `
+  --out-debt experiments\agent-live\codex-dos-host-opacity-debt.md
+```
+
+After routing Git mutations through structured fak gates, include those gate reports
+in the audit so historical `git_write` remains visible but does not masquerade as a
+new post-mitigation failure:
+
+```powershell
+python tools\codex_dos_recent_audit.py `
+  --repo-root . `
+  --codex-home $env:USERPROFILE\.codex `
+  --limit 10 `
+  --since-days 7 `
+  --gate-report experiments\agent-live\codex-fak-gate-git-add.json `
+  --gate-report experiments\agent-live\codex-fak-gate-git-commit.json `
+  --gate-report experiments\agent-live\codex-fak-gate-git-push.json `
+  --fail-on-actionable-warn `
+  --max-delegates 0
+```
+
+The gate reports must be expected-deny results for `git_add`, `git_commit`, and
+`git_push`. When all three are proven, the audit adds a post-gate command-shape
+lens; any `git_write` after that timestamp still fails actionability.
+
 The two lenses count over different windows — `dos helped` folds the lane journal
 while the raw grep counts the per-call observation log — so they report two
 nearby totals, not a disagreement (`dos helped` says as much in its own output).

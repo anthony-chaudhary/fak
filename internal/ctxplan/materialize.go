@@ -108,6 +108,22 @@ func Materialize(ctx context.Context, store Store, f Forecast, budget Budget, co
 		return View{}, err
 	}
 	p := PlanCells(spans, f, budget, cost)
+	return materializePlan(ctx, store, spans, p)
+}
+
+// MaterializeLayout is the layout-aware peer of Materialize: it uses the four-area Layout
+// to choose the bounded candidate set and per-area precision, then renders the selected
+// exact spans through the same trust gate and witness reconciliation as the default path.
+func MaterializeLayout(ctx context.Context, store Store, f Forecast, budget Budget, cost CostModel, layout Layout) (View, error) {
+	spans, err := store.Spans(ctx)
+	if err != nil {
+		return View{}, err
+	}
+	p := BuildIndex(spans).PlanLayout(f, budget, cost, layout)
+	return materializePlan(ctx, store, spans, p)
+}
+
+func materializePlan(ctx context.Context, store Store, spans []Span, p Plan) (View, error) {
 	// declared[id] = the Span.Bytes the planner priced each span at — the cost basis the
 	// page-in must honor. The planner charged ceil(Span.Bytes/4); the render realizes
 	// ceil(len(body)/4); the witness pins them equal so the budget is honest.

@@ -357,6 +357,131 @@ def test_links_skip_fenced_code(tmp_path: Path) -> None:
     assert k["defects"] == [], k
 
 
+# --- SUCCESS KPIs: presence -> success (the deepening) ---------------------
+
+def test_kpi_weights_sum_to_one() -> None:
+    assert abs(sum(sc.KPI_WEIGHTS.values()) - 1.0) < 1e-9, sc.KPI_WEIGHTS
+    assert "links_crawlable" in sc.KPI_WEIGHTS, sc.KPI_WEIGHTS
+
+
+def test_schema_is_v2() -> None:
+    assert sc.SCHEMA.endswith("/2"), sc.SCHEMA
+
+
+def test_headings_ignores_code_fence_hashes() -> None:
+    # A shell comment inside a ```fence``` is NOT a heading: the page has one real
+    # H1, so no skip and no inflated H1 count (the latent bug this fix closes).
+    text = ("# Real Title\n\nintro prose here.\n\n## Section\n\n"
+            "```bash\n# install deps\n### step three\nrun it\n```\n\nmore prose.\n")
+    k = sc.kpi_headings(text)
+    assert k["defects"] == [], k
+    assert "1 H1" in k["detail"], k  # exactly one real H1, fence '#'/'###' ignored
+
+
+def test_links_crawlable_nonpublished_is_hard(tmp_path: Path) -> None:
+    # A .md link that EXISTS on disk but lives in a non-published subtree (releases)
+    # is a crawl-404: present on disk, a 404 on the live Jekyll site.
+    (tmp_path / "docs" / "releases").mkdir(parents=True)
+    (tmp_path / "docs" / "releases" / "v1.md").write_text("# v1", encoding="utf-8")
+    k = sc.kpi_links_crawlable("see [notes](releases/v1.md)", tmp_path, "docs/index.md")
+    assert k["score"] < 100 and any("crawl-404" in d for d in k["defects"]), k
+
+
+def test_links_crawlable_published_is_ok(tmp_path: Path) -> None:
+    (tmp_path / "docs").mkdir()
+    (tmp_path / "docs" / "guide.md").write_text("# guide", encoding="utf-8")
+    k = sc.kpi_links_crawlable("see [g](guide.md)", tmp_path, "docs/index.md")
+    assert k["defects"] == [] and k["score"] == 100, k
+
+
+def test_links_crawlable_dead_on_disk_not_double_counted(tmp_path: Path) -> None:
+    # A link that does not exist on disk is the existing `links` KPI's defect, NOT
+    # a crawl-404 here (no double counting).
+    (tmp_path / "docs").mkdir()
+    k = sc.kpi_links_crawlable("see [x](gone.md)", tmp_path, "docs/index.md")
+    assert k["defects"] == [], k
+
+
+def test_links_crawlable_directory_is_soft(tmp_path: Path) -> None:
+    (tmp_path / "examples").mkdir()
+    k = sc.kpi_links_crawlable("see [ex](../examples)", tmp_path, "docs/index.md")
+    assert k["defects"] == [] and any("directory link" in s for s in k["soft"]), k
+
+
+def test_meta_distinct_flags_duplicate_title() -> None:
+    pages = [
+        {"path": "docs/a.md", "meta": {"title": "Same Title", "description": "desc a"},
+         "defects": [], "n_defects": 0},
+        {"path": "docs/b.md", "meta": {"title": "Same Title", "description": "desc b"},
+         "defects": [], "n_defects": 0},
+    ]
+    added = sc.apply_corpus_meta_distinct(pages)
+    assert added == 2, added
+    assert all(any("meta_distinct: title" in d for d in p["defects"]) for p in pages), pages
+    assert all(p["n_defects"] == 1 for p in pages), pages
+
+
+def test_meta_distinct_unique_is_clean() -> None:
+    pages = [
+        {"path": "docs/a.md", "meta": {"title": "Title A", "description": "desc a"},
+         "defects": [], "n_defects": 0},
+        {"path": "docs/b.md", "meta": {"title": "Title B", "description": "desc b"},
+         "defects": [], "n_defects": 0},
+    ]
+    assert sc.apply_corpus_meta_distinct(pages) == 0, pages
+
+
+def test_citation_links_dead_self_repo_is_hard(tmp_path: Path) -> None:
+    (tmp_path / "docs").mkdir()
+    (tmp_path / "docs" / "index.md").write_text(
+        "see [code](https://github.com/anthony-chaudhary/fak/blob/main/internal/gone.go)",
+        encoding="utf-8")
+    cit = sc.citation_link_audit(tmp_path)
+    assert any("internal/gone.go" in s for s in cit["dead_self"]), cit
+    by = {c["name"]: c for c in sc.site_checks(tmp_path)["checks"]}
+    assert by["citation_links"]["ok"] is False, by["citation_links"]
+
+
+def test_citation_links_live_self_repo_is_ok(tmp_path: Path) -> None:
+    (tmp_path / "docs").mkdir()
+    (tmp_path / "real.go").write_text("package x", encoding="utf-8")
+    (tmp_path / "docs" / "index.md").write_text(
+        "see [code](https://github.com/anthony-chaudhary/fak/blob/main/real.go)",
+        encoding="utf-8")
+    cit = sc.citation_link_audit(tmp_path)
+    assert cit["dead_self"] == [], cit
+
+
+def test_citation_self_repo_ignores_html_attribute_junk(tmp_path: Path) -> None:
+    # A <video src=".../hero.mp4"> URL must terminate at the quote, not swallow the
+    # trailing `">full-resolution` and report a phantom dead path.
+    (tmp_path / "docs").mkdir()
+    (tmp_path / "hero.mp4").write_text("x", encoding="utf-8")
+    (tmp_path / "docs" / "index.md").write_text(
+        '<video src="https://github.com/anthony-chaudhary/fak/raw/main/hero.mp4">full</video>',
+        encoding="utf-8")
+    cit = sc.citation_link_audit(tmp_path)
+    assert cit["dead_self"] == [], cit
+
+
+def test_llms_full_navigable_is_hard(tmp_path: Path) -> None:
+    (tmp_path / "docs").mkdir()
+    (tmp_path / "llms.txt").write_text("Key facts: x", encoding="utf-8")
+    # llms-full inlines a relative link that resolves to nothing from root.
+    (tmp_path / "llms-full.txt").write_text(
+        "Key facts: x\n\nsee [p](policy-guide.md) for more.", encoding="utf-8")
+    by = {c["name"]: c for c in sc.site_checks(tmp_path)["checks"]}
+    assert by["llms_full_navigable"]["ok"] is False, by["llms_full_navigable"]
+    assert by["llms_full_navigable"]["hard"] is True, by["llms_full_navigable"]
+
+
+def test_score_page_carries_crawlable_and_meta(tmp_path: Path) -> None:
+    (tmp_path / "docs").mkdir()
+    d = sc.score_page("---\ntitle: T\n---\n# T\n\nfak is a thing.\n", "docs/a.md", tmp_path)
+    assert "links_crawlable" in d["kpis"], d
+    assert d["meta"]["title"] == "T", d
+
+
 # --- self-contained runner -------------------------------------------------
 
 def main() -> int:

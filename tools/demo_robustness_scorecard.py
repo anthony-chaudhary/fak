@@ -48,6 +48,7 @@ captured output; it edits nothing. Run from the repo ROOT::
     python tools/demo_robustness_scorecard.py            # human scorecard
     python tools/demo_robustness_scorecard.py --json     # machine payload (control-pane)
     python tools/demo_robustness_scorecard.py --markdown # the committed snapshot body
+    python tools/demo_robustness_scorecard.py --check-doc # fail if the snapshot is stale
 
 The companion process is the robustness-3x program: each defect is one unit to
 retire; re-running proves the number moved.
@@ -55,6 +56,7 @@ retire; re-running proves the number moved.
 from __future__ import annotations
 
 import argparse
+import difflib
 import json
 import re
 import statistics
@@ -69,6 +71,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import demo_quality_scorecard as dq  # noqa: E402
 
 SCHEMA = "fleet-demo-robustness-scorecard/1"
+SCORECARD_DOC = "docs/DEMO-ROBUSTNESS-SCORECARD.md"
+STAMP_RE = re.compile(r"<!-- demo-robustness-scorecard:\s*(?P<stamp>[^·<]+?)\s*·")
 
 # Per-axis weights for the composite robustness-score. Speed and durability lean
 # heaviest — a returning user is bitten by a hang or a rotted dependency far more
@@ -681,6 +685,7 @@ def render_markdown(payload: dict[str, Any], *, stamp: str | None = None) -> str
         out.append("")
     out.append("> Regenerate: `python tools/demo_robustness_scorecard.py --markdown --stamp DATE "
                "> docs/DEMO-ROBUSTNESS-SCORECARD.md`")
+    out.append("> Verify snapshot freshness: `python tools/demo_robustness_scorecard.py --check-doc`")
     out.append("")
     out.append("> The measuring stick for **demos that stay simple, fast, and durable**: will it "
                "still run next month, on a fresh box, in one obvious command, in seconds — without "
@@ -743,12 +748,66 @@ def render_markdown(payload: dict[str, Any], *, stamp: str | None = None) -> str
     return "\n".join(out)
 
 
+def markdown_stamp(text: str) -> str:
+    m = STAMP_RE.search(text)
+    return m.group("stamp").strip() if m else ""
+
+
+def check_markdown_doc(workspace: Path, payload: dict[str, Any], *, doc: str = SCORECARD_DOC) -> dict[str, Any]:
+    path = workspace / doc
+    try:
+        actual = path.read_text(encoding="utf-8")
+    except OSError as exc:
+        return {"ok": False, "doc": doc, "stamp": "", "reason": f"read {doc}: {exc}", "diff": []}
+    stamp = markdown_stamp(actual)
+    if not stamp:
+        return {"ok": False, "doc": doc, "stamp": "", "reason": "scorecard stamp missing", "diff": []}
+    expected = render_markdown(payload, stamp=stamp)
+    if actual.rstrip() == expected.rstrip():
+        return {
+            "ok": True,
+            "doc": doc,
+            "stamp": stamp,
+            "reason": f"{doc} matches generated markdown using stamp {stamp}",
+            "diff": [],
+        }
+    diff = list(difflib.unified_diff(
+        actual.splitlines(),
+        expected.splitlines(),
+        fromfile=doc,
+        tofile=f"{doc} (generated)",
+        lineterm="",
+    ))
+    return {
+        "ok": False,
+        "doc": doc,
+        "stamp": stamp,
+        "reason": f"{doc} is stale; regenerate with --markdown --stamp {stamp}",
+        "diff": diff[:60],
+    }
+
+
+def render_doc_check(check: dict[str, Any]) -> str:
+    status = "OK" if check.get("ok") else "ACTION"
+    lines = [
+        f"demo-robustness scorecard doc: {status} ({'scorecard_doc_fresh' if check.get('ok') else 'scorecard_doc_drift'})",
+        f"  {check.get('reason', '')}",
+    ]
+    if check.get("diff"):
+        lines.append("")
+        lines.append("diff:")
+        lines.extend("  " + line for line in check["diff"])
+    return "\n".join(lines)
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description="Demo-robustness scorecard (read-only).")
     ap.add_argument("--workspace", default="", help="workspace root (default: repo root)")
     ap.add_argument("--json", action="store_true", help="emit machine-readable JSON")
     ap.add_argument("--markdown", action="store_true",
                     help="emit the DEMO-ROBUSTNESS-SCORECARD.md body")
+    ap.add_argument("--check-doc", action="store_true",
+                    help=f"fail if {SCORECARD_DOC} differs from generated markdown")
     ap.add_argument("--stamp", default="", help="date stamp for the markdown header")
     args = ap.parse_args(argv)
 
@@ -766,6 +825,10 @@ def main(argv: list[str] | None = None) -> int:
         print(json.dumps(payload, indent=2))
     elif args.markdown:
         print(render_markdown(payload, stamp=args.stamp or None))
+    elif args.check_doc:
+        check = check_markdown_doc(workspace, payload)
+        print(render_doc_check(check))
+        return 0 if check.get("ok") and payload.get("ok") else 1
     else:
         print(render(payload))
 

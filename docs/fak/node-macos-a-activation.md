@@ -1,5 +1,11 @@
 # Activating the always-on guarded dogfood fleet on node-macos-a (issue #729)
 
+Audience: operators activating the Tier-1 Mac dogfood node from the always-on
+dogfood plan. Prerequisite: read
+[always-on-dogfood-server.md](always-on-dogfood-server.md) and have shell access
+to `node-macos-a`. You will be able to install the launchd units, keep the node
+awake, and verify that guarded audit journals are real.
+
 This is the runbook that turns node-macos-a into a 24/7 **guarded** dogfood node — the
 one that finally flips `audit_journal_evidence` from a configured wire into an exercised
 one, taking `tools/dogfood_coverage.py` from grade **B** to **A** (issue #731).

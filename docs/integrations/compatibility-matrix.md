@@ -133,6 +133,7 @@ with a default-deny capability floor in the middle.
 ## Cross-references
 
 - [Integration index](README.md) — which-agent routing and the universal recipe this matrix backs.
+- [fak + LiteLLM](litellm.md) · [Routers & gateways](routers.md) — the dedicated guides for the LiteLLM-backed and router rows above (front / behind / route-through topologies).
 - [Claude Code](claude.md) · [Cursor](cursor.md) · [OpenAI Codex](openai-codex.md) — the per-harness guides.
 - [Agent memory (mem0 / OpenMemory / MCP)](agent-memory.md) — the gate in front of a memory store.
 - [CLAIMS.md](../../CLAIMS.md) — fak's scope, claim by claim (it's the governance band, not the token engine).

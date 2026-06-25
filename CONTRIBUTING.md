@@ -62,9 +62,16 @@ kernel), in addition to the CLA grant to Netra.
   block. Regenerate the scorecard snapshot with `--markdown` after a docs pass. This is the whole-corpus analogue of
   `tools/readme_freshness_audit.py`, which checks the front page.
 - **Touching the docs site or the FAQ? Keep discoverability honest.** `python
-  tools/seo_aeo_scorecard.py --scope core` grades the published Pages surfaces on five
-  SEO/AEO KPIs (title, description, headings, links, answerability) plus site-level
-  checks (sitemap, canonical, JSON-LD, `llms-full.txt`) and counts *seo-debt*. If you
+  tools/seo_aeo_scorecard.py --scope core` grades the published Pages surfaces on six
+  SEO/AEO KPIs (title, description, headings, links, links_crawlable, answerability)
+  plus site-level checks (sitemap, canonical, JSON-LD, `llms-full.txt`, citation_links)
+  and counts *seo-debt*. Beyond the presence checks (is the meta/link/JSON-LD there?)
+  it runs SUCCESS checks (does it WORK for the consumer): `links_crawlable` flags a link
+  that resolves on disk but 404s on the live site, the corpus-wide meta-distinctness pass
+  flags a duplicate `<title>`/description search can't tell apart, `citation_links`
+  flags a dead llms.txt-map or self-repo GitHub link an answer engine would follow, and
+  `llms_full_navigable` flags inlined local links that lost their source-page base path.
+  If you
   changed the FAQ or `_config.yml`, re-run `python tools/gen_structured_data.py` to
   regenerate the JSON-LD (CI hard-gates that it is in sync). The discoverability
   **scores** are strategic and live in the private repo (`--transfer`); the tool and the

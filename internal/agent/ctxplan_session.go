@@ -52,6 +52,9 @@ type SessionPlanner struct {
 	// Opts tunes the bounded probe (RecencyWindow, MaxCandidates, IncludeDurability). The zero
 	// value is valid — ctxplan fills sensible defaults (DefaultRecencyWindow / DefaultMaxCandidates).
 	Opts ctxplan.ProbeOptions
+	// Layout optionally tunes the four-area context profile (base/current/recent/deep). nil keeps
+	// the original ProbeOptions path; non-nil uses ctxplan.Index.PlanLayout.
+	Layout *ctxplan.Layout
 
 	store    *ctxplan.MemStore // the lossless byte store (id "span:<i>"); the demand-page backing
 	index    *ctxplan.Index    // the persistent candidate index, maintained incrementally
@@ -84,7 +87,12 @@ func NewSessionPlanner(budget int) *SessionPlanner {
 // maintains across turns. The Budget is inherited; the per-session state lives on the returned
 // SessionPlanner, never on the shared CtxViewPlanner.
 func (p *CtxViewPlanner) NewSession() *SessionPlanner {
-	return NewSessionPlanner(p.Budget)
+	sp := NewSessionPlanner(p.Budget)
+	if p.Layout != nil {
+		layout := *p.Layout
+		sp.Layout = &layout
+	}
+	return sp
 }
 
 // ingest lowers any messages not yet seen into the persistent store + index, in turn order, and
@@ -104,14 +112,21 @@ func (sp *SessionPlanner) ingest(messages []Message) {
 		}
 		span := sp.store.Add(role, messageDurability(role), []byte(msg.Content), false)
 		sp.index.Add(span)
+		// Pins track the NORMALIZED role (empty -> user), exactly as messagesToStore does, so
+		// a SessionPlanner and the stateless seam pin the same spans.
 		switch {
 		case role == RoleSystem && sp.systemPin == "":
 			sp.systemPin = span.ID
 		case role == RoleUser && sp.firstUserPin == "":
 			sp.firstUserPin = span.ID
-			sp.lastUserContent = msg.Content
 		case role == RoleUser:
 			sp.lastUserPin = span.ID
+		}
+		// Intents come from the last message whose RAW role is user — matching heuristicForecast
+		// exactly (it scans messages[i].Role == RoleUser, WITHOUT the empty-role normalization the
+		// store + pins use). Keeping the two role bases distinct is what makes forecast() identical
+		// to heuristicForecast for every input, not just messages with explicit roles.
+		if msg.Role == RoleUser {
 			sp.lastUserContent = msg.Content
 		}
 	}
@@ -153,6 +168,9 @@ func (sp *SessionPlanner) forecast() ctxplan.Forecast {
 // before rendering. RenderTurn is the I/O peer that pages the selected spans' bytes in.
 func (sp *SessionPlanner) PlanTurn(messages []Message) ctxplan.Plan {
 	sp.ingest(messages)
+	if sp.Layout != nil {
+		return sp.index.PlanLayout(sp.forecast(), ctxplan.Budget{Tokens: sp.Budget}, nil, *sp.Layout)
+	}
 	return sp.index.PlanCells(sp.forecast(), ctxplan.Budget{Tokens: sp.Budget}, nil, sp.Opts)
 }
 

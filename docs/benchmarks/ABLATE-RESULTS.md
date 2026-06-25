@@ -68,10 +68,13 @@ metrics reproduce exactly (see
   process start; sweeping them needs a subprocess-re-exec rung (the next child
   issue on the epic). `BuildSweep` fails loud on a non-runtime feature rather
   than silently measuring nothing.
-- **No cross-agent arm.** Regime B (pure fak vs Claude Code / ultracode) needs a
-  live model + API tokens and a distributional validity contract (success-gate,
-  N-run variance, model-named baseline, decomposed cache). It is a separate
-  harness on the epic and is **not** claimed here.
+- **Cross-agent arm — now shipped (rung 3).** Regime B (pure fak vs Claude Code /
+  ultracode) needs a live model + API tokens and a distributional validity contract
+  (success-gate, N-run variance, model-named baseline, decomposed cache). That
+  controller now exists — see [§Rung 3](#rung-3--the-cross-agent-controller-regime-b)
+  below — as a SEPARATE harness (`tools/cross_agent_ablate.py`): it shares this
+  record schema's decomposed-token discipline but deliberately does NOT use the
+  `WorkloadHash` guard, because an external model emits different tool calls each run.
 - **Two regimes, two numbers.** This document reports only kernel-efficiency
   (Regime A). It never blends into an agent-capability claim.
 
@@ -81,3 +84,70 @@ metrics reproduce exactly (see
 `TestValidate_RefusesMismatchedWorkloadHash`, `TestBuildSweep_UnknownAndDuplicate`,
 `TestAblateJSONReport`, `TestAblateUnknownFeatureUsageError`. On a native-Windows
 host run the suite under WSL (`./test.ps1`); `go build` / `go vet` are native.
+
+# Rung 3 — the cross-agent controller (Regime B)
+
+> **Regime B** of epic [#607](https://github.com/anthony-chaudhary/fak/issues/607)
+> ([#623](https://github.com/anthony-chaudhary/fak/issues/623)): the *agent* ablation.
+> It asks "what does the kernel cost/save in front of a real agent?" by running the
+> SAME task through `claude_code` (bare `claude -p`) vs `claude_code+fak`
+> (`fak guard -- claude -p`). The external model emits different tool calls each run,
+> so the `WorkloadHash` equality guard does NOT apply — validity here is
+> **distributional**, not exact-workload. The controller (`tools/cross_agent_ablate.py`)
+> enforces a four-part contract: a **success-gate** (no "saved" number unless both arms
+> completed AND succeeded), **N-run variance** (mean ± CI95 over K≥5 reps), a
+> **model-named** baseline (kernel-efficiency is *refused* unless the model is held
+> constant across arms), and a **decompose** into two numbers that are never blended.
+
+**Artifact:** [`experiments/ablate/cross-agent-pong-opus.json`](../../experiments/ablate/cross-agent-pong-opus.json)
+**Reproduce (offline, from the embedded raw reps):** `python tools/cross_agent_ablate.py report --reps <reps.json>`
+**Re-measure (live, costs API tokens):** `python tools/cross_agent_ablate.py run --task pong --k 5 --fak ./fak.exe`
+
+## The measured run — `pong` task, K=5 reps/arm, `claude-opus-4-8`
+
+The task: *create `RESULT.txt` containing exactly `PONG`* — a one-tool-call task with a
+deterministic success check (`RESULT.txt.strip() == "PONG"`). Same OAuth account both arms,
+single Windows host, single-shot sessions. Tokens are **decomposed, never summed**:
+
+| arm | success | turns | output tok | fresh input | cache-read | cache-create | total ingested | adjudication |
+|---|---|---|---|---|---|---|---|---|
+| `claude_code` (baseline) | 5/5 | 2.0 | 126.8 ±13.97 | 2503 | 42 619 | 6 955 | 52 078 | — |
+| `claude_code+fak` | 5/5 | 2.0 | 124.0 ±10.46 | 2144 | 72 506 | 6 413 | 81 063 | 5 allowed · 0 denied · 0 repaired · 0 quarantined |
+
+*(± is CI95 over the 5 successful reps; tokens are per-rep means.)*
+
+## The two numbers (never one)
+
+- **kernel-efficiency (model held constant — `claude-opus-4-8` both arms).** The kernel
+  hop is **output-token and turn neutral**: output ratio **0.98×** (saved ≈ 3 tok),
+  turns ratio **1.00×**. But it is **not** total-token-neutral: total ingested context
+  ratio **1.56×** (`−28 986` tok, a NEGATIVE "saved" = overhead, reported with its real
+  sign). The decomposition shows where it goes — fresh input *falls* (2503 → 2144) while
+  provider-cache-read *rises* (42.6k → 72.5k): the gateway hop reshapes the prompt-cache
+  split, pushing more context into the (cheapest) cache-read tier. The `+fak` arm's five
+  `Write` calls each crossed the capability floor and were **ALLOWED** (the hash-chained
+  journal carries the witness).
+- **agent-capability (model varies).** Success rate `1.0` on both arms. With both arms on
+  one model the capability axis is ~held here, so kernel-efficiency is the live number;
+  this axis becomes load-bearing once a `pure_fak` (different planner/model) arm is added.
+
+## Honesty fences (what this run does NOT establish)
+
+- **One tiny, tool-light task.** A single `Write` call ⇒ only ALLOW decisions; the deny /
+  repair / quarantine counters are an honest **zero** because this task never proposes a
+  blocked call. A denial-inducing and a multi-tool task are follow-on work.
+- **Single host, single account, single-shot sessions.** The cache-split numbers reflect
+  cold-prefix caching on one Windows box, not steady-state reuse across a long session;
+  they are illustrative of the *shape* of the kernel hop's effect, not a fleet SLA.
+- **Two regimes, two numbers — never blended.** The `1.56×` total-token figure is a
+  resource (kernel) number with the model held constant; it is never reported as an
+  agent-capability or quality multiple.
+
+## Witness
+
+`python tools/cross_agent_ablate_test.py` — 17 hermetic tests (no network, no `claude`,
+no `fak`): the `session_audit` token decomposition + de-dup, the journal verdict counter
+(ALLOW/DENY/TRANSFORM/QUARANTINE, VDSO_HIT separated), the CI95 math, the success-gate
+(no saved number off a failed arm), the model-named refusal, and the two-number decompose.
+Auto-gated as HERMETIC by `tools/gated_tool_tests.py`. The committed artifact regenerates
+byte-identical offline via `report --reps` (the raw reps are embedded).

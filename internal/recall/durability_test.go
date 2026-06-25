@@ -9,7 +9,7 @@ import (
 )
 
 // TestPromotionClassFailsClosed pins the reader-side forward-compat default of the
-// rung-1 promotion gate (#499 item 4 / #500 item 5): a missing key (a verdict from a
+// rung-1 promotion gate (#82): a missing key (a verdict from a
 // gate that does not classify) and any unknown/reserved value (e.g. `bounded`, which
 // has no validity home until rung 2) both normalize to turn — the shortest, refused
 // class. Mirrors abi.FallbackDeny: remembering-when-wrong is the expensive direction.
@@ -30,7 +30,7 @@ func TestPromotionClassFailsClosed(t *testing.T) {
 }
 
 // TestDurabilityPromotionGateBite is the single end-to-end witness of the rung-1
-// default-expire inversion (#499/#500) on real shipped code — the write gate
+// default-expire inversion (#82) on real shipped code — the write gate
 // (ctxmmu.MMU.Admit stamping Verdict.Meta["durability"]) and the durable boundary
 // (recall's promotion gate) — proving the HEADLINE thesis: expire by default,
 // promotion is the earned exception.

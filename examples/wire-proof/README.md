@@ -37,6 +37,13 @@ runs three checks, and tears the server down:
 
 Captured run: [`EXAMPLE-OUTPUT.md`](EXAMPLE-OUTPUT.md).
 
+## What you see
+
+The verifier prints the three checks as a compact PASS/FAIL transcript. A correct run shows
+the OpenAI-compatible request carrying an inline `fak` verdict block, `refund_payment`
+returning `DENY / POLICY_BLOCK`, and `search_kb` returning `ALLOW`; any missing or
+different verdict flips the script to `FAIL` and a non-zero exit.
+
 ## Scope
 
 This exercises the **call-side capability gate** only — the same layer as

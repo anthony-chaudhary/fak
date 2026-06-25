@@ -295,7 +295,7 @@ vs cold**, and **1.1× on top of an already-warm per-agent KV cache**.
   in-kernel model, drop `-print` and serve the page (below), or use `-race deep-research`.
 
 **Details:** the command's own header (`cmd/ctxdemo/main.go`) and
-[`docs/benchmarking/README.md`](../benchmarking/README.md).
+[`docs/benchmarking/README.md`](https://github.com/anthony-chaudhary/fak/blob/main/docs/benchmarking/README.md).
 
 ---
 
@@ -344,7 +344,7 @@ Every number on this page obeys the same rules, enforced in CI and in the per-de
   that creates, verifies, and publishes a claim before it can appear here.
 - **[BENCHMARK-GALLERY.md](https://github.com/anthony-chaudhary/fak/blob/main/BENCHMARK-GALLERY.md)** — the four generated hero visuals
   (model-card style), each from one source-of-truth JSON with a `--check` CI drift gate.
-- **[Benchmarking index](../benchmarking/README.md)** — how to read the baselines, the
+- **[Benchmarking index](https://github.com/anthony-chaudhary/fak/blob/main/docs/benchmarking/README.md)** — how to read the baselines, the
   measured-vs-modeled split, and the full tool inventory.
 - **[GLM52 witnessed run §3](../notes/GLM52-PURE-KERNEL-AND-AGENT-TURN-DEMOS-RESULTS-2026-06-21.md)**
   — the on-box reproduction these five numbers were taken from, closed by `go test` exit

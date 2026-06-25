@@ -50,6 +50,9 @@ FAK_BIN=./fak ./examples/wire-quarantine-demo/run.sh   # use a prebuilt binary
 > the bytes you POST, so the same result always yields the same ALLOW/QUARANTINE on every
 > run. The whole demo builds, serves, runs, and tears down in a few seconds.
 
+Windows users: run the `.sh` launcher from WSL or Git Bash; the demo itself is
+plain `fak serve` plus stdlib Python, and there is no native `.ps1` wrapper yet.
+
 ## What you see
 
 > **Reading the output:** a `✓` means *the verdict matched expectation* — so a `✓` on a

@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/appversion"
@@ -20,6 +21,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/modelengine"
 	"github.com/anthony-chaudhary/fak/internal/pathutil"
 	"github.com/anthony-chaudhary/fak/internal/policy"
+	"github.com/anthony-chaudhary/fak/internal/session"
 	"github.com/anthony-chaudhary/fak/internal/tokenizer"
 )
 
@@ -49,6 +51,12 @@ func cmdServe(argv []string) {
 	ggufPath := fs.String("gguf", "", "load these GGUF weights into the in-kernel engine at boot; the load is part of the measured startup sequence and its phase breakdown is exposed on /metrics. Default path is lean-Q8 (Q4→f32→Q8 round-trip); set FAK_Q4K=1 for the direct-resident-Q4_K path (Qwen3.6-27B q4_k_m, the P1/P2 decode lever)")
 	tokPath := fs.String("tokenizer", "", "OPTIONAL override for the in-kernel CHAT planner's tokenizer. With --gguf and no --base-url, /v1/chat/completions AND /v1/messages already serve the in-kernel model (real ChatML chat) using the GGUF's EMBEDDED tokenizer; pass this only to override it (e.g. an SPM-only checkpoint with no embedded BPE tokenizer, or a custom vocab). Accepts a tokenizer.json or its directory. e.g. ~/.cache/fak-models/tokenizers/qwen3.6")
 	ctxViewBudget := fs.Int("ctx-view-budget", 0, "wire the ctxplan context PLANNER into the live serve loop: each buffered turn, re-materialize the forwarded history as an O(1) planned VIEW under this resident-token budget (a planned view in place of appending the whole transcript, #555). 0 (default) leaves the existing path byte-for-byte unchanged. OFF by default: it rewrites in-flight turn history, so gate it until you have watched a real session. The streaming fast-path bypasses this; the buffered turn path is what gets planned.")
+	compactHistoryBudget := fs.Int("compact-history-budget", 0, "on the Anthropic PASSTHROUGH (an upstream --base-url anthropic), compact OLD conversation turns in the OUTBOUND request body down to this resident-token budget while keeping the cache_control prefix BYTE-IDENTICAL, so the upstream cache hit survives. This reaches the flagship passthrough the streaming ctxplan view cannot (#555). 0 (default) = OFF, body forwarded byte-for-byte. No effect on non-passthrough wires.")
+	sessionID := fs.String("session-id", "", "default trace/session id for callers that omit X-Trace-Id or MCP trace_id (empty = mint gw-N per request unless --context-budget-tokens is set)")
+	contextBudgetTokens := fs.Int("context-budget-tokens", 0, "seed the default session with this prompt/context-token budget; exhaustion returns a reset directive with continuation_id (0 = off)")
+	resetOnBudget := fs.Bool("reset-on-budget", false, "on context-budget exhaustion, re-arm the continuation trace with a carryover seed and continue transparently instead of returning 409 (requires --context-budget-tokens)")
+	budgetWebhook := fs.String("budget-webhook", "", "POST a JSON event to this URL when a served session's context budget crosses the warning threshold (--budget-warn-fraction) or is exhausted (the reset trigger), so an operator/monitor is notified before exhaustion (#743). Empty = off. Needs --context-budget-tokens to have a budget to watch.")
+	budgetWarnFraction := fs.Float64("budget-warn-fraction", 0.8, "consumed share (0..1) of the context budget at which --budget-webhook fires its pre-exhaustion warning (default 0.8 = 80%); <=0 or >=1 disables the warning while the exhaustion event still fires")
 	tParse := time.Now()
 	_ = fs.Parse(argv)
 	parseDur := time.Since(tParse)
@@ -139,6 +147,31 @@ func cmdServe(argv []string) {
 		fmt.Fprintf(os.Stderr, "fak serve: --require-key-env %s is set but unset/empty — refusing to start a network-facing gateway with NO authentication (set the secret or omit the flag)\n", *requireKeyEnv)
 		os.Exit(2)
 	}
+	if *contextBudgetTokens < 0 {
+		fmt.Fprintln(os.Stderr, "fak serve: --context-budget-tokens must be non-negative")
+		os.Exit(2)
+	}
+	if *resetOnBudget && *contextBudgetTokens <= 0 {
+		fmt.Fprintln(os.Stderr, "fak serve: --reset-on-budget requires --context-budget-tokens N")
+		os.Exit(2)
+	}
+	defaultTraceID := strings.TrimSpace(*sessionID)
+	if *contextBudgetTokens > 0 {
+		if defaultTraceID == "" {
+			defaultTraceID = "default"
+		}
+		serveSessions.SetBudget(defaultTraceID, session.Budget{
+			TurnsLeft:         session.Unbounded,
+			TokensLeft:        session.Unbounded,
+			ContextTokensLeft: *contextBudgetTokens,
+		})
+	}
+	// Wire the optional operator webhook: a pre-exhaustion warning at the configured
+	// consumed share and an event on exhaustion (the reset trigger), #743. Off unless a
+	// URL is given, so the served path is unchanged by default.
+	if obs := budgetWebhookObserver(*budgetWebhook); obs != nil {
+		serveSessions.WatchBudget(*budgetWarnFraction, obs)
+	}
 
 	// Resolve the optional in-kernel chat decode backend. Lookup (not Pick) so a typo
 	// or an unbuilt/absent device fails loud instead of silently degrading to CPU and
@@ -180,9 +213,14 @@ func cmdServe(argv []string) {
 		ObserveSession:              observeSession,
 		ControlSession:              controlSession,
 		ListSessions:                listSessions,
+		DecideSession:               decideSession,
+		DebitSession:                debitSession,
+		ResetOnBudget:               resetOnBudgetHook(*resetOnBudget, *contextBudgetTokens),
+		DefaultTraceID:              defaultTraceID,
 		StartTime:                   t0,
 		StartupPhases:               startupPhases,
 		CtxViewBudget:               *ctxViewBudget,
+		CompactHistoryBudget:        *compactHistoryBudget,
 	})
 	must(err)
 	srv.SetModelLoadProfile(loadProfile)
@@ -326,4 +364,17 @@ func resolveServeTokenizer(tokPath, ggufPath string) (*tokenizer.Tokenizer, bool
 		}
 	}
 	return nil, false
+}
+
+// resetOnBudgetHook gates the human-like auto-reset behind the --reset-on-budget flag.
+// When the flag is off it returns nil, so the gateway keeps the historical 409 + reset
+// directive verbatim (the reset is strictly opt-in). When on, it returns the host hook
+// that distills a carryover seed and re-arms the continuation trace with a fresh context
+// budget. The flag is validated to require --context-budget-tokens, so freshContextTokens
+// is positive here whenever enabled is true.
+func resetOnBudgetHook(enabled bool, freshContextTokens int) gateway.ResetOnBudgetFunc {
+	if !enabled {
+		return nil
+	}
+	return resetServedSessionOnBudget(freshContextTokens)
 }

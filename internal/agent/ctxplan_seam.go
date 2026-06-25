@@ -39,6 +39,10 @@ type CtxViewPlanner struct {
 	Enabled bool
 	// Budget is the O(1) resident-token window the planner materializes each turn.
 	Budget int
+	// Layout optionally enables ctxplan's four-area profile (base/current/recent/deep).
+	// nil preserves the original ProbeOptions path; a non-nil layout lets a caller tune
+	// each area's N and precision while keeping the same global resident-token Budget.
+	Layout *ctxplan.Layout
 }
 
 // ErrCtxSeamDisabled is returned by PlanTurn when the seam is OFF — the caller falls
@@ -77,6 +81,9 @@ func (p *CtxViewPlanner) PlanTurn(ctx context.Context, messages []Message) (ctxp
 	}
 	store, pinned := messagesToStore(messages)
 	forecast := heuristicForecast(messages, pinned)
+	if p.Layout != nil {
+		return ctxplan.MaterializeLayout(ctx, store, forecast, ctxplan.Budget{Tokens: p.Budget}, nil, *p.Layout)
+	}
 	return ctxplan.Materialize(ctx, store, forecast, ctxplan.Budget{Tokens: p.Budget}, nil)
 }
 
@@ -97,7 +104,15 @@ func (p *CtxViewPlanner) RenderTurn(ctx context.Context, messages []Message) ([]
 	}
 	store, pinned := messagesToStore(messages)
 	forecast := heuristicForecast(messages, pinned)
-	view, err := ctxplan.Materialize(ctx, store, forecast, ctxplan.Budget{Tokens: p.Budget}, nil)
+	var (
+		view ctxplan.View
+		err  error
+	)
+	if p.Layout != nil {
+		view, err = ctxplan.MaterializeLayout(ctx, store, forecast, ctxplan.Budget{Tokens: p.Budget}, nil, *p.Layout)
+	} else {
+		view, err = ctxplan.Materialize(ctx, store, forecast, ctxplan.Budget{Tokens: p.Budget}, nil)
+	}
 	if err != nil {
 		return nil, err
 	}

@@ -384,6 +384,51 @@ def test_live_payload_shape() -> None:
     assert set(p["corpus"]["axis_debt"]) == set(dr.AXIS_WEIGHTS)
 
 
+def test_check_markdown_doc_accepts_fresh_generated_snapshot(tmp_path: Path) -> None:
+    payload = {
+        "corpus": {
+            "n_demos": 0,
+            "robustness_debt": 0,
+            "axis_debt": {"simplicity": 0, "speed": 0, "durability": 0},
+            "mean_score": 0,
+            "median_score": 0,
+            "min_score": 0,
+            "max_score": 0,
+            "grade_distribution": {"A": 0, "B": 0, "C": 0, "D": 0, "F": 0},
+        },
+        "demos": [],
+    }
+    doc = tmp_path / dr.SCORECARD_DOC
+    doc.parent.mkdir(parents=True)
+    doc.write_text(dr.render_markdown(payload, stamp="2099-01-02") + "\n", encoding="utf-8")
+    check = dr.check_markdown_doc(tmp_path, payload)
+    assert check["ok"], check
+    assert check["stamp"] == "2099-01-02", check
+
+
+def test_check_markdown_doc_rejects_stale_snapshot(tmp_path: Path) -> None:
+    payload = {
+        "corpus": {
+            "n_demos": 0,
+            "robustness_debt": 0,
+            "axis_debt": {"simplicity": 0, "speed": 0, "durability": 0},
+            "mean_score": 0,
+            "median_score": 0,
+            "min_score": 0,
+            "max_score": 0,
+            "grade_distribution": {"A": 0, "B": 0, "C": 0, "D": 0, "F": 0},
+        },
+        "demos": [],
+    }
+    doc = tmp_path / dr.SCORECARD_DOC
+    doc.parent.mkdir(parents=True)
+    stale = dr.render_markdown(payload, stamp="2099-01-02").replace("Demos scored | 0", "Demos scored | 99")
+    doc.write_text(stale + "\n", encoding="utf-8")
+    check = dr.check_markdown_doc(tmp_path, payload)
+    assert not check["ok"], check
+    assert check["diff"], check
+
+
 # --- self-contained runner (mirrors demo_quality_scorecard_test.py) --------
 
 def main() -> int:

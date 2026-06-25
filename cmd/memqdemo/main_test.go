@@ -12,7 +12,7 @@ import (
 // the narrative surfaces the composable strategies + a novel authored query.
 func TestDemoRunsAndUpholdsInvariants(t *testing.T) {
 	var buf bytes.Buffer
-	if err := run(&buf); err != nil {
+	if err := run(&buf, ""); err != nil {
 		t.Fatalf("demo run failed (an invariant likely broke): %v", err)
 	}
 	got := buf.String()

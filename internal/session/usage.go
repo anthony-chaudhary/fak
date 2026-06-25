@@ -28,9 +28,9 @@ func (t *Table) DebitUsage(trace string, u Usage) State {
 		return DefaultState(trace)
 	}
 	t.mu.Lock()
-	defer t.mu.Unlock()
 	cur := t.getLocked(trace)
 	if cur.Run.terminal() || cur.Run == Paused {
+		t.mu.Unlock()
 		return cur
 	}
 	changed := false
@@ -38,22 +38,41 @@ func (t *Table) DebitUsage(trace string, u Usage) State {
 		cur.Budget.TokensLeft -= u.OutputTokens
 		changed = true
 	}
+	// fireKind/fire capture which budget event (if any) this debit triggers; the observer
+	// itself runs AFTER the lock is released so a slow webhook never stalls other sessions.
+	fireKind, fire := BudgetWarn, false
 	if u.ContextTokens > 0 && cur.Budget.contextBounded() {
+		prevLeft := cur.Budget.ContextTokensLeft
 		cur.Budget.ContextTokensLeft -= u.ContextTokens
 		changed = true
-		if cur.Budget.ContextTokensLeft <= 0 {
+		switch {
+		case cur.Budget.ContextTokensLeft <= 0:
 			cur.Budget.ContextTokensLeft = 0
 			cur.Run = Draining
 			cur.Reason = ReasonBudgetContext
 			if cur.ContinuationID == "" {
 				cur.ContinuationID = continuationID(trace, cur.Rev+1)
 			}
+			fireKind, fire = BudgetExhausted, t.obs != nil
+		case t.crossedWarnLocked(cur.Budget, prevLeft):
+			fireKind, fire = BudgetWarn, true
 		}
 	}
 	if !changed {
+		t.mu.Unlock()
 		return cur
 	}
-	return t.putLocked(cur)
+	out := t.putLocked(cur)
+	obs := t.obs
+	var ev BudgetEvent
+	if fire && obs != nil {
+		ev = budgetEvent(out, fireKind)
+	}
+	t.mu.Unlock()
+	if fire && obs != nil {
+		obs(ev)
+	}
+	return out
 }
 
 func continuationID(trace string, rev uint64) string {

@@ -36,6 +36,9 @@ every time and on every platform, and the whole battery **runs in ~1–2 seconds
 
 A captured run is in [`EXAMPLE-OUTPUT.md`](./EXAMPLE-OUTPUT.md).
 
+Windows users: run the `.sh` launcher from WSL or Git Bash; the battery itself is
+Go-only and deterministic, and there is no native `.ps1` wrapper yet.
+
 ## What "ASR-gated" means
 
 The battery scores **two** defenses side by side and reports the ASR of each:

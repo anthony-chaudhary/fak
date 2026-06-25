@@ -1,0 +1,19 @@
+{
+  "schema": "fak.shared-patch.v1",
+  "task_id": "task_shared_demo",
+  "base_rev": "sha256:taskrev003",
+  "actor": {
+    "kind": "human",
+    "id": "release-owner"
+  },
+  "scope": "fleet",
+  "durability": "session",
+  "ops": [
+    {
+      "op": "replace",
+      "path": "/open_decisions/dec_release_owner/state",
+      "value": "completed"
+    }
+  ],
+  "message": "Approve the release publication decision."
+}

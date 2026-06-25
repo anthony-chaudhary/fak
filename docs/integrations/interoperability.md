@@ -163,6 +163,8 @@ is above, and the adapter position is in the protocol docs linked from each row.
 
 ## Cross-references
 
+- [fak + LiteLLM](litellm.md): the three topologies (fak in front of a LiteLLM proxy, fak as a governed node behind it, fak's per-aspect routing dispatching through it) — the flagship router/proxy integration.
+- [Routers & gateways](routers.md): OpenRouter, Portkey, LiteLLM Router, Unify, Martian — fak as a complement to request-level routers, with the residency guarantee.
 - [Compatibility matrix](compatibility-matrix.md): the full sourced table of 44 tools, the wire each speaks, the exact repoint key, and a source link.
 - [Integration index](README.md): which-agent routing, the universal base-URL recipe, and the 60-second offline proof.
 - [Claude Code](claude.md) · [Cursor](cursor.md) · [OpenAI Codex](openai-codex.md): the dedicated harness guides.

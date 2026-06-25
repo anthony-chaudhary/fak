@@ -91,22 +91,23 @@ func commandWrites(cmd string) bool {
 			}
 		}
 	}
-	// Interpreter inline-program write: a general-purpose interpreter invoked with
-	// an inline-program flag (`python -c '…'`, `node -e '…'`, …) can open and rewrite
-	// a guarded file from inside the program string with NO shellWriteVerb token and
+	// Interpreter inline-program write: a general-purpose interpreter invoked with an
+	// inline-program flag (`python -c '…'`, `node -e '…'`, `ruby -e '…'`, …) can open and
+	// rewrite a guarded file from inside the program string with NO shellWriteVerb token and
 	// NO `>` redirect — `python3 -c "open('internal/abi/x.go','w').write(...)"` would
 	// otherwise launder a self-edit past every rung above (#172 Hole 1 residual, the
-	// `perl -i`/`ruby -i` gap one interpreter further out — python/node are the ones
-	// most likely on a coding agent's PATH). The program string is opaque to a
-	// substring floor, so — matching this floor's documented "a guarded tree named
-	// alongside a writer is refused; a false refusal is cheap" stance — an inline
-	// interpreter program is treated as write-shaped. commandSelfModify only reaches
-	// here once the command already names a guarded glob, so a `python -c` that
-	// touches nothing guarded is unaffected; only an inline program that mentions a
-	// guarded tree is refused. A read-shaped interpreter call WITHOUT an inline-
-	// program flag (`python score.py`, `node app.js`) is not matched here.
+	// `perl -i`/`ruby -i` gap one interpreter further out — python/node/ruby are the ones
+	// most likely on a coding agent's PATH). The program string is opaque to this floor, so
+	// — matching its documented "a guarded tree named alongside a writer is refused; a false
+	// refusal is cheap" stance — an inline interpreter program is treated as write-shaped.
+	// Matching is by TOKEN (interpreterEvalMatch), so the idiomatic `ruby -e'…'` (no space),
+	// `node --eval=…`, and intervening-flag (`ruby -rjson -e …`) spellings are all caught,
+	// not just a `<interp> <flag> ` prefix. commandSelfModify only reaches here once the
+	// command already names a guarded glob, so an inline program touching nothing guarded is
+	// unaffected; a read-shaped interpreter call WITHOUT an eval flag (`python score.py`,
+	// `node app.js`) names no flag token and is not matched.
 	for _, ev := range interpreterEvalFlags {
-		if strings.Contains(lc, ev) {
+		if interpreterEvalMatch(lc, ev) {
 			return true
 		}
 	}
@@ -254,4 +255,72 @@ func isShellSep(b byte) bool {
 		return true
 	}
 	return false
+}
+
+// interpreterEvalMatch reports whether lc (the lowercased command) invokes spec.interp
+// with one of its inline-eval flags, both matched as TOKENS. The interpreter need only
+// appear as a word (namesWord) and a flag as its own argument (namesFlagToken), so the
+// flag's delimiter (space, quote, `=`, backtick, end) and any intervening flags between
+// the interpreter and the eval flag (`ruby -rjson -e …`) do not let an inline self-edit
+// slip — the porous-prefix gap a fixed `<interp> <flag> ` table leaves open.
+func interpreterEvalMatch(lc string, spec interpreterEvalSpec) bool {
+	if !namesWord(lc, spec.interp) {
+		return false
+	}
+	for _, f := range spec.flags {
+		if namesFlagToken(lc, f) {
+			return true
+		}
+	}
+	return false
+}
+
+// namesWord reports whether tok appears in lc as a whole word: a left boundary of string
+// start, whitespace, or a shell separator, and a right boundary of whitespace (an
+// interpreter that runs anything always has an argument after it). So `ruby`, `| ruby`,
+// and `xargs ruby` match, but `myruby` and a `…/ruby/…` path fragment do not.
+func namesWord(lc, tok string) bool {
+	for from := 0; ; {
+		i := strings.Index(lc[from:], tok)
+		if i < 0 {
+			return false
+		}
+		at := from + i
+		end := at + len(tok)
+		leftOK := at == 0 || lc[at-1] == ' ' || lc[at-1] == '\t' || isShellSep(lc[at-1])
+		rightOK := end < len(lc) && (lc[end] == ' ' || lc[end] == '\t')
+		if leftOK && rightOK {
+			return true
+		}
+		from = at + 1
+	}
+}
+
+// namesFlagToken reports whether flag appears in lc as its own argument token: a left
+// boundary of whitespace and a right boundary of whitespace, a quote (`'` `"` “ ` “),
+// `=`, or end of string. So `-e 'p'`, `-e'p'`, `-e"p"`, `--eval=p`, and a trailing `-e`
+// all match, while `-e` inside `--eval` (left boundary `-`) or inside a longer word does
+// not. The right-boundary set is what catches the no-space/quoted/`=`-joined spellings a
+// fixed `<flag> ` prefix misses.
+func namesFlagToken(lc, flag string) bool {
+	for from := 0; ; {
+		i := strings.Index(lc[from:], flag)
+		if i < 0 {
+			return false
+		}
+		at := from + i
+		leftOK := at > 0 && (lc[at-1] == ' ' || lc[at-1] == '\t')
+		end := at + len(flag)
+		rightOK := end >= len(lc)
+		if !rightOK {
+			switch lc[end] {
+			case ' ', '\t', '\'', '"', '`', '=':
+				rightOK = true
+			}
+		}
+		if leftOK && rightOK {
+			return true
+		}
+		from = at + 1
+	}
 }

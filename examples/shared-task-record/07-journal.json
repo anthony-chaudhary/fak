@@ -1,0 +1,375 @@
+{
+  "schema": "fak.shared-task-journal.v1",
+  "task_id": "task_shared_demo",
+  "initial": {
+    "schema": "fak.shared-task.v1",
+    "task_id": "task_shared_demo",
+    "rev": "sha256:taskrev001",
+    "state": "working",
+    "title": "Coordinate the shared release checklist",
+    "body_ref": {
+      "kind": "cas",
+      "digest": "sha256:body001",
+      "bytes": 612,
+      "taint": "tainted",
+      "scope": "fleet",
+      "durability": "session"
+    },
+    "artifacts": [
+      {
+        "artifact_id": "art_release_notes",
+        "ref": "sha256:artifact001",
+        "media_type": "text/markdown",
+        "taint": "trusted",
+        "scope": "fleet",
+        "store": "local-cas"
+      }
+    ],
+    "notes": [],
+    "open_decisions": [],
+    "updated_by": {
+      "kind": "agent",
+      "id": "planner"
+    },
+    "updated_at": "2026-06-25T00:00:00Z"
+  },
+  "entries": [
+    {
+      "event": {
+        "schema": "fak.shared-event.v1",
+        "event_id": "evt_live_update_001",
+        "task_id": "task_shared_demo",
+        "prev_event": "",
+        "event_kind": "state_changed",
+        "actor": {
+          "kind": "agent",
+          "id": "runner"
+        },
+        "base_rev": "sha256:taskrev001",
+        "next_rev": "sha256:taskrev002",
+        "scope": "fleet",
+        "durability": "session",
+        "taint": "tainted",
+        "patch_digest": "sha256:patchlive001",
+        "verdict": "accepted",
+        "reason": "",
+        "ts": "2026-06-25T00:01:00Z"
+      },
+      "record": {
+        "schema": "fak.shared-task.v1",
+        "task_id": "task_shared_demo",
+        "rev": "sha256:taskrev002",
+        "state": "input_required",
+        "title": "Coordinate the shared release checklist",
+        "body_ref": {
+          "kind": "cas",
+          "digest": "sha256:body001",
+          "bytes": 612,
+          "taint": "tainted",
+          "scope": "fleet",
+          "durability": "session"
+        },
+        "artifacts": [
+          {
+            "artifact_id": "art_release_notes",
+            "ref": "sha256:artifact001",
+            "media_type": "text/markdown",
+            "taint": "trusted",
+            "scope": "fleet",
+            "store": "local-cas"
+          }
+        ],
+        "notes": [],
+        "open_decisions": [],
+        "updated_by": {
+          "kind": "agent",
+          "id": "runner"
+        },
+        "updated_at": "2026-06-25T00:01:00Z"
+      }
+    },
+    {
+      "event": {
+        "schema": "fak.shared-event.v1",
+        "event_id": "evt_human_patch_001",
+        "task_id": "task_shared_demo",
+        "prev_event": "sha256:event001",
+        "event_kind": "patch_accepted",
+        "actor": {
+          "kind": "human",
+          "id": "operator"
+        },
+        "base_rev": "sha256:taskrev002",
+        "next_rev": "sha256:taskrev003",
+        "scope": "fleet",
+        "durability": "session",
+        "taint": "tainted",
+        "patch_digest": "sha256:patchhuman001",
+        "verdict": "accepted",
+        "reason": "",
+        "ts": "2026-06-25T00:02:00Z"
+      },
+      "record": {
+        "schema": "fak.shared-task.v1",
+        "task_id": "task_shared_demo",
+        "rev": "sha256:taskrev003",
+        "state": "input_required",
+        "title": "Coordinate the shared release checklist",
+        "body_ref": {
+          "kind": "cas",
+          "digest": "sha256:body001",
+          "bytes": 612,
+          "taint": "tainted",
+          "scope": "fleet",
+          "durability": "session"
+        },
+        "artifacts": [
+          {
+            "artifact_id": "art_release_notes",
+            "ref": "sha256:artifact001",
+            "media_type": "text/markdown",
+            "taint": "trusted",
+            "scope": "fleet",
+            "store": "local-cas"
+          }
+        ],
+        "notes": [],
+        "open_decisions": [
+          {
+            "decision_id": "dec_release_owner",
+            "state": "input_required",
+            "reason": "release owner must approve the public note"
+          }
+        ],
+        "updated_by": {
+          "kind": "human",
+          "id": "operator"
+        },
+        "updated_at": "2026-06-25T00:02:00Z"
+      }
+    },
+    {
+      "event": {
+        "schema": "fak.shared-event.v1",
+        "event_id": "evt_decision_resolved_001",
+        "task_id": "task_shared_demo",
+        "prev_event": "sha256:event002",
+        "event_kind": "patch_accepted",
+        "actor": {
+          "kind": "human",
+          "id": "release-owner"
+        },
+        "base_rev": "sha256:taskrev003",
+        "next_rev": "sha256:taskrev004",
+        "scope": "fleet",
+        "durability": "session",
+        "taint": "tainted",
+        "patch_digest": "sha256:patchdecision001",
+        "verdict": "accepted",
+        "reason": "",
+        "ts": "2026-06-25T00:03:00Z"
+      },
+      "record": {
+        "schema": "fak.shared-task.v1",
+        "task_id": "task_shared_demo",
+        "rev": "sha256:taskrev004",
+        "state": "input_required",
+        "title": "Coordinate the shared release checklist",
+        "body_ref": {
+          "kind": "cas",
+          "digest": "sha256:body001",
+          "bytes": 612,
+          "taint": "tainted",
+          "scope": "fleet",
+          "durability": "session"
+        },
+        "artifacts": [
+          {
+            "artifact_id": "art_release_notes",
+            "ref": "sha256:artifact001",
+            "media_type": "text/markdown",
+            "taint": "trusted",
+            "scope": "fleet",
+            "store": "local-cas"
+          }
+        ],
+        "notes": [],
+        "open_decisions": [
+          {
+            "decision_id": "dec_release_owner",
+            "state": "completed",
+            "reason": "release owner must approve the public note"
+          }
+        ],
+        "updated_by": {
+          "kind": "human",
+          "id": "release-owner"
+        },
+        "updated_at": "2026-06-25T00:03:00Z"
+      }
+    },
+    {
+      "event": {
+        "schema": "fak.shared-event.v1",
+        "event_id": "evt_note_added_001",
+        "task_id": "task_shared_demo",
+        "prev_event": "sha256:event003",
+        "event_kind": "patch_accepted",
+        "actor": {
+          "kind": "human",
+          "id": "operator"
+        },
+        "base_rev": "sha256:taskrev004",
+        "next_rev": "sha256:taskrev005",
+        "scope": "fleet",
+        "durability": "session",
+        "taint": "tainted",
+        "patch_digest": "sha256:patchnote001",
+        "verdict": "accepted",
+        "reason": "",
+        "ts": "2026-06-25T00:04:00Z"
+      },
+      "record": {
+        "schema": "fak.shared-task.v1",
+        "task_id": "task_shared_demo",
+        "rev": "sha256:taskrev005",
+        "state": "input_required",
+        "title": "Coordinate the shared release checklist",
+        "body_ref": {
+          "kind": "cas",
+          "digest": "sha256:body001",
+          "bytes": 612,
+          "taint": "tainted",
+          "scope": "fleet",
+          "durability": "session"
+        },
+        "artifacts": [
+          {
+            "artifact_id": "art_release_notes",
+            "ref": "sha256:artifact001",
+            "media_type": "text/markdown",
+            "taint": "trusted",
+            "scope": "fleet",
+            "store": "local-cas"
+          }
+        ],
+        "notes": [
+          {
+            "note_id": "note_release_context",
+            "kind": "comment",
+            "body_ref": {
+              "kind": "external",
+              "digest": "sha256:notebody001",
+              "bytes": 128,
+              "taint": "tainted",
+              "scope": "fleet",
+              "durability": "session",
+              "store": "l3-kv",
+              "deletion_certificate": "sha256:deletenote001"
+            },
+            "author": {
+              "kind": "human",
+              "id": "operator"
+            },
+            "created_at": "2026-06-25T00:04:00Z"
+          }
+        ],
+        "open_decisions": [
+          {
+            "decision_id": "dec_release_owner",
+            "state": "completed",
+            "reason": "release owner must approve the public note"
+          }
+        ],
+        "updated_by": {
+          "kind": "human",
+          "id": "operator"
+        },
+        "updated_at": "2026-06-25T00:04:00Z"
+      }
+    },
+    {
+      "event": {
+        "schema": "fak.shared-event.v1",
+        "event_id": "evt_body_ref_001",
+        "task_id": "task_shared_demo",
+        "prev_event": "sha256:event004",
+        "event_kind": "patch_accepted",
+        "actor": {
+          "kind": "human",
+          "id": "operator"
+        },
+        "base_rev": "sha256:taskrev005",
+        "next_rev": "sha256:taskrev006",
+        "scope": "fleet",
+        "durability": "session",
+        "taint": "tainted",
+        "patch_digest": "sha256:patchbody001",
+        "verdict": "accepted",
+        "reason": "",
+        "ts": "2026-06-25T00:05:00Z"
+      },
+      "record": {
+        "schema": "fak.shared-task.v1",
+        "task_id": "task_shared_demo",
+        "rev": "sha256:taskrev006",
+        "state": "input_required",
+        "title": "Coordinate the shared release checklist",
+        "body_ref": {
+          "kind": "external",
+          "digest": "sha256:bodyremote001",
+          "bytes": 512,
+          "taint": "tainted",
+          "scope": "fleet",
+          "durability": "session",
+          "store": "l3-kv",
+          "deletion_certificate": "sha256:deletebody001"
+        },
+        "artifacts": [
+          {
+            "artifact_id": "art_release_notes",
+            "ref": "sha256:artifact001",
+            "media_type": "text/markdown",
+            "taint": "trusted",
+            "scope": "fleet",
+            "store": "local-cas"
+          }
+        ],
+        "notes": [
+          {
+            "note_id": "note_release_context",
+            "kind": "comment",
+            "body_ref": {
+              "kind": "external",
+              "digest": "sha256:notebody001",
+              "bytes": 128,
+              "taint": "tainted",
+              "scope": "fleet",
+              "durability": "session",
+              "store": "l3-kv",
+              "deletion_certificate": "sha256:deletenote001"
+            },
+            "author": {
+              "kind": "human",
+              "id": "operator"
+            },
+            "created_at": "2026-06-25T00:04:00Z"
+          }
+        ],
+        "open_decisions": [
+          {
+            "decision_id": "dec_release_owner",
+            "state": "completed",
+            "reason": "release owner must approve the public note"
+          }
+        ],
+        "updated_by": {
+          "kind": "human",
+          "id": "operator"
+        },
+        "updated_at": "2026-06-25T00:05:00Z"
+      }
+    }
+  ],
+  "digest": "sha256:journal001"
+}

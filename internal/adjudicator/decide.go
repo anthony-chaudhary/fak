@@ -468,18 +468,40 @@ func matchGlob(path string, globs []string) string {
 	return ""
 }
 
-// interpreterEvalFlags are the `<interpreter> <inline-program-flag>` prefixes that
-// run code from an opaque string argument able to write a file directly (#172
-// Hole 1 residual). They are the interpreter analogue of shellWriteVerbs: python
-// and node are the general-purpose runtimes most likely on a coding agent's PATH,
-// and each carries an inline-eval flag (`-c` / `-e` / `--eval` / `-p`/`--print`,
-// which evaluates AND can have side effects). Matched case-insensitively against
-// the lowercased command; the trailing space pins the flag as its own token so a
-// path like `mynode-eval.txt` cannot trip it.
-var interpreterEvalFlags = []string{
-	"python -c ", "python3 -c ", "python -c\"", "python3 -c\"",
-	"node -e ", "node --eval ", "node -e\"", "node --eval\"",
-	"node -p ", "node --print ",
+// interpreterEvalSpec pairs a general-purpose interpreter with the inline-program flags
+// whose presence as a TOKEN means it runs code from an opaque string argument able to
+// write a file directly.
+type interpreterEvalSpec struct {
+	interp string   // the interpreter named as a command word (`ruby`, `node`, …)
+	flags  []string // its inline-eval flags (`-e`, `--eval`, `-c`, `-p`/`--print`)
+}
+
+// interpreterEvalFlags is the adjudicator's inline-eval write floor (#172 Hole 1
+// residual): the general-purpose interpreters most likely on a coding agent's PATH —
+// python, node, and ruby — each paired with the inline-program flags that run an opaque
+// program string. It is the interpreter analogue of shellWriteVerbs; commandWrites ranges
+// over it and treats such a command as write-shaped, routing it through the SAME
+// commandSelfModify guard the shell floor uses.
+//
+// ruby joins python/node to close an asymmetry the rulesynth RSI loop (internal/rsiloop,
+// run with -harness rulesynth) mined from the near-miss corpus and the keep-bit KEPT:
+// `ruby -i` (an in-place edit) is already caught by shellWriteVerbs, but `ruby -e
+// 'File.write("internal/adjudicator/decide.go", …)'` — the EVAL flag doing the same
+// self-edit — slipped every rung. `perl -e`, `php -r`, and `lua -e` are the same shape and
+// remain the residual queue the loop's corpus drives next, so they are deliberately not
+// listed here yet.
+//
+// Detection is by TOKEN, not a fixed `<interp> <flag> ` prefix (see interpreterEvalMatch):
+// the interpreter need only appear as a word and the flag as its own argument, so the
+// idiomatic no-space, quoted, and `=`-joined spellings (`ruby -e'…'`, `node --eval=…`) and
+// intervening flags (`ruby -rjson -e …`) are all caught — closing the porous-prefix gap a
+// fixed-spelling table leaves open. The identifier name `interpreterEvalFlags` is pinned by
+// architest (TestInlineEvalFloorWiredInCommandWrites); rename only with that gate's constant.
+var interpreterEvalFlags = []interpreterEvalSpec{
+	{"python3", []string{"-c"}},
+	{"python", []string{"-c"}},
+	{"node", []string{"-e", "--eval", "-p", "--print"}},
+	{"ruby", []string{"-e", "--eval"}},
 }
 
 // evalArgPredicates runs every predicate that targets tool against the decoded

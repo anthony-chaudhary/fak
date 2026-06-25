@@ -85,11 +85,21 @@ jobs:
         run: |
           awk '/^- \[/{n=0; if(index($0,"[SHIPPED]"))n++; if(index($0,"[SIMULATED]"))n++; if(index($0,"[STUB]"))n++; c++; if(n!=1){print "VIOLATION:",$0; bad++}} END{printf "claims-lint: %d lines, %d violations\n",c,bad; if(bad>0||c==0)exit 1}' CLAIMS.md
 
-      - name: repo-hygiene gates (doc-placement · links · file-admission · secret-shapes · brand-descriptor · hardware-names)
+      - name: repo-hygiene gates (doc-placement · links · hosted-demos · demo-commands · browser-demo-contract · file-admission · secret-shapes · brand-descriptor · hardware-names)
         working-directory: ${{ github.workspace }}
         run: |
           python tools/check_doc_placement.py --audit-tree
           python tools/check_links.py --audit-tree
+          # Hosted-demo URL guard: static/no-network by default. It prevents docs/demos.html
+          # from reintroducing stale VM paths/ports or implying HTTPS support for the IP host
+          # before the public deployment actually has TLS.
+          python tools/demo_live_links.py
+          # Demo-command guard: static/no-network. It keeps run-the-demos and cmd/*/README
+          # from naming stale `go run ./cmd/...`, helper script, or python tool targets.
+          python tools/demo_command_audit.py
+          # Browser-demo contract guard: static/no-network. It keeps code default ports,
+          # local run docs, PORT examples, base-path examples, and nginx proxy snippets synced.
+          python tools/demo_browser_contract.py
           python tools/check_committed_files.py --audit-tree
           python tools/check_secret_shapes.py --audit-tree
           # Brand-descriptor guard (#591): fak's PRIMARY noun stays "the Fused Agent
@@ -115,6 +125,26 @@ jobs:
           # over the tracked tools tree (clean today: sync_memory/ctxcost/ctxwin pass).
           python tools/claude_config_home_guard_test.py
           python tools/claude_config_home_guard.py --check
+
+      - name: demo audit tool tests (registry · live-links · command refs · browser contract · smoke harnesses)
+        working-directory: ${{ github.workspace }}
+        run: |
+          python tools/demo_registry_test.py
+          python tools/demo_live_links_test.py
+          python tools/demo_command_audit_test.py
+          python tools/demo_browser_contract_test.py
+          python tools/demo_http_smoke_test.py
+          python tools/demo_headless_smoke_test.py
+
+      - name: demo HTTP smoke (browser demos build · base-path mount · page/API fetch)
+        working-directory: ${{ github.workspace }}
+        run: |
+          python tools/demo_http_smoke.py --timeout 60
+
+      - name: demo headless smoke (model-free terminal witnesses reproduce invariants)
+        working-directory: ${{ github.workspace }}
+        run: |
+          python tools/demo_headless_smoke.py --timeout 120
 
       # Skill-frontmatter lint: the load-bearing Claude-only SKILL.md frontmatter keys
       # (allowed-tools / disable-model-invocation / user-invocable) that opencode silently
@@ -309,23 +339,20 @@ jobs:
           echo "::endgroup::"
 
       # Demo-quality scorecard: the runnable-demos analogue of the docs scorecard.
-      # Grades every runnable demo (examples/* + cmd/simpledemo) on five axes
+      # Grades every runnable demo (examples/* + cmd/*demo + explicit demo commands) on five axes
       # (runnable · reproducible · honest_scope · self_contained · documented) and
       # counts demo-debt (no one-command runner, no captured EXAMPLE-OUTPUT, no
       # "what this does NOT claim" scope statement, state created without cleanup,
-      # missing title). Two tiers, matching how the gofmt / docs gates ratcheted:
-      #   * the tool's own unit tests are HARD (a real regression suite);
-      #   * the scorecard itself is ADVISORY for now — the public-scrub can drop a
-      #     demo's verify.py / EXAMPLE-OUTPUT.md, so demo-debt may be > 0 on the
-      #     public tree; surfaced as a ::warning:: until stable, then RATCHET to HARD.
+      # missing title). The corpus is now clean, so this is HARD: demo-debt must
+      # stay at zero instead of surfacing as an advisory warning.
       # Pure-stdlib Python, repo root like the other honesty gates.
-      - name: demo-quality scorecard (5 axes + demo-debt; tests HARD, scorecard advisory)
+      - name: demo-quality scorecard (5 axes + demo-debt; HARD zero-debt gate)
         working-directory: ${{ github.workspace }}
         run: |
           python tools/demo_quality_scorecard_test.py
-          echo "::group::demo-quality-scorecard (advisory until stable on the public tree)"
-          python tools/demo_quality_scorecard.py \
-            || echo "::warning title=demo-debt::demo-debt present (advisory) — see docs/DEMO-QUALITY-SCORECARD.md; retire worst-first (add a runner, capture EXAMPLE-OUTPUT, state scope), then re-arm the HARD gate"
+          echo "::group::demo-quality-scorecard (HARD zero demo-debt gate)"
+          python tools/demo_quality_scorecard.py
+          python tools/demo_quality_scorecard.py --check-doc
           echo "::endgroup::"
 
       # Demo-robustness scorecard: the SAME demo corpus through a second lens —
@@ -333,18 +360,16 @@ jobs:
       # running": simple to run, fast with no surprise waits, durable over time.
       # Three axes (simplicity · speed · durability) and a robustness-debt integer
       # (an unbounded wait loop, an unpinned run-time dep, no stated runtime, no
-      # stability guarantee). Same two tiers as its siblings:
-      #   * the tool's own unit tests are HARD (a real regression suite);
-      #   * the scorecard itself is ADVISORY for now — surfaced as a ::warning::
-      #     while robustness-debt is retired, then RATCHET to HARD.
+      # stability guarantee). The corpus is clean, so this is HARD: robustness-debt
+      # must stay at zero instead of surfacing as an advisory warning.
       # Pure-stdlib Python, repo root like the other honesty gates.
-      - name: demo-robustness scorecard (3 axes + robustness-debt; tests HARD, scorecard advisory)
+      - name: demo-robustness scorecard (3 axes + robustness-debt; HARD zero-debt gate)
         working-directory: ${{ github.workspace }}
         run: |
           python tools/demo_robustness_scorecard_test.py
-          echo "::group::demo-robustness-scorecard (advisory while robustness-debt is retired)"
-          python tools/demo_robustness_scorecard.py \
-            || echo "::warning title=robustness-debt::robustness-debt present (advisory) — see docs/DEMO-ROBUSTNESS-SCORECARD.md; retire worst-first (bound unbounded waits, pin/offline run-time deps, state runtime + a stability guarantee), then re-arm the HARD gate"
+          echo "::group::demo-robustness-scorecard (HARD zero robustness-debt gate)"
+          python tools/demo_robustness_scorecard.py
+          python tools/demo_robustness_scorecard.py --check-doc
           echo "::endgroup::"
 
       # SEO/AEO discoverability gate (the docs scorecard's discovery-side twin).

@@ -99,3 +99,9 @@ func TestConcat(t *testing.T) {
 		t.Fatalf("concat() = %v, want empty", got3)
 	}
 }
+
+func TestDeletionCertificateSelfcheckRuns(t *testing.T) {
+	if err := run(""); err != nil {
+		t.Fatalf("deletioncert selfcheck failed: %v", err)
+	}
+}

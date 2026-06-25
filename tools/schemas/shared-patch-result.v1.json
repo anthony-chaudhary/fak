@@ -1,0 +1,21 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "fak/shared-patch-result.v1.json",
+  "title": "Shared Task Patch Result",
+  "type": "object",
+  "required": ["schema", "task_id", "base_rev", "current_rev", "verdict", "reason"],
+  "properties": {
+    "schema": {"type": "string", "const": "fak.shared-patch-result.v1"},
+    "task_id": {"type": "string", "pattern": "^task_[A-Za-z0-9_.-]+$"},
+    "base_rev": {"type": "string", "pattern": "^sha256:.+"},
+    "current_rev": {"type": "string", "pattern": "^sha256:.+"},
+    "verdict": {"type": "string", "enum": ["accepted", "conflict", "quarantined", "denied", "needs_approval"]},
+    "reason": {"type": "string"},
+    "event_id": {"type": "string"},
+    "record_ref": {"type": "string"},
+    "approval": {"type": "object"},
+    "denial": {"type": "object"},
+    "quarantine": {"type": "object"},
+    "conflict": {"type": "object"}
+  }
+}

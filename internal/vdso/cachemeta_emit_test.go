@@ -178,6 +178,89 @@ func TestCacheEmission_Tier3StaticHit(t *testing.T) {
 	}
 }
 
+// §2.5: a fast-path MISS must ALSO emit a first-class cachemeta event — the acceptance
+// is "admissions/evictions/hits/misses", so the cache event stream is complete and a low
+// hit rate is explainable from the SAME stream, by reason and by the consumer that
+// experienced it. A served hit must emit no miss.
+func TestCacheEmission_Miss(t *testing.T) {
+	v := New(8)
+	events, mu := collectEvents(v)
+	ctx := context.Background()
+
+	// (1) A cacheable read nothing has filled -> NOT_CACHED, attributed to its agent/turn.
+	c := roCall("read_doc", `{"id":"q"}`)
+	c.TraceID = "trace-m"
+	c.Meta[MetaAgentID] = "agent-M"
+	c.Meta[MetaTurn] = "turn-1"
+	if _, ok := v.Lookup(ctx, c); ok {
+		t.Fatalf("an uncached read must miss")
+	}
+	// (2) A write-shaped tool is never fast-path eligible -> DESTRUCTIVE.
+	if _, ok := v.Lookup(ctx, roCall("delete_doc", `{"id":"q"}`)); ok {
+		t.Fatalf("a write-shaped call must miss")
+	}
+	// (3) A hint-less call cannot be proven cacheable -> MISSING_HINTS.
+	if _, ok := v.Lookup(ctx, &abi.ToolCall{
+		Tool: "read_doc",
+		Args: abi.Ref{Kind: abi.RefInline, Inline: []byte("{}")},
+	}); ok {
+		t.Fatalf("a hint-less call must miss")
+	}
+
+	mu.Lock()
+	got := append([]CacheEvent(nil), *events...)
+	mu.Unlock()
+
+	// Index the miss events by their lossless vDSO reason label.
+	misses := map[string]*CacheEvent{}
+	for i := range got {
+		if got[i].Kind == CacheMiss {
+			misses[got[i].Entry.Labels["vdso_miss"]] = &got[i]
+		}
+	}
+	for _, want := range []string{MissNotCached, MissDestructive, MissMissingHints} {
+		if misses[want] == nil {
+			t.Fatalf("no CacheMiss event for reason %q, got %+v", want, got)
+		}
+	}
+
+	// A NOT_CACHED miss is a tool_result-plane entry naming the looked-up tool, carrying
+	// the cachemeta-native reason and the consumer that experienced it.
+	nc := misses[MissNotCached]
+	if nc.Entry.Plane != cachemeta.PlaneToolResult || nc.Entry.Derivation.Tool != "read_doc" {
+		t.Fatalf("miss entry mis-shaped: plane=%s tool=%q", nc.Entry.Plane, nc.Entry.Derivation.Tool)
+	}
+	if nc.Reason != cachemeta.ReasonAbsent {
+		t.Fatalf("NOT_CACHED should map to ReasonAbsent, got %q", nc.Reason)
+	}
+	// A miss has no payload, so it carries no content digest.
+	if nc.Entry.ID.Digest != "" {
+		t.Fatalf("a miss entry must carry no payload digest, got %q", nc.Entry.ID.Digest)
+	}
+	cons := nc.Entry.Coherence.Consumers
+	if len(cons) != 1 || cons[0].AgentID != "agent-M" || cons[0].ID != "turn-1" || cons[0].TraceID != "trace-m" {
+		t.Fatalf("miss consumer mis-attributed: %+v", cons)
+	}
+	if misses[MissDestructive].Reason != cachemeta.ReasonScopeDenied {
+		t.Fatalf("DESTRUCTIVE should map to ReasonScopeDenied, got %q", misses[MissDestructive].Reason)
+	}
+	if misses[MissMissingHints].Reason != cachemeta.ReasonIncompleteBinding {
+		t.Fatalf("MISSING_HINTS should map to ReasonIncompleteBinding, got %q", misses[MissMissingHints].Reason)
+	}
+
+	// A served hit must NOT emit a miss event (the stream stays exactly 3 misses).
+	v.RegisterStatic("ping", []byte("pong"))
+	if _, ok := v.Lookup(ctx, roCall("ping", `{}`)); !ok {
+		t.Fatalf("static tool should hit")
+	}
+	mu.Lock()
+	got = append([]CacheEvent(nil), *events...)
+	mu.Unlock()
+	if n := countOf(got, CacheMiss); n != 3 {
+		t.Fatalf("a hit must not emit a miss; CacheMiss count = %d, want 3", n)
+	}
+}
+
 // §2.5: a per-tool witness adapter governs admission instead of the internal epoch.
 // Registering one for get_doc makes a fill's cachemeta entry carry the adapter's
 // witness, and revoking that witness evicts the entry.

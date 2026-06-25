@@ -1,0 +1,13 @@
+{
+  "schema": "fak.shared-patch-result.v1",
+  "task_id": "task_shared_demo",
+  "base_rev": "sha256:taskrev003",
+  "current_rev": "sha256:taskrev003",
+  "verdict": "quarantined",
+  "reason": "ARTIFACT_QUARANTINED",
+  "quarantine": {
+    "quarantine_id": "q_remote_trace_001",
+    "artifact_id": "art_remote_trace",
+    "safe_summary": "remote trace is held out of context until scanner verdict is available"
+  }
+}

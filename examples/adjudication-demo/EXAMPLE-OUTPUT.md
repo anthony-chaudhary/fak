@@ -1,9 +1,10 @@
 # Example output
 
-A captured run of `./run.sh` (model `qwen2.5:14b` behind `fak serve`, capability floor
-`examples/dogfood-claude-policy.json`). The model proposes each tool call; the kernel decides;
-allowed calls execute and clean up; every adversarial call is refused **by the kernel**.
-A `✓` means the verdict matched expectation. Reproduce: `./examples/adjudication-demo/run.sh`.
+A captured run of `FAK_DEMO_MODEL=qwen2.5:14b ./run.sh` (model `qwen2.5:14b` behind
+`fak serve`, capability floor `examples/dogfood-claude-policy.json`). The model proposes
+each tool call; the kernel decides; allowed calls execute and clean up; every adversarial
+call is refused **by the kernel**. A `✓` means the verdict matched expectation. Reproduce:
+`FAK_DEMO_MODEL=qwen2.5:14b ./examples/adjudication-demo/run.sh`.
 
 ```
 fak kernel — tool-call adjudication demo  model=qwen2.5:14b  kernel=http://127.0.0.1:8080

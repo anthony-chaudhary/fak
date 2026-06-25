@@ -15,7 +15,7 @@ flowchart TD
   MN --> Doc["docs: refresh-readme, appeal-score, curate-cluster"]
   MN --> Plan["planning / ship: release, issue-triage, plan-audit"]
   MN --> Quality["code: quality-score"]
-  MN --> Audit["read-only audit: trajectory-audit"]
+  MN --> Audit["read-mostly audit: bottleneck-map, trajectory-audit"]
   Pack --> DOS["DOS trust gates<br/>(witness, price, dispatch)"]
 ```
 
@@ -52,6 +52,7 @@ are intentionally small local entry points over `dos` verbs and this repo's
 | [`release`](release/SKILL.md) | Full versioned release: decide → bump VERSION → draft notes → commit → push → tag → create the GitHub release page. Wraps `tools/release_*.py`; encodes the ordering gotchas the helpers enforce by refusing. |
 | [`refresh-readme`](refresh-readme/SKILL.md) | Keep `README.md` current and honest: run the freshness auditor, fix every FAIL, apply the three front-page laws, re-stamp, commit only the README lane by explicit path. |
 | [`issue-triage`](issue-triage/SKILL.md) | Classify + rank the open GitHub issue backlog, propose mechanical gardening moves (mark-stale, close-dormant), apply only on approval. Read-only helper; writes are gated. |
+| [`bottleneck-map`](bottleneck-map/SKILL.md) | Map the current system and open-work bottlenecks in one pass: fleet/account/recovery limits from `fleet_bottleneck.py`, issue ownership/taxonomy limits from `issue_triage.py`, then route the next durable loop. Local note/audit writes only; no GitHub mutation. Standing runbook: [`docs/bottleneck-map-loop.md`](../../docs/bottleneck-map-loop.md). |
 | [`plan-audit`](plan-audit/SKILL.md) | Reconcile every plan-state surface into one completion audit and render a dated snapshot. Read-only — never edits a plan file. |
 | [`curate-cluster`](curate-cluster/SKILL.md) | Reconcile a project index doc against disk, gitignore artifacts, and commit only the quiescent curation lane by explicit path — never an actively-built code tree. |
 | [`trajectory-audit`](trajectory-audit/SKILL.md) | Sweep recent Claude Code session transcripts for token-weighted cost/efficiency problems (I:O ratio, cache reuse, heaviest sessions). Read-only; wraps `tools/session_audit.py`. |
@@ -105,10 +106,10 @@ metadata:
 
 This repo's `opencode.json` ports the one fully-portable gate — `phased-plan`
 (operator-only) is denied via `permission.skill: { "phased-plan": "deny" }`
-(`agent-permission`). The two read-only audit skills (`issue-triage`,
-`trajectory-audit`) carry a per-skill read-only boundary that opencode's
-per-*agent* permission can't express one-to-one, so they stay `claude-only`: run
-them under Claude, or under an opencode agent whose `permission.edit` is `deny`.
+(`agent-permission`). The audit skills (`issue-triage`, `bottleneck-map`,
+`trajectory-audit`) carry per-skill boundaries that opencode's per-*agent*
+permission can't express one-to-one, so they stay `claude-only`: run them under
+Claude, or under an opencode agent whose `permission.edit` is `deny`.
 
 **Lint.** `python tools/skill_frontmatter_lint.py` flags every skill whose
 Claude-only frontmatter is load-bearing and not yet acknowledged;

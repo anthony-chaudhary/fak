@@ -55,6 +55,29 @@ def test_collect_targets_dedups_and_orders() -> None:
             g.ROOT = orig
 
 
+def test_absolutize_local_links_resolves_from_source_doc() -> None:
+    import tempfile
+    with tempfile.TemporaryDirectory() as td:
+        orig = g.ROOT
+        g.ROOT = td
+        try:
+            docs = Path(td, "docs", "guide")
+            docs.mkdir(parents=True)
+            Path(td, "README.md").write_text("root", encoding="utf-8")
+            (docs / "next.md").write_text("next", encoding="utf-8")
+            (docs / "assets").mkdir()
+            text = ("[next](next.md#install) [root](../../README.md) "
+                    "[asset](assets) [web](https://example.com/x) [same](#local)")
+            out = g.absolutize_local_links(text, "docs/guide/start.md")
+            assert "[next](https://github.com/anthony-chaudhary/fak/blob/main/docs/guide/next.md#install)" in out
+            assert "[root](https://github.com/anthony-chaudhary/fak/blob/main/README.md)" in out
+            assert "[asset](https://github.com/anthony-chaudhary/fak/tree/main/docs/guide/assets)" in out
+            assert "[web](https://example.com/x)" in out
+            assert "[same](#local)" in out
+        finally:
+            g.ROOT = orig
+
+
 # --- build_corpus ----------------------------------------------------------
 
 def test_build_corpus_structure_and_version() -> None:
@@ -72,33 +95,12 @@ def test_build_corpus_structure_and_version() -> None:
 
 # --- --check drift gate (#511) --------------------------------------------
 
-def test_check_passes_on_committed_tree() -> None:
-    """LIVE: the committed llms-full.txt (HEAD) is in sync with the committed
-    llms.txt + docs -- the property the #511 CI gate enforces. Materialised from
-    HEAD (not the working tree) into a temp root, so the assertion is stable under
-    concurrent working-tree edits on this multi-session tree."""
-    import tempfile
-    linked = [t for _, t in g.collect_targets(
-        subprocess.run(["git", "-C", str(ROOT), "show", "HEAD:llms.txt"],
-                       capture_output=True).stdout.decode("utf-8", "replace"))]
-
-    def head(rel):
-        r = subprocess.run(["git", "-C", str(ROOT), "show", f"HEAD:{rel}"],
-                           capture_output=True)
-        assert r.returncode == 0, f"HEAD:{rel} missing"
-        return r.stdout
-
-    with tempfile.TemporaryDirectory() as td:
-        Path(td, "llms.txt").write_bytes(head("llms.txt"))
-        Path(td, "llms-full.txt").write_bytes(head("llms-full.txt"))
-        Path(td, "VERSION").write_bytes(head("VERSION"))
-        for rel in linked:
-            p = Path(td, rel)
-            p.parent.mkdir(parents=True, exist_ok=True)
-            p.write_bytes(head(rel))
-        r = subprocess.run([PY, str(ROOT / "tools/gen_llms_full.py"), "--check", "--root", td],
-                           capture_output=True, text=True)
-        assert r.returncode == 0, "committed llms-full.txt is stale vs committed docs:\n" + r.stdout
+def test_check_passes_on_working_tree() -> None:
+    """LIVE: the current llms-full.txt is in sync with the current generator,
+    llms.txt, and linked docs -- the property the #511 CI gate enforces."""
+    r = subprocess.run([PY, str(ROOT / "tools/gen_llms_full.py"), "--check", "--root", str(ROOT)],
+                       capture_output=True, text=True)
+    assert r.returncode == 0, "llms-full.txt is stale vs the working tree:\n" + r.stdout
 
 
 def test_check_fails_when_stale() -> None:

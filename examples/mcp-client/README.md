@@ -42,6 +42,10 @@ Needs only Python 3 (standard library — no `mcp` SDK, no `requests`) and the
 few seconds** and is **deterministic** — the same six responses on every run. A
 captured run is in [`EXAMPLE-OUTPUT.md`](EXAMPLE-OUTPUT.md).
 
+Windows users: run the `.sh` launcher from WSL or Git Bash, or call
+`python3 examples/mcp-client/client.py` directly if `fak` is already built; there is no
+native `.ps1` wrapper yet.
+
 ## What you see
 
 The client prints each step of the protocol exchange in order: the `initialize` handshake

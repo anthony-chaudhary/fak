@@ -1,3 +1,8 @@
+---
+title: "fak CUDA backend development loop"
+description: "How to edit, build, validate, and ship fak CUDA kernels across local no-GPU checks and remote GPU acceptance gates."
+---
+
 # Developing the CUDA backend
 
 This is the one place that describes the whole loop for working on fak's CUDA backend:

@@ -52,6 +52,7 @@ func TestLiftGuardStreamsPrefixOfLiftedContentAndNeverLeaksDialect(t *testing.T)
 		{"bare json call", `{"name":"do_x","arguments":{"a":1}}`},
 		{"bare json call leading ws", `   {"name":"do_x","arguments":{"a":1}}`},
 		{"prose then fenced call", "Working on it.\n```json\n{\"name\":\"do_x\",\"arguments\":{}}\n```"},
+		{"code fence then json call", "First:\n```python\nprint(1)\n```\nthen:\n```json\n{\"name\":\"do_x\",\"arguments\":{}}\n```"},
 		// Non-calls the guard must NOT suppress beyond a final tail (it streams them).
 		{"code fence not a call", "Here is code:\n```python\nprint('hello world')\n```\nAll done."},
 		{"prose inline backticks", "Use the `ls` command to list files in the directory tree."},
@@ -81,10 +82,12 @@ func TestLiftGuardStreamsPrefixOfLiftedContentAndNeverLeaksDialect(t *testing.T)
 					t.Fatalf("live bytes %q are not a prefix of lifted content %q — a stripped span leaked", streamed, cleaned)
 				}
 
-				// When a call WAS buried, the live bytes must carry neither a dialect
-				// marker nor the call's JSON payload keys.
+				// When a call WAS buried, the live bytes must carry neither a delimited
+				// dialect tag nor the call's JSON payload keys. (A bare ``` is NOT a leak
+				// marker: an ordinary code fence streams live alongside a held JSON-call
+				// fence — the prefix check above is the load-bearing leak proof.)
 				if len(lifted.ToolCalls) > 0 {
-					for _, marker := range append(append([]string{}, delimitedToolCallTags...), "```", `"arguments"`, `"name"`) {
+					for _, marker := range append(append([]string{}, delimitedToolCallTags...), `"arguments"`, `"name"`) {
 						if strings.Contains(streamed, marker) {
 							t.Fatalf("buried-call marker %q leaked into live stream: %q", marker, streamed)
 						}

@@ -14,6 +14,16 @@ THE THREE ARMS (identical to sessionbench):
   B per-agent-KV      warm per-agent cache, serial decode, prefix x C       prefill = C*(P + (T-1)*R)
   C fak fused         prefix prefilled ONCE + cloned + BATCHED decode        prefill = P + C*(T-1)*R
 
+WHICH ARM IS "SOTA" (read before quoting any multiple):
+  Arm B -- a WARM per-agent KV cache -- is the realistic serving baseline. Every shipping stack reuses
+  the prefix across turns: provider prompt caching (Anthropic/OpenAI), vLLM Automatic Prefix Caching,
+  SGLang RadixAttention, llama.cpp seq_cp. A *fully tuned* server goes further and shares the prefix
+  ACROSS agents + batches decode -- i.e. it does what arm C does -- so against it fak is ~parity on
+  wall-clock; fak's contribution is per-agent KV ownership + a default-deny safety floor, not raw t/s.
+  Arm A (re-prefill every turn) is a WORST-CASE FLOOR nobody ships -- it is the hand-rolled
+  `llama-cli -p <full prompt>` loop, NOT a SOTA baseline. So the headline multiple is "vs warm
+  per-agent KV (arm B)"; "vs naive (arm A)" is printed fenced as a floor and is never led with.
+
 WALL-CLOCK MODEL (per arm) = prefill_tokens / prefill_tok_s + decode_token_latencies / decode_tok_s
   decode token-latencies: A,B are SERIAL  -> C*T*D ;  C is BATCHED -> C*T*D / batch_eff
   (batch_eff = how many agents one weight-stream step serves; bandwidth-bound ideal ~ C. We CAP
@@ -158,16 +168,28 @@ def main():
         out["rate_cards"][name] = {"rate": rate, "arms": arms,
                                    "fak_under_budget": passed, "fak_total_s": c_total}
         out["verdict"][name] = passed
+        DISPLAY = {"A_naive_stateless": "A naive re-prefill (FLOOR, not SOTA)",
+                   "B_per_agent_kv":    "B warm per-agent KV (the SOTA baseline)",
+                   "C_fak_fused":       "C fak fused (prefix-once + batched)"}
         print(f"## rate card: {name}  ({rate['note']})")
-        print(f"   {'arm':<20} {'prefill':>10} {'decode':>10} {'total':>10}")
+        print(f"   {'arm':<38} {'prefill':>10} {'decode':>10} {'total':>10}")
         for k in ("A_naive_stateless", "B_per_agent_kv", "C_fak_fused"):
             v = arms[k]
             lb = ">=" if v["lower_bound"] else "  "
-            print(f"   {k:<20} {fmt_dur(v['prefill_s']):>10} {fmt_dur(v['decode_s']):>10} {lb}{fmt_dur(v['total_s']):>9}")
+            print(f"   {DISPLAY[k]:<38} {fmt_dur(v['prefill_s']):>10} {fmt_dur(v['decode_s']):>10} {lb}{fmt_dur(v['total_s']):>9}")
         bc = arms["B_per_agent_kv"]["total_s"] / c_total
         ac = arms["A_naive_stateless"]["total_s"] / c_total
         print(f"   fak fused: {fmt_dur(c_total)}  ->  {'UNDER' if passed else 'OVER'} the {args.budget_min:.0f}-min budget")
-        print(f"   vs tuned per-agent KV: {bc:.1f}x   vs naive (>=): {ac:.0f}x\n")
+        # REALISTIC SOTA -- never the naive strawman. A tuned batched server (vLLM Automatic Prefix
+        # Caching / SGLang RadixAttention / llama.cpp --parallel) ALSO prefills the shared prefix once
+        # and batches decode, so it lands ~parity with arm C on wall-clock; fak's add is per-agent KV
+        # ownership + a default-deny safety floor, not raw t/s (fak is ~0.5x llama.cpp single-stream).
+        # The honest per-agent multiple below is vs a WARM per-agent KV cache (arm B) -- what a real
+        # serving stack does. Arm A (naive re-prefill every turn) is a worst-case FLOOR nobody ships;
+        # it is shown fenced, never as the headline.
+        print(f"   vs warm per-agent KV (arm B, the SOTA baseline): {bc:.1f}x"
+              f"  |  ~parity vs a tuned batched server (prefix-once + batched decode)")
+        print(f"   [floor only, NOT a SOTA comparison: {ac:.0f}x vs naive re-prefill -- a worst case nobody ships]\n")
 
     if args.out:
         with open(args.out, "w") as f:

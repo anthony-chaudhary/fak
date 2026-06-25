@@ -6,8 +6,8 @@
   with NO Jekyll front matter (like showcase.html) so Pages copies it verbatim instead of
   wrapping it in the cayman theme.
 
-  The demos themselves run on a single GCE VM (NVIDIA L4) — four interactive Go servers
-  driving the REAL kernel. The links below point at that host. NOTE: the demo host is plain
+  The hosted demos run on a single GCE VM (NVIDIA L4) — interactive Go servers
+  driving the REAL kernel. The hosted links below point at that host. NOTE: the demo host is plain
   HTTP while this page is HTTPS, so a browser will navigate to it on click (no mixed-content
   block for a top-level link) but will not embed it. The URLs are resolved + kept current by
   deploy/demos/40-resolve-urls.sh; if the VM's ephemeral IP changes, re-run that and re-publish.
@@ -18,13 +18,13 @@
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <link rel="icon" href="data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2032%2032'%3E%3Crect%20width='32'%20height='32'%20rx='7'%20fill='%23070a10'/%3E%3Ccircle%20cx='16'%20cy='16'%20r='8'%20fill='%2338bdf8'/%3E%3C/svg%3E" />
 <title>fak — the agent kernel | live demos</title>
-<meta name="description" content="Four interactive demos of the fak agent kernel, running live on GCP: the safety floor side-by-side (without fak vs with fak), the turn-tax race (SOTA loop vs fak 1-shot), the multi-agent context reuse proof, and a live model reuse race — each driving the real kernel." />
+<meta name="description" content="Hosted fak demos and local self-contained proofs: live turn-tax, multi-agent context reuse, and model reuse race on GCP, plus terminal/browser demos you can run locally with go run." />
 <link rel="canonical" href="https://anthony-chaudhary.github.io/fak/demos.html" />
 <meta name="author" content="Anthony Chaudhary" />
 <meta property="og:type" content="website" />
 <meta property="og:site_name" content="fak — the agent kernel" />
 <meta property="og:title" content="fak — the agent kernel | live demos" />
-<meta property="og:description" content="Four interactive demos driving the real kernel, live on GCP: the safety floor side-by-side, the turn-tax race, multi-agent context reuse, and a live model reuse race." />
+<meta property="og:description" content="Three hosted demos driving the real kernel live on GCP, plus local self-contained fak proofs you can run with go run." />
 <meta property="og:url" content="https://anthony-chaudhary.github.io/fak/demos.html" />
 <meta property="og:image" content="https://raw.githubusercontent.com/anthony-chaudhary/fak/main/visuals/social-preview.png" />
 <meta name="twitter:card" content="summary_large_image" />
@@ -139,10 +139,10 @@
     <span class="eyebrow"><b>●</b> live on GCP · NVIDIA L4</span>
     <h1 class="title">Drive the real kernel.</h1>
     <p class="lede">
-      Four interactive demos, each running the <span class="k">actual fak kernel</span> on a single
-      GCE VM — not a recording, not a mock. Watch an attack get refused at the boundary while an
-      unguarded agent runs it, watch turns get saved inside the syscall, watch a shared prefix get
-      prefilled once and cloned into a fleet, and race a live model with reuse on vs off.
+      Three hosted demos run the <span class="k">actual fak kernel</span> on a single
+      GCE VM — not a recording, not a mock. Watch turns get saved inside the syscall, watch a
+      shared prefix get prefilled once and cloned into a fleet, and race a live model with reuse on
+      vs off. The safety and token proofs are self-contained local demos below.
     </p>
   </div>
 </header>
@@ -150,17 +150,17 @@
 <div class="wrap">
   <div class="grid">
 
-    <!-- guarddemo — self-contained, no model · the safety moat, side by side.
-         Reached through the :80 hub proxy (/guarddemo/) because the org firewall only
-         traverses the fixed port set {80,8080-8082,8150,8153}; :8151 would time out. -->
-    <a class="card" href="http://136.111.250.205/guarddemo/" rel="noopener">
-      <span class="pill self">self-contained · no model</span>
+    <!-- guarddemo — self-contained, no model · local path. The hosted guard proxy is not
+         assumed here; the link goes to the reproducible local guide instead of a stale host path. -->
+    <a class="card" href="run-the-demos.html" rel="noopener">
+      <span class="pill self">local · no model</span>
       <h3>🛡️ Without fak vs With fak — the safety floor</h3>
       <p>The moat, side by side. The <em>same</em> adversarial tool-call trace runs down two columns at once:
       without fak, a poisoned tool result is admitted to context and the injected <code>delete_account</code>
       payload executes; with fak, the poison is paged out and the destructive call is refused at the boundary —
-      while the legitimate calls run on both. A real kernel verdict per row, no model. The point lands in ~30 seconds.</p>
-      <span class="go">Run both agents →</span>
+      while the legitimate calls run on both. A real kernel verdict per row, no model. Run it locally
+      with one command; the terminal output is shown below.</p>
+      <span class="go">Run your copy →</span>
     </a>
 
     <!-- turntax — self-contained, no model -->
@@ -202,7 +202,7 @@
   <section class="seehere">
     <h2>See the comparisons right here — no server, no model</h2>
     <p class="intro">
-      The two self-contained demos render the <span class="k">same kernel verdicts</span> in your terminal,
+      The headless demos render the <span class="k">same kernel verdicts</span> in your terminal,
       side by side, in ~30 seconds. Below is the <em>actual</em> output — one command each, no weights, no GPU,
       no network. (The reuse numbers are exact, timing-free token counts.)
     </p>
@@ -264,7 +264,7 @@
     </div>
 
     <p class="runall">
-      Play all three with one command — then it verifies each headline still holds:
+      Play the terminal comparison set with one command — then it verifies each headline still holds:
       <code>bash tools/run_comparison_demos.sh</code>
     </p>
     <p class="runall" style="margin-top:12px">
@@ -276,22 +276,29 @@
   </section>
 
   <p class="note">
-    <b>What you're hitting.</b> A single GCE VM (NVIDIA L4) running these four Go demo servers plus the
-    <code>fak serve</code> kernel gateways. The two model demos run <code>SmolLM2-135M</code> in-process
-    through the kernel. The demo host is plain HTTP, so your browser opens it in a new tab rather than
+    <b>What you're hitting.</b> A single GCE VM (NVIDIA L4) running the hosted turn-tax, context-reuse,
+    reuse-race, and <code>fak serve</code> kernel gateways. The model demos run <code>SmolLM2-135M</code>
+    in-process through the kernel. The demo host is plain HTTP, so your browser opens it in a new tab rather than
     embedding it here. There's also a <a href="http://136.111.250.205/" rel="noopener" style="color:var(--fak)">live demos hub</a>
     on the same host with the CPU-vs-GPU engine comparison, a chat surface, and the kernel's metrics.
   </p>
 
   <div class="note" style="border-color:rgba(56,189,248,.4)">
     <b style="color:var(--fak)">▶ Run your own copy.</b> Every demo is in the public repo and runs anywhere
-    Go runs — no infrastructure of ours required. The two self-contained ones are one command each
+    Go runs — no infrastructure of ours required. The self-contained/headless ones are one command each
     (no model, no GPU, no downloads):
     <div style="margin:10px 0 6px"><code style="display:block;padding:9px 12px;white-space:pre-wrap">git clone https://github.com/anthony-chaudhary/fak &amp;&amp; cd fak
 go run ./cmd/guarddemo        # → http://127.0.0.1:8151   (or -print for an instant terminal diff)
-go run ./cmd/turntaxdemo      # → http://127.0.0.1:8150</code></div>
-    The two model demos add one step — <code>scripts/fetch-model.sh</code> exports a small CPU model — then
-    <code>go run ./cmd/ctxdemo</code> / <code>./cmd/demorace</code> light up the live race. The binaries also
+go run ./cmd/turntaxdemo      # → http://127.0.0.1:8150
+go run ./cmd/dropindemo       # → http://127.0.0.1:8154
+go run ./cmd/tokendemo -print
+go run ./cmd/unseedemo        # → http://127.0.0.1:8156
+go run ./cmd/ctxdemo          # → http://127.0.0.1:8153
+go run ./cmd/demorace         # → http://127.0.0.1:8147
+go run ./cmd/deletioncert -selfcheck
+go run ./cmd/causalbench -selfcheck</code></div>
+    The model-backed browser demos add one step — <code>scripts/fetch-model.sh</code> exports a small CPU model — then
+    <code>go run ./cmd/ctxdemo</code> / <code>go run ./cmd/demorace</code> light up the live race. The binaries also
     honor <code>$PORT</code>, so they drop straight into a container or your own cloud VM.
     <div class="go" style="margin-top:8px"><a href="run-the-demos.html" style="color:var(--fak)">Full guide: local · headless · Docker · your own cloud VM →</a></div>
   </div>
@@ -303,7 +310,9 @@ go run ./cmd/turntaxdemo      # → http://127.0.0.1:8150</code></div>
     <a href="https://github.com/anthony-chaudhary/fak" rel="noopener">GitHub</a> ·
     <a href="./">Docs home</a>
     <p style="margin-top:10px">Run any of these locally instead: <code>go run ./cmd/guarddemo</code> ·
-    <code>go run ./cmd/turntaxdemo</code> · <code>go run ./cmd/ctxdemo</code> · <code>go run ./cmd/demorace</code></p>
+    <code>go run ./cmd/turntaxdemo</code> · <code>go run ./cmd/dropindemo</code> ·
+    <code>go run ./cmd/unseedemo</code> ·
+    <code>go run ./cmd/ctxdemo</code> · <code>go run ./cmd/demorace</code></p>
   </div>
 </footer>
 

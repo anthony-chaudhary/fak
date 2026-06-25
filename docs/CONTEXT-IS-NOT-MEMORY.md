@@ -509,7 +509,7 @@ third of that surviving wedge.
 ### From concept to code — the buildable ladder (tracked)
 
 Rung 1 has **landed** (`[SHIPPED]`); rungs 2–3 are the tracked follow-ons of a sequenced
-epic against fak's real seams (**#496**), grounded in `internal/abi`, `internal/ctxmmu`,
+epic against fak's real seams (**#82**), grounded in `internal/abi`, `internal/ctxmmu`,
 `internal/recall`, and `internal/kvmmu`:
 
 - **Rung 1 — minimal, proves the inversion. `[SHIPPED]`.** A write-time `classifyDurability`
@@ -517,17 +517,18 @@ epic against fak's real seams (**#496**), grounded in `internal/abi`, `internal/
   `Verdict.Meta["durability"]` in `ctxmmu.MMU.Admit`; `recall` gained a **default-expire
   promotion gate** (`PromotionWarn` default / `PromotionEnforce` opt-in) that refuses to
   promote a non-`durable` page. The bite test witnesses it end to end: `it's 3pm → turn →
-  refused promotion`; `the user prefers afternoons → durable → promoted`. (#497 design,
-  #498 ctxmmu, #499 the gate, #500 the test — all green; `TestABIGoldenFreeze` unmoved.)
+  refused promotion`; `the user prefers afternoons → durable → promoted`. (#82; the
+  migrated #497-#500 child references are stale/unrelated in this repo, and live rung-1
+  child numbers still need remapping; `TestABIGoldenFreeze` is unmoved.)
 - **Rung 2 — bitemporal, kills stale-as-current.** A `recall.Page` validity interval
   (`ValidFrom`/`ValidTo`) + an as-of read gate (`ErrExpired`) makes the `bounded` class
-  the first temporally-enforced one (the Zep/Graphiti + SQL:2011 spine). (#501.)
+  the first temporally-enforced one (the Zep/Graphiti + SQL:2011 spine). (#81.)
 - **Rung 3 — engine-integrated, the distinctive move.** A `Segment` TTL over the bit-exact
   `KVCache.Evict` (`Kraw` re-rotation) so a turn/session span is **forgotten on a clock the
   fact itself sets**, byte-identical to never-having-seen-it — the in-context forgetting a
-  pressure-driven LRU cache structurally cannot do. (#502.)
+  pressure-driven LRU cache structurally cannot do. (#80.)
 - **Close-out.** [`CLAIMS.md`](https://github.com/anthony-chaudhary/fak/blob/main/CLAIMS.md) durability row + flip this doc's tag to `[SHIPPED]` for what
-  landed. (#503.)
+  landed. (#82; the migrated #503 reference is stale/unrelated in this repo.)
 
 The honest scope is on the tickets: rung 1 ships the inversion with a lexical classifier;
 `bounded` is a reserved value until rung 2 gives it a validity field; the byte-exact
@@ -535,7 +536,7 @@ guarantee on rung 3 holds only for spans no later token attended (mid-context ex
 coherent *compaction*, not never-saw). The seam itself costs zero ABI surface — `Meta` is
 the OPEN, forward-compatible map, so none of this moves the frozen ABI golden.
 
-### Rung-1 design contract (the ratified seam — #497)
+### Rung-1 design contract (the ratified seam — #82)
 
 The six decisions the classifier feature, the promotion-gate feature, and the bite test
 all agree on, with the exact shipped symbols:

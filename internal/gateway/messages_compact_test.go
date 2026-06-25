@@ -1,0 +1,194 @@
+package gateway
+
+import (
+	"bytes"
+	"encoding/json"
+	"strings"
+	"testing"
+
+	"github.com/anthony-chaudhary/fak/internal/agent"
+)
+
+// #555 req.Raw step: the gateway compacts the OUTBOUND Anthropic passthrough body to a
+// resident-token budget while keeping the cached prefix byte-identical. These tests
+// exercise the GATING (the cache-safety of the rewrite itself is proven in
+// internal/agent/anthropic_compact_test.go):
+//   - OFF (budget 0) is identity.
+//   - non-passthrough wire is identity even with a budget (the body is rebuilt downstream).
+//   - ON + Anthropic passthrough compacts an oversized body but keeps the prefix verbatim.
+
+// compactWireBody is a realistic /v1/messages body: a system array with a trailing
+// cache_control breakpoint, plus nMsgs alternating turns whose 1st carries a per-message
+// breakpoint — enough that a tight budget forces compaction.
+func compactWireBody(t *testing.T, nMsgs int) []byte {
+	t.Helper()
+	type block map[string]any
+	msgs := make([]map[string]any, 0, nMsgs)
+	msgs = append(msgs, map[string]any{
+		"role": "user",
+		"content": []block{
+			{"type": "text", "text": strings.Repeat("cached early context. ", 20), "cache_control": map[string]any{"type": "ephemeral"}},
+		},
+	})
+	for i := 1; i < nMsgs; i++ {
+		role := "user"
+		if i%2 == 0 {
+			role = "assistant"
+		}
+		msgs = append(msgs, map[string]any{
+			"role":    role,
+			"content": []block{{"type": "text", "text": strings.Repeat("conversation turn body. ", 15)}},
+		})
+	}
+	raw, err := json.Marshal(map[string]any{
+		"model": "claude-sonnet-4-6", "max_tokens": 1024, "stream": true,
+		"system": []block{
+			{"type": "text", "text": strings.Repeat("policy. ", 30), "cache_control": map[string]any{"type": "ephemeral"}},
+		},
+		"messages": msgs,
+	})
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	return raw
+}
+
+func anthropicPassthroughServer(budget int) *Server {
+	return &Server{
+		planner:              &agent.HTTPPlanner{Provider: agent.ProviderAnthropic},
+		compactHistoryBudget: budget,
+		logf:                 func(string, ...any) {},
+	}
+}
+
+// TestMaybeCompactOffIsIdentity: budget 0 forwards the body byte-for-byte unchanged.
+func TestMaybeCompactOffIsIdentity(t *testing.T) {
+	raw := compactWireBody(t, 16)
+	req, err := agent.DecodeAnthropicMessagesRequest(raw)
+	if err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	orig := append([]byte(nil), req.Raw...)
+	anthropicPassthroughServer(0).maybeCompactAnthropicRaw(req)
+	if !bytes.Equal(req.Raw, orig) {
+		t.Fatalf("budget 0 must leave req.Raw unchanged")
+	}
+}
+
+// TestMaybeCompactNonPassthroughIsIdentity: a budget set but the upstream is NOT the
+// Anthropic API (mock planner) → identity, because the body is rebuilt from req.Messages
+// downstream and touching req.Raw would be pointless (and unsafe to claim cache-preserving).
+func TestMaybeCompactNonPassthroughIsIdentity(t *testing.T) {
+	raw := compactWireBody(t, 16)
+	req, err := agent.DecodeAnthropicMessagesRequest(raw)
+	if err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	orig := append([]byte(nil), req.Raw...)
+	s := &Server{
+		planner:              agent.NewMockPlanner("m"),
+		compactHistoryBudget: 50,
+		logf:                 func(string, ...any) {},
+	}
+	if s.anthropicPassthrough() {
+		t.Fatal("mock planner must NOT be an anthropic passthrough")
+	}
+	s.maybeCompactAnthropicRaw(req)
+	if !bytes.Equal(req.Raw, orig) {
+		t.Fatalf("non-passthrough wire must leave req.Raw unchanged")
+	}
+}
+
+// TestMaybeCompactOnShortensKeepsPrefix: ON + Anthropic passthrough + an oversized history
+// → the forwarded body is shorter, still decodes, and its cache prefix is byte-identical.
+func TestMaybeCompactOnShortensKeepsPrefix(t *testing.T) {
+	raw := compactWireBody(t, 20)
+	req, err := agent.DecodeAnthropicMessagesRequest(raw)
+	if err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	orig := append([]byte(nil), req.Raw...)
+
+	// The prefix boundary: end of the last message bearing a cache_control breakpoint.
+	var obj map[string]json.RawMessage
+	if err := json.Unmarshal(orig, &obj); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	elems, spans, ok := decodeArrayElementsFromTest(t, orig, obj["messages"])
+	if !ok {
+		t.Fatal("decodeArrayElements failed")
+	}
+	split := spans[lastBreakpointMessageFromTest(elems)].end
+
+	anthropicPassthroughServer(120).maybeCompactAnthropicRaw(req)
+
+	if bytes.Equal(req.Raw, orig) {
+		t.Fatalf("expected compaction with a 20-message body at budget=120, got identity")
+	}
+	if len(req.Raw) >= len(orig) {
+		t.Fatalf("expected a shorter body, got %d >= %d", len(req.Raw), len(orig))
+	}
+	if split > len(req.Raw) || !bytes.Equal(orig[:split], req.Raw[:split]) {
+		t.Fatalf("cache prefix bytes changed (split=%d)", split)
+	}
+	if _, err := agent.DecodeAnthropicMessagesRequest(req.Raw); err != nil {
+		t.Fatalf("compacted body failed to re-decode: %v", err)
+	}
+}
+
+// The two helpers below let the gateway test reach the agent package's unexported span
+// locators indirectly: we re-derive the boundary with the same public primitive the
+// gateway relies on (DecodeAnthropicMessagesRequest round-trips), then compute the split
+// by parsing here. They keep the test self-contained without exporting agent internals.
+func decodeArrayElementsFromTest(t *testing.T, raw []byte, msgs json.RawMessage) ([]json.RawMessage, []elementSpanT, bool) {
+	t.Helper()
+	base := bytes.Index(raw, msgs)
+	if base < 0 {
+		return nil, nil, false
+	}
+	dec := json.NewDecoder(bytes.NewReader(msgs))
+	if tok, err := dec.Token(); err != nil {
+		return nil, nil, false
+	} else if d, ok := tok.(json.Delim); !ok || d != '[' {
+		return nil, nil, false
+	}
+	var elems []json.RawMessage
+	var spans []elementSpanT
+	for dec.More() {
+		start := int(dec.InputOffset())
+		for start < len(msgs) && (msgs[start] == ' ' || msgs[start] == ',' || msgs[start] == '\n' || msgs[start] == '\t' || msgs[start] == '\r') {
+			start++
+		}
+		var el json.RawMessage
+		if err := dec.Decode(&el); err != nil {
+			return nil, nil, false
+		}
+		elems = append(elems, el)
+		spans = append(spans, elementSpanT{start: base + start, end: base + int(dec.InputOffset())})
+	}
+	return elems, spans, true
+}
+
+type elementSpanT struct{ start, end int }
+
+func lastBreakpointMessageFromTest(elems []json.RawMessage) int {
+	last := -1
+	for i, el := range elems {
+		var m struct {
+			Content json.RawMessage `json:"content"`
+		}
+		if json.Unmarshal(el, &m) != nil {
+			continue
+		}
+		var blocks []map[string]json.RawMessage
+		if json.Unmarshal(m.Content, &blocks) != nil {
+			continue
+		}
+		for _, b := range blocks {
+			if _, ok := b["cache_control"]; ok {
+				last = i
+			}
+		}
+	}
+	return last
+}

@@ -488,6 +488,16 @@ func TestAnthropicParsesCacheCreationTokens(t *testing.T) {
 	if comp.Usage.CacheReadInputTokens != 7 {
 		t.Errorf("cache_read_input_tokens = %d, want 7", comp.Usage.CacheReadInputTokens)
 	}
+	if got := comp.Usage.ContextWindowTokens(); got != 110 {
+		t.Errorf("context window tokens = %d, want input+cache_read+cache_creation = 110", got)
+	}
+	openai := Usage{
+		PromptTokens:        13,
+		PromptTokensDetails: &UsageTokenDetails{CachedTokens: 5},
+	}
+	if got := openai.ContextWindowTokens(); got != 13 {
+		t.Errorf("openai context window tokens = %d, want prompt_tokens without double-counting cached details", got)
+	}
 }
 
 // TestHTTPPlannerRawBodyPassthrough proves the two passthrough levers: on the

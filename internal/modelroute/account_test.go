@@ -197,9 +197,6 @@ func TestValidateRejections(t *testing.T) {
 		"account id with delimiter": {
 			Accounts: []Account{{ID: "a/b", Kind: KindOpenAI, CredEnv: "K"}},
 		},
-		"account id reserved local token": {
-			Accounts: []Account{{ID: "local-mirror", Kind: KindOpenAI, CredEnv: "K"}},
-		},
 		"duplicate account id": {
 			Accounts: []Account{{ID: "a", Kind: KindOpenAI, CredEnv: "K"}, {ID: "a", Kind: KindAnthropic, CredEnv: "K"}},
 		},

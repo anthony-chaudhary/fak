@@ -142,12 +142,6 @@ func KindBaseURL(k ProviderKind) string {
 // instead of silently landing in the manifest.
 var envNameRE = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 
-// reservedLocalTokens are the route prefixes internal/engine's residency PDP reads as
-// ON-BOX (and short-circuits to local). An Account.ID may not begin with one, so a
-// remote target's route can never be deformed to read local. (Belt-and-suspenders:
-// a remote route already starts with its <kind>: prefix, never the account id.)
-var reservedLocalTokens = []string{"mock", "local", "inkernel", "cassette"}
-
 // Account is the switcher unit: a named credential set for one provider. ID is the
 // handle a Binding references. Kind is the wire (and the SOLE locality signal). BaseURL
 // overrides the kind's public default (REQUIRED, and loopback-only, for a local
@@ -408,17 +402,16 @@ func (r Roster) Validate() error {
 }
 
 // safeRouteToken rejects a token that would deform the EngineRoute string the
-// residency floor parses: a route delimiter (':', '/', whitespace) or a leading
-// reserved-local token (which could read as on-box if it ever led the route).
+// residency floor parses. The load-bearing rule is the route DELIMITER: an id or
+// upstream containing ':', '/', or whitespace could corrupt the route's parse-back. A
+// reserved-local word (mock/local/inkernel/cassette) in the ACCOUNT id is harmless and
+// allowed: a local account legitimately named "local" is fine, and a REMOTE account
+// named "local" still routes remote because EngineRoute always LEADS with the
+// validated <kind>: prefix (never the account id), so no id can flip the floor's
+// local/remote decision. Locality is the leading prefix, full stop.
 func safeRouteToken(what, tok string) error {
 	if strings.ContainsAny(tok, ":/ \t") {
 		return fmt.Errorf("modelroute: %s %q contains a route delimiter (:, /, space) — it must be a plain token", what, tok)
-	}
-	low := strings.ToLower(tok)
-	for _, r := range reservedLocalTokens {
-		if low == r || strings.HasPrefix(low, r+"-") || strings.HasPrefix(low, r+":") {
-			return fmt.Errorf("modelroute: %s %q begins with the reserved local token %q (it could read as an on-box route)", what, tok, r)
-		}
 	}
 	return nil
 }

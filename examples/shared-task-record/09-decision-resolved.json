@@ -1,0 +1,10 @@
+{
+  "schema": "fak.shared-patch-result.v1",
+  "task_id": "task_shared_demo",
+  "base_rev": "sha256:taskrev003",
+  "current_rev": "sha256:taskrev004",
+  "verdict": "accepted",
+  "reason": "",
+  "event_id": "evt_decision_resolved_001",
+  "record_ref": "sha256:taskrev004"
+}

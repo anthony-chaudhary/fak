@@ -180,8 +180,16 @@ tools/grafana/_*.json
 
 # DoS issue-dispatch run logs + tick state + scratch watchers (node-local,
 # regenerated each dispatch tick). The dispatch SKILLS/tools are tracked; the
-# run state they write is not.
+# run state they write is not. The operator STATUS DOC now renders here too
+# (.dispatch-runs/dispatch-status.md) -- private operator telemetry (switcher
+# account tag, closure honesty, throughput, silent-worker logs), never public.
 .dispatch-runs/
+
+# Belt-and-suspenders: the issue-dispatch STATUS DOC was once committed at
+# docs/dispatch-status.md but is now operator-private (renders to .dispatch-runs/).
+# A FleetDispatchStatusDoc task registered before the redirect may still write the
+# old path until re-registered, so keep it out of the public tree fail-closed.
+docs/dispatch-status.md
 
 # idea-scout seen-cache — node-local {source_id: record} of every candidate the
 # daily scout has filed, its durable anti-re-file rung (tools/idea_scout.py). The

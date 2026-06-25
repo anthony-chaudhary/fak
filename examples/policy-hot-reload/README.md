@@ -31,7 +31,7 @@ describes the motion; this directory *runs* it and asserts each step.
 ## Run it
 
 ```bash
-examples/policy-hot-reload/run.sh         # build fak, serve, run 10 witnesses, teardown
+examples/policy-hot-reload/run.sh
 ```
 
 Needs only Go (to build `fak`) and `curl` — **no model, key, or GPU**. It **runs in a
@@ -48,6 +48,9 @@ that the hot-reload worked: the **same** `delete_account` call flips from `DENY`
 `quarantined` across the swap; and `start_time_unix` + PID are identical before and after
 (only `uptime_seconds` rises) — proof the process never restarted. The script ends with a
 one-line `PASS`/`FAIL` summary and gates the exit code on it.
+
+Windows users: run the `.sh` launcher from WSL or Git Bash; the demo itself is
+plain `fak serve` plus `curl`, and there is no native `.ps1` wrapper yet.
 
 ## The operator loop the script walks
 

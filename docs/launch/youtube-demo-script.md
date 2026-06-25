@@ -94,7 +94,7 @@ Everything else — the `8.8–9.7× vs naive`, `~1.5–4.1× vs tuned`, `~13MB`
 
 ---
 
-**Pre-publish blocker (verify before posting):** the OG social-preview image on the published demos page (`anthony-chaudhary.github.io/fak/demos.html`) points at a `raw.githubusercontent.com/.../visuals/social-preview.png` asset — confirm it resolves, or the share card 404s when the link is dropped in the description. (Note: raw GitHub serves as `text/plain`, so don't rely on raw for the rendered card.)
+**Pre-publish blocker (verify before posting):** the OG social-preview image on the published demos page (`anthony-chaudhary.github.io/fak/demos.html`) points at `raw.githubusercontent.com/.../visuals/social-preview.png`; confirm it resolves with `python tools/demo_live_links.py --published` before the link is posted.
 
 **Total runtime:** ~68s of content, ~85s with the b-roll breathing room. Spoken numbers: `max|Δ|=0`, `8.8–9.7× naive`, `~1.5–4.1× tuned`, `~13MB`, `0/29 novel`, `~1-minute` offline proof.
 

@@ -1,0 +1,10 @@
+{
+  "schema": "fak.shared-artifact-ref.v1",
+  "artifact_id": "art_remote_trace",
+  "ref": "sha256:remoteartifact001",
+  "media_type": "application/json",
+  "taint": "tainted",
+  "scope": "tenant",
+  "store": "l3-kv",
+  "deletion_certificate": "sha256:deletecert001"
+}

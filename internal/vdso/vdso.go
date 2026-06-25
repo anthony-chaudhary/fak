@@ -139,9 +139,12 @@ const (
 	MissNotCached        = "NOT_CACHED"
 )
 
-// missed records a lookup miss by reason and returns the (nil, false) a Lookup
-// caller expects — so each early-return reads `return v.missed(MissX)`.
-func (v *VDSO) missed(reason string) (*abi.Result, bool) {
+// missed records a lookup miss by reason, emits the first-class cachemeta MISS event
+// (§2.5; a no-op unless a cache sink is installed), and returns the (nil, false) a
+// Lookup caller expects — so each early-return reads `return v.missed(c, MissX)`. It
+// takes the consuming call so the emitted miss is attributed to its agent/turn,
+// symmetric with the consumer attribution on a hit. Every call site is OUTSIDE v.mu.
+func (v *VDSO) missed(c *abi.ToolCall, reason string) (*abi.Result, bool) {
 	switch reason {
 	case MissDestructive:
 		atomic.AddInt64(&v.missCtr.destructive, 1)
@@ -154,6 +157,7 @@ func (v *VDSO) missed(reason string) (*abi.Result, bool) {
 	default:
 		atomic.AddInt64(&v.missCtr.notCached, 1)
 	}
+	v.emitMiss(c, reason)
 	return nil, false
 }
 
@@ -163,11 +167,11 @@ func (v *VDSO) missed(reason string) (*abi.Result, bool) {
 func (v *VDSO) gateMiss(c *abi.ToolCall) (*abi.Result, bool) {
 	switch {
 	case destructive(c):
-		return v.missed(MissDestructive)
+		return v.missed(c, MissDestructive)
 	case !metaTrue(c, "readOnlyHint") || !metaTrue(c, "idempotentHint"):
-		return v.missed(MissMissingHints)
+		return v.missed(c, MissMissingHints)
 	default:
-		return v.missed(MissNotCached)
+		return v.missed(c, MissNotCached)
 	}
 }
 
@@ -375,7 +379,7 @@ func (v *VDSO) Lookup(ctx context.Context, c *abi.ToolCall) (*abi.Result, bool) 
 		// Resource-mode soundness gate: refuse to serve a read that can't name its
 		// entity (it would be invalidated by no entity-fine write) — go to the engine.
 		if v.resourceMisnamed(c, args) {
-			return v.missed(MissResourceMisnamed)
+			return v.missed(c, MissResourceMisnamed)
 		}
 		v.mu.Lock()
 		key := v.keyLocked(c, args)
@@ -392,7 +396,7 @@ func (v *VDSO) Lookup(ctx context.Context, c *abi.ToolCall) (*abi.Result, bool) 
 				rk, rref, rwit := e.key, e.ref, e.witness
 				v.mu.Unlock()
 				v.emitCache(CacheRevoke, rk, rref, rwit)
-				return v.missed(MissWitnessRevoked)
+				return v.missed(c, MissWitnessRevoked)
 			}
 			v.lru.MoveToFront(el)
 			ref := e.ref

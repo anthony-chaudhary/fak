@@ -99,6 +99,24 @@ This is the core contract. JSON-RPC carries it over stdio/SSH. A2A maps it to
 messages, tasks, and artifacts. MCP can expose selected methods as tools if the
 operation is tool-like and sufficiently stateless.
 
+## Shared State Contract
+
+The method contract above is the control-plane half. The state half should use the
+same vocabulary as [Shared state ladder](shared-state-ladder.md):
+
+- **live updates** are messages or task events;
+- **live shared objects** are named cells with versions and conflict rules;
+- **durable state** is a task/audit/artifact record that survives the process or
+  context window;
+- **disaggregated state** is a digest-verified value whose bytes may live outside
+  the local process or engine;
+- **user-level collaboration** is a patch/edit with author, base digest, scope,
+  durability, and a typed verdict.
+
+That distinction matters for adapters. A2A can project task events and artifacts;
+MCP can expose selected tools/resources; a UI can show patches and conflicts. None
+of those adapters should create a second definition of what counts as shared state.
+
 ## Layer 1: Fleet In-Memory Bus
 
 This is the right meaning of "in-kernel" for Fleet: an in-process dispatch table

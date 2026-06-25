@@ -1,0 +1,12 @@
+{
+  "schema": "fak.shared-patch.v1",
+  "task_id": "task_shared_demo",
+  "base_rev": "sha256:taskrev001",
+  "actor": {"kind": "human", "id": "editor"},
+  "scope": "fleet",
+  "durability": "session",
+  "ops": [
+    {"op": "replace", "path": "/title", "value": "Coordinate the scoped release checklist"}
+  ],
+  "message": "Rename the collaborative task."
+}

@@ -118,3 +118,25 @@ the `ViewCache` (shipped at `internal/contextq/contextq.go`) or the
 memory is one more view type over that one cache — the procedural twin of the
 declarative memory views — so byte-level recall and procedural reuse share a single
 materialization decision rather than diverging into two caches with two trust models.
+
+## How it supports durable work loops
+
+The issue-gardening, learning-scorecard, and quality-scorecard passes are the
+procedural-memory use case in miniature: each run assembles a ranked context from
+stable inputs, then hands a human or worker a bounded next-action packet.
+
+- `/issue-triage` over the same open-issue snapshot and helper version should not
+  re-spend tokens reconstructing the same queue. The durable artifact is the
+  helper output (`docs/_audits/issue-triage-<date>.md` plus the actions JSON);
+  the reusable procedural context is the skill invocation that produced and read it.
+- `learning_scorecard.py` and the learning path refresh work the same way: the
+  score is re-derived from disk, while the skill context is the interpretation of
+  which teaching gap matters now.
+- A dispatch or RSI loop still needs an independent witness before acting. A
+  procedural-memory HIT may save context assembly, but it never proves an issue
+  was fixed, a label was applied, or a candidate improved. Those claims stay on
+  the witness rungs (`gh` read-back, `dos commit-audit`, tests, scorecard reruns).
+
+So the durable skill loop is not "remember what the worker said." It is: cache the
+repeatable skill context by exact invocation identity, then re-check the external
+effect before closing, labeling, keeping, or shipping.

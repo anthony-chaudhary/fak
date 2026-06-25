@@ -55,6 +55,8 @@ concurrent = [
   "a2achan",
   "rungobs",
   "vcachechain",
+  "dropin",
+  "comm",
   # They landed by hand / during the new_leaf.py path-bug window, so the `# new-leaf:lane`
   # auto-insert never fired. All are real, architest-tiered packages.
   "blobfs", "blobhttp", "ctxplan", "dgxbridge", "gitgate", "hfhub", "memq", "polymodel", "storedrv",
@@ -64,8 +66,13 @@ concurrent = [
   "a2achan",
   "snapshot",
   "rungobs",
+  "sharedtask",
   "vcachegov", # vCache M5 Governor (#720): steady-state pin/lazy/evict + warm-budget + affinity policy over cachemeta
   "vcachechain",
+  "vcachewarm",
+  "taskmgr",
+  "dropin",
+  "comm",
   # new-leaf:lane -- `python tools/new_leaf.py` inserts a generated leaf lane above
 ]
 exclusive = ["abi", "release", "global"]
@@ -95,8 +102,13 @@ autopick = [
   "a2achan",
   "snapshot",
   "rungobs",
+  "sharedtask",
   "vcachegov",
   "vcachechain",
+  "vcachewarm",
+  "taskmgr",
+  "dropin",
+  "comm",
   # new-leaf:lane
 ]
 
@@ -204,8 +216,13 @@ sessionimage = ["internal/sessionimage/**"]
 a2achan = ["internal/a2achan/**"]
 snapshot = ["internal/snapshot/**"]
 rungobs = ["internal/rungobs/**"]
+sharedtask = ["internal/sharedtask/**"]
 vcachegov = ["internal/vcachegov/**"]
 vcachechain = ["internal/vcachechain/**"]
+vcachewarm = ["internal/vcachewarm/**"]
+taskmgr = ["internal/taskmgr/**"]
+dropin = ["internal/dropin/**"]
+comm = ["internal/comm/**"]
 # new-leaf:tree -- generated leaf trees inserted above this line
 cmd         = ["cmd/**"]
 experiments = ["experiments/**"]

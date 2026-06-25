@@ -385,11 +385,15 @@ func TestSelfModifyGuardsShellWritePath(t *testing.T) {
 		// SELF_MODIFY: a general-purpose interpreter rewrites the file from inside the
 		// program string, carrying none of the shellWriteVerbs tokens and no `>`
 		// redirect (#172 Hole 1 residual, the perl/ruby -i gap one interpreter out —
-		// python/node are the runtimes most likely on a coding agent's PATH).
+		// python/node/ruby are the runtimes most likely on a coding agent's PATH; the
+		// `ruby -e` rows close the rulesynth-loop-surfaced asymmetry (`ruby -i` caught,
+		// `ruby -e` eval-write slipped)).
 		{"python -c write into abi", "python -c \"open('fak/internal/abi/kernel.go','w').write('x')\"", true},
 		{"python3 -c write into kernel", "python3 -c \"open('fak/internal/kernel/x.go','w').write('x')\"", true},
 		{"node -e write into adjudicator", "node -e \"require('fs').writeFileSync('fak/internal/adjudicator/decide.go','x')\"", true},
 		{"node --eval write into dos.toml", "node --eval \"require('fs').writeFileSync('dos.toml','x')\"", true},
+		{"ruby -e write into adjudicator", "ruby -e 'File.write(\"fak/internal/adjudicator/decide.go\", x)'", true},
+		{"ruby --eval write into kernel", "ruby --eval 'IO.write(\"fak/internal/kernel/x.go\", x)'", true},
 		// `awk -i inplace`/`gawk -i inplace` in-place edits into a guarded tree →
 		// SELF_MODIFY: GNU awk's in-place flag rewrites the file exactly as `sed -i`/
 		// `perl -i`/`ruby -i` do (#172 Hole 1 residual, the sed -i family one tool out —
@@ -427,6 +431,8 @@ func TestSelfModifyGuardsShellWritePath(t *testing.T) {
 		// An inline interpreter program that touches NO guarded tree → allowed (the
 		// guard only fires once a guarded glob is named in the command).
 		{"python -c write outside guarded", "python3 -c \"open('README.md','w').write('x')\"", false},
+		{"ruby -e write outside guarded", "ruby -e 'File.write(\"README.md\", x)'", false},
+		{"ruby -e pure compute, no path", "ruby -e 'puts 1+1'", false},
 		// A read-only `find` over a guarded tree (no -delete/-exec) → NOT a write,
 		// stays allowed by this guard (mirrors the cat/grep read cases above).
 		{"find read-only in abi", "find fak/internal/abi -name '*.go'", false},

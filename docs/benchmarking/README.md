@@ -66,8 +66,8 @@ All measured claims in [`fak/BENCHMARK-AUTHORITY.md`](../../BENCHMARK-AUTHORITY.
 
 ### Session Value Stack
 **What:** Multi-turn, multi-agent session efficiency
-**Result:** 19 min vs ~19 h naive (≈60×) on 50-turn × 5-agent session
-**Baseline:** Naive stateless (re-send everything every turn)
+**Result:** ~4.1× vs a tuned warm per-agent KV cache (the realistic SOTA) on a 50-turn × 5-agent session. (The ≈60× figure is only vs a *naive* re-prefill-every-turn loop — a worst-case floor no serving stack ships, not the SOTA comparison.)
+**Baseline:** Tuned warm per-agent KV cache (the SOTA); naive stateless shown only as the worst-case floor
 **Details:** `SESSION-VALUE-STACK-DECK.md` (private companion — see Authority below)
 **Authority:** [`fak/BENCHMARK-AUTHORITY.md`](../../BENCHMARK-AUTHORITY.md) → "Session value-add"
 

@@ -29,7 +29,7 @@ func TestFleetWireDumpRestore(t *testing.T) {
 			_ = json.NewEncoder(w).Encode(gateway.SessionListResponse{
 				Count: 2,
 				Sessions: []gateway.SessionState{
-					{TraceID: "a", Run: "throttled", Budget: gateway.SessionBudget{TurnsLeft: 2, TokensLeft: 1000}, Priority: 5, Pace: gateway.SessionPace{MaxTokensPerTurn: 256, MinTurnGapMs: 50}, Reason: "operator-offload", Rev: 3},
+					{TraceID: "a", Run: "throttled", Budget: gateway.SessionBudget{TurnsLeft: 2, TokensLeft: 1000, ContextTokensLeft: 150}, Priority: 5, Pace: gateway.SessionPace{MaxTokensPerTurn: 256, MinTurnGapMs: 50}, Reason: "operator-offload", ContinuationID: "win-a", ParentTrace: "root", Generation: 1, Rev: 3},
 					{TraceID: "b", Run: "stopped", Budget: gateway.SessionBudget{TurnsLeft: 0, TokensLeft: 0}, Reason: "BUDGET_TURNS_EXHAUSTED", Rev: 9},
 				},
 			})
@@ -83,7 +83,7 @@ func TestFleetWireDumpRestore(t *testing.T) {
 	for _, s := range body.Sessions {
 		byID[s.TraceID] = s
 	}
-	if a := byID["a"]; a.Run != session.Throttled || a.Budget.TokensLeft != 1000 || a.Priority != 5 {
+	if a := byID["a"]; a.Run != session.Throttled || a.Budget.TokensLeft != 1000 || a.Budget.ContextTokensLeft != 150 || a.ContinuationID != "win-a" || a.ParentTrace != "root" || a.Generation != 1 || a.Priority != 5 {
 		t.Fatalf("session a dumped wrong: %+v", a)
 	}
 	if b := byID["b"]; b.Run != session.Stopped || b.Reason != "BUDGET_TURNS_EXHAUSTED" || b.Rev != 9 {

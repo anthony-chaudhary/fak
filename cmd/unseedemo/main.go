@@ -362,7 +362,9 @@ func kindName(k abi.VerdictKind) string {
 func sci(x float64) string { return fmt.Sprintf("%.3e", x) }
 
 func main() {
-	addr := flag.String("addr", "127.0.0.1:8156", "listen address for the browser cam")
+	const defaultAddr = "127.0.0.1:8156"
+	addr := flag.String("addr", defaultAddr, "listen address for the browser cam")
+	basePath := demoui.BasePathFlag(flag.CommandLine, "/unsee")
 	selfcheck := flag.Bool("selfcheck", false, "run HEADLESS: drive the real kvmmu bridge / ctxmmu gate / KVCache.Evict, assert every documented invariant (verdict, cache len, max|Δ| evict==0, poison>0, too-late>0, reposition residual≤1e-4), print a witness table, exit non-zero on drift. The CI / cross-platform dog-food.")
 	printOut := flag.Bool("print", false, "render the witness table + the three acts as a colored strip in the TERMINAL (no browser, no port) and exit. Honors NO_COLOR.")
 	asJSON := flag.Bool("json", false, "emit the full event log (witness + frames + fences) as JSON to stdout and exit — the driver seam the browser cam replays.")
@@ -387,9 +389,9 @@ func main() {
 	}
 
 	ev := runExperiment()
-	mux := http.NewServeMux()
-	mux.HandleFunc("/", handleIndex)
-	mux.HandleFunc("/api/events", func(w http.ResponseWriter, r *http.Request) {
+	app := http.NewServeMux()
+	app.HandleFunc("/", handleIndex)
+	app.HandleFunc("/api/events", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		enc := json.NewEncoder(w)
 		enc.SetEscapeHTML(false)
@@ -403,11 +405,17 @@ func main() {
 			"version":     version,
 		})
 	})
+	mux := http.NewServeMux()
+	base := demoui.MountWithBasePath(mux, *basePath, app)
 
-	fmt.Fprintf(os.Stderr, "unseedemo %s on http://%s\n", version, listenAddr(*addr))
+	bind := demoui.ListenAddr(*addr, defaultAddr)
+	fmt.Fprintf(os.Stderr, "unseedemo %s on %s\n", version, demoui.LocalURL(bind, base))
 	fmt.Fprintf(os.Stderr, "the Lobotomy Cam: watch the kernel un-see a poisoned tool result (max|Δ| evict-vs-never = %s)\n", sci(ev.Witness.EvictVsNever))
+	if base != "" {
+		fmt.Fprintf(os.Stderr, "base path: %s (set by -base-path or %s)\n", base, demoui.DemoBasePathEnv)
+	}
 	fmt.Fprintf(os.Stderr, "open the URL → press ▶ to play the three acts\n")
-	if err := http.ListenAndServe(listenAddr(*addr), mux); err != nil {
+	if err := http.ListenAndServe(bind, mux); err != nil {
 		fmt.Fprintln(os.Stderr, "listen:", err)
 		os.Exit(1)
 	}
@@ -425,16 +433,6 @@ func handleIndex(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	_, _ = w.Write(b)
-}
-
-// listenAddr honors the $PORT contract container platforms set (Cloud Run, etc.): when
-// PORT is set and -addr is the compiled-in loopback default, bind 0.0.0.0:$PORT. An
-// explicit non-default -addr still wins, so a local override is never silently lost.
-func listenAddr(addr string) string {
-	if p := os.Getenv("PORT"); p != "" && addr == "127.0.0.1:8156" {
-		return "0.0.0.0:" + p
-	}
-	return addr
 }
 
 // --- headless modes ----------------------------------------------------------------------

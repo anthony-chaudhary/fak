@@ -38,6 +38,7 @@ DEMOS: tuple[Demo, ...] = (
         "demorace", "/demorace", "api/ladder", "reuse demo", ("-jobs", "1"), 8147,
         hosted_path="/demorace/", hosted_api_keys=("models", "prefill_tok_ratio_a_over_c"),
     ),
+    Demo("dropindemo", "/dropin", "api/gallery", "fak guard drop-in gallery", default_port=8154),
     Demo("unseedemo", "/unsee", "api/events", "Un-See It", default_port=8156),
 )
 

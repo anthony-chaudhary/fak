@@ -50,6 +50,29 @@ func TestRunArmTurnBudgetCapsRun(t *testing.T) {
 	}
 }
 
+func TestRunArmContextBudgetStopsAtNextBoundary(t *testing.T) {
+	p := NewMockPlanner("mock")
+	tbl := session.NewTable()
+	const trace = "arm-context"
+	tbl.SetBudget(trace, session.Budget{
+		TurnsLeft: session.Unbounded, TokensLeft: session.Unbounded, ContextTokensLeft: 1,
+	})
+
+	m, err := RunArm(context.Background(), p, DefaultTask, false, 20, nil, WithSessionTable(tbl, trace))
+	if err != nil {
+		t.Fatalf("RunArm: %v", err)
+	}
+	if m.Turns != 1 {
+		t.Fatalf("context budget ran %d turns, want exactly 1 before boundary stop", m.Turns)
+	}
+	if m.StoppedBySession != session.ReasonBudgetContext {
+		t.Fatalf("StoppedBySession=%q, want %s", m.StoppedBySession, session.ReasonBudgetContext)
+	}
+	if st := tbl.Get(trace); st.Run != session.Stopped || st.ContinuationID == "" {
+		t.Fatalf("after context cap session = %+v, want stopped with continuation id", st)
+	}
+}
+
 func TestRunArmPausedStopsImmediately(t *testing.T) {
 	p := NewMockPlanner("mock")
 	tbl := session.NewTable()

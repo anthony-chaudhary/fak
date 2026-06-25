@@ -274,7 +274,7 @@ func RunArm(ctx context.Context, p Planner, task string, fak bool, maxTurns int,
 		m.PromptTokens += comp.Usage.PromptTokens
 		m.CompletionTokens += comp.Usage.CompletionTokens
 		// Report this turn's output usage to the session budget (no-op without a table).
-		cfg.debitTurn(comp.Usage.CompletionTokens)
+		cfg.debitTurn(comp.Usage)
 		asst := comp.Message
 		asst.Role = RoleAssistant
 		// Tool-call conformance: the model announced tool calls but none parsed.

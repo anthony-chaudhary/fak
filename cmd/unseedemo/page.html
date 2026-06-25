@@ -194,7 +194,7 @@ $("#step").onclick=()=>{ pause(); next(); };
 $("#back").onclick=()=>{ pause(); show(0); };
 $("#speed").oninput=()=>{ if(playing) play(); };
 
-fetch("/api/events").then(r=>r.json()).then(d=>{
+fetch("api/events").then(r=>r.json()).then(d=>{
   EV=d;
   (d.fences||[]).forEach(t=>{ const li=document.createElement("li"); li.textContent=t; $("#fencelist").appendChild(li); });
   const hw=d.hardware||{};
@@ -203,7 +203,7 @@ fetch("/api/events").then(r=>r.json()).then(d=>{
   $("#ver").textContent = d.version||"";
   show(0);
   setTimeout(play, 600);
-}).catch(e=>{ $("#caption").textContent="failed to load /api/events: "+e; });
+}).catch(e=>{ $("#caption").textContent="failed to load api/events: "+e; });
 </script>
 </body>
 </html>

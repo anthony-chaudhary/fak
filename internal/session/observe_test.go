@@ -1,0 +1,128 @@
+package session
+
+import (
+	"sync"
+	"testing"
+)
+
+// recorder collects budget events thread-safely for assertions.
+type recorder struct {
+	mu     sync.Mutex
+	events []BudgetEvent
+}
+
+func (r *recorder) observe(ev BudgetEvent) {
+	r.mu.Lock()
+	r.events = append(r.events, ev)
+	r.mu.Unlock()
+}
+
+func (r *recorder) snapshot() []BudgetEvent {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	out := make([]BudgetEvent, len(r.events))
+	copy(out, r.events)
+	return out
+}
+
+// TestWatchBudgetWarnsOnceThenExhausts proves the #743 observer: a session seeded with a
+// context budget fires exactly one BudgetWarn when consumption first crosses the warning
+// share, then one BudgetExhausted (carrying a continuation id) when the budget drains.
+func TestWatchBudgetWarnsOnceThenExhausts(t *testing.T) {
+	const trace = "watch-1"
+	tbl := NewTable()
+	rec := &recorder{}
+	tbl.WatchBudget(0.8, rec.observe) // warn at 80% consumed (20 remaining of 100)
+
+	tbl.SetBudget(trace, Budget{TurnsLeft: Unbounded, TokensLeft: Unbounded, ContextTokensLeft: 100})
+
+	// 70 consumed (30 left): below the 80% watermark — no event yet.
+	tbl.DebitUsage(trace, Usage{ContextTokens: 70})
+	if got := rec.snapshot(); len(got) != 0 {
+		t.Fatalf("after 70/100 consumed, events = %+v, want none (still under 80%%)", got)
+	}
+
+	// 85 consumed (15 left): crosses the 80% watermark — exactly one warn.
+	tbl.DebitUsage(trace, Usage{ContextTokens: 15})
+	got := rec.snapshot()
+	if len(got) != 1 || got[0].Kind != BudgetWarn {
+		t.Fatalf("after crossing 80%%, events = %+v, want one BudgetWarn", got)
+	}
+	if got[0].TraceID != trace || got[0].ContextTokensCap != 100 || got[0].ContextTokensLeft != 15 {
+		t.Fatalf("warn payload = %+v, want trace=%s cap=100 left=15", got[0], trace)
+	}
+	if got[0].FractionConsumed < 0.84 || got[0].FractionConsumed > 0.86 {
+		t.Fatalf("warn fraction = %v, want ~0.85", got[0].FractionConsumed)
+	}
+
+	// A further debit still above the watermark must NOT re-warn (warn fires once).
+	tbl.DebitUsage(trace, Usage{ContextTokens: 5}) // 90 consumed, 10 left
+	if got := rec.snapshot(); len(got) != 1 {
+		t.Fatalf("warn must fire once; events = %+v", got)
+	}
+
+	// Drain it: one BudgetExhausted carrying the reset continuation id.
+	st := tbl.DebitUsage(trace, Usage{ContextTokens: 50})
+	got = rec.snapshot()
+	if len(got) != 2 || got[1].Kind != BudgetExhausted {
+		t.Fatalf("after exhaustion, events = %+v, want a trailing BudgetExhausted", got)
+	}
+	if got[1].ContinuationID == "" || got[1].ContinuationID != st.ContinuationID {
+		t.Fatalf("exhausted event continuation id = %q, want the session's %q", got[1].ContinuationID, st.ContinuationID)
+	}
+	if got[1].Reason != ReasonBudgetContext || got[1].FractionConsumed != 1 {
+		t.Fatalf("exhausted payload = %+v, want reason=%s fraction=1", got[1], ReasonBudgetContext)
+	}
+}
+
+// TestWatchBudgetStraightToExhaustionSkipsWarn proves a single oversized debit that jumps
+// past the watermark straight to zero fires only the exhaustion event, not a warning.
+func TestWatchBudgetStraightToExhaustionSkipsWarn(t *testing.T) {
+	const trace = "watch-2"
+	tbl := NewTable()
+	rec := &recorder{}
+	tbl.WatchBudget(0.8, rec.observe)
+	tbl.SetBudget(trace, Budget{TurnsLeft: Unbounded, TokensLeft: Unbounded, ContextTokensLeft: 100})
+
+	tbl.DebitUsage(trace, Usage{ContextTokens: 200}) // one turn larger than the whole budget
+	got := rec.snapshot()
+	if len(got) != 1 || got[0].Kind != BudgetExhausted {
+		t.Fatalf("oversized debit events = %+v, want a single BudgetExhausted (warn skipped)", got)
+	}
+	if got[0].FractionConsumed != 1 {
+		t.Fatalf("over-debit fraction = %v, want clamped 1.0", got[0].FractionConsumed)
+	}
+}
+
+// TestWatchBudgetDisabledWarnStillExhausts proves a warn fraction outside (0,1) disables
+// the pre-exhaustion warning but leaves the exhaustion (reset) event firing.
+func TestWatchBudgetDisabledWarnStillExhausts(t *testing.T) {
+	const trace = "watch-3"
+	tbl := NewTable()
+	rec := &recorder{}
+	tbl.WatchBudget(0, rec.observe) // warning disabled
+	tbl.SetBudget(trace, Budget{TurnsLeft: Unbounded, TokensLeft: Unbounded, ContextTokensLeft: 10})
+
+	tbl.DebitUsage(trace, Usage{ContextTokens: 9}) // 90% consumed — would warn if armed
+	if got := rec.snapshot(); len(got) != 0 {
+		t.Fatalf("warning disabled, events = %+v, want none before exhaustion", got)
+	}
+	tbl.DebitUsage(trace, Usage{ContextTokens: 5}) // drain
+	got := rec.snapshot()
+	if len(got) != 1 || got[0].Kind != BudgetExhausted {
+		t.Fatalf("events = %+v, want a single BudgetExhausted", got)
+	}
+}
+
+// TestDebitUsageNoObserverUnchanged proves the no-op default: with no observer wired the
+// debit path neither fires nor changes the resulting state (cap is still stamped for a
+// later WatchBudget, but no callback is invoked).
+func TestDebitUsageNoObserverUnchanged(t *testing.T) {
+	const trace = "watch-4"
+	tbl := NewTable()
+	tbl.SetBudget(trace, Budget{TurnsLeft: Unbounded, TokensLeft: Unbounded, ContextTokensLeft: 100})
+	st := tbl.DebitUsage(trace, Usage{ContextTokens: 90})
+	if st.Budget.ContextTokensLeft != 10 || st.Budget.ContextTokensCap != 100 {
+		t.Fatalf("no-observer debit state = %+v, want left=10 cap=100", st.Budget)
+	}
+}

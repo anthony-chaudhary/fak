@@ -1,0 +1,28 @@
+{
+  "schema": "fak.shared-patch.v1",
+  "task_id": "task_shared_demo",
+  "base_rev": "sha256:taskrev005",
+  "actor": {
+    "kind": "human",
+    "id": "operator"
+  },
+  "scope": "fleet",
+  "durability": "session",
+  "ops": [
+    {
+      "op": "replace",
+      "path": "/body_ref",
+      "value": {
+        "kind": "external",
+        "digest": "sha256:bodyremote001",
+        "bytes": 512,
+        "taint": "tainted",
+        "scope": "fleet",
+        "durability": "session",
+        "store": "l3-kv",
+        "deletion_certificate": "sha256:deletebody001"
+      }
+    }
+  ],
+  "message": "Move the task body to a disaggregated store."
+}

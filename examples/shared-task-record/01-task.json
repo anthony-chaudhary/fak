@@ -1,0 +1,20 @@
+{
+  "schema": "fak.shared-task.v1",
+  "task_id": "task_shared_demo",
+  "rev": "sha256:taskrev001",
+  "state": "working",
+  "title": "Coordinate the shared release checklist",
+  "body_ref": {
+    "kind": "cas",
+    "digest": "sha256:body001",
+    "bytes": 512,
+    "taint": "tainted",
+    "scope": "fleet",
+    "durability": "session"
+  },
+  "artifacts": [],
+  "notes": [],
+  "open_decisions": [],
+  "updated_by": {"kind": "agent", "id": "planner"},
+  "updated_at": "2026-06-25T00:00:00Z"
+}

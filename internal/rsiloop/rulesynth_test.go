@@ -33,13 +33,13 @@ func TestRuleSynthHarness_KeepsCatchingRule(t *testing.T) {
 	// An unrecognized interpreter-eval write that reaches the guarded tree: a true
 	// near-miss the current floor admits.
 	corpus := mineCorpus(t, []string{
-		"ruby -e 'File.write(\"internal/adjudicator/decide.go\", x)'",
-		"ruby -e 'IO.write(\"internal/adjudicator/policy.go\", y)'",
+		"php -r 'file_put_contents(\"internal/adjudicator/decide.go\", $x);'",
+		"php -r 'file_put_contents(\"internal/adjudicator/policy.go\", $y);'",
 	})
 	// A benign use of the SAME interpreter on an UNguarded path must stay admitted.
 	benign := []rulesynth.Call{
-		{Tool: "Bash", Arg: "command", Command: "ruby -e 'puts 1+1'"},
-		{Tool: "Bash", Arg: "command", Command: "ruby -e 'File.read(\"docs/readme.md\")'"},
+		{Tool: "Bash", Arg: "command", Command: "php -r 'echo 1+1;'"},
+		{Tool: "Bash", Arg: "command", Command: "php -r 'echo file_get_contents(\"docs/readme.md\");'"},
 	}
 
 	h := NewRuleSynthHarness(corpus, benign)
@@ -93,14 +93,14 @@ func TestRuleSynthHarness_KeepsCatchingRule(t *testing.T) {
 // proposer, holds the no-regression line.
 func TestRuleSynthHarness_RevertsRegressingRule(t *testing.T) {
 	corpus := mineCorpus(t, []string{
-		"ruby -e 'File.write(\"internal/adjudicator/decide.go\", x)'",
+		"php -r 'file_put_contents(\"internal/adjudicator/decide.go\", $x);'",
 	})
-	// A benign call that the synthesized "ruby -e ... adjudicator" rule WOULD also deny:
+	// A benign call that the synthesized "php -r ... adjudicator" rule WOULD also deny:
 	// it names the same verb and the same guarded tree, but is a read. The synthesized
 	// regex cannot tell read from write, so it regresses this — and the keep-bit must
 	// therefore REVERT the only candidate.
 	benign := []rulesynth.Call{
-		{Tool: "Bash", Arg: "command", Command: "ruby -e 'IO.read(\"internal/adjudicator/decide.go\")'"},
+		{Tool: "Bash", Arg: "command", Command: "php -r 'echo file_get_contents(\"internal/adjudicator/decide.go\");'"},
 	}
 
 	h := NewRuleSynthHarness(corpus, benign)

@@ -234,6 +234,23 @@ func (u Usage) CachedPromptTokens() int {
 	return 0
 }
 
+// ContextWindowTokens is the prompt/context size that should count against a
+// long-session context budget. OpenAI-style prompt_tokens already include cached
+// prompt tokens, so their details are NOT added again. Anthropic reports
+// input_tokens as the uncached remainder and cache_read/cache_creation separately;
+// those counters are added back so the budget reflects the full context the model
+// attended to.
+func (u Usage) ContextWindowTokens() int {
+	n := u.PromptTokens
+	if u.CacheReadInputTokens > 0 {
+		n += u.CacheReadInputTokens
+	}
+	if u.CacheCreationInputTokens > 0 {
+		n += u.CacheCreationInputTokens
+	}
+	return n
+}
+
 // Completion is a planner's response for one turn.
 type Completion struct {
 	Message            Message

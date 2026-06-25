@@ -222,7 +222,9 @@ func budgetCores(raw float64, cores int) (int, bool) {
 }
 
 func main() {
-	addr := flag.String("addr", "127.0.0.1:8150", "listen address")
+	const defaultAddr = "127.0.0.1:8150"
+	addr := flag.String("addr", defaultAddr, "listen address")
+	basePath := demoui.BasePathFlag(flag.CommandLine, "/turntax")
 	jobs := flag.Int("jobs", 0, "cap GOMAXPROCS to an ABSOLUTE core count (0 = all cores). On a shared/active box pass e.g. 8 so the demo doesn't starve other work.")
 	budget := flag.Float64("budget", 0, "cap GOMAXPROCS to a FRACTION of the machine: 0.75 = 75% of the logical cores (portable; 75 or 0.75 accepted). Mutually exclusive with -jobs. 0 = unset.")
 	selfcheck := flag.Bool("selfcheck", false, "run HEADLESS: replay each present suite through the kernel (the same turnbench.RunWithCalls path the browser drives), assert the documented turn-tax + safety-floor invariants, print a witness table, and exit non-zero on any mismatch. No browser, no network — the CI / cross-platform dog-food of this demo's data path.")
@@ -256,10 +258,12 @@ func main() {
 		os.Exit(runPrint(*suite))
 	}
 
+	app := http.NewServeMux()
+	app.HandleFunc("/", handleIndex)
+	app.HandleFunc("/api/suites", handleSuites)
+	app.HandleFunc("/api/run", handleRun)
 	mux := http.NewServeMux()
-	mux.HandleFunc("/", handleIndex)
-	mux.HandleFunc("/api/suites", handleSuites)
-	mux.HandleFunc("/api/run", handleRun)
+	base := demoui.MountWithBasePath(mux, *basePath, app)
 
 	present := []string{}
 	for _, ks := range knownSuites {
@@ -267,30 +271,22 @@ func main() {
 			present = append(present, ks.ID)
 		}
 	}
-	fmt.Fprintf(os.Stderr, "turntaxdemo %s on http://%s (GOMAXPROCS=%d)\n", version, listenAddr(*addr), gomax)
+	bind := demoui.ListenAddr(*addr, defaultAddr)
+	fmt.Fprintf(os.Stderr, "turntaxdemo %s on %s (GOMAXPROCS=%d)\n", version, demoui.LocalURL(bind, base), gomax)
 	fmt.Fprintf(os.Stderr, "trace dir: %s\n", turnTaxDir())
+	if base != "" {
+		fmt.Fprintf(os.Stderr, "base path: %s (set by -base-path or %s)\n", base, demoui.DemoBasePathEnv)
+	}
 	if len(present) == 0 {
 		fmt.Fprintf(os.Stderr, "WARNING: no turntax fixtures found — run from the fak/ directory\n")
 	} else {
 		fmt.Fprintf(os.Stderr, "suites present: %v\n", present)
 	}
 	fmt.Fprintf(os.Stderr, "open the URL → pick a suite → 'Replay through the kernel'\n")
-	if err := http.ListenAndServe(listenAddr(*addr), mux); err != nil {
+	if err := http.ListenAndServe(bind, mux); err != nil {
 		fmt.Fprintln(os.Stderr, "listen:", err)
 		os.Exit(1)
 	}
-}
-
-// listenAddr honors the $PORT contract used by container platforms (Cloud Run,
-// Heroku, etc.): when PORT is set in the environment, bind 0.0.0.0:$PORT and ignore
-// the -addr loopback default, so the same binary serves locally (-addr) and in a
-// container (no flags, just $PORT) with no rebuild. An explicit -addr that is not the
-// compiled-in loopback default still wins, so a local override is never silently lost.
-func listenAddr(addr string) string {
-	if p := os.Getenv("PORT"); p != "" && addr == "127.0.0.1:8150" {
-		return "0.0.0.0:" + p
-	}
-	return addr
 }
 
 // suiteExpect is the documented turn-tax + safety-floor invariant for a known

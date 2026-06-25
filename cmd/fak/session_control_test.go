@@ -9,8 +9,10 @@ package main
 
 import (
 	"context"
+	"strings"
 	"testing"
 
+	"github.com/anthony-chaudhary/fak/internal/agent"
 	"github.com/anthony-chaudhary/fak/internal/gateway"
 	"github.com/anthony-chaudhary/fak/internal/session"
 )
@@ -139,6 +141,92 @@ func TestControlAndObserveRoundTrip(t *testing.T) {
 	fresh := observeSession(context.Background(), "never-seen-"+trace)
 	if fresh.Run != "running" || fresh.Budget.TurnsLeft != session.Unbounded {
 		t.Fatalf("unseen trace = %+v, want running/unbounded default", fresh)
+	}
+}
+
+// TestDecideAndDebitSessionHooks proves the served-request hot-path callbacks wired
+// into gateway.Config use the same process-local session table as the operator
+// control surface.
+func TestDecideAndDebitSessionHooks(t *testing.T) {
+	const trace = "serve-hook-1"
+	t.Cleanup(func() { serveSessions.Reset(trace) })
+
+	if _, _, err := controlSession(context.Background(), trace, "budget",
+		gateway.SessionControlRequest{Budget: &gateway.SessionBudget{TurnsLeft: 1, TokensLeft: 10}}); err != nil {
+		t.Fatalf("seed budget: %v", err)
+	}
+	v := decideSession(context.Background(), trace)
+	if !v.Proceed || v.State.Budget.TurnsLeft != 0 {
+		t.Fatalf("first decide = %+v, want proceed with turn debited to 0", v)
+	}
+	st := debitSession(context.Background(), trace, gateway.SessionUsage{CompletionTokens: 10})
+	if st.Budget.TokensLeft != 0 {
+		t.Fatalf("debit state = %+v, want token budget 0", st)
+	}
+	v = decideSession(context.Background(), trace)
+	if v.Proceed || !v.Stop {
+		t.Fatalf("post-budget decide = %+v, want stop after token exhaustion", v)
+	}
+}
+
+func TestDebitSessionHookDebitsContextBudget(t *testing.T) {
+	const trace = "serve-hook-context-1"
+	t.Cleanup(func() { serveSessions.Reset(trace) })
+
+	if _, _, err := controlSession(context.Background(), trace, "budget",
+		gateway.SessionControlRequest{Budget: &gateway.SessionBudget{
+			TurnsLeft: session.Unbounded, TokensLeft: session.Unbounded, ContextTokensLeft: 20,
+		}}); err != nil {
+		t.Fatalf("seed context budget: %v", err)
+	}
+	st := debitSession(context.Background(), trace, gateway.SessionUsage{ContextTokens: 21})
+	if st.Run != "draining" || st.Reason != session.ReasonBudgetContext || st.ContinuationID == "" {
+		t.Fatalf("context debit state = %+v, want draining with continuation id", st)
+	}
+}
+
+func TestResetServedSessionOnBudgetRecontinuesWithCarryover(t *testing.T) {
+	const trace = "reset-hook-1"
+	var child string
+	t.Cleanup(func() {
+		serveSessions.Reset(trace)
+		if child != "" {
+			serveSessions.Reset(child)
+		}
+	})
+
+	if _, _, err := controlSession(context.Background(), trace, "budget",
+		gateway.SessionControlRequest{Budget: &gateway.SessionBudget{
+			TurnsLeft: session.Unbounded, TokensLeft: session.Unbounded, ContextTokensLeft: 5,
+		}}); err != nil {
+		t.Fatalf("seed context budget: %v", err)
+	}
+	st := debitSession(context.Background(), trace, gateway.SessionUsage{ContextTokens: 6})
+	child = st.ContinuationID
+	if child == "" {
+		t.Fatalf("context debit state = %+v, want continuation id", st)
+	}
+
+	hook := resetServedSessionOnBudget(50)
+	if hook == nil {
+		t.Fatalf("reset hook must be enabled with a positive fresh context budget")
+	}
+	nextTrace, seed, ok := hook(context.Background(), trace, []agent.Message{
+		{Role: agent.RoleSystem, Content: "You are fak."},
+		{Role: agent.RoleUser, Content: "Help me add reset."},
+		{Role: agent.RoleAssistant, Content: "I will wire the served reset hook."},
+		{Role: agent.RoleUser, Content: "I prefer concise answers."},
+	})
+	if !ok || nextTrace != child || len(seed) != 1 {
+		t.Fatalf("reset hook = trace=%q seed=%+v ok=%v, want child trace with one carryover message", nextTrace, seed, ok)
+	}
+	if seed[0].Role != agent.RoleSystem || !strings.Contains(strings.ToLower(seed[0].Content), "continuation") {
+		t.Fatalf("seed message = %+v, want system continuation recap", seed[0])
+	}
+
+	fresh := observeSession(context.Background(), child)
+	if fresh.Run != "running" || fresh.ParentTrace != trace || fresh.Generation != 1 || fresh.Budget.ContextTokensLeft != 50 {
+		t.Fatalf("fresh child state = %+v, want running child with parent/generation/context budget", fresh)
 	}
 }
 

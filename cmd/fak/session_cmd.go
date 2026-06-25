@@ -12,7 +12,7 @@ package main
 //	fak session resume <id>                 # un-pause (a live state flip, not a cold re-attach)
 //	fak session throttle <id> [--reason R]  # slow without pausing
 //	fak session run    <id> <state>         # set any run-state (running|throttled|paused|draining|stopped)
-//	fak session budget <id> [--turns N] [--tokens N]   # re-set the work allotment live
+//	fak session budget <id> [--turns N] [--tokens N] [--context-tokens N]   # re-set the work allotment live
 //	fak session pace   <id> [--max-tokens N] [--gap-ms N]  # re-set the per-turn throttle
 //	fak session priority <id> <N>           # re-set the scheduling rank (lower yields first)
 //
@@ -101,6 +101,7 @@ func runSession(stdout, stderr io.Writer, argv []string) int {
 	reason := fs.String("reason", "", "reason token recorded on throttle/stop")
 	turns := fs.Int("turns", sessionFlagUnset, "budget: remaining turns (-1 = unbounded)")
 	tokens := fs.Int("tokens", sessionFlagUnset, "budget: remaining output tokens (-1 = unbounded)")
+	contextTokens := fs.Int("context-tokens", sessionFlagUnset, "budget: remaining prompt/context tokens (0 = off)")
 	maxTokens := fs.Int("max-tokens", sessionFlagUnset, "pace: max output tokens this turn (0 = planner default)")
 	gapMs := fs.Int("gap-ms", sessionFlagUnset, "pace: minimum inter-turn gap in ms (0 = none)")
 	if err := fs.Parse(flagArgs); err != nil {
@@ -137,7 +138,7 @@ func runSession(stdout, stderr io.Writer, argv []string) int {
 	case "run":
 		return c.runVerb(stdout, stderr, *asJSON, pos[0], pos[1], *reason, *ifRev)
 	case "budget":
-		return c.budgetVerb(stdout, stderr, *asJSON, pos[0], *turns, *tokens, *ifRev)
+		return c.budgetVerb(stdout, stderr, *asJSON, pos[0], *turns, *tokens, *contextTokens, *ifRev)
 	case "pace":
 		return c.paceVerb(stdout, stderr, *asJSON, pos[0], *maxTokens, *gapMs, *ifRev)
 	case "priority":
@@ -162,18 +163,18 @@ func (c *sessionClient) runVerb(stdout, stderr io.Writer, asJSON bool, id, state
 	})
 }
 
-// budgetVerb re-sets the work allotment. Budget is one value (both axes), so a
+// budgetVerb re-sets the work allotment. Budget is one value (all axes), so a
 // partial update (only --turns, say) reads the current state and preserves the other
-// axis, fencing the read-modify-write with the observed rev (unless the operator
+// axes, fencing the read-modify-write with the observed rev (unless the operator
 // passed an explicit --if-rev) so a concurrent change is caught, not clobbered. The
 // fence is real once the session has prior state (rev>=1); a rev-0 (never-written)
 // session takes the plain write, since its defaults have nothing newer to clobber.
-func (c *sessionClient) budgetVerb(stdout, stderr io.Writer, asJSON bool, id string, turns, tokens int, ifRev uint64) int {
-	if turns == sessionFlagUnset && tokens == sessionFlagUnset {
-		fmt.Fprintln(stderr, "fak session budget: set at least one of --turns / --tokens")
+func (c *sessionClient) budgetVerb(stdout, stderr io.Writer, asJSON bool, id string, turns, tokens, contextTokens int, ifRev uint64) int {
+	if turns == sessionFlagUnset && tokens == sessionFlagUnset && contextTokens == sessionFlagUnset {
+		fmt.Fprintln(stderr, "fak session budget: set at least one of --turns / --tokens / --context-tokens")
 		return 2
 	}
-	b, rev, code := c.mergeBudget(stderr, id, turns, tokens, ifRev)
+	b, rev, code := c.mergeBudget(stderr, id, turns, tokens, contextTokens, ifRev)
 	if code != 0 {
 		return code
 	}
@@ -201,10 +202,10 @@ func (c *sessionClient) paceVerb(stdout, stderr io.Writer, asJSON bool, id strin
 // mergeBudget fills the axes the operator did not name from the session's current
 // state and returns the rev to fence the write with. code != 0 is an early exit (the
 // observe failed); the caller returns it.
-func (c *sessionClient) mergeBudget(stderr io.Writer, id string, turns, tokens int, ifRev uint64) (gateway.SessionBudget, uint64, int) {
-	b := gateway.SessionBudget{TurnsLeft: turns, TokensLeft: tokens}
+func (c *sessionClient) mergeBudget(stderr io.Writer, id string, turns, tokens, contextTokens int, ifRev uint64) (gateway.SessionBudget, uint64, int) {
+	b := gateway.SessionBudget{TurnsLeft: turns, TokensLeft: tokens, ContextTokensLeft: contextTokens}
 	rev := ifRev
-	if turns == sessionFlagUnset || tokens == sessionFlagUnset || ifRev == 0 {
+	if turns == sessionFlagUnset || tokens == sessionFlagUnset || contextTokens == sessionFlagUnset || ifRev == 0 {
 		cur, err := c.observe(id)
 		if err != nil {
 			fmt.Fprintf(stderr, "fak session budget: read current state: %v\n", err)
@@ -215,6 +216,9 @@ func (c *sessionClient) mergeBudget(stderr io.Writer, id string, turns, tokens i
 		}
 		if tokens == sessionFlagUnset {
 			b.TokensLeft = cur.Budget.TokensLeft
+		}
+		if contextTokens == sessionFlagUnset {
+			b.ContextTokensLeft = cur.Budget.ContextTokensLeft
 		}
 		if ifRev == 0 {
 			rev = cur.Rev // fence the read-modify-write so a concurrent change 409s
@@ -300,12 +304,21 @@ func emitSessionJSON(stdout, stderr io.Writer, v any) int {
 // column scan reads cleanly. Unbounded (-1) budget axes render as "inf"; a reason,
 // when present, is appended.
 func formatSessionState(st gateway.SessionState) string {
-	line := fmt.Sprintf("%-24s %-9s budget(turns=%s tokens=%s) pace(max=%d gap=%dms) prio=%d rev=%d",
+	line := fmt.Sprintf("%-24s %-9s budget(turns=%s tokens=%s context=%s) pace(max=%d gap=%dms) prio=%d rev=%d",
 		st.TraceID, st.Run,
-		budgetAxis(st.Budget.TurnsLeft), budgetAxis(st.Budget.TokensLeft),
+		budgetAxis(st.Budget.TurnsLeft), budgetAxis(st.Budget.TokensLeft), contextBudgetAxis(st.Budget.ContextTokensLeft),
 		st.Pace.MaxTokensPerTurn, st.Pace.MinTurnGapMs, st.Priority, st.Rev)
 	if st.Reason != "" {
 		line += " reason=" + st.Reason
+	}
+	if st.ContinuationID != "" {
+		line += " continuation=" + st.ContinuationID
+	}
+	if st.ParentTrace != "" {
+		line += " parent=" + st.ParentTrace
+	}
+	if st.Generation > 0 {
+		line += fmt.Sprintf(" gen=%d", st.Generation)
 	}
 	return line
 }
@@ -315,6 +328,16 @@ func formatSessionState(st gateway.SessionState) string {
 func budgetAxis(v int) string {
 	if v < 0 {
 		return "inf"
+	}
+	return strconv.Itoa(v)
+}
+
+func contextBudgetAxis(v int) string {
+	if v < 0 {
+		return "inf"
+	}
+	if v == 0 {
+		return "off"
 	}
 	return strconv.Itoa(v)
 }
@@ -446,7 +469,7 @@ func sessionUsage(w io.Writer) {
   fak session resume   <id>                   un-pause (a live state flip)
   fak session throttle <id> [--reason R]      slow without pausing
   fak session run      <id> <state>           set running|throttled|paused|draining|stopped
-  fak session budget   <id> [--turns N] [--tokens N]        re-set the work allotment live
+  fak session budget   <id> [--turns N] [--tokens N] [--context-tokens N]  re-set the work allotment live
   fak session pace     <id> [--max-tokens N] [--gap-ms N]   re-set the per-turn throttle
   fak session priority <id> <N>               re-set the scheduling rank (lower yields first)
 

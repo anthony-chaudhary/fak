@@ -126,7 +126,7 @@ const tpsFmt=v=>v>=1000?(v/1000).toFixed(1)+"k tok/s":Math.round(v)+" tok/s";
 let ladder=[], curvePts=[], curveMax=1, hwSummary="";
 
 // ---- init ----
-fetch("/api/ladder").then(r=>r.json()).then(d=>{
+fetch("api/ladder").then(r=>r.json()).then(d=>{
   ladder=d.models||[];
   const sel=$("model");
   ladder.forEach(m=>{if(m.present){const o=document.createElement("option");o.value=m.name;o.textContent=m.name+" ("+m.params+")";sel.appendChild(o);}});
@@ -149,7 +149,7 @@ $("raceBtn").onclick=()=>{
   if(raceES)raceES.close();
   resetRace();$("raceBtn").disabled=true;
   const model=$("model").value||"SmolLM2-135M";
-  raceES=new EventSource("/api/race?model="+encodeURIComponent(model)+"&P=512&T=5&C=5&D=16&R=32");
+  raceES=new EventSource("api/race?model="+encodeURIComponent(model)+"&P=512&T=5&C=5&D=16&R=32");
   raceES.onmessage=ev=>{
     const e=JSON.parse(ev.data);appendLog(e);
     if(e.type==="hw"&&e.hardware){hwSummary=e.hardware.summary||hwSummary;$("hwPill").textContent="hardware: "+hwSummary;}
@@ -192,7 +192,7 @@ let curveES=null;
 $("curveBtn").onclick=()=>{
   if(curveES)curveES.close();
   curvePts=[];curveMax=1;$("curveBtn").disabled=true;$("curvePhase").textContent="starting…";drawCurve();
-  curveES=new EventSource("/api/curve");
+  curveES=new EventSource("api/curve");
   curveES.onmessage=ev=>{
     const e=JSON.parse(ev.data);appendLog(e);
     if(e.type==="phase"){$("curvePhase").textContent="▸ "+e.model+": "+e.phase;}

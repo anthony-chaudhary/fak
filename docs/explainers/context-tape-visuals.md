@@ -17,6 +17,11 @@ date: 2026-06-24
 
 # The context tape
 
+Read this if you need to teach, debug, or audit where an agent's context budget
+actually went. You'll be able to render the same tape from a canned scenario, a
+real trajectory, or an RSI journal, then compare the reused prefix against fresh
+input and decode without hand-drawing a new chart.
+
 fak's most-shared picture is one panel of the live demo (`cmd/ctxdemo`): a row per agent,
 each row a horizontal bar whose coloured segments are drawn **to scale** — the shared
 prefix, the model's decode, and every tool result a different size. You can see the context
@@ -152,7 +157,7 @@ diagram a human drew and a diagram the data drew.
 The tape is the first instance of a general principle worth pursuing across the repo:
 
 > **Every fak data source that has a shape should be able to draw that shape, in the same
-> visual language, with no bespoke rendering code.**
+> visual language, with no custom rendering code.**
 
 The repo already has two visual families: the hand-authored mermaid deck in
 [`visuals/`](../../visuals/) (architecture diagrams, edited via `_meta.json`) and the

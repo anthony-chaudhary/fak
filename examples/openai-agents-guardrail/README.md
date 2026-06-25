@@ -18,6 +18,8 @@ From the repository root:
 python examples/openai-agents-guardrail/demo.py
 ```
 
+The demo runs locally and completes in seconds.
+
 Expected shape:
 
 ```text
@@ -29,6 +31,13 @@ summary: PASS
 ```
 
 Captured output is in [`EXAMPLE-OUTPUT.md`](EXAMPLE-OUTPUT.md).
+
+## What this does not claim
+
+This demo proves the verdict-to-guardrail mapping with a dependency-free adapter. It
+does not prove a live OpenAI Agents SDK run, hosted authentication, or a specific SDK
+decorator name; the final binding step still belongs in an app pinned to the SDK
+version it ships with.
 
 ## Mapping
 

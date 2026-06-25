@@ -86,6 +86,14 @@ directive. The gateway stays session-internals-blind: the host (`cmd/fak`) owns
 flag gates it (and requires `--context-budget-tokens`). Default OFF: the slice ships dark and
 flips on after a live soak, because it rewrites in-flight transcript history.
 
+**5. The cooperative MCP reset — `fak_session_reset`.**
+For clients that use fak as an MCP server rather than a full model-wire proxy, the tool
+accepts `{trace_id, context_tokens, messages}`. It first debits the reported context tokens,
+then refuses unless the session is genuinely budget-drained, and finally reuses the same
+`ResetOnBudget` host hook to return the fresh continuation trace and `seed_messages` for a
+new model window. MCP still cannot observe provider token usage by itself; the client or
+wrapper must report it.
+
 ## Honesty ledger
 
 - **Reuses, does not reinvent.** The "what to keep" decision is the shipped `ctxmmu`
@@ -108,7 +116,8 @@ as child issues:
 - **#740** — live same-model KV-included reuse (wire `vcachechain` to a live serve splice;
   today `warm_prefix` carries the recall *plan*, stamped `live_kv_reuse:deferred`).
 - **#741** — a model-call task distiller (summarize the middle, not just extract the ends).
-- **#742** — an MCP `fak_session_reset` tool variant (cooperative reset for any MCP client).
+- **#742** — MCP `fak_session_reset` cooperative reset for clients/wrappers that report
+  context usage (**shipped**).
 - **#743** — an operator webhook + a pre-threshold (e.g. 80%) warning before exhaustion.
 - **#744** — a cross-session / fleet-wide budget pool (today each session's budget is independent).
 

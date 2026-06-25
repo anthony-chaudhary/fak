@@ -1,0 +1,27 @@
+{
+  "command_argc": 12,
+  "command_digest": "69c0e46e35b81981f16f1ae37dd1f5fde923f119c5fce174b6890500da603636",
+  "command_executable": "python",
+  "command_exit_code": 1,
+  "command_label": "actionable-audit-with-git-gates",
+  "command_output_dropped": [
+    "stdout",
+    "stderr"
+  ],
+  "command_redacted": true,
+  "created_at": "2026-06-25T10:16:46.162689Z",
+  "dry_run": false,
+  "executed": true,
+  "expect_deny": false,
+  "policy": "examples/dev-agent-policy.json",
+  "preflight": {
+    "by": "monitor",
+    "exit_code": 0,
+    "reason": "NONE",
+    "stderr": "fak: loaded capability floor from examples/dev-agent-policy.json",
+    "stdout": "verdict=ALLOW reason=NONE by=monitor",
+    "verdict": "ALLOW"
+  },
+  "status": "COMMAND_FAILED",
+  "tool": "run_tests"
+}

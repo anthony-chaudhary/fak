@@ -1,5 +1,11 @@
 # Guarding the opencode/GLM dispatch lane (issue #730)
 
+Use this when you run the two-lane dispatch fleet and want the **opencode/GLM**
+worker to pass through the same `fak guard` decision journal as the Claude worker.
+Start with the always-on fleet shape in
+[`always-on-dogfood-server.md`](always-on-dogfood-server.md), then use this page
+to set the GLM base URL and verify the guarded opencode command.
+
 The fleet-through-kernel change fronts every **claude** dispatch worker with
 `fak guard` by default, so the kernel adjudicates every tool call the worker proposes
 and records each verdict in a durable decision journal. The **opencode/GLM** lane was

@@ -13,17 +13,26 @@ type CacheEventKind string
 
 const (
 	CacheFill   CacheEventKind = "fill"   // a tier-2 entry was stored from an EvComplete
-	CacheHit    CacheEventKind = "hit"    // a tier-2 entry was served on Lookup
+	CacheHit    CacheEventKind = "hit"    // a tier-2/tier-3 entry was served on Lookup
 	CacheEvict  CacheEventKind = "evict"  // an entry was dropped by LRU pressure
 	CacheRevoke CacheEventKind = "revoke" // an entry was evicted by witness refutation
+	CacheMiss   CacheEventKind = "miss"   // a Lookup found nothing servable (with a reason)
 )
 
-// CacheEvent is a tier-2 lifecycle event lowered into a cachemeta entry. The Entry
-// is built with cachemeta.FromVDSOKey, so it carries tool, args digest, admission
-// epoch, witness, and (when a witness is present) external-refutation invalidation.
+// CacheEvent is a tier-2/tier-3 lifecycle event lowered into a cachemeta entry. For
+// fills/hits/evicts/revokes the Entry is built with cachemeta.FromVDSOKey (or
+// FromStaticTool for tier-3), so it carries tool, args digest, admission epoch,
+// witness, and (when a witness is present) external-refutation invalidation. For a
+// CacheMiss the Entry is built with cachemeta.FromMiss (no payload) and Reason carries
+// the cachemeta-native miss cause.
 type CacheEvent struct {
 	Kind  CacheEventKind
 	Entry cachemeta.Entry
+	// Reason is the cachemeta-native cause of a CacheMiss (ReasonNone for every other
+	// kind). The exact vDSO reason string is preserved losslessly on the entry's
+	// "vdso_miss" label, since the cachemeta LookupReason vocabulary is coarser than the
+	// vDSO's own closed Miss* vocabulary.
+	Reason cachemeta.LookupReason
 }
 
 // WitnessFunc is a per-tool adapter that extracts the external world-state witness a
@@ -150,4 +159,48 @@ func (v *VDSO) emitStaticHit(c *abi.ToolCall, ref abi.Ref, opts ...cachemeta.Opt
 		return
 	}
 	sink(CacheEvent{Kind: CacheHit, Entry: cachemeta.FromStaticTool(c.Tool, ref, opts...)})
+}
+
+// missLookupReason maps a vDSO miss reason (the closed Miss* vocabulary) to the nearest
+// cachemeta LookupReason. The mapping is deliberately coarse — WITNESS_REVOKED and
+// NOT_CACHED map exactly (refuted-witness / absent), RESOURCE_MISNAMED and MISSING_HINTS
+// both reduce to incomplete-binding (the read could not bind enough to be admitted), and
+// a write-shaped DESTRUCTIVE call reduces to scope-denied (never reusable by structure).
+// No detail is lost: emitMiss preserves the exact vDSO reason on the "vdso_miss" label.
+func missLookupReason(r string) cachemeta.LookupReason {
+	switch r {
+	case MissWitnessRevoked:
+		return cachemeta.ReasonRefutedWitness
+	case MissResourceMisnamed, MissMissingHints:
+		return cachemeta.ReasonIncompleteBinding
+	case MissDestructive:
+		return cachemeta.ReasonScopeDenied
+	default: // MissNotCached
+		return cachemeta.ReasonAbsent
+	}
+}
+
+// emitMiss lowers a fast-path MISS into a first-class cachemeta event (§2.5:
+// "admissions/evictions/hits/misses"). Like emitCache it is opt-in (a nil sink is the
+// default and a no-op, so the hot miss path is unchanged when nobody observes) and is
+// dispatched OUTSIDE v.mu. The event names the tool, the cachemeta-native reason, the
+// lossless vDSO reason (the "vdso_miss" label), and the consumer that experienced the
+// miss — symmetric with the consumer attribution on a hit (consumerOpt is nil for an
+// anonymous call, so no empty consumer is recorded). A nil call still emits a tool-less
+// miss so the reason stream has no hole.
+func (v *VDSO) emitMiss(c *abi.ToolCall, vdsoReason string) {
+	v.regMu.RLock()
+	sink := v.cacheSink
+	v.regMu.RUnlock()
+	if sink == nil {
+		return
+	}
+	reason := missLookupReason(vdsoReason)
+	tool := ""
+	if c != nil {
+		tool = c.Tool
+	}
+	entry := cachemeta.FromMiss(tool, reason,
+		cachemeta.WithLabel("vdso_miss", vdsoReason), consumerOpt(c))
+	sink(CacheEvent{Kind: CacheMiss, Entry: entry, Reason: reason})
 }

@@ -1,0 +1,23 @@
+{
+  "command_argc": 0,
+  "command_digest": null,
+  "command_executable": null,
+  "command_label": "git-add-deny",
+  "command_redacted": true,
+  "created_at": "2026-06-25T10:15:36.616692Z",
+  "dry_run": true,
+  "executed": false,
+  "expect_deny": true,
+  "expect_reason": "DEFAULT_DENY",
+  "policy": "examples/dev-agent-policy.json",
+  "preflight": {
+    "by": "monitor",
+    "exit_code": 0,
+    "reason": "DEFAULT_DENY",
+    "stderr": "fak: loaded capability floor from examples/dev-agent-policy.json",
+    "stdout": "verdict=DENY reason=DEFAULT_DENY by=monitor",
+    "verdict": "DENY"
+  },
+  "status": "DENIED_EXPECTED",
+  "tool": "git_add"
+}

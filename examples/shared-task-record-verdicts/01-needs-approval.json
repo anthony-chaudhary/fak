@@ -1,0 +1,13 @@
+{
+  "schema": "fak.shared-patch-result.v1",
+  "task_id": "task_shared_demo",
+  "base_rev": "sha256:taskrev001",
+  "current_rev": "sha256:taskrev001",
+  "verdict": "needs_approval",
+  "reason": "APPROVAL_REQUIRED",
+  "approval": {
+    "decision_id": "dec_shared_task_approval",
+    "state": "input_required",
+    "reason": "write requires approval"
+  }
+}

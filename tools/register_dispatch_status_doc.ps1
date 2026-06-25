@@ -1,6 +1,6 @@
 <#
 register_dispatch_status_doc.ps1 -- install/remove the OS Scheduled Task that keeps
-the committed issue-dispatch STATUS DOC fresh (docs/dispatch-status.md).
+the operator-local issue-dispatch STATUS DOC fresh (gitignored .dispatch-runs/dispatch-status.md).
 
 The spawn arm (FleetIssueDispatch) produces #N commits and the close arm
 (FleetResolveProgress) drives OPEN_WITNESSED issues to CLOSED -- but every signal
@@ -8,16 +8,16 @@ lives in gitignored runtime (.dispatch-runs/progress.jsonl). This task renders t
 one human-readable surface an operator opens to see WHICH issues are synced to WHICH
 lanes, how closure is progressing, and any worker that spawned and produced nothing.
 
-It runs tools/dispatch_status.py --md docs/dispatch-status.md every few minutes. The
+It runs tools/dispatch_status.py --md .dispatch-runs/dispatch-status.md every few minutes. The
 tool is a pure read-only FOLD over the existing sub-tools (preflight, lane router,
 closure audit) plus a pure-local scan of .dispatch-runs for 0-byte worker logs. It
 launches NO worker and is DoS-free.
 
-IMPORTANT: this task only WRITES the working-tree doc; it does NOT git-commit it.
-The repo is a shared multi-session tree where commits are by explicit path only --
-automating `git add`/`git commit` here would steal a sibling session's in-flight
-files. An operator (or a session) commits docs/dispatch-status.md by path when ready;
-the task just keeps the working copy current between commits.
+IMPORTANT: this task only WRITES the gitignored, operator-local doc; it is NEVER
+git-committed. The rendered doc carries operator-private telemetry -- the switcher
+account tag, the closure-honesty rate, throughput, and silent-worker logs -- so it
+lives under .dispatch-runs/ (gitignored), out of the public tree. The task just keeps
+the operator-local copy current between ticks.
 
   .\register_dispatch_status_doc.ps1 -Workspace C:\work\fak          # install (every 30 min)
   .\register_dispatch_status_doc.ps1 -Workspace C:\work\fak -EveryMinutes 15
@@ -29,7 +29,7 @@ param(
   [ValidateSet('install','remove','status')] [string]$Action = 'install',
   [string]$TaskName    = 'FleetDispatchStatusDoc',
   [string]$Workspace   = $(Split-Path -Parent $PSScriptRoot),
-  [string]$DocPath     = 'docs\dispatch-status.md',
+  [string]$DocPath     = '.dispatch-runs\dispatch-status.md',
   [int]$EveryMinutes   = 30
 )
 $ErrorActionPreference = 'Stop'
@@ -78,6 +78,5 @@ $settings  = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGo
 Register-ScheduledTask -TaskName $TaskName -Action $taskAction -Trigger $trigger `
                -Principal $principal -Settings $settings -Force | Out-Null
 
-Write-Output "installed $TaskName -- every $EveryMinutes min, renders $DocPath (read-only fold; commits nothing)"
+Write-Output "installed $TaskName -- every $EveryMinutes min, renders $DocPath (read-only fold; gitignored, never committed)"
 Write-Output "read the doc:   $Workspace\$DocPath"
-Write-Output "commit it by path when ready:   git commit -s -- $DocPath"

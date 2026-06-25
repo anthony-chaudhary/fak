@@ -13,8 +13,8 @@ description: "The fak issue-dispatch loop spawns capped, witness-gated workers t
 > each close re-verified per-SHA by [`dos commit-audit`](https://github.com/anthony-chaudhary/fak/blob/main/tools/issue_resolve_witnessed.py),
 > never by the worker's word. The whole thing runs unattended on three OS scheduled
 > tasks, bounded so the live-worker population can never exceed a cap (the no-DoS
-> guarantee). The committed, human-readable view is
-> [`docs/dispatch-status.md`](dispatch-status.md), refreshed by the loop itself.
+> guarantee). An operator-local, human-readable view is rendered to
+> `.dispatch-runs/dispatch-status.md` (gitignored), refreshed by the loop itself.
 
 ## The gap this closes
 
@@ -41,7 +41,7 @@ scoped worker per issue — while keeping every safety primitive the plan path h
 | 3. **Witness** | [`issue_closure_audit.py`](https://github.com/anthony-chaudhary/fak/blob/main/tools/issue_closure_audit.py) | Binds each issue to its resolving commit(s) from the commit text, grades through `dos commit-audit`: `TRUE_RESOLVED` / `CLAIMED_CLOSED` / `OPEN_WITNESSED` / `OPEN`. `closure_rate = TRUE / (TRUE + CLAIMED)`. |
 | 4. **Close** | [`issue_resolve_witnessed.py`](https://github.com/anthony-chaudhary/fak/blob/main/tools/issue_resolve_witnessed.py) | The deterministic close arm — no model, no edit. For each `OPEN_WITNESSED` issue it **re-runs** `dos commit-audit <sha>` at close time and closes via `gh issue close` citing the SHA iff `OK` ∧ `diff-witnessed`. Reversible with `gh issue reopen`. |
 | 5. **Harvest** | [`issue_resolve_progress.py`](https://github.com/anthony-chaudhary/fak/blob/main/tools/issue_resolve_progress.py) | Snapshots open / closed-by-loop / witnessed counts to `.dispatch-runs/progress.jsonl` (the curve) and drives the close arm. Counts only closes carrying the close-arm's signature as the loop's own work. |
-| 6. **Surface** | [`dispatch_status.py`](https://github.com/anthony-chaudhary/fak/blob/main/tools/dispatch_status.py) | One-touch operator card; `--md` writes [`docs/dispatch-status.md`](dispatch-status.md) (backlog-by-lane, closure honesty, silent-worker scan). |
+| 6. **Surface** | [`dispatch_status.py`](https://github.com/anthony-chaudhary/fak/blob/main/tools/dispatch_status.py) | One-touch operator card; `--md` writes the operator-local `.dispatch-runs/dispatch-status.md` (gitignored; backlog-by-lane, closure honesty, silent-worker scan). |
 
 ## The load-bearing invariants
 
@@ -67,6 +67,21 @@ loop. Each one is a hard guarantee, not a best effort:
   install dry-run unless `-Live` is passed. `--live` is the explicit opt-in to
   autonomous spawning / closing.
 
+## Before spawning: map the limiter
+
+Run the [bottleneck map loop](bottleneck-map-loop.md) before turning on a dispatch
+window or when the loop reports `AT_CAP`/low throughput. That fold answers whether
+the next bottleneck is fleet capacity/recovery or the issue backlog itself.
+
+If fleet health is CRITICAL/HIGH from account throttles or auth failures, treat it
+as a **transient dispatch gate**: cap the spawn arm and recheck after reset/relogin
+instead of elevating it to the top strategic problem. If the CRITICAL/HIGH row is
+recovery plumbing, watchdog, auto-resume, or surfacing backlog, treat it as
+semi-durable process debt and fix it before broad dispatch. In both cases, keep the
+open-work lens visible: `/issue-triage` may still need to cut taxonomy debt or an
+ownership pass may still need to claim/defer orphan P0/P1 work before issue-dispatch
+spawns the next worker.
+
 ## Run it
 
 ```bash
@@ -84,9 +99,8 @@ python tools/issue_resolve_dispatch.py --live      # spawn
 python tools/issue_resolve_witnessed.py            # dry-run / plan
 python tools/issue_resolve_progress.py --close --live
 
-# render the committed status doc, then commit it by path
-python tools/dispatch_status.py --md docs/dispatch-status.md
-git commit -s -- docs/dispatch-status.md
+# render the operator-local status doc (gitignored; never committed)
+python tools/dispatch_status.py --md .dispatch-runs/dispatch-status.md
 ```
 
 ## The always-on tasks (the "keep going" loop)
@@ -98,7 +112,7 @@ default**; `-Live` opts into the side effect.
 |---|---|---|---|
 | `FleetIssueDispatch` | [`register_issue_dispatch.ps1`](https://github.com/anthony-chaudhary/fak/blob/main/tools/register_issue_dispatch.ps1) | 10 min | SPAWN — one guarded issue worker per tick (`-Mode resolve`, default). `-Mode loop` runs the plan-portfolio arm instead (dormant until `PLAN-*.md` ship). |
 | `FleetResolveProgress` | [`register_resolve_progress.ps1`](https://github.com/anthony-chaudhary/fak/blob/main/tools/register_resolve_progress.ps1) | 15 min | CLOSE / harvest — snapshot the curve and close `OPEN_WITNESSED` issues. DoS-free (no worker spawned). |
-| `FleetDispatchStatusDoc` | [`register_dispatch_status_doc.ps1`](https://github.com/anthony-chaudhary/fak/blob/main/tools/register_dispatch_status_doc.ps1) | 30 min | DOC — render `docs/dispatch-status.md`. Read-only fold; writes the working-tree doc but never commits it. |
+| `FleetDispatchStatusDoc` | [`register_dispatch_status_doc.ps1`](https://github.com/anthony-chaudhary/fak/blob/main/tools/register_dispatch_status_doc.ps1) | 30 min | DOC — render the gitignored, operator-local `.dispatch-runs/dispatch-status.md`. Read-only fold; never committed. |
 
 ```powershell
 # install all three live (bounded autonomous spawn + close + doc refresh)

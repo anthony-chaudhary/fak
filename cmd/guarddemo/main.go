@@ -186,7 +186,9 @@ func handleRun(w http.ResponseWriter, r *http.Request) {
 }
 
 func main() {
-	addr := flag.String("addr", "127.0.0.1:8151", "listen address")
+	const defaultAddr = "127.0.0.1:8151"
+	addr := flag.String("addr", defaultAddr, "listen address")
+	basePath := demoui.BasePathFlag(flag.CommandLine, "/guarddemo")
 	jobs := flag.Int("jobs", 0, "cap GOMAXPROCS to an ABSOLUTE core count (0 = all cores). On a shared/active box pass e.g. 8 so the demo doesn't starve other work.")
 	selfcheck := flag.Bool("selfcheck", false, "run HEADLESS: replay each present scenario through the kernel (the same turnbench.RunWithCalls path the browser drives), assert the documented safety-floor invariants, print a witness table, and exit non-zero on any mismatch. No browser, no network — the CI / cross-platform dog-food of this demo's data path.")
 	print := flag.Bool("print", false, "render the WITHOUT-fak vs WITH-fak side-by-side as a colored TWO-COLUMN diff in the TERMINAL (no browser, no port) and exit. The 30-second point with zero setup. Honors NO_COLOR.")
@@ -204,10 +206,12 @@ func main() {
 		os.Exit(runPrint(*scenario))
 	}
 
+	app := http.NewServeMux()
+	app.HandleFunc("/", handleIndex)
+	app.HandleFunc("/api/scenarios", handleScenarios)
+	app.HandleFunc("/api/run", handleRun)
 	mux := http.NewServeMux()
-	mux.HandleFunc("/", handleIndex)
-	mux.HandleFunc("/api/scenarios", handleScenarios)
-	mux.HandleFunc("/api/run", handleRun)
+	base := demoui.MountWithBasePath(mux, *basePath, app)
 
 	present := []string{}
 	for _, ks := range knownScenarios {
@@ -215,28 +219,22 @@ func main() {
 			present = append(present, ks.ID)
 		}
 	}
-	fmt.Fprintf(os.Stderr, "guarddemo %s on http://%s (GOMAXPROCS=%d)\n", version, listenAddr(*addr), gomax)
+	bind := demoui.ListenAddr(*addr, defaultAddr)
+	fmt.Fprintf(os.Stderr, "guarddemo %s on %s (GOMAXPROCS=%d)\n", version, demoui.LocalURL(bind, base), gomax)
 	fmt.Fprintf(os.Stderr, "trace dir: %s\n", turnTaxDir())
+	if base != "" {
+		fmt.Fprintf(os.Stderr, "base path: %s (set by -base-path or %s)\n", base, demoui.DemoBasePathEnv)
+	}
 	if len(present) == 0 {
 		fmt.Fprintf(os.Stderr, "WARNING: no turntax fixtures found — run from the repo root\n")
 	} else {
 		fmt.Fprintf(os.Stderr, "scenarios present: %v\n", present)
 	}
 	fmt.Fprintf(os.Stderr, "open the URL → pick a scenario → 'Run both agents' (WITHOUT fak vs WITH fak, side by side)\n")
-	if err := http.ListenAndServe(listenAddr(*addr), mux); err != nil {
+	if err := http.ListenAndServe(bind, mux); err != nil {
 		fmt.Fprintln(os.Stderr, "listen:", err)
 		os.Exit(1)
 	}
-}
-
-// listenAddr honors the $PORT contract used by container/VM platforms: when PORT is
-// set in the environment, bind 0.0.0.0:$PORT and ignore the -addr loopback default,
-// so the same binary serves locally (-addr) and on a public host with no rebuild.
-func listenAddr(addr string) string {
-	if p := os.Getenv("PORT"); p != "" && addr == "127.0.0.1:8151" {
-		return "0.0.0.0:" + p
-	}
-	return addr
 }
 
 // ---------------------------------------------------------------------------

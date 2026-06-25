@@ -106,6 +106,314 @@ What Codex gets from this path:
 Use this path when you are running Codex itself. It preserves Codex's current model wire and
 adds fak as an explicit, inspectable tool boundary.
 
+### Long-context reset budgets
+
+There are two different questions:
+
+- **Can fak gate Codex tool use?** Yes, use the MCP path above.
+- **Can fak automatically stop/restart a session at a 150k-token context budget?** Only
+  when the model traffic also flows through the fak gateway, because MCP tool calls do not
+  carry the model provider's prompt/cache token accounting.
+- **Can MCP participate in a reset anyway?** Yes. An MCP client or wrapper can call
+  `fak_session_reset` with the trace id, its observed `context_tokens`, and the transcript
+  slice to distill. fak debits the budget, refuses unless the session is actually
+  budget-drained, then returns the fresh continuation trace plus `seed_messages` to prepend
+  in a new model window.
+
+For an OpenAI-compatible client that can repoint its base URL, seed a stable served
+session and context budget:
+
+```bash
+fak serve \
+  --addr 127.0.0.1:8080 \
+  --provider openai \
+  --base-url "$UPSTREAM_OPENAI_COMPAT_BASE" \
+  --session-id codex \
+  --context-budget-tokens 150000 \
+  --reset-on-budget \
+  --policy examples/dev-agent-policy.json
+```
+
+Then point the client at `http://127.0.0.1:8080/v1`. With `--reset-on-budget`, when the
+normalized prompt/context usage exhausts the budget the gateway mints a continuation id,
+distills the refused transcript into a carryover seed, re-arms the continuation trace with
+a fresh 150k budget, and retries the live request under that new trace.
+
+Without `--reset-on-budget`, the next request returns `409` with the usual `error`
+envelope plus:
+
+- `session.continuation_id`: the fresh-window handoff id.
+- `reset.action: restart_fresh_session`.
+- `reset.required_actions`: dump the session image, start a fresh process, rehydrate the
+  planned view, and reuse provider cache only where legal.
+
+For `fak guard`, the equivalent flag is:
+
+```bash
+fak guard --provider openai --context-budget-tokens 150000 --reset-on-budget -- <openai-compatible-agent>
+```
+
+That transparent reset is an in-gateway re-arm. It does not kill and relaunch the child
+OS process; wrappers that require a hard process boundary should still consume the 409
+directive mode and perform that supervisor step themselves.
+
+Current Codex CLI/IDE sessions should still use MCP first. If that Codex surface does not
+honor an injected OpenAI-compatible base URL, fak can adjudicate tools but cannot
+independently observe provider context usage; use `fak_session_reset` only when the Codex
+side or a wrapper can report the context-token count it wants fak to debit.
+
+Cooperative MCP reset call shape:
+
+```json
+{
+  "name": "fak_session_reset",
+  "arguments": {
+    "trace_id": "codex",
+    "context_tokens": 150001,
+    "messages": [
+      {"role": "system", "content": "You are working in C:\\work\\fak."},
+      {"role": "user", "content": "Continue the reset implementation."}
+    ]
+  }
+}
+```
+
+The response has `reset: true`, `from_trace_id`, `to_trace_id`, a
+`reset_directive.action` of `restart_fresh_session`, and `seed_messages` when the reset
+was accepted. A `reset: false` result is a normal refusal value: the session was not
+budget-drained, or the gateway was not started with `--reset-on-budget`.
+
+### Prove Codex actually used fak
+
+The MCP server being configured is not enough evidence on its own. Prove a Codex session
+called the fak server and keep the proof privacy-preserving:
+
+```powershell
+codex mcp get fak
+python tools\codex_dogfood_witness.py --thread-id $env:CODEX_THREAD_ID --run-codex-exec
+```
+
+The witness writes `experiments/agent-live/codex-dogfood-<thread>.json` plus a sanitized
+usage JSONL. It copies token counters, fak verdicts, MCP call metadata, and DOS hook
+counts; it does not copy prompts, tool arguments, tool outputs, diffs, or model text.
+
+A good run has this shape:
+
+- `status: PROVEN`
+- `checks.mcp_stdio_adjudication.status: PASS`
+- `checks.codex_exec_mcp_usage.status: PASS`
+- `checks.vcache_telemetry_proof.status: PROVEN`
+- `checks.dos_helped_session.blocked: 0`
+- `checks.codex_hook_fast_path.status: PASS` with `codex_python_cli_hooks: 0`
+- `summary.codex_actionability.status: PASS`, with any residual debt named as
+  classes such as `HOST_SHELL_OPACITY` rather than copied commands
+
+`checks.dos_session_audit.status` may still be `WARN`. That is useful dogfood evidence,
+not a failed proof: it means DOS saw host calls whose file-tree footprint was opaque
+while a lane lease was live. If `checks.codex_hook_fast_path.status` is already `PASS`,
+the warning is not caused by Python hook-manifest wiring; prefer path-visible tool calls
+or narrower shell commands, then rerun the witness and compare
+`summary.dos.session_advisory_by_tool` and `summary.dos.unknown_tree_warning_rate`.
+For the single-session witness, `summary.codex_actionability` splits actionable risk
+from residual debt: delegates, stop failures, out-of-tree writes, and malformed shell
+arguments are actionable; `HOST_SHELL_OPACITY` and `UNKNOWN_TREE_WARNINGS` remain
+privacy-preserving upstream-footprint debt when the post-repair delegate count is zero.
+This actionability block is scoped to the current Codex thread, so it can stay clean
+while a later multi-session transfer audit warns about another recent session.
+
+### Gate local Codex commands through fak
+
+When Codex is about to run a local validation or build command, wrap it with the
+same policy floor instead of treating the shell as trusted:
+
+```powershell
+python tools\codex_fak_gate.py `
+  --tool run_tests `
+  --redact-command `
+  --command-label dogfood-witness-test `
+  --out experiments\agent-live\codex-fak-gate-dogfood-witness-test-$env:CODEX_THREAD_ID.json `
+  -- python tools\codex_dogfood_witness_test.py
+python tools\codex_fak_gate.py `
+  --tool run_tests `
+  --redact-command `
+  --command-label dos-recent-audit-test `
+  --out experiments\agent-live\codex-fak-gate-dos-recent-audit-test-$env:CODEX_THREAD_ID.json `
+  -- python tools\codex_dos_recent_audit_test.py
+python tools\codex_fak_gate.py --tool go_test -- go test ./cmd/fak -run "TestRunVCache|TestReadVCacheTelemetry"
+```
+
+The wrapper calls `fak preflight` first. If the named operation is denied, the command
+does not run:
+
+```powershell
+python tools\codex_fak_gate.py `
+  --tool git_add `
+  --expect-deny `
+  --expect-reason DEFAULT_DENY `
+  --redact-command `
+  --command-label git-add-deny `
+  --json `
+  --dry-run `
+  --out experiments\agent-live\codex-fak-gate-git-add-deny-$env:CODEX_THREAD_ID.json
+python tools\codex_fak_gate.py `
+  --tool git_commit `
+  --expect-deny `
+  --expect-reason DEFAULT_DENY `
+  --redact-command `
+  --command-label git-commit-deny `
+  --json `
+  --dry-run `
+  --out experiments\agent-live\codex-fak-gate-git-commit-deny-$env:CODEX_THREAD_ID.json
+python tools\codex_fak_gate.py `
+  --tool git_push `
+  --expect-deny `
+  --expect-reason POLICY_BLOCK `
+  --redact-command `
+  --command-label git-push-deny `
+  --json `
+  --dry-run `
+  --out experiments\agent-live\codex-fak-gate-git-push-deny-$env:CODEX_THREAD_ID.json
+```
+
+Use this for Codex's own operating loop: `run_tests` before Python test commands,
+`go_test` before Go test commands, default-denied names such as `git_add` and
+`git_commit` before local history mutation, and deny-listed names such as
+`git_push` before any publish path. JSON reports record the verdict, command
+identity, and exit code; command stdout/stderr are dropped unless
+`--include-command-output` is set.
+
+Fold the gate reports into the dogfood witness when you want one report to prove both
+Codex MCP usage and local command admission. Repeat `--gate-report` for every
+validation command the proof depends on:
+
+```powershell
+python tools\codex_dogfood_witness.py `
+  --thread-id $env:CODEX_THREAD_ID `
+  --run-codex-exec `
+  --gate-report experiments\agent-live\codex-fak-gate-dogfood-witness-test-$env:CODEX_THREAD_ID.json `
+  --gate-report experiments\agent-live\codex-fak-gate-dos-recent-audit-test-$env:CODEX_THREAD_ID.json `
+  --gate-report experiments\agent-live\codex-fak-gate-git-add-deny-$env:CODEX_THREAD_ID.json `
+  --gate-report experiments\agent-live\codex-fak-gate-git-commit-deny-$env:CODEX_THREAD_ID.json `
+  --gate-report experiments\agent-live\codex-fak-gate-git-push-deny-$env:CODEX_THREAD_ID.json
+```
+
+That adds `checks.local_fak_gate_reports.status: PASS` and
+`summary.local_fak_gate.status: PASS` to the witness, with `summary.local_fak_gate.total`
+showing how many checks passed. `DENIED_EXPECTED` reports count as passing local-gate
+evidence and also increment `summary.local_fak_gate.expected_denied`.
+Use `--redact-command --command-label <stable-name>` for durable reports: the command
+still runs, but the report keeps only a label, executable name, argc, and SHA-256 digest
+instead of the raw argv.
+
+### Post-run DOS audit for Codex sessions
+
+After a Codex run, fold the DOS hook stream before treating the run as clean:
+
+```powershell
+python tools\codex_dos_recent_audit.py `
+  --repo-root . `
+  --codex-home $env:USERPROFILE\.codex `
+  --limit 10 `
+  --since-days 7 `
+  --check-latest `
+  --out experiments\agent-live\codex-dos-recent-audit.json
+```
+
+For a local transfer gate:
+
+```powershell
+python tools\codex_dos_recent_audit.py `
+  --repo-root . `
+  --codex-home $env:USERPROFILE\.codex `
+  --limit 10 `
+  --since-days 7 `
+  --fail-on-warn `
+  --max-unknown-tree-rate 0.02 `
+  --max-delegates 0 `
+  --gate-report experiments\agent-live\codex-fak-gate-git-add-deny-$env:CODEX_THREAD_ID.json `
+  --gate-report experiments\agent-live\codex-fak-gate-git-commit-deny-$env:CODEX_THREAD_ID.json `
+  --gate-report experiments\agent-live\codex-fak-gate-git-push-deny-$env:CODEX_THREAD_ID.json
+```
+
+The report copies only session filenames, thread IDs, timestamps, tool names, counts,
+and latencies. It flags `tree_known=false` admission warnings, native-hook delegates,
+stop blocks, and whether the cached Codex hook manifest uses the native DOS launcher
+or the Python CLI hook path. A Bash-dominated report means the hook could not prove
+precise file-tree footprints for the run; use narrower shell calls where the host can
+derive a tree, prefer MCP/fak verdict surfaces for checkable calls, and file upstream
+footprint-derivation debt when the rate stays above the
+[transfer-playbook](../dos-kernel-transfer-playbook.md) threshold. `using_latest: true`
+only proves package freshness; `codex_hook_fast_path.status: PASS` proves the Codex
+hook manifest is actually wired to the fast path.
+
+If `codex_hook_fast_path.status` is `WARN`, inspect the manifest repair first:
+
+```powershell
+python tools\codex_dos_hook_doctor.py --codex-home $env:USERPROFILE\.codex
+```
+
+The dry-run prints projected hook modes after apply. A projection with native
+Codex hooks and zero Python Codex hooks proves the repair would clear the fast-path
+warning before you write the cache.
+
+Then apply it explicitly:
+
+```powershell
+python tools\codex_dos_hook_doctor.py --codex-home $env:USERPROFILE\.codex --apply
+```
+
+The doctor keeps Python as the delegate fallback; it only changes the first path
+Codex hooks try.
+
+After the repair, read `post_repair_observations` separately from the whole recent
+window. A whole-window delegate count can include old Python-hook history; a
+post-repair delegate count of `0` proves the fast-path issue is gone. If the report
+still shows `shell_no_write_target_detected` under `post_repair_command_shapes`, the
+remaining warning is shell opacity from read/inspect calls. Prefer host-visible
+read/search tools when Codex exposes them; otherwise keep the WARN as upstream
+footprint-derivation debt rather than treating it as a write-safety finding.
+If the family lens shows `git_write`, the actionable gate should fail: commit,
+add, push, and similar operations are opaque mutations and need an explicit
+operator gate.
+Supplying the three expected-deny Git gate reports proves a structured gate timestamp.
+The audit then also checks the post-gate Codex window; if another thread runs opaque
+`git_write` after that timestamp, the transfer gate remains WARN even though the
+single-thread witness can still be clean.
+
+For automation that should fail only on post-repair actionable risk, use
+`--fail-on-actionable-warn --max-delegates 0`. Keep `--fail-on-warn` for the stricter
+transfer gate that still fails on residual shell-opacity debt.
+
+The recent-audit command is intentionally multi-session: it folds the DOS-matched
+Codex threads included in `sessions_audited`, so a `git_write` family from a peer
+or older audited stream can make the transfer gate fail even when the
+single-thread dogfood witness is clean. Use `mutating_shell_sessions` to identify
+the sanitized thread/file bucket, then keep that failing report as transfer-gate
+evidence; do not fold it into `checks.local_fak_gate_reports` unless the witness
+is meant to fail closed too.
+
+After the structured Git deny probes exist, pass them back into the recent audit:
+
+```powershell
+python tools\codex_dos_recent_audit.py `
+  --repo-root . `
+  --codex-home $env:USERPROFILE\.codex `
+  --limit 10 `
+  --since-days 7 `
+  --gate-report experiments\agent-live\codex-fak-gate-git-add.json `
+  --gate-report experiments\agent-live\codex-fak-gate-git-commit.json `
+  --gate-report experiments\agent-live\codex-fak-gate-git-push.json `
+  --fail-on-actionable-warn `
+  --max-delegates 0
+```
+
+That gate passes only when the expected-deny Git probes are valid and no audited
+Codex session contains a new `git_write` family after the latest probe timestamp.
+
+To file or track that residual without leaking session content, add `--out-debt
+experiments\agent-live\codex-dos-host-opacity-debt.md`. The packet copies counts and
+shell shape/family categories only, including any mutating family counts.
+
 ## Path 2: OpenAI-compatible clients through `fak serve`
 
 Start fak in front of an OpenAI-compatible upstream:
@@ -183,6 +491,7 @@ self-modification surfaces.
 |---|---|
 | Read/search/list calls | Allowed when the tool is on the allow-list or prefix allow-list. |
 | `git_diff`, `git_log`, `git_status`, `go_build`, `go_test`, `run_tests` | Allowed by the dev-agent policy. |
+| `git_add`, `git_commit` | Denied by the default-deny floor unless routed through a narrower release/ship gate. |
 | `git_push`, `git_merge`, `git_tag` | Denied with `POLICY_BLOCK`. |
 | Writes to `.git/`, `internal/kernel/`, `internal/policy/`, `VERSION`, or `dos.toml` | Denied by the self-modify floor. |
 | Secret-shaped fields such as `api_key`, `token`, or `authorization` | Redacted or quarantined by result-side guards. |

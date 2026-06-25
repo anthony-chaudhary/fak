@@ -30,6 +30,12 @@ type Table struct {
 	cap   int
 	lru   *list.List
 	index map[string]*list.Element
+
+	// obs + warnFrac are the optional budget observer seam (#743): when wired via
+	// WatchBudget, DebitUsage calls obs once the context budget crosses warnFrac
+	// (consumed share) and again on exhaustion. Both default to the no-op (nil obs).
+	obs      BudgetObserver
+	warnFrac float64
 }
 
 // NewTable returns a Table bounded by DefaultTableLimit sessions.
@@ -213,7 +219,7 @@ func (t *Table) SetBudget(trace string, b Budget) (State, bool) {
 	if cur.Run.terminal() {
 		return cur, false
 	}
-	cur.Budget = b
+	cur.Budget = b.withContextCap()
 	return t.putLocked(cur), true
 }
 
@@ -277,7 +283,7 @@ func (t *Table) CompareAndSet(trace string, expectRev uint64, want State) (State
 func (t *Table) Recontinue(parent, child string, fresh Budget) State {
 	if t == nil {
 		st := DefaultState(child)
-		st.Budget = fresh
+		st.Budget = fresh.withContextCap()
 		st.ParentTrace = parent
 		st.Reason = ReasonBudgetReset
 		return st
@@ -288,7 +294,7 @@ func (t *Table) Recontinue(parent, child string, fresh Budget) State {
 	next := State{
 		TraceID:     child,
 		Run:         Running,
-		Budget:      fresh,
+		Budget:      fresh.withContextCap(),
 		ParentTrace: parent,
 		Generation:  prevGen + 1,
 		Reason:      ReasonBudgetReset,

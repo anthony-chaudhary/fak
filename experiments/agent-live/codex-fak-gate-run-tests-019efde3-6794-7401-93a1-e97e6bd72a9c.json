@@ -1,0 +1,24 @@
+{
+  "command": [
+    "python",
+    "tools\\codex_fak_gate_test.py"
+  ],
+  "command_exit_code": 0,
+  "command_output_dropped": [
+    "stdout",
+    "stderr"
+  ],
+  "dry_run": false,
+  "executed": true,
+  "policy": "examples/dev-agent-policy.json",
+  "preflight": {
+    "by": "monitor",
+    "exit_code": 0,
+    "reason": "NONE",
+    "stderr": "fak: loaded capability floor from examples/dev-agent-policy.json",
+    "stdout": "verdict=ALLOW reason=NONE by=monitor",
+    "verdict": "ALLOW"
+  },
+  "status": "PASS",
+  "tool": "run_tests"
+}

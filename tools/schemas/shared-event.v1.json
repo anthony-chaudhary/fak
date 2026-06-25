@@ -1,0 +1,24 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "fak/shared-event.v1.json",
+  "title": "Shared Task Event",
+  "type": "object",
+  "required": ["schema", "event_id", "task_id", "event_kind", "actor", "base_rev", "next_rev", "scope", "durability", "taint", "patch_digest", "verdict", "ts"],
+  "properties": {
+    "schema": {"type": "string", "const": "fak.shared-event.v1"},
+    "event_id": {"type": "string", "pattern": "^evt_[A-Za-z0-9_.-]+$"},
+    "task_id": {"type": "string", "pattern": "^task_[A-Za-z0-9_.-]+$"},
+    "prev_event": {"type": "string"},
+    "event_kind": {"type": "string"},
+    "actor": {"type": "object", "required": ["kind", "id"], "properties": {"kind": {"type": "string"}, "id": {"type": "string", "minLength": 1}}},
+    "base_rev": {"type": "string", "pattern": "^sha256:.+"},
+    "next_rev": {"type": "string", "pattern": "^sha256:.+"},
+    "scope": {"type": "string", "enum": ["agent", "fleet", "tenant", "public"]},
+    "durability": {"type": "string", "enum": ["turn", "session", "bounded", "durable"]},
+    "taint": {"type": "string", "enum": ["trusted", "tainted", "quarantined"]},
+    "patch_digest": {"type": "string", "pattern": "^sha256:.+"},
+    "verdict": {"type": "string", "enum": ["accepted", "conflict", "quarantined", "denied", "needs_approval"]},
+    "reason": {"type": "string"},
+    "ts": {"type": "string"}
+  }
+}

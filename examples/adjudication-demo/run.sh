@@ -8,7 +8,7 @@
 #
 #   ./run.sh                       # build, serve, run the demo, teardown
 #   ./run.sh --dry-run             # show verdicts without executing the allowed commands
-#   FAK_DEMO_MODEL=qwen2.5:7b ./run.sh    # smaller/faster model (any tool-capable one)
+#   FAK_DEMO_MODEL=qwen2.5:14b ./run.sh   # stronger/larger model (any tool-capable one)
 #
 # Requires: Go (to build fak), ollama (https://ollama.com), Python 3.
 # Env knobs:
@@ -66,7 +66,7 @@ if ! curl -sf "http://$OLLAMA/api/tags" >/dev/null 2>&1; then
   done
 fi
 if ! curl -s "http://$OLLAMA/api/tags" 2>/dev/null | grep -q "\"name\":\"$MODEL\""; then
-  log "pulling $MODEL (one-time; the 7B is ~5GB — set FAK_DEMO_MODEL for a smaller/larger one)"
+  log "pulling $MODEL (one-time; model downloads can be multi-GB — set FAK_DEMO_MODEL to choose)"
   ollama pull "$MODEL"
 fi
 

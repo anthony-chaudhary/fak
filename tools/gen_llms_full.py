@@ -18,12 +18,15 @@ import argparse
 import os
 import re
 import sys
+from urllib.parse import quote
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 INDEX = os.path.join(ROOT, "llms.txt")
 OUT = os.path.join(ROOT, "llms-full.txt")
 
 LINK_RE = re.compile(r"\[([^\]]+)\]\(([^)]+)\)")
+REPO_BLOB_BASE = "https://github.com/anthony-chaudhary/fak/blob/main/"
+REPO_TREE_BASE = "https://github.com/anthony-chaudhary/fak/tree/main/"
 
 
 def version() -> str:
@@ -56,6 +59,55 @@ def collect_targets(index_text: str):
     return out
 
 
+def _split_link_target(target: str) -> tuple[str, str]:
+    """Return (path, suffix) for a markdown link target, preserving ?query/#anchor."""
+    cut = len(target)
+    for marker in ("#", "?"):
+        i = target.find(marker)
+        if i != -1:
+            cut = min(cut, i)
+    return target[:cut], target[cut:]
+
+
+def _repo_url(rel: str, *, is_dir: bool = False) -> str:
+    base = REPO_TREE_BASE if is_dir else REPO_BLOB_BASE
+    return base + quote(rel.replace("\\", "/"), safe="/:@")
+
+
+def absolutize_local_links(text: str, source_relpath: str) -> str:
+    """Rewrite local links in an inlined document to repo-absolute URLs.
+
+    `llms-full.txt` is a flat one-fetch corpus. Once `docs/foo/bar.md` is inlined,
+    a link like `[x](baz.md)` no longer has `docs/foo/` as its base, so an answer
+    engine following the flat file sees a dangling citation. Resolve local targets
+    against the source document's original directory and emit GitHub blob/tree URLs.
+    External URLs and pure page anchors stay untouched.
+    """
+    source_dir = os.path.dirname(source_relpath)
+
+    def repl(m: re.Match[str]) -> str:
+        label, target = m.group(1), m.group(2).strip()
+        if target.startswith(("http://", "https://", "mailto:", "tel:", "#")):
+            return m.group(0)
+        path_part, suffix = _split_link_target(target)
+        if not path_part:
+            return m.group(0)
+        if path_part.startswith("/"):
+            rel = os.path.normpath(path_part.lstrip("/"))
+        else:
+            rel = os.path.normpath(os.path.join(source_dir, path_part))
+        if rel.startswith(".."):
+            return m.group(0)
+        abs_target = os.path.join(ROOT, rel)
+        if os.path.isdir(abs_target):
+            return f"[{label}]({_repo_url(rel, is_dir=True)}{suffix})"
+        if os.path.isfile(abs_target):
+            return f"[{label}]({_repo_url(rel)}{suffix})"
+        return m.group(0)
+
+    return LINK_RE.sub(repl, text)
+
+
 def build_corpus():
     """Build the llms-full.txt text from llms.txt. Returns (text, targets)."""
     with open(INDEX, encoding="utf-8") as f:
@@ -81,7 +133,7 @@ def build_corpus():
 
     for title, relpath in targets:
         with open(os.path.join(ROOT, relpath), encoding="utf-8", errors="replace") as f:
-            body = f.read().strip()
+            body = absolutize_local_links(f.read().strip(), relpath)
         parts.append(f"# {title}")
         parts.append("")
         parts.append(f"> Source: `{relpath}`")

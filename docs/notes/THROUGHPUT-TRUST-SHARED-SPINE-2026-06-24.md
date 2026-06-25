@@ -5,8 +5,18 @@ Status: synthesis note. Connects [`dual-track-serving-plan.md`](../serving/dual-
 (the throughput / parity track) to [`L3-DISAGGREGATED-CACHE-REIMAGINED.md`](L3-DISAGGREGATED-CACHE-REIMAGINED.md)
 (the trust / disaggregation track). Asserts no benchmark number. Tags every claim
 `[SHIPPED]` / `[SEAM-ONLY]` / `[GAP]`. Where the adversarial verification pass did not
-fully confirm a load-bearing claim, this note carries the correction inline rather than
-the original framing.
+fully confirm a load-bearing claim, this note carries the correction inline rather
+than the original framing.
+
+> **Non-goal reconciliation (epic #637, acceptance item 1).** This epic **supersedes**
+> #50's Track-B non-goal *"not chasing raw single-GPU throughput parity vs vLLM"*
+> (`dual-track-serving-plan.md` §9). The non-goal is **retired in scope**: native
+> multi-node throughput parity with vLLM/SGLang/TensorRT-LLM is now an explicit goal of
+> this epic's throughput branch (S6b), sequenced *behind* the shared spine (S1–S5) so the
+> parity spend never strands the trust option. This is the in-tree form of the acceptance
+> item ("supersede the non-goal here with a cross-link"); the #50 GitHub body retains its
+> Track-B wording until an operator edits it directly. Nothing here asserts a measured
+> parity number — see §4 (parity stays UNMEASURED until S2 runs).
 
 ---
 
@@ -118,28 +128,27 @@ arena is a Go `[]byte` in-process stand-in; nothing moves KV over a wire anywher
 Front-load the entire shared spine (S1–S5); every dollar through S5 is double-counted. Then
 fork into a **hardware-ungated trust branch** (S6a, keeps the moat option fully alive cheaply)
 running in parallel with a **hardware-gated throughput branch** (S6b, calendar-dominated by
-DGX access, the most expensive narrowly-single-track work) sequenced last.
+GPU server access, the most expensive narrowly-single-track work) sequenced last.
 
-| Step | What | Path | Size | Anchors |
-|---|---|---|---|---|
-| **S1** | Extend the `EngineDriver` seam from one-shot `Complete` to admit/step/stream/cancel, **reviewed against the native-scheduler shape, not just the adapter shape**. Thread `ctx` into the decode loop + incremental detokenizer so tokens flush live. | **both** | L | `EngineDriver` is `Complete`+`Caps` only at [`registry.go:590`](../../internal/abi/registry.go); the sole impl one-shots `sess.Generate` with `ctx` never consulted in decode ([`internal/modelengine/modelengine.go:139`](../../internal/modelengine/modelengine.go)); doc names this the #1 risk ([`dual-track-serving-plan.md:90`](../serving/dual-track-serving-plan.md)) |
-| **S2** | Parity bench harness (#44): drive identical Poisson load against fak AND a real vLLM/SGLang/TRT-LLM endpoint on the same hardware; emit TTFT/TPOT/goodput/queue-depth/KV-util. Net-new — `cmd/paritybench` measures capability/safety/cost A/B, a different axis. | **both** | L | [`cmd/paritybench/main.go`](../../cmd/paritybench/main.go); [`dual-track-serving-plan.md:85`](../serving/dual-track-serving-plan.md) |
-| **S3** | `KVCache → bytes` span serializer keyed by the materialization tuple, fails closed under a wrong regime. | **both** | L | [`kvcache.go:128`](../../internal/model/kvcache.go), [`:173`](../../internal/model/kvcache.go); [`materialization.go:62`](../../internal/cachemeta/materialization.go) |
-| **S4** | `StageTransport` byte mover — **TCP path first** (no special hardware, exercisable before DGX), RDMA/UCX as a backend swap behind the same seam. | **both** | XL | [`arena.go:35`](../../internal/xenginekv/arena.go); [`hardware.go:50`](../../internal/cachemeta/hardware.go); [`kvtransfer.go:54`](../../internal/cachemeta/kvtransfer.go) |
-| **S5** | Continuous-batching scheduler over `StepBatchActive` (admit/retire/rebuild-running-batch + admission/priority) **and** paged/block KV allocator that **proves the bit-exact `Evict` survives paging** (#33 gate). Sequenced together — the scheduler admits/preempts against the allocator. | **both** | XL | [`batch_step.go:75`](../../internal/model/batch_step.go) (StepBatchActive, per-step GEMM), [`:135`](../../internal/model/batch_step.go) (GenerateBatch is STATIC fixed-B, no loop); [`kvcache.go:92`](../../internal/model/kvcache.go) (memmove-compacting Evict) |
-| **S6a** | **Trust branch, hardware-UNGATED.** Asyncify `KVBackend.Prefill` (add residency-transfer methods, keep the local dense path byte-identical) → referee sidecar return-digest verify + durability-gated admission → `L3RegionBackend` behind the frozen Resolver/KVBackend seam → durability-tiered promotion → per-span `DeletionCertificate` over the pool. In-process L3 stub before a real external L3 cache. | **trust** | L (on top of spine) | [`registry.go:633`](../../internal/abi/registry.go); [`kvmmu.go:131`](../../internal/kvmmu/kvmmu.go); [`external_invalidation.go:93`](../../internal/cachemeta/external_invalidation.go); [`deletioncert.go:133`](../../internal/deletioncert/deletioncert.go) |
-| **S6b** | **Throughput branch, hardware-GATED.** Real 2-GPU device `CollectiveBackend` (lift hardcoded `cudaSetDevice(0)`) → multi-process TP serving (`ForwardTP` per-rank) → network PP serve loop → native P/D split → **last**: GLM-5.2 MLA-aware TP + MoE expert-parallel (the decompositions `ForwardTP` fails closed on). | **throughput** | XL | [`compute.go:350`](../../internal/compute/compute.go) (cpu-ref collectives); [`cuda_kernels.cu:52`](../../internal/compute/cuda_kernels.cu) (`cudaSetDevice(0)`); [`internal/model/tensor_parallel_forward.go:76`](../../internal/model/tensor_parallel_forward.go) (fails closed on MLA/DSA/MoE/quant/ParallelResidual/linear-attn) |
+| Step | What | Path | Size | Owning child(ren) | Anchors |
+|---|---|---|---|---|---|
+| **S1** | Extend the `EngineDriver` seam from one-shot `Complete` to admit/step/stream/cancel, **reviewed against the native-scheduler shape, not just the adapter shape**. Thread `ctx` into the decode loop + incremental detokenizer so tokens flush live. | **both** | L | #46, #47, #48 | `EngineDriver` is `Complete`+`Caps` only at [`registry.go:590`](../../internal/abi/registry.go); the sole impl one-shots `sess.Generate` with `ctx` never consulted in decode ([`internal/modelengine/modelengine.go:139`](../../internal/modelengine/modelengine.go)); doc names this the #1 risk ([`dual-track-serving-plan.md:90`](../serving/dual-track-serving-plan.md)) |
+| **S2** | Parity bench harness: drive identical Poisson load against fak AND a real vLLM/SGLang/TRT-LLM endpoint on the same hardware; emit TTFT/TPOT/goodput/queue-depth/KV-util. Net-new — `cmd/paritybench` measures capability/safety/cost A/B, a different axis. | **both** | L | #44, #43 | [`cmd/paritybench/main.go`](../../cmd/paritybench/main.go); [`dual-track-serving-plan.md:85`](../serving/dual-track-serving-plan.md) |
+| **S2½** | Wire the fleet router into the gateway hot path: N-upstream dispatch + residency index + membership/health, so throughput dispatch and trust admission attach at the same layer. | **both** | L | #45, #41, #42 | The tier `Route` policy is pure, tested, and **un-wired** — only `routing_test.go` calls it ([`routing.go:237`](../../internal/gateway/routing.go)) while the gateway fronts ONE upstream via `BaseURL`/`modelroute` ([`gateway.go:66`](../../internal/gateway/gateway.go)) |
+| **S3** | `KVCache → bytes` span serializer keyed by the materialization tuple, fails closed under a wrong regime. | **both** | L | #29 | [`kvcache.go:128`](../../internal/model/kvcache.go), [`:173`](../../internal/model/kvcache.go); [`materialization.go:62`](../../internal/cachemeta/materialization.go) |
+| **S4** | `StageTransport` byte mover — **TCP path first** (no special hardware, exercisable before GPU server), RDMA/UCX as a backend swap behind the same seam. | **both** | XL | #29 (KV bytes), #85/#30 (PP stage handoff) | [`arena.go:35`](../../internal/xenginekv/arena.go); [`hardware.go:50`](../../internal/cachemeta/hardware.go); [`kvtransfer.go:54`](../../internal/cachemeta/kvtransfer.go) |
+| **S5** | Continuous-batching scheduler over `StepBatchActive` (admit/retire/rebuild-running-batch + admission/priority) **and** paged/block KV allocator that **proves the bit-exact `Evict` survives paging** (#33 gate). Sequenced together — the scheduler admits/preempts against the allocator. | **both** | XL | #36, #35, #34, #33 | [`batch_step.go:75`](../../internal/model/batch_step.go) (StepBatchActive, per-step GEMM), [`:135`](../../internal/model/batch_step.go) (GenerateBatch is STATIC fixed-B, no loop); [`kvcache.go:92`](../../internal/model/kvcache.go) (memmove-compacting Evict) |
+| **S6a** | **Trust branch, hardware-UNGATED.** Asyncify `KVBackend.Prefill` (add residency-transfer methods, keep the local dense path byte-identical) → referee sidecar return-digest verify + durability-gated admission → `L3RegionBackend` behind the frozen Resolver/KVBackend seam → durability-tiered promotion → per-span `DeletionCertificate` over the pool. In-process L3 stub before a real external L3 cache. | **trust** | L (on top of spine) | #638 (unblock), #53 (+#55-#58) | [`registry.go:633`](../../internal/abi/registry.go); [`kvmmu.go:131`](../../internal/kvmmu/kvmmu.go); [`external_invalidation.go:93`](../../internal/cachemeta/external_invalidation.go); [`deletioncert.go:133`](../../internal/deletioncert/deletioncert.go) |
+| **S6b** | **Throughput branch, hardware-GATED.** Real 2-GPU device `CollectiveBackend` (lift hardcoded `cudaSetDevice(0)`) → multi-process TP serving (`ForwardTP` per-rank) → network PP serve loop → native P/D split → **last**: GLM-5.2 MLA-aware TP + MoE expert-parallel (the decompositions `ForwardTP` fails closed on). | **throughput** | XL | #28, #30, #85, #274 | [`compute.go:350`](../../internal/compute/compute.go) (cpu-ref collectives); [`cuda_kernels.cu:52`](../../internal/compute/cuda_kernels.cu) (`cudaSetDevice(0)`); [`internal/model/tensor_parallel_forward.go:76`](../../internal/model/tensor_parallel_forward.go) (fails closed on MLA/DSA/MoE/quant/ParallelResidual/linear-attn) |
 
-Wire the fleet router (S2½, **both**, L) opportunistically once S1 lands: the tier `Route`
-policy is pure, tested, and **un-wired** — only `routing_test.go` calls it
-([`routing.go:237`](../../internal/gateway/routing.go)) while the gateway fronts ONE upstream
-via `BaseURL`/`modelroute` ([`gateway.go:66`](../../internal/gateway/gateway.go)). It is the
-layer where both N-upstream dispatch (throughput) and lease/admission/taint verdicts (trust)
-attach.
+S2½ may land opportunistically once S1 lands, but **S1–S5 are the shared-spine gate before
+any track-specific parity claim**. A native fak parity claim belongs after S6b only if S2 has
+also produced a committed same-hardware run artifact; until then, §4 marks parity
+UNMEASURED.
 
 The logic of the order: every dollar through S5 is spent on code both tracks need, so under
 unknown popularity nothing through S5 is regretted. S6a is cheap and hardware-ungated, so the
-trust option stays fully alive without waiting on DGX. S6b is the most expensive, most
+trust option stays fully alive without waiting on GPU server. S6b is the most expensive, most
 narrowly-single-track, and most hardware-blocked work, so it is deferred until popularity and
 hardware justify it.
 
@@ -212,17 +221,20 @@ moat's `max|Δ|=0` premise.
 
 ---
 
-## 5. Open operator forks — these need a human decision
+## 5. Operator forks — 1 decided (epic #637, acceptance item 5), 4 still open
 
-1. **One transport or two?** Re-point L3 child-B's network dependency from the PP-stage
-   transport (#85/#493) to the KV-byte serializer (#29) so "one mover, both paths" becomes
-   *true in the issue graph*, not just a recommendation — OR accept two transports (PP hidden-state
-   handoff vs P/D KV-byte movement) as genuinely distinct. This note recommends the former; the
-   tree does not currently assert it. (Note #493 is a poisoned pre-migration tracker id — confirm
-   the real GitHub issue before wiring.)
+1. **One transport or two? — DECIDED: one KV-byte mover, both paths.** L3 child-B's
+   *remote-KV* dependency should point at the KV-byte serializer (#29), so "one mover,
+   both paths" is now the recorded epic decision, not just the §2b recommendation. The
+   poisoned pre-migration id #493 resolves to the **PP stage-handoff** children #85/#30
+   (per [`dual-track-serving-plan.md`](../serving/dual-track-serving-plan.md) §10 de-dup
+   map) — those stay the pipeline-parallel hidden-state transport on their own seam; what
+   child-B should consume is #29, the KV→bytes mover the throughput P/D path and the
+   trust/L3 path both consume. The #53 child-B GitHub body keeps its inline #493 wording
+   until an operator re-points it directly.
 
 2. **RDMA vs UCX vs gRPC/TCP for the production byte mover.** S4 builds TCP first regardless
-   (hardware-ungated, exercisable before DGX). The fork is which *production* backend to invest
+   (hardware-ungated, exercisable before GPU server). The fork is which *production* backend to invest
    the systems effort in behind the same `StageTransport` seam — RDMA (lowest latency, hardware-
    coupled), UCX (portable abstraction over RDMA/TCP), or gRPC (simplest, operationally cheapest,
    slowest). Decision can be deferred until after TCP proves the seam.
@@ -236,7 +248,7 @@ moat's `max|Δ|=0` premise.
 4. **How hard to resource the NCCL/RDMA device substrate (S6b) given it is pure greenfield and
    hardware-blocked.** This is the most expensive, most narrowly-throughput-only, most calendar-
    dominated work. The worst-regret sequence defers it behind the entire shared spine and runs it
-   in parallel with the hardware-ungated trust branch. The fork is the *pace*: a standing DGX/GCP
+   in parallel with the hardware-ungated trust branch. The fork is the *pace*: a standing GPU server/GCP
    budget to push it continuously, vs. a demand-triggered build once a parity number is actually
    contested. Recommend demand-triggered — nothing in S6b strands the trust option, and S2/S5
    make the parity gap *measurable* before the spend.

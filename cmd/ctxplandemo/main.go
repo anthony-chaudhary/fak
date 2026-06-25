@@ -85,6 +85,11 @@ func run(budget int) error {
 		return err
 	}
 
+	// ---- 6.6. Flexible four-area layout: base/current/recent/deep -----------------
+	if err := showFlexibleLayout(ctx, budget); err != nil {
+		return err
+	}
+
 	// ---- 7. The scaling law: the bent curve across the turn horizon --------------
 	return showScalingLaw()
 }
@@ -362,6 +367,61 @@ func showCandidateIndex(ctx context.Context, budget int) error {
 		noiseN, ctxplan.Audit(idxPlan).Faithful, budget)
 	fmt.Printf("  cumulative planner compute @ 1M turns: full-scan %.2e ops Θ(N²) vs index-bounded %.2e ops Θ(c·N) — %.0fx less\n",
 		float64(fullScan), float64(bounded), float64(fullScan)/float64(bounded))
+	return nil
+}
+
+// showFlexibleLayout demonstrates the operator/user-facing profile over the same O(1)
+// mechanism: exact base pins, an exact newest entry, a small recent tail, and old deep
+// history represented as recoverable pointers until explicitly expanded.
+func showFlexibleLayout(ctx context.Context, budget int) error {
+	fmt.Println("\n== Flexible layout: base + current + recent + deep areas ==")
+	st := ctxplan.NewMemStore()
+	st.Add("system", ctxplan.DurabilityDurable, []byte("base system prompt: obey policy"), false)                  // span:0
+	st.Add("user", ctxplan.DurabilitySession, []byte("goal: rotate the auth token"), false)                        // span:1
+	st.Add("WebSearch", ctxplan.DurabilityDurable, []byte("auth token rotation runbook: mint roll revoke"), false) // span:2 deep
+	for i := 0; i < 10; i++ {
+		st.Add("Bash", ctxplan.DurabilityTurn, []byte(fmt.Sprintf("old build log line %d", i)), false)
+	}
+	st.Add("Read", ctxplan.DurabilityTurn, []byte("recent note before current"), false)              // span:13
+	st.Add("Bash", ctxplan.DurabilityTurn, []byte("newest tool result for the current turn"), false) // span:14
+
+	layout := ctxplan.Layout{
+		Base:              ctxplan.AreaPolicy{MaxSpans: 2, MaxTokens: 32, Precision: ctxplan.PrecisionExact},
+		Current:           ctxplan.AreaPolicy{MaxSpans: 1, MaxTokens: 16, Precision: ctxplan.PrecisionExact},
+		Recent:            ctxplan.AreaPolicy{MaxSpans: 2, MaxTokens: 24, Precision: ctxplan.PrecisionPlanned},
+		Deep:              ctxplan.AreaPolicy{MaxSpans: 1, MaxTokens: 16, Precision: ctxplan.PrecisionPointer},
+		IncludeDurability: []string{ctxplan.DurabilityDurable},
+		MaxCandidates:     -1,
+	}
+	view, err := ctxplan.MaterializeLayout(ctx, st,
+		ctxplan.Forecast{Intents: []string{"auth token rotation"}, Pins: []string{"span:0", "span:1"}},
+		ctxplan.Budget{Tokens: budget}, nil, layout)
+	if err != nil {
+		return err
+	}
+	rendered := map[string]bool{}
+	for _, r := range view.Rendered {
+		rendered[r.ID] = true
+	}
+	for _, must := range []string{"span:0", "span:1", "span:14"} {
+		if !rendered[must] {
+			return fmt.Errorf("flexible layout did not keep exact area span %s resident", must)
+		}
+	}
+	deepPointer := false
+	for _, e := range view.Plan.Elided {
+		if e.ID == "span:2" && e.Area == ctxplan.AreaDeep && e.Precision == ctxplan.PrecisionPointer && e.Reason == ctxplan.ElidePointer {
+			deepPointer = true
+		}
+	}
+	if !deepPointer {
+		return fmt.Errorf("flexible layout should keep span:2 as a deep recoverable pointer; elided=%+v", view.Plan.Elided)
+	}
+	if !view.Witness.Faithful {
+		return fmt.Errorf("flexible layout plan must stay faithful: %+v", view.Witness)
+	}
+	fmt.Printf("  base/current exact spans rendered; recent N=%d/%d tok planned; deep N=%d/%d tok as pointers; candidates=%d resident=%d tokens\n",
+		layout.Recent.MaxSpans, layout.Recent.MaxTokens, layout.Deep.MaxSpans, layout.Deep.MaxTokens, view.Plan.Candidates, view.RenderedTokens())
 	return nil
 }
 

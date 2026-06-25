@@ -807,7 +807,7 @@ go test ./internal/codelint/ -count=1 -timeout 120s -run 'TestGoPackReportsParse
 - Name the failure modes (eviction during tool latency, head-mutation, injected timestamps, unstable JSON) and the zero-infra fix
 - Mark why the high public cache number is just the frozen-trajectory ceiling, and the three axes that bend it toward 0% — flexibility, per-turn tool density, and cross-agent fan-out (and why fan-out is a fleet metric, not one agent's hit %)
 
-**Read:** [`docs/explainers/kv-cache-agentic-context.md`](docs/explainers/kv-cache-agentic-context.md), [`docs/explainers/frozen-trajectory-cache-cliff.md`](docs/explainers/frozen-trajectory-cache-cliff.md)
+**Read:** [`docs/explainers/kv-cache-agentic-context.md`](docs/explainers/kv-cache-agentic-context.md), [`docs/explainers/frozen-trajectory-cache-cliff.md`](docs/explainers/frozen-trajectory-cache-cliff.md), [`docs/explainers/context-tape-visuals.md`](docs/explainers/context-tape-visuals.md)
 
 **Lab:**
 ```bash
@@ -918,7 +918,7 @@ go test ./internal/kvmmu/ -count=1 -timeout 120s -run 'TestLedgerRenumberAfterMi
 - Name the four conditions that downgrade a tier-2 hit to a MISS
 - Explain why the integrity epoch advances monotonically on a non-empty Revoke and is a no-op on an empty-witness Revoke
 
-**Read:** [`docs/proofs/vdso.md`](docs/proofs/vdso.md)
+**Read:** [`docs/proofs/vdso.md`](docs/proofs/vdso.md), [`docs/explainers/vdso-revoke-as-comm-revoke.md`](docs/explainers/vdso-revoke-as-comm-revoke.md)
 
 **Lab:**
 ```bash
@@ -2041,17 +2041,24 @@ python tools/extend_preflight.py
 
 **You'll be able to:**
 - Trace the loop: route -> spawn one worker -> require an #N-cited commit -> bind commit to issue via dos commit-audit -> close only when re-verified per-SHA
+- Run the read-only issue-gardening pass, distinguish mechanical actions from review-only priority/area/ownership decisions, and name the current top backlog rot from the report
 - Explain why a resolved issue whose commit omits #N can never be witnessed-closed
 - Explain how the loop guarantees the live-worker population can never exceed its cap
 
-**Read:** [`docs/dispatch-loop.md`](docs/dispatch-loop.md)
+**Read:** [`docs/dispatch-loop.md`](docs/dispatch-loop.md), [`.claude/skills/issue-triage/SKILL.md`](.claude/skills/issue-triage/SKILL.md), [`docs/SKILL-CONTEXT-MEMORY.md`](docs/SKILL-CONTEXT-MEMORY.md)
 
 **Lab:**
 ```bash
+python tools/issue_triage.py --markdown --out docs/_audits/issue-triage-YYYY-MM-DD.md
+python tools/issue_triage.py --actions --out docs/_audits/issue-actions-YYYY-MM-DD.json
 python tools/dispatch_status.py
 ```
 
-**Checkpoint:** Explain why a resolved issue whose commit omits #N can never be witnessed-closed, and how the loop guarantees the live-worker population can never exceed its cap.
+**Checkpoint:** From the issue-triage report, name the largest current backlog gap
+and the top three review-only P0/P1 rows. Then explain why a resolved issue whose
+commit omits #N can never be witnessed-closed, how the loop guarantees the
+live-worker population can never exceed its cap, and why an identical skill
+invocation can be served as procedural-memory HIT rather than re-rendered.
 
 ---
 
@@ -2078,4 +2085,3 @@ Where to go from there:
 
 Found a course whose reading no longer matches what the code does? That is a doc bug —
 please [open an issue](https://github.com/anthony-chaudhary/fak/issues).
-

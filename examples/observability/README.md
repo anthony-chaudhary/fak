@@ -16,13 +16,24 @@ the observability *guide* ([#163](https://github.com/anthony-chaudhary/fak/issue
 and the env-knob doc ([#199](https://github.com/anthony-chaudhary/fak/issues/199)).
 
 ```bash
-./run.sh            # build fak, serve offline (mock engine), drive calls, scrape /metrics + /debug/vars
+./run.sh
 ```
 
 It needs **only a Go toolchain** (to build `fak`) plus `curl`; `jq` is optional (the
 script falls back to `python3`, then to raw JSON). No model, API key, or GPU — `fak serve`
 with no `--base-url` runs a deterministic offline mock engine, and the whole run completes
 in a few seconds. Captured run: [`EXAMPLE-OUTPUT.md`](EXAMPLE-OUTPUT.md).
+
+## What you see
+
+The script builds `fak`, starts the gateway in offline mock mode, drives allow, deny,
+quarantine, and vDSO-hit calls, then prints the scraped `/metrics` lines and the
+`/debug/vars` JSON blocks that answer the four operator questions below. It finishes by
+demonstrating the auth transition for the operator routes: no token returns `401`, the
+configured bearer token returns `200`, and the launcher tears down the server it started.
+
+Windows users: run the `.sh` launcher from WSL or Git Bash; the demo itself is
+plain `fak serve` plus `curl`, and there is no native `.ps1` wrapper yet.
 
 ## A note on metric names
 

@@ -135,7 +135,7 @@ determinism check that proves the deterministic metrics are not arm64-specific.
   SmolLM2-135M **~100–120 tok/s** (CUDA Graph).
 - **Batched multi-user decode curve** — SmolLM2-135M Q8 peaks at **862 agg tok/s** at
   batch 512, **44.92×** over the naive baseline.
-  → [`docs/benchmark/CROSS-MACHINE-INFRASTRUCTURE.md`](benchmark/CROSS-MACHINE-INFRASTRUCTURE.md)
+  → [`docs/benchmark/CROSS-MACHINE-INFRASTRUCTURE.md`](https://github.com/anthony-chaudhary/fak/blob/main/docs/benchmark/CROSS-MACHINE-INFRASTRUCTURE.md)
 - **Cross-platform bit-exact determinism** — the RadixAttention deterministic fields
   reproduce **byte-for-byte on Windows x86_64** vs the Mac arm64 artifact (hit 86.7%,
   token speedup 7.50×, reused 5512 / computed 848); only the live wall-clock moves
@@ -209,7 +209,7 @@ spread on purpose:
   per-machine onboarding catalog (specs, baseline-run requirements, the scientific-rigor metadata schema).
 - **`MODEL-LADDER-VS-SOTA-2026-06-21.md`** (private companion — not published) —
   the full two-regime model-size ladder behind the M3 Pro rows.
-- **[`docs/benchmark/CROSS-MACHINE-INFRASTRUCTURE.md`](benchmark/CROSS-MACHINE-INFRASTRUCTURE.md)** —
+- **[`docs/benchmark/CROSS-MACHINE-INFRASTRUCTURE.md`](https://github.com/anthony-chaudhary/fak/blob/main/docs/benchmark/CROSS-MACHINE-INFRASTRUCTURE.md)** —
   the design for storing and querying results across all of these machines.
 </content>
 </invoke>

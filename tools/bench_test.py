@@ -97,7 +97,7 @@ def test_schema_examples() -> bool:
     return validate_schemas()
 
 
-def main(argv: List[str]) -> int:
+def main(argv: list[str]) -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--schemas", action="store_true", help="Validate JSON schemas")
     ap.add_argument("--tools", action="store_true", help="Test tool imports")
@@ -105,8 +105,7 @@ def main(argv: List[str]) -> int:
     args = ap.parse_args(argv)
 
     if not (args.schemas or args.tools or args.all):
-        ap.print_help()
-        return 1
+        args.all = True  # bare `python tools/bench_test.py` runs the full suite (the *_test.py convention)
 
     all_ok = True
 

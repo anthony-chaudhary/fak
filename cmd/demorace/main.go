@@ -601,7 +601,9 @@ func handleCurve(w http.ResponseWriter, r *http.Request) {
 }
 
 func main() {
-	addr := flag.String("addr", "127.0.0.1:8147", "listen address")
+	const defaultAddr = "127.0.0.1:8147"
+	addr := flag.String("addr", defaultAddr, "listen address")
+	basePath := demoui.BasePathFlag(flag.CommandLine, "/demorace")
 	jobs := flag.Int("jobs", 0, "cap parallelism to an ABSOLUTE core count (GOMAXPROCS + matmul workers). 0 = all cores. On a shared/active machine pass e.g. 8 so the demo doesn't starve other work.")
 	budget := flag.Float64("budget", 0, "cap parallelism to a FRACTION of the machine: 0.75 = 75% of the logical cores (portable across box sizes; 75 or 0.75 accepted). Mutually exclusive with -jobs. 0 = unset.")
 	flag.Parse()
@@ -631,11 +633,13 @@ func main() {
 	reg = newRegistry()
 	specs = ladderSpecs()
 
+	app := http.NewServeMux()
+	app.HandleFunc("/", handleIndex)
+	app.HandleFunc("/api/ladder", handleLadder)
+	app.HandleFunc("/api/race", handleRace)
+	app.HandleFunc("/api/curve", handleCurve)
 	mux := http.NewServeMux()
-	mux.HandleFunc("/", handleIndex)
-	mux.HandleFunc("/api/ladder", handleLadder)
-	mux.HandleFunc("/api/race", handleRace)
-	mux.HandleFunc("/api/curve", handleCurve)
+	base := demoui.MountWithBasePath(mux, *basePath, app)
 
 	present := []string{}
 	for _, s := range specs {
@@ -643,23 +647,15 @@ func main() {
 			present = append(present, s.Name)
 		}
 	}
-	fmt.Fprintf(os.Stderr, "demorace %s on http://%s (GOMAXPROCS=%d)\n", version, listenAddr(*addr), gomax)
+	bind := demoui.ListenAddr(*addr, defaultAddr)
+	fmt.Fprintf(os.Stderr, "demorace %s on %s (GOMAXPROCS=%d)\n", version, demoui.LocalURL(bind, base), gomax)
+	if base != "" {
+		fmt.Fprintf(os.Stderr, "base path: %s (set by -base-path or %s)\n", base, demoui.DemoBasePathEnv)
+	}
 	fmt.Fprintf(os.Stderr, "ladder present: %s\n", strings.Join(present, ", "))
 	fmt.Fprintf(os.Stderr, "open the URL -> 'Run live race' (HEADLINE fak vs tuned warm-cache, both LIVE) then 'Build curve'\n")
-	if err := http.ListenAndServe(listenAddr(*addr), mux); err != nil {
+	if err := http.ListenAndServe(bind, mux); err != nil {
 		fmt.Fprintln(os.Stderr, "listen:", err)
 		os.Exit(1)
 	}
-}
-
-// listenAddr honors the $PORT contract used by container/VM platforms: when PORT is
-// set in the environment, bind 0.0.0.0:$PORT and ignore the -addr loopback default,
-// so the same binary serves locally (-addr) and on a public host (PORT=… + an open
-// firewall) with no rebuild. A non-default -addr still wins, so an explicit local
-// override is never silently lost.
-func listenAddr(addr string) string {
-	if p := os.Getenv("PORT"); p != "" && addr == "127.0.0.1:8147" {
-		return "0.0.0.0:" + p
-	}
-	return addr
 }

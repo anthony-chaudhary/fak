@@ -418,6 +418,26 @@ def test_live_discover_finds_known_demos() -> None:
     rels = dq.discover_demos(root)
     assert "examples/adjudication-demo" in rels, rels
     assert "examples/wire-proof" in rels, rels
+    assert "cmd/simpledemo" in rels, rels
+    assert "cmd/guarddemo" in rels, rels
+    assert "cmd/demorace" in rels, rels
+
+
+def test_discover_auto_includes_cmd_demo_dirs_without_manual_list(tmp_path: Path) -> None:
+    ex = tmp_path / "examples" / "visible"
+    ex.mkdir(parents=True)
+    (ex / "README.md").write_text("# visible\n", encoding="utf-8")
+
+    demo = tmp_path / "cmd" / "newdemo"
+    demo.mkdir(parents=True)
+    (demo / "main.go").write_text("package main\nfunc main() {}\n", encoding="utf-8")
+
+    bench = tmp_path / "cmd" / "notbench"
+    bench.mkdir(parents=True)
+    (bench / "main.go").write_text("package main\nfunc main() {}\n", encoding="utf-8")
+
+    rels = dq.discover_demos(tmp_path)
+    assert rels == ["examples/visible", "cmd/newdemo"], rels
 
 
 def test_live_collect_payload_shape() -> None:
@@ -437,6 +457,49 @@ def test_live_gold_demos_grade_well() -> None:
         return
     s = dq.score_demo(dq.load_demo(root, "examples/adjudication-demo"))
     assert s["grade"] in ("A", "B") and s["n_defects"] == 0, s
+
+
+def test_check_markdown_doc_accepts_fresh_generated_snapshot(tmp_path: Path) -> None:
+    payload = {
+        "corpus": {
+            "n_demos": 0,
+            "demo_debt": 0,
+            "mean_score": 0,
+            "median_score": 0,
+            "min_score": 0,
+            "max_score": 0,
+            "grade_distribution": {"A": 0, "B": 0, "C": 0, "D": 0, "F": 0},
+        },
+        "demos": [],
+    }
+    doc = tmp_path / dq.SCORECARD_DOC
+    doc.parent.mkdir(parents=True)
+    doc.write_text(dq.render_markdown(payload, stamp="2099-01-02") + "\n", encoding="utf-8")
+    check = dq.check_markdown_doc(tmp_path, payload)
+    assert check["ok"], check
+    assert check["stamp"] == "2099-01-02", check
+
+
+def test_check_markdown_doc_rejects_stale_snapshot(tmp_path: Path) -> None:
+    payload = {
+        "corpus": {
+            "n_demos": 0,
+            "demo_debt": 0,
+            "mean_score": 0,
+            "median_score": 0,
+            "min_score": 0,
+            "max_score": 0,
+            "grade_distribution": {"A": 0, "B": 0, "C": 0, "D": 0, "F": 0},
+        },
+        "demos": [],
+    }
+    doc = tmp_path / dq.SCORECARD_DOC
+    doc.parent.mkdir(parents=True)
+    stale = dq.render_markdown(payload, stamp="2099-01-02").replace("Demos scored | 0", "Demos scored | 99")
+    doc.write_text(stale + "\n", encoding="utf-8")
+    check = dq.check_markdown_doc(tmp_path, payload)
+    assert not check["ok"], check
+    assert check["diff"], check
 
 
 # --- self-contained runner (mirrors docs_scorecard_test.py) ----------------

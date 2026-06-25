@@ -28,6 +28,15 @@
 // turn + a flexible history the planner re-derives on demand. scaling.go quantifies how
 // the resident-token curve bends across that horizon.
 //
+// The flexible version of that view is a Layout: four independently tunable areas over
+// the same lossless store. Base is structural prompt material supplied as pins (system,
+// developer, active task); current is the newest entry/entries; recent is the last N
+// entries before current; deep is old history reached by relevance or durability. Each
+// area declares its own N, token-size cap, and precision (exact, planned, or pointer), and
+// the final resident bytes still flow through the same global Budget and trust-gated
+// Materialize path. So a user/system can widen recent history, shrink deep history to
+// pointers, or force a larger current turn without returning to an unbounded transcript.
+//
 // # The Postgres-planner correspondence (the lens the design leans on)
 //
 //	relational analogue          ctxplan

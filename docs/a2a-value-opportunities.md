@@ -31,6 +31,16 @@ The concise product line is:
 > A2A gives agents a standard front door. Fleet gives that front door a
 > capability floor, quarantine, task evidence, and workload reuse.
 
+The shared-state version of that line is:
+
+> A2A exposes collaboration at the protocol edge. Fleet/fak decides which live
+> updates, durable task records, disaggregated artifacts, and user edits are
+> admissible shared state.
+
+See [Shared state ladder](shared-state-ladder.md) for the split between live
+messages, mutable live state, durable handoff, disaggregated state, and
+user-level collaborative editing.
+
 ## Current Fleet Base
 
 The repo already has the right boundary shape:
@@ -89,6 +99,25 @@ Checked against the official A2A materials on 2026-06-19:
 | 8 | Fleet scheduler behind A2A tasks | A2A clients see ordinary task state while Fleet deduplicates repeated read-heavy work, shares witnessed world state, and routes to the right machine or model backend. | Task lifecycle, streaming, artifacts | Run two A2A task submissions over a shared Fleet working set and report avoided duplicated calls/artifacts. |
 | 9 | A2A incident replay packet | Security teams can submit an A2A message/task/artifact trace and get allow/deny/quarantine rows, raw JSON, and residuals. | Messages, tasks, artifacts, Agent Cards | Extend the current replay/adoption packet with an A2A trace fixture. |
 | 10 | Human review and secondary authorization | `act` methods can become explicit approval or secondary-credential states instead of hidden prompt negotiation. | `input_required` / authorization-required flows, task status updates | `laptop.accept` starts as `input_required` unless the caller has an approved act scope. |
+
+## Shared-State Opportunities
+
+The collaboration surface should grow in this order:
+
+1. **Shared live:** project `a2achan`/task-bus updates as A2A task events. This is
+   liveness and coordination, not durable memory.
+2. **Shared durable:** persist task ids, audit rows, artifact refs, and
+   `Session`/`Window` handoffs so a run can resume without trusting transcript
+   prose.
+3. **Shared disaggregated:** let artifacts and KV/state cells live outside the
+   local process while keeping digest, scope, taint, deletion, and provenance
+   witnesses in Fleet/fak.
+4. **User-level editing:** expose task/artifact patches with base digests and
+   conflict states so a human edit is a first-class governed write, not a hidden
+   prompt instruction.
+
+This keeps A2A as the protocol front door while the state semantics stay inside
+the reviewed Fleet/fak contract.
 
 ## Best First Wedge
 

@@ -144,7 +144,7 @@ def main():
     ap = argparse.ArgumentParser(description="fak kernel tool-call adjudication demo")
     base = os.environ.get("FAK_DEMO_KERNEL", "http://127.0.0.1:8080")
     ap.add_argument("--kernel", default=base + "/v1/chat/completions")
-    ap.add_argument("--model", default=os.environ.get("FAK_DEMO_MODEL", "qwen2.5:14b"))
+    ap.add_argument("--model", default=os.environ.get("FAK_DEMO_MODEL", "qwen2.5:7b"))
     ap.add_argument("--dry-run", action="store_true", help="show verdicts but do NOT execute allowed commands")
     ap.add_argument("--no-color", action="store_true")
     args = ap.parse_args()

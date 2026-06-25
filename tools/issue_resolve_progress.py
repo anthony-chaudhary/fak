@@ -282,8 +282,11 @@ def main(argv: list[str] | None = None) -> int:
                     help="also run the close arm on OPEN_WITNESSED issues")
     ap.add_argument("--live", action="store_true",
                     help="with --close, execute the gh closes (default: dry-run)")
-    ap.add_argument("--max-commits", type=int, default=400,
-                    help="git history budget for the closure audit (default: 400)")
+    ap.add_argument("--max-commits", type=int, default=2000,
+                    help="git history budget for the closure audit; must stay "
+                         "above the repo's commit count or resolving commits "
+                         "older than the window can't bind a witnessed close "
+                         "(default: 2000, matching issue_closure_audit.py)")
     ap.add_argument("--json", action="store_true", help="emit machine-readable JSON")
     args = ap.parse_args(argv)
 

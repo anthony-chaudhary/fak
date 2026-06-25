@@ -33,7 +33,7 @@ _Reactivation: promote to [SHIPPED] when the deferred behavior is built behind t
 | claim | section |
 |---|---|
 | Decode-time logit-mask (grammar-constrained generation) — the strongest form (never-emit a malformed call) — requires owning the decode loop… | Pre-flight ladder + grammar rung |
-| Dream-time durability consolidation (principled sleep-time promotion) over the rung-1 class signal. Tracked under the S7 epic #496 close-out… | S7 write-time durability gate (context is not memory) |
+| Dream-time durability consolidation (principled sleep-time promotion) over the rung-1 class signal. Tracked under the S7 epic #82; live child… | S7 write-time durability gate (context is not memory) |
 | No FINE-TUNED *syscall/adjudication* LLM and no AsyncLM interrupt behavior — the harvest-corpus consumer edge CLOSED (#580) by a SMALL class… | What fak is NOT |
 | No LIVE transport attaching a real *external* serving engine's KV region — vLLM/SGLang owns the KV in Python/CUDA, so importing its pinned p… | What fak is NOT |
 | Rung-2 bitemporal: `recall.Page` validity interval (`ValidFrom`/`ValidTo`) + an as-of read gate (`ErrExpired`) that makes `bounded` the firs… | S7 write-time durability gate (context is not memory) |

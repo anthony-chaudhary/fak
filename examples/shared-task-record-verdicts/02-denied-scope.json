@@ -1,0 +1,16 @@
+{
+  "schema": "fak.shared-patch-result.v1",
+  "task_id": "task_shared_demo",
+  "base_rev": "sha256:taskrev003",
+  "current_rev": "sha256:taskrev003",
+  "verdict": "denied",
+  "reason": "SCOPE_WIDEN_FORBIDDEN",
+  "denial": {
+    "policy": "shared-task.write.scope",
+    "actor": {
+      "kind": "agent",
+      "id": "runner"
+    },
+    "required_scope": "tenant"
+  }
+}

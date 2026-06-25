@@ -75,6 +75,7 @@ For a cloud, the win is the governance band in front of the API, not throughput.
 ## Reference (the witnessed sources behind this page)
 
 - [Compatibility matrix](../integrations/compatibility-matrix.md) — 44 sourced harnesses / frameworks / backends / protocols, each with the exact repoint key
+- [fak + LiteLLM](../integrations/litellm.md) · [Routers & gateways](../integrations/routers.md) — front / behind / route-through topologies for LiteLLM, OpenRouter, Portkey, and the rest of Tier 2
 - [Integration index](../integrations/README.md) — the "repoint one base URL" recipe and the 60-second offline proof
 - [Claims ledger](https://github.com/anthony-chaudhary/fak/blob/main/CLAIMS.md) — every capability with one machine-checked tag (shipped / simulated / stub)
 - [Status](https://github.com/anthony-chaudhary/fak/blob/main/STATUS.md) · [CLI reference](../cli-reference.md) · [Hardware matrix](../HARDWARE-MATRIX.md) · [llms.txt](https://github.com/anthony-chaudhary/fak/blob/main/llms.txt)

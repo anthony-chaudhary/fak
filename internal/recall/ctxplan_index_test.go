@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -140,6 +141,91 @@ func TestPersistedIndexKeepsTrustInvariant(t *testing.T) {
 	}
 	if !sealedElided["page:1"] || !sealedElided["page:3"] {
 		t.Errorf("sealed pages must be elided sealed; elided=%+v", p.Elided)
+	}
+
+	// And reached via the INVERTED INDEX (relevance on the sealed page's preserved tool-name
+	// tokens), NOT a pin: a tight recency window buries every benign page, so "refund" reaches
+	// the sealed read_refund_policy page only through the relevance access path — and it is STILL
+	// elided sealed. This proves the trust gate survives persistence on the index path, the path
+	// a restored posting-list bug would actually surface a sealed page on, not just when the
+	// caller explicitly pins the sealed id.
+	relF := ctxplan.Forecast{Intents: []string{"refund"}}
+	relOpts := ctxplan.ProbeOptions{RecencyWindow: 1}
+	probedViaRelevance := false
+	for _, sp := range reattached.Probe(relF, relOpts) {
+		if sp.ID == "page:1" {
+			probedViaRelevance = true
+		}
+	}
+	if !probedViaRelevance {
+		t.Fatal("the sealed page must be reached via relevance (its preserved tool-name tokens), not only via an explicit pin")
+	}
+	relPlan := reattached.PlanCells(relF, ctxplan.Budget{Tokens: 1000}, nil, relOpts)
+	if planSelectedIDs(relPlan)["page:1"] {
+		t.Fatal("INVARIANT VIOLATED: a sealed page reached via the relevance index entered the resident view")
+	}
+}
+
+// recordManyBenign records n distinct benign pages through the shipped gate — a session large
+// enough that the bounded probe genuinely prunes (N far above the candidate window), so the
+// persistence machinery is exercised where the index-bounded access path is load-bearing, not
+// only on the 4-page airline fixture where every page trivially fits the bound.
+func recordManyBenign(t *testing.T, n int) *Recorder {
+	t.Helper()
+	ctx := context.Background()
+	r := NewRecorder("bulk-benign")
+	for i := 0; i < n; i++ {
+		body := "log line " + strconv.Itoa(i) + " compiled files cleanly"
+		if i%50 == 0 {
+			body = "auth token rotation note " + strconv.Itoa(i) // a few relevant pages scattered through
+		}
+		r.Record(ctx, "bench_tool", []byte(body))
+	}
+	return r
+}
+
+// TestPersistIndexReattachEqualsRebuildUnderPruning is the LOAD-BEARING half-a witness: over a
+// 300-page session under a tight recency window where the bounded probe ACTUALLY prunes (a
+// strict subset of N), a re-attached index probes and plans byte-identically to one rebuilt from
+// the manifest. The 4-page airline witness proves the wiring; this proves the persistence is
+// correct when the index-bounded access path is selecting a small candidate set out of many —
+// the regime ctxplan.Index exists for.
+func TestPersistIndexReattachEqualsRebuildUnderPruning(t *testing.T) {
+	ctx := context.Background()
+	dir := t.TempDir()
+	if err := recordManyBenign(t, 300).Persist(dir); err != nil {
+		t.Fatalf("persist bulk core image: %v", err)
+	}
+	s, err := Load(dir)
+	if err != nil {
+		t.Fatalf("load bulk core image: %v", err)
+	}
+
+	rebuilt, err := AttachIndex(ctx, s)
+	if err != nil {
+		t.Fatalf("AttachIndex: %v", err)
+	}
+	if err := PersistIndex(dir, rebuilt); err != nil {
+		t.Fatalf("PersistIndex: %v", err)
+	}
+	reattached, err := LoadIndex(dir)
+	if err != nil {
+		t.Fatalf("LoadIndex: %v", err)
+	}
+
+	f := ctxplan.Forecast{Intents: []string{"auth token rotation"}, Pins: []string{"page:0"}}
+	opts := ctxplan.ProbeOptions{RecencyWindow: 8} // tight window so the probe is a strict subset of N
+	probe := reattached.Probe(f, opts)
+	if len(probe) >= rebuilt.Len() {
+		t.Fatalf("probe (%d) did not prune below N (%d) — the test would be vacuous", len(probe), rebuilt.Len())
+	}
+	if !reflect.DeepEqual(probe, rebuilt.Probe(f, opts)) {
+		t.Fatal("re-attached probe != rebuild probe under pruning — persistence diverged where the bound bites")
+	}
+	pa := reattached.PlanCells(f, ctxplan.Budget{Tokens: 64}, nil, opts)
+	pb := rebuilt.PlanCells(f, ctxplan.Budget{Tokens: 64}, nil, opts)
+	if !reflect.DeepEqual(planSelectedIDs(pa), planSelectedIDs(pb)) {
+		t.Fatalf("re-attached plan != rebuild plan under pruning: %v vs %v", planSelectedIDs(pa), planSelectedIDs(pb))
 	}
 }
 

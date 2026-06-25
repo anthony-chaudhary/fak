@@ -144,9 +144,9 @@ func TestSessionCLIStopAndRunVerbs(t *testing.T) {
 }
 
 func TestSessionCLIBudgetPartialMergeFencesRev(t *testing.T) {
-	// Current state: turns=7 tokens=-1 rev=5. A `--turns 3` partial update must
-	// preserve tokens=-1 and fence the write with the observed rev (5).
-	g := &stubGateway{curBudget: gateway.SessionBudget{TurnsLeft: 7, TokensLeft: -1}, curRev: 5}
+	// Current state: turns=7 tokens=-1 context=150 rev=5. A `--turns 3` partial
+	// update must preserve the other axes and fence the write with the observed rev.
+	g := &stubGateway{curBudget: gateway.SessionBudget{TurnsLeft: 7, TokensLeft: -1, ContextTokensLeft: 150}, curRev: 5}
 	ts := httptest.NewServer(g.handler())
 	defer ts.Close()
 
@@ -157,11 +157,31 @@ func TestSessionCLIBudgetPartialMergeFencesRev(t *testing.T) {
 	if g.lastVerb != "budget" || g.lastBody.Budget == nil {
 		t.Fatalf("budget verb missing body: verb=%q body=%+v", g.lastVerb, g.lastBody)
 	}
-	if g.lastBody.Budget.TurnsLeft != 3 || g.lastBody.Budget.TokensLeft != -1 {
-		t.Fatalf("budget merge = %+v, want turns=3 tokens=-1 (preserved)", *g.lastBody.Budget)
+	if g.lastBody.Budget.TurnsLeft != 3 || g.lastBody.Budget.TokensLeft != -1 || g.lastBody.Budget.ContextTokensLeft != 150 {
+		t.Fatalf("budget merge = %+v, want turns=3 tokens=-1 context=150 (preserved)", *g.lastBody.Budget)
 	}
 	if g.lastBody.IfRev != 5 {
 		t.Fatalf("budget if_rev = %d, want 5 (the observed rev fences the read-modify-write)", g.lastBody.IfRev)
+	}
+}
+
+func TestSessionCLIContextBudget(t *testing.T) {
+	g := &stubGateway{curBudget: gateway.SessionBudget{TurnsLeft: -1, TokensLeft: -1}, curRev: 6}
+	ts := httptest.NewServer(g.handler())
+	defer ts.Close()
+
+	out, errb, code := runSessionAt(t, ts.URL, "budget", "sess-context", "--context-tokens", "150000")
+	if code != 0 {
+		t.Fatalf("context budget exit = %d (%s)", code, errb)
+	}
+	if g.lastVerb != "budget" || g.lastBody.Budget == nil {
+		t.Fatalf("context budget verb missing body: verb=%q body=%+v", g.lastVerb, g.lastBody)
+	}
+	if g.lastBody.Budget.TurnsLeft != -1 || g.lastBody.Budget.TokensLeft != -1 || g.lastBody.Budget.ContextTokensLeft != 150000 {
+		t.Fatalf("context budget merge = %+v, want turns=-1 tokens=-1 context=150000", *g.lastBody.Budget)
+	}
+	if !strings.Contains(out, "context=150000") {
+		t.Fatalf("context budget output missing axis: %q", out)
 	}
 }
 

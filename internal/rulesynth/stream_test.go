@@ -29,14 +29,14 @@ func TestEmitCapturesOnlyAdmittedNearMiss(t *testing.T) {
 	corpus := NewNearMissCorpus()
 	h := NewHarvester(corpus, guarded)
 
-	nearMiss := `ruby -e 'File.write("internal/adjudicator/x.go","")'`
+	nearMiss := `php -r 'file_put_contents("internal/adjudicator/x.go", $x);'`
 
 	// 1. Admitted near-miss on the verdict-resolved event -> captured.
 	h.Emit(streamEvent(abi.EvDecide, abi.VerdictAllow, "Bash", nearMiss))
 	// 2. A DENY of the same command is already caught -> not a near-miss.
 	h.Emit(streamEvent(abi.EvDecide, abi.VerdictDeny, "Bash", nearMiss))
 	// 3. An admitted command naming no guarded tree -> nothing to mine.
-	h.Emit(streamEvent(abi.EvDecide, abi.VerdictAllow, "Bash", `ruby -e 'File.write("/tmp/x","")'`))
+	h.Emit(streamEvent(abi.EvDecide, abi.VerdictAllow, "Bash", `php -r 'file_put_contents("/tmp/x", $x);'`))
 	// 4. The SAME admitted near-miss on a non-decide event (EvDispatch fires for every
 	//    allowed call too) must not double-record — Emit keys on EvDecide only.
 	h.Emit(streamEvent(abi.EvDispatch, abi.VerdictAllow, "Bash", nearMiss))
@@ -100,8 +100,8 @@ func TestHarvesterMinesLiveStream(t *testing.T) {
 	k := kernel.New("e")
 	ctx := context.Background()
 
-	// near-miss: ruby -e writes into a guarded tree by a verb not in shellWriteVerbs -> admitted.
-	k.Syscall(ctx, bash(`ruby -e 'File.write("internal/adjudicator/decide.go","x")'`))
+	// near-miss: php -r writes into a guarded tree by a verb not in interpreterEvalFlags -> admitted.
+	k.Syscall(ctx, bash(`php -r 'file_put_contents("internal/adjudicator/decide.go", $x);'`))
 	// already caught: sed -i is a recognized write verb -> denied, never a near-miss.
 	k.Syscall(ctx, bash(`sed -i s/a/b/ internal/adjudicator/decide.go`))
 	// benign: a write to an unguarded path -> admitted but names no guarded tree.
@@ -109,17 +109,17 @@ func TestHarvesterMinesLiveStream(t *testing.T) {
 
 	rows := corpus.Rows()
 	if len(rows) != 1 {
-		t.Fatalf("want exactly 1 mined near-miss (the ruby -e write), got %d: %+v", len(rows), rows)
+		t.Fatalf("want exactly 1 mined near-miss (the php -r write), got %d: %+v", len(rows), rows)
 	}
 	if rows[0].GuardedGlob != "internal/adjudicator/" {
 		t.Fatalf("near-miss glob = %q, want internal/adjudicator/", rows[0].GuardedGlob)
 	}
 
-	// The mined LOG must feed the proposer: Propose yields the ruby -e candidate, and
+	// The mined LOG must feed the proposer: Propose yields the php -r candidate, and
 	// because it guards a harness tree it is flagged SelfModify (require-witness).
 	cands := Propose(rows)
-	if len(cands) != 1 || cands[0].Verb != "ruby -e" {
-		t.Fatalf("Propose(live corpus) = %+v, want one ruby -e candidate", cands)
+	if len(cands) != 1 || cands[0].Verb != "php -r" {
+		t.Fatalf("Propose(live corpus) = %+v, want one php -r candidate", cands)
 	}
 	if !cands[0].SelfModify {
 		t.Fatalf("a candidate guarding internal/adjudicator must be flagged SelfModify")

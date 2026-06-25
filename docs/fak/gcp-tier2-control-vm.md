@@ -1,8 +1,14 @@
 # GCP Tier-2 always-on dogfood control VM (issue #732)
 
-`docs/fak/always-on-dogfood-server.md` describes Tier 2 — a cheap `e2-small` running the
-guarded fleet plus a shared `fak serve` gateway 24/7, reachable over Tailscale. This is the
-script that **stands it up**: `scripts/gcp-dogfood-control-vm.sh`.
+Audience: operators bringing up the always-on Tier-2 dogfood lane after reading
+[always-on-dogfood-server.md](always-on-dogfood-server.md). Prerequisite: a GCP
+project with `gcloud` access for apply mode. You will be able to review the VM
+plan safely, apply it from an authenticated host, and verify the systemd units.
+
+[always-on-dogfood-server.md](always-on-dogfood-server.md) describes Tier 2: a
+cheap `e2-small` running the guarded fleet plus a shared `fak serve` gateway
+24/7, reachable over Tailscale. This is the script that **stands it up**:
+`scripts/gcp-dogfood-control-vm.sh`.
 
 A VM never sleeps, so Tier 2 is the steady-state overflow lane next to the Mac (Tier 1).
 The units are **systemd** — the Linux analogue of the Tier-1 launchd plists:

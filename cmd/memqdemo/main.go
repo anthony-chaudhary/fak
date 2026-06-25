@@ -18,6 +18,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"flag"
 	"fmt"
 	"io"
 	"os"
@@ -26,13 +27,15 @@ import (
 )
 
 func main() {
-	if err := run(os.Stdout); err != nil {
+	reportPath := flag.String("report", "", "optional path to write the machine-readable JSON report")
+	flag.Parse()
+	if err := run(os.Stdout, *reportPath); err != nil {
 		fmt.Fprintln(os.Stderr, "memqdemo:", err)
 		os.Exit(1)
 	}
 }
 
-func run(out io.Writer) error {
+func run(out io.Writer, reportPath string) error {
 	ctx := context.Background()
 	w := func(format string, a ...any) { fmt.Fprintf(out, format, a...) }
 
@@ -155,9 +158,13 @@ func run(out io.Writer) error {
 	w("algebra; effects defaulted to proposed-not-applied; the sealed span was refused\n")
 	w("from every render — the substrate is the origin, the strategies are the queries.\n")
 
-	b, _ := json.MarshalIndent(report, "", "  ")
-	_ = os.WriteFile("memqdemo-report.json", b, 0o644)
-	w("\nreport written: memqdemo-report.json\n")
+	if reportPath != "" {
+		b, _ := json.MarshalIndent(report, "", "  ")
+		if err := os.WriteFile(reportPath, b, 0o644); err != nil {
+			return fmt.Errorf("write report: %w", err)
+		}
+		w("\nreport written: %s\n", reportPath)
+	}
 	if poisonLeaked {
 		return fmt.Errorf("INVARIANT VIOLATED: a sealed cell was rendered into context")
 	}

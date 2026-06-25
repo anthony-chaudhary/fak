@@ -109,7 +109,7 @@
   <text x="100" y="568" class="cardTitle">The winning move</text>
   <text x="100" y="598" class="cardBody" style="font-size:20px;">Do not make every agent reread the same setup. But never skip the proof that reuse is allowed.</text>
   <text x="1030" y="568" class="cardTitle">Measured clue</text>
-  <text x="1030" y="598" class="cardBody" style="font-size:20px;">50 turns x 5 agents: about 19h -> 19m vs naive.</text>
+  <text x="1030" y="598" class="cardBody" style="font-size:20px;">5 agents x 50 turns: ~4.1x vs a tuned warm cache.</text>
 
   <text x="72" y="674" class="cardTitle">What breaks first in an agent city?</text>
   <text x="72" y="704" class="subtitle" style="font-size:18px;">At 10,000s of agents x 10,000s of turns, hidden linear terms become walls.</text>

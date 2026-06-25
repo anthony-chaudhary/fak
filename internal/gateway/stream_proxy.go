@@ -33,7 +33,7 @@ import (
 // error before any byte hit the wire); false when the configured planner cannot
 // stream this wire, in which case it has written NOTHING and the caller falls back to
 // the buffered+synthesized path.
-func (s *Server) streamChatLive(ctx context.Context, w http.ResponseWriter, req ChatRequest, reqModel, reqTrace string, resultAdmissions []ResultAdmission) bool {
+func (s *Server) streamChatLive(ctx context.Context, w http.ResponseWriter, req ChatRequest, reqModel, reqTrace string, sessionTurn servedSessionTurn, resultAdmissions []ResultAdmission) bool {
 	sp, ok := s.planner.(agent.StreamingPlanner)
 	if !ok || !sp.StreamingSupported() {
 		return false
@@ -83,7 +83,7 @@ func (s *Server) streamChatLive(ctx context.Context, w http.ResponseWriter, req 
 	began := time.Now()
 	comp, err := sp.CompleteStream(ctx, guard.write, req.Messages, req.Tools,
 		agent.WithModel(req.Model),
-		agent.WithMaxTokens(req.MaxTokens),
+		agent.WithMaxTokens(sessionTurn.maxTokensFor(req.MaxTokens)),
 		agent.WithTemperature(req.Temperature),
 		agent.WithTopP(req.TopP),
 		agent.WithStop(normalizeStop(req.Stop)),
@@ -112,6 +112,7 @@ func (s *Server) streamChatLive(ctx context.Context, w http.ResponseWriter, req 
 	// The turn finished. The buffered path records inference metrics inside
 	// s.complete; this path bypasses it, so account here.
 	s.metrics.observeInference(comp.Usage.PromptTokens, comp.Usage.CompletionTokens, comp.Usage.CachedPromptTokens(), comp.FinishReason, time.Since(began))
+	s.debitServedSessionTurn(ctx, sessionTurn, comp.Usage)
 
 	// Tool-call conformance fail-closed: the upstream announced tool_calls but none
 	// survived parsing + the text-lift fallback. Proceeding would skip adjudication on

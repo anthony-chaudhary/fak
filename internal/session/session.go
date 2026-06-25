@@ -122,6 +122,20 @@ type Budget struct {
 	TurnsLeft         int `json:"turns_left"`                    // remaining model round-trips; Unbounded = no cap
 	TokensLeft        int `json:"tokens_left"`                   // remaining output tokens; Unbounded = no cap
 	ContextTokensLeft int `json:"context_tokens_left,omitempty"` // remaining prompt/context tokens; 0 = not configured
+	ContextTokensCap  int `json:"context_tokens_cap,omitempty"`  // the configured context-budget size; the denominator the pre-exhaustion warning measures consumed-share against (0 = no context budget)
+}
+
+// withContextCap stamps the context-budget capacity (the denominator the pre-exhaustion
+// warning measures consumed-share against, #743) from the remaining when a budget is
+// configured without an explicit cap. An explicit cap is preserved; an unbounded/zero
+// context axis leaves the cap zero, so no warning is ever computed for a session that has
+// no context budget. Decide/DebitUsage only ever decrement ContextTokensLeft, so the cap
+// stamped here at set-time survives every later debit as the stable denominator.
+func (b Budget) withContextCap() Budget {
+	if b.ContextTokensCap <= 0 && b.ContextTokensLeft > 0 {
+		b.ContextTokensCap = b.ContextTokensLeft
+	}
+	return b
 }
 
 // unbounded reports whether an axis carries no limit. A negative value (canonically

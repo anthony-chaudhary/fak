@@ -680,9 +680,20 @@ func (s *Server) modelLoadProfile() *ModelLoadProfile {
 // byte-for-byte identical to the pre-seam path. It is FAIL-SAFE: any planner error or empty
 // render falls back to the full lossless history, so an experimental rewrite can never
 // break or empty a turn — the planner only ever SHORTENS, and on doubt it shortens nothing.
-func (s *Server) maybePlanMessages(ctx context.Context, messages []agent.Message) []agent.Message {
+func (s *Server) maybePlanMessages(ctx context.Context, trace string, messages []agent.Message) []agent.Message {
 	if s.ctxView == nil || !s.ctxView.Enabled {
 		return messages
+	}
+	// With a stable session trace, plan through the PERSISTENT per-session index — the
+	// incremental O(c·N) path, output-equivalent to the stateless full-scan but without
+	// rebuilding the lossless store every turn. Without a trace (a one-shot caller), fall
+	// back to the stateless shared planner so behavior is unchanged for an unkeyed request.
+	if sp := s.sessionPlannerFor(trace); sp != nil {
+		planned := sp.RenderTurn(ctx, messages)
+		if len(planned) == 0 {
+			return messages // fail-safe: never empty a turn
+		}
+		return planned
 	}
 	planned, err := s.ctxView.RenderTurn(ctx, messages)
 	if err != nil || len(planned) == 0 {
@@ -692,6 +703,38 @@ func (s *Server) maybePlanMessages(ctx context.Context, messages []agent.Message
 	return planned
 }
 
+// maxSessionPlanners bounds the per-session planner cache so a long-lived gateway serving
+// many distinct traces cannot grow it without limit. When the cache is full a new trace
+// evicts the whole map (a cheap generational reset) rather than tracking per-entry LRU —
+// the planners are reconstructible from the next turn's full history, so eviction only
+// costs that session one O(N) rebuild, never correctness.
+const maxSessionPlanners = 8192
+
+// sessionPlannerFor returns the persistent SessionPlanner for a trace, minting one lazily
+// from the shared ctxView config (CtxViewPlanner.NewSession). It returns nil when the
+// planner is disabled or the trace is empty, so the caller falls back to the stateless
+// path. Concurrency-safe: the per-session planner is mutated only under sessionPlannerMu
+// by the single in-flight turn for that trace (turns of one session are serial).
+func (s *Server) sessionPlannerFor(trace string) *agent.SessionPlanner {
+	if s.ctxView == nil || !s.ctxView.Enabled || trace == "" {
+		return nil
+	}
+	s.sessionPlannerMu.Lock()
+	defer s.sessionPlannerMu.Unlock()
+	if s.sessionPlanners == nil {
+		s.sessionPlanners = make(map[string]*agent.SessionPlanner)
+	}
+	if sp, ok := s.sessionPlanners[trace]; ok {
+		return sp
+	}
+	if len(s.sessionPlanners) >= maxSessionPlanners {
+		s.sessionPlanners = make(map[string]*agent.SessionPlanner) // generational reset
+	}
+	sp := s.ctxView.NewSession()
+	s.sessionPlanners[trace] = sp
+	return sp
+}
+
 // complete runs the configured planner for one turn and records the inference
 // metrics that make real model work visible at /metrics — the token counts the
 // planner reports plus the wall-clock spent generating. Both /v1/chat/completions
@@ -699,11 +742,12 @@ func (s *Server) maybePlanMessages(ctx context.Context, messages []agent.Message
 // every served turn on either wire. On a planner error nothing is recorded (a turn
 // that produced no tokens is not a generation); the error is returned untouched so
 // the caller's existing error handling is unchanged.
-func (s *Server) complete(ctx context.Context, messages []agent.Message, tools []agent.ToolDef, opts ...agent.SampleOpt) (*agent.Completion, error) {
+func (s *Server) complete(ctx context.Context, trace string, messages []agent.Message, tools []agent.ToolDef, opts ...agent.SampleOpt) (*agent.Completion, error) {
 	// Re-plan the turn history into an O(1) resident view before the model sees it —
 	// the "replace append+compact with a planned view" rung (issue #555). Inert (an
-	// identity) unless CtxViewBudget > 0, so the default path is unchanged.
-	messages = s.maybePlanMessages(ctx, messages)
+	// identity) unless CtxViewBudget > 0, so the default path is unchanged. The trace keys
+	// the persistent per-session planner so the rewrite is O(c·N), not O(N²), across turns.
+	messages = s.maybePlanMessages(ctx, trace, messages)
 	start := time.Now()
 	comp, err := s.planner.Complete(ctx, messages, tools, opts...)
 	dur := time.Since(start)
@@ -720,7 +764,7 @@ func (s *Server) complete(ctx context.Context, messages []agent.Message, tools [
 // output/context budgets here. Planner errors keep the old behavior: no usage was
 // reported, so there is nothing to debit beyond the turn admission already taken.
 func (s *Server) completeServed(ctx context.Context, turn servedSessionTurn, messages []agent.Message, tools []agent.ToolDef, opts ...agent.SampleOpt) (*agent.Completion, error) {
-	comp, err := s.complete(ctx, messages, tools, opts...)
+	comp, err := s.complete(ctx, turn.traceID, messages, tools, opts...)
 	if err != nil {
 		return nil, err
 	}

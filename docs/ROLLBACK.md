@@ -1,3 +1,8 @@
+---
+title: "fak rollback runbook: revert, downgrade, pin"
+description: "How fak operators recover from a bad trunk change: revert commits, downgrade to stable tags, pin fleet versions, and repair measured state."
+---
+
 # Rollback runbook — getting back to a known-good state
 
 When a change on the fast-moving trunk goes wrong — a regression a gate caught, a

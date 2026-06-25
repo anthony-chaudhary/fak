@@ -1,3 +1,8 @@
+---
+title: "fak model routing: per-aspect models and ensembles"
+description: "How fak routes one request by aspect, from tool calls to reasoning steps, with deterministic policy manifests and configurable model ensembles."
+---
+
 # Model routing — first-class at every level (`fak route`)
 
 > **Status.** The routing **decision** spine and the ensemble **reduce** are
@@ -257,6 +262,30 @@ floor:
 3. **Member order is preserved into the fold.** The dispatcher gathers member
    outputs into the `Combine` `[]Vote` in `Plan.Members` order (not engine
    completion order), or the order-sensitive reductions stop being deterministic.
+
+## Connecting routed models to providers (LiteLLM, routers, your accounts)
+
+The manifest above picks *abstract* model ids ("small", "large", "guard-a"). Where each
+of those actually runs — a LiteLLM proxy fronting 100+ providers, an OpenRouter or Portkey
+gateway, a direct provider wire, or a local engine — is a binding the dispatch layer
+resolves, and it is the same OpenAI wire pointed at a different `base_url` in nearly every
+case (the field's lingua franca). So fak does not reimplement a provider: it owns the
+*decision* (per aspect, with ensembles) and the *floor*, and lets an aggregator be the
+connectivity for each chosen member. The dedicated guides:
+
+- **[fak + LiteLLM](integrations/litellm.md)** — the three topologies (fak in front of a
+  LiteLLM proxy, fak as a governed node behind it, and fak's per-aspect routing
+  dispatching *through* it) and what each means.
+- **[Routers & gateways](integrations/routers.md)** — OpenRouter, Portkey, LiteLLM
+  Router, Unify, Martian: fak as a complement to request-level routers.
+
+**Residency is fail-closed across every backend.** The engine-residency PDP
+(`internal/engine`) treats any route it cannot prove is on-box — a provider wire, a
+LiteLLM/OpenRouter aggregator, or your own gateway — as **remote**, and denies a
+tenant-scoped / sensitivity-tagged payload bound for it before dispatch (an `inkernel` /
+`local` / `on-device` route is exempt). Connecting your routing to a third-party
+proxy therefore cannot silently open an exfiltration path — an unknown backend is assumed
+remote, not trusted.
 
 ## Routing presets (examples/routing-presets/)
 

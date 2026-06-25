@@ -40,6 +40,13 @@ This is a **separate Go module** (its own `go.mod`). The root module's
 explicitly:
 
 ```sh
+go -C examples/extdriver build ./...
+go -C examples/extdriver run .
+```
+
+Or from the module directory:
+
+```sh
 cd examples/extdriver
 go build ./...
 go run .
@@ -87,4 +94,5 @@ through the public surface. The honesty ledger for the underlying capability is
 
 Because this is a nested module, the root CI's single-module `go build ./...` /
 `go test ./...` will not build it. To keep it from rotting, it needs its own CI
-step (`cd examples/extdriver && go build ./... && go run .`). See issue #454.
+step (`go -C examples/extdriver build ./... && go -C examples/extdriver run .`).
+See issue #454.

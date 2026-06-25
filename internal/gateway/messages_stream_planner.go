@@ -21,7 +21,7 @@ import (
 // It returns false only when this request cannot use the streaming seam and the
 // caller should fall back to streamAnthropicPending without anything having been
 // written. Once it admits inbound results or writes a response, it owns the request.
-func (s *Server) streamAnthropicPlannerLive(w http.ResponseWriter, r *http.Request, req *agent.AnthropicMessagesRequest, reqTrace string) bool {
+func (s *Server) streamAnthropicPlannerLive(w http.ResponseWriter, r *http.Request, req *agent.AnthropicMessagesRequest, reqTrace string, sessionTurn servedSessionTurn) bool {
 	sp, ok := s.planner.(agent.StreamingPlanner)
 	if !ok || !sp.StreamingSupported() {
 		return false
@@ -108,7 +108,7 @@ func (s *Server) streamAnthropicPlannerLive(w http.ResponseWriter, r *http.Reque
 		temp = &req.Temperature
 	}
 	opts := []agent.SampleOpt{
-		agent.WithMaxTokens(req.MaxTokens),
+		agent.WithMaxTokens(sessionTurn.maxTokensFor(req.MaxTokens)),
 		agent.WithTemperature(temp),
 		agent.WithTopP(req.TopP),
 		agent.WithTopK(req.TopK),
@@ -116,7 +116,7 @@ func (s *Server) streamAnthropicPlannerLive(w http.ResponseWriter, r *http.Reque
 	}
 
 	guard := newLiftGuard(emitText)
-	messages := s.maybePlanMessages(r.Context(), req.Messages)
+	messages := s.maybePlanMessages(r.Context(), reqTrace, req.Messages)
 	began := time.Now()
 	comp, err := sp.CompleteStream(r.Context(), guard.write, messages, req.Tools, opts...)
 	if err != nil {
@@ -134,6 +134,7 @@ func (s *Server) streamAnthropicPlannerLive(w http.ResponseWriter, r *http.Reque
 		return true
 	}
 	s.metrics.observeInference(comp.Usage.PromptTokens, comp.Usage.CompletionTokens, comp.Usage.CachedPromptTokens(), comp.FinishReason, time.Since(began))
+	s.debitServedSessionTurn(r.Context(), sessionTurn, comp.Usage)
 
 	if comp.ToolCallsDropped && len(comp.Message.ToolCalls) == 0 {
 		if !started {

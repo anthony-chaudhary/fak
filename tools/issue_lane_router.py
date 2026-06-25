@@ -81,6 +81,16 @@ LABEL_ALIAS: dict[str, str] = {
 # Confidence ordering (higher wins; used for sort + override decisions).
 CONFIDENCE_RANK = {"path-confirmed": 4, "exact-scope": 3, "alias": 2, "label": 1, "none": 0}
 
+# Issues a required HUMAN/EXTERNAL action genuinely blocks (e.g. a legal trademark
+# filing) — nothing an agent can land. Carrying the `blocked-by-human` GitHub label,
+# they are dropped from the DISPATCH candidate set in collect() — the one chokepoint
+# BOTH dispatch lanes read (issue_dispatch.pick_lane and issue_resolve_dispatch via
+# this router) — so a worker never re-spins on an issue no agent can close. The label
+# keeps them VISIBLE to a human, the skipped count is surfaced (never a silent drop),
+# and the closure auditor is untouched (the issue still closes when the human acts).
+# Apply the label RARELY — only when truly human-blocked, never as a difficulty dodge.
+BLOCKED_BY_HUMAN_LABEL = "blocked-by-human"
+
 
 def repo_root(start: Path | None = None) -> Path:
     here = (start or Path(__file__)).resolve()
@@ -205,6 +215,12 @@ def _label_names(issue: dict[str, Any]) -> set[str]:
     return {str(lab.get("name", "")) for lab in issue.get("labels", [])}
 
 
+def is_blocked_by_human(issue: dict[str, Any], *, label: str = BLOCKED_BY_HUMAN_LABEL) -> bool:
+    """True when the issue carries the human/external-blocked label — see
+    BLOCKED_BY_HUMAN_LABEL. Such issues are kept out of the dispatch candidate set."""
+    return label in _label_names(issue)
+
+
 def route_issue(
     issue: dict[str, Any],
     concurrent: list[str],
@@ -324,7 +340,13 @@ def build_payload(
     max_unrouted_frac: float = 0.25,
     fetch_error: str | None = None,
     coverage: dict[str, Any] | None = None,
+    skipped_blocked: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
+    skipped_blocked = skipped_blocked or []
+    skipped = [
+        {"number": i.get("number"), "title": str(i.get("title") or "")[:80]}
+        for i in skipped_blocked
+    ]
     by_conf: dict[str, int] = {k: 0 for k in CONFIDENCE_RANK}
     lanes: dict[str, dict[str, Any]] = {}
     for r in routes:
@@ -366,7 +388,9 @@ def build_payload(
         next_action = "operator: add scopes/labels or extend SCOPE_ALIAS so workers can target these"
     else:
         ok, verdict, finding = True, "OK", "routed"
-        reason = f"{routed}/{total} open issues routed to {len(lanes)} lane(s); {unrouted} UNROUTED"
+        blocked_note = f"; {len(skipped)} human-blocked skipped" if skipped else ""
+        reason = (f"{routed}/{total} open issues routed to {len(lanes)} lane(s); "
+                  f"{unrouted} UNROUTED{blocked_note}")
         next_action = "dos-dispatch workers fold lanes[<their lane>].issues into the dispositions sidecar"
 
     return {
@@ -381,9 +405,11 @@ def build_payload(
         "counts": {
             "open": total, "routed": routed, "unrouted": unrouted,
             "unrouted_frac": frac, "by_confidence": by_conf,
+            "skipped_human_blocked": len(skipped),
         },
         "lanes": dict(sorted(lanes.items(), key=lambda kv: (-kv[1]["count"], kv[0]))),
         "issues": sorted(routes, key=_route_sort_key),
+        "skipped_human_blocked": sorted(skipped, key=lambda s: -int(s.get("number") or 0)),
     }
 
 
@@ -431,6 +457,10 @@ def collect(
     fetch = fetcher or (lambda ws: fetch_issues(ws, limit=issue_limit))
     issues = fetch(root)
     coverage = compute_coverage(issues_fetched=len(issues), issue_limit=issue_limit)
+    # Drop human/external-blocked issues from the dispatch candidate set (the one
+    # chokepoint both lanes read), but surface them so the skip is never silent.
+    blocked = [i for i in issues if is_blocked_by_human(i)]
+    routable = [i for i in issues if not is_blocked_by_human(i)]
     fetch_error = None
     if not concurrent:
         fetch_error = "dos doctor returned no lanes — run from the repo root (not fak/)"
@@ -438,11 +468,12 @@ def collect(
         fetch_error = "gh returned no open issues (auth/network?)"
     routes = [
         route_issue(i, concurrent, trees, scope_alias=scope_alias, label_alias=label_alias)
-        for i in issues
+        for i in routable
     ]
     return build_payload(
         workspace=str(root), routes=routes, trees=trees,
         max_unrouted_frac=max_unrouted_frac, fetch_error=fetch_error, coverage=coverage,
+        skipped_blocked=blocked,
     )
 
 
@@ -454,6 +485,10 @@ def render(payload: dict[str, Any]) -> str:
         f"(frac={c.get('unrouted_frac')})  by_conf={c.get('by_confidence')}",
         f"next: {payload.get('next_action')}",
     ]
+    skipped = payload.get("skipped_human_blocked") or []
+    if skipped:
+        nums = ", ".join(f"#{s['number']}" for s in skipped[:10])
+        lines.append(f"  human-blocked (skipped, not dispatched): {len(skipped)}  {nums}")
     coverage = payload.get("coverage") or {}
     if not coverage.get("complete", True):
         for note in coverage.get("notes") or []:

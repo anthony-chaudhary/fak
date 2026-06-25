@@ -124,11 +124,17 @@ func (s *Server) handleGeminiGenerateContent(w http.ResponseWriter, r *http.Requ
 	stream := req.Stream || method == "streamGenerateContent"
 
 	ctx := r.Context()
-	reqTrace := useHTTPTrace(w, r, "")
-	// Operator control: refuse a paused/draining/stopped session's next request (the
-	// proxy-path enforcement of /v1/fak/session). Fail-open when the route is disabled.
-	if ok, st := s.sessionAdmits(ctx, reqTrace); !ok {
-		writeSessionRefusal(w, st)
+	reqTrace := s.useHTTPTrace(w, r, "")
+	// Operator control / budget / pace at the served request boundary. With
+	// DecideSession wired this mutates the live session table (TurnsLeft debit,
+	// budget exhaustion, pace cap); without it the legacy observe-only admission guard
+	// still refuses paused/draining/stopped sessions.
+	sessionTurn, ok, canceled := s.beginServedSessionTurn(ctx, reqTrace)
+	if canceled {
+		return
+	}
+	if !ok {
+		writeSessionRefusal(w, sessionTurn.state)
 		return
 	}
 
@@ -152,7 +158,7 @@ func (s *Server) handleGeminiGenerateContent(w http.ResponseWriter, r *http.Requ
 	}
 	opts := []agent.SampleOpt{
 		agent.WithModel(model),
-		agent.WithMaxTokens(req.MaxTokens),
+		agent.WithMaxTokens(sessionTurn.maxTokensFor(req.MaxTokens)),
 		agent.WithTemperature(temp),
 		agent.WithTopP(req.TopP),
 		agent.WithTopK(req.TopK),
@@ -160,11 +166,11 @@ func (s *Server) handleGeminiGenerateContent(w http.ResponseWriter, r *http.Requ
 	}
 
 	if stream {
-		s.streamGeminiPending(w, r, req, opts, reqTrace, model, resultAdmissions)
+		s.streamGeminiPending(w, r, req, opts, reqTrace, model, sessionTurn, resultAdmissions)
 		return
 	}
 
-	turn, err := s.completeGeminiTurn(ctx, req, opts, reqTrace, model, resultAdmissions)
+	turn, err := s.completeGeminiTurn(ctx, req, opts, reqTrace, model, sessionTurn, resultAdmissions)
 	if err != nil {
 		s.writeGeminiUpstreamError(w, err)
 		return
@@ -180,8 +186,8 @@ func (s *Server) handleGeminiGenerateContent(w http.ResponseWriter, r *http.Requ
 // completeGeminiTurn runs the planner, adjudicates every proposed function call,
 // and renders the Gemini candidate/usage shape. It is the shared core of the
 // buffered and streaming paths.
-func (s *Server) completeGeminiTurn(ctx context.Context, req *agent.GeminiGenerateContentRequest, opts []agent.SampleOpt, reqTrace, model string, resultAdmissions []ResultAdmission) (*geminiTurn, error) {
-	comp, err := s.complete(ctx, req.Messages, req.Tools, opts...)
+func (s *Server) completeGeminiTurn(ctx context.Context, req *agent.GeminiGenerateContentRequest, opts []agent.SampleOpt, reqTrace, model string, sessionTurn servedSessionTurn, resultAdmissions []ResultAdmission) (*geminiTurn, error) {
+	comp, err := s.completeServed(ctx, sessionTurn, req.Messages, req.Tools, opts...)
 	if err != nil {
 		return nil, err
 	}
@@ -259,8 +265,8 @@ func (s *Server) completeGeminiTurn(ctx context.Context, req *agent.GeminiGenera
 // upstream failure still maps to an honest HTTP status, not an error frame inside
 // an already-opened 200 stream. A Gemini client parses the data frame identically
 // to a buffered response.
-func (s *Server) streamGeminiPending(w http.ResponseWriter, r *http.Request, req *agent.GeminiGenerateContentRequest, opts []agent.SampleOpt, reqTrace, model string, resultAdmissions []ResultAdmission) {
-	turn, err := s.completeGeminiTurn(r.Context(), req, opts, reqTrace, model, resultAdmissions)
+func (s *Server) streamGeminiPending(w http.ResponseWriter, r *http.Request, req *agent.GeminiGenerateContentRequest, opts []agent.SampleOpt, reqTrace, model string, sessionTurn servedSessionTurn, resultAdmissions []ResultAdmission) {
+	turn, err := s.completeGeminiTurn(r.Context(), req, opts, reqTrace, model, sessionTurn, resultAdmissions)
 	if err != nil {
 		s.writeGeminiUpstreamError(w, err)
 		return

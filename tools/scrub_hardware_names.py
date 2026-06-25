@@ -52,7 +52,6 @@ REPO = Path(__file__).resolve().parent.parent
 # is regenerated. Excluded from the default set + the --check lint.
 GENERATED_DOCS = {
     "docs/bench-plan.md",
-    "docs/dispatch-status.md",
     "llms-full.txt",
     "llms.txt",
 }

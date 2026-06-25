@@ -56,6 +56,14 @@ model, no network). The result is **deterministic**: `fak policy --check` and th
 `FromPolicy` round-trip are pure functions of the manifest bytes, so the same preset yields
 the **same verdict on every run**, and re-running is safe (idempotent — it writes nothing).
 
+## What you see
+
+`fak policy --check` exits cleanly for a valid preset and prints the policy validation
+result. The preflight examples below show the two important witness shapes: an obviously
+dangerous coding-agent command (`git push --force`) returns `DENY POLICY_BLOCK`, while a
+normal push command remains `ALLOW`. That pair proves the preset is a capability floor, not
+a blanket shell ban.
+
 ## Scope — what this preset pack does **not** claim
 
 A preset is a curated *starting point*, not a finished policy. It does **not** claim to make

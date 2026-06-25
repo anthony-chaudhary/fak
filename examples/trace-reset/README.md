@@ -39,7 +39,7 @@ sequenceDiagram
 ## Run it
 
 ```bash
-examples/trace-reset/run.sh         # build fak, serve, run 11 witnesses, teardown
+examples/trace-reset/run.sh
 ```
 
 Needs only Go (to build `fak`) and `curl` — **no model, key, or GPU**. It **runs in a
@@ -47,6 +47,16 @@ few seconds** once `fak` is built — no model, no network. The admit,
 observe, and reset routes do not touch an upstream, so the result is
 **deterministic** on every run. A captured run is in
 [`EXAMPLE-OUTPUT.md`](EXAMPLE-OUTPUT.md).
+
+## What you see
+
+The run prints the 11 witness checks in order: trace A starts trusted, rises to
+quarantined after an untrusted admit, resets to trusted after the operator call, while
+trace B stays quarantined and the global quarantine counter stays unchanged. The final
+blank-`trace_id` request returns `400`, proving the route fails closed on malformed input.
+
+Windows users: run the `.sh` launcher from WSL or Git Bash; the demo itself is
+plain `fak serve` plus `curl`, and there is no native `.ps1` wrapper yet.
 
 ## The operator loop the script walks
 

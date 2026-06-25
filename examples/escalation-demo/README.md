@@ -70,11 +70,22 @@ build `fak`) and **Python 3** (stdlib only). No model, API key, GPU, or ollama.
 ## Run it
 
 ```bash
-./examples/escalation-demo/run.sh            # build kernel → serve the policy → run the demo → teardown
+./examples/escalation-demo/run.sh
 ```
 
 `run.sh` tears down everything *it* started. The demo itself **runs in a few seconds**
 once `fak` is built — no model, no network. Full captured run: [`EXAMPLE-OUTPUT.md`](EXAMPLE-OUTPUT.md).
+
+## What you see
+
+The script prints the refused `refund_payment` adjudication, the policy-declared
+`safe_sink`, the redacted escalation ticket, and the second adjudication that allows
+`transfer_to_human_agents`. A correct run ends with all four graceful-deny checks
+passing: catch the denial, route to the declared sink, redact the sensitive fields, and
+adjudicate the escalation path itself instead of using a side channel.
+
+Windows users: run the `.sh` launcher from WSL or Git Bash; the demo itself is
+plain `fak serve` plus stdlib Python, and there is no native `.ps1` wrapper yet.
 
 ## `safe_sinks` is no longer decorative
 

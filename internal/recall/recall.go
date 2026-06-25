@@ -68,7 +68,7 @@ type Page struct {
 	Quarantined bool   `json:"quarantined"`
 	QID         string `json:"qid,omitempty"`
 	Reason      string `json:"reason,omitempty"`
-	Durability  string `json:"durability,omitempty"`  // rung-1 write-time class (#499/#496): turn|session|durable; auditable in manifest.json
+	Durability  string `json:"durability,omitempty"`  // rung-1 write-time class (#82): turn|session|durable; auditable in manifest.json
 	Witness     string `json:"witness,omitempty"`     // external trust witness this page was admitted under
 	TrustEpoch  uint64 `json:"trust_epoch,omitempty"` // vdso trust epoch observed at record time
 
@@ -110,13 +110,13 @@ type Recorder struct {
 	pages []Page
 	qn    int // recall-owned quarantine counter (uniform QID space across both gates)
 
-	promotion         PromotionMode // rung-1 default-expire gate posture (#499/#496)
+	promotion         PromotionMode // rung-1 default-expire gate posture (#82)
 	refusedPromotions int           // count of non-durable benign pages the gate would/did refuse
 }
 
-// PromotionMode is the rung-1 default-expire promotion gate's posture (S7, epic #496).
+// PromotionMode is the rung-1 default-expire promotion gate's posture (S7, epic #82).
 // The headline inversion — expire by default, promotion is the earned exception — is a
-// CODE GATE, not a comment, but it ships in the #497 two-commit honesty split so every
+// CODE GATE, not a comment, but it ships in a two-posture honesty split so every
 // recall.Recorder caller can be audited before the boundary actually bites.
 type PromotionMode uint8
 
@@ -232,7 +232,7 @@ func (r *Recorder) RecordWithWitness(ctx context.Context, tool string, rawBody [
 		return v
 	}
 
-	// Benign page: rung-1 default-expire promotion gate (#499, epic #496). Read the
+	// Benign page: rung-1 default-expire promotion gate (#82). Read the
 	// write-time durability class the ctxmmu gate stamped on the verdict; fail-closed
 	// to turn for a missing/unknown value (forward-compat, mirrors abi.FallbackDeny).
 	class := promotionClass(v.Meta[ctxmmu.DurabilityKey])

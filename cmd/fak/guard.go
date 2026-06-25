@@ -24,6 +24,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/gateway"
 	"github.com/anthony-chaudhary/fak/internal/journal"
 	"github.com/anthony-chaudhary/fak/internal/policy"
+	"github.com/anthony-chaudhary/fak/internal/session"
 )
 
 // guardDefaultPolicyJSON is the day-to-day capability floor `fak guard` enforces when
@@ -76,6 +77,10 @@ func cmdGuard(argv []string) {
 	dumpPolicy := fs.Bool("dump-policy", false, "print the built-in guard capability floor (an editable manifest) and exit")
 	quiet := fs.Bool("quiet", false, "suppress the startup banner and the exit audit summary")
 	ctxViewBudget := fs.Int("ctx-view-budget", 0, "wire the ctxplan context PLANNER into the live guard loop: each buffered turn, re-materialize the forwarded history as an O(1) planned VIEW under this resident-token budget (a planned view in place of appending the whole transcript, #555). 0 (default) leaves the existing path byte-for-byte unchanged. OFF by default: it rewrites in-flight turn history, so gate it until you have watched a wrapped session. The streaming fast-path bypasses this; the buffered turn path is what gets planned.")
+	compactHistoryBudget := fs.Int("compact-history-budget", 0, "compact OLD conversation turns in the OUTBOUND Anthropic request body down to this resident-token budget while keeping the cache_control prefix BYTE-IDENTICAL, so the upstream prompt-cache hit survives. This reaches the flagship `fak guard -- claude` passthrough (where the body is forwarded verbatim, #555). 0 (default) = OFF, body forwarded byte-for-byte. Anthropic passthrough only.")
+	sessionID := fs.String("session-id", "guard", "default trace/session id for wrapped agents that omit X-Trace-Id or MCP trace_id")
+	contextBudgetTokens := fs.Int("context-budget-tokens", 0, "seed the guard session with this prompt/context-token budget; exhaustion returns a reset directive with continuation_id (0 = off)")
+	resetOnBudget := fs.Bool("reset-on-budget", false, "on context-budget exhaustion, re-arm the continuation trace with a carryover seed and continue transparently instead of returning 409 (requires --context-budget-tokens)")
 	fs.Usage = func() {
 		fmt.Fprintln(os.Stderr, "usage: fak guard [flags] -- <agent command...>")
 		fmt.Fprintln(os.Stderr, "  e.g. fak guard -- claude")
@@ -152,6 +157,25 @@ func cmdGuard(argv []string) {
 		fmt.Fprintf(os.Stderr, "fak guard: --require-key-env %s is set but empty — refusing to start a gateway with NO authentication (set it or drop the flag)\n", *requireKeyEnv)
 		os.Exit(2)
 	}
+	if *contextBudgetTokens < 0 {
+		fmt.Fprintln(os.Stderr, "fak guard: --context-budget-tokens must be non-negative")
+		os.Exit(2)
+	}
+	if *resetOnBudget && *contextBudgetTokens <= 0 {
+		fmt.Fprintln(os.Stderr, "fak guard: --reset-on-budget requires --context-budget-tokens N")
+		os.Exit(2)
+	}
+	guardTraceID := strings.TrimSpace(*sessionID)
+	if guardTraceID == "" {
+		guardTraceID = "guard"
+	}
+	if *contextBudgetTokens > 0 {
+		serveSessions.SetBudget(guardTraceID, session.Budget{
+			TurnsLeft:         session.Unbounded,
+			TokensLeft:        session.Unbounded,
+			ContextTokensLeft: *contextBudgetTokens,
+		})
+	}
 
 	// 3. Bind the listener up front so the real port is known BEFORE we wire the child,
 	//    and so there is no bind race between serving and exec. Serve(ctx, ln) accepts
@@ -189,11 +213,16 @@ func cmdGuard(argv []string) {
 		ObserveSession:        observeSession,
 		ControlSession:        controlSession,
 		ListSessions:          listSessions,
+		DecideSession:         decideSession,
+		DebitSession:          debitSession,
+		ResetOnBudget:         resetOnBudgetHook(*resetOnBudget, *contextBudgetTokens),
+		DefaultTraceID:        guardTraceID,
 		StartTime:             t0,
 		// Default OFF (clean terminal); --log routes the full structured stream to a file
 		// or stderr. /metrics + /debug/vars + the audit journal carry the record regardless.
-		Logf:          gwLogf,
-		CtxViewBudget: *ctxViewBudget,
+		Logf:                 gwLogf,
+		CtxViewBudget:        *ctxViewBudget,
+		CompactHistoryBudget: *compactHistoryBudget,
 	})
 	must(err)
 
@@ -239,6 +268,12 @@ func cmdGuard(argv []string) {
 			fmt.Fprintf(os.Stderr, "fak guard: upstream auth — Claude Pro/Max subscription (OAuth token from %s, sent as a bearer token)\n", oauthSource)
 		case up == "anthropic":
 			fmt.Fprintln(os.Stderr, "fak guard: upstream auth — passthrough (Claude Code forwards its own credential through the gateway)")
+		}
+		if *contextBudgetTokens > 0 {
+			fmt.Fprintf(os.Stderr, "fak guard: session budget — trace_id=%s context_tokens=%d\n", guardTraceID, *contextBudgetTokens)
+			if *resetOnBudget {
+				fmt.Fprintln(os.Stderr, "fak guard: session reset — transparent carryover enabled")
+			}
 		}
 	}
 

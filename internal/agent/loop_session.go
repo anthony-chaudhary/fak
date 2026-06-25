@@ -80,11 +80,14 @@ func (c runConfig) gateTurn(ctx contextLike) (maxTokens int, proceed bool, reaso
 	return v.MaxTokens, true, ""
 }
 
-// debitTurn reports a completed turn's output-token usage to the session table so the
-// token-budget axis decrements. A nil table is a no-op.
-func (c runConfig) debitTurn(tokensUsed int) {
+// debitTurn reports a completed turn's usage to the session table so the output and
+// context budget axes decrement. A nil table is a no-op.
+func (c runConfig) debitTurn(usage Usage) {
 	if c.table != nil {
-		c.table.Debit(c.trace, tokensUsed)
+		c.table.DebitUsage(c.trace, session.Usage{
+			OutputTokens:  usage.CompletionTokens,
+			ContextTokens: usage.ContextWindowTokens(),
+		})
 	}
 }
 

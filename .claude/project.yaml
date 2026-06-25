@@ -1,6 +1,7 @@
 # .claude/project.yaml — read by the maintenance skills (release, plan-audit,
-# issue-triage). It maps the universal skill contracts onto this repo's helper
-# scripts so the skill text stays project-agnostic and the wiring lives here.
+# issue-triage, bottleneck-map). It maps the universal skill contracts onto this
+# repo's helper scripts so the skill text stays project-agnostic and the wiring
+# lives here.
 #
 # fak is a Go module rooted at the repo root. It is NOT a Python package, so its
 # version source-of-truth is a bare `VERSION` file at the repo root (the vX.Y.Z
@@ -40,6 +41,10 @@ helpers:
   # /issue-triage — read-only fetch/classify/rank + proposed-actions for the
   # open GitHub issue backlog. Applying actions is the skill's gated step.
   issue_triage: tools/issue_triage.py
+  # /bottleneck-map — read-mostly system + backlog limiter map. It consumes the
+  # fleet registry/dashboard lens plus issue_triage to decide which durable loop
+  # should run next; it must not mutate GitHub state.
+  fleet_bottleneck: tools/fleet_bottleneck.py
   # /quality-score — the code-quality scorecard: ten deterministic, evidence-
   # grounded KPIs folded into a composite score + a code-debt integer. Read-only
   # (shells go build/vet/gofmt + dos review); the RSI pass drives code-debt down.
@@ -62,6 +67,6 @@ version_files:
 # no-ops cleanly; add PLAN-*.md / BUILD-*.md and it picks them up.
 plan_docs_glob: "{PLAN,BUILD}-*.md"
 
-# Where /plan-audit + /issue-triage write their dated operator snapshots
+# Where /plan-audit + /issue-triage + /bottleneck-map write dated operator snapshots
 # (created if missing; gitignored runtime — see .gitignore docs/_audits/).
 audits_dir: docs/_audits

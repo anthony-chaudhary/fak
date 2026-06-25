@@ -156,7 +156,7 @@ const WHAT = {
 };
 
 async function loadScenarios(){
-  const r = await fetch('/api/scenarios'); const j = await r.json();
+  const r = await fetch('api/scenarios'); const j = await r.json();
   const sel = $('#scenario'); sel.innerHTML='';
   j.scenarios.forEach(s=>{
     const o=document.createElement('option');
@@ -273,7 +273,7 @@ async function run(){
   const scenario=$('#scenario').value;
   $('#cfg').textContent='replaying through the kernel…';
   try{
-    const r=await fetch(`/api/run?scenario=${encodeURIComponent(scenario)}`);
+    const r=await fetch(`api/run?scenario=${encodeURIComponent(scenario)}`);
     if(!r.ok){ $('#cfg').textContent='error: '+await r.text(); return; }
     const j=await r.json(); lastRun=j;
     await animate(j.calls, j.breaches);

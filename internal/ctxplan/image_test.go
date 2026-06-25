@@ -1,6 +1,7 @@
 package ctxplan
 
 import (
+	"context"
 	"encoding/json"
 	"reflect"
 	"strings"
@@ -89,6 +90,38 @@ func TestRestoreEqualsRebuildAcrossProbes(t *testing.T) {
 	}
 }
 
+// TestRestoreEqualsRebuildUnderPruning is the LOAD-BEARING variant of the re-attach==rebuild
+// witness: over a 500-span store under a tight recency window where the bounded probe ACTUALLY
+// prunes (the probe is a strict subset of N), a restored index probes and plans byte-identically
+// to a fresh BuildIndex. This exercises the image's posting-list rederivation exactly where it
+// matters — when the index-bounded access path is selecting a small candidate set out of many,
+// not only on the tiny inputs where every span trivially fits the candidate bound and a broken
+// rederivation could hide.
+func TestRestoreEqualsRebuildUnderPruning(t *testing.T) {
+	ctx := context.Background()
+	spans, _ := goodPlusNoiseStore(500).Spans(ctx)
+	rebuilt := BuildIndex(spans)
+	restored, err := RestoreIndex(rebuilt.Image())
+	if err != nil {
+		t.Fatalf("RestoreIndex: %v", err)
+	}
+
+	f := Forecast{Intents: []string{"auth token rotation"}, Pins: []string{"span:0", "span:1"}}
+	opts := ProbeOptions{RecencyWindow: 8} // tight window so the probe is a strict subset of N
+	probe := restored.Probe(f, opts)
+	if len(probe) >= len(spans) {
+		t.Fatalf("probe (%d) did not prune below N (%d) — the test would be vacuous", len(probe), len(spans))
+	}
+	if !reflect.DeepEqual(probe, rebuilt.Probe(f, opts)) {
+		t.Fatal("restored probe != rebuild probe under pruning — the image rederivation diverged")
+	}
+	pa := restored.PlanCells(f, Budget{Tokens: 48}, nil, opts)
+	pb := rebuilt.PlanCells(f, Budget{Tokens: 48}, nil, opts)
+	if !reflect.DeepEqual(selectedIDs(pa), selectedIDs(pb)) {
+		t.Fatalf("restored plan != rebuild plan under pruning: %v vs %v", selectedIDs(pa), selectedIDs(pb))
+	}
+}
+
 // TestRestoreIndexRejectsBadVersion is the fail-closed guard: an image whose version the
 // loader does not recognize is REFUSED, not silently rebuilt — so a forward-incompatible
 // Span-shape change surfaces as a load error instead of a wrong index.
@@ -109,16 +142,26 @@ func TestRestoreIndexRejectsBadVersion(t *testing.T) {
 }
 
 // TestIndexImageIsSafeMetadataOnly is the trust witness: a SEALED span persists with its
-// Sealed flag intact and its sealed-safe descriptor — the image carries SAFE metadata, and
-// the trust invariant (a sealed span is never selected) survives a save/load exactly as it
-// survives a turn. The persisted bytes never contain a span's resolved content (a Span holds
-// a content-address Digest, not content), so persisting the index leaks nothing the
-// in-memory index did not already hold.
+// Sealed flag intact and its sealed-safe descriptor — the image carries SAFE metadata, and the
+// trust invariant (a sealed span is never selected) survives a save/load. Critically it forces
+// the sealed span in through the INVERTED INDEX (relevance) path, NOT recency: the sealed span
+// is buried under fresh benign noise (outside a tight recency window) and is durability=turn, so
+// the only access path that reaches it is the relevance match on its descriptor tokens — the
+// same way a sealed recall page surfaces. Proving suppression on the index path (not just on an
+// explicit pin) is what makes "the trust gate survives persistence" load-bearing, since the
+// inverted index is where a restored posting-list bug would actually surface a sealed span.
 func TestIndexImageIsSafeMetadataOnly(t *testing.T) {
 	ix := NewIndex()
 	ix.Add(Span{ID: "s0", Step: 0, Role: "user", Descriptor: "rotate the auth token", Digest: "d0", Bytes: 20, Durability: DurabilitySession})
-	ix.Add(Span{ID: "s1", Step: 1, Role: "WebFetch", Descriptor: "WebFetch: [sealed: 64 bytes]", Digest: "d1", Bytes: 64, Durability: DurabilityTurn})
+	// The sealed span: its sealed-safe descriptor still carries its TOOL-NAME tokens (exactly as
+	// recall seals a page — role preserved, content gone), so an intent matching "refund policy"
+	// reaches it via the inverted index.
+	ix.Add(Span{ID: "s1", Step: 1, Role: "read_refund_policy", Descriptor: "read_refund_policy: [sealed: 64 bytes]", Digest: "d1", Bytes: 64, Durability: DurabilityTurn})
 	ix.SetSealed("s1")
+	// Fresh benign noise AFTER the sealed span, pushing it OUT of any tight recency tail.
+	for i := 2; i < 12; i++ {
+		ix.Add(Span{ID: "s" + itoaTest(i), Step: i, Role: "Bash", Descriptor: "build log line compiled files", Digest: "dg" + itoaTest(i), Bytes: 10, Durability: DurabilityTurn})
+	}
 
 	b, err := MarshalIndexImage(ix)
 	if err != nil {
@@ -133,14 +176,24 @@ func TestIndexImageIsSafeMetadataOnly(t *testing.T) {
 	if err != nil {
 		t.Fatalf("UnmarshalIndexImage: %v", err)
 	}
-	// The sealed span is still PROBED (so the plan can record it elided-sealed) but never
-	// SELECTED — the poison-never-resident invariant survives persistence.
-	f := Forecast{Intents: []string{"auth token"}}
-	if !probeIDset(restored.Probe(f, ProbeOptions{}))["s1"] {
-		t.Fatal("the sealed span must still be probed after restore")
+	// A tight recency window so the sealed span (buried at step 1, durability=turn) is reachable
+	// ONLY via the inverted index — not recency, not durability.
+	f := Forecast{Intents: []string{"refund policy"}}
+	opts := ProbeOptions{RecencyWindow: 2}
+	if !probeIDset(restored.Probe(f, opts))["s1"] {
+		t.Fatal("the sealed span must be reached via the inverted index (relevance) after restore, proving suppression on the index path")
 	}
-	p := restored.PlanCells(f, Budget{Tokens: 999}, nil, ProbeOptions{})
+	p := restored.PlanCells(f, Budget{Tokens: 999}, nil, opts)
 	if selectedIDs(p)["s1"] {
-		t.Fatal("INVARIANT VIOLATED: a sealed span entered a restored index's resident view")
+		t.Fatal("INVARIANT VIOLATED: a sealed span reached via the inverted index entered a restored index's resident view")
+	}
+	sealedElided := false
+	for _, e := range p.Elided {
+		if e.ID == "s1" && e.Reason == ElideSealed {
+			sealedElided = true
+		}
+	}
+	if !sealedElided {
+		t.Errorf("the sealed span must be elided sealed; elided=%+v", p.Elided)
 	}
 }

@@ -1,0 +1,27 @@
+{
+  "command_argc": 2,
+  "command_digest": "e5cc8c0ee53455dd9133a7ef572fa694684b2d31d83267ed7d40c8bfb57df1a3",
+  "command_executable": "python",
+  "command_exit_code": 0,
+  "command_label": "dos-recent-audit-test",
+  "command_output_dropped": [
+    "stdout",
+    "stderr"
+  ],
+  "command_redacted": true,
+  "created_at": "2026-06-25T10:08:42.115264Z",
+  "dry_run": false,
+  "executed": true,
+  "expect_deny": false,
+  "policy": "examples/dev-agent-policy.json",
+  "preflight": {
+    "by": "monitor",
+    "exit_code": 0,
+    "reason": "NONE",
+    "stderr": "fak: loaded capability floor from examples/dev-agent-policy.json",
+    "stdout": "verdict=ALLOW reason=NONE by=monitor",
+    "verdict": "ALLOW"
+  },
+  "status": "PASS",
+  "tool": "run_tests"
+}

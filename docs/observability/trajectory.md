@@ -1,3 +1,8 @@
+---
+title: "fak trajectory observability primitives"
+description: "How fak records agent turns, compares them by meaning, and lets custom scorers analyze trajectories without changing the kernel ABI."
+---
+
 # Trajectory observability — the data plane, the similarity primitive, and the seam
 
 fak does not ship a trajectory-analysis product. It ships the three **primitives**

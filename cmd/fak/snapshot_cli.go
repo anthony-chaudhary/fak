@@ -377,7 +377,7 @@ func restoreFleetWire(c *fleetClient, file string, w io.Writer) (restored, skipp
 			verb string
 			req  gateway.SessionControlRequest
 		}{
-			{"budget", gateway.SessionControlRequest{Budget: &gateway.SessionBudget{TurnsLeft: st.Budget.TurnsLeft, TokensLeft: st.Budget.TokensLeft}}},
+			{"budget", gateway.SessionControlRequest{Budget: &gateway.SessionBudget{TurnsLeft: st.Budget.TurnsLeft, TokensLeft: st.Budget.TokensLeft, ContextTokensLeft: st.Budget.ContextTokensLeft}}},
 			{"pace", gateway.SessionControlRequest{Pace: &gateway.SessionPace{MaxTokensPerTurn: st.Pace.MaxTokensPerTurn, MinTurnGapMs: st.Pace.MinTurnGapMs}}},
 			{"priority", gateway.SessionControlRequest{Priority: snapIntPtr(st.Priority)}},
 			{"run", gateway.SessionControlRequest{Run: st.Run.String(), Reason: st.Reason}},
@@ -410,13 +410,20 @@ func wireToState(w gateway.SessionState) session.State {
 		run = session.Running
 	}
 	return session.State{
-		TraceID:  w.TraceID,
-		Run:      run,
-		Budget:   session.Budget{TurnsLeft: w.Budget.TurnsLeft, TokensLeft: w.Budget.TokensLeft},
-		Priority: w.Priority,
-		Pace:     session.Pace{MaxTokensPerTurn: w.Pace.MaxTokensPerTurn, MinTurnGapMs: w.Pace.MinTurnGapMs},
-		Reason:   w.Reason,
-		Rev:      w.Rev,
+		TraceID: w.TraceID,
+		Run:     run,
+		Budget: session.Budget{
+			TurnsLeft:         w.Budget.TurnsLeft,
+			TokensLeft:        w.Budget.TokensLeft,
+			ContextTokensLeft: w.Budget.ContextTokensLeft,
+		},
+		Priority:       w.Priority,
+		Pace:           session.Pace{MaxTokensPerTurn: w.Pace.MaxTokensPerTurn, MinTurnGapMs: w.Pace.MinTurnGapMs},
+		Reason:         w.Reason,
+		ContinuationID: w.ContinuationID,
+		ParentTrace:    w.ParentTrace,
+		Generation:     w.Generation,
+		Rev:            w.Rev,
 	}
 }
 

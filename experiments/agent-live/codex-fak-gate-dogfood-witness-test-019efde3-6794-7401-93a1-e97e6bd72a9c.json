@@ -1,0 +1,27 @@
+{
+  "command_argc": 2,
+  "command_digest": "ca414f485652d45cac85528663bb2b0fb43c60f42fae40c90e3740636ccdb5f0",
+  "command_executable": "python",
+  "command_exit_code": 0,
+  "command_label": "dogfood-witness-test",
+  "command_output_dropped": [
+    "stdout",
+    "stderr"
+  ],
+  "command_redacted": true,
+  "created_at": "2026-06-25T10:08:41.731486Z",
+  "dry_run": false,
+  "executed": true,
+  "expect_deny": false,
+  "policy": "examples/dev-agent-policy.json",
+  "preflight": {
+    "by": "monitor",
+    "exit_code": 0,
+    "reason": "NONE",
+    "stderr": "fak: loaded capability floor from examples/dev-agent-policy.json",
+    "stdout": "verdict=ALLOW reason=NONE by=monitor",
+    "verdict": "ALLOW"
+  },
+  "status": "PASS",
+  "tool": "run_tests"
+}

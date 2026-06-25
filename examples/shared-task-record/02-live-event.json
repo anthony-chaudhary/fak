@@ -1,0 +1,20 @@
+{
+  "schema": "fak.shared-event.v1",
+  "event_id": "evt_live_update_001",
+  "task_id": "task_shared_demo",
+  "prev_event": "sha256:event000",
+  "event_kind": "state_changed",
+  "actor": {
+    "kind": "agent",
+    "id": "runner"
+  },
+  "base_rev": "sha256:taskrev001",
+  "next_rev": "sha256:taskrev002",
+  "scope": "fleet",
+  "durability": "session",
+  "taint": "tainted",
+  "patch_digest": "sha256:patchlive001",
+  "verdict": "accepted",
+  "reason": "",
+  "ts": "2026-06-25T00:01:00Z"
+}

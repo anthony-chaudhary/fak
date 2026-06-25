@@ -15,6 +15,11 @@ type Candidate struct {
 	Cell    Span    `json:"cell"`
 	Cost    int     `json:"cost"`    // resident token cost (see CostModel)
 	Benefit float64 `json:"benefit"` // Forecast.Benefit score (the ISOLATED, per-span score)
+	Area    string  `json:"area,omitempty"`
+	// Precision is the layout policy that produced this candidate. The optimizer only
+	// needs the candidate's cost/benefit; layout-aware callers use this metadata to explain
+	// why a span was forced resident, planned normally, or kept as a pointer.
+	Precision string `json:"precision,omitempty"`
 
 	// Coverage geometry — precomputed by Candidates so the coverage objective can score
 	// MARGINAL benefit (a candidate's relevance discounted by the intents the resident set
@@ -113,6 +118,8 @@ type Selection struct {
 	Step       int     `json:"step"`
 	Role       string  `json:"role,omitempty"`
 	Descriptor string  `json:"descriptor,omitempty"`
+	Area       string  `json:"area,omitempty"`
+	Precision  string  `json:"precision,omitempty"`
 	Cost       int     `json:"cost"`
 	Benefit    float64 `json:"benefit"`
 	Density    float64 `json:"density"`
@@ -125,13 +132,15 @@ type Selection struct {
 // presence of a recovery handle is exactly what faithful.go checks to distinguish a
 // planned view from lossy compaction.
 type Elision struct {
-	ID      string  `json:"id"`
-	Step    int     `json:"step"`
-	Role    string  `json:"role,omitempty"`
-	Digest  string  `json:"digest,omitempty"` // content address — the page-back-in handle
-	Cost    int     `json:"cost"`
-	Benefit float64 `json:"benefit"`
-	Reason  string  `json:"reason"` // over_budget | sealed | tombstoned
+	ID        string  `json:"id"`
+	Step      int     `json:"step"`
+	Role      string  `json:"role,omitempty"`
+	Area      string  `json:"area,omitempty"`
+	Precision string  `json:"precision,omitempty"`
+	Digest    string  `json:"digest,omitempty"` // content address — the page-back-in handle
+	Cost      int     `json:"cost"`
+	Benefit   float64 `json:"benefit"`
+	Reason    string  `json:"reason"` // over_budget | sealed | tombstoned | pointer
 }
 
 // Elision reasons.
@@ -140,6 +149,7 @@ const (
 	ElideSealed     = "sealed"      // quarantined by the trust gate — never a candidate
 	ElideTombstoned = "tombstoned"  // suppressed by context control — never a candidate
 	ElideDuplicate  = "duplicate"   // byte-identical to an already-resident span (equal Digest) — kept cold, recoverable
+	ElidePointer    = "pointer"     // intentionally kept as a recoverable pointer by the area layout
 )
 
 // Objectives.
@@ -586,13 +596,14 @@ func coverageTieBreak(a, b Candidate, margA, margB float64) bool {
 func selectionOf(c Candidate, pinned bool) Selection {
 	return Selection{
 		ID: c.Cell.ID, Step: c.Cell.Step, Role: c.Cell.Role, Descriptor: c.Cell.Descriptor,
+		Area: c.Area, Precision: c.Precision,
 		Cost: c.Cost, Benefit: c.Benefit, Density: c.density(), Pinned: pinned,
 	}
 }
 
 func elisionOf(c Candidate, reason string) Elision {
 	return Elision{
-		ID: c.Cell.ID, Step: c.Cell.Step, Role: c.Cell.Role, Digest: c.Cell.Digest,
+		ID: c.Cell.ID, Step: c.Cell.Step, Role: c.Cell.Role, Area: c.Area, Precision: c.Precision, Digest: c.Cell.Digest,
 		Cost: c.Cost, Benefit: c.Benefit, Reason: reason,
 	}
 }

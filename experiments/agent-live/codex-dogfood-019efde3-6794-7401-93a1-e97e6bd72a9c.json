@@ -1,0 +1,899 @@
+{
+  "checks": {
+    "capability_floor_allows_status": {
+      "by": "monitor",
+      "exit_code": 0,
+      "reason": "NONE",
+      "stderr": "fak: loaded capability floor from examples/dev-agent-policy.json",
+      "stdout": "verdict=ALLOW reason=NONE by=monitor",
+      "verdict": "ALLOW"
+    },
+    "capability_floor_denies_publish": {
+      "by": "monitor",
+      "exit_code": 0,
+      "reason": "POLICY_BLOCK",
+      "stderr": "fak: loaded capability floor from examples/dev-agent-policy.json",
+      "stdout": "verdict=DENY reason=POLICY_BLOCK by=monitor",
+      "verdict": "DENY"
+    },
+    "codex_actionability": {
+      "delegate_count": 0,
+      "delegate_source": "post_repair",
+      "max_delegates": 0,
+      "post_repair_mutating_shell_family_counts": {},
+      "post_repair_shell_family_counts": {
+        "git_read": 22,
+        "inline_script": 2,
+        "other_shell": 77,
+        "powershell_inspect": 4,
+        "powershell_read": 49,
+        "python_script": 21,
+        "python_test": 78,
+        "search_rg": 16,
+        "shell_redirect": 5
+      },
+      "post_repair_shell_shape_counts": {
+        "non_shell_tool": 74,
+        "shell_in_tree_or_safe_write_target": 1,
+        "shell_no_write_target_detected": 273
+      },
+      "post_repair_unknown_tree_admission_warnings": 1993,
+      "privacy": {
+        "copied_fields": [
+          "status",
+          "counts",
+          "reason classes",
+          "residual classes",
+          "shell shape categories",
+          "shell family categories",
+          "mutating shell family categories"
+        ],
+        "dropped": [
+          "commands",
+          "tool arguments",
+          "tool results",
+          "prompts",
+          "model text",
+          "diffs"
+        ]
+      },
+      "reasons": [],
+      "residual": [
+        "HOST_SHELL_OPACITY",
+        "UNKNOWN_TREE_WARNINGS"
+      ],
+      "status": "PASS",
+      "stop_total": 0,
+      "unknowns": []
+    },
+    "codex_exec_mcp_usage": {
+      "reason": "no --codex-exec-jsonl",
+      "status": "SKIPPED"
+    },
+    "codex_hook_fast_path": {
+      "backups": [
+        "plugins/cache/dos/dos-kernel/0.28.0/hooks/hooks.json.before-native-dos-hook.bak"
+      ],
+      "codex_command_modes": {
+        "native_launcher": 4
+      },
+      "codex_native_launcher_hooks": 4,
+      "codex_python_cli_hooks": 0,
+      "command_modes": {
+        "native_launcher": 8
+      },
+      "malformed_manifests": 0,
+      "manifest_count": 1,
+      "manifests": [
+        "plugins/cache/dos/dos-kernel/0.28.0/hooks/hooks.json"
+      ],
+      "post_repair_command_shapes": {
+        "malformed_rows": 0,
+        "mutating_shell_sessions": [],
+        "privacy": {
+          "copied_fields": [
+            "thread id",
+            "session filename",
+            "tool names",
+            "counts",
+            "shell family categories",
+            "shell shape categories",
+            "write operation kinds"
+          ],
+          "dropped": [
+            "commands",
+            "tool arguments",
+            "tool results",
+            "prompts",
+            "model text"
+          ]
+        },
+        "scope": "codex_threads",
+        "sessions_inspected": 1,
+        "shell_argument_errors": 0,
+        "shell_command_calls": 274,
+        "shell_family_counts": {
+          "git_read": 22,
+          "inline_script": 2,
+          "other_shell": 77,
+          "powershell_inspect": 4,
+          "powershell_read": 49,
+          "python_script": 21,
+          "python_test": 78,
+          "search_rg": 16,
+          "shell_redirect": 5
+        },
+        "shell_shape_counts": {
+          "non_shell_tool": 74,
+          "shell_in_tree_or_safe_write_target": 1,
+          "shell_no_write_target_detected": 273
+        },
+        "since": "2026-06-25T09:22:57.680099Z",
+        "status": "PASS",
+        "threads_supplied": 1,
+        "tool_call_rows": 348,
+        "tool_counts": {
+          "apply_patch": 37,
+          "dos_arbitrate": 18,
+          "shell_command": 274,
+          "update_plan": 19
+        },
+        "write_op_counts": {
+          "redirect": 1
+        }
+      },
+      "post_repair_observations": {
+        "delegate_count": 0,
+        "latency_by_verb": {
+          "pretool": {
+            "max_ms": 2720.49,
+            "n": 3846,
+            "p50_ms": 257.375,
+            "p95_ms": 527.095
+          }
+        },
+        "observations": 3846,
+        "outcome_counts": {
+          "passthrough": 1736,
+          "warn": 2110
+        },
+        "pretool_calls": 3846,
+        "rung_counts": {
+          "admission": 2557,
+          "provenance": 1289
+        },
+        "since": "2026-06-25T09:22:57.680099Z",
+        "status": "WARN",
+        "unknown_tree_admission_warnings": 1993,
+        "unknown_tree_warning_rate": 0.518201,
+        "verb_counts": {
+          "pretool": 3846
+        }
+      },
+      "privacy": {
+        "copied_fields": [
+          "manifest-relative paths",
+          "hook mode counts",
+          "replacement counts",
+          "post-repair counts",
+          "shell shape categories"
+        ],
+        "dropped": [
+          "hook command bodies",
+          "commands",
+          "Codex prompts",
+          "tool arguments",
+          "tool results"
+        ]
+      },
+      "reason": "Codex hook commands use the native launcher",
+      "repair_projection": {
+        "codex_replacements_available": 0,
+        "codex_unrepairable_python_cli_hooks": 0,
+        "projected_codex_command_modes": {
+          "native_launcher": 4
+        },
+        "status": "PASS",
+        "would_clear_codex_python_cli": true
+      },
+      "repaired_at": "2026-06-25T09:22:57.680099Z",
+      "status": "PASS"
+    },
+    "dos_helped_session": {
+      "advisory": 456,
+      "blocked": 0,
+      "by_advisory_tool": {
+        "Bash": 360,
+        "apply_patch": 70,
+        "mcp__dos__dos_arbitrate": 21,
+        "update_plan": 5
+      },
+      "by_reason": {
+        "admission": 456
+      },
+      "by_reason_rung": {
+        "admission": {
+          "WARN": 456
+        }
+      },
+      "by_refused_reason": {},
+      "by_rung": {
+        "WARN": 456
+      },
+      "by_tool": {
+        "Bash": 360,
+        "apply_patch": 70,
+        "mcp__dos__dos_arbitrate": 21,
+        "update_plan": 5
+      },
+      "deferred": 0,
+      "exit_code": 0,
+      "latest": "2026-06-25T10:13:20Z",
+      "privacy": {
+        "copied_fields": [
+          "counts",
+          "tool names",
+          "reason classes",
+          "timestamps"
+        ],
+        "dropped": [
+          "examples",
+          "targets",
+          "tool arguments",
+          "tool results",
+          "prompts",
+          "model text"
+        ]
+      },
+      "since": "2026-06-25T08:28:50Z",
+      "source": "dos helped --session <thread> --advisory --json",
+      "status": "FOUND",
+      "stderr": "",
+      "total": 456,
+      "warned": 456,
+      "withheld": 0
+    },
+    "dos_session_audit": {
+      "observations": {
+        "delegate_count": 85,
+        "dialect_counts": {
+          "claude-code": 5153,
+          "codex": 7892,
+          "unknown": 12429
+        },
+        "latency_by_verb": {
+          "marker": {
+            "max_ms": 0.722,
+            "n": 24,
+            "p50_ms": 0.0,
+            "p95_ms": 0.531
+          },
+          "posttool": {
+            "max_ms": 2611.738,
+            "n": 11859,
+            "p50_ms": 104.778,
+            "p95_ms": 306.496
+          },
+          "pretool": {
+            "max_ms": 2720.49,
+            "n": 13045,
+            "p50_ms": 167.095,
+            "p95_ms": 443.285
+          },
+          "session-start": {
+            "max_ms": 379.834,
+            "n": 192,
+            "p50_ms": 105.361,
+            "p95_ms": 267.319
+          },
+          "stop": {
+            "max_ms": 675.594,
+            "n": 343,
+            "p50_ms": 89.575,
+            "p95_ms": 267.762
+          },
+          "stop-failure": {
+            "max_ms": 0.0,
+            "n": 11,
+            "p50_ms": 0.0,
+            "p95_ms": 0.0
+          }
+        },
+        "malformed_rows": 48,
+        "observations": 25474,
+        "outcome_counts": {
+          "delegate": 85,
+          "digest": 100,
+          "let-active": 11,
+          "no-claims": 332,
+          "no-digest": 18,
+          "passthrough": 19522,
+          "unarmed": 24,
+          "warn": 5382
+        },
+        "path": ".dos/metrics/observations.jsonl",
+        "pretool_calls": 13045,
+        "reason_counts": {
+          "none": 25474
+        },
+        "rung_counts": {
+          "admission": 7847,
+          "none": 12648,
+          "provenance": 4979
+        },
+        "scope": "timestamp-window; concurrent sessions in the same window may contribute observations",
+        "status": "WARN",
+        "stop_blocks": 0,
+        "unknown_tree_admission_warnings": 4837,
+        "unknown_tree_warning_rate": 0.370793,
+        "unknown_tree_warning_threshold": 0.02,
+        "verb_counts": {
+          "marker": 24,
+          "posttool": 11859,
+          "pretool": 13045,
+          "session-start": 192,
+          "stop": 343,
+          "stop-failure": 11
+        },
+        "warning_count": 5382,
+        "window_end": "2026-06-25T10:15:54Z",
+        "window_start": "2026-06-25T08:27:16Z"
+      },
+      "privacy": {
+        "copied_fields": [
+          "timestamps",
+          "tool names",
+          "counts",
+          "latencies",
+          "hash digests"
+        ],
+        "dropped": [
+          "tool arguments",
+          "tool results",
+          "prompts",
+          "model text",
+          "diffs"
+        ]
+      },
+      "recommendations": [
+        "prefer path-visible tool calls or narrower shell commands; this stream is Bash-dominated",
+        "reduce opaque shell/editor calls or file upstream footprint-derivation debt",
+        "inspect native-hook delegate fallbacks; the fast path should own routine calls"
+      ],
+      "status": "WARN",
+      "stop_failures": {
+        "consecutive": 0,
+        "path": ".dos/stop-failures/019efde3-6794-7401-93a1-e97e6bd72a9c.json",
+        "status": "FOUND",
+        "total": 0
+      },
+      "stream": {
+        "first_ts": "2026-06-25T08:27:16Z",
+        "last_ts": "2026-06-25T10:15:54Z",
+        "malformed_rows": 0,
+        "status": "FOUND",
+        "steps": 561,
+        "stream_path": ".dos/streams/019efde3-6794-7401-93a1-e97e6bd72a9c.jsonl",
+        "tool_counts": {
+          "Bash": 561
+        }
+      },
+      "thread_id": "019efde3-6794-7401-93a1-e97e6bd72a9c"
+    },
+    "local_fak_gate_reports": {
+      "denied": 3,
+      "expected_denied": 3,
+      "failed": 0,
+      "passed": 7,
+      "privacy": {
+        "copied_fields": [
+          "report path",
+          "tool",
+          "command label/digest",
+          "exit code",
+          "preflight verdict",
+          "expected-deny flag"
+        ],
+        "dropped": [
+          "raw command argv when redacted",
+          "command stdout",
+          "command stderr",
+          "prompts",
+          "tool outputs",
+          "diffs",
+          "model text"
+        ]
+      },
+      "reports": [
+        {
+          "command_argc": 2,
+          "command_digest": "ca414f485652d45cac85528663bb2b0fb43c60f42fae40c90e3740636ccdb5f0",
+          "command_executable": "python",
+          "command_exit_code": 0,
+          "command_label": "dogfood-witness-test",
+          "command_redacted": true,
+          "dry_run": false,
+          "executed": true,
+          "expect_deny": false,
+          "expect_reason": null,
+          "path": "experiments/agent-live/codex-fak-gate-dogfood-witness-test-019efde3-6794-7401-93a1-e97e6bd72a9c.json",
+          "policy": "examples/dev-agent-policy.json",
+          "preflight": {
+            "by": "monitor",
+            "exit_code": 0,
+            "reason": "NONE",
+            "verdict": "ALLOW"
+          },
+          "privacy": {
+            "copied_fields": [
+              "tool",
+              "policy",
+              "command label/digest",
+              "exit code",
+              "preflight verdict"
+            ],
+            "dropped": [
+              "raw command argv when redacted",
+              "command stdout",
+              "command stderr",
+              "prompts",
+              "tool outputs",
+              "diffs",
+              "model text"
+            ]
+          },
+          "status": "PASS",
+          "tool": "run_tests"
+        },
+        {
+          "command_argc": 2,
+          "command_digest": "e5cc8c0ee53455dd9133a7ef572fa694684b2d31d83267ed7d40c8bfb57df1a3",
+          "command_executable": "python",
+          "command_exit_code": 0,
+          "command_label": "dos-recent-audit-test",
+          "command_redacted": true,
+          "dry_run": false,
+          "executed": true,
+          "expect_deny": false,
+          "expect_reason": null,
+          "path": "experiments/agent-live/codex-fak-gate-dos-recent-audit-test-019efde3-6794-7401-93a1-e97e6bd72a9c.json",
+          "policy": "examples/dev-agent-policy.json",
+          "preflight": {
+            "by": "monitor",
+            "exit_code": 0,
+            "reason": "NONE",
+            "verdict": "ALLOW"
+          },
+          "privacy": {
+            "copied_fields": [
+              "tool",
+              "policy",
+              "command label/digest",
+              "exit code",
+              "preflight verdict"
+            ],
+            "dropped": [
+              "raw command argv when redacted",
+              "command stdout",
+              "command stderr",
+              "prompts",
+              "tool outputs",
+              "diffs",
+              "model text"
+            ]
+          },
+          "status": "PASS",
+          "tool": "run_tests"
+        },
+        {
+          "command_argc": 2,
+          "command_digest": "98f64c303b5ef80620e5bf5d47291116328332a3e466dc74fc75e225ab32989b",
+          "command_executable": "python",
+          "command_exit_code": 0,
+          "command_label": "dos-hook-doctor-test",
+          "command_redacted": true,
+          "dry_run": false,
+          "executed": true,
+          "expect_deny": false,
+          "expect_reason": null,
+          "path": "experiments/agent-live/codex-fak-gate-dos-hook-doctor-test-019efde3-6794-7401-93a1-e97e6bd72a9c.json",
+          "policy": "examples/dev-agent-policy.json",
+          "preflight": {
+            "by": "monitor",
+            "exit_code": 0,
+            "reason": "NONE",
+            "verdict": "ALLOW"
+          },
+          "privacy": {
+            "copied_fields": [
+              "tool",
+              "policy",
+              "command label/digest",
+              "exit code",
+              "preflight verdict"
+            ],
+            "dropped": [
+              "raw command argv when redacted",
+              "command stdout",
+              "command stderr",
+              "prompts",
+              "tool outputs",
+              "diffs",
+              "model text"
+            ]
+          },
+          "status": "PASS",
+          "tool": "run_tests"
+        },
+        {
+          "command_argc": 2,
+          "command_digest": "11b514f786ec7e33e0fec11d11acfad993480ce85ae2a0c01e91f80d378b094f",
+          "command_executable": "python",
+          "command_exit_code": 0,
+          "command_label": "fak-gate-test",
+          "command_redacted": true,
+          "dry_run": false,
+          "executed": true,
+          "expect_deny": false,
+          "expect_reason": null,
+          "path": "experiments/agent-live/codex-fak-gate-fak-gate-test-019efde3-6794-7401-93a1-e97e6bd72a9c.json",
+          "policy": "examples/dev-agent-policy.json",
+          "preflight": {
+            "by": "monitor",
+            "exit_code": 0,
+            "reason": "NONE",
+            "verdict": "ALLOW"
+          },
+          "privacy": {
+            "copied_fields": [
+              "tool",
+              "policy",
+              "command label/digest",
+              "exit code",
+              "preflight verdict"
+            ],
+            "dropped": [
+              "raw command argv when redacted",
+              "command stdout",
+              "command stderr",
+              "prompts",
+              "tool outputs",
+              "diffs",
+              "model text"
+            ]
+          },
+          "status": "PASS",
+          "tool": "run_tests"
+        },
+        {
+          "command_argc": 0,
+          "command_digest": null,
+          "command_executable": null,
+          "command_exit_code": null,
+          "command_label": "git-add-deny",
+          "command_redacted": true,
+          "dry_run": true,
+          "executed": false,
+          "expect_deny": true,
+          "expect_reason": "DEFAULT_DENY",
+          "path": "experiments/agent-live/codex-fak-gate-git-add-deny-019efde3-6794-7401-93a1-e97e6bd72a9c.json",
+          "policy": "examples/dev-agent-policy.json",
+          "preflight": {
+            "by": "monitor",
+            "exit_code": 0,
+            "reason": "DEFAULT_DENY",
+            "verdict": "DENY"
+          },
+          "privacy": {
+            "copied_fields": [
+              "tool",
+              "policy",
+              "command label/digest",
+              "exit code",
+              "preflight verdict"
+            ],
+            "dropped": [
+              "raw command argv when redacted",
+              "command stdout",
+              "command stderr",
+              "prompts",
+              "tool outputs",
+              "diffs",
+              "model text"
+            ]
+          },
+          "status": "DENIED_EXPECTED",
+          "tool": "git_add"
+        },
+        {
+          "command_argc": 0,
+          "command_digest": null,
+          "command_executable": null,
+          "command_exit_code": null,
+          "command_label": "git-commit-deny",
+          "command_redacted": true,
+          "dry_run": true,
+          "executed": false,
+          "expect_deny": true,
+          "expect_reason": "DEFAULT_DENY",
+          "path": "experiments/agent-live/codex-fak-gate-git-commit-deny-019efde3-6794-7401-93a1-e97e6bd72a9c.json",
+          "policy": "examples/dev-agent-policy.json",
+          "preflight": {
+            "by": "monitor",
+            "exit_code": 0,
+            "reason": "DEFAULT_DENY",
+            "verdict": "DENY"
+          },
+          "privacy": {
+            "copied_fields": [
+              "tool",
+              "policy",
+              "command label/digest",
+              "exit code",
+              "preflight verdict"
+            ],
+            "dropped": [
+              "raw command argv when redacted",
+              "command stdout",
+              "command stderr",
+              "prompts",
+              "tool outputs",
+              "diffs",
+              "model text"
+            ]
+          },
+          "status": "DENIED_EXPECTED",
+          "tool": "git_commit"
+        },
+        {
+          "command_argc": 0,
+          "command_digest": null,
+          "command_executable": null,
+          "command_exit_code": null,
+          "command_label": "git-push-deny",
+          "command_redacted": true,
+          "dry_run": true,
+          "executed": false,
+          "expect_deny": true,
+          "expect_reason": "POLICY_BLOCK",
+          "path": "experiments/agent-live/codex-fak-gate-git-push-deny-019efde3-6794-7401-93a1-e97e6bd72a9c.json",
+          "policy": "examples/dev-agent-policy.json",
+          "preflight": {
+            "by": "monitor",
+            "exit_code": 0,
+            "reason": "POLICY_BLOCK",
+            "verdict": "DENY"
+          },
+          "privacy": {
+            "copied_fields": [
+              "tool",
+              "policy",
+              "command label/digest",
+              "exit code",
+              "preflight verdict"
+            ],
+            "dropped": [
+              "raw command argv when redacted",
+              "command stdout",
+              "command stderr",
+              "prompts",
+              "tool outputs",
+              "diffs",
+              "model text"
+            ]
+          },
+          "status": "DENIED_EXPECTED",
+          "tool": "git_push"
+        }
+      ],
+      "status": "PASS",
+      "total": 7
+    },
+    "mcp_stdio_adjudication": {
+      "allows_status": {
+        "by": "monitor",
+        "kind": "ALLOW"
+      },
+      "command": "C:\\work\\fak\\fak.exe serve --stdio ...",
+      "denies_publish": {
+        "by": "monitor",
+        "disposition": "TERMINAL",
+        "kind": "DENY",
+        "reason": "POLICY_BLOCK"
+      },
+      "expected_tools_present": [
+        "fak_adjudicate",
+        "fak_admit",
+        "fak_syscall"
+      ],
+      "missing_tools": [],
+      "protocol_version": "2024-11-05",
+      "server_info": {
+        "name": "fak-gateway",
+        "version": "0.32.0"
+      },
+      "status": "PASS",
+      "stderr": "fak: loaded capability floor from examples/dev-agent-policy.json\n2026/06/25 03:16:11 gateway: WARNING \u2014 POST /v1/chat/completions is served by the DETERMINISTIC MOCK planner: responses are SCRIPTED, not model output. Pass --base-url (proxy a real provider) or --gguf/FAK_MODEL_DIR (serve the in-kernel model) to disable the mock.\n2026/06/25 03:16:11 {\"by\":\"monitor\",\"disposition\":\"TERMINAL\",\"duration_ms\":0,\"event\":\"gateway_operation\",\"operation\":\"adjudicate\",\"reason\":\"POLICY_BLOCK\",\"tool\":\"git_push\",\"trace_id\":\"gw-1\",\"verdict\":\"DENY\"}\n2026/06/25 03:16:11 {\"by\":\"monitor\",\"duration_ms\":0,\"event\":\"gateway_operation\",\"operation\":\"adjudicate\",\"tool\":\"git_status\",\"trace_id\":\"gw-2\",\"verdict\":\"ALLOW\"}",
+      "tools": [
+        "fak_adjudicate",
+        "fak_admit",
+        "fak_changes",
+        "fak_context_change",
+        "fak_memory_drivers",
+        "fak_memory_explain",
+        "fak_memory_run",
+        "fak_revoke",
+        "fak_syscall"
+      ],
+      "transport": "stdio"
+    },
+    "vcache_telemetry_proof": {
+      "actual_token_equiv": 7648822.800000002,
+      "baseline_token_equiv": 63227178,
+      "cache_creation_tokens": 0,
+      "cache_read_tokens": 61753728,
+      "correctness_depends_on_hit": false,
+      "ephemeral_1h_input_tokens": 0,
+      "ephemeral_5m_input_tokens": 0,
+      "exit_code": 0,
+      "first_positive_request": 1,
+      "reason": "observed provider telemetry shows positive realized cache savings",
+      "requests": 445,
+      "saved_pct": 87.90263452846179,
+      "saved_token_equiv": 55578355.199999996,
+      "status": "PROVEN",
+      "stderr": "",
+      "stdout": "{\n  \"status\": \"PROVEN\",\n  \"reason\": \"observed provider telemetry shows positive realized cache savings\",\n  \"requests\": 445,\n  \"baseline_token_equiv\": 63227178,\n  \"actual_token_equiv\": 7648822.800000002,\n  \"saved_token_equiv\": 55578355.199999996,\n  \"saved_pct\": 87.90263452846179,\n  \"cache_read_tokens\": 61753728,\n  \"cache_creation_tokens\": 0,\n  \"ephemeral_1h_input_tokens\": 0,\n  \"ephemeral_5m_input_tokens\": 0,\n  \"first_positive_request\": 1,\n  \"correctness_depends_on_hit\": false\n}"
+    }
+  },
+  "created_at": "2026-06-25T10:16:12.863364Z",
+  "privacy": {
+    "usage_jsonl_copied_fields": [
+      "input_tokens",
+      "cached_input_tokens"
+    ],
+    "usage_jsonl_dropped": [
+      "prompts",
+      "tool_calls",
+      "tool_outputs",
+      "diffs",
+      "model_text"
+    ]
+  },
+  "schema": "fak-codex-dogfood-witness/1",
+  "session_file": "rollout-2026-06-25T01-26-39-019efde3-6794-7401-93a1-e97e6bd72a9c.jsonl",
+  "status": "PROVEN",
+  "summary": {
+    "codex_actionability": {
+      "delegate_count": 0,
+      "delegate_source": "post_repair",
+      "max_delegates": 0,
+      "post_repair_mutating_shell_family_counts": {},
+      "post_repair_shell_family_counts": {
+        "git_read": 22,
+        "inline_script": 2,
+        "other_shell": 77,
+        "powershell_inspect": 4,
+        "powershell_read": 49,
+        "python_script": 21,
+        "python_test": 78,
+        "search_rg": 16,
+        "shell_redirect": 5
+      },
+      "post_repair_shell_shape_counts": {
+        "non_shell_tool": 74,
+        "shell_in_tree_or_safe_write_target": 1,
+        "shell_no_write_target_detected": 273
+      },
+      "post_repair_unknown_tree_admission_warnings": 1993,
+      "reasons": [],
+      "residual": [
+        "HOST_SHELL_OPACITY",
+        "UNKNOWN_TREE_WARNINGS"
+      ],
+      "status": "PASS",
+      "stop_total": 0,
+      "unknowns": []
+    },
+    "codex_hook_fast_path": {
+      "codex_command_modes": {
+        "native_launcher": 4
+      },
+      "codex_native_launcher_hooks": 4,
+      "codex_python_cli_hooks": 0,
+      "post_repair_command_shape_status": "PASS",
+      "post_repair_delegate_count": 0,
+      "post_repair_observations": 3846,
+      "post_repair_shell_shape_counts": {
+        "non_shell_tool": 74,
+        "shell_in_tree_or_safe_write_target": 1,
+        "shell_no_write_target_detected": 273
+      },
+      "post_repair_status": "WARN",
+      "post_repair_tool_counts": {
+        "apply_patch": 37,
+        "dos_arbitrate": 18,
+        "shell_command": 274,
+        "update_plan": 19
+      },
+      "post_repair_unknown_tree_admission_warnings": 1993,
+      "post_repair_unknown_tree_warning_rate": 0.518201,
+      "reason": "Codex hook commands use the native launcher",
+      "status": "PASS",
+      "would_clear_codex_python_cli": true
+    },
+    "dos": {
+      "delegate_count": 85,
+      "pretool_calls": 13045,
+      "recommendations": [
+        "prefer path-visible tool calls or narrower shell commands; this stream is Bash-dominated",
+        "reduce opaque shell/editor calls or file upstream footprint-derivation debt",
+        "inspect native-hook delegate fallbacks; the fast path should own routine calls"
+      ],
+      "session_advisory_by_tool": {
+        "Bash": 360,
+        "apply_patch": 70,
+        "mcp__dos__dos_arbitrate": 21,
+        "update_plan": 5
+      },
+      "session_advisory_cautions": 456,
+      "session_refusals": 0,
+      "status": "WARN",
+      "steps": 561,
+      "stop_blocks": 0,
+      "stop_failures_total": 0,
+      "tool_counts": {
+        "Bash": 561
+      },
+      "unknown_tree_admission_warnings": 4837,
+      "unknown_tree_warning_rate": 0.370793,
+      "unknown_tree_warning_threshold": 0.02
+    },
+    "local_fak_gate": {
+      "denied": 3,
+      "expected_denied": 3,
+      "failed": 0,
+      "passed": 7,
+      "status": "PASS",
+      "tools": [
+        "git_add",
+        "git_commit",
+        "git_push",
+        "run_tests"
+      ],
+      "total": 7
+    },
+    "next_actions": [
+      "fast path is repaired; remaining post-repair issue is unknown-tree admission for opaque Codex host calls",
+      "post-repair Codex shell calls include commands with no path-visible write target",
+      "prefer path-visible tool calls or narrower shell commands; this stream is Bash-dominated",
+      "reduce opaque shell/editor calls or file upstream footprint-derivation debt",
+      "inspect native-hook delegate fallbacks; the fast path should own routine calls"
+    ],
+    "policy_adjudication": {
+      "allow": {
+        "reason": "NONE",
+        "tool": "git_status",
+        "verdict": "ALLOW"
+      },
+      "codex_exec_mcp_status": "SKIPPED",
+      "deny": {
+        "reason": "POLICY_BLOCK",
+        "tool": "git_push",
+        "verdict": "DENY"
+      },
+      "mcp_stdio_status": "PASS"
+    },
+    "status": "PROVEN",
+    "vcache": {
+      "correctness_depends_on_hit": false,
+      "requests": 445,
+      "saved_pct": 87.90263452846179,
+      "saved_token_equiv": 55578355.199999996,
+      "status": "PROVEN"
+    }
+  },
+  "thread_id": "019efde3-6794-7401-93a1-e97e6bd72a9c",
+  "usage_jsonl": "experiments/agent-live/codex-dogfood-019efde3-6794-7401-93a1-e97e6bd72a9c.usage.jsonl",
+  "usage_rows": 445
+}

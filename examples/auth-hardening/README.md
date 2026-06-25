@@ -26,7 +26,7 @@ shipped in [#138](https://github.com/anthony-chaudhary/fak/issues/138).)
 ## Run it
 
 ```bash
-examples/auth-hardening/run.sh            # build fak, serve with auth on, run 6 witnesses, teardown
+examples/auth-hardening/run.sh
 ```
 
 Needs only Go (to build `fak`) and `curl` — **no model, key, or GPU**. The auth
@@ -46,6 +46,17 @@ The six witnesses:
 | 4 | `x-api-key: <correct>`            | `200` | Claude Code / Anthropic SDK shape |
 | 5 | `GET /metrics` *(no header)*      | `401` | operator route inherits the gate |
 | 6 | `GET /metrics` `Bearer <correct>` | `200` | …and opens with the same token |
+
+## What you see
+
+The run prints each witness as an HTTP status check, then reports a final
+`PASS`/`FAIL` summary. A correct run shows the two accepted credential shapes
+returning `200`, missing or wrong credentials returning `401`, and `/metrics`
+obeying the same gate as the model routes. The script tears down the gateway it
+started before exiting.
+
+Windows users: run the `.sh` launcher from WSL or Git Bash; the demo itself is
+plain `fak serve` plus `curl`, and there is no native `.ps1` wrapper yet.
 
 ## What `--require-key-env` does
 
