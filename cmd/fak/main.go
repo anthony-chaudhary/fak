@@ -83,6 +83,8 @@ func main() {
 		cmdLoop(os.Args[2:])
 	case "snapshot":
 		cmdSnapshot(os.Args[2:])
+	case "traj":
+		cmdTraj(os.Args[2:])
 	case "dream":
 		cmdDream(os.Args[2:])
 	case "memory":
@@ -255,6 +257,14 @@ func usage() {
                  a running gateway and 'restore-fleet --addr URL --file F' re-establishes
                  it on another. The session image is model-agnostic  -  logical content
                  only, no KV cache or token ids  -  so a resume re-prefills on any model)
+  fak traj      similar | cluster | score | gc | export  --corpus <turns.jsonl> [...]
+                (the TRAJECTORY-CORPUS toolkit over the JSONL a trajectory.Recorder
+                 exports: 'similar' finds the k past queries most like a --query by
+                 simhash cosine; 'cluster' groups near-duplicate queries; 'score' runs
+                 the registered scorers worst-first; 'gc' PROPOSES prune candidates
+                 (never deletes); 'export' re-emits normalized JSONL. fak ships the data
+                 plane + similarity primitive + scorer seam; a gardening skill builds the
+                 prune policy on top  -  see docs/observability/trajectory.md)
   fak dream     [--dir DIR] [--out-dir DIR] [--out dream-report.json]
                 (offline "sleep" pass over a core image: re-screen, pre-seal
                  refuted witnesses, repair descriptors, surface duplicate aliases,
