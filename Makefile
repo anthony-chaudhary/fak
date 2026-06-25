@@ -110,6 +110,7 @@ hygiene:
 	@python3 tools/check_secret_shapes.py --audit-tree
 	@python3 tools/check_brand_consistency.py --audit-tree
 	@python3 tools/scrub_hardware_names.py --check
+	@python3 tools/check_provenance_labels.py --audit-tree
 	@echo "hygiene OK"
 
 # demo-audit: full local demo health gate. Static checks are network-free; dynamic checks
@@ -134,6 +135,7 @@ demo-tool-tests:
 	@python3 tools/demo_browser_contract_test.py
 	@python3 tools/demo_http_smoke_test.py
 	@python3 tools/demo_headless_smoke_test.py
+	@python3 tools/check_provenance_labels_test.py
 	@echo "demo-tool-tests OK"
 
 # demo-scorecards: content-only demo quality and robustness scorecards. These are
