@@ -1,7 +1,11 @@
 package ggufload
 
 import (
+	"bytes"
 	"math"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -127,4 +131,138 @@ func TestBufferGLMKVBHalfPairing(t *testing.T) {
 	if _, _, err := bufferGLMKVBHalf(buf, 7, "k", ks, kd); err == nil {
 		t.Fatal("expected duplicate-k error")
 	}
+}
+
+// TestGLMMoeDsaSplitKVBF32Tensors proves the real F32 loader loop intercepts the split GGUF
+// names before CanonicalTensorNameArch and materializes the single canonical kv_b_proj tensor.
+func TestGLMMoeDsaSplitKVBF32Tensors(t *testing.T) {
+	const nH, kvLora, qkNope, vHead = 2, 3, 2, 2
+	kData := []float32{
+		10, 11, 20, 21, 30, 31,
+		110, 111, 120, 121, 130, 131,
+	}
+	vData := []float32{
+		40, 41, 42, 50, 51, 52,
+		140, 141, 142, 150, 151, 152,
+	}
+	want := []float32{
+		10, 20, 30,
+		11, 21, 31,
+		40, 41, 42,
+		50, 51, 52,
+		110, 120, 130,
+		111, 121, 131,
+		140, 141, 142,
+		150, 151, 152,
+	}
+
+	path := filepath.Join(t.TempDir(), "glm_split_kvb.gguf")
+	if err := os.WriteFile(path, glmMoeDsaSplitKVBGGUF(nH, kvLora, qkNope, vHead, kData, vData), 0o644); err != nil {
+		t.Fatalf("write fixture: %v", err)
+	}
+	ws, err := OpenWeights(path)
+	if err != nil {
+		t.Fatalf("OpenWeights: %v", err)
+	}
+	defer ws.Close()
+
+	cfg, tensors, err := ws.F32Tensors()
+	if err != nil {
+		t.Fatalf("F32Tensors: %v", err)
+	}
+	if cfg.ModelType != "glm_moe_dsa" {
+		t.Fatalf("ModelType=%q, want glm_moe_dsa", cfg.ModelType)
+	}
+	if len(tensors) != 1 {
+		t.Fatalf("loaded %d tensors, want only the merged kv_b_proj", len(tensors))
+	}
+	assertModelTensorForTest(t, map[string]modelTensorForTest{
+		tensors[0].Name: {shape: tensors[0].Shape, data: tensors[0].Data},
+	}, "model.layers.0.self_attn.kv_b_proj.weight", []int{nH * (qkNope + vHead), kvLora}, want)
+}
+
+func TestGLMMoeDsaSplitKVBRejectsUnpairedHalf(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "glm_unpaired_kvb.gguf")
+	if err := os.WriteFile(path, glmMoeDsaUnpairedKVBGGUF(), 0o644); err != nil {
+		t.Fatalf("write fixture: %v", err)
+	}
+	ws, err := OpenWeights(path)
+	if err != nil {
+		t.Fatalf("OpenWeights: %v", err)
+	}
+	defer ws.Close()
+
+	_, _, err = ws.F32Tensors()
+	if err == nil || !strings.Contains(err.Error(), "missing attn_v_b") {
+		t.Fatalf("F32Tensors unpaired error = %v, want missing attn_v_b", err)
+	}
+}
+
+func glmMoeDsaSplitKVBGGUF(nH, kvLora, qkNope, vHead int, kData, vData []float32) []byte {
+	tensors := []kvbTestTensor{
+		{"blk.0.attn_k_b.weight", []uint64{uint64(qkNope), uint64(kvLora), uint64(nH)}, kData},
+		{"blk.0.attn_v_b.weight", []uint64{uint64(kvLora), uint64(vHead), uint64(nH)}, vData},
+	}
+	return glmMoeDsaKVBOnlyGGUF(nH, kvLora, qkNope, vHead, tensors)
+}
+
+func glmMoeDsaUnpairedKVBGGUF() []byte {
+	return glmMoeDsaKVBOnlyGGUF(1, 2, 2, 1, []kvbTestTensor{
+		{"blk.0.attn_k_b.weight", []uint64{2, 2, 1}, []float32{1, 2, 3, 4}},
+	})
+}
+
+type kvbTestTensor struct {
+	name string
+	dims []uint64
+	data []float32
+}
+
+func glmMoeDsaKVBOnlyGGUF(nH, kvLora, qkNope, vHead int, tensors []kvbTestTensor) []byte {
+	align := func(x int) int { return (x + 31) / 32 * 32 }
+
+	var kv bytes.Buffer
+	nKV := 0
+	ks := func(k, v string) { writeKVString(&kv, k, v); nKV++ }
+	ku := func(k string, v uint32) { writeKVUint32(&kv, k, v); nKV++ }
+	kf := func(k string, v float32) { writeKVFloat32(&kv, k, v); nKV++ }
+	ks("general.architecture", "glm_moe_dsa")
+	ku("general.alignment", 32)
+	ku("glm_moe_dsa.embedding_length", 4)
+	ku("glm_moe_dsa.block_count", 1)
+	ku("glm_moe_dsa.attention.head_count", uint32(nH))
+	ku("glm_moe_dsa.attention.head_count_kv", uint32(nH))
+	ku("glm_moe_dsa.feed_forward_length", 8)
+	kf("glm_moe_dsa.attention.layer_norm_rms_epsilon", 1e-5)
+	kf("glm_moe_dsa.rope.freq_base", 10000)
+	ku("glm_moe_dsa.expert_count", 2)
+	ku("glm_moe_dsa.expert_used_count", 1)
+	ku("glm_moe_dsa.expert_feed_forward_length", 8)
+	ku("glm_moe_dsa.attention.q_lora_rank", 4)
+	ku("glm_moe_dsa.attention.kv_lora_rank", uint32(kvLora))
+	ku("glm_moe_dsa.attention.qk_nope_head_dim", uint32(qkNope))
+	ku("glm_moe_dsa.attention.qk_rope_head_dim", 1)
+	ku("glm_moe_dsa.attention.v_head_dim", uint32(vHead))
+
+	var ti bytes.Buffer
+	off := 0
+	for _, t := range tensors {
+		writeTensorInfoForTest(&ti, t.name, t.dims, TensorF32, uint64(off))
+		off = align(off + len(t.data)*4)
+	}
+	var b bytes.Buffer
+	writeMinimalHeader(&b, uint64(len(tensors)), uint64(nKV))
+	b.Write(kv.Bytes())
+	b.Write(ti.Bytes())
+	padToAlignment(&b, 32)
+	dataStart := b.Len()
+	off = 0
+	for _, t := range tensors {
+		padToLen(&b, dataStart+off)
+		for _, v := range t.data {
+			writeF32ForTest(&b, v)
+		}
+		off = align(off + len(t.data)*4)
+	}
+	return b.Bytes()
 }
