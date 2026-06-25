@@ -95,6 +95,7 @@ var tier = map[string]int{
 	"comm":         2,
 	"cohort":       2, // fail-closed cohort shrink/agree over comm.Group + modelroute vote fold.
 	"agenttopo":    2, // declared agent communication DAG over comm.Group + modelroute folds.
+	"promptmmu":    1, // cache-prefix-preserving inbound prompt MMU: splices tools[] past the last cache_control breakpoint; stdlib-only, off the hot path, no agent/gateway import (decode is a callback).
 	// new-leaf:tier — `python tools/new_leaf.py <name> --tier <name>` inserts the
 	// declaration for a generated leaf immediately ABOVE this line. Keep the marker last.
 }
