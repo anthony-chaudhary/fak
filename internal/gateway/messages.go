@@ -229,8 +229,8 @@ func (s *Server) handleAnthropicMessages(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	// Billing-truth: on a turn we actually compacted, record the provider's cache_read so a
-	// broken-cache fire (cache_read cratering after a fire) is visible on /metrics.
+	// On a turn we actually compacted, record the provider's OBSERVED cache_read (relayed, not a
+	// fak claim) so the net effect is visible on /metrics next to the WITNESSED shed.
 	if compacted {
 		s.metrics.recordCompactionCacheRead(turn.Usage.CacheReadInputTokens)
 	}
@@ -343,10 +343,10 @@ func spliceMaxTokens(raw []byte, cap int) ([]byte, bool) {
 // downstream, so touching req.Raw would be pointless. CompactAnthropicHistoryWithOutcome is
 // fail-safe: it returns req.Raw unchanged on any ambiguity, so this never breaks a turn.
 //
-// It records the attempt outcome on /metrics (fired/bailed/off + bail reason + shed) so a
-// silent failure is visible, and returns whether it FIRED — the caller threads that through
-// so the post-response provider cache_read (the billing-truth signal) is recorded only on
-// turns this actually compacted.
+// It records the attempt outcome on /metrics (fired/bailed/off + bail reason + shed — all
+// WITNESSED, what fak authored) so a silent failure is visible, and returns whether it FIRED —
+// the caller threads that through so the post-response provider cache_read (an OBSERVED value
+// fak relays, never a fak claim) is recorded only on turns this actually compacted.
 func (s *Server) maybeCompactAnthropicRaw(req *agent.AnthropicMessagesRequest) (fired bool) {
 	if req == nil || len(req.Raw) == 0 || !s.anthropicPassthrough() {
 		return false

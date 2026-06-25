@@ -79,12 +79,16 @@ a long session costs **more**. `fak` instead drops the un-cacheable middle turns
 splicing on the original bytes (a memcpy, never a re-marshal), and falls back to doing
 nothing on any ambiguity, so it never breaks a turn.
 
-It is honest about what it can prove. Byte-identity guarantees the prefix is *reusable*;
-only the provider's `cache_read_input_tokens` proves it was *actually reused*. So `fak`
-checks itself against the bill: `/metrics` reports `fak_gateway_compaction_*` — what it
-*claimed* to shed next to the provider's real cache_read on each compacted turn — and the
-`fak guard` exit line summarizes it. A fire whose cache_read craters is the cache breaking,
-and you will see it rather than silently overpay. Tracking: [#745](https://github.com/anthony-chaudhary/fak/issues/745).
+It is honest about the line between what it controls and what it only observes. `fak`
+*guarantees* one thing: the prefix it ships is byte-identical to what you sent (it refuses
+to ship otherwise). That makes the cache hit *possible* — it does not *force* it. Whether the
+provider actually reuses the cache is the provider's call, and `fak` relays its number rather
+than claiming it: `/metrics` shows `fak_gateway_compaction_*` with the tokens `fak` shed
+(what it sent) next to the provider's reported `cache_read` (what came back), and the
+`fak guard` exit line summarizes both. If that `cache_read` is low while the prefix was
+byte-identical, the miss is provider-side — a cache TTL expiry, an eviction, or your client
+moving its own breakpoint — not something `fak` broke. You see it either way instead of
+silently overpaying. Tracking: [#745](https://github.com/anthony-chaudhary/fak/issues/745).
 
 ### Codex, Cursor, MCP hosts
 

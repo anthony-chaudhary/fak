@@ -57,19 +57,23 @@ type gatewayMetrics struct {
 	inferDecodeSecs   float64
 
 	// compactMu guards the history-compaction accumulators. Compaction (the
-	// --compact-history-budget lever on the Anthropic passthrough) is otherwise INVISIBLE:
-	// it returns identity on any bail with no signal, so a silent failure (never fires,
-	// always bails, or fires but BREAKS the provider cache) reads exactly like success. These
-	// make the fired/bailed/off split, the bail reason, the claimed shed, and the BILLING
-	// TRUTH (the provider cache_read on the most recent compacted turn) all scrapeable. Kept
-	// off inferenceMu — different hot path, no lock coupling.
+	// --compact-history-budget lever on the Anthropic passthrough) is otherwise INVISIBLE: it
+	// returns identity on any bail with no signal, so a silent failure reads like success.
+	// These split cleanly into what fak CONTROLS and what it only OBSERVES — a distinction the
+	// surface must keep, or a provider-side miss reads as a fak bug:
+	//   - WITNESSED (fak authored): attempts{fired|bailed|off}, the bail reason, dropped, shed.
+	//     A turn only counts `fired` if the protected-prefix bytes were byte-identical to the
+	//     input (else it bails to `prefix_mismatch`), so these are facts about what fak SENT.
+	//   - OBSERVED (provider-reported, relayed): compactCacheReads / compactLastCacheRd are the
+	//     upstream's cache_read_input_tokens. fak attributes nothing to itself from them.
+	// Kept off inferenceMu — different hot path, no lock coupling.
 	compactMu          sync.Mutex
-	compactAttempts    map[string]uint64 // outcome -> count: fired | bailed | off
-	compactBailReasons map[string]uint64 // CompactReason* -> count (why a bail happened)
-	compactDropped     uint64            // whole messages stubbed out across all fires
-	compactShed        uint64            // estimated tokens removed across all fires (CLAIMED savings)
-	compactCacheReads  uint64            // sum of provider cache_read on compacted turns (BILLING TRUTH)
-	compactLastCacheRd float64           // provider cache_read on the MOST RECENT compacted turn
+	compactAttempts    map[string]uint64 // WITNESSED: outcome -> count: fired | bailed | off
+	compactBailReasons map[string]uint64 // WITNESSED: CompactReason* -> count (why a bail happened)
+	compactDropped     uint64            // WITNESSED: whole messages stubbed out across all fires
+	compactShed        uint64            // WITNESSED: estimated tokens fak removed from the body across all fires
+	compactCacheReads  uint64            // OBSERVED: sum of provider-reported cache_read on compacted turns
+	compactLastCacheRd float64           // OBSERVED: provider-reported cache_read on the MOST RECENT compacted turn
 }
 
 type inflightEntry struct {
@@ -131,9 +135,12 @@ func (m *gatewayMetrics) observeCompaction(out agent.CompactOutcome, off bool) {
 }
 
 // recordCompactionCacheRead records the provider's cache_read_input_tokens on a turn whose body
-// WAS compacted — the billing-truth signal. If compaction broke the cache, this craters to ~0
-// even though the in-function byte-equality self-check passed; only the provider's counter
-// proves the cache was actually reused after the splice.
+// WAS compacted. This is an OBSERVED value relayed verbatim from the upstream, NOT a fak claim:
+// fak's own guarantee (the protected prefix it shipped was byte-identical) is already witnessed
+// by the turn counting `fired` with no `prefix_mismatch` bail. A low cache_read here therefore
+// does not mean fak broke anything — pair it with shed_tokens to see the net effect, and read a
+// crater as a provider-side miss (TTL expiry / eviction / the client moving its breakpoint)
+// unless bail_reason{prefix_mismatch} is nonzero.
 func (m *gatewayMetrics) recordCompactionCacheRead(cacheRead int) {
 	if m == nil {
 		return
@@ -218,11 +225,14 @@ type AdjudicationSummary struct {
 	CachedPromptTokens uint64 `json:"cached_prompt_tokens"`
 	CachedTurns        uint64 `json:"cached_turns"`
 
-	// Compaction* folds the Anthropic history-compaction visibility into the same guard
-	// exit summary. Fired/Bailed/Off report what the rewrite attempted; ShedTokens is
-	// the claimed prompt reduction; CompactionCacheReadTokens and LastCompactionCacheRead
-	// are the provider billing-truth counters proving whether the post-splice turn still
-	// hit the remote prompt cache.
+	// Compaction* folds the Anthropic history-compaction visibility into the same guard exit
+	// summary, split WITNESSED (what fak authored) vs OBSERVED (what the provider reported):
+	// Fired/Bailed/Off and DroppedTurns/ShedTokens are WITNESSED — what fak attempted and what
+	// it removed (a turn only counts Fired when the prefix it shipped was byte-identical).
+	// CompactionCacheReadTokens / LastCompactionCacheRead are OBSERVED — the provider's
+	// cache_read_input_tokens, relayed verbatim. They are NOT proof fak preserved the cache (the
+	// byte-identity is); a low value with no prefix_mismatch is a provider-side miss fak does not
+	// control (TTL/eviction/client breakpoint move).
 	CompactionFired           uint64  `json:"compaction_fired"`
 	CompactionBailed          uint64  `json:"compaction_bailed"`
 	CompactionOff             uint64  `json:"compaction_off"`
@@ -904,24 +914,30 @@ func (m *gatewayMetrics) snapshot() ([]httpMetricSnapshot, []operationMetricSnap
 	return httpRows, opRows
 }
 
-// writeCompactionMetrics renders the history-compaction family — the observability that turns
-// a silent compaction failure into a scrapeable signal. The decisive one is
-// fak_gateway_compaction_post_fire_cache_read_tokens: the provider's cache_read on the most
-// recent compacted turn. The in-function byte-equality check proves OUR bytes match OUR prefix;
-// only this provider counter proves the PROVIDER actually reused the cache after the splice.
-// A fire (attempts{outcome="fired"} climbing) while this gauge craters to ~0 is compaction
-// COSTING money, not saving it — the one failure the whole design exists to surface.
+// writeCompactionMetrics renders the history-compaction family, split along what fak CONTROLS
+// versus what it can only OBSERVE — keep the two apart or a provider-side miss reads as a fak
+// bug it cannot support:
+//   - WITNESSED (fak authored): attempts{fired|bailed|off}, bail_reason, dropped_turns, shed.
+//     A turn counts `fired` only when the protected-prefix bytes it shipped were byte-identical
+//     to the input (else it bails to `prefix_mismatch`). These describe what fak SENT.
+//   - OBSERVED (provider-reported, relayed verbatim): cache_read_tokens / post_fire_cache_read.
+//     fak attributes nothing to itself here; it forwards the upstream's number.
+// The single fak-fault signal is bail_reason{reason="prefix_mismatch"}>0. A cratered cache_read
+// while fires climb is NOT that bug — the shipped prefix was byte-identical, so the provider
+// missed for a reason fak does not control (cache TTL expiry, eviction, or the client moving its
+// own breakpoint). Reading the crater as "the splice broke the cache" is the conflation this
+// split exists to prevent.
 func (m *gatewayMetrics) writeCompactionMetrics(b *strings.Builder) {
 	snap := m.compactionSnapshotData()
 
 	writeHelpType(b, "fak_gateway_compaction_attempts_total",
-		"Anthropic history-compaction attempts by outcome: fired (body rewritten), bailed (returned identity), off (budget unset).", "counter")
+		"WITNESSED (fak authored): Anthropic history-compaction attempts by outcome: fired (body rewritten, protected prefix shipped byte-identical), bailed (returned identity), off (budget unset).", "counter")
 	for _, o := range []string{"fired", "bailed", "off"} { // stable order; emit at 0 so the panel exists pre-first-fire
 		fmt.Fprintf(b, "fak_gateway_compaction_attempts_total{outcome=%q} %d\n", o, snap.attempts[o])
 	}
 
 	writeHelpType(b, "fak_gateway_compaction_bail_reason_total",
-		"Why a compaction attempt bailed to identity (closed set: under_budget|non_json|no_messages_key|too_few_msgs|no_breakpoint|window_no_drop|splice_failed|redecode_failed|prefix_mismatch). splice_failed/redecode_failed/prefix_mismatch should stay 0 — nonzero is a splice bug.", "counter")
+		"WITNESSED (fak authored): why a compaction attempt bailed to identity (closed set: under_budget|non_json|no_messages_key|too_few_msgs|no_breakpoint|window_no_drop|splice_failed|redecode_failed|prefix_mismatch). prefix_mismatch>0 is the ONLY fak-fault cache signal and must stay 0; splice_failed/redecode_failed are splice bugs and must stay 0 too.", "counter")
 	rs := make([]string, 0, len(snap.bailReasons))
 	for r := range snap.bailReasons {
 		rs = append(rs, r)
@@ -931,11 +947,11 @@ func (m *gatewayMetrics) writeCompactionMetrics(b *strings.Builder) {
 		fmt.Fprintf(b, "fak_gateway_compaction_bail_reason_total{reason=%q} %d\n", promQuote(r), snap.bailReasons[r])
 	}
 
-	writeCounter(b, "fak_gateway_compaction_dropped_turns_total", "Whole messages stubbed out across all fires.", int64(snap.dropped))
-	writeCounter(b, "fak_gateway_compaction_shed_tokens_total", "Estimated tokens removed from outbound bodies across all fires (CLAIMED savings; same ~4ch/token currency as the budget and provider input_tokens).", int64(snap.shed))
-	writeCounter(b, "fak_gateway_compaction_cache_read_tokens_total", "Cumulative provider cache_read_input_tokens on compacted turns — the BILLING-TRUTH counterpart of shed_tokens. If shed climbs but this stays flat the splice is producing a body the provider re-bills.", int64(snap.cacheReads))
+	writeCounter(b, "fak_gateway_compaction_dropped_turns_total", "WITNESSED (fak authored): whole messages stubbed out across all fires.", int64(snap.dropped))
+	writeCounter(b, "fak_gateway_compaction_shed_tokens_total", "WITNESSED (fak authored): estimated tokens fak removed from the outbound body across all fires (same ~4ch/token currency as the budget and provider input_tokens). What fak SENT — not a claim about what the provider billed.", int64(snap.shed))
+	writeCounter(b, "fak_gateway_compaction_cache_read_tokens_total", "OBSERVED (provider-reported, relayed verbatim): cumulative cache_read_input_tokens on compacted turns. Pair with shed_tokens to see the net effect; attribute nothing to fak from it alone — fak only guarantees the prefix it shipped was byte-identical (see attempts{fired} with prefix_mismatch=0).", int64(snap.cacheReads))
 	writeHelpType(b, "fak_gateway_compaction_post_fire_cache_read_tokens",
-		"Provider cache_read_input_tokens on the MOST RECENT compacted turn — the billing-truth check that compaction did not break the cache. Cratering to ~0 while compaction_attempts{outcome=fired} climbs means the cache broke and every fire is re-billing the prompt.", "gauge")
+		"OBSERVED (provider-reported): cache_read_input_tokens on the MOST RECENT compacted turn. If this craters while fires climb, the prefix fak shipped was still byte-identical (witnessed by fired with prefix_mismatch=0), so the provider did not reuse it for a reason fak does NOT control: cache TTL expiry, eviction, or the client moving its own breakpoint. Only bail_reason{reason=\"prefix_mismatch\"}>0 is fak's bug.", "gauge")
 	fmt.Fprintf(b, "fak_gateway_compaction_post_fire_cache_read_tokens %s\n", promFloat(snap.lastCacheRd))
 }
 
