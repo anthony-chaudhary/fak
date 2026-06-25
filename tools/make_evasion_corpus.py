@@ -107,7 +107,7 @@ add("sec_slack_variant", "xoxe.xoxp-1-Mi0yLXNlY3JldC10b2tlbi12YXJpYW50LW5vdC1tYX
     "secret", True, True)
 
 corpus = {
-    "_provenance": "operator-generated adversarial evasion corpus probing the ctxmmu DETECTION layer; mirrors SOTA evasions cited in COMPARE-security-model-vs-guardrails.",
+    "_provenance": "operator-generated adversarial evasion corpus probing the ctxmmu DETECTION layer; mirrors SOTA evasions cited in COMPARE-security-model-vs-guardrails (private companion, not published in this repo).",
     "results": [{"name": r["name"], "tool": r["tool"], "payload": r["payload"]} for r in results],
     "calls": [],
     "_labels": [{k: r[k] for k in ("name", "_targets", "_morally_malicious", "_predict_evades")} for r in results],

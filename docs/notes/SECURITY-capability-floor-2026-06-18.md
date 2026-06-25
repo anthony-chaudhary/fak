@@ -12,9 +12,10 @@ description: "Shows how fak adjudicates every tool call before it runs, allowing
 > deployable, file-authored form of fak's "permissions as the floor" thesis, shown on
 > the real Claude Code dogfood (`fak/examples/dogfood-claude-policy.json`).
 
-Companion to `COMPARE-security-model-vs-guardrails` (private research companion)
-(why this layer, not a content guardrail) and [`fak/POLICY.md`](https://github.com/anthony-chaudhary/fak/blob/main/POLICY.md) (the
-manifest schema + author/validate workflow). Generated 2026-06-18.
+Companion to [`fak/POLICY.md`](https://github.com/anthony-chaudhary/fak/blob/main/POLICY.md) (the
+manifest schema + author/validate workflow); the *why this layer, not a content guardrail*
+argument is in `COMPARE-security-model-vs-guardrails`, a **private companion — not published
+in this repo** (it lives in the paired `fak-private` research tree). Generated 2026-06-18.
 
 ---
 
@@ -96,4 +97,4 @@ so a manifest edit that silently widens the floor fails CI.
 - Honest scope: the floor bounds *which tools run with which argument values*. It is
   the call-side capability deny — paired with the result-side containment
   (poisoned tool results held out of context) described in the top-level
-  [`README`](https://github.com/anthony-chaudhary/fak/blob/main/README.md) and `COMPARE-security-model-vs-guardrails` (private research companion).
+  [`README`](https://github.com/anthony-chaudhary/fak/blob/main/README.md) and `COMPARE-security-model-vs-guardrails` (private companion — not published).
