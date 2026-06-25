@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -160,7 +161,11 @@ func Run(ctx context.Context, cfg RunConfig) (*RunResult, error) {
 		instMeta.ElapsedSec = elapsed.Seconds()
 
 		if err != nil {
-			instMeta.Status = "failed"
+			if errors.Is(err, context.DeadlineExceeded) || errors.Is(instCtx.Err(), context.DeadlineExceeded) {
+				instMeta.Status = "timeout"
+			} else {
+				instMeta.Status = "failed"
+			}
 			instMeta.Error = err.Error()
 			failed++
 			// Still append a dummy prediction so the eval harness has a full set.
