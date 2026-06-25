@@ -590,5 +590,3 @@ func f16bitsToF32bits(h uint16) uint32 {
 	}
 }
 
-// f32frombits is exported for the witness test's per-element comparison.
-func f32frombits(b []byte) float32 { return math.Float32frombits(binary.LittleEndian.Uint32(b)) }

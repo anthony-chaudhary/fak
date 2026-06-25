@@ -642,42 +642,6 @@ func fakExtFrom(adjs []ToolAdjudication, results []ResultAdmission) *FakExt {
 	return &FakExt{Adjudications: adjs, ResultAdmissions: results}
 }
 
-// streamAnthropic synthesizes the Messages SSE event sequence from a finished,
-// already-adjudicated turn: message_start, then a content_block_start /
-// (text|input_json)_delta / content_block_stop triple per block, then a
-// message_delta carrying the stop_reason + output token count, then message_stop.
-// Each event is flushed immediately so the client sees a live stream.
-func (s *Server) streamAnthropic(w http.ResponseWriter, id, model string, blocks []agent.AnthropicBlockOut, stop string, usage anthropicUsage) {
-	flusher, ok := w.(http.Flusher)
-	if !ok {
-		// No streaming support on this writer: degrade to a single buffered body
-		// rather than hang the client.
-		writeJSON(w, http.StatusOK, anthropicMessageResponse{
-			ID: id, Type: "message", Role: "assistant", Model: model,
-			Content: blocks, StopReason: stop, StopSequence: nil, Usage: usage,
-		})
-		return
-	}
-	h := w.Header()
-	h.Set("Content-Type", "text/event-stream")
-	h.Set("Cache-Control", "no-cache")
-	h.Set("Connection", "keep-alive")
-	w.WriteHeader(http.StatusOK)
-
-	send := anthropicSSESender(w, flusher)
-
-	send("message_start", map[string]any{
-		"type": "message_start",
-		"message": map[string]any{
-			"id": id, "type": "message", "role": "assistant", "model": model,
-			"content": []any{}, "stop_reason": nil, "stop_sequence": nil,
-			"usage": map[string]int{"input_tokens": usage.InputTokens, "output_tokens": 0},
-		},
-	})
-
-	streamAnthropicBlocks(send, blocks, stop, usage)
-}
-
 func (s *Server) streamAnthropicPending(w http.ResponseWriter, r *http.Request, req *agent.AnthropicMessagesRequest, reqTrace string, sessionTurn servedSessionTurn, upstreamKey, upstreamBeta string, compacted bool) {
 	flusher, ok := w.(http.Flusher)
 	if !ok {

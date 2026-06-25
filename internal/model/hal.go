@@ -475,33 +475,3 @@ func (s *Session) prefillHAL(ids []int, wantLogits bool) []float32 {
 	return nil
 }
 
-func (s *Session) generateHAL(prompt []int, n int) []int {
-	out := make([]int, 0, n)
-	if len(prompt) == 0 {
-		if n == 0 {
-			return out
-		}
-		panic("model: Generate requires a non-empty prompt")
-	}
-	lastPrompt := len(prompt) - 1
-	for _, id := range prompt[:lastPrompt] {
-		s.tokenHALNoLogits(id, s.halKV.Len())
-	}
-	if n == 0 {
-		s.tokenHALNoLogits(prompt[lastPrompt], s.halKV.Len())
-		return out
-	}
-	next := s.tokenHALArgmax(prompt[lastPrompt], s.halKV.Len())
-	for i := 0; i < n; i++ {
-		out = append(out, next)
-		if s.M.Cfg.IsEOS(next) {
-			break
-		}
-		if i == n-1 {
-			s.tokenHALNoLogits(next, s.halKV.Len())
-			break
-		}
-		next = s.tokenHALArgmax(next, s.halKV.Len())
-	}
-	return out
-}

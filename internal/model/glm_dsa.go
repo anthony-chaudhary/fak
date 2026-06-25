@@ -240,10 +240,6 @@ func glmDsaIndexerKind(cfg Config, layer int) string {
 	}
 }
 
-func cloneIndexRow(in []int) []int {
-	return append([]int(nil), in...)
-}
-
 func glmDsaNormalizeLayerInput(m *Model, layer int, hidden []float32, seq int) ([]float32, bool) {
 	cfg := m.Cfg
 	if !cfg.isGLMMoeDsa() || seq <= 0 || len(hidden) != seq*cfg.HiddenSize {

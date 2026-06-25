@@ -75,10 +75,6 @@ type tune struct {
 	turnCap  int     // cap turns replayed (0 = full track); keeps sweeps tractable
 }
 
-func (t tune) isIdentity() bool {
-	return t.toolFrac == 1 && t.result == 1 && t.decode == 1 && t.prefix == 1 && t.turnCap == 0
-}
-
 // turnStep is one resolved turn of the replay schedule: decode D tokens, then ingest
 // resultTokens private tool/result tokens (0 = a text-only / non-tool turn).
 type turnStep struct {

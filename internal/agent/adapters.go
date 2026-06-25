@@ -101,16 +101,6 @@ type apiError struct {
 	Code    any    `json:"code,omitempty"`
 }
 
-func providerError(raw []byte) string {
-	var doc struct {
-		Error *apiError `json:"error"`
-	}
-	if err := json.Unmarshal(raw, &doc); err == nil && doc.Error != nil && doc.Error.Message != "" {
-		return doc.Error.Message
-	}
-	return ""
-}
-
 // ---------------------------------------------------------------------------
 // OpenAI-compatible chat completions (OpenAI GPT and xAI Grok).
 // ---------------------------------------------------------------------------

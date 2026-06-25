@@ -379,16 +379,6 @@ func median(xs []float64) float64 {
 	sort.Float64s(cp)
 	return cp[len(cp)/2]
 }
-func minf(xs []float64) float64 {
-	if len(xs) == 0 {
-		return 0
-	}
-	m := xs[0]
-	for _, x := range xs {
-		m = math.Min(m, x)
-	}
-	return m
-}
 
 // ---- per-cell result ----
 

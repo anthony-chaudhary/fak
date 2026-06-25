@@ -528,13 +528,6 @@ func modelURLs(filename string) []string {
 	}
 }
 
-// tokenizerURL returns the HuggingFace URL for the tokenizer. mradermacher's GGUF
-// repos ship no tokenizer.json, so point at the upstream Qwen2.5 repo, which does.
-// (This is only a last-resort backstop: every demo GGUF embeds its own tokenizer.)
-func tokenizerURL() string {
-	return "https://huggingface.co/Qwen/Qwen2.5-0.5B-Instruct/resolve/main/tokenizer.json"
-}
-
 // tokenizerURLs returns all possible URLs for the tokenizer.
 func tokenizerURLs() []string {
 	return []string{
