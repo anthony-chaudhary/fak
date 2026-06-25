@@ -40,6 +40,19 @@ Writes outside the repo are refused by the repo-guard (OUT_OF_TREE_WRITE).
 See CONTRIBUTING.md. Green = `make ci`.
 """
 
+GOOD_CODEX = """# fak + OpenAI Codex
+Codex is OpenAI's coding agent. Current Codex surfaces include the CLI, IDE
+extension, Codex app, and cloud tasks.
+Codex reads AGENTS.md before it works in this repo.
+```bash
+codex mcp add fak -- ./fak serve --stdio --policy examples/dev-agent-policy.json
+codex exec --json "Summarize AGENTS.md"
+export OPENAI_BASE_URL="http://127.0.0.1:8080/v1"
+```
+Responses clients use /v1/responses; fak's current client-facing OpenAI-compatible
+surface is Chat Completions, so current Codex users should use MCP first.
+"""
+
 
 # --- the small helpers ------------------------------------------------------
 
@@ -154,6 +167,20 @@ def test_integration_recipes_kpi() -> None:
     assert ar.kpi_integration_recipes([])["score"] == 100
 
 
+def test_codex_recipe_currentness_detects_stale_or_missing_surface() -> None:
+    assert ar.codex_recipe_gaps(GOOD_CODEX) == []
+    clean = ar.kpi_codex_recipe_current([])
+    assert clean["score"] == 100 and clean["defects"] == [] and clean["group"] == "adopt"
+
+    stale = ("OpenAI has deprecated the standalone Codex API. Use gpt-4-turbo "
+             "through a generic SDK.")
+    gaps = ar.codex_recipe_gaps(stale)
+    assert any("MCP server path" in g for g in gaps)
+    assert any("stale Codex-era copy" in g for g in gaps)
+    k = ar.kpi_codex_recipe_current(gaps)
+    assert len(k["defects"]) == len(gaps) and k["score"] < 100
+
+
 def test_extension_scaffold_kpi() -> None:
     assert len(ar.kpi_extension_scaffold(False, False)["defects"]) == 2
     assert ar.kpi_extension_scaffold(True, True)["defects"] == []
@@ -256,6 +283,7 @@ def _clean_kpis() -> list[dict]:
         ar.kpi_install_oneliner(True, "AGENTS.md"),
         ar.kpi_honesty_ledger(True, []),
         ar.kpi_integration_recipes([]),
+        ar.kpi_codex_recipe_current([]),
         ar.kpi_fenced_paths_resolve([]),
         ar.kpi_extension_scaffold(True, True),
         ar.kpi_guardrails_surfaced([]),

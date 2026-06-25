@@ -11,7 +11,7 @@ an autonomous coding agent — Claude Code, OpenAI Codex, Cursor, an MCP client 
 effectively and easily**? That used to be a vibe ("we have an AGENTS.md, we're
 fine"). This is the number.
 
-It scores the git-tracked tree on thirteen mechanical KPIs in three groups — the
+It scores the git-tracked tree on seventeen mechanical KPIs in three groups — the
 exact three steps an agent walks — folds them into a weighted score and an A-F
 grade, and counts **friction-debt**: the total of concrete, re-derivable defects
 that make fak harder for an agent to find, trust, and build on. Each is a defect
@@ -36,6 +36,9 @@ more prose.
                        agent trusts a tagged ledger, not an un-caveated promise
     integration_recipes a per-agent recipe for each family an agent identifies with
                        (Claude, Codex/OpenAI, Cursor, MCP) — "point your agent here"
+    codex_recipe_current the Codex recipe matches current Codex surfaces: MCP for
+                       the current CLI/IDE path, codex exec JSON, AGENTS.md, and
+                       an honest Responses-vs-Chat-Completions fence
 
   BUILD         — an agent can contribute effectively and the guards won't ambush it
     extension_scaffold the additive extension path exists (new_leaf.py + EXTENDING)
@@ -121,6 +124,27 @@ REQUIRED_RECIPES: list[tuple[str, list[str]]] = [
     ("Cursor", ["docs/integrations/cursor.md"]),
     ("MCP client", ["examples/mcp/README.md", "docs/integrations/mcp.md"]),
 ]
+CODEX_RECIPE_FILE = "docs/integrations/openai-codex.md"
+
+# Current-Codex affordances that mere recipe presence does not prove. These map
+# to the official Codex manual shape: Codex is a coding agent with CLI/IDE/app/
+# cloud surfaces, reads AGENTS.md, supports MCP, and exposes codex exec JSON for
+# automation. fak's gateway exposes Chat Completions/Messages to clients today, so
+# the guide must also carry the honest Responses-vs-Chat-Completions fence.
+CODEX_RECIPE_CLUSTERS: list[tuple[str, tuple[str, ...]]] = [
+    ("current Codex product surface", ("coding agent", "CLI", "IDE", "app", "cloud")),
+    ("AGENTS.md instruction path", ("AGENTS.md", "reads")),
+    ("MCP server path", ("codex mcp", "fak serve --stdio")),
+    ("machine-readable codex exec path", ("codex exec", "--json")),
+    ("OpenAI-compatible proxy path", ("OPENAI_BASE_URL", "http://127.0.0.1:8080/v1")),
+    ("Responses honesty fence", ("Responses", "/v1/responses", "Chat Completions")),
+]
+STALE_CODEX_RECIPE_TOKENS = (
+    "deprecated the standalone Codex API",
+    "gpt-4-turbo",
+    "gpt-3.5-turbo",
+    "o1-preview",
+)
 
 # The enforced rules an agent WILL hit — each must be surfaced in AGENTS.md so an
 # agent learns it before the guard refuses it. Each cluster matches if ANY synonym
@@ -215,6 +239,7 @@ KPI_GROUP: dict[str, str] = {
     "install_oneliner": "adopt",
     "honesty_ledger": "adopt",
     "integration_recipes": "adopt",
+    "codex_recipe_current": "adopt",
     "extension_scaffold": "build",
     "guardrails_surfaced": "build",
     "contributor_contract": "build",
@@ -224,11 +249,12 @@ KPI_GROUP: dict[str, str] = {
     "first_command_runs": "adopt",
     "platform_guidance_consistent": "build",
 }
-# Sixteen KPIs across the three steps. The five "presence" originals per step keep
-# their relative ranking; the three success KPIs carry real weight (they measure
-# whether an agent who pastes the docs actually succeeds — the question presence
-# checks can't reach). Sum is exactly 1.0 (the score can reach 100); a regression
-# test asserts both the sum and that the weight set == the KPI set.
+# Seventeen KPIs across the three steps. The five "presence" originals per step
+# keep their relative ranking; the success/currentness KPIs carry real weight
+# (they measure whether an agent who pastes the docs actually succeeds, and
+# whether the Codex recipe still matches Codex's current surfaces — questions
+# presence checks can't reach). Sum is exactly 1.0 (the score can reach 100); a
+# regression test asserts both the sum and that the weight set == the KPI set.
 KPI_WEIGHTS: dict[str, float] = {
     # discover (0.30)
     "agents_entrypoint": 0.10,
@@ -236,13 +262,14 @@ KPI_WEIGHTS: dict[str, float] = {
     "llms_map": 0.05,
     "entry_links_resolve": 0.05,
     "identity_statement": 0.04,
-    # adopt (0.37) — now carries the two headline success checks
-    "fenced_paths_resolve": 0.09,
-    "first_command": 0.06,
-    "first_command_runs": 0.06,
+    # adopt (0.37) — now carries the two headline success checks plus Codex currentness
+    "fenced_paths_resolve": 0.08,
+    "first_command": 0.05,
+    "first_command_runs": 0.05,
     "honesty_ledger": 0.06,
-    "integration_recipes": 0.06,
-    "install_oneliner": 0.04,
+    "integration_recipes": 0.05,
+    "codex_recipe_current": 0.05,
+    "install_oneliner": 0.03,
     # build (0.33)
     "guardrails_surfaced": 0.08,
     "contributor_contract": 0.07,
@@ -397,6 +424,29 @@ def missing_recipes(present: dict[str, bool]) -> list[str]:
     """Agent families with no integration recipe on disk. ``present`` maps each
     REQUIRED_RECIPES label to whether any candidate path exists."""
     return [label for label, _ in REQUIRED_RECIPES if not present.get(label)]
+
+
+def codex_recipe_gaps(text: str | None) -> list[str]:
+    """Hard gaps in the Codex guide that recipe presence cannot catch.
+
+    This is deliberately about current Codex affordances, not generic OpenAI API
+    support: the guide must name the Codex product surfaces, AGENTS.md discovery,
+    the MCP path a current Codex CLI/IDE user can wire, `codex exec --json` for
+    automation, the OpenAI-compatible proxy URL for SDK/Chat-Completions clients,
+    and the honest Responses-vs-Chat-Completions boundary. It also refuses the
+    stale pre-Codex-product era copy that made the guide look abandoned.
+    """
+    if text is None:
+        return [f"missing {CODEX_RECIPE_FILE} — the Codex/OpenAI recipe an agent follows"]
+    gaps: list[str] = []
+    for label, tokens in CODEX_RECIPE_CLUSTERS:
+        missing = [tok for tok in tokens if not _has(text, tok)]
+        if missing:
+            gaps.append(f"{CODEX_RECIPE_FILE} missing {label}: {', '.join(missing)}")
+    for tok in STALE_CODEX_RECIPE_TOKENS:
+        if _has(text, tok):
+            gaps.append(f"{CODEX_RECIPE_FILE} still carries stale Codex-era copy: {tok}")
+    return gaps
 
 
 def missing_agent_configs(present: dict[str, bool]) -> list[str]:
@@ -558,6 +608,21 @@ def kpi_integration_recipes(missing: list[str]) -> dict[str, Any]:
             "score": _clamp(100 * covered / max(1, len(REQUIRED_RECIPES))),
             "detail": f"{covered}/{len(REQUIRED_RECIPES)} agent families have an integration recipe",
             "defects": defects, "soft": []}
+
+
+def kpi_codex_recipe_current(gaps: list[str]) -> dict[str, Any]:
+    """The OpenAI/Codex recipe must stay current with how Codex users actually
+    arrive: Codex reads AGENTS.md, the CLI/IDE can use MCP, automation uses
+    `codex exec --json`, and current model-provider docs are Responses-oriented.
+    A guide that merely exists but still says "deprecated Codex API" or implies
+    the Responses client can hit fak's Chat-Completions gateway is worse than no
+    guide — it sends the highest-intent agent down the wrong wire."""
+    n = len(gaps)
+    return {"kpi": "codex_recipe_current", "group": "adopt",
+            "score": _clamp(100 - 15 * n),
+            "detail": (f"{n} Codex currentness gap(s)" if n
+                       else "Codex recipe covers MCP, AGENTS.md, exec JSON, proxy URL, and Responses fence"),
+            "defects": gaps, "soft": []}
 
 
 def kpi_extension_scaffold(scaffold: bool, extending: bool) -> dict[str, Any]:
@@ -925,6 +990,7 @@ def gather(root: Path) -> list[dict[str, Any]]:
     claims_text = _safe_read(root / CLAIMS_FILE) if claims_present else None
     untagged = untagged_claims(claims_text)
     recipe_present = {label: any(present(p) for p in paths) for label, paths in REQUIRED_RECIPES}
+    codex_text = _safe_read(root / CODEX_RECIPE_FILE) if present(CODEX_RECIPE_FILE) else None
 
     # build
     scaffold = present(LEAF_SCAFFOLD)
@@ -961,6 +1027,7 @@ def gather(root: Path) -> list[dict[str, Any]]:
         kpi_install_oneliner(inst_found, inst_where),
         kpi_honesty_ledger(claims_present, untagged),
         kpi_integration_recipes(missing_recipes(recipe_present)),
+        kpi_codex_recipe_current(codex_recipe_gaps(codex_text)),
         kpi_fenced_paths_resolve(bad_paths),
         kpi_extension_scaffold(scaffold, extending),
         kpi_guardrails_surfaced(guard_missing),
@@ -1031,7 +1098,8 @@ def render_markdown(payload: dict[str, Any], *, stamp: str | None = None) -> str
                'the three steps an AI agent walks — discover, adopt, build — folded into a '
                'composite score and the headline friction-debt metric, re-derived from the '
                'git-tracked tree. Presence KPIs ask does-the-affordance-exist; the '
-               'paste-and-run success KPIs ask does-an-agent-who-pastes-the-docs-succeed."')
+               'paste-and-run and Codex-currentness KPIs ask whether the docs work for '
+               'current agents."')
     out.append("---")
     out.append("")
     out.append("# Agent-readiness scorecard — can an agent discover, adopt, and build on fak")
@@ -1071,7 +1139,10 @@ def render_markdown(payload: dict[str, Any], *, stamp: str | None = None) -> str
                "`debt` = units of HARD friction-debt. Five presence KPIs per step ask "
                "does-the-affordance-exist; the paste-and-run success KPIs "
                "(`fenced_paths_resolve`, `first_command_runs`, `platform_guidance_consistent`) "
-               "ask does-an-agent-who-pastes-the-docs-actually-succeed. `machine_consumable` is "
+               "ask does-an-agent-who-pastes-the-docs-actually-succeed; "
+               "`codex_recipe_current` asks whether the Codex guide still matches the current "
+               "Codex MCP / AGENTS.md / exec JSON / Responses-vs-Chat-Completions shape. "
+               "`machine_consumable` is "
                "advisory (it scores but emits no hard debt — a token is cheap to game).")
     out.append("")
     out.append("| Step | KPI | Score | Debt | Detail |")
