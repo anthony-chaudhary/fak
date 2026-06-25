@@ -8,6 +8,14 @@ package shipgate
 // mutable global state.
 //   mechanism: shipgate.go:54 (Witness.improved) and shipgate.go:64 (Evaluate).
 //
+// OPEN (2) [non-forgeability]: the keep-bit is a pure function of the profile's NAMED
+// measured signals; the Class field — the only non-measured input — never sets it on
+// its own. Every determinism sweep below now runs PER evidence class (ClassFull,
+// ClassDocsOnly, ClassProofCarrying, and an unrecognized value that must fall back to
+// ClassFull), so determinism is proven across the graduated keep-bit, not just the
+// legacy all-three default.
+//   mechanism: shipgate.go EvidenceProfile / ProfileFor and Evaluate's per-class fold.
+//
 // Discipline: fak/docs/proofs/00-METHOD.md. Stdlib only; fixed RNG seed; no wall-clock,
 // no shared mutable state. The assertion is a real invariant comparison (every repeat /
 // every goroutine yields a result bit-identical to a single reference evaluation), not a
@@ -21,13 +29,19 @@ import (
 	"testing/quick"
 )
 
-// genWitness builds a Witness from a fixed-seed RNG. We deliberately exercise the full
-// input surface Evaluate reads: Metric (string, irrelevant to the decision but part of
-// the value), Before/After (including NaN/Inf and equal-value boundaries), LowerBetter,
-// SuiteGreen, TruthClean. improvedBit is left zero — it is set only by Evaluate, so a
-// caller cannot pre-seed it; a fixed input value of the *exported* surface is what
-// determinism is claimed over.
-func genWitness(r *rand.Rand) Witness {
+// proofClasses is the closed evidence-class set every per-class sweep ranges over. It
+// includes an unrecognized value (0xFF) that must fall back to ClassFull, so the proofs
+// also pin the fallback's determinism, not just the three declared classes.
+var proofClasses = []EvidenceClass{ClassFull, ClassDocsOnly, ClassProofCarrying, EvidenceClass(0xFF)}
+
+// genWitness builds a Witness in the harness-proven evidence class `class` from a
+// fixed-seed RNG. We deliberately exercise the full input surface Evaluate reads: Class
+// (the graduated keep-bit profile), Metric (string, irrelevant to the decision but part
+// of the value), Before/After (including NaN/Inf and equal-value boundaries),
+// LowerBetter, SuiteGreen, TruthClean. improvedBit is left zero — it is set only by
+// Evaluate, so a caller cannot pre-seed it; a fixed input value of the *exported*
+// surface is what determinism is claimed over.
+func genWitness(r *rand.Rand, class EvidenceClass) Witness {
 	pick := func() float64 {
 		switch r.Intn(7) {
 		case 0:
@@ -54,6 +68,7 @@ func genWitness(r *rand.Rand) Witness {
 		after = before
 	}
 	return Witness{
+		Class:       class,
 		Metric:      metrics[r.Intn(len(metrics))],
 		Before:      before,
 		After:       after,
@@ -99,31 +114,33 @@ func (r result) consistent() bool {
 // outcomes so the equality is not trivially over a constant.
 func TestEvaluateDeterministicRepeat(t *testing.T) {
 	r := rand.New(rand.NewSource(0x5eed_1234))
-	const cases = 4000
-	const repeats = 64
-	sawKeep, sawRevert := false, false
-	for i := 0; i < cases; i++ {
-		w := genWitness(r)
-		ref := evalOnce(w)
-		if !ref.consistent() {
-			t.Fatalf("case %d: inconsistent (Decision,keep-bit) pair: %+v for %+v", i, ref, w)
-		}
-		switch ref.d {
-		case KEEP:
-			sawKeep = true
-		case REVERT:
-			sawRevert = true
-		}
-		for j := 0; j < repeats; j++ {
-			got := evalOnce(w)
-			if got != ref {
-				t.Fatalf("case %d repeat %d: Evaluate not deterministic: got %+v want %+v for witness %+v",
-					i, j, got, ref, w)
+	const cases = 1500
+	const repeats = 48
+	for _, class := range proofClasses {
+		sawKeep, sawRevert := false, false
+		for i := 0; i < cases; i++ {
+			w := genWitness(r, class)
+			ref := evalOnce(w)
+			if !ref.consistent() {
+				t.Fatalf("class %s case %d: inconsistent (Decision,keep-bit) pair: %+v for %+v", class, i, ref, w)
+			}
+			switch ref.d {
+			case KEEP:
+				sawKeep = true
+			case REVERT:
+				sawRevert = true
+			}
+			for j := 0; j < repeats; j++ {
+				got := evalOnce(w)
+				if got != ref {
+					t.Fatalf("class %s case %d repeat %d: Evaluate not deterministic: got %+v want %+v for witness %+v",
+						class, i, j, got, ref, w)
+				}
 			}
 		}
-	}
-	if !sawKeep || !sawRevert {
-		t.Fatalf("sweep was vacuous: sawKeep=%v sawRevert=%v (need both outcomes present)", sawKeep, sawRevert)
+		if !sawKeep || !sawRevert {
+			t.Fatalf("class %s sweep was vacuous: sawKeep=%v sawRevert=%v (need both outcomes present)", class, sawKeep, sawRevert)
+		}
 	}
 }
 
@@ -134,58 +151,99 @@ func TestEvaluateDeterministicRepeat(t *testing.T) {
 // to also rule out a data race on any hidden shared cell.
 func TestEvaluateDeterministicConcurrent(t *testing.T) {
 	r := rand.New(rand.NewSource(0xC0ffee_99))
-	const cases = 256
+	const cases = 128
 	const goroutines = 32
-	for i := 0; i < cases; i++ {
-		w := genWitness(r)
-		ref := evalOnce(w)
+	for _, class := range proofClasses {
+		for i := 0; i < cases; i++ {
+			w := genWitness(r, class)
+			ref := evalOnce(w)
 
-		var wg sync.WaitGroup
-		results := make([]result, goroutines)
-		start := make(chan struct{})
-		for g := 0; g < goroutines; g++ {
-			wg.Add(1)
-			go func(idx int) {
-				defer wg.Done()
-				<-start // line them up to maximize interleaving
-				results[idx] = evalOnce(w)
-			}(g)
-		}
-		close(start)
-		wg.Wait()
+			var wg sync.WaitGroup
+			results := make([]result, goroutines)
+			start := make(chan struct{})
+			for g := 0; g < goroutines; g++ {
+				wg.Add(1)
+				go func(idx int) {
+					defer wg.Done()
+					<-start // line them up to maximize interleaving
+					results[idx] = evalOnce(w)
+				}(g)
+			}
+			close(start)
+			wg.Wait()
 
-		for g := 0; g < goroutines; g++ {
-			if results[g] != ref {
-				t.Fatalf("case %d goroutine %d: concurrent Evaluate diverged: got %+v want %+v for %+v",
-					i, g, results[g], ref, w)
+			for g := 0; g < goroutines; g++ {
+				if results[g] != ref {
+					t.Fatalf("class %s case %d goroutine %d: concurrent Evaluate diverged: got %+v want %+v for %+v",
+						class, i, g, results[g], ref, w)
+				}
 			}
 		}
 	}
 }
 
 // TestEvaluateDeterministicQuick is a property-based restatement of OPEN(1) via
-// testing/quick with a FIXED seed: for every generated witness, two independent
-// evaluations agree and the pair is consistent. Independent generator from the loops
-// above, so it widens input coverage without RNG sharing.
+// testing/quick with a FIXED seed: for every class and every generated witness, two
+// independent evaluations agree and the pair is consistent. Independent generator from
+// the loops above, so it widens input coverage without RNG sharing.
 func TestEvaluateDeterministicQuick(t *testing.T) {
-	prop := func(metric string, before, after float64, lower, green, clean bool) bool {
-		w := Witness{
-			Metric:      metric,
-			Before:      before,
-			After:       after,
-			LowerBetter: lower,
-			SuiteGreen:  green,
-			TruthClean:  clean,
+	for _, class := range proofClasses {
+		prop := func(metric string, before, after float64, lower, green, clean bool) bool {
+			w := Witness{
+				Class:       class,
+				Metric:      metric,
+				Before:      before,
+				After:       after,
+				LowerBetter: lower,
+				SuiteGreen:  green,
+				TruthClean:  clean,
+			}
+			a := evalOnce(w)
+			b := evalOnce(w)
+			return a == b && a.consistent()
 		}
-		a := evalOnce(w)
-		b := evalOnce(w)
-		return a == b && a.consistent()
+		cfg := &quick.Config{
+			MaxCount: 2000,
+			Rand:     rand.New(rand.NewSource(0xABCD_4242)),
+		}
+		if err := quick.Check(prop, cfg); err != nil {
+			t.Fatalf("class %s: Evaluate not deterministic/consistent under quick.Check: %v", class, err)
+		}
 	}
-	cfg := &quick.Config{
-		MaxCount: 5000,
-		Rand:     rand.New(rand.NewSource(0xABCD_4242)),
-	}
-	if err := quick.Check(prop, cfg); err != nil {
-		t.Fatalf("Evaluate not deterministic/consistent under quick.Check: %v", err)
+}
+
+// TestKeepBitNeverSetByClassAlone is OPEN(2) [non-forgeability]: the keep-bit is a pure
+// function of the profile's NAMED measured signals, so Class — the only non-measured
+// field — can never set it on its own. Exhaustive over the finite measured-signal
+// lattice (gain x suite x truth) crossed with every class: for each fixed signal triple
+// the keep-bit equals the profile's required-subset AND, recomputed independently from
+// ProfileFor. Because that equality holds for EVERY class on the SAME triple, any
+// difference between classes is attributable only to their differing profiles, never to
+// class identity. And with every measured signal false, EVERY class REVERTs — no class
+// manufactures a keep from an unmeasured input.
+func TestKeepBitNeverSetByClassAlone(t *testing.T) {
+	bits := []bool{false, true}
+	for _, gain := range bits {
+		before, after := 0.0, 0.0
+		if gain {
+			after = 1.0 // After>Before under LowerBetter=false => improved()
+		}
+		for _, suite := range bits {
+			for _, truth := range bits {
+				for _, class := range proofClasses {
+					w := Witness{Class: class, Before: before, After: after, SuiteGreen: suite, TruthClean: truth}
+					_, out := Evaluate(w)
+					p := ProfileFor(class)
+					want := (!p.needGain || w.improved()) && (!p.needSuite || w.SuiteGreen) && (!p.needTruth || w.TruthClean)
+					if out.Kept() != want {
+						t.Fatalf("class %s gain=%v suite=%v truth=%v: keep-bit=%v want profile-AND=%v",
+							class, gain, suite, truth, out.Kept(), want)
+					}
+					if !gain && !suite && !truth && out.Kept() {
+						t.Fatalf("class %s set the keep-bit from an all-false (unmeasured) input", class)
+					}
+				}
+			}
+		}
 	}
 }
