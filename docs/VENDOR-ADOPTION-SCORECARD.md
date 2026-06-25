@@ -134,6 +134,16 @@ The target is **15 credible pilots** after the following work, a 2.1x expansion:
 | P1 | Publish the **Agent Tool Governance Gateway profile**: verdict schema, refusal vocabulary, quarantine semantics, audit fields, and conformance fixtures | +2 | 2.14x |
 | P1 | Run a **vendor-specific live pilot proof**: one Claude Code session and one Codex session, each showing allowed work continues after a denied dangerous call | +2 | 2.43x |
 
+**Progress as of 2026-06-25:** the repo now has the vendor proof packet
+([Anthropic](vendor/anthropic-internal-pitch.md),
+[OpenAI](vendor/openai-internal-pitch.md)), the
+[OpenAI Agents SDK guardrail adapter example](../examples/openai-agents-guardrail/),
+the [Claude Code managed rollout guide](vendor/claude-code-managed-rollout.md), and
+the [Agent Tool Governance Gateway profile](standards/agent-tool-governance-gateway.md)
+with [conformance fixtures](standards/fixtures/). That moves the artifact-backed
+pilot count from **7 to 15** (2.14x). The remaining P1 evidence gap is live pilot
+data proving the same paths during real Claude Code and Codex sessions.
+
 Stop after P1 if the goal is 2x. P2 work can improve depth, but it is not needed to
 double the number of credible pilots.
 
@@ -164,15 +174,15 @@ project-specific API.
 
 Do the smallest work that changes adoption probability, in this order:
 
-1. **Create `docs/vendor/anthropic-internal-pitch.md`.** One page for Claude Code,
-   MCP, API tools, enterprise settings, and security. Include exactly one pilot command
-   and one denied-call witness.
-2. **Create `docs/vendor/openai-internal-pitch.md`.** One page for Codex, Agents SDK,
-   MCP, managed configuration, and runtime security. Include the guardrail mapping table.
-3. **Create `examples/openai-agents-guardrail/`.** Minimal Python example: call
+1. **Done: `docs/vendor/anthropic-internal-pitch.md`.** One page for Claude Code,
+   MCP, API tools, enterprise settings, and security, with a pilot command and
+   denied-call witness.
+2. **Done: `docs/vendor/openai-internal-pitch.md`.** One page for Codex, Agents SDK,
+   MCP, managed configuration, and runtime security, with the guardrail mapping table.
+3. **Done: `examples/openai-agents-guardrail/`.** Minimal Python example: call
    `fak_adjudicate` before a tool and `fak_admit` after a tool; emit an Agents SDK trace
    mapping if available.
-4. **Create `docs/standards/agent-tool-governance-gateway.md`.** Vendor-neutral
+4. **Done: `docs/standards/agent-tool-governance-gateway.md`.** Vendor-neutral
    profile plus conformance JSON fixtures.
 5. **Record two live pilot artifacts under `experiments/agent-live/`.** One Claude Code,
    one Codex. Each must show "danger denied, useful task continues."
