@@ -45,7 +45,7 @@ func riskClass(tool string, args map[string]any) class {
 		return classWrite
 	}
 	if lowRiskReadShaped(tool) {
-		if targetPath(args) != "" || commandText(args) != "" {
+		if hasWritePayload(args) {
 			return classWrite
 		}
 		return classRead
@@ -53,18 +53,25 @@ func riskClass(tool string, args map[string]any) class {
 	return classWrite
 }
 
-// commandText returns the shell command string a call carries, reading the same arg
-// keys the shell write floor inspects ("command" then "cmd"). Used by riskClass to
-// escalate a read-shaped name that smuggles a command into the write class. Empty
-// when no command-bearing scalar arg is present.
-func commandText(args map[string]any) string {
-	if s, ok := argString(args, "command"); ok && s != "" {
-		return s
+// hasWritePayload reports whether the decoded args carry a write-capable value the
+// self-modify / shell rungs would inspect: a non-empty path-like target (the keys
+// targetPath scans) or a shell command (the keys commandSelfModify reads). It scans
+// the args map ONCE rather than probing a fixed series of keys twice. Scanning ALL
+// keys (vs targetPath's first-match) only ever escalates MORE calls to the write
+// class, the fail-closed direction.
+func hasWritePayload(args map[string]any) bool {
+	for k, v := range args {
+		s, ok := v.(string)
+		if !ok || s == "" {
+			continue
+		}
+		switch k {
+		case "path", "file_path", "filePath", "filepath", "file", "target", "filename", "dir",
+			"command", "cmd":
+			return true
+		}
 	}
-	if s, ok := argString(args, "cmd"); ok && s != "" {
-		return s
-	}
-	return ""
+	return false
 }
 
 // rung enumerates the ordered sub-rungs Adjudicate folds, so a RungProfile can gate
@@ -160,4 +167,27 @@ func sanitizeProfile(pr *RungProfile) *RungProfile {
 		}
 	}
 	return out
+}
+
+// DefaultRungProfile is the standard read-class profile (#667): it elides the
+// write-only rungs (self-modify, the shell + synth-tool write floor, the lint-write
+// grammar) for classRead. Those rungs are PROVABLY inert for a read-class call —
+// riskClass puts any write-capable call (a path target or a shell command) in
+// classWrite, where this profile elides nothing — so the profile changes no verdict.
+// Every rung it names is non-mandatory for classRead (mustRun), so sanitizeProfile
+// keeps the elision intact.
+func DefaultRungProfile() *RungProfile {
+	return (&RungProfile{}).elide(classRead,
+		rungSelfModify, rungCmdSelfModify, rungSynthTool, rungLintWrite)
+}
+
+// DefaultPolicyWithReadProfile is DefaultPolicy plus the read-class profile. It is
+// the EXPLICIT constructor #667 calls for: DefaultPolicy (and the zero Policy) keep
+// a nil Profile — the byte-identical HEAD floor — and only an operator who selects
+// THIS constructor opts into the read-class rung elision. The write floor is unchanged
+// (DefaultRungProfile elides nothing for classWrite).
+func DefaultPolicyWithReadProfile() Policy {
+	p := DefaultPolicy()
+	p.Profile = DefaultRungProfile()
+	return p
 }
