@@ -106,6 +106,15 @@ jobs:
           python tools/scrub_hardware_names_test.py
           python tools/new_leaf_test.py
           python tools/scrub_hardware_names.py --check
+          # Claude config-home guard (#606): a future tools/*.py must not re-introduce a
+          # bare ~/.claude/<store> hardcode that ignores CLAUDE_CONFIG_DIR (the fleet
+          # relocates every agent's config home), the way sync_memory.py once did
+          # (3eab69a). Flags a home-anchored bare .claude stepping into projects/memory
+          # without consulting CLAUDE_CONFIG_DIR; the all-accounts .claude* glob and the
+          # repo-root .claude/memory mirror are NOT flagged. Self-test HARD, then --check
+          # over the tracked tools tree (clean today: sync_memory/ctxcost/ctxwin pass).
+          python tools/claude_config_home_guard_test.py
+          python tools/claude_config_home_guard.py --check
 
       # Skill-frontmatter lint: the load-bearing Claude-only SKILL.md frontmatter keys
       # (allowed-tools / disable-model-invocation / user-invocable) that opencode silently
