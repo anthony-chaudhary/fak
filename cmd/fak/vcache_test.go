@@ -24,11 +24,11 @@ func TestRunVCacheStatusReportsM5AndRemainingIssues(t *testing.T) {
 		"M4 recall cost-gate proof: refuted",
 		"codex-like star proof: PROVEN",
 		"codex/openai verifier: ready",
+		"codex/openai live telemetry: proven (Codex CLI replay artifact)",
 		"codex/openai cached-token sample: PROVEN saved 1728.0 / 2006.0",
 		"codex/openai zero-cache sample: REFUTED saved 0.0 / 2006.0",
-		// #719 (M4 chains & recall) is closed by the off-path decision engine, so it
-		// is no longer in the live-loop "remaining" list (M1-M3 + the #727 probe are).
-		"remaining: #716 #717 #718 #727",
+		// #719 (M4 chains & recall) and #727 (Codex/OpenAI telemetry probe) are closed.
+		"remaining: #716 #717 #718",
 	} {
 		if !strings.Contains(s, want) {
 			t.Fatalf("status missing %q:\n%s", want, s)

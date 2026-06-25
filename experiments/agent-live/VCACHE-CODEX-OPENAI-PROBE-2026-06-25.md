@@ -255,7 +255,7 @@ new thread: may lose part or all of the hit depending on provider routing/keying
 
 ### 6. Run the raw OpenAI API probe
 
-For raw OpenAI API traffic, issue #727 still has the optional provider probe:
+For raw OpenAI API traffic, the optional provider probe remains available:
 run repeated Codex/OpenAI requests with a stable 1024+ token prefix, capture
 provider JSONL containing `cached_tokens`, and feed it to:
 

@@ -144,6 +144,7 @@ fak codelint  PATH...                                  # lint agent-written code
 fak policy    --dump > policy.json | --check policy.json   # author/validate the deployable capability floor
 fak route     --aspect tool_call --tool refund_payment [--manifest FILE] [--simulate "a,b,b"]   # which model/ensemble routes this aspect; --dump/--check author the routing manifest
 fak routebench [--corpus FILE] [--routed F] [--single F] [--json]            # offline routing benchmark: per-aspect+ensemble vs single-model on cost/latency/quality (no model in the loop)
+fak vcache    status | prove | prove-telemetry           # virtual provider-cache status plus planned/observed token-savings proof/refutation
 fak attest    --policy FILE [--probes FILE] [--json]        # compliance attestation: prove the capability floor from preflight (exit 0 PROVEN / 1 drift / 2 usage)
 fak hook      < call.json                              # spawned-hook decide (the A/B baseline)
 ```
@@ -193,6 +194,28 @@ demo corpus + `DefaultManifest` vs a one-frontier-model baseline; `--corpus` /
 `--routed` / `--single` load your own, `--dump-corpus` emits the starter corpus to
 edit. Every figure is a ROUGH lens, never a bill or a measured SLA. See
 [`docs/model-routing.md`](model-routing.md#the-offline-routing-benchmark-fak-routebench).
+
+`fak vcache status|prove|prove-telemetry` is the proof surface for the virtual
+provider-cache work. `status` reports the honest current state: the M5 Governor is up
+as a local, off-path policy engine, while provider calibration/warming/recall remain
+open in #716-#718 and the Codex/OpenAI cached-token probe is proven by #727. `prove` runs
+the deterministic star-anchor savings arithmetic without a provider or model; the
+default Codex-like workload (4096-token anchor, 7 sibling requests, 10-token suffixes,
+0.1 read / 1.25 write multipliers) proves 21,094.4 token-equivalents saved, 73.4%,
+and exits 1 for refuted workloads such as an anchor below the provider minimum.
+`prove-telemetry --file experiments/agent-live/vcache-claude-prefix-probe-2026-06-25.jsonl`
+replays observed provider counters and proves 13,141.5 token-equivalents saved
+(4.73%) on the four-turn Claude Code prefix probe, with the first positive request at
+4; the same verifier refutes the first three turns because the cache reads have not
+repaid the 1h cache-write cost yet. The same JSONL reader accepts raw OpenAI
+Responses usage (`usage.input_tokens_details.cached_tokens`), Chat Completions
+usage (`usage.prompt_tokens_details.cached_tokens`), Codex CLI `token_count` rows,
+and `codex exec --json` `turn.completed` usage rows. The replayable Codex artifact
+at `experiments/agent-live/vcache-codex-token-count-proof-2026-06-25.jsonl` proves
+9,147,340.8 token-equivalents saved (85.98%) over 68 token-count events. `status`
+reports the verifier as ready, includes a cached-token sample proof and zero-cache
+refutation, and keeps the raw OpenAI API probe as an optional no-credential skip path.
+These are cost proofs only: correctness never depends on a provider cache hit.
 
 `scripts/ci.ps1` (or `make ci`) runs build + vet + test + the CLAIMS lint as one gate.
 

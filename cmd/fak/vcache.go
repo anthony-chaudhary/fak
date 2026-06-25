@@ -56,7 +56,7 @@ func vcacheUsage(w io.Writer) {
 status reports what is actually up: the M5 governor is a local, off-path policy
 engine; the M4 chains & recall engine is off-path and gated OFF by default;
 provider calibration/warming remain tracked by #716-#718, and Codex/OpenAI cached-
-token telemetry remains tracked by #727.
+token telemetry is proven by the replayable #727 artifacts.
 prove runs the deterministic star-anchor token-savings proof. Exit 0 means PROVEN;
 exit 1 means REFUTED; exit 2 means usage error.
 prove-telemetry replays provider usage JSONL, such as Claude Code probe output,
@@ -300,7 +300,7 @@ func defaultVCacheStatus() vcacheStatusReport {
 		Status:       "M5 governor up; M4 chains & recall up (gated OFF by default); full vCache provider loop not yet live",
 		Governor:     "up (pin/lazy/evict, warm budget, affinity, secret gate)",
 		Chains:       "up (prefix DAG, topological replay, cost-gated rebuild) — gated OFF by default; off-path",
-		LiveProvider: "not wired; M1-M3 remain open; Codex/OpenAI telemetry probe #727 pending",
+		LiveProvider: "not wired; M1-M3 remain open; Codex/OpenAI telemetry #727 proven from replayable artifacts",
 		Proof: vcachegov.ProveStarSavings(vcachegov.StarSavingsInput{
 			AnchorTokens:    4096,
 			SuffixTokens:    10,
@@ -323,7 +323,6 @@ func defaultVCacheStatus() vcacheStatusReport {
 			{716, "M1 observe & calibrate", "https://github.com/anthony-chaudhary/fak/issues/716"},
 			{717, "M2 star anchors", "https://github.com/anthony-chaudhary/fak/issues/717"},
 			{718, "M3 dedicated warming", "https://github.com/anthony-chaudhary/fak/issues/718"},
-			{727, "Codex/OpenAI telemetry probe", "https://github.com/anthony-chaudhary/fak/issues/727"},
 		},
 		CorrectnessLaw: "cost is budgeted at the uncached price; hits are realized rebates, never trust claims",
 	}
@@ -331,11 +330,10 @@ func defaultVCacheStatus() vcacheStatusReport {
 
 func defaultCodexOpenAIStatus() vcacheCodexOpenAIStatus {
 	hasKey := strings.TrimSpace(os.Getenv("OPENAI_API_KEY")) != ""
-	live := "unavailable"
-	reason := "OPENAI_API_KEY not present; raw OpenAI API probe not run. Codex CLI session token_count JSONL can be passed to prove-telemetry."
+	live := "proven (Codex CLI replay artifact)"
+	reason := "replay experiments/agent-live/vcache-codex-token-count-proof-2026-06-25.jsonl with prove-telemetry; raw OpenAI API probe not run because OPENAI_API_KEY is not present"
 	if hasKey {
-		live = "not-run"
-		reason = "OPENAI_API_KEY is present, but a provider-authored OpenAI usage JSONL file is still required for the raw API probe"
+		reason = "Codex CLI replay artifact is tracked; OPENAI_API_KEY is present, so tools/vcache_openai_probe.py can refresh the optional raw API probe"
 	}
 	return vcacheCodexOpenAIStatus{
 		Verifier:            "ready",
