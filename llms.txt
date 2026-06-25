@@ -1,26 +1,32 @@
 # fak — the Fused Agent Kernel (agent kernel)
 
-> **Treat the model like an untrusted program, and the tool call like a syscall — the model proposes, the kernel disposes.**
+> **Put `fak` in front of the agent you already run — cheaper long sessions, the right model per call, and a verdict on every tool call — by treating the tool call like a syscall: the model proposes, the kernel disposes.**
 
-> `fak` is an **agent kernel** (also described as an *agent tool firewall*): an
-> in-process, **default-deny permission gate** for AI agents fused with an
-> **addressable, bit-exact KV cache**, written in Go. It treats the language model
-> like an untrusted program and every tool call like a syscall that must pass
-> through a kernel the model does not control. The same boundary that enforces
-> security (which effects are allowed, which tool results may enter the model's
-> context) also drives performance (reuse shared work once instead of every turn).
-> It is for teams running **self-hosted LLM agent fleets** who need prompt-injection
-> containment, capability security, and cache-efficient inference at the same time.
-> It ships as **one static Go binary with zero external dependencies** — the gateway,
-> the capability gate, the result quarantine, and the audit surface in a single
-> process — so the same artifact a developer runs on a laptop is what a platform team
-> hardens for a fleet (you add flags, not components). It does **not** replace the token
-> engine; it fronts one, owning the governance band that vLLM/SGLang leave open.
+> `fak` is an **agent kernel** (also described as an *agent tool firewall*): one
+> static Go binary you put in front of the AI agent you already run (Claude Code,
+> Codex, Cursor, or any OpenAI / Anthropic / MCP client) by repointing a single base
+> URL. It is an in-process, **default-deny permission gate** fused with an
+> **addressable, bit-exact KV cache**. The broad win is operational: it sheds the old
+> turns of a long session while keeping the provider's prompt-cache prefix
+> byte-identical (the discount survives), routes each tool call to the right model,
+> avoids wasted turns, and writes an auditable verdict for everything. The *same*
+> boundary is also a hard security floor — it treats the language model like an
+> untrusted program and every tool call like a syscall that must pass through a kernel
+> the model does not control, so which effects are allowed and which tool results may
+> enter context is decided by structure, not by a classifier. It ships as **one static
+> Go binary with zero external dependencies** — gateway, capability gate, result
+> quarantine, and audit surface in a single process — so the same artifact a developer
+> runs on a laptop is what a platform team hardens for a fleet (you add flags, not
+> components). It does **not** replace the token engine; it fronts one, owning the
+> governance band that vLLM/SGLang leave open.
 
 ## What problem it solves
 
-- **Prompt injection / tool poisoning containment.** A separate quarantine holds suspicious tool *results* out of the model's context entirely — addressing OWASP Agentic Top-10 and the MCP Top-10 (Tool Poisoning, Memory Poisoning) by *structure*, not by a classifier the model can argue past.
+- **Long sessions stop getting expensive.** A growing agent conversation re-sends its whole transcript every turn, and the provider only discounts it while the cached prefix stays byte-for-byte identical. `fak` sheds the un-cacheable middle turns by splicing on the original bytes (a memcpy, never a re-marshal), so the cache hit survives instead of breaking. `fak` guarantees the prefix it ships is byte-identical; whether the provider reuses the cache is the provider's call, and `fak` relays its number rather than claiming it.
+- **The right model per call.** Route an aspect — one tool call, a reasoning step, a tagged stage — to a different model, with first-class ensembles (`vote`, `best_of`). The routing *decision* spine is shipped and testable offline; live multi-model dispatch is the labeled next step.
+- **Fewer wasted turns.** A repeated read served locally, a malformed call repaired in place, a dead-end branch denied before the agent spends a turn on it — priced as effective productive turns per executed turn (and honest that a single-use cache entry is a loss).
 - **Default-deny capability security.** The permission policy runs *inside* the kernel, on the same call path as the tool call (one address space, no IPC). Refusing an irreversible action does not depend on *catching* an attack; the lever was never wired up. This fails **closed**, not open.
+- **Prompt injection / tool poisoning containment.** A separate quarantine holds suspicious tool *results* out of the model's context entirely — addressing OWASP Agentic Top-10 and the MCP Top-10 (Tool Poisoning, Memory Poisoning) by *structure*, not by a classifier the model can argue past.
 - **Addressable, bit-exact KV cache.** Reach into the middle of a kept model run, evict one span (a poisoned tool result, an expired secret), and leave the KV cache bit-for-bit identical to a run that never saw it (verified at `max|Δ| = 0`). No shipped serving engine offers mid-run causal eviction.
 - **Cache-efficient agent fleets.** Do shared prefill work once; later agents read it for free. ~4× fewer tokens vs a tuned warm-cache stack on a 50-turn × 5-agent run; 8.8–9.7× modeled prefill elimination vs the naive floor over the real WebVoyager web-agent set (1.0–1.1× vs a tuned per-agent KV).
 

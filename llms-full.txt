@@ -6,27 +6,33 @@
 
 # fak — the Fused Agent Kernel (agent kernel)
 
-> **Treat the model like an untrusted program, and the tool call like a syscall — the model proposes, the kernel disposes.**
+> **Put `fak` in front of the agent you already run — cheaper long sessions, the right model per call, and a verdict on every tool call — by treating the tool call like a syscall: the model proposes, the kernel disposes.**
 
-> `fak` is an **agent kernel** (also described as an *agent tool firewall*): an
-> in-process, **default-deny permission gate** for AI agents fused with an
-> **addressable, bit-exact KV cache**, written in Go. It treats the language model
-> like an untrusted program and every tool call like a syscall that must pass
-> through a kernel the model does not control. The same boundary that enforces
-> security (which effects are allowed, which tool results may enter the model's
-> context) also drives performance (reuse shared work once instead of every turn).
-> It is for teams running **self-hosted LLM agent fleets** who need prompt-injection
-> containment, capability security, and cache-efficient inference at the same time.
-> It ships as **one static Go binary with zero external dependencies** — the gateway,
-> the capability gate, the result quarantine, and the audit surface in a single
-> process — so the same artifact a developer runs on a laptop is what a platform team
-> hardens for a fleet (you add flags, not components). It does **not** replace the token
-> engine; it fronts one, owning the governance band that vLLM/SGLang leave open.
+> `fak` is an **agent kernel** (also described as an *agent tool firewall*): one
+> static Go binary you put in front of the AI agent you already run (Claude Code,
+> Codex, Cursor, or any OpenAI / Anthropic / MCP client) by repointing a single base
+> URL. It is an in-process, **default-deny permission gate** fused with an
+> **addressable, bit-exact KV cache**. The broad win is operational: it sheds the old
+> turns of a long session while keeping the provider's prompt-cache prefix
+> byte-identical (the discount survives), routes each tool call to the right model,
+> avoids wasted turns, and writes an auditable verdict for everything. The *same*
+> boundary is also a hard security floor — it treats the language model like an
+> untrusted program and every tool call like a syscall that must pass through a kernel
+> the model does not control, so which effects are allowed and which tool results may
+> enter context is decided by structure, not by a classifier. It ships as **one static
+> Go binary with zero external dependencies** — gateway, capability gate, result
+> quarantine, and audit surface in a single process — so the same artifact a developer
+> runs on a laptop is what a platform team hardens for a fleet (you add flags, not
+> components). It does **not** replace the token engine; it fronts one, owning the
+> governance band that vLLM/SGLang leave open.
 
 ## What problem it solves
 
-- **Prompt injection / tool poisoning containment.** A separate quarantine holds suspicious tool *results* out of the model's context entirely — addressing OWASP Agentic Top-10 and the MCP Top-10 (Tool Poisoning, Memory Poisoning) by *structure*, not by a classifier the model can argue past.
+- **Long sessions stop getting expensive.** A growing agent conversation re-sends its whole transcript every turn, and the provider only discounts it while the cached prefix stays byte-for-byte identical. `fak` sheds the un-cacheable middle turns by splicing on the original bytes (a memcpy, never a re-marshal), so the cache hit survives instead of breaking. `fak` guarantees the prefix it ships is byte-identical; whether the provider reuses the cache is the provider's call, and `fak` relays its number rather than claiming it.
+- **The right model per call.** Route an aspect — one tool call, a reasoning step, a tagged stage — to a different model, with first-class ensembles (`vote`, `best_of`). The routing *decision* spine is shipped and testable offline; live multi-model dispatch is the labeled next step.
+- **Fewer wasted turns.** A repeated read served locally, a malformed call repaired in place, a dead-end branch denied before the agent spends a turn on it — priced as effective productive turns per executed turn (and honest that a single-use cache entry is a loss).
 - **Default-deny capability security.** The permission policy runs *inside* the kernel, on the same call path as the tool call (one address space, no IPC). Refusing an irreversible action does not depend on *catching* an attack; the lever was never wired up. This fails **closed**, not open.
+- **Prompt injection / tool poisoning containment.** A separate quarantine holds suspicious tool *results* out of the model's context entirely — addressing OWASP Agentic Top-10 and the MCP Top-10 (Tool Poisoning, Memory Poisoning) by *structure*, not by a classifier the model can argue past.
 - **Addressable, bit-exact KV cache.** Reach into the middle of a kept model run, evict one span (a poisoned tool result, an expired secret), and leave the KV cache bit-for-bit identical to a run that never saw it (verified at `max|Δ| = 0`). No shipped serving engine offers mid-run causal eviction.
 - **Cache-efficient agent fleets.** Do shared prefill work once; later agents read it for free. ~4× fewer tokens vs a tuned warm-cache stack on a 50-turn × 5-agent run; 8.8–9.7× modeled prefill elimination vs the naive floor over the real WebVoyager web-agent set (1.0–1.1× vs a tuned per-agent KV).
 
@@ -150,22 +156,32 @@ The dedicated, cross-linked capability pages. Each lists one category of support
 
 ## What It Is
 
-`fak` is one Go binary that puts a kernel boundary under an AI agent.
+`fak` is one Go binary you put in front of the AI agent you already run — Claude
+Code, Codex, Cursor, or any OpenAI / Anthropic / MCP client. You keep your model,
+your IDE, and your tools. You point one base URL at `fak`, and it gives you a handle
+on the parts of a real agent loop that get expensive or go wrong:
 
-The model can propose a tool call. The kernel decides whether that call exists,
-whether its arguments are allowed, whether the result may enter context, and what
-gets audited. Treat the model like an untrusted program; treat the tool call like
-a syscall.
+- **Cheaper long sessions.** A 100k-token Claude Code conversation re-sends its whole
+  transcript every turn. `fak` sheds the old turns while keeping the provider's
+  prompt-cache prefix byte-identical, so the discount survives instead of breaking.
+- **The right model per call.** Send an easy read to a cheap model and a write-shaped
+  call to a careful one — chosen per tool call, not per whole request.
+- **Fewer wasted turns.** A repeated read served locally, a malformed call repaired in
+  place, a dead-end branch refused before the agent spends a turn on it.
+- **A trail you can audit.** Every decision is a plain verdict — `ALLOW`, `DENY`,
+  `TRANSFORM`, or `QUARANTINE` — in JSON logs, an optional hash-chained journal, and
+  Prometheus metrics.
 
-The most useful path today is simple: run the agent you already use through
-`fak guard`, `fak serve`, or the MCP server, then give it a reviewable policy file.
-You keep your model, your IDE, and your tools. `fak` adds the structural floor.
-Default-deny (nothing runs unless named) is the baseline.
+> TL;DR: Put `fak` in front of the agent you already run. It makes long sessions
+> cheaper, routes each call to the right model, keeps unsafe tool results out of
+> context, and records every verdict. One binary, no rewrite, no key to start.
 
-> TL;DR: Put `fak` under the agent you already run. It blocks unlisted tools,
-> keeps unsafe tool results out of context, and records verdicts you can audit.
-
-A verdict is plain: `ALLOW`, `DENY`, `TRANSFORM`, or `QUARANTINE`.
+It does this by sitting on the tool-call path as a kernel: the model *proposes* a
+call; `fak` decides whether that call exists, whether its arguments are allowed,
+whether the result may enter context, and what gets reused. The same boundary that
+saves you tokens is also where a dangerous call gets refused — which is why teams who
+need a hard security floor reach for it too (see
+[For security teams](#for-security-teams)).
 
 ## Start Here
 
@@ -206,6 +222,35 @@ Code it can use your logged-in Claude subscription by default; no API key is
 required.
 
 See [docs/integrations/claude.md](https://github.com/anthony-chaudhary/fak/blob/main/docs/integrations/claude.md).
+
+### Long sessions: shed history, keep the cache hit
+
+The same wrap is also where a 100k+-token session stops getting expensive. Add one
+flag and `fak` shrinks the OLD turns of a growing Claude Code conversation while
+keeping the `cache_control` prefix **byte-identical**, so the provider's prompt-cache
+hit survives instead of breaking:
+
+```bash
+fak guard --compact-history-budget 8000 -- claude
+```
+
+Why it matters: a long session re-sends the whole transcript every turn, and the
+provider only discounts it while the cached prefix stays byte-for-byte the same. The
+naive fix — summarize and re-serialize — reorders the body and *busts* the cache, so
+a long session costs **more**. `fak` instead drops the un-cacheable middle turns by
+splicing on the original bytes (a memcpy, never a re-marshal), and falls back to doing
+nothing on any ambiguity, so it never breaks a turn.
+
+It is honest about the line between what it controls and what it only observes. `fak`
+*guarantees* one thing: the prefix it ships is byte-identical to what you sent (it refuses
+to ship otherwise). That makes the cache hit *possible* — it does not *force* it. Whether the
+provider actually reuses the cache is the provider's call, and `fak` relays its number rather
+than claiming it: `/metrics` shows `fak_gateway_compaction_*` with the tokens `fak` shed
+(what it sent) next to the provider's reported `cache_read` (what came back), and the
+`fak guard` exit line summarizes both. If that `cache_read` is low while the prefix was
+byte-identical, the miss is provider-side — a cache TTL expiry, an eviction, or your client
+moving its own breakpoint — not something `fak` broke. You see it either way instead of
+silently overpaying. Tracking: [#745](https://github.com/anthony-chaudhary/fak/issues/745).
 
 ### Codex, Cursor, MCP hosts
 
@@ -268,10 +313,11 @@ wording.
 
 That changes the useful first screen for `fak`. The value is:
 
+- Make prompt-cache and routing decisions explicit enough to test — and keep the
+  cache discount alive across a long session instead of busting it.
+- Preserve a traceable, privacy-conscious audit trail of every tool call.
 - Put a default-deny floor under the tools your agent already has.
 - Keep poisoned tool output and secret-shaped results out of model context.
-- Preserve a traceable, privacy-conscious audit trail.
-- Make prompt-cache and routing decisions explicit enough to test.
 
 Relevant external signals: [Claude Code changelog](https://code.claude.com/docs/en/changelog),
 [MCP stateless/auth discussion](https://dev.to/alexmercedcoder/ai-weekly-codex-goes-long-mcp-goes-stateless-584d),
@@ -294,9 +340,11 @@ and [MCP tool-poisoning/security analysis](https://www.cybedefend.com/en/blog/mc
 Every claim in [CLAIMS.md](https://github.com/anthony-chaudhary/fak/blob/main/CLAIMS.md) carries exactly one tag:
 `[SHIPPED]`, `[SIMULATED]`, or `[STUB]`. The lint gate enforces that honesty ledger.
 
-## Security Model
+## For security teams
 
-`fak` is the lock around tool execution.
+If a hard capability floor is *why* you're here — not just a nice-to-have — this
+section is for you. The same boundary that sheds tokens above is, for your purposes,
+the lock around tool execution.
 
 Most agent security tries to recognize bad text. Recognizers help. They are not
 the floor. Prompt injection is a text game. Attackers get turns too. `fak` moves
@@ -3913,7 +3961,7 @@ description: "Frequently asked questions about fak, the agent kernel: how its de
       "name": "What is fak?",
       "acceptedAnswer": {
         "@type": "Answer",
-        "text": "fak is an agent kernel: an in-process, default-deny permission gate for AI agents, fused with an addressable, bit-exact KV cache, written in Go. It treats the language model like an untrusted program and every tool call like a syscall that must pass through a kernel the model cannot control. The same boundary enforces security (which effects are allowed, which tool results may enter the model's context) and drives performance (do shared work once instead of every turn). It is also described as an agent tool firewall."
+        "text": "fak is an agent kernel: one static Go binary you put in front of the AI agent you already run — Claude Code, Codex, Cursor, or any OpenAI / Anthropic / MCP client — by repointing a single base URL, with no rewrite. It makes long sessions cheaper (shedding old turns while keeping the provider's prompt-cache prefix byte-identical), routes each tool call to the right model, keeps unsafe tool results out of the model's context, and records an auditable verdict for every call. It is an in-process, default-deny permission gate fused with an addressable, bit-exact KV cache: the same boundary that saves tokens is also a hard security floor, because it treats the language model like an untrusted program and every tool call like a syscall that must pass through a kernel the model cannot control. It is also described as an agent tool firewall."
       }
     },
     {
@@ -3921,7 +3969,7 @@ description: "Frequently asked questions about fak, the agent kernel: how its de
       "name": "What problem does fak solve?",
       "acceptedAnswer": {
         "@type": "Answer",
-        "text": "It closes the gap between agent safety and agent cost at the same boundary: Prompt injection and tool poisoning reach the model through tool results. fak quarantines suspicious results so they never enter the model's context. Irreversible actions (refunds, deletes, sends) are gated by a reviewable allow-list that is checked inside the kernel. It is default-deny and fail-closed. Agent fleets waste tokens re-processing the same shared context every turn. fak makes the KV cache a kernel object so shared work is computed once and reused."
+        "text": "It gives you control over the parts of a real agent loop that get expensive or go wrong — at one boundary, the tool call: Long sessions get expensive. A growing conversation re-sends its whole transcript every turn, and the provider only discounts it while the cached prefix stays byte-for-byte identical. fak sheds the un-cacheable middle turns by splicing on the original bytes, so the cache discount survives instead of breaking. fak guarantees prefix byte-identity; whether the provider reuses the cache is the provider's call, which fak relays rather than claims. One model rarely fits every call. fak routes an aspect — a tool call, a reasoning step, a stage — to a different model, with first-class ensembles. The routing decision is shipped and testable offline; live dispatch is the next step. Agents waste turns and tokens re-processing shared context and retrying malformed calls. fak serves a repeated read locally, repairs a malformed call in place, and makes the KV cache a kernel object so shared work is computed once. Dangerous and poisoned calls. Irreversible actions (refunds, deletes, sends) are gated by a reviewable allow-list checked inside the kernel — default-deny …"
       }
     },
     {
@@ -3977,7 +4025,7 @@ description: "Frequently asked questions about fak, the agent kernel: how its de
       "name": "How much faster is fak for agent fleets?",
       "acceptedAnswer": {
         "@type": "Answer",
-        "text": "The win is in reread-rate, not raw GPU speed. On a 50-turn × 5-agent run it is about 4× fewer tokens than a tuned warm-cache stack: the apples-to-apples comparison (~60× only against the naive re-send-everything baseline, not the headline). Over the real WebVoyager set (643 tasks) a deterministic geometry model puts the prefill work-elimination at 8.8–9.7× vs the naive floor (1.0–1.1× vs a tuned per-agent-KV stack) — modeled, not a wall-clock. The reuse win is self-host only. An app that merely calls a frontier API gets the safety floor but not the savings. Every number is traced to a commit and artifact in the benchmark authority."
+        "text": "The win is in reread-rate, not raw GPU speed. On a 50-turn × 5-agent run it is about 4× fewer tokens than a tuned warm-cache stack: the apples-to-apples comparison (~60× only against the naive re-send-everything baseline, not the headline). Over the real WebVoyager set (643 tasks) a deterministic geometry model puts the prefill work-elimination at 8.8–9.7× vs the naive floor (only 1.0–1.1× vs a tuned per-agent-KV stack) — modeled, not a wall-clock. The reuse win is self-host only. An app that merely calls a frontier API gets the safety floor but not the savings. Every number is traced to a commit and artifact in the benchmark authority."
       }
     },
     {
@@ -5511,24 +5559,39 @@ The most common questions, answered to stand on their own. The deeper topic sect
 
 ## What is fak?
 
-`fak` is an **agent kernel**: an in-process, default-deny **permission gate** for AI
-agents, fused with an **addressable, bit-exact KV cache**, written in Go. It treats the
-language model like an untrusted program and every tool call like a syscall that must
-pass through a kernel the model cannot control. The same boundary enforces security
-(which effects are allowed, which tool results may enter the model's context) and drives
-performance (do shared work once instead of every turn). It is also described as an
+`fak` is an **agent kernel**: one static Go binary you put in front of the AI agent
+you already run — Claude Code, Codex, Cursor, or any OpenAI / Anthropic / MCP client —
+by repointing a single base URL, with no rewrite. It makes long sessions cheaper
+(shedding old turns while keeping the provider's prompt-cache prefix byte-identical),
+routes each tool call to the right model, keeps unsafe tool results out of the model's
+context, and records an auditable verdict for every call. It is an in-process,
+default-deny **permission gate** fused with an **addressable, bit-exact KV cache**:
+the same boundary that saves tokens is also a hard security floor, because it treats
+the language model like an untrusted program and every tool call like a syscall that
+must pass through a kernel the model cannot control. It is also described as an
 **agent tool firewall**.
 
 ## What problem does fak solve?
 
-It closes the gap between agent **safety** and agent **cost** at the same boundary:
+It gives you control over the parts of a real agent loop that get expensive or go
+wrong — at one boundary, the tool call:
 
-1. **Prompt injection and tool poisoning** reach the model through tool results. `fak`
-   quarantines suspicious results so they never enter the model's context.
-2. **Irreversible actions** (refunds, deletes, sends) are gated by a reviewable
-   allow-list that is checked inside the kernel. It is default-deny and fail-closed.
-3. **Agent fleets waste tokens** re-processing the same shared context every turn. `fak`
-   makes the KV cache a kernel object so shared work is computed once and reused.
+1. **Long sessions get expensive.** A growing conversation re-sends its whole
+   transcript every turn, and the provider only discounts it while the cached prefix
+   stays byte-for-byte identical. `fak` sheds the un-cacheable middle turns by splicing
+   on the original bytes, so the cache discount survives instead of breaking. `fak`
+   guarantees prefix byte-identity; whether the provider reuses the cache is the
+   provider's call, which `fak` relays rather than claims.
+2. **One model rarely fits every call.** `fak` routes an aspect — a tool call, a
+   reasoning step, a stage — to a different model, with first-class ensembles. The
+   routing decision is shipped and testable offline; live dispatch is the next step.
+3. **Agents waste turns and tokens** re-processing shared context and retrying
+   malformed calls. `fak` serves a repeated read locally, repairs a malformed call in
+   place, and makes the KV cache a kernel object so shared work is computed once.
+4. **Dangerous and poisoned calls.** Irreversible actions (refunds, deletes, sends)
+   are gated by a reviewable allow-list checked inside the kernel — default-deny and
+   fail-closed — and suspicious tool results are quarantined so they never enter the
+   model's context.
 
 ## How is fak different from a normal firewall or API gateway?
 
@@ -22244,6 +22307,13 @@ default**; `-Live` opts into the side effect.
 | `FleetResolveProgress` | [`register_resolve_progress.ps1`](https://github.com/anthony-chaudhary/fak/blob/main/tools/register_resolve_progress.ps1) | 15 min | CLOSE / harvest — snapshot the curve and close `OPEN_WITNESSED` issues. DoS-free (no worker spawned). |
 | `FleetDispatchStatusDoc` | [`register_dispatch_status_doc.ps1`](https://github.com/anthony-chaudhary/fak/blob/main/tools/register_dispatch_status_doc.ps1) | 30 min | DOC — render the gitignored, operator-local `.dispatch-runs/dispatch-status.md`. Read-only fold; never committed. |
 
+`FleetIssueDispatch` and `FleetResolveProgress` are installed through `fak loop run`,
+not directly through Python. The Task Scheduler fire/start/end wrapper rows land in
+`.fak/loops.jsonl` under `issue-resolve-dispatch/task-scheduler/<backend>` and
+`issue-resolve-progress/task-scheduler`; the Python producers then record their own
+admission/spawn/progress/witness rows under `issue-resolve-dispatch/<backend>` and
+`issue-resolve-progress`.
+
 ```powershell
 # install all three live (bounded autonomous spawn + close + doc refresh)
 .\tools\register_issue_dispatch.ps1     -Workspace C:\work\fak -Mode resolve -Live -MaxWorkers 2
@@ -22257,6 +22327,31 @@ default**; `-Live` opts into the side effect.
 
 Together: **spawn → ship `#N` commit → witness → close → refresh the doc**, unattended
 and cap-bounded.
+
+## Recently-created feature dogfood
+
+When a new local feature lands, run the same dogfood packet instead of inventing a
+one-off proof. It exercises the current loop ledger, vCache score/refutation
+surface, benchmark catalog, avoided-call economics tests, prompt-tool-pruning
+tests, code-slop scorecard, and dogfood coverage scorecard, then writes a JSON
+evidence bundle under `.fak/recent-feature-dogfood/`.
+
+```bash
+# quick local run
+python tools/recent_feature_dogfood.py
+
+# scheduler/manual run with OS-edge loop rows
+go run ./cmd/fak loop run --loop recent-feature-dogfood/manual --source manual -- \
+  python tools/recent_feature_dogfood.py
+
+# cron/launchd/systemd helper form
+tools/fak_loop_run.sh recent-feature-dogfood/cron cron -- \
+  python tools/recent_feature_dogfood.py
+```
+
+The scorecards may report ACTION/debt and still pass this dogfood packet when the
+machine payload is valid. The pass condition is repeatable use of the feature and
+valid evidence, not pretending existing repo debt is already gone.
 
 ## A note on opaque workers
 
@@ -23299,6 +23394,13 @@ choosing a GPU path.
 | `FAK_CUDA_GRAPH` | `1`-flag | off | Enable the CUDA-graph decode capture path. Off by default because per-token capture is a measured no-win (see the comment at the source); kept gated as the foundation for the instantiate-once/replay-many redesign. | `internal/compute/cuda.go:171` |
 | `FAK_CUDA_Q8` | `1`-flag | off | `gpucheck`: exercise the CUDA Q8 device path in the Approx-gate witness. | `cmd/gpucheck/main.go:101` |
 | `FAK_CUDA_F16` | `1`-flag | off | `gpucheck`: exercise the CUDA f16 device path in the Approx-gate witness. | `cmd/gpucheck/main.go:101` |
+
+Vulkan also has a hardware **single storage-buffer** ceiling, independent of the
+aggregate residency budget. At backend init fak records the effective cap
+(`min(maxStorageBufferRange, maxMemoryAllocationSize)` when both are known) and
+refuses any one tensor/KV buffer that exceeds it with the offending buffer name.
+`FAK_GPU_BUDGET_MB` can spill cold weights, but it cannot make one over-cap
+resource legal; those tensors still need split/chunked upload.
 
 > Note: `FAK_BACKEND` appears in `internal/compute` *comments* as the intended
 > native backend selector (`FAK_BACKEND=cuda|metal|vulkan` → `Pick(name)`), but

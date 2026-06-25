@@ -4,22 +4,32 @@
 
 ## What It Is
 
-`fak` is one Go binary that puts a kernel boundary under an AI agent.
+`fak` is one Go binary you put in front of the AI agent you already run — Claude
+Code, Codex, Cursor, or any OpenAI / Anthropic / MCP client. You keep your model,
+your IDE, and your tools. You point one base URL at `fak`, and it gives you a handle
+on the parts of a real agent loop that get expensive or go wrong:
 
-The model can propose a tool call. The kernel decides whether that call exists,
-whether its arguments are allowed, whether the result may enter context, and what
-gets audited. Treat the model like an untrusted program; treat the tool call like
-a syscall.
+- **Cheaper long sessions.** A 100k-token Claude Code conversation re-sends its whole
+  transcript every turn. `fak` sheds the old turns while keeping the provider's
+  prompt-cache prefix byte-identical, so the discount survives instead of breaking.
+- **The right model per call.** Send an easy read to a cheap model and a write-shaped
+  call to a careful one — chosen per tool call, not per whole request.
+- **Fewer wasted turns.** A repeated read served locally, a malformed call repaired in
+  place, a dead-end branch refused before the agent spends a turn on it.
+- **A trail you can audit.** Every decision is a plain verdict — `ALLOW`, `DENY`,
+  `TRANSFORM`, or `QUARANTINE` — in JSON logs, an optional hash-chained journal, and
+  Prometheus metrics.
 
-The most useful path today is simple: run the agent you already use through
-`fak guard`, `fak serve`, or the MCP server, then give it a reviewable policy file.
-You keep your model, your IDE, and your tools. `fak` adds the structural floor.
-Default-deny (nothing runs unless named) is the baseline.
+> TL;DR: Put `fak` in front of the agent you already run. It makes long sessions
+> cheaper, routes each call to the right model, keeps unsafe tool results out of
+> context, and records every verdict. One binary, no rewrite, no key to start.
 
-> TL;DR: Put `fak` under the agent you already run. It blocks unlisted tools,
-> keeps unsafe tool results out of context, and records verdicts you can audit.
-
-A verdict is plain: `ALLOW`, `DENY`, `TRANSFORM`, or `QUARANTINE`.
+It does this by sitting on the tool-call path as a kernel: the model *proposes* a
+call; `fak` decides whether that call exists, whether its arguments are allowed,
+whether the result may enter context, and what gets reused. The same boundary that
+saves you tokens is also where a dangerous call gets refused — which is why teams who
+need a hard security floor reach for it too (see
+[For security teams](#for-security-teams)).
 
 ## Start Here
 
@@ -151,10 +161,11 @@ wording.
 
 That changes the useful first screen for `fak`. The value is:
 
+- Make prompt-cache and routing decisions explicit enough to test — and keep the
+  cache discount alive across a long session instead of busting it.
+- Preserve a traceable, privacy-conscious audit trail of every tool call.
 - Put a default-deny floor under the tools your agent already has.
 - Keep poisoned tool output and secret-shaped results out of model context.
-- Preserve a traceable, privacy-conscious audit trail.
-- Make prompt-cache and routing decisions explicit enough to test.
 
 Relevant external signals: [Claude Code changelog](https://code.claude.com/docs/en/changelog),
 [MCP stateless/auth discussion](https://dev.to/alexmercedcoder/ai-weekly-codex-goes-long-mcp-goes-stateless-584d),
@@ -177,9 +188,11 @@ and [MCP tool-poisoning/security analysis](https://www.cybedefend.com/en/blog/mc
 Every claim in [CLAIMS.md](CLAIMS.md) carries exactly one tag:
 `[SHIPPED]`, `[SIMULATED]`, or `[STUB]`. The lint gate enforces that honesty ledger.
 
-## Security Model
+## For security teams
 
-`fak` is the lock around tool execution.
+If a hard capability floor is *why* you're here — not just a nice-to-have — this
+section is for you. The same boundary that sheds tokens above is, for your purposes,
+the lock around tool execution.
 
 Most agent security tries to recognize bad text. Recognizers help. They are not
 the floor. Prompt injection is a text game. Attackers get turns too. `fak` moves
