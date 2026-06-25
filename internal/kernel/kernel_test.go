@@ -3,10 +3,12 @@ package kernel
 import (
 	"context"
 	"os"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/abi"
 )
@@ -279,6 +281,66 @@ func TestDispositionMapping(t *testing.T) {
 		if got := Disposition(r); got != want {
 			t.Fatalf("Disposition(%s)=%s want %s", abi.ReasonName(r), got, want)
 		}
+	}
+}
+
+// TestDenyResultWaitCarriesRetryAfter is the issue-#699 acceptance witness
+// (criterion 4): an over-cap WAIT deny's DenyResult meta carries a non-empty
+// retry_after that parses as a Go time.Duration (and retry_after_ms as integer ms),
+// while a sub-cap (Allow) call carries none. The closed Disposition switch is
+// unchanged (criterion 5) — the hint rides the existing WAIT path only.
+func TestDenyResultWaitCarriesRetryAfter(t *testing.T) {
+	c := &abi.ToolCall{Tool: "rate_limited_tool", Args: abi.Ref{Kind: abi.RefInline, Inline: []byte(`{}`)}}
+	v := abi.Verdict{
+		Kind:   abi.VerdictDeny,
+		Reason: abi.ReasonRateLimited,
+		By:     "ratelimit",
+		Meta:   map[string]string{"retry_after": "500ms", "retry_after_ms": "500"},
+	}
+	if got := Disposition(v.Reason); got != "WAIT" {
+		t.Fatalf("Disposition = %q, want WAIT (no regression to the closed switch)", got)
+	}
+	r := DenyResult(c, v)
+	if r.Meta["disposition"] != "WAIT" {
+		t.Fatalf("disposition = %q, want WAIT", r.Meta["disposition"])
+	}
+	ra, err := time.ParseDuration(r.Meta["retry_after"])
+	if err != nil || ra != 500*time.Millisecond {
+		t.Fatalf("retry_after = %q (%v), want 500ms", r.Meta["retry_after"], err)
+	}
+	if ms, err := strconv.Atoi(r.Meta["retry_after_ms"]); err != nil || ms != 500 {
+		t.Fatalf("retry_after_ms = %q (%v), want 500", r.Meta["retry_after_ms"], err)
+	}
+}
+
+// TestDenyResultNonWaitNoRetryAfter proves the WAIT guard (criterion 4): a
+// TERMINAL deny never carries retry_after even if its verdict meta happens to hold
+// one, and a WAIT deny whose verdict carries no hint degrades to today's bare
+// token. So a loop that ignores retry_after is byte-for-byte on the old behavior.
+func TestDenyResultNonWaitNoRetryAfter(t *testing.T) {
+	c := &abi.ToolCall{Tool: "x", Args: abi.Ref{Kind: abi.RefInline, Inline: []byte(`{}`)}}
+	// A TERMINAL deny (POLICY_BLOCK) with a stray retry_after in meta: must NOT surface.
+	terminal := DenyResult(c, abi.Verdict{
+		Kind:   abi.VerdictDeny,
+		Reason: abi.ReasonPolicyBlock,
+		Meta:   map[string]string{"retry_after": "1s", "retry_after_ms": "1000"},
+	})
+	if terminal.Meta["disposition"] != "TERMINAL" {
+		t.Fatalf("disposition = %q, want TERMINAL", terminal.Meta["disposition"])
+	}
+	if _, ok := terminal.Meta["retry_after"]; ok {
+		t.Fatal("TERMINAL deny must not surface retry_after (WAIT guard)")
+	}
+	if _, ok := terminal.Meta["retry_after_ms"]; ok {
+		t.Fatal("TERMINAL deny must not surface retry_after_ms (WAIT guard)")
+	}
+	// A WAIT deny with NO hint in its verdict degrades to today's bare-token deny.
+	bare := DenyResult(c, abi.Verdict{Kind: abi.VerdictDeny, Reason: abi.ReasonRateLimited})
+	if bare.Meta["disposition"] != "WAIT" {
+		t.Fatalf("disposition = %q, want WAIT", bare.Meta["disposition"])
+	}
+	if _, ok := bare.Meta["retry_after"]; ok {
+		t.Fatal("a WAIT deny with no verdict hint must not invent retry_after")
 	}
 }
 

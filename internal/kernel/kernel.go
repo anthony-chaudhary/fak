@@ -469,6 +469,19 @@ func DenyResult(c *abi.ToolCall, v abi.Verdict) *abi.Result {
 	if wp, ok := v.Payload.(abi.WitnessPayload); ok && wp.Claim != "" {
 		meta["witness"] = wp.Claim // bounded disclosure: the offending set only
 	}
+	// Issue #699: surface the advisory retry-after on a WAIT disposition — the
+	// recoverable back-off the loop pairs with WAIT the way errno pairs EAGAIN with
+	// a retry window. Only WAIT denies carry one (a RATE_LIMITED over-cap), and only
+	// when the verdict supplies it; a non-WAIT deny or a WAIT without a hint degrades
+	// to today's bare-token behavior.
+	if meta["disposition"] == "WAIT" && v.Meta != nil {
+		if ra := v.Meta["retry_after"]; ra != "" {
+			meta["retry_after"] = ra
+		}
+		if ra := v.Meta["retry_after_ms"]; ra != "" {
+			meta["retry_after_ms"] = ra
+		}
+	}
 	return &abi.Result{Call: c, Status: abi.StatusError, Outcome: abi.OutcomeCommitted, Meta: meta}
 }
 
