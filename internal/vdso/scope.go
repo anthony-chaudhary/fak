@@ -160,6 +160,14 @@ func (v *VDSO) readChain(c *abi.ToolCall, args []byte) []string {
 	if g == Global {
 		return []string{rootTag}
 	}
+	// Per-path scope (#795): a file-shaped read (Read/Glob/Grep carrying a file_path)
+	// binds its filesystem path's generation, so a later Edit/Write to that exact path —
+	// and nothing else — strands it. Tried before the tool-NAME namespace lookup because
+	// file tools carry no nsKeyword; without this they'd bind only the root and be flushed
+	// by every unrelated write.
+	if chain := v.fileReadChain(args); chain != nil {
+		return chain
+	}
 	ns := namespaceOf(c.Tool)
 	if ns == "" {
 		return []string{rootTag} // unknown class: root-only (any write invalidates it)
@@ -181,6 +189,15 @@ func (v *VDSO) writeTags(c *abi.ToolCall, args []byte) []string {
 	g := v.GranularityOf()
 	if g == Global {
 		return []string{rootTag}
+	}
+	// Per-path scope (#795): an Edit/Write to a named file bumps exactly that path's
+	// generation ("files:<path>"), the leaf a prior file-shaped read bound — stranding
+	// only that file's reads and leaving every other file's cached reads warm. Tried
+	// before the namespace lookup for the same reason as the read side (file tools carry
+	// no nsKeyword). A write that names no single path (Bash) falls through to the
+	// namespace/root flush, which over-invalidates soundly.
+	if tags := v.fileWriteTags(args); tags != nil {
+		return tags
 	}
 	ns := namespaceOf(c.Tool)
 	if ns == "" {
@@ -320,6 +337,15 @@ func (v *VDSO) epochLocked(tag string) uint64 {
 func (v *VDSO) resourceMisnamed(c *abi.ToolCall, args []byte) bool {
 	if v.GranularityOf() != Resource {
 		return false
+	}
+	// File analog of the namespace check (#795): a read that CARRIES a file-path arg but
+	// whose path won't canonicalize would bind only the root, yet a path-fine write bumps
+	// "files:<path>" WITHOUT bumping the root — so the root-bound read would never be
+	// stranded by the write that changed its file: a stale serve. Refuse to tier-2 it (it
+	// always reaches the engine, which is sound). A read with NO path arg at all is a
+	// genuine non-file read and stays cacheable under its namespace/root chain.
+	if fileShapedButUnnamed(args) {
+		return true
 	}
 	ns := namespaceOf(c.Tool)
 	return ns != "" && entityOf(ns, args) == ""
