@@ -17,7 +17,7 @@ description: "fak is an agent kernel for self-hosted LLM agent fleets: an in-pro
     poster="https://raw.githubusercontent.com/anthony-chaudhary/fak/main/visuals/hero-video-poster.png"
     autoplay loop muted playsinline preload="metadata"
     width="100%" style="max-width:960px;border-radius:12px"
-    aria-label="fak — the agent kernel: a ~40 second model-card reveal of the headline benchmarks — the performance spectrum, the turn-tax curves (measured 9.7x), the capability matrix, the three-pillar stat card with its honest single-stream fence, and the eight-axis sweep">
+    aria-label="fak — the agent kernel: a ~40 second model-card reveal of the headline benchmarks — the performance spectrum, the turn-tax curves (modeled 9.7x vs the naive floor), the capability matrix, the three-pillar stat card with its honest single-stream fence, and the eight-axis sweep">
     <img
       src="https://raw.githubusercontent.com/anthony-chaudhary/fak/main/visuals/hero-video.gif"
       alt="fak headline benchmarks — an animated ~40-second reveal"
@@ -66,7 +66,8 @@ context) also drives **performance** (do shared work once instead of every turn)
 > [the turn-tax race](demos.html) (a SOTA agent loop vs fak's one-shot kernel), the
 > [multi-agent context-reuse proof](demos.html), and a [live model reuse race](demos.html).
 > Nothing to install; they run in your browser. **[Open the demos →](demos.html)**
-> Or [run your own copy](run-the-demos.md) — `go run ./cmd/turntaxdemo` locally, in a
+> Or [run your own copy](run-the-demos.md) — `go run ./cmd/turntaxdemo` or
+> `go run ./cmd/unseedemo` locally, in a
 > container, or on your own cloud VM.
 
 ---
@@ -85,14 +86,14 @@ context) also drives **performance** (do shared work once instead of every turn)
   bit-for-bit identical to a run that never saw it (`max|Δ| = 0`). No shipped serving
   engine offers mid-run causal eviction.
 - **Cache-efficient agent fleets.** ~4× fewer tokens than a tuned warm-cache stack
-  on a 50-turn × 5-agent run; 8.8–9.7× measured prefill elimination on real
-  WebVoyager web-agent workloads.
+  on a 50-turn × 5-agent run; 8.8–9.7× modeled prefill elimination vs the naive
+  floor over the real WebVoyager web-agent set (1.0–1.1× vs a tuned per-agent KV).
 
 ## See each win in one example
 
 Each idea shrinks to a single worked example. The numbers trace to the
 [benchmark authority](https://github.com/anthony-chaudhary/fak/blob/main/BENCHMARK-AUTHORITY.md);
-the live versions run on the [demos page](demos.html). Or watch the four as a
+the live versions run on the [demos page](demos.html). Or watch the worked examples as a
 [~25-second reveal](showcase.html#by-example).
 
 - **A poisoned turn, removed mid-run.** Quarantine evicts a tool result's K/V from the *middle* of the
@@ -133,6 +134,8 @@ twice — tools wired directly vs. behind `fak` — and prints the before/after.
 | **The quick answers** | [FAQ](FAQ.md) |
 | **A guided first run** | [Tutorial](fak/tutorial.md) |
 | **What the words mean** (preflight vs inflight vs prefill) | [Glossary](glossary.md) |
+| **How shared state is split** | [Shared state ladder](shared-state-ladder.md) |
+| **A collaborative task state contract** | [Shared task record contract](shared-task-record-contract.md) |
 | **The two core ideas** | [Policy in the kernel](explainers/policy-in-the-kernel.md) · [Addressable KV cache](explainers/addressable-kv-cache.md) |
 | **Every benchmark number** | [Benchmark authority](https://github.com/anthony-chaudhary/fak/blob/main/BENCHMARK-AUTHORITY.md) |
 | **Everything fak supports** | [What fak supports](supported/README.md) — models · features · clouds · APIs/MCP · harnesses · engines |
