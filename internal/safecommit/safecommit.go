@@ -162,7 +162,9 @@ func CommitWith(ctx context.Context, run Runner, lock LockFunc, opts Options) (R
 	branch = strings.TrimSpace(branch)
 	if code != 0 || branch != trunk {
 		res.Reason = ReasonOffTrunk
-		if branch == "" {
+		// A non-zero symbolic-ref is a detached HEAD; the captured output is git's stderr
+		// ("fatal: ref HEAD is not a symbolic ref"), not a branch name — don't echo it.
+		if code != 0 || branch == "" {
 			branch = "detached HEAD"
 		}
 		res.Detail = fmt.Sprintf("on %s, expected %s", branch, trunk)
