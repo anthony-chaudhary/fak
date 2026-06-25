@@ -25,6 +25,7 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import importlib.util
 import json
 import sys
 from pathlib import Path
@@ -34,6 +35,38 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import guard_hop_bench as ghb  # noqa: E402  (the #734 measurement source)
 
 SCHEMA = "guard-hop-rsi/1"
+
+
+def _repo_root() -> Path:
+    return Path(__file__).resolve().parent.parent
+
+
+def resolve_telemetry(root: Path | None = None) -> dict[str, Any]:
+    """Resolve the loop's telemetry source to the REAL journals on disk, not a dead
+    string. The latency keep/revert rung stays hardware-gated (#734) - a verdict journal
+    holds verdicts, not wall-clock - but the loop can still WITNESS that guarded sessions
+    ran by reading the same journals dogfood_coverage discovers. This closes the gap where
+    `telemetry_source` named `.dispatch-runs/guard-audit/*.jsonl` but no code ever read it;
+    the hardware-free verdict-quality RSI loop that DOES close on these rows is
+    tools/guard_verdict_rsi.py."""
+    root = root or _repo_root()
+    pattern = ".dispatch-runs/guard-audit/*.jsonl"
+    try:
+        spec = importlib.util.spec_from_file_location(
+            "dogfood_coverage", root / "tools" / "dogfood_coverage.py")
+        if spec and spec.loader:
+            mod = importlib.util.module_from_spec(spec)
+            sys.path.insert(0, str((root / "tools")))
+            spec.loader.exec_module(mod)
+            rows, journals = mod.count_audit_rows(root)
+            return {"source": pattern, "rows": rows, "journals": journals,
+                    "verdict_loop": "tools/guard_verdict_rsi.py",
+                    "note": "the latency keep/revert rung is hardware-gated (#734); the "
+                            "hardware-free verdict-quality loop closes on these rows"}
+    except Exception:  # noqa: BLE001 - a missing sibling must not crash plan mode
+        pass
+    return {"source": pattern, "rows": 0, "journals": 0,
+            "verdict_loop": "tools/guard_verdict_rsi.py"}
 
 # The candidate levers the loop sweeps, worst-overhead-first. Each is a HYPOTHESIS about
 # where the guard-hop cost lives + the mechanism that would shrink it. The loop applies
@@ -108,6 +141,7 @@ def plan_iteration(measured_row: dict[str, Any] | None = None) -> dict[str, Any]
                             "else REVERT. One candidate per iteration, worst-first.",
         "measurement_source": "tools/guard_hop_bench.py measure (live gateway, #734)",
         "telemetry_source": ".dispatch-runs/guard-audit/*.jsonl (live dogfood-fleet, #729)",
+        "telemetry": resolve_telemetry(),  # the resolved real journals (was a dead string)
         "candidates": candidates,
         "deferred": None if have_measured else
                     "the keep/revert rung needs a MEASURED baseline (hardware-gated, #734); "

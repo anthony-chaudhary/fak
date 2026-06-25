@@ -463,6 +463,12 @@ jobs:
           # HARD regression sentinel for the day someone removes a gate, an invariant,
           # a ratchet baseline, or the rollback runbook.
           python tools/stability_scorecard_test.py
+          # guard-RSI: the RSI loop for `fak guard` scored against reality (the verdict
+          # loop closes on the real decision journal; the latency loop's hardware gate is
+          # honestly disclosed). The live smoke pins the verdict loop's presence + the
+          # honesty gate that refuses an unwitnessed / empty-journal keep.
+          python tools/guard_verdict_rsi_test.py
+          python tools/guard_rsi_scorecard_test.py
 
       # Public-copy leak gate: the machine backstop for the redact-needle floor.
       # The local pre-commit hook (tools/githooks/pre-commit) only fires on a clone
