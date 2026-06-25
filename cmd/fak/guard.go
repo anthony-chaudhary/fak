@@ -707,7 +707,7 @@ func formatAuditSummary(sum gateway.AdjudicationSummary) string {
 	// session reads most of its prompt from Anthropic's cache. Show it when it happened
 	// so the operator sees the saving rather than assuming the hop re-bills the prefix.
 	if sum.CachedPromptTokens > 0 {
-		fmt.Fprintf(&b, "fak guard: provider cache — %d prompt token(s) served from cache across %d turn(s) (cache_control preserved through the kernel hop)\n",
+		fmt.Fprintf(&b, "fak guard: provider cache - %d prompt token(s) the provider reported serving from its cache across %d turn(s) (OBSERVED, relayed; fak's part was preserving cache_control byte-for-byte through the hop, not the hit itself)\n",
 			sum.CachedPromptTokens, sum.CachedTurns)
 	}
 	if sum.CompactionFired > 0 || sum.CompactionBailed > 0 || sum.CompactionOff > 0 {
