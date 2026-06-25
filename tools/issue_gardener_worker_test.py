@@ -47,6 +47,81 @@ class ModelResolutionTest(unittest.TestCase):
             mod.resolve_model(None, "9", {})
 
 
+class RouteBridgeTest(unittest.TestCase):
+    """The opt-in `fak route` rung: first deployed consumer of the routing spine.
+
+    Every test injects a stub route_runner so nothing shells out — the same
+    hermetic pattern the live-launch test uses.
+    """
+
+    @staticmethod
+    def _runner_returns(primary: str | None, returncode: int = 0):
+        import json as _json
+
+        def runner(_cmd):
+            stdout = _json.dumps({"primary": primary}) if primary is not None else ""
+            return {"returncode": returncode, "stdout": stdout}
+
+        return runner
+
+    def test_route_off_by_default_keeps_sonnet(self) -> None:
+        mod = load()
+        # No FLEET_GARDENER_ROUTE => the route rung never fires; default holds.
+        called = []
+        self.assertEqual(
+            mod.resolve_model(None, None, {}, route_runner=lambda c: called.append(c) or {}),
+            "sonnet",
+        )
+        self.assertEqual(called, [])  # runner never invoked when routing is off
+
+    def test_route_on_maps_small_to_haiku(self) -> None:
+        mod = load()
+        env = {"FLEET_GARDENER_ROUTE": "1"}
+        self.assertEqual(
+            mod.resolve_model(None, None, env, route_runner=self._runner_returns("small")),
+            "haiku",
+        )
+
+    def test_route_on_maps_large_to_opus(self) -> None:
+        mod = load()
+        env = {"FLEET_GARDENER_ROUTE": "1"}
+        self.assertEqual(
+            mod.resolve_model(None, None, env, route_runner=self._runner_returns("large")),
+            "opus",
+        )
+
+    def test_route_failure_falls_back_to_sonnet(self) -> None:
+        mod = load()
+        env = {"FLEET_GARDENER_ROUTE": "1"}
+        # nonzero exit (e.g. no fak binary) => fail-safe to the default ladder
+        self.assertEqual(
+            mod.resolve_model(None, None, env, route_runner=self._runner_returns("small", returncode=127)),
+            "sonnet",
+        )
+
+    def test_route_unknown_id_falls_back_to_sonnet(self) -> None:
+        mod = load()
+        env = {"FLEET_GARDENER_ROUTE": "1"}
+        self.assertEqual(
+            mod.resolve_model(None, None, env, route_runner=self._runner_returns("frontier-x")),
+            "sonnet",
+        )
+
+    def test_explicit_and_tier_still_beat_route(self) -> None:
+        mod = load()
+        env = {"FLEET_GARDENER_ROUTE": "1"}
+        r = self._runner_returns("small")  # would say haiku if consulted
+        self.assertEqual(mod.resolve_model("opus", None, env, route_runner=r), "opus")
+        self.assertEqual(mod.resolve_model(None, "1", env, route_runner=r), "opus")
+        # env model also beats the route rung
+        env2 = {"FLEET_GARDENER_ROUTE": "1", "FLEET_GARDENER_MODEL": "sonnet"}
+        self.assertEqual(mod.resolve_model(None, None, env2, route_runner=r), "sonnet")
+
+    def test_route_model_returns_none_when_disabled(self) -> None:
+        mod = load()
+        self.assertIsNone(mod.route_model({}, runner=self._runner_returns("small")))
+
+
 class CommandShapeTest(unittest.TestCase):
     def test_command_is_claude_print_with_model_and_plan_mode(self) -> None:
         mod = load()

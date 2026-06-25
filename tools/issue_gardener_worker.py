@@ -20,7 +20,11 @@ is the right default. Model selection precedence (highest first):
 1. ``--model`` CLI flag (an explicit model id/alias, e.g. ``opus``/``sonnet``).
 2. ``--tier {1,2,3}`` → ``opus`` / ``sonnet`` / ``haiku``.
 3. ``FLEET_GARDENER_MODEL`` env var.
-4. ``sonnet`` (tier 2, the default).
+4. ``fak route`` over the gardening routing preset (opt-in via
+   ``FLEET_GARDENER_ROUTE``; fail-safe — a routing failure falls through to 5).
+   This rung makes the gardener the first DEPLOYED consumer of fak's
+   model-routing spine, dogfooding routing on the lowest-risk workload.
+5. ``sonnet`` (tier 2, the default).
 
 Like the supervisor/watchdog/canary layer (and UNLIKE the leaf
 ``dispatch_worker.py``), this launcher is **dry-run by default** — it prints the
@@ -56,6 +60,22 @@ MODEL_TIERS = {v: k for k, v in TIER_MODELS.items()}
 DEFAULT_TIER = "2"
 DEFAULT_MODEL = TIER_MODELS[DEFAULT_TIER]  # "sonnet"
 
+# The model-routing bridge (opt-in via FLEET_GARDENER_ROUTE). The gardening pass
+# is the lowest-risk first workload to dogfood fak's routing spine: high-volume,
+# low-stakes, batch-latency, propose-only. When enabled, resolve_model asks
+# `fak route` to classify the gardening subject against the committed gardening
+# routing preset and maps the chosen ABSTRACT id (small/medium/large) onto the
+# Claude alias ladder below. The whole bridge is FAIL-SAFE: any failure (no fak
+# binary, a nonzero exit, unparseable JSON, an unknown id) falls straight through
+# to the existing tier ladder, so a routing hiccup never blocks a gardening tick.
+ROUTE_ENABLE_ENV = "FLEET_GARDENER_ROUTE"
+# The routing manifest the gardening subject is classified against (overridable).
+ROUTE_MANIFEST_ENV = "FLEET_GARDENER_ROUTE_MANIFEST"
+DEFAULT_ROUTE_MANIFEST = "examples/routing-presets/gardening.json"
+# Abstract routed id -> Claude alias. The gardener launches a `claude -p` backend,
+# so a routed id is mapped onto the same alias ladder the tier path uses.
+ROUTED_ID_MODELS = {"small": "haiku", "medium": "sonnet", "large": "opus"}
+
 BACKENDS = ("claude",)
 DEFAULT_BACKEND = "claude"
 
@@ -76,12 +96,87 @@ def repo_root(start: Path | None = None) -> Path:
     return here.parent.parent
 
 
+RouteRunner = Callable[[Sequence[str]], dict[str, Any]]
+
+
+def _truthy(value: str | None) -> bool:
+    """A permissive on-switch: anything but the explicit off tokens is ON."""
+    if value is None:
+        return False
+    return value.strip().lower() not in {"", "0", "off", "false", "no", "disable", "disabled"}
+
+
+def _default_route_runner(command: Sequence[str], cwd: Path | None = None) -> dict[str, Any]:
+    """Run `fak route` and capture its stdout (the real, non-test runner)."""
+    exe = resolve_exe(command[0]) if command else ""
+    argv = [exe, *command[1:]]
+    try:
+        proc = subprocess.run(argv, cwd=str(cwd) if cwd else None,
+                              capture_output=True, text=True,
+                              encoding="utf-8", errors="replace", timeout=30)
+    except (FileNotFoundError, subprocess.TimeoutExpired, OSError) as exc:
+        return {"returncode": 127, "error": str(exc)}
+    return {"returncode": proc.returncode, "stdout": proc.stdout, "stderr": proc.stderr}
+
+
+def route_model(
+    env: dict[str, str] | None,
+    *,
+    workspace: Path | None = None,
+    runner: RouteRunner | None = None,
+) -> str | None:
+    """Ask `fak route` which model the gardening subject routes to, or None.
+
+    FAIL-SAFE by construction: returns None on ANY problem (routing disabled, no
+    fak binary, a nonzero exit, unparseable JSON, an unknown routed id) so the
+    caller falls through to the tier ladder. Only returns a Claude alias when the
+    route cleanly resolves to a known abstract id (small/medium/large).
+    """
+    e = env if env is not None else os.environ
+    if not _truthy(e.get(ROUTE_ENABLE_ENV)):
+        return None
+    manifest = (e.get(ROUTE_MANIFEST_ENV) or DEFAULT_ROUTE_MANIFEST).strip()
+    fak = (e.get("FAK_BIN") or "fak").strip()
+    command = [
+        fak, "route",
+        "--manifest", manifest,
+        "--aspect", "request",
+        "--latency", "batch",
+        "--complexity", "low",
+        "--labels", "work_kind=gardening,stakes=low",
+        "--json",
+    ]
+    try:
+        if runner is not None:
+            result = runner(command)
+        else:
+            result = _default_route_runner(command, cwd=workspace)
+    except Exception:  # a custom runner blowing up must not break a gardening tick
+        return None
+    if not isinstance(result, dict) or result.get("returncode") != 0:
+        return None
+    try:
+        decision = json.loads(result.get("stdout") or "")
+        routed_id = str(decision.get("primary") or "").strip()
+    except (ValueError, AttributeError):
+        return None
+    return ROUTED_ID_MODELS.get(routed_id)
+
+
 def resolve_model(
     explicit: str | None,
     tier: str | None,
     env: dict[str, str] | None,
+    *,
+    workspace: Path | None = None,
+    route_runner: RouteRunner | None = None,
 ) -> str:
-    """Pick the gardener model. Precedence: --model > --tier > env > sonnet."""
+    """Pick the gardener model. Precedence: --model > --tier > env > route > sonnet.
+
+    The route rung (opt-in via FLEET_GARDENER_ROUTE) makes the gardener the first
+    deployed consumer of fak's model-routing spine; it is fail-safe, so a routing
+    failure leaves the historical --model > --tier > env > sonnet behavior intact.
+    """
     if explicit:
         return explicit.strip()
     if tier:
@@ -92,6 +187,9 @@ def resolve_model(
     env_model = (env if env is not None else os.environ).get("FLEET_GARDENER_MODEL")
     if env_model and env_model.strip():
         return env_model.strip()
+    routed = route_model(env, workspace=workspace, runner=route_runner)
+    if routed:
+        return routed
     return DEFAULT_MODEL
 
 
@@ -310,7 +408,7 @@ def main(argv: list[str] | None = None) -> int:
     error: str | None = None
     model = DEFAULT_MODEL
     try:
-        model = resolve_model(args.model, args.tier, None)
+        model = resolve_model(args.model, args.tier, None, workspace=workspace)
     except ValueError as exc:
         error = str(exc)
 
