@@ -61,6 +61,8 @@ You do not rewrite your agent to adopt fak — you repoint one base URL at `fak 
 - [Cursor](docs/integrations/cursor.md): governance for the Cursor IDE over MCP or the OpenAI-compatible proxy.
 - [OpenAI Codex / OpenAI API](docs/integrations/openai-codex.md): adjudicate every tool call from an OpenAI-compatible coding agent.
 - [Compatibility matrix](docs/integrations/compatibility-matrix.md): 44 surveyed harnesses, frameworks, model backends, and interop protocols — the wire each speaks, whether it takes a custom base URL, and the exact repoint key, each with a source link.
+- [fak + LiteLLM](docs/integrations/litellm.md): the three topologies — fak in front of a LiteLLM proxy, fak as a governed node behind it, and fak's per-aspect routing dispatching through it — and why supporting LiteLLM is one OpenAI wire, not a hundred adapters; fail-closed residency across every backend.
+- [Routers & gateways](docs/integrations/routers.md): OpenRouter, Portkey, LiteLLM Router, Unify, Martian — fak as a complement (govern the tool-call boundary + route per aspect with ensembles) to request-level routers, with the honest categorical positioning.
 - [MCP one-paste setup](examples/mcp/README.md): drop a project `.mcp.json` and call the five `fak_*` adjudication tools from any MCP client.
 - [Agent-framework integration](docs/fak/agent-framework-integration.md): a per-framework cookbook for putting fak in front of LangChain, LlamaIndex, AutoGen, CrewAI, and OpenAI-compatible agents (proxy or explicit adjudication).
 - [Agent-integration architecture](docs/fak/agent-integration-architecture.md): how an external agent connects through the gateway entry points, the frozen kernel ABI, the verdict types, and the capability floor.
@@ -82,6 +84,7 @@ The dedicated, cross-linked capability pages. Each lists one category of support
 
 ## Core concepts (the two flips)
 
+- [Engineering is building loops (fak is the kernel)](docs/explainers/engineering-is-building-loops.md): the synthesis — modern engineering is increasingly the act of building agentic loops (observe → orient → decide → act → verify), and fak is the in-process kernel they run on, safe and fast for the same reason. The loops-all-the-way-down map from the inner tool-call syscall up through the turn, session, and fleet loops to the loop that improves the loop.
 - [Policy in the kernel](docs/explainers/policy-in-the-kernel.md): why a default-deny check on the call path beats an external recognizer that fails open.
 - [Addressable KV cache](docs/explainers/addressable-kv-cache.md): how mid-run causal span eviction stays bit-exact (`max|Δ| = 0`).
 - [KV cache for agentic context](docs/explainers/kv-cache-agentic-context.md): what a KV cache is and why agents stress it differently than chat.
@@ -90,6 +93,7 @@ The dedicated, cross-linked capability pages. Each lists one category of support
 - [SOTA optimizations fak sits on top of](docs/explainers/sota-optimizations.md): the 10 already-shipped serving optimizations that define the honest baseline.
 - [One binary is the whole surface](docs/explainers/one-binary-one-surface.md): why the governed-serving surface as a single static Go binary beats assembling a multi-component Python/CUDA stack — operational surface, laptop to fleet, not throughput.
 - [Linting agent code at the kernel](docs/explainers/code-linting-at-the-kernel.md): the boundary that adjudicates a tool call is also where a `write_file` can be checked for code that actually parses — language-server packs (Go/JSON in-process, Python/CUDA shell-out) feed parse/compile errors back so the agent fixes them on the same turn.
+- [Model routing (per-aspect + ensemble)](docs/model-routing.md): route any aspect of one request — a single tool call, a sub-query, a reasoning step — to a different model, with first-class ensembles and configurable reductions (vote / best-of / all-reduce / concat), all from one deterministic, reviewable policy. SOTA routers pick one model for the whole request; fak makes routing first-class at every level (`fak route`).
 - [Context is not memory](docs/CONTEXT-IS-NOT-MEMORY.md): why fak separates context from memory by how long a fact stays true, gating promotion at write time with an expire-by-default durability class.
 - [The four layers of agent memory](docs/MEMORY-LAYERS-EXPLAINER.md): routing, addressing, fusion, and semantics as four distinct KV-cache problems, and why fak's change lives only at the semantics layer.
 - [AWQ quantization support](docs/explainers/awq-quantization.md): fak's AWQ 4-bit activation-aware weight format, its dequantization formula, the LoadAWQ API, and the memory/accuracy trade-offs.
@@ -109,6 +113,7 @@ The dedicated, cross-linked capability pages. Each lists one category of support
 - [fak vs vLLM, SGLang & provider KV caching](docs/fak-vs-alternatives-comparison.md): how fak's cross-worker/cross-session fused KV cache differs from the per-session engines and the provider prompt caches, with measured token/cost ratios.
 - [Local-vs-frontier parity](docs/explainers/local-vs-frontier-parity.md): a measured A/B run on safety and cost for a small local model behind the kernel vs hosted frontier models, with the capability ramp called out honestly.
 - [Prefill elimination explained](docs/prefill-elimination-explained.md): a plain-language walkthrough of how reusing a shared prompt prefix hits a provider's KV cache to cut repeated input-token cost on multi-turn agent runs.
+- [Trajectory observability primitives](docs/observability/trajectory.md): the data plane + reference vector-similarity primitive + pluggable scorer seam that let you (or a trivial agent skill) build semantic/trajectory/memory/cache/planner optimizations ON TOP of the kernel — a typed per-turn `Turn` record folded from the event stream (`internal/trajectory`), a deterministic dependency-free embed/cosine/top-k to find near-duplicate "bad" queries the lexical ranker misses (`internal/simhash`), and a `Turn → Finding` scorer registry you attach to with no core edit (`internal/trajhook`). Surfaced as `fak traj similar|cluster|score|gc`; the `trajectory-garden` skill is the worked example.
 
 ## Reference
 
@@ -117,7 +122,7 @@ The dedicated, cross-linked capability pages. Each lists one category of support
 - [Architecture](ARCHITECTURE.md): the registry seams and the frozen ABI.
 - [Extending fak](EXTENDING.md): plug in an optimization → prove it correct → prove it faster → ship.
 - [Repro packet](docs/repro-packet.md): the full 2-minute, no-key/no-GPU walkthrough.
-- [Issue-dispatch loop](docs/dispatch-loop.md): the witness-gated GitHub-issue backlog driver (spawn → ship #N → witness → close), and its live view [docs/dispatch-status.md](docs/dispatch-status.md).
+- [Issue-dispatch loop](docs/dispatch-loop.md): the witness-gated GitHub-issue backlog driver (spawn → ship #N → witness → close).
 - [Idea-scout](docs/idea-scout.md): the inbound feeder — a daily arXiv + GitHub search for ideas related to agent-kernel work, deduped three ways and capped, filed as triage-ready issues (`tools/idea_scout.py`); dry-run by default.
 - [Gateway API reference](docs/fak/api-reference.md): the complete HTTP reference for `fak serve` — its OpenAI, Anthropic Messages, fak-native, and MCP endpoints plus auth, rate limits, and ops routes.
 - [MCP tool-result wire](docs/mcp-tool-result.md): the gateway's MCP tool-result envelope — the SyscallResponse fields, the verdict object, and the closed refusal vocabulary, with one example per verdict class.
@@ -139,7 +144,7 @@ The dedicated, cross-linked capability pages. Each lists one category of support
 # fak — the **F**used **A**gent **K**ernel
 
 <!-- readme-verified: 2026-06-24 vs VERSION 0.32.0 + BENCHMARK-AUTHORITY · process: tools/readme_freshness_audit.py + /refresh-readme · turn-tax hero front and center; breadth stills in BENCHMARK-GALLERY.md -->
-<!-- appeal-verified: 2026-06-23 · doc-appeal scorecard v2 (tools/doc_appeal_scorecard.py) 100/100 A, appeal-debt 0 · v2 raised the bar (bold-flood + dense/unanchored lead promoted SOFT→HARD); front door rebuilt from 54/F: lead front-loaded behind an early Try-it anchor, 8 walls broken, 15 long/run-on sentences split, bold flood 84→20, contrast-frame tic removed — every claim, number, and link held identical -->
+<!-- appeal-verified: 2026-06-24 · doc-appeal scorecard v2 (tools/doc_appeal_scorecard.py) → appeal-debt 0 · 2026-06-24 re-measure caught 2 residual (1 overlong 36-word sentence in flip-1, 1 81-word wall at the flip-1 lead) — sentence split, wall broken into first/second, em-dash budget held (8→7); every claim, number, and link identical · prior 2026-06-23: front door rebuilt from 54/F (lead front-loaded behind an early Try-it anchor, 8 walls broken, 15 long/run-on sentences split, bold flood 84→20, contrast-frame tic removed) -->
 
 > **fak in one line.** A single Go binary that sits between an AI agent and the
 > tools it calls. It treats every tool call like a syscall: checked against a
@@ -227,17 +232,18 @@ rather than hidden.
 
 **1. The permission policy runs *inside* the kernel.** Most agent safety bolts a
 recognizer onto the *outside* of the loop: a pre-tool hook, a sidecar, a second
-model asked "is this safe?". That has two weaknesses. The model can argue its way
-past a recognizer (prompt injection is exactly that). And when the outside thing
-crashes or times out, the call usually runs anyway — *fail-open* (the unsafe
-default: a broken check lets the action through). That lands precisely when
-you're under attack.
+model asked "is this safe?". That has two weaknesses.
 
-`fak` puts the check on the *same call path* as the tool call: one address space (the
-same program — no message hop to a separate process, no *IPC*), and *default-deny*
-(anything the policy doesn't name is refused). So the gate isn't something the
-agent talks to. It's something the call passes *through*, like `read()` through the
-OS kernel.
+First, the model can argue its way past a recognizer — prompt injection is
+exactly that. Second, when the outside thing crashes or times out, the call
+usually runs anyway: *fail-open* (the unsafe default, where a broken check lets
+the action through). That lands precisely when you're under attack.
+
+`fak` puts the check on the *same call path* as the tool call: one address space,
+the same program. There's no message hop to a separate process, no *IPC*. And the
+policy is *default-deny*: anything it doesn't name is refused. So the gate isn't
+something the agent talks to. It's something the call passes *through*, like
+`read()` through the OS kernel.
 
 Refusing an irreversible action doesn't depend on *catching* the attack; it
 depends on the lever never having been wired up. For thirty years, "more security"
@@ -538,6 +544,7 @@ fak serve --addr 127.0.0.1:8080 --base-url http://localhost:11434/v1 --model qwe
 | If you want… | Read |
 |---|---|
 | The two flips, from first principles | [Policy in the kernel](docs/explainers/policy-in-the-kernel.md) · [Addressable KV cache](docs/explainers/addressable-kv-cache.md) |
+| Why engineering is becoming loop-building, and where fak sits | [Engineering is building loops](docs/explainers/engineering-is-building-loops.md) |
 | Why one Go binary beats a serving stack (operational surface, laptop → fleet) | [One binary is the whole surface](docs/explainers/one-binary-one-surface.md) |
 | The serving roadmap (many-node disaggregated serving — RIDE + NATIVE, honest file:line-cited scope) | [`docs/serving/dual-track-serving-plan.md`](docs/serving/dual-track-serving-plan.md) |
 | Every benchmark number (single source of truth, traced to commit + artifact) | [`fak/BENCHMARK-AUTHORITY.md`](BENCHMARK-AUTHORITY.md) ⭐ |
@@ -7888,7 +7895,7 @@ wiring `fak guard` automates.
 The dogfood launcher spins up the entire stack with one command:
 
 ```bash
-cd fleet/fak
+git clone https://github.com/anthony-chaudhary/fak && cd fak
 ./scripts/dogfood-claude.sh --probe "Reply with exactly the word: pong"
 ```
 
@@ -7923,7 +7930,7 @@ fak serve --help                  # Repo CLI from PATH
 Windows uses the native PowerShell script — same flow, no Ollama dependency:
 
 ```powershell
-cd fleet\fak
+git clone https://github.com/anthony-chaudhary/fak; cd fak
 .\scripts\dogfood-claude.ps1 --probe "say pong"
 ```
 
@@ -8014,8 +8021,9 @@ curl http://127.0.0.1:8131/v1/models
 
 ### 2. Start `fak serve`
 
+From the repo root (the Go module is the repo root):
+
 ```bash
-cd fleet/fak
 go build -o fak ./cmd/fak
 
 ./fak serve \
@@ -8309,8 +8317,8 @@ This guide covers both integration approaches.
 ### 1. Install fak
 
 ```bash
-# From the repo
-cd fleet/fak
+# From the repo (the Go module is the repo root)
+git clone https://github.com/anthony-chaudhary/fak && cd fak
 go build -o fak ./cmd/fak
 
 # Or via the installer
@@ -8368,7 +8376,7 @@ Or use an upstream provider:
   --base-url https://api.openai.com/v1 \
   --model gpt-4o \
   --api-key-env OPENAI_API_KEY \
-  --policy path/to/your-policy.json
+  --policy examples/dev-agent-policy.json
 ```
 
 ### Step 2: Configure Cursor for MCP
@@ -8377,17 +8385,20 @@ Or use an upstream provider:
 2. Navigate to **MCP Servers**
 3. Add a new MCP server configuration:
 
+Point `command` at the `fak` binary you built (an absolute path, or `fak` if it's on
+your `PATH`) and `--policy` at a shipped example to start (then adapt):
+
 ```json
 {
   "mcpServers": {
     "fak": {
-      "command": "/path/to/fak",
+      "command": "./fak",
       "args": [
         "serve",
         "--stdio",
         "--base-url", "http://localhost:11434/v1",
         "--model", "qwen2.5:1.5b",
-        "--policy", "/path/to/policy.json"
+        "--policy", "examples/customer-support-readonly-policy.json"
       ],
       "env": {
         "OPENAI_API_KEY": "your-key-here"
@@ -8461,7 +8472,7 @@ Cursor can use custom OpenAI-compatible endpoints. `fak` provides an OpenAI-comp
   --addr 127.0.0.1:8080 \
   --base-url http://localhost:11434/v1 \
   --model qwen2.5:1.5b \
-  --policy path/to/policy.json \
+  --policy examples/customer-support-readonly-policy.json \
   --vdso=true
 ```
 
@@ -8811,7 +8822,7 @@ This guide explains how to use **fak** as a kernel-adjudicated gateway for OpenA
 Start `fak serve` in front of the real OpenAI API:
 
 ```bash
-cd fleet/fak
+git clone https://github.com/anthony-chaudhary/fak && cd fak
 go build -o fak ./cmd/fak
 
 export OPENAI_API_KEY="sk-..."
@@ -12802,6 +12813,7 @@ The gateway fronts any OpenAI-compatible upstream (a local engine or a cloud pro
 | Live seam honesty | Shipped | A run carries a real transcript hash XOR the explicit RED flag `live_seam_unverified`, never a silent skip. |
 | Live seam exercised end-to-end | Shipped | `fak agent` drove the kernel with a real OpenAI-compatible model (Gemini OpenAI-compat and local Qwen2.5), each run carrying a real `transcript_sha`. |
 | Hardware-aware cache placement | Shipped | `internal/cachemeta` models CXL/NUMA-far tiers, per-tier TTL, a zero-copy share descriptor, and a cost-driven `PlanPlacement` that demotes a hot prefix instead of evicting it. The payload-free policy plane; the engine adapter performs the physical movement. |
+| Capacity engine adapter (PlanPlacement demote/spill executor) | Shipped | `internal/engine.CapacityAdapter.Execute` turns a `PlanPlacement` demote/spill into a real stage-to-the-colder-tier + eviction from the live KV cache, fail-safe (stage before evict) and recorded as a typed cache event (#708). |
 | metrics-service scrape / KV-residency / token-per-watt | Simulated | Labeled SIMULATED telemetry; there is no watt source on the build box. |
 | Zero-copy KV co-residence with an external engine | Stub | The `Ref`/`Resolver`/`RegionBackend` seam is frozen so it is a backend swap later, but the shipped path is copy-CAS. The in-kernel model owns its own KV cache. |
 | Advisory adjudication model (harvest-corpus consumer) | Shipped | A small fail-closed classifier (`internal/advmodel`, #580) trained over the floor-labeled `internal/harvest` corpus; it can only corroborate a deny, never weaken the floor. Held-out P/R/F1 vs the stock reference are committed in the artifact meta. |
@@ -12988,7 +13000,7 @@ the client surfaces are in the gateway route table
 |---|---|---|---|
 | OpenAI Chat Completions | `POST /v1/chat/completions` (client + upstream) | `openai` | Shipped. The adjudicating chat proxy; the same wire fronts any OpenAI-compatible engine (Ollama, vLLM, SGLang, llama.cpp, LM Studio). |
 | OpenAI Responses API | upstream only (`POST /responses`) | `openai-responses` | Upstream provider wire. fak proxies *to* a Responses upstream but exposes Chat Completions and Messages to clients. A Responses-default client connects by selecting the chat-completions model. |
-| Anthropic Messages | `POST /v1/messages` (client + upstream) | `anthropic` | Shipped. The Claude-Code-facing proxy; `fak guard -- claude` is the one-command front door. Live token streaming on this wire is synthesized from a buffered, already-adjudicated turn (the live-streaming rung is OpenAI-wire today). |
+| Anthropic Messages | `POST /v1/messages` (client + upstream) | `anthropic` | Shipped. The Claude-Code-facing proxy; `fak guard -- claude` is the one-command front door. `stream:true` relays live text deltas when fronting the real Anthropic API and translates a streaming OpenAI-compatible planner into Anthropic `text_delta` events; tool-use inputs are still held until adjudication. Non-streaming planners fall back to synthesized SSE. |
 | Gemini `generateContent` | `POST /v1beta/models/<model>:generateContent` (and `:streamGenerateContent`) (client + upstream) | `gemini` | Shipped (#567, [`internal/gateway/gemini.go`](https://github.com/anthony-chaudhary/fak/blob/main/internal/gateway/gemini.go)). The Gemini-CLI / google-genai-facing proxy: repoint a Gemini-native client's base URL from `generativelanguage.googleapis.com` at the fak host, and every proposed `functionCall` is adjudicated before the client sees it. A `:streamGenerateContent` request synthesizes a well-formed Gemini SSE sequence from the buffered, already-adjudicated turn (the same posture as the Anthropic wire). |
 | xAI (Grok) | upstream only (OpenAI-compatible `/chat/completions`) | `xai` | Upstream provider wire. xAI uses the OpenAI-compatible chat shape, so the same adapter serves it; clients reach it through fak's OpenAI surface. |
 
@@ -13379,6 +13391,262 @@ generate them faster.
 - [Integration index](../integrations/README.md) — the "repoint one base URL" recipe and the 60-second offline proof
 - [Claims ledger](https://github.com/anthony-chaudhary/fak/blob/main/CLAIMS.md) — every capability with one machine-checked tag (shipped / simulated / stub)
 - [Status](https://github.com/anthony-chaudhary/fak/blob/main/STATUS.md) · [CLI reference](../cli-reference.md) · [Hardware matrix](../HARDWARE-MATRIX.md) · [llms.txt](https://github.com/anthony-chaudhary/fak/blob/main/llms.txt)
+
+---
+
+# Engineering is building loops (fak is the kernel)
+
+> Source: `docs/explainers/engineering-is-building-loops.md`
+
+---
+title: "Engineering is building loops; fak is the kernel they run on"
+description: "Modern engineering is increasingly the act of building agentic loops. fak is the in-process kernel those loops run on, safe and fast for the same reason."
+slug: engineering-is-building-loops
+keywords:
+  - agentic loops
+  - agent kernel
+  - tool call as syscall
+  - observe orient decide act verify
+  - recursive self-improvement
+  - issue-dispatch loop
+  - context planner
+  - addressable KV cache
+  - capability gate
+  - witness-gated
+---
+
+# Engineering is becoming the act of building loops. fak is the kernel they run on.
+
+A decade ago the unit of work was a function. You named an input, named an output, wrote the steps between them, and you were done. The thing either returned the right value or it didn't.
+
+That unit is changing. More and more of the work now looks like a loop: observe, orient, decide, act, verify, and run it again until some condition holds. An agent harness is a loop. A CI bot that keeps proposing fixes until the suite is green is a loop. A dispatch fleet chewing through a backlog is a loop. A system that tunes itself is a loop. The function still exists, but it is now the body of a loop someone else is running.
+
+Here is the problem. Most people build each of those loops by hand on top of a raw model API. The model both proposes the next action and executes it. Context gets rebuilt blindly every turn. Nothing gates the act before it happens. Nothing remembers cheaply across turns. Nothing checks that a "kept" change is actually better. Every loop re-implements the dangerous, expensive parts, badly, in slightly different ways.
+
+A loop is only as trustworthy and as fast as the thing underneath it. That thing is what fak is.
+
+## The loop you already have, and the loop you wish you had
+
+Strip an agent down and the inner cycle is the same five steps every time:
+
+- **observe** — a tool produces some bytes
+- **orient** — assemble the context for this turn
+- **decide** — is this action allowed?
+- **act** — run it
+- **verify** — did it help; keep or revert
+
+When you hand-roll this, the model is in charge of all five. It decides what is allowed, so the only safety is "please don't." It picks what goes in context, so the window fills with junk. It grades its own work, so "done" means whatever it says it means.
+
+fak takes the structural steps away from the model and gives them to a kernel. The model still proposes. The kernel disposes. That single boundary is the whole idea, and it is why fak can be both safer and faster at the same time: the same gate that refuses a bad action also lets a known-good one reuse work it has already done.
+
+## Model proposes, kernel disposes: the syscall seam
+
+The lowest loop is one tool call. In fak a tool call is a syscall, not a function the model just runs.
+
+The kernel exposes a typed seam: `Submit` then `Reap` (the `Kernel` interface in `internal/abi/types.go`). `Submit` adjudicates the call and returns a handle and a verdict immediately, before any engine or network is touched (`Kernel.Submit` in `internal/kernel/kernel.go`). `Reap` carries the slow part, the actual engine round-trip, and folds the result through admission (`Kernel.Reap`). The kernel's own package comment is blunt about where the cost lives: "Adjudication happens entirely at Submit and touches neither the engine nor the network."
+
+The decision is made by an in-process reference monitor. No spawned hook, no IPC, the same call stack as the tool invocation (`Adjudicator.Adjudicate` in `internal/adjudicator/decide.go`). Three properties make it trustworthy:
+
+- **Default-deny.** An empty policy, an unknown tool, or every link abstaining all resolve to `Deny` with `DEFAULT_DENY` (`TestEmptyPolicyDefaultDeny`). No affirmative allow means no dispatch.
+- **Provable refusal only.** A `Deny` cites one reason from a closed twelve-word vocabulary (`CoreReasonCount = 12` in `internal/abi/reasons.go`). What it cannot prove, it defers rather than guesses.
+- **Deny never reaches the engine.** A denied call returns a `DenyResult` on the `Reap` path before `engine.Complete` is ever called (witness `TestDenyNeverReachesDispatch`).
+
+The refusal is bounded too: a self-modify denial returns only the offending glob, not the whole policy or the argument values (`TestSelfModifyDeniedWithBoundedWitness`). And the policy itself is a version-tagged JSON manifest loaded at runtime, so an adopter configures which tools an agent may call by editing one reviewable file, never by forking the kernel (`internal/policy`; CLAIMS.md).
+
+One honest measurement, framed honestly: the in-process decide path runs at about 2,427 ns versus 6.913 ms for a spawned hook doing the same work, roughly 2,849x at n=100 (STATUS.md, BENCHMARK-AUTHORITY.md). That is a subsystem regression sentinel proving the gate is not accidentally paying a process boundary. It is not a throughput or production-readiness number, and the repo says so in the same breath (CLAIMS.md). The point that carries here is narrow and real: making the gate an in-process call instead of a spawn is what lets you put it on every single tool call without the loop grinding to a halt.
+
+A note on the async story, because it is easy to over-read. The ABI freezes a `StatusPending` and a typed `Completion` for future async dispatch (`internal/abi/types.go`), but no current engine returns them. `Reap` blocks on a synchronous `engine.Complete`. The seam is real and frozen; the async operations are not shipped (ARCHITECTURE.md). Worth saying plainly so nobody plans around a future that is not here yet.
+
+## The turn loop: orient and observe without trusting the bytes
+
+Around the syscall sits the turn. Two organs run here.
+
+**Orient** is the context planner (`internal/ctxplan`). It treats this turn's window as an O(1) materialized view over the full, lossless history. Each turn it runs a bounded 0/1-knapsack over candidate spans (`Optimize` in `internal/ctxplan/plan.go`; greedy-density by default, with exact-DP and submodular-coverage objectives also available), keeping pins such as the system prompt, the active goal, and the last user turn as hard constraints, and everything else by benefit. A span it drops is not summarized away; it keeps a content-address and pages back in on a forecast miss (`DemandPage` in `internal/ctxplan/fault.go`). A candidate index bounds the per-turn work from Θ(N²) toward Θ(c·N), measured on an 851-turn replay as 100.1K full-scan candidate-scorings versus 68.0K bounded (CLAIMS.md).
+
+The caveat belongs in the same breath: the live-loop wiring is a guarded seam, off by default (`FAK_CTXPLAN_SEAM`, `internal/agent/ctxplan_seam.go`). The numbers come from a real transcript replay, not a live-serving benchmark.
+
+**Observe** is the result quarantine (`Admit` in `internal/ctxmmu/mmu.go`). Every tool result passes a write-time gate before it can enter context. Poison or secret-shaped bytes are held out and replaced in place with a stub pointer; oversize benign results page out to a sub-2KB pointer (CLAIMS.md). A held page can only be paged back in after an explicit witness `Clear()` and a fresh re-screen of the bytes, so a clearance alone cannot launder poison, even across a process restart (`TestQuarantineSurvivesTheSessionBoundary`).
+
+This is where safe and fast turn out to be the same mechanism. When the gate quarantines a result, a deeper bridge evicts that result's K/V span from the attention cache (`AdmitResult` in `internal/kvmmu/kvmmu.go`), and the cache ends up bit-identical to a run that never saw the span: max|Δ| = 0.0 against a non-vacuous poison control near 0.33 (`TestWriteTimeEvictEqualsNeverSaw`; CLAIMS.md). The trick is that RoPE is linear in position, so survivors after the evicted span are re-rotated by the position delta and land exactly where a fresh prefill would put them (`internal/model/kvcache.go`). The same boundary that contains the poison is the one that lets the cache reuse the clean prefix.
+
+The big honest caveat lives here. The architecture is sound — zero leaks after quarantine — but the detector fak inherits is roughly 100% evadable and false-positive prone on real context: one real session sealed 2 of 59 pages, both benign base64 images (CLAIMS.md). The load-bearing guarantee is the capability floor plus the containment, not detection (CLAIMS.md). And recurrent-state hybrid caches such as Gated-DeltaNet cannot quarantine mid-span at all; there the boundary fails loud with a typed error rather than silently corrupting (`RecurrentEvictUnsupportedError` in `internal/model/kvcache.go`).
+
+## Loops all the way down
+
+Step back and the same observe/decide/act/verify shape repeats at five sizes. Each layer hands the next a primitive it can trust.
+
+- **Inner — the tool call.** Primitive: the syscall seam plus the adjudicator. Model proposes via `Submit`, kernel disposes via the verdict, denial never reaches the engine. (`internal/kernel`, `internal/adjudicator`)
+- **Turn — one agent step.** Primitive: ctxplan orients, ctxmmu observes. Context is a planned O(1) view; results are gated before they enter it. (`internal/ctxplan`, `internal/ctxmmu`)
+- **Session — many turns over time.** Primitive: the KV cache and the durable core-dump. A finished session is a page table over a content-addressed swap, and a quarantine survives the process boundary. (`internal/recall`)
+- **Fleet — many sessions in parallel.** Primitive: witness-gated dispatch. Capped workers resolve issues, and an issue closes only on a per-SHA `dos commit-audit`, never on self-report. (`tools/issue_resolve_witnessed.py`, `docs/dispatch-loop.md`)
+- **RSI — the loop that improves the loop.** Primitive: the non-forgeable keep-bit. A change is kept only on measured gain AND a green suite AND clean truth, all derived from runs the loop performs itself. (`internal/shipgate`, `internal/rsiloop`)
+
+The diagram below is the same idea, nested.
+
+```
+                    LOOPS ALL THE WAY DOWN
+        (each ring = observe -> orient -> decide -> act -> verify)
+
+  +=========================================================================+
+  | RSI LOOP  (the loop that improves the loop)                             |
+  |   primitive: non-forgeable keep-bit  shipgate.Evaluate / internal/rsiloop|
+  |   KEEP only if  gain AND suite-green AND truth-clean  (all measured)     |
+  |                                                                         |
+  |  +===================================================================+  |
+  |  | FLEET LOOP  (many sessions, one backlog)                          |  |
+  |  |   primitive: witness-gated dispatch  docs/dispatch-loop.md        |  |
+  |  |   spawn under cap -> ship #N commit -> per-SHA audit -> close     |  |
+  |  |                                                                   |  |
+  |  |  +=============================================================+  |  |
+  |  |  | SESSION LOOP  (many turns over time)                        |  |  |
+  |  |  |   primitive: KV cache + durable core-dump  internal/recall  |  |  |
+  |  |  |   quarantine survives the process boundary (Clear + rescreen)|  |  |
+  |  |  |                                                             |  |  |
+  |  |  |  +=======================================================+  |  |  |
+  |  |  |  | TURN LOOP  (one agent step)                           |  |  |  |
+  |  |  |  |   ORIENT: ctxplan  O(1) view over lossless history    |  |  |  |
+  |  |  |  |   OBSERVE: ctxmmu  result gate before context entry   |  |  |  |
+  |  |  |  |                                                       |  |  |  |
+  |  |  |  |  +=================================================+  |  |  |  |
+  |  |  |  |  | INNER LOOP  (one tool call = one syscall)       |  |  |  |  |
+  |  |  |  |  |   MODEL PROPOSES ........ kernel.Submit         |  |  |  |  |
+  |  |  |  |  |       |                  (adjudicate, no engine)|  |  |  |  |
+  |  |  |  |  |       v                                         |  |  |  |  |
+  |  |  |  |  |   DECIDE ............... adjudicator verdict    |  |  |  |  |
+  |  |  |  |  |       |                  default-deny, 12 reasons|  |  |  |  |
+  |  |  |  |  |       v                                         |  |  |  |  |
+  |  |  |  |  |   KERNEL DISPOSES ...... kernel.Reap            |  |  |  |  |
+  |  |  |  |  |                          deny never reaches engine|  |  |  |  |
+  |  |  |  |  +=================================================+  |  |  |  |
+  |  |  |  +=======================================================+  |  |  |
+  |  |  +=============================================================+  |  |
+  |  +===================================================================+  |
+  +=========================================================================+
+
+  Same boundary, every ring:  a decision no participant can move by
+  narrating a number.  That is what makes each loop SAFE -- and, by reusing
+  the work it already trusts, FAST.
+```
+
+## The session loop: cache as durable loop state
+
+A session is just the turn loop run many times. Its state is the KV cache, and fak treats a finished session as a core dump (`internal/recall`). The context-MMU already paged every heavy or poisoned result out to a content-addressed store at write time, so what is left is a small page table — roles, digests, quarantine state — over a frozen swap device.
+
+Reload it in a fresh process and the moat holds: a page sealed at write time is refused on page-in unless `Clear()` ran and the bytes re-pass the gate (`TestQuarantineSurvivesTheSessionBoundary`; CLAIMS.md). Two independent gates, so poison cannot be laundered by clearance alone.
+
+There is a durability axis too. Benign results are classified at write time as turn, session, or durable, and only durable facts cross into the persisted core image under `PromotionEnforce` (CLAIMS.md). The default is audit-only (`PromotionWarn`) while callers migrate. This closes the benign over-promotion arm of OWASP Memory-Poisoning T1, where an ephemeral observation silently becomes a permanent bias. It does not close the adversarial arm, which still rests on the same evadable trust gate (CLAIMS.md).
+
+## The fleet loop: dispatch nobody has to trust
+
+Scale out and you get a fleet: many sessions resolving a backlog at once. fak's issue-dispatch loop is a staged pipeline — gate, route, spawn, prompt, witness, close, harvest, surface — driven on a 10/15/30-minute cadence by three scheduled tasks (`docs/dispatch-loop.md`).
+
+The interesting part is that no stage trusts a worker's word. A spawn passes only if the host is safe, an account is free, and the live worker count is under the cap, with any failed check refusing the spawn (`dispatch_preflight.py`). The live worker count is `MAX(kernel lease count, OS process scan)`, so neither a stale lease nor an orphan process can hide load. An issue closes only after the close arm re-runs `dos commit-audit <sha>` per SHA at close time and confirms the commit is reachable from origin/main (`tools/issue_resolve_witnessed.py`). The commit-to-issue link is reconstructed only from the commit text — a closing verb (`close/fix/resolve #N`), `#N` in the subject, or the house `issue #N` noun form — so a fix that names no issue number can never be witnessed-closed (`docs/dispatch-loop.md`).
+
+The headline metric is computed from git evidence, not self-report: `closure_rate = TRUE / (TRUE + CLAIMED)` over `dos commit-audit` verdicts (`docs/dispatch-loop.md`). A closed issue whose commit fails witness stays in `CLAIMED_CLOSED` and never inflates the numerator. A durable curve in `.dispatch-runs/progress.jsonl` — operator-local and gitignored — records every witnessed close, so the count itself is reconstructable from evidence rather than asserted.
+
+Everything is dry-run until `--live` (`docs/dispatch-loop.md`). The honest edge: a silent human close on the same commit could be mis-attributed to the loop, and the opencode backend is single-shot by design, with replan owned by the supervisor, not the worker.
+
+## The loop that improves the loop
+
+The outermost loop tunes fak itself. This is where the keep-bit has to be unforgeable, because the thing being graded is the grader.
+
+There is a one-shot, `cmd/rsicycle`, that takes the four witnesses — before, after, suite-green, truth-clean — as flags. It is honest about being hand-fed. The true loop, `internal/rsiloop` plus `cmd/rsiloop`, derives every one of those witnesses from a run it performs itself (`docs/rsi-loop.md`). It forks a detached git worktree off main, rewrites the tunable, measures the KPI by actually running the probe, takes suite-green from a real build and vet, and takes truth-clean from `git status` (`internal/rsiloop/worktree.go`). The loop author supplies none of them.
+
+The keep-bit lives in one place. `shipgate.Evaluate` sets it only on the conjunction of strict gain, a green suite, and clean truth (`internal/shipgate/shipgate.go`). A zero, unevaluated witness can never report `Kept()` true (`TestKeepBitNonForgeable`). Even a large metric gain is reverted if the suite is red or truth is dirty (`TestKeepBitNeedsAllThree`). Telemetry observers run after the row is journaled and can never re-gate the decision (`TestRunObserved_ObservesEveryVerdictWithoutChangingIt`). The loop never mutates main; a kept change advances only the in-memory baseline and the journal, and landing it is a separate human step (`docs/rsi-loop.md`; CLAIMS.md).
+
+Caveats, stated: only the demo tunable (`DefaultCacheSize`) is wired today; a real subsystem plugs in its own proposer and measurer. The default suite-green check is `go build` plus `go vet`, the Windows-safe proxy, weaker than a full `go test` (which a production run overrides with WSL).
+
+Notice the discipline repeats. The RSI keep-bit, the fleet's per-SHA close, the syscall's provable refusal — they are the same rule at three scales: a decision a participant cannot move by narrating a number.
+
+## Below the tool call: loops inside the syscall
+
+A tool call is not the bottom of the stack. It is the body of smaller loops, and the smallest one runs one token at a time inside the kernel's own address space. The decode loop that *emits* a tool call is `Session.Generate` plus `Session.Step` in `internal/model/kv.go`: prefill the prompt once, then loop, taking `argmax(logits)` for each next token and advancing the KV cache. Greedy, synchronous, owned by fak at the Go call site. The honest edge: this is greedy only. The ABI reserves an async/speculative seam but no engine returns it, and turning it on would re-open the greedy-path proofs.
+
+Under the decode loop is the forward pass: embed, then the attention and MLP layer stack, then a final norm to logits (`Session.token` and `Session.Prefill` in `internal/model/kv.go`). The live decode path can be kernel-selected by flag (f32, Q8_0, Q4_K). The correctness oracle is a separate, cacheless `Forward` (`internal/model/forward.go`) that runs CPU f32 only; it is proven bit-exact against a HuggingFace argmax oracle on SmolLM2-135M, the llama family. Other model families and the GPU and Q8 device paths are held to the weaker argmax-exact plus logit-cosine gate, not bit-identity, and several family oracles are still open for want of fixtures.
+
+Under the forward pass is the KV cache as a first-class kernel object. `KVCache` in `internal/model/kvcache.go` keeps the pre-RoPE keys in `Kraw` so `Evict` can compact the survivors and re-rotate them to their new positions, landing bit-exact to a cache that never saw the evicted span. This is the same RoPE-is-linear trick the turn loop relies on, exposed one rung lower. The boundary is honest where it stops: recurrent-state hybrids such as Gated-DeltaNet cannot evict mid-span and fail loud with `RecurrentEvictUnsupportedError`, never silent corruption.
+
+Under that is the compute HAL (`internal/compute`). It lifts seven CPU-monoculture assumptions into the type system, so adding a GPU, XPU, or NPU is a new `Backend` registration rather than an edit to the forward loop. The CPU reference backend is byte-identical by design (`cpuBackend.Class()` returns `Reference` in `internal/compute/cpuref.go`); every device backend (CUDA, Vulkan, Metal) is `Approx` class, held only to argmax-exact plus a per-backend empirical cosine threshold. A new device needs its own correctness study, not just a recompile.
+
+The bottom rung is borrowed, and this is the firm ceiling. The hardware scheduling loop — device-firmware kernel queuing, occupancy, VRAM paging, graph replay — belongs to CUDA, Vulkan, and Metal. fak exposes the device through the `Backend` interface and gates the correctness class of the results. It does not own or prove the launch queue or device-memory allocation. So the honest reach below the tool call is narrow and clear: fak owns the decode loop, the forward pass, and the KV cache as in-process kernel objects; it ships the HAL contract; it sits on the hardware loop.
+
+## Beyond RSI: loops that pick the work and improve the improver
+
+RSI is not the top of the ladder either. Above it sit loops that improve the kernel indirectly, and the honest tags matter more here because several are conceptual.
+
+The first is meta-RSI: a loop that would tune the improvement *policy* itself, not just one tunable. In fak this is mostly conceptual. The mechanical piece is real — `shipgate.Gate` in `internal/shipgate/shipgate.go` counts consecutive non-keeps and returns `ESCALATE` after K — but on escalation the loop exits to a human, and nothing yet feeds that judgment back to retune fak's own keep-gate. Treat meta-RSI as conceptual with a shipped escalation breaker.
+
+The intake loop picks the work. `tools/idea_scout.py` scans arXiv and GitHub for ideas adjacent to agent-kernel work, dedups three ways, and files cap-bounded triage issues that feed the dispatch backlog. It runs dry-run by default, with a transparent integer relevance score and a gitignored seen-cache. This is the loop that decides what the fleet works on next.
+
+The multi-surface scorecard family applies RSI's discipline to surfaces that are not code. `tools/scorecard_control_pane.py` folds a family of deterministic per-surface scorecards (docs, code, appeal, seo, industry, product, persona, agent-readiness, and more) into one debt integer, with `--check` as the CI ratchet against a pinned baseline. Every score is re-derived from disk and the Go toolchain on each run, so a number cannot be edited into looking better. It is the same no-narration rule, pointed at repo health.
+
+Two loops at the top are conceptual and must be labeled as such. The ecosystem and conformance loop names a frozen, additive-only ABI (`internal/abi/testdata/abi_v0.1.golden`, machine-checked by `TestABIGoldenFreeze`) and a `fak-certified` mark documented in `GOVERNANCE.md` and `TRADEMARK.md`, but the conformance suite a third party would run is declared, not shipped, and the second-implementation trigger has not occurred. The market loop is instrumentation only: `tools/industry_scorecard.py --stale` surfaces SOTA bars due a re-check against a dated, sourced taxonomy, but the action of updating fak to match the field is human-directed, never autonomous. fak surfaces the gap and escalates; it does not auto-reposition.
+
+## The orthogonal loops: the same rule at every ring
+
+The five nested loops are one axis: scale, or how much of the stack lives in one address space. There is a second axis the nesting hides. Some concerns are not a rung — they are threads that recur at *every* rung. Reading the loops this way turns one ladder into a grid.
+
+```
+                 TWO AXES, NOT ONE LADDER
+
+   VERTICAL = SCALE (how much of the stack is one address space)
+   ORTHOGONAL = INVARIANTS that recur at EVERY scale (->)
+
+                 trust   cost   memory  observ.  human
+   SCALE         /witness /econ  /durab  /feedbk  /govern
+   -----------   ------   ----   ------  -------  -----
+   ecosystem  =  [CONCEPTUAL: frozen ABI + fak-certified mark]
+   meta-RSI   =  [CONCEPTUAL: enforce-tune; ESCALATE breaker is shipped]
+   RSI        =  keep-bit  ->  ->  ->  ->  ->   (shipgate.Evaluate)
+   fleet      =  per-SHA   ->  ->  ->  ->  ->   (dos commit-audit)
+   session    =  sealed    ->  ->  ->  ->  ->   (internal/recall)
+   turn       =  Clear+    ->  ->  ->  ->  ->   (ctxplan / ctxmmu)
+              =  rescreen
+   tool-call  =  provable  ->  ->  ->  ->  ->   (adjudicator)
+              =  refusal
+   ...........................................................
+   = = = = = = = = = below the tool call = = = = = = = = = = =
+   decode     =  OWNED    Session.Generate / Step   (kv.go)
+   forward    =  OWNED    Prefill / token           (kv.go, forward.go)
+   KV cache   =  OWNED    Evict + Kraw re-RoPE       (kvcache.go)
+   compute HAL=  SHIPPED  Backend; CPU=Reference,    (internal/compute)
+              =           CUDA/Vulkan/Metal=Approx
+   hardware   =  BORROWED device firmware schedules; fak only
+              =           registers the device + gates correctness
+
+   VERTICAL  -> how DEEP fak owns the stack (one address space)
+   ORTHOGONAL-> the SAME rule, EVERY ring (trust is one of 5 threads)
+   distinctive = the CROSSING POINT: most scales, same invariant,
+                 one kernel. (0/29 primitives novel; assembly is it.)
+```
+
+There are five threads. Trust and witness is the one the rest of this doc traces: provable refusal at the syscall, quarantine `Clear()`-plus-rescreen at the turn, sealed pages at the session, per-SHA `dos commit-audit` at the fleet, the non-forgeable keep-bit (`shipgate.Evaluate`) at RSI. It takes two forms — the witness discipline at the inner, fleet, and RSI rings (a decision no participant can move by narrating a number) and the structural containment gate at the turn and session rings (a sealed page opens only on `Clear()` and a fresh re-screen, never on a say-so) — but both are structural, not a promise.
+
+Cost and economy thread the same ladder: O(1) bounded context reconstruction at the turn (`internal/ctxplan`), shared-prefix reuse across a session, and per-aspect or ensemble model routing at the call (`internal/modelroute`). Today the routing is deterministic over the request's shape, and cost is a post-hoc lens (`EstimateSavings`); cost-guided live dispatch is named as future wiring, not shipped.
+
+Memory and durability are the time axis: results are classified at write time, and in enforce mode the gate refuses to promote ephemeral observations into the durable image (audit-only by default — `Admit` in `internal/ctxmmu/mmu.go`, `Page.Durability` in `internal/recall/recall.go`). The same `Evict` primitive that contains poison is the one a TTL-driven forgetting policy would ride.
+
+Observability and feedback thread through the typed per-turn `Turn` record carried at every scale (`internal/trajectory/trajectory.go`), feeding the scorer seam and the measured witnesses RSI keeps on. Human governance recurs as the operator's hand on the loop: policy authored by a person, not the model; dry-run-until-`--live` at the fleet; the `ESCALATE` verdict that hands control back at RSI.
+
+The reframe is two sentences. The vertical axis is *how much of the stack is one address space*: fak owns from the KV and decode loop up through the fleet and RSI loops in a single in-process kernel, borrowing only the hardware scheduler below and leaving the ecosystem loop above as aspiration. The orthogonal axis is *the same rule, every ring*: the observe, decide, act, and verify shape repeats across the scales, and trust is only one of the threads doing it.
+
+This is also the cleanest statement of what makes fak distinctive, and it stays inside the prior-art honesty the repo leads with (0 of 29 primitives novel). Plenty of systems own a deep vertical slice — a serving engine owns decode and the KV cache. Plenty enforce one cross-cutting policy — a guardrail enforces trust. fak is the one substrate present at the most scales while carrying the same trust-and-reuse invariant through all of them. The contribution is the crossing point, not either axis alone.
+
+## Why an engineer should care
+
+You can build all of this yourself. People do. But every one of those loops re-implements the same dangerous, expensive scaffolding, and the failure modes are quiet: an action that should have been refused, a context full of poison, a "kept" change that was never better, a closed issue that was never fixed.
+
+fak's bet is that this scaffolding is a kernel, not a library you copy into each project. You inherit the spine — the gate, the quarantine, the durable cache, the witness, the keep-bit — and you write the only part that is actually yours: what the loop is *for*.
+
+One last honest note, the one the repo leads with. A prior-art audit found 0 of 29 primitives here novel (CLAIMS.md). The contribution is not any single mechanism. It is the assembly: a fused, fail-closed, witness-gated kernel with the tool call promoted to an in-process syscall. The parts are old. Wiring them into one boundary that is safe and fast for the same reason is the thing.
+
+## Read next
+
+- [Policy in the kernel](policy-in-the-kernel.md) — why a default-deny check on the call path beats an external recognizer that fails open.
+- [Addressable KV cache](addressable-kv-cache.md) — how mid-run causal span eviction stays bit-exact.
+- [The O(1) context window](o1-context-window-economics.md) — when reconstructing a bounded context each turn beats leaning on the prefix cache.
+- [The issue-dispatch loop](../dispatch-loop.md) — the witness-gated fleet loop in full.
+- [The RSI loop](../rsi-loop.md) — the self-improvement loop and its non-forgeable keep-bit.
 
 ---
 
@@ -14401,7 +14669,7 @@ date: 2026-06-23
 
 *Who this is for: engineers building long agent loops who are deciding between append-only-plus-prefix-cache and reconstructing a bounded context each turn. Prerequisite: a working grasp of prefix caching (see the companion [KV Cache](kv-cache-agentic-context.md) explainer). You'll come away able to say when the O(1) window is cheaper than a warm cache (it wins below the cache's own discount fraction, ~12%) and why it buys observability and deterministic replay — and how to check both against real billed usage with `tools/ctxcost.py`.*
 
-**Short answer:** An append-only agent loop keeps the whole transcript and re-sends it every turn, staying cheap only because the provider's prefix cache serves the repeated prefix at about one-tenth the price of fresh input. The contrarian design keeps the full history in a lossless store and sends a *bounded, freshly-reconstructed* context each turn. Reconstruction mutates the prefix, so you lose the cache hits — but you send dramatically less in the first place. Whether that nets out cheaper has a clean answer, and you can measure it without spending a dollar: a Claude Code transcript already records the *exact billed token accounting* of the append-only-with-cache regime per turn, so you only have to model the reconstruction against ground truth. The crossover turns out to be a near-identity: **the O(1) window wins exactly while it is smaller than the cache's effective input discount.** On real heavy agent sessions that discount is about 12%, so a reconstructed window under roughly 12% of the full context beats even a perfectly warm cache — and at a realistic 4K-token window it is about 4× cheaper than the warm cache and 28× cheaper than no cache, with a bounded prefill tail instead of an unbounded one. But cost is only the affordability proof. The real reason to keep history in a store and reconstruct each turn is **observability and deterministic replay** — every turn's context becomes a reconstructable function of a lossless store, so you can replay any step and see exactly what the model saw, while a cache, by demanding a byte-immutable prefix, structurally forbids the per-turn injection, reordering, and annotation that observability needs.
+**Short answer:** An append-only agent loop keeps the whole transcript and re-sends it every turn, staying cheap only because the provider's prefix cache serves the repeated prefix at about one-tenth the price of fresh input. The contrarian design keeps the full history in a lossless store and sends a *bounded, freshly-reconstructed* context each turn. Reconstruction mutates the prefix, so you lose the cache hits — but you send dramatically less in the first place. Whether that nets out cheaper has a clean answer, and you can measure it without spending a dollar: a Claude Code transcript already records the *exact billed token accounting* of the append-only-with-cache regime per turn, so you only have to model the reconstruction against ground truth. The crossover turns out to be a near-identity: **the O(1) window wins exactly while it is smaller than the cache's effective input discount.** On real heavy agent sessions that discount is about 12%, so a reconstructed window under roughly 12% of the full context beats even a perfectly warm cache — and at a realistic 4K-token window it is about 4× cheaper than the warm cache and 28× cheaper than no cache, with a bounded prefill tail instead of an unbounded one. But cost is only the affordability proof. The real reason to keep history in a store and reconstruct each turn is **observability and deterministic replay** — every turn's context becomes a reconstructable function of a lossless store, so you can replay any step and see exactly what the model saw, while a cache, by demanding a byte-immutable prefix, structurally forbids the per-turn injection, reordering, and annotation that observability needs. And these proxy-path numbers are a *floor* on the benefit, not a cap: when fak runs the engine itself the KV cache becomes an addressable kernel object, so the bounded view is reconstructed by reusing and evicting cached spans rather than re-sending a prompt — you get the bounded-context win and keep cache reuse at once, instead of trading one for the other.
 
 ## Two ways to carry context
 
@@ -14517,6 +14785,19 @@ The reading is directional and robust even if the exact fractions are illustrati
 Time-to-first-token tracks the prefill tokens. A cache read is cheaper than recompute but not free — reading KV from memory costs bandwidth — so the proxy charges it 0.1× the time of a fresh token, the same factor it costs in dollars (charging it zero, the "cache-read is free" view, is what makes a warm cache look near-instant; it is not). On that consistent basis the append-only cache's mean TTFT is about **32,374 prefill-tokens**, and its tail reaches **397,588** on the worst turn. That worst turn is *not* an eviction miss — in the warm scenario there are none by construction. It is a single large cache *write*: an oversized ~393K-token tool-result delta prefilled once and recovered as `cache_read` the next turn. The point is that the append-only delta is *unbounded* — one fat tool result can prefill hundreds of thousands of tokens in a turn.
 
 The O(1) window caps that: at a 4K budget no turn ever prefills more than 4,000 tokens. The honest framing is bounded-versus-unbounded, and it carries the same caveat as the cost result. C's 4,000-token worst turn is bounded only because it holds about 0.9% of that turn's 440K-token context; calling that "faster" is a latency win only if the bounded window is a faithful substitute (the same faithfulness assumption the cost numbers rest on). What is unconditional is the shape: the O(1) regime's prefill, and therefore its TTFT, has a hard ceiling at the budget, and it never approaches the context-window limit.
+
+## When fak owns the cache: both wins at once
+
+Everything above is the **proxy** story — fak in front of a black-box API, where the wire prompt *is* the cache key. That fusion is what forces the choice: to bound the context you re-send a smaller prompt and the provider re-prefills it (regime C, bounded but re-prefilled), or you keep appending and ride the cache (regime B, cached but unbounded). You cannot have both, because the only handle you have on a black-box cache is the prefix you send.
+
+When fak runs the engine itself, the KV cache stops being the provider's opaque prefix and becomes an addressable kernel object — and the choice dissolves. The three things a black-box API fuses into one — what is **on the wire**, what is **cached**, and what is **attended** — become separate axes:
+
+- **Reconstruction is a cache operation, not a re-prefill.** To shrink the resident context you do not re-send a smaller prompt; you keep the cached run and *evict* the pruned spans. fak's eviction is bit-exact and cheap: it drops the span's rows from every layer and re-derives each shifted survivor's key from the kept pre-RoPE `Kraw` in a single rotation — no forward pass, no re-prefill (`internal/model/kvcache.go` `Evict`). The survivors' KV is reused as it sits. So the bounded view costs the new tokens you add, not the whole window you keep.
+- **Prefill drops to the floor.** The kernel prefills only the genuinely-new content each turn; everything else is reused from cache. On the same 20 sessions the irreducible new-information floor is about **15.3M tokens — 1.5%** of what the naive regime re-prefills. Regime C, which cannot address the cache, re-prefills its window every turn (about **1.8× that floor at an 8K budget**) because it re-sends history it cannot reuse. The kernel deletes that penalty. (A warm provider cache also prefills roughly the floor — so the kernel matches B on prefill rather than beating it; the kernel's edge over B is the next two points.)
+- **Decode stays bounded.** Each generated token attends over the resident KV. B's resident set is the unbounded growing prefix; the kernel's is the bounded working set, which cuts the decode-attention work to a few percent of B's at a small budget. A black-box cache cannot bound this, because it cannot evict — only append.
+- **Eviction is governance, not just economy.** The same bit-exact removal is the durable point of the whole design: a poisoned tool result or an expired secret can be removed from the middle of a kept run and *proven* gone (`max|Δ| = 0` against a run that never saw it). That is the half of "addressable" that does not commoditize — see [addressable-kv-cache.md](addressable-kv-cache.md).
+
+The honest bounds on this regime are real and the harness labels them as such. It is a **compute** axis (prefill plus attention FLOPs), not the API-dollar bill of the proxy regimes, so the harness reports it separately and never prints a fused "E is N× cheaper than B in dollars." And it is **projected, not measured live**: the KV kernel is dormant on the live proxy loop, the bit-exact eviction is proven on a synthetic model (`internal/kvmmu`) rather than driven by a bounded-reconstruct serve loop that does not yet exist, the cheap exact case today is write-time eviction or append-after-evict (the general mid-stream bit-exact reselect is the audited non-prefix-reuse research item), and linear-attention layers cannot evict a span at all and fail closed. Treat regime E as the *ceiling* that owning the cache buys — the reason the proxy-path crossover is a floor on the benefit, not a cap. The harness emits it under a "When fak owns the cache (projected)" block so it can never be read as a shipped number.
 
 ## What this does and does not prove
 
@@ -15165,6 +15446,370 @@ to drop into any host or CI image.
 To see where this sits in the kernel's design — why feeding errors back at the
 write boundary is the concrete payoff of the write gate — work through FAK 318 in
 the [learning path](https://github.com/anthony-chaudhary/fak/blob/main/LEARNING-PATH.md).
+
+---
+
+# Model routing (per-aspect + ensemble)
+
+> Source: `docs/model-routing.md`
+
+# Model routing — first-class at every level (`fak route`)
+
+> **Status.** The routing **decision** spine and the ensemble **reduce** are
+> [SHIPPED] (`internal/modelroute`, `fak route`, witnessed by `go test`). The
+> **offline routing benchmark** (`fak routebench` — per-aspect + ensemble vs
+> single-model on cost/quality/latency, no model in the loop) is [SHIPPED]. The
+> **live multi-model dispatch** that executes a decision on real engines is
+> [STUB] — tracked as a GitHub issue series. See [`CLAIMS.md`](../CLAIMS.md).
+
+## The one-paragraph version
+
+Most LLM "routers" answer one question: *which single model should serve this
+whole request?* fak makes model routing first-class at **every level**. The unit
+of routing is an **aspect** — the whole request, **one tool call**, a sub-query, a
+planner state, a reasoning step — so a single request can send its `refund_payment`
+tool call to a two-model guard ensemble, its `search_kb` call to a small model, and
+its hard reasoning step to a large model, **each decided by the same policy**. And
+an **ensemble** — a *set* of models on one item, folded by a **reduction**
+(`first` / `vote` / `best_of` / `all_reduce` / `concat`) — is a first-class plan,
+not a bolt-on.
+
+## Why this is different from the SOTA
+
+Surveyed 2025–2026 routers and gateways. Every one routes the **whole request** to
+**one model**; the only shipped model ensemble is a single fixed recipe.
+
+| Product | Routes at | Ensemble | The gap fak fills |
+|---|---|---|---|
+| RouteLLM (LMSYS) | request | none | binary strong/weak pick of one model per request |
+| Martian | request | none | one best model per request; proprietary learned mapping |
+| NotDiamond | request | none | per-prompt single-model selection |
+| Unify.ai | request | none | trained predictor → one model+provider per prompt |
+| OpenRouter | request | **fallback** + Fusion | Fusion is a *fixed* parallel-synthesize recipe, not a configurable per-aspect reduction |
+| Portkey | request | fallback | deeply composable config, but each request still resolves to **one** model; keys are whole-request only |
+| LiteLLM Router | request | fallback | load-balance/failover among deployments of one model |
+| Aurelio Semantic-Router | request | none | routes to an *intent/route*, not to a model |
+| vLLM / SGLang router | replica | none | balances **replicas of the same model** for KV locality — not model selection (a different layer) |
+
+**The honest claim** (no measured multiple): *to our knowledge, fak is the only
+design that routes at any aspect of a single request — each to a different model —
+with first-class ensembles and configurable reductions, expressed as one
+deterministic, verifiable policy.* This is a **categorical** capability gap, not a
+benchmarked speed/quality win. Any "10×" is a **target to be measured**, never an
+inferred or borrowed number. "Deterministic" is scoped to the routing **decision**
+and the reduce **fold** — model **outputs** from non-bit-exact engines are not
+reproducible, and we never claim they are.
+
+The axes on which per-aspect + ensemble routing can become 10× over time:
+
+1. **Granularity** — sub-request routing is a new capability no surveyed product exposes.
+2. **First-class ensembles with configurable reductions** — declarable, not a fixed recipe.
+3. **One policy** instead of hand-assembling a router + a gateway + an ensemble tool + an intent layer.
+4. **Determinism + verifiability** of the routing decision (auditable, content-addressable).
+5. **Routing inside the agent loop** — the tool call is already an in-process syscall, so per-aspect routing rides an existing cut point at near-zero added latency.
+
+## The shape
+
+```
+Subject  ──Route──▶  Decision { Plan }
+  aspect            Plan = one Member  (a PICK → abi.ToolCall.Engine)
+  tool                   | many Members + a Reduction  (an ENSEMBLE)
+  prompt_tokens
+  latency           Votes ──Combine(reduction)──▶ Result { output, winner, tally }
+  complexity              first | vote | best_of | all_reduce | concat
+  labels{...}
+```
+
+- **Subject** — the classified aspect to route. Unset fields are wildcards.
+  `Aspect` is an **open** set (route your own named stage); `Latency`,
+  `Complexity`, and `Reduction` are **closed** vocabularies.
+- **Plan** — `len(Members)==1` is a single pick; `>1` is an ensemble + a reduction.
+  `Scout` names an optional cheap classify-first model.
+- **Manifest** — an ordered `Rule` list (`Match → Plan`) + a fail-closed `Default`.
+  A version-tagged JSON file, validated fail-loud (`fak route --dump` → edit →
+  `--check` → `--manifest`), exactly like the capability-floor policy manifest.
+- **Combine** — folds member outputs deterministically (member order preserved).
+
+## How it works (the data flow)
+
+A routed call moves through the kernel in five steps. Steps 1–2 are the shipped
+pure spine; steps 3–5 are the wiring the epic tracks. The ordering is not
+cosmetic — it is what keeps the default-deny floor intact (see the contract below).
+
+```
+   the host (gateway / agent loop)                 the kernel
+   ───────────────────────────────                 ──────────
+1. classify ──▶ Subject{aspect, tool, tokens, latency, complexity, labels}
+2. Route(Subject) ──▶ Decision{ rule, Plan }            (pure, deterministic)
+                          │
+                          ├─ PICK  (1 member)
+                          │     3. set ToolCall.Engine = Plan.Primary()  ◀── BEFORE submit
+                          │     4. Kernel.Submit (adjudicate — residency PDP sees the engine) ─▶ Reap (dispatch)
+                          │
+                          └─ ENSEMBLE (N members)
+                                3. for each member: a ToolCall with Engine = member.Model
+                                4. N independent Submit (each adjudicated) ─▶ Reap (each dispatched)
+                                5. gather outputs IN MEMBER ORDER ─▶ Combine(reduce) ─▶ Result
+```
+
+1. **Classify.** The host turns the thing it is about to do into a `Subject` — the
+   aspect (a whole request, one tool call, a sub-query, a step), the tool name, an
+   estimated prompt length, a latency/complexity hint, and any labels (domain,
+   tenant, language).
+2. **Route.** `Manifest.Route(Subject)` walks the rules top-to-bottom; the first
+   `Match` that fires returns its `Plan`, else the fail-closed `Default`. This is
+   pure and side-effect-free — the same subject always yields the same decision.
+3. **Bind the engine (pre-submit).** For a single-model plan the host writes
+   `Plan.Primary()` to `abi.ToolCall.Engine`. For an ensemble it builds **N** tool
+   calls, one per member, each carrying its member model in `Engine`.
+4. **Adjudicate, then dispatch.** Each call goes through `Kernel.Submit`, which
+   folds the adjudicator chain (including the residency PDP that reads `Engine`)
+   *before* dispatching. The kernel's `routeFor` then resolves `Engine` to a
+   registered engine and runs the call.
+5. **Reduce (ensemble only).** The host gathers the members' outputs **in member
+   order** and folds them with `Combine(Plan.Reduce, votes)` into one `Result`.
+
+Today the spine produces the `Decision` (steps 1–2) and the fold (`Combine`, step
+5's math); steps 3–4 — writing `Engine` and executing — are the [STUB] wiring.
+
+## Manifest reference (`fak-route/v1`)
+
+A manifest is an ordered rule list plus a fail-closed default. `fak route --dump`
+prints a starter; `--check` validates one (unknown fields are rejected).
+
+**Top level**
+
+| Field | Type | Meaning |
+|---|---|---|
+| `version` | string | schema tag; omit for current, a different MAJOR is refused |
+| `default` | Plan | applied when no rule matches — **must** name ≥1 model (fail-closed) |
+| `rules` | [Rule] | evaluated top-to-bottom; **first match wins** |
+
+**Rule** = `{ name (unique), match, plan }`.
+
+**Match** (every set field must hold; unset = wildcard)
+
+| Field | Type | Meaning |
+|---|---|---|
+| `aspect` | string (open) | `request` / `tool_call` / `query` / `state` / `step` / your own stage |
+| `tool` | string | exact name, or a single trailing `*` prefix (`git_*`), or `*` for any |
+| `min_prompt_tokens` / `max_prompt_tokens` | int | token band; `max=0` is unbounded |
+| `latency` | enum | `interactive` / `batch` (closed) |
+| `min_complexity` | enum | floor: `low` < `medium` < `high` (closed) |
+| `labels` | map | every pair must equal the subject's label |
+
+**Plan** = `{ members, reduce, scout, reason }`
+
+| Field | Type | Meaning |
+|---|---|---|
+| `members` | [Member] | 1 = a PICK; >1 = an ENSEMBLE |
+| `reduce` | enum | required for an ensemble: `first` / `vote` / `best_of` / `all_reduce` / `concat` |
+| `scout` | string | optional cheap model that classifies the subject first |
+| `reason` | string | free-text note surfaced in the decision trace |
+
+**Member** = `{ model, weight (vote/aggregate weight, default 1), role (primary / drafter / verifier / judge / …) }`.
+
+**Reductions:** `first` (fastest-wins / fallback), `vote` (weighted majority, deterministic tie-break), `best_of` (highest `Vote.Score` from a judge), `all_reduce` (weighted numeric **mean** of scalar outputs — *not* a tensor all-reduce), `concat` (gather, member order).
+
+## The matching primitive (`Match.Matches` — the envelope-matching spine)
+
+`Match.Matches(Subject)` (`internal/modelroute/modelroute.go`) is the single
+tag-matching primitive every routing rule reduces to. It has the *shape* of MPI's
+point-to-point envelope match, without the point-to-point delivery:
+
+- **A set field is a required tag; an unset field is a wildcard.** `Match` tests the
+  `Subject` field-by-field under logical AND — every field the rule sets must hold, and
+  a field the rule leaves empty matches anything. An empty `aspect`, `tool`, `latency`,
+  or `min_complexity`, or an unbounded token band (`max_prompt_tokens=0`), each play the
+  `MPI_ANY_SOURCE` / `MPI_ANY_TAG` wildcard role for their own dimension — "match any
+  value of this field." This is the only wildcard discipline in the routing spine:
+  anchor here, do not reinvent a parallel matcher.
+- **`Labels` are key/value tag pairs.** Every pair the rule sets must equal the
+  subject's label for the same key (`s.Labels[k] == v`); a key the rule omits is a
+  wildcard for that key. Labels are the OPEN tag channel — domain, tenant, language,
+  taint — that a deployment matches on without a code change.
+- **`tool` adds one wildcard form.** It matches an exact name, a single trailing `*`
+  prefix (`git_*` matches `git_push`), or bare `*` for any tool. The remaining fields
+  are exact, or — for the token band and `min_complexity` — banded / floored.
+- **Rules are first-match-wins.** `Manifest.Route` walks `Rules` top-to-bottom and
+  returns the first `Match` that fires, else the fail-closed `Default`: the deterministic
+  first-match receive of the envelope analogue. Put the most specific rules first.
+
+**Honesty caveat — it selects an engine, not a receiver.** `Match.Matches` selects a
+*Plan* (and therefore the engine or engines) for a *Subject*; it does not select a
+receiver for a message. fak borrows the envelope-matching **structure** — set field =
+required tag, unset = wildcard, first-match-wins — from MPI's `MPI_ANY_SOURCE` /
+`MPI_ANY_TAG` receive. It does **not** borrow point-to-point delivery, source ranks, or
+rendezvous: there is no message queue and no source-rank ordering behind a match. The
+match decides *which model runs*; the wiring contract above is what actually runs it.
+
+## The 60-second proof (no key, no model, no GPU)
+
+```bash
+# per-tool-call routing — a write-shaped tool call goes to a two-model guard ensemble
+go run ./cmd/fak route --aspect tool_call --tool write_file
+
+# a real manifest: route different aspects of one request to different models
+go run ./cmd/fak route --manifest examples/model-routing.example.json --aspect tool_call --tool search_kb        # -> small
+go run ./cmd/fak route --manifest examples/model-routing.example.json --aspect step --complexity high            # -> large
+
+# the ensemble half, end to end: fold stand-in member outputs through the plan's reduction
+go run ./cmd/fak route --manifest examples/model-routing.example.json \
+  --aspect tool_call --tool refund_payment --simulate "approve,deny,approve"   # -> vote: approve (2 vs 1)
+
+# author / validate the policy
+go run ./cmd/fak route --dump                                   # the built-in starter manifest
+go run ./cmd/fak route --check examples/model-routing.example.json
+```
+
+## The cost lens (usage saved vs the SOTA frontier)
+
+Routing earns its keep by *not* sending every aspect to one big model — so on every
+decision `fak route` prints a rough estimate of what the chosen plan costs against
+the SOTA baseline: one frontier model for everything (the naive default a
+request-level router reduces *from*).
+
+```bash
+go run ./cmd/fak route --latency interactive --prompt-tokens 100
+# usage (rough public list prices, overridable; not a bill): ~92% cheaper than
+# always-frontier -- plan ~$1.25 vs $15 /Mtok-out (saves ~$13.75/Mtok-out)
+
+go run ./cmd/fak route --aspect tool_call --tool write_file
+# usage ...: +100% vs one frontier call -- 2-model ensemble ~$30 vs $15 /Mtok-out
+# (a deliberate reliability spend) [unpriced, charged at frontier: guard-a, guard-b]
+
+go run ./cmd/fak route --check examples/model-routing.example.json   # a cost tag per rule
+```
+
+The math is deliberately rough and **honest by construction**:
+
+- Anchored to the repo's published price convention (Opus-class **$3 in / $15 out
+  per Mtok** — see `experiments/parity`, `cmd/fanbench`) and fully overridable:
+  `--prices small=0.25/1.25,large=3/15` and `--frontier MODEL` reprice the lens, so
+  the number is a transparent function of stated inputs, never a hidden claim.
+- An **ensemble costs more** than one frontier call, so its "savings" is negative —
+  reported as a deliberate reliability **premium**, never dressed up as a saving.
+- An **unpriced** model is charged at the conservative frontier rate *and* disclosed
+  — fak never invents a cheap number to flatter the route.
+- It is a **price-rate estimate** for choosing a policy, **not** a measured
+  speed/quality multiple (the same distinction this page draws above).
+
+## The wiring contract (load-bearing — read before wiring dispatch)
+
+The decision spine is pure; executing a decision on real engines is the [STUB]
+half. The wiring **must** honor three rules so it cannot regress fak's default-deny
+floor:
+
+1. **Route before adjudicate.** Write the chosen model to `abi.ToolCall.Engine`
+   **before** `Kernel.Submit`, never as a dispatch-time override. The residency PDP
+   (`internal/engine`) reads `c.Engine` *inside* the adjudication fold to deny a
+   tenant/sensitive payload bound for a **remote** engine. If routing set the model
+   only at dispatch, that gate would have adjudicated an empty route and the
+   sensitive payload would reach a remote model **fail-open**.
+2. **An ensemble expands to N independently-adjudicated calls.** Executing a Plan
+   with more than one member is N separate `Kernel.Submit` calls, each carrying its
+   member model in `Engine`, each crossing the syscall boundary on its own.
+3. **Member order is preserved into the fold.** The dispatcher gathers member
+   outputs into the `Combine` `[]Vote` in `Plan.Members` order (not engine
+   completion order), or the order-sensitive reductions stop being deterministic.
+
+## Routing presets (examples/routing-presets/)
+
+For adopters who want a starter that matches a single goal, the multi-rule
+mega-example above is split into **named, single-purpose presets** — the routing
+analogue of how `examples/presets/` ships ready-made capability floors. Copy the
+one that matches your intent, then `fak route --check` it. Each is a valid
+`fak-route/v1` manifest (a different schema + loader from the `fak-policy/v1`
+pack in `examples/presets/`, so it lives in its own directory); a round-trip test
+in `internal/modelroute` guards every preset against rot.
+
+| Preset | Goal | Shape |
+|---|---|---|
+| [`cost-saver.json`](../examples/routing-presets/cost-saver.json) | spend less | interactive/short + read-shaped tool calls → small; only `min_complexity: high` → large; default → small |
+| [`guard-writes.json`](../examples/routing-presets/guard-writes.json) | never ship a write unchecked | every `write_*` / `delete_*` tool call → a two-model `vote` ensemble; else a single default |
+| [`best-of-quality.json`](../examples/routing-presets/best-of-quality.json) | best answer on hard work | hard aspects → a drafters + judge `best_of` ensemble; medium → medium; cheap → small |
+| [`scout-then-route.json`](../examples/routing-presets/scout-then-route.json) | classify before you route | a cheap `scout` labels complexity first, then high → large / low → small |
+
+```bash
+go run ./cmd/fak route --check examples/routing-presets/cost-saver.json
+go run ./cmd/fak route --manifest examples/routing-presets/guard-writes.json --aspect tool_call --tool write_file
+```
+
+A `fak route --preset NAME` resolver (copy-by-name without spelling the path) is
+an optional follow-up; the presets are plain manifests today, so `--manifest
+<path>` already loads any of them.
+
+## The offline routing benchmark (`fak routebench`)
+
+The survey above frames per-aspect + ensemble routing as a *categorical*
+capability gap and is explicit that any "10x" is "a target to be measured, never
+an inferred or borrowed number". `fak routebench` is the measuring instrument. It
+runs a **corpus** of recorded cases through **two** manifests — a routed policy
+(per-aspect + ensemble) and a single-model baseline (the SOTA shape: one frontier
+model for everything) — and prints the delta on three axes:
+
+- **cost** — reuses the `fak route` cost lens (rough $/Mtok-out summed over
+  members); per-aspect routing pays the frontier rate only on hard aspects, an
+  ensemble pays it on every member (a deliberate premium).
+- **latency** — a rough per-call latency summed over members (the latency
+  analogue of the cost lens); an ensemble does *N* members' work, so its total
+  compute is the sum (a parallel dispatch's wall-clock is bounded by the max,
+  which this lens deliberately does not assume).
+- **quality** — the fraction of cases whose folded output equals the expected
+  answer; an ensemble can *win* here (a `vote`/`best_of` that folds to the right
+  answer where a single model errs) and a downgrade can *lose* (a cheap model
+  wrong where the frontier was right).
+
+**Offline means offline.** Each case carries the stand-in OUTPUT every candidate
+model produces for it (a recorded answer, never a live model call) — exactly as
+`fak route --simulate` already does — so the benchmark reuses the two pure,
+already-witnessed halves of the package (`Route` + `Combine`) over fixed votes.
+It is **deterministic end to end**: no key, no GPU, no network. It measures what
+the *policy* does to a *recorded workload*, not what a non-bit-exact engine would
+do live (that is the [STUB] dispatch half). Every figure is a **rough lens**, never
+a bill or a measured SLA.
+
+```bash
+# the built-in 8-case demo corpus + DefaultManifest vs a one-frontier-model baseline
+fak routebench
+
+# your own corpus + manifests (the demo corpus + the two baseline manifests ship as fixtures)
+fak routebench --corpus examples/routing-bench/demo-corpus.json \
+               --routed examples/routing-bench/routed.json \
+               --single examples/routing-bench/single-model.json
+
+fak routebench --dump-corpus > my-corpus.json   # the starter corpus to edit
+fak routebench --json                            # machine-readable comparison
+```
+
+The built-in demo corpus is an **honest trade, not a rigged win**: per-aspect
+routing is cheaper and faster on the easy aspects (they hit the small/mid tier),
+the two-model `vote` ensemble is a deliberate *premium* that *rescues* one case the
+single model gets wrong, and a downgrade to the default *loses* one case the
+single model got right — so on the demo the quality deltas offset (cost ~20%
+cheaper, total compute ~10% less, quality tied). The corpus is a recorded fixture
+to make the benchmark runnable now, **not** a claim about real traffic. A
+round-trip test in `internal/modelroute` guards every committed fixture against rot
+and re-asserts the documented numbers.
+
+## Roadmap (the GitHub issue series)
+
+The decision spine is the foundation; the offline benchmark (`fak routebench`) is
+shipped; the rest is wiring, each a tracked issue:
+
+- Wire a single-model route into the kernel/gateway: set `ToolCall.Engine` from
+  `Decision.Plan.Primary()` **pre-submit** (honoring the residency ordering).
+- Execute an ensemble Plan in the gateway: N adjudicated submits + `Combine`.
+- Per-tool-call routing inside the agent loop (`agent.execViaKernel`).
+- Scout-model live classification (a cheap model fills `Subject.Complexity`/labels).
+- Telemetry → learned routing (LIVE cost/latency/quality feedback feeding the
+  policy, RouteLLM-style but per-aspect — the offline benchmark measures a recorded
+  corpus; this is its live, self-improving counterpart).
+- Manifest hot-reload + `fak serve --route-manifest`.
+- Free-text ensemble reductions (a judge/verifier model for `best_of` beyond scalar scores).
+- Routing observability (per-aspect decisions in `/metrics` + the decision journal).
+- Speculative/draft roles bridged to `internal/polymodel` (drafter/verifier members).
+- Industry-scorecard row positioning vs the surveyed routers.
 
 ---
 
@@ -16658,10 +17303,12 @@ Two cross-cutting guard rails (judge grafts):
   every future device) is held to the looser argmax-exact + logit-cosine gate, with a
   per-backend cosine threshold. It is *mechanically impossible* to expect bit-identity of a
   device or to silently promote one to reference.
-- **`Caps`** (`Async`, `FusedAttn`, `FusedFFN`, `GraphCompile`, `UploadDtype`, `DeviceMemory`)
-  are optional capabilities a backend advertises; the core interface assumes none, the loop
-  falls back to the core when a cap is absent → every backend combination is correct by
-  construction.
+- **`Caps`** (`Async`, `FusedAttn`, `FusedFFN`, `GraphCompile`, `UploadDtype`, `DeviceMemory`,
+  `Collective`, `CapacityProbe`) are optional capabilities a backend advertises; the core
+  interface assumes none, the loop falls back to the core when a cap is absent → every backend
+  combination is correct by construction. (`CapacityProbe` is the newest — it reports the
+  device's *size*, the eighth assumption; see
+  [hardware-limits-and-capacity.md](hardware-limits-and-capacity.md).)
 
 ## 3. The CPU reference is *verbatim*
 
@@ -16716,6 +17363,7 @@ design panel: the deferrals are deliberate, not forgotten.
 | bf16→f32 widening at load | `Dtype` field now present; end-to-end narrow is future | `ReadAs(Dtype)` + native-narrow `WeightSource` |
 | synchronous return-by-value | day-1 simplicity + bit-identity | `Caps.Async` + `Buffer.Ready()` futures; `GraphCompile` record-replay |
 | optimized model package not yet fully wired to the seam | the safe first slice is a per-token HAL session path; the legacy batched/Q8 paths remain the production default | fold `prefillBatched`, Q8, and batch decode through `Backend` once the per-token gate stays green |
+| **finite device capacity** — OOM is a `dalloc` panic, `Caps.DeviceMemory` is a *shape* bool (not a size), and `cuda.go` discarded the `totalGlobalMem` it probed | the seven lifts above are all hardware *shape*; capacity is a hardware *limit* — a different category, treated in its own explainer | `compute.DeviceCapacity` (report) + `FitsOnDevice`, bridging to the `cachemeta` placement plane and an engine adapter. See **[hardware-limits-and-capacity.md](hardware-limits-and-capacity.md)** — the eighth assumption |
 
 ## 6. How each hardware class plugs in (and what each adversarial lens demanded)
 
@@ -16852,7 +17500,8 @@ through?"* before deploying.
   "allow_prefix": ["read_", "get_", "search_", "list_"],
   "deny":         { "delete_account": "POLICY_BLOCK", "exfiltrate": "SECRET_EXFIL" },
   "self_modify_globs": [".git/", ".dos/", "policy.json"],
-  "redact_fields":     ["password", "secret", "api_key", "token"]
+  "redact_fields":     ["password", "secret", "api_key", "token"],
+  "rate_limit":   { "max_calls": 50, "max_cost": 0, "key": "trace", "retry_after_ms": 1000 }
 }
 ```
 
@@ -16866,6 +17515,7 @@ through?"* before deploying.
 | `self_modify_globs` | Path fragments that prove a `SELF_MODIFY` attempt (the agent editing its own kernel/config). Checked on **both** write paths: a write-shaped call's target *argument* (`Edit`/`Write`), **and** a shell write whose target lives *inside the command string* (`Bash`: `sed -i`, a `>`/`>>` redirect, `tee`, `git apply`/`git checkout`, an in-place `perl -i`/`ruby -i`/`awk -i`, `python -c`/`node -e` inline writes, `find … -delete`, archive extraction). A shell *read* of a guarded file (`cat`/`grep`) is not a self-modify. |
 | `redact_fields` | Arg keys whose value is stripped (`[REDACTED]`, a `TRANSFORM`) before dispatch — secret hygiene at the call boundary. |
 | `arg_rules` | Per-tool **argument-value** denials: a list of `{ "tool", "arg", "deny_regex", "reason" }`. If an allow-listed `tool`'s decoded string `arg` matches `deny_regex` (RE2 — no backreferences), the call is refused with `reason` (a closed-vocabulary code). Regex-only and best-effort — it inspects one decoded string, not the resolved effect — but enough to deny `rm -rf`, `git push`, or a write whose path escapes the repo (`-o ../…`). See [`examples/dogfood-claude-policy.json`](examples/dogfood-claude-policy.json) and [`examples/repo-guard-policy.json`](examples/repo-guard-policy.json); the path-resolving structural complement is [`tools/repo_guard.py`](tools/repo_guard.py) (see [`docs/repo-guard.md`](docs/repo-guard.md)). |
+| `rate_limit` | Declarative throughput/cost cap (issue #699). An object `{ "max_calls", "max_cost", "key", "retry_after_ms" }` applied to the governor at boot and on `--policy` hot-reload. `max_calls` is a per-key admitted-call quota, `max_cost` a cumulative-cost budget (arg bytes ≈ tokens); set either or both (at least one is required). `key` is the bucketing dimension `trace` (default) / `tool` / `global`. An over-cap call is refused with `RATE_LIMITED`, whose disposition is `WAIT` carrying an advisory `retry_after` — back off like HTTP 429, not a reservation (this is a fixed-ceiling quota with no time window, so the hint is advisory; `retry_after_ms` overrides the default). Omit the block entirely to leave the limiter inert. The `FAK_RATELIMIT_*` env vars are the fallback when no `--policy` is given; a policy load is authoritative over them. |
 
 **Anything not in `allow` / `allow_prefix` and not explicitly denied resolves to
 the fail-closed `DEFAULT_DENY`.** An *empty* manifest (`{}`) is valid — it is the
@@ -17394,6 +18044,16 @@ Every number on this page obeys the same rules, enforced in CI and in the per-de
 **Last updated:** 2026-06-21
 **Status:** Living document — update when new model results ship
 
+> **🔁 Provenance vs. public reproducibility (read before you `git show` a commit below).**
+> The **Commit** column records the *private-lineage* result commit each number first shipped in.
+> Those short-SHAs predate the public **v0.30.0** squash (`1029e37`) and **do not resolve in a
+> public clone** — treat them as provenance, not as a public reproduce handle. What an outsider
+> actually re-runs in this repo is the committed **artifact** (the JSON / `.md` under
+> `experiments/…` and `docs/benchmarks/…`, all tracked here) plus the **Reproduce** command. The
+> artifact + command are the verifiable anchor; the SHA is lineage. (A few historical paths below
+> dropped their old monorepo `fak/` subdir prefix — the real tracked path is `experiments/…` /
+> `docs/benchmarks/…`. Limitation shown plainly rather than left for you to trip on.)
+
 ---
 
 ## Quick Reference: Primary Numbers
@@ -17432,6 +18092,7 @@ Every number on this page obeys the same rules, enforced in CI and in the per-de
 | **Ultra-long-context work floor (>100k tokens, EXACT/contention-free)** | **single ~10× · 5-agent fleet ~40×+ vs naive (4.3× vs tuned)** | Qwen2.5-7B geometry, P=100k T=10 C=1/5 D=200 R=500 (arithmetic, no model) | Naive re-prefill (A/C ref) / warm per-agent KV (B/C) | _this commit_ | `session/ultra-long-context-floor-20260622.json` + `ULTRA-LONG-CONTEXT-RESULTS.md`. WORK floor (token = sessionbench `prefillTokens`; FLOP = O(L²)-aware), not a wall-clock; anchor token A/C 62.0× reproduces the committed 50×5 token floor; live wall-clock anchor at >100k is separately gated |
 
 | **Decode vs prefill worker-count scaling (x86_64 32-core, within-run ratio)** | **decode all-cores-default penalty 2.5× (1.5B) → 2.1× (3B) → 1.14× (7B); decode peaks ≤8–16w, prefill scales to all cores** | Qwen2.5-1.5B/3B/7B Q8, x86_64 32-core agent-host (contended) | best worker count vs 32w default — same box, same run | _this commit_ | `experiments/session/worker-scaling-desktop-x86-20260624.json` + `WORKER-SCALING-DESKTOP-X86-20260624.md`. WITHIN-RUN ratio only; absolute tok/s is contended agent-host, NOT comparable to the uncontended M3 Pro rows. CPU-threading analogue of the GPU launch-bound small-model artifact |
+| **Self-ablation feature sweep — vDSO on/off (deterministic, Regime A of epic #607)** | **vdso_hits 0→7 · engine_calls 12→5 · tokens 937→417 (−520)** | tau2-airline-smoke frozen trace (12 calls), mock engine, no model | all-off baseline (vDSO off) | _this commit_ | `experiments/ablate/tau2-smoke-vdso-ablation.json` + `ABLATE-RESULTS.md`. Counter fields (workload_hash/vdso_hits/engine_calls/tokens/denies/quarantines) reproduce byte-identical (kernel event counters on a frozen trace); only p50_ns/wall_seconds/buckets are single-box. Rung 1 sweeps the one runtime knob only; env-gated features + cross-agent (Regime B) arms are separate rungs |
 
 > **The model-ladder thesis.** Live wall-clock ratio climbs toward the deterministic
 > 7.50× token-speedup ceiling as per-token compute grows (135M 4.58× → 360M 5.40× →
@@ -17448,7 +18109,7 @@ Every number on this page obeys the same rules, enforced in CI and in the per-de
 
 **Date:** 2026-06-20
 **Commit:** `bcad56e`
-**Files:** `fak/experiments/mac-m3pro-kernel-20260620/kernel-latency-mac-m3pro-20260620.json`, `fak/MAC-M3PRO-KERNEL-BENCH-2026-06-20.md`
+**Files:** `experiments/mac-m3pro-kernel-20260620/kernel-latency-mac-m3pro-20260620.json` *(the anchor)*, `MAC-M3PRO-KERNEL-BENCH-2026-06-20.md` *(narrative companion — not published in the public repo)*
 **Machine:** Mac15,7 — Apple M3 Pro, 12 core, arm64, darwin, go1.26.0. Medians of count=8 trials on an idle box.
 
 ### What this adds (and why)
@@ -17504,7 +18165,7 @@ silently removed.)
 
 **Date:** 2026-06-20
 **Commit:** `0fc39aa`
-**File:** `fak/experiments/causal-invalidation-20260620/causalbench-witness-20260620.json`
+**File:** `experiments/causal-invalidation-20260620/causalbench-witness-20260620.json`
 **Reproduce:** `go run ./cmd/causalbench -selfcheck` (zero files, exits non-zero on any violation)
 
 ### What this witnesses (and why it is the cheapest strategic proof)
@@ -17571,8 +18232,8 @@ not numeric.
 
 **Date:** 2026-06-19
 **Commit:** `2bbda6f`
-**File:** `fak/experiments/session/headline-qwen-50x5.json`
-**Chart:** `fak/experiments/session/chart1-headline-walltime.svg`
+**File:** `experiments/session/headline-qwen-50x5.json`
+**Chart:** `experiments/session/chart1-headline-walltime.svg`
 
 This is the number a first-time visitor sees in README §1: *"On a realistic 50-turn ×
 5-agent run (Apple M3 Pro, Qwen2.5-1.5B), fak did in ~19 minutes what the naive loop
@@ -17631,7 +18292,7 @@ diagnosis: `benchmark-run-opencode-20260619/BENCHMARK-RUN-OPENCODE-20260619.md` 
 
 **Date:** 2026-06-18
 **Commit:** `a200c3d`
-**File:** `fak/experiments/radixattention/radixbench-smollm2-135m-q8.json`
+**File:** `experiments/radixattention/radixbench-smollm2-135m-q8.json`
 
 ### What This Measures
 
@@ -17675,7 +18336,7 @@ On the synthetic 64-hidden/4-layer wiring model, the memcpy cost of cloning cach
 
 **Date:** 2026-06-19
 **Commit:** `92896a4`
-**Files:** `fak/experiments/radixattention/radixbench-{smollm2-135m,smollm2-360m,qwen2.5-0.5b,qwen2.5-1.5b}-q8-agents-fresh-20260619.json`
+**Files:** `experiments/radixattention/radixbench-{smollm2-135m,smollm2-360m,qwen2.5-0.5b,qwen2.5-1.5b}-q8-agents-fresh-20260619.json`
 
 ### What This Adds
 
@@ -17719,7 +18380,7 @@ green on every run.
 
 **Date:** 2026-06-19
 **Commit:** `92896a4`
-**Files:** `fak/experiments/session/highT-smollm2-135m-{64-128-256,512}-fresh-20260619.json`
+**Files:** `experiments/session/highT-smollm2-135m-{64-128-256,512}-fresh-20260619.json`
 
 ### What This Adds
 
@@ -17761,8 +18422,8 @@ model. This is disclosed in each JSON's `methodology` field.
 
 **Date:** 2026-06-19
 **Commit:** `60db592` (path unblocked by `84c2e6c`)
-**Files:** `fak/experiments/gpu/q8gpu-smollm2-135m-{gpu-q8,gpu-f32,cpu-q8}-20260619.json`
-**Doc:** `fak/experiments/gpu/VULKAN-Q8-RX7600-20260619.md`
+**Files:** `experiments/gpu/q8gpu-smollm2-135m-{gpu-q8,gpu-f32,cpu-q8}-20260619.json`
+**Doc:** `experiments/gpu/VULKAN-Q8-RX7600-20260619.md`
 
 ### What This Adds
 
@@ -17809,8 +18470,8 @@ real RX 7600 (Vulkan 1.4.349, native Windows), 64 decode steps / 3 reps.
 
 **Date:** 2026-06-19
 **Commit:** `7bf666b` (unblocked by the `8c74fd9` q8_matmul input-tiling fix)
-**Files:** `fak/experiments/gpu/crossover-qwen2.5-1.5b-{gpu,cpu}-q8-20260619.json`
-**Doc:** `fak/experiments/gpu/CROSSOVER-1P5B-RX7600-20260619.md`
+**Files:** `experiments/gpu/crossover-qwen2.5-1.5b-{gpu,cpu}-q8-20260619.json`
+**Doc:** `experiments/gpu/CROSSOVER-1P5B-RX7600-20260619.md`
 
 ### What This Adds
 
@@ -17852,7 +18513,7 @@ ceiling.
 
 ## Session Value-Stack Results (SmolLM2-135M Q8)
 
-**File:** `fak/SESSION-VALUE-STACK-RESULTS.md`
+**File:** `docs/benchmarks/SESSION-VALUE-STACK-RESULTS.md`
 
 ### What This Measures
 
@@ -17895,12 +18556,12 @@ The **11.2–14.5×** value-add is **vs naive stateless serving**, not vs SGLang
 
 ### SGLang RadixAttention Paper
 - **Source:** Lianmin Zheng et al., "SGLang: Efficient Execution of Structured Language Model Programs," arXiv:2312.07104; NeurIPS 2024
-- **fak replication:** `fak/RADIXATTENTION-RESULTS.md`
+- **fak replication:** `docs/benchmarks/RADIXATTENTION-RESULTS.md`
 - **Claim:** fak achieves 86.7% hit rate (inside SGLang's 50-99% band)
 
 ### SmolLM2-135M Reference
 - **Role:** In-kernel bit-exact anchor for GPU/CPU equivalence gates
-- **Proof:** `fak/IN-KERNEL-MODEL-DESIGN.md` R0–R14
+- **Proof:** `IN-KERNEL-MODEL-DESIGN.md` R0–R14 *(narrative companion — not published in the public repo; the bit-exact equivalence ships as tests, e.g. `TestHALVulkanForwardMatchesNative`)*
 - **Status:** Proven bit-for-bit vs HF oracle
 
 ---
@@ -19404,6 +20065,190 @@ POST /v1/messages
 
 ---
 
+# Trajectory observability primitives
+
+> Source: `docs/observability/trajectory.md`
+
+# Trajectory observability — the data plane, the similarity primitive, and the seam
+
+fak does not ship a trajectory-analysis product. It ships the three **primitives**
+an analysis is built from, so you (or a trivial agent skill) can write your own
+semantic, trajectory, memory, cache, or planner optimization on top of the kernel's
+defaults — without forking the kernel.
+
+The kernel already adjudicates every tool call and fans a typed lifecycle event to
+any registered observer. What it lacked was an *analysis-shaped* view of that stream
+and a way to compare turns by meaning rather than exact tokens. These three leaves
+close that gap, each opt-in and each additive to the frozen ABI:
+
+| primitive | package | what it gives you |
+|---|---|---|
+| **data plane** | `internal/trajectory` | a typed, exportable per-turn record folded from the kernel's event stream |
+| **reference vector similarity** | `internal/simhash` | a deterministic, dependency-free embed + cosine + top-k, to find near-duplicates the lexical ranker misses |
+| **scorer seam** | `internal/trajhook` | a pluggable registry of `Turn → Finding` scorers — attach your own analysis with no core edit |
+
+The CLI surface is `fak traj` (`similar` / `cluster` / `score` / `gc` / `export`);
+the reference application is the `trajectory-garden` skill.
+
+---
+
+## 1. The data plane — what a turn is
+
+A **`trajectory.Turn`** is one analysis-shaped record of an agent action: the trace
+it belongs to, its order within the trace, the human-meaningful query that drove it,
+the tool and the kernel's verdict, the result taint, the digest identities, the
+per-turn token/byte cost, and — optionally — a deterministic `simhash` embedding of
+the query. It is deliberately *different* from a [decision-journal](../../internal/journal/journal.go)
+row: the journal is the tamper-evident audit ledger (a verdict over a digest); a
+`Turn` is the analysis surface (the query text, the cost, the cache shape, the
+embedding). One proves what the kernel decided; the other lets you find the bad
+trajectories.
+
+The export schema is stable JSONL, one Turn per line:
+
+```json
+{"trace_id":"sess-a","seq":1,"query":"search the knowledge base for the refund policy","tool":"search_kb","verdict":"ALLOW","token_estimate":320}
+{"trace_id":"sess-a","seq":2,"query":"refund the customer's last payment","tool":"refund_payment","verdict":"DENY","reason":"POLICY_BLOCK","token_estimate":210}
+```
+
+### How a turn is recorded without touching the ABI
+
+A `trajectory.Recorder` is an `abi.Emitter`. The kernel already fans every lifecycle
+transition to registered emitters, and `abi.Event` carries an **OPEN `Fields` map**
+plus the call's **OPEN `Meta` map** — so the producer (the gateway / agent loop)
+stamps the query text and per-turn cost into those open channels, and the Recorder
+folds them into a Turn. No ABI field is added; the recorder reads only what is
+already there, defaulting cleanly when a field is absent.
+
+Recording is **off by default** (a benchmark should not pay to record). Turn it on
+with an env toggle, exactly like the audit journal:
+
+```bash
+FAK_TRAJECTORY=1         # enable the recorder
+FAK_TRAJECTORY_EMBED=1   # also stamp a simhash embedding on each turn's query
+```
+
+Programmatically, `trajectory.Enable(embedQueries)` registers one Recorder and
+returns it; `trajectory.Default()` is the process-global instance a front door reads
+and exports.
+
+---
+
+## 2. The reference vector-similarity primitive
+
+`internal/simhash` is the answer to "find the bad trajectories or bad queries in a
+useful way" — a **reference** vector similarity over tokens, not a learned model:
+
+```go
+v := simhash.Embed("delete every row in the production table") // deterministic, L2-normalized
+c := simhash.Cosine(v, simhash.Embed("drop all rows in prod")) // similarity in [-1, 1]
+
+var ix simhash.Index
+ix.AddText("q1", "refund the last payment", "")
+matches := ix.TopK(simhash.Embed("issue a refund"), 5)          // k nearest by cosine
+```
+
+It is a hashing-trick sketch over word unigrams/bigrams and character 3-grams:
+deterministic (same text → same vector, on any platform, no RNG, no model),
+dependency-free, and cheap. That makes it good enough to catch near-duplicate
+queries and outlier trajectories on day one.
+
+**Know its ceiling.** Because the features are lexical, two queries that mean the
+same thing in *different vocabulary* score low:
+
+| query A | query B | cosine |
+|---|---|---|
+| search the knowledge base for the refund policy | look up the refund policy in the knowledge base | **0.75** |
+| please refund the customer's last payment | refund the customers last payment please | **0.70** |
+| delete every row in the production users table | drop all records from the prod users table | **0.35** |
+
+Shared-vocabulary paraphrases cluster ~0.70–0.78; same-intent / different-word pairs
+fall to ~0.35. The default duplicate threshold (0.70) is calibrated to that reality —
+it catches the real redundancy without firing on distinct work. When your corpus has
+heavy same-intent/different-vocabulary redundancy, that is the signal to **swap in
+real embeddings**: build a `simhash.Index` from a sentence embedder's `[]float32`
+(the Index machinery is model-agnostic) or register your own scorer. The reference
+primitive is the floor, not the ceiling — and the swap is the whole point.
+
+---
+
+## 3. The scorer seam — attach your own analysis
+
+`internal/trajhook` is the application-layer extension point. A `Scorer` is a pure
+function from a `trajectory.Turn` (with the whole corpus as context) to zero or more
+`Finding`s; a `CorpusScorer` scores the whole corpus at once. You register named
+scorers into a `Registry` and run them — the same "register a driver, don't edit the
+core" discipline the kernel uses for `abi.Emitter`, lifted to the analysis layer
+where no ABI is involved at all.
+
+```go
+reg := trajhook.NewRegistry()
+reg.Register("my_regression", func(t trajectory.Turn, corpus []trajectory.Turn) []trajhook.Finding {
+    // your analysis here — flag t against corpus and return findings
+    return nil
+})
+findings := reg.Run(recorder.Turns()) // worst-first
+```
+
+Three **reference** scorers ship as worked examples (`trajhook.Default()`):
+
+- **`duplicate_query`** — a turn whose query near-duplicates an *earlier* one
+  (simhash cosine ≥ threshold). The redundancy a lexical ranker misses.
+- **`cost_outlier`** — a turn in the expensive tail of the token distribution. Where
+  the context budget went.
+- **`high_deny_rate`** — a *trace* the kernel refused on ≥50% of turns. A confused or
+  adversarial loop worth a human look.
+
+They are examples, not policy. fak deliberately does **not** ship a learned
+"bad-trajectory classifier" — that judgment is application-specific. What fak ships
+is the substrate that makes one a few lines to write.
+
+---
+
+## 4. The CLI — `fak traj`
+
+Gardening verbs over an exported corpus. Every verb reads a corpus file; none
+mutates it (`gc` *proposes*, it never deletes — fak never removes a user's
+trajectory data).
+
+```bash
+CORPUS=examples/trajectory/sample-corpus.jsonl
+
+fak traj score   --corpus "$CORPUS"                          # run the reference scorers, worst-first
+fak traj similar --corpus "$CORPUS" --query "issue a refund" # k most-similar past queries
+fak traj cluster --corpus "$CORPUS"                          # group near-duplicate queries
+fak traj gc      --corpus "$CORPUS" --json                   # propose prune candidates
+fak traj export  --corpus "$CORPUS"                          # re-emit normalized JSONL
+```
+
+`examples/trajectory/sample-corpus.jsonl` is a shipped demo corpus to rehearse the
+verbs with no live kernel.
+
+---
+
+## 5. The reference application — the `trajectory-garden` skill
+
+`.claude/skills/trajectory-garden/` is a trivial agent skill that drives `fak traj
+score` + `gc` to find redundant / bad / expensive trajectories and propose prunes.
+It is the proof of the thesis: a relatively trivial skill can do real memory /
+trajectory gardening *on top of* the primitives — work that wasn't possible before
+fak expressed the data plane, the similarity primitive, and the seam. Fork it to
+build your own analysis; swap the scorer and you have a different tool.
+
+---
+
+## Why this altitude
+
+The goal was never for fak to ship the semantic layer. It was to express the
+**primitives** at the kernel boundary — first-class data visibility and hooks — so
+the semantic, trajectory, memory, cache, and planner optimizations are something you
+and others write above the defaults, for a core use case or a one-off alike. The
+data is typed and exportable; the similarity is a deterministic reference you can
+replace; the seam takes your scorer with no core edit. That is the observability
+layer; the analysis is yours to build.
+
+---
+
 # Claims ledger
 
 > Source: `CLAIMS.md`
@@ -19480,6 +20325,25 @@ The lint witness (unit 96): every line beginning with `- [` carries one and only
 - [SHIPPED] Agent/requester initiated context tombstones: `recall.Session.RequestContextChange` accepts a negative-only request to suppress a page from future model-visible `Resolve`/`Recall`/`cdb.WorkingSet` without deleting the CAS bytes or mutating the original page row; `fak debug --cmd tombstone`, HTTP `POST /v1/fak/context/change`, and MCP `fak_context_change` persist the same ledger row on a core image. This gives RSI/self-audit a way to say "do not put that memory back in my context" while preserving audit evidence. Witness: `TestContextChangeTombstoneSuppressesRecallButKeepsAuditBytes`, `TestContextChangeTombstonePersistsAcrossReload`, `TestWorkingSetSkipsAgentTombstonedPage`, `TestCmdDebugTombstonePersists`, `TestContextChangeTombstonesRecallImageOverHTTPAndMCP`.
 - [SHIPPED] Inherited detection ceiling, surfaced not hidden: the same real-session run sealed 2 of 59 pages — two large base64 image renders flagged `SECRET_EXFIL`, FALSE POSITIVES (the documented `≈100% evadable + FP-prone on our own context` ceiling). `cdb` makes the gate's decision durable/queryable; it does not improve the decision. Witness: `fak debug --session <real>` `info.sealed==2` on benign images.
 
+## Portable session image + uniform dump/restore (session.Restore + sessionimage + snapshot)
+
+- [SHIPPED] `session.Table.Restore`: the durable-resume write — load a full drive `State` VERBATIM (Rev preserved, a terminal session restored terminal, never silently revived as Running), the load-time inverse of `Snapshot`. This closes the SESSION-CONTROL-STATE §5 "no persistence yet" fence: a session re-homed to another host/instance resumes at the budget/priority/run-state it held, not a default. Witness: `go test ./internal/session` (`TestRestoreRoundTripsSnapshotVerbatim`, `TestRestoreReestablishesTerminalSession`, `TestRestoreForcesTraceKey`).
+- [SHIPPED] `sessionimage`: a portable, versioned, **model-agnostic** SESSION image — composes the drive (`session.json`), the recall core image (`manifest.json`+`cas.json`+`index.json`), and the trajectory (`trajectory.jsonl`) into one bundle with a sha256 integrity index over every part, plus a deterministic single-file `.faksession` tar (`Pack`/`Unpack`, stdlib `archive/tar`, zero deps) for offload/archive across hosts, users, instances, and VMs. `Rehydrate` re-attaches the drive into a fresh table, reloads the gate-armed recall `Session` + ctxplan index, and logs a model/host `Migration`. Model-agnostic by design: it carries logical content only — no KV cache, no token ids — so a restore re-prefills on a DIFFERENT model. Witness: `go test ./internal/sessionimage` (`TestDumpLoadRoundTrip`, `TestTerminalSessionResumesStopped`, `TestPackIsDeterministic`, `TestRehydrateInPlaceRecordsNoMigration`, `TestDriveOnlyImage`).
+- [SHIPPED] The recall moat survives the OFFLOAD boundary: a page the gate sealed stays SEALED after the image is packed to a `.faksession`, shipped, unpacked into a fresh directory, and reloaded under a different model — and a witness `Clear()` still does not launder it (the content re-screen holds); a flipped byte fails the integrity check closed; a path-traversal tar entry is refused. Witness: `go test ./internal/sessionimage` (`TestPackUnpackPreservesQuarantineAcrossBoundary`, `TestLoadDirFailsClosedOnTamper`, `TestUnpackRejectsPathTraversal`).
+- [SHIPPED] `snapshot`: a UNIFORM dump/restore seam over any primitive on the loops ladder (turn → tool → session → fleet → rsi) — a sha256-integrity envelope (`Marshal`/`Parse`/`Into` over any JSON body, digest over the canonical-compacted bytes so a pretty-print round-trip stays verified and a content change fails closed) + a ladder registry (kind/level/desc) + typed codecs for the TURN level (a trajectory's `Turn` rows) and the FLEET level (a `session.Table`'s whole-fleet drive snapshot, restored verbatim via `session.Table.Restore`). The SESSION level has the richer multi-part `sessionimage`; rsi/tool ride the generic seam directly (`Marshal` over any body). Witness: `go test ./internal/snapshot` (`TestGenericRoundTripAnyBody`, `TestParseFailsClosedOnTamper`, `TestFleetRoundTripViaRestore`, `TestTraceRoundTrip`, `TestRegistryLadder`).
+
+## In-kernel agent-to-agent message channel (`a2achan`)
+
+- [SHIPPED] `a2achan`: the first in-kernel primitive that DELIVERS an addressed value from one agent to a DIFFERENT one, gated by the same default-deny floor that gates a tool call. A process-global, Ref-backed mailbox (`Bus`): `Send`/`Recv` (point-to-point) and `Publish`/`Subscribe` (one-to-many fan-out) ride a REGISTERED `a2aGate` adjudicator (the message capability floor) + `a2aIngress` result-admitter (the recv-time quarantine screen), so the floor lives in the same kernel registries every tool call folds — not a side library. Fail-closed by construction: a send without the negotiated `CapA2ASend` is `Deny(DEFAULT_DENY)`; a `ScopeAgent` (private) body crossing to another agent's channel is `Deny(TRUST_VIOLATION)` (widen `Scope` to share); a `TaintQuarantined` body is refused at send and HELD on ingress; a delivered body keeps its taint. ctx-aware blocking `Recv` gives async rendezvous between concurrent in-kernel agents (race-clean). Zero ABI edits; registers NO engine (avoids the `abi.Engine("")` lowest-id default hazard). Witness: `go test -race ./internal/a2achan` (`TestDeterministicDelivery`, `TestFailClosedDefault`, `TestScopeTaintEnforcement`, `TestAsyncRendezvous`, `TestRecvTimeoutNoLoss`, `TestRegisteredFloorInKernelChain`, `TestPubSubFanout`); `go run ./cmd/a2ademo` (no-key proof, exit 0). See `docs/a2a-in-kernel-channel.md`.
+- [SHIPPED] One `ChannelKey{Locale,ID}` shape bridges three locales keyed differently: `InKernel` (a rendezvous within one process — concurrent goroutine-agents), `Session` (a peer `TraceID` — cross-session handoff), `Window` (a continuation id — an explicit, adjudicated handoff across a context-window compaction). Witness: `TestScopeTaintEnforcement` (Window self-handoff); `cmd/a2ademo` legs [3] session + [4] window.
+- [STUB] DURABLE cross-process delivery — a session-image-backed mailbox so a Session/Window message survives a process boundary, and a compaction trigger that mints the Window continuation id — is the named next rung; the in-process locales are real today. The fleet-level A2A HTTP edge (`tools/fleet_agent_link.py`, `docs/a2a-value-opportunities.md`) is the OUT-OF-kernel projection of this substrate, not a duplicate. Routing `Send`/`Recv` as true kernel syscalls awaits wiring the registered-but-dormant `abi` Op table (`LookupOp` is never called on the hot path today).
+
+## Trajectory observability primitives (data plane + reference similarity + scorer seam)
+
+- [SHIPPED] Trajectory data plane (`internal/trajectory`): a typed, exportable per-turn `Turn` record (trace, seq, query, tool, verdict, taint, digests, token/byte cost, optional embedding) folded from the kernel's lifecycle stream. A `Recorder` is an `abi.Emitter` — it reads the human query + per-turn cost from the OPEN `abi.Event.Fields` / `ToolCall.Meta` channels the producer stamps, so it adds NO field to the frozen ABI. Off by default; opt-in via `FAK_TRAJECTORY=1` (+ `FAK_TRAJECTORY_EMBED=1` to stamp query vectors) or `trajectory.Enable`, mirroring the audit journal's enablement seam. JSONL export round-trips through `ExportTo`/`ImportFrom`. Distinct from `internal/journal` by design: the journal is the tamper-evident audit ledger (a verdict over a digest), this is the analysis surface (the query text, the cost, the embedding). Witness: `go test ./internal/trajectory` (`TestRecorderFoldsTrace`, `TestFieldsEnrichment`, `TestExportImportRoundTrip`, `TestIndexSimilarity`).
+- [SHIPPED] Reference vector-similarity primitive (`internal/simhash`): a deterministic, dependency-free `Embed`/`Cosine`/`Index.TopK` over hashed word+char n-grams — the substrate for finding near-duplicate "bad" queries the lexical token-overlap ranker (`internal/contextq`) misses. Honest ceiling, measured: shared-vocabulary paraphrases score ~0.70–0.78, but same-intent/different-vocabulary pairs ("delete every row" vs "drop all records") score ~0.35; it is a hashing-trick sketch, NOT a learned model, and the `Index` is model-agnostic so a deployment swaps in real `[]float32` embeddings through the same machinery. Tier-1 foundation leaf (imports nothing internal). Witness: `go test ./internal/simhash` (`TestEmbedDeterministic`, `TestNearDuplicateRanksAboveUnrelated`, `TestIndexTopK`).
+- [SHIPPED] Pluggable trajectory-scorer seam (`internal/trajhook`): a `Registry` of named `Turn → Finding` scorers application code attaches WITHOUT a core edit — the analysis-layer analogue of `abi.RegisterEmitter`, with no ABI involved. Three reference scorers ship as worked examples (`duplicate_query` via simhash, `cost_outlier`, `high_deny_rate`); they are examples, not a hard-coded classifier. Surfaced as `fak traj similar|cluster|score|gc|export` over an exported corpus (`gc` PROPOSES prune candidates, never deletes). End-to-end proven on the shipped demo corpus (`examples/trajectory/sample-corpus.jsonl`) by the `trajectory-garden` skill. Witness: `go test ./internal/trajhook` (`TestDuplicateQueryFlagsParaphrase`, `TestDenyRate`, `TestSampleCorpusGardening`, `TestSampleCorpusGCProposes`); see `docs/observability/trajectory.md`.
+
 ## S7 write-time durability gate (context is not memory)
 
 - [SHIPPED] Rung-1 write-time durability classifier: `ctxmmu.classifyDurability` assigns a benign result a class from a cheap lexical/tense prior (punctual deictics + bare clock times ⇒ `turn`; habitual/stative frames ⇒ `durable`; a session-scoped frame ⇒ `session`; unmatched ⇒ fail-closed `turn`) — NOT a model call, NOT the Zhang-Choi fact-duration estimator. `MMU.Admit` stamps the class on the OPEN `Verdict.Meta["durability"]` map, orthogonal to the trust `Kind`. Witness: `go test ./internal/ctxmmu` (`TestClassifyDurabilityViaAdmit`, `TestDurabilityTagIsAdditiveOnTransform`, `TestQuarantineCarriesNoDurability`).
@@ -19533,6 +20397,16 @@ Honest ceiling, surfaced not hidden: the *detector* these drivers feed is ~100% 
 - [SHIPPED] The served path arms the **result-side** stack: a new `fak_admit` op (`POST /v1/fak/admit` + the MCP tool) runs a CLIENT-produced tool result through `k.AdmitResult` (context-MMU quarantine + IFC source-stamp/taint ledger), and a `TraceID` is threaded end-to-end (`buildCall` mints one when the wire omits it) so the per-trace IFC ledger / plan-CFI key on it. Closes the structural gap where the proxy + `fak_adjudicate` ran `k.Decide` only, leaving the exfil floor inert off the in-process `Syscall` topology. Witness: `go test ./internal/gateway` — `TestServedResultArmsResultSideStack`: a served secret-shaped result comes back QUARANTINE with the bytes paged out AND `ifc.Ledger.Level(trace)` rises above Trusted (issue #7).
 - [SHIPPED] `fak guard -- <agent>` is the one-command adopter front door that collapses the dogfood path (a shell launcher + two terminals + six env vars + manual teardown) into one cross-platform Go verb. It starts the in-process gateway on a private loopback port, injects its URL into the CHILD process env only (never the parent shell or `settings.json`), execs the real agent interactively, and prints a verdict roll-up on exit. The default upstream is the Anthropic API in passthrough mode, so `fak guard -- claude` wraps a normal Claude Code session with the capability floor armed while the user's own key + prompt-cache breakpoints pass through untouched. A secure floor is embedded in the binary so it works from any directory (`--dump-policy` prints it; `--policy FILE` overrides). The exit audit reads `Server.AdjudicationSummary` from the same operation counters `/metrics` exposes, so it cannot overstate the protection. Witness: `go test ./cmd/fak` — `TestGuardDefaultPolicyDeniesDangerAllowsBenign` (the embedded floor denies `rm -rf`/`sudo`/RCE-pipe, allows `Read`, fails closed on unlisted tools), `TestGuardEnvVar`, `TestGuardDefaultBaseURL`, `TestFormatAuditSummary`, `TestGuardWaitHealthy`; end-to-end, a wrapped child posting to `/v1/fak/adjudicate` is denied/allowed by the kernel and the exit line reports the real tally.
 
+## Model routing (per-aspect + ensemble — `fak route`)
+
+- [SHIPPED] Per-aspect model routing as a first-class, deterministic policy spine (`internal/modelroute`): the routed unit is an ASPECT (the whole request, a single tool call, a sub-query, a planner state, a reasoning step), so within ONE request different aspects route to different models, and an ENSEMBLE (a SET of models on one item + a Reduction) is a first-class Plan — not a request-level pick. `Route(Subject) → Decision` selects the first matching rule's Plan (else a fail-closed Default); the policy is a version-tagged JSON manifest loaded at runtime (`DisallowUnknownFields`, round-trips `--dump`↔`--check`), mirroring the capability-floor `internal/policy` idiom. Pure, stdlib-only (architest tier 1). Witness: `go test ./internal/modelroute` (per-aspect-within-one-request routing, first-match, fail-closed default, prefix/complexity/label match, manifest round-trip + unknown-field rejection, determinism).
+- [SHIPPED] First-class ensemble REDUCE (`modelroute.Combine`): fold many member outputs into one under a CLOSED Reduction vocabulary — `first` (fastest-wins/fallback), `vote` (weighted majority, deterministic tie-break), `best_of` (judge score), `all_reduce` (weighted numeric mean over SCALAR outputs — not a tensor all-reduce), `concat`. Deterministic given fixed member outputs in member order. The `fak route` verb is the oracle (mirrors `fak preflight`/`fak policy`): `--manifest`/`--aspect`/`--tool`/… prints the Decision; `--simulate "a,b,b"` folds stand-in member outputs through the plan's reduction so the ensemble half runs end to end with no model in the loop; `--dump`/`--check` author and validate. Witness: `go test ./internal/modelroute` (`TestCombine*`), `go test ./cmd/fak` (`TestRoute*` — exit-code + JSON contracts); `examples/model-routing.example.json`.
+- [SHIPPED] Honest competitive framing: to our knowledge, fak is the only design that routes at ANY aspect of a single request — each to a different model — with first-class ensembles and configurable reductions under one deterministic, verifiable policy; surveyed routers (RouteLLM, Martian, NotDiamond, Unify) and gateways (OpenRouter, Portkey, LiteLLM) route the WHOLE request to a single model, and the one shipped model ensemble (OpenRouter Fusion) is a fixed parallel-synthesize recipe, not a configurable per-aspect reduction. This is a CATEGORICAL capability gap, NOT a measured speed/quality multiple — any "10×" is a target to be benchmarked, never an inferred or borrowed number; "deterministic" is scoped to the routing DECISION and the reduce FOLD, never to non-bit-exact end-to-end model outputs. Witness: `docs/model-routing.md` (the survey table + the hedged claim).
+- [SHIPPED] Rough cost lens — "usage saved vs the SOTA frontier" on every routing decision (`internal/modelroute/cost.go`; surfaced as the `fak route` `usage` line, a per-rule tag in `--check`, and a JSON `usage` object). For a routed Decision it estimates how much CHEAPER (or, for an ENSEMBLE, how much MORE) the chosen Plan is than always-routing that aspect to one frontier model — the naive default a request-level router reduces from. Anchored to the repo's published price convention (Opus-class $3/$15 per Mtok; `experiments/parity`, `cmd/fanbench`), every figure is ROUGH and overridable (`--prices model=in/out`, `--frontier MODEL`) — a cost LENS for choosing a policy, never a bill. HONESTY FENCES: an ensemble's "savings" is NEGATIVE, so it is reported as a deliberate reliability PREMIUM, never dressed up as a saving; an unpriced member is charged at the CONSERVATIVE frontier rate and DISCLOSED (fak never invents a cheap number); a $0 baseline is "not estimated", not a divide-by-zero; the default ladder is proportional (every tier 1:5 in:out) so the saved fraction is blend-independent (identical on input and output tokens). This is a price-rate ESTIMATE, explicitly NOT a measured speed/quality multiple. Witness: `go test ./internal/modelroute` (`TestSavings*` — blend-independence, conservative-unpriced-disclosure, `--prices` override, premium-not-saving, $0-baseline), `go test ./cmd/fak` (`TestRouteUsage*` — the human line, the JSON `usage` object, the `--check` cost lens, the override).
+- [SHIPPED] Offline routing benchmark (`internal/modelroute/bench.go`, `fak routebench`): runs a CORPUS of recorded cases through TWO manifests — a per-aspect + ensemble policy vs a single-model baseline (the SOTA shape) — and reports the delta on COST (reuses the cost lens), LATENCY (a rough per-call latency summed over members, the latency analogue of the cost lens), and QUALITY (the fraction of cases whose folded output matches the expected answer, where a vote/best_of ensemble can RESCUE a case a single model misses and a downgrade can LOSE one). OFFLINE means offline: each case carries the STAND-IN OUTPUT every candidate model produces (a recorded answer, never a live model call), so the benchmark reuses the pure `Route` + `Combine` halves over fixed votes — deterministic end to end, no key, no GPU. It measures what the POLICY does to a RECORDED workload, not what a non-bit-exact engine would do live (that is the live-dispatch half, still a stub). HONESTY FENCES: every figure is a ROUGH lens (never a bill or a measured SLA); an unpriced member is charged at the conservative frontier rate in BOTH lenses and DISCLOSED; the built-in demo corpus is an HONEST trade (cost ~20% cheaper, total compute ~10% less, quality TIED — one ensemble rescue offsets one downgrade), NOT a rigged "routing wins everything"; the corpus is a recorded fixture to make the benchmark runnable, not a claim about real traffic. Witness: `go test ./internal/modelroute` (`TestBench*` — exact demo aggregates, determinism, ensemble-rescue-wins-at-premium, downgrade-loses, best_of fold, corpus round-trip + validation, latency-book overlay/parse, unpriced-is-frontier; `TestRoutingBenchFixturesCanonicalAndReproducible` — the committed `examples/routing-bench/` corpus + manifests round-trip byte-exact AND reproduce the documented numbers), `go test ./cmd/fak` (`TestRoutebench*` — default demo, JSON contract, `--dump-corpus`, custom `--corpus`, exit codes); `examples/routing-bench/`.
+- [SHIPPED] Fail-closed engine-residency floor (`internal/engine` `residencyGate`): the PDP that denies a tenant-scoped / sensitivity-tagged payload routed to a REMOTE engine now classifies remoteness fail-closed — only a route it can PROVE is on-box (`inkernel` / `local` / `on-device` / `mock` / `cassette`, by family prefix) is local; EVERY other route is remote. This closes the integration hole the old allow-list-of-remote-names form left open: an ensemble member or upstream bound to a LiteLLM / OpenRouter / Portkey / Together / Groq aggregator, a direct provider wire, or a user's own gateway ("their thing") matched none of the known remote substrings and so a sensitive payload sailed past the floor; now an engine the kernel cannot prove local is assumed off-box and denied. The classification stays consistent with the account-switcher's structural engine route (`modelroute.IsRemoteRoute` mirrors the same on-box family list, pinned cross-package). This is the security half of "first-class router / LiteLLM support" — see [`docs/integrations/litellm.md`](docs/integrations/litellm.md), [`docs/integrations/routers.md`](docs/integrations/routers.md). Witness: `go test ./internal/engine` (`TestResidencyGate*` — tenant/sensitive→remote deny, on-box families defer under tenant scope, aggregator/custom routes deny).
+- [STUB] LIVE multi-model DISPATCH is not wired: nothing yet writes a single-model `Decision`'s `Plan.Primary()` to `abi.ToolCall.Engine`, nor executes an ensemble Plan as N engine calls + `Combine`. The frozen ABI seam `ToolCall.Engine` ("optional per-call engine route") is reserved and the kernel already routes on it (`kernel.routeFor`), but the gateway/agent loop never sets it (`gateway.buildCall` / `agent.execViaKernel` leave it empty) — so routing decisions are not yet executed. LOAD-BEARING WIRING CONTRACT (documented in the package so the wiring can't regress the default-deny floor): the route MUST be written to `c.Engine` BEFORE `Kernel.Submit` (the residency PDP `internal/engine` reads `c.Engine` inside the adjudication fold to deny a tenant/sensitive payload bound for a remote engine; a dispatch-time override would adjudicate an empty route and fail OPEN); an ensemble expands to N independently-adjudicated submits; the dispatcher preserves member order into the `Combine` fold. Tracked: the model-routing epic (per-aspect Engine wiring, gateway ensemble execution, scout-model live classify, telemetry→learned routing, observability).
+
 ## Turn-tax benchmark (`fak turntax`)
 
 - [SHIPPED] `fak turntax` replays a class-labeled trace through the real kernel and prices the extra error-code MODEL turn a SOTA loop fires (malformed/duplicate/poison) vs fak's 1-shot adjudication, per lever, with the safety floor on a separate axis. The fak side is live kernel events (not modeled); the headline is decomposed honestly (forced vs elision) and a happy-path control saves exactly 0. Witness: `go test ./internal/turnbench` (incl. `TestRun_HappyPathSavesNothing`, `TestRun_VDSOAblationIsARealPathSwap`); `TURN-TAX-RESULTS.md`.
@@ -19545,6 +20419,10 @@ Honest ceiling, surfaced not hidden: the *detector* these drivers feed is ~100% 
 - [SHIPPED] Replay-as-fitness policy search (`turnbench` policy-genome search): a deterministic, model-free ($0) hill-climb over the policy genome (Deny-by-name — paraphrase-invariant, on the provenance plane) scored entirely by replay over a frozen corpus on the honest replayable axes — `injections_admitted`, `destructive_executed`, `denies`, `quarantines`. Resolve-rate/completion is NOT a fitness term (the `SearchFitness` struct has no such field). A divergence GATE credits a harmful-sink catch only at-or-before the candidate's first-divergence frontier, so the search cannot win on a counterfactual `bounded@i` branch; top-k frontier candidates are FLAGGED for live re-validation, never run. Witness: `go test ./internal/turnbench` (`TestPolicySearch_OracleReducesInjectionsAtZeroModel`, `TestPolicySearch_DivergenceGateRefusesCounterfactualWin`, `TestPolicySearch_ResolveRateIsNotAFitnessTerm`).
 - [SHIPPED] Lever-flip causal attribution (`turnbench.RunLeverFlip` + `abi.WithoutRung`/`RungName`): replay ONE recorded trace through L kernels, each with exactly one rung ablated via a generic per-replay registry mask (composes with the per-kernel injection), and diff `Transforms/VDSOHits/Quarantines/Denies` vs the all-rungs baseline → an exact per-rung attribution table. A rung is named by its self-reported `By`; the vDSO FastPath lever is realized by the existing vdso-off replay arm (architecturally not a chain rung) but flows through the SAME generic diff/witness logic, reproducing the existing `VDSO ON−OFF == VDSOHits` result. Honest gain: `L×K ≈ 10–300×` attribution-coverage/$ — MEASURED, explicitly NOT 10⁹× (the avoided model run is counted once by the spine). Witness: `go test ./internal/turnbench ./internal/abi` (`TestRunLeverFlip_VDSOLeverMatchesLegacyAblation`, `TestRunLeverFlip_GrammarChainRungAblatesCleanly`, `TestRunLeverFlip_AttributionTableShapeAndJSON`).
 - [SHIPPED] World-pluggable replay (`turnbench.RunWithWorld`) + the tool-call token ledger demo (`cmd/tokendemo`): `RunWithCalls` is now `RunWithWorld(…, agent.Configure)`, so a demo can replay the SAME grounded machinery against a DIFFERENT tool world. `tokendemo` installs a coding-agent FILE world and scores two HONESTLY-DISTINCT meters. Win 1 (MODEL-CONTEXT): a prefilter on a mutating /bad call (`write_file`/`delete_path`/`run_shell`/`apply_patch` → structural DEFAULT_DENY) means the executed op's result is never produced — only a bounded deny-as-value verdict (~32 tok) enters the model, keeping (R−verdict) tokens out. Win 2 (TOOL-SIDE): a re-read served from the vDSO tier-2 content cache means the TOOL is not re-run (round-trip/latency/compute saved) — but the cached content is still RETURNED to the model (the gateway re-materializes it), so it is explicitly NOT a model-context cut; the model-side prefill/KV reuse is `ctxdemo`'s axis (the live-loop KV-eviction half is mechanism-proven, see docs/FAQ.md). The per-call DENY/DEDUP classification is the LIVE kernel verdict; the per-call result SIZES are a documented `result_tokens` knob (like the turnbench CostModel), so magnitudes are illustrative, not a measured production bill. A clean control saves 0 on both meters (anti-inflation). The deny's SAFETY value is a separate axis (`guarddemo`). Witness: `go test ./cmd/tokendemo` (`TestTokenLedgerInvariants`, `TestDedupIsToolSideNotContext`, `TestCleanControlInflatesNothing`) + `cmd/tokendemo -selfcheck` (win1 1,452 model tok kept out; win2 3 round-trips / 900 tool tok from cache; clean control 0).
+
+## Self-ablation sweep (`fak ablate`)
+
+- [SHIPPED] `fak ablate` generalizes the 2-arm `fak bench` (vDSO on/off) into an N-ARM feature sweep: it replays ONE frozen tool-call trace under a list of feature configs and prints one row per arm with the kernel counters + a per-arm delta vs the baseline, all bound to the trace's single workload hash by an N-arm identical-workload guard (`ablate.Report.Validate`, generalizing `metrics.Report.Validate` from a fixed pair to N) so the deltas are apples-to-apples. It is the deterministic, $0, no-model core of the self-ablation benchmark harness (epic #607). HONESTY FENCE: rung 1 sweeps only the RUNTIME-SETTABLE vDSO knob (`kernel.SetVDSO`, reused via `bench.RunArm`); the ~40 env-gated features (`FAK_NORMGATE` / `FAK_INKERNEL_RADIX` / `FAK_COMPRESSOR` / …) are read at process start and need the subprocess-re-exec rung, and the live-loop + cross-agent (pure fak vs Claude Code / ultracode) arms are separate rungs — `BuildSweep` fails loud on a non-runtime feature rather than silently measuring nothing. Witness: `go test ./internal/ablate ./cmd/fak` (`TestSweep_VDSO_NArmGuardAndIsolatedDelta`, `TestValidate_RefusesMismatchedWorkloadHash`, `TestBuildSweep_UnknownAndDuplicate`, `TestAblateJSONReport`, `TestAblateUnknownFeatureUsageError`); `go run ./cmd/fak ablate --sweep vdso`.
 
 ## Fan-out benchmark (`fanbench` — one master goal → N sub-agents, N=1…1024)
 
@@ -19562,6 +20440,7 @@ Honest ceiling, surfaced not hidden: the *detector* these drivers feed is ~100% 
 - [SHIPPED] OpenAI-compatible `/v1/chat/completions` client, base_url-swappable local↔remote, bounded timeout + backoff; cassette record/replay for deterministic offline runs; token-usage extraction; a deterministic mock engine. Witness: `engine` tests (units 39–45).
 - [SIMULATED] metrics-service scrape adapter / KV-residency / token-per-watt: labeled SIMULATED telemetry — there is no **watt source** on the build box (units 43, 78). (There IS now a GPU — see the AMD Vulkan backend below — but no power telemetry, so token-per-watt stays simulated.)
 - [SHIPPED] **Hardware-aware cache placement & lifecycle (CXL/NUMA-far tiers, zero-copy share, per-tier TTL, demote-not-evict).** `internal/cachemeta` models the physical memory hierarchy as first-class metadata: **CXL** and **NUMA-far** residency tiers slotted into the HBM→DRAM→…→Disk ladder; a `TierProfile` per tier (latency / bandwidth / capacity / byte-addressable / coherent / persistent); a zero-copy `ShareKind`/`ShareDescriptor` on `Residency` (copy / mmap / CXL-HDM / RDMA / dma-buf, fail-safe **copy** default); **per-tier TTL** + a multi-state lifecycle (filling→resident→expiring→expired/spilled→evicted) with a wall-clock-free `Advance`; and a hardware-cost-driven `PlanPlacement` that **DEMOTES a hot KV prefix to CXL far memory instead of evicting it** — emitting the existing `KVTransfer` offload/restore directives — when the colder tier beats recompute cost, evicting only when nothing colder has room or the span is cheaper to rebuild. It is the payload-free **policy plane** (cachemeta touches no bytes); the physical CXL/RDMA movement is performed by the engine adapter that consumes the directives. Witness: `go test ./internal/cachemeta` (per-tier TTL expiry, demote-skips-full-to-CXL, spill-only-disk, cheap-span-evicts, promote-hot); `go run ./cmd/hwcachedemo` (deterministic — 28000 prefill tokens saved by demoting vs blind LRU evict). See `docs/serving/hardware-aware-cache.md`.
+- [SHIPPED] **Capacity engine adapter — executing a `PlanPlacement` demote/spill against the live KV cache (#708, Plank 4 of the capacity bridge).** `internal/engine.CapacityAdapter.Execute` turns a `cachemeta.PlacementDecision` (the payload-free POLICY plane's verdict) into a real move against the kernel-owned cache: for a demote/spill it STAGES the span to the colder tier (`abi.KVBackend.StageSpan`, addressed by digest so the disaggregated direction survives) and then EVICTS it from the live KV tier (`abi.KVBackend.Evict`, the proven re-RoPE/renumber primitive) — the control path the two-plane gap was missing (the policy and physical planes previously met only at the meter). It is FAIL-SAFE: the live copy is staged BEFORE it is dropped, so a typed staging MISS/FAULT retains the span rather than losing it, and every transition is recorded through the same `CacheEventRecorder` as a typed offload event — a staging fault is a FAULT(residency_fault), never a silent recompute. An evict (no colder tier had room) skips staging; a promote (KVRestore) is the reverse direction and is left for the restore path. Witness: `go test ./internal/engine -run TestCapacityAdapter` (demote+spill stage-then-evict into a typed HIT offload; a stage fault/miss/transport-error retains the span and records a typed FAULT; a real backend's measured stage bytes win over the decision's estimate; evict skips staging; promote/keep not applied). Honest fences: the adapter executes the move but does not yet COMPUTE live `TierPressure` from a real device (Plank 3), turn an OOM into a typed value (Plank 2), nor drive itself from the live serving loop. See `docs/explainers/hardware-limits-and-capacity.md` §4.
 - [SHIPPED] **AMD GPU backend (Vulkan compute).** A `//go:build vulkan` `compute.Backend` (`internal/compute/vulkan*` + SPIR-V `shaders/*.comp`) runs the in-kernel model on a **real AMD Radeon RX 7600** (RDNA3, via the native Windows Vulkan loader), registered as an `Approx` peer so `cpu-ref` stays the Default. **Numerical parity witnessed:** the full SmolLM2-135M forward pass is argmax-exact with **prefill-logit cosine = 1.0** vs cpu-ref, and all 7 op kernels pass the Approx gate. Witness: `go test -tags vulkan ./internal/compute/ ./internal/model/` (TestVulkan*, TestHALVulkanForwardMatchesNative); `VULKAN-AMD-RESULTS.md`.
 - [SHIPPED] **llama.cpp parity — numerical YES, throughput NO.** The Vulkan f32 path is correct but ~58× slower than llama.cpp CPU (decode **394 ms/tok / 2.5 tok/s** on the RX 7600, after FFN-tail fusion, vs llama.cpp CPU Q8_0 ~6.9 ms/tok), because it issues one `vkQueueSubmit`+fence per primitive op (~300/token). Q8 device GEMM has since landed (**24.6 tok/s, ~1.49× vs the f32 GPU path**; and the CPU's small-model lead narrows from 7.2× at 135M to 1.16× at 1.5B as per-token compute grows — see `BENCHMARK-AUTHORITY.md`); the remaining levers (single command-buffer per forward pass, sub-buffer tensor allocation, async submission) are tracked follow-ups; the backend honestly advertises `Async=false`/`FusedAttn=false`/`GraphCompile=false`. Claiming throughput parity would be false. See `VULKAN-AMD-RESULTS.md` Rung 2.
 - [SHIPPED] **NVIDIA GPU backend (CUDA) — decode parity with llama.cpp.** A CUDA `compute.Backend` (`internal/compute/cuda*`, `cuda_kernels.cu`) runs the in-kernel forward pass on a **real RTX 4070** (WSL2 passthrough), argmax-exact vs cpu-ref. With the reusable CUDA graph (`FAK_CUDA_GRAPH=1`, kernel KV-append + cross-session weight share) decode reaches **~119–120 tok/s — dead even with `llama.cpp` Q8_0 (120 ± 15 tok/s)** on a model that fits the GPU, and at **higher precision (fak runs f32, 4× the bytes of llama.cpp's 8-bit Q8_0)** at ~46% GPU utilization — a 16× decode speedup (7.5 → 120). The parity is on a *small* model (a 7B f32 set won't fit WSL's ~15 GB RAM, so large-model parity is not claimed); fp16 is tracked in issue #34. Witness: `GPU.md` §3b (real bench output, `llama-bench` reference).
@@ -19576,7 +20455,7 @@ Honest ceiling, surfaced not hidden: the *detector* these drivers feed is ~100% 
 - [SHIPPED] Single-invariant stewards (secret-in-context, lease-disjointness, kpi-regression, vdso-soundness) that fire only with an independently-authored witness; a meta-steward prunes never-firing stewards. Witness: `steward` tests (units 87–92).
 - [SHIPPED] RSI-as-ship-gate: keep-or-revert on a non-forgeable keep-bit (strict metric gain AND suite-green AND truth-clean), applied in an isolated git worktree; a run of non-keeps trips an escalation breaker. Witness: `shipgate` tests (units 93–95).
 - [SHIPPED] RSI **closed loop** (`internal/rsiloop`, `cmd/rsiloop`): the true loop over `cmd/rsicycle`'s one-shot. Where `rsicycle` takes the keep-bit's witnesses (before/after/suite-green/truth-clean) AS FLAGS, `rsiloop` DERIVES every one from a real run it performs itself — it forks a detached worktree off `main`, rewrites the tunable (`DefaultCacheSize`), measures a deterministic KPI by running `cmd/kpiprobe` there, takes suite-green from a real build+vet and truth-clean from the worktree's git status, then folds through `shipgate.Evaluate` + `shipgate.Gate`. The baseline is re-measured from `main` every run (it competes against LATEST main, never a stale local number), and KEEPs recursively advance the running bar. `-mode track` records that `main` measurement to an append-only JSONL journal — the ongoing benchmark-against-main series, with vs-last-point regression detection (exit 3 to alert). The loop never mutates `main`: a kept candidate advances only the in-memory baseline + the journal; landing it is a separate gated step (EXTENDING.md "Land it"). Honesty fences: the demo KPI is a real but *deterministic* LRU hit-rate (wall-clock-free, reproduces bit-for-bit cross-platform — a legal witness per `docs/proofs/00-METHOD.md`), the suite-green gate defaults to `go build`+`go vet` (the native Windows-safe proxy; production overrides with the full WSL `go test` suite), and only the demo tunable is wired — a real subsystem optimization plugs in by supplying its own Proposer/Measurer. Witness: `internal/rsiloop` tests (keep/revert/escalate/breaker-reset, the keep-bit needing all three, journal round-trip + track/LastTrack) + `cmd/rsiloop` driver test; see [`docs/rsi-loop.md`](docs/rsi-loop.md).
-- [SHIPPED] Issue-dispatch **closed loop** (`tools/issue_*`, `tools/dispatch_*`): the witness-gated GitHub-issue backlog driver for a plan-empty repo. `issue_lane_router` routes each open `gh` issue to its `dos.toml` lane; `issue_resolve_dispatch` passes the `dispatch_preflight` DoS gate (host clean ∧ account free ∧ live < cap), picks the busiest lane's next fresh issue (anti-churn cooldown + in-flight de-dup), and spawns ONE detached `claude -p` worker rendered by `issue_worker_prompt` with the load-bearing `#N`-in-subject rule; the worker ships a commit citing `#N`; `issue_closure_audit` binds commit→issue and grades through `dos commit-audit` (`TRUE_RESOLVED`/`CLAIMED_CLOSED`/`OPEN_WITNESSED`); the deterministic `issue_resolve_witnessed` close arm re-runs `dos commit-audit` per-SHA at close time (no keep on a self-authored claim) and closes via `gh issue close` citing the SHA. The live-worker population is provably ≤ `cap = min(--max-workers, dos [supervise].target)` (the no-DoS proof), every tool is dry-run until `--live`, and the committed view is `docs/dispatch-status.md` (backlog-by-lane + closure honesty + silent-worker scan), refreshed by the loop. Witness: `tools/issue_lane_router_test.py`, `tools/issue_closure_audit` + `dispatch_status_test.py` (silent-worker classification, render_md tables) and the rest of the dispatch-tool test suite; see [`docs/dispatch-loop.md`](docs/dispatch-loop.md).
+- [SHIPPED] Issue-dispatch **closed loop** (`tools/issue_*`, `tools/dispatch_*`): the witness-gated GitHub-issue backlog driver for a plan-empty repo. `issue_lane_router` routes each open `gh` issue to its `dos.toml` lane; `issue_resolve_dispatch` passes the `dispatch_preflight` DoS gate (host clean ∧ account free ∧ live < cap), picks the busiest lane's next fresh issue (anti-churn cooldown + in-flight de-dup), and spawns ONE detached `claude -p` worker rendered by `issue_worker_prompt` with the load-bearing `#N`-in-subject rule; the worker ships a commit citing `#N`; `issue_closure_audit` binds commit→issue and grades through `dos commit-audit` (`TRUE_RESOLVED`/`CLAIMED_CLOSED`/`OPEN_WITNESSED`); the deterministic `issue_resolve_witnessed` close arm re-runs `dos commit-audit` per-SHA at close time (no keep on a self-authored claim) and closes via `gh issue close` citing the SHA. The live-worker population is provably ≤ `cap = min(--max-workers, dos [supervise].target)` (the no-DoS proof), every tool is dry-run until `--live`, and the operator-local view is `.dispatch-runs/dispatch-status.md` (gitignored; backlog-by-lane + closure honesty + silent-worker scan), refreshed by the loop. Witness: `tools/issue_lane_router_test.py`, `tools/issue_closure_audit` + `dispatch_status_test.py` (silent-worker classification, render_md tables) and the rest of the dispatch-tool test suite; see [`docs/dispatch-loop.md`](docs/dispatch-loop.md).
 - [SHIPPED] Harvest-corpus **advisory adjudication model** (`internal/advmodel`, #580): the consumer of the `internal/harvest` `LabelRow` corpus — the RSI loop's missing closing edge (the kernel harvested its own verdicts but nothing learned from them). A reproducible training run (`internal/advmodel/train.py`, numpy-only, deterministic) over a frozen, content-bearing corpus (`testdata/corpus.jsonl` — every label re-witnessed against the REAL adjudicator floor by `corpus_test.go`, and harvest-compatible by construction) trains a small logistic-regression classifier over a bag of call tokens and writes a model artifact (`testdata/adjudicator.json`); held-out precision/recall/F1 vs the stock reference (the inert model = the stock SmolLM2 emits no adjudication signal = F1 0) are printed and committed in the artifact `meta` (re-derivable by re-running train.py). The artifact loads as a fail-closed, opt-in `abi.Adjudicator` that may return ONLY `Deny` (corroborate) or `Defer` — never `Allow` — so under the kernel's restrictiveness fold (`kernel.Fold`) it can only tighten a decision, never weaken the deterministic floor; default-off (no self-registration; the frozen ABI is untouched). Witness: `internal/advmodel` tests (fail-closed-never-allows across benign/deny-worthy/inert, fold-safety under `kernel.Fold`, Go↔Python featurizer parity over all 65 corpus rows, corpus-matches-floor). HONEST SCOPE: this is a SMALL classifier (the issue's "small … model"), not a fine-tune of the fused SmolLM2 — see the retained STUB below; the 65-row corpus is a floor-grounded demo, and production accuracy needs a larger real harvest corpus.
 
 ## What fak is NOT
@@ -20064,7 +20943,10 @@ func (myBackend) Class() compute.CorrectnessClass { return compute.Approx } // s
 ```
 
 The CPU reference (`cpuref.go`) and the real `cuda` / `metal` / `vulkan` backends already
-ride this seam — read them as your template. The forward loop in `internal/model` calls
+ride this seam — read them as your template. For the **CUDA** backend specifically, the full
+edit→build→prove loop — the no-GPU local gate `make cuda-check`, the on-device build, the
+cosine witnesses, and how to add a kernel — is written up in
+**[`docs/cuda-dev.md`](docs/cuda-dev.md)**. The forward loop in `internal/model` calls
 *whole ops* (`MatMul`, `Attention`, `Argmax`), so a device is free to express its own
 intra-kernel parallelism, async enqueue (`Caps.Async`), fused attention (`Caps.FusedAttn`),
 or a tiled layout — and an older loop that doesn't know your capability falls back to the
@@ -20602,119 +21484,6 @@ unchanged — the loop is the harness, your issue backlog is the payload.
 
 ---
 
-# docs/dispatch-status.md
-
-> Source: `docs/dispatch-status.md`
-
----
-title: "fak issue dispatch status: fleet worker and backlog tracker"
-description: "Auto-generated fak issue dispatch status: dispatcher and worker state, open-issue backlog by lane, and closure-honesty rate across the fleet."
----
-
-# Issue dispatch status — 2026-06-24
-
-_Auto-generated by `tools/dispatch_status.py --md`. Do not hand-edit; re-run the tool (or the `FleetDispatchStatusDoc` task) to refresh._
-
-- **dispatcher**: `READY_TO_GROW` (ok)
-- **workers**: 0/2 live (headroom 2); host clean
-- **switcher account**: `day24-netra ` (t1, opus), available=True
-- **always-on watchdog**: installed (Ready)
-- **supervisor**: `PLAN_SURFACE_EMPTY` (alive 0/0)
-
-## Backlog by lane (issue → lane sync)
-
-Open issues: **351** — routed 320, unrouted 31.
-
-| lane | open issues |
-|---|---|
-| docs | 130 |
-| experiments | 26 |
-| gateway | 26 |
-| tools | 26 |
-| compute | 25 |
-| model | 24 |
-| cmd | 14 |
-| examples | 12 |
-| ctxplan | 7 |
-| engine | 5 |
-| policy | 5 |
-| bench | 2 |
-| recall | 2 |
-| vdso | 2 |
-| witness | 2 |
-| cachemeta | 1 |
-| ci | 1 |
-| claude | 1 |
-| contextq | 1 |
-| ctxmmu | 1 |
-| ggufload | 1 |
-| grammar | 1 |
-| harvest | 1 |
-| kvmmu | 1 |
-| metrics | 1 |
-| modelengine | 1 |
-| steward | 1 |
-
-## Closure honesty
-
-`closure_rate` = **0.4247** (TRUE_RESOLVED / (TRUE_RESOLVED + CLAIMED_CLOSED)).
-
-| bucket | count |
-|---|---|
-| TRUE_RESOLVED | 93 |
-| CLAIMED_CLOSED | 126 |
-| OPEN_WITNESSED (closable now) | 1 |
-
-## Throughput (closed issues per hour)
-
-`verdict` = **BELOW_TARGET** — **3.67/h** completed over the trailing **6h** window (target **10.0/h**). Graded on the *completed* (resolved, not wontfix/dup) rate.
-
-| window | closed | completed | completed /h | loop-closed | loop /h |
-|---|---|---|---|---|---|
-| 1h | 6 | 6 | 6.0 | 3 | 3.0 |
-| 3h | 11 | 11 | 3.67 | 3 | 1.0 |
-| 6h | 22 | 22 | 3.67 | 4 | 0.67 |
-| 12h | 31 | 31 | 2.58 | 11 | 0.92 |
-| 24h | 79 | 79 | 3.29 | 45 | 1.88 |
-
-Loop's last attributed close: 1.9 min ago. A gh-rate far above the loop-rate means humans/peers are draining the backlog, not the dispatcher.
-
-## Workers that produced nothing
-
-**23** worker(s) exited with a 0-byte log (spawned, committed nothing). The anti-churn cooldown advances the picker past these, so the loop still progresses — but each is worth an operator's eye (often an epic-shaped issue too large to land in one shot).
-
-| issue | spawned (utc stamp) | log |
-|---|---|---|
-| #519 | 20260623-135210 | `resolve-519-20260623-135210.log` |
-| #517 | 20260623-134518 | `resolve-517-20260623-134518.log` |
-| #254 | 20260623-133709 | `resolve-254-20260623-133709.log` |
-| #543 | 20260623-133519 | `resolve-543-20260623-133519.log` |
-| #258 | 20260623-132209 | `resolve-258-20260623-132209.log` |
-| #540 | 20260623-131519 | `resolve-540-20260623-131519.log` |
-| #262 | 20260623-130709 | `resolve-262-20260623-130709.log` |
-| #263 | 20260623-125209 | `resolve-263-20260623-125209.log` |
-| #535 | 20260623-120709 | `resolve-535-20260623-120709.log` |
-| #536 | 20260623-115209 | `resolve-536-20260623-115209.log` |
-| #519 | 20260623-113710 | `resolve-519-20260623-113710.log` |
-| #520 | 20260623-112209 | `resolve-520-20260623-112209.log` |
-| #521 | 20260623-110711 | `resolve-521-20260623-110711.log` |
-| #522 | 20260623-105210 | `resolve-522-20260623-105210.log` |
-| #531 | 20260623-103710 | `resolve-531-20260623-103710.log` |
-| #533 | 20260623-102210 | `resolve-533-20260623-102210.log` |
-| #534 | 20260623-100712 | `resolve-534-20260623-100712.log` |
-| #543 | 20260623-095523 | `resolve-543-20260623-095523.log` |
-| #536 | 20260623-094653 | `resolve-536-20260623-094653.log` |
-| #372 | 20260622-182830 | `resolve-372-20260622-182830.log` |
-| #260 | 20260622-181444 | `resolve-260-20260622-181444.log` |
-| #465 | 20260621-232003 | `resolve-465-20260621-232003.log` |
-| #465 | 20260621-225432 | `resolve-465-20260621-225432.log` |
-
----
-
-Reasons: safe to spawn: 0/2 live, account 'day24-netra ' free; always-on watchdog installed (Ready); 23 worker(s) exited producing nothing (#519, #517, #254, #543, #258, #540) — inspect or re-scope; throughput 3.67/h completed over 6h — below the 10.0/h target
-
----
-
 # Idea-scout
 
 > Source: `docs/idea-scout.md`
@@ -20965,6 +21734,9 @@ policy refusal. This is what lets a refusal cost a non-Go agent zero extra model
 | POST | [`/v1/fak/context/change`](#post-v1fakcontextchange) | fak-native | Tombstone a recall page |
 | POST | [`/v1/fak/policy/reload`](#post-v1fakpolicyreload) | fak-native | Hot-reload the policy manifest |
 | POST | [`/v1/fak/trace/reset`](#post-v1faktracereset) | fak-native | Clear a session's IFC taint mark |
+| GET | [`/v1/fak/session/{id}`](#v1faksession--live-session-control) | fak-native | Observe a session's live drive state |
+| POST | [`/v1/fak/session/{id}/{verb}`](#v1faksession--live-session-control) | fak-native | Control a session (run/budget/pace/priority) |
+| GET | [`/v1/fak/sessions`](#v1faksession--live-session-control) | fak-native | Snapshot every live session's drive state |
 | POST | [`/mcp`](#mcp-over-http--mcp) | MCP | JSON-RPC 2.0 over a single POST |
 | GET | [`/healthz`](#get-healthz) | ops | Liveness (auth-exempt) |
 | GET | [`/metrics`](#get-metrics) | ops | Prometheus metrics |
@@ -21028,19 +21800,18 @@ human-readable summary of the refusals is written into the message `content`.
 **Streaming.** With `stream: true` the gateway serves a `text/event-stream` by one of
 two paths, chosen so a tool call is **never** passed through before adjudication:
 
-- **Live pass-through** (a request with **no `tools`**, fronting a streaming-capable
-  upstream): each upstream content fragment is relayed as its own chunk the instant the
-  model emits it, so time-to-first-token tracks the model rather than the whole turn.
-  The opening chunk announces the `role`; a terminal chunk carries `finish_reason` +
-  `usage` + the `fak` extension; then `data: [DONE]`. Any tool call a model hallucinates
-  with no tools offered is still adjudicated before emission.
-- **Synthesized** (a **tool-bearing** request, or a non-streaming planner such as the
-  offline mock / in-kernel model): the gateway buffers the whole upstream turn,
-  adjudicates the complete proposed tool-call set, then emits the same chunk shape — an
-  opening `role` + surviving-`tool_calls` chunk, content fragments (word-boundary
-  segments that reconcatenate byte-for-byte), a final `finish_reason` + `usage` + `fak`
-  chunk, and `data: [DONE]`. Raw upstream tool-call deltas are never passed through
-  before adjudication.
+- **Live planner stream** (fronting a streaming-capable OpenAI-compatible planner):
+  each upstream content fragment is relayed as its own chunk the instant the model emits
+  it, so time-to-first-token tracks the model rather than the whole turn. Native
+  upstream `tool_calls` deltas are accumulated off-wire, the complete proposed call set
+  is adjudicated, and only surviving calls are emitted afterward. Known text-form
+  tool-call dialects inside content are held by the lift guard and go through the same
+  adjudication path.
+- **Synthesized fallback** (a non-streaming planner such as the offline mock /
+  in-kernel model): the gateway buffers the whole upstream turn, adjudicates the
+  complete proposed tool-call set, then emits the same chunk shape — an opening `role`,
+  content fragments (word-boundary segments that reconcatenate byte-for-byte), surviving
+  `tool_calls`, a final `finish_reason` + `usage` + `fak` chunk, and `data: [DONE]`.
 
 ---
 
@@ -21131,12 +21902,14 @@ a short in-band `[fak] …` text block so the agent actually reacts to them.
   byte-for-byte so a real upstream cache hit reaches the client's accounting.
 - `502` on an upstream model error (the raw provider body is not forwarded).
 
-**Streaming.** With `stream: true` the gateway synthesizes a well-formed Anthropic SSE
-sequence from the finished, already-adjudicated turn: `message_start`, then a
-`content_block_start` / `…_delta` / `content_block_stop` triple per block, a
-`message_delta` carrying the real `stop_reason` + token counts, then `message_stop`.
-A `ping` event is sent every 15 s while the upstream turn is still in flight. The
-`tool_use` ids the client matches results back by are byte-faithful.
+**Streaming.** With `stream: true` the gateway uses a live stream when one is available:
+the Anthropic passthrough relays upstream text/thinking events as they arrive, and the
+generic `agent.StreamingPlanner` path maps content callbacks to Anthropic `text_delta`
+events. In both cases `tool_use` input bytes are held off-wire until the full proposed
+call set is adjudicated; only surviving/repaired `tool_use` blocks are emitted. If the
+planner cannot stream, the fallback synthesizes the same well-formed SSE sequence from
+the finished turn and sends `ping` every 15 s while the upstream turn is in flight.
+The `tool_use` ids the client matches results back by are preserved for surviving calls.
 
 ### `POST /v1/messages/count_tokens`
 
@@ -21282,6 +22055,47 @@ implementation is injected by the host CLI.
 |---|---|
 | `404` | Trace reset is not configured for this deployment. |
 | `400` | `trace_id` was empty, or the reset failed. |
+
+---
+
+### `/v1/fak/session` — live session control
+
+Read and steer a served session's live **DRIVE state** (run-state, budget, priority,
+pace) — the read-write generalization of `/v1/fak/trace`, which carries one bit (taint).
+The state is keyed by `TraceID`; an unseen trace reads its live default (running,
+unbounded), never `404`. Observe/control are injected by the host CLI; a deployment that
+does not wire them returns `404`. The full design and the `fak session` operator CLI are
+in [`session-control.md`](session-control.md).
+
+**`GET /v1/fak/session/{id}`** — observe one session.
+Response (`SessionState`): `{ "trace_id", "run", "budget": {"turns_left","tokens_left"},
+"priority", "pace": {"max_tokens_per_turn","min_turn_gap_ms"}, "reason", "rev" }`.
+
+**`POST /v1/fak/session/{id}/{verb}`** — apply one control verb. `verb` ∈
+`run` · `budget` · `pace` · `priority`. Body carries the field the verb names, plus an
+optional `if_rev` (optimistic-concurrency guard). Echoes back the new `SessionState`.
+
+| verb | body | effect |
+|---|---|---|
+| `run` | `{"run":"running\|throttled\|paused\|draining\|stopped","reason":"…"}` | set the run-state (cancel = `stopped`/`draining`, hold = `paused`) |
+| `budget` | `{"budget":{"turns_left":N,"tokens_left":N}}` | re-set the allotment (`-1` = unbounded) |
+| `pace` | `{"pace":{"max_tokens_per_turn":N,"min_turn_gap_ms":N}}` | re-set the per-turn throttle |
+| `priority` | `{"priority":N}` | re-set the scheduling rank (lower yields first) |
+
+**`GET /v1/fak/sessions`** — snapshot every live session.
+Response (`SessionListResponse`): `{ "sessions": [SessionState, …], "count": N }`, in
+`Table.Snapshot()` order (priority ascending).
+
+| Status | When |
+|---|---|
+| `404` | The session routes are not configured for this deployment. |
+| `400` | Missing `trace_id`, unknown verb, or a malformed body. |
+| `409` | The session is terminal (stopped), or an `if_rev` CAS guard lost the race. |
+
+**Proxy-path enforcement.** On `fak serve` / `fak guard`, a `paused` / `draining` /
+`stopped` session's **next** `/v1/{chat/completions,messages,generateContent}` request is
+refused with `409 session_<state>` (keyed on the request `X-Trace-Id`) instead of being
+forwarded upstream — "cancel a request in flight."
 
 ---
 
