@@ -34,6 +34,8 @@ package agent
 // wall clock, so a workload replays deterministically.
 
 import (
+	"sort"
+
 	"github.com/anthony-chaudhary/fak/internal/cachemeta"
 )
 
@@ -187,6 +189,7 @@ func (tt *tenureTable) Sweep(nowMillis int64) []string {
 			demoted = append(demoted, cmd)
 		}
 	}
+	sort.Strings(demoted)
 	return demoted
 }
 

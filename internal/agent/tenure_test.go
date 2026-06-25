@@ -85,6 +85,23 @@ func TestTenureReviveOnHotKeepsTenured(t *testing.T) {
 	}
 }
 
+func TestTenureSweepDemotionsAreSorted(t *testing.T) {
+	tt := newTenureTable(1, 1000)
+	tt.Record("/zeta", 0)
+	tt.Record("/alpha", 0)
+
+	demoted := tt.Sweep(2000)
+	want := []string{"/alpha", "/zeta"}
+	if len(demoted) != len(want) {
+		t.Fatalf("demoted = %v, want %v", demoted, want)
+	}
+	for i := range want {
+		if demoted[i] != want[i] {
+			t.Fatalf("demoted = %v, want stable sorted order %v", demoted, want)
+		}
+	}
+}
+
 // TestTenureRollupDistinctFromPerTurnContext proves the rollup is a DISTINCT, compact
 // representation — not the raw per-turn derived context. The rollup's digest is the
 // derived-once form keyed by command identity, independent of any turn's transcript.
