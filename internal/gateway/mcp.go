@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 )
@@ -273,6 +274,16 @@ func (s *Server) callTool(ctx context.Context, params json.RawMessage) (any, *rp
 		}
 		evicted, te := s.revoke(req.Witness)
 		return mcpToolResult(RevokeResponse{Witness: req.Witness, Evicted: evicted, TrustEpoch: te}), nil
+	case "fak_session_reset":
+		var req SessionResetRequest
+		if err := json.Unmarshal(p.Arguments, &req); err != nil {
+			return nil, &rpcError{Code: rpcInvalidParams, Message: "invalid fak_session_reset arguments: " + err.Error()}
+		}
+		resp, err := s.sessionReset(ctx, req)
+		if err != nil {
+			return nil, &rpcError{Code: rpcInvalidParams, Message: err.Error()}
+		}
+		return mcpToolResult(resp), nil
 	case "fak_context_change":
 		var req ContextChangeRequest
 		if err := json.Unmarshal(p.Arguments, &req); err != nil {
@@ -308,6 +319,72 @@ func (s *Server) callTool(ctx context.Context, params json.RawMessage) (any, *rp
 	default:
 		return nil, &rpcError{Code: rpcInvalidParams, Message: "unknown tool: " + p.Name}
 	}
+}
+
+func (s *Server) sessionReset(ctx context.Context, req SessionResetRequest) (SessionResetResponse, error) {
+	if req.ContextTokens < 0 {
+		return SessionResetResponse{}, errors.New("fak_session_reset context_tokens must be non-negative")
+	}
+	trace := s.traceFor(req.TraceID)
+	resp := SessionResetResponse{TraceID: trace, FromTraceID: trace}
+
+	var st SessionState
+	switch {
+	case req.ContextTokens > 0:
+		if s.debitSession == nil {
+			resp.Note = "session debit hook unavailable; cannot apply reported context_tokens"
+			return resp, nil
+		}
+		st = s.debitSession(ctx, trace, SessionUsage{ContextTokens: req.ContextTokens})
+	case s.observeSession != nil:
+		st = s.observeSession(ctx, trace)
+	default:
+		st = SessionState{TraceID: trace, Run: "running"}
+	}
+	if st.TraceID == "" {
+		st.TraceID = trace
+	}
+	resp.Session = st
+	resp.Reason = st.Reason
+
+	if s.resetOnBudget == nil {
+		resp.Note = "reset_on_budget hook unavailable; start fak with --reset-on-budget to build a carryover seed"
+		return resp, nil
+	}
+	if !isBudgetResetReason(st) {
+		resp.Note = "session is not budget-drained; reset refused"
+		return resp, nil
+	}
+	newTrace, seed, ok := s.resetOnBudget(ctx, trace, req.Messages)
+	if !ok || newTrace == "" {
+		resp.Note = "reset_on_budget hook declined the reset"
+		return resp, nil
+	}
+	resp.Reset = true
+	resp.ToTraceID = newTrace
+	resp.TraceID = newTrace
+	resp.Seed = seed
+	resp.Directive = &SessionResetDirective{
+		Action:      "restart_fresh_session",
+		FromTraceID: trace,
+		ToTraceID:   newTrace,
+		Reason:      st.Reason,
+		Required: []string{
+			"dump_session_image",
+			"start_fresh_process",
+			"rehydrate_planned_view",
+			"reuse_provider_cache_when_legal",
+		},
+		Note: "context budget exhausted; prepend seed_messages in a fresh model window",
+	}
+	if s.observeSession != nil {
+		fresh := s.observeSession(ctx, newTrace)
+		if fresh.TraceID == "" {
+			fresh.TraceID = newTrace
+		}
+		resp.Session = fresh
+	}
+	return resp, nil
 }
 
 // decodeSyscallArgs parses the MCP tools/call `arguments` object into a SyscallRequest.
@@ -378,6 +455,18 @@ func toolDescriptors() []map[string]any {
 			"name":        "fak_revoke",
 			"description": "Refute an external world-state witness (a git commit / blob hash / lease epoch) found poisoned or stale: every pooled tier-2 entry admitted under it is causally evicted fleet-wide, future re-admission under it is refused, and the eviction is broadcast on the change feed. Pass {witness: <token>}; returns the local eviction count and the new trust epoch.",
 			"inputSchema": json.RawMessage(`{"type":"object","properties":{"witness":{"type":"string","description":"the external world-state witness to refute"}},"required":["witness"]}`),
+		},
+		{
+			"name":        "fak_session_reset",
+			"description": "Cooperatively reset a budget-drained served session from an MCP client. Pass {trace_id?, context_tokens?, messages?}; context_tokens is first debited against the session budget, then fak reuses the same --reset-on-budget carryover builder to mint a fresh continuation trace and seed_messages for a new model window. Returns reset=false when the session is not budget-drained or the host did not wire --reset-on-budget.",
+			"inputSchema": json.RawMessage(`{
+  "type": "object",
+  "properties": {
+    "trace_id": {"type": "string", "description": "session trace id; omitted uses the gateway default trace when configured"},
+    "context_tokens": {"type": "integer", "description": "optional provider/model context-token count to debit before checking the reset boundary"},
+    "messages": {"type": "array", "description": "optional transcript messages to distill into the fresh-window carryover seed"}
+  }
+}`),
 		},
 		{
 			"name":        "fak_context_change",

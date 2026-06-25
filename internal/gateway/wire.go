@@ -180,6 +180,33 @@ type RevokeResponse struct {
 	TrustEpoch uint64 `json:"trust_epoch"`
 }
 
+// SessionResetRequest is the `arguments` shape for the fak_session_reset MCP tool.
+// It is the cooperative reset path for an MCP client that cannot have its whole
+// model wire proxied through fak: the client may report the context-token count it
+// just observed, and supplies the transcript it wants distilled into the fresh-window
+// carryover seed.
+type SessionResetRequest struct {
+	TraceID       string          `json:"trace_id,omitempty"`
+	ContextTokens int             `json:"context_tokens,omitempty"`
+	Messages      []agent.Message `json:"messages,omitempty"`
+}
+
+// SessionResetResponse reports whether fak re-armed a fresh continuation trace and,
+// when it did, returns the seed messages the client should prepend in the new window.
+// Reset=false is a normal tool result, not an MCP protocol error: it means there was
+// no budget-drained session to continue, or the host did not wire ResetOnBudget.
+type SessionResetResponse struct {
+	Reset       bool                   `json:"reset"`
+	TraceID     string                 `json:"trace_id"`
+	FromTraceID string                 `json:"from_trace_id,omitempty"`
+	ToTraceID   string                 `json:"to_trace_id,omitempty"`
+	Reason      string                 `json:"reason,omitempty"`
+	Note        string                 `json:"note,omitempty"`
+	Session     SessionState           `json:"session,omitempty"`
+	Seed        []agent.Message        `json:"seed_messages,omitempty"`
+	Directive   *SessionResetDirective `json:"reset_directive,omitempty"`
+}
+
 // ContextChangeRequest is the body of POST /v1/fak/context/change and the
 // `arguments` of the fak_context_change MCP tool. It is deliberately
 // negative-only: today the only accepted mutation is a tombstone that suppresses

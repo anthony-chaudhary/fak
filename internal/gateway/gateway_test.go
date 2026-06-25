@@ -2005,11 +2005,11 @@ func TestMCPStdioRoundtrip(t *testing.T) {
 		t.Errorf("initialize protocolVersion = %v", got)
 	}
 	// tools/list — fak_adjudicate, fak_syscall, fak_admit, fak_changes, fak_revoke,
-	// fak_context_change, plus the memq memory-algebra trio fak_memory_drivers /
-	// fak_memory_explain / fak_memory_run.
+	// fak_session_reset, fak_context_change, plus the memq memory-algebra trio
+	// fak_memory_drivers / fak_memory_explain / fak_memory_run.
 	tools := resps[1].Result.(map[string]any)["tools"].([]any)
-	if len(tools) != 9 {
-		t.Errorf("tools/list returned %d tools, want 9", len(tools))
+	if len(tools) != 10 {
+		t.Errorf("tools/list returned %d tools, want 10", len(tools))
 	}
 	// tools/call fak_syscall (allow) -> verdict ALLOW in the embedded text
 	sc := unwrapToolResult(t, resps[2])
@@ -2026,6 +2026,83 @@ func TestMCPStdioRoundtrip(t *testing.T) {
 	}
 	if dn.TraceID == "" {
 		t.Errorf("fak_adjudicate must return a non-empty trace_id for the follow-up fak_admit call")
+	}
+}
+
+func TestMCPSessionResetDebitsAndRearmsContinuation(t *testing.T) {
+	srv := newTestServer(t)
+	ctx := context.Background()
+
+	states := map[string]SessionState{}
+	var debitedTrace string
+	var debitedTokens int
+	var resetTrace string
+	var resetMessages []agent.Message
+	srv.debitSession = func(_ context.Context, traceID string, usage SessionUsage) SessionState {
+		debitedTrace = traceID
+		debitedTokens = usage.ContextTokens
+		st := SessionState{
+			TraceID:        traceID,
+			Run:            "draining",
+			Reason:         sessionReasonBudgetContext,
+			ContinuationID: "mcp-child",
+		}
+		states[traceID] = st
+		return st
+	}
+	srv.observeSession = func(_ context.Context, traceID string) SessionState {
+		if st, ok := states[traceID]; ok {
+			return st
+		}
+		return SessionState{TraceID: traceID, Run: "running"}
+	}
+	srv.resetOnBudget = func(_ context.Context, traceID string, messages []agent.Message) (string, []agent.Message, bool) {
+		resetTrace = traceID
+		resetMessages = append([]agent.Message(nil), messages...)
+		states["mcp-child"] = SessionState{
+			TraceID:     "mcp-child",
+			Run:         "running",
+			ParentTrace: traceID,
+			Generation:  1,
+			Budget:      SessionBudget{ContextTokensLeft: 150000},
+		}
+		return "mcp-child", []agent.Message{{Role: agent.RoleSystem, Content: "continuation seed"}}, true
+	}
+
+	params, _ := json.Marshal(map[string]any{
+		"name": "fak_session_reset",
+		"arguments": map[string]any{
+			"trace_id":       "mcp-parent",
+			"context_tokens": 150001,
+			"messages": []map[string]any{
+				{"role": "system", "content": "You are guarded."},
+				{"role": "user", "content": "Keep the durable facts."},
+			},
+		},
+	})
+	res, rerr := srv.callTool(ctx, params)
+	if rerr != nil {
+		t.Fatalf("fak_session_reset rpc error: %v", rerr.Message)
+	}
+	var out SessionResetResponse
+	decodeMCPText(t, res, &out)
+	if !out.Reset || out.FromTraceID != "mcp-parent" || out.ToTraceID != "mcp-child" || out.TraceID != "mcp-child" {
+		t.Fatalf("session reset response = %+v, want reset parent->child", out)
+	}
+	if out.Directive == nil || out.Directive.Action != "restart_fresh_session" {
+		t.Fatalf("reset directive = %+v, want restart_fresh_session", out.Directive)
+	}
+	if len(out.Seed) != 1 || out.Seed[0].Content != "continuation seed" {
+		t.Fatalf("seed messages = %+v, want carryover seed", out.Seed)
+	}
+	if out.Session.ParentTrace != "mcp-parent" || out.Session.Generation != 1 || out.Session.Budget.ContextTokensLeft != 150000 {
+		t.Fatalf("fresh session state = %+v, want observed child lineage/budget", out.Session)
+	}
+	if debitedTrace != "mcp-parent" || debitedTokens != 150001 {
+		t.Fatalf("debit hook got trace=%q tokens=%d, want mcp-parent/150001", debitedTrace, debitedTokens)
+	}
+	if resetTrace != "mcp-parent" || len(resetMessages) != 2 {
+		t.Fatalf("reset hook got trace=%q messages=%+v, want parent transcript", resetTrace, resetMessages)
 	}
 }
 
