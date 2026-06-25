@@ -83,6 +83,8 @@ func main() {
 		cmdSignal(os.Args[2:])
 	case "task":
 		cmdTask(os.Args[2:])
+	case "tui":
+		cmdTUI(os.Args[2:])
 	case "loop":
 		cmdLoop(os.Args[2:])
 	case "snapshot":
@@ -312,6 +314,14 @@ func usage() {
   fak task      sample [--json] [--done N --total N --unit UNIT]
                 (the PROCESS-LOCAL TASK MANAGER snapshot: current hardware/runtime
                  sample plus task/step/concept progress and ETA when progress is known)
+  fak tui       issues [--epic N] [--issues-json FILE] [--json] |
+                loops [--ledger FILE] [--json] | sessions [--sessions-json FILE] [--json] |
+                garden [--garden-json FILE] [--json] [--check] |
+                guard --guard-json FILE [--json] | overview [--json]
+                (the NATIVE TERMINAL CONTROL PANE spine: ranked GitHub issue
+                 lanes, durable loop-ledger lanes, and live session DRIVE lanes,
+                 plus garden health, guard proof packets, and a composed overview,
+                 with fixture-friendly JSON models for deterministic use)
   fak loop      append | run -- CMD | status | admit
                 (the DURABLE LONG-RUNNING-LOOP ledger: hash-chained fire/admit/start/
                  end/witness events, an OS-scheduler wrapper, a read fold, and the
