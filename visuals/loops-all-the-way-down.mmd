@@ -1,0 +1,35 @@
+flowchart TB
+  THREADS["orthogonal threads at every ring:<br/>trust · cost · memory · observability · governance"]
+  subgraph BEYOND["beyond RSI — conceptual"]
+    direction TB
+    ECO["ecosystem / conformance<br/>frozen ABI + fak-certified — CONCEPTUAL"]
+    META["meta-RSI / enforce-tune — CONCEPTUAL<br/>ESCALATE breaker is shipped"]
+  end
+  subgraph FIVE["the five loops — shipped vertical"]
+    direction TB
+    RSI["RSI: keep-bit<br/>shipgate.Evaluate"]
+    FLEET["fleet: witness-gated dispatch<br/>per-SHA dos commit-audit"]
+    SESSION["session: durable core-dump<br/>internal/recall"]
+    TURN["turn: ctxplan orient + ctxmmu observe"]
+    TCALL["tool-call = syscall<br/>Submit / Reap + adjudicator"]
+  end
+  subgraph BELOW["below the tool call"]
+    direction TB
+    DECODE["decode loop — OWNED<br/>Session.Generate / Step"]
+    FWD["forward pass — OWNED"]
+    KV["KV cache — OWNED<br/>Evict + Kraw re-RoPE"]
+    HAL["compute HAL — SHIPPED contract<br/>CPU=Reference · devices=Approx"]
+    HW["hardware scheduling — BORROWED"]
+  end
+  ECO --> META --> RSI --> FLEET --> SESSION --> TURN --> TCALL --> DECODE --> FWD --> KV --> HAL --> HW
+  THREADS -.-> FIVE
+  classDef owned fill:#d5f5e3,stroke:#1e8449,color:#0b3d22;
+  classDef shipped fill:#d6eaf8,stroke:#2471a3,color:#0b2a43;
+  classDef concept fill:#fdebd0,stroke:#ca6f1e,color:#5b2c06,stroke-dasharray:5 3;
+  classDef borrow fill:#eaecee,stroke:#909497,color:#2c3036,stroke-dasharray:3 3;
+  classDef thread fill:#fef9e7,stroke:#b7950b,color:#5b4708;
+  class RSI,FLEET,SESSION,TURN,TCALL,HAL shipped;
+  class DECODE,FWD,KV owned;
+  class HW borrow;
+  class ECO,META concept;
+  class THREADS thread;
