@@ -265,6 +265,24 @@ class RecentCodexDosAuditTest(unittest.TestCase):
         self.assertIn("git_add", debt)
         rendered = mod.render(report)
         self.assertIn("actionable reasons:", rendered)
+        stale_gate = mod.actionable_gate(
+            hook_fast_path={"status": "PASS"},
+            post_repair={"observations": 3, "delegate_count": 0, "unknown_tree_admission_warnings": 2},
+            command_shapes={
+                "status": "PASS",
+                "shell_shape_counts": {"shell_no_write_target_detected": 2},
+                "shell_family_counts": {"git_write": 2},
+            },
+            delegate_total=0,
+            stop_total=0,
+            max_delegates=0,
+            git_gate={
+                "status": "PASS",
+                "post_gate_command_shapes": {"shell_family_counts": {"git_write": 1}},
+            },
+        )
+        self.assertEqual(stale_gate["status"], "WARN")
+        self.assertIn("post-git-gate shell command families include opaque mutating operations", stale_gate["reasons"])
 
     def test_post_repair_command_shapes_use_audited_stream_scope(self) -> None:
         mod = load()

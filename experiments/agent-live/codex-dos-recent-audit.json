@@ -3,42 +3,42 @@
     "delegate_count": 0,
     "delegate_source": "post_repair",
     "git_gate_status": "PASS",
-    "max_delegates": null,
-    "post_git_gate_mutating_shell_family_counts": {
-      "git_write": 1
-    },
+    "max_delegates": 0,
+    "post_git_gate_mutating_shell_family_counts": {},
     "post_repair_mutating_shell_family_counts": {
-      "git_write": 14
+      "git_write": 60
     },
     "post_repair_shell_family_counts": {
-      "build_test": 126,
-      "git_read": 426,
-      "git_write": 14,
-      "inline_script": 33,
-      "other_shell": 452,
-      "powershell_inspect": 55,
-      "powershell_read": 548,
-      "python_script": 231,
-      "python_test": 260,
-      "search_rg": 220,
-      "shell_redirect": 9
+      "build_test": 132,
+      "git_read": 613,
+      "git_write": 60,
+      "inline_script": 37,
+      "other_shell": 463,
+      "powershell_inspect": 75,
+      "powershell_read": 650,
+      "python_script": 338,
+      "python_test": 263,
+      "search_rg": 262,
+      "shell_redirect": 14
     },
     "post_repair_shell_shape_counts": {
-      "non_shell_tool": 585,
-      "shell_in_tree_or_safe_write_target": 4,
-      "shell_no_write_target_detected": 2370
+      "non_shell_tool": 520,
+      "shell_in_tree_or_safe_write_target": 6,
+      "shell_no_write_target_detected": 2901
     },
-    "post_repair_unknown_tree_admission_warnings": 1990,
-    "reasons": [
-      "post-repair shell command families include opaque mutating operations"
+    "post_repair_unknown_tree_admission_warnings": 1999,
+    "reasons": [],
+    "residual": [
+      "HISTORICAL_GIT_WRITE_BEFORE_STRUCTURED_GATE",
+      "HOST_SHELL_OPACITY",
+      "UNKNOWN_TREE_WARNINGS"
     ],
-    "residual": [],
-    "status": "WARN",
+    "status": "PASS",
     "stop_total": 0,
     "unknowns": []
   },
   "budgets": {
-    "max_delegates": null,
+    "max_delegates": 0,
     "max_unknown_tree_rate": 0.02
   },
   "codex_home": ".codex",
@@ -67,95 +67,74 @@
       "malformed_rows": 0,
       "mutating_shell_sessions": [
         {
-          "codex_session_file": "rollout-2026-06-25T01-27-31-019efde4-32f6-7b22-9e5b-1ccddb6c3987.jsonl",
+          "codex_session_file": "rollout-2026-06-25T02-38-18-019efe24-ff94-73a0-8b81-0958a40f72e6.jsonl",
           "mutating_shell_family_counts": {
-            "git_write": 6
+            "git_write": 13
           },
           "shell_family_counts": {
-            "git_read": 80,
-            "git_write": 6,
-            "inline_script": 8,
-            "other_shell": 40,
-            "powershell_inspect": 16,
-            "powershell_read": 63,
-            "python_script": 38,
-            "python_test": 10,
-            "search_rg": 21
+            "build_test": 30,
+            "git_read": 82,
+            "git_write": 13,
+            "other_shell": 27,
+            "powershell_inspect": 7,
+            "powershell_read": 92,
+            "search_rg": 47
           },
           "shell_shape_counts": {
-            "non_shell_tool": 30,
-            "shell_no_write_target_detected": 282
+            "non_shell_tool": 103,
+            "shell_no_write_target_detected": 298
           },
-          "thread_id": "019efde4-32f6-7b22-9e5b-1ccddb6c3987",
-          "tool_call_rows": 312,
+          "thread_id": "019efe24-ff94-73a0-8b81-0958a40f72e6",
+          "tool_call_rows": 401,
           "write_op_counts": {}
         },
         {
           "codex_session_file": "rollout-2026-06-25T01-48-58-019efdf7-d4a8-7c30-b2e4-438c92fafec2.jsonl",
           "mutating_shell_family_counts": {
-            "git_write": 1
+            "git_write": 41
           },
           "shell_family_counts": {
-            "build_test": 8,
-            "git_read": 14,
-            "git_write": 1,
-            "other_shell": 41,
-            "powershell_inspect": 3,
-            "powershell_read": 28,
-            "python_script": 4,
-            "search_rg": 16
+            "build_test": 10,
+            "git_read": 281,
+            "git_write": 41,
+            "other_shell": 155,
+            "powershell_inspect": 8,
+            "powershell_read": 85,
+            "python_script": 59,
+            "python_test": 9,
+            "search_rg": 56,
+            "shell_redirect": 1
           },
           "shell_shape_counts": {
-            "non_shell_tool": 3,
-            "shell_no_write_target_detected": 115
+            "non_shell_tool": 22,
+            "shell_no_write_target_detected": 705
           },
           "thread_id": "019efdf7-d4a8-7c30-b2e4-438c92fafec2",
-          "tool_call_rows": 118,
+          "tool_call_rows": 727,
           "write_op_counts": {}
         },
         {
-          "codex_session_file": "rollout-2026-06-25T02-38-18-019efe24-ff94-73a0-8b81-0958a40f72e6.jsonl",
+          "codex_session_file": "rollout-2026-06-25T01-27-31-019efde4-32f6-7b22-9e5b-1ccddb6c3987.jsonl",
           "mutating_shell_family_counts": {
-            "git_write": 5
+            "git_write": 6
           },
           "shell_family_counts": {
-            "build_test": 14,
-            "git_read": 41,
-            "git_write": 5,
-            "other_shell": 15,
-            "powershell_inspect": 7,
-            "powershell_read": 59,
-            "search_rg": 30
+            "git_read": 82,
+            "git_write": 6,
+            "inline_script": 8,
+            "other_shell": 43,
+            "powershell_inspect": 16,
+            "powershell_read": 64,
+            "python_script": 46,
+            "python_test": 10,
+            "search_rg": 21
           },
           "shell_shape_counts": {
-            "non_shell_tool": 69,
-            "shell_no_write_target_detected": 171
+            "non_shell_tool": 32,
+            "shell_no_write_target_detected": 296
           },
-          "thread_id": "019efe24-ff94-73a0-8b81-0958a40f72e6",
-          "tool_call_rows": 240,
-          "write_op_counts": {}
-        },
-        {
-          "codex_session_file": "rollout-2026-06-25T01-33-50-019efde9-fab7-7c13-bf3a-a994010253a3.jsonl",
-          "mutating_shell_family_counts": {
-            "git_write": 2
-          },
-          "shell_family_counts": {
-            "build_test": 19,
-            "git_read": 113,
-            "git_write": 2,
-            "other_shell": 53,
-            "powershell_inspect": 6,
-            "powershell_read": 32,
-            "python_script": 11,
-            "search_rg": 20
-          },
-          "shell_shape_counts": {
-            "non_shell_tool": 50,
-            "shell_no_write_target_detected": 256
-          },
-          "thread_id": "019efde9-fab7-7c13-bf3a-a994010253a3",
-          "tool_call_rows": 306,
+          "thread_id": "019efde4-32f6-7b22-9e5b-1ccddb6c3987",
+          "tool_call_rows": 328,
           "write_op_counts": {}
         }
       ],
@@ -180,43 +159,45 @@
       "scope": "audited_dos_streams",
       "sessions_inspected": 10,
       "shell_argument_errors": 0,
-      "shell_command_calls": 2374,
+      "shell_command_calls": 2907,
       "shell_family_counts": {
-        "build_test": 126,
-        "git_read": 426,
-        "git_write": 14,
-        "inline_script": 33,
-        "other_shell": 452,
-        "powershell_inspect": 55,
-        "powershell_read": 548,
-        "python_script": 231,
-        "python_test": 260,
-        "search_rg": 220,
-        "shell_redirect": 9
+        "build_test": 132,
+        "git_read": 613,
+        "git_write": 60,
+        "inline_script": 37,
+        "other_shell": 463,
+        "powershell_inspect": 75,
+        "powershell_read": 650,
+        "python_script": 338,
+        "python_test": 263,
+        "search_rg": 262,
+        "shell_redirect": 14
       },
       "shell_shape_counts": {
-        "non_shell_tool": 585,
-        "shell_in_tree_or_safe_write_target": 4,
-        "shell_no_write_target_detected": 2370
+        "non_shell_tool": 520,
+        "shell_in_tree_or_safe_write_target": 6,
+        "shell_no_write_target_detected": 2901
       },
       "since": "2026-06-25T09:22:57.680099Z",
       "status": "PASS",
       "threads_supplied": 10,
-      "tool_call_rows": 2959,
+      "tool_call_rows": 3427,
       "tool_counts": {
-        "apply_patch": 330,
-        "close_agent": 12,
-        "dos_arbitrate": 44,
-        "dos_commit_audit": 19,
+        "apply_patch": 309,
+        "close_agent": 13,
+        "dos_arbitrate": 38,
+        "dos_commit_audit": 10,
         "dos_doctor": 1,
-        "dos_review": 1,
-        "get_goal": 8,
-        "shell_command": 2374,
-        "spawn_agent": 19,
-        "update_plan": 143,
-        "wait_agent": 8
+        "dos_review": 2,
+        "get_goal": 9,
+        "shell_command": 2907,
+        "spawn_agent": 17,
+        "update_goal": 1,
+        "update_plan": 115,
+        "wait_agent": 5
       },
       "write_op_counts": {
+        "output-flag": 3,
         "redirect": 4
       }
     },
@@ -225,27 +206,27 @@
       "latency_by_verb": {
         "pretool": {
           "max_ms": 2720.49,
-          "n": 3832,
-          "p50_ms": 258.254,
-          "p95_ms": 527.217
+          "n": 5251,
+          "p50_ms": 189.208,
+          "p95_ms": 487.105
         }
       },
-      "observations": 3832,
+      "observations": 5251,
       "outcome_counts": {
-        "passthrough": 1725,
-        "warn": 2107
+        "passthrough": 3135,
+        "warn": 2116
       },
-      "pretool_calls": 3832,
+      "pretool_calls": 5251,
       "rung_counts": {
-        "admission": 2553,
-        "provenance": 1279
+        "admission": 2565,
+        "provenance": 2686
       },
       "since": "2026-06-25T09:22:57.680099Z",
       "status": "WARN",
-      "unknown_tree_admission_warnings": 1990,
-      "unknown_tree_warning_rate": 0.519311,
+      "unknown_tree_admission_warnings": 1999,
+      "unknown_tree_warning_rate": 0.380689,
       "verb_counts": {
-        "pretool": 3832
+        "pretool": 5251
       }
     },
     "reason": "Codex hook commands use the native launcher",
@@ -261,7 +242,7 @@
     "repaired_at": "2026-06-25T09:22:57.680099Z",
     "status": "PASS"
   },
-  "codex_threads_discovered": 150,
+  "codex_threads_discovered": 140,
   "dos_version": {
     "distribution": "dos-kernel",
     "latest_check_note": "run with --check-latest to compare against https://pypi.org/pypi/dos-kernel/json",
@@ -274,23 +255,7 @@
     "missing": [],
     "post_gate_command_shapes": {
       "malformed_rows": 0,
-      "mutating_shell_sessions": [
-        {
-          "codex_session_file": "rollout-2026-06-25T01-27-31-019efde4-32f6-7b22-9e5b-1ccddb6c3987.jsonl",
-          "mutating_shell_family_counts": {
-            "git_write": 1
-          },
-          "shell_family_counts": {
-            "git_write": 1
-          },
-          "shell_shape_counts": {
-            "shell_no_write_target_detected": 1
-          },
-          "thread_id": "019efde4-32f6-7b22-9e5b-1ccddb6c3987",
-          "tool_call_rows": 1,
-          "write_op_counts": {}
-        }
-      ],
+      "mutating_shell_sessions": [],
       "privacy": {
         "copied_fields": [
           "thread id",
@@ -310,29 +275,40 @@
         ]
       },
       "scope": "post_git_gate_audited_dos_streams",
-      "sessions_inspected": 5,
+      "sessions_inspected": 3,
       "shell_argument_errors": 0,
-      "shell_command_calls": 10,
+      "shell_command_calls": 233,
       "shell_family_counts": {
-        "build_test": 1,
-        "git_read": 1,
-        "git_write": 1,
-        "other_shell": 1,
-        "powershell_read": 4,
-        "python_script": 1,
-        "search_rg": 1
+        "build_test": 9,
+        "git_read": 41,
+        "inline_script": 3,
+        "other_shell": 39,
+        "powershell_inspect": 4,
+        "powershell_read": 24,
+        "python_script": 63,
+        "python_test": 32,
+        "search_rg": 17,
+        "shell_redirect": 1
       },
       "shell_shape_counts": {
-        "shell_no_write_target_detected": 10
+        "non_shell_tool": 30,
+        "shell_in_tree_or_safe_write_target": 1,
+        "shell_no_write_target_detected": 232
       },
-      "since": "2026-06-25T10:15:36.616692Z",
+      "since": "2026-06-25T14:28:11.173213Z",
       "status": "PASS",
       "threads_supplied": 10,
-      "tool_call_rows": 10,
+      "tool_call_rows": 263,
       "tool_counts": {
-        "shell_command": 10
+        "apply_patch": 19,
+        "dos_arbitrate": 1,
+        "get_goal": 1,
+        "shell_command": 233,
+        "update_plan": 9
       },
-      "write_op_counts": {}
+      "write_op_counts": {
+        "output-flag": 2
+      }
     },
     "privacy": {
       "copied_fields": [
@@ -350,39 +326,39 @@
         "command output"
       ]
     },
-    "proved_at": "2026-06-25T10:15:36.616692Z",
+    "proved_at": "2026-06-25T14:28:11.173213Z",
     "reports": [
       {
-        "created_at": "2026-06-25T10:15:36.616692Z",
+        "created_at": "2026-06-25T14:28:10.990552Z",
         "dry_run": true,
         "executed": false,
         "expect_deny": true,
         "expect_reason": "DEFAULT_DENY",
-        "path": "codex-fak-gate-git-add-deny-019efde3-6794-7401-93a1-e97e6bd72a9c.json",
+        "path": "codex-fak-gate-git-add.json",
         "reason": "DEFAULT_DENY",
         "status": "DENIED_EXPECTED",
         "tool": "git_add",
         "verdict": "DENY"
       },
       {
-        "created_at": "2026-06-25T10:15:36.400093Z",
+        "created_at": "2026-06-25T14:28:10.619317Z",
         "dry_run": true,
         "executed": false,
         "expect_deny": true,
         "expect_reason": "DEFAULT_DENY",
-        "path": "codex-fak-gate-git-commit-deny-019efde3-6794-7401-93a1-e97e6bd72a9c.json",
+        "path": "codex-fak-gate-git-commit.json",
         "reason": "DEFAULT_DENY",
         "status": "DENIED_EXPECTED",
         "tool": "git_commit",
         "verdict": "DENY"
       },
       {
-        "created_at": "2026-06-25T10:15:36.616478Z",
+        "created_at": "2026-06-25T14:28:11.173213Z",
         "dry_run": true,
         "executed": false,
         "expect_deny": true,
         "expect_reason": "POLICY_BLOCK",
-        "path": "codex-fak-gate-git-push-deny-019efde3-6794-7401-93a1-e97e6bd72a9c.json",
+        "path": "codex-fak-gate-git-push.json",
         "reason": "POLICY_BLOCK",
         "status": "DENIED_EXPECTED",
         "tool": "git_push",
@@ -397,36 +373,36 @@
     "status": "PASS",
     "valid": {
       "git_add": {
-        "created_at": "2026-06-25T10:15:36.616692Z",
+        "created_at": "2026-06-25T14:28:10.990552Z",
         "dry_run": true,
         "executed": false,
         "expect_deny": true,
         "expect_reason": "DEFAULT_DENY",
-        "path": "codex-fak-gate-git-add-deny-019efde3-6794-7401-93a1-e97e6bd72a9c.json",
+        "path": "codex-fak-gate-git-add.json",
         "reason": "DEFAULT_DENY",
         "status": "DENIED_EXPECTED",
         "tool": "git_add",
         "verdict": "DENY"
       },
       "git_commit": {
-        "created_at": "2026-06-25T10:15:36.400093Z",
+        "created_at": "2026-06-25T14:28:10.619317Z",
         "dry_run": true,
         "executed": false,
         "expect_deny": true,
         "expect_reason": "DEFAULT_DENY",
-        "path": "codex-fak-gate-git-commit-deny-019efde3-6794-7401-93a1-e97e6bd72a9c.json",
+        "path": "codex-fak-gate-git-commit.json",
         "reason": "DEFAULT_DENY",
         "status": "DENIED_EXPECTED",
         "tool": "git_commit",
         "verdict": "DENY"
       },
       "git_push": {
-        "created_at": "2026-06-25T10:15:36.616478Z",
+        "created_at": "2026-06-25T14:28:11.173213Z",
         "dry_run": true,
         "executed": false,
         "expect_deny": true,
         "expect_reason": "POLICY_BLOCK",
-        "path": "codex-fak-gate-git-push-deny-019efde3-6794-7401-93a1-e97e6bd72a9c.json",
+        "path": "codex-fak-gate-git-push.json",
         "reason": "POLICY_BLOCK",
         "status": "DENIED_EXPECTED",
         "tool": "git_push",
@@ -464,271 +440,268 @@
   "schema": "fak-codex-dos-recent-audit/1",
   "sessions": [
     {
-      "codex_session_file": "rollout-2026-06-25T01-27-31-019efde4-32f6-7b22-9e5b-1ccddb6c3987.jsonl",
-      "delegate_count": 83,
+      "codex_session_file": "rollout-2026-06-25T02-44-01-019efe2a-3a49-70f0-9951-5bc62e47feaa.jsonl",
+      "delegate_count": 6,
       "observation_scope": "timestamp-window; concurrent sessions in the same window may contribute observations",
-      "observations": 25299,
-      "pretool_calls": 12951,
+      "observations": 988,
+      "pretool_calls": 529,
       "recommendations": [
         "prefer path-visible tool calls or narrower shell commands; this stream is Bash-dominated",
-        "reduce opaque shell/editor calls or file upstream footprint-derivation debt",
         "inspect native-hook delegate fallbacks; the fast path should own routine calls"
       ],
       "status": "WARN",
-      "steps": 466,
+      "steps": 145,
       "stop_blocks": 0,
       "stop_failures_total": 0,
-      "stream_path": ".dos/streams/019efde4-32f6-7b22-9e5b-1ccddb6c3987.jsonl",
-      "thread_id": "019efde4-32f6-7b22-9e5b-1ccddb6c3987",
+      "stream_path": ".dos/streams/019efe2a-3a49-70f0-9951-5bc62e47feaa.jsonl",
+      "thread_id": "019efe2a-3a49-70f0-9951-5bc62e47feaa",
       "tool_counts": {
-        "Bash": 466
+        "Bash": 145
       },
-      "unknown_tree_admission_warnings": 4834,
-      "unknown_tree_warning_rate": 0.373253,
-      "window_end": "2026-06-25T10:15:43Z",
-      "window_start": "2026-06-25T08:28:32Z"
+      "unknown_tree_admission_warnings": 0,
+      "unknown_tree_warning_rate": 0.0,
+      "window_end": "2026-06-25T14:43:43Z",
+      "window_start": "2026-06-25T14:23:22Z"
     },
     {
-      "codex_session_file": "rollout-2026-06-25T02-02-26-019efe04-2aa3-72f1-8aee-f5aa0e2b3538.jsonl",
-      "delegate_count": 69,
+      "codex_session_file": "rollout-2026-06-25T07-17-59-019eff25-109f-7143-b5b3-3fa5a0044e91.jsonl",
+      "delegate_count": 8,
       "observation_scope": "timestamp-window; concurrent sessions in the same window may contribute observations",
-      "observations": 19575,
-      "pretool_calls": 9915,
+      "observations": 1414,
+      "pretool_calls": 748,
       "recommendations": [
         "prefer path-visible tool calls or narrower shell commands; this stream is Bash-dominated",
-        "reduce opaque shell/editor calls or file upstream footprint-derivation debt",
         "inspect native-hook delegate fallbacks; the fast path should own routine calls"
       ],
       "status": "WARN",
-      "steps": 394,
+      "steps": 67,
       "stop_blocks": 0,
       "stop_failures_total": 0,
-      "stream_path": ".dos/streams/019efe04-2aa3-72f1-8aee-f5aa0e2b3538.jsonl",
-      "thread_id": "019efe04-2aa3-72f1-8aee-f5aa0e2b3538",
+      "stream_path": ".dos/streams/019eff25-109f-7143-b5b3-3fa5a0044e91.jsonl",
+      "thread_id": "019eff25-109f-7143-b5b3-3fa5a0044e91",
       "tool_counts": {
-        "Bash": 394
+        "Bash": 67
       },
-      "unknown_tree_admission_warnings": 3780,
-      "unknown_tree_warning_rate": 0.381241,
-      "window_end": "2026-06-25T10:15:39Z",
-      "window_start": "2026-06-25T09:04:04Z"
+      "unknown_tree_admission_warnings": 0,
+      "unknown_tree_warning_rate": 0.0,
+      "window_end": "2026-06-25T14:43:37Z",
+      "window_start": "2026-06-25T14:18:21Z"
     },
     {
-      "codex_session_file": "rollout-2026-06-25T01-26-39-019efde3-6794-7401-93a1-e97e6bd72a9c.jsonl",
-      "delegate_count": 85,
+      "codex_session_file": "rollout-2026-06-25T07-25-17-019eff2b-c03e-78a1-8716-cb82d70e28ac.jsonl",
+      "delegate_count": 4,
       "observation_scope": "timestamp-window; concurrent sessions in the same window may contribute observations",
-      "observations": 25425,
-      "pretool_calls": 13023,
+      "observations": 764,
+      "pretool_calls": 412,
       "recommendations": [
         "prefer path-visible tool calls or narrower shell commands; this stream is Bash-dominated",
-        "reduce opaque shell/editor calls or file upstream footprint-derivation debt",
         "inspect native-hook delegate fallbacks; the fast path should own routine calls"
       ],
       "status": "WARN",
-      "steps": 560,
+      "steps": 135,
       "stop_blocks": 0,
       "stop_failures_total": 0,
-      "stream_path": ".dos/streams/019efde3-6794-7401-93a1-e97e6bd72a9c.jsonl",
-      "thread_id": "019efde3-6794-7401-93a1-e97e6bd72a9c",
+      "stream_path": ".dos/streams/019eff2b-c03e-78a1-8716-cb82d70e28ac.jsonl",
+      "thread_id": "019eff2b-c03e-78a1-8716-cb82d70e28ac",
       "tool_counts": {
-        "Bash": 560
+        "Bash": 135
       },
-      "unknown_tree_admission_warnings": 4831,
-      "unknown_tree_warning_rate": 0.370959,
-      "window_end": "2026-06-25T10:15:37Z",
-      "window_start": "2026-06-25T08:27:16Z"
-    },
-    {
-      "codex_session_file": "rollout-2026-06-25T01-48-58-019efdf7-d4a8-7c30-b2e4-438c92fafec2.jsonl",
-      "delegate_count": 72,
-      "observation_scope": "timestamp-window; concurrent sessions in the same window may contribute observations",
-      "observations": 22374,
-      "pretool_calls": 11381,
-      "recommendations": [
-        "prefer path-visible tool calls or narrower shell commands; this stream is Bash-dominated",
-        "reduce opaque shell/editor calls or file upstream footprint-derivation debt",
-        "inspect native-hook delegate fallbacks; the fast path should own routine calls"
-      ],
-      "status": "WARN",
-      "steps": 220,
-      "stop_blocks": 0,
-      "stop_failures_total": 0,
-      "stream_path": ".dos/streams/019efdf7-d4a8-7c30-b2e4-438c92fafec2.jsonl",
-      "thread_id": "019efdf7-d4a8-7c30-b2e4-438c92fafec2",
-      "tool_counts": {
-        "Bash": 220
-      },
-      "unknown_tree_admission_warnings": 4203,
-      "unknown_tree_warning_rate": 0.3693,
-      "window_end": "2026-06-25T10:15:48Z",
-      "window_start": "2026-06-25T08:49:29Z"
+      "unknown_tree_admission_warnings": 0,
+      "unknown_tree_warning_rate": 0.0,
+      "window_end": "2026-06-25T14:43:55Z",
+      "window_start": "2026-06-25T14:25:43Z"
     },
     {
       "codex_session_file": "rollout-2026-06-25T02-38-18-019efe24-ff94-73a0-8b81-0958a40f72e6.jsonl",
-      "delegate_count": 30,
+      "delegate_count": 53,
       "observation_scope": "timestamp-window; concurrent sessions in the same window may contribute observations",
-      "observations": 10317,
-      "pretool_calls": 5245,
+      "observations": 16264,
+      "pretool_calls": 8125,
       "recommendations": [
         "prefer path-visible tool calls or narrower shell commands; this stream is Bash-dominated",
         "reduce opaque shell/editor calls or file upstream footprint-derivation debt",
         "inspect native-hook delegate fallbacks; the fast path should own routine calls"
       ],
       "status": "WARN",
-      "steps": 587,
+      "steps": 816,
       "stop_blocks": 0,
       "stop_failures_total": 0,
       "stream_path": ".dos/streams/019efe24-ff94-73a0-8b81-0958a40f72e6.jsonl",
       "thread_id": "019efe24-ff94-73a0-8b81-0958a40f72e6",
       "tool_counts": {
-        "Bash": 587
+        "Bash": 816
       },
-      "unknown_tree_admission_warnings": 1860,
-      "unknown_tree_warning_rate": 0.354623,
-      "window_end": "2026-06-25T10:15:48Z",
+      "unknown_tree_admission_warnings": 1871,
+      "unknown_tree_warning_rate": 0.230277,
+      "window_end": "2026-06-25T14:24:46Z",
       "window_start": "2026-06-25T09:39:24Z"
     },
     {
-      "codex_session_file": "rollout-2026-06-25T01-33-50-019efde9-fab7-7c13-bf3a-a994010253a3.jsonl",
-      "delegate_count": 80,
-      "observation_scope": "timestamp-window; concurrent sessions in the same window may contribute observations",
-      "observations": 24637,
-      "pretool_calls": 12597,
-      "recommendations": [
-        "prefer path-visible tool calls or narrower shell commands; this stream is Bash-dominated",
-        "reduce opaque shell/editor calls or file upstream footprint-derivation debt",
-        "inspect native-hook delegate fallbacks; the fast path should own routine calls"
-      ],
-      "status": "WARN",
-      "steps": 1057,
-      "stop_blocks": 0,
-      "stop_failures_total": 0,
-      "stream_path": ".dos/streams/019efde9-fab7-7c13-bf3a-a994010253a3.jsonl",
-      "thread_id": "019efde9-fab7-7c13-bf3a-a994010253a3",
-      "tool_counts": {
-        "Bash": 1057
-      },
-      "unknown_tree_admission_warnings": 4663,
-      "unknown_tree_warning_rate": 0.370168,
-      "window_end": "2026-06-25T10:14:46Z",
-      "window_start": "2026-06-25T08:34:34Z"
-    },
-    {
-      "codex_session_file": "rollout-2026-06-25T01-14-00-019efdd7-d29b-7c31-8ef5-489659feaeaa.jsonl",
-      "delegate_count": 92,
-      "observation_scope": "timestamp-window; concurrent sessions in the same window may contribute observations",
-      "observations": 26667,
-      "pretool_calls": 13713,
-      "recommendations": [
-        "prefer path-visible tool calls or narrower shell commands; this stream is Bash-dominated",
-        "reduce opaque shell/editor calls or file upstream footprint-derivation debt",
-        "inspect native-hook delegate fallbacks; the fast path should own routine calls"
-      ],
-      "status": "WARN",
-      "steps": 620,
-      "stop_blocks": 0,
-      "stop_failures_total": 0,
-      "stream_path": ".dos/streams/019efdd7-d29b-7c31-8ef5-489659feaeaa.jsonl",
-      "thread_id": "019efdd7-d29b-7c31-8ef5-489659feaeaa",
-      "tool_counts": {
-        "Bash": 620
-      },
-      "unknown_tree_admission_warnings": 4818,
-      "unknown_tree_warning_rate": 0.351345,
-      "window_end": "2026-06-25T10:14:04Z",
-      "window_start": "2026-06-25T08:14:38Z"
-    },
-    {
-      "codex_session_file": "rollout-2026-06-25T01-21-08-019efdde-5c74-7411-8e12-11389890058b.jsonl",
-      "delegate_count": 88,
-      "observation_scope": "timestamp-window; concurrent sessions in the same window may contribute observations",
-      "observations": 25741,
-      "pretool_calls": 13195,
-      "recommendations": [
-        "prefer path-visible tool calls or narrower shell commands; this stream is Bash-dominated",
-        "reduce opaque shell/editor calls or file upstream footprint-derivation debt",
-        "inspect native-hook delegate fallbacks; the fast path should own routine calls"
-      ],
-      "status": "WARN",
-      "steps": 650,
-      "stop_blocks": 0,
-      "stop_failures_total": 0,
-      "stream_path": ".dos/streams/019efdde-5c74-7411-8e12-11389890058b.jsonl",
-      "thread_id": "019efdde-5c74-7411-8e12-11389890058b",
-      "tool_counts": {
-        "Bash": 650
-      },
-      "unknown_tree_admission_warnings": 4801,
-      "unknown_tree_warning_rate": 0.36385,
-      "window_end": "2026-06-25T10:12:54Z",
-      "window_start": "2026-06-25T08:22:07Z"
-    },
-    {
-      "codex_session_file": "rollout-2026-06-25T01-38-15-019efdee-04fd-7562-bab1-2a0e9acb16af.jsonl",
-      "delegate_count": 76,
-      "observation_scope": "timestamp-window; concurrent sessions in the same window may contribute observations",
-      "observations": 24006,
-      "pretool_calls": 12263,
-      "recommendations": [
-        "prefer path-visible tool calls or narrower shell commands; this stream is Bash-dominated",
-        "reduce opaque shell/editor calls or file upstream footprint-derivation debt",
-        "inspect native-hook delegate fallbacks; the fast path should own routine calls"
-      ],
-      "status": "WARN",
-      "steps": 638,
-      "stop_blocks": 0,
-      "stop_failures_total": 0,
-      "stream_path": ".dos/streams/019efdee-04fd-7562-bab1-2a0e9acb16af.jsonl",
-      "thread_id": "019efdee-04fd-7562-bab1-2a0e9acb16af",
-      "tool_counts": {
-        "Bash": 638
-      },
-      "unknown_tree_admission_warnings": 4557,
-      "unknown_tree_warning_rate": 0.371606,
-      "window_end": "2026-06-25T10:12:11Z",
-      "window_start": "2026-06-25T08:38:42Z"
-    },
-    {
       "codex_session_file": "rollout-2026-06-25T01-40-39-019efdf0-3a96-7ed2-9c58-23f7645ee031.jsonl",
-      "delegate_count": 76,
+      "delegate_count": 100,
       "observation_scope": "timestamp-window; concurrent sessions in the same window may contribute observations",
-      "observations": 23618,
-      "pretool_calls": 12041,
+      "observations": 29511,
+      "pretool_calls": 14891,
       "recommendations": [
         "prefer path-visible tool calls or narrower shell commands; this stream is Bash-dominated",
         "reduce opaque shell/editor calls or file upstream footprint-derivation debt",
         "inspect native-hook delegate fallbacks; the fast path should own routine calls"
       ],
       "status": "WARN",
-      "steps": 437,
+      "steps": 459,
       "stop_blocks": 0,
       "stop_failures_total": 0,
       "stream_path": ".dos/streams/019efdf0-3a96-7ed2-9c58-23f7645ee031.jsonl",
       "thread_id": "019efdf0-3a96-7ed2-9c58-23f7645ee031",
       "tool_counts": {
-        "Bash": 437
+        "Bash": 459
       },
-      "unknown_tree_admission_warnings": 4456,
-      "unknown_tree_warning_rate": 0.370069,
-      "window_end": "2026-06-25T10:11:56Z",
+      "unknown_tree_admission_warnings": 4540,
+      "unknown_tree_warning_rate": 0.304882,
+      "window_end": "2026-06-25T14:20:16Z",
       "window_start": "2026-06-25T08:41:11Z"
+    },
+    {
+      "codex_session_file": "rollout-2026-06-25T01-48-58-019efdf7-d4a8-7c30-b2e4-438c92fafec2.jsonl",
+      "delegate_count": 90,
+      "observation_scope": "timestamp-window; concurrent sessions in the same window may contribute observations",
+      "observations": 27135,
+      "pretool_calls": 13654,
+      "recommendations": [
+        "prefer path-visible tool calls or narrower shell commands; this stream is Bash-dominated",
+        "reduce opaque shell/editor calls or file upstream footprint-derivation debt",
+        "inspect native-hook delegate fallbacks; the fast path should own routine calls"
+      ],
+      "status": "WARN",
+      "steps": 776,
+      "stop_blocks": 0,
+      "stop_failures_total": 0,
+      "stream_path": ".dos/streams/019efdf7-d4a8-7c30-b2e4-438c92fafec2.jsonl",
+      "thread_id": "019efdf7-d4a8-7c30-b2e4-438c92fafec2",
+      "tool_counts": {
+        "Bash": 776
+      },
+      "unknown_tree_admission_warnings": 4214,
+      "unknown_tree_warning_rate": 0.308628,
+      "window_end": "2026-06-25T13:31:46Z",
+      "window_start": "2026-06-25T08:49:29Z"
+    },
+    {
+      "codex_session_file": "rollout-2026-06-25T02-02-26-019efe04-2aa3-72f1-8aee-f5aa0e2b3538.jsonl",
+      "delegate_count": 72,
+      "observation_scope": "timestamp-window; concurrent sessions in the same window may contribute observations",
+      "observations": 20517,
+      "pretool_calls": 10398,
+      "recommendations": [
+        "prefer path-visible tool calls or narrower shell commands; this stream is Bash-dominated",
+        "reduce opaque shell/editor calls or file upstream footprint-derivation debt",
+        "inspect native-hook delegate fallbacks; the fast path should own routine calls"
+      ],
+      "status": "WARN",
+      "steps": 476,
+      "stop_blocks": 0,
+      "stop_failures_total": 0,
+      "stream_path": ".dos/streams/019efe04-2aa3-72f1-8aee-f5aa0e2b3538.jsonl",
+      "thread_id": "019efe04-2aa3-72f1-8aee-f5aa0e2b3538",
+      "tool_counts": {
+        "Bash": 476
+      },
+      "unknown_tree_admission_warnings": 3794,
+      "unknown_tree_warning_rate": 0.364878,
+      "window_end": "2026-06-25T10:29:21Z",
+      "window_start": "2026-06-25T09:04:04Z"
+    },
+    {
+      "codex_session_file": "rollout-2026-06-25T01-27-31-019efde4-32f6-7b22-9e5b-1ccddb6c3987.jsonl",
+      "delegate_count": 86,
+      "observation_scope": "timestamp-window; concurrent sessions in the same window may contribute observations",
+      "observations": 25886,
+      "pretool_calls": 13250,
+      "recommendations": [
+        "prefer path-visible tool calls or narrower shell commands; this stream is Bash-dominated",
+        "reduce opaque shell/editor calls or file upstream footprint-derivation debt",
+        "inspect native-hook delegate fallbacks; the fast path should own routine calls"
+      ],
+      "status": "WARN",
+      "steps": 478,
+      "stop_blocks": 0,
+      "stop_failures_total": 0,
+      "stream_path": ".dos/streams/019efde4-32f6-7b22-9e5b-1ccddb6c3987.jsonl",
+      "thread_id": "019efde4-32f6-7b22-9e5b-1ccddb6c3987",
+      "tool_counts": {
+        "Bash": 478
+      },
+      "unknown_tree_admission_warnings": 4848,
+      "unknown_tree_warning_rate": 0.365887,
+      "window_end": "2026-06-25T10:22:13Z",
+      "window_start": "2026-06-25T08:28:32Z"
+    },
+    {
+      "codex_session_file": "rollout-2026-06-25T01-14-00-019efdd7-d29b-7c31-8ef5-489659feaeaa.jsonl",
+      "delegate_count": 97,
+      "observation_scope": "timestamp-window; concurrent sessions in the same window may contribute observations",
+      "observations": 27316,
+      "pretool_calls": 14037,
+      "recommendations": [
+        "prefer path-visible tool calls or narrower shell commands; this stream is Bash-dominated",
+        "reduce opaque shell/editor calls or file upstream footprint-derivation debt",
+        "inspect native-hook delegate fallbacks; the fast path should own routine calls"
+      ],
+      "status": "WARN",
+      "steps": 646,
+      "stop_blocks": 0,
+      "stop_failures_total": 0,
+      "stream_path": ".dos/streams/019efdd7-d29b-7c31-8ef5-489659feaeaa.jsonl",
+      "thread_id": "019efdd7-d29b-7c31-8ef5-489659feaeaa",
+      "tool_counts": {
+        "Bash": 646
+      },
+      "unknown_tree_admission_warnings": 4848,
+      "unknown_tree_warning_rate": 0.345373,
+      "window_end": "2026-06-25T10:20:46Z",
+      "window_start": "2026-06-25T08:14:38Z"
+    },
+    {
+      "codex_session_file": "rollout-2026-06-25T01-26-39-019efde3-6794-7401-93a1-e97e6bd72a9c.jsonl",
+      "delegate_count": 86,
+      "observation_scope": "timestamp-window; concurrent sessions in the same window may contribute observations",
+      "observations": 25638,
+      "pretool_calls": 13123,
+      "recommendations": [
+        "prefer path-visible tool calls or narrower shell commands; this stream is Bash-dominated",
+        "reduce opaque shell/editor calls or file upstream footprint-derivation debt",
+        "inspect native-hook delegate fallbacks; the fast path should own routine calls"
+      ],
+      "status": "WARN",
+      "steps": 568,
+      "stop_blocks": 0,
+      "stop_failures_total": 0,
+      "stream_path": ".dos/streams/019efde3-6794-7401-93a1-e97e6bd72a9c.jsonl",
+      "thread_id": "019efde3-6794-7401-93a1-e97e6bd72a9c",
+      "tool_counts": {
+        "Bash": 568
+      },
+      "unknown_tree_admission_warnings": 4848,
+      "unknown_tree_warning_rate": 0.369428,
+      "window_end": "2026-06-25T10:17:36Z",
+      "window_start": "2026-06-25T08:27:16Z"
     }
   ],
   "sessions_audited": 10,
   "since_days": 7,
   "status": "WARN",
   "summary": {
-    "delegate_count": 751,
-    "observations": 227659,
-    "pretool_calls": 116324,
-    "steps": 5629,
+    "delegate_count": 602,
+    "observations": 175433,
+    "pretool_calls": 89167,
+    "steps": 4566,
     "stop_blocks": 0,
     "stop_failures_total": 0,
     "tool_counts": {
-      "Bash": 5629
+      "Bash": 4566
     },
-    "unknown_tree_admission_warnings": 42803,
-    "unknown_tree_warning_rate": 0.367964,
+    "unknown_tree_admission_warnings": 28963,
+    "unknown_tree_warning_rate": 0.324817,
     "unknown_tree_warning_threshold": 0.02,
     "warned_sessions": 10
   },

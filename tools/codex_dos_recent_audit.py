@@ -784,8 +784,11 @@ def actionable_gate(
     if shape_counts.get("shell_out_of_tree_write_target"):
         reasons.append("post-repair shell command shapes include out-of-tree write targets")
     if mutating_families:
-        if isinstance(git_gate, dict) and git_gate.get("status") == "PASS" and not post_gate_mutating_families:
-            residual.append("HISTORICAL_GIT_WRITE_BEFORE_STRUCTURED_GATE")
+        if isinstance(git_gate, dict) and git_gate.get("status") == "PASS":
+            if post_gate_mutating_families:
+                reasons.append("post-git-gate shell command families include opaque mutating operations")
+            else:
+                residual.append("HISTORICAL_GIT_WRITE_BEFORE_STRUCTURED_GATE")
         else:
             reasons.append("post-repair shell command families include opaque mutating operations")
     if command_shapes.get("shell_argument_errors"):
@@ -908,6 +911,10 @@ def build_report(
     mutating_families = mutating_shell_family_counts(family_counts)
     if mutating_families:
         recommendations.append("post-repair shell usage includes opaque mutating git operations; route commit/push/add through explicit operator gates")
+    post_gate_shapes = git_gate.get("post_gate_command_shapes") if isinstance(git_gate.get("post_gate_command_shapes"), dict) else {}
+    post_gate_families = post_gate_shapes.get("shell_family_counts") if isinstance(post_gate_shapes.get("shell_family_counts"), dict) else {}
+    if mutating_shell_family_counts(post_gate_families):
+        recommendations.append("structured git gates have stale evidence; rerun expected-deny git gate probes after the latest opaque git mutation")
     if sum(s["stop_blocks"] + s["stop_failures_total"] for s in sessions):
         recommendations.append("stop-hook blocks/failures appeared; review before treating affected sessions as closed")
 
