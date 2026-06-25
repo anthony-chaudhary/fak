@@ -97,13 +97,20 @@ flips on after a live soak, because it rewrites in-flight transcript history.
 - **Default behavior is unchanged.** With `--reset-on-budget` off (the default), the 409 +
   `SessionResetDirective` path is byte-identical to before.
 
-## Follow-ons (filed as issues)
+## Status & follow-ons (epic #739)
 
-- Live same-model KV-included reuse (wire `vcachechain` to a live serve splice).
-- A model-call task distiller (summarize the middle, not just extract the ends).
-- An MCP `fak_session_reset` tool variant (cooperative reset for any MCP client).
-- An operator webhook + a pre-threshold (e.g. 80%) warning before exhaustion.
-- A cross-session / fleet-wide budget pool (today each session's budget is independent).
+The epic is **#739**. The vertical slice described above — the `Recontinue` re-arm verb,
+the `internal/sessionreset` contributor registry, the `gateway.Config.ResetOnBudget`
+boundary, and the `fak serve --reset-on-budget` flag — is **shipped on `main`** (swept into
+the shared trunk on 2026-06-25; ships dark, default OFF). The named follow-on rungs are filed
+as child issues:
+
+- **#740** — live same-model KV-included reuse (wire `vcachechain` to a live serve splice;
+  today `warm_prefix` carries the recall *plan*, stamped `live_kv_reuse:deferred`).
+- **#741** — a model-call task distiller (summarize the middle, not just extract the ends).
+- **#742** — an MCP `fak_session_reset` tool variant (cooperative reset for any MCP client).
+- **#743** — an operator webhook + a pre-threshold (e.g. 80%) warning before exhaustion.
+- **#744** — a cross-session / fleet-wide budget pool (today each session's budget is independent).
 
 ## See also
 
