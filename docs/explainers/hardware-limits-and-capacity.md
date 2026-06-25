@@ -158,14 +158,21 @@ stack trace.
 placeholders and the demo's hand-injected `TierPressure` with live numbers from
 `DeviceMemoryInfo`, so `PlanPlacement` plans against the device that actually exists.
 
-**Plank 4 — the engine adapter that EXECUTES a placement directive.** The
-[hardware-aware cache doc](../serving/hardware-aware-cache.md) already names this missing
-piece ("the engine adapter that consumes those directives"). It is the control path the
-diagram in §2 is missing: a `PlanPlacement` `demote`/`spill` decision turned into a real
-`KVStore.Evict` plus a stage to the colder tier, against the kernel-owned cache. The
-mechanical primitives exist — `kvmmu.Context.ApplyPlan` already does bit-exact eviction to
-match a plan, and `model/paging.go: pagedKernel` already pages a weight in on demand — but
-neither is driven by live capacity pressure on the serving loop.
+**Plank 4 — the engine adapter that EXECUTES a placement directive. _Shipped_ (#708).**
+`internal/engine.CapacityAdapter.Execute` is the control path the diagram in §2 was
+missing: it turns a `PlanPlacement` `demote`/`spill` decision into a real
+`abi.KVBackend.StageSpan` (stage to the colder tier, addressed by digest) PLUS an
+`abi.KVBackend.Evict` (the re-RoPE/renumber eviction from the live KV tier) against the
+kernel-owned cache. It is fail-safe — the live copy is staged before it is dropped, so a
+typed staging MISS/FAULT retains the span rather than losing it — and it records every
+transition through the same `CacheEventRecorder` as a typed offload event, so a staging
+fault is never a silent recompute. Witness: `go test ./internal/engine -run
+TestCapacityAdapter`. The mechanical primitives it leans on were already in place —
+`kvmmu.Context.ApplyPlan` does bit-exact eviction to match a plan, and
+`model/paging.go: pagedKernel` pages a weight in on demand — but neither was driven by
+live capacity pressure; this adapter is the demote/spill executor that consumes a
+placement directive. What remains is feeding it LIVE pressure (Plank 3) and wiring it
+into the serving loop.
 
 **Plank 5 — a load-time fit pre-check.** `FitsOnDevice` before the `make`/`append` in the
 model loaders (`model: Load`, `LoadSafetensors`, `ggufload.LoadModel`) turns "OOM panic
@@ -202,8 +209,10 @@ and it is what `DeviceCapacity` begins.
 
 ## 6. Honest boundaries
 
-- This note ships **Plank 1 only** — the report capability and the fit helper, lifted into
-  the type system, with `cuda` as the first producer. It enforces nothing on the live path.
+- This note ships **Plank 1 (backends report their ceiling) and Plank 4 (the engine
+  adapter that executes a demote/spill, #708)**. Neither yet touches the live serving
+  path: Plank 1 enforces nothing on the live path, and Plank 4 executes a placement
+  directive but is not yet driven by live capacity pressure (that is Plank 3).
 - `FitsOnDevice` is a *pre-check*, not an allocator. Nothing yet calls it before a load or an
   upload; wiring it in is Plank 5.
 - The `cuda` producer reports `total` only; `free` is `FreeUnknown` until `cudaMemGetInfo` is
