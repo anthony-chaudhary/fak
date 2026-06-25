@@ -54,6 +54,13 @@ type Segment struct {
 	Len  int               // number of cached positions; 0 once evicted
 	Held bool              // true once this segment's K/V has been evicted from the cache
 	KV   cachemeta.EntryID // cachemeta identity for derived entries that parent this span
+
+	// Attended is the witnessed post-softmax attention mass this span has received,
+	// accumulated by AttributeRow from the rung-1 attention observer (#852/#853). It is
+	// mass, not a position, so the From renumbering on eviction does not touch it; a
+	// survivor keeps exactly the mass it accumulated. evict() zeroes it on the evicted
+	// span (a held span can no longer be attended to). Zero means never attended.
+	Attended float64
 }
 
 // Gate is the decision the bridge ENFORCES on the KV cache. It answers, for a
@@ -329,6 +336,7 @@ func (c *Context) evict(seg *Segment) int {
 	}
 	seg.Held = true
 	seg.Len = 0
+	seg.Attended = 0 // a held span can no longer be attended to; survivors keep their mass
 	return n
 }
 
