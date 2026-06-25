@@ -79,9 +79,9 @@ var tier = map[string]int{
 	"trajectory":   3, // trajectory data plane: folds the abi event stream into per-trace Turn rows + JSONL export; an abi.Emitter that optionally stamps a simhash query embedding. Imports abi+simhash.
 	"trajhook":     3, // pluggable trajectory scorer/tap seam (the "trivial skill does gardening" enabler): app code registers Scorers over Turn rows without a core edit. Imports trajectory+simhash.
 	"sessionimage": 4, // portable, model-agnostic SESSION image: composes recall(3)+session(1)+trajectory(3)+ctxplan(1) into one versioned, sha256-integrity bundle + a .faksession tar (dump/pack/unpack/rehydrate across hosts/users/VMs/model changes). Integrator: imports tier-3 composers, off the hot path.
-	"a2achan": 2, // in-kernel agent-to-agent message channel: a process-global, capability-floored, Ref-backed mailbox (Send/Recv adjudicated by a registered a2aGate + a2aIngress; Taint/Scope enforced). Mechanism: imports only abi, off the hot path.
-	"snapshot": 3, // uniform DUMP/RESTORE seam over any primitive (turn/tool/session/fleet/rsi): a sha256-integrity envelope (Marshal/Parse over any body) + a ladder registry + typed codecs for trace(trajectory) and fleet(session.Table). Imports session(1)+trajectory(3); off the hot path.
-	"rungobs": 2, // passive rung-decision distribution counter: an abi.Emitter (subscribed to EvDecide/EvDeny/EvVDSOHit) that re-folds each call's chain off the hot path via kernel.FoldExplain and bumps a per-(rung,kind,reason) histogram. Mechanism: imports kernel(2)+abi(0); runs synchronously in emit but adds 0 adjudication rungs and never touches the verdict or Counters.
+	"a2achan":      2, // in-kernel agent-to-agent message channel: a process-global, capability-floored, Ref-backed mailbox (Send/Recv adjudicated by a registered a2aGate + a2aIngress; Taint/Scope enforced). Mechanism: imports only abi, off the hot path.
+	"snapshot":     3, // uniform DUMP/RESTORE seam over any primitive (turn/tool/session/fleet/rsi): a sha256-integrity envelope (Marshal/Parse over any body) + a ladder registry + typed codecs for trace(trajectory) and fleet(session.Table). Imports session(1)+trajectory(3); off the hot path.
+	"rungobs":      2, // passive rung-decision distribution counter: an abi.Emitter (subscribed to EvDecide/EvDeny/EvVDSOHit) that re-folds each call's chain off the hot path via kernel.FoldExplain and bumps a per-(rung,kind,reason) histogram. Mechanism: imports kernel(2)+abi(0); runs synchronously in emit but adds 0 adjudication rungs and never touches the verdict or Counters.
 	// new-leaf:tier — `python tools/new_leaf.py <name> --tier <name>` inserts the
 	// declaration for a generated leaf immediately ABOVE this line. Keep the marker last.
 }
@@ -284,13 +284,15 @@ func selfRegisters(t *testing.T, internal, pkg string) bool {
 
 // regOffList names leaves that self-register but are intentionally wired NOT through the
 // defconfig (internal/registrations). `agent` registers the "localtools" engine from its
-// init() and is pulled in directly by cmd/fak, never blank-imported. `spec` (the
-// speculation ProvisionalSink + OpsSpec ops) registers ONLY from its Enabled()-gated
-// Install(), never from init() and never from the defconfig — that off-defconfig absence
-// IS the strongest of its two safety gates (the kernel never even links the poly-model
-// lane until a rung flips FAK_POLYMODEL and calls Install; epic #529). A leaf added here is
-// a conscious "wired elsewhere" decision, the same review chokepoint as the tier table.
-var regOffList = map[string]bool{"agent": true, "spec": true}
+// init() and is pulled in directly by cmd/fak, never blank-imported. `gateway` registers
+// a per-Server metrics observer from New(), and the server itself is wired by cmd/fak.
+// `spec` (the speculation ProvisionalSink + OpsSpec ops) registers ONLY from its
+// Enabled()-gated Install(), never from init() and never from the defconfig — that
+// off-defconfig absence IS the strongest of its two safety gates (the kernel never even
+// links the poly-model lane until a rung flips FAK_POLYMODEL and calls Install; epic
+// #529). A leaf added here is a conscious "wired elsewhere" decision, the same review
+// chokepoint as the tier table.
+var regOffList = map[string]bool{"agent": true, "gateway": true, "spec": true}
 
 // TestRequestPathLeavesRegistered closes the registration-completeness hole: a leaf whose
 // production init() calls abi.Register* MUST be either blank-imported by the defconfig

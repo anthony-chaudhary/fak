@@ -200,6 +200,11 @@ class MergeRoundTripTest(unittest.TestCase):
 
 class SelectTargetsTest(unittest.TestCase):
     def _annotated(self):
+        # gem8's reset must be UNAMBIGUOUSLY in the future for skip_active_throttle to drop
+        # it -- a hardcoded calendar date ("Jun 24, 8pm") silently expires and flips this
+        # test red once that wall-clock moment passes. Derive it ~3 days ahead of now in the
+        # dated "%b %d, %I%p" shape _reset_is_future parses, so the fixture stays future-valid.
+        future_reset = self._future_reset_str(days=3)
         return [
             {"kind": "worker", "account": ".claude", "tag": "default", "available": True,
              "active_sessions": 5, "live_sessions": 2, "block_kind": None},
@@ -209,10 +214,18 @@ class SelectTargetsTest(unittest.TestCase):
             {"kind": "worker", "account": ".claude-gem8-acct", "tag": "gem8",
              "available": False, "active_sessions": 0, "live_sessions": 0,
              "block_kind": "usage", "throttled": True,
-             "reset": "Jun 24, 8pm (America/Los_Angeles)"},
+             "reset": future_reset},
             {"kind": "excluded", "account": ".claude-adminbackup-acct", "tag": "adminbackup",
              "available": False},
         ]
+
+    @staticmethod
+    def _future_reset_str(days: int = 3) -> str:
+        import datetime as _dt
+        # Dated "%b %d, %I%p" -- _reset_is_future parses the zero-padded form ("Jun 27, 08PM")
+        # directly, so no platform-specific %-d/%-I munging is needed.
+        when = _dt.datetime.now() + _dt.timedelta(days=days)
+        return when.strftime("%b %d, %I%p") + " (America/Los_Angeles)"
 
     def test_blocked_selector_skips_available_and_excluded(self) -> None:
         targets = account_probe.select_targets(self._annotated(), selector="blocked")
