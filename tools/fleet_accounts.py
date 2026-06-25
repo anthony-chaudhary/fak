@@ -115,6 +115,19 @@ POLICY_EXAMPLE_PATH = os.path.join(
     os.path.dirname(os.path.abspath(__file__)), "accounts_policy.example.json")
 REGISTRY_PATH = os.path.join(REG_DIR, "sessions.json")
 
+# How fresh an active-probe ledger entry must be to override the registry's carried
+# status. The probe LEDGER (account_probe's probe_ledger.jsonl) is a SEPARATE file from
+# the watchdog's sessions.json -- a manual or watchdog `account_probe` run writes its
+# OK/LIMIT verdict only to the ledger, and nothing folds that back into sessions.json. So
+# without consulting the ledger here, runtime_status keeps reporting a stale carried
+# throttle ("resets 11pm") for an account a probe just confirmed OK -- the day24 incident,
+# where the live probe returned OK but the roster (and every consumer: the switcher AND
+# resume_resolver's re-home target search) still saw it blocked, yielding PIN_BLOCKED with
+# a healthy worker sitting right there. A probe is ground truth the moment it lands but
+# decays: an OK from hours ago must NOT override a real current limit, so we honor a ledger
+# verdict only within this window. Matches account_probe's own anti-spam interval scale.
+PROBE_LEDGER_FRESH_MIN = float(os.environ.get("FLEET_PROBE_FRESH_MIN", "20"))
+
 # Built-in defaults, used when no policy file is present. Keep backup or
 # break-glass accounts off the auto-resume roster until the operator opts in.
 DEFAULT_POLICY = {
@@ -419,6 +432,76 @@ def _normalize_auth(auth: dict | None) -> dict:
     return out
 
 
+# Map account_probe's closed STATUS set onto the (available, block_kind) shape runtime_status
+# uses, so a ledger verdict rides the SAME fresh-probe override the _probe session row does.
+_PROBE_STATUS_KIND = {"AUTH": "auth", "ACCESS": "access", "CREDIT": "credit", "LIMIT": "usage"}
+
+# annotate_accounts calls runtime_status once per worker, so a naive per-call ledger read
+# re-parses the whole probe_ledger.jsonl ~10x per roster render. Memoize the parsed snapshot
+# keyed on the ledger file's (mtime, size): a render reads it once, and a new probe (which
+# changes size) invalidates it immediately. Keeps runtime_status's signature unchanged.
+_PROBE_LEDGER_CACHE: dict = {"key": None, "by_account": {}, "ages": {}}
+
+
+def _probe_ledger_snapshot():
+    """(latest-entry-by-account, age-min-by-account) from account_probe's ledger, memoized on
+    the file's mtime+size so one roster render parses it once. Empty on any read failure."""
+    try:
+        import account_probe  # lazy: account_probe imports fleet_accounts, not vice-versa
+    except ImportError:
+        return {}, {}
+    path = account_probe.probe_ledger_path()
+    try:
+        st = os.stat(path)
+        key = (st.st_mtime, st.st_size)
+    except OSError:
+        return {}, {}
+    if _PROBE_LEDGER_CACHE["key"] != key:
+        try:
+            by_account = account_probe.last_probe_by_account()
+            ages = {a: account_probe.recent_probe_age_min(a) for a in by_account}
+        except Exception:
+            by_account, ages = {}, {}
+        _PROBE_LEDGER_CACHE.update(key=key, by_account=by_account, ages=ages)
+    return _PROBE_LEDGER_CACHE["by_account"], _PROBE_LEDGER_CACHE["ages"]
+
+
+def _fresh_probe_from_ledger(account: str, fresh_min: float = PROBE_LEDGER_FRESH_MIN
+                             ) -> dict | None:
+    """The freshest active-probe verdict for ``account`` from account_probe's ledger, IF it
+    is within ``fresh_min`` minutes -- else ``None``.
+
+    This is the missing link between the prober and the roster: ``account_probe`` writes its
+    OK/LIMIT/AUTH verdict to ``probe_ledger.jsonl``, a file distinct from the watchdog's
+    ``sessions.json`` that ``runtime_status`` reads. Nothing folds the ledger back into the
+    registry, so a fresh probe was invisible to every roster consumer (the day24 stale-throttle
+    incident). Consulting it here lets a recent probe override a carried block for the switcher
+    AND resume_resolver's re-home search alike, with one freshness gate so a stale OK can't
+    mask a real current limit. Returns a record shaped for the fresh-probe branch."""
+    by_account, ages = _probe_ledger_snapshot()
+    entry = by_account.get(account)
+    if not entry:
+        return None
+    age = ages.get(account)
+    if age is None or age > fresh_min:
+        return None
+    status = str(entry.get("status") or "").upper()
+    if status == "OK":
+        return {"available": True, "age_min": age}
+    if status in _PROBE_STATUS_KIND:
+        kind = _PROBE_STATUS_KIND[status]
+        reset = entry.get("reset")
+        reason = entry.get("block_reason") or entry.get("reason")
+        if not reason:
+            reason = (f"usage limit; resets {reset}" if reset else "usage limit") \
+                if kind == "usage" else f"{kind} block"
+        return {"available": False, "block_kind": kind, "block_reason": reason,
+                "reset": reset, "weekly": entry.get("weekly"), "age_min": age}
+    # Any other status (APIERR/TRANSPORT/unknown) is not a clean availability signal --
+    # fall through to the registry's own status rather than inventing a verdict.
+    return None
+
+
 def _age_min(row: dict) -> float | None:
     raw = row.get("age_min")
     if raw is None:
@@ -648,6 +731,27 @@ def runtime_status(account: str, registry: dict | None = None,
             "weekly": fresh_probe_block.get("throttle_weekly"),
             "throttled": kind == "usage",
             "status_source": "probe",
+        })
+        return status
+
+    # No synthetic _probe session row in the registry -> consult the active-probe LEDGER
+    # directly. account_probe writes its verdict only there, NOT into sessions.json, so a
+    # fresh manual/watchdog probe would otherwise be invisible here and the carried throttle
+    # below would win (the day24 incident: probe OK, roster still "resets 11pm"). A ledger
+    # verdict within PROBE_LEDGER_FRESH_MIN is treated as the same authoritative fresh probe.
+    led = _fresh_probe_from_ledger(account)
+    if led is not None:
+        if led.get("available"):
+            status["status_source"] = "probe-ledger"
+            status["probe_age_min"] = led.get("age_min")
+            return status
+        kind = led.get("block_kind") or "auth"
+        status.update({
+            "available": False, "blocked": True, "block_kind": kind,
+            "block_reason": led.get("block_reason") or "blocked",
+            "reset": led.get("reset"), "weekly": led.get("weekly"),
+            "throttled": kind == "usage",
+            "status_source": "probe-ledger", "probe_age_min": led.get("age_min"),
         })
         return status
 
