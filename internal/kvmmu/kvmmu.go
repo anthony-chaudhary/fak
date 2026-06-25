@@ -80,6 +80,12 @@ type Segment struct {
 	Cumulative float64 // Σ_t a_s(t): undecayed lifetime mass (post-hoc analyst)
 	EMA        float64 // lambda·EMA + a_s(t): recency-decayed rolling mass (real-time controller)
 
+	// Pinned protects this span from the attention-informed controller (#856): the
+	// coldest-by-EMA evictor (EvictColdest / EvictUnderBudget) never drops a pinned span
+	// regardless of how cold it is. Pinning does not block the content-driven quarantine
+	// path: a poisoned pinned span can still be evicted by AdmitResult / Quarantine.
+	Pinned bool
+
 	// traj is a bounded ring of the most recent per-turn masses {a_s(t)} — the trajectory
 	// that reconstructs WHEN a span was hot. Bounded to trajCap turns so memory is O(cap)
 	// per span regardless of session length (O(1) amortized per turn). trajLen is how many
@@ -177,9 +183,13 @@ func NewBackendWithGate(kv abi.KVBackend, gate Gate) *Context {
 func (c *Context) Append(id, tool string, ids []int) ([]float32, *Segment) {
 	from := c.kv.Len()
 	logits := c.kv.Prefill(ids)
-	seg := &Segment{ID: id, Tool: tool, From: from, Len: len(ids), KV: c.kvEntryID(ids)}
+	seg := &Segment{ID: id, Tool: tool, From: from, Len: len(ids), KV: c.kvEntryID(ids), Pinned: defaultPinned(tool)}
 	c.segs = append(c.segs, seg)
 	return logits, seg
+}
+
+func defaultPinned(tool string) bool {
+	return tool == "system"
 }
 
 func (c *Context) kvEntryID(ids []int) cachemeta.EntryID {
@@ -401,6 +411,17 @@ func externalEntryReferencesKV(e cachemeta.Entry, kv cachemeta.EntryID) bool {
 // Segments returns the current ledger (a copy of the slice header is fine; the
 // caller should treat the entries as read-only).
 func (c *Context) Segments() []*Segment { return c.segs }
+
+// Pin marks a live segment as protected from budget-driven attention eviction.
+func (c *Context) Pin(id string, pinned bool) bool {
+	for _, s := range c.segs {
+		if s.ID == id && !s.Held {
+			s.Pinned = pinned
+			return true
+		}
+	}
+	return false
+}
 
 // Entries returns currently live cache metadata entries tracked by this bridge.
 func (c *Context) Entries() []cachemeta.Entry { return append([]cachemeta.Entry(nil), c.meta...) }

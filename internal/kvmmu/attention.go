@@ -1,6 +1,10 @@
 package kvmmu
 
-import "github.com/anthony-chaudhary/fak/internal/model"
+import (
+	"sort"
+
+	"github.com/anthony-chaudhary/fak/internal/model"
+)
 
 // attention.go — issue #853, rung 2 of the attention-witness epic (#851).
 //
@@ -200,4 +204,59 @@ func (s *Segment) trajectory() []float64 {
 		out[i] = s.traj[(start+i)%cap(s.traj)]
 	}
 	return out
+}
+
+// EvictedSpan records one span dropped by the attention-informed controller (#856): its
+// id, the EMA it carried when selected, and the number of cache positions removed.
+type EvictedSpan struct {
+	ID        string
+	EMA       float64
+	Positions int
+}
+
+// EvictColdest drops the coldest-by-attention unpinned spans until at least
+// targetPositions cache positions have been freed, or until no unpinned live spans
+// remain. Pinned spans are excluded from the candidate set entirely.
+func (c *Context) EvictColdest(targetPositions int) []EvictedSpan {
+	if targetPositions <= 0 {
+		return nil
+	}
+	cand := make([]*Segment, 0, len(c.segs))
+	for _, s := range c.segs {
+		if s.Held || s.Len == 0 || s.Pinned {
+			continue
+		}
+		cand = append(cand, s)
+	}
+	sort.SliceStable(cand, func(i, j int) bool {
+		a, b := cand[i], cand[j]
+		if a.EMA != b.EMA {
+			return a.EMA < b.EMA
+		}
+		if a.Cumulative != b.Cumulative {
+			return a.Cumulative < b.Cumulative
+		}
+		return a.From < b.From
+	})
+	var out []EvictedSpan
+	freed := 0
+	for _, s := range cand {
+		if freed >= targetPositions {
+			break
+		}
+		ema, id := s.EMA, s.ID
+		n := c.evict(s)
+		out = append(out, EvictedSpan{ID: id, EMA: ema, Positions: n})
+		freed += n
+	}
+	return out
+}
+
+// EvictUnderBudget applies EvictColdest only when live residency exceeds the budget.
+func (c *Context) EvictUnderBudget(budgetPositions int) []EvictedSpan {
+	over := c.kv.Len() - budgetPositions
+	if over <= 0 {
+		return nil
+	}
+	return c.EvictColdest(over)
 }
