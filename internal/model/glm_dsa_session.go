@@ -141,6 +141,15 @@ func (s *Session) tokenHiddenGLMDsa(id, pos int) []float32 {
 	if err != nil {
 		panic(err)
 	}
+	// Token boundary: return this position's transient device op-output buffers to the backend pool
+	// — the same recycle the HAL decode path (recycleHALToken) does every token. GLM-DSA's
+	// Prefill/Step loops (kv.go) drive tokenHiddenGLMDsa DIRECTLY, not through the HAL, so without
+	// this a multi-token Prefill never recycles and the device op buffers grow per position until
+	// cudaMalloc fails. xf is host-resident (finalNorm), so recycling the device pool is safe here.
+	// No-op on the host/cpu-ref backend (it advertises no Recycle), so host forwards stay byte-exact.
+	if r, ok := s.Backend.(interface{ Recycle() }); ok {
+		r.Recycle()
+	}
 	return xf
 }
 

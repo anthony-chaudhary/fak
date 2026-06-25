@@ -70,7 +70,15 @@ extern "C" void *fcuda_malloc(size_t bytes) {
     d = it->second.back();
     it->second.pop_back();
   } else {
-    CK(cudaMalloc(&d, bytes));
+    cudaError_t _e = cudaMalloc(&d, bytes);
+    if (_e != cudaSuccess) {
+      // Report the TRUE reason instead of letting CK swallow it and the Go caller panic with no
+      // cause: an out-of-memory says "out of memory", a context poisoned by a prior asynchronous
+      // kernel/launch fault says e.g. "an illegal memory access was encountered". Returning nullptr
+      // keeps a genuine OOM loud (dalloc still panics) — this EXPOSES the error, it does not mask it.
+      fprintf(stderr, "fak-cuda: cudaMalloc(%zu bytes) failed: %s\n", bytes, cudaGetErrorString(_e));
+      return nullptr;
+    }
   }
   g_live[d] = bytes;
   return d;

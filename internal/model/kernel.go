@@ -83,6 +83,12 @@ func (k backendKernel) mul(name string, x any, out, in int) []float32 {
 	wt := s.glmDsaWeightHAL(name, out, in)
 	xt := be.Upload(compute.NewF32(be, []int{in}, xf), compute.F32)
 	y := be.Read(be.MatMul(wt, xt))
+	// The activation upload has a FRESH host pointer every token, so compute.uploadCache (which
+	// shares only STABLE weight pointers) can never reuse it. Evict it now — otherwise a multi-token
+	// Prefill accumulates one resident device buffer per position per GEMM until cudaMalloc fails
+	// (the glmdsatput "cuda device allocation failed" on the 512-token prefill). The resident weight
+	// wt stays cached. No-op on cpu-ref (Upload is identity, Free is a no-op).
+	be.Free(xt)
 	if len(y) != out {
 		panic("model: backendKernel " + name + " result length mismatch")
 	}
@@ -121,6 +127,11 @@ func (k backendKernel) sparseAttend(q, selK, selV []float32, nSel, nH, qkHead, v
 	kt := be.Upload(compute.NewF32(be, []int{nSel * nH * qkHead}, selK), compute.F32)
 	vt := be.Upload(compute.NewF32(be, []int{nSel * nH * vHead}, selV), compute.F32)
 	out := be.Read(sb.DSASparseAttend(qt, kt, vt, nSel, nH, qkHead, vHead, scale))
+	// Per-call gathered operands with fresh host pointers (see backendKernel.mul) — evict them so a
+	// multi-token Prefill does not accumulate one resident device copy per position. Read fenced.
+	be.Free(qt)
+	be.Free(kt)
+	be.Free(vt)
 	if len(out) != nH*vHead {
 		panic("model: backendKernel sparseAttend result length mismatch")
 	}
@@ -165,6 +176,11 @@ func (k backendKernel) indexSelect(indexQ, indexK, weights []float32, nKeys, nH,
 	kt := be.Upload(compute.NewF32(be, []int{nKeys * indexDim}, indexK), compute.F32)
 	wt := be.Upload(compute.NewF32(be, []int{nH}, weights), compute.F32)
 	sel := ib.DSAIndexSelect(qt, kt, wt, nKeys, nH, indexDim, queryPos, topK, scale)
+	// Per-call operands with fresh host pointers — evict so a multi-token Prefill does not accumulate
+	// a resident device copy per position. DSAIndexSelect returns a host []int, so it has fenced.
+	be.Free(qt)
+	be.Free(kt)
+	be.Free(wt)
 	return sel, true
 }
 

@@ -350,7 +350,10 @@ func (c *cudaBackend) DeviceMemory() (total, free int64, known bool) {
 func (c *cudaBackend) dalloc(nbytes int) *cudaBuf {
 	p := C.fcuda_malloc(C.size_t(nbytes))
 	if p == nil {
-		panic("compute: cuda device allocation failed")
+		// fcuda_malloc now prints the real cudaMalloc error (OOM vs a context poisoned by a prior
+		// async kernel fault) to stderr before returning nil; carry the requested size here so the
+		// two halves of the diagnosis line up. A genuine OOM still panics loudly — nothing masked.
+		panic("compute: cuda device allocation failed for " + itoaC(nbytes) + " bytes (see the fak-cuda stderr line for the cudaMalloc reason)")
 	}
 	return &cudaBuf{ptr: unsafe.Pointer(p), n: nbytes}
 }
