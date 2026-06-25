@@ -203,6 +203,58 @@ func TestArgRulesAreLoadBearing(t *testing.T) {
 	}
 }
 
+// TestDeniesToolUnconditionally proves the manifest-level "is this a blanket block?"
+// predicate (#752/#773): true only when no argument value could ever flip the tool to
+// ALLOW, so promptmmu may safely drop its definition from the advertised surface.
+func TestDeniesToolUnconditionally(t *testing.T) {
+	// A real floor: two tools affirmatively allowed, one of them narrowed by an
+	// arg-conditional rule, plus an explicit blanket deny.
+	m, err := ParseManifest([]byte(`{
+		"allow": ["read_file", "write_file"],
+		"deny": {"exfiltrate": "SECRET_EXFIL"},
+		"arg_rules": [
+			{"tool":"write_file", "arg":"path", "allow_glob":"./out/**"}
+		]
+	}`))
+	if err != nil {
+		t.Fatalf("ParseManifest: %v", err)
+	}
+
+	// (a) a blanket name-level deny is unconditional — no arg can make it allow.
+	if !m.DeniesToolUnconditionally("exfiltrate") {
+		t.Error("blanket-denied tool should report unconditionally denied")
+	}
+	// (b) an arg-conditional tool is NOT unconditional — some path values are allowed.
+	if m.DeniesToolUnconditionally("write_file") {
+		t.Error("arg-conditional tool (some args allowed) must NOT report unconditionally denied")
+	}
+	// (c) an affirmatively allowed tool with no restriction is not denied at all.
+	if m.DeniesToolUnconditionally("read_file") {
+		t.Error("affirmatively allowed tool must NOT report unconditionally denied")
+	}
+	// (d) under a real fail-closed floor, a tool absent from every allow case is never
+	// reachable for ANY arg — droppable.
+	if !m.DeniesToolUnconditionally("unlisted_tool") {
+		t.Error("unlisted tool under a real fail-closed floor is never admitted → droppable")
+	}
+
+	// A manifest with NO affirmative-allow surface (the unconfigured / default-allow
+	// case) must report false for everything — never prune against a zero floor.
+	open, err := ParseManifest([]byte(`{}`))
+	if err != nil {
+		t.Fatalf("ParseManifest empty: %v", err)
+	}
+	if open.DeniesToolUnconditionally("anything") {
+		t.Error("empty/unconfigured manifest must NOT prune any tool (zero-floor guard)")
+	}
+
+	// A manifest that does not resolve (unknown deny reason) fails safe → false.
+	bad := Manifest{Allow: []string{"read_file"}, Deny: map[string]string{"x": "NOPE_NOT_A_REASON"}}
+	if bad.DeniesToolUnconditionally("x") {
+		t.Error("an unresolvable manifest must report false (never prune against a floor that did not load)")
+	}
+}
+
 func TestArgRuleValidation(t *testing.T) {
 	cases := []struct {
 		name string

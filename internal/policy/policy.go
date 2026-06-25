@@ -214,6 +214,27 @@ func (m Manifest) ToPolicy() (adjudicator.Policy, error) {
 	return rt.Adjudicator, nil
 }
 
+// DeniesToolUnconditionally reports whether the manifest denies tool for EVERY
+// argument value — i.e. no ArgRule could make it ALLOW — the args-independent
+// "is this a blanket block?" question promptmmu (#752) asks before it may safely
+// drop a tool DEFINITION from the advertised surface.
+//
+// It resolves the manifest to its runtime adjudicator.Policy and delegates to
+// Policy.NeverAdmits, so the manifest-level predicate and the live floor can never
+// drift: an explicit name-level Deny (or self-modify glob) reports true; a tool the
+// floor affirmatively allows — even one narrowed by an arg-conditional ArgRule —
+// reports false (arg rules only RESTRICT an otherwise-allow, never grant one, so a
+// never-allowed name stays never-allowed under every argument). A manifest that does
+// not resolve (malformed, unknown deny reason) reports false: never prune a tool-def
+// against a floor that did not load.
+func (m Manifest) DeniesToolUnconditionally(tool string) bool {
+	p, err := m.ToPolicy()
+	if err != nil {
+		return false
+	}
+	return p.NeverAdmits(tool)
+}
+
 // ToRuntime validates the manifest and builds the complete runtime policy.
 func (m Manifest) ToRuntime() (Runtime, error) {
 	if err := m.validateVersion(); err != nil {
