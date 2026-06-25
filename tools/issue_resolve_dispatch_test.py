@@ -388,5 +388,90 @@ class WeeklyCapGateTest(unittest.TestCase):
         self.assertEqual(p["weekly_cap"]["until"], "2026-06-25T20:00:00Z")
 
 
+class WaveMembershipTest(unittest.TestCase):
+    """A wave is a typed group, not N anonymous lanes: each worker is stamped with
+    its rank/wave/size into child_env + a .wave sidecar, so an auditor enumerates
+    the whole group from the filesystem and reads the honest under-fill."""
+
+    def test_wave_membership_env_shape(self) -> None:
+        mod = load()
+        env = mod.wave_membership_env(rank=2, wave_id="wave-abc", size=4, shortfall=1)
+        self.assertEqual(env, {
+            "FLEET_WAVE_ID": "wave-abc", "FLEET_WAVE_RANK": "2",
+            "FLEET_WAVE_SIZE": "4", "FLEET_WAVE_SHORTFALL": "1"})
+
+    def test_enumerate_wave_reads_ranks_and_shortfall_from_sidecars(self) -> None:
+        # Simulate a granted-3 wave (requested 5 -> shortfall 2) by writing the same
+        # .wave sidecars spawn_issue_worker writes, then enumerate from disk alone.
+        import tempfile
+        mod = load()
+        with tempfile.TemporaryDirectory() as d:
+            runs = Path(d)
+            for rank in range(3):
+                out_log = runs / f"resolve-{600 + rank}-2026{rank}.log"
+                mod.write_wave_sidecar(out_log, rank=rank, wave_id="wave-xyz",
+                                       size=3, shortfall=2)
+            # A worker from a DIFFERENT wave must not bleed into this enumeration.
+            mod.write_wave_sidecar(runs / "resolve-999-other.log", rank=0,
+                                   wave_id="wave-other", size=1, shortfall=0)
+            grp = mod.enumerate_wave(runs, "wave-xyz")
+            self.assertEqual(grp["wave_id"], "wave-xyz")
+            self.assertEqual(grp["granted"], 3)
+            self.assertEqual(grp["size"], 3)
+            self.assertEqual(grp["shortfall"], 2)
+            self.assertEqual(grp["ranks"], [0, 1, 2])   # ranks 0..granted-1
+
+    def test_spawn_stamps_membership_env_and_sidecar(self) -> None:
+        # End-to-end: spawn_issue_worker stamps FLEET_WAVE_* into the child env AND
+        # writes the .wave sidecar — proven without launching a real process.
+        import tempfile
+        from unittest import mock
+        mod = load()
+        captured: dict[str, object] = {}
+
+        class _FakePopen:
+            def __init__(self, argv, **kwargs):
+                captured["env"] = kwargs.get("env")
+                kwargs.get("stdout").close()  # the parent's log fh (no real child)
+                self.pid = 31337
+
+        with tempfile.TemporaryDirectory() as d:
+            runs = Path(d)
+            membership = {"rank": 1, "wave_id": "wave-zzz", "size": 2, "shortfall": 0}
+            with mock.patch.object(mod.subprocess, "Popen", _FakePopen):
+                res = mod.spawn_issue_worker(
+                    ["true"], {"DISPATCH_LANE": "tools"}, runs, runs,
+                    issue=42, lane="tools", backend="claude", membership=membership)
+            env = captured["env"]
+            self.assertEqual(env["FLEET_WAVE_RANK"], "1")
+            self.assertEqual(env["FLEET_WAVE_ID"], "wave-zzz")
+            self.assertEqual(env["FLEET_WAVE_SIZE"], "2")
+            self.assertEqual(env["FLEET_WAVE_SHORTFALL"], "0")
+            self.assertEqual(env["DISPATCH_LANE"], "tools")  # base env preserved
+            self.assertEqual(res["membership"]["rank"], 1)
+            # The wave is enumerable from the sidecar that spawn wrote.
+            grp = mod.enumerate_wave(runs, "wave-zzz")
+            self.assertEqual(grp["ranks"], [1])
+            self.assertEqual(grp["shortfall"], 0)
+
+    def test_spawn_without_membership_writes_no_wave_sidecar(self) -> None:
+        # The default single-worker path is unchanged: no membership -> no .wave file.
+        import tempfile
+        from unittest import mock
+        mod = load()
+
+        class _FakePopen:
+            def __init__(self, argv, **kwargs):
+                kwargs.get("stdout").close()  # the parent's log fh (no real child)
+                self.pid = 7
+
+        with tempfile.TemporaryDirectory() as d:
+            runs = Path(d)
+            with mock.patch.object(mod.subprocess, "Popen", _FakePopen):
+                mod.spawn_issue_worker(["true"], {}, runs, runs,
+                                       issue=1, lane="tools", backend="claude")
+            self.assertEqual(list(runs.glob("*.wave")), [])
+
+
 if __name__ == "__main__":
     unittest.main()

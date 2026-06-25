@@ -801,6 +801,35 @@ class WaveAllocationTest(unittest.TestCase):
         self.assertFalse(w["ok"])
         self.assertEqual(w["granted"], 0)
 
+    def test_wave_stamps_rank_waveid_size_membership(self) -> None:
+        # The typed-group identity: each granted lane carries rank 0..granted-1, a
+        # shared wave_id, and size == granted; the under-fill is recorded once.
+        self._three_distinct()
+        w = fleet_accounts.allocate_wave(
+            5, task_class="t1", home=str(self.home),
+            config_home=str(self.config_home), registry={})
+        self.assertEqual(w["granted"], 3)
+        self.assertEqual(w["size"], 3)
+        self.assertEqual(w["shortfall"], 2)            # asked 5, got 3
+        self.assertTrue(w["wave_id"].startswith("wave-"))
+        ranks = [lane["rank"] for lane in w["lanes"]]
+        self.assertEqual(ranks, [0, 1, 2])             # ranks 0..granted-1, in order
+        self.assertEqual({lane["wave_id"] for lane in w["lanes"]}, {w["wave_id"]})
+        self.assertEqual({lane["size"] for lane in w["lanes"]}, {3})
+
+    def test_wave_id_is_deterministic_and_content_addressed(self) -> None:
+        # Same roster -> same wave_id (deterministic, no clock/random); an explicit
+        # wave_id overrides the derived one.
+        self._three_distinct()
+        kw = dict(task_class="t1", home=str(self.home),
+                  config_home=str(self.config_home), registry={})
+        a = fleet_accounts.allocate_wave(3, **kw)
+        b = fleet_accounts.allocate_wave(3, **kw)
+        self.assertEqual(a["wave_id"], b["wave_id"])
+        pinned = fleet_accounts.allocate_wave(3, wave_id="W-42", **kw)
+        self.assertEqual(pinned["wave_id"], "W-42")
+        self.assertEqual({lane["wave_id"] for lane in pinned["lanes"]}, {"W-42"})
+
 
 class IdentityReconciliationTest(unittest.TestCase):
     """The roster must see WHO each dir is logged into, not just its name -- so N dirs

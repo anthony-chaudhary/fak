@@ -64,6 +64,7 @@ from __future__ import annotations
 import copy
 import datetime as dt
 import glob
+import hashlib
 import json
 import os
 import re
@@ -1421,12 +1422,24 @@ def _pool_key(row: dict) -> str:
     return f"dir:{row.get('account') or row.get('dir') or ''}"
 
 
+def _wave_id_for(pools: list[str]) -> str:
+    """A deterministic, content-addressed id for a wave: a short digest of its
+    granted pools (sorted). Same membership -> same id, with no clock or random
+    input, so an auditor reproduces it from the lanes alone. An empty wave
+    (granted 0) gets the empty id."""
+    if not pools:
+        return ""
+    digest = hashlib.blake2b(",".join(sorted(pools)).encode("utf-8"), digest_size=6)
+    return "wave-" + digest.hexdigest()
+
+
 def allocate_wave(count: int, *, task_text: str = "", task_class: str = "auto",
                   work_kind: str = "", product: str | None = None,
                   allow_tier_fallback: bool = False, strict_tier: bool = False,
                   home: str = USER, policy: dict | None = None,
                   registry: dict | None = None,
-                  config_home: str | None = None) -> dict:
+                  config_home: str | None = None,
+                  wave_id: str | None = None) -> dict:
     """Allocate up to ``count`` DISTINCT available accounts for a parallel fan-out
     (an "ultracode" wave), balanced across the roster -- the primitive a wave needs
     that single-account ``resolve_account`` cannot provide.
@@ -1458,14 +1471,33 @@ def allocate_wave(count: int, *, task_text: str = "", task_class: str = "auto",
     duplicate that would re-collapse two lanes onto one pool. ``distinct_pools`` (==
     granted) is the wave's true concurrency multiplier vs the naive 1.
 
+    Rank-stamped membership (the typed group). Each granted lane carries its
+    ``rank`` in ``[0, granted)``, the shared ``wave_id`` (a deterministic, content-
+    addressed digest of the granted pools -- override via the ``wave_id`` arg), and
+    the wave ``size`` (== granted). This is the Python counterpart to
+    ``internal/comm``'s ``Membership`` value and borrows ``MPI_Comm_spawn_multiple``'s
+    typed-array-with-counts shape: the lanes are the typed array, ``granted``/``size``
+    the counts, and ``shortfall`` the honest maxprocs/error under-fill. A caller that
+    spawns the wave stamps these onto each child (env + sidecars) so the group is a
+    legible thing an auditor enumerates from the filesystem ("wave W: ranks 0..K-1,
+    K=granted, shortfall=S") without trusting any worker's self-report.
+
+    NOT a collective. The stamps LABEL an allocation; they do not make the wave a
+    communicator -- no barrier, no all-to-all, no gather across ranks. A wave stays
+    N independent detached workers whose only shared fabric is git + the
+    ``dos arbitrate`` lease. The honest under-fill is the spawn_multiple
+    maxprocs/error array, not a guaranteed group size.
+
     Returns a flat dict::
 
-        {ok, requested, granted, shortfall, distinct_pools, target_tier,
-         reason, lanes: [<resolve record + 'pool'>...], blocked_target_accounts}
+        {ok, requested, granted, shortfall, distinct_pools, size, wave_id,
+         target_tier, reason, lanes: [<resolve record + 'pool'/'rank'/'wave_id'/
+         'size'>...], blocked_target_accounts}
 
     Each ``lanes`` entry is the same flat shape ``resolve_account`` returns (so a
     caller pins ``config_dir`` as CLAUDE_CONFIG_DIR and serves on ``oauth_token``),
-    plus a ``pool`` field carrying its ``_pool_key`` for distinctness auditing."""
+    plus a ``pool`` field carrying its ``_pool_key`` for distinctness auditing and
+    the ``rank``/``wave_id``/``size`` membership stamp."""
     pol = policy or load_policy()
     n = max(0, int(count))
 
@@ -1525,6 +1557,14 @@ def allocate_wave(count: int, *, task_text: str = "", task_class: str = "auto",
 
     granted = len(lanes)
     shortfall = max(0, n - granted)
+    # Stamp the rank-stamped membership now that the group size is known: each lane
+    # gets its rank in [0, granted), the shared (content-addressed) wave id, and the
+    # wave size. This is the typed-group identity a spawner carries onto each child.
+    wid = wave_id if wave_id is not None else _wave_id_for([lane["pool"] for lane in lanes])
+    for i, lane in enumerate(lanes):
+        lane["rank"] = i
+        lane["wave_id"] = wid
+        lane["size"] = granted
     blocked = [
         _public_blocked(r) for r in workers
         if _as_int(r.get("model_tier"), 3) == target and not r.get("available")
@@ -1543,6 +1583,8 @@ def allocate_wave(count: int, *, task_text: str = "", task_class: str = "auto",
         "granted": granted,
         "shortfall": shortfall,
         "distinct_pools": granted,
+        "size": granted,
+        "wave_id": wid,
         "target_tier": target,
         "reason": reason,
         "lanes": lanes,

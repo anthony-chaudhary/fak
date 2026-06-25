@@ -50,6 +50,9 @@ import dispatch_worker  # noqa: E402  (child_env for the opencode backend)
 
 SCHEMA = "fleet-issue-resolve-dispatch/1"
 RUNS_DIRNAME = ".dispatch-runs"
+# Per-worker membership sidecar (rank/wave/size/shortfall), written next to the
+# .pid/.backend sidecars so an auditor enumerates a wave straight from disk.
+WAVE_SIDECAR_SUFFIX = ".wave"
 _LOG_ISSUE_RE = re.compile(r"resolve-(\d+)-")
 
 # Worker backends this tick can launch:
@@ -246,18 +249,83 @@ def win_creationflags(exe: str) -> int:
     return _CREATE_NO_WINDOW
 
 
+def wave_membership_env(rank: int, wave_id: str, size: int,
+                        shortfall: int) -> dict[str, str]:
+    """The env vars that stamp a worker's place in its wave: which ``rank`` it is
+    in ``[0, size)``, which ``wave_id`` it belongs to, the granted ``size`` of the
+    group, and the recorded ``shortfall`` (lanes the wave fell short of the
+    request). The deterministic counterpart of ``fleet_accounts.allocate_wave``'s
+    per-lane membership stamp, carried into ``child_env``.
+
+    NOT a collective: these vars LABEL an otherwise-independent detached worker —
+    they grant no barrier/gather/all-to-all. A wave stays N lanes whose only shared
+    fabric is git + the ``dos arbitrate`` lease."""
+    return {
+        "FLEET_WAVE_ID": str(wave_id),
+        "FLEET_WAVE_RANK": str(int(rank)),
+        "FLEET_WAVE_SIZE": str(int(size)),
+        "FLEET_WAVE_SHORTFALL": str(int(shortfall)),
+    }
+
+
+def write_wave_sidecar(out_log: Path, rank: int, wave_id: str, size: int,
+                       shortfall: int) -> dict[str, Any]:
+    """Write the per-worker membership sidecar next to ``.pid``/``.backend`` so an
+    auditor enumerates the whole wave from the filesystem — without trusting any
+    worker's self-report. Mirrors the env stamp; deterministic at allocation."""
+    rec = {"wave_id": str(wave_id), "rank": int(rank), "size": int(size),
+           "shortfall": int(shortfall)}
+    out_log.with_suffix(WAVE_SIDECAR_SUFFIX).write_text(
+        json.dumps(rec, sort_keys=True), encoding="utf-8")
+    return rec
+
+
+def enumerate_wave(runs_dir: Path, wave_id: str) -> dict[str, Any]:
+    """Enumerate a wave from its ``.wave`` sidecars on disk — the auditor's view of
+    a typed group. Returns ``{wave_id, granted, size, shortfall, ranks, members}``
+    where ``ranks`` is the sorted list of stamped ranks (a complete wave reads
+    ``0..granted-1``) and ``shortfall`` is the recorded under-fill. Reads only the
+    filesystem, never a worker's self-report."""
+    runs_dir = Path(runs_dir)
+    want = str(wave_id)
+    members: list[dict[str, Any]] = []
+    for side in runs_dir.glob(f"resolve-*{WAVE_SIDECAR_SUFFIX}"):
+        try:
+            rec = json.loads(side.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        if str(rec.get("wave_id")) != want:
+            continue
+        members.append(rec)
+    members.sort(key=lambda r: int(r.get("rank", -1)))
+    ranks = [int(r.get("rank", -1)) for r in members]
+    size = int(members[0].get("size", 0)) if members else 0
+    shortfall = int(members[0].get("shortfall", 0)) if members else 0
+    return {"wave_id": want, "granted": len(members), "size": size,
+            "shortfall": shortfall, "ranks": ranks, "members": members}
+
+
 def spawn_issue_worker(command: list[str], env: dict[str, str], cwd: Path,
                        log_dir: Path, issue: int, lane: str,
-                       backend: str) -> dict[str, Any]:
+                       backend: str,
+                       membership: dict[str, Any] | None = None) -> dict[str, Any]:
     """Launch a detached worker (claude or opencode) on one issue; record pid.
 
     The log keeps the backend-neutral ``resolve-<N>-<stamp>.log`` name so the close
-    arm, silent-worker scan, and in-flight de-dup all see it uniformly."""
+    arm, silent-worker scan, and in-flight de-dup all see it uniformly.
+
+    ``membership`` (``{rank, wave_id, size, shortfall}``, as ``allocate_wave`` stamps
+    each lane) is OPTIONAL: when given, the worker's rank/wave identity is stamped
+    into ``child_env`` (``FLEET_WAVE_*``) AND a ``.wave`` sidecar so the wave is a
+    legible typed group enumerable from disk. It does NOT make the wave a collective
+    — the worker stays a detached lane."""
     log_dir.mkdir(parents=True, exist_ok=True)
     stamp = dt.datetime.now(dt.timezone.utc).strftime("%Y%m%d-%H%M%S")
     out_log = log_dir / f"resolve-{issue}-{stamp}.log"
     exe = shutil.which(command[0]) or command[0]
     argv = [exe, *command[1:]]
+    if membership is not None:
+        env = {**env, **wave_membership_env(**membership)}
     kwargs: dict[str, Any] = {}
     if os.name == "nt":
         kwargs["creationflags"] = win_creationflags(exe)
@@ -270,8 +338,11 @@ def spawn_issue_worker(command: list[str], env: dict[str, str], cwd: Path,
     # Per-worker backend sidecar: makes each run's backend traceable from disk,
     # independent of the (multi-task, last-writer) tick record.
     (out_log.with_suffix(".backend")).write_text(backend, encoding="utf-8")
-    return {"pid": proc.pid, "log": str(out_log), "issue": issue, "lane": lane,
-            "backend": backend}
+    result: dict[str, Any] = {"pid": proc.pid, "log": str(out_log), "issue": issue,
+                              "lane": lane, "backend": backend}
+    if membership is not None:
+        result["membership"] = write_wave_sidecar(out_log, **membership)
+    return result
 
 
 # --- Weekly-cap gate -------------------------------------------------------
