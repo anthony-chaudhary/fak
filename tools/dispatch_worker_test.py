@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import importlib.util
+import os
 import sys
 import unittest
 from pathlib import Path
@@ -111,6 +112,21 @@ class DispatchWorkerTest(unittest.TestCase):
         )
         self.assertFalse(payload["ok"])
 
+    def test_launch_real_runs_trivial_command_and_returns_rc(self) -> None:
+        mod = load()
+        result = mod.launch([sys.executable, "-c", "import sys; sys.exit(0)"],
+                            Path("."), dict(os.environ), timeout_s=30)
+        self.assertEqual(result["returncode"], 0)
+
+    def test_launch_real_timeout_kills_tree_and_returns_124(self) -> None:
+        mod = load()
+        # A 5s sleeper under a 1s cap must time out (124) and be reaped by
+        # terminate_tree -- not hang. Real-process exercise of the timeout path.
+        result = mod.launch([sys.executable, "-c", "import time; time.sleep(5)"],
+                            Path("."), dict(os.environ), timeout_s=1)
+        self.assertEqual(result["returncode"], 124)
+        self.assertTrue(result.get("timeout"))
+
     def test_resolve_exe_falls_back_to_name_when_not_found(self) -> None:
         mod = load()
         # A name that will not resolve should fall back to the bare name rather
@@ -157,7 +173,7 @@ class DispatchWorkerTest(unittest.TestCase):
         self.assertEqual(mod.guard_provider("claude"), "anthropic")
         self.assertEqual(mod.guard_provider("opencode"), "openai")
 
-    def test_guard_audit_path_is_per_lane_under_dispatch_runs(self) -> None:
+    def test_guard_audit_path_is_per_session_under_dispatch_runs(self) -> None:
         mod = load()
         p = mod.guard_audit_path(Path("C:/work/fak"), "gate way/1", "claude")
         self.assertEqual(p.parent.name, "guard-audit")
@@ -165,6 +181,15 @@ class DispatchWorkerTest(unittest.TestCase):
         self.assertTrue(p.name.endswith(".jsonl"))
         self.assertNotIn("/", p.name)   # lane separators sanitized out of the filename
         self.assertNotIn(" ", p.name)
+        self.assertTrue(p.name.startswith("gate_way_1-claude-"))  # lane prefix preserved for globbing
+
+    def test_guard_audit_path_is_unique_per_call(self) -> None:
+        mod = load()
+        # Two workers on the SAME lane must NOT resolve to the same journal file, or
+        # their independent hash chains would braid into one unverifiable file.
+        a = mod.guard_audit_path(Path("C:/work/fak"), "gateway", "claude")
+        b = mod.guard_audit_path(Path("C:/work/fak"), "gateway", "claude")
+        self.assertNotEqual(a, b)
 
     def test_guard_wrap_claude_fronts_with_fak_guard_anthropic(self) -> None:
         mod = load()

@@ -35,7 +35,9 @@ import argparse
 import json
 import os
 import shutil
+import signal
 import subprocess
+import uuid
 from pathlib import Path
 from typing import Any, Callable, Sequence
 
@@ -207,12 +209,21 @@ def guard_provider(backend: str) -> str:
 
 
 def guard_audit_path(workspace: Path, lane: str, backend: str) -> Path:
-    """Per-(lane,backend) durable decision journal under the gitignored
-    ``.dispatch-runs/``. Per worker -- NOT ``fak guard``'s shared per-user default --
-    so concurrent workers never fork ONE hash chain, and each lane's kernel evidence
-    is separable. The dir is created lazily by the journal writer."""
+    """A PER-SESSION durable decision journal under the gitignored ``.dispatch-runs/``.
+
+    The filename is keyed on the lane+backend (for separability and globbing) PLUS a
+    per-process discriminator (pid + a uuid). This is deliberate: ``fak guard``'s
+    hash-chained journal has NO inter-process lock, so two concurrent workers sharing
+    ONE file would each start an independent sha256 chain and braid them into a forked,
+    unverifiable journal (and interleave mid-row). Two close dispatch ticks CAN pick the
+    same lane (``pick_lane`` returns the busiest lane before any issue resolves), so a
+    per-lane-only path would force exactly that collision. A unique-per-session file lets
+    each ``fak guard`` own its own valid chain; ``fak audit verify`` / the coverage
+    scorecard glob the lane prefix to aggregate them. The dir is created lazily by the
+    journal writer (``journal.Enable`` mkdirs it)."""
     safe = "".join(c if (c.isalnum() or c in "-_.") else "_" for c in f"{lane}-{backend}")
-    return Path(workspace) / ".dispatch-runs" / "guard-audit" / f"{safe}.jsonl"
+    token = f"{os.getpid()}-{uuid.uuid4().hex[:8]}"
+    return Path(workspace) / ".dispatch-runs" / "guard-audit" / f"{safe}-{token}.jsonl"
 
 
 def guard_wrap(
@@ -300,18 +311,53 @@ def launch(
     resolved = list(command)
     if resolved:
         resolved[0] = resolve_exe(resolved[0])
+    # Spawn the worker as its OWN process group (Windows) / session (POSIX) so a
+    # timeout can kill the WHOLE tree, not just the immediate child. With guard on,
+    # the immediate child is ``fak guard`` and the agent (``claude``) is a GRANDCHILD;
+    # subprocess.run's timeout would SIGKILL only fak guard and orphan the agent --
+    # leaving it running past the wall-clock cap with the kernel gateway already torn
+    # down. New-group + a tree-kill on timeout closes that hole (and is strictly safer
+    # for the un-guarded path too).
+    popen_kwargs: dict[str, Any] = {"cwd": str(cwd), "env": env}
+    if os.name == "nt":
+        popen_kwargs["creationflags"] = 0x00000200  # CREATE_NEW_PROCESS_GROUP
+    else:
+        popen_kwargs["start_new_session"] = True
     try:
-        proc = subprocess.run(resolved, cwd=cwd, env=env, timeout=timeout_s)
+        proc = subprocess.Popen(resolved, **popen_kwargs)
     except FileNotFoundError as exc:
         return {"returncode": 127, "error": str(exc), "stdout": "", "stderr": str(exc)}
-    except subprocess.TimeoutExpired as exc:
-        return {
-            "returncode": 124,
-            "timeout": True,
-            "stdout": exc.stdout or "",
-            "stderr": exc.stderr or str(exc),
-        }
-    return {"returncode": proc.returncode, "stdout": "", "stderr": ""}
+    try:
+        rc = proc.wait(timeout=timeout_s)
+    except subprocess.TimeoutExpired:
+        terminate_tree(proc)
+        return {"returncode": 124, "timeout": True, "stdout": "", "stderr": "timeout"}
+    return {"returncode": rc, "stdout": "", "stderr": ""}
+
+
+def terminate_tree(proc: "subprocess.Popen[Any]") -> None:
+    """Kill a worker AND its descendants (``fak guard`` + the agent it wraps). On a
+    timeout, killing only the immediate child would orphan the grandchild agent with
+    the kernel gateway already gone -- the exact runaway the wall-clock cap exists to
+    prevent. On Windows ``taskkill /T`` walks the PID tree; on POSIX the worker is a
+    session/group leader (``start_new_session``) so killpg reaps the group."""
+    try:
+        if os.name == "nt":
+            subprocess.run(["taskkill", "/F", "/T", "/PID", str(proc.pid)],
+                           capture_output=True, timeout=30)
+        else:
+            os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
+    except (OSError, ValueError, subprocess.SubprocessError):
+        # Fall back to a single-process kill if the group/tree kill is unavailable.
+        try:
+            proc.kill()
+        except OSError:
+            pass
+    finally:
+        try:
+            proc.wait(timeout=10)
+        except (subprocess.TimeoutExpired, OSError):
+            pass
 
 
 def build_payload(
