@@ -91,7 +91,14 @@ until it clears.
     `git restore --staged` your files, leave edits in the working tree, and wait for
     `MERGE_HEAD` to clear, then commit by explicit path.
 - **Commit by explicit path** — `git commit -- <paths>`, never `git add -A`. This is a
-  shared multi-session tree; never stage a peer's uncommitted files.
+  shared multi-session tree; never stage a peer's uncommitted files. `fak commit --path
+  <p> -m "<msg>"` mechanizes this whole rule: it stages only the named paths under an
+  advisory lock, writes the message to a file (so an em-dash/multiline subject can't
+  misparse as a pathspec), runs the real hooks, then **asserts the committed file set
+  equals the requested paths** — refusing `PATHSPEC_RACE` (and leaving the commit intact,
+  never force-pushing) if a peer swept extra files in. It also refuses `OFF_TRUNK` /
+  `MERGE_IN_PROGRESS` up front, so the runbook above is a verb, not a discipline you have
+  to remember.
 - **Sign off every commit** — `git commit -s` (DCO). Use a Conventional-Commits subject
   with a `(fak <leaf>)` trailer; a docs-only change uses a `docs(scope):` subject.
   A `cmd/` **demo or binary** has no `internal/<name>/` package, so stamp it with its

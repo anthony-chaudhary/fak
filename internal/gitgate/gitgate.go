@@ -338,6 +338,25 @@ func coveredByDeclaredPath(p string, declared []declaredPath) bool {
 	return false
 }
 
+// CleanRepoPath is the exported form of the repo-path normalizer the collective-commit
+// invariants use: it lower-noises a raw pathspec (backslash->forward, path.Clean) and
+// reports false for anything that cannot be a committed repo-relative path — empty, a
+// NUL, an absolute path, or an escape above the tree (".", "..", "../x"). The executor
+// half (internal/safecommit) normalizes its requested and committed path sets through
+// THIS one function so the policy and the executor share a single path rule.
+func CleanRepoPath(raw string) (string, bool) { return cleanRepoPath(raw) }
+
+// TreeContains reports whether repo-relative path p is tree or sits beneath it (tree ==
+// p, or p has the prefix "tree/"). Exported so the executor's "did exactly the requested
+// paths land" assertion uses the same containment the policy uses — a requested directory
+// legitimately covers the files committed under it.
+func TreeContains(tree, p string) bool { return treeContains(tree, p) }
+
+// CoveredByAnyTree reports whether p is contained by at least one tree in trees. Exported
+// as the set-membership primitive the executor folds over to find a committed file that NO
+// requested path covers — the empirical signature of a peer-swept (raced) commit.
+func CoveredByAnyTree(p string, trees []string) bool { return coveredByAnyTree(p, trees) }
+
 // Classify is the pure, testable core: it reports the cited law and true if cmd
 // contains a refused git hazard, else ("", false). Exported (via the method on
 // the rule set) so tests exercise the tokenizer + table directly over command
