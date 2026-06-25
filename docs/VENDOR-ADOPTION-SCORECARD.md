@@ -141,8 +141,12 @@ The target is **15 credible pilots** after the following work, a 2.1x expansion:
 the [Claude Code managed rollout guide](vendor/claude-code-managed-rollout.md), and
 the [Agent Tool Governance Gateway profile](standards/agent-tool-governance-gateway.md)
 with [conformance fixtures](standards/fixtures/). That moves the artifact-backed
-pilot count from **7 to 15** (2.14x). The remaining P1 evidence gap is live pilot
-data proving the same paths during real Claude Code and Codex sessions.
+pilot count from **7 to 15** (2.14x). The repo also records the live P1 proof:
+[Claude Code through `fak guard`](../experiments/agent-live/claude-code-fak-guard-live-pilot-2026-06-25.json)
+and
+[Codex through the `fak` MCP server](../experiments/agent-live/codex-mcp-fak-live-pilot-2026-06-25.json)
+both show a denied dangerous call followed by useful allowed work. With those captures,
+the current adoption-path count is **17** (2.43x).
 
 Stop after P1 if the goal is 2x. P2 work can improve depth, but it is not needed to
 double the number of credible pilots.
@@ -184,8 +188,8 @@ Do the smallest work that changes adoption probability, in this order:
    mapping if available.
 4. **Done: `docs/standards/agent-tool-governance-gateway.md`.** Vendor-neutral
    profile plus conformance JSON fixtures.
-5. **Record two live pilot artifacts under `experiments/agent-live/`.** One Claude Code,
-   one Codex. Each must show "danger denied, useful task continues."
+5. **Done: `experiments/agent-live/*live-pilot-2026-06-25.json`.** One Claude Code,
+   one Codex. Each shows "danger denied, useful task continues."
 
 ## Non-goals
 
