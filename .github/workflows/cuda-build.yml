@@ -1,0 +1,125 @@
+# cuda-build.yml — the AUTOMATIC, GPU-FREE compile gate for the `-tags cuda` variant.
+#
+# WHY THIS EXISTS: the only other cuda CI is windows-cuda.yml — manual `workflow_dispatch`
+# on a self-hosted GPU runner — so on a normal push NOTHING checks that the CUDA seam still
+# compiles. A peer can break the cgo agreement between cuda_backend.h and cuda.go, or break a
+# kernel in cuda_kernels.cu, and CI stays green until someone runs a manual GPU job. This
+# workflow closes that gap with checks that need NO GPU and NO secrets, so they run on plain
+# GitHub-hosted runners on every CUDA-touching push/PR.
+#
+# THE GPU-FREE BOUNDARY (why this is sound — see the infra review in docs/cuda-dev.md):
+#   - `go vet -tags cuda` type-checks the cgo seam. The header is deliberately TOOLKIT-FREE
+#     (only <stddef.h>/<stdint.h>, __half as void*), so a plain host compiler parses it with
+#     no CUDA toolkit at all. This catches the most common real break (a signature changed in
+#     cuda_backend.h but not in cuda.go) in seconds.
+#   - The nvcc job COMPILES the kernels and LINKS `go build -tags cuda` against the -devel
+#     image's cudart/cublas STUB libs. Nothing links -lcuda and the job NEVER runs the binary,
+#     so no GPU / driver is ever needed — only fcuda_init()/cublasCreate() at RUN time need a
+#     device, and that is the windows-cuda.yml / tools/cuda_acceptance.sh GPU lane, not here.
+#   - The container is the FIRST automatic check of the uint8_t header-hygiene trap that
+#     cuda_backend.h documents but only WSL currently hides (a datacenter toolchain does not
+#     transitively pull <stdint.h>).
+#
+# NOT a required check while paths-filtered (a filtered required check deadlocks branch
+# protection on PRs that touch none of the paths). It gates the people editing CUDA without
+# blocking the PRs that don't.
+name: cuda-build
+
+on:
+  push:
+    paths:
+      - "internal/compute/**"
+      - "internal/model/**"
+      - "tools/cuda_abi_parity.py"
+      - "tools/cuda_acceptance.sh"
+      - ".github/workflows/cuda-build.yml"
+  pull_request:
+    paths:
+      - "internal/compute/**"
+      - "internal/model/**"
+      - "tools/cuda_abi_parity.py"
+      - "tools/cuda_acceptance.sh"
+      - ".github/workflows/cuda-build.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: cuda-build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ---- cheap tier: hosted runner, NO CUDA toolkit, seconds ---------------------------------
+  static:
+    name: ABI parity · pure-Go guard · cgo type-check (-tags cuda, no toolkit)
+    runs-on: ubuntu-latest
+    if: ${{ github.repository == 'anthony-chaudhary/fak' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: false
+
+      # The pure-text ABI cross-check (header <-> kernels <-> cgo binding) — no toolchain at
+      # all, the highest signal-per-millisecond check in the lane.
+      - name: CUDA ABI parity (tools/cuda_abi_parity.py --check)
+        run: python3 tools/cuda_abi_parity.py --check
+
+      # DIRECTION reviewer check 3: the DEFAULT build must stay pure-Go and pull ZERO cgo
+      # files, so the shipped artifact is one pure-Go binary. Today this guard lives only in
+      # the MANUAL windows-cuda.yml job; here it runs automatically.
+      - name: default build stays pure-Go (no cgo leak)
+        run: |
+          go build ./cmd/fak
+          cgo="$(go list -f '{{.CgoFiles}}' ./internal/compute)"
+          if [ "$cgo" != "[]" ]; then echo "default build pulled cgo files: $cgo"; exit 1; fi
+          echo "default build pure-Go: OK"
+
+      # The cgo type-check of the cuda seam — needs a C compiler (ubuntu ships gcc) but NO
+      # CUDA toolkit, because the header is toolkit-free. Building the LIBRARY package does not
+      # link the external cudart/cublas, so this passes GPU-free.
+      - name: cgo type-check the cuda binding (go vet -tags cuda)
+        run: go vet -tags cuda ./internal/compute/ ./internal/model/
+
+  # ---- deep tier: nvcc container, NO GPU, paths-filtered -----------------------------------
+  nvcc:
+    name: nvcc compile kernels · go build -tags cuda (links stub libs, no GPU)
+    runs-on: ubuntu-latest
+    if: ${{ github.repository == 'anthony-chaudhary/fak' }}
+    # Pinned to the 12.6 line so it AGREES with internal/compute/setup_cuda_wsl.sh's pin; a
+    # silent CUDA-minor bump can't change behavior under the gate. -devel ships nvcc + cuBLAS
+    # headers + the cudart/cublas stub libs the cgo link needs (no GPU).
+    container: nvidia/cuda:12.6.2-devel-ubuntu22.04
+    steps:
+      - name: toolchain (the -devel image lacks git/build-essential by default)
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends build-essential git ca-certificates
+
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: false
+
+      # Compile the kernels with build_cuda.sh's EXACT flags (sm_89, the default) so the gate
+      # exercises the real build path. One arch is enough for a compile gate — nvcc is
+      # arch-portable here, and build_portable scores the full sm_80/89/90/100 matrix.
+      - name: nvcc compile cuda_kernels.cu -> libfakcuda.a (sm_89)
+        working-directory: internal/compute
+        run: |
+          nvcc -O3 -std=c++14 -arch=sm_89 -ccbin g++ -Xcompiler -fPIC -c cuda_kernels.cu -o cuda_kernels.o
+          ar rcs libfakcuda.a cuda_kernels.o
+          echo "built libfakcuda.a ($(wc -c < libfakcuda.a) bytes)"
+
+      # Link the -tags cuda variant against the resident archive + the image's cudart/cublas
+      # STUB libs. This LINKS but never RUNS — no device is touched.
+      - name: go build -tags cuda (cgo link, no GPU, no run)
+        env:
+          CGO_ENABLED: "1"
+          CGO_CFLAGS: "-I/usr/local/cuda/include"
+          CGO_LDFLAGS: "-L${{ github.workspace }}/internal/compute -L/usr/local/cuda/lib64"
+        run: go build -tags cuda ./internal/compute/

@@ -75,7 +75,10 @@ func (myBackend) Class() compute.CorrectnessClass { return compute.Approx } // s
 ```
 
 The CPU reference (`cpuref.go`) and the real `cuda` / `metal` / `vulkan` backends already
-ride this seam — read them as your template. The forward loop in `internal/model` calls
+ride this seam — read them as your template. For the **CUDA** backend specifically, the full
+edit→build→prove loop — the no-GPU local gate `make cuda-check`, the on-device build, the
+cosine witnesses, and how to add a kernel — is written up in
+**[`docs/cuda-dev.md`](docs/cuda-dev.md)**. The forward loop in `internal/model` calls
 *whole ops* (`MatMul`, `Attention`, `Argmax`), so a device is free to express its own
 intra-kernel parallelism, async enqueue (`Caps.Async`), fused attention (`Caps.FusedAttn`),
 or a tiled layout — and an older loop that doesn't know your capability falls back to the
