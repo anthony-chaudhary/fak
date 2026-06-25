@@ -28,6 +28,12 @@ func (r *recordingKV) Evict(from, n int) int {
 	return r.inner.Evict(from, n)
 }
 func (r *recordingKV) ModelID() string { return r.modelTag }
+func (r *recordingKV) StageSpan(ctx context.Context, digest string, from, n int) (abi.KVResidency, error) {
+	return r.inner.StageSpan(ctx, digest, from, n)
+}
+func (r *recordingKV) RestoreSpan(ctx context.Context, digest string) (abi.KVResidency, error) {
+	return r.inner.RestoreSpan(ctx, digest)
+}
 
 // TestRegisteredKVBackendDrivesEnforcement proves issue #385's inversion: a
 // Quarantine verdict drives EVICTION on the abi.KVBackend the Context was given, not
@@ -87,5 +93,97 @@ func TestKVBackendFactoryIsRegistered(t *testing.T) {
 	// A value the in-process factory does not own fails closed.
 	if _, ok := abi.KVBackendFor("not a session"); ok {
 		t.Fatalf("abi.KVBackendFor with a non-session value: ok=true, want false (fail-closed)")
+	}
+}
+
+// stubL3 is a PURE remote / disaggregated abi.KVBackend — it fronts NO model.Session,
+// so it proves the KV-MMU enforces against an engine fak does not itself run (#638's
+// acceptance: a remote L3 backend with ZERO concrete-model dependency). It models a
+// tiny cache by position, records every Evict so the bridge's enforcement is
+// witnessed, and tracks a digest->positions residency map for the stage/restore pair.
+type stubL3 struct {
+	positions int
+	evicts    [][2]int
+	staged    map[string]int
+}
+
+func (s *stubL3) Len() int { return s.positions }
+func (s *stubL3) Prefill(ids []int) []float32 {
+	s.positions += len(ids)
+	return make([]float32, 8) // a non-nil, deterministic logits vector
+}
+func (s *stubL3) Evict(from, n int) int {
+	s.evicts = append(s.evicts, [2]int{from, n})
+	if n > s.positions {
+		n = s.positions
+	}
+	s.positions -= n
+	return n
+}
+func (s *stubL3) ModelID() string { return "stub-l3-remote" }
+func (s *stubL3) StageSpan(_ context.Context, digest string, _, n int) (abi.KVResidency, error) {
+	if s.staged == nil {
+		s.staged = map[string]int{}
+	}
+	s.staged[digest] = n
+	return abi.KVResidency{Outcome: abi.KVResidencyOK, Digest: digest, Positions: n, BytesMoved: int64(n) * 64}, nil
+}
+func (s *stubL3) RestoreSpan(_ context.Context, digest string) (abi.KVResidency, error) {
+	if n, ok := s.staged[digest]; ok {
+		return abi.KVResidency{Outcome: abi.KVResidencyOK, Digest: digest, Positions: n}, nil
+	}
+	return abi.KVResidency{Outcome: abi.KVResidencyMiss, Digest: digest, Reason: "not staged"}, nil
+}
+
+// TestRemoteL3BackendEnforcedWithoutModelDependency is #638's headline acceptance: a
+// remote/stub L3 backend, registered via abi.RegisterKVBackend, is enforced by
+// kvmmu.NewBackend against an L3-resident span with NO concrete-model dependency — and
+// its widened residency-transfer pair returns typed outcomes (a restore hit/miss is
+// TOLD, never a silent recompute). We restore the in-process default factory after, so
+// the global registry is left exactly as modelengine's init set it.
+func TestRemoteL3BackendEnforcedWithoutModelDependency(t *testing.T) {
+	ctx := context.Background()
+
+	// (1) The pure remote backend registers through the kernel seam the SAME way the
+	// in-process default does; KVBackendFor builds it with no *model.Session anywhere.
+	abi.RegisterKVBackend(func(any) (abi.KVBackend, bool) { return &stubL3{}, true })
+	defer abi.RegisterKVBackend(model.KVBackendFor) // restore the in-process default
+	kv, ok := abi.KVBackendFor("anything-non-session")
+	if !ok {
+		t.Fatalf("KVBackendFor through the registered remote factory: ok=false, want true")
+	}
+	if kv.ModelID() != "stub-l3-remote" {
+		t.Fatalf("registered remote backend ModelID = %q, want stub-l3-remote", kv.ModelID())
+	}
+
+	// (2) The residency-transfer pair returns TYPED outcomes (not dense logits): stage a
+	// span, restore it (OK), and a restore of an unknown digest is a typed MISS.
+	rem := &stubL3{}
+	if st, err := rem.StageSpan(ctx, "span-A", 0, 4); err != nil || st.Outcome != abi.KVResidencyOK || st.BytesMoved == 0 {
+		t.Fatalf("StageSpan -> %+v err=%v, want OK with bytes moved", st, err)
+	}
+	if got, err := rem.RestoreSpan(ctx, "span-A"); err != nil || got.Outcome != abi.KVResidencyOK || got.Positions != 4 {
+		t.Fatalf("RestoreSpan(staged) -> %+v err=%v, want OK positions=4", got, err)
+	}
+	if miss, _ := rem.RestoreSpan(ctx, "absent"); miss.Outcome != abi.KVResidencyMiss {
+		t.Fatalf("RestoreSpan(absent) -> %+v, want a typed MISS (never a silent recompute)", miss)
+	}
+
+	// (3) The KV-MMU enforces a quarantine eviction against this remote backend through
+	// the pure-abi NewBackendWithGate seam — no concrete *model.Session in the path.
+	c := kvmmu.NewBackendWithGate(rem, ctxmmu.New())
+	prefix := []int{1, 2, 3}
+	poison := []int{10, 11, 12, 13}
+	c.Append("sys", "system", prefix)
+	v, evicted, _ := c.AdmitResult(ctx, "q1", "read_refund_policy", poison, []byte(poisonBody))
+	if v.Kind != abi.VerdictQuarantine || !evicted {
+		t.Fatalf("verdict=%v evicted=%v, want Quarantine+evicted on the remote backend", v.Kind, evicted)
+	}
+	if len(rem.evicts) != 1 || rem.evicts[0] != [2]int{len(prefix), len(poison)} {
+		t.Fatalf("recorded evicts=%v, want exactly the poison span [from=%d,len=%d] on the remote backend",
+			rem.evicts, len(prefix), len(poison))
+	}
+	if c.CacheLen() != len(prefix) {
+		t.Fatalf("remote cache len after quarantine = %d, want %d", c.CacheLen(), len(prefix))
 	}
 }

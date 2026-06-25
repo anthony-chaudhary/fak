@@ -1,10 +1,14 @@
 package abi
 
-import "testing"
+import (
+	"context"
+	"testing"
+)
 
 // fakeKV is a stand-in abi.KVBackend that records the Evict it received, so a test
 // can prove the enforcement path drove THIS registered backend rather than a
-// hardcoded one.
+// hardcoded one. It implements the residency-transfer pair as a trivial off-box stub
+// (stage OK, restore MISS) so it satisfies the widened seam.
 type fakeKV struct {
 	id          string
 	evictFrom   int
@@ -19,6 +23,12 @@ func (b *fakeKV) Evict(from, n int) int {
 	return n
 }
 func (b *fakeKV) ModelID() string { return b.id }
+func (b *fakeKV) StageSpan(_ context.Context, digest string, _, n int) (KVResidency, error) {
+	return KVResidency{Outcome: KVResidencyOK, Digest: digest, Positions: n}, nil
+}
+func (b *fakeKV) RestoreSpan(_ context.Context, digest string) (KVResidency, error) {
+	return KVResidency{Outcome: KVResidencyMiss, Digest: digest}, nil
+}
 
 // TestRegisterKVBackendRoundTrips proves the factory the kernel registered is what
 // KVBackendFor hands back, and that an unrecognized session value fails CLOSED
@@ -78,4 +88,46 @@ func modelIDOf(b KVBackend) string {
 		return "<nil>"
 	}
 	return b.ModelID()
+}
+
+// TestKVResidencyOutcomeString pins the stable log/metric names, and that the zero
+// value renders "unknown" (it must never read as a successful transfer).
+func TestKVResidencyOutcomeString(t *testing.T) {
+	cases := map[KVResidencyOutcome]string{
+		KVResidencyUnknown: "unknown",
+		KVResidencyOK:      "ok",
+		KVResidencyMiss:    "miss",
+		KVResidencyFault:   "fault",
+	}
+	for o, want := range cases {
+		if got := o.String(); got != want {
+			t.Fatalf("KVResidencyOutcome(%d).String() = %q, want %q", o, got, want)
+		}
+	}
+	var zero KVResidencyOutcome // the zero value is Unknown, not OK
+	if zero != KVResidencyUnknown {
+		t.Fatalf("zero value = %v, want KVResidencyUnknown (fail-closed)", zero)
+	}
+}
+
+// TestKVResidencyTransferThroughSeam proves a registered backend answers the widened
+// residency-transfer pair with typed outcomes (not dense logits): the in-process-style
+// stub stages OK and restores MISS, so a remote backend can distinguish them.
+func TestKVResidencyTransferThroughSeam(t *testing.T) {
+	ResetForTest()
+	defer ResetForTest()
+
+	RegisterKVBackend(func(any) (KVBackend, bool) { return &fakeKV{id: "fake"}, true })
+	kv, ok := KVBackendFor(nil)
+	if !ok {
+		t.Fatalf("KVBackendFor: ok=false, want true")
+	}
+	staged, err := kv.StageSpan(context.Background(), "span-A", 0, 4)
+	if err != nil || staged.Outcome != KVResidencyOK || staged.Positions != 4 {
+		t.Fatalf("StageSpan -> %+v err=%v, want OK positions=4", staged, err)
+	}
+	restored, err := kv.RestoreSpan(context.Background(), "span-A")
+	if err != nil || restored.Outcome != KVResidencyMiss {
+		t.Fatalf("RestoreSpan -> %+v err=%v, want a typed MISS (never a silent recompute)", restored, err)
+	}
 }

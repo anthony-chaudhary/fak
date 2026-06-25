@@ -51,6 +51,10 @@ type (
 	KVBackend = internalabi.KVBackend
 	// KVBackendFactory adapts a session-like value into a KVBackend.
 	KVBackendFactory = internalabi.KVBackendFactory
+	// KVResidency is the typed result of a KVBackend residency transfer (off-box L3).
+	KVResidency = internalabi.KVResidency
+	// KVResidencyOutcome is the ok|MISS|FAULT trichotomy a residency transfer returns.
+	KVResidencyOutcome = internalabi.KVResidencyOutcome
 	// WitnessResolver backs the require-witness verdict.
 	WitnessResolver = internalabi.WitnessResolver
 	// SemanticScreen is the local-model-on-the-wire advisory seam.
@@ -196,6 +200,14 @@ const (
 	RefInline = internalabi.RefInline
 	RefBlob   = internalabi.RefBlob
 	RefRegion = internalabi.RefRegion
+)
+
+// KVResidencyOutcome trichotomy for an off-box KV residency transfer.
+const (
+	KVResidencyUnknown = internalabi.KVResidencyUnknown
+	KVResidencyOK      = internalabi.KVResidencyOK
+	KVResidencyMiss    = internalabi.KVResidencyMiss
+	KVResidencyFault   = internalabi.KVResidencyFault
 )
 
 // TaintLabel lattice.

@@ -630,11 +630,35 @@ type PageOutBackend interface {
 // the disaggregated-agent-memory direction — is an additive registration that
 // attaches the SAME way the region/page-out backends do, so the KV-MMU enforces
 // against an engine fak does not itself run with no edit to the kvmmu composer.
+//
+// The residency-transfer pair (StageSpan / RestoreSpan) widens the seam for a span
+// fak does NOT host locally: a remote / disaggregated L3 KV tier. Unlike Prefill —
+// which returns a dense logits vector a network backend cannot serve at line rate —
+// they return a TYPED outcome (ok | MISS | FAULT) addressed by digest, with a ctx so
+// a remote stall is a typed FAULT rather than a hang. The in-process backend
+// implements them as the local synchronous path (the span is already resident), so
+// adding them does not change Prefill / Evict / Len / ModelID behavior for the
+// inkernel engine; they unblock a remote L3 KV backend without shipping its transport.
 type KVBackend interface {
 	Len() int                    // live cached positions
 	Prefill(ids []int) []float32 // prefill a span; return next-token logits
 	Evict(from, n int) int       // evict [from,from+n); return positions removed
 	ModelID() string             // model id for the cachemeta cache key
+
+	// StageSpan offloads the [from,from+n) span to a remote / disaggregated residency
+	// tier, addressing it by digest, and returns a TYPED outcome (ok | MISS | FAULT) —
+	// never dense logits, never a silent recompute. The in-process backend keeps the
+	// span resident locally and returns OK (a no-op, BytesMoved=0); a remote backend
+	// serializes the fak-owned pre-RoPE Kraw rows off-box, so the eviction moat
+	// survives disaggregated. ctx bounds a remote stall: a hang surfaces as a FAULT.
+	StageSpan(ctx context.Context, digest string, from, n int) (KVResidency, error)
+
+	// RestoreSpan re-materializes a previously staged span by digest. OK on a hit,
+	// MISS when the tier no longer holds the span (the caller recomputes — but is
+	// TOLD), FAULT on a transport / store error or a ctx deadline. The in-process
+	// backend hosts no off-box tier, so it returns a typed MISS rather than silently
+	// recomputing.
+	RestoreSpan(ctx context.Context, digest string) (KVResidency, error)
 }
 
 // KVBackendFactory adapts a session-like value (the in-process *model.Session in

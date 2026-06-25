@@ -1,15 +1,23 @@
 package model
 
-import "github.com/anthony-chaudhary/fak/internal/abi"
+import (
+	"context"
+
+	"github.com/anthony-chaudhary/fak/internal/abi"
+)
 
 // kvBackend adapts a *Session onto abi.KVBackend — the seam the KV-MMU
-// (internal/kvmmu) enforces a quarantine verdict through. It exposes EXACTLY the
-// four operations the bridge performs on a session's kernel-owned cache: the live
-// length, a prefill that returns next-token logits, the re-RoPE / renumber span
-// eviction, and the model id used to key the cachemeta entry. Wrapping the session
-// behind this interface is what lets kvmmu enforce without importing the concrete
-// model type — and lets a remote/zero-copy KV backend (the disaggregated direction)
-// substitute itself by re-registering the factory (last-wins), with no kvmmu edit.
+// (internal/kvmmu) enforces a quarantine verdict through. It exposes the four local
+// operations the bridge performs on a session's kernel-owned cache — the live length,
+// a prefill that returns next-token logits, the re-RoPE / renumber span eviction, and
+// the model id used to key the cachemeta entry — plus the residency-transfer pair
+// (StageSpan / RestoreSpan) the widened seam adds for a span hosted off-box. The
+// in-process adapter answers that pair from the local synchronous path: the span is
+// already resident, so StageSpan is a no-op OK and RestoreSpan is a typed MISS (this
+// backend owns no off-box tier). Wrapping the session behind this interface is what
+// lets kvmmu enforce without importing the concrete model type — and lets a
+// remote/zero-copy KV backend (the disaggregated direction) substitute itself by
+// re-registering the factory (last-wins), with no kvmmu edit.
 type kvBackend struct{ s *Session }
 
 // Len reports the session cache's live position count.
@@ -21,6 +29,23 @@ func (b kvBackend) Prefill(ids []int) []float32 { return b.s.Prefill(ids) }
 // Evict removes a [from,from+n) span via the proven re-RoPE / renumber primitive and
 // returns the number of positions removed.
 func (b kvBackend) Evict(from, n int) int { return b.s.Cache.Evict(from, n) }
+
+// StageSpan is the in-process local-synchronous default: the span is already resident
+// in the kernel-owned cache, so "staging" it off-box is a no-op that returns OK with
+// no bytes moved. The digest addresses the span on a remote tier; the in-process
+// backend addresses by position and never faults. A remote / disaggregated KV backend
+// overrides this to serialize the fak-owned pre-RoPE Kraw rows off-box.
+func (b kvBackend) StageSpan(_ context.Context, digest string, _, n int) (abi.KVResidency, error) {
+	return abi.KVResidency{Outcome: abi.KVResidencyOK, Digest: digest, Positions: n}, nil
+}
+
+// RestoreSpan is the in-process local-synchronous default: this backend hosts no
+// separate off-box residency tier, so a restore-by-digest is a TYPED MISS — the
+// caller is told to recompute rather than the backend silently recomputing or
+// hanging. A remote KV backend overrides this to page the span back in from L3.
+func (b kvBackend) RestoreSpan(_ context.Context, digest string) (abi.KVResidency, error) {
+	return abi.KVResidency{Outcome: abi.KVResidencyMiss, Digest: digest, Reason: "no off-box residency tier (in-process backend)"}, nil
+}
 
 // ModelID returns the model id the cachemeta cache key uses: the config ModelType,
 // falling back to the first architecture string, matching the prior in-line logic.
