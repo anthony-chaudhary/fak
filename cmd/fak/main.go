@@ -135,6 +135,8 @@ func main() {
 		cmdGarden(os.Args[2:])
 	case "savings-vector":
 		cmdSavingsVector(os.Args[2:])
+	case "horizon-recovery":
+		cmdHorizonRecovery(os.Args[2:])
 	case "dogfood-issues":
 		cmdDogfoodIssues(os.Args[2:])
 	case "version", "-v", "--version":
