@@ -455,6 +455,124 @@ func TestHealthReportsMockPlanner(t *testing.T) {
 	}
 }
 
+func TestGatewayReplicaBaseURLsRoundRobinProxy(t *testing.T) {
+	abi.ResetForTest()
+	abi.RegisterRegionBackend(inlineBackend{})
+	abi.RegisterEngine("test", echoEngine{})
+	abi.RegisterAdjudicator(0, toolAdj{})
+
+	mkUpstream := func(name string, hits *int) *httptest.Server {
+		return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			(*hits)++
+			if r.URL.Path != "/chat/completions" {
+				t.Errorf("%s path = %q, want /chat/completions", name, r.URL.Path)
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = fmt.Fprintf(w, `{"model":%q,"choices":[{"message":{"role":"assistant","content":%q},"finish_reason":"stop"}],"usage":{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2}}`, name, name)
+		}))
+	}
+	var aHits, bHits int
+	a := mkUpstream("replica-a", &aHits)
+	defer a.Close()
+	b := mkUpstream("replica-b", &bHits)
+	defer b.Close()
+
+	srv, err := New(Config{
+		EngineID:        "test",
+		Model:           "fleet-model",
+		BaseURL:         a.URL,
+		ReplicaBaseURLs: []string{b.URL},
+		Provider:        "openai",
+		VDSO:            true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(srv.Close)
+	ts := httptest.NewServer(srv.Handler())
+	defer ts.Close()
+
+	var health map[string]any
+	getJSON(t, ts.URL+"/healthz", &health)
+	if health["planner"] != "replica" {
+		t.Fatalf(`/healthz planner = %v, want "replica"`, health["planner"])
+	}
+
+	var got []string
+	for i := 0; i < 4; i++ {
+		var resp ChatResponse
+		code := postJSON(t, ts.URL+"/v1/chat/completions", ChatRequest{
+			Model:    "fleet-model",
+			Messages: []agent.Message{{Role: agent.RoleUser, Content: "hi"}},
+		}, &resp)
+		if code != http.StatusOK {
+			t.Fatalf("request %d status = %d, want 200", i, code)
+		}
+		if len(resp.Choices) != 1 {
+			t.Fatalf("request %d choices = %d, want 1", i, len(resp.Choices))
+		}
+		got = append(got, resp.Choices[0].Message.Content)
+	}
+	want := []string{"replica-a", "replica-b", "replica-a", "replica-b"}
+	if strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Fatalf("served replica sequence = %v, want %v", got, want)
+	}
+	if aHits != 2 || bHits != 2 {
+		t.Fatalf("upstream hits = replica-a:%d replica-b:%d, want 2 each", aHits, bHits)
+	}
+}
+
+func TestGatewayReplicaBaseURLValidation(t *testing.T) {
+	abi.ResetForTest()
+	abi.RegisterRegionBackend(inlineBackend{})
+	abi.RegisterEngine("test", echoEngine{})
+	abi.RegisterAdjudicator(0, toolAdj{})
+
+	_, err := New(Config{
+		EngineID:        "test",
+		Model:           "fleet-model",
+		BaseURL:         "http://127.0.0.1:1/v1",
+		ReplicaBaseURLs: []string{" \t "},
+		Provider:        "openai",
+	})
+	if err == nil || !strings.Contains(err.Error(), "replica base URL") {
+		t.Fatalf("New with blank replica base URL error = %v, want replica base URL validation", err)
+	}
+}
+
+func TestGatewayReplicaCacheResetRequiresExplicitControlURL(t *testing.T) {
+	abi.ResetForTest()
+	abi.RegisterRegionBackend(inlineBackend{})
+	abi.RegisterEngine("test", echoEngine{})
+	abi.RegisterAdjudicator(0, toolAdj{})
+
+	_, err := New(Config{
+		EngineID:          "test",
+		Model:             "fleet-model",
+		BaseURL:           "http://127.0.0.1:1/v1",
+		ReplicaBaseURLs:   []string{"http://127.0.0.1:2/v1"},
+		Provider:          "openai",
+		EngineCacheEngine: "sglang",
+	})
+	if err == nil || !strings.Contains(err.Error(), "requires EngineCacheBaseURL") {
+		t.Fatalf("New multi-replica cache reset error = %v, want explicit EngineCacheBaseURL refusal", err)
+	}
+
+	srv, err := New(Config{
+		EngineID:           "test",
+		Model:              "fleet-model",
+		BaseURL:            "http://127.0.0.1:1/v1",
+		ReplicaBaseURLs:    []string{"http://127.0.0.1:2/v1"},
+		Provider:           "openai",
+		EngineCacheEngine:  "sglang",
+		EngineCacheBaseURL: "http://127.0.0.1:3/v1",
+	})
+	if err != nil {
+		t.Fatalf("New with explicit multi-replica cache URL: %v", err)
+	}
+	t.Cleanup(srv.Close)
+}
+
 func TestHTTPAuth(t *testing.T) {
 	abi.ResetForTest()
 	abi.RegisterRegionBackend(inlineBackend{})

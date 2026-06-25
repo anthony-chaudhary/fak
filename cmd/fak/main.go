@@ -268,7 +268,7 @@ func usage() {
                 (the PROCESS-LOCAL TASK MANAGER snapshot: current hardware/runtime
                  sample plus task/step/concept progress and ETA when progress is known)
   fak serve     [--addr 127.0.0.1:8080 | --stdio]
-                [--provider openai|anthropic|gemini|xai --base-url URL --model M --api-key-env VAR]
+                [--provider openai|anthropic|gemini|xai --base-url URL [--replica-base-url URL ...] --model M --api-key-env VAR]
                 [--engine inkernel] [--gguf FILE] [--policy FILE] [--policy-check] [--require-key-env VAR] [--vdso=true]
                 [--session-id ID --context-budget-tokens N [--reset-on-budget]]
                 [--invalidation global|namespace|resource]

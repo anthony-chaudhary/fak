@@ -110,6 +110,87 @@ func TestChatProxyStreamsUpstreamContentLive(t *testing.T) {
 	}
 }
 
+func TestChatProxyStreamUsesReplicaRouter(t *testing.T) {
+	abi.ResetForTest()
+	abi.RegisterRegionBackend(inlineBackend{})
+	abi.RegisterEngine("test", echoEngine{})
+	abi.RegisterAdjudicator(0, toolAdj{})
+
+	mkUpstream := func(name string, hits *int) *httptest.Server {
+		return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			(*hits)++
+			var req struct {
+				Stream bool `json:"stream"`
+			}
+			raw, _ := io.ReadAll(r.Body)
+			_ = json.Unmarshal(raw, &req)
+			if !req.Stream {
+				t.Errorf("%s was not asked to stream: %s", name, raw)
+			}
+			w.Header().Set("Content-Type", "text/event-stream")
+			w.WriteHeader(http.StatusOK)
+			_, _ = io.WriteString(w,
+				`data: {"model":"`+name+`","choices":[{"delta":{"role":"assistant"},"finish_reason":null}]}`+"\n\n"+
+					`data: {"choices":[{"delta":{"content":"`+name+`"},"finish_reason":null}]}`+"\n\n"+
+					`data: {"choices":[{"delta":{},"finish_reason":"stop"}],"usage":{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2}}`+"\n\n"+
+					"data: [DONE]\n\n")
+		}))
+	}
+	var aHits, bHits int
+	a := mkUpstream("stream-a", &aHits)
+	defer a.Close()
+	b := mkUpstream("stream-b", &bHits)
+	defer b.Close()
+
+	srv, err := New(Config{
+		EngineID:        "test",
+		Model:           "stream-fleet",
+		BaseURL:         a.URL + "/compat",
+		ReplicaBaseURLs: []string{b.URL + "/compat"},
+		Provider:        "openai-compatible",
+		VDSO:            true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(srv.Close)
+	ts := httptest.NewServer(srv.Handler())
+	defer ts.Close()
+
+	var got []string
+	for i := 0; i < 2; i++ {
+		reqBody, _ := json.Marshal(map[string]any{
+			"model":    "stream-fleet",
+			"messages": []map[string]string{{"role": "user", "content": "hello"}},
+			"stream":   true,
+		})
+		httpResp, err := http.Post(ts.URL+"/v1/chat/completions", "application/json", bytes.NewReader(reqBody))
+		if err != nil {
+			t.Fatal(err)
+		}
+		respRaw, _ := io.ReadAll(httpResp.Body)
+		_ = httpResp.Body.Close()
+		if httpResp.StatusCode != http.StatusOK {
+			t.Fatalf("request %d status = %d, want 200: %s", i, httpResp.StatusCode, respRaw)
+		}
+		chunks, sawDone := parseSSEChunks(t, respRaw)
+		if !sawDone {
+			t.Fatalf("request %d stream missing [DONE]: %s", i, respRaw)
+		}
+		var content strings.Builder
+		for _, c := range chunks {
+			content.WriteString(c.Choices[0].Delta.Content)
+		}
+		got = append(got, content.String())
+	}
+	if want := []string{"stream-a", "stream-b"}; strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Fatalf("stream replica sequence = %v, want %v", got, want)
+	}
+	if aHits != 1 || bHits != 1 {
+		t.Fatalf("stream upstream hits = a:%d b:%d, want one each", aHits, bHits)
+	}
+}
+
 // TestChatProxyStreamFallsBackWhenPlannerCannotStream proves the gate's false branch:
 // a planner that cannot stream (the offline mock) still serves a stream=true request
 // via the buffered+synthesized path — nothing was written before the fall-through.

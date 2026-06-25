@@ -25,6 +25,33 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/tokenizer"
 )
 
+type repeatedStringFlag []string
+
+func (f *repeatedStringFlag) String() string {
+	if f == nil {
+		return ""
+	}
+	return strings.Join(*f, ",")
+}
+
+func (f *repeatedStringFlag) Set(value string) error {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return errors.New("value must be non-empty")
+	}
+	*f = append(*f, value)
+	return nil
+}
+
+func (f *repeatedStringFlag) Values() []string {
+	if f == nil || len(*f) == 0 {
+		return nil
+	}
+	out := make([]string, len(*f))
+	copy(out, *f)
+	return out
+}
+
 func cmdServe(argv []string) {
 	// t0 anchors the boot timeline exposed as fak_gateway_time_to_ready_seconds; it
 	// must be the FIRST statement so flag parse + policy + weight load are accounted.
@@ -34,6 +61,8 @@ func cmdServe(argv []string) {
 	stdio := fs.Bool("stdio", false, "serve MCP over stdin/stdout (newline-delimited JSON-RPC) instead of HTTP")
 	provider := fs.String("provider", "openai", "upstream provider transcript wire: openai, anthropic, gemini, or xai")
 	baseURL := fs.String("base-url", "", "upstream provider base URL for the /v1/chat/completions proxy (empty = offline mock planner)")
+	var replicaBaseURLs repeatedStringFlag
+	fs.Var(&replicaBaseURLs, "replica-base-url", "additional upstream provider base URL for a static round-robin replica fleet; repeat for N replicas. If --base-url is set, it is replica 1.")
 	model := fs.String("model", "mock", "model id (advertised by /v1/models; used for the upstream call)")
 	apiKeyEnv := fs.String("api-key-env", "", "env var holding the upstream API key (proxy mode)")
 	engineCacheEngine := fs.String("engine-cache-engine", "", "self-hosted upstream cache reset engine for quarantined provider-bound tool results: sglang|vllm (empty disables)")
@@ -192,6 +221,7 @@ func cmdServe(argv []string) {
 		EngineID:                    *engineID,
 		Model:                       *model,
 		BaseURL:                     *baseURL,
+		ReplicaBaseURLs:             replicaBaseURLs.Values(),
 		Provider:                    *provider,
 		APIKey:                      apiKey,
 		EngineCacheEngine:           *engineCacheEngine,

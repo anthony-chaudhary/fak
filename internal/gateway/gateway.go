@@ -65,6 +65,11 @@ type Config struct {
 	// that provider endpoint. Empty => the deterministic offline mock planner
 	// (CI / drop-in testing).
 	BaseURL string
+	// ReplicaBaseURLs adds static upstream replicas to the live proxy. When BaseURL
+	// plus ReplicaBaseURLs names two or more endpoints, New wraps the per-endpoint
+	// HTTP planners in a ReplicaRouter and dispatches turns round-robin. Empty keeps
+	// the historical single-upstream behavior.
+	ReplicaBaseURLs []string
 	// Provider selects the upstream transcript wire when BaseURL is set
 	// (openai, anthropic, gemini, xai). Empty keeps the OpenAI-compatible default.
 	Provider string
@@ -400,8 +405,8 @@ type Server struct {
 	modelLoad   *ModelLoadProfile
 
 	// planner generates the assistant turn for the /v1/chat/completions proxy. A
-	// live HTTPPlanner when BaseURL is set, else the offline MockPlanner. Settable
-	// in-package for tests.
+	// live HTTPPlanner/ReplicaRouter when BaseURL/ReplicaBaseURLs are set, else the
+	// offline MockPlanner. Settable in-package for tests.
 	planner     agent.Planner
 	engineCache *enginecache.Client
 
@@ -493,15 +498,19 @@ func New(cfg Config) (*Server, error) {
 		startup.phase(ph.Name, ph.Dur)
 	}
 
+	proxyURLs, err := proxyBaseURLs(cfg)
+	if err != nil {
+		return nil, err
+	}
+
 	var planner agent.Planner
 	t := time.Now()
 	switch {
-	case cfg.BaseURL != "":
-		p, err := agent.NewProviderHTTPPlanner(cfg.Provider, cfg.BaseURL, model, cfg.APIKey)
+	case len(proxyURLs) != 0:
+		planner, err = newProxyPlanner(cfg, model, proxyURLs)
 		if err != nil {
 			return nil, err
 		}
-		planner = p
 	case cfg.InKernelModel != nil && cfg.Tokenizer != nil:
 		// Serve the model fused into the kernel as the chat backend on BOTH
 		// /v1/chat/completions and /v1/messages (they share s.planner.Complete):
@@ -607,7 +616,16 @@ func newEngineCacheClient(cfg Config) (*enginecache.Client, error) {
 		return nil, errors.New("gateway: engine cache reset requires EngineCacheEngine (sglang|vllm)")
 	}
 	if baseURL == "" {
-		baseURL = strings.TrimSpace(cfg.BaseURL)
+		urls, err := proxyBaseURLs(cfg)
+		if err != nil {
+			return nil, err
+		}
+		if len(urls) > 1 {
+			return nil, errors.New("gateway: engine cache reset with replica base URLs requires EngineCacheBaseURL")
+		}
+		if len(urls) == 1 {
+			baseURL = urls[0]
+		}
 	}
 	if baseURL == "" {
 		return nil, errors.New("gateway: engine cache reset requires EngineCacheBaseURL or BaseURL")
@@ -629,6 +647,39 @@ func newEngineCacheClient(cfg Config) (*enginecache.Client, error) {
 		IdleTimeout:   cfg.EngineCacheIdleTimeout,
 		RequiredScope: requiredScope,
 	}, nil
+}
+
+func proxyBaseURLs(cfg Config) ([]string, error) {
+	urls := make([]string, 0, 1+len(cfg.ReplicaBaseURLs))
+	if base := strings.TrimSpace(cfg.BaseURL); base != "" {
+		urls = append(urls, base)
+	}
+	for i, base := range cfg.ReplicaBaseURLs {
+		base = strings.TrimSpace(base)
+		if base == "" {
+			return nil, fmt.Errorf("gateway: replica base URL %d is empty", i+1)
+		}
+		urls = append(urls, base)
+	}
+	return urls, nil
+}
+
+func newProxyPlanner(cfg Config, model string, baseURLs []string) (agent.Planner, error) {
+	if len(baseURLs) == 1 {
+		return agent.NewProviderHTTPPlanner(cfg.Provider, baseURLs[0], model, cfg.APIKey)
+	}
+	replicas := make([]PlannerReplica, 0, len(baseURLs))
+	for i, base := range baseURLs {
+		p, err := agent.NewProviderHTTPPlanner(cfg.Provider, base, model, cfg.APIKey)
+		if err != nil {
+			return nil, err
+		}
+		replicas = append(replicas, PlannerReplica{
+			Name:    fmt.Sprintf("replica-%d", i+1),
+			Planner: p,
+		})
+	}
+	return NewReplicaRouter(model, replicas)
 }
 
 // MarkReady stamps the instant the gateway became able to serve requests, closing
@@ -778,7 +829,8 @@ func (s *Server) completeServed(ctx context.Context, turn servedSessionTurn, mes
 //
 //   - "mock"     the scripted offline fallback (no --base-url, no --gguf) — the
 //     same condition New warns about loudly at boot.
-//   - "proxy"    a live upstream provider (fak serve --base-url).
+//   - "proxy"    one live upstream provider (fak serve --base-url).
+//   - "replica"  a static round-robin live upstream fleet.
 //   - "inkernel" the model fused into the kernel (fak serve --gguf).
 //
 // A nil or unrecognized planner reports "unknown" rather than masquerading as a
@@ -789,6 +841,8 @@ func plannerKind(p agent.Planner) string {
 		return "mock"
 	case *agent.HTTPPlanner:
 		return "proxy"
+	case *ReplicaRouter:
+		return "replica"
 	case *agent.InKernelPlanner:
 		return "inkernel"
 	default:
