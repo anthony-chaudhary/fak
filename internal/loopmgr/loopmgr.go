@@ -200,9 +200,11 @@ func Summarize(events []Event, now time.Time) Status {
 		case EventAdmit:
 			if ev.Status == StatusRefused {
 				loop.Refused++
+				loop.ConsecutiveRefusals++
 				loop.State = string(StatusRefused)
 			} else {
 				loop.Admitted++
+				loop.ConsecutiveRefusals = 0
 				if loop.State == "" {
 					loop.State = string(StatusAdmitted)
 				}
@@ -258,22 +260,23 @@ type Status struct {
 }
 
 type LoopSnapshot struct {
-	LoopID             string       `json:"loop_id"`
-	State              string       `json:"state,omitempty"`
-	LastSeq            uint64       `json:"last_seq"`
-	LastEventUnixNano  int64        `json:"last_event_unix_nano,omitempty"`
-	LastKind           EventKind    `json:"last_kind,omitempty"`
-	CurrentRunID       string       `json:"current_run_id,omitempty"`
-	Fires              uint64       `json:"fires"`
-	Admitted           uint64       `json:"admitted"`
-	Refused            uint64       `json:"refused"`
-	Started            uint64       `json:"started"`
-	Ended              uint64       `json:"ended"`
-	Witnessed          uint64       `json:"witnessed"`
-	WitnessRefused     uint64       `json:"witness_refused"`
-	WitnessUnavailable uint64       `json:"witness_unavailable"`
-	Notifications      uint64       `json:"notifications"`
-	LastRun            *RunSnapshot `json:"last_run,omitempty"`
+	LoopID              string       `json:"loop_id"`
+	State               string       `json:"state,omitempty"`
+	LastSeq             uint64       `json:"last_seq"`
+	LastEventUnixNano   int64        `json:"last_event_unix_nano,omitempty"`
+	LastKind            EventKind    `json:"last_kind,omitempty"`
+	CurrentRunID        string       `json:"current_run_id,omitempty"`
+	Fires               uint64       `json:"fires"`
+	Admitted            uint64       `json:"admitted"`
+	Refused             uint64       `json:"refused"`
+	ConsecutiveRefusals uint64       `json:"consecutive_refusals"`
+	Started             uint64       `json:"started"`
+	Ended               uint64       `json:"ended"`
+	Witnessed           uint64       `json:"witnessed"`
+	WitnessRefused      uint64       `json:"witness_refused"`
+	WitnessUnavailable  uint64       `json:"witness_unavailable"`
+	Notifications       uint64       `json:"notifications"`
+	LastRun             *RunSnapshot `json:"last_run,omitempty"`
 }
 
 type RunSnapshot struct {
