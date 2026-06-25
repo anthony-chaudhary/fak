@@ -125,4 +125,5 @@ import (
 	// rules run out of band.
 	_ "github.com/anthony-chaudhary/fak/internal/headroom"
 	_ "github.com/anthony-chaudhary/fak/internal/toollint"
+	_ "github.com/anthony-chaudhary/fak/internal/a2achan"
 )

@@ -78,6 +78,8 @@ var tier = map[string]int{
 	"simhash":      1, // reference vector-similarity primitive (embed/cosine/top-k); the observability layer's near-duplicate / outlier-query substrate. Deterministic, stdlib-only, imports nothing internal.
 	"trajectory":   3, // trajectory data plane: folds the abi event stream into per-trace Turn rows + JSONL export; an abi.Emitter that optionally stamps a simhash query embedding. Imports abi+simhash.
 	"trajhook":     3, // pluggable trajectory scorer/tap seam (the "trivial skill does gardening" enabler): app code registers Scorers over Turn rows without a core edit. Imports trajectory+simhash.
+	"a2achan": 2, // in-kernel agent-to-agent message channel: a process-global, capability-floored, Ref-backed mailbox (Send/Recv adjudicated by a registered a2aGate + a2aIngress; Taint/Scope enforced). Mechanism: imports only abi, off the hot path.
+	"snapshot": 3, // uniform DUMP/RESTORE seam over any primitive (turn/tool/session/fleet/rsi): a sha256-integrity envelope (Marshal/Parse over any body) + a ladder registry + typed codecs for trace(trajectory) and fleet(session.Table). Imports session(1)+trajectory(3); off the hot path.
 	// new-leaf:tier — `python tools/new_leaf.py <name> --tier <name>` inserts the
 	// declaration for a generated leaf immediately ABOVE this line. Keep the marker last.
 }
