@@ -9,8 +9,11 @@ package agent
 // half of docs/notes/SESSION-CONTROL-STATE-AS-FIRST-CLASS-2026-06-24.md.
 
 import (
+	"context"
 	"time"
 
+	"github.com/anthony-chaudhary/fak/internal/a2achan"
+	"github.com/anthony-chaudhary/fak/internal/abi"
 	"github.com/anthony-chaudhary/fak/internal/session"
 )
 
@@ -78,6 +81,45 @@ func (c runConfig) gateTurn(ctx contextLike) (maxTokens int, proceed bool, reaso
 		}
 	}
 	return v.MaxTokens, true, ""
+}
+
+// drainSteer non-blocking-receives any operator steer enqueued for this run on the
+// a2achan Session-locale bus and returns its text to splice into the next turn's
+// input. It is the CONSUMER half of the steer path (#850): the producer (the serve
+// process's steerSession, cmd/fak/main.go) does a2achan.Send onto {Session, trace}
+// when POST /session/{id}/steer fires; this drains it at the turn boundary so a
+// RUNNING session actually picks the steer up, not just enqueues it.
+//
+// The channel is keyed by the run's trace id (the same id WithSessionTable wires),
+// so a run with no trace (c.trace == "") has no mailbox and drains nothing. TryRecv
+// is non-blocking: an empty mailbox returns ok=false (VerdictDefer) and we splice
+// nothing — zero cost on the common no-steer path. The operator body is Shared +
+// Tainted (a cross-principal widening, screened on ingress), so a VerdictQuarantine
+// is DROPPED, never spliced: only an explicitly-allowed body becomes turn input.
+// Multiple queued steers coalesce (drained in order) into one appended block.
+func (c runConfig) drainSteer() string {
+	if c.trace == "" {
+		return ""
+	}
+	key := a2achan.ChannelKey{Locale: a2achan.Session, ID: c.trace}
+	var out string
+	for {
+		msg, v, ok := a2achan.TryRecv(context.Background(), key, a2achan.CapA2ARecv)
+		if !ok {
+			break // empty mailbox (VerdictDefer) — nothing more to splice
+		}
+		if v.Kind != abi.VerdictAllow {
+			continue // quarantined/screened operator input — drop, keep draining
+		}
+		if len(msg.Body.Inline) == 0 {
+			continue
+		}
+		if out != "" {
+			out += "\n"
+		}
+		out += string(msg.Body.Inline)
+	}
+	return out
 }
 
 // debitTurn reports a completed turn's usage to the session table so the output and
