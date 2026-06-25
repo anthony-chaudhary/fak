@@ -6714,6 +6714,7 @@ scaling laws, the explainers) live one level up in [`docs/`](https://github.com/
 |---|---|
 | Fast path to a running gateway | [server-quickstart.md](https://github.com/anthony-chaudhary/fak/blob/main/docs/fak/server-quickstart.md) |
 | Every flag and env var | [server-config.md](https://github.com/anthony-chaudhary/fak/blob/main/docs/fak/server-config.md) |
+| Batching multi-request inference (dynamic batch size, padding) | [batching-config.md](https://github.com/anthony-chaudhary/fak/blob/main/docs/fak/batching-config.md) |
 | Every endpoint, request, and response | [api-reference.md](https://github.com/anthony-chaudhary/fak/blob/main/docs/fak/api-reference.md) |
 | When something breaks | [server-troubleshooting.md](https://github.com/anthony-chaudhary/fak/blob/main/docs/fak/server-troubleshooting.md) |
 | Metrics, logs, and traces | [observability.md](https://github.com/anthony-chaudhary/fak/blob/main/docs/fak/observability.md) |
