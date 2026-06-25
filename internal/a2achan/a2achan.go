@@ -127,7 +127,7 @@ var Default = NewBus()
 // (the "send right"); without CapA2ASend negotiated, Send fails closed. Send
 // never blocks.
 func (b *Bus) Send(ctx context.Context, from string, to ChannelKey, body abi.Ref, caps ...abi.Capability) abi.Verdict {
-	v := gateSend(from, to, body, caps)
+	v := gateSend(from, to, body, caps, true) // point-to-point: the self-channel exception applies
 	if v.Kind != abi.VerdictAllow {
 		atomic.AddInt64(&b.denied, 1)
 		return v

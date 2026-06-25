@@ -185,7 +185,7 @@ func TestRegisteredFloorInKernelChain(t *testing.T) {
 	body := Shared([]byte("m"))
 	to := ChannelKey{Locale: InKernel, ID: "q"}
 	caps := []abi.Capability{CapA2ASend}
-	direct := gateSend("alpha", to, body, caps)
+	direct := gateSend("alpha", to, body, caps, true)
 	viaCall := a2aGate{}.Adjudicate(bg(), sendCall("alpha", to, body, caps))
 	if direct.Kind != viaCall.Kind {
 		t.Fatalf("registered gate (%v) disagrees with the Bus's direct gate (%v)", viaCall.Kind, direct.Kind)
@@ -235,5 +235,24 @@ func TestPubSubFanout(t *testing.T) {
 	// An uncapped publish is refused (same floor as Send).
 	if uv, _ := b.Publish(bg(), "pub", topic, Shared([]byte("x"))); uv.Kind != abi.VerdictDeny {
 		t.Fatalf("uncapped publish: want Deny, got %v", uv.Kind)
+	}
+}
+
+// TestPubSubPrivateLeakRefused: a publisher cannot smuggle a ScopeAgent (private)
+// body to a topic's subscribers by spoofing from == topic.ID. Publishing is
+// one-to-many sharing — the subscriber inboxes are NOT the topic, so the
+// point-to-point self-channel exception must never apply, and the private body
+// must be refused with nothing fanned out and the subscriber inbox left empty.
+func TestPubSubPrivateLeakRefused(t *testing.T) {
+	b := NewBus()
+	topic := ChannelKey{Locale: InKernel, ID: "alice"}
+	inbox, _ := b.Subscribe(topic)
+	v, n := b.Publish(bg(), "alice", topic, Private([]byte("secret")), CapA2ASend)
+	if v.Kind != abi.VerdictDeny || abi.ReasonName(v.Reason) != "TRUST_VIOLATION" || n != 0 {
+		t.Fatalf("spoofed (from==topic.ID) private publish: want Deny/TRUST_VIOLATION/0, got %v/%s/%d",
+			v.Kind, abi.ReasonName(v.Reason), n)
+	}
+	if b.Len(inbox) != 0 {
+		t.Fatalf("private body leaked to a subscriber inbox (len=%d)", b.Len(inbox))
 	}
 }

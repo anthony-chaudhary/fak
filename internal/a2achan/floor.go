@@ -59,19 +59,29 @@ func hasCap(caps []abi.Capability, want abi.Capability) bool {
 //   - no CapA2ASend advertised (or it is not a registered/negotiable cap) → deny
 //     with ReasonDefaultDeny (no affirmative send-right);
 //   - a TaintQuarantined body → deny with ReasonTrustViolation (poison never sent);
-//   - a ScopeAgent body to a channel that is not the sender's OWN (To.ID != From)
-//     → deny with ReasonTrustViolation (a private payload cannot cross agents; the
-//     sender must widen Scope to share).
+//   - a ScopeAgent body to a non-self destination → deny with ReasonTrustViolation
+//     (a private payload cannot cross agents; the sender must widen Scope to share).
+//
+// allowSelfChannel gates the ONE exception, and it is true ONLY for point-to-point
+// Send, where the destination IS the named channel: a ScopeAgent body may then go
+// to the sender's OWN channel (To.ID == From) — a session/window self-handoff that
+// never leaves the agent. For one-to-many Publish it is FALSE: a topic is NOT a
+// destination (the real recipients are arbitrary subscriber inboxes keyed off the
+// topic id), so the self-channel premise is structurally invalid there and a
+// private body is never publishable. Note From is the caller-ASSERTED sender id;
+// the self-channel exception trusts it, which only lets a sender route its OWN
+// private data — the unspoofable guarantees are the cap floor + the Quarantine
+// screen, and (for Publish) the unconditional ScopeAgent refusal.
 //
 // Otherwise VerdictAllow.
-func gateSend(from string, to ChannelKey, body abi.Ref, caps []abi.Capability) abi.Verdict {
+func gateSend(from string, to ChannelKey, body abi.Ref, caps []abi.Capability, allowSelfChannel bool) abi.Verdict {
 	if !hasCap(caps, CapA2ASend) || !abi.Supported(CapA2ASend) {
 		return abi.Verdict{Kind: abi.VerdictDeny, Reason: abi.ReasonDefaultDeny, By: "a2achan/gate"}
 	}
 	if body.Taint == abi.TaintQuarantined {
 		return abi.Verdict{Kind: abi.VerdictDeny, Reason: abi.ReasonTrustViolation, By: "a2achan/gate"}
 	}
-	selfChannel := from != "" && to.ID == from
+	selfChannel := allowSelfChannel && from != "" && to.ID == from
 	if body.Scope == abi.ScopeAgent && !selfChannel {
 		return abi.Verdict{Kind: abi.VerdictDeny, Reason: abi.ReasonTrustViolation, By: "a2achan/gate"}
 	}
@@ -125,7 +135,7 @@ func (a2aGate) Adjudicate(_ context.Context, c *abi.ToolCall) abi.Verdict {
 			from = c.Meta[metaFrom]
 			toID = c.Meta[metaToID]
 		}
-		return gateSend(from, ChannelKey{ID: toID}, c.Args, c.Caps)
+		return gateSend(from, ChannelKey{ID: toID}, c.Args, c.Caps, true)
 	case ToolRecv:
 		return gateRecv(c.Caps)
 	}

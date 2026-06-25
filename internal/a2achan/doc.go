@@ -1,7 +1,11 @@
 // Package a2achan is the in-kernel agent-to-agent message channel: a generic,
 // capability-floored, Ref-backed mailbox that lets one agent hand a value to
-// ANOTHER agent — and the SAME default-deny floor that gates a tool call gates
-// the message.
+// ANOTHER agent. A message is not a memcpy; it is an adjudicated transfer — Send
+// and Recv apply the same gateSend/gateRecv logic a REGISTERED kernel adjudicator
+// (a2aGate) folds for a synthetic a2a.send/a2a.recv tool call, so a message gets
+// the SAME default-deny DECISION a tool call would. (The floor is registered into
+// the kernel's chains; the in-process path applies that decision directly rather
+// than routing through Submit/Reap today — see "Honest scope" below.)
 //
 // # Why it exists (the gap it fills)
 //

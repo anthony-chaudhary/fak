@@ -20,7 +20,9 @@ package main
 // operator (or a second controller) cannot clobber a newer change — a lost race
 // returns a clear 409 to re-read and retry. A partial budget/pace update reads the
 // current state first and preserves the axes you did not name, fencing that
-// read-modify-write with the observed rev so it stays atomic.
+// read-modify-write with the observed rev once the session has prior state (rev>=1);
+// a fresh, never-written session (rev 0) takes the plain write — it is at its defaults,
+// so there is no newer change to clobber.
 //
 // Connection: --addr (default $FAK_ADDR or http://127.0.0.1:8080) and --key (default
 // $FAK_KEY) — a loopback gateway with no --require-key needs neither.
@@ -34,8 +36,10 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/gateway"
@@ -46,6 +50,11 @@ import (
 // (both of which are meaningful: 0 = planner default for pace, -1 = unbounded for
 // budget). It is deliberately an absurd value no operator would type.
 const sessionFlagUnset = -1 << 62
+
+// maxSessionRespBytes caps a gateway JSON response the CLI will read into memory —
+// generous for a SessionListResponse over a large fleet, but bounded so a misbehaving
+// gateway cannot stream an unbounded body into the operator's process.
+const maxSessionRespBytes = 4 << 20
 
 // cmdSession is the `fak session` entry point. It delegates to the testable core and
 // maps its exit code to the process exit code, mirroring cmdRoute.
@@ -100,8 +109,15 @@ func runSession(stdout, stderr io.Writer, argv []string) int {
 		}
 		return 2
 	}
+	// flag.Parse stops at the first non-flag token, so a stray positional (or a flag
+	// placed BEFORE the id) would otherwise be silently dropped or misread as the id.
+	// Reject leftovers loudly instead: the id (and any value) come first, then flags.
+	if fs.NArg() > 0 {
+		fmt.Fprintf(stderr, "fak session %s: unexpected argument %q (the id/value come first, then flags)\n", verb, fs.Arg(0))
+		return 2
+	}
 
-	c := &sessionClient{base: *addr, key: *key, hc: &http.Client{Timeout: 15 * time.Second}}
+	c := &sessionClient{base: strings.TrimRight(*addr, "/"), key: *key, hc: &http.Client{Timeout: 15 * time.Second}}
 
 	switch verb {
 	case "ls":
@@ -149,7 +165,9 @@ func (c *sessionClient) runVerb(stdout, stderr io.Writer, asJSON bool, id, state
 // budgetVerb re-sets the work allotment. Budget is one value (both axes), so a
 // partial update (only --turns, say) reads the current state and preserves the other
 // axis, fencing the read-modify-write with the observed rev (unless the operator
-// passed an explicit --if-rev) so a concurrent change is caught, not clobbered.
+// passed an explicit --if-rev) so a concurrent change is caught, not clobbered. The
+// fence is real once the session has prior state (rev>=1); a rev-0 (never-written)
+// session takes the plain write, since its defaults have nothing newer to clobber.
 func (c *sessionClient) budgetVerb(stdout, stderr io.Writer, asJSON bool, id string, turns, tokens int, ifRev uint64) int {
 	if turns == sessionFlagUnset && tokens == sessionFlagUnset {
 		fmt.Fprintln(stderr, "fak session budget: set at least one of --turns / --tokens")
@@ -279,8 +297,8 @@ func emitSessionJSON(stdout, stderr io.Writer, v any) int {
 }
 
 // formatSessionState renders one drive record as a compact, fixed-shape line so a
-// column scan reads cleanly. Unbounded (-1) budget axes render as "∞"; a reason, when
-// present, is appended.
+// column scan reads cleanly. Unbounded (-1) budget axes render as "inf"; a reason,
+// when present, is appended.
 func formatSessionState(st gateway.SessionState) string {
 	line := fmt.Sprintf("%-24s %-9s budget(turns=%s tokens=%s) pace(max=%d gap=%dms) prio=%d rev=%d",
 		st.TraceID, st.Run,
@@ -314,7 +332,7 @@ type sessionClient struct {
 // observe reads one session's drive state (GET /v1/fak/session/{id}).
 func (c *sessionClient) observe(id string) (gateway.SessionState, error) {
 	var st gateway.SessionState
-	err := c.req(http.MethodGet, "/v1/fak/session/"+id, nil, &st)
+	err := c.req(http.MethodGet, "/v1/fak/session/"+url.PathEscape(id), nil, &st)
 	return st, err
 }
 
@@ -329,7 +347,7 @@ func (c *sessionClient) list() (gateway.SessionListResponse, error) {
 // drive state.
 func (c *sessionClient) control(id, verb string, body gateway.SessionControlRequest) (gateway.SessionState, error) {
 	var st gateway.SessionState
-	err := c.req(http.MethodPost, "/v1/fak/session/"+id+"/"+verb, body, &st)
+	err := c.req(http.MethodPost, "/v1/fak/session/"+url.PathEscape(id)+"/"+verb, body, &st)
 	return st, err
 }
 
@@ -367,7 +385,10 @@ func (c *sessionClient) req(method, path string, body any, out any) error {
 	if out == nil {
 		return nil
 	}
-	if err := json.NewDecoder(resp.Body).Decode(out); err != nil {
+	// Bound the success body too (the error path is already capped): a misbehaving or
+	// compromised gateway must not stream an unbounded 200 into the operator's memory.
+	// maxSessionRespBytes sits well above a SessionListResponse for a large fleet.
+	if err := json.NewDecoder(io.LimitReader(resp.Body, maxSessionRespBytes)).Decode(out); err != nil {
 		return fmt.Errorf("decode response: %w", err)
 	}
 	return nil
@@ -405,7 +426,9 @@ func readErrMessage(r io.Reader) string {
 }
 
 // defaultSessionAddr is the gateway base URL the CLI talks to: $FAK_ADDR if set, else
-// the loopback dogfood default. A trailing slash is trimmed so path joins are clean.
+// the loopback dogfood default. Any trailing slash is trimmed where the client is
+// built (strings.TrimRight, covering both this default and an explicit --addr), so
+// path joins stay clean even behind a strict (non-Go) reverse proxy.
 func defaultSessionAddr() string {
 	if a := os.Getenv("FAK_ADDR"); a != "" {
 		return a

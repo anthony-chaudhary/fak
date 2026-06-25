@@ -53,7 +53,11 @@ func (b *Bus) Subscribe(topic ChannelKey) (inbox ChannelKey, cancel func()) {
 // message was fanned out to (0 when the topic has no subscribers — adjudicated but
 // undelivered). Like Send, a denied Publish enqueues nothing.
 func (b *Bus) Publish(ctx context.Context, from string, topic ChannelKey, body abi.Ref, caps ...abi.Capability) (abi.Verdict, int) {
-	v := gateSend(from, topic, body, caps)
+	// allowSelfChannel=false: a topic is not a destination — the real recipients
+	// are the subscriber inboxes (topic.ID#subN), owned by arbitrary other agents —
+	// so the point-to-point self-channel exception is meaningless and a ScopeAgent
+	// (private) body is NEVER publishable (a from == topic.ID spoof cannot open it).
+	v := gateSend(from, topic, body, caps, false)
 	if v.Kind != abi.VerdictAllow {
 		atomic.AddInt64(&b.denied, 1)
 		return v, 0

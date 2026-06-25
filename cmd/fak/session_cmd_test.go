@@ -223,3 +223,34 @@ func TestSessionCLIUsageErrors(t *testing.T) {
 		t.Fatalf("empty-budget exit = %d, want 2", code)
 	}
 }
+
+func TestSessionCLIRejectsLeftoverArgs(t *testing.T) {
+	g := &stubGateway{curRev: 1}
+	ts := httptest.NewServer(g.handler())
+	defer ts.Close()
+
+	// A stray extra positional ⇒ exit 2 (not a silent drop).
+	if _, _, code := runSessionAt(t, ts.URL, "priority", "sess-1", "7", "8"); code != 2 {
+		t.Fatalf("extra-positional exit = %d, want 2", code)
+	}
+	// A flag placed BEFORE the id ⇒ exit 2 (it would otherwise be misread as the id).
+	if _, _, code := runSessionAt(t, ts.URL, "status", "--json", "sess-1"); code != 2 {
+		t.Fatalf("flag-before-id exit = %d, want 2", code)
+	}
+}
+
+func TestSessionCLIEscapesIDInPath(t *testing.T) {
+	// An id with a query char must reach the gateway WHOLE (escaped), not be split so a
+	// DIFFERENT session is read. Without url.PathEscape, "sess?x" would target "sess".
+	g := &stubGateway{curRev: 1, curBudget: gateway.SessionBudget{TurnsLeft: -1, TokensLeft: -1}}
+	ts := httptest.NewServer(g.handler())
+	defer ts.Close()
+
+	out, errb, code := runSessionAt(t, ts.URL, "status", "sess?danger")
+	if code != 0 {
+		t.Fatalf("status exit = %d (%s)", code, errb)
+	}
+	if !strings.Contains(out, "sess?danger") {
+		t.Fatalf("escaped id did not round-trip whole; output=%q path=%q", out, g.lastPath)
+	}
+}

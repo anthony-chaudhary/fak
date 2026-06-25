@@ -60,13 +60,31 @@ caught rather than clobbered.
 
 ## What "cancel in flight" means today
 
-The control surface writes the per-session DRIVE table; **fak's own agent turn loop**
-(`agent.RunArm`, via `WithSessionTable`) reads it at each turn boundary, so a `stop` is
-taken cleanly at the next boundary — never mid-decode, so it cannot tear a half-emitted
-tool call. The stop carries its reason as a value (`StoppedBySession`), so "why did it
-stop" is a field, not an inference from an exit code.
+Be precise about *which* in-flight work the control surface actually stops today:
 
-Honest fences (the follow-on epic): the gating is wired into the agent harness loop
-first, not yet the flagship proxied serve path; `priority` is recorded but not yet
-consumed by a contended scheduler; and there is no cross-restart persistence of the
-drive state yet. See the design note's status section for the full list.
+- **The proxied serve/guard path — enforced.** On `fak serve` / `fak guard`, each
+  `/v1/{chat/completions,messages,generateContent}` request checks the session's DRIVE
+  state before forwarding upstream. If an operator has set the session to
+  `paused`/`draining`/`stopped`, the gateway refuses that session's **next** request
+  with `409 session_<state>` (carrying the reason) instead of forwarding it. That is the
+  operator-reachable "cancel a request in flight": stop the session, and the agent's
+  subsequent model calls are refused at the boundary. It keys on the request `TraceID`,
+  so an operator targets a session whose agent sends a stable `X-Trace-Id` (a minted
+  `gw-<n>` is not externally addressable); the stop takes effect at the next request
+  boundary, never mid-stream. `running`/`throttled` are admitted (throttle shapes pace
+  inside fak's own loop, not proxy admission).
+
+- **fak's own agent turn loop — a tested seam, not yet an operator-reachable consumer.**
+  `agent.RunArm` *can* gate each turn on the table via the `WithSessionTable` option, and
+  that gate (`Decide` at each turn boundary, recording `StoppedBySession`) is unit-tested.
+  But no production loop passes the option yet: `fak agent` (`agent.Run`) calls `RunArm`
+  with no table, and the operator-written `serveSessions` table is not threaded into any
+  `RunArm` invocation. So issuing `fak session stop <id>` against a running `fak agent`
+  loop records drive state that the loop does not yet read.
+
+Honest fences (the follow-on epic): wire the operator table into the `fak agent` loop so
+the per-turn gate is operator-reachable; `priority` is recorded but not yet consumed by a
+contended scheduler; and there is no cross-restart persistence of the drive state yet
+(the portable session *image* — `internal/sessionimage`, a separate `.faksession`
+dump/restore feature — is not this live-control table). See the design note's status
+section for the full list.
