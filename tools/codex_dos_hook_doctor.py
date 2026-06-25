@@ -1,10 +1,10 @@
-"""Inspect or repair Codex DOS hook manifests for native-hook wiring.
+"""Inspect or repair Codex DOS hook manifests for launch-safe native-hook wiring.
 
 The recent-session DOS audit can prove that Codex hooks are routed through the
 Python CLI path, but it should not rewrite the user's Codex cache implicitly.
 This helper is the explicit repair surface: dry-run by default, `--apply` to
-rewrite cached DOS hook manifests to call the bundled native PowerShell launcher
-first, with Python preserved as the delegate fallback.
+rewrite cached DOS hook manifests to call the bundled POSIX `dos-hook` launcher
+via Git Bash, with Python preserved as the delegate fallback.
 
 Reports are privacy-preserving: they include manifest-relative paths and counts,
 not hook command bodies.
@@ -24,6 +24,14 @@ from typing import Any
 SCHEMA = "fak-codex-dos-hook-doctor/1"
 PYTHON_HOOK_RE = re.compile(
     r"-m\s+dos\.cli\s+hook\s+(?P<verb>[a-z0-9-]+)(?P<flags>.*?)(?:;|$)",
+    re.IGNORECASE,
+)
+NATIVE_HOOK_RE = re.compile(
+    r"dos-hook(?:\.ps1)?(?:['\"])?\s+(?P<verb>[a-z0-9-]+)(?P<flags>.*?)(?:;|$)",
+    re.IGNORECASE,
+)
+PS_NATIVE_HOOK_RE = re.compile(
+    r"&\s+\$dosHook\s+(?P<verb>[a-z0-9-]+)(?P<flags>.*?)(?:;|$)",
     re.IGNORECASE,
 )
 
@@ -58,6 +66,8 @@ def discover_manifests(home: Path) -> list[Path]:
 
 def hook_command_mode(command: str) -> str:
     lower = command.lower()
+    if "dos-hook.ps1" in lower:
+        return "powershell_native_launcher"
     if "dos-hook" in lower:
         return "native_launcher"
     if "dos.cli hook" in lower:
@@ -92,32 +102,43 @@ def parse_python_hook(command: str) -> tuple[str, str] | None:
     return verb, flags
 
 
-def ps_single_quoted(path: Path) -> str:
-    return "'" + str(path).replace("'", "''") + "'"
+def parse_native_launcher(command: str) -> tuple[str, str] | None:
+    match = PS_NATIVE_HOOK_RE.search(command) or NATIVE_HOOK_RE.search(command)
+    if match is None:
+        return None
+    verb = match.group("verb").strip()
+    flags = " ".join(match.group("flags").split())
+    return verb, flags
 
 
-def native_command(launcher: Path, verb: str, flags: str) -> str:
+def bash_single_quoted(value: str) -> str:
+    return "'" + value.replace("'", "'\"'\"'") + "'"
+
+
+def native_command(verb: str, flags: str) -> str:
     hook_args = f"{verb} {flags}".strip()
+    quoted_hook_args = " ".join(bash_single_quoted(arg) for arg in hook_args.split())
     return (
-        f"$dosHook = {ps_single_quoted(launcher)}; "
-        f"if (Test-Path $dosHook) {{ & $dosHook {hook_args}; $dosExit = $LASTEXITCODE }} "
-        "else { $dosExit = 3 }; "
-        "if ($dosExit -eq 3) { "
-        "$py = Get-Command python -ErrorAction SilentlyContinue; "
-        f"if ($py) {{ & $py.Source -m dos.cli hook {hook_args}; $dosExit = $LASTEXITCODE }} "
-        "}; "
-        "if ($dosExit -ne 0) { exit 0 }"
+        'root="${CLAUDE_PLUGIN_ROOT:-${CODEX_PLUGIN_ROOT:-}}"; '
+        'if [ -n "$root" ]; then '
+        f'"$root/bin/dos-hook" {quoted_hook_args} 2>/dev/null; '
+        "rc=$?; [ \"$rc\" -eq 0 ] && exit 0; "
+        "fi; "
+        f"python -m dos.cli hook {quoted_hook_args} 2>/dev/null || "
+        f"python3 -m dos.cli hook {quoted_hook_args} 2>/dev/null || "
+        f"powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "
+        f"{bash_single_quoted('python -m dos.cli hook ' + hook_args)} 2>/dev/null || true"
     )
 
 
 def inspect_manifest(path: Path, home: Path, *, apply: bool) -> dict[str, Any]:
     manifest_rel = home_relpath(path, home)
-    launcher = path.parent.parent / "bin" / "dos-hook.ps1"
+    launcher = path.parent.parent / "bin" / "dos-hook"
     if not launcher.exists():
         return {
             "manifest": manifest_rel,
             "status": "UNKNOWN",
-            "reason": "native PowerShell launcher missing beside cached DOS hook manifest",
+            "reason": "native POSIX launcher missing beside cached DOS hook manifest",
             "command_modes": {},
             "codex_command_modes": {},
             "projected_command_modes": {},
@@ -181,12 +202,12 @@ def inspect_manifest(path: Path, home: Path, *, apply: bool) -> dict[str, Any]:
         if is_codex:
             codex_command_modes[mode] += 1
         projected_mode = mode
-        if mode != "python_cli":
+        if mode not in {"python_cli", "powershell_native_launcher"}:
             projected_command_modes[projected_mode] += 1
             if is_codex:
                 projected_codex_command_modes[projected_mode] += 1
             continue
-        parsed = parse_python_hook(command)
+        parsed = parse_python_hook(command) if mode == "python_cli" else parse_native_launcher(command)
         if parsed is None:
             unrepairable_python += 1
             if is_codex:
@@ -204,7 +225,8 @@ def inspect_manifest(path: Path, home: Path, *, apply: bool) -> dict[str, Any]:
         if is_codex:
             projected_codex_command_modes[projected_mode] += 1
         if apply:
-            hook["command"] = native_command(launcher, verb, flags)
+            hook["shell"] = "bash"
+            hook["command"] = native_command(verb, flags)
 
     applied = False
     backup_rel = None
@@ -218,7 +240,7 @@ def inspect_manifest(path: Path, home: Path, *, apply: bool) -> dict[str, Any]:
 
     if replacements:
         status = "CHANGED" if applied else "WARN"
-        reason = "Python hook commands can be routed through the bundled native launcher"
+        reason = "hook commands can be routed through the bundled POSIX native launcher"
     elif int(codex_command_modes.get("native_launcher") or 0):
         status = "PASS"
         reason = "Codex hook commands already use the native launcher"

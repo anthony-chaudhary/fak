@@ -296,6 +296,8 @@ def hook_commands(manifest: dict[str, Any]) -> list[str]:
 
 def hook_command_mode(command: str) -> str:
     lower = command.lower()
+    if "dos-hook.ps1" in lower:
+        return "powershell_native_launcher"
     if "dos-hook" in lower:
         return "native_launcher"
     if "dos.cli hook" in lower:
@@ -348,10 +350,14 @@ def codex_hook_fast_path(home: Path) -> dict[str, Any]:
                 codex_command_modes[mode] += 1
 
     codex_python = int(codex_command_modes.get("python_cli") or 0)
+    codex_powershell = int(codex_command_modes.get("powershell_native_launcher") or 0)
     codex_native = int(codex_command_modes.get("native_launcher") or 0)
     if codex_python:
         status = "WARN"
         reason = "Codex hook commands route through the Python CLI hook instead of the bundled native launcher"
+    elif codex_powershell:
+        status = "WARN"
+        reason = "Codex hook commands route through the PowerShell native launcher; use shell:bash and bin/dos-hook to avoid Windows launch-window side effects"
     elif codex_native:
         status = "PASS"
         reason = "Codex hook commands use the native launcher"
@@ -391,6 +397,7 @@ def codex_hook_fast_path(home: Path) -> dict[str, Any]:
         "command_modes": {k: command_modes[k] for k in sorted(command_modes)},
         "codex_command_modes": {k: codex_command_modes[k] for k in sorted(codex_command_modes)},
         "codex_python_cli_hooks": codex_python,
+        "codex_powershell_native_hooks": codex_powershell,
         "codex_native_launcher_hooks": codex_native,
         "doctor": {
             "dry_run": "python tools/codex_dos_hook_doctor.py --codex-home <codex-home>",
@@ -894,8 +901,10 @@ def build_report(
             recommendations.append("recent-window delegate count includes pre-repair history; post-repair Codex delegates are zero")
         else:
             recommendations.append("native DOS hook delegates are present; inspect fallback reasons upstream")
-    if hook_fast_path.get("status") == "WARN":
+    if hook_fast_path.get("status") == "WARN" and hook_fast_path.get("codex_python_cli_hooks"):
         recommendations.append("Codex hook manifest uses the Python hook path; track native-fast-path wiring separately from package freshness")
+    if hook_fast_path.get("status") == "WARN" and hook_fast_path.get("codex_powershell_native_hooks"):
+        recommendations.append("Codex hook manifest uses the PowerShell native launcher; rerun the hook doctor so Codex starts through shell:bash and bin/dos-hook")
     if post_repair.get("status") == "WARN":
         if post_repair.get("unknown_tree_admission_warnings") and not post_repair.get("delegate_count"):
             recommendations.append("fast path is repaired; remaining post-repair issue is unknown-tree admission for opaque Codex host calls")

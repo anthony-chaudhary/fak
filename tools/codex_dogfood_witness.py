@@ -923,6 +923,7 @@ def codex_hook_fast_path(
         "command_modes": report.get("command_modes") if isinstance(report.get("command_modes"), dict) else {},
         "codex_command_modes": report.get("codex_command_modes") if isinstance(report.get("codex_command_modes"), dict) else {},
         "codex_python_cli_hooks": report.get("codex_python_cli_hooks"),
+        "codex_powershell_native_hooks": report.get("codex_powershell_native_hooks"),
         "codex_native_launcher_hooks": report.get("codex_native_launcher_hooks"),
         "repair_projection": report.get("repair_projection") if isinstance(report.get("repair_projection"), dict) else {},
         "post_repair_observations": report.get("post_repair_observations")
@@ -1137,6 +1138,7 @@ def dogfood_summary(
             "status": hook_fast_path.get("status"),
             "reason": hook_fast_path.get("reason"),
             "codex_python_cli_hooks": hook_fast_path.get("codex_python_cli_hooks"),
+            "codex_powershell_native_hooks": hook_fast_path.get("codex_powershell_native_hooks"),
             "codex_native_launcher_hooks": hook_fast_path.get("codex_native_launcher_hooks"),
             "codex_command_modes": hook_fast_path.get("codex_command_modes") or {},
             "post_repair_status": post_repair.get("status"),

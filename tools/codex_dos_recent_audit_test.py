@@ -33,7 +33,7 @@ def write_jsonl(path: Path, rows: list[dict]) -> None:
 
 def write_hook_manifest(home: Path, command: str) -> Path:
     root = home / "plugins" / "cache" / "dos" / "dos-kernel" / "0.28.0"
-    launcher = root / "bin" / "dos-hook.ps1"
+    launcher = root / "bin" / "dos-hook"
     launcher.parent.mkdir(parents=True, exist_ok=True)
     launcher.write_text("# launcher\n", encoding="utf-8")
     manifest = root / "hooks" / "hooks.json"
@@ -47,7 +47,7 @@ def write_hook_manifest(home: Path, command: str) -> Path:
                             "hooks": [
                                 {
                                     "type": "command",
-                                    "shell": "powershell",
+                                    "shell": "bash" if "bin/dos-hook" in command and "dos-hook.ps1" not in command else "powershell",
                                     "command": command,
                                 }
                             ]
@@ -60,6 +60,10 @@ def write_hook_manifest(home: Path, command: str) -> Path:
         encoding="utf-8",
     )
     return manifest
+
+
+def native_bash_hook_command() -> str:
+    return 'root="${CLAUDE_PLUGIN_ROOT:-${CODEX_PLUGIN_ROOT:-}}"; "$root/bin/dos-hook" pretool --workspace . --dialect codex'
 
 
 def write_gate_report(path: Path, *, tool: str, reason: str, created_at: str) -> None:
@@ -207,11 +211,27 @@ class RecentCodexDosAuditTest(unittest.TestCase):
             home = Path(td) / "codex-home"
             write_hook_manifest(
                 home,
-                "& $env:CLAUDE_PLUGIN_ROOT\\bin\\dos-hook.ps1 pretool --workspace . --dialect codex",
+                native_bash_hook_command(),
             )
             native_report = mod.codex_hook_fast_path(home)
             self.assertEqual(native_report["status"], "PASS")
             self.assertEqual(native_report["codex_command_modes"], {"native_launcher": 1})
+            self.assertEqual(native_report["codex_powershell_native_hooks"], 0)
+
+        with tempfile.TemporaryDirectory() as td:
+            home = Path(td) / "codex-home"
+            write_hook_manifest(
+                home,
+                "& $env:CLAUDE_PLUGIN_ROOT\\bin\\dos-hook.ps1 pretool --workspace . --dialect codex",
+            )
+            powershell_report = mod.codex_hook_fast_path(home)
+            self.assertEqual(powershell_report["status"], "WARN")
+            self.assertEqual(powershell_report["codex_command_modes"], {"powershell_native_launcher": 1})
+            self.assertEqual(powershell_report["codex_powershell_native_hooks"], 1)
+            self.assertEqual(
+                powershell_report["repair_projection"]["projected_codex_command_modes"],
+                {"native_launcher": 1},
+            )
 
     def test_shell_family_parses_git_subcommands(self) -> None:
         mod = load()
@@ -321,7 +341,7 @@ class RecentCodexDosAuditTest(unittest.TestCase):
             )
             manifest = write_hook_manifest(
                 home,
-                "& $env:CLAUDE_PLUGIN_ROOT\\bin\\dos-hook.ps1 pretool --workspace . --dialect codex",
+                native_bash_hook_command(),
             )
             backup = manifest.with_name("hooks.json.before-native-dos-hook.bak")
             backup.write_text("backup\n", encoding="utf-8")
@@ -378,7 +398,7 @@ class RecentCodexDosAuditTest(unittest.TestCase):
             )
             manifest = write_hook_manifest(
                 home,
-                "& $env:CLAUDE_PLUGIN_ROOT\\bin\\dos-hook.ps1 pretool --workspace . --dialect codex",
+                native_bash_hook_command(),
             )
             backup = manifest.with_name("hooks.json.before-native-dos-hook.bak")
             backup.write_text("backup\n", encoding="utf-8")
@@ -440,7 +460,7 @@ class RecentCodexDosAuditTest(unittest.TestCase):
             )
             manifest = write_hook_manifest(
                 home,
-                "& $env:CLAUDE_PLUGIN_ROOT\\bin\\dos-hook.ps1 pretool --workspace . --dialect codex",
+                native_bash_hook_command(),
             )
             backup = manifest.with_name("hooks.json.before-native-dos-hook.bak")
             backup.write_text("backup\n", encoding="utf-8")
@@ -604,7 +624,7 @@ class RecentCodexDosAuditTest(unittest.TestCase):
             )
             manifest = write_hook_manifest(
                 home,
-                "& $env:CLAUDE_PLUGIN_ROOT\\bin\\dos-hook.ps1 pretool --workspace . --dialect codex",
+                native_bash_hook_command(),
             )
             backup = manifest.with_name("hooks.json.before-native-dos-hook.bak")
             backup.write_text("backup\n", encoding="utf-8")

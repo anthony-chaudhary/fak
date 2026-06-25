@@ -274,7 +274,7 @@ def write_dos_fixture(
 def write_native_hook_manifest(home: Path, *, repaired_at: datetime | None = None) -> None:
     hook_dir = home / "plugins" / "cache" / "dos" / "dos-kernel" / "0.28.0" / "hooks"
     hook_dir.mkdir(parents=True)
-    launcher = hook_dir.parent / "bin" / "dos-hook.ps1"
+    launcher = hook_dir.parent / "bin" / "dos-hook"
     launcher.parent.mkdir(parents=True)
     launcher.write_text("# native hook launcher fixture\n", encoding="utf-8")
     manifest = {
@@ -284,7 +284,8 @@ def write_native_hook_manifest(home: Path, *, repaired_at: datetime | None = Non
                     "hooks": [
                         {
                             "type": "command",
-                            "command": "& $env:CLAUDE_PLUGIN_ROOT\\bin\\dos-hook.ps1 pretool --workspace . --dialect codex",
+                            "shell": "bash",
+                            "command": 'root="${CLAUDE_PLUGIN_ROOT:-${CODEX_PLUGIN_ROOT:-}}"; "$root/bin/dos-hook" pretool --workspace . --dialect codex',
                         }
                     ]
                 }
@@ -476,6 +477,7 @@ class DogfoodWitnessTest(unittest.TestCase):
             self.assertEqual(saved["summary"]["local_fak_gate"]["tools"], ["git_push", "run_tests"])
             self.assertEqual(saved["summary"]["codex_hook_fast_path"]["status"], "PASS")
             self.assertEqual(saved["summary"]["codex_hook_fast_path"]["codex_native_launcher_hooks"], 1)
+            self.assertEqual(saved["summary"]["codex_hook_fast_path"]["codex_powershell_native_hooks"], 0)
             self.assertEqual(saved["summary"]["codex_hook_fast_path"]["codex_python_cli_hooks"], 0)
             self.assertEqual(saved["summary"]["codex_hook_fast_path"]["post_repair_status"], "PASS")
             self.assertEqual(saved["summary"]["codex_hook_fast_path"]["post_repair_delegate_count"], 0)
