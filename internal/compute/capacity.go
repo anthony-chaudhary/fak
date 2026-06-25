@@ -1,5 +1,7 @@
 package compute
 
+import "strconv"
+
 // capacity.go — the eighth assumption the HAL lifts, at the type level.
 //
 // internal/compute/compute.go neutralizes SEVEN hardware-SHAPE assumptions (dtype
@@ -134,4 +136,57 @@ func FitsOnDevice(b Backend, wantBytes int64, headroom float64) (verdict FitVerd
 		return FitOK, budget
 	}
 	return FitTooBig, budget
+}
+
+// FitError is the typed refusal RefuseIfTooBig returns when a capacity-reporting backend
+// KNOWS the requested bytes exceed its device — the answerable form of the allocation that
+// would otherwise panic (cuda/metal dalloc) mid-load. It carries the sizing so a caller can
+// surface "needs ~W, device has ~A" before a byte is allocated.
+//
+// It is returned ONLY for FitTooBig. A backend whose capacity is unknown (the pure-Go cpu-ref
+// floor, a device that cannot probe) never produces one — RefuseIfTooBig returns nil there, so
+// the portable floor and any non-reporting backend load exactly as before the capability added
+// this refusal (the fail-open contract from DeviceCapacity, docs/explainers/hardware-limits-
+// and-capacity.md Plank 5).
+type FitError struct {
+	Verdict FitVerdict // always FitTooBig
+	Want    int64      // bytes the caller asked to place
+	Avail   int64      // headroom-adjusted budget the verdict was computed against
+}
+
+func (e *FitError) Error() string {
+	return "compute: model needs " + memSize(e.Want) + ", device has " + memSize(e.Avail) +
+		" (FitTooBig: model exceeds the reported device capacity; RefuseIfTooBig turned a would-be OOM into a typed refusal)"
+}
+
+// memSize renders a byte count in the largest binary unit that keeps at least one of it, so a
+// refusal message reads "needs ~4.13 GiB" / "device has ~1.00 MiB" rather than a bare integer.
+// It is for human-facing refusal strings only; the exact bytes live on the FitError fields.
+func memSize(b int64) string {
+	switch {
+	case b >= 1<<30:
+		return strconv.FormatFloat(float64(b)/float64(1<<30), 'f', 2, 64) + " GiB"
+	case b >= 1<<20:
+		return strconv.FormatFloat(float64(b)/float64(1<<20), 'f', 2, 64) + " MiB"
+	case b >= 1<<10:
+		return strconv.FormatFloat(float64(b)/float64(1<<10), 'f', 2, 64) + " KiB"
+	default:
+		return strconv.FormatInt(b, 10) + " B"
+	}
+}
+
+// RefuseIfTooBig turns FitsOnDevice's verdict into a typed, fail-open admission decision: it
+// returns a *FitError (with the "needs ~W, device has ~A" sizing) ONLY when b knows the
+// request exceeds its ceiling (FitTooBig), and nil otherwise — FitOK obviously, and CRUCIALLY
+// FitUnknown (a backend that cannot probe, i.e. the cpu-ref floor), so wiring this into a load
+// path never blocks a path that worked before. It is the load-time half of the capacity bridge
+// (docs/explainers/hardware-limits-and-capacity.md Plank 5): call it with a pre-load
+// weight-footprint estimate before the make/append that would otherwise OOM-panic, and a
+// capacity-reporting backend turns "too big" into an answerable refusal instead of a panic.
+func RefuseIfTooBig(b Backend, wantBytes int64, headroom float64) error {
+	verdict, avail := FitsOnDevice(b, wantBytes, headroom)
+	if verdict != FitTooBig {
+		return nil
+	}
+	return &FitError{Verdict: verdict, Want: wantBytes, Avail: avail}
 }

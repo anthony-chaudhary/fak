@@ -1,6 +1,9 @@
 package compute
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 // capDevice is a fakeDevice that ALSO reports its capacity — the test stand-in for a real
 // device backend (cuda/metal/vulkan) implementing the DeviceCapacity capability. It embeds
@@ -99,6 +102,51 @@ func TestFitVerdictString(t *testing.T) {
 	for v, want := range map[FitVerdict]string{FitOK: "ok", FitTooBig: "too_big", FitUnknown: "unknown"} {
 		if got := v.String(); got != want {
 			t.Fatalf("FitVerdict(%d).String() = %q, want %q", v, got, want)
+		}
+	}
+}
+
+// RefuseIfTooBig is the load-time admission decision the model loaders call with a pre-load
+// footprint estimate (issue #709; capacity-bridge Plank 5). It MUST fail open on every verdict
+// except FitTooBig, so wiring it in never blocks a path that worked before — including the
+// cpu-ref floor (unknown capacity) and a model that fits.
+
+func TestRefuseIfTooBigFailsOpen(t *testing.T) {
+	// FitUnknown: the cpu-ref floor and a nil backend both proceed (no typed refusal).
+	for _, be := range []Backend{cpu(), nil} {
+		if err := RefuseIfTooBig(be, 1<<40, 0); err != nil {
+			t.Fatalf("%v: unknown capacity must fail open (nil), got %v", be, err)
+		}
+	}
+	// FitOK: a model that fits a known ceiling is not refused.
+	dev := capDevice{total: 24 << 30, free: 10 << 30, known: true}
+	if err := RefuseIfTooBig(dev, 8<<30, 0); err != nil { // 8 GiB into 10 GiB free
+		t.Fatalf("FitOK must yield nil, got %v", err)
+	}
+}
+
+func TestRefuseIfTooBigReturnsTypedSizingError(t *testing.T) {
+	// FitTooBig: a capacity-reporting backend that KNOWS the request exceeds its ceiling yields
+	// a *FitError carrying the sizing — the answerable form of the would-be OOM panic.
+	dev := capDevice{total: 24 << 30, free: 1 << 30, known: true} // 1 GiB free
+	err := RefuseIfTooBig(dev, 8<<30, 0)                          // 8 GiB into 1 GiB -> FitTooBig
+	if err == nil {
+		t.Fatal("oversize request on a known ceiling must yield a FitError, got nil")
+	}
+	fe, ok := err.(*FitError)
+	if !ok {
+		t.Fatalf("want *FitError, got %T (%v)", err, err)
+	}
+	if fe.Verdict != FitTooBig {
+		t.Fatalf("Verdict = %s, want FitTooBig", fe.Verdict)
+	}
+	if fe.Want != 8<<30 || fe.Avail != 1<<30 {
+		t.Fatalf("FitError sizing: Want=%d Avail=%d, want 8 GiB / 1 GiB", fe.Want, fe.Avail)
+	}
+	msg := err.Error()
+	for _, want := range []string{"needs", "device has", "GiB", "FitTooBig"} {
+		if !strings.Contains(msg, want) {
+			t.Fatalf("FitError message %q missing %q", msg, want)
 		}
 	}
 }
