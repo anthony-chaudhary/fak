@@ -156,6 +156,38 @@ prints a starter; `--check` validates one (unknown fields are rejected).
 
 **Reductions:** `first` (fastest-wins / fallback), `vote` (weighted majority, deterministic tie-break), `best_of` (highest `Vote.Score` from a judge), `all_reduce` (weighted numeric **mean** of scalar outputs — *not* a tensor all-reduce), `concat` (gather, member order).
 
+## The matching primitive (`Match.Matches` — the envelope-matching spine)
+
+`Match.Matches(Subject)` (`internal/modelroute/modelroute.go`) is the single
+tag-matching primitive every routing rule reduces to. It has the *shape* of MPI's
+point-to-point envelope match, without the point-to-point delivery:
+
+- **A set field is a required tag; an unset field is a wildcard.** `Match` tests the
+  `Subject` field-by-field under logical AND — every field the rule sets must hold, and
+  a field the rule leaves empty matches anything. An empty `aspect`, `tool`, `latency`,
+  or `min_complexity`, or an unbounded token band (`max_prompt_tokens=0`), each play the
+  `MPI_ANY_SOURCE` / `MPI_ANY_TAG` wildcard role for their own dimension — "match any
+  value of this field." This is the only wildcard discipline in the routing spine:
+  anchor here, do not reinvent a parallel matcher.
+- **`Labels` are key/value tag pairs.** Every pair the rule sets must equal the
+  subject's label for the same key (`s.Labels[k] == v`); a key the rule omits is a
+  wildcard for that key. Labels are the OPEN tag channel — domain, tenant, language,
+  taint — that a deployment matches on without a code change.
+- **`tool` adds one wildcard form.** It matches an exact name, a single trailing `*`
+  prefix (`git_*` matches `git_push`), or bare `*` for any tool. The remaining fields
+  are exact, or — for the token band and `min_complexity` — banded / floored.
+- **Rules are first-match-wins.** `Manifest.Route` walks `Rules` top-to-bottom and
+  returns the first `Match` that fires, else the fail-closed `Default`: the deterministic
+  first-match receive of the envelope analogue. Put the most specific rules first.
+
+**Honesty caveat — it selects an engine, not a receiver.** `Match.Matches` selects a
+*Plan* (and therefore the engine or engines) for a *Subject*; it does not select a
+receiver for a message. fak borrows the envelope-matching **structure** — set field =
+required tag, unset = wildcard, first-match-wins — from MPI's `MPI_ANY_SOURCE` /
+`MPI_ANY_TAG` receive. It does **not** borrow point-to-point delivery, source ranks, or
+rendezvous: there is no message queue and no source-rank ordering behind a match. The
+match decides *which model runs*; the wiring contract above is what actually runs it.
+
 ## The 60-second proof (no key, no model, no GPU)
 
 ```bash

@@ -8,6 +8,8 @@ package main
 //	fak snapshot kinds                       # the loops ladder this build can dump
 //	fak snapshot demo  [--dir D] [--out F]   # the offline witness (no key, no model, no GPU)
 //	fak snapshot info  --file F              # load + integrity-verify a .snap envelope or a session image
+//	fak snapshot dump-fleet    --addr URL --out F   # offload a LIVE fleet's drive state from a gateway
+//	fak snapshot restore-fleet --addr URL --file F  # re-establish that fleet on another gateway
 //
 // The demo proves the load-bearing properties end to end: a SESSION image dumped on
 // "laptop/model-A", packed to one .faksession, restored on a fresh dir under "model-B"
@@ -17,15 +19,21 @@ package main
 // session restored stopped). Exit 1 if any property fails, so it gates a CI run.
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
+	"io"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/appversion"
+	"github.com/anthony-chaudhary/fak/internal/gateway"
 	"github.com/anthony-chaudhary/fak/internal/pathutil"
 	"github.com/anthony-chaudhary/fak/internal/recall"
 	"github.com/anthony-chaudhary/fak/internal/session"
@@ -46,8 +54,12 @@ func cmdSnapshot(argv []string) {
 		snapshotKinds(argv[1:])
 	case "info":
 		snapshotInfo(argv[1:])
+	case "dump-fleet":
+		snapshotDumpFleet(argv[1:])
+	case "restore-fleet":
+		snapshotRestoreFleet(argv[1:])
 	default:
-		fmt.Fprintf(os.Stderr, "fak snapshot: unknown subcommand %q (want demo|kinds|info)\n", argv[0])
+		fmt.Fprintf(os.Stderr, "fak snapshot: unknown subcommand %q (want demo|kinds|info|dump-fleet|restore-fleet)\n", argv[0])
 		os.Exit(2)
 	}
 }
@@ -246,6 +258,203 @@ func okMarkS(ok bool) string {
 		return "OK "
 	}
 	return "XX "
+}
+
+// ---------------------------------------------------------------------------
+// over-the-wire fleet dump/restore — offload a LIVE fleet's drive state from a
+// running gateway (the #620 /v1/fak/session(s) routes) and restore it onto another.
+// The dumped .snap is the SAME fleet snapshot the offline DumpFleet writes, so a fleet
+// can be frozen from one server and thawed onto a fresh one — the operational half of
+// "easily offload/restore" for a live deployment.
+// ---------------------------------------------------------------------------
+
+type fleetClient struct {
+	base string
+	key  string
+	hc   *http.Client
+}
+
+func newFleetClient(addr, key string) *fleetClient {
+	return &fleetClient{base: strings.TrimRight(addr, "/"), key: key, hc: &http.Client{Timeout: 15 * time.Second}}
+}
+
+// listSessions reads every live session's drive state from GET /v1/fak/sessions.
+func (c *fleetClient) listSessions() ([]gateway.SessionState, error) {
+	var lr gateway.SessionListResponse
+	if err := c.req(http.MethodGet, "/v1/fak/sessions", nil, &lr); err != nil {
+		return nil, err
+	}
+	return lr.Sessions, nil
+}
+
+// control applies one drive verb to one session via POST /v1/fak/session/{id}/{verb}.
+func (c *fleetClient) control(id, verb string, body gateway.SessionControlRequest) error {
+	return c.req(http.MethodPost, "/v1/fak/session/"+id+"/"+verb, body, nil)
+}
+
+func (c *fleetClient) req(method, path string, body, out any) error {
+	var rdr io.Reader
+	if body != nil {
+		b, err := json.Marshal(body)
+		if err != nil {
+			return err
+		}
+		rdr = bytes.NewReader(b)
+	}
+	httpReq, err := http.NewRequestWithContext(context.Background(), method, c.base+path, rdr)
+	if err != nil {
+		return err
+	}
+	if body != nil {
+		httpReq.Header.Set("Content-Type", "application/json")
+	}
+	if c.key != "" {
+		httpReq.Header.Set("Authorization", "Bearer "+c.key)
+	}
+	resp, err := c.hc.Do(httpReq)
+	if err != nil {
+		return fmt.Errorf("%s %s: %w", method, c.base+path, err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode/100 != 2 {
+		msg, _ := io.ReadAll(io.LimitReader(resp.Body, 4<<10))
+		return fmt.Errorf("%s %s -> %d: %s", method, path, resp.StatusCode, strings.TrimSpace(string(msg)))
+	}
+	if out == nil {
+		return nil
+	}
+	return json.NewDecoder(resp.Body).Decode(out)
+}
+
+// dumpFleetWire pulls a live fleet's drive snapshot and writes it as a fleet-kind
+// snapshot envelope to out (interchangeable with the offline DumpFleet form). Returns
+// the number of sessions captured.
+func dumpFleetWire(c *fleetClient, id, out string, now int64) (int, error) {
+	wire, err := c.listSessions()
+	if err != nil {
+		return 0, err
+	}
+	states := make([]session.State, 0, len(wire))
+	for _, w := range wire {
+		states = append(states, wireToState(w))
+	}
+	snap, err := snapshot.Marshal(snapshot.KindFleet, id, snapshot.FleetBody{Sessions: states}, nil, now)
+	if err != nil {
+		return 0, err
+	}
+	b, err := snap.Encode()
+	if err != nil {
+		return 0, err
+	}
+	if err := os.WriteFile(out, b, 0o644); err != nil {
+		return 0, err
+	}
+	return len(states), nil
+}
+
+// restoreFleetWire reads a fleet snapshot and re-establishes each session's drive on a
+// live gateway by POSTing its axes (budget, pace, priority, then run — run last so a
+// terminal target is set after the live-axis writes). It returns the count restored and
+// the count skipped (a control verb the live table refused, e.g. an already-terminal
+// session). A wire restore cannot resurrect a session the target already drove terminal
+// — that is the in-process Table.Restore's privilege — so such a verb is counted skipped,
+// not fatal.
+func restoreFleetWire(c *fleetClient, file string, w io.Writer) (restored, skipped int, err error) {
+	snap, err := snapshot.ReadFile(file)
+	if err != nil {
+		return 0, 0, err
+	}
+	if snap.Kind != snapshot.KindFleet {
+		return 0, 0, fmt.Errorf("snapshot kind %q is not a fleet snapshot", snap.Kind)
+	}
+	var body snapshot.FleetBody
+	if err := snap.Into(&body); err != nil {
+		return 0, 0, err
+	}
+	for _, st := range body.Sessions {
+		ok := true
+		posts := []struct {
+			verb string
+			req  gateway.SessionControlRequest
+		}{
+			{"budget", gateway.SessionControlRequest{Budget: &gateway.SessionBudget{TurnsLeft: st.Budget.TurnsLeft, TokensLeft: st.Budget.TokensLeft}}},
+			{"pace", gateway.SessionControlRequest{Pace: &gateway.SessionPace{MaxTokensPerTurn: st.Pace.MaxTokensPerTurn, MinTurnGapMs: st.Pace.MinTurnGapMs}}},
+			{"priority", gateway.SessionControlRequest{Priority: snapIntPtr(st.Priority)}},
+			{"run", gateway.SessionControlRequest{Run: st.Run.String(), Reason: st.Reason}},
+		}
+		for _, p := range posts {
+			if e := c.control(st.TraceID, p.verb, p.req); e != nil {
+				// A 409 (terminal/CAS) is an expected, non-fatal skip; a transport error is fatal.
+				if strings.Contains(e.Error(), "-> 409") {
+					ok = false
+					fmt.Fprintf(w, "  skip %s %s: %v\n", st.TraceID, p.verb, e)
+					continue
+				}
+				return restored, skipped, e
+			}
+		}
+		if ok {
+			restored++
+		} else {
+			skipped++
+		}
+	}
+	return restored, skipped, nil
+}
+
+// wireToState maps the gateway's drive DTO back to the internal drive State (the inverse
+// of cmd/fak's toGatewaySessionState). An unparseable run token fails closed to Running.
+func wireToState(w gateway.SessionState) session.State {
+	run, ok := session.ParseRunState(w.Run)
+	if !ok {
+		run = session.Running
+	}
+	return session.State{
+		TraceID:  w.TraceID,
+		Run:      run,
+		Budget:   session.Budget{TurnsLeft: w.Budget.TurnsLeft, TokensLeft: w.Budget.TokensLeft},
+		Priority: w.Priority,
+		Pace:     session.Pace{MaxTokensPerTurn: w.Pace.MaxTokensPerTurn, MinTurnGapMs: w.Pace.MinTurnGapMs},
+		Reason:   w.Reason,
+		Rev:      w.Rev,
+	}
+}
+
+func snapIntPtr(n int) *int { return &n }
+
+// snapshotDumpFleet / snapshotRestoreFleet are the CLI wrappers.
+func snapshotDumpFleet(argv []string) {
+	fs := flag.NewFlagSet("snapshot dump-fleet", flag.ExitOnError)
+	addr := fs.String("addr", defaultSnapshotAddr(), "gateway base URL")
+	key := fs.String("key", os.Getenv("FAK_KEY"), "bearer credential (only if the gateway sets --require-key)")
+	id := fs.String("id", "fleet", "an id for the fleet snapshot")
+	out := fs.String("out", "fleet.snap", "output snapshot path")
+	_ = fs.Parse(argv)
+	n, err := dumpFleetWire(newFleetClient(*addr, *key), *id, pathutil.ExpandTilde(*out), 0)
+	must(err)
+	fmt.Printf("dumped %d live session(s) from %s -> %s\n", n, *addr, *out)
+}
+
+func snapshotRestoreFleet(argv []string) {
+	fs := flag.NewFlagSet("snapshot restore-fleet", flag.ExitOnError)
+	addr := fs.String("addr", defaultSnapshotAddr(), "gateway base URL")
+	key := fs.String("key", os.Getenv("FAK_KEY"), "bearer credential")
+	file := fs.String("file", "", "the fleet snapshot to restore (required)")
+	_ = fs.Parse(argv)
+	if *file == "" {
+		fmt.Fprintln(os.Stderr, "fak snapshot restore-fleet: --file is required")
+		os.Exit(2)
+	}
+	restored, skipped, err := restoreFleetWire(newFleetClient(*addr, *key), pathutil.ExpandTilde(*file), os.Stdout)
+	must(err)
+	fmt.Printf("restored %d session(s) onto %s (%d skipped: terminal/contended)\n", restored, *addr, skipped)
+}
+
+func defaultSnapshotAddr() string {
+	if a := os.Getenv("FAK_ADDR"); a != "" {
+		return a
+	}
+	return "http://127.0.0.1:8080"
 }
 
 const (

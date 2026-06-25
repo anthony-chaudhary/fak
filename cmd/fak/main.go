@@ -204,7 +204,7 @@ func usage() {
   fak recall    [--dir DIR] [--out recall-report.json] [--query STR]
                 (persist a finished session as a core dump, reload it in a FRESH
                  store, and demonstrate the quarantine surviving the boundary)
-  fak snapshot  kinds | demo | info
+  fak snapshot  kinds | demo | info | dump-fleet | restore-fleet
                 (DUMP/RESTORE any primitive on the loops ladder — a turn, a tool, a
                  session, a fleet, an RSI loop — to a portable, sha256-integrity bundle.
                  'kinds' lists the ladder; 'demo' is the offline witness: a SESSION
@@ -212,9 +212,11 @@ func usage() {
                  model-B (drive re-attached, content byte-identical, the recall
                  quarantine SEALED across the offload, migration logged, integrity
                  fail-closed) + a FLEET of drive states dumped and restored verbatim;
-                 'info --file F' verifies + prints a .snap envelope or a session image.
-                 The session image is model-agnostic — logical content only, no KV cache
-                 or token ids — so a resume re-prefills on any model)
+                 'info --file F' verifies + prints a .snap envelope or a session image;
+                 'dump-fleet --addr URL --out F' offloads a LIVE fleet's drive state from
+                 a running gateway and 'restore-fleet --addr URL --file F' re-establishes
+                 it on another. The session image is model-agnostic — logical content
+                 only, no KV cache or token ids — so a resume re-prefills on any model)
   fak dream     [--dir DIR] [--out-dir DIR] [--out dream-report.json]
                 (offline "sleep" pass over a core image: re-screen, pre-seal
                  refuted witnesses, repair descriptors, surface duplicate aliases,
