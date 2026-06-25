@@ -24,7 +24,7 @@ internal/webbench tests). It only enforces the label: a known-modeled number is
 labeled modeled, never measured.
 
 Modes:
-  --audit-staged   scan staged additions (the pre-commit hook).
+  --audit-staged   scan staged additions from the index (the pre-commit hook).
   --audit-tree     scan the whole tracked tree (CI / hygiene backstop).
 
 Exit: 0 = clean, 1 = violation, 2 = could not run (git error). The pre-commit
@@ -169,6 +169,57 @@ def scan_file(root: str, relpath: str) -> list[dict]:
     return hits
 
 
+_HUNK_RE = re.compile(r"^@@ -\d+(?:,\d+)? \+(\d+)(?:,(\d+))? @@")
+
+
+def _staged_added_lines(root: str, relpath: str) -> list[tuple[int, str]]:
+    """Return (new-line-number, text) for staged additions in relpath.
+
+    Pre-commit must judge the index, not the working tree. Reading the whole file
+    would let an old, unrelated line block a clean staged edit; reading the diff
+    keeps the hook scoped to what the commit introduces.
+    """
+    out = subprocess.run(
+        ["git", "diff", "--cached", "--unified=0", "--no-ext-diff", "--", relpath],
+        cwd=root, capture_output=True, text=True, check=True,
+    )
+    lines: list[tuple[int, str]] = []
+    new_line: int | None = None
+    for raw in out.stdout.splitlines():
+        m = _HUNK_RE.match(raw)
+        if m:
+            new_line = int(m.group(1))
+            continue
+        if new_line is None:
+            continue
+        if raw.startswith("+++"):
+            continue
+        if raw.startswith("+"):
+            lines.append((new_line, raw[1:]))
+            new_line += 1
+            continue
+        if raw.startswith("-"):
+            continue
+        if raw.startswith(" "):
+            new_line += 1
+    return lines
+
+
+def scan_staged_file(root: str, relpath: str) -> list[dict]:
+    base = os.path.basename(relpath)
+    if any(relpath.startswith(pre) for pre in SKIP_PREFIXES):
+        return []
+    if base in SKIP_BASENAMES:
+        return []
+    hits = []
+    for line_no, line in _staged_added_lines(root, relpath):
+        bad, fam = _line_violates(line)
+        if bad:
+            hits.append({"file": relpath, "line": line_no,
+                         "text": line.strip()[:160], "fix": fam["fix"]})
+    return hits
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     g = ap.add_mutually_exclusive_group(required=True)
@@ -188,7 +239,10 @@ def main(argv: list[str] | None = None) -> int:
 
     all_hits: list[dict] = []
     for rel in files:
-        all_hits.extend(scan_file(root, rel))
+        if args.audit_staged:
+            all_hits.extend(scan_staged_file(root, rel))
+        else:
+            all_hits.extend(scan_file(root, rel))
 
     if not all_hits:
         scope = "staged" if args.audit_staged else "tracked tree"

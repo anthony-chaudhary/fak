@@ -31,6 +31,26 @@ def _scan(text_by_file: dict[str, str]) -> int:
         return cpl.main(["--audit-tree", "--root", d])
 
 
+def _commit_all(root: str) -> None:
+    subprocess.run(["git", "add", "-A"], cwd=root, check=True, capture_output=True)
+    subprocess.run(
+        [
+            "git",
+            "-c",
+            "user.name=provenance-test",
+            "-c",
+            "user.email=provenance-test@example.invalid",
+            "commit",
+            "-q",
+            "-m",
+            "seed",
+        ],
+        cwd=root,
+        check=True,
+        capture_output=True,
+    )
+
+
 class ProvenanceLabelGate(unittest.TestCase):
     def test_flags_modeled_number_called_measured(self):
         # the exact original defect: the webbench 9.7x called "measured"
@@ -80,6 +100,40 @@ class ProvenanceLabelGate(unittest.TestCase):
             _scan({"plain.md": "fak treats the model like an untrusted "
                                "program.\n"}),
             0)
+
+    def test_audit_staged_flags_added_bad_line(self):
+        with tempfile.TemporaryDirectory() as d:
+            subprocess.run(["git", "init", "-q"], cwd=d, check=True)
+            path = Path(d) / "bad.md"
+            path.write_text("plain line\n", encoding="utf-8")
+            _commit_all(d)
+
+            path.write_text(
+                "plain line\nmeasured 9.7x prefill elimination on WebVoyager\n",
+                encoding="utf-8",
+            )
+            subprocess.run(["git", "add", "bad.md"], cwd=d, check=True, capture_output=True)
+
+            self.assertEqual(cpl.main(["--audit-staged", "--root", d]), 1)
+
+    def test_audit_staged_ignores_preexisting_bad_line(self):
+        with tempfile.TemporaryDirectory() as d:
+            subprocess.run(["git", "init", "-q"], cwd=d, check=True)
+            path = Path(d) / "legacy.md"
+            path.write_text(
+                "measured 9.7x prefill elimination on WebVoyager\n",
+                encoding="utf-8",
+            )
+            _commit_all(d)
+
+            path.write_text(
+                "measured 9.7x prefill elimination on WebVoyager\n"
+                "new clean line\n",
+                encoding="utf-8",
+            )
+            subprocess.run(["git", "add", "legacy.md"], cwd=d, check=True, capture_output=True)
+
+            self.assertEqual(cpl.main(["--audit-staged", "--root", d]), 0)
 
 
 if __name__ == "__main__":
