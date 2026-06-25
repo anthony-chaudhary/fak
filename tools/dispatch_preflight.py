@@ -158,8 +158,27 @@ def host_check(root: Path, *, max_threads: int | None = None) -> dict[str, Any]:
             "flagged_names": [str(r.get("name")) for r in flagged][:8]}
 
 
+def _codex_ambient_account() -> dict[str, Any]:
+    """Codex authenticates from a single ambient ``~/.codex`` (ChatGPT) login rather
+    than the multi-account switcher, so its 'account check' is just: is codex logged
+    in? A present ``~/.codex/auth.json`` ⇒ available, with a synthetic ambient
+    account; absent ⇒ not available (the operator must ``codex login``)."""
+    home = Path(os.path.expanduser("~")) / ".codex"
+    auth = home / "auth.json"
+    if auth.exists():
+        return {"available": True, "tag": "codex-ambient", "dir": str(home),
+                "tier": 1, "model": None, "reason": "ambient ~/.codex login"}
+    return {"available": False, "tag": None, "dir": None, "tier": None,
+            "model": None, "reason": "no ~/.codex/auth.json — run `codex login`"}
+
+
 def account_check(root: Path, *, work_kind: str, product: str) -> dict[str, Any]:
-    """fleet_accounts.py route ⇒ the switcher's pick. ok+account ⇒ a free worker."""
+    """fleet_accounts.py route ⇒ the switcher's pick. ok+account ⇒ a free worker.
+
+    Codex is the exception: it has no switcher roster (single ambient login), so its
+    availability is read straight from ``~/.codex`` rather than the switcher."""
+    if product == "codex":
+        return _codex_ambient_account()
     sw = root / "tools" / "fleet_accounts.py"
     if not sw.exists():
         return {"available": False, "error": f"switcher not found: {sw}"}
@@ -534,6 +553,7 @@ def live_resolve_worker_pids(
 _PRODUCT_BACKENDS = {
     "claude": ("claude",),
     "opencode": ("opencode",),
+    "codex": ("codex",),
 }
 
 

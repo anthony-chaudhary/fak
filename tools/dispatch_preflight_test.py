@@ -336,6 +336,32 @@ class WorkerCountTest(unittest.TestCase):
         self.assertEqual(mod.proc_worker_count(ROOT, product="opencode"), 2)
         self.assertEqual(seen["product"], "opencode")
 
+    def test_account_check_codex_uses_ambient_login(self) -> None:
+        # Codex has no switcher roster — its availability is read from ~/.codex.
+        import tempfile, os as _os
+        mod = load()
+        with tempfile.TemporaryDirectory() as home:
+            old = _os.environ.get("USERPROFILE"), _os.environ.get("HOME")
+            try:
+                _os.environ["USERPROFILE"] = home
+                _os.environ["HOME"] = home
+                # No auth.json yet -> not available.
+                out = mod.account_check(ROOT, work_kind="engineering", product="codex")
+                self.assertFalse(out["available"])
+                # Create the login -> available, ambient account, switcher NOT consulted.
+                codex = Path(home) / ".codex"
+                codex.mkdir(parents=True, exist_ok=True)
+                (codex / "auth.json").write_text("{}", encoding="utf-8")
+                out = mod.account_check(ROOT, work_kind="engineering", product="codex")
+                self.assertTrue(out["available"])
+                self.assertEqual(out["tag"], "codex-ambient")
+            finally:
+                for k, v in zip(("USERPROFILE", "HOME"), old):
+                    if v is None:
+                        _os.environ.pop(k, None)
+                    else:
+                        _os.environ[k] = v
+
     def test_live_resolve_worker_pids_filters_by_backend_sidecar(self) -> None:
         import tempfile
         mod = load()

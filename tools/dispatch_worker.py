@@ -43,7 +43,7 @@ from typing import Any, Callable, Sequence
 
 SCHEMA = "fleet-dispatch-worker/1"
 
-BACKENDS = ("claude", "opencode")
+BACKENDS = ("claude", "opencode", "codex")
 DEFAULT_BACKEND = "claude"
 
 # Default wall-clock cap on a spawned worker session (seconds). A dispatch worker

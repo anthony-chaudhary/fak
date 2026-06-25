@@ -505,6 +505,27 @@ class BuildWorkerCommandTest(unittest.TestCase):
             mod.build_worker_command("opencode", "PROMPT", None),
             ["opencode", "run", "--dangerously-skip-permissions", "PROMPT"])
 
+    def test_codex_command_shape(self) -> None:
+        mod = load()
+        self.assertEqual(
+            mod.build_worker_command("codex", "PROMPT", None),
+            ["codex", "exec", "--dangerously-bypass-approvals-and-sandbox",
+             "--skip-git-repo-check", "PROMPT"])
+
+    def test_codex_command_pins_model(self) -> None:
+        mod = load()
+        self.assertEqual(
+            mod.build_worker_command("codex", "PROMPT", "gpt-5.5"),
+            ["codex", "exec", "--dangerously-bypass-approvals-and-sandbox",
+             "--skip-git-repo-check", "-m", "gpt-5.5", "PROMPT"])
+
+    def test_codex_env_uses_codex_home_not_claude_vars(self) -> None:
+        mod = load()
+        env = mod.codex_worker_env("/some/.codex", "tools", Path("/ws"))
+        self.assertEqual(env.get("CODEX_HOME"), "/some/.codex")
+        self.assertNotIn("CLAUDE_CONFIG_DIR", env)
+        self.assertNotIn("CLAUDE_CODE_OAUTH_TOKEN", env)
+
     def test_unknown_backend_rejected(self) -> None:
         mod = load()
         with self.assertRaises(ValueError):

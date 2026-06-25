@@ -72,8 +72,8 @@ LOOP_ID_PREFIX = "issue-resolve-dispatch"
 #   opencode = glm-5.2 via the zai-coding-plan accounts (t2) -- a SEPARATE quota
 #              pool that sits idle. Routing a lane (e.g. docs, where glm is proven)
 #              to opencode relieves the opus weekly-quota throughput ceiling.
-BACKENDS = ("claude", "opencode")
-_BACKEND_PRODUCT = {"claude": "claude", "opencode": "opencode"}
+BACKENDS = ("claude", "opencode", "codex")
+_BACKEND_PRODUCT = {"claude": "claude", "opencode": "opencode", "codex": "codex"}
 
 
 def repo_root() -> Path:
@@ -339,6 +339,17 @@ def build_worker_command(backend: str, prompt: str, model: str | None) -> list[s
             cmd += ["-m", model]  # pin the exact model so the run is reproducible/traced
         cmd.append(prompt)
         return cmd
+    if backend == "codex":
+        # `codex exec` is the headless analogue of `claude -p` / `opencode run`;
+        # --dangerously-bypass-approvals-and-sandbox is the full-access mode (we run
+        # in the repo, already externally bounded by fak guard + the trunk guard).
+        # --skip-git-repo-check keeps it from refusing in a worktree edge case.
+        cmd = ["codex", "exec", "--dangerously-bypass-approvals-and-sandbox",
+               "--skip-git-repo-check"]
+        if model:
+            cmd += ["-m", model]
+        cmd.append(prompt)
+        return cmd
     raise ValueError(f"unknown backend {backend!r}; expected one of {BACKENDS}")
 
 
@@ -378,6 +389,20 @@ def opencode_worker_env(account_dir: str | None, lane: str, workspace: Path,
     env.pop("CLAUDE_CODE_OAUTH_TOKEN", None)
     if account_dir:
         env["XDG_CONFIG_HOME"] = _opencode_config_home(account_dir, runs_dir)
+    return env
+
+
+def codex_worker_env(account_dir: str | None, lane: str, workspace: Path) -> dict[str, str]:
+    """Child env for a codex (`codex exec`) worker. Codex authenticates from the
+    ambient ``~/.codex`` (one ChatGPT login) rather than the multi-account switcher,
+    so there is no per-account dir to pin — just clear the claude-only vars and stamp
+    the self-describing dispatch vars. When a per-account CODEX_HOME dir IS supplied
+    (future multi-account codex), honor it so the run is attributed to that account."""
+    env = dispatch_worker.child_env(lane, "codex", workspace)
+    env.pop("CLAUDE_CONFIG_DIR", None)
+    env.pop("CLAUDE_CODE_OAUTH_TOKEN", None)
+    if account_dir:
+        env["CODEX_HOME"] = account_dir
     return env
 
 
@@ -1021,6 +1046,8 @@ def evaluate(root: Path, *, max_workers: int, work_kind: str, lane: str | None,
 
     if backend == "claude":
         env = issue_dispatch.worker_env(acct.get("dir"), chosen_lane, root)
+    elif backend == "codex":
+        env = codex_worker_env(acct.get("dir"), chosen_lane, root)
     else:
         env = opencode_worker_env(acct.get("dir"), chosen_lane, root, runs_dir)
     env["FLEET_RESOLVE_ISSUE"] = str(target)
