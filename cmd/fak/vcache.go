@@ -2,16 +2,22 @@ package main
 
 import (
 	"bufio"
+	"bytes"
+	"encoding/csv"
 	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
+	"strconv"
 	"strings"
 
+	"github.com/anthony-chaudhary/fak/internal/vcachecal"
 	"github.com/anthony-chaudhary/fak/internal/vcachechain"
 	"github.com/anthony-chaudhary/fak/internal/vcachegov"
+	"github.com/anthony-chaudhary/fak/internal/vcachescore"
 )
 
 func cmdVCache(argv []string) {
@@ -32,6 +38,8 @@ func runVCache(stdout, stderr io.Writer, argv []string) int {
 		return runVCacheProveTelemetry(stdout, stderr, argv[1:])
 	case "prove-recall":
 		return runVCacheProveRecall(stdout, stderr, argv[1:])
+	case "score", "bench":
+		return runVCacheScore(stdout, stderr, argv[1:])
 	case "-h", "--help", "help":
 		vcacheUsage(stdout)
 		return 0
@@ -52,6 +60,13 @@ func vcacheUsage(w io.Writer) {
                    [--read-mult F] [--write-5m-mult F] [--write-1h-mult F]
   fak vcache prove-recall [--json] [--prefix-tokens N] [--unit-tokens N]
                    [--read-mult F] [--siblings N]
+  fak vcache score|bench [--json] [--out FILE] [--telemetry FILE] [--two-x F]
+                   [--anchor-tokens N --suffix-tokens N --requests N]
+                   [--read-mult F --write-mult F --write-5m-mult F --write-1h-mult F]
+                   [--zipf-s F --anchors N --anchors-file FILE --target-coverage F]
+                   [--index-out FILE]
+                   [--true-warm N --false-warm N --true-cold N --false-cold N]
+                   [--recall-prefix-tokens N --recall-unit-tokens N --recall-siblings N --recall-read-mult F]
 
 status reports what is actually up: the M5 governor is a local, off-path policy
 engine; the M4 chains & recall engine is off-path and gated OFF by default;
@@ -67,6 +82,8 @@ prove-recall runs the deterministic M4 cost-gate proof (the §11.0 headline): a
 single ~10-token unit recalled from a long warm prefix is almost always a net LOSS,
 so the gate REFUSES it; rebuild wins only for amortized fan-out. Exit 0 = rebuild
 allowed (PROVEN); exit 1 = refused (REFUTED); exit 2 = usage error.
+score/bench composes planned or observed savings, workload concentration,
+false-warm risk, recall risk, and a hot-anchor index into one 2x agent-dev gate.
 
 `)
 }
@@ -295,6 +312,163 @@ func runVCacheProveTelemetry(stdout, stderr io.Writer, argv []string) int {
 	return vcacheProofExit(proof.Status)
 }
 
+func runVCacheScore(stdout, stderr io.Writer, argv []string) int {
+	def := vcachescore.DefaultInput()
+	fs := flag.NewFlagSet("vcache score", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	asJSON := fs.Bool("json", false, "emit machine-readable scorecard")
+	out := fs.String("out", "", "write machine-readable scorecard JSON to this file")
+	telemetry := fs.String("telemetry", "", "optional provider telemetry JSONL file ('-' for stdin)")
+	anchorsFile := fs.String("anchors-file", "", "optional ranked anchor workload JSONL/JSON/CSV file ('-' for stdin)")
+	indexOut := fs.String("index-out", "", "write selected hot-anchor index JSON to this file")
+	anchor := fs.Float64("anchor-tokens", def.Star.AnchorTokens, "cacheable anchor size in input tokens")
+	suffix := fs.Float64("suffix-tokens", def.Star.SuffixTokens, "fresh suffix tokens per sibling request")
+	requests := fs.Int("requests", def.Star.Requests, "number of sibling requests sharing the anchor")
+	minPrefix := fs.Float64("min-prefix-tokens", def.Star.MinPrefixTokens, "provider minimum cacheable prefix")
+	readMult := fs.Float64("read-mult", def.Star.ReadMult, "provider cached-read input-token multiplier")
+	writeMult := fs.Float64("write-mult", def.Star.WriteMult, "provider cache-write input-token multiplier")
+	write5mMult := fs.Float64("write-5m-mult", vcachegov.WriteMult5Minutes, "5m cache-write input-token multiplier for telemetry")
+	write1hMult := fs.Float64("write-1h-mult", vcachegov.WriteMult1Hour, "1h cache-write input-token multiplier for telemetry")
+	content := fs.String("content", "public", "prefix content class: public, secret, regulated")
+	zipfS := fs.Float64("zipf-s", 1.74, "synthetic workload Zipf exponent for hot-anchor concentration")
+	anchors := fs.Int("anchors", 1000, "synthetic anchor universe size")
+	targetCoverage := fs.Float64("target-coverage", def.TargetCoverage, "coverage target for the hot-anchor index")
+	twoX := fs.Float64("two-x", def.TwoXThreshold, "multiplier gate required for success")
+	maxFalseWarm := fs.Float64("max-false-warm-rate", def.MaxFalseWarmRate, "maximum tolerated false-warm rate")
+	trueWarm := fs.Int("true-warm", 0, "prediction-error count: predicted warm and cache_read>0")
+	falseWarm := fs.Int("false-warm", 0, "prediction-error count: predicted warm and cache_read=0")
+	trueCold := fs.Int("true-cold", 0, "prediction-error count: predicted cold and cache_read=0")
+	falseCold := fs.Int("false-cold", 0, "prediction-error count: predicted cold and cache_read>0")
+	recallPrefix := fs.Int64("recall-prefix-tokens", def.Recall.PrefixTokens, "M4 recall proof prefix tokens (P)")
+	recallUnit := fs.Int64("recall-unit-tokens", def.Recall.UnitTokens, "M4 recall proof unit tokens (U)")
+	recallSiblings := fs.Int("recall-siblings", def.Recall.Siblings, "M4 recall proof sibling count (S)")
+	recallReadMult := fs.Float64("recall-read-mult", def.Recall.ReadMult, "M4 recall cached-read token multiplier")
+	if err := fs.Parse(argv); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			return 0
+		}
+		return 2
+	}
+	if strings.TrimSpace(*telemetry) == "-" && strings.TrimSpace(*anchorsFile) == "-" {
+		fmt.Fprintln(stderr, "fak vcache score: --telemetry - and --anchors-file - cannot both read stdin")
+		return 2
+	}
+
+	in := def
+	in.Star = vcachegov.StarSavingsInput{
+		AnchorTokens:    *anchor,
+		SuffixTokens:    *suffix,
+		Requests:        *requests,
+		MinPrefixTokens: *minPrefix,
+		ReadMult:        *readMult,
+		WriteMult:       *writeMult,
+		Secret:          vcachegov.ClassifyPrefix(strings.ToLower(strings.TrimSpace(*content))),
+	}
+	in.TelemetryReadMult = *readMult
+	in.TelemetryWrite5m = *write5mMult
+	in.TelemetryWrite1h = *write1hMult
+	in.Ranked = vcachescore.SyntheticZipfWorkload(*zipfS, *anchors)
+	in.TargetCoverage = *targetCoverage
+	in.TwoXThreshold = *twoX
+	in.MaxFalseWarmRate = *maxFalseWarm
+	in.Prediction = vcachecal.PredictionError{
+		Total:     *trueWarm + *falseWarm + *trueCold + *falseCold,
+		TrueWarm:  *trueWarm,
+		FalseWarm: *falseWarm,
+		TrueCold:  *trueCold,
+		FalseCold: *falseCold,
+	}
+	in.Recall = vcachechain.ProveRecallInput{
+		PrefixTokens: *recallPrefix,
+		UnitTokens:   *recallUnit,
+		ReadMult:     *recallReadMult,
+		Siblings:     *recallSiblings,
+	}
+	if strings.TrimSpace(*anchorsFile) != "" {
+		ranked, err := readVCacheAnchors(*anchorsFile, os.Stdin)
+		if err != nil {
+			fmt.Fprintf(stderr, "fak vcache score: %v\n", err)
+			return 2
+		}
+		in.Ranked = ranked
+	}
+	in.Ranked = vcachescore.NormalizeRanked(in.Ranked)
+	if strings.TrimSpace(*telemetry) != "" {
+		rows, err := readVCacheTelemetry(*telemetry, os.Stdin)
+		if err != nil {
+			fmt.Fprintf(stderr, "fak vcache score: %v\n", err)
+			return 2
+		}
+		in.TelemetryRows = rows
+	}
+
+	rep := vcachescore.Score(in)
+	if strings.TrimSpace(*indexOut) != "" {
+		artifact := vcachescore.BuildIndexArtifact(in.Ranked, rep.Index.TargetCoverage)
+		if err := writeJSONFile(*indexOut, artifact); err != nil {
+			fmt.Fprintf(stderr, "fak vcache score: %v\n", err)
+			return 2
+		}
+	}
+	if strings.TrimSpace(*out) != "" {
+		if err := writeJSONFile(*out, rep); err != nil {
+			fmt.Fprintf(stderr, "fak vcache score: %v\n", err)
+			return 2
+		}
+	}
+	if *asJSON {
+		if code := writeJSON(stdout, rep); code != 0 {
+			return code
+		}
+		if rep.TwoXBetter {
+			return 0
+		}
+		return 1
+	}
+
+	fmt.Fprintf(stdout, "status: %s\n", rep.Status)
+	fmt.Fprintf(stdout, "grade: %s (%d/100)\n", rep.Grade, rep.Score)
+	fmt.Fprintf(stdout, "active source: %s\n", rep.ActiveSource)
+	fmt.Fprintf(stdout, "active multiplier: %.2fx (target %.2fx)\n", rep.ActiveMultiplier, rep.TwoXThreshold)
+	fmt.Fprintf(stdout, "2x gate: %s\n", passFail(rep.TwoXBetter))
+	fmt.Fprintf(stdout, "planned proof: %s saved %.1f / %.1f (%.1f%%)\n",
+		rep.Planned.Status, rep.Planned.SavedTokenEquiv, rep.Planned.BaselineTokenEquiv, rep.Planned.SavedPct)
+	if rep.Observed != nil {
+		fmt.Fprintf(stdout, "observed proof: %s saved %.1f / %.1f (%.2f%%), first positive request %s\n",
+			rep.Observed.Status,
+			rep.Observed.SavedTokenEquiv,
+			rep.Observed.BaselineTokenEquiv,
+			rep.Observed.SavedPct,
+			formatObservedPositive(rep.Observed.FirstPositiveRequest))
+	}
+	fmt.Fprintf(stdout, "concentration: s=%.2f measured=%v defeated=%v\n",
+		rep.Concentration.ZipfS, rep.Concentration.Measured, rep.Concentration.Defeated)
+	fmt.Fprintf(stdout, "hot-anchor index: top %d covers %.1f%% (target %.1f%%)\n",
+		rep.Index.AnchorCount, 100*rep.Index.Coverage, 100*rep.Index.TargetCoverage)
+	if strings.TrimSpace(*indexOut) != "" {
+		fmt.Fprintf(stdout, "hot-anchor index artifact: %s\n", *indexOut)
+	}
+	fmt.Fprintf(stdout, "prediction errors: false-warm %.2f%% false-cold %.2f%% (%d samples)\n",
+		100*rep.Prediction.FalseWarmRate, 100*rep.Prediction.FalseColdRate, rep.Prediction.Total)
+	fmt.Fprintf(stdout, "recall proof: %s decision=%s break-even siblings=%s\n",
+		rep.Recall.Status, rep.Recall.Decision, formatBreakEven(rep.Recall.BreakEvenSiblings))
+	if len(rep.Risks) > 0 {
+		fmt.Fprintln(stdout, "risks:")
+		for _, risk := range rep.Risks {
+			fmt.Fprintf(stdout, "- %s\n", risk)
+		}
+	}
+	fmt.Fprintln(stdout, "actions:")
+	for _, action := range rep.Actions {
+		fmt.Fprintf(stdout, "- %s\n", action)
+	}
+	fmt.Fprintln(stdout, "correctness depends on cache hit: false")
+	if rep.TwoXBetter {
+		return 0
+	}
+	return 1
+}
+
 func defaultVCacheStatus() vcacheStatusReport {
 	return vcacheStatusReport{
 		Status:       "M5 governor up; M4 chains & recall up (gated OFF by default); full vCache provider loop not yet live",
@@ -367,6 +541,19 @@ func writeJSON(w io.Writer, v any) int {
 	return 0
 }
 
+func writeJSONFile(path string, v any) error {
+	b, err := json.MarshalIndent(v, "", "  ")
+	if err != nil {
+		return err
+	}
+	if dir := filepath.Dir(path); dir != "." && dir != "" {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			return err
+		}
+	}
+	return os.WriteFile(path, append(b, '\n'), 0o644)
+}
+
 func vcacheProofExit(s vcachegov.ProofStatus) int {
 	if s == vcachegov.ProofProven {
 		return 0
@@ -386,6 +573,209 @@ func formatObservedPositive(n int) string {
 		return "never"
 	}
 	return fmt.Sprintf("%d", n)
+}
+
+func passFail(ok bool) string {
+	if ok {
+		return "pass"
+	}
+	return "fail"
+}
+
+type vcacheAnchorInput struct {
+	Key              string  `json:"key"`
+	Anchor           string  `json:"anchor"`
+	ID               string  `json:"id"`
+	PrefixDigest     string  `json:"prefix_digest"`
+	Frequency        float64 `json:"frequency"`
+	Freq             float64 `json:"freq"`
+	Count            float64 `json:"count"`
+	AccessRatePerSec float64 `json:"access_rate_per_sec"`
+	Size             float64 `json:"size"`
+	Tokens           float64 `json:"tokens"`
+	PrefixTokens     float64 `json:"prefix_tokens"`
+	ReuseDensity     float64 `json:"reuse_density"`
+	Reuse            float64 `json:"reuse"`
+	Reuses           float64 `json:"reuses"`
+	ExpectedReuse    float64 `json:"expected_reuse"`
+	Weight           float64 `json:"weight"`
+}
+
+func readVCacheAnchors(path string, stdin io.Reader) ([]vcachecal.RankedVBlock, error) {
+	var data []byte
+	var err error
+	if path == "-" {
+		if stdin == nil {
+			return nil, errors.New("stdin is not available")
+		}
+		data, err = io.ReadAll(stdin)
+	} else {
+		data, err = os.ReadFile(path)
+	}
+	if err != nil {
+		return nil, err
+	}
+	trimmed := bytes.TrimSpace(data)
+	if len(trimmed) == 0 {
+		return nil, errors.New("anchor workload is empty")
+	}
+
+	var rows []vcacheAnchorInput
+	switch trimmed[0] {
+	case '[':
+		if err := json.Unmarshal(trimmed, &rows); err != nil {
+			return nil, err
+		}
+	case '{':
+		rows, err = readVCacheAnchorJSONL(trimmed)
+	default:
+		rows, err = readVCacheAnchorCSV(trimmed)
+	}
+	if err != nil {
+		return nil, err
+	}
+	ranked := vcachescore.NormalizeRanked(anchorInputsToRanked(rows))
+	if len(ranked) == 0 {
+		return nil, errors.New("anchor workload has no positive-weight rows")
+	}
+	return ranked, nil
+}
+
+func readVCacheAnchorJSONL(raw []byte) ([]vcacheAnchorInput, error) {
+	sc := bufio.NewScanner(bytes.NewReader(raw))
+	sc.Buffer(make([]byte, 0, 64*1024), 4*1024*1024)
+	var rows []vcacheAnchorInput
+	lineNo := 0
+	for sc.Scan() {
+		lineNo++
+		line := strings.TrimSpace(sc.Text())
+		if line == "" {
+			continue
+		}
+		var row vcacheAnchorInput
+		if err := json.Unmarshal([]byte(line), &row); err != nil {
+			return nil, fmt.Errorf("anchor line %d: %w", lineNo, err)
+		}
+		rows = append(rows, row)
+	}
+	return rows, sc.Err()
+}
+
+func readVCacheAnchorCSV(raw []byte) ([]vcacheAnchorInput, error) {
+	cr := csv.NewReader(bytes.NewReader(raw))
+	cr.TrimLeadingSpace = true
+	cr.FieldsPerRecord = -1
+	records, err := cr.ReadAll()
+	if err != nil {
+		return nil, err
+	}
+	if len(records) == 0 {
+		return nil, errors.New("anchor CSV is empty")
+	}
+	header := map[string]int{}
+	for i, h := range records[0] {
+		header[normalizeVCacheAnchorField(h)] = i
+	}
+	rows := make([]vcacheAnchorInput, 0, len(records)-1)
+	for i, rec := range records[1:] {
+		row, err := parseVCacheAnchorCSVRecord(header, rec)
+		if err != nil {
+			return nil, fmt.Errorf("anchor CSV row %d: %w", i+2, err)
+		}
+		rows = append(rows, row)
+	}
+	return rows, nil
+}
+
+func parseVCacheAnchorCSVRecord(header map[string]int, rec []string) (vcacheAnchorInput, error) {
+	var row vcacheAnchorInput
+	row.Key = csvString(header, rec, "key", "anchor", "id", "prefix_digest")
+	var err error
+	if row.Frequency, err = csvFloat(header, rec, "frequency", "freq", "count", "access_rate_per_sec"); err != nil {
+		return row, err
+	}
+	if row.Size, err = csvFloat(header, rec, "size", "tokens", "prefix_tokens"); err != nil {
+		return row, err
+	}
+	if row.ReuseDensity, err = csvFloat(header, rec, "reuse_density", "reuse", "reuses", "expected_reuse"); err != nil {
+		return row, err
+	}
+	if row.Weight, err = csvFloat(header, rec, "weight"); err != nil {
+		return row, err
+	}
+	return row, nil
+}
+
+func normalizeVCacheAnchorField(s string) string {
+	s = strings.ToLower(strings.TrimSpace(s))
+	s = strings.ReplaceAll(s, "-", "_")
+	s = strings.ReplaceAll(s, " ", "_")
+	return s
+}
+
+func csvString(header map[string]int, rec []string, names ...string) string {
+	for _, name := range names {
+		if idx, ok := header[name]; ok && idx < len(rec) {
+			return strings.TrimSpace(rec[idx])
+		}
+	}
+	return ""
+}
+
+func csvFloat(header map[string]int, rec []string, names ...string) (float64, error) {
+	for _, name := range names {
+		idx, ok := header[name]
+		if !ok || idx >= len(rec) {
+			continue
+		}
+		s := strings.TrimSpace(rec[idx])
+		if s == "" {
+			return 0, nil
+		}
+		v, err := strconv.ParseFloat(s, 64)
+		if err != nil {
+			return 0, fmt.Errorf("%s=%q: %w", name, s, err)
+		}
+		return v, nil
+	}
+	return 0, nil
+}
+
+func anchorInputsToRanked(rows []vcacheAnchorInput) []vcachecal.RankedVBlock {
+	out := make([]vcachecal.RankedVBlock, 0, len(rows))
+	for _, row := range rows {
+		v := vcachecal.RankedVBlock{
+			Key:          firstAnchorString(row.Key, row.Anchor, row.ID, row.PrefixDigest),
+			Frequency:    firstAnchorFloat(row.Frequency, row.Freq, row.Count, row.AccessRatePerSec),
+			Size:         firstAnchorFloat(row.Size, row.Tokens, row.PrefixTokens),
+			ReuseDensity: firstAnchorFloat(row.ReuseDensity, row.Reuse, row.Reuses, row.ExpectedReuse),
+		}
+		if row.Weight != 0 {
+			v.Frequency = row.Weight
+			v.Size = 1
+			v.ReuseDensity = 1
+		}
+		out = append(out, v)
+	}
+	return out
+}
+
+func firstAnchorString(values ...string) string {
+	for _, v := range values {
+		if strings.TrimSpace(v) != "" {
+			return strings.TrimSpace(v)
+		}
+	}
+	return ""
+}
+
+func firstAnchorFloat(values ...float64) float64 {
+	for _, v := range values {
+		if v != 0 {
+			return v
+		}
+	}
+	return 0
 }
 
 type vcacheTelemetryJSONLRow struct {

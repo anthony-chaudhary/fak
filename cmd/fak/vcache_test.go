@@ -10,6 +10,7 @@ import (
 
 	"github.com/anthony-chaudhary/fak/internal/vcachechain"
 	"github.com/anthony-chaudhary/fak/internal/vcachegov"
+	"github.com/anthony-chaudhary/fak/internal/vcachescore"
 )
 
 func TestRunVCacheStatusReportsM5AndRemainingIssues(t *testing.T) {
@@ -309,5 +310,111 @@ func TestRunVCacheProveTelemetryRefutesFirstThreeClaudeProbeTurns(t *testing.T) 
 	if !strings.Contains(out.String(), "status: REFUTED") ||
 		!strings.Contains(out.String(), "did not repay cache write cost") {
 		t.Fatalf("three-turn output unexpected:\n%s", out.String())
+	}
+}
+
+func TestRunVCacheScoreDefaultPassesTwoXGate(t *testing.T) {
+	var out, errb bytes.Buffer
+	if code := runVCache(&out, &errb, []string{"score", "--json"}); code != 0 {
+		t.Fatalf("score exit=%d stderr=%s output=%s", code, errb.String(), out.String())
+	}
+	var rep vcachescore.Report
+	if err := json.Unmarshal(out.Bytes(), &rep); err != nil {
+		t.Fatalf("invalid json: %v\n%s", err, out.String())
+	}
+	if rep.Schema != "fak.vcache.score.v1" || rep.Status != "2x_ready" || !rep.TwoXBetter {
+		t.Fatalf("score = %+v, want default 2x-ready report", rep)
+	}
+}
+
+func TestRunVCacheScoreTelemetryJSONAndOut(t *testing.T) {
+	dir := t.TempDir()
+	telemetry := filepath.Join(dir, "openai.jsonl")
+	if err := os.WriteFile(telemetry, []byte(`{"usage":{"input_tokens":2006,"input_tokens_details":{"cached_tokens":1920}}}`+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	artifact := filepath.Join(dir, "nested", "score.json")
+	var out, errb bytes.Buffer
+	if code := runVCache(&out, &errb, []string{"score", "--json", "--telemetry", telemetry, "--out", artifact}); code != 0 {
+		t.Fatalf("score telemetry exit=%d stderr=%s output=%s", code, errb.String(), out.String())
+	}
+	var stdoutRep vcachescore.Report
+	if err := json.Unmarshal(out.Bytes(), &stdoutRep); err != nil {
+		t.Fatalf("stdout is invalid json: %v\n%s", err, out.String())
+	}
+	if !stdoutRep.TwoXBetter || stdoutRep.ActiveSource != "telemetry" || stdoutRep.Observed == nil {
+		t.Fatalf("stdout report = %+v, want telemetry-backed 2x report", stdoutRep)
+	}
+	var fileRep vcachescore.Report
+	b, err := os.ReadFile(artifact)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(b, &fileRep); err != nil {
+		t.Fatalf("artifact is invalid json: %v\n%s", err, string(b))
+	}
+	if fileRep.ActiveSource != "telemetry" || fileRep.ActiveMultiplier != stdoutRep.ActiveMultiplier {
+		t.Fatalf("artifact report = %+v, stdout multiplier=%g", fileRep, stdoutRep.ActiveMultiplier)
+	}
+}
+
+func TestRunVCacheScoreAnchorsFileWritesIndexArtifact(t *testing.T) {
+	dir := t.TempDir()
+	anchors := filepath.Join(dir, "anchors.jsonl")
+	if err := os.WriteFile(anchors, []byte(strings.Join([]string{
+		`{"key":"tail","weight":10}`,
+		`{"key":"head","weight":60}`,
+		`{"key":"mid","weight":30}`,
+	}, "\n")), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	index := filepath.Join(dir, "nested", "anchor-index.json")
+	var out, errb bytes.Buffer
+	if code := runVCache(&out, &errb, []string{"score", "--json", "--anchors-file", anchors, "--index-out", index}); code != 0 {
+		t.Fatalf("score anchors exit=%d stderr=%s output=%s", code, errb.String(), out.String())
+	}
+	var rep vcachescore.Report
+	if err := json.Unmarshal(out.Bytes(), &rep); err != nil {
+		t.Fatalf("stdout is invalid json: %v\n%s", err, out.String())
+	}
+	if rep.Index.AnchorCount != 2 || rep.Index.Coverage != 0.9 {
+		t.Fatalf("report index=%+v, want top-2 covering 90%%", rep.Index)
+	}
+	b, err := os.ReadFile(index)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var artifact vcachescore.AnchorIndexArtifact
+	if err := json.Unmarshal(b, &artifact); err != nil {
+		t.Fatalf("index artifact is invalid json: %v\n%s", err, string(b))
+	}
+	if artifact.Schema != "fak.vcache.anchor_index.v1" || len(artifact.Entries) != 2 {
+		t.Fatalf("artifact=%+v, want v1 top-2 index", artifact)
+	}
+	if artifact.Entries[0].Key != "head" || artifact.Entries[1].Key != "mid" {
+		t.Fatalf("entries=%+v, want sorted hot-anchor keys", artifact.Entries)
+	}
+}
+
+func TestRunVCacheBenchAliasTelemetryJSON(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "openai-responses.jsonl")
+	if err := os.WriteFile(path, []byte(`{"usage":{"input_tokens":2006,"input_tokens_details":{"cached_tokens":1920}}}`+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var out, errb bytes.Buffer
+	if code := runVCache(&out, &errb, []string{"bench", "--telemetry", path, "--json"}); code != 0 {
+		t.Fatalf("bench --json exit=%d stderr=%s output=%s", code, errb.String(), out.String())
+	}
+	var rep struct {
+		Schema       string  `json:"schema"`
+		ActiveSource string  `json:"active_source"`
+		TwoXBetter   bool    `json:"two_x_better"`
+		Multiplier   float64 `json:"active_multiplier"`
+	}
+	if err := json.Unmarshal(out.Bytes(), &rep); err != nil {
+		t.Fatalf("invalid json: %v\n%s", err, out.String())
+	}
+	if rep.Schema != "fak.vcache.score.v1" || rep.ActiveSource != "telemetry" || !rep.TwoXBetter || rep.Multiplier < 7 {
+		t.Fatalf("score json = %+v, want telemetry-backed 2x score", rep)
 	}
 }
