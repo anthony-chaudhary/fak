@@ -105,15 +105,58 @@ func CompactAnthropicHistory(raw []byte, budget int) []byte {
 	//    orphan a tool_result (a user turn carrying tool_result blocks needs the assistant
 	//    tool_use turn before it). Everything between pfxEnd+1 and keepStart is dropped.
 	keepStart := chooseKeptWindow(elems, pfxEnd+1, budget)
+	if keepStart <= pfxEnd+1 || keepStart >= len(elems) {
+		return raw // nothing actually drops, or the window is empty (budget < one message) — identity
+	}
+
+	// 3b. Role alternation (F7): the synthetic stub is one message inserted BETWEEN the
+	//     protected prefix (ends at pfxEnd) and the kept window (starts at keepStart). Anthropic
+	//     rejects two consecutive same-role messages (400), and the stub's content is text — so
+	//     it must carry a role that alternates with BOTH neighbors. The stub role is the opposite
+	//     of the prefix's last message role; then we snap keepStart so the kept window's first
+	//     message alternates with the stub (i.e. matches the prefix-last role). Dropping one more
+	//     message flips the kept-first role, so this is always reachable while keepStart stays a
+	//     real drop. When pfxEnd<0 (system-only breakpoint) there is no preceding message: the
+	//     stub leads the array, so it must alternate only with the kept window — pick the opposite
+	//     of the kept-first role.
+	prefixLastRole := ""
+	if pfxEnd >= 0 {
+		prefixLastRole = messageRole(elems[pfxEnd])
+	}
+	stubRole := "user"
+	if prefixLastRole == "user" {
+		stubRole = "assistant"
+	}
+	if prefixLastRole == "" { // system-only: alternate against the kept window head instead
+		if messageRole(elems[keepStart]) == "user" {
+			stubRole = "assistant"
+		} else {
+			stubRole = "user"
+		}
+	}
+	// Snap the kept window so its first message alternates with the stub. If it collides,
+	// drop one more message (flipping the kept-first role); never cross back over pfxEnd+1.
+	if keepStart < len(elems) && messageRole(elems[keepStart]) == stubRole {
+		if keepStart+1 < len(elems) {
+			keepStart++
+		} else {
+			return raw // cannot fix alternation without emptying the window — fail safe
+		}
+	}
 	if keepStart <= pfxEnd+1 {
-		return raw // nothing actually drops (or the window swallowed the whole suffix) — identity
+		return raw // the alternation snap swallowed the whole drop — identity
+	}
+	// A kept window that opens on a user tool_result still needs its assistant tool_use; the
+	// snap above only moves the boundary FORWARD, so re-assert the orphan guard once more.
+	if messageHasToolResult(elems[keepStart]) {
+		return raw // would orphan a tool_result after the role snap — fail safe
 	}
 	dropped := keepStart - (pfxEnd + 1)
 
 	// 4. Splice on ORIGINAL bytes. The prefix span [0, spans[pfxEnd].end) (or just the
 	//    array-open when pfxEnd<0) is copied verbatim; then the stub; then the kept
 	//    elements verbatim; then the verbatim tail from the array close onward.
-	out, ok := spliceCompacted(raw, spans, pfxEnd, keepStart, len(elems), dropped)
+	out, ok := spliceCompacted(raw, spans, pfxEnd, keepStart, len(elems), dropped, stubRole)
 	if !ok {
 		return raw
 	}
@@ -272,7 +315,10 @@ func chooseKeptWindow(elems []json.RawMessage, compactStart, budget int) int {
 	}
 	// Don't orphan a tool_result: if the first kept message is a user turn bearing
 	// tool_result blocks, pull the preceding (assistant tool_use) message into the window.
-	for keep > compactStart && messageHasToolResult(elems[keep]) {
+	// Guard keep < len(elems): a budget so small that even the last message exceeds it leaves
+	// keep == len(elems) (an empty window), and elems[keep] would be out of range — the caller
+	// treats an empty window as identity.
+	for keep > compactStart && keep < len(elems) && messageHasToolResult(elems[keep]) {
 		keep--
 	}
 	if keep < compactStart {
@@ -307,15 +353,31 @@ func messageHasToolResult(el json.RawMessage) bool {
 	return false
 }
 
+// messageRole returns a messages[] element's role ("user"/"assistant"), or "" if it cannot be
+// parsed. Used to keep the synthetic stub alternating with its neighbors (Anthropic rejects two
+// consecutive same-role messages).
+func messageRole(el json.RawMessage) string {
+	var m struct {
+		Role string `json:"role"`
+	}
+	if json.Unmarshal(el, &m) != nil {
+		return ""
+	}
+	return m.Role
+}
+
 // spliceCompacted assembles the rewritten body from original byte spans: the verbatim
 // protected prefix (through the breakpoint message, or just the array open when pfxEnd<0),
 // then a synthetic stub message naming the drop count, then the verbatim kept elements,
 // then the verbatim tail from the array close onward. It never re-serializes a protected or
 // kept element, so their bytes (and thus the cached prefix) are preserved exactly. ok is
 // false if the stub cannot be marshalled (it never realistically fails).
-func spliceCompacted(raw []byte, spans []elementSpan, pfxEnd, keepStart, n, dropped int) ([]byte, bool) {
+func spliceCompacted(raw []byte, spans []elementSpan, pfxEnd, keepStart, n, dropped int, stubRole string) ([]byte, bool) {
+	if stubRole != "user" && stubRole != "assistant" {
+		stubRole = "user"
+	}
 	stub := map[string]any{
-		"role":    "user",
+		"role":    stubRole,
 		"content": fmt.Sprintf("%s%d earlier turn(s) to stay within the context budget; their detail is omitted from this request.", compactStubPrefix, dropped),
 	}
 	stubBytes, err := json.Marshal(stub)

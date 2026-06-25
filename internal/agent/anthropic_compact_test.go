@@ -349,6 +349,51 @@ func TestCompactFiresOnClaudeCodeMultiBreakpointShape(t *testing.T) {
 	}
 }
 
+// assertAlternation fails if any two consecutive messages share a role — Anthropic rejects
+// that with a 400, and the splice's synthetic stub must not introduce it (F7).
+func assertAlternation(t *testing.T, out []byte) {
+	t.Helper()
+	var obj map[string]json.RawMessage
+	if err := json.Unmarshal(out, &obj); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	var ms []struct {
+		Role string `json:"role"`
+	}
+	if err := json.Unmarshal(obj["messages"], &ms); err != nil {
+		t.Fatalf("unmarshal messages: %v", err)
+	}
+	prev := ""
+	for i, m := range ms {
+		if m.Role == prev {
+			t.Fatalf("adjacent %q turns at index %d — alternation broken, Anthropic would 400", m.Role, i)
+		}
+		prev = m.Role
+	}
+}
+
+// TestCompactStubNeverBreaksAlternation is the F7 regression: with the first-breakpoint anchor
+// the protected prefix routinely ends on a USER turn (msg 0), so a hardcoded user-role stub
+// would produce two consecutive user turns. The stub role must alternate with both neighbors.
+// Swept across breakpoint placements, budgets, and message counts.
+func TestCompactStubNeverBreaksAlternation(t *testing.T) {
+	for _, n := range []int{20, 41, 80, 121} {
+		for _, recentBack := range []int{1, 2, 5} {
+			for _, budget := range []int{100, 200, 400, 800} {
+				raw := claudeCodeShapedBody(t, n, recentBack)
+				out := CompactAnthropicHistory(raw, budget)
+				if bytes.Equal(out, raw) {
+					continue // identity is always safe
+				}
+				assertAlternation(t, out)
+				if _, err := DecodeAnthropicMessagesRequest(out); err != nil {
+					t.Fatalf("n=%d recent=%d budget=%d: compacted body failed to decode: %v", n, recentBack, budget, err)
+				}
+			}
+		}
+	}
+}
+
 // TestCompactSystemOnlyBreakpoint covers the case where ONLY the system block carries the
 // cache_control breakpoint (no per-message breakpoint): every message is compactible, the
 // system+array-head prefix is preserved, and the result still decodes.
