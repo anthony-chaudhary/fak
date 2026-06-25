@@ -273,7 +273,7 @@ try {
       $shimErr = Join-Path $env:TEMP 'fak-dogfood-shim.err.log'
       $shim = Start-Process -FilePath $Python `
         -ArgumentList @((Join-Path $FakDir 'experiments\agent-live\local_shim.py'), '--model', $Model, '--port', $ShimPort) `
-        -PassThru -NoNewWindow -RedirectStandardOutput $shimOut -RedirectStandardError $shimErr
+        -PassThru -WindowStyle Hidden -RedirectStandardOutput $shimOut -RedirectStandardError $shimErr
       $script:children += $shim
       if (-not (Wait-Url "http://127.0.0.1:$ShimPort/v1/models" 180)) {
         Get-Content $shimErr -Tail 20 -ErrorAction SilentlyContinue | Write-Host
@@ -327,7 +327,7 @@ try {
   Log "starting kernel: fak $($serveArgs -join ' ')"
   $serveOut = Join-Path $env:TEMP 'fak-dogfood-serve.out.log'
   $serveErr = Join-Path $env:TEMP 'fak-dogfood-serve.err.log'
-  $serve = Start-Process -FilePath $Bin -ArgumentList $serveArgs -PassThru -NoNewWindow `
+  $serve = Start-Process -FilePath $Bin -ArgumentList $serveArgs -PassThru -WindowStyle Hidden `
     -RedirectStandardOutput $serveOut -RedirectStandardError $serveErr
   $script:children += $serve
   # The kernel arm loads the GGUF eagerly BEFORE the listener binds, so /healthz is
@@ -343,17 +343,17 @@ try {
     # A GGUF lacking an embedded BPE tokenizer would SILENTLY drop to the offline
     # MockPlanner (scripted text), not fak's forward. Turn that into a hard failure: the
     # whole point of this backend is the in-kernel forward, so refuse anything else.
-    $planner = try { ($hzBody | ConvertFrom-Json).planner } catch { '' }
+    $planner = ($hzBody | ConvertFrom-Json).planner
     if ($planner -ne 'inkernel') {
-      Die "kernel backend expected planner=inkernel but /healthz reports planner='$planner' — the GGUF may lack an embedded tokenizer (pass FAK_DOGFOOD_TOKENIZER / --tokenizer) or fell back to the mock planner"
+      Die "kernel backend expected planner=inkernel but /healthz reports planner='$planner'; the GGUF may lack an embedded tokenizer or fell back to the mock planner"
     }
-    Log "verified: planner=inkernel (fak's OWN pure-Go forward is serving the wire)"
+    Log "verified: planner=inkernel; fak in-kernel forward is serving the wire"
   }
 
   # ---- resolve the account dir through the switcher ------------------------
-  # ONE call to the switcher's canonical front door: `resolve --faklocal-ok` pins the
-  # named tag (or synthesizes the isolated .claude-faklocal dogfood account for the
-  # 'faklocal' default), returning the config dir in a single flat record.
+  # ONE call to the switcher's canonical front door: resolve --faklocal-ok pins the
+  # named tag, or synthesizes the isolated .claude-faklocal dogfood account for the
+  # faklocal default, returning the config dir in a single flat record.
   function Resolve-AccountDir { param([string]$tag)
     $r = (& $Python (Join-Path $Root 'tools\fleet_accounts.py') `
             resolve --faklocal-ok --account $tag | ConvertFrom-Json)
