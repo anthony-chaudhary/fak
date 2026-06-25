@@ -1,0 +1,92 @@
+# Dogfood-coverage gate + cadence (issue #731).
+#
+# `tools/dogfood_coverage.py` measures how much of the real dev workflow eats the
+# kernel — it cross-checks LIVE behavior (calls `guarded_launch_command`, counts
+# audit rows), folds the KPIs into a `coverage` %, a `dogfood_debt` integer, and an
+# A–F grade, and emits a control-pane JSON payload. It was a one-shot tool: nothing
+# ran it on a cadence or gated on it. This workflow closes both halves:
+#
+#   * GATE     — `--check` exits 1 on any HARD `dogfood_debt > 0`. A regression
+#                (e.g. `FLEET_DOGFOOD_GUARD=0`, or the `fak guard` front door
+#                deleted) flips a HARD KPI and FAILS the build. The hermetic proof
+#                that the gate actually catches that regression is
+#                `tools/dogfood_coverage_gate_test.py` (run first, below).
+#   * CADENCE  — `schedule:` re-runs it daily so the number can't silently rot, and
+#                the `--json` payload is written to the run's step summary so the
+#                coverage % is surfaced over time without anyone re-running it.
+#
+# The HARD KPIs (`fleet_leaf_guarded`, `fak_bin_resolvable`) need a real `fak`
+# binary on the box, so the job BUILDS one into `tools/.bin/` first — exactly where
+# `resolve_fak_bin` looks — before measuring. That makes the green gate meaningful:
+# it asserts the kernel front door actually resolves and wraps a worker on a clean
+# runner, not merely that a flag is set.
+name: dogfood-coverage
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+  schedule:
+    # Daily at 07:13 UTC — an off-the-hour minute so the fleet's scheduled jobs
+    # don't all land on :00. The cadence half of #731: the coverage payload is
+    # re-emitted to the step summary every day so the number is tracked, not stale.
+    - cron: "13 7 * * *"
+
+permissions:
+  contents: read
+
+jobs:
+  dogfood-coverage:
+    name: dogfood-coverage gate + payload
+    runs-on: ubuntu-latest
+    env:
+      GOTOOLCHAIN: auto
+    defaults:
+      run:
+        working-directory: .
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: false
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+
+      # The hermetic regression proof FIRST: this asserts the gate flips RED when a
+      # HARD KPI regresses (guard disabled / no fak binary), so a green `--check`
+      # below is a real signal and not a tool that always passes.
+      - name: dogfood-coverage gate self-test
+        run: python tools/dogfood_coverage_gate_test.py
+
+      # Build a real `fak` into tools/.bin/ — the exact path `resolve_fak_bin`
+      # probes — so `fak_bin_resolvable` / `fleet_leaf_guarded` are met by a binary
+      # that genuinely resolves and wraps a worker, not a stub.
+      - name: build fak (so the guard front door resolves)
+        run: go build -o tools/.bin/fak ./cmd/fak
+
+      # The GATE: exit 1 on any HARD dogfood_debt. Green today (debt 0 with a built
+      # fak + guard default-on); a regression flips a HARD KPI and fails here.
+      - name: dogfood-coverage gate (--check; HARD debt must be 0)
+        run: python tools/dogfood_coverage.py --check
+
+      # The CADENCE payload: surface the control-pane JSON + the human report to the
+      # run summary so the coverage % is tracked over time (esp. on the daily cron).
+      - name: dogfood-coverage payload -> step summary
+        if: always()
+        run: |
+          {
+            echo "## dogfood-coverage"
+            echo '```'
+            python tools/dogfood_coverage.py
+            echo '```'
+            echo '<details><summary>control-pane payload</summary>'
+            echo
+            echo '```json'
+            python tools/dogfood_coverage.py --json
+            echo '```'
+            echo '</details>'
+          } >> "$GITHUB_STEP_SUMMARY"
