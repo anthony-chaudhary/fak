@@ -1,11 +1,11 @@
 # GLM-5.2 vLLM Agentic Benchmark Battery
 
-- Generated: `2026-06-25T14:20:43.290923Z`
+- Generated: `2026-06-25T23:16:18.571294Z`
 - Model family: `zai-org/GLM-5.2`
 - Checkpoint: `zai-org/GLM-5.2-FP8` served as `glm-5.2`
 - Raw vLLM endpoint: `http://127.0.0.1:8000/v1`
 - Status: **`PENDING_MEASUREMENT`**
-- Required artifacts passed: `0/10`
+- Required artifacts passed: `3/10`
 
 > Pending measurement: this manifest contains commands and artifact checks, not benchmark results.
 
@@ -18,10 +18,10 @@
 | `swebench_compare_preflight` | live-agentic-preflight | `/tmp/swe-glm52-vllm-20/COMPARE-PREFLIGHT.json` | MISSING | missing |
 | `swebench_verified_20` | live-agentic | `/tmp/swe-glm52-vllm-20/compare.json` | MISSING | missing |
 | `swebench_floor_20` | fak-native-floor | `experiments/vllm/swebench-20-fak-floor.json` | MISSING | missing |
-| `turntax_airline` | fak-native-floor | `experiments/vllm/turntax-airline.json` | MISSING | missing |
+| `turntax_airline` | fak-native-floor | `experiments/vllm/turntax-airline.json` | PASS | turntax-airline turns_saved=9 |
 | `sessionbench_synthetic` | fak-native-floor | `experiments/vllm/sessionbench-synthetic.json` | MISSING | missing |
-| `fanbench_research` | fak-native-floor | `experiments/vllm/fanbench-research.json` | MISSING | missing |
-| `radixbench_synthetic` | fak-native-floor | `experiments/vllm/radixbench-synthetic.json` | MISSING | missing |
+| `fanbench_research` | fak-native-floor | `experiments/vllm/fanbench-research.json` | PASS | fanbench research grid/trials present |
+| `radixbench_synthetic` | fak-native-floor | `experiments/vllm/radixbench-synthetic.json` | PASS | radixbench agents hit_rate=0.8666666666666667 |
 
 ## Commands
 
@@ -113,7 +113,7 @@ Measure RadixAttention-style prefix-cache hit-rate evidence.
 go run ./cmd/radixbench -live=false -out experiments/vllm/radixbench-synthetic.json
 ```
 
-Missing required artifacts: `serving_witness`, `vllm_tax`, `swebench_compare_preflight`, `swebench_verified_20`, `swebench_floor_20`, `turntax_airline`, `sessionbench_synthetic`, `fanbench_research`, `radixbench_synthetic`.
+Missing required artifacts: `serving_witness`, `vllm_tax`, `swebench_compare_preflight`, `swebench_verified_20`, `swebench_floor_20`, `sessionbench_synthetic`.
 Failed required artifacts: `preflight`.
 
 No GLM-5.2/vLLM benchmark number is quotable until every required artifact passes and any copied number is linked from BENCHMARK-AUTHORITY.md.

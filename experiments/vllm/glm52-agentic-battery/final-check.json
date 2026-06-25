@@ -1,6 +1,6 @@
 {
   "schema": "fak.glm52-vllm-agentic-battery.v1",
-  "generated_at": "2026-06-25T14:20:50.718179Z",
+  "generated_at": "2026-06-25T23:16:24.391619Z",
   "model_family": "zai-org/GLM-5.2",
   "checkpoint_model": "zai-org/GLM-5.2-FP8",
   "served_model_name": "glm-5.2",
@@ -257,7 +257,7 @@
       "kind": "fak-native-floor",
       "description": "Measure the turn-tax safety/control floor.",
       "required": true,
-      "status": "planned",
+      "status": "artifact-pass",
       "command": {
         "argv": [
           "go",
@@ -277,8 +277,8 @@
       ],
       "check": "turntax_floor",
       "claim_boundary": "Engine-agnostic safety floor; do not present as vLLM throughput.",
-      "artifact_status": "MISSING",
-      "artifact_detail": "missing"
+      "artifact_status": "PASS",
+      "artifact_detail": "turntax-airline turns_saved=9"
     },
     {
       "id": "sessionbench_synthetic",
@@ -322,7 +322,7 @@
       "kind": "fak-native-floor",
       "description": "Measure fan-out prefix sharing and cost geometry.",
       "required": true,
-      "status": "planned",
+      "status": "artifact-pass",
       "command": {
         "argv": [
           "go",
@@ -346,15 +346,15 @@
       ],
       "check": "fanbench_floor",
       "claim_boundary": "Cost geometry and kernel reuse evidence; not a raw serving-engine comparison.",
-      "artifact_status": "MISSING",
-      "artifact_detail": "missing"
+      "artifact_status": "PASS",
+      "artifact_detail": "fanbench research grid/trials present"
     },
     {
       "id": "radixbench_synthetic",
       "kind": "fak-native-floor",
       "description": "Measure RadixAttention-style prefix-cache hit-rate evidence.",
       "required": true,
-      "status": "planned",
+      "status": "artifact-pass",
       "command": {
         "argv": [
           "go",
@@ -372,15 +372,15 @@
       ],
       "check": "radixbench_floor",
       "claim_boundary": "Hardware-independent hit-rate evidence; live tok/s needs a separate serving run.",
-      "artifact_status": "MISSING",
-      "artifact_detail": "missing"
+      "artifact_status": "PASS",
+      "artifact_detail": "radixbench agents hit_rate=0.8666666666666667"
     }
   ],
   "summary": {
     "complete": false,
     "status": "PENDING_MEASUREMENT",
     "required_artifacts": 10,
-    "required_passed": 0,
+    "required_passed": 3,
     "required_failed": [
       "preflight"
     ],
@@ -390,10 +390,7 @@
       "swebench_compare_preflight",
       "swebench_verified_20",
       "swebench_floor_20",
-      "turntax_airline",
-      "sessionbench_synthetic",
-      "fanbench_research",
-      "radixbench_synthetic"
+      "sessionbench_synthetic"
     ],
     "honesty": "No GLM-5.2/vLLM benchmark number is quotable until every required artifact passes and any copied number is linked from BENCHMARK-AUTHORITY.md."
   }

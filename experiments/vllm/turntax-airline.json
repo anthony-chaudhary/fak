@@ -1,0 +1,129 @@
+{
+  "provenance": {
+    "app_version": "0.34.0",
+    "command": "fak turntax --suite turntax-airline",
+    "slice_id": "turntax-airline",
+    "workload_hash": "71c788f2c57aeb10",
+    "go_version": "go1.26.3",
+    "os": "windows",
+    "generated_by": "fak/internal/turnbench"
+  },
+  "calls": 14,
+  "cost_model": {
+    "version": "fak.cost-model.v1",
+    "prompt_tokens_per_turn": 1200,
+    "completion_tokens_per_turn": 120,
+    "dollars_per_mtok_in": 3,
+    "dollars_per_mtok_out": 15,
+    "model_turn_latency_ms": 1500
+  },
+  "class_breakdown": {
+    "grammar": 2,
+    "vdso_pure": 2,
+    "vdso_dedup": 3,
+    "vdso_static": 2,
+    "quarantine": 1,
+    "deny": 1,
+    "pass": 3
+  },
+  "kernel_counters": {
+    "submits": 14,
+    "vdso_hits": 7,
+    "engine_calls": 6,
+    "denies": 1,
+    "transforms": 2,
+    "quarantines": 1
+  },
+  "local_serve_ns": 6408,
+  "net": {
+    "turns_saved": 9,
+    "tokens_saved": 11880,
+    "dollars_saved": 0.048600000000000004,
+    "latency_saved_ms": 13500
+  },
+  "turn_kinds": {
+    "forced": 5,
+    "elision": 4
+  },
+  "vdso_off_net": {
+    "turns_saved": 2,
+    "tokens_saved": 2640,
+    "dollars_saved": 0.0108,
+    "latency_saved_ms": 3000
+  },
+  "safety_floor": {
+    "injections_admitted_baseline": 1,
+    "injections_admitted_fak": 0,
+    "destructive_executed_baseline": 1,
+    "destructive_executed_fak": 0
+  },
+  "ablation_levers": [
+    {
+      "version": "fak.benchmark-concept.v1",
+      "name": "grammar-repair",
+      "mechanism": "TRANSFORM in-syscall (alias-\u003ecanonical)",
+      "axis": "turn-tax",
+      "turns_saved": 2,
+      "witness": "kernel Counters.Transforms == grammar-classified calls"
+    },
+    {
+      "version": "fak.benchmark-concept.v1",
+      "name": "vdso",
+      "mechanism": "3-tier local serve (pure / content-cache / static)",
+      "axis": "turn-tax",
+      "turns_saved": 7,
+      "witness": "real ON/OFF path swap: net.turns_saved(on) - net.turns_saved(off) == VDSOHits"
+    },
+    {
+      "version": "fak.benchmark-concept.v1",
+      "name": "quarantine",
+      "mechanism": "context-MMU result admission (poison paged out)",
+      "axis": "safety-floor",
+      "turns_saved": 0,
+      "witness": "kernel Counters.Quarantines; injection kept out of context"
+    },
+    {
+      "version": "fak.benchmark-concept.v1",
+      "name": "deny",
+      "mechanism": "capability-floor adjudication (deny-as-value)",
+      "axis": "safety-floor",
+      "turns_saved": 0,
+      "witness": "kernel Counters.Denies; destructive op never dispatched"
+    },
+    {
+      "version": "fak.benchmark-concept.v1",
+      "name": "NET (1-shot)",
+      "mechanism": "all levers — turns the baseline pays and fak does not",
+      "axis": "turn-tax",
+      "turns_saved": 9,
+      "witness": "grammar + vdso (sum of the turn-tax levers)"
+    }
+  ],
+  "latency_sensitivity": [
+    {
+      "scenario": "local-fast (400ms, 600tok)",
+      "model_turn_latency_ms": 400,
+      "prompt_tokens_per_turn": 600,
+      "tokens_saved": 6480,
+      "dollars_saved": 0.0324,
+      "latency_saved_sec": 3.6
+    },
+    {
+      "scenario": "hosted-flash (1.5s, 1200tok)",
+      "model_turn_latency_ms": 1500,
+      "prompt_tokens_per_turn": 1200,
+      "tokens_saved": 11880,
+      "dollars_saved": 0.048600000000000004,
+      "latency_saved_sec": 13.5
+    },
+    {
+      "scenario": "frontier (4s, 4000tok)",
+      "model_turn_latency_ms": 4000,
+      "prompt_tokens_per_turn": 4000,
+      "tokens_saved": 37080,
+      "dollars_saved": 0.1242,
+      "latency_saved_sec": 36
+    }
+  ],
+  "consistency_check": "ok"
+}
