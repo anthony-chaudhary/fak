@@ -327,10 +327,11 @@ func CanonicalTensorNameArch(name, arch string) (string, bool) {
 	// the router + its score-correction bias, the shared experts, and the DSA indexer.
 	// Map those FIRST; anything not GLM-specific (attn_norm, ffn_norm, attn_output, and
 	// the leading-dense layers' ffn_gate/up/down) falls through to the shared base map
-	// below. The batched ROUTED experts (ffn_*_exps, one [E,…] blob per layer) are
-	// deliberately NOT mapped here — a single GGUF name cannot become E per-expert
-	// canonical tensors, so they stay an explicit "no canonical mapping" until the
-	// loader-side expert splitter lands (then a glm_moe_dsa GGUF loads end to end).
+	// below. The batched ROUTED experts (ffn_*_exps, one [E,...] blob per layer) and
+	// split MLA KV-b halves (attn_k_b/attn_v_b) are deliberately NOT mapped here: a
+	// single GGUF name cannot become E per-expert canonical tensors, and two KV-b names
+	// must become one canonical tensor. gguf_weightsource.go handles both before this
+	// one-name-to-one-name map is consulted.
 	if arch == "glm_moe_dsa" {
 		if mapped, ok := glmMoeDsaCanonicalSuffix(suffix); ok {
 			return "model.layers." + layer + "." + mapped, true
