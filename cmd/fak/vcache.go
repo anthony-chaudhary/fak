@@ -53,8 +53,9 @@ engine; provider calibration/warming/recall remain tracked by #716-#719, and
 Codex/OpenAI cached-token telemetry remains tracked by #727.
 prove runs the deterministic star-anchor token-savings proof. Exit 0 means PROVEN;
 exit 1 means REFUTED; exit 2 means usage error.
-prove-telemetry replays provider usage JSONL, such as Claude Code probe output, and
-proves realized savings from observed cache_read/cache_creation counters.
+prove-telemetry replays provider usage JSONL, such as Claude Code probe output or
+OpenAI Responses/Chat usage objects, and proves realized savings from observed
+cache counters.
 `)
 }
 
@@ -63,6 +64,7 @@ type vcacheStatusReport struct {
 	Governor       string                     `json:"governor"`
 	LiveProvider   string                     `json:"live_provider"`
 	Proof          vcachegov.StarSavingsProof `json:"proof"`
+	CodexOpenAI    vcacheCodexOpenAIStatus    `json:"codex_openai"`
 	M5Issue        string                     `json:"m5_issue"`
 	Remaining      []vcacheRemainingIssue     `json:"remaining"`
 	CorrectnessLaw string                     `json:"correctness_law"`
@@ -72,6 +74,17 @@ type vcacheRemainingIssue struct {
 	Number int    `json:"number"`
 	Title  string `json:"title"`
 	URL    string `json:"url"`
+}
+
+type vcacheCodexOpenAIStatus struct {
+	Verifier            string                          `json:"verifier"`
+	LiveTelemetry       string                          `json:"live_telemetry"`
+	Reason              string                          `json:"reason"`
+	OpenAIAPIKeyPresent bool                            `json:"openai_api_key_present"`
+	CachedTokenFields   []string                        `json:"cached_token_fields"`
+	Issue               string                          `json:"issue"`
+	CachedSampleProof   vcachegov.TelemetrySavingsProof `json:"cached_sample_proof"`
+	NoCacheRefutation   vcachegov.TelemetrySavingsProof `json:"no_cache_refutation"`
 }
 
 func runVCacheStatus(stdout, stderr io.Writer, argv []string) int {
@@ -95,6 +108,19 @@ func runVCacheStatus(stdout, stderr io.Writer, argv []string) int {
 	fmt.Fprintf(stdout, "codex-like star proof: %s (%s)\n", rep.Proof.Status, rep.Proof.Reason)
 	fmt.Fprintf(stdout, "token-equiv saved: %.1f / %.1f (%.1f%%)\n",
 		rep.Proof.SavedTokenEquiv, rep.Proof.BaselineTokenEquiv, rep.Proof.SavedPct)
+	fmt.Fprintf(stdout, "codex/openai verifier: %s\n", rep.CodexOpenAI.Verifier)
+	fmt.Fprintf(stdout, "codex/openai live telemetry: %s (%s)\n",
+		rep.CodexOpenAI.LiveTelemetry, rep.CodexOpenAI.Reason)
+	fmt.Fprintf(stdout, "codex/openai cached-token sample: %s saved %.1f / %.1f (%.2f%%)\n",
+		rep.CodexOpenAI.CachedSampleProof.Status,
+		rep.CodexOpenAI.CachedSampleProof.SavedTokenEquiv,
+		rep.CodexOpenAI.CachedSampleProof.BaselineTokenEquiv,
+		rep.CodexOpenAI.CachedSampleProof.SavedPct)
+	fmt.Fprintf(stdout, "codex/openai zero-cache sample: %s saved %.1f / %.1f (%.2f%%)\n",
+		rep.CodexOpenAI.NoCacheRefutation.Status,
+		rep.CodexOpenAI.NoCacheRefutation.SavedTokenEquiv,
+		rep.CodexOpenAI.NoCacheRefutation.BaselineTokenEquiv,
+		rep.CodexOpenAI.NoCacheRefutation.SavedPct)
 	fmt.Fprintf(stdout, "correctness depends on cache hit: %v\n", rep.Proof.CorrectnessDependsOn)
 	fmt.Fprintf(stdout, "m5 issue: %s\n", rep.M5Issue)
 	fmt.Fprint(stdout, "remaining:")
@@ -216,7 +242,8 @@ func defaultVCacheStatus() vcacheStatusReport {
 			WriteMult:       vcachegov.WriteMult5Minutes,
 			Secret:          vcachegov.Cacheable,
 		}),
-		M5Issue: "https://github.com/anthony-chaudhary/fak/issues/720",
+		CodexOpenAI: defaultCodexOpenAIStatus(),
+		M5Issue:     "https://github.com/anthony-chaudhary/fak/issues/720",
 		Remaining: []vcacheRemainingIssue{
 			{716, "M1 observe & calibrate", "https://github.com/anthony-chaudhary/fak/issues/716"},
 			{717, "M2 star anchors", "https://github.com/anthony-chaudhary/fak/issues/717"},
@@ -225,6 +252,36 @@ func defaultVCacheStatus() vcacheStatusReport {
 			{727, "Codex/OpenAI telemetry probe", "https://github.com/anthony-chaudhary/fak/issues/727"},
 		},
 		CorrectnessLaw: "cost is budgeted at the uncached price; hits are realized rebates, never trust claims",
+	}
+}
+
+func defaultCodexOpenAIStatus() vcacheCodexOpenAIStatus {
+	hasKey := strings.TrimSpace(os.Getenv("OPENAI_API_KEY")) != ""
+	live := "unavailable"
+	reason := "OPENAI_API_KEY not present; raw OpenAI API probe not run. Codex CLI session token_count JSONL can be passed to prove-telemetry."
+	if hasKey {
+		live = "not-run"
+		reason = "OPENAI_API_KEY is present, but a provider-authored OpenAI usage JSONL file is still required for the raw API probe"
+	}
+	return vcacheCodexOpenAIStatus{
+		Verifier:            "ready",
+		LiveTelemetry:       live,
+		Reason:              reason,
+		OpenAIAPIKeyPresent: hasKey,
+		CachedTokenFields: []string{
+			"usage.input_tokens_details.cached_tokens",
+			"usage.prompt_tokens_details.cached_tokens",
+			"payload.info.last_token_usage.cached_input_tokens",
+		},
+		Issue: "https://github.com/anthony-chaudhary/fak/issues/727",
+		CachedSampleProof: vcachegov.ProveTelemetrySavings(vcachegov.TelemetrySavingsInput{
+			Rows:     []vcachegov.TelemetryRow{openAITelemetryRow(2006, 1920)},
+			ReadMult: 0.1,
+		}),
+		NoCacheRefutation: vcachegov.ProveTelemetrySavings(vcachegov.TelemetrySavingsInput{
+			Rows:     []vcachegov.TelemetryRow{openAITelemetryRow(2006, 0)},
+			ReadMult: 0.1,
+		}),
 	}
 }
 
@@ -259,11 +316,41 @@ func formatObservedPositive(n int) string {
 }
 
 type vcacheTelemetryJSONLRow struct {
-	InputTokens              float64 `json:"input_tokens"`
-	CacheCreationInputTokens float64 `json:"cache_creation_input_tokens"`
-	CacheReadInputTokens     float64 `json:"cache_read_input_tokens"`
-	Ephemeral1hInputTokens   float64 `json:"ephemeral_1h_input_tokens"`
-	Ephemeral5mInputTokens   float64 `json:"ephemeral_5m_input_tokens"`
+	InputTokens              float64             `json:"input_tokens"`
+	PromptTokens             float64             `json:"prompt_tokens"`
+	CachedTokens             float64             `json:"cached_tokens"`
+	CacheCreationInputTokens float64             `json:"cache_creation_input_tokens"`
+	CacheReadInputTokens     float64             `json:"cache_read_input_tokens"`
+	Ephemeral1hInputTokens   float64             `json:"ephemeral_1h_input_tokens"`
+	Ephemeral5mInputTokens   float64             `json:"ephemeral_5m_input_tokens"`
+	Usage                    *vcacheOpenAIUsage  `json:"usage"`
+	Type                     string              `json:"type"`
+	Payload                  *vcacheCodexPayload `json:"payload"`
+}
+
+type vcacheOpenAIUsage struct {
+	InputTokens         float64                   `json:"input_tokens"`
+	PromptTokens        float64                   `json:"prompt_tokens"`
+	InputTokensDetails  vcacheCachedTokensDetails `json:"input_tokens_details"`
+	PromptTokensDetails vcacheCachedTokensDetails `json:"prompt_tokens_details"`
+}
+
+type vcacheCachedTokensDetails struct {
+	CachedTokens float64 `json:"cached_tokens"`
+}
+
+type vcacheCodexPayload struct {
+	Type string               `json:"type"`
+	Info vcacheCodexTokenInfo `json:"info"`
+}
+
+type vcacheCodexTokenInfo struct {
+	LastTokenUsage vcacheCodexTokenUsage `json:"last_token_usage"`
+}
+
+type vcacheCodexTokenUsage struct {
+	InputTokens       float64 `json:"input_tokens"`
+	CachedInputTokens float64 `json:"cached_input_tokens"`
 }
 
 func readVCacheTelemetry(path string, stdin io.Reader) ([]vcachegov.TelemetryRow, error) {
@@ -292,16 +379,77 @@ func readVCacheTelemetry(path string, stdin io.Reader) ([]vcachegov.TelemetryRow
 		if err := json.Unmarshal([]byte(line), &raw); err != nil {
 			return nil, fmt.Errorf("line %d: %w", lineNo, err)
 		}
-		rows = append(rows, vcachegov.TelemetryRow{
-			InputTokens:              raw.InputTokens,
-			CacheCreationInputTokens: raw.CacheCreationInputTokens,
-			CacheReadInputTokens:     raw.CacheReadInputTokens,
-			Ephemeral1hInputTokens:   raw.Ephemeral1hInputTokens,
-			Ephemeral5mInputTokens:   raw.Ephemeral5mInputTokens,
-		})
+		row, ok := raw.telemetryRow()
+		if ok {
+			rows = append(rows, row)
+		}
 	}
 	if err := sc.Err(); err != nil {
 		return nil, err
 	}
 	return rows, nil
+}
+
+func (r vcacheTelemetryJSONLRow) telemetryRow() (vcachegov.TelemetryRow, bool) {
+	if r.hasClaudeCounters() {
+		return vcachegov.TelemetryRow{
+			InputTokens:              r.InputTokens,
+			CacheCreationInputTokens: r.CacheCreationInputTokens,
+			CacheReadInputTokens:     r.CacheReadInputTokens,
+			Ephemeral1hInputTokens:   r.Ephemeral1hInputTokens,
+			Ephemeral5mInputTokens:   r.Ephemeral5mInputTokens,
+		}, true
+	}
+	if r.Usage != nil {
+		total, cached := r.Usage.openAITokens()
+		return openAITelemetryRow(total, cached), true
+	}
+	if r.Payload != nil && r.Type == "event_msg" && r.Payload.Type == "token_count" {
+		usage := r.Payload.Info.LastTokenUsage
+		if usage.InputTokens != 0 || usage.CachedInputTokens != 0 {
+			return openAITelemetryRow(usage.InputTokens, usage.CachedInputTokens), true
+		}
+	}
+	if r.InputTokens != 0 || r.PromptTokens != 0 || r.CachedTokens != 0 {
+		return openAITelemetryRow(firstNonZero(r.InputTokens, r.PromptTokens), r.CachedTokens), true
+	}
+	return vcachegov.TelemetryRow{}, false
+}
+
+func (r vcacheTelemetryJSONLRow) hasClaudeCounters() bool {
+	return r.CacheCreationInputTokens != 0 ||
+		r.CacheReadInputTokens != 0 ||
+		r.Ephemeral1hInputTokens != 0 ||
+		r.Ephemeral5mInputTokens != 0
+}
+
+func (u vcacheOpenAIUsage) openAITokens() (float64, float64) {
+	total := firstNonZero(u.InputTokens, u.PromptTokens)
+	cached := firstNonZero(u.InputTokensDetails.CachedTokens, u.PromptTokensDetails.CachedTokens)
+	return total, cached
+}
+
+func openAITelemetryRow(total, cached float64) vcachegov.TelemetryRow {
+	if total < 0 {
+		total = 0
+	}
+	if cached < 0 {
+		cached = 0
+	}
+	if cached > total {
+		cached = total
+	}
+	return vcachegov.TelemetryRow{
+		InputTokens:          total - cached,
+		CacheReadInputTokens: cached,
+	}
+}
+
+func firstNonZero(values ...float64) float64 {
+	for _, v := range values {
+		if v != 0 {
+			return v
+		}
+	}
+	return 0
 }
