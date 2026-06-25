@@ -33,8 +33,13 @@
   Knobs (env):
     FAK_DOGFOOD_PORT       fak serve port                 (default 8080, auto-bumped if busy)
     FAK_DOGFOOD_SHIM_PORT  transformers shim port         (default 8190, auto-bumped if busy)
-    FAK_DOGFOOD_MODEL      served model id                (default SmolLM2-135M; qwen2.5-7b-q8 for gguf; empty for anthropic)
+    FAK_DOGFOOD_MODEL      served model id                (default SmolLM2-135M for shim; qwen2.5-coder:7b for ollama; qwen2.5-7b-q8 for gguf; empty for anthropic)
+    FAK_DOGFOOD_CTX        ollama context window          (default 32768; baked via a derived num_ctx model so the ~25K Claude Code prompt is not truncated; 0 disables)
     FAK_DOGFOOD_BACKEND    shim | ollama | gguf | anthropic   (default shim)
+                             ollama = a coding-capable local model (default qwen2.5-coder:7b)
+                             auto-pulled and served with a 32K context. The usable local
+                             path: Claude Code -> fak (adjudicates) -> ollama. Needs the
+                             ollama CLI on PATH or the AMD AI-Bundle install.
                              gguf = fak's OWN in-kernel pure-Go forward (the -Kernel alias):
                              Claude Code -> fak serve --gguf (fak's decode, NO Python, NO
                              proxy) -> back. The path that proves agentic work on fak's own
@@ -108,7 +113,7 @@ $KernelBackend = ($Backend -eq 'gguf')
 # real model tiers (claude-opus-4-8, etc.), so the single-model override is OFF and
 # the default 'model' is empty. Local backends still map every tier onto one model.
 $AnthropicUpstream = ($Backend -eq 'anthropic')
-$DefaultModel = if ($AnthropicUpstream) { '' } elseif ($KernelBackend) { 'qwen2.5-7b-q8' } else { 'HuggingFaceTB/SmolLM2-135M-Instruct' }
+$DefaultModel = if ($AnthropicUpstream) { '' } elseif ($KernelBackend) { 'qwen2.5-7b-q8' } elseif ($Backend -eq 'ollama') { 'qwen2.5-coder:7b' } else { 'HuggingFaceTB/SmolLM2-135M-Instruct' }
 $Model     = if ($env:FAK_DOGFOOD_MODEL)     { $env:FAK_DOGFOOD_MODEL }     else { $DefaultModel }
 $Account   = if ($env:FAK_DOGFOOD_ACCOUNT)   { $env:FAK_DOGFOOD_ACCOUNT }   else { 'faklocal' }
 $UserHome  = if ($env:FLEET_USER_HOME)       { $env:FLEET_USER_HOME }       else { $env:USERPROFILE }
@@ -285,6 +290,53 @@ try {
       $oll = if ($env:OLLAMA_HOST) { $env:OLLAMA_HOST } else { '127.0.0.1:11434' }
       if (-not (Wait-Url "http://$oll/api/tags" 3)) { Die "ollama not reachable at $oll (start 'ollama serve' or use FAK_DOGFOOD_BACKEND=shim)" }
       $BaseUrl = "http://$oll/v1"
+
+      # Resolve the ollama CLI (PATH first, then the AMD AI-Bundle install) so we can
+      # auto-pull the model and bake a large context. With neither, fall back to just
+      # serving whatever is already loaded (the API path still works).
+      $ollamaExe = (Get-Command ollama -ErrorAction SilentlyContinue).Source
+      if (-not $ollamaExe) {
+        $amd = Join-Path $env:LOCALAPPDATA 'AMD\AI_Bundle\Ollama\ollama.exe'
+        if (Test-Path $amd) { $ollamaExe = $amd }
+      }
+
+      if ($ollamaExe) {
+        # ollama's CLI writes progress to stderr; under this script's $ErrorActionPreference
+        # = 'Stop', merging native stderr into the pipeline (2>&1) is treated as a terminating
+        # error. ollamaCli runs each call with all streams sent to a log file (*> file), so
+        # stderr never trips Stop, and tolerates a non-zero exit (a derive/pull hiccup must
+        # degrade to "serve the base model", not kill the launcher).
+        $ollLog = Join-Path $env:TEMP 'fak-dogfood-ollama-cli.log'
+        function ollamaCli { param([string[]]$cliArgs) try { & $ollamaExe @cliArgs *> $ollLog } catch {} ; Get-Content $ollLog -Raw -ErrorAction SilentlyContinue }
+
+        # Auto-pull the chosen model if it isn't installed (one-time download). The default
+        # is qwen2.5-coder:7b (set in $DefaultModel) — a coding-capable model that actually
+        # drives Claude Code, unlike the 135M CPU shim default.
+        $baseModel = $Model -replace '-fakctx\d+$',''
+        if (-not ((ollamaCli @('list')) -match [regex]::Escape($baseModel))) {
+          Log "pulling ollama model $baseModel (one-time download)"
+          ollamaCli @('pull', $baseModel) | Out-Null
+        }
+
+        # Claude Code sends a ~25K-token agent prompt; ollama defaults to a 4K context and
+        # SILENTLY TRUNCATES it, which breaks the turn. OLLAMA_CONTEXT_LENGTH and a per-request
+        # num_ctx on the OpenAI /v1 endpoint are both ignored, so bake the context into a
+        # derived model via a Modelfile (PARAMETER num_ctx) — the only endpoint-independent
+        # way. Skip when the operator already pinned a large-ctx tag or set FAK_DOGFOOD_CTX=0.
+        $ctx = if ($env:FAK_DOGFOOD_CTX) { [int]$env:FAK_DOGFOOD_CTX } else { 32768 }
+        if ($ctx -gt 0 -and $Model -notmatch '-fakctx\d+$') {
+          $ctxModel = "$baseModel-fakctx$ctx"
+          if (-not ((ollamaCli @('list')) -match [regex]::Escape($ctxModel))) {
+            $mf = Join-Path $env:TEMP "fak-$($baseModel -replace '[:/]','_')-ctx.Modelfile"
+            "FROM $baseModel`nPARAMETER num_ctx $ctx" | Set-Content -Path $mf -Encoding ASCII
+            Log "deriving $ctxModel (num_ctx=$ctx) so the large Claude Code prompt is not truncated"
+            ollamaCli @('create', $ctxModel, '-f', $mf) | Out-Null
+          }
+          $Model = $ctxModel
+        }
+      } else {
+        Log "ollama CLI not found (PATH or AMD AI-Bundle) - serving the already-loaded model; set FAK_DOGFOOD_CTX or pre-create a num_ctx model if the prompt is truncated."
+      }
     }
     else { Die "unknown FAK_DOGFOOD_BACKEND=$Backend (want shim|ollama)" }
   }
