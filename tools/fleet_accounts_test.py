@@ -5,6 +5,7 @@ from __future__ import annotations
 import contextlib
 import io
 import json
+import os
 import sys
 import tempfile
 import unittest
@@ -1027,6 +1028,76 @@ class ResetIsFutureTests(unittest.TestCase):
             {"reset": "sometime never"}))  # unparseable -> stay active
         self.assertTrue(fleet_accounts.throttle_is_active(
             {"reset": "Dec 31, 11pm (America/Los_Angeles)"}))  # year-end -> future
+
+
+class ProbeLedgerConsultTest(unittest.TestCase):
+    """runtime_status consults account_probe's probe_ledger.jsonl as a fresh-probe source.
+
+    The bug this guards: account_probe writes its OK/LIMIT verdict ONLY to the probe ledger,
+    a file distinct from the watchdog's sessions.json that runtime_status reads. Nothing folded
+    the ledger back into the registry, so a fresh probe was invisible to the roster -- the day24
+    incident, where a live OK probe left the account still reading "resets 11pm" and the resume
+    resolver returned PIN_BLOCKED with a healthy worker available."""
+
+    ACCT = ".claude-day24-acct"
+
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        self.reg_dir = Path(self._tmp.name)
+        self.addCleanup(self._tmp.cleanup)
+        fleet_accounts._PROBE_LEDGER_CACHE.update(key=None, by_account={}, ages={})
+        self.addCleanup(lambda: fleet_accounts._PROBE_LEDGER_CACHE.update(
+            key=None, by_account={}, ages={}))
+
+    def _write_ledger(self, *, status: str, age_min: float, **extra) -> None:
+        import datetime as _dt
+        ts = (_dt.datetime.now(_dt.timezone.utc)
+              - _dt.timedelta(minutes=age_min)).isoformat()
+        entry = {"ts": ts, "account": self.ACCT, "tag": "day24",
+                 "status": status, **extra}
+        (self.reg_dir / "probe_ledger.jsonl").write_text(
+            json.dumps(entry) + "\n", encoding="utf-8")
+
+    def _carried_throttle_registry(self) -> dict:
+        return {"generated_utc": "2026-06-17T00:00:00+00:00",
+                "throttle": {self.ACCT: {"reset": "Dec 31, 11pm (America/Los_Angeles)"}},
+                "sessions": []}
+
+    def test_fresh_ok_probe_overrides_carried_throttle(self) -> None:
+        self._write_ledger(status="OK", age_min=5.0)
+        with mock.patch.dict(os.environ, {"FLEET_REG_DIR": str(self.reg_dir)}, clear=False):
+            status = fleet_accounts.runtime_status(
+                self.ACCT, registry=self._carried_throttle_registry())
+        self.assertTrue(status["available"], "a fresh OK probe must clear the carried throttle")
+        self.assertEqual(status["status_source"], "probe-ledger")
+
+    def test_stale_ok_probe_does_not_override_throttle(self) -> None:
+        self._write_ledger(status="OK", age_min=fleet_accounts.PROBE_LEDGER_FRESH_MIN + 30)
+        with mock.patch.dict(os.environ, {"FLEET_REG_DIR": str(self.reg_dir)}, clear=False):
+            status = fleet_accounts.runtime_status(
+                self.ACCT, registry=self._carried_throttle_registry())
+        self.assertFalse(status["available"], "a stale OK probe must not clear the throttle")
+        self.assertEqual(status["block_kind"], "usage")
+
+    def test_fresh_limit_probe_blocks_even_without_carried_throttle(self) -> None:
+        self._write_ledger(status="LIMIT", age_min=3.0, reset="9pm (America/Los_Angeles)")
+        with mock.patch.dict(os.environ, {"FLEET_REG_DIR": str(self.reg_dir)}, clear=False):
+            status = fleet_accounts.runtime_status(
+                self.ACCT, registry={"generated_utc": "2026-06-17T00:00:00+00:00",
+                                     "throttle": {}, "sessions": []})
+        self.assertFalse(status["available"])
+        self.assertEqual(status["block_kind"], "usage")
+        self.assertEqual(status["status_source"], "probe-ledger")
+
+    def test_probe_session_row_takes_precedence_over_ledger(self) -> None:
+        self._write_ledger(status="LIMIT", age_min=3.0)  # ledger says blocked...
+        registry = {"generated_utc": "2026-06-17T00:00:00+00:00", "throttle": {},
+                    "sessions": [{"account": self.ACCT, "project": "_probe",
+                                  "probe_status": "OK"}]}  # ...but a fresh session-row probe says OK
+        with mock.patch.dict(os.environ, {"FLEET_REG_DIR": str(self.reg_dir)}, clear=False):
+            status = fleet_accounts.runtime_status(self.ACCT, registry=registry)
+        self.assertTrue(status["available"])
+        self.assertEqual(status["status_source"], "probe")
 
 
 if __name__ == "__main__":
