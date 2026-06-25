@@ -100,6 +100,39 @@ func TestWitnessedSNFitnessRangeAndEmpty(t *testing.T) {
 	}
 }
 
+func TestWitnessedSNFitnessMissingAttentionIsNeutral(t *testing.T) {
+	spans := []Span{snSpan("span:a", "alpha apple", 1)}
+	f := Forecast{Intents: []string{"alpha"}, Horizon: 1}
+	witnessed := Turn{Spans: spans, Budget: Budget{Tokens: 10}, Attribution: Attribution{"span:a": 0.9}}
+	unwitnessed := Turn{Spans: spans, Budget: Budget{Tokens: 10}}
+
+	onlyWitnessed := WitnessedSNFitness(f, []Turn{witnessed})
+	withUnwitnessed := WitnessedSNFitness(f, []Turn{witnessed, unwitnessed})
+	if withUnwitnessed != onlyWitnessed {
+		t.Fatalf("unwitnessed/no-fault turn changed fitness: with=%.4f only=%.4f", withUnwitnessed, onlyWitnessed)
+	}
+	if got := WitnessedSNFitness(f, []Turn{unwitnessed}); got != 1.0 {
+		t.Fatalf("only unwitnessed/no-fault turns should be neutral 1.0, got %.4f", got)
+	}
+}
+
+func TestWitnessedSNFitnessFaultOnlyTurnsContributeUnderResidentPressure(t *testing.T) {
+	spans := []Span{
+		snSpan("span:a", "alpha apple", 2),
+		snSpan("span:d", "delta", 1),
+	}
+	budget := Budget{Tokens: 10} // alpha forecast keeps span:a; span:d is elided and faults.
+	f := Forecast{Intents: []string{"alpha"}, Horizon: 1}
+	got := WitnessedSNFitness(f, []Turn{{Spans: spans, Budget: budget, Faults: []string{"span:d"}}})
+	if got < 0.45 || got > 0.55 {
+		t.Fatalf("fault-only turn should score under-resident pressure ~0.5, got %.4f", got)
+	}
+	noFault := WitnessedSNFitness(f, []Turn{{Spans: spans, Budget: budget}})
+	if noFault != 1.0 {
+		t.Fatalf("no-witness/no-fault turn should stay neutral, got %.4f", noFault)
+	}
+}
+
 // TestWitnessedSNFitnessDeterministic proves the replay is a GATE: the same (forecast, session)
 // yields a byte-identical fitness, so a re-run that differs is a real regression, not noise — the
 // determinism a non-forgeable RSI keep-bit (and its journal trend) rests on.

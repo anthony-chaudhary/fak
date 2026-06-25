@@ -69,21 +69,38 @@ type Turn struct {
 // the property the rsiloop KEEP gate needs to fire only on a REAL S/N gain.
 //
 // It is the scalar an rsiloop Measure returns (see the file header). Pure and deterministic — the
-// same (forecast, session) yields the same fitness, so a replay is a gate (re-run, diff empty). An
-// empty session returns 1.0, the empty-window fail-to-best convention SignalNoise.Ratio already
-// takes (no turns, no noise — nothing to curate).
+// same (forecast, session) yields the same fitness, so a replay is a gate (re-run, diff empty).
+// Turns with no attention witness and no faults are neutral: they carry no S/N evidence, so they
+// are excluded from the mean instead of being misread as all-noise. A fault-only turn still
+// contributes the under-resident pressure (1-FaultRatio), because demand paging is itself a
+// witness. An empty or fully unwitnessed/no-fault session returns 1.0, the empty-window
+// fail-to-best convention SignalNoise.Ratio already takes (no evidence, no noise — nothing to
+// curate).
 func WitnessedSNFitness(f Forecast, session []Turn) float64 {
 	if len(session) == 0 {
 		return 1.0
 	}
 	var sum float64
+	scored := 0
 	for _, t := range session {
 		p := PlanCells(t.Spans, f, t.Budget, nil)
 		sn := SignalNoiseFromAttention(p, t.Attribution, Outcome{Faults: t.Faults})
+		if len(t.Attribution) == 0 {
+			if len(t.Faults) == 0 {
+				continue
+			}
+			sum += 1 - sn.FaultRatio()
+			scored++
+			continue
+		}
 		// Ratio is the resident signal share; (1-FaultRatio) is the under-resident discount.
 		// Both are already in [0,1] (Ratio by construction, FaultRatio by definition), so the
 		// product stays in [0,1] and reduces to the pure witnessed S/N when nothing faulted.
 		sum += sn.Ratio() * (1 - sn.FaultRatio())
+		scored++
 	}
-	return sum / float64(len(session))
+	if scored == 0 {
+		return 1.0
+	}
+	return sum / float64(scored)
 }
