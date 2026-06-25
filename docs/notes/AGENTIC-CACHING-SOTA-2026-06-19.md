@@ -217,9 +217,14 @@ destructive names/hints, has scoped epoch invalidation, exposes mutation and
 revocation buses, and can fail closed on revoked or overflowed witness ledgers.
 `cachemeta.FromVDSOKey()` describes tier-2 entries as tool-result cache entries.
 
-**Gap.** vDSO still needs first-class `cachemeta` event emission, consumer
-tracking, and per-tool witness adapters instead of relying mainly on internal
-epochs.
+**Gap (closed, #425).** As of this note vDSO relied mainly on internal epochs.
+That gap has since closed: vDSO now emits first-class `cachemeta` events for
+tier-2 fills, hits, evicts and revocations plus tier-3 static hits and reasoned
+misses; it attributes each hit and miss to the consuming agent and turn; and it
+resolves per-tool witness adapters (etag, content hash, git SHA, lease epoch, DB
+row version, source digest, sandbox snapshot id) in place of the global epoch.
+Shipped in commits `3e68f4d` and `98d583d`; witnessed by `TestCacheEmission_*`
+in `internal/vdso/cachemeta_emit_test.go`.
 
 ### 2.6 Semantic, intent, and plan-template caches
 
