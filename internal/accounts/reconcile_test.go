@@ -161,6 +161,29 @@ func TestReconcileTombstonedExcludedAndNoLogin(t *testing.T) {
 	}
 }
 
+// TestNameLieIgnoresOrgSuffix covers the partial-match case the older TestNameLie did
+// not: a name that shares SOME tokens with the login (the org-suffix pattern) is
+// truthful, while a name that shares NONE is the lie.
+func TestNameLieIgnoresOrgSuffix(t *testing.T) {
+	cases := []struct {
+		name, email string
+		lie         bool
+	}{
+		{"gem8-netra", "gem8@example.test", false},                      // truthful: "gem8" matches, "-netra" org suffix ignored
+		{"day24-netra", "day24@example.test", false},                    // truthful despite org suffix
+		{"jack-barker-claude-netra", "jack.barker@example.test", false}, // "jack" matches
+		{"q-netra", "gem8@example.test", true},                          // q is really gem8 — no token matches
+		{"c10-netra", "anthony.agent@example.test", true},               // c10 dir is really anthony's
+		{"default", "gem8@example.test", false},                         // role name, never a lie
+	}
+	for _, c := range cases {
+		h := Home{Name: c.name, Identity: Identity{Email: c.email}}
+		if got := h.NameLie(); got != c.lie {
+			t.Errorf("NameLie(%q logged into %q) = %v, want %v", c.name, c.email, got, c.lie)
+		}
+	}
+}
+
 // --- tiny local helpers (avoid pulling in strings/slices just for the asserts) ---
 
 func contains(s, sub string) bool {

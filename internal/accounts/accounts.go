@@ -347,10 +347,14 @@ func (r Registry) Validate() error {
 // ---------------------------------------------------------------------------
 
 // NameLie reports whether this seat's NAME disagrees with the account actually logged
-// into it (per the disk-derived Identity). It is the q-seat-is-really-gem8 detector:
-// true when a meaningful token of the name stem is absent from the login email's local
-// part. Advisory (a display flag), and only meaningful once Identity is filled; a home
-// with no derived email is never a lie.
+// into it (per the disk-derived Identity). It is the q-seat-is-really-gem8 detector: a
+// non-default seat with a known login whose name shares NOTHING with that login
+// (nameMatch == 0). Flagging on NO match rather than ANY-token-absent is deliberate: an
+// org-suffixed but truthful name (gem8-netra logged into gem8@netra…) still names the
+// right account through its "gem8" token even though the "-netra" org suffix never
+// appears in the email local part — so it must NOT read as a lie. Advisory (a display
+// flag), meaningful only once Identity is filled; a home with no derived email, or a
+// name that makes no identity claim, is never a lie.
 func (h Home) NameLie() bool {
 	if h.Identity.Email == "" {
 		return false
@@ -360,17 +364,10 @@ func (h Home) NameLie() bool {
 	if strings.EqualFold(h.Name, "default") {
 		return false
 	}
-	local := h.Identity.Email
-	if at := strings.IndexByte(local, '@'); at >= 0 {
-		local = local[:at]
+	if len(nameTokens(h.Name)) == 0 {
+		return false // a name that makes no identity claim cannot lie
 	}
-	localNorm := normAlnum(local)
-	for _, tok := range nameTokens(h.Name) {
-		if !strings.Contains(localNorm, normAlnum(tok)) {
-			return true
-		}
-	}
-	return false
+	return h.nameMatch() == 0
 }
 
 // nameTokens splits a seat name into identity-bearing tokens, dropping role/product
