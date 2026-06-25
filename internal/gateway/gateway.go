@@ -531,7 +531,10 @@ type Server struct {
 	// route, when non-nil, is the per-call model-routing policy buildCall consults to
 	// set abi.ToolCall.Engine PRE-submit (the load-bearing residency contract — see
 	// Config.RouteManifest and buildCall). nil leaves Engine unset (kernel default).
-	route *modelroute.Manifest
+	// It is a *modelroute.Live (an atomic holder), not a bare *Manifest, so a host
+	// watcher can hot-swap the policy on a file edit without a torn read (#842): a
+	// classification sees either the whole old manifest or the whole new one.
+	route *modelroute.Live
 }
 
 // New builds a Server. It validates that the ABI is wired (a resolver is
@@ -683,11 +686,27 @@ func New(cfg Config) (*Server, error) {
 		rungObs:              rungObs,
 		feed:                 newCoherenceFeed(0),
 		metrics:              newGatewayMetrics(time.Now()),
-		route:                cfg.RouteManifest,
+		route:                newRouteLive(cfg.RouteManifest),
 
 		pinUpstreamCredential: cfg.PinUpstreamCredential,
 	}, nil
 }
+
+// newRouteLive wraps the validated config manifest in an atomic Live holder, or
+// returns nil when routing is off (no --route-manifest). A nil Live leaves
+// routeDecision on the kernel-default path, byte-for-byte the pre-routing behavior.
+func newRouteLive(m *modelroute.Manifest) *modelroute.Live {
+	if m == nil {
+		return nil
+	}
+	return modelroute.NewLive(m)
+}
+
+// RouteLive returns the atomic holder of the live routing policy, or nil when no
+// --route-manifest is installed. The host (cmd/fak serve) hands this to a
+// modelroute.Watcher so a manifest edit hot-swaps the policy this server reads —
+// the same Live, so the swap is visible on the hot path with no restart (#842).
+func (s *Server) RouteLive() *modelroute.Live { return s.route }
 
 func newEngineCacheClient(cfg Config) (*enginecache.Client, error) {
 	engineName := strings.ToLower(strings.TrimSpace(cfg.EngineCacheEngine))

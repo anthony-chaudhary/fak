@@ -159,3 +159,35 @@ func TestRouteDispatchesToRoutedEngine(t *testing.T) {
 		t.Fatalf("call must dispatch to the routed engine; result meta = %v", r.Meta)
 	}
 }
+
+// A route-manifest hot swap updates the same Live holder the gateway reads on the
+// buildCall hot path: no server rebuild, no torn intermediate manifest.
+func TestRouteLiveHotSwapAffectsBuildCall(t *testing.T) {
+	s := routeServer(t, pickManifest("fetch", "routed2"))
+	ctx := context.Background()
+	tc, err := s.buildCall(ctx, "fetch", `{}`, true, "", "")
+	if err != nil {
+		t.Fatalf("buildCall before swap: %v", err)
+	}
+	if tc.Engine != "routed2" {
+		t.Fatalf("before swap Engine=%q, want routed2", tc.Engine)
+	}
+
+	live := s.RouteLive()
+	if live == nil {
+		t.Fatal("RouteLive() = nil with a route manifest installed")
+	}
+	next := pickManifest("fetch", "remote:openai")
+	if err := next.Validate(); err != nil {
+		t.Fatalf("replacement manifest should validate: %v", err)
+	}
+	live.Store(next)
+
+	tc, err = s.buildCall(ctx, "fetch", `{}`, true, "", "")
+	if err != nil {
+		t.Fatalf("buildCall after swap: %v", err)
+	}
+	if tc.Engine != "remote:openai" {
+		t.Fatalf("after swap Engine=%q, want remote:openai", tc.Engine)
+	}
+}
