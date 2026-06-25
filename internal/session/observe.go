@@ -53,6 +53,7 @@ type BudgetEvent struct {
 	TraceID           string          `json:"trace_id"`
 	ContinuationID    string          `json:"continuation_id,omitempty"` // set on Exhausted: the fresh-window handoff id
 	Reason            string          `json:"reason,omitempty"`          // the closed budget reason token at this event
+	Rev               uint64          `json:"rev"`
 	ContextTokensLeft int             `json:"context_tokens_left"`
 	ContextTokensCap  int             `json:"context_tokens_cap,omitempty"`
 	FractionConsumed  float64         `json:"fraction_consumed"` // 0..1, the share of the context budget spent at this event
@@ -63,6 +64,22 @@ type BudgetEvent struct {
 // without holding up other sessions. The host owns fan-out and failure policy — cmd/fak
 // fires the webhook fire-and-forget, fail-open; the table only delivers the typed event.
 type BudgetObserver func(BudgetEvent)
+
+// TransitionEvent is the immutable snapshot a TransitionObserver receives when an
+// operator run-state change lands. It is built under the table lock and delivered
+// after release, mirroring BudgetEvent.
+type TransitionEvent struct {
+	TraceID        string   `json:"trace_id"`
+	From           RunState `json:"from"`
+	To             RunState `json:"to"`
+	Reason         string   `json:"reason,omitempty"`
+	ContinuationID string   `json:"continuation_id,omitempty"`
+	Rev            uint64   `json:"rev"`
+}
+
+// TransitionObserver is the run-state boundary callback seam. The host owns
+// fan-out and failure policy; the table only delivers typed transition values.
+type TransitionObserver func(TransitionEvent)
 
 // WatchBudget wires the pre-exhaustion warning + exhaustion observer. warnFraction is the
 // consumed share (0..1) at which BudgetWarn fires — 0.8 warns at 80% of the context budget
@@ -76,6 +93,17 @@ func (t *Table) WatchBudget(warnFraction float64, obs BudgetObserver) {
 	t.mu.Lock()
 	t.obs = obs
 	t.warnFrac = warnFraction
+	t.mu.Unlock()
+}
+
+// WatchTransitions wires the run-state transition observer. obs==nil clears the
+// seam. Safe to call on a live table; a nil receiver is a no-op.
+func (t *Table) WatchTransitions(obs TransitionObserver) {
+	if t == nil {
+		return
+	}
+	t.mu.Lock()
+	t.transObs = obs
 	t.mu.Unlock()
 }
 
@@ -123,8 +151,55 @@ func budgetEvent(st State, kind BudgetEventKind) BudgetEvent {
 		TraceID:           st.TraceID,
 		ContinuationID:    st.ContinuationID,
 		Reason:            st.Reason,
+		Rev:               st.Rev,
 		ContextTokensLeft: st.Budget.ContextTokensLeft,
 		ContextTokensCap:  capacity,
 		FractionConsumed:  frac,
 	}
+}
+
+func transitionEvent(st State, from, to RunState) TransitionEvent {
+	reason := st.Reason
+	if reason == "" {
+		reason = canonicalReason(to)
+	}
+	return TransitionEvent{
+		TraceID:        st.TraceID,
+		From:           from,
+		To:             to,
+		Reason:         reason,
+		ContinuationID: st.ContinuationID,
+		Rev:            st.Rev,
+	}
+}
+
+// notableTransition reports whether a move from->to is one a supervisor should be PUSHED
+// about (#761): a flip INTO Paused (needs-input), Draining, or Stopped, and only when it
+// actually changes the run-state (a no-op re-set must not notify). Running/Throttled are
+// excluded — they are not "the agent is waiting / has stopped" signals, so the SIGCHLD-
+// equivalent stays the terminal/paused boundary, fired exactly once per real transition.
+func notableTransition(from, to RunState) bool {
+	if from == to {
+		return false
+	}
+	switch to {
+	case Paused, Draining, Stopped:
+		return true
+	}
+	return false
+}
+
+// canonicalReason maps a notable run-state to its closed stop-reason token — the default a
+// transition push carries when the operator gave no free-text reason, so a push ALWAYS
+// announces WHY with a recognized token (PAUSED / DRAINING / STOPPED) rather than a blank.
+func canonicalReason(to RunState) string {
+	switch to {
+	case Paused:
+		return ReasonPaused
+	case Draining:
+		return ReasonDrained
+	case Stopped:
+		return ReasonStopped
+	}
+	return ""
 }

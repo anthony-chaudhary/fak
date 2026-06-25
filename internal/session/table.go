@@ -36,6 +36,7 @@ type Table struct {
 	// (consumed share) and again on exhaustion. Both default to the no-op (nil obs).
 	obs      BudgetObserver
 	warnFrac float64
+	transObs TransitionObserver
 }
 
 // NewTable returns a Table bounded by DefaultTableLimit sessions.
@@ -194,19 +195,27 @@ func (t *Table) Reset(trace string) {
 // terminal session).
 func (t *Table) Transition(trace string, to RunState, reason string) (State, bool) {
 	t.mu.Lock()
-	defer t.mu.Unlock()
 	cur := t.getLocked(trace)
 	if cur.Run.terminal() {
+		t.mu.Unlock()
 		return cur, false // a stopped session is terminal; refuse to revive it
 	}
+	from := cur.Run
 	cur.Run = to
 	switch to {
-	case Throttled, Stopped:
+	case Throttled, Paused, Draining, Stopped:
 		cur.Reason = reason
 	case Running:
 		cur.Reason = ""
 	}
-	return t.putLocked(cur), true
+	out := t.putLocked(cur)
+	obs := t.transObs
+	fire := obs != nil && notableTransition(from, to)
+	t.mu.Unlock()
+	if fire {
+		obs(transitionEvent(out, from, to))
+	}
+	return out, true
 }
 
 // SetBudget re-sets a session's remaining allotment live — raise to extend/speed
@@ -257,13 +266,24 @@ func (t *Table) SetPriority(trace string, priority int) (State, bool) {
 // did not match (the caller re-reads and retries) OR the session is terminal.
 func (t *Table) CompareAndSet(trace string, expectRev uint64, want State) (State, bool) {
 	t.mu.Lock()
-	defer t.mu.Unlock()
 	cur := t.getLocked(trace)
 	if cur.Run.terminal() || cur.Rev != expectRev {
+		t.mu.Unlock()
 		return cur, false
 	}
+	from := cur.Run
 	want.TraceID = trace
-	return t.putLocked(want), true
+	out := t.putLocked(want)
+	// A CAS-driven run-state flip (the operator --if-rev path) fires the transition observer
+	// too — without this, a pause/stop applied with --if-rev would notify nothing. Staged
+	// under the lock, fired after release (the same discipline as Transition).
+	obs := t.transObs
+	fire := obs != nil && notableTransition(from, out.Run)
+	t.mu.Unlock()
+	if fire {
+		obs(transitionEvent(out, from, out.Run))
+	}
+	return out, true
 }
 
 // Recontinue re-arms a budget-drained session under a FRESH trace (its continuation

@@ -126,3 +126,104 @@ func TestDebitUsageNoObserverUnchanged(t *testing.T) {
 		t.Fatalf("no-observer debit state = %+v, want left=10 cap=100", st.Budget)
 	}
 }
+
+// transRecorder collects transition events thread-safely for assertions.
+type transRecorder struct {
+	mu     sync.Mutex
+	events []TransitionEvent
+}
+
+func (r *transRecorder) observe(ev TransitionEvent) {
+	r.mu.Lock()
+	r.events = append(r.events, ev)
+	r.mu.Unlock()
+}
+
+func (r *transRecorder) snapshot() []TransitionEvent {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	out := make([]TransitionEvent, len(r.events))
+	copy(out, r.events)
+	return out
+}
+
+// TestWatchTransitionsFiresOncePerNotableBoundary proves the #761 SIGCHLD-equivalent: a
+// flip into Paused / Draining / Stopped fires exactly one event carrying the closed reason
+// token and a monotonic Rev; a Running/Throttled flip is silent; a no-op re-set into the
+// same state fires nothing.
+func TestWatchTransitionsFiresOncePerNotableBoundary(t *testing.T) {
+	const trace = "trans-1"
+	tbl := NewTable()
+	rec := &transRecorder{}
+	tbl.WatchTransitions(rec.observe)
+
+	// Throttled then Running: neither is a "waiting/stopped" signal -> silent.
+	tbl.Transition(trace, Throttled, "slow")
+	tbl.Transition(trace, Running, "")
+	if got := rec.snapshot(); len(got) != 0 {
+		t.Fatalf("Throttled/Running flips must be silent; events = %+v", got)
+	}
+
+	// Paused (needs-input): one event. Reason is reason-free at the operator API but the
+	// event carries the canonical PAUSED token.
+	tbl.Transition(trace, Paused, "")
+	got := rec.snapshot()
+	if len(got) != 1 || got[0].To != Paused || got[0].Reason != ReasonPaused {
+		t.Fatalf("after pause, events = %+v, want one To=Paused reason=%s", got, ReasonPaused)
+	}
+	if got[0].TraceID != trace || got[0].Rev == 0 {
+		t.Fatalf("pause event = %+v, want trace=%s rev>0", got[0], trace)
+	}
+	pausedRev := got[0].Rev
+
+	// Draining carrying an operator reason: one more, Rev advanced.
+	tbl.Transition(trace, Draining, "operator-stop")
+	got = rec.snapshot()
+	if len(got) != 2 || got[1].To != Draining || got[1].Reason != "operator-stop" || got[1].Rev <= pausedRev {
+		t.Fatalf("after drain, events = %+v, want a trailing To=Draining reason=operator-stop rev>%d", got, pausedRev)
+	}
+
+	// No-op re-set into the same Draining: notableTransition(from==to) is false -> silent.
+	tbl.Transition(trace, Draining, "operator-stop")
+	if got := rec.snapshot(); len(got) != 2 {
+		t.Fatalf("re-set into the same state must be silent; events = %+v", got)
+	}
+
+	// Stopped: one event carrying the stop token (Stopped is terminal afterward).
+	tbl.Transition(trace, Stopped, ReasonStopped)
+	got = rec.snapshot()
+	if len(got) != 3 || got[2].To != Stopped || got[2].Reason != ReasonStopped {
+		t.Fatalf("after stop, events = %+v, want a trailing To=Stopped reason=%s", got, ReasonStopped)
+	}
+}
+
+// TestWatchTransitionsViaCompareAndSet proves the operator --if-rev (CAS) path fires the
+// observer too: without the CAS fire hook a pause applied with --if-rev would notify nothing.
+func TestWatchTransitionsViaCompareAndSet(t *testing.T) {
+	const trace = "trans-cas"
+	tbl := NewTable()
+	rec := &transRecorder{}
+	tbl.WatchTransitions(rec.observe)
+
+	seeded, _ := tbl.SetPriority(trace, 5)
+	want := seeded
+	want.Run = Paused
+	if _, ok := tbl.CompareAndSet(trace, seeded.Rev, want); !ok {
+		t.Fatalf("CompareAndSet at rev %d unexpectedly failed", seeded.Rev)
+	}
+	got := rec.snapshot()
+	if len(got) != 1 || got[0].To != Paused || got[0].Reason != ReasonPaused {
+		t.Fatalf("CAS pause events = %+v, want one To=Paused reason=%s", got, ReasonPaused)
+	}
+}
+
+// TestWatchTransitionsNoObserverUnchanged proves the no-op default: with no observer wired
+// Transition returns the same (State, ok) and never panics.
+func TestWatchTransitionsNoObserverUnchanged(t *testing.T) {
+	const trace = "trans-noop"
+	tbl := NewTable()
+	st, ok := tbl.Transition(trace, Paused, "")
+	if !ok || st.Run != Paused {
+		t.Fatalf("no-observer transition = (%+v, %v), want Paused/ok", st, ok)
+	}
+}
