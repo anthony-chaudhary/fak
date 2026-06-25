@@ -1,11 +1,11 @@
 ---
-title: "fak — the agent kernel | default-deny permission gate + addressable KV cache for AI agents"
-description: "fak is an agent kernel for self-hosted LLM agent fleets: an in-process, default-deny permission gate fused with an addressable, bit-exact KV cache. Prompt-injection and tool-poisoning containment, capability security, and cache-efficient inference, in Go."
+title: "fak — the agent kernel | cheaper long sessions, the right model per call, a safe floor for AI agents"
+description: "fak is one Go binary you put in front of the AI agent you already run — Claude Code, Codex, Cursor, or any OpenAI / Anthropic / MCP client. Cheaper long sessions, the right model per call, fewer wasted turns, an auditable trail — and a hard security floor when you need one."
 ---
 
 # fak — the Fused Agent Kernel (agent kernel)
 
-**Treat the model like an untrusted program, and the tool call like a syscall — the model proposes, the kernel disposes.**
+**Put one Go binary in front of the AI agent you already run. Keep your model, your IDE, and your tools — gain a handle on the parts of a real agent loop that get expensive or go wrong.**
 
 <!-- hero video — the headline benchmarks as a ~40s reveal. Assets live in /visuals
      (outside the Pages /docs root), so they are referenced by absolute raw URL, the
@@ -27,15 +27,31 @@ description: "fak is an agent kernel for self-hosted LLM agent fleets: an in-pro
   <sub>The headline benchmarks as a ~40-second reveal · <a href="https://raw.githubusercontent.com/anthony-chaudhary/fak/main/visuals/hero-video.mp4">full-resolution MP4</a></sub>
 </div>
 
-`fak` is an **agent kernel** (also described as an *agent tool firewall*): an in-process,
-**default-deny permission gate** for AI agents, fused with an **addressable,
-bit-exact KV cache**, written in **Go**. Every tool call an agent makes passes
-through a kernel the model doesn't control — the same boundary that enforces
-**security** (which effects are allowed, which tool results may enter the model's
-context) also drives **performance** (do shared work once instead of every turn).
+`fak` is one Go binary you put in front of the AI agent you already run — Claude
+Code, Codex, Cursor, or any OpenAI / Anthropic / MCP client. You keep your model,
+your IDE, and your tools. You point one base URL at `fak`, and it gives you a handle
+on the parts of a real agent loop that get expensive or go wrong:
 
-> **In one line:** prompt-injection containment, capability security, and
-> cache-efficient inference for **self-hosted LLM agent fleets** — at one boundary.
+- **Cheaper long sessions.** A 100k-token conversation re-sends its whole transcript
+  every turn. `fak` sheds the old turns while keeping the provider's prompt-cache
+  prefix byte-identical, so the discount survives instead of breaking.
+- **The right model per call.** Send an easy read to a cheap model and a write-shaped
+  call to a careful one, chosen per tool call rather than per whole request.
+- **Fewer wasted turns.** A repeated read served locally, a malformed call repaired in
+  place, a dead-end branch refused before the agent spends a turn on it.
+- **A trail you can audit.** Every decision is a plain verdict (`ALLOW`, `DENY`,
+  `TRANSFORM`, or `QUARANTINE`) in JSON logs, an optional hash-chained journal, and
+  Prometheus metrics.
+
+> **In one line:** put `fak` in front of the agent you already run. It makes long
+> sessions cheaper, routes each call to the right model, keeps unsafe tool results out
+> of context, and records every verdict. One binary, no rewrite, no key to start.
+
+It does this by sitting on the tool-call path as a **kernel**: the model *proposes* a
+call; `fak` decides whether that call exists, whether its arguments are allowed, whether
+the result may enter context, and what gets reused. The same boundary that saves you
+tokens is also where a dangerous call gets refused, which is why teams who need a hard
+security floor reach for it too ([see below](#for-security-teams)).
 
 <!-- agent-kernel explainer video — the boundary / how-it-works story (P1) as a ~44s reveal,
      built by tools/hero_video_gen.py from the in-repo deterministic diagrams (nothing
@@ -73,6 +89,29 @@ context) also drives **performance** (do shared work once instead of every turn)
 ---
 
 ## What fak does
+
+The everyday wins first — the reasons most people put `fak` in front of an agent:
+
+- **Cheaper long sessions.** A long conversation re-sends its whole transcript every
+  turn, and the provider only discounts it while the cached prefix stays byte-for-byte
+  the same. `fak` sheds the un-cacheable middle turns by splicing on the original bytes
+  (a memcpy, never a re-marshal), so the prompt-cache discount survives instead of
+  breaking. It guarantees prefix byte-identity, and relays the provider's cache number
+  rather than claiming it.
+- **The right model per call.** `fak route` routes an *aspect* (a tool call, a
+  reasoning step, a stage) to a different model, with first-class ensembles
+  (`vote`, `best_of`). An easy read goes to a cheap model; a write-shaped call goes to
+  a careful one.
+- **Fewer wasted turns.** A repeated read is served locally, a malformed call is
+  repaired in place, and a dead-end branch is refused before the agent spends a turn on
+  it. Shared work is computed once because the KV cache is a kernel object, not a rented
+  one.
+- **A trail you can audit.** Every decision is a plain verdict (`ALLOW`, `DENY`,
+  `TRANSFORM`, or `QUARANTINE`) in JSON logs, an optional hash-chained journal, and
+  Prometheus metrics.
+
+And the security floor, for the teams who need one (more in
+[For security teams](#for-security-teams)):
 
 - **Stops prompt injection and tool poisoning by structure.** Suspicious tool
   *results* are quarantined out of the model's context entirely; dangerous tools are
@@ -117,6 +156,34 @@ orthogonal questions they don't: which effects are allowed, which results may en
 memory, when reuse is still legal, and what survives a session boundary. You can run
 `fak serve` in front of any of them.
 
+## For security teams
+
+If a hard capability floor is *why* you're here — not just a nice-to-have — this is the
+load-bearing idea, kept in full.
+
+**Treat the model like an untrusted program, and the tool call like a syscall: the
+model proposes, the kernel disposes.** Most agent security tries to recognize bad text.
+Recognizers help; they are not the floor. Prompt injection is a text game, and attackers
+get turns too. `fak` moves the load-bearing decision to the capability floor: a dangerous
+tool outside the allow-list cannot be called, no matter what the model was told.
+
+Two independent gates matter:
+
+- **Call-side gate:** tool names and selected arguments are checked before dispatch, on
+  the same call path as the tool call (one address space, no IPC, `default-deny`). A
+  denied call never reaches the tool runner, and a check that crashes or times out fails
+  **closed**.
+- **Result-side gate:** tool output is screened before it enters context. A poisoned or
+  secret-bearing result is paged out or quarantined instead of being handed back to the
+  model as trusted text. The detector is treated as evadable by design, a bonus rather
+  than the floor; the floor is the dangerous lever simply not existing.
+
+The capability floor is the guarantee. Irreversible effects are unwired by default;
+untrusted bytes have to pass a gate before they become model context. Read
+[Policy in the kernel](explainers/policy-in-the-kernel.md),
+[POLICY.md](https://github.com/anthony-chaudhary/fak/blob/main/POLICY.md), and
+[the security model](https://github.com/anthony-chaudhary/fak/blob/main/docs/fak/security.md).
+
 ## Try it in 2 minutes (no key, no model, no GPU)
 
 ```bash
@@ -137,11 +204,6 @@ twice — tools wired directly vs. behind `fak` — and prints the before/after.
 | **How shared state is split** | [Shared state ladder](shared-state-ladder.md) |
 | **A collaborative task state contract** | [Shared task record contract](shared-task-record-contract.md) |
 | **The two core ideas** | [Policy in the kernel](explainers/policy-in-the-kernel.md) · [Addressable KV cache](explainers/addressable-kv-cache.md) |
-| **The agent-to-agent message channel** | [In-kernel A2A channel](a2a-in-kernel-channel.md) |
-| **Shared results as a one-sided RMA pool** | [Region](region.md) |
-| **Bring your own model accounts** | [Account switcher](model-accounts.md) |
-| **The vendor-neutral governance profile** | [Agent Tool Governance Gateway](standards/agent-tool-governance-gateway.md) |
-| **Listing fak in the MCP Registry** | [MCP Registry publish guide](fak/mcp-registry.md) |
 | **Every benchmark number** | [Benchmark authority](https://github.com/anthony-chaudhary/fak/blob/main/BENCHMARK-AUTHORITY.md) |
 | **Everything fak supports** | [What fak supports](supported/README.md) — models · features · clouds · APIs/MCP · harnesses · engines |
 | **Every machine fak runs on** | [Hardware matrix](HARDWARE-MATRIX.md) (4 platforms · 2 CPU ISAs · 4 GPU backends) |

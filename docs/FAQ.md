@@ -16,7 +16,7 @@ description: "Frequently asked questions about fak, the agent kernel: how its de
       "name": "What is fak?",
       "acceptedAnswer": {
         "@type": "Answer",
-        "text": "fak is an agent kernel: one static Go binary you put in front of the AI agent you already run — Claude Code, Codex, Cursor, or any OpenAI / Anthropic / MCP client — by repointing a single base URL, with no rewrite. It makes long sessions cheaper (shedding old turns while keeping the provider's prompt-cache prefix byte-identical), routes each tool call to the right model, keeps unsafe tool results out of the model's context, and records an auditable verdict for every call. It is an in-process, default-deny permission gate fused with an addressable, bit-exact KV cache: the same boundary that saves tokens is also a hard security floor, because it treats the language model like an untrusted program and every tool call like a syscall that must pass through a kernel the model cannot control. It is also described as an agent tool firewall."
+        "text": "fak is one static Go binary you put in front of the AI agent you already run — Claude Code, Codex, Cursor, or any OpenAI / Anthropic / MCP client — by repointing a single base URL, with no rewrite. It makes long sessions cheaper (shedding old turns while keeping the provider's prompt-cache prefix byte-identical), routes each tool call to the right model, keeps unsafe tool results out of the model's context, and records an auditable verdict for every call. Under the hood it is an agent kernel: an in-process, default-deny permission gate fused with an addressable, bit-exact KV cache, so the same boundary that saves tokens is also a hard security floor — it treats the language model like an untrusted program and every tool call like a syscall that must pass through a kernel the model cannot control. (It is also described as an agent tool firewall.)"
       }
     },
     {
@@ -1614,17 +1614,17 @@ The most common questions, answered to stand on their own. The deeper topic sect
 
 ## What is fak?
 
-`fak` is an **agent kernel**: one static Go binary you put in front of the AI agent
-you already run — Claude Code, Codex, Cursor, or any OpenAI / Anthropic / MCP client —
-by repointing a single base URL, with no rewrite. It makes long sessions cheaper
-(shedding old turns while keeping the provider's prompt-cache prefix byte-identical),
-routes each tool call to the right model, keeps unsafe tool results out of the model's
-context, and records an auditable verdict for every call. It is an in-process,
-default-deny **permission gate** fused with an **addressable, bit-exact KV cache**:
-the same boundary that saves tokens is also a hard security floor, because it treats
-the language model like an untrusted program and every tool call like a syscall that
-must pass through a kernel the model cannot control. It is also described as an
-**agent tool firewall**.
+`fak` is one static Go binary you put in front of the AI agent you already run —
+Claude Code, Codex, Cursor, or any OpenAI / Anthropic / MCP client — by repointing a
+single base URL, with no rewrite. It makes long sessions cheaper (shedding old turns
+while keeping the provider's prompt-cache prefix byte-identical), routes each tool call
+to the right model, keeps unsafe tool results out of the model's context, and records an
+auditable verdict for every call. Under the hood it is an **agent kernel**: an
+in-process, default-deny **permission gate** fused with an **addressable, bit-exact KV
+cache**, so the same boundary that saves tokens is also a hard security floor — it treats
+the language model like an untrusted program and every tool call like a syscall that must
+pass through a kernel the model cannot control. (It is also described as an **agent tool
+firewall**.)
 
 ## What problem does fak solve?
 

@@ -11,9 +11,10 @@
 
 title: "Netra Fused Agent Kernel (`fak`)"
 description: >-
-  Netra Fused Agent Kernel (`fak`): an in-process, default-deny permission gate for
-  AI agents fused with an addressable, bit-exact KV cache. Prompt-injection and
-  tool-poisoning containment plus cache-efficient self-hosted LLM agent fleets, in Go.
+  Netra Fused Agent Kernel (`fak`): one Go binary you put in front of the AI agent you
+  already run — Claude Code, Codex, Cursor, or any OpenAI / Anthropic / MCP client.
+  Cheaper long sessions, the right model per call, fewer wasted turns, an auditable
+  trail — and a default-deny security floor when you need one.
 author: Anthony Chaudhary
 lang: en
 

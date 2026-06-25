@@ -27,7 +27,7 @@
 
 <!-- ---- SEO / AEO (hand-written; this page opts out of the Jekyll theme + jekyll-seo-tag) ---- -->
 <title>fak — the agent kernel | a live showcase</title>
-<meta name="description" content="fak is an agent kernel: an in-process, default-deny permission gate for AI agents fused with an addressable, bit-exact KV cache, in Go. Treat the model like an untrusted program and every tool call like a syscall — one boundary for prompt-injection containment, capability security, and cache-efficient self-hosted agent fleets." />
+<meta name="description" content="fak is one Go binary you put in front of the AI agent you already run — Claude Code, Codex, Cursor, or any OpenAI / Anthropic / MCP client. Cheaper long sessions, the right model per call, fewer wasted turns, an auditable trail — and a default-deny security floor when you need one. An in-process permission gate fused with an addressable, bit-exact KV cache, in Go." />
 <link rel="canonical" href="https://anthony-chaudhary.github.io/fak/showcase.html" />
 <meta name="author" content="Anthony Chaudhary" />
 
@@ -35,12 +35,12 @@
 <meta property="og:type" content="website" />
 <meta property="og:site_name" content="fak — the agent kernel" />
 <meta property="og:title" content="fak — the agent kernel | a live showcase" />
-<meta property="og:description" content="Treat the model like an untrusted program, and the tool call like a syscall. A default-deny permission gate fused with an addressable, bit-exact KV cache — in Go." />
+<meta property="og:description" content="Put one Go binary in front of the agent you already run: cheaper long sessions, the right model per call, fewer wasted turns, and a hard security floor when you need one." />
 <meta property="og:url" content="https://anthony-chaudhary.github.io/fak/showcase.html" />
 <meta property="og:image" content="https://raw.githubusercontent.com/anthony-chaudhary/fak/main/visuals/social-preview.png" />
 <meta name="twitter:card" content="summary_large_image" />
 <meta name="twitter:title" content="fak — the agent kernel | a live showcase" />
-<meta name="twitter:description" content="A default-deny permission gate fused with an addressable, bit-exact KV cache — in Go." />
+<meta name="twitter:description" content="One Go binary in front of your agent: cheaper long sessions, the right model per call, fewer wasted turns — plus a default-deny security floor." />
 <meta name="twitter:image" content="https://raw.githubusercontent.com/anthony-chaudhary/fak/main/visuals/social-preview.png" />
 
 <style>
@@ -271,13 +271,13 @@
 <a id="top"></a>
 <header class="hero">
   <div class="wrap">
-    <span class="eyebrow"><b>●</b> the agent kernel · default-deny · Go</span>
-    <h1 class="title">Don't trust the agent.</h1>
+    <span class="eyebrow"><b>●</b> the agent kernel · one Go binary · drop-in</span>
+    <h1 class="title">Run your agent for less. Keep it on a leash.</h1>
     <p class="lede">
-      <span class="k">fak</span> treats the model like an untrusted program and every tool call like a
-      <span class="k">syscall</span>: each one passes through a kernel the model doesn't control. The
-      same boundary enforces security <em>and</em> drives performance — put the check on the call path
-      so the agent can't talk its way past it.
+      Put <span class="k">fak</span> in front of the AI agent you already run — Claude Code, Codex,
+      Cursor, any OpenAI / Anthropic / MCP client. Long sessions get cheaper, each call routes to the
+      right model, and wasted turns get cut — while the same boundary holds a hard security floor when
+      you need one. One binary, no rewrite, no key to start.
     </p>
 
     <div class="syscall-line">
