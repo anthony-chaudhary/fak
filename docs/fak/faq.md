@@ -47,8 +47,11 @@ They solve different problems and compose:
 the kernel boundary. `fak` does ship an in-kernel engine that can load a GGUF directly, but
 that path is a *correctness reference*, not a production serving engine (see
 [Does `fak` work with any model?](#does-fak-work-with-any-model)). The infrastructure-level
-differences (cross-worker / cross-session reuse, measured 20–24× vs naive re-prefill) are
-quantified in [`docs/fak-vs-alternatives-comparison.md`](../../docs/fak-vs-alternatives-comparison.md).
+difference is cross-worker / cross-session prefix reuse — ~1.1–1.2× over a tuned per-agent-KV
+SOTA baseline at 4 workers, climbing toward the agent count as the shared-prefix fraction grows
+(the eye-catching 20–24× is only versus a *naive* re-prefill-every-turn floor no serving stack
+ships, never the SOTA comparison) — quantified in
+[`docs/fak-vs-alternatives-comparison.md`](../../docs/fak-vs-alternatives-comparison.md).
 
 ### Why a kernel for tool adjudication?
 

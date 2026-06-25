@@ -88,6 +88,9 @@ The principal served routes, from the Claude Code integration guide and the
 | `POST /v1/fak/syscall` | Adjudicate and execute one tool call (dispatch to the registered engine) |
 | `POST /v1/fak/adjudicate` | Get a pre-execution verdict without executing |
 | `POST /v1/fak/admit` | Send a client-executed tool result through the result-side floor |
+| `GET /v1/fak/session/{id}` | Read one served session's live drive state (status/budget/pace/priority) |
+| `POST /v1/fak/session/{id}/{verb}` | Control a session in flight — `stop` · `pause` · `resume` · `throttle` · `run` · `budget` · `pace` · `priority` (optional `if_rev` optimistic-concurrency guard) |
+| `GET /v1/fak/sessions` | Multi-session snapshot of all live drive states |
 | `GET·POST /v1/fak/changes` | Drain the cross-agent "what changed" feed (vDSO coherence) |
 | `GET·POST /v1/fak/events` | Drain the durable decision-journal tail (after a `?since=` cursor) |
 | `POST /v1/fak/revoke` | Refute a poisoned or stale world-state witness fleet-wide |

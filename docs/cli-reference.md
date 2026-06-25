@@ -134,6 +134,9 @@ fak bench     --suite tau2-smoke --out report.json     # A/B vDSO ablation -> re
 fak ablate    --sweep vdso                             # N-arm self-ablation: one frozen trace, feature on/off, deltas off the kernel counters
 fak turntax   --suite turntax-airline                  # price the extra error-code MODEL turn the 1-shot kernel deletes
 fak agent     --offline | --base-url URL --model M --api-key-env VAR  # LIVE turn-count A/B (see LIVE-RESULTS.md)
+fak session   ls | status <id> | stop|pause|resume|throttle <id> | budget <id> [--turns N] [--addr URL]   # operator control of a served session's live drive state, over /v1/fak/session(s)
+fak task      sample [--json] [--done N --total N]     # process-local task-manager snapshot: hardware/runtime sample + task/step/concept progress and ETA
+fak snapshot  kinds | demo | info | dump-fleet | restore-fleet   # dump/restore any primitive (turn|tool|session|fleet|RSI loop) to a portable sha256-integrity bundle
 fak serve     --addr :8080 [--require-key-env VAR]     # OpenAI-compatible HTTP + MCP gateway (any-language agents)
 fak recall    --dir DIR                                # persist/inspect a finished session as a durable core image
 fak dream     --dir DIR --out-dir DIR                   # offline cleanup pass over a sleeping core image
