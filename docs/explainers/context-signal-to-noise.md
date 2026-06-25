@@ -104,3 +104,48 @@ referenced — so the session auditor can offer only a coarse density **proxy**
 mirrors fak's WITNESSED-vs-OBSERVED line: the measured S/N is witnessed from the
 planner's own ground truth; a transcript proxy is a separate, clearly-labeled surface
 that can flag a suspect session but not prove it.
+
+## The formula is one rung of a ladder (epic [#851](https://github.com/anthony-chaudhary/fak/issues/851))
+
+The version above defines "hit" the coarsest way: an **inferred boolean** — did the next
+turn's text lexically overlap this span? That is a guess you are forced into when you only
+*consume* a model API. fak runs its own forward pass, so it can do better. The formula
+generalizes by leaving the structure fixed and refining one term:
+
+```
+              Σ_s  a_s · cost(s)
+   S/N  =  ──────────────────────        a_s ∈ [0,1] = the attribution weight of span s
+              Σ_s  cost(s)
+```
+
+| Rung | `a_s` is… | Source | Status |
+|---|---|---|---|
+| 0 | inferred boolean | lexical overlap, post-hoc | **shipped** (this doc) |
+| 1 | witnessed boolean | did the forward pass read the span's KV at all | epic #851 |
+| 2 | **attention mass** ∈ [0,1] | post-softmax weights landing on the span, this turn | epic #851 |
+| 3 | per-**token** mass | weight per resident token (locate noise *inside* a span) | epic #851 |
+
+The formula never changes as you climb; only `a_s` gets more truthful. When fak controls
+attention, the hit is **witnessed**, not inferred — the normalized softmax weight that
+actually landed on the span's tokens (`internal/model/forward.go` computes it; the span↔KV
+map `kvmmu.Segment{ID,From,Len}` attributes it).
+
+### Hit is a rolling accumulation, not a per-turn event
+
+A span can idle for ten turns then become load-bearing, or run hot then die. So the real
+quantity is a per-span accumulator over the *session*, and the time-reduction is chosen by
+the consumer — **the same accumulator, two reductions, one knob (λ):**
+
+```
+   real-time controller:  A_s(t) = λ · A_s(t−1) + a_s(t)    (EMA — "what is hot NOW")
+   post-hoc analyst:      A_s    = Σ_t a_s(t)  + trajectory  (cumulative — "what mattered overall")
+```
+
+With λ<1 the rolling sum *is* the heavy-hitter signal (H2O/SnapKV territory) — but as a
+witnessed kernel quantity the same kernel can act on, evicting cold-by-attention spans via
+the **existing bit-exact evictor** (`KVCache.Evict`), so eviction becomes attention-informed
+*and* `max|Δ|=0` — the intersection the lossy-attention literature (approximate) and
+fak-today (exact but attention-blind) each have only one half of. With λ=1 the same numbers
+become a post-hoc report: which spans were ever worth their residency, and for how many turns
+they were dead weight. The honest boundary: fak does not claim to have invented heavy-hitters
+— the novelty is the *witness* (a measured, replayable signal) fused with *exact* eviction.
