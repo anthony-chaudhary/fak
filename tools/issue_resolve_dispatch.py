@@ -21,6 +21,11 @@ In-flight de-dup: it skips an issue that already has a live resolution worker (a
 dispatch log naming ``#N`` whose process is still alive) so two ticks never storm
 the same issue.
 
+Loop ledger: the CLI path appends this dispatcher tick to fak's durable loop
+ledger by default (``fak loop append``): every tick records ``fire`` and
+admitted/refused ``admit`` rows, live spawns record ``start``, and successful ticks
+record ``end``. Disable with ``--no-loop-ledger`` for hermetic/manual probes.
+
     python tools/issue_resolve_dispatch.py                 # plan one tick (dry-run)
     python tools/issue_resolve_dispatch.py --live          # spawn one issue worker
     python tools/issue_resolve_dispatch.py --lane gateway --live
@@ -32,6 +37,7 @@ import datetime as dt
 import json
 import os
 import re
+import shlex
 import shutil
 import signal
 import subprocess
@@ -59,6 +65,7 @@ ACCOUNT_SIDECAR_SUFFIX = ".account"
 _LOG_ISSUE_RE = re.compile(r"resolve-(\d+)-")
 DEFAULT_WORKER_TIMEOUT_S = dispatch_worker.DEFAULT_TIMEOUT_S
 DEFAULT_SPAWN_PROBE_S = 5.0
+LOOP_ID_PREFIX = "issue-resolve-dispatch"
 
 # Worker backends this tick can launch:
 #   claude   = opus (t1) -- the reference path, the established quota pool.
@@ -657,12 +664,178 @@ def check_weekly_cap(runs_dir: Path, *, product: str, account_tag: str | None,
         return {"capped": False}
 
 
+def loop_id_for_payload(payload: dict[str, Any]) -> str:
+    backend = str(payload.get("backend") or "claude").strip() or "claude"
+    return f"{LOOP_ID_PREFIX}/{backend}"
+
+
+def default_loop_ledger(root: Path) -> Path:
+    configured = os.environ.get("FAK_LOOP_LEDGER")
+    if configured:
+        return Path(configured)
+    return root / ".fak" / "loops.jsonl"
+
+
+def fak_loop_cmd(root: Path) -> list[str]:
+    configured = os.environ.get("FAK_BIN")
+    if configured:
+        return shlex.split(configured)
+    return ["go", "run", "./cmd/fak"]
+
+
+def _loop_metric_args(metrics: dict[str, int]) -> list[str]:
+    out: list[str] = []
+    for key in sorted(metrics):
+        out += ["--metric", f"{key}={int(metrics[key])}"]
+    return out
+
+
+def _loop_evidence_args(evidence: list[tuple[str, str]]) -> list[str]:
+    out: list[str] = []
+    for kind, ref in evidence:
+        if kind and ref:
+            out += ["--evidence", f"{kind}={ref}"]
+    return out
+
+
+def append_loop_event(root: Path, ledger: Path, event: dict[str, Any],
+                      *, source: str = "issue_resolve_dispatch") -> dict[str, Any]:
+    """Append one canonical loop-ledger row through `fak loop append`.
+
+    Fail-open by design: a dispatcher tick must not fail just because the optional
+    observability append could not find a binary. The error is returned into the
+    tick payload for audit, while the dispatch verdict stays grounded in preflight.
+    """
+    cmd = fak_loop_cmd(root) + [
+        "loop", "append",
+        "--ledger", str(ledger),
+        "--loop", str(event["loop_id"]),
+        "--kind", str(event["kind"]),
+        "--source", source,
+        "--principal", str(event.get("principal") or event.get("backend") or "dispatcher"),
+    ]
+    for flag, key in (("--run", "run_id"), ("--status", "status"),
+                      ("--verified-state", "verified_state"),
+                      ("--reason", "reason"), ("--summary", "summary")):
+        if event.get(key):
+            cmd += [flag, str(event[key])]
+    cmd += _loop_metric_args(event.get("metrics") or {})
+    cmd += _loop_evidence_args(event.get("evidence") or [])
+    try:
+        proc = subprocess.run(cmd, cwd=root, capture_output=True, text=True,
+                              encoding="utf-8", errors="replace", timeout=60)
+    except (OSError, subprocess.SubprocessError) as exc:
+        return {"ok": False, "kind": event.get("kind"), "error": str(exc)}
+    return {
+        "ok": proc.returncode == 0,
+        "kind": event.get("kind"),
+        "returncode": proc.returncode,
+        "stderr": (proc.stderr or "").strip()[-500:],
+        "stdout": (proc.stdout or "").strip()[-500:],
+    }
+
+
+def loop_run_id(payload: dict[str, Any]) -> str:
+    spawned = payload.get("spawned") or {}
+    if spawned.get("pid"):
+        return f"resolve-{payload.get('target_issue') or 'none'}-{spawned.get('pid')}"
+    stamp = dt.datetime.now(dt.timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    return f"resolve-tick-{payload.get('backend') or 'claude'}-{stamp}"
+
+
+def record_loop_tick(root: Path, payload: dict[str, Any],
+                     *,
+                     ledger: Path | None = None,
+                     append: Any | None = None) -> dict[str, Any]:
+    """Lower one issue-resolve dispatcher tick into loop ledger events.
+
+    The rows describe the DISPATCHER tick, not the spawned worker's eventual issue
+    resolution. A successful spawn is therefore `claimed_done` for the tick only;
+    the independent commit/issue witness remains the close/audit arm.
+    """
+    ledger = ledger or default_loop_ledger(root)
+    append = append or append_loop_event
+    run_id = str(payload.get("run_id") or loop_run_id(payload))
+    payload["run_id"] = run_id
+    loop_id = loop_id_for_payload(payload)
+    pre = payload.get("preflight") or {}
+    spawned = payload.get("spawned") or {}
+    metrics: dict[str, int] = {
+        "live": 1 if payload.get("live") else 0,
+        "lane_issue_count": int(payload.get("lane_issue_count") or 0),
+        "max_workers": int(payload.get("max_workers") or 0),
+        "preflight_live": int(pre.get("live") or 0),
+        "preflight_cap": int(pre.get("cap") or 0),
+    }
+    if payload.get("target_issue") is not None:
+        metrics["target_issue"] = int(payload["target_issue"])
+    if payload.get("prompt_chars") is not None:
+        metrics["prompt_chars"] = int(payload["prompt_chars"])
+    if spawned.get("pid"):
+        metrics["pid"] = int(spawned["pid"])
+    evidence: list[tuple[str, str]] = []
+    if payload.get("target_issue") is not None:
+        evidence.append(("issue", str(payload["target_issue"])))
+    if spawned.get("log"):
+        evidence.append(("log", str(spawned["log"])))
+    if (payload.get("account") or {}).get("tag"):
+        evidence.append(("account", str((payload.get("account") or {}).get("tag"))))
+
+    events: list[dict[str, Any]] = [{
+        "loop_id": loop_id, "run_id": run_id, "kind": "fire",
+        "backend": payload.get("backend"), "summary": f"issue dispatch tick lane={payload.get('lane') or '-'}",
+        "metrics": metrics, "evidence": evidence,
+    }]
+    admitted = bool(payload.get("ok")) and payload.get("action") in {"would_spawn", "spawned"}
+    events.append({
+        "loop_id": loop_id, "run_id": run_id, "kind": "admit",
+        "backend": payload.get("backend"),
+        "status": "admitted" if admitted else "refused",
+        "reason": str(payload.get("verdict") or payload.get("action") or ""),
+        "summary": str(payload.get("reason") or "")[:200],
+        "metrics": metrics, "evidence": evidence,
+    })
+    if payload.get("action") == "spawned":
+        events.append({
+            "loop_id": loop_id, "run_id": run_id, "kind": "start",
+            "backend": payload.get("backend"),
+            "status": "running",
+            "reason": "SPAWNED",
+            "summary": str(payload.get("reason") or "")[:200],
+            "metrics": metrics, "evidence": evidence,
+        })
+    if payload.get("ok"):
+        events.append({
+            "loop_id": loop_id, "run_id": run_id, "kind": "end",
+            "backend": payload.get("backend"),
+            "status": "claimed_done",
+            "reason": str(payload.get("verdict") or payload.get("action") or ""),
+            "summary": str(payload.get("reason") or "")[:200],
+            "metrics": metrics, "evidence": evidence,
+        })
+    rows = [append(root, ledger, ev) for ev in events]
+    return {
+        "ledger": str(ledger),
+        "loop_id": loop_id,
+        "run_id": run_id,
+        "events": rows,
+        "ok": all(r.get("ok") for r in rows) if rows else True,
+    }
+
+
 def evaluate(root: Path, *, max_workers: int, work_kind: str, lane: str | None,
               live: bool, refresh: bool = True, cooldown_min: int = 120,
               backend: str = "claude",
               exclude_lanes: set[str] | None = None,
               worker_timeout_s: int | None = DEFAULT_WORKER_TIMEOUT_S,
-              spawn_probe_s: float = DEFAULT_SPAWN_PROBE_S) -> dict[str, Any]:
+              spawn_probe_s: float = DEFAULT_SPAWN_PROBE_S,
+              record_loop: bool = False,
+              loop_ledger: Path | None = None) -> dict[str, Any]:
+    def finish(payload: dict[str, Any]) -> dict[str, Any]:
+        if record_loop:
+            payload["loop_ledger"] = record_loop_tick(root, payload, ledger=loop_ledger)
+        return payload
+
     if backend not in BACKENDS:
         raise ValueError(f"unknown backend {backend!r}; expected one of {BACKENDS}")
     product = _BACKEND_PRODUCT[backend]
@@ -683,7 +856,7 @@ def evaluate(root: Path, *, max_workers: int, work_kind: str, lane: str | None,
     cap = (check_weekly_cap(runs_dir, product=product, account_tag=acct.get("tag"))
            if pre_ok else {"capped": False})
     if pre_ok and cap.get("capped"):
-        return {
+        return finish({
             "schema": SCHEMA, "workspace": str(root), "live": live, "backend": backend,
             "max_workers": max_workers, "registry_refresh": reg,
             "timed_out_workers": reaped,
@@ -695,7 +868,7 @@ def evaluate(root: Path, *, max_workers: int, work_kind: str, lane: str | None,
             "reason": (f"account '{acct.get('tag')}' is weekly-capped (resets "
                        f"{cap.get('reset_text') or '?'}); holding spawn until "
                        f"{cap.get('until')} — re-arm is automatic at the reset"),
-        }
+        })
 
     pick = lane_issue_numbers(root, lane, exclude=exclude_lanes)
     chosen_lane = pick.get("lane")
@@ -722,18 +895,18 @@ def evaluate(root: Path, *, max_workers: int, work_kind: str, lane: str | None,
         payload.update({"ok": False, "action": "refused",
                         "verdict": pre.get("verdict") or "REFUSE",
                         "reason": f"preflight refused: {pre.get('reason')}"})
-        return payload
+        return finish(payload)
     if not chosen_lane:
         payload.update({"ok": False, "action": "no_lane", "verdict": "NO_LANE",
                         "reason": "no lane has open issues (router empty/error)"})
-        return payload
+        return finish(payload)
     if target is None:
         payload.update({"ok": False, "action": "no_issue", "verdict": "NO_ISSUE",
                         "reason": (f"every open issue on lane '{chosen_lane}' is "
                                    f"either live ({sorted(live_issues)}) or in "
                                    f"cooldown ({sorted(cooled)}) — nothing fresh to "
                                    f"dispatch this tick")})
-        return payload
+        return finish(payload)
 
     rec = issue_worker_prompt.build(target, chosen_lane, workspace=root)
     payload["prompt_chars"] = rec.get("prompt_chars")
@@ -748,7 +921,7 @@ def evaluate(root: Path, *, max_workers: int, work_kind: str, lane: str | None,
                                    f"#{target} (lane '{chosen_lane}') under account "
                                    f"'{acct.get('tag')}' (t{acct.get('tier')}, "
                                    f"{acct.get('model') or backend})")})
-        return payload
+        return finish(payload)
 
     if backend == "claude":
         env = issue_dispatch.worker_env(acct.get("dir"), chosen_lane, root)
@@ -767,14 +940,14 @@ def evaluate(root: Path, *, max_workers: int, work_kind: str, lane: str | None,
                                    f"#{target} exited within {early.get('wait_s')}s "
                                    "and produced an empty log")})
         _record(runs_dir, payload)
-        return payload
+        return finish(payload)
     payload.update({"ok": True, "action": "spawned", "verdict": "SPAWNED",
                     "spawned": spawned,
                     "reason": (f"spawned {backend} issue-resolution worker pid "
                                f"{spawned['pid']} on #{target} (lane '{chosen_lane}') "
                                f"under '{acct.get('tag')}' ({acct.get('model') or backend})")})
     _record(runs_dir, payload)
-    return payload
+    return finish(payload)
 
 
 def _record(runs_dir: Path, payload: dict[str, Any]) -> None:
@@ -854,6 +1027,10 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--spawn-probe-s", type=float, default=DEFAULT_SPAWN_PROBE_S,
                     help=f"seconds to wait after a live spawn to catch immediate "
                          f"empty-log exits (default: {DEFAULT_SPAWN_PROBE_S}; 0 disables)")
+    ap.add_argument("--loop-ledger", default="",
+                    help="append this tick to a fak loop ledger (default: FAK_LOOP_LEDGER or .fak/loops.jsonl)")
+    ap.add_argument("--no-loop-ledger", action="store_true",
+                    help="disable loop-ledger append for this tick")
     ap.add_argument("--json", action="store_true", help="emit machine-readable JSON")
     args = ap.parse_args(argv)
 
@@ -865,9 +1042,12 @@ def main(argv: list[str] | None = None) -> int:
     payload = evaluate(root, max_workers=args.max_workers, work_kind=work_kind,
                        lane=args.lane, live=args.live, refresh=not args.no_refresh,
                        cooldown_min=args.cooldown_min, backend=args.backend,
-                        exclude_lanes=exclude_lanes,
-                        worker_timeout_s=dispatch_worker.normalize_timeout(args.worker_timeout_s),
-                        spawn_probe_s=max(0.0, args.spawn_probe_s))
+                       exclude_lanes=exclude_lanes,
+                       worker_timeout_s=dispatch_worker.normalize_timeout(args.worker_timeout_s),
+                       spawn_probe_s=max(0.0, args.spawn_probe_s),
+                       record_loop=not args.no_loop_ledger,
+                       loop_ledger=(Path(args.loop_ledger).resolve()
+                                    if args.loop_ledger else None))
     print(json.dumps(payload, indent=2) if args.json else render(payload))
     return 0 if payload.get("ok") else 1
 

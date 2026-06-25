@@ -114,6 +114,13 @@ default**; `-Live` opts into the side effect.
 | `FleetResolveProgress` | [`register_resolve_progress.ps1`](https://github.com/anthony-chaudhary/fak/blob/main/tools/register_resolve_progress.ps1) | 15 min | CLOSE / harvest — snapshot the curve and close `OPEN_WITNESSED` issues. DoS-free (no worker spawned). |
 | `FleetDispatchStatusDoc` | [`register_dispatch_status_doc.ps1`](https://github.com/anthony-chaudhary/fak/blob/main/tools/register_dispatch_status_doc.ps1) | 30 min | DOC — render the gitignored, operator-local `.dispatch-runs/dispatch-status.md`. Read-only fold; never committed. |
 
+`FleetIssueDispatch` and `FleetResolveProgress` are installed through `fak loop run`,
+not directly through Python. The Task Scheduler fire/start/end wrapper rows land in
+`.fak/loops.jsonl` under `issue-resolve-dispatch/task-scheduler/<backend>` and
+`issue-resolve-progress/task-scheduler`; the Python producers then record their own
+admission/spawn/progress/witness rows under `issue-resolve-dispatch/<backend>` and
+`issue-resolve-progress`.
+
 ```powershell
 # install all three live (bounded autonomous spawn + close + doc refresh)
 .\tools\register_issue_dispatch.ps1     -Workspace C:\work\fak -Mode resolve -Live -MaxWorkers 2
@@ -127,6 +134,30 @@ default**; `-Live` opts into the side effect.
 
 Together: **spawn → ship `#N` commit → witness → close → refresh the doc**, unattended
 and cap-bounded.
+
+## Recently-created feature dogfood
+
+When a new local feature lands, run the same dogfood packet instead of inventing a
+one-off proof. It exercises the current loop ledger, vCache score/refutation
+surface, prompt-tool-pruning tests, code-slop scorecard, and dogfood coverage
+scorecard, then writes a JSON evidence bundle under `.fak/recent-feature-dogfood/`.
+
+```bash
+# quick local run
+python tools/recent_feature_dogfood.py
+
+# scheduler/manual run with OS-edge loop rows
+go run ./cmd/fak loop run --loop recent-feature-dogfood/manual --source manual -- \
+  python tools/recent_feature_dogfood.py
+
+# cron/launchd/systemd helper form
+tools/fak_loop_run.sh recent-feature-dogfood/cron cron -- \
+  python tools/recent_feature_dogfood.py
+```
+
+The scorecards may report ACTION/debt and still pass this dogfood packet when the
+machine payload is valid. The pass condition is repeatable use of the feature and
+valid evidence, not pretending existing repo debt is already gone.
 
 ## A note on opaque workers
 

@@ -178,6 +178,75 @@ class TimedOutWorkerReapTest(unittest.TestCase):
         self.assertTrue(out["disabled"])
 
 
+class LoopLedgerTest(unittest.TestCase):
+    def test_record_loop_tick_writes_fire_admit_end_for_dry_run(self) -> None:
+        mod = load()
+        rows: list[dict[str, object]] = []
+
+        def append(root, ledger, ev):
+            rows.append(dict(ev))
+            return {"ok": True, "kind": ev["kind"]}
+
+        payload = {
+            "schema": mod.SCHEMA,
+            "workspace": str(ROOT),
+            "live": False,
+            "backend": "claude",
+            "max_workers": 2,
+            "preflight": {"verdict": "SPAWN_OK", "cap": 2, "live": 0},
+            "account": {"tag": "worker-a", "tier": 1, "model": "opus"},
+            "lane": "gateway",
+            "lane_issue_count": 3,
+            "target_issue": 717,
+            "prompt_chars": 1200,
+            "ok": True,
+            "action": "would_spawn",
+            "verdict": "WOULD_SPAWN",
+            "reason": "safe to spawn one worker",
+        }
+        rec = mod.record_loop_tick(ROOT, payload, ledger=Path("loops.jsonl"), append=append)
+
+        self.assertTrue(rec["ok"])
+        self.assertEqual(rec["loop_id"], "issue-resolve-dispatch/claude")
+        self.assertEqual([r["kind"] for r in rows], ["fire", "admit", "end"])
+        self.assertEqual(rows[1]["status"], "admitted")
+        self.assertEqual(rows[1]["reason"], "WOULD_SPAWN")
+        self.assertEqual(rows[1]["metrics"]["target_issue"], 717)
+        self.assertIn(("issue", "717"), rows[1]["evidence"])
+        self.assertTrue(payload["run_id"].startswith("resolve-tick-claude-"))
+
+    def test_record_loop_tick_refusal_has_fire_and_refused_admit(self) -> None:
+        mod = load()
+        rows: list[dict[str, object]] = []
+        payload = {
+            "schema": mod.SCHEMA,
+            "workspace": str(ROOT),
+            "live": True,
+            "backend": "opencode",
+            "max_workers": 2,
+            "preflight": {"verdict": "REFUSE_NO_ACCOUNT", "cap": 2, "live": 2},
+            "account": {},
+            "lane": "docs",
+            "lane_issue_count": 8,
+            "ok": False,
+            "action": "refused",
+            "verdict": "REFUSE_NO_ACCOUNT",
+            "reason": "preflight refused: no account",
+        }
+
+        mod.record_loop_tick(
+            ROOT,
+            payload,
+            ledger=Path("loops.jsonl"),
+            append=lambda root, ledger, ev: (rows.append(dict(ev)) or {"ok": True, "kind": ev["kind"]}),
+        )
+
+        self.assertEqual([r["kind"] for r in rows], ["fire", "admit"])
+        self.assertEqual(rows[1]["status"], "refused")
+        self.assertEqual(rows[1]["reason"], "REFUSE_NO_ACCOUNT")
+        self.assertEqual(rows[1]["metrics"]["preflight_live"], 2)
+
+
 class EvaluateTest(unittest.TestCase):
     SPAWN_OK = {
         "verdict": "SPAWN_OK", "reason": "ok", "cap": 2, "live": 0,

@@ -43,6 +43,10 @@ param(
   # Comma-separated lanes to drop from the busiest-pick (e.g. the opus task excludes
   # 'docs' so the glm task owns it). Ignored when -Lane is set.
   [string]$ExcludeLane = '',
+  # Optional path to a fak binary. If unset, the installer probes ./fak.exe, PATH fak,
+  # then falls back to `go run ./cmd/fak` so source-tree installs cannot silently use
+  # a stale binary that lacks `fak loop`.
+  [string]$FakExe = $env:FAK_BIN,
   [switch]$Live
 )
 $ErrorActionPreference = 'Stop'
@@ -60,6 +64,8 @@ if ($Action -eq 'remove') {
   return
 }
 
+. (Join-Path $PSScriptRoot 'fak_loop_task.ps1')
+
 # install -- resolve python and the guarded tick; pick dry-run vs live.
 $py = (Get-Command python -ErrorAction SilentlyContinue).Source
 if (-not $py) { $py = (Get-Command python3 -ErrorAction SilentlyContinue).Source }
@@ -68,31 +74,30 @@ $tickName = if ($Mode -eq 'resolve') { 'issue_resolve_dispatch.py' } else { 'iss
 $tick = Join-Path $Workspace ('tools\' + $tickName)
 if (-not (Test-Path $tick)) { throw "$tickName not found at $tick" }
 
-$liveFlag = if ($Live) { ' --live' } else { '' }
-# Register the tick to run python.exe DIRECTLY via the ScheduledTasks cmdlets, NOT
+# Register the tick through `fak loop run` via the ScheduledTasks cmdlets, NOT
 # through a `powershell.exe -Command "..."` wrapper. The wrapper was a SILENT-NO-OP
 # trap: a standard python install lives under "C:\Program Files\Python3xx\python.exe"
 # (a SPACE in the path), and the nested quotes needed to protect it did not survive
 # the PowerShell -> schtasks /TR handoff -- the stored -Command truncated at
 # "C:\Program", powershell.exe exited 0 without ever launching python, and the task
-# logged LastResult=0 while the tick never actually ran. Splitting Execute (the
-# program) from Argument (its args) sidesteps ALL nested quoting: Task Scheduler keeps
-# the program path in its own field (no quoting needed), and python's own exit code
-# becomes the task's LastTaskResult directly (so the `; exit $LASTEXITCODE` shim that
-# the old -Command form needed is gone too).
-$pyArgs    = "`"$tick`" --workspace `"$Workspace`" --max-workers $MaxWorkers$liveFlag --json"
+# logged LastResult=0 while the tick never actually ran. Splitting Execute (fak/go)
+# from Argument (fak args + child python args) keeps Task Scheduler out of nested
+# shell quoting while the loop ledger records the child exit code and duration.
+$childArgs = @($py, $tick, '--workspace', $Workspace, '--max-workers', [string]$MaxWorkers, '--json')
+if ($Live) { $childArgs += '--live' }
 # --backend / --lane are resolve-tick options only (the loop tick has neither).
 if ($Mode -eq 'resolve') {
-  if ($Backend -ne 'claude') { $pyArgs += " --backend $Backend" }
-  if ($Lane)                 { $pyArgs += " --lane $Lane" }
-  if ($ExcludeLane)          { $pyArgs += " --exclude-lane $ExcludeLane" }
+  if ($Backend -ne 'claude') { $childArgs += @('--backend', $Backend) }
+  if ($Lane)                 { $childArgs += @('--lane', $Lane) }
+  if ($ExcludeLane)          { $childArgs += @('--exclude-lane', $ExcludeLane) }
 }
-$taskAction = New-ScheduledTaskAction -Execute $py -Argument $pyArgs -WorkingDirectory $Workspace
+$wrapperLoop = if ($Mode -eq 'resolve') { "issue-resolve-dispatch/task-scheduler/$Backend" } else { 'issue-dispatch/task-scheduler' }
+$taskAction = New-FakLoopScheduledTaskAction -Workspace $Workspace -FakExe $FakExe -LoopId $wrapperLoop -ChildArgs $childArgs
 $trigger   = New-ScheduledTaskTrigger -Once -At (Get-Date).AddMinutes(1) `
                -RepetitionInterval (New-TimeSpan -Minutes $EveryMinutes) `
                -RepetitionDuration (New-TimeSpan -Days 3650)
-# S4U (non-interactive, session 0), NOT Interactive: this tick executes python.exe
-# DIRECTLY, and a console exe launched in the interactive session flashes a console
+# S4U (non-interactive, session 0), NOT Interactive: this tick executes fak/go
+# directly, and a console exe launched in the interactive session flashes a console
 # window on EVERY trigger — the "random popup windows". S4U runs the tick windowless
 # yet still AS THIS USER (same profile/config/oauth), so the headless dispatch and the
 # workers it spawns are unaffected. (Same pattern as the FleetHeartbeat/S4U tasks.)
@@ -103,7 +108,8 @@ Register-ScheduledTask -TaskName $TaskName -Action $taskAction -Trigger $trigger
                -Principal $principal -Settings $settings -Force | Out-Null
 
 $runMode = if ($Live) { "LIVE (bounded autonomous spawning, cap=$MaxWorkers)" } else { "DRY-RUN (logs plans, spawns nothing)" }
-Write-Output "installed $TaskName -- every $EveryMinutes min, arm=$Mode ($tickName), current-user interactive, $runMode"
+Write-Output "installed $TaskName -- every $EveryMinutes min, arm=$Mode ($tickName), current-user S4U, $runMode"
+Write-Output "loop ledger:  .fak\loops.jsonl via fak loop run ($wrapperLoop)"
 Write-Output "check status any time:  python tools\dispatch_status.py"
 if (-not $Live) {
   Write-Output "to go live later:  .\tools\register_issue_dispatch.ps1 -Live -Mode $Mode -MaxWorkers $MaxWorkers"

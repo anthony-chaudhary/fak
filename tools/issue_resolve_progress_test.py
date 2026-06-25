@@ -64,6 +64,114 @@ class FoldsTest(unittest.TestCase):
             self.assertEqual(loaded["baseline_open"], 483)
 
 
+class LoopLedgerTest(unittest.TestCase):
+    def test_record_loop_tick_records_snapshot_witness(self) -> None:
+        mod = load()
+        rows: list[dict[str, object]] = []
+        rec = {
+            "schema": mod.SCHEMA,
+            "utc": "2026-06-25T10:15:00Z",
+            "target": 50,
+            "ok": True,
+            "open_now": 479,
+            "baseline_open": 483,
+            "resolved_toward_target": 4,
+            "target_remaining": 46,
+            "witnessed_open": 2,
+            "witnessed_numbers": [491, 493],
+            "closed_now": 0,
+            "closed_by_loop_total": 1,
+            "close_live": False,
+            "close_result": None,
+            "audit_error": None,
+        }
+
+        out = mod.record_loop_tick(
+            ROOT,
+            rec,
+            ledger=Path("loops.jsonl"),
+            append=lambda root, ledger, ev: (rows.append(dict(ev)) or {"ok": True, "kind": ev["kind"]}),
+        )
+
+        self.assertTrue(out["ok"])
+        self.assertEqual(out["loop_id"], "issue-resolve-progress")
+        self.assertEqual([r["kind"] for r in rows], ["fire", "admit", "end", "witness"])
+        self.assertEqual(rows[1]["status"], "admitted")
+        self.assertEqual(rows[2]["status"], "claimed_done")
+        self.assertEqual(rows[3]["status"], "witnessed_done")
+        self.assertEqual(rows[3]["verified_state"], "verified_done")
+        self.assertEqual(rows[3]["metrics"]["open_now"], 479)
+        self.assertIn(("open_witnessed_issue", "491"), rows[3]["evidence"])
+        self.assertEqual(rec["run_id"], "progress-20260625T101500")
+
+    def test_record_loop_tick_audit_error_marks_witness_unavailable(self) -> None:
+        mod = load()
+        rows: list[dict[str, object]] = []
+        rec = {
+            "schema": mod.SCHEMA,
+            "utc": "2026-06-25T10:20:00Z",
+            "target": 50,
+            "ok": True,
+            "open_now": 479,
+            "baseline_open": 483,
+            "resolved_toward_target": 4,
+            "target_remaining": 46,
+            "witnessed_open": 0,
+            "witnessed_numbers": [],
+            "closed_now": 0,
+            "closed_by_loop_total": 0,
+            "close_live": True,
+            "close_result": None,
+            "audit_error": "dos not found",
+        }
+
+        mod.record_loop_tick(
+            ROOT,
+            rec,
+            ledger=Path("loops.jsonl"),
+            append=lambda root, ledger, ev: (rows.append(dict(ev)) or {"ok": True, "kind": ev["kind"]}),
+        )
+
+        self.assertEqual([r["kind"] for r in rows], ["fire", "admit", "end", "witness"])
+        self.assertEqual(rows[3]["status"], "witness_unavailable")
+        self.assertEqual(rows[3]["verified_state"], "verified_unavailable")
+        self.assertEqual(rows[3]["reason"], "AUDIT_UNAVAILABLE")
+        self.assertEqual(rows[3]["metrics"]["close_live"], 1)
+
+    def test_record_loop_tick_failed_snapshot_has_no_witness_row(self) -> None:
+        mod = load()
+        rows: list[dict[str, object]] = []
+        rec = {
+            "schema": mod.SCHEMA,
+            "utc": "2026-06-25T10:25:00Z",
+            "target": 50,
+            "ok": False,
+            "open_now": None,
+            "baseline_open": None,
+            "resolved_toward_target": None,
+            "target_remaining": None,
+            "witnessed_open": 0,
+            "witnessed_numbers": [],
+            "closed_now": 0,
+            "closed_by_loop_total": 0,
+            "close_live": None,
+            "close_result": None,
+            "audit_error": None,
+        }
+
+        mod.record_loop_tick(
+            ROOT,
+            rec,
+            ledger=Path("loops.jsonl"),
+            append=lambda root, ledger, ev: (rows.append(dict(ev)) or {"ok": True, "kind": ev["kind"]}),
+        )
+
+        self.assertEqual([r["kind"] for r in rows], ["fire", "admit", "end"])
+        self.assertEqual(rows[1]["status"], "refused")
+        self.assertEqual(rows[2]["status"], "failed")
+        self.assertEqual(rows[2]["reason"], "OPEN_COUNT_UNAVAILABLE")
+
+
 class EvaluateTest(unittest.TestCase):
     def _stub(self, mod, *, open_now, witnessed, closed=0, history=0) -> None:
         mod.open_issue_count = lambda root: open_now

@@ -23,6 +23,11 @@ snapshot's open-count, recorded once; ``resolved_toward_target`` is
     python tools/issue_resolve_progress.py                 # snapshot only (dry)
     python tools/issue_resolve_progress.py --close --live  # snapshot + close witnessed
     python tools/issue_resolve_progress.py --target 50 --json
+
+The CLI path appends this tick to fak's durable loop ledger by default
+(``fak loop append``): ``fire``, admitted/refused ``admit``, ``end``, and a
+``witness`` row when the snapshot has independent read-back. Disable with
+``--no-loop-ledger`` for hermetic/manual probes.
 """
 from __future__ import annotations
 
@@ -39,10 +44,14 @@ try:
 except (AttributeError, ValueError):
     pass
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import issue_resolve_dispatch as loop_writer  # noqa: E402  (canonical fak loop append wrapper)
+
 SCHEMA = "fleet-issue-resolve-progress/1"
 RUNS_DIRNAME = ".dispatch-runs"
 PROGRESS_LOG = "progress.jsonl"
 BASELINE_FILE = "progress-baseline.json"
+LOOP_ID = "issue-resolve-progress"
 # The close-arm stamps this phrase into every close comment; we count only closes
 # carrying it as "the loop's work" so the proof never inflates with foreign closes.
 LOOP_CLOSE_SIGNATURE = "DOS dispatch loop's close-resolved arm"
@@ -189,8 +198,91 @@ def append_progress(runs_dir: Path, rec: dict[str, Any]) -> None:
         pass
 
 
+def _metric_ints(rec: dict[str, Any]) -> dict[str, int]:
+    metrics: dict[str, int] = {}
+    for key in (
+        "target", "open_now", "baseline_open", "resolved_toward_target",
+        "target_remaining", "witnessed_open", "closed_now",
+        "closed_by_loop_total",
+    ):
+        if rec.get(key) is not None:
+            metrics[key] = int(rec[key])
+    if rec.get("close_live") is not None:
+        metrics["close_live"] = 1 if rec.get("close_live") else 0
+    return metrics
+
+
+def progress_run_id(rec: dict[str, Any]) -> str:
+    stamp = str(rec.get("utc") or _now()).replace("-", "").replace(":", "")
+    stamp = stamp.replace("Z", "").replace("T", "T")
+    return f"progress-{stamp}"
+
+
+def record_loop_tick(root: Path, rec: dict[str, Any],
+                     *,
+                     ledger: Path | None = None,
+                     append: Any | None = None) -> dict[str, Any]:
+    """Lower one progress/close tick into fak loop-ledger events.
+
+    The witness row is about the progress instrument's independent read-back
+    (GitHub open-count + closure audit), not a worker's self-report.
+    """
+    ledger = ledger or loop_writer.default_loop_ledger(root)
+    append = append or (lambda r, l, ev: loop_writer.append_loop_event(
+        r, l, ev, source="issue_resolve_progress"))
+    run_id = str(rec.get("run_id") or progress_run_id(rec))
+    rec["run_id"] = run_id
+    metrics = _metric_ints(rec)
+    evidence = [("progress_log", str(root / RUNS_DIRNAME / PROGRESS_LOG))]
+    for n in rec.get("witnessed_numbers") or []:
+        evidence.append(("open_witnessed_issue", str(n)))
+    status_reason = "OK" if rec.get("ok") else "OPEN_COUNT_UNAVAILABLE"
+    if rec.get("audit_error"):
+        status_reason = "AUDIT_UNAVAILABLE"
+
+    events: list[dict[str, Any]] = [{
+        "loop_id": LOOP_ID, "run_id": run_id, "kind": "fire",
+        "summary": f"issue progress tick target={rec.get('target')}",
+        "metrics": metrics, "evidence": evidence,
+    }, {
+        "loop_id": LOOP_ID, "run_id": run_id, "kind": "admit",
+        "status": "admitted" if rec.get("ok") else "refused",
+        "reason": status_reason,
+        "summary": f"open={rec.get('open_now')} target_remaining={rec.get('target_remaining')}",
+        "metrics": metrics, "evidence": evidence,
+    }, {
+        "loop_id": LOOP_ID, "run_id": run_id, "kind": "end",
+        "status": "claimed_done" if rec.get("ok") else "failed",
+        "reason": status_reason,
+        "summary": f"closed_now={rec.get('closed_now')} witnessed_open={rec.get('witnessed_open')}",
+        "metrics": metrics, "evidence": evidence,
+    }]
+    if rec.get("ok"):
+        witness_status = "witness_unavailable" if rec.get("audit_error") else "witnessed_done"
+        verified_state = "verified_unavailable" if rec.get("audit_error") else "verified_done"
+        events.append({
+            "loop_id": LOOP_ID, "run_id": run_id, "kind": "witness",
+            "status": witness_status,
+            "verified_state": verified_state,
+            "reason": status_reason,
+            "summary": f"open_count={rec.get('open_now')} audit_error={rec.get('audit_error') or ''}",
+            "metrics": metrics, "evidence": evidence,
+        })
+
+    rows = [append(root, ledger, ev) for ev in events]
+    return {
+        "ledger": str(ledger),
+        "loop_id": LOOP_ID,
+        "run_id": run_id,
+        "events": rows,
+        "ok": all(r.get("ok") for r in rows) if rows else True,
+    }
+
+
 def evaluate(root: Path, *, target: int, do_close: bool, live: bool,
-             max_commits: int) -> dict[str, Any]:
+             max_commits: int,
+             record_loop: bool = False,
+             loop_ledger: Path | None = None) -> dict[str, Any]:
     runs_dir = root / RUNS_DIRNAME
     open_now = open_issue_count(root)
     audit = closure_audit(root, max_commits=max_commits)
@@ -241,6 +333,8 @@ def evaluate(root: Path, *, target: int, do_close: bool, live: bool,
         "audit_error": audit.get("_error"),
     }
     append_progress(runs_dir, rec)   # rec already carries `ok` — the log is honest
+    if record_loop:
+        rec["loop_ledger"] = record_loop_tick(root, rec, ledger=loop_ledger)
     return rec
 
 
@@ -287,12 +381,19 @@ def main(argv: list[str] | None = None) -> int:
                          "above the repo's commit count or resolving commits "
                          "older than the window can't bind a witnessed close "
                          "(default: 2000, matching issue_closure_audit.py)")
+    ap.add_argument("--loop-ledger", default="",
+                    help="append this tick to a fak loop ledger (default: FAK_LOOP_LEDGER or .fak/loops.jsonl)")
+    ap.add_argument("--no-loop-ledger", action="store_true",
+                    help="disable loop-ledger append for this tick")
     ap.add_argument("--json", action="store_true", help="emit machine-readable JSON")
     args = ap.parse_args(argv)
 
     root = Path(args.workspace).resolve() if args.workspace else repo_root()
     p = evaluate(root, target=args.target, do_close=args.close, live=args.live,
-                 max_commits=args.max_commits)
+                 max_commits=args.max_commits,
+                 record_loop=not args.no_loop_ledger,
+                 loop_ledger=(Path(args.loop_ledger).resolve()
+                              if args.loop_ledger else None))
     print(json.dumps(p, indent=2) if args.json else render(p))
     return 0 if p.get("ok") else 1
 

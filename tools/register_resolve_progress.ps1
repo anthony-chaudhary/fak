@@ -29,6 +29,10 @@ param(
   [string]$Workspace   = $(Split-Path -Parent $PSScriptRoot),
   [int]$Target         = 50,
   [int]$EveryMinutes   = 15,
+  # Optional path to a fak binary. If unset, the installer probes ./fak.exe, PATH fak,
+  # then falls back to `go run ./cmd/fak` so source-tree installs cannot silently use
+  # a stale binary that lacks `fak loop`.
+  [string]$FakExe = $env:FAK_BIN,
   [switch]$Live
 )
 $ErrorActionPreference = 'Stop'
@@ -46,6 +50,8 @@ if ($Action -eq 'remove') {
   return
 }
 
+. (Join-Path $PSScriptRoot 'fak_loop_task.ps1')
+
 # install -- resolve python and the tick; pick snapshot-only vs live-close.
 $py = (Get-Command python -ErrorAction SilentlyContinue).Source
 if (-not $py) { $py = (Get-Command python3 -ErrorAction SilentlyContinue).Source }
@@ -54,21 +60,23 @@ $tick = Join-Path $Workspace 'tools\issue_resolve_progress.py'
 if (-not (Test-Path $tick)) { throw "issue_resolve_progress.py not found at $tick" }
 
 # --close always (so the snapshot also reports closeable count); --live gates the
-# actual gh closes. Register python.exe DIRECTLY via the ScheduledTasks cmdlets, NOT
-# a `powershell.exe -Command "..."` wrapper: a Program-Files python path has a SPACE,
-# and the nested quotes protecting it did not survive the PowerShell -> schtasks /TR
-# handoff -- the stored -Command truncated at "C:\Program", powershell exited 0
-# without launching python, and the task logged LastResult=0 while the close arm
-# never ran (witnessed issues stayed open). Splitting Execute from Argument sidesteps
-# the quoting entirely, and python's exit code becomes LastTaskResult directly.
-$liveFlag  = if ($Live) { ' --live' } else { '' }
-$pyArgs    = "`"$tick`" --workspace `"$Workspace`" --target $Target --close$liveFlag --json"
-$taskAction = New-ScheduledTaskAction -Execute $py -Argument $pyArgs -WorkingDirectory $Workspace
+# actual gh closes. Register the tick through `fak loop run` via the ScheduledTasks
+# cmdlets, NOT a `powershell.exe -Command "..."` wrapper: a Program-Files python path
+# has a SPACE, and the nested quotes protecting it did not survive the PowerShell ->
+# schtasks /TR handoff -- the stored -Command truncated at "C:\Program", powershell
+# exited 0 without launching python, and the task logged LastResult=0 while the close
+# arm never ran (witnessed issues stayed open). Splitting Execute (fak/go) from
+# Argument (fak args + child python args) keeps Task Scheduler out of nested shell
+# quoting while the loop ledger records the child exit code and duration.
+$childArgs = @($py, $tick, '--workspace', $Workspace, '--target', [string]$Target, '--close', '--json')
+if ($Live) { $childArgs += '--live' }
+$wrapperLoop = 'issue-resolve-progress/task-scheduler'
+$taskAction = New-FakLoopScheduledTaskAction -Workspace $Workspace -FakExe $FakExe -LoopId $wrapperLoop -ChildArgs $childArgs
 $trigger   = New-ScheduledTaskTrigger -Once -At (Get-Date).AddMinutes(1) `
                -RepetitionInterval (New-TimeSpan -Minutes $EveryMinutes) `
                -RepetitionDuration (New-TimeSpan -Days 3650)
-# S4U (non-interactive, session 0), NOT Interactive: this tick executes python.exe
-# DIRECTLY, and a console exe launched in the interactive session flashes a console
+# S4U (non-interactive, session 0), NOT Interactive: this tick executes fak/go
+# directly, and a console exe launched in the interactive session flashes a console
 # window on EVERY trigger — the "random popup windows". S4U runs the tick windowless
 # yet still AS THIS USER (same profile/config/oauth), so the headless tick is unaffected.
 $principal = New-ScheduledTaskPrincipal -UserId $env:USERNAME -LogonType S4U -RunLevel Limited
@@ -78,7 +86,8 @@ Register-ScheduledTask -TaskName $TaskName -Action $taskAction -Trigger $trigger
                -Principal $principal -Settings $settings -Force | Out-Null
 
 $mode = if ($Live) { "LIVE (closes witnessed issues)" } else { "SNAPSHOT-ONLY (records the curve, closes nothing)" }
-Write-Output "installed $TaskName -- every $EveryMinutes min, target $Target, current-user interactive, $mode"
+Write-Output "installed $TaskName -- every $EveryMinutes min, target $Target, current-user S4U, $mode"
+Write-Output "loop ledger:  .fak\loops.jsonl via fak loop run ($wrapperLoop)"
 Write-Output "watch the curve:  python -c `"import json;[print(l.strip()) for l in open(r'$Workspace\.dispatch-runs\progress.jsonl')]`"  (or tools\dispatch_status.py)"
 if (-not $Live) {
   Write-Output "to close witnessed issues automatically:  .\tools\register_resolve_progress.ps1 -Live -Target $Target"

@@ -40,13 +40,13 @@ existing="$(crontab -l 2>/dev/null | sed '/# >>> fak fleet watchers >>>/,/# <<< 
 # >>> fak fleet watchers >>>
 # Resume watchdog: refresh session registry + ledger-gated resume-once of dead
 # AUTO_RESUME sessions. $RESUME_LABEL
-*/5 * * * * ${LIVE}$PY $WD/fleet_resume_watchdog.py >> $LOG/cron_resume.log 2>&1
+*/5 * * * * ${LIVE}/bin/bash $WD/fak_loop_run.sh fleet-resume-watchdog/cron cron -- $PY $WD/fleet_resume_watchdog.py >> $LOG/cron_resume.log 2>&1
 # Supervisor watchdog: keep job-fleet supervisor alive. No-op until job repo present
 # AND FAK_SUPERVISOR_ENABLE=1 is set on this line.
-*/5 * * * * ${SUP_ENV}$PY $WD/fleet_supervisor_watchdog.py >> $LOG/cron_supervisor.log 2>&1
+*/5 * * * * ${SUP_ENV}/bin/bash $WD/fak_loop_run.sh fleet-supervisor-watchdog/cron cron -- $PY $WD/fleet_supervisor_watchdog.py >> $LOG/cron_supervisor.log 2>&1
 # Dispatch supervisor watchdog: keep the DOS dispatch supervisor (dos loop --enact)
 # alive. Dry-run/no-op unless FAK_DISPATCH_ENABLE=1 is set on this line (#566).
-*/5 * * * * ${DISP_ENV}$PY $WD/fleet_dos_dispatch_watchdog.py >> $LOG/cron_dispatch.log 2>&1
+*/5 * * * * ${DISP_ENV}/bin/bash $WD/fak_loop_run.sh fleet-dos-dispatch-watchdog/cron cron -- $PY $WD/fleet_dos_dispatch_watchdog.py >> $LOG/cron_dispatch.log 2>&1
 # <<< fak fleet watchers <<<
 EOF
 } | crontab -
