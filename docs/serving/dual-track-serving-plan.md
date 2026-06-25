@@ -100,8 +100,8 @@ incomplete · **[SEAM-ONLY]** the interface/seam exists, no production impl behi
 | Base item | fak today | Anchor (`@89abc5d`) | SOTA equivalent (the parity target) |
 |---|---|---|---|
 | **Gateway topology** | **[PARTIAL]** single-upstream proxy: one `BaseURL`, one `agent.Planner` seam — no replica set, no router | `internal/gateway/gateway.go:65` (`BaseURL`), `:188` (`planner`) | SGLang Router / vLLM router / LiteLLM front N replicas — fak is the single-engine front, not that router |
-| **Engine seam** | **[PARTIAL]** one-shot buffered `Complete`; `ctx` never consulted inside decode → no cancel/stream | `internal/abi/registry.go:568`; `internal/modelengine/modelengine.go:139` (`Complete`), `:151` (`sess.Generate` one-shot); `internal/agent/chat.go:440` (`Planner`, no token callback) | vLLM-V1 `EngineCore` admit→per-step-decode→stream→reclaim lifecycle |
-| **Streaming** | **[PARTIAL]** synthesized **post-adjudication** from the finished turn; TTFT == whole-turn latency | `internal/gateway/http.go:338` (`writeChatCompletionStream`), `:395` (`segmentContent` word-split) | vLLM-V1 / SGLang flush each decoded token live → real-TTFT SSE, inter-token gaps == TPOT |
+| **Engine seam** | **[PARTIAL]** `agent.StreamingPlanner` adds a content callback for streaming-capable HTTP planners, but the native in-kernel engine still exposes a one-shot `Complete`; `ctx` is not yet a per-step cancel/control point inside decode | `internal/agent/stream.go` (`StreamingPlanner`, `CompleteStream`); `internal/modelengine/modelengine.go:139` (`Complete`), `:151` (`sess.Generate` one-shot) | vLLM-V1 `EngineCore` admit→per-step-decode→stream→reclaim lifecycle |
+| **Streaming** | **[PARTIAL]** live prose deltas now stream on the OpenAI wire and on Anthropic `/v1/messages` when backed by Anthropic passthrough or a generic streaming planner; tool-call bytes are still held until whole-turn adjudication; non-streaming planners still synthesize SSE post-turn | `internal/gateway/stream_proxy.go`; `internal/gateway/messages_stream_passthrough.go`; `internal/gateway/messages_stream_planner.go` | vLLM-V1 / SGLang flush each decoded token live → real-TTFT SSE, inter-token gaps == TPOT |
 | **Incremental detokenizer** | **[GAP]** whole reply detokenized once; no streaming detokenizer | — (prerequisite, #48) | streaming detokenizer feeding per-token SSE |
 | **Continuous-batching scheduler** | **[SEAM-ONLY]** `StepBatch` per-step primitive exists; **no** admit/evict loop. `GenerateBatch` runs static fixed-B and re-feeds EOS into finished slots | `internal/model/batch.go:1122` (`StepBatch`), `:1148` (`GenerateBatch`) | vLLM-V1 `EngineCore` / SGLang `Scheduler` iteration loop: admit, retire, rebuild running batch each step |
 | **Chunked prefill** | **[PARTIAL]** rectangular equal-length panel ≤512 tokens; ragged batches fall back to serial prefill | `internal/model/batch.go:761` (`rectangularPrefillLen`); `internal/model/batch.go:47` (`batchRectPrefillMaxTokens=512`) | chunked prefill (vLLM-V1 default) packs different requests' prefill chunks + decode into one ragged varlen batch |
@@ -125,14 +125,14 @@ So no downstream issue silently overclaims:
    seam (`gateway.go:188`); there is no replica set or router. The GPU-cluster path today runs
    one SGLang TP=8 upstream behind that single seam — fak does **no** native multi-node compute.
    *[PARTIAL]*
-2. **Streaming is SYNTHESIZED from the finished adjudicated turn, not token-by-token.**
-   `internal/gateway/http.go:338` (`writeChatCompletionStream`) runs strictly *after*
-   `planner.Complete` + adjudication, then fakes word-granular deltas with `segmentContent`
-   (`http.go:395`). TTFT == whole-turn latency on both wires. The `agent.Planner` seam
-   (`chat.go:440`) has no token-callback method, so this is structural, not a missing flag.
-   *(Note: the issue body described a "2-chunk SSE"; the synthesizer has since grown
-   word-granular splitting — the chunk count changed, the load-bearing fact did not: it is
-   post-adjudication synthesis, never incremental detokenization.)* *[PARTIAL]*
+2. **Streaming is live for prose, still gated for tools, and still partial.**
+   `agent.StreamingPlanner` gives the gateway a content callback for OpenAI-compatible
+   HTTP planners, and the Anthropic passthrough has a native SSE relay. Those paths stream
+   prose deltas before the full turn finishes, while native `tool_calls` /
+   Anthropic `tool_use.input` bytes remain buffered until the complete proposed call set
+   clears adjudication. The offline mock, Gemini stream, and native in-kernel model still
+   synthesize SSE from the finished turn. This is enough for real prose TTFT, not yet the
+   full vLLM/SGLang per-step engine lifecycle. *[PARTIAL]*
 3. **PP is SEAM-ONLY for serving.** `internal/model/pipeline.go:159` `MarshalHidden`/
    `UnmarshalHidden` (bit-exact hidden-state codec) and `internal/model/pipeline_transport.go:30`
    `TCPTransport` are real and loopback-proven byte-identical — but `TCPTransport`'s only peer

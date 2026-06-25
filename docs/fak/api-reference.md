@@ -190,19 +190,18 @@ human-readable summary of the refusals is written into the message `content`.
 **Streaming.** With `stream: true` the gateway serves a `text/event-stream` by one of
 two paths, chosen so a tool call is **never** passed through before adjudication:
 
-- **Live pass-through** (a request with **no `tools`**, fronting a streaming-capable
-  upstream): each upstream content fragment is relayed as its own chunk the instant the
-  model emits it, so time-to-first-token tracks the model rather than the whole turn.
-  The opening chunk announces the `role`; a terminal chunk carries `finish_reason` +
-  `usage` + the `fak` extension; then `data: [DONE]`. Any tool call a model hallucinates
-  with no tools offered is still adjudicated before emission.
-- **Synthesized** (a **tool-bearing** request, or a non-streaming planner such as the
-  offline mock / in-kernel model): the gateway buffers the whole upstream turn,
-  adjudicates the complete proposed tool-call set, then emits the same chunk shape — an
-  opening `role` + surviving-`tool_calls` chunk, content fragments (word-boundary
-  segments that reconcatenate byte-for-byte), a final `finish_reason` + `usage` + `fak`
-  chunk, and `data: [DONE]`. Raw upstream tool-call deltas are never passed through
-  before adjudication.
+- **Live planner stream** (fronting a streaming-capable OpenAI-compatible planner):
+  each upstream content fragment is relayed as its own chunk the instant the model emits
+  it, so time-to-first-token tracks the model rather than the whole turn. Native
+  upstream `tool_calls` deltas are accumulated off-wire, the complete proposed call set
+  is adjudicated, and only surviving calls are emitted afterward. Known text-form
+  tool-call dialects inside content are held by the lift guard and go through the same
+  adjudication path.
+- **Synthesized fallback** (a non-streaming planner such as the offline mock /
+  in-kernel model): the gateway buffers the whole upstream turn, adjudicates the
+  complete proposed tool-call set, then emits the same chunk shape — an opening `role`,
+  content fragments (word-boundary segments that reconcatenate byte-for-byte), surviving
+  `tool_calls`, a final `finish_reason` + `usage` + `fak` chunk, and `data: [DONE]`.
 
 ---
 
@@ -293,12 +292,14 @@ a short in-band `[fak] …` text block so the agent actually reacts to them.
   byte-for-byte so a real upstream cache hit reaches the client's accounting.
 - `502` on an upstream model error (the raw provider body is not forwarded).
 
-**Streaming.** With `stream: true` the gateway synthesizes a well-formed Anthropic SSE
-sequence from the finished, already-adjudicated turn: `message_start`, then a
-`content_block_start` / `…_delta` / `content_block_stop` triple per block, a
-`message_delta` carrying the real `stop_reason` + token counts, then `message_stop`.
-A `ping` event is sent every 15 s while the upstream turn is still in flight. The
-`tool_use` ids the client matches results back by are byte-faithful.
+**Streaming.** With `stream: true` the gateway uses a live stream when one is available:
+the Anthropic passthrough relays upstream text/thinking events as they arrive, and the
+generic `agent.StreamingPlanner` path maps content callbacks to Anthropic `text_delta`
+events. In both cases `tool_use` input bytes are held off-wire until the full proposed
+call set is adjudicated; only surviving/repaired `tool_use` blocks are emitted. If the
+planner cannot stream, the fallback synthesizes the same well-formed SSE sequence from
+the finished turn and sends `ping` every 15 s while the upstream turn is in flight.
+The `tool_use` ids the client matches results back by are preserved for surviving calls.
 
 ### `POST /v1/messages/count_tokens`
 

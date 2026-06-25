@@ -162,6 +162,15 @@ func (s *Server) handleAnthropicMessages(w http.ResponseWriter, r *http.Request)
 		if s.anthropicPassthrough() && s.streamAnthropicPassthroughLive(w, r, req, reqTrace, upstreamKey, upstreamBeta) {
 			return
 		}
+		// For non-Anthropic upstreams that still support the generic planner streaming
+		// seam (OpenAI-compatible/vLLM/SGLang), translate live content callbacks into
+		// Anthropic text_delta events while holding every proposed tool call until the
+		// same whole-turn adjudication gate below can run. A false return means either
+		// the planner cannot stream or the writer cannot flush, so the existing
+		// ping-then-synthesize fallback remains the behavior.
+		if s.streamAnthropicPlannerLive(w, r, req, reqTrace) {
+			return
+		}
 		s.streamAnthropicPending(w, r, req, reqTrace, upstreamKey, upstreamBeta)
 		return
 	}
