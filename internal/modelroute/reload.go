@@ -131,13 +131,15 @@ func NewWatcher(path string, live *Live, interval time.Duration, onEvent func(Re
 		interval = DefaultReloadInterval
 	}
 	w := &Watcher{path: path, live: live, interval: interval, onEvent: onEvent}
-	// Seed the baseline to exactly what is on disk now (which is what the caller just
-	// loaded into live), so the installed policy and the watcher's last-good agree and
-	// the first real edit — not a startup artifact — is the first reload.
+	// Seed the baseline only when disk still matches the installed policy. The host
+	// loads the manifest before constructing the watcher; if the file changes in that
+	// small window, treating the new bytes as "last-good" would make the edit invisible.
 	if b, err := os.ReadFile(path); err == nil {
-		w.lastGood = b
-		if fi, err := os.Stat(path); err == nil {
-			w.lastSig = sigOf(fi)
+		if disk, err := ParseManifest(b); err == nil && sameManifest(live.Manifest(), &disk) {
+			w.lastGood = b
+			if fi, err := os.Stat(path); err == nil {
+				w.lastSig = sigOf(fi)
+			}
 		}
 	}
 	return w
@@ -245,4 +247,11 @@ func (w *Watcher) emit(ev ReloadEvent) {
 
 func sigOf(fi os.FileInfo) fileSig {
 	return fileSig{size: fi.Size(), modNano: fi.ModTime().UnixNano()}
+}
+
+func sameManifest(a, b *Manifest) bool {
+	if a == nil || b == nil {
+		return a == b
+	}
+	return bytes.Equal(a.JSON(), b.JSON())
 }
