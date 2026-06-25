@@ -127,6 +127,9 @@ policy refusal. This is what lets a refusal cost a non-Go agent zero extra model
 | POST | [`/v1/fak/context/change`](#post-v1fakcontextchange) | fak-native | Tombstone a recall page |
 | POST | [`/v1/fak/policy/reload`](#post-v1fakpolicyreload) | fak-native | Hot-reload the policy manifest |
 | POST | [`/v1/fak/trace/reset`](#post-v1faktracereset) | fak-native | Clear a session's IFC taint mark |
+| GET | [`/v1/fak/session/{id}`](#v1faksession--live-session-control) | fak-native | Observe a session's live drive state |
+| POST | [`/v1/fak/session/{id}/{verb}`](#v1faksession--live-session-control) | fak-native | Control a session (run/budget/pace/priority) |
+| GET | [`/v1/fak/sessions`](#v1faksession--live-session-control) | fak-native | Snapshot every live session's drive state |
 | POST | [`/mcp`](#mcp-over-http--mcp) | MCP | JSON-RPC 2.0 over a single POST |
 | GET | [`/healthz`](#get-healthz) | ops | Liveness (auth-exempt) |
 | GET | [`/metrics`](#get-metrics) | ops | Prometheus metrics |
@@ -445,6 +448,47 @@ implementation is injected by the host CLI.
 |---|---|
 | `404` | Trace reset is not configured for this deployment. |
 | `400` | `trace_id` was empty, or the reset failed. |
+
+---
+
+### `/v1/fak/session` — live session control
+
+Read and steer a served session's live **DRIVE state** (run-state, budget, priority,
+pace) — the read-write generalization of `/v1/fak/trace`, which carries one bit (taint).
+The state is keyed by `TraceID`; an unseen trace reads its live default (running,
+unbounded), never `404`. Observe/control are injected by the host CLI; a deployment that
+does not wire them returns `404`. The full design and the `fak session` operator CLI are
+in [`session-control.md`](session-control.md).
+
+**`GET /v1/fak/session/{id}`** — observe one session.
+Response (`SessionState`): `{ "trace_id", "run", "budget": {"turns_left","tokens_left"},
+"priority", "pace": {"max_tokens_per_turn","min_turn_gap_ms"}, "reason", "rev" }`.
+
+**`POST /v1/fak/session/{id}/{verb}`** — apply one control verb. `verb` ∈
+`run` · `budget` · `pace` · `priority`. Body carries the field the verb names, plus an
+optional `if_rev` (optimistic-concurrency guard). Echoes back the new `SessionState`.
+
+| verb | body | effect |
+|---|---|---|
+| `run` | `{"run":"running\|throttled\|paused\|draining\|stopped","reason":"…"}` | set the run-state (cancel = `stopped`/`draining`, hold = `paused`) |
+| `budget` | `{"budget":{"turns_left":N,"tokens_left":N}}` | re-set the allotment (`-1` = unbounded) |
+| `pace` | `{"pace":{"max_tokens_per_turn":N,"min_turn_gap_ms":N}}` | re-set the per-turn throttle |
+| `priority` | `{"priority":N}` | re-set the scheduling rank (lower yields first) |
+
+**`GET /v1/fak/sessions`** — snapshot every live session.
+Response (`SessionListResponse`): `{ "sessions": [SessionState, …], "count": N }`, in
+`Table.Snapshot()` order (priority ascending).
+
+| Status | When |
+|---|---|
+| `404` | The session routes are not configured for this deployment. |
+| `400` | Missing `trace_id`, unknown verb, or a malformed body. |
+| `409` | The session is terminal (stopped), or an `if_rev` CAS guard lost the race. |
+
+**Proxy-path enforcement.** On `fak serve` / `fak guard`, a `paused` / `draining` /
+`stopped` session's **next** `/v1/{chat/completions,messages,generateContent}` request is
+refused with `409 session_<state>` (keyed on the request `X-Trace-Id`) instead of being
+forwarded upstream — "cancel a request in flight."
 
 ---
 
