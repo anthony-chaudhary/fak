@@ -63,15 +63,21 @@ cd /opt/fak
 go build -o /opt/fak/tools/.bin/fak ./cmd/fak
 
 # --- systemd: the 24/7 fak serve gateway (Linux analogue of the serve-gateway plist) ---
-cat >/etc/systemd/system/fak-serve-gateway.service <<'UNIT'
+# Dogfood the 100k-session lever by DEFAULT: --compact-history-budget shrinks a long
+# Anthropic-passthrough session's OLD turns to a resident-token budget while keeping the
+# cache_control prefix byte-identical, so we eat our own dog food on the real dev gateway.
+# Override the budget (or disable it: 0) with FAK_COMPACT_BUDGET before running this script;
+# watch it on /metrics (fak_gateway_compaction_*) and in the `fak guard` exit summary.
+: "${FAK_COMPACT_BUDGET:=8000}"
+cat >/etc/systemd/system/fak-serve-gateway.service <<UNIT
 [Unit]
-Description=fak serve — shared dogfood gateway (anthropic passthrough)
+Description=fak serve — shared dogfood gateway (anthropic passthrough, history compaction on)
 After=network-online.target
 Wants=network-online.target
 [Service]
 WorkingDirectory=/opt/fak
 Environment=FAK_AUDIT_JOURNAL=/opt/fak/tools/_watchdog/serve_audit.jsonl
-ExecStart=/opt/fak/tools/.bin/fak serve --provider anthropic --base-url https://api.anthropic.com --addr 127.0.0.1:8080
+ExecStart=/opt/fak/tools/.bin/fak serve --provider anthropic --base-url https://api.anthropic.com --addr 127.0.0.1:8080 --compact-history-budget ${FAK_COMPACT_BUDGET}
 Restart=always
 RestartSec=2
 [Install]
