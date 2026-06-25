@@ -125,3 +125,55 @@ func TestHALVulkanQ8ForwardMatchesComputeQ8(t *testing.T) {
 	t.Logf("HAL device (%s/%s): Q8 model path prefill cosine=%.8f step cosine=%.8f",
 		be.Name(), be.Tier(), prefillCos, stepCos)
 }
+
+func TestHALVulkanQ8SessionCloseReleasesBudgetedWeights(t *testing.T) {
+	be := compute.Pick("vulkan")
+	if be.Name() != "vulkan" {
+		t.Skip("vulkan backend not registered (no reachable Vulkan device)")
+	}
+	if !be.Caps().UploadDtype {
+		t.Skip("vulkan device does not expose Q8 upload/matmul support")
+	}
+	dbg, ok := be.(interface {
+		VulkanDebugResidencyBudget() (int64, int64, int)
+		VulkanDebugSetResidencyBudget(int64) (int64, int64, int)
+		VulkanDebugRestoreResidencyBudget(int64, int64, int)
+	})
+	if !ok {
+		t.Skip("vulkan backend does not expose residency debug counters")
+	}
+	oldBudget, oldUsed, oldHostvis := dbg.VulkanDebugSetResidencyBudget(1 << 30)
+	defer dbg.VulkanDebugRestoreResidencyBudget(oldBudget, oldUsed, oldHostvis)
+
+	cfg := Config{
+		HiddenSize: 96, NumLayers: 4, NumHeads: 6, NumKVHeads: 2, HeadDim: 16,
+		IntermediateSize: 256, VocabSize: 128, RMSNormEps: 1e-5, RopeTheta: 10000,
+		TieWordEmbeddings: true, EOSTokenID: -1,
+	}
+	m := NewSynthetic(cfg)
+	m.Quantize()
+	prompt := []int{3, 9, 44, 1, 77, 22}
+
+	run := func(label string) (int64, int) {
+		s := m.NewBackendSession(be)
+		s.Quant = true
+		_ = s.Prefill(prompt)
+		_, liveUsed, liveHostvis := dbg.VulkanDebugResidencyBudget()
+		if liveUsed <= 0 {
+			t.Fatalf("%s: live dlUsed=%d, want budgeted Q8 weights resident", label, liveUsed)
+		}
+		s.Close()
+		_, afterUsed, afterHostvis := dbg.VulkanDebugResidencyBudget()
+		if afterUsed != 0 || afterHostvis != 0 {
+			t.Fatalf("%s: after Close dlUsed=%d hostvisN=%d, want both zero", label, afterUsed, afterHostvis)
+		}
+		return liveUsed, liveHostvis
+	}
+
+	used1, hostvis1 := run("first session")
+	used2, hostvis2 := run("second session")
+	if used2 != used1 || hostvis2 != hostvis1 {
+		t.Fatalf("second session residency changed: used=%d/%d hostvis=%d/%d",
+			used2, used1, hostvis2, hostvis1)
+	}
+}
