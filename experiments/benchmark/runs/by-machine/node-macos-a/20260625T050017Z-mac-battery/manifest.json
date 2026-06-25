@@ -1,0 +1,55 @@
+{
+  "$schema": "benchmark/run-manifest.v1",
+  "run_id": "node-macos-a-mac-battery-20260625T050017Z",
+  "machine_id": "node-macos-a",
+  "timestamp": "20260625T050017Z",
+  "git": {
+    "rev": "e27511f",
+    "branch": "main",
+    "dirty": false
+  },
+  "harness": {
+    "name": "mac-bench-battery",
+    "version": "1"
+  },
+  "model": {
+    "name": "qwen2.5-1.5b-instruct-q8_0.gguf",
+    "precision": "Q8_0"
+  },
+  "config": {
+    "forward": "pure-go-cpu",
+    "note": "fak OWN-forward (in-kernel pure-Go CPU Q8); no Metal/llama.cpp/gateway. Box shared+contended for parts; throughput labeled.",
+    "workers": 12,
+    "lanes": [
+      "model-ladder-decode (1.5B/7B)",
+      "residency-loadonly (14B/27B)",
+      "radix-regression (1.5B)",
+      "session-value-bounded (1.5B)",
+      "agent-live (1.5B/7B)"
+    ]
+  },
+  "peak_tok_per_sec": 36.31,
+  "baseline_tok_per_sec": 38.07,
+  "tags": [
+    "model",
+    "radix",
+    "session",
+    "agent-live",
+    "darwin",
+    "arm64",
+    "cpu-forward",
+    "experiment"
+  ],
+  "artifacts": {
+    "decode_1p5b": "01-qwen25-1.5b-q8-decode.json",
+    "decode_7b_hf": "02-qwen25-7b-hf-decode.json",
+    "decode_7b_gguf": "02b-qwen25-7b-gguf-decode.json",
+    "loadonly_14b": "03-qwen25-14b-loadonly.json",
+    "loadonly_27b": "04-qwen36-27b-loadonly.json",
+    "radix": "05-radix-1.5b.json",
+    "session": "06-session-bounded.json",
+    "agent_live_1p5b": "07-agent-live-1.5b.json",
+    "agent_live_7b": "07b-agent-live-7b.json",
+    "lineage": "lineage.json"
+  }
+}

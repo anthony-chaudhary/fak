@@ -1,0 +1,5 @@
+{"lineage_schema":"fak-bench-lineage/1","run_id":"20260625T045925Z-mac-battery","utc":"2026-06-25T05:00:17Z",
+ "runner":"mac_battery.sh","node":"node-macos-a",
+ "node_capabilities":["arm64","darwin","m3-pro","36gb-unified","cpu-forward-only"],
+ "git_commit":"e27511f","go_version":"go1.23.1","forward_label":"pure-go-cpu",
+ "notes":"caffeinate holds-awake only (cannot wake asleep box; -s is AC-only). All numbers = fak own-forward CPU."}

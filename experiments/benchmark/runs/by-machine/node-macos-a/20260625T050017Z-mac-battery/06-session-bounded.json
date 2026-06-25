@@ -1,0 +1,90 @@
+{
+  "app_version": "dev",
+  "cells": [
+    {
+      "turns": 8,
+      "agents": 3,
+      "prefix": 512,
+      "decode": 16,
+      "result": 64,
+      "arm_A_naive_stateless": {
+        "name": "A_naive_stateless",
+        "prefill_ms": 100159.63074421462,
+        "decode_ms": 26617.801126,
+        "total_ms": 126777.43187021461,
+        "live": false
+      },
+      "arm_B_per_agent_kv": {
+        "name": "B_per_agent_kv",
+        "prefill_ms": 17103.656914,
+        "decode_ms": 26617.801126,
+        "total_ms": 43721.45804,
+        "live": true
+      },
+      "arm_C_fak_fused": {
+        "name": "C_fak_fused",
+        "prefill_ms": 12548.529499,
+        "clone_ms": 3.762459,
+        "decode_ms": 26132.691499,
+        "total_ms": 38684.983457,
+        "live": true
+      },
+      "prefill_anchor": 1.001222624385675,
+      "arm_A_prefill_raw_ms": 100037.3226740357,
+      "prefill_tokens": {
+        "a": 19008,
+        "b": 2880,
+        "c": 1856,
+        "a_over_c": 10.241379310344827,
+        "b_over_c": 1.5517241379310345
+      },
+      "net_value_add_vs_naive": 3.2771742557711856,
+      "net_value_add_vs_tuned": 1.1301919797535458,
+      "turn_tax_A_over_B": 2.8996615747404433
+    }
+  ],
+  "decode_per_turn": 16,
+  "engine": "fak sessionbench (multi-agent session value stack, Q8=true)",
+  "go_threads": 12,
+  "headline": "fak vs a WARM per-agent-KV cache (B/C = net_value_add_vs_tuned) — the honest serving baseline; fak's cross-agent prefix sharing on top of a warm cache. The cold no-cache re-prefill arm (A, net_value_add_vs_naive) is a worst-case REFERENCE only, not a serving baseline.",
+  "live_validate": {
+    "anchored_computed_over_live": 1.0241404018578493,
+    "armA_decode_live_ms": 19436.01979,
+    "armA_prefill_computed_anchored_ms": 47523.948601826356,
+    "armA_prefill_computed_raw_ms": 46203.618742107144,
+    "armA_prefill_live_ms": 46403.743584,
+    "armB_decode_live_ms": 19471.113207,
+    "decode_A_over_B": 0.998197667661478,
+    "prefill_anchor": 1.0285763300725175,
+    "raw_computed_over_live": 0.9956873125649746,
+    "scale": {
+      "C": 3,
+      "D": 16,
+      "P": 256,
+      "R": 32,
+      "T": 8
+    }
+  },
+  "methodology": "arms B,C run end-to-end LIVE (attention growth captured); arm A re-prefill computed from prefillCost(L) measured at sampled lengths (O(L^2) prefill-attention captured) summed over exact per-turn contexts; arm A decode := arm B live decode (byte-identical serial work); validate runs arm A fully live",
+  "model": "qwen2.5-1.5b-instruct [lean]",
+  "prefill_model": {
+    "lens": [
+      256,
+      480,
+      512,
+      704,
+      928,
+      1152
+    ],
+    "ms": [
+      1061.940958,
+      2175.844583,
+      2372.480625,
+      3547.522792,
+      4984.84775,
+      6797.610959
+    ]
+  },
+  "prefix": 512,
+  "result_per_turn": 64
+}

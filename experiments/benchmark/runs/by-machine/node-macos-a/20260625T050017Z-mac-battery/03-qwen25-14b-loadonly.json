@@ -1,0 +1,11 @@
+{
+  "app_version": "dev",
+  "engine": "fak model load",
+  "lean": true,
+  "load_ms": 33776.234166,
+  "model": "qwen2.5-14b",
+  "peak_rss_bytes": 22463676416,
+  "peak_rss_unavailable": false,
+  "quantized_at_load": true,
+  "source": "/Users/USER/.cache/fak-models/gguf/qwen2.5-14b-instruct-q4_k_m-00001-of-00003.gguf"
+}
