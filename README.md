@@ -11,7 +11,7 @@
 <!-- hero video — generated from the headline visuals by tools/hero_video_gen.py
      (storyboard: visuals/hero-video.storyboard.json). GitHub markdown can't autoplay a
      repo-relative .mp4, so the embed is a compact looping .gif that links to the full mp4. -->
-[![fak — the Fused Agent Kernel · a ~40s, 1440p model-card reveal: the turn-tax curves animate the measured 9.7x prefill elimination, then the capability matrix, the three-pillar stat card with its honest single-stream fence, and the eight-axis sweep build in — click for the full-resolution MP4](visuals/hero-video.gif)](visuals/hero-video.mp4)
+[![fak — the Fused Agent Kernel · a ~40s, 1440p model-card reveal: the turn-tax curves animate the modeled 9.7x prefill-elimination floor, then the capability matrix, the three-pillar stat card with its honest single-stream fence, and the eight-axis sweep build in — click for the full-resolution MP4](visuals/hero-video.gif)](visuals/hero-video.mp4)
 
 <sub>▶ a ~40-second reveal — the curves draw themselves, the multipliers count up — [full-resolution MP4 (1440p)](visuals/hero-video.mp4)</sub>
 
@@ -65,11 +65,14 @@ when reuse is still legal, and what survives a session boundary.
 An agent rereads the same setup on every turn. The naive baseline re-prefills it
 on each cold KV miss, so its cost climbs linearly with context, fleet size, and
 turns. By contrast, `fak` keeps that work resident and addressable, so its line
-stays flat. The gap is the whole pitch: a measured **9.7×** less prefill at 8
-workers on real WebVoyager, and a conservative **4.1×** against a tuned warm-cache
-SOTA stack.
+stays flat. The gap is the whole pitch: at 8 workers on the real WebVoyager task
+set (643 tasks), `fak`'s shared-prefix reuse does **1.10×** less prefill than a
+tuned per-agent-KV stack and **9.7×** less than the naive re-prefill-every-turn
+floor — a deterministic geometry model, not a wall-clock measurement (run it
+yourself: `fak webbench describe`). Against a tuned warm-cache SOTA stack on the
+live model-reuse race, the measured win is a conservative **4.1×**.
 
-[![fak turn-tax efficiency curves — three panels (per-turn prefill cost vs context, WebVoyager fleet prefill vs workers, 50-turn fleet serving work vs turns), each a baseline re-prefill curve rising linearly while fak's resident-KV curve stays flat, multipliers 20,480x / measured 9.7x / 4.1x](visuals/60-hero-turntax-curves.png)](BENCHMARK-GALLERY.md#60--turn-tax-curves)
+[![fak turn-tax efficiency curves — three panels (per-turn prefill cost vs context, WebVoyager fleet prefill vs workers, 50-turn fleet serving work vs turns), each a baseline re-prefill curve rising linearly while fak's resident-KV curve stays flat, multipliers 20,480x / modeled 9.7x / measured 4.1x](visuals/60-hero-turntax-curves.png)](BENCHMARK-GALLERY.md#60--turn-tax-curves)
 
 The breadth is the point too, but it belongs in the gallery rather than on the
 front page. A capability matrix (`fak` spans the whole boundary; serving stacks
@@ -212,18 +215,21 @@ Two fences keep this honest. The reuse win is self-host only: an app that just
 frontier-scale "agent city" numbers are design targets rather than measurements.
 → [The full cost model and personas](docs/concepts-and-story.md)
 
-Measured on real WebVoyager (643 tasks). Every navigation action re-prefills
-the whole browser context (DOM, tool schemas, task history), so the turn-tax
-compounds with fleet size:
+Modeled from the real WebVoyager task set (643 tasks) with a deterministic
+geometry model — `fak webbench describe` derives turn counts from each task's
+difficulty and computes the prefill-token work each policy pays (no model, no
+wall-clock). Every navigation action re-prefills the whole browser context (DOM,
+tool schemas, task history), so the turn-tax compounds with fleet size:
 
-| Workers | Naive Re-Prefill | fak Fused | Net Elimination |
-|---------|-----------------|-----------|-----------------|
+| Workers | Naive Re-Prefill | fak Fused | vs Naive Floor |
+|---------|-----------------|-----------|----------------|
 | 1 | 170.9 M tokens | 19.4 M tokens | 8.8× |
 | 8 | 1.37 G tokens | 141.3 M tokens | 9.7× |
 
 The turn-tax is worker-independent: every agent pays it, every turn,
 regardless of fleet size. SOTA agents like Alumnium (98.5% WebVoyager success)
-reach the same capability through `fak` at ~9× less prefill cost (measured).
+reach the same capability through `fak` at ~9× less prefill cost than the naive
+floor (modeled), or ~1.1× less than a tuned per-agent-KV stack.
 → [Frontier WebBench baselines](docs/webbench-baselines.md)
 
 And it's not one lucky box. The same pure-Go kernel runs across **4 distinct
@@ -406,7 +412,7 @@ fak serve --addr 127.0.0.1:8080 --base-url http://localhost:11434/v1 --model qwe
 | The serving roadmap (many-node disaggregated serving — RIDE + NATIVE, honest file:line-cited scope) | [`docs/serving/dual-track-serving-plan.md`](docs/serving/dual-track-serving-plan.md) |
 | Every benchmark number (single source of truth, traced to commit + artifact) | [`fak/BENCHMARK-AUTHORITY.md`](BENCHMARK-AUTHORITY.md) ⭐ |
 | Every machine fak runs on (the hardware matrix — 4 platforms, 2 CPU ISAs, 4 GPU backends, 4 OSes) | [`docs/HARDWARE-MATRIX.md`](docs/HARDWARE-MATRIX.md) |
-| Web agent benchmark results (real WebVoyager: 8.8-9.7× measured) | [`docs/webbench-baselines.md`](docs/webbench-baselines.md) |
+| Web agent benchmark results (real WebVoyager: 8.8-9.7× vs naive floor, modeled geometry) | [`docs/webbench-baselines.md`](docs/webbench-baselines.md) |
 | The parable, personas, and when-the-win-kicks-in tables | [`docs/concepts-and-story.md`](docs/concepts-and-story.md) |
 | What "tuned SOTA" means (the 10 optimizations fak sits on top of) | [`docs/explainers/sota-optimizations.md`](docs/explainers/sota-optimizations.md) |
 | Shipped capabilities (runnable artifacts, claim tags) | [`fak/CLAIMS.md`](CLAIMS.md), [`fak/STATUS.md`](STATUS.md) |

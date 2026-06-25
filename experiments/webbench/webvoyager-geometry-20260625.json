@@ -1,0 +1,61 @@
+{
+  "instances": 643,
+  "total_turns": 8745,
+  "turns_min": 5,
+  "turns_median": 12,
+  "turns_max": 25,
+  "difficulty_dist": {
+    "easy": 87,
+    "hard": 126,
+    "medium": 430
+  },
+  "category_dist": {
+    "general": 343,
+    "information": 85,
+    "media": 44,
+    "search": 43,
+    "shopping": 86,
+    "travel": 42
+  },
+  "geometry_sources": {
+    "difficulty": 643
+  },
+  "prefill": [
+    {
+      "workers": 1,
+      "a_naive": 170930292,
+      "b_agent": 19386804,
+      "c_fak": 19386804,
+      "a_over_c": 8.816837060920408,
+      "b_over_c": 1,
+      "a_over_b": 8.816837060920408
+    },
+    {
+      "workers": 2,
+      "a_naive": 341860584,
+      "b_agent": 38773608,
+      "c_fak": 36806104,
+      "a_over_c": 9.288149161345629,
+      "b_over_c": 1.0534559158991672,
+      "a_over_b": 8.816837060920408
+    },
+    {
+      "workers": 4,
+      "a_naive": 683721168,
+      "b_agent": 77547216,
+      "c_fak": 71644704,
+      "a_over_c": 9.543219942677132,
+      "b_over_c": 1.0823858801901114,
+      "a_over_b": 8.816837060920408
+    },
+    {
+      "workers": 8,
+      "a_naive": 1367442336,
+      "b_agent": 155094432,
+      "c_fak": 141321904,
+      "a_over_c": 9.676082031841291,
+      "b_over_c": 1.0974550130601128,
+      "a_over_b": 8.816837060920408
+    }
+  ]
+}
