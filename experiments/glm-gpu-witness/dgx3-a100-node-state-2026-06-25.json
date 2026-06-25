@@ -1,0 +1,57 @@
+{
+  "schema": "fak.dgx3-node-state.v1",
+  "captured_at": "2026-06-25T18:10:00Z",
+  "node": "dgx3 (internal 8-GPU sm_80 datacenter server; hostname redacted)",
+  "kernel": "Linux 6.8.0-117-generic",
+  "gpus": {
+    "count": 8,
+    "name": "8x 80GB sm_80 datacenter GPU (model redacted)",
+    "compute_cap": "8.0",
+    "arch": "sm_80 (below the sm_90 DSA kernel floor)",
+    "per_gpu_vram_mib": 81920,
+    "total_vram_gb": 640,
+    "all_idle_at_capture": true
+  },
+  "host": {
+    "ram_total_gb": 2015,
+    "ram_available_gb": 1890,
+    "nproc": 256
+  },
+  "storage_free": {
+    "/projects": "4141G",
+    "/dev/shm": "1008G",
+    "/tools": "733G",
+    "/": "329G",
+    "_note": "additional large home/scratch volumes present (identifiers redacted); /projects has ample room for the 466 GB shards"
+  },
+  "toolchain": {
+    "go": "go1.26.4",
+    "nvcc": "/usr/local/cuda-12.8/bin/nvcc",
+    "hf_cli": "huggingface-cli + hf present",
+    "hf_xet": true,
+    "systemd_run_user": "ok",
+    "user": "root"
+  },
+  "preflight_verdict": {
+    "tool": "tools/glm52_serve_preflight.py",
+    "args": "--gpu-name '<the sm_80 datacenter GPU model>' --gpu-count 8 --gpu-memory-total-gb 640",
+    "node_verdict": "BLOCKED_ARCH",
+    "blocked_engines": ["sglang", "vllm"],
+    "reason": "sm_80 is below the DSA stock kernel floor (sm_90); stock SGLang/vLLM cannot serve GLM-5.2 here (vLLM #35021)."
+  },
+  "overcome": {
+    "path": "llama.cpp MLA + CPU expert-offload (sm_80-capable)",
+    "runner": "tools/glm52_stage_serve_dgx3.sh",
+    "quant": "unsloth/GLM-5.2-GGUF UD-Q4_K_M (~466 GB, 11 shards)",
+    "staging_dir": "/projects/glm52-q4 (4.1 TB free; fits the 466 GB shards)",
+    "expert_offload": "n-cpu-moe=999 keeps MoE experts on the ~2 TB host RAM; A100s hold attention/shared tensors",
+    "status_as_of_capture": "runner committed to origin/main; launch blocked on a degraded Slack control-bridge (box sessions stopped consuming stdin mid-session). Not a kernel/approach block; re-launch when the bridge recovers."
+  },
+  "native_track_already_passing": {
+    "note": "fak's NATIVE in-kernel glm_moe_dsa forward already PASSES on this A100 class (sm_80), separate from external-engine serving.",
+    "witness": "experiments/glm-gpu-witness/a100-glm52-59bc40f.json",
+    "tests": ["TestCUDAGLMMoeDsaBackendForward", "TestCUDAGLMDsaCPUOffloadHybrid", "TestCUDAGLMMoeDsaIndexSelectMatches"],
+    "cosine": 1.0,
+    "verdict": "PASS"
+  }
+}

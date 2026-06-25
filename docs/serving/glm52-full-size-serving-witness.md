@@ -163,13 +163,37 @@ that requires an actual native run and is tracked separately.
 checkpoint.
 
 **Why it is not in this change:** the run needs a DSA-capable node that can hold ~454 GB
-(Q4_K_M, sm_80 + large host RAM via offload) or an sm_90+ node for native-DSA SGLang/vLLM.
-That hardware is not reachable from the box this runbook was authored on, and **no
-measured pass may be fabricated**.
+(Q4_K_M, sm_80 + large host RAM via offload) or an sm_90+ node for native-DSA SGLang/vLLM,
+plus a multi-hour ~466 GB checkpoint download. **No measured pass may be fabricated.**
 
-**Smallest next step:** provision/borrow such a node, stage the Q4_K_M shards, run the
-preflight → serve → witness sequence above, and commit the JSON + Markdown report. At that
-point criteria 4 and 5 are met and #413 can close against a real artifact.
+**The target node is now identified and validated (2026-06-25):** an internal 8-GPU
+datacenter server (`dgx3`) — 8× 80 GB sm_80 GPUs (640 GB aggregate VRAM, below the sm_90
+DSA floor), ~2 TB host RAM, 256 cores, `/projects` 4.1 TB free,
+go1.26.4 + cuda-12.8 + the HF CLI staged. The preflight planner run against that exact shape
+returns `BLOCKED_ARCH` for stock SGLang/vLLM (sm_80 is below the sm_90 DSA floor) — so the
+A100 **llama.cpp MLA fork is the path**, captured in the live node snapshot
+[`experiments/glm-gpu-witness/dgx3-a100-node-state-2026-06-25.json`](../../experiments/glm-gpu-witness/dgx3-a100-node-state-2026-06-25.json).
+
+**Smallest next step — run the self-staging A100 serve runner on DGX3, then the witness:**
+
+```bash
+# ON DGX3 (detached so a disconnect does not orphan a ~466 GB load):
+systemd-run --user --unit=glm52stage --collect bash tools/glm52_stage_serve_dgx3.sh
+# poll progress out-of-band:  cat /projects/glm52-q4/PHASE
+# on GLM52_SERVE_READY, capture the #413 witness through fak:
+python tools/glm52_serving_witness.py --base-url http://127.0.0.1:8000/v1 \
+    --model glm-5.2 --context-length 8192 \
+    --out experiments/glm52/full-size-serving-witness.json \
+    --markdown docs/notes/GLM52-FULL-SIZE-SERVING-WITNESS.md
+# then drive Claude Code end-to-end through the fak local guard against the same endpoint:
+fak guard --provider openai --base-url http://127.0.0.1:8000/v1 -- claude
+```
+
+[`tools/glm52_stage_serve_dgx3.sh`](../../tools/glm52_stage_serve_dgx3.sh) self-stages
+unsloth/GLM-5.2-GGUF UD-Q4_K_M (the published 11-shard ~466 GB dynamic-Q4 quant), builds
+llama.cpp (CUDA sm_80), launches `llama-server` with all MoE experts on host RAM, and writes
+a `PHASE` file so progress is pollable. At `GLM52_SERVE_READY` the witness + guard commands
+above close #413 criteria 4 & 5 against a real artifact.
 
 ## How to re-verify the harness (the gate this change does run)
 
