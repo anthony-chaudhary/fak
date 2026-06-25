@@ -139,6 +139,12 @@ func (s *Server) handleAnthropicMessages(w http.ResponseWriter, r *http.Request)
 	}
 	ctx := r.Context()
 	reqTrace := s.traceFor(r.Header.Get("X-Trace-Id"))
+	// Operator control: refuse a paused/draining/stopped session's next request (the
+	// proxy-path enforcement of /v1/fak/session). Fail-open when the route is disabled.
+	if ok, st := s.sessionAdmits(ctx, reqTrace); !ok {
+		writeSessionRefusal(w, st)
+		return
+	}
 	// In passthrough mode the upstream credential is the client's own (transparent
 	// hop) UNLESS the gateway pins its own (the subscription path). The inbound
 	// anthropic-beta is forwarded so the client's negotiated betas survive the hop.

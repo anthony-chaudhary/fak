@@ -125,6 +125,12 @@ func (s *Server) handleGeminiGenerateContent(w http.ResponseWriter, r *http.Requ
 
 	ctx := r.Context()
 	reqTrace := useHTTPTrace(w, r, "")
+	// Operator control: refuse a paused/draining/stopped session's next request (the
+	// proxy-path enforcement of /v1/fak/session). Fail-open when the route is disabled.
+	if ok, st := s.sessionAdmits(ctx, reqTrace); !ok {
+		writeSessionRefusal(w, st)
+		return
+	}
 
 	// Arm the result-side floor BEFORE the planner runs — exact parity with the
 	// OpenAI and Anthropic proxy paths. decodeGeminiContent already turned each

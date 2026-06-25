@@ -252,6 +252,14 @@ func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 	// ledger, plan-CFI, response header, and access log all correlate. The
 	// middleware honors a client-supplied X-Trace-Id or mints one.
 	reqTrace := useHTTPTrace(w, r, "")
+	// Operator control (the PROXY-path enforcement of /v1/fak/session): a paused /
+	// draining / stopped session refuses its next request instead of forwarding it
+	// upstream — "cancel a request in flight" on the served path. Fail-open when the
+	// session route is disabled (no-op for the historical behavior).
+	if ok, st := s.sessionAdmits(ctx, reqTrace); !ok {
+		writeSessionRefusal(w, st)
+		return
+	}
 	resultAdmissions, err := s.admitInboundResults(ctx, req.Messages, reqTrace)
 	if err != nil {
 		writeErr(w, http.StatusBadGateway, "upstream cache invalidation failed")
