@@ -1,0 +1,74 @@
+{
+  "schema": "fak.glm52-serve-preflight.v1",
+  "generated_at": "2026-06-25T14:20:31.265014Z",
+  "model": "zai-org/GLM-5.2",
+  "model_total_params_b": 753.0,
+  "quant": "fp8",
+  "kv_overhead": 0.15,
+  "dsa_stock_floor_cc": 9.0,
+  "supported_gpus": [
+    "H100",
+    "H200",
+    "B200",
+    "B300",
+    "GB200",
+    "GB300"
+  ],
+  "nvidia_smi": {
+    "source": "nvidia-smi",
+    "status": "UNAVAILABLE",
+    "detail": "nvidia-smi not found",
+    "gpus": []
+  },
+  "node": {
+    "gpu_name": "",
+    "gpu_count": 0,
+    "compute_cap": null,
+    "compute_cap_source": "",
+    "arch": "unknown",
+    "total_vram_gb": 0.0,
+    "total_vram_source": "",
+    "per_gpu_vram_gb": null,
+    "per_gpu_vram_source": ""
+  },
+  "engine_probes": {
+    "vllm": {
+      "present": false,
+      "version": "",
+      "detail": "Traceback (most recent call last):\n  File \"<string>\", line 1, in <module>\n    import vllm,sys; print(getattr(vllm, '__version__', '?'))\n    ^^^^^^^^^^^^^^^\nModuleNotFoundError: No module named 'vllm'"
+    }
+  },
+  "engines": [
+    {
+      "engine": "vllm",
+      "verdict": "BLOCKED_ARCH",
+      "ready": false,
+      "arch_ok": false,
+      "memory_ok": false,
+      "engine_present": false,
+      "engine_version": "",
+      "quant": "fp8",
+      "required_vram_gb": 865.9,
+      "total_vram_gb": 0.0,
+      "required_per_gpu_vram_gb": 865.9,
+      "per_gpu_vram_gb": null,
+      "gpu_count": 0,
+      "recommended_quant": null,
+      "notes": [
+        "GPU compute capability is unknown; pass --gpu-name or run on the node."
+      ]
+    }
+  ],
+  "summary": {
+    "node_verdict": "BLOCKED_ARCH",
+    "any_engine_ready": false,
+    "ready_engines": [],
+    "blocked_engines": [
+      "vllm"
+    ],
+    "recommended_quant": null,
+    "arch": "unknown",
+    "compute_cap": null,
+    "total_vram_gb": 0.0
+  }
+}

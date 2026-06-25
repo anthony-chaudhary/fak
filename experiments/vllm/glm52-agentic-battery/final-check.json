@@ -1,0 +1,400 @@
+{
+  "schema": "fak.glm52-vllm-agentic-battery.v1",
+  "generated_at": "2026-06-25T14:20:50.718179Z",
+  "model_family": "zai-org/GLM-5.2",
+  "checkpoint_model": "zai-org/GLM-5.2-FP8",
+  "served_model_name": "glm-5.2",
+  "raw_vllm_base_url": "http://127.0.0.1:8000/v1",
+  "context_length": 131072,
+  "quant": "fp8",
+  "verified_count": 20,
+  "tax_count": 8,
+  "python": "python",
+  "out_dir": "experiments/vllm",
+  "serving_out_dir": "experiments/glm52",
+  "swe_run_dir": "/tmp/swe-glm52-vllm-20",
+  "swebench_difficulty": "",
+  "swebench_dataset": "",
+  "steps": [
+    {
+      "id": "preflight",
+      "kind": "live-readiness",
+      "description": "Fail-closed GLM-5.2/vLLM node readiness gate.",
+      "required": true,
+      "status": "artifact-fail",
+      "command": {
+        "argv": [
+          "python",
+          "tools/glm52_serve_preflight.py",
+          "--engine",
+          "vllm",
+          "--quant",
+          "fp8",
+          "--require-ready",
+          "--out",
+          "experiments/vllm/glm52-vllm-preflight.json",
+          "--markdown",
+          "experiments/vllm/glm52-vllm-preflight.md"
+        ],
+        "shell": "python tools/glm52_serve_preflight.py --engine vllm --quant fp8 --require-ready --out experiments/vllm/glm52-vllm-preflight.json --markdown experiments/vllm/glm52-vllm-preflight.md"
+      },
+      "primary_artifact": "experiments/vllm/glm52-vllm-preflight.json",
+      "artifacts": [
+        "experiments/vllm/glm52-vllm-preflight.json",
+        "experiments/vllm/glm52-vllm-preflight.md"
+      ],
+      "check": "preflight",
+      "claim_boundary": "Readiness only; no resolve-rate or speed number comes from this rung.",
+      "artifact_status": "FAIL",
+      "artifact_detail": "node_verdict='BLOCKED_ARCH'; vllm.ready=False; expected GLM-5.2 vLLM READY/PENDING preflight"
+    },
+    {
+      "id": "serve_raw_vllm",
+      "kind": "manual-live-serving",
+      "description": "Start raw vLLM for GLM-5.2 before the live witnesses.",
+      "required": true,
+      "status": "manual",
+      "command": {
+        "argv": [],
+        "shell": ": \"${GLM52_TOOL_CALL_PARSER:?set GLM52_TOOL_CALL_PARSER to the vLLM parser name}\" && ENGINE=vllm SERVED_NAME=glm-5.2 PORT=8000 ENGINE_ARGS=\"--enable-auto-tool-choice --tool-call-parser ${GLM52_TOOL_CALL_PARSER}\" bash tools/glm52_sglang_vllm_serve.sh"
+      },
+      "primary_artifact": "",
+      "artifacts": [],
+      "check": "manual",
+      "claim_boundary": "This step is witnessed by the serving and tax artifacts, not by this manifest.",
+      "artifact_status": "MANUAL",
+      "artifact_detail": "manual serving step; witnessed by downstream artifacts"
+    },
+    {
+      "id": "serving_witness",
+      "kind": "live-serving",
+      "description": "Direct + fak-gateway + quarantine serving witness.",
+      "required": true,
+      "status": "planned",
+      "command": {
+        "argv": [
+          "python",
+          "tools/glm52_serving_witness.py",
+          "--base-url",
+          "http://127.0.0.1:8000/v1",
+          "--model",
+          "glm-5.2",
+          "--engine-cache-engine",
+          "vllm",
+          "--context-length",
+          "131072",
+          "--out",
+          "experiments/glm52/full-size-serving-witness.json",
+          "--markdown",
+          "experiments/glm52/full-size-serving-witness.md"
+        ],
+        "shell": "python tools/glm52_serving_witness.py --base-url http://127.0.0.1:8000/v1 --model glm-5.2 --engine-cache-engine vllm --context-length 131072 --out experiments/glm52/full-size-serving-witness.json --markdown experiments/glm52/full-size-serving-witness.md"
+      },
+      "primary_artifact": "experiments/glm52/full-size-serving-witness.json",
+      "artifacts": [
+        "experiments/glm52/full-size-serving-witness.json",
+        "experiments/glm52/full-size-serving-witness.md"
+      ],
+      "check": "serving_witness",
+      "claim_boundary": "Counts only external full-size serving; native reduced-scale evidence is not folded here.",
+      "artifact_status": "MISSING",
+      "artifact_detail": "missing"
+    },
+    {
+      "id": "vllm_tax",
+      "kind": "live-serving",
+      "description": "Measure fak gateway adjudication tax over raw vLLM.",
+      "required": true,
+      "status": "planned",
+      "command": {
+        "argv": [
+          "python",
+          "tools/vllm_tax_witness.py",
+          "--base-url",
+          "http://127.0.0.1:8000/v1",
+          "--model",
+          "glm-5.2",
+          "--count",
+          "8",
+          "--record",
+          "--out",
+          "experiments/vllm/adjudication-tax-witness.json",
+          "--markdown",
+          "experiments/vllm/adjudication-tax-witness.md"
+        ],
+        "shell": "python tools/vllm_tax_witness.py --base-url http://127.0.0.1:8000/v1 --model glm-5.2 --count 8 --record --out experiments/vllm/adjudication-tax-witness.json --markdown experiments/vllm/adjudication-tax-witness.md"
+      },
+      "primary_artifact": "experiments/vllm/adjudication-tax-witness.json",
+      "artifacts": [
+        "experiments/vllm/adjudication-tax-witness.json",
+        "experiments/vllm/adjudication-tax-witness.md"
+      ],
+      "check": "tax_witness",
+      "claim_boundary": "Tax >= 1 is expected; this is a cost witness, not a fak speed win.",
+      "artifact_status": "MISSING",
+      "artifact_detail": "missing"
+    },
+    {
+      "id": "swebench_compare_preflight",
+      "kind": "live-agentic-preflight",
+      "description": "Fail fast before the long SWE-bench agent run.",
+      "required": true,
+      "status": "planned",
+      "command": {
+        "argv": [
+          "python",
+          "tools/dgx_swebench_compare.py",
+          "--engine",
+          "vllm",
+          "--model",
+          "zai-org/GLM-5.2-FP8",
+          "--served-model-name",
+          "glm-5.2",
+          "--raw-base-url",
+          "http://127.0.0.1:8000/v1",
+          "--verified-count",
+          "20",
+          "--skip-engine-serve",
+          "--require-tool-calls",
+          "--require-grade",
+          "--run-dir",
+          "/tmp/swe-glm52-vllm-20",
+          "--require-gpu-name",
+          "H200",
+          "--preflight-only"
+        ],
+        "shell": "python tools/dgx_swebench_compare.py --engine vllm --model zai-org/GLM-5.2-FP8 --served-model-name glm-5.2 --raw-base-url http://127.0.0.1:8000/v1 --verified-count 20 --skip-engine-serve --require-tool-calls --require-grade --run-dir /tmp/swe-glm52-vllm-20 --require-gpu-name H200 --preflight-only"
+      },
+      "primary_artifact": "/tmp/swe-glm52-vllm-20/COMPARE-PREFLIGHT.json",
+      "artifacts": [
+        "/tmp/swe-glm52-vllm-20/COMPARE-PREFLIGHT.json",
+        "/tmp/swe-glm52-vllm-20/DONE.rc"
+      ],
+      "check": "swebench_compare_preflight",
+      "claim_boundary": "Dependency/raw-endpoint/GPU gate only; resolve claims come from swebench_verified_20.",
+      "artifact_status": "MISSING",
+      "artifact_detail": "missing"
+    },
+    {
+      "id": "swebench_verified_20",
+      "kind": "live-agentic",
+      "description": "Run raw-vLLM vs fak-gateway on a 20-task SWE-bench Verified slice.",
+      "required": true,
+      "status": "planned",
+      "command": {
+        "argv": [
+          "python",
+          "tools/dgx_swebench_compare.py",
+          "--engine",
+          "vllm",
+          "--model",
+          "zai-org/GLM-5.2-FP8",
+          "--served-model-name",
+          "glm-5.2",
+          "--raw-base-url",
+          "http://127.0.0.1:8000/v1",
+          "--verified-count",
+          "20",
+          "--skip-engine-serve",
+          "--require-tool-calls",
+          "--require-grade",
+          "--run-dir",
+          "/tmp/swe-glm52-vllm-20",
+          "--require-gpu-name",
+          "H200"
+        ],
+        "shell": "python tools/dgx_swebench_compare.py --engine vllm --model zai-org/GLM-5.2-FP8 --served-model-name glm-5.2 --raw-base-url http://127.0.0.1:8000/v1 --verified-count 20 --skip-engine-serve --require-tool-calls --require-grade --run-dir /tmp/swe-glm52-vllm-20 --require-gpu-name H200"
+      },
+      "primary_artifact": "/tmp/swe-glm52-vllm-20/compare.json",
+      "artifacts": [
+        "/tmp/swe-glm52-vllm-20/COMPARE-PREFLIGHT.json",
+        "/tmp/swe-glm52-vllm-20/compare.json",
+        "/tmp/swe-glm52-vllm-20/COMPARE.md",
+        "/tmp/swe-glm52-vllm-20/DONE.rc"
+      ],
+      "check": "swebench_compare",
+      "claim_boundary": "Completion/resolve claims require official harness grading for both arms.",
+      "artifact_status": "MISSING",
+      "artifact_detail": "missing"
+    },
+    {
+      "id": "swebench_floor_20",
+      "kind": "fak-native-floor",
+      "description": "Record the deterministic fak-native SWE-bench geometry floor at the same 20-task scale.",
+      "required": true,
+      "status": "planned",
+      "command": {
+        "argv": [
+          "go",
+          "run",
+          "./cmd/fak",
+          "swebench",
+          "compare",
+          "--workers",
+          "1,2,4,8",
+          "--limit",
+          "20",
+          "--with-adjudication",
+          "--out",
+          "experiments/vllm/swebench-20-fak-floor.json",
+          "--md",
+          "experiments/vllm/swebench-20-fak-floor.md"
+        ],
+        "shell": "go run ./cmd/fak swebench compare --workers 1,2,4,8 --limit 20 --with-adjudication --out experiments/vllm/swebench-20-fak-floor.json --md experiments/vllm/swebench-20-fak-floor.md"
+      },
+      "primary_artifact": "experiments/vllm/swebench-20-fak-floor.json",
+      "artifacts": [
+        "experiments/vllm/swebench-20-fak-floor.json",
+        "experiments/vllm/swebench-20-fak-floor.md"
+      ],
+      "check": "swebench_floor",
+      "claim_boundary": "This is deterministic mechanism evidence, not a raw vLLM head-to-head.",
+      "artifact_status": "MISSING",
+      "artifact_detail": "missing"
+    },
+    {
+      "id": "turntax_airline",
+      "kind": "fak-native-floor",
+      "description": "Measure the turn-tax safety/control floor.",
+      "required": true,
+      "status": "planned",
+      "command": {
+        "argv": [
+          "go",
+          "run",
+          "./cmd/fak",
+          "turntax",
+          "--suite",
+          "turntax-airline",
+          "--out",
+          "experiments/vllm/turntax-airline.json"
+        ],
+        "shell": "go run ./cmd/fak turntax --suite turntax-airline --out experiments/vllm/turntax-airline.json"
+      },
+      "primary_artifact": "experiments/vllm/turntax-airline.json",
+      "artifacts": [
+        "experiments/vllm/turntax-airline.json"
+      ],
+      "check": "turntax_floor",
+      "claim_boundary": "Engine-agnostic safety floor; do not present as vLLM throughput.",
+      "artifact_status": "MISSING",
+      "artifact_detail": "missing"
+    },
+    {
+      "id": "sessionbench_synthetic",
+      "kind": "fak-native-floor",
+      "description": "Measure the multi-agent session value stack on a weightless synthetic shape.",
+      "required": true,
+      "status": "planned",
+      "command": {
+        "argv": [
+          "go",
+          "run",
+          "./cmd/sessionbench",
+          "-synthetic",
+          "smollm2-135m",
+          "-turns",
+          "50",
+          "-agents",
+          "5",
+          "-prefix",
+          "2048",
+          "-decode",
+          "32",
+          "-result",
+          "64",
+          "-out",
+          "experiments/vllm/sessionbench-synthetic.json"
+        ],
+        "shell": "go run ./cmd/sessionbench -synthetic smollm2-135m -turns 50 -agents 5 -prefix 2048 -decode 32 -result 64 -out experiments/vllm/sessionbench-synthetic.json"
+      },
+      "primary_artifact": "experiments/vllm/sessionbench-synthetic.json",
+      "artifacts": [
+        "experiments/vllm/sessionbench-synthetic.json"
+      ],
+      "check": "sessionbench_floor",
+      "claim_boundary": "Synthetic shape; ratio evidence only unless a live model artifact is added.",
+      "artifact_status": "MISSING",
+      "artifact_detail": "missing"
+    },
+    {
+      "id": "fanbench_research",
+      "kind": "fak-native-floor",
+      "description": "Measure fan-out prefix sharing and cost geometry.",
+      "required": true,
+      "status": "planned",
+      "command": {
+        "argv": [
+          "go",
+          "run",
+          "./cmd/fanbench",
+          "-profile",
+          "research",
+          "-trials",
+          "12",
+          "-out",
+          "experiments/vllm/fanbench-research.json",
+          "-csv",
+          "experiments/vllm/fanbench-research.csv"
+        ],
+        "shell": "go run ./cmd/fanbench -profile research -trials 12 -out experiments/vllm/fanbench-research.json -csv experiments/vllm/fanbench-research.csv"
+      },
+      "primary_artifact": "experiments/vllm/fanbench-research.json",
+      "artifacts": [
+        "experiments/vllm/fanbench-research.json",
+        "experiments/vllm/fanbench-research.csv"
+      ],
+      "check": "fanbench_floor",
+      "claim_boundary": "Cost geometry and kernel reuse evidence; not a raw serving-engine comparison.",
+      "artifact_status": "MISSING",
+      "artifact_detail": "missing"
+    },
+    {
+      "id": "radixbench_synthetic",
+      "kind": "fak-native-floor",
+      "description": "Measure RadixAttention-style prefix-cache hit-rate evidence.",
+      "required": true,
+      "status": "planned",
+      "command": {
+        "argv": [
+          "go",
+          "run",
+          "./cmd/radixbench",
+          "-live=false",
+          "-out",
+          "experiments/vllm/radixbench-synthetic.json"
+        ],
+        "shell": "go run ./cmd/radixbench -live=false -out experiments/vllm/radixbench-synthetic.json"
+      },
+      "primary_artifact": "experiments/vllm/radixbench-synthetic.json",
+      "artifacts": [
+        "experiments/vllm/radixbench-synthetic.json"
+      ],
+      "check": "radixbench_floor",
+      "claim_boundary": "Hardware-independent hit-rate evidence; live tok/s needs a separate serving run.",
+      "artifact_status": "MISSING",
+      "artifact_detail": "missing"
+    }
+  ],
+  "summary": {
+    "complete": false,
+    "status": "PENDING_MEASUREMENT",
+    "required_artifacts": 10,
+    "required_passed": 0,
+    "required_failed": [
+      "preflight"
+    ],
+    "required_missing": [
+      "serving_witness",
+      "vllm_tax",
+      "swebench_compare_preflight",
+      "swebench_verified_20",
+      "swebench_floor_20",
+      "turntax_airline",
+      "sessionbench_synthetic",
+      "fanbench_research",
+      "radixbench_synthetic"
+    ],
+    "honesty": "No GLM-5.2/vLLM benchmark number is quotable until every required artifact passes and any copied number is linked from BENCHMARK-AUTHORITY.md."
+  }
+}
