@@ -8,7 +8,7 @@
 
 > **🧠 The *why*:** `WHY-REUSE-WINS-2026-06-21.md` (private companion — not published) (v1) argues — and stress-tests — *why* these reuse numbers matter more than the headline alone: reuse is a **different class** of optimization (work-elimination on the `N` axis, not work-acceleration on the `κ` axis), so it's **exact, training-free, and composes multiplicatively** on top of every per-token trick. Follows the v2 SOTA-only framing — leads with the absolute competitive number (**19.0 min vs 78 min = 4.1× less work**, conservative marginal 2.4–2.7×), shows **no naive-loop numbers**, and centers cross-agent reuse as the layer that is `fak`'s. No new numbers; fences where the "works across everything / no fine-tuning" framing is overstated (and where addressable reuse, [#228](https://github.com/anthony-chaudhary/fak/issues/228), widens it).
 
-**Last updated:** 2026-06-21
+**Last updated:** 2026-06-25
 **Status:** Living document — update when new model results ship
 
 > **🔁 Provenance vs. public reproducibility (read before you `git show` a commit below).**
@@ -62,6 +62,7 @@
 | **Decode vs prefill worker-count scaling (x86_64 32-core, within-run ratio)** | **decode all-cores-default penalty 2.5× (1.5B) → 2.1× (3B) → 1.14× (7B); decode peaks ≤8–16w, prefill scales to all cores** | Qwen2.5-1.5B/3B/7B Q8, x86_64 32-core agent-host (contended) | best worker count vs 32w default — same box, same run | _this commit_ | `experiments/session/worker-scaling-desktop-x86-20260624.json` + `WORKER-SCALING-DESKTOP-X86-20260624.md`. WITHIN-RUN ratio only; absolute tok/s is contended agent-host, NOT comparable to the uncontended M3 Pro rows. CPU-threading analogue of the GPU launch-bound small-model artifact |
 | **Self-ablation feature sweep — vDSO on/off (deterministic, Regime A of epic #607)** | **vdso_hits 0→7 · engine_calls 12→5 · tokens 937→417 (−520)** | tau2-airline-smoke frozen trace (12 calls), mock engine, no model | all-off baseline (vDSO off) | _this commit_ | `experiments/ablate/tau2-smoke-vdso-ablation.json` + `ABLATE-RESULTS.md`. Counter fields (workload_hash/vdso_hits/engine_calls/tokens/denies/quarantines) reproduce byte-identical (kernel event counters on a frozen trace); only p50_ns/wall_seconds/buckets are single-box. Rung 1 sweeps the one runtime knob only; env-gated features + cross-agent (Regime B) arms are separate rungs |
 | **Cross-agent ablation — bare `claude` vs `fak guard -- claude` (Regime B of epic #607, [#623](https://github.com/anthony-chaudhary/fak/issues/623))** | **K=5/arm, both 5/5 success · output 0.98× · turns 1.00× · total-ingested 1.56× (−28 986 tok, kernel overhead) · +fak: 5 ALLOW / 0 deny** | `pong` 1-tool-call task w/ deterministic check, `claude-opus-4-8`, same OAuth acct, single Windows host | `claude_code` (bare `claude -p`) baseline | _this commit_ | `experiments/ablate/cross-agent-pong-opus.json` + `ABLATE-RESULTS.md`. Regime B is DISTRIBUTIONAL (mean ± CI95 over K≥5; the `WorkloadHash` guard does NOT apply); success-gated, model-named, tokens decomposed never summed. ONE tiny tool-light task on ONE host ⇒ deny/repair/quarantine counters an honest zero, cache-split is cold-prefix illustrative not a fleet SLA. Tool: `tools/cross_agent_ablate.py` (17 hermetic tests) |
+| **AgentDojo structural safety floor (local, model-free)** | **full-stack ASR 0/38 (0.000) vs detection-only 29/38 (0.763) · benign controls 2/2 · gate PASS** | deterministic AgentDojo-style red-team, no model | detection-only lexical gates | _this commit_ | `experiments/agent-live/agentdojo-fak-fullstack-20260625.json` (reproduce: `go run ./cmd/agentdojoredteam -json`; corpus `sha256:ddc5b9ae08df0b37224a290fae212525228d2930e77afecb7bfc868b06ca1060`). LOCAL structural floor only — not an official external AgentDojo leaderboard result or raw-model arm |
 
 > **The model-ladder thesis.** Live wall-clock ratio climbs toward the deterministic
 > 7.50× token-speedup ceiling as per-token compute grows (135M 4.58× → 360M 5.40× →
@@ -71,6 +72,60 @@
 > hardware-independent and reproduce the committed JSON exactly; only the live
 > wall-clocks are single-box (within-run ratios authoritative per
 > [BENCHMARK-GOVERNANCE.md](BENCHMARK-GOVERNANCE.md) regime rules).
+
+---
+
+## AgentDojo Structural Safety Floor (2026-06-25)
+
+**Date:** 2026-06-25
+**Commit:** _this commit_
+**File:** `experiments/agent-live/agentdojo-fak-fullstack-20260625.json`
+**Reproduce:** `go run ./cmd/agentdojoredteam -json`
+
+### What this measures
+
+This is Packet A from `docs/notes/AGENTIC-BENCHMARK-RUN-PACKETS-2026-06-25.md`: the
+local, deterministic AgentDojo-style structural safety floor. It compares the same
+38-attack corpus against two configurations:
+
+- **detection-only:** content detectors only (`normgate` + `ctxmmu`);
+- **full-stack:** the shipped detector stack plus IFC provenance taint and sink-gate.
+
+It is model-free and preserves the benchmark fence: this row does **not** claim an
+official external AgentDojo leaderboard score, and it does not replace a future raw
+model-vs-fak external harness arm.
+
+### Results
+
+| Metric | Artifact field | Value |
+|---|---|---:|
+| Task / attack count | `task_count` | 38 |
+| Detection-only attack successes | `asr_detection_succeeded` / `asr_detection` | 29 / 0.763 |
+| Full-stack attack successes | `asr_fullstack_succeeded` / `asr_fullstack` | **0 / 0.000** |
+| Harvest corpus rows / catches | `corpus_rows` / `corpus_catches` | 38 / 38 |
+| Closed catch reasons | `catch_reasons` | `MALFORMED=9`, `TRUST_VIOLATION=29` |
+| Benign controls completed | `benign_completed` / `benign_completion_rate` | 2 / 1.000 |
+| Gate verdict | `gate` | **PASS** |
+
+Corpus identity: `sha256:ddc5b9ae08df0b37224a290fae212525228d2930e77afecb7bfc868b06ca1060`.
+The artifact also records the reproduce command, the attack ids, policy mode
+(`detection-only-vs-full-stack-ifc`), and source revision metadata.
+
+### Honesty fences
+
+- This is a **local structural safety floor**, not a claim that fak beats the
+  official AgentDojo benchmark or any model leaderboard.
+- The detection-only arm is an internal lexical-gate baseline, not a raw frontier
+  model arm.
+- A safety win counts here because the runner now reports benign full-stack controls
+  alongside ASR; broader task utility still requires the external AgentDojo-compatible
+  adapter described in issue #868/#869.
+
+### Verification
+
+- `go test ./cmd/agentdojoredteam ./internal/agentdojo` -> PASS.
+- `go run ./cmd/agentdojoredteam -json` -> exit 0 and writes `gate=PASS`.
+- JSON parse/read-back confirmed the fields in the table above.
 
 ---
 
