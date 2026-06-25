@@ -6,25 +6,25 @@
     "max_delegates": 0,
     "post_git_gate_mutating_shell_family_counts": {},
     "post_repair_mutating_shell_family_counts": {
-      "git_write": 60
+      "git_write": 62
     },
     "post_repair_shell_family_counts": {
-      "build_test": 132,
-      "git_read": 613,
-      "git_write": 60,
+      "build_test": 135,
+      "git_read": 675,
+      "git_write": 62,
       "inline_script": 37,
-      "other_shell": 463,
-      "powershell_inspect": 75,
-      "powershell_read": 650,
-      "python_script": 338,
-      "python_test": 263,
-      "search_rg": 262,
-      "shell_redirect": 14
+      "other_shell": 471,
+      "powershell_inspect": 79,
+      "powershell_read": 681,
+      "python_script": 356,
+      "python_test": 266,
+      "search_rg": 270,
+      "shell_redirect": 16
     },
     "post_repair_shell_shape_counts": {
-      "non_shell_tool": 520,
+      "non_shell_tool": 537,
       "shell_in_tree_or_safe_write_target": 6,
-      "shell_no_write_target_detected": 2901
+      "shell_no_write_target_detected": 3042
     },
     "post_repair_unknown_tree_admission_warnings": 1999,
     "reasons": [],
@@ -66,6 +66,34 @@
     "post_repair_command_shapes": {
       "malformed_rows": 0,
       "mutating_shell_sessions": [
+        {
+          "codex_session_file": "rollout-2026-06-25T07-25-17-019eff2b-c03e-78a1-8716-cb82d70e28ac.jsonl",
+          "mutating_shell_family_counts": {
+            "git_write": 2
+          },
+          "shell_family_counts": {
+            "build_test": 7,
+            "git_read": 71,
+            "git_write": 2,
+            "other_shell": 29,
+            "powershell_inspect": 5,
+            "powershell_read": 37,
+            "python_script": 37,
+            "python_test": 13,
+            "search_rg": 20,
+            "shell_redirect": 2
+          },
+          "shell_shape_counts": {
+            "non_shell_tool": 9,
+            "shell_in_tree_or_safe_write_target": 1,
+            "shell_no_write_target_detected": 222
+          },
+          "thread_id": "019eff2b-c03e-78a1-8716-cb82d70e28ac",
+          "tool_call_rows": 232,
+          "write_op_counts": {
+            "output-flag": 2
+          }
+        },
         {
           "codex_session_file": "rollout-2026-06-25T02-38-18-019efe24-ff94-73a0-8b81-0958a40f72e6.jsonl",
           "mutating_shell_family_counts": {
@@ -159,41 +187,41 @@
       "scope": "audited_dos_streams",
       "sessions_inspected": 10,
       "shell_argument_errors": 0,
-      "shell_command_calls": 2907,
+      "shell_command_calls": 3048,
       "shell_family_counts": {
-        "build_test": 132,
-        "git_read": 613,
-        "git_write": 60,
+        "build_test": 135,
+        "git_read": 675,
+        "git_write": 62,
         "inline_script": 37,
-        "other_shell": 463,
-        "powershell_inspect": 75,
-        "powershell_read": 650,
-        "python_script": 338,
-        "python_test": 263,
-        "search_rg": 262,
-        "shell_redirect": 14
+        "other_shell": 471,
+        "powershell_inspect": 79,
+        "powershell_read": 681,
+        "python_script": 356,
+        "python_test": 266,
+        "search_rg": 270,
+        "shell_redirect": 16
       },
       "shell_shape_counts": {
-        "non_shell_tool": 520,
+        "non_shell_tool": 537,
         "shell_in_tree_or_safe_write_target": 6,
-        "shell_no_write_target_detected": 2901
+        "shell_no_write_target_detected": 3042
       },
       "since": "2026-06-25T09:22:57.680099Z",
       "status": "PASS",
       "threads_supplied": 10,
-      "tool_call_rows": 3427,
+      "tool_call_rows": 3585,
       "tool_counts": {
-        "apply_patch": 309,
+        "apply_patch": 316,
         "close_agent": 13,
-        "dos_arbitrate": 38,
+        "dos_arbitrate": 39,
         "dos_commit_audit": 10,
         "dos_doctor": 1,
         "dos_review": 2,
         "get_goal": 9,
-        "shell_command": 2907,
+        "shell_command": 3048,
         "spawn_agent": 17,
         "update_goal": 1,
-        "update_plan": 115,
+        "update_plan": 124,
         "wait_agent": 5
       },
       "write_op_counts": {
@@ -206,27 +234,27 @@
       "latency_by_verb": {
         "pretool": {
           "max_ms": 2720.49,
-          "n": 5251,
-          "p50_ms": 189.208,
-          "p95_ms": 487.105
+          "n": 5406,
+          "p50_ms": 184.097,
+          "p95_ms": 483.998
         }
       },
-      "observations": 5251,
+      "observations": 5406,
       "outcome_counts": {
-        "passthrough": 3135,
+        "passthrough": 3290,
         "warn": 2116
       },
-      "pretool_calls": 5251,
+      "pretool_calls": 5406,
       "rung_counts": {
         "admission": 2565,
-        "provenance": 2686
+        "provenance": 2841
       },
       "since": "2026-06-25T09:22:57.680099Z",
       "status": "WARN",
       "unknown_tree_admission_warnings": 1999,
-      "unknown_tree_warning_rate": 0.380689,
+      "unknown_tree_warning_rate": 0.369774,
       "verb_counts": {
-        "pretool": 5251
+        "pretool": 5406
       }
     },
     "reason": "Codex hook commands use the native launcher",
@@ -242,7 +270,7 @@
     "repaired_at": "2026-06-25T09:22:57.680099Z",
     "status": "PASS"
   },
-  "codex_threads_discovered": 140,
+  "codex_threads_discovered": 137,
   "dos_version": {
     "distribution": "dos-kernel",
     "latest_check_note": "run with --check-latest to compare against https://pypi.org/pypi/dos-kernel/json",
@@ -275,40 +303,24 @@
         ]
       },
       "scope": "post_git_gate_audited_dos_streams",
-      "sessions_inspected": 3,
+      "sessions_inspected": 2,
       "shell_argument_errors": 0,
-      "shell_command_calls": 233,
+      "shell_command_calls": 2,
       "shell_family_counts": {
-        "build_test": 9,
-        "git_read": 41,
-        "inline_script": 3,
-        "other_shell": 39,
-        "powershell_inspect": 4,
-        "powershell_read": 24,
-        "python_script": 63,
-        "python_test": 32,
-        "search_rg": 17,
-        "shell_redirect": 1
+        "powershell_read": 1,
+        "python_script": 1
       },
       "shell_shape_counts": {
-        "non_shell_tool": 30,
-        "shell_in_tree_or_safe_write_target": 1,
-        "shell_no_write_target_detected": 232
+        "shell_no_write_target_detected": 2
       },
-      "since": "2026-06-25T14:28:11.173213Z",
+      "since": "2026-06-25T14:51:04.727080Z",
       "status": "PASS",
       "threads_supplied": 10,
-      "tool_call_rows": 263,
+      "tool_call_rows": 2,
       "tool_counts": {
-        "apply_patch": 19,
-        "dos_arbitrate": 1,
-        "get_goal": 1,
-        "shell_command": 233,
-        "update_plan": 9
+        "shell_command": 2
       },
-      "write_op_counts": {
-        "output-flag": 2
-      }
+      "write_op_counts": {}
     },
     "privacy": {
       "copied_fields": [
@@ -326,10 +338,10 @@
         "command output"
       ]
     },
-    "proved_at": "2026-06-25T14:28:11.173213Z",
+    "proved_at": "2026-06-25T14:51:04.727080Z",
     "reports": [
       {
-        "created_at": "2026-06-25T14:28:10.990552Z",
+        "created_at": "2026-06-25T14:51:04.544701Z",
         "dry_run": true,
         "executed": false,
         "expect_deny": true,
@@ -341,7 +353,7 @@
         "verdict": "DENY"
       },
       {
-        "created_at": "2026-06-25T14:28:10.619317Z",
+        "created_at": "2026-06-25T14:51:04.328935Z",
         "dry_run": true,
         "executed": false,
         "expect_deny": true,
@@ -353,7 +365,7 @@
         "verdict": "DENY"
       },
       {
-        "created_at": "2026-06-25T14:28:11.173213Z",
+        "created_at": "2026-06-25T14:51:04.727080Z",
         "dry_run": true,
         "executed": false,
         "expect_deny": true,
@@ -373,7 +385,7 @@
     "status": "PASS",
     "valid": {
       "git_add": {
-        "created_at": "2026-06-25T14:28:10.990552Z",
+        "created_at": "2026-06-25T14:51:04.544701Z",
         "dry_run": true,
         "executed": false,
         "expect_deny": true,
@@ -385,7 +397,7 @@
         "verdict": "DENY"
       },
       "git_commit": {
-        "created_at": "2026-06-25T14:28:10.619317Z",
+        "created_at": "2026-06-25T14:51:04.328935Z",
         "dry_run": true,
         "executed": false,
         "expect_deny": true,
@@ -397,7 +409,7 @@
         "verdict": "DENY"
       },
       "git_push": {
-        "created_at": "2026-06-25T14:28:11.173213Z",
+        "created_at": "2026-06-25T14:51:04.727080Z",
         "dry_run": true,
         "executed": false,
         "expect_deny": true,
@@ -440,75 +452,100 @@
   "schema": "fak-codex-dos-recent-audit/1",
   "sessions": [
     {
-      "codex_session_file": "rollout-2026-06-25T02-44-01-019efe2a-3a49-70f0-9951-5bc62e47feaa.jsonl",
-      "delegate_count": 6,
-      "observation_scope": "timestamp-window; concurrent sessions in the same window may contribute observations",
-      "observations": 988,
-      "pretool_calls": 529,
-      "recommendations": [
-        "prefer path-visible tool calls or narrower shell commands; this stream is Bash-dominated",
-        "inspect native-hook delegate fallbacks; the fast path should own routine calls"
-      ],
-      "status": "WARN",
-      "steps": 145,
-      "stop_blocks": 0,
-      "stop_failures_total": 0,
-      "stream_path": ".dos/streams/019efe2a-3a49-70f0-9951-5bc62e47feaa.jsonl",
-      "thread_id": "019efe2a-3a49-70f0-9951-5bc62e47feaa",
-      "tool_counts": {
-        "Bash": 145
-      },
-      "unknown_tree_admission_warnings": 0,
-      "unknown_tree_warning_rate": 0.0,
-      "window_end": "2026-06-25T14:43:43Z",
-      "window_start": "2026-06-25T14:23:22Z"
-    },
-    {
       "codex_session_file": "rollout-2026-06-25T07-17-59-019eff25-109f-7143-b5b3-3fa5a0044e91.jsonl",
-      "delegate_count": 8,
+      "delegate_count": 17,
       "observation_scope": "timestamp-window; concurrent sessions in the same window may contribute observations",
-      "observations": 1414,
-      "pretool_calls": 748,
+      "observations": 1980,
+      "pretool_calls": 1037,
       "recommendations": [
         "prefer path-visible tool calls or narrower shell commands; this stream is Bash-dominated",
         "inspect native-hook delegate fallbacks; the fast path should own routine calls"
       ],
       "status": "WARN",
-      "steps": 67,
+      "steps": 75,
       "stop_blocks": 0,
       "stop_failures_total": 0,
       "stream_path": ".dos/streams/019eff25-109f-7143-b5b3-3fa5a0044e91.jsonl",
       "thread_id": "019eff25-109f-7143-b5b3-3fa5a0044e91",
       "tool_counts": {
-        "Bash": 67
+        "Bash": 75
       },
       "unknown_tree_admission_warnings": 0,
       "unknown_tree_warning_rate": 0.0,
-      "window_end": "2026-06-25T14:43:37Z",
+      "window_end": "2026-06-25T14:51:06Z",
       "window_start": "2026-06-25T14:18:21Z"
     },
     {
-      "codex_session_file": "rollout-2026-06-25T07-25-17-019eff2b-c03e-78a1-8716-cb82d70e28ac.jsonl",
-      "delegate_count": 4,
+      "codex_session_file": "rollout-2026-06-25T02-44-01-019efe2a-3a49-70f0-9951-5bc62e47feaa.jsonl",
+      "delegate_count": 15,
       "observation_scope": "timestamp-window; concurrent sessions in the same window may contribute observations",
-      "observations": 764,
-      "pretool_calls": 412,
+      "observations": 1544,
+      "pretool_calls": 813,
       "recommendations": [
         "prefer path-visible tool calls or narrower shell commands; this stream is Bash-dominated",
         "inspect native-hook delegate fallbacks; the fast path should own routine calls"
       ],
       "status": "WARN",
-      "steps": 135,
+      "steps": 179,
+      "stop_blocks": 0,
+      "stop_failures_total": 0,
+      "stream_path": ".dos/streams/019efe2a-3a49-70f0-9951-5bc62e47feaa.jsonl",
+      "thread_id": "019efe2a-3a49-70f0-9951-5bc62e47feaa",
+      "tool_counts": {
+        "Bash": 179
+      },
+      "unknown_tree_admission_warnings": 0,
+      "unknown_tree_warning_rate": 0.0,
+      "window_end": "2026-06-25T14:51:05Z",
+      "window_start": "2026-06-25T14:23:22Z"
+    },
+    {
+      "codex_session_file": "rollout-2026-06-25T02-02-26-019efe04-2aa3-72f1-8aee-f5aa0e2b3538.jsonl",
+      "delegate_count": 108,
+      "observation_scope": "timestamp-window; concurrent sessions in the same window may contribute observations",
+      "observations": 26948,
+      "pretool_calls": 13540,
+      "recommendations": [
+        "prefer path-visible tool calls or narrower shell commands; this stream is Bash-dominated",
+        "reduce opaque shell/editor calls or file upstream footprint-derivation debt",
+        "inspect native-hook delegate fallbacks; the fast path should own routine calls"
+      ],
+      "status": "WARN",
+      "steps": 498,
+      "stop_blocks": 0,
+      "stop_failures_total": 0,
+      "stream_path": ".dos/streams/019efe04-2aa3-72f1-8aee-f5aa0e2b3538.jsonl",
+      "thread_id": "019efe04-2aa3-72f1-8aee-f5aa0e2b3538",
+      "tool_counts": {
+        "Bash": 498
+      },
+      "unknown_tree_admission_warnings": 3794,
+      "unknown_tree_warning_rate": 0.280207,
+      "window_end": "2026-06-25T14:51:14Z",
+      "window_start": "2026-06-25T09:04:04Z"
+    },
+    {
+      "codex_session_file": "rollout-2026-06-25T07-25-17-019eff2b-c03e-78a1-8716-cb82d70e28ac.jsonl",
+      "delegate_count": 12,
+      "observation_scope": "timestamp-window; concurrent sessions in the same window may contribute observations",
+      "observations": 1203,
+      "pretool_calls": 637,
+      "recommendations": [
+        "prefer path-visible tool calls or narrower shell commands; this stream is Bash-dominated",
+        "inspect native-hook delegate fallbacks; the fast path should own routine calls"
+      ],
+      "status": "WARN",
+      "steps": 197,
       "stop_blocks": 0,
       "stop_failures_total": 0,
       "stream_path": ".dos/streams/019eff2b-c03e-78a1-8716-cb82d70e28ac.jsonl",
       "thread_id": "019eff2b-c03e-78a1-8716-cb82d70e28ac",
       "tool_counts": {
-        "Bash": 135
+        "Bash": 197
       },
       "unknown_tree_admission_warnings": 0,
       "unknown_tree_warning_rate": 0.0,
-      "window_end": "2026-06-25T14:43:55Z",
+      "window_end": "2026-06-25T14:50:18Z",
       "window_start": "2026-06-25T14:25:43Z"
     },
     {
@@ -585,31 +622,6 @@
       "unknown_tree_warning_rate": 0.308628,
       "window_end": "2026-06-25T13:31:46Z",
       "window_start": "2026-06-25T08:49:29Z"
-    },
-    {
-      "codex_session_file": "rollout-2026-06-25T02-02-26-019efe04-2aa3-72f1-8aee-f5aa0e2b3538.jsonl",
-      "delegate_count": 72,
-      "observation_scope": "timestamp-window; concurrent sessions in the same window may contribute observations",
-      "observations": 20517,
-      "pretool_calls": 10398,
-      "recommendations": [
-        "prefer path-visible tool calls or narrower shell commands; this stream is Bash-dominated",
-        "reduce opaque shell/editor calls or file upstream footprint-derivation debt",
-        "inspect native-hook delegate fallbacks; the fast path should own routine calls"
-      ],
-      "status": "WARN",
-      "steps": 476,
-      "stop_blocks": 0,
-      "stop_failures_total": 0,
-      "stream_path": ".dos/streams/019efe04-2aa3-72f1-8aee-f5aa0e2b3538.jsonl",
-      "thread_id": "019efe04-2aa3-72f1-8aee-f5aa0e2b3538",
-      "tool_counts": {
-        "Bash": 476
-      },
-      "unknown_tree_admission_warnings": 3794,
-      "unknown_tree_warning_rate": 0.364878,
-      "window_end": "2026-06-25T10:29:21Z",
-      "window_start": "2026-06-25T09:04:04Z"
     },
     {
       "codex_session_file": "rollout-2026-06-25T01-27-31-019efde4-32f6-7b22-9e5b-1ccddb6c3987.jsonl",
@@ -691,17 +703,17 @@
   "since_days": 7,
   "status": "WARN",
   "summary": {
-    "delegate_count": 602,
-    "observations": 175433,
-    "pretool_calls": 89167,
-    "steps": 4566,
+    "delegate_count": 664,
+    "observations": 183425,
+    "pretool_calls": 93107,
+    "steps": 4692,
     "stop_blocks": 0,
     "stop_failures_total": 0,
     "tool_counts": {
-      "Bash": 4566
+      "Bash": 4692
     },
     "unknown_tree_admission_warnings": 28963,
-    "unknown_tree_warning_rate": 0.324817,
+    "unknown_tree_warning_rate": 0.311072,
     "unknown_tree_warning_threshold": 0.02,
     "warned_sessions": 10
   },

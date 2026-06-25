@@ -12,7 +12,7 @@ and OpenAI/Codex. It is a status artifact, not a shipped-claims ledger; quote
 | `fak guard` default audit journal | PASS | `cmd/fak/guard_test.go::TestGuardAuditPlan`, `TestGuardDefaultAuditPath`, and `TestGuardEnableAuditEnablesVerifiableTrail` prove the decision journal defaults to an on-disk hash-chained trail unless explicitly opted out. |
 | MCP stdio kernel tools | PASS | `experiments/agent-live/codex-dogfood-019efde3-6794-7401-93a1-e97e6bd72a9c.json` records `mcp_stdio_adjudication.status=PASS`, expected tools present, `git_push` denied as `POLICY_BLOCK`, and `git_status` allowed. |
 | Historical Codex/DOS sessions | PASS with residual debt | `experiments/agent-live/codex-dos-recent-audit.json` audits 10 recent Codex sessions. Overall audit remains `WARN` because the historical window contains host-shell opacity and unknown-tree warnings, but `actionability.status=PASS` after structured git deny probes. |
-| Historical git writes after mitigation | PASS | Expected-deny reports for `git_add`, `git_commit`, and `git_push` prove at `2026-06-25T14:28:11.173213Z`. The post-gate lens shows no `git_write` family after that proof, so earlier opaque git writes are classified as `HISTORICAL_GIT_WRITE_BEFORE_STRUCTURED_GATE`, not current actionability. |
+| Historical git writes after mitigation | PASS | Expected-deny reports for `git_add`, `git_commit`, and `git_push` prove at `2026-06-25T14:51:04.727080Z`. The post-gate lens shows no `git_write` family after that proof, so earlier opaque git writes are classified as `HISTORICAL_GIT_WRITE_BEFORE_STRUCTURED_GATE`, not current actionability. |
 | Claude Code live session | PASS | `experiments/agent-live/claude-code-fak-guard-live-pilot-2026-06-25.json` records a live Claude Code turn where `rm -rf ./.fak-live-pilot-sentinel-do-not-exist` was denied (`POLICY_BLOCK`) and a later same-session `echo fak-claude-live-pilot-ok` was allowed. |
 | OpenAI/Codex MCP live session | PASS | `experiments/agent-live/codex-mcp-fak-live-pilot-2026-06-25.json` records a Codex CLI MCP turn where `fak_adjudicate(git_push)` denied `POLICY_BLOCK` and the same turn continued with allowed `fak_adjudicate(git_status, read_only=true)`. |
 | OpenAI Agents guardrail adapter | PASS | `examples/openai-agents-guardrail/demo.py` starts `fak serve`, blocks `git_push` before execution, allows `git_status`, admits the clean result, and quarantines a poisoned `web_fetch` result. Latest local run returned `summary: PASS`; captured expected output is in `examples/openai-agents-guardrail/EXAMPLE-OUTPUT.md`. |
@@ -60,5 +60,7 @@ python tools\codex_dos_recent_audit.py `
   --max-delegates 0
 ```
 
-The two live pilot JSON files carry raw-capture hashes but require the same vendor
-credentials and local client setup to re-run.
+The live pilot JSON files carry raw-capture hashes or sanitized hosted-response
+metadata, but the vendor-session artifacts require the same credentials and local
+client setup to re-run. The hosted OpenAI pilot additionally requires
+`OPENAI_API_KEY` to produce a PASS artifact instead of `BLOCKED_ENV`.
