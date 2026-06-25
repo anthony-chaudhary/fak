@@ -567,5 +567,35 @@ class MainCliTests(unittest.TestCase):
             self.assertEqual(out.getvalue().strip(), "")
 
 
+class ProjectSlugTests(unittest.TestCase):
+    """project_slug must match the Claude Code harness slug rule EXACTLY -- every
+    non-alphanumeric char becomes '-' -- so a re-home copy lands where `claude --resume`
+    looks AND under the same slug sync_memory uses for the memory store. The earlier
+    `[\\/:.]` form diverged on a cwd containing a space/'@'/etc., landing the copy at a
+    slug claude never reads (a silent 404 from that folder)."""
+
+    def test_fak_path_unchanged(self) -> None:
+        # Regression: the common case must be byte-identical to before the broadening.
+        self.assertEqual(resume_resolver.project_slug(r"C:\work\fak"), "C--work-fak")
+
+    def test_space_and_punctuation_normalized(self) -> None:
+        # The case the narrow [\\/:.] form got WRONG: a space and '@' were passed through.
+        self.assertEqual(
+            resume_resolver.project_slug(r"C:\work\my app@2"), "C--work-my-app-2")
+        # tilde / parens likewise collapse to '-'
+        self.assertEqual(
+            resume_resolver.project_slug(r"C:\work\foo (bar)~x"), "C--work-foo--bar--x")
+
+    def test_agrees_with_sync_memory_slug(self) -> None:
+        # Pin the drift class permanently: the resolver's slug and the one sync_memory
+        # derives for the memory store must AGREE on a punctuated path, or a re-home
+        # lands the transcript and the memory under two different slugs.
+        import re
+        import sync_memory  # noqa: F401  (its default_home_memory inlines the harness rule)
+        for p in (r"C:\work\fak", r"C:\work\my app@2", r"C:\Users\USER\AppData\Local\x.y"):
+            harness_slug = re.sub(r"[^A-Za-z0-9]", "-", p)  # the rule sync_memory uses
+            self.assertEqual(resume_resolver.project_slug(p), harness_slug)
+
+
 if __name__ == "__main__":
     unittest.main()

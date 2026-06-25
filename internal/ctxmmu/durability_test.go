@@ -10,7 +10,7 @@ import (
 )
 
 // TestClassifyDurabilityViaAdmit pins the rung-1 write-time durability classifier
-// (S7, issue #498) through the SHIPPED gate: MMU.Admit stamps the class on the OPEN
+// (S7, issue #82) through the SHIPPED gate: MMU.Admit stamps the class on the OPEN
 // Verdict.Meta map, orthogonal to the trust Kind, with no ABI/golden-freeze cost.
 func TestClassifyDurabilityViaAdmit(t *testing.T) {
 	ctx := context.Background()
@@ -67,6 +67,41 @@ func TestClassifyDurabilityViaAdmit(t *testing.T) {
 				t.Fatalf("durability of %q: want %q, got %q", tc.body, tc.want, got)
 			}
 		})
+	}
+}
+
+// TestClassifyTextAgreesWithAdmitPath proves the exported chat-shaped wrapper runs the
+// SAME rung-1 prior as the admit path: a budget-reset carryover builder calling
+// ClassifyText on a transcript line gets the identical verdict MMU.Admit would stamp on
+// the same words — "it's 3pm" => turn (dropped on reset), "I prefer afternoons" =>
+// durable (kept on reset) — so the reset reuses the shipped classifier, not a fork.
+func TestClassifyTextAgreesWithAdmitPath(t *testing.T) {
+	ctx := context.Background()
+	cases := []struct {
+		role, content, want string
+	}{
+		{"user", "it's 3pm", ctxmmu.DurabilityTurn},
+		{"user", "the build is currently running", ctxmmu.DurabilityTurn},
+		{"user", "I prefer to work in the afternoon", ctxmmu.DurabilityDurable},
+		{"assistant", "the user prefers afternoons", ctxmmu.DurabilityDurable},
+		{"user", "my name is Ada", ctxmmu.DurabilityDurable},
+		{"user", "today's task is the durability gate", ctxmmu.DurabilitySession},
+		{"tool", "row 42 = 17", ctxmmu.DurabilityTurn}, // unmatched => fail-closed turn
+	}
+	for _, tc := range cases {
+		// ClassifyText verdict...
+		got := ctxmmu.ClassifyText(tc.role, tc.content)
+		if got != tc.want {
+			t.Fatalf("ClassifyText(%q) = %q, want %q", tc.content, got, tc.want)
+		}
+		// ...must equal the admit-path verdict on the identical bytes.
+		m := ctxmmu.New()
+		c := &abi.ToolCall{Tool: "x"}
+		r := &abi.Result{Call: c, Status: abi.StatusOK, Payload: abi.Ref{Kind: abi.RefInline, Inline: []byte(tc.content)}}
+		v := m.Admit(ctx, c, r)
+		if admit := v.Meta[ctxmmu.DurabilityKey]; admit != got {
+			t.Fatalf("ClassifyText(%q)=%q disagrees with admit-path %q", tc.content, got, admit)
+		}
 	}
 }
 

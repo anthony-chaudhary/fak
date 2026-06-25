@@ -146,6 +146,32 @@ type Config struct {
 	// into a live operator surface). Nil disables the route. Injected by cmd/fak so
 	// this package stays session-internals-blind, mirroring ObserveSession.
 	ListSessions SessionListFunc
+	// DecideSession gates one served request at its session boundary. It is the
+	// mutating hot-path twin of ObserveSession: the host calls session.Table.Decide,
+	// so run-state refusal, TurnsLeft debit, budget exhaustion, and per-turn pace are
+	// applied before the model turn is served. Nil keeps the historical observe-only
+	// admission path.
+	DecideSession SessionDecideFunc
+	// DebitSession reports the just-served turn's token usage after the planner
+	// returns, so TokensLeft and the long-context budget can be debited from the
+	// live session table. Nil is a no-op for embedders that have not wired the
+	// session table.
+	DebitSession SessionDebitFunc
+	// ResetOnBudget is the OPT-IN "human-like reset": when a served session crosses
+	// its (context/output) token budget, instead of refusing the next request with a
+	// 409 + a passive reset directive, the host distills the transcript into a compact
+	// carryover seed, re-arms a fresh session, and the gateway splices the seed ahead
+	// of the live messages so the CLIENT'S next request just continues transparently.
+	// It is given the canonical transcript and returns the fresh trace id + the seed
+	// messages to prepend. ok=false (or a nil hook) falls back to the historical 409 +
+	// SessionResetDirective path verbatim — so the reset is strictly additive and the
+	// default behavior is unchanged. Injected by cmd/fak (fak serve --reset-on-budget).
+	ResetOnBudget ResetOnBudgetFunc
+	// DefaultTraceID is used when a proxied HTTP/MCP caller omits X-Trace-Id /
+	// trace_id. Empty preserves the historical process-unique gw-N mint. A stable
+	// value lets wrapped CLIs that do not expose trace headers still share one
+	// operator-addressable session budget.
+	DefaultTraceID string
 	// Logf is the structured log sink (default: stderr). MCP-over-stdio sets this
 	// to stderr so protocol bytes on stdout are never corrupted.
 	Logf func(format string, args ...any)
@@ -169,6 +195,15 @@ type Config struct {
 	// streaming fast-path bypasses this hook; the buffered turn path (the canonical path
 	// all three wires route through s.complete) is what gets planned.
 	CtxViewBudget int
+	// CompactHistoryBudget, when > 0, wires the cache-prefix-preserving history rewrite
+	// into the flagship `fak guard -- claude` Anthropic PASSTHROUGH (where CtxViewBudget
+	// cannot reach, because that route forwards req.Raw byte-for-byte — the deferred #555
+	// req.Raw step). Each turn the OUTBOUND body is compacted so OLD whole turns beyond the
+	// cache_control prefix are dropped to this resident-token budget, while the cached
+	// prefix bytes are copied VERBATIM so the upstream cache hit survives (see
+	// agent.CompactAnthropicHistory). 0 (the default) leaves the body byte-for-byte
+	// unchanged. Anthropic passthrough only; it is an inert no-op on every other wire.
+	CompactHistoryBudget int
 	// RouteManifest, when non-nil, makes the gateway classify each fak_syscall tool
 	// call into a modelroute.Subject and route it: for a single-model (PICK) plan the
 	// chosen model id is written to abi.ToolCall.Engine BEFORE Submit, so the kernel
@@ -232,20 +267,25 @@ type TraceResetResponse struct {
 // the monotonic revision the table bumps on every write; a client may round-trip it
 // as if_rev to reject a stale clobber (optimistic concurrency).
 type SessionState struct {
-	TraceID  string        `json:"trace_id"`
-	Run      string        `json:"run"`
-	Budget   SessionBudget `json:"budget"`
-	Priority int           `json:"priority"`
-	Pace     SessionPace   `json:"pace"`
-	Reason   string        `json:"reason,omitempty"`
-	Rev      uint64        `json:"rev"`
+	TraceID        string        `json:"trace_id"`
+	Run            string        `json:"run"`
+	Budget         SessionBudget `json:"budget"`
+	Priority       int           `json:"priority"`
+	Pace           SessionPace   `json:"pace"`
+	Reason         string        `json:"reason,omitempty"`
+	ContinuationID string        `json:"continuation_id,omitempty"`
+	ParentTrace    string        `json:"parent_trace,omitempty"`
+	Generation     int           `json:"generation,omitempty"`
+	Rev            uint64        `json:"rev"`
 }
 
-// SessionBudget is the wire form of internal/session.Budget. Either axis at -1
-// (session.Unbounded) means no cap on that axis.
+// SessionBudget is the wire form of internal/session.Budget. TurnsLeft/TokensLeft
+// at -1 (session.Unbounded) mean no cap; ContextTokensLeft uses 0 as off and a
+// positive value as the long-window reset budget.
 type SessionBudget struct {
-	TurnsLeft  int `json:"turns_left"`
-	TokensLeft int `json:"tokens_left"`
+	TurnsLeft         int `json:"turns_left"`
+	TokensLeft        int `json:"tokens_left"`
+	ContextTokensLeft int `json:"context_tokens_left,omitempty"`
 }
 
 // SessionPace is the wire form of internal/session.Pace. Zero on either axis means
@@ -284,6 +324,49 @@ type SessionObserveFunc func(context.Context, string) SessionState
 // refusal, not a client error.
 type SessionControlFunc func(ctx context.Context, traceID, verb string, req SessionControlRequest) (SessionState, bool, error)
 
+// SessionVerdict is the gateway wire-neutral projection of session.Verdict. The
+// gateway intentionally carries only primitive fields so it stays decoupled from
+// internal/session while still applying the table's mutating Decide semantics on the
+// served request path.
+type SessionVerdict struct {
+	Proceed   bool
+	MaxTokens int
+	MinGapMs  int
+	State     SessionState
+	Stop      bool
+	Reason    string
+}
+
+// SessionDecideFunc is injected by the host CLI to run session.Table.Decide for one
+// served request boundary. It returns a SessionVerdict instead of importing
+// internal/session into gateway.
+type SessionDecideFunc func(ctx context.Context, traceID string) SessionVerdict
+
+// SessionUsage is the gateway's session-table-neutral token accounting for one
+// served request. CompletionTokens debits the historical output budget; ContextTokens
+// is the provider-normalized prompt/context window for the long-session reset budget.
+type SessionUsage struct {
+	PromptTokens             int `json:"prompt_tokens,omitempty"`
+	CompletionTokens         int `json:"completion_tokens,omitempty"`
+	ContextTokens            int `json:"context_tokens,omitempty"`
+	CacheReadInputTokens     int `json:"cache_read_input_tokens,omitempty"`
+	CacheCreationInputTokens int `json:"cache_creation_input_tokens,omitempty"`
+}
+
+// SessionDebitFunc is injected by the host CLI to run session.Table.DebitUsage with
+// the token usage reported after a served request finishes.
+type SessionDebitFunc func(ctx context.Context, traceID string, usage SessionUsage) SessionState
+
+// ResetOnBudgetFunc is the host's budget-reset action (Config.ResetOnBudget). Given
+// the budget-drained session's trace and its canonical transcript, the host builds
+// the carryover seed (durable facts + task recap + warm-prefix + verbatim tail), calls
+// session.Table.Recontinue to re-arm a fresh session, and returns the fresh trace id
+// plus the seed messages the gateway prepends to the live request. ok=false means the
+// host declined to reset (not a budget-reset reason, or no carryover) — the gateway
+// then falls back to the historical refusal. The gateway stays session-internals-blind:
+// it never imports internal/session or internal/sessionreset; the host owns both.
+type ResetOnBudgetFunc func(ctx context.Context, trace string, messages []agent.Message) (newTrace string, seed []agent.Message, ok bool)
+
 // Server is a configured, ready-to-serve gateway. Construct with New; serve with
 // Handler()/ListenAndServe (HTTP) or ServeStdio (MCP over stdin/stdout).
 type Server struct {
@@ -302,6 +385,10 @@ type Server struct {
 	observeSession SessionObserveFunc
 	controlSession SessionControlFunc
 	listSessions   SessionListFunc
+	decideSession  SessionDecideFunc
+	debitSession   SessionDebitFunc
+	resetOnBudget  ResetOnBudgetFunc
+	defaultTraceID string
 
 	// startup is the one-time boot timeline (start -> ready, per-phase costs),
 	// exposed as fak_gateway_startup_* gauges. See startup.go.
@@ -322,6 +409,22 @@ type Server struct {
 	// turn's history into an O(1) resident view (issue #555). nil (CtxViewBudget == 0)
 	// leaves the forwarded history untouched; maybePlanMessages is an inert identity then.
 	ctxView *agent.CtxViewPlanner
+
+	// sessionPlanners holds ONE persistent agent.SessionPlanner per session trace id, so
+	// the live ctxplan path maintains an incremental index across a conversation's turns
+	// (O(c·N) cumulative) instead of rebuilding the lossless store and full-scanning every
+	// turn (the stateless CtxViewPlanner.RenderTurn path, O(N²)). nil/empty until ctxView
+	// is enabled; minted lazily by sessionPlannerFor and bounded so it cannot grow without
+	// limit. Guarded by sessionPlannerMu. The two paths are output-equivalent (proven by
+	// agent.TestSessionPlannerBoundedMatchesStatelessFullScan), so this only changes COST.
+	sessionPlannerMu sync.Mutex
+	sessionPlanners  map[string]*agent.SessionPlanner
+
+	// compactHistoryBudget mirrors Config.CompactHistoryBudget: when > 0 the flagship
+	// Anthropic passthrough compacts OLD turns in the OUTBOUND body to this resident-token
+	// budget while preserving the cached-prefix bytes (agent.CompactAnthropicHistory). 0
+	// (the default) leaves the body byte-for-byte unchanged.
+	compactHistoryBudget int
 
 	// pinUpstreamCredential, when set, makes the Anthropic passthrough authenticate
 	// upstream with the planner's OWN configured credential and ignore the inbound
@@ -463,27 +566,32 @@ func New(cfg Config) (*Server, error) {
 	}
 
 	return &Server{
-		k:              k,
-		engineID:       engineID,
-		model:          model,
-		requireKey:     cfg.RequireKey,
-		version:        version,
-		logf:           logf,
-		reloadPolicy:   cfg.ReloadPolicy,
-		resetTrace:     cfg.ResetTrace,
-		observeTrace:   cfg.ObserveTrace,
-		observeSession: cfg.ObserveSession,
-		controlSession: cfg.ControlSession,
-		listSessions:   cfg.ListSessions,
-		startup:        startup,
-		planner:        planner,
-		engineCache:    remoteCache,
-		ctxView:        ctxView,
-		cacheStream:    cacheStream,
-		rungObs:        rungObs,
-		feed:           newCoherenceFeed(0),
-		metrics:        newGatewayMetrics(time.Now()),
-		route:          cfg.RouteManifest,
+		k:                    k,
+		engineID:             engineID,
+		model:                model,
+		requireKey:           cfg.RequireKey,
+		version:              version,
+		logf:                 logf,
+		reloadPolicy:         cfg.ReloadPolicy,
+		resetTrace:           cfg.ResetTrace,
+		observeTrace:         cfg.ObserveTrace,
+		observeSession:       cfg.ObserveSession,
+		controlSession:       cfg.ControlSession,
+		listSessions:         cfg.ListSessions,
+		decideSession:        cfg.DecideSession,
+		debitSession:         cfg.DebitSession,
+		resetOnBudget:        cfg.ResetOnBudget,
+		defaultTraceID:       strings.TrimSpace(cfg.DefaultTraceID),
+		startup:              startup,
+		planner:              planner,
+		engineCache:          remoteCache,
+		ctxView:              ctxView,
+		compactHistoryBudget: cfg.CompactHistoryBudget,
+		cacheStream:          cacheStream,
+		rungObs:              rungObs,
+		feed:                 newCoherenceFeed(0),
+		metrics:              newGatewayMetrics(time.Now()),
+		route:                cfg.RouteManifest,
 
 		pinUpstreamCredential: cfg.PinUpstreamCredential,
 	}, nil
@@ -603,6 +711,20 @@ func (s *Server) complete(ctx context.Context, messages []agent.Message, tools [
 		return nil, err
 	}
 	s.metrics.observeInference(comp.Usage.PromptTokens, comp.Usage.CompletionTokens, comp.Usage.CachedPromptTokens(), comp.FinishReason, dur)
+	return comp, nil
+}
+
+// completeServed is complete plus the served-session usage debit. The request
+// boundary has already called beginServedSessionTurn (and therefore Decide); after a
+// successful planner response the provider usage is finally known, so debit the
+// output/context budgets here. Planner errors keep the old behavior: no usage was
+// reported, so there is nothing to debit beyond the turn admission already taken.
+func (s *Server) completeServed(ctx context.Context, turn servedSessionTurn, messages []agent.Message, tools []agent.ToolDef, opts ...agent.SampleOpt) (*agent.Completion, error) {
+	comp, err := s.complete(ctx, messages, tools, opts...)
+	if err != nil {
+		return nil, err
+	}
+	s.debitServedSessionTurn(ctx, turn, comp.Usage)
 	return comp, nil
 }
 
@@ -935,8 +1057,12 @@ func boolLabel(b bool) string {
 // one so the result-side IFC ledger + plan-CFI never collapse distinct served
 // sessions onto the empty-string default trace.
 func (s *Server) traceFor(traceID string) string {
+	traceID = strings.TrimSpace(traceID)
 	if traceID != "" {
 		return traceID
+	}
+	if s.defaultTraceID != "" {
+		return s.defaultTraceID
 	}
 	return "gw-" + itoa(atomic.AddUint64(&s.traceSeq, 1))
 }

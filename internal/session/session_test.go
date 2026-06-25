@@ -194,6 +194,88 @@ func TestDecideTokenBudgetExhaustion(t *testing.T) {
 	}
 }
 
+func TestContextBudgetMintsContinuationAndDrains(t *testing.T) {
+	tbl := NewTable()
+	tbl.SetBudget("s", Budget{TurnsLeft: Unbounded, TokensLeft: Unbounded, ContextTokensLeft: 150})
+
+	st := tbl.DebitUsage("s", Usage{ContextTokens: 151})
+	if st.Run != Draining || st.Reason != ReasonBudgetContext || st.ContinuationID == "" {
+		t.Fatalf("context debit state = %+v, want draining %s with continuation id", st, ReasonBudgetContext)
+	}
+	if st.Budget.ContextTokensLeft != 0 {
+		t.Fatalf("context budget left = %d, want 0 after exhaustion", st.Budget.ContextTokensLeft)
+	}
+
+	v := tbl.Decide("s")
+	if v.Proceed || !v.Stop || v.Reason != ReasonBudgetContext || v.State.Run != Stopped {
+		t.Fatalf("post-context-exhaustion Decide = %+v, want stopped %s", v, ReasonBudgetContext)
+	}
+	if v.State.ContinuationID != st.ContinuationID {
+		t.Fatalf("continuation changed across drain boundary: %q -> %q", st.ContinuationID, v.State.ContinuationID)
+	}
+}
+
+// TestRecontinueReArmsDrainedSessionOnFreshTrace proves the human-like reset: a
+// budget-drained session is re-armed under its continuation id with a clean budget,
+// the fresh session is live with the lineage recorded, and the drained PARENT record
+// is left intact (the exhaustion event stays observable, never resurrected in place).
+func TestRecontinueReArmsDrainedSessionOnFreshTrace(t *testing.T) {
+	tbl := NewTable()
+	tbl.SetBudget("s", Budget{TurnsLeft: Unbounded, TokensLeft: Unbounded, ContextTokensLeft: 150})
+	drained := tbl.DebitUsage("s", Usage{ContextTokens: 151}) // -> Draining + continuation id
+	if v := tbl.Decide("s"); v.State.Run != Stopped {         // take the drain to terminal
+		t.Fatalf("expected stopped parent, got %+v", v)
+	}
+	child := drained.ContinuationID
+	if child == "" {
+		t.Fatalf("no continuation id minted to recontinue onto")
+	}
+
+	fresh := tbl.Recontinue("s", child, Budget{TurnsLeft: Unbounded, TokensLeft: Unbounded, ContextTokensLeft: 150})
+	if fresh.TraceID != child || fresh.Run != Running {
+		t.Fatalf("fresh session = %+v, want running under %q", fresh, child)
+	}
+	if fresh.ParentTrace != "s" || fresh.Generation != 1 || fresh.Reason != ReasonBudgetReset {
+		t.Fatalf("lineage = parent=%q gen=%d reason=%q, want s/1/%s", fresh.ParentTrace, fresh.Generation, fresh.Reason, ReasonBudgetReset)
+	}
+	if fresh.Budget.ContextTokensLeft != 150 {
+		t.Fatalf("fresh context budget = %d, want re-armed to 150", fresh.Budget.ContextTokensLeft)
+	}
+	// The fresh session advances; the drained parent stays Stopped (not revived).
+	if v := tbl.Decide(child); !v.Proceed {
+		t.Fatalf("re-armed session must proceed, got %+v", v)
+	}
+	if parent := tbl.Get("s"); parent.Run != Stopped {
+		t.Fatalf("parent must remain stopped after recontinue, got %+v", parent)
+	}
+	// A SECOND reset chains the generation off the live child.
+	gen2 := tbl.Recontinue(child, "win-2", Budget{TurnsLeft: Unbounded, TokensLeft: Unbounded, ContextTokensLeft: 150})
+	if gen2.Generation != 2 || gen2.ParentTrace != child {
+		t.Fatalf("second recontinue = gen=%d parent=%q, want 2/%q", gen2.Generation, gen2.ParentTrace, child)
+	}
+}
+
+// TestSetBudgetStillRefusesTerminal is the no-regression guard: the existing control
+// verb must NOT be the reset path — a stopped session still rejects a live SetBudget,
+// so Recontinue (a new trace) is the only way to continue past a budget drain.
+func TestSetBudgetStillRefusesTerminal(t *testing.T) {
+	tbl := NewTable()
+	tbl.Transition("s", Stopped, ReasonBudgetContext)
+	if _, ok := tbl.SetBudget("s", Budget{TurnsLeft: 5}); ok {
+		t.Fatalf("SetBudget on a terminal session must refuse (ok=false)")
+	}
+}
+
+// TestRecontinueNilTableMintsDetachedChild proves the nil-receiver path is a sane
+// no-op-permissive default (a loop with no table still gets a usable fresh child).
+func TestRecontinueNilTableMintsDetachedChild(t *testing.T) {
+	var tbl *Table
+	fresh := tbl.Recontinue("parent", "child", Budget{TurnsLeft: 3})
+	if fresh.TraceID != "child" || fresh.ParentTrace != "parent" || fresh.Reason != ReasonBudgetReset {
+		t.Fatalf("nil-table recontinue = %+v, want detached child with lineage", fresh)
+	}
+}
+
 func TestDebitIgnoresTerminalAndUnbounded(t *testing.T) {
 	tbl := NewTable()
 	// Unbounded token axis: Debit is a no-op on the budget.

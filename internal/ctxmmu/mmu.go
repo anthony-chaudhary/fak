@@ -177,7 +177,7 @@ func (m *MMU) Admit(ctx context.Context, c *abi.ToolCall, r *abi.Result) abi.Ver
 		}
 	}
 	// The result survived the screen — classify its WRITE-TIME DURABILITY (S7 rung 1,
-	// issue #496) and carry the class on the OPEN Verdict.Meta map so the durable
+	// issue #82) and carry the class on the OPEN Verdict.Meta map so the durable
 	// boundary downstream (recall's promotion gate) can refuse non-durable facts. The
 	// tag is orthogonal to the trust Kind and additive over the frozen ABI, exactly
 	// like the quarantine_id stamp above (mmu.go:107). A Quarantine verdict (returned
@@ -498,7 +498,7 @@ func ScreenBytes(body []byte) (abi.ReasonCode, bool) {
 }
 
 // ---------------------------------------------------------------------------
-// Write-time durability classification (S7 rung 1 — issue #496).
+// Write-time durability classification (S7 rung 1 — issue #82).
 //
 // The write gate decides WHETHER a result may enter context; it never decided HOW
 // LONG it should be believed. classifyDurability assigns a result a durability class
@@ -558,6 +558,23 @@ func classifyDurability(c *abi.ToolCall, body []byte) string {
 	default:
 		return DurabilityTurn
 	}
+}
+
+// ClassifyText is the exported, chat-message-shaped entry to the SAME rung-1
+// durability prior classifyDurability runs over tool-result bytes — it lets a caller
+// outside the admit path (e.g. a budget-reset carryover builder that must decide which
+// transcript lines a fresh session keeps) reuse the shipped tense/deixis classifier
+// instead of reinventing it. It runs the identical durableFrame/sessionFrame/turnFrame
+// priors over the message text and fails closed to turn, so "it's 3pm" => turn and "I
+// prefer afternoons" => durable, exactly as the admit path classifies the same words.
+//
+// It takes the message text only (no tool call): a chat line has no producing tool,
+// and classifyDurability's tool argument is reserved/unused at rung 1. role is accepted
+// for forward compatibility (a future prior may weight assistant vs user vs system text)
+// but does not change the rung-1 verdict.
+func ClassifyText(role, content string) string {
+	_ = role // reserved: a future prior may weight by author; rung 1 is text-only
+	return classifyDurability(nil, []byte(content))
 }
 
 func putJSON(ctx context.Context, v any) (abi.Ref, bool) {

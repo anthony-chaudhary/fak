@@ -44,6 +44,7 @@ FLEET_DIR = os.path.dirname(HERE)
 if HERE not in sys.path:
     sys.path.insert(0, HERE)
 import fleet_session_signals  # noqa: E402  -- shared limit/auth banner detection
+import memory_cotravel  # noqa: E402  -- carry the slug-scoped memory store on re-home
 
 
 def _env_flag(name: str) -> bool:
@@ -201,6 +202,17 @@ def rehome_transcript(src_cfg: str, dst_cfg: str, project: str, sid: str,
                 shutil.copytree(side, os.path.join(dst_dir, sid), dirs_exist_ok=True)
             except Exception:
                 pass
+        # Carry the slug-scoped agent-memory store too, so the resumed session is not
+        # amnesic on the target account. The SOURCE memory is the owner's original slug
+        # (``project``); the DEST is this destination ``slug`` (== project for the owner
+        # slug, or the launching cwd slug for a cross-dir resume). Gated by
+        # FAK_MEMORY_COTRAVEL (default ``shadow``: decide + ledger, copy nothing) and
+        # the FAK_MEMORY_MERGE strategy (default ``additive``: never clobber a dest
+        # memory). Fail-open: any error inside is swallowed there, never crashing here.
+        try:
+            memory_cotravel.cotravel_memory(src_cfg, dst_cfg, project, sid, dst_slug=slug)
+        except Exception:
+            pass
     return copied_any
 
 

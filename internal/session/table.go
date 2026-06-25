@@ -259,3 +259,39 @@ func (t *Table) CompareAndSet(trace string, expectRev uint64, want State) (State
 	want.TraceID = trace
 	return t.putLocked(want), true
 }
+
+// Recontinue re-arms a budget-drained session under a FRESH trace (its continuation
+// id), carrying a clean budget — the "human-like reset" write. It is the one verb
+// that may follow a terminal budget exhaustion: the parent session stays Stopped
+// (its closed Reason preserved for audit), and a NEW live session is minted under
+// child, linked back via ParentTrace with Generation incremented from the parent.
+// This is deliberately NOT SetBudget (which refuses a terminal session — you do not
+// un-stop one) and NOT Reset (which deletes the record): the parent's drained record
+// is left intact so the budget-exhaustion event stays observable, and the fresh
+// session is a new key, not a resurrection of the old one.
+//
+// The returned State is the fresh child (Running, fresh budget, ParentTrace=parent,
+// Generation=parent.Generation+1, Reason=ReasonBudgetReset, Rev 1). The parent trace
+// is left exactly as the budget drain left it. A nil receiver mints a detached
+// default child (no table to record into) so a loop with no table behaves sanely.
+func (t *Table) Recontinue(parent, child string, fresh Budget) State {
+	if t == nil {
+		st := DefaultState(child)
+		st.Budget = fresh
+		st.ParentTrace = parent
+		st.Reason = ReasonBudgetReset
+		return st
+	}
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	prevGen := t.getLocked(parent).Generation
+	next := State{
+		TraceID:     child,
+		Run:         Running,
+		Budget:      fresh,
+		ParentTrace: parent,
+		Generation:  prevGen + 1,
+		Reason:      ReasonBudgetReset,
+	}
+	return t.putLocked(next)
+}

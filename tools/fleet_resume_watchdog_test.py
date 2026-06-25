@@ -183,6 +183,85 @@ def test_manual_override_is_authoritative():
     assert blocked and "operator" in why.lower()
 
 
+def _setenv(**kv):
+    """Set env vars for the duration of a test, returning a restore callable. Used for the
+    memory-cotravel gate, which memory_cotravel reads at CALL time (so it must be live when
+    rehome_transcript runs -- _reload restores env before returning, which would unset it)."""
+    saved = {k: os.environ.get(k) for k in kv}
+    for k, v in kv.items():
+        if v is None:
+            os.environ.pop(k, None)
+        else:
+            os.environ[k] = v
+
+    def restore():
+        for k, v in saved.items():
+            if v is None:
+                os.environ.pop(k, None)
+            else:
+                os.environ[k] = v
+    return restore
+
+
+def test_rehome_co_travels_memory_when_live(tmp_path):
+    """End-to-end: rehome_transcript carries the slug-scoped memory store, not just the
+    transcript. Forced to the `live` gate so the copy is observable; the additive
+    strategy keeps a conflicting dest memory. Proves the switcher<->memory seam is wired
+    through the ONE canonical copy primitive both resume paths call."""
+    wd = _reload({})
+    restore = _setenv(FAK_MEMORY_COTRAVEL="live", FAK_MEMORY_MERGE="additive",
+                      FAK_MEMORY_COTRAVEL_LEDGER=str(tmp_path / "led.jsonl"))
+    try:
+        sid = "11112222-3333-4444-5555-666677778888"
+        slug = "C--work-fak"
+        src_cfg = str(tmp_path / ".claude-A")
+        dst_cfg = str(tmp_path / ".claude-B")
+        # source: a transcript + a memory note under the owner slug
+        src_proj = os.path.join(src_cfg, "projects", slug)
+        src_mem = os.path.join(src_proj, "memory")
+        os.makedirs(src_mem, exist_ok=True)
+        with open(os.path.join(src_proj, sid + ".jsonl"), "w", encoding="utf-8") as f:
+            f.write('{"type":"user"}\n')
+        with open(os.path.join(src_mem, "learned.md"), "w", encoding="utf-8") as f:
+            f.write("hard-won fleet fact")
+
+        assert wd.rehome_transcript(src_cfg, dst_cfg, slug, sid) is True
+
+        dst_mem = os.path.join(dst_cfg, "projects", slug, "memory", "learned.md")
+        assert os.path.isfile(dst_mem), "memory must co-travel with the transcript on re-home"
+        assert open(dst_mem, encoding="utf-8").read() == "hard-won fleet fact"
+    finally:
+        restore()
+
+
+def test_rehome_default_shadow_does_not_copy_memory(tmp_path):
+    """With the default (shadow) gate, the transcript still re-homes but memory is only
+    OBSERVED -- copied nowhere. Confirms the feature ships safe-by-default."""
+    wd = _reload({})
+    restore = _setenv(FAK_MEMORY_COTRAVEL=None,  # unset -> default shadow
+                      FAK_MEMORY_COTRAVEL_LEDGER=str(tmp_path / "led.jsonl"))
+    try:
+        sid = "aaaa1111-2222-3333-4444-555566667777"
+        slug = "C--work-fak"
+        src_cfg = str(tmp_path / ".claude-A")
+        dst_cfg = str(tmp_path / ".claude-B")
+        src_proj = os.path.join(src_cfg, "projects", slug)
+        src_mem = os.path.join(src_proj, "memory")
+        os.makedirs(src_mem, exist_ok=True)
+        with open(os.path.join(src_proj, sid + ".jsonl"), "w", encoding="utf-8") as f:
+            f.write('{"type":"user"}\n')
+        with open(os.path.join(src_mem, "learned.md"), "w", encoding="utf-8") as f:
+            f.write("fact")
+
+        assert wd.rehome_transcript(src_cfg, dst_cfg, slug, sid) is True
+        # transcript landed, memory did NOT (shadow observes only)
+        assert os.path.isfile(os.path.join(dst_cfg, "projects", slug, sid + ".jsonl"))
+        assert not os.path.isfile(
+            os.path.join(dst_cfg, "projects", slug, "memory", "learned.md"))
+    finally:
+        restore()
+
+
 if __name__ == "__main__":
     import pytest
 

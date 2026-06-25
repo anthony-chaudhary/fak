@@ -108,23 +108,27 @@ func (s RunState) terminal() bool { return s == Stopped }
 
 // Unbounded is the sentinel for a budget axis with no limit (the v0.1 default — a
 // session runs until it ends on its own). A non-negative TurnsLeft/TokensLeft is a
-// real remaining allotment that Decide debits toward zero.
+// real remaining allotment that Decide/Debit debits toward zero; ContextTokensLeft
+// uses 0 as "not configured" and a positive value as the long-window reset budget.
 const Unbounded = -1
 
 // Budget is a session's remaining work allotment. Decide debits TurnsLeft by one
-// each turn and TokensLeft by the turn's reported usage; either hitting zero drives
-// the session to Draining (the budget-exhausted stop). An operator RE-SETS either
-// axis live — raising it (speed up / extend) or cutting it (slow down / the
-// priority-queue "let an urgent one pass" move). Unbounded (-1) means no limit.
+// each turn and TokensLeft/ContextTokensLeft by the turn's reported usage; hitting
+// a configured axis drives the session to Draining (the budget-exhausted stop). An
+// operator RE-SETS any axis live — raising it (speed up / extend) or cutting it
+// (slow down / the priority-queue "let an urgent one pass" move). Unbounded (-1)
+// means no limit for the turn/output axes; context 0 means off.
 type Budget struct {
-	TurnsLeft  int `json:"turns_left"`  // remaining model round-trips; Unbounded = no cap
-	TokensLeft int `json:"tokens_left"` // remaining output tokens; Unbounded = no cap
+	TurnsLeft         int `json:"turns_left"`                    // remaining model round-trips; Unbounded = no cap
+	TokensLeft        int `json:"tokens_left"`                   // remaining output tokens; Unbounded = no cap
+	ContextTokensLeft int `json:"context_tokens_left,omitempty"` // remaining prompt/context tokens; 0 = not configured
 }
 
 // unbounded reports whether an axis carries no limit. A negative value (canonically
 // Unbounded) is treated as no-cap, so an operator clearing a budget with -1 is safe.
 func (b Budget) turnsUnbounded() bool  { return b.TurnsLeft < 0 }
 func (b Budget) tokensUnbounded() bool { return b.TokensLeft < 0 }
+func (b Budget) contextBounded() bool  { return b.ContextTokensLeft > 0 }
 
 // Pace is the per-turn throttle — how to slow a session WITHOUT pausing it. It is
 // admission control's cooperative twin: lowering MaxTokensPerTurn gives a shared
@@ -144,13 +148,16 @@ type Pace struct {
 // the optimistic-concurrency guard a stale operator UI is checked against, and the
 // cursor a /v1/fak/changes stream of drive revisions would key on.
 type State struct {
-	TraceID  string   `json:"trace_id"`
-	Run      RunState `json:"run"`
-	Budget   Budget   `json:"budget"`
-	Priority int      `json:"priority"` // scheduling rank; lower yields first under contention
-	Pace     Pace     `json:"pace"`
-	Reason   string   `json:"reason,omitempty"` // closed token on Throttled/Stopped; "" otherwise
-	Rev      uint64   `json:"rev"`
+	TraceID        string   `json:"trace_id"`
+	Run            RunState `json:"run"`
+	Budget         Budget   `json:"budget"`
+	Priority       int      `json:"priority"` // scheduling rank; lower yields first under contention
+	Pace           Pace     `json:"pace"`
+	Reason         string   `json:"reason,omitempty"`          // closed token on Throttled/Stopped; "" otherwise
+	ContinuationID string   `json:"continuation_id,omitempty"` // fresh-window handoff id minted on context exhaustion
+	ParentTrace    string   `json:"parent_trace,omitempty"`    // the trace this session was re-continued FROM (Recontinue lineage)
+	Generation     int      `json:"generation,omitempty"`      // how many budget-reset re-continuations preceded this session (0 = original)
+	Rev            uint64   `json:"rev"`
 }
 
 // DefaultState is the drive a fresh/unseen session reads: Running, unbounded budget,

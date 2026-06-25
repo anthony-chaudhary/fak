@@ -139,12 +139,43 @@ func (s *Server) handleAnthropicMessages(w http.ResponseWriter, r *http.Request)
 	}
 	ctx := r.Context()
 	reqTrace := s.traceFor(r.Header.Get("X-Trace-Id"))
-	// Operator control: refuse a paused/draining/stopped session's next request (the
-	// proxy-path enforcement of /v1/fak/session). Fail-open when the route is disabled.
-	if ok, st := s.sessionAdmits(ctx, reqTrace); !ok {
-		writeSessionRefusal(w, st)
+	// Operator control / budget / pace at the served request boundary. With
+	// DecideSession wired this mutates the live session table (TurnsLeft debit,
+	// budget exhaustion, pace cap); without it the legacy observe-only admission guard
+	// still refuses paused/draining/stopped sessions.
+	sessionTurn, ok, canceled := s.beginServedSessionTurn(ctx, reqTrace)
+	if canceled {
 		return
 	}
+	if !ok {
+		// Budget drained: if the host wired the opt-in human-like reset, distill a
+		// carryover seed, re-arm a fresh session, and continue transparently on the
+		// new trace instead of refusing. Otherwise emit the historical 409 directive.
+		if newTrace, seed, reset := s.maybeResetOnBudget(ctx, sessionTurn.state, req.Messages); reset {
+			req.Messages = spliceSeed(seed, req.Messages)
+			reqTrace = newTrace
+			if sessionTurn, ok, canceled = s.beginServedSessionTurn(ctx, reqTrace); canceled {
+				return
+			}
+			if !ok { // the fresh session somehow refuses too — fall back, never loop
+				writeSessionRefusal(w, sessionTurn.state)
+				return
+			}
+		} else {
+			writeSessionRefusal(w, sessionTurn.state)
+			return
+		}
+	}
+	applySessionPaceToAnthropicRequest(req, sessionTurn)
+	// Cache-prefix-preserving history compaction (#555): on the Anthropic passthrough,
+	// shrink the OUTBOUND body's OLD turns to the configured resident-token budget while
+	// keeping the cached-prefix bytes verbatim, so a long conversation forwards far fewer
+	// uncached tokens upstream with the cache hit intact. OFF (identity) by default and on
+	// every non-passthrough wire. Applied to req.Raw ONLY — the decoded req.Messages the
+	// kernel adjudicates below are untouched, so the trust boundary is unchanged. Placed
+	// after the pace cap (which only ever rewrites the top-level max_tokens, never the
+	// cached message prefix) and before either passthrough consumer of req.Raw.
+	s.maybeCompactAnthropicRaw(req)
 	// In passthrough mode the upstream credential is the client's own (transparent
 	// hop) UNLESS the gateway pins its own (the subscription path). The inbound
 	// anthropic-beta is forwarded so the client's negotiated betas survive the hop.
@@ -171,7 +202,7 @@ func (s *Server) handleAnthropicMessages(w http.ResponseWriter, r *http.Request)
 		// is felt, not buffered away). It returns false only if the upstream stream never
 		// opened and nothing was written — then fall back to the buffered synth path,
 		// which is also the path for a local/mock upstream that cannot stream this wire.
-		if s.anthropicPassthrough() && s.streamAnthropicPassthroughLive(w, r, req, reqTrace, upstreamKey, upstreamBeta) {
+		if s.anthropicPassthrough() && s.streamAnthropicPassthroughLive(w, r, req, reqTrace, sessionTurn, upstreamKey, upstreamBeta) {
 			return
 		}
 		// For non-Anthropic upstreams that still support the generic planner streaming
@@ -180,14 +211,14 @@ func (s *Server) handleAnthropicMessages(w http.ResponseWriter, r *http.Request)
 		// same whole-turn adjudication gate below can run. A false return means either
 		// the planner cannot stream or the writer cannot flush, so the existing
 		// ping-then-synthesize fallback remains the behavior.
-		if s.streamAnthropicPlannerLive(w, r, req, reqTrace) {
+		if s.streamAnthropicPlannerLive(w, r, req, reqTrace, sessionTurn) {
 			return
 		}
-		s.streamAnthropicPending(w, r, req, reqTrace, upstreamKey, upstreamBeta)
+		s.streamAnthropicPending(w, r, req, reqTrace, sessionTurn, upstreamKey, upstreamBeta)
 		return
 	}
 
-	turn, err := s.completeAnthropicTurn(ctx, req, reqTrace, "", "", upstreamKey, upstreamBeta)
+	turn, err := s.completeAnthropicTurn(ctx, req, reqTrace, sessionTurn, "", "", upstreamKey, upstreamBeta)
 	if err != nil {
 		// Mirror the chat-completions posture: an upstream model failure is a gateway
 		// error, and the raw provider body must not cross the trust boundary.
@@ -211,6 +242,46 @@ func (s *Server) modelOr(reqModel string) string {
 		return reqModel
 	}
 	return s.model
+}
+
+func applySessionPaceToAnthropicRequest(req *agent.AnthropicMessagesRequest, turn servedSessionTurn) {
+	if req == nil {
+		return
+	}
+	cap := turn.maxTokensFor(req.MaxTokens)
+	if cap <= 0 || cap == req.MaxTokens {
+		return
+	}
+	req.MaxTokens = cap
+	if len(req.Raw) == 0 {
+		return
+	}
+	var obj map[string]json.RawMessage
+	if err := json.Unmarshal(req.Raw, &obj); err != nil {
+		return
+	}
+	b, err := json.Marshal(cap)
+	if err != nil {
+		return
+	}
+	obj["max_tokens"] = b
+	if out, err := json.Marshal(obj); err == nil {
+		req.Raw = out
+	}
+}
+
+// maybeCompactAnthropicRaw applies the cache-prefix-preserving history rewrite to the
+// outbound passthrough body when --compact-history-budget is set. It is a no-op unless the
+// gateway is fronting the REAL Anthropic API (s.anthropicPassthrough) — only there is the
+// raw body forwarded verbatim, so only there does compacting it reach the wire AND need to
+// preserve the cached prefix. On every other wire the body is re-built from req.Messages
+// downstream, so touching req.Raw would be pointless. agent.CompactAnthropicHistory is
+// fail-safe: it returns req.Raw unchanged on any ambiguity, so this never breaks a turn.
+func (s *Server) maybeCompactAnthropicRaw(req *agent.AnthropicMessagesRequest) {
+	if s.compactHistoryBudget <= 0 || req == nil || len(req.Raw) == 0 || !s.anthropicPassthrough() {
+		return
+	}
+	req.Raw = agent.CompactAnthropicHistory(req.Raw, s.compactHistoryBudget)
 }
 
 // writeAnthropicTurn renders a fully-formed turn to the wire as either a buffered JSON
@@ -253,7 +324,7 @@ func (s *Server) writeAnthropicTurn(w http.ResponseWriter, stream bool, turn *an
 	streamAnthropicBlocks(send, turn.Blocks, turn.Stop, turn.Usage)
 }
 
-func (s *Server) completeAnthropicTurn(ctx context.Context, req *agent.AnthropicMessagesRequest, reqTrace, id, model, upstreamKey, upstreamBeta string) (*anthropicTurn, error) {
+func (s *Server) completeAnthropicTurn(ctx context.Context, req *agent.AnthropicMessagesRequest, reqTrace string, sessionTurn servedSessionTurn, id, model, upstreamKey, upstreamBeta string) (*anthropicTurn, error) {
 	// Arm the RESULT-side floor BEFORE the planner runs — the exact parity the
 	// OpenAI proxy has at http.go (#77). DecodeAnthropicMessagesRequest already
 	// turned each inbound Anthropic `tool_result` block into a canonical RoleTool
@@ -280,7 +351,7 @@ func (s *Server) completeAnthropicTurn(ctx context.Context, req *agent.Anthropic
 		temp = &req.Temperature
 	}
 	opts := []agent.SampleOpt{
-		agent.WithMaxTokens(req.MaxTokens),
+		agent.WithMaxTokens(sessionTurn.maxTokensFor(req.MaxTokens)),
 		agent.WithTemperature(temp),
 		agent.WithTopP(req.TopP),
 		agent.WithStop(req.StopSequences),
@@ -295,7 +366,7 @@ func (s *Server) completeAnthropicTurn(ctx context.Context, req *agent.Anthropic
 	if s.anthropicPassthrough() {
 		opts = append(opts, agent.WithRawRequestBody(req.Raw), agent.WithUpstreamAPIKey(upstreamKey), agent.WithUpstreamBeta(upstreamBeta))
 	}
-	comp, err := s.complete(ctx, req.Messages, req.Tools, opts...)
+	comp, err := s.completeServed(ctx, sessionTurn, req.Messages, req.Tools, opts...)
 	if err != nil {
 		return nil, err
 	}
@@ -530,10 +601,10 @@ func (s *Server) streamAnthropic(w http.ResponseWriter, id, model string, blocks
 	streamAnthropicBlocks(send, blocks, stop, usage)
 }
 
-func (s *Server) streamAnthropicPending(w http.ResponseWriter, r *http.Request, req *agent.AnthropicMessagesRequest, reqTrace, upstreamKey, upstreamBeta string) {
+func (s *Server) streamAnthropicPending(w http.ResponseWriter, r *http.Request, req *agent.AnthropicMessagesRequest, reqTrace string, sessionTurn servedSessionTurn, upstreamKey, upstreamBeta string) {
 	flusher, ok := w.(http.Flusher)
 	if !ok {
-		turn, err := s.completeAnthropicTurn(r.Context(), req, reqTrace, "", "", upstreamKey, upstreamBeta)
+		turn, err := s.completeAnthropicTurn(r.Context(), req, reqTrace, sessionTurn, "", "", upstreamKey, upstreamBeta)
 		if err != nil {
 			s.logf("gateway: upstream model error (messages): %v", err)
 			writeErr(w, http.StatusBadGateway, "upstream model error")
@@ -572,7 +643,7 @@ func (s *Server) streamAnthropicPending(w http.ResponseWriter, r *http.Request, 
 	}
 	done := make(chan turnResult, 1)
 	go func() {
-		turn, err := s.completeAnthropicTurn(r.Context(), req, reqTrace, id, model, upstreamKey, upstreamBeta)
+		turn, err := s.completeAnthropicTurn(r.Context(), req, reqTrace, sessionTurn, id, model, upstreamKey, upstreamBeta)
 		done <- turnResult{turn: turn, err: err}
 	}()
 

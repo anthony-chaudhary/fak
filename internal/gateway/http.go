@@ -251,14 +251,33 @@ func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 	// Thread one request TraceID across every proposed call in this chat so the IFC
 	// ledger, plan-CFI, response header, and access log all correlate. The
 	// middleware honors a client-supplied X-Trace-Id or mints one.
-	reqTrace := useHTTPTrace(w, r, "")
-	// Operator control (the PROXY-path enforcement of /v1/fak/session): a paused /
-	// draining / stopped session refuses its next request instead of forwarding it
-	// upstream — "cancel a request in flight" on the served path. Fail-open when the
-	// session route is disabled (no-op for the historical behavior).
-	if ok, st := s.sessionAdmits(ctx, reqTrace); !ok {
-		writeSessionRefusal(w, st)
+	reqTrace := s.useHTTPTrace(w, r, "")
+	// Operator control / budget / pace at the served request boundary. With
+	// DecideSession wired this mutates the live session table (TurnsLeft debit,
+	// budget exhaustion, pace cap); without it the legacy observe-only admission guard
+	// still refuses paused/draining/stopped sessions.
+	sessionTurn, ok, canceled := s.beginServedSessionTurn(ctx, reqTrace)
+	if canceled {
 		return
+	}
+	if !ok {
+		// Budget drained: opt-in human-like reset (distill seed, re-arm, continue on
+		// the fresh trace) when wired; else the historical 409 directive. Mirrors the
+		// Anthropic wire in messages.go.
+		if newTrace, seed, reset := s.maybeResetOnBudget(ctx, sessionTurn.state, req.Messages); reset {
+			req.Messages = spliceSeed(seed, req.Messages)
+			reqTrace = newTrace
+			if sessionTurn, ok, canceled = s.beginServedSessionTurn(ctx, reqTrace); canceled {
+				return
+			}
+			if !ok {
+				writeSessionRefusal(w, sessionTurn.state)
+				return
+			}
+		} else {
+			writeSessionRefusal(w, sessionTurn.state)
+			return
+		}
 	}
 	resultAdmissions, err := s.admitInboundResults(ctx, req.Messages, reqTrace)
 	if err != nil {
@@ -276,7 +295,7 @@ func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 	// still synthesizes a stream for stream=true. streamChatLive returns false having
 	// written nothing when it cannot stream, so the fall-through is safe.
 	if req.Stream {
-		if s.streamChatLive(ctx, w, req, reqModel, reqTrace, resultAdmissions) {
+		if s.streamChatLive(ctx, w, req, reqModel, reqTrace, sessionTurn, resultAdmissions) {
 			return
 		}
 	}
@@ -286,9 +305,9 @@ func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 	// empty stop), so an OpenAI client that omits them gets the planner default —
 	// identical to the pre-seam behavior — while one asking for a long completion is
 	// no longer hard-capped at the planner's 1024-token floor (#62).
-	comp, err := s.complete(ctx, req.Messages, req.Tools,
+	comp, err := s.completeServed(ctx, sessionTurn, req.Messages, req.Tools,
 		agent.WithModel(req.Model), // no-op when the client omitted model
-		agent.WithMaxTokens(req.MaxTokens),
+		agent.WithMaxTokens(sessionTurn.maxTokensFor(req.MaxTokens)),
 		agent.WithTemperature(req.Temperature),
 		agent.WithTopP(req.TopP),
 		agent.WithStop(normalizeStop(req.Stop)),
@@ -553,7 +572,7 @@ func (s *Server) handleModels(w http.ResponseWriter, r *http.Request) {
 // handleFakSyscall adjudicates AND executes a single tool call through the kernel
 // (the self-contained / CI path).
 func (s *Server) handleFakSyscall(w http.ResponseWriter, r *http.Request) {
-	req, ok := decodeSyscall(w, r)
+	req, ok := s.decodeSyscall(w, r)
 	if !ok {
 		return
 	}
@@ -591,7 +610,7 @@ func (s *Server) handleFakAdmit(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "malformed request body: "+err.Error())
 		return
 	}
-	req.TraceID = useHTTPTrace(w, r, req.TraceID)
+	req.TraceID = s.useHTTPTrace(w, r, req.TraceID)
 	wv, env, err := s.admit(r.Context(), req.Tool, rawArgs(req.Result), req.Witness, req.TraceID)
 	if err != nil {
 		// A REMOTE engine-cache reset failure is a gateway/upstream fault — surface it
@@ -612,7 +631,7 @@ func (s *Server) handleFakAdmit(w http.ResponseWriter, r *http.Request) {
 // handleFakAdjudicate returns the pre-execution verdict only (the production path
 // for a client that runs its own tools): no dispatch, no engine, no pending state.
 func (s *Server) handleFakAdjudicate(w http.ResponseWriter, r *http.Request) {
-	req, ok := decodeSyscall(w, r)
+	req, ok := s.decodeSyscall(w, r)
 	if !ok {
 		return
 	}
@@ -909,7 +928,7 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 // helpers
 // ---------------------------------------------------------------------------
 
-func decodeSyscall(w http.ResponseWriter, r *http.Request) (SyscallRequest, bool) {
+func (s *Server) decodeSyscall(w http.ResponseWriter, r *http.Request) (SyscallRequest, bool) {
 	if r.Method != http.MethodPost {
 		writeErr(w, http.StatusMethodNotAllowed, "use POST")
 		return SyscallRequest{}, false
@@ -919,7 +938,7 @@ func decodeSyscall(w http.ResponseWriter, r *http.Request) (SyscallRequest, bool
 		writeErr(w, http.StatusBadRequest, "malformed request body: "+err.Error())
 		return SyscallRequest{}, false
 	}
-	req.TraceID = useHTTPTrace(w, r, req.TraceID)
+	req.TraceID = s.useHTTPTrace(w, r, req.TraceID)
 	return req, true
 }
 

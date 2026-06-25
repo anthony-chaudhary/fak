@@ -46,7 +46,7 @@ const modPrefix = "github.com/anthony-chaudhary/fak/internal/"
 var tier = map[string]int{
 	"abi": 0,
 
-	"appversion": 1, "blob": 1, "boundarylint": 1, "cachemeta": 1, "cacheobs": 1, "canon": 1, "compute": 1, "deletioncert": 1, "demoui": 1, "ggufload": 1, "gpulease": 1, "hfhub": 1, "leakcheck": 1, "metalgemm": 1, "metrics": 1, "model": 1, "pathlint": 1, "pathutil": 1, "provenance": 1, "swebench": 1, "urllint": 1, "webbench": 1,
+	"accounts": 1, "appversion": 1, "blob": 1, "boundarylint": 1, "cachemeta": 1, "cacheobs": 1, "canon": 1, "compute": 1, "deletioncert": 1, "demoui": 1, "ggufload": 1, "gpulease": 1, "hfhub": 1, "leakcheck": 1, "metalgemm": 1, "metrics": 1, "model": 1, "pathlint": 1, "pathutil": 1, "provenance": 1, "swebench": 1, "urllint": 1, "webbench": 1,
 	"blobfs": 1, "blobhttp": 1, // durable on-disk / remote-HTTP content-addressed Ref backends; attach to abi like blob (Resolver+PageOutBackend), import only abi+blob+stdlib.
 	"xenginekv": 1, // cross-engine zero-copy KV co-residence arena (#448): a RefRegion-issuing Resolver+RegionBackend+PageOutBackend; attaches to abi like blob, imports only abi+blob+stdlib (FAK_XENGINE_KV-gated).
 
@@ -80,11 +80,16 @@ var tier = map[string]int{
 	"trajhook":     3, // pluggable trajectory scorer/tap seam (the "trivial skill does gardening" enabler): app code registers Scorers over Turn rows without a core edit. Imports trajectory+simhash.
 	"sessionimage": 4, // portable, model-agnostic SESSION image: composes recall(3)+session(1)+trajectory(3)+ctxplan(1) into one versioned, sha256-integrity bundle + a .faksession tar (dump/pack/unpack/rehydrate across hosts/users/VMs/model changes). Integrator: imports tier-3 composers, off the hot path.
 	"a2achan":      2, // in-kernel agent-to-agent message channel: a process-global, capability-floored, Ref-backed mailbox (Send/Recv adjudicated by a registered a2aGate + a2aIngress; Taint/Scope enforced). Mechanism: imports only abi, off the hot path.
+	"region":       2, // typed one-sided shared Ref window: adjudicated Put/Get/Accumulate over abi.Resolver with ScopeFleet ceiling and vDSO coherence bumps.
 	"snapshot":     3, // uniform DUMP/RESTORE seam over any primitive (turn/tool/session/fleet/rsi): a sha256-integrity envelope (Marshal/Parse over any body) + a ladder registry + typed codecs for trace(trajectory) and fleet(session.Table). Imports session(1)+trajectory(3); off the hot path.
 	"rungobs":      2, // passive rung-decision distribution counter: an abi.Emitter (subscribed to EvDecide/EvDeny/EvVDSOHit) that re-folds each call's chain off the hot path via kernel.FoldExplain and bumps a per-(rung,kind,reason) histogram. Mechanism: imports kernel(2)+abi(0); runs synchronously in emit but adds 0 adjudication rungs and never touches the verdict or Counters.
+	"sharedtask":   2, // in-memory collaborative task-record fold: user patches, conflicts, held verdicts, event rows, scoped views, and a2achan live subscriptions. Mechanism, off the hot path.
 	"vcachegov":    2, // vCache M5 Governor (#720): the steady-state policy over the vCache warm set — pin/lazy/evict (§5.4), rate-limit warm budget (§5.5), cross-shard affinity routing + rehash/burst guards (§9/D3), and the Law-D4 secret classifier. Pure decision layer: imports cachemeta(1)+stdlib, off the hot path (NOT registered; M1–M3 wire the live loop).
 	"vcachechain":  2, // vCache M4 chains & recall (#719): prefix DAG + topological replay (send-one-then-fan) + 20-block breakpoints + the §11.0 cost-gated rebuild (refuses single-unit chain rebuilds, allows amortized fan-out). Pure decision layer: imports cachemeta(1)+vcachegov(2)+stdlib, off the hot path (NOT registered; gated OFF by default).
 	"vcachecal":    2, // vCache M1 observe & calibrate (#716): the warmth-belief estimator (§7) over cachemeta.Lifecycle at TierProvider + the offline probe harness that fits T/M_min/r (Law D2) + the LRU probe budget (observer-perturbs-state) + the Zipf-s concentration gate (§5.2) + the false-warm/false-cold prediction-error report. Pure decision layer: imports cachemeta(1)+stdlib only, off the hot path (NOT registered; observe-only — no warming in M1).
+	"vcachewarm":   2, // vCache M3 dedicated warming (#718): Anthropic max_tokens:0 vs decode-1 decision gates, byte-identical prefix guard, send-one-then-fan barrier, and wasted-warm accounting. Pure decision layer, off the hot path, no live transport claim.
+	"sessionreset": 2, // budget-reset carryover builder: a pluggable Contributor registry that folds a drained session's transcript into the "human-like" seed a fresh session is re-armed with (durable facts via ctxmmu's shipped prior + task recap + warm-prefix descriptor via vcachechain + verbatim tail). Mechanism: imports ctxmmu(2)+vcachechain(2)+stdlib, NOT the wire agent type; off the hot path, registers nothing into the kernel.
+	"taskmgr":      1, // process-local task/step/resource/ETA snapshot fold; stdlib-only, off the hot path.
 	// new-leaf:tier — `python tools/new_leaf.py <name> --tier <name>` inserts the
 	// declaration for a generated leaf immediately ABOVE this line. Keep the marker last.
 }

@@ -123,11 +123,18 @@ def _is_host(config_dir: str) -> bool:
 
 def project_slug(path: str) -> str:
     """The on-disk session-store slug Claude derives from a working directory:
-    drive colon, path separators, and dots all become '-' (``C:\\work\\fak`` ->
-    ``C--work-fak``). Mirrors the PowerShell launcher's Get-ClaudeProjectSlug EXACTLY
-    so the resolver lands a re-home copy under the same slug ``claude --resume`` will
-    look under from the caller's cwd -- the cross-directory resume fix."""
-    return re.sub(r"[\\/:.]", "-", path)
+    EVERY non-alphanumeric character becomes '-' (``C:\\work\\fak`` -> ``C--work-fak``).
+
+    This mirrors the Claude Code harness rule EXACTLY -- the same
+    ``re.sub(r"[^A-Za-z0-9]", "-", ...)`` :mod:`sync_memory.default_home_memory` uses,
+    confirmed against the on-disk slugs (e.g. a pytest tmp path
+    ``C:\\Users\\USER\\AppData\\Local\\Temp\\pytest-of-USER\\...`` slugs one-to-one with
+    every separator -> '-'). The earlier ``[\\/:.]`` form only replaced slash/colon/dot,
+    so a cwd containing a space, '@', '~', '(' etc. computed a DIFFERENT slug than the
+    harness -- landing a re-home copy where ``claude --resume`` would never look (a silent
+    404 from that folder). For ``C:\\work\\fak`` both forms agree; the broadened class only
+    changes the punctuated-path case. Both are one-to-one (no ``+``), matching the harness."""
+    return re.sub(r"[^A-Za-z0-9]", "-", path)
 
 
 def _rehome(rehome_fn, src_cfg: str, dst_cfg: str, project: str, sid: str,

@@ -26,11 +26,13 @@ type Verdict struct {
 // not run" is a checkable field, never free text. They mirror the refusal-reason
 // discipline the kernel uses elsewhere.
 const (
-	ReasonBudgetTurns  = "BUDGET_TURNS_EXHAUSTED"  // TurnsLeft hit zero
-	ReasonBudgetTokens = "BUDGET_TOKENS_EXHAUSTED" // TokensLeft hit zero
-	ReasonPaused       = "PAUSED"                  // operator hold; not terminal, the loop waits
-	ReasonDrained      = "DRAINING"                // operator stop, taken at this boundary
-	ReasonStopped      = "STOPPED"                 // already terminal
+	ReasonBudgetTurns   = "BUDGET_TURNS_EXHAUSTED"   // TurnsLeft hit zero
+	ReasonBudgetTokens  = "BUDGET_TOKENS_EXHAUSTED"  // TokensLeft hit zero
+	ReasonBudgetContext = "BUDGET_CONTEXT_EXHAUSTED" // ContextTokensLeft hit zero
+	ReasonPaused        = "PAUSED"                   // operator hold; not terminal, the loop waits
+	ReasonDrained       = "DRAINING"                 // operator stop, taken at this boundary
+	ReasonStopped       = "STOPPED"                  // already terminal
+	ReasonBudgetReset   = "BUDGET_RESET"             // budget-drained, then re-armed on a fresh window (Recontinue)
 )
 
 // Decide is the per-turn boundary gate. Given a session's TraceID it:
@@ -114,24 +116,7 @@ func (t *Table) Decide(trace string) Verdict {
 // TokensLeft<=0 and drains) — Debit itself does not transition, keeping the "stop
 // is taken at a boundary" invariant.
 func (t *Table) Debit(trace string, tokensUsed int) State {
-	if t == nil || tokensUsed <= 0 {
-		st := DefaultState(trace)
-		if t != nil {
-			st = t.Get(trace)
-		}
-		return st
-	}
-	t.mu.Lock()
-	defer t.mu.Unlock()
-	cur := t.getLocked(trace)
-	if cur.Run.terminal() || cur.Run == Paused {
-		return cur
-	}
-	if cur.Budget.tokensUnbounded() {
-		return cur
-	}
-	cur.Budget.TokensLeft -= tokensUsed
-	return t.putLocked(cur)
+	return t.DebitUsage(trace, Usage{OutputTokens: tokensUsed})
 }
 
 // finalizeDrainLocked writes a budget-exhausted record straight to Stopped (the
