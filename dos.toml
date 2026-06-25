@@ -57,6 +57,7 @@ concurrent = [
   "vcachechain",
   "dropin",
   "comm",
+  "cohort",
   # They landed by hand / during the new_leaf.py path-bug window, so the `# new-leaf:lane`
   # auto-insert never fired. All are real, architest-tiered packages.
   "blobfs", "blobhttp", "ctxplan", "dgxbridge", "gitgate", "hfhub", "memq", "polymodel", "storedrv",
@@ -73,6 +74,7 @@ concurrent = [
   "taskmgr",
   "dropin",
   "comm",
+  "cohort",
   # new-leaf:lane -- `python tools/new_leaf.py` inserts a generated leaf lane above
 ]
 exclusive = ["abi", "release", "global"]
@@ -109,6 +111,7 @@ autopick = [
   "taskmgr",
   "dropin",
   "comm",
+  "cohort",
   # new-leaf:lane
 ]
 
@@ -223,6 +226,7 @@ vcachewarm = ["internal/vcachewarm/**"]
 taskmgr = ["internal/taskmgr/**"]
 dropin = ["internal/dropin/**"]
 comm = ["internal/comm/**"]
+cohort = ["internal/cohort/**"]
 # new-leaf:tree -- generated leaf trees inserted above this line
 cmd         = ["cmd/**"]
 experiments = ["experiments/**"]

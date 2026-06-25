@@ -93,6 +93,7 @@ var tier = map[string]int{
 	"taskmgr":      1, // process-local task/step/resource/ETA snapshot fold; stdlib-only, off the hot path.
 	"dropin":       1,
 	"comm":         2,
+	"cohort":       2, // fail-closed cohort shrink/agree over comm.Group + modelroute vote fold.
 	// new-leaf:tier — `python tools/new_leaf.py <name> --tier <name>` inserts the
 	// declaration for a generated leaf immediately ABOVE this line. Keep the marker last.
 }
