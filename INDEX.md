@@ -81,6 +81,7 @@ Working docs that track a specific effort. Dated by design; they age out.
 
 - [Issue tracker](https://github.com/anthony-chaudhary/fak/issues) — the live, always-current open-issue count. This index never hard-codes a count (it drifts); see the tracker for the current number.
 - [GPU parity tracking (#480)](docs/notes/gpu-parity-tracking-480.md) — bringing the GPU path to parity.
+- [SIMD CPU parity tracking (#400)](docs/notes/simd-cpu-parity-tracking-400.md) — Go-native SIMD (AVX2/AVX-512/NEON) vs llama.cpp on CPU: parity where SIMD is the lever, non-SIMD residuals named.
 - [Model-arch seam status (#487)](docs/notes/model-arch-seam-status-487.md) — the model-architecture seam work.
 - [Trust-floor decomposition (#492)](docs/notes/trust-floor-decomposition-492.md) — splitting the trust floor into checkable parts.
 
