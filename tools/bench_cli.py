@@ -16,7 +16,11 @@ from pathlib import Path
 from typing import Dict, List, Optional
 
 ROOT = Path(__file__).resolve().parents[1]
-BENCHMARK_DIR = ROOT / "fak" / "experiments" / "benchmark"
+# The Go module is the repository root, so committed benchmark results live at
+# experiments/benchmark  -  NOT fak/experiments/benchmark (a leftover doubled-root
+# prefix from when the module lived in a fak/ subdir). The doubled prefix made
+# `bench_cli.py list` fail to find catalog.json from the repo root.
+BENCHMARK_DIR = ROOT / "experiments" / "benchmark"
 CATALOG_PATH = BENCHMARK_DIR / "catalog.json"
 
 

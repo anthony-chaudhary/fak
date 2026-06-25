@@ -1,0 +1,101 @@
+package benchcatalog
+
+import (
+	"strings"
+	"testing"
+)
+
+func TestVCacheBenchmarkIsDiscoverableOfflineGate(t *testing.T) {
+	b, ok := Get("vcache")
+	if !ok {
+		t.Fatal("vcache benchmark missing from catalog")
+	}
+	if b.Kind != KindVerb || b.Need != NeedNone {
+		t.Fatalf("vcache kind/need = %s/%s, want verb/offline", b.Kind, b.Need)
+	}
+	if !strings.Contains(b.Run, "fak vcache bench --json") {
+		t.Fatalf("vcache run = %q, want vcache bench JSON gate", b.Run)
+	}
+	for _, want := range []string{"--telemetry", "--anchors-file", "--index-out", "--two-x"} {
+		if !containsFlag(b.Flags, want) {
+			t.Fatalf("vcache flags = %v, missing %s", b.Flags, want)
+		}
+	}
+	if !b.Offline() {
+		t.Fatal("vcache scorecard must remain zero-asset/offline by default")
+	}
+}
+
+func containsFlag(flags []string, want string) bool {
+	for _, flag := range flags {
+		if strings.Contains(flag, want) {
+			return true
+		}
+	}
+	return false
+}
+
+// TestAllSortedAndUnique guards the registry's two structural invariants the
+// `fak benchmarks` verb and the bench-DX scorecard both rely on: All() is sorted
+// by Name, and every Name is unique.
+func TestAllSortedAndUnique(t *testing.T) {
+	all := All()
+	if len(all) == 0 {
+		t.Fatal("registry is empty")
+	}
+	seen := map[string]bool{}
+	for i, b := range all {
+		if b.Name == "" {
+			t.Errorf("entry %d has empty Name", i)
+		}
+		if seen[b.Name] {
+			t.Errorf("duplicate Name %q", b.Name)
+		}
+		seen[b.Name] = true
+		if i > 0 && all[i-1].Name > b.Name {
+			t.Errorf("not sorted: %q before %q", all[i-1].Name, b.Name)
+		}
+	}
+}
+
+// TestEveryEntryHasSummaryAndRun checks the two fields the developer reads first:
+// every benchmark must say what it measures (Summary) and how to run it (Run),
+// and carry a known Need/Kind.
+func TestEveryEntryHasSummaryAndRun(t *testing.T) {
+	for _, b := range All() {
+		if b.Summary == "" {
+			t.Errorf("%s: empty Summary (a number with no inline meaning)", b.Name)
+		}
+		if b.Run == "" {
+			t.Errorf("%s: empty Run (no copy-pasteable command)", b.Name)
+		}
+		switch b.Need {
+		case NeedNone, NeedWeights, NeedDataset:
+		default:
+			t.Errorf("%s: unknown Need %q", b.Name, b.Need)
+		}
+		switch b.Kind {
+		case KindCmd, KindVerb:
+		default:
+			t.Errorf("%s: unknown Kind %q", b.Name, b.Kind)
+		}
+	}
+}
+
+// TestOfflineSubsetOfAll confirms Offline() returns exactly the NeedNone entries
+// and that Get round-trips every registered name.
+func TestOfflineSubsetOfAll(t *testing.T) {
+	for _, b := range Offline() {
+		if b.Need != NeedNone {
+			t.Errorf("Offline() returned %s with Need=%q", b.Name, b.Need)
+		}
+	}
+	for _, name := range Names() {
+		if _, ok := Get(name); !ok {
+			t.Errorf("Get(%q) missing for a registered name", name)
+		}
+	}
+	if _, ok := Get("definitely-not-a-bench"); ok {
+		t.Error("Get returned ok for an unregistered name")
+	}
+}

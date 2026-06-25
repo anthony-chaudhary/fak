@@ -3,11 +3,11 @@
 // policy and quarantine boundary (adjudicate -> vDSO -> pre-flight/grammar ->
 // dispatch -> context-MMU admit). Verbs:
 //
-//	fak run       — replay a trace (or a single call) through the kernel
-//	fak preflight — run only the pre-flight + grammar rungs over a call
-//	fak bench     — A/B ablate the vDSO over a frozen trace, emit report.json
-//	fak policy    — dump / validate the deployable capability-floor manifest
-//	fak hook      — spawned-hook mode: decide one call from stdin (the baseline)
+//	fak run        -  replay a trace (or a single call) through the kernel
+//	fak preflight  -  run only the pre-flight + grammar rungs over a call
+//	fak bench      -  A/B ablate the vDSO over a frozen trace, emit report.json
+//	fak policy     -  dump / validate the deployable capability-floor manifest
+//	fak hook       -  spawned-hook mode: decide one call from stdin (the baseline)
 //
 // The single blank import of internal/registrations is what wires every leaf
 // subsystem into the frozen ABI before the kernel boots.
@@ -63,6 +63,8 @@ func main() {
 		cmdAttest(os.Args[2:])
 	case "bench":
 		cmdBench(os.Args[2:])
+	case "benchmarks":
+		cmdBenchmarks(os.Args[2:])
 	case "ablate":
 		cmdAblate(os.Args[2:])
 	case "turntax":
@@ -141,7 +143,7 @@ func usage() {
                  (the COMPLIANCE ATTESTATION GENERATOR: prove the capability floor
                   from preflight. Runs the real adjudication fold over a probe set
                   and emits a re-checkable attestation. Default probes are DERIVED
-                  from the manifest — each deny must be DENIED with its cited reason,
+                  from the manifest  -  each deny must be DENIED with its cited reason,
                   each allow/allow_prefix ALLOWED, and an unnamed tool DENIED
                   DEFAULT_DENY. --probes FILE attests arg-value cases. Exit 0 if the
                   floor is PROVEN, 1 if any probe drifts, 2 on usage error)
@@ -151,13 +153,16 @@ func usage() {
                  cached path is printed on stdout; --gguf and the loaders accept it)
   fak bench     --suite NAME [--out report.json] [--baseline-n 30]
                 (transport A/B: in-process adjudication p50 vs spawned-hook p50)
+  fak benchmarks list [--offline] | describe <name> | run <name>
+                (THE INDEX of every benchmark fak ships -- start with
+                 'fak benchmarks list --offline' for the zero-asset set)
   fak ablate    --sweep vdso[,...] [--suite NAME] [--baseline all-off] [--out FILE] [--json]
                 (self-ablation: replay one frozen trace under N feature configs;
                  one row per arm, deltas off the kernel counters, same-trace guard)
   fak turntax   --suite NAME [--out turntax-report.json]
                 [--prompt-tokens N --completion-tokens N --turn-latency-ms F]
-                (TURN-TAX A/B: the extra error-code MODEL TURN a SOTA loop fires —
-                 malformed args, duplicate read, poison — vs fak's 1-shot. Replays a
+                (TURN-TAX A/B: the extra error-code MODEL TURN a SOTA loop fires  - 
+                 malformed args, duplicate read, poison  -  vs fak's 1-shot. Replays a
                  class-labeled trace through the real kernel, prices the turns it
                  deletes per lever, and keeps the safety floor on its own axis)
   fak agent     [--task STR] [--provider openai|anthropic|gemini|xai]
@@ -166,16 +171,16 @@ func usage() {
   fak policy    --dump | --check FILE
                 (--dump writes the built-in DefaultPolicy as a manifest you edit;
                  --check validates a manifest and prints the floor it admits. The
-                 capability floor — WHICH tools may be called — is a deployable
+                 capability floor  -  WHICH tools may be called  -  is a deployable
                  file, not a Go edit: dump -> edit -> --check -> --policy)
   fak route     [--manifest FILE] [--aspect request|tool_call|query|state|step|scout]
                 [--tool NAME --prompt-tokens N --latency interactive|batch --complexity low|medium|high --labels k=v,...]
                 [--simulate "<out>[@score],..."] [--json] | --dump | --check FILE
-                (the MODEL-ROUTING oracle — first-class per-aspect + ensemble model
+                (the MODEL-ROUTING oracle  -  first-class per-aspect + ensemble model
                  routing. For one classified SUBJECT (an aspect of a request: the
                  whole request, a tool call, a sub-query, a state, a reasoning step)
-                 print which MODEL — or which ENSEMBLE of models + reduction
-                 (first|vote|best_of|all_reduce|concat) — the policy selects. The
+                 print which MODEL  -  or which ENSEMBLE of models + reduction
+                 (first|vote|best_of|all_reduce|concat)  -  the policy selects. The
                  routing policy is a deployable JSON manifest: --dump -> edit ->
                  --check -> --manifest, mirroring 'fak policy'. --simulate folds
                  stand-in member outputs through the plan's reduction so the
@@ -183,12 +188,12 @@ func usage() {
   fak routebench [--corpus FILE] [--routed FILE] [--single FILE] [--frontier MODEL]
                  [--prices ...] [--latencies ...] [--json] | --dump-corpus
                  (the OFFLINE ROUTING BENCHMARK: run a corpus of recorded cases
-                  through TWO manifests — a per-aspect + ensemble policy vs a
-                  single-model baseline (the SOTA shape) — and print the delta on
+                  through TWO manifests  -  a per-aspect + ensemble policy vs a
+                  single-model baseline (the SOTA shape)  -  and print the delta on
                   COST / LATENCY / QUALITY. Each case carries the stand-in OUTPUT
                   every candidate model produces (like 'fak route --simulate'),
                   so it reuses the pure Route + Combine halves and is deterministic
-                  end to end — no key, no GPU, no network. Default: the built-in
+                  end to end  -  no key, no GPU, no network. Default: the built-in
                   8-case demo corpus + DefaultManifest vs a one-frontier-model
                   baseline. Every figure is a ROUGH lens, never a bill or SLA)
   fak accounts  <list|resolve|discover|validate> [--registry FILE] [--home DIR] [--json]
@@ -201,20 +206,20 @@ func usage() {
                 (the STATIC TOOL LINTER: the definition-time dual of the kernel's
                  call-time re-checks. Reports a dead cache hint, an unreachable pure
                  registration, a canned answer for a write-shaped tool, or a schema
-                 the model is shown but the kernel never enforces — once, instead of
+                 the model is shown but the kernel never enforces  -  once, instead of
                  the runtime silently papering over it every call. Exit 1 on an
                  error finding, or on any finding with --strict)
   fak codelint  [--json] [--errors-only] [--list] PATH...
                 (the LANGUAGE-SERVER-PACK code linter: route each file to the pack
-                 that owns its extension and report parse/compile errors — the
+                 that owns its extension and report parse/compile errors  -  the
                  write-time check the kernel runs over CODE the agent produces
                  (Go/JSON in-process, Python/CUDA via their toolchains, degrading
                  to no-opinion where a checker is absent). The same Lint the
                  SWE-bench fleet runs on every agent file write. Exit 1 on an error)
   fak answer-shape [--text - | --file PATH | --text STR] [--max-repeat 0.5] [--max-chars N] [--ngram 3] [--json]
                 (the DEGENERATION/VERBOSITY WITNESS: judge the SHAPE of a candidate
-                 answer or tool result — how repetitive (looping) and how long
-                 (runaway) it is — against your thresholds. The graded consumer dual
+                 answer or tool result  -  how repetitive (looping) and how long
+                 (runaway) it is  -  against your thresholds. The graded consumer dual
                  of the context-MMU's write-time repeat-admit rung. Reads stdin on
                  "-" or no source. Exit 1 when degenerate, so it gates a pipeline)
   fak doctor    [--text - | --file PATH | --text STR] [--max-repeat 0.5] [--max-chars N] [--ngram 3] [--json]
@@ -226,8 +231,8 @@ func usage() {
                 (persist a finished session as a core dump, reload it in a FRESH
                  store, and demonstrate the quarantine surviving the boundary)
   fak snapshot  kinds | demo | info | dump-fleet | restore-fleet
-                (DUMP/RESTORE any primitive on the loops ladder — a turn, a tool, a
-                 session, a fleet, an RSI loop — to a portable, sha256-integrity bundle.
+                (DUMP/RESTORE any primitive on the loops ladder  -  a turn, a tool, a
+                 session, a fleet, an RSI loop  -  to a portable, sha256-integrity bundle.
                  'kinds' lists the ladder; 'demo' is the offline witness: a SESSION
                  image dumped on laptop/model-A, packed to one .faksession, resumed on
                  model-B (drive re-attached, content byte-identical, the recall
@@ -236,15 +241,15 @@ func usage() {
                  'info --file F' verifies + prints a .snap envelope or a session image;
                  'dump-fleet --addr URL --out F' offloads a LIVE fleet's drive state from
                  a running gateway and 'restore-fleet --addr URL --file F' re-establishes
-                 it on another. The session image is model-agnostic — logical content
-                 only, no KV cache or token ids — so a resume re-prefills on any model)
+                 it on another. The session image is model-agnostic  -  logical content
+                 only, no KV cache or token ids  -  so a resume re-prefills on any model)
   fak dream     [--dir DIR] [--out-dir DIR] [--out dream-report.json]
                 (offline "sleep" pass over a core image: re-screen, pre-seal
                  refuted witnesses, repair descriptors, surface duplicate aliases,
                  and write a pruned cleaned image)
   fak memory    drivers | explain | run  [--driver NAME] [--query-file PLAN.json]
                 [--intent STR] [--k N] [--budget BYTES] [--dir IMAGE] [--apply]
-                (the MEMORY-OPERATION ALGEBRA — build SQL, not a specific query: an
+                (the MEMORY-OPERATION ALGEBRA  -  build SQL, not a specific query: an
                  agent authors its OWN render/clean/compact/dream strategy as a
                  composable Op pipeline (scan|filter|rank|limit|budget |
                  render|tombstone|consolidate|reclassify|prune) instead of the kernel
@@ -258,7 +263,7 @@ func usage() {
                 (the CONTEXT DEBUGGER: attach to a finished session as a core dump and
                  demand-page only the working set a question touches. --session ingests
                  a REAL Claude Code transcript; default is the committed fixture.
-                 --cmd html emits a self-contained static HTML inspection report — the
+                 --cmd html emits a self-contained static HTML inspection report  -  the
                  shareable artifact a teammate opens in a browser)
   fak session   ls | status <id> | stop <id> | pause <id> | resume <id> | throttle <id> |
                 run <id> <state> | budget <id> [--turns N] [--tokens N] [--context-tokens N] |
@@ -303,7 +308,7 @@ func usage() {
                  URL into the CHILD only (never your shell), execs the agent, and on
                  exit prints what the kernel allowed vs blocked. Default upstream is the
                  real Anthropic API in passthrough mode, so 'fak guard -- claude' wraps
-                 your normal Claude Code — your key + prompt cache flow through, every
+                 your normal Claude Code  -  your key + prompt cache flow through, every
                  proposed tool call crosses the capability floor first. Every verdict is
                  appended to a durable, tamper-evident DECISION JOURNAL by default
                  (--audit FILE to relocate, --no-audit to turn off; replay with
@@ -312,12 +317,12 @@ func usage() {
   fak audit     verify <journal.jsonl> | export <journal.jsonl>
                 (the AUDIT-TRAIL consumer: 'verify' re-reads a decision journal (the
                  'fak guard' / FAK_AUDIT_JOURNAL trail) and validates its hash chain
-                 end to end — exit 1 naming the first broken link if a byte changed
+                 end to end  -  exit 1 naming the first broken link if a byte changed
                  since it was written; 'export' re-emits it as JSONL. A self-report is
-                 not a witness — this is how the record is checked offline)
+                 not a witness  -  this is how the record is checked offline)
   fak headroom  list | status | compress [--via NAME] [--model ID] [--emit] [FILE|-]
                 (the CONTEXT-COMPRESSION seam: shrink tool outputs/logs/files before
-                 they reach the model, reversibly. A pluggable AREA — one generic
+                 they reach the model, reversibly. A pluggable AREA  -  one generic
                  Compressor interface, swappable plugins: noop (off default), native
                  (in-process structural, zero deps), headroom (bridge to a running
                  'headroom proxy'). The selected plugin folds into the result path as
@@ -342,7 +347,7 @@ pre-flight/grammar -> dispatch -> context-MMU admit.
 
 func ctx() context.Context { return context.Background() }
 
-// fak run — replay a trace through the kernel.
+// fak run  -  replay a trace through the kernel.
 func cmdRun(argv []string) {
 	fs := flag.NewFlagSet("run", flag.ExitOnError)
 	trace := fs.String("trace", "", "path to a trace JSON file")
@@ -378,7 +383,7 @@ func cmdRun(argv []string) {
 		cc.Submits, cc.VDSOHits, cc.EngineCalls, cc.Denies, cc.Transforms, cc.Quarantines)
 }
 
-// fak preflight — run only the pre-flight/grammar rungs over one call.
+// fak preflight  -  run only the pre-flight/grammar rungs over one call.
 func cmdPreflight(argv []string) {
 	fs := flag.NewFlagSet("preflight", flag.ExitOnError)
 	tool := fs.String("tool", "", "tool name")
@@ -412,7 +417,7 @@ func cmdPreflight(argv []string) {
 	fmt.Printf("verdict=%s reason=%s by=%s\n", verdictName(v.Kind), abi.ReasonName(v.Reason), v.By)
 }
 
-// fak bench — A/B ablate the vDSO over a frozen trace.
+// fak bench  -  A/B ablate the vDSO over a frozen trace.
 func cmdBench(argv []string) {
 	fs := flag.NewFlagSet("bench", flag.ExitOnError)
 	suite := fs.String("suite", "tau2-smoke", "trace suite name (under testdata/tau2)")
@@ -451,9 +456,9 @@ func cmdBench(argv []string) {
 	printReport(rep, *out)
 }
 
-// fak turntax — the TURN-TAX A/B. Replays a class-labeled trace through the real
+// fak turntax  -  the TURN-TAX A/B. Replays a class-labeled trace through the real
 // kernel and prices the extra error-code MODEL TURNS the SOTA baseline fires
-// (malformed args, duplicate read, poison) that fak's 1-shot path deletes —
+// (malformed args, duplicate read, poison) that fak's 1-shot path deletes  -
 // keeping the deterministic safety floor on its own axis.
 func cmdTurnTax(argv []string) {
 	fs := flag.NewFlagSet("turntax", flag.ExitOnError)
@@ -533,11 +538,11 @@ func printBreakEven(w io.Writer, r *turnbench.BreakEvenReport) {
 	fmt.Fprintln(w, "it only becomes large in error/dup-rich regimes. The airline demo slice (9/14) is the far high end of this curve.")
 }
 
-// fak agent — the LIVE agentic loop. A real model (or the offline mock) drives a
+// fak agent  -  the LIVE agentic loop. A real model (or the offline mock) drives a
 // multi-turn tool-calling conversation TWICE over the same task: once with every
 // tool call mediated by the in-process kernel (fak arm), once naive (the "now"
 // baseline). It reports turns, tokens, in-syscall repairs, vDSO dedup hits,
-// adjudicator denies, and MMU quarantines for each arm — the real turn-use-vs-now
+// adjudicator denies, and MMU quarantines for each arm  -  the real turn-use-vs-now
 // measurement the static bench could not produce.
 func cmdAgent(argv []string) {
 	fs := flag.NewFlagSet("agent", flag.ExitOnError)
@@ -565,7 +570,7 @@ func cmdAgent(argv []string) {
 		if key == "" {
 			// A local endpoint (e.g. the transformers shim) needs no key; a remote
 			// one will return 401, which the planner surfaces clearly. Warn, proceed.
-			fmt.Fprintf(os.Stderr, "fak agent: env %s is empty — proceeding with no auth header (fine for a local endpoint)\n", *apiKeyEnv)
+			fmt.Fprintf(os.Stderr, "fak agent: env %s is empty  -  proceeding with no auth header (fine for a local endpoint)\n", *apiKeyEnv)
 		}
 		p, err := agent.NewProviderHTTPPlanner(*provider, *baseURL, *model, key)
 		must(err)
@@ -642,7 +647,7 @@ func resetTrace(_ context.Context, traceID string) error {
 // observeTrace is the read-only complement of resetTrace (#411): it reports the
 // live IFC taint high-water mark for one trace so the gateway can serve
 // GET /v1/fak/trace/{trace_id} without importing IFC internals. An unseen trace
-// reads "trusted" — the ledger's own clean default.
+// reads "trusted"  -  the ledger's own clean default.
 func observeTrace(_ context.Context, traceID string) (string, bool) {
 	lvl := ifc.Default.Level(strings.TrimSpace(traceID))
 	return taintLevelName(lvl), ifc.Dangerous(lvl)
@@ -650,7 +655,7 @@ func observeTrace(_ context.Context, traceID string) (string, bool) {
 
 // serveSessions is the process-local per-session DRIVE-state table shared by the
 // gateway session routes (observe/control) and any in-process agent loop. It is the
-// structural twin of ifc.Default: TraceID-keyed, bounded-LRU, live-mutable — widened
+// structural twin of ifc.Default: TraceID-keyed, bounded-LRU, live-mutable  -  widened
 // from the single taint bit to a small drive struct (run-state/budget/priority/pace).
 // Constructed once at process start; the gateway holds it by injected closure, never
 // by import, so the gateway stays session-internals-blind the way it stays
@@ -660,14 +665,14 @@ var serveSessions = session.NewTable()
 // observeSession is the read side of the /v1/fak/session control surface (#620): it
 // returns one served session's current DRIVE state so an operator can read how hard
 // a live session is running without reconstructing it from git + a process scan. An
-// unseen trace reads its default — Running, unbounded budget — the table's own safe
+// unseen trace reads its default  -  Running, unbounded budget  -  the table's own safe
 // default, never a phantom Stopped.
 func observeSession(_ context.Context, traceID string) gateway.SessionState {
 	return toGatewaySessionState(serveSessions.Get(strings.TrimSpace(traceID)))
 }
 
 // listSessions is the multi-session read side of the /v1/fak/session control surface:
-// it projects the WHOLE live drive table (Snapshot order — by priority, lower yields
+// it projects the WHOLE live drive table (Snapshot order  -  by priority, lower yields
 // first) into the gateway wire DTO so an operator can see what every session is doing
 // right now in one read, instead of reconstructing liveness from git + a process scan
 // (docs/dispatch-loop.md). Snapshot already returns a fresh, sorted copy.
@@ -740,7 +745,7 @@ func resetMsgs(messages []agent.Message) []sessionreset.Msg {
 // budgetWebhookObserver returns the session.BudgetObserver that wires the operator
 // webhook (#743): it POSTs each pre-exhaustion warning and each exhaustion (reset-trigger)
 // event to rawURL as JSON, so an external monitor is notified BEFORE a served session
-// drains, not only after. It is fire-and-forget and fail-open — the POST runs on its own
+// drains, not only after. It is fire-and-forget and fail-open  -  the POST runs on its own
 // goroutine under a short timeout, and any transport error is logged to stderr but never
 // blocks or fails the served turn that produced the event. An empty URL returns nil (the
 // no-op seam: behavior is byte-identical to today).
@@ -931,7 +936,7 @@ func applyRuntime(rt policy.Runtime) {
 // applyRateLimit pushes the manifest-declared rate_limit into the governor singleton
 // (issue #699, Epic 8), mirroring how SafeSinks/Authorize reach ifc. A present block
 // installs the cap (authoritative over the FAK_RATELIMIT_* env fallback); an absent
-// block resets the limiter to inert — so editing the cap out of the file on
+// block resets the limiter to inert  -  so editing the cap out of the file on
 // --policy hot-reload removes it. Config and accrued counters are separate
 // (SetLimit does not wipe budgets), exactly as a mid-flight env change behaves.
 func applyRateLimit(r *policy.RateLimitRule) {
@@ -1005,7 +1010,7 @@ func sinkClass(name string) ifc.SinkClass {
 	}
 }
 
-// fak policy — author and validate the deployable capability floor. --dump emits
+// fak policy  -  author and validate the deployable capability floor. --dump emits
 // the built-in DefaultPolicy as a manifest (the starting point an adopter edits);
 // --check validates a manifest against the closed refusal vocabulary and prints
 // the floor it admits, so a misconfigured policy is caught BEFORE it gates a run.
@@ -1031,12 +1036,12 @@ func cmdPolicy(argv []string) {
 	}
 }
 
-// fak lint — the STATIC tool linter. The kernel never trusts a tool's self-declared
+// fak lint  -  the STATIC tool linter. The kernel never trusts a tool's self-declared
 // annotations: it re-checks them every call and silently does the safe thing (the
 // vDSO overrides a lying readOnlyHint from the name, pre-flight re-validates args).
 // This verb is the definition-time DUAL of those call-time re-checks: it runs once
 // over the configured tool surface and says OUT LOUD what the runtime would only
-// ever whisper to itself — a dead cache hint, an unreachable pure registration, a
+// ever whisper to itself  -  a dead cache hint, an unreachable pure registration, a
 // canned answer for a write-shaped tool, a schema the model is shown but the kernel
 // never enforces. Exit 1 on an error-severity finding (or any finding with
 // --strict), so it can gate a build.
@@ -1093,8 +1098,8 @@ func cmdLint(argv []string) {
 }
 
 // lintExitCode is the PURE exit-code contract for `fak lint`, factored out so it is
-// unit-testable without os.Exit: 1 on any error-severity finding, or — under
-// --strict — on ANY finding at all (the "gate a build on a clean surface" mode the
+// unit-testable without os.Exit: 1 on any error-severity finding, or  -  under
+// --strict  -  on ANY finding at all (the "gate a build on a clean surface" mode the
 // help text and cmdLint doc both promise). 0 otherwise.
 func lintExitCode(rep toollint.Report, strict bool) int {
 	if rep.Errors() > 0 || (strict && !rep.Clean()) {
@@ -1103,20 +1108,20 @@ func lintExitCode(rep toollint.Report, strict bool) int {
 	return 0
 }
 
-// fak serve — the GATEWAY. It fronts the kernel over an OpenAI-compatible HTTP
+// fak serve  -  the GATEWAY. It fronts the kernel over an OpenAI-compatible HTTP
 // surface and MCP so an agent in ANY language can route its tool calls through the
 // in-process syscall boundary without writing Go. The gateway is Go and ON the
-// request path (it adjudicates) — in-direction; non-Go CLIENTS live in the
+// request path (it adjudicates)  -  in-direction; non-Go CLIENTS live in the
 // adopter's repo. Construction mirrors cmdAgent: registrations is already imported
 // (so the resolver + full adjudicator chain are wired), the capability floor is
 // installed fail-loud, and the kernel is built bound to a registered engine.
 // resolveRequiredKey resolves a secret the operator REQUIRED by naming an env
-// var via a --…-key-env flag. When the flag is unset (empty name) auth was not
+// var via a --...-key-env flag. When the flag is unset (empty name) auth was not
 // requested, so it returns ok=true with an empty key. But when the flag names an
 // env var that is unset or empty, it returns ok=false: the operator asked for
 // auth and the secret did not land (typo, un-propagated CI env, k8s Secret
 // mis-mount, pod restarted without it). For an agent kernel the safe
-// default is to fail CLOSED — refuse to start — not to warn and silently serve
+// default is to fail CLOSED  -  refuse to start  -  not to warn and silently serve
 // unauthenticated. The lookup is injected so the decision is unit-testable
 // without touching process env. (issue #213-class fail-open fix; see #255.)
 func resolveRequiredKey(envName string, lookup func(string) string) (key string, ok bool) {
@@ -1130,7 +1135,7 @@ func resolveRequiredKey(envName string, lookup func(string) string) (key string,
 	return v, true
 }
 
-// fak hook — the spawned-hook decide transport (A/B baseline). Reads one call
+// fak hook  -  the spawned-hook decide transport (A/B baseline). Reads one call
 // from stdin, folds the adjudicator chain, writes the verdict to stdout.
 func cmdHook() {
 	var c bench.Call

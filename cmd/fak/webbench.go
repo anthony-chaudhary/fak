@@ -1,15 +1,17 @@
-// fak webbench — frontier web/browser agent benchmarks as a fak-native benchmark.
+// fak webbench  -  frontier web/browser agent benchmarks as a fak-native benchmark.
 // Measures the value of fak's session value stack on multi-turn web automation tasks.
 // Subcommands:
 //
-//	describe — load the web task set + derived geometry; print the deterministic
+//	describe  -  load the web task set + derived geometry; print the deterministic
 //	           prefill-token work-elimination (the value-stack floor) at a worker
-//	           sweep. Fully offline; needs no model, GPU, or network. RUNNABLE NOW.
+//	           sweep. Fully offline; needs no model, GPU, or network. RUNNABLE NOW:
+//	           with no --dataset it falls back to a committed sample, so
+//	           `fak webbench describe` (zero args) prints the real geometry table.
 //
-//	eval     — grade predictions into the task success-rate via the official harness
+//	eval      -  grade predictions into the task success-rate via the official harness
 //	           (when available). Gated when this box lacks the runtime.
 //
-//	compare  — the full comparison: fak's metric families keyed to external benchmarks,
+//	compare   -  the full comparison: fak's metric families keyed to external benchmarks,
 //	           with optional side-by-side against a benchmark results file.
 package main
 
@@ -24,6 +26,11 @@ import (
 
 	"github.com/anthony-chaudhary/fak/internal/webbench"
 )
+
+// webbenchSampleDataset is the committed task set `fak webbench describe` falls
+// back to when no --dataset is given, so the advertised RUNNABLE-NOW entry point
+// works with zero args and zero external assets.
+const webbenchSampleDataset = "testdata/webbench/sample-tasks.jsonl"
 
 func cmdWebbench(argv []string) {
 	if len(argv) == 0 {
@@ -53,7 +60,7 @@ func cmdWebbench(argv []string) {
 }
 
 func webbenchUsage() {
-	fmt.Fprint(os.Stderr, `fak webbench — Frontier Web Agent Benchmarks as a fak-native benchmark
+	fmt.Fprint(os.Stderr, `fak webbench  -  Frontier Web Agent Benchmarks as a fak-native benchmark
 
 usage:
   fak webbench describe [--dataset FILE] [--workers 1,2,4,8] [--out FILE]
@@ -90,18 +97,24 @@ The metrics most relevant to web agents:
 
 func cmdWebbenchDescribe(argv []string) {
 	fs := flag.NewFlagSet("webbench describe", flag.ExitOnError)
-	dataset := fs.String("dataset", "", "path to web task dataset (JSONL or JSON array)")
+	dataset := fs.String("dataset", "", "path to web task dataset (JSONL or JSON array); default: the committed "+webbenchSampleDataset+" sample")
 	workersArg := fs.String("workers", "1,2,4,8", "comma-separated worker counts to sweep")
 	limit := fs.Int("limit", 0, "cap to the first N instances (0 = all)")
 	out := fs.String("out", "", "write the Summary JSON here (default: stdout JSON + human table on stderr)")
 	_ = fs.Parse(argv)
 
-	if *dataset == "" {
-		fmt.Fprintln(os.Stderr, "fak webbench describe: --dataset is required")
-		os.Exit(2)
+	// describe is the advertised RUNNABLE-NOW entry point: it must work with no
+	// flags. When --dataset is omitted we fall back to a small committed sample so
+	// a newcomer sees the real geometry table on the first command, then can point
+	// --dataset at their own WebVoyager export. (The eval/compare/serving paths
+	// still require an explicit dataset  -  they grade a real run, not a shape demo.)
+	src := *dataset
+	if src == "" {
+		src = webbenchSampleDataset
+		fmt.Fprintf(os.Stderr, "fak webbench describe: no --dataset; using the committed sample %s (deterministic geometry, no model).\n", src)
 	}
 
-	d, err := webbench.LoadDataset(*dataset)
+	d, err := webbench.LoadDataset(src)
 	must(err)
 
 	if *limit > 0 && *limit < d.Len() {
@@ -124,7 +137,7 @@ func cmdWebbenchDescribe(argv []string) {
 		fmt.Println(string(data))
 	}
 
-	printWebbenchSummary(os.Stderr, s, *dataset, *out)
+	printWebbenchSummary(os.Stderr, s, src, *out)
 }
 
 func printWebbenchSummary(w *os.File, s webbench.Summary, src, out string) {

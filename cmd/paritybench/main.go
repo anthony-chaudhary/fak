@@ -5,7 +5,7 @@
 // same frozen task), scores every card on the three never-blended axes
 // (capability / safety / cost), and emits the parity table.
 //
-// It is the driver for internal/turnbench/parity.go — the headline "viral local
+// It is the driver for internal/turnbench/parity.go  -  the headline "viral local
 // vs frontier" comparison. Capability is graded against the fixed oracle; safety
 // is the fak-arm (kernel-mediated) guarantee with the unmediated baseline kept
 // visible; cost is the kernel-counted fak-arm token spend at each model's price.
@@ -13,13 +13,13 @@
 // Usage:
 //
 //	paritybench \
-//	  --local 'fak/experiments/parity/local-*.json' \
-//	  --local-gpu 'fak/experiments/parity/remote-*-7b.json' \
-//	  --reference-cards fak/experiments/parity/reference-frontier.json \
+//	  --local 'experiments/parity/local-*.json' \
+//	  --local-gpu 'experiments/parity/remote-*-7b.json' \
+//	  --reference-cards experiments/parity/reference-frontier.json \
 //	  --reference claude-sonnet \
 //	  --require-phase1 \
-//	  --out-json fak/experiments/parity/parity.json \
-//	  --out-md   fak/experiments/parity/PARITY.md
+//	  --out-json experiments/parity/parity.json \
+//	  --out-md   experiments/parity/PARITY.md
 package main
 
 import (
@@ -37,13 +37,13 @@ import (
 )
 
 func main() {
-	localGlob := flag.String("local", "fak/experiments/parity/local-*.json", "glob of live fak-agent A/B reports for local models")
+	localGlob := flag.String("local", "experiments/parity/local-*.json", "glob of live fak-agent A/B reports for local models")
 	localGPUGlob := flag.String("local-gpu", "", "optional glob of live fak-agent A/B reports served from a local GPU/non-CPU endpoint")
-	refPath := flag.String("reference-cards", "fak/experiments/parity/reference-frontier.json", "committed frontier reference cards JSON")
+	refPath := flag.String("reference-cards", "experiments/parity/reference-frontier.json", "committed frontier reference cards JSON")
 	reference := flag.String("reference", "claude-sonnet", "which card is the frontier reference to score against")
 	task := flag.String("task", agent.DefaultTask, "task description for the report header")
-	outJSON := flag.String("out-json", "fak/experiments/parity/parity.json", "parity report JSON output")
-	outMD := flag.String("out-md", "fak/experiments/parity/PARITY.md", "parity report Markdown output")
+	outJSON := flag.String("out-json", "experiments/parity/parity.json", "parity report JSON output")
+	outMD := flag.String("out-md", "experiments/parity/PARITY.md", "parity report Markdown output")
 	requirePhase1 := flag.Bool("require-phase1", false, "fail unless measured 0.5B + 1.5B local rungs and a live local-gpu 7-9B parity card are present")
 	flag.Parse()
 
@@ -78,7 +78,7 @@ func main() {
 	must(os.WriteFile(*outJSON, rep.JSON(), 0o644))
 	must(os.WriteFile(*outMD, []byte(rep.Markdown()), 0o644))
 
-	// Echo the Markdown to stdout — the operator's at-a-glance view.
+	// Echo the Markdown to stdout  -  the operator's at-a-glance view.
 	fmt.Println(rep.Markdown())
 	fmt.Fprintf(os.Stderr, "\nwrote %s and %s (%d cards, %d verdicts)\n",
 		*outJSON, *outMD, len(rep.Cards), len(rep.Verdicts))
