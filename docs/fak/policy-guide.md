@@ -476,6 +476,50 @@ Bounds the injection surface on a free-text argument (ticket body, change-reques
 
 ---
 
+## Throughput & cost caps (`rate_limit` → a WAIT deny with retry-after)
+
+The capability floor bounds *which* tools run; `rate_limit` bounds *how fast* (and how
+expensively) an allow-listed tool may be called. It is the one top-level manifest field
+that is **runtime config, not an adjudicator rule** — it tunes fak's rank-8 load-shed
+governor (`internal/ratelimit`) rather than adding a deny. The manifest block is
+authoritative over the `FAK_RATELIMIT_*` env fallback and is re-applied on every
+`--policy` hot-reload, so the cap is versioned with the rest of the floor instead of
+living only in the environment.
+
+```jsonc
+{
+  "version": "fak-policy/v1",
+  "allow": ["search_kb", "summarize"],
+  "rate_limit": {
+    "max_calls": 200,        // per-key admitted-call quota   (0 = no call cap)
+    "max_cost": 500000,      // per-key cumulative cost budget (0 = no cost cap)
+    "key": "trace",          // the bucket the quota counts in: trace | tool | global
+    "retry_after_ms": 1000   // advisory back-off on the over-cap WAIT (0 = limiter default, 1s)
+  }
+}
+```
+
+- **At least one cap must be declared** (`max_calls` *or* `max_cost`); an empty block is
+  inert. When both are set, a call must satisfy both. **Cost** is the call's argument byte
+  length — a resolver-free stand-in for tokens — unless the caller supplies a real count in
+  `Meta["fak.ratelimit.cost"]`.
+- **`key`** selects the bucket the quota is counted in: `trace` (per agent run — the
+  default), `tool` (per tool name), or `global` (one shared bucket across the process).
+
+**The WAIT / retry-after deny contract.** When a key exceeds a cap, the governor returns a
+`DENY` citing the closed reason `RATE_LIMITED`, and the kernel maps `RATE_LIMITED` to a
+**WAIT disposition** — a *recoverable* deny. The agent loop backs off and retries rather
+than treating it as a hard refusal, the way `errno` pairs `EAGAIN` with a retry window. The
+refusal is a **value, not an exception**: its `meta` carries `retry_after` (a duration, e.g.
+`1s`) and `retry_after_ms` (the same back-off in milliseconds), alongside `cap` (which cap
+fired — `max_calls` / `max_cost`), `limit`, and `key`. The back-off is the operator-declared
+`retry_after_ms` when set, else a built-in `1s` default. Disclosure is bounded — the deny
+names the cap and the back-off, never the call's arguments. With no `rate_limit` block (and
+no `FAK_RATELIMIT_*` env), the governor Defers on every call, so the limiter is inert until
+a cap is set.
+
+---
+
 ## Testing policies
 
 `preflight` is a single-call test with no model and no server — cheap enough to script.
