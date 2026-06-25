@@ -5,11 +5,12 @@
 //
 // URI grammar:
 //
-//	hf://<owner>/<repo>[@<revision>]/<path/to/file>
+//	hf://<owner>/<repo>[@<revision>][/<path/to/file>]
 //
 //	owner/repo   required — the model repo (e.g. mradermacher/Qwen2.5-1.5B-GGUF)
 //	@revision    optional — a branch, tag, or commit; default "main"
-//	path/to/file required — the file within the repo (e.g. model.Q8_0.gguf)
+//	path/to/file optional — the file within the repo (e.g. model.Q8_0.gguf). When
+//	             omitted, FetchURI resolves the repo to one unambiguous loadable artifact.
 //
 // The package is pure standard library (the `fak` binary ships with zero
 // external dependencies), so it can be linked into cmd/fak without bloating the
@@ -20,6 +21,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -59,13 +61,12 @@ const DefaultBaseURL = "https://huggingface.co"
 type Ref struct {
 	Repo     string // "<owner>/<repo>"
 	Revision string // branch/tag/commit; "main" when unspecified
-	File     string // repo-relative file path
+	File     string // repo-relative file path; empty means "resolve repo"
 }
 
-// ParseURI parses an hf:// URI into a Ref. It requires the owner/repo/file form
-// so the boundary between the repo and the file is unambiguous; a bare
-// single-segment canonical repo (e.g. hf://gpt2/...) is intentionally not
-// accepted.
+// ParseURI parses an hf:// URI into a Ref. It requires at least owner/repo so the
+// canonical two-segment Hub repo boundary is explicit; a bare single-segment
+// canonical repo (e.g. hf://gpt2) is intentionally not accepted.
 func ParseURI(uri string) (Ref, error) {
 	rest, ok := strings.CutPrefix(uri, "hf://")
 	if !ok {
@@ -73,8 +74,8 @@ func ParseURI(uri string) (Ref, error) {
 	}
 	rest = strings.TrimPrefix(rest, "/")
 	parts := strings.Split(rest, "/")
-	if len(parts) < 3 || parts[0] == "" || parts[1] == "" {
-		return Ref{}, fmt.Errorf("hfhub: %q must be hf://<owner>/<repo>[@rev]/<file>", uri)
+	if len(parts) < 2 || parts[0] == "" || parts[1] == "" {
+		return Ref{}, fmt.Errorf("hfhub: %q must be hf://<owner>/<repo>[@rev][/<file>]", uri)
 	}
 	owner, repoAndRev := parts[0], parts[1]
 	repoName, rev := repoAndRev, "main"
@@ -84,9 +85,15 @@ func ParseURI(uri string) (Ref, error) {
 		}
 		repoName, rev = name, r
 	}
-	file := strings.Join(parts[2:], "/")
+	file := ""
+	if len(parts) > 2 {
+		file = strings.Join(parts[2:], "/")
+	}
 	if file == "" || strings.HasSuffix(file, "/") {
-		return Ref{}, fmt.Errorf("hfhub: %q names no file within the repo", uri)
+		if len(parts) > 2 {
+			return Ref{}, fmt.Errorf("hfhub: %q names no file within the repo", uri)
+		}
+		return Ref{Repo: owner + "/" + repoName, Revision: rev}, nil
 	}
 	return Ref{Repo: owner + "/" + repoName, Revision: rev, File: file}, nil
 }
@@ -156,6 +163,99 @@ func (c *Client) authorize(req *http.Request) {
 	if c.Token != "" {
 		req.Header.Set("Authorization", "Bearer "+c.Token)
 	}
+}
+
+type repoInfo struct {
+	Siblings []repoSibling `json:"siblings"`
+}
+
+type repoSibling struct {
+	RFilename string `json:"rfilename"`
+	Path      string `json:"path"`
+}
+
+func (s repoSibling) filename() string {
+	if s.RFilename != "" {
+		return s.RFilename
+	}
+	return s.Path
+}
+
+// ResolveRepoFile turns a repo-only Ref into a single downloadable artifact by
+// reading the Hub model-info siblings list. It refuses ambiguous repos rather
+// than guessing between multiple model files.
+func (c *Client) ResolveRepoFile(ctx context.Context, r Ref, progress io.Writer) (Ref, error) {
+	if r.File != "" {
+		return r, nil
+	}
+	infoURL := c.repoInfoURL(r)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, infoURL, nil)
+	if err != nil {
+		return Ref{}, err
+	}
+	c.authorize(req)
+	logf(progress, "GET %s", infoURL)
+	resp, err := c.httpClient().Do(req)
+	if err != nil {
+		return Ref{}, fmt.Errorf("hfhub: repo info %s@%s: %w", r.Repo, r.Revision, err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return Ref{}, fmt.Errorf("hfhub: repo info %s@%s: hub returned %s", r.Repo, r.Revision, resp.Status)
+	}
+	var info repoInfo
+	if err := json.NewDecoder(resp.Body).Decode(&info); err != nil {
+		return Ref{}, fmt.Errorf("hfhub: repo info %s@%s: %w", r.Repo, r.Revision, err)
+	}
+	file, err := selectLoadArtifact(info.Siblings)
+	if err != nil {
+		return Ref{}, fmt.Errorf("hfhub: resolve %s@%s: %w", r.Repo, r.Revision, err)
+	}
+	r.File = file
+	logf(progress, "resolved %s@%s -> %s", r.Repo, r.Revision, r.File)
+	return r, nil
+}
+
+func (c *Client) repoInfoURL(r Ref) string {
+	base := strings.TrimRight(c.base(), "/")
+	return base + "/api/models/" + r.Repo + "/revision/" + r.Revision
+}
+
+func selectLoadArtifact(siblings []repoSibling) (string, error) {
+	var ggufs, safetensors []string
+	for _, s := range siblings {
+		name := strings.TrimPrefix(s.filename(), "/")
+		if name == "" || strings.HasSuffix(name, "/") {
+			continue
+		}
+		lower := strings.ToLower(name)
+		switch {
+		case strings.HasSuffix(lower, ".gguf"):
+			ggufs = append(ggufs, name)
+		case name == "model.safetensors":
+			safetensors = append(safetensors, name)
+		}
+	}
+	if file, ok := oneArtifact(ggufs); ok {
+		return file, nil
+	}
+	if len(ggufs) > 1 {
+		return "", fmt.Errorf("ambiguous GGUF artifacts: %s", strings.Join(ggufs, ", "))
+	}
+	if file, ok := oneArtifact(safetensors); ok {
+		return file, nil
+	}
+	if len(safetensors) > 1 {
+		return "", fmt.Errorf("ambiguous safetensors artifacts: %s", strings.Join(safetensors, ", "))
+	}
+	return "", errors.New("no single loadable artifact found (pass hf://owner/repo@rev/path explicitly)")
+}
+
+func oneArtifact(files []string) (string, bool) {
+	if len(files) == 1 {
+		return files[0], true
+	}
+	return "", false
 }
 
 // CachePath is the absolute local path the ref caches to. It is returned by
@@ -274,11 +374,21 @@ func logf(w io.Writer, format string, args ...any) {
 // FetchURI is the one-call convenience used by the CLI: parse, download, return
 // the local path. base, when "", defaults to DefaultBaseURL via NewClient.
 func FetchURI(ctx context.Context, uri string, progress io.Writer) (string, error) {
+	return NewClient().FetchURI(ctx, uri, progress)
+}
+
+// FetchURI is the client-scoped form of FetchURI, useful for tests and callers
+// that inject a Hub base URL or HTTP client.
+func (c *Client) FetchURI(ctx context.Context, uri string, progress io.Writer) (string, error) {
 	ref, err := ParseURI(uri)
 	if err != nil {
 		return "", err
 	}
-	return NewClient().Download(ctx, ref, progress)
+	ref, err = c.ResolveRepoFile(ctx, ref, progress)
+	if err != nil {
+		return "", err
+	}
+	return c.Download(ctx, ref, progress)
 }
 
 // IsURI reports whether s looks like an hf:// reference (used to branch a

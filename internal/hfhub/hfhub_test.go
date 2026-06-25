@@ -22,8 +22,9 @@ func TestParseURI(t *testing.T) {
 		{"hf://meta-llama/Llama-3.1-8B@main/orig/consolidated.00.pth", "meta-llama/Llama-3.1-8B", "main", "orig/consolidated.00.pth", false},
 		{"hf://Qwen/Qwen2.5-1.5B-Instruct@v1.0/config.json", "Qwen/Qwen2.5-1.5B-Instruct", "v1.0", "config.json", false},
 		{"hf://owner/repo/a/b/c.gguf", "owner/repo", "main", "a/b/c.gguf", false},
+		{"hf://owner/repo", "owner/repo", "main", "", false},
+		{"hf://owner/repo@v1", "owner/repo", "v1", "", false},
 		{"https://huggingface.co/x/y/z", "", "", "", true}, // not hf://
-		{"hf://owner/repo", "", "", "", true},              // no file
 		{"hf://owner//file", "", "", "", true},             // empty repo
 		{"hf://owner/repo@/file", "", "", "", true},        // empty revision
 		{"hf://owner/repo/", "", "", "", true},             // trailing slash, no file
@@ -163,6 +164,92 @@ func TestDownloadSendsToken(t *testing.T) {
 	}
 	if auth, _ := stub.lastAuth.Load().(string); auth != "Bearer testtok" {
 		t.Fatalf("Authorization = %q, want %q", auth, "Bearer testtok")
+	}
+}
+
+func TestFetchURIRepoOnlyResolvesUnambiguousGGUF(t *testing.T) {
+	body := []byte("GGUF\x00 selected by repo-only URI")
+	sum := sha256hex(body)
+	var infoGets atomic.Int32
+	var downloaded atomic.Value
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/models/owner/repo/revision/main":
+			infoGets.Add(1)
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"siblings":[{"rfilename":"README.md"},{"rfilename":"model.Q8_0.gguf"}]}`))
+		case "/owner/repo/resolve/main/model.Q8_0.gguf":
+			w.Header().Set("X-Linked-Etag", `"`+sum+`"`)
+			if r.Method == http.MethodHead {
+				return
+			}
+			downloaded.Store(r.URL.Path)
+			_, _ = w.Write(body)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+
+	c := &Client{BaseURL: srv.URL, HTTP: srv.Client(), CacheDir: t.TempDir()}
+	path, err := c.FetchURI(context.Background(), "hf://owner/repo", nil)
+	if err != nil {
+		t.Fatalf("FetchURI repo-only: %v", err)
+	}
+	got, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read cached file: %v", err)
+	}
+	if string(got) != string(body) {
+		t.Fatalf("cached content = %q, want %q", got, body)
+	}
+	if n := infoGets.Load(); n != 1 {
+		t.Fatalf("repo info GETs = %d, want 1", n)
+	}
+	if p, _ := downloaded.Load().(string); p != "/owner/repo/resolve/main/model.Q8_0.gguf" {
+		t.Fatalf("download path = %q", p)
+	}
+}
+
+func TestResolveRepoFileRefusesAmbiguousGGUF(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/models/owner/repo/revision/main" {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"siblings":[{"rfilename":"a.gguf"},{"rfilename":"b.gguf"}]}`))
+	}))
+	defer srv.Close()
+
+	c := &Client{BaseURL: srv.URL, HTTP: srv.Client(), CacheDir: t.TempDir()}
+	_, err := c.ResolveRepoFile(context.Background(), Ref{Repo: "owner/repo", Revision: "main"}, nil)
+	if err == nil {
+		t.Fatal("ResolveRepoFile: want ambiguous artifact error, got nil")
+	}
+	if !strings.Contains(err.Error(), "ambiguous GGUF artifacts") {
+		t.Fatalf("error = %v, want ambiguous GGUF artifacts", err)
+	}
+}
+
+func TestResolveRepoFileFallsBackToSingleSafetensors(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/models/owner/repo/revision/main" {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"siblings":[{"rfilename":"config.json"},{"rfilename":"model.safetensors"}]}`))
+	}))
+	defer srv.Close()
+
+	c := &Client{BaseURL: srv.URL, HTTP: srv.Client(), CacheDir: t.TempDir()}
+	got, err := c.ResolveRepoFile(context.Background(), Ref{Repo: "owner/repo", Revision: "main"}, nil)
+	if err != nil {
+		t.Fatalf("ResolveRepoFile: %v", err)
+	}
+	if got.File != "model.safetensors" {
+		t.Fatalf("resolved file = %q, want model.safetensors", got.File)
 	}
 }
 
