@@ -86,6 +86,7 @@ Working docs that track a specific effort. Dated by design; they age out.
 - [GPU parity tracking (#480)](docs/notes/gpu-parity-tracking-480.md) — bringing the GPU path to parity.
 - [SIMD CPU parity tracking (#400)](docs/notes/simd-cpu-parity-tracking-400.md) — Go-native SIMD (AVX2/AVX-512/NEON) vs llama.cpp on CPU: parity where SIMD is the lever, non-SIMD residuals named.
 - [Track B performance parity tracking (#306)](docs/notes/track-b-performance-parity-tracking-306.md) — roll-up status for the eight Track B children, with stale migrated issue links corrected and GPU-gated/unimplemented acceptance blockers kept explicit.
+- [Track D agent-framework parity tracking (#304)](docs/notes/track-d-agent-framework-parity-tracking-304.md) — roll-up status for the eight Track D children, with stale migrated issue links corrected; D-001 benchmark scaffold (smoke green, published run bench-node-gated), D-002 closed by wire repoint, D-003/D-004 wire-supported with adapter acceptance open, D-005/D-006 unimplemented, D-007/D-008 scaffolds tracked by sibling epics.
 - [Model-arch seam status (#487)](docs/notes/model-arch-seam-status-487.md) — the model-architecture seam work.
 - [Trust-floor decomposition (#492)](docs/notes/trust-floor-decomposition-492.md) — splitting the trust floor into checkable parts.
 
