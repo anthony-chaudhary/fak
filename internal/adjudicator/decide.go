@@ -76,6 +76,14 @@ type Policy struct {
 	// never be widened. A nil Profile (the zero Policy and DefaultPolicy) runs the
 	// fixed HEAD sequence byte-for-byte.
 	Profile *RungProfile
+	// Complain is the per-tool admit-and-log set (#670): a tool named here has its
+	// DEFAULT_DENY downgraded to an admit-and-log Allow — admitted, with forensic
+	// metadata — even when it is NOT read-shaped, so an operator can put a tool on a
+	// logged trial without flipping the global Posture. It downgrades ONLY the
+	// default-deny rung; the hard-refusal rungs (explicit Deny, self-modify, arg
+	// violations) already returned before defaultDeny, so they still fail closed. An
+	// empty/nil Complain set is byte-identical to HEAD (no tool is in complain mode).
+	Complain map[string]bool
 }
 
 // Posture selects the policy's default-deny behavior after all provable refusal
@@ -400,7 +408,23 @@ func (a *Adjudicator) Adjudicate(ctx context.Context, c *abi.ToolCall) abi.Verdi
 	return defaultDeny(p, c.Tool)
 }
 
+// complainFor reports whether a tool is in the per-tool complain set (#670). A nil
+// set admits nothing, so the zero Policy is unaffected.
+func (p *Policy) complainFor(tool string) bool {
+	return p.Complain[tool]
+}
+
 func defaultDeny(p Policy, tool string) abi.Verdict {
+	if p.complainFor(tool) {
+		// Complain mode (#670): a named tool is admitted-and-logged even when it is not
+		// read-shaped, so an operator can promote it to a logged trial. #671 enriches
+		// this record with the suppressed would_deny reason.
+		return abi.Verdict{
+			Kind: abi.VerdictAllow,
+			By:   "monitor",
+			Meta: map[string]string{"posture": "admit_and_log"},
+		}
+	}
 	if p.Posture == PostureAdmitAndLog && lowRiskReadShaped(tool) {
 		return abi.Verdict{
 			Kind: abi.VerdictAllow,
