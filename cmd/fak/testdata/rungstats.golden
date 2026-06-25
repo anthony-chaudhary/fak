@@ -1,0 +1,10 @@
+fak rungstats — passive rung-decision distribution (6 probes, real fold, no gateway)
+
+RUNG                     KIND   REASON        COUNT
+adjudicator.Adjudicator  ALLOW  -             3
+adjudicator.Adjudicator  DENY   DEFAULT_DENY  1
+adjudicator.Adjudicator  DENY   POLICY_BLOCK  1
+adjudicator.Adjudicator  DENY   SECRET_EXFIL  1
+                                TOTAL         6
+
+drill down on one call with: fak preflight --tool <name> --explain

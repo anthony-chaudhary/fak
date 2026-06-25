@@ -100,6 +100,8 @@ func main() {
 		cmdVCache(os.Args[2:])
 	case "hook":
 		cmdHook()
+	case "rungstats":
+		cmdRungStats(os.Args[2:])
 	case "swebench":
 		cmdSwebench(os.Args[2:])
 	case "webbench":
