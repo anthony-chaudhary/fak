@@ -44,6 +44,17 @@ func TestRunCommit_integration_realGit(t *testing.T) {
 	if _, err := git("config", "core.hooksPath", emptyHooks); err != nil {
 		t.Skipf("git config failed: %v", err)
 	}
+	// Persist an author identity in the repo config: runCommit shells out to the
+	// real git binary through safecommit.Commit, which inherits ambient identity
+	// only. A CI runner has none, so without this the commit-under-test fails with
+	// "empty ident name" -> HOOK_REFUSED. (The seed commit below uses the helper's
+	// GIT_*_NAME env, but safecommit.Commit does not see those.)
+	if _, err := git("config", "user.email", "t@t"); err != nil {
+		t.Skipf("git config failed: %v", err)
+	}
+	if _, err := git("config", "user.name", "t"); err != nil {
+		t.Skipf("git config failed: %v", err)
+	}
 	// Seed an initial commit so HEAD exists.
 	if err := os.WriteFile(filepath.Join(repo, "seed.txt"), []byte("seed\n"), 0o644); err != nil {
 		t.Fatal(err)
