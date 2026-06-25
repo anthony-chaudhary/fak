@@ -106,7 +106,7 @@ And it reproduces **byte-for-byte across 4 GPU backends, 2 CPU ISAs, 4 OSes** (A
 
 Here's where most launch posts lie by omission. The honest framing — two *separate* benchmarks, never blended:
 
-**Benchmark 1 — real WebVoyager (643 tasks), measured.** vs a **naive re-prefill** baseline: **8.8x (1 worker) → 9.7x (8 workers) less prefill** (the A/C column). Against a **per-agent warm-KV** baseline on this same dataset, the cross-worker gain is small — about **1.0–1.1x** — because WebVoyager's per-task geometry (median 12 turns) leaves little cross-worker prefix to share. I show that number, I don't hide it. [measured]
+**Benchmark 1 — real WebVoyager (643 tasks), modeled geometry.** vs a **naive re-prefill** baseline: **8.8x (1 worker) → 9.7x (8 workers) less prefill** (the A/C column). Against a **per-agent warm-KV** baseline on this same dataset, the cross-worker gain is small — about **1.0–1.1x** — because WebVoyager's per-task geometry (median 12 turns) leaves little cross-worker prefix to share. I show that number, I don't hide it. The 8.8–9.7x is a closed-form prefill-token count over the real task set, not a wall-clock. [modeled]
 
 **Benchmark 2 — a fleet-shaped synthetic (Qwen2.5-1.5B, 50 turns × 5 agents), the reuse-at-scale headline.** vs naive: **60.3x**; vs a **tuned warm-cache** stack (per-agent KV / prefix sharing): **4.1x**. Honest fence on *this* one: the naive arm's wall-clock is **modeled** from a sampled prefill-cost curve (running it live would take ~19h), not measured end-to-end; the token-elimination ratios are exact. This is the read-heavy-fleet projection, not a WebVoyager result. [modeled headline]
 

@@ -58,7 +58,7 @@ top commenter does.
 | [`youtube-demo-script.md`](youtube-demo-script.md) | A 60–90s shot-by-shot script (VO + on-screen text) tied to the live demos, for a short or a creator hand-off. |
 | [`x-thread.md`](x-thread.md) | An X/Twitter thread + a standalone Bluesky variant, each post paired with an existing visual. |
 | [`lobsters-and-blog.md`](lobsters-and-blog.md) | A Lobsters submission + a dev.to/Hashnode cross-post outline (the long-tail SEO + newsletter-pickup asset). |
-| [`untrusted-program-talk.md`](untrusted-program-talk.md) | **The long-form spine.** A talk outline (the syscall framing → the two flips → the 0/29 posture → the `max|Δ|=0` slide → the measured WebVoyager 8.8×–9.7× with fences), a 4-post blog-series outline each mapped to a sourced explainer, and a conference/meetup submission-target list. Extends this kit; every number traces to `BENCHMARK-AUTHORITY.md` or a named doc. |
+| [`untrusted-program-talk.md`](untrusted-program-talk.md) | **The long-form spine.** A talk outline (the syscall framing → the two flips → the 0/29 posture → the `max|Δ|=0` slide → the modeled WebVoyager 8.8×–9.7× vs the naive floor, with fences), a 4-post blog-series outline each mapped to a sourced explainer, and a conference/meetup submission-target list. Extends this kit; every number traces to `BENCHMARK-AUTHORITY.md` or a named doc. |
 
 Each post file ends with a **Provenance & fact-check** appendix — the adversarial review
 that produced it. Keep it for your own reference; strip it before pasting.

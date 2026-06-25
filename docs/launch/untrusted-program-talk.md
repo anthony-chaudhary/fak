@@ -184,7 +184,7 @@ measured.
 
 | Claim | Number | Source | Fence (say it with the number) |
 |---|---|---|---|
-| WebVoyager per-turn prefill elimination | **8.8× (1 worker) → 9.7× (8 workers)** net (A/C) on the real 643-task set | [`docs/webbench-baselines.md`](../webbench-baselines.md) "REAL MEASUREMENTS" | vs the **naive** re-prefill loop, **measured**. It is prefill-*token* elimination, not a wall-clock speedup over a tuned stack. The win is the structural per-turn turn-tax (A/B = 8.8×, worker-independent); cross-worker reuse (B/C) is only 1.00×–1.10×. |
+| WebVoyager per-turn prefill elimination | **8.8× (1 worker) → 9.7× (8 workers)** net (A/C) on the real 643-task set | [`docs/webbench-baselines.md`](../webbench-baselines.md) (modeled geometry) | vs the **naive** re-prefill loop, **modeled** (closed-form geometry, no wall-clock). It is prefill-*token* elimination, not a wall-clock speedup over a tuned stack. The win is the structural per-turn turn-tax (A/B = 8.8×, worker-independent); cross-worker reuse (B/C) is only 1.00×–1.10×. |
 | 50-turn × 5-agent reuse (README headline) | **4.1× vs tuned** warm-cache · 60.3× vs naive | [`BENCHMARK-AUTHORITY.md`](../../BENCHMARK-AUTHORITY.md) row "README headline" (commit `2bbda6f`) | The 60.3× is vs naive; **lead 4.1×**. Arm A's ~19 h is **modeled** (validated within ~0.4%), not run live. Reuse is **self-host only**. |
 | RadixAttention reuse ladder | 4.58× → 6.95× live (135M → 1.5B); 7.50× token ceiling; **86.7%** hit rate | [`BENCHMARK-AUTHORITY.md`](../../BENCHMARK-AUTHORITY.md) "RadixAttention Model Ladder" (commit `92896a4`) | Hit rate is hardware-independent and inside SGLang's published 50–99% band; the comparison to SGLang is on **hit rate, not throughput**. |
 | In-process adjudication cost | ~2.4 µs in-process vs ~6.9 ms spawned `fak hook` ≈ **2,800×** boundary tax | [`BENCHMARK-AUTHORITY.md`](../../BENCHMARK-AUTHORITY.md) "Pure-kernel latency" (commit `bcad56e`) | A **subsystem regression sentinel**, not a fleet-speed headline. Nobody runs a per-call process spawn in production, so the ratio is not a "fak is faster" claim — it's *why fail-closed is affordable*. |
@@ -275,7 +275,7 @@ server.
 **Arc:** the contribution is the *assembly* (0/29 primitives novel) → every
 capability carries exactly one machine-checked tag (`[SHIPPED]` /
 `[SIMULATED]` / `[STUB]`) → the disciplined numbers (4.1× tuned headline,
-WebVoyager 8.8×–9.7× measured, RadixAttention 86.7% hit rate) → the design
+WebVoyager 8.8×–9.7× modeled vs naive, RadixAttention 86.7% hit rate) → the design
 targets honestly labeled (~60× / "agent city", simulated power/$).
 **Carry the number:** 0/29 novel, and the SHIPPED-vs-SIMULATED discipline that
 makes the measured numbers trustworthy.
