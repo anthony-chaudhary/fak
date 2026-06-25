@@ -23,8 +23,8 @@ ALERTS = os.path.join(HERE, "grafana", "prometheus-alerts.yml")
 PROMETHEUS = os.path.join(HERE, "grafana", "prometheus.yml")
 # fak_gateway_/fak_kernel_ families are emitted from two files: the request/kernel
 # counters in metrics.go and the one-time boot timeline in startup.go.
-GATEWAY_METRICS_GO = os.path.join(HERE, "..", "fak", "internal", "gateway", "metrics.go")
-STARTUP_METRICS_GO = os.path.join(HERE, "..", "fak", "internal", "gateway", "startup.go")
+GATEWAY_METRICS_GO = os.path.join(HERE, "..", "internal", "gateway", "metrics.go")
+STARTUP_METRICS_GO = os.path.join(HERE, "..", "internal", "gateway", "startup.go")
 
 
 def make_snap(surface=4, api_error=3, hanging=2, auth=1, throttled_accts=("acctA",)):
@@ -89,6 +89,49 @@ class AuditEmptyAlertTest(unittest.TestCase):
         self.assertIn("absent(", expr, f"FleetAuditEmpty must use absent(): {expr!r}")
         self.assertIn("fleet_cache_hit_ratio_median", expr,
                       "FleetAuditEmpty must watch the FleetTokenWaste source metric")
+
+
+class TokenAuditNamespaceTest(unittest.TestCase):
+    def test_token_audit_uses_all_namespaces_by_default(self):
+        class FakeSessionAudit:
+            DEFAULT_ROOTS = ["/transcripts"]
+
+            def __init__(self):
+                self.calls = []
+
+            def discover(self, roots, since_days=None, ns_prefix=None, include_subagents=False):
+                self.calls.append({
+                    "roots": roots, "since_days": since_days, "ns_prefix": ns_prefix,
+                    "include_subagents": include_subagents,
+                })
+                return [{"path": os.path.join("/transcripts", "-Users-USER-Documents-GitHub-fleet", "s.jsonl")}]
+
+            def analyze(self, path):
+                return {
+                    "path": path, "session": "abcdef123456", "assistant_turns": 2, "n_tool_use": 6,
+                    "wall_s": 3600, "tokens": {"output": 1200}, "io_ratio": 42.0,
+                    "cache_hit_frac": 0.73, "cost_usd": 0.5,
+                }
+
+            def aggregate(self, sess):
+                return {
+                    "totals": {}, "total_cost_usd": 0.5,
+                    "dist": {"cache_hit_frac": {"median": 0.73}, "io_ratio": {"median": 42.0}},
+                    "tool_mix": {},
+                }
+
+        fake = FakeSessionAudit()
+        old = fb.session_audit
+        fb.session_audit = fake
+        try:
+            audit = fb._token_audit(days=3, cap=10)
+        finally:
+            fb.session_audit = old
+
+        self.assertEqual(fake.calls[0]["ns_prefix"], "",
+                         "fleet exporter must not inherit an operator-specific namespace prefix")
+        self.assertEqual(audit["n_analyzed"], 1)
+        self.assertEqual(audit["top_spenders"][0]["ns"], "-Users-USER-Documents-GitHub-fleet")
 
 
 class ScorerTest(unittest.TestCase):
