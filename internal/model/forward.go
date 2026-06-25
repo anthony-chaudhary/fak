@@ -256,6 +256,9 @@ func (m *Model) attnSeq(l int, xn [][]float32, rp rope) [][]float32 {
 			}
 			softcapInPlace(scores, attnCap)
 			m.softmaxAttentionScores(l, h, scores)
+			if m.attnObs != nil { // #852: emit the post-softmax row (copy-out, math untouched)
+				emitAttnRow(m.attnObs, l, t, h, lo, scores)
+			}
 			// weighted sum of values
 			o := attnOut[t][h*hd : (h+1)*hd]
 			for j := lo; j <= t; j++ {

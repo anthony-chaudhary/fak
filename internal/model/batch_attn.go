@@ -15,7 +15,7 @@ import "sync"
 // causal attention and reduces the loops byte-for-byte to the pre-SWA path; W>=0 masks the
 // score/V loops to the contiguous visible suffix (windowLoContig). This SWA mask layers on
 // top of the GQA-fuse + saxpy3-SIMD perf branches — they coexist.
-func attnDecodeBatch(attnOut, Q []float32, caches []*KVCache, l, B, nH, hd, w, grp, W int, scale float32, scoreDot func(a, b []float32) float32, scoreDot3 func(a, b, c, x []float32) (float32, float32, float32), scoreScratch [][]float32) [][]float32 {
+func attnDecodeBatch(attnOut, Q []float32, caches []*KVCache, l, B, nH, hd, w, grp, W int, scale float32, scoreDot func(a, b []float32) float32, scoreDot3 func(a, b, c, x []float32) (float32, float32, float32), scoreScratch [][]float32, obs AttnObserver) [][]float32 {
 	nKV := nH / grp
 	units := B * nKV
 	maxPos := 0
@@ -64,6 +64,11 @@ func attnDecodeBatch(attnOut, Q []float32, caches []*KVCache, l, B, nH, hd, w, g
 				softmaxInPlace(sc0)
 				softmaxInPlace(sc1)
 				softmaxInPlace(sc2)
+				if obs != nil { // #852: query is the just-appended row at abs pos nPos-1
+					emitAttnRow(obs, l, nPos-1, h0+0, j0, sc0)
+					emitAttnRow(obs, l, nPos-1, h0+1, j0, sc1)
+					emitAttnRow(obs, l, nPos-1, h0+2, j0, sc2)
+				}
 				for g := 0; g < grp; g++ {
 					h := h0 + g
 					out := attnOut[b*nH*hd+h*hd : b*nH*hd+(h+1)*hd]
@@ -81,6 +86,9 @@ func attnDecodeBatch(attnOut, Q []float32, caches []*KVCache, l, B, nH, hd, w, g
 						sc[j-j0] = scoreDot(qh, kh) * scale
 					}
 					softmaxInPlace(sc)
+					if obs != nil { // #852: query is the just-appended row at abs pos nPos-1
+						emitAttnRow(obs, l, nPos-1, h, j0, sc)
+					}
 					out := attnOut[b*nH*hd+h*hd : b*nH*hd+(h+1)*hd]
 					for i := range out {
 						out[i] = 0

@@ -272,7 +272,7 @@ func (s *Session) tokenHiddenQ(id, pos int) []float32 {
 			caches := growCaches(db.caches, 1)
 			db.caches = caches
 			caches[0] = s.Cache
-			db.scores = attnDecodeBatch(attnOut, q, caches, l, 1, nH, hd, w, grp, cfg.windowForLayer(l), scale, fdot, scoreDot3, db.scores)
+			db.scores = attnDecodeBatch(attnOut, q, caches, l, 1, nH, hd, w, grp, cfg.windowForLayer(l), scale, fdot, scoreDot3, db.scores, s.M.attnObs)
 		}
 		s.phaseEnd("q8_attn", tAttn)
 		tO := s.phaseStart()
@@ -515,7 +515,7 @@ func (s *Session) prefillBatchedQ(ids []int) []float32 {
 
 		attnOut := make([]float32, P*nH*hd)
 		tA := tic()
-		attnPrefillInto(attnOut, Q, Kl, Vl, P, base, nH, hd, w, grp, cfg.windowForLayer(l), scale, attnCap, scoreDot)
+		attnPrefillInto(attnOut, Q, Kl, Vl, P, base, nH, hd, w, grp, cfg.windowForLayer(l), l, scale, attnCap, scoreDot, s.M.attnObs)
 		toc(&tAttn, tA)
 
 		O := gemm(ql.oProj, qz(attnOut, P, nH*hd))

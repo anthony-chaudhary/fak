@@ -35,7 +35,7 @@ import "sync"
 // contiguous (pos[j]==j), so the index is the absolute position; W=-1 keeps j0=0 exactly,
 // reducing every byte to the pre-SWA loop. attnCap is the optional Gemma2 attention
 // score soft-cap; zero keeps Llama-family scores unchanged.
-func attnPrefillInto(attnOut, Q, Kl, Vl []float32, P, base, nH, hd, w, grp, W int, scale, attnCap float32, scoreDot func(a, b []float32) float32) {
+func attnPrefillInto(attnOut, Q, Kl, Vl []float32, P, base, nH, hd, w, grp, W, layer int, scale, attnCap float32, scoreDot func(a, b []float32) float32, obs AttnObserver) {
 	units := P * nH
 	maxPos := base + P // widest scores row in this panel
 
@@ -55,6 +55,9 @@ func attnPrefillInto(attnOut, Q, Kl, Vl []float32, P, base, nH, hd, w, grp, W in
 			}
 			softcapInPlace(sc, attnCap)
 			softmaxInPlace(sc)
+			if obs != nil { // #852: prefill token t sits at absolute position base+t
+				emitAttnRow(obs, layer, base+t, h, j0, sc)
+			}
 			out := attnOut[t*nH*hd+h*hd : t*nH*hd+(h+1)*hd]
 			for j := j0; j < nPos; j++ {
 				vh := Vl[j*w+kvh*hd : j*w+(kvh+1)*hd]

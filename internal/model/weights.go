@@ -214,6 +214,13 @@ type Model struct {
 	// this field does not touch the proven Llama path. modelLayout() consults it to
 	// pick standardKVLayout (MLA==nil) vs mlaKVLayout (MLA!=nil).
 	MLA *MLAConfig
+
+	// attnObs is the optional attention-mass witness (#852). nil by default — the
+	// unobserved forward pass is byte-identical and allocation-identical. When set via
+	// SetAttnObserver, the named attention seams emit a COPY of their post-softmax
+	// weights at the softmax seam (emission only; the math is untouched). See
+	// attn_observer.go.
+	attnObs AttnObserver
 }
 
 // newModel assembles a Model from a built manifest + packed f32 blob, applying

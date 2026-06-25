@@ -154,7 +154,7 @@ func (s *Session) prefillBatchedQ4K(ids []int) []float32 {
 
 		attnOut := make([]float32, P*nH*hd)
 		tA := tic()
-		attnPrefillInto(attnOut, Q, Kl, Vl, P, base, nH, hd, w, grp, cfg.windowForLayer(l), scale, attnCap, fdot)
+		attnPrefillInto(attnOut, Q, Kl, Vl, P, base, nH, hd, w, grp, cfg.windowForLayer(l), l, scale, attnCap, fdot, nil)
 		toc(&tAttn, tA)
 
 		O := proj(lp("self_attn.o_proj.weight"), attnOut, qz(attnOut, P, nH*hd))

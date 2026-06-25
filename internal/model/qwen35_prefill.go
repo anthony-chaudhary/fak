@@ -370,7 +370,7 @@ func (s *Session) prefillQwen35FullAttnLayerQ(l int, Xn []float32, P, base int, 
 
 	attnOut := make([]float32, P*qWidth)
 	t = s.phaseStart()
-	attnPrefillInto(attnOut, Q, s.Cache.K[l], s.Cache.V[l], P, base, nH, hd, w, grp, cfg.windowForLayer(l), scale, attnCap, fdot)
+	attnPrefillInto(attnOut, Q, s.Cache.K[l], s.Cache.V[l], P, base, nH, hd, w, grp, cfg.windowForLayer(l), l, scale, attnCap, fdot, s.M.attnObs)
 	s.phaseEnd("qwen35_full_attn", t)
 	t = s.phaseStart()
 	for i := range attnOut {

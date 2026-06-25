@@ -266,7 +266,7 @@ func (s *Session) prefillBatchedMetal(ids []int) []float32 {
 		if metalProf {
 			tA = time.Now()
 		}
-		attnPrefillInto(attnOut, Q, Kl, Vl, P, base, nH, hd, w, grp, cfg.windowForLayer(l), scale, attnCap, fdot)
+		attnPrefillInto(attnOut, Q, Kl, Vl, P, base, nH, hd, w, grp, cfg.windowForLayer(l), l, scale, attnCap, fdot, nil)
 		if metalProf {
 			tAttn += time.Since(tA)
 		}

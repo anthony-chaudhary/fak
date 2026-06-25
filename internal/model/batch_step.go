@@ -246,7 +246,7 @@ func (bs *BatchSession) stepBatchF32(ids []int) [][]float32 {
 		}
 		// causal GQA attention, each user over its own cache (parallel, allocation-light).
 		attnOut := make([]float32, B*nH*hd)
-		db.scores = attnDecodeBatch(attnOut, Q, caches, l, B, nH, hd, w, grp, cfg.windowForLayer(l), scale, dot, nil, db.scores)
+		db.scores = attnDecodeBatch(attnOut, Q, caches, l, B, nH, hd, w, grp, cfg.windowForLayer(l), scale, dot, nil, db.scores, m.attnObs)
 
 		// batched output projection + residual.
 		O := matMulBatch(m.tensor(lp("self_attn.o_proj.weight")), attnOut, H, nH*hd, B)
@@ -416,7 +416,7 @@ func (bs *BatchSession) stepBatchQ(ids []int) [][]float32 {
 		if attnFdot3SIMD && B >= attnFdot3SIMDMinBatch {
 			scoreDot3 = fdot3SIMD
 		}
-		db.scores = attnDecodeBatch(attnOut, Q, caches, l, B, nH, hd, w, grp, cfg.windowForLayer(l), scale, fdot, scoreDot3, db.scores)
+		db.scores = attnDecodeBatch(attnOut, Q, caches, l, B, nH, hd, w, grp, cfg.windowForLayer(l), scale, fdot, scoreDot3, db.scores, m.attnObs)
 
 		O := grow(db.O, B*H)
 		db.O = O
