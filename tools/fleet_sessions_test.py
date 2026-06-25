@@ -33,13 +33,21 @@ def _row(account, disp, autonomous=True, cwd=None, project="C--work-fleet",
     }
 
 
-def _avail(account, available=True, live=0, active=0):
+def _avail(account, available=True, live=0, active=0, verdict_source="passive"):
+    """An availability row shaped like account_availability() output.
+
+    verdict_source defaults to 'passive' (a real session row inside the window proves
+    the account alive) -- the production-faithful default, since account_availability
+    always stamps a verdict and an account that reads `available` does so on positive
+    evidence (a probe OK or a live/done row). Tests exercising the #619 launch-boundary
+    rule pass verdict_source='carried' (a stale verdict with no fresh evidence)."""
     tag = account.replace(".claude-", "").replace(".claude", "default")
     if tag.endswith("-acct"):
         tag = tag[: -len("-acct")]
     return {"account": account, "tag": tag or "default",
             "config_dir": os.path.join(fleet_sessions.USER, account),
-            "available": available, "live_sessions": live, "active_sessions": active}
+            "available": available, "live_sessions": live, "active_sessions": active,
+            "verdict_source": verdict_source}
 
 
 class RehomeDecisionTest(unittest.TestCase):
@@ -222,12 +230,12 @@ class RehomeSpreadTest(unittest.TestCase):
         self.assertEqual(rows[0]["resume_account"], ".claude-idle-acct")
 
     def test_proven_healthy_account_ranks_above_unproven(self) -> None:
-        # equal load: an account with a fresh positive verdict (probe) beats one whose
-        # `available` is merely the absence-of-evidence default ("none").
-        proven = _avail(".claude-proven-acct", available=True, live=0)
-        proven["verdict_source"] = "probe"
-        unproven = _avail(".claude-unproven-acct", available=True, live=0)
-        unproven["verdict_source"] = "none"
+        # _rehome_targets is a pure RANKER: an account with a fresh positive verdict
+        # (probe) sorts ahead of one whose `available` is merely the absence-of-evidence
+        # default ("none"). (The hard exclusion of carried/none is the launch-boundary
+        # rule tested in LaunchBoundaryAdmissionTest via decide()/_admissible_targets.)
+        proven = _avail(".claude-proven-acct", available=True, live=0, verdict_source="probe")
+        unproven = _avail(".claude-unproven-acct", available=True, live=0, verdict_source="none")
         # list the unproven FIRST to prove ranking, not list order, decides.
         cands = fleet_sessions._rehome_targets([unproven, proven], ".claude-owner-acct")
         self.assertEqual(cands[0]["account"], ".claude-proven-acct")
@@ -235,15 +243,80 @@ class RehomeSpreadTest(unittest.TestCase):
     def test_passive_verdict_ranks_above_carried(self) -> None:
         # 'passive' (a real session row inside the window proves the account alive) is
         # genuine positive evidence and must rank above a stale 'carried' verdict --
-        # even when the carried account's tag sorts first. (The earlier draft whitelisted
-        # a phantom 'registry' and dropped 'passive', so passive tied with carried.)
-        carried = _avail(".claude-aaa-acct", available=True, live=0)   # tag sorts first
-        carried["verdict_source"] = "carried"
-        passive = _avail(".claude-zzz-acct", available=True, live=0)   # tag sorts last
-        passive["verdict_source"] = "passive"
+        # even when the carried account's tag sorts first.
+        carried = _avail(".claude-aaa-acct", available=True, live=0, verdict_source="carried")
+        passive = _avail(".claude-zzz-acct", available=True, live=0, verdict_source="passive")
         cands = fleet_sessions._rehome_targets([carried, passive], ".claude-owner-acct")
         self.assertEqual(cands[0]["account"], ".claude-zzz-acct",
                          "a proven-alive 'passive' account must beat a stale 'carried' one")
+
+
+class LaunchBoundaryAdmissionTest(unittest.TestCase):
+    """#619: ONE authoritative, freshness-stamped verdict gates every launch. Load is
+    never admitted onto a CARRIED / absence-of-evidence verdict -- a carried 'available'
+    that flip-flops with whether the pass probed cannot route a workload. The decision
+    is identical across repeated passes over the SAME evidence (the day24 incident:
+    available@22:17, throttled@22:19, available@22:20 -- the carried verdict latched
+    routing non-deterministically)."""
+
+    def _carried_only(self):
+        """A re-home decision whose ONLY candidate is a carried-verdict 'available'
+        account, owner genuinely throttled. Returns the decided row."""
+        rows = [_row(".claude-owner-acct", "STOPPED_LIMIT")]
+        throttle = {".claude-owner-acct": {"reset": "Jun 24, 8pm"}}
+        carried = _avail(".claude-carried-acct", available=True, live=0,
+                         verdict_source="carried")
+        fleet_sessions.decide(rows, throttle, [carried])
+        return rows[0]
+
+    def test_carried_only_verdict_refuses_load(self) -> None:
+        # carried 'available' is NOT positive evidence -> not a re-home target -> DEFER.
+        r = self._carried_only()
+        self.assertEqual(r["action"], "DEFER_THROTTLED")
+        self.assertFalse(r["rehomed"])
+
+    def test_carried_only_decision_is_deterministic(self) -> None:
+        # the acceptance: identical evidence -> identical decision on every pass.
+        a = self._carried_only()
+        b = self._carried_only()
+        self.assertEqual((a["action"], a["resume_account"]),
+                         (b["action"], b["resume_account"]))
+        self.assertEqual(a["action"], "DEFER_THROTTLED")
+
+    def test_fresh_probe_admits_load(self) -> None:
+        # the same shape but with a fresh PROBE verdict -> positive evidence -> admitted.
+        rows = [_row(".claude-owner-acct", "STOPPED_LIMIT")]
+        throttle = {".claude-owner-acct": {"reset": "Jun 24, 8pm"}}
+        probed = _avail(".claude-probed-acct", available=True, live=0,
+                        verdict_source="probe")
+        fleet_sessions.decide(rows, throttle, [probed])
+        r = rows[0]
+        self.assertEqual(r["action"], "AUTO_RESUME")
+        self.assertTrue(r["rehomed"])
+        self.assertEqual(r["resume_account"], ".claude-probed-acct")
+
+    def test_carried_owner_does_not_resume_in_place(self) -> None:
+        # The in-place resume IS a launch: a STOPPED_LIMIT session whose owner is NOT in
+        # the throttle map but carries only a stale 'carried' verdict must not resume in
+        # place on that unproven owner. With no proven target it DEFERs (re-probe first).
+        rows = [_row(".claude-owner-acct", "STOPPED_LIMIT")]
+        carried = _avail(".claude-owner-acct", available=True, verdict_source="carried")
+        fleet_sessions.decide(rows, {}, [carried])   # owner NOT in the throttle map
+        r = rows[0]
+        self.assertEqual(r["action"], "DEFER_THROTTLED")
+        self.assertFalse(r["rehomed"])
+
+    def test_carried_owner_rehomes_onto_proven_target(self) -> None:
+        # carried owner + a fresh-probed alternative: don't resume in place on the
+        # unproven owner -- re-home onto the proven-healthy account instead.
+        rows = [_row(".claude-owner-acct", "STOPPED_LIMIT")]
+        carried_owner = _avail(".claude-owner-acct", available=True, verdict_source="carried")
+        probed = _avail(".claude-probed-acct", available=True, live=0, verdict_source="probe")
+        fleet_sessions.decide(rows, {}, [carried_owner, probed])
+        r = rows[0]
+        self.assertEqual(r["action"], "AUTO_RESUME")
+        self.assertTrue(r["rehomed"])
+        self.assertEqual(r["resume_account"], ".claude-probed-acct")
 
 
 class OrgDisabledRehomeTest(unittest.TestCase):

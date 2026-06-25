@@ -611,6 +611,20 @@ def resume_cmd(r):
 REHOME_CAP = int(os.environ.get("FAK_REHOME_CAP", "4"))
 
 
+def _has_positive_evidence(a) -> bool:
+    """The launch-boundary admission predicate (#619): True iff an account's health
+    verdict rests on POSITIVE evidence it is serving right now -- a fresh probe
+    (verdict_source 'probe') or a real session row inside the window ('passive') --
+    rather than a stale 'carried' verdict or the absence-of-evidence default ('none').
+    account_availability stamps exactly one verdict_source per account, so this is the
+    single field load-routing consults. Load is only ever admitted onto accounts that
+    pass this gate; a carried verdict must be re-probed before it can take a workload.
+    That is what makes routing deterministic: the SAME evidence yields the SAME
+    decision regardless of which pass or tool asks -- a carried 'available' that
+    flip-flops with whether the pass happened to probe can no longer admit load."""
+    return str(a.get("verdict_source") or "none") in ("probe", "passive")
+
+
 def _rehome_targets(availability, exclude_account, assigned=None):
     """Available Claude worker accounts a throttled session can move to, least
     loaded first. opencode accounts are excluded: a Claude transcript can only
@@ -643,30 +657,52 @@ def _rehome_targets(availability, exclude_account, assigned=None):
     # session row inside the window proves it alive), or carried (a stale verdict
     # carried forward with no fresh evidence). probe/passive are genuine positive
     # evidence; carried/none are not -- so probe/passive sort ahead of carried/none.
-    # A target offered purely because nothing bad was recorded is the weakest kind of
-    # healthy, so it goes last among equals -- without ever being excluded when it is
-    # the only option (the load + cap gate already decides inclusion).
+    # This is RANKING only; the hard launch-boundary admission rule (#619) -- refusing
+    # to route load onto a carried verdict at all -- is enforced by _admissible_targets,
+    # which decide() consults. _rehome_targets stays a pure ranker so resume_resolver
+    # (a separate consumer with its own owner-probe discipline) keeps its behavior.
     def _unproven(a):
-        return 0 if str(a.get("verdict_source") or "none") in ("probe", "passive") else 1
+        return 0 if _has_positive_evidence(a) else 1
     cands.sort(key=lambda a: (int(a.get("live_sessions") or 0) + assigned.get(a.get("account", ""), 0),
                               _unproven(a),
                               int(a.get("active_sessions") or 0),
                               str(a.get("tag") or a.get("account") or "")))
     return cands
 
+
+def _admissible_targets(availability, exclude_account, assigned=None):
+    """Re-home targets that pass the kernel's launch-boundary admission rule (#619).
+
+    The load-bearing rule: NEVER admit a real workload onto a CARRIED / absence-of-
+    evidence verdict. _rehome_targets ranks the available candidates; this gate then
+    drops every one whose health verdict is not POSITIVE evidence it is serving right
+    now (verdict_source probe | passive). A carried "available" -- the day24 incident,
+    where the account read available@22:17, throttled@22:19, available@22:20 purely on
+    whether that pass probed -- can no longer take load: it must be re-probed first.
+    decide() consults THIS, not the raw ranker, so the same evidence yields the same
+    routing decision on every pass; with no admissible target it DEFERs and waits for
+    a probe, which is the deterministic outcome the issue requires."""
+    return [t for t in _rehome_targets(availability, exclude_account, assigned)
+            if _has_positive_evidence(t)]
+
 def _owner_available(availability, account):
-    """True when this session's CURRENT owner account reads available in the
-    freshness-stamped snapshot. Used to detect a STALE STOPPED_LIMIT banner: a
-    transcript copied off a once-throttled owner carries that owner's old "limit
-    reached" line, so decide() can read STOPPED_LIMIT for a session whose owner has
-    since cleared. The static counterpart of resume_resolver's carried-throttle
+    """True when this session's CURRENT owner account is ADMISSIBLE for an in-place
+    resume in the freshness-stamped snapshot. Used to detect a STALE STOPPED_LIMIT
+    banner: a transcript copied off a once-throttled owner carries that owner's old
+    "limit reached" line, so decide() can read STOPPED_LIMIT for a session whose owner
+    has since cleared. The static counterpart of resume_resolver's carried-throttle
     re-probe -- account_availability already folds a fresh probe row into `available`,
-    so an available owner means the limit lifted: resume in place, don't re-home.
-    Conservative when the snapshot is absent (availability is None) -> False, which
-    preserves the pre-existing re-home/defer behavior."""
+    so a proven-available owner means the limit lifted: resume in place, don't re-home.
+    Admissible (#619) = available AND backed by positive evidence (probe/passive):
+    resuming a workload onto the owner IS a launch, so this in-place path obeys the
+    same launch-boundary rule as re-home target selection. A carried "available" owner
+    -- the exact passive-banner-vs-probe flip from the day24 incident -- is NOT trusted
+    to take load in place; it falls through to re-home/defer until a fresh probe
+    confirms it. Conservative when the snapshot is absent (availability is None) ->
+    False, which preserves the pre-existing re-home/defer behavior."""
     for a in (availability or []):
         if a.get("account") == account:
-            return bool(a.get("available"))
+            return bool(a.get("available")) and _has_positive_evidence(a)
     return False
 
 def _ledger_blocked_sids(reg_dir=None):
@@ -849,7 +885,9 @@ def decide(rows, throttle, availability=None):
             else:
                 resumable = r["autonomous"] and (
                     r["disp"] in DEAD or r["disp"] in ("STOPPED_LIMIT", "STOPPED_APIERR"))
-                targets = _rehome_targets(availability, r["account"], assigned) if resumable else []
+                # #619: only PROVEN-healthy (probe/passive) targets may take load; a
+                # carried "available" is refused here -> defer until a fresh probe.
+                targets = _admissible_targets(availability, r["account"], assigned) if resumable else []
                 if targets:
                     tgt = targets[0]
                     r["action"] = "AUTO_RESUME"     # INFRA: rate limit -> move to healthy acct
@@ -865,7 +903,9 @@ def decide(rows, throttle, availability=None):
             # onto a healthy, non-org-disabled account WITH usage (the same machinery as
             # the rate-limit path; _rehome_targets already excludes blocked accounts).
             resumable = r["autonomous"]
-            targets = _rehome_targets(availability, r["account"], assigned) if resumable else []
+            # #619: same launch-boundary gate -- never route an org-disabled session's
+            # workload onto a carried/absence-of-evidence target; require positive evidence.
+            targets = _admissible_targets(availability, r["account"], assigned) if resumable else []
             if targets:
                 tgt = targets[0]
                 r["action"] = "AUTO_RESUME"         # INFRA: org-disabled -> move to a usable acct
