@@ -34,6 +34,8 @@ package accounts
 
 import (
 	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -63,12 +65,37 @@ const (
 // Identity is the DISK-DERIVED truth about which account a config home is logged into.
 // It is filled by DeriveIdentity from the home's own files, never authored by hand, so
 // a home's NAME can never silently disagree with its login. It holds an email + the
-// account UUID, never a credential value.
+// account UUID + a non-secret fingerprint of the setup token, never a credential value.
 type Identity struct {
 	Email       string `json:"email,omitempty"`
 	AccountUUID string `json:"account_uuid,omitempty"`
 	HasCreds    bool   `json:"has_creds"`
 	Exists      bool   `json:"exists"`
+	// TokenFP is a short, one-way fingerprint (SHA-256 prefix) of the home's setup
+	// token (<dir>/.oauth-token), or "" when absent. It is NOT the token: the secret is
+	// read, hashed, and discarded. It exists because the interactive login
+	// (.claude.json / .credentials.json) and the setup token can name DIFFERENT
+	// accounts in one dir — a headless `claude -p` that honors CLAUDE_CODE_OAUTH_TOKEN
+	// then burns the TOKEN's account, not the dir-name's. Two homes with the same
+	// TokenFP share one rate-limit bucket regardless of what their .claude.json says, so
+	// Reconcile uses it to collapse phantom duplicates the email/UUID alone would miss.
+	TokenFP string `json:"token_fp,omitempty"`
+}
+
+// AccountKey is the identity a seat collapses onto for dedup: two seats with the same
+// AccountKey are the SAME account (one rate-limit bucket) and must never be counted as
+// independent capacity. It prefers the interactive login's AccountUUID (ground truth for
+// WHO the dir is logged in as); only when that is absent does it fall back to the
+// setup-token fingerprint, so a half-set-up token-only dir still groups. Empty when the
+// home has neither a login nor a token (nothing to collapse on).
+func (id Identity) AccountKey() string {
+	if id.AccountUUID != "" {
+		return "uuid:" + id.AccountUUID
+	}
+	if id.TokenFP != "" {
+		return "tok:" + id.TokenFP
+	}
+	return ""
 }
 
 // Home is one Claude config home (a CLAUDE_CONFIG_DIR seat). Name is the roster handle
@@ -376,6 +403,146 @@ func normAlnum(s string) string {
 }
 
 // ---------------------------------------------------------------------------
+// RECONCILIATION — collapse N config homes that are really ONE account.
+// ---------------------------------------------------------------------------
+//
+// A host accretes config homes faster than it retires them: ~/.claude,
+// ~/.claude-gem8-netra, ~/.claude-day24-netra, a leftover ~/.claude-q-…DELETED — and
+// several end up logged into the SAME account (one rate-limit bucket) by an honest
+// mistake (a copied .oauth-token, a re-login that landed on the wrong account). Keyed
+// purely on the dir NAME, the roster then shows one account as several independent
+// "serving" seats, so a spread fans onto what is really one window and they all wall
+// together. Reconcile is the auto-handler: it groups seats by the account each truly
+// resolves to and elects ONE canonical per account, so a roster can collapse the rest
+// instead of double-counting them — and it flags the subtler split where a dir's setup
+// TOKEN belongs to a different account than its interactive login.
+
+// IdentityRole classifies an active seat within its resolved-account group.
+type IdentityRole string
+
+const (
+	// RoleUnique is the only seat on its account — nothing to collapse.
+	RoleUnique IdentityRole = "unique"
+	// RoleCanonical is the kept seat when several share one account.
+	RoleCanonical IdentityRole = "canonical"
+	// RoleDuplicate is a seat that shares another's account; collapse it onto Canonical.
+	RoleDuplicate IdentityRole = "duplicate"
+	// RoleNoLogin is a seat with no derivable identity (no login, no token) — ungroupable.
+	RoleNoLogin IdentityRole = "no-login"
+)
+
+// SeatIdentity is the derived dedup verdict for one active seat. It is computed on
+// demand from disk-derived Identity (never persisted) — the reconciliation sibling of
+// the advisory NameLie flag.
+type SeatIdentity struct {
+	Name string `json:"name"`
+	// Role places this seat in its account group (unique/canonical/duplicate/no-login).
+	Role IdentityRole `json:"role"`
+	// Account is the grouping key (uuid:… or tok:…); "" when the seat has no identity.
+	Account string `json:"account,omitempty"`
+	// Canonical is the seat this one collapses onto (== Name for unique/canonical).
+	Canonical string `json:"canonical,omitempty"`
+	// Peers are the other seat names on the SAME account (sorted), empty when unique.
+	Peers []string `json:"peers,omitempty"`
+	// TokenTwin lists seats sharing this seat's setup-token but a DIFFERENT interactive
+	// login — the split-identity warning: a headless launch here may burn THEIR account's
+	// bucket, not the one this dir's name/login implies.
+	TokenTwin []string `json:"token_twin,omitempty"`
+}
+
+// Reconcile groups the registry's ACTIVE seats by the account each resolves to and
+// returns a per-seat verdict keyed by seat name. Tombstoned seats are excluded (a
+// tombstone already collapses via RehomeTo). It is pure over the homes' disk-derived
+// Identity, so Refresh first for a live answer. The election is deterministic and reads
+// no disk: a seat whose NAME matches its login beats a name-lie; a named seat beats the
+// generic "default"; a seat with live creds beats one without; ties break on the
+// lexically smaller name.
+func (r Registry) Reconcile() map[string]SeatIdentity {
+	var active []Home
+	for _, h := range r.Homes {
+		if h.Active() {
+			active = append(active, h)
+		}
+	}
+	byAccount := map[string][]Home{}
+	byToken := map[string][]Home{}
+	for _, h := range active {
+		if k := h.Identity.AccountKey(); k != "" {
+			byAccount[k] = append(byAccount[k], h)
+		}
+		if fp := h.Identity.TokenFP; fp != "" {
+			byToken[fp] = append(byToken[fp], h)
+		}
+	}
+	out := make(map[string]SeatIdentity, len(active))
+	for _, h := range active {
+		key := h.Identity.AccountKey()
+		si := SeatIdentity{Name: h.Name, Account: key, Canonical: h.Name}
+		if key == "" {
+			si.Role = RoleNoLogin
+		} else {
+			group := byAccount[key]
+			for _, g := range group {
+				if g.Name != h.Name {
+					si.Peers = append(si.Peers, g.Name)
+				}
+			}
+			sort.Strings(si.Peers)
+			canon := canonicalSeat(group)
+			si.Canonical = canon.Name
+			switch {
+			case len(group) == 1:
+				si.Role = RoleUnique
+			case h.Name == canon.Name:
+				si.Role = RoleCanonical
+			default:
+				si.Role = RoleDuplicate
+			}
+		}
+		// Split identity: same setup token, different interactive login.
+		if fp := h.Identity.TokenFP; fp != "" {
+			for _, g := range byToken[fp] {
+				if g.Name != h.Name && g.Identity.AccountUUID != h.Identity.AccountUUID {
+					si.TokenTwin = append(si.TokenTwin, g.Name)
+				}
+			}
+			sort.Strings(si.TokenTwin)
+		}
+		out[h.Name] = si
+	}
+	return out
+}
+
+// canonicalSeat picks the seat a same-account group collapses onto (see Reconcile for
+// the ordering). group is non-empty.
+func canonicalSeat(group []Home) Home {
+	best := group[0]
+	for _, h := range group[1:] {
+		if canonRank(h) > canonRank(best) ||
+			(canonRank(h) == canonRank(best) && h.Name < best.Name) {
+			best = h
+		}
+	}
+	return best
+}
+
+// canonRank scores a seat's fitness to be its account's canonical home: a truthful name
+// dominates, then a named (non-"default") seat, then live credentials.
+func canonRank(h Home) int {
+	rank := 0
+	if !h.NameLie() {
+		rank += 4
+	}
+	if !strings.EqualFold(h.Name, "default") {
+		rank += 2
+	}
+	if h.Identity.HasCreds {
+		rank++
+	}
+	return rank
+}
+
+// ---------------------------------------------------------------------------
 // DISCOVERY — disk truth: which ~/.claude* dirs exist + who they're logged in as.
 // ---------------------------------------------------------------------------
 
@@ -412,7 +579,26 @@ func DeriveIdentity(dir string) Identity {
 	if fi, err := os.Stat(filepath.Join(dir, ".credentials.json")); err == nil && !fi.IsDir() {
 		id.HasCreds = true
 	}
+	id.TokenFP = tokenFingerprint(dir)
 	return id
+}
+
+// tokenFingerprint returns a short, non-secret fingerprint of a config home's setup
+// token (<dir>/.oauth-token), or "" when the file is absent/empty. It is a SHA-256
+// prefix of the token bytes — one-way, so two seats sharing one token fingerprint share
+// one rate-limit bucket without the registry ever storing or exposing the secret. The
+// token is read, hashed, and discarded; only the 12-hex-char fingerprint is retained.
+func tokenFingerprint(dir string) string {
+	b, err := os.ReadFile(filepath.Join(dir, ".oauth-token"))
+	if err != nil {
+		return ""
+	}
+	tok := bytes.TrimSpace(b)
+	if len(tok) == 0 {
+		return ""
+	}
+	sum := sha256.Sum256(tok)
+	return hex.EncodeToString(sum[:6])
 }
 
 // isConfigHome reports whether dir looks like a Claude config home rather than an
