@@ -1663,12 +1663,14 @@ func TestShellSelfModifyGuardWiredInDecide(t *testing.T) {
 //
 //   - "inkernel"   — modelengine: the in-kernel Go model-fusion engine (the dogfood default).
 //   - "localtools" — agent: the local tool-call engine cmd/fak wires directly.
+//   - "fakread"    — agent: the read-only engine for fak_read gateway calls.
 //   - "mock"       — engine: the routing/mock engine used by the engine-route capability.
 //
 // A NEW engine under a NEW id is correctly allowed (the map is plural by design); only a
 // second registrant of an EXISTING id is the regression this gate catches.
 var engineDriverRole = map[string]map[string]string{
 	"inkernel":   {"modelengine": "the in-kernel Go model-fusion engine (dogfood default)"},
+	"fakread":    {"agent": "the read-only engine for fak_read gateway calls"},
 	"localtools": {"agent": "the local tool-call engine wired by cmd/fak"},
 	"mock":       {"engine": "the routing/mock engine behind the engine.route capability"},
 }
