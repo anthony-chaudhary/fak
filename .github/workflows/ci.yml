@@ -424,7 +424,7 @@ jobs:
       # Their suites are deterministic, pure-stdlib (the code-quality + tooling-quality
       # runners were converted off the pytest subprocess to match their siblings), and green
       # today; wired HARD here so the whole family is gated symmetrically.
-      - name: scorecard regression suites (code-quality · doc-appeal · industry · agent-readiness · tooling-quality · observability)
+      - name: scorecard regression suites (code-quality · doc-appeal · industry · agent-readiness · tooling-quality · observability · stability)
         working-directory: ${{ github.workspace }}
         run: |
           python tools/code_quality_scorecard_test.py
@@ -433,6 +433,11 @@ jobs:
           python tools/agent_readiness_scorecard_test.py
           python tools/tooling_quality_scorecard_test.py
           python tools/observability_scorecard_test.py
+          # stability: the sentinel/invariant/revert/drift measuring stick. Its live
+          # smoke asserts the real tree folds to ZERO stability-debt (grade A) — the
+          # HARD regression sentinel for the day someone removes a gate, an invariant,
+          # a ratchet baseline, or the rollback runbook.
+          python tools/stability_scorecard_test.py
 
       # Public-copy leak gate: the machine backstop for the redact-needle floor.
       # The local pre-commit hook (tools/githooks/pre-commit) only fires on a clone
