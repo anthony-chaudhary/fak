@@ -5,6 +5,8 @@ description: "The durable trajectory ledger for fak's code-quality RSI loop: the
 
 # The code-2x program — a consistent quality measure, baselined and halved
 
+The code-2x program is fak's trajectory ledger for recursively halving code-debt: the hand-kept record of the baseline, the target, and what each quality pass actually moved, with the evidence that proves it. Code-debt is the count of concrete, re-derivable HARD defects that `tools/code_quality_scorecard.py` scores from disk and the Go toolchain — never from a self-report — so the same tree always yields the same number. Because a mature codebase's composite score caps at 100 and cannot double, the "2×" target lives on the debt axis: cut defects by at least half, then halve again. Each pass is committed by explicit path and witnessed with `dos commit-audit`, so the ledger records improvements that were proven, not asserted.
+
 > The durable ledger for the code-quality RSI loop. The living per-KPI snapshot
 > is [`CODE-QUALITY-SCORECARD.md`](CODE-QUALITY-SCORECARD.md) (auto-regenerated
 > each pass); this file is the hand-kept *trajectory* — baseline, target, and

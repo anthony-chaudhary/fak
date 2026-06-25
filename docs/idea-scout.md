@@ -5,6 +5,8 @@ description: "The fak idea-scout searches arXiv and GitHub once a day for ideas 
 
 # The idea-scout (`idea-scout`)
 
+The fak idea-scout is a research-to-issue feeder that, once a day, searches arXiv and GitHub for work adjacent to agent-kernel development. It scores each hit with a transparent, auditable relevance number, dedups candidates three ways — against a persistent seen-cache, existing issue bodies, and near-duplicate titles — and files at most a few of the best as triage-ready GitHub issues. It runs dry-run by default, planning the issues without creating any; `--live` is the explicit opt-in to actually file them. Paired with the issue-dispatch loop, it closes the backlog cycle: the scout fills the backlog, the dispatcher drains it.
+
 > The fleet's **inbound** idea feeder. The [issue-dispatch loop](dispatch-loop.md)
 > *resolves* the open backlog; nothing *fills* it. The idea-scout is that missing
 > half: once a day it searches the outside world — arXiv papers and GitHub repos —

@@ -5,6 +5,8 @@ description: "Tracks fak server and agent-integration documentation: which guide
 
 # fak Documentation Roadmap
 
+The fak documentation roadmap is the index of fak's server and agent-integration guides — what has shipped, where each page lives, and how the set maps to its tracking issues. As of this page's status, the tracked backlog is closed: every planned guide (tutorial, policy, observability, API reference, multi-language examples, framework integration, advanced topics, security, FAQ, deployment, and migration) has shipped and is wired into the docs index. It doubles as a historical record of the original "100x better documentation" structure vision, now superseded by consolidated pages. Use it to find the right guide and to confirm a documentation surface exists before assuming it doesn't.
+
 **Status:** Complete — all tracked documentation has shipped and is wired into the index
 
 **Last updated:** 2026-06-24

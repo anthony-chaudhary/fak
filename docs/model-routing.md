@@ -5,6 +5,8 @@ description: "How fak routes one request by aspect, from tool calls to reasoning
 
 # Model routing — first-class at every level (`fak route`)
 
+fak model routing is a way to route a single request at any aspect — the whole request, one tool call, a sub-query, a planner state, or a reasoning step — each to a different model, with first-class ensembles folded by a configurable reduction (first, vote, best_of, all_reduce, or concat), all expressed as one deterministic, verifiable policy manifest. Most LLM routers answer only "which single model serves this whole request?"; fak makes the routing decision first-class at every level instead. The routing decision spine and the ensemble reduce are shipped and witnessed by go test (internal/modelroute, fak route), along with an offline routing benchmark (fak routebench) that compares per-aspect and ensemble policies against a single-model baseline with no model in the loop. Live multi-model dispatch that executes a decision on real engines is still a stub tracked as a GitHub issue series; any "10x" is a categorical capability framing and a target to be measured, never a measured result.
+
 > **Status.** The routing **decision** spine and the ensemble **reduce** are
 > [SHIPPED] (`internal/modelroute`, `fak route`, witnessed by `go test`). The
 > **offline routing benchmark** (`fak routebench` — per-aspect + ensemble vs

@@ -1,3 +1,8 @@
+---
+title: "fak: guard the opencode/GLM dispatch lane"
+description: "How to front the opencode/GLM dispatch worker with fak guard by setting the GLM base URL; live-node activation is deferred."
+---
+
 # Guarding the opencode/GLM dispatch lane (issue #730)
 
 Use this when you run the two-lane dispatch fleet and want the **opencode/GLM**

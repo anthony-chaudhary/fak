@@ -16030,6 +16030,8 @@ description: "How fak routes one request by aspect, from tool calls to reasoning
 
 # Model routing — first-class at every level (`fak route`)
 
+fak model routing is a way to route a single request at any aspect — the whole request, one tool call, a sub-query, a planner state, or a reasoning step — each to a different model, with first-class ensembles folded by a configurable reduction (first, vote, best_of, all_reduce, or concat), all expressed as one deterministic, verifiable policy manifest. Most LLM routers answer only "which single model serves this whole request?"; fak makes the routing decision first-class at every level instead. The routing decision spine and the ensemble reduce are shipped and witnessed by go test (internal/modelroute, fak route), along with an offline routing benchmark (fak routebench) that compares per-aspect and ensemble policies against a single-model baseline with no model in the loop. Live multi-model dispatch that executes a decision on real engines is still a stub tracked as a GitHub issue series; any "10x" is a categorical capability framing and a target to be measured, never a measured result.
+
 > **Status.** The routing **decision** spine and the ensemble **reduce** are
 > [SHIPPED] (`internal/modelroute`, `fak route`, witnessed by `go test`). The
 > **offline routing benchmark** (`fak routebench` — per-aspect + ensemble vs
@@ -17071,6 +17073,8 @@ description: "How routing, addressing, fusion, and semantics are four different 
 
 # The four layers of agent memory — routing, addressing, fusion, semantics
 
+Agent memory — the KV cache and context window a transformer shares across requests — is really four distinct problems wearing one name: routing (where a cell lives and how a request finds it), addressing (the stable name two readers share for it), fusion (whether the bytes share one arena for zero-copy access), and semantics (whether a cell can be coherently mutated, isolated, attributed, and capability-gated across a trust boundary — and proven). The serving world (Mooncake, NVIDIA Dynamo, LMCache, vLLM, SGLang) has largely solved the first three. fak's paradigm change is at the fourth and the fourth alone: it does not move, rename, or co-locate the cell faster, it changes what the cell is — making it mutable-in-the-middle, isolatable, and provenance-stamped. This explainer walks the four layers, shows why the semantics layer is still largely unowned, and gives the one-line test for telling a routing claim apart from fak's actual differentiator.
+
 *Why "the KV cache is shared now" is four different problems wearing one name — and which one fak actually changes.*
 
 ## TL;DR
@@ -17619,6 +17623,11 @@ placement win cross the line into a semantics claim.
 
 > Source: `docs/shared-state-ladder.md`
 
+---
+title: "fak shared state ladder"
+description: "The five-rung vocabulary for shared state in fak: live messages, shared objects, durable handoff, disaggregated state, and human-agent collaboration."
+---
+
 # Shared state ladder
 
 This is the vocabulary for shared state in fak. It keeps five related but
@@ -17665,6 +17674,11 @@ UI.
 # Shared task record contract
 
 > Source: `docs/shared-task-record-contract.md`
+
+---
+title: "fak shared task record contract"
+description: "Defines fak's adapter-neutral shared-task JSON envelopes, merge rules, and in-memory reference fold for humans and agents co-editing a task board."
+---
 
 # Shared task record contract
 
@@ -18510,6 +18524,8 @@ description: "Five model-agnostic fleet benchmarks you can reproduce in minutes 
 ---
 
 # The fak Fleet Benchmark Suite — explore it yourself
+
+The fak Fleet Benchmark Suite is five model-agnostic kernel demos — `fanbench`, `fleetbench`, `fak turntax`, `radixbench`, and `ctxdemo` — that you reproduce in minutes with `go run`, with no model weights, no GPU, and no API key. Each drives the real `fak` kernel and reads its own counters, so the headline numbers are deterministic and seeded down to a fixed `(profile, grid, trials, seed)`. They measure an axis orthogonal to raw throughput: how much redundant work a fleet of agents can safely delete through cross-agent cache reuse, turn-tax elimination, and shared-prefix fan-out. Every figure is graded against the best already-shipped baseline and keeps measured kernel events strictly apart from modeled cost economics — any `naive`/`cold` multiple is labeled as such, never as a SOTA win.
 
 > **What this page is.** A single place to *run* the five benchmarks that show what
 > `fak` buys a **fleet** of agents — cross-agent cache reuse, turn-tax elimination, and
@@ -19692,6 +19708,8 @@ description: "fak's modeled WebVoyager prefill geometry: over the real 643-task 
 
 # Frontier WebBench Baselines & SOTA Comparison
 
+This page is fak's WebBench baseline comparison: a deterministic geometry model of the prefill-token work that a fused resident KV eliminates versus a naive per-turn re-prefill harness, computed over the real 643-task WebVoyager set. The headline 8.8x-9.7x is a MODELED A/C ratio against the naive re-prefill floor — a closed-form integer formula, not a wall-clock measurement. The honest cross-worker reuse number, versus a tuned per-agent-KV stack, is B/C = 1.00x-1.10x. fak is not a web agent; it is the serving kernel that makes any SOTA web agent cheaper to run by not re-processing the same browser context on every turn.
+
 **Last Updated:** 2026-06-20
 
 ---
@@ -19933,6 +19951,8 @@ description: "How fak's fused KV cache compares to vLLM, SGLang, llama.cpp and p
 ---
 
 # fak vs Alternatives — Infrastructure Comparison
+
+fak is an agent-kernel KV cache layer that adds cross-worker and cross-session prefix sharing on top of what a tuned single-instance prefix-caching engine (vLLM Automatic Prefix Caching, SGLang RadixAttention, llama.cpp, or provider prompt caching) already does. Within one serving instance, those engines prefill a shared prefix once and are roughly at parity with fak; fak's incremental win is sharing that prefix across separate workers and sessions plus addressable mid-run eviction and a default-deny safety floor. Against that tuned SOTA, the modeled cross-worker delta is about 1.1-1.2x at 4 workers on a 2k prefix, rising toward the agent count as the shared-prefix fraction grows. The eye-catching 20-24x figures in this page are only versus a naive re-prefill-every-turn loop that no serving stack ships — a floor, never the SOTA comparison.
 
 **Date:** 2026-06-20
 **Status:** ✅ Complete with Quantitative Analysis
@@ -20498,6 +20518,8 @@ description: "A non-technical walkthrough of the per-turn prefill tax and how fa
 ---
 
 # Prefill Elimination Explained — How fak Saves 20x on API Costs
+
+Prefill elimination is the practice of not re-sending unchanged context — the system prompt, tool schemas, and problem statement — on every turn of an agent conversation, so providers serve it from their KV cache and charge nothing for the repeated tokens. fak structures requests so this shared prefix stays byte-identical across turns and across agents, turning the provider's standard prompt cache into a cross-worker shared cache. This is not a trick on the model: it exploits the cache behavior Anthropic and OpenAI built into their APIs by design. In a 5-instance SWE-bench smoke test, fak measured a 19.7x–24.0x reduction in input tokens sent versus re-sending everything, with the savings growing as workers and turns increase.
 
 **Target Audience:** Non-technical (product managers, decision-makers)
 **Status:** ✅ Complete with diagrams
@@ -22198,6 +22220,8 @@ description: "The fak issue-dispatch loop spawns capped, witness-gated workers t
 
 # The issue-dispatch loop (`dispatch-loop`)
 
+The issue-dispatch loop is fak's witness-gated driver for a GitHub-issue backlog: it spawns a capped fleet of detached `claude -p` workers, each scoped to one open issue, and closes a ticket only after a commit citing `#N` is bound to it and re-verified per-SHA by `dos commit-audit` — never on the worker's word. Because this repo ships no `PLAN-*.md` portfolio, the open issues themselves are the work surface, routed to the `dos.toml` lane whose file-tree each one touches. The whole loop runs unattended on three OS scheduled tasks, bounded so the live-worker population can never exceed its cap (the no-DoS guarantee). It defaults to dry-run; `--live` is the explicit opt-in to autonomous spawning and closing.
+
 > The fleet's GitHub-issue backlog driver, **closed and witness-gated**. This repo
 > ships no `PLAN-*.md` (`dos` reports `PLAN_SURFACE_EMPTY`), so the backlog lives in
 > GitHub *issues*, not a plan portfolio. The loop spawns a worker at one concrete
@@ -22425,6 +22449,8 @@ description: "The fak idea-scout searches arXiv and GitHub once a day for ideas 
 ---
 
 # The idea-scout (`idea-scout`)
+
+The fak idea-scout is a research-to-issue feeder that, once a day, searches arXiv and GitHub for work adjacent to agent-kernel development. It scores each hit with a transparent, auditable relevance number, dedups candidates three ways — against a persistent seen-cache, existing issue bodies, and near-duplicate titles — and files at most a few of the best as triage-ready GitHub issues. It runs dry-run by default, planning the issues without creating any; `--live` is the explicit opt-in to actually file them. Paired with the issue-dispatch loop, it closes the backlog cycle: the scout fills the backlog, the dispatcher drains it.
 
 > The fleet's **inbound** idea feeder. The [issue-dispatch loop](https://github.com/anthony-chaudhary/fak/blob/main/docs/dispatch-loop.md)
 > *resolves* the open backlog; nothing *fills* it. The idea-scout is that missing
@@ -24372,6 +24398,8 @@ description: "The long-form story of fak: a default-deny capability floor plus r
 ---
 
 # fak — concepts & story (the unabridged front door)
+
+fak is a trust and coherence layer for tool-using AI agents: it sits between the model and its effects and treats the agent as a long-running, untrusted program. It enforces two independent gates — a default-deny capability floor, where dangerous levers like refunds or destructive commands are simply never wired up, and result quarantine, which screens incoming tool output and context for prompt-injection before the agent can read it. The structural guarantee is the floor: an attacker has to both slip a note past the screener and find a lever that was deliberately left unbuilt, and the screener is explicitly best-effort rather than perfect. This page is the long-form companion to the README, covering the two-gate model, when the prefix-reuse performance win actually pays off, and exactly what is shipped versus simulated versus not yet built.
 
 > This is the long-form companion to the [top-level README](https://github.com/anthony-chaudhary/fak/blob/main/README.md). The README
 > is the 3-page front door. Everything that used to make it long lives here.

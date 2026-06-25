@@ -1,3 +1,8 @@
+---
+title: "fak node-macos-a dogfood fleet activation"
+description: "Runbook to activate the always-on guarded dogfood fleet on node-macos-a via launchd; the on-device launchctl load is deferred."
+---
+
 # Activating the always-on guarded dogfood fleet on node-macos-a (issue #729)
 
 Audience: operators activating the Tier-1 Mac dogfood node from the always-on

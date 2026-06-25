@@ -44,3 +44,9 @@ throughput, and you can run `fak serve` in front of any of them. These plans cov
 orthogonal questions a fleet hits at scale: where reused KV lives, how it is shared and
 rebuilt, and which reuse is still *legal* across tenants. See the
 [addressable KV cache](../explainers/addressable-kv-cache.md) explainer for the core idea.
+
+## Witnesses
+
+- [GLM-5.2 full-size serving witness](glm52-full-size-serving-witness.md) — the
+  reproducible runbook behind issue #413: standing up a full-size GLM-5.2 serve and
+  capturing the evidence that it ran.

@@ -5,6 +5,8 @@ description: "The fak issue-dispatch loop spawns capped, witness-gated workers t
 
 # The issue-dispatch loop (`dispatch-loop`)
 
+The issue-dispatch loop is fak's witness-gated driver for a GitHub-issue backlog: it spawns a capped fleet of detached `claude -p` workers, each scoped to one open issue, and closes a ticket only after a commit citing `#N` is bound to it and re-verified per-SHA by `dos commit-audit` — never on the worker's word. Because this repo ships no `PLAN-*.md` portfolio, the open issues themselves are the work surface, routed to the `dos.toml` lane whose file-tree each one touches. The whole loop runs unattended on three OS scheduled tasks, bounded so the live-worker population can never exceed its cap (the no-DoS guarantee). It defaults to dry-run; `--live` is the explicit opt-in to autonomous spawning and closing.
+
 > The fleet's GitHub-issue backlog driver, **closed and witness-gated**. This repo
 > ships no `PLAN-*.md` (`dos` reports `PLAN_SURFACE_EMPTY`), so the backlog lives in
 > GitHub *issues*, not a plan portfolio. The loop spawns a worker at one concrete

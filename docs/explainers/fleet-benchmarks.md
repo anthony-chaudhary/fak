@@ -5,6 +5,8 @@ description: "Five model-agnostic fleet benchmarks you can reproduce in minutes 
 
 # The fak Fleet Benchmark Suite — explore it yourself
 
+The fak Fleet Benchmark Suite is five model-agnostic kernel demos — `fanbench`, `fleetbench`, `fak turntax`, `radixbench`, and `ctxdemo` — that you reproduce in minutes with `go run`, with no model weights, no GPU, and no API key. Each drives the real `fak` kernel and reads its own counters, so the headline numbers are deterministic and seeded down to a fixed `(profile, grid, trials, seed)`. They measure an axis orthogonal to raw throughput: how much redundant work a fleet of agents can safely delete through cross-agent cache reuse, turn-tax elimination, and shared-prefix fan-out. Every figure is graded against the best already-shipped baseline and keeps measured kernel events strictly apart from modeled cost economics — any `naive`/`cold` multiple is labeled as such, never as a SOTA win.
+
 > **What this page is.** A single place to *run* the five benchmarks that show what
 > `fak` buys a **fleet** of agents — cross-agent cache reuse, turn-tax elimination, and
 > fan-out — and to read each one honestly. All five are **model-agnostic kernel demos**:

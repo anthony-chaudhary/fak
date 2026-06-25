@@ -5,6 +5,8 @@ description: "Tracks the remaining blockers for full WebBench runs in fak, inclu
 
 # WebBench: What's Blocking Full End-to-End Runs?
 
+This page tracks the remaining blockers that stop fak from running the WebBench (WebVoyager) benchmark fully end-to-end, and what each one needs to clear. As of 2026-06-20 the harness, GLM API integration, and browser automation are in place, but two blockers are still unconfigured: model access (an API key or a local model) and the browser-use agent framework. The core efficiency claim here — 8.8x to 9.7x prefill elimination versus the naive floor — is a modeled, closed-form geometry result over the real 643-task WebVoyager set, not a wall-clock measurement from a completed run.
+
 **Date:** 2026-06-20
 **Status:** Framework READY, GLM API Integration COMPLETE, Browser Automation COMPLETE
 

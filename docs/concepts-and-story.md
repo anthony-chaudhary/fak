@@ -5,6 +5,8 @@ description: "The long-form story of fak: a default-deny capability floor plus r
 
 # fak — concepts & story (the unabridged front door)
 
+fak is a trust and coherence layer for tool-using AI agents: it sits between the model and its effects and treats the agent as a long-running, untrusted program. It enforces two independent gates — a default-deny capability floor, where dangerous levers like refunds or destructive commands are simply never wired up, and result quarantine, which screens incoming tool output and context for prompt-injection before the agent can read it. The structural guarantee is the floor: an attacker has to both slip a note past the screener and find a lever that was deliberately left unbuilt, and the screener is explicitly best-effort rather than perfect. This page is the long-form companion to the README, covering the two-gate model, when the prefix-reuse performance win actually pays off, and exactly what is shipped versus simulated versus not yet built.
+
 > This is the long-form companion to the [top-level README](https://github.com/anthony-chaudhary/fak/blob/main/README.md). The README
 > is the 3-page front door. Everything that used to make it long lives here.
 >

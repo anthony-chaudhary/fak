@@ -137,6 +137,11 @@ twice — tools wired directly vs. behind `fak` — and prints the before/after.
 | **How shared state is split** | [Shared state ladder](shared-state-ladder.md) |
 | **A collaborative task state contract** | [Shared task record contract](shared-task-record-contract.md) |
 | **The two core ideas** | [Policy in the kernel](explainers/policy-in-the-kernel.md) · [Addressable KV cache](explainers/addressable-kv-cache.md) |
+| **The agent-to-agent message channel** | [In-kernel A2A channel](a2a-in-kernel-channel.md) |
+| **Shared results as a one-sided RMA pool** | [Region](region.md) |
+| **Bring your own model accounts** | [Account switcher](model-accounts.md) |
+| **The vendor-neutral governance profile** | [Agent Tool Governance Gateway](standards/agent-tool-governance-gateway.md) |
+| **Listing fak in the MCP Registry** | [MCP Registry publish guide](fak/mcp-registry.md) |
 | **Every benchmark number** | [Benchmark authority](https://github.com/anthony-chaudhary/fak/blob/main/BENCHMARK-AUTHORITY.md) |
 | **Everything fak supports** | [What fak supports](supported/README.md) — models · features · clouds · APIs/MCP · harnesses · engines |
 | **Every machine fak runs on** | [Hardware matrix](HARDWARE-MATRIX.md) (4 platforms · 2 CPU ISAs · 4 GPU backends) |

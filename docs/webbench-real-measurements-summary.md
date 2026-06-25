@@ -5,6 +5,8 @@ description: "Summarizes fak's modeled prefill work-elimination over the real 64
 
 # WebBench Modeled Geometry — Status Summary
 
+fak's WebBench geometry result is a closed-form MODEL — not a wall-clock measurement — of how much redundant prefill work fak's fused KV adjudication eliminates across the real 643-task WebVoyager dataset. Computed by `internal/webbench/geometry.go::ComputeArms` over difficulty-derived per-task turn geometry, it reports an 8.8x–9.7x reduction versus the naive re-prefill floor (the A/C ratio) as worker count scales from 1 to 8; measured against a tuned per-agent-KV stack instead (B/C), the cross-worker gain is a modest 1.0x–1.1x. The task set is real but the turn geometry is derived, so these are a structural prefill work floor, not end-to-end latency or cost. The CLI (`fak webbench`) and the geometry model are shipped; live-model harness runs that would turn this into an end-to-end measured number remain pending.
+
 > **Provenance.** The numbers below are a deterministic geometry MODEL over the
 > real 643-task WebVoyager set — closed-form prefill-token arithmetic
 > (`internal/webbench/geometry.go::ComputeArms`), **not a wall-clock

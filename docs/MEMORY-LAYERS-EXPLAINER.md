@@ -5,6 +5,8 @@ description: "How routing, addressing, fusion, and semantics are four different 
 
 # The four layers of agent memory — routing, addressing, fusion, semantics
 
+Agent memory — the KV cache and context window a transformer shares across requests — is really four distinct problems wearing one name: routing (where a cell lives and how a request finds it), addressing (the stable name two readers share for it), fusion (whether the bytes share one arena for zero-copy access), and semantics (whether a cell can be coherently mutated, isolated, attributed, and capability-gated across a trust boundary — and proven). The serving world (Mooncake, NVIDIA Dynamo, LMCache, vLLM, SGLang) has largely solved the first three. fak's paradigm change is at the fourth and the fourth alone: it does not move, rename, or co-locate the cell faster, it changes what the cell is — making it mutable-in-the-middle, isolatable, and provenance-stamped. This explainer walks the four layers, shows why the semantics layer is still largely unowned, and gives the one-line test for telling a routing claim apart from fak's actual differentiator.
+
 *Why "the KV cache is shared now" is four different problems wearing one name — and which one fak actually changes.*
 
 ## TL;DR

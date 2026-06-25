@@ -1,3 +1,8 @@
+---
+title: "fak task manager: in-process runtime state"
+description: "How fak's internal/taskmgr folds live process, task, step, and concept state into a Manager.Snapshot, with the fak task sample CLI."
+---
+
 # fak task manager concept
 
 `internal/taskmgr` is the process-local runtime state surface for "what is this

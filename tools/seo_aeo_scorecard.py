@@ -80,6 +80,7 @@ import re
 import sys
 import tempfile
 from collections import deque
+from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
@@ -160,7 +161,7 @@ MIN_FAQ_QUESTIONS = 6  # below this, FAQ.md is too thin to seed a FAQPage
 # are; this set must stay in sync with that `exclude` list.
 NONPUBLISHED_DIRS = {
     "benchmark", "benchmarking", "planning", "testing", "releases",
-    "stable-releases", "launch", "_includes", "_layouts", "_data", "_site",
+    "stable-releases", "launch", "archive", "_includes", "_layouts", "_data", "_site",
 }
 
 _LINK_RE = re.compile(r"\[(?P<text>[^\]]+)\]\((?P<target>[^)]+)\)")
@@ -791,15 +792,54 @@ def _safe_read(path: Path) -> str:
 # Published-set enumeration
 # ---------------------------------------------------------------------------
 
+@lru_cache(maxsize=8)
+def _config_excludes(root_str: str) -> tuple[frozenset[str], frozenset[str]]:
+    """Parse docs/_config.yml's `exclude:` list into (dir_rules, file_rules),
+    both repo-`docs/`-relative. Reading the live config (instead of trusting only
+    the hardcoded NONPUBLISHED_DIRS) keeps the scorecard's published set in sync
+    with what Jekyll actually publishes BY CONSTRUCTION — a reviewer re-runs and
+    gets the same answer, and a single-file exclude (e.g. an orphaned internal
+    snapshot) is honored without a second hand-edited list drifting from the first.
+    A trailing-slash entry is a directory rule; a `.md` entry is a file rule.
+    Glob/quote/non-doc entries (`*.py`, `*.pdf`) are ignored — those never name a
+    published reader page anyway."""
+    cfg = _safe_read(Path(root_str) / CONFIG_REL)
+    m = re.search(r"^exclude:\s*\n((?:[ \t]+-.*\n?|[ \t]*#.*\n?)+)", cfg, re.MULTILINE)
+    dirs: set[str] = set()
+    files: set[str] = set()
+    if m:
+        for line in m.group(1).splitlines():
+            line = line.strip()
+            if not line.startswith("-"):
+                continue
+            entry = line[1:].strip().strip('"').strip("'")
+            if not entry or "*" in entry:
+                continue
+            if entry.endswith("/"):
+                dirs.add(entry.rstrip("/"))
+            elif entry.endswith(".md"):
+                files.add(entry)
+    return frozenset(dirs), frozenset(files)
+
+
 def _published(root: Path, rel: str) -> bool:
-    """True if Jekyll would publish docs/<…>.md as an indexable HTML page."""
+    """True if Jekyll would publish docs/<…>.md as an indexable HTML page.
+
+    A page is unpublished if any path segment hits a non-published directory
+    (the hardcoded NONPUBLISHED_DIRS default OR a `dir/` rule in _config.yml's
+    exclude list), or if its docs-relative path is a `*.md` file rule there."""
     p = Path(rel)
     if p.suffix.lower() != ".md":
         return False
     parts = p.parts
     if not parts or parts[0] != "docs":
         return False
-    return not (set(parts[1:]) & NONPUBLISHED_DIRS)
+    seg = set(parts[1:])
+    cfg_dirs, cfg_files = _config_excludes(str(root.resolve()))
+    if seg & (NONPUBLISHED_DIRS | cfg_dirs):
+        return False
+    docs_rel = Path(*parts[1:]).as_posix()
+    return docs_rel not in cfg_files
 
 
 def _discovery(rel: str) -> bool:

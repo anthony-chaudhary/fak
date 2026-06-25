@@ -5,6 +5,8 @@ description: "Architecture brief (RFC) for fak's open-core, multi-tenant hosted 
 
 # Hosted Policy + Audit Control Plane — Architecture Brief
 
+The fak Hosted Policy + Audit Control Plane is a planned, multi-tenant paid layer that would aggregate the audit stream the open-source `fak serve` binary already emits — a read-side governance plane that never sits in the request path and never weakens the capability floor. This page is the architecture brief (RFC) for that plane, not documentation of a shipped feature: the plane is adoption-gated and sequenced after the MCP wedge and context-debugger products ship. It defines fak's open-core boundary — the Apache-2.0 binary stays free to run a safe agent, while fleet-wide policy lifecycle, audit/SIEM export, and tenant governance form the paid layer — and verifies every "what we already have" claim against the binary's existing `/v1/fak/events`, `/metrics`, and `X-Trace-Id` surfaces.
+
 > **Status: architecture brief (RFC), not a built feature. Adoption-gated** — sequenced
 > *after* the MCP wedge and the context-debugger product ship. This document satisfies the
 > epic-level acceptance criterion "a written architecture brief for the hosted plane" of

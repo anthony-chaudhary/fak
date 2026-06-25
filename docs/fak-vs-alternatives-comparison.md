@@ -5,6 +5,8 @@ description: "How fak's fused KV cache compares to vLLM, SGLang, llama.cpp and p
 
 # fak vs Alternatives — Infrastructure Comparison
 
+fak is an agent-kernel KV cache layer that adds cross-worker and cross-session prefix sharing on top of what a tuned single-instance prefix-caching engine (vLLM Automatic Prefix Caching, SGLang RadixAttention, llama.cpp, or provider prompt caching) already does. Within one serving instance, those engines prefill a shared prefix once and are roughly at parity with fak; fak's incremental win is sharing that prefix across separate workers and sessions plus addressable mid-run eviction and a default-deny safety floor. Against that tuned SOTA, the modeled cross-worker delta is about 1.1-1.2x at 4 workers on a 2k prefix, rising toward the agent count as the shared-prefix fraction grows. The eye-catching 20-24x figures in this page are only versus a naive re-prefill-every-turn loop that no serving stack ships — a floor, never the SOTA comparison.
+
 **Date:** 2026-06-20
 **Status:** ✅ Complete with Quantitative Analysis
 

@@ -5,6 +5,8 @@ description: "A person-facing snapshot of where fak's product concepts stand: wh
 
 # Product status — durable, real, useful-today
 
+fak's product-status page is a tree-checked snapshot of which of fak's concepts a person can actually pick up and run today, versus which are still real-but-not-yet-a-surface subsystems or named gaps. As of v0.30.0 it counts 10 durable products you can run offline on a laptop this afternoon, 8 more usable today with a GPU, key, or network, and 17 witnessed subsystems that work but have no command a person runs directly. Every verdict is re-derived from tools/product_scorecard.data/ by tools/product_scorecard.py and cross-checked against the real tree, so nothing here is hand-typed. The 100/100 score grades how complete and honest that product map is — not how much fak wins — so a labeled honest stub counts as accurate, and only an overclaim counts as a defect.
+
 > **As of 2026-06-24 (fak v0.30.0).** This page answers the one question a person
 > asks of a project: *of the concepts fak ships, which can I pick up and use this
 > afternoon — and which are still a research seam or a named gap?* Every number and

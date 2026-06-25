@@ -1,3 +1,8 @@
+---
+title: "fak account switcher: bring your own model accounts"
+description: "How fak's account switcher routes each aspect of a request to a chosen account and provider wire — OpenAI, Codex, Anthropic, Gemini, or local — so you can mix providers per tool call, step, or ensemble half."
+---
+
 # The account switcher: bring your own accounts, mix and match
 
 `fak route` decides *which* model — or which ensemble of models — serves an aspect of

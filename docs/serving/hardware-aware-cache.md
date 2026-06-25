@@ -5,6 +5,8 @@ description: "fak's cachemeta plane plans where a KV span lives across HBM, DRAM
 
 # Hardware-aware cache: tiers, zero-copy, per-tier TTL, demote-not-evict
 
+A hardware-aware KV cache is a cache whose placement policy knows the physical character of every tier a cached span can live in — HBM, DRAM, NUMA-far, CXL, disk, remote — and uses it to relocate a hot prefix one tier colder under memory pressure instead of dropping it and paying a full re-prefill later. In fak this is the `internal/cachemeta` policy and metadata plane: it decides where a KV span should live and when it should move, emitting `KVTransfer` directives that an engine adapter executes — the plane itself touches no bytes. Its signature move is demote-not-evict: a span demoted to a byte-addressable, coherent tier (NUMA-far or CXL) stays attendable in place and is never recomputed. The demo's savings are computed by a deterministic cost model over representative tier profiles, not measured on hardware; an operator supplies real numbers for their box.
+
 > Status: the **policy/metadata plane** is shipped and tested (`internal/cachemeta`,
 > `cmd/hwcachedemo`). It decides *where a cached span should live and when it should
 > move*, and emits the existing `KVTransfer` directives. The *physical* byte movement

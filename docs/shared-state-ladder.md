@@ -1,3 +1,8 @@
+---
+title: "fak shared state ladder"
+description: "The five-rung vocabulary for shared state in fak: live messages, shared objects, durable handoff, disaggregated state, and human-agent collaboration."
+---
+
 # Shared state ladder
 
 This is the vocabulary for shared state in fak. It keeps five related but

@@ -1,3 +1,8 @@
+---
+title: "fak shared task record contract"
+description: "Defines fak's adapter-neutral shared-task JSON envelopes, merge rules, and in-memory reference fold for humans and agents co-editing a task board."
+---
+
 # Shared task record contract
 
 This is the concrete adapter-neutral contract for user-level shared task state.

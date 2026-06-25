@@ -5,6 +5,8 @@ description: "fak's modeled WebVoyager prefill geometry: over the real 643-task 
 
 # Frontier WebBench Baselines & SOTA Comparison
 
+This page is fak's WebBench baseline comparison: a deterministic geometry model of the prefill-token work that a fused resident KV eliminates versus a naive per-turn re-prefill harness, computed over the real 643-task WebVoyager set. The headline 8.8x-9.7x is a MODELED A/C ratio against the naive re-prefill floor — a closed-form integer formula, not a wall-clock measurement. The honest cross-worker reuse number, versus a tuned per-agent-KV stack, is B/C = 1.00x-1.10x. fak is not a web agent; it is the serving kernel that makes any SOTA web agent cheaper to run by not re-processing the same browser context on every turn.
+
 **Last Updated:** 2026-06-20
 
 ---

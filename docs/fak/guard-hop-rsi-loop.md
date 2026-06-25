@@ -1,3 +1,8 @@
+---
+title: "fak guard-hop RSI loop (issue #733)"
+description: "How fak plans an RSI loop to drive guard-hop overhead toward 0, with a keep/revert rung deferred on a live measured baseline."
+---
+
 # Guard-hop RSI loop — driving kernel-in-the-loop overhead toward 0 (issue #733)
 
 Audience: maintainers tuning the guarded dogfood fleet after the always-on

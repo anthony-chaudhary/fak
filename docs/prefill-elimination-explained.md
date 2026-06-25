@@ -5,6 +5,8 @@ description: "A non-technical walkthrough of the per-turn prefill tax and how fa
 
 # Prefill Elimination Explained — How fak Saves 20x on API Costs
 
+Prefill elimination is the practice of not re-sending unchanged context — the system prompt, tool schemas, and problem statement — on every turn of an agent conversation, so providers serve it from their KV cache and charge nothing for the repeated tokens. fak structures requests so this shared prefix stays byte-identical across turns and across agents, turning the provider's standard prompt cache into a cross-worker shared cache. This is not a trick on the model: it exploits the cache behavior Anthropic and OpenAI built into their APIs by design. In a 5-instance SWE-bench smoke test, fak measured a 19.7x–24.0x reduction in input tokens sent versus re-sending everything, with the savings growing as workers and turns increase.
+
 **Target Audience:** Non-technical (product managers, decision-makers)
 **Status:** ✅ Complete with diagrams
 

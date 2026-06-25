@@ -71,3 +71,22 @@ exclude:
   # would surface strategic positioning. The work they distribute lives in the
   # real docs above; the drafts stay out of the index.
   - launch/
+  # Frozen historical snapshots (e.g. the pre-rewrite README). They are kept for
+  # provenance, not reading: their links point at a tree that has since moved, so
+  # publishing them creates stale duplicate content that competes with the live
+  # pages in search. Out of the index; reachable from git history if needed.
+  - archive/
+  # Vendor-facing pilot/rollout memos (Anthropic/OpenAI internal-pitch, managed
+  # rollout). Strategic GTM positioning, not reader docs — indexing them would leak
+  # positioning and create duplicate content with the eventual external materials,
+  # the same reasoning as launch/.
+  - vendor/
+  # Internal RSI artifacts that are NOT linked from any front door: auto-generated
+  # status/strategy snapshots a reader is not meant to land on cold. (The reader-
+  # facing scorecards — code-quality, agent-readiness, demo-quality, … — stay
+  # published and linked from INDEX.md; only these orphaned internal ones are cut.)
+  - persona-scorecard/
+  - BENCH-DX-SCORECARD.md
+  - CODE-SLOP-SCORECARD.md
+  - VENDOR-ADOPTION-SCORECARD.md
+  - dispatch-status.md

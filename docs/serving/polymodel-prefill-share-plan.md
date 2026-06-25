@@ -5,6 +5,8 @@ description: "fak's poly-model serving design: host tens of models in one kernel
 
 # Poly-model serving — host many, share the prefill, decode one
 
+Poly-model serving is fak's design for hosting tens of models warm in one kernel, sharing prefill across them, and serializing decode to a single lane — because prefill is compute-bound and parallelizable while decode is HBM-bandwidth-bound, so you host many and decode one. This page is that design decision, paired with a shipped, GPU-free deterministic core (`internal/polymodel`: the residency pool, the serial decode-lane scheduler, and the speculative-accept arithmetic) plus the cross-model prefill-share splice and single-pass verify execution (#532–#535), all off by default behind `FAK_POLYMODEL`. The live multi-model residency on a real backend is explicitly sequenced, not yet shipped, and no benchmark number is claimed — the speedup model in §5 is closed-form arithmetic gated on a measured run.
+
 > **Design decision doc** for the multi-model axis of in-kernel serving: hosting
 > **tens of models in one kernel**, sharing/amortizing the **prefill**, and
 > serializing **decode to a single lane** — plus the cache-led, next-generation

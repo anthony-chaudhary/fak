@@ -1,3 +1,8 @@
+---
+title: "fak GCP Tier-2 dogfood control VM bring-up"
+description: "How to plan, apply, and verify the always-on Tier-2 dogfood control VM on GCP via the gcp-dogfood-control-vm.sh script and its systemd units."
+---
+
 # GCP Tier-2 always-on dogfood control VM (issue #732)
 
 Audience: operators bringing up the always-on Tier-2 dogfood lane after reading

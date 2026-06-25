@@ -5,6 +5,8 @@ description: "Design doc treating fak's KV cache as a regenerable artifact rebui
 
 # Regenerable KV — the text is the source, the cache is a build artifact
 
+Regenerable KV treats the KV cache not as durable memory but as a rebuildable build artifact derived from durable transcript text, under the identity `KV = prefill(model, tokenize(text))` — the text is the cheap, model-agnostic source of truth, and the KV is an expensive, model-bound derivation you can evict and recompute. fak already ships the pieces this rests on: the deterministic suffix-only text-to-KV regen path on the live per-turn loop, a content-addressed tool-result store that survives process death, and a `SourceDigest` field naming the text each KV span was prefilled from. This page is the design plan for the layers on top — persistence across a model rollout, a fleet-shared text corpus, and a backfill scheduler — which are unbuilt today; it turns a model rollout, the event that invalidates the entire KV cache at once, from a synchronized cold-start cliff into a background prefill-backfill. It asserts no benchmark number: the regen-versus-keep cost is the same A/B "turn-tax" the existing bench harnesses measure, and a throughput claim would need that harness, not this doc.
+
 > **Design decision doc** for treating the KV cache as a *regenerable build artifact*
 > derived from durable transcript **text**, rather than as durable memory in its own
 > right. The one fact underneath it: `KV = prefill(model, tokenize(text))`. The text is

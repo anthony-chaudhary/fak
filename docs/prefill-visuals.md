@@ -5,6 +5,8 @@ description: "Mermaid diagrams of fak's SWE-bench layers and run sequence, showi
 
 # SWE-bench Integration — Visual Architecture
 
+This page is a set of architecture diagrams for fak's SWE-bench integration, showing how its gateway lets multiple agent sessions share one KV-cache prefix (system prompt, tool schemas, and problem statement) instead of each re-sending it every turn. The diagrams trace the layered design, a single run's request sequence, and the A/B/C cost arms that contrast naive re-sending, per-agent caching, and fak's shared cache. The cost figures shown — a 1.13x B/C ratio, "20-24x less prefill work", and a "93% cost reduction" — are outputs of fak's geometry cost model, not measurements from a completed benchmark run.
+
 ```mermaid
 graph TB
     subgraph ["User Layer"]
