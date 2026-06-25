@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -76,18 +77,17 @@ func TestSoundRestoreSkipsWitnessedEffectReplay(t *testing.T) {
 		Rev:     9,
 	}
 	imageDir := filepath.Join(t.TempDir(), "image")
+	// The keep-bit rides a FIRST-CLASS, integrity-indexed part (witness.json) — NOT a
+	// descriptive Meta.Label — so a restore reads a non-forgeable VerifiedDone rung that
+	// fails the image closed if tampered (TestWitnessPartGatesReplayAfterTamperFailsClosed).
 	if _, err := DumpDir(imageDir, Input{
 		SessionID: sessionID,
 		Drive:     drive,
 		Recorder:  rec,
+		Witness:   []WitnessEntry{{EffectID: taskID, Record: witness}},
 		Model:     "model-before",
 		Host:      "host-before",
-		Labels: map[string]string{
-			"effect_task":          taskID,
-			"effect_receipt_path":  receiptPath,
-			"effect_witness_state": string(witness.VerifiedState),
-		},
-		Now: now.Unix(),
+		Now:       now.Unix(),
 	}); err != nil {
 		t.Fatalf("DumpDir: %v", err)
 	}
@@ -96,8 +96,20 @@ func TestSoundRestoreSkipsWitnessedEffectReplay(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadDir: %v", err)
 	}
-	if img.Meta.Labels["effect_witness_state"] != string(taskmgr.VerifiedDone) {
-		t.Fatalf("image did not carry the witness pointer/state labels: %+v", img.Meta.Labels)
+	// The keep-bit is read back from integrity-checked image bytes, not re-derived from a
+	// receipt that merely happens to still be on disk: this is the persisted distinction.
+	entries, err := img.Witness()
+	if err != nil {
+		t.Fatalf("Witness: %v", err)
+	}
+	if len(entries) != 1 || entries[0].EffectID != taskID || entries[0].Record.VerifiedState != taskmgr.VerifiedDone {
+		t.Fatalf("persisted keep-bit not restored: %+v", entries)
+	}
+	if !img.VerifiedDone(taskID) {
+		t.Fatalf("VerifiedDone(%q) = false, want true (the persisted keep-bit)", taskID)
+	}
+	if img.VerifiedDone("task-never-witnessed") {
+		t.Fatalf("VerifiedDone reported a never-witnessed effect as done")
 	}
 
 	table := session.NewTable()
@@ -114,6 +126,11 @@ func TestSoundRestoreSkipsWitnessedEffectReplay(t *testing.T) {
 	if !resumed.Migrated || resumed.Meta.Model != "model-after" || resumed.Meta.Host != "host-after" {
 		t.Fatalf("restore migration not recorded: migrated=%v meta=%+v", resumed.Migrated, resumed.Meta)
 	}
+	// The live restored handle carries the keep-bit too — a resumed loop gates on it
+	// directly without re-reading the image directory.
+	if len(resumed.Witness) != 1 || resumed.Witness[0].Record.VerifiedState != taskmgr.VerifiedDone {
+		t.Fatalf("resumed handle did not carry the keep-bit: %+v", resumed.Witness)
+	}
 	if page := resumed.Session.Pages()[0]; page.Witness != "taskmgr:"+taskID+":verified_done" {
 		t.Fatalf("recall witness page not restored: %+v", page)
 	}
@@ -128,11 +145,10 @@ func TestSoundRestoreSkipsWitnessedEffectReplay(t *testing.T) {
 		t.Fatalf("draining restore was not taken at the next boundary: %+v", verdict)
 	}
 
-	restoredWitness := taskmgr.PathWitness{}.WitnessClaim(taskmgr.Claim{
-		TaskID: taskID,
-		State:  taskmgr.StateDone,
-		Refs:   refs,
-	})
+	// The fak arm gates re-execution on the PERSISTED keep-bit (resumed.Witness[0].Record),
+	// read from the image — not on a live re-witness of an on-disk receipt. Already
+	// VerifiedDone -> the effect is NOT re-fired.
+	restoredWitness := resumed.Witness[0].Record
 	if restoredWitness.VerifiedState != taskmgr.VerifiedDone {
 		t.Fatalf("restored witness read-back = %q, want verified_done", restoredWitness.VerifiedState)
 	}
@@ -141,6 +157,56 @@ func TestSoundRestoreSkipsWitnessedEffectReplay(t *testing.T) {
 	}
 	if got := effect.Count(); got != 1 {
 		t.Fatalf("fak restore effect count = %d, want 1", got)
+	}
+}
+
+// TestWitnessPartGatesReplayAfterTamperFailsClosed proves the keep-bit is non-forgeable:
+// a tampered witness.json fails the WHOLE image closed on the sha256 integrity check, so a
+// forged "already done" can never wave a skipped-but-not-actually-completed effect through.
+// (The ACRFence soundness depends on this — a keep-bit an attacker could edit would be no
+// distinction at all.)
+func TestWitnessPartGatesReplayAfterTamperFailsClosed(t *testing.T) {
+	const (
+		sessionID = "sess-tamper"
+		taskID    = "task-charge-card"
+	)
+	now := time.Unix(1_700_200_000, 0)
+	witness := taskmgr.WitnessRecord{VerifiedState: taskmgr.VerifiedDone, Source: "path", Detail: "all referenced paths exist"}
+
+	imageDir := filepath.Join(t.TempDir(), "image")
+	if _, err := DumpDir(imageDir, Input{
+		SessionID: sessionID,
+		Drive:     session.State{TraceID: sessionID, Run: session.Stopped, Reason: session.ReasonStopped, Rev: 3},
+		Witness:   []WitnessEntry{{EffectID: taskID, Record: witness}},
+		Now:       now.Unix(),
+	}); err != nil {
+		t.Fatalf("DumpDir: %v", err)
+	}
+
+	// Sanity: the untampered image loads and the keep-bit reads VerifiedDone.
+	if img, err := LoadDir(imageDir); err != nil || !img.VerifiedDone(taskID) {
+		t.Fatalf("clean image did not load with the keep-bit: err=%v", err)
+	}
+
+	// Forge the keep-bit on disk: flip verified_done to an attacker's claim. The bytes no
+	// longer match the digest recorded in image.json's Parts index.
+	wpath := filepath.Join(imageDir, WitnessFile)
+	raw, err := os.ReadFile(wpath)
+	if err != nil {
+		t.Fatalf("read witness: %v", err)
+	}
+	forged := strings.Replace(string(raw), "verified_done", "verified_done_FORGED", 1)
+	if forged == string(raw) {
+		t.Fatal("test setup: witness.json did not contain the expected verified_done token")
+	}
+	if err := os.WriteFile(wpath, []byte(forged), 0o644); err != nil {
+		t.Fatalf("write forged witness: %v", err)
+	}
+
+	// LoadDir must fail closed on the digest mismatch — the forged keep-bit never reaches
+	// a VerifiedDone read.
+	if _, err := LoadDir(imageDir); err == nil {
+		t.Fatal("LoadDir accepted a tampered witness.json (forged keep-bit) — integrity gate did not fail closed")
 	}
 }
 

@@ -43,13 +43,16 @@ type RehydrateOptions struct {
 }
 
 // Resumed is the live session after a Rehydrate: the (possibly migrated) Meta, the drive
-// State as re-attached, and the content primitives paged in (Session/Index are nil for a
-// drive-only image). Migrated reports whether a model/host change was recorded.
+// State as re-attached, the content primitives paged in (Session/Index are nil for a
+// drive-only image), and the persisted keep-bits (Witness is nil when the image carried
+// none). Migrated reports whether a model/host change was recorded. Witness is the rung a
+// resumed loop consults before re-firing an effect — the ACRFence distinction, restored.
 type Resumed struct {
 	Meta     Meta
 	Drive    session.State
 	Session  *recall.Session
 	Index    *ctxplan.Index
+	Witness  []WitnessEntry
 	Migrated bool
 }
 
@@ -81,6 +84,15 @@ func (img *Image) Rehydrate(ctx context.Context, opt RehydrateOptions) (*Resumed
 		}
 		out.Index = ix
 	}
+
+	// (2b) Re-attach the persisted keep-bits. The bytes were integrity-verified at Load;
+	// this decodes them onto the live handle so a resumed loop can gate re-execution on
+	// VerifiedDone (Resumed.Witness / Image.VerifiedDone) instead of replaying the effect.
+	w, err := img.Witness()
+	if err != nil {
+		return nil, err
+	}
+	out.Witness = w
 
 	// (3) Record an identity move. The content is model-agnostic, so a model change needs
 	// no transform — only an honest entry in the log.

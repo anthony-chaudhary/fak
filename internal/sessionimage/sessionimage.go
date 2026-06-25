@@ -89,12 +89,13 @@ const (
 	CASFile        = "cas.json"
 	IndexFile      = recall.IndexFile // "index.json"
 	TrajectoryFile = "trajectory.jsonl"
+	WitnessFile    = "witness.json" // the persisted keep-bit (VerifiedDone rung); see witness.go
 )
 
 // knownParts is the deterministic order parts are dumped, integrity-listed, and packed
 // in. image.json is excluded (it is the index over these). Only parts that actually
 // exist are written and listed; a missing optional part is simply absent.
-var knownParts = []string{SessionFile, ManifestFile, CASFile, IndexFile, TrajectoryFile}
+var knownParts = []string{SessionFile, ManifestFile, CASFile, IndexFile, TrajectoryFile, WitnessFile}
 
 // Portability declares what a restored image guarantees and what it deliberately drops —
 // the model-change contract, made explicit so an operator never assumes a KV cache rode
@@ -156,16 +157,19 @@ type Meta struct {
 }
 
 // Input is everything DumpDir needs to write an image. Drive is always written; the
-// Recorder (page table + CAS), Index, and Trajectory are each optional — a brand-new
-// session may carry only its drive. The descriptive fields (Model/Engine/Account/
-// Residency/Host/Labels) are recorded verbatim into Meta so a restored session knows
-// where it came from. Now is an injected unix clock for determinism; 0 uses wall time.
+// Recorder (page table + CAS), Index, Trajectory, and Witness are each optional — a
+// brand-new session may carry only its drive. The descriptive fields (Model/Engine/
+// Account/Residency/Host/Labels) are recorded verbatim into Meta so a restored session
+// knows where it came from. Now is an injected unix clock for determinism; 0 uses wall
+// time. Witness carries the persisted keep-bits (the VerifiedDone rung) so a restore can
+// ask "did this effect already complete?" from integrity-checked bytes (see witness.go).
 type Input struct {
 	SessionID  string
 	Drive      session.State
 	Recorder   *recall.Recorder
 	Index      *ctxplan.Index
 	Trajectory []trajectory.Turn
+	Witness    []WitnessEntry
 
 	Model     string
 	Engine    string
@@ -238,6 +242,16 @@ func DumpDir(dir string, in Input) (Meta, error) {
 	// object per line (the same stable schema trajectory.Recorder.ExportTo writes).
 	if len(in.Trajectory) > 0 {
 		if err := writeTrajectory(filepath.Join(dir, TrajectoryFile), in.Trajectory); err != nil {
+			return Meta{}, err
+		}
+	}
+
+	// (4b) The witness sibling (witness.json) — the persisted keep-bits, deterministically
+	// ordered so the part's digest is stable. Absent when the session witnessed no effect;
+	// when present it is integrity-indexed and verified like every other part, so a restore
+	// reads a non-forgeable VerifiedDone rung, not the agent's re-narration (see witness.go).
+	if len(in.Witness) > 0 {
+		if err := writeWitness(filepath.Join(dir, WitnessFile), in.Witness); err != nil {
 			return Meta{}, err
 		}
 	}
