@@ -30,6 +30,15 @@ const neverBreakEven = int(^uint(0) >> 1)
 // silent: Account reports how many fan-outs were clamped.
 const DefaultMaxRedirectFanout = 1024
 
+// DefaultMaxSpeculativePrunedTurns bounds the AGGREGATE speculative pruning a window
+// may report — the per-deny DefaultMaxRedirectFanout caps each entry but not the NUMBER
+// of entries, so an unbounded Redirects slice could otherwise report an arbitrarily
+// large pruned total (#816). The aggregate is saturated at this value and the
+// saturation is surfaced (SpeculativeAggregateCapped), so the speculative upper bound is
+// always finite and non-gameable. It is a reporting bound only: it never touches the
+// grade, which is built from realized dispositions alone.
+const DefaultMaxSpeculativePrunedTurns = 1 << 20 // 1,048,576 futile round-trips
+
 // ValidateFloor is the minimum cost charged to a memo hit / stale validation: a
 // vDSO entry is cheap to re-validate (a world-version check) but NEVER free. At the
 // old zero floor a StaleMiss priced exactly 1 (validate 0 + re-run 1 + capture 0),
@@ -203,8 +212,16 @@ type TurnReport struct {
 	StaleMisses      int `json:"stale_misses"`
 	HardDenies       int `json:"hard_denies"`
 	ProductiveDenies int `json:"productive_denies"`
-	RedirectPruned   int `json:"redirect_pruned"` // total futile round-trips spared by productive denies (after the cap).
-	RedirectCapped   int `json:"redirect_capped"` // how many fan-outs were clamped to the cap (surfaced, not silent).
+	RedirectPruned   int `json:"redirect_pruned"` // total futile round-trips spared by productive denies (per-deny cap applied).
+	RedirectCapped   int `json:"redirect_capped"` // how many fan-outs were clamped to the per-deny cap (surfaced, not silent).
+
+	// SPECULATIVE axis (#816): productive-deny pruning is a COUNTERFACTUAL no kernel
+	// counter measures, so it is reported here as a bounded upper bound and NEVER folds
+	// into the graded Amplification/Grade/Status (those are realized-only). The
+	// aggregate is saturated at DefaultMaxSpeculativePrunedTurns so a 100000×large
+	// redirect flood cannot inflate it; SpeculativeAggregateCapped surfaces saturation.
+	SpeculativePrunedTurns     int  `json:"speculative_pruned_turns"`     // bounded aggregate futile round-trips a productive deny MAY have spared (excluded from the grade).
+	SpeculativeAggregateCapped bool `json:"speculative_aggregate_capped"` // true when the aggregate hit DefaultMaxSpeculativePrunedTurns (the upper bound saturated).
 
 	Actions []string `json:"actions,omitempty"`
 	Risks   []string `json:"risks,omitempty"`
@@ -252,38 +269,54 @@ func Account(t Tally) TurnReport {
 		float64(repair) +
 		float64(staleMiss)
 
+	// SPECULATIVE axis (#816): the productive-deny fan-out is a counterfactual no kernel
+	// counter measures, so it is NOT folded into the graded naive — it is bounded both
+	// per-deny (fanoutCap) AND in aggregate (specCap), reported separately, and never
+	// moves the grade. The per-deny cap clamps each entry; the aggregate cap saturates
+	// the sum so an unbounded NUMBER of entries cannot inflate the upper bound.
+	specCap := DefaultMaxSpeculativePrunedTurns
 	pruned := 0
 	capped := 0
+	aggCapped := false
 	for _, f := range t.Redirects {
 		if f < 0 {
 			f = 0
 		}
-		if f > fanoutCap {
+		if f >= fanoutCap { // >= so an at-cap fan-out surfaces too, not just an over-cap one.
 			f = fanoutCap
 			capped++
 		}
 		pruned += f
+		if pruned >= specCap {
+			pruned = specCap
+			aggCapped = true
+			break
+		}
 	}
-	naive += float64(pruned)
 	// HardDeny adds 0 to both sides; it is symmetric and intentionally not credited.
 
+	// The graded amplification is built ONLY from realized, Counter-backed dispositions
+	// (Execute/MemoHit/Repair/StaleMiss). The speculative `pruned` upper bound is
+	// excluded — "an avoided call is a realized rebate, never a trust claim" (#816).
 	raw := execute + memoHit + repair + staleMiss + hardDeny + len(t.Redirects)
 	amp := safeRatio(naive, executed)
 
 	rep := TurnReport{
-		Schema:           "fak.callavoid.turns.v1",
-		RawTurns:         raw,
-		ExecutedTurns:    executed,
-		EffectiveTurns:   naive,
-		AvoidedTurns:     naive - executed,
-		Amplification:    amp,
-		MemoHits:         memoHit,
-		Repairs:          repair,
-		StaleMisses:      staleMiss,
-		HardDenies:       hardDeny,
-		ProductiveDenies: len(t.Redirects),
-		RedirectPruned:   pruned,
-		RedirectCapped:   capped,
+		Schema:                     "fak.callavoid.turns.v1",
+		RawTurns:                   raw,
+		ExecutedTurns:              executed,
+		EffectiveTurns:             naive,
+		AvoidedTurns:               naive - executed,
+		Amplification:              amp,
+		MemoHits:                   memoHit,
+		Repairs:                    repair,
+		StaleMisses:                staleMiss,
+		HardDenies:                 hardDeny,
+		ProductiveDenies:           len(t.Redirects),
+		RedirectPruned:             pruned,
+		RedirectCapped:             capped,
+		SpeculativePrunedTurns:     pruned,
+		SpeculativeAggregateCapped: aggCapped,
 	}
 	rep.Status = turnStatus(amp)
 	rep.Grade = turnGrade(amp)
@@ -318,12 +351,19 @@ func turnGrade(amp float64) string {
 }
 
 func turnActionsAndRisks(t Tally, rep TurnReport) (actions, risks []string) {
-	if rep.RedirectPruned > 0 {
-		actions = append(actions, fmt.Sprintf("productive denies pruned %d futile round-trip(s) across %d deny(ies); keep enriching deny reasons with forward guidance — that is the cheapest amplification",
-			rep.RedirectPruned, rep.ProductiveDenies))
+	if rep.SpeculativePrunedTurns > 0 {
+		actions = append(actions, fmt.Sprintf("productive denies MAY have pruned %d futile round-trip(s) across %d deny(ies); keep enriching deny reasons with forward guidance — but this is a speculative rebate, not realized work",
+			rep.SpeculativePrunedTurns, rep.ProductiveDenies))
+		// Mandatory: the speculative axis is excluded from the grade and is witness-gated.
+		// It must always be surfaced so a reader never mistakes the upper bound for the grade.
+		risks = append(risks, fmt.Sprintf("SPECULATIVE: %d pruned round-trip(s) are a counterfactual upper bound — EXCLUDED from the graded amplification/grade/status (which are realized, Counter-backed only) and witness-gated until a kernel counter measures the avoided fan-out",
+			rep.SpeculativePrunedTurns))
+	}
+	if rep.SpeculativeAggregateCapped {
+		risks = append(risks, fmt.Sprintf("the speculative pruned total saturated at the aggregate cap (%d); the upper bound is a floor of the true count, never inflated", DefaultMaxSpeculativePrunedTurns))
 	}
 	if rep.RedirectCapped > 0 {
-		risks = append(risks, fmt.Sprintf("%d redirect fan-out(s) were clamped to the cap; the reported amplification is a LOWER bound, not inflated", rep.RedirectCapped))
+		risks = append(risks, fmt.Sprintf("%d redirect fan-out(s) were clamped to the per-deny cap; the speculative pruned total is a LOWER bound, not inflated", rep.RedirectCapped))
 	}
 	if rep.StaleMisses > 0 && rep.StaleMisses*2 >= rep.MemoHits {
 		risks = append(risks, fmt.Sprintf("stale misses (%d) rival hits (%d): the world mutates faster than the cache amortizes — run ProveMemo for this class; a global world-version may be over-invalidating",

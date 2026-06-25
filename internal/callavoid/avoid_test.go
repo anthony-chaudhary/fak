@@ -125,26 +125,29 @@ func TestAccountAmplification(t *testing.T) {
 	}
 }
 
-// TestAccountProductiveDenyDrivesAmplification: one free productive deny that prunes a
-// large futile sub-tree is the "reaches a state a naive path cannot" regime — and the
-// fan-out is capped and SURFACED, so amplification is a lower bound, never inflated.
+// TestAccountProductiveDenyIsSpeculativeOnly: a productive deny that prunes a large
+// futile sub-tree is reported on the SPECULATIVE axis — bounded per-deny and surfaced —
+// but it NEVER touches the realized grade (#816). With one real execute and no realized
+// avoidance, the graded amplification is exactly break-even regardless of the fan-out.
 func TestAccountProductiveDeny(t *testing.T) {
 	r := Account(Tally{Execute: 1, Redirects: []int{200, 5000}})
-	// pruned = 200 + min(5000, 1024) = 1224; one fan-out was clamped.
-	if r.RedirectPruned != 1224 {
-		t.Errorf("RedirectPruned = %d, want 1224", r.RedirectPruned)
+	// pruned = 200 + min(5000, 1024) = 1224; one fan-out was clamped (>= cap).
+	if r.SpeculativePrunedTurns != 1224 || r.RedirectPruned != 1224 {
+		t.Errorf("pruned = spec %d / redirect %d, want 1224 each", r.SpeculativePrunedTurns, r.RedirectPruned)
 	}
 	if r.RedirectCapped != 1 {
 		t.Errorf("RedirectCapped = %d, want 1 (the 5000 clamp, surfaced)", r.RedirectCapped)
 	}
-	if !approx(r.EffectiveTurns, 1225) || !approx(r.ExecutedTurns, 1) {
-		t.Errorf("effective=%v executed=%v, want 1225 and 1", r.EffectiveTurns, r.ExecutedTurns)
+	// The graded headline is realized-only: one execute, nothing avoided → break-even.
+	if !approx(r.EffectiveTurns, 1) || !approx(r.ExecutedTurns, 1) {
+		t.Errorf("effective=%v executed=%v, want 1 and 1 (speculative pruning excluded from the grade)", r.EffectiveTurns, r.ExecutedTurns)
 	}
-	if r.Grade != "A" {
-		t.Errorf("grade = %s, want A", r.Grade)
+	if r.Status != "break_even" || r.Grade == "A" {
+		t.Errorf("status/grade = %s/%s, want break_even and NOT A (the fan-out must not drive the grade)", r.Status, r.Grade)
 	}
-	if len(r.Risks) == 0 {
-		t.Error("a clamped fan-out must surface a lower-bound risk, not silently inflate")
+	// The speculative axis must be surfaced as a risk, never silently folded.
+	if !hasRisk(r.Risks, "SPECULATIVE") {
+		t.Errorf("a productive deny must surface a mandatory SPECULATIVE risk:\n%v", r.Risks)
 	}
 }
 
