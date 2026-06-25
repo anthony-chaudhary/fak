@@ -166,6 +166,91 @@ func TestAdjudicate(t *testing.T) {
 	}
 }
 
+func TestCollectiveCommitAllowsPairwiseDisjointLeases(t *testing.T) {
+	plan := CollectiveCommitPlan{
+		Writers: []CollectiveWriter{
+			{ID: "kernel", Leases: []string{"internal/kernel/**"}, Paths: []string{"internal/kernel/kernel.go"}},
+			{ID: "docs", Leases: []string{"docs/**"}, Paths: []string{"docs/cli-reference.md"}},
+		},
+		CommitPaths: []string{"internal/kernel/kernel.go", "docs/cli-reference.md"},
+	}
+	finding := CheckCollectiveCommit(plan)
+	if !finding.OK {
+		t.Fatalf("CheckCollectiveCommit valid plan=%+v, want OK", finding)
+	}
+
+	v := New().Adjudicate(context.Background(), collectiveCall(plan))
+	if v.Kind != abi.VerdictAllow {
+		t.Fatalf("collective Adjudicate Kind=%v, want Allow (verdict=%+v)", v.Kind, v)
+	}
+	if v.By != ToolCollectiveCommit {
+		t.Fatalf("collective Adjudicate By=%q, want %q", v.By, ToolCollectiveCommit)
+	}
+}
+
+func TestCollectiveCommitRefusesOverlappingLeases(t *testing.T) {
+	plan := CollectiveCommitPlan{
+		Writers: []CollectiveWriter{
+			{ID: "wide", Leases: []string{"internal/**"}, Paths: []string{"internal/gitgate/gitgate.go"}},
+			{ID: "narrow", Leases: []string{"internal/gitgate/**"}, Paths: []string{"internal/gitgate/gitgate_test.go"}},
+		},
+		CommitPaths: []string{"internal/gitgate/gitgate.go", "internal/gitgate/gitgate_test.go"},
+	}
+	finding := CheckCollectiveCommit(plan)
+	assertCollectiveRefusal(t, finding, "lease conflict")
+}
+
+func TestCollectiveCommitRefusesPathOutsideLeasedTree(t *testing.T) {
+	plan := CollectiveCommitPlan{
+		Writers: []CollectiveWriter{
+			{ID: "gitgate", Leases: []string{"internal/gitgate/**"}, Paths: []string{"internal/kernel/kernel.go"}},
+		},
+		CommitPaths: []string{"internal/kernel/kernel.go"},
+	}
+	finding := CheckCollectiveCommit(plan)
+	assertCollectiveRefusal(t, finding, "outside leased tree")
+
+	v := New().Adjudicate(context.Background(), collectiveCall(plan))
+	if v.Kind != abi.VerdictDeny || v.Reason != abi.ReasonLeaseHeld {
+		t.Fatalf("collective outside-lease verdict=%+v, want Deny LEASE_HELD", v)
+	}
+	wp, ok := v.Payload.(abi.WitnessPayload)
+	if !ok || !strings.Contains(wp.Claim, "outside leased tree") {
+		t.Fatalf("collective outside-lease witness=%v, want outside leased tree claim", v.Payload)
+	}
+}
+
+func TestCollectiveCommitRefusesUnionViolation(t *testing.T) {
+	plan := CollectiveCommitPlan{
+		Writers: []CollectiveWriter{
+			{ID: "gitgate", Leases: []string{"internal/gitgate/**"}, Paths: []string{"internal/gitgate/gitgate.go"}},
+		},
+		// The second path sits inside the held lease, so this is not a lease-tree
+		// containment failure. It is outside the writer-declared path union.
+		CommitPaths: []string{"internal/gitgate/gitgate.go", "internal/gitgate/gitgate_test.go"},
+	}
+	finding := CheckCollectiveCommit(plan)
+	assertCollectiveRefusal(t, finding, "union violation")
+}
+
+func collectiveCall(plan CollectiveCommitPlan) *abi.ToolCall {
+	b, _ := json.Marshal(plan)
+	return &abi.ToolCall{Tool: ToolCollectiveCommit, Args: abi.Ref{Kind: abi.RefInline, Inline: b}}
+}
+
+func assertCollectiveRefusal(t *testing.T, finding CollectiveFinding, claimHas string) {
+	t.Helper()
+	if finding.OK {
+		t.Fatalf("finding OK=true, want refusal containing %q", claimHas)
+	}
+	if finding.Reason != abi.ReasonLeaseHeld {
+		t.Fatalf("finding reason=%s, want LEASE_HELD (finding=%+v)", abi.ReasonName(finding.Reason), finding)
+	}
+	if !strings.Contains(finding.Claim, claimHas) {
+		t.Fatalf("finding claim=%q, want substring %q", finding.Claim, claimHas)
+	}
+}
+
 // TestEmptyRulesDefers proves a gate with no rules is inert (the FAK_GITGATE=off
 // shape, modeled as an empty rule set).
 func TestEmptyRulesDefers(t *testing.T) {

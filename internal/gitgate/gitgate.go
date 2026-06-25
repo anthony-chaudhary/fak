@@ -39,6 +39,17 @@
 //     hooks, not this rung. gitgate is the earlier, in-path complement to the
 //     hooks, never their replacement.
 //
+// COLLECTIVE-COMMIT BARRIER. The synthetic gitgate.collective_commit tool is a
+// pure argv/lease check for a many-writer shared-trunk commit plan: held lease
+// trees must be pairwise disjoint, every writer path must sit inside that
+// writer's lease, and the final ordered commit pathspec may touch only the union
+// of paths those writers declared. This borrows the MPI_File_write_all shape
+// (many ranks, one shared file, a consistency view), but it is NOT distributed
+// filesystem I/O and claims no cross-machine transaction or atomicity beyond git
+// plus the lease partition. Truly stateful checks — live index sweep, current
+// branch, a peer's MERGE_HEAD — stay deferred to the witness resolver and git
+// hooks, not this in-path pure rung.
+//
 // It is PURE (a string read + an argv walk); it execs nothing, imports only the
 // frozen ABI, and is cgo-free — so it satisfies architest's interpreter-free /
 // cgo-free / layered-DAG gates exactly as a hot-path rung must.
@@ -47,7 +58,9 @@ package gitgate
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
+	"path"
 	"strings"
 
 	"github.com/anthony-chaudhary/fak/internal/abi"
@@ -97,6 +110,10 @@ var defaultHazards = []hazard{
 
 const dotAddLaw = "commit-by-explicit-path: `git add .` stages the whole tree (AGENTS.md). Add explicit paths instead."
 
+// ToolCollectiveCommit is the synthetic tool name for the collective-commit
+// barrier. It never shells out; its args are a CollectiveCommitPlan JSON object.
+const ToolCollectiveCommit = "gitgate.collective_commit"
+
 // GitGate is the registered rung. Construct with New; the package Default instance
 // registers itself in init() unless FAK_GITGATE=off. Stateless: the rule table is
 // read-only after construction, so one instance is safe for the whole process.
@@ -118,6 +135,9 @@ func (g *GitGate) Adjudicate(ctx context.Context, c *abi.ToolCall) abi.Verdict {
 	if c == nil || len(g.rules) == 0 {
 		return deferVerdict()
 	}
+	if c.Tool == ToolCollectiveCommit {
+		return g.adjudicateCollective(ctx, c)
+	}
 	cmd := shellCommand(ctx, c)
 	// Cheap reject: no command arg, or no "git" anywhere in it — nothing to prove.
 	if cmd == "" || !strings.Contains(strings.ToLower(cmd), "git") {
@@ -135,6 +155,188 @@ func (g *GitGate) Adjudicate(ctx context.Context, c *abi.ToolCall) abi.Verdict {
 }
 
 func deferVerdict() abi.Verdict { return abi.Verdict{Kind: abi.VerdictDefer, By: "gitgate"} }
+
+// CollectiveCommitPlan is the argv/lease-decidable shape verified by the
+// collective-commit barrier. Writers are independent workers holding lease trees;
+// Paths are the repo-relative paths that writer contributes; CommitPaths is the
+// ordered `git commit -- <paths>` pathspec the coordinator plans to run.
+type CollectiveCommitPlan struct {
+	Writers     []CollectiveWriter `json:"writers"`
+	CommitPaths []string           `json:"commit_paths"`
+}
+
+// CollectiveWriter is one participant in a CollectiveCommitPlan.
+type CollectiveWriter struct {
+	ID     string   `json:"id"`
+	Leases []string `json:"leases"`
+	Paths  []string `json:"paths"`
+}
+
+// CollectiveFinding is the structured result of CheckCollectiveCommit.
+type CollectiveFinding struct {
+	OK     bool
+	Reason abi.ReasonCode
+	Claim  string
+}
+
+// CheckCollectiveCommit verifies the pure collective-commit invariants without
+// reading repo state: lease trees are pairwise disjoint, writer paths stay inside
+// their own leases, and the final commit pathspec is covered by the union of
+// writer-declared paths.
+func CheckCollectiveCommit(plan CollectiveCommitPlan) CollectiveFinding {
+	if len(plan.Writers) == 0 {
+		return malformedCollective("collective-commit plan has no writers")
+	}
+	if len(plan.CommitPaths) == 0 {
+		return malformedCollective("collective-commit plan has no explicit commit paths")
+	}
+
+	var leases []leaseTree
+	var declared []declaredPath
+	for wi, w := range plan.Writers {
+		id := strings.TrimSpace(w.ID)
+		if id == "" {
+			id = fmt.Sprintf("writer[%d]", wi)
+		}
+		if len(w.Leases) == 0 {
+			return malformedCollective(fmt.Sprintf("collective-commit writer %s has no leases", id))
+		}
+		writerLeases := make([]string, 0, len(w.Leases))
+		for _, raw := range w.Leases {
+			tree, ok := cleanLeaseTree(raw)
+			if !ok {
+				return malformedCollective(fmt.Sprintf("collective-commit writer %s has invalid lease %q", id, raw))
+			}
+			for _, prev := range leases {
+				if treesOverlap(prev.tree, tree) {
+					return leaseFinding(fmt.Sprintf("collective-commit lease conflict: writer %s lease %q overlaps writer %s lease %q; held leases must be pairwise disjoint", id, tree, prev.owner, prev.tree))
+				}
+			}
+			leases = append(leases, leaseTree{owner: id, tree: tree})
+			writerLeases = append(writerLeases, tree)
+		}
+		if len(w.Paths) == 0 {
+			return malformedCollective(fmt.Sprintf("collective-commit writer %s has no committed paths", id))
+		}
+		for _, raw := range w.Paths {
+			p, ok := cleanRepoPath(raw)
+			if !ok {
+				return malformedCollective(fmt.Sprintf("collective-commit writer %s has invalid path %q", id, raw))
+			}
+			if !coveredByAnyTree(p, writerLeases) {
+				return leaseFinding(fmt.Sprintf("collective-commit path outside leased tree: writer %s path %q is outside leases [%s]", id, p, strings.Join(writerLeases, ", ")))
+			}
+			declared = append(declared, declaredPath{owner: id, path: p})
+		}
+	}
+
+	for _, raw := range plan.CommitPaths {
+		p, ok := cleanRepoPath(raw)
+		if !ok {
+			return malformedCollective(fmt.Sprintf("collective-commit has invalid commit path %q", raw))
+		}
+		if !coveredByDeclaredPath(p, declared) {
+			return leaseFinding(fmt.Sprintf("collective-commit union violation: commit path %q is not covered by any writer-declared path", p))
+		}
+	}
+	return CollectiveFinding{OK: true}
+}
+
+func (g *GitGate) adjudicateCollective(ctx context.Context, c *abi.ToolCall) abi.Verdict {
+	var plan CollectiveCommitPlan
+	b := refBytes(ctx, c.Args)
+	if len(b) == 0 {
+		return collectiveDeny(malformedCollective("collective-commit missing JSON args"))
+	}
+	if err := json.Unmarshal(b, &plan); err != nil {
+		return collectiveDeny(malformedCollective("collective-commit malformed JSON args: " + err.Error()))
+	}
+	finding := CheckCollectiveCommit(plan)
+	if finding.OK {
+		return abi.Verdict{Kind: abi.VerdictAllow, By: ToolCollectiveCommit}
+	}
+	return collectiveDeny(finding)
+}
+
+func collectiveDeny(f CollectiveFinding) abi.Verdict {
+	return abi.Verdict{
+		Kind:    abi.VerdictDeny,
+		Reason:  f.Reason,
+		By:      ToolCollectiveCommit,
+		Payload: abi.WitnessPayload{Claim: f.Claim},
+	}
+}
+
+func malformedCollective(claim string) CollectiveFinding {
+	return CollectiveFinding{Reason: abi.ReasonMalformed, Claim: claim}
+}
+
+func leaseFinding(claim string) CollectiveFinding {
+	return CollectiveFinding{Reason: abi.ReasonLeaseHeld, Claim: claim}
+}
+
+type leaseTree struct {
+	owner string
+	tree  string
+}
+
+type declaredPath struct {
+	owner string
+	path  string
+}
+
+func cleanLeaseTree(raw string) (string, bool) {
+	s := strings.TrimSpace(strings.ReplaceAll(raw, "\\", "/"))
+	for strings.HasSuffix(s, "/**") {
+		s = strings.TrimSuffix(s, "/**")
+	}
+	for strings.HasSuffix(s, "/*") {
+		s = strings.TrimSuffix(s, "/*")
+	}
+	s = strings.TrimSuffix(s, "/")
+	if strings.Contains(s, "*") {
+		return "", false
+	}
+	return cleanRepoPath(s)
+}
+
+func cleanRepoPath(raw string) (string, bool) {
+	s := strings.TrimSpace(strings.ReplaceAll(raw, "\\", "/"))
+	if s == "" || strings.ContainsRune(s, 0) || strings.HasPrefix(s, "/") {
+		return "", false
+	}
+	p := path.Clean(s)
+	if p == "." || p == ".." || strings.HasPrefix(p, "../") {
+		return "", false
+	}
+	return p, true
+}
+
+func treesOverlap(a, b string) bool {
+	return treeContains(a, b) || treeContains(b, a)
+}
+
+func treeContains(tree, p string) bool {
+	return p == tree || strings.HasPrefix(p, tree+"/")
+}
+
+func coveredByAnyTree(p string, trees []string) bool {
+	for _, tree := range trees {
+		if treeContains(tree, p) {
+			return true
+		}
+	}
+	return false
+}
+
+func coveredByDeclaredPath(p string, declared []declaredPath) bool {
+	for _, d := range declared {
+		if treeContains(d.path, p) {
+			return true
+		}
+	}
+	return false
+}
 
 // Classify is the pure, testable core: it reports the cited law and true if cmd
 // contains a refused git hazard, else ("", false). Exported (via the method on
