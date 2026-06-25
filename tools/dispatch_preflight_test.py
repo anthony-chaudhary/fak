@@ -231,8 +231,32 @@ class WorkerCountTest(unittest.TestCase):
             bad.write_text("not-a-pid", encoding="utf-8")
             os.utime(one, (now, now))
             os.utime(two, (now, now))
-            probe = lambda pid: {"alive": True, "create_time": now - 1, "cmdline": ""}
+            # In-window survivor must also LOOK like a worker backend image; a
+            # cmdline-less probe with a claude image is the real "OS hid the
+            # cmdline of a live claude worker" case the window fallback exists for.
+            probe = lambda pid: {"alive": True, "create_time": now - 1,
+                                 "name": "claude.exe", "cmdline": ""}
             self.assertEqual(mod.live_resolve_worker_pids(runs, alive={101}, probe=probe), {101})
+
+    def test_live_resolve_worker_pids_rejects_recycled_shell_in_window(self) -> None:
+        # The ghost that pinned the dispatcher at cap: a recycled cmd.exe whose
+        # create time happens to fall inside a stale sidecar's spawn window, with
+        # no cmdline marker. A bare shell image is NOT a worker even in-window, so
+        # it must NOT consume a cap slot.
+        mod = load()
+        with tempfile.TemporaryDirectory() as d:
+            runs = Path(d)
+            now = 1_000_000.0
+            side = runs / "resolve-825-20260625-213720.pid"
+            side.write_text("58752", encoding="utf-8")
+            os.utime(side, (now, now))
+            probe = lambda pid: {
+                "alive": True,
+                "create_time": now - 30,  # well inside the 5-min window
+                "name": "cmd.exe",
+                "cmdline": "",
+            }
+            self.assertEqual(mod.live_resolve_worker_pids(runs, probe=probe), set())
 
     def test_live_resolve_worker_pids_rejects_reused_pid_after_sidecar(self) -> None:
         mod = load()

@@ -81,6 +81,14 @@ RUNS_DIRNAME = ".dispatch-runs"
 _RESOLVE_PID_RE = re.compile(r"resolve-\d+-\d{8}-\d{6}\.pid$")
 _SIDECAR_CREATE_BEFORE_WINDOW_SECONDS = 5 * 60
 _SIDECAR_CREATE_AFTER_SLOP_SECONDS = 10
+# Process names a real dispatch worker actually runs as. The create-time-window
+# fallback (used only when the OS hid the cmdline) may ONLY count a sidecar pid
+# whose image is one of these — otherwise a recycled pid that merely SHARES a
+# claude/opencode backend image, or worse a generic shell (cmd.exe, powershell,
+# bash) spawned in the same minute, gets miscounted as a live worker and pins the
+# dispatcher at cap against ghosts. A bare shell image NEVER counts; only the
+# named agent backends do, and even then only inside the spawn window.
+_WORKER_BACKEND_IMAGES = ("claude", "opencode", "node")
 
 
 def repo_root(start: Path | None = None) -> Path:
@@ -406,6 +414,23 @@ def _within_sidecar_spawn_window(create_time: Any, sidecar_mtime: float) -> bool
     return True
 
 
+def _probe_image_is_worker_backend(probe: dict[str, Any]) -> bool:
+    """Does the process image look like a real agent worker backend?
+
+    The honest signal is the cmdline marker; this is the weaker name-only check
+    the create-time-window branch leans on when the OS hid the cmdline. A bare
+    shell (cmd.exe / powershell / bash) is NEVER a worker, so it is rejected even
+    inside the spawn window — that is what stops a recycled shell pid from pinning
+    the cap. We match on the image stem so `claude.exe`, `opencode.exe`, `node`
+    all qualify; anything else does not.
+    """
+    name = str(probe.get("name") or "").strip().lower()
+    if not name:
+        return False
+    stem = name[:-4] if name.endswith(".exe") else name
+    return stem in _WORKER_BACKEND_IMAGES
+
+
 def _sidecar_process_matches(pid: int, sidecar_mtime: float, *,
                              probe: Callable[[int], dict[str, Any]] | None = None) -> bool:
     rec = (probe or _process_probe)(pid)
@@ -413,6 +438,12 @@ def _sidecar_process_matches(pid: int, sidecar_mtime: float, *,
         return False
     if _is_worker_cmdline(_probe_cmdline_text(rec)):
         return True
+    # Fallback for a real worker whose cmdline the OS hid: only an agent-backend
+    # image inside the spawn window counts. A recycled shell pid (cmd.exe, etc.)
+    # is rejected here even if its create time lands in the window — the
+    # create-time coincidence alone is NOT evidence of a live worker.
+    if not _probe_image_is_worker_backend(rec):
+        return False
     return _within_sidecar_spawn_window(rec.get("create_time"), sidecar_mtime)
 
 
