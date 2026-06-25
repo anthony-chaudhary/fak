@@ -474,4 +474,3 @@ func (s *Session) prefillHAL(ids []int, wantLogits bool) []float32 {
 	}
 	return nil
 }
-

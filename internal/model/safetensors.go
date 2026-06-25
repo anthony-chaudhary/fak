@@ -589,4 +589,3 @@ func f16bitsToF32bits(h uint16) uint32 {
 		return sign | uint32(exp-15+127)<<23 | frac<<13
 	}
 }
-
