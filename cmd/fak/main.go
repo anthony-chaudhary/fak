@@ -375,7 +375,7 @@ func cmdRun(argv []string) {
 	trace := fs.String("trace", "", "path to a trace JSON file")
 	engineID := fs.String("engine", "inkernel", "engine id (inkernel: the fused in-kernel model; mock; cassette)")
 	vdso := fs.Bool("vdso", true, "enable the vDSO fast path")
-	policyPath := fs.String("policy", "", "load the capability floor from a manifest (default: built-in DefaultPolicy)")
+	policyPath := fs.String("policy", "", "load the capability floor from a manifest (default: the built-in adjudicator floor — the tau2 airline-demo tools, NOT the `fak guard` coding floor; see `fak policy --dump`)")
 	_ = fs.Parse(argv)
 
 	if *trace == "" {
@@ -410,7 +410,7 @@ func cmdPreflight(argv []string) {
 	fs := flag.NewFlagSet("preflight", flag.ExitOnError)
 	tool := fs.String("tool", "", "tool name")
 	args := fs.String("args", "{}", "tool args as JSON")
-	policyPath := fs.String("policy", "", "load the capability floor from a manifest (default: built-in DefaultPolicy)")
+	policyPath := fs.String("policy", "", "load the capability floor from a manifest (default: the built-in adjudicator floor — the tau2 airline-demo tools, NOT the `fak guard` coding floor; see `fak policy --dump`)")
 	explain := fs.Bool("explain", false, "print the full decision trace: every rung folded, what each returned, which won, and why")
 	asJSON := fs.Bool("json", false, "emit the decision trace as JSON (safe to log: args digest only, never raw args)")
 	_ = fs.Parse(argv)
@@ -577,7 +577,7 @@ func cmdAgent(argv []string) {
 	maxTurns := fs.Int("max-turns", 10, "max model turns per arm")
 	out := fs.String("out", "agent-report.json", "report output path")
 	logOut := fs.String("log", "", "optional path to write the per-call trace log")
-	policyPath := fs.String("policy", "", "load the capability floor from a manifest (default: built-in DefaultPolicy)")
+	policyPath := fs.String("policy", "", "load the capability floor from a manifest (default: the built-in adjudicator floor — the tau2 airline-demo tools, NOT the `fak guard` coding floor; see `fak policy --dump`)")
 	_ = fs.Parse(argv)
 	applyPolicy(*policyPath)
 
