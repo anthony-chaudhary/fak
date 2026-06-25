@@ -135,14 +135,18 @@ func (w Weights) Learn(o Outcome, spans []Span, f Forecast, maxStep int) Weights
 	}
 	// Average logistic gradient: d/dw [σ(w·x) - y]^2 ~ 2*(σ(w·x)-y)*x; the factor 2 folds
 	// into learnRate, leaving (σ(w·x)-y)*x per row.
-	var gRel, gUtil, gDur, gRec float64
+	var gRel, gUtil, gDur, gRec, gPrim float64
 	for _, r := range rows {
-		score := cur.Relevance*r.s.Relevance + cur.Utility*r.s.Utility + cur.Durability*r.s.Durability + cur.Recency*r.s.Recency
+		// The score MUST mirror Forecast.Benefit's dot product exactly (incl. Primacy), or
+		// the gradient is taken against a different model than the one that scored - the
+		// scorer/learner drift the signal struct's doc forbids.
+		score := cur.Relevance*r.s.Relevance + cur.Utility*r.s.Utility + cur.Durability*r.s.Durability + cur.Recency*r.s.Recency + cur.Primacy*r.s.Primacy
 		err := sigmoid(score) - r.y
 		gRel += err * r.s.Relevance
 		gUtil += err * r.s.Utility
 		gDur += err * r.s.Durability
 		gRec += err * r.s.Recency
+		gPrim += err * r.s.Primacy
 	}
 	n := float64(len(rows))
 	return Weights{
@@ -150,6 +154,11 @@ func (w Weights) Learn(o Outcome, spans []Span, f Forecast, maxStep int) Weights
 		Utility:    clampWeight(cur.Utility - learnRate*(gUtil/n)),
 		Durability: clampWeight(cur.Durability - learnRate*(gDur/n)),
 		Recency:    clampWeight(cur.Recency - learnRate*(gRec/n)),
+		// Primacy learns on the SAME footing: if the experiment is on (non-zero seed) and it
+		// does not pay, the learner flattens it toward 0 - the built-in off-ramp. If it stays
+		// 0 (default), the primacy term never entered the score, so the default path is
+		// byte-identical to before this change.
+		Primacy: clampWeight(cur.Primacy - learnRate*(gPrim/n)),
 	}
 }
 

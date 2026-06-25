@@ -74,7 +74,10 @@ func main() {
 	probeCap := flag.Int("probe-cap", 0, "bounded-probe candidate cap c (0 = ctxplan default 128); the per-turn planner-compute bound")
 	probeRecency := flag.Int("probe-recency", 0, "bounded-probe recency tail (0 = ctxplan default 32)")
 	out := flag.String("out", "", "optional JSON report path")
+	primacy := flag.Float64("primacy", 0, "EXPERIMENT: 'remove-the-middle' positional weight (0=off, 0.2 symmetric with recency). "+
+		"Favors the OLDEST spans as recency favors the newest. Measure with 'fak horizon-recovery': a recovery gain that raises the fault rate is NOT a win.")
 	flag.Parse()
+	primacyWeight = *primacy // EXPERIMENT off unless --primacy > 0; see recencyForecast.
 
 	// The bounded probe's tuning. The zero value is valid — ctxplan.ProbeOptions.orDefaults
 	// fills DefaultMaxCandidates/DefaultRecencyWindow — so an operator who passes nothing gets
@@ -596,8 +599,22 @@ func recencyForecast(spans []ctxplan.Span, window int) ctxplan.Forecast {
 		fc.Intents = append(fc.Intents, t)
 	}
 	sort.Strings(fc.Intents)
+	// EXPERIMENT (--primacy, default 0 = off): turn on the 'remove-the-middle' positional
+	// prior. When primacyWeight is 0 (default) fc.Weights stays the zero value, so orDefault()
+	// yields the exact shipped DefaultWeights and the run is byte-identical to before the flag.
+	// A linear primacy+recency sum is flat - see internal/ctxplan/primacy_test.go.
+	if primacyWeight > 0 {
+		w := ctxplan.DefaultWeights()
+		w.Primacy = primacyWeight
+		fc.Weights = w
+	}
 	return fc
 }
+
+// primacyWeight is the experimental 'remove-the-middle' positional weight, set by --primacy.
+// 0 (default) leaves the planner's shipped behavior untouched. A package var rather than a
+// threaded parameter keeps the flag the only new surface in the per-session worker chain.
+var primacyWeight float64
 
 // referencesTo returns the OLDER benign spans whose descriptor content overlaps the span
 // arriving at step t — the ground-truth "this turn referenced those facts" signal, derived

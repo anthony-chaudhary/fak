@@ -50,6 +50,14 @@ type Weights struct {
 	Utility    float64 `json:"utility,omitempty"`    // learned outcome-utility (recall.Page.Utility, carried in Cell.Attrs["utility"])
 	Durability float64 `json:"durability,omitempty"` // durable > bounded > session > turn (a durable fact is worth keeping resident)
 	Recency    float64 `json:"recency,omitempty"`    // newer spans slightly favored (a mild prior, not a dominant one)
+	// Primacy is the OPPOSITE-END twin of Recency: OLDER spans slightly favored. Recency
+	// alone is monotone in step, so the four-term benefit cannot express "the oldest spans
+	// (system framing, original constraints) are ALSO load-bearing" - the structural gap a
+	// U-shaped 'remove-the-middle' prior fills. DEFAULT 0 (OFF): an EXPERIMENT, not shipped
+	// behavior; turn it on with a non-zero weight (0.2 is symmetric with Recency). Gate any
+	// claim on a multi-turn fault measure (fak horizon-recovery), never on faith. See
+	// docs/explainers/compounding-benefits-of-a-saved-call.md (the r term).
+	Primacy float64 `json:"primacy,omitempty"`
 }
 
 // DefaultWeights is the seed cost model: relevance dominates (the forecast is the point),
@@ -85,6 +93,7 @@ type signal struct {
 	Utility    float64
 	Durability float64
 	Recency    float64
+	Primacy    float64
 }
 
 // signals returns the four benefit features for c, normalizing recency against maxStep.
@@ -96,6 +105,9 @@ func (f Forecast) signals(c Span, maxStep int) signal {
 		Utility:    spanUtility(c),
 		Durability: durabilityPrior(c.Durability),
 		Recency:    recency(c.Step, maxStep),
+		// c.Step is the LAST-REFERENCE step (the same signal recency reads), so primacy only
+		// down-weights spans untouched-since-old, never a recently re-referenced old span.
+		Primacy: primacy(c.Step, maxStep),
 	}
 }
 
@@ -111,7 +123,7 @@ func (f Forecast) Benefit(c Span, maxStep int) float64 {
 	}
 	w := f.Weights.orDefault()
 	s := f.signals(c, maxStep)
-	b := w.Relevance*s.Relevance + w.Utility*s.Utility + w.Durability*s.Durability + w.Recency*s.Recency
+	b := w.Relevance*s.Relevance + w.Utility*s.Utility + w.Durability*s.Durability + w.Recency*s.Recency + w.Primacy*s.Primacy
 	// Single fail-closed choke point: a non-finite score (a poisoned signal, an Inf
 	// weight) collapses to 0 rather than poisoning the planner's sort or DP downstream.
 	if math.IsNaN(b) || math.IsInf(b, 0) {
@@ -191,6 +203,23 @@ func recency(step, maxStep int) float64 {
 		return 1
 	}
 	return float64(step) / float64(maxStep)
+}
+
+// primacy is the OPPOSITE-END mirror of recency: a mild [0,1] preference for OLDER spans
+// (lower last-reference step). It is exactly 1 - recency over the open interval, but pinned
+// to 0 at BOTH degenerate ends so it never lifts the newest span and never divides by zero.
+// Paired with recency under separate weights it favors both ends over the middle - the
+// 'remove-the-middle' prior. EXPERIMENT: contributes nothing unless Weights.Primacy is
+// non-zero (DEFAULT 0). step is the LAST-REFERENCE step, so a recently re-touched old span
+// has high recency and LOW primacy - primacy only down-weights spans untouched since old.
+func primacy(step, maxStep int) float64 {
+	if maxStep <= 0 || step <= 0 {
+		return 0
+	}
+	if step >= maxStep {
+		return 0
+	}
+	return float64(maxStep-step) / float64(maxStep)
 }
 
 // tokenSet is the lowercased, length>2, content-token set of a string — the same
