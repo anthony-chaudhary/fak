@@ -480,6 +480,33 @@ func describeEngine(f *benchFlags, be compute.Backend, registeredBackends []stri
 	return engine, precision, backendReport
 }
 
+func modelConfigReport(cfg model.Config) map[string]any {
+	return map[string]any{
+		"model_type":              cfg.ModelType,
+		"architectures":           cfg.Architectures,
+		"hidden_size":             cfg.HiddenSize,
+		"num_hidden_layers":       cfg.NumLayers,
+		"num_attention_heads":     cfg.NumHeads,
+		"num_key_value_heads":     cfg.NumKVHeads,
+		"head_dim":                cfg.HeadDim,
+		"intermediate_size":       cfg.IntermediateSize,
+		"vocab_size":              cfg.VocabSize,
+		"is_moe":                  cfg.IsMoE(),
+		"num_local_experts":       cfg.NumExperts,
+		"num_experts_per_tok":     cfg.NumExpertsPerTok,
+		"q_lora_rank":             cfg.QLoraRank,
+		"kv_lora_rank":            cfg.KVLoraRank,
+		"qk_nope_head_dim":        cfg.QKNopeHeadDim,
+		"qk_rope_head_dim":        cfg.QKRopeHeadDim,
+		"v_head_dim":              cfg.VHeadDim,
+		"index_n_heads":           cfg.IndexNHeads,
+		"index_head_dim":          cfg.IndexHeadDim,
+		"index_topk":              cfg.IndexTopK,
+		"indexer_types":           cfg.IndexerTypes,
+		"max_position_embeddings": cfg.MaxPositionEmbeddings,
+	}
+}
+
 // runPrefill times Session.Prefill over each P in prefillSizes (builds KV cache, last
 // logits) and records the median timings and any phase profiles into the report maps.
 func runPrefill(f *benchFlags, newSession func() *model.Session, vocab int, prefillSizes []int, report, phaseReport map[string]any) {
@@ -708,6 +735,7 @@ func main() {
 		"app_version":       appversion.Current(),
 		"engine":            engine,
 		"model":             modelName,
+		"model_config":      modelConfigReport(m.Cfg),
 		"source":            loadSource(*f.hf, *f.gguf, *f.dir, *f.lean),
 		"precision":         precision,
 		"backend":           backendReport,

@@ -273,6 +273,19 @@ func (c *cudaBackend) Recycle() {
 	c.transient = c.transient[:0]
 }
 
+// TrimLarge frees cached allocator buckets larger than maxKeepBytes while preserving the
+// small-buffer pool that makes steady-state decode cheap. GLM-DSA's sparse-attention gather
+// creates large, one-off selK/selV buffers whose exact sizes grow with context; keeping one
+// bucket per position can consume multiple GB on the largest sweeps.
+func (c *cudaBackend) TrimLarge(maxKeepBytes int) {
+	if maxKeepBytes < 0 {
+		maxKeepBytes = 0
+	}
+	cudaMu.Lock()
+	defer cudaMu.Unlock()
+	C.fcuda_trim_pool_large(C.size_t(maxKeepBytes))
+}
+
 // GraphBegin/GraphEndLaunch capture one token's op stream into a CUDA graph and replay it
 // as a single launch — the only way past the proven ~12 tok/s op-per-call WSL floor. The
 // HAL calls GraphBegin after the (pre-capture) input upload, issues the layer ops (which

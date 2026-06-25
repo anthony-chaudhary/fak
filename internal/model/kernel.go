@@ -2,6 +2,18 @@ package model
 
 import "github.com/anthony-chaudhary/fak/internal/compute"
 
+const glmDsaLargeScratchPoolKeepBytes = 1 << 20
+
+type largeScratchTrimmer interface {
+	TrimLarge(maxKeepBytes int)
+}
+
+func trimLargeScratchPool(be compute.Backend) {
+	if t, ok := be.(largeScratchTrimmer); ok {
+		t.TrimLarge(glmDsaLargeScratchPoolKeepBytes)
+	}
+}
+
 // matKernel selects which arithmetic a single-position block's weight matmuls run
 // through, so the f32 decode block (tokenHidden) and its Q8 twin (tokenHiddenQ) share
 // ONE block skeleton — blockStep — instead of two hand-copied transcriptions. prep
@@ -132,6 +144,7 @@ func (k backendKernel) sparseAttend(q, selK, selV []float32, nSel, nH, qkHead, v
 	be.Free(qt)
 	be.Free(kt)
 	be.Free(vt)
+	trimLargeScratchPool(be)
 	if len(out) != nH*vHead {
 		panic("model: backendKernel sparseAttend result length mismatch")
 	}

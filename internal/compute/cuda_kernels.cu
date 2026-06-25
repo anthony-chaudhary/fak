@@ -93,6 +93,19 @@ extern "C" void fcuda_free(void *d) {
     cudaFree(d);
   }
 }
+
+extern "C" void fcuda_trim_pool_large(size_t max_keep_bytes) {
+  for (auto it = g_pool.begin(); it != g_pool.end(); ) {
+    if (it->first > max_keep_bytes) {
+      for (void *p : it->second) {
+        cudaFree(p);
+      }
+      it = g_pool.erase(it);
+    } else {
+      ++it;
+    }
+  }
+}
 extern "C" void fcuda_h2d(void *d, const void *h, size_t n) { CK(cudaMemcpy(d, h, n, cudaMemcpyHostToDevice)); }
 extern "C" void fcuda_d2h(void *h, const void *d, size_t n) { CK(cudaMemcpy(h, d, n, cudaMemcpyDeviceToHost)); g_host_bytes += n; }
 // Device-to-device copies stay on the default stream but are ASYNC w.r.t. the host: a
