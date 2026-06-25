@@ -239,6 +239,15 @@ func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "messages: field required")
 		return
 	}
+	// Validate the sampling params on ingress (#326). A negative max_tokens or an
+	// out-of-range temperature/top_p is a CLIENT error — reject it here with a 400
+	// rather than forwarding bad input that the upstream silently answers anyway (a
+	// wire-contract deviation the proxy used to swallow). Same well-formedness floor
+	// as the empty-messages check above, applied before an upstream round-trip is spent.
+	if msg := validateSampling(req); msg != "" {
+		writeErr(w, http.StatusBadRequest, msg)
+		return
+	}
 	ctx := r.Context()
 	// Request-model pass-through (#82): forward the client's requested model to the
 	// upstream verbatim, falling back to the gateway's configured model only when the
@@ -381,6 +390,32 @@ func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, resp)
+}
+
+// validateSampling enforces the OpenAI sampling-param contract on an inbound chat
+// request, returning a client-facing 400 message for the first invalid field (or ""
+// when every present field is in range). It catches the unambiguous wire-contract
+// violations the proxy otherwise forwarded verbatim — a negative max_tokens, a
+// temperature outside [0, 2], a top_p outside [0, 1] — so bad client input surfaces
+// as a 400 instead of the model silently answering it (#326).
+//
+// max_tokens == 0 is deliberately NOT rejected. The wire field is an omitempty int,
+// so an explicit "max_tokens":0 and an omitted field both decode to Go 0 and are
+// indistinguishable here; 0 therefore falls through to the planner default (the
+// documented semantics). Only values that cannot be a zero-value default — negatives
+// and out-of-band floats — are caught, which keeps the check free of false positives
+// on a client that simply omitted a field.
+func validateSampling(req ChatRequest) string {
+	if req.MaxTokens < 0 {
+		return "max_tokens: must be a positive integer"
+	}
+	if req.Temperature != nil && (*req.Temperature < 0 || *req.Temperature > 2) {
+		return "temperature: must be in [0, 2]"
+	}
+	if req.TopP != nil && (*req.TopP < 0 || *req.TopP > 1) {
+		return "top_p: must be in [0, 1]"
+	}
+	return ""
 }
 
 // upstreamErrorStatus maps a planner error to the HTTP status, an OpenAI-style

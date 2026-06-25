@@ -160,9 +160,9 @@ does.
 | `model` | string | Echoed back; the served model is fixed at boot. |
 | `messages` | array | Standard OpenAI chat messages (`role`, `content`, `tool_calls`, …). Inbound `role: "tool"` results are run through the result-side floor before the upstream model sees them. |
 | `tools` | array | Standard OpenAI tool definitions. Optional. |
-| `max_tokens` | int | Forwarded to the model. Omit to use the planner default. |
-| `temperature` | number | Forwarded. Optional. |
-| `top_p` | number | Forwarded. Optional. |
+| `max_tokens` | int | Forwarded to the model. Omit (or `0`) to use the planner default; a **negative** value is a `400`. |
+| `temperature` | number | Forwarded. Valid range `[0, 2]`; out of range is a `400`. Optional. |
+| `top_p` | number | Forwarded. Valid range `[0, 1]`; out of range is a `400`. Optional. |
 | `stop` | string \| string[] | Either shape accepted. Optional. |
 | `stream` | bool | `true` ⇒ an SSE stream — live token pass-through when it is safe, else synthesized (see below). |
 
@@ -187,8 +187,8 @@ human-readable summary of the refusals is written into the message `content`.
 
 | Status | When |
 |---|---|
-| `400` | Malformed JSON body. |
-| `502` | Upstream model error, or the upstream announced tool calls but **none** parsed (fail-closed: the gateway refuses to skip adjudication on a call the model intended to make). The upstream provider's raw error body never crosses the trust boundary. |
+| `400` | A malformed JSON body, an empty/missing `messages` array, or an invalid sampling param — a negative `max_tokens`, a `temperature` outside `[0, 2]`, or a `top_p` outside `[0, 1]`. The error message names the offending field, so a client can tell its own bad request apart from an upstream fault. |
+| `502` | Upstream model error, or the upstream announced tool calls but **none** parsed (fail-closed: the gateway refuses to skip adjudication on a call the model intended to make). A deterministic dial failure (connection refused / DNS NXDOMAIN / TLS) fails fast — no `~8s` retry backoff — and carries the distinct error `code: "upstream_unreachable"`. The upstream provider's raw error body never crosses the trust boundary. |
 
 **Streaming.** With `stream: true` the gateway serves a `text/event-stream` by one of
 two paths, chosen so a tool call is **never** passed through before adjudication:

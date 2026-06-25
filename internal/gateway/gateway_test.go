@@ -1928,6 +1928,66 @@ func TestChatCompletionsEmptyMessagesIsBadRequest(t *testing.T) {
 	}
 }
 
+// TestChatCompletionsInvalidSamplingParamsIsBadRequest proves the sampling-param
+// ingress floor (#326): a negative max_tokens, an out-of-range temperature, or an
+// out-of-range top_p is rejected at the gateway with a 400 naming the offending
+// field, rather than being forwarded so the upstream silently answers bad input (a
+// wire-contract deviation). The wired planner must never be reached on a rejected
+// request. A request whose sampling fields are at their valid boundaries — and one
+// that sends max_tokens:0 (treated as "unset", the planner default) — is NOT
+// rejected and reaches the planner for a 200.
+func TestChatCompletionsInvalidSamplingParamsIsBadRequest(t *testing.T) {
+	srv := newTestServer(t)
+	srv.planner = stubPlanner{comp: &agent.Completion{
+		Message: agent.Message{Role: agent.RoleAssistant, Content: "ok"},
+	}}
+	ts := httptest.NewServer(srv.Handler())
+	defer ts.Close()
+
+	const msgs = `,"messages":[{"role":"user","content":"hi"}]`
+	reject := []struct {
+		body string
+		want string
+	}{
+		{`{"model":"m","max_tokens":-5` + msgs + `}`, "max_tokens: must be a positive integer"},
+		{`{"model":"m","temperature":-1` + msgs + `}`, "temperature: must be in [0, 2]"},
+		{`{"model":"m","temperature":2.5` + msgs + `}`, "temperature: must be in [0, 2]"},
+		{`{"model":"m","top_p":-0.1` + msgs + `}`, "top_p: must be in [0, 1]"},
+		{`{"model":"m","top_p":1.5` + msgs + `}`, "top_p: must be in [0, 1]"},
+	}
+	for _, c := range reject {
+		httpResp, err := http.Post(ts.URL+"/v1/chat/completions", "application/json", strings.NewReader(c.body))
+		if err != nil {
+			t.Fatal(err)
+		}
+		respRaw, _ := io.ReadAll(httpResp.Body)
+		httpResp.Body.Close()
+		if httpResp.StatusCode != http.StatusBadRequest {
+			t.Errorf("body %s: status = %d, want 400: %s", c.body, httpResp.StatusCode, respRaw)
+		}
+		if !strings.Contains(string(respRaw), c.want) {
+			t.Errorf("body %s: response = %s, want %q", c.body, respRaw, c.want)
+		}
+	}
+
+	// Valid boundaries (temperature=2, top_p=1) and the omitempty-zero max_tokens:0
+	// must pass the floor and reach the planner.
+	for _, body := range []string{
+		`{"model":"m","temperature":2,"top_p":1` + msgs + `}`,
+		`{"model":"m","max_tokens":0` + msgs + `}`,
+	} {
+		httpResp, err := http.Post(ts.URL+"/v1/chat/completions", "application/json", strings.NewReader(body))
+		if err != nil {
+			t.Fatal(err)
+		}
+		respRaw, _ := io.ReadAll(httpResp.Body)
+		httpResp.Body.Close()
+		if httpResp.StatusCode != http.StatusOK {
+			t.Errorf("body %s: status = %d, want 200: %s", body, httpResp.StatusCode, respRaw)
+		}
+	}
+}
+
 func TestContextChangeTombstonesRecallImageOverHTTPAndMCP(t *testing.T) {
 	srv := newTestServer(t)
 	ctx := context.Background()
