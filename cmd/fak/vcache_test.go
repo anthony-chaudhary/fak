@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/anthony-chaudhary/fak/internal/vcachechain"
 	"github.com/anthony-chaudhary/fak/internal/vcachegov"
 )
 
@@ -19,11 +20,15 @@ func TestRunVCacheStatusReportsM5AndRemainingIssues(t *testing.T) {
 	s := out.String()
 	for _, want := range []string{
 		"vCache M5 governor: up",
+		"vCache M4 chains & recall: up",
+		"M4 recall cost-gate proof: refuted",
 		"codex-like star proof: PROVEN",
 		"codex/openai verifier: ready",
 		"codex/openai cached-token sample: PROVEN saved 1728.0 / 2006.0",
 		"codex/openai zero-cache sample: REFUTED saved 0.0 / 2006.0",
-		"remaining: #716 #717 #718 #719 #727",
+		// #719 (M4 chains & recall) is closed by the off-path decision engine, so it
+		// is no longer in the live-loop "remaining" list (M1-M3 + the #727 probe are).
+		"remaining: #716 #717 #718 #727",
 	} {
 		if !strings.Contains(s, want) {
 			t.Fatalf("status missing %q:\n%s", want, s)
@@ -77,6 +82,60 @@ func TestRunVCacheProveRefutesBelowMinimum(t *testing.T) {
 	if !strings.Contains(out.String(), "status: REFUTED") ||
 		!strings.Contains(out.String(), "below the provider minimum") {
 		t.Fatalf("refuted output unexpected:\n%s", out.String())
+	}
+}
+
+func TestRunVCacheProveRecallRefusesSingleUnit(t *testing.T) {
+	// The §11.0 headline default: a 30k-token prefix replayed at r=0.1 to recall one
+	// 10-token unit is a 300× LOSS, so the cost gate REFUSES it (exit 1).
+	var out, errb bytes.Buffer
+	code := runVCache(&out, &errb, []string{"prove-recall"})
+	if code != 1 {
+		t.Fatalf("single-unit prove-recall exit=%d, want 1; stderr=%s output=%s", code, errb.String(), out.String())
+	}
+	s := out.String()
+	for _, want := range []string{
+		"status: refuted",
+		"decision: cold_prefill",
+		"replay cost (P·r): 3000.0 token-equiv",
+		"single-unit loss ratio (P·r/U): 300.0x",
+		"break-even siblings: 301",
+		"correctness depends on cache hit: false",
+	} {
+		if !strings.Contains(s, want) {
+			t.Fatalf("prove-recall missing %q:\n%s", want, s)
+		}
+	}
+}
+
+func TestRunVCacheProveRecallAmortizedProven(t *testing.T) {
+	// The amortized-fan-out exception: 401 sibling units clear the 301 break-even,
+	// so rebuild is net-positive (exit 0).
+	var out, errb bytes.Buffer
+	code := runVCache(&out, &errb, []string{"prove-recall", "--siblings", "401"})
+	if code != 0 {
+		t.Fatalf("amortized prove-recall exit=%d, want 0; stderr=%s output=%s", code, errb.String(), out.String())
+	}
+	s := out.String()
+	if !strings.Contains(s, "status: proven") || !strings.Contains(s, "decision: rebuild") {
+		t.Fatalf("amortized prove-recall unexpected:\n%s", s)
+	}
+}
+
+func TestRunVCacheProveRecallJSON(t *testing.T) {
+	var out, errb bytes.Buffer
+	if code := runVCache(&out, &errb, []string{"prove-recall", "--json", "--siblings", "301"}); code != 0 {
+		t.Fatalf("json prove-recall exit=%d stderr=%s output=%s", code, errb.String(), out.String())
+	}
+	var proof vcachechain.RecallProof
+	if err := json.Unmarshal(out.Bytes(), &proof); err != nil {
+		t.Fatalf("invalid json: %v\n%s", err, out.String())
+	}
+	if proof.Status != vcachechain.ProofProven || proof.Decision != vcachechain.DecisionRebuild {
+		t.Fatalf("proof = %+v, want proven/rebuild at the 301 break-even", proof)
+	}
+	if proof.BreakEvenSiblings != 301 || proof.LossRatio != 300 {
+		t.Fatalf("economics = %+v, want break-even 301 / loss 300", proof)
 	}
 }
 

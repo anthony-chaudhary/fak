@@ -10,6 +10,7 @@ import (
 	"os"
 	"strings"
 
+	"github.com/anthony-chaudhary/fak/internal/vcachechain"
 	"github.com/anthony-chaudhary/fak/internal/vcachegov"
 )
 
@@ -29,6 +30,8 @@ func runVCache(stdout, stderr io.Writer, argv []string) int {
 		return runVCacheProve(stdout, stderr, argv[1:])
 	case "prove-telemetry":
 		return runVCacheProveTelemetry(stdout, stderr, argv[1:])
+	case "prove-recall":
+		return runVCacheProveRecall(stdout, stderr, argv[1:])
 	case "-h", "--help", "help":
 		vcacheUsage(stdout)
 		return 0
@@ -47,24 +50,35 @@ func vcacheUsage(w io.Writer) {
                    [--content public|secret|regulated]
   fak vcache prove-telemetry --file FILE [--json]
                    [--read-mult F] [--write-5m-mult F] [--write-1h-mult F]
+  fak vcache prove-recall [--json] [--prefix-tokens N] [--unit-tokens N]
+                   [--read-mult F] [--siblings N]
 
 status reports what is actually up: the M5 governor is a local, off-path policy
-engine; provider calibration/warming/recall remain tracked by #716-#719, and
-Codex/OpenAI cached-token telemetry remains tracked by #727.
+engine; the M4 chains & recall engine is off-path and gated OFF by default;
+provider calibration/warming remain tracked by #716-#718, and Codex/OpenAI cached-
+token telemetry remains tracked by #727.
 prove runs the deterministic star-anchor token-savings proof. Exit 0 means PROVEN;
 exit 1 means REFUTED; exit 2 means usage error.
 prove-telemetry replays provider usage JSONL, such as Claude Code probe output or
 OpenAI Responses/Chat usage objects, and proves realized savings from observed
 cache counters.
+prove-recall runs the deterministic M4 cost-gate proof (the §11.0 headline): a
+single ~10-token unit recalled from a long warm prefix is almost always a net LOSS,
+so the gate REFUSES it; rebuild wins only for amortized fan-out. Exit 0 = rebuild
+allowed (PROVEN); exit 1 = refused (REFUTED); exit 2 = usage error.
+
 `)
 }
 
 type vcacheStatusReport struct {
 	Status         string                     `json:"status"`
 	Governor       string                     `json:"governor"`
+	Chains         string                     `json:"chains"`
 	LiveProvider   string                     `json:"live_provider"`
 	Proof          vcachegov.StarSavingsProof `json:"proof"`
+	RecallProof    vcachechain.RecallProof    `json:"recall_proof"`
 	CodexOpenAI    vcacheCodexOpenAIStatus    `json:"codex_openai"`
+	M4Issue        string                     `json:"m4_issue"`
 	M5Issue        string                     `json:"m5_issue"`
 	Remaining      []vcacheRemainingIssue     `json:"remaining"`
 	CorrectnessLaw string                     `json:"correctness_law"`
@@ -104,10 +118,14 @@ func runVCacheStatus(stdout, stderr io.Writer, argv []string) int {
 	}
 	fmt.Fprintf(stdout, "vCache status: %s\n", rep.Status)
 	fmt.Fprintf(stdout, "vCache M5 governor: %s\n", rep.Governor)
+	fmt.Fprintf(stdout, "vCache M4 chains & recall: %s\n", rep.Chains)
 	fmt.Fprintf(stdout, "live provider loop: %s\n", rep.LiveProvider)
 	fmt.Fprintf(stdout, "codex-like star proof: %s (%s)\n", rep.Proof.Status, rep.Proof.Reason)
 	fmt.Fprintf(stdout, "token-equiv saved: %.1f / %.1f (%.1f%%)\n",
 		rep.Proof.SavedTokenEquiv, rep.Proof.BaselineTokenEquiv, rep.Proof.SavedPct)
+	fmt.Fprintf(stdout, "M4 recall cost-gate proof: %s — %s\n", rep.RecallProof.Status, rep.RecallProof.Decision)
+	fmt.Fprintf(stdout, "M4 single-unit loss ratio: %.1fx (break-even %s siblings)\n",
+		rep.RecallProof.LossRatio, formatBreakEven(rep.RecallProof.BreakEvenSiblings))
 	fmt.Fprintf(stdout, "codex/openai verifier: %s\n", rep.CodexOpenAI.Verifier)
 	fmt.Fprintf(stdout, "codex/openai live telemetry: %s (%s)\n",
 		rep.CodexOpenAI.LiveTelemetry, rep.CodexOpenAI.Reason)
@@ -179,6 +197,54 @@ func runVCacheProve(stdout, stderr io.Writer, argv []string) int {
 	return vcacheProofExit(proof.Status)
 }
 
+func runVCacheProveRecall(stdout, stderr io.Writer, argv []string) int {
+	fs := flag.NewFlagSet("vcache prove-recall", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	asJSON := fs.Bool("json", false, "emit machine-readable proof")
+	prefix := fs.Int64("prefix-tokens", 30000, "replayed warm prefix length in tokens (P)")
+	unit := fs.Int64("unit-tokens", 10, "recalled unit fresh-prefill length in tokens (U)")
+	readMult := fs.Float64("read-mult", 0.1, "provider cached-read token multiplier (r)")
+	siblings := fs.Int("siblings", 1, "co-recalled sibling units sharing the prefix (S, the amortization)")
+	if err := fs.Parse(argv); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			return 0
+		}
+		return 2
+	}
+	proof := vcachechain.ProveRecall(vcachechain.ProveRecallInput{
+		PrefixTokens: *prefix,
+		UnitTokens:   *unit,
+		ReadMult:     *readMult,
+		Siblings:     *siblings,
+	})
+	if *asJSON {
+		if code := writeJSON(stdout, proof); code != 0 {
+			return code
+		}
+		return vcacheRecallProofExit(proof.Status)
+	}
+	fmt.Fprintf(stdout, "status: %s\n", proof.Status)
+	fmt.Fprintf(stdout, "decision: %s\n", proof.Decision)
+	fmt.Fprintf(stdout, "reason: %s\n", proof.Reason)
+	fmt.Fprintf(stdout, "prefix/unit tokens: %d / %d\n", proof.PrefixTokens, proof.UnitTokens)
+	fmt.Fprintf(stdout, "read multiplier: %.3g\n", proof.ReadMult)
+	fmt.Fprintf(stdout, "siblings (amortization): %d\n", proof.Siblings)
+	fmt.Fprintf(stdout, "replay cost (P·r): %.1f token-equiv\n", proof.ReplayCost)
+	fmt.Fprintf(stdout, "fresh prefill (U): %.1f token-equiv\n", proof.FreshPrefillCost)
+	fmt.Fprintf(stdout, "amortized savings (S·U): %.1f token-equiv\n", proof.AmortizedSavings)
+	fmt.Fprintf(stdout, "single-unit loss ratio (P·r/U): %.1fx\n", proof.LossRatio)
+	fmt.Fprintf(stdout, "break-even siblings: %s\n", formatBreakEven(proof.BreakEvenSiblings))
+	fmt.Fprintf(stdout, "correctness depends on cache hit: %v\n", proof.CorrectnessDependsOn)
+	return vcacheRecallProofExit(proof.Status)
+}
+
+func vcacheRecallProofExit(s vcachechain.ProofStatus) int {
+	if s == vcachechain.ProofProven {
+		return 0
+	}
+	return 1
+}
+
 func runVCacheProveTelemetry(stdout, stderr io.Writer, argv []string) int {
 	fs := flag.NewFlagSet("vcache prove-telemetry", flag.ContinueOnError)
 	fs.SetOutput(stderr)
@@ -230,9 +296,10 @@ func runVCacheProveTelemetry(stdout, stderr io.Writer, argv []string) int {
 
 func defaultVCacheStatus() vcacheStatusReport {
 	return vcacheStatusReport{
-		Status:       "M5 governor up; full vCache provider loop not yet live",
+		Status:       "M5 governor up; M4 chains & recall up (gated OFF by default); full vCache provider loop not yet live",
 		Governor:     "up (pin/lazy/evict, warm budget, affinity, secret gate)",
-		LiveProvider: "not wired; M1-M4 remain open; Codex/OpenAI telemetry probe #727 pending",
+		Chains:       "up (prefix DAG, topological replay, cost-gated rebuild) — gated OFF by default; off-path",
+		LiveProvider: "not wired; M1-M3 remain open; Codex/OpenAI telemetry probe #727 pending",
 		Proof: vcachegov.ProveStarSavings(vcachegov.StarSavingsInput{
 			AnchorTokens:    4096,
 			SuffixTokens:    10,
@@ -242,13 +309,19 @@ func defaultVCacheStatus() vcacheStatusReport {
 			WriteMult:       vcachegov.WriteMult5Minutes,
 			Secret:          vcachegov.Cacheable,
 		}),
+		RecallProof: vcachechain.ProveRecall(vcachechain.ProveRecallInput{
+			PrefixTokens: 30000,
+			UnitTokens:   10,
+			ReadMult:     0.1,
+			Siblings:     1,
+		}),
 		CodexOpenAI: defaultCodexOpenAIStatus(),
+		M4Issue:     "https://github.com/anthony-chaudhary/fak/issues/719",
 		M5Issue:     "https://github.com/anthony-chaudhary/fak/issues/720",
 		Remaining: []vcacheRemainingIssue{
 			{716, "M1 observe & calibrate", "https://github.com/anthony-chaudhary/fak/issues/716"},
 			{717, "M2 star anchors", "https://github.com/anthony-chaudhary/fak/issues/717"},
 			{718, "M3 dedicated warming", "https://github.com/anthony-chaudhary/fak/issues/718"},
-			{719, "M4 chains & recall", "https://github.com/anthony-chaudhary/fak/issues/719"},
 			{727, "Codex/OpenAI telemetry probe", "https://github.com/anthony-chaudhary/fak/issues/727"},
 		},
 		CorrectnessLaw: "cost is budgeted at the uncached price; hits are realized rebates, never trust claims",
