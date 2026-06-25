@@ -39,6 +39,10 @@ func cmdWebbench(argv []string) {
 		cmdWebbenchEval(rest)
 	case "compare":
 		cmdWebbenchCompare(rest)
+	case "serving":
+		cmdWebbenchServing(rest)
+	case "parity-gate":
+		cmdWebbenchParityGate(rest)
 	case "-h", "--help", "help":
 		webbenchUsage()
 	default:
@@ -65,6 +69,17 @@ usage:
         [--bench-result FILE] [--out FILE] [--md FILE]
         THE comparison: fak's headline metric families keyed to external benchmarks,
         with optional side-by-side against a benchmark results file.
+
+  fak webbench serving --dataset FILE [--tracks ours,sglang,vllm,fak-fronts-fleet]
+        [--endpoints track=http://host/v1,...] [--metrics track=http://host/metrics,...]
+        [--model MODEL] [--agents 100] [--concurrency 16] [--out FILE]
+        Client-measured serving parity harness: same workload, same JSON schema,
+        measured TTFT/ITL/TPOT/latency/throughput/goodput where an endpoint is
+        configured; missing endpoints are emitted as "not_measured".
+
+  fak webbench parity-gate --claim-file FILE --artifact FILE
+        Reject a "parity or better" serving claim unless the artifact contains
+        measured vllm, sglang, and fak-fronts-fleet tracks.
 
 The metrics most relevant to web agents:
   A/C  net prefill work-elimination vs the naive re-prefill-every-turn harness
@@ -245,6 +260,164 @@ func cmdWebbenchCompare(argv []string) {
 	}
 	if *md != "" {
 		fmt.Fprintf(os.Stderr, "markdown: %s\n", *md)
+	}
+}
+
+func cmdWebbenchServing(argv []string) {
+	fs := flag.NewFlagSet("webbench serving", flag.ExitOnError)
+	dataset := fs.String("dataset", "", "path to web task dataset (required)")
+	tracksArg := fs.String("tracks", "ours,sglang,vllm,fak-fronts-fleet", "comma-separated tracks")
+	endpointsArg := fs.String("endpoints", "", "comma-separated track=OpenAI-compatible /v1 base URLs")
+	metricsArg := fs.String("metrics", "", "comma-separated track=Prometheus metrics URLs for prefix-cache hit rate")
+	model := fs.String("model", "unknown", "model id sent to each OpenAI-compatible endpoint")
+	machine := fs.String("machine", "", "machine id for artifact path (default: hostname)")
+	agents := fs.Int("agents", 100, "number of agent requests to replay; repeats dataset tasks if needed")
+	concurrency := fs.Int("concurrency", 16, "parallel request workers")
+	limit := fs.Int("limit", 0, "cap source dataset tasks before agent replay (0 = all)")
+	maxOutput := fs.Int("max-output-tokens", 64, "max output tokens per request")
+	sloMS := fs.Int("slo-ms", 2000, "goodput SLO threshold in milliseconds")
+	timeoutSec := fs.Int("timeout-sec", 60, "per-request timeout in seconds")
+	apiKeyEnv := fs.String("api-key-env", "", "optional env var containing a bearer token for all endpoints")
+	replicas := fs.Int("replicas", 1, "replica count described by the fak-fronts-fleet plan script")
+	sharedPrefix := fs.String("shared-prefix", "", "override the shared prefix used across all requests")
+	out := fs.String("out", "", "write artifact JSON here (default: by-machine dated run dir)")
+	outDir := fs.String("out-dir", "", "artifact root (default: experiments/benchmark/runs/by-machine)")
+	_ = fs.Parse(argv)
+
+	if *dataset == "" {
+		fmt.Fprintln(os.Stderr, "fak webbench serving: --dataset is required")
+		os.Exit(2)
+	}
+	tracks, err := webbench.ParseServingTracks(*tracksArg)
+	must(err)
+	endpoints, err := parseServingTrackMap(*endpointsArg)
+	must(err)
+	metrics, err := parseServingTrackMap(*metricsArg)
+	must(err)
+
+	d, err := webbench.LoadDataset(*dataset)
+	must(err)
+	workload := webbench.BuildServingWorkload(d, webbench.DefaultGeometryModel(), *limit, *agents, *maxOutput, *sharedPrefix)
+	if len(workload) == 0 {
+		fmt.Fprintln(os.Stderr, "fak webbench serving: workload is empty")
+		os.Exit(2)
+	}
+
+	machineID := *machine
+	if machineID == "" {
+		if host, err := os.Hostname(); err == nil && host != "" {
+			machineID = host
+		} else {
+			machineID = "unknown"
+		}
+	}
+	var cfgTracks []webbench.ServingTrackConfig
+	for _, tr := range tracks {
+		cfgTracks = append(cfgTracks, webbench.ServingTrackConfig{
+			Track:      tr,
+			BaseURL:    endpoints[tr],
+			MetricsURL: metrics[tr],
+			Model:      *model,
+			APIKeyEnv:  *apiKeyEnv,
+			Replicas:   *replicas,
+		})
+	}
+
+	rep, err := webbench.RunServingParity(ctx(), webbench.ServingParityConfig{
+		GeneratedAt: time.Now().UTC().Format(time.RFC3339),
+		MachineID:   machineID,
+		Model:       *model,
+		Tracks:      cfgTracks,
+		Workload:    workload,
+		Concurrency: *concurrency,
+		SLO:         time.Duration(*sloMS) * time.Millisecond,
+		Timeout:     time.Duration(*timeoutSec) * time.Second,
+	})
+	must(err)
+	outPath := *out
+	if outPath == "" {
+		outPath = webbench.DefaultServingArtifactPath(*outDir, machineID, rep.GeneratedAt, tracks)
+	}
+	must(webbench.WriteServingParityReport(rep, outPath))
+	printServingSummary(os.Stderr, rep, outPath)
+}
+
+func cmdWebbenchParityGate(argv []string) {
+	fs := flag.NewFlagSet("webbench parity-gate", flag.ExitOnError)
+	claimFile := fs.String("claim-file", "", "file containing claim text")
+	claim := fs.String("claim", "", "inline claim text")
+	artifact := fs.String("artifact", "", "serving parity artifact JSON")
+	_ = fs.Parse(argv)
+
+	claimText := *claim
+	if *claimFile != "" {
+		b, err := os.ReadFile(*claimFile)
+		must(err)
+		claimText = string(b)
+	}
+	if claimText == "" {
+		fmt.Fprintln(os.Stderr, "fak webbench parity-gate: --claim-file or --claim is required")
+		os.Exit(2)
+	}
+	var rep *webbench.ServingParityReport
+	if *artifact != "" {
+		var err error
+		rep, err = webbench.LoadServingParityReport(*artifact)
+		must(err)
+	}
+	if err := webbench.ValidateParityClaim(claimText, rep); err != nil {
+		fmt.Fprintf(os.Stderr, "serving parity gate: %v\n", err)
+		os.Exit(1)
+	}
+	fmt.Fprintln(os.Stderr, "serving parity gate: OK")
+}
+
+func parseServingTrackMap(arg string) (map[webbench.ServingTrack]string, error) {
+	out := make(map[webbench.ServingTrack]string)
+	if strings.TrimSpace(arg) == "" {
+		return out, nil
+	}
+	for _, part := range strings.Split(arg, ",") {
+		part = strings.TrimSpace(part)
+		if part == "" {
+			continue
+		}
+		k, v, ok := strings.Cut(part, "=")
+		if !ok || strings.TrimSpace(k) == "" || strings.TrimSpace(v) == "" {
+			return nil, fmt.Errorf("track map entry %q must be track=value", part)
+		}
+		tr, err := webbench.ParseServingTrack(k)
+		if err != nil {
+			return nil, err
+		}
+		out[tr] = strings.TrimSpace(v)
+	}
+	return out, nil
+}
+
+func printServingSummary(w *os.File, rep *webbench.ServingParityReport, out string) {
+	fmt.Fprintf(w, "\n== fak webbench serving ==\n")
+	fmt.Fprintf(w, "artifact      : %s\n", out)
+	fmt.Fprintf(w, "requests      : %d  concurrency: %d  slo: %dms\n", rep.Workload.Requests, rep.Workload.Concurrency, rep.Workload.SLOMillis)
+	for _, tr := range rep.Tracks {
+		fmt.Fprintf(w, "  %-16s %-12s", tr.Track, tr.Status)
+		if tr.Status != "measured" {
+			fmt.Fprintf(w, " %s\n", tr.Reason)
+			continue
+		}
+		fmt.Fprintf(w, " ok=%d/%d", tr.Stats.OK, tr.Stats.Requests)
+		if tr.Stats.TTFTMillis.P50 != nil {
+			fmt.Fprintf(w, " ttft.p50=%.1fms", *tr.Stats.TTFTMillis.P50)
+		}
+		if tr.Stats.GoodputRPS.Value != nil {
+			fmt.Fprintf(w, " goodput=%.3f req/s", *tr.Stats.GoodputRPS.Value)
+		}
+		if tr.Stats.PrefixCacheHitRate.Value != nil {
+			fmt.Fprintf(w, " prefix-hit=%.3f", *tr.Stats.PrefixCacheHitRate.Value)
+		} else {
+			fmt.Fprintf(w, " prefix-hit=%s", tr.Stats.PrefixCacheHitRate.Status)
+		}
+		fmt.Fprintln(w)
 	}
 }
 
