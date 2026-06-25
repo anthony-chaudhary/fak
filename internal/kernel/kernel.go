@@ -445,6 +445,12 @@ var ErrDenied = errors.New("kernel: call denied by adjudicator")
 // progress engine to poll, an all-pending set is driven by reaping the first handle
 // in the caller's set. The method consumes exactly the returned handle; other
 // handles remain pending for later Reap/ReapAll calls.
+//
+// It matches a completion to its submission by SubmissionHandle.Seq; the Queue/Opaque
+// fields are reserved, inert routing/correlation slots no scheduler reads here (there
+// is one global engine fold, no multi-queue tag-matcher). The async-addressing seam —
+// what Seq/Queue/Opaque and the Ext/ExtKey sidecar are shaped for, and the MPI-analogue
+// caveats — is documented in docs/proofs/async-addressing.md.
 func (k *Kernel) ReapAny(ctx context.Context, handles []abi.SubmissionHandle) (abi.SubmissionHandle, *abi.Result, error) {
 	if len(handles) == 0 {
 		return abi.SubmissionHandle{}, nil, ErrNoHandles
