@@ -116,6 +116,7 @@ front page.
 - [GLM-5.2 kernel + turn demos (2026-06-21)](docs/notes/GLM52-PURE-KERNEL-AND-AGENT-TURN-DEMOS-RESULTS-2026-06-21.md)
 - [GLM-5.2 pure kernel on GPU server (2026-06-21)](docs/notes/GLM52-PURE-KERNEL-ON-GPU-SERVER-2026-06-21.md)
 - [GLM-5.2 real-checkpoint generation matches HuggingFace on the pure engine (2026-06-23)](docs/notes/GLM52-REAL-ORACLE-GENERATION-ON-PURE-FAK-2026-06-23.md)
+- [GLM-5.2 first native throughput, next steps & honest benchmarking plan (2026-06-25)](docs/notes/GLM52-NATIVE-THROUGHPUT-AND-BENCHMARK-PLAN-2026-06-25.md) — the first native `glm_moe_dsa` decode/prefill tok/s on a DGX A100 (26.53 decode @ L8/H2048, synthetic-kernel scope), the per-prefill-position VRAM-leak fix (`b68a182`) that unblocked it, the prioritized next steps (P0 = the DSA-kernel illegal-access at the largest configs), and a category-honest ladder for comparing fak to the llama.cpp 753B baseline (2.62 tok/s) / vLLM / SGLang without a scale-mismatch error.
 - [Mac bench refresh: CPU Q8 parity + uncontended radix (2026-06-23)](docs/notes/MAC-BENCH-REFRESH-2026-06-23.md)
 - [The O(1) current turn: a planned view over the lossless history (2026-06-23)](docs/notes/O1-TURN-CONTEXT-PLANNER-2026-06-23.md) — cost-based, forecast-driven context planner; the middle ground between an unbounded transcript and lossy compaction.
 - [On-demand context KV reuse (2026-06-19)](docs/notes/ON-DEMAND-CONTEXT-KV-REUSE-2026-06-19.md)
