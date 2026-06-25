@@ -69,6 +69,13 @@ type Policy struct {
 	// green); languages whose only checkers shell out (Python/CUDA) DEFER — fail
 	// open, never denying over a quality signal the decide path cannot produce.
 	LintWrites bool
+	// Profile, when non-nil, ELIDES sub-rungs Adjudicate would otherwise always run,
+	// per risk class (#665/#666, see riskClass + RungProfile). It NARROWS the floor
+	// only — SetPolicy clamps any profile that tries to drop a mandatory write-class
+	// refusal rung (sanitizeProfile / mustRun), so the write/self-modify floor can
+	// never be widened. A nil Profile (the zero Policy and DefaultPolicy) runs the
+	// fixed HEAD sequence byte-for-byte.
+	Profile *RungProfile
 }
 
 // Posture selects the policy's default-deny behavior after all provable refusal
@@ -140,11 +147,13 @@ type Adjudicator struct {
 
 // New builds an adjudicator with the given policy.
 func New(p Policy) *Adjudicator {
+	p.Profile = sanitizeProfile(p.Profile) // floor invariant: a profile may narrow only
 	return &Adjudicator{policy: p, argByTool: indexArgPredicates(p.ArgPredicates)}
 }
 
 // SetPolicy swaps the policy (used by tests + the bench harness).
 func (a *Adjudicator) SetPolicy(p Policy) {
+	p.Profile = sanitizeProfile(p.Profile) // floor invariant: a profile may narrow only
 	a.mu.Lock()
 	a.policy = p
 	a.argByTool = indexArgPredicates(p.ArgPredicates)

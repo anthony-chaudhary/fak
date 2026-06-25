@@ -66,3 +66,98 @@ func commandText(args map[string]any) string {
 	}
 	return ""
 }
+
+// rung enumerates the ordered sub-rungs Adjudicate folds, so a RungProfile can gate
+// each one independently (#665/#666). The order MIRRORS the fixed sequence in
+// Adjudicate; a profile may only ELIDE a rung for a class, never reorder or add one.
+type rung uint8
+
+const (
+	rungDenyName      rung = iota // explicit Deny[tool] by name
+	rungSelfModify                // write-shaped target hits a SelfModifyGlob
+	rungCmdSelfModify             // shell command writes into a guarded tree
+	rungSynthTool                 // exec of an agent-authored script into a guarded tree (+ ledger note)
+	rungArgPredicate              // per-tool arg-value predicates
+	rungLintWrite                 // whole-file write of unparseable code
+	rungTransform                 // redact a secret-shaped arg before dispatch
+	rungAllow                     // affirmative allow + AllowPrefix (terminal)
+	rungDefaultDeny               // fail-closed default deny (terminal)
+	numRungs
+)
+
+// numClasses is the count of risk classes (classRead, classWrite) — the first
+// dimension of a RungProfile's elision table.
+const numClasses = int(classWrite) + 1
+
+// RungProfile narrows which of Adjudicate's sub-rungs run, per risk class. It is the
+// per-class elision table behind epic #663: most refusal rungs are write-shaped and
+// inert for a plain read, so a profile can elide them for classRead to shorten the
+// read path WITHOUT changing any verdict (riskClass keeps a write-capable read in
+// classWrite, where nothing is elided).
+//
+// The zero RungProfile — and a nil *RungProfile — elides NOTHING for any class, so it
+// reproduces the fixed HEAD sequence byte-for-byte (#666, drop-in safe). A profile may
+// only NARROW the floor for the read class; SetPolicy clamps any attempt to elide a
+// mandatory write-class rung (see mustRun / sanitizeProfile), so the
+// write/self-modify-adjacent floor can never be widened.
+type RungProfile struct {
+	// elided[class] is a bitmask of rungs SKIPPED for that class (bit r set => rung r
+	// is elided). uint16 covers numRungs (≤ 16) with room to spare.
+	elided [numClasses]uint16
+}
+
+// runs reports whether the profile runs sub-rung r for a call of class cl. A nil
+// profile (and the zero RungProfile) runs every rung — the byte-identical HEAD
+// sequence. A non-nil profile runs r unless it has explicitly elided r for cl.
+func (pr *RungProfile) runs(cl class, r rung) bool {
+	if pr == nil {
+		return true
+	}
+	return pr.elided[cl]&(1<<r) == 0
+}
+
+// elide marks rungs rs elided for class cl and returns the profile, so callers
+// (DefaultRungProfile, tests) can construct a profile fluently. Eliding a mandatory
+// rung is a no-op at the floor: SetPolicy clamps it via sanitizeProfile.
+func (pr *RungProfile) elide(cl class, rs ...rung) *RungProfile {
+	for _, r := range rs {
+		pr.elided[cl] |= 1 << r
+	}
+	return pr
+}
+
+// mustRun is the floor invariant: it reports whether sub-rung r is MANDATORY for risk
+// class cl and so may not be elided by any RungProfile. The write-shaped refusal rungs
+// (self-modify, the shell + synth-tool write floor, the lint-write grammar) are
+// mandatory for the write/self-modify-adjacent class — a profile may narrow the floor
+// only for the read class, where those rungs are provably inert. Everything else — the
+// by-name Deny, the arg-value predicates, the redact transform, and the terminal
+// allow / default-deny — is shape-independent and mandatory for EVERY class.
+func mustRun(cl class, r rung) bool {
+	switch r {
+	case rungSelfModify, rungCmdSelfModify, rungSynthTool, rungLintWrite:
+		return cl == classWrite
+	default:
+		return true
+	}
+}
+
+// sanitizeProfile enforces the floor invariant on a policy's RungProfile: it returns a
+// copy with every MANDATORY rung's elision bit CLEARED, so a profile can never drop a
+// rung mustRun requires — the floor narrows only, never widens. A nil profile stays nil
+// (run everything). New and SetPolicy call it, so the LIVE floor always satisfies the
+// invariant no matter how a profile was hand-constructed.
+func sanitizeProfile(pr *RungProfile) *RungProfile {
+	if pr == nil {
+		return nil
+	}
+	out := &RungProfile{elided: pr.elided}
+	for cl := class(0); int(cl) < numClasses; cl++ {
+		for r := rung(0); r < numRungs; r++ {
+			if mustRun(cl, r) {
+				out.elided[cl] &^= 1 << r // clear: this rung must run for cl
+			}
+		}
+	}
+	return out
+}
