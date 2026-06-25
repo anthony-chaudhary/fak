@@ -20,16 +20,16 @@ type scriptedStream struct {
 	i    int
 }
 
-func (s *scriptedStream) Next(ctx context.Context) (int, string, bool, error) {
+func (s *scriptedStream) Next(ctx context.Context) (UpstreamToken, error) {
 	if err := ctx.Err(); err != nil {
-		return 0, "", false, err
+		return UpstreamToken{}, err
 	}
 	if s.i >= len(s.toks) {
-		return 0, "", true, nil // upstream finished the turn
+		return UpstreamToken{Done: true}, nil // upstream finished the turn
 	}
 	t := s.toks[s.i]
 	s.i++
-	return t, "", false, nil
+	return UpstreamToken{ID: t}, nil
 }
 
 // TestAdapterStreamsUpstream proves the external-adapter shape compiles against and
@@ -79,12 +79,12 @@ func TestAdapterStreamsUpstream(t *testing.T) {
 // for an engine that would keep decoding until the client disconnects.
 type countingStream struct{ n int }
 
-func (s *countingStream) Next(ctx context.Context) (int, string, bool, error) {
+func (s *countingStream) Next(ctx context.Context) (UpstreamToken, error) {
 	if err := ctx.Err(); err != nil {
-		return 0, "", false, err
+		return UpstreamToken{}, err
 	}
 	s.n++
-	return s.n, "", false, nil
+	return UpstreamToken{ID: s.n}, nil
 }
 
 // TestAdapterAbortStopsMidStream proves ctx cancellation aborts the adapter

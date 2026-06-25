@@ -24,15 +24,26 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/abi"
 )
 
+// UpstreamToken is one decoded step from an upstream stream. It is a STRUCT, not a
+// positional return, EXACTLY so an adapter author can grow it with upstream-native
+// fields (per-token logprobs/top-k, a finish-reason, usage) WITHOUT breaking every
+// UpstreamStream implementation — a return-tuple could not grow additively. Done
+// marks the turn finished and carries no token.
+type UpstreamToken struct {
+	ID   int    // the decoded token id
+	Text string // optional incremental detok text ("" if none)
+	Done bool   // the upstream finished the turn (no token in this event)
+}
+
 // UpstreamStream is the minimal async-token surface an external serving engine
-// exposes for one request: pull the next decoded token, or learn the stream is
+// exposes for one request: pull the next decoded step, or learn the stream is
 // finished, honoring ctx for mid-stream abort. A real adapter implements Next by
 // reading the upstream's token stream; cancelling ctx aborts the upstream request.
 type UpstreamStream interface {
-	// Next returns the next token (id + optional incremental detok text). done=true
-	// signals the upstream finished the turn (no token). A non-nil err (including
-	// ctx.Err() on abort) terminates the request.
-	Next(ctx context.Context) (token int, text string, done bool, err error)
+	// Next returns the next decoded step. A non-nil err (including ctx.Err() on
+	// abort) terminates the request; otherwise UpstreamToken.Done signals the
+	// upstream finished the turn.
+	Next(ctx context.Context) (UpstreamToken, error)
 }
 
 // UpstreamFactory opens an upstream stream for one admitted call. A real adapter
@@ -132,18 +143,18 @@ func (r *adapterRequest) pump(ctx context.Context, up UpstreamStream) {
 			r.finish(nil, err)
 			return
 		}
-		tok, text, done, err := up.Next(ctx)
+		ut, err := up.Next(ctx)
 		if err != nil {
 			r.finish(nil, err)
 			return
 		}
-		if done {
+		if ut.Done {
 			r.finish(r.assemble(), nil)
 			return
 		}
-		r.gen = append(r.gen, tok)
+		r.gen = append(r.gen, ut.ID)
 		select {
-		case r.tokens <- abi.EngineToken{ID: tok, Text: text}:
+		case r.tokens <- abi.EngineToken{ID: ut.ID, Text: ut.Text}:
 		case <-ctx.Done():
 			r.finish(nil, ctx.Err())
 			return
@@ -163,6 +174,11 @@ func (r *adapterRequest) assemble() *abi.Result {
 		Engine: r.engine,
 		Tokens: r.gen,
 	})
+	// input_tokens is intentionally omitted: an external upstream tokenizes the
+	// prompt itself and does not report prompt length to the adapter, so unlike the
+	// in-kernel engine this path cannot emit it — downstream Meta consumers must
+	// treat input_tokens as optional. Typed usage / finish-reason carriers ride on
+	// Result.Meta/Ext additively (sibling adapter-issue scope; see the abi seam doc).
 	return &abi.Result{
 		Payload: putBytes(r.putCtx, body),
 		Status:  abi.StatusOK,

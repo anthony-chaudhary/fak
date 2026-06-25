@@ -83,6 +83,7 @@ func (s *NativeScheduler) Admit(ctx context.Context, c *abi.ToolCall) (abi.Engin
 
 	cctx, cancel := context.WithCancel(ctx)
 	ln := &schedLane{
+		sched:     s,
 		ctx:       cctx,
 		cancel:    cancel,
 		sess:      sess,
@@ -122,11 +123,17 @@ func (s *NativeScheduler) Complete(ctx context.Context, c *abi.ToolCall) (*abi.R
 	return res, nil
 }
 
-// Close stops the scheduler once its live lanes drain. In-flight requests still
-// complete (or must be cancelled); a fully-idle loop exits promptly. Idempotent.
+// Close aborts every outstanding request and stops the scheduler. It cancels each
+// live lane's context so the run loop unblocks — even a lane wedged on an undrained
+// send — and exits once the lanes retire, so a non-draining consumer can no longer
+// leak the loop. Idempotent. A host that wants in-flight requests to FINISH rather
+// than abort must drain them before calling Close.
 func (s *NativeScheduler) Close() {
 	s.mu.Lock()
 	s.closed = true
+	for _, ln := range s.lanes {
+		ln.cancel() // unblock a lane wedged on an undrained send so run() can exit
+	}
 	s.mu.Unlock()
 	s.signal()
 }
@@ -214,6 +221,7 @@ func (s *NativeScheduler) stepOnce(active []*schedLane) {
 
 // schedLane is one admitted request's state + its EngineRequest handle.
 type schedLane struct {
+	sched  *NativeScheduler // back-pointer so Cancel can wake the run loop
 	ctx    context.Context
 	cancel context.CancelFunc
 
@@ -244,7 +252,12 @@ func (ln *schedLane) Result() (*abi.Result, error) {
 	return ln.res, ln.err
 }
 
-func (ln *schedLane) Cancel() { ln.cancel() }
+func (ln *schedLane) Cancel() {
+	ln.cancel()
+	if ln.sched != nil {
+		ln.sched.signal() // wake the loop so the cancel is observed promptly, not only on its next step
+	}
+}
 
 // Reclaimed reports whether the lane released its KV-bearing session (slot
 // reclaim). True once terminal, on done AND on cancellation. Blocks until terminal.

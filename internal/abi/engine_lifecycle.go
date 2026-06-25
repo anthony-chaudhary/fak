@@ -34,15 +34,30 @@
 //     lane's request channel; cancelling a request frees its lane/KV.
 // This file owns only the SEAM. The continuous-batching scheduler, paged-KV, and
 // native cancellation-loop wiring are sibling issues that CONSUME this contract.
+//
+// TERMINAL METADATA IS DELIBERATELY OUT OF THE BASE CONTRACT. finish-reason,
+// usage/token-accounting, per-token logprobs, and n>1 (parallel-sampling/beam)
+// sequences are NOT in EngineToken/EngineRequest: this seam is greedy
+// single-sequence base-item parity (the issue's non-goal). They ride ADDITIVELY on
+// Result.Meta (open map) / Result.Ext (typed sidecar by reserved ExtKey range), and
+// EngineToken/Result are structs that can grow new fields without breaking any
+// consumer — so blessing the typed carriers is the sibling adapter issues' scope,
+// not a future break of this interface. The one return shape an adapter author must
+// keep additive-safe is the upstream token event: see engine.UpstreamToken (a
+// struct, not a positional tuple, exactly so it can grow logprobs/finish-reason).
 
 package abi
 
 import "context"
 
 // EngineLifecycleCap is the Capability an engine advertises from Caps() when it
-// implements LifecycleEngine. A consumer negotiating over the registry can detect
-// streaming/cancel support by intersecting caps, without a Go type assertion; the
-// type assertion (EngineSupportsLifecycle) is the in-process ground truth.
+// implements LifecycleEngine. It is a PER-ENGINE advertised cap: lifecycle support
+// is a property of the bound engine, not of the process, so it is deliberately NOT
+// passed to RegisterCapability / surfaced in the process-global Supported() set
+// (kernel.Negotiate intersects caller caps with that global set and would wrongly
+// report lifecycle for a process whose SELECTED engine is one-shot). The correct
+// probes are CapsHaveLifecycle(eng.Caps()) at negotiation time and
+// EngineSupportsLifecycle(eng) for the in-process ground truth.
 const EngineLifecycleCap Capability = "engine.lifecycle.v1"
 
 // EngineToken is one streamed decode step: the generated token id, plus optional
@@ -72,6 +87,11 @@ type EngineToken struct {
 //     request has already finished. Cancelling ctx (passed to Admit) is
 //     equivalent — both are real per-step control points, unlike Complete's
 //     buffered loop.
+//
+// A consumer MUST either drain Tokens() to completion or Cancel() the request:
+// doing neither blocks (and so leaks) the request's producer goroutine — and, for
+// a native engine, holds its slot/KV — until process exit. The AdmitOrShim
+// one-shot path is exempt (its shim emits no per-token send and always closes).
 type EngineRequest interface {
 	Tokens() <-chan EngineToken
 	Result() (*Result, error)
