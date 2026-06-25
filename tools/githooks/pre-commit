@@ -29,6 +29,21 @@
 
 root="$(git rev-parse --show-toplevel 2>/dev/null)" || exit 0
 
+# FAST PATH: `fak hooks` runs all 7 gates in ONE process (the Go port of these checkers),
+# ~10.7s -> ~0.3s vs spawning 7 Python interpreters. It honors the SAME FLEET_<NAME>_GUARD
+# block|warn|off + one-shot escape env vars. Its exit code decides:
+#   0 -> all gates clean, commit allowed (done; skip the Python path).
+#   1 -> a block gate fired (done; refuse the commit).
+#   2 -> could-not-run (no built `fak`, or git/read failure) -> FALL THROUGH to the Python
+#        gates below, so a clone without a built binary still gets the checks (fail-open).
+if command -v fak >/dev/null 2>&1; then
+	fak hooks pre-commit --root "$root"
+	_fak_st=$?
+	[ "$_fak_st" -eq 0 ] && exit 0
+	[ "$_fak_st" -eq 1 ] && exit 1
+	# _fak_st == 2 (or anything else): fall through to the Python checkers below.
+fi
+
 # Resolve a python interpreter once. PY_A is the binary (quoted at the call site so a
 # path with spaces survives); PY_B is an optional arg for the Windows `py -3` launcher
 # (left unquoted so it expands to two words). Empty PY_A -> skip every gate (fail open):

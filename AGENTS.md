@@ -65,6 +65,10 @@ Green = `make ci` (build + vet + test + claims-lint; on a native-Windows host ru
 suite under WSL with `./test.ps1`, since native `go test` is blocked). The commit-message,
 file-admission, public-leak, and trunk guards then run automatically as git hooks at
 commit/push — so "the guard passed" means CI is green *and* the commit/push was accepted.
+(Those gates run in one process via `fak hooks pre-commit` / `commit-msg` when a `fak`
+binary is on PATH — ~10.7s → ~0.3s vs spawning a Python interpreter per gate; the shell
+hooks fall back to the `tools/check_*.py` checkers when no binary resolves, so a fresh
+clone is still gated.)
 The HOW below is unchanged and gates the WHEN: stay on the trunk, `git commit -s -- <paths>`
 (never `git add -A`), merge **in place** if the trunk diverged, wait out a peer's
 `MERGE_HEAD`, and **never force-push**. If a guard refuses (`OFF_TRUNK`), a peer merge is

@@ -108,6 +108,7 @@ var tier = map[string]int{
 	"dogfoodissues":   3, // dogfood-action-issues backlog bridge: folds a recent-feature dogfood report.json into scorecard ACTION items, derives a stable dedup key per item, renders the marker-stamped issue body, and (only on --live) composes the external `gh` CLI to create/update one issue per item. Composer: shells out off the hot path, imports nothing internal.
 	"horizonrecovery": 1, // pure budget-recovery (term r) grounding lens over a ctxplanbench report's already-measured real-transcript fields: surfaces the recovery ratio + its fault-rate FENCE co-located, structurally refuses to emit r/horizon_multiplier; stdlib-only, imports nothing internal, off the hot path.
 	"guardrsi":        1, // pure guard RSI journal fold + scorecard: reads guard-audit bytes, computes deterministic verdict quality, and validates keep/revert iterations; stdlib-only, off the hot path.
+	"hooks":           1, // commit-boundary gates run in ONE process: the Go port of the tools/check_*.py git-hook checkers (PUBLIC_LEAK/SECRET_SHAPE/DOC_PLACEMENT/BROKEN_LINK/FILE_ADMISSION/INDEX_SYNC/PROVENANCE_LABEL + commit-msg), folding one staged-diff read. stdlib-only, imports nothing internal, off the hot path.
 	// new-leaf:tier — `python tools/new_leaf.py <name> --tier <name>` inserts the
 	// declaration for a generated leaf immediately ABOVE this line. Keep the marker last.
 }

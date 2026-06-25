@@ -61,6 +61,8 @@ func main() {
 		cmdRun(os.Args[2:])
 	case "commit":
 		cmdCommit(os.Args[2:])
+	case "hooks":
+		cmdHooks(os.Args[2:])
 	case "preflight":
 		cmdPreflight(os.Args[2:])
 	case "attest":
@@ -178,6 +180,15 @@ func usage() {
                  in -> PATHSPEC_RACE, commit left intact, never pushed/force-pushed.
                  Refuses OFF_TRUNK / MERGE_IN_PROGRESS / NOTHING_STAGED up front.
                  Exit 0 ok, 2 usage, 3 a pre-commit refusal, 1 a raced/refused commit)
+  fak hooks     pre-commit [--root DIR] [--json] | commit-msg <msgfile> [--root DIR]
+                (the COMMIT-BOUNDARY GATES in ONE process — the Go port of the
+                 tools/check_*.py git-hook checkers. pre-commit runs all 7 staged-diff
+                 gates (PUBLIC_LEAK/SECRET_SHAPE/DOC_PLACEMENT/BROKEN_LINK/FILE_ADMISSION/
+                 INDEX_SYNC/PROVENANCE_LABEL) over ONE staged-diff read instead of spawning
+                 7 Python interpreters (~10.7s -> ~0.3s measured). Honors each gate
+                 FLEET_<NAME>_GUARD block|warn|off + one-shot escape env. Exit 0 clean,
+                 1 a block gate fired, 2 could-not-run (the shell hook then falls back to
+                 the Python checkers — fail-open). The shell hooks prefer this.)
   fak preflight --tool NAME --args JSON [--policy FILE]
   fak attest    --policy FILE [--probes FILE] [--out FILE] [--json] [--quiet]
                  (the COMPLIANCE ATTESTATION GENERATOR: prove the capability floor
