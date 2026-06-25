@@ -414,18 +414,20 @@ func (p *Policy) complainFor(tool string) bool {
 	return p.Complain[tool]
 }
 
+// admitAndLog reports whether a DEFAULT-denied tool should be downgraded to an
+// admit-and-log Allow: the global read-shaped posture, OR the per-tool complain set
+// (#670). It gates ONLY the default-deny rung — the hard-refusal rungs (explicit Deny,
+// self-modify, arg violations) return before defaultDeny, so neither path can admit one.
+func (p *Policy) admitAndLog(tool string) bool {
+	return (p.Posture == PostureAdmitAndLog && lowRiskReadShaped(tool)) || p.complainFor(tool)
+}
+
 func defaultDeny(p Policy, tool string) abi.Verdict {
-	if p.complainFor(tool) {
-		// Complain mode (#670): a named tool is admitted-and-logged even when it is not
-		// read-shaped, so an operator can promote it to a logged trial. #671 enriches
-		// this record with the suppressed would_deny reason.
-		return abi.Verdict{
-			Kind: abi.VerdictAllow,
-			By:   "monitor",
-			Meta: map[string]string{"posture": "admit_and_log"},
-		}
-	}
-	if p.Posture == PostureAdmitAndLog && lowRiskReadShaped(tool) {
+	if p.admitAndLog(tool) {
+		// Admit-and-log record (#671): the default-deny rung is the refusal being
+		// suppressed, so the record carries would_deny = its reason name via
+		// abi.ReasonName — the forensic field the promotion ledger (#672) folds. Both
+		// the complain-set and the global read-shaped path carry it identically.
 		return abi.Verdict{
 			Kind: abi.VerdictAllow,
 			By:   "monitor",
