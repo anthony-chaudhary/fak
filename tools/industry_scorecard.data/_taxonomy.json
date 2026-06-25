@@ -1556,6 +1556,28 @@
       "source_date": "2026-06",
       "in_scope": true,
       "notes": ""
+    },
+    {
+      "id": "model-routing-granularity",
+      "category": "model-routing",
+      "dimension": "Model routing granularity: per-aspect + first-class ensemble routing vs whole-request single-model selection",
+      "why_it_matters": "Every mainstream 'LLM router' (RouteLLM, Martian, NotDiamond, Unify, OpenRouter, Portkey, LiteLLM Router) answers one question — which SINGLE model should serve this WHOLE request — and the only shipped model ensemble is a single fixed recipe (OpenRouter Fusion). Routing a sub-request aspect (one tool call, one reasoning step) to its own model, or declaring a configurable per-aspect ensemble with a reduction, is a granularity layer no surveyed product exposes; it is the axis that decides whether routing is a per-request pick or a first-class, in-loop decision.",
+      "sota_systems": [
+        "RouteLLM (LMSYS)",
+        "Martian",
+        "NotDiamond",
+        "Unify.ai",
+        "OpenRouter (+ Fusion)",
+        "Portkey",
+        "LiteLLM Router"
+      ],
+      "sota_bar": "Surveyed 2025-2026 routers/gateways (RouteLLM, Martian, NotDiamond, Unify, OpenRouter, Portkey, LiteLLM Router) all route the WHOLE request to ONE model; OpenRouter Fusion is the only shipped model ensemble and it is a fixed parallel-synthesize recipe, not a configurable per-aspect reduction. None routes a sub-request aspect to its own model. (Aurelio Semantic-Router routes to an intent, not a model; vLLM/SGLang routers balance replicas of ONE model for KV locality — a different layer.)",
+      "best_value": null,
+      "metric_unit": "qualitative (routing granularity: whole-request vs per-aspect; fixed vs configurable ensemble reduction)",
+      "source_url": "https://github.com/anthony-chaudhary/fak/blob/main/docs/model-routing.md",
+      "source_date": "2026-06",
+      "notes": "Survey of 2025-2026 routers/gateways in docs/model-routing.md. The gap is categorical (a routing GRANULARITY no surveyed product exposes), not a benchmarked speed/quality win — any '10x' is a target to be measured, never an inferred or borrowed number.",
+      "in_scope": true
     }
   ]
 }

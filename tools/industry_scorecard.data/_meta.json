@@ -91,6 +91,11 @@
       "name": "Agent / fleet serving"
     },
     {
+      "id": "model-routing",
+      "group": "agent",
+      "name": "Model routing"
+    },
+    {
       "id": "single-stream",
       "group": "serving",
       "name": "Single-stream (one chat)"

@@ -86,6 +86,28 @@
       "measured_on": "2026-06-23",
       "verdict": "no-claim",
       "status": "projected"
+    },
+    {
+      "id": "model-routing-granularity",
+      "dim_id": "model-routing-granularity",
+      "axis": "Model routing granularity: per-aspect + first-class ensemble routing vs whole-request single-model selection",
+      "category": "model-routing",
+      "competitor": "RouteLLM (LMSYS); Martian; NotDiamond; Unify.ai; OpenRouter (+ Fusion); Portkey; LiteLLM Router",
+      "competitor_class": "sota",
+      "competitor_value": null,
+      "competitor_source": "docs/model-routing.md — survey of 2025-2026 routers/gateways (2026-06); RouteLLM (lm-sys/RouteLLM), OpenRouter Fusion, Portkey, LiteLLM Router docs",
+      "fak_value": null,
+      "unit": "qualitative (per-aspect routing + configurable ensemble reduction, vs whole-request single-model)",
+      "higher_is_better": true,
+      "verdict": "lead",
+      "status": "shipped",
+      "qualitative": true,
+      "fak_commit": "2298421",
+      "fak_artifact": "",
+      "fak_doc": "docs/model-routing.md (survey + status); BENCHMARK-AUTHORITY.md (fak routebench)",
+      "apples_to_apples": true,
+      "comparison_note": "To our knowledge / among surveyed 2025-2026 routers and gateways (RouteLLM, Martian, NotDiamond, Unify, OpenRouter, Portkey, LiteLLM Router), every one routes the WHOLE request to ONE model and the only shipped model ensemble is OpenRouter Fusion — a fixed parallel-synthesize recipe, not a configurable reduction. fak routes at the ASPECT level (request | tool_call | query | step), so one request can send different aspects to different models, with first-class ENSEMBLES folded by a configurable reduction (first | vote | best_of | all_reduce | concat), expressed as one deterministic, verifiable policy. The decision spine (Route + Combine) and the offline benchmark (fak routebench) are SHIPPED (commit 2298421, witnessed by go test), so this is a CATEGORICAL capability lead on routing granularity and ensemble expressiveness — NOT a benchmarked speed/quality win. Any '10x' is a target to be measured, never an inferred or borrowed number; the live multi-model dispatch that executes a decision on real engines is STUB, so the end-to-end competitive latency/cost/quality delta is unmeasured.",
+      "measured_on": "2026-06-24"
     }
   ]
 }
