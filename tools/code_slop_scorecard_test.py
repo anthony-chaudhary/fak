@@ -1,0 +1,357 @@
+#!/usr/bin/env python3
+"""Unit tests for the code-slop scorecard. Pure KPIs take in-memory fixtures — no
+disk, no toolchain, no git — so the testable seam runs anywhere. Each test locks in
+one calibration decision (especially the false-positive guards: a benchmark is not a
+vacuous test, an interface guard is an assertion, a shell example is not commented-out
+code, struct fields are not clones).
+
+Dual-runnable (the repo runs the suite pytest-free in CI):
+    python tools/code_slop_scorecard_test.py
+    python -m pytest tools/code_slop_scorecard_test.py -q
+"""
+from __future__ import annotations
+
+import code_slop_scorecard as cs
+
+
+# --- duplication ----------------------------------------------------------
+
+def _dup_block(name: str) -> str:
+    # an 8-line function body that is identical across files -> a real clone
+    return (f"func {name}(xs []int) int {{\n"
+            "\ttotal := 0\n"
+            "\tfor _, v := range xs {\n"
+            "\t\tif v > 0 {\n"
+            "\t\t\ttotal += v * 2\n"
+            "\t\t\ttotal -= v % 3\n"
+            "\t\t}\n"
+            "\t}\n"
+            "\treturn total\n"
+            "}\n")
+
+
+def test_duplication_real_clone_is_debt():
+    files = {"a.go": "package a\n" + _dup_block("sum"),
+             "b.go": "package b\n" + _dup_block("sum")}
+    k = cs.kpi_duplication(files)
+    assert len(k["defects"]) >= 1
+    assert k["score"] < 100
+
+
+def test_duplication_unique_code_is_clean():
+    files = {"a.go": "package a\n" + _dup_block("sum"),
+             "b.go": ("package b\n"
+                      "func other(s string) string {\n"
+                      "\tr := s + s\n"
+                      "\treturn r\n"
+                      "}\n")}
+    k = cs.kpi_duplication(files)
+    assert k["defects"] == []
+    assert k["score"] == 100
+
+
+def test_duplication_ignores_package_and_import_boilerplate():
+    # two files with identical package+import preamble but distinct bodies must NOT
+    # register as a clone — that's language boilerplate, not copy-paste.
+    pre = "package x\n\nimport (\n\t\"fmt\"\n\t\"os\"\n\t\"strings\"\n\t\"bytes\"\n)\n"
+    files = {"a.go": pre + "func aaa() { fmt.Println(1) }\n",
+             "b.go": pre + "func bbb() { os.Exit(2) }\n"}
+    k = cs.kpi_duplication(files)
+    assert k["defects"] == []
+
+
+def test_duplication_ignores_struct_field_lists():
+    # two structs sharing field names are a data-shape overlap, not a logic clone.
+    s1 = ("package a\ntype Report struct {\n\tName string\n\tID int\n"
+          "\tHash string\n\tSeed int64\n\tCount int\n\tCost float64\n}\n")
+    s2 = ("package b\ntype Curve struct {\n\tName string\n\tID int\n"
+          "\tHash string\n\tSeed int64\n\tCount int\n\tCost float64\n}\n")
+    k = cs.kpi_duplication({"a.go": s1, "b.go": s2})
+    assert k["defects"] == []
+
+
+def test_duplication_ignores_composite_literal_fields():
+    lit = ("package {p}\nfunc make{n}() T {{\n\treturn T{{\n"
+           "\t\tName: \"x\",\n\t\tID: 1,\n\t\tHash: \"h\",\n"
+           "\t\tSeed: 2,\n\t\tCount: 3,\n\t\tCost: 4.0,\n\t}}\n}}\n")
+    files = {"a.go": lit.format(p="a", n="A"),
+             "b.go": lit.format(p="b", n="B")}
+    k = cs.kpi_duplication(files)
+    assert k["defects"] == []
+
+
+# --- vacuous_tests --------------------------------------------------------
+
+def test_vacuous_test_no_assertion_is_debt():
+    tf = {"x_test.go": ("package x\n"
+                        "func TestThing(t *testing.T) {\n"
+                        "\t_ = Compute()\n"
+                        "}\n")}
+    k = cs.kpi_vacuous_tests(tf)
+    assert len(k["defects"]) == 1
+    assert "TestThing" in k["defects"][0]
+
+
+def test_test_with_assertion_is_clean():
+    tf = {"x_test.go": ("package x\n"
+                        "func TestThing(t *testing.T) {\n"
+                        "\tif Compute() != 4 {\n\t\tt.Fatalf(\"bad\")\n\t}\n"
+                        "}\n")}
+    k = cs.kpi_vacuous_tests(tf)
+    assert k["defects"] == []
+    assert k["score"] == 100
+
+
+def test_benchmark_is_not_vacuous():
+    # a benchmark's job is to time, not assert — it must NOT be flagged.
+    tf = {"x_test.go": ("package x\n"
+                        "func BenchmarkThing(b *testing.B) {\n"
+                        "\tb.ResetTimer()\n"
+                        "\tfor i := 0; i < b.N; i++ {\n\t\t_ = Compute()\n\t}\n"
+                        "}\n")}
+    k = cs.kpi_vacuous_tests(tf)
+    assert k["defects"] == []
+
+
+def test_interface_guard_is_an_assertion():
+    # a compile-time interface guard fails the BUILD if unsatisfied — a real assertion.
+    tf = {"x_test.go": ("package x\n"
+                        "func TestResolverInterface(t *testing.T) {\n"
+                        "\tvar _ abi.Resolver = (*Store)(nil)\n"
+                        "}\n")}
+    k = cs.kpi_vacuous_tests(tf)
+    assert k["defects"] == []
+
+
+def test_table_test_with_subrun_is_clean():
+    tf = {"x_test.go": ("package x\n"
+                        "func TestCases(t *testing.T) {\n"
+                        "\tfor _, c := range cases {\n"
+                        "\t\tt.Run(c.name, func(t *testing.T) { check(t, c) })\n"
+                        "\t}\n"
+                        "}\n")}
+    k = cs.kpi_vacuous_tests(tf)
+    assert k["defects"] == []
+
+
+# --- dead_code ------------------------------------------------------------
+
+def test_dead_unexported_symbol_is_debt():
+    files = {"a.go": ("package a\n"
+                      "func used() int { return 1 }\n"
+                      "func deadHelper() int { return 2 }\n"
+                      "func Entry() int { return used() }\n")}
+    k = cs.kpi_dead_code(files, {})
+    names = " ".join(k["defects"])
+    assert "deadHelper" in names
+    assert "used" not in names  # referenced by Entry
+    assert "Entry" not in names  # exported, not graded
+
+
+def test_referenced_unexported_is_clean():
+    files = {"a.go": ("package a\n"
+                      "func helper() int { return 7 }\n"
+                      "func Run() int { return helper() + helper() }\n")}
+    k = cs.kpi_dead_code(files, {})
+    assert k["defects"] == []
+
+
+def test_dead_code_sees_test_references():
+    # a helper used only by a _test.go is NOT dead.
+    files = {"a.go": "package a\nfunc helper() int { return 1 }\n"}
+    tests = {"a_test.go": ("package a\n"
+                           "func TestH(t *testing.T) { if helper() != 1 { t.Fatal() } }\n")}
+    k = cs.kpi_dead_code(files, tests)
+    assert k["defects"] == []
+
+
+def test_dead_code_capped_per_file():
+    body = "package a\n" + "".join(f"func dead{i}() {{}}\n" for i in range(20))
+    k = cs.kpi_dead_code({"a.go": body}, {})
+    assert len(k["defects"]) <= cs.DEAD_CAP_PER_FILE
+    assert k["soft"]  # the cap is surfaced as an advisory
+
+
+# --- comment_slop ---------------------------------------------------------
+
+def test_commented_out_code_block_is_debt():
+    files = {"a.go": ("package a\n"
+                      "func f() {\n"
+                      "\t// x := compute()\n"
+                      "\t// if x > 0 {\n"
+                      "\t// \treturn x\n"
+                      "\t// }\n"
+                      "\treturn\n"
+                      "}\n")}
+    k = cs.kpi_comment_slop(files)
+    assert any("commented-out code" in d for d in k["defects"])
+
+
+def test_shell_example_comment_is_not_commented_code():
+    # a doc-comment usage example must NOT be flagged as commented-out code.
+    files = {"a.go": ("// Package x does things.\n"
+                      "//\n"
+                      "//\tgo run ./cmd/x --flag\n"
+                      "//\tgo run ./cmd/x -json\n"
+                      "//\t$ fak serve\n"
+                      "package x\n")}
+    k = cs.kpi_comment_slop(files)
+    assert not any("commented-out code" in d for d in k["defects"])
+
+
+def test_tautological_doc_comment_is_debt():
+    files = {"a.go": ("package a\n"
+                      "// Foo does foo.\n"
+                      "func Foo() {}\n")}
+    k = cs.kpi_comment_slop(files)
+    assert any("tautological" in d for d in k["defects"])
+
+
+def test_substantive_doc_comment_is_clean():
+    files = {"a.go": ("package a\n"
+                      "// Foo splices the prefix through the last cache breakpoint so the\n"
+                      "// upstream cache hit survives a history rewrite.\n"
+                      "func Foo() {}\n")}
+    k = cs.kpi_comment_slop(files)
+    assert not any("tautological" in d for d in k["defects"])
+
+
+# --- stub_masquerade (SOFT) -----------------------------------------------
+
+def test_stub_masquerade_never_emits_hard_debt():
+    files = {"a.go": ("package a\n"
+                      "func Future() int { panic(\"not implemented\") }\n")}
+    k = cs.kpi_stub_masquerade(files, claims_text="")
+    assert k["defects"] == []  # SOFT — never gates
+
+
+def test_return_nil_accessor_is_not_a_stub():
+    # a bare `return nil` interface method is a legitimate empty-result impl, NOT a
+    # stub — the narrow detector must not flag it (the ~40-false-positive guard).
+    files = {"a.go": ("package a\n"
+                      "func (m *MMU) Caps() []abi.Capability { return nil }\n")}
+    k = cs.kpi_stub_masquerade(files, claims_text="")
+    assert k["soft"] == []
+
+
+def test_panic_unimplemented_is_soft_signal():
+    files = {"a.go": ("package a\n"
+                      "func Future() int { panic(\"not implemented\") }\n")}
+    k = cs.kpi_stub_masquerade(files, claims_text="")
+    assert k["defects"] == []
+    assert any("Future" in s for s in k["soft"])
+
+
+def test_stub_declared_in_claims_is_not_flagged():
+    files = {"a.go": "package a\nfunc Future() int { panic(\"unimplemented\") }\n"}
+    claims = "- [STUB] Future is the planned X path, not yet wired.\n"
+    k = cs.kpi_stub_masquerade(files, claims_text=claims)
+    assert k["soft"] == []
+
+
+def test_real_implementation_is_clean():
+    files = {"a.go": ("package a\n"
+                      "func Add(x, y int) int {\n"
+                      "\tz := x + y\n"
+                      "\tz *= 2\n"
+                      "\treturn z\n"
+                      "}\n")}
+    k = cs.kpi_stub_masquerade(files, claims_text="")
+    assert k["soft"] == []
+
+
+# --- churn_bloat (SOFT) ---------------------------------------------------
+
+def test_churn_bloat_accretion_is_soft():
+    k = cs.kpi_churn_bloat(added=12, removed=0, n_commits=20)
+    assert k["defects"] == []
+    assert k["soft"]
+    assert k["score"] < 100
+
+
+def test_churn_bloat_balanced_is_clean():
+    k = cs.kpi_churn_bloat(added=5, removed=4, n_commits=20)
+    assert k["defects"] == []
+    assert k["soft"] == []
+    assert k["score"] == 100
+
+
+# --- build_payload fold ---------------------------------------------------
+
+def _kpi(name: str, defects: list[str], soft: list[str] | None = None) -> dict:
+    return {"kpi": name, "score": 100 if not defects else 0,
+            "detail": "", "defects": defects, "soft": soft or []}
+
+
+def test_payload_clean_is_ok_zero_debt():
+    kpis = [_kpi(n, []) for n in cs.KPI_WEIGHTS]
+    p = cs.build_payload(workspace="/x", kpis=kpis)
+    assert p["ok"] is True
+    assert p["corpus"]["slop_debt"] == 0
+    assert p["finding"] == "code_slop_clean"
+
+
+def test_payload_sums_slop_debt_and_gates_ok():
+    kpis = [_kpi("duplication", ["c1", "c2"]), _kpi("dead_code", ["d1"]),
+            _kpi("comment_slop", []), _kpi("vacuous_tests", []),
+            _kpi("stub_masquerade", [], soft=["s1"]), _kpi("churn_bloat", [])]
+    p = cs.build_payload(workspace="/x", kpis=kpis)
+    assert p["corpus"]["slop_debt"] == 3
+    assert p["ok"] is False
+    assert p["finding"] == "code_slop"
+    # corpus key the control-pane find_int reads
+    assert isinstance(p["corpus"]["slop_debt"], int)
+    assert p["corpus"]["debt_by_kpi"]["duplication"] == 2
+
+
+def test_payload_soft_never_counts_as_debt():
+    kpis = [_kpi(n, []) for n in cs.KPI_WEIGHTS]
+    # add a SOFT-only signal
+    kpis[0]["soft"] = ["advisory only"]
+    p = cs.build_payload(workspace="/x", kpis=kpis)
+    assert p["ok"] is True
+    assert p["corpus"]["slop_debt"] == 0
+    assert p["corpus"]["soft_signals"] == 1
+
+
+def test_payload_breakdown_worst_first():
+    kpis = [_kpi("duplication", ["a", "b", "c"]), _kpi("dead_code", ["d"]),
+            _kpi("comment_slop", []), _kpi("vacuous_tests", []),
+            _kpi("stub_masquerade", []), _kpi("churn_bloat", [])]
+    p = cs.build_payload(workspace="/x", kpis=kpis)
+    assert p["corpus"]["breakdown"][0]["kpi"] == "duplication"
+    assert p["corpus"]["breakdown"][0]["debt"] == 3
+
+
+def test_grade_letter_boundaries():
+    assert cs.grade_letter(90) == "A"
+    assert cs.grade_letter(80) == "B"
+    assert cs.grade_letter(59) == "F"
+
+
+# --- markdown / doc-freshness ---------------------------------------------
+
+def test_markdown_stamp_roundtrips():
+    kpis = [_kpi(n, []) for n in cs.KPI_WEIGHTS]
+    p = cs.build_payload(workspace="/x", kpis=kpis)
+    body = cs.render_markdown(p, stamp="2026-06-25")
+    assert cs.markdown_stamp(body) == "2026-06-25"
+    assert "code-slop-scorecard:" in body
+
+
+def main() -> int:
+    tests = sorted((n, f) for n, f in globals().items()
+                   if n.startswith("test_") and callable(f))
+    failures = 0
+    for name, fn in tests:
+        try:
+            fn()
+        except Exception as exc:  # noqa: BLE001
+            failures += 1
+            print(f"  FAIL {name}: {exc}")
+    print(f"{len(tests) - failures}/{len(tests)} passed")
+    return 1 if failures else 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
