@@ -420,8 +420,9 @@ func (c *cudaBackend) dalloc(nbytes int) *cudaBuf {
 		if p == nil {
 			// fcuda_malloc and fcuda_malloc_managed print the real CUDA errors (OOM vs a context
 			// poisoned by a prior async kernel fault) to stderr before returning nil; carry the
-			// requested size here so the two halves of the diagnosis line up.
-			panic("compute: cuda allocation failed for " + itoaC(nbytes) + " bytes (cudaMalloc and cudaMallocManaged fallback both failed; see fak-cuda stderr)")
+			// requested size on a typed DeviceAllocError so the in-kernel decode boundary can
+			// recover it into an actionable error instead of crashing the serving goroutine.
+			panic(&DeviceAllocError{Bytes: nbytes, Site: "dalloc"})
 		}
 		return &cudaBuf{ptr: unsafe.Pointer(p), n: nbytes, managed: true}
 	}
@@ -433,7 +434,7 @@ func (c *cudaBackend) dalloc(nbytes int) *cudaBuf {
 func (c *cudaBackend) dallocManaged(nbytes int) *cudaBuf {
 	p := C.fcuda_malloc_managed(C.size_t(nbytes))
 	if p == nil {
-		panic("compute: cuda managed allocation failed for " + itoaC(nbytes) + " bytes")
+		panic(&DeviceAllocError{Bytes: nbytes, Site: "dallocManaged"})
 	}
 	return &cudaBuf{ptr: unsafe.Pointer(p), n: nbytes, managed: true}
 }
@@ -1206,7 +1207,7 @@ func (k *cudaKV) Evict(from, n int) int {
 	if tailFloats > 0 {
 		scratch = unsafe.Pointer(C.fcuda_malloc(C.size_t(tailFloats * 4)))
 		if scratch == nil {
-			panic("compute: cuda Evict scratch allocation failed")
+			panic(&DeviceAllocError{Bytes: tailFloats * 4, Site: "evict-scratch"})
 		}
 	}
 	for l := 0; l < k.cfg.NumLayers; l++ {

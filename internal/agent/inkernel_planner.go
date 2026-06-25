@@ -16,6 +16,8 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"log"
 	"math"
 	"math/rand"
@@ -127,7 +129,50 @@ func (p *InKernelPlanner) Model() string { return p.modelID }
 // per-request Stop sequence ends the turn early (string-suffix stop, orthogonal to
 // the token-ID <|im_end|>/EOS stops). All five per-request sampling controls the
 // HTTP wires forward are now honored on the in-kernel path too.
-func (p *InKernelPlanner) Complete(_ context.Context, messages []Message, tools []ToolDef, opts ...SampleOpt) (*Completion, error) {
+// InKernelOOMError is the agent-level, recovered form of an in-kernel device allocation
+// failure (a *compute.DeviceAllocError that unwound out of the CUDA decode path). It is
+// in-kernel BY CONSTRUCTION — only the in-kernel planner / compute backend can produce it,
+// never a real upstream — so the gateway can safely render a specific, actionable client
+// message for it (an over-large prompt on a small GPU) without any risk of leaking upstream
+// content. Bytes is the device allocation that failed.
+type InKernelOOMError struct {
+	Bytes int
+}
+
+func (e *InKernelOOMError) Error() string {
+	return fmt.Sprintf("in-kernel GPU out of memory (device allocation of %d bytes failed)", e.Bytes)
+}
+
+// recoverDevicePanic is the body of Complete's deferred recover, factored out so it is
+// unit-testable without a GPU (the panic payload is an ordinary Go value). It converts a
+// recovered in-kernel device-allocation panic into a typed, actionable error and reports
+// handled=true; for ANY other recovered value it reports handled=false so the caller
+// re-panics — the recover stays surgical and never swallows a genuine bug (a nil deref, a
+// validation panic, a poisoned-context launch failure).
+func recoverDevicePanic(r any) (err error, handled bool) {
+	var dae *compute.DeviceAllocError
+	if e, ok := r.(error); ok && errors.As(e, &dae) {
+		return &InKernelOOMError{Bytes: dae.Bytes}, true
+	}
+	return nil, false
+}
+
+func (p *InKernelPlanner) Complete(_ context.Context, messages []Message, tools []ToolDef, opts ...SampleOpt) (comp *Completion, err error) {
+	// An in-kernel device-allocation failure (e.g. OOM on a small GPU under a large Claude
+	// Code system prompt) panics deep below a CGO boundary with no error channel. Recover it
+	// HERE — the narrowest Go frame that wraps the whole device decode (generateReused's
+	// Prefill/Step + NewBackendSession's NewKV) AND returns the error the gateway already maps
+	// to a client response — converting it into a typed error instead of crashing the serving
+	// goroutine. Everything else re-panics, preserving today's crash/stack behavior for bugs.
+	defer func() {
+		if r := recover(); r != nil {
+			if e, ok := recoverDevicePanic(r); ok {
+				comp, err = nil, e
+				return
+			}
+			panic(r)
+		}
+	}()
 	sp := applySampleOpts(opts...)
 	maxNew := p.maxNew
 	if sp.MaxTokens != nil && *sp.MaxTokens > 0 {
@@ -203,7 +248,7 @@ func (p *InKernelPlanner) Complete(_ context.Context, messages []Message, tools 
 	// the frozen-trajectory cache cliff (docs/explainers/frozen-trajectory-cache-cliff.md).
 	cacheobs.Default.Observe(promptTok, matched)
 
-	comp := &Completion{
+	comp = &Completion{
 		Message:      Message{Role: "assistant", Content: sb.String()},
 		FinishReason: finishReason,
 		Usage:        Usage{PromptTokens: promptTok, CompletionTokens: gen, TotalTokens: promptTok + gen},

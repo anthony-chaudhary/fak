@@ -190,3 +190,25 @@ func RefuseIfTooBig(b Backend, wantBytes int64, headroom float64) error {
 	}
 	return &FitError{Verdict: verdict, Want: wantBytes, Avail: avail}
 }
+
+// DeviceAllocError is the typed form of a RUNTIME in-kernel device allocation failure — the
+// allocation that actually returned nil, as opposed to FitError's pre-flight refusal. It is
+// raised (as a panic, since the failing alloc sits deep below a CGO boundary with no error
+// return) by the cuda backend's allocation choke points and recovered at the in-kernel decode
+// boundary, where it becomes an actionable error instead of crashing the serving goroutine.
+//
+// It carries the requested size so a caller can render a fak-owned, leak-free message (Bytes is
+// fak's own number, never upstream content). The real CUDA cause — a genuine OOM vs a context
+// poisoned by a prior async kernel fault — is printed to fak-cuda stderr by fcuda_malloc /
+// fcuda_malloc_managed; Site names the allocation choke point that raised it, for the operator
+// log. This lives in capacity.go (plain Go, no `cuda` build tag) so packages that only import
+// compute for its types — e.g. internal/agent — can errors.As it without the cuda build.
+type DeviceAllocError struct {
+	Bytes int    // the device allocation that failed
+	Site  string // "dalloc" | "dallocManaged" | "evict-scratch" — the choke point that raised it
+}
+
+func (e *DeviceAllocError) Error() string {
+	return "compute: cuda device allocation of " + memSize(int64(e.Bytes)) + " failed (" + e.Site +
+		"; cudaMalloc and managed fallback both returned nil; see fak-cuda stderr for the real CUDA error)"
+}

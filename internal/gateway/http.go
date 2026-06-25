@@ -433,6 +433,17 @@ func validateSampling(req ChatRequest) string {
 // detail is NEVER forwarded — only the status + classification cross the boundary —
 // so an upstream error message cannot leak to a possibly-unauthenticated caller.
 func upstreamErrorStatus(err error) (status int, code, msg string) {
+	// An in-kernel device-allocation failure (e.g. the model decode OOM'd on a small GPU under
+	// a large prompt) is a LOCAL resource exhaustion the caller can act on, not an upstream
+	// failure. It is in-kernel by construction (only the in-kernel planner produces it), so the
+	// specific, actionable message is safe and reachable only on a genuine local OOM — a real
+	// upstream error can never be this type. 503 (retryable with a smaller request) over 502.
+	var oom *agent.InKernelOOMError
+	if errors.As(err, &oom) {
+		return http.StatusServiceUnavailable, "in_kernel_oom",
+			fmt.Sprintf("in-kernel GPU out of memory for this request (device allocation of %d bytes failed); "+
+				"reduce the prompt/context size or max_tokens, or serve a smaller model / shorter --ctx", oom.Bytes)
+	}
 	var ue *agent.UpstreamUnreachableError
 	if errors.As(err, &ue) {
 		return http.StatusBadGateway, "upstream_unreachable",
