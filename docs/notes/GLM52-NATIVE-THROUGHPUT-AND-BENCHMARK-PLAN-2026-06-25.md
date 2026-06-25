@@ -1,13 +1,13 @@
 ---
 title: "GLM-5.2 native on fak — first throughput, next steps, and the honest benchmarking plan"
-description: "The first native GLM-5.2 (glm_moe_dsa) decode/prefill tok/s measured on a DGX A100, the VRAM-leak fix that unblocked it, the prioritized next steps, and a category-honest framework for comparing fak to llama.cpp / vLLM / SGLang."
+description: "The first native GLM-5.2 (glm_moe_dsa) decode/prefill tok/s measured on a GPU server, the VRAM-leak fix that unblocked it, the prioritized next steps, and a category-honest framework for comparing fak to llama.cpp / vLLM / SGLang."
 ---
 
 # GLM-5.2 native on fak: first throughput, next steps & benchmarking plan
 
 _2026-06-25._ Living companion to
 [native-753b-track-staged-plan](native-753b-track-staged-plan.md). It records the
-**first native GLM-5.2 (`glm_moe_dsa`) decode/prefill tok/s** measured on a DGX, the
+**first native GLM-5.2 (`glm_moe_dsa`) decode/prefill tok/s** measured on a GPU server, the
 bug fixed to get there, what is next, and — most important — **how to compare fak's
 number to the field without a category error**.
 
@@ -15,10 +15,10 @@ number to the field without a category error**.
 
 - **Forward correctness** — GLM-5.2's DSA forward is bit-exact on fak's own CUDA
   kernels: cosine `1.000000`, argmax-exact, re-witnessed at HEAD `f39796e`
-  (sm_80, A100-80GB). See the `glm-gpu-witness/1` records under
+  (sm_80, datacenter GPU-80GB). See the `glm-gpu-witness/1` records under
   `experiments/glm-gpu-witness/`.
 - **First native throughput** — `cmd/glmdsatput` times the native `glm_moe_dsa`
-  decode/prefill on a real compute backend (the CUDA A100 path). Numbers in §2.
+  decode/prefill on a real compute backend (the CUDA datacenter GPU path). Numbers in §2.
 - **Leak fix `b68a182`** (shipped; `dos verify fak model` = SHIPPED) — the GLM-DSA
   device seam leaked one resident VRAM buffer per prefill position: the per-call
   activation/operand uploads (`backendKernel.mul`/`sparseAttend`/`indexSelect`) were
@@ -29,7 +29,7 @@ number to the field without a category error**.
   token, and surface the true `cudaMalloc` reason. No-op on cpu-ref (host forward
   stays byte-for-byte). Validated: 4/6 sweep configs that previously OOM'd now run.
 
-## 2. First native GLM-5.2 tok/s (dgx3, A100-80GB, sm_80)
+## 2. First native GLM-5.2 tok/s (dgx3, datacenter GPU-80GB, sm_80)
 
 > **HONEST SCOPE.** `glmdsatput` builds a **synthetic, reduced-layer, dense-FFN**
 > `glm_moe_dsa` (real architecture + real per-layer dims, **random** weights, **no
@@ -92,7 +92,7 @@ Three numbers exist; only some are comparable:
   cost, fits-one-GPU, dense-FFN (no MoE). **Not** 753B serving.
 - **llama.cpp 753B baseline:** the **real** GLM-5.2 753B Q4_K_M (8 shards, ~425 GB),
   CPU-offloaded (`--n-cpu-moe`), **2.62 tok/s single / 4.84 tok/s agg @ concurrency 2**
-  on dgx2 (8×A100-40GB + ~1 TB host RAM). Real model, real serving.
+  on dgx2 (8-GPU datacenter server + ~1 TB host RAM). Real model, real serving.
 - **vLLM / SGLang GLM-5.2:** stock-engine serving; the real DSA path needs sm_90
   (Hopper). A stock-SGLang comparison server already runs on dgx2 (Qwen today).
 
@@ -119,7 +119,7 @@ metrics for every engine:
 - **B2 — real tiny checkpoint:** fak vs llama.cpp vs vLLM on the **same** small real
   `glm_moe_dsa` checkpoint (`yujiepan/glm-5-tiny-random`, already an oracle here). The
   first honest cross-engine number, at small scale.
-- **B3 — real mid checkpoint, one GPU:** a quantized GLM that fits one A100 — fak vs
+- **B3 — real mid checkpoint, one GPU:** a quantized GLM that fits one datacenter GPU — fak vs
   llama.cpp vs vLLM/SGLang on decode/prefill/throughput@conc **+ correctness**.
 - **B4 — 753B (the wall):** fak (once multi-GPU TP + paged experts land) vs the
   llama.cpp 2.62 tok/s baseline vs vLLM/SGLang on sm_90. The only comparison where a
