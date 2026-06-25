@@ -61,8 +61,6 @@ func main() {
 		cmdRun(os.Args[2:])
 	case "commit":
 		cmdCommit(os.Args[2:])
-	case "hooks":
-		cmdHooks(os.Args[2:])
 	case "preflight":
 		cmdPreflight(os.Args[2:])
 	case "attest":
@@ -125,8 +123,6 @@ func main() {
 		cmdVCache(os.Args[2:])
 	case "hook":
 		cmdHook()
-	case "hooks":
-		cmdHooks(os.Args[2:])
 	case "rungstats":
 		cmdRungStats(os.Args[2:])
 	case "swebench":
