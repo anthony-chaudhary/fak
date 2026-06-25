@@ -182,6 +182,33 @@ def _is_worker_cmdline(cmdline: str) -> bool:
     return any(marker.lower() in low for marker in WORKER_CMD_MARKERS)
 
 
+def _collapse_descendant_pids(pids: set[int], parent_by_pid: dict[int, int | None]) -> set[int]:
+    """Collapse wrapper/child matches to one worker root.
+
+    Windows .cmd launchers can leave the full prompt on both the wrapper process
+    and the real backend child (for example cmd.exe -> opencode.exe). Both match
+    the issue prompt marker, but they are one worker tree and must consume one cap
+    slot. Keep the highest marked ancestor and drop marked descendants.
+    """
+    roots: set[int] = set()
+    for pid in pids:
+        cur = pid
+        seen = {pid}
+        descendant = False
+        while True:
+            parent = parent_by_pid.get(cur)
+            if parent is None or parent <= 0 or parent in seen:
+                break
+            if parent in pids:
+                descendant = True
+                break
+            seen.add(parent)
+            cur = parent
+        if not descendant:
+            roots.add(pid)
+    return roots
+
+
 def _cmdline_worker_pids() -> set[int]:
     """OS-level worker pids by command-line marker.
 
@@ -196,14 +223,16 @@ def _cmdline_worker_pids() -> set[int]:
         psutil = None
     if psutil is not None:
         pids: set[int] = set()
-        for p in psutil.process_iter(["cmdline"]):
+        parent_by_pid: dict[int, int | None] = {}
+        for p in psutil.process_iter(["cmdline", "ppid"]):
             try:
                 cl = " ".join(p.info.get("cmdline") or [])
+                parent_by_pid[int(p.pid)] = int(p.info.get("ppid") or 0)
             except (psutil.Error, TypeError):
                 continue
             if _is_worker_cmdline(cl):
                 pids.add(int(p.pid))
-        return pids
+        return _collapse_descendant_pids(pids, parent_by_pid)
     # Fallback when psutil is absent. wmic.exe is removed on Win11 24H2+ (build
     # 26200), so use the supported CIM API; Win32_Process.CommandLine carries the
     # full argv (incl. the prompt/marker), so this is an honest worker count, not 0.
@@ -211,11 +240,21 @@ def _cmdline_worker_pids() -> set[int]:
         try:
             out = subprocess.run(
                 ["powershell", "-NoProfile", "-NonInteractive", "-Command",
-                 "Get-CimInstance Win32_Process | "
-                 "Where-Object { $_.CommandLine -match 'dos-dispatch-loop|resolve GitHub issue #' } | "
-                 "ForEach-Object { $_.ProcessId }"],
+                 "$all = @(Get-CimInstance Win32_Process); "
+                 "$all | Where-Object { $_.CommandLine -match 'dos-dispatch-loop|resolve GitHub issue #' } | "
+                 "ForEach-Object { \"$($_.ProcessId),$($_.ParentProcessId)\" }"],
                 capture_output=True, text=True, timeout=30).stdout
-            return {int(ln.strip()) for ln in out.splitlines() if ln.strip().isdigit()}
+            pids: set[int] = set()
+            parent_by_pid: dict[int, int | None] = {}
+            for ln in out.splitlines():
+                parts = [p.strip() for p in ln.split(",", 1)]
+                if not parts or not parts[0].isdigit():
+                    continue
+                pid = int(parts[0])
+                parent = int(parts[1]) if len(parts) > 1 and parts[1].isdigit() else 0
+                pids.add(pid)
+                parent_by_pid[pid] = parent
+            return _collapse_descendant_pids(pids, parent_by_pid)
         except (OSError, subprocess.TimeoutExpired):
             return set()
     try:

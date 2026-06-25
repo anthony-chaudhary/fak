@@ -210,6 +210,14 @@ class WorkerCountTest(unittest.TestCase):
         self.assertTrue(mod._is_worker_cmdline("claude -p your goal: resolve GitHub issue #717"))
         self.assertFalse(mod._is_worker_cmdline("python tools/dispatch_preflight.py --json"))
 
+    def test_collapse_descendant_worker_pids_counts_wrapper_tree_once(self) -> None:
+        mod = load()
+        # The live opencode shape is a .cmd wrapper whose backend child keeps the same
+        # prompt marker in its argv. Both match, but they are one worker tree.
+        pids = {8436, 30912, 40388}
+        parents = {8436: 47720, 30912: 8436, 40388: 45116}
+        self.assertEqual(mod._collapse_descendant_pids(pids, parents), {8436, 40388})
+
     def test_live_resolve_worker_pids_counts_only_alive_sidecars(self) -> None:
         mod = load()
         with tempfile.TemporaryDirectory() as d:
