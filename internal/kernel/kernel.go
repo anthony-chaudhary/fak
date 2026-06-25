@@ -420,17 +420,77 @@ func (k *Kernel) store(seq uint64, p *pendingCall) {
 // path hits, denied calls, and unknown/reaped handles are locally complete from
 // the poller's point of view and report StatusOK; Reap remains the consuming path.
 func (k *Kernel) TestHandle(h abi.SubmissionHandle) abi.Status {
+	status, _ := k.testHandle(h)
+	return status
+}
+
+func (k *Kernel) testHandle(h abi.SubmissionHandle) (abi.Status, bool) {
 	k.mu.Lock()
 	p := k.pending[h.Seq]
 	k.mu.Unlock()
 	if p == nil || p.ready != nil || p.denied {
-		return abi.StatusOK
+		return abi.StatusOK, p != nil
 	}
-	return abi.StatusPending
+	return abi.StatusPending, true
 }
+
+// ErrNoHandles is returned by ReapAny for an empty request set.
+var ErrNoHandles = errors.New("kernel: no submission handles")
 
 // ErrDenied is returned by Reap for a call that adjudication refused.
 var ErrDenied = errors.New("kernel: call denied by adjudicator")
+
+// ReapAny completes one handle from a request set. It first consumes an already
+// locally-complete handle (fast-path hit or denied call) if one is present. With no
+// progress engine to poll, an all-pending set is driven by reaping the first handle
+// in the caller's set. The method consumes exactly the returned handle; other
+// handles remain pending for later Reap/ReapAll calls.
+func (k *Kernel) ReapAny(ctx context.Context, handles []abi.SubmissionHandle) (abi.SubmissionHandle, *abi.Result, error) {
+	if len(handles) == 0 {
+		return abi.SubmissionHandle{}, nil, ErrNoHandles
+	}
+	for _, h := range handles {
+		if status, ok := k.testHandle(h); ok && status == abi.StatusOK {
+			r, err := k.Reap(ctx, h)
+			return h, r, err
+		}
+	}
+	h := handles[0]
+	r, err := k.Reap(ctx, h)
+	return h, r, err
+}
+
+// ReapAll completes every handle in the caller's order and returns results in the
+// same index order. It borrows MPI_Waitall's request-set shape only: each handle
+// was already adjudicated at Submit, and this fan-in performs no new admission or
+// transport progress beyond the underlying local Reap calls.
+func (k *Kernel) ReapAll(ctx context.Context, handles []abi.SubmissionHandle) ([]*abi.Result, error) {
+	results := make([]*abi.Result, len(handles))
+	if len(handles) == 0 {
+		return results, nil
+	}
+
+	var wg sync.WaitGroup
+	errs := make(chan error, len(handles))
+	for i, h := range handles {
+		wg.Add(1)
+		go func(i int, h abi.SubmissionHandle) {
+			defer wg.Done()
+			r, err := k.Reap(ctx, h)
+			if err != nil {
+				errs <- fmt.Errorf("handle %d/%d seq %d: %w", i, len(handles), h.Seq, err)
+				return
+			}
+			results[i] = r
+		}(i, h)
+	}
+	wg.Wait()
+	close(errs)
+	if err, ok := <-errs; ok {
+		return results, err
+	}
+	return results, nil
+}
 
 // Reap completes a submission. A fast-path result is returned directly. A denied
 // call yields a structured deny Result (Status=Error, Meta carries reason +

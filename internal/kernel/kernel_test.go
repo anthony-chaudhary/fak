@@ -2,6 +2,7 @@ package kernel
 
 import (
 	"context"
+	"errors"
 	"os"
 	"reflect"
 	"strconv"
@@ -223,6 +224,98 @@ func TestTestHandleReadyAndDeniedAreLocallyComplete(t *testing.T) {
 	}
 	if _, err := k.Reap(context.Background(), h); err != nil {
 		t.Fatalf("denied handle must remain reapable: %v", err)
+	}
+}
+
+func TestReapAnyEmptyAndSingle(t *testing.T) {
+	setup()
+	k := New("e")
+	if _, _, err := k.ReapAny(context.Background(), nil); !errors.Is(err, ErrNoHandles) {
+		t.Fatalf("empty ReapAny err=%v, want ErrNoHandles", err)
+	}
+
+	setup()
+	abi.RegisterAdjudicator(0, fakeAdj{abi.Verdict{Kind: abi.VerdictAllow}})
+	abi.RegisterEngine("e", &countEngine{})
+	k = New("e")
+	h, v := k.Submit(context.Background(), call("read_x", "{}"))
+	if v.Kind != abi.VerdictAllow {
+		t.Fatalf("Submit verdict=%v, want Allow", v.Kind)
+	}
+	gotH, r, err := k.ReapAny(context.Background(), []abi.SubmissionHandle{h})
+	if err != nil {
+		t.Fatalf("single ReapAny failed: %v", err)
+	}
+	if gotH != h || r.Status != abi.StatusOK || string(r.Payload.Inline) != "{}" {
+		t.Fatalf("single ReapAny handle/result=%+v/%+v, want handle %+v with payload {}", gotH, r, h)
+	}
+}
+
+func TestReapAnyPrefersReadyHandleAndLeavesPending(t *testing.T) {
+	setup()
+	abi.RegisterAdjudicator(0, fakeAdj{abi.Verdict{Kind: abi.VerdictAllow}})
+	abi.RegisterAdjudicator(10, scopedAdj{
+		v:     abi.Verdict{Kind: abi.VerdictDeny, Reason: abi.ReasonPolicyBlock},
+		tools: []string{"deny_x"},
+	})
+	abi.RegisterEngine("e", &countEngine{})
+	k := New("e")
+	ctx := context.Background()
+
+	pending, v := k.Submit(ctx, call("read_x", "{}"))
+	if v.Kind != abi.VerdictAllow {
+		t.Fatalf("pending Submit verdict=%v, want Allow", v.Kind)
+	}
+	ready, v := k.Submit(ctx, call("deny_x", "{}"))
+	if v.Kind != abi.VerdictDeny {
+		t.Fatalf("ready Submit verdict=%v, want Deny", v.Kind)
+	}
+
+	gotH, r, err := k.ReapAny(ctx, []abi.SubmissionHandle{pending, ready})
+	if err != nil {
+		t.Fatalf("ReapAny failed: %v", err)
+	}
+	if gotH != ready || r.Status != abi.StatusError {
+		t.Fatalf("ReapAny handle/result=%+v/%+v, want denied ready handle %+v", gotH, r, ready)
+	}
+	if got := k.TestHandle(pending); got != abi.StatusPending {
+		t.Fatalf("pending handle status after ReapAny=%v, want StatusPending", got)
+	}
+	if _, err := k.Reap(ctx, pending); err != nil {
+		t.Fatalf("non-returned pending handle must remain reapable: %v", err)
+	}
+}
+
+func TestReapAllIndexAlignedMulti(t *testing.T) {
+	setup()
+	abi.RegisterAdjudicator(0, fakeAdj{abi.Verdict{Kind: abi.VerdictAllow}})
+	abi.RegisterEngine("e", &countEngine{})
+	k := New("e")
+	ctx := context.Background()
+
+	var handles []abi.SubmissionHandle
+	for _, body := range []string{"zero", "one", "two"} {
+		h, v := k.Submit(ctx, call("read_x", body))
+		if v.Kind != abi.VerdictAllow {
+			t.Fatalf("Submit(%q) verdict=%v, want Allow", body, v.Kind)
+		}
+		handles = append(handles, h)
+	}
+	order := []abi.SubmissionHandle{handles[2], handles[0], handles[1]}
+	results, err := k.ReapAll(ctx, order)
+	if err != nil {
+		t.Fatalf("ReapAll failed: %v", err)
+	}
+	want := []string{"two", "zero", "one"}
+	for i, r := range results {
+		if r == nil || r.Status != abi.StatusOK || string(r.Payload.Inline) != want[i] {
+			t.Fatalf("result[%d]=%+v, want payload %q", i, r, want[i])
+		}
+	}
+
+	empty, err := k.ReapAll(ctx, nil)
+	if err != nil || len(empty) != 0 {
+		t.Fatalf("empty ReapAll results=%v err=%v, want empty nil-error", empty, err)
 	}
 }
 
