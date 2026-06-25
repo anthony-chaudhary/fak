@@ -59,6 +59,8 @@ package main
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -67,10 +69,15 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"sync/atomic"
+	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/abi"
 	"github.com/anthony-chaudhary/fak/internal/adjudicator"
+	"github.com/anthony-chaudhary/fak/internal/ifc"
+	"github.com/anthony-chaudhary/fak/internal/kernel"
 	"github.com/anthony-chaudhary/fak/internal/turnbench"
+	"github.com/anthony-chaudhary/fak/internal/vdso"
 
 	// Blank-import the built-in driver list so the full ABI (resolver, vDSO,
 	// adjudicator, ctx-MMU, engines) is wired before turnbench.RunWithWorld runs.
@@ -113,10 +120,44 @@ var knownSuites = []struct{ ID, Label string }{
 // the engine exists only so the dedup path is GROUNDED in a real completion.
 type fileEngine struct{}
 
+var (
+	fileEngineDelayNs atomic.Int64
+	fileEngineCallSeq atomic.Int64
+)
+
+func setFileEngineDelay(d time.Duration) time.Duration {
+	prev := time.Duration(fileEngineDelayNs.Swap(int64(d)))
+	return prev
+}
+
+func resetFileEngineStats() {
+	fileEngineCallSeq.Store(0)
+}
+
+func fileEngineCalls() int64 {
+	return fileEngineCallSeq.Load()
+}
+
 // Caps reports the engine's capabilities; this demo file engine declares none.
 func (fileEngine) Caps() []abi.Capability { return nil }
 
 func (fileEngine) Complete(ctx context.Context, c *abi.ToolCall) (*abi.Result, error) {
+	t0 := time.Now()
+	if d := time.Duration(fileEngineDelayNs.Load()); d > 0 {
+		timer := time.NewTimer(d)
+		select {
+		case <-timer.C:
+		case <-ctx.Done():
+			if !timer.Stop() {
+				select {
+				case <-timer.C:
+				default:
+				}
+			}
+			return nil, ctx.Err()
+		}
+	}
+	seq := fileEngineCallSeq.Add(1)
 	out := []byte(`{"tool":"` + c.Tool + `","ok":true}`)
 	var ref abi.Ref
 	if res := abi.ActiveResolver(); res != nil {
@@ -127,7 +168,11 @@ func (fileEngine) Complete(ctx context.Context, c *abi.ToolCall) (*abi.Result, e
 	if ref.Kind == 0 && ref.Len == 0 {
 		ref = abi.Ref{Kind: abi.RefInline, Inline: out, Len: int64(len(out))}
 	}
-	return &abi.Result{Call: c, Payload: ref, Status: abi.StatusOK, Meta: map[string]string{"engine": "localtools"}}, nil
+	return &abi.Result{Call: c, Payload: ref, Status: abi.StatusOK, Meta: map[string]string{
+		"engine":            "localtools",
+		"engine_call":       strconv.FormatInt(seq, 10),
+		"engine_elapsed_ns": strconv.FormatInt(time.Since(t0).Nanoseconds(), 10),
+	}}, nil
 }
 
 // configureFileWorld installs the coding-agent file world: the read family is
@@ -196,6 +241,39 @@ type ledger struct {
 	Dedups              int `json:"dedups"`
 	Passes              int `json:"passes"`
 	DenyVerdictTokens   int `json:"deny_verdict_tokens"`
+}
+
+type timingCall struct {
+	Index           int    `json:"index"`
+	Tool            string `json:"tool"`
+	Resource        string `json:"resource,omitempty"`
+	ArgsHash        string `json:"args_hash"`
+	Class           string `json:"class"`
+	ResultTokens    int    `json:"result_tokens"`
+	RawToolTimeNs   int64  `json:"raw_tool_time_ns"`
+	FakToolTimeNs   int64  `json:"fak_tool_time_ns"`
+	FakSource       string `json:"fak_source"`
+	FakTier         string `json:"fak_tier,omitempty"`
+	EngineRanRaw    bool   `json:"engine_ran_raw"`
+	EngineRanFak    bool   `json:"engine_ran_fak"`
+	FakEngineDelta  int64  `json:"fak_engine_call_delta"`
+	KernelVDSODelta int64  `json:"kernel_vdso_hit_delta"`
+}
+
+type timingProof struct {
+	Suite                string       `json:"suite"`
+	EngineDelayMs        int          `json:"engine_delay_ms"`
+	Calls                []timingCall `json:"calls"`
+	RawTotalNs           int64        `json:"raw_total_ns"`
+	FakTotalNs           int64        `json:"fak_total_ns"`
+	TimeSavedNs          int64        `json:"time_saved_ns"`
+	RawEngineCalls       int64        `json:"raw_engine_calls"`
+	FakEngineCalls       int64        `json:"fak_engine_calls"`
+	VDSOHits             int64        `json:"vdso_hits"`
+	RoundtripsCollapsed  int          `json:"roundtrips_collapsed"`
+	ToolTokensFromCache  int          `json:"tool_tokens_from_cache"`
+	ContextTokensKeptOut int          `json:"context_tokens_kept_out"`
+	DenyVerdictTokens    int          `json:"deny_verdict_tokens"`
 }
 
 // resultTokens reads the explicit per-call `result_tokens` annotation (the modeled,
@@ -274,6 +352,176 @@ func buildLedger(ctx context.Context, suite string) (ledger, error) {
 	return l, nil
 }
 
+func buildTimingProof(ctx context.Context, suite string, engineDelay time.Duration) (timingProof, error) {
+	t, err := turnbench.LoadTrace(suitePath(suite))
+	if err != nil {
+		return timingProof{}, err
+	}
+	configureFileWorld()
+	res := abi.ActiveResolver()
+	if res == nil {
+		return timingProof{}, fmt.Errorf("no active Ref resolver registered")
+	}
+
+	prevDelay := setFileEngineDelay(engineDelay)
+	defer setFileEngineDelay(prevDelay)
+
+	rawTimes := make([]int64, 0, len(t.Calls))
+	resetFileEngineStats()
+	rawEngine := fileEngine{}
+	for _, c := range t.Calls {
+		tc, err := traceToolCall(ctx, res, c)
+		if err != nil {
+			return timingProof{}, err
+		}
+		start := time.Now()
+		if _, err := rawEngine.Complete(ctx, tc); err != nil {
+			return timingProof{}, err
+		}
+		rawTimes = append(rawTimes, elapsedNs(start))
+	}
+	rawEngineCalls := fileEngineCalls()
+
+	resetFileEngineStats()
+	vdso.Default.BumpWorld()
+	ifc.Default.Reset("")
+	k := kernel.New("localtools")
+	k.SetVDSO(true)
+
+	out := timingProof{
+		Suite:             suite,
+		EngineDelayMs:     int(engineDelay / time.Millisecond),
+		DenyVerdictTokens: denyVerdictTokens,
+		Calls:             make([]timingCall, 0, len(t.Calls)),
+		RawEngineCalls:    rawEngineCalls,
+	}
+	for idx, c := range t.Calls {
+		tc, err := traceToolCall(ctx, res, c)
+		if err != nil {
+			return timingProof{}, err
+		}
+		beforeEngine := fileEngineCalls()
+		beforeCounters := k.Counters()
+		start := time.Now()
+		r, v := k.Syscall(ctx, tc)
+		fakElapsed := elapsedNs(start)
+		afterCounters := k.Counters()
+		afterEngine := fileEngineCalls()
+
+		class, source, tier := timingClass(r, v)
+		R := resultTokens(c)
+		row := timingCall{
+			Index:           idx,
+			Tool:            c.Tool,
+			Resource:        resourceLabel(c.Args),
+			ArgsHash:        argsHash(c.Args),
+			Class:           class,
+			ResultTokens:    R,
+			RawToolTimeNs:   rawTimes[idx],
+			FakToolTimeNs:   fakElapsed,
+			FakSource:       source,
+			FakTier:         tier,
+			EngineRanRaw:    true,
+			EngineRanFak:    afterEngine > beforeEngine,
+			FakEngineDelta:  afterEngine - beforeEngine,
+			KernelVDSODelta: afterCounters.VDSOHits - beforeCounters.VDSOHits,
+		}
+		out.RawTotalNs += row.RawToolTimeNs
+		out.FakTotalNs += row.FakToolTimeNs
+		switch class {
+		case "deny":
+			saved := R - denyVerdictTokens
+			if saved > 0 {
+				out.ContextTokensKeptOut += saved
+			}
+		case "vdso_dedup":
+			out.RoundtripsCollapsed++
+			out.ToolTokensFromCache += R
+		}
+		out.Calls = append(out.Calls, row)
+	}
+	finalCounters := k.Counters()
+	out.FakEngineCalls = fileEngineCalls()
+	out.VDSOHits = finalCounters.VDSOHits
+	out.TimeSavedNs = out.RawTotalNs - out.FakTotalNs
+	return out, nil
+}
+
+func traceToolCall(ctx context.Context, res abi.Resolver, c turnbench.Call) (*abi.ToolCall, error) {
+	args := []byte(c.Args)
+	if len(args) == 0 {
+		args = []byte("{}")
+	}
+	ref, err := res.Put(ctx, args)
+	if err != nil {
+		return nil, err
+	}
+	return &abi.ToolCall{Tool: c.Tool, Args: ref, Meta: c.Meta}, nil
+}
+
+func timingClass(r *abi.Result, v abi.Verdict) (class, source, tier string) {
+	if v.Kind == abi.VerdictDeny {
+		return "deny", "fak_deny", ""
+	}
+	if v.By == "vdso" {
+		if r != nil && r.Meta != nil {
+			tier = r.Meta["tier"]
+		}
+		switch tier {
+		case "2":
+			return "vdso_dedup", "vdso_tier2", tier
+		case "3":
+			return "vdso_static", "vdso_tier3", tier
+		default:
+			if tier == "" {
+				tier = "1"
+			}
+			return "vdso_pure", "vdso_tier" + tier, tier
+		}
+	}
+	if r != nil && r.Meta != nil && r.Meta["engine"] != "" {
+		return "pass", "engine", ""
+	}
+	return "pass", "unknown", ""
+}
+
+func resourceLabel(raw json.RawMessage) string {
+	var m map[string]any
+	if err := json.Unmarshal(raw, &m); err != nil {
+		return ""
+	}
+	for _, k := range []string{"path", "file_path", "filePath", "query", "q", "id"} {
+		if v, ok := m[k]; ok {
+			switch x := v.(type) {
+			case string:
+				return x
+			case float64:
+				return strconv.FormatFloat(x, 'f', -1, 64)
+			}
+		}
+	}
+	return ""
+}
+
+func argsHash(raw json.RawMessage) string {
+	b := []byte(raw)
+	var v any
+	if err := json.Unmarshal(raw, &v); err == nil {
+		if canon, err := json.Marshal(v); err == nil {
+			b = canon
+		}
+	}
+	sum := sha256.Sum256(b)
+	return hex.EncodeToString(sum[:])[:12]
+}
+
+func elapsedNs(start time.Time) int64 {
+	if ns := time.Since(start).Nanoseconds(); ns > 0 {
+		return ns
+	}
+	return 1
+}
+
 // ---------------------------------------------------------------------------
 // fixture resolution (mirrors cmd/turntaxdemo's turnTaxDir climb).
 // ---------------------------------------------------------------------------
@@ -315,17 +563,38 @@ func main() {
 	jobs := flag.Int("jobs", 0, "cap GOMAXPROCS to an ABSOLUTE core count (0 = all cores). On a shared/active box pass e.g. 8 so the demo doesn't starve other work.")
 	print := flag.Bool("print", false, "render the WITHOUT-kernel vs WITH-kernel ledger as a colored TWO-COLUMN diff in the TERMINAL and exit. The 30-second point with zero setup. -suite picks the trace; honors NO_COLOR.")
 	asJSON := flag.Bool("json", false, "emit the exact per-call ledger as JSON (all suites, or just -suite) and exit.")
+	timing := flag.Bool("timing", false, "run a measured raw-vs-fak proof for one suite and print per-tool-call latency/source evidence. If -suite is omitted, defaults to reread-same-file.")
+	timingJSON := flag.Bool("timing-json", false, "emit the measured raw-vs-fak proof as JSON. If -suite is omitted, defaults to reread-same-file.")
+	engineDelayMS := flag.Int("engine-delay-ms", 15, "fixed local-tool delay used by -timing/-timing-json so engine re-execution cost is visible and deterministic enough to inspect.")
 	selfcheck := flag.Bool("selfcheck", false, "run HEADLESS: replay each suite through the kernel (the same turnbench.RunWithWorld path -print/-json drive), assert the documented ledger invariants, and exit non-zero on any drift. The CI / cross-platform dog-food of this demo's data path.")
 	suite := flag.String("suite", "prefilter-bad-calls", "suite for -print / -json (prefilter-bad-calls | reread-same-file | clean-control)")
 	flag.Parse()
+	suiteSet := false
+	flag.Visit(func(f *flag.Flag) {
+		if f.Name == "suite" {
+			suiteSet = true
+		}
+	})
+	selectedSuite := *suite
+	if (*timing || *timingJSON) && !suiteSet {
+		selectedSuite = "reread-same-file"
+	}
 	if *jobs > 0 {
 		runtime.GOMAXPROCS(*jobs)
 		gomax = *jobs
+	}
+	if *engineDelayMS < 0 {
+		fmt.Fprintln(os.Stderr, "-engine-delay-ms must be non-negative")
+		os.Exit(2)
 	}
 
 	switch {
 	case *selfcheck:
 		os.Exit(runSelfcheck())
+	case *timingJSON:
+		os.Exit(runTimingJSON(selectedSuite, time.Duration(*engineDelayMS)*time.Millisecond))
+	case *timing:
+		os.Exit(runTimingPrint(selectedSuite, time.Duration(*engineDelayMS)*time.Millisecond))
 	case *asJSON:
 		os.Exit(runJSON(*suite))
 	case *print:
@@ -336,6 +605,7 @@ func main() {
 		fmt.Fprintf(os.Stderr, "tokendemo %s — the tool-call token ledger (no model, no browser)\n", version)
 		fmt.Fprintf(os.Stderr, "trace dir: %s\n", tokenDir())
 		fmt.Fprintf(os.Stderr, "  go run ./cmd/tokendemo -print [-suite %s]\n", knownSuites[0].ID)
+		fmt.Fprintf(os.Stderr, "  go run ./cmd/tokendemo -timing [-suite reread-same-file]\n")
 		fmt.Fprintf(os.Stderr, "  go run ./cmd/tokendemo -json\n")
 		fmt.Fprintf(os.Stderr, "  go run ./cmd/tokendemo -selfcheck\n")
 		os.Exit(2)
@@ -364,6 +634,79 @@ func runJSON(suite string) int {
 	b, _ := json.MarshalIndent(out, "", "  ")
 	fmt.Println(string(b))
 	return 0
+}
+
+func runTimingJSON(suite string, delay time.Duration) int {
+	proof, err := buildTimingProof(context.Background(), suite, delay)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "timing proof %q: %v\n", suite, err)
+		return 1
+	}
+	b, _ := json.MarshalIndent(proof, "", "  ")
+	fmt.Println(string(b))
+	return 0
+}
+
+func runTimingPrint(suite string, delay time.Duration) int {
+	p := colors()
+	proof, err := buildTimingProof(context.Background(), suite, delay)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "timing proof %q: %v\n", suite, err)
+		return 1
+	}
+
+	fmt.Printf("\n  %s — suite: %s (%d calls, engine delay %dms)\n",
+		p.paint(p.bold, "fak · measured tool-cache proof"), suite, len(proof.Calls), proof.EngineDelayMs)
+	fmt.Printf("  %s\n\n", p.paint(p.dim, "raw loop executes every tool; fak loop goes through kernel.Syscall with vDSO on"))
+	fmt.Printf("  %-3s  %-10s  %-16s  %-12s  %9s  %9s  %-11s  %-7s  %-6s  %-6s\n",
+		"#", "tool", "resource", "args", "raw ms", "fak ms", "fak source", "engine", "vDSO", "tokens")
+	fmt.Printf("  %s\n", strings.Repeat("─", 105))
+	for _, c := range proof.Calls {
+		engine := "skip"
+		if c.EngineRanFak {
+			engine = "run"
+		}
+		source := c.FakSource
+		if c.FakTier != "" && !strings.Contains(source, c.FakTier) {
+			source += "/" + c.FakTier
+		}
+		lineColor := p.dim
+		if c.FakSource == "vdso_tier2" || c.FakSource == "fak_deny" {
+			lineColor = p.green
+		}
+		fmt.Printf("  %s\n", p.paint(lineColor, fmt.Sprintf("%-3d  %-10s  %-16s  %-12s  %9s  %9s  %-11s  %-7s  %-6d  %-6d",
+			c.Index,
+			padTrim(c.Tool, 10),
+			padTrim(c.Resource, 16),
+			c.ArgsHash,
+			formatMs(c.RawToolTimeNs),
+			formatMs(c.FakToolTimeNs),
+			padTrim(source, 11),
+			engine,
+			c.KernelVDSODelta,
+			c.ResultTokens,
+		)))
+	}
+	fmt.Printf("  %s\n", strings.Repeat("─", 105))
+	fmt.Printf("  raw engine calls: %d   fak engine calls: %d   vDSO hits: %d   round-trips collapsed: %d\n",
+		proof.RawEngineCalls, proof.FakEngineCalls, proof.VDSOHits, proof.RoundtripsCollapsed)
+	fmt.Printf("  measured tool time: raw %.3fms   fak %.3fms   saved %.3fms\n",
+		nsToMs(proof.RawTotalNs), nsToMs(proof.FakTotalNs), nsToMs(proof.TimeSavedNs))
+	fmt.Printf("  tool-result tokens served from cache: %s   model-context tokens kept out: %s\n\n",
+		commaInt(proof.ToolTokensFromCache), commaInt(proof.ContextTokensKeptOut))
+	return 0
+}
+
+func nsToMs(ns int64) float64 {
+	return float64(ns) / float64(time.Millisecond)
+}
+
+func formatMs(ns int64) string {
+	ms := nsToMs(ns)
+	if ns > 0 && ms < 0.001 {
+		return "<0.001"
+	}
+	return fmt.Sprintf("%.3f", ms)
 }
 
 // ---------------------------------------------------------------------------

@@ -14,6 +14,8 @@ required. The run is deterministic and usually completes in a few seconds.
 ```bash
 go run ./cmd/tokendemo -print
 go run ./cmd/tokendemo -print -suite reread-same-file
+go run ./cmd/tokendemo -timing
+go run ./cmd/tokendemo -timing-json
 go run ./cmd/tokendemo -json
 go run ./cmd/tokendemo -selfcheck
 ```
@@ -33,6 +35,11 @@ OK - all suites reproduced the documented ledger invariants.
 
 The `-print` view renders the without-kernel and with-kernel columns. The JSON output
 contains every call's class, token accounting, and tool-run count.
+
+Use `-timing` for the concrete cache proof: the raw loop calls the local tool engine
+for every read, while the fak loop runs the same trace through `kernel.Syscall` with
+the vDSO enabled. Repeated reads show `fak_source=vdso_tier2`,
+`fak_engine_call_delta=0`, and a per-call latency next to the raw engine time.
 
 ## Scope
 

@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/turnbench"
 )
@@ -98,6 +99,45 @@ func TestDedupIsToolSideNotContext(t *testing.T) {
 	}
 	if l.RoundtripsCollapsed != l.Dedups {
 		t.Errorf("roundtrips_collapsed (%d) should equal dedup hits (%d)", l.RoundtripsCollapsed, l.Dedups)
+	}
+}
+
+func TestTimingProofShowsRepeatedReadsServedByVDSO(t *testing.T) {
+	proof, err := buildTimingProof(context.Background(), "reread-same-file", time.Millisecond)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if proof.RawEngineCalls != 6 {
+		t.Fatalf("raw engine calls = %d, want 6", proof.RawEngineCalls)
+	}
+	if proof.FakEngineCalls != 3 {
+		t.Fatalf("fak engine calls = %d, want 3 (first read/list only)", proof.FakEngineCalls)
+	}
+	if proof.VDSOHits != 3 || proof.RoundtripsCollapsed != 3 {
+		t.Fatalf("vdso hits=%d roundtrips=%d, want 3/3", proof.VDSOHits, proof.RoundtripsCollapsed)
+	}
+	if proof.ToolTokensFromCache != 900 {
+		t.Fatalf("tool tokens from cache = %d, want 900", proof.ToolTokensFromCache)
+	}
+
+	hits := 0
+	for _, c := range proof.Calls {
+		if c.FakSource != "vdso_tier2" {
+			continue
+		}
+		hits++
+		if c.EngineRanFak || c.FakEngineDelta != 0 {
+			t.Fatalf("vdso row ran the engine: %+v", c)
+		}
+		if c.KernelVDSODelta != 1 {
+			t.Fatalf("vdso row delta = %d, want 1: %+v", c.KernelVDSODelta, c)
+		}
+		if c.FakToolTimeNs <= 0 || c.RawToolTimeNs <= 0 {
+			t.Fatalf("timing fields must be populated: %+v", c)
+		}
+	}
+	if hits != 3 {
+		t.Fatalf("vdso_tier2 rows = %d, want 3", hits)
 	}
 }
 
