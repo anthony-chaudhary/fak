@@ -108,7 +108,8 @@ The policy plane plans demote-not-evict beautifully — against `DefaultTierProf
 own comment calls them "representative order-of-magnitude defaults, not measurements of any
 particular box," and against `TierPressure` values that, on the live serving path, **nothing
 computes from real device state.** `cmd/hwcachedemo` injects escalating pressure by hand; the
-live model engine never does. Meanwhile the physical allocators that *do* know the real
+live model engine never does. (Plank 3, §4, now ships the wire that derives that pressure from
+the real backend; the serving loop does not yet call it.) Meanwhile the physical allocators that *do* know the real
 pressure — they hold `totalGlobalMem`, they are the ones that hit `nullptr` — never report it
 into the policy plane and never consume a demote directive out of it. The two planes are
 connected only through the *observability* layer: `PlanPlacement`'s `KVOffload`/`KVRestore`
@@ -154,9 +155,20 @@ direction ("a failed restore is NEVER a silent recompute … typed, never a hang
 that gets a fault can spill, evict, or refuse with a sizing message. Today it gets a
 stack trace.
 
-**Plank 3 — feed real pressure into the policy plane.** Replace the `DefaultTierProfiles`
-placeholders and the demo's hand-injected `TierPressure` with live numbers from
-`DeviceMemoryInfo`, so `PlanPlacement` plans against the device that actually exists.
+**Plank 3 — feed real pressure into the policy plane. _Shipped_ (#707).**
+`internal/engine.PlanPlacementForDevice` is the report→policy wire: it derives a live
+`cachemeta.TierPressure` (and the HBM tier's real `CapacityBytes`) from the active backend's
+device memory via `compute.DeviceMemoryInfo(b)`, folds them into the request, and calls
+`PlanPlacement` — so the policy plans against the device that actually exists instead of
+`DefaultTierProfiles`' representative numbers and the demo's hand-injected `TierPressure`. It
+**fails open**: a backend that cannot probe (the `cpu-ref` floor, a wasm target;
+`known=false`) contributes no pressure and no capacity override, so the profile default
+stands and no path that works today regresses. While the `cuda` producer reports `total` but
+not `free` (the `cudaMemGetInfo` follow-up, #363), HBM pressure derives from `total` vs fak's
+tracked-resident bytes. Witness: `go test ./internal/engine -run TestPlanPlacementForDevice`
+(a full device flips a hot prefix from `keep` → `demote`; `cpu-ref` is unchanged). What
+remains is the serving loop CALLING this wire per pressured entry and routing the resulting
+demote through the Plank-4 adapter.
 
 **Plank 4 — the engine adapter that EXECUTES a placement directive. _Shipped_ (#708).**
 `internal/engine.CapacityAdapter.Execute` is the control path the diagram in §2 was
@@ -218,8 +230,10 @@ and it is what `DeviceCapacity` begins.
 - The `cuda` producer reports `total` only; `free` is `FreeUnknown` until `cudaMemGetInfo` is
   wired, so the check catches "too big for the whole device," not "too big for the current
   free headroom."
-- The capacity numbers in `cachemeta`'s `DefaultTierProfiles` remain representative defaults,
-  not measurements. Plank 3 is what would make them real.
+- Plank 3 (#707) makes the HBM tier's pressure and `CapacityBytes` real on a probing backend
+  (`engine.PlanPlacementForDevice`), but it ships the report→policy SEAM, not a serving-loop
+  caller — nothing on the live path invokes it yet. The other tiers' (`DRAM`/`NUMA-far`/`CXL`/
+  `Disk`) numbers in `DefaultTierProfiles` remain representative defaults until measured per box.
 - The industry scorecard ([`docs/industry-scorecard/memory.md`](../industry-scorecard/memory.md))
   honestly lists `fak`'s capacity gaps (paged KV, KV-offload hierarchy, memory-utilization %,
   fleet KV-aware routing) as out-of-scope / no-claim today. This explainer harmonizes with
