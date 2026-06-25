@@ -182,6 +182,12 @@ type TopologySearchReport struct {
 	// frontier, Best can never be an unrecorded-scale projection.
 	Best TopologyCandidate `json:"best"`
 
+	// NamedTopology is an optional score for a declared topology supplied by cmd/topobench.
+	// It is scored by the same model-free replay oracle and frontier gate as searched
+	// genomes, but is not inserted into the search frontier unless the caller also puts its
+	// equivalent width/lane shape in the search grid.
+	NamedTopology *TopologyCandidate `json:"named_topology,omitempty"`
+
 	// Candidates are every scored genome (sorted by name for a stable artifact).
 	Candidates []TopologyCandidate `json:"candidates"`
 
@@ -328,6 +334,14 @@ func scoreTopology(ctx context.Context, p FanoutProfile, g TopologyGenome, front
 			g.Width, frontierWidth, credited, creditedWidth, measured-credited)
 	}
 	return out
+}
+
+// ScoreTopology scores one genome with the same model-free replay oracle, corpus-frontier
+// gate, and arbiter-collision cost that RunTopologySearch uses. It is the adapter surface
+// for callers that already have a declared topology instead of asking the search to propose
+// one.
+func ScoreTopology(ctx context.Context, p FanoutProfile, g TopologyGenome, frontierWidth, trials int, seed int64, cm FanoutCostModel) TopologyCandidate {
+	return scoreTopology(ctx, withFanoutProfileVersion(p), g, frontierWidth, trials, seed, withFanoutCostModelVersion(cm))
 }
 
 // TopologySearchConfig configures the structure-search. The corpus frontier (the widest

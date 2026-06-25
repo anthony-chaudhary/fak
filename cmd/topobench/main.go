@@ -18,6 +18,7 @@
 //	          [--frontier-width 16]            (Wmax: the widest run the corpus witnessed)
 //	          [--baseline-width 4 --baseline-lanes 1 --baseline-sub-turns 4]
 //	          [--widths 1,2,4,8,16] [--lanes 1,2,4,8,16]   (the searched genome grid)
+//	          [--named-topology linear|star --named-width N] (score one declared shape)
 //	          [--trials 6] [--seed N] [--topk 0]
 //	          [--prefix 2048]                  (master-goal shared prefix tokens P)
 //	          [--out topo.json] [--csv topo.csv]
@@ -36,6 +37,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/anthony-chaudhary/fak/internal/agenttopo"
+	"github.com/anthony-chaudhary/fak/internal/comm"
 	"github.com/anthony-chaudhary/fak/internal/turnbench"
 
 	_ "github.com/anthony-chaudhary/fak/internal/registrations"
@@ -48,6 +51,8 @@ func main() {
 	baseWidth := fs.Int("baseline-width", 4, "hand-frozen baseline fan-out width (the bar the search beats)")
 	baseLanes := fs.Int("baseline-lanes", 1, "hand-frozen baseline lane count (single-lane = the dos.toml partition)")
 	baseSubTurns := fs.Int("baseline-sub-turns", 4, "orchestrator->worker depth (turns per worker)")
+	namedTopology := fs.String("named-topology", "", "optional declared topology to score: linear | star")
+	namedWidth := fs.Int("named-width", 0, "node count for --named-topology (default: baseline-width)")
 	widthsArg := fs.String("widths", "", "searched fan-out widths, comma-separated (default: powers-of-two ladder to frontier-width)")
 	lanesArg := fs.String("lanes", "", "searched lane partitions, comma-separated (default: same ladder as widths)")
 	trials := fs.Int("trials", 6, "seeded trials per cell handed to the measured fan-out replay")
@@ -100,6 +105,18 @@ func main() {
 		fmt.Fprintln(os.Stderr, "topobench:", err)
 		os.Exit(1)
 	}
+	if strings.TrimSpace(*namedTopology) != "" {
+		nw := *namedWidth
+		if nw <= 0 {
+			nw = *baseWidth
+		}
+		named, err := scoreNamedTopology(context.Background(), *namedTopology, nw, *baseLanes, *baseSubTurns, *frontierWidth, *trials, *seed, p, cm)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "topobench:", err)
+			os.Exit(2)
+		}
+		rep.NamedTopology = &named
+	}
 
 	if err := os.WriteFile(*out, rep.JSON(), 0o644); err != nil {
 		fmt.Fprintln(os.Stderr, "topobench:", err)
@@ -127,6 +144,58 @@ func main() {
 		fmt.Fprintf(os.Stderr, " and %s", *csv)
 	}
 	fmt.Fprintln(os.Stderr)
+}
+
+func scoreNamedTopology(ctx context.Context, shape string, width, lanes, subTurns, frontierWidth, trials int, seed int64, p turnbench.FanoutProfile, cm turnbench.FanoutCostModel) (turnbench.TopologyCandidate, error) {
+	if width < 1 {
+		return turnbench.TopologyCandidate{}, fmt.Errorf("--named-width must be >=1, got %d", width)
+	}
+	if lanes < 1 {
+		lanes = 1
+	}
+	g, err := comm.New("topobench-"+shape, "", namedMembers(width, lanes))
+	if err != nil {
+		return turnbench.TopologyCandidate{}, err
+	}
+
+	var topo *agenttopo.Topology
+	switch strings.ToLower(strings.TrimSpace(shape)) {
+	case "linear", "line":
+		topo, err = agenttopo.Linear("linear", g)
+	case "star":
+		root, _ := g.Member(0)
+		topo, err = agenttopo.Star("star", g, root.ID)
+	default:
+		return turnbench.TopologyCandidate{}, fmt.Errorf("unknown --named-topology %q (linear|star)", shape)
+	}
+	if err != nil {
+		return turnbench.TopologyCandidate{}, err
+	}
+
+	cand := turnbench.ScoreTopology(ctx, p, turnbench.TopologyGenome{
+		Width:    topo.Size(),
+		SubTurns: subTurns,
+		Lanes:    topo.LaneCount(),
+	}, frontierWidth, trials, seed, cm)
+	cand.Name = "named-" + topo.Name()
+	cand.Summary["declared_shape"] = topo.Name()
+	cand.Summary["declared_edges"] = strconv.Itoa(len(topo.Edges()))
+	cand.Summary["declared_nodes"] = strconv.Itoa(topo.Size())
+	return cand, nil
+}
+
+func namedMembers(width, lanes int) []comm.Member {
+	if lanes < 1 {
+		lanes = 1
+	}
+	out := make([]comm.Member, width)
+	for i := range out {
+		out[i] = comm.Member{
+			ID:   fmt.Sprintf("node-%04d", i),
+			Lane: fmt.Sprintf("lane-%03d", i%lanes),
+		}
+	}
+	return out
 }
 
 // profileByName resolves a fan-out workload profile name to its FanoutProfile (the same

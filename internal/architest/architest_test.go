@@ -94,6 +94,7 @@ var tier = map[string]int{
 	"dropin":       1,
 	"comm":         2,
 	"cohort":       2, // fail-closed cohort shrink/agree over comm.Group + modelroute vote fold.
+	"agenttopo":    2, // declared agent communication DAG over comm.Group + modelroute folds.
 	// new-leaf:tier — `python tools/new_leaf.py <name> --tier <name>` inserts the
 	// declaration for a generated leaf immediately ABOVE this line. Keep the marker last.
 }

@@ -75,6 +75,7 @@ func TestTopobenchEndToEnd(t *testing.T) {
 		"--profile", "research",
 		"--frontier-width", "8",
 		"--baseline-width", "4", "--baseline-lanes", "1", "--baseline-sub-turns", "4",
+		"--named-topology", "star", "--named-width", "4",
 		"--widths", "2,4,8", "--lanes", "1,4,8",
 		"--trials", "4", "--seed", "5",
 		"--out", "topo.json", "--csv", "topo.csv",
@@ -91,6 +92,12 @@ func TestTopobenchEndToEnd(t *testing.T) {
 	}
 	if rep.ModelCallsSpent != 0 {
 		t.Errorf("topology search must spend ZERO model calls, got %d", rep.ModelCallsSpent)
+	}
+	if rep.NamedTopology == nil {
+		t.Fatalf("named topology score missing from report")
+	}
+	if rep.NamedTopology.Name != "named-star" || rep.NamedTopology.Summary["declared_edges"] != "3" {
+		t.Errorf("named topology score = %+v", rep.NamedTopology)
 	}
 	if len(rep.Frontier) == 0 {
 		t.Errorf("report must surface a non-empty Pareto frontier")
