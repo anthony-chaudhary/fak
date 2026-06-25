@@ -487,6 +487,65 @@ errors are covered in [server-troubleshooting.md](server-troubleshooting.md).
 
 ---
 
+## Forge-side enforcement (required)
+
+fak's client-side hook floor (`tools/githooks/{pre-commit,pre-push,commit-msg,reference-transaction}`)
+enforces the trunk laws — `OFF_TRUNK`, DCO sign-off, the Conventional-Commits
+`(fak <leaf>)` stamp, and the leak scan — but it lives **inside each clone and is
+bypassable by design.** Three independent client-side escapes defeat it: `--no-verify`
+skips client hooks; a `core.hooksPath` override repoints them at an empty directory; and
+shell-laundering (`alias`, a wrapper script, `eval`, `$()`, backticks) evades the
+conservative argv tokenizer so a laundered `git push --force` never presents recognizable
+argv to fak at all. `internal/gitgate` refuses `--no-verify` and the `core.hooksPath`
+knob precisely *because* hooks are bypassable — but that refusal is itself a per-process
+client-side check.
+
+A **forge-side ruleset never sees client argv.** It evaluates the actual ref update the
+forge receives, after all laundering has collapsed into a concrete
+`<old-sha> <new-sha> <refname>`. That is the one layer fak structurally cannot reach from
+inside the clone, and it is where a fleet's trunk laws need a backstop no client can
+disarm. **For a multi-tenant fleet the trunk guarantees only hold if the forge ruleset is
+also applied.** The client floor is best-effort defense-in-depth; the ruleset is the
+non-bypassable companion.
+
+The templates and a one-command apply wrapper live in
+[`tools/forge-rulesets/`](https://github.com/anthony-chaudhary/fak/tree/main/tools/forge-rulesets):
+
+```bash
+# GitHub (needs `gh auth login`); edit the status-check contexts in the JSON first:
+tools/forge-rulesets/apply.sh github  <owner>/<repo>
+
+# GitLab (needs GITLAB_TOKEN with api scope):
+tools/forge-rulesets/apply.sh gitlab  <project-id>
+```
+
+- `github-ruleset.json` — a Repository Ruleset targeting `main`: non-fast-forward
+  (no force-push), deletion protection, required linear history, required signatures, and
+  required status checks (`ci`). Mirrors `OFF_TRUNK` and the no-force-push law server-side.
+- `gitlab-push-rules.json` — Push Rules with a `commit_message_regex` mirroring the
+  Conventional-Commits + `(fak <leaf>)` stamp (the same shape `tools/commit_stamp_doctor.py`
+  recognizes) and `prevent_secrets` mirroring the leak scan.
+- `apply.sh` — the `gh api` / GitLab Push Rules API wrappers plus a Terraform stub so the
+  ruleset can live in IaC and not drift silently.
+
+This is pure defense-in-depth that **composes with, and does not overlap,** fak's core
+value: fak adjudicates *before the call runs* (it refuses a hazard with a reason,
+in-process, no round-trip); the ruleset adjudicates *the resulting ref update at the
+forge* (it cannot reason about intent or refuse pre-call, but it cannot be laundered).
+Neither replaces the other.
+
+**Per-forge parity residual.** GitHub Rulesets and GitLab Push Rules do not express an
+identical predicate set. The commit-message regex is a first-class Push Rule on GitLab but
+is status-check / signature-shaped on GitHub; conversely no-force-push and linear-history
+are Ruleset rules on GitHub but **protected-branch** settings on GitLab (configured
+separately from push rules — see the note in `gitlab-push-rules.json`). The template
+mirrors each law on whichever forge can express it and documents the residual; it does not
+promise a byte-identical mirror of every client hook. It also does **not** make fak's
+guarantees cross-clone or atomic — a ruleset validates a single ref update per repository;
+cross-machine commit atomicity remains the collective-commit barrier's separate concern.
+
+---
+
 ## See also
 
 - [server-quickstart.md](server-quickstart.md) — fastest path to a running gateway

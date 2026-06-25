@@ -1,0 +1,30 @@
+{
+  "_comment": "fak forge-side trunk-law mirror (GitHub Repository Ruleset). The client hooks in tools/githooks/ are best-effort and bypassable (--no-verify, core.hooksPath, shell-laundering); a forge ruleset evaluates the ref update SERVER-SIDE, after all laundering has collapsed into a concrete <old-sha> <new-sha> <refname>, so no client flag can disarm it. Apply with tools/forge-rulesets/apply.sh. Mirrors: OFF_TRUNK / no-force-push / no-delete on main, linear history, and (where the fleet runs CI) required status checks + signatures. Edit `repository` and the status-check contexts to match your repo before applying.",
+  "name": "fak-trunk-laws",
+  "target": "branch",
+  "enforcement": "active",
+  "conditions": {
+    "ref_name": {
+      "include": ["refs/heads/main"],
+      "exclude": []
+    }
+  },
+  "rules": [
+    { "type": "deletion" },
+    { "type": "non_fast_forward" },
+    { "type": "required_linear_history" },
+    {
+      "type": "required_signatures"
+    },
+    {
+      "type": "required_status_checks",
+      "parameters": {
+        "strict_required_status_checks_policy": true,
+        "required_status_checks": [
+          { "context": "ci" }
+        ]
+      }
+    }
+  ],
+  "bypass_actors": []
+}

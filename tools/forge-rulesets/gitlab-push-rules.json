@@ -1,0 +1,16 @@
+{
+  "_comment": "fak forge-side trunk-law mirror (GitLab Push Rules). Server-side push validation that a client cannot bypass with --no-verify / core.hooksPath / shell-laundering. Mirrors the commit-msg hook (Conventional-Commits subject + the (fak <leaf>) ship stamp) and the leak scan (prevent_secrets). Apply via the Project Push Rules API (PUT /projects/:id/push_rule) or Terraform gitlab_project_push_rules. The commit_message_regex below requires BOTH a Conventional-Commits subject AND a (fak <leaf>) / (fak: <leaf>) / (refs fak <leaf>) trailer, matching tools/commit_stamp_doctor.py's _TRAILER_RE and the repo's commit-msg gate.",
+  "commit_message_regex": "^(feat|fix|docs|refactor|perf|test|chore|ci|build|style|revert)(\\([a-z0-9._-]+\\))?!?: .+\\((refs +)?fak[ :]+[A-Za-z0-9][A-Za-z0-9._-]*\\)\\s*$",
+  "commit_message_negative_regex": "",
+  "deny_delete_tag": true,
+  "prevent_secrets": true,
+  "reject_unsigned_commits": false,
+  "commit_committer_check": false,
+  "member_check": false,
+  "max_file_size": 0,
+  "_notes": {
+    "commit_message_regex": "GitLab applies this per commit subject; a merge commit subject ('Merge ...') will not match. Either exempt merges in your workflow (squash/rebase to a single stamped commit) or relax to allow a leading 'Merge'. The repo's own stamp doctor treats Merge subjects as bookkeeping, not ships.",
+    "reject_unsigned_commits": "Set true once every fleet machine has a signing key provisioned; leaving it false avoids locking out an unsigned-but-legitimate push during rollout.",
+    "_parity": "GitLab expresses the commit-message + secret laws as first-class push rules; the no-force-push / linear-history laws are GitLab *protected-branch* settings (allowed_to_force_push=false, etc.), configured separately from push rules. See the deployment guide's per-forge parity residual."
+  }
+}
