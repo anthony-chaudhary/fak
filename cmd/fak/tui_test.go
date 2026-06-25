@@ -101,7 +101,7 @@ func TestTUIIssuesHumanOutputFromFixture(t *testing.T) {
 		t.Fatalf("runTUI code=%d stderr=%s", code, stderr.String())
 	}
 	out := stdout.String()
-	for _, want := range []string{"fak tui issues", "Epic #10", "related loaded issues: 2", "Related", "#11", "orphan"} {
+	for _, want := range []string{"fak console issues", "Epic #10", "related loaded issues: 2", "Related", "#11", "orphan"} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("human output missing %q:\n%s", want, out)
 		}
@@ -166,7 +166,7 @@ func TestTUILoopsHumanOutputFromLedger(t *testing.T) {
 		t.Fatalf("runTUI loops code=%d stderr=%s", code, stderr.String())
 	}
 	out := stdout.String()
-	for _, want := range []string{"fak tui loops", "running=1", "refused=1", "witness-gaps=1", "issue-dispatch/default", "needs-witness"} {
+	for _, want := range []string{"fak console loops", "running=1", "refused=1", "witness-gaps=1", "issue-dispatch/default", "needs-witness"} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("loop output missing %q:\n%s", want, out)
 		}
@@ -214,7 +214,7 @@ func TestTUISessionsHumanOutputFromFixture(t *testing.T) {
 		t.Fatalf("runTUI sessions code=%d stderr=%s", code, stderr.String())
 	}
 	out := stdout.String()
-	for _, want := range []string{"fak tui sessions", "sessions=4", "paused=1", "stopped=1", "lineage=1", "sess-low", "low-turns"} {
+	for _, want := range []string{"fak console sessions", "sessions=4", "paused=1", "stopped=1", "lineage=1", "sess-low", "low-turns"} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("session output missing %q:\n%s", want, out)
 		}
@@ -273,7 +273,7 @@ func TestTUIGardenHumanOutputFromFixture(t *testing.T) {
 		t.Fatalf("runTUI garden code=%d stderr=%s", code, stderr.String())
 	}
 	out := stdout.String()
-	for _, want := range []string{"fak tui garden", "finding=garden_gate_red", "gate=1", "scorecard control pane", "red", "fresh status", "broken-loops"} {
+	for _, want := range []string{"fak console garden", "finding=garden_gate_red", "gate=1", "scorecard control pane", "red", "fresh status", "broken-loops"} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("garden output missing %q:\n%s", want, out)
 		}
@@ -328,7 +328,7 @@ func TestTUIGuardHumanOutputFromFixtures(t *testing.T) {
 		t.Fatalf("runTUI guard code=%d stderr=%s", code, stderr.String())
 	}
 	out := stdout.String()
-	for _, want := range []string{"fak tui guard", "artifacts=2", "deny=4", "policy_block=1", "default_deny=3", "expected=1", "git_add", "Bash", "policy-block"} {
+	for _, want := range []string{"fak console guard", "artifacts=2", "deny=4", "policy_block=1", "default_deny=3", "expected=1", "git_add", "Bash", "policy-block"} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("guard output missing %q:\n%s", want, out)
 		}
@@ -382,7 +382,7 @@ func TestTUIAgentDryRunDefaultsToClaudeGuardOAuth(t *testing.T) {
 		t.Fatalf("runTUI agent dry-run code=%d stderr=%s", code, stderr.String())
 	}
 	out := stdout.String()
-	for _, want := range []string{"fak tui agent", "backend=claude", "auth=claude-subscription-oauth", "fak", "guard", "--provider anthropic", "--anthropic-oauth", "claude -p"} {
+	for _, want := range []string{"fak console agent", "backend=claude", "auth=claude-subscription-oauth", "fak", "guard", "--provider anthropic", "--anthropic-oauth", "claude -p"} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("agent dry-run output missing %q:\n%s", want, out)
 		}
@@ -463,7 +463,7 @@ func TestTUIOverviewHumanOutputFromFixtures(t *testing.T) {
 		t.Fatalf("runTUI overview code=%d stderr=%s", code, stderr.String())
 	}
 	out := stdout.String()
-	for _, want := range []string{"fak tui overview", "cards=5", "missing=0", "issues", "loops", "sessions", "garden", "guard", "garden-red"} {
+	for _, want := range []string{"fak console overview", "cards=5", "missing=0", "issues", "loops", "sessions", "garden", "guard", "garden-red"} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("overview output missing %q:\n%s", want, out)
 		}

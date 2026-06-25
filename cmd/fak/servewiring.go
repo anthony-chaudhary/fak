@@ -84,6 +84,7 @@ var servewiringData = []wiringRow{
 	{"notifier", "--notify-native / --notify-webhook / --notify-slack", "", verdictWired, "cmd/fak/serve.go (WatchTransitions)", "#761 stop-reason push notifier; native default-on (was DEAD_WIRED before this pass)"},
 	{"enginecache", "--engine-cache-engine", "EngineCacheEngine", verdictOffByDefault, "internal/gateway/gateway.go:1480", "resets the serving-engine cache after a quarantined proxy turn; off when engine empty"},
 	{"backend", "--backend", "Backend", verdictOffByDefault, "internal/agent/inkernel_planner.go:271", "decodes the in-kernel chat through the compute HAL device; off when name empty"},
+	{"cpuoffloadexperts", "--cpu-offload-experts", "CPUOffloadExperts", verdictOffByDefault, "internal/agent/inkernel_planner.go:282", "with --gguf --backend, keeps MoE expert GEMMs on host RAM while dense/router/attention run on the device; off by default"},
 	{"steersession", "(host func, default-on)", "SteerSession", verdictPartial, "internal/gateway/http.go:951", "POST /session/{id}/steer sends onto a2achan; the running-session TryRecv splice is deferred (#760)"},
 }
 

@@ -83,6 +83,8 @@ func main() {
 		cmdSignal(os.Args[2:])
 	case "task":
 		cmdTask(os.Args[2:])
+	case "console":
+		cmdTUI(os.Args[2:])
 	case "tui":
 		cmdTUI(os.Args[2:])
 	case "loop":
@@ -121,6 +123,8 @@ func main() {
 		cmdVCache(os.Args[2:])
 	case "hook":
 		cmdHook()
+	case "hooks":
+		cmdHooks(os.Args[2:])
 	case "rungstats":
 		cmdRungStats(os.Args[2:])
 	case "swebench":
@@ -322,14 +326,15 @@ func usage() {
   fak task      sample [--json] [--done N --total N --unit UNIT]
                 (the PROCESS-LOCAL TASK MANAGER snapshot: current hardware/runtime
                  sample plus task/step/concept progress and ETA when progress is known)
-  fak tui       issues [--epic N] [--issues-json FILE] [--json] |
+  fak console   issues [--epic N] [--issues-json FILE] [--json] |
                 loops [--ledger FILE] [--json] | sessions [--sessions-json FILE] [--json] |
                 garden [--garden-json FILE] [--json] [--check] |
                 guard --guard-json FILE [--json] | overview [--json]
                 (the NATIVE TERMINAL CONTROL PANE spine: ranked GitHub issue
                  lanes, durable loop-ledger lanes, and live session DRIVE lanes,
                  plus garden health, guard proof packets, and a composed overview,
-                 with fixture-friendly JSON models for deterministic use)
+                 with fixture-friendly JSON models for deterministic use. fak tui
+                 is the compatibility alias)
   fak loop      append | run -- CMD | status | admit
                 (the DURABLE LONG-RUNNING-LOOP ledger: hash-chained fire/admit/start/
                  end/witness events, an OS-scheduler wrapper, a read fold, and the
@@ -355,6 +360,8 @@ func usage() {
                  fails closed instead of using a whole-cache reset fallback. --stdio serves MCP (fak_adjudicate /
                  fak_syscall / fak_admit / fak_changes / fak_revoke /
                  fak_session_reset / fak_context_change) over stdin/stdout)
+  fak serve-wiring [--md|--check]
+                (audit fak serve flag -> gateway.Config -> runtime-read wiring)
   fak guard     [--provider anthropic|openai|gemini|xai] [--base-url URL] [--policy FILE]
                 [--session-id ID --context-budget-tokens N [--reset-on-budget|--restart-on-budget]]
                 [--restart-limit N] [--restart-seed-dir DIR]
@@ -397,6 +404,8 @@ func usage() {
                    exits 0 when PROVEN, 1 when REFUTED; 'prove-telemetry' proves/refutes
                    realized savings from provider usage JSONL)
   fak hook      < call.json     (spawned-hook decide; the A/B baseline transport)
+  fak hooks     pre-commit | commit-msg <file>
+                (in-process repo git-hook gates; exit 2 lets shell hooks fall back)
   fak webbench  describe | eval | compare    (frontier web/browser agent benchmarking)
   fak swebench  describe | eval | compare    (SWE-bench Verified benchmarking)
   fak version

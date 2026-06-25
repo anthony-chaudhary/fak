@@ -210,6 +210,7 @@ feeds it; unreachable on the shipped binary).
 | `notifier` | wired | `--notify-native / --notify-webhook / --notify-slack` | _(observer seam)_ | `cmd/fak/serve.go (WatchTransitions)` | #761 stop-reason push notifier; native default-on (was DEAD_WIRED before this pass) |
 | `enginecache` | off-by-default (wired) | `--engine-cache-engine` | `EngineCacheEngine` | `internal/gateway/gateway.go:1480` | resets the serving-engine cache after a quarantined proxy turn; off when engine empty |
 | `backend` | off-by-default (wired) | `--backend` | `Backend` | `internal/agent/inkernel_planner.go:271` | decodes the in-kernel chat through the compute HAL device; off when name empty |
+| `cpuoffloadexperts` | off-by-default (wired) | `--cpu-offload-experts` | `CPUOffloadExperts` | `internal/agent/inkernel_planner.go:282` | with --gguf --backend, keeps MoE expert GEMMs on host RAM while dense/router/attention run on the device; off by default |
 | `steersession` | partial | `(host func, default-on)` | `SteerSession` | `internal/gateway/http.go:951` | POST /session/{id}/steer sends onto a2achan; the running-session TryRecv splice is deferred (#760) |
 <!-- END serve-wiring -->
 

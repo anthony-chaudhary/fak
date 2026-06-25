@@ -45,6 +45,10 @@ tools/_registry/
 tools/_watchdog/
 tools/_walltime.*
 
+# Local live-dogfood scratch state: try-it PID files, logs, and one-off console proof
+# artifacts. Regenerated per operator session.
+.dogfood/
+
 # Mermaid render toolchain for the visuals deck (regenerate via visuals/render.sh)
 visuals/node_modules/
 visuals/.render-scratch/

@@ -1,6 +1,6 @@
 package main
 
-// fak tui is the native terminal control pane spine. The first surface is an
+// fak console is the native terminal control pane spine. The first surface is an
 // issue queue view because issue triage is already one of fak's dogfood loops:
 // fetch or load the GitHub issue shape, fold it into a ranked model, then render
 // a compact terminal dashboard without adding a TUI dependency.
@@ -464,7 +464,7 @@ func runTUI(stdout, stderr io.Writer, argv []string) int {
 		tuiUsage(stdout)
 		return 0
 	default:
-		fmt.Fprintf(stderr, "fak tui: unknown subcommand %q\n", argv[0])
+		fmt.Fprintf(stderr, "fak console: unknown subcommand %q\n", argv[0])
 		tuiUsage(stderr)
 		return 2
 	}
@@ -486,15 +486,15 @@ func runTUIIssues(stdout, stderr io.Writer, argv []string) int {
 		return 2
 	}
 	if fs.NArg() != 0 {
-		fmt.Fprintf(stderr, "fak tui issues: unexpected argument %q\n", fs.Arg(0))
+		fmt.Fprintf(stderr, "fak console issues: unexpected argument %q\n", fs.Arg(0))
 		return 2
 	}
 	if *limit <= 0 {
-		fmt.Fprintln(stderr, "fak tui issues: --limit must be positive")
+		fmt.Fprintln(stderr, "fak console issues: --limit must be positive")
 		return 2
 	}
 	if *top <= 0 {
-		fmt.Fprintln(stderr, "fak tui issues: --top must be positive")
+		fmt.Fprintln(stderr, "fak console issues: --top must be positive")
 		return 2
 	}
 	if *width < 72 {
@@ -502,13 +502,13 @@ func runTUIIssues(stdout, stderr io.Writer, argv []string) int {
 	}
 	asOf, err := parseTUIDay(*asOfText)
 	if err != nil {
-		fmt.Fprintf(stderr, "fak tui issues: %v\n", err)
+		fmt.Fprintf(stderr, "fak console issues: %v\n", err)
 		return 2
 	}
 
 	issues, source, err := loadTUIIssues(*issuesJSON, *repo, *state, *limit)
 	if err != nil {
-		fmt.Fprintf(stderr, "fak tui issues: %v\n", err)
+		fmt.Fprintf(stderr, "fak console issues: %v\n", err)
 		return 2
 	}
 	report := buildTUIIssueReport(issues, source, asOf, *epic)
@@ -516,7 +516,7 @@ func runTUIIssues(stdout, stderr io.Writer, argv []string) int {
 		enc := json.NewEncoder(stdout)
 		enc.SetIndent("", "  ")
 		if err := enc.Encode(report); err != nil {
-			fmt.Fprintf(stderr, "fak tui issues: encode json: %v\n", err)
+			fmt.Fprintf(stderr, "fak console issues: encode json: %v\n", err)
 			return 1
 		}
 		return 0
@@ -537,11 +537,11 @@ func runTUILoops(stdout, stderr io.Writer, argv []string) int {
 		return 2
 	}
 	if fs.NArg() != 0 {
-		fmt.Fprintf(stderr, "fak tui loops: unexpected argument %q\n", fs.Arg(0))
+		fmt.Fprintf(stderr, "fak console loops: unexpected argument %q\n", fs.Arg(0))
 		return 2
 	}
 	if *top <= 0 {
-		fmt.Fprintln(stderr, "fak tui loops: --top must be positive")
+		fmt.Fprintln(stderr, "fak console loops: --top must be positive")
 		return 2
 	}
 	if *width < 72 {
@@ -549,12 +549,12 @@ func runTUILoops(stdout, stderr io.Writer, argv []string) int {
 	}
 	at, err := parseTUITime(*atText)
 	if err != nil {
-		fmt.Fprintf(stderr, "fak tui loops: %v\n", err)
+		fmt.Fprintf(stderr, "fak console loops: %v\n", err)
 		return 2
 	}
 	st, err := loopmgr.SnapshotFile(*ledger, at)
 	if err != nil {
-		fmt.Fprintf(stderr, "fak tui loops: %v\n", err)
+		fmt.Fprintf(stderr, "fak console loops: %v\n", err)
 		return 1
 	}
 	report := buildTUILoopReport(st, at)
@@ -562,7 +562,7 @@ func runTUILoops(stdout, stderr io.Writer, argv []string) int {
 		enc := json.NewEncoder(stdout)
 		enc.SetIndent("", "  ")
 		if err := enc.Encode(report); err != nil {
-			fmt.Fprintf(stderr, "fak tui loops: encode json: %v\n", err)
+			fmt.Fprintf(stderr, "fak console loops: encode json: %v\n", err)
 			return 1
 		}
 		return 0
@@ -585,11 +585,11 @@ func runTUISessions(stdout, stderr io.Writer, argv []string) int {
 		return 2
 	}
 	if fs.NArg() != 0 {
-		fmt.Fprintf(stderr, "fak tui sessions: unexpected argument %q\n", fs.Arg(0))
+		fmt.Fprintf(stderr, "fak console sessions: unexpected argument %q\n", fs.Arg(0))
 		return 2
 	}
 	if *top <= 0 {
-		fmt.Fprintln(stderr, "fak tui sessions: --top must be positive")
+		fmt.Fprintln(stderr, "fak console sessions: --top must be positive")
 		return 2
 	}
 	if *width < 72 {
@@ -597,12 +597,12 @@ func runTUISessions(stdout, stderr io.Writer, argv []string) int {
 	}
 	at, err := parseTUITime(*atText)
 	if err != nil {
-		fmt.Fprintf(stderr, "fak tui sessions: %v\n", err)
+		fmt.Fprintf(stderr, "fak console sessions: %v\n", err)
 		return 2
 	}
 	list, source, err := loadTUISessions(*sessionsJSON, *addr, *key)
 	if err != nil {
-		fmt.Fprintf(stderr, "fak tui sessions: %v\n", err)
+		fmt.Fprintf(stderr, "fak console sessions: %v\n", err)
 		return 1
 	}
 	report := buildTUISessionReport(list, source, at)
@@ -610,7 +610,7 @@ func runTUISessions(stdout, stderr io.Writer, argv []string) int {
 		enc := json.NewEncoder(stdout)
 		enc.SetIndent("", "  ")
 		if err := enc.Encode(report); err != nil {
-			fmt.Fprintf(stderr, "fak tui sessions: encode json: %v\n", err)
+			fmt.Fprintf(stderr, "fak console sessions: encode json: %v\n", err)
 			return 1
 		}
 		return 0
@@ -634,11 +634,11 @@ func runTUIGarden(stdout, stderr io.Writer, argv []string) int {
 		return 2
 	}
 	if fs.NArg() != 0 {
-		fmt.Fprintf(stderr, "fak tui garden: unexpected argument %q\n", fs.Arg(0))
+		fmt.Fprintf(stderr, "fak console garden: unexpected argument %q\n", fs.Arg(0))
 		return 2
 	}
 	if *timeout <= 0 {
-		fmt.Fprintln(stderr, "fak tui garden: --timeout must be positive")
+		fmt.Fprintln(stderr, "fak console garden: --timeout must be positive")
 		return 2
 	}
 	if *width < 72 {
@@ -646,12 +646,12 @@ func runTUIGarden(stdout, stderr io.Writer, argv []string) int {
 	}
 	at, err := parseTUITime(*atText)
 	if err != nil {
-		fmt.Fprintf(stderr, "fak tui garden: %v\n", err)
+		fmt.Fprintf(stderr, "fak console garden: %v\n", err)
 		return 2
 	}
 	payload, source, err := loadTUIGarden(*gardenJSON, *workspace, *deep, time.Duration(*timeout)*time.Second)
 	if err != nil {
-		fmt.Fprintf(stderr, "fak tui garden: %v\n", err)
+		fmt.Fprintf(stderr, "fak console garden: %v\n", err)
 		return 1
 	}
 	report := buildTUIGardenReport(payload, source, at, *check)
@@ -659,7 +659,7 @@ func runTUIGarden(stdout, stderr io.Writer, argv []string) int {
 		enc := json.NewEncoder(stdout)
 		enc.SetIndent("", "  ")
 		if err := enc.Encode(report); err != nil {
-			fmt.Fprintf(stderr, "fak tui garden: encode json: %v\n", err)
+			fmt.Fprintf(stderr, "fak console garden: encode json: %v\n", err)
 			return 1
 		}
 		return 0
@@ -680,11 +680,11 @@ func runTUIGuard(stdout, stderr io.Writer, argv []string) int {
 		return 2
 	}
 	if fs.NArg() != 0 {
-		fmt.Fprintf(stderr, "fak tui guard: unexpected argument %q\n", fs.Arg(0))
+		fmt.Fprintf(stderr, "fak console guard: unexpected argument %q\n", fs.Arg(0))
 		return 2
 	}
 	if len(guardJSON) == 0 {
-		fmt.Fprintln(stderr, "fak tui guard: at least one --guard-json artifact is required")
+		fmt.Fprintln(stderr, "fak console guard: at least one --guard-json artifact is required")
 		return 2
 	}
 	if *width < 72 {
@@ -692,12 +692,12 @@ func runTUIGuard(stdout, stderr io.Writer, argv []string) int {
 	}
 	at, err := parseTUITime(*atText)
 	if err != nil {
-		fmt.Fprintf(stderr, "fak tui guard: %v\n", err)
+		fmt.Fprintf(stderr, "fak console guard: %v\n", err)
 		return 2
 	}
 	artifacts, err := loadTUIGuard([]string(guardJSON))
 	if err != nil {
-		fmt.Fprintf(stderr, "fak tui guard: %v\n", err)
+		fmt.Fprintf(stderr, "fak console guard: %v\n", err)
 		return 1
 	}
 	report := buildTUIGuardReport(artifacts, at)
@@ -705,7 +705,7 @@ func runTUIGuard(stdout, stderr io.Writer, argv []string) int {
 		enc := json.NewEncoder(stdout)
 		enc.SetIndent("", "  ")
 		if err := enc.Encode(report); err != nil {
-			fmt.Fprintf(stderr, "fak tui guard: encode json: %v\n", err)
+			fmt.Fprintf(stderr, "fak console guard: encode json: %v\n", err)
 			return 1
 		}
 		return 0
@@ -747,20 +747,20 @@ func runTUIAgent(stdout, stderr io.Writer, argv []string) int {
 		*width = 72
 	}
 	if *contextBudget < 0 {
-		fmt.Fprintln(stderr, "fak tui agent: --context-budget-tokens must be non-negative")
+		fmt.Fprintln(stderr, "fak console agent: --context-budget-tokens must be non-negative")
 		return 2
 	}
 	if *restartLimit < 0 {
-		fmt.Fprintln(stderr, "fak tui agent: --restart-limit must be non-negative")
+		fmt.Fprintln(stderr, "fak console agent: --restart-limit must be non-negative")
 		return 2
 	}
 	if *restartOnBudget && *contextBudget <= 0 {
-		fmt.Fprintln(stderr, "fak tui agent: --restart-on-budget requires --context-budget-tokens N")
+		fmt.Fprintln(stderr, "fak console agent: --restart-on-budget requires --context-budget-tokens N")
 		return 2
 	}
 	at, err := parseTUITime(*atText)
 	if err != nil {
-		fmt.Fprintf(stderr, "fak tui agent: %v\n", err)
+		fmt.Fprintf(stderr, "fak console agent: %v\n", err)
 		return 2
 	}
 	report, err := buildTUIAgentReport(tuiAgentOptions{
@@ -781,14 +781,14 @@ func runTUIAgent(stdout, stderr io.Writer, argv []string) int {
 		Passthrough:         *passthrough,
 	}, at, tuiExecutable(), os.Getenv)
 	if err != nil {
-		fmt.Fprintf(stderr, "fak tui agent: %v\n", err)
+		fmt.Fprintf(stderr, "fak console agent: %v\n", err)
 		return 2
 	}
 	if *asJSON {
 		enc := json.NewEncoder(stdout)
 		enc.SetIndent("", "  ")
 		if err := enc.Encode(report); err != nil {
-			fmt.Fprintf(stderr, "fak tui agent: encode json: %v\n", err)
+			fmt.Fprintf(stderr, "fak console agent: encode json: %v\n", err)
 			return 1
 		}
 		return 0
@@ -819,7 +819,7 @@ func runTUIOverview(stdout, stderr io.Writer, argv []string) int {
 		return 2
 	}
 	if fs.NArg() != 0 {
-		fmt.Fprintf(stderr, "fak tui overview: unexpected argument %q\n", fs.Arg(0))
+		fmt.Fprintf(stderr, "fak console overview: unexpected argument %q\n", fs.Arg(0))
 		return 2
 	}
 	if *width < 72 {
@@ -827,12 +827,12 @@ func runTUIOverview(stdout, stderr io.Writer, argv []string) int {
 	}
 	asOf, err := parseTUIDay(*asOfText)
 	if err != nil {
-		fmt.Fprintf(stderr, "fak tui overview: %v\n", err)
+		fmt.Fprintf(stderr, "fak console overview: %v\n", err)
 		return 2
 	}
 	at, err := parseTUITime(*atText)
 	if err != nil {
-		fmt.Fprintf(stderr, "fak tui overview: %v\n", err)
+		fmt.Fprintf(stderr, "fak console overview: %v\n", err)
 		return 2
 	}
 	report, err := loadTUIOverview(tuiOverviewOptions{
@@ -847,14 +847,14 @@ func runTUIOverview(stdout, stderr io.Writer, argv []string) int {
 		At:           at,
 	})
 	if err != nil {
-		fmt.Fprintf(stderr, "fak tui overview: %v\n", err)
+		fmt.Fprintf(stderr, "fak console overview: %v\n", err)
 		return 1
 	}
 	if *asJSON {
 		enc := json.NewEncoder(stdout)
 		enc.SetIndent("", "  ")
 		if err := enc.Encode(report); err != nil {
-			fmt.Fprintf(stderr, "fak tui overview: encode json: %v\n", err)
+			fmt.Fprintf(stderr, "fak console overview: encode json: %v\n", err)
 			return 1
 		}
 		return 0
@@ -1044,7 +1044,7 @@ func tuiExecutable() string {
 
 func launchTUIAgent(stdout, stderr io.Writer, report tuiAgentReport) int {
 	if len(report.Launch) == 0 {
-		fmt.Fprintln(stderr, "fak tui agent: empty launch command")
+		fmt.Fprintln(stderr, "fak console agent: empty launch command")
 		return 1
 	}
 	child := exec.Command(report.Launch[0], report.Launch[1:]...)
@@ -1056,7 +1056,7 @@ func launchTUIAgent(stdout, stderr io.Writer, report tuiAgentReport) int {
 		if ee, ok := err.(*exec.ExitError); ok {
 			return ee.ExitCode()
 		}
-		fmt.Fprintf(stderr, "fak tui agent: launch %q: %v\n", report.Launch[0], err)
+		fmt.Fprintf(stderr, "fak console agent: launch %q: %v\n", report.Launch[0], err)
 		return 1
 	}
 	return 0
@@ -1790,7 +1790,7 @@ func countTUIGarden(rows []tuiGardenRow) tuiGardenCounts {
 
 func renderTUIGarden(report tuiGardenReport, width int) string {
 	var b strings.Builder
-	fmt.Fprintf(&b, "fak tui garden  at=%s  source=%s\n", report.At, report.Source)
+	fmt.Fprintf(&b, "fak console garden  at=%s  source=%s\n", report.At, report.Source)
 	fmt.Fprintf(&b, "verdict=%s  finding=%s  ok=%v  members=%d  action=%d  red=%d  errored=%d  gating=%d\n",
 		report.Verdict, report.Finding, report.OK, report.Counts.Members, report.Counts.Action,
 		report.Counts.Red, report.Counts.Errored, report.Counts.Gating)
@@ -2242,7 +2242,7 @@ func tuiGuardActions(counts tuiGuardCounts) []string {
 
 func renderTUIGuard(report tuiGuardReport, width int) string {
 	var b strings.Builder
-	fmt.Fprintf(&b, "fak tui guard  at=%s  source=%s\n", report.At, report.Source)
+	fmt.Fprintf(&b, "fak console guard  at=%s  source=%s\n", report.At, report.Source)
 	fmt.Fprintf(&b, "status=%s  artifacts=%d  rows=%d  allow=%d  deny=%d  quarantine=%d  policy_block=%d  default_deny=%d  expected=%d  unexpected=%d\n",
 		report.Status, report.Counts.Artifacts, report.Counts.Rows, report.Counts.Allow,
 		report.Counts.Deny, report.Counts.Quarantine, report.Counts.PolicyBlock,
@@ -2364,7 +2364,7 @@ func loadTUIOverview(opt tuiOverviewOptions) (tuiOverviewReport, error) {
 		}
 		cards = append(cards, overviewIssueCard(buildTUIIssueReport(issues, source, opt.AsOf, opt.Epic), opt.Epic))
 	} else {
-		cards = append(cards, missingOverviewCard("issues", "fak tui overview --issues-json issues.json --epic 837"))
+		cards = append(cards, missingOverviewCard("issues", "fak console overview --issues-json issues.json --epic 837"))
 	}
 	if opt.Ledger != "" {
 		st, err := loopmgr.SnapshotFile(opt.Ledger, opt.At)
@@ -2373,7 +2373,7 @@ func loadTUIOverview(opt tuiOverviewOptions) (tuiOverviewReport, error) {
 		}
 		cards = append(cards, overviewLoopCard(buildTUILoopReport(st, opt.At)))
 	} else {
-		cards = append(cards, missingOverviewCard("loops", "fak tui overview --ledger .fak/loop-ledger.jsonl"))
+		cards = append(cards, missingOverviewCard("loops", "fak console overview --ledger .fak/loop-ledger.jsonl"))
 	}
 	if opt.SessionsJSON != "" {
 		list, source, err := loadTUISessions(opt.SessionsJSON, "", "")
@@ -2382,7 +2382,7 @@ func loadTUIOverview(opt tuiOverviewOptions) (tuiOverviewReport, error) {
 		}
 		cards = append(cards, overviewSessionCard(buildTUISessionReport(list, source, opt.At)))
 	} else {
-		cards = append(cards, missingOverviewCard("sessions", "fak tui overview --sessions-json sessions.json"))
+		cards = append(cards, missingOverviewCard("sessions", "fak console overview --sessions-json sessions.json"))
 	}
 	if opt.GardenJSON != "" {
 		payload, source, err := loadTUIGarden(opt.GardenJSON, "", false, 0)
@@ -2391,7 +2391,7 @@ func loadTUIOverview(opt tuiOverviewOptions) (tuiOverviewReport, error) {
 		}
 		cards = append(cards, overviewGardenCard(buildTUIGardenReport(payload, source, opt.At, opt.CheckGarden)))
 	} else {
-		cards = append(cards, missingOverviewCard("garden", "fak tui overview --garden-json garden.json --check"))
+		cards = append(cards, missingOverviewCard("garden", "fak console overview --garden-json garden.json --check"))
 	}
 	if len(opt.GuardJSON) > 0 {
 		artifacts, err := loadTUIGuard(opt.GuardJSON)
@@ -2400,7 +2400,7 @@ func loadTUIOverview(opt tuiOverviewOptions) (tuiOverviewReport, error) {
 		}
 		cards = append(cards, overviewGuardCard(buildTUIGuardReport(artifacts, opt.At)))
 	} else {
-		cards = append(cards, missingOverviewCard("guard", "fak tui overview --guard-json guard-proof.json"))
+		cards = append(cards, missingOverviewCard("guard", "fak console overview --guard-json guard-proof.json"))
 	}
 	sort.SliceStable(cards, func(i, j int) bool {
 		if cards[i].Attention != cards[j].Attention {
@@ -2451,7 +2451,7 @@ func overviewIssueCard(report tuiIssueReport, epic int) tuiOverviewCard {
 		Status:    status,
 		Source:    report.Source,
 		Summary:   summary,
-		Command:   "fak tui issues --issues-json " + report.Source,
+		Command:   "fak console issues --issues-json " + report.Source,
 		Attention: attention,
 		Counts:    counts,
 		Tags:      tags,
@@ -2482,7 +2482,7 @@ func overviewLoopCard(report tuiLoopReport) tuiOverviewCard {
 		Status:    status,
 		Source:    report.Ledger,
 		Summary:   fmt.Sprintf("loops=%d running=%d refused=%d witness_gaps=%d", report.Counts.Loops, report.Counts.Running, report.Counts.Refused, report.Counts.WitnessGaps),
-		Command:   "fak tui loops --ledger " + report.Ledger,
+		Command:   "fak console loops --ledger " + report.Ledger,
 		Attention: attention,
 		Counts:    counts,
 		Tags:      tags,
@@ -2522,7 +2522,7 @@ func overviewSessionCard(report tuiSessionReport) tuiOverviewCard {
 		Status:    status,
 		Source:    report.Source,
 		Summary:   fmt.Sprintf("sessions=%d running=%d paused=%d stopped=%d low_budget=%d", report.Counts.Sessions, report.Counts.Running, report.Counts.Paused, report.Counts.Stopped, lowBudget),
-		Command:   "fak tui sessions --sessions-json " + report.Source,
+		Command:   "fak console sessions --sessions-json " + report.Source,
 		Attention: attention,
 		Counts:    counts,
 		Tags:      tags,
@@ -2554,7 +2554,7 @@ func overviewGardenCard(report tuiGardenReport) tuiOverviewCard {
 		Status:    status,
 		Source:    report.Source,
 		Summary:   fmt.Sprintf("finding=%s members=%d red=%d errored=%d gate=%d", report.Finding, report.Counts.Members, report.Counts.Red, report.Counts.Errored, report.GateExit),
-		Command:   "fak tui garden --garden-json " + report.Source + " --check",
+		Command:   "fak console garden --garden-json " + report.Source + " --check",
 		Attention: attention,
 		Counts:    counts,
 		Tags:      tags,
@@ -2588,7 +2588,7 @@ func overviewGuardCard(report tuiGuardReport) tuiOverviewCard {
 		Status:    status,
 		Source:    report.Source,
 		Summary:   fmt.Sprintf("artifacts=%d deny=%d policy_block=%d unexpected=%d", report.Counts.Artifacts, report.Counts.Deny, report.Counts.PolicyBlock, report.Counts.Unexpected),
-		Command:   "fak tui guard --guard-json <artifact>",
+		Command:   "fak console guard --guard-json <artifact>",
 		Attention: attention,
 		Counts:    counts,
 		Tags:      tags,
@@ -2637,7 +2637,7 @@ func overviewActions(cards []tuiOverviewCard) []tuiOverviewAction {
 
 func renderTUIAgent(report tuiAgentReport, width int) string {
 	var b strings.Builder
-	fmt.Fprintf(&b, "fak tui agent  at=%s  backend=%s  provider=%s  mode=dry-run\n", report.At, report.Backend, report.Provider)
+	fmt.Fprintf(&b, "fak console agent  at=%s  backend=%s  provider=%s  mode=dry-run\n", report.At, report.Backend, report.Provider)
 	fmt.Fprintf(&b, "auth=%s  session=%s", report.Auth, report.SessionID)
 	if report.Account != "" {
 		fmt.Fprintf(&b, "  account=%s", report.Account)
@@ -2677,7 +2677,7 @@ func renderTUIAgent(report tuiAgentReport, width int) string {
 
 func renderTUIOverview(report tuiOverviewReport, width int) string {
 	var b strings.Builder
-	fmt.Fprintf(&b, "fak tui overview  at=%s  source=%s\n", report.At, report.Source)
+	fmt.Fprintf(&b, "fak console overview  at=%s  source=%s\n", report.At, report.Source)
 	fmt.Fprintf(&b, "cards=%d  ok=%d  action=%d  warn=%d  missing=%d\n",
 		report.Counts.Cards, report.Counts.OK, report.Counts.Action, report.Counts.Warn, report.Counts.Missing)
 	fmt.Fprintln(&b, "\nPanes")
@@ -2868,7 +2868,7 @@ func rowInTUISessionLane(row tuiSessionRow, lane string) bool {
 
 func renderTUISessions(report tuiSessionReport, top, width int) string {
 	var b strings.Builder
-	fmt.Fprintf(&b, "fak tui sessions  at=%s  source=%s\n", report.At, report.Source)
+	fmt.Fprintf(&b, "fak console sessions  at=%s  source=%s\n", report.At, report.Source)
 	fmt.Fprintf(&b, "sessions=%d  running=%d  throttled=%d  paused=%d  draining=%d  stopped=%d  budgeted=%d  context=%d  lineage=%d\n",
 		report.Counts.Sessions, report.Counts.Running, report.Counts.Throttled, report.Counts.Paused,
 		report.Counts.Draining, report.Counts.Stopped, report.Counts.Budgeted, report.Counts.ContextBudget, report.Counts.Lineage)
@@ -3116,7 +3116,7 @@ func tuiLoopHasTag(row tuiLoopRow, tag string) bool {
 
 func renderTUILoops(report tuiLoopReport, top, width int) string {
 	var b strings.Builder
-	fmt.Fprintf(&b, "fak tui loops  at=%s  ledger=%s\n", report.At, report.Ledger)
+	fmt.Fprintf(&b, "fak console loops  at=%s  ledger=%s\n", report.At, report.Ledger)
 	fmt.Fprintf(&b, "loops=%d  running=%d  refused=%d  failed=%d  witnessed=%d  witness-gaps=%d  notified=%d\n",
 		report.Counts.Loops, report.Counts.Running, report.Counts.Refused, report.Counts.Failed,
 		report.Counts.Witnessed, report.Counts.WitnessGaps, report.Counts.Notifications)
@@ -3188,7 +3188,7 @@ func durationTUIText(seconds int64) string {
 
 func renderTUIIssues(report tuiIssueReport, top, width int) string {
 	var b strings.Builder
-	title := "fak tui issues"
+	title := "fak console issues"
 	fmt.Fprintf(&b, "%s  as_of=%s  source=%s\n", title, report.AsOf, report.Source)
 	fmt.Fprintf(&b, "open=%d  P0=%d  P1=%d  P2=%d  orphan=%d  stale=%d  needs: prio=%d kind=%d area=%d\n",
 		report.Counts.Open, report.Counts.P0, report.Counts.P1, report.Counts.P2,
@@ -3338,23 +3338,24 @@ func shellArgTUI(arg string) string {
 }
 
 func tuiUsage(w io.Writer) {
-	fmt.Fprint(w, `fak tui - native terminal control panes
+	fmt.Fprint(w, `fak console - native terminal control panes
+Alias: fak tui
 
-  fak tui issues [--issues-json FILE] [--json] [--epic N]
+  fak console issues [--issues-json FILE] [--json] [--epic N]
                  [--repo owner/repo] [--state open|closed|all]
                  [--limit N] [--top N] [--width N] [--as-of YYYY-MM-DD]
-  fak tui loops  [--ledger FILE] [--json] [--top N] [--width N]
+  fak console loops  [--ledger FILE] [--json] [--top N] [--width N]
                  [--at RFC3339|YYYY-MM-DD]
-  fak tui sessions [--sessions-json FILE] [--json] [--addr URL] [--key K]
+  fak console sessions [--sessions-json FILE] [--json] [--addr URL] [--key K]
                    [--top N] [--width N] [--at RFC3339|YYYY-MM-DD]
-  fak tui garden [--garden-json FILE] [--json] [--check]
+  fak console garden [--garden-json FILE] [--json] [--check]
                  [--workspace DIR] [--deep] [--timeout N] [--width N]
-  fak tui guard  --guard-json FILE [--guard-json FILE ...] [--json]
+  fak console guard  --guard-json FILE [--guard-json FILE ...] [--json]
                  [--width N] [--at RFC3339|YYYY-MM-DD]
-  fak tui agent [--account NAME | --claude-config-dir DIR] [--dry-run]
+  fak console agent [--account NAME | --claude-config-dir DIR] [--dry-run]
                 [--prompt STR] [--session-id ID] [--passthrough] [--json]
                 [--] [claude args...]
-  fak tui overview [--issues-json FILE] [--ledger FILE] [--sessions-json FILE]
+  fak console overview [--issues-json FILE] [--ledger FILE] [--sessions-json FILE]
                    [--garden-json FILE] [--guard-json FILE ...] [--json]
 
 The issues pane folds GitHub issues into a ranked terminal model: priority lanes,

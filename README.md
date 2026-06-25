@@ -178,6 +178,7 @@ and [MCP tool-poisoning/security analysis](https://www.cybedefend.com/en/blog/mc
 | Surface | What it gives you | Status |
 |---|---|---|
 | `fak guard` | Drop-in guard around an existing CLI agent | shipped |
+| `fak console` | Native operator/client panes for issues, live sessions, guard artifacts, and guarded agent launch plans | shipped |
 | `fak serve` | OpenAI, Anthropic, fak-native HTTP, plus MCP over HTTP/stdio | shipped |
 | Policy floor | JSON allow/deny manifest with closed refusal reasons | shipped |
 | Result quarantine | Secret, poison, oversize, and pollution results held out of context | shipped |
