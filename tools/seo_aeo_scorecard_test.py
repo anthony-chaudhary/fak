@@ -403,6 +403,7 @@ def test_links_crawlable_dead_on_disk_not_double_counted(tmp_path: Path) -> None
 
 
 def test_links_crawlable_directory_is_soft(tmp_path: Path) -> None:
+    (tmp_path / "docs").mkdir()
     (tmp_path / "examples").mkdir()
     k = sc.kpi_links_crawlable("see [ex](../examples)", tmp_path, "docs/index.md")
     assert k["defects"] == [] and any("directory link" in s for s in k["soft"]), k
