@@ -26,7 +26,8 @@
             "command": "dos hook pretool --workspace .",
             "type": "command"
           }
-        ]
+        ],
+        "matcher": "Bash|Write|Edit|MultiEdit|NotebookEdit|mcp__.*dos.*"
       }
     ],
     "Stop": [

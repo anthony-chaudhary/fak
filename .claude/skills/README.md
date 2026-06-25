@@ -16,9 +16,10 @@ flowchart TD
   MN --> Plan["planning / ship: release, issue-triage, plan-audit"]
   MN --> Quality["code: quality-score"]
   MN --> Audit["read-only audit: trajectory-audit"]
+  Pack --> DOS["DOS trust gates<br/>(witness, price, dispatch)"]
 ```
 
-*The page's two skill families — and, within Maintenance, the surface each skill tends.*
+*The page's skill families — and, within Maintenance, the surface each skill tends.*
 
 ## Workflow / analysis (no project contract)
 
@@ -28,6 +29,21 @@ flowchart TD
 | [`phased-plan`](phased-plan/SKILL.md) | Ceremony rules for shipping a phase of a phased plan — when to release, the hero-exit rule, the phase-split test. (Auto-loaded; not user-invocable.) |
 | [`clean-skill`](clean-skill/SKILL.md) | Audit a skill's per-invocation context use and propose a context-bundling helper + SKILL.md trim. Stops for approval before writing code. |
 | [`memory-compact`](memory-compact/SKILL.md) | Keep a Claude Code auto-memory store under the harness load cap (200 lines / 25 KB), tier into hot/cold, prove it with the bundled `check_memory.py` witness. |
+
+## DOS trust gates
+
+These skills make Claude use DOS as a witness layer rather than a vocabulary. They
+are intentionally small local entry points over `dos` verbs and this repo's
+`dos.toml`.
+
+| Skill | What it does |
+|---|---|
+| [`dos-next-up`](dos-next-up/SKILL.md) | Snapshot the phased-plan portfolio with `dos verify`, render a dispatch packet, and classify the packet through `dos gate`. |
+| [`dos-dispatch`](dos-dispatch/SKILL.md) | Take a lane through `dos arbitrate`, run the next-up packet, gate empty work, ship, and archive one lane without widening the lease. |
+| [`dos-dispatch-loop`](dos-dispatch-loop/SKILL.md) | Repeat dispatch/replan cycles while the kernel's typed loop verdict says to continue. |
+| [`dos-replan`](dos-replan/SKILL.md) | Refresh the portfolio from `dos verify` evidence and surface only the operator decisions that remain. |
+| [`dos-plan-price`](dos-plan-price/SKILL.md) | Price a proposed multi-agent fan-out before launch so overlapping trees are caught before workers start. |
+| [`dos-witness-claim`](dos-witness-claim/SKILL.md) | Verify subagent results before folding them into synthesis; confirmed effects fold, narration does not. |
 
 ## Maintenance (read `.claude/project.yaml`)
 
