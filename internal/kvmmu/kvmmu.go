@@ -55,12 +55,38 @@ type Segment struct {
 	Held bool              // true once this segment's K/V has been evicted from the cache
 	KV   cachemeta.EntryID // cachemeta identity for derived entries that parent this span
 
-	// Attended is the witnessed post-softmax attention mass this span has received,
-	// accumulated by AttributeRow from the rung-1 attention observer (#852/#853). It is
-	// mass, not a position, so the From renumbering on eviction does not touch it; a
-	// survivor keeps exactly the mass it accumulated. evict() zeroes it on the evicted
-	// span (a held span can no longer be attended to). Zero means never attended.
+	// Attended is the witnessed post-softmax attention mass this span has received in the
+	// CURRENT turn, accumulated by AttributeRow from the rung-1 attention observer
+	// (#852/#853). It is the in-flight per-turn term a_s(t): AttributeRow adds to it across
+	// the turn's rows, and CloseTurn folds it into the rolling accumulators (#855) then
+	// resets it to 0 for the next turn. It is mass, not a position, so the From renumbering
+	// on eviction does not touch it; a survivor keeps exactly the mass it accumulated.
+	// evict() zeroes it on the evicted span (a held span can no longer be attended to).
+	// Zero means not attended this turn.
 	Attended float64
+
+	// The rolling per-span accumulators (#855, rung 4): the temporal dual of Attended. A
+	// span's value spans many turns — it can idle then become load-bearing, or run hot
+	// then die — so CloseTurn(lambda) folds each turn's a_s(t) (the just-closed Attended)
+	// into two reductions of the SAME per-turn stream, the only difference being lambda:
+	//
+	//   Cumulative = Σ_t a_s(t)                    (undecayed; "mattered overall" — audit)
+	//   EMA        = lambda·EMA + a_s(t)           (recency-decayed; "hot now" — eviction)
+	//
+	// With lambda == 1 the EMA recurrence reduces exactly to the cumulative sum (the
+	// identity #855 requires); with lambda < 1 it is the H2O / heavy-hitter signal — but as
+	// a WITNESSED kernel quantity, not an inferred one (the #851 novelty boundary: we did
+	// not invent heavy-hitters; we attribute them from real emitted attention mass).
+	Cumulative float64 // Σ_t a_s(t): undecayed lifetime mass (post-hoc analyst)
+	EMA        float64 // lambda·EMA + a_s(t): recency-decayed rolling mass (real-time controller)
+
+	// traj is a bounded ring of the most recent per-turn masses {a_s(t)} — the trajectory
+	// that reconstructs WHEN a span was hot. Bounded to trajCap turns so memory is O(cap)
+	// per span regardless of session length (O(1) amortized per turn). trajLen is how many
+	// entries are valid (< trajCap until the ring fills); trajHead is the next write slot.
+	traj     []float64
+	trajHead int
+	trajLen  int
 }
 
 // Gate is the decision the bridge ENFORCES on the KV cache. It answers, for a
@@ -336,7 +362,17 @@ func (c *Context) evict(seg *Segment) int {
 	}
 	seg.Held = true
 	seg.Len = 0
-	seg.Attended = 0 // a held span can no longer be attended to; survivors keep their mass
+	// A held span can no longer be attended to: its in-flight mass AND its rolling
+	// accumulators (cumulative/EMA/trajectory) all clear — the span is gone from the
+	// cache, so its attention history is moot. Survivors keep their accumulators
+	// untouched (mass is not renumbered with From). This is the reset-on-evict the
+	// rolling accumulator (#855) inherits from the rung-2 Attended semantics.
+	seg.Attended = 0
+	seg.Cumulative = 0
+	seg.EMA = 0
+	seg.traj = seg.traj[:0]
+	seg.trajHead = 0
+	seg.trajLen = 0
 	return n
 }
 
