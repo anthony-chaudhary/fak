@@ -71,12 +71,25 @@ auto-handle the collapse rather than maintain the dirs as separate. Landed
   token** — `q-netra.DELETED → dup of gem8-netra`, `default → dup of day24-netra`,
   `c10 → dup of anthony-agent`, all visible at a glance.
 
-## What remains (operator decisions + cutover)
+## Also fixed in the tool the operator actually runs (`job` repo)
+
+`claude-accounts observe` is the `u` view, so the gem8 symptom was fixed at that surface too
+(`job` `6fd12f649`, `c485afc34`, on origin):
+
+- **gem8 re-enabled** in `job/config/claude_accounts.yaml` — moved out of `tombstoned_accounts:`
+  back to an active, non-reserved worker (it was the rehome target for the deleted q-netra
+  phantom, so it must appear as its own seat). `observe` now lists gem8-netra serving.
+- **Token-twin reconcile in `observe`** — `account_observability` fingerprints each seat's
+  `.oauth-token` (the credential `make_live_probe_fn` actually probes; same one-way SHA-256
+  as fak) and the card prints a reconcile line: *"4 seats → 2 distinct rate-limit bucket(s);
+  one bucket (same .oauth-token): day24-netra, default-host, gem8-netra"*. So one bucket is
+  no longer silently shown as three serving seats. Additive (counts/verdict unchanged); 22 tests green.
+
+## What remains (operator decisions)
 
 - **Credentials.** `~/.claude` and `day24-netra` carrying gem8's setup token is a leak, not
-  a config: their headless launches may burn gem8's bucket. Re-login (an interactive
-  browser auth only the operator can run) is the durable fix; the tooling now *detects*
-  the split so it stops hiding.
-- **Cut the consumers over.** `claude-accounts observe` (job) and the `dos`/`fak` rosters
-  should resolve through one source so gem8's status can't disagree across tools. Until
-  then the three rosters must be reconciled by hand when an account changes.
+  a config: their headless launches burn gem8's bucket. Re-login (an interactive browser
+  auth only the operator can run) is the durable fix; the tooling now *detects* the split.
+- **Full cutover.** The reconcile LOGIC now lives in two places (fak Go `internal/accounts`
+  and the `job` Python `observe`), mirrored. Collapsing to one source — `observe` (and the
+  `dos`/`fak` rosters) resolving through fak's Go — is the remaining consolidation step.
