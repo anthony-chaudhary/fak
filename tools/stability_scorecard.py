@@ -195,6 +195,11 @@ REQUIRED_DRIFT_DETECTORS: list[tuple[str, str]] = [
 ]
 # DRIFT — a deterministic tail-wag finder backing the manual /tail-wag skill (frontier).
 TAIL_WAG_TOOL_GLOB = "tail_wag"
+# DRIFT — the per-metric early-warning lens in the portfolio control pane (#712): a
+# pre-regression signal that flags a metric rising vs its pinned floor even while the
+# portfolio total holds green. Witnessed by the trend carrying the early_warning key.
+EARLY_WARNING_TOOL = "tools/scorecard_control_pane.py"
+EARLY_WARNING_MARKER = "early_warning"
 # DRIFT — the "I can't decide → escalate" disposition. Scoped to the adjudication core.
 CONFUSION_SIGNAL_FILES = ["internal/abi", "internal/adjudicator"]
 CONFUSION_SIGNAL_TOKENS = ["indeterminate", "verdictindeterminate"]
@@ -705,6 +710,11 @@ def gather(root: Path) -> list[dict[str, Any]]:
     detectors_missing = [path for _, path in REQUIRED_DRIFT_DETECTORS if not present(path)]
     no_tail_wag_tool = not any(TAIL_WAG_TOOL_GLOB in rel for rel in tracked
                                if rel.startswith("tools/") and rel.endswith(".py"))
+    # The early-warning lens is wired iff the control pane's trend carries the
+    # early_warning key (#712); a control pane without it can only flag a portfolio
+    # regression, never a first per-metric move within a healthy envelope.
+    no_early_warning = (EARLY_WARNING_MARKER not in _safe_read(root / EARLY_WARNING_TOOL)
+                        if present(EARLY_WARNING_TOOL) else True)
     confusion_text = "\n".join(
         _safe_read(root / rel) for rel in tracked
         if rel.endswith(".go") and not rel.endswith("_test.go")
@@ -725,7 +735,7 @@ def gather(root: Path) -> list[dict[str, Any]]:
         kpi_release_tagging_gated(release_gated),
         kpi_rollback_runbook(bool(runbook_where), runbook_where, missing_sections,
                              runbook_linked, runbook_has_commands),
-        kpi_drift_detectors_wired(detectors_missing, no_tail_wag_tool, no_early_warning=True),
+        kpi_drift_detectors_wired(detectors_missing, no_tail_wag_tool, no_early_warning),
         kpi_confusion_escalation_signal(has_confusion_signal, doctrine_present),
     ]
 

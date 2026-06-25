@@ -145,6 +145,55 @@ def test_trend_regressed_sets_action() -> None:
     assert "seo" in out["trend"]["worsened"]
 
 
+def test_early_warning_fires_under_a_green_portfolio() -> None:
+    """The #712 case: a per-metric rise hidden under a net-improved portfolio. seo
+    rises 6->8 while doc falls 16->10, so the portfolio TOTAL drops (22->18, green) —
+    the ratchet would stay silent, but the early-warning lens must still name seo."""
+    base = baseline_from(seo=6, doc=16)
+    out = scp.fold(full_metrics(seo=8, doc=10), base, workspace=".", commit="now01")
+    t = out["trend"]
+    # the portfolio is GREEN (improved), so the ratchet does not trip...
+    assert t["direction"] == "improved" and t["total_delta"] == -4
+    # ...but the per-metric lens flags the hidden seo rise (and ONLY seo).
+    ew = {e["key"]: e for e in t["early_warning"]}
+    assert set(ew) == {"seo"}
+    assert ew["seo"]["delta"] == 2 and ew["seo"]["from"] == 6 and ew["seo"]["to"] == 8
+    # it is surfaced on the payload + woven into the advisory, verdict unchanged.
+    assert out["early_warning"] == t["early_warning"]
+    assert "EARLY-WARNING" in out["reason"] and "seo" in out["reason"]
+
+
+def test_early_warning_empty_when_no_metric_rose() -> None:
+    base = baseline_from(seo=6, doc=16)
+    out = scp.fold(full_metrics(seo=6, doc=10), base, workspace=".", commit="now01")
+    assert out["trend"]["early_warning"] == [] and out["early_warning"] == []
+    assert "EARLY-WARNING" not in out["reason"]
+
+
+def test_check_gate_green_but_surfaces_early_warning_advisory() -> None:
+    """--check keeps portfolio ratchet semantics (exit 0 when the total held) yet
+    appends the per-metric early-warning as an ADVISORY so a re-pin isn't blind."""
+    base = baseline_from(seo=6, doc=16)
+    out = scp.fold(full_metrics(seo=8, doc=10), base, workspace=".", commit="now01")
+    code, msg = scp.check_gate(out)
+    assert code == 0 and "RATCHET OK" in msg           # gate stays green
+    assert "EARLY-WARNING" in msg and "seo" in msg     # but the rise is surfaced
+
+
+def test_check_gate_green_no_warning_when_flat() -> None:
+    base = baseline_from(code=5)
+    out = scp.fold(full_metrics(code=5), base, workspace=".", commit="now01")
+    code, msg = scp.check_gate(out)
+    assert code == 0 and "EARLY-WARNING" not in msg
+
+
+def test_render_shows_early_warning_line() -> None:
+    base = baseline_from(seo=6, doc=16)
+    out = scp.fold(full_metrics(seo=8, doc=10), base, workspace=".", commit="now01")
+    text = scp.render(out)
+    assert "early-warning" in text.lower() and "seo" in text
+
+
 def test_baseline_round_trip() -> None:
     payload = scp.fold(full_metrics(code=9, hygiene=5), None, workspace=".", commit="pin01")
     doc = scp.baseline_doc(payload)

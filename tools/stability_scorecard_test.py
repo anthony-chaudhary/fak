@@ -170,6 +170,16 @@ def test_drift_detectors_wired_defect_and_soft() -> None:
     assert clean["defects"] == [] and clean["soft"] == [] and clean["score"] == 100
 
 
+def test_live_early_warning_lens_is_wired() -> None:
+    """#712: the control pane now carries the per-metric early-warning lens, so the
+    live drift KPI must NOT raise the 'no early-warning' SOFT signal anymore. This is
+    the issue's 'Done when' — re-deriving from the committed control-pane source."""
+    payload = sc.collect(sc.repo_root())
+    kpi = next(k for k in payload["kpis"] if k["kpi"] == "drift_detectors_wired")
+    assert not any("early-warning" in s for s in kpi["soft"]), (
+        f"early-warning SOFT still fires: {kpi['soft']}")
+
+
 def test_confusion_escalation_signal_is_soft_only() -> None:
     absent = sc.kpi_confusion_escalation_signal(has_signal=False, doctrine_present=True)
     assert absent["defects"] == [] and len(absent["soft"]) == 1  # never HARD debt

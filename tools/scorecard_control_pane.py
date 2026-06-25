@@ -35,6 +35,17 @@ at ZERO debt), ``--check`` is GREEN while the portfolio holds at-or-below its
 pinned baseline and RED only when debt *regresses* above it (or a scorecard
 fails to report). That is the honest CI contract — debt may stay or fall, never
 silently rise — without demanding the whole family be at zero first. Issue #509.
+
+The portfolio ratchet has one blind spot: it folds every metric into one sum, so
+a single metric's regression can hide under another metric's improvement (seo
+rose 6->8 while the portfolio fell 44->40 — the ratchet stayed green, and a blind
+``--pin`` would have blessed the seo rise as the new floor). The per-metric
+EARLY-WARNING lens (#712) closes it: any metric whose debt rose vs its pinned
+value is reported as an advisory WARN even when the portfolio total is green —
+the trend carries an ``early_warning`` list, ``--check`` appends it to the
+RATCHET OK line WITHOUT tripping the gate (the portfolio ratchet semantics are
+unchanged), and the human snapshot prints it. So a hidden per-metric regression
+surfaces BEFORE a re-pin locks it in.
 """
 from __future__ import annotations
 
@@ -170,6 +181,17 @@ def fold(metrics: list[dict[str, Any]], baseline: dict[str, Any] | None,
     breakdown = ", ".join(f"{m['label']} {m['debt']}" for m in by_debt) or "none"
 
     regressed = trend["direction"] == "regressed"
+    early_warning = trend.get("early_warning") or []
+    ew_note = ""
+    if early_warning and not regressed:
+        # The hidden case the early-warning lens exists for (#712): a metric rose
+        # but the portfolio held, so the ratchet stays green. Surface it advisory —
+        # don't flip the verdict (the portfolio ratchet semantics are unchanged).
+        ew_note = ("; EARLY-WARNING (advisory): "
+                   + ", ".join(f"{e['label']} {e['from']}->{e['to']} (+{e['delta']})"
+                               for e in early_warning)
+                   + " rose vs baseline under a green portfolio — a hidden per-metric "
+                     "regression; review before --pin re-floors it")
     if errors:
         ok, verdict, finding = False, "ACTION", "scorecard_unmeasured"
         reason = (f"{len(errors)} scorecard(s) failed to report a debt integer "
@@ -198,6 +220,15 @@ def fold(metrics: list[dict[str, Any]], baseline: dict[str, Any] | None,
                   f"trend {trend['summary']}")
         next_action = "hold the line; re-pin the baseline to lock the clean state"
 
+    reason += ew_note
+    if ew_note:
+        # Point the operator at the offending metric(s) regardless of the verdict
+        # ladder branch — the early-warning is the actionable signal here.
+        next_action = ("review the per-metric early-warning ("
+                       + ", ".join(e["label"] for e in early_warning)
+                       + ") with that scorecard's skill BEFORE `--pin`, so a hidden "
+                       "regression isn't blessed as the new floor; then: " + next_action)
+
     return {
         "schema": SCHEMA,
         "ok": ok,
@@ -210,6 +241,7 @@ def fold(metrics: list[dict[str, Any]], baseline: dict[str, Any] | None,
         "total_debt": total_debt,
         "measured": len(measured),
         "errored": len(errors),
+        "early_warning": early_warning,
         "metrics": metrics,
         "trend": trend,
     }
@@ -237,11 +269,19 @@ def compute_trend(metrics: list[dict[str, Any]], baseline: dict[str, Any] | None
             "deltas": {},
             "worsened": [],
             "improved": [],
+            "early_warning": [],
         }
 
     deltas: dict[str, int] = {}
     worsened: list[str] = []
     improved: list[str] = []
+    # The per-metric early-warning lens (#712): EVERY metric whose debt rose vs its
+    # pinned value, independent of where the portfolio total landed. The portfolio
+    # ratchet only trips when the SUM regresses, so a single metric's rise can hide
+    # under another's improvement (seo 6->8 while the portfolio fell 44->40). This
+    # list surfaces that first downward move WITHIN a healthy envelope — before a
+    # blind --pin blesses it as the new floor.
+    early_warning: list[dict[str, Any]] = []
     for m in metrics:
         if not isinstance(m.get("debt"), int):
             continue
@@ -252,6 +292,8 @@ def compute_trend(metrics: list[dict[str, Any]], baseline: dict[str, Any] | None
         deltas[m["key"]] = delta
         if delta > 0:
             worsened.append(m["label"])
+            early_warning.append({"key": m["key"], "label": m["label"],
+                                  "delta": delta, "from": int(prior), "to": int(m["debt"])})
         elif delta < 0:
             improved.append(m["label"])
 
@@ -273,6 +315,7 @@ def compute_trend(metrics: list[dict[str, Any]], baseline: dict[str, Any] | None
         "deltas": deltas,
         "worsened": worsened,
         "improved": improved,
+        "early_warning": early_warning,
     }
 
 
@@ -346,6 +389,12 @@ def render(payload: dict[str, Any]) -> str:
         debt = m["debt"] if m["debt"] is not None else f"ERR ({m['error']})"
         grade = f" [{m['grade']}]" if m.get("grade") else ""
         lines.append(f"  {m['label']:<16} {m['debt_key']:<16} {debt}{grade}")
+    early_warning = payload.get("early_warning") or []
+    if early_warning:
+        lines.append("")
+        for e in early_warning:
+            lines.append(f"  WARN early-warning: {e['label']} rose {e['from']}->{e['to']} "
+                         f"(+{e['delta']}) vs baseline — hidden under a green portfolio")
     lines.extend(["", f"  → {payload['next_action']}"])
     return "\n".join(lines)
 
@@ -371,7 +420,16 @@ def check_gate(payload: dict[str, Any]) -> tuple[int, str]:
                    "`python tools/scorecard_control_pane.py --pin` to set one")
     if direction == "regressed":
         return 1, f"RATCHET FAIL: {trend['summary']}; worsened: {', '.join(trend['worsened']) or 'see deltas'}"
-    return 0, f"RATCHET OK: {trend['summary']} (debt {payload['total_debt']} held at-or-below baseline)"
+    msg = f"RATCHET OK: {trend['summary']} (debt {payload['total_debt']} held at-or-below baseline)"
+    # The early-warning lens (#712): the portfolio ratchet held (exit 0), but a
+    # per-metric rise is hiding under it — surface it ADVISORY without tripping the
+    # gate, so it's seen before a re-pin re-floors it as the new baseline.
+    early_warning = (trend.get("early_warning") or []) if isinstance(trend, dict) else []
+    if early_warning:
+        msg += ("; EARLY-WARNING (advisory, gate still green): "
+                + ", ".join(f"{e['label']} +{e['delta']}" for e in early_warning)
+                + " rose vs baseline — a hidden per-metric regression; review before --pin")
+    return 0, msg
 
 
 def main(argv: list[str] | None = None) -> int:
