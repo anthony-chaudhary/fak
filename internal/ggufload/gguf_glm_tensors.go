@@ -22,11 +22,13 @@ import (
 // NOT — the real file uses an "indexer." sub-namespace (indexer.attn_q_b / indexer.attn_k /
 // indexer.k_norm / indexer.proj), so the earlier best-guess attn_indexer_* names were corrected.
 //
-// KNOWN REMAINING GAP (next slice): the real file splits the KV-b up-projection into SEPARATE
-// blk.<L>.attn_k_b + blk.<L>.attn_v_b tensors, whereas fak's forward consumes ONE combined
-// self_attn.kv_b_proj.weight. Those two names are deliberately left unmapped here so a real load
-// fails LOUD rather than silently mis-shaping — the per-head 2→1 merge (DeepSeek [qkNope]+[vHead]
-// per head) is the next loader slice.
+// MLA KV-b SPLIT (handled by the 2→1 merge, NOT this map): the real file splits the KV-b
+// up-projection into SEPARATE blk.<L>.attn_k_b + blk.<L>.attn_v_b tensors, whereas fak's forward
+// consumes ONE combined self_attn.kv_b_proj.weight. Those two names are deliberately left unmapped
+// here so the loader's merge pre-pass (glmMoeDsaSplitKVB + mergeGLMMoeDsaKVB in this file, called
+// from gguf_weightsource.go before CanonicalTensorNameArch) combines them — transposing attn_k_b
+// per head (DeepSeek MLA "weight absorption": k_b is stored transposed, v_b is not) and laying out
+// [k_nope rows, then v rows] per head. Verified against llama.cpp's convert split + fak's forward.
 //
 // NOT mapped here (by design): the batched ROUTED experts ffn_gate_exps / ffn_up_exps /
 // ffn_down_exps. Each is a single [E,…] blob that must split into E per-expert canonical
@@ -173,4 +175,149 @@ func splitGLMMoeDsaExperts(layer int, proj string, shape []int, data []float32) 
 		}
 	}
 	return tensors, nil
+}
+
+// The MLA KV-b up-projection is split in the GGUF (llama.cpp LLM_ARCH_GLM_DSA, inherited from
+// DeepSeek2's convert: kv_b is view()'d [n_head, qk_nope+v_head, kv_lora], split into k_b/v_b,
+// and k_b is TRANSPOSED) into these two per-layer tensors, which fak's forward consumes as ONE
+// combined self_attn.kv_b_proj.weight. glmMoeDsaSplitKVB combines them — see mergeGLMMoeDsaKVB.
+const (
+	glmGGUFAttnKB = "attn_k_b.weight" // [n_head, kv_lora, qk_nope] — TRANSPOSED at convert time
+	glmGGUFAttnVB = "attn_v_b.weight" // [n_head, v_head, kv_lora]   — NOT transposed
+)
+
+// glmMoeDsaSplitKVB reports whether a glm_moe_dsa GGUF tensor name is one half of the split MLA
+// KV-b up-projection and, if so, returns its layer index and which half ("k" or "v"). These two
+// names are deliberately left out of glmMoeDsaCanonicalSuffix so the loader's 2->1 merge pre-pass
+// (mergeGLMMoeDsaKVB) handles them BEFORE CanonicalTensorNameArch — the same shape the batched
+// expert splitter (glmMoeDsaBatchedExpert) uses, but combining two tensors instead of splitting one.
+func glmMoeDsaSplitKVB(name string) (layer int, half string, ok bool) {
+	if !strings.HasPrefix(name, "blk.") {
+		return 0, "", false
+	}
+	rest := strings.TrimPrefix(name, "blk.")
+	dot := strings.IndexByte(rest, '.')
+	if dot <= 0 {
+		return 0, "", false
+	}
+	l, err := strconv.Atoi(rest[:dot])
+	if err != nil {
+		return 0, "", false
+	}
+	switch rest[dot+1:] {
+	case glmGGUFAttnKB:
+		return l, "k", true
+	case glmGGUFAttnVB:
+		return l, "v", true
+	}
+	return 0, "", false
+}
+
+// glmKVBHalf buffers one dequantized half (attn_k_b or attn_v_b) of a layer's MLA KV-b projection
+// until its partner arrives, so the 2->1 merge works regardless of tensor stream order.
+type glmKVBHalf struct {
+	kShape, vShape []int
+	kData, vData   []float32
+	haveK, haveV   bool
+}
+
+// bufferGLMKVBHalf records one half ("k"/"v") of layer L's split KV-b and, once BOTH halves are
+// present, merges them (mergeGLMMoeDsaKVB), clears the buffer entry, and returns the combined
+// kv_b_proj tensor with ready=true. While only one half is seen it returns ready=false. Shared by
+// the quantized (QuantModelProfile) and f32 (F32Tensors) loader paths so they merge identically.
+func bufferGLMKVBHalf(buf map[int]glmKVBHalf, layer int, half string, shape []int, data []float32) (model.NamedTensorF32, bool, error) {
+	h := buf[layer]
+	switch half {
+	case "k":
+		if h.haveK {
+			return model.NamedTensorF32{}, false, fmt.Errorf("gguf: glm_moe_dsa duplicate attn_k_b for layer %d", layer)
+		}
+		h.kShape, h.kData, h.haveK = shape, data, true
+	case "v":
+		if h.haveV {
+			return model.NamedTensorF32{}, false, fmt.Errorf("gguf: glm_moe_dsa duplicate attn_v_b for layer %d", layer)
+		}
+		h.vShape, h.vData, h.haveV = shape, data, true
+	default:
+		return model.NamedTensorF32{}, false, fmt.Errorf("gguf: glm_moe_dsa kv_b unknown half %q (layer %d)", half, layer)
+	}
+	if h.haveK && h.haveV {
+		delete(buf, layer)
+		merged, err := mergeGLMMoeDsaKVB(layer, h.kShape, h.kData, h.vShape, h.vData)
+		return merged, true, err
+	}
+	buf[layer] = h
+	return model.NamedTensorF32{}, false, nil
+}
+
+// glmKVBUnpaired returns an error naming any layer left with only one KV-b half after the tensor
+// stream is exhausted — a malformed GGUF that would otherwise silently drop a layer's kv_b_proj.
+func glmKVBUnpaired(buf map[int]glmKVBHalf) error {
+	for layer, h := range buf {
+		missing := "attn_v_b"
+		if !h.haveK {
+			missing = "attn_k_b"
+		}
+		return fmt.Errorf("gguf: glm_moe_dsa layer %d has only one KV-b half (missing %s)", layer, missing)
+	}
+	return nil
+}
+
+// mergeGLMMoeDsaKVB combines the split MLA tensors attn_k_b + attn_v_b (both already dequantized
+// to f32, model-order row-major) into the single canonical self_attn.kv_b_proj.weight the native
+// glm_dsa forward reads. Layout (verified against llama.cpp's convert kv_b split + fak's forward,
+// internal/model/glm_dsa.go:58-76; numeric round-trip diff 0.0):
+//
+//	attn_k_b model shape [nH, kvLora, qkNope]  (k_b was TRANSPOSED at convert time)
+//	attn_v_b model shape [nH, vHead,  kvLora]  (v_b was NOT transposed)
+//	kv_b_proj target     [nH*(qkNope+vHead), kvLora]  row-major; per head h the qkNope k_nope rows
+//	                     come first, then the vHead v rows, each row dotted against the kvLora latent.
+//
+// So the k part needs a per-head TRANSPOSE [kvLora,qkNope]->[qkNope,kvLora]; the v part is a
+// straight copy. Fails loud on any shape mismatch — a wrong merge would silently corrupt the model.
+func mergeGLMMoeDsaKVB(layer int, kShape []int, kData []float32, vShape []int, vData []float32) (model.NamedTensorF32, error) {
+	if len(kShape) != 3 || len(vShape) != 3 {
+		return model.NamedTensorF32{}, fmt.Errorf("gguf: glm_moe_dsa kv_b merge expects 3-D attn_k_b/attn_v_b, got k=%v v=%v (layer %d)", kShape, vShape, layer)
+	}
+	nH, kvLoraK, qkNope := kShape[0], kShape[1], kShape[2]
+	nHv, vHead, kvLoraV := vShape[0], vShape[1], vShape[2]
+	if nH != nHv {
+		return model.NamedTensorF32{}, fmt.Errorf("gguf: glm_moe_dsa kv_b merge head mismatch attn_k_b nH=%d vs attn_v_b nH=%d (layer %d)", nH, nHv, layer)
+	}
+	if kvLoraK != kvLoraV {
+		return model.NamedTensorF32{}, fmt.Errorf("gguf: glm_moe_dsa kv_b merge kv_lora mismatch attn_k_b=%d vs attn_v_b=%d (layer %d)", kvLoraK, kvLoraV, layer)
+	}
+	kvLora := kvLoraK
+	if nH <= 0 || kvLora <= 0 || qkNope <= 0 || vHead <= 0 {
+		return model.NamedTensorF32{}, fmt.Errorf("gguf: glm_moe_dsa kv_b merge non-positive dim nH=%d kvLora=%d qkNope=%d vHead=%d (layer %d)", nH, kvLora, qkNope, vHead, layer)
+	}
+	if len(kData) != nH*kvLora*qkNope {
+		return model.NamedTensorF32{}, fmt.Errorf("gguf: glm_moe_dsa attn_k_b has %d values, want %d (layer %d)", len(kData), nH*kvLora*qkNope, layer)
+	}
+	if len(vData) != nH*vHead*kvLora {
+		return model.NamedTensorF32{}, fmt.Errorf("gguf: glm_moe_dsa attn_v_b has %d values, want %d (layer %d)", len(vData), nH*vHead*kvLora, layer)
+	}
+	perHead := qkNope + vHead
+	out := make([]float32, nH*perHead*kvLora)
+	for h := 0; h < nH; h++ {
+		base := h * perHead
+		kHead := kData[h*kvLora*qkNope:] // [kvLora, qkNope] for this head
+		vHeadData := vData[h*vHead*kvLora:]
+		// k part: TRANSPOSE [kvLora,qkNope] -> rows [qkNope, kvLora]
+		for o := 0; o < qkNope; o++ {
+			dst := out[(base+o)*kvLora:]
+			for i := 0; i < kvLora; i++ {
+				dst[i] = kHead[i*qkNope+o]
+			}
+		}
+		// v part: straight copy [vHead,kvLora] -> rows [vHead, kvLora]
+		for o := 0; o < vHead; o++ {
+			copy(out[(base+qkNope+o)*kvLora:(base+qkNope+o+1)*kvLora], vHeadData[o*kvLora:(o+1)*kvLora])
+		}
+	}
+	return model.NamedTensorF32{
+		Name:  fmt.Sprintf("model.layers.%d.self_attn.kv_b_proj.weight", layer),
+		Shape: []int{nH * perHead, kvLora},
+		Data:  out,
+	}, nil
 }
