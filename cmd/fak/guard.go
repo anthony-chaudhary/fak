@@ -188,6 +188,7 @@ func cmdGuard(argv []string) {
 		ObserveTrace:          observeTrace,
 		ObserveSession:        observeSession,
 		ControlSession:        controlSession,
+		ListSessions:          listSessions,
 		StartTime:             t0,
 		// Default OFF (clean terminal); --log routes the full structured stream to a file
 		// or stderr. /metrics + /debug/vars + the audit journal carry the record regardless.

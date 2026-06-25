@@ -179,6 +179,7 @@ func cmdServe(argv []string) {
 		ObserveTrace:                observeTrace,
 		ObserveSession:              observeSession,
 		ControlSession:              controlSession,
+		ListSessions:                listSessions,
 		StartTime:                   t0,
 		StartupPhases:               startupPhases,
 		CtxViewBudget:               *ctxViewBudget,
