@@ -103,6 +103,45 @@ func TestCheapSpanEvictsInsteadOfRetaining(t *testing.T) {
 	}
 }
 
+// TestCompressDemoteRequiresQualityEvidence: when the exact span is too large to
+// retain but a measured, quality-bounded compressed view is cheap enough to keep, the
+// planner chooses compress_demote. Unmeasured or over-bound compression is refused
+// and the span is evicted instead.
+func TestCompressDemoteRequiresQualityEvidence(t *testing.T) {
+	base := baseReq()
+	base.Pressure = TierPressure{TierHBM: 1.0, TierDRAM: 1.0, TierNUMAFar: 1.0, TierCXL: 1.0}
+	base.Tokens = 10
+	base.PerTokenPrefillNanos = 1_000_000 // 10ms recompute
+	base.SizeBytes = 1 << 30              // exact disk staging is more expensive than recompute
+	base.CompressedSizeBytes = 1 << 20    // compressed disk staging is cheaper than recompute
+
+	ok := base
+	ok.Quality = QualityEvidence{Measured: true, QualityDelta: 0.01, MaxQualityDelta: 0.05}
+	d := PlanPlacement(ok)
+	if d.Action != ActionCompressDemote || d.ToTier != TierDisk {
+		t.Fatalf("acceptable compressed span should compress-demote to disk, got %s->%s (%s)", d.Action, d.ToTier, d.Reason)
+	}
+	if d.EstMoveBytes != ok.CompressedSizeBytes {
+		t.Fatalf("compress-demote should stage compressed bytes %d, got %d", ok.CompressedSizeBytes, d.EstMoveBytes)
+	}
+
+	for _, tc := range []struct {
+		name string
+		q    QualityEvidence
+	}{
+		{name: "unmeasured", q: QualityEvidence{}},
+		{name: "over_bound", q: QualityEvidence{Measured: true, QualityDelta: 0.20, MaxQualityDelta: 0.05}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			req := base
+			req.Quality = tc.q
+			if d := PlanPlacement(req); d.Action != ActionEvict {
+				t.Fatalf("unproven compressed span must evict, got %s->%s (%s)", d.Action, d.ToTier, d.Reason)
+			}
+		})
+	}
+}
+
 // TestExpiredNoDemotePolicyEvicts: an expired entry under a policy that forbids
 // demotion is dropped outright even with room below.
 func TestExpiredNoDemotePolicyEvicts(t *testing.T) {

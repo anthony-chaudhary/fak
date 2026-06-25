@@ -43,7 +43,15 @@ const (
 	ActionPromote PlacementAction = "promote" // relocate to a hotter tier (it is hot)
 	ActionDemote  PlacementAction = "demote"  // relocate to a colder attendable tier
 	ActionSpill   PlacementAction = "spill"   // relocate to a colder NON-attendable tier (disk)
-	ActionEvict   PlacementAction = "evict"   // drop it; recompute on demand
+	// ActionCompressDemote lossily COMPRESSES the span and relocates the smaller
+	// representation to a colder tier — the last resort BEFORE eviction (#523). It
+	// is taken only when the EXACT span is too costly to retain (a bit-faithful
+	// demote/spill lost to recompute) yet a quality-bounded compressed span is
+	// cheap enough to keep: more effective context per byte than dropping it. It is
+	// admitted ONLY on acceptable QualityEvidence (Measured + delta under bound); an
+	// unproven or over-bound compression is refused and the span is evicted instead.
+	ActionCompressDemote PlacementAction = "compress_demote"
+	ActionEvict          PlacementAction = "evict" // drop it; recompute on demand
 )
 
 // PlacementDecision is the planner's verdict: the action, the tiers involved, the
@@ -74,6 +82,22 @@ type PlacementRequest struct {
 	PerTokenPrefillNanos int64
 	PromoteAccessRate    float64
 	NowMillis            int64
+
+	// CompressedSizeBytes is the size of a lossy COMPRESSED representation of the
+	// span (a MatCompressedKV view), the compress-and-demote lever (#523). When > 0
+	// it offers a fallback the planner considers ONLY when the exact span would
+	// otherwise be evicted under residency pressure: a smaller payload is cheaper to
+	// stage, so it can clear the retain-vs-recompute bar the full-size span could not,
+	// keeping the span's (quality-bounded) information resident at a fraction of the
+	// bytes. Zero (the default) disables compression — the planner is byte-identical
+	// to before #523.
+	CompressedSizeBytes int64
+	// Quality bounds the error of that compressed representation. The compressed span
+	// is admitted ONLY when Quality.Acceptable() — a measurement was actually taken
+	// (Measured) AND the observed delta clears MaxQualityDelta. An unmeasured or
+	// over-bound compression is an unproven hit: it is refused, and the span is
+	// evicted rather than demoted under a compression fak cannot stand behind.
+	Quality QualityEvidence
 }
 
 // stageNanos estimates the one-time cost of moving SizeBytes into a tier at its
@@ -127,9 +151,14 @@ func coldestColderWithRoom(from ResidencyTier, req PlacementRequest) ResidencyTi
 //     a faster seat.
 //  2. Under pressure or expiry, RELOCATE rather than evict when possible:
 //     - find the nearest colder profiled tier with room;
-//     - if that tier is attendable in place (NUMA-far/CXL) and retaining there beats
-//     recompute, DEMOTE to it (KVOffload);
-//     - else if it is a spill tier (disk) and retaining still beats recompute, SPILL;
+//     - if that tier is attendable in place (NUMA-far/CXL) and retaining the EXACT
+//     span there beats recompute, DEMOTE to it (KVOffload);
+//     - else if it is a spill tier (disk) and retaining the exact span still beats
+//     recompute, SPILL;
+//     - else if the exact span is too costly to retain but a quality-PROVEN COMPRESSED
+//     span (CompressedSizeBytes, Quality.Acceptable()) is cheap enough to keep there,
+//     COMPRESS-AND-DEMOTE — keep more effective context per byte instead of dropping
+//     it (#523); an unproven or over-bound compression is refused;
 //     - else (nothing colder has room, or recompute is cheaper than any retain) EVICT.
 //  3. Otherwise KEEP.
 //
@@ -185,23 +214,42 @@ func PlanPlacement(req PlacementRequest) PlacementDecision {
 	}
 
 	toProfile := req.Profiles[to]
-	if !RetainCheaperThanRecompute(req.SizeBytes, req.Tokens, req.PerTokenPrefillNanos, toProfile) {
-		// Cheaper to rebuild than to hold even in the colder tier — let it go.
+	if RetainCheaperThanRecompute(req.SizeBytes, req.Tokens, req.PerTokenPrefillNanos, toProfile) {
+		// The EXACT (bit-faithful) span is worth holding in the colder tier — always
+		// preferred over a lossy form when it pays.
+		action := ActionDemote
+		reason := "demote_beats_recompute"
+		if !toProfile.AttendableInPlace() {
+			action = ActionSpill
+			reason = "spill_beats_recompute"
+		}
 		return PlacementDecision{
-			Action: ActionEvict, FromTier: from, ToTier: TierRecompute,
-			Directive: KVOffload, Reason: "recompute_cheaper_than_retain",
+			Action: action, FromTier: from, ToTier: to,
+			Directive: KVOffload, EstMoveBytes: req.SizeBytes, Reason: reason,
 		}
 	}
 
-	action := ActionDemote
-	reason := "demote_beats_recompute"
-	if !toProfile.AttendableInPlace() {
-		action = ActionSpill
-		reason = "spill_beats_recompute"
+	// The exact span is too costly to retain even in the colder tier. Before dropping
+	// it (a full recompute on the next request), try COMPRESS-AND-DEMOTE (#523): a
+	// lossy compressed representation is smaller, so staging it can beat recompute
+	// where the full-size span could not — keeping more effective context per byte. It
+	// is admitted ONLY when the compression's quality is PROVEN under bound; an
+	// unmeasured or over-bound compression is an unproven hit and is refused (the span
+	// is evicted), never demoted under a quality claim fak cannot stand behind.
+	if req.CompressedSizeBytes > 0 && req.Quality.Acceptable() &&
+		RetainCheaperThanRecompute(req.CompressedSizeBytes, req.Tokens, req.PerTokenPrefillNanos, toProfile) {
+		return PlacementDecision{
+			Action: ActionCompressDemote, FromTier: from, ToTier: to,
+			Directive: KVOffload, EstMoveBytes: req.CompressedSizeBytes,
+			Reason: "compress_demote_beats_recompute",
+		}
 	}
+
+	// Cheaper to rebuild than to hold even compressed, or the compression is unproven /
+	// over-bound — let it go.
 	return PlacementDecision{
-		Action: action, FromTier: from, ToTier: to,
-		Directive: KVOffload, EstMoveBytes: req.SizeBytes, Reason: reason,
+		Action: ActionEvict, FromTier: from, ToTier: TierRecompute,
+		Directive: KVOffload, Reason: "recompute_cheaper_than_retain",
 	}
 }
 
@@ -211,7 +259,7 @@ func PlanPlacement(req PlacementRequest) PlacementDecision {
 // Evict so a caller does not re-implement the state transition.
 func (d PlacementDecision) Apply(lc Lifecycle, profiles map[ResidencyTier]TierProfile, nowMillis int64) (Lifecycle, KVTransferDirection) {
 	switch d.Action {
-	case ActionPromote, ActionDemote, ActionSpill:
+	case ActionPromote, ActionDemote, ActionSpill, ActionCompressDemote:
 		return lc.MoveTo(d.ToTier, profiles, nowMillis)
 	case ActionEvict:
 		return lc.Evict(nowMillis), KVOffload

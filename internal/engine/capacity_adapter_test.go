@@ -43,9 +43,9 @@ func (f *fakeCapacityKV) RestoreSpan(_ context.Context, digest string) (abi.KVRe
 	return abi.KVResidency{Outcome: abi.KVResidencyMiss, Digest: digest}, nil
 }
 
-// A demote and a spill both STAGE to the colder tier then EVICT the live span, landing a
-// typed HIT offload in the cache-entry stream. This is the load-bearing Plank-4 control
-// path: a PlanPlacement decision turned into a real Evict + stage.
+// A demote, spill, and compress-demote all STAGE to the colder tier then EVICT the live
+// span, landing a typed HIT offload in the cache-entry stream. This is the load-bearing
+// Plank-4 control path: a PlanPlacement decision turned into a real Evict + stage.
 func TestCapacityAdapterExecutesDemoteAndSpill(t *testing.T) {
 	for _, tc := range []struct {
 		name   string
@@ -54,6 +54,7 @@ func TestCapacityAdapterExecutesDemoteAndSpill(t *testing.T) {
 	}{
 		{"demote_to_dram", cachemeta.ActionDemote, cachemeta.TierDRAM},
 		{"spill_to_disk", cachemeta.ActionSpill, cachemeta.TierDisk},
+		{"compress_demote_to_disk", cachemeta.ActionCompressDemote, cachemeta.TierDisk},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			kv := &fakeCapacityKV{len: 4096, modelID: "m", stageOut: abi.KVResidencyOK}

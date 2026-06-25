@@ -105,8 +105,11 @@ func (a *CapacityAdapter) Execute(ctx context.Context, mv PlacementMove) (Placem
 		// Not this adapter's control path: keep is a no-op; promote is a page-IN
 		// (RestoreSpan), the reverse direction. Surface that it was not applied.
 		return PlacementResult{Applied: false}, nil
-	case cachemeta.ActionDemote, cachemeta.ActionSpill, cachemeta.ActionEvict:
-		// The drop-from-hot-tier family — executed below.
+	case cachemeta.ActionDemote, cachemeta.ActionSpill, cachemeta.ActionCompressDemote, cachemeta.ActionEvict:
+		// The drop-from-hot-tier family — executed below. A compress-demote stages a
+		// lossy COMPRESSED span to the colder tier (its smaller EstMoveBytes) before the
+		// live exact copy is evicted, exactly the fail-safe stage-then-evict ordering a
+		// demote/spill uses.
 	default:
 		return PlacementResult{Applied: false}, fmt.Errorf("engine: unknown placement action %q", d.Action)
 	}
@@ -117,7 +120,8 @@ func (a *CapacityAdapter) Execute(ctx context.Context, mv PlacementMove) (Placem
 
 	// (1) Stage a demote/spill to the colder tier BEFORE evicting the live copy, so a
 	// staging fault cannot lose the span. An evict skips staging (recompute on demand).
-	if d.Action == cachemeta.ActionDemote || d.Action == cachemeta.ActionSpill {
+	if d.Action == cachemeta.ActionDemote || d.Action == cachemeta.ActionSpill ||
+		d.Action == cachemeta.ActionCompressDemote {
 		staged, err := a.KV.StageSpan(ctx, mv.SpanDigest, mv.From, mv.N)
 		if err != nil {
 			// A transport error is a typed FAULT: retain the live span, record, never silent.
