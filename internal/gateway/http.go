@@ -55,6 +55,10 @@ func (s *Server) Handler() http.Handler {
 	// every live session's drive state. Registered distinctly from the singular
 	// /v1/fak/session/ subtree, so a single-id request never lands here.
 	mux.HandleFunc("/v1/fak/sessions", s.handleFakSessions)
+	// /v1/fak/tasks is the read-only process task-manager snapshot. Inert (404)
+	// unless a host installs a provider via SetTasksSnapshotProvider and the
+	// operator enables it; the snapshot carries accounting only, no payload bytes.
+	mux.HandleFunc("/v1/fak/tasks", s.handleFakTasks)
 	mux.HandleFunc("/v1/models", s.handleModels)
 	mux.HandleFunc("/mcp", s.handleMCPHTTP)
 	mux.HandleFunc("/healthz", s.handleHealth)
