@@ -140,6 +140,7 @@ demo-tool-tests:
 	@python3 tools/guard_mcp_status_audit_test.py
 	@python3 tools/openai_live_prereq_audit_test.py
 	@python3 tools/openai_hosted_live_pilot_test.py
+	@python3 tools/claude_historical_guard_audit_test.py
 	@echo "demo-tool-tests OK"
 
 # demo-scorecards: content-only demo quality and robustness scorecards. These are

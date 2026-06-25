@@ -36,6 +36,7 @@ def seed_tree(
     agents_output_ok: bool = True,
     openai_prereq_ok: bool = True,
     openai_hosted_ok: bool = True,
+    claude_historical_ok: bool = True,
 ) -> None:
     mod = load()
     (root / mod.STATUS_PACKET).parent.mkdir(parents=True, exist_ok=True)
@@ -43,6 +44,8 @@ def seed_tree(
         "\n".join(
             [
                 mod.CODEX_DOS_AUDIT,
+                mod.CLAUDE_HISTORICAL,
+                mod.CLAUDE_HISTORICAL_MD,
                 mod.CLAUDE_LIVE,
                 mod.CODEX_MCP_LIVE,
                 mod.OPENAI_AGENTS_OUTPUT,
@@ -118,6 +121,36 @@ def seed_tree(
                 "final_message": {"useful_completed": True},
             },
         },
+    )
+    historical_verdicts = {"ALLOW": 35, "DENY": 3}
+    historical_reasons = {"DEFAULT_DENY": 2, "POLICY_BLOCK": 1}
+    if not claude_historical_ok:
+        historical_verdicts = {"ALLOW": 38}
+        historical_reasons = {}
+    write_json(
+        root,
+        mod.CLAUDE_HISTORICAL,
+        {
+            "schema": "fak-claude-historical-guard-audit/1",
+            "status": "PASS",
+            "sessions_discovered": 10,
+            "sessions_audited": 6,
+            "tool_calls_seen": 39,
+            "unique_tool_calls_replayed": 38,
+            "truncated": False,
+            "verdict_counts": historical_verdicts,
+            "reason_counts": historical_reasons,
+            "privacy": {
+                "dropped": ["prompts", "tool arguments", "tool results", "raw transcript text"],
+            },
+        },
+    )
+    (root / mod.CLAUDE_HISTORICAL_MD).parent.mkdir(parents=True, exist_ok=True)
+    (root / mod.CLAUDE_HISTORICAL_MD).write_text(
+        "# Claude Code historical guard replay\n\n"
+        "- status: **`PASS`**\n\n"
+        "It never writes prompts, tool arguments, tool results, or raw transcript text.\n",
+        encoding="utf-8",
     )
     write_json(
         root,
@@ -231,6 +264,15 @@ class GuardMCPStatusAuditTest(unittest.TestCase):
             payload = mod.collect(root)
             self.assertEqual(payload["status"], "FAIL")
             self.assertIn("codex mcp live pilot", json.dumps(payload))
+
+    def test_collect_fails_when_claude_historical_has_no_denies(self) -> None:
+        mod = load()
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            seed_tree(root, claude_historical_ok=False)
+            payload = mod.collect(root)
+            self.assertEqual(payload["status"], "FAIL")
+            self.assertIn("claude code historical replay", json.dumps(payload))
 
     def test_collect_fails_when_agents_adapter_output_breaks(self) -> None:
         mod = load()

@@ -13,6 +13,7 @@ and OpenAI/Codex. It is a status artifact, not a shipped-claims ledger; quote
 | MCP stdio kernel tools | PASS | `experiments/agent-live/codex-dogfood-019efde3-6794-7401-93a1-e97e6bd72a9c.json` records `mcp_stdio_adjudication.status=PASS`, expected tools present, `git_push` denied as `POLICY_BLOCK`, and `git_status` allowed. |
 | Historical Codex/DOS sessions | PASS with residual debt | `experiments/agent-live/codex-dos-recent-audit.json` audits 10 recent Codex sessions. Overall audit remains `WARN` because the historical window contains host-shell opacity and unknown-tree warnings, but `actionability.status=PASS` after structured git deny probes. |
 | Historical git writes after mitigation | PASS | Expected-deny reports for `git_add`, `git_commit`, and `git_push` prove at `2026-06-25T14:51:04.727080Z`. The post-gate lens shows no `git_write` family after that proof, so earlier opaque git writes are classified as `HISTORICAL_GIT_WRITE_BEFORE_STRUCTURED_GATE`, not current actionability. |
+| Historical Claude Code sessions | PASS | `experiments/agent-live/claude-historical-guard-audit-2026-06-25.json` and `experiments/agent-live/CLAUDE-HISTORICAL-GUARD-AUDIT-2026-06-25.md` replay 39 recent Claude Code tool proposals from 10 local `C--work-fak` transcripts through `fak preflight` under `examples/dogfood-claude-policy.json`. It records 35 `ALLOW` and 3 `DENY` verdicts, including one `POLICY_BLOCK`, while storing only tool names, verdict metadata, counts, and hash digests. |
 | Claude Code live session | PASS | `experiments/agent-live/claude-code-fak-guard-live-pilot-2026-06-25.json` records a live Claude Code turn where `rm -rf ./.fak-live-pilot-sentinel-do-not-exist` was denied (`POLICY_BLOCK`) and a later same-session `echo fak-claude-live-pilot-ok` was allowed. |
 | OpenAI/Codex MCP live session | PASS | `experiments/agent-live/codex-mcp-fak-live-pilot-2026-06-25.json` records a Codex CLI MCP turn where `fak_adjudicate(git_push)` denied `POLICY_BLOCK` and the same turn continued with allowed `fak_adjudicate(git_status, read_only=true)`. |
 | OpenAI Agents guardrail adapter | PASS | `examples/openai-agents-guardrail/demo.py` starts `fak serve`, blocks `git_push` before execution, allows `git_status`, admits the clean result, and quarantines a poisoned `web_fetch` result. Latest local run returned `summary: PASS`; captured expected output is in `examples/openai-agents-guardrail/EXAMPLE-OUTPUT.md`. |
@@ -48,6 +49,15 @@ python tools\openai_live_prereq_audit.py `
 python tools\openai_hosted_live_pilot.py `
   --out experiments\agent-live\openai-hosted-live-pilot-2026-06-25.json `
   --markdown experiments\agent-live\OPENAI-HOSTED-LIVE-PILOT-2026-06-25.md
+python tools\claude_historical_guard_audit.py `
+  --root $env:USERPROFILE\.claude\projects\C--work-fak `
+  --policy examples\dogfood-claude-policy.json `
+  --fak .\fak.exe `
+  --since-days 1 `
+  --max-sessions 10 `
+  --max-calls 500 `
+  --out experiments\agent-live\claude-historical-guard-audit-2026-06-25.json `
+  --markdown experiments\agent-live\CLAUDE-HISTORICAL-GUARD-AUDIT-2026-06-25.md
 python tools\codex_dos_recent_audit.py `
   --repo-root . `
   --codex-home $env:USERPROFILE\.codex `

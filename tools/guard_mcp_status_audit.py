@@ -25,6 +25,8 @@ SCHEMA = "fak-guard-mcp-status-audit/1"
 STATUS_PACKET = "experiments/agent-live/GUARD-MCP-STATUS-2026-06-25.md"
 CODEX_DOGFOOD = "experiments/agent-live/codex-dogfood-019efde3-6794-7401-93a1-e97e6bd72a9c.json"
 CODEX_DOS_AUDIT = "experiments/agent-live/codex-dos-recent-audit.json"
+CLAUDE_HISTORICAL = "experiments/agent-live/claude-historical-guard-audit-2026-06-25.json"
+CLAUDE_HISTORICAL_MD = "experiments/agent-live/CLAUDE-HISTORICAL-GUARD-AUDIT-2026-06-25.md"
 CLAUDE_LIVE = "experiments/agent-live/claude-code-fak-guard-live-pilot-2026-06-25.json"
 CODEX_MCP_LIVE = "experiments/agent-live/codex-mcp-fak-live-pilot-2026-06-25.json"
 OPENAI_AGENTS_OUTPUT = "examples/openai-agents-guardrail/EXAMPLE-OUTPUT.md"
@@ -110,6 +112,8 @@ def check_status_packet(root: Path, checks: list[dict[str, Any]]) -> None:
         return
     required = [
         CODEX_DOS_AUDIT,
+        CLAUDE_HISTORICAL,
+        CLAUDE_HISTORICAL_MD,
         CLAUDE_LIVE,
         CODEX_MCP_LIVE,
         OPENAI_AGENTS_OUTPUT,
@@ -181,6 +185,40 @@ def check_historical_audit(root: Path, checks: list[dict[str, Any]]) -> None:
         "historical codex/dos actionability",
         ok,
         f"audit={report.get('status')} actionability={action.get('status')} residual={sorted(residual)} post_gate={post_gate_families}",
+    )
+
+
+def check_claude_historical(root: Path, checks: list[dict[str, Any]]) -> None:
+    report = read_json(root, CLAUDE_HISTORICAL, checks)
+    try:
+        md = (root / CLAUDE_HISTORICAL_MD).read_text(encoding="utf-8", errors="replace")
+    except OSError as exc:
+        add(checks, "claude code historical replay", False, str(exc))
+        return
+    verdicts = report.get("verdict_counts") if isinstance(report.get("verdict_counts"), dict) else {}
+    reasons = report.get("reason_counts") if isinstance(report.get("reason_counts"), dict) else {}
+    serialized = json.dumps(report, sort_keys=True) + md
+    leaked_payload = any(token in serialized for token in ["rm -rf", "README.md", "tool_result", "secret result"])
+    ok = (
+        report.get("schema") == "fak-claude-historical-guard-audit/1"
+        and report.get("status") == "PASS"
+        and int(report.get("sessions_discovered") or 0) >= 1
+        and int(report.get("sessions_audited") or 0) >= 1
+        and int(report.get("tool_calls_seen") or 0) >= 1
+        and int(report.get("unique_tool_calls_replayed") or 0) >= 1
+        and verdicts.get("ALLOW", 0) >= 1
+        and verdicts.get("DENY", 0) >= 1
+        and reasons.get("POLICY_BLOCK", 0) >= 1
+        and report.get("truncated") is False
+        and "status: **`PASS`**" in md
+        and "It never writes prompts, tool arguments, tool results, or raw transcript text." in md
+        and not leaked_payload
+    )
+    add(
+        checks,
+        "claude code historical replay",
+        ok,
+        f"status={report.get('status')} sessions={report.get('sessions_audited')} calls={report.get('tool_calls_seen')} verdicts={verdicts} leaked_payload={leaked_payload}",
     )
 
 
@@ -338,6 +376,7 @@ def collect(root: Path) -> dict[str, Any]:
     check_mcp_stdio(root, checks)
     check_git_gate_reports(root, checks)
     check_historical_audit(root, checks)
+    check_claude_historical(root, checks)
     check_claude_live(root, checks)
     check_codex_mcp_live(root, checks)
     check_openai_agents_adapter(root, checks)

@@ -1,0 +1,136 @@
+{
+  "created_at": "2026-06-25T14:58:24.018378Z",
+  "max_calls": 500,
+  "max_sessions": 10,
+  "non_allow_samples": [
+    {
+      "args_bytes": 37,
+      "args_digest": "052a79b7f944",
+      "by": "monitor",
+      "call_digest": "c38bdf84780b2f80",
+      "claim": "",
+      "reason": "DEFAULT_DENY",
+      "tool": "TaskUpdate",
+      "verdict": "DENY"
+    },
+    {
+      "args_bytes": 10616,
+      "args_digest": "0ebc86741a5c",
+      "by": "monitor",
+      "call_digest": "228e30224e260877",
+      "claim": "",
+      "reason": "DEFAULT_DENY",
+      "tool": "Workflow",
+      "verdict": "DENY"
+    },
+    {
+      "args_bytes": 857,
+      "args_digest": "ae45085a31a6",
+      "by": "monitor",
+      "call_digest": "f5a056b4348603d3",
+      "claim": "Bash.command deny_regex /\\brm\\s+-[A-Za-z]*[rRfF]/",
+      "reason": "POLICY_BLOCK",
+      "tool": "Bash",
+      "verdict": "DENY"
+    }
+  ],
+  "policy": "examples\\dogfood-claude-policy.json",
+  "privacy": {
+    "copied_fields": [
+      "tool names",
+      "verdict metadata",
+      "counts",
+      "hash digests"
+    ],
+    "dropped": [
+      "prompts",
+      "tool arguments",
+      "tool results",
+      "raw transcript text"
+    ]
+  },
+  "reason_counts": {
+    "DEFAULT_DENY": 2,
+    "POLICY_BLOCK": 1
+  },
+  "replay_engine": {
+    "binary": ".\\fak.exe",
+    "kind": "fak_preflight",
+    "policy": "examples\\dogfood-claude-policy.json"
+  },
+  "replay_errors": [],
+  "root": "C:\\Users\\USER\\.claude\\projects\\C--work-fak",
+  "schema": "fak-claude-historical-guard-audit/1",
+  "sessions": [
+    {
+      "mtime": "2026-06-25T14:58:22.652034Z",
+      "session_digest": "92014df3bf88e5f2",
+      "tool_calls": 1
+    },
+    {
+      "mtime": "2026-06-25T14:58:20.378519Z",
+      "session_digest": "baa0e44a0032e6da",
+      "tool_calls": 0
+    },
+    {
+      "mtime": "2026-06-25T14:58:19.919692Z",
+      "session_digest": "72c8ef06f9570fe1",
+      "tool_calls": 0
+    },
+    {
+      "mtime": "2026-06-25T14:58:18.325444Z",
+      "session_digest": "2cff391bfb6d86de",
+      "tool_calls": 4
+    },
+    {
+      "mtime": "2026-06-25T14:58:08.577781Z",
+      "session_digest": "a413f8e6663b9a00",
+      "tool_calls": 0
+    },
+    {
+      "mtime": "2026-06-25T14:57:45.675771Z",
+      "session_digest": "feff8be1968a0c58",
+      "tool_calls": 1
+    },
+    {
+      "mtime": "2026-06-25T14:57:43.870550Z",
+      "session_digest": "3aa69467cac7453f",
+      "tool_calls": 0
+    },
+    {
+      "mtime": "2026-06-25T14:43:15.895125Z",
+      "session_digest": "3dbf0dbc166b15ed",
+      "tool_calls": 3
+    },
+    {
+      "mtime": "2026-06-25T14:43:08.228210Z",
+      "session_digest": "6b83e5b3108eba9d",
+      "tool_calls": 11
+    },
+    {
+      "mtime": "2026-06-25T14:41:51.470166Z",
+      "session_digest": "327f6e8ff30159e3",
+      "tool_calls": 19
+    }
+  ],
+  "sessions_audited": 6,
+  "sessions_discovered": 10,
+  "since_days": 1.0,
+  "status": "PASS",
+  "tool_calls_seen": 39,
+  "tool_counts": {
+    "Bash": 11,
+    "Edit": 16,
+    "Read": 9,
+    "TaskUpdate": 1,
+    "Workflow": 1,
+    "Write": 1
+  },
+  "truncated": false,
+  "unique_tool_calls": 38,
+  "unique_tool_calls_replayed": 38,
+  "verdict_counts": {
+    "ALLOW": 35,
+    "DENY": 3
+  }
+}
