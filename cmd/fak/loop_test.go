@@ -259,3 +259,85 @@ func gotKinds(events []loopmgr.Event) string {
 	}
 	return strings.Join(parts, ",")
 }
+
+func TestLoopAdmitNoPolicyAdmits(t *testing.T) {
+	dir := t.TempDir()
+	ledger := filepath.Join(dir, "loops.jsonl")
+	appendLoopTestEvent(t, ledger, loopmgr.Event{LoopID: "issue-dispatch/default", Kind: loopmgr.EventFire})
+
+	var stdout, stderr bytes.Buffer
+	code := runLoop(&stdout, &stderr, []string{"admit", "--ledger", ledger,
+		"--policy", filepath.Join(dir, "absent-policy.json"), "--json"})
+	if code != 0 {
+		t.Fatalf("admit code=%d stderr=%s", code, stderr.String())
+	}
+	var out struct {
+		Schema    string             `json:"schema"`
+		Decisions []loopmgr.Decision `json:"decisions"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &out); err != nil {
+		t.Fatalf("unmarshal: %v\n%s", err, stdout.String())
+	}
+	if out.Schema != "fak.loop-admit.v1" {
+		t.Fatalf("schema = %q", out.Schema)
+	}
+	if len(out.Decisions) != 1 || !out.Decisions[0].Admit {
+		t.Fatalf("decisions = %+v", out.Decisions)
+	}
+}
+
+func TestLoopAdmitPausedRefusesWithExit3(t *testing.T) {
+	dir := t.TempDir()
+	ledger := filepath.Join(dir, "loops.jsonl")
+	appendLoopTestEvent(t, ledger, loopmgr.Event{LoopID: "issue-dispatch/default", Kind: loopmgr.EventFire})
+
+	policy := filepath.Join(dir, "loop-policy.json")
+	doc := `{"schema":"fak.loop-policy.v1","loops":{"issue-dispatch/default":{"paused":true}}}`
+	if err := os.WriteFile(policy, []byte(doc), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	var stdout, stderr bytes.Buffer
+	code := runLoop(&stdout, &stderr, []string{"admit", "--ledger", ledger,
+		"--policy", policy, "--loop", "issue-dispatch/default"})
+	if code != 3 {
+		t.Fatalf("paused loop must exit 3, got %d stderr=%s", code, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "REFUSE") || !strings.Contains(stdout.String(), loopmgr.ReasonLoopPaused) {
+		t.Fatalf("expected REFUSE/%s in output: %s", loopmgr.ReasonLoopPaused, stdout.String())
+	}
+}
+
+func TestLoopAdmitUnknownLoopGetsVerdict(t *testing.T) {
+	dir := t.TempDir()
+	ledger := filepath.Join(dir, "loops.jsonl")
+	policy := filepath.Join(dir, "loop-policy.json")
+	doc := `{"schema":"fak.loop-policy.v1","loops":{"future/loop":{"disabled":true}}}`
+	if err := os.WriteFile(policy, []byte(doc), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	var stdout, stderr bytes.Buffer
+	code := runLoop(&stdout, &stderr, []string{"admit", "--ledger", ledger,
+		"--policy", policy, "--loop", "future/loop"})
+	if code != 3 {
+		t.Fatalf("disabled unseen loop must exit 3, got %d", code)
+	}
+	if !strings.Contains(stdout.String(), loopmgr.ReasonLoopDisabled) {
+		t.Fatalf("expected %s: %s", loopmgr.ReasonLoopDisabled, stdout.String())
+	}
+}
+
+func TestLoopAdmitBadPolicyExits2(t *testing.T) {
+	dir := t.TempDir()
+	ledger := filepath.Join(dir, "loops.jsonl")
+	policy := filepath.Join(dir, "loop-policy.json")
+	if err := os.WriteFile(policy, []byte(`{"schema":"wrong"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var stdout, stderr bytes.Buffer
+	code := runLoop(&stdout, &stderr, []string{"admit", "--ledger", ledger, "--policy", policy})
+	if code != 2 {
+		t.Fatalf("bad policy must exit 2, got %d", code)
+	}
+}

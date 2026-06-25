@@ -29,6 +29,8 @@ func runLoop(stdout, stderr io.Writer, argv []string) int {
 		return runLoopRun(stdout, stderr, argv[1:])
 	case "status":
 		return runLoopStatus(stdout, stderr, argv[1:])
+	case "admit":
+		return runLoopAdmit(stdout, stderr, argv[1:])
 	case "-h", "--help", "help":
 		loopUsage(stdout)
 		return 0
@@ -298,11 +300,109 @@ func runLoopStatus(stdout, stderr io.Writer, argv []string) int {
 	return 0
 }
 
+// runLoopAdmit applies the tunable loop-admission policy to the folded ledger
+// and reports an admit/refuse verdict per loop. This is the governor surface
+// that makes the always-on loop tunable: a scheduler line gates work on
+// `fak loop admit --loop ID` (exit 0 admit, exit 3 refused), and the operator
+// retunes the policy file — pause, cadence floor, refusal-storm backoff,
+// witness-collapse hold — without re-registering the OS task. It only reads:
+// it appends no event, so a refusal here is not itself a recorded refusal.
+func runLoopAdmit(stdout, stderr io.Writer, argv []string) int {
+	fs := flag.NewFlagSet("loop admit", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	ledger := fs.String("ledger", defaultLoopLedger(), "loop JSONL ledger path")
+	policyPath := fs.String("policy", defaultLoopPolicy(), "loop admission policy JSON path")
+	loopID := fs.String("loop", "", "evaluate one loop id (default: every loop in the ledger)")
+	asJSON := fs.Bool("json", false, "emit the decisions as JSON")
+	if err := fs.Parse(argv); err != nil {
+		return 2
+	}
+	if fs.NArg() != 0 {
+		fmt.Fprintf(stderr, "fak loop admit: unexpected argument %q\n", fs.Arg(0))
+		return 2
+	}
+
+	policies, err := loopmgr.LoadPolicies(*policyPath)
+	if err != nil {
+		fmt.Fprintf(stderr, "fak loop admit: %v\n", err)
+		return 2
+	}
+	now := time.Now()
+	st, err := loopmgr.SnapshotFile(*ledger, now)
+	if err != nil {
+		fmt.Fprintf(stderr, "fak loop admit: %v\n", err)
+		return 1
+	}
+
+	var decisions []loopmgr.Decision
+	if id := strings.TrimSpace(*loopID); id != "" {
+		// A named loop the ledger has never seen still gets a verdict: an empty
+		// snapshot under its policy, so an operator can pre-pause a loop that has
+		// not fired yet, and a first-ever fire is evaluated rather than skipped.
+		decisions = []loopmgr.Decision{loopmgr.Admit(loopSnapshotForID(st, id), policies.PolicyFor(id), now)}
+	} else {
+		decisions = loopmgr.AdmitAll(st, policies, now)
+	}
+
+	if *asJSON {
+		enc := json.NewEncoder(stdout)
+		enc.SetIndent("", "  ")
+		if err := enc.Encode(map[string]any{
+			"schema":      "fak.loop-admit.v1",
+			"ledger_path": *ledger,
+			"policy_path": *policyPath,
+			"decisions":   decisions,
+		}); err != nil {
+			fmt.Fprintf(stderr, "fak loop admit: encode json: %v\n", err)
+			return 1
+		}
+	} else {
+		for _, d := range decisions {
+			verdict := "ADMIT"
+			if !d.Admit {
+				verdict = "REFUSE"
+			}
+			fmt.Fprintf(stdout, "%-6s %-30s %-18s %s\n", verdict, d.LoopID, d.Reason, d.Summary)
+		}
+		if len(decisions) == 0 {
+			fmt.Fprintf(stdout, "no loops to admit (ledger %s)\n", *ledger)
+		}
+	}
+
+	// Exit 3 when any evaluated loop is refused, so a scheduler can gate on it:
+	//   fak loop admit --loop ID && python tick.py ...
+	for _, d := range decisions {
+		if !d.Admit {
+			return 3
+		}
+	}
+	return 0
+}
+
+// loopSnapshotForID returns the folded snapshot for a loop id, or an empty
+// snapshot bearing just that id when the ledger has never seen it — so a policy
+// can still be evaluated against a not-yet-fired loop.
+func loopSnapshotForID(st loopmgr.Status, id string) loopmgr.LoopSnapshot {
+	for _, l := range st.Loops {
+		if l.LoopID == id {
+			return l
+		}
+	}
+	return loopmgr.LoopSnapshot{LoopID: id}
+}
+
 func defaultLoopLedger() string {
 	if v := os.Getenv("FAK_LOOP_LEDGER"); v != "" {
 		return v
 	}
 	return filepath.Join(".fak", "loops.jsonl")
+}
+
+func defaultLoopPolicy() string {
+	if v := os.Getenv("FAK_LOOP_POLICY"); v != "" {
+		return v
+	}
+	return filepath.Join(".fak", "loop-policy.json")
 }
 
 func appendLoopRunEvent(ledger string, ev loopmgr.Event) error {
@@ -408,10 +508,14 @@ func loopUsage(w io.Writer) {
                   [--metric NAME=INT64] [--json]
   fak loop run --loop ID [--ledger FILE] [--source cron|launchd|task-scheduler] -- CMD [ARG...]
   fak loop status [--ledger FILE] [--json]
+  fak loop admit [--loop ID] [--ledger FILE] [--policy FILE] [--json]
 
 Append records one scheduler/script/control event in the canonical hash-chained
 ledger. Run wraps an OS scheduler command and records fire/admit/start/end around it.
-Status folds that ledger into the current loop/run view. The ledger records events;
-admission, scheduler authority, and completion witnesses live in producers.
+Status folds that ledger into the current loop/run view. Admit applies the tunable
+admission policy (default .fak/loop-policy.json, FAK_LOOP_POLICY) to the fold and
+prints admit/refuse per loop — exit 3 when any evaluated loop is refused, so a
+scheduler line can gate work on it. The ledger records events; admission, scheduler
+authority, and completion witnesses live in producers.
 `)
 }
