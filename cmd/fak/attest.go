@@ -300,7 +300,10 @@ func runProbe(ctx context.Context, p probe) probeResult {
 	if err != nil {
 		return probeResult{probe: p, Actual: "ERROR", By: "resolver", Pass: false}
 	}
-	tc := &abi.ToolCall{Tool: p.Tool, Args: ref}
+	// Attestation is a proof run, not a continuation of the caller's ambient
+	// session. Use a non-empty trace id so process-local IFC ledger state from a
+	// prior command/test that touched the empty trace cannot contaminate the probe.
+	tc := &abi.ToolCall{TraceID: "fak-attest/" + p.Tool, Tool: p.Tool, Args: ref}
 	v := kernel.Fold(ctx, abi.AdjudicatorsFor(tc), tc)
 	return probeResult{
 		probe:        p,

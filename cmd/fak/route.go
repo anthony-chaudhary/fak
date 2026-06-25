@@ -51,6 +51,9 @@ func runRoute(stdout, stderr io.Writer, argv []string) int {
 	simulate := fs.String("simulate", "", "stand-in member outputs '<out>[@score],…' to fold through the plan's reduction")
 	frontier := fs.String("frontier", "", "SOTA baseline model for the rough usage estimate (default: an Opus-class frontier anchor, $3/$15 per Mtok)")
 	prices := fs.String("prices", "", "override the rough price book: model=in/out[,model=N,...] (e.g. small=0.25/1.25,large=3/15)")
+	accounts := fs.String("accounts", "", "load an account roster (the switcher) and bind each routed model id to a provider/account/upstream target")
+	accountsDump := fs.Bool("accounts-dump", false, "write the built-in DefaultRoster (the account-switcher starter) to stdout")
+	accountsCheck := fs.String("accounts-check", "", "validate an account roster and print the account + binding surface")
 	asJSON := fs.Bool("json", false, "emit the decision (and any reduction) as JSON")
 	if err := fs.Parse(argv); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
@@ -84,6 +87,18 @@ func runRoute(stdout, stderr io.Writer, argv []string) int {
 		}
 		fmt.Fprintf(stdout, "OK  %s  (manifest valid; %d rule(s), fail-closed default -> %s)\n\n%s",
 			*check, len(m.Rules), m.Default.Primary(), routeSummary(m, book, *frontier))
+		return 0
+	case *accountsDump:
+		stdout.Write(modelroute.DefaultRoster().JSON())
+		return 0
+	case *accountsCheck != "":
+		r, err := modelroute.LoadRoster(*accountsCheck)
+		if err != nil {
+			fmt.Fprintln(stderr, "fak route:", err)
+			return 1
+		}
+		fmt.Fprintf(stdout, "OK  %s  (roster valid; %d account(s), %d binding(s), default -> %s)\n\n%s",
+			*accountsCheck, len(r.Accounts), len(r.Bindings), orDash(r.Default), accountSurface(r))
 		return 0
 	}
 
@@ -120,11 +135,30 @@ func runRoute(stdout, stderr io.Writer, argv []string) int {
 		red = &r
 	}
 
+	// The account switcher: bind each routed model id (scout + every member) to the
+	// concrete provider/account/upstream that serves it. This is the COMPOSITION:
+	// the route picks the abstract model ids, the roster says whose account runs them.
+	var bound *modelroute.ResolvedPlan
+	if *accounts != "" {
+		r, err := modelroute.LoadRoster(*accounts)
+		if err != nil {
+			fmt.Fprintln(stderr, "fak route:", err)
+			return 1
+		}
+		fmt.Fprintf(stderr, "fak: loaded account roster from %s\n", *accounts)
+		resolved, err := r.ResolveDecision(d)
+		if err != nil {
+			fmt.Fprintln(stderr, "fak route:", err)
+			return 1
+		}
+		bound = &resolved
+	}
+
 	if *asJSON {
-		fmt.Fprintln(stdout, routeJSON(d, red, sav))
+		fmt.Fprintln(stdout, routeJSON(d, red, sav, bound))
 		return 0
 	}
-	printRoute(stdout, d, red, sav)
+	printRoute(stdout, d, red, sav, bound)
 	return 0
 }
 
@@ -179,7 +213,7 @@ func simulateReduce(p modelroute.Plan, spec string) (modelroute.Result, error) {
 }
 
 // printRoute renders the decision (and any simulated reduction) for a human.
-func printRoute(w io.Writer, d modelroute.Decision, red *modelroute.Result, sav modelroute.Savings) {
+func printRoute(w io.Writer, d modelroute.Decision, red *modelroute.Result, sav modelroute.Savings, bound *modelroute.ResolvedPlan) {
 	s := d.Subject
 	fmt.Fprintln(w, "== fak route ==")
 	fmt.Fprintf(w, "subject     : aspect=%s tool=%s prompt_tokens=%d latency=%s complexity=%s%s\n",
@@ -201,6 +235,15 @@ func printRoute(w io.Writer, d modelroute.Decision, red *modelroute.Result, sav 
 		fmt.Fprintf(w, "reason      : %s\n", d.Plan.Reason)
 	}
 	fmt.Fprintf(w, "%s\n", sav.Headline())
+	if bound != nil {
+		fmt.Fprintf(w, "\n-- account binding (the switcher: which of YOUR accounts serves each id) --\n")
+		if bound.Scout != nil {
+			printTarget(w, "scout", *bound.Scout)
+		}
+		for _, tg := range bound.Members {
+			printTarget(w, "member", tg)
+		}
+	}
 	if red != nil {
 		fmt.Fprintf(w, "\n-- simulated reduction (stand-in member outputs) --\n")
 		fmt.Fprintf(w, "reduce=%s  members=%d\n", red.Reduce, red.Members)
@@ -216,8 +259,63 @@ func printRoute(w io.Writer, d modelroute.Decision, red *modelroute.Result, sav 
 	}
 }
 
+// printTarget renders one resolved account binding (a routed id -> the concrete
+// provider/account/upstream that serves it). It prints the credential ENV-VAR NAME,
+// never a secret, and labels the route local (residency-exempt) or remote.
+func printTarget(w io.Writer, role string, t modelroute.Target) {
+	loc := "remote"
+	if t.Local() {
+		loc = "local "
+	}
+	cred := t.CredEnv
+	if cred == "" {
+		cred = "-"
+	}
+	fmt.Fprintf(w, "  %-7s %-14s -> %-14s %-16s upstream=%-16s key=$%-20s [%s] %s\n",
+		role, t.Model, t.Account, string(t.Kind), t.UpstreamModel, cred, loc, t.EngineRoute())
+}
+
+// accountSurface renders a roster's accounts + bindings as an operator-readable table
+// for `--accounts-check`, resolving each binding so the whole switch is visible at a
+// glance. It never prints a secret - only the credential env-var name.
+func accountSurface(r modelroute.Roster) string {
+	var sb strings.Builder
+	sb.WriteString("accounts:\n")
+	for _, a := range r.Accounts {
+		loc := "remote"
+		if a.Kind == modelroute.KindLocal {
+			loc = "local "
+		}
+		base := a.BaseURL
+		if base == "" {
+			base = modelroute.KindBaseURL(a.Kind)
+		}
+		cred := a.CredEnv
+		if cred == "" {
+			cred = "-"
+		}
+		sb.WriteString(fmt.Sprintf("  %-16s %-16s [%s] key=$%-20s %s\n", a.ID, string(a.Kind), loc, cred, base))
+	}
+	sb.WriteString("\nbindings (model id -> account / upstream wire model):\n")
+	for _, b := range r.Bindings {
+		t, err := r.Resolve(b.Model)
+		if err != nil {
+			sb.WriteString(fmt.Sprintf("  %-14s -> ERROR %v\n", b.Model, err))
+			continue
+		}
+		sb.WriteString(fmt.Sprintf("  %-14s -> %-16s upstream=%-16s %s\n", b.Model, t.Account, t.UpstreamModel, t.EngineRoute()))
+	}
+	if r.Default != "" {
+		sb.WriteString(fmt.Sprintf("\n  (any unbound id) -> default account %q\n", r.Default))
+	}
+	sb.WriteString("\nresidency: a 'local' route is residency-exempt (on-box); a 'remote' route is gated " +
+		"by the engine-residency floor (a tenant/sensitive payload bound for it is denied). The credential is the\n" +
+		"named env var, dereferenced only at dispatch - never stored here.\n")
+	return sb.String()
+}
+
 // routeJSON renders the decision (and any reduction) as a stable JSON object.
-func routeJSON(d modelroute.Decision, red *modelroute.Result, sav modelroute.Savings) string {
+func routeJSON(d modelroute.Decision, red *modelroute.Result, sav modelroute.Savings, bound *modelroute.ResolvedPlan) string {
 	type memberJSON struct {
 		Model  string  `json:"model"`
 		Weight float64 `json:"weight,omitempty"`
@@ -255,8 +353,39 @@ func routeJSON(d modelroute.Decision, red *modelroute.Result, sav modelroute.Sav
 			"members": red.Members,
 		}
 	}
+	if bound != nil {
+		bj := map[string]any{"members": targetsJSON(bound.Members)}
+		if bound.Scout != nil {
+			bj["scout"] = targetJSON(*bound.Scout)
+		}
+		obj["binding"] = bj
+	}
 	b, _ := json.MarshalIndent(obj, "", "  ")
 	return string(b)
+}
+
+// targetJSON renders one resolved account binding as a stable JSON object. It carries
+// the credential ENV-VAR NAME (cred_env), never a secret, plus the local/remote flag
+// and the abi.ToolCall.Engine route the dispatcher would write.
+func targetJSON(t modelroute.Target) map[string]any {
+	return map[string]any{
+		"model":          t.Model,
+		"account":        t.Account,
+		"kind":           string(t.Kind),
+		"base_url":       t.BaseURL,
+		"cred_env":       t.CredEnv,
+		"upstream_model": t.UpstreamModel,
+		"local":          t.Local(),
+		"engine_route":   t.EngineRoute(),
+	}
+}
+
+func targetsJSON(ts []modelroute.Target) []map[string]any {
+	out := make([]map[string]any, 0, len(ts))
+	for _, t := range ts {
+		out = append(out, targetJSON(t))
+	}
+	return out
 }
 
 // routeSummary renders a manifest's rules as an operator-readable table, with a
