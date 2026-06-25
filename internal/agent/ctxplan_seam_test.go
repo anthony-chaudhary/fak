@@ -174,7 +174,7 @@ func TestCtxSeamHeuristicForecastPinsEssentials(t *testing.T) {
 		}
 	}
 	for w := range want {
-		if !contains(pins, w) {
+		if !containsString(pins, w) {
 			t.Errorf("missing expected pin %q in %v", w, pins)
 		}
 	}
@@ -308,7 +308,7 @@ func renderedHas(rs []ctxplan.Rendered, id string) bool {
 	return false
 }
 
-func contains(s []string, want string) bool {
+func containsString(s []string, want string) bool {
 	for _, v := range s {
 		if v == want {
 			return true
