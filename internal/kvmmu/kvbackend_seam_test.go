@@ -187,3 +187,29 @@ func TestRemoteL3BackendEnforcedWithoutModelDependency(t *testing.T) {
 		t.Fatalf("remote cache len after quarantine = %d, want %d", c.CacheLen(), len(prefix))
 	}
 }
+
+// TestRegisteredDefaultBackendAnswersResidencyPair is the DEFAULT-WIRING guarantee:
+// the in-process backend the kernel actually boots with (modelengine init ->
+// abi.RegisterKVBackend(model.KVBackendFor), blank-imported via internal/registrations)
+// answers the widened residency-transfer pair from the local synchronous path — stage
+// = no-op OK, restore = a TYPED MISS (this backend owns no off-box tier, so it never
+// silently recomputes). It proves #638's seam is implemented by the backend a normal
+// `fak serve` resolves through abi.KVBackendFor, not only by the test stubs.
+func TestRegisteredDefaultBackendAnswersResidencyPair(t *testing.T) {
+	ctx := context.Background()
+	m := model.NewSynthetic(synthCfg())
+	s := m.NewSession()
+
+	kv, ok := abi.KVBackendFor(s)
+	if !ok {
+		t.Fatalf("abi.KVBackendFor(*model.Session): ok=false — the in-process default is not wired")
+	}
+	st, err := kv.StageSpan(ctx, "span-A", 0, 4)
+	if err != nil || st.Outcome != abi.KVResidencyOK || st.Positions != 4 {
+		t.Fatalf("registered-default StageSpan -> %+v err=%v, want local-synchronous OK positions=4", st, err)
+	}
+	got, err := kv.RestoreSpan(ctx, "span-A")
+	if err != nil || got.Outcome != abi.KVResidencyMiss {
+		t.Fatalf("registered-default RestoreSpan -> %+v err=%v, want a typed MISS (no off-box tier, never silent recompute)", got, err)
+	}
+}
