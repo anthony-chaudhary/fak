@@ -1,0 +1,15 @@
+{
+  "profile": "agent-tool-governance-gateway/v0",
+  "case": "revoke-witness",
+  "purpose": "A poisoned or stale external witness can be revoked and dependent state is evicted or marked stale.",
+  "revocation": {
+    "request": {
+      "witness": "sha256:1111111111111111111111111111111111111111111111111111111111111111"
+    },
+    "expected": {
+      "revoked": true,
+      "local_eviction_count_min": 0,
+      "trust_epoch_increments": true
+    }
+  }
+}

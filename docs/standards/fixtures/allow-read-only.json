@@ -1,0 +1,19 @@
+{
+  "profile": "agent-tool-governance-gateway/v0",
+  "case": "allow-read-only",
+  "purpose": "A safe read-only call is allowed and can execute as proposed.",
+  "pre_execution": {
+    "request": {
+      "tool": "git_status",
+      "arguments": {},
+      "read_only": true,
+      "trace_id": "atgg-allow-1",
+      "witness": "git:HEAD"
+    },
+    "expected": {
+      "verdict": {
+        "kind": "ALLOW"
+      }
+    }
+  }
+}

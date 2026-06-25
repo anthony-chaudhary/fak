@@ -1,0 +1,26 @@
+{
+  "profile": "agent-tool-governance-gateway/v0",
+  "case": "transform-canonical-args",
+  "purpose": "Malformed but repairable arguments produce a canonical argument object and do not require a model retry.",
+  "pre_execution": {
+    "request": {
+      "tool": "open_file",
+      "arguments": [
+        "/srv/report.csv",
+        "r"
+      ],
+      "read_only": true,
+      "trace_id": "atgg-transform-1",
+      "witness": "sha256:2222222222222222222222222222222222222222222222222222222222222222"
+    },
+    "expected": {
+      "verdict": {
+        "kind": "TRANSFORM"
+      },
+      "repaired_arguments": {
+        "path": "/srv/report.csv",
+        "mode": "r"
+      }
+    }
+  }
+}

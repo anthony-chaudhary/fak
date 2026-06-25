@@ -1,0 +1,29 @@
+{
+  "profile": "agent-tool-governance-gateway/v0",
+  "case": "quarantine-result",
+  "purpose": "A poisoned or secret-marked result is held out of model-visible context while preserving an audit reference.",
+  "result_admission": {
+    "request": {
+      "tool": "web_fetch",
+      "result": {
+        "content": "ATGG_FAKE_SECRET_MARKER for conformance only"
+      },
+      "trace_id": "atgg-quarantine-1",
+      "witness": "https://example.invalid/page"
+    },
+    "expected": {
+      "verdict": {
+        "kind": "QUARANTINE",
+        "reason": "SECRET_EXFIL",
+        "disposition": "TERMINAL"
+      },
+      "result": {
+        "status": "OK",
+        "content": "",
+        "meta": {
+          "admit": "quarantined"
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,21 @@
+{
+  "profile": "agent-tool-governance-gateway/v0",
+  "case": "deny-policy-block",
+  "purpose": "A dangerous or disallowed tool call is refused by policy with a stable reason and terminal disposition.",
+  "pre_execution": {
+    "request": {
+      "tool": "git_push",
+      "arguments": {},
+      "read_only": false,
+      "trace_id": "atgg-deny-1",
+      "witness": "git:HEAD"
+    },
+    "expected": {
+      "verdict": {
+        "kind": "DENY",
+        "reason": "POLICY_BLOCK",
+        "disposition": "TERMINAL"
+      }
+    }
+  }
+}
