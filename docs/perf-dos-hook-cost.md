@@ -5,8 +5,9 @@ description: "A measured proposal to reduce per-agent-turn latency from spawned 
 
 # Proposal: cut the per-tool-call DOS hook cost (upstream `dos-kernel`)
 
-**Status:** proposal · **Target repo:** `anthony-chaudhary/dos-kernel` · **Filed from:**
-fleet-public host-slowness diagnosis (2026-06-21)
+**Status:** local matcher mitigation applied (2026-06-25); kernel cache/transport
+work remains a proposal · **Target repo:** `anthony-chaudhary/dos-kernel` ·
+**Filed from:** fleet-public host-slowness diagnosis (2026-06-21)
 
 ## The problem, measured
 
@@ -51,6 +52,10 @@ Two properties make this the dominant felt cost:
    typical session reads are a large share of calls, so a large share of the
    spawn tax buys nothing.
 
+   **Local mitigation now applied:** `.claude/settings.json` scopes the
+   `PreToolUse` DOS hook to mutating tools plus DOS MCP calls:
+   `Bash|Write|Edit|MultiEdit|NotebookEdit|mcp__.*dos.*`.
+
 Multiply by N concurrent sessions on the host and the machine *feels* sluggish
 while every gauge reads idle — death by a thousand 30 ms spawns.
 
@@ -66,7 +71,7 @@ while every gauge reads idle — death by a thousand 30 ms spawns.
 Stop spawning `dos hook` on read-only tools. In `.claude/settings.json`:
 
 ```json
-"PreToolUse":  [{ "matcher": "Bash|Edit|Write|NotebookEdit|mcp__.*dos.*",
+"PreToolUse":  [{ "matcher": "Bash|Write|Edit|MultiEdit|NotebookEdit|mcp__.*dos.*",
                   "hooks": [{ "command": "dos hook pretool --workspace ." }] }]
 ```
 
@@ -109,7 +114,9 @@ The KPI proves the in-process boundary is **5,000–39,000× faster**. Two shape
 
 ## Recommended sequencing
 
-1. **Now (operator):** ship #1 with a kernel-published "must-observe" tool list.
+1. **Done locally (operator):** #1 is applied in `.claude/settings.json` for
+   PreToolUse. Kernel should still publish the "must-observe" tool list so other
+   workspaces can scope this matcher without guessing.
 2. **Near (kernel):** ship #2 — biggest win per line of kernel change, no harness
    dependency, fully backward-compatible (cache miss == today's behavior).
 3. **Later (kernel + harness):** #3 async `posttool`, then resident `pretool`.
