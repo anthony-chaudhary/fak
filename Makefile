@@ -1,6 +1,6 @@
 # Makefile — portable build/test entrypoints (unit 12). On Windows without make,
 # use scripts/ci.ps1, which this mirrors.
-.PHONY: ci build vet test test-fast bench status status-check claims-lint salience index-sync model gofmt-check hygiene demo-audit demo-tool-tests demo-scorecards demo-smoke demo-headless-smoke demo-live-status demo-https-status demo-published-status demo-published-check demo-readiness-status gated-tests cuda-check cuda-build cuda-test cuda-accept
+.PHONY: ci build vet test test-fast bench status status-check dogfood-recent claims-lint salience index-sync model gofmt-check hygiene demo-audit demo-tool-tests demo-scorecards demo-smoke demo-headless-smoke demo-live-status demo-https-status demo-published-status demo-published-check demo-readiness-status gated-tests cuda-check cuda-build cuda-test cuda-accept
 
 # ci is THE local green gate (AGENTS.md: "Green = make ci"). It must stay aligned with
 # .github/workflows/ci.yml's HARD steps so a pre-push `make ci` fails on the same things
@@ -65,6 +65,9 @@ status:
 
 status-check:
 	@python3 tools/fresh_status.py --check
+
+dogfood-recent:
+	@python3 tools/recent_feature_dogfood.py
 
 # model: export the real SmolLM2-135M weights the in-kernel engine (--engine inkernel)
 # loads from FAK_MODEL_DIR. One-time; needs Python. See GETTING-STARTED.md §4b.
@@ -168,6 +171,8 @@ demo-scorecards:
 	@python3 tools/demo_robustness_scorecard.py
 	@python3 tools/demo_robustness_scorecard.py --check-doc
 	@python3 tools/code_slop_scorecard_test.py
+	@python3 tools/steerability_scorecard_test.py
+	@python3 tools/steerability_scorecard.py >/dev/null
 	@echo "demo-scorecards OK"
 # code-slop scorecard: only the unit-test line gates here for now. The bare run +
 # --check-doc both exit 1 while slop-debt > 0 (the scorecard reports honestly), so

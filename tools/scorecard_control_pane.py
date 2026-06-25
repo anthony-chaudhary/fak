@@ -77,6 +77,7 @@ SCORECARDS: list[dict[str, str]] = [
     {"key": "persona", "debt": "persona_debt", "script": "persona_readiness_scorecard.py", "label": "persona"},
     {"key": "stability", "debt": "stability_debt", "script": "stability_scorecard.py", "label": "stability"},
     {"key": "slop", "debt": "slop_debt", "script": "code_slop_scorecard.py", "label": "code-slop"},
+    {"key": "steer", "debt": "steerability_debt", "script": "steerability_scorecard.py", "label": "steerability"},
 ]
 
 

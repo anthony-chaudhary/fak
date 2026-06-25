@@ -37,6 +37,7 @@ down by adding the real thing — never by gaming the detector.**
 | agent-readiness | `tools/agent_readiness_scorecard.py` | `friction_debt` | can an AI agent adopt fak (one persona) |
 | product | `tools/product_scorecard.py` | `product_debt` | can a person use each concept today |
 | persona | `tools/persona_readiness_scorecard.py` | `persona_debt` | are the top-10 personas served |
+| steerability | `tools/steerability_scorecard.py` | `steerability_debt` | does steering effort stay FLAT as the repo grows (growth-invariant) |
 
 The ones that fold into the unified ratchet are wired in
 `tools/scorecard_control_pane.py` (`SCORECARDS`), which sums every `*-debt` into one
@@ -158,6 +159,45 @@ package is fixed by a real test, not a stubbed one. If "fixing" a defect would m
 gaming the substring match instead of improving the surface, **stop — that's not a
 real gap**, and weakening the check to make it green is the one move that turns the
 whole family into theater.
+
+## The growth-invariant KPI shape (when "stays constant as it grows" is the goal)
+
+Most scorecards measure an *absolute* surface and report a **count** — and that count
+mechanically WORSENS as the repo grows (a 3×-bigger tree has ~3× the surfaces, so the
+raw defect count climbs even when discipline is unchanged). That is correct for "how
+clean is the tree right now," but WRONG when the goal is "does effort stay *flat* as we
+grow" (steerability, or any future "constant-as-it-scales" surface). For that goal:
+
+1. **Every KPI is a ratio, density, or distribution percentile — never a raw count.** A
+   2×-larger surface with the same discipline must score *identically*. A percentile is
+   definitionally scale-free; a rate (offenders / total) is scale-free; a Gini is
+   scale-free in value. A raw count is not — drop it.
+
+2. **The headline is a 0–100 INDEX (a weighted mean of the invariant KPIs), not a debt
+   pile.** A debt count can't answer "is effort flat" because it trends with size. The
+   index can. You still emit a `*-debt` integer for control-pane membership, but —
+
+3. **A defect is emitted only when an invariant rate crosses a FIXED threshold.** The
+   *score* is the rate; the *debt* is the count of threshold crossings. So the debt
+   stays orthogonal to size: a clean small tree and a clean 10×-bigger tree both emit 0.
+
+4. **DROP any signal that is secretly size-coupled.** Some ratios still trend with
+   growth: a *spread* (files-per-package) widens as packages mature; a *mean*
+   (LOC-per-package) drifts as the denominator grows non-linearly; a *denominator-coupled
+   share* (one package's fan-in / total packages) falls "for free" as the repo grows. If
+   it moves from growth alone with no change in discipline, it is SOFT (advisory) or
+   dropped — never a gate.
+
+5. **Stay orthogonal to count-based siblings in the shared portfolio.** If another
+   scorecard already emits HARD debt for a defect class (code_quality owns god-files and
+   tests), do NOT re-emit it — score it on the invariant rate (SOFT) and let the sibling
+   own the count. Re-emitting double-counts the same defect in `total_debt`.
+
+`steerability` is the reference instance: its only HARD KPIs are the two whose cheapest
+fix is genuinely real (split a dispatch monolith; commit the ratchet) — both 0 on a
+disciplined tree — and its value lives in the index + the SOFT drift signals.
+
+---
 
 Keep this skill refined as the method evolves: when a new scorecard teaches a better
 KPI shape, a sharper cross-check, or a new failure mode (a SOFT signal that should be
