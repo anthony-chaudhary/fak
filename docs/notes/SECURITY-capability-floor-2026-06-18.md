@@ -33,6 +33,13 @@ manifest schema + author/validate workflow). Generated 2026-06-18.
             └─────────────────────────────────────────────────────────────────┘
 ```
 
+> **"ring-3" in the visual.** *ring-3* is the least-privileged CPU protection ring
+> (ordinary userspace, as opposed to ring-0 kernel mode). The visual casts the model as
+> that unprivileged userspace and the harness as the kernel adjudicating every syscall
+> (tool call) from evidence the model did not author. The ring-3 inversion in fuller
+> form — model as untrusted ring-3 userspace, harness as kernel — is in
+> [`docs/notes/EXPLAINER-trust-floor-two-lenses-2026-06-17.md`](EXPLAINER-trust-floor-two-lenses-2026-06-17.md).
+
 The deny is **structural**, not a model judgement: an injection that talks the model
 into proposing `rm -rf` changes nothing — the call is refused at the boundary. The
 refused call never reaches the shell, the filesystem, or the network.
