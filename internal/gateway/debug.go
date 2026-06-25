@@ -64,6 +64,16 @@ type debugKernelVars struct {
 type debugMetricsVars struct {
 	HTTP       []debugHTTPMetricVars      `json:"http"`
 	Operations []debugOperationMetricVars `json:"operations"`
+	Compaction debugCompactionVars        `json:"compaction"`
+}
+
+type debugCompactionVars struct {
+	Attempts                    map[string]uint64 `json:"attempts"`
+	BailReasons                 map[string]uint64 `json:"bail_reasons"`
+	DroppedTurns                uint64            `json:"dropped_turns"`
+	ShedTokens                  uint64            `json:"shed_tokens"`
+	CacheReadTokens             uint64            `json:"cache_read_tokens"`
+	LastPostFireCacheReadTokens float64           `json:"last_post_fire_cache_read_tokens"`
 }
 
 type debugHTTPMetricVars struct {
@@ -124,6 +134,7 @@ func (s *Server) debugVars(now time.Time) debugVarsResponse {
 		ratio = float64(c.VDSOHits) / float64(c.Submits)
 	}
 	httpRows, opRows := m.snapshot()
+	compact := m.compactionSnapshotData()
 
 	return debugVarsResponse{
 		Gateway: debugGatewayVars{
@@ -171,8 +182,24 @@ func (s *Server) debugVars(now time.Time) debugVarsResponse {
 		Metrics: debugMetricsVars{
 			HTTP:       debugHTTPRows(httpRows),
 			Operations: debugOperationRows(opRows),
+			Compaction: debugCompactionVars{
+				Attempts:                    debugStableCompactionAttempts(compact.attempts),
+				BailReasons:                 compact.bailReasons,
+				DroppedTurns:                compact.dropped,
+				ShedTokens:                  compact.shed,
+				CacheReadTokens:             compact.cacheReads,
+				LastPostFireCacheReadTokens: compact.lastCacheRd,
+			},
 		},
 	}
+}
+
+func debugStableCompactionAttempts(in map[string]uint64) map[string]uint64 {
+	out := map[string]uint64{}
+	for _, outcome := range []string{"fired", "bailed", "off"} {
+		out[outcome] = in[outcome]
+	}
+	return out
 }
 
 func debugHTTPRows(rows []httpMetricSnapshot) []debugHTTPMetricVars {

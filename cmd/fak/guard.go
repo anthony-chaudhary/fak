@@ -710,6 +710,15 @@ func formatAuditSummary(sum gateway.AdjudicationSummary) string {
 		fmt.Fprintf(&b, "fak guard: provider cache — %d prompt token(s) served from cache across %d turn(s) (cache_control preserved through the kernel hop)\n",
 			sum.CachedPromptTokens, sum.CachedTurns)
 	}
+	if sum.CompactionFired > 0 || sum.CompactionBailed > 0 || sum.CompactionOff > 0 {
+		fmt.Fprintf(&b, "fak guard: compaction — %d fired, %d bailed, %d off; shed %d token(s), cache_read %d token(s) total, last post-fire cache_read %.0f\n",
+			sum.CompactionFired,
+			sum.CompactionBailed,
+			sum.CompactionOff,
+			sum.CompactionShedTokens,
+			sum.CompactionCacheReadTokens,
+			sum.LastCompactionCacheRead)
+	}
 	if len(sum.ByReason) > 0 {
 		reasons := make([]string, 0, len(sum.ByReason))
 		for r := range sum.ByReason {

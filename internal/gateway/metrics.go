@@ -11,6 +11,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/anthony-chaudhary/fak/internal/agent"
 	"github.com/anthony-chaudhary/fak/internal/blob"
 	"github.com/anthony-chaudhary/fak/internal/cachemeta"
 	"github.com/anthony-chaudhary/fak/internal/cacheobs"
@@ -54,6 +55,21 @@ type gatewayMetrics struct {
 	inferCachedTokens uint64
 	inferCachedHits   uint64 // served turns whose prompt got a provider cache READ (>0 cached tokens)
 	inferDecodeSecs   float64
+
+	// compactMu guards the history-compaction accumulators. Compaction (the
+	// --compact-history-budget lever on the Anthropic passthrough) is otherwise INVISIBLE:
+	// it returns identity on any bail with no signal, so a silent failure (never fires,
+	// always bails, or fires but BREAKS the provider cache) reads exactly like success. These
+	// make the fired/bailed/off split, the bail reason, the claimed shed, and the BILLING
+	// TRUTH (the provider cache_read on the most recent compacted turn) all scrapeable. Kept
+	// off inferenceMu — different hot path, no lock coupling.
+	compactMu          sync.Mutex
+	compactAttempts    map[string]uint64 // outcome -> count: fired | bailed | off
+	compactBailReasons map[string]uint64 // CompactReason* -> count (why a bail happened)
+	compactDropped     uint64            // whole messages stubbed out across all fires
+	compactShed        uint64            // estimated tokens removed across all fires (CLAIMED savings)
+	compactCacheReads  uint64            // sum of provider cache_read on compacted turns (BILLING TRUTH)
+	compactLastCacheRd float64           // provider cache_read on the MOST RECENT compacted turn
 }
 
 type inflightEntry struct {
@@ -83,11 +99,49 @@ type latencyCounter struct {
 
 func newGatewayMetrics(now time.Time) *gatewayMetrics {
 	return &gatewayMetrics{
-		start:       now,
-		http:        map[httpMetricKey]*latencyCounter{},
-		operations:  map[operationMetricKey]*latencyCounter{},
-		inflightReq: map[uint64]inflightEntry{},
+		start:              now,
+		http:               map[httpMetricKey]*latencyCounter{},
+		operations:         map[operationMetricKey]*latencyCounter{},
+		inflightReq:        map[uint64]inflightEntry{},
+		compactAttempts:    map[string]uint64{},
+		compactBailReasons: map[string]uint64{},
 	}
+}
+
+// observeCompaction records the outcome of one history-compaction attempt. off=true means the
+// budget was unset (the lever is configured off); otherwise the outcome's Reason decides fired
+// vs bailed and which bail-reason bucket increments.
+func (m *gatewayMetrics) observeCompaction(out agent.CompactOutcome, off bool) {
+	if m == nil {
+		return
+	}
+	m.compactMu.Lock()
+	defer m.compactMu.Unlock()
+	switch {
+	case off:
+		m.compactAttempts["off"]++
+	case out.Reason == agent.CompactReasonNone:
+		m.compactAttempts["fired"]++
+		m.compactDropped += uint64(out.Dropped)
+		m.compactShed += uint64(out.ShedTokens)
+	default:
+		m.compactAttempts["bailed"]++
+		m.compactBailReasons[out.Reason]++
+	}
+}
+
+// recordCompactionCacheRead records the provider's cache_read_input_tokens on a turn whose body
+// WAS compacted — the billing-truth signal. If compaction broke the cache, this craters to ~0
+// even though the in-function byte-equality self-check passed; only the provider's counter
+// proves the cache was actually reused after the splice.
+func (m *gatewayMetrics) recordCompactionCacheRead(cacheRead int) {
+	if m == nil {
+		return
+	}
+	m.compactMu.Lock()
+	m.compactCacheReads += uint64(cacheRead)
+	m.compactLastCacheRd = float64(cacheRead)
+	m.compactMu.Unlock()
 }
 
 func (m *gatewayMetrics) observeHTTP(route, method string, status int, dur time.Duration) {
@@ -163,6 +217,19 @@ type AdjudicationSummary struct {
 	// operator SEES the cache reuse rather than having to scrape /metrics.
 	CachedPromptTokens uint64 `json:"cached_prompt_tokens"`
 	CachedTurns        uint64 `json:"cached_turns"`
+
+	// Compaction* folds the Anthropic history-compaction visibility into the same guard
+	// exit summary. Fired/Bailed/Off report what the rewrite attempted; ShedTokens is
+	// the claimed prompt reduction; CompactionCacheReadTokens and LastCompactionCacheRead
+	// are the provider billing-truth counters proving whether the post-splice turn still
+	// hit the remote prompt cache.
+	CompactionFired           uint64  `json:"compaction_fired"`
+	CompactionBailed          uint64  `json:"compaction_bailed"`
+	CompactionOff             uint64  `json:"compaction_off"`
+	CompactionDroppedTurns    uint64  `json:"compaction_dropped_turns"`
+	CompactionShedTokens      uint64  `json:"compaction_shed_tokens"`
+	CompactionCacheReadTokens uint64  `json:"compaction_cache_read_tokens"`
+	LastCompactionCacheRead   float64 `json:"last_compaction_cache_read"`
 }
 
 // adjudicationSummary folds the live operation counters into a verdict roll-up.
@@ -177,6 +244,16 @@ func (m *gatewayMetrics) adjudicationSummary() AdjudicationSummary {
 	sum.CachedPromptTokens = m.inferCachedTokens
 	sum.CachedTurns = m.inferCachedHits
 	m.inferenceMu.Unlock()
+
+	comp := m.compactionSnapshotData()
+	sum.CompactionFired = comp.attempts["fired"]
+	sum.CompactionBailed = comp.attempts["bailed"]
+	sum.CompactionOff = comp.attempts["off"]
+	sum.CompactionDroppedTurns = comp.dropped
+	sum.CompactionShedTokens = comp.shed
+	sum.CompactionCacheReadTokens = comp.cacheReads
+	sum.LastCompactionCacheRead = comp.lastCacheRd
+
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	for key, c := range m.operations {
@@ -276,6 +353,35 @@ func (m *gatewayMetrics) observeInference(promptTok, complTok, cachedTok int, fi
 		m.inferDecodeSecs += dur.Seconds()
 	}
 	m.inferenceMu.Unlock()
+}
+
+func (s *Server) logInferenceTurn(traceID, wire string, stream bool, usage agent.Usage, finishReason string, dur time.Duration, compacted bool) {
+	if s == nil || s.logf == nil {
+		return
+	}
+	ev := map[string]any{
+		"event":                       "gateway_inference_turn",
+		"wire":                        wire,
+		"stream":                      stream,
+		"model":                       s.model,
+		"finish_reason":               finishReason,
+		"duration_ms":                 float64(dur.Microseconds()) / 1000.0,
+		"prompt_tokens":               usage.PromptTokens,
+		"completion_tokens":           usage.CompletionTokens,
+		"cached_prompt_tokens":        usage.CachedPromptTokens(),
+		"cache_read_input_tokens":     usage.CacheReadInputTokens,
+		"cache_creation_input_tokens": usage.CacheCreationInputTokens,
+		"total_tokens":                usage.TotalTokens,
+		"compaction_fired":            compacted,
+	}
+	if trace := strings.TrimSpace(traceID); trace != "" {
+		ev["trace_id"] = trace
+	}
+	b, err := json.Marshal(ev)
+	if err != nil {
+		return
+	}
+	s.logf("%s", b)
 }
 
 // beginInflight records a request as live and returns a token to release it with.
@@ -469,6 +575,7 @@ func (s *Server) renderMetrics() string {
 	writeBlobMetrics(&b)
 	writeKVPrefixMetrics(&b)
 	inf := m.writeInferenceMetrics(&b)
+	m.writeCompactionMetrics(&b)
 
 	// Fleet-value (hero-axis) KPIs, derived live from the kernel counters + the
 	// inference accumulators above. fak's product axis is agent-fleet serving
@@ -597,6 +704,15 @@ type inferenceSnapshot struct {
 	decodeSecs float64
 }
 
+type compactionSnapshot struct {
+	attempts    map[string]uint64
+	bailReasons map[string]uint64
+	dropped     uint64
+	shed        uint64
+	cacheReads  uint64
+	lastCacheRd float64
+}
+
 func (m *gatewayMetrics) inferenceSnapshotData() inferenceSnapshot {
 	m.inferenceMu.Lock()
 	defer m.inferenceMu.Unlock()
@@ -611,6 +727,33 @@ func (m *gatewayMetrics) inferenceSnapshotData() inferenceSnapshot {
 		cachedTok:  m.inferCachedTokens,
 		cachedHits: m.inferCachedHits,
 		decodeSecs: m.inferDecodeSecs,
+	}
+}
+
+func (m *gatewayMetrics) compactionSnapshotData() compactionSnapshot {
+	if m == nil {
+		return compactionSnapshot{
+			attempts:    map[string]uint64{},
+			bailReasons: map[string]uint64{},
+		}
+	}
+	m.compactMu.Lock()
+	defer m.compactMu.Unlock()
+	attempts := map[string]uint64{}
+	for k, v := range m.compactAttempts {
+		attempts[k] = v
+	}
+	bailReasons := map[string]uint64{}
+	for k, v := range m.compactBailReasons {
+		bailReasons[k] = v
+	}
+	return compactionSnapshot{
+		attempts:    attempts,
+		bailReasons: bailReasons,
+		dropped:     m.compactDropped,
+		shed:        m.compactShed,
+		cacheReads:  m.compactCacheReads,
+		lastCacheRd: m.compactLastCacheRd,
 	}
 }
 
@@ -759,6 +902,41 @@ func (m *gatewayMetrics) snapshot() ([]httpMetricSnapshot, []operationMetricSnap
 		return a.by < b.by
 	})
 	return httpRows, opRows
+}
+
+// writeCompactionMetrics renders the history-compaction family — the observability that turns
+// a silent compaction failure into a scrapeable signal. The decisive one is
+// fak_gateway_compaction_post_fire_cache_read_tokens: the provider's cache_read on the most
+// recent compacted turn. The in-function byte-equality check proves OUR bytes match OUR prefix;
+// only this provider counter proves the PROVIDER actually reused the cache after the splice.
+// A fire (attempts{outcome="fired"} climbing) while this gauge craters to ~0 is compaction
+// COSTING money, not saving it — the one failure the whole design exists to surface.
+func (m *gatewayMetrics) writeCompactionMetrics(b *strings.Builder) {
+	snap := m.compactionSnapshotData()
+
+	writeHelpType(b, "fak_gateway_compaction_attempts_total",
+		"Anthropic history-compaction attempts by outcome: fired (body rewritten), bailed (returned identity), off (budget unset).", "counter")
+	for _, o := range []string{"fired", "bailed", "off"} { // stable order; emit at 0 so the panel exists pre-first-fire
+		fmt.Fprintf(b, "fak_gateway_compaction_attempts_total{outcome=%q} %d\n", o, snap.attempts[o])
+	}
+
+	writeHelpType(b, "fak_gateway_compaction_bail_reason_total",
+		"Why a compaction attempt bailed to identity (closed set: under_budget|non_json|no_messages_key|too_few_msgs|no_breakpoint|window_no_drop|splice_failed|redecode_failed|prefix_mismatch). splice_failed/redecode_failed/prefix_mismatch should stay 0 — nonzero is a splice bug.", "counter")
+	rs := make([]string, 0, len(snap.bailReasons))
+	for r := range snap.bailReasons {
+		rs = append(rs, r)
+	}
+	sort.Strings(rs)
+	for _, r := range rs {
+		fmt.Fprintf(b, "fak_gateway_compaction_bail_reason_total{reason=%q} %d\n", promQuote(r), snap.bailReasons[r])
+	}
+
+	writeCounter(b, "fak_gateway_compaction_dropped_turns_total", "Whole messages stubbed out across all fires.", int64(snap.dropped))
+	writeCounter(b, "fak_gateway_compaction_shed_tokens_total", "Estimated tokens removed from outbound bodies across all fires (CLAIMED savings; same ~4ch/token currency as the budget and provider input_tokens).", int64(snap.shed))
+	writeCounter(b, "fak_gateway_compaction_cache_read_tokens_total", "Cumulative provider cache_read_input_tokens on compacted turns — the BILLING-TRUTH counterpart of shed_tokens. If shed climbs but this stays flat the splice is producing a body the provider re-bills.", int64(snap.cacheReads))
+	writeHelpType(b, "fak_gateway_compaction_post_fire_cache_read_tokens",
+		"Provider cache_read_input_tokens on the MOST RECENT compacted turn — the billing-truth check that compaction did not break the cache. Cratering to ~0 while compaction_attempts{outcome=fired} climbs means the cache broke and every fire is re-billing the prompt.", "gauge")
+	fmt.Fprintf(b, "fak_gateway_compaction_post_fire_cache_read_tokens %s\n", promFloat(snap.lastCacheRd))
 }
 
 func writeHelpType(b *strings.Builder, name, help, typ string) {

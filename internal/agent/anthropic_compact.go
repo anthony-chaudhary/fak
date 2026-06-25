@@ -15,8 +15,12 @@ package agent
 // prefix is copied verbatim (a memcpy), never re-marshalled. The load-bearing invariant:
 //
 //	The protected prefix = every whole message up to AND INCLUDING the message that holds
-//	the LAST cache_control breakpoint. Only whole messages strictly AFTER it may be
-//	dropped/stubbed. On ANY ambiguity the function returns its input UNCHANGED (identity).
+//	the FIRST cache_control breakpoint (the STABLE cached head the provider reuses every
+//	turn). Whole MIDDLE messages between it and the recent kept window may be dropped/stubbed
+//	— that middle is the un-cacheable span the provider re-bills anyway. On ANY ambiguity the
+//	function returns its input UNCHANGED (identity). Anchoring on the FIRST breakpoint (not
+//	the last) is what lets compaction fire on real Claude Code traffic, which marks both the
+//	static head AND recent turns (see firstBreakpointMessage).
 //
 // Protecting at WHOLE-MESSAGE granularity (rather than at the block where the breakpoint
 // sits) is the trick that keeps the splice a pure byte copy: a content array is never
@@ -40,32 +44,66 @@ import (
 // prefix and the kept recent window.
 const compactStubPrefix = "[fak] compacted "
 
-// CompactAnthropicHistory rewrites an outbound Anthropic /v1/messages body so the byte
-// range from the start through the LAST message that carries a cache_control breakpoint is
-// copied VERBATIM, and only whole messages AFTER it are dropped (replaced by one stub
-// message) to bring the compactible suffix under budget (a resident-token target, ~4
-// chars/token to match EstimateAnthropicTokens).
+// Compaction bail-reason vocabulary — the closed set of identity-return causes, surfaced on
+// CompactOutcome so the gateway can label a metric and an operator can see WHY compaction did
+// nothing (silence must not read as success). CompactReasonNone means the body was rewritten.
+const (
+	CompactReasonNone           = ""             // FIRED: a rewrite happened (Dropped/ShedTokens meaningful)
+	CompactReasonUnderBudget    = "under_budget" // budget<=0, or the compactible suffix already fits
+	CompactReasonNonJSON        = "non_json"     // body is not a JSON object
+	CompactReasonNoMsgsKey      = "no_messages_key"
+	CompactReasonTooFewMsgs     = "too_few_msgs"   // < 3 messages — nothing safe to drop
+	CompactReasonNoBreakpoint   = "no_breakpoint"  // no cache_control to anchor the protected prefix
+	CompactReasonWindowNoDrop   = "window_no_drop" // the kept window swallowed the whole suffix
+	CompactReasonSpliceFailed   = "splice_failed"
+	CompactReasonRedecodeFail   = "redecode_failed" // the spliced body failed to re-decode
+	CompactReasonPrefixMismatch = "prefix_mismatch" // the splice changed the protected prefix bytes
+)
+
+// CompactOutcome is the observable verdict of one compaction attempt. Reason==CompactReasonNone
+// means FIRED — Dropped (whole messages stubbed out) and ShedTokens (estimated tokens removed
+// from the outbound body, same ~4-chars/token currency as the budget) are then meaningful. Any
+// other Reason means the body was returned unchanged (identity), and Dropped/ShedTokens are 0.
+type CompactOutcome struct {
+	Reason     string
+	Dropped    int
+	ShedTokens int
+}
+
+// CompactAnthropicHistory rewrites an outbound Anthropic /v1/messages body so the byte range
+// from the start through the protected prefix (the FIRST cache_control breakpoint message — the
+// stable cached head) is copied VERBATIM, and whole middle messages between it and the recent
+// kept window are dropped (replaced by one stub) to bring the compactible span under budget (a
+// resident-token target, ~4 chars/token to match EstimateAnthropicTokens).
 //
-// It returns raw UNCHANGED — the fail-safe identity — whenever it cannot prove the rewrite
-// is both cache-safe and well-formed: budget <= 0, non-JSON, no messages array, fewer than
-// three messages, no cache_control breakpoint to anchor the protected prefix, the
-// compactible suffix already fits, or the spliced result fails to re-decode. The prefix
-// bytes of a non-identity result are guaranteed equal to the input's prefix bytes.
+// It returns raw UNCHANGED — the fail-safe identity — whenever it cannot prove the rewrite is
+// both cache-safe and well-formed (see the CompactReason* vocabulary). The prefix bytes of a
+// non-identity result are guaranteed equal to the input's prefix bytes. This is the byte-only
+// wrapper; CompactAnthropicHistoryWithOutcome additionally reports WHY it bailed / how much it
+// shed, for observability.
 func CompactAnthropicHistory(raw []byte, budget int) []byte {
+	out, _ := CompactAnthropicHistoryWithOutcome(raw, budget)
+	return out
+}
+
+// CompactAnthropicHistoryWithOutcome is CompactAnthropicHistory plus the observable outcome
+// (fired vs the labeled bail reason, and the dropped-turn / shed-token counts on a fire). The
+// gateway uses it to emit the compaction metric family; the byte-level guarantees are identical.
+func CompactAnthropicHistoryWithOutcome(raw []byte, budget int) ([]byte, CompactOutcome) {
 	if budget <= 0 || len(raw) == 0 {
-		return raw
+		return raw, CompactOutcome{Reason: CompactReasonUnderBudget}
 	}
 	var obj map[string]json.RawMessage
 	if err := json.Unmarshal(raw, &obj); err != nil {
-		return raw // not a JSON object — leave it alone
+		return raw, CompactOutcome{Reason: CompactReasonNonJSON} // not a JSON object — leave it alone
 	}
 	msgsRaw, ok := obj["messages"]
 	if !ok {
-		return raw
+		return raw, CompactOutcome{Reason: CompactReasonNoMsgsKey}
 	}
 	elems, spans, ok := decodeArrayElements(raw, msgsRaw)
 	if !ok || len(elems) < 3 {
-		return raw // nothing safe to compact
+		return raw, CompactOutcome{Reason: CompactReasonTooFewMsgs} // nothing safe to compact
 	}
 
 	// 1. Anchor the protected prefix on the FIRST cache_control breakpoint message — the
@@ -85,7 +123,7 @@ func CompactAnthropicHistory(raw []byte, budget int) []byte {
 	pfxEnd := firstBreakpointMessage(elems)
 	sysHasCC := rawHasCacheControl(obj["system"])
 	if pfxEnd < 0 && !sysHasCC {
-		return raw // no breakpoint to anchor on — identity
+		return raw, CompactOutcome{Reason: CompactReasonNoBreakpoint} // no anchor — identity
 	}
 	// When only `system` holds the cache, the protected message prefix is empty (-1):
 	// every message is compactible. Otherwise it ends at the FIRST breakpoint message (the
@@ -97,7 +135,7 @@ func CompactAnthropicHistory(raw []byte, budget int) []byte {
 		suffixTokens += len(elems[i]) / 4
 	}
 	if suffixTokens <= budget {
-		return raw
+		return raw, CompactOutcome{Reason: CompactReasonUnderBudget}
 	}
 
 	// 3. Choose the kept recent window: walk from the END accumulating tokens until the
@@ -106,7 +144,7 @@ func CompactAnthropicHistory(raw []byte, budget int) []byte {
 	//    tool_use turn before it). Everything between pfxEnd+1 and keepStart is dropped.
 	keepStart := chooseKeptWindow(elems, pfxEnd+1, budget)
 	if keepStart <= pfxEnd+1 || keepStart >= len(elems) {
-		return raw // nothing actually drops, or the window is empty (budget < one message) — identity
+		return raw, CompactOutcome{Reason: CompactReasonWindowNoDrop} // nothing drops / empty window
 	}
 
 	// 3b. Role alternation (F7): the synthetic stub is one message inserted BETWEEN the
@@ -140,41 +178,53 @@ func CompactAnthropicHistory(raw []byte, budget int) []byte {
 		if keepStart+1 < len(elems) {
 			keepStart++
 		} else {
-			return raw // cannot fix alternation without emptying the window — fail safe
+			return raw, CompactOutcome{Reason: CompactReasonWindowNoDrop} // can't fix alternation — fail safe
 		}
 	}
 	if keepStart <= pfxEnd+1 {
-		return raw // the alternation snap swallowed the whole drop — identity
+		return raw, CompactOutcome{Reason: CompactReasonWindowNoDrop} // snap swallowed the drop — identity
 	}
 	// A kept window that opens on a user tool_result still needs its assistant tool_use; the
 	// snap above only moves the boundary FORWARD, so re-assert the orphan guard once more.
 	if messageHasToolResult(elems[keepStart]) {
-		return raw // would orphan a tool_result after the role snap — fail safe
+		return raw, CompactOutcome{Reason: CompactReasonWindowNoDrop} // would orphan a tool_result — fail safe
 	}
 	dropped := keepStart - (pfxEnd + 1)
+
+	// shedTokens: the estimated tokens removed from the outbound body — the sum over the dropped
+	// MIDDLE [pfxEnd+1, keepStart), minus the stub's own ~cost. Same ~4-chars/token currency as
+	// the budget and the provider input_tokens, so it is the CLAIMED-savings half of the
+	// billing-truth comparison (vs the provider's cache_read on the same turn).
+	shedTokens := 0
+	for i := pfxEnd + 1; i < keepStart; i++ {
+		shedTokens += len(elems[i]) / 4
+	}
+	if shedTokens -= compactStubTokenCost(dropped); shedTokens < 0 {
+		shedTokens = 0
+	}
 
 	// 4. Splice on ORIGINAL bytes. The prefix span [0, spans[pfxEnd].end) (or just the
 	//    array-open when pfxEnd<0) is copied verbatim; then the stub; then the kept
 	//    elements verbatim; then the verbatim tail from the array close onward.
 	out, ok := spliceCompacted(raw, spans, pfxEnd, keepStart, len(elems), dropped, stubRole)
 	if !ok {
-		return raw
+		return raw, CompactOutcome{Reason: CompactReasonSpliceFailed}
 	}
 
 	// 5. Prove it: the result must still decode as a valid Messages request, and the
 	//    protected prefix bytes must be byte-identical to the input. Either failing is a
 	//    bug in the splice, not a reason to ship a broken/cache-busting body — fall back.
 	if _, err := DecodeAnthropicMessagesRequest(out); err != nil {
-		return raw
+		return raw, CompactOutcome{Reason: CompactReasonRedecodeFail}
 	}
 	prefixEnd := arrayContentStart(spans) // byte offset just inside `[`
 	if pfxEnd >= 0 {
 		prefixEnd = spans[pfxEnd].end
 	}
 	if prefixEnd > len(out) || !bytes.Equal(raw[:prefixEnd], out[:prefixEnd]) {
-		return raw
+		return raw, CompactOutcome{Reason: CompactReasonPrefixMismatch}
 	}
-	return out
+	return out, CompactOutcome{Reason: CompactReasonNone, Dropped: dropped, ShedTokens: shedTokens}
 }
 
 // elementSpan is the [start,end) byte range of one messages[] element within the original
@@ -364,6 +414,14 @@ func messageRole(el json.RawMessage) string {
 		return ""
 	}
 	return m.Role
+}
+
+// compactStubTokenCost estimates the synthetic stub message's own ~token cost (the same
+// ~4-chars/token basis the budget uses), so the reported shed is NET of the message we add
+// back. The stub text is fixed apart from the drop count, so this is a close estimate.
+func compactStubTokenCost(dropped int) int {
+	stub := fmt.Sprintf("%s%d earlier turn(s) to stay within the context budget; their detail is omitted from this request.", compactStubPrefix, dropped)
+	return (len(stub) + len(`{"role":"assistant","content":""}`)) / 4
 }
 
 // spliceCompacted assembles the rewritten body from original byte spans: the verbatim

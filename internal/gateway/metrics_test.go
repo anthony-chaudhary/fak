@@ -189,6 +189,22 @@ func TestAdjudicationSummaryReportsProviderCache(t *testing.T) {
 	}
 }
 
+func TestAdjudicationSummaryReportsCompaction(t *testing.T) {
+	m := newGatewayMetrics(time.Now())
+	m.observeCompaction(agent.CompactOutcome{}, true)
+	m.observeCompaction(agent.CompactOutcome{Reason: agent.CompactReasonNone, Dropped: 4, ShedTokens: 900}, false)
+	m.observeCompaction(agent.CompactOutcome{Reason: agent.CompactReasonUnderBudget}, false)
+	m.recordCompactionCacheRead(1234)
+
+	s := m.adjudicationSummary()
+	if s.CompactionFired != 1 || s.CompactionBailed != 1 || s.CompactionOff != 1 {
+		t.Fatalf("compaction attempts = fired %d bailed %d off %d, want 1/1/1", s.CompactionFired, s.CompactionBailed, s.CompactionOff)
+	}
+	if s.CompactionDroppedTurns != 4 || s.CompactionShedTokens != 900 || s.CompactionCacheReadTokens != 1234 || s.LastCompactionCacheRead != 1234 {
+		t.Fatalf("compaction summary = %+v, want dropped/shed/cache-read folded from metrics", s)
+	}
+}
+
 // TestInferenceMetricsAccumulateAcrossTurns exercises the model-generation family
 // directly: the kernel/vDSO counters stay 0 on a pure chat workload, so this is the
 // signal that makes a busy gateway look busy. Two turns must sum the token totals,
@@ -520,6 +536,51 @@ func TestHTTPAccessLogIsStructured(t *testing.T) {
 	}
 }
 
+func TestInferenceTurnLogIsStructured(t *testing.T) {
+	srv := newTestServer(t)
+	var lines []string
+	srv.logf = func(format string, args ...any) {
+		lines = append(lines, formatLog(format, args...))
+	}
+
+	srv.logInferenceTurn("trace-turn", "anthropic_messages", true, agent.Usage{
+		PromptTokens:             10,
+		CompletionTokens:         2,
+		TotalTokens:              12,
+		CacheReadInputTokens:     8,
+		CacheCreationInputTokens: 1,
+	}, "end_turn", 1500*time.Millisecond, true)
+
+	if len(lines) != 1 {
+		t.Fatalf("got %d inference log lines, want 1: %v", len(lines), lines)
+	}
+	var ev map[string]any
+	if err := json.Unmarshal([]byte(lines[0]), &ev); err != nil {
+		t.Fatalf("inference log is not JSON: %v\n%s", err, lines[0])
+	}
+	for k, want := range map[string]any{
+		"event":                       "gateway_inference_turn",
+		"trace_id":                    "trace-turn",
+		"wire":                        "anthropic_messages",
+		"stream":                      true,
+		"finish_reason":               "end_turn",
+		"prompt_tokens":               float64(10),
+		"completion_tokens":           float64(2),
+		"cached_prompt_tokens":        float64(8),
+		"cache_read_input_tokens":     float64(8),
+		"cache_creation_input_tokens": float64(1),
+		"total_tokens":                float64(12),
+		"compaction_fired":            true,
+	} {
+		if got := ev[k]; got != want {
+			t.Fatalf("inference log %s = %#v, want %#v (event=%v)", k, got, want, ev)
+		}
+	}
+	if _, ok := ev["duration_ms"].(float64); !ok {
+		t.Fatalf("inference log duration_ms missing/non-number: %v", ev)
+	}
+}
+
 func TestHTTPTraceIsMintedAndThreaded(t *testing.T) {
 	srv := newTestServer(t)
 	rec := &eventRecorder{}
@@ -643,4 +704,57 @@ func hasDebugOperationRow(rows []debugOperationMetricVars, operation, verdict st
 		}
 	}
 	return false
+}
+
+// TestCompactionMetricsObserveAndRender proves the compaction observability surface: fired /
+// bailed / off attempts, the labeled bail reason, the shed/dropped counters, and the
+// billing-truth gauge all reach /metrics — so a silent compaction failure (never fires, always
+// bails, or fires-but-breaks-the-cache) is visible instead of reading like success.
+func TestCompactionMetricsObserveAndRender(t *testing.T) {
+	m := newGatewayMetrics(time.Now())
+	m.observeCompaction(agent.CompactOutcome{}, true)                                                               // OFF
+	m.observeCompaction(agent.CompactOutcome{Reason: agent.CompactReasonNone, Dropped: 7, ShedTokens: 1200}, false) // FIRED
+	m.observeCompaction(agent.CompactOutcome{Reason: agent.CompactReasonUnderBudget}, false)                        // BAILED (reason)
+	m.observeCompaction(agent.CompactOutcome{Reason: agent.CompactReasonNoBreakpoint}, false)                       // BAILED (reason)
+	m.recordCompactionCacheRead(4096)                                                                               // billing-truth on a fire
+
+	var b strings.Builder
+	m.writeCompactionMetrics(&b)
+	out := b.String()
+
+	for _, want := range []string{
+		`fak_gateway_compaction_attempts_total{outcome="fired"} 1`,
+		`fak_gateway_compaction_attempts_total{outcome="bailed"} 2`,
+		`fak_gateway_compaction_attempts_total{outcome="off"} 1`,
+		`fak_gateway_compaction_bail_reason_total{reason="under_budget"} 1`,
+		`fak_gateway_compaction_bail_reason_total{reason="no_breakpoint"} 1`,
+		`fak_gateway_compaction_dropped_turns_total 7`,
+		`fak_gateway_compaction_shed_tokens_total 1200`,
+		`fak_gateway_compaction_cache_read_tokens_total 4096`,
+		`fak_gateway_compaction_post_fire_cache_read_tokens 4096`,
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("metrics missing %q\n--- got ---\n%s", want, out)
+		}
+	}
+}
+
+func TestDebugVarsExposeCompactionStats(t *testing.T) {
+	srv := newTestServer(t)
+	srv.metrics.observeCompaction(agent.CompactOutcome{}, true)
+	srv.metrics.observeCompaction(agent.CompactOutcome{Reason: agent.CompactReasonNone, Dropped: 3, ShedTokens: 800}, false)
+	srv.metrics.observeCompaction(agent.CompactOutcome{Reason: agent.CompactReasonPrefixMismatch}, false)
+	srv.metrics.recordCompactionCacheRead(2048)
+
+	vars := srv.debugVars(time.Now())
+	c := vars.Metrics.Compaction
+	if c.Attempts["off"] != 1 || c.Attempts["fired"] != 1 || c.Attempts["bailed"] != 1 {
+		t.Fatalf("debug compaction attempts = %+v, want off/fired/bailed all visible", c.Attempts)
+	}
+	if c.BailReasons[agent.CompactReasonPrefixMismatch] != 1 {
+		t.Fatalf("debug compaction bail reasons = %+v, want prefix_mismatch visible", c.BailReasons)
+	}
+	if c.DroppedTurns != 3 || c.ShedTokens != 800 || c.CacheReadTokens != 2048 || c.LastPostFireCacheReadTokens != 2048 {
+		t.Fatalf("debug compaction totals = %+v, want dropped/shed/cache-read billing truth", c)
+	}
 }

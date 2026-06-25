@@ -175,7 +175,7 @@ func (s *Server) handleAnthropicMessages(w http.ResponseWriter, r *http.Request)
 	// kernel adjudicates below are untouched, so the trust boundary is unchanged. Placed
 	// after the pace cap (which only ever rewrites the top-level max_tokens, never the
 	// cached message prefix) and before either passthrough consumer of req.Raw.
-	s.maybeCompactAnthropicRaw(req)
+	compacted := s.maybeCompactAnthropicRaw(req)
 	// In passthrough mode the upstream credential is the client's own (transparent
 	// hop) UNLESS the gateway pins its own (the subscription path). The inbound
 	// anthropic-beta is forwarded so the client's negotiated betas survive the hop.
@@ -202,7 +202,7 @@ func (s *Server) handleAnthropicMessages(w http.ResponseWriter, r *http.Request)
 		// is felt, not buffered away). It returns false only if the upstream stream never
 		// opened and nothing was written — then fall back to the buffered synth path,
 		// which is also the path for a local/mock upstream that cannot stream this wire.
-		if s.anthropicPassthrough() && s.streamAnthropicPassthroughLive(w, r, req, reqTrace, sessionTurn, upstreamKey, upstreamBeta) {
+		if s.anthropicPassthrough() && s.streamAnthropicPassthroughLive(w, r, req, reqTrace, sessionTurn, upstreamKey, upstreamBeta, compacted) {
 			return
 		}
 		// For non-Anthropic upstreams that still support the generic planner streaming
@@ -214,10 +214,11 @@ func (s *Server) handleAnthropicMessages(w http.ResponseWriter, r *http.Request)
 		if s.streamAnthropicPlannerLive(w, r, req, reqTrace, sessionTurn) {
 			return
 		}
-		s.streamAnthropicPending(w, r, req, reqTrace, sessionTurn, upstreamKey, upstreamBeta)
+		s.streamAnthropicPending(w, r, req, reqTrace, sessionTurn, upstreamKey, upstreamBeta, compacted)
 		return
 	}
 
+	began := time.Now()
 	turn, err := s.completeAnthropicTurn(ctx, req, reqTrace, sessionTurn, "", "", upstreamKey, upstreamBeta)
 	if err != nil {
 		// Mirror the chat-completions posture: an upstream model failure is a gateway
@@ -226,6 +227,18 @@ func (s *Server) handleAnthropicMessages(w http.ResponseWriter, r *http.Request)
 		writeErr(w, http.StatusBadGateway, "upstream model error")
 		return
 	}
+
+	// Billing-truth: on a turn we actually compacted, record the provider's cache_read so a
+	// broken-cache fire (cache_read cratering after a fire) is visible on /metrics.
+	if compacted {
+		s.metrics.recordCompactionCacheRead(turn.Usage.CacheReadInputTokens)
+	}
+	s.logInferenceTurn(reqTrace, "anthropic_messages", false, agent.Usage{
+		PromptTokens:             turn.Usage.InputTokens,
+		CompletionTokens:         turn.Usage.OutputTokens,
+		CacheReadInputTokens:     turn.Usage.CacheReadInputTokens,
+		CacheCreationInputTokens: turn.Usage.CacheCreationInputTokens,
+	}, turn.Stop, time.Since(began), compacted)
 
 	writeJSON(w, http.StatusOK, anthropicMessageResponse{
 		ID: turn.ID, Type: "message", Role: "assistant", Model: turn.Model,
@@ -275,13 +288,25 @@ func applySessionPaceToAnthropicRequest(req *agent.AnthropicMessagesRequest, tur
 // gateway is fronting the REAL Anthropic API (s.anthropicPassthrough) — only there is the
 // raw body forwarded verbatim, so only there does compacting it reach the wire AND need to
 // preserve the cached prefix. On every other wire the body is re-built from req.Messages
-// downstream, so touching req.Raw would be pointless. agent.CompactAnthropicHistory is
+// downstream, so touching req.Raw would be pointless. CompactAnthropicHistoryWithOutcome is
 // fail-safe: it returns req.Raw unchanged on any ambiguity, so this never breaks a turn.
-func (s *Server) maybeCompactAnthropicRaw(req *agent.AnthropicMessagesRequest) {
-	if s.compactHistoryBudget <= 0 || req == nil || len(req.Raw) == 0 || !s.anthropicPassthrough() {
-		return
+//
+// It records the attempt outcome on /metrics (fired/bailed/off + bail reason + shed) so a
+// silent failure is visible, and returns whether it FIRED — the caller threads that through
+// so the post-response provider cache_read (the billing-truth signal) is recorded only on
+// turns this actually compacted.
+func (s *Server) maybeCompactAnthropicRaw(req *agent.AnthropicMessagesRequest) (fired bool) {
+	if req == nil || len(req.Raw) == 0 || !s.anthropicPassthrough() {
+		return false
 	}
-	req.Raw = agent.CompactAnthropicHistory(req.Raw, s.compactHistoryBudget)
+	if s.compactHistoryBudget <= 0 {
+		s.metrics.observeCompaction(agent.CompactOutcome{}, true) // configured OFF
+		return false
+	}
+	out, outcome := agent.CompactAnthropicHistoryWithOutcome(req.Raw, s.compactHistoryBudget)
+	req.Raw = out
+	s.metrics.observeCompaction(outcome, false)
+	return outcome.Reason == agent.CompactReasonNone
 }
 
 // writeAnthropicTurn renders a fully-formed turn to the wire as either a buffered JSON
@@ -601,15 +626,25 @@ func (s *Server) streamAnthropic(w http.ResponseWriter, id, model string, blocks
 	streamAnthropicBlocks(send, blocks, stop, usage)
 }
 
-func (s *Server) streamAnthropicPending(w http.ResponseWriter, r *http.Request, req *agent.AnthropicMessagesRequest, reqTrace string, sessionTurn servedSessionTurn, upstreamKey, upstreamBeta string) {
+func (s *Server) streamAnthropicPending(w http.ResponseWriter, r *http.Request, req *agent.AnthropicMessagesRequest, reqTrace string, sessionTurn servedSessionTurn, upstreamKey, upstreamBeta string, compacted bool) {
 	flusher, ok := w.(http.Flusher)
 	if !ok {
+		began := time.Now()
 		turn, err := s.completeAnthropicTurn(r.Context(), req, reqTrace, sessionTurn, "", "", upstreamKey, upstreamBeta)
 		if err != nil {
 			s.logf("gateway: upstream model error (messages): %v", err)
 			writeErr(w, http.StatusBadGateway, "upstream model error")
 			return
 		}
+		if compacted {
+			s.metrics.recordCompactionCacheRead(turn.Usage.CacheReadInputTokens)
+		}
+		s.logInferenceTurn(reqTrace, "anthropic_messages", true, agent.Usage{
+			PromptTokens:             turn.Usage.InputTokens,
+			CompletionTokens:         turn.Usage.OutputTokens,
+			CacheReadInputTokens:     turn.Usage.CacheReadInputTokens,
+			CacheCreationInputTokens: turn.Usage.CacheCreationInputTokens,
+		}, turn.Stop, time.Since(began), compacted)
 		writeJSON(w, http.StatusOK, anthropicMessageResponse{
 			ID: turn.ID, Type: "message", Role: "assistant", Model: turn.Model,
 			Content: turn.Blocks, StopReason: turn.Stop, StopSequence: nil, Usage: turn.Usage,
@@ -642,6 +677,7 @@ func (s *Server) streamAnthropicPending(w http.ResponseWriter, r *http.Request, 
 		err  error
 	}
 	done := make(chan turnResult, 1)
+	began := time.Now()
 	go func() {
 		turn, err := s.completeAnthropicTurn(r.Context(), req, reqTrace, sessionTurn, id, model, upstreamKey, upstreamBeta)
 		done <- turnResult{turn: turn, err: err}
@@ -660,6 +696,15 @@ func (s *Server) streamAnthropicPending(w http.ResponseWriter, r *http.Request, 
 				})
 				return
 			}
+			if compacted {
+				s.metrics.recordCompactionCacheRead(res.turn.Usage.CacheReadInputTokens)
+			}
+			s.logInferenceTurn(reqTrace, "anthropic_messages", true, agent.Usage{
+				PromptTokens:             res.turn.Usage.InputTokens,
+				CompletionTokens:         res.turn.Usage.OutputTokens,
+				CacheReadInputTokens:     res.turn.Usage.CacheReadInputTokens,
+				CacheCreationInputTokens: res.turn.Usage.CacheCreationInputTokens,
+			}, res.turn.Stop, time.Since(began), compacted)
 			streamAnthropicBlocks(send, res.turn.Blocks, res.turn.Stop, res.turn.Usage)
 			return
 		case <-ticker.C:

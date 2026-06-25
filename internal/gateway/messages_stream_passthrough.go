@@ -257,7 +257,7 @@ func (p *anthropicPassthrough) onEvent(ev agent.AnthropicSSEEvent) error {
 // error). It returns false ONLY when the upstream stream never opened and NOTHING was
 // written to the client — so the caller can fall back to the buffered path with exactly
 // one upstream generation having been attempted.
-func (s *Server) streamAnthropicPassthroughLive(w http.ResponseWriter, r *http.Request, req *agent.AnthropicMessagesRequest, reqTrace string, sessionTurn servedSessionTurn, upstreamKey, upstreamBeta string) bool {
+func (s *Server) streamAnthropicPassthroughLive(w http.ResponseWriter, r *http.Request, req *agent.AnthropicMessagesRequest, reqTrace string, sessionTurn servedSessionTurn, upstreamKey, upstreamBeta string, compacted bool) bool {
 	hp, ok := s.planner.(*agent.HTTPPlanner)
 	if !ok {
 		return false
@@ -296,7 +296,17 @@ func (s *Server) streamAnthropicPassthroughLive(w http.ResponseWriter, r *http.R
 		}
 	}
 	if p.started {
-		s.metrics.observeInference(p.promptTok, p.complTok, p.cacheRead, p.finishReason, time.Since(began))
+		dur := time.Since(began)
+		s.metrics.observeInference(p.promptTok, p.complTok, p.cacheRead, p.finishReason, dur)
+		if compacted {
+			s.metrics.recordCompactionCacheRead(p.cacheRead) // billing-truth on a compacted streamed turn
+		}
+		s.logInferenceTurn(reqTrace, "anthropic_messages", true, agent.Usage{
+			PromptTokens:             p.promptTok,
+			CompletionTokens:         p.complTok,
+			CacheReadInputTokens:     p.cacheRead,
+			CacheCreationInputTokens: p.cacheCreate,
+		}, p.finishReason, dur, compacted)
 		s.debitServedSessionTurn(r.Context(), p.turn, agent.Usage{
 			PromptTokens:             p.promptTok,
 			CompletionTokens:         p.complTok,
