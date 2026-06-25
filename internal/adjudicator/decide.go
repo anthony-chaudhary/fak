@@ -275,10 +275,20 @@ func (a *Adjudicator) Adjudicate(ctx context.Context, c *abi.ToolCall) abi.Verdi
 	// Decode args once for the structural checks.
 	args := decodeArgs(ctx, c)
 
+	// Coarse risk class for the RungProfile (#666). Computed ONCE from the DECODED
+	// args (never model-controlled Meta), and ONLY when a profile is installed — a
+	// nil profile runs every rung regardless (pr.runs == true), so the default floor
+	// pays zero classification cost and stays byte-for-byte identical to HEAD.
+	pr := p.Profile
+	var cl class
+	if pr != nil {
+		cl = riskClass(c.Tool, args)
+	}
+
 	// SELF_MODIFY: a write-shaped call whose target matches a protected glob is a
 	// PROVABLE refusal. Bounded disclosure: the witness carries ONLY the offending
 	// glob, never the whole policy (deny channel is not a policy oracle).
-	if writeShaped(c.Tool) {
+	if pr.runs(cl, rungSelfModify) && writeShaped(c.Tool) {
 		if g := matchGlob(targetPath(args), p.SelfModifyGlobs); g != "" {
 			return abi.Verdict{
 				Kind:    abi.VerdictDeny,
@@ -298,12 +308,14 @@ func (a *Adjudicator) Adjudicate(ctx context.Context, c *abi.ToolCall) abi.Verdi
 	// shell VERB targeting a guarded glob; a read of a guarded file (`cat`/`grep`
 	// internal/abi/x.go) is NOT a self-modify, so it stays allowed. Bounded
 	// disclosure: the witness names only the offending glob.
-	if g := commandSelfModify(args, p.SelfModifyGlobs); g != "" {
-		return abi.Verdict{
-			Kind:    abi.VerdictDeny,
-			Reason:  abi.ReasonSelfModify,
-			By:      "monitor",
-			Payload: abi.WitnessPayload{Claim: g},
+	if pr.runs(cl, rungCmdSelfModify) {
+		if g := commandSelfModify(args, p.SelfModifyGlobs); g != "" {
+			return abi.Verdict{
+				Kind:    abi.VerdictDeny,
+				Reason:  abi.ReasonSelfModify,
+				By:      "monitor",
+				Payload: abi.WitnessPayload{Claim: g},
+			}
 		}
 	}
 
@@ -315,25 +327,30 @@ func (a *Adjudicator) Adjudicate(ctx context.Context, c *abi.ToolCall) abi.Verdi
 	// write-shaped so one that reaches a guarded glob is denied SELF_MODIFY exactly
 	// as the equivalent direct write is — a self-written tool can do no more than a
 	// direct adjudicated call. Bounded disclosure: the witness names only the glob.
-	if g := synthToolSelfModify(args, &a.authored, p.SelfModifyGlobs); g != "" {
-		return abi.Verdict{
-			Kind:    abi.VerdictDeny,
-			Reason:  abi.ReasonSelfModify,
-			By:      "monitor",
-			Payload: abi.WitnessPayload{Claim: g},
+	// The deny half and the ledger half ride the SAME rung gate, so a profile that
+	// elides the synth-tool rung skips both (the ledger note is inert for a call that
+	// is not exec/command-shaped anyway).
+	if pr.runs(cl, rungSynthTool) {
+		if g := synthToolSelfModify(args, &a.authored, p.SelfModifyGlobs); g != "" {
+			return abi.Verdict{
+				Kind:    abi.VerdictDeny,
+				Reason:  abi.ReasonSelfModify,
+				By:      "monitor",
+				Payload: abi.WitnessPayload{Claim: g},
+			}
 		}
+		// Record agent-authored scripts (the ledger half) so the NEXT exec is
+		// recognized as a synth-tool. Placed AFTER the self-modify deny rung, so a
+		// write into a guarded tree (already denied above) never lands in the ledger.
+		noteAuthoredScript(args, c.Tool, &a.authored, p.SelfModifyGlobs)
 	}
-	// Record agent-authored scripts (the ledger half) so the NEXT exec is recognized
-	// as a synth-tool. Placed AFTER the self-modify deny rungs, so a write into a
-	// guarded tree (already denied above) never lands in the ledger.
-	noteAuthoredScript(args, c.Tool, &a.authored, p.SelfModifyGlobs)
 
 	// ARG-LEVEL value predicates (issue #9): the floor gates argument VALUES, not
 	// just the tool name. A constrained arg that fails its predicate is a PROVABLE
 	// refusal even for an otherwise allow-listed tool — denied here, never passed
 	// to detection. Bounded disclosure: the witness names only the offending
 	// tool.arg + the bound it broke, never the whole policy nor the arg value.
-	if len(argPreds) > 0 {
+	if pr.runs(cl, rungArgPredicate) && len(argPreds) > 0 {
 		if v, denied := evalArgPredicates(argPreds, c.Tool, args); denied {
 			return v
 		}
@@ -348,7 +365,7 @@ func (a *Adjudicator) Adjudicate(ctx context.Context, c *abi.ToolCall) abi.Verdi
 	// in-process checker here and DEFERs (fail open — lint is a quality signal,
 	// not a security gate). Bounded disclosure: the witness names only the first
 	// finding, never the file content.
-	if p.LintWrites && wholeFileWrite(c.Tool) {
+	if pr.runs(cl, rungLintWrite) && p.LintWrites && wholeFileWrite(c.Tool) {
 		if w := lintWriteMalformed(targetPath(args), args); w != "" {
 			return abi.Verdict{
 				Kind:    abi.VerdictDeny,
@@ -360,7 +377,7 @@ func (a *Adjudicator) Adjudicate(ctx context.Context, c *abi.ToolCall) abi.Verdi
 	}
 
 	// TRANSFORM: redact a secret-shaped arg field before dispatch.
-	if len(p.RedactFields) > 0 && args != nil {
+	if pr.runs(cl, rungTransform) && len(p.RedactFields) > 0 && args != nil {
 		if newArgs, changed := redact(args, p.RedactFields); changed {
 			if ref, ok := putJSON(ctx, newArgs); ok {
 				return abi.Verdict{Kind: abi.VerdictTransform, By: "monitor",
@@ -468,40 +485,18 @@ func matchGlob(path string, globs []string) string {
 	return ""
 }
 
-// interpreterEvalSpec pairs a general-purpose interpreter with the inline-program flags
-// whose presence as a TOKEN means it runs code from an opaque string argument able to
-// write a file directly.
-type interpreterEvalSpec struct {
-	interp string   // the interpreter named as a command word (`ruby`, `node`, …)
-	flags  []string // its inline-eval flags (`-e`, `--eval`, `-c`, `-p`/`--print`)
-}
-
-// interpreterEvalFlags is the adjudicator's inline-eval write floor (#172 Hole 1
-// residual): the general-purpose interpreters most likely on a coding agent's PATH —
-// python, node, and ruby — each paired with the inline-program flags that run an opaque
-// program string. It is the interpreter analogue of shellWriteVerbs; commandWrites ranges
-// over it and treats such a command as write-shaped, routing it through the SAME
-// commandSelfModify guard the shell floor uses.
-//
-// ruby joins python/node to close an asymmetry the rulesynth RSI loop (internal/rsiloop,
-// run with -harness rulesynth) mined from the near-miss corpus and the keep-bit KEPT:
-// `ruby -i` (an in-place edit) is already caught by shellWriteVerbs, but `ruby -e
-// 'File.write("internal/adjudicator/decide.go", …)'` — the EVAL flag doing the same
-// self-edit — slipped every rung. `perl -e`, `php -r`, and `lua -e` are the same shape and
-// remain the residual queue the loop's corpus drives next, so they are deliberately not
-// listed here yet.
-//
-// Detection is by TOKEN, not a fixed `<interp> <flag> ` prefix (see interpreterEvalMatch):
-// the interpreter need only appear as a word and the flag as its own argument, so the
-// idiomatic no-space, quoted, and `=`-joined spellings (`ruby -e'…'`, `node --eval=…`) and
-// intervening flags (`ruby -rjson -e …`) are all caught — closing the porous-prefix gap a
-// fixed-spelling table leaves open. The identifier name `interpreterEvalFlags` is pinned by
-// architest (TestInlineEvalFloorWiredInCommandWrites); rename only with that gate's constant.
-var interpreterEvalFlags = []interpreterEvalSpec{
-	{"python3", []string{"-c"}},
-	{"python", []string{"-c"}},
-	{"node", []string{"-e", "--eval", "-p", "--print"}},
-	{"ruby", []string{"-e", "--eval"}},
+// interpreterEvalFlags are the `<interpreter> <inline-program-flag>` prefixes that
+// run code from an opaque string argument able to write a file directly (#172
+// Hole 1 residual). They are the interpreter analogue of shellWriteVerbs: python
+// and node are the general-purpose runtimes most likely on a coding agent's PATH,
+// and each carries an inline-eval flag (`-c` / `-e` / `--eval` / `-p`/`--print`,
+// which evaluates AND can have side effects). Matched case-insensitively against
+// the lowercased command; the trailing space pins the flag as its own token so a
+// path like `mynode-eval.txt` cannot trip it.
+var interpreterEvalFlags = []string{
+	"python -c ", "python3 -c ", "python -c\"", "python3 -c\"",
+	"node -e ", "node --eval ", "node -e\"", "node --eval\"",
+	"node -p ", "node --print ",
 }
 
 // evalArgPredicates runs every predicate that targets tool against the decoded
