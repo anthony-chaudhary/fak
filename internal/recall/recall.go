@@ -297,6 +297,12 @@ func (r *Recorder) Persist(dir string) error {
 // quarantine gate enforced on every page-in. It deliberately carries its own CAS
 // populated from disk and a FRESH ctxmmu gate, so a Resolve provably does not depend
 // on the process that produced the session — the "survives death" proof.
+//
+// Naming: this is the reloaded-core-image sense of "session" (the frozen dump a
+// finished run leaves behind, queryable without replay), NOT the drive-state
+// session. The canonical "session" — live run-state, budget, priority, pace — is
+// internal/session.Table / session.State. See the vocabulary worklist at
+// docs/notes/VOCAB-DISAMBIGUATION-WORKLIST-2026-06-24.md.
 type Session struct {
 	Manifest Manifest
 	cas      map[string][]byte

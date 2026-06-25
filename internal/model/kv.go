@@ -16,6 +16,12 @@ func (m *Model) SessionFromPrefix(prefix *KVCache) *Session {
 // Step decodes one token. Both share the exact per-token math the verified full
 // forward pass uses, so cached decode is provably identical to full prefill.
 // GLM-MoE-DSA uses a separate DSA attention/index cache carried inside KVCache.
+//
+// Naming: this is the token-decoder sense of "session" (a generator over a KV
+// cache), NOT the drive-state session. The canonical "session" — run-state,
+// budget, priority, pace — is internal/session.Table / session.State; the wire
+// DTO of that drive state is gateway.SessionState. See the vocabulary worklist at
+// docs/notes/VOCAB-DISAMBIGUATION-WORKLIST-2026-06-24.md.
 type Session struct {
 	M     *Model
 	Cache *KVCache

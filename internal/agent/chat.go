@@ -1,19 +1,8 @@
-// Package agent is the REAL agentic loop: a live model (the planner) drives a
-// multi-turn tool-calling conversation, and EVERY tool call it emits is mediated
-// — on the "fak" arm — by the in-process kernel syscall (vDSO -> adjudicate ->
-// grammar repair -> dispatch -> context-MMU admit). The "now" baseline arm runs
-// the SAME conversation with the SAME planner but executes tool calls naively, so
-// the two arms differ only by the kernel.
-//
-// This is what turns the project's static A/B latency benchmark into a LIVE,
-// turn-counting one: it measures model round-trips (turns) and tokens with the
-// kernel ON vs OFF, against a real OpenAI-compatible endpoint (Gemini, local
-// vLLM, anything base_url-swappable) or a deterministic offline MockPlanner for
-// CI.
-//
 // chat.go is the planner seam: provider transcript adapters + a typed
 // message/tool vocabulary + the Planner interface both the live client and the
-// offline mock satisfy.
+// offline mock satisfy. See doc.go for the package's trust framing (this is the
+// host-side loop, not the guarded guest) and the A/B-loop purpose.
+
 package agent
 
 import (
