@@ -35,6 +35,10 @@ import (
 // per-request cost the acceptance is really about) AND ≥ 99% of requests ≤ 100µs (the
 // honest "per request" reading, tolerant of rare outliers on a shared host).
 func TestAdjudicationLatencyUnder100us(t *testing.T) {
+	if raceDetectorEnabled {
+		t.Skip("latency distribution gate is not meaningful under go test -race instrumentation")
+	}
+
 	const (
 		budget    = 100 * time.Microsecond // #282 acceptance bar
 		iters     = 5000                   // enough samples for a stable p50/p99
