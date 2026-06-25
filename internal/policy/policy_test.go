@@ -357,3 +357,82 @@ func TestLintWritesLoadsAndRoundTrips(t *testing.T) {
 		}
 	}
 }
+
+// TestManifestRateLimitRoundTrip is the issue-#699 acceptance witness (criterion
+// 1): a fak-policy/v1 manifest with a rate_limit block parses, round-trips through
+// the manifest level (it is NOT an adjudicator.Policy field, so FromPolicy/ToPolicy
+// is the wrong vehicle — its round-trip is JSON -> Manifest -> Runtime -> JSON),
+// and surfaces in SummaryRuntime.
+func TestManifestRateLimitRoundTrip(t *testing.T) {
+	const js = `{"allow":["search_kb"],"rate_limit":{"max_calls":5,"max_cost":1000,"key":"tool","retry_after_ms":250}}`
+	m, err := ParseManifest([]byte(js))
+	if err != nil {
+		t.Fatalf("ParseManifest: %v", err)
+	}
+	if m.RateLimit == nil || m.RateLimit.MaxCalls != 5 || m.RateLimit.MaxCost != 1000 ||
+		m.RateLimit.Key != "tool" || m.RateLimit.RetryAfterMS != 250 {
+		t.Fatalf("parsed rule = %+v, want the declared cap", m.RateLimit)
+	}
+	rt, err := m.ToRuntime()
+	if err != nil {
+		t.Fatalf("ToRuntime: %v", err)
+	}
+	if got := rt.RateLimit; got == nil || *got != *m.RateLimit {
+		t.Fatalf("runtime rule = %+v, want %+v", got, m.RateLimit)
+	}
+	// JSON -> Manifest -> JSON round-trips the rule byte-for-byte.
+	m2, err := ParseManifest(m.JSON())
+	if err != nil {
+		t.Fatalf("re-parse marshal: %v", err)
+	}
+	if m2.RateLimit == nil || *m2.RateLimit != *m.RateLimit {
+		t.Fatalf("JSON round-trip lost the rule: got %+v want %+v", m2.RateLimit, m.RateLimit)
+	}
+	if !strings.Contains(SummaryRuntime(rt), "rate limit         : 5 call(s) / 1000 cost per tool") {
+		t.Fatalf("SummaryRuntime should surface the declared rate limit:\n%s", SummaryRuntime(rt))
+	}
+}
+
+// TestManifestRateLimitRejectsBadBlocks is the issue-#699 fail-loud witness
+// (criterion 1): an unknown key-mode, a negative cap, or an all-zero (no-cap)
+// block is rejected at load — never silently installed.
+func TestManifestRateLimitRejectsBadBlocks(t *testing.T) {
+	cases := []struct {
+		name string
+		js   string
+	}{
+		{"unknown key-mode", `{"rate_limit":{"max_calls":1,"key":"tenant"}}`},
+		{"negative calls", `{"rate_limit":{"max_calls":-1}}`},
+		{"negative cost", `{"rate_limit":{"max_cost":-5}}`},
+		{"negative retry_after", `{"rate_limit":{"max_calls":1,"retry_after_ms":-10}}`},
+		{"no cap declared", `{"rate_limit":{"key":"tool"}}`},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if _, err := Parse([]byte(tc.js)); err == nil {
+				t.Fatal("expected validation error, got nil")
+			}
+		})
+	}
+}
+
+// TestManifestWithoutRateLimitIsAbsent proves criterion 2 at the manifest level: a
+// manifest with NO rate_limit block resolves to a nil (inert) rule, and the
+// existing name-level FromPolicy/ToPolicy round-trip is unaffected (rate_limit is
+// not an adjudicator.Policy field).
+func TestManifestWithoutRateLimitIsAbsent(t *testing.T) {
+	rt, err := ParseRuntime([]byte(`{"allow":["search_kb"]}`))
+	if err != nil {
+		t.Fatalf("ParseRuntime: %v", err)
+	}
+	if rt.RateLimit != nil {
+		t.Fatalf("absent rate_limit must resolve to nil (inert), got %+v", rt.RateLimit)
+	}
+	if !strings.Contains(SummaryRuntime(rt), "rate limit         : (none") {
+		t.Fatalf("SummaryRuntime should flag the inert rate limit:\n%s", SummaryRuntime(rt))
+	}
+	p := adjudicator.DefaultPolicy()
+	if got, err := FromPolicy(p).ToPolicy(); err != nil || !reflect.DeepEqual(got, p) {
+		t.Fatalf("name-level round-trip drifted: err=%v got=%+v", err, got)
+	}
+}

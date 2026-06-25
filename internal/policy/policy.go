@@ -79,6 +79,13 @@ type Manifest struct {
 	// before it lands. Off by default; languages whose only checkers shell out
 	// (Python/CUDA) defer (fail open). Maps 1:1 to adjudicator.Policy.LintWrites.
 	LintWrites bool `json:"lint_writes,omitempty"`
+	// RateLimit (issue #699, Epic 8) is the declarative throughput/cost cap applied
+	// to ratelimit.Default at boot and on --policy hot-reload. Absent (or an empty
+	// manifest) leaves the limiter inert (it Defers on every call); a present block
+	// installs the cap and is authoritative over the FAK_RATELIMIT_* env fallback.
+	// See RateLimitRule. This is manifest/runtime-only — NOT an adjudicator.Policy
+	// field (rate config is separate from the name-level allow/deny floor).
+	RateLimit *RateLimitRule `json:"rate_limit,omitempty"`
 }
 
 // AuthorizeRule releases a tainted flow into one exact sink tool/class. It is
@@ -110,13 +117,35 @@ type ArgRule struct {
 	Reason    string `json:"reason,omitempty"`
 }
 
+// RateLimitRule is the declarative throughput/cost cap (Epic 8, issue #699): the
+// fak-policy/v1 form of internal/ratelimit's governor. It makes the env-only
+// limiter reachable from the manifest an operator edits — a per-key call quota
+// and/or cumulative-cost budget, bucketed by a key dimension, with an optional
+// advisory retry-after (ms) surfaced on the WAIT the over-cap deny becomes. The
+// resolved rule is applied to ratelimit.Default at boot and on --policy hot-reload
+// (cmd/fak applyRuntime), mirroring how SafeSinks/Authorize reach ifc.
+//
+// At least one cap (max_calls / max_cost) must be declared; BOTH may be set
+// together — the underlying limiter enforces each independently (check-before-
+// consume), exactly as the FAK_RATELIMIT_* env seam does, so the manifest is never
+// strictly less capable than env config. Key defaults to "trace" when omitted; an
+// unknown key-mode, a negative value, or an all-zero block fails loud at load.
+type RateLimitRule struct {
+	MaxCalls     int    `json:"max_calls,omitempty"`      // per-key admitted-call quota; 0 = no call cap
+	MaxCost      int64  `json:"max_cost,omitempty"`       // per-key cumulative cost budget (arg bytes ~ tokens); 0 = no cost cap
+	Key          string `json:"key,omitempty"`            // trace|tool|global (default trace)
+	RetryAfterMS int    `json:"retry_after_ms,omitempty"` // advisory back-off (ms) on the over-cap WAIT; 0 = limiter default
+}
+
 // Runtime is the full manifest resolved for boot: the existing name-level
-// adjudicator policy, plus IFC policy and host-authored source registrations.
+// adjudicator policy, plus IFC policy, host-authored source registrations, and the
+// declared rate-limit cap (issue #699) pushed into ratelimit.Default by applyRuntime.
 type Runtime struct {
 	Adjudicator    adjudicator.Policy
 	Sources        map[string]provenance.Source
 	SafeSinks      []string
 	AuthorizeRules []AuthorizeRule
+	RateLimit      *RateLimitRule
 }
 
 // Load reads, parses, validates, and resolves a manifest file into a Policy.
@@ -242,11 +271,16 @@ func (m Manifest) ToRuntime() (Runtime, error) {
 	if err != nil {
 		return Runtime{}, err
 	}
+	rl, err := compileRateLimit(m.RateLimit)
+	if err != nil {
+		return Runtime{}, err
+	}
 	return Runtime{
 		Adjudicator:    p,
 		Sources:        sources,
 		SafeSinks:      safe,
 		AuthorizeRules: auth,
+		RateLimit:      rl,
 	}, nil
 }
 
@@ -383,6 +417,16 @@ func SummaryRuntime(rt Runtime) string {
 	for _, tool := range sortedSourceKeys(rt.Sources) {
 		fmt.Fprintf(&b, "                     %s -> %s\n", tool, rt.Sources[tool])
 	}
+	if rt.RateLimit != nil {
+		key := strings.ToLower(strings.TrimSpace(rt.RateLimit.Key))
+		if key == "" {
+			key = "trace"
+		}
+		fmt.Fprintf(&b, "rate limit         : %d call(s) / %d cost per %s (retry_after_ms=%d)\n",
+			rt.RateLimit.MaxCalls, rt.RateLimit.MaxCost, key, rt.RateLimit.RetryAfterMS)
+	} else {
+		fmt.Fprintf(&b, "rate limit         : (none — inert)\n")
+	}
 	return b.String()
 }
 
@@ -406,6 +450,30 @@ func normalizeSafeSinks(safeSinks []string) ([]string, error) {
 		out = append(out, tool)
 	}
 	return out, nil
+}
+
+// compileRateLimit validates a declared rate_limit block (absent => inert nil) and
+// returns it for Runtime. A present block must name a known key-mode, hold
+// non-negative values, and declare at least one meaningful cap — so a typo'd or
+// empty block fails loud at load rather than silently installing no cap. The rule
+// is returned as-is (key defaulting to trace is resolved at the ratelimit side).
+func compileRateLimit(r *RateLimitRule) (*RateLimitRule, error) {
+	if r == nil {
+		return nil, nil // absent => inert limiter
+	}
+	switch strings.ToLower(strings.TrimSpace(r.Key)) {
+	case "", "trace", "tool", "global":
+	default:
+		return nil, fmt.Errorf("rate_limit.key: unknown mode %q (want trace|tool|global)", r.Key)
+	}
+	if r.MaxCalls < 0 || r.MaxCost < 0 || r.RetryAfterMS < 0 {
+		return nil, fmt.Errorf("rate_limit: max_calls/max_cost/retry_after_ms must be non-negative (got calls=%d cost=%d retry_ms=%d)",
+			r.MaxCalls, r.MaxCost, r.RetryAfterMS)
+	}
+	if r.MaxCalls == 0 && r.MaxCost == 0 {
+		return nil, fmt.Errorf("rate_limit: declare at least one of max_calls / max_cost (an all-zero block installs no cap)")
+	}
+	return r, nil
 }
 
 func normalizeAuthorizeRules(rules []AuthorizeRule) ([]AuthorizeRule, error) {
