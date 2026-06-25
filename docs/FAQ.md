@@ -80,7 +80,7 @@ description: "Frequently asked questions about fak, the agent kernel: how its de
       "name": "How much faster is fak for agent fleets?",
       "acceptedAnswer": {
         "@type": "Answer",
-        "text": "The win is in reread-rate, not raw GPU speed. On a 50-turn × 5-agent run it is about 4× fewer tokens than a tuned warm-cache stack: the apples-to-apples comparison (~60× only against the naive re-send-everything baseline, not the headline). On real WebVoyager web-agent workloads (643 tasks) it eliminates 8.8–9.7× of prefill, measured. The reuse win is self-host only. An app that merely calls a frontier API gets the safety floor but not the savings. Every number is traced to a commit and artifact in the benchmark authority."
+        "text": "The win is in reread-rate, not raw GPU speed. On a 50-turn × 5-agent run it is about 4× fewer tokens than a tuned warm-cache stack: the apples-to-apples comparison (~60× only against the naive re-send-everything baseline, not the headline). Over the real WebVoyager set (643 tasks) a deterministic geometry model puts the prefill work-elimination at 8.8–9.7× vs the naive floor (1.0–1.1× vs a tuned per-agent-KV stack) — modeled, not a wall-clock. The reuse win is self-host only. An app that merely calls a frontier API gets the safety floor but not the savings. Every number is traced to a commit and artifact in the benchmark authority."
       }
     },
     {
@@ -984,7 +984,7 @@ description: "Frequently asked questions about fak, the agent kernel: how its de
       "name": "What does the 8.8-9.7x WebVoyager number actually measure?",
       "acceptedAnswer": {
         "@type": "Answer",
-        "text": "It is measured prefill work-elimination on the real 643-task WebVoyager dataset, swept across 1 to 8 workers, against a naive per-turn re-prefill baseline. At 1 worker it is 8.8x (170.9M vs 19.4M prefill tokens); at 8 workers it is 9.7x (1.37G vs 141.3M). The number is deterministic prefill-token arithmetic over the real task geometry (8,745 navigation turns, median 12 per task), not a wall-clock; live model runs are a separate pending phase."
+        "text": "It is a modeled prefill work-elimination floor over the real 643-task WebVoyager dataset, swept across 1 to 8 workers, against a naive per-turn re-prefill baseline. At 1 worker it is 8.8x (170.9M vs 19.4M prefill tokens); at 8 workers it is 9.7x (1.37G vs 141.3M). The number is deterministic prefill-token arithmetic over the real task geometry (8,745 navigation turns, median 12 per task) — not a wall-clock measurement. Against a tuned per-agent-KV stack (not the naive floor) the cross-worker reuse is only 1.0x to 1.1x. Live model runs are a separate pending phase."
       }
     },
     {
@@ -1584,7 +1584,7 @@ description: "Frequently asked questions about fak, the agent kernel: how its de
       "name": "Why do the cache-reuse savings only apply to self-hosted models?",
       "acceptedAnswer": {
         "@type": "Answer",
-        "text": "Because the reuse win comes from owning the KV cache as a kernel object, and an app that merely calls a frontier API never holds that cache, so it gets the safety floor but none of the savings. The roughly 4x figure (versus a tuned warm-cache stack) and the 8.8x to 9.7x figure (measured prefill elimination on the real 643-task WebVoyager dataset, swept across worker counts) are reread-rate reductions over a cache fak controls. When you proxy to OpenAI or Anthropic, the provider owns prefix caching upstream, so fak is governing the wire rather than eliminating prefill. Front your existing API for the capability floor and result quarantine; go all-in on the fused kernel with a self-hosted model to also get the reuse wins. Every benchmark traces to a commit and artifact in the benchmark authority."
+        "text": "Because the reuse win comes from owning the KV cache as a kernel object, and an app that merely calls a frontier API never holds that cache, so it gets the safety floor but none of the savings. The roughly 4x figure (versus a tuned warm-cache stack) and the 8.8x to 9.7x figure (modeled prefill elimination vs the naive floor over the real 643-task WebVoyager dataset, swept across worker counts) are reread-rate reductions over a cache fak controls. When you proxy to OpenAI or Anthropic, the provider owns prefix caching upstream, so fak is governing the wire rather than eliminating prefill. Front your existing API for the capability floor and result quarantine; go all-in on the fused kernel with a self-hosted model to also get the reuse wins. Every benchmark traces to a commit and artifact in the benchmark authority."
       }
     },
     {
@@ -1714,8 +1714,7 @@ correctness reference, not a production server. See
 
 The win is in **reread-rate**, not raw GPU speed. On a 50-turn × 5-agent run it is about
 **4× fewer tokens than a tuned warm-cache stack**: the apples-to-apples comparison
-(~60× only against the naive re-send-everything baseline, not the headline). On real WebVoyager web-agent workloads (643 tasks) it eliminates **8.8–9.7×**
-of prefill, measured. The reuse win is **self-host only**. An app that merely *calls* a
+(~60× only against the naive re-send-everything baseline, not the headline). Over the real WebVoyager set (643 tasks) a deterministic geometry model puts the prefill work-elimination at 8.8–9.7× vs the naive floor (only **1.0–1.1× vs a tuned per-agent-KV stack**) — modeled, not a wall-clock. The reuse win is **self-host only**. An app that merely *calls* a
 frontier API gets the safety floor but not the savings. Every number is traced to a
 commit and artifact in the [benchmark authority](https://github.com/anthony-chaudhary/fak/blob/main/BENCHMARK-AUTHORITY.md).
 
@@ -2276,7 +2275,7 @@ Because they answer two different questions, and collapsing them into one would 
 
 ## What does the 8.8-9.7x WebVoyager number actually measure?
 
-It is measured prefill work-elimination on the real 643-task WebVoyager dataset, swept across 1 to 8 workers, against a naive per-turn re-prefill baseline. At 1 worker it is 8.8x (170.9M vs 19.4M prefill tokens); at 8 workers it is 9.7x (1.37G vs 141.3M). The number is deterministic prefill-token arithmetic over the real task geometry (8,745 navigation turns, median 12 per task), not a wall-clock; live model runs are a separate pending phase.
+It is a modeled prefill work-elimination floor over the real 643-task WebVoyager dataset, swept across 1 to 8 workers, against a naive per-turn re-prefill baseline. At 1 worker it is 8.8x (170.9M vs 19.4M prefill tokens); at 8 workers it is 9.7x (1.37G vs 141.3M). The number is deterministic prefill-token arithmetic over the real task geometry (8,745 navigation turns, median 12 per task) — not a wall-clock measurement. Against a tuned per-agent-KV stack (not the naive floor) the cross-worker reuse is only 1.0x to 1.1x. Live model runs are a separate pending phase.
 
 ## Is the WebVoyager win still 9.7x against a tuned warm-cache stack?
 
@@ -2654,7 +2653,7 @@ No, the in-kernel model engine is a bit-exact correctness reference, not a tuned
 
 ## Why do the cache-reuse savings only apply to self-hosted models?
 
-Because the reuse win comes from owning the KV cache as a kernel object, and an app that merely calls a frontier API never holds that cache, so it gets the safety floor but none of the savings. The roughly 4x figure (versus a tuned warm-cache stack) and the 8.8x to 9.7x figure (measured prefill elimination on the real 643-task WebVoyager dataset, swept across worker counts) are reread-rate reductions over a cache `fak` controls. When you proxy to OpenAI or Anthropic, the provider owns prefix caching upstream, so `fak` is governing the wire rather than eliminating prefill. Front your existing API for the capability floor and result quarantine; go all-in on the fused kernel with a self-hosted model to also get the reuse wins. Every benchmark traces to a commit and artifact in the benchmark authority.
+Because the reuse win comes from owning the KV cache as a kernel object, and an app that merely calls a frontier API never holds that cache, so it gets the safety floor but none of the savings. The roughly 4x figure (versus a tuned warm-cache stack) and the 8.8x to 9.7x figure (modeled prefill elimination vs the naive floor over the real 643-task WebVoyager dataset, swept across worker counts) are reread-rate reductions over a cache `fak` controls. When you proxy to OpenAI or Anthropic, the provider owns prefix caching upstream, so `fak` is governing the wire rather than eliminating prefill. Front your existing API for the capability floor and result quarantine; go all-in on the fused kernel with a self-hosted model to also get the reuse wins. Every benchmark traces to a commit and artifact in the benchmark authority.
 
 ## What does the max|Δ|=0 bit-exactness proof actually guarantee, and what does it not?
 

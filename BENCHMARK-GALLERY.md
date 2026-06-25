@@ -64,8 +64,8 @@ Three lenses on one structural win, in the grammar of an attention-efficiency ch
 baseline curve that rises ~linearly and a fak curve that stays ~flat, the gap shaded, one
 big multiplier per panel. The shape is real, not stylised — re-prefill cost **is** linear
 in context / fleet / turns, and resident, addressable KV is not. Each panel names its own
-baseline: a structural per-cold-miss tax (vs re-prefill), a **measured** WebVoyager
-elimination (`9.7×`, 643 tasks), and the conservative `4.1×` vs a tuned warm-cache SOTA
+baseline: a structural per-cold-miss tax (vs re-prefill), a **modeled** WebVoyager
+elimination vs the naive floor (`9.7×`, 643 tasks), and the conservative `4.1×` vs a tuned warm-cache SOTA
 stack (the `~60×` vs naive is mentioned only as the thing we *don't* lead with).
 
 ![fak turn-tax efficiency curves](visuals/60-hero-turntax-curves.png)
