@@ -395,7 +395,7 @@ func TestFormatAuditSummary(t *testing.T) {
 	// session reads most of its prompt from Anthropic's cache (cache_control preserved
 	// byte-for-byte through the kernel hop), and the operator should see that saving.
 	cached := formatAuditSummary(gateway.AdjudicationSummary{Total: 2, Allowed: 2, CachedPromptTokens: 23428, CachedTurns: 1})
-	for _, want := range []string{"provider cache", "23428 prompt token(s) served from cache", "across 1 turn(s)"} {
+	for _, want := range []string{"provider cache", "23428 prompt token(s) the provider reported serving from its cache", "across 1 turn(s)", "OBSERVED"} {
 		if !strings.Contains(cached, want) {
 			t.Errorf("cached summary missing %q:\n%s", want, cached)
 		}
