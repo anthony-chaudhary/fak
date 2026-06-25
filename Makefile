@@ -167,7 +167,12 @@ demo-scorecards:
 	@python3 tools/demo_robustness_scorecard_test.py
 	@python3 tools/demo_robustness_scorecard.py
 	@python3 tools/demo_robustness_scorecard.py --check-doc
+	@python3 tools/code_slop_scorecard_test.py
 	@echo "demo-scorecards OK"
+# code-slop scorecard: only the unit-test line gates here for now. The bare run +
+# --check-doc both exit 1 while slop-debt > 0 (the scorecard reports honestly), so
+# wiring them would red-gate `make ci` immediately. Add them once slop-debt is driven
+# to 0; until then the scorecard is run on demand / via the control pane (the slop epic).
 
 # demo-smoke: dynamic but hermetic. It builds the browser demos into a temp dir,
 # starts them on loopback, mounts each behind its documented base path, verifies
