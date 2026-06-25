@@ -46,6 +46,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -73,6 +74,10 @@ DEFAULT_MAX_WORKERS = 2
 # launches `claude -p ... /dos-kernel:dos-dispatch-loop --lane X`). Used to count
 # real OS processes, the honest DoS signal the kernel's lease count can miss.
 WORKER_CMD_MARKER = "dos-dispatch-loop"
+ISSUE_RESOLVE_CMD_MARKER = "resolve GitHub issue #"
+WORKER_CMD_MARKERS = (WORKER_CMD_MARKER, ISSUE_RESOLVE_CMD_MARKER)
+RUNS_DIRNAME = ".dispatch-runs"
+_RESOLVE_PID_RE = re.compile(r"resolve-\d+-\d{8}-\d{6}\.pid$")
 
 
 def repo_root(start: Path | None = None) -> Path:
@@ -169,25 +174,33 @@ def kernel_alive(root: Path) -> dict[str, Any]:
             "verdict": doc.get("verdict")}
 
 
-def proc_worker_count() -> int:
-    """OS-level count of live `dos-dispatch-loop` worker processes — the honest
-    DoS signal: a real process consuming threads/handles, leased or not. Best
-    effort across platforms; 0 if it cannot be determined (the kernel count then
-    governs)."""
+def _is_worker_cmdline(cmdline: str) -> bool:
+    low = (cmdline or "").lower()
+    return any(marker.lower() in low for marker in WORKER_CMD_MARKERS)
+
+
+def _cmdline_worker_pids() -> set[int]:
+    """OS-level worker pids by command-line marker.
+
+    This catches the generic DOS-loop worker and the issue-resolution workers
+    whose prompt is still on the top-level command line. Best effort: an
+    inaccessible process table returns an empty set so the pid-sidecar witness
+    below can still govern the issue-dispatch path.
+    """
     try:
         import psutil  # type: ignore
     except ImportError:
         psutil = None
     if psutil is not None:
-        n = 0
+        pids: set[int] = set()
         for p in psutil.process_iter(["cmdline"]):
             try:
                 cl = " ".join(p.info.get("cmdline") or [])
             except (psutil.Error, TypeError):
                 continue
-            if WORKER_CMD_MARKER in cl:
-                n += 1
-        return n
+            if _is_worker_cmdline(cl):
+                pids.add(int(p.pid))
+        return pids
     # Fallback when psutil is absent. wmic.exe is removed on Win11 24H2+ (build
     # 26200), so use the supported CIM API; Win32_Process.CommandLine carries the
     # full argv (incl. the prompt/marker), so this is an honest worker count, not 0.
@@ -195,18 +208,100 @@ def proc_worker_count() -> int:
         try:
             out = subprocess.run(
                 ["powershell", "-NoProfile", "-NonInteractive", "-Command",
-                 "Get-CimInstance Win32_Process -Filter \"Name='claude.exe'\" "
-                 "| ForEach-Object { $_.CommandLine }"],
+                 "Get-CimInstance Win32_Process | "
+                 "Where-Object { $_.CommandLine -match 'dos-dispatch-loop|resolve GitHub issue #' } | "
+                 "ForEach-Object { $_.ProcessId }"],
                 capture_output=True, text=True, timeout=30).stdout
-            return sum(1 for ln in out.splitlines() if WORKER_CMD_MARKER in ln)
+            return {int(ln.strip()) for ln in out.splitlines() if ln.strip().isdigit()}
         except (OSError, subprocess.TimeoutExpired):
-            return 0
+            return set()
     try:
-        out = subprocess.run(["pgrep", "-fa", WORKER_CMD_MARKER],
+        out = subprocess.run(["pgrep", "-fa", "|".join(WORKER_CMD_MARKERS)],
                              capture_output=True, text=True, timeout=20).stdout
-        return sum(1 for ln in out.splitlines() if ln.strip())
+        pids = set()
+        for ln in out.splitlines():
+            if not ln.strip() or not _is_worker_cmdline(ln):
+                continue
+            first = ln.split(None, 1)[0]
+            if first.isdigit():
+                pids.add(int(first))
+        return pids
     except (OSError, subprocess.TimeoutExpired):
-        return 0
+        return set()
+
+
+def _alive_pid_set() -> set[int] | None:
+    """All live pids when psutil is available; None means use per-pid probes."""
+    try:
+        import psutil  # type: ignore
+        return {int(p.pid) for p in psutil.process_iter()}
+    except ImportError:
+        return None
+    except Exception:
+        return None
+
+
+def _pid_is_alive(pid: int) -> bool:
+    if pid <= 0:
+        return False
+    if os.name == "nt":
+        try:
+            proc = subprocess.run(
+                ["powershell", "-NoProfile", "-NonInteractive", "-Command",
+                 f"Get-Process -Id {int(pid)} -ErrorAction SilentlyContinue | Select-Object -First 1 -ExpandProperty Id"],
+                capture_output=True, text=True, timeout=5,
+            )
+            return proc.returncode == 0 and bool((proc.stdout or "").strip())
+        except (OSError, subprocess.TimeoutExpired):
+            return False
+    try:
+        os.kill(pid, 0)
+        return True
+    except OSError:
+        return False
+
+
+def live_resolve_worker_pids(runs_dir: Path, *, alive: set[int] | None = None) -> set[int]:
+    """Live issue-resolution workers from `.dispatch-runs/resolve-*.pid`.
+
+    `issue_resolve_dispatch.py` is the active always-on issue closer in this
+    plan-empty repo, and it writes one pid sidecar per spawned worker. The old
+    preflight counted only `dos-dispatch-loop` argv markers, so these workers did
+    not consume the cap at all. This is the filesystem witness the dispatcher
+    already authors, folded into the same live-worker budget.
+    """
+    if not runs_dir.is_dir():
+        return set()
+    if alive is None:
+        alive = _alive_pid_set()
+    pids: set[int] = set()
+    for pid_file in runs_dir.glob("resolve-*.pid"):
+        if not _RESOLVE_PID_RE.match(pid_file.name):
+            continue
+        try:
+            pid = int(pid_file.read_text(encoding="utf-8").strip())
+        except (OSError, ValueError):
+            continue
+        if alive is not None:
+            if pid in alive:
+                pids.add(pid)
+        elif _pid_is_alive(pid):
+            pids.add(pid)
+    return pids
+
+
+def proc_worker_count(root: Path | None = None) -> int:
+    """Count live worker processes that consume the dispatch cap.
+
+    This combines the generic DOS-loop command-line marker with the issue
+    resolver's pid sidecars. Use the union of pids so a worker visible through both
+    witnesses is counted once; if psutil is absent, each witness is still best
+    effort and may be conservatively low rather than fabricating capacity.
+    """
+    root = root or repo_root()
+    pids = set(_cmdline_worker_pids())
+    pids.update(live_resolve_worker_pids(root / RUNS_DIRNAME))
+    return len(pids)
 
 
 def _int(value: Any, default: int | None = None) -> int | None:
@@ -237,7 +332,7 @@ def evaluate(root: Path, *, max_workers: int, work_kind: str, product: str,
     cap = min(max_workers, target) if target else max_workers
     cap = max(0, cap)
     alive_kernel = kern.get("alive")
-    alive_proc = proc_worker_count()
+    alive_proc = proc_worker_count(root)
     # MAX of the two views: neither a stale lease nor an unleased orphan hides load.
     live = max(alive_kernel or 0, alive_proc)
     headroom = cap - live

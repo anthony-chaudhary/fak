@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import importlib.util
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -37,7 +38,7 @@ def patch_checks(mod, *, host=None, account=None, kernel=None, procs=0):
     mod.host_check = lambda root, **kw: host
     mod.account_check = lambda root, **kw: account
     mod.kernel_alive = lambda root: kernel
-    mod.proc_worker_count = lambda: procs
+    mod.proc_worker_count = lambda root=None: procs
 
 
 def run_eval(mod, **kw):
@@ -123,6 +124,21 @@ class EvaluateVerdictTest(unittest.TestCase):
         self.assertEqual(p["verdict"], mod.REFUSE_AT_CAP)
         self.assertEqual(p["os_worker_procs"], 3)
 
+    def test_refuse_at_cap_counts_issue_resolution_sidecars(self) -> None:
+        mod = load()
+        patch_checks(mod, kernel={"alive": 0, "target": 9, "verdict": "X"}, procs=0)
+        # Restore the real proc_worker_count, but make its two live-process witnesses
+        # hermetic: no command-line workers, two live issue-resolution sidecars.
+        mod._cmdline_worker_pids = lambda: set()
+        mod.live_resolve_worker_pids = lambda runs_dir: {101, 102}
+        mod.proc_worker_count = lambda root=None: len(
+            mod._cmdline_worker_pids() | mod.live_resolve_worker_pids(
+                (root or ROOT) / mod.RUNS_DIRNAME))
+        p = run_eval(mod, max_workers=2)
+        self.assertEqual(p["live"], 2)
+        self.assertEqual(p["os_worker_procs"], 2)
+        self.assertEqual(p["verdict"], mod.REFUSE_AT_CAP)
+
     def test_refuse_inspect_when_host_check_errored(self) -> None:
         mod = load()
         patch_checks(mod, host={"safe": False, "error": "guard not found", "flagged": 0})
@@ -173,6 +189,29 @@ class RenderTest(unittest.TestCase):
         text = mod.render(run_eval(mod))
         self.assertIn("dispatch preflight", text)
         self.assertIn("SPAWN_OK", text)
+
+
+class WorkerCountTest(unittest.TestCase):
+    def test_is_worker_cmdline_matches_generic_and_issue_resolver(self) -> None:
+        mod = load()
+        self.assertTrue(mod._is_worker_cmdline("claude -p /dos-kernel:dos-dispatch-loop --lane docs"))
+        self.assertTrue(mod._is_worker_cmdline("claude -p your goal: resolve GitHub issue #717"))
+        self.assertFalse(mod._is_worker_cmdline("python tools/dispatch_preflight.py --json"))
+
+    def test_live_resolve_worker_pids_counts_only_alive_sidecars(self) -> None:
+        mod = load()
+        with tempfile.TemporaryDirectory() as d:
+            runs = Path(d)
+            (runs / "resolve-717-20260625-062210.pid").write_text("101", encoding="utf-8")
+            (runs / "resolve-718-20260625-060712.pid").write_text("102", encoding="utf-8")
+            (runs / "resolve-719-20260625-055209.pid").write_text("not-a-pid", encoding="utf-8")
+            self.assertEqual(mod.live_resolve_worker_pids(runs, alive={101}), {101})
+
+    def test_proc_worker_count_unions_cmdline_and_sidecar_pids(self) -> None:
+        mod = load()
+        mod._cmdline_worker_pids = lambda: {101, 103}
+        mod.live_resolve_worker_pids = lambda runs_dir: {101, 102}
+        self.assertEqual(mod.proc_worker_count(ROOT), 3)
 
 
 if __name__ == "__main__":
