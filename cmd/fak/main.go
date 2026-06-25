@@ -96,6 +96,8 @@ func main() {
 		cmdAudit(os.Args[2:])
 	case "headroom":
 		cmdHeadroom(os.Args[2:])
+	case "vcache":
+		cmdVCache(os.Args[2:])
 	case "hook":
 		cmdHook()
 	case "swebench":
@@ -293,6 +295,13 @@ func usage() {
                  'headroom proxy'). The selected plugin folds into the result path as
                  a ResultAdmitter, so 'fak guard'/'fak serve' compress in-stream.
                  Pick with FAK_COMPRESSOR; 'compress' proves the savings with no model)
+  fak vcache    status | prove | prove-telemetry
+                  (the VIRTUAL PROVIDER-CACHE status/proof surface. 'status' reports
+                   what is actually up: the M5 Governor is a local off-path policy
+                   engine, while provider calibration/warming/recall remain issue-tracked.
+                   'prove' runs the deterministic star-anchor token-savings proof and
+                   exits 0 when PROVEN, 1 when REFUTED; 'prove-telemetry' proves/refutes
+                   realized savings from provider usage JSONL)
   fak hook      < call.json     (spawned-hook decide; the A/B baseline transport)
   fak webbench  describe | eval | compare    (frontier web/browser agent benchmarking)
   fak swebench  describe | eval | compare    (SWE-bench Verified benchmarking)

@@ -63,6 +63,7 @@ concurrent = [
   "a2achan",
   "snapshot",
   "rungobs",
+  "vcachegov", # vCache M5 Governor (#720): steady-state pin/lazy/evict + warm-budget + affinity policy over cachemeta
   # new-leaf:lane -- `python tools/new_leaf.py` inserts a generated leaf lane above
 ]
 exclusive = ["abi", "release", "global"]
@@ -92,6 +93,7 @@ autopick = [
   "a2achan",
   "snapshot",
   "rungobs",
+  "vcachegov",
   # new-leaf:lane
 ]
 
@@ -199,6 +201,7 @@ sessionimage = ["internal/sessionimage/**"]
 a2achan = ["internal/a2achan/**"]
 snapshot = ["internal/snapshot/**"]
 rungobs = ["internal/rungobs/**"]
+vcachegov = ["internal/vcachegov/**"]
 # new-leaf:tree -- generated leaf trees inserted above this line
 cmd         = ["cmd/**"]
 experiments = ["experiments/**"]

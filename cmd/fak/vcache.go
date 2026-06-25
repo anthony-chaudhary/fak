@@ -1,0 +1,307 @@
+package main
+
+import (
+	"bufio"
+	"encoding/json"
+	"errors"
+	"flag"
+	"fmt"
+	"io"
+	"os"
+	"strings"
+
+	"github.com/anthony-chaudhary/fak/internal/vcachegov"
+)
+
+func cmdVCache(argv []string) {
+	os.Exit(runVCache(os.Stdout, os.Stderr, argv))
+}
+
+func runVCache(stdout, stderr io.Writer, argv []string) int {
+	if len(argv) == 0 {
+		vcacheUsage(stderr)
+		return 2
+	}
+	switch argv[0] {
+	case "status":
+		return runVCacheStatus(stdout, stderr, argv[1:])
+	case "prove":
+		return runVCacheProve(stdout, stderr, argv[1:])
+	case "prove-telemetry":
+		return runVCacheProveTelemetry(stdout, stderr, argv[1:])
+	case "-h", "--help", "help":
+		vcacheUsage(stdout)
+		return 0
+	default:
+		fmt.Fprintf(stderr, "fak vcache: unknown subcommand %q\n", argv[0])
+		vcacheUsage(stderr)
+		return 2
+	}
+}
+
+func vcacheUsage(w io.Writer) {
+	fmt.Fprint(w, `usage:
+  fak vcache status [--json]
+  fak vcache prove [--json] [--anchor-tokens N] [--suffix-tokens N] [--requests N]
+                   [--min-prefix-tokens N] [--read-mult F] [--write-mult F]
+                   [--content public|secret|regulated]
+  fak vcache prove-telemetry --file FILE [--json]
+                   [--read-mult F] [--write-5m-mult F] [--write-1h-mult F]
+
+status reports what is actually up: the M5 governor is a local, off-path policy
+engine; provider calibration/warming/recall remain tracked by #716-#719, and
+Codex/OpenAI cached-token telemetry remains tracked by #727.
+prove runs the deterministic star-anchor token-savings proof. Exit 0 means PROVEN;
+exit 1 means REFUTED; exit 2 means usage error.
+prove-telemetry replays provider usage JSONL, such as Claude Code probe output, and
+proves realized savings from observed cache_read/cache_creation counters.
+`)
+}
+
+type vcacheStatusReport struct {
+	Status         string                     `json:"status"`
+	Governor       string                     `json:"governor"`
+	LiveProvider   string                     `json:"live_provider"`
+	Proof          vcachegov.StarSavingsProof `json:"proof"`
+	M5Issue        string                     `json:"m5_issue"`
+	Remaining      []vcacheRemainingIssue     `json:"remaining"`
+	CorrectnessLaw string                     `json:"correctness_law"`
+}
+
+type vcacheRemainingIssue struct {
+	Number int    `json:"number"`
+	Title  string `json:"title"`
+	URL    string `json:"url"`
+}
+
+func runVCacheStatus(stdout, stderr io.Writer, argv []string) int {
+	fs := flag.NewFlagSet("vcache status", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	asJSON := fs.Bool("json", false, "emit machine-readable status")
+	if err := fs.Parse(argv); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			return 0
+		}
+		return 2
+	}
+
+	rep := defaultVCacheStatus()
+	if *asJSON {
+		return writeJSON(stdout, rep)
+	}
+	fmt.Fprintf(stdout, "vCache status: %s\n", rep.Status)
+	fmt.Fprintf(stdout, "vCache M5 governor: %s\n", rep.Governor)
+	fmt.Fprintf(stdout, "live provider loop: %s\n", rep.LiveProvider)
+	fmt.Fprintf(stdout, "codex-like star proof: %s (%s)\n", rep.Proof.Status, rep.Proof.Reason)
+	fmt.Fprintf(stdout, "token-equiv saved: %.1f / %.1f (%.1f%%)\n",
+		rep.Proof.SavedTokenEquiv, rep.Proof.BaselineTokenEquiv, rep.Proof.SavedPct)
+	fmt.Fprintf(stdout, "correctness depends on cache hit: %v\n", rep.Proof.CorrectnessDependsOn)
+	fmt.Fprintf(stdout, "m5 issue: %s\n", rep.M5Issue)
+	fmt.Fprint(stdout, "remaining:")
+	for _, issue := range rep.Remaining {
+		fmt.Fprintf(stdout, " #%d", issue.Number)
+	}
+	fmt.Fprintln(stdout)
+	return 0
+}
+
+func runVCacheProve(stdout, stderr io.Writer, argv []string) int {
+	fs := flag.NewFlagSet("vcache prove", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	asJSON := fs.Bool("json", false, "emit machine-readable proof")
+	anchor := fs.Float64("anchor-tokens", 4096, "cacheable anchor size in input tokens")
+	suffix := fs.Float64("suffix-tokens", 10, "fresh suffix tokens per sibling request")
+	requests := fs.Int("requests", 7, "number of sibling requests sharing the anchor")
+	minPrefix := fs.Float64("min-prefix-tokens", 1024, "provider minimum cacheable prefix")
+	readMult := fs.Float64("read-mult", 0.1, "provider cached-read input-token multiplier")
+	writeMult := fs.Float64("write-mult", vcachegov.WriteMult5Minutes, "provider cache-write input-token multiplier")
+	content := fs.String("content", "public", "prefix content class: public, secret, regulated")
+	if err := fs.Parse(argv); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			return 0
+		}
+		return 2
+	}
+
+	proof := vcachegov.ProveStarSavings(vcachegov.StarSavingsInput{
+		AnchorTokens:    *anchor,
+		SuffixTokens:    *suffix,
+		Requests:        *requests,
+		MinPrefixTokens: *minPrefix,
+		ReadMult:        *readMult,
+		WriteMult:       *writeMult,
+		Secret:          vcachegov.ClassifyPrefix(strings.ToLower(strings.TrimSpace(*content))),
+	})
+	if *asJSON {
+		code := writeJSON(stdout, proof)
+		if code != 0 {
+			return code
+		}
+		return vcacheProofExit(proof.Status)
+	}
+	fmt.Fprintf(stdout, "status: %s\n", proof.Status)
+	fmt.Fprintf(stdout, "reason: %s\n", proof.Reason)
+	fmt.Fprintf(stdout, "requests: %d\n", proof.Requests)
+	fmt.Fprintf(stdout, "anchor/suffix/min: %.0f / %.0f / %.0f tokens\n",
+		proof.AnchorTokens, proof.SuffixTokens, proof.MinPrefixTokens)
+	fmt.Fprintf(stdout, "read/write multipliers: %.3g / %.3g\n", proof.ReadMult, proof.WriteMult)
+	fmt.Fprintf(stdout, "baseline token-equiv: %.1f\n", proof.BaselineTokenEquiv)
+	fmt.Fprintf(stdout, "vcache token-equiv: %.1f\n", proof.VCacheTokenEquiv)
+	fmt.Fprintf(stdout, "saved token-equiv: %.1f (%.1f%%)\n", proof.SavedTokenEquiv, proof.SavedPct)
+	fmt.Fprintf(stdout, "break-even requests: %s\n", formatBreakEven(proof.BreakEvenRequests))
+	fmt.Fprintf(stdout, "correctness depends on cache hit: %v\n", proof.CorrectnessDependsOn)
+	return vcacheProofExit(proof.Status)
+}
+
+func runVCacheProveTelemetry(stdout, stderr io.Writer, argv []string) int {
+	fs := flag.NewFlagSet("vcache prove-telemetry", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	asJSON := fs.Bool("json", false, "emit machine-readable proof")
+	file := fs.String("file", "", "provider telemetry JSONL file ('-' for stdin)")
+	readMult := fs.Float64("read-mult", 0.1, "provider cached-read input-token multiplier")
+	write5mMult := fs.Float64("write-5m-mult", vcachegov.WriteMult5Minutes, "5m cache-write input-token multiplier")
+	write1hMult := fs.Float64("write-1h-mult", vcachegov.WriteMult1Hour, "1h cache-write input-token multiplier")
+	if err := fs.Parse(argv); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			return 0
+		}
+		return 2
+	}
+	if strings.TrimSpace(*file) == "" {
+		fmt.Fprintln(stderr, "fak vcache prove-telemetry: --file is required")
+		return 2
+	}
+
+	rows, err := readVCacheTelemetry(*file, os.Stdin)
+	if err != nil {
+		fmt.Fprintf(stderr, "fak vcache prove-telemetry: %v\n", err)
+		return 2
+	}
+	proof := vcachegov.ProveTelemetrySavings(vcachegov.TelemetrySavingsInput{
+		Rows:        rows,
+		ReadMult:    *readMult,
+		Write5mMult: *write5mMult,
+		Write1hMult: *write1hMult,
+	})
+	if *asJSON {
+		code := writeJSON(stdout, proof)
+		if code != 0 {
+			return code
+		}
+		return vcacheProofExit(proof.Status)
+	}
+	fmt.Fprintf(stdout, "status: %s\n", proof.Status)
+	fmt.Fprintf(stdout, "reason: %s\n", proof.Reason)
+	fmt.Fprintf(stdout, "requests: %d\n", proof.Requests)
+	fmt.Fprintf(stdout, "baseline token-equiv: %.1f\n", proof.BaselineTokenEquiv)
+	fmt.Fprintf(stdout, "actual token-equiv: %.1f\n", proof.ActualTokenEquiv)
+	fmt.Fprintf(stdout, "saved token-equiv: %.1f (%.2f%%)\n", proof.SavedTokenEquiv, proof.SavedPct)
+	fmt.Fprintf(stdout, "cache read/write tokens: %.0f / %.0f\n", proof.CacheReadTokens, proof.CacheCreationTokens)
+	fmt.Fprintf(stdout, "first positive request: %s\n", formatObservedPositive(proof.FirstPositiveRequest))
+	fmt.Fprintf(stdout, "correctness depends on cache hit: %v\n", proof.CorrectnessDependsOn)
+	return vcacheProofExit(proof.Status)
+}
+
+func defaultVCacheStatus() vcacheStatusReport {
+	return vcacheStatusReport{
+		Status:       "M5 governor up; full vCache provider loop not yet live",
+		Governor:     "up (pin/lazy/evict, warm budget, affinity, secret gate)",
+		LiveProvider: "not wired; M1-M4 remain open; Codex/OpenAI telemetry probe #727 pending",
+		Proof: vcachegov.ProveStarSavings(vcachegov.StarSavingsInput{
+			AnchorTokens:    4096,
+			SuffixTokens:    10,
+			Requests:        7,
+			MinPrefixTokens: 1024,
+			ReadMult:        0.1,
+			WriteMult:       vcachegov.WriteMult5Minutes,
+			Secret:          vcachegov.Cacheable,
+		}),
+		M5Issue: "https://github.com/anthony-chaudhary/fak/issues/720",
+		Remaining: []vcacheRemainingIssue{
+			{716, "M1 observe & calibrate", "https://github.com/anthony-chaudhary/fak/issues/716"},
+			{717, "M2 star anchors", "https://github.com/anthony-chaudhary/fak/issues/717"},
+			{718, "M3 dedicated warming", "https://github.com/anthony-chaudhary/fak/issues/718"},
+			{719, "M4 chains & recall", "https://github.com/anthony-chaudhary/fak/issues/719"},
+			{727, "Codex/OpenAI telemetry probe", "https://github.com/anthony-chaudhary/fak/issues/727"},
+		},
+		CorrectnessLaw: "cost is budgeted at the uncached price; hits are realized rebates, never trust claims",
+	}
+}
+
+func writeJSON(w io.Writer, v any) int {
+	b, err := json.MarshalIndent(v, "", "  ")
+	if err != nil {
+		return 2
+	}
+	fmt.Fprintln(w, string(b))
+	return 0
+}
+
+func vcacheProofExit(s vcachegov.ProofStatus) int {
+	if s == vcachegov.ProofProven {
+		return 0
+	}
+	return 1
+}
+
+func formatBreakEven(n int) string {
+	if n == int(^uint(0)>>1) {
+		return "never"
+	}
+	return fmt.Sprintf("%d", n)
+}
+
+func formatObservedPositive(n int) string {
+	if n <= 0 {
+		return "never"
+	}
+	return fmt.Sprintf("%d", n)
+}
+
+type vcacheTelemetryJSONLRow struct {
+	InputTokens              float64 `json:"input_tokens"`
+	CacheCreationInputTokens float64 `json:"cache_creation_input_tokens"`
+	CacheReadInputTokens     float64 `json:"cache_read_input_tokens"`
+	Ephemeral1hInputTokens   float64 `json:"ephemeral_1h_input_tokens"`
+	Ephemeral5mInputTokens   float64 `json:"ephemeral_5m_input_tokens"`
+}
+
+func readVCacheTelemetry(path string, stdin io.Reader) ([]vcachegov.TelemetryRow, error) {
+	var r io.Reader
+	if path == "-" {
+		r = stdin
+	} else {
+		f, err := os.Open(path)
+		if err != nil {
+			return nil, err
+		}
+		defer f.Close()
+		r = f
+	}
+	sc := bufio.NewScanner(r)
+	sc.Buffer(make([]byte, 0, 64*1024), 4*1024*1024)
+	var rows []vcachegov.TelemetryRow
+	lineNo := 0
+	for sc.Scan() {
+		lineNo++
+		line := strings.TrimSpace(sc.Text())
+		if line == "" {
+			continue
+		}
+		var raw vcacheTelemetryJSONLRow
+		if err := json.Unmarshal([]byte(line), &raw); err != nil {
+			return nil, fmt.Errorf("line %d: %w", lineNo, err)
+		}
+		rows = append(rows, vcachegov.TelemetryRow{
+			InputTokens:              raw.InputTokens,
+			CacheCreationInputTokens: raw.CacheCreationInputTokens,
+			CacheReadInputTokens:     raw.CacheReadInputTokens,
+			Ephemeral1hInputTokens:   raw.Ephemeral1hInputTokens,
+			Ephemeral5mInputTokens:   raw.Ephemeral5mInputTokens,
+		})
+	}
+	if err := sc.Err(); err != nil {
+		return nil, err
+	}
+	return rows, nil
+}

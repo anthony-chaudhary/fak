@@ -82,6 +82,7 @@ var tier = map[string]int{
 	"a2achan":      2, // in-kernel agent-to-agent message channel: a process-global, capability-floored, Ref-backed mailbox (Send/Recv adjudicated by a registered a2aGate + a2aIngress; Taint/Scope enforced). Mechanism: imports only abi, off the hot path.
 	"snapshot":     3, // uniform DUMP/RESTORE seam over any primitive (turn/tool/session/fleet/rsi): a sha256-integrity envelope (Marshal/Parse over any body) + a ladder registry + typed codecs for trace(trajectory) and fleet(session.Table). Imports session(1)+trajectory(3); off the hot path.
 	"rungobs":      2, // passive rung-decision distribution counter: an abi.Emitter (subscribed to EvDecide/EvDeny/EvVDSOHit) that re-folds each call's chain off the hot path via kernel.FoldExplain and bumps a per-(rung,kind,reason) histogram. Mechanism: imports kernel(2)+abi(0); runs synchronously in emit but adds 0 adjudication rungs and never touches the verdict or Counters.
+	"vcachegov":    2, // vCache M5 Governor (#720): the steady-state policy over the vCache warm set — pin/lazy/evict (§5.4), rate-limit warm budget (§5.5), cross-shard affinity routing + rehash/burst guards (§9/D3), and the Law-D4 secret classifier. Pure decision layer: imports cachemeta(1)+stdlib, off the hot path (NOT registered; M1–M3 wire the live loop).
 	// new-leaf:tier — `python tools/new_leaf.py <name> --tier <name>` inserts the
 	// declaration for a generated leaf immediately ABOVE this line. Keep the marker last.
 }
