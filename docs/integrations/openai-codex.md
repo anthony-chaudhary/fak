@@ -147,15 +147,26 @@ envelope plus:
 - `reset.required_actions`: dump the session image, start a fresh process, rehydrate the
   planned view, and reuse provider cache only where legal.
 
-For `fak guard`, the equivalent flag is:
+For `fak guard`, use the restart supervisor when the wrapped client benefits from a real
+child-process boundary:
 
 ```bash
-fak guard --provider openai --context-budget-tokens 150000 --reset-on-budget -- <openai-compatible-agent>
+fak guard --provider openai --context-budget-tokens 150000 --restart-on-budget -- <openai-compatible-agent>
 ```
 
-That transparent reset is an in-gateway re-arm. It does not kill and relaunch the child
-OS process; wrappers that require a hard process boundary should still consume the 409
-directive mode and perform that supervisor step themselves.
+On budget exhaustion, guard distills the served transcript into a carryover seed, re-arms
+the continuation trace, writes a seed JSON file, advances the default trace for callers
+that omit `X-Trace-Id`, stops the child, and relaunches it with:
+
+- `FAK_RESET_TRACE_ID`: the continuation trace id.
+- `FAK_SESSION_ID`: the same continuation id, for wrappers that map session env to trace.
+- `FAK_RESET_SEED_FILE`: the carryover seed JSON to prepend into the fresh model window.
+
+Use `--restart-limit N` to cap relaunches and `--restart-seed-dir DIR` to choose where the
+seed handoff files are written. The older `--reset-on-budget` mode remains available for
+clients that want the gateway to retry in-place without killing the child process. A
+generic child that ignores `FAK_RESET_SEED_FILE` still restarts under the fresh trace, but
+will not automatically rehydrate its local transcript.
 
 Current Codex CLI/IDE sessions should still use MCP first. If that Codex surface does not
 honor an injected OpenAI-compatible base URL, fak can adjudicate tools but cannot

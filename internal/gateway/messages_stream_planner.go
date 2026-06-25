@@ -134,7 +134,7 @@ func (s *Server) streamAnthropicPlannerLive(w http.ResponseWriter, r *http.Reque
 		return true
 	}
 	s.metrics.observeInference(comp.Usage.PromptTokens, comp.Usage.CompletionTokens, comp.Usage.CachedPromptTokens(), comp.FinishReason, time.Since(began))
-	s.debitServedSessionTurn(r.Context(), sessionTurn, comp.Usage)
+	s.debitServedSessionTurn(r.Context(), sessionTurn, comp.Usage, req.Messages)
 
 	if comp.ToolCallsDropped && len(comp.Message.ToolCalls) == 0 {
 		if !started {

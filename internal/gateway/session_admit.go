@@ -149,12 +149,15 @@ func (t servedSessionTurn) maxTokensFor(requestMax int) int {
 // debitServedSessionTurn reports the provider usage after a served model request.
 // Usage is known only post-response; session.Table.DebitUsage records the debit
 // now, and the next Decide takes any normal budget-exhaustion stop at the boundary.
-func (s *Server) debitServedSessionTurn(ctx context.Context, turn servedSessionTurn, usage agent.Usage) {
+func (s *Server) debitServedSessionTurn(ctx context.Context, turn servedSessionTurn, usage agent.Usage, messages []agent.Message) {
 	su := sessionUsageFromAgent(usage)
 	if s.debitSession == nil || turn.traceID == "" || (su.CompletionTokens <= 0 && su.ContextTokens <= 0) {
 		return
 	}
-	s.debitSession(ctx, turn.traceID, su)
+	st := s.debitSession(ctx, turn.traceID, su)
+	if s.budgetDrained != nil && isBudgetResetReason(st) {
+		s.budgetDrained(ctx, st, append([]agent.Message(nil), messages...))
+	}
 }
 
 func sessionUsageFromAgent(u agent.Usage) SessionUsage {

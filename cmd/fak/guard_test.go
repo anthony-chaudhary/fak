@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"net/http"
@@ -15,9 +16,11 @@ import (
 
 	"github.com/anthony-chaudhary/fak/internal/abi"
 	"github.com/anthony-chaudhary/fak/internal/adjudicator"
+	"github.com/anthony-chaudhary/fak/internal/agent"
 	"github.com/anthony-chaudhary/fak/internal/gateway"
 	"github.com/anthony-chaudhary/fak/internal/journal"
 	"github.com/anthony-chaudhary/fak/internal/policy"
+	"github.com/anthony-chaudhary/fak/internal/session"
 )
 
 // The embedded guard floor must be a valid, closed-vocabulary manifest, and must do
@@ -147,6 +150,101 @@ func TestGuardInjectedEnv(t *testing.T) {
 	// still carrying the /v1 the OpenAI wire needs.
 	if got := guardInjectedEnv("openai", "MY_BASE", gw); len(got) != 1 || got[0] != [2]string{"MY_BASE", gw + "/v1"} {
 		t.Errorf("override injected = %v, want one MY_BASE=%s/v1", got, gw)
+	}
+}
+
+func TestGuardRestartSeedFileAndEnv(t *testing.T) {
+	ev := guardBudgetRestartEvent{
+		Schema:      "fak.guard.budget_restart.v1",
+		FromTraceID: "guard",
+		ToTraceID:   "win-child",
+		Reason:      "BUDGET_CONTEXT_EXHAUSTED",
+		Seed:        []agent.Message{{Role: agent.RoleSystem, Content: "continuation seed"}},
+		SeedText:    "continuation seed",
+		Note:        "restart",
+	}
+	path, err := writeGuardRestartSeedFile(t.TempDir(), ev)
+	if err != nil {
+		t.Fatalf("writeGuardRestartSeedFile: %v", err)
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read seed file: %v", err)
+	}
+	var got guardBudgetRestartEvent
+	if err := json.Unmarshal(raw, &got); err != nil {
+		t.Fatalf("decode seed file: %v", err)
+	}
+	if got.FromTraceID != "guard" || got.ToTraceID != "win-child" || got.SeedText != "continuation seed" {
+		t.Fatalf("seed file = %+v, want guard->win-child with seed text", got)
+	}
+	ev.SeedFile = path
+	env := guardRestartEnv(ev)
+	want := map[string]string{
+		"FAK_RESET_FROM_TRACE": "guard",
+		"FAK_RESET_TRACE_ID":   "win-child",
+		"FAK_SESSION_ID":       "win-child",
+		"FAK_RESET_REASON":     "BUDGET_CONTEXT_EXHAUSTED",
+		"FAK_RESET_SEED_FILE":  path,
+	}
+	for _, kv := range env {
+		if want[kv[0]] == kv[1] {
+			delete(want, kv[0])
+		}
+	}
+	if len(want) != 0 {
+		t.Fatalf("restart env missing/mismatched entries: %+v from %v", want, env)
+	}
+}
+
+func TestBuildGuardChildIncludesRestartEnv(t *testing.T) {
+	child := buildGuardChild([]string{"agent"}, [][2]string{{"OPENAI_BASE_URL", "http://gw/v1"}}, false, [2]string{"FAK_SESSION_ID", "win-child"})
+	env := strings.Join(child.Env, "\n")
+	for _, want := range []string{"OPENAI_BASE_URL=http://gw/v1", "FAK_SESSION_ID=win-child"} {
+		if !strings.Contains(env, want) {
+			t.Fatalf("child env missing %q in:\n%s", want, env)
+		}
+	}
+}
+
+func TestGuardBudgetRestarterRecontinuesAndEmitsSeed(t *testing.T) {
+	const trace = "guard-restart-test"
+	var child string
+	t.Cleanup(func() {
+		serveSessions.Reset(trace)
+		if child != "" {
+			serveSessions.Reset(child)
+		}
+	})
+	serveSessions.SetBudget(trace, session.Budget{
+		TurnsLeft:         session.Unbounded,
+		TokensLeft:        session.Unbounded,
+		ContextTokensLeft: 5,
+	})
+	st := debitSession(context.Background(), trace, gateway.SessionUsage{ContextTokens: 6})
+	child = st.ContinuationID
+	if child == "" {
+		t.Fatalf("debit state = %+v, want continuation id", st)
+	}
+	r := newGuardBudgetRestarter(true, 50, 0, t.TempDir(), io.Discard)
+	r.OnBudgetExhausted(context.Background(), st, []agent.Message{
+		{Role: agent.RoleSystem, Content: "You are fak."},
+		{Role: agent.RoleUser, Content: "Keep the budget reset objective."},
+	})
+	select {
+	case ev := <-r.events:
+		if ev.FromTraceID != trace || ev.ToTraceID != child || ev.SeedFile == "" {
+			t.Fatalf("restart event = %+v, want trace->child with seed file", ev)
+		}
+		if !strings.Contains(ev.SeedText, "budget reset objective") {
+			t.Fatalf("seed text = %q, want transcript-derived carryover", ev.SeedText)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("restarter did not emit a restart event")
+	}
+	fresh := observeSession(context.Background(), child)
+	if fresh.Run != "running" || fresh.ParentTrace != trace || fresh.Budget.ContextTokensLeft != 50 {
+		t.Fatalf("fresh state = %+v, want recontinued child with fresh context budget", fresh)
 	}
 }
 

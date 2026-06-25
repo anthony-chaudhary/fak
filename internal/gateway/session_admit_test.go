@@ -115,6 +115,52 @@ func TestTraceForUsesConfiguredDefaultTrace(t *testing.T) {
 	}
 }
 
+func TestSetDefaultTraceIDAdvancesOmittedCallerTrace(t *testing.T) {
+	srv := &Server{defaultTraceID: "guard"}
+	srv.SetDefaultTraceID(" win-child ")
+	if got := srv.traceFor(""); got != "win-child" {
+		t.Fatalf("traceFor empty after SetDefaultTraceID = %q, want win-child", got)
+	}
+	srv.SetDefaultTraceID("")
+	if got := srv.traceFor(""); !strings.HasPrefix(got, "gw-") {
+		t.Fatalf("traceFor empty after clearing default = %q, want minted gw-*", got)
+	}
+}
+
+func TestBudgetExhaustedCallbackReceivesServedTranscript(t *testing.T) {
+	var gotState SessionState
+	var gotMessages []agent.Message
+	srv := &Server{
+		debitSession: func(_ context.Context, traceID string, usage SessionUsage) SessionState {
+			if traceID != "guard" || usage.ContextTokens != 151 {
+				t.Fatalf("debit got trace=%q usage=%+v, want guard/context=151", traceID, usage)
+			}
+			return SessionState{
+				TraceID:        traceID,
+				Run:            "draining",
+				Reason:         sessionReasonBudgetContext,
+				ContinuationID: "win-child",
+			}
+		},
+		budgetDrained: func(_ context.Context, st SessionState, messages []agent.Message) {
+			gotState = st
+			gotMessages = messages
+		},
+	}
+	msgs := []agent.Message{{Role: agent.RoleUser, Content: "carry this into the restart"}}
+	srv.debitServedSessionTurn(context.Background(), servedSessionTurn{traceID: "guard"}, agent.Usage{PromptTokens: 151}, msgs)
+	if gotState.TraceID != "guard" || gotState.ContinuationID != "win-child" {
+		t.Fatalf("callback state = %+v, want drained guard->win-child", gotState)
+	}
+	if len(gotMessages) != 1 || gotMessages[0].Content != "carry this into the restart" {
+		t.Fatalf("callback messages = %+v, want served transcript", gotMessages)
+	}
+	msgs[0].Content = "mutated after callback"
+	if gotMessages[0].Content != "carry this into the restart" {
+		t.Fatalf("callback must receive a copy, got %q", gotMessages[0].Content)
+	}
+}
+
 func TestSessionDecideDebitsTurnsOnServedChat(t *testing.T) {
 	srv := newTestServer(t)
 	tbl := session.NewTable()

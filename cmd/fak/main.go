@@ -289,7 +289,8 @@ func usage() {
                  fak_syscall / fak_admit / fak_changes / fak_revoke /
                  fak_session_reset / fak_context_change) over stdin/stdout)
   fak guard     [--provider anthropic|openai|gemini|xai] [--base-url URL] [--policy FILE]
-                [--session-id ID --context-budget-tokens N [--reset-on-budget]]
+                [--session-id ID --context-budget-tokens N [--reset-on-budget|--restart-on-budget]]
+                [--restart-limit N] [--restart-seed-dir DIR]
                 [--api-key-env VAR] [--env VAR] [--audit FILE|off] [--no-audit] [--dump-policy] [--quiet] -- <agent command...>
                 (RUN YOUR REAL AGENT THROUGH THE KERNEL: the one-command front door.
                  Starts the gateway in-process on a private loopback port, injects its

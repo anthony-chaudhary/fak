@@ -94,6 +94,16 @@ then refuses unless the session is genuinely budget-drained, and finally reuses 
 new model window. MCP still cannot observe provider token usage by itself; the client or
 wrapper must report it.
 
+**6. The child-process supervisor — `fak guard --restart-on-budget`.**
+For wrapped CLIs that need a real OS-process boundary, guard wires a separate
+`gateway.Config.OnBudgetExhausted` callback. The callback fires after a served turn's
+provider usage drains the context budget, while the transcript is still available. Guard
+then recontinues the session, writes a carryover seed JSON file, advances the gateway's
+default trace to the continuation id, stops the child, and relaunches it with
+`FAK_RESET_TRACE_ID`, `FAK_SESSION_ID`, and `FAK_RESET_SEED_FILE`. This is deliberately
+additive to `--reset-on-budget`: transparent reset retries in place; restart reset gives a
+wrapper a fresh process and a seed file to inject into the new model window.
+
 ## Honesty ledger
 
 - **Reuses, does not reinvent.** The "what to keep" decision is the shipped `ctxmmu`
@@ -104,14 +114,19 @@ wrapper must report it.
   a model-call middle-summary is a tracked follow-on.
 - **Default behavior is unchanged.** With `--reset-on-budget` off (the default), the 409 +
   `SessionResetDirective` path is byte-identical to before.
+- **A hard restart is a handoff, not magic rehydration.** `fak guard --restart-on-budget`
+  relaunches the child and exposes the carryover seed through `FAK_RESET_SEED_FILE`; a
+  generic child that ignores that file starts fresh under the continuation trace but does
+  not automatically ingest the seed.
 
 ## Status & follow-ons (epic #739)
 
 The epic is **#739**. The vertical slice described above — the `Recontinue` re-arm verb,
 the `internal/sessionreset` contributor registry, the `gateway.Config.ResetOnBudget`
-boundary, and the `fak serve --reset-on-budget` flag — is **shipped on `main`** (swept into
-the shared trunk on 2026-06-25; ships dark, default OFF). The named follow-on rungs are filed
-as child issues:
+boundary, the `fak serve --reset-on-budget` flag, the MCP `fak_session_reset` tool, and the
+`fak guard --restart-on-budget` supervisor — is **shipped on `main`** (swept into the shared
+trunk on 2026-06-25; ships dark/default-off). The named follow-on rungs are filed as child
+issues:
 
 - **#740** — live same-model KV-included reuse (wire `vcachechain` to a live serve splice;
   today `warm_prefix` carries the recall *plan*, stamped `live_kv_reuse:deferred`).

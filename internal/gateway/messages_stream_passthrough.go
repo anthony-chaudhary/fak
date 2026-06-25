@@ -302,7 +302,7 @@ func (s *Server) streamAnthropicPassthroughLive(w http.ResponseWriter, r *http.R
 			CompletionTokens:         p.complTok,
 			CacheReadInputTokens:     p.cacheRead,
 			CacheCreationInputTokens: p.cacheCreate,
-		})
+		}, p.req.Messages)
 		return true
 	}
 	// StreamAnthropicRaw returned nil but produced no events (no message_start) — treat

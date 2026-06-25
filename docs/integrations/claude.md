@@ -113,9 +113,19 @@ directive:
 `restart_fresh_session`, dump the session image, start a fresh process, rehydrate the
 planned view, and reuse provider cache only where legal.
 
-The transparent reset is an in-gateway re-arm, not an OS-process kill switch. A wrapper
-that wants a hard child-process relaunch should use the 409 directive mode, persist the
-session image, and start a fresh Claude process under the new window id.
+For a hard child-process boundary, use the guard restart supervisor:
+
+```bash
+fak guard --context-budget-tokens 150000 --restart-on-budget -- claude
+```
+
+On budget exhaustion, guard distills the served transcript into a carryover seed, re-arms
+the continuation trace, writes a seed JSON file, advances the default trace for omitted
+trace headers, stops the child, and relaunches it with `FAK_RESET_TRACE_ID`,
+`FAK_SESSION_ID`, and `FAK_RESET_SEED_FILE`. Use `--restart-limit N` to cap relaunches and
+`--restart-seed-dir DIR` to choose the seed-file directory. Plain `claude` does not
+automatically read fak's seed file; wrapper-aware launchers can use
+`FAK_RESET_SEED_FILE` to prepend the carryover seed into the fresh Claude session.
 
 For a cooperative MCP wrapper, use `fak_session_reset` instead of waiting for a proxied
 request boundary. Pass the trace id, the wrapper's observed `context_tokens`, and the

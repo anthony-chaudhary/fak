@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/adjudicator"
+	"github.com/anthony-chaudhary/fak/internal/agent"
 	"github.com/anthony-chaudhary/fak/internal/appversion"
 	"github.com/anthony-chaudhary/fak/internal/gateway"
 	"github.com/anthony-chaudhary/fak/internal/journal"
@@ -81,6 +82,9 @@ func cmdGuard(argv []string) {
 	sessionID := fs.String("session-id", "guard", "default trace/session id for wrapped agents that omit X-Trace-Id or MCP trace_id")
 	contextBudgetTokens := fs.Int("context-budget-tokens", 0, "seed the guard session with this prompt/context-token budget; exhaustion returns a reset directive with continuation_id (0 = off)")
 	resetOnBudget := fs.Bool("reset-on-budget", false, "on context-budget exhaustion, re-arm the continuation trace with a carryover seed and continue transparently instead of returning 409 (requires --context-budget-tokens)")
+	restartOnBudget := fs.Bool("restart-on-budget", false, "on context-budget exhaustion, stop and relaunch the wrapped child under the continuation trace, writing a carryover seed JSON and exposing it via FAK_RESET_* env vars (requires --context-budget-tokens)")
+	restartLimit := fs.Int("restart-limit", 0, "maximum child relaunches for --restart-on-budget; 0 means unlimited")
+	restartSeedDir := fs.String("restart-seed-dir", "", "directory for --restart-on-budget carryover seed JSON files (default: OS temp dir, one private directory per reset)")
 	fs.Usage = func() {
 		fmt.Fprintln(os.Stderr, "usage: fak guard [flags] -- <agent command...>")
 		fmt.Fprintln(os.Stderr, "  e.g. fak guard -- claude")
@@ -165,6 +169,14 @@ func cmdGuard(argv []string) {
 		fmt.Fprintln(os.Stderr, "fak guard: --reset-on-budget requires --context-budget-tokens N")
 		os.Exit(2)
 	}
+	if *restartOnBudget && *contextBudgetTokens <= 0 {
+		fmt.Fprintln(os.Stderr, "fak guard: --restart-on-budget requires --context-budget-tokens N")
+		os.Exit(2)
+	}
+	if *restartLimit < 0 {
+		fmt.Fprintln(os.Stderr, "fak guard: --restart-limit must be non-negative")
+		os.Exit(2)
+	}
 	guardTraceID := strings.TrimSpace(*sessionID)
 	if guardTraceID == "" {
 		guardTraceID = "guard"
@@ -176,6 +188,7 @@ func cmdGuard(argv []string) {
 			ContextTokensLeft: *contextBudgetTokens,
 		})
 	}
+	restarter := newGuardBudgetRestarter(*restartOnBudget, *contextBudgetTokens, *restartLimit, *restartSeedDir, os.Stderr)
 
 	// 3. Bind the listener up front so the real port is known BEFORE we wire the child,
 	//    and so there is no bind race between serving and exec. Serve(ctx, ln) accepts
@@ -216,6 +229,7 @@ func cmdGuard(argv []string) {
 		DecideSession:         decideSession,
 		DebitSession:          debitSession,
 		ResetOnBudget:         resetOnBudgetHook(*resetOnBudget, *contextBudgetTokens),
+		OnBudgetExhausted:     restarter.OnBudgetExhausted,
 		DefaultTraceID:        guardTraceID,
 		StartTime:             t0,
 		// Default OFF (clean terminal); --log routes the full structured stream to a file
@@ -274,10 +288,17 @@ func cmdGuard(argv []string) {
 			if *resetOnBudget {
 				fmt.Fprintln(os.Stderr, "fak guard: session reset — transparent carryover enabled")
 			}
+			if *restartOnBudget {
+				fmt.Fprintln(os.Stderr, "fak guard: session restart — child relaunch on budget exhaustion enabled")
+			}
 		}
 	}
 
 	// 6. Run the wrapped agent, then tear the gateway down and report the session.
+	if restarter.Enabled() {
+		runGuardChildSupervisedAndReport(command, injected, pinUpstream, restarter, srv, cancel, serveErr, *quiet, auditJournal, auditSeq0, command[0])
+		return
+	}
 	runGuardChildAndReport(child, srv, cancel, serveErr, *quiet, auditJournal, auditSeq0, command[0])
 }
 
@@ -776,12 +797,17 @@ func resolveGuardUpstream(providerFlag, agentName, baseURLFlag, apiKeyEnv string
 // into its environment (never the parent shell). In pinned subscription mode it also hands
 // the client a placeholder ANTHROPIC_API_KEY (when it has none) so it talks x-api-key to the
 // gateway, which ignores the placeholder and authenticates upstream with the held token.
-func buildGuardChild(command []string, injected [][2]string, pinUpstream bool) *exec.Cmd {
+func buildGuardChild(command []string, injected [][2]string, pinUpstream bool, extraEnv ...[2]string) *exec.Cmd {
 	child := exec.Command(command[0], command[1:]...)
 	child.Stdin, child.Stdout, child.Stderr = os.Stdin, os.Stdout, os.Stderr
 	child.Env = os.Environ()
 	for _, kv := range injected {
 		child.Env = append(child.Env, kv[0]+"="+kv[1])
+	}
+	for _, kv := range extraEnv {
+		if strings.TrimSpace(kv[0]) != "" {
+			child.Env = append(child.Env, kv[0]+"="+kv[1])
+		}
 	}
 	// Subscription mode: hand the client a PLACEHOLDER api key (only if it has none) so
 	// it talks to the gateway in x-api-key mode; the gateway IGNORES the placeholder
@@ -794,12 +820,209 @@ func buildGuardChild(command []string, injected [][2]string, pinUpstream bool) *
 	return child
 }
 
+type guardBudgetRestartEvent struct {
+	Schema      string          `json:"schema"`
+	FromTraceID string          `json:"from_trace_id"`
+	ToTraceID   string          `json:"to_trace_id"`
+	Reason      string          `json:"reason,omitempty"`
+	SeedFile    string          `json:"seed_file,omitempty"`
+	Seed        []agent.Message `json:"seed_messages,omitempty"`
+	SeedText    string          `json:"seed_text,omitempty"`
+	Note        string          `json:"note"`
+}
+
+type guardBudgetRestarter struct {
+	enabled            bool
+	freshContextTokens int
+	limit              int
+	seedDir            string
+	stderr             io.Writer
+	events             chan guardBudgetRestartEvent
+}
+
+func newGuardBudgetRestarter(enabled bool, freshContextTokens, limit int, seedDir string, stderr io.Writer) *guardBudgetRestarter {
+	return &guardBudgetRestarter{
+		enabled:            enabled,
+		freshContextTokens: freshContextTokens,
+		limit:              limit,
+		seedDir:            strings.TrimSpace(seedDir),
+		stderr:             stderr,
+		events:             make(chan guardBudgetRestartEvent, 1),
+	}
+}
+
+func (r *guardBudgetRestarter) Enabled() bool { return r != nil && r.enabled }
+
+func (r *guardBudgetRestarter) OnBudgetExhausted(ctx context.Context, st gateway.SessionState, messages []agent.Message) {
+	if !r.Enabled() || strings.TrimSpace(st.TraceID) == "" || strings.TrimSpace(st.ContinuationID) == "" {
+		return
+	}
+	reset := resetServedSessionOnBudget(r.freshContextTokens)
+	if reset == nil {
+		return
+	}
+	nextTrace, seed, ok := reset(ctx, st.TraceID, messages)
+	if !ok || strings.TrimSpace(nextTrace) == "" {
+		return
+	}
+	ev := guardBudgetRestartEvent{
+		Schema:      "fak.guard.budget_restart.v1",
+		FromTraceID: st.TraceID,
+		ToTraceID:   nextTrace,
+		Reason:      st.Reason,
+		Seed:        seed,
+		SeedText:    guardSeedText(seed),
+		Note:        "context budget exhausted; fak guard is relaunching the child under the continuation trace",
+	}
+	if path, err := writeGuardRestartSeedFile(r.seedDir, ev); err == nil {
+		ev.SeedFile = path
+	} else if r.stderr != nil {
+		fmt.Fprintf(r.stderr, "fak guard: budget restart seed write failed: %v\n", err)
+	}
+	select {
+	case r.events <- ev:
+	default:
+		if r.stderr != nil {
+			fmt.Fprintf(r.stderr, "fak guard: budget restart event for %s dropped; restart already pending\n", st.TraceID)
+		}
+	}
+}
+
+func guardSeedText(seed []agent.Message) string {
+	var parts []string
+	for _, m := range seed {
+		if c := strings.TrimSpace(m.Content); c != "" {
+			parts = append(parts, c)
+		}
+	}
+	return strings.Join(parts, "\n\n")
+}
+
+func writeGuardRestartSeedFile(dir string, ev guardBudgetRestartEvent) (string, error) {
+	if strings.TrimSpace(dir) == "" {
+		var err error
+		dir, err = os.MkdirTemp("", "fak-guard-reset-*")
+		if err != nil {
+			return "", err
+		}
+	} else if err := os.MkdirAll(dir, 0o700); err != nil {
+		return "", err
+	}
+	name := "reset-" + guardSafeFilePart(ev.FromTraceID) + "-to-" + guardSafeFilePart(ev.ToTraceID) + ".json"
+	path := filepath.Join(dir, name)
+	ev.SeedFile = path
+	raw, err := json.MarshalIndent(ev, "", "  ")
+	if err != nil {
+		return "", err
+	}
+	if err := os.WriteFile(path, append(raw, '\n'), 0o600); err != nil {
+		return "", err
+	}
+	return path, nil
+}
+
+func guardSafeFilePart(s string) string {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return "trace"
+	}
+	var b strings.Builder
+	for _, r := range s {
+		switch {
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9', r == '-', r == '_':
+			b.WriteRune(r)
+		default:
+			b.WriteByte('_')
+		}
+	}
+	out := b.String()
+	if out == "" {
+		return "trace"
+	}
+	if len(out) > 80 {
+		out = out[:80]
+	}
+	return out
+}
+
+func guardRestartEnv(ev guardBudgetRestartEvent) [][2]string {
+	env := [][2]string{
+		{"FAK_RESET_FROM_TRACE", ev.FromTraceID},
+		{"FAK_RESET_TRACE_ID", ev.ToTraceID},
+		{"FAK_SESSION_ID", ev.ToTraceID},
+		{"FAK_RESET_REASON", ev.Reason},
+	}
+	if ev.SeedFile != "" {
+		env = append(env, [2]string{"FAK_RESET_SEED_FILE", ev.SeedFile})
+	}
+	return env
+}
+
 // runGuardChildAndReport runs the wrapped agent to completion, tears the gateway down,
 // prints the session's adjudication + journal summary (unless quiet), flushes the durable
 // trail, and exits with the child's own code — surfacing a gateway-mid-session failure as
 // a non-silent error so a clean child exit never hides a downed adjudication boundary.
 func runGuardChildAndReport(child *exec.Cmd, srv *gateway.Server, cancel context.CancelFunc, serveErr <-chan error, quiet bool, auditJournal *journal.Journal, auditSeq0 uint64, agentName string) {
 	runErr := child.Run()
+	finishGuardChildAndReport(runErr, srv, cancel, serveErr, quiet, auditJournal, auditSeq0, agentName)
+}
+
+func runGuardChildSupervisedAndReport(command []string, injected [][2]string, pinUpstream bool, restarter *guardBudgetRestarter, srv *gateway.Server, cancel context.CancelFunc, serveErr <-chan error, quiet bool, auditJournal *journal.Journal, auditSeq0 uint64, agentName string) {
+	var extraEnv [][2]string
+	restarts := 0
+	for {
+		child := buildGuardChild(command, injected, pinUpstream, extraEnv...)
+		wait := make(chan error, 1)
+		if err := child.Start(); err != nil {
+			finishGuardChildAndReport(err, srv, cancel, serveErr, quiet, auditJournal, auditSeq0, agentName)
+			return
+		}
+		go func() { wait <- child.Wait() }()
+		select {
+		case runErr := <-wait:
+			finishGuardChildAndReport(runErr, srv, cancel, serveErr, quiet, auditJournal, auditSeq0, agentName)
+			return
+		case ev := <-restarter.events:
+			if restarter.limit > 0 && restarts >= restarter.limit {
+				if restarter.stderr != nil {
+					fmt.Fprintf(restarter.stderr, "fak guard: restart limit %d reached; leaving child on drained session %s\n", restarter.limit, ev.FromTraceID)
+				}
+				runErr := <-wait
+				finishGuardChildAndReport(runErr, srv, cancel, serveErr, quiet, auditJournal, auditSeq0, agentName)
+				return
+			}
+			restarts++
+			if restarter.stderr != nil {
+				fmt.Fprintf(restarter.stderr, "fak guard: context budget exhausted for %s; restarting child as %s\n", ev.FromTraceID, ev.ToTraceID)
+				if ev.SeedFile != "" {
+					fmt.Fprintf(restarter.stderr, "fak guard: carryover seed written to %s\n", ev.SeedFile)
+				}
+			}
+			srv.SetDefaultTraceID(ev.ToTraceID)
+			extraEnv = guardRestartEnv(ev)
+			// Let the triggering response finish flushing to the wrapped client before
+			// stopping the process that initiated it.
+			time.Sleep(750 * time.Millisecond)
+			stopGuardChild(child, wait, 2*time.Second)
+		}
+	}
+}
+
+func stopGuardChild(child *exec.Cmd, wait <-chan error, grace time.Duration) {
+	if child == nil || child.Process == nil {
+		return
+	}
+	_ = child.Process.Signal(os.Interrupt)
+	select {
+	case <-wait:
+		return
+	case <-time.After(grace):
+		_ = child.Process.Kill()
+		<-wait
+	}
+}
+
+func finishGuardChildAndReport(runErr error, srv *gateway.Server, cancel context.CancelFunc, serveErr <-chan error, quiet bool, auditJournal *journal.Journal, auditSeq0 uint64, agentName string) {
 
 	// Tear the gateway down and report what the kernel decided this session.
 	cancel()

@@ -172,6 +172,12 @@ type Config struct {
 	// SessionResetDirective path verbatim — so the reset is strictly additive and the
 	// default behavior is unchanged. Injected by cmd/fak (fak serve --reset-on-budget).
 	ResetOnBudget ResetOnBudgetFunc
+	// OnBudgetExhausted is the host/supervisor notification fired after a served turn's
+	// reported usage drains a resettable budget. Unlike ResetOnBudget, it fires with
+	// the just-served transcript still available, so a process supervisor can build a
+	// carryover seed and restart a wrapped child before the child sends another giant
+	// request. Nil is inert.
+	OnBudgetExhausted BudgetExhaustedFunc
 	// DefaultTraceID is used when a proxied HTTP/MCP caller omits X-Trace-Id /
 	// trace_id. Empty preserves the historical process-unique gw-N mint. A stable
 	// value lets wrapped CLIs that do not expose trace headers still share one
@@ -372,6 +378,11 @@ type SessionDebitFunc func(ctx context.Context, traceID string, usage SessionUsa
 // it never imports internal/session or internal/sessionreset; the host owns both.
 type ResetOnBudgetFunc func(ctx context.Context, trace string, messages []agent.Message) (newTrace string, seed []agent.Message, ok bool)
 
+// BudgetExhaustedFunc is injected by hosts that supervise a real child process.
+// It fires after a served turn's post-response usage debit drains a resettable
+// budget, while the transcript for that turn is still available.
+type BudgetExhaustedFunc func(ctx context.Context, st SessionState, messages []agent.Message)
+
 // Server is a configured, ready-to-serve gateway. Construct with New; serve with
 // Handler()/ListenAndServe (HTTP) or ServeStdio (MCP over stdin/stdout).
 type Server struct {
@@ -393,6 +404,8 @@ type Server struct {
 	decideSession  SessionDecideFunc
 	debitSession   SessionDebitFunc
 	resetOnBudget  ResetOnBudgetFunc
+	budgetDrained  BudgetExhaustedFunc
+	defaultTraceMu sync.RWMutex
 	defaultTraceID string
 
 	// startup is the one-time boot timeline (start -> ready, per-phase costs),
@@ -590,6 +603,7 @@ func New(cfg Config) (*Server, error) {
 		decideSession:        cfg.DecideSession,
 		debitSession:         cfg.DebitSession,
 		resetOnBudget:        cfg.ResetOnBudget,
+		budgetDrained:        cfg.OnBudgetExhausted,
 		defaultTraceID:       strings.TrimSpace(cfg.DefaultTraceID),
 		startup:              startup,
 		planner:              planner,
@@ -819,7 +833,7 @@ func (s *Server) completeServed(ctx context.Context, turn servedSessionTurn, mes
 	if err != nil {
 		return nil, err
 	}
-	s.debitServedSessionTurn(ctx, turn, comp.Usage)
+	s.debitServedSessionTurn(ctx, turn, comp.Usage, messages)
 	return comp, nil
 }
 
@@ -1159,10 +1173,25 @@ func (s *Server) traceFor(traceID string) string {
 	if traceID != "" {
 		return traceID
 	}
-	if s.defaultTraceID != "" {
-		return s.defaultTraceID
+	s.defaultTraceMu.RLock()
+	defaultTraceID := s.defaultTraceID
+	s.defaultTraceMu.RUnlock()
+	if defaultTraceID != "" {
+		return defaultTraceID
 	}
 	return "gw-" + itoa(atomic.AddUint64(&s.traceSeq, 1))
+}
+
+// SetDefaultTraceID changes the trace used for callers that omit X-Trace-Id /
+// trace_id. Guard's budget-restart supervisor uses this when it relaunches a child
+// under a continuation id; a blank value restores the historical minted gw-N default.
+func (s *Server) SetDefaultTraceID(traceID string) {
+	if s == nil {
+		return
+	}
+	s.defaultTraceMu.Lock()
+	s.defaultTraceID = strings.TrimSpace(traceID)
+	s.defaultTraceMu.Unlock()
 }
 
 // principalCtxKey is the context key carrying a request's isolation principal.
