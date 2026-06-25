@@ -1,0 +1,341 @@
+#!/usr/bin/env python3
+"""Hosted OpenAI live pilot for the fak guard proof packet.
+
+This is intentionally optional: it only makes a hosted OpenAI Responses API call
+when the host has OPENAI_API_KEY and the Python `openai` package. Without those,
+it writes a structured BLOCKED_ENV artifact that records the missing external
+state without leaking secrets.
+"""
+from __future__ import annotations
+
+import argparse
+import contextlib
+import hashlib
+import json
+import os
+import re
+import shutil
+import socket
+import subprocess
+import sys
+import time
+import urllib.error
+import urllib.request
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any, Iterator
+
+
+TOOLS_DIR = Path(__file__).resolve().parent
+if str(TOOLS_DIR) not in sys.path:
+    sys.path.insert(0, str(TOOLS_DIR))
+
+import openai_live_prereq_audit  # noqa: E402
+
+
+SCHEMA = "fak-openai-hosted-live-pilot/1"
+DEFAULT_MODEL = "gpt-5.5"
+MARKER = "fak-openai-live-ok"
+REPO_ROOT = Path(__file__).resolve().parents[1]
+POLICY = Path("examples/dev-agent-policy.json")
+BOOT_TIMEOUT = 30
+
+
+def now_utc() -> str:
+    return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+
+
+def redact(text: str) -> str:
+    text = re.sub(r"sk-[A-Za-z0-9_-]+", "[redacted-openai-key]", text)
+    text = re.sub(r"(?i)(authorization:\s*bearer\s+)[^\s]+", r"\1[redacted]", text)
+    text = re.sub(r"(?i)(OPENAI_API_KEY=)[^\s]+", r"\1[redacted]", text)
+    return text[:300]
+
+
+def sha256_text(text: str) -> str:
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
+def collect_prereqs() -> dict[str, Any]:
+    return openai_live_prereq_audit.collect()
+
+
+def find_fak(explicit: str | None) -> list[str]:
+    if explicit:
+        return [explicit]
+    exe = "fak.exe" if sys.platform == "win32" else "fak"
+    local = REPO_ROOT / exe
+    if local.is_file():
+        return [str(local)]
+    on_path = shutil.which("fak")
+    if on_path:
+        return [on_path]
+    if shutil.which("go"):
+        out = REPO_ROOT / exe
+        result = subprocess.run(["go", "build", "-o", str(out), "./cmd/fak"], cwd=REPO_ROOT)
+        if result.returncode == 0 and out.is_file():
+            return [str(out)]
+        return ["go", "run", "./cmd/fak"]
+    raise RuntimeError("fak not found and no Go toolchain to build it")
+
+
+def free_port() -> int:
+    sock = socket.socket()
+    sock.bind(("127.0.0.1", 0))
+    port = sock.getsockname()[1]
+    sock.close()
+    return int(port)
+
+
+def wait_healthy(base_url: str) -> bool:
+    deadline = time.time() + BOOT_TIMEOUT
+    while time.time() < deadline:
+        try:
+            with urllib.request.urlopen(base_url + "/healthz", timeout=2) as resp:
+                data = json.load(resp)
+                if data.get("ok"):
+                    return True
+        except (urllib.error.URLError, TimeoutError, json.JSONDecodeError):
+            time.sleep(0.2)
+    return False
+
+
+@contextlib.contextmanager
+def kernel_context(kernel: str | None, fak: str | None) -> Iterator[str]:
+    if kernel:
+        if not wait_healthy(kernel.rstrip("/")):
+            raise RuntimeError(f"could not reach fak at {kernel}")
+        yield kernel.rstrip("/")
+        return
+
+    port = free_port()
+    base_url = f"http://127.0.0.1:{port}"
+    proc = subprocess.Popen(
+        find_fak(fak) + ["serve", "--addr", f"127.0.0.1:{port}", "--policy", str(POLICY)],
+        cwd=REPO_ROOT,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+    )
+    try:
+        if not wait_healthy(base_url):
+            out = ""
+            try:
+                proc.terminate()
+                out = proc.communicate(timeout=5)[0] or ""
+            except Exception:
+                proc.kill()
+            raise RuntimeError("fak server did not become healthy: " + redact(out[-800:]))
+        yield base_url
+    finally:
+        proc.terminate()
+        try:
+            proc.communicate(timeout=5)
+        except Exception:
+            proc.kill()
+
+
+class FakClient:
+    def __init__(self, base_url: str) -> None:
+        self.base_url = base_url.rstrip("/")
+
+    def post(self, path: str, payload: dict[str, Any]) -> dict[str, Any]:
+        body = json.dumps(payload).encode("utf-8")
+        req = urllib.request.Request(
+            self.base_url + path,
+            data=body,
+            headers={"Content-Type": "application/json"},
+        )
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            data = json.load(resp)
+        if not isinstance(data, dict):
+            raise RuntimeError(f"fak {path} returned non-object JSON")
+        return data
+
+    def adjudicate(self, tool: str, arguments: dict[str, Any], *, read_only: bool = False, trace_id: str = "") -> dict[str, Any]:
+        payload: dict[str, Any] = {"tool": tool, "arguments": arguments, "read_only": read_only}
+        if trace_id:
+            payload["trace_id"] = trace_id
+        return self.post("/v1/fak/adjudicate", payload)
+
+    def admit(self, tool: str, result: Any, *, trace_id: str = "") -> dict[str, Any]:
+        payload: dict[str, Any] = {"tool": tool, "result": result}
+        if trace_id:
+            payload["trace_id"] = trace_id
+        return self.post("/v1/fak/admit", payload)
+
+
+def verdict_kind(row: dict[str, Any]) -> str:
+    verdict = row.get("verdict") if isinstance(row.get("verdict"), dict) else {}
+    return str(verdict.get("kind") or "")
+
+
+def verdict_reason(row: dict[str, Any]) -> str:
+    verdict = row.get("verdict") if isinstance(row.get("verdict"), dict) else {}
+    return str(verdict.get("reason") or "")
+
+
+def run_guard_probe(base_url: str) -> dict[str, Any]:
+    client = FakClient(base_url)
+    denied = client.adjudicate("git_push", {}, trace_id="openai-hosted-deny")
+    allowed = client.adjudicate("git_status", {}, read_only=True, trace_id="openai-hosted-allow")
+    admitted = client.admit(
+        "git_status",
+        {"text": "On branch main\nnothing to commit, working tree clean"},
+        trace_id="openai-hosted-allow",
+    )
+    ok = (
+        verdict_kind(denied) == "DENY"
+        and verdict_reason(denied) == "POLICY_BLOCK"
+        and verdict_kind(allowed) == "ALLOW"
+        and verdict_kind(admitted) in {"ALLOW", "DEFER"}
+    )
+    return {
+        "status": "PASS" if ok else "FAIL",
+        "dangerous_attempt": {
+            "tool": "git_push",
+            "expected": "DENY/POLICY_BLOCK",
+            "verdict": denied.get("verdict") or {},
+            "executed": False,
+        },
+        "useful_continuation": {
+            "tool": "git_status",
+            "expected": "ALLOW",
+            "verdict": allowed.get("verdict") or {},
+            "admit_verdict": admitted.get("verdict") or {},
+        },
+    }
+
+
+def run_openai_probe(model: str) -> dict[str, Any]:
+    try:
+        from openai import OpenAI
+
+        client = OpenAI()
+        response = client.responses.create(
+            model=model,
+            input=f"Return exactly this text and no other text: {MARKER}",
+        )
+        output_text = str(getattr(response, "output_text", "") or "")
+        response_id = str(getattr(response, "id", "") or "")
+        contains_marker = MARKER in output_text
+        return {
+            "status": "PASS" if contains_marker else "FAIL",
+            "model": model,
+            "response_id_present": bool(response_id),
+            "output_text_len": len(output_text),
+            "output_text_sha256": sha256_text(output_text),
+            "contains_expected_marker": contains_marker,
+        }
+    except Exception as exc:  # noqa: BLE001 - live proof artifact must capture typed failures
+        return {
+            "status": "FAIL",
+            "model": model,
+            "error_type": type(exc).__name__,
+            "error": redact(str(exc)),
+        }
+
+
+def collect(model: str, *, kernel: str | None = None, fak: str | None = None) -> dict[str, Any]:
+    prereqs = collect_prereqs()
+    payload: dict[str, Any] = {
+        "schema": SCHEMA,
+        "created_at": now_utc(),
+        "status": "BLOCKED_ENV",
+        "model": model,
+        "prereqs": prereqs,
+        "privacy": {
+            "copied_fields": ["status booleans", "package versions", "verdict metadata", "response hash"],
+            "dropped": ["OPENAI_API_KEY value", "raw hosted OpenAI response text", "request/response payloads"],
+        },
+    }
+    if not prereqs.get("hosted_openai_ready"):
+        payload["blockers"] = prereqs.get("blockers") or []
+        return payload
+
+    try:
+        with kernel_context(kernel, fak) as base_url:
+            guard = run_guard_probe(base_url)
+            hosted = run_openai_probe(model)
+    except Exception as exc:  # noqa: BLE001 - preserve live failure without leaking process output
+        payload.update({"status": "FAIL", "error_type": type(exc).__name__, "error": redact(str(exc))})
+        return payload
+
+    payload["guard"] = guard
+    payload["hosted_openai"] = hosted
+    payload["status"] = "PASS" if guard.get("status") == "PASS" and hosted.get("status") == "PASS" else "FAIL"
+    return payload
+
+
+def render_md(payload: dict[str, Any]) -> str:
+    prereqs = payload.get("prereqs") if isinstance(payload.get("prereqs"), dict) else {}
+    guard = payload.get("guard") if isinstance(payload.get("guard"), dict) else {}
+    hosted = payload.get("hosted_openai") if isinstance(payload.get("hosted_openai"), dict) else {}
+    blockers = payload.get("blockers") or prereqs.get("blockers") or []
+    lines = [
+        "# OpenAI hosted live pilot",
+        "",
+        f"- generated: `{payload.get('created_at')}`",
+        f"- status: **`{payload.get('status')}`**",
+        f"- model: `{payload.get('model')}`",
+        f"- hosted_openai_ready: `{prereqs.get('hosted_openai_ready')}`",
+        f"- agents_sdk_ready: `{prereqs.get('agents_sdk_ready')}`",
+        "",
+        "## Guard",
+        "",
+        f"- status: `{guard.get('status')}`",
+        f"- dangerous tool: `git_push` -> `{((guard.get('dangerous_attempt') or {}).get('verdict') or {}).get('kind')}` / `{((guard.get('dangerous_attempt') or {}).get('verdict') or {}).get('reason', '')}`",
+        f"- useful tool: `git_status` -> `{((guard.get('useful_continuation') or {}).get('verdict') or {}).get('kind')}`",
+        "",
+        "## Hosted OpenAI",
+        "",
+        f"- status: `{hosted.get('status')}`",
+        f"- response_id_present: `{hosted.get('response_id_present')}`",
+        f"- contains_expected_marker: `{hosted.get('contains_expected_marker')}`",
+        f"- output_text_sha256: `{hosted.get('output_text_sha256', '')}`",
+        "",
+        "## Blockers",
+        "",
+    ]
+    if blockers:
+        lines.extend(f"- {item}" for item in blockers)
+    else:
+        lines.append("- none")
+    lines.extend(
+        [
+            "",
+            "## Privacy",
+            "",
+            "This artifact records verdict metadata and hosted-response hashes only. It never writes API key values or raw hosted OpenAI response text.",
+        ]
+    )
+    return "\n".join(lines) + "\n"
+
+
+def main(argv: list[str] | None = None) -> int:
+    p = argparse.ArgumentParser(description=__doc__)
+    p.add_argument("--model", default=os.environ.get("OPENAI_LIVE_MODEL", DEFAULT_MODEL))
+    p.add_argument("--kernel", help="use an existing fak base URL instead of starting one")
+    p.add_argument("--fak", help="path to fak binary")
+    p.add_argument("--out", type=Path, help="write JSON report")
+    p.add_argument("--markdown", type=Path, help="write Markdown report")
+    p.add_argument("--json", action="store_true", help="print JSON to stdout")
+    p.add_argument("--fail-on-not-pass", action="store_true", help="exit nonzero unless status is PASS")
+    args = p.parse_args(argv)
+
+    payload = collect(args.model, kernel=args.kernel, fak=args.fak)
+    if args.out:
+        args.out.parent.mkdir(parents=True, exist_ok=True)
+        args.out.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    if args.markdown:
+        args.markdown.parent.mkdir(parents=True, exist_ok=True)
+        args.markdown.write_text(render_md(payload), encoding="utf-8")
+    if args.json or not (args.out or args.markdown):
+        print(json.dumps(payload, indent=2, sort_keys=True))
+    if args.fail_on_not_pass and payload.get("status") != "PASS":
+        return 1
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

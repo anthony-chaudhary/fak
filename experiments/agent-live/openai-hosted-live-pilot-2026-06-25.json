@@ -1,0 +1,66 @@
+{
+  "blockers": [
+    "OPENAI_API_KEY is not set",
+    "openai-agents distribution is not installed",
+    "importable agents module is not an installed OpenAI Agents SDK distribution"
+  ],
+  "created_at": "2026-06-25T14:48:42.747210Z",
+  "model": "gpt-5.5",
+  "prereqs": {
+    "agents_sdk_ready": false,
+    "blockers": [
+      "OPENAI_API_KEY is not set",
+      "openai-agents distribution is not installed",
+      "importable agents module is not an installed OpenAI Agents SDK distribution"
+    ],
+    "created_at": "2026-06-25T14:48:42.747194Z",
+    "env": {
+      "OPENAI_API_KEY_set": false,
+      "OPENAI_BASE_URL_set": false
+    },
+    "hosted_openai_ready": false,
+    "modules": {
+      "agents": {
+        "file": "C:\\work\\job\\agents\\__init__.py",
+        "has_custom_span": false,
+        "installed": true
+      },
+      "agents.tracing": {
+        "installed": false
+      }
+    },
+    "packages": {
+      "agents": null,
+      "openai": "2.41.0",
+      "openai-agents": null
+    },
+    "privacy": {
+      "copied_fields": [
+        "env var presence booleans",
+        "package versions",
+        "module paths"
+      ],
+      "dropped": [
+        "OPENAI_API_KEY value",
+        "any request/response payloads"
+      ]
+    },
+    "schema": "fak-openai-live-prereq-audit/1",
+    "status": "BLOCKED_ENV"
+  },
+  "privacy": {
+    "copied_fields": [
+      "status booleans",
+      "package versions",
+      "verdict metadata",
+      "response hash"
+    ],
+    "dropped": [
+      "OPENAI_API_KEY value",
+      "raw hosted OpenAI response text",
+      "request/response payloads"
+    ]
+  },
+  "schema": "fak-openai-hosted-live-pilot/1",
+  "status": "BLOCKED_ENV"
+}
