@@ -25,6 +25,11 @@ SCRUB = os.path.join(HERE, "scrub_public_copy.py")
 # not SELF_REFERENTIAL, so a bare literal would (correctly) trip the leak gate on
 # its own commit. We want the gate live on test code, not exempted.
 NEEDLE = ".".join(["100", "95", "5", "23"])
+# An identity-tier needle, assembled from parts for the SAME reason as NEEDLE
+# (this test file is not SELF_REFERENTIAL, so a raw literal would trip the leak
+# gate on its own commit). Used to prove DCO/co-author trailers are exempt while
+# the same string in the body is still caught.
+ORG = "".join(["netra", "systems"]) + ".ai"
 
 
 def _git(repo: str, *args: str) -> str:
@@ -60,6 +65,26 @@ def _audit_tree(repo: str, as_json: bool = False):
         cmd.append("--json")
     out = subprocess.run(
         cmd, capture_output=True, text=True, encoding="utf-8", errors="replace",
+    )
+    return out.returncode, out.stdout + out.stderr
+
+
+def _audit_message(repo: str, text: str):
+    """Return (exit_code, combined_output) of the scrubber's --audit-message.
+
+    Roots the scan at the REAL repo (the dir holding this scrubber), not the
+    throwaway temp repo: the commit-msg hook always runs `--audit-message
+    --root <real repo>`, so `_effective_audit_needles` resolves the same needle
+    set a live commit would be gated against. The message file is written under
+    the temp repo so nothing touches the real tree.
+    """
+    real_root = os.path.dirname(os.path.dirname(os.path.abspath(SCRUB)))
+    msg = os.path.join(repo, "_MSG")
+    with open(msg, "w", encoding="utf-8") as f:
+        f.write(text)
+    out = subprocess.run(
+        [sys.executable, SCRUB, "--audit-message", msg, "--root", real_root],
+        capture_output=True, text=True, encoding="utf-8", errors="replace",
     )
     return out.returncode, out.stdout + out.stderr
 
@@ -243,7 +268,37 @@ def main() -> int:
         check("export-tier gated WITH sidecar (PLAN §6)", rc == 1, out)
         check("export-tier hit names the file", "leak.json" in out, out)
 
+        # 7) commit MESSAGE gate (the gap: a leak in the subject/body, not a file)
+        rc, out = _audit_message(repo, "fix(x): a clean subject (fak x)\n\nbody\n")
+        check("clean message exits 0", rc == 0, out)
+        rc, out = _audit_message(repo, "fix(x): debug node %s (fak x)\n" % NEEDLE)
+        check("message with a needle exits 1", rc == 1, out)
+        check("message hit is named", NEEDLE in out and "message:" in out, out)
+        # a needle BELOW the scissors line (git strips it) must NOT count
+        scissors = "# ------------------------ >8 ------------------------"
+        rc, out = _audit_message(
+            repo, "fix(x): clean (fak x)\n%s\ndiff has %s\n" % (scissors, NEEDLE)
+        )
+        check("needle below the scissors line is ignored", rc == 0, out)
+        # a needle in a comment line (git strips it) must NOT count
+        rc, out = _audit_message(repo, "fix(x): clean (fak x)\n# note: %s\n" % NEEDLE)
+        check("needle in a comment line is ignored", rc == 0, out)
+        # a DCO sign-off / co-author TRAILER carrying an identity needle is
+        # exempt (it is structured metadata, not leakable prose) -- otherwise
+        # every signed commit by an org member would be refused.
+        signoff = "fix(x): clean subject (fak x)\n\nSigned-off-by: A B <a@%s>\n" % ORG
+        rc, out = _audit_message(repo, signoff)
+        check("DCO sign-off trailer is exempt", rc == 0, out)
+        coauth = "fix(x): clean (fak x)\n\nCo-authored-by: X <x@%s>\n" % ORG
+        rc, out = _audit_message(repo, coauth)
+        check("co-author trailer is exempt", rc == 0, out)
+        # but an identity needle in the BODY (not a trailer) is still caught
+        body = "fix(x): clean (fak x)\n\nsee internal note at %s prod\n" % ORG
+        rc, out = _audit_message(repo, body)
+        check("identity needle in body is still caught", rc == 1, out)
+
     print()
+
     if failures:
         print(f"FAILED: {len(failures)} check(s): {', '.join(failures)}")
         return 1

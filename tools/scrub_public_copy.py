@@ -630,6 +630,71 @@ def audit_staged(root: str) -> int:
     )
 
 
+def _scan_text_lines(text: str, needles: list[str]):
+    """Scan PLAIN text (every line is "new") for redact needles + shape regexes.
+
+    The non-diff twin of `_scan_added_lines`: a commit message is not a staged
+    file, so the same AUDIT_NEEDLES / AUDIT_REGEXES matching is applied to its
+    raw lines. Same case-insensitive substring test as the diff scanner so the
+    message gate and the content gate cannot drift. Returns
+    (line_no, needle, preview) hits.
+    """
+    # Git trailers (DCO sign-off, co-author, etc.) carry IDENTITY metadata --
+    # `Signed-off-by: name <user@org>` legitimately contains the org domain, an
+    # identity-tier needle. They are structured trailers, not prose body, so a
+    # needle THERE is not a leak; exempting them keeps the gate from refusing
+    # every signed commit while still scanning the real subject/body.
+    trailer_re = re.compile(
+        r"^(Signed-off-by|Co-authored-by|Co-Authored-By|Acked-by|Reviewed-by|"
+        r"Reported-by|Suggested-by|Tested-by|Cc|Helped-by|Reported-and-tested-by"
+        r"):\s",
+        re.IGNORECASE,
+    )
+    hits = []
+    for i, line in enumerate(text.splitlines(), start=1):
+        # Skip the scissors line and everything below it (git's commit template
+        # comment block: "# ------------------------ >8 ------------------------"
+        # and the diff git appends under -v), so a needle in the to-be-stripped
+        # diff preview is not double-counted here (the content gate owns it).
+        if line.startswith("# ------------------------ >8"):
+            break
+        if line.startswith("#"):
+            continue  # git strips comment lines from the final message
+        if trailer_re.match(line):
+            continue  # identity trailer (DCO sign-off / co-author) -- not prose
+        line_l = line.lower()
+        for needle in needles:
+            if needle.lower() in line_l:
+                hits.append((i, needle, line.strip()[:80]))
+        for rx, label in AUDIT_REGEXES:
+            if rx.search(line):
+                hits.append((i, label, line.strip()[:80]))
+    return hits
+
+
+def audit_message(root: str, msg_path: str) -> int:
+    """Scan a COMMIT MESSAGE file for AUDIT_NEEDLES. For the commit-msg hook.
+
+    A leaked hostname/credential/needle in a commit SUBJECT or BODY sails past
+    `audit_staged` (which scans staged file content, not the message). This
+    closes that gap with the SAME needle set, so a secret cannot ride into
+    history via the message. Exit 1 on any hit, 0 if clean, 2 if unreadable.
+    """
+    try:
+        with open(msg_path, encoding="utf-8", errors="replace") as fh:
+            text = fh.read()
+    except OSError as exc:
+        print(f"could not read commit message {msg_path}: {exc}", file=sys.stderr)
+        return 2
+    hits = _scan_text_lines(text, _effective_audit_needles(root))
+    if not hits:
+        return 0
+    print(f"FOUND {len(hits)} redact-needle hit(s) in the commit message:")
+    for n, needle, preview in hits:
+        print(f"  message:{n}  [{needle}]  {preview}")
+    return 1
+
+
 def audit_range(root: str, rev_range: str) -> int:
     """Scan the ADDED lines of a commit range for AUDIT_NEEDLES. For CI.
 
@@ -777,6 +842,13 @@ def main() -> int:
              "(shape regexes always; real needles when pulled via pull_scan_needles.py)",
     )
     ap.add_argument(
+        "--audit-message",
+        metavar="MSGFILE",
+        default=None,
+        help="commit-msg mode: scan a commit message file for AUDIT_NEEDLES "
+             "(so a leaked hostname/credential in the SUBJECT or BODY is caught too)",
+    )
+    ap.add_argument(
         "--json",
         action="store_true",
         help="emit machine-readable JSON (for the control-pane public-leak-scan loop)",
@@ -790,6 +862,8 @@ def main() -> int:
 
     if args.audit_staged:
         return audit_staged(os.path.abspath(args.root))
+    if args.audit_message:
+        return audit_message(os.path.abspath(args.root), args.audit_message)
     if args.audit_range:
         return audit_range(os.path.abspath(args.root), args.audit_range)
     if args.audit_tree:
