@@ -10,6 +10,7 @@ _int) and the cap = min(max_workers, dos target) rule. No subprocess runs.
 from __future__ import annotations
 
 import importlib.util
+import os
 import sys
 import tempfile
 import unittest
@@ -202,10 +203,64 @@ class WorkerCountTest(unittest.TestCase):
         mod = load()
         with tempfile.TemporaryDirectory() as d:
             runs = Path(d)
-            (runs / "resolve-717-20260625-062210.pid").write_text("101", encoding="utf-8")
-            (runs / "resolve-718-20260625-060712.pid").write_text("102", encoding="utf-8")
-            (runs / "resolve-719-20260625-055209.pid").write_text("not-a-pid", encoding="utf-8")
-            self.assertEqual(mod.live_resolve_worker_pids(runs, alive={101}), {101})
+            now = 1_000_000.0
+            one = runs / "resolve-717-20260625-062210.pid"
+            two = runs / "resolve-718-20260625-060712.pid"
+            bad = runs / "resolve-719-20260625-055209.pid"
+            one.write_text("101", encoding="utf-8")
+            two.write_text("102", encoding="utf-8")
+            bad.write_text("not-a-pid", encoding="utf-8")
+            os.utime(one, (now, now))
+            os.utime(two, (now, now))
+            probe = lambda pid: {"alive": True, "create_time": now - 1, "cmdline": ""}
+            self.assertEqual(mod.live_resolve_worker_pids(runs, alive={101}, probe=probe), {101})
+
+    def test_live_resolve_worker_pids_rejects_reused_pid_after_sidecar(self) -> None:
+        mod = load()
+        with tempfile.TemporaryDirectory() as d:
+            runs = Path(d)
+            now = 1_000_000.0
+            side = runs / "resolve-717-20260625-062210.pid"
+            side.write_text("20032", encoding="utf-8")
+            os.utime(side, (now, now))
+            probe = lambda pid: {
+                "alive": True,
+                "create_time": now + 60 * 60,
+                "name": "conhost.exe",
+                "cmdline": "",
+            }
+            self.assertEqual(mod.live_resolve_worker_pids(runs, probe=probe), set())
+
+    def test_live_resolve_worker_pids_rejects_unrelated_old_process(self) -> None:
+        mod = load()
+        with tempfile.TemporaryDirectory() as d:
+            runs = Path(d)
+            now = 1_000_000.0
+            side = runs / "resolve-717-20260625-062210.pid"
+            side.write_text("29520", encoding="utf-8")
+            os.utime(side, (now, now))
+            probe = lambda pid: {
+                "alive": True,
+                "create_time": now - 60 * 60,
+                "name": "chrome.exe",
+                "cmdline": "chrome.exe --type=renderer",
+            }
+            self.assertEqual(mod.live_resolve_worker_pids(runs, probe=probe), set())
+
+    def test_live_resolve_worker_pids_counts_worker_marker(self) -> None:
+        mod = load()
+        with tempfile.TemporaryDirectory() as d:
+            runs = Path(d)
+            now = 1_000_000.0
+            side = runs / "resolve-717-20260625-062210.pid"
+            side.write_text("31337", encoding="utf-8")
+            os.utime(side, (now, now))
+            probe = lambda pid: {
+                "alive": True,
+                "create_time": now - 60 * 60,
+                "cmdline": "claude -p resolve GitHub issue #717",
+            }
+            self.assertEqual(mod.live_resolve_worker_pids(runs, probe=probe), {31337})
 
     def test_proc_worker_count_unions_cmdline_and_sidecar_pids(self) -> None:
         mod = load()

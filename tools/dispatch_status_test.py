@@ -202,10 +202,15 @@ class SilentWorkersFoldTest(unittest.TestCase):
 class SilentWorkersScanTest(unittest.TestCase):
     """silent_workers() classification — hermetic: a tmp runs-dir + injected alive set."""
 
-    def _mk(self, runs: Path, issue: int, stamp: str, *, size: int, pid: int) -> None:
+    def _mk(self, runs: Path, issue: int, stamp: str, *, size: int, pid: int,
+            sidecar_mtime: float | None = None) -> None:
+        import os
         log = runs / f"resolve-{issue}-{stamp}.log"
         log.write_bytes(b"x" * size)
-        (runs / f"resolve-{issue}-{stamp}.pid").write_text(str(pid), encoding="utf-8")
+        pid_file = runs / f"resolve-{issue}-{stamp}.pid"
+        pid_file.write_text(str(pid), encoding="utf-8")
+        if sidecar_mtime is not None:
+            os.utime(pid_file, (sidecar_mtime, sidecar_mtime))
 
     def test_zero_byte_dead_pid_is_silent(self) -> None:
         mod = load()
@@ -221,8 +226,27 @@ class SilentWorkersScanTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as d:
             runs = Path(d)
             self._mk(runs, 465, "20260621-232003", size=0, pid=39688)
-            out = mod.silent_workers(runs, alive={39688})  # still running
+            probe = lambda pid: {
+                "alive": True,
+                "cmdline": "claude -p resolve GitHub issue #465",
+            }
+            out = mod.silent_workers(runs, alive={39688}, probe=probe)  # still running
             self.assertEqual(out, [])
+
+    def test_zero_byte_reused_pid_is_silent(self) -> None:
+        mod = load()
+        with tempfile.TemporaryDirectory() as d:
+            runs = Path(d)
+            now = 1_000_000.0
+            self._mk(runs, 465, "20260621-232003", size=0, pid=39688,
+                     sidecar_mtime=now)
+            probe = lambda pid: {
+                "alive": True,
+                "create_time": now + 60 * 60,
+                "cmdline": "chrome.exe --type=renderer",
+            }
+            out = mod.silent_workers(runs, alive={39688}, probe=probe)
+            self.assertEqual([w["issue"] for w in out], [465])
 
     def test_non_empty_log_is_excluded(self) -> None:
         mod = load()

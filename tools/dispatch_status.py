@@ -41,6 +41,9 @@ try:
 except (AttributeError, ValueError):
     pass
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import dispatch_preflight  # noqa: E402  (pid-sidecar identity probe)
+
 SCHEMA = "fleet-dispatch-status/1"
 # The guarded always-on tick (tools/register_issue_dispatch.ps1). The older
 # FleetDOSDispatchWatchdog keeps the un-gated kernel supervisor alive; this card
@@ -100,7 +103,12 @@ def _last_json(text: str) -> dict[str, Any]:
     return {}
 
 
-def silent_workers(runs_dir: Path, *, alive: set[int] | None = None) -> list[dict[str, Any]]:
+def silent_workers(
+    runs_dir: Path,
+    *,
+    alive: set[int] | None = None,
+    probe: Any | None = None,
+) -> list[dict[str, Any]]:
     """Issue-resolution workers that exited having produced NOTHING — a 0-byte
     ``resolve-<N>-<stamp>.log`` whose ``.pid`` process is dead.
 
@@ -114,7 +122,7 @@ def silent_workers(runs_dir: Path, *, alive: set[int] | None = None) -> list[dic
     """
     if not runs_dir.is_dir():
         return []
-    if alive is None:
+    if alive is None and probe is None:
         try:
             import psutil  # type: ignore
 
@@ -138,9 +146,10 @@ def silent_workers(runs_dir: Path, *, alive: set[int] | None = None) -> list[dic
             pid = int(pid_file.read_text(encoding="utf-8").strip())
         except (OSError, ValueError):
             continue
-        if alive is None:
+        if alive is None and probe is None:
             continue  # no liveness oracle this run -> do not claim it is silent
-        if pid in alive:
+        if dispatch_preflight.resolve_sidecar_pid_is_live(
+            pid_file, alive=alive, probe=probe):
             continue  # still running -> not (yet) silent
         out.append({"issue": int(m.group(1)), "stamp": m.group(2), "log": log.name, "pid": pid})
     out.sort(key=lambda r: r["stamp"], reverse=True)

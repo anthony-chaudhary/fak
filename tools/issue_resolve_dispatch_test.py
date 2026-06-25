@@ -61,6 +61,42 @@ class CooldownTest(unittest.TestCase):
             self.assertEqual(mod.recently_attempted_issues(runs, cooldown_min=0), set())
 
 
+class LiveResolutionIssuesTest(unittest.TestCase):
+    def _mk(self, runs: Path, issue: int, stamp: str, *, pid: int,
+            sidecar_mtime: float) -> None:
+        import os
+        log = runs / f"resolve-{issue}-{stamp}.log"
+        log.write_text("", encoding="utf-8")
+        pid_file = log.with_suffix(".pid")
+        pid_file.write_text(str(pid), encoding="utf-8")
+        os.utime(pid_file, (sidecar_mtime, sidecar_mtime))
+
+    def test_counts_issue_when_sidecar_process_matches_spawn_time(self) -> None:
+        import tempfile
+        mod = load()
+        now = 1_000_000.0
+        with tempfile.TemporaryDirectory() as d:
+            runs = Path(d)
+            self._mk(runs, 717, "20260625-062210", pid=101, sidecar_mtime=now)
+            probe = lambda pid: {"alive": True, "create_time": now - 1, "cmdline": ""}
+            self.assertEqual(mod.live_resolution_issues(runs, probe=probe), {717})
+
+    def test_rejects_issue_when_sidecar_pid_was_reused(self) -> None:
+        import tempfile
+        mod = load()
+        now = 1_000_000.0
+        with tempfile.TemporaryDirectory() as d:
+            runs = Path(d)
+            self._mk(runs, 718, "20260625-060712", pid=102, sidecar_mtime=now)
+            probe = lambda pid: {
+                "alive": True,
+                "create_time": now + 60 * 60,
+                "name": "chrome.exe",
+                "cmdline": "chrome.exe --type=renderer",
+            }
+            self.assertEqual(mod.live_resolution_issues(runs, probe=probe), set())
+
+
 class EvaluateTest(unittest.TestCase):
     SPAWN_OK = {
         "verdict": "SPAWN_OK", "reason": "ok", "cap": 2, "live": 0,

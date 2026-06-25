@@ -44,13 +44,14 @@ not, exactly which budget is exhausted?".
 from __future__ import annotations
 
 import argparse
+import datetime as dt
 import json
 import os
 import re
 import subprocess
 import sys
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 try:
     sys.stdout.reconfigure(encoding="utf-8")  # type: ignore[union-attr]
@@ -78,6 +79,8 @@ ISSUE_RESOLVE_CMD_MARKER = "resolve GitHub issue #"
 WORKER_CMD_MARKERS = (WORKER_CMD_MARKER, ISSUE_RESOLVE_CMD_MARKER)
 RUNS_DIRNAME = ".dispatch-runs"
 _RESOLVE_PID_RE = re.compile(r"resolve-\d+-\d{8}-\d{6}\.pid$")
+_SIDECAR_CREATE_BEFORE_WINDOW_SECONDS = 5 * 60
+_SIDECAR_CREATE_AFTER_SLOP_SECONDS = 10
 
 
 def repo_root(start: Path | None = None) -> Path:
@@ -230,15 +233,148 @@ def _cmdline_worker_pids() -> set[int]:
         return set()
 
 
-def _alive_pid_set() -> set[int] | None:
-    """All live pids when psutil is available; None means use per-pid probes."""
+def _parse_process_create_time(value: Any) -> float | None:
+    if value is None:
+        return None
+    if isinstance(value, (int, float)):
+        return float(value)
+    text = str(value).strip()
+    if not text:
+        return None
+    m = re.match(r"/Date\((\d+)\)/", text)
+    if m:
+        return int(m.group(1)) / 1000.0
+    # WMI DMTF datetime: YYYYMMDDHHMMSS.ffffff+/-UUU, where UUU is offset minutes.
+    m = re.match(r"^(\d{14})\.(\d{1,6})([+-])(\d{3})$", text)
+    if m:
+        base, micros, sign, offset_min = m.groups()
+        try:
+            naive = dt.datetime.strptime(base, "%Y%m%d%H%M%S")
+            micro = int(micros.ljust(6, "0")[:6])
+            offset = dt.timedelta(minutes=int(offset_min))
+            if sign == "-":
+                offset = -offset
+            aware = naive.replace(microsecond=micro,
+                                  tzinfo=dt.timezone(offset))
+            return aware.timestamp()
+        except ValueError:
+            return None
+    try:
+        parsed = dt.datetime.fromisoformat(text.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    return parsed.timestamp()
+
+
+def _probe_cmdline_text(probe: dict[str, Any]) -> str:
+    cmdline = probe.get("cmdline")
+    if isinstance(cmdline, (list, tuple)):
+        return " ".join(str(part) for part in cmdline)
+    return str(cmdline or "")
+
+
+def _psutil_process_probe(pid: int) -> dict[str, Any] | None:
     try:
         import psutil  # type: ignore
-        return {int(p.pid) for p in psutil.process_iter()}
     except ImportError:
         return None
-    except Exception:
+    try:
+        proc = psutil.Process(pid)
+    except psutil.NoSuchProcess:
+        return {"alive": False}
+    except psutil.Error:
         return None
+    rec: dict[str, Any] = {"alive": proc.is_running()}
+    try:
+        rec["create_time"] = float(proc.create_time())
+    except psutil.Error:
+        pass
+    try:
+        rec["cmdline"] = proc.cmdline()
+    except psutil.Error:
+        pass
+    try:
+        rec["name"] = proc.name()
+    except psutil.Error:
+        pass
+    return rec
+
+
+def _cim_process_probe(pid: int) -> dict[str, Any] | None:
+    if os.name != "nt":
+        return None
+    try:
+        proc = subprocess.run(
+            ["powershell", "-NoProfile", "-NonInteractive", "-Command",
+             f"$p = Get-CimInstance Win32_Process -Filter \"ProcessId={int(pid)}\"; "
+             "if ($null -eq $p) { exit 2 }; "
+             "$p | Select-Object ProcessId,Name,CreationDate,CommandLine | "
+             "ConvertTo-Json -Compress"],
+            capture_output=True, text=True, timeout=5,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    if proc.returncode == 2 or not (proc.stdout or "").strip():
+        return {"alive": False}
+    try:
+        obj = json.loads(proc.stdout)
+    except ValueError:
+        return None
+    if isinstance(obj, list):
+        obj = obj[0] if obj else {}
+    if not isinstance(obj, dict):
+        return None
+    create_time = _parse_process_create_time(obj.get("CreationDate"))
+    return {
+        "alive": True,
+        "create_time": create_time,
+        "cmdline": obj.get("CommandLine") or "",
+        "name": obj.get("Name") or "",
+    }
+
+
+def _process_probe(pid: int) -> dict[str, Any]:
+    probe = _psutil_process_probe(pid)
+    if probe and not probe.get("alive"):
+        return probe
+    if os.name == "nt" and (
+        probe is None
+        or probe.get("cmdline") in (None, "")
+        or probe.get("create_time") is None
+    ):
+        cim = _cim_process_probe(pid)
+        if cim is not None:
+            if probe is None:
+                return cim
+            merged = dict(probe)
+            for key, value in cim.items():
+                if merged.get(key) in (None, "", []):
+                    merged[key] = value
+            return merged
+    if probe is not None:
+        return probe
+    return {"alive": _pid_is_alive(pid)}
+
+
+def _within_sidecar_spawn_window(create_time: Any, sidecar_mtime: float) -> bool:
+    created = _parse_process_create_time(create_time)
+    if created is None:
+        return False
+    if created > sidecar_mtime + _SIDECAR_CREATE_AFTER_SLOP_SECONDS:
+        return False
+    if sidecar_mtime - created > _SIDECAR_CREATE_BEFORE_WINDOW_SECONDS:
+        return False
+    return True
+
+
+def _sidecar_process_matches(pid: int, sidecar_mtime: float, *,
+                             probe: Callable[[int], dict[str, Any]] | None = None) -> bool:
+    rec = (probe or _process_probe)(pid)
+    if not rec.get("alive"):
+        return False
+    if _is_worker_cmdline(_probe_cmdline_text(rec)):
+        return True
+    return _within_sidecar_spawn_window(rec.get("create_time"), sidecar_mtime)
 
 
 def _pid_is_alive(pid: int) -> bool:
@@ -261,31 +397,56 @@ def _pid_is_alive(pid: int) -> bool:
         return False
 
 
-def live_resolve_worker_pids(runs_dir: Path, *, alive: set[int] | None = None) -> set[int]:
+def _read_resolve_pid_sidecar(pid_file: Path) -> int | None:
+    try:
+        return int(pid_file.read_text(encoding="utf-8").strip())
+    except (OSError, ValueError):
+        return None
+
+
+def resolve_sidecar_pid_is_live(
+    pid_file: Path,
+    *,
+    alive: set[int] | None = None,
+    probe: Callable[[int], dict[str, Any]] | None = None,
+) -> bool:
+    pid = _read_resolve_pid_sidecar(pid_file)
+    if pid is None:
+        return False
+    if alive is not None and pid not in alive:
+        return False
+    try:
+        sidecar_mtime = pid_file.stat().st_mtime
+    except OSError:
+        return False
+    return _sidecar_process_matches(pid, sidecar_mtime, probe=probe)
+
+
+def live_resolve_worker_pids(
+    runs_dir: Path,
+    *,
+    alive: set[int] | None = None,
+    probe: Callable[[int], dict[str, Any]] | None = None,
+) -> set[int]:
     """Live issue-resolution workers from `.dispatch-runs/resolve-*.pid`.
 
     `issue_resolve_dispatch.py` is the active always-on issue closer in this
-    plan-empty repo, and it writes one pid sidecar per spawned worker. The old
-    preflight counted only `dos-dispatch-loop` argv markers, so these workers did
-    not consume the cap at all. This is the filesystem witness the dispatcher
-    already authors, folded into the same live-worker budget.
+    plan-empty repo, and it writes one pid sidecar per spawned worker. A bare
+    live-PID check is not enough on long-running Windows hosts because PIDs get
+    reused: the sidecar only counts when the current process either still exposes
+    a worker command-line marker or its create time matches the sidecar's spawn
+    window.
     """
     if not runs_dir.is_dir():
         return set()
-    if alive is None:
-        alive = _alive_pid_set()
     pids: set[int] = set()
     for pid_file in runs_dir.glob("resolve-*.pid"):
         if not _RESOLVE_PID_RE.match(pid_file.name):
             continue
-        try:
-            pid = int(pid_file.read_text(encoding="utf-8").strip())
-        except (OSError, ValueError):
+        pid = _read_resolve_pid_sidecar(pid_file)
+        if pid is None:
             continue
-        if alive is not None:
-            if pid in alive:
-                pids.add(pid)
-        elif _pid_is_alive(pid):
+        if resolve_sidecar_pid_is_live(pid_file, alive=alive, probe=probe):
             pids.add(pid)
     return pids
 

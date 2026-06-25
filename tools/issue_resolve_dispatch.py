@@ -47,6 +47,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import issue_dispatch  # noqa: E402  (refresh_registry/preflight/worker_env/spawn_detached)
 import issue_worker_prompt  # noqa: E402  (render the per-issue resolution prompt)
 import dispatch_worker  # noqa: E402  (child_env for the opencode backend)
+import dispatch_preflight  # noqa: E402  (pid-sidecar identity probe)
 
 SCHEMA = "fleet-issue-resolve-dispatch/1"
 RUNS_DIRNAME = ".dispatch-runs"
@@ -106,29 +107,32 @@ def lane_issue_numbers(root: Path, explicit_lane: str | None,
             "router_error": router.get("_error")}
 
 
-def live_resolution_issues(runs_dir: Path) -> set[int]:
+def live_resolution_issues(
+    runs_dir: Path,
+    *,
+    alive: set[int] | None = None,
+    probe: Any | None = None,
+) -> set[int]:
     """Issue numbers that already have a LIVE resolution worker — read from the
     dispatch logs (``resolve-<N>-<stamp>.log``) whose pid is still alive. Best
     effort: a log without a recoverable pid is treated as not-live."""
     live: set[int] = set()
     if not runs_dir.is_dir():
         return live
-    try:
-        import psutil  # type: ignore
-        alive = {p.pid for p in psutil.process_iter()}
-    except ImportError:
-        alive = set()
+    if alive is None and probe is None:
+        try:
+            import psutil  # type: ignore
+            alive = {p.pid for p in psutil.process_iter()}
+        except ImportError:
+            alive = None
     for log in runs_dir.glob("resolve-*.log"):
         m = _LOG_ISSUE_RE.search(log.name)
         if not m:
             continue
         pid_file = log.with_suffix(".pid")
         if pid_file.exists():
-            try:
-                pid = int(pid_file.read_text(encoding="utf-8").strip())
-            except (OSError, ValueError):
-                continue
-            if not alive or pid in alive:
+            if dispatch_preflight.resolve_sidecar_pid_is_live(
+                pid_file, alive=alive, probe=probe):
                 live.add(int(m.group(1)))
     return live
 
