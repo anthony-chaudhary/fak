@@ -28,6 +28,7 @@ scaling laws, the explainers) live one level up in [`docs/`](../) and at the
 |---|---|
 | Fast path to a running gateway | [server-quickstart.md](server-quickstart.md) |
 | Every flag and env var | [server-config.md](server-config.md) |
+| Batching multi-request inference (dynamic batch size, padding) | [batching-config.md](batching-config.md) |
 | Every endpoint, request, and response | [api-reference.md](api-reference.md) |
 | When something breaks | [server-troubleshooting.md](server-troubleshooting.md) |
 | Metrics, logs, and traces | [observability.md](observability.md) |
