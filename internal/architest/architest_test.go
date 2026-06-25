@@ -337,8 +337,9 @@ func TestRequestPathLeavesRegistered(t *testing.T) {
 // path too. cmd/fak's help text also names it but lives outside internal/, so it is
 // not scanned.
 var chatEndpointRole = map[string]string{
-	"agent":   "the single outbound chat-completions client (HTTPPlanner)",
-	"gateway": "the inbound /v1/chat/completions server route (adjudication proxy)",
+	"agent":    "the single outbound chat-completions client (HTTPPlanner)",
+	"gateway":  "the inbound /v1/chat/completions server route (adjudication proxy)",
+	"webbench": "the off-path serving-parity benchmark client (not a live planner)",
 }
 
 // TestSingleOpenAIChatClient pins the T4 fix as an architecture invariant: the
