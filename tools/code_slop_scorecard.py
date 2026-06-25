@@ -802,6 +802,7 @@ def kpi_comment_slop(files: dict[str, str]) -> dict[str, Any]:
 # needs — prose words on a `[STUB]` line no longer grant a false free pass (#781).
 _BACKTICK_SPAN_RE = re.compile(r"`([^`]+)`")
 _DOTTED_IDENT_RE = re.compile(r"[A-Za-z_]\w*(?:\.[A-Za-z_]\w*)*")
+_STUB_CLAIM_LINE_RE = re.compile(r"^\s*-\s+\[STUB\](?:\s|$)")
 
 
 def _ledger_stub_symbols(claims_text: str) -> set[str]:
@@ -812,7 +813,7 @@ def _ledger_stub_symbols(claims_text: str) -> set[str]:
     link (vs the v1 any-token-lowercased match that pulled in prose words)."""
     symbols: set[str] = set()
     for line in claims_text.splitlines():
-        if "[STUB]" not in line:
+        if not _STUB_CLAIM_LINE_RE.match(line):
             continue
         for span in _BACKTICK_SPAN_RE.findall(line):
             for dotted in _DOTTED_IDENT_RE.findall(span):

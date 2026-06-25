@@ -363,6 +363,17 @@ def test_ledger_stub_symbols_keys_on_backticks_only():
     assert "behaviors" not in syms
 
 
+def test_ledger_stub_symbols_ignores_tag_legend():
+    # The CLAIMS.md glossary line is "- `[STUB]` ...", not a real stub claim.
+    # Mentioning the tag in a backtick span must not suppress an exported stub.
+    claims = ("- `[STUB]` - plumbing present, behavior deferred.\n"
+              "- [SHIPPED] The docs mention `[STUB]` in prose.\n"
+              "- [STUB] `Future` is deferred.\n")
+    syms = cs._ledger_stub_symbols(claims)
+    assert "Future" in syms
+    assert "STUB" not in syms
+
+
 def test_real_implementation_is_clean():
     files = {"a.go": ("package a\n"
                       "func Add(x, y int) int {\n"
