@@ -631,10 +631,17 @@ def _has_positive_evidence(a) -> bool:
     return str(a.get("verdict_source") or "none") in ("probe", "passive")
 
 
-def _rehome_targets(availability, exclude_account, assigned=None, cap=None):
+def rehome_targets(availability, exclude_account, assigned=None, cap=None):
     """Available Claude worker accounts a throttled session can move to, least
     loaded first. opencode accounts are excluded: a Claude transcript can only
     resume under another Claude config dir, not an opencode one.
+
+    This is the SHARED re-home ranking seam. Three consumers depend on it: the
+    in-module admission gate :func:`_admissible_targets` (which filters this
+    ranking down to positive-evidence targets) and, across the module boundary,
+    :mod:`resume_resolver` (the interactive ``c --resume`` path, with its own
+    owner-probe discipline). Because an out-of-module caller relies on it, it is
+    public; ``_rehome_targets`` remains as a back-compat alias.
 
     ``assigned`` is the per-account count this pass has ALREADY re-homed onto each
     target (account basename -> n). It is folded into the load so a burst of
@@ -672,7 +679,7 @@ def _rehome_targets(availability, exclude_account, assigned=None, cap=None):
     # evidence; carried/none are not -- so probe/passive sort ahead of carried/none.
     # This is RANKING only; the hard launch-boundary admission rule (#619) -- refusing
     # to route load onto a carried verdict at all -- is enforced by _admissible_targets,
-    # which decide() consults. _rehome_targets stays a pure ranker so resume_resolver
+    # which decide() consults. rehome_targets stays a pure ranker so resume_resolver
     # (a separate consumer with its own owner-probe discipline) keeps its behavior.
     def _unproven(a):
         return 0 if _has_positive_evidence(a) else 1
@@ -683,11 +690,19 @@ def _rehome_targets(availability, exclude_account, assigned=None, cap=None):
     return cands
 
 
+# Back-compat alias: this ranker was private (`_rehome_targets`) before its
+# cross-module consumers (resume_resolver, its tests) made it a de-facto public
+# seam. The name was promoted to `rehome_targets`; the underscore alias keeps
+# every existing caller -- in this module, in resume_resolver, and in the tests
+# -- working unchanged.
+_rehome_targets = rehome_targets
+
+
 def _admissible_targets(availability, exclude_account, assigned=None):
     """Re-home targets that pass the kernel's launch-boundary admission rule (#619).
 
     The load-bearing rule: NEVER admit a real workload onto a CARRIED / absence-of-
-    evidence verdict. _rehome_targets ranks the available candidates; this gate then
+    evidence verdict. rehome_targets ranks the available candidates; this gate then
     drops every one whose health verdict is not POSITIVE evidence it is serving right
     now (verdict_source probe | passive). A carried "available" -- the day24 incident,
     where the account read available@22:17, throttled@22:19, available@22:20 purely on
@@ -695,7 +710,7 @@ def _admissible_targets(availability, exclude_account, assigned=None):
     decide() consults THIS, not the raw ranker, so the same evidence yields the same
     routing decision on every pass; with no admissible target it DEFERs and waits for
     a probe, which is the deterministic outcome the issue requires."""
-    return [t for t in _rehome_targets(availability, exclude_account, assigned)
+    return [t for t in rehome_targets(availability, exclude_account, assigned)
             if _has_positive_evidence(t)]
 
 def _owner_available(availability, account):
