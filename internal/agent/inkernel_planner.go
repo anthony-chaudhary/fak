@@ -40,15 +40,16 @@ import (
 // emit structured tool calls — the gateway's adjudication layer still runs on
 // whatever the caller proposed.
 type InKernelPlanner struct {
-	m       *model.Model
-	tok     *tokenizer.Tokenizer
-	modelID string
-	q4k     bool            // resident-Q4_K load: decode runs Session.Q4K (SDOT int8 GEMV)
-	quant   bool            // Q8_0 decode/prefill path (the served default); tests flip it to exercise the proven f32 reuse path
-	backend compute.Backend // non-nil → decode runs through the device HAL (e.g. CUDA) instead of the CPU session
-	maxNew  int
-	temp    float64
-	seed    int64
+	m                 *model.Model
+	tok               *tokenizer.Tokenizer
+	modelID           string
+	q4k               bool            // resident-Q4_K load: decode runs Session.Q4K (SDOT int8 GEMV)
+	quant             bool            // Q8_0 decode/prefill path (the served default); tests flip it to exercise the proven f32 reuse path
+	backend           compute.Backend // non-nil → decode runs through the device HAL (e.g. CUDA) instead of the CPU session
+	cpuOffloadExperts bool            // with a backend, keep MoE experts host-resident while dense/attention use the device
+	maxNew            int
+	temp              float64
+	seed              int64
 
 	// tree is the process-scoped RadixAttention prefix cache (internal/radixkv): the
 	// multi-thousand-token static system+tool-schema prefix is prefilled once and the
@@ -83,17 +84,22 @@ type InKernelPlanner struct {
 // q4k flags a resident-Q4_K load so the decode engages Session.Q4K. Generation
 // depth/sampling default to a greedy 256-token turn but are overridable via
 // FAK_INKERNEL_MAX_TOKENS / FAK_INKERNEL_TEMP / FAK_INKERNEL_SEED.
-func NewInKernelPlanner(m *model.Model, tok *tokenizer.Tokenizer, modelID string, q4k bool, backend compute.Backend) *InKernelPlanner {
+func NewInKernelPlanner(m *model.Model, tok *tokenizer.Tokenizer, modelID string, q4k bool, backend compute.Backend, cpuOffloadExpertsOpt ...bool) *InKernelPlanner {
+	cpuOffloadExperts := false
+	if len(cpuOffloadExpertsOpt) > 0 {
+		cpuOffloadExperts = cpuOffloadExpertsOpt[0]
+	}
 	p := &InKernelPlanner{
-		m:       m,
-		tok:     tok,
-		modelID: modelID,
-		q4k:     q4k,
-		quant:   true, // the served in-kernel path runs the Q8_0 forward (a quantized model)
-		backend: backend,
-		maxNew:  envInt("FAK_INKERNEL_MAX_TOKENS", 256),
-		temp:    envFloat("FAK_INKERNEL_TEMP", 0),
-		seed:    int64(envInt("FAK_INKERNEL_SEED", 0)),
+		m:                 m,
+		tok:               tok,
+		modelID:           modelID,
+		q4k:               q4k,
+		quant:             true, // the served in-kernel path runs the Q8_0 forward (a quantized model)
+		backend:           backend,
+		cpuOffloadExperts: cpuOffloadExperts,
+		maxNew:            envInt("FAK_INKERNEL_MAX_TOKENS", 256),
+		temp:              envFloat("FAK_INKERNEL_TEMP", 0),
+		seed:              int64(envInt("FAK_INKERNEL_SEED", 0)),
 	}
 	// RadixAttention KV-prefix reuse is ON by default; FAK_INKERNEL_RADIX=off disables it
 	// (the A/B "tree OFF" arm). The reuse clone is a CPU session, so it only engages when
@@ -277,6 +283,7 @@ func (p *InKernelPlanner) generateReused(ids []int, maxNew int, temp, topP float
 	}
 	s.Quant = p.quant
 	s.Q4K = p.q4k && p.backend == nil // resident-Q4_K is a CPU-only decode path; the device HAL uses Q8/F32
+	s.CPUOffloadExperts = p.cpuOffloadExperts
 
 	// 2) Prefill ONLY the divergent suffix (the whole prompt on a miss).
 	tp := time.Now()

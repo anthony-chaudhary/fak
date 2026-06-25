@@ -115,6 +115,11 @@ type Config struct {
 	// `fak serve --backend <name>`. Ignored unless InKernelModel+Tokenizer are set
 	// (proxy mode and the mock planner do not touch a device).
 	Backend compute.Backend
+	// CPUOffloadExperts, when true with a device Backend, keeps the MoE expert GEMMs on
+	// host RAM while the dense projections + router + attention run on the device — the
+	// `--n-cpu-moe` hybrid that lets a model whose experts dwarf VRAM (e.g. GLM-5.2 Q4)
+	// serve at all. Set by `fak serve --cpu-offload-experts`; ignored without a Backend.
+	CPUOffloadExperts bool
 	// RequireKey, if non-empty, is the bearer token the gateway REQUIRES on every
 	// request (except /healthz). Empty => no auth (drop-in compatible, loopback).
 	RequireKey string
@@ -473,6 +478,15 @@ type Server struct {
 	sessionPlannerMu sync.Mutex
 	sessionPlanners  map[string]*agent.SessionPlanner
 
+	// resetHealth holds ONE rolling compaction-health record per session trace id, fed the
+	// provider's OBSERVED cache counters on every compacted turn so the per-session resetScore
+	// shadow surface (#792, reset_shadow.go) can recommend cut-vs-reset without re-deriving the
+	// session's cache health from a global counter. nil/empty until the first compacted turn;
+	// minted lazily by resetHealthForLocked and bounded by maxResetHealthSessions. Guarded by
+	// resetHealthMu. SHADOW-only: nothing here ever resets a session.
+	resetHealthMu sync.Mutex
+	resetHealth   map[string]*sessionResetHealth
+
 	// compactHistoryBudget mirrors Config.CompactHistoryBudget: when > 0 the flagship
 	// Anthropic passthrough compacts OLD turns in the OUTBOUND body to this resident-token
 	// budget while preserving the cached-prefix bytes (agent.CompactAnthropicHistory). 0
@@ -571,7 +585,7 @@ func New(cfg Config) (*Server, error) {
 		// /v1/chat/completions and /v1/messages (they share s.planner.Complete):
 		// real ChatML chat via internal/tokenizer, the cmd/fakchat recipe factored
 		// into a Planner. Falls through to MockPlanner if the host didn't preload.
-		planner = agent.NewInKernelPlanner(cfg.InKernelModel, cfg.Tokenizer, model, cfg.InKernelQ4K, cfg.Backend)
+		planner = agent.NewInKernelPlanner(cfg.InKernelModel, cfg.Tokenizer, model, cfg.InKernelQ4K, cfg.Backend, cfg.CPUOffloadExperts)
 	default:
 		// No upstream (--base-url) and no in-kernel model (--gguf/FAK_MODEL_DIR): the
 		// chat surface silently fell back to the deterministic offline mock. Warn

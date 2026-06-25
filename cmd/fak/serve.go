@@ -87,6 +87,7 @@ func cmdServe(argv []string) {
 	sessionID := fs.String("session-id", "", "default trace/session id for callers that omit X-Trace-Id or MCP trace_id (empty = mint gw-N per request unless --context-budget-tokens is set)")
 	contextBudgetTokens := fs.Int("context-budget-tokens", 0, "seed the default session with this prompt/context-token budget; exhaustion returns a reset directive with continuation_id (0 = off)")
 	resetOnBudget := fs.Bool("reset-on-budget", false, "on context-budget exhaustion, re-arm the continuation trace with a carryover seed and continue transparently instead of returning 409 (requires --context-budget-tokens)")
+	cpuOffloadExperts := fs.Bool("cpu-offload-experts", false, "with --gguf --backend: keep the MoE expert GEMMs on host RAM while dense projections + router + attention run on the device — the `--n-cpu-moe` hybrid that lets a model whose experts dwarf VRAM (e.g. GLM-5.2 Q4 ~424GB experts) serve at all on a smaller VRAM pool. Switches the device load to the memory-lean Q8 quantize-at-load path; off (default) keeps the existing F32 device load byte-unchanged.")
 	budgetWebhook := fs.String("budget-webhook", "", "POST a JSON event to this URL when a served session's context budget crosses the warning threshold (--budget-warn-fraction) or is exhausted (the reset trigger), so an operator/monitor is notified before exhaustion (#743). Empty = off. Needs --context-budget-tokens to have a budget to watch.")
 	budgetWarnFraction := fs.Float64("budget-warn-fraction", 0.8, "consumed share (0..1) of the context budget at which --budget-webhook fires its pre-exhaustion warning (default 0.8 = 80%); <=0 or >=1 disables the warning while the exhaustion event still fires")
 	notifyNative := fs.Bool("notify-native", true, "emit a one-line native notification to stderr when a served session hits a PAUSED/DRAINING/STOPPED or budget boundary, carrying the closed stop-reason token — the SIGCHLD-equivalent so a waiting agent is never silent (#761); default on")
@@ -154,7 +155,7 @@ func cmdServe(argv []string) {
 	// The loaded *model.Model is ALSO kept for the gateway chat planner: with a tokenizer
 	// (explicit --tokenizer or the GGUF's embedded one) and no --base-url,
 	// /v1/chat/completions and /v1/messages serve it directly.
-	inKernelModel, inKernelQ4K, loadProfile, loadPhase := loadServeInKernelModel(*ggufPath, *backendName)
+	inKernelModel, inKernelQ4K, loadProfile, loadPhase := loadServeInKernelModel(*ggufPath, *backendName, *cpuOffloadExperts)
 	if loadPhase.Name != "" {
 		startupPhases = append(startupPhases, loadPhase)
 	}
@@ -271,6 +272,7 @@ func cmdServe(argv []string) {
 		Tokenizer:                   inKernelTok,
 		InKernelQ4K:                 inKernelQ4K,
 		Backend:                     chatBackend,
+		CPUOffloadExperts:           *cpuOffloadExperts,
 		RequireKey:                  requireKey,
 		VDSO:                        *vdso,
 		Invalidation:                *invalidation,
@@ -360,19 +362,33 @@ func toGatewayLoadProfile(p *ggufload.LoadProfile) *gateway.ModelLoadProfile {
 // selection mirrors cmd/fakchat: a device --backend forces the F32 load (the compute HAL has
 // no quantized-upload seam yet), FAK_Q4K takes the direct-resident-Q4_K path, and the
 // default is the lean-Q8 round-trip; the Q8 path stays byte-identical when the env is unset.
-func loadServeInKernelModel(ggufPath, backendName string) (inKernelModel *fakmodel.Model, inKernelQ4K bool, loadProfile *gateway.ModelLoadProfile, phase gateway.StartupPhase) {
+func loadServeInKernelModel(ggufPath, backendName string, cpuOffloadExperts bool) (inKernelModel *fakmodel.Model, inKernelQ4K bool, loadProfile *gateway.ModelLoadProfile, phase gateway.StartupPhase) {
 	if ggufPath == "" {
 		return nil, false, nil, gateway.StartupPhase{}
 	}
 	tLoad := time.Now()
 	switch {
+	case backendName != "" && cpuOffloadExperts:
+		// Device backend + CPU expert-offload: the memory-lean Q8 quantize-at-load path (the
+		// SAME representation cmd/modelbench's `-lean -backend cuda` produces). The big matmul
+		// weights are dropped from f32 and kept Q8-resident, which the cuda HAL now consumes
+		// directly at H2D (internal/compute/cuda.go Upload(t, Q8_0) / uploadQ8Resident, #485) —
+		// the old "the HAL only narrows F32" limitation is gone. This is the only load that fits
+		// a model whose experts dwarf VRAM (GLM-5.2 Q4 experts ~424GB): with --cpu-offload-experts
+		// the per-request session keeps the expert GEMMs on host RAM while dense projections +
+		// router + attention run on the device (internal/model glmDsaMatKernel split).
+		prof := ggufload.NewLoadProfiler()
+		mm, err := ggufload.LoadModelQuantProfile(ggufPath, prof)
+		must(err)
+		modelengine.Preload(mm)
+		loadNanos := time.Since(tLoad).Nanoseconds()
+		profile := toGatewayLoadProfile(prof.Snapshot("gguf-lean-q8-device", ggufPath, loadNanos))
+		return mm, false, profile, gateway.StartupPhase{Name: "model-load", Dur: time.Duration(loadNanos)}
 	case backendName != "":
-		// A device backend (e.g. CUDA) consumes weights through the compute HAL Upload path,
-		// which today only narrows F32 host data to VRAM (the quantized H2D / UploadDtype seam
-		// is deferred — see internal/compute/cuda.go). The lean-Q8 and Q4_K loads keep ONLY
-		// quantized weights (no F32 manifest entry), which makes weightHAL panic ("missing
-		// tensor"). So when serving on a device we load the GGUF as F32 — the SAME path
-		// cmd/modelbench uses before NewBackendSession — so the HAL takes its proven F32 GEMV.
+		// A device backend (e.g. CUDA) with NO offload loads the GGUF as F32 — the SAME path
+		// cmd/modelbench uses before NewBackendSession, so the HAL takes its proven F32/Q8-narrow
+		// GEMV. (For a model that fits VRAM this is fine; pass --cpu-offload-experts for the
+		// lean+offload path when the experts dwarf VRAM.)
 		mm, err := ggufload.LoadModel(ggufPath)
 		must(err)
 		modelengine.Preload(mm)
