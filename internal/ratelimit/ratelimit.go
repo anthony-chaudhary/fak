@@ -21,17 +21,27 @@
 // A limiter with no cap configured Defers on every call — registering this leaf
 // changes no behavior until an operator sets a cap. Two ways to set one:
 //
-//   - Production: environment, read once at process start (the same stance
-//     internal/modelengine takes with FAK_MODEL_DIR):
+//   - Declarative: the fak-policy/v1 `rate_limit:` block (issue #699, Epic 8),
+//     applied to Default at boot and on --policy hot-reload from cmd/fak's
+//     applyRuntime — the same surface SafeSinks/Authorize reach through ifc. A
+//     policy load is AUTHORITATIVE over the cap: present installs it, absent resets
+//     the limiter to inert. Env is the fallback only when no --policy is given.
+//   - Environment, read once at process start (the same stance internal/modelengine
+//     takes with FAK_MODEL_DIR) — the keyless / single-process deploy surface:
 //     FAK_RATELIMIT_MAX_CALLS=<n>   per-key admitted-call quota
 //     FAK_RATELIMIT_MAX_COST=<n>    per-key cumulative cost budget (arg bytes ~ tokens)
 //     FAK_RATELIMIT_KEY=trace|tool|global   which dimension to bucket by (default trace)
+//     FAK_RATELIMIT_RETRY_AFTER_MS=<n>  advisory back-off (ms) surfaced on the WAIT
 //   - In-process / tests: (*Limiter).SetLimit.
 //
-// A policy-manifest field (fak-policy/v1 `rate_limit:`) is the natural next
-// ergonomic surface; it is deliberately left to a follow-up so this enforcer lands
-// without touching the policy schema while it is in flight (issue #8/#13 coordinate
-// one schema bump). The env seam already makes the governor usable end-to-end.
+// RETRY-AFTER ON WAIT (issue #699). An over-cap deny climbs from a bare WAIT token
+// to a WAIT carrying an advisory `retry_after` in its deny meta — the recoverable
+// back-off the loop pairs with WAIT the way errno pairs EAGAIN with a retry window.
+// The value is the operator-declared RetryAfter when one is set (manifest
+// `retry_after_ms` / env), else a small default advisory constant: this limiter is a
+// fixed-ceiling quota with NO time window, so a duration is an estimate, not a
+// guaranteed admission time — advisory back-off like HTTP Retry-After, not a
+// reservation (windowed/decaying budgets stay the lifecycle leaf's job).
 //
 // BOUNDED STATE. The per-key counters live in a map capped at maxKeys entries.
 // Past the ceiling a NEW key is not tracked (fail-open) rather than evicting a live
@@ -45,6 +55,7 @@ import (
 	"os"
 	"strconv"
 	"sync"
+	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/abi"
 )
@@ -58,6 +69,15 @@ const capRateLimit abi.Capability = "ratelimit.v1"
 // defaultMaxKeys bounds the per-key counter map so a high-cardinality key
 // dimension (e.g. per-trace under churn) cannot grow memory without limit.
 const defaultMaxKeys = 8192
+
+// defaultRetryAfter is the advisory back-off surfaced on an over-cap WAIT when no
+// explicit RetryAfter is configured. This limiter is a fixed-ceiling quota with no
+// time window (no calls/sec or tokens/sec rate is tracked), so there is no duration
+// it can honestly DERIVE from the cap — any magnitude-based formula would be
+// fabricated precision. A small documented constant is the honest default: it tells
+// the loop "this is a hard quota, back off and retry" without promising a specific
+// admission time. An operator who knows better declares `retry_after_ms`.
+const defaultRetryAfter = 1 * time.Second
 
 // KeyMode selects the dimension a budget buckets by.
 type KeyMode uint8
@@ -73,11 +93,14 @@ const (
 	KeyGlobal
 )
 
-// Limit is the per-key budget. A zero Limit (both fields 0) is UNLIMITED: the
-// limiter Defers on every call, so the leaf is inert until a cap is set.
+// Limit is the per-key budget. A zero Limit (both cap fields 0) is UNLIMITED: the
+// limiter Defers on every call, so the leaf is inert until a cap is set. RetryAfter
+// alone (no cap) is meaningless and still inert — a back-off only matters once a
+// cap can fire.
 type Limit struct {
-	MaxCalls int   // max ADMITTED calls per key (a quota). 0 = unlimited.
-	MaxCost  int64 // max cumulative cost per key (arg bytes ~ tokens; a budget). 0 = unlimited.
+	MaxCalls   int           // max ADMITTED calls per key (a quota). 0 = unlimited.
+	MaxCost    int64         // max cumulative cost per key (arg bytes ~ tokens; a budget). 0 = unlimited.
+	RetryAfter time.Duration // advisory back-off surfaced on the over-cap WAIT; 0 = defaultRetryAfter.
 }
 
 // unlimited reports whether no cap is configured (the inert state).
@@ -177,11 +200,11 @@ func (r *Limiter) Adjudicate(ctx context.Context, c *abi.ToolCall) abi.Verdict {
 	// counter past the cap.
 	if r.lim.MaxCalls > 0 && st.calls+1 > r.lim.MaxCalls {
 		r.denies++
-		return denyVerdict(key, "max_calls", int64(r.lim.MaxCalls))
+		return denyVerdict(key, "max_calls", int64(r.lim.MaxCalls), r.retryAfterLocked())
 	}
 	if r.lim.MaxCost > 0 && st.cost+cost > r.lim.MaxCost {
 		r.denies++
-		return denyVerdict(key, "max_cost", r.lim.MaxCost)
+		return denyVerdict(key, "max_cost", r.lim.MaxCost, r.retryAfterLocked())
 	}
 
 	st.calls++
@@ -214,18 +237,31 @@ func (r *Limiter) Stats() (admits, denies, dropped int64) {
 // keyword). Every "nothing to refuse" path returns this.
 func defer_() abi.Verdict { return abi.Verdict{Kind: abi.VerdictDefer, By: by} }
 
+// retryAfterLocked is the advisory back-off surfaced on an over-cap deny. The
+// operator-declared RetryAfter wins; otherwise the default constant stands in
+// (there is no rate window to derive a real duration from). Caller holds r.mu.
+func (r *Limiter) retryAfterLocked() time.Duration {
+	if r.lim.RetryAfter > 0 {
+		return r.lim.RetryAfter
+	}
+	return defaultRetryAfter
+}
+
 // denyVerdict is the bounded-disclosure RATE_LIMITED refusal: it names the cap
-// that fired, its limit, and the key — never the call's arguments. The kernel
-// derives the WAIT disposition from the reason.
-func denyVerdict(key, cap string, limit int64) abi.Verdict {
+// that fired, its limit, the key, and the advisory retry-after — never the call's
+// arguments. The kernel derives the WAIT disposition from the reason and surfaces
+// the retry-after on the deny-as-value (issue #699).
+func denyVerdict(key, cap string, limit int64, retryAfter time.Duration) abi.Verdict {
 	return abi.Verdict{
 		Kind:   abi.VerdictDeny,
 		Reason: abi.ReasonRateLimited,
 		By:     by,
 		Meta: map[string]string{
-			"cap":   cap,
-			"limit": strconv.FormatInt(limit, 10),
-			"key":   key,
+			"cap":            cap,
+			"limit":          strconv.FormatInt(limit, 10),
+			"key":            key,
+			"retry_after":    retryAfter.String(),
+			"retry_after_ms": strconv.FormatInt(retryAfter.Milliseconds(), 10),
 		},
 	}
 }
@@ -282,7 +318,8 @@ func (r *Limiter) configureFromEnv() {
 	case "global":
 		mode = KeyGlobal
 	}
-	r.SetLimit(Limit{MaxCalls: mc, MaxCost: int64(cost)}, mode)
+	ra := envInt("FAK_RATELIMIT_RETRY_AFTER_MS")
+	r.SetLimit(Limit{MaxCalls: mc, MaxCost: int64(cost), RetryAfter: time.Duration(ra) * time.Millisecond}, mode)
 }
 
 // envInt reads a non-negative int from env, returning 0 (unset/unlimited) on an

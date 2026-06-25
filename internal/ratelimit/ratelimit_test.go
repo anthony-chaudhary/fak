@@ -4,6 +4,7 @@ import (
 	"context"
 	"strconv"
 	"testing"
+	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/abi"
 	_ "github.com/anthony-chaudhary/fak/internal/blob" // register the Ref resolver (CAS backend)
@@ -182,6 +183,50 @@ func TestBoundedKeysFailOpen(t *testing.T) {
 	}
 	// An EXISTING key still enforces its cap (not bypassed by the ceiling).
 	mustRateLimited(t, r.Adjudicate(ctx, call("k0", "x", "{}")), "existing key still capped")
+}
+
+// TestLimiterDenyCarriesRetryAfter is the issue-#699 retry-after witness: an
+// over-cap deny carries an advisory back-off in its meta — both a Go
+// time.Duration string (retry_after) and integer milliseconds (retry_after_ms) —
+// while a sub-cap call Defers and carries none. The declared RetryAfter wins when
+// set; an undeclared cap still carries the documented default advisory constant.
+func TestLimiterDenyCarriesRetryAfter(t *testing.T) {
+	ctx := context.Background()
+
+	// Declared retry-after: the over-cap deny surfaces exactly that back-off.
+	r := New()
+	r.SetLimit(Limit{MaxCalls: 1, RetryAfter: 500 * time.Millisecond}, KeyPerTrace)
+	mustDefer(t, r.Adjudicate(ctx, call("t", "x", "{}")), "sub-cap call Defers (no deny, no retry_after)")
+	v := r.Adjudicate(ctx, call("t", "x", "{}")) // over cap
+	mustRateLimited(t, v, "over-cap call")
+
+	ra, err := time.ParseDuration(v.Meta["retry_after"])
+	if err != nil || ra != 500*time.Millisecond {
+		t.Fatalf("retry_after = %q (%v), want 500ms", v.Meta["retry_after"], err)
+	}
+	ms, err := strconv.Atoi(v.Meta["retry_after_ms"])
+	if err != nil || ms != 500 {
+		t.Fatalf("retry_after_ms = %q (%v), want 500", v.Meta["retry_after_ms"], err)
+	}
+
+	// Undeclared retry-after: the over-cap deny still carries the documented default
+	// advisory constant (the limiter has no rate window to derive a duration from).
+	r2 := New()
+	r2.SetLimit(Limit{MaxCalls: 1}, KeyPerTrace)
+	r2.Adjudicate(ctx, call("t2", "x", "{}")) // consume the one-call quota
+	v2 := r2.Adjudicate(ctx, call("t2", "x", "{}")) // over cap
+	mustRateLimited(t, v2, "over-cap call with default retry-after")
+	if ra, err := time.ParseDuration(v2.Meta["retry_after"]); err != nil || ra != defaultRetryAfter {
+		t.Fatalf("default retry_after = %q (%v), want %s", v2.Meta["retry_after"], err, defaultRetryAfter)
+	}
+	if v2.Meta["retry_after_ms"] == "" {
+		t.Fatal("over-cap deny must always carry a non-empty retry_after_ms (issue #699)")
+	}
+
+	// The cap/limit/key forensics are still present alongside the new hint.
+	if v.Meta["cap"] != "max_calls" || v.Meta["key"] != "trace:t" {
+		t.Fatalf("deny forensics lost: cap=%q key=%q", v.Meta["cap"], v.Meta["key"])
+	}
 }
 
 // --- kernel integration: the issue-#13 witness -----------------------------------
