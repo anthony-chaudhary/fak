@@ -8,6 +8,8 @@ import (
 	"errors"
 	"io"
 	"net/http"
+
+	"github.com/anthony-chaudhary/fak/internal/agent"
 )
 
 // MCP transport. The kernel is exposed as an MCP server speaking JSON-RPC 2.0,
@@ -241,6 +243,28 @@ func (s *Server) callTool(ctx context.Context, params json.RawMessage) (any, *rp
 			return nil, &rpcError{Code: rpcInvalidParams, Message: err.Error()}
 		}
 		return mcpToolResult(SyscallResponse{Verdict: wv, Result: env, TraceID: req.TraceID}), nil
+	case "fak_read":
+		// The vToolcall serve seam (#795): a real, kernel-mediated file read the model can
+		// call INSTEAD of the harness's built-in Read. Routing through k.Syscall means the
+		// vDSO fast path serves a FRESH cached read with no disk I/O (the #795 per-path
+		// invalidator proves freshness), and only a genuine miss reaches the confined
+		// readEngine. No Claude Code change is needed — the model opts in via the MCP tool.
+		var rr struct {
+			FilePath string `json:"file_path"`
+			Path     string `json:"path"`
+			TraceID  string `json:"trace_id"`
+			Witness  string `json:"witness"`
+		}
+		_ = json.Unmarshal(p.Arguments, &rr)
+		path := rr.FilePath
+		if path == "" {
+			path = rr.Path
+		}
+		wv, env, err := s.fakRead(ctx, path, s.traceFor(rr.TraceID), rr.Witness)
+		if err != nil {
+			return nil, &rpcError{Code: rpcInvalidParams, Message: err.Error()}
+		}
+		return mcpToolResult(SyscallResponse{Verdict: wv, Result: env, TraceID: s.traceFor(rr.TraceID)}), nil
 	case "fak_adjudicate":
 		req := decodeSyscallArgs(p.Arguments)
 		req.TraceID = s.traceFor(req.TraceID)
@@ -396,6 +420,35 @@ func decodeSyscallArgs(raw json.RawMessage) SyscallRequest {
 	return req
 }
 
+// fakRead runs a kernel-mediated file read for the fak_read MCP tool (#795). It builds a
+// read-only Read call (so the vDSO tier path is armed and the #795 per-path tag binds),
+// PINS the engine to the confined readEngine (agent.FakReadEngineID) so a cache MISS reads
+// the real file regardless of the gateway's configured chat engine, and runs the full
+// syscall boundary. On a vDSO hit k.Syscall serves the cached bytes with no engine
+// dispatch and no disk read; the per-path invalidator guarantees that hit is fresh.
+func (s *Server) fakRead(ctx context.Context, path, traceID, witness string) (WireVerdict, *ResultEnvelope, error) {
+	args, _ := json.Marshal(map[string]string{"file_path": path})
+	tc, err := s.buildCall(ctx, "Read", string(args), true, witness, traceID)
+	if err != nil {
+		return WireVerdict{}, nil, err
+	}
+	// Pin the confined read engine: routeEngine left Engine "" (kernel default = the chat
+	// engine) or a model id, neither of which can read a file. k.Syscall honors a non-empty
+	// c.Engine, so this is what dispatches a miss to readEngine.
+	tc.Engine = agent.FakReadEngineID
+	r, v := s.k.Syscall(ctx, tc)
+	wv := renderVerdict(v, resultMeta(r))
+	var env *ResultEnvelope
+	if r != nil {
+		env = &ResultEnvelope{
+			Status:  statusName(r.Status),
+			Content: string(resolveBytes(ctx, r.Payload)),
+			Meta:    r.Meta,
+		}
+	}
+	return wv, env, nil
+}
+
 // mcpToolResult wraps a SyscallResponse as an MCP tool result: a single text
 // content block carrying the JSON. isError stays false — a deny is a successful
 // adjudication, surfaced in the verdict, not a tool failure.
@@ -431,6 +484,19 @@ func toolDescriptors() []map[string]any {
 			"name":        "fak_syscall",
 			"description": "Adjudicate AND execute a tool call through the fak kernel (dispatch to the registered engine + context-MMU result admission). Returns the verdict and the admitted result. Use when fak should run the tool.",
 			"inputSchema": schema,
+		},
+		{
+			"name":        "fak_read",
+			"description": "Read a file through the fak kernel instead of the built-in Read tool. When you have read this file before and it has not changed since, fak serves the cached contents WITHOUT touching disk (a verified-fresh cache hit); otherwise it reads the file. Prefer this over the built-in Read for files you may read more than once in a session. Pass {file_path}.",
+			"inputSchema": json.RawMessage(`{
+  "type": "object",
+  "properties": {
+    "file_path": {"type": "string", "description": "the path of the file to read (absolute, or relative to the working tree)"},
+    "trace_id": {"type": "string", "description": "optional session trace id; omitted means the gateway mints one and returns it"},
+    "witness": {"type": "string", "description": "optional external world-state token (a git commit / blob hash) the read is taken at"}
+  },
+  "required": ["file_path"]
+}`),
 		},
 		{
 			"name":        "fak_admit",

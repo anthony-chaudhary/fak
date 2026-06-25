@@ -248,6 +248,10 @@ func (localEngine) Complete(ctx context.Context, c *abi.ToolCall) (*abi.Result, 
 // binaries are per-package, so this never leaks across packages.)
 func Configure() {
 	abi.RegisterEngine("localtools", localEngine{})
+	// The real filesystem-read engine behind the fak_read MCP tool (#795): the miss path
+	// for a Read routed through the kernel, confined to the working tree. The vDSO serves a
+	// fresh hit before this ever runs. Confined to the process cwd by default.
+	RegisterReadEngine("")
 
 	adjudicator.Default.SetPolicy(adjudicator.Policy{
 		Allow: map[string]bool{
