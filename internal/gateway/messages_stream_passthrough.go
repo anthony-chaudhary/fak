@@ -300,6 +300,7 @@ func (s *Server) streamAnthropicPassthroughLive(w http.ResponseWriter, r *http.R
 		s.metrics.observeInference(p.promptTok, p.complTok, p.cacheRead, p.finishReason, dur)
 		if compacted {
 			s.metrics.recordCompactionCacheRead(p.cacheRead) // OBSERVED provider cache_read on a compacted streamed turn
+			s.observeResetHealth(reqTrace, p.promptTok, p.cacheRead, p.cacheCreate)
 		}
 		s.logInferenceTurn(reqTrace, "anthropic_messages", true, agent.Usage{
 			PromptTokens:             p.promptTok,

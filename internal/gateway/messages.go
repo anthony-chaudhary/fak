@@ -240,6 +240,7 @@ func (s *Server) handleAnthropicMessages(w http.ResponseWriter, r *http.Request)
 	// fak claim) so the net effect is visible on /metrics next to the WITNESSED shed.
 	if compacted {
 		s.metrics.recordCompactionCacheRead(turn.Usage.CacheReadInputTokens)
+		s.observeResetHealth(reqTrace, turn.Usage.InputTokens, turn.Usage.CacheReadInputTokens, turn.Usage.CacheCreationInputTokens)
 	}
 	s.logInferenceTurn(reqTrace, "anthropic_messages", false, agent.Usage{
 		PromptTokens:             turn.Usage.InputTokens,
@@ -700,6 +701,7 @@ func (s *Server) streamAnthropicPending(w http.ResponseWriter, r *http.Request, 
 		}
 		if compacted {
 			s.metrics.recordCompactionCacheRead(turn.Usage.CacheReadInputTokens)
+			s.observeResetHealth(reqTrace, turn.Usage.InputTokens, turn.Usage.CacheReadInputTokens, turn.Usage.CacheCreationInputTokens)
 		}
 		s.logInferenceTurn(reqTrace, "anthropic_messages", true, agent.Usage{
 			PromptTokens:             turn.Usage.InputTokens,
@@ -760,6 +762,7 @@ func (s *Server) streamAnthropicPending(w http.ResponseWriter, r *http.Request, 
 			}
 			if compacted {
 				s.metrics.recordCompactionCacheRead(res.turn.Usage.CacheReadInputTokens)
+				s.observeResetHealth(reqTrace, res.turn.Usage.InputTokens, res.turn.Usage.CacheReadInputTokens, res.turn.Usage.CacheCreationInputTokens)
 			}
 			s.logInferenceTurn(reqTrace, "anthropic_messages", true, agent.Usage{
 				PromptTokens:             res.turn.Usage.InputTokens,
