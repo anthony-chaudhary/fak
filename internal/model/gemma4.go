@@ -124,7 +124,6 @@ func (m *Model) gemma4AttnSeq(l int, xn [][]float32, ropeFreqs []float64) [][]fl
 	if ropeDim > hd {
 		ropeDim = hd
 	}
-	half := ropeDim / 2
 	seq := len(xn)
 	eps := float32(cfg.RMSNormEps)
 	p := func(s string) string { return layerName(l, s) }
@@ -136,19 +135,10 @@ func (m *Model) gemma4AttnSeq(l int, xn [][]float32, ropeFreqs []float64) [][]fl
 
 	// Per-layer RoPE inverse frequencies: full rotary over ropeDim. Global (full-
 	// attention) layers additionally divide each frequency by the shared rope_freqs
-	// factor (proportional rope); local layers do not.
-	inv := make([]float64, half)
-	theta := cfg.ropeThetaForLayer(l)
-	for j := 0; j < half; j++ {
-		inv[j] = 1.0 / math.Pow(theta, float64(2*j)/float64(ropeDim))
-	}
-	if !cfg.gemma4LayerIsSliding(l) && ropeFreqs != nil && !gemma4SkipRopeFreqs() {
-		for j := 0; j < half && j < len(ropeFreqs); j++ {
-			if ropeFreqs[j] != 0 {
-				inv[j] /= ropeFreqs[j]
-			}
-		}
-	}
+	// factor (proportional rope); local layers do not. Memoized across forwards
+	// (gemma4InvFreq) since the table is a pure function of pinned per-layer config;
+	// the cached bytes are identical to this recompute.
+	inv := m.gemma4InvFreq(l, ropeDim, ropeFreqs)
 
 	q := make([][]float32, seq)
 	k := make([][]float32, seq)
