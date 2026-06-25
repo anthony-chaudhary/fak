@@ -220,7 +220,9 @@ draws with a type, and a power you only get once the line exists.
 
 The clearest single artifact is a list of the overloaded terms with their sharpest
 split. These are not hypothetical; each sense below is a real type or doc in this
-tree.
+tree. The canonical, maintained version is [`docs/glossary.md`](../glossary.md),
+which also carries the shared-memory sense split and the live memory issue-owner
+audit.
 
 - **agent** → (1) fak itself, the *kernel*; (2) the external untrusted AI loop fak
   sits in front of, the *guest*; (3) `fak agent`, the CLI verb for fak's own demo

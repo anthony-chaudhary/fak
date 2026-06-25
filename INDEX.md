@@ -56,6 +56,7 @@ Each turns a fuzzy goal into a number you can drive toward zero.
 - [Interoperability stance](docs/integrations/interoperability.md) — why fak adopts whatever agent/model/framework you run (the one opinion kept is the floor) + the honest per-wire grade for the flagship harnesses and every interop protocol.
 - [Agent-to-agent value](docs/a2a-value-opportunities.md) — where the cross-agent cache pays off.
 - [Agent–machine link protocol](docs/agent-machine-link-protocol.md) — how an agent and a host node bind.
+- [Glossary](docs/glossary.md) — the canonical split for overloaded core words (session, agent, context, model, memory, tool/skill, steering), shared-memory senses, and the live memory issue-owner map.
 - [DOS kernel transfer playbook](docs/dos-kernel-transfer-playbook.md) — moving the trust substrate to a new repo.
 - [Prefill visuals](docs/prefill-visuals.md) — the diagrams behind prefill reuse.
 

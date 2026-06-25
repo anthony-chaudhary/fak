@@ -1,13 +1,56 @@
 ---
-title: "fak glossary: preflight vs inflight (and the words that get conflated)"
-description: "What preflight, inflight, and prefill mean in fak — how to tell the before-gates (preflight) from the during-state signals (inflight), why each word is reused across the kernel, serving, and dispatch layers, and the kernel gate vocabulary (vDSO, adjudicator, fold, rung, monitor, admit)."
+title: "fak glossary: core vocabulary, shared memory, preflight vs inflight"
+description: "The canonical fak glossary: overloaded core terms (session, agent, context, model, memory, tool/skill, steering), shared-memory sense splits, the active memory issue map, and the preflight/inflight/prefill gate vocabulary."
 ---
 
-# Glossary: before-gates, during-state, and the words that get conflated
+# Glossary: core vocabulary, shared memory, and before/during words
 
 A few words in this codebase look related but aren't, and a couple are reused at
 several layers with no shared code. That overload is the usual source of confusion.
 This page pins each one down.
+
+This is the canonical docs-lane glossary for the term-conflation audit tracked in
+[#721](https://github.com/anthony-chaudhary/fak/issues/721). The dated worklist
+([`docs/notes/VOCAB-DISAMBIGUATION-WORKLIST-2026-06-24.md`](notes/VOCAB-DISAMBIGUATION-WORKLIST-2026-06-24.md))
+is the source audit; this page is the stable reader-facing contract.
+
+## Canonical overloaded vocabulary
+
+| term | senses in this repo | house rule |
+|------|---------------------|------------|
+| **session** | token decoder (`model.Session` / `model.BatchSession`), reloaded core image (`recall.Session`), live drive state (`internal/session.Table` / `State`), wire DTO (`gateway.SessionState`), and per-session context planner (`agent.SessionPlanner`) | qualify it. Bare "session" in architecture docs means live drive state only when the surrounding path is `internal/session`; otherwise say decoder session, core-image session, gateway session state, or planner session. |
+| **agent** | `fak` as kernel/reference monitor, the external untrusted guest loop, the `fak agent` demo verb, and the `internal/agent` wire/loop package | say kernel/reference monitor for `fak`; say guest or external agent for the program being mediated. Do not make "agent" name both sides of the trust boundary in the same paragraph. |
+| **context** | token window, planner-resident view for this turn, and the result-admission target (`ctxmmu`) | "fits in the window" is not "entered the view", and "entered context" means the post-result admission gate allowed model-visible bytes. |
+| **model** | a routed provider/engine binding, and `internal/model.Model`, fak's own in-kernel transformer | use engine, provider, or routed LLM for the first sense; reserve model for the owned transformer when precision matters. |
+| **memory** | KV working memory, durable/recall memory, and procedural memory (a cached skill/context view) | "working memory" always means the KV cache. Durable memory is cross-session recall; procedural memory is a reusable skill view, not a fact store. |
+| **shared memory** | shared KV/prefix reuse, shared CAS/blob refs (`abi.Resolver` / `Ref`), a typed region/window (`internal/region`, planned in #646), an external L3 shared-KV tier, or a remote provider prompt cache (vCache) | qualify the transport and ownership. "Shared memory" alone must not imply RDMA, CUDA IPC, durable recall, or trust to reuse; say shared KV prefix, CAS ref, region window, L3 tier, or provider cache. |
+| **tool vs skill** | a tool is an adjudicated effect-bearing call; a skill is host-side procedure/instructions that may issue tools | `fak` gates tools. It does not directly gate a skill; it gates the tool calls the skill produces. |
+| **steering** | loop steering after a deny, planner bias over what goes resident, and adversarial prompt steering | reserve steer/steering for the kernel-owned loop disposition when possible; use bias/weight for planner selection and manipulate/hijack for attacks. |
+| **audit vs drive** | audit is the read-only record of what happened (journal, trace, hosted control plane); drive state is the live control value that changes what a run does next (`session.Table`, budgets, pace, priority) | audit reports decisions; drive state changes execution. Do not call both "session state" without a qualifier. |
+
+## Shared-memory issue audit
+
+Last checked against live GitHub issue state on 2026-06-25 with `gh issue list --repo
+anthony-chaudhary/fak`. This table is deliberately narrow: it says which in-flight
+ticket family owns each memory/shared-memory concept and which nearby concept it does
+not own.
+
+| concept | live owner tickets | owns | does not own |
+|---------|--------------------|------|--------------|
+| vocabulary cleanup | [#721](https://github.com/anthony-chaudhary/fak/issues/721) | canonical sense split and docs links | code renames/trust-framing fixes, which stay in the code-lane follow-up |
+| context vs durable memory | [#82](https://github.com/anthony-chaudhary/fak/issues/82), [#81](https://github.com/anthony-chaudhary/fak/issues/81), [#80](https://github.com/anthony-chaudhary/fak/issues/80) | write-time durability, as-of validity, and TTL-driven KV expiry | shared-window concurrency, provider prompt caching, or external L3 routing |
+| one-sided shared window | [#646](https://github.com/anthony-chaudhary/fak/issues/646) | `Put` / `Get` / deterministic `Accumulate` over `Ref` + `ShareScope` | RDMA, hardware zero-copy, provider cache warmth, or durable fact promotion |
+| external L3 shared KV | [#53](https://github.com/anthony-chaudhary/fak/issues/53), [#54](https://github.com/anthony-chaudhary/fak/issues/54)-[#58](https://github.com/anthony-chaudhary/fak/issues/58), [#75](https://github.com/anthony-chaudhary/fak/issues/75)-[#78](https://github.com/anthony-chaudhary/fak/issues/78) | fak as the semantics/referee layer over an external shared KV tier: digest verification, ShareScope, deletion certificate, L3 region backend | base serving parity, inline data-path byte scanning, or forking the external L3 store |
+| provider prompt-cache control | [#715](https://github.com/anthony-chaudhary/fak/issues/715)-[#720](https://github.com/anthony-chaudhary/fak/issues/720) | vCache: warmth belief, anchor shaping, dedicated warming, gated chain recall, governor | correctness/trust claims. Warmth is a cost/latency belief confirmed by telemetry, never authority to omit context. |
+| shared serving spine | [#50](https://github.com/anthony-chaudhary/fak/issues/50), [#637](https://github.com/anthony-chaudhary/fak/issues/637) | base serving substrate shared by RIDE and NATIVE tracks: streaming, EngineDriver, router/residency, metrics, parity bench | L3 governance value-adds; those ride on top of the base serving spine. |
+| closed memory-view slices | [#421](https://github.com/anthony-chaudhary/fak/issues/421), [#435](https://github.com/anthony-chaudhary/fak/issues/435), [#513](https://github.com/anthony-chaudhary/fak/issues/513) | historical/completed work on opencode memory reads, materialization verdicts, and procedural-memory views | active backlog ownership unless a new issue reopens a gap. |
+
+Two audit caveats:
+
+- Some migrated epic bodies still carry stale internal-tracker child numbers. Prefer the live
+  issue numbers in the table above when dispatching work.
+- A cache hit, shared prefix, or materialized view is not automatically a memory write. It
+  becomes memory only after the result/admission and durability gates say it may.
 
 ## The one distinction worth memorizing
 
