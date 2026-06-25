@@ -74,6 +74,15 @@ type gatewayMetrics struct {
 	compactShed        uint64            // WITNESSED: estimated tokens fak removed from the body across all fires
 	compactCacheReads  uint64            // OBSERVED: sum of provider-reported cache_read on compacted turns
 	compactLastCacheRd float64           // OBSERVED: provider-reported cache_read on the MOST RECENT compacted turn
+
+	// resetShadowMu guards the per-session resetScore SHADOW accumulators (#792). The reset
+	// policy (reset_score.go) recommends cut-vs-reset; this folds the recommend-only verdict
+	// stream into /metrics so an operator sees the cut-vs-reset pressure WITHOUT the policy ever
+	// acting. The verdict is WITNESSED (fak's own policy); the cache ratios it folds are OBSERVED.
+	resetShadowMu        sync.Mutex
+	resetShadowReasons   map[string]uint64 // ResetReason -> compacted turns scored that way
+	resetShadowRecommend uint64            // compacted turns whose SHADOW verdict was ShouldReset (acted on: none)
+	resetShadowLastScore float64           // the most recent turn's 0..1 reset-pressure score
 }
 
 type inflightEntry struct {
@@ -149,6 +158,28 @@ func (m *gatewayMetrics) recordCompactionCacheRead(cacheRead int) {
 	m.compactCacheReads += uint64(cacheRead)
 	m.compactLastCacheRd = float64(cacheRead)
 	m.compactMu.Unlock()
+}
+
+// recordResetShadow folds one compacted turn's resetScore SHADOW verdict into the recommend-only
+// accumulators. The reset policy NEVER acts in shadow mode (reset_shadow.go); this only counts what
+// it WOULD recommend, bucketed by the closed ResetReason, so an operator can watch the cut-vs-reset
+// pressure build before reset is ever enabled. The verdict is WITNESSED (fak's own policy); the
+// inputs it scored are OBSERVED (provider cache counters). Lazily inits the reason map like
+// observeInference, so a Server built without this family present still records correctly.
+func (m *gatewayMetrics) recordResetShadow(d ResetDecision) {
+	if m == nil {
+		return
+	}
+	m.resetShadowMu.Lock()
+	if m.resetShadowReasons == nil {
+		m.resetShadowReasons = map[string]uint64{}
+	}
+	m.resetShadowReasons[string(d.Reason)]++
+	if d.ShouldReset {
+		m.resetShadowRecommend++
+	}
+	m.resetShadowLastScore = d.Score
+	m.resetShadowMu.Unlock()
 }
 
 func (m *gatewayMetrics) observeHTTP(route, method string, status int, dur time.Duration) {
@@ -586,6 +617,7 @@ func (s *Server) renderMetrics() string {
 	writeKVPrefixMetrics(&b)
 	inf := m.writeInferenceMetrics(&b)
 	m.writeCompactionMetrics(&b)
+	m.writeResetShadowMetrics(&b)
 
 	// Fleet-value (hero-axis) KPIs, derived live from the kernel counters + the
 	// inference accumulators above. fak's product axis is agent-fleet serving
@@ -954,6 +986,52 @@ func (m *gatewayMetrics) writeCompactionMetrics(b *strings.Builder) {
 	writeHelpType(b, "fak_gateway_compaction_post_fire_cache_read_tokens",
 		"OBSERVED (provider-reported): cache_read_input_tokens on the MOST RECENT compacted turn. If this craters while fires climb, the prefix fak shipped was still byte-identical (witnessed by fired with prefix_mismatch=0), so the provider did not reuse it for a reason fak does NOT control: cache TTL expiry, eviction, or the client moving its own breakpoint. Only bail_reason{reason=\"prefix_mismatch\"}>0 is fak's bug.", "gauge")
 	fmt.Fprintf(b, "fak_gateway_compaction_post_fire_cache_read_tokens %s\n", promFloat(snap.lastCacheRd))
+}
+
+// resetShadowSnapshot is a lock-free copy of the resetScore SHADOW accumulators for rendering.
+type resetShadowSnapshot struct {
+	reasons   map[string]uint64
+	recommend uint64
+	lastScore float64
+}
+
+func (m *gatewayMetrics) resetShadowSnapshotData() resetShadowSnapshot {
+	out := resetShadowSnapshot{reasons: map[string]uint64{}}
+	if m == nil {
+		return out
+	}
+	m.resetShadowMu.Lock()
+	for k, v := range m.resetShadowReasons {
+		out.reasons[k] = v
+	}
+	out.recommend = m.resetShadowRecommend
+	out.lastScore = m.resetShadowLastScore
+	m.resetShadowMu.Unlock()
+	return out
+}
+
+// writeResetShadowMetrics renders the per-session resetScore SHADOW family (#792). The reset
+// policy recommends cut-vs-reset on the compaction crossover; in SHADOW mode it acts on NOTHING,
+// so this surface is purely "what it WOULD recommend" — recommendations_total is the count of
+// turns the verdict said reset, and it stays a recommendation until shadow evidence supports
+// enabling reset. The verdict is WITNESSED (fak's policy); the cache ratios it scored are OBSERVED
+// (provider-reported), the same split the compaction family keeps. Every reason bucket is emitted
+// at 0 so the panel exists before the first compacted turn.
+func (m *gatewayMetrics) writeResetShadowMetrics(b *strings.Builder) {
+	snap := m.resetShadowSnapshotData()
+	writeHelpType(b, "fak_gateway_compaction_reset_shadow_total",
+		"WITNESSED (fak policy, recommend-only): compacted turns scored by the resetScore SHADOW policy, by reason (healthy_cache|stale_prefix|cache_decay|cooldown|unknown_provider). SHADOW mode acts on nothing — this is what the cut-vs-reset crossover WOULD recommend, not a reset that happened. The cache ratios scored are OBSERVED (provider-reported).", "counter")
+	for _, reason := range []string{
+		string(ResetReasonHealthy), string(ResetReasonStalePrefix), string(ResetReasonDecay),
+		string(ResetReasonCooldown), string(ResetReasonUnknown),
+	} { // stable order; emit at 0 so the panel exists pre-first-turn
+		fmt.Fprintf(b, "fak_gateway_compaction_reset_shadow_total{reason=%q} %d\n", reason, snap.reasons[reason])
+	}
+	writeCounter(b, "fak_gateway_compaction_reset_recommendations_total",
+		"WITNESSED (fak policy, recommend-only): compacted turns whose resetScore SHADOW verdict was ShouldReset. In SHADOW mode NONE were acted on — the count is the reset pressure the policy held back, cut-by-default.", int64(snap.recommend))
+	writeHelpType(b, "fak_gateway_compaction_reset_score",
+		"The most recent compacted turn's 0..1 resetScore reset-pressure magnitude (0 = clearly keep cutting, 1 = clearly reset). Reported even when the cooldown holds the recommendation, so the building pressure is visible. Advisory: nothing acts on it in SHADOW mode.", "gauge")
+	fmt.Fprintf(b, "fak_gateway_compaction_reset_score %s\n", promFloat(snap.lastScore))
 }
 
 func writeHelpType(b *strings.Builder, name, help, typ string) {
