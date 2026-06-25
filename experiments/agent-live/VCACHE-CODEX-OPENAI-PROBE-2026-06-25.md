@@ -26,10 +26,7 @@ Codex side without an API key.
 Captured Codex CLI session witness:
 
 ```powershell
-$session = Get-ChildItem -Path C:\Users\USER\.codex\sessions -Recurse -File -Filter "*$env:CODEX_THREAD_ID.jsonl" |
-  Sort-Object LastWriteTime -Descending |
-  Select-Object -First 1 -ExpandProperty FullName
-go run ./cmd/fak vcache prove-telemetry --file $session --json
+go run ./cmd/fak vcache prove-telemetry --file experiments/agent-live/vcache-codex-token-count-proof-2026-06-25.jsonl --json
 ```
 
 Result:
@@ -37,12 +34,12 @@ Result:
 ```json
 {
   "status": "PROVEN",
-  "requests": 44,
-  "baseline_token_equiv": 5431843,
-  "actual_token_equiv": 861628.6,
-  "saved_token_equiv": 4570214.4,
-  "saved_pct": 84.13745389916463,
-  "cache_read_tokens": 5078016,
+  "requests": 68,
+  "baseline_token_equiv": 10638831,
+  "actual_token_equiv": 1491490.2,
+  "saved_token_equiv": 9147340.8,
+  "saved_pct": 85.98069468346664,
+  "cache_read_tokens": 10163712,
   "first_positive_request": 1,
   "correctness_depends_on_hit": false
 }
@@ -50,6 +47,8 @@ Result:
 
 Frozen summary artifact:
 `experiments/agent-live/vcache-codex-token-count-proof-2026-06-25.json`.
+Replayable telemetry artifact:
+`experiments/agent-live/vcache-codex-token-count-proof-2026-06-25.jsonl`.
 
 ## Verifier path now supported
 
