@@ -99,7 +99,7 @@ incomplete · **[SEAM-ONLY]** the interface/seam exists, no production impl behi
 
 | Base item | fak today | Anchor (`@89abc5d`) | SOTA equivalent (the parity target) |
 |---|---|---|---|
-| **Gateway topology** | **[PARTIAL]** single-upstream proxy: one `BaseURL`, one `agent.Planner` seam — no replica set, no router | `internal/gateway/gateway.go:65` (`BaseURL`), `:188` (`planner`) | SGLang Router / vLLM router / LiteLLM front N replicas — fak is the single-engine front, not that router |
+| **Gateway topology** | **[PARTIAL]** static multi-upstream proxy: `ReplicaRouter` can round-robin a configured `BaseURL` + `ReplicaBaseURLs` set through the live `agent.Planner` seam, but there is no residency index, health/drain loop, queueing, or cache-aware placement yet | `internal/gateway/replica_router.go`; `internal/gateway/gateway.go` (`ReplicaBaseURLs`); `cmd/fak/serve.go` (`--replica-base-url`) | SGLang Router / vLLM router / LiteLLM front N replicas with health, load, and KV-locality routing |
 | **Engine seam** | **[PARTIAL]** `agent.StreamingPlanner` adds a content callback for streaming-capable HTTP planners, but the native in-kernel engine still exposes a one-shot `Complete`; `ctx` is not yet a per-step cancel/control point inside decode | `internal/agent/stream.go` (`StreamingPlanner`, `CompleteStream`); `internal/modelengine/modelengine.go:139` (`Complete`), `:151` (`sess.Generate` one-shot) | vLLM-V1 `EngineCore` admit→per-step-decode→stream→reclaim lifecycle |
 | **Streaming** | **[PARTIAL]** live prose deltas now stream on the OpenAI wire and on Anthropic `/v1/messages` when backed by Anthropic passthrough or a generic streaming planner; tool-call bytes are still held until whole-turn adjudication; non-streaming planners still synthesize SSE post-turn | `internal/gateway/stream_proxy.go`; `internal/gateway/messages_stream_passthrough.go`; `internal/gateway/messages_stream_planner.go` | vLLM-V1 / SGLang flush each decoded token live → real-TTFT SSE, inter-token gaps == TPOT |
 | **Incremental detokenizer** | **[GAP]** whole reply detokenized once; no streaming detokenizer | — (prerequisite, #48) | streaming detokenizer feeding per-token SSE |
@@ -120,11 +120,12 @@ incomplete · **[SEAM-ONLY]** the interface/seam exists, no production impl behi
 
 So no downstream issue silently overclaims:
 
-1. **The gateway is a single-upstream proxy today, NOT fleet orchestration.**
-   `internal/gateway/gateway.go:65` fronts one `BaseURL` upstream through one `agent.Planner`
-   seam (`gateway.go:188`); there is no replica set or router. The GPU-cluster path today runs
-   one SGLang TP=8 upstream behind that single seam — fak does **no** native multi-node compute.
-   *[PARTIAL]*
+1. **The gateway has static replica dispatch, NOT fleet orchestration.**
+   `internal/gateway/replica_router.go` and `fak serve --replica-base-url` can fan the
+   served planner path across a fixed upstream set, round-robin. It still has no
+   per-worker residency index (#41), node membership / health / drain / failover (#42),
+   or load/KV-locality placement. The GPU-cluster path today can sit behind that static
+   proxy, but fak still does **no** native multi-node compute. *[PARTIAL]*
 2. **Streaming is live for prose, still gated for tools, and still partial.**
    `agent.StreamingPlanner` gives the gateway a content callback for OpenAI-compatible
    HTTP planners, and the Anthropic passthrough has a native SSE relay. Those paths stream
