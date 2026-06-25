@@ -171,7 +171,51 @@ type State struct {
 	ContinuationID string   `json:"continuation_id,omitempty"` // fresh-window handoff id minted on context exhaustion
 	ParentTrace    string   `json:"parent_trace,omitempty"`    // the trace this session was re-continued FROM (Recontinue lineage)
 	Generation     int      `json:"generation,omitempty"`      // how many budget-reset re-continuations preceded this session (0 = original)
-	Rev            uint64   `json:"rev"`
+	// Intent is the ADVISORY, never-trust projection of what the kernel knows about
+	// this session's next turn but the GPU cannot see (issue #807, the intent conduit
+	// #805). A scheduler reading Snapshot MAY act on it to place KV / order prefill,
+	// but MUST degrade to the GPU-visible decision when it is absent or stale — a hint
+	// that gates correctness is a bug. The zero value is "no opinion".
+	Intent TurnIntent `json:"intent,omitempty"`
+	Rev    uint64     `json:"rev"`
+}
+
+// TurnIntent is the read-only, advisory hint set the adjudicator/session layer emits
+// for a session's NEXT turn, folded into State so a scheduler reading Table.Snapshot
+// can act on what the kernel already knows — the continuous-batching guesses it would
+// otherwise have to reconstruct from sequence length, KV occupancy, and arrival order
+// alone (issue #807). Every field defaults to the safe "no opinion" zero value.
+//
+// FENCE: advisory, never trust. A hint can be wrong (a turn expected to end keeps
+// going); every consumer degrades to the GPU-visible decision when a hint is absent or
+// stale. This is a cost/latency lever only — a hint must NEVER gate correctness. It is
+// a pure projection over Table.Snapshot and adds nothing to the frozen ABI beyond this
+// struct. No consumer exists until the snapshot-reading scheduler (#627) lands; this is
+// filed now so the conduit is defined and sequenced ahead of its first reader.
+type TurnIntent struct {
+	// EndsSoon: the agent is at a settle point — drain this turn, don't admit new
+	// prefill behind it.
+	EndsSoon bool `json:"ends_soon,omitempty"`
+	// IsSpeculative: this turn is a branch that may be thrown away — prefer-not-to-prefill.
+	IsSpeculative bool `json:"is_speculative,omitempty"`
+	// WillDiscard: this turn's result is already known to be discarded — the strongest
+	// prefer-not-to-prefill signal (ties to discard-aware admission, #808).
+	WillDiscard bool `json:"will_discard,omitempty"`
+	// SharesPrefixWith names another live session (by TraceID) this turn shares a
+	// verbatim prompt prefix with — co-batch / pin the shared KV. "" means no known overlap.
+	SharesPrefixWith string `json:"shares_prefix_with,omitempty"`
+	// ResultAlreadyKnown: the call's output is determined — route to the avoid-the-
+	// forward-pass path (ties to vToolcall / vCache, #794/#795).
+	ResultAlreadyKnown bool `json:"result_already_known,omitempty"`
+}
+
+// IsZero reports whether the intent carries no opinion — the safe default a scheduler
+// reads as "fall back to the GPU-visible decision". A consumer checks this before
+// acting on any field, so an unset (or never-emitted) intent is never mistaken for a
+// positive hint.
+func (ti TurnIntent) IsZero() bool {
+	return !ti.EndsSoon && !ti.IsSpeculative && !ti.WillDiscard &&
+		ti.SharesPrefixWith == "" && !ti.ResultAlreadyKnown
 }
 
 // DefaultState is the drive a fresh/unseen session reads: Running, unbounded budget,

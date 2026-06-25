@@ -259,6 +259,23 @@ func (t *Table) SetPriority(trace string, priority int) (State, bool) {
 	return t.putLocked(cur), true
 }
 
+// SetTurnIntent records the ADVISORY next-turn hint set for a session (issue #807).
+// A terminal session rejects the change. The table only RECORDS it — a scheduler
+// reading Snapshot decides whether to act on it, and MUST degrade to the GPU-visible
+// decision when the intent is zero or stale. The hint never gates correctness; it is a
+// cost/latency lever (vCache posture). Setting it bumps Rev like any other write, so a
+// /v1/fak/changes cursor sees the intent update.
+func (t *Table) SetTurnIntent(trace string, intent TurnIntent) (State, bool) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	cur := t.getLocked(trace)
+	if cur.Run.terminal() {
+		return cur, false
+	}
+	cur.Intent = intent
+	return t.putLocked(cur), true
+}
+
 // CompareAndSet applies want only if the session's current Rev equals expectRev —
 // the optimistic-concurrency guard a stale operator UI is checked against, so a
 // newer transition is never silently clobbered. want's TraceID and Rev are ignored

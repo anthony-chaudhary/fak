@@ -58,6 +58,44 @@ func TestWritesBumpRevByOne(t *testing.T) {
 	}
 }
 
+// TestTurnIntentIsAdvisoryProjection: the next-turn hint set (#807) records onto State,
+// surfaces verbatim through Snapshot, bumps Rev like any write, and is rejected by a
+// terminal session. The zero value reads as "no opinion" (IsZero) so an unset intent is
+// never mistaken for a positive hint.
+func TestTurnIntentIsAdvisoryProjection(t *testing.T) {
+	if !(TurnIntent{}).IsZero() {
+		t.Fatal("zero TurnIntent must report IsZero (the safe 'fall back to GPU-visible' default)")
+	}
+	hint := TurnIntent{EndsSoon: true, WillDiscard: true, SharesPrefixWith: "peer", ResultAlreadyKnown: true}
+	if hint.IsZero() {
+		t.Fatal("a populated TurnIntent must NOT report IsZero")
+	}
+
+	tbl := NewTable()
+	st, ok := tbl.SetTurnIntent("s", hint)
+	if !ok || st.Rev != 1 {
+		t.Fatalf("SetTurnIntent ok=%v Rev=%d, want true/1", ok, st.Rev)
+	}
+	if st.Intent != hint {
+		t.Fatalf("recorded intent = %+v, want %+v", st.Intent, hint)
+	}
+
+	// The scheduler's read carries it verbatim.
+	snap := tbl.Snapshot()
+	if len(snap) != 1 || snap[0].Intent != hint {
+		t.Fatalf("Snapshot intent = %+v, want it to carry the hint verbatim", snap)
+	}
+
+	// A terminal session rejects the advisory write — no resurrection, no intent change.
+	tbl2 := NewTable()
+	if _, ok := tbl2.Transition("t", Stopped, "done"); !ok {
+		t.Fatal("setup: could not stop session")
+	}
+	if _, ok := tbl2.SetTurnIntent("t", hint); ok {
+		t.Fatal("a terminal session must reject SetTurnIntent")
+	}
+}
+
 // --- the state machine: terminal sessions reject every change ----------------
 
 func TestTransitionTerminalRejectsRevival(t *testing.T) {
