@@ -922,6 +922,7 @@ func (m *gatewayMetrics) snapshot() ([]httpMetricSnapshot, []operationMetricSnap
 //     to the input (else it bails to `prefix_mismatch`). These describe what fak SENT.
 //   - OBSERVED (provider-reported, relayed verbatim): cache_read_tokens / post_fire_cache_read.
 //     fak attributes nothing to itself here; it forwards the upstream's number.
+//
 // The single fak-fault signal is bail_reason{reason="prefix_mismatch"}>0. A cratered cache_read
 // while fires climb is NOT that bug — the shipped prefix was byte-identical, so the provider
 // missed for a reason fak does not control (cache TTL expiry, eviction, or the client moving its
