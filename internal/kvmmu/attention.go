@@ -115,3 +115,89 @@ func (c *Context) AttendedMass() float64 {
 	}
 	return total
 }
+
+// trajCap bounds the per-span trajectory ring: each live segment remembers at most the
+// last trajCap per-turn masses {a_s(t)}, so memory is O(trajCap) per span regardless of
+// how many turns a session runs. A span hot far in the past still shows a high Cumulative
+// and (with lambda<1) a decayed EMA; only the fine-grained "which exact turn" trail is
+// windowed. 64 turns is a generous recent-history window for the post-hoc analyst.
+const trajCap = 64
+
+// TrajCapForTest exposes the trajectory ring cap to the external _test package so the
+// bounded-ring acceptance test can assert the window size without hardcoding the constant.
+func TrajCapForTest() int { return trajCap }
+
+// CloseTurn ends the current turn for the rolling accumulators (#855, rung 4): for every
+// live segment it folds the turn's accumulated a_s(t) (the in-flight Attended) into the
+// two reductions of the SAME stream, appends it to the bounded trajectory ring, then
+// resets Attended to 0 for the next turn. lambda is the ONLY knob separating the two
+// consumers:
+//
+//	Cumulative += a_s(t)                 (undecayed — "mattered overall", the audit signal)
+//	EMA         = lambda*EMA + a_s(t)    (recency-decayed — "hot now", the eviction signal)
+//
+// One accumulator, two lambda: pass lambda<1 for the real-time heavy-hitter controller
+// (#856 evicts the lowest EMA); pass lambda==1 and the EMA recurrence is exactly the
+// cumulative sum, so a post-hoc analyst reading EMA at lambda=1 sees Cumulative (the
+// identity the issue requires). Held segments are skipped — an evicted span has no turn
+// to close. Deterministic given a fixed per-turn mass stream.
+//
+// Call once per turn boundary, AFTER the turn's attention has been attributed (the
+// AttributeRow / observer calls) and BEFORE the next turn's attribution begins.
+func (c *Context) CloseTurn(lambda float64) {
+	for _, s := range c.segs {
+		if s.Held {
+			continue
+		}
+		a := s.Attended
+		s.Cumulative += a
+		s.EMA = lambda*s.EMA + a
+		s.pushTraj(a)
+		s.Attended = 0
+	}
+}
+
+// pushTraj appends one per-turn mass to the bounded trajectory ring, overwriting the
+// oldest entry once the ring is full (trajCap turns of history). O(1) per turn.
+func (s *Segment) pushTraj(a float64) {
+	if cap(s.traj) < trajCap {
+		s.traj = make([]float64, trajCap)
+	}
+	s.traj[s.trajHead] = a
+	s.trajHead = (s.trajHead + 1) % trajCap
+	if s.trajLen < trajCap {
+		s.trajLen++
+	}
+}
+
+// Trajectory returns the segment's recent per-turn masses {a_s(t)} in chronological
+// order (oldest retained turn first, most recent last) — the reconstruction of WHEN the
+// span was hot, for the post-hoc analyst. The slice is a fresh copy (the caller may keep
+// it); it holds at most trajCap entries (older turns have aged out of the bounded ring).
+// A span with no closed turns returns an empty slice.
+func (c *Context) Trajectory(id string) []float64 {
+	for _, s := range c.segs {
+		if s.ID == id {
+			return s.trajectory()
+		}
+	}
+	return nil
+}
+
+// trajectory unrolls the ring into chronological order (oldest first). When the ring has
+// not yet filled, entries occupy [0, trajLen) and trajHead == trajLen, so the unroll is
+// the identity; once full, the oldest entry sits at trajHead and we read wrapping around.
+func (s *Segment) trajectory() []float64 {
+	out := make([]float64, s.trajLen)
+	if s.trajLen == 0 {
+		return out
+	}
+	start := s.trajHead - s.trajLen
+	if start < 0 {
+		start += cap(s.traj)
+	}
+	for i := 0; i < s.trajLen; i++ {
+		out[i] = s.traj[(start+i)%cap(s.traj)]
+	}
+	return out
+}
