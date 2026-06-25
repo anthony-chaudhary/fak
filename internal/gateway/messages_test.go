@@ -130,6 +130,106 @@ func TestAnthropicMessagesAllDeniedNote(t *testing.T) {
 	}
 }
 
+// parrotNote renders the assistant turn Claude Code replays when the model has ECHOED
+// fak's refusal note back as its own text — the empirically-observed loop: a small
+// local model, told a tool was refused, stops proposing tools and parrots the
+// `[fak] refused …` line every turn until the harness turn-cap, "succeeding" with an
+// empty result. The parrot guard reads exactly this trailing run of [fak] echoes.
+func parrotNote() string {
+	return `{"role":"assistant","content":[{"type":"text","text":"[fak] refused 1 tool call(s): Write (DEFAULT_DENY/TERMINAL). Do not re-propose a refused call unchanged; choose an allowed alternative."}]}`
+}
+
+// verbatimRefusal renders the assistant turn for the SECOND observed loop: after the
+// echo loop is broken, a small model often settles into repeating the SAME graceful
+// refusal prose verbatim every turn. A trailing run of these is also degenerate.
+func verbatimRefusal() string {
+	return `{"role":"assistant","content":[{"type":"text","text":"I'm sorry, but I can't complete this request due to a security policy that prevents the use of certain tools."}]}`
+}
+
+// A single trailing degenerate turn is BELOW loopBreakThreshold: not yet a loop, so the
+// guard must NOT short-circuit — the planner still runs and the real turn proceeds.
+func TestAnthropicMessagesRepetitionBelowThresholdNoSteer(t *testing.T) {
+	srv := newTestServer(t)
+	srv.planner = stubPlanner{comp: &agent.Completion{
+		Message:      agent.Message{Role: agent.RoleAssistant, Content: "42"},
+		FinishReason: "stop",
+	}}
+	ts := httptest.NewServer(srv.Handler())
+	defer ts.Close()
+
+	body := json.RawMessage(`{"messages":[{"role":"user","content":"go"},` + parrotNote() + `,{"role":"user","content":"again"}]}`)
+	var resp anthropicMessageResponse
+	postJSON(t, ts.URL+"/v1/messages", body, &resp)
+	joined := ""
+	for _, b := range resp.Content {
+		if b.Type == "text" {
+			joined += b.Text
+		}
+	}
+	if !strings.Contains(joined, "42") {
+		t.Errorf("below-threshold tail must let the real turn through, got %q", joined)
+	}
+	if strings.Contains(joined, "repeating myself") {
+		t.Errorf("must not steer below threshold: %q", joined)
+	}
+}
+
+// Once a trailing `[fak]`-echo streak reaches loopBreakThreshold, the guard short-circuits
+// BEFORE the planner with a terminal steer turn (plain text, never [fak]-prefixed).
+func TestAnthropicMessagesParrotLoopSteers(t *testing.T) {
+	srv := newTestServer(t)
+	// A planner that, if reached, would itself parrot — proving the guard fired PRE-planner.
+	srv.planner = stubPlanner{comp: &agent.Completion{
+		Message:      agent.Message{Role: agent.RoleAssistant, Content: "[fak] refused 1 tool call(s): Write (DEFAULT_DENY/TERMINAL)."},
+		FinishReason: "stop",
+	}}
+	ts := httptest.NewServer(srv.Handler())
+	defer ts.Close()
+
+	body := json.RawMessage(`{"messages":[{"role":"user","content":"go"},` +
+		parrotNote() + `,{"role":"user","content":"again"},` +
+		parrotNote() + `,{"role":"user","content":"again"}]}`)
+	var resp anthropicMessageResponse
+	postJSON(t, ts.URL+"/v1/messages", body, &resp)
+	if resp.StopReason != "end_turn" {
+		t.Errorf("repetition steer must end_turn, got %q", resp.StopReason)
+	}
+	if len(resp.Content) != 1 || resp.Content[0].Type != "text" {
+		t.Fatalf("steer must be a single text block, got %+v", resp.Content)
+	}
+	steer := resp.Content[0].Text
+	if strings.Contains(steer, "[fak]") {
+		t.Errorf("steer must NOT be prefixed with [fak] (would re-feed the echo detector): %q", steer)
+	}
+	if !strings.Contains(steer, "repeating myself") {
+		t.Errorf("expected the corrective steer turn, got %q", steer)
+	}
+}
+
+// The SECOND loop class: the model repeating its OWN identical prose (not a [fak] echo)
+// verbatim each turn. Two identical trailing refusals → at threshold → steer.
+func TestAnthropicMessagesVerbatimRepeatSteers(t *testing.T) {
+	srv := newTestServer(t)
+	srv.planner = stubPlanner{comp: &agent.Completion{
+		Message:      agent.Message{Role: agent.RoleAssistant, Content: "I'm sorry, but I can't complete this request due to a security policy that prevents the use of certain tools."},
+		FinishReason: "stop",
+	}}
+	ts := httptest.NewServer(srv.Handler())
+	defer ts.Close()
+
+	body := json.RawMessage(`{"messages":[{"role":"user","content":"go"},` +
+		verbatimRefusal() + `,{"role":"user","content":"again"},` +
+		verbatimRefusal() + `,{"role":"user","content":"again"}]}`)
+	var resp anthropicMessageResponse
+	postJSON(t, ts.URL+"/v1/messages", body, &resp)
+	if resp.StopReason != "end_turn" {
+		t.Errorf("verbatim-repeat steer must end_turn, got %q", resp.StopReason)
+	}
+	if len(resp.Content) != 1 || !strings.Contains(resp.Content[0].Text, "repeating myself") {
+		t.Errorf("expected the corrective steer turn, got %+v", resp.Content)
+	}
+}
+
 // A clean all-allow turn must NOT inject an in-band [fak] note (that channel is
 // reserved for drops/repairs the agent must react to), while the structured `fak`
 // extension still records the allow for fak-aware tooling — the same asymmetry the

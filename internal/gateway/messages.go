@@ -153,6 +153,18 @@ func (s *Server) handleAnthropicMessages(w http.ResponseWriter, r *http.Request)
 	upstreamKey := s.anthropicUpstreamCredential(r)
 	upstreamBeta := r.Header.Get("anthropic-beta")
 
+	// Repetition-loop guard (runs on EVERY wire, before any planner round-trip). A small
+	// local model, after a tool refusal, often stops making progress and loops — echoing
+	// fak's `[fak] refused …` note back as its own text, or repeating the same refusal
+	// prose verbatim — every turn to the harness turn-cap with an empty result. When the
+	// replayed history shows an unbroken degenerate tail, short-circuit with a terminal
+	// steer turn that breaks the cycle deterministically (no model call). The kernel still
+	// adjudicated every real call that got us here; this only stops the dead loop.
+	if steer := repetitionLoopSteer(req.Messages, "", s.modelOr(req.Model)); steer != nil {
+		s.writeAnthropicTurn(w, req.Stream, steer)
+		return
+	}
+
 	if req.Stream {
 		// When fronting the REAL Anthropic API, relay a TRUE live token stream so the
 		// client's first token tracks the model (and the prompt-cache hit's fast prefill
@@ -189,6 +201,56 @@ func (s *Server) handleAnthropicMessages(w http.ResponseWriter, r *http.Request)
 		Content: turn.Blocks, StopReason: turn.Stop, StopSequence: nil, Usage: turn.Usage,
 		Fak: fakExtFrom(turn.Adjs, turn.ResultAdmissions),
 	})
+}
+
+// modelOr returns the client-requested model, or the gateway's configured model when
+// the request omitted one (Anthropic reflects the requested id; we fall back so a
+// synthesized turn always names a model).
+func (s *Server) modelOr(reqModel string) string {
+	if reqModel != "" {
+		return reqModel
+	}
+	return s.model
+}
+
+// writeAnthropicTurn renders a fully-formed turn to the wire as either a buffered JSON
+// response or a synthesized SSE sequence, matching the request's stream flag. Used by
+// the short-circuit guards (e.g. parrotLoopSteer) that produce a complete turn without
+// running the planner, so they don't each duplicate the stream/buffered plumbing.
+func (s *Server) writeAnthropicTurn(w http.ResponseWriter, stream bool, turn *anthropicTurn) {
+	if !stream {
+		writeJSON(w, http.StatusOK, anthropicMessageResponse{
+			ID: turn.ID, Type: "message", Role: "assistant", Model: turn.Model,
+			Content: turn.Blocks, StopReason: turn.Stop, StopSequence: nil, Usage: turn.Usage,
+			Fak: fakExtFrom(turn.Adjs, turn.ResultAdmissions),
+		})
+		return
+	}
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		// No flush support: fall back to the buffered shape rather than failing.
+		writeJSON(w, http.StatusOK, anthropicMessageResponse{
+			ID: turn.ID, Type: "message", Role: "assistant", Model: turn.Model,
+			Content: turn.Blocks, StopReason: turn.Stop, StopSequence: nil, Usage: turn.Usage,
+		})
+		return
+	}
+	h := w.Header()
+	h.Set("Content-Type", "text/event-stream")
+	h.Set("Cache-Control", "no-cache")
+	h.Set("Connection", "keep-alive")
+	h.Set("X-Accel-Buffering", "no")
+	w.WriteHeader(http.StatusOK)
+	send := anthropicSSESender(w, flusher)
+	send("message_start", map[string]any{
+		"type": "message_start",
+		"message": map[string]any{
+			"id": turn.ID, "type": "message", "role": "assistant", "model": turn.Model,
+			"content": []any{}, "stop_reason": nil, "stop_sequence": nil,
+			"usage": map[string]int{"input_tokens": turn.Usage.InputTokens, "output_tokens": 0},
+		},
+	})
+	streamAnthropicBlocks(send, turn.Blocks, turn.Stop, turn.Usage)
 }
 
 func (s *Server) completeAnthropicTurn(ctx context.Context, req *agent.AnthropicMessagesRequest, reqTrace, id, model, upstreamKey, upstreamBeta string) (*anthropicTurn, error) {
@@ -255,8 +317,7 @@ func (s *Server) completeAnthropicTurn(ctx context.Context, req *agent.Anthropic
 	// no surviving prose and no tool_use block, so the note becomes the whole turn
 	// (the previous denySummary behavior, now generalized to partial denies too).
 	if dropped > 0 || anyRepaired(adjs) {
-		note := adjudicationNote(adjs)
-		if note != "" {
+		if note := adjudicationNote(adjs); note != "" {
 			blocks = prependTextBlock(blocks, note)
 		}
 	}
@@ -331,6 +392,86 @@ func anyRepaired(adjs []ToolAdjudication) bool {
 		}
 	}
 	return false
+}
+
+// loopBreakThreshold is how long a degenerate tail of assistant turns must grow before
+// the gateway short-circuits the loop. A capable model never repeats itself verbatim or
+// echoes a kernel notice; a small local model fronted by the kernel often does exactly
+// that — turn after turn, with no new tool call and no progress — until the harness
+// turn-cap ends the session with an empty result. At threshold=2 the third such
+// degenerate turn trips the break, reclaiming the rest of the turn budget.
+const loopBreakThreshold = 2
+
+// degenerateStreak counts the trailing run of NON-PROGRESSING assistant turns in the
+// replayed history. A turn is degenerate when it is text-only (no tool call survived to
+// drive work forward) AND it is either:
+//
+//   - a `[fak]` echo: text the KERNEL originates (adjudicationNote / resultAdmissionNote)
+//     that a model should never produce — the model parroting the refusal note back; or
+//   - a verbatim repeat of the previous assistant turn — the model emitting the SAME
+//     prose every turn (e.g. the same graceful "I can't, policy blocks it" refusal).
+//
+// Counted from the END so a single stale line in a long healthy transcript never trips
+// it; only an unbroken degenerate tail does. A turn that carries a tool_use, or differs
+// from its predecessor and is not a `[fak]` echo, is real progress and breaks the run.
+// Stateless: it reads exactly what Claude Code replayed.
+func degenerateStreak(messages []agent.Message) int {
+	// Collect the trailing run of text-only assistant turns (most recent first). A turn
+	// carrying a tool_use is forward progress and ends the run.
+	var tail []string
+	for i := len(messages) - 1; i >= 0; i-- {
+		m := messages[i]
+		if m.Role != agent.RoleAssistant {
+			continue // user / tool turns interleave; skip without breaking the run
+		}
+		if len(m.ToolCalls) > 0 {
+			break
+		}
+		tail = append(tail, m.Content)
+	}
+	// Count, from the most recent backward, how many turns are degenerate: a `[fak]`
+	// echo (kernel-originated text the model should never produce), or a verbatim repeat
+	// of the adjacent more-recent assistant turn (the model emitting the same prose).
+	n := 0
+	for i, c := range tail {
+		isEcho := strings.Contains(c, "[fak]")
+		isRepeat := c != "" && ((i > 0 && c == tail[i-1]) || (i+1 < len(tail) && c == tail[i+1]))
+		if isEcho || isRepeat {
+			n++
+			continue
+		}
+		break
+	}
+	return n
+}
+
+// repetitionLoopSteer returns a terminal corrective turn when the model is stuck in a
+// degenerate tail (degenerateStreak ≥ loopBreakThreshold) — echoing the kernel's `[fak]`
+// notes or repeating the same prose with no progress — or nil otherwise. The corrective
+// turn is a single plain-text assistant message, deliberately NOT prefixed with `[fak]`
+// (so it can't itself feed the echo detector) and distinct from any repeated line, that
+// ends the turn (end_turn). Returned BEFORE the planner runs, it breaks the loop
+// deterministically and cheaply (no model round-trip) and Claude Code reads a normal
+// terminal assistant turn so its agent loop settles instead of grinding to the turn-cap.
+func repetitionLoopSteer(messages []agent.Message, id, model string) *anthropicTurn {
+	if degenerateStreak(messages) < loopBreakThreshold {
+		return nil
+	}
+	const steer = "I was repeating myself without making progress: a tool I tried is " +
+		"blocked by the security policy and cannot be used. Stopping that loop. If the " +
+		"request needs the blocked tool I cannot complete it; otherwise tell me what to " +
+		"answer and I will respond directly."
+	if id == "" {
+		id = "msg_fak_" + itoa(uint64(time.Now().UnixNano()))
+	}
+	return &anthropicTurn{
+		ID:    id,
+		Model: model,
+		Blocks: []agent.AnthropicBlockOut{
+			{Type: "text", Text: steer},
+		},
+		Stop: "end_turn",
+	}
 }
 
 // prependTextBlock inserts an in-band [fak] note as the FIRST content block so a
