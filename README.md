@@ -4,7 +4,7 @@
 
 ## What It Is
 
-`fak` is one Go binary you put in front of the AI agent you already run — Claude
+`fak` is one Go binary you put in front of the AI agent you already run: Claude
 Code, Codex, Cursor, or any OpenAI / Anthropic / MCP client. You keep your model,
 your IDE, and your tools. You point one base URL at `fak`, and it gives you a handle
 on the parts of a real agent loop that get expensive or go wrong:
@@ -13,23 +13,28 @@ on the parts of a real agent loop that get expensive or go wrong:
   transcript every turn. `fak` sheds the old turns while keeping the provider's
   prompt-cache prefix byte-identical, so the discount survives instead of breaking.
 - **The right model per call.** Send an easy read to a cheap model and a write-shaped
-  call to a careful one — chosen per tool call, not per whole request.
+  call to a careful one, chosen per tool call rather than per whole request.
 - **Fewer wasted turns.** A repeated read served locally, a malformed call repaired in
   place, a dead-end branch refused before the agent spends a turn on it.
-- **A trail you can audit.** Every decision is a plain verdict — `ALLOW`, `DENY`,
-  `TRANSFORM`, or `QUARANTINE` — in JSON logs, an optional hash-chained journal, and
-  Prometheus metrics.
+- **A trail you can audit.** Every decision is a plain verdict: `ALLOW`, `DENY`,
+  `TRANSFORM`, or `QUARANTINE`. It lands in JSON logs, an optional hash-chained
+  journal, and Prometheus metrics.
 
-> TL;DR: Put `fak` in front of the agent you already run. It makes long sessions
+> **fak in one line:** Put `fak` in front of the agent you already run. It makes long sessions
 > cheaper, routes each call to the right model, keeps unsafe tool results out of
 > context, and records every verdict. One binary, no rewrite, no key to start.
 
-It does this by sitting on the tool-call path as a kernel: the model *proposes* a
-call; `fak` decides whether that call exists, whether its arguments are allowed,
+It does this by sitting on the tool-call path as a kernel. The model *proposes* a
+call. `fak` decides whether that call exists, whether its arguments are allowed,
 whether the result may enter context, and what gets reused. The same boundary that
-saves you tokens is also where a dangerous call gets refused — which is why teams who
+saves you tokens is also where a dangerous call gets refused. That is why teams who
 need a hard security floor reach for it too (see
 [For security teams](#for-security-teams)).
+
+```text
+agent --> proposed tool call --> fak kernel --> allowed tool / denied call
+tool  --> raw result          --> fak kernel --> admitted context / quarantine
+```
 
 ## Start Here
 
@@ -79,32 +84,23 @@ See [docs/integrations/claude.md](docs/integrations/claude.md).
 
 ### Long sessions: shed history, keep the cache hit
 
-The same wrap is also where a 100k+-token session stops getting expensive. Add one
-flag and `fak` shrinks the OLD turns of a growing Claude Code conversation while
-keeping the `cache_control` prefix **byte-identical**, so the provider's prompt-cache
-hit survives instead of breaking:
+A long session re-sends its whole transcript every turn, so a 100k-token conversation
+gets expensive fast. The same wrap fixes that with one flag:
 
 ```bash
 fak guard --compact-history-budget 8000 -- claude
 ```
 
-Why it matters: a long session re-sends the whole transcript every turn, and the
-provider only discounts it while the cached prefix stays byte-for-byte the same. The
-naive fix — summarize and re-serialize — reorders the body and *busts* the cache, so
-a long session costs **more**. `fak` instead drops the un-cacheable middle turns by
-splicing on the original bytes (a memcpy, never a re-marshal), and falls back to doing
-nothing on any ambiguity, so it never breaks a turn.
+`fak` drops the old middle turns while copying the provider's cache prefix through
+byte-for-byte, so the prompt-cache discount survives instead of breaking. The obvious
+fix, summarizing the old turns, rewrites the prompt and busts the cache, so it costs
+*more*. On any doubt `fak` forwards the original prompt unchanged, so it never breaks a
+turn. It guarantees the prefix is byte-identical, then relays the provider's own
+`cache_read` number rather than claiming the hit.
 
-It is honest about the line between what it controls and what it only observes. `fak`
-*guarantees* one thing: the prefix it ships is byte-identical to what you sent (it refuses
-to ship otherwise). That makes the cache hit *possible* — it does not *force* it. Whether the
-provider actually reuses the cache is the provider's call, and `fak` relays its number rather
-than claiming it: `/metrics` shows `fak_gateway_compaction_*` with the tokens `fak` shed
-(what it sent) next to the provider's reported `cache_read` (what came back), and the
-`fak guard` exit line summarizes both. If that `cache_read` is low while the prefix was
-byte-identical, the miss is provider-side — a cache TTL expiry, an eviction, or your client
-moving its own breakpoint — not something `fak` broke. You see it either way instead of
-silently overpaying. Tracking: [#745](https://github.com/anthony-chaudhary/fak/issues/745).
+How and why, with the metrics:
+[Long sessions: keep the cache hit](docs/explainers/long-sessions-keep-the-cache-hit.md).
+Tracking: [#745](https://github.com/anthony-chaudhary/fak/issues/745).
 
 ### Codex, Cursor, MCP hosts
 
@@ -222,41 +218,29 @@ Read [POLICY.md](POLICY.md), [docs/fak/security.md](docs/fak/security.md), and
 
 ## vCache: Provider Cache As A Budget Signal
 
-Provider prompt caches are useful, but they are not memory you control. You cannot
-usually ask a provider to evict span X or prove prefix Y is resident. You get
-telemetry after the request.
-
-`fak vcache` treats that correctly:
-
-- A cache hit is a realized rebate, never a correctness dependency.
-- The full prompt must always be resendable.
-- Plans are proven or refuted from arithmetic and observed usage counters.
-- Secrets and regulated content are refused before cache economics apply.
-
-Useful commands:
+A provider's prompt cache is not memory you control. You cannot ask it to evict a span
+or prove a prefix is resident. You just get telemetry after the request. So `fak vcache`
+treats a cache hit as a realized rebate, never something the answer depends on. It
+proves or refutes each saving from the provider's own usage counters.
 
 ```bash
 go run ./cmd/fak vcache status
 go run ./cmd/fak vcache prove
-go run ./cmd/fak vcache prove-telemetry --file experiments/agent-live/vcache-claude-prefix-probe-2026-06-25.jsonl
-go run ./cmd/fak vcache prove-telemetry --file experiments/agent-live/vcache-codex-token-count-proof-2026-06-25.jsonl --json
 ```
 
-Current evidence:
+Evidence from two live traces:
 
 - Claude Code prefix probe: **13,141.5 input-token equivalents saved** over four
-  sibling turns, **4.73%**, with the first positive request at 4.
+  sibling turns, **4.73%**.
 - Codex/OpenAI session telemetry: **9,147,340.8 token equivalents saved** over
   68 token-count events, **85.98%**.
 
-Those prove provider prompt-cache economics on those traces. Causality is
-intentionally narrower: the traces show realized provider-cache rebates, while
-`fak` supplies the accounting and control plane. The product focus is to make
-prefix stability, cache routing, and cache accounting explicit enough that `fak`
-can eventually cause and verify more of it.
-
-Read [docs/notes/VCACHE-VIRTUAL-API-CACHE-2026-06-24.md](docs/notes/VCACHE-VIRTUAL-API-CACHE-2026-06-24.md)
-and [experiments/agent-live/VCACHE-CODEX-OPENAI-PROBE-2026-06-25.md](experiments/agent-live/VCACHE-CODEX-OPENAI-PROBE-2026-06-25.md).
+Those are provider-cache accounting proofs on those traces: `fak` supplies the
+accounting and control plane. The design contract, the full command set, and the
+causality fences are on the
+[vCache page](docs/notes/VCACHE-VIRTUAL-API-CACHE-2026-06-24.md); the Codex/OpenAI
+probe is written up in
+[the probe note](experiments/agent-live/VCACHE-CODEX-OPENAI-PROBE-2026-06-25.md).
 
 ## Model Routing And Router Fusion
 
@@ -292,9 +276,9 @@ The numbers worth remembering:
 
 - `guarddemo -selfcheck`: frozen attack traces reproduce zero breaches behind
   `fak`.
-- WebVoyager geometry model: 8-worker fleet prefill is **9.7x less work than the
-  naive re-prefill floor** and **1.10x less than tuned per-agent KV**. This is
-  modeled prefill-token work, separate from wall-clock.
+- WebVoyager geometry model: 8-worker fleet prefill is **1.10x less work than tuned
+  per-agent KV** (and 9.7x less than the naive re-prefill floor). This is modeled
+  prefill-token work, separate from wall-clock.
 - 50-turn x 5-agent Qwen2.5-1.5B authority row: **4.1x vs tuned warm-cache**.
   Larger numbers are fenced as vs-naive.
 - vCache telemetry proofs above are provider-cache accounting proofs, separate
