@@ -230,4 +230,16 @@ func TestInKernelReuseConcurrentNoRace(t *testing.T) {
 		}(g)
 	}
 	wg.Wait()
+
+	// Post-contention the shared tree must be coherent, not just race-free: the
+	// common system prefix every goroutine generated is resident, and a probe
+	// returns a match length bounded by the prefix it was asked about (the mutex
+	// serialized every tree access, so no torn/over-long match survived).
+	matched := p.cachedPrefixLen(sys)
+	if matched <= 0 {
+		t.Fatalf("system prefix not resident after concurrent turns: cachedPrefixLen=%d", matched)
+	}
+	if matched > len(sys) {
+		t.Fatalf("match length %d exceeds probed prefix len %d (torn shared-tree state)", matched, len(sys))
+	}
 }

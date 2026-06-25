@@ -914,8 +914,37 @@ func TestParallelResidualDoesNotRequireSeparateMLPNorm(t *testing.T) {
 	m := NewSynthetic(cfg)
 	delete(m.manifest, layerName(0, "post_attention_layernorm.weight"))
 
-	_ = m.Forward([]int{1, 2, 3})
-	_ = m.NewSession().Prefill([]int{1, 2, 3})
+	ids := []int{1, 2, 3}
+	act := m.Forward(ids)
+	// Parallel residual must still produce full-shape, finite logits without the
+	// separate MLP norm weight (it shares the input norm) -- not merely "no panic".
+	if act.Seq != len(ids) {
+		t.Fatalf("Forward Seq = %d, want %d", act.Seq, len(ids))
+	}
+	if len(act.Logits) != len(ids) {
+		t.Fatalf("Forward returned %d logit rows, want %d", len(act.Logits), len(ids))
+	}
+	for p, row := range act.Logits {
+		if len(row) != cfg.VocabSize {
+			t.Fatalf("Forward logits[%d] len = %d, want vocab %d", p, len(row), cfg.VocabSize)
+		}
+		for v, x := range row {
+			if math.IsNaN(float64(x)) || math.IsInf(float64(x), 0) {
+				t.Fatalf("Forward logits[%d][%d] not finite: %v", p, v, x)
+			}
+		}
+	}
+
+	// The KV-cached Prefill path is the same model by another route: its
+	// last-position logits must match Forward's last row (the missing norm does
+	// not diverge the two paths).
+	pf := m.NewSession().Prefill(ids)
+	if len(pf) != cfg.VocabSize {
+		t.Fatalf("Prefill logits len = %d, want vocab %d", len(pf), cfg.VocabSize)
+	}
+	if d := maxAbsDelta(pf, act.Logits[len(ids)-1]); d > 1e-4 {
+		t.Fatalf("Prefill last-row diverges from Forward by %g (>1e-4)", d)
+	}
 }
 
 // TestBlockTopologyString keeps the enum's String() honest (used in test labels and
