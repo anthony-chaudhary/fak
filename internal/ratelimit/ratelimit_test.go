@@ -213,7 +213,7 @@ func TestLimiterDenyCarriesRetryAfter(t *testing.T) {
 	// advisory constant (the limiter has no rate window to derive a duration from).
 	r2 := New()
 	r2.SetLimit(Limit{MaxCalls: 1}, KeyPerTrace)
-	r2.Adjudicate(ctx, call("t2", "x", "{}")) // consume the one-call quota
+	r2.Adjudicate(ctx, call("t2", "x", "{}"))       // consume the one-call quota
 	v2 := r2.Adjudicate(ctx, call("t2", "x", "{}")) // over cap
 	mustRateLimited(t, v2, "over-cap call with default retry-after")
 	if ra, err := time.ParseDuration(v2.Meta["retry_after"]); err != nil || ra != defaultRetryAfter {
