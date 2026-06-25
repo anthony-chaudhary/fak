@@ -51,6 +51,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import shlex
 import subprocess
 import sys
 from pathlib import Path
@@ -79,7 +80,7 @@ SCORECARDS: list[dict[str, str]] = [
     {"key": "slop", "debt": "slop_debt", "script": "code_slop_scorecard.py", "label": "code-slop"},
     {"key": "steer", "debt": "steerability_debt", "script": "steerability_scorecard.py", "label": "steerability"},
     {"key": "conflation", "debt": "conflation_debt", "script": "conflation_scorecard.py", "label": "conflation"},
-    {"key": "guard_rsi", "debt": "guard_rsi_debt", "script": "guard_rsi_scorecard.py", "label": "guard-rsi"},
+    {"key": "guard_rsi", "debt": "guard_rsi_debt", "script": "", "cmd": "go run ./cmd/fak guard-rsi-scorecard --json", "label": "guard-rsi"},
 ]
 
 
@@ -343,13 +344,18 @@ def baseline_doc(payload: dict[str, Any]) -> dict[str, Any]:
 
 # --- live runner -----------------------------------------------------------
 
-def run_scorecard(root: Path, script: str, *, python: str, timeout: int) -> tuple[dict[str, Any] | None, str]:
-    script_path = root / "tools" / script
-    if not script_path.exists():
-        return None, f"missing scorecard: tools/{script}"
+def run_scorecard(root: Path, card: dict[str, str] | str, *, python: str, timeout: int) -> tuple[dict[str, Any] | None, str]:
+    if isinstance(card, dict) and card.get("cmd"):
+        argv = shlex.split(card["cmd"])
+    else:
+        script = card["script"] if isinstance(card, dict) else card
+        script_path = root / "tools" / script
+        if not script_path.exists():
+            return None, f"missing scorecard: tools/{script}"
+        argv = [python, str(script_path), "--json"]
     try:
         proc = subprocess.run(
-            [python, str(script_path), "--json"],
+            argv,
             cwd=str(root), capture_output=True, text=True,
             encoding="utf-8", errors="replace", timeout=timeout,
         )
@@ -368,7 +374,7 @@ def collect(root: Path, *, python: str = "", timeout: int = 120) -> list[dict[st
     python = python or sys.executable
     metrics: list[dict[str, Any]] = []
     for card in SCORECARDS:
-        payload, error = run_scorecard(root, card["script"], python=python, timeout=timeout)
+        payload, error = run_scorecard(root, card, python=python, timeout=timeout)
         metrics.append(metric_from_payload(card, payload, error))
     return metrics
 

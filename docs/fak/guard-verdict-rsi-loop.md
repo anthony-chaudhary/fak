@@ -16,7 +16,7 @@ them can close on a normal machine:
 | loop | tool | signal | closes on a normal box? |
 |---|---|---|---|
 | **latency** | `tools/guard_hop_rsi.py` (#733) | guard-hop overhead (TTFB delta) | **No** — its keep/revert rung needs a live `fak serve` + a direct mock on one box (#734). It runs in plan mode (every candidate `PENDING_MEASUREMENT`) and honestly fences that gate rather than fabricating a wall-clock. The journal holds *verdicts*, not latency, so latency is the wrong thing to read from it. |
-| **verdict** | `tools/guard_verdict_rsi.py` | verdict-quality of the real journal | **Yes** — it reads the real `guard-audit.jsonl`, scores the verdict distribution's honesty, and keeps a refinement only on a strict gain + an external witness. No hardware. |
+| **verdict** | `fak guard-verdict-rsi` | verdict-quality of the real journal | **Yes** — it reads the real `guard-audit.jsonl`, scores the verdict distribution's honesty, and keeps a refinement only on a strict gain + an external witness. No hardware. |
 
 This doc is about the verdict loop — the one that learns from our usage today.
 
@@ -81,12 +81,12 @@ fak audit verify .dispatch-runs/guard-audit/seed.jsonl   # the tamper-evident ch
 ## Usage
 
 ```bash
-python tools/guard_verdict_rsi.py fold                 # the verdict distribution + quality
-python tools/guard_verdict_rsi.py run                  # one iteration: propose -> replay -> keep/revert
-python tools/guard_verdict_rsi.py run --witness '{"ok":true,"suite":"go test ./... PASS"}'
-python tools/guard_verdict_rsi.py --check iter.json    # honesty gate over an emitted iteration
+go run ./cmd/fak guard-verdict-rsi fold                 # the verdict distribution + quality
+go run ./cmd/fak guard-verdict-rsi run                  # one iteration: propose -> replay -> keep/revert
+go run ./cmd/fak guard-verdict-rsi run --witness '{"ok":true,"suite":"go test ./... PASS"}'
+go run ./cmd/fak guard-verdict-rsi --check iter.json    # honesty gate over an emitted iteration
 ```
 
-The loop's maturity + realized value is scored by `tools/guard_rsi_scorecard.py` (the
+The loop's maturity + realized value is scored by `fak guard-rsi-scorecard` (the
 `guard_rsi_debt` member of the control-pane ratchet) and driven on a `/loop` cadence by the
 `guard-rsi-score` skill.

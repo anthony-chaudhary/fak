@@ -65,47 +65,48 @@ var tier = map[string]int{
 	"tracesink": 4, // imports agent/turnbench/registrations (tier 4) — tier forced to 4
 	"ablate":    4, // the N-arm self-ablation sweep: a bench sibling; imports bench(4)+registrations(4)+metrics(1), off the hot path.
 
-	"tokenizer":    1,
-	"answershape":  1, // pure degeneration/verbosity metric over text; stdlib-only, imports nothing internal.
-	"codelint":     1,
-	"polymodel":    1, // multi-model residency + serial-decode-lane + cache-led MTP accept core; stdlib-only, imports nothing internal.
-	"rulesynth":    3, // refusal-log rule synthesizer (#537): composes harvest/policy/adjudicator/shipgate to propose+gate a new structural rule as a reviewable diff; imports tier-2 mechanisms, never the hot path.
-	"residency":    2,
-	"ctxresidency": 3,
-	"ctxplan":      1, // context planner: cost-based, forecast-driven O(1) view over a lossless history store; stdlib-only, imports nothing internal.
-	"session":      1, // per-session DRIVE state: a TraceID-keyed, bounded-LRU, live-mutable control-state value (run-state/budget/priority/pace), the structural twin of ifc.Ledger widened past one value; stdlib-only, imports nothing internal.
-	"wirescreen":   2, // local-model-on-the-wire proposer spine: registers an abi.SemanticScreen that ctxmmu consults after its regex floor (#569) + the ScreenDigest useful-page-out (#570) + the pre-send redactor (#572); imports only abi by default — the -tags fakwiremodel model arm (#569) adds model/tokenizer/ggufload (all tier-1).
-	"advmodel":     2,
-	"modelroute":   1, // per-aspect + ensemble model-routing policy spine (Route + Combine); pure, stdlib-only, imports nothing internal.
-	"simhash":      1, // reference vector-similarity primitive (embed/cosine/top-k); the observability layer's near-duplicate / outlier-query substrate. Deterministic, stdlib-only, imports nothing internal.
-	"trajectory":   3, // trajectory data plane: folds the abi event stream into per-trace Turn rows + JSONL export; an abi.Emitter that optionally stamps a simhash query embedding. Imports abi+simhash.
-	"trajhook":     3, // pluggable trajectory scorer/tap seam (the "trivial skill does gardening" enabler): app code registers Scorers over Turn rows without a core edit. Imports trajectory+simhash.
-	"sessionimage": 4, // portable, model-agnostic SESSION image: composes recall(3)+session(1)+trajectory(3)+ctxplan(1) into one versioned, sha256-integrity bundle + a .faksession tar (dump/pack/unpack/rehydrate across hosts/users/VMs/model changes). Integrator: imports tier-3 composers, off the hot path.
-	"a2achan":      2, // in-kernel agent-to-agent message channel: a process-global, capability-floored, Ref-backed mailbox (Send/Recv adjudicated by a registered a2aGate + a2aIngress; Taint/Scope enforced). Mechanism: imports only abi, off the hot path.
-	"region":       2, // typed one-sided shared Ref window: adjudicated Put/Get/Accumulate over abi.Resolver with ScopeFleet ceiling and vDSO coherence bumps.
-	"snapshot":     3, // uniform DUMP/RESTORE seam over any primitive (turn/tool/session/fleet/rsi): a sha256-integrity envelope (Marshal/Parse over any body) + a ladder registry + typed codecs for trace(trajectory) and fleet(session.Table). Imports session(1)+trajectory(3); off the hot path.
-	"rungobs":      2, // passive rung-decision distribution counter: an abi.Emitter (subscribed to EvDecide/EvDeny/EvVDSOHit) that re-folds each call's chain off the hot path via kernel.FoldExplain and bumps a per-(rung,kind,reason) histogram. Mechanism: imports kernel(2)+abi(0); runs synchronously in emit but adds 0 adjudication rungs and never touches the verdict or Counters.
-	"sharedtask":   2, // in-memory collaborative task-record fold: user patches, conflicts, held verdicts, event rows, scoped views, and a2achan live subscriptions. Mechanism, off the hot path.
-	"vcachegov":    2, // vCache M5 Governor (#720): the steady-state policy over the vCache warm set — pin/lazy/evict (§5.4), rate-limit warm budget (§5.5), cross-shard affinity routing + rehash/burst guards (§9/D3), and the Law-D4 secret classifier. Pure decision layer: imports cachemeta(1)+stdlib, off the hot path (NOT registered; M1–M3 wire the live loop).
-	"vcachechain":  2, // vCache M4 chains & recall (#719): prefix DAG + topological replay (send-one-then-fan) + 20-block breakpoints + the §11.0 cost-gated rebuild (refuses single-unit chain rebuilds, allows amortized fan-out). Pure decision layer: imports cachemeta(1)+vcachegov(2)+stdlib, off the hot path (NOT registered; gated OFF by default).
-	"vcachecal":    2, // vCache M1 observe & calibrate (#716): the warmth-belief estimator (§7) over cachemeta.Lifecycle at TierProvider + the offline probe harness that fits T/M_min/r (Law D2) + the LRU probe budget (observer-perturbs-state) + the Zipf-s concentration gate (§5.2) + the false-warm/false-cold prediction-error report. Pure decision layer: imports cachemeta(1)+stdlib only, off the hot path (NOT registered; observe-only — no warming in M1).
-	"vcachescore":  2, // vCache operator scorecard: composes vcachecal/vcachechain/vcachegov proof leaves into the offline 2x readiness gate and hot-anchor index artifact; pure off-path decision layer.
-	"vcachestar":   2, // vCache M2 star anchors (#717): canonicalizer-as-gate, wire-byte manifest keying, first-natural-request anchor warming, telemetry demotion, and uncached-first cost booking. Pure decision layer: imports cachemeta(1)+stdlib only, off the hot path.
-	"vcachewarm":   2, // vCache M3 dedicated warming (#718): Anthropic max_tokens:0 vs decode-1 decision gates, byte-identical prefix guard, send-one-then-fan barrier, and wasted-warm accounting. Pure decision layer, off the hot path, no live transport claim.
-	"sessionreset": 2, // budget-reset carryover builder: a pluggable Contributor registry that folds a drained session's transcript into the "human-like" seed a fresh session is re-armed with (durable facts via ctxmmu's shipped prior + task recap + warm-prefix descriptor via vcachechain + verbatim tail). Mechanism: imports ctxmmu(2)+vcachechain(2)+stdlib, NOT the wire agent type; off the hot path, registers nothing into the kernel.
-	"taskmgr":      1, // process-local task/step/resource/ETA snapshot fold; stdlib-only, off the hot path.
-	"dropin":       1,
-	"comm":         2,
-	"cohort":       2, // fail-closed cohort shrink/agree over comm.Group + modelroute vote fold.
-	"agenttopo":    2, // declared agent communication DAG over comm.Group + modelroute folds.
-	"promptmmu":    1, // cache-prefix-preserving inbound prompt MMU: splices tools[] past the last cache_control breakpoint; stdlib-only, off the hot path, no agent/gateway import (decode is a callback).
-	"loopmgr":      1, // durable loop-event JSONL ledger + read fold: SHA-256 hash chain over armed/fire/admit/start/heartbeat/end/witness/notify events. stdlib-only, off the hot path; schedules/spawns/notifies/authorizes nothing — those stay in the producers.
-	"pythongate":   2, // NEW-PYTHON-TOOL de-Python ratchet: scans tracked tools/*.py (git ls-files) against a frozen grandfathered baseline and refuses any new .py (NEW_PYTHON_TOOL). A tool-shaped witness leaf (reads tree, folds, emits offenses); shells to git off the hot path, imports nothing internal.
-	"gardenbundle": 3, // the garden bundle: a read-only fold-over-folds that runs the grandfathered Python gardening passes (scorecard control pane + fresh status, +loop-audit under --deep), reads each control-pane payload, and folds one schema/ok/verdict/finding envelope. Composer: composes other tools' outputs (shelling out off the hot path), imports nothing internal.
-	"savingsvector": 1, // pure four-account saving-decomposition lens over a turnbench Report's already-measured fields (local_cpu/gpu_prefill/context_window/wall_clock, labeled per axis); stdlib-only, imports nothing internal, off the hot path.
-	"swebenchsota":  2, // SWE-bench SOTA leaderboard snapshot: a tool-shaped leaf that extracts the embedded leaderboard JSON (regex+unescape), folds the per-group SOTA, and emits a versioned snapshot. net/http fetch off the hot path; imports nothing internal.
-	"dogfoodissues": 3, // dogfood-action-issues backlog bridge: folds a recent-feature dogfood report.json into scorecard ACTION items, derives a stable dedup key per item, renders the marker-stamped issue body, and (only on --live) composes the external `gh` CLI to create/update one issue per item. Composer: shells out off the hot path, imports nothing internal.
+	"tokenizer":       1,
+	"answershape":     1, // pure degeneration/verbosity metric over text; stdlib-only, imports nothing internal.
+	"codelint":        1,
+	"polymodel":       1, // multi-model residency + serial-decode-lane + cache-led MTP accept core; stdlib-only, imports nothing internal.
+	"rulesynth":       3, // refusal-log rule synthesizer (#537): composes harvest/policy/adjudicator/shipgate to propose+gate a new structural rule as a reviewable diff; imports tier-2 mechanisms, never the hot path.
+	"residency":       2,
+	"ctxresidency":    3,
+	"ctxplan":         1, // context planner: cost-based, forecast-driven O(1) view over a lossless history store; stdlib-only, imports nothing internal.
+	"session":         1, // per-session DRIVE state: a TraceID-keyed, bounded-LRU, live-mutable control-state value (run-state/budget/priority/pace), the structural twin of ifc.Ledger widened past one value; stdlib-only, imports nothing internal.
+	"wirescreen":      2, // local-model-on-the-wire proposer spine: registers an abi.SemanticScreen that ctxmmu consults after its regex floor (#569) + the ScreenDigest useful-page-out (#570) + the pre-send redactor (#572); imports only abi by default — the -tags fakwiremodel model arm (#569) adds model/tokenizer/ggufload (all tier-1).
+	"advmodel":        2,
+	"modelroute":      1, // per-aspect + ensemble model-routing policy spine (Route + Combine); pure, stdlib-only, imports nothing internal.
+	"simhash":         1, // reference vector-similarity primitive (embed/cosine/top-k); the observability layer's near-duplicate / outlier-query substrate. Deterministic, stdlib-only, imports nothing internal.
+	"trajectory":      3, // trajectory data plane: folds the abi event stream into per-trace Turn rows + JSONL export; an abi.Emitter that optionally stamps a simhash query embedding. Imports abi+simhash.
+	"trajhook":        3, // pluggable trajectory scorer/tap seam (the "trivial skill does gardening" enabler): app code registers Scorers over Turn rows without a core edit. Imports trajectory+simhash.
+	"sessionimage":    4, // portable, model-agnostic SESSION image: composes recall(3)+session(1)+trajectory(3)+ctxplan(1) into one versioned, sha256-integrity bundle + a .faksession tar (dump/pack/unpack/rehydrate across hosts/users/VMs/model changes). Integrator: imports tier-3 composers, off the hot path.
+	"a2achan":         2, // in-kernel agent-to-agent message channel: a process-global, capability-floored, Ref-backed mailbox (Send/Recv adjudicated by a registered a2aGate + a2aIngress; Taint/Scope enforced). Mechanism: imports only abi, off the hot path.
+	"region":          2, // typed one-sided shared Ref window: adjudicated Put/Get/Accumulate over abi.Resolver with ScopeFleet ceiling and vDSO coherence bumps.
+	"snapshot":        3, // uniform DUMP/RESTORE seam over any primitive (turn/tool/session/fleet/rsi): a sha256-integrity envelope (Marshal/Parse over any body) + a ladder registry + typed codecs for trace(trajectory) and fleet(session.Table). Imports session(1)+trajectory(3); off the hot path.
+	"rungobs":         2, // passive rung-decision distribution counter: an abi.Emitter (subscribed to EvDecide/EvDeny/EvVDSOHit) that re-folds each call's chain off the hot path via kernel.FoldExplain and bumps a per-(rung,kind,reason) histogram. Mechanism: imports kernel(2)+abi(0); runs synchronously in emit but adds 0 adjudication rungs and never touches the verdict or Counters.
+	"sharedtask":      2, // in-memory collaborative task-record fold: user patches, conflicts, held verdicts, event rows, scoped views, and a2achan live subscriptions. Mechanism, off the hot path.
+	"vcachegov":       2, // vCache M5 Governor (#720): the steady-state policy over the vCache warm set — pin/lazy/evict (§5.4), rate-limit warm budget (§5.5), cross-shard affinity routing + rehash/burst guards (§9/D3), and the Law-D4 secret classifier. Pure decision layer: imports cachemeta(1)+stdlib, off the hot path (NOT registered; M1–M3 wire the live loop).
+	"vcachechain":     2, // vCache M4 chains & recall (#719): prefix DAG + topological replay (send-one-then-fan) + 20-block breakpoints + the §11.0 cost-gated rebuild (refuses single-unit chain rebuilds, allows amortized fan-out). Pure decision layer: imports cachemeta(1)+vcachegov(2)+stdlib, off the hot path (NOT registered; gated OFF by default).
+	"vcachecal":       2, // vCache M1 observe & calibrate (#716): the warmth-belief estimator (§7) over cachemeta.Lifecycle at TierProvider + the offline probe harness that fits T/M_min/r (Law D2) + the LRU probe budget (observer-perturbs-state) + the Zipf-s concentration gate (§5.2) + the false-warm/false-cold prediction-error report. Pure decision layer: imports cachemeta(1)+stdlib only, off the hot path (NOT registered; observe-only — no warming in M1).
+	"vcachescore":     2, // vCache operator scorecard: composes vcachecal/vcachechain/vcachegov proof leaves into the offline 2x readiness gate and hot-anchor index artifact; pure off-path decision layer.
+	"vcachestar":      2, // vCache M2 star anchors (#717): canonicalizer-as-gate, wire-byte manifest keying, first-natural-request anchor warming, telemetry demotion, and uncached-first cost booking. Pure decision layer: imports cachemeta(1)+stdlib only, off the hot path.
+	"vcachewarm":      2, // vCache M3 dedicated warming (#718): Anthropic max_tokens:0 vs decode-1 decision gates, byte-identical prefix guard, send-one-then-fan barrier, and wasted-warm accounting. Pure decision layer, off the hot path, no live transport claim.
+	"sessionreset":    2, // budget-reset carryover builder: a pluggable Contributor registry that folds a drained session's transcript into the "human-like" seed a fresh session is re-armed with (durable facts via ctxmmu's shipped prior + task recap + warm-prefix descriptor via vcachechain + verbatim tail). Mechanism: imports ctxmmu(2)+vcachechain(2)+stdlib, NOT the wire agent type; off the hot path, registers nothing into the kernel.
+	"taskmgr":         1, // process-local task/step/resource/ETA snapshot fold; stdlib-only, off the hot path.
+	"dropin":          1,
+	"comm":            2,
+	"cohort":          2, // fail-closed cohort shrink/agree over comm.Group + modelroute vote fold.
+	"agenttopo":       2, // declared agent communication DAG over comm.Group + modelroute folds.
+	"promptmmu":       1, // cache-prefix-preserving inbound prompt MMU: splices tools[] past the last cache_control breakpoint; stdlib-only, off the hot path, no agent/gateway import (decode is a callback).
+	"loopmgr":         1, // durable loop-event JSONL ledger + read fold: SHA-256 hash chain over armed/fire/admit/start/heartbeat/end/witness/notify events. stdlib-only, off the hot path; schedules/spawns/notifies/authorizes nothing — those stay in the producers.
+	"pythongate":      2, // NEW-PYTHON-TOOL de-Python ratchet: scans tracked tools/*.py (git ls-files) against a frozen grandfathered baseline and refuses any new .py (NEW_PYTHON_TOOL). A tool-shaped witness leaf (reads tree, folds, emits offenses); shells to git off the hot path, imports nothing internal.
+	"gardenbundle":    3, // the garden bundle: a read-only fold-over-folds that runs the grandfathered Python gardening passes (scorecard control pane + fresh status, +loop-audit under --deep), reads each control-pane payload, and folds one schema/ok/verdict/finding envelope. Composer: composes other tools' outputs (shelling out off the hot path), imports nothing internal.
+	"savingsvector":   1, // pure four-account saving-decomposition lens over a turnbench Report's already-measured fields (local_cpu/gpu_prefill/context_window/wall_clock, labeled per axis); stdlib-only, imports nothing internal, off the hot path.
+	"swebenchsota":    2, // SWE-bench SOTA leaderboard snapshot: a tool-shaped leaf that extracts the embedded leaderboard JSON (regex+unescape), folds the per-group SOTA, and emits a versioned snapshot. net/http fetch off the hot path; imports nothing internal.
+	"dogfoodissues":   3, // dogfood-action-issues backlog bridge: folds a recent-feature dogfood report.json into scorecard ACTION items, derives a stable dedup key per item, renders the marker-stamped issue body, and (only on --live) composes the external `gh` CLI to create/update one issue per item. Composer: shells out off the hot path, imports nothing internal.
 	"horizonrecovery": 1, // pure budget-recovery (term r) grounding lens over a ctxplanbench report's already-measured real-transcript fields: surfaces the recovery ratio + its fault-rate FENCE co-located, structurally refuses to emit r/horizon_multiplier; stdlib-only, imports nothing internal, off the hot path.
+	"guardrsi":        1, // pure guard RSI journal fold + scorecard: reads guard-audit bytes, computes deterministic verdict quality, and validates keep/revert iterations; stdlib-only, off the hot path.
 	// new-leaf:tier — `python tools/new_leaf.py <name> --tier <name>` inserts the
 	// declaration for a generated leaf immediately ABOVE this line. Keep the marker last.
 }

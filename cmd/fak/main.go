@@ -135,6 +135,10 @@ func main() {
 		cmdAccounts(os.Args[2:])
 	case "garden":
 		cmdGarden(os.Args[2:])
+	case "guard-verdict-rsi":
+		cmdGuardVerdictRSI(os.Args[2:])
+	case "guard-rsi-scorecard":
+		cmdGuardRSIScorecard(os.Args[2:])
 	case "savings-vector":
 		cmdSavingsVector(os.Args[2:])
 	case "horizon-recovery":
@@ -362,6 +366,11 @@ func usage() {
                  (--audit FILE to relocate, --no-audit to turn off; replay with
                  'fak audit verify'). --dump-policy prints the built-in floor to edit;
                  --policy FILE enforces your own)
+  fak guard-verdict-rsi fold|run|--check
+                (the GUARD VERDICT RSI loop: folds the real guard decision journal,
+                 scores verdict-quality, and keeps only on rows + strict gain + witness)
+  fak guard-rsi-scorecard [--json] [--markdown] [--compare FILE]
+                (native control-pane payload for guard RSI loop maturity and realized value)
   fak audit     verify <journal.jsonl> | export <journal.jsonl>
                 (the AUDIT-TRAIL consumer: 'verify' re-reads a decision journal (the
                  'fak guard' / FAK_AUDIT_JOURNAL trail) and validates its hash chain

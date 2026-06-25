@@ -1,6 +1,6 @@
 ---
 name: guard-rsi-score
-description: One repeatable pass that keeps the RSI loop for `fak guard` actually CLOSING on our own usage - the real, hash-chained decision journal `fak guard` writes - instead of a plan-mode scaffold that never closes. Runs the guard-RSI scorecard (tools/guard_rsi_scorecard.py) over the two guard RSI loops (the hardware-gated LATENCY loop tools/guard_hop_rsi.py and the hardware-free VERDICT loop tools/guard_verdict_rsi.py), scores maturity (can it honestly close?) + realized value (does it run on our usage?), turns each HARD defect into a required affordance to ADD (a journal-grounded loop, a deterministic verdict-quality metric, a non-forgeable keep-bit, real adjudicated rows, control-pane membership, a paired honesty test), retires guard_rsi_debt worst-first, re-measures to PROVE the debt dropped, and commits only the guard-RSI lane by explicit path. The product-loop counterpart of rsi-maturity (which scores the generic internal/rsiloop engine). Use after a change to either guard RSI loop, after a guarded session adds journal rows, or on a /loop cadence to keep the guard learning from our workflow.
+description: One repeatable pass that keeps the RSI loop for `fak guard` actually CLOSING on our own usage - the real, hash-chained decision journal `fak guard` writes - instead of a plan-mode scaffold that never closes. Runs the native guard-RSI scorecard (`fak guard-rsi-scorecard`) over the two guard RSI loops (the hardware-gated LATENCY loop tools/guard_hop_rsi.py and the hardware-free VERDICT loop `fak guard-verdict-rsi`), scores maturity (can it honestly close?) + realized value (does it run on our usage?), turns each HARD defect into a required affordance to ADD (a journal-grounded loop, a deterministic verdict-quality metric, a non-forgeable keep-bit, real adjudicated rows, control-pane membership, a paired honesty test), retires guard_rsi_debt worst-first, re-measures to PROVE the debt dropped, and commits only the guard-RSI lane by explicit path. The product-loop counterpart of rsi-maturity (which scores the generic internal/rsiloop engine). Use after a change to either guard RSI loop, after a guarded session adds journal rows, or on a /loop cadence to keep the guard learning from our workflow.
 ---
 
 # guard-rsi-score - the RSI loop for `fak guard`, scored against reality
@@ -18,7 +18,7 @@ self-improver. Nothing scored the loop attached to the PRODUCT a user actually r
 a normal box.
 
 The fix is not to fake the latency number. It is the SIBLING loop the journal CAN close:
-the verdict-pattern loop (`tools/guard_verdict_rsi.py`), which reads the real journal, scores
+the verdict-pattern loop (`fak guard-verdict-rsi`), which reads the real journal, scores
 the verdict distribution's honesty, and keeps a refinement only on a strict gain + a witness
 it did not author. See [docs/fak/guard-verdict-rsi-loop.md](../../../docs/fak/guard-verdict-rsi-loop.md).
 
@@ -53,7 +53,7 @@ REALIZED - does it run on our own usage?
 
 ## The pass (the shared five-step loop)
 
-1. **Run it** - `python tools/guard_rsi_scorecard.py` (work-list), `--json` (payload),
+1. **Run it** - `fak guard-rsi-scorecard` (work-list), `--json` (payload),
    `--compare baseline.json` (prove the drop and the Nx verdict).
 2. **Retire guard_rsi_debt worst-first** - fix the heaviest HARD KPI by ADDING the real
    thing: the journal-grounded loop, the deterministic metric, the control-pane row, the

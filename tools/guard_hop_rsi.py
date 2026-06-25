@@ -48,7 +48,7 @@ def resolve_telemetry(root: Path | None = None) -> dict[str, Any]:
     ran by reading the same journals dogfood_coverage discovers. This closes the gap where
     `telemetry_source` named `.dispatch-runs/guard-audit/*.jsonl` but no code ever read it;
     the hardware-free verdict-quality RSI loop that DOES close on these rows is
-    tools/guard_verdict_rsi.py."""
+    fak guard-verdict-rsi."""
     root = root or _repo_root()
     pattern = ".dispatch-runs/guard-audit/*.jsonl"
     try:
@@ -60,13 +60,13 @@ def resolve_telemetry(root: Path | None = None) -> dict[str, Any]:
             spec.loader.exec_module(mod)
             rows, journals = mod.count_audit_rows(root)
             return {"source": pattern, "rows": rows, "journals": journals,
-                    "verdict_loop": "tools/guard_verdict_rsi.py",
+                    "verdict_loop": "fak guard-verdict-rsi",
                     "note": "the latency keep/revert rung is hardware-gated (#734); the "
                             "hardware-free verdict-quality loop closes on these rows"}
     except Exception:  # noqa: BLE001 - a missing sibling must not crash plan mode
         pass
     return {"source": pattern, "rows": 0, "journals": 0,
-            "verdict_loop": "tools/guard_verdict_rsi.py"}
+            "verdict_loop": "fak guard-verdict-rsi"}
 
 # The candidate levers the loop sweeps, worst-overhead-first. Each is a HYPOTHESIS about
 # where the guard-hop cost lives + the mechanism that would shrink it. The loop applies
