@@ -156,7 +156,15 @@ class ReleasePublishTest(unittest.TestCase):
             text=True,
             capture_output=True,
         ).stdout
-        version = (ROOT / "VERSION").read_text(encoding="utf-8").strip()
+        tags = subprocess.run(
+            ["git", "tag", "-l", "v[0-9]*", "--sort=-v:refname"],
+            cwd=ROOT,
+            text=True,
+            capture_output=True,
+            check=True,
+        ).stdout.splitlines()
+        self.assertTrue(tags, "release_publish live dry-run needs at least one existing version tag")
+        version = tags[0].removeprefix("v")
         proc = subprocess.run(
             [
                 sys.executable, str(SCRIPT),
