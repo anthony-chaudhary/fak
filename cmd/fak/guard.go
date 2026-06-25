@@ -105,6 +105,18 @@ func cmdGuard(argv []string) {
 		os.Exit(2)
 	}
 
+	// Fail loud BEFORE binding the gateway if the wrapped agent is not on PATH — a cold
+	// adopter who installed only fak (curl|sh) and ran `fak guard -- claude` without Claude
+	// Code gets an actionable next step instead of a raw exec error after the gateway
+	// already started (issue #835, failure 1). A command given as an explicit path is left
+	// to exec to resolve.
+	if !strings.ContainsAny(command[0], "/\\") {
+		if _, lookErr := exec.LookPath(command[0]); lookErr != nil {
+			fmt.Fprintf(os.Stderr, "fak guard: %q is not on your PATH. Install it (Claude Code: https://claude.com/claude-code), or pass the full path / a different agent after `--`.\n", command[0])
+			os.Exit(2)
+		}
+	}
+
 	// Observability sink for the gateway's structured per-request + per-verdict logs
 	// (event=gateway_http_request / event=gateway_operation, each carrying the trace_id).
 	// Default OFF (a no-op) so the wrapped agent's terminal stays clean; --log FILE (or
@@ -155,6 +167,9 @@ func cmdGuard(argv []string) {
 	us := resolveGuardUpstream(*provider, command[0], *baseURL, *apiKeyEnv, *anthropicOAuth, *oauthTokenEnv)
 	up, providerAutodetected, resolvedBase := us.provider, us.autodetected, us.baseURL
 	apiKey, pinUpstream, oauthSource := us.apiKey, us.pinUpstream, us.oauthSource
+	if us.passthroughFallback && !*quiet {
+		fmt.Fprintln(os.Stderr, "fak guard: no Claude subscription OAuth token found; falling back to passthrough — this works only if the wrapped agent is logged in. If you hit a 401, run `claude` once or `claude setup-token`.")
+	}
 
 	requireKey, ok := resolveRequiredKey(*requireKeyEnv, os.Getenv)
 	if !ok {
@@ -743,6 +758,12 @@ type guardUpstream struct {
 	apiKey       string
 	pinUpstream  bool
 	oauthSource  string
+	// passthroughFallback is set when the Anthropic subscription-OAuth auto-lookup found
+	// no token and guard fell back to plain passthrough. That path works ONLY if the
+	// wrapped agent (Claude Code) is itself logged in; cmdGuard surfaces a one-line note
+	// so a cold agent that is ALSO not logged in gets a pointer home instead of an opaque
+	// upstream 401 (issue #835, failure 2).
+	passthroughFallback bool
 }
 
 // resolveGuardUpstream picks the upstream wire and credential posture: an explicit
@@ -775,6 +796,7 @@ func resolveGuardUpstream(providerFlag, agentName, baseURLFlag, apiKeyEnv string
 	// fails loud if no token is found.
 	pinUpstream := false
 	oauthSource := ""
+	passthroughFallback := false
 	if forceOAuth && up != "anthropic" {
 		fmt.Fprintf(os.Stderr, "fak guard: --anthropic-oauth applies only to --provider anthropic (got %q)\n", up)
 		os.Exit(2)
@@ -794,11 +816,13 @@ func resolveGuardUpstream(providerFlag, agentName, baseURLFlag, apiKeyEnv string
 		default:
 			// Auto attempt found no token (normal for an API-key user): fall back to
 			// plain passthrough — Claude Code forwards its own bearer if it is logged in.
+			passthroughFallback = true
 		}
 	}
 	return guardUpstream{
 		provider: up, autodetected: autodetected, baseURL: resolvedBase,
 		apiKey: apiKey, pinUpstream: pinUpstream, oauthSource: oauthSource,
+		passthroughFallback: passthroughFallback,
 	}
 }
 

@@ -583,3 +583,35 @@ func TestResolveAnthropicOAuthToken(t *testing.T) {
 		t.Fatalf("env precedence: tok=%q src=%q err=%v", tok, src, err)
 	}
 }
+
+// TestGuardPassthroughFallbackFlag witnesses issue #835 failure 2: when the Anthropic
+// subscription-OAuth auto-lookup finds NO token, resolveGuardUpstream falls back to plain
+// passthrough and now marks passthroughFallback so cmdGuard can warn a cold agent (instead
+// of letting an opaque upstream 401 be the only signal). When a token IS present, the pinned
+// path is taken and the fallback flag stays false.
+func TestGuardPassthroughFallbackFlag(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("CLAUDE_CONFIG_DIR", dir)
+	const tokenEnv = "FAK_TEST_GUARD_OAUTH"
+	t.Setenv(tokenEnv, "")
+	t.Setenv("ANTHROPIC_API_KEY", "")
+
+	// No token anywhere -> passthrough fallback, not pinned.
+	us := resolveGuardUpstream("anthropic", "claude", "", "", false, tokenEnv)
+	if !us.passthroughFallback {
+		t.Fatalf("want passthroughFallback=true when no OAuth token exists; got %+v", us)
+	}
+	if us.pinUpstream {
+		t.Fatalf("must not pin the upstream with no token; got %+v", us)
+	}
+
+	// A token present -> pinned, no fallback warning.
+	t.Setenv(tokenEnv, "sk-ant-oat01-present")
+	us = resolveGuardUpstream("anthropic", "claude", "", "", false, tokenEnv)
+	if us.passthroughFallback {
+		t.Fatalf("must not flag fallback when a token is present; got %+v", us)
+	}
+	if !us.pinUpstream {
+		t.Fatalf("want pinUpstream=true with a token present; got %+v", us)
+	}
+}
