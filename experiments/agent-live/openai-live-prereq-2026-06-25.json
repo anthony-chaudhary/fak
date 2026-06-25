@@ -1,16 +1,46 @@
 {
-  "agents_sdk_ready": false,
-  "blockers": [
-    "OPENAI_API_KEY is not set",
+  "agents_blockers": [
     "openai-agents distribution is not installed",
     "importable agents module is not an installed OpenAI Agents SDK distribution"
   ],
-  "created_at": "2026-06-25T14:42:05.908626Z",
+  "agents_sdk_ready": false,
+  "auth_sources": {
+    "codex_login": true,
+    "platform_api_key": false
+  },
+  "blockers": [
+    "openai-agents distribution is not installed",
+    "importable agents module is not an installed OpenAI Agents SDK distribution"
+  ],
+  "codex_auth": {
+    "access_token_audience": [
+      "https://api.openai.com/v1"
+    ],
+    "access_token_exp": 1782762799,
+    "access_token_exp_iso": "2026-06-29T19:53:19Z",
+    "access_token_expired": false,
+    "access_token_issuer": "https://auth.openai.com",
+    "access_token_present": true,
+    "account_id_sha256_12": "70cd3b39e217",
+    "auth_json_present": true,
+    "auth_mode": "chatgpt",
+    "blockers": [],
+    "chatgpt_plan_type": "pro",
+    "codex_cli_present": true,
+    "codex_login_ready": true,
+    "id_token_present": true,
+    "last_refresh": "2026-06-19T19:53:20.425431400Z",
+    "openai_api_key_stored": false,
+    "refresh_token_present": true
+  },
+  "codex_login_ready": true,
+  "created_at": "2026-06-25T15:39:22.721376Z",
   "env": {
     "OPENAI_API_KEY_set": false,
     "OPENAI_BASE_URL_set": false
   },
-  "hosted_openai_ready": false,
+  "hosted_blockers": [],
+  "hosted_openai_ready": true,
   "modules": {
     "agents": {
       "file": "C:\\work\\job\\agents\\__init__.py",
@@ -26,17 +56,25 @@
     "openai": "2.41.0",
     "openai-agents": null
   },
+  "platform_api_ready": false,
   "privacy": {
     "copied_fields": [
       "env var presence booleans",
       "package versions",
-      "module paths"
+      "module paths",
+      "sanitized Codex auth booleans",
+      "selected non-secret token claims",
+      "short hashes of stable account identifiers"
     ],
     "dropped": [
       "OPENAI_API_KEY value",
+      "Codex access_token value",
+      "Codex refresh_token value",
+      "Codex id_token value",
+      "raw account/user/org identifiers",
       "any request/response payloads"
     ]
   },
   "schema": "fak-openai-live-prereq-audit/1",
-  "status": "BLOCKED_ENV"
+  "status": "PARTIAL"
 }

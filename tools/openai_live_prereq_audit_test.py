@@ -45,10 +45,13 @@ class OpenAILivePrereqAuditTest(unittest.TestCase):
                 "module_info",
                 side_effect=lambda name: {"installed": True, "file": f"/site-packages/{name.replace('.', '/')}.py", "has_custom_span": name == "agents"},
             ),
+            mock.patch.object(mod, "codex_auth_info", return_value={"codex_login_ready": False, "blockers": ["Codex auth.json is not present"]}),
         ):
             payload = mod.collect()
         self.assertEqual(payload["status"], "READY")
         self.assertTrue(payload["hosted_openai_ready"])
+        self.assertTrue(payload["platform_api_ready"])
+        self.assertFalse(payload["codex_login_ready"])
         self.assertTrue(payload["agents_sdk_ready"])
         self.assertEqual(payload["blockers"], [])
         self.assertNotIn("test-secret-value", json.dumps(payload))
@@ -63,13 +66,50 @@ class OpenAILivePrereqAuditTest(unittest.TestCase):
                 side_effect=fake_dist({"openai": "2.41.0", "openai-agents": None, "agents": None}),
             ),
             mock.patch.object(mod, "module_info", side_effect=lambda name: {"installed": False}),
+            mock.patch.object(mod, "codex_auth_info", return_value={"codex_login_ready": False, "blockers": ["Codex auth.json is not present"]}),
         ):
             payload = mod.collect()
         self.assertEqual(payload["status"], "PARTIAL")
         self.assertTrue(payload["hosted_openai_ready"])
+        self.assertTrue(payload["platform_api_ready"])
+        self.assertFalse(payload["codex_login_ready"])
         self.assertFalse(payload["agents_sdk_ready"])
         self.assertIn("openai-agents distribution is not installed", payload["blockers"])
         self.assertNotIn("test-secret-value", json.dumps(payload))
+
+    def test_collect_partial_when_codex_login_ready_without_api_key(self) -> None:
+        mod = load()
+        with (
+            mock.patch.dict("os.environ", {}, clear=True),
+            mock.patch.object(
+                mod,
+                "dist_version",
+                side_effect=fake_dist({"openai": "2.41.0", "openai-agents": None, "agents": None}),
+            ),
+            mock.patch.object(mod, "module_info", side_effect=lambda name: {"installed": False}),
+            mock.patch.object(
+                mod,
+                "codex_auth_info",
+                return_value={
+                    "auth_json_present": True,
+                    "auth_mode": "chatgpt",
+                    "codex_cli_present": True,
+                    "access_token_present": True,
+                    "refresh_token_present": True,
+                    "access_token_expired": False,
+                    "codex_login_ready": True,
+                    "blockers": [],
+                },
+            ),
+        ):
+            payload = mod.collect()
+        self.assertEqual(payload["status"], "PARTIAL")
+        self.assertTrue(payload["hosted_openai_ready"])
+        self.assertFalse(payload["platform_api_ready"])
+        self.assertTrue(payload["codex_login_ready"])
+        self.assertTrue(payload["auth_sources"]["codex_login"])
+        self.assertNotIn("OPENAI_API_KEY is not set", payload["blockers"])
+        self.assertIn("openai-agents distribution is not installed", payload["blockers"])
 
     def test_collect_flags_local_shadow_agents_module(self) -> None:
         mod = load()
@@ -85,6 +125,7 @@ class OpenAILivePrereqAuditTest(unittest.TestCase):
                 "module_info",
                 side_effect=lambda name: {"installed": True, "file": f"C:/work/job/{name.replace('.', '/')}/__init__.py"},
             ),
+            mock.patch.object(mod, "codex_auth_info", return_value={"codex_login_ready": False, "blockers": ["Codex auth.json is not present"]}),
         ):
             payload = mod.collect()
         self.assertEqual(payload["status"], "BLOCKED_ENV")
@@ -107,6 +148,7 @@ class OpenAILivePrereqAuditTest(unittest.TestCase):
                     side_effect=fake_dist({"openai": "2.41.0", "openai-agents": None, "agents": None}),
                 ),
                 mock.patch.object(mod, "module_info", side_effect=lambda name: {"installed": False}),
+                mock.patch.object(mod, "codex_auth_info", return_value={"codex_login_ready": False, "blockers": ["Codex auth.json is not present"]}),
             ):
                 rc = mod.main(["--out", str(out), "--markdown", str(md)])
             self.assertEqual(rc, 0)

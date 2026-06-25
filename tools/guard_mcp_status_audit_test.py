@@ -55,7 +55,7 @@ def seed_tree(
                 mod.OPENAI_HOSTED_MD,
                 "actionability.status=PASS",
                 "post-gate lens shows no `git_write`",
-                "BLOCKED_ENV",
+                "codex_login",
             ]
         )
         + "\n",
@@ -292,6 +292,51 @@ class GuardMCPStatusAuditTest(unittest.TestCase):
             self.assertEqual(payload["status"], "FAIL")
             self.assertIn("openai hosted live prereqs", json.dumps(payload))
 
+    def test_collect_accepts_codex_login_openai_prereq_artifact(self) -> None:
+        mod = load()
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            seed_tree(root)
+            write_json(
+                root,
+                mod.OPENAI_PREREQ_JSON,
+                {
+                    "schema": "fak-openai-live-prereq-audit/1",
+                    "status": "PARTIAL",
+                    "hosted_openai_ready": True,
+                    "platform_api_ready": False,
+                    "codex_login_ready": True,
+                    "auth_sources": {"platform_api_key": False, "codex_login": True},
+                    "agents_sdk_ready": False,
+                    "blockers": ["openai-agents distribution is not installed"],
+                    "codex_auth": {
+                        "auth_json_present": True,
+                        "auth_mode": "chatgpt",
+                        "codex_cli_present": True,
+                        "access_token_present": True,
+                        "refresh_token_present": True,
+                        "access_token_expired": False,
+                        "account_id_sha256_12": "abc123def456",
+                    },
+                    "privacy": {
+                        "dropped": [
+                            "OPENAI_API_KEY value",
+                            "Codex access_token value",
+                            "Codex refresh_token value",
+                            "Codex id_token value",
+                        ]
+                    },
+                },
+            )
+            (root / mod.OPENAI_PREREQ_MD).write_text(
+                "# OpenAI hosted live proof prerequisites\n\n"
+                "- status: **`PARTIAL`**\n\n"
+                "It never writes API key values, Codex token values, raw account identifiers, or request payloads.\n",
+                encoding="utf-8",
+            )
+            payload = mod.collect(root)
+            self.assertEqual(payload["status"], "PASS")
+
     def test_collect_fails_when_openai_hosted_pilot_blockers_are_incomplete(self) -> None:
         mod = load()
         with tempfile.TemporaryDirectory() as td:
@@ -313,6 +358,7 @@ class GuardMCPStatusAuditTest(unittest.TestCase):
                     "schema": "fak-openai-hosted-live-pilot/1",
                     "status": "PASS",
                     "model": "gpt-5.5",
+                    "auth_source": "platform_api_key",
                     "prereqs": {"hosted_openai_ready": True, "agents_sdk_ready": False},
                     "guard": {
                         "status": "PASS",
@@ -327,11 +373,55 @@ class GuardMCPStatusAuditTest(unittest.TestCase):
                     },
                     "hosted_openai": {
                         "status": "PASS",
+                        "auth_source": "platform_api_key",
                         "model": "gpt-5.5",
                         "response_id_present": True,
                         "contains_expected_marker": True,
                         "output_text_sha256": "abc123",
                         "output_text_len": 21,
+                    },
+                },
+            )
+            (root / mod.OPENAI_HOSTED_MD).write_text(
+                "# OpenAI hosted live pilot\n\n- status: **`PASS`**\n",
+                encoding="utf-8",
+            )
+            payload = mod.collect(root)
+            self.assertEqual(payload["status"], "PASS")
+
+    def test_collect_accepts_codex_login_openai_hosted_pass_artifact(self) -> None:
+        mod = load()
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            seed_tree(root)
+            write_json(
+                root,
+                mod.OPENAI_HOSTED_JSON,
+                {
+                    "schema": "fak-openai-hosted-live-pilot/1",
+                    "status": "PASS",
+                    "model": "gpt-5.5",
+                    "auth_source": "codex_login",
+                    "prereqs": {"hosted_openai_ready": True, "codex_login_ready": True, "agents_sdk_ready": False},
+                    "guard": {
+                        "status": "PASS",
+                        "dangerous_attempt": {
+                            "verdict": {"kind": "DENY", "reason": "POLICY_BLOCK"},
+                            "executed": False,
+                        },
+                        "useful_continuation": {
+                            "verdict": {"kind": "ALLOW"},
+                            "admit_verdict": {"kind": "DEFER"},
+                        },
+                    },
+                    "hosted_openai": {
+                        "status": "PASS",
+                        "auth_source": "codex_login",
+                        "codex_exec_exit_code": 0,
+                        "contains_expected_marker": True,
+                        "output_text_sha256": "abc123",
+                        "output_text_len": 21,
+                        "json_event_count": 3,
                     },
                 },
             )

@@ -123,7 +123,7 @@ def check_status_packet(root: Path, checks: list[dict[str, Any]]) -> None:
         OPENAI_HOSTED_MD,
         "actionability.status=PASS",
         "post-gate lens shows no `git_write`",
-        "BLOCKED_ENV",
+        "codex_login",
     ]
     missing = [item for item in required if item not in text]
     add(
@@ -290,23 +290,43 @@ def check_openai_live_prereq(root: Path, checks: list[dict[str, Any]]) -> None:
         add(checks, "openai hosted live prereqs", False, str(exc))
         return
     blockers = set(report.get("blockers") or [])
-    required_blockers = {
-        "OPENAI_API_KEY is not set",
-        "openai-agents distribution is not installed",
-        "importable agents module is not an installed OpenAI Agents SDK distribution",
-    }
     serialized = json.dumps(report, sort_keys=True) + md
-    secret_leak = "sk-" in serialized or "OPENAI_API_KEY_value" in serialized
-    ok = (
-        report.get("schema") == "fak-openai-live-prereq-audit/1"
-        and report.get("status") == "BLOCKED_ENV"
-        and report.get("hosted_openai_ready") is False
-        and report.get("agents_sdk_ready") is False
-        and required_blockers.issubset(blockers)
-        and "status: **`BLOCKED_ENV`**" in md
-        and "It never writes API key values" in md
-        and not secret_leak
+    secret_leak = (
+        "sk-" in serialized
+        or "OPENAI_API_KEY_value" in serialized
+        or "access_token_value" in serialized
+        or "refresh_token_value" in serialized
+        or "id_token_value" in serialized
     )
+    if report.get("codex_login_ready") is True:
+        auth_sources = report.get("auth_sources") if isinstance(report.get("auth_sources"), dict) else {}
+        ok = (
+            report.get("schema") == "fak-openai-live-prereq-audit/1"
+            and report.get("status") in {"PARTIAL", "READY"}
+            and report.get("hosted_openai_ready") is True
+            and auth_sources.get("codex_login") is True
+            and "OPENAI_API_KEY is not set" not in blockers
+            and f"status: **`{report.get('status')}`**" in md
+            and "It never writes API key values" in md
+            and "Codex token values" in md
+            and not secret_leak
+        )
+    else:
+        required_blockers = {
+            "OPENAI_API_KEY is not set",
+            "openai-agents distribution is not installed",
+            "importable agents module is not an installed OpenAI Agents SDK distribution",
+        }
+        ok = (
+            report.get("schema") == "fak-openai-live-prereq-audit/1"
+            and report.get("status") == "BLOCKED_ENV"
+            and report.get("hosted_openai_ready") is False
+            and report.get("agents_sdk_ready") is False
+            and required_blockers.issubset(blockers)
+            and "status: **`BLOCKED_ENV`**" in md
+            and "It never writes API key values" in md
+            and not secret_leak
+        )
     add(
         checks,
         "openai hosted live prereqs",
@@ -345,6 +365,20 @@ def check_openai_hosted_live_pilot(root: Path, checks: list[dict[str, Any]]) -> 
         hosted = report.get("hosted_openai") if isinstance(report.get("hosted_openai"), dict) else {}
         danger = guard.get("dangerous_attempt") if isinstance(guard.get("dangerous_attempt"), dict) else {}
         useful = guard.get("useful_continuation") if isinstance(guard.get("useful_continuation"), dict) else {}
+        auth_source = hosted.get("auth_source") or report.get("auth_source")
+        hosted_proof_ok = False
+        if auth_source == "codex_login":
+            hosted_proof_ok = (
+                hosted.get("codex_exec_exit_code") == 0
+                and hosted.get("contains_expected_marker") is True
+                and "output_text_sha256" in hosted
+            )
+        elif auth_source == "platform_api_key":
+            hosted_proof_ok = (
+                hosted.get("response_id_present") is True
+                and hosted.get("contains_expected_marker") is True
+                and "output_text_sha256" in hosted
+            )
         ok = (
             report.get("schema") == "fak-openai-hosted-live-pilot/1"
             and guard.get("status") == "PASS"
@@ -353,9 +387,7 @@ def check_openai_hosted_live_pilot(root: Path, checks: list[dict[str, Any]]) -> 
             and ((danger.get("verdict") or {}).get("reason") == "POLICY_BLOCK")
             and danger.get("executed") is False
             and ((useful.get("verdict") or {}).get("kind") == "ALLOW")
-            and hosted.get("response_id_present") is True
-            and hosted.get("contains_expected_marker") is True
-            and "output_text_sha256" in hosted
+            and hosted_proof_ok
             and "raw hosted OpenAI response text" not in json.dumps(hosted)
             and not secret_leak
         )

@@ -17,8 +17,8 @@ and OpenAI/Codex. It is a status artifact, not a shipped-claims ledger; quote
 | Claude Code live session | PASS | `experiments/agent-live/claude-code-fak-guard-live-pilot-2026-06-25.json` records a live Claude Code turn where `rm -rf ./.fak-live-pilot-sentinel-do-not-exist` was denied (`POLICY_BLOCK`) and a later same-session `echo fak-claude-live-pilot-ok` was allowed. |
 | OpenAI/Codex MCP live session | PASS | `experiments/agent-live/codex-mcp-fak-live-pilot-2026-06-25.json` records a Codex CLI MCP turn where `fak_adjudicate(git_push)` denied `POLICY_BLOCK` and the same turn continued with allowed `fak_adjudicate(git_status, read_only=true)`. |
 | OpenAI Agents guardrail adapter | PASS | `examples/openai-agents-guardrail/demo.py` starts `fak serve`, blocks `git_push` before execution, allows `git_status`, admits the clean result, and quarantines a poisoned `web_fetch` result. Latest local run returned `summary: PASS`; captured expected output is in `examples/openai-agents-guardrail/EXAMPLE-OUTPUT.md`. |
-| Hosted OpenAI / installed Agents SDK live prerequisites | BLOCKED_ENV | `experiments/agent-live/openai-live-prereq-2026-06-25.json` and `experiments/agent-live/OPENAI-LIVE-PREREQ-2026-06-25.md` record sanitized host state: `OPENAI_API_KEY_set=false`, `openai=2.41.0`, `openai-agents=None`, and the importable `agents` module resolves to `C:\work\job\agents\__init__.py`, not an installed SDK distribution. |
-| Hosted OpenAI live pilot | BLOCKED_ENV | `tools/openai_hosted_live_pilot.py` is the runnable proof path for a credentialed host: it starts/uses `fak serve`, proves `git_push` is denied before execution and `git_status` can continue, then calls the OpenAI Responses API through `OpenAI().responses.create(...)` and records only response metadata/hash. On this host, `experiments/agent-live/openai-hosted-live-pilot-2026-06-25.json` and `experiments/agent-live/OPENAI-HOSTED-LIVE-PILOT-2026-06-25.md` stop at `BLOCKED_ENV` because hosted OpenAI credentials are absent. |
+| Hosted OpenAI / installed Agents SDK live prerequisites | PARTIAL | `experiments/agent-live/openai-live-prereq-2026-06-25.json` and `experiments/agent-live/OPENAI-LIVE-PREREQ-2026-06-25.md` record sanitized host state: `codex_login_ready=true`, `platform_api_ready=false`, `OPENAI_API_KEY_set=false`, `openai=2.41.0`, `openai-agents=None`, and the importable `agents` module resolves to `C:\work\job\agents\__init__.py`, not an installed SDK distribution. |
+| Hosted OpenAI live pilot | PASS | `tools/openai_hosted_live_pilot.py --auth-mode codex-login` starts/uses `fak serve`, proves `git_push` is denied before execution and `git_status` can continue, then runs `codex exec --ephemeral` with the existing ChatGPT/OAuth login. `experiments/agent-live/openai-hosted-live-pilot-2026-06-25.json` and `experiments/agent-live/OPENAI-HOSTED-LIVE-PILOT-2026-06-25.md` record `auth_source=codex_login`, `codex_exec_exit_code=0`, `contains_expected_marker=true`, and only hosted-output hashes/event counts. |
 
 ## Current Residuals
 
@@ -28,14 +28,12 @@ and OpenAI/Codex. It is a status artifact, not a shipped-claims ledger; quote
 - `UNKNOWN_TREE_WARNINGS`: DOS still warns when it cannot derive a call tree. The
   current pass records this, but it does not block actionability because the
   remaining shapes are not post-mitigation opaque mutating git operations.
-- `OPENAI_HOSTED_LIVE_BLOCKED_ENV`: Direct hosted OpenAI API / installed Agents SDK
-  live pilot is not the same artifact as Codex MCP or the dependency-free adapter.
-  The sanitized prereq audit and hosted pilot artifact record that this host has no
-  `OPENAI_API_KEY`, no installed `openai-agents` distribution, and a local non-SDK
-  `agents` module shadow. The OpenAI-side proof here is Codex CLI via MCP plus the
-  local Agents guardrail mapping demo; `tools/openai_hosted_live_pilot.py` is ready
-  to turn this residual into a PASS artifact on a credentialed host, but the current
-  artifact does not prove a hosted OpenAI API call with production credentials.
+- `OPENAI_AGENTS_SDK_NOT_INSTALLED`: The hosted OpenAI proof now passes through the
+  existing Codex ChatGPT/OAuth login (`auth_source=codex_login`), not a Platform API
+  key. The remaining OpenAI residual is narrower: this host still has no installed
+  `openai-agents` distribution, and the local `agents` import resolves to a non-SDK
+  shadow package. The dependency-free guardrail adapter remains the local mapping
+  proof for Agents-style behavior.
 
 ## Re-run Commands
 
@@ -47,6 +45,7 @@ python tools\openai_live_prereq_audit.py `
   --out experiments\agent-live\openai-live-prereq-2026-06-25.json `
   --markdown experiments\agent-live\OPENAI-LIVE-PREREQ-2026-06-25.md
 python tools\openai_hosted_live_pilot.py `
+  --auth-mode codex-login `
   --out experiments\agent-live\openai-hosted-live-pilot-2026-06-25.json `
   --markdown experiments\agent-live\OPENAI-HOSTED-LIVE-PILOT-2026-06-25.md
 python tools\claude_historical_guard_audit.py `
@@ -72,5 +71,6 @@ python tools\codex_dos_recent_audit.py `
 
 The live pilot JSON files carry raw-capture hashes or sanitized hosted-response
 metadata, but the vendor-session artifacts require the same credentials and local
-client setup to re-run. The hosted OpenAI pilot additionally requires
-`OPENAI_API_KEY` to produce a PASS artifact instead of `BLOCKED_ENV`.
+client setup to re-run. The hosted OpenAI pilot uses the existing Codex
+ChatGPT/OAuth login in `~/.codex/auth.json` for `--auth-mode codex-login`; the
+direct Platform API-key route remains available with `--auth-mode api-key`.
