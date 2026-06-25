@@ -78,7 +78,9 @@ class LiveResolutionIssuesTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as d:
             runs = Path(d)
             self._mk(runs, 717, "20260625-062210", pid=101, sidecar_mtime=now)
-            probe = lambda pid: {"alive": True, "create_time": now - 1, "cmdline": ""}
+            # OS hid the cmdline, but the image is a real worker backend → counts.
+            probe = lambda pid: {"alive": True, "create_time": now - 1,
+                                 "name": "claude.exe", "cmdline": ""}
             self.assertEqual(mod.live_resolution_issues(runs, probe=probe), {717})
 
     def test_rejects_issue_when_sidecar_pid_was_reused(self) -> None:
@@ -116,7 +118,8 @@ class TimedOutWorkerReapTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as d:
             runs = Path(d)
             self._mk(runs, 717, "20260625-062210", pid=101, sidecar_mtime=now - 4000)
-            probe = lambda pid: {"alive": True, "create_time": now - 4001, "cmdline": ""}
+            probe = lambda pid: {"alive": True, "create_time": now - 4001,
+                                 "name": "claude.exe", "cmdline": ""}
             out = mod.reap_timed_out_workers(
                 runs, timeout_s=1800, live=False, now_ts=now, probe=probe,
                 killer=lambda pid: killed.append(pid))
@@ -132,7 +135,8 @@ class TimedOutWorkerReapTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as d:
             runs = Path(d)
             self._mk(runs, 718, "20260625-060712", pid=102, sidecar_mtime=now - 4000)
-            probe = lambda pid: {"alive": True, "create_time": now - 4001, "cmdline": ""}
+            probe = lambda pid: {"alive": True, "create_time": now - 4001,
+                                 "name": "claude.exe", "cmdline": ""}
             out = mod.reap_timed_out_workers(
                 runs, timeout_s=1800, live=True, now_ts=now, probe=probe,
                 killer=lambda pid: (killed.append(pid) or {"ok": True, "returncode": 0}))
@@ -171,6 +175,87 @@ class TimedOutWorkerReapTest(unittest.TestCase):
                 killer=lambda pid: {"ok": True})
         self.assertEqual(out["candidates"], [])
         self.assertEqual(out["reaped"], [])
+
+
+class PruneDeadSidecarsTest(unittest.TestCase):
+    def _mk(self, runs: Path, issue: int, stamp: str, *, pid: int,
+            mtime: float, siblings: tuple[str, ...] = ()) -> Path:
+        import os
+        pid_file = runs / f"resolve-{issue}-{stamp}.pid"
+        pid_file.write_text(str(pid), encoding="utf-8")
+        stem = pid_file.with_suffix("")
+        for suf in siblings:
+            stem.with_suffix(suf).write_text("", encoding="utf-8")
+        os.utime(pid_file, (mtime, mtime))
+        return pid_file
+
+    def test_live_prunes_dead_sidecar_and_siblings(self) -> None:
+        import tempfile
+        mod = load()
+        now = 1_000_000.0
+        with tempfile.TemporaryDirectory() as d:
+            runs = Path(d)
+            self._mk(runs, 825, "20260625-213720", pid=58752, mtime=now - 4000,
+                     siblings=(".log", ".backend", ".wave", ".account"))
+            probe = lambda pid: {"alive": False}
+            out = mod.prune_dead_sidecars(runs, live=True, now_ts=now, probe=probe)
+            self.assertEqual(out["pruned"], ["resolve-825-20260625-213720.pid"])
+            self.assertEqual(sorted(p.name for p in runs.glob("resolve-825-*")), [])
+
+    def test_recycled_shell_in_window_is_pruned(self) -> None:
+        # The exact ghost: a recycled cmd.exe whose create time lands inside the
+        # stale sidecar's spawn window. resolve_sidecar_pid_is_live rejects a bare
+        # shell image, so the sidecar is correctly seen as dead and swept.
+        import tempfile
+        mod = load()
+        now = 1_000_000.0
+        with tempfile.TemporaryDirectory() as d:
+            runs = Path(d)
+            self._mk(runs, 825, "20260625-213720", pid=58752, mtime=now - 4000)
+            probe = lambda pid: {"alive": True, "create_time": now - 4030,
+                                 "name": "cmd.exe", "cmdline": ""}
+            out = mod.prune_dead_sidecars(runs, live=True, now_ts=now, probe=probe)
+            self.assertEqual(out["pruned"], ["resolve-825-20260625-213720.pid"])
+
+    def test_live_worker_sidecar_is_kept(self) -> None:
+        import tempfile
+        mod = load()
+        now = 1_000_000.0
+        with tempfile.TemporaryDirectory() as d:
+            runs = Path(d)
+            self._mk(runs, 822, "20260625-220538", pid=8416, mtime=now - 4000)
+            probe = lambda pid: {"alive": True, "create_time": now - 4001,
+                                 "name": "claude.exe",
+                                 "cmdline": "claude -p resolve GitHub issue #822"}
+            out = mod.prune_dead_sidecars(runs, live=True, now_ts=now, probe=probe)
+            self.assertEqual(out["pruned"], [])
+            self.assertTrue((runs / "resolve-822-20260625-220538.pid").exists())
+
+    def test_too_fresh_dead_sidecar_survives_min_age(self) -> None:
+        import tempfile
+        mod = load()
+        now = 1_000_000.0
+        with tempfile.TemporaryDirectory() as d:
+            runs = Path(d)
+            self._mk(runs, 830, "20260625-210713", pid=999, mtime=now - 5)
+            probe = lambda pid: {"alive": False}
+            out = mod.prune_dead_sidecars(runs, live=True, min_age_s=60.0,
+                                          now_ts=now, probe=probe)
+            self.assertEqual(out["pruned"], [])
+            self.assertTrue((runs / "resolve-830-20260625-210713.pid").exists())
+
+    def test_dry_run_reports_would_prune_without_unlinking(self) -> None:
+        import tempfile
+        mod = load()
+        now = 1_000_000.0
+        with tempfile.TemporaryDirectory() as d:
+            runs = Path(d)
+            pid_file = self._mk(runs, 831, "20260625-205217", pid=111, mtime=now - 4000)
+            probe = lambda pid: {"alive": False}
+            out = mod.prune_dead_sidecars(runs, live=False, now_ts=now, probe=probe)
+            self.assertEqual(out["would_prune"], ["resolve-831-20260625-205217.pid"])
+            self.assertEqual(out["pruned"], [])
+            self.assertTrue(pid_file.exists())
 
     def test_timeout_zero_disables_reap(self) -> None:
         mod = load()

@@ -257,6 +257,68 @@ def reap_timed_out_workers(
             "reaped": reaped, "would_reap": would_reap}
 
 
+def prune_dead_sidecars(
+    runs_dir: Path,
+    *,
+    live: bool,
+    min_age_s: float = 60.0,
+    now_ts: float | None = None,
+    probe: Any | None = None,
+) -> dict[str, Any]:
+    """Sweep ``resolve-*.pid`` sidecars whose worker is no longer alive.
+
+    A worker that exits NORMALLY leaves its ``.pid`` (and sibling ``.log`` /
+    ``.backend`` / ``.wave`` / ``.account``) sidecars behind forever — the reaper
+    only KILLS live runaways, it never deletes the corpses. Left alone they pile
+    up (379 were found on one host) and become landmines for the create-time
+    spawn-window liveness fallback: a recycled PID landing in a stale sidecar's
+    window was miscounted as a live worker, pinning the dispatcher at cap against
+    ghosts. Sweeping every tick keeps the worker count the preflight reads honest
+    and the directory bounded.
+
+    A sidecar is pruned only when its identity-gated liveness check says the
+    process is gone, and only once it is at least ``min_age_s`` old (so a sidecar
+    written microseconds ago, before its child has fully materialised, is never
+    swept out from under a just-spawned worker). Dry-run reports ``would_prune``;
+    ``live`` actually unlinks. The matching non-``.pid`` sidecars are removed with
+    the ``.pid`` so a half-pruned run never confuses the wave auditor.
+    """
+    import time
+    now = now_ts if now_ts is not None else time.time()
+    pruned: list[str] = []
+    would_prune: list[str] = []
+    if not runs_dir.is_dir():
+        return {"live": live, "pruned": pruned, "would_prune": would_prune}
+    sibling_suffixes = (".log", ".backend", ".wave", ".account")
+    for pid_file in sorted(runs_dir.glob("resolve-*.pid")):
+        if not _LOG_ISSUE_RE.search(pid_file.name):
+            continue
+        try:
+            age_s = max(0.0, now - pid_file.stat().st_mtime)
+        except OSError:
+            continue
+        if age_s < min_age_s:
+            continue
+        if dispatch_preflight.resolve_sidecar_pid_is_live(pid_file, probe=probe):
+            continue
+        if not live:
+            would_prune.append(pid_file.name)
+            continue
+        stem = pid_file.with_suffix("")
+        try:
+            pid_file.unlink()
+            pruned.append(pid_file.name)
+        except OSError:
+            continue
+        for suf in sibling_suffixes:
+            sib = stem.with_suffix(suf)
+            try:
+                sib.unlink()
+            except OSError:
+                pass
+    return {"live": live, "pruned": pruned, "would_prune": would_prune}
+
+
 def pick_target_issue(numbers: list[int], skip: set[int]) -> int | None:
     """The first lane issue not in ``skip`` (live workers ∪ recently-attempted)."""
     for n in numbers:
@@ -842,6 +904,10 @@ def evaluate(root: Path, *, max_workers: int, work_kind: str, lane: str | None,
     runs_dir = root / RUNS_DIRNAME
     reg = issue_dispatch.refresh_registry(root) if refresh else {"skipped": True}
     reaped = reap_timed_out_workers(runs_dir, timeout_s=worker_timeout_s, live=live)
+    # Sweep the dead sidecars the reaper leaves behind, BEFORE preflight counts
+    # capacity — otherwise stale `.pid` files accumulate and a recycled PID landing
+    # in one's spawn window is miscounted as a live worker, pinning the cap.
+    pruned = prune_dead_sidecars(runs_dir, live=live)
     pre = issue_dispatch.preflight(root, max_workers=max_workers, work_kind=work_kind,
                                    product=product)
     pre_ok = pre.get("verdict") == "SPAWN_OK"
@@ -859,7 +925,7 @@ def evaluate(root: Path, *, max_workers: int, work_kind: str, lane: str | None,
         return finish({
             "schema": SCHEMA, "workspace": str(root), "live": live, "backend": backend,
             "max_workers": max_workers, "registry_refresh": reg,
-            "timed_out_workers": reaped,
+            "timed_out_workers": reaped, "pruned_sidecars": pruned,
             "preflight": {"verdict": pre.get("verdict"), "reason": pre.get("reason"),
                           "cap": pre.get("cap"), "live": pre.get("live")},
             "account": {k: acct.get(k) for k in ("tag", "tier", "model", "dir")},
