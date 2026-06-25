@@ -58,6 +58,9 @@ func ValidateSnapshot(s Snapshot) error {
 		if err := validateRecord("task "+task.TaskID, task.State, task.RuntimeSeconds, task.Progress, task.ETASeconds, task.ETAUnixNano, task.Resource); err != nil {
 			return err
 		}
+		if err := validateWitness("task "+task.TaskID, task.Witness); err != nil {
+			return err
+		}
 
 		seenSteps := make(map[string]struct{}, len(task.Steps))
 		for j := range task.Steps {
@@ -72,6 +75,9 @@ func ValidateSnapshot(s Snapshot) error {
 
 			ctx := fmt.Sprintf("task %q step %q", task.TaskID, step.StepID)
 			if err := validateRecord(ctx, step.State, step.RuntimeSeconds, step.Progress, step.ETASeconds, step.ETAUnixNano, step.Resource); err != nil {
+				return err
+			}
+			if err := validateWitness(ctx, step.Witness); err != nil {
 				return err
 			}
 		}

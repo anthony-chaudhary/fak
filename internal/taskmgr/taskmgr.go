@@ -95,6 +95,9 @@ type TaskSnapshot struct {
 	Steps           []StepSnapshot    `json:"steps,omitempty"`
 	Concepts        []ConceptUsage    `json:"concepts,omitempty"`
 	Labels          map[string]string `json:"labels,omitempty"`
+	// Witness is the optional, independently-attested completion rung. It is nil
+	// for a claimed-only task; the claimed State above is never overwritten.
+	Witness *WitnessRecord `json:"witness,omitempty"`
 }
 
 type StepSnapshot struct {
@@ -111,6 +114,9 @@ type StepSnapshot struct {
 	ETAUnixNano     *int64            `json:"estimated_completion_unix_nano,omitempty"`
 	Resource        ResourceWindow    `json:"resource"`
 	Labels          map[string]string `json:"labels,omitempty"`
+	// Witness is the optional, independently-attested completion rung for this
+	// step. Nil means claimed-only; the claimed State above is never overwritten.
+	Witness *WitnessRecord `json:"witness,omitempty"`
 }
 
 type Progress struct {
@@ -188,6 +194,7 @@ type taskState struct {
 	progress  progressState
 	steps     map[string]*stepState
 	stepOrder []string
+	witness   *WitnessRecord
 }
 
 type stepState struct {
@@ -199,6 +206,7 @@ type stepState struct {
 	start    ResourceSample
 	end      ResourceSample
 	progress progressState
+	witness  *WitnessRecord
 }
 
 type progressState struct {
@@ -487,6 +495,7 @@ func (m *Manager) taskSnapshotLocked(task *taskState, now time.Time, current Res
 		Steps:           steps,
 		Concepts:        conceptUsage([]TaskSnapshot{{Steps: steps}}),
 		Labels:          cloneLabels(task.spec.Labels),
+		Witness:         cloneWitness(task.witness),
 	}
 }
 
@@ -513,6 +522,7 @@ func (m *Manager) stepSnapshotLocked(step *stepState, now time.Time, current Res
 		ETAUnixNano:     etaAt,
 		Resource:        ResourceWindow{Start: step.start, Current: cur, Delta: resourceDelta(step.start, cur)},
 		Labels:          cloneLabels(step.spec.Labels),
+		Witness:         cloneWitness(step.witness),
 	}
 }
 
