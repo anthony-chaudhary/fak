@@ -157,13 +157,21 @@ func (p *CtxViewPlanner) DemandPage(ctx context.Context, store ctxplan.Store, v 
 
 // messagesToStore lowers the running agent messages into a fresh lossless ctxplan store
 // (one Span per message, in turn order) and returns the store plus the ids of the spans a
-// Forecast should pin (system prompt + active goal + last user turn). The store is the
-// "core dump" the planner views; the lowering is faithful (the bytes are preserved
-// verbatim, never summarized) so recall stays exact. The MemStore assigns span:<i> by
-// insertion order == message index, so the pin ids address the spans directly.
+// Forecast should pin (the active goal + system prompt + first user turn + last user turn).
+// The store is the "core dump" the planner views; the lowering is faithful (the bytes are
+// preserved verbatim, never summarized) so recall stays exact. The MemStore assigns span:<i>
+// by insertion order == message index, so the pin ids address the spans directly.
+//
+// The active GOAL (a RoleGoal message, #845) is pinned FIRST — it is the intentional GC root
+// of the heap, charged against the resident budget ahead of the structural pins so a session
+// pursuing one goal never elides the span that goal depends on. It is a DISTINCT root from
+// the first user turn, which the planner previously used as a goal proxy. Absent a RoleGoal
+// message the pin set is byte-identical to before, so a caller that injects no goal sees no
+// behavior change.
 func messagesToStore(messages []Message) (*ctxplan.MemStore, []string) {
 	store := ctxplan.NewMemStore()
 	var pinned []string
+	goal := -1
 	firstUser := -1
 	lastUser := -1
 	systemSeen := false
@@ -174,6 +182,8 @@ func messagesToStore(messages []Message) (*ctxplan.MemStore, []string) {
 		}
 		store.Add(role, messageDurability(role), []byte(msg.Content), false)
 		switch {
+		case role == RoleGoal && goal < 0:
+			goal = i
 		case role == RoleSystem && !systemSeen:
 			systemSeen = true
 			pinned = append(pinned, ctxplanSpanID(i))
@@ -182,6 +192,10 @@ func messagesToStore(messages []Message) (*ctxplan.MemStore, []string) {
 		case role == RoleUser:
 			lastUser = i
 		}
+	}
+	// The goal root is charged first (prepended), ahead of the structural pins.
+	if goal >= 0 {
+		pinned = append([]string{ctxplanSpanID(goal)}, pinned...)
 	}
 	if firstUser >= 0 {
 		pinned = append(pinned, ctxplanSpanID(firstUser))
@@ -194,9 +208,10 @@ func messagesToStore(messages []Message) (*ctxplan.MemStore, []string) {
 
 // heuristicForecast authors the Forecast the planner optimizes under: intents are the
 // content words of the LAST user message (what the upcoming turns are expected to ask
-// about), and Pins are the system prompt + the active goal (first user turn) + the last
-// user turn (the spans a turn cannot proceed without). The weights stay at the ctxplan
-// default seed — a sensible prior, tunable later via the learning loop.
+// about), and Pins are the active goal (a RoleGoal message, when present) + the system
+// prompt + the first and last user turns (the spans a turn cannot proceed without). The
+// pins are supplied by messagesToStore, which charges the goal root first. The weights
+// stay at the ctxplan default seed — a sensible prior, tunable later via the learning loop.
 func heuristicForecast(messages []Message, pins []string) ctxplan.Forecast {
 	var intents []string
 	for i := len(messages) - 1; i >= 0; i-- {
@@ -236,6 +251,11 @@ func messageDurability(role string) string {
 	switch role {
 	case RoleSystem:
 		return ctxplan.DurabilityDurable
+	case RoleGoal:
+		// A goal is durable within the session: it outlives any single turn (the
+		// whole point of pinning it as a root) but is not a permanent fact like the
+		// system prompt — it is discharged when the session's goal is met.
+		return ctxplan.DurabilitySession
 	case RoleTool:
 		return ctxplan.DurabilitySession
 	case RoleAssistant:
@@ -250,7 +270,7 @@ func messageDurability(role string) string {
 // role=tool with Name set (the caller distinguishes tool results by Name).
 func spanRoleToMessage(role string) string {
 	switch role {
-	case RoleSystem, RoleUser, RoleAssistant, RoleTool:
+	case RoleSystem, RoleUser, RoleAssistant, RoleTool, RoleGoal:
 		return role
 	default:
 		return RoleTool // a span whose role was a tool name
