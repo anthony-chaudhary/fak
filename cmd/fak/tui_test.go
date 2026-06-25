@@ -369,6 +369,123 @@ func TestTUIGuardJSONOutputFromFixtures(t *testing.T) {
 	}
 }
 
+// writeGuardJournalFixture writes a small canonical-shaped guard decision journal:
+// one ALLOW, two DENYs (POLICY_BLOCK + DEFAULT_DENY), and one QUARANTINE. Payload-free
+// rows (digests/claims only), exactly as the real journal emits.
+func writeGuardJournalFixture(t *testing.T) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "guard-audit.jsonl")
+	lines := []string{
+		`{"seq":1,"ts_unix_nano":1,"kind":"DECIDE","tool":"search_kb","verdict":"ALLOW","prev_hash":"","hash":"a"}`,
+		`{"seq":2,"ts_unix_nano":2,"kind":"DENY","tool":"Bash","verdict":"DENY","reason":"POLICY_BLOCK","by":"floor","witness":"rm -rf /","prev_hash":"a","hash":"b"}`,
+		`{"seq":3,"ts_unix_nano":3,"kind":"DENY","tool":"write_file","verdict":"DENY","reason":"DEFAULT_DENY","prev_hash":"b","hash":"c"}`,
+		`{"seq":4,"ts_unix_nano":4,"kind":"QUARANTINE","tool":"fetch_url","verdict":"QUARANTINE","prev_hash":"c","hash":"d"}`,
+	}
+	if err := os.WriteFile(path, []byte(strings.Join(lines, "\n")+"\n"), 0o600); err != nil {
+		t.Fatalf("write journal fixture: %v", err)
+	}
+	return path
+}
+
+// TestTUIGuardJournalJSON proves the #843 journal pane: tailing the canonical guard
+// decision journal folds its adjudication rows through the SAME guard model — the
+// denial surface (deny/policy_block/default_deny/quarantine) is surfaced and the
+// highest-attention denial sorts to the top.
+func TestTUIGuardJournalJSON(t *testing.T) {
+	path := writeGuardJournalFixture(t)
+	var stdout, stderr bytes.Buffer
+	code := runTUI(&stdout, &stderr, []string{
+		"guard", "--journal", path, "--at", "2026-06-25T12:00:00Z", "--json",
+	})
+	if code != 0 {
+		t.Fatalf("runTUI guard --journal code=%d stderr=%s", code, stderr.String())
+	}
+	var report tuiGuardReport
+	if err := json.Unmarshal(stdout.Bytes(), &report); err != nil {
+		t.Fatalf("unmarshal journal report: %v\n%s", err, stdout.String())
+	}
+	if report.Schema != tuiGuardSchema {
+		t.Fatalf("schema = %q, want %q", report.Schema, tuiGuardSchema)
+	}
+	c := report.Counts
+	if c.Allow != 1 || c.Deny != 2 || c.PolicyBlock != 1 || c.DefaultDeny != 1 || c.Quarantine != 1 || c.Rows != 4 {
+		t.Fatalf("journal counts = %+v, want allow=1 deny=2 policy_block=1 default_deny=1 quarantine=1 rows=4", c)
+	}
+	// Highest attention: DENY+POLICY_BLOCK (45+25) ties QUARANTINE (70); Kind asc breaks
+	// the tie so "audit-deny" (Bash) sorts ahead of "audit-quarantine".
+	if len(report.Rows) == 0 || report.Rows[0].Tool != "Bash" || report.Rows[0].Verdict != "DENY" {
+		t.Fatalf("top row = %+v, want the Bash POLICY_BLOCK deny first", report.Rows)
+	}
+	if !hasTUITag(report.Rows[0].Tags, "policy-block") {
+		t.Fatalf("top row tags = %v, want policy-block", report.Rows[0].Tags)
+	}
+}
+
+// TestTUIGuardJournalHuman proves the denial surface renders in the human pane.
+func TestTUIGuardJournalHuman(t *testing.T) {
+	path := writeGuardJournalFixture(t)
+	var stdout, stderr bytes.Buffer
+	code := runTUI(&stdout, &stderr, []string{"guard", "--journal", path, "--width", "130"})
+	if code != 0 {
+		t.Fatalf("runTUI guard --journal human code=%d stderr=%s", code, stderr.String())
+	}
+	out := stdout.String()
+	for _, want := range []string{"fak console guard", "deny=2", "policy_block=1", "default_deny=1", "quarantine=1", "Bash"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("journal pane missing %q:\n%s", want, out)
+		}
+	}
+}
+
+// TestTUIGuardJournalMissingIsEmptyPane proves a missing/empty journal yields a
+// well-formed empty pane (exit 0), not an error — the acceptance for a not-yet-written
+// journal.
+func TestTUIGuardJournalMissingIsEmptyPane(t *testing.T) {
+	missing := filepath.Join(t.TempDir(), "never-written.jsonl")
+	var stdout, stderr bytes.Buffer
+	code := runTUI(&stdout, &stderr, []string{"guard", "--journal", missing, "--json"})
+	if code != 0 {
+		t.Fatalf("missing journal code=%d stderr=%s (want 0, empty pane)", code, stderr.String())
+	}
+	var report tuiGuardReport
+	if err := json.Unmarshal(stdout.Bytes(), &report); err != nil {
+		t.Fatalf("unmarshal empty report: %v\n%s", err, stdout.String())
+	}
+	if report.Status != "PASS" || report.Counts.Rows != 0 || len(report.Rows) != 0 {
+		t.Fatalf("empty pane = status %q rows %d, want PASS with 0 rows", report.Status, report.Counts.Rows)
+	}
+}
+
+// TestTUIGuardTailResolvesCanonical proves --tail resolves the canonical journal via
+// FAK_AUDIT_JOURNAL and tolerates its absence as an empty pane.
+func TestTUIGuardTailResolvesCanonical(t *testing.T) {
+	path := writeGuardJournalFixture(t)
+	t.Setenv("FAK_AUDIT_JOURNAL", path)
+	var stdout, stderr bytes.Buffer
+	code := runTUI(&stdout, &stderr, []string{"guard", "--tail", "--json"})
+	if code != 0 {
+		t.Fatalf("--tail code=%d stderr=%s", code, stderr.String())
+	}
+	var report tuiGuardReport
+	if err := json.Unmarshal(stdout.Bytes(), &report); err != nil {
+		t.Fatalf("unmarshal --tail report: %v\n%s", err, stdout.String())
+	}
+	if report.Counts.Deny != 2 {
+		t.Fatalf("--tail counts = %+v, want deny=2 from the canonical journal", report.Counts)
+	}
+}
+
+// TestTUIGuardJournalAndArtifactConflict proves the two input modes are mutually
+// exclusive (a coherent pane reads one source).
+func TestTUIGuardJournalAndArtifactConflict(t *testing.T) {
+	path := writeGuardJournalFixture(t)
+	var stdout, stderr bytes.Buffer
+	code := runTUI(&stdout, &stderr, []string{"guard", "--journal", path, "--guard-json", path})
+	if code != 2 {
+		t.Fatalf("conflicting --journal + --guard-json code=%d, want 2\nstderr=%s", code, stderr.String())
+	}
+}
+
 func TestTUIAgentDryRunDefaultsToClaudeGuardOAuth(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	code := runTUI(&stdout, &stderr, []string{

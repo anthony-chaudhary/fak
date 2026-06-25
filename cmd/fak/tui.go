@@ -6,6 +6,7 @@ package main
 // a compact terminal dashboard without adding a TUI dependency.
 
 import (
+	"context"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -13,6 +14,7 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"os/signal"
 	"path/filepath"
 	"regexp"
 	"sort"
@@ -23,6 +25,7 @@ import (
 	acct "github.com/anthony-chaudhary/fak/internal/accounts"
 	"github.com/anthony-chaudhary/fak/internal/gardenbundle"
 	"github.com/anthony-chaudhary/fak/internal/gateway"
+	"github.com/anthony-chaudhary/fak/internal/journal"
 	"github.com/anthony-chaudhary/fak/internal/loopmgr"
 )
 
@@ -673,6 +676,10 @@ func runTUIGuard(stdout, stderr io.Writer, argv []string) int {
 	fs.SetOutput(stderr)
 	var guardJSON stringList
 	fs.Var(&guardJSON, "guard-json", "read a guard artifact JSON file (repeatable)")
+	journalPath := fs.String("journal", "", "tail the durable, hash-chained guard DECISION JOURNAL at this path instead of static --guard-json artifacts (#843): each adjudication row is folded through the same guard model, redaction-safe (the journal carries no payloads, only digests)")
+	tail := fs.Bool("tail", false, "tail the CANONICAL guard journal (FAK_AUDIT_JOURNAL, else <config>/fak/guard-audit.jsonl) — equivalent to --journal <canonical-path>")
+	follow := fs.Bool("follow", false, "with --journal/--tail: keep following the journal and print each NEW adjudication row as it lands (Ctrl-C to stop)")
+	maxRows := fs.Int("rows", 50, "cap the number of (highest-attention) journal rows rendered in the pane")
 	atText := fs.String("at", "", "snapshot time (RFC3339 or YYYY-MM-DD, default: now)")
 	width := fs.Int("width", 120, "target terminal width for human rendering")
 	asJSON := fs.Bool("json", false, "emit the guard TUI model as JSON")
@@ -683,16 +690,36 @@ func runTUIGuard(stdout, stderr io.Writer, argv []string) int {
 		fmt.Fprintf(stderr, "fak console guard: unexpected argument %q\n", fs.Arg(0))
 		return 2
 	}
-	if len(guardJSON) == 0 {
-		fmt.Fprintln(stderr, "fak console guard: at least one --guard-json artifact is required")
-		return 2
-	}
 	if *width < 72 {
 		*width = 72
 	}
 	at, err := parseTUITime(*atText)
 	if err != nil {
 		fmt.Fprintf(stderr, "fak console guard: %v\n", err)
+		return 2
+	}
+
+	// Live guard-journal mode (#843): tail the canonical hash-chained guard decision
+	// journal and render its denial surface through the SAME guard model, or follow it
+	// live. Selected by --journal/--tail; otherwise the static --guard-json pane runs.
+	useJournal := *journalPath != "" || *tail
+	if useJournal && len(guardJSON) > 0 {
+		fmt.Fprintln(stderr, "fak console guard: pass EITHER --guard-json artifacts OR --journal/--tail, not both")
+		return 2
+	}
+	if useJournal {
+		path := *journalPath
+		if path == "" {
+			path = canonicalGuardJournalPath()
+		}
+		if path == "" {
+			fmt.Fprintln(stderr, "fak console guard: --tail could not resolve a canonical guard journal path (set FAK_AUDIT_JOURNAL or pass --journal PATH)")
+			return 2
+		}
+		return runTUIGuardJournal(stdout, stderr, path, at, *width, *maxRows, *asJSON, *follow)
+	}
+	if len(guardJSON) == 0 {
+		fmt.Fprintln(stderr, "fak console guard: at least one --guard-json artifact (or --journal/--tail) is required")
 		return 2
 	}
 	artifacts, err := loadTUIGuard([]string(guardJSON))
@@ -712,6 +739,171 @@ func runTUIGuard(stdout, stderr io.Writer, argv []string) int {
 	}
 	fmt.Fprint(stdout, renderTUIGuard(report, *width))
 	return 0
+}
+
+// runTUIGuardJournal renders the live guard-journal pane (#843): it reads the durable
+// hash-chained guard decision journal at path, folds its adjudication rows through the
+// SAME guard model (scoreTUIGuardRow / countTUIGuard / tuiGuardActions) the static
+// artifact pane uses, and renders the report (or JSON). A missing/empty journal yields
+// a well-formed empty pane, not an error — a not-yet-written journal is a valid "no
+// adjudications yet" state. With follow, it then tails the journal, printing each new
+// row as it lands until interrupted. Redaction is preserved by construction: the
+// journal carries only decision fields + content digests, never a prompt/arg/result
+// payload, so nothing sensitive can reach the model.
+func runTUIGuardJournal(stdout, stderr io.Writer, path string, at time.Time, width, maxRows int, asJSON, follow bool) int {
+	rows, err := journal.ReadRows(path)
+	if err != nil {
+		fmt.Fprintf(stderr, "fak console guard: %v\n", err)
+		return 1
+	}
+	report := buildTUIGuardJournalReport(rows, path, at, maxRows)
+	if asJSON {
+		enc := json.NewEncoder(stdout)
+		enc.SetIndent("", "  ")
+		if err := enc.Encode(report); err != nil {
+			fmt.Fprintf(stderr, "fak console guard: encode json: %v\n", err)
+			return 1
+		}
+		return 0
+	}
+	fmt.Fprint(stdout, renderTUIGuard(report, width))
+	if follow {
+		return followGuardJournal(stdout, path, width, lastSeqOf(rows))
+	}
+	return 0
+}
+
+// buildTUIGuardJournalReport folds journal rows into the guard report model. Each row
+// becomes one tuiGuardRow scored by the committed scorer, so DENY / POLICY_BLOCK /
+// DEFAULT_DENY / QUARANTINE rows rise to the top of the attention sort and the counts
+// line surfaces the denial surface. Counts are computed over ALL rows (an honest
+// total); only the rendered table is capped to maxRows (the highest-attention ones).
+func buildTUIGuardJournalReport(rows []journal.Row, path string, at time.Time, maxRows int) tuiGuardReport {
+	name := tuiGuardArtifactName(path)
+	if name == "" {
+		name = "guard-audit"
+	}
+	guardRows := make([]tuiGuardRow, 0, len(rows))
+	for _, r := range rows {
+		guardRows = append(guardRows, tuiGuardRow{
+			Artifact: name,
+			Kind:     "audit-" + strings.ToLower(r.Kind),
+			Tool:     r.Tool,
+			Verdict:  strings.ToUpper(r.Verdict),
+			Reason:   strings.ToUpper(r.Reason),
+			By:       r.By,
+			Detail:   tuiGuardJournalDetail(r),
+			Count:    1,
+		})
+	}
+	for i := range guardRows {
+		guardRows[i].Tags, guardRows[i].Attention = scoreTUIGuardRow(guardRows[i])
+	}
+	sort.SliceStable(guardRows, func(i, j int) bool {
+		if guardRows[i].Attention != guardRows[j].Attention {
+			return guardRows[i].Attention > guardRows[j].Attention
+		}
+		if guardRows[i].Kind != guardRows[j].Kind {
+			return guardRows[i].Kind < guardRows[j].Kind
+		}
+		return guardRows[i].Tool < guardRows[j].Tool
+	})
+	sources := []tuiGuardSource{{Path: path, Schema: "fak-guard-audit-journal/1"}}
+	counts := countTUIGuard(guardRows, sources)
+	if maxRows > 0 && len(guardRows) > maxRows {
+		guardRows = guardRows[:maxRows]
+	}
+	status := "PASS"
+	switch {
+	case counts.Fail > 0 || counts.Unexpected > 0:
+		status = "FAIL"
+	case counts.Warn > 0:
+		status = "WARN"
+	}
+	return tuiGuardReport{
+		Schema:  tuiGuardSchema,
+		At:      at.UTC().Format(time.RFC3339),
+		Source:  name,
+		Status:  status,
+		Counts:  counts,
+		Actions: tuiGuardActions(counts),
+		Rows:    guardRows,
+		Sources: sources,
+	}
+}
+
+// tuiGuardJournalDetail builds the per-row detail from the journal's bounded-disclosure
+// fields ONLY (the witness claim that names which glob/arg tripped the deny, plus the
+// trace id) — never a payload. It is the redaction-safe "why" for an audited decision.
+func tuiGuardJournalDetail(r journal.Row) string {
+	return strings.TrimSpace(strings.Join(nonEmptyTUI([]string{r.Witness, r.TraceID}), "  "))
+}
+
+// canonicalGuardJournalPath resolves the canonical guard decision journal: the
+// documented FAK_AUDIT_JOURNAL override, else <user-config>/fak/guard-audit.jsonl (the
+// path internal/guardrsi writes). Empty when no config home is resolvable.
+func canonicalGuardJournalPath() string {
+	if p := strings.TrimSpace(os.Getenv("FAK_AUDIT_JOURNAL")); p != "" {
+		return p
+	}
+	if cfg, err := os.UserConfigDir(); err == nil && cfg != "" {
+		return filepath.Join(cfg, "fak", "guard-audit.jsonl")
+	}
+	return ""
+}
+
+// followGuardJournal tails the journal after the initial snapshot, printing each NEW
+// adjudication row (seq beyond lastSeq) as a compact one-line entry as it lands. It
+// polls (no fsnotify dependency, matching the rest of the kernel) and stops on Ctrl-C.
+func followGuardJournal(stdout io.Writer, path string, width int, lastSeq uint64) int {
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+	defer stop()
+	ticker := time.NewTicker(500 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return 0
+		case <-ticker.C:
+			rows, err := journal.ReadRows(path)
+			if err != nil {
+				continue // transient (mid-rotate / I/O blip): keep tailing
+			}
+			for _, r := range rows {
+				if r.Seq <= lastSeq {
+					continue
+				}
+				lastSeq = r.Seq
+				fmt.Fprintln(stdout, formatGuardJournalLine(r, width))
+			}
+		}
+	}
+}
+
+// formatGuardJournalLine renders one journal row as a compact tail line — decision
+// fields + the witness claim only, never a payload (the #840 redaction contract).
+func formatGuardJournalLine(r journal.Row, width int) string {
+	parts := []string{fmt.Sprintf("seq=%d", r.Seq), r.Kind}
+	for _, s := range []string{r.Tool, r.Verdict, r.Reason} {
+		if s != "" {
+			parts = append(parts, s)
+		}
+	}
+	if r.Witness != "" {
+		parts = append(parts, "("+r.Witness+")")
+	}
+	return trimTUI(strings.Join(parts, "  "), maxTUI(40, width))
+}
+
+// lastSeqOf returns the highest seq in a row slice (0 for none) — the follow watermark.
+func lastSeqOf(rows []journal.Row) uint64 {
+	var m uint64
+	for _, r := range rows {
+		if r.Seq > m {
+			m = r.Seq
+		}
+	}
+	return m
 }
 
 func runTUIAgent(stdout, stderr io.Writer, argv []string) int {
