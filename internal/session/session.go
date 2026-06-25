@@ -176,7 +176,7 @@ type State struct {
 	// #805). A scheduler reading Snapshot MAY act on it to place KV / order prefill,
 	// but MUST degrade to the GPU-visible decision when it is absent or stale — a hint
 	// that gates correctness is a bug. The zero value is "no opinion".
-	Intent TurnIntent `json:"intent,omitempty"`
+	Intent TurnIntent `json:"intent,omitempty,omitzero"`
 	Rev    uint64     `json:"rev"`
 }
 

@@ -1,7 +1,9 @@
 package session
 
 import (
+	"encoding/json"
 	"fmt"
+	"strings"
 	"sync"
 	"testing"
 )
@@ -93,6 +95,26 @@ func TestTurnIntentIsAdvisoryProjection(t *testing.T) {
 	}
 	if _, ok := tbl2.SetTurnIntent("t", hint); ok {
 		t.Fatal("a terminal session must reject SetTurnIntent")
+	}
+}
+
+func TestStateJSONOmitsZeroTurnIntent(t *testing.T) {
+	raw, err := json.Marshal(DefaultState("s"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(raw) != `{"trace_id":"s","run":0,"budget":{"turns_left":-1,"tokens_left":-1},"priority":0,"pace":{"max_tokens_per_turn":0,"min_turn_gap_ms":0},"rev":0}` {
+		t.Fatalf("zero intent must be absent, got %s", raw)
+	}
+
+	st := DefaultState("s")
+	st.Intent = TurnIntent{EndsSoon: true}
+	raw, err = json.Marshal(st)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(raw), `"intent":{"ends_soon":true}`) {
+		t.Fatalf("non-zero intent must be present, got %s", raw)
 	}
 }
 
