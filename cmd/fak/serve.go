@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/anthony-chaudhary/fak/internal/adjudicator"
 	"github.com/anthony-chaudhary/fak/internal/appversion"
 	"github.com/anthony-chaudhary/fak/internal/compute"
 	"github.com/anthony-chaudhary/fak/internal/gateway"
@@ -251,6 +252,13 @@ func cmdServe(argv []string) {
 		StartupPhases:               startupPhases,
 		CtxViewBudget:               *ctxViewBudget,
 		CompactHistoryBudget:        *compactHistoryBudget,
+		// Inbound twin of #555: prune tool DEFINITIONS the installed floor can never admit
+		// from the Anthropic passthrough's tools[], cache-prefix-preserving. The predicate
+		// reads adjudicator.Default (the floor serve installs via applyPolicy) under its lock,
+		// and is fail-safe against an unconfigured floor (NeverAdmits returns false when there
+		// is nothing to admit), so it is a no-op until a real floor is in place — never an
+		// over-drop. Behavior-preserving: a pruned tool stays DEFAULT_DENY at the kernel.
+		ToolFloorDenies: adjudicator.Default.NeverAdmits,
 	})
 	must(err)
 	srv.SetModelLoadProfile(loadProfile)

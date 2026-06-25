@@ -252,6 +252,13 @@ func cmdGuard(argv []string) {
 		Logf:                 gwLogf,
 		CtxViewBudget:        *ctxViewBudget,
 		CompactHistoryBudget: *compactHistoryBudget,
+		// Inbound twin of #555: prune tool DEFINITIONS the floor can never admit from the
+		// Anthropic passthrough's tools[], cache-prefix-preserving. Default-ON because it is
+		// behavior-preserving by construction (a pruned tool stays DEFAULT_DENY at the kernel),
+		// so it only ever shrinks uncached tool-def tokens. The predicate is a pure read of the
+		// installed floor (rt.Adjudicator.NeverAdmits): true only for a name no argument could
+		// make Allowed. nil would disable it; we always supply it.
+		ToolFloorDenies: rt.Adjudicator.NeverAdmits,
 	})
 	must(err)
 

@@ -215,6 +215,19 @@ type Config struct {
 	// agent.CompactAnthropicHistory). 0 (the default) leaves the body byte-for-byte
 	// unchanged. Anthropic passthrough only; it is an inert no-op on every other wire.
 	CompactHistoryBudget int
+	// ToolFloorDenies, when non-nil, is the INBOUND twin of CompactHistoryBudget: the
+	// host's pure predicate "would the capability floor DEFAULT_DENY this tool name for
+	// every possible argument?" — true ONLY for a name the policy admits under no args
+	// (absent from Allow and matching no AllowPrefix), never an arg-conditional tool.
+	// When set on the Anthropic PASSTHROUGH, each turn the gateway prunes those provably-
+	// unreachable tool DEFINITIONS from the OUTBOUND tools[] (promptmmu.CompactInboundTools),
+	// splicing on the original bytes so the cache_control prefix stays byte-identical and
+	// the upstream prompt-cache hit survives. The kernel still default-denies the call if the
+	// model somehow names a pruned tool, so dropping the definition is behavior-preserving by
+	// construction. nil (the default) leaves tools[] byte-for-byte unchanged. The gateway
+	// imports no policy internals — the host (cmd/fak) supplies the floor predicate, mirroring
+	// ReloadPolicy / DecideSession. Anthropic passthrough only; inert on every other wire.
+	ToolFloorDenies func(toolName string) bool
 	// RouteManifest, when non-nil, makes the gateway classify each fak_syscall tool
 	// call into a modelroute.Subject and route it: for a single-model (PICK) plan the
 	// chosen model id is written to abi.ToolCall.Engine BEFORE Submit, so the kernel
@@ -444,6 +457,13 @@ type Server struct {
 	// (the default) leaves the body byte-for-byte unchanged.
 	compactHistoryBudget int
 
+	// toolFloorDenies mirrors Config.ToolFloorDenies: the INBOUND-half predicate over a
+	// tool name (true ⇔ the floor DEFAULT_DENYs it for every arg). When non-nil the
+	// Anthropic passthrough prunes those provably-unreachable tool DEFINITIONS from the
+	// outbound tools[] while keeping the cache_control prefix byte-identical. nil leaves
+	// tools[] unchanged.
+	toolFloorDenies func(toolName string) bool
+
 	// pinUpstreamCredential, when set, makes the Anthropic passthrough authenticate
 	// upstream with the planner's OWN configured credential and ignore the inbound
 	// client's key (the subscription path — see Config.PinUpstreamCredential).
@@ -610,6 +630,7 @@ func New(cfg Config) (*Server, error) {
 		engineCache:          remoteCache,
 		ctxView:              ctxView,
 		compactHistoryBudget: cfg.CompactHistoryBudget,
+		toolFloorDenies:      cfg.ToolFloorDenies,
 		cacheStream:          cacheStream,
 		rungObs:              rungObs,
 		feed:                 newCoherenceFeed(0),
