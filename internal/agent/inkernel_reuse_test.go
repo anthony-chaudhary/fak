@@ -231,15 +231,18 @@ func TestInKernelReuseConcurrentNoRace(t *testing.T) {
 	}
 	wg.Wait()
 
-	// Post-contention the shared tree must be coherent, not just race-free: the
-	// common system prefix every goroutine generated is resident, and a probe
-	// returns a match length bounded by the prefix it was asked about (the mutex
-	// serialized every tree access, so no torn/over-long match survived).
-	matched := p.cachedPrefixLen(sys)
-	if matched <= 0 {
-		t.Fatalf("system prefix not resident after concurrent turns: cachedPrefixLen=%d", matched)
+	// Post-contention: the planner must still be usable and the tree must not
+	// have leaked or deadlocked under concurrent access.
+	post := append(append([]int{}, sys...), synthIDs(cfg.VocabSize, 4, 200)...)
+	gen, matched := decode(p, post, 3)
+	if matched != len(sys) {
+		t.Errorf("post-contention reuse: matched %d, want shared prefix %d", matched, len(sys))
 	}
-	if matched > len(sys) {
-		t.Fatalf("match length %d exceeds probed prefix len %d (torn shared-tree state)", matched, len(sys))
+	if len(gen) != 3 {
+		t.Errorf("post-contention decode produced %d tokens, want 3", len(gen))
 	}
+	if p.cachedPrefixLen(post) == 0 {
+		t.Error("post-contention cache empty after concurrent operations")
+	}
+	t.Logf("RACE: planner functional post-contention, matched %d/%d, generated %d tokens", matched, len(post), len(gen))
 }
