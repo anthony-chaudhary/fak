@@ -67,8 +67,10 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -121,8 +123,9 @@ var knownSuites = []struct{ ID, Label string }{
 type fileEngine struct{}
 
 var (
-	fileEngineDelayNs atomic.Int64
-	fileEngineCallSeq atomic.Int64
+	fileEngineDelayNs    atomic.Int64
+	fileEngineCallSeq    atomic.Int64
+	fileEngineByResource sync.Map // resource string -> *atomic.Int64
 )
 
 func setFileEngineDelay(d time.Duration) time.Duration {
@@ -132,10 +135,27 @@ func setFileEngineDelay(d time.Duration) time.Duration {
 
 func resetFileEngineStats() {
 	fileEngineCallSeq.Store(0)
+	fileEngineByResource.Range(func(k, _ any) bool {
+		fileEngineByResource.Delete(k)
+		return true
+	})
 }
 
 func fileEngineCalls() int64 {
 	return fileEngineCallSeq.Load()
+}
+
+func fileEngineResourceCalls() map[string]int64 {
+	out := map[string]int64{}
+	fileEngineByResource.Range(func(k, v any) bool {
+		name, ok := k.(string)
+		ctr, ok2 := v.(*atomic.Int64)
+		if ok && ok2 {
+			out[name] = ctr.Load()
+		}
+		return true
+	})
+	return out
 }
 
 // Caps reports the engine's capabilities; this demo file engine declares none.
@@ -158,6 +178,14 @@ func (fileEngine) Complete(ctx context.Context, c *abi.ToolCall) (*abi.Result, e
 		}
 	}
 	seq := fileEngineCallSeq.Add(1)
+	resource := resourceLabelBytes(toolCallArgsBytes(ctx, c))
+	if resource == "" {
+		resource = c.Tool
+	}
+	ctrAny, _ := fileEngineByResource.LoadOrStore(resource, &atomic.Int64{})
+	if ctr, ok := ctrAny.(*atomic.Int64); ok {
+		ctr.Add(1)
+	}
 	out := []byte(`{"tool":"` + c.Tool + `","ok":true}`)
 	var ref abi.Ref
 	if res := abi.ActiveResolver(); res != nil {
@@ -274,6 +302,49 @@ type timingProof struct {
 	ToolTokensFromCache  int          `json:"tool_tokens_from_cache"`
 	ContextTokensKeptOut int          `json:"context_tokens_kept_out"`
 	DenyVerdictTokens    int          `json:"deny_verdict_tokens"`
+}
+
+type parallelResourceProof struct {
+	Resource              string  `json:"resource"`
+	ResultTokens          int     `json:"result_tokens"`
+	RawEngineCalls        int64   `json:"raw_engine_calls"`
+	FakWarmupEngineCalls  int64   `json:"fak_warmup_engine_calls"`
+	FakHotEngineCalls     int64   `json:"fak_hot_engine_calls"`
+	VDSOHits              int64   `json:"vdso_hits"`
+	ToolTokensFromCache   int     `json:"tool_tokens_from_cache"`
+	RawP50Ns              int64   `json:"raw_p50_ns"`
+	RawP95Ns              int64   `json:"raw_p95_ns"`
+	FakP50Ns              int64   `json:"fak_p50_ns"`
+	FakP95Ns              int64   `json:"fak_p95_ns"`
+	EngineCallsAvoided    int64   `json:"engine_calls_avoided"`
+	EngineCallAvoidedRate float64 `json:"engine_call_avoided_rate"`
+}
+
+type parallelProof struct {
+	Schema                string                  `json:"schema"`
+	Workers               int                     `json:"workers"`
+	Calls                 int                     `json:"calls"`
+	HotFiles              int                     `json:"hot_files"`
+	EngineDelayMs         int                     `json:"engine_delay_ms"`
+	Prewarmed             bool                    `json:"prewarmed"`
+	RawWallNs             int64                   `json:"raw_wall_ns"`
+	FakWarmupWallNs       int64                   `json:"fak_warmup_wall_ns"`
+	FakHotWallNs          int64                   `json:"fak_hot_wall_ns"`
+	RawTotalNs            int64                   `json:"raw_total_ns"`
+	FakHotTotalNs         int64                   `json:"fak_hot_total_ns"`
+	TimeSavedNs           int64                   `json:"time_saved_ns"`
+	RawP50Ns              int64                   `json:"raw_p50_ns"`
+	RawP95Ns              int64                   `json:"raw_p95_ns"`
+	FakP50Ns              int64                   `json:"fak_p50_ns"`
+	FakP95Ns              int64                   `json:"fak_p95_ns"`
+	RawEngineCalls        int64                   `json:"raw_engine_calls"`
+	FakWarmupEngineCalls  int64                   `json:"fak_warmup_engine_calls"`
+	FakHotEngineCalls     int64                   `json:"fak_hot_engine_calls"`
+	VDSOHits              int64                   `json:"vdso_hits"`
+	EngineCallsAvoided    int64                   `json:"engine_calls_avoided"`
+	EngineCallAvoidedRate float64                 `json:"engine_call_avoided_rate"`
+	ToolTokensFromCache   int                     `json:"tool_tokens_from_cache"`
+	PerResource           []parallelResourceProof `json:"per_resource"`
 }
 
 // resultTokens reads the explicit per-call `result_tokens` annotation (the modeled,
@@ -447,6 +518,277 @@ func buildTimingProof(ctx context.Context, suite string, engineDelay time.Durati
 	return out, nil
 }
 
+var parallelHotFileCatalog = []struct {
+	path   string
+	tokens int
+}{
+	{"config.yaml", 180},
+	{"src/main.go", 540},
+	{"README.md", 700},
+	{"go.mod", 120},
+	{"docs/repro-packet.md", 620},
+	{"cmd/tokendemo/main.go", 900},
+	{"internal/vdso/vdso.go", 1000},
+	{"examples/customer-support-readonly-policy.json", 260},
+}
+
+func buildParallelProof(ctx context.Context, workers, calls, hotFiles int, engineDelay time.Duration) (parallelProof, error) {
+	if workers <= 0 {
+		return parallelProof{}, fmt.Errorf("workers must be positive")
+	}
+	if calls <= 0 {
+		return parallelProof{}, fmt.Errorf("calls must be positive")
+	}
+	if hotFiles <= 0 {
+		return parallelProof{}, fmt.Errorf("hot files must be positive")
+	}
+	if hotFiles > len(parallelHotFileCatalog) {
+		hotFiles = len(parallelHotFileCatalog)
+	}
+	configureFileWorld()
+	res := abi.ActiveResolver()
+	if res == nil {
+		return parallelProof{}, fmt.Errorf("no active Ref resolver registered")
+	}
+	prevDelay := setFileEngineDelay(engineDelay)
+	defer setFileEngineDelay(prevDelay)
+
+	hot, workload := parallelWorkload(calls, hotFiles)
+	rawEngine := fileEngine{}
+
+	resetFileEngineStats()
+	rawRun, err := runParallelToolCalls(ctx, workers, workload, func(ctx context.Context, c turnbench.Call) (string, error) {
+		tc, err := traceToolCall(ctx, res, c)
+		if err != nil {
+			return "", err
+		}
+		if _, err := rawEngine.Complete(ctx, tc); err != nil {
+			return "", err
+		}
+		return "engine", nil
+	})
+	if err != nil {
+		return parallelProof{}, err
+	}
+	rawByResource := fileEngineResourceCalls()
+	rawEngineCalls := fileEngineCalls()
+
+	resetFileEngineStats()
+	vdso.Default.BumpWorld()
+	ifc.Default.Reset("")
+	k := kernel.New("localtools")
+	k.SetVDSO(true)
+
+	warmStart := time.Now()
+	for _, c := range hot {
+		tc, err := traceToolCall(ctx, res, c)
+		if err != nil {
+			return parallelProof{}, err
+		}
+		k.Syscall(ctx, tc)
+	}
+	warmWall := elapsedNs(warmStart)
+	warmByResource := fileEngineResourceCalls()
+	warmEngineCalls := fileEngineCalls()
+
+	beforeHotEngine := fileEngineCalls()
+	beforeHotByResource := fileEngineResourceCalls()
+	fakRun, err := runParallelToolCalls(ctx, workers, workload, func(ctx context.Context, c turnbench.Call) (string, error) {
+		tc, err := traceToolCall(ctx, res, c)
+		if err != nil {
+			return "", err
+		}
+		r, v := k.Syscall(ctx, tc)
+		_, source, _ := timingClass(r, v)
+		return source, nil
+	})
+	if err != nil {
+		return parallelProof{}, err
+	}
+	afterHotByResource := fileEngineResourceCalls()
+	fakHotByResource := resourceDelta(afterHotByResource, beforeHotByResource)
+	fakHotEngineCalls := fileEngineCalls() - beforeHotEngine
+
+	out := parallelProof{
+		Schema:               "fak.tokendemo.parallel.v1",
+		Workers:              workers,
+		Calls:                calls,
+		HotFiles:             hotFiles,
+		EngineDelayMs:        int(engineDelay / time.Millisecond),
+		Prewarmed:            true,
+		RawWallNs:            rawRun.wallNs,
+		FakWarmupWallNs:      warmWall,
+		FakHotWallNs:         fakRun.wallNs,
+		RawTotalNs:           sumNs(rawRun.durations),
+		FakHotTotalNs:        sumNs(fakRun.durations),
+		RawP50Ns:             percentileNs(rawRun.durations, 50),
+		RawP95Ns:             percentileNs(rawRun.durations, 95),
+		FakP50Ns:             percentileNs(fakRun.durations, 50),
+		FakP95Ns:             percentileNs(fakRun.durations, 95),
+		RawEngineCalls:       rawEngineCalls,
+		FakWarmupEngineCalls: warmEngineCalls,
+		FakHotEngineCalls:    fakHotEngineCalls,
+		VDSOHits:             int64(countSource(fakRun.sources, "vdso_tier2")),
+	}
+	out.TimeSavedNs = out.RawTotalNs - out.FakHotTotalNs
+	out.EngineCallsAvoided = out.RawEngineCalls - out.FakWarmupEngineCalls - out.FakHotEngineCalls
+	out.EngineCallAvoidedRate = ratio(out.EngineCallsAvoided, out.RawEngineCalls)
+	out.PerResource = parallelResourceProofs(workload, rawRun, fakRun, rawByResource, warmByResource, fakHotByResource)
+	for _, r := range out.PerResource {
+		out.ToolTokensFromCache += r.ToolTokensFromCache
+	}
+	return out, nil
+}
+
+type parallelRun struct {
+	durations []int64
+	sources   []string
+	wallNs    int64
+}
+
+func runParallelToolCalls(ctx context.Context, workers int, calls []turnbench.Call, fn func(context.Context, turnbench.Call) (string, error)) (parallelRun, error) {
+	if workers > len(calls) {
+		workers = len(calls)
+	}
+	out := parallelRun{
+		durations: make([]int64, len(calls)),
+		sources:   make([]string, len(calls)),
+	}
+	jobs := make(chan int)
+	errs := make(chan error, len(calls))
+	var wg sync.WaitGroup
+	startWall := time.Now()
+	for w := 0; w < workers; w++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for idx := range jobs {
+				start := time.Now()
+				source, err := fn(ctx, calls[idx])
+				out.durations[idx] = elapsedNs(start)
+				out.sources[idx] = source
+				if err != nil {
+					errs <- err
+				}
+			}
+		}()
+	}
+	for i := range calls {
+		jobs <- i
+	}
+	close(jobs)
+	wg.Wait()
+	out.wallNs = elapsedNs(startWall)
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			return out, err
+		}
+	}
+	return out, nil
+}
+
+func parallelWorkload(calls, hotFiles int) ([]turnbench.Call, []turnbench.Call) {
+	hot := make([]turnbench.Call, 0, hotFiles)
+	for i := 0; i < hotFiles; i++ {
+		src := parallelHotFileCatalog[i]
+		hot = append(hot, turnbench.Call{
+			Tool: "read_file",
+			Args: json.RawMessage(`{"path":"` + src.path + `"}`),
+			Meta: map[string]string{
+				"readOnlyHint":   "true",
+				"idempotentHint": "true",
+				"result_tokens":  strconv.Itoa(src.tokens),
+			},
+		})
+	}
+	work := make([]turnbench.Call, 0, calls)
+	for i := 0; i < calls; i++ {
+		work = append(work, hot[i%len(hot)])
+	}
+	return hot, work
+}
+
+func parallelResourceProofs(workload []turnbench.Call, rawRun, fakRun parallelRun, rawByResource, warmByResource, fakHotByResource map[string]int64) []parallelResourceProof {
+	type agg struct {
+		tokens       int
+		rawDurations []int64
+		fakDurations []int64
+		vdsoHits     int64
+		cacheTokens  int
+	}
+	aggs := map[string]*agg{}
+	for i, c := range workload {
+		resource := resourceLabel(c.Args)
+		if resource == "" {
+			resource = c.Tool
+		}
+		a := aggs[resource]
+		if a == nil {
+			a = &agg{tokens: resultTokens(c)}
+			aggs[resource] = a
+		}
+		a.rawDurations = append(a.rawDurations, rawRun.durations[i])
+		a.fakDurations = append(a.fakDurations, fakRun.durations[i])
+		if fakRun.sources[i] == "vdso_tier2" {
+			a.vdsoHits++
+			a.cacheTokens += resultTokens(c)
+		}
+	}
+	keys := make([]string, 0, len(aggs))
+	for k := range aggs {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	out := make([]parallelResourceProof, 0, len(keys))
+	for _, resource := range keys {
+		a := aggs[resource]
+		rawCalls := rawByResource[resource]
+		warmCalls := warmByResource[resource]
+		hotCalls := fakHotByResource[resource]
+		avoided := rawCalls - warmCalls - hotCalls
+		out = append(out, parallelResourceProof{
+			Resource:              resource,
+			ResultTokens:          a.tokens,
+			RawEngineCalls:        rawCalls,
+			FakWarmupEngineCalls:  warmCalls,
+			FakHotEngineCalls:     hotCalls,
+			VDSOHits:              a.vdsoHits,
+			ToolTokensFromCache:   a.cacheTokens,
+			RawP50Ns:              percentileNs(a.rawDurations, 50),
+			RawP95Ns:              percentileNs(a.rawDurations, 95),
+			FakP50Ns:              percentileNs(a.fakDurations, 50),
+			FakP95Ns:              percentileNs(a.fakDurations, 95),
+			EngineCallsAvoided:    avoided,
+			EngineCallAvoidedRate: ratio(avoided, rawCalls),
+		})
+	}
+	return out
+}
+
+func resourceDelta(after, before map[string]int64) map[string]int64 {
+	out := map[string]int64{}
+	for k, v := range after {
+		out[k] = v - before[k]
+	}
+	for k, v := range before {
+		if _, ok := out[k]; !ok && v != 0 {
+			out[k] = -v
+		}
+	}
+	return out
+}
+
+func countSource(sources []string, want string) int {
+	n := 0
+	for _, s := range sources {
+		if s == want {
+			n++
+		}
+	}
+	return n
+}
+
 func traceToolCall(ctx context.Context, res abi.Resolver, c turnbench.Call) (*abi.ToolCall, error) {
 	args := []byte(c.Args)
 	if len(args) == 0 {
@@ -486,6 +828,10 @@ func timingClass(r *abi.Result, v abi.Verdict) (class, source, tier string) {
 }
 
 func resourceLabel(raw json.RawMessage) string {
+	return resourceLabelBytes([]byte(raw))
+}
+
+func resourceLabelBytes(raw []byte) string {
 	var m map[string]any
 	if err := json.Unmarshal(raw, &m); err != nil {
 		return ""
@@ -501,6 +847,21 @@ func resourceLabel(raw json.RawMessage) string {
 		}
 	}
 	return ""
+}
+
+func toolCallArgsBytes(ctx context.Context, c *abi.ToolCall) []byte {
+	if c == nil {
+		return nil
+	}
+	if c.Args.Kind == abi.RefInline {
+		return c.Args.Inline
+	}
+	if res := abi.ActiveResolver(); res != nil {
+		if b, err := res.Resolve(ctx, c.Args); err == nil {
+			return b
+		}
+	}
+	return nil
 }
 
 func argsHash(raw json.RawMessage) string {
@@ -520,6 +881,37 @@ func elapsedNs(start time.Time) int64 {
 		return ns
 	}
 	return 1
+}
+
+func sumNs(vals []int64) int64 {
+	var total int64
+	for _, v := range vals {
+		total += v
+	}
+	return total
+}
+
+func percentileNs(vals []int64, pct int) int64 {
+	if len(vals) == 0 {
+		return 0
+	}
+	cp := append([]int64(nil), vals...)
+	sort.Slice(cp, func(i, j int) bool { return cp[i] < cp[j] })
+	if pct <= 0 {
+		return cp[0]
+	}
+	if pct >= 100 {
+		return cp[len(cp)-1]
+	}
+	idx := (len(cp) - 1) * pct / 100
+	return cp[idx]
+}
+
+func ratio(num, den int64) float64 {
+	if den <= 0 {
+		return 0
+	}
+	return float64(num) / float64(den)
 }
 
 // ---------------------------------------------------------------------------
@@ -565,7 +957,12 @@ func main() {
 	asJSON := flag.Bool("json", false, "emit the exact per-call ledger as JSON (all suites, or just -suite) and exit.")
 	timing := flag.Bool("timing", false, "run a measured raw-vs-fak proof for one suite and print per-tool-call latency/source evidence. If -suite is omitted, defaults to reread-same-file.")
 	timingJSON := flag.Bool("timing-json", false, "emit the measured raw-vs-fak proof as JSON. If -suite is omitted, defaults to reread-same-file.")
-	engineDelayMS := flag.Int("engine-delay-ms", 15, "fixed local-tool delay used by -timing/-timing-json so engine re-execution cost is visible and deterministic enough to inspect.")
+	parallel := flag.Bool("parallel", false, "run a warmed parallel hot-read proof: many workers repeat a small read set and fak serves the hot phase from vDSO tier-2.")
+	parallelJSON := flag.Bool("parallel-json", false, "emit the warmed parallel hot-read proof as JSON.")
+	engineDelayMS := flag.Int("engine-delay-ms", 15, "fixed local-tool delay used by timing and parallel proof modes so engine re-execution cost is visible and deterministic enough to inspect.")
+	parallelWorkers := flag.Int("parallel-workers", 32, "worker count for -parallel/-parallel-json.")
+	parallelCalls := flag.Int("parallel-calls", 512, "parallel hot-phase calls for -parallel/-parallel-json.")
+	parallelHotFiles := flag.Int("parallel-hot-files", 8, "distinct hot files to prewarm and repeat for -parallel/-parallel-json.")
 	selfcheck := flag.Bool("selfcheck", false, "run HEADLESS: replay each suite through the kernel (the same turnbench.RunWithWorld path -print/-json drive), assert the documented ledger invariants, and exit non-zero on any drift. The CI / cross-platform dog-food of this demo's data path.")
 	suite := flag.String("suite", "prefilter-bad-calls", "suite for -print / -json (prefilter-bad-calls | reread-same-file | clean-control)")
 	flag.Parse()
@@ -587,10 +984,18 @@ func main() {
 		fmt.Fprintln(os.Stderr, "-engine-delay-ms must be non-negative")
 		os.Exit(2)
 	}
+	if *parallelWorkers <= 0 || *parallelCalls <= 0 || *parallelHotFiles <= 0 {
+		fmt.Fprintln(os.Stderr, "-parallel-workers, -parallel-calls, and -parallel-hot-files must be positive")
+		os.Exit(2)
+	}
 
 	switch {
 	case *selfcheck:
 		os.Exit(runSelfcheck())
+	case *parallelJSON:
+		os.Exit(runParallelJSON(*parallelWorkers, *parallelCalls, *parallelHotFiles, time.Duration(*engineDelayMS)*time.Millisecond))
+	case *parallel:
+		os.Exit(runParallelPrint(*parallelWorkers, *parallelCalls, *parallelHotFiles, time.Duration(*engineDelayMS)*time.Millisecond))
 	case *timingJSON:
 		os.Exit(runTimingJSON(selectedSuite, time.Duration(*engineDelayMS)*time.Millisecond))
 	case *timing:
@@ -606,6 +1011,7 @@ func main() {
 		fmt.Fprintf(os.Stderr, "trace dir: %s\n", tokenDir())
 		fmt.Fprintf(os.Stderr, "  go run ./cmd/tokendemo -print [-suite %s]\n", knownSuites[0].ID)
 		fmt.Fprintf(os.Stderr, "  go run ./cmd/tokendemo -timing [-suite reread-same-file]\n")
+		fmt.Fprintf(os.Stderr, "  go run ./cmd/tokendemo -parallel [-parallel-workers 32 -parallel-calls 512]\n")
 		fmt.Fprintf(os.Stderr, "  go run ./cmd/tokendemo -json\n")
 		fmt.Fprintf(os.Stderr, "  go run ./cmd/tokendemo -selfcheck\n")
 		os.Exit(2)
@@ -701,6 +1107,60 @@ func runTimingPrint(suite string, delay time.Duration) int {
 		nsToMs(proof.RawTotalNs), nsToMs(proof.FakTotalNs), nsToMs(proof.TimeSavedNs))
 	fmt.Printf("  tool-result tokens served from cache: %s   model-context tokens kept out: %s\n\n",
 		commaInt(proof.ToolTokensFromCache), commaInt(proof.ContextTokensKeptOut))
+	return 0
+}
+
+func runParallelJSON(workers, calls, hotFiles int, delay time.Duration) int {
+	proof, err := buildParallelProof(context.Background(), workers, calls, hotFiles, delay)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "parallel proof: %v\n", err)
+		return 1
+	}
+	b, _ := json.MarshalIndent(proof, "", "  ")
+	fmt.Println(string(b))
+	return 0
+}
+
+func runParallelPrint(workers, calls, hotFiles int, delay time.Duration) int {
+	p := colors()
+	proof, err := buildParallelProof(context.Background(), workers, calls, hotFiles, delay)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "parallel proof: %v\n", err)
+		return 1
+	}
+	fmt.Printf("\n  %s — %d workers, %d hot calls, %d hot files (engine delay %dms)\n",
+		p.paint(p.bold, "fak · parallel hot-cache proof"), proof.Workers, proof.Calls, proof.HotFiles, proof.EngineDelayMs)
+	fmt.Printf("  %s\n\n", p.paint(p.dim, "fak prewarms one read per hot file, then the parallel hot phase should be vDSO tier-2 only"))
+	fmt.Printf("  raw engine calls: %d   fak warmup engine calls: %d   fak hot engine calls: %d\n",
+		proof.RawEngineCalls, proof.FakWarmupEngineCalls, proof.FakHotEngineCalls)
+	fmt.Printf("  vDSO hits: %d   engine calls avoided: %d (%.1f%%)   tool tokens from cache: %s\n",
+		proof.VDSOHits, proof.EngineCallsAvoided, proof.EngineCallAvoidedRate*100, commaInt(proof.ToolTokensFromCache))
+	fmt.Printf("  hot-phase total tool time: raw %.3fms   fak %.3fms   saved %.3fms\n",
+		nsToMs(proof.RawTotalNs), nsToMs(proof.FakHotTotalNs), nsToMs(proof.TimeSavedNs))
+	fmt.Printf("  hot-phase wall time: raw %.3fms   fak %.3fms   warmup %.3fms\n",
+		nsToMs(proof.RawWallNs), nsToMs(proof.FakHotWallNs), nsToMs(proof.FakWarmupWallNs))
+	fmt.Printf("  p50/p95 per call: raw %s/%sms   fak %s/%sms\n\n",
+		formatMs(proof.RawP50Ns), formatMs(proof.RawP95Ns), formatMs(proof.FakP50Ns), formatMs(proof.FakP95Ns))
+
+	fmt.Printf("  %-38s  %8s  %8s  %8s  %8s  %10s  %10s\n",
+		"resource", "raw_eng", "warm_eng", "hot_eng", "vdso", "raw_p95", "fak_p95")
+	fmt.Printf("  %s\n", strings.Repeat("─", 100))
+	for _, r := range proof.PerResource {
+		color := p.dim
+		if r.FakHotEngineCalls == 0 && r.VDSOHits > 0 {
+			color = p.green
+		}
+		fmt.Printf("  %s\n", p.paint(color, fmt.Sprintf("%-38s  %8d  %8d  %8d  %8d  %10sms  %10sms",
+			padTrim(r.Resource, 38),
+			r.RawEngineCalls,
+			r.FakWarmupEngineCalls,
+			r.FakHotEngineCalls,
+			r.VDSOHits,
+			formatMs(r.RawP95Ns),
+			formatMs(r.FakP95Ns),
+		)))
+	}
+	fmt.Println()
 	return 0
 }
 

@@ -16,6 +16,8 @@ go run ./cmd/tokendemo -print
 go run ./cmd/tokendemo -print -suite reread-same-file
 go run ./cmd/tokendemo -timing
 go run ./cmd/tokendemo -timing-json
+go run ./cmd/tokendemo -parallel
+go run ./cmd/tokendemo -parallel-json
 go run ./cmd/tokendemo -json
 go run ./cmd/tokendemo -selfcheck
 ```
@@ -40,6 +42,11 @@ Use `-timing` for the concrete cache proof: the raw loop calls the local tool en
 for every read, while the fak loop runs the same trace through `kernel.Syscall` with
 the vDSO enabled. Repeated reads show `fak_source=vdso_tier2`,
 `fak_engine_call_delta=0`, and a per-call latency next to the raw engine time.
+
+Use `-parallel` for a larger hot-cache proof. It prewarms one read per hot file, then
+runs hundreds of parallel repeated reads. The output reports raw engine calls, fak
+warmup calls, fak hot-phase engine calls, vDSO hits, timing percentiles, and
+per-resource cache evidence.
 
 ## Scope
 

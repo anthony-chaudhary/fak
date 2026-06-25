@@ -141,6 +141,43 @@ func TestTimingProofShowsRepeatedReadsServedByVDSO(t *testing.T) {
 	}
 }
 
+func TestParallelProofShowsSharedHotCache(t *testing.T) {
+	proof, err := buildParallelProof(context.Background(), 8, 64, 4, time.Millisecond)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if proof.RawEngineCalls != 64 {
+		t.Fatalf("raw engine calls = %d, want 64", proof.RawEngineCalls)
+	}
+	if proof.FakWarmupEngineCalls != 4 {
+		t.Fatalf("fak warmup engine calls = %d, want 4", proof.FakWarmupEngineCalls)
+	}
+	if proof.FakHotEngineCalls != 0 {
+		t.Fatalf("fak hot engine calls = %d, want 0 after prewarm", proof.FakHotEngineCalls)
+	}
+	if proof.VDSOHits != 64 {
+		t.Fatalf("vdso hits = %d, want 64", proof.VDSOHits)
+	}
+	if proof.EngineCallsAvoided != 60 {
+		t.Fatalf("engine calls avoided = %d, want 60", proof.EngineCallsAvoided)
+	}
+	wantTokens := (180 + 540 + 700 + 120) * 16
+	if proof.ToolTokensFromCache != wantTokens {
+		t.Fatalf("tool tokens from cache = %d, want %d", proof.ToolTokensFromCache, wantTokens)
+	}
+	if len(proof.PerResource) != 4 {
+		t.Fatalf("per-resource rows = %d, want 4", len(proof.PerResource))
+	}
+	for _, r := range proof.PerResource {
+		if r.RawEngineCalls != 16 || r.FakWarmupEngineCalls != 1 || r.FakHotEngineCalls != 0 || r.VDSOHits != 16 {
+			t.Fatalf("resource row not fully cached: %+v", r)
+		}
+		if r.RawP95Ns <= 0 || r.FakP95Ns <= 0 {
+			t.Fatalf("resource timing fields must be populated: %+v", r)
+		}
+	}
+}
+
 // TestDenyVerdictBounded guards the one constant the prefilter win rests on: a deny
 // verdict that enters context in place of an executed bad call's result must stay a
 // SMALL, bounded size (the refusal vocabulary is closed). If it ever grows large, the
