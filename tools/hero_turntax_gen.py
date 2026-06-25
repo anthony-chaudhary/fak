@@ -10,7 +10,7 @@ is the honest picture, not a stylisation.
 
 Each panel names its OWN baseline so the framing stays honest:
   1. per-turn prefill cost vs context     — baseline = re-prefill on a cold KV miss
-  2. WebVoyager fleet prefill (MEASURED)   — baseline = naive re-prefill, 643 tasks
+  2. WebVoyager fleet prefill (MODELED)    — baseline = naive re-prefill floor, 643 tasks
   3. 50-turn x 5-agent fleet               — baseline = a tuned warm-cache SOTA stack
 
   Source of truth : tools/hero_turntax.data.json
@@ -181,7 +181,7 @@ def svg_turntax(d: dict) -> str:
     )
     out.append(f'  <title id="tt-title">{esc(d["meta"]["title"])}</title>')
     mults = " / ".join(p["mult"] for p in d["panels"])
-    out.append(f'  <desc id="tt-desc">Three panels — per-turn prefill cost vs context, WebVoyager fleet prefill vs workers, and 50-turn fleet serving work vs turns. In each, a baseline re-prefill curve rises ~linearly while fak\'s resident-KV curve stays flat; multipliers {esc(mults)}. Panel 2 is measured (643 WebVoyager tasks); panel 3 is the conservative number vs a tuned SOTA cache.</desc>')
+    out.append(f'  <desc id="tt-desc">Three panels — per-turn prefill cost vs context, WebVoyager fleet prefill vs workers, and 50-turn fleet serving work vs turns. In each, a baseline re-prefill curve rises ~linearly while fak\'s resident-KV curve stays flat; multipliers {esc(mults)}. Panel 2 is modeled geometry vs the naive floor (643 WebVoyager tasks); panel 3 is the conservative number vs a tuned SOTA cache.</desc>')
     out.append(STYLE)
 
     out.append(f'  <rect width="{W}" height="{H}" fill="url(#tt-bg)"/>')

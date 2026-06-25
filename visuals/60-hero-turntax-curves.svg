@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1320" height="622" viewBox="0 0 1320 622" role="img" aria-labelledby="tt-title tt-desc">
   <title id="tt-title">The turn-tax: re-prefill cost is linear, resident KV is not</title>
-  <desc id="tt-desc">Three panels — per-turn prefill cost vs context, WebVoyager fleet prefill vs workers, and 50-turn fleet serving work vs turns. In each, a baseline re-prefill curve rises ~linearly while fak's resident-KV curve stays flat; multipliers 20,480× / 9.7× / 4.1×. Panel 2 is measured (643 WebVoyager tasks); panel 3 is the conservative number vs a tuned SOTA cache.</desc>
+  <desc id="tt-desc">Three panels — per-turn prefill cost vs context, WebVoyager fleet prefill vs workers, and 50-turn fleet serving work vs turns. In each, a baseline re-prefill curve rises ~linearly while fak's resident-KV curve stays flat; multipliers 20,480× / 9.7× / 4.1×. Panel 2 is modeled geometry vs the naive floor (643 WebVoyager tasks); panel 3 is the conservative number vs a tuned SOTA cache.</desc>
   <defs>
     <linearGradient id="tt-bg" x1="0" y1="0" x2="1" y2="1">
       <stop offset="0%" stop-color="#fbfcfd"/>
@@ -54,7 +54,7 @@
   <text x="280.0" y="422.0" class="msub" text-anchor="middle">fewer prefill tokens at 1M ctx</text>
   <text x="280.0" y="442.0" class="mfoot" text-anchor="middle">2,560× already at a 128k agent context — the per-cold-miss tax = P / R</text>
   <text x="474" y="210" class="pt">Fleet prefill, WebVoyager</text>
-  <text x="474" y="230" class="pst">vs worker count · baseline = naive re-prefill · MEASURED, 643 tasks</text>
+  <text x="474" y="230" class="pst">vs worker count · baseline = naive re-prefill · MODELED geometry, 643 tasks</text>
   <line x1="514" y1="443.0" x2="834" y2="443.0" stroke="#e3e9ee" stroke-width="1"/>
   <text x="508" y="447.0" class="ytk" text-anchor="end">342M</text>
   <line x1="514" y1="384.1" x2="834" y2="384.1" stroke="#e3e9ee" stroke-width="1"/>
@@ -77,7 +77,7 @@
   <text x="486" y="377.0" class="axl" text-anchor="middle" transform="rotate(-90 486 377.0)">Total prefill tokens</text>
   <text x="690.0" y="402.0" class="mult" text-anchor="middle">9.7×</text>
   <text x="690.0" y="422.0" class="msub" text-anchor="middle">less prefill at 8 workers</text>
-  <text x="690.0" y="442.0" class="mfoot" text-anchor="middle">8.8× at a single worker — the turn-tax is worker-independent (measured)</text>
+  <text x="690.0" y="442.0" class="mfoot" text-anchor="middle">8.8× at a single worker vs the naive floor — modeled geometry, no wall-clock</text>
   <text x="884" y="210" class="pt">50-turn × 5-agent fleet</text>
   <text x="884" y="230" class="pst">vs turns elapsed · baseline = a tuned warm-cache SOTA stack</text>
   <line x1="924" y1="446.4" x2="1244" y2="446.4" stroke="#e3e9ee" stroke-width="1"/>

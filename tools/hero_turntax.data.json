@@ -1,5 +1,5 @@
 {
-  "_about": "SOURCE OF TRUTH for the fak TURN-TAX efficiency curves (visuals/60-hero-turntax-curves.svg), rendered by tools/hero_turntax_gen.py. fak's analog of the MiniMax 'GQA vs MSA' 3-panel attention-efficiency chart: a baseline whose cost rises ~linearly vs a fak line that stays ~flat, the gap filled, one big multiplier per panel. The shape is real — re-prefill cost is linear in context/fleet, resident+addressable KV is not. Each panel names its OWN baseline honestly: a structural per-cold-miss tax (panel 1), a MEASURED WebVoyager elimination (panel 2), and the conservative-vs-tuned-SOTA fleet number (panel 3). Every number traces to fak/BENCHMARK-AUTHORITY.md / docs/webbench-baselines.md by commit. Edit this file, then run `python tools/hero_turntax_gen.py`.",
+  "_about": "SOURCE OF TRUTH for the fak TURN-TAX efficiency curves (visuals/60-hero-turntax-curves.svg), rendered by tools/hero_turntax_gen.py. fak's analog of the MiniMax 'GQA vs MSA' 3-panel attention-efficiency chart: a baseline whose cost rises ~linearly vs a fak line that stays ~flat, the gap filled, one big multiplier per panel. The shape is real — re-prefill cost is linear in context/fleet, resident+addressable KV is not. Each panel names its OWN baseline honestly: a structural per-cold-miss tax (panel 1), a MODELED WebVoyager elimination vs the naive floor (panel 2), and the conservative-vs-tuned-SOTA fleet number (panel 3). Every number traces to fak/BENCHMARK-AUTHORITY.md / docs/webbench-baselines.md by commit. Edit this file, then run `python tools/hero_turntax_gen.py`.",
   "meta": {
     "title": "The turn-tax: re-prefill cost is linear, resident KV is not",
     "as_of": "2026-06-21",
@@ -32,7 +32,7 @@
     },
     {
       "title": "Fleet prefill, WebVoyager",
-      "subtitle": "vs worker count · baseline = naive re-prefill · MEASURED, 643 tasks",
+      "subtitle": "vs worker count · baseline = naive re-prefill · MODELED geometry, 643 tasks",
       "x_label": "Concurrent workers",
       "y_label": "Total prefill tokens",
       "x_ticks": ["1", "2", "4", "8"],
@@ -43,7 +43,7 @@
       "fak": [19.4, 36.8, 71.6, 141.3],
       "mult": "9.7×",
       "mult_sub": "less prefill at 8 workers",
-      "mult_foot": "8.8× at a single worker — the turn-tax is worker-independent (measured)",
+      "mult_foot": "8.8× at a single worker vs the naive floor — modeled geometry, no wall-clock",
       "anchor_idx": 3
     },
     {
