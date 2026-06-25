@@ -61,8 +61,9 @@ type SessionPlanner struct {
 	ingested int               // messages already lowered into store+index (the append cursor)
 
 	// Incremental pins, maintained in O(1) per new message so a turn never re-scans all N to
-	// re-derive them: the system prompt, the active goal (first user turn), and the last user
-	// turn — the spans a turn cannot proceed without (the heuristicForecast contract).
+	// re-derive them: the active goal, the system prompt, the first user turn, and the last
+	// user turn — the spans a turn cannot proceed without (the heuristicForecast contract).
+	goalPin         string // the active-goal root (a RoleGoal message, #845); "" when no goal is set
 	systemPin       string
 	firstUserPin    string
 	lastUserPin     string
@@ -113,8 +114,12 @@ func (sp *SessionPlanner) ingest(messages []Message) {
 		span := sp.store.Add(role, messageDurability(role), []byte(msg.Content), false)
 		sp.index.Add(span)
 		// Pins track the NORMALIZED role (empty -> user), exactly as messagesToStore does, so
-		// a SessionPlanner and the stateless seam pin the same spans.
+		// a SessionPlanner and the stateless seam pin the same spans. The active goal (a
+		// RoleGoal span, #845) is the intentional GC root — the FIRST goal span wins and is
+		// charged ahead of the structural pins in pins().
 		switch {
+		case role == RoleGoal && sp.goalPin == "":
+			sp.goalPin = span.ID
 		case role == RoleSystem && sp.systemPin == "":
 			sp.systemPin = span.ID
 		case role == RoleUser && sp.firstUserPin == "":
@@ -133,11 +138,16 @@ func (sp *SessionPlanner) ingest(messages []Message) {
 	sp.ingested = len(messages)
 }
 
-// pins returns the incremental pin id list in the same order messagesToStore produces — system
-// prompt, first user turn, then the last user turn when it differs from the first. A pin id is
-// resolved against the index in Probe, so a pin that names no span is simply skipped.
+// pins returns the incremental pin id list in the same order messagesToStore produces — the
+// active goal (the intentional GC root, charged first), then system prompt, first user turn,
+// then the last user turn when it differs from the first. A pin id is resolved against the
+// index in Probe, so a pin that names no span is simply skipped; with no goal set the list is
+// byte-identical to before, so the plan is unchanged.
 func (sp *SessionPlanner) pins() []string {
 	var pins []string
+	if sp.goalPin != "" {
+		pins = append(pins, sp.goalPin)
+	}
 	if sp.systemPin != "" {
 		pins = append(pins, sp.systemPin)
 	}

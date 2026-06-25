@@ -30,6 +30,14 @@ const (
 	RoleUser      = "user"
 	RoleAssistant = "assistant"
 	RoleTool      = "tool"
+	// RoleGoal is a message carrying the session's ACTIVE GOAL — the intentional GC
+	// root of the context heap (#845, epic #844). It is not a chat turn the model
+	// emits; a host injects it (e.g. from the harness /goal) so the context planner
+	// can PIN the goal as a root distinct from the first user turn, which the planner
+	// previously used as a proxy. A goal span is pinned resident regardless of its
+	// relevance/recency score, so a long session pursuing one goal never elides the
+	// span that goal depends on. Absent (no goal message), the planner is unchanged.
+	RoleGoal = "goal"
 )
 
 // ToolCall is one function call the model emitted. Arguments is the RAW JSON
