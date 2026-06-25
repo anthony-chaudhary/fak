@@ -1,0 +1,82 @@
+# Release container — publish the `fak` OCI image to GitHub Container Registry.
+#
+# Companion to release-artifacts.yml (which attaches cross-compiled binaries to the
+# release). On a `v*` tag push this builds the repo Dockerfile and pushes
+# `ghcr.io/<owner>/fak:<version>` and `:latest`. That image is what the Official MCP
+# Registry (modelcontextprotocol/registry) lists as the `oci` package in server.json —
+# ownership is proved by the `LABEL io.modelcontextprotocol.server.name` baked into the
+# Dockerfile. The actual registry publish (`mcp-publisher login github && publish`) is a
+# one-time interactive step run by a maintainer; see docs/fak/mcp-registry.md.
+#
+# Why ghcr and not Docker Hub: ghcr authenticates with the built-in GITHUB_TOKEN
+# (packages: write), so there is no external secret to manage — same single-artifact,
+# no-extra-credentials posture as the rest of the release path.
+name: release-container
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing vX.Y.Z tag to (re)build and push the image for"
+        type: string
+        required: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-container-${{ github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  image:
+    name: build + push ghcr image
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      packages: write # push to ghcr.io
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.tag || github.ref }}
+          fetch-depth: 0
+
+      - name: Resolve version + lowercase image ref
+        id: meta
+        run: |
+          set -euo pipefail
+          TAG="${{ github.event.inputs.tag || github.ref_name }}"
+          VERSION="${TAG#v}"
+          # ghcr image paths must be lowercase; the owner login may carry uppercase.
+          OWNER="$(echo '${{ github.repository_owner }}' | tr '[:upper:]' '[:lower:]')"
+          IMAGE="ghcr.io/${OWNER}/fak"
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "image=${IMAGE}" >> "$GITHUB_OUTPUT"
+          echo "resolved ${IMAGE}:${VERSION}"
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Log in to ghcr.io
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          build-args: |
+            APP_VERSION=${{ steps.meta.outputs.version }}
+          tags: |
+            ${{ steps.meta.outputs.image }}:${{ steps.meta.outputs.version }}
+            ${{ steps.meta.outputs.image }}:latest
+          labels: |
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.version=${{ steps.meta.outputs.version }}
+            io.modelcontextprotocol.server.name=io.github.anthony-chaudhary/fak

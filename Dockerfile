@@ -26,6 +26,11 @@ RUN go build -trimpath \
 
 # --- runtime -------------------------------------------------------------------
 FROM gcr.io/distroless/static-debian12:nonroot
+# Ownership label for the Official MCP Registry (modelcontextprotocol/registry): when
+# this image is published as an `oci` package in server.json, the registry verifies the
+# publisher by matching this label to the server name in the io.github.* namespace it
+# already authenticated via GitHub. See docs/fak/mcp-registry.md.
+LABEL io.modelcontextprotocol.server.name="io.github.anthony-chaudhary/fak"
 COPY --from=build /out/fak /usr/local/bin/fak
 EXPOSE 8080
 ENTRYPOINT ["/usr/local/bin/fak"]

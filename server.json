@@ -1,0 +1,24 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.anthony-chaudhary/fak",
+  "description": "Default-deny permission gate for AI agents that treats the model as untrusted and every tool call like a syscall: capability-lock plus result-quarantine for prompt-injection and tool-poisoning containment (OWASP Agentic / MCP Top-10).",
+  "repository": {
+    "url": "https://github.com/anthony-chaudhary/fak",
+    "source": "github"
+  },
+  "version": "0.33.0",
+  "packages": [
+    {
+      "registryType": "oci",
+      "identifier": "ghcr.io/anthony-chaudhary/fak:0.33.0",
+      "version": "0.33.0",
+      "transport": {
+        "type": "stdio"
+      },
+      "runtimeArguments": [
+        { "type": "positional", "value": "serve" },
+        { "type": "positional", "value": "--stdio" }
+      ]
+    }
+  ]
+}

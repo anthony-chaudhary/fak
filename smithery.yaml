@@ -1,0 +1,23 @@
+# Smithery configuration — https://smithery.ai/docs
+#
+# fak runs as a local stdio MCP server: `fak serve --stdio` speaks newline-delimited
+# JSON-RPC 2.0 over stdin/stdout and exposes the fak_* tool-call adjudication tools.
+# Install the binary first (`go install github.com/anthony-chaudhary/fak/cmd/fak@latest`,
+# or download a release binary / pull ghcr.io/anthony-chaudhary/fak), then Smithery
+# launches it via the command below.
+startCommand:
+  type: stdio
+  configSchema:
+    # fak needs no required configuration to start; an optional policy path narrows the
+    # default-deny capability floor. Without it, fak applies its built-in safe defaults.
+    type: object
+    required: []
+    properties:
+      policy:
+        type: string
+        description: "Path to a capability-floor policy JSON (e.g. examples/dev-agent-policy.json). Optional."
+  commandFunction: |-
+    (config) => ({
+      command: 'fak',
+      args: ['serve', '--stdio'].concat(config && config.policy ? ['--policy', config.policy] : [])
+    })
