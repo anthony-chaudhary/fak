@@ -44,24 +44,30 @@ PATH. No clone, no Go toolchain, no cgo. It needs only POSIX `sh`, `curl` (or `w
 Then confirm:
 
 ```sh
-fak version          # prints the installed version, e.g. 0.30.0
+fak version          # prints the installed version, e.g. 0.33.0
 ```
 
 What you'll see: a single version line on stdout (the release you just installed). If
 `fak version` resolves and prints, the binary is on your PATH and the install worked.
 
+> **`command not found` right after install?** On a fresh macOS, `/usr/local/bin` is not
+> writable without `sudo`, so the installer falls back to `~/.local/bin` — which is **not**
+> on the default PATH. Add it (zsh is the macOS default shell):
+> `echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.zshrc && exec zsh`. Or install
+> straight to a dir already on PATH: `FAK_INSTALL_DIR=/usr/local/bin sudo sh -c 'curl -fsSL .../install.sh | sh'`.
+
 Knobs (environment variables):
 
 | Variable | Effect | Default |
 | --- | --- | --- |
-| `FAK_VERSION` | Pin a version, e.g. `0.32.0` | latest release |
+| `FAK_VERSION` | Pin a version, e.g. `0.33.0` | latest release |
 | `FAK_INSTALL_DIR` | Install target directory | `/usr/local/bin` if writable, else `~/.local/bin` |
 | `FAK_REPO` | `owner/repo` override | `anthony-chaudhary/fak` |
 
 Example — pin a version into a user-local dir:
 
 ```sh
-FAK_VERSION=0.32.0 FAK_INSTALL_DIR="$HOME/.local/bin" \
+FAK_VERSION=0.33.0 FAK_INSTALL_DIR="$HOME/.local/bin" \
   sh -c 'curl -fsSL https://raw.githubusercontent.com/anthony-chaudhary/fak/main/install.sh | sh'
 ```
 
@@ -85,7 +91,7 @@ SHA256SUMS                           # aggregate, all targets
 ### Linux / macOS
 
 ```sh
-VERSION=0.32.0
+VERSION=0.33.0
 OS=$(uname -s | tr '[:upper:]' '[:lower:]')          # linux | darwin
 ARCH=$(uname -m); [ "$ARCH" = x86_64 ] && ARCH=amd64; [ "$ARCH" = aarch64 ] && ARCH=arm64
 ARCHIVE="fak_${VERSION}_${OS}_${ARCH}.tar.gz"
@@ -106,7 +112,7 @@ fak version
 ### Windows (PowerShell)
 
 ```powershell
-$Version = "0.32.0"
+$Version = "0.33.0"
 $Archive = "fak_${Version}_windows_amd64.zip"
 $Base    = "https://github.com/anthony-chaudhary/fak/releases/download/v$Version"
 
@@ -151,7 +157,7 @@ Containers must bind `0.0.0.0`, not loopback — the default `CMD` already does
 (`serve --addr 0.0.0.0:8080`). Stamp a specific version into the binary at build time:
 
 ```sh
-docker build --build-arg APP_VERSION=0.32.0 -t fak:0.32.0 .
+docker build --build-arg APP_VERSION=0.33.0 -t fak:0.33.0 .
 ```
 
 Override the entrypoint command to run `fak agent`, `fak policy`, etc. instead of the

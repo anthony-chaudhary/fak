@@ -33,26 +33,32 @@ need a hard security floor reach for it too (see
 
 ## Start Here
 
-No key, no model, no GPU:
+No key, no model, no GPU. Pick the line that matches how you got `fak`.
+
+**Installed the binary** (`curl ... install.sh | sh`, see [Install](#install))? These run
+from the bare binary anywhere — no clone, no Go, no `examples/` dir. They use the
+built-in default floor:
 
 ```bash
-go run ./cmd/fak preflight --policy examples/customer-support-readonly-policy.json --tool refund_payment --args "{}"
-go run ./cmd/fak preflight --policy examples/customer-support-readonly-policy.json --tool search_kb --args "{}"
+fak preflight --tool refund_payment --args "{}"     # -> DENY  (DEFAULT_DENY): unknown tool, fail-closed
+fak preflight --tool search_kb      --args "{}"     # -> ALLOW: a read-shaped name is not blanket-blocked
+fak preflight --tool shell_rm_rf    --args "{}"     # -> DENY  (POLICY_BLOCK): refused by structure
+fak preflight --tool exfiltrate     --args "{}"     # -> DENY  (SECRET_EXFIL)
+fak agent --offline                                 # the injection / destructive-op A/B, fully offline
+```
+
+**Cloned the repo** (you have the Go source tree + `examples/`)? The same proof against a
+named example floor, where the deny is by *argument value*:
+
+```bash
+go run ./cmd/fak preflight --policy examples/customer-support-readonly-policy.json --tool refund_payment --args "{}"   # -> DENY (POLICY_BLOCK)
+go run ./cmd/fak preflight --policy examples/customer-support-readonly-policy.json --tool search_kb     --args "{}"   # -> ALLOW
 go run ./cmd/fak agent --offline
-go run ./cmd/guarddemo -selfcheck
+go run ./cmd/guarddemo -selfcheck                                                                                      # -> WITH fak: 0 breaches
 ```
 
-Expected shape:
-
-```text
-refund_payment -> DENY (POLICY_BLOCK)
-search_kb      -> ALLOW
-agent --offline -> injection in context: no; destructive op: no; task still completes
-guarddemo       -> WITH fak: 0 breaches
-```
-
-That is the core proof: the dangerous action is refused by structure before a
-model interpretation matters.
+Either way, the core proof is the same: the dangerous action is refused by structure
+before a model interpretation matters.
 
 ## Use It With Your Agent
 
