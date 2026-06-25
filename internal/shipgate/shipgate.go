@@ -90,6 +90,15 @@ func ProfileFor(c EvidenceClass) Profile {
 	return EvidenceProfile[ClassFull]
 }
 
+// NeedsCostlyEvidence reports whether the profile requires either a strict metric gain
+// or a green suite — the two signals whose measurement forks an isolated worktree and
+// runs the suite. A class needing NEITHER (e.g. ClassDocsOnly, which keeps on the
+// truth-clean signal alone) can be admitted by a cheaper truth-only probe, skipping the
+// worktree+suite rung entirely. The truth-clean floor is never "costly" in this sense —
+// it is a single syscall, not a worktree fork — so dropping the costly signals never
+// drops the non-forgeability floor.
+func (p Profile) NeedsCostlyEvidence() bool { return p.needGain || p.needSuite }
+
 // Witness is the measured evidence the loop did not author: a before/after metric
 // plus the suite-green and truth-clean bits a real run would also require.
 type Witness struct {

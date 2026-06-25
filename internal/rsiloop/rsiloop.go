@@ -78,6 +78,13 @@ type Harness struct {
 	// Classify optionally proves the candidate's evidence class from artifacts the
 	// candidate did not author (for example, touched paths). nil means ClassFull.
 	Classify func(c Candidate) shipgate.EvidenceClass
+	// MeasureTruthOnly is the cheaper rung for a candidate whose harness-PROVEN class
+	// needs neither a metric gain nor a green suite (Profile.NeedsCostlyEvidence()==false,
+	// e.g. ClassDocsOnly): it derives only the TruthClean signal WITHOUT forking an
+	// isolated worktree or running the suite. nil means "always take the full Measure
+	// rung" — the skip is opt-in and changes nothing for a harness that does not supply
+	// it. The rung is chosen from the harness-proven class, never the candidate's say-so.
+	MeasureTruthOnly func(c Candidate) (Measurement, error)
 }
 
 // Row is one append-only journal record. The schema is stable so a downstream
@@ -200,7 +207,22 @@ func RunObserved(h Harness, j *Journal, k, maxCycles int, obs Observer) (Result,
 		}
 		cycle := i + 1
 
-		m, merr := h.Measure(c)
+		// Prove the candidate's evidence class BEFORE measuring: the class is harness-
+		// VERIFIED via h.Classify (never the candidate's say-so), and a nil seam or an
+		// unprovable narrowing pins ClassFull. A class the harness proves needs neither a
+		// metric gain nor a green suite (e.g. ClassDocsOnly) takes the cheaper truth-only
+		// rung when one is supplied — no worktree fork, no suite run — gated on the proven
+		// class, not merely on the seam being present.
+		class := shipgate.ClassFull
+		if h.Classify != nil {
+			class = h.Classify(c)
+		}
+		measure := h.Measure
+		if h.MeasureTruthOnly != nil && !shipgate.ProfileFor(class).NeedsCostlyEvidence() {
+			measure = h.MeasureTruthOnly
+		}
+
+		m, merr := measure(c)
 		note := m.Note // carry a measurement-supplied detail (e.g. a suite-red diagnostic)
 		measured := merr == nil
 		if merr != nil {
@@ -210,10 +232,6 @@ func RunObserved(h Harness, j *Journal, k, maxCycles int, obs Observer) (Result,
 			// so the witness reverts) — a downstream reader must not trust it.
 			m = Measurement{Metric: running, SuiteGreen: false, TruthClean: false}
 			note = "measure error: " + merr.Error()
-		}
-		class := shipgate.ClassFull
-		if h.Classify != nil {
-			class = h.Classify(c)
 		}
 
 		w := shipgate.Witness{
