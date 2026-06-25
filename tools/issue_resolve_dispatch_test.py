@@ -97,6 +97,87 @@ class LiveResolutionIssuesTest(unittest.TestCase):
             self.assertEqual(mod.live_resolution_issues(runs, probe=probe), set())
 
 
+class TimedOutWorkerReapTest(unittest.TestCase):
+    def _mk(self, runs: Path, issue: int, stamp: str, *, pid: int,
+            sidecar_mtime: float) -> Path:
+        import os
+        log = runs / f"resolve-{issue}-{stamp}.log"
+        log.write_text("", encoding="utf-8")
+        pid_file = log.with_suffix(".pid")
+        pid_file.write_text(str(pid), encoding="utf-8")
+        os.utime(pid_file, (sidecar_mtime, sidecar_mtime))
+        return pid_file
+
+    def test_dry_run_reports_would_reap_without_killing(self) -> None:
+        import tempfile
+        mod = load()
+        now = 1_000_000.0
+        killed: list[int] = []
+        with tempfile.TemporaryDirectory() as d:
+            runs = Path(d)
+            self._mk(runs, 717, "20260625-062210", pid=101, sidecar_mtime=now - 4000)
+            probe = lambda pid: {"alive": True, "create_time": now - 4001, "cmdline": ""}
+            out = mod.reap_timed_out_workers(
+                runs, timeout_s=1800, live=False, now_ts=now, probe=probe,
+                killer=lambda pid: killed.append(pid))
+        self.assertEqual([r["pid"] for r in out["would_reap"]], [101])
+        self.assertEqual(out["reaped"], [])
+        self.assertEqual(killed, [])
+
+    def test_live_reaps_matching_timed_out_worker(self) -> None:
+        import tempfile
+        mod = load()
+        now = 1_000_000.0
+        killed: list[int] = []
+        with tempfile.TemporaryDirectory() as d:
+            runs = Path(d)
+            self._mk(runs, 718, "20260625-060712", pid=102, sidecar_mtime=now - 4000)
+            probe = lambda pid: {"alive": True, "create_time": now - 4001, "cmdline": ""}
+            out = mod.reap_timed_out_workers(
+                runs, timeout_s=1800, live=True, now_ts=now, probe=probe,
+                killer=lambda pid: (killed.append(pid) or {"ok": True, "returncode": 0}))
+        self.assertEqual([r["pid"] for r in out["reaped"]], [102])
+        self.assertEqual(killed, [102])
+        self.assertTrue(out["reaped"][0]["kill"]["ok"])
+
+    def test_fresh_worker_is_not_reaped(self) -> None:
+        import tempfile
+        mod = load()
+        now = 1_000_000.0
+        with tempfile.TemporaryDirectory() as d:
+            runs = Path(d)
+            self._mk(runs, 719, "20260625-055209", pid=103, sidecar_mtime=now - 60)
+            probe = lambda pid: {"alive": True, "create_time": now - 61, "cmdline": ""}
+            out = mod.reap_timed_out_workers(
+                runs, timeout_s=1800, live=True, now_ts=now, probe=probe,
+                killer=lambda pid: {"ok": True})
+        self.assertEqual(out["candidates"], [])
+        self.assertEqual(out["reaped"], [])
+
+    def test_reused_pid_is_not_reaped(self) -> None:
+        import tempfile
+        mod = load()
+        now = 1_000_000.0
+        with tempfile.TemporaryDirectory() as d:
+            runs = Path(d)
+            self._mk(runs, 720, "20260625-055210", pid=104, sidecar_mtime=now - 4000)
+            probe = lambda pid: {
+                "alive": True,
+                "create_time": now + 60,
+                "cmdline": "chrome.exe --type=renderer",
+            }
+            out = mod.reap_timed_out_workers(
+                runs, timeout_s=1800, live=True, now_ts=now, probe=probe,
+                killer=lambda pid: {"ok": True})
+        self.assertEqual(out["candidates"], [])
+        self.assertEqual(out["reaped"], [])
+
+    def test_timeout_zero_disables_reap(self) -> None:
+        mod = load()
+        out = mod.reap_timed_out_workers(Path("does-not-matter"), timeout_s=None, live=True)
+        self.assertTrue(out["disabled"])
+
+
 class EvaluateTest(unittest.TestCase):
     SPAWN_OK = {
         "verdict": "SPAWN_OK", "reason": "ok", "cap": 2, "live": 0,
@@ -113,6 +194,9 @@ class EvaluateTest(unittest.TestCase):
         mod.issue_worker_prompt.build = lambda n, lane, *, workspace: {
             "prompt": f"resolve #{n}", "prompt_chars": prompt_chars, "title": f"title {n}"}
         mod.check_weekly_cap = lambda runs_dir, **k: {"capped": False}  # hermetic: not capped
+        mod.reap_timed_out_workers = lambda runs_dir, **k: {
+            "timeout_s": k.get("timeout_s"), "live": k.get("live"),
+            "candidates": [], "reaped": [], "would_reap": []}
 
         def boom(*a, **k):
             raise AssertionError("dry-run must never spawn")
@@ -130,6 +214,36 @@ class EvaluateTest(unittest.TestCase):
         self.assertEqual(p["lane"], "gateway")
         self.assertEqual(p["target_issue"], 467)
         self.assertIn("467", p["reason"])
+
+    def test_reap_runs_before_preflight_and_is_recorded(self) -> None:
+        mod = load()
+        state = {"reaped": False}
+
+        def fake_pre(root, **kw):
+            self.assertTrue(state["reaped"])
+            return self.SPAWN_OK
+
+        mod.issue_dispatch.refresh_registry = lambda root: {"ok": True}
+        mod.issue_dispatch.preflight = fake_pre
+        mod.reap_timed_out_workers = lambda runs_dir, **k: (
+            state.__setitem__("reaped", True) or
+            {"timeout_s": k.get("timeout_s"), "live": k.get("live"),
+             "candidates": [{"pid": 101}], "reaped": [{"pid": 101}], "would_reap": []})
+        mod.check_weekly_cap = lambda runs_dir, **k: {"capped": False}
+        mod.lane_issue_numbers = lambda root, lane, exclude=None: {
+            "lane": "gateway", "numbers": [467], "by_lane_count": {"gateway": 1}}
+        mod.live_resolution_issues = lambda runs_dir: set()
+        mod.recently_attempted_issues = lambda runs_dir, *, cooldown_min, **k: set()
+        mod.issue_worker_prompt.build = lambda n, lane, *, workspace: {
+            "prompt": f"resolve #{n}", "prompt_chars": 100, "title": f"title {n}"}
+        mod.spawn_issue_worker = lambda *a, **k: {
+            "pid": 202, "log": "resolve-467.log", "issue": 467,
+            "lane": "gateway", "backend": "claude"}
+
+        p = mod.evaluate(ROOT, max_workers=2, work_kind="engineering",
+                         lane=None, live=True)
+        self.assertTrue(p["ok"])
+        self.assertEqual(p["timed_out_workers"]["reaped"], [{"pid": 101}])
 
     def test_skips_already_live_issue(self) -> None:
         mod = load()
@@ -255,6 +369,9 @@ class BackendRoutingTest(unittest.TestCase):
         mod.issue_worker_prompt.build = lambda n, lane, *, workspace: {
             "prompt": f"resolve #{n}", "prompt_chars": 100, "title": f"t{n}"}
         mod.check_weekly_cap = lambda runs_dir, **k: {"capped": False}
+        mod.reap_timed_out_workers = lambda runs_dir, **k: {
+            "timeout_s": k.get("timeout_s"), "live": k.get("live"),
+            "candidates": [], "reaped": [], "would_reap": []}
         mod.spawn_issue_worker = lambda *a, **k: (_ for _ in ()).throw(
             AssertionError("dry-run must not spawn"))
 
@@ -411,6 +528,9 @@ class WeeklyCapGateTest(unittest.TestCase):
         mod.check_weekly_cap = lambda runs_dir, **k: {
             "capped": True, "until": "2026-06-25T20:00:00Z", "reset_text": "Jun 25, 1pm",
             "source": "banner"}
+        mod.reap_timed_out_workers = lambda runs_dir, **k: {
+            "timeout_s": k.get("timeout_s"), "live": k.get("live"),
+            "candidates": [], "reaped": [], "would_reap": []}
         # if the gate works, the lane router / spawn must never be reached:
         mod.lane_issue_numbers = lambda *a, **k: (_ for _ in ()).throw(
             AssertionError("capped tick must short-circuit before the lane router"))

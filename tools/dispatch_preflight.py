@@ -493,9 +493,16 @@ def evaluate(root: Path, *, max_workers: int, work_kind: str, product: str,
     cap = min(max_workers, target) if target else max_workers
     cap = max(0, cap)
     alive_kernel = kern.get("alive")
+    # When dos target is zero/unset, `dos loop` is emit-only in this repo and its
+    # `alive` count describes live DOS lanes (operator/peer work such as
+    # tools/docs/experiments), not issue-resolution worker processes. Counting it
+    # against the issue-dispatcher cap false-pins spawning whenever normal peer
+    # lanes are active. A positive target means dos is managing a standing worker
+    # population, so kernel alive becomes a real cap consumer again.
+    alive_kernel_for_cap = alive_kernel if target else 0
     alive_proc = proc_worker_count(root)
     # MAX of the two views: neither a stale lease nor an unleased orphan hides load.
-    live = max(alive_kernel or 0, alive_proc)
+    live = max(alive_kernel_for_cap or 0, alive_proc)
     headroom = cap - live
 
     # Fail-safe ordering, evaluated top to bottom:

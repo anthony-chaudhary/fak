@@ -151,6 +151,31 @@ def resolve_exe(name: str) -> str:
     return found or name
 
 
+def _which_on_exact_path(name: str, path_value: str | None) -> str | None:
+    """Resolve ``name`` using exactly ``path_value``.
+
+    Windows' `shutil.which(name, path=...)` still applies current-directory
+    search semantics, so a repo-root `fak.exe` can leak into a test or worker env
+    that deliberately supplied a PATH excluding it. This helper scans only the
+    explicit PATH directories while still honoring PATHEXT for command shims.
+    """
+    if path_value is None:
+        return shutil.which(name)
+    suffixes = [""]
+    if os.name == "nt" and not Path(name).suffix:
+        pathext = os.environ.get("PATHEXT", ".COM;.EXE;.BAT;.CMD")
+        suffixes.extend(ext.lower() for ext in pathext.split(os.pathsep) if ext)
+        suffixes.extend(ext.upper() for ext in pathext.split(os.pathsep) if ext)
+    for raw_dir in path_value.split(os.pathsep):
+        if not raw_dir:
+            continue
+        for suffix in suffixes:
+            candidate = Path(raw_dir) / f"{name}{suffix}"
+            if candidate.is_file():
+                return str(candidate)
+    return None
+
+
 # --- Dogfood: front each worker with the kernel (``fak guard``) ----------------
 # A dispatch worker IS the highest-volume dev work on a fleet node, and by default
 # it talked STRAIGHT to the provider API -- the kernel adjudicated NONE of it. That
@@ -199,7 +224,7 @@ def resolve_fak_bin(workspace: Path, env: dict[str, str] | None = None) -> str |
         return str(intree)
     # Honor the supplied env's PATH for the lookup (so the env param fully governs
     # resolution); an absent PATH key falls back to the process PATH.
-    return shutil.which("fak", path=e.get("PATH"))
+    return _which_on_exact_path("fak", e.get("PATH"))
 
 
 def guard_provider(backend: str) -> str:

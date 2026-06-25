@@ -33,6 +33,7 @@ import json
 import os
 import re
 import shutil
+import signal
 import subprocess
 import sys
 from pathlib import Path
@@ -55,6 +56,7 @@ RUNS_DIRNAME = ".dispatch-runs"
 # .pid/.backend sidecars so an auditor enumerates a wave straight from disk.
 WAVE_SIDECAR_SUFFIX = ".wave"
 _LOG_ISSUE_RE = re.compile(r"resolve-(\d+)-")
+DEFAULT_WORKER_TIMEOUT_S = dispatch_worker.DEFAULT_TIMEOUT_S
 
 # Worker backends this tick can launch:
 #   claude   = opus (t1) -- the reference path, the established quota pool.
@@ -161,6 +163,89 @@ def recently_attempted_issues(runs_dir: Path, *, cooldown_min: int,
         except OSError:
             continue
     return recent
+
+
+def terminate_issue_worker_tree(pid: int) -> dict[str, Any]:
+    """Kill one detached issue worker and its descendants.
+
+    The resolver's Windows path launches a hidden-console cmd/opencode tree, so
+    `taskkill /T` is the honest process-tree reaper. On POSIX the worker is
+    spawned with `start_new_session=True`, making its pid the process-group root.
+    """
+    if pid <= 0:
+        return {"ok": False, "returncode": None, "error": "invalid pid"}
+    try:
+        if os.name == "nt":
+            proc = subprocess.run(["taskkill", "/F", "/T", "/PID", str(pid)],
+                                  capture_output=True, text=True, timeout=30)
+            return {"ok": proc.returncode == 0, "returncode": proc.returncode,
+                    "stdout": (proc.stdout or "").strip()[-500:],
+                    "stderr": (proc.stderr or "").strip()[-500:]}
+        os.killpg(os.getpgid(pid), signal.SIGKILL)
+        return {"ok": True, "returncode": 0}
+    except (OSError, ValueError, subprocess.SubprocessError) as exc:
+        return {"ok": False, "returncode": None, "error": str(exc)}
+
+
+def reap_timed_out_workers(
+    runs_dir: Path,
+    *,
+    timeout_s: int | None,
+    live: bool,
+    now_ts: float | None = None,
+    probe: Any | None = None,
+    killer: Any | None = None,
+) -> dict[str, Any]:
+    """Find resolver workers older than the wall-clock cap and optionally reap.
+
+    This is deliberately sidecar-identity gated: a stale `.pid` file can only
+    nominate a process if `dispatch_preflight.resolve_sidecar_pid_is_live`
+    proves the current PID still belongs to that sidecar. Dry-run reports
+    `would_reap`; the scheduled live tick kills the worker tree before preflight
+    counts capacity.
+    """
+    if not timeout_s or timeout_s <= 0:
+        return {"timeout_s": timeout_s, "live": live, "candidates": [],
+                "reaped": [], "would_reap": [], "disabled": True}
+    import time
+    now = now_ts if now_ts is not None else time.time()
+    kill = killer or terminate_issue_worker_tree
+    candidates: list[dict[str, Any]] = []
+    reaped: list[dict[str, Any]] = []
+    would_reap: list[dict[str, Any]] = []
+    if not runs_dir.is_dir():
+        return {"timeout_s": timeout_s, "live": live, "candidates": [],
+                "reaped": [], "would_reap": []}
+    for pid_file in sorted(runs_dir.glob("resolve-*.pid")):
+        m = _LOG_ISSUE_RE.search(pid_file.name)
+        if not m:
+            continue
+        try:
+            pid = int(pid_file.read_text(encoding="utf-8").strip())
+            st = pid_file.stat()
+        except (OSError, ValueError):
+            continue
+        age_s = max(0.0, now - st.st_mtime)
+        if age_s < timeout_s:
+            continue
+        if not dispatch_preflight.resolve_sidecar_pid_is_live(pid_file, probe=probe):
+            continue
+        rec: dict[str, Any] = {
+            "issue": int(m.group(1)),
+            "pid": pid,
+            "pid_file": pid_file.name,
+            "log": pid_file.with_suffix(".log").name,
+            "age_s": round(age_s, 1),
+        }
+        candidates.append(dict(rec))
+        if live:
+            outcome = kill(pid)
+            rec["kill"] = outcome
+            reaped.append(rec)
+        else:
+            would_reap.append(rec)
+    return {"timeout_s": timeout_s, "live": live, "candidates": candidates,
+            "reaped": reaped, "would_reap": would_reap}
 
 
 def pick_target_issue(numbers: list[int], skip: set[int]) -> int | None:
@@ -512,16 +597,18 @@ def check_weekly_cap(runs_dir: Path, *, product: str, account_tag: str | None,
 def evaluate(root: Path, *, max_workers: int, work_kind: str, lane: str | None,
              live: bool, refresh: bool = True, cooldown_min: int = 120,
              backend: str = "claude",
-             exclude_lanes: set[str] | None = None) -> dict[str, Any]:
+             exclude_lanes: set[str] | None = None,
+             worker_timeout_s: int | None = DEFAULT_WORKER_TIMEOUT_S) -> dict[str, Any]:
     if backend not in BACKENDS:
         raise ValueError(f"unknown backend {backend!r}; expected one of {BACKENDS}")
     product = _BACKEND_PRODUCT[backend]
+    runs_dir = root / RUNS_DIRNAME
     reg = issue_dispatch.refresh_registry(root) if refresh else {"skipped": True}
+    reaped = reap_timed_out_workers(runs_dir, timeout_s=worker_timeout_s, live=live)
     pre = issue_dispatch.preflight(root, max_workers=max_workers, work_kind=work_kind,
                                    product=product)
     pre_ok = pre.get("verdict") == "SPAWN_OK"
     acct = pre.get("account") or {}
-    runs_dir = root / RUNS_DIRNAME
 
     # Weekly-cap gate — BEFORE the lane router's gh work. A logged-in account can
     # still be quota-exhausted; the preflight returns SPAWN_OK regardless. Without
@@ -535,6 +622,7 @@ def evaluate(root: Path, *, max_workers: int, work_kind: str, lane: str | None,
         return {
             "schema": SCHEMA, "workspace": str(root), "live": live, "backend": backend,
             "max_workers": max_workers, "registry_refresh": reg,
+            "timed_out_workers": reaped,
             "preflight": {"verdict": pre.get("verdict"), "reason": pre.get("reason"),
                           "cap": pre.get("cap"), "live": pre.get("live")},
             "account": {k: acct.get(k) for k in ("tag", "tier", "model", "dir")},
@@ -557,6 +645,7 @@ def evaluate(root: Path, *, max_workers: int, work_kind: str, lane: str | None,
     payload: dict[str, Any] = {
         "schema": SCHEMA, "workspace": str(root), "live": live, "backend": backend,
         "max_workers": max_workers, "registry_refresh": reg,
+        "timed_out_workers": reaped,
         "preflight": {"verdict": pre.get("verdict"), "reason": pre.get("reason"),
                       "cap": pre.get("cap"), "live": pre.get("live")},
         "account": {k: acct.get(k) for k in ("tag", "tier", "model", "dir")},
@@ -643,6 +732,13 @@ def render(p: dict[str, Any]) -> str:
     if p.get("spawned"):
         s = p["spawned"]
         lines.append(f"  spawned pid={s.get('pid')} issue=#{s.get('issue')} log={s.get('log')}")
+    timed_out = p.get("timed_out_workers") or {}
+    reaped = timed_out.get("reaped") or []
+    would_reap = timed_out.get("would_reap") or []
+    if reaped:
+        lines.append(f"  reaped timed-out workers: {len(reaped)}")
+    elif would_reap:
+        lines.append(f"  would reap timed-out workers: {len(would_reap)}")
     if not p.get("live") and p.get("action") == "would_spawn":
         lines.append("  DRY-RUN — re-run with --live to spawn the issue worker")
     return "\n".join(lines)
@@ -676,6 +772,10 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--cooldown-min", type=int, default=120,
                     help="skip an issue attempted within this many minutes (anti-churn; "
                          "0 disables). Default 120 — stops re-storming one un-landable issue.")
+    ap.add_argument("--worker-timeout-s", type=int, default=DEFAULT_WORKER_TIMEOUT_S,
+                    help=f"wall-clock cap for live resolver workers before this tick "
+                         f"reaps their process tree (default: {DEFAULT_WORKER_TIMEOUT_S}; "
+                         "0 disables)")
     ap.add_argument("--json", action="store_true", help="emit machine-readable JSON")
     args = ap.parse_args(argv)
 
@@ -687,7 +787,8 @@ def main(argv: list[str] | None = None) -> int:
     payload = evaluate(root, max_workers=args.max_workers, work_kind=work_kind,
                        lane=args.lane, live=args.live, refresh=not args.no_refresh,
                        cooldown_min=args.cooldown_min, backend=args.backend,
-                       exclude_lanes=exclude_lanes)
+                       exclude_lanes=exclude_lanes,
+                       worker_timeout_s=dispatch_worker.normalize_timeout(args.worker_timeout_s))
     print(json.dumps(payload, indent=2) if args.json else render(payload))
     return 0 if payload.get("ok") else 1
 

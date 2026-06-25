@@ -182,6 +182,17 @@ class EvaluateVerdictTest(unittest.TestCase):
         self.assertEqual(p["cap"], 3)
         self.assertEqual(p["verdict"], mod.OK_VERDICT)
 
+    def test_zero_target_does_not_count_live_dos_lanes_as_issue_workers(self) -> None:
+        # With target=0, `dos loop` reports ordinary live lanes (for example tools,
+        # docs, experiments) even though no DOS standing-loop worker population is
+        # armed. Those lanes must not consume the issue-dispatcher's process cap.
+        mod = load()
+        patch_checks(mod, kernel={"alive": 3, "target": 0, "verdict": "OVER_TARGET"}, procs=0)
+        p = run_eval(mod, max_workers=2)
+        self.assertEqual(p["cap"], 2)
+        self.assertEqual(p["live"], 0)
+        self.assertEqual(p["verdict"], mod.OK_VERDICT)
+
 
 class RenderTest(unittest.TestCase):
     def test_render_does_not_raise_on_evaluate_output(self) -> None:
