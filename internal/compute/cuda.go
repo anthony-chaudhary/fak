@@ -31,6 +31,7 @@ import "C"
 
 import (
 	"os"
+	"strconv"
 	"sync"
 	"sync/atomic"
 	"unsafe"
@@ -169,11 +170,29 @@ func init() {
 	}
 	graphEnabled = os.Getenv("FAK_CUDA_GRAPH") == "1"
 	cudaDev = &cudaBackend{
-		name:     "cuda",
-		tier:     "sm_" + itoaC(int(sm)),
-		totalMem: int64(total), // KEEP the device VRAM total — it used to be read and discarded
+		name:        "cuda",
+		tier:        "sm_" + itoaC(int(sm)),
+		totalMem:    int64(total), // KEEP the device VRAM total — it used to be read and discarded
+		budgetBytes: cudaBudgetBytes(),
 	}
 	Register(cudaDev)
+}
+
+// cudaBudgetBytes reads FAK_GPU_BUDGET_MB — the device-local weight budget in MiB. 0 / unset /
+// invalid = unbounded (place every explicit weight allocation with cudaMalloc, the prior behavior).
+// A positive value caps CUDA device-local weight residency; weights past the cap go into
+// cudaMallocManaged so the driver can page them on demand instead of losing the allocation race and
+// hard-panicking.
+func cudaBudgetBytes() int64 {
+	s := os.Getenv("FAK_GPU_BUDGET_MB")
+	if s == "" {
+		return 0
+	}
+	mb, err := strconv.ParseInt(s, 10, 64)
+	if err != nil || mb <= 0 {
+		return 0
+	}
+	return mb * 1024 * 1024
 }
 
 var cudaDev *cudaBackend
@@ -192,6 +211,11 @@ type cudaBuf struct {
 	hostLo  Layout         // layout this upload was cached under (ditto — same host buffer, two layouts)
 	be      *cudaBackend   // non-nil => async op output; Ready() tracks be.fenceGen vs bornGen
 	bornGen uint64         // fence generation in which this async buffer was enqueued
+	managed bool           // ptr came from cudaMallocManaged, not pooled cudaMalloc
+	// budgetedWeightBytes/managedWeight account only explicit resident WEIGHT buffers (F16/Q8/Q4K
+	// uploads). Generic F32 Upload is also used for per-token inputs, so it stays outside this budget.
+	budgetedWeightBytes int64
+	managedWeight       bool
 	// scales is the SECOND VRAM buffer a resident Q8_0 weight carries (#485): the per-block(32)
 	// f32 scales living beside the int8 codes in ptr. Q4_K keeps d/dmin/scales/codes packed in the
 	// raw super-block bytes at ptr, so it leaves scales==nil. Freed alongside ptr in Free.
@@ -254,6 +278,35 @@ type cudaBackend struct {
 	// them all to the C-side pool at a token boundary so steady-state decode stops paying
 	// cudaMalloc per op. Guarded by cudaMu (every appender holds it).
 	transient []*cudaBuf
+	// Device-local residency budget (Stage-1 offload parity with Vulkan). budgetBytes caps
+	// cudaMalloc-backed resident WEIGHT bytes; 0 = unbounded. dlUsed tracks bytes placed with
+	// cudaMalloc while under the cap. When the next explicit weight would exceed the cap, it is
+	// deliberately placed in managed memory (cudaMallocManaged) in upload order, so early/hot
+	// layers stay device-local and the cold tail spills by choice instead of OOM. Guarded by
+	// cudaMu (mutated only inside locked upload/free paths).
+	budgetBytes int64
+	dlUsed      int64
+	managedN    int
+}
+
+func (c *cudaBackend) CUDADebugResidencyBudget() (budgetBytes, dlUsed int64, managedN int) {
+	cudaMu.Lock()
+	defer cudaMu.Unlock()
+	return c.budgetBytes, c.dlUsed, c.managedN
+}
+
+func (c *cudaBackend) CUDADebugSetResidencyBudget(budgetBytes int64) (oldBudgetBytes, oldDLUsed int64, oldManagedN int) {
+	cudaMu.Lock()
+	defer cudaMu.Unlock()
+	oldBudgetBytes, oldDLUsed, oldManagedN = c.budgetBytes, c.dlUsed, c.managedN
+	c.budgetBytes, c.dlUsed, c.managedN = budgetBytes, 0, 0
+	return oldBudgetBytes, oldDLUsed, oldManagedN
+}
+
+func (c *cudaBackend) CUDADebugRestoreResidencyBudget(budgetBytes, dlUsed int64, managedN int) {
+	cudaMu.Lock()
+	defer cudaMu.Unlock()
+	c.budgetBytes, c.dlUsed, c.managedN = budgetBytes, dlUsed, managedN
 }
 
 // Recycle returns every transient op-output buffer allocated since the last Recycle to the
@@ -363,12 +416,53 @@ func (c *cudaBackend) DeviceMemory() (total, free int64, known bool) {
 func (c *cudaBackend) dalloc(nbytes int) *cudaBuf {
 	p := C.fcuda_malloc(C.size_t(nbytes))
 	if p == nil {
-		// fcuda_malloc now prints the real cudaMalloc error (OOM vs a context poisoned by a prior
-		// async kernel fault) to stderr before returning nil; carry the requested size here so the
-		// two halves of the diagnosis line up. A genuine OOM still panics loudly — nothing masked.
-		panic("compute: cuda device allocation failed for " + itoaC(nbytes) + " bytes (see the fak-cuda stderr line for the cudaMalloc reason)")
+		p = C.fcuda_malloc_managed(C.size_t(nbytes))
+		if p == nil {
+			// fcuda_malloc and fcuda_malloc_managed print the real CUDA errors (OOM vs a context
+			// poisoned by a prior async kernel fault) to stderr before returning nil; carry the
+			// requested size here so the two halves of the diagnosis line up.
+			panic("compute: cuda allocation failed for " + itoaC(nbytes) + " bytes (cudaMalloc and cudaMallocManaged fallback both failed; see fak-cuda stderr)")
+		}
+		return &cudaBuf{ptr: unsafe.Pointer(p), n: nbytes, managed: true}
 	}
 	return &cudaBuf{ptr: unsafe.Pointer(p), n: nbytes}
+}
+
+// dallocManaged allocates directly from cudaMallocManaged. Used by the residency-budget path for
+// cold weights. Caller holds cudaMu.
+func (c *cudaBackend) dallocManaged(nbytes int) *cudaBuf {
+	p := C.fcuda_malloc_managed(C.size_t(nbytes))
+	if p == nil {
+		panic("compute: cuda managed allocation failed for " + itoaC(nbytes) + " bytes")
+	}
+	return &cudaBuf{ptr: unsafe.Pointer(p), n: nbytes, managed: true}
+}
+
+// dallocWeight places an explicit weight buffer device-local while under the residency budget,
+// else managed (deliberately, in upload order). budgetBytes==0 means unbounded -> always attempt
+// device-local first. Caller holds cudaMu.
+func (c *cudaBackend) dallocWeight(nbytes int) *cudaBuf {
+	if c.budgetBytes > 0 && c.dlUsed+int64(nbytes) > c.budgetBytes {
+		buf := c.dallocManaged(nbytes)
+		c.accountWeightPlacement(buf, nbytes)
+		return buf
+	}
+	buf := c.dalloc(nbytes)
+	c.accountWeightPlacement(buf, nbytes)
+	return buf
+}
+
+func (c *cudaBackend) accountWeightPlacement(buf *cudaBuf, nbytes int) {
+	if c.budgetBytes == 0 || buf == nil || buf.ptr == nil {
+		return
+	}
+	if buf.managed {
+		c.managedN++
+		buf.managedWeight = true
+		return
+	}
+	c.dlUsed += int64(nbytes)
+	buf.budgetedWeightBytes = int64(nbytes)
 }
 
 func (c *cudaBackend) dev(shape []int, dt Dtype) (Tensor, *cudaBuf) {
@@ -401,7 +495,7 @@ func (c *cudaBackend) devF16(shape []int, layout Layout) (Tensor, *cudaBuf) {
 	for _, d := range shape {
 		n *= d
 	}
-	buf := c.dalloc(n * F16.Bytes())
+	buf := c.dallocWeight(n * F16.Bytes())
 	return makeTensor(c, F16, layout, append([]int(nil), shape...), nil, buf), buf
 }
 
@@ -587,12 +681,10 @@ func (c *cudaBackend) uploadQ4K(t Tensor, hb HostBuffer) Tensor {
 // resident-weight cache is never recycled out from under them.
 func (c *cudaBackend) devQ8(shape []int, block, nScales int) (Tensor, *cudaBuf) {
 	out, in := shape[0], shape[1]
-	buf := c.dalloc(out * in) // int8 codes, 1 byte each
-	buf.scales = unsafe.Pointer(C.fcuda_malloc(C.size_t(nScales * 4)))
-	if buf.scales == nil {
-		panic("compute: cuda Q8 scale allocation failed")
-	}
-	buf.scalesN = nScales * 4
+	buf := c.dallocWeight(out * in) // int8 codes, 1 byte each
+	scales := c.dalloc(nScales * 4)
+	buf.scales = scales.ptr
+	buf.scalesN = scales.n
 	q := &QuantSpec{Block: block, Axis: 2, Bits: 8, Symmetric: true}
 	return makeTensor(c, Q8_0, RowMajor, append([]int(nil), shape...), q, buf), buf
 }
@@ -601,7 +693,7 @@ func (c *cudaBackend) devQ8(shape []int, block, nScales int) (Tensor, *cudaBuf) 
 // super-block bytes (d/dmin/scales/codes all packed; no scale side-channel). nbytes is the size of
 // the host byte slice (= (out*in/256)*144). The QuantSpec records the 256-elem super-block.
 func (c *cudaBackend) devQ4K(shape []int, nbytes int) (Tensor, *cudaBuf) {
-	buf := c.dalloc(nbytes)
+	buf := c.dallocWeight(nbytes)
 	q := &QuantSpec{Block: 256, Axis: 2, Bits: 4, Symmetric: false}
 	return makeTensor(c, Q4_K, RowMajor, append([]int(nil), shape...), q, buf), buf
 }
@@ -674,6 +766,19 @@ func (c *cudaBackend) Free(t Tensor) {
 		}
 		C.fcuda_free(db.ptr)
 		db.ptr = nil
+		if db.budgetedWeightBytes > 0 {
+			c.dlUsed -= db.budgetedWeightBytes
+			if c.dlUsed < 0 {
+				c.dlUsed = 0
+			}
+			db.budgetedWeightBytes = 0
+		}
+		if db.managedWeight {
+			if c.managedN > 0 {
+				c.managedN--
+			}
+			db.managedWeight = false
+		}
 	}
 }
 

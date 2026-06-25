@@ -39,6 +39,7 @@ static cudaStream_t g_stream = 0;
 // graph allocator uses, kept minimal. Single-threaded by the Go-side cudaMu mutex.
 static std::unordered_map<size_t, std::vector<void *>> g_pool; // free buffers, by exact byte size
 static std::unordered_map<void *, size_t> g_live;              // live ptr -> its byte size
+static std::unordered_map<void *, size_t> g_managed_live;      // live cudaMallocManaged ptr -> byte size
 
 // host-transfer witness (#482): cumulative device->host bytes. Every d2h copy adds to it — the
 // Read fence (fcuda_d2h) adds the vector bytes, the single token-id copy in fcuda_argmax_f32
@@ -83,8 +84,25 @@ extern "C" void *fcuda_malloc(size_t bytes) {
   g_live[d] = bytes;
   return d;
 }
+extern "C" void *fcuda_malloc_managed(size_t bytes) {
+  if (bytes == 0) bytes = 1;
+  void *d = nullptr;
+  cudaError_t _e = cudaMallocManaged(&d, bytes, cudaMemAttachGlobal);
+  if (_e != cudaSuccess) {
+    fprintf(stderr, "fak-cuda: cudaMallocManaged(%zu bytes) failed: %s\n", bytes, cudaGetErrorString(_e));
+    return nullptr;
+  }
+  g_managed_live[d] = bytes;
+  return d;
+}
 extern "C" void fcuda_free(void *d) {
   if (!d) return;
+  auto mit = g_managed_live.find(d);
+  if (mit != g_managed_live.end()) {
+    g_managed_live.erase(mit);
+    cudaFree(d);
+    return;
+  }
   auto it = g_live.find(d);
   if (it != g_live.end()) {
     g_pool[it->second].push_back(d); // return to the pool for reuse, don't cudaFree

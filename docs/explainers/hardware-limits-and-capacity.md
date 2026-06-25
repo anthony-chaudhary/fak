@@ -70,11 +70,13 @@ So the plane plans. Something else is supposed to act. Read on for what that som
 This is where bytes are actually allocated and actually run out: `cudaBackend.dalloc`,
 `metalBackend.dalloc`, `vulkanBackend.dalloc`. Here is what they do when the device is full:
 
-- **CUDA** (`cuda.go: dalloc`) — `panic("compute: cuda device allocation failed")`. No
-  capacity check before the alloc, no fallback, no typed error.
-- **Metal** (`metal.go: dalloc`) — `panic("compute: metal device allocation failed")`. Same.
-- **Vulkan** (`vulkan.go: dalloc`) — the one that tries: it falls back to a host-visible
-  allocation, and only panics if *both* device-local and host-visible are exhausted.
+- **CUDA** (`cuda.go: dalloc`) — it now falls back from `cudaMalloc` to
+  `cudaMallocManaged`, and `FAK_GPU_BUDGET_MB` deliberately sends over-budget explicit
+  weight uploads to managed memory before a device-local OOM.
+- **Metal** (`metal.go: dalloc`) — `panic("compute: metal device allocation failed")`.
+  No capacity check before the alloc, no fallback, no typed error.
+- **Vulkan** (`vulkan.go: dalloc`) — it falls back to a host-visible allocation, and only
+  panics if *both* device-local and host-visible are exhausted.
 
 And the capacity *information* the physical plane has, it throws away. `fcuda_init` probes
 `p.totalGlobalMem` and returns it; `cuda.go: init` read it into a local and **discarded it**
@@ -208,7 +210,7 @@ add up to a HAL contract. Crediting them is what keeps the gap claim honest:
 
 | Mechanism | What it does | Why it is not the bridge |
 |---|---|---|
-| `vulkan.go: dallocWeight` (`FAK_GPU_BUDGET_MB`) | spills the cold weight tail host-visible when a device-local budget is exceeded | Vulkan-only; weights-only; env-set, not a device query; not in the HAL contract |
+| `vulkan.go: dallocWeight` / `cuda.go: dallocWeight` (`FAK_GPU_BUDGET_MB`) | spills the cold weight tail when a device-local budget is exceeded: host-visible on Vulkan, managed memory on CUDA | weights-only; env-set, not a device query; not in the HAL contract |
 | `cachemeta.PlanPlacement` + `TierPressure` | full demote-not-evict placement policy | wired into `cmd/hwcachedemo`/`cmd/cxlpooldemo` + tests, **not** the live model/serving allocation path |
 | `residency.Manager` + `polymodel.Pool` (`ErrTooLarge`) | a backend-agnostic resident-weight-byte budget with LRU page-out | policy-only; caller-supplied budget, not VRAM-derived; not wired to CUDA/Metal `Upload` |
 | `model/paging.go: pagedKernel` | upload → compute → free, an on-demand page-in primitive | standalone; bit-equal to resident, but not integrated into the live weight HAL |

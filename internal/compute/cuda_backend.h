@@ -26,6 +26,7 @@ int fcuda_init(char *name, int namelen, int *sm, size_t *total_mem);
 
 /* device memory + transfers (the residency seam). */
 void *fcuda_malloc(size_t bytes);
+void *fcuda_malloc_managed(size_t bytes);
 void fcuda_free(void *d);
 void fcuda_trim_pool_large(size_t max_keep_bytes);
 void fcuda_h2d(void *d, const void *h, size_t bytes);

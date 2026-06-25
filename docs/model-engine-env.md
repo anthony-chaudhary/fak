@@ -40,10 +40,10 @@ choosing a GPU path.
 
 | Variable | Type / units | Default | When to use | Source |
 |---|---|---|---|---|
-| `FAK_GPU_BUDGET_MB` | int, MiB | unset / `0` / invalid = **unbounded** (every weight device-local) | The **Spills** lever. Cap device-local weight residency on a card whose VRAM is smaller than the weight set; weights past the cap are placed host-visible *in upload order* (early/hot layers stay device-local, the cold tail spills by choice instead of losing the allocation race). Vulkan backend only. | `internal/compute/vulkan.go:57` |
+| `FAK_GPU_BUDGET_MB` | int, MiB | unset / `0` / invalid = **unbounded** for budgeted weight-upload paths | The **Spills** lever. Cap device-local weight residency on a card whose VRAM is smaller than the weight set; weights past the cap spill *in upload order* (early/hot layers stay device-local, the cold tail spills by choice instead of losing the allocation race): Vulkan uses host-visible memory, CUDA uses managed memory. | `internal/compute/vulkan.go:57`, `internal/compute/cuda.go:185` |
 | `FAK_VULKAN_SPIRV` | filesystem path (compiled SPIR-V dir) | unset = **Vulkan backend not registered** | Point at the compiled shader dir to register and use the Windows Vulkan backend at runtime. `build_vulkan.ps1` sets it after a build. Without it, `init()` returns early and only the Reference floor is available. (Requires the `vulkan` build tag.) | `internal/compute/vulkan.go:28` |
 | `FAK_METAL` | flag (set/unset) | unset (CPU prefill) | Apple GPU: route the resident-Q4_K hybrid **prefill** q4_k GEMMs through the Metal dequant-GEMM (Qwen3.6-27B path). Needs `-tags fakmetal`; a no-op on the pure-Go build. Decode stays on CPU. | `cmd/fakchat/main.go:205` |
-| `FAK_CUDA_GRAPH` | `1`-flag | off | Enable the CUDA-graph decode capture path. Off by default because per-token capture is a measured no-win (see the comment at the source); kept gated as the foundation for the instantiate-once/replay-many redesign. | `internal/compute/cuda.go:138` |
+| `FAK_CUDA_GRAPH` | `1`-flag | off | Enable the CUDA-graph decode capture path. Off by default because per-token capture is a measured no-win (see the comment at the source); kept gated as the foundation for the instantiate-once/replay-many redesign. | `internal/compute/cuda.go:171` |
 | `FAK_CUDA_Q8` | `1`-flag | off | `gpucheck`: exercise the CUDA Q8 device path in the Approx-gate witness. | `cmd/gpucheck/main.go:101` |
 | `FAK_CUDA_F16` | `1`-flag | off | `gpucheck`: exercise the CUDA f16 device path in the Approx-gate witness. | `cmd/gpucheck/main.go:101` |
 
