@@ -200,10 +200,10 @@ The greedy non-degeneracy guard is regression-tested. With a model on disk:
 
 ```bash
 FAK_SIMPLEDEMO_GGUF="$HOME/.cache/fak-models/gguf/Qwen2.5-1.5B-Instruct.Q8_0.gguf" \
-    go -C fak test ./cmd/simpledemo/ -run TestGreedyNonDegenerate -v
+    go test ./cmd/simpledemo/ -run TestGreedyNonDegenerate -v
 ```
 
-(The detector's own unit tests run with no model: `go -C fak test ./cmd/simpledemo/`.)
+(The detector's own unit tests run with no model: `go test ./cmd/simpledemo/`.)
 
 ---
 
