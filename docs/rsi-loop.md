@@ -13,6 +13,11 @@ description: "How fak's rsiloop closes its recursive self-improvement loop: it d
 > numbers that drive a KEEP. This is the runnable assembly of the four-part process
 > the repo already names in [`EXTENDING.md`](https://github.com/anthony-chaudhary/fak/blob/main/EXTENDING.md).
 
+This loop is the top rung of fak's *loops-all-the-way-down* picture. See
+[Engineering is building loops](explainers/engineering-is-building-loops.md) for how
+the RSI loop nests with the inner tool-call, turn, session, and fleet loops, and the
+orthogonal threads (trust, cost, memory, observability, governance) that cut across them.
+
 ## The gap this closes
 
 `rsicycle` is honest about being hand-fed:

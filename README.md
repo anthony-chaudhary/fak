@@ -401,6 +401,7 @@ fak serve --addr 127.0.0.1:8080 --base-url http://localhost:11434/v1 --model qwe
 | If you want… | Read |
 |---|---|
 | The two flips, from first principles | [Policy in the kernel](docs/explainers/policy-in-the-kernel.md) · [Addressable KV cache](docs/explainers/addressable-kv-cache.md) |
+| Why engineering is becoming loop-building, and where fak sits | [Engineering is building loops](docs/explainers/engineering-is-building-loops.md) |
 | Why one Go binary beats a serving stack (operational surface, laptop → fleet) | [One binary is the whole surface](docs/explainers/one-binary-one-surface.md) |
 | The serving roadmap (many-node disaggregated serving — RIDE + NATIVE, honest file:line-cited scope) | [`docs/serving/dual-track-serving-plan.md`](docs/serving/dual-track-serving-plan.md) |
 | Every benchmark number (single source of truth, traced to commit + artifact) | [`fak/BENCHMARK-AUTHORITY.md`](BENCHMARK-AUTHORITY.md) ⭐ |
