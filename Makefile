@@ -1,6 +1,6 @@
 # Makefile — portable build/test entrypoints (unit 12). On Windows without make,
 # use scripts/ci.ps1, which this mirrors.
-.PHONY: ci build vet test test-fast bench claims-lint salience index-sync model gofmt-check hygiene demo-audit demo-tool-tests demo-scorecards demo-smoke demo-headless-smoke demo-live-status demo-https-status demo-published-status demo-published-check demo-readiness-status gated-tests cuda-check cuda-build cuda-test cuda-accept
+.PHONY: ci build vet test test-fast bench status status-check claims-lint salience index-sync model gofmt-check hygiene demo-audit demo-tool-tests demo-scorecards demo-smoke demo-headless-smoke demo-live-status demo-https-status demo-published-status demo-published-check demo-readiness-status gated-tests cuda-check cuda-build cuda-test cuda-accept
 
 # ci is THE local green gate (AGENTS.md: "Green = make ci"). It must stay aligned with
 # .github/workflows/ci.yml's HARD steps so a pre-push `make ci` fails on the same things
@@ -50,6 +50,21 @@ test-fast: build vet
 
 bench:
 	go build -o fak ./cmd/fak && ./fak bench --suite tau2-smoke --out report.json
+
+# status: the cross-domain "where do we stand right now?" rollup — folds git +
+# benchmarks + work + industry into ONE control-pane view (the sibling of
+# scorecard_control_pane one level up: that folds the scorecard FAMILY, this folds
+# the four top-level domains). Read-only, pure-stdlib, no network by default; the
+# git pane is the crystal-clear center, the benchmark pane rolls up catalog.json
+# with per-run measured|modeled|unknown provenance (unknown surfaced loudly). NOT
+# in the hard `ci` chain — it folds optional/slow sub-tools (industry scorecard);
+# its hermetic *test* is gated automatically by `gated-tests`. status-check is the
+# advisory gate (non-zero only on a HARD pane failure or stale benchmarks).
+status:
+	@python3 tools/fresh_status.py
+
+status-check:
+	@python3 tools/fresh_status.py --check
 
 # model: export the real SmolLM2-135M weights the in-kernel engine (--engine inkernel)
 # loads from FAK_MODEL_DIR. One-time; needs Python. See GETTING-STARTED.md §4b.
