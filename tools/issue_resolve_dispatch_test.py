@@ -293,9 +293,42 @@ class EvaluateTest(unittest.TestCase):
         self._patch(mod, pre=self.SPAWN_OK,
                     pick={"lane": None, "numbers": [], "by_lane_count": {}})
         p = mod.evaluate(ROOT, max_workers=2, work_kind="engineering",
-                         lane=None, live=False)
+                          lane=None, live=False)
         self.assertFalse(p["ok"])
         self.assertEqual(p["verdict"], "NO_LANE")
+
+    def test_live_reports_spawn_failed_when_worker_exits_silent_immediately(self) -> None:
+        mod = load()
+        self._patch(mod, pre=self.SPAWN_OK,
+                    pick={"lane": "gateway", "numbers": [467], "by_lane_count": {}})
+        seen: dict = {}
+
+        def fake_spawn(*args, **kwargs):
+            seen.update(kwargs)
+            return {
+                "pid": 202,
+                "log": "resolve-467.log",
+                "issue": 467,
+                "lane": "gateway",
+                "backend": "claude",
+                "early_exit": {
+                    "checked": True,
+                    "alive": False,
+                    "wait_s": 5.0,
+                    "returncode": 0,
+                    "log_bytes": 0,
+                    "silent": True,
+                },
+            }
+
+        mod.spawn_issue_worker = fake_spawn
+        p = mod.evaluate(ROOT, max_workers=2, work_kind="engineering",
+                         lane=None, live=True, spawn_probe_s=5.0)
+        self.assertFalse(p["ok"])
+        self.assertEqual(p["verdict"], "SPAWN_FAILED")
+        self.assertEqual(p["action"], "spawn_failed")
+        self.assertEqual(seen["spawn_probe_s"], 5.0)
+        self.assertEqual(seen["account"]["tag"], "worker-a")
 
 
 class BuildWorkerCommandTest(unittest.TestCase):
@@ -343,6 +376,38 @@ class WinCreationFlagsTest(unittest.TestCase):
         self.assertEqual(mod.win_creationflags(r"C:\bin\claude.exe"), mod._CREATE_NO_WINDOW)
         self.assertEqual(mod.win_creationflags("/usr/bin/claude"), mod._CREATE_NO_WINDOW)
         self.assertNotEqual(mod.win_creationflags(r"C:\bin\claude.exe"), mod._DETACHED_PROCESS)
+
+
+class SpawnProbeTest(unittest.TestCase):
+    def test_probe_reports_alive_when_timeout_expires(self) -> None:
+        import tempfile
+        mod = load()
+
+        class _Alive:
+            def wait(self, timeout):
+                raise mod.subprocess.TimeoutExpired("worker", timeout)
+
+        with tempfile.TemporaryDirectory() as d:
+            log = Path(d) / "resolve-1.log"
+            log.write_text("", encoding="utf-8")
+            out = mod.probe_spawned_worker(_Alive(), log, wait_s=0.1)
+        self.assertEqual(out, {"checked": True, "alive": True, "wait_s": 0.1})
+
+    def test_probe_reports_silent_exit(self) -> None:
+        import tempfile
+        mod = load()
+
+        class _Exited:
+            def wait(self, timeout):
+                return 0
+
+        with tempfile.TemporaryDirectory() as d:
+            log = Path(d) / "resolve-1.log"
+            log.write_text("", encoding="utf-8")
+            out = mod.probe_spawned_worker(_Exited(), log, wait_s=0.1)
+        self.assertFalse(out["alive"])
+        self.assertTrue(out["silent"])
+        self.assertEqual(out["log_bytes"], 0)
 
 
 class BackendRoutingTest(unittest.TestCase):
@@ -609,6 +674,31 @@ class WaveMembershipTest(unittest.TestCase):
             grp = mod.enumerate_wave(runs, "wave-zzz")
             self.assertEqual(grp["ranks"], [1])
             self.assertEqual(grp["shortfall"], 0)
+
+    def test_spawn_stamps_account_sidecar(self) -> None:
+        # A silent 0-byte worker log is only useful if it can be attributed back to
+        # the selected switcher account. The account sidecar is written at spawn time,
+        # before the child has to produce any output.
+        import json
+        import tempfile
+        from unittest import mock
+        mod = load()
+
+        class _FakePopen:
+            def __init__(self, argv, **kwargs):
+                self.pid = 9
+
+        with tempfile.TemporaryDirectory() as d:
+            runs = Path(d)
+            account = {"tag": "gem8-netra", "tier": 1, "model": "opus", "dir": "/acct/gem8"}
+            with mock.patch.object(mod.subprocess, "Popen", _FakePopen):
+                res = mod.spawn_issue_worker(["true"], {}, runs, runs,
+                                             issue=2, lane="tools", backend="claude",
+                                             account=account)
+            self.assertEqual(res["account"]["tag"], "gem8-netra")
+            sidecars = list(runs.glob("*.account"))
+            self.assertEqual(len(sidecars), 1)
+            self.assertEqual(json.loads(sidecars[0].read_text(encoding="utf-8")), account)
 
     def test_spawn_without_membership_writes_no_wave_sidecar(self) -> None:
         # The default single-worker path is unchanged: no membership -> no .wave file.

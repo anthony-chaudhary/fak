@@ -55,8 +55,10 @@ RUNS_DIRNAME = ".dispatch-runs"
 # Per-worker membership sidecar (rank/wave/size/shortfall), written next to the
 # .pid/.backend sidecars so an auditor enumerates a wave straight from disk.
 WAVE_SIDECAR_SUFFIX = ".wave"
+ACCOUNT_SIDECAR_SUFFIX = ".account"
 _LOG_ISSUE_RE = re.compile(r"resolve-(\d+)-")
 DEFAULT_WORKER_TIMEOUT_S = dispatch_worker.DEFAULT_TIMEOUT_S
+DEFAULT_SPAWN_PROBE_S = 5.0
 
 # Worker backends this tick can launch:
 #   claude   = opus (t1) -- the reference path, the established quota pool.
@@ -369,6 +371,56 @@ def write_wave_sidecar(out_log: Path, rank: int, wave_id: str, size: int,
     return rec
 
 
+def write_account_sidecar(out_log: Path, account: dict[str, Any] | None) -> dict[str, Any]:
+    """Write the switcher account selected for this worker next to its log.
+
+    A 0-byte worker log used to tell us only which issue died. Stamping the account
+    at launch time makes later silent-death scans attributable without trusting the
+    worker to start and self-report.
+    """
+    src = account or {}
+    rec = {k: src.get(k) for k in ("tag", "tier", "model", "dir")
+           if src.get(k) is not None}
+    if rec:
+        out_log.with_suffix(ACCOUNT_SIDECAR_SUFFIX).write_text(
+            json.dumps(rec, sort_keys=True), encoding="utf-8")
+    return rec
+
+
+def probe_spawned_worker(proc: subprocess.Popen, out_log: Path,
+                         wait_s: float = 0.0) -> dict[str, Any]:
+    """Briefly check whether a just-spawned worker died before it could log.
+
+    A healthy issue worker can be silent for many seconds while Claude starts, so a
+    live process with a 0-byte log is not a failure. The failure we can witness here
+    is narrower: the process has already exited AND the log is still empty.
+    """
+    if wait_s <= 0:
+        return {"checked": False}
+    try:
+        returncode = proc.wait(timeout=wait_s)
+    except subprocess.TimeoutExpired:
+        return {"checked": True, "alive": True, "wait_s": wait_s}
+    try:
+        log_bytes = out_log.stat().st_size
+    except OSError:
+        log_bytes = 0
+    rec: dict[str, Any] = {
+        "checked": True,
+        "alive": False,
+        "wait_s": wait_s,
+        "returncode": returncode,
+        "log_bytes": log_bytes,
+        "silent": log_bytes == 0,
+    }
+    if log_bytes:
+        try:
+            rec["tail"] = out_log.read_text(encoding="utf-8", errors="replace")[-500:]
+        except OSError:
+            pass
+    return rec
+
+
 def enumerate_wave(runs_dir: Path, wave_id: str) -> dict[str, Any]:
     """Enumerate a wave from its ``.wave`` sidecars on disk — the auditor's view of
     a typed group. Returns ``{wave_id, granted, size, shortfall, ranks, members}``
@@ -397,7 +449,9 @@ def enumerate_wave(runs_dir: Path, wave_id: str) -> dict[str, Any]:
 def spawn_issue_worker(command: list[str], env: dict[str, str], cwd: Path,
                        log_dir: Path, issue: int, lane: str,
                        backend: str,
-                       membership: dict[str, Any] | None = None) -> dict[str, Any]:
+                       membership: dict[str, Any] | None = None,
+                       account: dict[str, Any] | None = None,
+                       spawn_probe_s: float = 0.0) -> dict[str, Any]:
     """Launch a detached worker (claude or opencode) on one issue; record pid.
 
     The log keeps the backend-neutral ``resolve-<N>-<stamp>.log`` name so the close
@@ -421,16 +475,25 @@ def spawn_issue_worker(command: list[str], env: dict[str, str], cwd: Path,
     else:
         kwargs["start_new_session"] = True
     fh = open(out_log, "w", encoding="utf-8")
-    proc = subprocess.Popen(argv, cwd=str(cwd), env=env, stdin=subprocess.DEVNULL,
-                            stdout=fh, stderr=subprocess.STDOUT, **kwargs)
+    try:
+        proc = subprocess.Popen(argv, cwd=str(cwd), env=env, stdin=subprocess.DEVNULL,
+                                stdout=fh, stderr=subprocess.STDOUT, **kwargs)
+    finally:
+        fh.close()
     (out_log.with_suffix(".pid")).write_text(str(proc.pid), encoding="utf-8")
     # Per-worker backend sidecar: makes each run's backend traceable from disk,
     # independent of the (multi-task, last-writer) tick record.
     (out_log.with_suffix(".backend")).write_text(backend, encoding="utf-8")
     result: dict[str, Any] = {"pid": proc.pid, "log": str(out_log), "issue": issue,
                               "lane": lane, "backend": backend}
+    acct = write_account_sidecar(out_log, account)
+    if acct:
+        result["account"] = acct
     if membership is not None:
         result["membership"] = write_wave_sidecar(out_log, **membership)
+    early = probe_spawned_worker(proc, out_log, spawn_probe_s)
+    if early.get("checked"):
+        result["early_exit"] = early
     return result
 
 
@@ -595,10 +658,11 @@ def check_weekly_cap(runs_dir: Path, *, product: str, account_tag: str | None,
 
 
 def evaluate(root: Path, *, max_workers: int, work_kind: str, lane: str | None,
-             live: bool, refresh: bool = True, cooldown_min: int = 120,
-             backend: str = "claude",
-             exclude_lanes: set[str] | None = None,
-             worker_timeout_s: int | None = DEFAULT_WORKER_TIMEOUT_S) -> dict[str, Any]:
+              live: bool, refresh: bool = True, cooldown_min: int = 120,
+              backend: str = "claude",
+              exclude_lanes: set[str] | None = None,
+              worker_timeout_s: int | None = DEFAULT_WORKER_TIMEOUT_S,
+              spawn_probe_s: float = DEFAULT_SPAWN_PROBE_S) -> dict[str, Any]:
     if backend not in BACKENDS:
         raise ValueError(f"unknown backend {backend!r}; expected one of {BACKENDS}")
     product = _BACKEND_PRODUCT[backend]
@@ -692,7 +756,18 @@ def evaluate(root: Path, *, max_workers: int, work_kind: str, lane: str | None,
         env = opencode_worker_env(acct.get("dir"), chosen_lane, root, runs_dir)
     env["FLEET_RESOLVE_ISSUE"] = str(target)
     command = build_worker_command(backend, rec["prompt"], model)
-    spawned = spawn_issue_worker(command, env, root, runs_dir, target, chosen_lane, backend)
+    spawned = spawn_issue_worker(command, env, root, runs_dir, target, chosen_lane, backend,
+                                 account=acct, spawn_probe_s=spawn_probe_s)
+    early = spawned.get("early_exit") or {}
+    if early.get("checked") and not early.get("alive") and early.get("silent"):
+        payload.update({"ok": False, "action": "spawn_failed",
+                        "verdict": "SPAWN_FAILED",
+                        "spawned": spawned,
+                        "reason": (f"{backend} worker pid {spawned['pid']} for "
+                                   f"#{target} exited within {early.get('wait_s')}s "
+                                   "and produced an empty log")})
+        _record(runs_dir, payload)
+        return payload
     payload.update({"ok": True, "action": "spawned", "verdict": "SPAWNED",
                     "spawned": spawned,
                     "reason": (f"spawned {backend} issue-resolution worker pid "
@@ -776,6 +851,9 @@ def main(argv: list[str] | None = None) -> int:
                     help=f"wall-clock cap for live resolver workers before this tick "
                          f"reaps their process tree (default: {DEFAULT_WORKER_TIMEOUT_S}; "
                          "0 disables)")
+    ap.add_argument("--spawn-probe-s", type=float, default=DEFAULT_SPAWN_PROBE_S,
+                    help=f"seconds to wait after a live spawn to catch immediate "
+                         f"empty-log exits (default: {DEFAULT_SPAWN_PROBE_S}; 0 disables)")
     ap.add_argument("--json", action="store_true", help="emit machine-readable JSON")
     args = ap.parse_args(argv)
 
@@ -787,8 +865,9 @@ def main(argv: list[str] | None = None) -> int:
     payload = evaluate(root, max_workers=args.max_workers, work_kind=work_kind,
                        lane=args.lane, live=args.live, refresh=not args.no_refresh,
                        cooldown_min=args.cooldown_min, backend=args.backend,
-                       exclude_lanes=exclude_lanes,
-                       worker_timeout_s=dispatch_worker.normalize_timeout(args.worker_timeout_s))
+                        exclude_lanes=exclude_lanes,
+                        worker_timeout_s=dispatch_worker.normalize_timeout(args.worker_timeout_s),
+                        spawn_probe_s=max(0.0, args.spawn_probe_s))
     print(json.dumps(payload, indent=2) if args.json else render(payload))
     return 0 if payload.get("ok") else 1
 
