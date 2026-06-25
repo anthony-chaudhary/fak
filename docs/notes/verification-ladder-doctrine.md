@@ -99,15 +99,15 @@ The lazy-escalation half of the doctrine, enumerated against `HEAD`:
 
 ## The epic line
 
-Eight epics build the missing half. The keystone is Epic 1 (it adds the verdict and the lazy fold the others lean on); Epics 2 and 4 build on the fold semantics. Full drafts — problem, file:symbol current state, graduated rungs, acceptance, child issues, honesty boundary — are in [verification-ladder-epics.md](verification-ladder-epics.md).
+Eight epics build the missing half. The keystone is Epic 1 (it adds the verdict and the lazy fold the others lean on); Epics 2 and 4 build on the fold semantics. Full drafts — problem, file:symbol current state, graduated rungs, acceptance, child issues, honesty boundary — are in [verification-ladder-epics.md](verification-ladder-epics.md). They are tracked on GitHub under roadmap issue **#705**, each epic carrying its own child issues.
 
-| # | Epic |
-|---|------|
-| 1 | feat(kernel): VerdictIndeterminate + lazy chain fold — short-circuit on the first conclusive rung, escalate only on a residual abstain |
-| 2 | feat(adjudicator): per-claim risk-class RungProfile — restrict-only, data-driven rung selection (default the smallest sufficient rung) |
-| 3 | feat(adjudicator): per-tool complain → shadow → enforce promotion ledger (AppArmor/eBPF analogue) |
-| 4 | feat(kernel): result-side ladder parity — honor Deny/RequireWitness on admitResult |
-| 5 | feat(shipgate): smallest-sufficient-evidence keep-bit (graduated EvidenceProfile, default all-three) |
-| 6 | feat(engine): result-side ShareScope ceiling enforcement — confine a result to its declared scope on the share/readmit path |
-| 7 | feat(observability): rung-decision telemetry — make the adjudication ladder OBSERVABLE (a labeled /metrics counter over the verdict stream) |
-| 8 | feat(adjudicator): policy-manifest rate_limit + retry-after on WAIT (declarative throttle rung) |
+| # | Epic | Tracked |
+|---|------|---------|
+| 1 | feat(kernel): VerdictIndeterminate + lazy chain fold — short-circuit on the first conclusive rung, escalate only on a residual abstain | #657 |
+| 2 | feat(adjudicator): per-claim risk-class RungProfile — restrict-only, data-driven rung selection (default the smallest sufficient rung) | #663 |
+| 3 | feat(adjudicator): per-tool complain → shadow → enforce promotion ledger (AppArmor/eBPF analogue) | #669 |
+| 4 | feat(kernel): result-side ladder parity — honor Deny/RequireWitness on admitResult | #674 |
+| 5 | feat(shipgate): smallest-sufficient-evidence keep-bit (graduated EvidenceProfile, default all-three) | #680 |
+| 6 | feat(engine): result-side ShareScope ceiling enforcement — confine a result to its declared scope on the share/readmit path | #687 |
+| 7 | feat(observability): rung-decision telemetry — make the adjudication ladder OBSERVABLE (a labeled /metrics counter over the verdict stream) | #693 |
+| 8 | feat(adjudicator): policy-manifest rate_limit + retry-after on WAIT (declarative throttle rung) | #699 |
