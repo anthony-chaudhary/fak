@@ -39,7 +39,7 @@ def patch_checks(mod, *, host=None, account=None, kernel=None, procs=0):
     mod.host_check = lambda root, **kw: host
     mod.account_check = lambda root, **kw: account
     mod.kernel_alive = lambda root: kernel
-    mod.proc_worker_count = lambda root=None: procs
+    mod.proc_worker_count = lambda root=None, *, product=None: procs
 
 
 def run_eval(mod, **kw):
@@ -131,10 +131,17 @@ class EvaluateVerdictTest(unittest.TestCase):
         # Restore the real proc_worker_count, but make its two live-process witnesses
         # hermetic: no command-line workers, two live issue-resolution sidecars.
         mod._cmdline_worker_pids = lambda: set()
-        mod.live_resolve_worker_pids = lambda runs_dir: {101, 102}
-        mod.proc_worker_count = lambda root=None: len(
-            mod._cmdline_worker_pids() | mod.live_resolve_worker_pids(
+        mod.live_resolve_worker_pids = lambda runs_dir, **kw: {101, 102}
+        # Exercise the REAL union/scoping logic: an unscoped count is cmdline ∪
+        # sidecars; a product-scoped count is the sidecars for that product. Here
+        # the patched witnesses ignore product, so both views see {101, 102}.
+        def _count(root=None, *, product=None):
+            if product is not None:
+                return len(mod.live_resolve_worker_pids((root or ROOT) / mod.RUNS_DIRNAME,
+                                                        product=product))
+            return len(mod._cmdline_worker_pids() | mod.live_resolve_worker_pids(
                 (root or ROOT) / mod.RUNS_DIRNAME))
+        mod.proc_worker_count = _count
         p = run_eval(mod, max_workers=2)
         self.assertEqual(p["live"], 2)
         self.assertEqual(p["os_worker_procs"], 2)
@@ -308,8 +315,49 @@ class WorkerCountTest(unittest.TestCase):
     def test_proc_worker_count_unions_cmdline_and_sidecar_pids(self) -> None:
         mod = load()
         mod._cmdline_worker_pids = lambda: {101, 103}
-        mod.live_resolve_worker_pids = lambda runs_dir: {101, 102}
+        mod.live_resolve_worker_pids = lambda runs_dir, **kw: {101, 102}
         self.assertEqual(mod.proc_worker_count(ROOT), 3)
+
+    def test_proc_worker_count_scopes_to_product_pool(self) -> None:
+        # A product-scoped count is the issue-resolver sidecars for that product
+        # ALONE — the generic cmdline-marked DOS-loop workers (no backend tag) do
+        # not pin a specific pool's cap, so the two account pools fill independently.
+        mod = load()
+        mod._cmdline_worker_pids = lambda: {999}
+        seen = {}
+
+        def fake_pids(runs_dir, **kw):
+            seen["product"] = kw.get("product")
+            return {201, 202} if kw.get("product") == "opencode" else {201, 202, 203}
+        mod.live_resolve_worker_pids = fake_pids
+        # Unscoped: cmdline ∪ all sidecars = {999, 201, 202, 203} = 4
+        self.assertEqual(mod.proc_worker_count(ROOT), 4)
+        # Product-scoped: only that pool's sidecars, no cmdline union
+        self.assertEqual(mod.proc_worker_count(ROOT, product="opencode"), 2)
+        self.assertEqual(seen["product"], "opencode")
+
+    def test_live_resolve_worker_pids_filters_by_backend_sidecar(self) -> None:
+        import tempfile
+        mod = load()
+        with tempfile.TemporaryDirectory() as d:
+            runs = Path(d)
+            now = 1_000_000.0
+            cl = runs / "resolve-700-20260625-100000.pid"
+            oc = runs / "resolve-701-20260625-100100.pid"
+            cl.write_text("701", encoding="utf-8")
+            oc.write_text("702", encoding="utf-8")
+            cl.with_suffix(".backend").write_text("claude", encoding="utf-8")
+            oc.with_suffix(".backend").write_text("opencode", encoding="utf-8")
+            for f in (cl, oc):
+                os.utime(f, (now, now))
+            probe = lambda pid: {"alive": True, "create_time": now - 1,
+                                 "name": "claude.exe", "cmdline": ""}
+            self.assertEqual(
+                mod.live_resolve_worker_pids(runs, product="claude", probe=probe), {701})
+            self.assertEqual(
+                mod.live_resolve_worker_pids(runs, product="opencode", probe=probe), {702})
+            self.assertEqual(
+                mod.live_resolve_worker_pids(runs, probe=probe), {701, 702})
 
 
 if __name__ == "__main__":

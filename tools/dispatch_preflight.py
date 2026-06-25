@@ -497,8 +497,12 @@ def live_resolve_worker_pids(
     *,
     alive: set[int] | None = None,
     probe: Callable[[int], dict[str, Any]] | None = None,
+    product: str | None = None,
 ) -> set[int]:
     """Live issue-resolution workers from `.dispatch-runs/resolve-*.pid`.
+
+    When ``product`` is given, only sidecars whose ``.backend`` tag is in that
+    product's pool are counted, so a claude worker does not pin the opencode cap.
 
     `issue_resolve_dispatch.py` is the active always-on issue closer in this
     plan-empty repo, and it writes one pid sidecar per spawned worker. A bare
@@ -516,20 +520,56 @@ def live_resolve_worker_pids(
         pid = _read_resolve_pid_sidecar(pid_file)
         if pid is None:
             continue
+        if product is not None and _sidecar_backend(pid_file) not in _product_backends(product):
+            continue
         if resolve_sidecar_pid_is_live(pid_file, alive=alive, probe=probe):
             pids.add(pid)
     return pids
 
 
-def proc_worker_count(root: Path | None = None) -> int:
+# A worker pins one ACCOUNT POOL's cap, not a global one: a claude (opus) worker
+# and an opencode (GLM) worker draw on different accounts and rate limits, so they
+# must run concurrently up to each pool's own headroom. The pool a sidecar belongs
+# to is its `.backend` (claude|opencode), written next to the `.pid`.
+_PRODUCT_BACKENDS = {
+    "claude": ("claude",),
+    "opencode": ("opencode",),
+}
+
+
+def _product_backends(product: str) -> tuple[str, ...]:
+    return _PRODUCT_BACKENDS.get(product, (product,))
+
+
+def _sidecar_backend(pid_file: Path) -> str | None:
+    """The backend (claude|opencode) a resolve sidecar belongs to, from its
+    `.backend` sibling. A missing/unreadable sidecar returns None so a
+    product-scoped count treats it conservatively as 'not this product' — a worker
+    with no backend tag does not pin a specific pool's cap."""
+    try:
+        return pid_file.with_suffix(".backend").read_text(encoding="utf-8").strip() or None
+    except OSError:
+        return None
+
+
+def proc_worker_count(root: Path | None = None, *, product: str | None = None) -> int:
     """Count live worker processes that consume the dispatch cap.
 
     This combines the generic DOS-loop command-line marker with the issue
     resolver's pid sidecars. Use the union of pids so a worker visible through both
     witnesses is counted once; if psutil is absent, each witness is still best
     effort and may be conservatively low rather than fabricating capacity.
+
+    When ``product`` is given, only workers in that account pool count — a claude
+    worker no longer pins the opencode lane's cap and vice versa, so the two lanes
+    fill to their independent account headrooms instead of starving one another.
+    The generic cmdline-marked DOS-loop workers carry no backend tag, so they are
+    counted only in the unscoped (global) call; a product-scoped count is the
+    issue-resolver sidecars for that product alone.
     """
     root = root or repo_root()
+    if product is not None:
+        return len(live_resolve_worker_pids(root / RUNS_DIRNAME, product=product))
     pids = set(_cmdline_worker_pids())
     pids.update(live_resolve_worker_pids(root / RUNS_DIRNAME))
     return len(pids)
@@ -570,7 +610,11 @@ def evaluate(root: Path, *, max_workers: int, work_kind: str, product: str,
     # lanes are active. A positive target means dos is managing a standing worker
     # population, so kernel alive becomes a real cap consumer again.
     alive_kernel_for_cap = alive_kernel if target else 0
-    alive_proc = proc_worker_count(root)
+    # Scope the worker count to THIS product's account pool: a claude (opus) worker
+    # and an opencode (GLM) worker draw on different accounts/rate limits, so each
+    # lane fills to its own headroom instead of the two sharing one global cap and
+    # starving each other (claude+GLM ran 3 total instead of 3+3 before this).
+    alive_proc = proc_worker_count(root, product=product)
     # MAX of the two views: neither a stale lease nor an unleased orphan hides load.
     live = max(alive_kernel_for_cap or 0, alive_proc)
     headroom = cap - live
