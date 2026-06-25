@@ -80,6 +80,56 @@ def test_duplication_ignores_composite_literal_fields():
     assert k["defects"] == []
 
 
+def test_duplication_catches_reformatted_clone():
+    # The token-stream engine (#780) is line-break invariant: the same code wrapped
+    # across a DIFFERENT set of lines (binary operators at line end suppress Go's
+    # semicolon insertion, so no token changes) is one normalized token stream. The old
+    # line-shingle engine keyed on per-line text and MISSED such a reformatted clone;
+    # the token engine catches it. Both copies use identical identifiers — only the line
+    # layout differs.
+    compact = ("package a\n"
+               "func tally(a, b, c, d, e, f int) int {\n"
+               "\tr := a + b + c + d + e + f\n"
+               "\ts := a*b + c*d + e*f\n"
+               "\tu := r - s + a - b + c - d\n"
+               "\treturn u + r - s\n"
+               "}\n")
+    wrapped = ("package b\n"
+               "func tally(a, b, c, d, e, f int) int {\n"
+               "\tr := a + b +\n\t\tc + d +\n\t\te + f\n"
+               "\ts := a*b +\n\t\tc*d +\n\t\te*f\n"
+               "\tu := r - s + a -\n\t\tb + c - d\n"
+               "\treturn u + r - s\n"
+               "}\n")
+    k = cs.kpi_duplication({"a.go": compact, "b.go": wrapped})
+    assert len(k["defects"]) >= 1
+    assert k["score"] < 100
+
+
+# --- go_tokens (the #780 token-stream foundation) -------------------------
+
+def test_go_tokens_literal_is_one_token():
+    # A string/raw/number literal is ONE `L` token — code-like content inside a string
+    # (`if`, `:=`, braces) is NEVER parsed as code. This is the precision win over the
+    # line engine, whose blanked string husks could stitch unrelated code into a clone.
+    src = ('package p\n'
+           'func f() {\n'
+           '\tx := "if y := 0 { return }"\n'
+           '\ty := 1 + 2\n'
+           '}\n')
+    syms = [t[0] for t in cs.go_tokens(src, normalize_idents=False)]
+    assert "if" not in syms and "return" not in syms  # those live inside the string
+    assert syms.count("L") == 3  # the string, the 1, the 2
+    assert ":=" in syms and "func" in syms  # real structure is kept
+
+
+def test_go_tokens_identifier_normalization_and_logic_flag():
+    toks = cs.go_tokens("a := bcd + e", normalize_idents=True)
+    assert [t[0] for t in toks] == ["I", ":=", "I", "+", "I"]
+    # the `:=` and `+` are logic tokens; the identifiers/keywords are not
+    assert [t[2] for t in toks] == [False, True, False, True, False]
+
+
 # --- vacuous_tests --------------------------------------------------------
 
 def test_vacuous_test_no_assertion_is_debt():

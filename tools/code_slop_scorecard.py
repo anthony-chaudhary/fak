@@ -24,7 +24,7 @@ shells ``go`` (so it stays no-network, no-build, gate-safe).
 
 The six KPIs (each 0-100):
 
-  duplication     copy-paste clones: a normalized N-line window appearing in 2+ places  [HARD]
+  duplication     copy-paste clones: a normalized Go token-window appearing in 2+ places [HARD]
   vacuous_tests   a Test/Benchmark func body that makes zero assertions                 [HARD]
   dead_code       an unexported symbol defined but referenced nowhere else              [HARD]
   comment_slop    tautological doc comments + commented-out code blocks                 [HARD]
@@ -60,7 +60,6 @@ from __future__ import annotations
 
 import argparse
 import difflib
-import hashlib
 import json
 import re
 import subprocess
@@ -81,10 +80,25 @@ VERSION_REL = "VERSION"
 # Each constant is a deliberate threshold with a stated reason.
 # ---------------------------------------------------------------------------
 
-# Duplication: a window must be this many normalized (comment/whitespace-stripped)
-# lines long to count as a clone — short enough to catch a copy-pasted block, long
-# enough that an idiomatic 3-line error-wrap or struct-literal is not "duplication".
-CLONE_WINDOW = 6
+# Duplication (token-stream engine, #780): a clone is a window of this many normalized
+# Go TOKENS appearing in 2+ places. Literals (strings/runes/numbers) collapse to one `L`
+# token; keywords/operators/punctuation/identifiers are kept verbatim. Token windows are
+# whitespace/comment/line-break invariant, so a clone reformatted across lines still
+# hashes identically (the line-shingle engine missed those) and a literal is one token,
+# never a blanked husk that stitches unrelated code into a phantom clone. Identifiers are
+# kept (NOT anonymized): full identifier anonymization was measured and collapses
+# idiomatic Go — `if x != nil { return ... }` and the like — into phantom mega-clusters
+# (a single window matched 5000+ sites), the OPPOSITE of tightening precision. ~34 tokens
+# is roughly a 6-line block: long enough that an idiomatic err-wrap is not "duplication",
+# short enough to catch a copy-pasted body (≈ the old 6-non-trivial-line window).
+CLONE_WINDOW_TOKENS = 34
+# A window counts only if it carries at least this many LOGIC tokens (computation /
+# comparison / assignment operators + control-flow keywords). This ONE structural rule
+# replaces the old hand-tuned line skips: package/import boilerplate, struct/interface
+# field lists and composite-literal `Key: value,` data all carry ZERO logic tokens, so
+# they are never mistaken for a copy-pasted block — duplication is measured on executable
+# structure, not text.
+CLONE_MIN_LOGIC_TOKENS = 2
 # A clone group is HARD only if its window appears in >= this many DISTINCT locations
 # (a location = (file, start-line)). Two is the threshold for "copy-pasted".
 CLONE_MIN_OCCURRENCES = 2
@@ -280,132 +294,248 @@ def line_comment_of(line: str, in_raw: bool, in_block: bool) -> tuple[str, bool,
 # `defects` is one HARD unit of slop-debt and every item in `soft` is advisory.
 # ---------------------------------------------------------------------------
 
-# Boilerplate every Go file shares — never a copy-paste *defect*, just the language.
-_CLONE_BOILERPLATE_RE = re.compile(
-    r"^(package\s+\w+|import\b|\)\s*$|\.\.\.|//.*)$")
+# ---------------------------------------------------------------------------
+# Go token-stream lexer (#780). A dependency-free, pure-Python tokenizer — no
+# `go/parser`, no `go` shell — so the scorecard stays static and gate-safe inside the
+# `demo-scorecards` target. It is the structural foundation of the clone detector:
+# duplication is measured on the NORMALIZED token stream, not on text lines, which is
+# both whitespace/comment/line-break invariant (a clone reformatted across lines still
+# matches — the line-shingle engine missed those) and string-husk immune (a literal is
+# one `L` token, never a blanked husk that stitches unrelated code into a phantom clone).
+# ---------------------------------------------------------------------------
+
+_GO_KEYWORDS = frozenset({
+    "break", "case", "chan", "const", "continue", "default", "defer", "else",
+    "fallthrough", "for", "func", "go", "goto", "if", "import", "interface", "map",
+    "package", "range", "return", "select", "struct", "switch", "type", "var",
+})
+
+# Operators + punctuation, longest-first so a greedy startswith() match never returns a
+# proper prefix (`<<=` before `<<` before `<`; `:=` before `:`; `...` before `.`).
+_GO_OPS = (
+    "<<=", ">>=", "&^=", "...",
+    "<-", ":=", "&&", "||", "++", "--", "==", "!=", "<=", ">=",
+    "+=", "-=", "*=", "/=", "%=", "&=", "|=", "^=", "<<", ">>", "&^",
+    "+", "-", "*", "/", "%", "&", "|", "^", "<", ">", "=", "!",
+    "(", ")", "[", "]", "{", "}", ",", ";", ".", ":",
+)
+
+# LOGIC tokens — the ones that denote computation or control flow, the signal that a
+# duplicated window is copy-pasted LOGIC rather than a data/declaration shape. A window
+# must carry CLONE_MIN_LOGIC_TOKENS of these to count. Identifiers, literals,
+# punctuation and the declaration keywords (package/import/type/struct/...) are NOT
+# logic, so an import block, a struct field list and a composite-literal `Key: value,`
+# region all score zero logic and are never clones — one rule, no per-line skip list.
+_LOGIC_OPS = frozenset({
+    "+", "-", "*", "/", "%", "&", "|", "^", "<<", ">>", "&^", "&&", "||", "!",
+    "==", "!=", "<", "<=", ">", ">=", "=", ":=",
+    "+=", "-=", "*=", "/=", "%=", "&=", "|=", "^=", "<<=", ">>=", "&^=", "++", "--",
+})
+_LOGIC_KEYWORDS = frozenset({"if", "for", "switch", "select", "range"})
 
 
-# A pure composite-literal field entry — `Name: value,` — is DATA, not copy-pasted
-# logic. Two struct values built field-by-field share these lines without being a
-# clone of any executable block; counting them floods duplication with weak signal
-# (the same reason struct *declarations* are skipped). A line that is only `Key: …,`
-# (no operators, no call beyond the value) is dropped.
-_COMPOSITE_FIELD_RE = re.compile(r"^[A-Za-z_]\w*\s*:\s*.*,\s*$")
+def go_tokens(text: str, *, normalize_idents: bool = True) -> list[tuple[str, int, bool]]:
+    """Lex Go source into a normalized token stream of (sym, line, is_logic).
+
+    Comments and whitespace are dropped; every string/rune/number literal collapses to
+    ``L``; identifiers collapse to ``I`` (so a clone survives a variable rename) unless
+    ``normalize_idents`` is False; keywords, operators and punctuation are kept verbatim.
+    ``is_logic`` marks a computation/control-flow token (see ``_LOGIC_OPS`` /
+    ``_LOGIC_KEYWORDS``). Best-effort and forgiving — an unterminated literal or a stray
+    byte is consumed without raising, since the scorecard must never crash on odd input."""
+    out: list[tuple[str, int, bool]] = []
+    i, n, line = 0, len(text), 1
+    while i < n:
+        c = text[i]
+        if c == "\n":
+            line += 1
+            i += 1
+            continue
+        if c in " \t\r\f\v":
+            i += 1
+            continue
+        # line comment
+        if c == "/" and i + 1 < n and text[i + 1] == "/":
+            j = text.find("\n", i)
+            if j == -1:
+                break
+            i = j
+            continue
+        # block comment (may span lines)
+        if c == "/" and i + 1 < n and text[i + 1] == "*":
+            j = text.find("*/", i + 2)
+            if j == -1:
+                line += text.count("\n", i)
+                break
+            line += text.count("\n", i, j + 2)
+            i = j + 2
+            continue
+        # raw string literal (may span lines)
+        if c == "`":
+            j = text.find("`", i + 1)
+            if j == -1:
+                j = n - 1
+            line += text.count("\n", i, j + 1)
+            out.append(("L", line, False))
+            i = j + 1
+            continue
+        # interpreted string / rune literal
+        if c == '"' or c == "'":
+            q = c
+            j = i + 1
+            while j < n:
+                if text[j] == "\\":
+                    j += 2
+                    continue
+                if text[j] == "\n":
+                    break  # unterminated — interpreted strings/runes can't span lines
+                if text[j] == q:
+                    j += 1
+                    break
+                j += 1
+            out.append(("L", line, False))
+            i = j
+            continue
+        # numeric literal
+        if c.isdigit() or (c == "." and i + 1 < n and text[i + 1].isdigit()):
+            j = i + 1
+            while j < n and (text[j].isalnum() or text[j] in "._"):
+                if text[j] in "eEpP" and j + 1 < n and text[j + 1] in "+-":
+                    j += 2  # exponent sign
+                    continue
+                j += 1
+            out.append(("L", line, False))
+            i = j
+            continue
+        # identifier or keyword
+        if c.isalpha() or c == "_":
+            j = i + 1
+            while j < n and (text[j].isalnum() or text[j] == "_"):
+                j += 1
+            word = text[i:j]
+            if word in _GO_KEYWORDS:
+                out.append((word, line, word in _LOGIC_KEYWORDS))
+            else:
+                out.append(("I" if normalize_idents else word, line, False))
+            i = j
+            continue
+        # operator / punctuation (greedy, longest-first)
+        for op in _GO_OPS:
+            if text.startswith(op, i):
+                out.append((op, line, op in _LOGIC_OPS))
+                i += len(op)
+                break
+        else:
+            i += 1  # unknown byte (e.g. a stray non-ASCII rune) — skip
+    return out
 
 
-def _norm_for_clone(code_line: str) -> str:
-    """Normalize a code-only line for clone hashing: collapse all whitespace, drop
-    a line that carries no copy-paste signal — empty, structural punctuation only,
-    language boilerplate (package/import), or a composite-literal field entry
-    (`Name: value,`, data not logic). A line whose code-only form is mostly the
-    blanked husk of a string literal (e.g. `if c >= && c <= {`) is low-signal: keep it
-    (it still has structure) but the boilerplate + contiguity + struct-skip guards
-    stop those husks from stitching unrelated code into a phantom clone."""
-    s = re.sub(r"\s+", " ", code_line).strip()
-    if not s:
-        return ""
-    if re.fullmatch(r"[\{\}\(\)\[\],;]+", s):
-        return ""
-    if _CLONE_BOILERPLATE_RE.match(s):
-        return ""
-    if _COMPOSITE_FIELD_RE.match(s):
-        return ""
-    return s
-
-
-# A clone window's normalized lines must come from a CONTIGUOUS original span: the
-# real line distance from first to last normalized line is bounded, so the hash can't
-# stitch lines that are pages apart (separated by skipped blanks/braces) into a
-# spurious match. A genuine copy-pasted block has its lines packed together.
-CLONE_MAX_SPAN = CLONE_WINDOW * 3
+def _clone_sample(text: str, lineno: int) -> str:
+    """A short, human-readable hint for a clone finding: the source line at `lineno`
+    (1-based), trimmed. The token engine matches on structure; this just labels it."""
+    lines = text.splitlines()
+    if 1 <= lineno <= len(lines):
+        return lines[lineno - 1].strip()
+    return ""
 
 
 def kpi_duplication(files: dict[str, str]) -> dict[str, Any]:
-    """Copy-paste clones. For every file, slide a CLONE_WINDOW window over its
-    normalized non-trivial lines, hash the window, and record (file, first-line).
-    Any window hash seen at >= CLONE_MIN_OCCURRENCES distinct locations is a clone
-    group — one HARD unit each. `files` maps rel-path -> source text. Windows that
-    span more than CLONE_MAX_SPAN original lines (non-contiguous) are skipped, as is
-    language boilerplate (package/import)."""
-    # hash -> list of (file, lineno, sample)
-    seen: dict[str, list[tuple[str, int, str]]] = {}
+    """Copy-paste clones, measured on the normalized Go token stream (#780). For every
+    file, slide a CLONE_WINDOW_TOKENS-token window over ``go_tokens`` output, keep only
+    windows carrying >= CLONE_MIN_LOGIC_TOKENS logic tokens (so data/declaration regions
+    are skipped without a hand-tuned line list), and key each by its normalized token
+    sequence. A key seen at >= CLONE_MIN_OCCURRENCES distinct locations is a clone
+    window. Per file the clone windows are merged by token adjacency into blocks, and
+    blocks sharing any clone window are unioned into one group naming every site — one
+    HARD unit of slop-debt each. `files` maps rel-path -> source text.
+
+    Identifiers are kept (``normalize_idents=False``) so distinct code with distinct names
+    does not false-match and idiomatic Go does not collapse into phantom clusters; only
+    literals are normalized — the precision/recall sweet spot for this tree (#780)."""
+    win_locs: dict[int, set[tuple[str, int]]] = {}  # key -> {(file, start_line)}
+    # file -> [(tok_idx, start_line, end_line, key)] for qualifying windows
+    per_file: dict[str, list[tuple[int, int, int, int]]] = {}
     for rel in sorted(files):
-        code = code_lines_of(files[rel])
-        # (orig_lineno, normalized) for the non-trivial lines, EXCLUDING the field
-        # lists inside a `type ... struct {` / `interface {` block. Two report
-        # structs that share field names are a data-shape overlap, not copy-pasted
-        # LOGIC — counting them floods duplication with weak signal. Track the
-        # struct/interface brace depth and skip lines inside it.
-        norm: list[tuple[int, str]] = []
-        struct_depth = 0  # brace depth INSIDE the current struct/interface field list
-        for idx, c in enumerate(code):
-            if struct_depth > 0:
-                struct_depth += c.count("{") - c.count("}")
-                if struct_depth < 0:
-                    struct_depth = 0
-                continue  # inside a field list — skip
-            if re.search(r"\b(struct|interface)\s*\{", c):
-                struct_depth = c.count("{") - c.count("}")
-                if struct_depth < 0:
-                    struct_depth = 0
-                continue  # the `... struct {` line itself
-            n = _norm_for_clone(c)
-            if n:
-                norm.append((idx + 1, n))
-        for start in range(0, len(norm) - CLONE_WINDOW + 1):
-            window = norm[start:start + CLONE_WINDOW]
-            # contiguity guard: reject a window stitched from far-apart lines
-            if window[-1][0] - window[0][0] > CLONE_MAX_SPAN:
-                continue
-            blob = "\n".join(w[1] for w in window)
-            h = hashlib.sha1(blob.encode("utf-8")).hexdigest()
-            seen.setdefault(h, []).append((rel, window[0][0], window[0][1]))
+        toks = go_tokens(files[rel], normalize_idents=False)
+        m = len(toks)
+        quals: list[tuple[int, int, int, int]] = []
+        if m >= CLONE_WINDOW_TOKENS:
+            logic = [1 if t[2] else 0 for t in toks]
+            running = sum(logic[:CLONE_WINDOW_TOKENS])
+            for start in range(0, m - CLONE_WINDOW_TOKENS + 1):
+                if start > 0:
+                    running += logic[start + CLONE_WINDOW_TOKENS - 1] - logic[start - 1]
+                if running < CLONE_MIN_LOGIC_TOKENS:
+                    continue
+                key = hash(tuple(toks[j][0] for j in range(start, start + CLONE_WINDOW_TOKENS)))
+                sline = toks[start][1]
+                eline = toks[start + CLONE_WINDOW_TOKENS - 1][1]
+                quals.append((start, sline, eline, key))
+                win_locs.setdefault(key, set()).add((rel, sline))
+        per_file[rel] = quals
 
-    # A copy-pasted BLOCK is many overlapping windows; counting windows would inflate
-    # one duplicated function into a dozen "clones". Collapse to distinct blocks: take
-    # every window seen in >= 2 places, then within each file merge windows whose line
-    # ranges overlap or abut into maximal spans. One finding per merged block.
-    block_starts: list[tuple[str, int, str]] = []  # (file, start, sample) of a cloned window
-    for h, locs in seen.items():
-        distinct = sorted(set(locs))
-        if len(distinct) >= CLONE_MIN_OCCURRENCES:
-            block_starts.extend(distinct)
-    # per file, sort window starts and merge contiguous runs (gap <= CLONE_WINDOW)
-    by_file: dict[str, list[tuple[int, str]]] = {}
-    for f, ln, sample in block_starts:
-        by_file.setdefault(f, []).append((ln, sample))
-    blocks: list[tuple[str, int, int, str]] = []  # (file, start, end, sample)
-    for f in sorted(by_file):
-        pts = sorted(set(by_file[f]))
-        cur_start = cur_end = None
-        cur_sample = ""
-        for ln, sample in pts:
-            if cur_start is None:
-                cur_start, cur_end, cur_sample = ln, ln, sample
-            elif ln - cur_end <= CLONE_WINDOW:
-                cur_end = ln
+    clone_keys = {k for k, locs in win_locs.items() if len(locs) >= CLONE_MIN_OCCURRENCES}
+
+    # Per file, merge clone windows that are adjacent in the token stream (a gap of up to
+    # one window of non-clone tokens still merges) into one block. Counting raw windows
+    # would inflate a single duplicated function into dozens of "clones".
+    blocks: list[tuple[str, int, int, frozenset[int]]] = []  # (file, start_line, end_line, keyset)
+    for rel in sorted(per_file):
+        cw = [(idx, sl, el, k) for (idx, sl, el, k) in per_file[rel] if k in clone_keys]
+        cur_idx = cur_sl = cur_el = None
+        cur_keys: set[int] = set()
+        for (idx, sl, el, k) in cw:  # already ascending in token index
+            if cur_idx is None:
+                cur_idx, cur_sl, cur_el, cur_keys = idx, sl, el, {k}
+            elif idx - cur_idx <= CLONE_WINDOW_TOKENS:
+                cur_idx, cur_el = idx, max(cur_el, el)
+                cur_keys.add(k)
             else:
-                blocks.append((f, cur_start, cur_end, cur_sample))
-                cur_start, cur_end, cur_sample = ln, ln, sample
-        if cur_start is not None:
-            blocks.append((f, cur_start, cur_end, cur_sample))
+                blocks.append((rel, cur_sl, cur_el, frozenset(cur_keys)))
+                cur_idx, cur_sl, cur_el, cur_keys = idx, sl, el, {k}
+        if cur_idx is not None:
+            blocks.append((rel, cur_sl, cur_el, frozenset(cur_keys)))
 
-    # group merged blocks that share the same normalized first-line sample (the
-    # cloned text) so the two+ copies are reported as ONE finding naming all sites.
-    by_sample: dict[str, list[tuple[str, int, int]]] = {}
-    for f, s, e, sample in blocks:
-        by_sample.setdefault(sample, []).append((f, s, e))
+    # Union blocks that share any clone-window key — the copies of one block, even three
+    # imperfectly-aligned copies, land in a single group.
+    parent = list(range(len(blocks)))
+
+    def _find(x: int) -> int:
+        while parent[x] != x:
+            parent[x] = parent[parent[x]]
+            x = parent[x]
+        return x
+
+    key_to_blocks: dict[int, list[int]] = {}
+    for bi, (_, _, _, keys) in enumerate(blocks):
+        for k in keys:
+            key_to_blocks.setdefault(k, []).append(bi)
+    for bis in key_to_blocks.values():
+        for x in bis[1:]:
+            parent[_find(x)] = _find(bis[0])
+
+    comps: dict[int, list[int]] = {}
+    for bi in range(len(blocks)):
+        comps.setdefault(_find(bi), []).append(bi)
+
+    # one group per component with >= CLONE_MIN_OCCURRENCES distinct sites
+    group_sites: list[list[tuple[str, int, int]]] = []
+    for bis in comps.values():
+        sites = sorted({(blocks[b][0], blocks[b][1], blocks[b][2]) for b in bis})
+        if len(sites) >= CLONE_MIN_OCCURRENCES:
+            group_sites.append(sites)
+    group_sites.sort(key=lambda s: s[0])  # deterministic: by first site
+
     defects: list[str] = []
     groups = 0
-    for sample in sorted(by_sample):
-        sites = sorted(set(by_sample[sample]))
-        if len(sites) < CLONE_MIN_OCCURRENCES:
-            continue
+    for sites in group_sites:
         groups += 1
         if len(defects) < CLONE_GROUPS_CAP:
             shown = ", ".join(f"{f}:{s}" for f, s, _ in sites[:4])
             more = f" (+{len(sites) - 4} more)" if len(sites) > 4 else ""
-            span = sites[0][2] - sites[0][1] + CLONE_WINDOW
+            f0, s0, e0 = sites[0]
+            span = max(1, e0 - s0 + 1)
+            sample = _clone_sample(files.get(f0, ""), s0)
             defects.append(
                 f"clone x{len(sites)} (~{span} lines): {shown}{more} — '{sample[:60]}…'")
     score = _clamp(100 - 2 * groups)
@@ -986,7 +1116,7 @@ def render_markdown(payload: dict[str, Any], *, stamp: str | None = None) -> str
     out.append("")
     out.append("## What each axis catches")
     out.append("")
-    out.append("- **duplication** — a normalized 6-line window copy-pasted into 2+ places. [HARD]")
+    out.append("- **duplication** — a normalized Go token-window copy-pasted into 2+ places. [HARD]")
     out.append("- **dead_code** — an unexported symbol defined but referenced nowhere else. [HARD]")
     out.append("- **comment_slop** — tautological doc comments + commented-out code blocks. [HARD]")
     out.append("- **vacuous_tests** — a Test/Benchmark func that makes zero assertions. [HARD]")
