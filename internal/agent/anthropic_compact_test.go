@@ -257,6 +257,98 @@ func TestCompactBreakpointOnLastMessage(t *testing.T) {
 	}
 }
 
+// claudeCodeShapedBody models the REAL Claude Code growing-conversation cache layout
+// (Anthropic prompt-caching docs: up to 4 breakpoints — one on the static system/tools head,
+// and one or more on RECENT turns to incrementally cache the growing prefix). The decisive
+// difference from realisticBody: there is a breakpoint on msg 0 (the early cached head) AND a
+// breakpoint on a RECENT message (near the tail), so the LAST breakpoint is near the end.
+// nMsgs total; the breakpoint sits on the message recentBpBack from the end.
+func claudeCodeShapedBody(t *testing.T, nMsgs, recentBpBack int) []byte {
+	t.Helper()
+	type block map[string]any
+	recentBpIdx := nMsgs - 1 - recentBpBack
+	msgs := make([]map[string]any, 0, nMsgs)
+	for i := 0; i < nMsgs; i++ {
+		role := "user"
+		if i%2 == 1 {
+			role = "assistant"
+		}
+		blk := block{"type": "text", "text": strings.Repeat("conversation turn body words. ", 12) + itoa(i)}
+		// Breakpoint on msg 0 (early cached head) and on a RECENT message (growing-prefix cache).
+		if i == 0 || i == recentBpIdx {
+			blk["cache_control"] = map[string]any{"type": "ephemeral"}
+		}
+		msgs = append(msgs, map[string]any{"role": role, "content": []block{blk}})
+	}
+	raw, err := json.Marshal(map[string]any{
+		"model": "claude-sonnet-4-6", "max_tokens": 1024,
+		"system": []block{
+			{"type": "text", "text": "You are a coding agent."},
+			{"type": "text", "text": strings.Repeat("policy text. ", 40), "cache_control": map[string]any{"type": "ephemeral"}},
+		},
+		"messages": msgs,
+	})
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	return raw
+}
+
+// firstMessageBreakpointEnd returns the byte offset just past the FIRST messages[] element
+// carrying a cache_control breakpoint — the stable cached HEAD the provider reuses every turn.
+func firstMessageBreakpointEnd(t *testing.T, raw []byte) int {
+	t.Helper()
+	var obj map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &obj); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	elems, spans, ok := decodeArrayElements(raw, obj["messages"])
+	if !ok {
+		t.Fatalf("decodeArrayElements failed")
+	}
+	for i, el := range elems {
+		var m struct {
+			Content json.RawMessage `json:"content"`
+		}
+		if json.Unmarshal(el, &m) == nil && rawHasCacheControl(m.Content) {
+			return spans[i].end
+		}
+	}
+	return arrayContentStart(spans)
+}
+
+// TestCompactFiresOnClaudeCodeMultiBreakpointShape is the regression for the silent
+// no-op-on-real-traffic bug: with a breakpoint on the static head AND on a recent turn (the
+// real Claude Code layout), a large session MUST still shed the un-cacheable MIDDLE turns —
+// the span between the cached head and the recent kept window, which the provider re-bills
+// every turn anyway (it is beyond the recent breakpoint's 20-block backward lookback). The
+// kept HEAD (through the first message breakpoint) must stay byte-identical so the dominant
+// cache read survives.
+//
+// Before the anchor fix, CompactAnthropicHistory anchored the protected prefix on the LAST
+// breakpoint (the recent turn), so the whole conversation was "protected" and it shed 0%.
+func TestCompactFiresOnClaudeCodeMultiBreakpointShape(t *testing.T) {
+	raw := claudeCodeShapedBody(t, 120, 2) // 120 turns, recent breakpoint 2 from the end
+	head := firstMessageBreakpointEnd(t, raw)
+
+	out := CompactAnthropicHistory(raw, 400) // budget far below the 120-turn middle
+	if bytes.Equal(out, raw) {
+		t.Fatalf("REGRESSION: compaction is a no-op on the real Claude Code multi-breakpoint shape — "+
+			"it must shed the un-cacheable middle turns (inbound %d bytes, budget 400)", len(raw))
+	}
+	if len(out) >= len(raw) {
+		t.Fatalf("expected a shorter body, got %d >= %d", len(out), len(raw))
+	}
+	// The stable cached HEAD (through the first message breakpoint) must be byte-identical.
+	if head > len(out) || !bytes.Equal(raw[:head], out[:head]) {
+		t.Fatalf("cached head prefix changed: head end=%d, lenOut=%d", head, len(out))
+	}
+	// The result must still be a valid, well-paired Messages request.
+	if _, err := DecodeAnthropicMessagesRequest(out); err != nil {
+		t.Fatalf("compacted body failed to decode: %v", err)
+	}
+}
+
 // TestCompactSystemOnlyBreakpoint covers the case where ONLY the system block carries the
 // cache_control breakpoint (no per-message breakpoint): every message is compactible, the
 // system+array-head prefix is preserved, and the result still decodes.

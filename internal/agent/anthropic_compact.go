@@ -68,17 +68,28 @@ func CompactAnthropicHistory(raw []byte, budget int) []byte {
 		return raw // nothing safe to compact
 	}
 
-	// 1. Anchor the protected prefix on the LAST cache_control breakpoint message. A
-	//    breakpoint in `system` (or no breakpoint past message 0) still protects the
-	//    array head; we require a breakpoint somewhere or we cannot know the cache
-	//    boundary and must not touch the body.
-	pfxEnd := lastBreakpointMessage(elems)
+	// 1. Anchor the protected prefix on the FIRST cache_control breakpoint message — the
+	//    STABLE cached head the provider reuses every turn — NOT the last. This is the fix
+	//    for the silent no-op on real Claude Code traffic: the growing-conversation cache
+	//    layout (Anthropic prompt-caching docs: up to 4 breakpoints) marks the static head
+	//    AND a RECENT turn, so the LAST breakpoint sits near the end. Anchoring on it would
+	//    "protect" the whole conversation and compact NOTHING. The span we want to drop is
+	//    the un-cacheable MIDDLE — the turns between the cached head and the recent kept
+	//    window — which the provider re-bills every turn anyway (it is beyond the recent
+	//    breakpoint's 20-block backward lookback). Removing it shifts the recent breakpoint's
+	//    position, so the provider's cache read walks back to the HEAD breakpoint (the cache
+	//    cascade), where the bytes are byte-identical → the dominant cache hit survives. A
+	//    breakpoint in `system` (or no message breakpoint) still protects the array head; we
+	//    require a breakpoint somewhere or we cannot know the cache boundary and must not
+	//    touch the body.
+	pfxEnd := firstBreakpointMessage(elems)
 	sysHasCC := rawHasCacheControl(obj["system"])
 	if pfxEnd < 0 && !sysHasCC {
 		return raw // no breakpoint to anchor on — identity
 	}
 	// When only `system` holds the cache, the protected message prefix is empty (-1):
-	// every message is compactible. Otherwise it ends at the breakpoint message.
+	// every message is compactible. Otherwise it ends at the FIRST breakpoint message (the
+	// cached head); everything after it up to the recent kept window is compactible middle.
 
 	// 2. Is the compactible suffix already under budget? Then there is nothing to do.
 	suffixTokens := 0
@@ -195,6 +206,27 @@ func lastBreakpointMessage(elems []json.RawMessage) int {
 		}
 	}
 	return last
+}
+
+// firstBreakpointMessage returns the index of the FIRST messages[] element whose content
+// carries a cache_control breakpoint, or -1 if none does. This is the anchor for the protected
+// prefix: the earliest message breakpoint marks the stable cached HEAD the provider reuses
+// every turn (the growing-conversation layout marks the static head AND recent turns; only the
+// head's prefix is byte-stable across turns). Anchoring here — not on the last breakpoint —
+// is what lets compaction drop the un-cacheable MIDDLE on real multi-breakpoint traffic.
+func firstBreakpointMessage(elems []json.RawMessage) int {
+	for i, el := range elems {
+		var m struct {
+			Content json.RawMessage `json:"content"`
+		}
+		if json.Unmarshal(el, &m) != nil {
+			continue
+		}
+		if rawHasCacheControl(m.Content) {
+			return i
+		}
+	}
+	return -1
 }
 
 // rawHasCacheControl reports whether a `system` or message `content` value (a bare string,
