@@ -623,9 +623,18 @@ def throttle_is_active(info: dict | str | None) -> bool:
     return True
 
 
+def _should_consult_probe_ledger(registry: dict | None, probe_ledger: bool | None) -> bool:
+    if probe_ledger is not None:
+        return probe_ledger
+    if registry is None:
+        return True
+    return bool(os.environ.get("FLEET_REG_DIR"))
+
+
 def runtime_status(account: str, registry: dict | None = None,
                    throttle: dict | None = None,
-                   sessions: list[dict] | None = None) -> dict:
+                   sessions: list[dict] | None = None,
+                   probe_ledger: bool | None = None) -> dict:
     """Return the live availability status for one account basename.
 
     Static policy answers "is this a real worker account?". Runtime status answers
@@ -739,21 +748,22 @@ def runtime_status(account: str, registry: dict | None = None,
     # fresh manual/watchdog probe would otherwise be invisible here and the carried throttle
     # below would win (the day24 incident: probe OK, roster still "resets 11pm"). A ledger
     # verdict within PROBE_LEDGER_FRESH_MIN is treated as the same authoritative fresh probe.
-    led = _fresh_probe_from_ledger(account)
-    if led is not None:
-        if led.get("available"):
-            status["status_source"] = "probe-ledger"
-            status["probe_age_min"] = led.get("age_min")
+    if _should_consult_probe_ledger(registry, probe_ledger):
+        led = _fresh_probe_from_ledger(account)
+        if led is not None:
+            if led.get("available"):
+                status["status_source"] = "probe-ledger"
+                status["probe_age_min"] = led.get("age_min")
+                return status
+            kind = led.get("block_kind") or "auth"
+            status.update({
+                "available": False, "blocked": True, "block_kind": kind,
+                "block_reason": led.get("block_reason") or "blocked",
+                "reset": led.get("reset"), "weekly": led.get("weekly"),
+                "throttled": kind == "usage",
+                "status_source": "probe-ledger", "probe_age_min": led.get("age_min"),
+            })
             return status
-        kind = led.get("block_kind") or "auth"
-        status.update({
-            "available": False, "blocked": True, "block_kind": kind,
-            "block_reason": led.get("block_reason") or "blocked",
-            "reset": led.get("reset"), "weekly": led.get("weekly"),
-            "throttled": kind == "usage",
-            "status_source": "probe-ledger", "probe_age_min": led.get("age_min"),
-        })
-        return status
 
     thr = throttle_map.get(account)
     if thr and throttle_is_active(thr):
@@ -792,13 +802,15 @@ def runtime_status(account: str, registry: dict | None = None,
 
 def annotate_accounts(rows: list[dict], registry: dict | None = None,
                       throttle: dict | None = None,
-                      sessions: list[dict] | None = None) -> list[dict]:
+                      sessions: list[dict] | None = None,
+                      probe_ledger: bool | None = None) -> list[dict]:
     """Attach live availability fields to discover_accounts() rows."""
     out = []
     for row in rows:
         r = dict(row)
         if r.get("kind") == "worker":
-            r.update(runtime_status(r["account"], registry, throttle, sessions))
+            r.update(runtime_status(
+                r["account"], registry, throttle, sessions, probe_ledger=probe_ledger))
         else:
             r.update({
                 "available": False,
@@ -1097,23 +1109,21 @@ def annotated_roster(home: str = USER, policy: dict | None = None,
     to discovery/annotation reaches every front door at once. ``registry`` defaults to
     the live session registry (``load_registry()``); pass an explicit dict (or the
     ``throttle``/``sessions`` overrides) when a caller already has the data in hand."""
+    consult_probe_ledger = registry is None
     reg = load_registry() if registry is None else registry
     return annotate_accounts(
         discover_accounts(home, policy, config_home=config_home),
-        reg, throttle, sessions)
+        reg, throttle, sessions, probe_ledger=consult_probe_ledger)
 
 
 def read_oauth_token(account_dir: str) -> str | None:
     """Return the account's long-lived setup token, or None.
 
-    The single implementation of the credential rule the dispatch front doors share:
-    prefer the dir's ``.oauth-token`` (a long-lived setup token) over the interactive
-    ``.credentials.json``, which EXPIRES -- a worker pinned only by CLAUDE_CONFIG_DIR can
-    false-fail on turn 1 when the interactive creds have lapsed but the setup token is
-    still good. Returns the stripped token string when ``<account_dir>/.oauth-token``
-    exists and is readable, else None so the caller can DROP any ambient
-    CLAUDE_CODE_OAUTH_TOKEN (never bleed a sibling account's token into this worker).
-    Pure read -- the caller decides whether to set or pop the env var.
+    This is the optional setup-token reader, not the default dispatch credential
+    rule. The default worker path pins ``CLAUDE_CONFIG_DIR`` and clears any ambient
+    ``CLAUDE_CODE_OAUTH_TOKEN`` so it matches account_probe's health check and never
+    bleeds a sibling account's token into the worker. A caller that deliberately opts
+    into setup-token auth can use this pure read, then decide whether to set the env var.
 
     Previously duplicated in launch_goal_detached.ps1 and issue_dispatch.py."""
     if not account_dir:

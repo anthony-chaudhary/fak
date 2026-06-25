@@ -6,7 +6,7 @@ issue_lane_router (via pick_lane's run_json), and the detached spawn. All are
 replaced here with synthetic results on the module; NOTHING live (preflight /
 gh / dos / claude) is ever invoked, and spawn_detached is never reached in
 dry-run. worker_env's account-pinning is exercised against a real tmp dir so the
-.oauth-token read/pop branches run without any network.
+config-dir pin / token-scrub branches run without any network.
 """
 from __future__ import annotations
 
@@ -15,6 +15,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 ROOT = Path(__file__).resolve().parent.parent
 SCRIPT = ROOT / "tools" / "issue_dispatch.py"
@@ -88,21 +89,38 @@ class PickLaneTest(unittest.TestCase):
 
 
 class WorkerEnvTest(unittest.TestCase):
-    def test_pins_config_dir_reads_token_and_sets_witness(self) -> None:
+    def test_pins_config_dir_drops_ambient_token_and_sets_witness(self) -> None:
         mod = load()
-        with tempfile.TemporaryDirectory() as d:
-            (Path(d) / ".oauth-token").write_text("tok-12345\n", encoding="utf-8")
-            env = mod.worker_env(d, "docs", ROOT)
+        with mock.patch.dict("os.environ", {"CLAUDE_CODE_OAUTH_TOKEN": "ambient"},
+                             clear=False):
+            with tempfile.TemporaryDirectory() as d:
+                (Path(d) / ".oauth-token").write_text("tok-12345\n", encoding="utf-8")
+                env = mod.worker_env(d, "docs", ROOT)
         self.assertEqual(env["CLAUDE_CONFIG_DIR"], d)
-        self.assertEqual(env["CLAUDE_CODE_OAUTH_TOKEN"], "tok-12345")  # stripped
+        self.assertNotIn("CLAUDE_CODE_OAUTH_TOKEN", env)
         self.assertEqual(env["FLEET_DISPATCH_WITNESS"], "benchmark")
         self.assertIn("--lane docs", env["FLEET_BENCH_WITNESS_CMD"])
 
+    def test_setup_token_is_opt_in_and_stripped(self) -> None:
+        mod = load()
+        with mock.patch.dict(
+            "os.environ",
+            {mod.USE_SETUP_TOKEN_ENV: "1", "CLAUDE_CODE_OAUTH_TOKEN": "ambient"},
+            clear=False,
+        ):
+            with tempfile.TemporaryDirectory() as d:
+                (Path(d) / ".oauth-token").write_text("tok-12345\n", encoding="utf-8")
+                env = mod.worker_env(d, "docs", ROOT)
+        self.assertEqual(env["CLAUDE_CONFIG_DIR"], d)
+        self.assertEqual(env["CLAUDE_CODE_OAUTH_TOKEN"], "tok-12345")
+
     def test_missing_token_pops_the_oauth_var(self) -> None:
         mod = load()
-        with tempfile.TemporaryDirectory() as d:
-            # no .oauth-token in this dir
-            env = mod.worker_env(d, "gateway", ROOT)
+        with mock.patch.dict("os.environ", {"CLAUDE_CODE_OAUTH_TOKEN": "ambient"},
+                             clear=False):
+            with tempfile.TemporaryDirectory() as d:
+                # no .oauth-token in this dir
+                env = mod.worker_env(d, "gateway", ROOT)
         self.assertEqual(env["CLAUDE_CONFIG_DIR"], d)
         self.assertNotIn("CLAUDE_CODE_OAUTH_TOKEN", env)
         self.assertEqual(env["FLEET_DISPATCH_WITNESS"], "benchmark")

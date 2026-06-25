@@ -268,6 +268,9 @@ def _default_runner(argv: list[str], *, config_dir: str, timeout: float,
     """
     env = os.environ.copy()
     env["CLAUDE_CONFIG_DIR"] = config_dir
+    # Probe the same default auth surface dispatched workers use: the pinned config dir,
+    # not an ambient token from whichever account launched this tick.
+    env.pop("CLAUDE_CODE_OAUTH_TOKEN", None)
     try:
         proc = subprocess.run(
             argv, env=env, input="", capture_output=True, text=True,

@@ -218,8 +218,17 @@ class FleetAccountsTest(unittest.TestCase):
         self.assertEqual(status["block_kind"], "auth")
 
     def test_explicit_empty_registry_does_not_load_live_registry(self) -> None:
-        with mock.patch.object(fleet_accounts, "load_registry", side_effect=AssertionError("unexpected load")):
-            status = fleet_accounts.runtime_status(".claude-gem8-acct", registry={})
+        with mock.patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("FLEET_REG_DIR", None)
+            with mock.patch.object(
+                fleet_accounts, "load_registry",
+                side_effect=AssertionError("unexpected load")
+            ):
+                with mock.patch.object(
+                    fleet_accounts, "_fresh_probe_from_ledger",
+                    side_effect=AssertionError("unexpected ledger read")
+                ):
+                    status = fleet_accounts.runtime_status(".claude-gem8-acct", registry={})
 
         self.assertTrue(status["available"])
         self.assertEqual(status["status_source"], "none")

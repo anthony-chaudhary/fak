@@ -8,6 +8,7 @@ sets the carry-forward blocker latch.
 """
 from __future__ import annotations
 
+import os
 import sys
 import tempfile
 import unittest
@@ -108,6 +109,28 @@ class ProbeAccountTest(unittest.TestCase):
             runner=runner_returning(1, "", BANNER_ACCESS))
         self.assertEqual(v["status"], "ACCESS")
         self.assertIn("disabled", v["block_reason"].lower())
+
+
+class DefaultRunnerEnvTest(unittest.TestCase):
+    def test_default_runner_pins_config_dir_and_clears_ambient_token(self) -> None:
+        class Proc:
+            returncode = 0
+            stdout = "pong"
+            stderr = ""
+
+        with mock.patch.dict(os.environ, {"CLAUDE_CODE_OAUTH_TOKEN": "ambient"},
+                             clear=False):
+            with mock.patch.object(account_probe.subprocess, "run", return_value=Proc()
+                                   ) as run:
+                code, stdout, stderr, timed_out, spawn_error = account_probe._default_runner(
+                    ["claude", "-p", "say pong"], config_dir="C:/acct/day24",
+                    timeout=3.0)
+
+        self.assertEqual((code, stdout, stderr, timed_out, spawn_error),
+                         (0, "pong", "", False, ""))
+        env = run.call_args.kwargs["env"]
+        self.assertEqual(env["CLAUDE_CONFIG_DIR"], "C:/acct/day24")
+        self.assertNotIn("CLAUDE_CODE_OAUTH_TOKEN", env)
 
 
 class VerdictToRowTest(unittest.TestCase):

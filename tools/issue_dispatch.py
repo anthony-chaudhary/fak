@@ -12,11 +12,10 @@ closes, in order, before a single worker is launched:
                               — that refusal IS the no-DoS guarantee (the live
                               population can never exceed the cap, so per-session
                               hook pressure stays bounded).
-  2. SWITCHER PIN (routing)   the worker is launched with CLAUDE_CONFIG_DIR (and
-                              the account's long-lived .oauth-token) pinned to the
-                              switcher's chosen account — never the ambient
-                              default that historically ate the dispatch when it
-                              was throttled/auth-blocked.
+  2. SWITCHER PIN (routing)   the worker is launched with CLAUDE_CONFIG_DIR pinned
+                              to the switcher's chosen account — never the ambient
+                              default or a sibling token that historically ate the
+                              dispatch when it was throttled/auth-blocked.
 
 It then picks the lane with the most open issues (the issue_lane_router fold), or
 an explicit ``--lane``, and launches ONE detached worker on it. DRY-RUN BY
@@ -47,10 +46,11 @@ except (AttributeError, ValueError):
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import dispatch_worker  # noqa: E402  (sibling tool: build_command/child_env)
-import fleet_accounts  # noqa: E402  (the switcher: read_oauth_token)
+import fleet_accounts  # noqa: E402  (the switcher: optional setup-token read)
 
 SCHEMA = "fleet-issue-dispatch/1"
 RUNS_DIRNAME = ".dispatch-runs"
+USE_SETUP_TOKEN_ENV = "FLEET_CLAUDE_USE_OAUTH_TOKEN"
 
 
 def repo_root(start: Path | None = None) -> Path:
@@ -134,20 +134,24 @@ def pick_lane(root: Path, explicit: str | None) -> dict[str, Any]:
             "router_error": router.get("_error")}
 
 
+def _truthy_env(value: str | None) -> bool:
+    return (value or "").strip().lower() in {"1", "true", "yes", "on"}
+
+
 def worker_env(account_dir: str | None, lane: str, workspace: Path) -> dict[str, str]:
-    """Child env: the switcher account pinned (CLAUDE_CONFIG_DIR + its oauth token),
-    plus the self-describing dispatch vars and the benchmark-witness hint."""
+    """Child env: the switcher account pinned, self-describing dispatch vars,
+    and the benchmark-witness hint."""
     env = dispatch_worker.child_env(lane, "claude", workspace)
     if account_dir:
         env["CLAUDE_CONFIG_DIR"] = account_dir
-        # The switcher's single credential rule: prefer the dir's long-lived
-        # .oauth-token over the expiring interactive creds; drop any ambient token when
-        # this account has none (never bleed a sibling account's token into the worker).
-        tok = fleet_accounts.read_oauth_token(account_dir)
-        if tok:
-            env["CLAUDE_CODE_OAUTH_TOKEN"] = tok
-        else:
-            env.pop("CLAUDE_CODE_OAUTH_TOKEN", None)
+        # Match account_probe.py: validate and launch against the account directory.
+        # A stale ambient/setup token can belong to another account or org and turn a
+        # healthy config dir into an immediate ACCESS wall, so clear it by default.
+        env.pop("CLAUDE_CODE_OAUTH_TOKEN", None)
+        if _truthy_env(env.get(USE_SETUP_TOKEN_ENV)):
+            tok = fleet_accounts.read_oauth_token(account_dir)
+            if tok:
+                env["CLAUDE_CODE_OAUTH_TOKEN"] = tok
     # The witness for this loop is the benchmark, not the unit-test suite.
     env["FLEET_DISPATCH_WITNESS"] = "benchmark"
     env["FLEET_BENCH_WITNESS_CMD"] = f"python tools/bench_witness.py --lane {lane}"
