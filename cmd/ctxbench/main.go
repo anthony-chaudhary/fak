@@ -115,6 +115,8 @@ func verdictName(k abi.VerdictKind) string {
 		return "REQUIRE_WITNESS"
 	case abi.VerdictDefer:
 		return "DEFER"
+	case abi.VerdictIndeterminate:
+		return "INDETERMINATE"
 	}
 	return fmt.Sprintf("KIND_%d", k)
 }

@@ -80,8 +80,8 @@ func FoldExplain(ctx context.Context, chain []abi.Adjudicator, c *abi.ToolCall) 
 	}
 
 	// Mirror Fold's lattice resolution, capturing each rung as we go. The winning
-	// verdict is selected identically: the highest-FoldRank non-Defer verdict, ties
-	// won by the FIRST rung to reach that rank (strict-greater update).
+	// verdict is selected identically: the highest-FoldRank conclusive verdict,
+	// ties won by the FIRST rung to reach that rank (strict-greater update).
 	var v abi.Verdict
 	switch {
 	case len(chain) == 0:
@@ -89,7 +89,9 @@ func FoldExplain(ctx context.Context, chain []abi.Adjudicator, c *abi.ToolCall) 
 	default:
 		best := abi.Verdict{Kind: abi.VerdictDefer, By: "no-link"}
 		bestRank, bestIdx := -1, -1
-		sawNonDefer := false
+		indeterminateIdx := -1
+		sawConclusive := false
+		sawIndeterminate := false
 		d.Rungs = make([]RungVerdict, 0, len(chain))
 		for i, a := range chain {
 			rv := a.Adjudicate(ctx, c)
@@ -105,20 +107,35 @@ func FoldExplain(ctx context.Context, chain []abi.Adjudicator, c *abi.ToolCall) 
 				Deferred: rv.Kind == abi.VerdictDefer,
 			}
 			d.Rungs = append(d.Rungs, rung)
-			if rv.Kind == abi.VerdictDefer {
+			switch rv.Kind {
+			case abi.VerdictDefer:
+				continue
+			case abi.VerdictIndeterminate:
+				sawIndeterminate = true
+				if indeterminateIdx < 0 {
+					indeterminateIdx = len(d.Rungs) - 1
+				}
 				continue
 			}
-			sawNonDefer = true
 			if rank > bestRank {
 				bestRank, best, bestIdx = rank, rv, i
+				sawConclusive = true
+				if isMaxFoldRank(rank) {
+					break
+				}
 			}
 		}
 		switch {
-		case !sawNonDefer:
-			v = abi.Verdict{Kind: abi.VerdictDeny, Reason: abi.ReasonDefaultDeny, By: "all-defer"}
-		default:
+		case sawConclusive:
 			v = best
 			d.Rungs[bestIdx].Winner = true
+		case sawIndeterminate:
+			rv := d.Rungs[indeterminateIdx]
+			v = abi.Verdict{Kind: abi.VerdictDeny, Reason: abi.ReasonDefaultDeny, By: rv.By,
+				Meta: map[string]string{"fold": "indeterminate"}}
+			d.Rungs[indeterminateIdx].Winner = true
+		default:
+			v = abi.Verdict{Kind: abi.VerdictDeny, Reason: abi.ReasonDefaultDeny, By: "all-defer"}
 		}
 	}
 
@@ -280,6 +297,8 @@ func kindName(k abi.VerdictKind) string {
 		return "WITNESS"
 	case abi.VerdictDefer:
 		return "DEFER"
+	case abi.VerdictIndeterminate:
+		return "INDETERMINATE"
 	}
 	return fmt.Sprintf("KIND_%d", uint16(k))
 }

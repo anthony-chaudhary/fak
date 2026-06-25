@@ -37,6 +37,7 @@
     "Allow": 0,
     "Defer": 5,
     "Deny": 1,
+    "Indeterminate": 6,
     "Quarantine": 3,
     "RequireWitness": 4,
     "ReservedMax": 1023,

@@ -17,7 +17,7 @@ func TestABIGoldenFreeze(t *testing.T) {
 			"Allow": int(VerdictAllow), "Deny": int(VerdictDeny),
 			"Transform": int(VerdictTransform), "Quarantine": int(VerdictQuarantine),
 			"RequireWitness": int(VerdictRequireWitness), "Defer": int(VerdictDefer),
-			"ReservedMax": int(VerdictReservedMax),
+			"Indeterminate": int(VerdictIndeterminate), "ReservedMax": int(VerdictReservedMax),
 		},
 		"status":   {"OK": int(StatusOK), "Error": int(StatusError), "Pending": int(StatusPending)},
 		"outcome":  {"Committed": int(OutcomeCommitted), "Squashed": int(OutcomeSquashed), "RolledBack": int(OutcomeRolledBack)},
@@ -72,6 +72,10 @@ func TestFoldRankOrdering(t *testing.T) {
 	}
 	if FoldRank(VerdictAllow) != 0 {
 		t.Fatal("Allow must be the least restrictive (rank 0)")
+	}
+	if !(FoldRank(VerdictDefer) < FoldRank(VerdictIndeterminate) &&
+		FoldRank(VerdictIndeterminate) < FoldRank(VerdictTransform)) {
+		t.Fatal("Indeterminate must rank strictly between Defer and Transform")
 	}
 	if Fallback(9999) != FallbackDeny {
 		t.Fatal("an unknown verdict kind must fall back to Deny (fail-closed)")

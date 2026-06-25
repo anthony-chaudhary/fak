@@ -867,13 +867,15 @@ func FoldRank(k VerdictKind) int {
 	case VerdictAllow:
 		return 0
 	case VerdictDefer:
-		return 1
+		return 10
+	case VerdictIndeterminate:
+		return 15
 	case VerdictTransform:
-		return 2
+		return 20
 	case VerdictQuarantine:
-		return 3
+		return 30
 	case VerdictRequireWitness:
-		return 4
+		return 40
 	case VerdictDeny:
 		return 100 // most restrictive of the core set
 	}

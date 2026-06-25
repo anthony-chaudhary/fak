@@ -172,30 +172,52 @@ func (k *Kernel) BatchDecide(ctx context.Context, calls []*abi.ToolCall) []abi.V
 }
 
 // Fold runs an Adjudicator chain and resolves it by the restrictiveness lattice:
-// the most-restrictive non-Defer verdict wins (fail-closed). An empty chain
+// the most-restrictive conclusive verdict wins (fail-closed). An empty chain
 // yields Deny (default-deny on no policy — unit 15). A Defer from every link also
-// yields Deny (nothing affirmatively allowed it).
+// yields Deny (nothing affirmatively allowed it). An Indeterminate is non-
+// committable: a later conclusive rung resolves it; a residual Indeterminate
+// fails closed.
 func Fold(ctx context.Context, chain []abi.Adjudicator, c *abi.ToolCall) abi.Verdict {
 	if len(chain) == 0 {
 		return abi.Verdict{Kind: abi.VerdictDeny, Reason: abi.ReasonDefaultDeny, By: "empty-policy"}
 	}
 	best := abi.Verdict{Kind: abi.VerdictDefer, By: "no-link"}
 	bestRank := -1
-	sawNonDefer := false
+	sawConclusive := false
+	sawIndeterminate := false
+	indeterminateBy := ""
 	for _, a := range chain {
 		v := a.Adjudicate(ctx, c)
-		if v.Kind == abi.VerdictDefer {
+		switch v.Kind {
+		case abi.VerdictDefer:
+			continue
+		case abi.VerdictIndeterminate:
+			sawIndeterminate = true
+			if indeterminateBy == "" {
+				indeterminateBy = v.By
+			}
 			continue
 		}
-		sawNonDefer = true
 		if r := abi.FoldRank(v.Kind); r > bestRank {
 			bestRank, best = r, v
+			sawConclusive = true
+			if isMaxFoldRank(r) {
+				break
+			}
 		}
 	}
-	if !sawNonDefer {
-		return abi.Verdict{Kind: abi.VerdictDeny, Reason: abi.ReasonDefaultDeny, By: "all-defer"}
+	if sawConclusive {
+		return best
 	}
-	return best
+	if sawIndeterminate {
+		return abi.Verdict{Kind: abi.VerdictDeny, Reason: abi.ReasonDefaultDeny, By: indeterminateBy,
+			Meta: map[string]string{"fold": "indeterminate"}}
+	}
+	return abi.Verdict{Kind: abi.VerdictDeny, Reason: abi.ReasonDefaultDeny, By: "all-defer"}
+}
+
+func isMaxFoldRank(rank int) bool {
+	return rank >= abi.FoldRank(abi.VerdictDeny)
 }
 
 // resolveWitness drives the require-witness gate. It asks every registered

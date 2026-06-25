@@ -83,6 +83,8 @@ func kindName(k abi.VerdictKind) string {
 		return "RequireWitness"
 	case abi.VerdictDefer:
 		return "Defer"
+	case abi.VerdictIndeterminate:
+		return "Indeterminate"
 	default:
 		return "Unknown"
 	}

@@ -427,6 +427,8 @@ func verdictName(k abi.VerdictKind) string {
 		return "WITNESS"
 	case abi.VerdictDefer:
 		return "DEFER"
+	case abi.VerdictIndeterminate:
+		return "INDETERMINATE"
 	}
 	return fmt.Sprintf("K%d", k)
 }

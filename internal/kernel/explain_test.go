@@ -83,18 +83,17 @@ func TestFoldExplainRungCapture(t *testing.T) {
 }
 
 // TestFoldExplainTieFirstWins mirrors Fold's tie-break: the FIRST rung to reach
-// the max rank wins, so an earlier deny owns the verdict even when a later rung
-// also denies (this is what makes a preflight MALFORMED deny shadow a later
-// monitor DEFAULT_DENY — the exact nuance the trace exists to reveal).
+// the max observed rank wins. Use a non-ceiling rank so the second rung still runs;
+// a rank-ceiling Deny now short-circuits the chain before a tie can occur.
 func TestFoldExplainTieFirstWins(t *testing.T) {
 	ctx := context.Background()
 	chain := []abi.Adjudicator{
-		fakeAdj{abi.Verdict{Kind: abi.VerdictDeny, Reason: abi.ReasonMalformed, By: "preflight"}},
-		fakeAdj{abi.Verdict{Kind: abi.VerdictDeny, Reason: abi.ReasonDefaultDeny, By: "monitor"}},
+		fakeAdj{abi.Verdict{Kind: abi.VerdictQuarantine, Reason: abi.ReasonMalformed, By: "preflight"}},
+		fakeAdj{abi.Verdict{Kind: abi.VerdictQuarantine, Reason: abi.ReasonDefaultDeny, By: "monitor"}},
 	}
 	_, d := FoldExplain(ctx, chain, callInline("t", "{}"))
 	if !d.Rungs[0].Winner || d.Rungs[1].Winner {
-		t.Fatalf("first deny should win the tie, got winners %v/%v", d.Rungs[0].Winner, d.Rungs[1].Winner)
+		t.Fatalf("first quarantine should win the tie, got winners %v/%v", d.Rungs[0].Winner, d.Rungs[1].Winner)
 	}
 	if d.By != "preflight" || d.Reason != "MALFORMED" {
 		t.Errorf("winner should be preflight/MALFORMED, got %s/%s", d.By, d.Reason)

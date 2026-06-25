@@ -211,7 +211,8 @@ const (
 	VerdictQuarantine                        // hold the RESULT out of context (MMU)
 	VerdictRequireWitness                    // gate pending an independent read-back
 	VerdictDefer                             // not adjudicable here; pass to next link
-	// 6..1023 reserved for additive CORE kinds. > VerdictReservedMax: registered.
+	VerdictIndeterminate  VerdictKind = 6    // undecided cheaply; climb or fail closed
+	// 7..1023 reserved for additive CORE kinds. > VerdictReservedMax: registered.
 	VerdictReservedMax VerdictKind = 1023
 )
 

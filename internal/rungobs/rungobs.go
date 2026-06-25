@@ -236,6 +236,8 @@ func kindOf(k abi.VerdictKind) string {
 		return "WITNESS"
 	case abi.VerdictDefer:
 		return "DEFER"
+	case abi.VerdictIndeterminate:
+		return "INDETERMINATE"
 	}
 	return "KIND_UNKNOWN"
 }

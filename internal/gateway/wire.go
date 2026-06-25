@@ -86,6 +86,8 @@ func verdictKindName(k abi.VerdictKind) string {
 		return "REQUIRE_WITNESS"
 	case abi.VerdictDefer:
 		return "DEFER"
+	case abi.VerdictIndeterminate:
+		return "INDETERMINATE"
 	}
 	return "KIND_" + itoa(uint64(k))
 }
