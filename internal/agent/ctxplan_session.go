@@ -68,6 +68,14 @@ type SessionPlanner struct {
 	firstUserPin    string
 	lastUserPin     string
 	lastUserContent string // the last user message's content, for the forecast intents (O(content), not O(N))
+
+	// tenure is the OPTIONAL generational-tenuring table (#848): a per-command recurrence
+	// counter that promotes a long-lived recurring slash-command to a compact rollup so its
+	// context stops being re-derived each turn, and demotes it on cold. nil is the default-off
+	// path — a SessionPlanner with no tenure table behaves byte-for-byte as before. It is
+	// orthogonal to the resident-span plan (object lifetime, not placement), so it lives
+	// beside the pins rather than inside pins().
+	tenure *tenureTable
 }
 
 // NewSessionPlanner mints a fresh per-session planner with an empty store and index. A
@@ -158,6 +166,37 @@ func (sp *SessionPlanner) pins() []string {
 		pins = append(pins, sp.lastUserPin)
 	}
 	return pins
+}
+
+// EnableTenuring turns on generational tenuring of recurring slash-commands (#848) with the
+// given promotion threshold and quiet-TTL (non-positive values fall back to the package
+// defaults). It is opt-in: a SessionPlanner created without it has a nil tenure table and is
+// behavior-preserving. Calling it again replaces the table (resetting recurrence history).
+func (sp *SessionPlanner) EnableTenuring(threshold int, ttlMillis int64) {
+	sp.tenure = newTenureTable(threshold, ttlMillis)
+}
+
+// RecordCommand observes one invocation of a recurring slash-command at nowMillis, advancing
+// its recurrence counter and reviving its tenuring clock. It returns the command's compact
+// rollup and whether it is currently tenured (promoted). With tenuring disabled (the default)
+// it is a no-op returning (zero, false): a command is always safe to re-derive each turn.
+func (sp *SessionPlanner) RecordCommand(command string, nowMillis int64) (Rollup, bool) {
+	return sp.tenure.Record(command, nowMillis)
+}
+
+// CommandRollup returns a recurring command's compact rollup and whether it is tenured. A
+// young / unknown / demoted command (or tenuring disabled) returns (zero, false) — the safe
+// "re-derive this turn" signal. The caller uses the rollup as a CACHE of derived context; a
+// false result means fall back to re-deriving (heuristicForecast), never a correctness change.
+func (sp *SessionPlanner) CommandRollup(command string) (Rollup, bool) {
+	return sp.tenure.Rollup(command)
+}
+
+// SweepTenure applies the time-driven demotion at nowMillis, demoting any tenured command that
+// has gone quiet past its TTL back to young (dropping its rollup cache, keeping its history).
+// It returns the commands demoted this sweep. A no-op with tenuring disabled.
+func (sp *SessionPlanner) SweepTenure(nowMillis int64) []string {
+	return sp.tenure.Sweep(nowMillis)
 }
 
 // forecast authors the per-turn Forecast from the maintained state — intents from the last user
