@@ -104,6 +104,42 @@ func TestClassify(t *testing.T) {
 		{"git.exe", `git.exe push --force`, true, "force-push"},
 		{"uppercase GIT", "GIT push --force", true, "force-push"},
 		{"subshell launder caught", "echo $(git push --force)", true, "force-push"},
+
+		// ---- shell-laundering recovered by the unwrap pass (#823) -------------
+		// A git hazard the shell grammar wraps around the call: a pipe, an operator,
+		// a `$(...)` / backtick command substitution, or a `bash -c`/`sh -c` string.
+		// The unwrap pass makes each VISIBLE to the SAME defaultHazards rules.
+		{"pipe to force", "echo x | git push --force origin main", true, "force-push"},
+		{"and-and force", "true && git push --force", true, "force-push"},
+		{"or-or force", "git status || git push -f", true, "force-push"},
+		{"cmdsubst force inner", "git push $(printf -- --force)", false, ""}, // the FLAG is in a $() printf builds at runtime — undecidable, defer
+		{"cmdsubst whole git call", "echo $(git push -f)", true, "force-push"},
+		{"backtick git call", "echo `git commit --amend`", true, "amend"},
+		{"bash -c single quote", `bash -c 'git push --force origin main'`, true, "force-push"},
+		{"bash -c double quote", `bash -c "git commit --amend"`, true, "amend"},
+		{"sh -c amend", `sh -c 'git commit --amend --no-edit'`, true, "amend"},
+		{"sh -c add -A", `sh -c "git add -A"`, true, "explicit-path"},
+		{"absolute bash -c", `/bin/bash -c 'git push -f'`, true, "force-push"},
+		{"bash -lc cluster", `bash -lc 'git push --force'`, true, "force-push"},
+		{"nested cmdsubst in bash -c", `bash -c 'echo $(git tag -f v1)'`, true, "tag-force"},
+		{"bash -c nested bash -c", `bash -c "bash -c 'git push -f'"`, true, "force-push"},
+		{"pipe inside bash -c", `bash -c 'echo x | git push --force'`, true, "force-push"},
+
+		// ---- expansion stays out of scope (degrades to defer, NEVER allow) ----
+		// $VAR / eval / alias need runtime state a static pass cannot have; the git
+		// call they reconstruct is unrecoverable here and must DEFER (the git hooks
+		// floor is the backstop). The key property: a defer, not a false-allow.
+		{"var-expanded subcommand", "git $CMD --force", false, ""},
+		{"var-expanded program", "$GIT push --force", false, ""},
+		{"eval launder", `eval "git push --force"`, false, ""},
+		{"alias then push", "alias g=git; g push -f", false, ""},
+		// ...but a REAL hazard paired with an unrecoverable one is still caught.
+		{"var plus real hazard", "git $CMD; git push --force", true, "force-push"},
+
+		// ---- unwrap is fail-safe on malformed input (defer, never crash/allow) -
+		{"unbalanced cmdsubst still caught", "echo $(git push --force", true, "force-push"}, // outer string still tokenizes; the bare $( does not hide it
+		{"empty bash -c", "bash -c ''", false, ""},
+		{"bash -c no operand", "bash -c", false, ""},
 	}
 
 	for _, tc := range cases {
@@ -117,6 +153,60 @@ func TestClassify(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestUnwrapShellSources pins the pure recovery layer directly: every yielded source
+// always includes the original command, the recovered `$(...)`/backtick bodies and
+// `bash -c` strings are present, and the pass is bounded + crash-free on adversarial input.
+func TestUnwrapShellSources(t *testing.T) {
+	contains := func(srcs []string, want string) bool {
+		for _, s := range srcs {
+			if s == want {
+				return true
+			}
+		}
+		return false
+	}
+
+	t.Run("always yields the original", func(t *testing.T) {
+		got := unwrapShellSources("git status")
+		if !contains(got, "git status") {
+			t.Fatalf("unwrapShellSources must always include cmd itself; got %q", got)
+		}
+	})
+	t.Run("recovers cmdsubst body", func(t *testing.T) {
+		got := unwrapShellSources("echo $(git push -f)")
+		if !contains(got, "git push -f") {
+			t.Fatalf("expected the $() body recovered; got %q", got)
+		}
+	})
+	t.Run("recovers backtick body", func(t *testing.T) {
+		got := unwrapShellSources("x=`git commit --amend`")
+		if !contains(got, "git commit --amend") {
+			t.Fatalf("expected the backtick body recovered; got %q", got)
+		}
+	})
+	t.Run("recovers bash -c string", func(t *testing.T) {
+		got := unwrapShellSources(`bash -c 'git push --force'`)
+		if !contains(got, "git push --force") {
+			t.Fatalf("expected the bash -c string recovered; got %q", got)
+		}
+	})
+	t.Run("does not extract from single quotes", func(t *testing.T) {
+		// A $() literally inside single quotes is inert in the shell, so it must NOT
+		// be lifted out as a live source (it stays only as part of the whole string).
+		got := unwrapShellSources(`echo 'literal $(git push -f) text'`)
+		if contains(got, "git push -f") {
+			t.Fatalf("a $() inside single quotes is inert and must not be lifted; got %q", got)
+		}
+	})
+	t.Run("bounded + crash-free on adversarial nesting", func(t *testing.T) {
+		deep := strings.Repeat("$(", 50) + "git push -f" + strings.Repeat(")", 50)
+		got := unwrapShellSources(deep) // must not panic or run away
+		if len(got) > maxUnwrapSources {
+			t.Fatalf("unwrap exceeded the source bound: %d > %d", len(got), maxUnwrapSources)
+		}
+	})
 }
 
 // cmdCall builds a shell tool call with the given command as inline JSON args
