@@ -1,0 +1,77 @@
+{
+  "version": "fak-route/v1",
+  "default": {
+    "members": [
+      {
+        "model": "small",
+        "role": "primary"
+      }
+    ],
+    "scout": "tiny-classifier",
+    "reason": "gardening is high-volume, low-stakes, batch-latency background work (issue triage, label proposals, trajectory dedup) -\u003e the small/fast model is adequate; a wrong gardening label costs a re-run, not a bad production write"
+  },
+  "rules": [
+    {
+      "name": "garden-triage-batch",
+      "match": {
+        "latency": "batch",
+        "labels": {
+          "work_kind": "gardening"
+        }
+      },
+      "plan": {
+        "members": [
+          {
+            "model": "small",
+            "role": "primary"
+          }
+        ],
+        "scout": "tiny-classifier",
+        "reason": "the steady-state gardening pass (classify priority/area/kind, propose labels) -\u003e small/local model; a cheap scout labels complexity first"
+      }
+    },
+    {
+      "name": "garden-expansion-hard",
+      "match": {
+        "min_complexity": "high",
+        "labels": {
+          "work_kind": "gardening"
+        }
+      },
+      "plan": {
+        "members": [
+          {
+            "model": "large",
+            "role": "primary"
+          }
+        ],
+        "scout": "tiny-classifier",
+        "reason": "EXPANSION: splitting an oversized needs-split issue into focused sub-issues is genuine hard judgment -\u003e escalate to the large model when the scout flags high complexity"
+      }
+    },
+    {
+      "name": "garden-contraction-vote",
+      "match": {
+        "aspect": "state",
+        "labels": {
+          "move": "contraction",
+          "work_kind": "gardening"
+        }
+      },
+      "plan": {
+        "members": [
+          {
+            "model": "guard-a",
+            "weight": 1
+          },
+          {
+            "model": "guard-b",
+            "weight": 1
+          }
+        ],
+        "reduce": "vote",
+        "reason": "CONTRACTION (confirm a dup/stale/dormant cluster for close) is low-stakes-but-irreversible -\u003e a two-model vote ensemble proposes a close only when two cheap models agree, never one model alone"
+      }
+    }
+  ]
+}
