@@ -106,6 +106,11 @@ var defaultHazards = []hazard{
 	{sub: "tag", long: "--delete", short: 'd', law: "tag-delete refused: do not delete a tag from an agent (tag -d/--delete)."},
 	// No history rewrite on the shared trunk.
 	{sub: "rebase", long: "--interactive", short: 'i', law: "history-rewrite refused: no interactive rebase on the shared trunk (rebase -i/--interactive)."},
+	// Never --autostash in the shared tree: an aborted/conflicted rebase pops the
+	// stash back as a working-tree blob, dumping a peer's in-flight WIP into your
+	// tree and leaving a dangling `autostash` stash (CLAUDE.md / [[fak-shared-tree-high-churn-commit]]).
+	{sub: "rebase", long: "--autostash", law: "autostash refused: never `rebase --autostash` in the shared tree — an abort pops the stash into your working tree, sweeping a peer's WIP (CLAUDE.md). Reach a clean tree first (stash explicit paths or commit your work), THEN `git rebase` with no autostash."},
+	{sub: "pull", long: "--autostash", law: "autostash refused: never `pull --rebase --autostash` in the shared tree — a conflict abort pops the stash into your working tree, sweeping a peer's WIP (CLAUDE.md). Reach a clean tree first, then `git fetch` + `git rebase origin/main` with no autostash."},
 }
 
 const dotAddLaw = "commit-by-explicit-path: `git add .` stages the whole tree (AGENTS.md). Add explicit paths instead."

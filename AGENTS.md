@@ -81,9 +81,13 @@ until it clears.
     `git diff --cached` is empty). Finish with a plain `git commit -s` — the merge commits
     the index as-is; never `-a` / `git add -A`, which would sweep a peer's files into your
     merge. Prefer **merge over rebase**: rebase replays every local commit and re-hits the
-    same conflict N times; merge resolves it once. After a clean `git push` the pushed tip
-    may sit *ahead* of your commit — a peer landed on the shared ref between commit and
-    push; that's expected, not a force.
+    same conflict N times; merge resolves it once. **Never `--autostash`** (on `rebase` or
+    `pull --rebase`): an aborted/conflicted rebase pops the stash back as a working-tree
+    blob, dumping a peer's in-flight WIP into your tree and leaving a dangling `autostash`
+    stash. Reach a clean tree first, *then* `git fetch` + `git rebase origin/main` with no
+    autostash — the `gitgate` rung refuses the flag for exactly this reason. After a clean
+    `git push` the pushed tip may sit *ahead* of your commit — a peer landed on the shared
+    ref between commit and push; that's expected, not a force.
   - *A merge is mid-flight* (`git rev-parse -q --verify MERGE_HEAD` prints a SHA): a
     path-scoped `git commit -- <paths>` then fails with *"cannot do a partial commit during
     a merge."* If it is **your** merge, finish it promptly — peers are blocked until

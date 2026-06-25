@@ -66,6 +66,8 @@ func TestClassify(t *testing.T) {
 		{"tag delete", "git tag -d v1", true, "tag-delete"},
 		{"rebase -i", "git rebase -i HEAD~3", true, "history-rewrite"},
 		{"rebase interactive long", "git rebase --interactive origin/main", true, "history-rewrite"},
+		{"rebase autostash", "git rebase --autostash origin/main", true, "autostash refused"},
+		{"pull rebase autostash", "git pull --rebase --autostash origin main", true, "autostash refused"},
 
 		// ---- allowed git ops (DEFER) ----------------------------------------
 		{"commit explicit OK", `git commit -s -m "fix(x): do y (fak x)"`, false, ""},
