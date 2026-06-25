@@ -201,6 +201,15 @@ def evaluate(root: Path, *, max_workers: int, work_kind: str, lane: str | None,
     lane_pick = pick_lane(root, lane)
     chosen = lane_pick.get("lane")
     command = dispatch_worker.build_command(chosen, "claude") if chosen else []
+    # Dogfood: front the worker with the kernel (``fak guard``) so every tool call it
+    # proposes crosses the capability floor and lands in a durable, hash-chained
+    # decision journal. ``command`` stays the raw agent argv (the logical worker
+    # command); ``launch_command`` is what actually spawns (kernel-fronted when a fak
+    # binary resolves and FLEET_DOGFOOD_GUARD!=0; unchanged otherwise -- fail open).
+    launch_command, guarded = (
+        dispatch_worker.guarded_launch_command(command, chosen, "claude", root)
+        if command else ([], False)
+    )
 
     payload: dict[str, Any] = {
         "schema": SCHEMA,
@@ -214,6 +223,8 @@ def evaluate(root: Path, *, max_workers: int, work_kind: str, lane: str | None,
         "lane": chosen,
         "lane_issue_count": lane_pick.get("issues"),
         "command": command,
+        "guarded": guarded,
+        "launch_command": launch_command,
         "witness": {"kind": "benchmark",
                     "cmd": f"python tools/bench_witness.py --lane {chosen}" if chosen else None},
     }
@@ -235,7 +246,9 @@ def evaluate(root: Path, *, max_workers: int, work_kind: str, lane: str | None,
         return payload
 
     env = worker_env(acct.get("dir"), chosen, root)
-    spawned = spawn_detached(command, env, root, root / RUNS_DIRNAME, chosen)
+    if guarded:
+        dispatch_worker.guard_env_augment(env)
+    spawned = spawn_detached(launch_command, env, root, root / RUNS_DIRNAME, chosen)
     payload.update({"ok": True, "action": "spawned", "verdict": "SPAWNED",
                     "spawned": spawned,
                     "reason": (f"spawned worker pid {spawned['pid']} on lane '{chosen}' "

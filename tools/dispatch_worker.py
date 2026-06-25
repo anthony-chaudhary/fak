@@ -149,6 +149,134 @@ def resolve_exe(name: str) -> str:
     return found or name
 
 
+# --- Dogfood: front each worker with the kernel (``fak guard``) ----------------
+# A dispatch worker IS the highest-volume dev work on a fleet node, and by default
+# it talked STRAIGHT to the provider API -- the kernel adjudicated NONE of it. That
+# is the inverse of dogfooding the product. Fronting the worker with ``fak guard``
+# puts the SAME kernel ``fak serve`` runs in front of every tool call the worker
+# proposes (deny by structure, repair malformed args, quarantine poisoned results),
+# and records every verdict in a durable, hash-chained DECISION JOURNAL -- so the
+# fleet eats the product on the real workflow, with a witness. Default ON; opt out
+# per node with ``FLEET_DOGFOOD_GUARD=0``. resolve_fak_bin already fails OPEN to an
+# unwrapped worker on a host that has not built ``fak``, so the default never breaks
+# dispatch.
+GUARD_OFF_VALUES = frozenset({"0", "off", "false", "no", "", "disable", "disabled"})
+
+# fak guard fronts the real provider API in passthrough, and a Claude Code turn on a
+# frontier model (with extended thinking) can run well past ``fak serve``'s default
+# 60s planner / 90s write timeouts -- which would TRUNCATE the turn at the gateway.
+# Raise both floors for a guarded worker (mirrors scripts/dogfood-claude.*, which
+# pre-raise them) without clobbering an operator's explicit value.
+GUARD_TIMEOUT_FLOOR_S = 600
+
+
+def guard_enabled(env: dict[str, str] | None = None) -> bool:
+    """Whether to front a worker with ``fak guard``. Dogfood-by-default (ON); a node
+    opts out with ``FLEET_DOGFOOD_GUARD`` in {0,off,false,no,disable}."""
+    raw = (env if env is not None else os.environ).get("FLEET_DOGFOOD_GUARD")
+    if raw is None:
+        return True
+    return raw.strip().lower() not in GUARD_OFF_VALUES
+
+
+def resolve_fak_bin(workspace: Path, env: dict[str, str] | None = None) -> str | None:
+    """Locate a ``fak`` binary to front the worker with, or ``None``.
+
+    Precedence: ``$FAK_BIN`` (if it exists) -> the in-tree ``tools/.bin/fak[.exe]``
+    the dogfood launcher builds -> ``fak`` on PATH. ``None`` means the caller should
+    fail OPEN (launch the worker unwrapped) rather than break dispatch on a host that
+    has not built fak.
+    """
+    e = env if env is not None else os.environ
+    explicit = (e.get("FAK_BIN") or "").strip()
+    if explicit and Path(explicit).exists():
+        return explicit
+    exe = "fak.exe" if os.name == "nt" else "fak"
+    intree = Path(workspace) / "tools" / ".bin" / exe
+    if intree.exists():
+        return str(intree)
+    # Honor the supplied env's PATH for the lookup (so the env param fully governs
+    # resolution); an absent PATH key falls back to the process PATH.
+    return shutil.which("fak", path=e.get("PATH"))
+
+
+def guard_provider(backend: str) -> str:
+    """The upstream wire ``fak guard`` proxies for a worker backend. ``claude`` ->
+    the Anthropic API (passthrough/subscription); every other backend is OpenAI-wire."""
+    return "anthropic" if backend == "claude" else "openai"
+
+
+def guard_audit_path(workspace: Path, lane: str, backend: str) -> Path:
+    """Per-(lane,backend) durable decision journal under the gitignored
+    ``.dispatch-runs/``. Per worker -- NOT ``fak guard``'s shared per-user default --
+    so concurrent workers never fork ONE hash chain, and each lane's kernel evidence
+    is separable. The dir is created lazily by the journal writer."""
+    safe = "".join(c if (c.isalnum() or c in "-_.") else "_" for c in f"{lane}-{backend}")
+    return Path(workspace) / ".dispatch-runs" / "guard-audit" / f"{safe}.jsonl"
+
+
+def guard_wrap(
+    command: Sequence[str],
+    *,
+    fak_bin: str | None,
+    lane: str,
+    backend: str,
+    workspace: Path,
+    env: dict[str, str] | None = None,
+) -> list[str]:
+    """Front a raw worker argv with ``fak guard -- <worker>`` so the kernel
+    adjudicates every tool call. Pure given ``fak_bin``. Returns the command
+    UNCHANGED when:
+
+    * ``fak_bin`` is ``None`` (no binary resolved -> fail open), or
+    * the backend fronts a LOCAL upstream we have not been told the base URL of.
+      ``claude`` proxies the public Anthropic API (passthrough/subscription) with no
+      base-URL override; ``opencode`` (and friends) front a local server (e.g. a GLM
+      endpoint), so guard would MISROUTE them to the provider's public API unless
+      ``FLEET_DOGFOOD_GUARD_BASEURL`` names that upstream. We refuse to misroute.
+    """
+    cmd = list(command)
+    if not cmd or not fak_bin:
+        return cmd
+    provider = guard_provider(backend)
+    extra: list[str] = []
+    if backend != "claude":
+        e = env if env is not None else os.environ
+        base = (e.get("FLEET_DOGFOOD_GUARD_BASEURL") or "").strip()
+        if not base:
+            return cmd  # don't misroute a local-upstream worker
+        extra = ["--base-url", base]
+    audit = guard_audit_path(workspace, lane, backend)
+    return [fak_bin, "guard", "--provider", provider, *extra,
+            "--audit", str(audit), "--", *cmd]
+
+
+def guard_env_augment(env: dict[str, str]) -> dict[str, str]:
+    """Ensure a guarded worker's gateway won't truncate a long frontier turn: set
+    ``FAK_PLANNER_TIMEOUT_S`` / ``FAK_HTTP_WRITE_TIMEOUT_S`` to a generous floor when
+    unset (an explicit operator value is left as-is). Mutates and returns ``env``."""
+    for key in ("FAK_PLANNER_TIMEOUT_S", "FAK_HTTP_WRITE_TIMEOUT_S"):
+        if not env.get(key):
+            env[key] = str(GUARD_TIMEOUT_FLOOR_S)
+    return env
+
+
+def guarded_launch_command(
+    command: Sequence[str], lane: str, backend: str, workspace: Path,
+    env: dict[str, str] | None = None,
+) -> tuple[list[str], bool]:
+    """Resolve the argv to actually launch: ``command`` fronted by ``fak guard`` when
+    dogfood mode is on and a fak binary resolves, else ``command`` unchanged. Returns
+    ``(launch_command, guarded)`` so callers can both run it and report what ran."""
+    e = env if env is not None else os.environ
+    fak_bin = resolve_fak_bin(workspace, e) if guard_enabled(e) else None
+    if not fak_bin:
+        return list(command), False
+    wrapped = guard_wrap(command, fak_bin=fak_bin, lane=lane, backend=backend,
+                         workspace=workspace, env=e)
+    return wrapped, wrapped != list(command)
+
+
 Runner = Callable[[Sequence[str], Path, dict[str, str]], dict[str, Any]]
 
 
@@ -194,14 +322,22 @@ def build_payload(
     dry_run: bool,
     result: dict[str, Any] | None = None,
     error: str | None = None,
+    command: Sequence[str] | None = None,
+    guarded: bool = False,
 ) -> dict[str, Any]:
-    command = build_command(lane, backend) if not error else []
+    # ``command`` defaults to the raw (unguarded) worker argv for backward compat; a
+    # live/dry-run launch passes the actual launched argv (kernel-fronted when guarded)
+    # so the record shows exactly what ran.
+    if command is None:
+        command = build_command(lane, backend) if not error else []
+    command = list(command)
     ok = error is None and (result is None or result.get("returncode") == 0)
     return {
         "schema": SCHEMA,
         "ok": ok,
         "lane": lane,
         "backend": backend,
+        "guarded": guarded,
         "workspace": str(workspace),
         "dry_run": dry_run,
         "command": command,
@@ -214,7 +350,8 @@ def build_payload(
 def render(payload: dict[str, Any]) -> str:
     cmd = " ".join(payload.get("command") or []) or "-"
     lines = [
-        f"dispatch-worker: backend={payload.get('backend')} lane={payload.get('lane')} dry_run={payload.get('dry_run')}",
+        f"dispatch-worker: backend={payload.get('backend')} lane={payload.get('lane')} "
+        f"guarded={payload.get('guarded')} dry_run={payload.get('dry_run')}",
         f"command: {cmd}",
     ]
     if payload.get("error"):
@@ -245,9 +382,21 @@ def main(argv: list[str] | None = None) -> int:
     except ValueError as exc:
         error = str(exc)
 
+    # Resolve the argv to actually launch, fronting it with ``fak guard`` when dogfood
+    # mode is on and a fak binary resolves (fail OPEN to an unwrapped worker otherwise).
+    # Computed for BOTH paths so ``--dry-run`` reveals the kernel-fronted argv an
+    # operator will actually run.
+    command: list[str] = []
+    guarded = False
+    if not error:
+        command, guarded = guarded_launch_command(
+            build_command(args.lane, backend), args.lane, backend, workspace
+        )
+
     if args.dry_run or error:
         payload = build_payload(
-            lane=args.lane, backend=backend, workspace=workspace, dry_run=True, error=error
+            lane=args.lane, backend=backend, workspace=workspace, dry_run=True,
+            error=error, command=command, guarded=guarded,
         )
         if args.json:
             print(json.dumps(payload, indent=2))
@@ -255,11 +404,13 @@ def main(argv: list[str] | None = None) -> int:
             print(render(payload))
         return 0 if not error else 2
 
-    command = build_command(args.lane, backend)
     env = child_env(args.lane, backend, workspace)
+    if guarded:
+        guard_env_augment(env)
     result = launch(command, workspace, env, timeout_s=normalize_timeout(args.timeout_s))
     payload = build_payload(
-        lane=args.lane, backend=backend, workspace=workspace, dry_run=False, result=result
+        lane=args.lane, backend=backend, workspace=workspace, dry_run=False,
+        result=result, command=command, guarded=guarded,
     )
     if args.json:
         print(json.dumps(payload, indent=2))
