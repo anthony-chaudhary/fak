@@ -24,6 +24,14 @@
 //	path:<path>       the path exists on disk             (the artifact is present)
 //	grep:<pattern>    some commit message in history matches
 //	clean:<pathspec>  the working tree is clean there      (a green-tree ship)
+//	notests:<ref>     the commit did NOT edit its own gating tests (reward-hack guard)
+//
+// The notests rung is the dual of the others: where the rest CONFIRM that a
+// claimed effect is present, notests REFUTES when a ship-commit modified the very
+// *_test.go files that gate it — editing the tests you must pass is the canonical
+// reward-hack. CONFIRMED means the commit touched no test file (clean); REFUTED
+// names the suspicious commit for a human; a bad/unknown ref or missing git
+// abstains (never a false CONFIRM that lets a test-rewriting commit through).
 //
 // An unrecognized or empty claim, or any environment where git is unavailable,
 // resolves to ABSTAIN (fail-to-abstain) — the witness never blocks on its own
@@ -156,8 +164,41 @@ func (r *Resolver) Resolve(ctx context.Context, c *abi.ToolCall, claim string) a
 			return abi.WitnessConfirmed
 		}
 		return abi.WitnessRefuted
+	case "notests":
+		// The reward-hack guard: list the files <ref> touched and REFUTE if any is a
+		// gating test file. `git show --name-only --format=` (empty format) prints the
+		// commit's file list with no header; a merge or empty commit prints nothing.
+		// CONFIRMED = touched no test (clean ship); REFUTED = edited a gating test;
+		// a failure to run (bad ref / git missing) abstains, never a false CONFIRM.
+		out, code, err := r.run(ctx, r.dir, "show", "--name-only", "--format=", arg)
+		if err != nil || code != 0 {
+			return abi.WitnessAbstain
+		}
+		for _, line := range strings.Split(out, "\n") {
+			if isGatingTestPath(strings.TrimSpace(line)) {
+				return abi.WitnessRefuted // the commit edited a test it must pass
+			}
+		}
+		return abi.WitnessConfirmed
 	}
 	return abi.WitnessAbstain
+}
+
+// isGatingTestPath reports whether a repo path is a test file whose edit by a
+// ship-commit is a reward-hack signal. It matches the Go convention (a basename
+// ending in "_test.go") — the language's own definition of a gating test — and is
+// deliberately narrow: a non-test source edit, or a fixture/testdata file, is not
+// flagged, so the guard refuses only the unambiguous "rewrote the assertions" case.
+func isGatingTestPath(p string) bool {
+	if p == "" {
+		return false
+	}
+	// normalize the trailing path segment without importing path (keep this file's
+	// minimal-deps shape); both separators appear in git output across platforms.
+	if i := strings.LastIndexAny(p, "/\\"); i >= 0 {
+		p = p[i+1:]
+	}
+	return strings.HasSuffix(p, "_test.go")
 }
 
 // splitClaim parses "kind:arg". Returns ok=false for an empty/colon-less claim.
