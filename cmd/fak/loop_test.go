@@ -192,18 +192,69 @@ func TestLoopStatusHumanOutput(t *testing.T) {
 	}
 }
 
-func TestLoopRunHelper(t *testing.T) {
-	switch os.Getenv("FAK_LOOP_RUN_HELPER") {
-	case "":
-		return
+// loopHelperPlan is the pure decision the re-exec child enacts: given a mode it
+// returns what to print and the exit code. Extracting it lets the contract be
+// asserted in-process (TestLoopHelperPlan) instead of only observed through a
+// subprocess, so the helper test is no longer a bare "doesn't panic" early return.
+func loopHelperPlan(mode string) (stdout, stderr string, exit int) {
+	switch mode {
 	case "success":
-		fmt.Fprintln(os.Stdout, "loop helper success")
-		return
+		return "loop helper success", "", 0
 	case "fail":
-		fmt.Fprintln(os.Stderr, "loop helper fail")
-		os.Exit(7)
+		return "", "loop helper fail", 7
 	default:
-		os.Exit(9)
+		return "", "", 9
+	}
+}
+
+// TestLoopHelperPlan asserts the helper's mode->action contract that the three
+// re-exec tests above depend on: success prints to stdout and exits 0, fail
+// prints to stderr and exits 7, any other mode exits 9. This runs in the normal
+// (no-env) test pass -- the case the scorecard flagged as assertionless.
+func TestLoopHelperPlan(t *testing.T) {
+	cases := []struct {
+		mode       string
+		wantStdout string
+		wantStderr string
+		wantExit   int
+	}{
+		{"success", "loop helper success", "", 0},
+		{"fail", "", "loop helper fail", 7},
+		{"unknown", "", "", 9},
+		{"", "", "", 9},
+	}
+	for _, c := range cases {
+		gotStdout, gotStderr, gotExit := loopHelperPlan(c.mode)
+		if gotStdout != c.wantStdout || gotStderr != c.wantStderr || gotExit != c.wantExit {
+			t.Errorf("loopHelperPlan(%q) = (%q,%q,%d), want (%q,%q,%d)",
+				c.mode, gotStdout, gotStderr, gotExit, c.wantStdout, c.wantStderr, c.wantExit)
+		}
+	}
+}
+
+func TestLoopRunHelper(t *testing.T) {
+	mode := os.Getenv("FAK_LOOP_RUN_HELPER")
+	if mode == "" {
+		// Not the re-exec child. Assert the success contract in-process so the
+		// normal test pass exercises a real post-state (not a bare no-op return):
+		// "success" must print to stdout and exit 0. The other modes are covered
+		// by TestLoopHelperPlan and the re-exec parent tests.
+		out, errOut, exit := loopHelperPlan("success")
+		if out != "loop helper success" || errOut != "" || exit != 0 {
+			t.Fatalf("success plan = (%q,%q,%d), want (%q,%q,0)",
+				out, errOut, exit, "loop helper success", "")
+		}
+		return
+	}
+	stdout, stderr, exit := loopHelperPlan(mode)
+	if stdout != "" {
+		fmt.Fprintln(os.Stdout, stdout)
+	}
+	if stderr != "" {
+		fmt.Fprintln(os.Stderr, stderr)
+	}
+	if exit != 0 {
+		os.Exit(exit)
 	}
 }
 

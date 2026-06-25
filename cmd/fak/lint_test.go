@@ -81,7 +81,30 @@ func TestLintJSONEnvelopeShape(t *testing.T) {
 	}
 }
 
-// The --kernel-only collector path is lintable without panicking.
+// The --kernel-only collector path produces a deterministically-ordered,
+// idempotent report. Lint documents (Tool, Code) ordering so a host can diff
+// output across commits; assert that contract here rather than just "doesn't
+// panic" -- two runs over the same surface must be byte-identical and the
+// findings must be sorted.
 func TestLintCollectorBranchKernelOnly(t *testing.T) {
-	_ = toollint.Lint(toollint.FromKernel())
+	facts := toollint.FromKernel()
+	r1 := toollint.Lint(facts)
+	r2 := toollint.Lint(facts)
+	if len(r1.Findings) != len(r2.Findings) {
+		t.Fatalf("Lint not idempotent: %d vs %d findings", len(r1.Findings), len(r2.Findings))
+	}
+	for i := range r1.Findings {
+		if r1.Findings[i] != r2.Findings[i] {
+			t.Fatalf("Lint not idempotent at %d: %+v vs %+v", i, r1.Findings[i], r2.Findings[i])
+		}
+		if i > 0 {
+			prev, cur := r1.Findings[i-1], r1.Findings[i]
+			ordered := prev.Tool < cur.Tool ||
+				(prev.Tool == cur.Tool && prev.Code <= cur.Code)
+			if !ordered {
+				t.Errorf("findings not in (Tool, Code) order at %d: %q/%v before %q/%v",
+					i, prev.Tool, prev.Code, cur.Tool, cur.Code)
+			}
+		}
+	}
 }
