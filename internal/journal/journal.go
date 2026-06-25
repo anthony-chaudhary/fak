@@ -8,7 +8,7 @@
 // WHAT IT GUARANTEES.
 //
 //   - DURABLE: a persisting abi.Emitter writes one JSONL row per
-//     EvDecide / EvDeny / EvQuarantine / EvVDSOHit (the vDSO-served hit included,
+//     EvDecide / EvDeny / EvResultDeny / EvQuarantine / EvVDSOHit (the vDSO-served hit included,
 //     so a cache hit is audited exactly like an engine call). Rows are appended
 //     and flushed per write, so a process crash loses nothing already returned to
 //     the caller.
@@ -59,7 +59,7 @@ import (
 type Row struct {
 	Seq          uint64 `json:"seq"`          // monotonic 1-based order anchor
 	TSUnixNano   int64  `json:"ts_unix_nano"` // wall-clock time anchor
-	Kind         string `json:"kind"`         // DECIDE | DENY | QUARANTINE | VDSO_HIT
+	Kind         string `json:"kind"`         // DECIDE | DENY | RESULT_DENY | QUARANTINE | VDSO_HIT
 	Tool         string `json:"tool,omitempty"`
 	TraceID      string `json:"trace_id,omitempty"`
 	Verdict      string `json:"verdict,omitempty"`
@@ -357,6 +357,8 @@ func rowFromEvent(ev abi.Event) (Row, bool) {
 		kind = "DECIDE"
 	case abi.EvDeny:
 		kind = "DENY"
+	case abi.EvResultDeny:
+		kind = "RESULT_DENY"
 	case abi.EvQuarantine:
 		kind = "QUARANTINE"
 	case abi.EvVDSOHit:

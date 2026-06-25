@@ -26,13 +26,14 @@ import (
 
 // Counters are the kernel's call-path tallies (read by the metrics tap + tests).
 type Counters struct {
-	Submits     int64
-	VDSOHits    int64
-	EngineCalls int64
-	Denies      int64
-	Transforms  int64
-	Quarantines int64
-	Admitted    int64
+	Submits      int64
+	VDSOHits     int64
+	EngineCalls  int64
+	Denies       int64
+	Transforms   int64
+	Quarantines  int64
+	ResultDenies int64
+	Admitted     int64
 }
 
 // Kernel is the concrete abi.Kernel. Construct with New.
@@ -112,13 +113,14 @@ func New(engineID string, opts ...Option) *Kernel {
 // Counters returns a snapshot of the kernel's call-path tallies.
 func (k *Kernel) Counters() Counters {
 	return Counters{
-		Submits:     atomic.LoadInt64(&k.ctr.Submits),
-		VDSOHits:    atomic.LoadInt64(&k.ctr.VDSOHits),
-		EngineCalls: atomic.LoadInt64(&k.ctr.EngineCalls),
-		Denies:      atomic.LoadInt64(&k.ctr.Denies),
-		Transforms:  atomic.LoadInt64(&k.ctr.Transforms),
-		Quarantines: atomic.LoadInt64(&k.ctr.Quarantines),
-		Admitted:    atomic.LoadInt64(&k.ctr.Admitted),
+		Submits:      atomic.LoadInt64(&k.ctr.Submits),
+		VDSOHits:     atomic.LoadInt64(&k.ctr.VDSOHits),
+		EngineCalls:  atomic.LoadInt64(&k.ctr.EngineCalls),
+		Denies:       atomic.LoadInt64(&k.ctr.Denies),
+		Transforms:   atomic.LoadInt64(&k.ctr.Transforms),
+		Quarantines:  atomic.LoadInt64(&k.ctr.Quarantines),
+		ResultDenies: atomic.LoadInt64(&k.ctr.ResultDenies),
+		Admitted:     atomic.LoadInt64(&k.ctr.Admitted),
 	}
 }
 
@@ -299,10 +301,30 @@ func (k *Kernel) admitResult(ctx context.Context, c *abi.ToolCall, r *abi.Result
 		}
 		r.Meta["admit"] = "transformed"
 		atomic.AddInt64(&k.ctr.Admitted, 1)
+	case abi.VerdictRequireWitness:
+		resolved := k.resolveWitness(ctx, c, best)
+		if resolved.Kind == abi.VerdictAllow {
+			atomic.AddInt64(&k.ctr.Admitted, 1)
+			return resolved
+		}
+		return k.denyResultAdmission(c, r, resolved)
+	case abi.VerdictDeny:
+		return k.denyResultAdmission(c, r, best)
 	default:
 		atomic.AddInt64(&k.ctr.Admitted, 1)
 	}
 	return best
+}
+
+func (k *Kernel) denyResultAdmission(c *abi.ToolCall, r *abi.Result, v abi.Verdict) abi.Verdict {
+	atomic.AddInt64(&k.ctr.ResultDenies, 1)
+	denied := DenyResult(c, v)
+	denied.Meta["admit"] = "denied"
+	if r != nil {
+		*r = *denied
+	}
+	emit(abi.Event{Kind: abi.EvResultDeny, Call: c, Verdict: &v, Result: r})
+	return v
 }
 
 // Submit adjudicates and admits the call. The vDSO is consulted FIRST (unit 30);

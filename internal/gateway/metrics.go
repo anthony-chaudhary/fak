@@ -438,6 +438,7 @@ func (s *Server) renderMetrics() string {
 	writeCounter(&b, "fak_kernel_denies_total", "Kernel submissions denied before execution.", c.Denies)
 	writeCounter(&b, "fak_kernel_transforms_total", "Kernel submissions transformed by adjudication.", c.Transforms)
 	writeCounter(&b, "fak_kernel_quarantines_total", "Kernel result admissions quarantined by the result-side stack.", c.Quarantines)
+	writeCounter(&b, "fak_kernel_result_denies_total", "Kernel result admissions hard-refused by the result-side stack.", c.ResultDenies)
 	writeCounter(&b, "fak_kernel_admitted_total", "Kernel result admissions that were accepted or transformed.", c.Admitted)
 	// Per-rung decision distribution (issue #693): which adjudication rung actually
 	// decided each call, bucketed by (rung, kind, reason). Passive — re-derived off the

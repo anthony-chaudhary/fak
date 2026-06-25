@@ -44,6 +44,7 @@ func TestHTTPMetricsEndpointExposesGatewayAndKernelCounters(t *testing.T) {
 		`fak_gateway_operation_duration_seconds_count{operation="syscall",verdict="ALLOW",reason="",disposition="",by="test"} 1`,
 		"fak_kernel_submits_total 1",
 		"fak_kernel_engine_calls_total 1",
+		"fak_kernel_result_denies_total 0",
 		"fak_kernel_admitted_total 1",
 		"fak_gateway_vdso_hit_ratio 0",
 		// The scrape request is excluded from the live-request registry, so an idle
@@ -417,7 +418,7 @@ func TestDebugVarsEndpointExposesRuntimeGatewayKernelAndMetrics(t *testing.T) {
 	if vars.Runtime.GoVersion == "" || vars.Runtime.NumCPU < 1 || vars.Runtime.NumGoroutine < 1 {
 		t.Fatalf("runtime vars mismatch: %+v", vars.Runtime)
 	}
-	if vars.Kernel.Submits != 1 || vars.Kernel.EngineCalls != 1 || vars.Kernel.Admitted != 1 {
+	if vars.Kernel.Submits != 1 || vars.Kernel.EngineCalls != 1 || vars.Kernel.Admitted != 1 || vars.Kernel.ResultDenies != 0 {
 		t.Fatalf("kernel counters mismatch: %+v", vars.Kernel)
 	}
 	if !hasDebugHTTPRow(vars.Metrics.HTTP, "/v1/fak/syscall", "POST", "200") {

@@ -254,6 +254,7 @@ const (
 	EvComplete   = internalabi.EvComplete
 	EvQuarantine = internalabi.EvQuarantine
 	EvVDSOHit    = internalabi.EvVDSOHit
+	EvResultDeny = internalabi.EvResultDeny
 	EvRungLabel  = internalabi.EvRungLabel
 )
 

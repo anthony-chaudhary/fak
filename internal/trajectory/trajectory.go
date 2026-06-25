@@ -81,7 +81,7 @@ func (r *Recorder) MaxPerTrace(n int) *Recorder {
 }
 
 // Emit implements abi.Emitter. It records every decision-bearing lifecycle event
-// (DECIDE/DENY/QUARANTINE/VDSO_HIT) as a Turn appended to its trace. Operational-only
+// (DECIDE/DENY/RESULT_DENY/QUARANTINE/VDSO_HIT) as a Turn appended to its trace. Operational-only
 // kinds (Submit/Dispatch/Complete without a verdict) are skipped — Complete is folded
 // in when it carries cost Fields, otherwise it is operational noise.
 func (r *Recorder) Emit(ev abi.Event) {
@@ -227,7 +227,7 @@ func turnKey(t Turn) string { return t.TraceID + ":" + itoa(t.Seq) }
 // enriches the stream.
 func turnFromEvent(ev abi.Event) (Turn, bool) {
 	switch ev.Kind {
-	case abi.EvDecide, abi.EvDeny, abi.EvQuarantine, abi.EvVDSOHit:
+	case abi.EvDecide, abi.EvDeny, abi.EvResultDeny, abi.EvQuarantine, abi.EvVDSOHit:
 		// analysis-bearing kinds proceed
 	default:
 		return Turn{}, false
@@ -254,7 +254,7 @@ func turnFromEvent(ev abi.Event) (Turn, bool) {
 	// Default the verdict label from the event kind so a kind without a Verdict
 	// object (a VDSO hit) is still legible; a real Verdict overrides it.
 	switch ev.Kind {
-	case abi.EvDeny:
+	case abi.EvDeny, abi.EvResultDeny:
 		t.Verdict = "DENY"
 	case abi.EvQuarantine:
 		t.Verdict = "QUARANTINE"

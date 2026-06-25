@@ -123,6 +123,39 @@ func TestCleanSessionEgressAllowed(t *testing.T) {
 	}
 }
 
+func TestStampGateDeniesOverCeiling(t *testing.T) {
+	ctx := context.Background()
+	read := &abi.ToolCall{Tool: "read_webpage", TraceID: "ceiling"}
+
+	offLedger := NewLedger()
+	off := NewStampGate(offLedger, Policy{})
+	defaultResult := resultOf("external")
+	defaultResult.Payload.Scope = abi.ScopeFleet
+	if v := off.Admit(ctx, read, defaultResult); v.Kind != abi.VerdictDefer {
+		t.Fatalf("default StampGate must still Defer, got %v", v.Kind)
+	}
+	if defaultResult.Payload.Scope != abi.ScopeAgent {
+		t.Fatalf("default StampGate must keep the ScopeAgent down-clamp, got %s", scopeName(defaultResult.Payload.Scope))
+	}
+	if offLedger.Level("ceiling") != abi.TaintTainted {
+		t.Fatalf("default StampGate must still raise the ledger, got %s", taintName(offLedger.Level("ceiling")))
+	}
+
+	on := NewStampGate(NewLedger(), Policy{DenyResultsOverTaintCeiling: true})
+	deniedResult := resultOf("external")
+	deniedResult.Payload.Scope = abi.ScopeFleet
+	v := on.Admit(ctx, read, deniedResult)
+	if v.Kind != abi.VerdictDeny || v.Reason != abi.ReasonTrustViolation {
+		t.Fatalf("over-ceiling result must Deny/TRUST_VIOLATION, got %v/%s", v.Kind, abi.ReasonName(v.Reason))
+	}
+	if deniedResult.Payload.Scope == abi.ScopeAgent {
+		t.Fatal("hard-deny path must not fall back to the ScopeAgent clamp")
+	}
+	if deniedResult.Meta["ifc_taint"] != "tainted" || deniedResult.Meta["ifc_taint_ceiling"] != "trusted" {
+		t.Fatalf("denied result meta = %+v, want taint/ceiling witness", deniedResult.Meta)
+	}
+}
+
 // TestSessionIsolation — taint in one trace does not gate a sink in another. The
 // ledger is per-TraceID, so concurrent sessions don't cross-contaminate.
 func TestSessionIsolation(t *testing.T) {

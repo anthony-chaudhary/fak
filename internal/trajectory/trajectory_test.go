@@ -50,6 +50,24 @@ func TestRecorderFoldsTrace(t *testing.T) {
 	}
 }
 
+func TestRecorderFoldsResultDeny(t *testing.T) {
+	r := New()
+	r.Emit(abi.Event{
+		Kind:    abi.EvResultDeny,
+		Call:    mkCall("trace-1", "read_webpage", "load policy"),
+		Verdict: &abi.Verdict{Kind: abi.VerdictDeny, Reason: abi.ReasonUnwitnessed},
+		Result:  &abi.Result{Payload: abi.Ref{Kind: abi.RefInline, Inline: []byte("denied")}},
+	})
+
+	turns := r.Trace("trace-1")
+	if len(turns) != 1 {
+		t.Fatalf("turns = %d, want 1", len(turns))
+	}
+	if turns[0].Verdict != "DENY" || turns[0].Reason != "UNWITNESSED" || turns[0].ResultDigest == "" {
+		t.Fatalf("result deny turn = %+v, want DENY/UNWITNESSED with result digest", turns[0])
+	}
+}
+
 // TestOperationalKindsSkipped — Submit/Dispatch/Complete (no verdict, no analysis
 // signal) do not become turns; only decision-bearing kinds do.
 func TestOperationalKindsSkipped(t *testing.T) {

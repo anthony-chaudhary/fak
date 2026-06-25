@@ -3,6 +3,7 @@ package kernel
 import (
 	"context"
 	"os"
+	"reflect"
 	"strconv"
 	"strings"
 	"sync"
@@ -80,6 +81,13 @@ func (quarantineAdmitter) Admit(ctx context.Context, c *abi.ToolCall, r *abi.Res
 	return abi.Verdict{Kind: abi.VerdictQuarantine, By: "test"}
 }
 func (quarantineAdmitter) Caps() []abi.Capability { return nil }
+
+type verdictAdmitter struct{ v abi.Verdict }
+
+func (a verdictAdmitter) Admit(ctx context.Context, c *abi.ToolCall, r *abi.Result) abi.Verdict {
+	return a.v
+}
+func (a verdictAdmitter) Caps() []abi.Capability { return nil }
 
 func setup() { abi.ResetForTest(); abi.RegisterRegionBackend(inlineBackend{}) }
 
@@ -265,6 +273,193 @@ func TestDirectAdmitResultEmitsQuarantine(t *testing.T) {
 	}
 	if !rec.has(abi.EvQuarantine) {
 		t.Fatalf("direct AdmitResult quarantine did not emit EvQuarantine: %+v", rec.events)
+	}
+}
+
+func TestAdmitResultDenyHardRefuses(t *testing.T) {
+	setup()
+	abi.RegisterResultAdmitter(0, verdictAdmitter{abi.Verdict{
+		Kind:   abi.VerdictDeny,
+		Reason: abi.ReasonTrustViolation,
+		By:     "result-deny-test",
+	}})
+	k := New("")
+	c := call("read_x", "{}")
+	r := &abi.Result{Call: c, Status: abi.StatusOK, Payload: c.Args}
+
+	v := k.AdmitResult(context.Background(), c, r)
+	if v.Kind != abi.VerdictDeny {
+		t.Fatalf("AdmitResult = %v, want Deny", v.Kind)
+	}
+	if r.Status != abi.StatusError || r.Outcome != abi.OutcomeCommitted {
+		t.Fatalf("denied result status/outcome = %v/%v, want Error/Committed", r.Status, r.Outcome)
+	}
+	if r.Meta["admit"] != "denied" || r.Meta["reason"] != "TRUST_VIOLATION" || r.Meta["disposition"] != "ESCALATE" {
+		t.Fatalf("denied result meta = %+v, want admit=denied reason=TRUST_VIOLATION disposition=ESCALATE", r.Meta)
+	}
+	if len(r.Payload.Inline) != 0 || r.Payload.Kind != 0 {
+		t.Fatalf("denied result must not carry the original payload, got %+v", r.Payload)
+	}
+	if c := k.Counters(); c.ResultDenies != 1 || c.Admitted != 0 {
+		t.Fatalf("counters = %+v, want ResultDenies=1 and Admitted=0", c)
+	}
+}
+
+func TestAdmitResultRequireWitnessFailsClosed(t *testing.T) {
+	setup()
+	abi.RegisterResultAdmitter(0, verdictAdmitter{requireWitness("origin:trusted-read")})
+	k := New("")
+	c := call("read_x", "{}")
+	r := &abi.Result{Call: c, Status: abi.StatusOK, Payload: c.Args}
+
+	v := k.AdmitResult(context.Background(), c, r)
+	if v.Kind != abi.VerdictDeny || v.Reason != abi.ReasonUnwitnessed {
+		t.Fatalf("unwitnessed result must DENY/UNWITNESSED, got %v/%s", v.Kind, abi.ReasonName(v.Reason))
+	}
+	if r.Status != abi.StatusError || r.Meta["admit"] != "denied" || r.Meta["reason"] != "UNWITNESSED" {
+		t.Fatalf("unwitnessed result was not denied-as-value: status=%v meta=%+v", r.Status, r.Meta)
+	}
+	if c := k.Counters(); c.ResultDenies != 1 || c.Admitted != 0 {
+		t.Fatalf("counters = %+v, want ResultDenies=1 and Admitted=0", c)
+	}
+}
+
+func TestAdmitResultRequireWitnessConfirmedAdmits(t *testing.T) {
+	setup()
+	abi.RegisterResultAdmitter(0, verdictAdmitter{requireWitness("origin:trusted-read")})
+	abi.RegisterWitnessResolver("test", fakeWitness{abi.WitnessConfirmed})
+	k := New("")
+	c := call("read_x", "{}")
+	r := &abi.Result{Call: c, Status: abi.StatusOK, Payload: c.Args}
+
+	v := k.AdmitResult(context.Background(), c, r)
+	if v.Kind != abi.VerdictAllow || v.Meta["witness"] != "confirmed" {
+		t.Fatalf("confirmed result witness must admit with witness metadata, got %+v", v)
+	}
+	if r.Status != abi.StatusOK {
+		t.Fatalf("confirmed result status = %v, want OK", r.Status)
+	}
+	if r.Meta != nil && r.Meta["admit"] == "denied" {
+		t.Fatalf("confirmed result must not be denied: %+v", r.Meta)
+	}
+	if c := k.Counters(); c.ResultDenies != 0 || c.Admitted != 1 {
+		t.Fatalf("counters = %+v, want ResultDenies=0 and Admitted=1", c)
+	}
+}
+
+func TestAdmitResultDenyEmitsResultDeny(t *testing.T) {
+	setup()
+	abi.RegisterResultAdmitter(0, verdictAdmitter{abi.Verdict{
+		Kind:   abi.VerdictDeny,
+		Reason: abi.ReasonPolicyBlock,
+		By:     "result-deny-test",
+	}})
+	rec := &recordEmitter{}
+	abi.RegisterEmitter(rec)
+	k := New("")
+	c := call("read_x", "{}")
+	r := &abi.Result{Call: c, Status: abi.StatusOK, Payload: c.Args}
+
+	k.AdmitResult(context.Background(), c, r)
+	if !rec.has(abi.EvResultDeny) {
+		t.Fatalf("direct AdmitResult deny did not emit EvResultDeny: %+v", rec.events)
+	}
+	if rec.has(abi.EvQuarantine) {
+		t.Fatalf("result deny must not be reported as quarantine: %+v", rec.events)
+	}
+}
+
+func TestAdmitResultDefaultAdmitUnchanged(t *testing.T) {
+	setup()
+	k := New("")
+	c := call("read_x", "{}")
+	r := &abi.Result{Call: c, Status: abi.StatusOK, Payload: c.Args}
+
+	v := k.AdmitResult(context.Background(), c, r)
+	if v.Kind != abi.VerdictAllow || v.By != "default-admit" {
+		t.Fatalf("empty result-admitter chain = %+v, want Allow/default-admit", v)
+	}
+	if r.Status != abi.StatusOK || string(r.Payload.Inline) != "{}" {
+		t.Fatalf("empty chain mutated result: %+v", r)
+	}
+	if v = k.AdmitResult(context.Background(), c, nil); v.Kind != abi.VerdictAllow || v.By != "default-admit" {
+		t.Fatalf("nil result = %+v, want Allow/default-admit", v)
+	}
+	if c := k.Counters(); c.Admitted != 2 || c.Quarantines != 0 || c.ResultDenies != 0 {
+		t.Fatalf("default-admit counters = %+v, want Admitted=2 only", c)
+	}
+}
+
+func TestAdmitResultTransformTallyUnchanged(t *testing.T) {
+	setup()
+	rewritten := abi.Ref{Kind: abi.RefInline, Inline: []byte(`{"rewritten":true}`)}
+	abi.RegisterResultAdmitter(0, verdictAdmitter{abi.Verdict{
+		Kind:    abi.VerdictTransform,
+		By:      "transform-test",
+		Payload: abi.TransformPayload{NewArgs: rewritten},
+	}})
+	k := New("")
+	c := call("read_x", "{}")
+	r := &abi.Result{Call: c, Status: abi.StatusOK, Payload: c.Args}
+
+	v := k.AdmitResult(context.Background(), c, r)
+	if v.Kind != abi.VerdictTransform || string(r.Payload.Inline) != `{"rewritten":true}` {
+		t.Fatalf("transform result = verdict %+v payload %q, want transformed payload", v, string(r.Payload.Inline))
+	}
+	if r.Meta["admit"] != "transformed" {
+		t.Fatalf("transform admit meta = %+v, want admit=transformed", r.Meta)
+	}
+	if c := k.Counters(); c.Admitted != 1 || c.Quarantines != 0 || c.ResultDenies != 0 {
+		t.Fatalf("transform counters = %+v, want Admitted=1 only", c)
+	}
+}
+
+type resultEffect struct {
+	Status  abi.Status
+	Outcome abi.Outcome
+	Payload abi.Ref
+	Meta    map[string]string
+}
+
+func effectOf(r *abi.Result) resultEffect {
+	if r == nil {
+		return resultEffect{}
+	}
+	return resultEffect{Status: r.Status, Outcome: r.Outcome, Payload: r.Payload, Meta: r.Meta}
+}
+
+func TestResultLadderParity(t *testing.T) {
+	rewritten := abi.Ref{Kind: abi.RefInline, Inline: []byte(`{"rewritten":true}`)}
+	cases := []struct {
+		name string
+		v    abi.Verdict
+	}{
+		{"allow", abi.Verdict{Kind: abi.VerdictAllow, By: "allow-test"}},
+		{"quarantine", abi.Verdict{Kind: abi.VerdictQuarantine, Reason: abi.ReasonSecretExfil, By: "quarantine-test"}},
+		{"transform", abi.Verdict{Kind: abi.VerdictTransform, By: "transform-test", Payload: abi.TransformPayload{NewArgs: rewritten}}},
+		{"require-witness", requireWitness("origin:trusted-read")},
+		{"deny", abi.Verdict{Kind: abi.VerdictDeny, Reason: abi.ReasonPolicyBlock, By: "deny-test"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			setup()
+			abi.RegisterResultAdmitter(0, verdictAdmitter{tc.v})
+			c := call("read_x", "{}")
+			direct := &abi.Result{Call: c, Status: abi.StatusOK, Payload: c.Args}
+			New("").AdmitResult(context.Background(), c, direct)
+			directEffect := effectOf(direct)
+
+			setup()
+			abi.RegisterAdjudicator(0, fakeAdj{abi.Verdict{Kind: abi.VerdictAllow, By: "allow-test"}})
+			abi.RegisterResultAdmitter(0, verdictAdmitter{tc.v})
+			abi.RegisterEngine("e", &countEngine{})
+			reaped, _ := New("e").Syscall(context.Background(), call("read_x", "{}"))
+			reapEffect := effectOf(reaped)
+
+			if !reflect.DeepEqual(directEffect, reapEffect) {
+				t.Fatalf("AdmitResult/Reap result effect mismatch\n direct=%+v\n reap=%+v", directEffect, reapEffect)
+			}
+		})
 	}
 }
 

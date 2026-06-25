@@ -69,6 +69,25 @@ func TestHarvestsDeniesAsLabels(t *testing.T) {
 	}
 }
 
+func TestHarvestsResultDeniesAsLabels(t *testing.T) {
+	c := NewCorpus()
+	h := New(c)
+	call := &abi.ToolCall{Tool: "read_webpage", Args: abi.Ref{Kind: abi.RefInline, Inline: []byte(`{"url":"https://example.com"}`)}}
+	h.Emit(abi.Event{
+		Kind:    abi.EvResultDeny,
+		Call:    call,
+		Verdict: &abi.Verdict{Kind: abi.VerdictDeny, Reason: abi.ReasonUnwitnessed, By: "result-admit"},
+	})
+
+	rows := c.Positives()
+	if len(rows) != 1 {
+		t.Fatalf("expected 1 positive result-deny label, got %d", len(rows))
+	}
+	if rows[0].Verdict != abi.VerdictDeny || rows[0].Reason != abi.ReasonUnwitnessed {
+		t.Fatalf("result-deny label did not carry the verdict/reason: %+v", rows[0])
+	}
+}
+
 // TestExplicitLabelRowTakenVerbatim — the pre-flight ladder's typed EvRungLabel
 // (RungPassed/RungFailed) is collected verbatim, and surfaces as a HARD NEGATIVE.
 func TestExplicitLabelRowTakenVerbatim(t *testing.T) {

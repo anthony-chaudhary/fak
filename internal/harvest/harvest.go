@@ -122,7 +122,7 @@ func (h *Harvester) Emit(ev abi.Event) {
 		return
 	}
 	switch ev.Kind {
-	case abi.EvDecide, abi.EvDeny, abi.EvQuarantine:
+	case abi.EvDecide, abi.EvDeny, abi.EvResultDeny, abi.EvQuarantine:
 		h.corpus.add(abi.LabelRow{
 			CallHash:   callHash(ev.Call),
 			RungPassed: -1, // unknown without an explicit ladder label

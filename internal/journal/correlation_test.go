@@ -61,3 +61,26 @@ func TestRowPersistsWitness(t *testing.T) {
 		t.Errorf("row = %+v, want SELF_MODIFY / CallSeq 3", rows[0])
 	}
 }
+
+func TestRowRecordsResultDenySeparately(t *testing.T) {
+	j := OpenMemory()
+	call := &abi.ToolCall{Tool: "read_webpage", TraceID: "t1", SeqNo: 9,
+		Args: abi.Ref{Kind: abi.RefInline, Inline: []byte(`{"url":"https://example.com"}`)}}
+	j.Emit(abi.Event{
+		Kind:    abi.EvResultDeny,
+		Call:    call,
+		Verdict: &abi.Verdict{Kind: abi.VerdictDeny, Reason: abi.ReasonUnwitnessed, By: "result-admit"},
+		Result:  &abi.Result{Call: call, Payload: abi.Ref{Kind: abi.RefInline, Inline: []byte("denied")}},
+	})
+
+	rows := j.Recent(0)
+	if len(rows) != 1 {
+		t.Fatalf("rows = %d, want 1", len(rows))
+	}
+	if rows[0].Kind != "RESULT_DENY" || rows[0].Verdict != "DENY" || rows[0].Reason != "UNWITNESSED" {
+		t.Fatalf("result deny row = %+v, want RESULT_DENY/DENY/UNWITNESSED", rows[0])
+	}
+	if rows[0].CallSeq != 9 || rows[0].ResultDigest == "" {
+		t.Fatalf("result deny row lost call/result identity: %+v", rows[0])
+	}
+}

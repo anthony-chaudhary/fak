@@ -12,6 +12,7 @@ const (
 	EvComplete                    // an engine produced a result (Result is set)
 	EvQuarantine                  // a result was held out of context by the MMU
 	EvVDSOHit                     // a call was served locally by the vDSO
+	EvResultDeny                  // a produced result was hard-refused by the result-admit stack
 	// EvRungLabel lives in the EventsLabel block (>=128): a typed LabelRow rode the
 	// event (the pre-flight self-labeling signal).
 	EvRungLabel EventKind = 128

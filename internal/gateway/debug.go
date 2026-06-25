@@ -56,6 +56,7 @@ type debugKernelVars struct {
 	Denies       int64   `json:"denies"`
 	Transforms   int64   `json:"transforms"`
 	Quarantines  int64   `json:"quarantines"`
+	ResultDenies int64   `json:"result_denies"`
 	Admitted     int64   `json:"admitted"`
 	VDSOHitRatio float64 `json:"vdso_hit_ratio"`
 }
@@ -163,6 +164,7 @@ func (s *Server) debugVars(now time.Time) debugVarsResponse {
 			Denies:       c.Denies,
 			Transforms:   c.Transforms,
 			Quarantines:  c.Quarantines,
+			ResultDenies: c.ResultDenies,
 			Admitted:     c.Admitted,
 			VDSOHitRatio: ratio,
 		},

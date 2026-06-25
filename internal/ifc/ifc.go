@@ -272,6 +272,10 @@ type Policy struct {
 	// permits the flow (the explicit-authorization escape CaMeL requires for
 	// legitimate egress). Default nil => no escape (fail-closed).
 	Authorize func(c *abi.ToolCall, into SinkClass) bool
+	// DenyResultsOverTaintCeiling hard-refuses a produced result whose source taint
+	// exceeds the trusted ceiling instead of admitting it with a ScopeAgent clamp.
+	// Default false preserves the historical stamp-only result path.
+	DenyResultsOverTaintCeiling bool
 }
 
 // defaultSafeSinks: a human handoff is the safe response to an injection.
@@ -494,6 +498,20 @@ func (g *StampGate) Admit(ctx context.Context, c *abi.ToolCall, r *abi.Result) a
 	}
 	t := SourceTaint(c, r)
 	r.Payload.Taint = t
+	if g.policy.DenyResultsOverTaintCeiling && taintRank(t) > taintRank(abi.TaintTrusted) {
+		if r.Meta == nil {
+			r.Meta = map[string]string{}
+		}
+		r.Meta["ifc_taint"] = taintName(t)
+		r.Meta["ifc_taint_ceiling"] = taintName(abi.TaintTrusted)
+		return abi.Verdict{
+			Kind:    abi.VerdictDeny,
+			Reason:  abi.ReasonTrustViolation,
+			By:      "ifc-stamp",
+			Payload: abi.WitnessPayload{Claim: "result taint " + taintName(t) + " exceeds " + taintName(abi.TaintTrusted) + " ceiling"},
+			Meta:    map[string]string{"ifc_taint": taintName(t), "ifc_taint_ceiling": taintName(abi.TaintTrusted)},
+		}
+	}
 	if t != abi.TaintTrusted {
 		r.Payload.Scope = abi.ScopeAgent // tainted data is never shared beyond this agent
 	}
