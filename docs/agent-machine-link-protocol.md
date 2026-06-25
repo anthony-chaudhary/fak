@@ -86,6 +86,11 @@ Long calls return a task:
 }
 ```
 
+The `fleet.call.v1` and `fleet.result.v1` schemas are per-message envelope
+schemas: one names a call, the other names either an immediate result or a
+task-acceptance result. The protocol-level descriptor below uses
+`fleet.agent-link.v1` for the Fleet Agent Link ABI and adapter surface.
+
 Task states should be a deliberately small subset that maps cleanly to A2A:
 `submitted`, `working`, `input_required`, `completed`, `failed`, `canceled`,
 and `rejected`.
