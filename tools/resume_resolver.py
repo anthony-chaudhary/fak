@@ -53,6 +53,7 @@ import argparse
 import glob
 import inspect
 import json
+import math
 import os
 import re
 import sys
@@ -452,13 +453,30 @@ def resolve(sid: str, home: str | None = None, *,
             availability = _discover_availability(home)
         targets = fleet_sessions._rehome_targets(availability, owner["account"])
         if not targets:
-            rec.update({
-                "action": "PIN_BLOCKED", "rehomed": False,
-                "pin_account": owner["account"], "pin_config_dir": owner["config_dir"],
-                "reason": (f"owner blocked ({block_reason}) and no healthy Claude "
-                           "worker available -- pin to owner; resume waits for reset"),
-            })
-            return rec
+            # The fleet burst-spread cap (REHOME_CAP) just excluded every available
+            # account by LOAD. That cap exists to stop a BURST of throttled sessions
+            # stampeding one seat -- but this is a SINGLE interactive resume, and the
+            # comment on the forced_target path above says the cap must not strand one
+            # operator's resume on PIN_BLOCKED. So retry UNCAPPED: if a healthy Claude
+            # account exists and was dropped only for being over the cap (not because it
+            # is blocked), re-home there anyway. PIN_BLOCKED stays the verdict only when
+            # even the uncapped pool is empty -- i.e. NO healthy account exists at all.
+            relief = fleet_sessions._rehome_targets(
+                availability, owner["account"], cap=math.inf)
+            if not relief:
+                rec.update({
+                    "action": "PIN_BLOCKED", "rehomed": False,
+                    "pin_account": owner["account"], "pin_config_dir": owner["config_dir"],
+                    "reason": (f"owner blocked ({block_reason}) and no healthy Claude "
+                               "worker available -- pin to owner; resume waits for reset"),
+                })
+                return rec
+            rec["cap_relief"] = {
+                "rehome_cap": fleet_sessions.REHOME_CAP,
+                "note": ("all available accounts were over the fleet burst cap; a single "
+                         "interactive resume relaxes it onto the least-loaded healthy seat"),
+            }
+            targets = relief
 
         # The roster's `available` is only "nothing bad was recorded" -- it can offer an
         # account that is itself limited but never probed (so no throttle row exists). A

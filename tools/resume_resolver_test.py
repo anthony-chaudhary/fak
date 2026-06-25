@@ -16,6 +16,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 if HERE not in sys.path:
     sys.path.insert(0, HERE)
 
+import fleet_sessions  # noqa: E402  (REHOME_CAP -- the cap-relief tests assert against it)
 import resume_resolver  # noqa: E402
 
 SID = "caeb3a9c-1efd-4a0c-9c18-8769d924ce35"
@@ -327,6 +328,53 @@ class ResolveTests(unittest.TestCase):
                 SID, home,
                 owner_status={"available": False, "block_reason": "usage limit"},
                 availability=[_avail(".claude-gem5-acct", False, home=home)])
+            self.assertEqual(rec["action"], "PIN_BLOCKED")
+            self.assertFalse(rec["rehomed"])
+            self.assertEqual(rec["pin_config_dir"],
+                             os.path.join(home, ".claude-gem8-acct"))
+
+    def test_cap_relief_rehomes_when_only_healthy_account_is_over_cap(self) -> None:
+        # The day24 incident: owner walled, and the ONLY healthy Claude account is
+        # available but its live load is over REHOME_CAP (so _rehome_targets drops it
+        # and the fleet path would PIN_BLOCKED). A single interactive resume relaxes the
+        # burst cap -- live-probes the over-cap account, confirms it serves, re-homes there.
+        over_cap = fleet_sessions.REHOME_CAP + 3
+        with tempfile.TemporaryDirectory() as home:
+            _write_session(home, ".claude-gem8-acct", sidecar=True)
+            calls: list = []
+            rec = resume_resolver.resolve(
+                SID, home,
+                owner_status={"available": False, "block_reason": "usage limit"},
+                availability=[
+                    _avail(".claude-gem8-acct", False, home=home),
+                    _avail(".claude-day24-acct", True, live=over_cap, active=41, home=home),
+                ],
+                probe_fn=_probe_all_ok,
+                rehome_fn=lambda *a, **k: calls.append((a, k)) or True)
+            self.assertEqual(rec["action"], "REHOME")
+            self.assertTrue(rec["rehomed"])
+            self.assertEqual(rec["pin_account"], ".claude-day24-acct")
+            self.assertEqual(rec["cap_relief"]["rehome_cap"], fleet_sessions.REHOME_CAP)
+            # the relief target was live-probe-confirmed before being chosen
+            self.assertTrue(any(p["account"] == ".claude-day24-acct" and p["available"]
+                                for p in rec.get("target_probes", [])))
+
+    def test_cap_relief_still_pin_blocked_when_over_cap_account_is_walled(self) -> None:
+        # Relief relaxes the LOAD cap, not the health check: if the only over-cap
+        # account probes BLOCKED, re-homing would just move the resume to another walled
+        # seat, so it stays PIN_BLOCKED. Proves relief can't strand on a secretly-walled
+        # account.
+        over_cap = fleet_sessions.REHOME_CAP + 3
+        with tempfile.TemporaryDirectory() as home:
+            _write_session(home, ".claude-gem8-acct")
+            rec = resume_resolver.resolve(
+                SID, home,
+                owner_status={"available": False, "block_reason": "usage limit"},
+                availability=[
+                    _avail(".claude-gem8-acct", False, home=home),
+                    _avail(".claude-day24-acct", True, live=over_cap, active=41, home=home),
+                ],
+                probe_fn=lambda _a: {"available": False, "block_reason": "usage limit"})
             self.assertEqual(rec["action"], "PIN_BLOCKED")
             self.assertFalse(rec["rehomed"])
             self.assertEqual(rec["pin_config_dir"],

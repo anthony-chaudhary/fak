@@ -357,6 +357,12 @@ def classify(path):
             "throttle_seen": throttle,
             "throttle_current": throttle_current,
             "pending_tool": pending,
+            # the literal HTTP/transport code from the terminal banner (429/529/401/...),
+            # so "last reported status" is a real field rather than buried in `last` prose.
+            "http_status": fleet_session_signals.http_status(lt),
+            # who started this session: an autonomous /goal|/loop|supervised worker is
+            # "agent"-initiated; everything else is an interactive ("user") session.
+            "initiated_by": "agent" if autonomous else "user",
             "session": sid or os.path.splitext(os.path.basename(path))[0],
             "cwd": cwd, "git": git, "last": lt[:200].replace("\n", " "), "path": path,
             "autonomous": autonomous, "supervised": supervised,
@@ -625,7 +631,7 @@ def _has_positive_evidence(a) -> bool:
     return str(a.get("verdict_source") or "none") in ("probe", "passive")
 
 
-def _rehome_targets(availability, exclude_account, assigned=None):
+def _rehome_targets(availability, exclude_account, assigned=None, cap=None):
     """Available Claude worker accounts a throttled session can move to, least
     loaded first. opencode accounts are excluded: a Claude transcript can only
     resume under another Claude config dir, not an opencode one.
@@ -636,9 +642,16 @@ def _rehome_targets(availability, exclude_account, assigned=None):
     same momentary least-loaded one: the snapshot's live/active counts are static
     within a pass, so without this every caller computes the identical winner and
     stampedes it. An account whose (already-live + just-assigned) load reaches
-    ``REHOME_CAP`` drops out of the pool entirely -- better to DEFER_THROTTLED and
-    wait for a reset than to pile a session onto an account that will limit-wall."""
+    ``cap`` drops out of the pool entirely -- better to DEFER_THROTTLED and
+    wait for a reset than to pile a session onto an account that will limit-wall.
+
+    ``cap`` defaults to ``REHOME_CAP`` (the fleet burst-spread ceiling). A caller
+    routing a SINGLE interactive resume -- not a burst -- can pass a larger cap (or
+    ``math.inf``) to get the same least-loaded ranking without the stampede gate, so
+    a lone resume is not stranded on PIN_BLOCKED when the only healthy account is
+    merely over the fleet cap (the day24 incident: available, but live=7 >= cap=4)."""
     assigned = assigned or {}
+    cap = REHOME_CAP if cap is None else cap
     cands = []
     for a in (availability or []):
         acct = a.get("account", "")
@@ -647,7 +660,7 @@ def _rehome_targets(availability, exclude_account, assigned=None):
                 or not str(acct).startswith(".claude")):
             continue
         base_load = int(a.get("live_sessions") or 0)
-        if base_load + assigned.get(acct, 0) >= REHOME_CAP:
+        if base_load + assigned.get(acct, 0) >= cap:
             continue                       # already at this pass's admission ceiling
         cands.append(a)
     # Rank by load (live + in-pass assigned) first, but break ties by PROVEN health:
@@ -997,7 +1010,9 @@ def write_registry(rows, throttle, auth, probes=None):
                           "category", "cause", "disp", "reason", "action", "autonomous",
                           "supervised", "age_min", "seen_utc", "throttle_reset",
                           "throttle_weekly", "resume_cmd", "rehomed", "resume_account", "last")},
-                          "task_sig": r.get("task_sig", "")}
+                          "task_sig": r.get("task_sig", ""),
+                          "http_status": r.get("http_status"),
+                          "initiated_by": r.get("initiated_by", "user")}
                         for r in session_rows]}
     if probes:
         reg["probes"] = probes  # raw active-probe verdicts (evidence for the operator/UI)
@@ -1130,9 +1145,12 @@ def main():
         cats[r["category"]] = cats.get(r["category"], 0) + 1
     order += [d for d in counts if d not in order]   # any unforeseen disp still shown
     catorder = ["INFRA", "AGENT", "USER", "HANGING", "LIVE"]
+    n_agent = sum(1 for r in rows if r.get("initiated_by") == "agent")
     print("category: " + "  ".join(f"{k}={cats[k]}" for k in catorder if cats.get(k)))
     print("disp:     " + "  ".join(f"{k}={counts.get(k,0)}" for k in order if counts.get(k)))
     print("action:   " + "  ".join(f"{k}={acts[k]}" for k in sorted(acts)))
+    # who started these sessions: agent-driven (/goal,/loop,supervised) vs interactive.
+    print(f"initiated: agent={n_agent}  user={len(rows) - n_agent}")
     print()
     CAP = 40
     for disp in order:
@@ -1151,7 +1169,9 @@ def main():
                 rtag = r["resume_account"].replace(".claude-", "").replace(".claude", "default")
                 mark += f" -> {rtag}"
             tag = r["account"].replace(".claude-", "").replace(".claude", "default")
-            print(f"  {r['age_min']:>6}m  {tag:<18} {r['project']:<26} {r['session'][:8]}{mark}{thr}")
+            who = "A" if r.get("initiated_by") == "agent" else "u"   # agent- vs user-initiated
+            code = f" [{r['http_status']}]" if r.get("http_status") else ""
+            print(f"  {r['age_min']:>6}m {who} {tag:<18} {r['project']:<26} {r['session'][:8]}{mark}{thr}{code}")
         if len(grp) > CAP:
             print(f"  ... +{len(grp)-CAP} more")
         print()
