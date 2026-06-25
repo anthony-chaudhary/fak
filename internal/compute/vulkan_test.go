@@ -4,6 +4,7 @@ package compute
 
 import (
 	"math"
+	"strings"
 	"testing"
 )
 
@@ -34,6 +35,53 @@ func maxAbs(a, b []float32) float64 {
 		}
 	}
 	return m
+}
+
+func TestVulkanResourceCapCheckNamesOffendingBuffer(t *testing.T) {
+	v := &vulkanBackend{
+		maxBufferBytes:          64,
+		maxStorageBufferRange:   64,
+		maxMemoryAllocationSize: 128,
+	}
+	defer func() {
+		r := recover()
+		if r == nil {
+			t.Fatal("checkResourceCap did not panic for an over-cap buffer")
+		}
+		got, ok := r.(string)
+		if !ok {
+			t.Fatalf("checkResourceCap panic type = %T, want string", r)
+		}
+		for _, want := range []string{
+			"KV key cache layer 7",
+			"65 bytes",
+			"64 bytes",
+			"maxStorageBufferRange=64",
+			"maxMemoryAllocationSize=128",
+			"split/chunk",
+		} {
+			if !strings.Contains(got, want) {
+				t.Fatalf("cap error missing %q:\n%s", want, got)
+			}
+		}
+	}()
+	v.checkResourceCap(65, "KV key cache layer 7")
+}
+
+func TestVulkanResourceCapsAreDiscovered(t *testing.T) {
+	v := vk(t)
+	maxBufferBytes, maxStorageBufferRange, maxMemoryAllocationSize := v.VulkanDebugResourceCaps()
+	if maxStorageBufferRange <= 0 {
+		t.Fatalf("maxStorageBufferRange=%d, want positive", maxStorageBufferRange)
+	}
+	want := maxStorageBufferRange
+	if maxMemoryAllocationSize > 0 && maxMemoryAllocationSize < want {
+		want = maxMemoryAllocationSize
+	}
+	if maxBufferBytes != want {
+		t.Fatalf("maxBufferBytes=%d, want effective cap %d (storage=%d allocation=%d)",
+			maxBufferBytes, want, maxStorageBufferRange, maxMemoryAllocationSize)
+	}
 }
 
 // upload host data to the device backend and read it straight back — the residency round-trip.

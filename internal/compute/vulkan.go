@@ -42,10 +42,13 @@ func init() {
 		tier = "discrete"
 	}
 	vulkanDev = &vulkanBackend{
-		name:        "vulkan",
-		tier:        tier + ":" + C.GoString(&name[0]),
-		haveQ8:      C.fvk_have_q8() != 0,
-		budgetBytes: vulkanBudgetBytes(),
+		name:                    "vulkan",
+		tier:                    tier + ":" + C.GoString(&name[0]),
+		haveQ8:                  C.fvk_have_q8() != 0,
+		budgetBytes:             vulkanBudgetBytes(),
+		maxBufferBytes:          vulkanCapInt64(C.fvk_max_buffer_bytes()),
+		maxStorageBufferRange:   vulkanCapInt64(C.fvk_max_storage_buffer_range()),
+		maxMemoryAllocationSize: vulkanCapInt64(C.fvk_max_memory_allocation_size()),
 	}
 	Register(vulkanDev)
 }
@@ -63,6 +66,15 @@ func vulkanBudgetBytes() int64 {
 		return 0
 	}
 	return mb * 1024 * 1024
+}
+
+func vulkanCapInt64(v C.uint64_t) int64 {
+	u := uint64(v)
+	const maxInt64 = uint64(1<<63 - 1)
+	if u > maxInt64 {
+		return 0
+	}
+	return int64(u)
 }
 
 var vulkanDev *vulkanBackend
@@ -108,6 +120,12 @@ func (v *vulkanBackend) VulkanDebugRestoreResidencyBudget(budgetBytes, dlUsed in
 	v.budgetBytes, v.dlUsed, v.hostvisN = budgetBytes, dlUsed, hostvisN
 }
 
+func (v *vulkanBackend) VulkanDebugResourceCaps() (maxBufferBytes, maxStorageBufferRange, maxMemoryAllocationSize int64) {
+	vulkanMu.Lock()
+	defer vulkanMu.Unlock()
+	return v.maxBufferBytes, v.maxStorageBufferRange, v.maxMemoryAllocationSize
+}
+
 type vulkanBackend struct {
 	name          string
 	tier          string
@@ -123,6 +141,13 @@ type vulkanBackend struct {
 	budgetBytes int64
 	dlUsed      int64
 	hostvisN    int // count of weights placed host-visible (for the bench report)
+	// Single-resource caps queried from the Vulkan physical device. maxBufferBytes is the
+	// effective STORAGE buffer ceiling: min(maxStorageBufferRange, maxMemoryAllocationSize)
+	// when both are known. It does not solve chunking, but it turns a raw driver allocation
+	// failure into a deterministic refusal that names the over-cap buffer (#362).
+	maxBufferBytes          int64
+	maxStorageBufferRange   int64
+	maxMemoryAllocationSize int64
 }
 
 const vulkanGoPoolBucketCap = 64
@@ -171,7 +196,21 @@ func (v *vulkanBackend) FlushBatch() {
 	C.fvk_batch_flush()
 }
 
+func (v *vulkanBackend) checkResourceCap(nbytes int, what string) {
+	if what == "" {
+		what = "storage buffer"
+	}
+	if singleResourceCapExceeded(nbytes, v.maxBufferBytes) {
+		panic(formatVulkanResourceCapError(what, nbytes, v.maxBufferBytes, v.maxStorageBufferRange, v.maxMemoryAllocationSize))
+	}
+}
+
 func (v *vulkanBackend) dalloc(nbytes int) *vulkanBuf {
+	return v.dallocFor(nbytes, "storage buffer")
+}
+
+func (v *vulkanBackend) dallocFor(nbytes int, what string) *vulkanBuf {
+	v.checkResourceCap(nbytes, what)
 	p := C.fvk_malloc(C.size_t(nbytes))
 	if p == nil {
 		// Device-local (and the shim's own host-visible storage fallback) is exhausted. Rather
@@ -190,6 +229,11 @@ func (v *vulkanBackend) dalloc(nbytes int) *vulkanBuf {
 // dallocHostVis allocates a storage buffer in host-visible memory directly (no device-local
 // attempt). Used by the residency-budget path for cold weights. Caller holds vulkanMu.
 func (v *vulkanBackend) dallocHostVis(nbytes int) *vulkanBuf {
+	return v.dallocHostVisFor(nbytes, "host-visible storage buffer")
+}
+
+func (v *vulkanBackend) dallocHostVisFor(nbytes int, what string) *vulkanBuf {
+	v.checkResourceCap(nbytes, what)
 	p := C.fvk_malloc_hostvis(C.size_t(nbytes))
 	if p == nil {
 		panic("compute: vulkan host-visible allocation failed")
@@ -201,12 +245,16 @@ func (v *vulkanBackend) dallocHostVis(nbytes int) *vulkanBuf {
 // host-visible (deliberately, in upload order). budgetBytes==0 means unbounded -> always
 // device-local. Caller holds vulkanMu.
 func (v *vulkanBackend) dallocWeight(nbytes int) *vulkanBuf {
+	return v.dallocWeightFor(nbytes, "weight buffer")
+}
+
+func (v *vulkanBackend) dallocWeightFor(nbytes int, what string) *vulkanBuf {
 	if v.budgetBytes > 0 && v.dlUsed+int64(nbytes) > v.budgetBytes {
-		buf := v.dallocHostVis(nbytes)
+		buf := v.dallocHostVisFor(nbytes, what)
 		v.accountWeightPlacement(buf, nbytes)
 		return buf
 	}
-	buf := v.dalloc(nbytes)
+	buf := v.dallocFor(nbytes, what)
 	v.accountWeightPlacement(buf, nbytes)
 	return buf
 }
@@ -232,12 +280,12 @@ func (v *vulkanBackend) dallocTransient(nbytes int) *vulkanBuf {
 			v.freeTransient[nbytes] = bucket[:len(bucket)-1]
 			if !v.debugBufferDeviceLocal(b) {
 				C.fvk_free(b.ptr)
-				return v.dalloc(nbytes)
+				return v.dallocFor(nbytes, "transient storage buffer")
 			}
 			return b
 		}
 	}
-	return v.dalloc(nbytes)
+	return v.dallocFor(nbytes, "transient storage buffer")
 }
 
 func (v *vulkanBackend) recycleTransientLocked(b *vulkanBuf) {
@@ -277,7 +325,7 @@ func (v *vulkanBackend) dev(shape []int, dt Dtype) (Tensor, *vulkanBuf) {
 	for _, d := range shape {
 		n *= d
 	}
-	buf := v.dalloc(n * dt.Bytes())
+	buf := v.dallocFor(n*dt.Bytes(), dt.String()+" tensor "+shapeText(shape))
 	return makeTensor(v, dt, RowMajor, append([]int(nil), shape...), nil, buf), buf
 }
 
@@ -343,8 +391,9 @@ func (v *vulkanBackend) uploadQ8Locked(shape []int, codes []int8, scales []float
 	// The code buffer is the bulk of the weight (in*out bytes) — it's the budget's subject.
 	// The scale buffer is ~1/32 the size; keep it device-local so the hot per-block scales
 	// stay fast even when the codes spill host-visible.
-	codeBuf := v.dallocWeight(len(codes))
-	scaleBuf := v.dalloc(len(scales) * F32.Bytes())
+	shapeName := shapeText(shape)
+	codeBuf := v.dallocWeightFor(len(codes), "Q8_0 weight code buffer "+shapeName)
+	scaleBuf := v.dallocFor(len(scales)*F32.Bytes(), "Q8_0 weight scale buffer "+shapeName)
 	if len(codes) > 0 {
 		C.fvk_h2d(codeBuf.ptr, unsafe.Pointer(&codes[0]), C.size_t(len(codes)))
 	}
@@ -872,10 +921,10 @@ type vslice struct {
 	len, cap int
 }
 
-func (v *vulkanBackend) growAppend(d *vslice, srcPtr unsafe.Pointer, nFloats int) {
+func (v *vulkanBackend) growAppend(d *vslice, srcPtr unsafe.Pointer, nFloats int, what string) {
 	if d.len+nFloats > d.cap {
 		ncap := d.cap*2 + nFloats
-		np := C.fvk_malloc(C.size_t(ncap * 4))
+		np := v.dallocFor(ncap*F32.Bytes(), what).ptr
 		if d.len > 0 {
 			C.fvk_d2d(unsafe.Pointer(np), d.ptr, C.size_t(d.len*4))
 		}
@@ -907,9 +956,9 @@ func (k *vulkanKV) AppendKV(layer int, kRaw, kRoPE, val Tensor, pos int) {
 	vulkanMu.Lock()
 	defer vulkanMu.Unlock()
 	w := k.stride()
-	k.be.growAppend(&k.Kraw[layer], kRaw.buf.(*vulkanBuf).ptr, w)
-	k.be.growAppend(&k.K[layer], kRoPE.buf.(*vulkanBuf).ptr, w)
-	k.be.growAppend(&k.V[layer], val.buf.(*vulkanBuf).ptr, w)
+	k.be.growAppend(&k.Kraw[layer], kRaw.buf.(*vulkanBuf).ptr, w, "KV pre-RoPE key cache layer "+strconv.Itoa(layer))
+	k.be.growAppend(&k.K[layer], kRoPE.buf.(*vulkanBuf).ptr, w, "KV key cache layer "+strconv.Itoa(layer))
+	k.be.growAppend(&k.V[layer], val.buf.(*vulkanBuf).ptr, w, "KV value cache layer "+strconv.Itoa(layer))
 	if layer == 0 {
 		k.pos = append(k.pos, pos)
 	}
@@ -926,10 +975,10 @@ func (k *vulkanKV) AppendKVRoPE(layer int, kRaw, val Tensor, pos, nHeads, headDi
 	}
 	w := k.stride()
 	kRawPtr := kRaw.buf.(*vulkanBuf).ptr
-	k.be.growAppend(&k.Kraw[layer], kRawPtr, w)
+	k.be.growAppend(&k.Kraw[layer], kRawPtr, w, "KV pre-RoPE key cache layer "+strconv.Itoa(layer))
 	C.fvk_rope_f32(kRawPtr, C.int(pos), C.int(nHeads), C.int(headDim), C.double(theta))
-	k.be.growAppend(&k.K[layer], kRawPtr, w)
-	k.be.growAppend(&k.V[layer], val.buf.(*vulkanBuf).ptr, w)
+	k.be.growAppend(&k.K[layer], kRawPtr, w, "KV key cache layer "+strconv.Itoa(layer))
+	k.be.growAppend(&k.V[layer], val.buf.(*vulkanBuf).ptr, w, "KV value cache layer "+strconv.Itoa(layer))
 	if layer == 0 {
 		k.pos = append(k.pos, pos)
 	}
@@ -986,9 +1035,9 @@ func (k *vulkanKV) Evict(from, n int) int {
 				}
 			}
 		}
-		k.writeVS(&k.K[l], K)
-		k.writeVS(&k.Kraw[l], Kraw)
-		k.writeVS(&k.V[l], V)
+		k.writeVS(&k.K[l], K, "KV key cache rewrite layer "+strconv.Itoa(l))
+		k.writeVS(&k.Kraw[l], Kraw, "KV pre-RoPE key cache rewrite layer "+strconv.Itoa(l))
+		k.writeVS(&k.V[l], V, "KV value cache rewrite layer "+strconv.Itoa(l))
 	}
 	k.pos = append(k.pos[:from], k.pos[end:]...)
 	for i := range k.pos {
@@ -1005,18 +1054,18 @@ func (k *vulkanKV) Clone() KVStore {
 	n := &vulkanKV{be: k.be, cfg: k.cfg,
 		K: make([]vslice, len(k.K)), Kraw: make([]vslice, len(k.Kraw)), V: make([]vslice, len(k.V)),
 		pos: append([]int(nil), k.pos...)}
-	cp := func(dst, src *vslice) {
+	cp := func(dst, src *vslice, what string) {
 		if src.len == 0 {
 			return
 		}
-		np := C.fvk_malloc(C.size_t(src.len * 4))
+		np := k.be.dallocFor(src.len*F32.Bytes(), what).ptr
 		C.fvk_d2d(unsafe.Pointer(np), src.ptr, C.size_t(src.len*4))
 		dst.ptr, dst.len, dst.cap = unsafe.Pointer(np), src.len, src.len
 	}
 	for l := range k.K {
-		cp(&n.K[l], &k.K[l])
-		cp(&n.Kraw[l], &k.Kraw[l])
-		cp(&n.V[l], &k.V[l])
+		cp(&n.K[l], &k.K[l], "KV key cache clone layer "+strconv.Itoa(l))
+		cp(&n.Kraw[l], &k.Kraw[l], "KV pre-RoPE key cache clone layer "+strconv.Itoa(l))
+		cp(&n.V[l], &k.V[l], "KV value cache clone layer "+strconv.Itoa(l))
 	}
 	return n
 }
@@ -1050,13 +1099,13 @@ func (k *vulkanKV) readVS(d *vslice) []float32 {
 	return out
 }
 
-func (k *vulkanKV) writeVS(d *vslice, data []float32) {
+func (k *vulkanKV) writeVS(d *vslice, data []float32, what string) {
 	need := len(data)
 	if need > d.cap {
 		if d.ptr != nil {
 			C.fvk_free(d.ptr)
 		}
-		d.ptr = unsafe.Pointer(C.fvk_malloc(C.size_t(need * 4)))
+		d.ptr = k.be.dallocFor(need*F32.Bytes(), what).ptr
 		d.cap = need
 	}
 	if need > 0 {

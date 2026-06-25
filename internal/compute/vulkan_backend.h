@@ -70,6 +70,12 @@ int fvk_matmul_argmax_f32(const void *dW, const void *dX, int out, int in);
  * features the Q8 GEMM shader needs (queried at init); 0 otherwise. The Go side falls back to
  * f32 weights when this is 0, so Q8 is an optional fast path, never a correctness dependency. */
 int fvk_have_q8(void);
+/* Per-resource storage-buffer cap discovered at init. fvk_max_buffer_bytes is the effective
+ * single-buffer ceiling fak must respect: min(maxStorageBufferRange, maxMemoryAllocationSize)
+ * when both are known, otherwise the known cap, or 0 when unknown. */
+uint64_t fvk_max_buffer_bytes(void);
+uint64_t fvk_max_storage_buffer_range(void);
+uint64_t fvk_max_memory_allocation_size(void);
 
 /* Q8_0 quantized GEMM: y[P,out] = dequant(Wq[out,in], scales[out,in/32]) applied to x[P,in].
  * Wq is int8 weight codes (out*in bytes), Wscale is per-block f32 scales (out*(in/32) floats),

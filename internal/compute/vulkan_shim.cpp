@@ -53,6 +53,9 @@ VkCommandPool     g_cmdpool  = VK_NULL_HANDLE;
 VkFence           g_submitFence = VK_NULL_HANDLE;
 VkPhysicalDeviceMemoryProperties g_memprops{};
 bool              g_ready    = false;
+VkDeviceSize      g_maxStorageBufferRange = 0;
+VkDeviceSize      g_maxMemoryAllocationSize = 0;
+VkDeviceSize      g_maxBufferBytes = 0;
 
 // A device buffer: VkBuffer + its memory + byte size. The opaque handle Go holds is a
 // Buffer* — never a host address.
@@ -197,10 +200,22 @@ size_t drainPool() {
 }
 
 Buffer* allocBuffer(size_t bytes, VkMemoryPropertyFlags props, VkBufferUsageFlags usage) {
+    size_t reqBytes = bytes ? bytes : 1;
+    if ((usage & VK_BUFFER_USAGE_STORAGE_BUFFER_BIT) &&
+        g_maxBufferBytes > 0 && (VkDeviceSize)reqBytes > g_maxBufferBytes) {
+        fprintf(stderr,
+            "fak-vulkan: refusing storage buffer %zu bytes; device single-resource cap=%llu "
+            "(maxStorageBufferRange=%llu maxMemoryAllocationSize=%llu); chunk/defuse required\n",
+            bytes,
+            (unsigned long long)g_maxBufferBytes,
+            (unsigned long long)g_maxStorageBufferRange,
+            (unsigned long long)g_maxMemoryAllocationSize);
+        return nullptr;
+    }
     Buffer* b = new Buffer();
     b->bytes = bytes;
     VkBufferCreateInfo bi{VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO};
-    bi.size = bytes ? bytes : 1;
+    bi.size = reqBytes;
     bi.usage = usage;
     bi.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
     VkResult cr = vkCreateBuffer(g_dev, &bi, nullptr, &b->buf);
@@ -606,6 +621,18 @@ int fvk_init(char* name, int namelen, int* is_discrete, const char* spirv_dir) {
     g_phys = chosen;
     VkPhysicalDeviceProperties props{};
     vkGetPhysicalDeviceProperties(g_phys, &props);
+    VkPhysicalDeviceMaintenance3Properties maint3{
+        VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MAINTENANCE_3_PROPERTIES};
+    VkPhysicalDeviceProperties2 props2{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2};
+    props2.pNext = &maint3;
+    vkGetPhysicalDeviceProperties2(g_phys, &props2);
+    g_maxStorageBufferRange = props2.properties.limits.maxStorageBufferRange;
+    g_maxMemoryAllocationSize = maint3.maxMemoryAllocationSize;
+    g_maxBufferBytes = g_maxStorageBufferRange;
+    if (g_maxMemoryAllocationSize > 0 &&
+        (g_maxBufferBytes == 0 || g_maxMemoryAllocationSize < g_maxBufferBytes)) {
+        g_maxBufferBytes = g_maxMemoryAllocationSize;
+    }
     if (name && namelen > 0) { strncpy(name, props.deviceName, namelen - 1); name[namelen - 1] = 0; }
     if (is_discrete) *is_discrete = discrete ? 1 : 0;
     vkGetPhysicalDeviceMemoryProperties(g_phys, &g_memprops);
@@ -816,6 +843,9 @@ void fvk_batch_flush(void) { batchFlush(); }
 void fvk_sync(void) { if (g_dev) vkDeviceWaitIdle(g_dev); }
 
 int fvk_have_q8(void) { return g_have_q8; }
+uint64_t fvk_max_buffer_bytes(void) { return (uint64_t)g_maxBufferBytes; }
+uint64_t fvk_max_storage_buffer_range(void) { return (uint64_t)g_maxStorageBufferRange; }
+uint64_t fvk_max_memory_allocation_size(void) { return (uint64_t)g_maxMemoryAllocationSize; }
 
 uint32_t fvk_debug_buffer_props(const void* d) {
     if (!d) return 0;

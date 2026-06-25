@@ -47,6 +47,13 @@ choosing a GPU path.
 | `FAK_CUDA_Q8` | `1`-flag | off | `gpucheck`: exercise the CUDA Q8 device path in the Approx-gate witness. | `cmd/gpucheck/main.go:101` |
 | `FAK_CUDA_F16` | `1`-flag | off | `gpucheck`: exercise the CUDA f16 device path in the Approx-gate witness. | `cmd/gpucheck/main.go:101` |
 
+Vulkan also has a hardware **single storage-buffer** ceiling, independent of the
+aggregate residency budget. At backend init fak records the effective cap
+(`min(maxStorageBufferRange, maxMemoryAllocationSize)` when both are known) and
+refuses any one tensor/KV buffer that exceeds it with the offending buffer name.
+`FAK_GPU_BUDGET_MB` can spill cold weights, but it cannot make one over-cap
+resource legal; those tensors still need split/chunked upload.
+
 > Note: `FAK_BACKEND` appears in `internal/compute` *comments* as the intended
 > native backend selector (`FAK_BACKEND=cuda|metal|vulkan` → `Pick(name)`), but
 > no shipped binary currently reads it — backends are selected in code today.
