@@ -11,6 +11,7 @@
 #
 # Usage:
 #   ./scripts/dogfood-claude.sh                 # interactive Claude Code on the local model
+#   ./scripts/dogfood-claude.sh --kernel        # OPT-IN: fak's OWN in-kernel pure-Go --gguf forward (no shim/proxy); composes, e.g. --kernel --probe "hi"
 #   ./scripts/dogfood-claude.sh --probe "hi"    # ONE headless live turn (witnessable proof), then exit
 #   ./scripts/dogfood-claude.sh --smoke         # curl the wire (no model intelligence needed), then exit
 #   ./scripts/dogfood-claude.sh --print-env     # print the export lines for your own `claude` invocation
@@ -22,18 +23,24 @@
 #   FAK_DOGFOOD_PRESET   qwen36-local preset    (auto when invoked as fak-qwen36-claude)
 #   FAK_DOGFOOD_PORT     fak serve port              (default 8080)
 #   FAK_DOGFOOD_MODEL    served model id             (default: first ollama model, else qwen2.5:1.5b)
-#   FAK_DOGFOOD_BACKEND  ollama | shim | openai | anthropic
+#   FAK_DOGFOOD_BACKEND  ollama | shim | openai | gguf | anthropic
 #                          (default: auto - ollama if installed, else the in-tree python3
 #                           shim; with neither, an actionable hint, never a dead end. Pin a
 #                           value to force it and get an honest die if its deps are missing.)
+#                          gguf = fak's OWN in-kernel pure-Go --gguf forward (the --kernel
+#                          alias): Claude Code -> fak serve --gguf (NO shim, NO proxy) -> back.
+#                          Loads FAK_DOGFOOD_GGUF; needs a tokenizer-bearing GGUF (Qwen2.5
+#                          GGUFs embed one); CPU prefill is slow so the timeouts auto-raise to
+#                          900s. Asserts /healthz planner=inkernel.
 #                          anthropic = front the REAL Claude API (api.anthropic.com):
 #                          Claude Code -> fak (adjudicates) -> real Claude. Your own
 #                          key + real model tiers flow through; cache_control survives
 #                          byte-for-byte. Override the upstream with FAK_DOGFOOD_BASE_URL.
+#   FAK_DOGFOOD_GGUF     gguf backend: local .gguf to load (default ~/.cache/fak-models/gguf/Qwen2.5-7B-Instruct-Q8_0.gguf)
 #   FAK_DOGFOOD_BASE_URL OpenAI-compatible upstream  (required for BACKEND=openai, e.g. http://127.0.0.1:8131/v1;
 #                                                     optional override for BACKEND=anthropic)
 #   FAK_DOGFOOD_API_KEY_ENV optional upstream API key env var for BACKEND=openai
-#   FAK_DOGFOOD_TIMEOUT_S planner/write timeout      (default 300s, or 900s for BACKEND=openai)
+#   FAK_DOGFOOD_TIMEOUT_S planner/write timeout      (default 300s, or 900s for BACKEND=openai|gguf)
 #   FAK_DOGFOOD_PROVIDER_EXTRA_BODY_JSON extra JSON merged into upstream provider requests
 #   FAK_DOGFOOD_CLAUDE_DEBUG Claude Code debug filter (default api; 0/off/none disables)
 #   FAK_DOGFOOD_CLAUDE_DEBUG_FILE optional Claude Code --debug-file path
@@ -69,6 +76,22 @@ cd "$FAK_DIR"
 log()  { printf '\033[36m[dogfood]\033[0m %s\n' "$*" >&2; }
 warn() { printf '\033[33m[dogfood] %s\033[0m\n' "$*" >&2; }
 die()  { printf '\033[31m[dogfood] %s\033[0m\n' "$*" >&2; exit 1; }
+
+# --- -Kernel / --kernel alias: FAK_DOGFOOD_BACKEND=gguf (fak's OWN in-kernel forward) ---
+# The Windows twin (dogfood-claude.ps1) accepts -Kernel as an alias for the gguf backend;
+# mirror it here so the flag composes with --probe/--smoke/--print-env, e.g.
+# `dogfood-claude.sh --kernel --probe "..."`. Pre-scan and strip it from the positional
+# args, forcing the gguf backend (a pinned, explicit choice). Absent, the default
+# (shim/ollama) path is untouched. The empty-array expansion guard keeps `set -u` happy
+# under the bash 3.2 the macOS twin may run.
+_kargv=()
+for _ka in "$@"; do
+  case "$_ka" in
+    -Kernel|--kernel) export FAK_DOGFOOD_BACKEND=gguf ;;
+    *) _kargv+=("$_ka") ;;
+  esac
+done
+set -- "${_kargv[@]+"${_kargv[@]}"}"
 
 # Build the kernel binary into $1, resilient to a transiently-broken shared trunk.
 # This is a live multi-session tree: a peer can have an uncommitted, half-written edit
@@ -124,6 +147,19 @@ PORT="${FAK_DOGFOOD_PORT:-8080}"
 # path rather than dead-end the adopter (see pick_auto_backend, called at backend bring-up).
 if [ -n "${FAK_DOGFOOD_BACKEND:-}" ]; then BACKEND_PINNED=1; else BACKEND_PINNED=""; fi
 BACKEND="${FAK_DOGFOOD_BACKEND:-$DEFAULT_BACKEND}"
+# The 'gguf' (kernel) backend is the OPT-IN sibling (the --kernel alias): it runs
+# `fak serve --gguf` — fak's OWN pure-Go in-kernel forward, NO shim, NO proxy engine,
+# NO --base-url. The path that proves Claude Code doing agentic work on fak's own kernel.
+# OFF by default; set FAK_DOGFOOD_BACKEND=gguf or pass --kernel. CPU prefill is slow, so
+# the timeouts/healthz-wait auto-raise below and it asserts /healthz planner=inkernel.
+if [ "$BACKEND" = "gguf" ]; then KERNEL_BACKEND=1; else KERNEL_BACKEND=""; fi
+# Kernel-backend knobs: the local GGUF the in-kernel forward loads (Qwen2.5 GGUFs embed
+# the BPE tokenizer the forward needs), and the env var name holding the bearer secret the
+# kernel requires (pinned to ANTHROPIC_API_KEY below so Claude Code's x-api-key authenticates).
+GGUF="${FAK_DOGFOOD_GGUF:-$HOME/.cache/fak-models/gguf/Qwen2.5-7B-Instruct-Q8_0.gguf}"
+KEY_ENV="FAK_DOGFOOD_KEY"
+# Map every Claude Code model tier onto one served id for the kernel arm (default below).
+if [ -n "$KERNEL_BACKEND" ] && [ -z "$DEFAULT_MODEL" ]; then DEFAULT_MODEL="qwen2.5-7b-q8"; fi
 OLLAMA_HOST="${OLLAMA_HOST:-127.0.0.1:11434}"
 SHIM_PORT="${FAK_DOGFOOD_SHIM_PORT:-8099}"
 OPENAI_BASE_URL="${FAK_DOGFOOD_BASE_URL:-$DEFAULT_OPENAI_BASE_URL}"
@@ -155,7 +191,7 @@ case "${1:-}" in
   --print-env)     MODE="print-env" ;;
   --list-accounts) MODE="list-accounts" ;;
   --install)       MODE="install" ;;
-  --help|-h)       sed -n '2,30p' "$0"; exit 0 ;;
+  --help|-h)       sed -n '2,50p' "$0"; exit 0 ;;
 esac
 
 # --- --install: put `fak-dogfood`, `fak-qwen36-claude`, and `fak` on PATH -----
@@ -225,7 +261,11 @@ fi
 # attaches. Set FAK_DOGFOOD_NO_ATTACH=1 to force a fresh kernel (and fail loud
 # if the port is busy, as the guard below always did).
 ATTACHED=""; POLICY=""
-if [ "$MODE" != "smoke" ] && [ -z "${FAK_DOGFOOD_NO_ATTACH:-}" ] \
+# The kernel (gguf) backend never attaches: it must start its OWN `fak serve --gguf` so the
+# planner=inkernel assertion below actually proves fak's forward is on the wire (an
+# already-running kernel on the port could be a shim/proxy one). Mirror of the .ps1, which
+# always starts fresh. The default (shim/ollama) attach behavior is unchanged.
+if [ "$MODE" != "smoke" ] && [ -z "$KERNEL_BACKEND" ] && [ -z "${FAK_DOGFOOD_NO_ATTACH:-}" ] \
    && curl -sf "http://127.0.0.1:$PORT/healthz" >/dev/null 2>&1; then
   # Tolerate optional whitespace around the JSON colon (the kernel emits compact
   # json.Marshal output, but a pretty-printer / proxy in between may add spaces).
@@ -399,6 +439,14 @@ if [ "$BACKEND" = "anthropic" ]; then
   MODEL=""   # real model tiers flow through; fak does not pin one
   log "upstream = REAL Claude API ($BASE_URL) — fak adjudicates every tool call on your live turns"
 fi
+# The 'gguf' (kernel) backend has no shim/ollama/proxy to start: `fak serve --gguf` loads
+# the GGUF resident and serves /v1/messages with fak's OWN pure-Go decode (PROVIDER stays
+# openai; no --base-url). Verify the weights exist before we try to bind (the eager load
+# happens before the listener does); the actual bring-up is the --gguf serve invocation below.
+if [ -n "$KERNEL_BACKEND" ]; then
+  [ -f "$GGUF" ] || die "gguf not found: $GGUF  (set FAK_DOGFOOD_GGUF to a local .gguf, e.g. a Qwen2.5 Q8)"
+  log "kernel backend: fak's OWN in-kernel forward over $GGUF (no shim, no proxy)"
+fi
 
 # --smoke proves the WIRE with zero model dependency: front the offline mock planner.
 # When attached, the live kernel already owns its backend — don't start our own.
@@ -422,7 +470,7 @@ pick_auto_backend() {
        Or prove just the wire with no model:  $0 --smoke"
 }
 
-if [ -z "$ATTACHED" ] && [ "$MODE" != "smoke" ] && [ "$BACKEND" != "anthropic" ]; then
+if [ -z "$ATTACHED" ] && [ "$MODE" != "smoke" ] && [ "$BACKEND" != "anthropic" ] && [ "$BACKEND" != "gguf" ]; then
   # An unpinned default is a preference, not a demand: resolve it to what's actually here.
   if [ -z "$BACKEND_PINNED" ] && [ "$BACKEND" = "ollama" ]; then pick_auto_backend; fi
   case "$BACKEND" in
@@ -461,7 +509,11 @@ POLICY="${FAK_DOGFOOD_POLICY:-$FAK_DIR/examples/dogfood-claude-policy.json}"
 
 # --- start fak serve (the kernel) in front of the model -----------------------
 if [ -z "${FAK_PLANNER_TIMEOUT_S:-}" ]; then
-  if [ "$BACKEND" = "openai" ]; then
+  # The in-kernel 7B Q8 CPU forward is much slower than the shim/ollama path — a real Claude
+  # Code turn (a multi-thousand-token tool prompt prefilled on CPU) can take minutes — so the
+  # kernel arm raises the floor to 900s (matching BACKEND=openai) to avoid a 502 mid-turn.
+  # FAK_HTTP_WRITE_TIMEOUT_S and API_TIMEOUT_MS derive from it below.
+  if [ "$BACKEND" = "openai" ] || [ -n "$KERNEL_BACKEND" ]; then
     export FAK_PLANNER_TIMEOUT_S="${FAK_DOGFOOD_TIMEOUT_S:-900}"
   else
     export FAK_PLANNER_TIMEOUT_S="${FAK_DOGFOOD_TIMEOUT_S:-300}"
@@ -484,6 +536,15 @@ SERVE_ARGS=(serve --addr "127.0.0.1:$PORT" --provider "$PROVIDER" --engine "${FA
 if [ "$PROVIDER" != "anthropic" ]; then SERVE_ARGS+=(--model "${MODEL:-mock}"); fi
 [ -n "$BASE_URL" ] && SERVE_ARGS+=(--base-url "$BASE_URL")
 [ -n "$UPSTREAM_API_KEY_ENV" ] && SERVE_ARGS+=(--api-key-env "$UPSTREAM_API_KEY_ENV")
+if [ -n "$KERNEL_BACKEND" ]; then
+  # fak's OWN in-kernel forward: load the GGUF, NO --base-url (no proxy/shim upstream).
+  # The required-key value MUST equal ANTHROPIC_API_KEY (Claude Code sends it as x-api-key,
+  # which the gateway authenticates against this secret). Export it BEFORE launching so
+  # `fak serve` inherits it (an unset/empty required-key env makes serve exit 2); the wiring
+  # block below pins ANTHROPIC_API_KEY to the same source so the two always agree.
+  export "$KEY_ENV=${ANTHROPIC_API_KEY:-fak-local-dogfood}"
+  SERVE_ARGS+=(--gguf "$GGUF" --require-key-env "$KEY_ENV")
+fi
 # --smoke fronts the offline mock planner to prove the WIRE; leave its tool
 # unadjudicated so the smoke output still shows a tool_use block.
 if [ "$MODE" != "smoke" ] && [ -n "$POLICY" ] && [ "$POLICY" != "none" ]; then
@@ -512,6 +573,16 @@ case "$HEALTH" in
   *"\"model\":\"${MODEL:-mock}\""*) : ;;
   *) die "kernel on :$PORT reports an unexpected model (wanted ${MODEL:-mock}): $HEALTH" ;;
 esac
+if [ -n "$KERNEL_BACKEND" ]; then
+  # A GGUF lacking an embedded BPE tokenizer would SILENTLY drop to the offline MockPlanner
+  # (scripted text), not fak's forward. The whole point of this backend is the in-kernel
+  # forward, so make anything but planner=inkernel a hard failure. Tolerate optional
+  # whitespace around the JSON colon (the kernel emits compact json.Marshal, but a
+  # pretty-printer/proxy in between may add spaces) — same parse as RUNNING_MODEL above.
+  PLANNER="$(printf '%s' "$HEALTH" | sed -n 's/.*"planner"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p')"
+  [ "$PLANNER" = "inkernel" ] || die "kernel backend expected planner=inkernel but /healthz reports planner='$PLANNER'; the GGUF may lack an embedded tokenizer or fell back to the mock planner"
+  log "verified: planner=inkernel; fak in-kernel forward is serving the wire"
+fi
 
 fi  # end "start our own kernel" path (skipped when ATTACHED)
 
@@ -560,6 +631,7 @@ log "Claude Code wired:"
 log "  ANTHROPIC_BASE_URL = $ANTHROPIC_BASE_URL   (native /v1/messages on the kernel)"
 log "  CLAUDE_CONFIG_DIR  = $CLAUDE_CONFIG_DIR    (account: ${FAK_DOGFOOD_ACCOUNT:-faklocal})"
 log "  model (all tiers)  = ${MODEL:-mock}"
+[ -n "$KERNEL_BACKEND" ] && log "  forward            = fak's OWN in-kernel pure-Go decode over $GGUF  (NO Python, NO proxy)"
 [ -n "$PRESET" ] && log "  preset             = $PRESET"
 if [ ${#CLAUDE_DEBUG_ARGS[@]} -gt 0 ]; then
   log "  Claude debug       = ${CLAUDE_DEBUG_ARGS[*]}"
