@@ -87,8 +87,9 @@ The vDSO tier-2 cache is the shared-result pool over those refs:
 That is the one-sided part: a later consumer reads the already-addressed result
 through the shared pool. The producer does not run again, and the consumer does
 not need a callback to the original producer. It is still a kernel-mediated
-serve: the read had to be eligible, the stored result keeps its taint, and scope
-or principal isolation can force a miss instead of a share.
+serve: the read had to be eligible, the stored result keeps its taint and scope
+metadata, principal isolation can force a miss instead of a cross-tenant share,
+and downstream gates still enforce the scope boundary.
 
 ## RMA vocabulary map
 
@@ -132,7 +133,7 @@ adjudication to the handle:
 
 - **Adjudication:** fills originate from kernel-observed successful completions,
   and cache serves are available only to read-shaped, idempotent calls whose
-  vDSO gates can prove they are safe to reuse. Write-shaped, mis-scoped, or
+  vDSO gates can prove they are safe to reuse. Write-shaped, resource-misnamed, or
   witness-refuted shapes miss instead of serving stale bytes.
 - **Taint:** `Ref.Taint` rides with the payload. Sharing a result does not launder
   quarantined or tainted bytes.
