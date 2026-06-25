@@ -74,6 +74,14 @@ def paths_from_bump_report(report: dict) -> list[str]:
         path = target.get("path")
         if isinstance(path, str) and path:
             out.append(shell_quote_path(path))
+        # A target may nest a per-file list (e.g. release_bump's `install_docs`
+        # target pin-bumps INSTALL.md under `files[].path`); pull those into the
+        # commit pathspec too, or the bumped doc is left dirty-but-uncommitted
+        # and trips release_cut's foreign-dirty guard.
+        for f in target.get("files") or []:
+            fp = f.get("path") if isinstance(f, dict) else None
+            if isinstance(fp, str) and fp:
+                out.append(shell_quote_path(fp))
     return dedupe(out)
 
 
@@ -419,7 +427,11 @@ def execute_plan(root: Path, plan: dict, *, includes: list[str], overwrite_notes
         return plan
 
     paths = [shell_quote_path(p) for p in plan["paths"]]
+    # Any path the cut plans to commit is allowed to be dirty going in — that's
+    # VERSION, the release note, the explicit --includes, AND the bump targets
+    # (e.g. INSTALL.md install-pin bumps) carried in plan["paths"].
     allowed_dirty = set(shell_quote_path(p) for p in includes)
+    allowed_dirty.update(paths)
     foreign_dirty = [
         p for p in dirty_paths(root)
         if p not in allowed_dirty and p not in {"VERSION", plan["notes_file"]}

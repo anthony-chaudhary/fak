@@ -1,12 +1,21 @@
 #!/usr/bin/env python3
 """Bump fleet's version-marker file(s) in one shot — the /release Step 4 helper.
 
-Fleet's only load-bearing version marker is the bare-semver `VERSION` file at the
-repo root (fak/ carries no version constant today). This prints a JSON report —
-`{new_version, dry_run, targets}` — where `targets` maps each marker to
-`{ok, changed, path, ...}`, exactly the shape `.claude/skills/release/SKILL.md`
-§ "Expected behavior of helpers.release_bump" documents. Idempotent (new == current
-is a clean no-op). Pure stdlib.
+Fleet's load-bearing version marker is the bare-semver `VERSION` file at the repo
+root (fak/ carries no version constant today). Cold-start install docs ALSO carry
+copy-paste version pins (`INSTALL.md`: `FAK_VERSION=`, `VERSION=`, `--build-arg
+APP_VERSION=`, the PowerShell `$Version`, the illustrative `e.g. X`); those drift
+behind a release if nobody bumps them — exactly what stranded INSTALL.md at 0.33.0
+after the 0.34.0 cut. This helper bumps both: the `version` target rewrites
+`VERSION`, and the `install_docs` target pin-bumps each doc in `INSTALL_DOC_PINS`
+on its install/pin lines only (the same context gate `docs_scorecard.py` reads),
+so the bump set matches the gate set and the drift can't recur.
+
+Prints a JSON report — `{new_version, dry_run, targets}` — where `targets` maps
+each target to `{ok, changed, ...}` (the `install_docs` target nests a per-file
+list), matching the shape `.claude/skills/release/SKILL.md` § "Expected behavior
+of helpers.release_bump" documents. Idempotent (new == current is a clean no-op).
+Pure stdlib.
 
 **Single-writer gate.** Bumping `VERSION` is the moment the release mutates a
 single-writer resource, so by default this refuses unless the caller holds the
@@ -38,6 +47,27 @@ except ImportError:  # pragma: no cover - defensive
 
 SEMVER_RE = re.compile(r"^\d+\.\d+\.\d+$")
 
+# Cold-start docs that carry copy-paste version pins (FAK_VERSION=, VERSION=,
+# --build-arg APP_VERSION=, a `$Version = "X"` PowerShell line, an "e.g. X"
+# illustrative pin). A release must bump these too, or a fresh-install user
+# reads a stale pin in the first doc they hit. INSTALL.md drifted to 0.33.0
+# after the 0.34.0 release because the only thing this helper bumped was
+# VERSION; this list closes that root cause. `docs_scorecard.py`'s freshness
+# KPI gates the same surface from the read side.
+INSTALL_DOC_PINS = ["INSTALL.md"]
+
+# An install/pin LINE — the same context gate `tools/docs_scorecard.py` uses to
+# tell "stale install advice" from a benchmark-lineage field or a changelog
+# entry. Only version strings on these lines are bumped; a bare semver in prose
+# is left alone, so the bump set == the gate set (no over-reach, no drift gap).
+_INSTALL_CTX_RE = re.compile(
+    r"(FAK_VERSION|[A-Za-z_]*VERSION\s*=|@v?\d+\.\d|releases/(?:download|tag|latest)|"
+    r"pip install|brew install|go install|pin a version|--build-arg|prints the installed version)",
+    re.IGNORECASE,
+)
+# A bumpable semver token: bare MAJOR.MINOR.PATCH, optionally v- or "-prefixed.
+_PIN_SEMVER_RE = re.compile(r"(?P<pre>v?)(?P<ver>\d+\.\d+\.\d+)")
+
 
 def repo_root() -> Path:
     return Path(__file__).resolve().parent.parent
@@ -55,11 +85,43 @@ def bump_plain_file(root: Path, rel: str, new: str, *, dry_run: bool) -> dict:
     return {"path": rel, "old": old, "new": new, "changed": changed, "ok": True}
 
 
+def bump_install_doc(root: Path, rel: str, new: str, *, dry_run: bool) -> dict:
+    """Bump version pins on install/pin lines in a cold-start doc.
+
+    Only rewrites a semver that sits on a line `_INSTALL_CTX_RE` recognizes as
+    install advice, so a benchmark figure or a release-history mention in the
+    same file is never touched. Idempotent: a doc already at `new` reports
+    changed=False with an empty `replaced`.
+    """
+    path = root / rel
+    if not path.exists():
+        return {"path": rel, "ok": False, "reason": f"{rel} not found"}
+    replaced: list[str] = []
+    out_lines: list[str] = []
+    for line in path.read_text(encoding="utf-8").splitlines(keepends=True):
+        if not _INSTALL_CTX_RE.search(line):
+            out_lines.append(line)
+            continue
+
+        def _sub(m: "re.Match[str]") -> str:
+            if m.group("ver") == new:
+                return m.group(0)
+            replaced.append(f"{m.group('ver')}->{new}")
+            return f"{m.group('pre')}{new}"
+
+        out_lines.append(_PIN_SEMVER_RE.sub(_sub, line))
+    new_text = "".join(out_lines)
+    changed = new_text != path.read_text(encoding="utf-8")
+    if changed and not dry_run:
+        path.write_text(new_text, encoding="utf-8")
+    return {"path": rel, "new": new, "changed": changed, "replaced": replaced, "ok": True}
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description="Bump fleet version-marker file(s).")
     ap.add_argument("version", help="New semver, e.g. 0.2.0 (no leading v)")
     ap.add_argument("--dry-run", action="store_true")
-    ap.add_argument("--skip", action="append", default=[], choices=["version"], help="Skip a target (repeatable)")
+    ap.add_argument("--skip", action="append", default=[], choices=["version", "install_docs"], help="Skip a target (repeatable)")
     ap.add_argument("--owner", default=None, help="release-lock owner to gate on (default: session id)")
     ap.add_argument("--no-lock", action="store_true", help="bypass the single-writer release lock (solo/CI only)")
     args = ap.parse_args()
@@ -87,8 +149,13 @@ def main() -> int:
                 "owner_checked": owner,
             }, indent=2))
             return 4
+    def _install_docs() -> dict:
+        files = [bump_install_doc(root, rel, new_version, dry_run=args.dry_run) for rel in INSTALL_DOC_PINS]
+        return {"ok": all(f.get("ok", False) for f in files), "files": files}
+
     actions = {
         "version": lambda: bump_plain_file(root, "VERSION", new_version, dry_run=args.dry_run),
+        "install_docs": _install_docs,
     }
 
     report: dict = {"new_version": new_version, "dry_run": args.dry_run, "targets": {}}

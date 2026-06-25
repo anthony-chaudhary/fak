@@ -59,9 +59,16 @@ helpers:
 # Where vX.Y.Z.md release notes are written.
 release_notes_dir: docs/releases
 
-# The single version-marker file the bumper keeps stamped.
+# Version surfaces the bumper (tools/release_bump.py) keeps stamped on a release.
+# VERSION is the load-bearing marker (whole-file replace). INSTALL.md carries
+# copy-paste install pins (FAK_VERSION=, VERSION=, --build-arg APP_VERSION=, the
+# PowerShell $Version, the illustrative "e.g. X"); the bumper pin-bumps those on
+# install-context lines so a fresh-install user never reads a stale pin. The list
+# is documentation — the targets are encoded in release_bump.py (VERSION + the
+# INSTALL_DOC_PINS set); docs_scorecard.py's freshness KPI gates the same surface.
 version_files:
   - VERSION
+  - INSTALL.md
 
 # Plan documents the audit globs. None at the public root today, so /plan-audit
 # no-ops cleanly; add PLAN-*.md / BUILD-*.md and it picks them up.

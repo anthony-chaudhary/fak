@@ -1,6 +1,6 @@
 # fak - Fused Agent Kernel
 
-<!-- readme-verified: 2026-06-25 vs VERSION 0.33.0. Previous long-form README archived at docs/archive/README-2026-06-25-before-fresh-start.md. -->
+<!-- readme-verified: 2026-06-25 vs VERSION 0.34.0. Previous long-form README archived at docs/archive/README-2026-06-25-before-fresh-start.md. -->
 
 ## What It Is
 
