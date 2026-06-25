@@ -59,6 +59,39 @@ class DogfoodCoverageTest(unittest.TestCase):
         self.assertEqual(rows, 4)       # 3 + 1 non-blank lines
         self.assertEqual(journals, 2)
 
+    def test_diagnose_audit_gap_distinguishes_the_three_blanks(self) -> None:
+        mod = load()
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            # (1) no journal dir at all -> "no guarded worker has run"
+            msg_no_dir = mod.diagnose_audit_gap(root)
+            self.assertIn("no guarded worker", msg_no_dir)
+
+            jdir = root / ".dispatch-runs" / "guard-audit"
+            jdir.mkdir(parents=True)
+            # (2) dir but no files -> "configured but never exercised"
+            msg_empty_dir = mod.diagnose_audit_gap(root)
+            self.assertIn("never exercised", msg_empty_dir)
+
+            # (3) dir + only-blank files -> the silent empty-turn signature
+            (jdir / "docs-claude.jsonl").write_text("\n\n", encoding="utf-8")
+            msg_blank_files = mod.diagnose_audit_gap(root)
+            self.assertIn("all blank", msg_blank_files)
+            self.assertIn("auth/login", msg_blank_files)
+
+            # The three blanks must be distinguishable (the whole point).
+            self.assertEqual(len({msg_no_dir, msg_empty_dir, msg_blank_files}), 3)
+
+        # And when rows exist, there is no gap to explain.
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            jdir = root / ".dispatch-runs" / "guard-audit"
+            jdir.mkdir(parents=True)
+            (jdir / "g.jsonl").write_text('{"seq":1}\n', encoding="utf-8")
+            # diagnose is only consulted when rows==0; here it would report the
+            # blank-files branch is NOT hit because the file has a row.
+            self.assertEqual(mod.count_audit_rows(root)[0], 1)
+
     def test_grade_ladder(self) -> None:
         mod = load()
         self.assertEqual(mod._grade(100.0, 0), "A")

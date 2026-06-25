@@ -86,6 +86,34 @@ def count_audit_rows(root: Path) -> tuple[int, int]:
     return rows, journals
 
 
+def diagnose_audit_gap(root: Path) -> str:
+    """Explain WHY the audit journal is empty, so a zero row count is self-diagnosing
+    instead of an undifferentiated 0 (the default-observability point: a blank witness
+    must say which blank it is). Returns "" when rows exist (no gap to explain).
+
+    The three blanks a `0` can hide are distinct actions:
+      * no journal DIR at all      -> no guarded worker has ever run here
+      * journal dir, only empty/blank files -> guard booted but the wrapped agent
+        proposed no tool call the kernel adjudicated (e.g. it exited before its first
+        tool use — the silent auth-failure / empty-turn case)
+      * dir present, files present, rows>0 -> not a gap (handled by the caller)
+    """
+    fleet_dir = root / ".dispatch-runs" / "guard-audit"
+    if not fleet_dir.is_dir():
+        return ("no guard-audit journal directory yet — no guarded worker has run on "
+                "this host (arm `fak guard -- <agent>` so the kernel records verdicts)")
+    jsonls = sorted(fleet_dir.glob("*.jsonl"))
+    if not jsonls:
+        return ("guard-audit directory exists but holds no journal files — the guard "
+                "wire is configured but never exercised by a launched worker")
+    # Dir + files present but every file is blank: the worker booted under guard but
+    # never reached a tool call the kernel adjudicated (the silent empty-turn signature
+    # — e.g. the wrapped agent exited on an auth/login failure before its first tool use).
+    return (f"{len(jsonls)} journal file(s) present but all blank — a guarded worker "
+            "booted but proposed no adjudicated tool call (check the agent reached a "
+            "tool use; an auth/login failure exits before the first verdict)")
+
+
 def evaluate(root: Path, env: dict[str, str] | None = None) -> dict[str, Any]:
     """Compute the dogfood-coverage KPIs. `env` defaults to the process env so the
     LIVE opt-out (FLEET_DOGFOOD_GUARD=0) shows up in the score."""
@@ -140,9 +168,14 @@ def evaluate(root: Path, env: dict[str, str] | None = None) -> dict[str, Any]:
     #    because a freshly-configured host has 0 until the fleet runs — but it is the
     #    proof the wire is exercised, not merely wired.
     rows, journals = count_audit_rows(root)
+    audit_evidence = f"{rows} decision row(s) across {journals} journal(s)"
+    if rows == 0:
+        # Make the blank witness self-diagnosing: say WHICH zero this is so the
+        # operator gets the unblock action, not an undifferentiated 0.
+        audit_evidence += f" — {diagnose_audit_gap(root)}"
     add("audit_journal_evidence", rows > 0, False,
         "guarded workers have recorded kernel decisions in a durable audit journal",
-        evidence=f"{rows} decision row(s) across {journals} journal(s)")
+        evidence=audit_evidence)
 
     # 8/9. Always-on compute so the dogfood loop runs 24/7 (the goal's other half).
     doc = (root / "docs" / "fak" / "always-on-dogfood-server.md").is_file()
