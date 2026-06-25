@@ -209,6 +209,21 @@ func openAICompatibleTools(tools []ToolDef) []ToolDef {
 }
 
 func openAICompatibleSchema(raw json.RawMessage, root bool) json.RawMessage {
+	// Tool parameter schemas are static for the model's lifetime but MarshalRequest
+	// re-normalizes them every turn (#796). Memoize the (provider, root, raw-bytes) ->
+	// normalized-bytes mapping: a changed schema is simply a new key, so the cache is
+	// self-invalidating with no TTL and no event — the same content-addressed idiom
+	// internal/grammar uses one rung over. The cached value is the marshaled bytes (not
+	// the parsed tree), so a hit can never alias a map a caller might mutate.
+	if cached, ok := loadNormalizedSchema(schemaCacheKeyOpenAI, root, raw); ok {
+		return cached
+	}
+	out := openAICompatibleSchemaCompute(raw, root)
+	storeNormalizedSchema(schemaCacheKeyOpenAI, root, raw, out)
+	return out
+}
+
+func openAICompatibleSchemaCompute(raw json.RawMessage, root bool) json.RawMessage {
 	var v any
 	if len(raw) == 0 || json.Unmarshal(raw, &v) != nil {
 		return rawSchema(`{"type":"object","properties":{}}`)
@@ -1024,11 +1039,34 @@ func geminiTools(tools []ToolDef) []geminiTool {
 }
 
 func geminiSchema(raw json.RawMessage) any {
+	// Same per-turn re-normalization waste as the OpenAI adapter (#796): memoize the
+	// (provider, raw-bytes) -> normalized-bytes mapping, content-addressed and self-
+	// invalidating. We cache the marshaled bytes (returned as json.RawMessage, which the
+	// request marshaler emits verbatim — byte-identical to marshaling the uppercased tree
+	// because Go's encoder sorts map keys deterministically) rather than the uppercased
+	// map tree, so a hit never aliases a map a caller could mutate. Provider is in the key
+	// because OpenAI lowercases/fills type while Gemini uppercases it — the same raw schema
+	// normalizes differently per adapter.
+	if cached, ok := loadNormalizedSchema(schemaCacheKeyGemini, false, raw); ok {
+		return cached
+	}
+	out := geminiSchemaCompute(raw)
+	if b, ok := out.(json.RawMessage); ok {
+		storeNormalizedSchema(schemaCacheKeyGemini, false, raw, b)
+	}
+	return out
+}
+
+func geminiSchemaCompute(raw json.RawMessage) any {
 	var v any
 	if len(raw) == 0 || json.Unmarshal(raw, &v) != nil {
 		return raw
 	}
-	return uppercaseSchemaTypes(v)
+	b, err := json.Marshal(uppercaseSchemaTypes(v))
+	if err != nil {
+		return raw
+	}
+	return json.RawMessage(b)
 }
 
 func uppercaseSchemaTypes(v any) any {
