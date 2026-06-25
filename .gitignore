@@ -318,6 +318,13 @@ experiments/fleet/*.log
 /report.json
 /baseline.json
 
+# fak loop runtime ledger (internal/loopmgr): the append-only hash-chained loop-event
+# JSONL the dispatcher/scheduler producers write to (default .fak/loops.jsonl, overridable
+# with FAK_LOOP_LEDGER). This is machine-local run state, not source — committing it would
+# collide across sessions and replay stale fires. The schema lives in code; the rows are
+# regenerable scratch.
+/.fak/
+
 # default outputs of the remaining demo subcommands (cmd/fak/main.go), all regenerable
 # scratch dropped at the module root by a no-arg run — same class as the report/agent/
 # turntax defaults above, so running any demo never dirties `git status` (#311):
