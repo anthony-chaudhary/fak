@@ -156,6 +156,13 @@ def build_suite(root: Path, out_dir: Path, *, include_go_tests: bool = True) -> 
     py = sys.executable or "python"
     ledger = out_dir / "loop-smoke.jsonl"
     vcache_score_artifact = out_dir / "vcache-score.json"
+    # CLI JSON probe input for `fak callavoid account` (#799): an amplifying window the
+    # CLI must grade B. Written here so the probe drives the operator CLI surface, not
+    # just the package tests, via --in (no stdin plumbing in the runner).
+    callavoid_input = out_dir / "callavoid-account-input.json"
+    callavoid_input.write_text(
+        json.dumps({"execute": 4, "memo_hit": 6}) + "\n", encoding="utf-8"
+    )
     suite = [
         Probe(
             key="loop-append",
@@ -222,6 +229,13 @@ def build_suite(root: Path, out_dir: Path, *, include_go_tests: bool = True) -> 
             command=[py, "tools/dogfood_coverage.py", "--json"],
             json_source="stdout",
             validator="dogfood_coverage",
+        ),
+        Probe(
+            key="callavoid-account-cli",
+            description="run the avoided-call economics scorecard through the fak CLI (#799)",
+            command=fak + ["callavoid", "account", "--in", str(callavoid_input), "--json"],
+            json_source="stdout",
+            validator="callavoid_account",
         ),
     ]
     if include_go_tests:
@@ -353,6 +367,16 @@ def validate_payload(name: str, payload: Any) -> tuple[bool, str]:
         debt = payload.get("dogfood_debt") if isinstance(payload, dict) else None
         ok = isinstance(payload, dict) and payload.get("schema") == "dogfood-coverage/1" and isinstance(debt, int)
         return bool(ok), f"dogfood coverage reports debt={debt}" if ok else "missing dogfood coverage payload/debt"
+    if name == "callavoid_account":
+        amp = payload.get("amplification") if isinstance(payload, dict) else None
+        ok = (
+            isinstance(payload, dict)
+            and payload.get("schema") == "fak.callavoid.turns.v1"
+            and payload.get("status") == "amplifying"
+            and isinstance(amp, (int, float))
+            and amp > 1
+        )
+        return bool(ok), f"callavoid CLI grades the window amplifying (amp={amp})" if ok else "callavoid CLI payload unexpected"
     return False, f"unknown validator {name}"
 
 

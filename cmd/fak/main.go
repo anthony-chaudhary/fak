@@ -139,6 +139,8 @@ func main() {
 		cmdGuardVerdictRSI(os.Args[2:])
 	case "guard-rsi-scorecard":
 		cmdGuardRSIScorecard(os.Args[2:])
+	case "callavoid":
+		cmdCallavoid(os.Args[2:])
 	case "savings-vector":
 		cmdSavingsVector(os.Args[2:])
 	case "horizon-recovery":

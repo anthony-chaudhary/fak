@@ -51,10 +51,10 @@ const ValidateFloor = 0.01
 // (tiny), while the mutation rate is the share of reuses whose key was invalidated by
 // an intervening write.
 type MemoInput struct {
-	Accesses     int     // k: times this exact pure call is proposed in the window (>=1).
-	ValidateCost float64 // v: cost to re-validate an entry on each reuse (a world-version / fingerprint check), in execution-equivalents.
-	MutationRate float64 // m: probability the world changed between two accesses, invalidating the entry, in [0,1].
-	CaptureCost  float64 // c: one-time cost to capture/store a fingerprint+result on each execution, in execution-equivalents.
+	Accesses     int     `json:"accesses"`      // k: times this exact pure call is proposed in the window (>=1).
+	ValidateCost float64 `json:"validate_cost"` // v: cost to re-validate an entry on each reuse (a world-version / fingerprint check), in execution-equivalents.
+	MutationRate float64 `json:"mutation_rate"` // m: probability the world changed between two accesses, invalidating the entry, in [0,1].
+	CaptureCost  float64 `json:"capture_cost"`  // c: one-time cost to capture/store a fingerprint+result on each execution, in execution-equivalents.
 }
 
 // MemoProof is the self-describing output of ProveMemo: the verdict plus every number
@@ -171,17 +171,17 @@ func memoBreakEven(d, c float64) int {
 // MemoHit paid≈0 is honest); set them to price the cache overhead and stale-miss bet,
 // which is where ProveMemo's teeth live.
 type Tally struct {
-	Execute      int     // real engine dispatches (Counters.EngineCalls).
-	MemoHit      int     // calls served from the vDSO without dispatch (Counters.VDSOHits).
-	Repair       int     // malformed calls repaired in-syscall, each sparing a retry round-trip (Counters.Transforms).
-	StaleMiss    int     // entries validated, found invalidated, re-dispatched (folds into EngineCalls live; explicit here for analysis).
-	HardDeny     int     // fast-rejects with no forward guidance — symmetric, no amplification.
-	Redirects    []int   // each entry is the bounded futile-variant fan-out a PRODUCTIVE deny pruned.
-	ValidateCost float64 // v charged to a MemoHit / StaleMiss (default 0).
-	CaptureCost  float64 // c charged to an Execute / StaleMiss (default 0).
+	Execute      int     `json:"execute"`       // real engine dispatches (Counters.EngineCalls).
+	MemoHit      int     `json:"memo_hit"`      // calls served from the vDSO without dispatch (Counters.VDSOHits).
+	Repair       int     `json:"repair"`        // malformed calls repaired in-syscall, each sparing a retry round-trip (Counters.Transforms).
+	StaleMiss    int     `json:"stale_miss"`    // entries validated, found invalidated, re-dispatched (folds into EngineCalls live; explicit here for analysis).
+	HardDeny     int     `json:"hard_deny"`     // fast-rejects with no forward guidance — symmetric, no amplification.
+	Redirects    []int   `json:"redirects"`     // each entry is the bounded futile-variant fan-out a PRODUCTIVE deny pruned.
+	ValidateCost float64 `json:"validate_cost"` // v charged to a MemoHit / StaleMiss (default 0).
+	CaptureCost  float64 `json:"capture_cost"`  // c charged to an Execute / StaleMiss (default 0).
 
 	// MaxRedirectFanout caps each Redirect entry; 0 uses DefaultMaxRedirectFanout.
-	MaxRedirectFanout int
+	MaxRedirectFanout int `json:"max_redirect_fanout"`
 }
 
 // TurnReport is the amplification scorecard: how far the agent actually got

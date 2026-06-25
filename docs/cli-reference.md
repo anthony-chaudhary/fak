@@ -148,6 +148,7 @@ fak policy    --dump > policy.json | --check policy.json   # author/validate the
 fak route     --aspect tool_call --tool refund_payment [--manifest FILE] [--simulate "a,b,b"]   # which model/ensemble routes this aspect; --dump/--check author the routing manifest
 fak routebench [--corpus FILE] [--routed F] [--single F] [--json]            # offline routing benchmark: per-aspect+ensemble vs single-model on cost/latency/quality (no model in the loop)
 fak vcache    status | prove | prove-telemetry           # virtual provider-cache status plus planned/observed token-savings proof/refutation
+fak callavoid prove-memo | account [--in FILE] [--json] [--gate]   # avoided-call economics: break-even memo proof + per-window amplification scorecard (JSON in/out)
 fak attest    --policy FILE [--probes FILE] [--json]        # compliance attestation: prove the capability floor from preflight (exit 0 PROVEN / 1 drift / 2 usage)
 fak hook      < call.json                              # spawned-hook decide (the A/B baseline)
 ```
@@ -170,6 +171,27 @@ parse in-process via the stdlib, Python and CUDA shell out to their toolchains
 parse/compile errors (the zero-false-positive tier — semantic checks are out of
 scope) and exits `1` so it gates a pipeline. Because the input is untrusted model
 output, it honors no in-content ignore comment, and it runs off the hot path.
+
+`fak callavoid` is the operator-facing surface over the avoided-call economics leaf —
+no Go required. Both subcommands are JSON-first (read input from stdin or `--in FILE`,
+emit JSON), and the arithmetic is `internal/callavoid`'s, verbatim and deterministic:
+
+```bash
+# is memoizing this exact pure call net-positive? (k accesses, validate/mutation/capture costs)
+echo '{"accesses":20,"validate_cost":0.02,"mutation_rate":0.05,"capture_cost":0.1}' \
+  | fak callavoid prove-memo            # -> {"status":"PROVEN","decision":"memoize",...}
+
+# how much amplification did a window of work get? (a Tally of the kernel's counters)
+echo '{"execute":4,"memo_hit":6}' \
+  | fak callavoid account               # -> {"status":"amplifying","grade":"B","amplification":2.46,...}
+
+# gate a pipeline: exit 1 when avoidance was a NET LOSS this window
+echo '{"stale_miss":5}' | fak callavoid account --gate    # exit 1 (regressing)
+```
+
+It exits `0` on a valid decision, `2` on malformed input (an unknown field or non-JSON,
+caught loudly — never a silent zero-value decision), and `1` only under `--gate` on a
+regressing window. Field names are the snake_case struct tags shown above.
 
 `run`, `preflight`, and `agent` take `--policy FILE` to load the capability floor
 from a declarative JSON **manifest** instead of the compiled-in default — so WHICH
