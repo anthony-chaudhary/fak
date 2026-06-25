@@ -17,6 +17,7 @@ package gateway
 // crucially the tool_use ids it matches results back by — is byte-faithful.
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -269,18 +270,69 @@ func applySessionPaceToAnthropicRequest(req *agent.AnthropicMessagesRequest, tur
 	if len(req.Raw) == 0 {
 		return
 	}
-	var obj map[string]json.RawMessage
-	if err := json.Unmarshal(req.Raw, &obj); err != nil {
-		return
-	}
-	b, err := json.Marshal(cap)
-	if err != nil {
-		return
-	}
-	obj["max_tokens"] = b
-	if out, err := json.Marshal(obj); err == nil {
+	// Cap max_tokens in req.Raw by a TARGETED byte splice, NOT a full unmarshal/re-marshal.
+	// On the Anthropic passthrough req.Raw is forwarded byte-for-byte to preserve the client's
+	// prompt-cache prefix; re-marshalling a map[string]json.RawMessage sorts the top-level keys
+	// (Go map marshal is key-sorted), reordering everything before the messages array and
+	// BUSTING the cached prefix on every paced turn (#774 / the F13 cache-bust). spliceMaxTokens
+	// replaces only the integer after the existing "max_tokens" key, leaving every other byte —
+	// and thus the cached prefix — untouched. If the key is absent or the body cannot be safely
+	// spliced, leave req.Raw alone: the decoded req.MaxTokens above already carries the cap for
+	// any non-passthrough re-build, and on passthrough the client's original max_tokens riding
+	// through unchanged is strictly safer than a cache-busting rewrite.
+	if out, ok := spliceMaxTokens(req.Raw, cap); ok {
 		req.Raw = out
 	}
+}
+
+// spliceMaxTokens replaces the integer value of the top-level "max_tokens" key in an Anthropic
+// /v1/messages body with cap, by a byte splice that touches ONLY that number — every other byte
+// (and so the cache_control prefix) is preserved verbatim. It returns ok=false (caller leaves
+// req.Raw unchanged) when the key is absent, the value is not a bare integer, or the splice
+// would not re-decode to a valid request — fail-safe identity, never a cache-busting rewrite.
+func spliceMaxTokens(raw []byte, cap int) ([]byte, bool) {
+	// Locate the "max_tokens" key, then the JSON number that follows its colon. We scan for the
+	// key bytes; a false match inside a string value is caught by the re-decode + value check.
+	key := []byte(`"max_tokens"`)
+	ki := bytes.Index(raw, key)
+	if ki < 0 {
+		return nil, false
+	}
+	i := ki + len(key)
+	// Skip whitespace and the single ':' separator.
+	for i < len(raw) && (raw[i] == ' ' || raw[i] == '\t' || raw[i] == '\n' || raw[i] == '\r') {
+		i++
+	}
+	if i >= len(raw) || raw[i] != ':' {
+		return nil, false
+	}
+	i++
+	for i < len(raw) && (raw[i] == ' ' || raw[i] == '\t' || raw[i] == '\n' || raw[i] == '\r') {
+		i++
+	}
+	// The value must be a bare JSON integer (digits, optional leading '-').
+	start := i
+	if i < len(raw) && raw[i] == '-' {
+		i++
+	}
+	digitsStart := i
+	for i < len(raw) && raw[i] >= '0' && raw[i] <= '9' {
+		i++
+	}
+	if i == digitsStart { // no digits → not an integer value (e.g. it was a string) — bail
+		return nil, false
+	}
+	var b bytes.Buffer
+	b.Grow(len(raw))
+	b.Write(raw[:start])
+	b.WriteString(itoa(uint64(cap)))
+	b.Write(raw[i:])
+	out := b.Bytes()
+	// Prove the splice produced a valid request before trusting it.
+	if _, err := agent.DecodeAnthropicMessagesRequest(out); err != nil {
+		return nil, false
+	}
+	return out, true
 }
 
 // maybeCompactAnthropicRaw applies the cache-prefix-preserving history rewrite to the

@@ -192,3 +192,30 @@ func lastBreakpointMessageFromTest(elems []json.RawMessage) int {
 	}
 	return last
 }
+
+// TestSpliceMaxTokensPreservesPrefix is the F13 regression: capping max_tokens must NOT
+// re-marshal the whole body (which would sort the top-level keys and bust the cached prefix
+// on a paced turn). The splice replaces only the integer and leaves every other byte — and so
+// the cache_control prefix — byte-identical.
+func TestSpliceMaxTokensPreservesPrefix(t *testing.T) {
+	raw := []byte(`{"model":"claude","max_tokens":1024,"system":[{"type":"text","text":"sys","cache_control":{"type":"ephemeral"}}],"messages":[{"role":"user","content":"hi"}]}`)
+	out, ok := spliceMaxTokens(raw, 64)
+	if !ok {
+		t.Fatalf("spliceMaxTokens returned ok=false on a valid body")
+	}
+	if !bytes.Contains(out, []byte(`"max_tokens":64`)) {
+		t.Fatalf("max_tokens not capped to 64: %s", out)
+	}
+	// Everything BEFORE max_tokens (the model key) and the whole system/messages tail must be
+	// byte-identical — only the number changed, nothing reordered.
+	if !bytes.HasPrefix(out, []byte(`{"model":"claude","max_tokens":`)) {
+		t.Fatalf("top-level key order changed (cache prefix would bust): %s", out)
+	}
+	if !bytes.Contains(out, []byte(`"system":[{"type":"text","text":"sys","cache_control":{"type":"ephemeral"}}]`)) {
+		t.Fatalf("system/cache_control bytes changed: %s", out)
+	}
+	// A body with no max_tokens, or a non-integer value, leaves the body untouched (ok=false).
+	if _, ok := spliceMaxTokens([]byte(`{"model":"c","messages":[]}`), 64); ok {
+		t.Fatalf("expected ok=false when max_tokens is absent")
+	}
+}
