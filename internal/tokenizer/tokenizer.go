@@ -298,34 +298,16 @@ func (t *Tokenizer) Decode(ids []int) (string, error) {
 		out = out[:0]
 	}
 	for _, id := range ids {
-		if id < 0 || id >= len(t.idToToken) {
-			return "", fmt.Errorf("tokenizer: id %d out of range", id)
+		decoded, err := t.decodeToken(id)
+		if err != nil {
+			return "", err
 		}
-		piece := t.idToToken[id]
-		if piece == "" {
-			return "", fmt.Errorf("tokenizer: missing token for id %d", id)
-		}
-		if special, ok := t.special[id]; ok {
+		if decoded.isSpecial {
 			flush()
-			text += special
+			text += decoded.special
 			continue
 		}
-		if t.metaspace {
-			// ▁ -> space; "<0xNN>" byte-fallback -> that byte; everything else literal UTF-8.
-			if b, ok := byteFallback(piece); ok {
-				out = append(out, b)
-				continue
-			}
-			out = append(out, []byte(strings.ReplaceAll(piece, string(metaspaceRune), " "))...)
-			continue
-		}
-		for _, r := range piece {
-			b, ok := byteLevelDecode[r]
-			if !ok {
-				return "", fmt.Errorf("tokenizer: token %q contains non-ByteLevel rune %U", piece, r)
-			}
-			out = append(out, b)
-		}
+		out = append(out, decoded.bytes...)
 	}
 	flush()
 	return text, nil
