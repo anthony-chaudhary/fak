@@ -13,6 +13,8 @@ package adjudicator
 // tool that ever provokes a self-modify / policy / exfil refusal is not a candidate.
 
 import (
+	"fmt"
+	"sort"
 	"sync"
 
 	"github.com/anthony-chaudhary/fak/internal/abi"
@@ -90,4 +92,42 @@ func (l *Ledger) HardEvents(tool string) int {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	return l.hard[tool]
+}
+
+// PromotionOffer is the reviewable record Promotable emits for a tool that has earned
+// promotion out of the complain set: at least the requested clean complain-mode admits,
+// with ZERO hard-refusal events. It mirrors rulesynth.Candidate.ManifestDiff — a
+// PROPOSAL an operator reviews and lands, never an in-process Policy mutation.
+type PromotionOffer struct {
+	Tool        string // the tool to promote: add to Policy.Allow, remove from Policy.Complain
+	CleanEvents int    // clean complain-mode admits observed (>= the requested threshold)
+}
+
+// Review renders the operator action this offer proposes — the reviewable fragment an
+// operator applies BY HAND. Like rulesynth.Candidate.ManifestDiff it is emitted, never
+// applied: promotion WIDENS the floor (it admits a previously default-denied tool), so
+// it must land as a reviewed Policy edit, not a self-grading in-process change.
+func (o PromotionOffer) Review() string {
+	return fmt.Sprintf("promote %q: add to Policy.Allow, remove from Policy.Complain (%d clean complain admits, 0 hard refusals)",
+		o.Tool, o.CleanEvents)
+}
+
+// Promotable returns the reviewable promotion offers for every tool that has reached n
+// clean complain-mode admits with ZERO hard-refusal events, sorted by tool for a
+// deterministic, reviewable list. It MUTATES NOTHING — not the ledger, not any Policy —
+// mirroring rulesynth.Candidate.ManifestDiff's emit-a-diff-and-STOP discipline: a
+// floor-widening change always lands as an operator review, never an in-process
+// mutation. A tool that EVER provoked a hard refusal carries a non-zero hard count
+// (its clean run was reset on that refusal), so it is permanently excluded here.
+func (l *Ledger) Promotable(n int) []PromotionOffer {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	var out []PromotionOffer
+	for tool, c := range l.clean {
+		if c >= n && l.hard[tool] == 0 {
+			out = append(out, PromotionOffer{Tool: tool, CleanEvents: c})
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Tool < out[j].Tool })
+	return out
 }
