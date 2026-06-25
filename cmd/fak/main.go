@@ -109,6 +109,8 @@ func main() {
 		cmdDoctor(os.Args[2:])
 	case "serve":
 		cmdServe(os.Args[2:])
+	case "serve-wiring":
+		cmdServeWiring(os.Args[2:])
 	case "guard":
 		cmdGuard(os.Args[2:])
 	case "audit":
