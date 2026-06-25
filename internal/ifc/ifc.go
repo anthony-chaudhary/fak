@@ -630,10 +630,12 @@ func (e vdsoTaintEmitter) Emit(ev abi.Event) {
 }
 
 // DefaultStampGate / DefaultSinkGate are the registered instances sharing Default
-// ledger + default policy.
+// ledger + default policy. DefaultScopeCeilingGate is the stateless result-side
+// scope ceiling (shares no ledger — it reads only the call/result Meta).
 var (
-	DefaultStampGate = NewStampGate(Default, Policy{})
-	DefaultSinkGate  = NewSinkGate(Default, Policy{})
+	DefaultStampGate        = NewStampGate(Default, Policy{})
+	DefaultSinkGate         = NewSinkGate(Default, Policy{})
+	DefaultScopeCeilingGate = ScopeCeilingGate{}
 )
 
 // ConfigureDefaultPolicy installs the boot-time IFC policy on the registered
@@ -647,6 +649,9 @@ func init() {
 	// Source-stamp runs in the result chain AFTER the detectors (rank 20 > ctxmmu
 	// 10 > normgate 5) so it observes their final verdict.
 	abi.RegisterResultAdmitter(20, DefaultStampGate)
+	// Scope ceiling folds AFTER the stamp (rank 21 > 20) so the tainted-data
+	// down-clamp to ScopeAgent has already run before the upward bound is checked.
+	abi.RegisterResultAdmitter(21, DefaultScopeCeilingGate)
 	// Sink-gate runs in the pre-call chain. Rank is immaterial to the verdict (the
 	// fold takes the most-restrictive); a cheap rank keeps it before the monitor.
 	abi.RegisterAdjudicator(30, DefaultSinkGate)
