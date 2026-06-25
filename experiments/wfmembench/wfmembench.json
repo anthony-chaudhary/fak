@@ -1,0 +1,75 @@
+{
+  "issue": "#434",
+  "command": "go run ./cmd/wfmembench -out experiments/wfmembench",
+  "fixture": {
+    "pages": 8,
+    "benign": 6,
+    "sealed": 2,
+    "tombstoned": 1,
+    "raw_bytes": 980,
+    "resident_bytes": 577,
+    "hazards": [
+      "clean tool result (account record, order status)",
+      "stale mutable source (order world_epoch A, superseded preference)",
+      "poisoned/sealed result (prompt injection)",
+      "poisoned/sealed result (secret exfil)",
+      "tombstoned page (agent-suppressed stale preference)",
+      "multi-agent handoff (audit-bot sub-agent)",
+      "verified effect claim (refund settled=true, receipt_sha)",
+      "unverified effect claim (note: no confirmation checked)"
+    ]
+  },
+  "arms": [
+    {
+      "name": "full-transcript",
+      "kind": "modeled",
+      "resident_bytes": 980,
+      "resident_tokens": 245,
+      "view_fault_rate": 1,
+      "source_coverage": 1,
+      "stale_reuse": 1,
+      "poison_leak": 2,
+      "task_success": true,
+      "fallback_to_raw": 1,
+      "note": "baseline: carries the whole flat transcript; sealed and tombstoned pages leak because nothing is filtered."
+    },
+    {
+      "name": "naive-global-summary",
+      "kind": "modeled",
+      "resident_bytes": 384,
+      "resident_tokens": 96,
+      "view_fault_rate": 0,
+      "source_coverage": 0,
+      "stale_reuse": 1,
+      "poison_leak": 2,
+      "task_success": true,
+      "fallback_to_raw": 0,
+      "note": "baseline: one lossy blob; cheapest in bytes but loses provenance, leaks sealed content, and cannot fall back to raw."
+    },
+    {
+      "name": "provenance-bound-virtual-views",
+      "kind": "measured",
+      "resident_bytes": 577,
+      "resident_tokens": 145,
+      "view_fault_rate": 0.5,
+      "source_coverage": 0.8333333333333334,
+      "stale_reuse": 0,
+      "poison_leak": 0,
+      "task_success": true,
+      "fallback_to_raw": 0.5,
+      "note": "fak: demand-paged provenance-bound views; sealed pages refused, stale views recomputed across the policy boundary — fail-closed."
+    }
+  ],
+  "stale_replay": {
+    "description": "a goal view built under policy epoch A is served again under epoch B; the stale view is rejected and RECOMPUTEd, never served as a HIT.",
+    "recomputes": 5,
+    "stale_reuse": 0,
+    "old_view_rejected": true
+  },
+  "poison_replay": {
+    "description": "a query targeting a sealed source's descriptor is REFUSED; no sealed or tombstoned page enters any derived view.",
+    "sealed_refused": 6,
+    "poison_leakage": 0,
+    "sealed_contained": true
+  }
+}
