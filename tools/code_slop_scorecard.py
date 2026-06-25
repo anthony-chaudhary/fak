@@ -452,9 +452,9 @@ def kpi_duplication(files: dict[str, str]) -> dict[str, Any]:
     Identifiers are kept (``normalize_idents=False``) so distinct code with distinct names
     does not false-match and idiomatic Go does not collapse into phantom clusters; only
     literals are normalized — the precision/recall sweet spot for this tree (#780)."""
-    win_locs: dict[int, set[tuple[str, int]]] = {}  # key -> {(file, start_line)}
+    win_locs: dict[tuple[str, ...], set[tuple[str, int]]] = {}  # key -> {(file, start_line)}
     # file -> [(tok_idx, start_line, end_line, key)] for qualifying windows
-    per_file: dict[str, list[tuple[int, int, int, int]]] = {}
+    per_file: dict[str, list[tuple[int, int, int, tuple[str, ...]]]] = {}
     for rel in sorted(files):
         toks = go_tokens(files[rel], normalize_idents=False)
         m = len(toks)
@@ -467,7 +467,7 @@ def kpi_duplication(files: dict[str, str]) -> dict[str, Any]:
                     running += logic[start + CLONE_WINDOW_TOKENS - 1] - logic[start - 1]
                 if running < CLONE_MIN_LOGIC_TOKENS:
                     continue
-                key = hash(tuple(toks[j][0] for j in range(start, start + CLONE_WINDOW_TOKENS)))
+                key = tuple(toks[j][0] for j in range(start, start + CLONE_WINDOW_TOKENS))
                 sline = toks[start][1]
                 eline = toks[start + CLONE_WINDOW_TOKENS - 1][1]
                 quals.append((start, sline, eline, key))
@@ -479,7 +479,7 @@ def kpi_duplication(files: dict[str, str]) -> dict[str, Any]:
     # Per file, merge clone windows that are adjacent in the token stream (a gap of up to
     # one window of non-clone tokens still merges) into one block. Counting raw windows
     # would inflate a single duplicated function into dozens of "clones".
-    blocks: list[tuple[str, int, int, frozenset[int]]] = []  # (file, start_line, end_line, keyset)
+    blocks: list[tuple[str, int, int, frozenset[tuple[str, ...]]]] = []  # (file, start_line, end_line, keyset)
     for rel in sorted(per_file):
         cw = [(idx, sl, el, k) for (idx, sl, el, k) in per_file[rel] if k in clone_keys]
         cur_idx = cur_sl = cur_el = None
@@ -506,7 +506,7 @@ def kpi_duplication(files: dict[str, str]) -> dict[str, Any]:
             x = parent[x]
         return x
 
-    key_to_blocks: dict[int, list[int]] = {}
+    key_to_blocks: dict[tuple[str, ...], list[int]] = {}
     for bi, (_, _, _, keys) in enumerate(blocks):
         for k in keys:
             key_to_blocks.setdefault(k, []).append(bi)
@@ -795,23 +795,60 @@ def kpi_comment_slop(files: dict[str, str]) -> dict[str, Any]:
             "defects": defects, "soft": []}
 
 
+# A code symbol inside a backtick span — `recall.Page`, `xenginekv.AttachArena`,
+# `LookupOp`. CLAIMS.md backticks Go symbols and writes behaviors in prose, so keying
+# the stub-suppression set on backtick spans (and matching a func by the LAST dotted
+# component, case-sensitive) is the TIGHT symbol<->ledger link the SOFT->HARD promotion
+# needs — prose words on a `[STUB]` line no longer grant a false free pass (#781).
+_BACKTICK_SPAN_RE = re.compile(r"`([^`]+)`")
+_DOTTED_IDENT_RE = re.compile(r"[A-Za-z_]\w*(?:\.[A-Za-z_]\w*)*")
+
+
+def _ledger_stub_symbols(claims_text: str) -> set[str]:
+    """The set of Go symbol names a CLAIMS.md ``[STUB]`` line declares — collected ONLY
+    from backtick-quoted code spans, taking the last dotted component of each
+    ``pkg.Symbol`` / ``Type.Method`` so a func matches by its bare exported name.
+    Case-sensitive (Go symbols are). Prose on the line is ignored — that is the tight
+    link (vs the v1 any-token-lowercased match that pulled in prose words)."""
+    symbols: set[str] = set()
+    for line in claims_text.splitlines():
+        if "[STUB]" not in line:
+            continue
+        for span in _BACKTICK_SPAN_RE.findall(line):
+            for dotted in _DOTTED_IDENT_RE.findall(span):
+                symbols.add(dotted.rsplit(".", 1)[-1])
+    return symbols
+
+
 def kpi_stub_masquerade(files: dict[str, str], claims_text: str) -> dict[str, Any]:
-    """SOFT (v1). An EXPORTED func whose body explicitly declares itself
+    """SOFT (v1, advisory). An EXPORTED func whose body explicitly declares itself
     UNIMPLEMENTED — ``panic("not implemented")`` / ``panic("unimplemented")`` / a
     body whose only statement is a ``// TODO: implement`` — where the symbol is not
     declared on a ``[STUB]`` line in ``CLAIMS.md`` (the honesty ledger). Deliberately
-    NARROW: a bare ``return nil`` is NOT counted, because on an interface method that
-    is overwhelmingly a legitimate "no capabilities / empty result" implementation,
-    not a stub (the broad form produced ~40 false positives on this tree — trivial
-    accessors like ``func (m *MMU) Caps() []abi.Capability { return nil }``). An
-    explicit unimplemented-panic, by contrast, is unambiguous. SOFT because the
-    symbol->ledger link is fuzzy; it scores but never gates. Promote to HARD once the
-    heuristic proves tight."""
-    stub_names: set[str] = set()
-    for line in claims_text.splitlines():
-        if "[STUB]" in line:
-            for tok in _IDENT_RE.findall(line):
-                stub_names.add(tok.lower())
+    NARROW on the DETECTION side: a bare ``return nil`` is NOT counted, because on an
+    interface method that is overwhelmingly a legitimate "no capabilities / empty
+    result" implementation, not a stub (the broad form produced ~40 false positives on
+    this tree — trivial accessors like ``func (m *MMU) Caps() []abi.Capability { return
+    nil }``). An explicit unimplemented-panic, by contrast, is unambiguous.
+
+    The symbol<->ledger link (the SUPPRESSION side) is now TIGHT (#781): a ``[STUB]``
+    line suppresses a func only when the func's exact (case-sensitive) Go name appears
+    as a BACKTICK-quoted code symbol on that line — ``- [STUB] `recall.Page` …``
+    suppresses ``Page``; ``- [STUB] `xenginekv.AttachArena` …`` suppresses
+    ``AttachArena`` (the last dotted component of a ``pkg.Symbol`` / ``Type.Method``
+    span). CLAIMS.md names behaviors in PROSE and Go symbols in BACKTICKS, so keying
+    only on the backticked code spans drops the prose-fuzz: a stub named after a common
+    word ("Path", "Op", "Result") is no longer granted a false free pass by an
+    unrelated sentence, and a declared symbol is reliably matched. (v1 added every
+    identifier-shaped token on the line, lowercased — prose included.)
+
+    Still SOFT: the SOFT->HARD promotion (move ``soft`` -> ``defects`` + bump the KPI
+    weight) is gated on a SECOND condition the link-tightening alone does not satisfy —
+    zero false positives confirmed on the tree across a few releases. The detector is
+    one release old (it shipped with the scorecard in 53e4d5f) and the tree currently
+    has ZERO exported panic-stubs, so the soak has not run yet; until it does, the axis
+    scores but never gates. See #781 / the #775 Track-B epic."""
+    stub_symbols = _ledger_stub_symbols(claims_text)
 
     todo_only_re = re.compile(r"^\s*//\s*TODO[:\s].*implement", re.I)
     panic_stub_re = re.compile(
@@ -841,8 +878,8 @@ def kpi_stub_masquerade(files: dict[str, str], claims_text: str) -> dict[str, An
             is_todo_only = (not real and any(
                 todo_only_re.match(rl) for rl in raw_lines[lineno:lineno + 4]))
             if is_panic_stub or is_todo_only:
-                if name.lower() in stub_names:
-                    continue  # honestly declared in the ledger
+                if name in stub_symbols:
+                    continue  # honestly declared (by backtick symbol) in the ledger
                 why = "panic-unimplemented" if is_panic_stub else "TODO-only body"
                 soft.append(f"possible stub-masquerade (exported, {why}, not [STUB]): {rel}:{lineno} {name}")
     score = _clamp(100 - 4 * len(soft))

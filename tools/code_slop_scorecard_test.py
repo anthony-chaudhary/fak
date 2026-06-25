@@ -11,6 +11,8 @@ Dual-runnable (the repo runs the suite pytest-free in CI):
 """
 from __future__ import annotations
 
+import builtins
+
 import code_slop_scorecard as cs
 
 
@@ -46,6 +48,33 @@ def test_duplication_unique_code_is_clean():
                       "\treturn r\n"
                       "}\n")}
     k = cs.kpi_duplication(files)
+    assert k["defects"] == []
+    assert k["score"] == 100
+
+
+def test_duplication_token_window_keys_are_collision_exact():
+    # The clone engine must not reduce token windows to a lossy integer hash. Force every
+    # explicit hash() call to collide; distinct token windows should still stay distinct
+    # because kpi_duplication keys by the token tuple itself.
+    original_hash = builtins.hash
+    builtins.hash = lambda _: 1
+    try:
+        files = {"a.go": "package a\n" + _dup_block("sum"),
+                 "b.go": ("package b\n"
+                          "func other(s string, xs []string) string {\n"
+                          "\tbuf := s\n"
+                          "\tfor _, part := range xs {\n"
+                          "\t\tif len(part) > 3 {\n"
+                          "\t\t\tbuf = buf + \":\" + part\n"
+                          "\t\t} else {\n"
+                          "\t\t\tbuf = part + \":\" + buf\n"
+                          "\t\t}\n"
+                          "\t}\n"
+                          "\treturn buf\n"
+                          "}\n")}
+        k = cs.kpi_duplication(files)
+    finally:
+        builtins.hash = original_hash
     assert k["defects"] == []
     assert k["score"] == 100
 
@@ -293,10 +322,45 @@ def test_panic_unimplemented_is_soft_signal():
 
 
 def test_stub_declared_in_claims_is_not_flagged():
+    # the TIGHT link (#781): a [STUB] line suppresses a func when the func's name
+    # appears as a BACKTICK code symbol on that line.
     files = {"a.go": "package a\nfunc Future() int { panic(\"unimplemented\") }\n"}
-    claims = "- [STUB] Future is the planned X path, not yet wired.\n"
+    claims = "- [STUB] `Future` is the planned X path, not yet wired.\n"
     k = cs.kpi_stub_masquerade(files, claims_text=claims)
     assert k["soft"] == []
+
+
+def test_stub_prose_mention_does_not_suppress():
+    # the TIGHT link (#781): a [STUB] line that names the symbol only in PROSE (not in a
+    # backtick code span) must NOT suppress — keying on prose was the v1 fuzz that
+    # granted a false free pass. The func is still surfaced as a SOFT signal.
+    files = {"a.go": "package a\nfunc Future() int { panic(\"unimplemented\") }\n"}
+    claims = "- [STUB] the Future path is deferred; not yet wired.\n"
+    k = cs.kpi_stub_masquerade(files, claims_text=claims)
+    assert any("Future" in s for s in k["soft"])
+    assert k["defects"] == []  # SOFT — still never gates
+
+
+def test_stub_qualified_symbol_suppresses_by_last_component():
+    # `recall.Page` in the ledger suppresses an exported func named Page (the last
+    # dotted component) — the package-qualified symbol<->ledger match.
+    files = {"a.go": "package recall\nfunc Page() int { panic(\"not implemented\") }\n"}
+    claims = "- [STUB] `recall.Page` validity interval, tracked #81.\n"
+    k = cs.kpi_stub_masquerade(files, claims_text=claims)
+    assert k["soft"] == []
+
+
+def test_ledger_stub_symbols_keys_on_backticks_only():
+    # the tight-link helper: backtick code spans on a [STUB] line, last dotted
+    # component, case-sensitive; prose and non-[STUB] lines are ignored.
+    claims = ("- [STUB] `recall.Page` and `LookupOp` are deferred behaviors.\n"
+              "- not a stub line: `Ignored` here.\n")
+    syms = cs._ledger_stub_symbols(claims)
+    assert "Page" in syms        # last component of `recall.Page`
+    assert "LookupOp" in syms
+    assert "Ignored" not in syms  # not on a [STUB] line
+    assert "deferred" not in syms  # prose, not backticked
+    assert "behaviors" not in syms
 
 
 def test_real_implementation_is_clean():
