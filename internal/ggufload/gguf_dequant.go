@@ -113,7 +113,33 @@ func tensorElems(t TensorInfo) (uint64, error) {
 	return n, nil
 }
 
+// reuseF32 returns a length-n float32 slice backed by buf when buf's capacity allows, else
+// a fresh allocation. The caller overwrites every returned element, so the reused tail is
+// not zeroed — and never leaks into the result, whose length is exactly n.
+func reuseF32(buf []float32, n int) []float32 {
+	if cap(buf) >= n {
+		return buf[:n]
+	}
+	return make([]float32, n)
+}
+
+// dequantF32 decodes a GGUF tensor's raw payload into a freshly-allocated f32 slice.
 func dequantF32(t TensorInfo, raw []byte) ([]float32, error) {
+	return dequantF32Into(nil, t, raw)
+}
+
+// dequantF32Into decodes a GGUF tensor's raw payload to f32, writing into scratch when it
+// has the capacity (else allocating). The dequant writes every returned element for every
+// supported type, so the reused buffer's prior contents never leak. The returned slice
+// aliases scratch's backing array on reuse, so a caller recycling one buffer across many
+// tensors MUST finish consuming the result before the next dequantF32Into overwrites it.
+// Passing nil always allocates — the historical dequantF32 behavior every other caller keeps.
+//
+// This is the GGUF->Q8 quant-on-load page-churn fix (#440): the quant-on-load path
+// dequantizes each tensor only long enough to re-quantize it, so a 27B checkpoint's 800+
+// throwaway elems*4 f32 buffers — each faulting in fresh zeroed pages the GC then unmaps —
+// collapse to one reused arena grown to the largest tensor.
+func dequantF32Into(scratch []float32, t TensorInfo, raw []byte) ([]float32, error) {
 	elems, err := tensorElems(t)
 	if err != nil {
 		return nil, err
@@ -121,7 +147,7 @@ func dequantF32(t TensorInfo, raw []byte) ([]float32, error) {
 	if elems > uint64(math.MaxInt) {
 		return nil, fmt.Errorf("gguf: tensor %s element count overflows int", t.Name)
 	}
-	out := make([]float32, int(elems))
+	out := reuseF32(scratch, int(elems))
 	switch t.Type {
 	case TensorF32:
 		if len(raw) != len(out)*4 {

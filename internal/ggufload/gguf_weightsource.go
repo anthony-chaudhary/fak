@@ -146,6 +146,12 @@ func (s *WeightSource) QuantModelProfile(p *LoadProfiler) (*model.Model, error) 
 		return nil, err
 	}
 	builder := model.NewQuantBuilder(cfg, cfg.TieWordEmbeddings)
+	// One dequant arena reused across every tensor: each weight is dequantized only long
+	// enough to be re-quantized into the builder, so without reuse the 27B path would
+	// allocate (and the GC unmap) 800+ throwaway elems*4 f32 buffers — the load-time page
+	// churn #440 targets. Safe because each tensor's f32 is fully consumed (quantized or
+	// copied into the f32 blob) before the next dequantF32Into overwrites it.
+	var dequantBuf []float32
 	for _, info := range s.File.Tensors {
 		// glm_moe_dsa batched routed experts: split the [E,out,in] blob 1->E into per-expert
 		// canonical tensors and add each (the quant builder narrows the 2-D matmul weights as
@@ -212,7 +218,7 @@ func (s *WeightSource) QuantModelProfile(p *LoadProfiler) (*model.Model, error) 
 		}
 
 		t = loadProfileStart(p)
-		data, err := dequantF32(info, raw)
+		data, err := dequantF32Into(dequantBuf, info, raw)
 		dequantNanos := loadProfileEnd(p, "gguf_dequant", t, int64(len(data))*4, 1)
 		if p != nil {
 			tt.DequantNanos = dequantNanos
@@ -221,6 +227,10 @@ func (s *WeightSource) QuantModelProfile(p *LoadProfiler) (*model.Model, error) 
 		if err != nil {
 			return nil, err
 		}
+		// Carry the (possibly grown) arena forward. Capture it before normalize, which may
+		// hand back a fresh reordered buffer instead of data — dequantBuf must stay the
+		// dequant arena so the next tensor reuses it.
+		dequantBuf = data
 
 		t = loadProfileStart(p)
 		data, err = normalizeCanonicalTensorData(name, data, cfg)
