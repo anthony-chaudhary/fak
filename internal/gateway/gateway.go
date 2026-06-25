@@ -146,6 +146,11 @@ type Config struct {
 	// session's DRIVE state — the write side of the session-control surface. Nil
 	// disables the POST /v1/fak/session/{id}/{verb} route. Injected by cmd/fak.
 	ControlSession SessionControlFunc
+	// SteerSession enqueues an operator steer onto the host's a2achan bus so a RUNNING
+	// detached session receives the input at its next turn boundary (#760). Nil disables
+	// the POST /v1/fak/session/{id}/steer route (404). Injected by cmd/fak so this package
+	// stays a2achan-blind, mirroring ControlSession.
+	SteerSession SteerSessionFunc
 	// ListSessions returns a snapshot of EVERY live session's DRIVE state — the
 	// multi-session read behind GET /v1/fak/sessions (the table's Snapshot turned
 	// into a live operator surface). Nil disables the route. Injected by cmd/fak so
@@ -348,6 +353,22 @@ type SessionObserveFunc func(context.Context, string) SessionState
 // refusal, not a client error.
 type SessionControlFunc func(ctx context.Context, traceID, verb string, req SessionControlRequest) (SessionState, bool, error)
 
+// SteerRequest is the body of POST /v1/fak/session/{trace_id}/steer (#760): operator
+// input sent to a RUNNING detached session, delivered at its next turn boundary. Text is
+// the message the running agent receives — the "send input without stopping it" affordance
+// of Claude Code #21419.
+type SteerRequest struct {
+	Text string `json:"text"`
+}
+
+// SteerSessionFunc is injected by the host CLI so the gateway can enqueue an operator
+// steer onto the host's a2achan bus (Session locale, keyed by traceID) without importing
+// internal/a2achan. A non-nil error is the adjudication floor's deny-as-value surfaced
+// (tainted / over-scoped / uncapped body), which the route maps to 422 — the same
+// default-deny floor that gates a tool call, here gating operator input. nil hook ⇒ the
+// steer route is not configured (404).
+type SteerSessionFunc func(ctx context.Context, traceID, text string) error
+
 // SessionVerdict is the gateway wire-neutral projection of session.Verdict. The
 // gateway intentionally carries only primitive fields so it stays decoupled from
 // internal/session while still applying the table's mutating Decide semantics on the
@@ -413,6 +434,7 @@ type Server struct {
 	observeTrace   TraceObserveFunc
 	observeSession SessionObserveFunc
 	controlSession SessionControlFunc
+	steerSession   SteerSessionFunc
 	listSessions   SessionListFunc
 	decideSession  SessionDecideFunc
 	debitSession   SessionDebitFunc
@@ -619,6 +641,7 @@ func New(cfg Config) (*Server, error) {
 		observeTrace:         cfg.ObserveTrace,
 		observeSession:       cfg.ObserveSession,
 		controlSession:       cfg.ControlSession,
+		steerSession:         cfg.SteerSession,
 		listSessions:         cfg.ListSessions,
 		decideSession:        cfg.DecideSession,
 		debitSession:         cfg.DebitSession,

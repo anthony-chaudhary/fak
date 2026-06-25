@@ -29,6 +29,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/anthony-chaudhary/fak/internal/a2achan"
 	"github.com/anthony-chaudhary/fak/internal/abi"
 	"github.com/anthony-chaudhary/fak/internal/adjudicator"
 	"github.com/anthony-chaudhary/fak/internal/agent"
@@ -78,6 +79,8 @@ func main() {
 		cmdRecall(os.Args[2:])
 	case "session":
 		cmdSession(os.Args[2:])
+	case "signal":
+		cmdSignal(os.Args[2:])
 	case "task":
 		cmdTask(os.Args[2:])
 	case "loop":
@@ -294,6 +297,10 @@ func usage() {
                 priority <id> <N>   [--addr URL] [--key K] [--if-rev N] [--json]
                 (the OPERATOR control surface: read a served session's live DRIVE state
                  and CANCEL or UPDATE it in flight, over the /v1/fak/session(s) routes)
+  fak signal    <id> pause | resume | stop [--reason R] | steer --text "..."
+                (JOB CONTROL for a running session - the OS process-model names over the
+                 control plane; steer sends INPUT to a running agent, taken at its next
+                 turn boundary. Answers Claude Code #21419, the SIGCONT+stdin gap)
   fak task      sample [--json] [--done N --total N --unit UNIT]
                 (the PROCESS-LOCAL TASK MANAGER snapshot: current hardware/runtime
                  sample plus task/step/concept progress and ETA when progress is known)
@@ -818,6 +825,30 @@ func controlSession(_ context.Context, traceID, verb string, req gateway.Session
 		return gateway.SessionState{}, false, err
 	}
 	return toGatewaySessionState(st), ok, nil
+}
+
+// steerSession enqueues an operator steer onto the process-global a2achan bus so a RUNNING
+// detached session can receive the input at its next turn boundary (#760). The serve
+// process owns the bus, so the in-process Send happens HERE (the CLI is a separate process
+// that POSTs HTTP; only the server can enqueue onto the bus it shares with the served loop).
+//
+// The body rides the a2achan floor: "operator" is a different principal from the target
+// trace, so a Private (ScopeAgent) body would be refused — Shared (ScopeFleet) is the
+// auditable cross-principal widening the operator must make, and it stays Tainted (operator
+// input is untrusted, screened on ingress). A tainted/over-scoped/uncapped Send is refused
+// by the SAME default-deny floor that gates a tool call; that deny-as-value becomes the
+// error the route maps to 422 — "a tainted/over-scoped steer is refused", mechanically.
+func steerSession(ctx context.Context, traceID, text string) error {
+	traceID = strings.TrimSpace(traceID)
+	if traceID == "" {
+		return errors.New("trace_id is required")
+	}
+	key := a2achan.ChannelKey{Locale: a2achan.Session, ID: traceID}
+	v := a2achan.Default.Send(ctx, "operator", key, a2achan.Shared([]byte(text)), a2achan.CapA2ASend)
+	if v.Kind != abi.VerdictAllow {
+		return fmt.Errorf("a2a floor refused (%s)", abi.ReasonName(v.Reason))
+	}
+	return nil
 }
 
 // applySessionControl routes one control verb to the matching Table write. It is the

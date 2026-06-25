@@ -929,6 +929,33 @@ func (s *Server) handleFakSession(w http.ResponseWriter, r *http.Request) {
 			writeErr(w, http.StatusBadRequest, "control verb is required: POST /v1/fak/session/{trace_id}/{run|budget|pace|priority}")
 			return
 		}
+		// steer is its own shape (operator input to a RUNNING session, #760): a different
+		// body and a different sink (the a2achan bus, not the drive table). Dispatch it
+		// before the generic control path. A refused steer (tainted/over-scoped/uncapped)
+		// is the adjudication floor's deny — distinct from the control 409 — so it maps to
+		// 422 (unprocessable), not 409 (terminal/stale rev).
+		if verb == "steer" {
+			if s.steerSession == nil {
+				writeErr(w, http.StatusNotFound, "session steer is not configured")
+				return
+			}
+			var sr SteerRequest
+			if err := decodeJSON(w, r, &sr); err != nil {
+				writeErr(w, http.StatusBadRequest, "malformed request body: "+err.Error())
+				return
+			}
+			if strings.TrimSpace(sr.Text) == "" {
+				writeErr(w, http.StatusBadRequest, "steer text is required")
+				return
+			}
+			if err := s.steerSession(r.Context(), traceID, sr.Text); err != nil {
+				writeErr(w, http.StatusUnprocessableEntity, "steer refused: "+err.Error())
+				return
+			}
+			s.logf("gateway: session %s steer accepted (%d bytes)", traceID, len(sr.Text))
+			writeJSON(w, http.StatusAccepted, map[string]any{"trace_id": traceID, "steered": true})
+			return
+		}
 		if s.controlSession == nil {
 			writeErr(w, http.StatusNotFound, "session control is not configured")
 			return

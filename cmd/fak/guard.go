@@ -240,6 +240,7 @@ func cmdGuard(argv []string) {
 		ObserveTrace:          observeTrace,
 		ObserveSession:        observeSession,
 		ControlSession:        controlSession,
+		SteerSession:          steerSession,
 		ListSessions:          listSessions,
 		DecideSession:         decideSession,
 		DebitSession:          debitSession,
