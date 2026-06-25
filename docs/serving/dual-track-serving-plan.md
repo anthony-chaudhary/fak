@@ -213,7 +213,7 @@ track. (Shared spine is in [§4](#4-the-shared-spine-built-once-both-tracks-plug
 - **Base-item parity framing.** The L3 KV-governance value-adds (the §8 L3 family) and the
   trust/exact-eviction layer ride **on top of** the base items. This doc must not let a parity
   item depend on a value-add, nor claim a value-add as parity.
-- **Track A: do NOT fork** vLLM/SGLang/Dynamo/CAMA internals — orchestrate + govern behind the
+- **Track A: do NOT fork** vLLM/SGLang/Dynamo/external-L3-cache internals — orchestrate + govern behind the
   `EngineDriver`/gateway seam.
 - **Track B: not chasing raw single-GPU throughput parity vs vLLM** — native targets the
   single-node → small-cluster path and the kernel-owned-KV value-add unlock.

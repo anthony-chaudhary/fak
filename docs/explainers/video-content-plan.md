@@ -40,7 +40,7 @@ a shot needs.
 | **`video_generate`** | `openclaw` | hosted **generative** T2V/I2V/V2V (Wan/Veo/fal/minimax) + local `comfy` | hosted = per-clip API; `comfy` = $0 local | photoreal/cinematic **atmosphere** b-roll |
 | **`ascii-video`** | `hermes-agent` | **deterministic** procedural ASCII-art video; also TTS narration, SRT/karaoke captions, audio-reactive, and **video-to-ASCII restyle** | **$0 local** (Python+ffmpeg; ElevenLabs key optional for TTS) | **brand/title layer, narration, captions, unifying restyle** — and *claim-safe* (renders exactly what you feed it) |
 | **`video-generation`** | `deer-flow` | structured-**JSON** prompt → `generate.py` CLI (reference image as first/last frame) | depends on backend | a cleaner **authoring model** for storyboard shots |
-| **multimodal_gen** | `cama-complete/…/sglang` | **self-hosted** video DiTs (Wan/Hunyuan) behind an OpenAI-compatible `video_api.py` | $0 marginal on our GPU | a **self-hosted backend** to slot behind `openclaw`'s provider abstraction at scale |
+| **multimodal_gen** | `multimodal-gen/…/sglang` | **self-hosted** video DiTs (Wan/Hunyuan) behind an OpenAI-compatible `video_api.py` | $0 marginal on our GPU | a **self-hosted backend** to slot behind `openclaw`'s provider abstraction at scale |
 
 The pivotal one is **`ascii-video`**: it is deterministic (math/procedural, no model
 hallucination), terminal-native (on-brand for a CLI / agent-kernel product), runs $0
@@ -327,7 +327,7 @@ Per-video checklist:
   · `openclaw/src/image-generation/` · `openclaw/skills/video-frames/SKILL.md`
 - Brand/narration/captions: `hermes-agent/skills/creative/ascii-video/` (README + `references/`)
 - Structured-prompt authoring: `deer-flow/skills/public/video-generation/SKILL.md`
-- Self-hosted video backend (optional): `cama-complete/.../sglang/multimodal_gen/` (`video_api.py`, `dits/wanvideo.py`, `dits/hunyuanvideo.py`)
+- Self-hosted video backend (optional): `multimodal-gen/.../sglang/multimodal_gen/` (`video_api.py`, `dits/wanvideo.py`, `dits/hunyuanvideo.py`)
 - Provider setup: `openclaw/docs/providers/{alibaba,fal,minimax,google,comfy}.md`
 - Message source: `docs/share-kit.md` · `docs/explainers/*` ·
   `docs/explain-executive-summary-2026-06-18.md`
