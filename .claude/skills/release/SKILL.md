@@ -90,9 +90,9 @@ git worktree add --detach <path> origin/main
 git worktree remove <path>     # when done
 ```
 
-Verify the release commit touches ONLY `VERSION` + `docs/releases/vX.Y.Z.md`.
+Verify the release commit touches ONLY `VERSION`, `docs/releases/vX.Y.Z.md`, and any `INSTALL.md` install-pin bumps. (`release_bump` pin-bumps `INSTALL.md` too — its `targets.install_docs.files[].changed` flags whether `INSTALL.md` actually moved this release; it is a clean no-op when the pins are already current.)
 
-Manual fallback: compute the version, write `<release_notes_dir>/vX.Y.Z.md` mirroring the prior release's front-matter + theme shape, run `python <helpers.release_bump> X.Y.Z`, then `git add -- VERSION docs/releases/vX.Y.Z.md` and `git commit -m "vX.Y.Z: <summary>" -- VERSION docs/releases/vX.Y.Z.md`. Never `git add -A`. No `Co-Authored-By` line.
+Manual fallback: compute the version, write `<release_notes_dir>/vX.Y.Z.md` mirroring the prior release's front-matter + theme shape, run `python <helpers.release_bump> X.Y.Z`, then `git add -- VERSION INSTALL.md docs/releases/vX.Y.Z.md` and `git commit -m "vX.Y.Z: <summary>" -- VERSION INSTALL.md docs/releases/vX.Y.Z.md`. Never `git add -A`. No `Co-Authored-By` line.
 
 ## Step 6: Push the release commit FIRST, then tag
 
