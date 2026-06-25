@@ -8,8 +8,8 @@ the competitive claims. None of them grade the thing a *developer who wants to r
 a benchmark* actually hits: can they **(1) discover** what benchmarks exist,
 **(2) cold-start** at least one with no weights/GPU/dataset/key, **(3) learn one
 flag vocabulary that transfers**, **(4) read a number and know what it means**, and
-**(5) record + compare** a result? fak ships 23 benchmark surfaces (18 ``cmd/*bench*``
-mains + 5 ``fak`` verbs)  -  its headline value-proof  -  and until now had no number
+**(5) record + compare** a result? fak ships 25 benchmark surfaces (18 ``cmd/*bench*``
+mains + 7 ``fak`` verbs)  -  its headline value-proof  -  and until now had no number
 for how hard they are to use.
 
 This scores the git-tracked tree on mechanical KPIs in five groups  -  the five steps
@@ -152,9 +152,10 @@ def fak_bench_verbs(root: Path, tracked: list[str]) -> set[str]:
     main_go = _read(root, "cmd/fak/main.go") or ""
     cases = set(re.findall(r'case\s+"([a-z0-9-]+)":', main_go))
     # Bench verbs whose name lacks the substring 'bench' but which expose a
-    # benchmark: `turntax` (the turn-tax A/B) and `vcache` (its `bench`/`score`
-    # subcommand). Kept as a small named allowlist so the detector stays structural.
-    known_non_bench_named = {"turntax", "vcache"}
+    # benchmark: `turntax` (the turn-tax A/B), `vcache` (its `bench`/`score`
+    # subcommand), and `ablate` (the N-arm self-ablation sweep, the generalization
+    # of `fak bench`). Kept as a small named allowlist so the detector stays structural.
+    known_non_bench_named = {"turntax", "vcache", "ablate"}
     verbs = {c for c in cases if "bench" in c} | (cases & known_non_bench_named)
     # The catalog verb itself is not a benchmark; drop it.
     verbs.discard("benchmarks")

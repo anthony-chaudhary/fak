@@ -74,6 +74,13 @@ func (b Bench) Offline() bool { return b.Need == NeedNone }
 // asserts every cmd/*bench* main and every `fak` bench verb appears exactly once.
 var registry = []Bench{
 	{
+		Name: "ablate", Kind: KindVerb, Need: NeedNone,
+		Summary: "Self-ablation feature sweep: replays ONE frozen tool-call trace under N runtime-feature configs and reads each arm's cost/benefit (vDSO hits, denies, p50 latency, tokens) straight off the kernel counters  -  the N-arm generalization of `fak bench`, apples-to-apples on one workload hash.",
+		Run:     "fak ablate --sweep vdso",
+		Flags:   []string{"--sweep  -  comma list of features to ablate (known: vdso)", "--suite  -  trace suite under testdata/tau2", "--baseline  -  arm id used as the delta reference", "--engine  -  engine id (offline mock by default)", "--out  -  AblationReport JSON path"},
+		Doc:     "docs/benchmarks/ABLATE-RESULTS.md",
+	},
+	{
 		Name: "bench", Kind: KindVerb, Need: NeedNone,
 		Summary: "A/B ablation of the vDSO over a frozen tau2 trace  -  the per-turn adjudication work fak eliminates vs a spawned-hook baseline.",
 		Run:     "fak bench --suite tau2-smoke --out report.json",

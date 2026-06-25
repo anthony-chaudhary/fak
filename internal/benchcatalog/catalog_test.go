@@ -26,6 +26,25 @@ func TestVCacheBenchmarkIsDiscoverableOfflineGate(t *testing.T) {
 	}
 }
 
+func TestAblateBenchmarkIsDiscoverableOfflineGate(t *testing.T) {
+	b, ok := Get("ablate")
+	if !ok {
+		t.Fatal("ablate benchmark missing from catalog (it is a `fak` bench verb, epic #607, but had no registry row)")
+	}
+	if b.Kind != KindVerb || b.Need != NeedNone {
+		t.Fatalf("ablate kind/need = %s/%s, want verb/offline", b.Kind, b.Need)
+	}
+	if !strings.Contains(b.Run, "fak ablate") {
+		t.Fatalf("ablate run = %q, want a `fak ablate` invocation", b.Run)
+	}
+	if !b.Offline() {
+		t.Fatal("ablate runs on the offline mock engine by default; it must stay zero-asset/offline")
+	}
+	if b.Doc == "" {
+		t.Fatal("ablate must point at its methodology doc (docs/benchmarks/ABLATE-RESULTS.md)")
+	}
+}
+
 func containsFlag(flags []string, want string) bool {
 	for _, flag := range flags {
 		if strings.Contains(flag, want) {
