@@ -150,27 +150,58 @@ def load_json(path: str, default):
         return default
 
 
-def rehome_transcript(src_cfg: str, dst_cfg: str, project: str, sid: str) -> bool:
+def rehome_transcript(src_cfg: str, dst_cfg: str, project: str, sid: str,
+                      dest_projects: list[str] | None = None) -> bool:
     """Copy a session's transcript (and its sidecar subagents/workflows dir) from
     the throttled owner's config dir into the healthy target account's config dir.
 
     `claude --resume <sid>` is CLAUDE_CONFIG_DIR + cwd scoped: it only finds the
     conversation under <config>/projects/<sanitized-cwd>/<sid>.jsonl. So to resume
     on a different account the transcript must physically live there first. Returns
-    False (caller skips the resume) when the source transcript is missing."""
+    False (caller skips the resume) when the source transcript is missing.
+
+    ``dest_projects`` lets the caller land the copy under ADDITIONAL project slugs
+    beyond the owner's original ``project``. This is the cross-directory resume fix:
+    a session created under ``C--work-fak`` is stored under that slug, but when an
+    operator runs ``c --resume <sid>`` from a DIFFERENT cwd (e.g. C:\\work\\slack-helpers,
+    slug ``C--work-slack-helpers``), ``claude --resume`` looks under the NEW cwd's slug
+    and 404s. The interactive resolver passes the launching cwd's slug here so the copy
+    also lands where claude will actually look. The headless watchdog passes nothing and
+    keeps the owner-slug-only behavior."""
     src = os.path.join(src_cfg, "projects", project, sid + ".jsonl")
     if not os.path.isfile(src):
         return False
-    dst_dir = os.path.join(dst_cfg, "projects", project)
-    os.makedirs(dst_dir, exist_ok=True)
-    shutil.copy2(src, os.path.join(dst_dir, sid + ".jsonl"))
     side = os.path.join(src_cfg, "projects", project, sid)
-    if os.path.isdir(side):
+    # The owner's original slug PLUS any caller-supplied destination slugs, de-duped.
+    slugs = [project]
+    for p in (dest_projects or []):
+        if p and p not in slugs:
+            slugs.append(p)
+    copied_any = False
+    for slug in slugs:
+        dst_dir = os.path.join(dst_cfg, "projects", slug)
+        dst = os.path.join(dst_dir, sid + ".jsonl")
+        # Skip the no-op self-copy: when mirroring WITHIN the owner account
+        # (src_cfg == dst_cfg) the owner's own slug resolves dst == src, and
+        # shutil.copy2 of an open file onto ITSELF raises WinError 32 on Windows.
+        if os.path.abspath(dst) == os.path.abspath(src):
+            copied_any = True
+            continue
+        os.makedirs(dst_dir, exist_ok=True)
         try:
-            shutil.copytree(side, os.path.join(dst_dir, sid), dirs_exist_ok=True)
-        except Exception:
-            pass
-    return True
+            shutil.copy2(src, dst)
+            copied_any = True
+        except OSError:
+            # A live process may hold the transcript (Windows mandatory locks). A
+            # failed copy must never crash the resolver -- it falls back to a plain
+            # pin, the launcher's fail-open contract. Other slugs may still succeed.
+            continue
+        if os.path.isdir(side):
+            try:
+                shutil.copytree(side, os.path.join(dst_dir, sid), dirs_exist_ok=True)
+            except Exception:
+                pass
+    return copied_any
 
 
 def _newest_transcript(sid: str) -> str | None:

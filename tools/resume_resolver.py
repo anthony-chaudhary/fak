@@ -51,8 +51,10 @@ from __future__ import annotations
 
 import argparse
 import glob
+import inspect
 import json
 import os
+import re
 import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -116,6 +118,35 @@ def _is_host(config_dir: str) -> bool:
     """True for the host ``~/.claude`` login -- the account ``c`` keeps OFF the
     rotation, so it is only ever chosen as an owner when it is the SOLE one."""
     return os.path.basename(config_dir.rstrip("\\/")) == ".claude"
+
+
+def project_slug(path: str) -> str:
+    """The on-disk session-store slug Claude derives from a working directory:
+    drive colon, path separators, and dots all become '-' (``C:\\work\\fak`` ->
+    ``C--work-fak``). Mirrors the PowerShell launcher's Get-ClaudeProjectSlug EXACTLY
+    so the resolver lands a re-home copy under the same slug ``claude --resume`` will
+    look under from the caller's cwd -- the cross-directory resume fix."""
+    return re.sub(r"[\\/:.]", "-", path)
+
+
+def _rehome(rehome_fn, src_cfg: str, dst_cfg: str, project: str, sid: str,
+            dest_projects: list[str] | None = None) -> bool:
+    """Call ``rehome_fn`` with ``dest_projects`` only when it accepts that parameter.
+
+    rehome_transcript gained ``dest_projects`` for the cross-dir fix, but this module
+    lives in a shared multi-session tree where a peer can transiently revert it to the
+    4-arg form -- and tests inject simpler stubs. Degrade gracefully: if the callable
+    can't take dest_projects, fall back to the owner-slug-only copy rather than raising."""
+    if dest_projects:
+        try:
+            params = inspect.signature(rehome_fn).parameters
+            takes = ("dest_projects" in params
+                     or any(p.kind == inspect.Parameter.VAR_KEYWORD for p in params.values()))
+        except (TypeError, ValueError):
+            takes = False
+        if takes:
+            return rehome_fn(src_cfg, dst_cfg, project, sid, dest_projects=dest_projects)
+    return rehome_fn(src_cfg, dst_cfg, project, sid)
 
 
 def locate_owner(sid: str, home: str) -> dict | None:
@@ -275,7 +306,8 @@ def resolve(sid: str, home: str | None = None, *,
             dry_run: bool = False,
             rehome_fn=None,
             probe_fn=None,
-            probe_owner: bool = True) -> dict:
+            probe_owner: bool = True,
+            cwd: str | None = None) -> dict:
     """Decide where ``claude --resume <sid>`` should run.
 
     ``availability`` / ``owner_status`` / ``rehome_fn`` / ``probe_fn`` are injectable
@@ -288,10 +320,17 @@ def resolve(sid: str, home: str | None = None, *,
     bare-time reset that reads as future for hours after the limit cleared -- without
     it the resolver re-homes off a healthy account onto an arbitrary target. Set
     False (or pass ``--no-probe``) to skip the probe and trust the carried status.
+
+    ``cwd`` (default: the process cwd) is the directory ``claude --resume`` will run
+    from. Its project slug is added to the re-home copy's destinations -- and, on the
+    pin path, mirrored WITHIN the owner account -- so the resume works from a DIRECTORY
+    DIFFERENT from where the session was created (the cross-directory fix: run
+    ``c --resume <sid>`` from slack-helpers for a session born under fak).
     """
     home = home or fleet_accounts.USER
     rehome_fn = rehome_fn or fleet_resume_watchdog.rehome_transcript
     probe_fn = probe_fn or _probe_owner_available
+    cwd_slug = project_slug(cwd or os.getcwd())
 
     owner = locate_owner(sid, home)
     if owner is None:
@@ -368,13 +407,25 @@ def resolve(sid: str, home: str | None = None, *,
             if owner_available:
                 rec["owner_block_reason"] = ""
 
-    # Owner reachable -> pin to it, no copy. This is the unchanged, safe default
-    # (and exactly what the PS finder already returns).
+    # Owner reachable -> pin to it, no cross-ACCOUNT copy. This is the unchanged, safe
+    # default (and exactly what the PS finder already returns) -- EXCEPT that the session
+    # may be stored under a DIFFERENT cwd-slug than the one claude --resume looks up from
+    # the caller's directory. The owner account is right but the transcript isn't under the
+    # resume cwd's slug -> a 404 from a different folder. So mirror it WITHIN the owner
+    # account into the cwd slug (same account, owner->owner). (cross-dir fix)
     if owner_available:
         pinned_reason = "owner account is available -- pin to it (no copy)"
         if rec.get("owner_probe", {}).get("available"):
             pinned_reason = ("owner's carried throttle was stale -- live probe OK, "
                              "pin to owner (no re-home)")
+        if cwd_slug and cwd_slug != owner["project"] and not dry_run:
+            mirrored = _rehome(rehome_fn, owner["config_dir"], owner["config_dir"],
+                               owner["project"], sid, dest_projects=[cwd_slug])
+            if mirrored:
+                rec["mirrored_to_cwd_slug"] = cwd_slug
+                pinned_reason += f" (mirrored into cwd slug {cwd_slug})"
+        elif cwd_slug and cwd_slug != owner["project"]:
+            rec["would_mirror_to_cwd_slug"] = cwd_slug
         rec.update({
             "action": "PIN", "rehomed": False,
             "pin_account": owner["account"], "pin_config_dir": owner["config_dir"],
@@ -455,8 +506,15 @@ def resolve(sid: str, home: str | None = None, *,
                 rec["target_probes"] = checked
 
     tgt_cfg = tgt.get("config_dir") or os.path.join(home, tgt["account"])
+    # Land the copy under the owner's original slug AND the launching cwd's slug, so
+    # `claude --resume` finds it whether the operator resumes from the session's birth
+    # directory or a different one (the cross-directory fix).
+    dest_slugs = [cwd_slug] if cwd_slug and cwd_slug != owner["project"] else []
+    if dest_slugs:
+        rec["dest_project_slugs"] = [owner["project"], *dest_slugs]
     if not dry_run:
-        copied = rehome_fn(owner["config_dir"], tgt_cfg, owner["project"], sid)
+        copied = _rehome(rehome_fn, owner["config_dir"], tgt_cfg, owner["project"], sid,
+                         dest_projects=dest_slugs)
         if not copied:
             rec.update({
                 "action": "PIN_BLOCKED", "rehomed": False,
@@ -467,14 +525,15 @@ def resolve(sid: str, home: str | None = None, *,
         # shutil.copy2 preserves the SOURCE mtime, so the re-homed copy would tie
         # the throttled original -- and the "host-last, newest-mtime" owner pick
         # (here AND the PowerShell fallback finder) could then re-select the walled
-        # account on the next launch. Stamp the re-homed copy as newest so the
-        # healthy target is the unambiguous owner from now on (it also stops a
-        # redundant re-copy each invocation until the live resume writes to it).
-        dst_jsonl = os.path.join(tgt_cfg, "projects", owner["project"], sid + ".jsonl")
-        try:
-            os.utime(dst_jsonl, None)
-        except OSError:
-            pass
+        # account on the next launch. Stamp every re-homed copy (owner slug + any cwd
+        # slug) as newest so the healthy target is the unambiguous owner from now on
+        # (it also stops a redundant re-copy each invocation until the live resume
+        # writes to it).
+        for slug in (owner["project"], *dest_slugs):
+            try:
+                os.utime(os.path.join(tgt_cfg, "projects", slug, sid + ".jsonl"), None)
+            except OSError:
+                pass
 
     tgt_tag = tgt.get("tag") or tgt["account"]
     target_confirmed = any(
@@ -508,13 +567,18 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--no-probe", action="store_true",
                     help="trust the carried throttle; do NOT live-probe the owner "
                          "before re-homing (faster, but can re-home off a stale block)")
+    ap.add_argument("--cwd", default=None,
+                    help="directory `claude --resume` will run from (default: the "
+                         "process cwd); its project slug is added to the re-home copy "
+                         "so a resume works from a different folder than the session's "
+                         "birth directory")
     ap.add_argument("--json", action="store_true",
                     help="emit the full decision record instead of the bare dir")
     args = ap.parse_args(argv)
 
     try:
         rec = resolve(args.session, args.home, dry_run=args.dry_run,
-                      probe_owner=not args.no_probe)
+                      probe_owner=not args.no_probe, cwd=args.cwd)
     except Exception as exc:  # never crash the launcher -- it falls back on rc!=0
         print(f"[resume-resolver] internal error: {exc}", file=sys.stderr)
         return 2

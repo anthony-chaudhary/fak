@@ -203,16 +203,19 @@ class ResolveTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as home:
             _write_session(home, ".claude-gem8-acct")
             calls: list = []
+            # cwd whose slug == the session's PROJECT slug, so the cross-dir mirror
+            # (which fires only when the resume cwd differs) does NOT trigger here.
             rec = resume_resolver.resolve(
                 SID, home,
                 owner_status={"available": True},
                 availability=[],
-                rehome_fn=lambda *a: calls.append(a) or True)
+                cwd=r"C:\work\fleet",
+                rehome_fn=lambda *a, **k: calls.append((a, k)) or True)
             self.assertEqual(rec["action"], "PIN")
             self.assertFalse(rec["rehomed"])
             self.assertEqual(rec["pin_config_dir"],
                              os.path.join(home, ".claude-gem8-acct"))
-            self.assertEqual(calls, [])  # no copy on the pin path
+            self.assertEqual(calls, [])  # no copy on the pin path (same-slug cwd)
 
     def test_rehome_when_owner_throttled(self) -> None:
         with tempfile.TemporaryDirectory() as home:
@@ -262,6 +265,45 @@ class ResolveTests(unittest.TestCase):
             self.assertTrue(os.path.isfile(os.path.join(dst, SID, "agent-x.jsonl")))
             # re-homed copy must out-rank the throttled original on mtime
             self.assertGreater(os.path.getmtime(dst_jsonl), os.path.getmtime(src))
+
+    def test_rehome_also_lands_under_cwd_slug(self) -> None:
+        # Cross-dir fix: resuming from a DIFFERENT folder than the session was born in,
+        # the re-home copy must ALSO land under the launching cwd's project slug -- else
+        # `claude --resume` (cwd-scoped) 404s. Here owner is throttled -> REHOME path.
+        with tempfile.TemporaryDirectory() as home:
+            _write_session(home, ".claude-gem8-acct", sidecar=True)
+            other_slug = resume_resolver.project_slug(r"C:\work\slack-helpers")
+            self.assertNotEqual(other_slug, PROJECT)
+            rec = resume_resolver.resolve(
+                SID, home,
+                owner_status={"available": False, "block_reason": "usage limit"},
+                availability=[_avail(".claude-gem5-acct", True, home=home)],
+                probe_fn=_probe_all_ok,
+                cwd=r"C:\work\slack-helpers")
+            self.assertEqual(rec["action"], "REHOME")
+            self.assertEqual(rec["dest_project_slugs"], [PROJECT, other_slug])
+            tgt = os.path.join(home, ".claude-gem5-acct", "projects")
+            # the transcript exists under BOTH the owner slug and the cwd slug
+            self.assertTrue(os.path.isfile(os.path.join(tgt, PROJECT, SID + ".jsonl")))
+            self.assertTrue(os.path.isfile(os.path.join(tgt, other_slug, SID + ".jsonl")))
+
+    def test_pin_mirrors_into_cwd_slug_within_owner(self) -> None:
+        # Cross-dir fix on the PIN path: owner is available (no re-home), but the
+        # transcript lives under the owner's birth slug; resuming from another folder
+        # would 404. The resolver mirrors it WITHIN the owner account into the cwd slug.
+        with tempfile.TemporaryDirectory() as home:
+            _write_session(home, ".claude-gem8-acct", sidecar=True)
+            other_slug = resume_resolver.project_slug(r"C:\work\slack-helpers")
+            rec = resume_resolver.resolve(
+                SID, home,
+                owner_status={"available": True},
+                availability=[],
+                cwd=r"C:\work\slack-helpers")
+            self.assertEqual(rec["action"], "PIN")
+            self.assertEqual(rec["mirrored_to_cwd_slug"], other_slug)
+            mirrored = os.path.join(home, ".claude-gem8-acct", "projects",
+                                    other_slug, SID + ".jsonl")
+            self.assertTrue(os.path.isfile(mirrored))
 
     def test_dry_run_does_not_copy(self) -> None:
         with tempfile.TemporaryDirectory() as home:
@@ -330,7 +372,8 @@ class CarriedThrottleProbeTests(unittest.TestCase):
                 availability=[_avail(".claude-gem5-acct", True, home=home)],
                 probe_fn=lambda owner: {"available": True, "block_reason": "",
                                         "status_source": "probe"},
-                rehome_fn=lambda *a: calls.append(a) or True)
+                cwd=r"C:\work\fleet",  # same slug as PROJECT -> no cross-dir mirror
+                rehome_fn=lambda *a, **k: calls.append((a, k)) or True)
             self.assertEqual(rec["action"], "PIN")
             self.assertFalse(rec["rehomed"])
             self.assertEqual(rec["pin_account"], ".claude-gem8-acct")
