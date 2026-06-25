@@ -20,6 +20,7 @@ import (
 	"strings"
 	"time"
 
+	acct "github.com/anthony-chaudhary/fak/internal/accounts"
 	"github.com/anthony-chaudhary/fak/internal/gardenbundle"
 	"github.com/anthony-chaudhary/fak/internal/gateway"
 	"github.com/anthony-chaudhary/fak/internal/loopmgr"
@@ -31,6 +32,7 @@ const (
 	tuiSessionsSchema = "fak.tui.sessions.v1"
 	tuiGardenSchema   = "fak.tui.garden.v1"
 	tuiGuardSchema    = "fak.tui.guard.v1"
+	tuiAgentSchema    = "fak.tui.agent.v1"
 	tuiOverviewSchema = "fak.tui.overview.v1"
 )
 
@@ -388,6 +390,54 @@ type tuiOverviewAction struct {
 	Reason  string `json:"reason"`
 }
 
+type tuiAgentReport struct {
+	Schema          string        `json:"schema"`
+	At              string        `json:"at"`
+	Backend         string        `json:"backend"`
+	Mode            string        `json:"mode"`
+	Provider        string        `json:"provider"`
+	Auth            string        `json:"auth"`
+	Account         string        `json:"account,omitempty"`
+	ResolvedAccount string        `json:"resolved_account,omitempty"`
+	AccountIdentity string        `json:"account_identity,omitempty"`
+	ClaudeConfigDir string        `json:"claude_config_dir,omitempty"`
+	ConfigSource    string        `json:"config_source,omitempty"`
+	SessionID       string        `json:"session_id,omitempty"`
+	Policy          string        `json:"policy,omitempty"`
+	Model           string        `json:"model,omitempty"`
+	ContextBudget   int           `json:"context_budget_tokens,omitempty"`
+	RestartOnBudget bool          `json:"restart_on_budget,omitempty"`
+	RestartLimit    int           `json:"restart_limit,omitempty"`
+	Command         []string      `json:"command"`
+	Launch          []string      `json:"launch"`
+	Env             []tuiAgentEnv `json:"env,omitempty"`
+	Notes           []string      `json:"notes,omitempty"`
+}
+
+type tuiAgentEnv struct {
+	Name   string `json:"name"`
+	Value  string `json:"value"`
+	Source string `json:"source"`
+}
+
+type tuiAgentOptions struct {
+	Backend             string
+	Command             string
+	CommandArgs         []string
+	Prompt              string
+	Account             string
+	ClaudeConfigDir     string
+	Registry            string
+	Home                string
+	Policy              string
+	Model               string
+	SessionID           string
+	ContextBudgetTokens int
+	RestartOnBudget     bool
+	RestartLimit        int
+	Passthrough         bool
+}
+
 func cmdTUI(argv []string) { os.Exit(runTUI(os.Stdout, os.Stderr, argv)) }
 
 func runTUI(stdout, stderr io.Writer, argv []string) int {
@@ -406,6 +456,8 @@ func runTUI(stdout, stderr io.Writer, argv []string) int {
 		return runTUIGarden(stdout, stderr, argv[1:])
 	case "guard":
 		return runTUIGuard(stdout, stderr, argv[1:])
+	case "agent":
+		return runTUIAgent(stdout, stderr, argv[1:])
 	case "overview":
 		return runTUIOverview(stdout, stderr, argv[1:])
 	case "-h", "--help", "help":
@@ -662,6 +714,92 @@ func runTUIGuard(stdout, stderr io.Writer, argv []string) int {
 	return 0
 }
 
+func runTUIAgent(stdout, stderr io.Writer, argv []string) int {
+	fs := flag.NewFlagSet("tui agent", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	defHome, _ := os.UserHomeDir()
+	regDefault := os.Getenv("FAK_ACCOUNTS_REGISTRY")
+	if regDefault == "" && defHome != "" {
+		regDefault = filepath.Join(defHome, ".claude-accounts", "registry.json")
+	}
+	backend := fs.String("backend", "claude", "backend agent to launch (currently: claude)")
+	command := fs.String("command", "claude", "Claude Code command or path to execute")
+	account := fs.String("account", "", "Claude config-home account name from `fak accounts`")
+	claudeConfigDir := fs.String("claude-config-dir", "", "explicit Claude config directory to pass as CLAUDE_CONFIG_DIR")
+	registry := fs.String("registry", regDefault, "path to the fak accounts registry.json")
+	home := fs.String("home", defHome, "home dir used when discovering Claude account homes")
+	prompt := fs.String("prompt", "", "append `claude -p PROMPT` for a non-interactive backend run")
+	policyPath := fs.String("policy", "", "capability-floor manifest for the guard child (default: built-in guard floor)")
+	model := fs.String("model", "", "upstream Claude model override for the guard child")
+	sessionID := fs.String("session-id", "tui-agent", "trace/session id for the guard session")
+	contextBudget := fs.Int("context-budget-tokens", 0, "seed a context-token budget in the guard session")
+	restartOnBudget := fs.Bool("restart-on-budget", false, "ask guard to relaunch Claude on context-budget exhaustion")
+	restartLimit := fs.Int("restart-limit", 0, "maximum guard relaunches for --restart-on-budget; 0 means unlimited")
+	passthrough := fs.Bool("passthrough", false, "do not force subscription OAuth; let Claude Code forward its own credential")
+	atText := fs.String("at", "", "snapshot time (RFC3339 or YYYY-MM-DD, default: now)")
+	width := fs.Int("width", 120, "target terminal width for dry-run human rendering")
+	dryRun := fs.Bool("dry-run", false, "render the launch plan without starting the backend agent")
+	asJSON := fs.Bool("json", false, "emit the launch model as JSON and do not start the backend agent")
+	if err := fs.Parse(argv); err != nil {
+		return 2
+	}
+	if *width < 72 {
+		*width = 72
+	}
+	if *contextBudget < 0 {
+		fmt.Fprintln(stderr, "fak tui agent: --context-budget-tokens must be non-negative")
+		return 2
+	}
+	if *restartLimit < 0 {
+		fmt.Fprintln(stderr, "fak tui agent: --restart-limit must be non-negative")
+		return 2
+	}
+	if *restartOnBudget && *contextBudget <= 0 {
+		fmt.Fprintln(stderr, "fak tui agent: --restart-on-budget requires --context-budget-tokens N")
+		return 2
+	}
+	at, err := parseTUITime(*atText)
+	if err != nil {
+		fmt.Fprintf(stderr, "fak tui agent: %v\n", err)
+		return 2
+	}
+	report, err := buildTUIAgentReport(tuiAgentOptions{
+		Backend:             *backend,
+		Command:             *command,
+		CommandArgs:         fs.Args(),
+		Prompt:              *prompt,
+		Account:             *account,
+		ClaudeConfigDir:     *claudeConfigDir,
+		Registry:            *registry,
+		Home:                *home,
+		Policy:              *policyPath,
+		Model:               *model,
+		SessionID:           *sessionID,
+		ContextBudgetTokens: *contextBudget,
+		RestartOnBudget:     *restartOnBudget,
+		RestartLimit:        *restartLimit,
+		Passthrough:         *passthrough,
+	}, at, tuiExecutable(), os.Getenv)
+	if err != nil {
+		fmt.Fprintf(stderr, "fak tui agent: %v\n", err)
+		return 2
+	}
+	if *asJSON {
+		enc := json.NewEncoder(stdout)
+		enc.SetIndent("", "  ")
+		if err := enc.Encode(report); err != nil {
+			fmt.Fprintf(stderr, "fak tui agent: encode json: %v\n", err)
+			return 1
+		}
+		return 0
+	}
+	if *dryRun {
+		fmt.Fprint(stdout, renderTUIAgent(report, *width))
+		return 0
+	}
+	return launchTUIAgent(stdout, stderr, report)
+}
+
 func runTUIOverview(stdout, stderr io.Writer, argv []string) int {
 	fs := flag.NewFlagSet("tui overview", flag.ContinueOnError)
 	fs.SetOutput(stderr)
@@ -761,6 +899,191 @@ func parseTUITime(s string) (time.Time, error) {
 		return t.UTC(), nil
 	}
 	return time.Time{}, fmt.Errorf("--at must be RFC3339 or YYYY-MM-DD")
+}
+
+func buildTUIAgentReport(opt tuiAgentOptions, at time.Time, fakPath string, getenv func(string) string) (tuiAgentReport, error) {
+	backend := strings.ToLower(strings.TrimSpace(opt.Backend))
+	if backend == "" {
+		backend = "claude"
+	}
+	if backend != "claude" {
+		return tuiAgentReport{}, fmt.Errorf("unknown --backend %q (want claude)", opt.Backend)
+	}
+	commandName := strings.TrimSpace(opt.Command)
+	if commandName == "" {
+		return tuiAgentReport{}, fmt.Errorf("--command must not be empty")
+	}
+	sessionID := strings.TrimSpace(opt.SessionID)
+	if sessionID == "" {
+		sessionID = "tui-agent"
+	}
+	if strings.TrimSpace(opt.Account) != "" && strings.TrimSpace(opt.ClaudeConfigDir) != "" {
+		return tuiAgentReport{}, fmt.Errorf("--account and --claude-config-dir are mutually exclusive")
+	}
+	if fakPath == "" {
+		fakPath = "fak"
+	}
+
+	command := append([]string{commandName}, opt.CommandArgs...)
+	if strings.TrimSpace(opt.Prompt) != "" {
+		command = append(command, "-p", opt.Prompt)
+	}
+
+	env, cfgDir, cfgSource, resolvedAccount, identity, notes, err := resolveTUIAgentClaudeConfig(opt, getenv)
+	if err != nil {
+		return tuiAgentReport{}, err
+	}
+	guardArgs := []string{"guard", "--provider", "anthropic", "--session-id", sessionID}
+	auth := "claude-subscription-oauth"
+	if opt.Passthrough {
+		auth = "passthrough"
+		notes = append(notes, "Claude Code forwards its own credential through the gateway")
+	} else {
+		guardArgs = append(guardArgs, "--anthropic-oauth")
+		notes = append(notes, "guard forces the Claude Pro/Max subscription OAuth path and fails loud if no token is available")
+	}
+	if strings.TrimSpace(opt.Policy) != "" {
+		guardArgs = append(guardArgs, "--policy", strings.TrimSpace(opt.Policy))
+	}
+	if strings.TrimSpace(opt.Model) != "" {
+		guardArgs = append(guardArgs, "--model", strings.TrimSpace(opt.Model))
+	}
+	if opt.ContextBudgetTokens > 0 {
+		guardArgs = append(guardArgs, "--context-budget-tokens", strconv.Itoa(opt.ContextBudgetTokens))
+	}
+	if opt.RestartOnBudget {
+		guardArgs = append(guardArgs, "--restart-on-budget")
+	}
+	if opt.RestartLimit > 0 {
+		guardArgs = append(guardArgs, "--restart-limit", strconv.Itoa(opt.RestartLimit))
+	}
+	guardArgs = append(guardArgs, "--")
+	launch := append([]string{fakPath}, guardArgs...)
+	launch = append(launch, command...)
+
+	return tuiAgentReport{
+		Schema:          tuiAgentSchema,
+		At:              at.UTC().Format(time.RFC3339),
+		Backend:         backend,
+		Mode:            "launch",
+		Provider:        "anthropic",
+		Auth:            auth,
+		Account:         strings.TrimSpace(opt.Account),
+		ResolvedAccount: resolvedAccount,
+		AccountIdentity: identity,
+		ClaudeConfigDir: cfgDir,
+		ConfigSource:    cfgSource,
+		SessionID:       sessionID,
+		Policy:          strings.TrimSpace(opt.Policy),
+		Model:           strings.TrimSpace(opt.Model),
+		ContextBudget:   opt.ContextBudgetTokens,
+		RestartOnBudget: opt.RestartOnBudget,
+		RestartLimit:    opt.RestartLimit,
+		Command:         command,
+		Launch:          launch,
+		Env:             env,
+		Notes:           notes,
+	}, nil
+}
+
+func resolveTUIAgentClaudeConfig(opt tuiAgentOptions, getenv func(string) string) ([]tuiAgentEnv, string, string, string, string, []string, error) {
+	if getenv == nil {
+		getenv = os.Getenv
+	}
+	var env []tuiAgentEnv
+	var notes []string
+	account := strings.TrimSpace(opt.Account)
+	if account != "" {
+		reg, err := loadOrDiscover(opt.Registry, opt.Home)
+		if err != nil {
+			return nil, "", "", "", "", nil, err
+		}
+		reg = reg.Refresh()
+		home, chain, err := reg.Serve(account)
+		if err != nil {
+			return nil, "", "", "", "", nil, err
+		}
+		for i, hop := range chain {
+			to := home.Name
+			if i+1 < len(chain) {
+				to = chain[i+1]
+			}
+			notes = append(notes, fmt.Sprintf("%q can't serve; rehomed to %q", hop, to))
+		}
+		id := acct.DeriveIdentity(home.Dir)
+		if !id.HasCreds {
+			notes = append(notes, fmt.Sprintf("%q (%s) has no live credentials; Claude may prompt for login", home.Name, home.Dir))
+		}
+		env = append(env, tuiAgentEnv{Name: "CLAUDE_CONFIG_DIR", Value: home.Dir, Source: "account:" + home.Name})
+		return env, home.Dir, "account:" + home.Name, home.Name, id.Email, notes, nil
+	}
+	if dir := strings.TrimSpace(opt.ClaudeConfigDir); dir != "" {
+		id := acct.DeriveIdentity(dir)
+		if !id.HasCreds {
+			notes = append(notes, fmt.Sprintf("%s has no live credentials; Claude may prompt for login", dir))
+		}
+		env = append(env, tuiAgentEnv{Name: "CLAUDE_CONFIG_DIR", Value: dir, Source: "flag"})
+		return env, dir, "flag", "", id.Email, notes, nil
+	}
+	if dir := strings.TrimSpace(getenv("CLAUDE_CONFIG_DIR")); dir != "" {
+		id := acct.DeriveIdentity(dir)
+		return nil, dir, "inherited-env", "", id.Email, notes, nil
+	}
+	return nil, guardClaudeConfigDir(), "default", "", "", notes, nil
+}
+
+func tuiExecutable() string {
+	if exe, err := os.Executable(); err == nil && strings.TrimSpace(exe) != "" {
+		return exe
+	}
+	if len(os.Args) > 0 && strings.TrimSpace(os.Args[0]) != "" {
+		return os.Args[0]
+	}
+	return "fak"
+}
+
+func launchTUIAgent(stdout, stderr io.Writer, report tuiAgentReport) int {
+	if len(report.Launch) == 0 {
+		fmt.Fprintln(stderr, "fak tui agent: empty launch command")
+		return 1
+	}
+	child := exec.Command(report.Launch[0], report.Launch[1:]...)
+	child.Stdin = os.Stdin
+	child.Stdout = stdout
+	child.Stderr = stderr
+	child.Env = mergeTUIAgentEnv(os.Environ(), report.Env)
+	if err := child.Run(); err != nil {
+		if ee, ok := err.(*exec.ExitError); ok {
+			return ee.ExitCode()
+		}
+		fmt.Fprintf(stderr, "fak tui agent: launch %q: %v\n", report.Launch[0], err)
+		return 1
+	}
+	return 0
+}
+
+func mergeTUIAgentEnv(base []string, pairs []tuiAgentEnv) []string {
+	out := append([]string{}, base...)
+	for _, pair := range pairs {
+		name := strings.TrimSpace(pair.Name)
+		if name == "" {
+			continue
+		}
+		line := name + "=" + pair.Value
+		replaced := false
+		for i, cur := range out {
+			k, _, ok := strings.Cut(cur, "=")
+			if ok && strings.EqualFold(k, name) {
+				out[i] = line
+				replaced = true
+				break
+			}
+		}
+		if !replaced {
+			out = append(out, line)
+		}
+	}
+	return out
 }
 
 func loadTUISessions(path, addr, key string) (gateway.SessionListResponse, string, error) {
@@ -2312,6 +2635,46 @@ func overviewActions(cards []tuiOverviewCard) []tuiOverviewAction {
 	return actions
 }
 
+func renderTUIAgent(report tuiAgentReport, width int) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "fak tui agent  at=%s  backend=%s  provider=%s  mode=dry-run\n", report.At, report.Backend, report.Provider)
+	fmt.Fprintf(&b, "auth=%s  session=%s", report.Auth, report.SessionID)
+	if report.Account != "" {
+		fmt.Fprintf(&b, "  account=%s", report.Account)
+	}
+	if report.ResolvedAccount != "" && report.ResolvedAccount != report.Account {
+		fmt.Fprintf(&b, "->%s", report.ResolvedAccount)
+	}
+	fmt.Fprintln(&b)
+	if report.ClaudeConfigDir != "" {
+		fmt.Fprintf(&b, "claude_config=%s  source=%s\n", trimTUI(report.ClaudeConfigDir, maxTUI(20, width-31)), report.ConfigSource)
+	}
+	if report.AccountIdentity != "" {
+		fmt.Fprintf(&b, "identity=%s\n", report.AccountIdentity)
+	}
+	if report.Policy != "" || report.Model != "" || report.ContextBudget > 0 || report.RestartOnBudget {
+		fmt.Fprintf(&b, "guard_options policy=%s model=%s context=%d restart=%v limit=%d\n",
+			blankTUI(report.Policy), blankTUI(report.Model), report.ContextBudget, report.RestartOnBudget, report.RestartLimit)
+	}
+	if len(report.Env) > 0 {
+		fmt.Fprintln(&b, "\nEnv")
+		for _, kv := range report.Env {
+			fmt.Fprintf(&b, "%-18s %-12s %s\n", kv.Name, kv.Source, trimTUI(kv.Value, maxTUI(20, width-33)))
+		}
+	}
+	fmt.Fprintln(&b, "\nBackend Command")
+	fmt.Fprintf(&b, "  %s\n", trimTUI(shellLineTUI(report.Command), maxTUI(20, width-2)))
+	fmt.Fprintln(&b, "\nLaunch")
+	fmt.Fprintf(&b, "  %s\n", trimTUI(shellLineTUI(report.Launch), maxTUI(20, width-2)))
+	if len(report.Notes) > 0 {
+		fmt.Fprintln(&b, "\nNotes")
+		for _, note := range report.Notes {
+			fmt.Fprintf(&b, "- %s\n", trimTUI(note, maxTUI(20, width-2)))
+		}
+	}
+	return b.String()
+}
+
 func renderTUIOverview(report tuiOverviewReport, width int) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "fak tui overview  at=%s  source=%s\n", report.At, report.Source)
@@ -2947,6 +3310,33 @@ func hasStringTUI(values []string, want string) bool {
 	return false
 }
 
+func blankTUI(s string) string {
+	if strings.TrimSpace(s) == "" {
+		return "-"
+	}
+	return strings.TrimSpace(s)
+}
+
+func shellLineTUI(args []string) string {
+	parts := make([]string, 0, len(args))
+	for _, arg := range args {
+		parts = append(parts, shellArgTUI(arg))
+	}
+	return strings.Join(parts, " ")
+}
+
+func shellArgTUI(arg string) string {
+	if arg == "" {
+		return `""`
+	}
+	if strings.IndexFunc(arg, func(r rune) bool {
+		return r == '"' || r == '\'' || r == '\\' || r == '$' || r == '`' || r <= ' '
+	}) >= 0 {
+		return strconv.Quote(arg)
+	}
+	return arg
+}
+
 func tuiUsage(w io.Writer) {
 	fmt.Fprint(w, `fak tui - native terminal control panes
 
@@ -2961,6 +3351,9 @@ func tuiUsage(w io.Writer) {
                  [--workspace DIR] [--deep] [--timeout N] [--width N]
   fak tui guard  --guard-json FILE [--guard-json FILE ...] [--json]
                  [--width N] [--at RFC3339|YYYY-MM-DD]
+  fak tui agent [--account NAME | --claude-config-dir DIR] [--dry-run]
+                [--prompt STR] [--session-id ID] [--passthrough] [--json]
+                [--] [claude args...]
   fak tui overview [--issues-json FILE] [--ledger FILE] [--sessions-json FILE]
                    [--garden-json FILE] [--guard-json FILE ...] [--json]
 
@@ -2979,6 +3372,10 @@ bundle and renders member health, gating regressions, and advisory actions.
 
 The guard pane reads existing guard/adjudication JSON artifacts and renders
 denials, reasons, audit status, and proof-packet gaps without replaying calls.
+
+The agent pane launches a real Claude Code backend through `+"`fak guard`"+`. It can pin
+CLAUDE_CONFIG_DIR from `+"`fak accounts`"+` and defaults to the Claude subscription OAuth
+path, so the native TUI can start an actual account-backed agent without an API key.
 
 The overview pane composes selected pane models into one ranked spine so
 operators can see issue, loop, session, garden, and guard pressure together.

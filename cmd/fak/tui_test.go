@@ -369,6 +369,79 @@ func TestTUIGuardJSONOutputFromFixtures(t *testing.T) {
 	}
 }
 
+func TestTUIAgentDryRunDefaultsToClaudeGuardOAuth(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	code := runTUI(&stdout, &stderr, []string{
+		"agent",
+		"--dry-run",
+		"--at", "2026-06-25T12:00:00Z",
+		"--prompt", "summarize the queue",
+		"--width", "1000",
+	})
+	if code != 0 {
+		t.Fatalf("runTUI agent dry-run code=%d stderr=%s", code, stderr.String())
+	}
+	out := stdout.String()
+	for _, want := range []string{"fak tui agent", "backend=claude", "auth=claude-subscription-oauth", "fak", "guard", "--provider anthropic", "--anthropic-oauth", "claude -p"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("agent dry-run output missing %q:\n%s", want, out)
+		}
+	}
+}
+
+func TestTUIAgentJSONResolvesClaudeAccount(t *testing.T) {
+	home := t.TempDir()
+	gem8 := mkHome(t, home, ".claude-gem8-seat", "gem8@example.test", true)
+	reg := `{"version":"fak-config-homes/v1","homes":[` +
+		`{"name":"gem8-seat","dir":"` + jsonPath(gem8) + `","default":true},` +
+		`{"name":"q","status":"tombstoned","rehome_to":"gem8-seat"}` +
+		`]}`
+	regPath := filepath.Join(home, "registry.json")
+	if err := os.WriteFile(regPath, []byte(reg), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	var stdout, stderr bytes.Buffer
+	code := runTUI(&stdout, &stderr, []string{
+		"agent",
+		"--json",
+		"--account", "q",
+		"--registry", regPath,
+		"--home", home,
+		"--at", "2026-06-25T12:00:00Z",
+		"--",
+		"--permission-mode", "bypassPermissions",
+	})
+	if code != 0 {
+		t.Fatalf("runTUI agent json code=%d stderr=%s", code, stderr.String())
+	}
+	var report tuiAgentReport
+	if err := json.Unmarshal(stdout.Bytes(), &report); err != nil {
+		t.Fatalf("unmarshal agent report: %v\n%s", err, stdout.String())
+	}
+	if report.Schema != tuiAgentSchema {
+		t.Fatalf("schema = %q, want %q", report.Schema, tuiAgentSchema)
+	}
+	if report.Auth != "claude-subscription-oauth" || !hasTUIString(report.Launch, "--anthropic-oauth") {
+		t.Fatalf("launch did not force Claude subscription OAuth: auth=%s launch=%v", report.Auth, report.Launch)
+	}
+	if report.Account != "q" || report.ResolvedAccount != "gem8-seat" || report.ClaudeConfigDir != gem8 {
+		t.Fatalf("account resolution = account %q resolved %q dir %q, want q -> gem8-seat %q", report.Account, report.ResolvedAccount, report.ClaudeConfigDir, gem8)
+	}
+	if report.AccountIdentity != "gem8@example.test" {
+		t.Fatalf("identity = %q, want gem8@example.test", report.AccountIdentity)
+	}
+	if !hasTUIAgentEnv(report.Env, "CLAUDE_CONFIG_DIR", gem8) {
+		t.Fatalf("env = %+v, want CLAUDE_CONFIG_DIR=%s", report.Env, gem8)
+	}
+	if got := strings.Join(report.Command, " "); got != "claude --permission-mode bypassPermissions" {
+		t.Fatalf("backend command = %q", got)
+	}
+	if !hasTUIString(report.Launch, "guard") || !hasTUIString(report.Launch, "--provider") || !hasTUIString(report.Launch, "anthropic") {
+		t.Fatalf("launch does not route through fak guard anthropic: %v", report.Launch)
+	}
+}
+
 func TestTUIOverviewHumanOutputFromFixtures(t *testing.T) {
 	guardPaths := writeTUIGuardFixtures(t)
 	var stdout, stderr bytes.Buffer
@@ -449,6 +522,24 @@ func TestTUIRejectsUnknownSubcommand(t *testing.T) {
 func hasTUITag(tags []string, want string) bool {
 	for _, tag := range tags {
 		if tag == want {
+			return true
+		}
+	}
+	return false
+}
+
+func hasTUIString(values []string, want string) bool {
+	for _, value := range values {
+		if value == want {
+			return true
+		}
+	}
+	return false
+}
+
+func hasTUIAgentEnv(env []tuiAgentEnv, name, value string) bool {
+	for _, kv := range env {
+		if kv.Name == name && kv.Value == value {
 			return true
 		}
 	}
