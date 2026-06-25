@@ -211,7 +211,7 @@ the body.
 
 ## 7. Status — what shipped, what is the next track
 
-**Shipped (the spine).** `internal/session` exists: the `State` / `RunState` machine, the
+**Shipped (the spine + the wire).** `internal/session` exists: the `State` / `RunState` machine, the
 bounded-LRU `Table` (the `ifc.Ledger` twin), `Decide` (the per-turn gate), `Snapshot` (the
 scheduler's read), and the live control verbs (`Transition` / `SetBudget` / `SetPace` /
 `SetPriority` / `CompareAndSet`), each bumping a monotonic `Rev`. It is wired into the agent
@@ -221,13 +221,26 @@ the session's live drive state and ends the arm cleanly — recording the closed
 pace cap lowered into the planner through `agent.WithMaxTokens`. No option wired ⇒ the loop is
 byte-for-byte the historical fixed-`maxTurns` path. Tested race-clean; gofmt + vet green.
 
+The drive state is now a value **over the wire**, not just in-process (#620): the gateway
+exposes the mechanical mirror of the `/v1/fak/trace` routes the design called for —
+`GET /v1/fak/session/{id}` observes one session's drive, `POST /v1/fak/session/{id}/{verb}`
+applies a control verb (`run`/`budget`/`pace`/`priority`), with `if_rev` for optimistic
+concurrency. `Config`-injected `SessionObserveFunc` / `SessionControlFunc` keep the gateway
+session-internals-blind exactly as `TraceObserveFunc` / `TraceResetFunc` keep it IFC-blind; a
+nil injection ⇒ 404 (never a silent clean reading). `cmd/fak` owns one process-local
+`session.Table` and threads the observe/control closures into both `serve` and `guard`. So an
+operator can now dial a live session down mid-flight — drop its budget, lower its priority,
+pause or stop it — and read the result back, without a restart or a re-derivation. Routes and
+host wiring tested; the serve-*loop* still reads `Decide` only on the harness arm (next fence).
+
 **The honest fences (the next track — the follow-on epic).**
 
-- **The gateway `/v1/fak/session` routes are not built yet.** The design (§3) is a mechanical
-  mirror of the `/v1/fak/trace` routes (a `Config`-injected observe + control func, a
-  `SessionState` DTO, the exact-path-plus-subtree mux pairing), blocked only by tree contention
-  (`gateway.go` was mid-edit by a peer when the spine landed), not by any design gap. With no
-  routes, the table is in-process only — readable/writable by Go callers, not yet over the wire.
+- **The gateway `/v1/fak/session` routes ship the operator surface, not the serve-loop
+  consumption.** The routes and the host CLI wiring are built and tested (#620); what is NOT
+  wired is the gateway's *served* turn reading `Decide` — the control verbs take effect on the
+  `agent.RunArm` harness loop (which shares the table), but the served `req.Raw` passthrough
+  turn does not yet gate on it. So an operator's `POST …/run` `pause` records the state and
+  reads back; taking it on the next *served* boundary is the next track below.
 - **The loop wired is the A/B harness loop, not the flagship serve path.** `agent.RunArm` is the
   benchmark harness; the served gateway turn is the `req.Raw` passthrough the ctxplan seam is
   also still gated behind (`#555`). The guard lands on the harness loop first (testable

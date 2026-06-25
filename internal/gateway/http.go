@@ -46,6 +46,15 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/v1/fak/policy/reload", s.handleFakPolicyReload)
 	mux.HandleFunc("/v1/fak/trace/reset", s.handleFakTraceReset)
 	mux.HandleFunc("/v1/fak/trace/", s.handleFakTraceObserve)
+	// /v1/fak/session/ is the DRIVE-state control surface: GET /v1/fak/session/{id}
+	// observes one session's run-state/budget/priority/pace; POST
+	// /v1/fak/session/{id}/{verb} applies a control verb (run|budget|pace|priority).
+	// One subtree handler dispatches on method + the trailing path segments.
+	mux.HandleFunc("/v1/fak/session/", s.handleFakSession)
+	// /v1/fak/sessions (no trailing slash) is the MULTI-session read: a snapshot of
+	// every live session's drive state. Registered distinctly from the singular
+	// /v1/fak/session/ subtree, so a single-id request never lands here.
+	mux.HandleFunc("/v1/fak/sessions", s.handleFakSessions)
 	mux.HandleFunc("/v1/models", s.handleModels)
 	mux.HandleFunc("/mcp", s.handleMCPHTTP)
 	mux.HandleFunc("/healthz", s.handleHealth)
@@ -812,6 +821,73 @@ func (s *Server) handleFakTraceObserve(w http.ResponseWriter, r *http.Request) {
 	}
 	level, dangerous := s.observeTrace(r.Context(), traceID)
 	writeJSON(w, http.StatusOK, TraceObserveResponse{TraceID: traceID, Taint: level, Dangerous: dangerous})
+}
+
+// handleFakSession is the session DRIVE-state control surface, the read-write
+// generalization of /v1/fak/trace (which carries exactly one bit — taint). It is
+// mounted on the /v1/fak/session/ subtree; the remainder is "{trace_id}" for an
+// observe (GET) or "{trace_id}/{verb}" for a control verb (POST). The observe and
+// control implementations are injected by cmd/fak so this package stays
+// session-internals-blind, mirroring resetTrace/observeTrace. A nil injection ⇒
+// 404 (never a silent clean reading) — the same fail-closed posture as the trace
+// routes with no ledger.
+func (s *Server) handleFakSession(w http.ResponseWriter, r *http.Request) {
+	rest := strings.TrimPrefix(r.URL.Path, "/v1/fak/session/")
+	rest = strings.TrimSuffix(rest, "/")
+	parts := strings.Split(rest, "/")
+	if len(parts) == 0 || strings.TrimSpace(parts[0]) == "" {
+		writeErr(w, http.StatusBadRequest, "trace_id is required")
+		return
+	}
+	traceID := strings.TrimSpace(parts[0])
+	verb := ""
+	if len(parts) >= 2 {
+		verb = strings.TrimSpace(parts[1])
+	}
+
+	switch r.Method {
+	case http.MethodGet:
+		// GET observes one session. A verb on the path is not the observe shape.
+		if verb != "" {
+			writeErr(w, http.StatusMethodNotAllowed, "use GET /v1/fak/session/{trace_id}")
+			return
+		}
+		if s.observeSession == nil {
+			writeErr(w, http.StatusNotFound, "session observe is not configured")
+			return
+		}
+		writeJSON(w, http.StatusOK, s.observeSession(r.Context(), traceID))
+	case http.MethodPost:
+		// POST applies a control verb. The verb is required from the path.
+		if verb == "" {
+			writeErr(w, http.StatusBadRequest, "control verb is required: POST /v1/fak/session/{trace_id}/{run|budget|pace|priority}")
+			return
+		}
+		if s.controlSession == nil {
+			writeErr(w, http.StatusNotFound, "session control is not configured")
+			return
+		}
+		var req SessionControlRequest
+		if err := decodeJSON(w, r, &req); err != nil {
+			writeErr(w, http.StatusBadRequest, "malformed request body: "+err.Error())
+			return
+		}
+		st, ok, err := s.controlSession(r.Context(), traceID, verb, req)
+		if err != nil {
+			writeErr(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		if !ok {
+			// Terminal session, or an if_rev CAS guard lost the race: the client
+			// re-reads and retries. Not a malformed request.
+			writeErr(w, http.StatusConflict, "session control refused (terminal or stale rev)")
+			return
+		}
+		s.logf("gateway: session %s %s -> rev %d (%s)", traceID, verb, st.Rev, st.Run)
+		writeJSON(w, http.StatusOK, st)
+	default:
+		writeErr(w, http.StatusMethodNotAllowed, "use GET or POST")
+	}
 }
 
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {

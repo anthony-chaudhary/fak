@@ -177,6 +177,8 @@ func cmdServe(argv []string) {
 		ReloadPolicy:                policyReloader(*policyPath),
 		ResetTrace:                  resetTrace,
 		ObserveTrace:                observeTrace,
+		ObserveSession:              observeSession,
+		ControlSession:              controlSession,
 		StartTime:                   t0,
 		StartupPhases:               startupPhases,
 		CtxViewBudget:               *ctxViewBudget,

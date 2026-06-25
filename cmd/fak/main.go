@@ -36,6 +36,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/kernel"
 	"github.com/anthony-chaudhary/fak/internal/metrics"
 	"github.com/anthony-chaudhary/fak/internal/policy"
+	"github.com/anthony-chaudhary/fak/internal/session"
 	"github.com/anthony-chaudhary/fak/internal/tokenizer"
 	"github.com/anthony-chaudhary/fak/internal/toollint"
 	"github.com/anthony-chaudhary/fak/internal/turnbench"
@@ -65,6 +66,8 @@ func main() {
 		cmdAgent(os.Args[2:])
 	case "recall":
 		cmdRecall(os.Args[2:])
+	case "session":
+		cmdSession(os.Args[2:])
 	case "dream":
 		cmdDream(os.Args[2:])
 	case "memory":
@@ -99,6 +102,8 @@ func main() {
 		cmdModel(os.Args[2:])
 	case "route":
 		cmdRoute(os.Args[2:])
+	case "session":
+		cmdSession(os.Args[2:])
 	case "routebench":
 		cmdRoutebench(os.Args[2:])
 	case "version", "-v", "--version":
@@ -199,6 +204,18 @@ func usage() {
   fak recall    [--dir DIR] [--out recall-report.json] [--query STR]
                 (persist a finished session as a core dump, reload it in a FRESH
                  store, and demonstrate the quarantine surviving the boundary)
+  fak session   demo | dump | info | restore | ls
+                (the PORTABLE SESSION IMAGE: make a session a first-class value you
+                 dump, archive to one .faksession file, offload, and RESUME on another
+                 host — under another model. Composes the drive state (run/budget/
+                 priority/pace), the recall core image (page table + swap device +
+                 index), and the trajectory into one versioned, sha256-integrity bundle.
+                 Model-agnostic by design: it carries logical content, never a KV cache
+                 or token ids, so a resume re-prefills on any model and the change is
+                 logged as a migration. 'demo' is the offline witness — dump on
+                 laptop/model-A -> pack -> resume on server-vm/model-B: the drive
+                 re-attaches, the quarantine survives the boundary, integrity is
+                 fail-closed. 'dump'/'info'/'restore'/'ls' operate on real images)
   fak dream     [--dir DIR] [--out-dir DIR] [--out dream-report.json]
                 (offline "sleep" pass over a core image: re-screen, pre-seal
                  refuted witnesses, repair descriptors, surface duplicate aliases,
@@ -584,6 +601,146 @@ func resetTrace(_ context.Context, traceID string) error {
 func observeTrace(_ context.Context, traceID string) (string, bool) {
 	lvl := ifc.Default.Level(strings.TrimSpace(traceID))
 	return taintLevelName(lvl), ifc.Dangerous(lvl)
+}
+
+// serveSessions is the process-local per-session DRIVE-state table shared by the
+// gateway session routes (observe/control) and any in-process agent loop. It is the
+// structural twin of ifc.Default: TraceID-keyed, bounded-LRU, live-mutable — widened
+// from the single taint bit to a small drive struct (run-state/budget/priority/pace).
+// Constructed once at process start; the gateway holds it by injected closure, never
+// by import, so the gateway stays session-internals-blind the way it stays
+// IFC-internals-blind for the trace routes.
+var serveSessions = session.NewTable()
+
+// observeSession is the read side of the /v1/fak/session control surface (#620): it
+// returns one served session's current DRIVE state so an operator can read how hard
+// a live session is running without reconstructing it from git + a process scan. An
+// unseen trace reads its default — Running, unbounded budget — the table's own safe
+// default, never a phantom Stopped.
+func observeSession(_ context.Context, traceID string) gateway.SessionState {
+	return toGatewaySessionState(serveSessions.Get(strings.TrimSpace(traceID)))
+}
+
+// listSessions is the multi-session read side of the /v1/fak/session control surface:
+// it projects the WHOLE live drive table (Snapshot order — by priority, lower yields
+// first) into the gateway wire DTO so an operator can see what every session is doing
+// right now in one read, instead of reconstructing liveness from git + a process scan
+// (docs/dispatch-loop.md). Snapshot already returns a fresh, sorted copy.
+func listSessions(_ context.Context) []gateway.SessionState {
+	snap := serveSessions.Snapshot()
+	out := make([]gateway.SessionState, 0, len(snap))
+	for _, s := range snap {
+		out = append(out, toGatewaySessionState(s))
+	}
+	return out
+}
+
+// controlSession is the write side of /v1/fak/session (#620): it applies one control
+// verb (run|budget|pace|priority) to a live session's DRIVE state. The (ok=false,
+// err=nil) return is a terminal/CAS refusal (the route maps it to 409); a non-nil
+// err is a malformed verb/body (the route maps it to 400). if_rev, when non-zero,
+// is an optimistic-concurrency guard: the write is taken only if the session's
+// current Rev matches (read-then-CompareAndSet; a lost race returns ok=false).
+func controlSession(_ context.Context, traceID, verb string, req gateway.SessionControlRequest) (gateway.SessionState, bool, error) {
+	traceID = strings.TrimSpace(traceID)
+	st, ok, err := applySessionControl(serveSessions, traceID, verb, req)
+	if err != nil {
+		return gateway.SessionState{}, false, err
+	}
+	return toGatewaySessionState(st), ok, nil
+}
+
+// applySessionControl routes one control verb to the matching Table write. It is the
+// single place that knows the verb set, so the verb vocabulary lives with the table
+// owner (cmd/fak), not the gateway. CAS (if_rev>0) reads the current record, mutates
+// the one field, and CompareAndSets; a concurrent write between read and CAS loses
+// the race and returns ok=false for the client to retry.
+func applySessionControl(tbl *session.Table, traceID, verb string, req gateway.SessionControlRequest) (session.State, bool, error) {
+	switch verb {
+	case "run":
+		run, ok := session.ParseRunState(req.Run)
+		if !ok {
+			return session.State{}, false, fmt.Errorf("unknown run-state %q (want running|throttled|paused|draining|stopped)", req.Run)
+		}
+		if req.IfRev > 0 {
+			return casApply(tbl, traceID, req.IfRev, func(s *session.State) {
+				s.Run = run
+				s.Reason = transitionReason(run, req.Reason)
+			})
+		}
+		st, ok := tbl.Transition(traceID, run, req.Reason)
+		return st, ok, nil
+	case "budget":
+		if req.Budget == nil {
+			return session.State{}, false, errors.New("budget is required")
+		}
+		b := session.Budget{TurnsLeft: req.Budget.TurnsLeft, TokensLeft: req.Budget.TokensLeft}
+		if req.IfRev > 0 {
+			return casApply(tbl, traceID, req.IfRev, func(s *session.State) { s.Budget = b })
+		}
+		st, ok := tbl.SetBudget(traceID, b)
+		return st, ok, nil
+	case "pace":
+		if req.Pace == nil {
+			return session.State{}, false, errors.New("pace is required")
+		}
+		p := session.Pace{MaxTokensPerTurn: req.Pace.MaxTokensPerTurn, MinTurnGapMs: req.Pace.MinTurnGapMs}
+		if req.IfRev > 0 {
+			return casApply(tbl, traceID, req.IfRev, func(s *session.State) { s.Pace = p })
+		}
+		st, ok := tbl.SetPace(traceID, p)
+		return st, ok, nil
+	case "priority":
+		if req.Priority == nil {
+			return session.State{}, false, errors.New("priority is required")
+		}
+		pri := *req.Priority
+		if req.IfRev > 0 {
+			return casApply(tbl, traceID, req.IfRev, func(s *session.State) { s.Priority = pri })
+		}
+		st, ok := tbl.SetPriority(traceID, pri)
+		return st, ok, nil
+	}
+	return session.State{}, false, fmt.Errorf("unknown verb %q (want run|budget|pace|priority)", verb)
+}
+
+// casApply reads the current drive record, mutates it in place, and CompareAndSets
+// it against expectRev. It is the optimistic-concurrency form of every verb. A lost
+// race (the table moved between read and CAS) returns ok=false; the caller maps that
+// to 409 and the client re-reads and retries.
+func casApply(tbl *session.Table, traceID string, expectRev uint64, apply func(*session.State)) (session.State, bool, error) {
+	cur := tbl.Get(traceID)
+	apply(&cur)
+	st, ok := tbl.CompareAndSet(traceID, expectRev, cur)
+	return st, ok, nil
+}
+
+// transitionReason mirrors Table.Transition's reason bookkeeping so a CAS run-state
+// change records/clears the reason token identically to the direct path: Throttled
+// and Stopped carry the reason, Running clears it.
+func transitionReason(to session.RunState, reason string) string {
+	switch to {
+	case session.Throttled, session.Stopped:
+		return reason
+	case session.Running:
+		return ""
+	}
+	return ""
+}
+
+// toGatewaySessionState projects internal/session.State into the gateway's
+// session-internals-blind wire DTO. Run becomes its lowercase token; everything
+// else is a 1:1 field copy.
+func toGatewaySessionState(s session.State) gateway.SessionState {
+	return gateway.SessionState{
+		TraceID:  s.TraceID,
+		Run:      s.Run.String(),
+		Budget:   gateway.SessionBudget{TurnsLeft: s.Budget.TurnsLeft, TokensLeft: s.Budget.TokensLeft},
+		Priority: s.Priority,
+		Pace:     gateway.SessionPace{MaxTokensPerTurn: s.Pace.MaxTokensPerTurn, MinTurnGapMs: s.Pace.MinTurnGapMs},
+		Reason:   s.Reason,
+		Rev:      s.Rev,
+	}
 }
 
 // taintLevelName renders an abi.TaintLabel as its stable wire name. It mirrors

@@ -186,6 +186,8 @@ func cmdGuard(argv []string) {
 		ReloadPolicy:          policyReloader(*policyPath),
 		ResetTrace:            resetTrace,
 		ObserveTrace:          observeTrace,
+		ObserveSession:        observeSession,
+		ControlSession:        controlSession,
 		StartTime:             t0,
 		// Default OFF (clean terminal); --log routes the full structured stream to a file
 		// or stderr. /metrics + /debug/vars + the audit journal carry the record regardless.

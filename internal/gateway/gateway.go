@@ -131,6 +131,20 @@ type Config struct {
 	// read-only complement of ResetTrace). Nil disables the GET /v1/fak/trace/{id}
 	// observe route.
 	ObserveTrace TraceObserveFunc
+	// ObserveSession reports one served session's current DRIVE state (run-state,
+	// budget, priority, pace) — the read side of the session-control surface. Nil
+	// disables the GET /v1/fak/session/{id} route. Injected by cmd/fak so this
+	// package stays session-internals-blind, mirroring ObserveTrace.
+	ObserveSession SessionObserveFunc
+	// ControlSession applies one control verb (run/budget/pace/priority) to a served
+	// session's DRIVE state — the write side of the session-control surface. Nil
+	// disables the POST /v1/fak/session/{id}/{verb} route. Injected by cmd/fak.
+	ControlSession SessionControlFunc
+	// ListSessions returns a snapshot of EVERY live session's DRIVE state — the
+	// multi-session read behind GET /v1/fak/sessions (the table's Snapshot turned
+	// into a live operator surface). Nil disables the route. Injected by cmd/fak so
+	// this package stays session-internals-blind, mirroring ObserveSession.
+	ListSessions SessionListFunc
 	// Logf is the structured log sink (default: stderr). MCP-over-stdio sets this
 	// to stderr so protocol bytes on stdout are never corrupted.
 	Logf func(format string, args ...any)
@@ -209,21 +223,84 @@ type TraceResetResponse struct {
 	TraceID string `json:"trace_id"`
 }
 
+// SessionState is the wire form of a served session's DRIVE state — the value
+// GET /v1/fak/session/{id} returns and every control verb echoes back. Run is the
+// lowercase run-state TOKEN ("running"|"throttled"|"paused"|"draining"|"stopped"),
+// never the enum: the gateway is session-internals-blind the same way it is
+// IFC-internals-blind for TraceObserveFunc, so it carries wire names only. Rev is
+// the monotonic revision the table bumps on every write; a client may round-trip it
+// as if_rev to reject a stale clobber (optimistic concurrency).
+type SessionState struct {
+	TraceID  string        `json:"trace_id"`
+	Run      string        `json:"run"`
+	Budget   SessionBudget `json:"budget"`
+	Priority int           `json:"priority"`
+	Pace     SessionPace   `json:"pace"`
+	Reason   string        `json:"reason,omitempty"`
+	Rev      uint64        `json:"rev"`
+}
+
+// SessionBudget is the wire form of internal/session.Budget. Either axis at -1
+// (session.Unbounded) means no cap on that axis.
+type SessionBudget struct {
+	TurnsLeft  int `json:"turns_left"`
+	TokensLeft int `json:"tokens_left"`
+}
+
+// SessionPace is the wire form of internal/session.Pace. Zero on either axis means
+// "no opinion" (the planner's own default stands).
+type SessionPace struct {
+	MaxTokensPerTurn int `json:"max_tokens_per_turn"`
+	MinTurnGapMs     int `json:"min_turn_gap_ms"`
+}
+
+// SessionControlRequest is the gateway-parsed body of POST
+// /v1/fak/session/{trace_id}/{verb}. Exactly the field named by the verb is read;
+// the others are ignored. if_rev, when non-zero, is the optimistic-concurrency
+// guard: the write is taken only if the session's current Rev matches, else the
+// route returns 409 (the client re-reads and retries).
+type SessionControlRequest struct {
+	Run      string         `json:"run,omitempty"`      // verb "run": target run-state token
+	Reason   string         `json:"reason,omitempty"`   // verb "run": reason token (closed vocabulary)
+	Budget   *SessionBudget `json:"budget,omitempty"`   // verb "budget"
+	Pace     *SessionPace   `json:"pace,omitempty"`     // verb "pace"
+	Priority *int           `json:"priority,omitempty"` // verb "priority"
+	IfRev    uint64         `json:"if_rev,omitempty"`   // optional CAS guard
+}
+
+// SessionObserveFunc is injected by the host CLI so the gateway can read one
+// session's live DRIVE state without importing internal/session. An unseen trace
+// reads its default (Running, unbounded) — the table's own safe default, never a
+// phantom Stopped.
+type SessionObserveFunc func(context.Context, string) SessionState
+
+// SessionControlFunc is injected by the host CLI so the gateway can apply one
+// control verb to a session's DRIVE state without importing internal/session. It
+// returns the NEW state, an ok flag (false ⇒ the session is terminal, or an if_rev
+// CAS guard lost the race; the route returns 409), and an error (non-nil ⇒ the
+// verb or body was malformed — unknown run-state token, missing field, unknown
+// verb; the route returns 400). ok==false with err==nil is a concurrent/terminal
+// refusal, not a client error.
+type SessionControlFunc func(ctx context.Context, traceID, verb string, req SessionControlRequest) (SessionState, bool, error)
+
 // Server is a configured, ready-to-serve gateway. Construct with New; serve with
 // Handler()/ListenAndServe (HTTP) or ServeStdio (MCP over stdin/stdout).
 type Server struct {
-	k            *kernel.Kernel
-	engineID     string
-	model        string
-	requireKey   string
-	version      string
-	logf         func(format string, args ...any)
-	feed         *coherenceFeed // the cross-agent "what changed" feed (vdso coherence bus)
-	metrics      *gatewayMetrics
-	traceSeq     uint64 // mints a non-empty TraceID when the wire omits one (atomic)
-	reloadPolicy PolicyReloadFunc
-	resetTrace   TraceResetFunc
-	observeTrace TraceObserveFunc
+	k              *kernel.Kernel
+	engineID       string
+	model          string
+	requireKey     string
+	version        string
+	logf           func(format string, args ...any)
+	feed           *coherenceFeed // the cross-agent "what changed" feed (vdso coherence bus)
+	metrics        *gatewayMetrics
+	traceSeq       uint64 // mints a non-empty TraceID when the wire omits one (atomic)
+	reloadPolicy   PolicyReloadFunc
+	resetTrace     TraceResetFunc
+	observeTrace   TraceObserveFunc
+	observeSession SessionObserveFunc
+	controlSession SessionControlFunc
+	listSessions   SessionListFunc
 
 	// startup is the one-time boot timeline (start -> ready, per-phase costs),
 	// exposed as fak_gateway_startup_* gauges. See startup.go.
@@ -370,23 +447,26 @@ func New(cfg Config) (*Server, error) {
 	}
 
 	return &Server{
-		k:            k,
-		engineID:     engineID,
-		model:        model,
-		requireKey:   cfg.RequireKey,
-		version:      version,
-		logf:         logf,
-		reloadPolicy: cfg.ReloadPolicy,
-		resetTrace:   cfg.ResetTrace,
-		observeTrace: cfg.ObserveTrace,
-		startup:      startup,
-		planner:      planner,
-		engineCache:  remoteCache,
-		ctxView:      ctxView,
-		cacheStream:  cacheStream,
-		feed:         newCoherenceFeed(0),
-		metrics:      newGatewayMetrics(time.Now()),
-		route:        cfg.RouteManifest,
+		k:              k,
+		engineID:       engineID,
+		model:          model,
+		requireKey:     cfg.RequireKey,
+		version:        version,
+		logf:           logf,
+		reloadPolicy:   cfg.ReloadPolicy,
+		resetTrace:     cfg.ResetTrace,
+		observeTrace:   cfg.ObserveTrace,
+		observeSession: cfg.ObserveSession,
+		controlSession: cfg.ControlSession,
+		listSessions:   cfg.ListSessions,
+		startup:        startup,
+		planner:        planner,
+		engineCache:    remoteCache,
+		ctxView:        ctxView,
+		cacheStream:    cacheStream,
+		feed:           newCoherenceFeed(0),
+		metrics:        newGatewayMetrics(time.Now()),
+		route:          cfg.RouteManifest,
 
 		pinUpstreamCredential: cfg.PinUpstreamCredential,
 	}, nil
@@ -590,6 +670,15 @@ func (s *Server) syscall(ctx context.Context, tool, rawArgs string, readOnly boo
 		return WireVerdict{}, nil, err
 	}
 	opTrace, opTool = tc.TraceID, tc.Tool
+	// Ensemble fan-out (issue #597): a multi-member routing Plan runs each member as
+	// its OWN adjudicated kernel call and folds the outputs. buildCall left tc.Engine
+	// unset for an ensemble (routeEngine returns "" rather than collapse to one member);
+	// dispatchEnsemble re-reads the same routing decision and submits N independent
+	// calls. The single-model PICK below is byte-for-byte the pre-#597 path.
+	if plan, ok := s.ensemblePlan(tc.Tool, readOnly, tc.Meta); ok {
+		wv, env, err = s.dispatchEnsemble(ctx, tc, plan)
+		return wv, env, err
+	}
 	r, v := s.k.Syscall(ctx, tc)
 	wv = renderVerdict(v, resultMeta(r))
 	if r != nil {
@@ -600,6 +689,99 @@ func (s *Server) syscall(ctx context.Context, tool, rawArgs string, readOnly boo
 		}
 	}
 	return wv, env, nil
+}
+
+// dispatchEnsemble executes a multi-member routing Plan (issue #597): it runs each
+// member as its OWN independently-adjudicated kernel call — carrying THAT member's
+// model in abi.ToolCall.Engine (the same pre-submit residency contract a single-model
+// route obeys) — gathers the ALLOWED members' outputs in Plan.Members order, and folds
+// them with modelroute.Combine(plan.Reduce, votes). The contract this honors, point by
+// point (see the internal/modelroute package doc):
+//
+//   - N INDEPENDENTLY-ADJUDICATED CALLS, never one fan-out that bypasses the floor.
+//     Each member is a full k.Syscall, so a vote member bound for a REMOTE model still
+//     crosses the residency/policy floor and is DENIED for a tenant/sensitive payload.
+//   - MEMBER ORDER PRESERVED INTO THE FOLD. votes are appended in Plan.Members order,
+//     so ReduceConcat / ReduceVote tie-breaks stay deterministic. A member the kernel
+//     refused (or that errored at dispatch) contributes NO vote; the survivors keep
+//     their relative order.
+//   - FAIL CLOSED on a wipeout. If EVERY member was refused, there is no silent empty
+//     success — the last member's refusal verdict is surfaced (so a residency/policy
+//     reason reaches the wire) and the result Status is ERROR.
+//
+// vDSO interaction: a member contributes a vote iff its result Status is OK (a refused
+// member's Reap yields a Status=Error deny-as-value). For the canonical write-shaped
+// ensemble (a guard quorum over a destructive tool) the vDSO never dedups, so every
+// member's engine actually runs. A read-only idempotent ensemble may have later members
+// served from an earlier member's tier-2 fill — consistent with fak's engine-independence
+// model for idempotent reads (the same bytes regardless of which engine), where an
+// ensemble adds nothing anyway.
+func (s *Server) dispatchEnsemble(ctx context.Context, base *abi.ToolCall, plan modelroute.Plan) (WireVerdict, *ResultEnvelope, error) {
+	votes := make([]modelroute.Vote, 0, len(plan.Members))
+	var lastRefused abi.Verdict
+	refused := 0
+	for _, mem := range plan.Members {
+		r, v := s.k.Syscall(ctx, memberCall(base, mem.Model))
+		if r == nil || r.Status != abi.StatusOK {
+			lastRefused = v
+			refused++
+			continue
+		}
+		votes = append(votes, modelroute.Vote{Member: mem, Output: string(resolveBytes(ctx, r.Payload))})
+	}
+	if len(votes) == 0 {
+		// Every member was refused or errored at dispatch — fail closed (never a silent
+		// empty success). Surface the last refusal verdict so the residency/policy reason
+		// reaches the wire; default to a plain deny if the verdict was somehow non-refusing.
+		wv := renderVerdict(lastRefused, nil)
+		if wv.Kind == "ALLOW" {
+			wv = WireVerdict{Kind: "DENY", Reason: abi.ReasonName(abi.ReasonPolicyBlock), By: "modelroute-ensemble", Disposition: "TERMINAL"}
+		}
+		env := &ResultEnvelope{Status: "ERROR", Content: "", Meta: map[string]string{
+			"served_by":        "modelroute-ensemble",
+			"ensemble_refused": itoa(uint64(refused)),
+		}}
+		return wv, env, nil
+	}
+	folded, ferr := modelroute.Combine(plan.Reduce, votes)
+	if ferr != nil {
+		// A misconfigured reduce over incompatible outputs (e.g. all_reduce over
+		// non-numeric tool results) is a fail-loud error, never a silent guess.
+		return WireVerdict{}, nil, fmt.Errorf("gateway: ensemble combine: %w", ferr)
+	}
+	meta := map[string]string{
+		"served_by":        "modelroute-ensemble",
+		"reduce":           string(folded.Reduce),
+		"ensemble_members": itoa(uint64(folded.Members)),
+	}
+	if refused > 0 {
+		meta["ensemble_refused"] = itoa(uint64(refused))
+	}
+	if folded.Winner != "" {
+		meta["winner"] = folded.Winner
+	}
+	return WireVerdict{Kind: "ALLOW", By: "modelroute-ensemble"},
+		&ResultEnvelope{Status: "OK", Content: folded.Output, Meta: meta}, nil
+}
+
+// memberCall clones a base ToolCall for one ensemble member, binding THAT member's
+// model to Engine before submission (the pre-submit residency contract) and giving the
+// call a fresh identity (SeqNo unset, an independent Meta copy) so the kernel
+// adjudicates and dispatches each member on its own. The content-addressed Args Ref is
+// shared — every member sees the same input — while the Meta map is copied so a
+// per-call kernel annotation can never leak across members.
+func memberCall(base *abi.ToolCall, model string) *abi.ToolCall {
+	meta := make(map[string]string, len(base.Meta))
+	for k, v := range base.Meta {
+		meta[k] = v
+	}
+	return &abi.ToolCall{
+		Tool:    base.Tool,
+		Args:    base.Args,
+		TraceID: base.TraceID,
+		Meta:    meta,
+		Engine:  model,
+	}
 }
 
 // buildCall converts untrusted wire input into an abi.ToolCall. The raw argument
@@ -651,32 +833,54 @@ func (s *Server) buildCall(ctx context.Context, tool, rawArgs string, readOnly b
 	return tc, nil
 }
 
-// routeEngine consults the optional per-call routing policy and returns the engine
-// route to bind to abi.ToolCall.Engine, or "" for the kernel default. It classifies
-// the call into a modelroute.Subject (aspect=tool_call, the tool name, and the
-// read-only / sensitivity / tenant signals the gateway already attests) and returns
-// Decision.Plan.Primary() for a single-model PICK. An ENSEMBLE plan is left to the
-// kernel default here (route ""): fanning N independently-adjudicated submits out is
-// issue #597, and collapsing an ensemble to one member would be a silent wrong
-// route. The returned route is the model id verbatim (Plan.Primary()'s documented
-// destination), NOT collapsed to a registered engine id — the string must keep the
-// model's remote-ness so the residency gate can deny a tenant/sensitive payload
-// bound for a remote model. A route to a model with no registered engine driver
-// fails LOUD at dispatch ("no engine registered for route"), never silently runs
-// elsewhere.
-func (s *Server) routeEngine(tool string, readOnly bool, meta map[string]string) string {
+// routeDecision classifies a tool call into a modelroute.Subject (aspect=tool_call,
+// the tool name, and the read-only / sensitivity / tenant signals the gateway already
+// attests) and returns the manifest's routing Decision. The second return is false
+// when no manifest is configured (the kernel-default path). routeEngine and
+// ensemblePlan share this single classification so the single-model and ensemble
+// paths can never diverge on what a call routes to.
+func (s *Server) routeDecision(tool string, readOnly bool, meta map[string]string) (modelroute.Decision, bool) {
 	if s.route == nil {
-		return ""
+		return modelroute.Decision{}, false
 	}
-	d := s.route.Route(modelroute.Subject{
+	return s.route.Route(modelroute.Subject{
 		Aspect: modelroute.AspectToolCall,
 		Tool:   tool,
 		Labels: routeLabels(readOnly, meta),
-	})
-	if d.Plan.IsEnsemble() {
-		return "" // #597: ensemble fan-out; do not collapse to a single member here.
+	}), true
+}
+
+// routeEngine consults the optional per-call routing policy and returns the engine
+// route to bind to abi.ToolCall.Engine, or "" for the kernel default. It returns
+// Decision.Plan.Primary() for a single-model PICK. An ENSEMBLE plan is left to the
+// kernel default here (route ""): the N-submit fan-out happens at dispatch time in
+// dispatchEnsemble (the syscall path), and collapsing an ensemble to one member here
+// would be a silent wrong route. The returned route is the model id verbatim
+// (Plan.Primary()'s documented destination), NOT collapsed to a registered engine id —
+// the string must keep the model's remote-ness so the residency gate can deny a
+// tenant/sensitive payload bound for a remote model. A route to a model with no
+// registered engine driver fails LOUD at dispatch ("no engine registered for route"),
+// never silently runs elsewhere.
+func (s *Server) routeEngine(tool string, readOnly bool, meta map[string]string) string {
+	d, ok := s.routeDecision(tool, readOnly, meta)
+	if !ok || d.Plan.IsEnsemble() {
+		return ""
 	}
 	return d.Plan.Primary()
+}
+
+// ensemblePlan returns the routing Plan for this call WHEN it is a multi-member
+// ensemble, so the syscall path can fan it out (issue #597). A single-model PICK, or
+// no manifest, returns ok=false (the call dispatches once on the route routeEngine
+// already bound to Engine). The classification is identical to routeEngine's — same
+// Subject, same routeDecision — so the two never disagree on whether a call is an
+// ensemble.
+func (s *Server) ensemblePlan(tool string, readOnly bool, meta map[string]string) (modelroute.Plan, bool) {
+	d, ok := s.routeDecision(tool, readOnly, meta)
+	if !ok || !d.Plan.IsEnsemble() {
+		return modelroute.Plan{}, false
+	}
+	return d.Plan, true
 }
 
 // routeLabels lowers the call signals the gateway honestly knows into the OPEN
