@@ -1,35 +1,61 @@
 #!/bin/sh
-# fleet commit-message gate  --  DOS reason: COMMIT_MSG
+# fleet commit-message gates  --  DOS reasons: PUBLIC_LEAK, COMMIT_MSG
 #
-# Nudges every commit subject toward `type(scope): <verb> <what>` so the DOS
-# commit-audit witness can grade the commit. A noun-led subject ABSTAINs, and an
-# ABSTAIN on a landed commit is immutable -- so this catches it before it lands.
+# Two gates over the commit MESSAGE itself, at the same boundary git checks it:
 #
-# Mode (env FLEET_MSG_GUARD):  warn (default) | block | off
-#   warn   allow the commit, print an advisory      (exit 0)
-#   block  refuse the commit                         (exit 1)
-#   off    do nothing
-# Escape:  FLEET_ALLOW_MSG=1 <git cmd>   always allows.
+#   PUBLIC_LEAK (block) -- a leaked hostname/credential/needle in the SUBJECT or
+#     BODY sails past the pre-commit content gate (which scans staged FILES, not
+#     the message). This closes that gap with the SAME AUDIT_NEEDLES list
+#     (tools/scrub_public_copy.py --audit-message), so a secret cannot ride into
+#     history via the message. Mode FLEET_SCRUB_GUARD; escape FLEET_ALLOW_LEAK=1.
 #
-# Default is WARN, not block: a non-gradeable subject is a lost grading
-# opportunity, not a leak, and ~10 auto-committing agents should not be wedged by
-# message style. Hard-enforce with FLEET_MSG_GUARD=block. Logic lives in
-# tools/check_commit_msg.py.
+#   COMMIT_MSG (warn) -- nudges the subject toward `type(scope): <verb> <what>`
+#     so the DOS commit-audit witness can grade the commit (a noun-led subject
+#     ABSTAINs, and an ABSTAIN on a landed commit is immutable).
+#     Mode FLEET_MSG_GUARD; escape FLEET_ALLOW_MSG=1. Logic: check_commit_msg.py.
+#
+# Every gate FAILS OPEN if its checker cannot run (a broken check must never
+# wedge every commit in the clone).
 
 msgfile="$1"                       # save BEFORE `set --` clobbers the positionals
+root="$(git rev-parse --show-toplevel 2>/dev/null)" || exit 0
+
+# Resolve a python interpreter once (PY_A binary, PY_B optional `-3` for the
+# Windows `py` launcher). Empty PY_A -> skip every gate (fail open).
+if [ -n "${PYTHON:-}" ]; then PY_A="$PYTHON"; PY_B=""
+elif command -v python3 >/dev/null 2>&1; then PY_A=python3; PY_B=""
+elif command -v python  >/dev/null 2>&1; then PY_A=python;  PY_B=""
+elif command -v py >/dev/null 2>&1; then PY_A=py; PY_B="-3"
+else PY_A=""; PY_B=""; fi
+[ -n "$PY_A" ] || exit 0
+
+# ---- PUBLIC_LEAK: scan the message for redact needles (block by default) ----
+leak_mode="${FLEET_SCRUB_GUARD:-block}"
+scrub="$root/tools/scrub_public_copy.py"
+if [ "$leak_mode" != "off" ] && [ "${FLEET_ALLOW_LEAK:-0}" != "1" ] && [ -f "$scrub" ]; then
+	lout="$("$PY_A" $PY_B "$scrub" --audit-message "$msgfile" --root "$root" 2>&1)"; lst=$?
+	if [ "$lst" -eq 1 ]; then
+		if [ "$leak_mode" = "block" ]; then
+			echo "$lout" >&2
+			echo "PUBLIC_LEAK: the commit MESSAGE carries a redact needle (above)." >&2
+			echo "  scrub the subject/body, or FLEET_ALLOW_LEAK=1 to override once (=warn/off softens)." >&2
+			exit 1
+		fi
+		echo "PUBLIC_LEAK (advisory): redact needle in the commit message:" >&2
+		echo "$lout" >&2
+	fi
+	# lst 0 (clean) or 2 (could-not-read) -> fall through; never wedge on a broken check.
+fi
+
+# ---- COMMIT_MSG: subject-shape advisory (warn by default) ----
 mode="${FLEET_MSG_GUARD:-warn}"
 [ "$mode" = "off" ] && exit 0
 [ "${FLEET_ALLOW_MSG:-0}" = "1" ] && exit 0
 
-root="$(git rev-parse --show-toplevel 2>/dev/null)" || exit 0
 chk="$root/tools/check_commit_msg.py"
 [ -f "$chk" ] || exit 0
 
-if [ -n "${PYTHON:-}" ]; then set -- "$PYTHON"
-elif command -v python3 >/dev/null 2>&1; then set -- python3
-elif command -v python >/dev/null 2>&1; then set -- python
-elif command -v py >/dev/null 2>&1; then set -- py -3
-else exit 0; fi
+set -- "$PY_A" $PY_B
 
 out="$("$@" "$chk" --file "$msgfile" 2>&1)"; status=$?
 [ "$status" -eq 0 ] && exit 0
