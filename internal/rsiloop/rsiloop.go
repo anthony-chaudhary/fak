@@ -75,6 +75,9 @@ type Harness struct {
 	// error here is NOT fatal: a candidate that won't even build is simply reverted
 	// (recorded as a non-keep with SuiteGreen=false), and the loop continues.
 	Measure func(c Candidate) (Measurement, error)
+	// Classify optionally proves the candidate's evidence class from artifacts the
+	// candidate did not author (for example, touched paths). nil means ClassFull.
+	Classify func(c Candidate) shipgate.EvidenceClass
 }
 
 // Row is one append-only journal record. The schema is stable so a downstream
@@ -208,8 +211,13 @@ func RunObserved(h Harness, j *Journal, k, maxCycles int, obs Observer) (Result,
 			m = Measurement{Metric: running, SuiteGreen: false, TruthClean: false}
 			note = "measure error: " + merr.Error()
 		}
+		class := shipgate.ClassFull
+		if h.Classify != nil {
+			class = h.Classify(c)
+		}
 
 		w := shipgate.Witness{
+			Class:       class,
 			Metric:      h.MetricName,
 			Before:      running,
 			After:       m.Metric,
