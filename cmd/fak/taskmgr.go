@@ -97,8 +97,8 @@ func renderTaskSample(w io.Writer, snap taskmgr.Snapshot) {
 		snap.Resource.Goroutines,
 	)
 	for _, task := range snap.Tasks {
-		fmt.Fprintf(w, "task %-18s %-8s runtime=%s progress=%s",
-			task.TaskID, task.State, secondsText(task.RuntimeSeconds), progressText(task.Progress))
+		fmt.Fprintf(w, "task %-18s %-8s liveness=%-8s runtime=%s progress=%s",
+			task.TaskID, task.State, livenessText(task.LivenessClass), secondsText(task.RuntimeSeconds), progressText(task.Progress))
 		if task.ETASeconds != nil {
 			fmt.Fprintf(w, " eta=%s", secondsText(*task.ETASeconds))
 		}
@@ -108,9 +108,9 @@ func renderTaskSample(w io.Writer, snap taskmgr.Snapshot) {
 			if concept == "" {
 				concept = "-"
 			}
-			fmt.Fprintf(w, "  step %-17s concept=%-10s %-8s runtime=%s cpu_delta=%s progress=%s",
-				step.StepID, concept, step.State, secondsText(step.RuntimeSeconds),
-				secondsText(step.Resource.Delta.CPUSeconds), progressText(step.Progress))
+			fmt.Fprintf(w, "  step %-17s concept=%-10s %-8s liveness=%-8s runtime=%s cpu_delta=%s progress=%s",
+				step.StepID, concept, step.State, livenessText(step.LivenessClass),
+				secondsText(step.RuntimeSeconds), secondsText(step.Resource.Delta.CPUSeconds), progressText(step.Progress))
 			if step.ETASeconds != nil {
 				fmt.Fprintf(w, " eta=%s", secondsText(*step.ETASeconds))
 			}
@@ -124,6 +124,13 @@ func renderTaskSample(w io.Writer, snap taskmgr.Snapshot) {
 				c.Concept, c.Steps, c.RunningSteps, secondsText(c.RuntimeSeconds), secondsText(c.CPUSeconds))
 		}
 	}
+}
+
+func livenessText(class taskmgr.LivenessClass) string {
+	if class == "" {
+		return "-"
+	}
+	return string(class)
 }
 
 func progressText(p taskmgr.Progress) string {

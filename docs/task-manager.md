@@ -19,15 +19,22 @@ Each snapshot carries:
 - process resource sample: wall seconds, runtime CPU seconds when the Go runtime
   exposes it, heap/sys memory, and goroutine count.
 - task rows: id, title, state, runtime seconds, progress, ETA when progress has a
-  positive `done` and a known `total`, current step, and resource delta since task
-  start.
+  positive `done` and a known `total`, current step, liveness class, beat counters,
+  and resource delta since task start.
 - step rows: id, title, concept bucket, state, runtime seconds, progress, ETA, and
-  resource delta since step start.
+  liveness/resource delta since step start.
 - concept usage: per-concept aggregation over steps, so an operator can see time
   spent in buckets such as `observe`, `adjudicate`, `tool`, `model`, or `verify`.
 
 ETA is deliberately absent when it would be guesswork: no known total, no positive
 progress, elapsed time of zero, or a terminal task/step.
+
+Liveness is an in-loop progress heartbeat, not a process scan. `Beat` marks that
+the task or step body is still advancing; `SetProgress` also counts as a beat.
+Running records with no beats are `idle`; records with a recent beat are `live`;
+records whose last beat is older than the manager's liveness timeout are
+`stalled`. Terminal records return to `idle` while preserving beat metadata for
+diagnostics.
 
 ## CLI proof surface
 
@@ -65,6 +72,7 @@ step, _ := task.StartStep(taskmgr.StepSpec{
 
 _ = task.SetProgress(2, 10, "phase")
 _ = step.SetProgress(1, 4, "suite")
+_ = step.Beat()
 snapshot := m.Snapshot()
 ```
 

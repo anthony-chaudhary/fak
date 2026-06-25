@@ -49,6 +49,9 @@ func TestSnapshotTracksStepResourceConceptAndETA(t *testing.T) {
 	if gotTask.Progress.Percent == nil || *gotTask.Progress.Percent != 20 {
 		t.Fatalf("task percent = %v, want 20", gotTask.Progress.Percent)
 	}
+	if gotTask.LivenessClass != LivenessLive || gotTask.BeatsSeen != 2 {
+		t.Fatalf("task liveness/beats = %s/%d, want live/2", gotTask.LivenessClass, gotTask.BeatsSeen)
+	}
 	if gotTask.ETASeconds == nil || *gotTask.ETASeconds != 16 {
 		t.Fatalf("task eta = %v, want 16", gotTask.ETASeconds)
 	}
@@ -76,11 +79,80 @@ func TestSnapshotTracksStepResourceConceptAndETA(t *testing.T) {
 	if gotStep.Resource.Delta.CPUSeconds != 1.5 {
 		t.Fatalf("step cpu delta = %.1f, want 1.5", gotStep.Resource.Delta.CPUSeconds)
 	}
+	if gotStep.LivenessClass != LivenessLive || gotStep.BeatsSeen != 1 {
+		t.Fatalf("step liveness/beats = %s/%d, want live/1", gotStep.LivenessClass, gotStep.BeatsSeen)
+	}
 	if len(gotTask.Concepts) != 1 || gotTask.Concepts[0].Concept != "verify" || gotTask.Concepts[0].RuntimeSeconds != 3 {
 		t.Fatalf("task concepts = %+v, want verify/3s", gotTask.Concepts)
 	}
 	if len(snap.Concepts) != 1 || snap.Concepts[0].Concept != "verify" || snap.Concepts[0].RunningSteps != 1 {
 		t.Fatalf("snapshot concepts = %+v, want one running verify step", snap.Concepts)
+	}
+}
+
+func TestBeatLivenessClassifiesLiveIdleAndStalled(t *testing.T) {
+	base := time.Unix(1700000000, 0)
+	now := base
+	m := NewManager(
+		WithClock(func() time.Time { return now }),
+		WithSampler(fakeSampler(base)),
+		WithLivenessTimeout(2*time.Second),
+	)
+	task, err := m.StartTask(TaskSpec{TaskID: "task_loop", Total: 10})
+	if err != nil {
+		t.Fatalf("start task: %v", err)
+	}
+	step, err := task.StartStep(StepSpec{StepID: "step_loop", Total: 10})
+	if err != nil {
+		t.Fatalf("start step: %v", err)
+	}
+
+	snap := m.Snapshot()
+	if got := snap.Tasks[0].LivenessClass; got != LivenessIdle {
+		t.Fatalf("new task liveness = %s, want idle", got)
+	}
+
+	now = now.Add(1 * time.Second)
+	if err := step.Beat(); err != nil {
+		t.Fatalf("beat step: %v", err)
+	}
+	snap = m.Snapshot()
+	gotTask, gotStep := snap.Tasks[0], snap.Tasks[0].Steps[0]
+	if gotTask.LivenessClass != LivenessLive || gotStep.LivenessClass != LivenessLive {
+		t.Fatalf("recent beat liveness task/step = %s/%s, want live/live", gotTask.LivenessClass, gotStep.LivenessClass)
+	}
+	if gotTask.BeatsSeen != 1 || gotStep.BeatsSeen != 1 {
+		t.Fatalf("beats task/step = %d/%d, want 1/1", gotTask.BeatsSeen, gotStep.BeatsSeen)
+	}
+
+	now = now.Add(3 * time.Second)
+	snap = m.Snapshot()
+	gotTask, gotStep = snap.Tasks[0], snap.Tasks[0].Steps[0]
+	if gotTask.LivenessClass != LivenessStalled || gotStep.LivenessClass != LivenessStalled {
+		t.Fatalf("stale beat liveness task/step = %s/%s, want stalled/stalled", gotTask.LivenessClass, gotStep.LivenessClass)
+	}
+	if gotTask.LastBeatAgeSeconds == nil || *gotTask.LastBeatAgeSeconds != 3 {
+		t.Fatalf("task beat age = %v, want 3", gotTask.LastBeatAgeSeconds)
+	}
+
+	now = now.Add(1 * time.Second)
+	if err := task.SetProgress(2, 10, "item"); err != nil {
+		t.Fatalf("set task progress: %v", err)
+	}
+	snap = m.Snapshot()
+	if got := snap.Tasks[0].LivenessClass; got != LivenessLive {
+		t.Fatalf("progress refreshed liveness = %s, want live", got)
+	}
+	if got := snap.Tasks[0].BeatsSeen; got != 2 {
+		t.Fatalf("task beats after progress = %d, want 2", got)
+	}
+
+	if err := task.Finish(); err != nil {
+		t.Fatalf("finish task: %v", err)
+	}
+	snap = m.Snapshot()
+	if got := snap.Tasks[0].LivenessClass; got != LivenessIdle {
+		t.Fatalf("terminal liveness = %s, want idle", got)
 	}
 }
 

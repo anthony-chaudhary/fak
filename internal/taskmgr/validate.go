@@ -55,7 +55,7 @@ func ValidateSnapshot(s Snapshot) error {
 		}
 		seenTasks[task.TaskID] = struct{}{}
 
-		if err := validateRecord("task "+task.TaskID, task.State, task.RuntimeSeconds, task.Progress, task.ETASeconds, task.ETAUnixNano, task.Resource); err != nil {
+		if err := validateRecord("task "+task.TaskID, task.State, task.LivenessClass, task.BeatsSeen, task.LastBeatUnixNano, task.LastBeatAgeSeconds, task.RuntimeSeconds, task.Progress, task.ETASeconds, task.ETAUnixNano, task.Resource); err != nil {
 			return err
 		}
 		if err := validateWitness("task "+task.TaskID, task.Witness); err != nil {
@@ -74,7 +74,7 @@ func ValidateSnapshot(s Snapshot) error {
 			seenSteps[step.StepID] = struct{}{}
 
 			ctx := fmt.Sprintf("task %q step %q", task.TaskID, step.StepID)
-			if err := validateRecord(ctx, step.State, step.RuntimeSeconds, step.Progress, step.ETASeconds, step.ETAUnixNano, step.Resource); err != nil {
+			if err := validateRecord(ctx, step.State, step.LivenessClass, step.BeatsSeen, step.LastBeatUnixNano, step.LastBeatAgeSeconds, step.RuntimeSeconds, step.Progress, step.ETASeconds, step.ETAUnixNano, step.Resource); err != nil {
 				return err
 			}
 			if err := validateWitness(ctx, step.Witness); err != nil {
@@ -87,9 +87,12 @@ func ValidateSnapshot(s Snapshot) error {
 
 // validateRecord checks the fields a task snapshot and a step snapshot share: the
 // state vocabulary, non-negative runtime, the resource window, progress, and ETA.
-func validateRecord(ctx string, state State, runtime float64, p Progress, etaSeconds *float64, etaAt *int64, rw ResourceWindow) error {
+func validateRecord(ctx string, state State, liveness LivenessClass, beatsSeen int64, lastBeat int64, beatAge *float64, runtime float64, p Progress, etaSeconds *float64, etaAt *int64, rw ResourceWindow) error {
 	if !validState(state) {
 		return fmt.Errorf("taskmgr: %s has unknown state %q", ctx, state)
+	}
+	if err := validateLiveness(ctx, state, liveness, beatsSeen, lastBeat, beatAge); err != nil {
+		return err
 	}
 	if runtime < 0 {
 		return fmt.Errorf("taskmgr: %s runtime is negative: %v", ctx, runtime)
@@ -104,6 +107,46 @@ func validateRecord(ctx string, state State, runtime float64, p Progress, etaSec
 		return err
 	}
 	return validateETA(ctx, state, p, etaSeconds, etaAt)
+}
+
+func validateLiveness(ctx string, state State, class LivenessClass, beatsSeen int64, lastBeat int64, beatAge *float64) error {
+	if !validLivenessClass(class) {
+		return fmt.Errorf("taskmgr: %s has unknown liveness class %q", ctx, class)
+	}
+	if class == LivenessUnknown {
+		if beatsSeen != 0 || lastBeat != 0 || beatAge != nil {
+			return fmt.Errorf("taskmgr: %s has unknown liveness but carries beat data", ctx)
+		}
+		return nil
+	}
+	if beatsSeen < 0 {
+		return fmt.Errorf("taskmgr: %s beats_seen is negative: %d", ctx, beatsSeen)
+	}
+	if beatsSeen == 0 {
+		if lastBeat != 0 {
+			return fmt.Errorf("taskmgr: %s has last beat without beats_seen", ctx)
+		}
+		if beatAge != nil {
+			return fmt.Errorf("taskmgr: %s has beat age without beats_seen", ctx)
+		}
+	} else {
+		if lastBeat == 0 {
+			return fmt.Errorf("taskmgr: %s has beats_seen without last beat", ctx)
+		}
+		if beatAge == nil {
+			return fmt.Errorf("taskmgr: %s has beats_seen without beat age", ctx)
+		}
+		if *beatAge < 0 {
+			return fmt.Errorf("taskmgr: %s beat age is negative: %v", ctx, *beatAge)
+		}
+	}
+	if state != StateRunning && class != LivenessIdle {
+		return fmt.Errorf("taskmgr: %s is %s but liveness is %s", ctx, state, class)
+	}
+	if state == StateRunning && class == LivenessIdle && beatsSeen > 0 {
+		return fmt.Errorf("taskmgr: %s is running with beats but idle liveness", ctx)
+	}
+	return nil
 }
 
 // validateProgress enforces non-negative done/total and that the percent field is
@@ -175,6 +218,15 @@ func validateSample(ctx string, s ResourceSample) error {
 func validState(state State) bool {
 	switch state {
 	case StateRunning, StateDone, StateFailed, StateCanceled:
+		return true
+	default:
+		return false
+	}
+}
+
+func validLivenessClass(class LivenessClass) bool {
+	switch class {
+	case LivenessUnknown, LivenessIdle, LivenessLive, LivenessStalled:
 		return true
 	default:
 		return false

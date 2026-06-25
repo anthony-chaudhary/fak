@@ -39,8 +39,14 @@ func TestTaskSampleJSON(t *testing.T) {
 	if task.Progress.Done != 2 || task.Progress.Total != 4 || task.Progress.Unit != "phase" {
 		t.Fatalf("task progress = %+v", task.Progress)
 	}
+	if task.LivenessClass != taskmgr.LivenessLive {
+		t.Fatalf("task liveness = %s, want live", task.LivenessClass)
+	}
 	if len(task.Steps) != 1 || task.Steps[0].Concept != "verify" {
 		t.Fatalf("steps = %+v, want one verify step", task.Steps)
+	}
+	if task.Steps[0].LivenessClass != taskmgr.LivenessLive {
+		t.Fatalf("step liveness = %s, want live", task.Steps[0].LivenessClass)
 	}
 }
 
@@ -51,7 +57,7 @@ func TestTaskSampleHumanOutput(t *testing.T) {
 		t.Fatalf("runTask code=%d stderr=%s", code, stderr.String())
 	}
 	out := stdout.String()
-	for _, want := range []string{"process pid=", "task task_human", "step snapshot", "concept=observe"} {
+	for _, want := range []string{"process pid=", "task task_human", "liveness=idle", "step snapshot", "concept=observe"} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("human output missing %q:\n%s", want, out)
 		}

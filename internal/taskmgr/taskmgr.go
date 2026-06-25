@@ -22,6 +22,17 @@ const (
 	StateCanceled State = "canceled"
 )
 
+const DefaultLivenessTimeout = 30 * time.Second
+
+type LivenessClass string
+
+const (
+	LivenessUnknown LivenessClass = ""
+	LivenessIdle    LivenessClass = "idle"
+	LivenessLive    LivenessClass = "live"
+	LivenessStalled LivenessClass = "stalled"
+)
+
 // Sampler reads this process' resource state. The default sampler uses the Go
 // runtime: memory stats, goroutine count, and runtime CPU-class seconds when the
 // Go toolchain exposes that metric. The clock is injectable so tests can prove ETA
@@ -42,6 +53,14 @@ func WithSampler(sampler Sampler) Option {
 	return func(m *Manager) {
 		if sampler != nil {
 			m.sampler = sampler
+		}
+	}
+}
+
+func WithLivenessTimeout(timeout time.Duration) Option {
+	return func(m *Manager) {
+		if timeout > 0 {
+			m.livenessTimeout = timeout
 		}
 	}
 }
@@ -80,40 +99,48 @@ type Snapshot struct {
 }
 
 type TaskSnapshot struct {
-	TaskID          string            `json:"task_id"`
-	Title           string            `json:"title,omitempty"`
-	State           State             `json:"state"`
-	Reason          string            `json:"reason,omitempty"`
-	StartedUnixNano int64             `json:"started_unix_nano"`
-	EndedUnixNano   int64             `json:"ended_unix_nano,omitempty"`
-	RuntimeSeconds  float64           `json:"runtime_s"`
-	Progress        Progress          `json:"progress"`
-	ETASeconds      *float64          `json:"eta_s,omitempty"`
-	ETAUnixNano     *int64            `json:"estimated_completion_unix_nano,omitempty"`
-	CurrentStep     string            `json:"current_step,omitempty"`
-	Resource        ResourceWindow    `json:"resource"`
-	Steps           []StepSnapshot    `json:"steps,omitempty"`
-	Concepts        []ConceptUsage    `json:"concepts,omitempty"`
-	Labels          map[string]string `json:"labels,omitempty"`
+	TaskID             string            `json:"task_id"`
+	Title              string            `json:"title,omitempty"`
+	State              State             `json:"state"`
+	Reason             string            `json:"reason,omitempty"`
+	LivenessClass      LivenessClass     `json:"liveness_class,omitempty"`
+	BeatsSeen          int64             `json:"beats_seen,omitempty"`
+	LastBeatUnixNano   int64             `json:"last_beat_unix_nano,omitempty"`
+	LastBeatAgeSeconds *float64          `json:"last_beat_age_s,omitempty"`
+	StartedUnixNano    int64             `json:"started_unix_nano"`
+	EndedUnixNano      int64             `json:"ended_unix_nano,omitempty"`
+	RuntimeSeconds     float64           `json:"runtime_s"`
+	Progress           Progress          `json:"progress"`
+	ETASeconds         *float64          `json:"eta_s,omitempty"`
+	ETAUnixNano        *int64            `json:"estimated_completion_unix_nano,omitempty"`
+	CurrentStep        string            `json:"current_step,omitempty"`
+	Resource           ResourceWindow    `json:"resource"`
+	Steps              []StepSnapshot    `json:"steps,omitempty"`
+	Concepts           []ConceptUsage    `json:"concepts,omitempty"`
+	Labels             map[string]string `json:"labels,omitempty"`
 	// Witness is the optional, independently-attested completion rung. It is nil
 	// for a claimed-only task; the claimed State above is never overwritten.
 	Witness *WitnessRecord `json:"witness,omitempty"`
 }
 
 type StepSnapshot struct {
-	StepID          string            `json:"step_id"`
-	Title           string            `json:"title,omitempty"`
-	Concept         string            `json:"concept,omitempty"`
-	State           State             `json:"state"`
-	Reason          string            `json:"reason,omitempty"`
-	StartedUnixNano int64             `json:"started_unix_nano"`
-	EndedUnixNano   int64             `json:"ended_unix_nano,omitempty"`
-	RuntimeSeconds  float64           `json:"runtime_s"`
-	Progress        Progress          `json:"progress"`
-	ETASeconds      *float64          `json:"eta_s,omitempty"`
-	ETAUnixNano     *int64            `json:"estimated_completion_unix_nano,omitempty"`
-	Resource        ResourceWindow    `json:"resource"`
-	Labels          map[string]string `json:"labels,omitempty"`
+	StepID             string            `json:"step_id"`
+	Title              string            `json:"title,omitempty"`
+	Concept            string            `json:"concept,omitempty"`
+	State              State             `json:"state"`
+	Reason             string            `json:"reason,omitempty"`
+	LivenessClass      LivenessClass     `json:"liveness_class,omitempty"`
+	BeatsSeen          int64             `json:"beats_seen,omitempty"`
+	LastBeatUnixNano   int64             `json:"last_beat_unix_nano,omitempty"`
+	LastBeatAgeSeconds *float64          `json:"last_beat_age_s,omitempty"`
+	StartedUnixNano    int64             `json:"started_unix_nano"`
+	EndedUnixNano      int64             `json:"ended_unix_nano,omitempty"`
+	RuntimeSeconds     float64           `json:"runtime_s"`
+	Progress           Progress          `json:"progress"`
+	ETASeconds         *float64          `json:"eta_s,omitempty"`
+	ETAUnixNano        *int64            `json:"estimated_completion_unix_nano,omitempty"`
+	Resource           ResourceWindow    `json:"resource"`
+	Labels             map[string]string `json:"labels,omitempty"`
 	// Witness is the optional, independently-attested completion rung for this
 	// step. Nil means claimed-only; the claimed State above is never overwritten.
 	Witness *WitnessRecord `json:"witness,omitempty"`
@@ -162,14 +189,15 @@ type ConceptUsage struct {
 }
 
 type Manager struct {
-	mu            sync.Mutex
-	clock         func() time.Time
-	sampler       Sampler
-	started       time.Time
-	startResource ResourceSample
-	tasks         map[string]*taskState
-	order         []string
-	labels        map[string]string
+	mu              sync.Mutex
+	clock           func() time.Time
+	sampler         Sampler
+	livenessTimeout time.Duration
+	started         time.Time
+	startResource   ResourceSample
+	tasks           map[string]*taskState
+	order           []string
+	labels          map[string]string
 }
 
 type Task struct {
@@ -192,21 +220,23 @@ type taskState struct {
 	start     ResourceSample
 	end       ResourceSample
 	progress  progressState
+	heartbeat heartbeatState
 	steps     map[string]*stepState
 	stepOrder []string
 	witness   *WitnessRecord
 }
 
 type stepState struct {
-	spec     StepSpec
-	state    State
-	reason   string
-	started  time.Time
-	ended    time.Time
-	start    ResourceSample
-	end      ResourceSample
-	progress progressState
-	witness  *WitnessRecord
+	spec      StepSpec
+	state     State
+	reason    string
+	started   time.Time
+	ended     time.Time
+	start     ResourceSample
+	end       ResourceSample
+	progress  progressState
+	heartbeat heartbeatState
+	witness   *WitnessRecord
 }
 
 type progressState struct {
@@ -215,11 +245,17 @@ type progressState struct {
 	unit  string
 }
 
+type heartbeatState struct {
+	beats int64
+	last  time.Time
+}
+
 func NewManager(opts ...Option) *Manager {
 	m := &Manager{
-		clock:   time.Now,
-		sampler: SampleRuntime,
-		tasks:   map[string]*taskState{},
+		clock:           time.Now,
+		sampler:         SampleRuntime,
+		livenessTimeout: DefaultLivenessTimeout,
+		tasks:           map[string]*taskState{},
 	}
 	for _, opt := range opts {
 		opt(m)
@@ -272,6 +308,8 @@ func (t *Task) SetProgress(done, total float64, unit string) error {
 	return t.manager.SetTaskProgress(t.id, done, total, unit)
 }
 
+func (t *Task) Beat() error { return t.manager.BeatTask(t.id) }
+
 func (t *Task) Finish() error              { return t.manager.FinishTask(t.id) }
 func (t *Task) Fail(reason string) error   { return t.manager.FailTask(t.id, reason) }
 func (t *Task) Cancel(reason string) error { return t.manager.CancelTask(t.id, reason) }
@@ -279,6 +317,8 @@ func (t *Task) Cancel(reason string) error { return t.manager.CancelTask(t.id, r
 func (s *Step) SetProgress(done, total float64, unit string) error {
 	return s.manager.SetStepProgress(s.taskID, s.stepID, done, total, unit)
 }
+
+func (s *Step) Beat() error { return s.manager.BeatStep(s.taskID, s.stepID) }
 
 func (s *Step) Finish() error            { return s.manager.FinishStep(s.taskID, s.stepID) }
 func (s *Step) Fail(reason string) error { return s.manager.FailStep(s.taskID, s.stepID, reason) }
@@ -326,6 +366,7 @@ func (m *Manager) SetTaskProgress(taskID string, done, total float64, unit strin
 		return err
 	}
 	task.progress = p
+	beat(&task.heartbeat, m.clock())
 	return nil
 }
 
@@ -341,6 +382,39 @@ func (m *Manager) SetStepProgress(taskID, stepID string, done, total float64, un
 		return err
 	}
 	step.progress = p
+	now := m.clock()
+	beat(&step.heartbeat, now)
+	if task := m.tasks[taskID]; task != nil {
+		beat(&task.heartbeat, now)
+	}
+	return nil
+}
+
+func (m *Manager) BeatTask(taskID string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	task, ok := m.tasks[taskID]
+	if !ok {
+		return fmt.Errorf("taskmgr: task %q not found", taskID)
+	}
+	beat(&task.heartbeat, m.clock())
+	return nil
+}
+
+func (m *Manager) BeatStep(taskID, stepID string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	task, ok := m.tasks[taskID]
+	if !ok {
+		return fmt.Errorf("taskmgr: task %q not found", taskID)
+	}
+	step, ok := task.steps[stepID]
+	if !ok {
+		return fmt.Errorf("taskmgr: step %q not found on task %q", stepID, taskID)
+	}
+	now := m.clock()
+	beat(&step.heartbeat, now)
+	beat(&task.heartbeat, now)
 	return nil
 }
 
@@ -479,23 +553,28 @@ func (m *Manager) taskSnapshotLocked(task *taskState, now time.Time, current Res
 	}
 	progress := progressSnapshot(task.progress)
 	eta, etaAt := estimate(task.started, now, task.state, task.progress)
+	liveness, beats, lastBeat, beatAge := livenessSnapshot(task.state, end, task.heartbeat, m.livenessTimeout)
 	return TaskSnapshot{
-		TaskID:          task.spec.TaskID,
-		Title:           task.spec.Title,
-		State:           task.state,
-		Reason:          task.reason,
-		StartedUnixNano: task.started.UnixNano(),
-		EndedUnixNano:   unixNanoOrZero(task.ended),
-		RuntimeSeconds:  seconds(end.Sub(task.started)),
-		Progress:        progress,
-		ETASeconds:      eta,
-		ETAUnixNano:     etaAt,
-		CurrentStep:     currentStep,
-		Resource:        ResourceWindow{Start: task.start, Current: cur, Delta: resourceDelta(task.start, cur)},
-		Steps:           steps,
-		Concepts:        conceptUsage([]TaskSnapshot{{Steps: steps}}),
-		Labels:          cloneLabels(task.spec.Labels),
-		Witness:         cloneWitness(task.witness),
+		TaskID:             task.spec.TaskID,
+		Title:              task.spec.Title,
+		State:              task.state,
+		Reason:             task.reason,
+		LivenessClass:      liveness,
+		BeatsSeen:          beats,
+		LastBeatUnixNano:   lastBeat,
+		LastBeatAgeSeconds: beatAge,
+		StartedUnixNano:    task.started.UnixNano(),
+		EndedUnixNano:      unixNanoOrZero(task.ended),
+		RuntimeSeconds:     seconds(end.Sub(task.started)),
+		Progress:           progress,
+		ETASeconds:         eta,
+		ETAUnixNano:        etaAt,
+		CurrentStep:        currentStep,
+		Resource:           ResourceWindow{Start: task.start, Current: cur, Delta: resourceDelta(task.start, cur)},
+		Steps:              steps,
+		Concepts:           conceptUsage([]TaskSnapshot{{Steps: steps}}),
+		Labels:             cloneLabels(task.spec.Labels),
+		Witness:            cloneWitness(task.witness),
 	}
 }
 
@@ -508,21 +587,26 @@ func (m *Manager) stepSnapshotLocked(step *stepState, now time.Time, current Res
 	}
 	progress := progressSnapshot(step.progress)
 	eta, etaAt := estimate(step.started, now, step.state, step.progress)
+	liveness, beats, lastBeat, beatAge := livenessSnapshot(step.state, end, step.heartbeat, m.livenessTimeout)
 	return StepSnapshot{
-		StepID:          step.spec.StepID,
-		Title:           step.spec.Title,
-		Concept:         step.spec.Concept,
-		State:           step.state,
-		Reason:          step.reason,
-		StartedUnixNano: step.started.UnixNano(),
-		EndedUnixNano:   unixNanoOrZero(step.ended),
-		RuntimeSeconds:  seconds(end.Sub(step.started)),
-		Progress:        progress,
-		ETASeconds:      eta,
-		ETAUnixNano:     etaAt,
-		Resource:        ResourceWindow{Start: step.start, Current: cur, Delta: resourceDelta(step.start, cur)},
-		Labels:          cloneLabels(step.spec.Labels),
-		Witness:         cloneWitness(step.witness),
+		StepID:             step.spec.StepID,
+		Title:              step.spec.Title,
+		Concept:            step.spec.Concept,
+		State:              step.state,
+		Reason:             step.reason,
+		LivenessClass:      liveness,
+		BeatsSeen:          beats,
+		LastBeatUnixNano:   lastBeat,
+		LastBeatAgeSeconds: beatAge,
+		StartedUnixNano:    step.started.UnixNano(),
+		EndedUnixNano:      unixNanoOrZero(step.ended),
+		RuntimeSeconds:     seconds(end.Sub(step.started)),
+		Progress:           progress,
+		ETASeconds:         eta,
+		ETAUnixNano:        etaAt,
+		Resource:           ResourceWindow{Start: step.start, Current: cur, Delta: resourceDelta(step.start, cur)},
+		Labels:             cloneLabels(step.spec.Labels),
+		Witness:            cloneWitness(step.witness),
 	}
 }
 
@@ -599,6 +683,26 @@ func progressSnapshot(p progressState) Progress {
 		out.Percent = &pct
 	}
 	return out
+}
+
+func beat(h *heartbeatState, now time.Time) {
+	h.beats++
+	h.last = now
+}
+
+func livenessSnapshot(state State, now time.Time, h heartbeatState, timeout time.Duration) (LivenessClass, int64, int64, *float64) {
+	if h.beats <= 0 || h.last.IsZero() {
+		return LivenessIdle, 0, 0, nil
+	}
+	age := seconds(now.Sub(h.last))
+	class := LivenessIdle
+	if state == StateRunning {
+		class = LivenessLive
+		if timeout > 0 && now.Sub(h.last) > timeout {
+			class = LivenessStalled
+		}
+	}
+	return class, h.beats, h.last.UnixNano(), &age
 }
 
 func estimate(start, now time.Time, state State, p progressState) (*float64, *int64) {

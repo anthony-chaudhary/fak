@@ -14,6 +14,8 @@ func validSnapshot() Snapshot {
 	stepPct := 25.0
 	etaSeconds := 8.0
 	etaAt := int64(1700000016000000000)
+	taskBeatAge := 1.0
+	stepBeatAge := 1.5
 	return Snapshot{
 		Schema:          SchemaSnapshot,
 		ProcessID:       4321,
@@ -26,25 +28,33 @@ func validSnapshot() Snapshot {
 		Resource:        ResourceSample{TSUnixNano: 1700000004000000000, WallSeconds: 4, CPUSeconds: 2, Goroutines: 6},
 		ResourceDelta:   ResourceDelta{WallSeconds: 4, CPUSeconds: 1},
 		Tasks: []TaskSnapshot{{
-			TaskID:         "task_build",
-			Title:          "Build release",
-			State:          StateRunning,
-			RuntimeSeconds: 4,
-			Progress:       Progress{Done: 2, Total: 4, Unit: "phase", Percent: &taskPct},
-			ETASeconds:     &etaSeconds,
-			ETAUnixNano:    &etaAt,
-			CurrentStep:    "step_tests",
+			TaskID:             "task_build",
+			Title:              "Build release",
+			State:              StateRunning,
+			LivenessClass:      LivenessLive,
+			BeatsSeen:          2,
+			LastBeatUnixNano:   1700000003000000000,
+			LastBeatAgeSeconds: &taskBeatAge,
+			RuntimeSeconds:     4,
+			Progress:           Progress{Done: 2, Total: 4, Unit: "phase", Percent: &taskPct},
+			ETASeconds:         &etaSeconds,
+			ETAUnixNano:        &etaAt,
+			CurrentStep:        "step_tests",
 			Resource: ResourceWindow{
 				Start:   ResourceSample{WallSeconds: 0, CPUSeconds: 1, Goroutines: 5},
 				Current: ResourceSample{WallSeconds: 4, CPUSeconds: 2, Goroutines: 6},
 				Delta:   ResourceDelta{WallSeconds: 4, CPUSeconds: 1, Goroutines: 1},
 			},
 			Steps: []StepSnapshot{{
-				StepID:         "step_tests",
-				Concept:        "verify",
-				State:          StateRunning,
-				RuntimeSeconds: 3,
-				Progress:       Progress{Done: 1, Total: 4, Unit: "suite", Percent: &stepPct},
+				StepID:             "step_tests",
+				Concept:            "verify",
+				State:              StateRunning,
+				LivenessClass:      LivenessLive,
+				BeatsSeen:          1,
+				LastBeatUnixNano:   1700000002500000000,
+				LastBeatAgeSeconds: &stepBeatAge,
+				RuntimeSeconds:     3,
+				Progress:           Progress{Done: 1, Total: 4, Unit: "suite", Percent: &stepPct},
 				Resource: ResourceWindow{
 					Start:   ResourceSample{WallSeconds: 1, CPUSeconds: 1, Goroutines: 5},
 					Current: ResourceSample{WallSeconds: 4, CPUSeconds: 2, Goroutines: 6},
@@ -70,7 +80,9 @@ func TestValidateSnapshotAcceptsTerminalWithoutETA(t *testing.T) {
 	s.Tasks[0].Progress = Progress{Done: 4, Total: 4, Unit: "phase", Percent: &done}
 	s.Tasks[0].ETASeconds = nil
 	s.Tasks[0].ETAUnixNano = nil
+	s.Tasks[0].LivenessClass = LivenessIdle
 	s.Tasks[0].Steps[0].State = StateDone
+	s.Tasks[0].Steps[0].LivenessClass = LivenessIdle
 	if err := ValidateSnapshot(s); err != nil {
 		t.Fatalf("terminal snapshot rejected: %v", err)
 	}
@@ -85,7 +97,9 @@ func TestValidateSnapshotAcceptsOverrun(t *testing.T) {
 	s.Tasks[0].Progress = Progress{Done: 6, Total: 4, Unit: "phase", Percent: &over}
 	s.Tasks[0].ETASeconds = nil
 	s.Tasks[0].ETAUnixNano = nil
+	s.Tasks[0].LivenessClass = LivenessIdle
 	s.Tasks[0].Steps[0].State = StateDone
+	s.Tasks[0].Steps[0].LivenessClass = LivenessIdle
 	if err := ValidateSnapshot(s); err != nil {
 		t.Fatalf("overrun snapshot rejected: %v", err)
 	}
@@ -115,6 +129,18 @@ func TestValidateSnapshotRejectsInvalid(t *testing.T) {
 		}},
 		{"unknown task state", func(s *Snapshot) { s.Tasks[0].State = State("paused") }},
 		{"unknown step state", func(s *Snapshot) { s.Tasks[0].Steps[0].State = State("zombie") }},
+		{"unknown liveness class", func(s *Snapshot) { s.Tasks[0].LivenessClass = LivenessClass("sleeping") }},
+		{"negative beats", func(s *Snapshot) { s.Tasks[0].BeatsSeen = -1 }},
+		{"beat age without beats", func(s *Snapshot) {
+			s.Tasks[0].BeatsSeen = 0
+			s.Tasks[0].LastBeatUnixNano = 0
+		}},
+		{"running idle with beats", func(s *Snapshot) { s.Tasks[0].LivenessClass = LivenessIdle }},
+		{"terminal live liveness", func(s *Snapshot) {
+			s.Tasks[0].State = StateDone
+			s.Tasks[0].ETASeconds = nil
+			s.Tasks[0].ETAUnixNano = nil
+		}},
 		{"negative task runtime", func(s *Snapshot) { s.Tasks[0].RuntimeSeconds = -2 }},
 		{"negative step resource counter", func(s *Snapshot) { s.Tasks[0].Steps[0].Resource.Current.CPUSeconds = -1 }},
 		{"negative progress done", func(s *Snapshot) { s.Tasks[0].Progress.Done = -1 }},
@@ -207,6 +233,10 @@ func deepCopySnapshot(t *testing.T, s Snapshot) Snapshot {
 			v := *task.ETAUnixNano
 			ct.ETAUnixNano = &v
 		}
+		if task.LastBeatAgeSeconds != nil {
+			v := *task.LastBeatAgeSeconds
+			ct.LastBeatAgeSeconds = &v
+		}
 		if task.Progress.Percent != nil {
 			v := *task.Progress.Percent
 			ct.Progress.Percent = &v
@@ -217,6 +247,10 @@ func deepCopySnapshot(t *testing.T, s Snapshot) Snapshot {
 			if step.Progress.Percent != nil {
 				v := *step.Progress.Percent
 				cs.Progress.Percent = &v
+			}
+			if step.LastBeatAgeSeconds != nil {
+				v := *step.LastBeatAgeSeconds
+				cs.LastBeatAgeSeconds = &v
 			}
 			ct.Steps[j] = cs
 		}
