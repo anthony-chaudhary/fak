@@ -57,6 +57,8 @@ func main() {
 	switch os.Args[1] {
 	case "run":
 		cmdRun(os.Args[2:])
+	case "commit":
+		cmdCommit(os.Args[2:])
 	case "preflight":
 		cmdPreflight(os.Args[2:])
 	case "attest":
@@ -138,6 +140,16 @@ func usage() {
 	fmt.Fprintf(os.Stderr, "fak - the Fused Agent Kernel (v%s)\n\n", appversion.Current())
 	fmt.Fprint(os.Stderr, `usage:
   fak run       --trace FILE [--engine inkernel] [--vdso=true] [--policy FILE]
+  fak commit    --path P [--path P ...] (-m STR | -F FILE/-) [--push] [--trunk B] [--no-signoff] [--json]
+                (the SAFE SHARED-TRUNK COMMIT: commit by EXPLICIT pathspec on a
+                 multi-session trunk and refuse to report success unless ONLY those
+                 paths landed. Lock-guards the commit, writes the message to a file
+                 (never -m, so an em-dash/multiline subject can't misparse as a
+                 pathspec), runs the real hooks (never --no-verify), then asserts the
+                 committed file set == the requested paths. If a peer raced extra files
+                 in -> PATHSPEC_RACE, commit left intact, never pushed/force-pushed.
+                 Refuses OFF_TRUNK / MERGE_IN_PROGRESS / NOTHING_STAGED up front.
+                 Exit 0 ok, 2 usage, 3 a pre-commit refusal, 1 a raced/refused commit)
   fak preflight --tool NAME --args JSON [--policy FILE]
   fak attest    --policy FILE [--probes FILE] [--out FILE] [--json] [--quiet]
                  (the COMPLIANCE ATTESTATION GENERATOR: prove the capability floor
