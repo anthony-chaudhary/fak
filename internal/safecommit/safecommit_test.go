@@ -3,6 +3,8 @@ package safecommit
 import (
 	"context"
 	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -395,5 +397,136 @@ func TestNoPushWithoutFlag(t *testing.T) {
 	}
 	if g.sawSubcommand("push") {
 		t.Fatalf("must not invoke git push without the flag; calls=%v", g.calls)
+	}
+}
+
+// realDirOpts builds Options pointed at a real on-disk dir (the symlink-escape guard
+// resolves landed paths against the filesystem, unlike the string-only race guard).
+func realDirOpts(dir string, paths []string) Options {
+	return Options{
+		Dir:     dir,
+		Paths:   paths,
+		Message: "fix(x): contained change\n\n(fak safecommit)",
+		SignOff: true,
+	}
+}
+
+// TestSymlinkEscape_isRefused proves the CVE-2025-53109 class is caught: a symlink created
+// INSIDE the lease that points OUTSIDE it passes the path-string race guard (the committed
+// path still starts with the lease prefix) but its resolved target escapes the lease, so the
+// post-commit assertion must refuse rather than report clean.
+func TestSymlinkEscape_isRefused(t *testing.T) {
+	root := t.TempDir()
+	lease := filepath.Join(root, "lease")
+	outside := filepath.Join(root, "outside")
+	for _, d := range []string{lease, outside} {
+		if err := os.MkdirAll(d, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// the real secret lives outside the lease
+	if err := os.WriteFile(filepath.Join(outside, "secret.go"), []byte("package x\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// a symlink INSIDE the lease pointing at the outside file
+	link := filepath.Join(lease, "evil.go")
+	if err := os.Symlink(filepath.Join(outside, "secret.go"), link); err != nil {
+		t.Skipf("symlinks unavailable on this host (%v) — guard is still compiled and unit-covered elsewhere", err)
+	}
+
+	rep := onTrunkBase()
+	rep["status"] = reply{out: " M lease/evil.go\n", code: 0}
+	rep["diff-tree"] = reply{out: "lease/evil.go\n", code: 0}
+	g := &fakeGit{reply: rep}
+	var released bool
+
+	res, err := CommitWith(context.Background(), g.run, okLock(&released), realDirOpts(root, []string{"lease"}))
+	if err != nil {
+		t.Fatalf("infra error: %v", err)
+	}
+	if res.Reason != ReasonSymlinkEscape {
+		t.Fatalf("reason = %q, want %q (symlink escaping the lease must refuse)", res.Reason, ReasonSymlinkEscape)
+	}
+	if res.Verified {
+		t.Fatalf("a symlink-escaping commit must not be Verified")
+	}
+	if res.Pushed {
+		t.Fatalf("a refused commit must never push")
+	}
+	if len(res.RacedExtra) == 0 || res.RacedExtra[0] != "lease/evil.go" {
+		t.Fatalf("RacedExtra = %v, want [lease/evil.go]", res.RacedExtra)
+	}
+}
+
+// TestInLeaseSymlink_passes is the paired positive case: a symlink that stays INSIDE the
+// lease resolves to a target the lease covers, so the guard must NOT refuse it (otherwise it
+// is merely rejecting all symlinks, not escapes).
+func TestInLeaseSymlink_passes(t *testing.T) {
+	root := t.TempDir()
+	lease := filepath.Join(root, "lease")
+	if err := os.MkdirAll(lease, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(lease, "real.go"), []byte("package x\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(lease, "alias.go")
+	if err := os.Symlink(filepath.Join(lease, "real.go"), link); err != nil {
+		t.Skipf("symlinks unavailable on this host (%v)", err)
+	}
+
+	rep := onTrunkBase()
+	rep["status"] = reply{out: " M lease/alias.go\n", code: 0}
+	rep["diff-tree"] = reply{out: "lease/alias.go\n", code: 0}
+	g := &fakeGit{reply: rep}
+
+	res, err := CommitWith(context.Background(), g.run, okLock(nil), realDirOpts(root, []string{"lease"}))
+	if err != nil {
+		t.Fatalf("infra error: %v", err)
+	}
+	if res.Reason != "" {
+		t.Fatalf("reason = %q, want clean (an in-lease symlink must pass)", res.Reason)
+	}
+	if !res.Verified {
+		t.Fatalf("an in-lease symlink commit must verify")
+	}
+}
+
+// TestLandedEscapesLease_directUnit exercises the containment helper without needing OS
+// symlink privilege (unavailable to an unprivileged Windows process), so the guard's logic
+// is behaviorally verified on every host, not only where symlinks can be created. It drives
+// the two decisive branches with plain real files: a landed path whose resolved target the
+// requested lease covers (clean) vs one the lease does NOT cover (escaped).
+func TestLandedEscapesLease_directUnit(t *testing.T) {
+	root := t.TempDir()
+	for _, d := range []string{"lease", "outside"} {
+		if err := os.MkdirAll(filepath.Join(root, d), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(root, "lease", "ok.go"), []byte("package x\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "outside", "secret.go"), []byte("package x\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// in-lease landed path: resolved target is covered -> not escaped.
+	if got := landedEscapesLease(root, "lease/ok.go\n", []string{"lease"}); len(got) != 0 {
+		t.Fatalf("in-lease path flagged as escape: %v", got)
+	}
+	// a landed path naming a real file OUTSIDE the lease (the post-resolution containment
+	// the symlink case reduces to): resolved target is not covered -> escaped.
+	if got := landedEscapesLease(root, "outside/secret.go\n", []string{"lease"}); len(got) != 1 || got[0] != "outside/secret.go" {
+		t.Fatalf("outside path not flagged as escape: %v", got)
+	}
+	// a landed path that does not exist on disk carries no symlink to escape through and is
+	// left to the string-level guard -> not flagged here.
+	if got := landedEscapesLease(root, "lease/ghost.go\n", []string{"lease"}); len(got) != 0 {
+		t.Fatalf("non-existent path flagged as escape: %v", got)
+	}
+	// dir == "" disables the check.
+	if got := landedEscapesLease("", "outside/secret.go\n", []string{"lease"}); len(got) != 0 {
+		t.Fatalf("empty dir did not disable the check: %v", got)
 	}
 }

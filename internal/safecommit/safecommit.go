@@ -35,6 +35,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"path/filepath"
 	"os"
 	"sort"
 	"strings"
@@ -98,6 +99,7 @@ const (
 	ReasonLockBusy        = "LOCK_BUSY"         // another fak writer holds the commit lock (retryable)
 	ReasonHookRefused     = "HOOK_REFUSED"      // git/commit-hook refused the commit (exit != 0)
 	ReasonPathspecRace    = "PATHSPEC_RACE"     // a peer swept extra files into the commit — the headline guard
+	ReasonSymlinkEscape   = "SYMLINK_ESCAPE"    // a landed path resolves (through a symlink) to a target outside the lease
 	ReasonPushRejected    = "PUSH_REJECTED"     // git push refused (e.g. non-fast-forward)
 )
 
@@ -270,6 +272,20 @@ func CommitWith(ctx context.Context, run Runner, lock LockFunc, opts Options) (R
 		res.Detail = "extra files landed in this commit — a peer raced; commit left intact for review, not pushed"
 		return res, nil
 	}
+
+	// racedExtra compared path STRINGS. A symlink created inside the lease that points
+	// outside it would pass that check (the committed path string still starts with a
+	// requested prefix) while git tracked a target outside the lease — the CVE-2025-53109
+	// symlink-escape class. Resolve each landed path on disk and refuse if its real target
+	// escapes the lease. Fail closed on an escaping target; a path that does not resolve to
+	// a real file (deleted, or simply not present) carries no symlink to escape through and
+	// is left to the string-level guard above.
+	if escaped := landedEscapesLease(opts.Dir, landed, paths); len(escaped) > 0 {
+		res.Reason = ReasonSymlinkEscape
+		res.RacedExtra = escaped
+		res.Detail = "a landed path resolves through a symlink to a target outside the lease; commit left intact for review, not pushed"
+		return res, nil
+	}
 	res.Verified = true
 
 	// (8) Optional push — only a verified commit, plain push (never --force). A rejection
@@ -358,4 +374,54 @@ func trimDetail(s string) string {
 		return s[:max] + "…"
 	}
 	return s
+}
+
+// landedEscapesLease resolves each committed path against the real filesystem under dir
+// and returns those whose resolved target escapes every requested tree — the symlink-escape
+// (CVE-2025-53109) signature that a path-string comparison (racedExtra) cannot see. The
+// containment of the RESOLVED, repo-relative target is decided with the same gitgate rule
+// the policy uses. Fail-closed semantics: a path that resolves to a target outside the
+// lease is reported; a path that cannot be resolved to a real file (EvalSymlinks errors:
+// deleted, or never on disk) is NOT reported here — it carries no on-disk symlink to escape
+// through, and the string-level racedExtra guard already covered its tracked path. dir == ""
+// disables the check (no tree to resolve against).
+func landedEscapesLease(dir string, diffTreeOut string, requested []string) []string {
+	if dir == "" {
+		return nil
+	}
+	root, err := filepath.EvalSymlinks(dir)
+	if err != nil {
+		root = dir // best-effort: compare against the unresolved root
+	}
+	var escaped []string
+	for _, line := range strings.Split(diffTreeOut, "\n") {
+		p, ok := gitgate.CleanRepoPath(line)
+		if !ok {
+			continue
+		}
+		abs := filepath.Join(root, filepath.FromSlash(p))
+		real, rerr := filepath.EvalSymlinks(abs)
+		if rerr != nil {
+			// Not a resolvable on-disk path: nothing to escape through here.
+			continue
+		}
+		rel, rerr := filepath.Rel(root, real)
+		if rerr != nil {
+			// Cannot express the target relative to the repo root — it is outside. Refuse.
+			escaped = append(escaped, p)
+			continue
+		}
+		rel = filepath.ToSlash(rel)
+		clean, ok := gitgate.CleanRepoPath(rel)
+		if !ok {
+			// rel escapes above the root (".." / absolute) — outside the lease. Refuse.
+			escaped = append(escaped, p)
+			continue
+		}
+		if !gitgate.CoveredByAnyTree(clean, requested) {
+			escaped = append(escaped, p)
+		}
+	}
+	sort.Strings(escaped)
+	return escaped
 }
