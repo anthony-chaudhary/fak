@@ -102,8 +102,6 @@ func main() {
 		cmdModel(os.Args[2:])
 	case "route":
 		cmdRoute(os.Args[2:])
-	case "session":
-		cmdSession(os.Args[2:])
 	case "routebench":
 		cmdRoutebench(os.Args[2:])
 	case "version", "-v", "--version":
@@ -204,18 +202,6 @@ func usage() {
   fak recall    [--dir DIR] [--out recall-report.json] [--query STR]
                 (persist a finished session as a core dump, reload it in a FRESH
                  store, and demonstrate the quarantine surviving the boundary)
-  fak session   demo | dump | info | restore | ls
-                (the PORTABLE SESSION IMAGE: make a session a first-class value you
-                 dump, archive to one .faksession file, offload, and RESUME on another
-                 host — under another model. Composes the drive state (run/budget/
-                 priority/pace), the recall core image (page table + swap device +
-                 index), and the trajectory into one versioned, sha256-integrity bundle.
-                 Model-agnostic by design: it carries logical content, never a KV cache
-                 or token ids, so a resume re-prefills on any model and the change is
-                 logged as a migration. 'demo' is the offline witness — dump on
-                 laptop/model-A -> pack -> resume on server-vm/model-B: the drive
-                 re-attaches, the quarantine survives the boundary, integrity is
-                 fail-closed. 'dump'/'info'/'restore'/'ls' operate on real images)
   fak dream     [--dir DIR] [--out-dir DIR] [--out dream-report.json]
                 (offline "sleep" pass over a core image: re-screen, pre-seal
                  refuted witnesses, repair descriptors, surface duplicate aliases,
@@ -238,6 +224,11 @@ func usage() {
                  a REAL Claude Code transcript; default is the committed fixture.
                  --cmd html emits a self-contained static HTML inspection report — the
                  shareable artifact a teammate opens in a browser)
+  fak session   ls | status <id> | stop <id> | pause <id> | resume <id> | throttle <id> |
+                run <id> <state> | budget <id> [--turns N] | pace <id> [--max-tokens N] |
+                priority <id> <N>   [--addr URL] [--key K] [--if-rev N] [--json]
+                (the OPERATOR control surface: read a served session's live DRIVE state
+                 and CANCEL or UPDATE it in flight, over the /v1/fak/session(s) routes)
   fak serve     [--addr 127.0.0.1:8080 | --stdio]
                 [--provider openai|anthropic|gemini|xai --base-url URL --model M --api-key-env VAR]
                 [--engine inkernel] [--gguf FILE] [--policy FILE] [--policy-check] [--require-key-env VAR] [--vdso=true]
