@@ -545,6 +545,9 @@ func buildParallelProof(ctx context.Context, workers, calls, hotFiles int, engin
 	if hotFiles > len(parallelHotFileCatalog) {
 		hotFiles = len(parallelHotFileCatalog)
 	}
+	if hotFiles > calls {
+		hotFiles = calls
+	}
 	configureFileWorld()
 	res := abi.ActiveResolver()
 	if res == nil {

@@ -178,6 +178,39 @@ func TestParallelProofShowsSharedHotCache(t *testing.T) {
 	}
 }
 
+func TestParallelProofCapsHotFilesToWorkload(t *testing.T) {
+	proof, err := buildParallelProof(context.Background(), 8, 2, 8, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if proof.HotFiles != 2 {
+		t.Fatalf("hot files = %d, want 2", proof.HotFiles)
+	}
+	if proof.RawEngineCalls != 2 {
+		t.Fatalf("raw engine calls = %d, want 2", proof.RawEngineCalls)
+	}
+	if proof.FakWarmupEngineCalls != 2 {
+		t.Fatalf("warmup engine calls = %d, want 2", proof.FakWarmupEngineCalls)
+	}
+	if proof.FakHotEngineCalls != 0 {
+		t.Fatalf("hot engine calls = %d, want 0", proof.FakHotEngineCalls)
+	}
+	if proof.EngineCallsAvoided != 0 {
+		t.Fatalf("engine calls avoided = %d, want 0", proof.EngineCallsAvoided)
+	}
+	if proof.EngineCallAvoidedRate != 0 {
+		t.Fatalf("engine call avoided rate = %f, want 0", proof.EngineCallAvoidedRate)
+	}
+	if len(proof.PerResource) != 2 {
+		t.Fatalf("per-resource rows = %d, want 2", len(proof.PerResource))
+	}
+	for _, r := range proof.PerResource {
+		if r.EngineCallsAvoided != 0 || r.EngineCallAvoidedRate != 0 {
+			t.Fatalf("resource row reported impossible savings: %+v", r)
+		}
+	}
+}
+
 // TestDenyVerdictBounded guards the one constant the prefilter win rests on: a deny
 // verdict that enters context in place of an executed bad call's result must stay a
 // SMALL, bounded size (the refusal vocabulary is closed). If it ever grows large, the
