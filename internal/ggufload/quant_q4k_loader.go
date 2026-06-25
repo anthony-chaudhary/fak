@@ -43,7 +43,41 @@ func (s *WeightSource) QuantModelQ4K() (*model.Model, error) {
 		return nil, err
 	}
 	builder := model.NewQuantBuilder(cfg, cfg.TieWordEmbeddings)
+	kvbHalf := map[int]glmKVBHalf{} // MLA KV-b 2->1 merge buffer (see QuantModelProfile)
 	for _, info := range s.File.Tensors {
+		// glm_moe_dsa MLA KV-b: buffer the split attn_k_b/attn_v_b and emit the combined
+		// kv_b_proj when both arrive, before CanonicalTensorNameArch (which leaves them unmapped).
+		// The merged tensor follows the standard dequant->Q8 path (it is not resident-Q4_K eligible).
+		if cfg.ModelType == "glm_moe_dsa" {
+			if layer, half, ok := glmMoeDsaSplitKVB(info.Name); ok {
+				shape, err := modelShapeFromGGUFDims(info.Name, info.Dims)
+				if err != nil {
+					return nil, err
+				}
+				raw, _, err := s.TensorBytes(info.Name)
+				if err != nil {
+					return nil, err
+				}
+				data, err := dequantF32(info, raw)
+				if err != nil {
+					return nil, err
+				}
+				merged, ready, err := bufferGLMKVBHalf(kvbHalf, layer, half, shape, append([]float32(nil), data...))
+				if err != nil {
+					return nil, err
+				}
+				if ready {
+					md, err := normalizeCanonicalTensorData(merged.Name, merged.Data, cfg)
+					if err != nil {
+						return nil, err
+					}
+					if err := builder.AddF32Tensor(merged.Name, merged.Shape, md); err != nil {
+						return nil, err
+					}
+				}
+				continue
+			}
+		}
 		canon, ok := CanonicalTensorNameArch(info.Name, cfg.ModelType)
 		if !ok {
 			return nil, fmt.Errorf("gguf: no canonical mapping for tensor %s", info.Name)
@@ -83,6 +117,9 @@ func (s *WeightSource) QuantModelQ4K() (*model.Model, error) {
 		if err := builder.AddF32Tensor(canon, shape, data); err != nil {
 			return nil, err
 		}
+	}
+	if err := glmKVBUnpaired(kvbHalf); err != nil {
+		return nil, err
 	}
 	return builder.Build()
 }
