@@ -20,6 +20,16 @@
 msgfile="$1"                       # save BEFORE `set --` clobbers the positionals
 root="$(git rev-parse --show-toplevel 2>/dev/null)" || exit 0
 
+# FAST PATH: `fak hooks commit-msg` runs the PUBLIC_LEAK (block) + COMMIT_MSG (warn) gates in
+# one process, honoring the SAME FLEET_SCRUB_GUARD / FLEET_MSG_GUARD env vars. Exit 0 -> done;
+# 1 -> a block gate fired; 2 -> could-not-run, fall through to the Python path below (fail-open).
+if command -v fak >/dev/null 2>&1; then
+	fak hooks commit-msg --root "$root" "$msgfile"
+	_fak_st=$?
+	[ "$_fak_st" -eq 0 ] && exit 0
+	[ "$_fak_st" -eq 1 ] && exit 1
+fi
+
 # Resolve a python interpreter once (PY_A binary, PY_B optional `-3` for the
 # Windows `py` launcher). Empty PY_A -> skip every gate (fail open).
 if [ -n "${PYTHON:-}" ]; then PY_A="$PYTHON"; PY_B=""
