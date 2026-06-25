@@ -70,6 +70,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import difflib
 import re
 import subprocess
 import sys
@@ -502,6 +503,38 @@ def render_markdown(payload: dict[str, Any], stamp: str | None) -> str:
     return "\n".join(lines) + "\n"
 
 
+
+# The snapshot stamp lives in the H1 ("# Bench-DX scorecard <stamp>"); --check-doc re-renders
+# with the SAME stamp so a date never causes spurious drift — only content drift fails.
+_SNAPSHOT_STAMP_RE = re.compile(r"^# Bench-DX scorecard\s+(?P<stamp>\S+)\s*$", re.MULTILINE)
+
+
+def snapshot_stamp(text: str) -> str:
+    m = _SNAPSHOT_STAMP_RE.search(text)
+    return m.group("stamp").strip() if m else ""
+
+
+def check_markdown_doc(workspace: Path, payload: dict) -> dict:
+    """Re-derive the snapshot markdown using the committed doc's own stamp and compare. A
+    mismatch means the committed docs/BENCH-DX-SCORECARD.md drifted from the live score."""
+    path = workspace / GENERATED_SNAPSHOT
+    try:
+        actual = path.read_text(encoding="utf-8")
+    except OSError as exc:
+        return {"ok": False, "doc": GENERATED_SNAPSHOT, "stamp": "", "reason": f"read {GENERATED_SNAPSHOT}: {exc}", "diff": []}
+    stamp = snapshot_stamp(actual)
+    if not stamp:
+        return {"ok": False, "doc": GENERATED_SNAPSHOT, "stamp": "", "reason": "snapshot H1 stamp missing", "diff": []}
+    expected = render_markdown(payload, stamp=stamp)
+    if actual.rstrip() == expected.rstrip():
+        return {"ok": True, "doc": GENERATED_SNAPSHOT, "stamp": stamp,
+                "reason": f"{GENERATED_SNAPSHOT} matches the live score (stamp {stamp})", "diff": []}
+    diff = list(difflib.unified_diff(actual.splitlines(), expected.splitlines(),
+                                     fromfile=GENERATED_SNAPSHOT, tofile=f"{GENERATED_SNAPSHOT} (generated)", lineterm=""))
+    return {"ok": False, "doc": GENERATED_SNAPSHOT, "stamp": stamp,
+            "reason": f"{GENERATED_SNAPSHOT} is stale; regenerate with --markdown --stamp {stamp}", "diff": diff}
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description="Bench-DX scorecard (read-only).")
     ap.add_argument("--workspace", default="", help="workspace root (default: repo root)")
@@ -510,6 +543,8 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--stamp", default="", help="date stamp for the markdown header")
     ap.add_argument("--compare", default="", metavar="BASELINE.json",
                     help="print the bench-DX-debt delta vs a prior baseline JSON")
+    ap.add_argument("--check-doc", action="store_true",
+                    help=f"fail if {GENERATED_SNAPSHOT} drifted from the live score (CI gate)")
     args = ap.parse_args(argv)
 
     try:
@@ -519,6 +554,15 @@ def main(argv: list[str] | None = None) -> int:
 
     workspace = Path(args.workspace).resolve() if args.workspace else repo_root()
     payload = collect(workspace)
+
+    if args.check_doc:
+        chk = check_markdown_doc(workspace, payload)
+        print(chk["reason"])
+        if not chk["ok"]:
+            for line in chk["diff"][:40]:
+                print(line)
+            return 1
+        return 0
 
     if args.compare:
         try:

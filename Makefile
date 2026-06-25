@@ -190,6 +190,9 @@ demo-scorecards:
 	@python3 tools/code_slop_scorecard_test.py
 	@python3 tools/steerability_scorecard_test.py
 	@python3 tools/steerability_scorecard.py >/dev/null
+	@python3 tools/bench_dx_scorecard_test.py
+	@python3 tools/bench_dx_scorecard.py >/dev/null
+	@python3 tools/bench_dx_scorecard.py --check-doc
 	@echo "demo-scorecards OK"
 # code-slop scorecard: only the unit-test line gates here for now. The bare run +
 # --check-doc both exit 1 while slop-debt > 0 (the scorecard reports honestly), so
