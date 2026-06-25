@@ -1,0 +1,114 @@
+[
+  {
+    "struct": "abi.Ref",
+    "fields": [
+      "Kind: abi.RefKind",
+      "Digest: string",
+      "Inline: []uint8",
+      "Handle: uint64",
+      "Len: int64",
+      "Taint: abi.TaintLabel",
+      "Scope: abi.ShareScope"
+    ]
+  },
+  {
+    "struct": "abi.SpeculationContext",
+    "fields": [
+      "Speculative: bool",
+      "Epoch: uint64",
+      "ParentEpoch: uint64"
+    ]
+  },
+  {
+    "struct": "abi.ToolCall",
+    "fields": [
+      "Op: abi.OpCode",
+      "Tool: string",
+      "Engine: string",
+      "Args: abi.Ref",
+      "Caps: []abi.Capability",
+      "Spec: abi.SpeculationContext",
+      "Txn: abi.TxnID",
+      "SeqNo: uint64",
+      "TraceID: string",
+      "Meta: map[string]string",
+      "Ext: map[abi.ExtKey]abi.Ref"
+    ]
+  },
+  {
+    "struct": "abi.Result",
+    "fields": [
+      "Call: *abi.ToolCall",
+      "Payload: abi.Ref",
+      "Status: abi.Status",
+      "Outcome: abi.Outcome",
+      "Meta: map[string]string",
+      "Ext: map[abi.ExtKey]abi.Ref"
+    ]
+  },
+  {
+    "struct": "abi.Verdict",
+    "fields": [
+      "Kind: abi.VerdictKind",
+      "Payload: abi.VerdictPayload",
+      "Reason: abi.ReasonCode",
+      "By: string",
+      "Meta: map[string]string"
+    ]
+  },
+  {
+    "struct": "abi.TransformPayload",
+    "fields": [
+      "NewArgs: abi.Ref"
+    ]
+  },
+  {
+    "struct": "abi.QuarantinePayload",
+    "fields": [
+      "PageOut: bool"
+    ]
+  },
+  {
+    "struct": "abi.WitnessPayload",
+    "fields": [
+      "Claim: string"
+    ]
+  },
+  {
+    "struct": "abi.Completion",
+    "fields": [
+      "Handle: abi.SubmissionHandle",
+      "Result: *abi.Result"
+    ]
+  },
+  {
+    "struct": "abi.SubmissionHandle",
+    "fields": [
+      "Seq: uint64",
+      "Queue: uint32",
+      "Opaque: uint64"
+    ]
+  },
+  {
+    "struct": "abi.Event",
+    "fields": [
+      "Kind: abi.EventKind",
+      "Call: *abi.ToolCall",
+      "Verdict: *abi.Verdict",
+      "Result: *abi.Result",
+      "Label: *abi.LabelRow",
+      "Fields: map[string]interface {}"
+    ]
+  },
+  {
+    "struct": "abi.LabelRow",
+    "fields": [
+      "CallHash: string",
+      "RungPassed: int",
+      "RungFailed: int",
+      "Verdict: abi.VerdictKind",
+      "Reason: abi.ReasonCode",
+      "Speculative: bool"
+    ]
+  }
+]
