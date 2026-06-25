@@ -14,8 +14,75 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/ifc"
 	"github.com/anthony-chaudhary/fak/internal/kernel"
 	"github.com/anthony-chaudhary/fak/internal/policy"
+	"github.com/anthony-chaudhary/fak/internal/ratelimit"
 	"github.com/anthony-chaudhary/fak/internal/recall"
 )
+
+// TestApplyRuntimeInstallsRateCap is the issue-#699 acceptance witness (criterion
+// 3): applyRuntime pushes the manifest rate_limit into the governor singleton, an
+// absent block resets it to inert, and re-applying a changed cap re-arms it (the
+// --policy hot-reload path). The process-global governor is snapshotted + restored
+// so the test is hermetic.
+func TestApplyRuntimeInstallsRateCap(t *testing.T) {
+	ctx := context.Background()
+	ratelimit.Default.ResetAll()
+	defer func() {
+		ratelimit.Default.SetLimit(ratelimit.Limit{}, ratelimit.KeyPerTrace) // restore inert
+		ratelimit.Default.ResetAll()
+	}()
+
+	// Install: a manifest with max_calls=2 per trace + a declared retry-after.
+	rt, err := policy.ParseRuntime([]byte(`{"allow":["search_kb"],"rate_limit":{"max_calls":2,"retry_after_ms":300}}`))
+	if err != nil {
+		t.Fatalf("ParseRuntime: %v", err)
+	}
+	applyRuntime(rt)
+
+	admit := func(trace string) abi.Verdict {
+		return ratelimit.Default.Adjudicate(ctx, &abi.ToolCall{
+			Tool: "search_kb", TraceID: trace,
+			Args: abi.Ref{Kind: abi.RefInline, Inline: []byte(`{}`)},
+		})
+	}
+	for i := 0; i < 2; i++ {
+		if v := admit("rl-trace"); v.Kind != abi.VerdictDefer {
+			t.Fatalf("under-cap call %d: got %v, want Defer", i, v.Kind)
+		}
+	}
+	v := admit("rl-trace")
+	if v.Kind != abi.VerdictDeny || v.Reason != abi.ReasonRateLimited {
+		t.Fatalf("over-cap call: got %v/%s, want Deny/RATE_LIMITED", v.Kind, abi.ReasonName(v.Reason))
+	}
+	if v.Meta["retry_after_ms"] != "300" {
+		t.Fatalf("declared retry_after_ms should surface on the singleton: got %q, want 300", v.Meta["retry_after_ms"])
+	}
+
+	// Inert-on-absent (criterion 2/3): a manifest with NO rate_limit resets the
+	// governor to inert — every call Defers, no RATE_LIMITED emitted.
+	rtInert, err := policy.ParseRuntime([]byte(`{"allow":["search_kb"]}`))
+	if err != nil {
+		t.Fatalf("ParseRuntime inert: %v", err)
+	}
+	applyRuntime(rtInert)
+	for i := 0; i < 10; i++ {
+		if v := admit("rl-trace"); v.Kind != abi.VerdictDefer {
+			t.Fatalf("inert governor should Defer every call %d: got %v", i, v.Kind)
+		}
+	}
+
+	// Hot-reload (criterion 3): re-applying a tighter cap re-arms the governor.
+	rtReload, err := policy.ParseRuntime([]byte(`{"allow":["search_kb"],"rate_limit":{"max_calls":1}}`))
+	if err != nil {
+		t.Fatalf("ParseRuntime reload: %v", err)
+	}
+	applyRuntime(rtReload)
+	if v := admit("rl-trace-2"); v.Kind != abi.VerdictDefer {
+		t.Fatalf("reloaded cap=1 first call: got %v, want Defer", v.Kind)
+	}
+	if v := admit("rl-trace-2"); v.Kind != abi.VerdictDeny || v.Reason != abi.ReasonRateLimited {
+		t.Fatalf("reloaded cap=1 second call: got %v/%s, want Deny/RATE_LIMITED", v.Kind, abi.ReasonName(v.Reason))
+	}
+}
 
 func TestApplyRuntimeInstallsIFCManifestPolicy(t *testing.T) {
 	rt, err := policy.ParseRuntime([]byte(`{

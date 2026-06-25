@@ -24,6 +24,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/abi"
 	"github.com/anthony-chaudhary/fak/internal/adjudicator"
@@ -36,6 +37,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/kernel"
 	"github.com/anthony-chaudhary/fak/internal/metrics"
 	"github.com/anthony-chaudhary/fak/internal/policy"
+	"github.com/anthony-chaudhary/fak/internal/ratelimit"
 	"github.com/anthony-chaudhary/fak/internal/session"
 	"github.com/anthony-chaudhary/fak/internal/tokenizer"
 	"github.com/anthony-chaudhary/fak/internal/toollint"
@@ -767,6 +769,39 @@ func taintLevelName(t abi.TaintLabel) string {
 func applyRuntime(rt policy.Runtime) {
 	policy.ApplySources(rt)
 	ifc.ConfigureDefaultPolicy(ifcPolicy(rt))
+	applyRateLimit(rt.RateLimit)
+}
+
+// applyRateLimit pushes the manifest-declared rate_limit into the governor singleton
+// (issue #699, Epic 8), mirroring how SafeSinks/Authorize reach ifc. A present block
+// installs the cap (authoritative over the FAK_RATELIMIT_* env fallback); an absent
+// block resets the limiter to inert — so editing the cap out of the file on
+// --policy hot-reload removes it. Config and accrued counters are separate
+// (SetLimit does not wipe budgets), exactly as a mid-flight env change behaves.
+func applyRateLimit(r *policy.RateLimitRule) {
+	if r == nil {
+		ratelimit.Default.SetLimit(ratelimit.Limit{}, ratelimit.KeyPerTrace) // unlimited/inert
+		return
+	}
+	ratelimit.Default.SetLimit(ratelimit.Limit{
+		MaxCalls:   r.MaxCalls,
+		MaxCost:    r.MaxCost,
+		RetryAfter: time.Duration(r.RetryAfterMS) * time.Millisecond,
+	}, rateLimitKeyMode(r.Key))
+}
+
+// rateLimitKeyMode maps the manifest key string to the governor's KeyMode. The
+// manifest validator already guaranteed trace|tool|global (or empty); "" and "trace"
+// both mean per-trace (the governor's default dimension).
+func rateLimitKeyMode(key string) ratelimit.KeyMode {
+	switch strings.ToLower(strings.TrimSpace(key)) {
+	case "tool":
+		return ratelimit.KeyPerTool
+	case "global":
+		return ratelimit.KeyGlobal
+	default:
+		return ratelimit.KeyPerTrace
+	}
 }
 
 func ifcPolicy(rt policy.Runtime) ifc.Policy {
