@@ -1,0 +1,73 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  launchd keep-alive for the shared `fak serve` gateway — the always-on sibling
+  of com.fleet.dispatch-supervisor.plist. Where THAT plist polls a watchdog every
+  5 minutes, THIS one is a true 24/7 daemon: KeepAlive=true means launchd respawns
+  `fak serve` the instant it crashes or exits, and RunAtLoad=true starts it at
+  load (and at every login / boot). One local gateway on 127.0.0.1:8080 is the
+  shared inference seam every dispatch worker on this node dials, so it must
+  outlive any single session.
+
+  The M-series mac node sleeps ~every 25 minutes, which drops the gateway off the
+  fleet. KeepAlive only restarts a CRASHED process — it does NOT stop the OS from
+  sleeping the whole box. Pair this plist with tools/mac_keep_awake.sh (caffeinate)
+  so the machine itself stays awake while the fleet runs. For OFF-LAN reach to
+  127.0.0.1:8080 from another node, expose it over Tailscale (the gateway stays
+  bound to loopback; Tailscale handles the private overlay).
+
+  This is a TEMPLATE: replace the two __PLACEHOLDER__ tokens with absolute paths
+  for your node, then install it as a per-user agent:
+
+      sed -e "s#__FAK__#$(command -v fak)#" \
+          -e "s#__REPO__#$(cd "$(dirname "$0")/.." && pwd)#" \
+          tools/com.fak.serve-gateway.plist \
+        > ~/Library/LaunchAgents/com.fak.serve-gateway.plist
+      launchctl load -w ~/Library/LaunchAgents/com.fak.serve-gateway.plist
+
+  Set the upstream credential in your login environment (NOT in this template):
+
+      launchctl setenv ANTHROPIC_API_KEY "sk-ant-..."
+
+  Tail it, or unload it, with:
+
+      tail -f tools/_watchdog/launchd_serve.log
+      launchctl unload -w ~/Library/LaunchAgents/com.fak.serve-gateway.plist
+-->
+<plist version="1.0">
+  <dict>
+    <key>Label</key>
+    <string>com.fak.serve-gateway</string>
+
+    <key>ProgramArguments</key>
+    <array>
+      <string>__FAK__</string>
+      <string>serve</string>
+      <string>--provider</string>
+      <string>anthropic</string>
+      <string>--base-url</string>
+      <string>https://api.anthropic.com</string>
+      <string>--addr</string>
+      <string>127.0.0.1:8080</string>
+    </array>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+      <key>FAK_AUDIT_JOURNAL</key>
+      <string>__REPO__/tools/_watchdog/serve_audit.jsonl</string>
+    </dict>
+
+    <key>WorkingDirectory</key>
+    <string>__REPO__</string>
+
+    <key>KeepAlive</key>
+    <true/>
+
+    <key>RunAtLoad</key>
+    <true/>
+
+    <key>StandardOutPath</key>
+    <string>__REPO__/tools/_watchdog/launchd_serve.log</string>
+    <key>StandardErrorPath</key>
+    <string>__REPO__/tools/_watchdog/launchd_serve.err</string>
+  </dict>
+</plist>

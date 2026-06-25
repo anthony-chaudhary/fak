@@ -63,6 +63,7 @@ You do not rewrite your agent to adopt fak — you repoint one base URL at `fak 
 - [Migrating to fak](docs/fak/migration-guide.md): repoint one base URL to put fak's tool-call boundary in front of an existing OpenAI, Anthropic, LangChain, AutoGen, or llama.cpp stack.
 - [Multi-language client examples](docs/fak/multi-language-examples.md): runnable Python, JS/TS, Go, and Rust client code for calling a `fak serve` gateway across its OpenAI, Anthropic, and fak-native surfaces.
 - [Deployment guide](docs/fak/deployment-guide.md): production deployment of the `fak serve` gateway across Docker, Compose, Kubernetes, and bare metal, with an auth/policy/binding readiness checklist.
+- [Always-on dogfood server](docs/fak/always-on-dogfood-server.md): run the kernel in front of the REAL dev loop 24/7 — the guarded dispatch fleet plus a shared `fak serve` gateway — across a laptop, an always-on Mac (launchd + caffeinate), and GCP; with the `dogfood_coverage.py` scorecard to measure it and the `FLEET_DOGFOOD_GUARD` kill switch.
 
 ## Supported (what fak works with)
 
@@ -90,6 +91,8 @@ The dedicated, cross-linked capability pages. Each lists one category of support
 - [Model routing (per-aspect + ensemble)](docs/model-routing.md): route any aspect of one request — a single tool call, a sub-query, a reasoning step — to a different model, with first-class ensembles and configurable reductions (vote / best-of / all-reduce / concat), all from one deterministic, reviewable policy. SOTA routers pick one model for the whole request; fak makes routing first-class at every level (`fak route`).
 - [Context is not memory](docs/CONTEXT-IS-NOT-MEMORY.md): why fak separates context from memory by how long a fact stays true, gating promotion at write time with an expire-by-default durability class.
 - [The four layers of agent memory](docs/MEMORY-LAYERS-EXPLAINER.md): routing, addressing, fusion, and semantics as four distinct KV-cache problems, and why fak's change lives only at the semantics layer.
+- [Shared state ladder](docs/shared-state-ladder.md): the split between shared live messages, live mutable objects, durable handoff, disaggregated state, and user-level collaborative editing.
+- [Shared task record contract](docs/shared-task-record-contract.md): executable JSON envelopes and fixtures for collaborative task records, user patches, conflicts, approval gates, and disaggregated artifact refs.
 - [AWQ quantization support](docs/explainers/awq-quantization.md): fak's AWQ 4-bit activation-aware weight format, its dequantization formula, the LoadAWQ API, and the memory/accuracy trade-offs.
 - [Hardware portability via the compute HAL](docs/explainers/hardware-portability.md): how the `internal/compute` interface adds CUDA and Vulkan backends by registration instead of re-forking the in-kernel forward pass.
 
