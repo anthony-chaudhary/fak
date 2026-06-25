@@ -435,7 +435,7 @@ func main() {
 	hf := flag.String("hf", "", "HuggingFace snapshot dir (config.json + model.safetensors)")
 	synthetic := flag.String("synthetic", "", "run weightless on a synthetic model at a named shape (smollm2-135m|qwen25-1.5b|qwen25-7b) — no -hf/-dir needed; ratios faithful, absolute wall-clock is this-box")
 	lean := flag.Bool("lean", false, "memory-lean quantize-at-load (requires -hf; implies -quant)")
-	quantF := flag.Bool("quant", true, "use the Q8_0 quantized lane")
+	quantF := flag.Bool("quant", false, "use the Q8_0 quantized lane (else f32) — opt-in, matching batch/model/radixbench")
 	prefix := flag.Int("prefix", 2048, "shared prefix tokens (system prompt + tool schemas)")
 	turnsArg := flag.String("turns", "50", "comma-separated turn counts to sweep")
 	agentsArg := flag.String("agents", "5", "comma-separated agent counts to sweep")
