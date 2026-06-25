@@ -416,15 +416,35 @@ func buildProvenance() buildMetadata {
 			meta.FakCommit = strings.TrimSpace(string(out))
 		}
 	}
-	if meta.FakModified == "unknown" {
-		switch err := exec.Command("git", "diff-index", "--quiet", "HEAD", "--").Run(); {
-		case err == nil:
-			meta.FakModified = "false"
-		case isExitCode(err, 1):
-			meta.FakModified = "true"
-		}
+	switch gitModified := gitTreeModifiedIn("."); {
+	case gitModified == "true":
+		meta.FakModified = "true"
+	case meta.FakModified == "unknown":
+		meta.FakModified = gitModified
 	}
 	return meta
+}
+
+func gitTreeModifiedIn(dir string) string {
+	cmd := exec.Command("git", "status", "--porcelain", "--untracked-files=all")
+	cmd.Dir = dir
+	if out, err := cmd.Output(); err == nil {
+		if strings.TrimSpace(string(out)) == "" {
+			return "false"
+		}
+		return "true"
+	}
+
+	cmd = exec.Command("git", "diff-index", "--quiet", "HEAD", "--")
+	cmd.Dir = dir
+	switch err := cmd.Run(); {
+	case err == nil:
+		return "false"
+	case isExitCode(err, 1):
+		return "true"
+	default:
+		return "unknown"
+	}
 }
 
 func isExitCode(err error, code int) bool {

@@ -9,6 +9,9 @@ package main
 import (
 	"context"
 	"math"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -80,6 +83,40 @@ func TestCorpusHashStableAcrossPresentationOrder(t *testing.T) {
 	}
 	if got := corpusHash(ordered); !strings.HasPrefix(got, "sha256:") {
 		t.Fatalf("corpusHash = %q, want sha256 prefix", got)
+	}
+}
+
+func TestGitTreeModifiedIncludesUntrackedFiles(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not on PATH")
+	}
+	dir := t.TempDir()
+	runGit(t, dir, "init")
+	runGit(t, dir, "config", "user.email", "agentdojo@example.invalid")
+	runGit(t, dir, "config", "user.name", "AgentDojo Test")
+	if err := os.WriteFile(filepath.Join(dir, "tracked.txt"), []byte("tracked\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, dir, "add", "tracked.txt")
+	runGit(t, dir, "commit", "-m", "initial")
+
+	if got := gitTreeModifiedIn(dir); got != "false" {
+		t.Fatalf("clean tree modified = %q, want false", got)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "untracked.go"), []byte("package main\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if got := gitTreeModifiedIn(dir); got != "true" {
+		t.Fatalf("tree with untracked file modified = %q, want true", got)
+	}
+}
+
+func runGit(t *testing.T, dir string, args ...string) {
+	t.Helper()
+	cmd := exec.Command("git", args...)
+	cmd.Dir = dir
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git %v: %v\n%s", args, err, out)
 	}
 }
 
