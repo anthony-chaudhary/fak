@@ -95,6 +95,11 @@ type Bus struct {
 	queues map[ChannelKey][]Message
 	seq    uint64
 
+	// subs is the pub/sub registry: per topic, the set of live subscriber inboxes
+	// a Publish fans a copy out to (see topic.go). subSeq mints unique inbox ids.
+	subs   map[ChannelKey]map[uint64]ChannelKey
+	subSeq uint64
+
 	sent   int64
 	recvd  int64
 	denied int64
@@ -103,7 +108,10 @@ type Bus struct {
 
 // NewBus builds an empty mailbox bus.
 func NewBus() *Bus {
-	b := &Bus{queues: map[ChannelKey][]Message{}}
+	b := &Bus{
+		queues: map[ChannelKey][]Message{},
+		subs:   map[ChannelKey]map[uint64]ChannelKey{},
+	}
 	b.cond = sync.NewCond(&b.mu)
 	return b
 }

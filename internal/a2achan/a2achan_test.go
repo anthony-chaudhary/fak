@@ -191,3 +191,49 @@ func TestRegisteredFloorInKernelChain(t *testing.T) {
 		t.Fatalf("registered gate (%v) disagrees with the Bus's direct gate (%v)", viaCall.Kind, direct.Kind)
 	}
 }
+
+// TestPubSubFanout: the one-to-many option fans an adjudicated message out as an
+// independent copy to every subscriber inbox, under the SAME capability floor as
+// point-to-point Send (a private/uncapped publish is refused identically); cancel
+// unsubscribes.
+func TestPubSubFanout(t *testing.T) {
+	b := NewBus()
+	topic := ChannelKey{Locale: InKernel, ID: "events"}
+	in1, cancel1 := b.Subscribe(topic)
+	in2, _ := b.Subscribe(topic)
+	if b.Subscribers(topic) != 2 {
+		t.Fatalf("want 2 subscribers, got %d", b.Subscribers(topic))
+	}
+
+	// A shared publish reaches both private inboxes.
+	v, n := b.Publish(bg(), "pub", topic, Shared([]byte("evt")), CapA2ASend)
+	if v.Kind != abi.VerdictAllow || n != 2 {
+		t.Fatalf("publish: want Allow/fanout=2, got %v/%d", v.Kind, n)
+	}
+	m1, rv1, _ := b.Recv(bg(), in1, CapA2ARecv)
+	m2, rv2, _ := b.Recv(bg(), in2, CapA2ARecv)
+	if rv1.Kind != abi.VerdictAllow || rv2.Kind != abi.VerdictAllow {
+		t.Fatalf("subscriber recv: want Allow/Allow, got %v/%v", rv1.Kind, rv2.Kind)
+	}
+	if string(m1.Body.Inline) != "evt" || string(m2.Body.Inline) != "evt" {
+		t.Fatalf("fanned-out body: want evt/evt, got %q/%q", m1.Body.Inline, m2.Body.Inline)
+	}
+
+	// Cancel one subscriber → the next publish reaches only the survivor.
+	cancel1()
+	if b.Subscribers(topic) != 1 {
+		t.Fatalf("after cancel: want 1 subscriber, got %d", b.Subscribers(topic))
+	}
+	if _, n2 := b.Publish(bg(), "pub", topic, Shared([]byte("evt2")), CapA2ASend); n2 != 1 {
+		t.Fatalf("post-cancel fanout: want 1, got %d", n2)
+	}
+
+	// Publishing a private (ScopeAgent) body is refused — publishing is sharing.
+	if pv, pn := b.Publish(bg(), "pub", topic, Private([]byte("secret")), CapA2ASend); pv.Kind != abi.VerdictDeny || pn != 0 {
+		t.Fatalf("private publish: want Deny/0, got %v/%d", pv.Kind, pn)
+	}
+	// An uncapped publish is refused (same floor as Send).
+	if uv, _ := b.Publish(bg(), "pub", topic, Shared([]byte("x"))); uv.Kind != abi.VerdictDeny {
+		t.Fatalf("uncapped publish: want Deny, got %v", uv.Kind)
+	}
+}
