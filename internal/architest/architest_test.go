@@ -96,6 +96,7 @@ var tier = map[string]int{
 	"cohort":       2, // fail-closed cohort shrink/agree over comm.Group + modelroute vote fold.
 	"agenttopo":    2, // declared agent communication DAG over comm.Group + modelroute folds.
 	"promptmmu":    1, // cache-prefix-preserving inbound prompt MMU: splices tools[] past the last cache_control breakpoint; stdlib-only, off the hot path, no agent/gateway import (decode is a callback).
+	"loopmgr":      1, // durable loop-event JSONL ledger + read fold: SHA-256 hash chain over armed/fire/admit/start/heartbeat/end/witness/notify events. stdlib-only, off the hot path; schedules/spawns/notifies/authorizes nothing — those stay in the producers.
 	// new-leaf:tier — `python tools/new_leaf.py <name> --tier <name>` inserts the
 	// declaration for a generated leaf immediately ABOVE this line. Keep the marker last.
 }
