@@ -123,7 +123,7 @@ And the compounding is why you cannot get this by optimizing one lever in isolat
 `r/d` is a **model**, and it inherits every caveat the O(1) economics doc carries, plus one of its own:
 
 - **`d` is partly measured, partly modeled.** The vDSO/grammar turn deletions are real kernel events (`turns_saved` is measured on a replayed trace). The per-call *cost ratio* in tokens is measured; in dollars and latency it rides the knobbed `CostModel`. In local CPU it is measured (the boundary tax). So `d` is a blend, and a reader must price it on *their* scarce axis.
-- **`r` is the softest term and must not be quoted as a number.** It depends on the workload's staleness profile — how much of the context is reclaimable without losing a fact the agent needs. The repo *measures the inputs* to `r` (pollution rate, resident-token compression, the demand-page fault rate that flags when reclamation went too far) but does **not** ship a measured `r` for a real task, because doing so soundly requires a task-success eval proving the reclaimed budget did not cost an answer. Until that eval exists, `r` is a structural argument, not a figure. **Do not publish a horizon multiplier as a headline number.** Publish the structure and the measured inputs.
+- **`r` is the softest term and must not be quoted as a number.** It depends on the workload's staleness profile — how much of the context is reclaimable without losing a fact the agent needs. The repo *measures the inputs* to `r` (pollution rate, resident-token compression, the demand-page fault rate that flags when reclamation went too far) but does **not** ship a measured `r` for a real task, because doing so soundly requires a task-success eval proving the reclaimed budget did not cost an answer. Until that eval exists, `r` is a structural argument, not a figure. **Do not publish a horizon multiplier as a headline number.** Publish the structure and the measured inputs. `fak horizon-recovery` does exactly this: over a real `ctxplanbench` replay it prints the budget-recovery *operand* (linear vs bounded resident tokens, their ratio, the reclaimed budget) **co-located with its fault-rate fence** (served vs refused faults, compaction-loss turns) — and structurally refuses to emit `r` or any product. On one 25-session real corpus it reads a 5.05× resident-token recovery beside a 33.8% forecast-miss rate, every miss served by demand-page (0 refused) — the recovery is large *and* its correctness price is shown in the same breath.
 - **The whole thing assumes faithfulness.** A horizon you bought by evicting a span the agent later needed is not a horizon gain — it is a demand-page fault (best case, you pay it back) or a wrong answer (worst case). This is the same load-bearing faithfulness assumption `internal/ctxplan` exists to establish, and the same one the O(1) cost result rests on. A horizon win on a window that breaks the agent's reasoning is not a win.
 
 ---
@@ -173,7 +173,9 @@ fak turntax --suite turntax-airline     # the safety floor: 1 injection->0, 1 de
 fak benchmarks run kernel-latency       # the local-CPU account (boundary tax)
 python tools/ctxcost.py crossover        # the context account's O(1) economics
 
-# the numerator's measured inputs
+# the numerator's measured inputs (r's grounding — operand + fence, never their product)
+fak ctxplanbench --heaviest 25 --out cpb.json   # measure budget recovery over 25 real sessions
+fak horizon-recovery cpb.json                    # the recovery ratio AND its fault-rate fence, co-located; no r printed
 python tools/session_audit.py            # is the harness cache already harvesting the dollar saving?
 ```
 
