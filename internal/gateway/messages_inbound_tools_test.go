@@ -2,7 +2,11 @@ package gateway
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
+	"io"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 
@@ -73,7 +77,7 @@ func TestInboundToolsNilPredicateIsIdentity(t *testing.T) {
 	}
 	orig := append([]byte(nil), req.Raw...)
 	s := anthropicServerWithFloor(nil)
-	if pruned := s.maybeCompactInboundTools(req); pruned != nil {
+	if pruned := s.maybeCompactInboundTools(req, true); pruned != nil {
 		t.Fatalf("nil predicate must prune nothing, got %v", pruned)
 	}
 	if !bytes.Equal(req.Raw, orig) {
@@ -98,7 +102,7 @@ func TestInboundToolsNonPassthroughIsIdentity(t *testing.T) {
 	if s.anthropicPassthrough() {
 		t.Fatal("mock planner must NOT be an anthropic passthrough")
 	}
-	if pruned := s.maybeCompactInboundTools(req); pruned != nil {
+	if pruned := s.maybeCompactInboundTools(req, true); pruned != nil {
 		t.Fatalf("non-passthrough must prune nothing, got %v", pruned)
 	}
 	if !bytes.Equal(req.Raw, orig) {
@@ -130,7 +134,7 @@ func TestInboundToolsPrunesDeniedKeepsPrefix(t *testing.T) {
 	prefixEnd := spans[0].end // end of read_file (the breakpoint-bearing head)
 
 	s := anthropicServerWithFloor(floorAllowing("read_file", "Bash"))
-	pruned := s.maybeCompactInboundTools(req)
+	pruned := s.maybeCompactInboundTools(req, true)
 
 	// WebFetch and DeleteEverything (floor-denied, after the breakpoint) must be removed.
 	wantPruned := map[string]bool{"WebFetch": true, "DeleteEverything": true}
@@ -170,6 +174,130 @@ func TestInboundToolsPrunesDeniedKeepsPrefix(t *testing.T) {
 	}
 }
 
+// TestInboundToolsMidSessionGateIsIdentity proves the issue #753 lifecycle guard: even when
+// the floor predicate and body would otherwise prune, a normal mid-session turn must not mutate
+// req.Raw. The safe prune window is session-start / post-RESET only.
+func TestInboundToolsMidSessionGateIsIdentity(t *testing.T) {
+	raw := inboundToolsBody(t)
+	req, err := agent.DecodeAnthropicMessagesRequest(raw)
+	if err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	orig := append([]byte(nil), req.Raw...)
+	s := anthropicServerWithFloor(floorAllowing("read_file", "Bash"))
+	if pruned := s.maybeCompactInboundTools(req, false); pruned != nil {
+		t.Fatalf("mid-session gate must prune nothing, got %v", pruned)
+	}
+	if !bytes.Equal(req.Raw, orig) {
+		t.Fatalf("mid-session gate must leave req.Raw unchanged")
+	}
+}
+
+func TestPromptMMURebuildWindowIsOneShotPerTrace(t *testing.T) {
+	s := &Server{}
+	if !s.takePromptMMURebuildWindow("guard", true) {
+		t.Fatal("first request for a trace should get the rebuild window")
+	}
+	if s.takePromptMMURebuildWindow("guard", true) {
+		t.Fatal("second request for the same trace must be mid-session")
+	}
+	if !s.takePromptMMURebuildWindow("guard-continuation", true) {
+		t.Fatal("post-RESET continuation trace should get a fresh rebuild window")
+	}
+}
+
+func TestPromptMMURebuildWindowRequiresStableTrace(t *testing.T) {
+	s := &Server{}
+	if s.hasStablePromptMMUTrace("") {
+		t.Fatal("omitted trace without a default trace is a minted per-request trace, not a session-start witness")
+	}
+	if s.takePromptMMURebuildWindow("gw-1", false) {
+		t.Fatal("minted per-request traces must not spend the promptmmu rebuild window")
+	}
+	s.SetDefaultTraceID("guard")
+	if !s.hasStablePromptMMUTrace("") {
+		t.Fatal("a server default trace is the stable guard session trace")
+	}
+	if !s.hasStablePromptMMUTrace("explicit") {
+		t.Fatal("an explicit X-Trace-Id is a stable caller-supplied trace")
+	}
+}
+
+func TestInboundToolsPromptMMUPrunesAfterTransparentReset(t *testing.T) {
+	var upstreamBody []byte
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var err error
+		upstreamBody, err = io.ReadAll(r.Body)
+		if err != nil {
+			t.Fatalf("read upstream body: %v", err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"model":"claude-test","content":[{"type":"text","text":"ok"}],"stop_reason":"end_turn","usage":{"input_tokens":1,"output_tokens":1}}`))
+	}))
+	defer upstream.Close()
+
+	planner, err := agent.NewProviderHTTPPlanner("anthropic", upstream.URL, "claude-test", "")
+	if err != nil {
+		t.Fatalf("planner: %v", err)
+	}
+	s := newTestServer(t)
+	s.planner = planner
+	s.toolFloorDenies = floorAllowing("read_file", "Bash")
+	s.decideSession = func(_ context.Context, trace string) SessionVerdict {
+		if trace == "gw-reset" {
+			return SessionVerdict{Proceed: true, State: SessionState{TraceID: trace, Run: "running"}}
+		}
+		return SessionVerdict{
+			Proceed: false,
+			State: SessionState{
+				TraceID:        trace,
+				Run:            "draining",
+				Reason:         sessionReasonBudgetContext,
+				ContinuationID: "gw-reset",
+			},
+			Reason: sessionReasonBudgetContext,
+		}
+	}
+	s.resetOnBudget = func(_ context.Context, trace string, _ []agent.Message) (string, []agent.Message, bool) {
+		if !strings.HasPrefix(trace, "gw-") {
+			t.Fatalf("reset saw trace %q, want minted gw-*", trace)
+		}
+		return "gw-reset", nil, true
+	}
+
+	raw := inboundToolsBody(t)
+	var obj map[string]any
+	if err := json.Unmarshal(raw, &obj); err != nil {
+		t.Fatalf("unmarshal body: %v", err)
+	}
+	delete(obj, "stream") // keep the test on the buffered passthrough path.
+	raw, err = json.Marshal(obj)
+	if err != nil {
+		t.Fatalf("marshal body: %v", err)
+	}
+
+	ts := httptest.NewServer(s.Handler())
+	defer ts.Close()
+
+	var resp anthropicMessageResponse
+	if code := postJSON(t, ts.URL+"/v1/messages", json.RawMessage(raw), &resp); code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", code)
+	}
+	if len(upstreamBody) == 0 {
+		t.Fatal("upstream saw no request body")
+	}
+	for _, denied := range []string{"WebFetch", "DeleteEverything"} {
+		if bytes.Contains(upstreamBody, []byte(denied)) {
+			t.Fatalf("post-reset passthrough still advertised denied tool %q: %s", denied, upstreamBody)
+		}
+	}
+	for _, kept := range []string{"read_file", "Bash"} {
+		if !bytes.Contains(upstreamBody, []byte(kept)) {
+			t.Fatalf("post-reset passthrough dropped allowed tool %q: %s", kept, upstreamBody)
+		}
+	}
+}
+
 // TestInboundToolsAllAllowedIsIdentity: when every advertised tool is floor-allowed there is
 // nothing to drop → identity (a named no-op, not a spurious rewrite).
 func TestInboundToolsAllAllowedIsIdentity(t *testing.T) {
@@ -180,7 +308,7 @@ func TestInboundToolsAllAllowedIsIdentity(t *testing.T) {
 	}
 	orig := append([]byte(nil), req.Raw...)
 	s := anthropicServerWithFloor(floorAllowing("read_file", "Bash", "WebFetch", "DeleteEverything"))
-	if pruned := s.maybeCompactInboundTools(req); pruned != nil {
+	if pruned := s.maybeCompactInboundTools(req, true); pruned != nil {
 		t.Fatalf("all-allowed floor must prune nothing, got %v", pruned)
 	}
 	if !bytes.Equal(req.Raw, orig) {
