@@ -61,6 +61,25 @@ reproduce identically on any box with Go. `ctxdemo` is also model-free in `-prin
 `-bars` modes, but it lives in the research track because its main job is explaining
 multi-agent context reuse rather than onboarding.
 
+## Adding a demo
+
+New demos should not expand the front door by default. A new start-here demo must meet the
+lowest-common-denominator bar: one Go command, deterministic output, no provider key, no
+network, no model weights, no GPU, and no hosted dependency. If it needs a model, a framework,
+network I/O, a live gateway, a corpus, or a specialized mental model, put it in the matching
+track above instead: security/policy, research/science, memory/serving, adoption/integration,
+or shared task records.
+
+Before landing a new demo or moving one between tracks, update this guide, the demo's README,
+and the relevant scorecard snapshot, then run:
+
+```bash
+python tools/demo_command_audit.py
+python tools/demo_quality_scorecard.py --check-doc
+python tools/demo_robustness_scorecard.py --check-doc
+python tools/demo_headless_smoke.py --timeout 120
+```
+
 ## 1. Local — one command
 
 ```bash
