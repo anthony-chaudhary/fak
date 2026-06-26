@@ -110,6 +110,37 @@ func TestPrepareDeviceOOMRetryTrimsIdlePoolsOnce(t *testing.T) {
 	}
 }
 
+func TestInKernelOOMRetryStatsBucketByClass(t *testing.T) {
+	be := &oomRetryBackend{Backend: compute.Default()}
+	p := &InKernelPlanner{modelID: "retry-test", backend: be}
+
+	p.recordInKernelOOMRetry(&InKernelOOMError{Bytes: 1 << 20, Class: compute.MemoryScratchpad, Site: "scratch-a"}, true)
+	p.recordInKernelOOMRetry(&InKernelOOMError{Bytes: 2 << 20, Class: compute.MemoryScratchpad, Site: "scratch-b"}, false)
+	p.recordInKernelOOMRetry(&InKernelOOMError{Bytes: 3 << 20, Class: compute.MemoryKVCache, Site: "kv-a"}, true)
+
+	st := p.InKernelOOMRetryStats()
+	if st.Backend != be.Name() {
+		t.Fatalf("retry backend = %q, want %q", st.Backend, be.Name())
+	}
+	if len(st.Rows) != 2 {
+		t.Fatalf("retry rows = %+v, want scratchpad and kv_cache", st.Rows)
+	}
+	byClass := map[string]InKernelOOMRetryClassStats{}
+	for _, row := range st.Rows {
+		byClass[row.Class] = row
+	}
+	scratch := byClass[string(compute.MemoryScratchpad)]
+	if scratch.Attempts != 2 || scratch.Successes != 1 || scratch.Failures != 1 ||
+		scratch.LastFailedBytes != 2<<20 || scratch.LastSite != "scratch-b" {
+		t.Fatalf("scratch retry row = %+v, want 2 attempts/1 success/1 failure/latest scratch-b", scratch)
+	}
+	kv := byClass[string(compute.MemoryKVCache)]
+	if kv.Attempts != 1 || kv.Successes != 1 || kv.Failures != 0 ||
+		kv.LastFailedBytes != 3<<20 || kv.LastSite != "kv-a" {
+		t.Fatalf("kv retry row = %+v, want 1 successful latest kv-a", kv)
+	}
+}
+
 type capacityProbeBackend struct {
 	compute.Backend
 	total int64

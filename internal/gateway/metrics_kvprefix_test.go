@@ -63,8 +63,9 @@ func TestMetricsExposesKVPrefixReuse(t *testing.T) {
 }
 
 type kvMemoryStatsPlanner struct {
-	stats agent.KVMemoryStats
-	req   agent.RequestMemoryStats
+	stats    agent.KVMemoryStats
+	req      agent.RequestMemoryStats
+	oomRetry agent.InKernelOOMRetryStats
 }
 
 func (p kvMemoryStatsPlanner) Complete(context.Context, []agent.Message, []agent.ToolDef, ...agent.SampleOpt) (*agent.Completion, error) {
@@ -77,6 +78,10 @@ func (p kvMemoryStatsPlanner) KVMemoryStats() agent.KVMemoryStats { return p.sta
 
 func (p kvMemoryStatsPlanner) RequestMemoryStats() agent.RequestMemoryStats { return p.req }
 
+func (p kvMemoryStatsPlanner) InKernelOOMRetryStats() agent.InKernelOOMRetryStats {
+	return p.oomRetry
+}
+
 func TestKVMemoryMetricsSuppressedWithoutReporter(t *testing.T) {
 	srv := newTestServer(t)
 	if text := srv.renderMetrics(); strings.Contains(text, "fak_gateway_kv_memory_") {
@@ -84,6 +89,46 @@ func TestKVMemoryMetricsSuppressedWithoutReporter(t *testing.T) {
 	}
 	if vars := srv.debugVars(time.Now()); vars.KVMemory != nil {
 		t.Fatalf("debug kv_memory should be absent for a non-reporting planner: %+v", vars.KVMemory)
+	}
+}
+
+func TestInKernelOOMRetryMetricsAndDebugVars(t *testing.T) {
+	srv := newTestServer(t)
+	srv.planner = kvMemoryStatsPlanner{oomRetry: agent.InKernelOOMRetryStats{
+		Backend: "vulkan",
+		Rows: []agent.InKernelOOMRetryClassStats{
+			{
+				Class:           "scratchpad",
+				Attempts:        2,
+				Successes:       1,
+				Failures:        1,
+				LastFailedBytes: 1 << 20,
+				LastSite:        "transient-scratch",
+			},
+		},
+	}}
+
+	text := srv.renderMetrics()
+	for _, want := range []string{
+		`fak_gateway_in_kernel_oom_retry_total{backend="vulkan",class="scratchpad",outcome="attempted"} 2`,
+		`fak_gateway_in_kernel_oom_retry_total{backend="vulkan",class="scratchpad",outcome="succeeded"} 1`,
+		`fak_gateway_in_kernel_oom_retry_total{backend="vulkan",class="scratchpad",outcome="failed"} 1`,
+		`fak_gateway_in_kernel_oom_retry_last_failed_bytes{backend="vulkan",class="scratchpad"} 1048576`,
+	} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("OOM retry metrics missing %q\n--- metrics ---\n%s", want, text)
+		}
+	}
+
+	vars := srv.debugVars(time.Now())
+	if len(vars.Metrics.InKernelOOMRetries) != 1 {
+		t.Fatalf("debug OOM retry rows = %+v, want one row", vars.Metrics.InKernelOOMRetries)
+	}
+	got := vars.Metrics.InKernelOOMRetries[0]
+	if got.Backend != "vulkan" || got.Class != "scratchpad" || got.Attempts != 2 ||
+		got.Successes != 1 || got.Failures != 1 || got.LastFailedBytes != 1<<20 ||
+		got.LastSite != "transient-scratch" {
+		t.Fatalf("debug OOM retry row = %+v, want vulkan/scratchpad 2/1/1 transient-scratch", got)
 	}
 }
 

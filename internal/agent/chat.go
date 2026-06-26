@@ -611,6 +611,31 @@ type RequestMemoryReporter interface {
 	RequestMemoryStats() RequestMemoryStats
 }
 
+// InKernelOOMRetryClassStats is one bounded-label row for decode retries that were
+// attempted after a local in-kernel device allocation OOM.
+type InKernelOOMRetryClassStats struct {
+	Class           string
+	Attempts        uint64
+	Successes       uint64
+	Failures        uint64
+	LastFailedBytes uint64
+	LastSite        string
+}
+
+// InKernelOOMRetryStats is the optional planner-owned snapshot of idle-pool trim retries
+// after in-kernel device allocation OOMs. It is intentionally class-bucketed; allocator
+// sites stay out of Prometheus labels and are exposed only in debug output.
+type InKernelOOMRetryStats struct {
+	Backend string
+	Rows    []InKernelOOMRetryClassStats
+}
+
+// InKernelOOMRetryReporter is implemented by local planners that can report in-kernel
+// OOM retry attempts. Proxy planners do not implement it.
+type InKernelOOMRetryReporter interface {
+	InKernelOOMRetryStats() InKernelOOMRetryStats
+}
+
 // ---------------------------------------------------------------------------
 // Live planner — provider API client.
 // ---------------------------------------------------------------------------

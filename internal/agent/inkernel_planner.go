@@ -89,6 +89,9 @@ type InKernelPlanner struct {
 	reqMemMu      sync.Mutex
 	lastReqMemory RequestMemoryStats
 
+	oomRetryMu sync.Mutex
+	oomRetry   map[string]*inKernelOOMRetryClassStats
+
 	// kvSpanEvict gates the model-side KV-quarantine eviction BRIDGE (internal/kvmmu)
 	// on the live serve path (issue #579). When on, a tool-result QUARANTINE drives a
 	// real model.KVCache.Evict of the result's K/V span over a fresh model.Session built
@@ -99,6 +102,14 @@ type InKernelPlanner struct {
 	// radixkv prefix-cache eviction above — that drops a reusable PREFIX node; this evicts
 	// the per-session SPAN and is the model-independent KV-MMU floor.
 	kvSpanEvict bool
+}
+
+type inKernelOOMRetryClassStats struct {
+	attempts        uint64
+	successes       uint64
+	failures        uint64
+	lastFailedBytes uint64
+	lastSite        string
 }
 
 // NewInKernelPlanner builds a planner over an already-loaded model + tokenizer.
@@ -256,6 +267,34 @@ func (p *InKernelPlanner) RequestMemoryStats() RequestMemoryStats {
 	return out
 }
 
+func (p *InKernelPlanner) InKernelOOMRetryStats() InKernelOOMRetryStats {
+	if p == nil {
+		return InKernelOOMRetryStats{}
+	}
+	backend := "unknown"
+	if p.backend != nil {
+		backend = p.backend.Name()
+	}
+	p.oomRetryMu.Lock()
+	defer p.oomRetryMu.Unlock()
+	out := InKernelOOMRetryStats{Backend: backend, Rows: make([]InKernelOOMRetryClassStats, 0, len(p.oomRetry))}
+	for class, st := range p.oomRetry {
+		if st == nil {
+			continue
+		}
+		out.Rows = append(out.Rows, InKernelOOMRetryClassStats{
+			Class:           class,
+			Attempts:        st.attempts,
+			Successes:       st.successes,
+			Failures:        st.failures,
+			LastFailedBytes: st.lastFailedBytes,
+			LastSite:        st.lastSite,
+		})
+	}
+	sort.SliceStable(out.Rows, func(i, j int) bool { return out.Rows[i].Class < out.Rows[j].Class })
+	return out
+}
+
 // Complete renders the transcript as ChatML and runs one in-kernel decode turn,
 // returning the generated assistant text. Mirrors cmd/fakchat's hybrid path. The
 // per-request SampleOpts override this planner's configured decode length,
@@ -363,7 +402,9 @@ func (p *InKernelPlanner) generateReusedWithOOMRetry(ids []int, maxNew int, temp
 	if onRetry != nil {
 		onRetry()
 	}
-	return p.generateReusedRecovering(ids, maxNew, temp, topP, topK, stops, emit)
+	retryRes, retryErr := p.generateReusedRecovering(ids, maxNew, temp, topP, topK, stops, emit)
+	p.recordInKernelOOMRetry(err, retryErr == nil)
+	return retryRes, retryErr
 }
 
 func (p *InKernelPlanner) prepareDeviceOOMRetry(err error) bool {
@@ -392,6 +433,46 @@ func (p *InKernelPlanner) prepareDeviceOOMRetry(err error) bool {
 			p.modelID, p.backend.Name(), oom.Class, oom.Site, oom.Bytes)
 	}
 	return released
+}
+
+func (p *InKernelPlanner) recordInKernelOOMRetry(trigger error, success bool) {
+	if p == nil {
+		return
+	}
+	class, bytes, site := inKernelOOMRetryTrigger(trigger)
+	p.oomRetryMu.Lock()
+	if p.oomRetry == nil {
+		p.oomRetry = map[string]*inKernelOOMRetryClassStats{}
+	}
+	st := p.oomRetry[class]
+	if st == nil {
+		st = &inKernelOOMRetryClassStats{}
+		p.oomRetry[class] = st
+	}
+	st.attempts++
+	if success {
+		st.successes++
+	} else {
+		st.failures++
+	}
+	st.lastFailedBytes = bytes
+	st.lastSite = site
+	p.oomRetryMu.Unlock()
+}
+
+func inKernelOOMRetryTrigger(err error) (class string, bytes uint64, site string) {
+	var oom *InKernelOOMError
+	if errors.As(err, &oom) {
+		if oom.Bytes > 0 {
+			bytes = uint64(oom.Bytes)
+		}
+		class = strings.TrimSpace(string(oom.Class))
+		site = strings.TrimSpace(oom.Site)
+	}
+	if class == "" {
+		class = string(compute.MemoryUnknown)
+	}
+	return class, bytes, site
 }
 
 func (p *InKernelPlanner) Complete(_ context.Context, messages []Message, tools []ToolDef, opts ...SampleOpt) (comp *Completion, err error) {

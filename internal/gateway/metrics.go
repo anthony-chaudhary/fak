@@ -701,6 +701,7 @@ func (s *Server) renderMetrics() string {
 	s.writeRequestMemoryMetrics(&b)
 	inf := m.writeInferenceMetrics(&b)
 	m.writeInKernelOOMMetrics(&b)
+	s.writeInKernelOOMRetryMetrics(&b)
 	m.writeCompactionMetrics(&b)
 	m.writeResetShadowMetrics(&b)
 
@@ -793,6 +794,39 @@ func (s *Server) writeRequestMemoryMetrics(b *strings.Builder) {
 			fmt.Fprintf(b, "fak_gateway_in_kernel_request_memory_fit_bytes{backend=\"%s\",scope=\"%s\",kind=\"margin\"} %d\n",
 				promQuote(backend), promQuote(row.Scope), row.MarginBytes)
 		}
+	}
+}
+
+func (s *Server) writeInKernelOOMRetryMetrics(b *strings.Builder) {
+	if s == nil || s.planner == nil {
+		return
+	}
+	reporter, ok := s.planner.(agent.InKernelOOMRetryReporter)
+	if !ok {
+		return
+	}
+	st := reporter.InKernelOOMRetryStats()
+	if len(st.Rows) == 0 {
+		return
+	}
+	backend := strings.TrimSpace(st.Backend)
+	if backend == "" {
+		backend = "unknown"
+	}
+	writeHelpType(b, "fak_gateway_in_kernel_oom_retry_total", "Idle-pool trim retries attempted after local in-kernel device allocation OOMs, bucketed by backend, memory class, and outcome. These are decode retries only; capacity precheck refusals do not retry.", "counter")
+	for _, row := range st.Rows {
+		class := oomClassLabel(row.Class)
+		fmt.Fprintf(b, "fak_gateway_in_kernel_oom_retry_total{backend=\"%s\",class=\"%s\",outcome=\"attempted\"} %d\n",
+			promQuote(backend), promQuote(class), row.Attempts)
+		fmt.Fprintf(b, "fak_gateway_in_kernel_oom_retry_total{backend=\"%s\",class=\"%s\",outcome=\"succeeded\"} %d\n",
+			promQuote(backend), promQuote(class), row.Successes)
+		fmt.Fprintf(b, "fak_gateway_in_kernel_oom_retry_total{backend=\"%s\",class=\"%s\",outcome=\"failed\"} %d\n",
+			promQuote(backend), promQuote(class), row.Failures)
+	}
+	writeHelpType(b, "fak_gateway_in_kernel_oom_retry_last_failed_bytes", "Most recent allocation size that triggered an idle-pool trim retry for each backend and memory class.", "gauge")
+	for _, row := range st.Rows {
+		fmt.Fprintf(b, "fak_gateway_in_kernel_oom_retry_last_failed_bytes{backend=\"%s\",class=\"%s\"} %d\n",
+			promQuote(backend), promQuote(oomClassLabel(row.Class)), row.LastFailedBytes)
 	}
 }
 

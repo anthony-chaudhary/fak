@@ -68,10 +68,11 @@ type debugKernelVars struct {
 }
 
 type debugMetricsVars struct {
-	HTTP        []debugHTTPMetricVars      `json:"http"`
-	Operations  []debugOperationMetricVars `json:"operations"`
-	Compaction  debugCompactionVars        `json:"compaction"`
-	InKernelOOM []debugInKernelOOMVars     `json:"in_kernel_oom"`
+	HTTP               []debugHTTPMetricVars       `json:"http"`
+	Operations         []debugOperationMetricVars  `json:"operations"`
+	Compaction         debugCompactionVars         `json:"compaction"`
+	InKernelOOM        []debugInKernelOOMVars      `json:"in_kernel_oom"`
+	InKernelOOMRetries []debugInKernelOOMRetryVars `json:"in_kernel_oom_retries,omitempty"`
 }
 
 type debugModelLoadVars struct {
@@ -190,6 +191,16 @@ type debugInKernelOOMVars struct {
 	LastSite        string `json:"last_site,omitempty"`
 }
 
+type debugInKernelOOMRetryVars struct {
+	Backend         string `json:"backend"`
+	Class           string `json:"class"`
+	Attempts        uint64 `json:"attempts"`
+	Successes       uint64 `json:"successes"`
+	Failures        uint64 `json:"failures"`
+	LastFailedBytes uint64 `json:"last_failed_bytes"`
+	LastSite        string `json:"last_site,omitempty"`
+}
+
 type debugLatencyVars struct {
 	Count      uint64            `json:"count"`
 	SumSeconds float64           `json:"sum_seconds"`
@@ -292,7 +303,8 @@ func (s *Server) debugVars(now time.Time) debugVarsResponse {
 				CacheReadTokens:             compact.cacheReads,
 				LastPostFireCacheReadTokens: compact.lastCacheRd,
 			},
-			InKernelOOM: debugInKernelOOMRows(oomRows),
+			InKernelOOM:        debugInKernelOOMRows(oomRows),
+			InKernelOOMRetries: debugInKernelOOMRetryRows(s.planner),
 		},
 	}
 }
@@ -497,6 +509,34 @@ func debugInKernelOOMRows(rows []inKernelOOMSnapshot) []debugInKernelOOMVars {
 			FailedBytes:     row.failedBytes,
 			LastFailedBytes: row.lastFailedBytes,
 			LastSite:        row.lastSite,
+		})
+	}
+	return out
+}
+
+func debugInKernelOOMRetryRows(p agent.Planner) []debugInKernelOOMRetryVars {
+	reporter, ok := p.(agent.InKernelOOMRetryReporter)
+	if !ok {
+		return nil
+	}
+	st := reporter.InKernelOOMRetryStats()
+	if len(st.Rows) == 0 {
+		return nil
+	}
+	backend := strings.TrimSpace(st.Backend)
+	if backend == "" {
+		backend = "unknown"
+	}
+	out := make([]debugInKernelOOMRetryVars, 0, len(st.Rows))
+	for _, row := range st.Rows {
+		out = append(out, debugInKernelOOMRetryVars{
+			Backend:         backend,
+			Class:           oomClassLabel(row.Class),
+			Attempts:        row.Attempts,
+			Successes:       row.Successes,
+			Failures:        row.Failures,
+			LastFailedBytes: row.LastFailedBytes,
+			LastSite:        row.LastSite,
 		})
 	}
 	return out
