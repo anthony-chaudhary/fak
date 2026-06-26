@@ -14,8 +14,8 @@ the GCP setup.
 ```
  ┌────────────────┐   /v1/messages   ┌────────────────────────┐  /v1/chat/...  ┌──────────────────┐
  │ claude-glm-gcp │ ───────────────▶ │ fak serve (the kernel) │ ─────────────▶ │ GLM-5.2 on a GCP  │
- │  (Claude Code) │ ◀──── SSE ─────── │ openai backend, adjud. │ ◀──────────── │ sm_90+ GPU node   │
- └────────────────┘                   └────────────────────────┘                │ (SGLang / vLLM)   │
+ │  (Claude Code) │ ◀──── SSE ─────── │ openai backend, adjud. │ ◀──────────── │ GPU node (A100+)   │
+ └────────────────┘                   └────────────────────────┘                │ fak kernel/llama  │
         ▲ ANTHROPIC_BASE_URL=loopback fak           every tool call crosses the  └──────────────────┘
         │ FAK_GLM_GCP_BASE_URL=http://<tunnel-or-tailscale>:PORT/v1     kernel floor first
 ```
@@ -26,26 +26,50 @@ model turn needs the GCP node up — see [What is proven here](#what-is-proven-h
 
 ## Half A — stand up GLM-5.2 on GCP
 
-`scripts/gcp-glm-serve.sh` provisions an sm_90+ GPU VM and runs the preflight-gated
-SGLang/vLLM serve (`tools/glm52_sglang_vllm_serve.sh`). It is **plan-by-default**: with no
-creds it prints the exact `gcloud` command, the VM startup script, and the
-reach-from-laptop steps, so the whole deploy is reviewable first.
+`scripts/gcp-glm-serve.sh` provisions a GPU VM and stands the GLM-5.2 serve up on it. It is
+**plan-by-default**: with no creds it prints the exact `gcloud` command, the VM startup
+script, and the reach-from-laptop steps, so the whole deploy is reviewable first.
 
 ```bash
-./scripts/gcp-glm-serve.sh                       # PLAN: gcloud + startup + reach steps
+./scripts/gcp-glm-serve.sh                            # PLAN: gcloud + startup + reach steps
 GCP_PROJECT=<id> ./scripts/gcp-glm-serve.sh --apply   # create the GPU VM
 ```
 
-The default tier is `a3-ultra-h200` (8× H200, sm_90, ~$60/hr while up) from the
-`tools/gcp_accel.py` registry — the most-provisionable tier that clears the
-DeepSeek-Sparse-Attention floor. Knobs: `GCP_TIER` (e.g. `a4-b200` for Blackwell),
-`GCP_ZONE`, `ENGINE` (sglang|vllm), `QUANT` (fp8|w4afp8|nvfp4|bf16), `GLM_PORT`,
-`HF_TOKEN` (the GLM checkpoint is HF-gated), `TAILSCALE_AUTHKEY`.
+It picks the serve path from the tier's GPU arch (override with `SERVE=`):
 
-> **Why sm_90+.** GLM-5.2's DSA kernels in stock SGLang/vLLM are gated to Hopper
-> (sm_90) / Blackwell (sm_100). The default tier clears that, and the on-node preflight
-> (`tools/glm52_serve_preflight.py`) **fails closed** if a tier doesn't. On Ampere (A100,
-> sm_80) use the llama.cpp MLA path on a GPU server instead: `tools/glm52_serve.sh`.
+| `SERVE` | what runs | default on |
+|---|---|---|
+| `fak` | the **pure fak kernel** — fak serves GLM-5.2 (`glm_moe_dsa`) through its *own* CUDA kernels (`tools/glm52_fak_native_serve.sh`: `fak serve --gguf <shard1> --backend cuda --cpu-offload-experts --context-budget-tokens 8192`). **Preferred.** | Ampere (A100, sm_80) |
+| `llamacpp` | the **benchmark baseline** — the *same* checkpoint under llama.cpp MLA + CPU expert-offload (`tools/glm52_stage_serve_dgx3.sh`, the DGX A100 example brought to GCP). Stand it up to compare fak apples-to-apples. | — (opt-in, any tier) |
+| `sglang` / `vllm` | stock DSA engines (`tools/glm52_sglang_vllm_serve.sh`), gated by `tools/glm52_serve_preflight.py` (fails closed below sm_90). | Hopper / Blackwell (sm_90+) |
+
+So **"whatever is available" includes A100** — `GCP_TIER=a2-ultra-a100-80gb` serves GLM-5.2
+via the pure fak kernel by default:
+
+```bash
+GCP_TIER=a2-ultra-a100-80gb ./scripts/gcp-glm-serve.sh                 # A100, pure fak kernel (default)
+GCP_TIER=a2-ultra-a100-80gb SERVE=llamacpp ./scripts/gcp-glm-serve.sh  # A100, llama.cpp benchmark node
+GCP_TIER=a4-b200 ./scripts/gcp-glm-serve.sh                            # Blackwell, stock SGLang/vLLM
+```
+
+The default tier is `a3-ultra-h200` (8× H200, sm_90, ~$60/hr) from the `tools/gcp_accel.py`
+registry — the most-provisionable tier that clears the DSA floor. The A100 tiers are
+`a2-ultra-a100-80gb` (8× A100 80GB, 640 GB VRAM, ~$40/hr — the same shape as the DGX example)
+and `a2-high-a100-40gb` (8× A100 40GB, ~$29/hr). Knobs: `GCP_TIER`, `SERVE`, `GCP_ZONE`,
+`ENGINE`/`QUANT` (the sm_90 stock path), `GLM_GGUF_REPO`/`GLM_GGUF_SUBDIR` (the fak/llama.cpp
+GGUF, default `unsloth/GLM-5.2-GGUF` `UD-Q4_K_M`), `NCPU_MOE`, `GLM_PORT`, `HF_TOKEN`,
+`TAILSCALE_AUTHKEY`.
+
+> **Why A100 needs a different serve.** GLM-5.2's DSA kernels in stock SGLang/vLLM are gated
+> to Hopper (sm_90) / Blackwell (sm_100); on Ampere (A100, sm_80) the preflight
+> (`tools/glm52_serve_preflight.py`) **fails closed** (vLLM #35021). Two paths clear it on
+> A100: fak's **own** kernel runs the `glm_moe_dsa` forward as full MLA (no sm_90 kernel
+> needed) — **bit-exact vs the CPU reference, cosine 1.0, witnessed on sm_80**
+> (`experiments/glm-gpu-witness/a100-glm52-*.json`) — and llama.cpp serves the same GGUF as
+> the honest throughput baseline. **Prefer the pure fak kernel; keep llama.cpp for the
+> comparison.** (See the benchmarking framework in
+> `docs/notes/GLM52-NATIVE-THROUGHPUT-AND-BENCHMARK-PLAN-2026-06-25.md` — never put the two
+> numbers side by side without holding {weights, hardware, precision, context} equal.)
 
 ## Half B — use it here
 
@@ -105,13 +129,18 @@ which is not stood up from the implementing host — same gate as
 | Item | Witness | Status |
 |---|---|---|
 | The `glm-gcp` preset resolves to fak's openai backend at the GLM `/v1` with model `glm-5.2` | `go test ./cmd/fak -run TestClaudeGLMGCP` (bash + PowerShell launchers) | ✅ proven on any host |
-| The bring-up plan renders the gcloud create + preflight-gated serve + the `claude-glm-gcp` hand-off, with no creds | `go test ./cmd/fak -run TestClaudeGLMGCPBringupPlanRendersWithoutCreds` | ✅ proven on any host |
-| The provisioner reads machine/accelerator/image from the single registry | `tools/gcp_accel.py --emit-shell` + `tools/gcp_accel_test.py` | ✅ proven on any host |
+| The bring-up plan renders the gcloud create + serve + the `claude-glm-gcp` hand-off, with no creds | `go test ./cmd/fak -run TestClaudeGLMGCPBringupPlanRendersWithoutCreds` | ✅ proven on any host |
+| The **A100 tiers** are in the single registry (`a2-ultra-a100-80gb`, `a2-high-a100-40gb`) | `tools/gcp_accel_test.py` + `go test ./cmd/fak -run TestClaudeGLMGCPA100TiersInRegistry` | ✅ proven on any host |
+| The A100 plan **wires the pure fak kernel** by default; `SERVE=llamacpp` wires the llama.cpp benchmark | `go test ./cmd/fak -run 'TestClaudeGLMGCPA100Plan'` (WSL/Unix CI) + `TestClaudeGLMGCPFakNativeServeWiring` | ✅ proven on any host |
+| The fak-native **`glm_moe_dsa` forward is bit-exact** on A100 (sm_80): cosine 1.0, argmax-exact | `experiments/glm-gpu-witness/a100-glm52-*.json` (`TestCUDAGLMMoeDsaBackendForward` …) | ✅ witnessed on sm_80 |
 | The wire end-to-end (Anthropic `/v1/messages` → kernel) | `claude-glm-gcp --smoke` (offline mock planner; no model needed) | ✅ runnable here |
-| A **live GLM-5.2 turn** through the preset | needs the GCP node up (Half A `--apply`) → `claude-glm-gcp --probe` | ⏳ hardware-gated (no GCP creds/GPU on the implementing host) |
+| A **live GLM-5.2 turn** through the preset (pure fak kernel **or** llama.cpp) | needs the GCP node up (Half A `--apply`) → `claude-glm-gcp --probe` | ⏳ hardware-gated |
 
-The remaining step is operational: run Half A `--apply` on an authenticated host with
-H200/B200 quota, open the tunnel, and run `claude-glm-gcp --probe "say pong"`.
+The pure-fak-kernel **load** on the dynamic-mixed `UD-Q4_K_M` is the open perf item (the
+resident-Q4_K path fully fires only on pure-Q4_K tensors; see
+`docs/notes/GLM52-FAK-NATIVE-SERVE-LOAD-SPEED-2026-06-25.md`) — it serves, the load is being
+sped up. The remaining step is operational: run Half A `--apply` on an authenticated host
+with A100 (or H200/B200) quota, open the tunnel, and run `claude-glm-gcp --probe "say pong"`.
 
 ## Troubleshooting
 
@@ -125,9 +154,13 @@ H200/B200 quota, open the tunnel, and run `claude-glm-gcp --probe "say pong"`.
 
 ## Refs
 
-- `scripts/gcp-glm-serve.sh` — the GCP bring-up (plan/apply)
+- `scripts/gcp-glm-serve.sh` — the GCP bring-up (plan/apply), `SERVE=fak|llamacpp|sglang|vllm`
 - `scripts/dogfood-claude.sh` / `.ps1` — the launcher + the `glm-gcp` preset
-- `tools/gcp_accel.py` — the GCP accelerator registry (`--emit-shell` feeds the bring-up)
-- `tools/glm52_sglang_vllm_serve.sh` / `tools/glm52_serve_preflight.py` — the on-node serve + arch gate
+- `tools/gcp_accel.py` — the GCP accelerator registry (A100 tiers + `--emit-shell` feeds the bring-up)
+- `tools/glm52_fak_native_serve.sh` — the **pure fak kernel** on-node serve (A100 default)
+- `tools/glm52_stage_serve_dgx3.sh` — the **llama.cpp benchmark** on-node serve (the DGX A100 example)
+- `tools/glm52_sglang_vllm_serve.sh` / `tools/glm52_serve_preflight.py` — the sm_90 stock serve + arch gate
+- `internal/compute/build_cuda.sh binary <pkg> <out>` — the DRY `-tags cuda` binary build the fak-native serve uses
+- [`GLM52-NATIVE-THROUGHPUT-AND-BENCHMARK-PLAN-2026-06-25.md`](../notes/GLM52-NATIVE-THROUGHPUT-AND-BENCHMARK-PLAN-2026-06-25.md) — the honest fak-vs-llama.cpp comparison framework
 - [`always-on-dogfood-server.md`](always-on-dogfood-server.md) — the always-on tiers + GPU-burst lane
 - [`DOGFOOD-CLAUDE.md`](../../DOGFOOD-CLAUDE.md) — the general one-command dogfood launcher
