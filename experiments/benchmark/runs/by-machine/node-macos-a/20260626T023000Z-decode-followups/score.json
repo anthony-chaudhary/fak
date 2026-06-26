@@ -1,0 +1,131 @@
+{
+  "schema": "fak.arm64-qkernel-score.v1",
+  "captured_at": "2026-06-26T02:30:00Z",
+  "machine": "node-macos-a",
+  "benchmark_clone": {
+    "rev": "374776a",
+    "local_patches": [
+      "cmd/batchbench: add -hf Hugging Face snapshot loading and truthful model/source metadata",
+      "internal/model: cap default Q8 decode workers on darwin/arm64",
+      "cmd/modelbench: report q8_decode_workers/q8_decode_budget",
+      "cmd/modelbench: add -q4k GGUF resident-Q4_K scoring path",
+      "internal/model: keep resident Q4/Q4_K sessions off the Q8 hand-copied fast decode path",
+      "cmd/modelbench: verify Metal prefill against f32 when f32 weights are available, with near-tie handling",
+      "cmd/modelbench: include requested -prefill-sizes in -metal -verify",
+      "internal/model: add FAK_METAL_RESIDENT=0 diagnostic switch"
+    ]
+  },
+  "baseline": {
+    "name": "canonical single-stream CPU Q8 baseline",
+    "artifact": "experiments/model-ladder/qwen25-1.5b-q8-cpu-parity-m3pro.json",
+    "decode_tok_per_sec": 38.065806338839884
+  },
+  "model": {
+    "name": "qwen2.5-1.5b-instruct",
+    "source_kind": "HuggingFace safetensors and matching Q8_0 GGUF",
+    "precision": "Q8_0 unless otherwise stated"
+  },
+  "probes": {
+    "batch_q8": {
+      "tool": "cmd/batchbench",
+      "flags": [
+        "-hf",
+        "qwen2.5-1.5b-instruct",
+        "-quant",
+        "-batches",
+        "1,2,4,8",
+        "-decode-steps",
+        "8",
+        "-reps",
+        "1",
+        "-prompt",
+        "16"
+      ],
+      "env": {
+        "FAK_WORKERS": "unset",
+        "FAK_BUDGET": "unset"
+      },
+      "baseline_b1_tok_per_sec": 41.932687637036025,
+      "peak": {
+        "batch": 8,
+        "agg_tok_per_sec": 44.82218565516261,
+        "speedup_vs_in_run_b1": 1.0689080090247902,
+        "speedup_vs_canonical_q8": 1.1774920845280756,
+        "speedup_vs_naive_f32_serial": 2.335235872633972
+      },
+      "points": [
+        {
+          "batch": 1,
+          "step_ms": 22.339145,
+          "agg_tok_per_sec": 44.764470618727806
+        },
+        {
+          "batch": 2,
+          "step_ms": 44.639661,
+          "agg_tok_per_sec": 44.80320762292528
+        },
+        {
+          "batch": 4,
+          "step_ms": 89.662197,
+          "agg_tok_per_sec": 44.611889222388776
+        },
+        {
+          "batch": 8,
+          "step_ms": 178.483041,
+          "agg_tok_per_sec": 44.82218565516261
+        }
+      ],
+      "verdict": "negative: aggregate tok/s stays flat from B=1 to B=8, so this does not establish a 2x/3x decode improvement over the tracked Q8 baseline"
+    },
+    "batch_f32": {
+      "tool": "cmd/batchbench",
+      "flags": [
+        "-hf",
+        "qwen2.5-1.5b-instruct",
+        "-batches",
+        "1,2,4,8",
+        "-decode-steps",
+        "8",
+        "-reps",
+        "1",
+        "-prompt",
+        "16"
+      ],
+      "baseline_b1_tok_per_sec": 12.18937570113289,
+      "peak": {
+        "batch": 8,
+        "agg_tok_per_sec": 15.56467848055336,
+        "speedup_vs_in_run_b1": 1.2769053036167197,
+        "speedup_vs_canonical_q8": 0.408888710828967
+      },
+      "verdict": "negative: f32 batching is slower than Q8 decode and cannot satisfy the tracked MacBook decode target"
+    },
+    "q8_gguf_lean": {
+      "tool": "cmd/modelbench",
+      "flags": [
+        "-gguf",
+        "qwen2.5-1.5b-instruct-q8_0.gguf",
+        "-lean",
+        "-decode-reps",
+        "2",
+        "-decode-steps",
+        "32",
+        "-prefill-sizes",
+        "16",
+        "-prefill-reps",
+        "1"
+      ],
+      "decode_tok_per_sec": 41.661186484761146,
+      "speedup_vs_canonical_q8": 1.0944517006658747,
+      "q8_decode_workers": 6,
+      "q8_decode_budget": "default(GOMAXPROCS); q8_decode=darwin/arm64-half-cap",
+      "verdict": "negative: matching Q8_0 GGUF lean residency is within the existing 40-45 tok/s band"
+    }
+  },
+  "interpretation": {
+    "status": "decode_followups_negative",
+    "outcome": "The additional decode-oriented probes do not clear the requested 2x/3x target on the tracked Qwen2.5-1.5B Q8 MacBook decode metric. The accepted MacBook wins remain Metal prefill and prompt-heavy end-to-end: 5.70x prefill at P256, 2.74x at P512+D32, and 4.07x at P1024+D32.",
+    "why_not_claim_batch_decode": "batch_q8 reports 2.34x only against the historical naive-f32 serial denominator. Against the current canonical Q8 baseline it is 1.18x, and aggregate throughput is flat as batch grows, so claiming a 2x/3x decode win would be misleading.",
+    "next_decode_lever": "A true decode win on this Mac likely needs a different kernel path, such as an Apple-Silicon Q8/Q4_K decode kernel with real batch reuse, a native Metal decode path, or a cached 1.5B Q4_K artifact for an apples-to-apples lower-byte decode comparison."
+  }
+}

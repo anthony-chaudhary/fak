@@ -1,0 +1,185 @@
+{
+  "schema": "fak.arm64-qkernel-score.v1",
+  "issue": 477,
+  "captured_at": "2026-06-26T01:58:51Z",
+  "machine": "node-macos-a",
+  "benchmark_clone": {
+    "rev": "374776a",
+    "local_patches": [
+      "internal/model: cap default Q8 decode workers on darwin/arm64",
+      "cmd/modelbench: report q8_decode_workers/q8_decode_budget",
+      "cmd/modelbench: add -q4k GGUF resident-Q4_K scoring path",
+      "internal/model: keep resident Q4/Q4_K sessions off the Q8 hand-copied fast decode path",
+      "cmd/modelbench: verify Metal prefill against f32 when f32 weights are available, with near-tie handling",
+      "internal/model: add FAK_METAL_RESIDENT=0 diagnostic switch"
+    ]
+  },
+  "command": {
+    "tool": "cmd/modelbench",
+    "build_tags": [
+      "fakmetal"
+    ],
+    "flags": [
+      "-hf",
+      "qwen2.5-1.5b-instruct",
+      "-metal",
+      "-prefill-sizes",
+      "256",
+      "-prefill-reps",
+      "3",
+      "-decode-reps",
+      "1",
+      "-decode-steps",
+      "8"
+    ],
+    "env": {
+      "CGO_ENABLED": "1",
+      "FAK_WORKERS": "unset",
+      "FAK_BUDGET": "unset"
+    }
+  },
+  "model": {
+    "name": "qwen2.5-1.5b-instruct",
+    "source_kind": "HuggingFace safetensors",
+    "precision": "Q8_0 weights / f16 GPU GEMM",
+    "metal_prefill": true,
+    "lean": false,
+    "quantized_at_load": false
+  },
+  "runtime": {
+    "app_version": "0.31.0",
+    "backend": "legacy",
+    "registered_backends": [
+      "cpu-ref"
+    ],
+    "workers": 12,
+    "budget": "default(GOMAXPROCS)",
+    "q8_decode_workers": 6,
+    "q8_decode_budget": "default(GOMAXPROCS); q8_decode=darwin/arm64-half-cap",
+    "go_threads": "GOMAXPROCS=12, matmul workers=12, q8 decode workers=6"
+  },
+  "results": {
+    "load_ms": 3694.087458,
+    "quant_ms": 1858.376208,
+    "prefill": [
+      {
+        "tokens": 256,
+        "reps": 3,
+        "median_ms": 186.877292,
+        "tok_per_sec": 1369.8828640988654
+      }
+    ],
+    "decode": {
+      "prompt_tokens": 16,
+      "decode_steps": 8,
+      "reps": 1,
+      "per_token_median_ms": 22.541031,
+      "tok_per_sec": 44.3635430872705
+    }
+  },
+  "baseline": {
+    "artifact": "experiments/model-ladder/qwen25-1.5b-q8-cpu-parity-m3pro.json",
+    "fak_cpu_q8_prefill_p256_tok_per_sec": 240.44806919115604,
+    "fak_cpu_q8_decode_tok_per_sec": 38.065806338839884,
+    "llamacpp_cpu_prefill_p256_tok_per_sec": 412.506876
+  },
+  "improvement": {
+    "prefill_over_fak_cpu_q8": 5.697209,
+    "prefill_over_llamacpp_cpu": 3.320873,
+    "decode_over_fak_cpu_q8": 1.165443
+  },
+  "verification": {
+    "status": "pass",
+    "command": {
+      "tool": "cmd/modelbench",
+      "build_tags": [
+        "fakmetal"
+      ],
+      "flags": [
+        "-hf",
+        "qwen2.5-1.5b-instruct",
+        "-metal",
+        "-verify",
+        "-prefill-sizes",
+        "256"
+      ],
+      "env": {
+        "CGO_ENABLED": "1"
+      }
+    },
+    "policy": {
+      "reference": "f32 path when f32 weights are available",
+      "min_cosine": 0.999,
+      "decisive_logit_margin": 0.02,
+      "near_tie_rule": "an f32 argmax mismatch is tolerated only when f32 top1-top2 is below the decisive margin"
+    },
+    "rows": [
+      {
+        "tokens": 8,
+        "cpu_q8_argmax": 13,
+        "metal_argmax": 13,
+        "cpu_q8_metal_argmax_agree": true,
+        "cpu_q8_metal_cosine": 0.99922854,
+        "cpu_q8_margin": 0.0664,
+        "metal_margin": 0.0285,
+        "f32_argmax": 271,
+        "f32_margin": 0.0134,
+        "f32_cpu_q8_cosine": 0.99924719,
+        "f32_metal_cosine": 0.99991447,
+        "status": "f32-near-tie",
+        "ok": true
+      },
+      {
+        "tokens": 32,
+        "cpu_q8_argmax": 271,
+        "metal_argmax": 220,
+        "cpu_q8_metal_argmax_agree": false,
+        "cpu_q8_metal_cosine": 0.99945006,
+        "cpu_q8_margin": 0.0241,
+        "metal_margin": 0.042,
+        "f32_argmax": 220,
+        "f32_margin": 0.0486,
+        "f32_cpu_q8_cosine": 0.9994334,
+        "f32_metal_cosine": 0.99980176,
+        "status": "f32",
+        "ok": true
+      },
+      {
+        "tokens": 128,
+        "cpu_q8_argmax": 198,
+        "metal_argmax": 198,
+        "cpu_q8_metal_argmax_agree": true,
+        "cpu_q8_metal_cosine": 0.99942798,
+        "cpu_q8_margin": 0.2224,
+        "metal_margin": 0.2896,
+        "f32_argmax": 198,
+        "f32_margin": 0.2722,
+        "f32_cpu_q8_cosine": 0.99920918,
+        "f32_metal_cosine": 0.99976688,
+        "status": "f32",
+        "ok": true
+      },
+      {
+        "tokens": 256,
+        "cpu_q8_argmax": 220,
+        "metal_argmax": 220,
+        "cpu_q8_metal_argmax_agree": true,
+        "cpu_q8_metal_cosine": 0.99983701,
+        "cpu_q8_margin": 0.259,
+        "metal_margin": 0.2894,
+        "f32_argmax": 220,
+        "f32_margin": 0.2534,
+        "f32_cpu_q8_cosine": 0.99978763,
+        "f32_metal_cosine": 0.9998882,
+        "status": "f32",
+        "ok": true
+      }
+    ],
+    "verdict": "VERIFY OK - Metal prefill matches the f32 reference on decisive margins"
+  },
+  "interpretation": {
+    "status": "accepted_for_prefill_p256",
+    "outcome": "The MacBook P256 prefill metric clears the requested 2x/3x bar: 5.70x over fak CPU Q8 and 3.32x over the llama.cpp CPU prefill baseline, with f32-reference verification on decisive margins.",
+    "decode_note": "Decode remains the CPU Q8 path and is still only about 1.17x over the old fak CPU Q8 baseline; this artifact is a prefill win, not a decode win."
+  }
+}

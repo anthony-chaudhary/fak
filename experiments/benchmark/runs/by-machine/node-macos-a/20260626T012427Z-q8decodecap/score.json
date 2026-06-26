@@ -1,0 +1,47 @@
+{
+  "schema": "fak.arm64-qkernel-score.v1",
+  "issue": 477,
+  "generated_at": "2026-06-26T01:25:14Z",
+  "host": "node-macos-a",
+  "arch": "arm64",
+  "git": {"rev": "374776a", "branch": "main"},
+  "go": "go version go1.26.0 darwin/arm64",
+  "bench_time": "2s",
+  "gates": {
+    "amort_argmax_cosine": "pass",
+    "default_bit_identity_anchor": "pass",
+    "benchmark_return_code": 0
+  },
+  "kernel_bench": [
+    {"shape": "1536x1536", "kernel": "asm", "mac_per_ns": 15.83},
+    {"shape": "1536x1536", "kernel": "unroll4", "mac_per_ns": 40.33},
+    {"shape": "1536x1536", "kernel": "amort", "mac_per_ns": 41.16},
+    {"shape": "1536x8960", "kernel": "asm", "mac_per_ns": 15.08},
+    {"shape": "1536x8960", "kernel": "unroll4", "mac_per_ns": 42.05},
+    {"shape": "1536x8960", "kernel": "amort", "mac_per_ns": 41.90},
+    {"shape": "8960x1536", "kernel": "asm", "mac_per_ns": 15.87},
+    {"shape": "8960x1536", "kernel": "unroll4", "mac_per_ns": 40.93},
+    {"shape": "8960x1536", "kernel": "amort", "mac_per_ns": 41.43}
+  ],
+  "kernel_ratios": [
+    {"shape": "1536x8960", "amort_over_unroll4": 0.996433, "amort_over_asm": 2.778515},
+    {"shape": "8960x1536", "amort_over_unroll4": 1.012216, "amort_over_asm": 2.610586},
+    {"shape": "1536x1536", "amort_over_unroll4": 1.020580, "amort_over_asm": 2.600126}
+  ],
+  "full_model": {
+    "enabled": true,
+    "model": "qwen2.5-1.5b",
+    "source_kind": "gguf",
+    "default_decode_tok_per_sec": 44.01664762433129,
+    "amort_decode_tok_per_sec": 44.57873540826544,
+    "amort_over_default": 1.012770
+  },
+  "baseline": {
+    "artifact": "experiments/model-ladder/qwen25-1.5b-q8-cpu-parity-m3pro.json",
+    "decode_tok_per_sec": 38.065806
+  },
+  "improvement": {
+    "default_over_baseline": 1.156330,
+    "amort_over_baseline": 1.171097
+  }
+}

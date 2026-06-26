@@ -1,0 +1,156 @@
+{
+  "schema": "fak.arm64-qkernel-score.v1",
+  "issue": 477,
+  "captured_at": "2026-06-26T01:49:54Z",
+  "machine": "node-macos-a",
+  "benchmark_clone": {
+    "rev": "374776a",
+    "local_patches": [
+      "internal/model: cap default Q8 decode workers on darwin/arm64",
+      "cmd/modelbench: report q8_decode_workers/q8_decode_budget",
+      "cmd/modelbench: add -q4k GGUF resident-Q4_K scoring path",
+      "internal/model: keep resident Q4/Q4_K sessions off the Q8 hand-copied fast decode path"
+    ]
+  },
+  "command": {
+    "tool": "cmd/modelbench",
+    "build_tags": [
+      "fakmetal"
+    ],
+    "flags": [
+      "-gguf",
+      "qwen2.5-1.5b-instruct-q8_0.gguf",
+      "-lean",
+      "-metal",
+      "-prefill-sizes",
+      "256",
+      "-prefill-reps",
+      "3",
+      "-decode-reps",
+      "1",
+      "-decode-steps",
+      "8"
+    ],
+    "env": {
+      "CGO_ENABLED": "1",
+      "FAK_WORKERS": "unset",
+      "FAK_BUDGET": "unset"
+    }
+  },
+  "model": {
+    "name": "qwen2.5-1.5b-instruct-q8_0.gguf",
+    "source_kind": "GGUF",
+    "precision": "Q8_0 weights / f16 GPU GEMM",
+    "metal_prefill": true
+  },
+  "runtime": {
+    "app_version": "0.31.0",
+    "backend": "legacy",
+    "registered_backends": [
+      "cpu-ref"
+    ],
+    "workers": 12,
+    "budget": "default(GOMAXPROCS)",
+    "q8_decode_workers": 6,
+    "q8_decode_budget": "default(GOMAXPROCS); q8_decode=darwin/arm64-half-cap",
+    "go_threads": "GOMAXPROCS=12, matmul workers=12, q8 decode workers=6"
+  },
+  "results": {
+    "load_ms": 3104.42375,
+    "quant_ms": 0.000042,
+    "prefill": [
+      {
+        "tokens": 256,
+        "reps": 3,
+        "median_ms": 186.4835,
+        "tok_per_sec": 1372.7756074934243
+      }
+    ],
+    "decode": {
+      "prompt_tokens": 16,
+      "decode_steps": 8,
+      "reps": 1,
+      "per_token_median_ms": 22.117156,
+      "tok_per_sec": 45.21376979933586
+    }
+  },
+  "baseline": {
+    "artifact": "experiments/model-ladder/qwen25-1.5b-q8-cpu-parity-m3pro.json",
+    "fak_cpu_q8_prefill_p256_tok_per_sec": 240.44806919115604,
+    "fak_cpu_q8_decode_tok_per_sec": 38.065806338839884,
+    "llamacpp_cpu_prefill_p256_tok_per_sec": 412.506876
+  },
+  "improvement": {
+    "prefill_over_fak_cpu_q8": 5.709239,
+    "prefill_over_llamacpp_cpu": 3.327885,
+    "decode_over_fak_cpu_q8": 1.187779
+  },
+  "verification": {
+    "status": "failed_overall",
+    "gguf_verify": [
+      {
+        "tokens": 8,
+        "cpu_argmax": 13,
+        "metal_argmax": 271,
+        "argmax_agree": false,
+        "max_abs_logit_delta": 0.3194
+      },
+      {
+        "tokens": 32,
+        "cpu_argmax": 220,
+        "metal_argmax": 13,
+        "argmax_agree": false,
+        "max_abs_logit_delta": 0.2207
+      },
+      {
+        "tokens": 128,
+        "cpu_argmax": 198,
+        "metal_argmax": 198,
+        "argmax_agree": true,
+        "max_abs_logit_delta": 0.2476
+      },
+      {
+        "tokens": 256,
+        "cpu_argmax": 220,
+        "metal_argmax": 220,
+        "argmax_agree": true,
+        "max_abs_logit_delta": 0.2452
+      }
+    ],
+    "hf_verify": [
+      {
+        "tokens": 8,
+        "cpu_argmax": 13,
+        "metal_argmax": 13,
+        "argmax_agree": true,
+        "max_abs_logit_delta": 0.566
+      },
+      {
+        "tokens": 32,
+        "cpu_argmax": 271,
+        "metal_argmax": 220,
+        "argmax_agree": false,
+        "max_abs_logit_delta": 0.2745
+      },
+      {
+        "tokens": 128,
+        "cpu_argmax": 198,
+        "metal_argmax": 198,
+        "argmax_agree": true,
+        "max_abs_logit_delta": 0.373
+      },
+      {
+        "tokens": 256,
+        "cpu_argmax": 220,
+        "metal_argmax": 220,
+        "argmax_agree": true,
+        "max_abs_logit_delta": 0.3167
+      }
+    ]
+  },
+  "interpretation": {
+    "status": "exploratory_raw_speed_only",
+    "outcome": "Metal prefill clears the requested 2x/3x raw-speed bar on P=256, but the built-in all-length Metal verify gate fails, so this is not counted as a fully accepted performance win.",
+    "decode_note": "Decode remains the CPU Q8 path and is still only about 1.18x over the old fak CPU Q8 baseline in this short run."
+  }
+}

@@ -1,0 +1,89 @@
+{
+  "schema": "fak.arm64-qkernel-score.v1",
+  "issue": 477,
+  "captured_at": "2026-06-26T01:47:01Z",
+  "machine": "node-macos-a",
+  "benchmark_clone": {
+    "rev": "374776a",
+    "local_patches": [
+      "cmd/modelbench: add -q4k GGUF resident-Q4_K scoring path",
+      "internal/model: keep resident Q4/Q4_K sessions off the Q8 hand-copied fast decode path"
+    ]
+  },
+  "command": {
+    "tool": "cmd/modelbench",
+    "flags": [
+      "-q4k",
+      "-gguf",
+      "qwen2.5-14b-instruct-q4_k_m-00001-of-00003.gguf",
+      "-prefill-sizes",
+      "16",
+      "-prefill-reps",
+      "1",
+      "-decode-reps",
+      "2",
+      "-decode-steps",
+      "8"
+    ],
+    "env": {
+      "FAK_WORKERS": "unset",
+      "FAK_BUDGET": "unset"
+    }
+  },
+  "model": {
+    "name": "qwen2.5-14b-instruct-q4_k_m-00001-of-00003.gguf",
+    "source_kind": "GGUF split shard root",
+    "precision": "Q4_K/Q8 resident hybrid",
+    "q4k": true
+  },
+  "runtime": {
+    "app_version": "0.31.0",
+    "backend": "legacy",
+    "registered_backends": [
+      "cpu-ref"
+    ],
+    "workers": 12,
+    "budget": "default(GOMAXPROCS)",
+    "q8_decode_workers": 6,
+    "q8_decode_budget": "default(GOMAXPROCS); q8_decode=darwin/arm64-half-cap",
+    "go_threads": "GOMAXPROCS=12, matmul workers=12, q8 decode workers=6"
+  },
+  "results": {
+    "load_ms": 11768.932,
+    "quant_ms": 0,
+    "prefill": [
+      {
+        "tokens": 16,
+        "reps": 1,
+        "median_ms": 2702.215458,
+        "tok_per_sec": 5.921067453237846
+      }
+    ],
+    "decode": {
+      "prompt_tokens": 16,
+      "decode_steps": 8,
+      "reps": 2,
+      "per_token_median_ms": 225.262156,
+      "tok_per_sec": 4.439272080837227
+    }
+  },
+  "resident": {
+    "q4k_tensors": 192,
+    "q4k_bytes": 5556142080,
+    "q4k_params": 9877585920,
+    "q8_tensors": 145,
+    "q8_bytes": 4627169280,
+    "q8_params": 4113039360,
+    "f32_tensors": 242,
+    "f32_bytes": 3117633536,
+    "total_resident_bytes": 13300944896,
+    "decode_bytes_per_token": 10183311360,
+    "decode_gib_per_token": 9.48394775390625,
+    "summary": "resident: Q4_K=192 tensors/5298.75MiB  Q8=145/4412.81MiB  f32=242/2973.20MiB  total=12684.76MiB  decode=9.48GiB/tok"
+  },
+  "interpretation": {
+    "status": "exploratory",
+    "baseline_comparison": "not apples-to-apples with the 1.5B Q8 baseline; this run proves the resident Q4_K path can score a standard Qwen2.5 PreNorm model after the fast-path guard",
+    "outcome": "Q4_K reduces resident decode bytes for a 14B model, but this CPU path does not establish a 2x or 3x improvement on the tracked 1.5B Q8 decode metric"
+  }
+}
