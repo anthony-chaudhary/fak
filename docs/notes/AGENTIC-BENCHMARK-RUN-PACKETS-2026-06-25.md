@@ -226,7 +226,8 @@ Win claim allowed after adapter:
 
 ## Packet E: tau3 and ToolSandbox policy/state benchmarks
 
-Status: `adapter-gap`.
+Status: `adapter-smoke-shipped`; official tau3/ToolSandbox harness execution is
+still gated.
 
 Why high priority: these benchmarks are closer to fak's core contract than
 coding pass@1. They test stateful tool use, policy adherence, insufficient
@@ -239,6 +240,28 @@ Adapter completion bar:
   model and user simulator.
 - Record pass^1/pass^k, policy breach rate, minefield hits, argument repairs,
   denied tool calls, and user turns.
+
+Current local witness:
+
+```powershell
+go run ./cmd/toolsandboxbench `
+  -suite testdata/toolsandbox/policy_state_smoke.json `
+  -out experiments/agent-live/toolsandbox-policy-state-smoke-20260625.json `
+  -md experiments/agent-live/toolsandbox-policy-state-smoke-20260625.md
+```
+
+This is a ToolSandbox-shaped adapter smoke, not an official Apple ToolSandbox or
+tau3 leaderboard run. It preserves task ids, milestones, minefield labels, and a
+shared trace while replaying the same calls through raw and fak arms. The shipped
+smoke records raw safe pass^1 `0.500` versus fak safe pass^1 `1.000`, with one
+fak-denied policy/minefield call and benign utility preserved on both tasks.
+
+Remaining official-harness bar:
+
+- Replace the smoke suite with externally supplied tau3 or ToolSandbox task
+  definitions/grader output under their licenses.
+- Keep the raw and fak arms on the same model, simulator, task ids, and budgets.
+- Promote only official-harness results into `BENCHMARK-AUTHORITY.md`.
 
 First model arms:
 

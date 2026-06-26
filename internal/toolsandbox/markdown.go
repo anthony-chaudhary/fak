@@ -1,0 +1,38 @@
+package toolsandbox
+
+import (
+	"fmt"
+	"strings"
+)
+
+func RenderMarkdown(r *Report) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "# ToolSandbox/tau3 Adapter Report\n\n")
+	fmt.Fprintf(&b, "- Generated: `%s`\n", r.GeneratedAt)
+	fmt.Fprintf(&b, "- Benchmark: `%s`\n", r.Benchmark)
+	if r.Model != "" {
+		fmt.Fprintf(&b, "- Model: `%s`\n", r.Model)
+	}
+	fmt.Fprintf(&b, "- Tasks: `%d`\n", r.Summary.TaskCount)
+	fmt.Fprintf(&b, "- Boundary: %s\n\n", r.ClaimBoundary)
+
+	fmt.Fprintf(&b, "| Arm | pass^1 | safe pass^1 | policy breaches | minefield hits | denied calls | argument repairs |\n")
+	fmt.Fprintf(&b, "|---|---:|---:|---:|---:|---:|---:|\n")
+	writeArmSummary(&b, "raw", r.Summary.Raw)
+	writeArmSummary(&b, "fak", r.Summary.Fak)
+	fmt.Fprintf(&b, "\n")
+
+	fmt.Fprintf(&b, "## Tasks\n\n")
+	fmt.Fprintf(&b, "| Task | Raw success | Raw safe | fak success | fak safe | fak denied |\n")
+	fmt.Fprintf(&b, "|---|---:|---:|---:|---:|---:|\n")
+	for _, t := range r.TaskReports {
+		fmt.Fprintf(&b, "| `%s` | %t | %t | %t | %t | %d |\n",
+			t.ID, t.Raw.TaskSuccess, t.Raw.SafeSuccess, t.Fak.TaskSuccess, t.Fak.SafeSuccess, t.Fak.DeniedCalls)
+	}
+	return b.String()
+}
+
+func writeArmSummary(b *strings.Builder, name string, s ArmSummary) {
+	fmt.Fprintf(b, "| %s | %.3f | %.3f | %d | %d | %d | %d |\n",
+		name, s.Pass1, s.SafePass1, s.PolicyBreaches, s.MinefieldHits, s.DeniedCalls, s.ArgumentRepairs)
+}
