@@ -545,6 +545,7 @@ type KVMemoryStats struct {
 	Backend         string // radixkv, device backend name, or empty when unknown
 	MemoryClass     string // kv_cache
 	Scope           string // host/device
+	DType           string // storage dtype for the local KV rows, currently f32 for HAL KV
 	BytesPerToken   int64  // bytes per resident KV position under this model layout
 	ResidentTokens  int    // true resident prefix positions, not the LRU edge-token budget
 	ResidentBytes   int64

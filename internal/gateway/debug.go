@@ -98,6 +98,7 @@ type debugModelLoadMemoryPlanVars struct {
 	Scope  string `json:"scope"`
 	Bytes  int64  `json:"bytes"`
 	Detail string `json:"detail,omitempty"`
+	DType  string `json:"dtype,omitempty"`
 }
 
 type debugModelLoadCapacityVars struct {
@@ -113,6 +114,7 @@ type debugKVMemoryVars struct {
 	Backend         string `json:"backend"`
 	MemoryClass     string `json:"memory_class"`
 	Scope           string `json:"scope"`
+	DType           string `json:"dtype,omitempty"`
 	BytesPerToken   int64  `json:"bytes_per_token"`
 	ResidentTokens  int    `json:"resident_tokens,omitempty"`
 	ResidentBytes   int64  `json:"resident_bytes,omitempty"`
@@ -295,6 +297,7 @@ func debugModelLoadProfile(p *ModelLoadProfile) *debugModelLoadVars {
 			Scope:  modelLoadScope(row.Scope),
 			Bytes:  row.Bytes,
 			Detail: row.Detail,
+			DType:  modelLoadDType(row.DType),
 		})
 	}
 	for _, cap := range p.sortedMemoryCapacities() {
@@ -363,11 +366,13 @@ func debugKVMemory(p agent.Planner) *debugKVMemoryVars {
 	if backend == "" {
 		backend = "unknown"
 	}
+	dtype := modelLoadDType(st.DType)
 	return &debugKVMemoryVars{
 		Enabled:         st.Enabled,
 		Backend:         backend,
 		MemoryClass:     class,
 		Scope:           scope,
+		DType:           dtype,
 		BytesPerToken:   st.BytesPerToken,
 		ResidentTokens:  st.ResidentTokens,
 		ResidentBytes:   st.ResidentBytes,

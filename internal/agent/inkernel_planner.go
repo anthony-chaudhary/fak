@@ -148,6 +148,7 @@ func (p *InKernelPlanner) KVMemoryStats() KVMemoryStats {
 		return KVMemoryStats{
 			MemoryClass: string(compute.MemoryKVCache),
 			Scope:       string(compute.MemoryScopeHost),
+			DType:       compute.F32.String(),
 		}
 	}
 	kvCfg := compute.KVConfig{
@@ -162,6 +163,7 @@ func (p *InKernelPlanner) KVMemoryStats() KVMemoryStats {
 		Backend:       "radixkv",
 		MemoryClass:   string(compute.MemoryKVCache),
 		Scope:         string(compute.MemoryScopeHost),
+		DType:         compute.F32.String(),
 		BytesPerToken: bytesPerToken,
 	}
 	if p.backend != nil {
@@ -437,7 +439,7 @@ func (p *InKernelPlanner) requestMemoryPlan(promptTokens, maxNew int) compute.Me
 	})...)
 	if p.backend != nil && p.includeResidentWeightsInRequestFit() {
 		if r := p.m.ResidentReport(); r != nil && r.TotalResidentBytes > 0 {
-			plan = append(compute.MemoryPlan{{Class: compute.MemoryWeights, Bytes: r.TotalResidentBytes, Detail: "resident-weights"}}, plan...)
+			plan = append(compute.MemoryPlan{{Class: compute.MemoryWeights, Bytes: r.TotalResidentBytes, Detail: "resident-weights", DType: "mixed"}}, plan...)
 		}
 	}
 	return plan

@@ -108,10 +108,10 @@ func TestModelLoadMetricsSuppressedUntilSet(t *testing.T) {
 			{Phase: "dequant", Seconds: 1.2, Bytes: 1_900_000, Tensors: 290},
 		},
 		MemoryPlan: []ModelLoadMemoryDemand{
-			{Class: "weights", Scope: "device", Bytes: 1_750_000, Detail: "gguf-q8-load"},
-			{Class: "kv_cache", Scope: "device", Bytes: 240_000, Detail: "hal-kv-store"},
-			{Class: "offload", Scope: "host", Bytes: 10_000, Detail: "expert-weights"},
-			{Class: "weights", Scope: "device", Bytes: 250_000, Detail: "scale-buffer"},
+			{Class: "weights", Scope: "device", Bytes: 1_750_000, Detail: "gguf-q8-load", DType: "q8_0"},
+			{Class: "kv_cache", Scope: "device", Bytes: 240_000, Detail: "hal-kv-store", DType: "f32"},
+			{Class: "offload", Scope: "host", Bytes: 10_000, Detail: "expert-weights", DType: "q8_0"},
+			{Class: "weights", Scope: "device", Bytes: 250_000, Detail: "scale-buffer", DType: "f32"},
 		},
 		MemoryCapacities: []ModelLoadMemoryCapacity{
 			{Scope: "device", TotalBytes: 8 << 30, Known: true},
@@ -132,6 +132,10 @@ func TestModelLoadMetricsSuppressedUntilSet(t *testing.T) {
 		`fak_model_load_memory_plan_bytes{class="weights",scope="device"} 2000000`,
 		`fak_model_load_memory_plan_bytes{class="kv_cache",scope="device"} 240000`,
 		`fak_model_load_memory_plan_bytes{class="offload",scope="host"} 10000`,
+		`fak_model_load_memory_plan_dtype_bytes{class="weights",scope="device",dtype="q8_0"} 1750000`,
+		`fak_model_load_memory_plan_dtype_bytes{class="weights",scope="device",dtype="f32"} 250000`,
+		`fak_model_load_memory_plan_dtype_bytes{class="kv_cache",scope="device",dtype="f32"} 240000`,
+		`fak_model_load_memory_plan_dtype_bytes{class="offload",scope="host",dtype="q8_0"} 10000`,
 		"fak_model_load_memory_headroom_ratio 0.15",
 		`fak_model_load_memory_capacity_known{scope="device"} 1`,
 		`fak_model_load_memory_capacity_free_known{scope="device"} 0`,
@@ -154,6 +158,9 @@ func TestModelLoadMetricsSuppressedUntilSet(t *testing.T) {
 	}
 	if len(vars.ModelLoad.MemoryPlan) != 4 || vars.ModelLoad.MemoryPlan[0].Detail != "gguf-q8-load" {
 		t.Fatalf("debug memory plan = %+v, want detailed plan rows", vars.ModelLoad.MemoryPlan)
+	}
+	if vars.ModelLoad.MemoryPlan[0].DType != "q8_0" || vars.ModelLoad.MemoryPlan[1].DType != "f32" {
+		t.Fatalf("debug memory plan dtypes = %+v, want q8_0/f32 rows", vars.ModelLoad.MemoryPlan)
 	}
 	if len(vars.ModelLoad.MemoryCapacities) != 2 || !vars.ModelLoad.MemoryCapacities[1].FreeKnown {
 		t.Fatalf("debug capacities = %+v, want device+host rows with host free known", vars.ModelLoad.MemoryCapacities)

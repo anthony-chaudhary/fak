@@ -98,9 +98,16 @@ func TestInKernelRequestMemoryPlanSplitsRuntimeClasses(t *testing.T) {
 	}
 
 	byClass := p.requestMemoryPlan(10, 5).ByClass()
+	byClassDType := map[compute.MemoryClass]string{}
+	for _, row := range p.requestMemoryPlan(10, 5) {
+		byClassDType[row.Class] = row.DType
+	}
 	for _, class := range []compute.MemoryClass{compute.MemoryKVCache, compute.MemoryActivation, compute.MemoryScratchpad} {
 		if byClass[class] <= 0 {
 			t.Fatalf("request plan missing %s demand: %#v", class, byClass)
+		}
+		if byClassDType[class] != compute.F32.String() {
+			t.Fatalf("request plan %s dtype = %q, want f32", class, byClassDType[class])
 		}
 	}
 	if byClass[compute.MemoryWeights] != 0 {
@@ -111,6 +118,11 @@ func TestInKernelRequestMemoryPlanSplitsRuntimeClasses(t *testing.T) {
 	byClass = p.requestMemoryPlan(10, 5).ByClass()
 	if byClass[compute.MemoryWeights] <= 0 {
 		t.Fatalf("request plan with unknown free memory must include resident weights against the total ceiling: %#v", byClass)
+	}
+	for _, row := range p.requestMemoryPlan(10, 5) {
+		if row.Class == compute.MemoryWeights && row.DType != "mixed" {
+			t.Fatalf("resident weight dtype = %q, want mixed", row.DType)
+		}
 	}
 }
 

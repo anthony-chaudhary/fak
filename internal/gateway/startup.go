@@ -117,6 +117,7 @@ type ModelLoadMemoryDemand struct {
 	Scope  string
 	Bytes  int64
 	Detail string
+	DType  string
 }
 
 // ModelLoadMemoryCapacity is the backend capacity snapshot used with the memory
@@ -198,6 +199,39 @@ func (p *ModelLoadProfile) memoryPlanByClassScope() []ModelLoadMemoryDemand {
 	return out
 }
 
+func (p *ModelLoadProfile) memoryPlanByClassScopeDType() []ModelLoadMemoryDemand {
+	if p == nil {
+		return nil
+	}
+	type key struct {
+		class string
+		scope string
+		dtype string
+	}
+	by := map[key]int64{}
+	for _, row := range p.MemoryPlan {
+		if row.Bytes <= 0 {
+			continue
+		}
+		k := key{class: modelLoadClass(row.Class), scope: modelLoadScope(row.Scope), dtype: modelLoadDType(row.DType)}
+		by[k] += row.Bytes
+	}
+	out := make([]ModelLoadMemoryDemand, 0, len(by))
+	for k, bytes := range by {
+		out = append(out, ModelLoadMemoryDemand{Class: k.class, Scope: k.scope, DType: k.dtype, Bytes: bytes})
+	}
+	sort.SliceStable(out, func(i, j int) bool {
+		if out[i].Scope != out[j].Scope {
+			return out[i].Scope < out[j].Scope
+		}
+		if out[i].Class != out[j].Class {
+			return out[i].Class < out[j].Class
+		}
+		return out[i].DType < out[j].DType
+	})
+	return out
+}
+
 func (p *ModelLoadProfile) sortedMemoryCapacities() []ModelLoadMemoryCapacity {
 	if p == nil {
 		return nil
@@ -224,6 +258,14 @@ func modelLoadScope(scope string) string {
 		return "device"
 	}
 	return scope
+}
+
+func modelLoadDType(dtype string) string {
+	dtype = strings.ToLower(strings.TrimSpace(dtype))
+	if dtype == "" {
+		return "unknown"
+	}
+	return dtype
 }
 
 // writeStartupMetrics renders the boot-timeline gauges. They are emitted on every
@@ -315,6 +357,13 @@ func (s *Server) writeModelLoadMetrics(b *strings.Builder) {
 		for _, row := range rows {
 			fmt.Fprintf(b, "fak_model_load_memory_plan_bytes{class=\"%s\",scope=\"%s\"} %d\n",
 				promQuote(row.Class), promQuote(row.Scope), row.Bytes)
+		}
+	}
+	if rows := p.memoryPlanByClassScopeDType(); len(rows) > 0 {
+		writeHelpType(b, "fak_model_load_memory_plan_dtype_bytes", "Classed memory demand used to admit the boot-time model load, aggregated by memory class, scope, and bounded dtype/storage label.", "gauge")
+		for _, row := range rows {
+			fmt.Fprintf(b, "fak_model_load_memory_plan_dtype_bytes{class=\"%s\",scope=\"%s\",dtype=\"%s\"} %d\n",
+				promQuote(row.Class), promQuote(row.Scope), promQuote(row.DType), row.Bytes)
 		}
 	}
 	if p.MemoryHeadroomRatio > 0 {

@@ -244,7 +244,7 @@ func TestEstimateKVStoreMemoryPlan(t *testing.T) {
 		t.Fatalf("EstimateKVStoreBytes = %d, want %d", got, want)
 	}
 	plan := EstimateKVStoreMemoryPlan(cfg, 16)
-	if len(plan) != 1 || plan[0].Class != MemoryKVCache || plan[0].Bytes != want || plan[0].Detail != "hal-kv-store" {
+	if len(plan) != 1 || plan[0].Class != MemoryKVCache || plan[0].Bytes != want || plan[0].Detail != "hal-kv-store" || plan[0].DType != F32.String() {
 		t.Fatalf("EstimateKVStoreMemoryPlan = %+v, want one classed kv_cache demand", plan)
 	}
 }
@@ -282,6 +282,9 @@ func TestEstimateHALTransientMemoryPlan(t *testing.T) {
 	}
 	if plan[0].Detail != "hal-token-activation" || plan[1].Detail != "hal-token-scratch" {
 		t.Fatalf("plan details = %+v", plan)
+	}
+	if plan[0].DType != F32.String() || plan[1].DType != F32.String() {
+		t.Fatalf("plan dtypes = %+v, want f32 activation/scratchpad", plan)
 	}
 	if got := EstimateHALTransientMemoryPlan(TransformerScratchConfig{HiddenSize: 32, NumLayers: 2}); len(got) != 1 || got[0].Class != MemoryActivation {
 		t.Fatalf("partial geometry should keep only the supported activation estimate, got %+v", got)

@@ -91,6 +91,7 @@ func TestKVMemoryMetricsAndDebugVars(t *testing.T) {
 		Backend:         "radixkv",
 		MemoryClass:     "kv_cache",
 		Scope:           "host",
+		DType:           "f32",
 		BytesPerToken:   6144,
 		ResidentTokens:  42,
 		ResidentBytes:   258048,
@@ -107,6 +108,7 @@ func TestKVMemoryMetricsAndDebugVars(t *testing.T) {
 	text := srv.renderMetrics()
 	for _, want := range []string{
 		`fak_gateway_kv_memory_enabled{class="kv_cache",scope="host",backend="radixkv"} 1`,
+		`fak_gateway_kv_memory_dtype_info{class="kv_cache",scope="host",backend="radixkv",dtype="f32"} 1`,
 		`fak_gateway_kv_memory_bytes_per_token{class="kv_cache",scope="host",backend="radixkv"} 6144`,
 		`fak_gateway_kv_memory_resident_tokens{class="kv_cache",scope="host",backend="radixkv"} 42`,
 		`fak_gateway_kv_memory_resident_bytes{class="kv_cache",scope="host",backend="radixkv"} 258048`,
@@ -126,7 +128,7 @@ func TestKVMemoryMetricsAndDebugVars(t *testing.T) {
 		t.Fatal("/debug/vars missing kv_memory")
 	}
 	if vars.KVMemory.ResidentTokens != 42 || vars.KVMemory.ResidentBytes != 258048 ||
-		vars.KVMemory.LRUTokens != 18 || vars.KVMemory.PolicyEvictions != 1 {
+		vars.KVMemory.LRUTokens != 18 || vars.KVMemory.PolicyEvictions != 1 || vars.KVMemory.DType != "f32" {
 		t.Fatalf("debug kv_memory = %+v, want resident/lru/eviction fields", vars.KVMemory)
 	}
 }
@@ -138,12 +140,14 @@ func TestKVMemoryMetricsDisabledReporterEmitsGeometryOnly(t *testing.T) {
 		Backend:       "cpu-ref",
 		MemoryClass:   "kv_cache",
 		Scope:         "device",
+		DType:         "f32",
 		BytesPerToken: 4096,
 	}}
 
 	text := srv.renderMetrics()
 	for _, want := range []string{
 		`fak_gateway_kv_memory_enabled{class="kv_cache",scope="device",backend="cpu-ref"} 0`,
+		`fak_gateway_kv_memory_dtype_info{class="kv_cache",scope="device",backend="cpu-ref",dtype="f32"} 1`,
 		`fak_gateway_kv_memory_bytes_per_token{class="kv_cache",scope="device",backend="cpu-ref"} 4096`,
 	} {
 		if !strings.Contains(text, want) {
@@ -164,7 +168,7 @@ func TestKVMemoryMetricsDisabledReporterEmitsGeometryOnly(t *testing.T) {
 	if vars.KVMemory == nil {
 		t.Fatal("/debug/vars missing disabled kv_memory geometry")
 	}
-	if vars.KVMemory.Enabled || vars.KVMemory.Scope != "device" || vars.KVMemory.BytesPerToken != 4096 || vars.KVMemory.ResidentTokens != 0 {
+	if vars.KVMemory.Enabled || vars.KVMemory.Scope != "device" || vars.KVMemory.DType != "f32" || vars.KVMemory.BytesPerToken != 4096 || vars.KVMemory.ResidentTokens != 0 {
 		t.Fatalf("debug disabled kv_memory = %+v, want geometry-only disabled snapshot", vars.KVMemory)
 	}
 }

@@ -417,6 +417,7 @@ func toGatewayLoadMemoryPlan(plan compute.MemoryPlan) []gateway.ModelLoadMemoryD
 			Scope:  string(d.ScopeOrDefault()),
 			Bytes:  d.Bytes,
 			Detail: d.Detail,
+			DType:  d.DType,
 		})
 	}
 	return out

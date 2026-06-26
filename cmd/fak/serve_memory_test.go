@@ -168,7 +168,11 @@ func TestGatewayLoadProfileCarriesServeMemoryPlanAndCapacity(t *testing.T) {
 		t.Fatalf("MemoryHeadroomRatio = %v, want %v", profile.MemoryHeadroomRatio, serveGGUFDeviceHeadroom)
 	}
 	var weights, kv int64
+	seenDType := map[string]bool{}
 	for _, row := range profile.MemoryPlan {
+		if row.DType != "" {
+			seenDType[row.Class+"/"+row.Scope+"/"+row.DType] = true
+		}
 		switch row.Class {
 		case string(compute.MemoryWeights):
 			weights += row.Bytes
@@ -181,6 +185,12 @@ func TestGatewayLoadProfileCarriesServeMemoryPlanAndCapacity(t *testing.T) {
 	}
 	if weights == 0 || kv == 0 {
 		t.Fatalf("profile memory plan missing weights/kv rows: %+v", profile.MemoryPlan)
+	}
+	if !seenDType[string(compute.MemoryKVCache)+"/"+string(compute.MemoryScopeDevice)+"/f32"] {
+		t.Fatalf("profile memory plan missing f32 KV dtype row: %+v", profile.MemoryPlan)
+	}
+	if !seenDType[string(compute.MemoryWeights)+"/"+string(compute.MemoryScopeDevice)+"/f32"] && !seenDType[string(compute.MemoryWeights)+"/"+string(compute.MemoryScopeDevice)+"/q4_k"] && !seenDType[string(compute.MemoryWeights)+"/"+string(compute.MemoryScopeDevice)+"/q8_0"] {
+		t.Fatalf("profile memory plan missing concrete weight dtype row: %+v", profile.MemoryPlan)
 	}
 	if len(profile.MemoryCapacities) != 2 {
 		t.Fatalf("MemoryCapacities = %+v, want device+host", profile.MemoryCapacities)

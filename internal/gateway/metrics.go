@@ -843,12 +843,15 @@ func (s *Server) writeKVMemoryMetrics(b *strings.Builder) {
 		backend = "unknown"
 	}
 	labels := fmt.Sprintf("class=\"%s\",scope=\"%s\",backend=\"%s\"", promQuote(class), promQuote(scope), promQuote(backend))
+	dtype := modelLoadDType(st.DType)
 	enabled := 0
 	if st.Enabled {
 		enabled = 1
 	}
 	writeHelpType(b, "fak_gateway_kv_memory_enabled", "Whether a local reusable KV prefix cache is active for this planner. Proxy/mock planners emit no resident-KV series.", "gauge")
 	fmt.Fprintf(b, "fak_gateway_kv_memory_enabled{%s} %d\n", labels, enabled)
+	writeHelpType(b, "fak_gateway_kv_memory_dtype_info", "Storage dtype for local KV-cache rows under this planner/backend. Current HAL KV rows are f32; proxy/mock planners emit no resident-KV series.", "gauge")
+	fmt.Fprintf(b, "fak_gateway_kv_memory_dtype_info{%s,dtype=\"%s\"} 1\n", labels, promQuote(dtype))
 	writeHelpType(b, "fak_gateway_kv_memory_bytes_per_token", "Estimated bytes for one resident KV position under this model layout (classed as kv_cache).", "gauge")
 	fmt.Fprintf(b, "fak_gateway_kv_memory_bytes_per_token{%s} %d\n", labels, st.BytesPerToken)
 	if !st.Enabled {
