@@ -44,6 +44,9 @@ go install github.com/anthony-chaudhary/fak/cmd/fak@latest
 > **Windows:** `go build` / `go vet` / `go run` work natively, but native `go test` is
 > blocked by an OS Application-Control policy on the freshly-compiled test binaries — run
 > the suite under WSL: `./test.ps1` from the repo root. This is an OS quirk, not a code failure.
+> For now, **avoid running tests or long-lived local `fak serve` directly on the dev box** —
+> use WSL/CI for tests and the GPU/cloud nodes for a real serve. See
+> [`docs/notes/AVOID-TESTING-ON-THIS-MACHINE-2026-06-25.md`](docs/notes/AVOID-TESTING-ON-THIS-MACHINE-2026-06-25.md).
 
 ## The 60-second proof (no key, no model, no GPU — verified)
 
