@@ -285,6 +285,100 @@ func TestResolveRepoFileFallsBackToSingleSafetensors(t *testing.T) {
 	}
 }
 
+func TestResolveRepoFileResolvesShardedSafetensors(t *testing.T) {
+	// A sharded repo (a model.safetensors.index.json plus model-0000N shards, no
+	// single model.safetensors) resolves to the index — the entry point FetchURI
+	// expands to the full shard set (issue #294's hf://meta-llama/Llama-3.1-8B).
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/models/owner/repo/revision/main" {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"siblings":[{"rfilename":"config.json"},` +
+			`{"rfilename":"model.safetensors.index.json"},` +
+			`{"rfilename":"model-00001-of-00002.safetensors"},` +
+			`{"rfilename":"model-00002-of-00002.safetensors"}]}`))
+	}))
+	defer srv.Close()
+
+	c := &Client{BaseURL: srv.URL, HTTP: srv.Client(), CacheDir: t.TempDir()}
+	got, err := c.ResolveRepoFile(context.Background(), Ref{Repo: "owner/repo", Revision: "main"}, nil)
+	if err != nil {
+		t.Fatalf("ResolveRepoFile sharded: %v", err)
+	}
+	if got.File != "model.safetensors.index.json" {
+		t.Fatalf("resolved file = %q, want model.safetensors.index.json", got.File)
+	}
+}
+
+func TestFetchURIShardedSafetensorsFansOut(t *testing.T) {
+	// meta-llama/Llama-3.1-8B-shaped repo: a bare hf://owner/repo must resolve to
+	// the sharded index, then download the index plus every shard its weight_map
+	// names into ONE cache directory (the unit model.LoadSafetensorsDir consumes).
+	// Every file is verified against its X-Linked-Etag sha256 (issue #294).
+	shard1 := []byte("shard-one-pretend-weights")
+	shard2 := []byte("shard-two-pretend-weights")
+	indexJSON := []byte(`{"metadata":{"total_size":50},"weight_map":{` +
+		`"model.layers.0.weight":"model-00001-of-00002.safetensors",` +
+		`"model.layers.1.weight":"model-00001-of-00002.safetensors",` +
+		`"model.layers.2.weight":"model-00002-of-00002.safetensors"}}`)
+	files := map[string][]byte{
+		"model.safetensors.index.json":     indexJSON,
+		"model-00001-of-00002.safetensors": shard1,
+		"model-00002-of-00002.safetensors": shard2,
+	}
+	var infoGets atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/models/owner/repo/revision/main" {
+			infoGets.Add(1)
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"siblings":[{"rfilename":"config.json"},` +
+				`{"rfilename":"model.safetensors.index.json"},` +
+				`{"rfilename":"model-00001-of-00002.safetensors"},` +
+				`{"rfilename":"model-00002-of-00002.safetensors"}]}`))
+			return
+		}
+		name, ok := strings.CutPrefix(r.URL.Path, "/owner/repo/resolve/main/")
+		if !ok {
+			http.NotFound(w, r)
+			return
+		}
+		body, ok := files[name]
+		if !ok {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("X-Linked-Etag", `"`+sha256hex(body)+`"`)
+		if r.Method == http.MethodHead {
+			return
+		}
+		_, _ = w.Write(body)
+	}))
+	defer srv.Close()
+
+	c := &Client{BaseURL: srv.URL, HTTP: srv.Client(), CacheDir: t.TempDir()}
+	dir, err := c.FetchURI(context.Background(), "hf://owner/repo", nil)
+	if err != nil {
+		t.Fatalf("FetchURI sharded: %v", err)
+	}
+	if fi, err := os.Stat(dir); err != nil || !fi.IsDir() {
+		t.Fatalf("FetchURI returned %q, want a directory (stat err=%v)", dir, err)
+	}
+	for name, want := range files {
+		got, err := os.ReadFile(filepath.Join(dir, name))
+		if err != nil {
+			t.Fatalf("read %s from cache dir: %v", name, err)
+		}
+		if string(got) != string(want) {
+			t.Fatalf("cached %s = %q, want %q", name, got, want)
+		}
+	}
+	if n := infoGets.Load(); n != 1 {
+		t.Fatalf("repo info GETs = %d, want 1", n)
+	}
+}
+
 func TestDownloadUnverifiedWhenNoEtag(t *testing.T) {
 	body := []byte("no oid stamped")
 	stub := &hubStub{body: body, etag: ""} // Hub stamps nothing

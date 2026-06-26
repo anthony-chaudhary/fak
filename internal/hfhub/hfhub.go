@@ -29,7 +29,9 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"path"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -59,6 +61,14 @@ var defaultHTTPClient = &http.Client{
 
 // DefaultBaseURL is the Hugging Face Hub origin the resolve URLs are built on.
 const DefaultBaseURL = "https://huggingface.co"
+
+// safetensorsIndexFile is the HuggingFace sharded-weights manifest. Its presence
+// in a repo marks a multi-file safetensors model whose shards are named by the
+// index's weight_map (e.g. meta-llama/Llama-3.1-8B's four model-0000N-of-00004
+// shards, with no single model.safetensors). FetchURI resolves such a repo to the
+// index and fans out to every shard it names. The on-disk layout (index + shards
+// side by side in one directory) is exactly what model.LoadSafetensorsDir consumes.
+const safetensorsIndexFile = "model.safetensors.index.json"
 
 // Ref is a parsed hf:// reference to a single file in a Hub repo.
 type Ref struct {
@@ -242,6 +252,7 @@ func (c *Client) repoInfoURL(r Ref) string {
 
 func selectLoadArtifact(siblings []repoSibling) (string, error) {
 	var ggufs, safetensors []string
+	hasShardIndex := false
 	for _, s := range siblings {
 		name := strings.TrimPrefix(s.filename(), "/")
 		if name == "" || strings.HasSuffix(name, "/") {
@@ -251,6 +262,8 @@ func selectLoadArtifact(siblings []repoSibling) (string, error) {
 		switch {
 		case strings.HasSuffix(lower, ".gguf"):
 			ggufs = append(ggufs, name)
+		case name == safetensorsIndexFile:
+			hasShardIndex = true
 		case name == "model.safetensors":
 			safetensors = append(safetensors, name)
 		}
@@ -260,6 +273,12 @@ func selectLoadArtifact(siblings []repoSibling) (string, error) {
 	}
 	if len(ggufs) > 1 {
 		return "", fmt.Errorf("ambiguous GGUF artifacts: %s", strings.Join(ggufs, ", "))
+	}
+	// A sharded safetensors model has no single weight file — the index names
+	// every shard, so it is the one unambiguous entry point. FetchURI expands it
+	// to the shard set; here it just resolves the bare repo to the index.
+	if hasShardIndex {
+		return safetensorsIndexFile, nil
 	}
 	if file, ok := oneArtifact(safetensors); ok {
 		return file, nil
@@ -397,7 +416,10 @@ func FetchURI(ctx context.Context, uri string, progress io.Writer) (string, erro
 }
 
 // FetchURI is the client-scoped form of FetchURI, useful for tests and callers
-// that inject a Hub base URL or HTTP client.
+// that inject a Hub base URL or HTTP client. It returns the cached file path for a
+// single artifact, or — when the URI resolves to a sharded-safetensors model — the
+// cache DIRECTORY holding the index and every shard (the unit LoadSafetensorsDir
+// consumes).
 func (c *Client) FetchURI(ctx context.Context, uri string, progress io.Writer) (string, error) {
 	ref, err := ParseURI(uri)
 	if err != nil {
@@ -407,7 +429,59 @@ func (c *Client) FetchURI(ctx context.Context, uri string, progress io.Writer) (
 	if err != nil {
 		return "", err
 	}
+	if path.Base(ref.File) == safetensorsIndexFile {
+		return c.downloadSharded(ctx, ref, progress)
+	}
 	return c.Download(ctx, ref, progress)
+}
+
+// shardIndex is the subset of a model.safetensors.index.json this loader needs:
+// the weight_map's values are the (repo-relative) shard filenames.
+type shardIndex struct {
+	WeightMap map[string]string `json:"weight_map"`
+}
+
+// downloadSharded fetches a sharded-safetensors model named by idx (its File is the
+// index manifest): the index plus every distinct shard its weight_map references,
+// all into one cache directory, which it returns. Each file goes through the same
+// Download contract (cache hit, SHA256 verification), so re-runs are free and every
+// shard is integrity-checked. Shards are fetched in sorted order for determinism.
+func (c *Client) downloadSharded(ctx context.Context, idx Ref, progress io.Writer) (string, error) {
+	idxPath, err := c.Download(ctx, idx, progress)
+	if err != nil {
+		return "", err
+	}
+	raw, err := os.ReadFile(idxPath)
+	if err != nil {
+		return "", err
+	}
+	var index shardIndex
+	if err := json.Unmarshal(raw, &index); err != nil {
+		return "", fmt.Errorf("hfhub: sharded index %s: %w", idx.File, err)
+	}
+	dir := path.Dir(idx.File) // repo-relative dir the index (and its shards) live in
+	seen := map[string]bool{}
+	var shards []string
+	for _, shard := range index.WeightMap {
+		if shard == "" || seen[shard] {
+			continue
+		}
+		seen[shard] = true
+		shards = append(shards, shard)
+	}
+	if len(shards) == 0 {
+		return "", fmt.Errorf("hfhub: sharded index %s names no shards", idx.File)
+	}
+	sort.Strings(shards)
+	for _, shard := range shards {
+		shardRef := Ref{Repo: idx.Repo, Revision: idx.Revision, File: path.Join(dir, shard)}
+		if _, err := c.Download(ctx, shardRef, progress); err != nil {
+			return "", err
+		}
+	}
+	localDir := filepath.Dir(idxPath)
+	logf(progress, "resolved sharded model %s@%s -> %d shards in %s", idx.Repo, idx.Revision, len(shards), localDir)
+	return localDir, nil
 }
 
 // IsURI reports whether s looks like an hf:// reference (used to branch a
