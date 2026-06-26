@@ -84,6 +84,53 @@ can be caught against a recorded baseline (KEEP/REVERT, like `tools/bench_witnes
 **never frames the tax as a fak win**. Artifact (pending):
 `experiments/vllm/adjudication-tax-witness.json`.
 
+### 3a. The on-host adjudication-overhead FLOOR (GPU-free, MEASURED — [#451](https://github.com/anthony-chaudhary/fak/issues/451))
+
+The §3 table above is the *end-to-end network* tax — it needs a live vLLM serving node and
+stays `TBD` until one runs. But a provider weighing the drop-in does not have to wait for a
+GPU to learn the **lower bound** of what fronting their engine with `fak serve` costs: the
+per-call overhead fak's adjudication plane adds **before any byte crosses the wire**. That
+floor is measurable on any laptop, today, with no model and no GPU — and it is published here
+so the "complementary drop-in" claim carries a number instead of prose.
+
+Every tool call fak routes folds over the kernel's driver/policy registries (the
+adjudicators, fast-paths, result-admitters, emitters the decide path consults). That fold is
+the repo's **zero-alloc read path**: a single atomic-pointer load, no mutex, no per-call
+allocation — and, critically, **flat as the policy/driver count grows**, so the drop-in cost
+does not creep as a provider registers more policy.
+
+| Path (no model, no GPU) | ns/call | allocs/call | scaling |
+|---|---:|---:|---|
+| Zero-alloc registry read fold (the decide path walks it every call) | **~0.55** | **0** | **FLAT, N=1→1000 drivers** |
+| Full per-call adjudication decide (read-only ALLOW, end-to-end) | **~362–373** | 5 | per-call, sub-µs |
+
+- **What "FLAT" buys a provider.** Adding the 1000th policy/driver costs the read path
+  nothing — `~0.55 ns/op, 0 allocs/op` at N=1 and at N=1000 alike. The capability floor a
+  provider deploys in front of vLLM/SGLang does not get more expensive per call as it grows.
+- **Proven, not asserted.** `internal/abi/registry_scaling_test.go::TestRegistryReadsZeroAlloc`
+  FAILS the build if any future change reintroduces a per-call allocation or lock-copy on a
+  read accessor (0 allocs/op with 256 drivers of every kind). The number is `BenchmarkRegistryReadScaling`.
+- **Honest fence — this is a FLOOR, not the tax.** The end-to-end gateway tax a provider
+  actually pays is dominated by the network proxy hop and the engine, **not** by this fold —
+  see the SGLang measurement in §4 (0.75× at peak, converging to a ~3% tax at saturation).
+  The full per-call *decide* (`362 ns` allow, the "Pure-kernel decide latency" row in
+  [`BENCHMARK-AUTHORITY.md`](../../BENCHMARK-AUTHORITY.md)) is the realistic per-call cost
+  fak adds before the engine runs; the `~0.55 ns` zero-alloc fold is the registry-read
+  *component* of it that the issue names. None of these three numbers is the vLLM end-to-end
+  tax — that stays `TBD` (§3) until a serving-node run lands an artifact.
+
+Reproduce (any host, ~3 s):
+
+```bash
+go test ./internal/abi -run TestRegistryReadsZeroAlloc -v          # the zero-alloc proof
+go test ./internal/abi -bench BenchmarkRegistryReadScaling -benchmem   # the ns/call, flat across N
+go test ./internal/adjudicator -bench 'BenchmarkDecide$' -benchmem      # the full per-call decide
+```
+
+Machine-stamped for the table above: AMD Ryzen 9 9950X, linux/amd64, 2026-06-26 (the
+zero-alloc/flat-scaling **shape** is hardware-independent and reproduces the test exactly;
+the absolute ns is single-box, per `BENCHMARK-GOVERNANCE.md` regime rules).
+
 ## 4. The measured sibling: the SGLang stack (real numbers, NOT vLLM's)
 
 The vLLM tables above are placeholders. The **SGLang** head-to-head *did* run, on the same
