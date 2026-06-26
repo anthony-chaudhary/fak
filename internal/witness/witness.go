@@ -25,6 +25,7 @@
 //	grep:<pattern>    some commit message in history matches
 //	clean:<pathspec>  the working tree is clean there      (a green-tree ship)
 //	notests:<ref>     the commit did NOT edit its own gating tests (reward-hack guard)
+//	exec:<json>       fail-to-pass/pass-to-pass execution witness
 //
 // The notests rung is the dual of the others: where the rest CONFIRM that a
 // claimed effect is present, notests REFUTES when a ship-commit modified the very
@@ -53,6 +54,11 @@ import (
 // missing); a non-zero exit with git present is reported via code, not err.
 type Runner func(ctx context.Context, dir string, args ...string) (stdout string, code int, err error)
 
+// CommandRunner executes an argv vector in dir and returns (stdout/stderr,
+// exitCode, err). err is non-nil only when the command could not be started; a
+// non-zero process exit is reported in code, not err.
+type CommandRunner func(ctx context.Context, dir string, argv ...string) (stdout string, code int, err error)
+
 // gitRunner is the default: it runs the real git binary. A non-zero git exit is
 // returned in code (not err); err signals git could not be executed at all.
 func gitRunner(ctx context.Context, dir string, args ...string) (string, int, error) {
@@ -73,19 +79,50 @@ func gitRunner(ctx context.Context, dir string, args ...string) (string, int, er
 	return "", -1, err // git could not be executed
 }
 
+func commandRunner(ctx context.Context, dir string, argv ...string) (string, int, error) {
+	if len(argv) == 0 || strings.TrimSpace(argv[0]) == "" {
+		return "", -1, exec.ErrNotFound
+	}
+	cmd := exec.CommandContext(ctx, argv[0], argv[1:]...)
+	if dir != "" {
+		cmd.Dir = dir
+	}
+	var out strings.Builder
+	cmd.Stdout = &out
+	cmd.Stderr = &out
+	err := cmd.Run()
+	if err == nil {
+		return out.String(), 0, nil
+	}
+	if ee, ok := err.(*exec.ExitError); ok {
+		return out.String(), ee.ExitCode(), nil
+	}
+	return out.String(), -1, err
+}
+
 // Resolver is the git-backed WitnessResolver. Construct with New (real git) or
 // NewWithRunner (injected evidence). dir is the repo to verify against ("" = git's
 // own default discovery from the process cwd).
 type Resolver struct {
-	run Runner
-	dir string
+	run     Runner
+	execRun CommandRunner
+	dir     string
 }
 
 // New is the real-git resolver, registered as "dos_verify".
-func New() *Resolver { return &Resolver{run: gitRunner} }
+func New() *Resolver { return &Resolver{run: gitRunner, execRun: commandRunner} }
 
 // NewWithRunner injects a Runner + dir (tests, or an alternate evidence source).
-func NewWithRunner(r Runner, dir string) *Resolver { return &Resolver{run: r, dir: dir} }
+func NewWithRunner(r Runner, dir string) *Resolver {
+	return &Resolver{run: r, execRun: commandRunner, dir: dir}
+}
+
+// NewWithRunners injects both git and command runners. It is used by the
+// execution witness tests so red/green selector evidence can be driven without
+// shelling out to arbitrary commands.
+func NewWithRunners(git Runner, exec CommandRunner, dir string) *Resolver {
+	return &Resolver{run: git, execRun: exec, dir: dir}
+}
 
 // Resolve corroborates the claim against independent evidence and returns the
 // outcome. Parse-failures and a missing git both yield Abstain (never a false
@@ -180,6 +217,8 @@ func (r *Resolver) Resolve(ctx context.Context, c *abi.ToolCall, claim string) a
 			}
 		}
 		return abi.WitnessConfirmed
+	case "exec":
+		return r.resolveExecution(ctx, arg)
 	}
 	return abi.WitnessAbstain
 }
