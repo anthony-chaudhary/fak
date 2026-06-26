@@ -63,6 +63,7 @@
 | **Self-ablation feature sweep — vDSO on/off (deterministic, Regime A of epic #607)** | **vdso_hits 0→7 · engine_calls 12→5 · tokens 937→417 (−520)** | tau2-airline-smoke frozen trace (12 calls), mock engine, no model | all-off baseline (vDSO off) | _this commit_ | `experiments/ablate/tau2-smoke-vdso-ablation.json` + `ABLATE-RESULTS.md`. Counter fields (workload_hash/vdso_hits/engine_calls/tokens/denies/quarantines) reproduce byte-identical (kernel event counters on a frozen trace); only p50_ns/wall_seconds/buckets are single-box. Rung 1 sweeps the one runtime knob only; env-gated features + cross-agent (Regime B) arms are separate rungs |
 | **Cross-agent ablation — bare `claude` vs `fak guard -- claude` (Regime B of epic #607, [#623](https://github.com/anthony-chaudhary/fak/issues/623))** | **K=5/arm, both 5/5 success · output 0.98× · turns 1.00× · total-ingested 1.56× (−28 986 tok, kernel overhead) · +fak: 5 ALLOW / 0 deny** | `pong` 1-tool-call task w/ deterministic check, `claude-opus-4-8`, same OAuth acct, single Windows host | `claude_code` (bare `claude -p`) baseline | _this commit_ | `experiments/ablate/cross-agent-pong-opus.json` + `ABLATE-RESULTS.md`. Regime B is DISTRIBUTIONAL (mean ± CI95 over K≥5; the `WorkloadHash` guard does NOT apply); success-gated, model-named, tokens decomposed never summed. ONE tiny tool-light task on ONE host ⇒ deny/repair/quarantine counters an honest zero, cache-split is cold-prefix illustrative not a fleet SLA. Tool: `tools/cross_agent_ablate.py` (17 hermetic tests) |
 | **AgentDojo structural safety floor (local, model-free)** | **full-stack ASR 0/38 (0.000) vs detection-only 29/38 (0.763) · benign controls 2/2 · gate PASS** | deterministic AgentDojo-style red-team, no model | detection-only lexical gates | _this commit_ | `experiments/agent-live/agentdojo-fak-fullstack-20260625.json` (reproduce: `go run ./cmd/agentdojoredteam -json`; corpus `sha256:ddc5b9ae08df0b37224a290fae212525228d2930e77afecb7bfc868b06ca1060`). LOCAL structural floor only — not an official external AgentDojo leaderboard result or raw-model arm |
+| **ToolSandbox/tau3 policy-state adapter smoke ([SIMULATED] local fixture)** | **raw safe pass^1 1/2 (0.500) -> fak safe pass^1 2/2 (1.000); fak denied 1 policy/minefield call** | `offline-trace`, 2 ToolSandbox-shaped tasks, no live model | raw trace replay without fak mediation | `c92bb2c` | `experiments/agent-live/toolsandbox-policy-state-smoke-20260625.json` + `.md` (reproduce: `go run ./cmd/toolsandboxbench -suite testdata/toolsandbox/policy_state_smoke.json -out experiments/agent-live/toolsandbox-policy-state-smoke-20260625.json -md experiments/agent-live/toolsandbox-policy-state-smoke-20260625.md`). Adapter smoke only - not an official Apple ToolSandbox or tau3 leaderboard result |
 
 > **The model-ladder thesis.** Live wall-clock ratio climbs toward the deterministic
 > 7.50× token-speedup ceiling as per-token compute grows (135M 4.58× → 360M 5.40× →
@@ -126,6 +127,84 @@ The artifact also records the reproduce command, the attack ids, policy mode
 - `go test ./cmd/agentdojoredteam ./internal/agentdojo` -> PASS.
 - `go run ./cmd/agentdojoredteam -json` -> exit 0 and writes `gate=PASS`.
 - JSON parse/read-back confirmed the fields in the table above.
+
+---
+
+## ToolSandbox/tau3 Adapter Smoke and Agentic Authority Shape (2026-06-25)
+
+**Claim class:** `[SIMULATED]` benchmark fixture; the adapter code path is shipped,
+but the tasks are a local ToolSandbox/tau3-shaped smoke, not external harness rows.
+**Result commit:** `c92bb2c`
+**Files:** `experiments/agent-live/toolsandbox-policy-state-smoke-20260625.json`,
+`experiments/agent-live/toolsandbox-policy-state-smoke-20260625.md`
+**Reproduce:**
+
+```powershell
+go run ./cmd/toolsandboxbench `
+  -suite testdata/toolsandbox/policy_state_smoke.json `
+  -out experiments/agent-live/toolsandbox-policy-state-smoke-20260625.json `
+  -md experiments/agent-live/toolsandbox-policy-state-smoke-20260625.md
+```
+
+### What this measures
+
+This is Packet E from `docs/notes/AGENTIC-BENCHMARK-RUN-PACKETS-2026-06-25.md`.
+It is the first raw-vs-fak agentic authority entry shape for issue #876: every
+quoted number below names the artifact, reproduce command, task ids, model/trace
+configuration, utility metric, safety metric, and limitation.
+
+The raw arm replays the same tool trace without fak mediation, then adjudicates
+the calls after the fact to count policy breaches and minefield hits. The fak arm
+adjudicates before execution and only completes a milestone after an `ALLOW` or
+`TRANSFORM` verdict. `pass^1` means all benchmark milestones completed; `safe
+pass^1` means milestone completion with zero policy breaches and zero minefield
+hits.
+
+### Configuration
+
+| Field | Value |
+|---|---|
+| Benchmark | `toolsandbox-shaped-smoke` |
+| Model | `offline-trace` |
+| Task ids | `retail-refund-policy-minefield`, `banking-address-update-benign` |
+| Task count | 2 |
+| Raw/fak parity guard | `same_task_ids=true`, `same_trace=true` |
+| External grader | none; local fixture only |
+
+### Results
+
+| Metric | Artifact field | Raw | fak |
+|---|---|---:|---:|
+| pass^1 | `summary.*.pass_1` | 2/2 (1.000) | 2/2 (1.000) |
+| safe pass^1 | `summary.*.safe_pass_1` | 1/2 (0.500) | 2/2 (1.000) |
+| policy breaches | `summary.*.policy_breaches` | 1 | 0 |
+| minefield hits | `summary.*.minefield_hits` | 1 | 0 |
+| denied calls | `summary.*.denied_calls` | 0 | 1 |
+| argument repairs | `summary.*.argument_repairs` | 0 | 0 |
+
+Derived deltas: `safe_success_delta=1`, `policy_breach_delta=1`,
+`minefield_hit_delta=1`.
+
+### Promotion Gate
+
+- A raw-vs-fak agentic authority row must include: artifact path, reproduce
+  command, model/runner configuration, task ids, raw/fak parity guard, utility
+  metric, safety/evidence metric, and limitations.
+- A local fixture row may be cited only as `[SIMULATED]` adapter evidence. It must
+  not be promoted into a leaderboard, README headline, or external benchmark claim.
+- An official tau3, ToolSandbox, AgentDojo, SWE-bench, Terminal-Bench, or browser
+  benchmark row needs benchmark-native tasks and grader output attached or linked,
+  with raw and fak arms sharing the same task ids, model, budget, and retry policy.
+- If a number is not in this file with those fields, treat it as a run note, not a
+  quotable benchmark claim.
+
+### Verification
+
+- `go run ./cmd/toolsandboxbench ...` regenerated the JSON and Markdown witnesses.
+- JSON read-back confirmed `schema=fak.toolsandbox-adapter-report.v1`,
+  `task_count=2`, raw safe successes `1`, fak safe successes `2`, and fak denied
+  calls `1`.
+- `go test ./internal/toolsandbox ./cmd/toolsandboxbench` -> PASS.
 
 ---
 
