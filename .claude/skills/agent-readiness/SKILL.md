@@ -47,26 +47,30 @@ affordance, **stop** — that's not a real gap.
 
 ## The three steps an agent walks (the groups, and the HARD defects each retires)
 
-Sixteen KPIs, each 0–100, grouped by the step they gate. Retire worst-step-first
-(the scorecard names the weakest step in `group_scores`). Five **presence** KPIs per
-step ask *does the affordance exist*; three **paste-and-run success** KPIs ask the
+Twenty KPIs, each 0–100, grouped by the step they gate. Retire worst-step-first
+(the scorecard names the weakest step in `group_scores`). The **presence** KPIs ask
+*does the affordance exist*; the **paste-and-run / executable-truth** KPIs ask the
 question presence can't reach — *does an agent who pastes the docs actually succeed*
 (a saturated presence-only score reads 100 while a cold agent still trips on a stale
-`cd fleet/fak` or a `/path/to/…` placeholder).
+`cd fleet/fak`, a `/path/to/…` placeholder, or a `fak <verb>` the binary never dispatches).
 
 | Step | KPI | The affordance to add when it's red |
 |---|---|---|
 | **discover** | `agents_entrypoint` | An AGENTS.md (the agents.md convention) that states what fak is and carries build + test + run commands. |
 | discover | `agent_config` | The zero-setup configs a harness auto-loads: `.mcp.json`, `.cursorrules`, `.github/copilot-instructions.md`. |
+| discover | `agent_config_valid` | **SUCCESS** — the auto-loaded config is well-formed, not just present: `.mcp.json` parses and every server names a launch command (else the harness silently fails to start it). |
 | discover | `llms_map` | `llms.txt` (the answer-engine / agent doc-map). |
 | discover | `identity_statement` | A one-sentence "fak is a/an …" near the top of AGENTS.md / llms.txt / README an agent can quote. |
 | discover | `entry_links_resolve` | Fix any dead local link in AGENTS.md or the integration index — a 404 on the orientation path. |
+| discover | `recipe_links_resolve` | **SUCCESS** — every local link INSIDE each per-agent recipe resolves (one hop past the index — the recipe an agent is actively following). |
 | **adopt** | `first_command` | A copy-pasteable, **fenced**, no-key/no-model/no-GPU first command (the 30-second proof). |
+| adopt | `command_verbs_resolve` | **SUCCESS** — every `fak <verb>` an agent pastes resolves to a real dispatched verb (parsed live from `cmd/fak/main.go`); a doc that says `fak hooks` when the verb is `fak hook` is an ambush. |
 | adopt | `first_command_runs` | **SUCCESS** — the first command actually RUNS from a clean clone: the `--policy` it names exists on disk, and it's the no-key form (not a `serve --api-key-env` sold as step one). |
 | adopt | `fenced_paths_resolve` | **SUCCESS** — every path an agent pastes from a fenced block resolves in a clean clone: no stale `cd fleet/fak` private-monorepo prefix, no non-existent repo-relative path, no `/path/to/…` literal in a runnable line. |
 | adopt | `install_oneliner` | The `go install …@latest` one-liner (the module is at the repo root, so it resolves). |
 | adopt | `honesty_ledger` | CLAIMS.md present, every `- [` claim carrying exactly one status tag (the `make claims-lint` rule). |
 | adopt | `integration_recipes` | A per-agent recipe under `docs/integrations/` for each family (Claude, Codex/OpenAI, Cursor, MCP). |
+| adopt | `codex_recipe_current` | The Codex recipe matches current Codex surfaces: MCP for the CLI/IDE path, `codex exec --json`, AGENTS.md discovery, and an honest Responses-vs-Chat-Completions fence. |
 | **build** | `extension_scaffold` | The additive path: `tools/new_leaf.py` + `EXTENDING.md` (add a leaf, don't edit core). |
 | build | `guardrails_surfaced` | Document each enforced rule in AGENTS.md: trunk-only, commit-by-path, DCO sign-off, tagged claims, leaf/ABI, the out-of-tree write guard. |
 | build | `contributor_contract` | `CONTRIBUTING.md` linked from the entry point + a one-command green gate (`make ci`). |

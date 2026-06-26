@@ -270,15 +270,142 @@ def test_platform_guidance_consistent_kpi() -> None:
     assert ar.kpi_platform_guidance_consistent(False, False)["defects"] == []
 
 
+# --- executable-truth KPIs (the pasted command actually runs / resolves) ----
+
+# A main()-shaped switch: top-level verbs in the func main() body; the sub-command
+# switch in another function (cmdPolicy) must NOT leak in.
+MAIN_GO_FIXTURE = '''package main
+
+func main() {
+	switch os.Args[1] {
+	case "serve":
+		cmdServe(os.Args[2:])
+	case "hook":
+		cmdHook()
+	case "hooks":
+		cmdHooks(os.Args[2:])
+	case "version", "-v", "--version":
+		fmt.Println(v)
+	case guard.TrampolineVerb:
+		guard.LandlockTrampoline(os.Args[2:])
+	default:
+		usage()
+	}
+}
+
+func cmdPolicy(argv []string) {
+	switch argv[0] {
+	case "budget":
+		runBudget(argv[1:])
+	}
+}
+'''
+
+
+def test_dispatch_verbs_parses_only_main_switch() -> None:
+    verbs = ar.dispatch_verbs(MAIN_GO_FIXTURE)
+    assert {"serve", "hook", "hooks", "version", "-v", "--version"} <= verbs
+    # the sub-command switch in cmdPolicy must NOT leak top-level verbs.
+    assert "budget" not in verbs
+    # a non-string case (guard.TrampolineVerb) contributes nothing.
+    assert "TrampolineVerb" not in verbs
+    # an unreadable/absent main.go => empty set (the KPI then abstains).
+    assert ar.dispatch_verbs(None) == set()
+    assert ar.dispatch_verbs("package main\n// no func main here\n") == set()
+
+
+def test_command_verbs_extracts_command_context_only() -> None:
+    # fenced commands (incl. `go run ./cmd/fak` and a `&&` chain) are captured.
+    fenced = ("```bash\n"
+              "go run ./cmd/fak preflight --policy p.json\n"
+              "cd repo && fak serve --stdio\n"
+              "# fak governs the call   <- a comment, not a command\n"
+              "```\n")
+    got = ar.command_verbs(fenced)
+    assert "preflight" in got and "serve" in got
+    assert "governs" not in got  # a fenced comment line is not a command
+
+    # an inline `code` span that begins with the binary IS a command (the real-world
+    # `fak hooks` case); prose and the Cursor `@fak` tool handle are NOT.
+    prose = ("Run it via `fak hooks pre-commit` to gate the commit. "
+             "fak governs the call (prose, no backticks). "
+             "In Cursor: `@fak please adjudicate` is a tool mention, not a CLI call.")
+    got = ar.command_verbs(prose)
+    assert "hooks" in got            # inline command span captured
+    assert "governs" not in got      # bare prose ignored
+    assert "please" not in got       # @fak handle ignored
+
+    # REGRESSION: a `fak <verb>` inline span that FOLLOWS a fenced block must still be
+    # found — fence triple-backticks must not desync the inline-span pairing.
+    desync = ("```bash\nfak serve\n```\n\nThen `fak hooks pre-commit` runs the gates.\n")
+    assert "hooks" in ar.command_verbs(desync)
+
+
+def test_command_verbs_resolve_kpi() -> None:
+    clean = ar.kpi_command_verbs_resolve([])
+    assert clean["defects"] == [] and clean["score"] == 100 and clean["group"] == "adopt"
+    bad = ar.kpi_command_verbs_resolve(["AGENTS.md: fak hooks", "README.md: fak frobnicate"])
+    assert len(bad["defects"]) == 2 and bad["score"] == 60
+
+
+def test_unknown_command_verbs_abstains_without_dispatch() -> None:
+    docs = {"AGENTS.md": "Run `fak hooks pre-commit`."}
+    # no dispatch set parsed => abstain (don't blame the docs for a missing source).
+    assert ar._unknown_command_verbs(docs, set()) == []
+    # with a dispatch set lacking `hooks`, the verb is flagged once, deduped per doc.
+    out = ar._unknown_command_verbs(docs, {"hook", "serve"})
+    assert out == ["AGENTS.md: fak hooks"]
+    # a verb that IS dispatched is not flagged.
+    assert ar._unknown_command_verbs({"AGENTS.md": "`fak serve`"}, {"serve"}) == []
+
+
+def test_recipe_links_resolve_kpi() -> None:
+    clean = ar.kpi_recipe_links_resolve([])
+    assert clean["defects"] == [] and clean["score"] == 100 and clean["group"] == "discover"
+    bad = ar.kpi_recipe_links_resolve([
+        "docs/integrations/cursor.md -> ../gone.md",
+        "docs/integrations/claude.md -> missing.md",
+    ])
+    assert len(bad["defects"]) == 2 and bad["score"] == 76
+
+
+def test_agent_config_valid_kpi() -> None:
+    clean = ar.kpi_agent_config_valid([])
+    assert clean["defects"] == [] and clean["score"] == 100 and clean["group"] == "discover"
+    bad = ar.kpi_agent_config_valid([".mcp.json server 'x' names no launch command"])
+    assert len(bad["defects"]) == 1 and bad["score"] == 66
+
+
+def test_agent_config_integrity_reads_mcp_json() -> None:
+    import tempfile
+    from pathlib import Path
+    with tempfile.TemporaryDirectory() as d:
+        root = Path(d)
+        # absent .mcp.json => no integrity defect (presence is agent_config's job).
+        assert ar._agent_config_integrity(root) == []
+        # malformed JSON => one defect.
+        (root / ".mcp.json").write_text("{ not json", encoding="utf-8")
+        assert any("does not parse" in b for b in ar._agent_config_integrity(root))
+        # a server with no command => one defect.
+        (root / ".mcp.json").write_text('{"mcpServers": {"x": {"args": []}}}', encoding="utf-8")
+        assert any("names no launch command" in b for b in ar._agent_config_integrity(root))
+        # a well-formed config => clean.
+        (root / ".mcp.json").write_text('{"mcpServers": {"dos": {"command": "dos-mcp"}}}', encoding="utf-8")
+        assert ar._agent_config_integrity(root) == []
+
+
 def _clean_kpis() -> list[dict]:
     """Every KPI in its zero-defect (clean) state — the all-green tree."""
     return [
         ar.kpi_agents_entrypoint(GOOD_AGENTS),
         ar.kpi_agent_config([]),
+        ar.kpi_agent_config_valid([]),
         ar.kpi_llms_map({ar.LLMS_FILE: True, ar.LLMS_FULL_FILE: True}),
         ar.kpi_identity_statement(True, "AGENTS.md"),
         ar.kpi_entry_links_resolve([]),
+        ar.kpi_recipe_links_resolve([]),
         ar.kpi_first_command(True, "AGENTS.md"),
+        ar.kpi_command_verbs_resolve([]),
         ar.kpi_first_command_runs(True, True, "examples/p.json", False),
         ar.kpi_install_oneliner(True, "AGENTS.md"),
         ar.kpi_honesty_ledger(True, []),

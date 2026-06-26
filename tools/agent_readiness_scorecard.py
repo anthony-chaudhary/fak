@@ -11,7 +11,7 @@ an autonomous coding agent — Claude Code, OpenAI Codex, Cursor, an MCP client 
 effectively and easily**? That used to be a vibe ("we have an AGENTS.md, we're
 fine"). This is the number.
 
-It scores the git-tracked tree on seventeen mechanical KPIs in three groups — the
+It scores the git-tracked tree on twenty mechanical KPIs in three groups — the
 exact three steps an agent walks — folds them into a weighted score and an A-F
 grade, and counts **friction-debt**: the total of concrete, re-derivable defects
 that make fak harder for an agent to find, trust, and build on. Each is a defect
@@ -24,13 +24,21 @@ more prose.
     agent_config       the zero-setup configs an agent's harness auto-loads —
                        .mcp.json (MCP), .cursorrules (Cursor), copilot-instructions
                        (Copilot) — so "point your agent here" needs no hand-wiring
+    agent_config_valid the auto-loaded config is WELL-FORMED, not just present —
+                       .mcp.json parses and every server names a launch command, so
+                       the harness actually starts the server instead of silently failing
     llms_map           llms.txt (the answer-engine / agent doc-map) is present
     identity_statement a one-sentence "what fak is" an agent can quote verbatim
     entry_links_resolve every local link on the orientation path resolves (no 404
                        when an agent follows AGENTS.md / the integration index)
+    recipe_links_resolve every local link INSIDE each per-agent recipe resolves —
+                       one hop deeper than the index, the recipe the agent is following
 
   ADOPT         — an agent has a low-friction path to first run, and a reason to trust it
     first_command      a copy-pasteable first command that needs no key/model/GPU
+    command_verbs_resolve every `fak <verb>` an agent pastes resolves to a verb the
+                       binary actually dispatches (parsed live from cmd/fak/main.go) —
+                       a doc that says `fak hooks` when the verb is `fak hook` is an ambush
     install_oneliner   the one-line install that resolves (module at the repo root)
     honesty_ledger     CLAIMS.md exists and every claim carries one status tag — an
                        agent trusts a tagged ledger, not an un-caveated promise
@@ -228,14 +236,34 @@ IDENTITY_RE = re.compile(r"\bfak\b[^.\n]{0,60}?\bis\b[^.\n]{0,80}?"
 IDENTITY_DOCS = [AGENTS_FILE, LLMS_FILE, "README.md"]
 IDENTITY_HEAD_LINES = 40
 
+# `command_verbs_resolve`: the binary's real dispatch table is the source of truth —
+# parsed live from the `func main()` switch so the check stays correct as verbs are
+# added, never a hand-maintained list. A `fak <verb>` an agent pastes from a command
+# span must be one of these, or the agent's first command dies on `unknown verb`.
+MAIN_GO = "cmd/fak/main.go"
+# A command span an agent pastes begins with one of these binary invocations. The
+# Cursor `@fak` tool handle is deliberately NOT here — it's a mention, not a CLI call.
+CMD_PREFIXES = ("go run ./cmd/fak ", "go run cmd/fak ", "./cmd/fak ", "./fak ", "fak ")
+# The first token after the invocation is the verb to resolve (lowercase, hyphen-ok).
+VERB_TOKEN_RE = re.compile(r"^([a-z][a-z0-9-]+)")
+_INLINE_CODE_RE = re.compile(r"`([^`]+)`")
+
+# `agent_config_valid`: the auto-loaded harness config must be well-formed, not just
+# present. A malformed `.mcp.json`, or a server with no launch command, silently
+# breaks the drop-in the moment the harness tries to start it.
+MCP_CONFIG_FILE = ".mcp.json"
+
 GROUPS = ("discover", "adopt", "build")
 KPI_GROUP: dict[str, str] = {
     "agents_entrypoint": "discover",
     "agent_config": "discover",
+    "agent_config_valid": "discover",
     "llms_map": "discover",
     "identity_statement": "discover",
     "entry_links_resolve": "discover",
+    "recipe_links_resolve": "discover",
     "first_command": "adopt",
+    "command_verbs_resolve": "adopt",
     "install_oneliner": "adopt",
     "honesty_ledger": "adopt",
     "integration_recipes": "adopt",
@@ -249,31 +277,35 @@ KPI_GROUP: dict[str, str] = {
     "first_command_runs": "adopt",
     "platform_guidance_consistent": "build",
 }
-# Seventeen KPIs across the three steps. The five "presence" originals per step
-# keep their relative ranking; the success/currentness KPIs carry real weight
-# (they measure whether an agent who pastes the docs actually succeeds, and
-# whether the Codex recipe still matches Codex's current surfaces — questions
-# presence checks can't reach). Sum is exactly 1.0 (the score can reach 100); a
-# regression test asserts both the sum and that the weight set == the KPI set.
+# Twenty KPIs across the three steps. The "presence" originals keep their relative
+# ranking; the success/currentness/executable-truth KPIs carry real weight (they
+# measure whether an agent who pastes the docs actually succeeds — whether the
+# `fak <verb>` resolves, the recipe link is alive, the config parses, the Codex
+# recipe still matches Codex's current surfaces — questions presence checks can't
+# reach). Sum is exactly 1.0 (the score can reach 100); a regression test asserts
+# both the sum and that the weight set == the KPI set.
 KPI_WEIGHTS: dict[str, float] = {
-    # discover (0.30)
-    "agents_entrypoint": 0.10,
-    "agent_config": 0.06,
-    "llms_map": 0.05,
-    "entry_links_resolve": 0.05,
-    "identity_statement": 0.04,
-    # adopt (0.37) — now carries the two headline success checks plus Codex currentness
-    "fenced_paths_resolve": 0.08,
-    "first_command": 0.05,
+    # discover (0.31)
+    "agents_entrypoint": 0.09,
+    "agent_config": 0.05,
+    "agent_config_valid": 0.03,   # executable-truth: the config actually parses
+    "llms_map": 0.04,
+    "entry_links_resolve": 0.04,
+    "recipe_links_resolve": 0.03,  # success: links inside the recipe resolve
+    "identity_statement": 0.03,
+    # adopt (0.39) — carries the headline success checks plus executable-truth + currentness
+    "fenced_paths_resolve": 0.07,
+    "command_verbs_resolve": 0.06,  # executable-truth: the pasted `fak <verb>` exists
+    "first_command": 0.04,
     "first_command_runs": 0.05,
-    "honesty_ledger": 0.06,
-    "integration_recipes": 0.05,
+    "honesty_ledger": 0.05,
+    "integration_recipes": 0.04,
     "codex_recipe_current": 0.05,
     "install_oneliner": 0.03,
-    # build (0.33)
-    "guardrails_surfaced": 0.08,
-    "contributor_contract": 0.07,
-    "extension_scaffold": 0.06,
+    # build (0.30)
+    "guardrails_surfaced": 0.07,
+    "contributor_contract": 0.06,
+    "extension_scaffold": 0.05,
     "platform_guidance_consistent": 0.06,
     "machine_consumable": 0.06,
 }
@@ -459,6 +491,79 @@ def missing_guardrails(agents_text: str | None) -> list[str]:
     """Enforced rules NOT surfaced in AGENTS.md (an agent learns each before the
     guard refuses it). One miss per undocumented rule cluster."""
     return [label for label, syns in GUARDRAIL_CLUSTERS if not _has(agents_text, *syns)]
+
+
+def dispatch_verbs(main_go_text: str | None) -> set[str]:
+    """The set of top-level verbs the binary dispatches, parsed from the `func main()`
+    switch in cmd/fak/main.go. Bounded to main()'s body (its closing brace is the
+    first column-0 `}` after `func main()`) so the sub-command switches in other
+    functions (policy/audit/…) don't leak in. Empty set if the file is unreadable or
+    the function can't be found — the caller then ABSTAINS rather than flag every verb
+    as unknown (a missing source of truth is not a documentation defect)."""
+    if not main_go_text:
+        return set()
+    lines = main_go_text.splitlines()
+    start = next((i for i, ln in enumerate(lines) if ln.startswith("func main()")), None)
+    if start is None:
+        return set()
+    verbs: set[str] = set()
+    for ln in lines[start + 1:]:
+        if ln == "}":  # gofmt: main()'s own close brace is the first at column 0
+            break
+        m = re.match(r"\s*case\s+(.+):", ln)
+        if not m:
+            continue
+        for sm in re.finditer(r'"([^"]+)"', m.group(1)):
+            verbs.add(sm.group(1))
+    return verbs
+
+
+def command_verbs(text: str) -> list[str]:
+    """Every CLI verb an agent would actually paste from this doc: the first token
+    after a `fak` / `./fak` / `go run ./cmd/fak` invocation that BEGINS a command —
+    the start of a fenced line or an inline `code` span (optionally after a `$`/`>`
+    prompt or a `&&`/`;`/`|` separator). The command-leading anchor is what separates
+    a real invocation from prose ("fak governs the call") and from the Cursor `@fak`
+    tool handle (a mention, not a CLI call). Returns verbs in order of appearance —
+    the unit `command_verbs_resolve` checks against the real dispatch set."""
+    verbs: list[str] = []
+
+    def from_segment(seg: str) -> None:
+        s = re.sub(r"^\s*[\$>]\s+", "", seg.strip())  # drop a shell prompt marker
+        for pre in CMD_PREFIXES:
+            if s.startswith(pre):
+                rest = s[len(pre):].lstrip()
+                m = VERB_TOKEN_RE.match(rest)
+                if m:
+                    verbs.append(m.group(1))
+                return
+
+    for block in _fenced_blocks(text):
+        for line in block.split("\n"):
+            if line.lstrip().startswith("#"):
+                continue
+            for seg in re.split(r"&&|\|\||;|\|", line):
+                from_segment(seg)
+    # Inline `code` spans, scanned on the PROSE OUTSIDE fenced blocks only — a fence's
+    # triple-backticks would otherwise desync the inline-span backtick pairing and
+    # swallow a real `fak <verb>` span that follows a code block.
+    for m in _INLINE_CODE_RE.finditer(_prose_outside_fences(text)):
+        from_segment(m.group(1))
+    return verbs
+
+
+def _prose_outside_fences(text: str) -> str:
+    """The document with fenced code blocks (and their fence lines) removed — the
+    prose where inline `code` spans live with balanced backticks."""
+    out: list[str] = []
+    in_fence = False
+    for raw in text.split("\n"):
+        if _FENCE_RE.match(raw.strip()):
+            in_fence = not in_fence
+            continue
+        if not in_fence:
+            out.append(raw)
+    return "\n".join(out)
 
 
 # ---------------------------------------------------------------------------
@@ -696,6 +801,53 @@ def kpi_machine_consumable(json_tools: int, total_tools: int,
 # succeeds — does the command in the fence run from a clean clone? Each takes facts
 # the impure shell already resolved against disk, so the check stays pure + testable.
 # ---------------------------------------------------------------------------
+
+def kpi_command_verbs_resolve(unknown: list[str]) -> dict[str, Any]:
+    """SUCCESS / executable-truth — every `fak <verb>` an agent pastes from a command
+    span resolves to a verb the binary actually dispatches (parsed live from
+    cmd/fak/main.go). The gap a presence check is blind to: AGENTS.md can mention
+    `fak hooks` while the real verb is `fak hook` — an agent's first command then dies
+    on `unknown verb` exactly when it's trying to see fak work. ``unknown`` is the list
+    of '<doc>: fak <verb>' the shell found with no matching dispatch case. Each is one
+    unit. (Abstains — empty list — when the dispatch table can't be parsed, rather than
+    blame the docs for a missing source of truth.)"""
+    defects = [f"unknown CLI verb an agent would paste: {u}" for u in unknown]
+    n = len(defects)
+    return {"kpi": "command_verbs_resolve", "group": "adopt",
+            "score": _clamp(100 - 20 * n),
+            "detail": (f"{n} pasted `fak <verb>` command(s) don't resolve to a dispatched verb" if n
+                       else "every pasted `fak <verb>` resolves to a real dispatched verb"),
+            "defects": defects, "soft": []}
+
+
+def kpi_recipe_links_resolve(dead: list[str]) -> dict[str, Any]:
+    """Every local link INSIDE a per-agent integration recipe (the doc an agent
+    follows after the index) must resolve on disk. `entry_links_resolve` guards
+    AGENTS.md + the integration index; this guards one hop deeper — the recipe itself.
+    A 404 inside the recipe an agent is actively following is friction at the worst
+    moment. ``dead`` is the list of '<recipe> -> <target>'. Each is one unit."""
+    defects = [f"dead recipe link: {d}" for d in sorted(dead)]
+    return {"kpi": "recipe_links_resolve", "group": "discover",
+            "score": _clamp(100 - 12 * len(defects)),
+            "detail": (f"{len(defects)} dead link(s) inside the integration recipes" if defects
+                       else "every link inside every integration recipe resolves"),
+            "defects": defects, "soft": []}
+
+
+def kpi_agent_config_valid(bad: list[str]) -> dict[str, Any]:
+    """The zero-setup config an agent's harness auto-loads must be WELL-FORMED, not
+    merely present: `.mcp.json` must parse as JSON and every server must name a
+    non-empty launch command, or the harness silently fails to start the server the
+    moment an agent points at the repo. `agent_config` checks presence; this checks
+    the file actually works. ``bad`` is the integrity defects the shell found. Each is
+    one unit."""
+    defects = list(bad)
+    return {"kpi": "agent_config_valid", "group": "discover",
+            "score": _clamp(100 - 34 * len(defects)),
+            "detail": (f"{len(defects)} agent-config integrity defect(s)" if defects
+                       else f"{MCP_CONFIG_FILE} parses and every server names a launch command"),
+            "defects": defects, "soft": []}
+
 
 def kpi_fenced_paths_resolve(bad_paths: list[str]) -> dict[str, Any]:
     """Every path an agent pastes from a fenced block must resolve in a clean clone.
@@ -948,6 +1100,65 @@ def _first_command_facts(texts: dict[str, str], root: Path) -> tuple[bool, bool,
     return False, True, "", False
 
 
+def _unknown_command_verbs(doc_texts: dict[str, str], verbs: set[str]) -> list[str]:
+    """For each agent-facing doc, the `fak <verb>` an agent would paste whose verb is
+    not in the binary's real dispatch set. Returns deduped '<doc>: fak <verb>' strings.
+    Empty when ``verbs`` is empty (the dispatch table couldn't be parsed) — the KPI
+    abstains rather than flag every verb. The impure half: ``verbs`` was parsed from
+    disk so the KPI stays pure."""
+    if not verbs:
+        return []
+    out: list[str] = []
+    seen: set[str] = set()
+    for doc, text in sorted(doc_texts.items()):
+        if not text:
+            continue
+        for v in command_verbs(text):
+            if v in verbs:
+                continue
+            key = f"{doc}: fak {v}"
+            if key not in seen:
+                seen.add(key)
+                out.append(key)
+    return out
+
+
+def _dead_recipe_links(root: Path, recipe_texts: dict[str, str]) -> list[str]:
+    """Every local link inside each per-agent recipe that does not resolve on disk,
+    as '<recipe> -> <target>'. The impure half of `recipe_links_resolve`."""
+    dead: list[str] = []
+    for rel, text in sorted(recipe_texts.items()):
+        if not text:
+            continue
+        for target, ok in _local_links(text, rel, root):
+            if not ok:
+                dead.append(f"{rel} -> {target}")
+    return dead
+
+
+def _agent_config_integrity(root: Path) -> list[str]:
+    """Integrity defects in the auto-loaded harness config: `.mcp.json` that doesn't
+    parse, has no server map, or a server with no launch command. Empty when the file
+    is absent (presence is `agent_config`'s job; this only grades a file that IS there).
+    The impure half of `agent_config_valid`."""
+    bad: list[str] = []
+    mcp = root / MCP_CONFIG_FILE
+    if not mcp.exists():
+        return bad
+    try:
+        data = json.loads(_safe_read(mcp))
+    except ValueError as exc:
+        return [f"{MCP_CONFIG_FILE} is present but does not parse as JSON: {exc}"]
+    servers = (data or {}).get("mcpServers") if isinstance(data, dict) else None
+    if not isinstance(servers, dict) or not servers:
+        bad.append(f"{MCP_CONFIG_FILE} has no mcpServers map — the harness finds no server to start")
+        return bad
+    for name, spec in servers.items():
+        if not isinstance(spec, dict) or not str(spec.get("command", "")).strip():
+            bad.append(f"{MCP_CONFIG_FILE} server '{name}' names no launch command — the harness can't start it")
+    return bad
+
+
 def gather(root: Path) -> list[dict[str, Any]]:
     """Read the git-tracked tree and run every pure KPI."""
     tracked = set(_git_lines(["ls-files"], root))
@@ -1016,6 +1227,18 @@ def gather(root: Path) -> list[dict[str, Any]]:
     sells_make = _has(agents_text, "make ci")
     windows_bridge = _has(agents_text, *WINDOWS_BRIDGE_TOKENS)
 
+    # executable-truth facts: the binary's real dispatch table + the verbs an agent
+    # would paste; the recipe links one hop past the index; the auto-loaded config's
+    # integrity. (paste_texts already holds AGENTS.md/README + every docs/integrations
+    # recipe — the agent-paste surface.)
+    main_go_text = _safe_read(root / MAIN_GO) if present(MAIN_GO) else None
+    verbs = dispatch_verbs(main_go_text)
+    unknown_verbs = _unknown_command_verbs(paste_texts, verbs)
+    recipe_texts = {rel: txt for rel, txt in paste_texts.items()
+                    if rel.startswith(PASTE_DOCS_GLOB + "/") and not rel.endswith("/README.md")}
+    dead_recipe_links = _dead_recipe_links(root, recipe_texts)
+    config_integrity = _agent_config_integrity(root)
+
     return [
         kpi_agents_entrypoint(agents_text if present(AGENTS_FILE) else None),
         kpi_agent_config(missing_agent_configs(config_present)),
@@ -1029,6 +1252,9 @@ def gather(root: Path) -> list[dict[str, Any]]:
         kpi_integration_recipes(missing_recipes(recipe_present)),
         kpi_codex_recipe_current(codex_recipe_gaps(codex_text)),
         kpi_fenced_paths_resolve(bad_paths),
+        kpi_command_verbs_resolve(unknown_verbs),
+        kpi_recipe_links_resolve(dead_recipe_links),
+        kpi_agent_config_valid(config_integrity),
         kpi_extension_scaffold(scaffold, extending),
         kpi_guardrails_surfaced(guard_missing),
         kpi_contributor_contract(contributing, contributing_linked, green_gate),
@@ -1136,10 +1362,14 @@ def render_markdown(payload: dict[str, Any], *, stamp: str | None = None) -> str
     out.append("## The three steps an agent walks")
     out.append("")
     out.append(f"{len(payload.get('kpis', []))} KPIs, each 0–100, grouped by the step they gate. "
-               "`debt` = units of HARD friction-debt. Five presence KPIs per step ask "
-               "does-the-affordance-exist; the paste-and-run success KPIs "
-               "(`fenced_paths_resolve`, `first_command_runs`, `platform_guidance_consistent`) "
-               "ask does-an-agent-who-pastes-the-docs-actually-succeed; "
+               "`debt` = units of HARD friction-debt. The presence KPIs ask "
+               "does-the-affordance-exist; the paste-and-run / executable-truth KPIs ask the "
+               "question presence can't reach — does an agent who pastes the docs actually "
+               "succeed: `fenced_paths_resolve` (the path resolves), `command_verbs_resolve` "
+               "(the `fak <verb>` is a real dispatched verb, parsed live from cmd/fak/main.go), "
+               "`first_command_runs` (the proof runs cold), `recipe_links_resolve` (the link "
+               "inside the recipe is alive), `agent_config_valid` (the auto-loaded config "
+               "parses), `platform_guidance_consistent` (the gate names its Windows bridge). "
                "`codex_recipe_current` asks whether the Codex guide still matches the current "
                "Codex MCP / AGENTS.md / exec JSON / Responses-vs-Chat-Completions shape. "
                "`machine_consumable` is "
