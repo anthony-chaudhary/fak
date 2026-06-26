@@ -36,6 +36,28 @@ func TestUpstreamErrorStatus_InKernelOOMIsActionable(t *testing.T) {
 	}
 }
 
+func TestUpstreamErrorStatus_InKernelCapacityPrecheckIsActionable(t *testing.T) {
+	status, code, msg := upstreamErrorStatus(&agent.InKernelCapacityError{
+		Want:  96 << 20,
+		Avail: 64 << 20,
+		Class: compute.MemoryKVCache,
+		Scope: compute.MemoryScopeDevice,
+		Site:  "capacity-precheck",
+	})
+
+	if status != http.StatusServiceUnavailable {
+		t.Fatalf("capacity precheck refusal should be 503 (retryable local exhaustion), got %d", status)
+	}
+	if code != "in_kernel_oom" {
+		t.Fatalf("capacity precheck refusal should carry the distinct code, got %q", code)
+	}
+	for _, want := range []string{"capacity precheck", "kv cache", "reduce the prompt"} {
+		if !strings.Contains(msg, want) {
+			t.Fatalf("capacity message missing %q: %q", want, msg)
+		}
+	}
+}
+
 // A genuine upstream error must NOT be misclassified as an in-kernel OOM, and its raw provider
 // body must never cross the trust boundary into the client message (#82/#346 invariant).
 func TestUpstreamErrorStatus_RealUpstreamErrorDoesNotLeakOrMisclassify(t *testing.T) {

@@ -76,6 +76,13 @@ func TestInKernelOOMMetricsAndDebugVars(t *testing.T) {
 		Class: compute.MemoryScratchpad,
 		Site:  "transient",
 	})
+	srv.plannerErrorStatus(&agent.InKernelCapacityError{
+		Want:  7 << 20,
+		Avail: 5 << 20,
+		Class: compute.MemoryKVCache,
+		Scope: compute.MemoryScopeDevice,
+		Site:  "capacity-precheck",
+	})
 	srv.plannerErrorStatus(&agent.UpstreamStatusError{Status: 500, Body: "provider body"})
 
 	text := srv.renderMetrics()
@@ -83,6 +90,9 @@ func TestInKernelOOMMetricsAndDebugVars(t *testing.T) {
 		`fak_gateway_in_kernel_oom_total{class="scratchpad"} 2`,
 		`fak_gateway_in_kernel_oom_failed_bytes_total{class="scratchpad"} 5242880`,
 		`fak_gateway_in_kernel_oom_last_failed_bytes{class="scratchpad"} 1048576`,
+		`fak_gateway_in_kernel_oom_total{class="kv_cache"} 1`,
+		`fak_gateway_in_kernel_oom_failed_bytes_total{class="kv_cache"} 7340032`,
+		`fak_gateway_in_kernel_oom_last_failed_bytes{class="kv_cache"} 7340032`,
 	} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("metrics missing %q\n--- metrics ---\n%s", want, text)
@@ -103,6 +113,20 @@ func TestInKernelOOMMetricsAndDebugVars(t *testing.T) {
 	}
 	if got.Count != 2 || got.FailedBytes != 5242880 || got.LastFailedBytes != 1048576 || got.LastSite != "transient" {
 		t.Fatalf("debug OOM row = %+v, want count=2 failed=5242880 last=1048576 site=transient", got)
+	}
+	got = nil
+	for i := range vars.Metrics.InKernelOOM {
+		row := &vars.Metrics.InKernelOOM[i]
+		if row.Class == "kv_cache" {
+			got = row
+			break
+		}
+	}
+	if got == nil {
+		t.Fatal("/debug/vars missing kv_cache capacity refusal row")
+	}
+	if got.Count != 1 || got.FailedBytes != 7340032 || got.LastFailedBytes != 7340032 || got.LastSite != "capacity-precheck" {
+		t.Fatalf("debug capacity row = %+v, want count=1 failed=7340032 last=7340032 site=capacity-precheck", got)
 	}
 }
 

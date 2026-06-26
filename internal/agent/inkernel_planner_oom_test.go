@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/anthony-chaudhary/fak/internal/compute"
+	"github.com/anthony-chaudhary/fak/internal/model"
 )
 
 // These tests cover the recover boundary that turns an in-kernel device-allocation panic into
@@ -72,5 +73,79 @@ func TestRecoverDevicePanic_OtherPanicsAreNotHandled(t *testing.T) {
 				t.Fatalf("%s must NOT be handled (Complete must re-panic it)", tc.name)
 			}
 		})
+	}
+}
+
+type capacityProbeBackend struct {
+	compute.Backend
+	total int64
+	free  int64
+	known bool
+}
+
+func (b capacityProbeBackend) Caps() compute.Caps {
+	return compute.Caps{DeviceMemory: true, CapacityProbe: true}
+}
+
+func (b capacityProbeBackend) DeviceMemory() (total, free int64, known bool) {
+	return b.total, b.free, b.known
+}
+
+func TestInKernelRequestMemoryPlanSplitsRuntimeClasses(t *testing.T) {
+	p := &InKernelPlanner{
+		m:       model.NewSynthetic(tinyConcurrencyConfig()),
+		backend: capacityProbeBackend{total: 1 << 30, free: 1 << 30, known: true},
+	}
+
+	byClass := p.requestMemoryPlan(10, 5).ByClass()
+	for _, class := range []compute.MemoryClass{compute.MemoryKVCache, compute.MemoryActivation, compute.MemoryScratchpad} {
+		if byClass[class] <= 0 {
+			t.Fatalf("request plan missing %s demand: %#v", class, byClass)
+		}
+	}
+	if byClass[compute.MemoryWeights] != 0 {
+		t.Fatalf("request plan with known free device memory must not double-count resident weights: %#v", byClass)
+	}
+
+	p.backend = capacityProbeBackend{total: 1 << 30, free: compute.FreeUnknown, known: true}
+	byClass = p.requestMemoryPlan(10, 5).ByClass()
+	if byClass[compute.MemoryWeights] <= 0 {
+		t.Fatalf("request plan with unknown free memory must include resident weights against the total ceiling: %#v", byClass)
+	}
+}
+
+func TestInKernelRequestCapacityPrecheckRefusesKnownTooLargeKV(t *testing.T) {
+	p := &InKernelPlanner{
+		m:       model.NewSynthetic(tinyConcurrencyConfig()),
+		backend: capacityProbeBackend{total: 1 << 20, free: 1 << 20, known: true},
+	}
+
+	err := p.refuseOversizeRequest(100_000, 256)
+	var capErr *InKernelCapacityError
+	if !errors.As(err, &capErr) {
+		t.Fatalf("refuseOversizeRequest error = %T (%v), want *InKernelCapacityError", err, err)
+	}
+	if capErr.Class != compute.MemoryKVCache {
+		t.Fatalf("capacity error class = %s, want %s", capErr.Class, compute.MemoryKVCache)
+	}
+	if capErr.Scope != compute.MemoryScopeDevice {
+		t.Fatalf("capacity error scope = %s, want %s", capErr.Scope, compute.MemoryScopeDevice)
+	}
+	if capErr.Site != "capacity-precheck" {
+		t.Fatalf("capacity error site = %q, want capacity-precheck", capErr.Site)
+	}
+	if capErr.Want <= capErr.Avail || capErr.Avail <= 0 {
+		t.Fatalf("capacity sizing = want %d avail %d, want positive refused budget", capErr.Want, capErr.Avail)
+	}
+}
+
+func TestInKernelRequestCapacityPrecheckFailsOpenWhenCapacityUnknown(t *testing.T) {
+	p := &InKernelPlanner{
+		m:       model.NewSynthetic(tinyConcurrencyConfig()),
+		backend: capacityProbeBackend{known: false},
+	}
+
+	if err := p.refuseOversizeRequest(100_000, 256); err != nil {
+		t.Fatalf("unknown-capacity backend must fail open, got %v", err)
 	}
 }

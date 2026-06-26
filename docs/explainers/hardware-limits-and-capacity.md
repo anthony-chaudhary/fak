@@ -21,8 +21,10 @@ description: "fak's HAL lifts seven hardware-SHAPE assumptions; finite device CA
 > `/metrics` (`fak_model_load_memory_plan_bytes`, `fak_model_load_memory_capacity_*`) and
 > `/debug/vars` (detailed rows plus the capacity snapshot).
 > Runtime device allocation failures now recover as a typed,
-> classed in-kernel OOM on the served path and publish classed counters on `/metrics`
-> plus last-site drilldown on `/debug/vars`. Nothing here claims that allocator OOM can
+> classed in-kernel OOM on the served path, and served backend requests now run a
+> prompt+`max_tokens` KV/HAL-transient capacity precheck before device decode when capacity
+> is known. Both paths publish classed counters on `/metrics` plus last-site drilldown on
+> `/debug/vars`. Nothing here claims that allocator OOM can
 > already spill/retry, that the serving loop demotes KV under live pressure, or that
 > every model loader has a complete memory plan yet. Those remain tracked
 > planks below.
@@ -183,14 +185,21 @@ the failed byte count, allocator site, and memory class (`weights`, `kv_cache`, 
 `scratchpad`, `activation`, or `unknown`); CUDA, Metal, and Vulkan allocation choke points
 raise it instead of a raw string panic where the backend allocator returns nil;
 `agent.InKernelPlanner` recovers only that typed allocation fault; and the gateway maps it
-to a 503 `in_kernel_oom` with a client-safe, class-visible remedy. The visibility slice is
-also live: `/metrics` publishes `fak_gateway_in_kernel_oom_total`,
+to a 503 `in_kernel_oom` with a client-safe, class-visible remedy. The same served planner
+also refuses a known-too-large request before allocation when the prompt+`max_tokens` KV
+window plus HAL activation/scratch/logit transients exceed the reported device budget; it
+also includes resident weights when the backend reports total capacity but not current free
+memory. That refusal returns `agent.InKernelCapacityError` with site
+`capacity-precheck`. The visibility slice is also live: `/metrics` publishes
+`fak_gateway_in_kernel_oom_total`,
 `fak_gateway_in_kernel_oom_failed_bytes_total`, and
-`fak_gateway_in_kernel_oom_last_failed_bytes` by memory class, while `/debug/vars` includes
-the last allocator site for drilldown without turning dynamic sites into Prometheus labels.
-Honest fences: this is still panic/recover below the HAL, not ordinary `error` returns;
-generic allocation sites can still be `unknown`; resource-cap validation panics are not OOM;
-and no caller yet spills, demotes, or retries based on the class.
+`fak_gateway_in_kernel_oom_last_failed_bytes` by memory class for both allocation OOMs and
+capacity precheck refusals, while `/debug/vars` includes the last site for drilldown without
+turning dynamic sites into Prometheus labels.
+Honest fences: allocation OOM recovery is still panic/recover below the HAL, unknown
+capacity still fails open, generic allocation sites can still be `unknown`, resource-cap
+validation panics are not OOM, and no caller yet spills, demotes, or retries based on the
+class.
 
 **Plank 3 — feed real pressure into the policy plane. _Shipped_ (#707).**
 `internal/engine.PlanPlacementForDevice` is the report→policy wire: it derives a live
@@ -223,7 +232,7 @@ live capacity pressure; this adapter is the demote/spill executor that consumes 
 placement directive. What remains is feeding it LIVE pressure (Plank 3) and wiring it
 into the serving loop.
 
-**Plank 5 — a load-time fit pre-check. _Partially shipped._** `FitsOnDevice` before the
+**Plank 5 — load-time and request-time fit pre-checks. _Partially shipped._** `FitsOnDevice` before the
 `make`/`append` in the model loaders (`model: Load`, `LoadSafetensors`, `ggufload.LoadModel`)
 turns "OOM panic mid-load" into "this needs ~W GB, the device has ~A GB" *before* a byte is
 allocated. The shipped slice is the GGUF path: `ggufload.WeightSource` can estimate the raw
@@ -250,6 +259,13 @@ uploads. After a successful eager device load, the gateway publishes the exact a
 profile it used: `/metrics` aggregates `fak_model_load_memory_plan_bytes` by class+scope,
 exports device/host capacity known/free-known/byte gauges, and records the headroom ratio;
 `/debug/vars` keeps the detailed memory-plan rows and capacity snapshot for drilldown.
+The served in-kernel backend path now reuses the same classed fit contract per request:
+after tokenizing the transcript and applying the request's `max_tokens`, it checks the
+planned KV window plus HAL activation/scratchpad demand before entering `Prefill`/`Step`.
+When the backend reports current free bytes, resident weights are not counted again because
+that free value already reflects the loaded model; when only total capacity is known
+(`FreeUnknown`) or capacity is unknown, the check includes the resident-weight estimate or
+fails open respectively.
 Honest fences: unknown capacity still fails open, host memory is physical/OS memory rather
 than cgroup/container quota, safetensors and generic `model.Load` are not wired yet, runtime
 upload pre-checks are still allocator-side, and the telemetry is not spill/retry.
@@ -275,7 +291,7 @@ add up to a HAL contract. Crediting them is what keeps the gap claim honest:
 | `residency.Manager` + `polymodel.Pool` (`ErrTooLarge`) | a backend-agnostic resident-weight-byte budget with LRU page-out | policy-only; caller-supplied budget, not VRAM-derived; not wired to CUDA/Metal `Upload` |
 | `model/paging.go: pagedKernel` | upload → compute → free, an on-demand page-in primitive | standalone; bit-equal to resident, but not integrated into the live weight HAL |
 | `engine.CacheEventMetrics` memory-class projection | KV residency events expose `memory_class` alongside `to_tier`: HBM is `kv_cache`, DRAM/NUMA-far/CXL are `ddr_cache`, and Disk/Remote/Provider are `offload`; byte/token breakdowns are exported as `fak_engine_cache_*_breakdown_total` series | visibility only; it does not yet drive spill/retry policy or allocate a DRAM cache |
-| `compute.DeviceAllocError` → `agent.InKernelOOMError` → gateway `in_kernel_oom` + `/metrics` | runtime device allocation failure becomes a typed served 503 with bytes + memory class, counted by class on `/metrics` and drillable by last site on `/debug/vars`; device weight, KV-cache, offload, scratchpad, HAL activation upload, GLM-DSA backend activation, and paged-weight page-in sites carry dedicated classes where the backend knows the purpose | classification and visibility only; no spill/retry policy yet, and ambiguous generic alloc sites stay `unknown` |
+| `compute.DeviceAllocError` / `agent.InKernelCapacityError` → gateway `in_kernel_oom` + `/metrics` | runtime device allocation failure becomes a typed served 503 with bytes + memory class; served backend requests also refuse a known-too-large prompt+`max_tokens` KV/HAL plan before allocation with site `capacity-precheck`; both are counted by class on `/metrics` and drillable by last site on `/debug/vars`; device weight, KV-cache, offload, scratchpad, HAL activation upload, GLM-DSA backend activation, and paged-weight page-in sites carry dedicated classes where the backend knows the purpose | classification/admission and visibility only; no spill/retry policy yet, ambiguous generic alloc sites stay `unknown`, and the request precheck fails open when capacity is unknown |
 | `ggufload.WeightSource.FitOnDevice` / `FitF32OnDevice` / `FitCPUOffloadExpertsOnDevice` + `compute.EstimateKVStoreMemoryPlan` / `EstimateHALTransientMemoryPlan` + gateway model-load memory telemetry | header-only GGUF load refusal before the Go process allocates resident weights, with classed HAL KV-cache, activation, and scratchpad estimates when GGUF config exposes context geometry; expert-offload plans keep host expert bytes visible without counting them against device capacity, and optional `HostCapacity` can refuse known-too-large host-scoped `offload`/`ddr_cache` plans; successful eager device loads expose the admission profile on `/metrics` and `/debug/vars` | shipped for GGUF serve's device load paths; quantized-upload backends are explicitly mixed precision (Q8 resident weights, f32 runtime state); f32 weights are only the fallback for backends without quantized upload; host capacity is OS physical memory, not cgroup/container quota; telemetry is visibility only, not spill/retry; not yet safetensors, generic `model.Load`, upload pre-checks, or backend-specific transient peaks |
 | `agent.KVMemoryReporter` + gateway `fak_gateway_kv_memory_*` | local in-kernel KV-prefix residency reports as `kv_cache`: bytes per KV position from `compute.EstimateKVStoreBytes`, true resident `PrefixTokens`, estimated resident bytes, configured radix LRU budget tokens, current LRU edge-token count, tree shape, splits, and LRU vs policy evictions; `/debug/vars` carries the same snapshot as `kv_memory` | visibility over the CPU-backed radix KV prefix cache and its known budget-vs-true-footprint gap; device-HAL serve currently reports per-token geometry with `enabled=false` because it uses per-request backend sessions, not device-side radix reuse; no pressure-driven demote/spill or retry yet |
 | `tools/memgate.py` | an operator pre-flight RAM gate | still useful outside the Go process, but no longer the only fit gate |
@@ -288,9 +304,10 @@ and it is what `DeviceCapacity` begins.
 ## 6. Honest boundaries
 
 - This note now covers shipped pieces of **Plank 1 (capacity reporting + classed memory
-  plans), Plank 2 (typed/classed runtime allocation OOM on the served in-kernel path),
+  plans), Plank 2 (typed/classed runtime allocation OOM and request precheck refusal on the served in-kernel path),
   Plank 3 (real device-pressure planning seam), Plank 4 (the engine adapter that executes
-  a demote/spill, #708), and a GGUF slice of Plank 5 (load-time fit refusal)**.
+  a demote/spill, #708), and Plank 5 slices for GGUF load-time fit refusal plus served
+  request-time KV/HAL fit refusal**.
 - `FitsOnDevice` / `FitsMemoryPlan` are *pre-checks*, not allocators. The live
   `fak serve --gguf --backend` now calls a GGUF plan before load: Q8/raw weights plus f32
   HAL KV/activation/scratch estimates on quantized-upload backends, f32 weights plus the
@@ -298,7 +315,10 @@ and it is what `DeviceCapacity` begins.
   `--cpu-offload-experts`. Host-scoped `offload`/`ddr_cache` bytes are checked only when a
   backend advertises `HostCapacityProbe` from the OS host-memory probe; without that they
   remain visible and fail open. Successful eager device loads expose that same classed plan
-  and capacity snapshot on `/metrics` and `/debug/vars`.
+  and capacity snapshot on `/metrics` and `/debug/vars`. On the served in-kernel backend
+  path, each request also checks the prompt+`max_tokens` KV/HAL transient plan before device
+  decode when the backend reports capacity, including resident weights only when current
+  free memory is unknown; unknown capacity still proceeds.
   Safetensors, generic `model.Load`, runtime upload pre-checks, and backend-specific
   transient peaks are still unwired.
 - The CUDA and Vulkan producers report `total` only; `free` is `FreeUnknown` until

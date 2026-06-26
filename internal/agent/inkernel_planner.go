@@ -150,12 +150,13 @@ func (p *InKernelPlanner) KVMemoryStats() KVMemoryStats {
 			Scope:       string(compute.MemoryScopeHost),
 		}
 	}
-	bytesPerToken := compute.EstimateKVStoreBytes(compute.KVConfig{
+	kvCfg := compute.KVConfig{
 		NumLayers:  p.m.Cfg.NumLayers,
 		NumKVHeads: p.m.Cfg.NumKVHeads,
 		HeadDim:    p.m.Cfg.HeadDim,
 		RopeTheta:  p.m.Cfg.RopeTheta,
-	}, 1)
+	}
+	bytesPerToken := compute.EstimateKVStoreBytes(kvCfg, 1)
 	stats := KVMemoryStats{
 		Enabled:       p.tree != nil,
 		Backend:       "radixkv",
@@ -167,6 +168,7 @@ func (p *InKernelPlanner) KVMemoryStats() KVMemoryStats {
 		stats.Enabled = false
 		stats.Backend = p.backend.Name()
 		stats.Scope = string(compute.MemoryScopeDevice)
+		return stats
 	}
 	if p.tree == nil {
 		return stats
@@ -175,12 +177,7 @@ func (p *InKernelPlanner) KVMemoryStats() KVMemoryStats {
 	st := p.tree.Stats()
 	p.mu.Unlock()
 	stats.ResidentTokens = st.PrefixTokens
-	stats.ResidentBytes = compute.EstimateKVStoreBytes(compute.KVConfig{
-		NumLayers:  p.m.Cfg.NumLayers,
-		NumKVHeads: p.m.Cfg.NumKVHeads,
-		HeadDim:    p.m.Cfg.HeadDim,
-		RopeTheta:  p.m.Cfg.RopeTheta,
-	}, st.PrefixTokens)
+	stats.ResidentBytes = compute.EstimateKVStoreBytes(kvCfg, st.PrefixTokens)
 	stats.BudgetTokens = st.MaxTokens
 	stats.LRUTokens = st.Tokens
 	stats.MaxDepthTokens = st.MaxDepthTokens
@@ -221,6 +218,30 @@ func (e *InKernelOOMError) Error() string {
 		return fmt.Sprintf("in-kernel GPU out of memory (device allocation of %d bytes failed)", e.Bytes)
 	}
 	return fmt.Sprintf("in-kernel GPU out of memory (%s allocation of %d bytes failed)", class, e.Bytes)
+}
+
+// InKernelCapacityError is the request-time companion to InKernelOOMError: a backend
+// with known capacity can refuse the planned in-kernel request memory before the device
+// allocator is touched. It is still a local OOM-class resource exhaustion, but it is
+// earlier and more actionable than a recovered DeviceAllocError.
+type InKernelCapacityError struct {
+	Want  int64
+	Avail int64
+	Class compute.MemoryClass
+	Scope compute.MemoryScope
+	Site  string
+}
+
+func (e *InKernelCapacityError) Error() string {
+	class := e.Class
+	if class == "" {
+		class = compute.MemoryUnknown
+	}
+	scope := e.Scope
+	if scope == "" {
+		scope = compute.MemoryScopeDevice
+	}
+	return fmt.Sprintf("in-kernel GPU capacity precheck refused request (%s %s plan needs %d bytes, available budget is %d bytes)", scope, class, e.Want, e.Avail)
 }
 
 // recoverDevicePanic is the body of Complete's deferred recover, factored out so it is
@@ -309,6 +330,9 @@ func (p *InKernelPlanner) Complete(_ context.Context, messages []Message, tools 
 	if p.backend != nil {
 		p.devMu.Lock()
 		defer p.devMu.Unlock()
+		if err := p.refuseOversizeRequest(len(ids), maxNew); err != nil {
+			return nil, err
+		}
 	}
 	gen, promptTok, matched, prefillS, decodeS, stopped := p.generateReused(ids, maxNew, temp, topP, topK, stops, emit)
 	// finishReason is honest about WHY decode ended: "stop" when a token-ID stop or a
@@ -358,6 +382,112 @@ func (p *InKernelPlanner) Complete(_ context.Context, messages []Message, tools 
 		comp.ToolCallsDropped = true
 	}
 	return comp, nil
+}
+
+const inKernelRequestDeviceHeadroom = 0.15
+
+func (p *InKernelPlanner) refuseOversizeRequest(promptTokens, maxNew int) error {
+	if p == nil || p.backend == nil || p.m == nil {
+		return nil
+	}
+	plan := p.requestMemoryPlan(promptTokens, maxNew)
+	if len(plan) == 0 {
+		return nil
+	}
+	if err := compute.RefuseMemoryPlanIfTooBig(p.backend, plan, inKernelRequestDeviceHeadroom); err != nil {
+		var fe *compute.FitError
+		if errors.As(err, &fe) {
+			return p.capacityErrorFromFit(fe)
+		}
+		return err
+	}
+	return nil
+}
+
+func (p *InKernelPlanner) requestMemoryPlan(promptTokens, maxNew int) compute.MemoryPlan {
+	if p == nil || p.m == nil {
+		return nil
+	}
+	if promptTokens < 0 {
+		promptTokens = 0
+	}
+	if maxNew < 0 {
+		maxNew = 0
+	}
+	plannedTokens := promptTokens + maxNew
+	if plannedTokens < promptTokens {
+		plannedTokens = promptTokens
+	}
+	cfg := p.m.Cfg
+	plan := compute.EstimateKVStoreMemoryPlan(compute.KVConfig{
+		NumLayers:  cfg.NumLayers,
+		NumKVHeads: cfg.NumKVHeads,
+		HeadDim:    cfg.HeadDim,
+		RopeTheta:  cfg.RopeTheta,
+	}, plannedTokens)
+	plan = append(plan, compute.EstimateHALTransientMemoryPlan(compute.TransformerScratchConfig{
+		HiddenSize:       cfg.HiddenSize,
+		IntermediateSize: cfg.IntermediateSize,
+		VocabSize:        cfg.VocabSize,
+		NumLayers:        cfg.NumLayers,
+		NumHeads:         cfg.NumHeads,
+		NumKVHeads:       cfg.NumKVHeads,
+		HeadDim:          cfg.HeadDim,
+		IncludeLogits:    true,
+	})...)
+	if p.backend != nil && p.includeResidentWeightsInRequestFit() {
+		if r := p.m.ResidentReport(); r != nil && r.TotalResidentBytes > 0 {
+			plan = append(compute.MemoryPlan{{Class: compute.MemoryWeights, Bytes: r.TotalResidentBytes, Detail: "resident-weights"}}, plan...)
+		}
+	}
+	return plan
+}
+
+func (p *InKernelPlanner) includeResidentWeightsInRequestFit() bool {
+	if p == nil || p.backend == nil {
+		return false
+	}
+	_, free, known := compute.DeviceMemoryInfo(p.backend)
+	return !known || free < 0
+}
+
+func (p *InKernelPlanner) capacityErrorFromFit(fe *compute.FitError) error {
+	if fe == nil {
+		return nil
+	}
+	scope := fe.Scope
+	if scope == "" {
+		scope = compute.MemoryScopeDevice
+	}
+	return &InKernelCapacityError{
+		Want:  fe.Want,
+		Avail: fe.Avail,
+		Class: primaryDemandClass(fe.Demands, scope),
+		Scope: scope,
+		Site:  "capacity-precheck",
+	}
+}
+
+func primaryDemandClass(plan compute.MemoryPlan, scope compute.MemoryScope) compute.MemoryClass {
+	var bestClass compute.MemoryClass
+	var bestBytes int64
+	for _, d := range plan {
+		if d.Bytes <= 0 || d.ScopeOrDefault() != scope {
+			continue
+		}
+		class := d.Class
+		if class == "" {
+			class = compute.MemoryUnknown
+		}
+		if d.Bytes > bestBytes {
+			bestBytes = d.Bytes
+			bestClass = class
+		}
+	}
+	if bestClass == "" {
+		return compute.MemoryUnknown
+	}
+	return bestClass
 }
 
 // generateReused runs prefill + decode for an already-encoded prompt, REUSING the longest

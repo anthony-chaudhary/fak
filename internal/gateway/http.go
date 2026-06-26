@@ -449,6 +449,25 @@ func upstreamErrorStatus(err error) (status int, code, msg string) {
 			fmt.Sprintf("in-kernel GPU out of memory for this request (%s allocation of %d bytes failed); "+
 				"reduce the prompt/context size or max_tokens, or serve a smaller model / shorter --ctx", class, oom.Bytes)
 	}
+	var capErr *agent.InKernelCapacityError
+	if errors.As(err, &capErr) {
+		class := strings.TrimSpace(string(capErr.Class))
+		if class == "" || class == "unknown" {
+			class = "device"
+		}
+		class = strings.ReplaceAll(class, "_", " ")
+		scope := strings.TrimSpace(string(capErr.Scope))
+		if scope == "" {
+			scope = "device"
+		}
+		subject := "GPU"
+		if scope == "host" {
+			subject = "host memory"
+		}
+		return http.StatusServiceUnavailable, "in_kernel_oom",
+			fmt.Sprintf("in-kernel %s capacity precheck refused this request (%s %s plan needs %d bytes; available budget is %d bytes); "+
+				"reduce the prompt/context size or max_tokens, or serve a smaller model / shorter --ctx", subject, scope, class, capErr.Want, capErr.Avail)
+	}
 	var ue *agent.UpstreamUnreachableError
 	if errors.As(err, &ue) {
 		return http.StatusBadGateway, "upstream_unreachable",

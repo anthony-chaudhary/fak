@@ -86,9 +86,10 @@ type gatewayMetrics struct {
 	resetShadowLastScore float64           // the most recent turn's 0..1 reset-pressure score
 
 	// oomMu guards the in-kernel device-OOM visibility family. These are LOCAL resource
-	// exhaustion faults recovered from compute.DeviceAllocError, not provider errors. The
-	// Prometheus labels stay class-only to avoid allocator-site cardinality; /debug/vars keeps
-	// the most recent site for operator drilldown.
+	// exhaustion faults: either recovered compute.DeviceAllocError allocations or a request
+	// capacity precheck that refused a known-too-large plan before allocation, never provider
+	// errors. The Prometheus labels stay class-only to avoid allocator-site cardinality;
+	// /debug/vars keeps the most recent site for operator drilldown.
 	oomMu       sync.Mutex
 	inKernelOOM map[string]*inKernelOOMClassStats
 }
@@ -138,20 +139,16 @@ func newGatewayMetrics(now time.Time) *gatewayMetrics {
 }
 
 // observeInKernelOOM folds a planner error into the local device-OOM visibility family when
-// it is the in-kernel allocation fault. It returns true only for that local OOM class, so
-// callers can record without re-doing errors.As.
+// it is either an in-kernel allocation fault or the request-time capacity precheck refusal.
+// It returns true only for that local OOM class, so callers can record without re-doing
+// errors.As.
 func (m *gatewayMetrics) observeInKernelOOM(err error) bool {
 	if m == nil || err == nil {
 		return false
 	}
-	var oom *agent.InKernelOOMError
-	if !errors.As(err, &oom) {
+	class, bytes, site, ok := inKernelOOMObservation(err)
+	if !ok {
 		return false
-	}
-	class := oomClassLabel(string(oom.Class))
-	var bytes uint64
-	if oom.Bytes > 0 {
-		bytes = uint64(oom.Bytes)
 	}
 	m.oomMu.Lock()
 	if m.inKernelOOM == nil {
@@ -165,9 +162,27 @@ func (m *gatewayMetrics) observeInKernelOOM(err error) bool {
 	st.count++
 	st.failedBytes += bytes
 	st.lastFailedBytes = bytes
-	st.lastSite = strings.TrimSpace(oom.Site)
+	st.lastSite = site
 	m.oomMu.Unlock()
 	return true
+}
+
+func inKernelOOMObservation(err error) (class string, bytes uint64, site string, ok bool) {
+	var oom *agent.InKernelOOMError
+	if errors.As(err, &oom) {
+		if oom.Bytes > 0 {
+			bytes = uint64(oom.Bytes)
+		}
+		return oomClassLabel(string(oom.Class)), bytes, strings.TrimSpace(oom.Site), true
+	}
+	var capErr *agent.InKernelCapacityError
+	if errors.As(err, &capErr) {
+		if capErr.Want > 0 {
+			bytes = uint64(capErr.Want)
+		}
+		return oomClassLabel(string(capErr.Class)), bytes, strings.TrimSpace(capErr.Site), true
+	}
+	return "", 0, "", false
 }
 
 func oomClassLabel(class string) string {
@@ -955,15 +970,15 @@ func (m *gatewayMetrics) inKernelOOMSnapshotData() []inKernelOOMSnapshot {
 
 func (m *gatewayMetrics) writeInKernelOOMMetrics(b *strings.Builder) {
 	rows := m.inKernelOOMSnapshotData()
-	writeHelpType(b, "fak_gateway_in_kernel_oom_total", "LOCAL in-kernel device allocation OOMs recovered from compute.DeviceAllocError, bucketed by memory class. These are fak-owned resource faults, not upstream provider errors.", "counter")
+	writeHelpType(b, "fak_gateway_in_kernel_oom_total", "LOCAL in-kernel device OOMs and capacity precheck refusals, bucketed by memory class. These are fak-owned resource faults, not upstream provider errors.", "counter")
 	for _, row := range rows {
 		fmt.Fprintf(b, "fak_gateway_in_kernel_oom_total{class=\"%s\"} %d\n", promQuote(row.class), row.count)
 	}
-	writeHelpType(b, "fak_gateway_in_kernel_oom_failed_bytes_total", "Cumulative bytes requested by recovered in-kernel device allocation OOMs, bucketed by memory class.", "counter")
+	writeHelpType(b, "fak_gateway_in_kernel_oom_failed_bytes_total", "Cumulative bytes requested by local in-kernel allocation OOMs and capacity refusals, bucketed by memory class.", "counter")
 	for _, row := range rows {
 		fmt.Fprintf(b, "fak_gateway_in_kernel_oom_failed_bytes_total{class=\"%s\"} %d\n", promQuote(row.class), row.failedBytes)
 	}
-	writeHelpType(b, "fak_gateway_in_kernel_oom_last_failed_bytes", "Most recent failed device allocation size for each memory class (0 until that class has faulted).", "gauge")
+	writeHelpType(b, "fak_gateway_in_kernel_oom_last_failed_bytes", "Most recent failed allocation or refused plan size for each memory class (0 until that class has faulted).", "gauge")
 	for _, row := range rows {
 		fmt.Fprintf(b, "fak_gateway_in_kernel_oom_last_failed_bytes{class=\"%s\"} %d\n", promQuote(row.class), row.lastFailedBytes)
 	}

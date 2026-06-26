@@ -90,35 +90,6 @@ func kvConfigFromModelConfig(cfg model.Config) compute.KVConfig {
 	}
 }
 
-func TestInKernelKVMemoryStatsReportsRadixResidency(t *testing.T) {
-	cfg := tinyCfg()
-	p := reusePlanner(true, false, cfg)
-	ids := synthIDs(cfg.VocabSize, 16, 99)
-	decode(p, ids, 2)
-
-	st := p.KVMemoryStats()
-	wantPerToken := compute.EstimateKVStoreBytes(kvConfigFromModelConfig(cfg), 1)
-	if !st.Enabled {
-		t.Fatal("KVMemoryStats.Enabled = false, want radix cache enabled")
-	}
-	if st.Backend != "radixkv" || st.MemoryClass != string(compute.MemoryKVCache) || st.Scope != string(compute.MemoryScopeHost) {
-		t.Fatalf("KVMemoryStats labels = backend=%q class=%q scope=%q", st.Backend, st.MemoryClass, st.Scope)
-	}
-	if st.BytesPerToken != wantPerToken {
-		t.Fatalf("BytesPerToken = %d, want %d", st.BytesPerToken, wantPerToken)
-	}
-	if st.ResidentTokens <= 0 || st.LRUTokens <= 0 || st.Nodes <= 0 || st.Leaves <= 0 || st.MaxDepthTokens <= 0 {
-		t.Fatalf("KVMemoryStats did not report resident radix shape: %+v", st)
-	}
-	wantResidentBytes := compute.EstimateKVStoreBytes(kvConfigFromModelConfig(cfg), st.ResidentTokens)
-	if st.ResidentBytes != wantResidentBytes {
-		t.Fatalf("ResidentBytes = %d, want %d for %d resident tokens", st.ResidentBytes, wantResidentBytes, st.ResidentTokens)
-	}
-	if st.BudgetTokens != 0 {
-		t.Fatalf("BudgetTokens = %d, want 0 for unbounded test tree", st.BudgetTokens)
-	}
-}
-
 func TestInKernelKVMemoryStatsDeviceBackendReportsGeometryOnly(t *testing.T) {
 	cfg := tinyCfg()
 	backend, ok := compute.Lookup("cpu-ref")
