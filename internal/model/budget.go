@@ -36,6 +36,8 @@ import (
 	"strings"
 )
 
+const defaultWorkerBudgetSource = "default(GOMAXPROCS)"
+
 // SetWorkerBudget re-resolves the matmul worker count from a fractional budget AFTER
 // package init — the path a bench's -budget flag uses. The env-driven numWorkers var is
 // resolved at package load (before main() parses flags), so a flag cannot reach it by
@@ -67,6 +69,46 @@ func SetWorkers(n int) error {
 	numWorkers = n
 	workerBudgetSource = fmt.Sprintf("-jobs=%d", n)
 	return nil
+}
+
+// Q8DecodeWorkers reports the worker count used by Q8 batch-1 decode GEMVs. On
+// darwin/arm64, the default all-core budget over-saturates the shared memory system:
+// the M3 Pro scorecard peaks at 4-6 workers, while prefill still benefits from the
+// global worker count. Explicit FAK_WORKERS/FAK_BUDGET/-budget choices remain exact.
+func Q8DecodeWorkers() int {
+	w, _ := q8DecodeWorkersFor(numWorkers, workerBudgetSource, runtime.GOOS, runtime.GOARCH)
+	return w
+}
+
+// Q8DecodeWorkerBudget reports how Q8DecodeWorkers was derived, so benchmark JSON can
+// state when decode used the Apple Silicon default cap instead of the global budget.
+func Q8DecodeWorkerBudget() string {
+	_, source := q8DecodeWorkersFor(numWorkers, workerBudgetSource, runtime.GOOS, runtime.GOARCH)
+	return source
+}
+
+func q8DecodeWorkers() int {
+	return Q8DecodeWorkers()
+}
+
+func q8DecodeWorkersFor(workers int, source, goos, goarch string) (int, string) {
+	if workers < 1 {
+		workers = 1
+	}
+	if source != defaultWorkerBudgetSource {
+		return workers, source
+	}
+	if goos == "darwin" && goarch == "arm64" && workers >= 8 {
+		w := (workers + 1) / 2
+		if w > 6 {
+			w = 6
+		}
+		if w < 1 {
+			w = 1
+		}
+		return w, defaultWorkerBudgetSource + "; q8_decode=darwin/arm64-half-cap"
+	}
+	return workers, source
 }
 
 // budgetToWorkers maps a raw fraction-or-percent number + machine width to a worker
@@ -128,7 +170,7 @@ func resolveBudgetWorkers(envWorkers, envBudget string, cores int, notify func(s
 	}
 
 	// 3. default — all cores.
-	return cores, "default(GOMAXPROCS)"
+	return cores, defaultWorkerBudgetSource
 }
 
 // parseBudgetFraction reads "0.75", "75", or "75%" into a fraction in (0,1]. A value

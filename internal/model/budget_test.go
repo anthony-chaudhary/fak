@@ -155,3 +155,47 @@ func TestBudgetEnvAndFlagAgree(t *testing.T) {
 		}
 	}
 }
+
+func TestQ8DecodeWorkersDarwinArm64DefaultCap(t *testing.T) {
+	cases := []struct {
+		workers int
+		want    int
+	}{
+		{6, 6},
+		{8, 4},
+		{10, 5},
+		{12, 6},
+		{16, 6},
+	}
+	for _, tc := range cases {
+		got, source := q8DecodeWorkersFor(tc.workers, defaultWorkerBudgetSource, "darwin", "arm64")
+		if got != tc.want {
+			t.Errorf("workers=%d -> q8 decode workers=%d, want %d", tc.workers, got, tc.want)
+		}
+		if tc.workers >= 8 && source == defaultWorkerBudgetSource {
+			t.Errorf("workers=%d source did not record darwin/arm64 cap", tc.workers)
+		}
+	}
+}
+
+func TestQ8DecodeWorkersHonorsExplicitBudget(t *testing.T) {
+	for _, source := range []string{"FAK_WORKERS=12", "FAK_BUDGET=0.5", "-budget=0.5"} {
+		got, gotSource := q8DecodeWorkersFor(12, source, "darwin", "arm64")
+		if got != 12 {
+			t.Errorf("source=%s -> q8 decode workers=%d, want explicit 12", source, got)
+		}
+		if gotSource != source {
+			t.Errorf("source=%s -> q8 decode source=%s", source, gotSource)
+		}
+	}
+}
+
+func TestQ8DecodeWorkersNonAppleDefaultUnchanged(t *testing.T) {
+	got, source := q8DecodeWorkersFor(12, defaultWorkerBudgetSource, "linux", "arm64")
+	if got != 12 {
+		t.Errorf("linux arm64 default -> q8 decode workers=%d, want 12", got)
+	}
+	if source != defaultWorkerBudgetSource {
+		t.Errorf("linux arm64 source=%s, want %s", source, defaultWorkerBudgetSource)
+	}
+}

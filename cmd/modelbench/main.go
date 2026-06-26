@@ -743,9 +743,11 @@ func main() {
 		"quant_ms":          quantMS,
 		"lean":              *f.lean,
 		"quantized_at_load": *f.lean,
-		"workers":           model.NumWorkers(),   // actual matmul parallelism these numbers were taken at
+		"workers":           model.NumWorkers(),   // global matmul worker budget (prefill and explicit paths)
 		"budget":            model.WorkerBudget(), // how the worker count was resolved (FAK_WORKERS / FAK_BUDGET / -budget / default)
-		"go_threads":        fmt.Sprintf("GOMAXPROCS=%d, matmul workers=%d (FAK_WORKERS / FAK_BUDGET / -budget to pin)", runtime.GOMAXPROCS(0), model.NumWorkers()),
+		"q8_decode_workers": model.Q8DecodeWorkers(),
+		"q8_decode_budget":  model.Q8DecodeWorkerBudget(),
+		"go_threads":        fmt.Sprintf("GOMAXPROCS=%d, matmul workers=%d, q8 decode workers=%d (FAK_WORKERS / FAK_BUDGET / -budget to pin)", runtime.GOMAXPROCS(0), model.NumWorkers(), model.Q8DecodeWorkers()),
 	}
 	if ggufLoadProfile != nil {
 		report["load_profile"] = ggufLoadProfile

@@ -40,9 +40,10 @@ func qMatRowsIntoMany(qv q8Vec, targets ...qMatTarget) {
 			base = end
 		}
 	}
-	if numWorkers <= 1 || total*targets[0].qt.in < parThreshold {
+	workers := q8DecodeWorkers()
+	if workers <= 1 || total*targets[0].qt.in < parThreshold {
 		body(0, total)
 		return
 	}
-	parFor(total, numWorkers, body)
+	parFor(total, workers, body)
 }

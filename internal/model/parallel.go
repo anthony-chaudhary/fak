@@ -275,13 +275,17 @@ func parFor(n, workers int, body func(lo, hi int)) {
 
 	parDispatchMu.Lock()
 	// Slice [0,n) into ~workers*granularity contiguous chunks so a fast core can grab several while
-	// a slow core grabs one. All pool workers are woken; extras simply find a drained queue.
+	// a slow core grabs one. Only the requested worker budget is dispatched; this lets decode paths
+	// deliberately use fewer workers than the global prefill budget.
 	chunkSize := (n + workers*parChunkGranularity - 1) / (workers * parChunkGranularity)
 	if chunkSize < 1 {
 		chunkSize = 1
 	}
 	numChunks := int64((n + chunkSize - 1) / chunkSize)
-	nDisp := len(parSlots)
+	nDisp := workers - 1
+	if nDisp > len(parSlots) {
+		nDisp = len(parSlots)
+	}
 	parBody = body
 	parN = n
 	parChunkSize = chunkSize

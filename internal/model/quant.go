@@ -227,14 +227,15 @@ func qMatRows(qt *q8Tensor, qv q8Vec) []float32 {
 
 func qMatRowsInto(qt *q8Tensor, qv q8Vec, y []float32) {
 	y = y[:qt.out]
-	if numWorkers <= 1 || qt.out*qt.in < parThreshold {
+	workers := q8DecodeWorkers()
+	if workers <= 1 || qt.out*qt.in < parThreshold {
 		qMatRowsRange(qt, qv, y, 0, qt.out)
 		return
 	}
 	body := func(lo, hi int) {
 		qMatRowsRange(qt, qv, y, lo, hi)
 	}
-	parFor(qt.out, numWorkers, body)
+	parFor(qt.out, workers, body)
 }
 
 func qMatRowsRange(qt *q8Tensor, qv q8Vec, y []float32, lo, hi int) {
