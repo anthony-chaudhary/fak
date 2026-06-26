@@ -48,6 +48,7 @@ var tier = map[string]int{
 
 	"agenticbench": 1, // pure #868 artifact rollup gate over committed benchmark evidence; stdlib-only, off the hot path.
 	"benchcatalog": 1, // pure benchmark registry used by fak benchmarks and scorecards; stdlib-only, off the hot path.
+	"benchscore":   1, // pure benchmark score artifact validator/renderer; stdlib-only, off the hot path.
 	"callavoid":    1, // pure avoided-call economics/accounting primitive; stdlib-only, folded by higher layers.
 	"accounts":     1, "appversion": 1, "blob": 1, "boundarylint": 1, "cachemeta": 1, "cacheobs": 1, "canon": 1, "compute": 1, "deletioncert": 1, "demoui": 1, "ggufload": 1, "gpulease": 1, "hfhub": 1, "leakcheck": 1, "metalgemm": 1, "metrics": 1, "model": 1, "pathlint": 1, "pathutil": 1, "provenance": 1, "swebench": 1, "urllint": 1, "webbench": 1,
 	"blobfs": 1, "blobhttp": 1, // durable on-disk / remote-HTTP content-addressed Ref backends; attach to abi like blob (Resolver+PageOutBackend), import only abi+blob+stdlib.
@@ -96,6 +97,7 @@ var tier = map[string]int{
 	"vcachewarm":      2, // vCache M3 dedicated warming (#718): Anthropic max_tokens:0 vs decode-1 decision gates, byte-identical prefix guard, send-one-then-fan barrier, and wasted-warm accounting. Pure decision layer, off the hot path, no live transport claim.
 	"sessionreset":    2, // budget-reset carryover builder: a pluggable Contributor registry that folds a drained session's transcript into the "human-like" seed a fresh session is re-armed with (durable facts via ctxmmu's shipped prior + task recap + warm-prefix descriptor via vcachechain + verbatim tail). Mechanism: imports ctxmmu(2)+vcachechain(2)+stdlib, NOT the wire agent type; off the hot path, registers nothing into the kernel.
 	"taskmgr":         1, // process-local task/step/resource/ETA snapshot fold; stdlib-only, off the hot path.
+	"stopfailure":     1, // pure StopFailure marker planner/settler over JSON files and transcript existence; stdlib-only, off the hot path.
 	"dropin":          1,
 	"comm":            2,
 	"cohort":          2, // fail-closed cohort shrink/agree over comm.Group + modelroute vote fold.
