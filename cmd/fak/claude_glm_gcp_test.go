@@ -202,6 +202,30 @@ func TestClaudeGLMGCPA100LlamacppBenchmarkPlan(t *testing.T) {
 	}
 }
 
+func TestClaudeGLMGCPA100StockEngineFailsClosed(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("bash plan rendering is covered under WSL/Unix CI")
+	}
+	bash, err := exec.LookPath("bash")
+	if err != nil {
+		t.Skip("bash not on PATH")
+	}
+	root := repoRootFromTest(t)
+	cmd := exec.Command(bash, filepath.Join(root, "scripts", "gcp-glm-serve.sh"))
+	cmd.Dir = root
+	// sm_80 is below the DSA kernel floor: the stock engines MUST fail closed, never render a
+	// serve. This locks the central A100 invariant (the script gate, not just the registry cap).
+	cmd.Env = append(os.Environ(), "GCP_TIER=a2-ultra-a100-80gb", "SERVE=sglang")
+	out, err := cmd.CombinedOutput()
+	if err == nil {
+		t.Fatalf("expected non-zero exit for SERVE=sglang on an A100 (sm_80) tier; got success\n%s", out)
+	}
+	requireContainsForClaudeGLMGCP(t, string(out), "needs sm_90+")
+	if strings.Contains(string(out), "glm52_sglang_vllm_serve.sh") {
+		t.Fatalf("A100 + SERVE=sglang rendered a serve instead of failing closed:\n%s", out)
+	}
+}
+
 func readRepoTextForClaudeGLMGCP(t *testing.T, root string, elems ...string) string {
 	t.Helper()
 	path := filepath.Join(append([]string{root}, elems...)...)
