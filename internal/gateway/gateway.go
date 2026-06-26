@@ -533,6 +533,13 @@ type Server struct {
 	// (the default) leaves the body byte-for-byte unchanged.
 	compactHistoryBudget int
 
+	// elideResultBytes mirrors Config.ElideResultBytes: when > 0 the flagship Anthropic
+	// passthrough shrinks oversized tool_result bodies in the un-cached, non-recent middle to a
+	// bounded head+tail form (agent.ElideAnthropicResults), keeping the cached-prefix bytes
+	// verbatim and never touching a cache_control-bearing message. 0 (the default) leaves the
+	// body byte-for-byte unchanged. The bounded-loss sibling of compactHistoryBudget.
+	elideResultBytes int
+
 	// toolFloorDenies mirrors Config.ToolFloorDenies: the INBOUND-half predicate over a
 	// tool name (true ⇔ the floor DEFAULT_DENYs it for every arg). When non-nil the
 	// Anthropic passthrough prunes those provably-unreachable tool DEFINITIONS from the
@@ -711,6 +718,7 @@ func New(cfg Config) (*Server, error) {
 		engineCache:          remoteCache,
 		ctxView:              ctxView,
 		compactHistoryBudget: cfg.CompactHistoryBudget,
+		elideResultBytes:     cfg.ElideResultBytes,
 		toolFloorDenies:      cfg.ToolFloorDenies,
 		cacheStream:          cacheStream,
 		rungObs:              rungObs,

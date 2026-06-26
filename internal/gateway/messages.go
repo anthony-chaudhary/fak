@@ -190,6 +190,14 @@ func (s *Server) handleAnthropicMessages(w http.ResponseWriter, r *http.Request)
 	if viewPlanned {
 		compacted = true // the ctxview transform shrunk the body too — record the observed cache_read
 	}
+	// Oversized tool_result elision (the bounded-loss sibling of compaction): after compaction
+	// has dropped whole OLD turns, shrink any remaining oversized tool_result bodies in the
+	// un-cached, non-recent middle to a bounded head+tail form, keeping the cached-prefix bytes
+	// verbatim and never touching a cache_control-bearing message. OFF (identity) by default and
+	// on every non-passthrough wire; fail-safe. Runs on the already-compacted body.
+	if s.maybeElideAnthropicRaw(req) {
+		compacted = true // the elision transform shrank the body too — record the observed cache_read
+	}
 	// Inbound twin of #555: prune tool DEFINITIONS the floor can never admit from the
 	// outbound tools[], keeping the cache_control prefix byte-identical (promptmmu). Runs
 	// after the history compaction (both rewrite req.Raw; tools[] and messages[] are
@@ -393,6 +401,25 @@ func (s *Server) maybeCompactAnthropicRaw(req *agent.AnthropicMessagesRequest) (
 	req.Raw = out
 	s.metrics.observeCompaction(outcome, false)
 	return outcome.Reason == agent.CompactReasonNone
+}
+
+// maybeElideAnthropicRaw shrinks oversized tool_result bodies in the outbound passthrough body
+// when --elide-result-bytes is set. Like maybeCompactAnthropicRaw it is a no-op unless the gateway
+// is fronting the REAL Anthropic API (s.anthropicPassthrough) — only there is the raw body
+// forwarded verbatim, so only there does rewriting it reach the wire AND need to preserve the
+// cached prefix. agent.ElideAnthropicResultsWithOutcome is fail-safe: it returns req.Raw unchanged
+// on any ambiguity, never touches a cache_control-bearing message, and proves the protected prefix
+// stays byte-identical, so this never breaks a turn or busts the cache. Returns whether it FIRED.
+func (s *Server) maybeElideAnthropicRaw(req *agent.AnthropicMessagesRequest) (fired bool) {
+	if req == nil || len(req.Raw) == 0 || !s.anthropicPassthrough() {
+		return false
+	}
+	if s.elideResultBytes <= 0 {
+		return false // configured OFF
+	}
+	out, outcome := agent.ElideAnthropicResultsWithOutcome(req.Raw, s.elideResultBytes)
+	req.Raw = out
+	return outcome.Reason == agent.ElideReasonNone
 }
 
 // maybePlanAnthropicRaw is the ctxplan planned-view req.Raw transform for the Anthropic
