@@ -127,3 +127,11 @@ gate. It does not run the benchmark, does not produce a compare artifact, and
 does not add an authority row. `result_claim_allowed` stays `false` until the
 credentialed rehearsal (#900), the gateway witness, and the official grader
 output are checked in and hashed into the manifest above.
+
+## Where this sits in the campaign
+
+- Epic (#897): [`TERMINAL-BENCH-2.1`](https://github.com/anthony-chaudhary/fak/issues/897) — the rank-1 objective, target bar, and hard fences.
+- Gate (#898): the official-run contract pinned above is the machine-readable promotion gate.
+- Adapter (#899) / rehearsal (#900): the credentialed raw-vs-fak run that produces the still-missing compare artifact and gateway witness.
+- Recovery (#901): [`TERMINAL-BENCH-2.1-FAILURE-TAXONOMY.md`](TERMINAL-BENCH-2.1-FAILURE-TAXONOMY.md) — the closed-vocabulary classifier the compare artifact tallies by.
+- Promotion: [`BENCHMARK-AUTHORITY.md`](../../BENCHMARK-AUTHORITY.md) — the single source of truth a row joins, only after the evidence gate clears.
