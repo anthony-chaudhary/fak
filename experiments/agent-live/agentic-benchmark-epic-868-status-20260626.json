@@ -1,6 +1,6 @@
 {
   "schema": "fak.agentic-benchmark-epic-rollup.v1",
-  "generated_at": "2026-06-26T03:35:42Z",
+  "generated_at": "2026-06-26T03:43:07Z",
   "epic": 868,
   "status": "PENDING_EXTERNAL_HARNESS",
   "result_claim_allowed": false,
@@ -9,6 +9,8 @@
     "children_parsed": 8,
     "local_evidence_artifacts": 2,
     "result_claim_artifacts": 0,
+    "result_packets_total": 0,
+    "result_packets_passed": 0,
     "pending_children": [
       870,
       871,
@@ -158,7 +160,7 @@
     {
       "name": "result_packet_graduated",
       "ok": false,
-      "detail": "0 result-claim-enabled artifact(s); pending live children=#870, #871, #872, #873, #874, #875"
+      "detail": "0 result-claim-enabled artifact(s); result packets passed=0/0 failed=0; pending live children=#870, #871, #872, #873, #874, #875"
     },
     {
       "name": "external_harness_grading",

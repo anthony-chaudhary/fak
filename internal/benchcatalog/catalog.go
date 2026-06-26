@@ -83,8 +83,8 @@ var registry = []Bench{
 	{
 		Name: "agenticbench", Kind: KindCmd, Need: NeedNone,
 		Summary: "Parent #868 rollup gate: folds the committed agentic benchmark child artifacts and reports whether any real raw-vs-fak result claim is allowed.",
-		Run:     "go run ./cmd/agenticbench -out experiments/agent-live/agentic-benchmark-epic-868-status-20260626.json -md experiments/agent-live/agentic-benchmark-epic-868-status-20260626.md",
-		Flags:   []string{"-root  -  repo root containing artifacts", "-out  -  rollup JSON path", "-md  -  markdown summary path", "-strict  -  exit nonzero unless #868 is complete"},
+		Run:     "go run ./cmd/agenticbench -out experiments/agent-live/agentic-benchmark-epic-868-status-20260626.json -md experiments/agent-live/agentic-benchmark-epic-868-status-20260626.md -external-queue experiments/agent-live/agentic-benchmark-epic-868-external-harness-queue-20260626.json -external-queue-md experiments/agent-live/agentic-benchmark-epic-868-external-harness-queue-20260626.md",
+		Flags:   []string{"-root  -  repo root containing artifacts", "-out  -  rollup JSON path", "-md  -  markdown summary path", "-external-queue  -  pending external harness queue JSON path", "-external-queue-md  -  pending external harness queue markdown path", "-strict  -  exit nonzero unless #868 is complete"},
 		Doc:     "docs/notes/AGENTIC-BENCHMARK-RUN-PACKETS-2026-06-25.md",
 	},
 	{

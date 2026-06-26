@@ -23,6 +23,9 @@ func TestBuildKeepsEpicPendingForFixtureEvidence(t *testing.T) {
 	if report.Summary.ResultClaimArtifacts != 0 {
 		t.Fatalf("result claim artifacts = %d, want 0", report.Summary.ResultClaimArtifacts)
 	}
+	if report.Summary.ResultPacketsTotal != 0 || report.Summary.ResultPacketsPassed != 0 {
+		t.Fatalf("result packets = %d/%d, want none", report.Summary.ResultPacketsPassed, report.Summary.ResultPacketsTotal)
+	}
 	if got, want := len(report.Summary.PendingChildren), 6; got != want {
 		t.Fatalf("pending children = %v (len %d), want %d live lanes", report.Summary.PendingChildren, got, want)
 	}
@@ -31,6 +34,106 @@ func TestBuildKeepsEpicPendingForFixtureEvidence(t *testing.T) {
 	}
 	md := RenderMarkdown(report)
 	for _, want := range []string{"PENDING_EXTERNAL_HARNESS", "#870", "result_packet_graduated"} {
+		if !strings.Contains(md, want) {
+			t.Fatalf("markdown missing %q:\n%s", want, md)
+		}
+	}
+}
+
+func TestBuildRejectsIncompleteResultPacket(t *testing.T) {
+	root := fixtureRoot(t)
+	write(t, root, "experiments/agent-live/agentic-benchmark-result-packets/bad.json", `{
+  "schema": "fak.agentic-benchmark-result-packet.v1",
+  "issue": 871,
+  "status": "PASS_RESULT",
+  "result_claim_allowed": true,
+  "benchmark_native": true,
+  "same_task_ids": true,
+  "same_model": true,
+  "same_budget": true,
+  "official_grader": {"available": false},
+  "arms": [{"role": "raw", "name": "raw-opus"}],
+  "metric_categories": {
+    "task_success": true,
+    "safe_success": true,
+    "cost_or_token_budget": true,
+    "latency": true,
+    "policy_events": true,
+    "evidence_completeness": true
+  },
+  "artifacts": ["experiments/agent-live/missing.json"]
+}`)
+	report, err := Build(root, time.Unix(0, 0))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if report.Summary.ResultPacketsTotal != 1 || report.Summary.ResultPacketsPassed != 0 || report.Summary.ResultPacketsFailed != 1 {
+		t.Fatalf("packet summary = %+v", report.Summary)
+	}
+	if report.Summary.ResultClaimArtifacts != 0 || gateOK(report, "result_packet_graduated") {
+		t.Fatalf("incomplete packet must not graduate: summary=%+v", report.Summary)
+	}
+	packet := report.ResultPackets[0]
+	for _, want := range []string{"official_grader.available", "arms must include a fak role", "artifact missing"} {
+		if !strings.Contains(packet.Detail, want) {
+			t.Fatalf("packet detail missing %q: %s", want, packet.Detail)
+		}
+	}
+}
+
+func TestBuildAcceptsWitnessedResultPacketButKeepsEpicPending(t *testing.T) {
+	root := fixtureRoot(t)
+	for _, rel := range []string{
+		"experiments/agent-live/result-opus/raw-report.json",
+		"experiments/agent-live/result-opus/fak-report.json",
+		"experiments/agent-live/result-opus/compare.json",
+	} {
+		write(t, root, rel, `{"ok": true}`)
+	}
+	write(t, root, "experiments/agent-live/agentic-benchmark-result-packets/opus.json", `{
+  "schema": "fak.agentic-benchmark-result-packet.v1",
+  "issue": 871,
+  "packet": "C",
+  "status": "PASS_RESULT",
+  "result_claim_allowed": true,
+  "benchmark_native": true,
+  "same_task_ids": true,
+  "same_model": true,
+  "same_budget": true,
+  "official_grader": {"available": true},
+  "arms": [
+    {"role": "raw", "name": "raw-opus"},
+    {"role": "fak", "name": "fak-opus"}
+  ],
+  "metric_categories": {
+    "task_success": true,
+    "safe_success": true,
+    "cost_or_token_budget": true,
+    "latency": true,
+    "policy_events": true,
+    "evidence_completeness": true
+  },
+  "artifacts": [
+    "experiments/agent-live/result-opus/raw-report.json",
+    "experiments/agent-live/result-opus/fak-report.json",
+    "experiments/agent-live/result-opus/compare.json"
+  ]
+}`)
+	report, err := Build(root, time.Unix(0, 0))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if report.Summary.ResultPacketsPassed != 1 || report.Summary.ResultClaimArtifacts != 1 {
+		t.Fatalf("packet did not graduate: summary=%+v packets=%+v", report.Summary, report.ResultPackets)
+	}
+	if !gateOK(report, "result_packet_graduated") {
+		t.Fatal("result_packet_graduated should pass when a witnessed packet is present")
+	}
+	if report.Status != "PENDING_EXTERNAL_HARNESS" || report.ResultClaimAllowed {
+		t.Fatalf("epic status/claim = %s/%t, want pending/false while sibling lanes remain pending", report.Status, report.ResultClaimAllowed)
+	}
+	md := RenderMarkdown(report)
+	for _, want := range []string{"Result Packets", "opus.json", "PASS_RESULT"} {
 		if !strings.Contains(md, want) {
 			t.Fatalf("markdown missing %q:\n%s", want, md)
 		}

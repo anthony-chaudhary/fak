@@ -17,15 +17,16 @@ import (
 const Schema = "fak.agentic-benchmark-epic-rollup.v1"
 
 type Report struct {
-	Schema             string        `json:"schema"`
-	GeneratedAt        string        `json:"generated_at"`
-	Epic               int           `json:"epic"`
-	Status             string        `json:"status"`
-	ResultClaimAllowed bool          `json:"result_claim_allowed"`
-	Summary            Summary       `json:"summary"`
-	Children           []ChildStatus `json:"children"`
-	Acceptance         []Gate        `json:"acceptance"`
-	ClaimBoundary      string        `json:"claim_boundary"`
+	Schema             string               `json:"schema"`
+	GeneratedAt        string               `json:"generated_at"`
+	Epic               int                  `json:"epic"`
+	Status             string               `json:"status"`
+	ResultClaimAllowed bool                 `json:"result_claim_allowed"`
+	Summary            Summary              `json:"summary"`
+	Children           []ChildStatus        `json:"children"`
+	ResultPackets      []ResultPacketStatus `json:"result_packets,omitempty"`
+	Acceptance         []Gate               `json:"acceptance"`
+	ClaimBoundary      string               `json:"claim_boundary"`
 }
 
 type Summary struct {
@@ -33,6 +34,9 @@ type Summary struct {
 	ChildrenParsed         int   `json:"children_parsed"`
 	LocalEvidenceArtifacts int   `json:"local_evidence_artifacts"`
 	ResultClaimArtifacts   int   `json:"result_claim_artifacts"`
+	ResultPacketsTotal     int   `json:"result_packets_total"`
+	ResultPacketsPassed    int   `json:"result_packets_passed"`
+	ResultPacketsFailed    int   `json:"result_packets_failed,omitempty"`
 	PendingChildren        []int `json:"pending_children,omitempty"`
 	FailedChildren         []int `json:"failed_children,omitempty"`
 }
@@ -110,6 +114,8 @@ func Build(root string, now time.Time) (*Report, error) {
 		foldChild(&rep.Summary, child)
 	}
 	rep.Summary.ChildrenTotal = len(rep.Children)
+	rep.ResultPackets = scanResultPackets(root)
+	foldResultPackets(&rep.Summary, rep.ResultPackets)
 	rep.Acceptance = acceptanceGates(rep)
 	rep.ResultClaimAllowed = allGatesOK(rep.Acceptance)
 	if rep.ResultClaimAllowed {
@@ -118,6 +124,18 @@ func Build(root string, now time.Time) (*Report, error) {
 		rep.Status = "PENDING_EXTERNAL_HARNESS"
 	}
 	return rep, nil
+}
+
+func foldResultPackets(s *Summary, packets []ResultPacketStatus) {
+	s.ResultPacketsTotal = len(packets)
+	for _, packet := range packets {
+		if packet.Gate == "PASS_RESULT" && packet.ResultClaimAllowed {
+			s.ResultPacketsPassed++
+			s.ResultClaimArtifacts++
+		} else {
+			s.ResultPacketsFailed++
+		}
+	}
 }
 
 func readJSON(path string) (map[string]any, error) {
@@ -324,7 +342,7 @@ func acceptanceGates(rep *Report) []Gate {
 	return []Gate{
 		{Name: "child_artifacts_parse", OK: parsedOK, Detail: fmt.Sprintf("%d/%d child artifacts parsed; failed=%s", rep.Summary.ChildrenParsed, rep.Summary.ChildrenTotal, joinOrNone(failed))},
 		{Name: "authority_entry_shape", OK: authorityShape, Detail: "BENCHMARK-AUTHORITY carries local rows plus the promotion-gate shape"},
-		{Name: "result_packet_graduated", OK: resultClaim, Detail: fmt.Sprintf("%d result-claim-enabled artifact(s); pending live children=%s", rep.Summary.ResultClaimArtifacts, joinOrNone(pending))},
+		{Name: "result_packet_graduated", OK: resultClaim, Detail: fmt.Sprintf("%d result-claim-enabled artifact(s); result packets passed=%d/%d failed=%d; pending live children=%s", rep.Summary.ResultClaimArtifacts, rep.Summary.ResultPacketsPassed, rep.Summary.ResultPacketsTotal, rep.Summary.ResultPacketsFailed, joinOrNone(pending))},
 		{Name: "external_harness_grading", OK: resultClaim && len(rep.Summary.PendingChildren) == 0, Detail: "requires benchmark-native raw/fak grader output for open live lanes"},
 		{Name: "compare_metrics_complete", OK: resultClaim, Detail: "requires solve/safe/cost-or-token/latency/policy/evidence metrics from a result-bearing compare artifact"},
 		{Name: "final_writeup_ready", OK: resultClaim, Detail: "final #868 writeup waits for at least one real raw-vs-fak result packet"},
