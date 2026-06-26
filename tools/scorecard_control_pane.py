@@ -81,6 +81,7 @@ SCORECARDS: list[dict[str, str]] = [
     {"key": "steer", "debt": "steerability_debt", "script": "steerability_scorecard.py", "label": "steerability"},
     {"key": "conflation", "debt": "conflation_debt", "script": "conflation_scorecard.py", "label": "conflation"},
     {"key": "guard_rsi", "debt": "guard_rsi_debt", "script": "", "cmd": "go run ./cmd/fak guard-rsi-scorecard --json", "label": "guard-rsi"},
+    {"key": "dogfood", "debt": "dogfood_debt", "script": "", "cmd": "go run ./cmd/fak dogfood-score --json", "label": "dogfood-loop"},
 ]
 
 

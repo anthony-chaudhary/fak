@@ -159,6 +159,8 @@ func main() {
 		cmdGuardVerdictRSI(os.Args[2:])
 	case "guard-rsi-scorecard":
 		cmdGuardRSIScorecard(os.Args[2:])
+	case "dogfood-score":
+		cmdDogfoodScore(os.Args[2:])
 	case "callavoid":
 		cmdCallavoid(os.Args[2:])
 	case "savings-vector":
@@ -418,6 +420,10 @@ func usage() {
                  scores verdict-quality, and keeps only on rows + strict gain + witness)
   fak guard-rsi-scorecard [--json] [--markdown] [--compare FILE]
                 (native control-pane payload for guard RSI loop maturity and realized value)
+  fak dogfood-score [--json] [--markdown] [--compare FILE] [--window-hours N]
+                (scores the launched-session dogfooding loop: is it WIRED to run honestly,
+                 and does the model report itself truthfully  -  the keystone defect is a turn
+                 that claims success over an OBSERVED Stop-hook error, read from real transcripts)
   fak audit     verify <journal.jsonl> | export <journal.jsonl>
                 (the AUDIT-TRAIL consumer: 'verify' re-reads a decision journal (the
                  'fak guard' / FAK_AUDIT_JOURNAL trail) and validates its hash chain
