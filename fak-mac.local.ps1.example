@@ -1,0 +1,17 @@
+# fak-mac.local.ps1.example — copy to fak-mac.local.ps1 (gitignored) and edit.
+#
+# `fak claude-mac-fak` ships PUBLIC-SAFE PLACEHOLDER defaults (node-macos-a.local).
+# Your real tailnet host, SSH user, and any credential belong in the gitignored
+# copy, never in tracked source. See docs/fak/scrubbing-real-values.md.
+#
+#   cp fak-mac.local.ps1.example fak-mac.local.ps1   # then edit
+#   . .\fak-mac.local.ps1
+#   go run ./cmd/fak claude-mac-fak
+
+$env:FAK_MAC_GATEWAY  = "http://YOUR-MAC-HOST:8080"   # tailscale name or 100.x.y.z
+$env:FAK_MAC_SSH_HOST = "you@YOUR-MAC-HOST"
+$env:FAK_MAC_MODEL    = "lmstudio-community/Qwen3.6-27B-GGUF:Q4_K_M"
+
+# Either fetch the bearer over ssh (left to the binary's --fetch-key), or set it
+# directly here to skip ssh entirely:
+# $env:FAK_GATEWAY_KEY = "..."

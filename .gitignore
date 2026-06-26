@@ -104,6 +104,10 @@ fak/.*.log
 *.local.json
 *.local.yaml
 *.local.yml
+*.local.ps1
+*.local.sh
+!*.local.ps1.example
+!*.local.sh.example
 *.pem
 *.key
 *.p12

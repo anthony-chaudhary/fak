@@ -16,6 +16,12 @@ import (
 	"time"
 )
 
+// These defaults are PUBLIC-SAFE PLACEHOLDERS, not a real host. fak is a public
+// repo, so the real tailnet gateway/SSH user must never be a tracked default
+// (docs/fak/scrubbing-real-values.md). The placeholder intentionally does not
+// resolve — supply your own via FAK_MAC_GATEWAY / FAK_MAC_SSH_HOST (or a
+// gitignored fak-mac.local.ps1; see fak-mac.local.ps1.example). Do NOT "fix" a
+// resolve error by restoring a real value here.
 const (
 	defaultClaudeMacGateway = "http://node-macos-a.local:8080"
 	defaultClaudeMacModel   = "lmstudio-community/Qwen3.6-27B-GGUF:Q4_K_M"
