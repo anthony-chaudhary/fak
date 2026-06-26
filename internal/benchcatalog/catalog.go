@@ -88,6 +88,13 @@ var registry = []Bench{
 		Doc:     "BENCHMARK-AUTHORITY.md",
 	},
 	{
+		Name: "browseractionbench", Kind: KindCmd, Need: NeedNone,
+		Summary: "Browser/computer-use action-mediation smoke: replays local browser traces through raw and fak arms and reports safe pass^1, policy breaches, minefield hits, denied actions, and evidence checkpoints.",
+		Run:     "go run ./cmd/browseractionbench",
+		Flags:   []string{"-suite  -  browser action mediation suite JSON", "-out  -  report JSON path", "-md  -  markdown summary path"},
+		Doc:     "docs/notes/AGENTIC-BENCHMARK-RUN-PACKETS-2026-06-25.md",
+	},
+	{
 		Name: "batchbench", Kind: KindCmd, Need: NeedWeights,
 		Summary: "Aggregate multi-user batched-decode throughput as a function of batch size B (the continuous-batching regime).",
 		Run:     "go run ./cmd/batchbench -dir internal/model/.cache/smollm2-135m",

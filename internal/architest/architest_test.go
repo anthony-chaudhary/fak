@@ -59,7 +59,8 @@ var tier = map[string]int{
 	"storedrv": 2, // content-addressed storage ROUTER: composes the blob/blobfs/blobhttp (tier-1) drivers into one namespace; the abi RegionBackend only when FAK_STORE opts in.
 
 	"ifc": 3, "normgate": 3, "recall": 3, "kvmmu": 3, "radixkv": 3, "cdb": 3, "contextq": 3, "agentdojo": 3, "toollint": 3, "toolsandbox": 3,
-	"memq": 3, "headroom": 3, // memq: the memory-operation algebra composed over recall (tier 3). headroom: the context-compression seam over ctxmmu/abi (its doc.go declares composer/3).
+	"browseraction": 3,                // browser/computer-use action-mediation harness: composes webbench actions with policy/adjudicator, off the live request path.
+	"memq":          3, "headroom": 3, // memq: the memory-operation algebra composed over recall (tier 3). headroom: the context-compression seam over ctxmmu/abi (its doc.go declares composer/3).
 
 	"agent": 4, "bench": 4, "turnbench": 4, "gateway": 4, "registrations": 4, "rsiloop": 4,
 	"tracesink": 4, // imports agent/turnbench/registrations (tier 4) — tier forced to 4

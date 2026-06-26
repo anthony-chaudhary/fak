@@ -8,7 +8,7 @@ the competitive claims. None of them grade the thing a *developer who wants to r
 a benchmark* actually hits: can they **(1) discover** what benchmarks exist,
 **(2) cold-start** at least one with no weights/GPU/dataset/key, **(3) learn one
 flag vocabulary that transfers**, **(4) read a number and know what it means**, and
-**(5) record + compare** a result? fak ships 26 benchmark surfaces (19 ``cmd/*bench*``
+**(5) record + compare** a result? fak ships 27 benchmark surfaces (20 ``cmd/*bench*``
 mains + 7 ``fak`` verbs)  -  its headline value-proof  -  and until now had no number
 for how hard they are to use.
 
@@ -55,7 +55,7 @@ flag, an inline provenance line, a record command), not by writing prose.
 The headline metric is **bench-DX-debt**: the count of concrete HARD defects above.
 Driving it to zero means a developer who wants to benchmark fak can find what to
 run, run something in under a minute, learn one flag set, trust the number, and
-compare it  -  without reading 18 mains. The companion process re-runs this, retires
+compare it  -  without reading 20 mains. The companion process re-runs this, retires
 the worst-first defect by adding the missing affordance, and re-runs to prove the
 drop, folding into the unified scorecard_control_pane alongside the other sticks.
 
