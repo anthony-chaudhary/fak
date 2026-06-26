@@ -136,6 +136,102 @@ func TestMaybeCompactOnShortensKeepsPrefix(t *testing.T) {
 	}
 }
 
+// sprawlWireBody is compactWireBody with each turn padded so the compactible suffix
+// deterministically EXCEEDS a target resident-token budget — the "sprawl" the default-on
+// trigger is meant to catch. tokensPerTurn is the ~4-chars/token estimate the compactor
+// uses, so nMsgs*tokensPerTurn clears the budget with margin.
+func sprawlWireBody(t *testing.T, nMsgs, charsPerTurn int) []byte {
+	t.Helper()
+	type block map[string]any
+	msgs := make([]map[string]any, 0, nMsgs)
+	msgs = append(msgs, map[string]any{
+		"role": "user",
+		"content": []block{
+			{"type": "text", "text": strings.Repeat("cached early context. ", 20), "cache_control": map[string]any{"type": "ephemeral"}},
+		},
+	})
+	body := strings.Repeat("x", charsPerTurn)
+	for i := 1; i < nMsgs; i++ {
+		role := "user"
+		if i%2 == 0 {
+			role = "assistant"
+		}
+		msgs = append(msgs, map[string]any{
+			"role":    role,
+			"content": []block{{"type": "text", "text": body}},
+		})
+	}
+	raw, err := json.Marshal(map[string]any{
+		"model": "claude-sonnet-4-6", "max_tokens": 1024, "stream": true,
+		"system": []block{
+			{"type": "text", "text": strings.Repeat("policy. ", 30), "cache_control": map[string]any{"type": "ephemeral"}},
+		},
+		"messages": msgs,
+	})
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	return raw
+}
+
+// TestMaybeCompactDefaultBudgetTrigger is the default-on sprawl trigger: a server built at
+// DefaultCompactHistoryBudget (what the CLI flag now defaults to) compacts a conversation
+// whose suffix has sprawled past that budget, and keeps the cache_control prefix byte-
+// identical. This is the live realization of "limit sprawl without net-charging more" — the
+// cut only sheds the un-cacheable middle, never the cached prefix.
+func TestMaybeCompactDefaultBudgetTrigger(t *testing.T) {
+	// ~12 turns of ~24k chars each ≈ 6k tokens/turn ≈ 72k token suffix, well over the 48k
+	// default — so the cut MUST fire at the default budget.
+	raw := sprawlWireBody(t, 12, 24000)
+	req, err := agent.DecodeAnthropicMessagesRequest(raw)
+	if err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	orig := append([]byte(nil), req.Raw...)
+
+	var obj map[string]json.RawMessage
+	if err := json.Unmarshal(orig, &obj); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	elems, spans, ok := decodeArrayElementsFromTest(t, orig, obj["messages"])
+	if !ok {
+		t.Fatal("decodeArrayElements failed")
+	}
+	split := spans[lastBreakpointMessageFromTest(elems)].end
+
+	// Built at the DEFAULT budget — no explicit operator value, exactly the CLI default path.
+	anthropicPassthroughServer(DefaultCompactHistoryBudget).maybeCompactAnthropicRaw(req)
+
+	if bytes.Equal(req.Raw, orig) {
+		t.Fatalf("a body sprawled past the default budget must compact, got identity")
+	}
+	if len(req.Raw) >= len(orig) {
+		t.Fatalf("expected a shorter body, got %d >= %d", len(req.Raw), len(orig))
+	}
+	if split > len(req.Raw) || !bytes.Equal(orig[:split], req.Raw[:split]) {
+		t.Fatalf("cache prefix bytes changed (split=%d)", split)
+	}
+	if _, err := agent.DecodeAnthropicMessagesRequest(req.Raw); err != nil {
+		t.Fatalf("compacted body failed to re-decode: %v", err)
+	}
+}
+
+// TestMaybeCompactDefaultBudgetLeavesShortSessionAlone: a short conversation whose suffix
+// is well under the default budget is forwarded byte-for-byte even at the default-on budget
+// — the trigger only fires on genuine sprawl, so a typical session is untouched.
+func TestMaybeCompactDefaultBudgetLeavesShortSessionAlone(t *testing.T) {
+	raw := compactWireBody(t, 8) // ~8 small turns, far under 48k tokens
+	req, err := agent.DecodeAnthropicMessagesRequest(raw)
+	if err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	orig := append([]byte(nil), req.Raw...)
+	anthropicPassthroughServer(DefaultCompactHistoryBudget).maybeCompactAnthropicRaw(req)
+	if !bytes.Equal(req.Raw, orig) {
+		t.Fatalf("a short session under the default budget must be left byte-for-byte unchanged")
+	}
+}
+
 // The two helpers below let the gateway test reach the agent package's unexported span
 // locators indirectly: we re-derive the boundary with the same public primitive the
 // gateway relies on (DecodeAnthropicMessagesRequest round-trips), then compute the split

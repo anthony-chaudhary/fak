@@ -85,10 +85,12 @@ See [docs/integrations/claude.md](docs/integrations/claude.md).
 ### Long sessions: shed history, keep the cache hit
 
 A long session re-sends its whole transcript every turn, so a 100k-token conversation
-gets expensive fast. The same wrap fixes that with one flag:
+gets expensive fast. The same wrap fixes that **on by default** — once a conversation
+sprawls past ~48k resident tokens, `fak guard` sheds the old middle while a short
+session is left untouched. Tighten it with one flag, or pass `0` to disable:
 
 ```bash
-fak guard --compact-history-budget 8000 -- claude
+fak guard --compact-history-budget 8000 -- claude   # tighter than the ~48k default
 ```
 
 `fak` drops the old middle turns while copying the provider's cache prefix through
