@@ -49,6 +49,21 @@ func TestShadowSpanRewardLeaveOneOutRecordsRewardAndEvicts(t *testing.T) {
 	if !report.SpearmanDefined {
 		t.Fatalf("reward-vs-LOO Spearman should be defined for this recorded session: %+v", report)
 	}
+	if report.Verdict != SpanRewardRefute {
+		t.Fatalf("recorded session verdict = %q, want REFUTE with measured Spearman: %+v", report.Verdict, report)
+	}
+	if report.SpearmanRewardDelta >= report.CorrelationThreshold {
+		t.Fatalf("reward-vs-LOO Spearman %.6f unexpectedly cleared threshold %.6f", report.SpearmanRewardDelta, report.CorrelationThreshold)
+	}
+	if !report.SpearmanRawDefined {
+		t.Fatalf("raw-attention-vs-LOO Spearman should be defined for this recorded session: %+v", report)
+	}
+	if report.ConfoundNormalizationImproved {
+		t.Fatalf("normalization should not claim improvement on this refuted recorded session: %+v", report)
+	}
+	if report.SpearmanRewardDelta >= report.SpearmanRawDelta {
+		t.Fatalf("normalized reward should be measurably worse than raw attention in this refutation: %+v", report)
+	}
 
 	seenRank := map[int]bool{}
 	var tail *SpanRewardRow
