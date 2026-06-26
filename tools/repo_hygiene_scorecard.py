@@ -183,6 +183,15 @@ ROOT_ALLOWED_OTHER = {
     "CITATION.cff", "llms.txt", "llms-full.txt", ".golangci.yml", ".golangci.yaml",
     # agent/editor config a contributor is expected to find at the root
     ".cursorrules", ".mcp.json", ".gitmodules", ".markdownlint.json",
+    # MCP-registry / discovery manifests: each registry resolves fak from a
+    # well-known file at the repo ROOT, so these are front-door config, not
+    # clutter. server.json is the official MCP registry manifest (the schema
+    # mandates repo-root placement); glama.json (Glama) and smithery.yaml
+    # (Smithery) are the same contract for their registries.
+    "server.json", "glama.json", "smithery.yaml",
+    # a *.example template a contributor copies to a gitignored local override —
+    # the public-safe seed for `fak claude-mac-fak` (see fak-mac.local.ps1).
+    "fak-mac.local.ps1.example",
 }
 
 # This tool's own published snapshot: never scored (it would oscillate — the report
