@@ -1,6 +1,6 @@
 # Browser Action Official-Run Contract
 
-- Generated: `2026-06-26T03:24:10Z`
+- Generated: `2026-06-26T11:10:13Z`
 - Benchmark: `Browser/computer-use action official-run contract`
 - Status: `READY_FOR_EXTERNAL_HARNESS`
 - Evidence class: `EXTERNAL_RUN_CONTRACT`
@@ -8,9 +8,21 @@
 - Local fixture artifact: `experiments/agent-live/browser-action-mediation-smoke-20260625.json`
 - Boundary: External-run contract only: fixes the raw/fak BrowserGym/WebArena-style command shape, shared model/task/browser-state/budget requirements, evidence paths, and promotion gates. It is not an official browser or computer-use benchmark result until benchmark-native task traces, score reports, and a raw-vs-fak compare artifact are checked in.
 
+## Target Choice
+
+- Selected: `webarena`
+- Reason: Chosen as the first target this adapter can mediate with browser-action tool calls and BrowserGym/AgentLab task traces before adding higher-cost desktop or answer-only bridges.
+
+| Candidate | Harness | Adapter cost | Status |
+|---|---|---|---|
+| `WebArena` | `BrowserGym/AgentLab` | `low` | selected: browser actions map directly to browser.navigate/type/click/wait/extract tool calls |
+| `WorkArena` | `BrowserGym/AgentLab` | `medium` | compatible target after WebArena; needs heavier service state, credentials, and reset evidence |
+| `OSWorld` | `desktop/computer-use` | `high` | not selected here: desktop action checkpoints need a separate adapter |
+| `BrowseComp` | `answer-scored browser research` | `medium` | not selected here: score is answer-level until a browser action trace bridge is available |
+
 ## Task Selection
 
-- Candidate suite: `testdata/webbench/action_mediation_smoke.json`
+- Candidate suite: `testdata\webbench\action_mediation_smoke.json`
 - Candidate task ids: `knowledgebase-search-benign, shopping-address-delete-minefield`
 - Official harness: `BrowserGym/AgentLab`
 - Official benchmark: `webarena`
@@ -26,7 +38,15 @@
 | Arm | Harness | Output | Command |
 |---|---|---|---|
 | `raw-browseraction` | `benchmark-native` | `experiments/agent-live/browseraction-official-raw-20260626` | $env:BROWSERGYM_TASK_IDS='<space-separated BrowserGym env ids>'; $env:AGENTLAB_EXP_ROOT='experiments/agent-live/browseraction-official-raw-20260626'; $env:FAK_BROWSERGYM_AGENT='browsergym_agent_config'; $env:FAK_BROWSERGYM_MODEL='shared-agent-model'; $env:FAK_BROWSERGYM_MAX_STEPS='30'; python -c 'from agentlab.experiments.study import make_study; from importlib import import_module; import os; agent_args=getattr(import_module(os.environ[''FAK_BROWSERGYM_AGENT'']), ''AGENT_ARGS''); study=make_study(benchmark=''webarena'', agent_args=[agent_args], comment=os.environ[''FAK_BROWSERGYM_MODEL'']); study.run(n_jobs=1)' |
-| `fak-browseraction` | `benchmark-native-through-fak-gateway` | `experiments/agent-live/browseraction-official-fak-20260626` | $env:BROWSERGYM_TASK_IDS='<space-separated BrowserGym env ids>'; $env:AGENTLAB_EXP_ROOT='experiments/agent-live/browseraction-official-fak-20260626'; $env:FAK_BROWSERGYM_AGENT='browsergym_agent_config_through_fak'; $env:FAK_BROWSERGYM_MODEL='shared-agent-model'; $env:FAK_BROWSERGYM_MAX_STEPS='30'; $env:OPENAI_BASE_URL='http://localhost:8080/v1'; $env:OPENAI_API_BASE='http://localhost:8080/v1'; python -c 'from agentlab.experiments.study import make_study; from importlib import import_module; import os; agent_args=getattr(import_module(os.environ[''FAK_BROWSERGYM_AGENT'']), ''AGENT_ARGS''); study=make_study(benchmark=''webarena'', agent_args=[agent_args], comment=os.environ[''FAK_BROWSERGYM_MODEL'']); study.run(n_jobs=1)' |
+| `fak-browseraction` | `benchmark-native-through-fak-gateway` | `experiments/agent-live/browseraction-official-fak-20260626` | $env:BROWSERGYM_TASK_IDS='<space-separated BrowserGym env ids>'; $env:AGENTLAB_EXP_ROOT='experiments/agent-live/browseraction-official-fak-20260626'; $env:FAK_BROWSERGYM_AGENT='browsergym_agent_config-through-fak'; $env:FAK_BROWSERGYM_MODEL='shared-agent-model'; $env:FAK_BROWSERGYM_MAX_STEPS='30'; $env:OPENAI_BASE_URL='http://localhost:8080/v1'; $env:OPENAI_API_BASE='http://localhost:8080/v1'; python -c 'from agentlab.experiments.study import make_study; from importlib import import_module; import os; agent_args=getattr(import_module(os.environ[''FAK_BROWSERGYM_AGENT'']), ''AGENT_ARGS''); study=make_study(benchmark=''webarena'', agent_args=[agent_args], comment=os.environ[''FAK_BROWSERGYM_MODEL'']); study.run(n_jobs=1)' |
+
+## Score Evidence Link
+
+- Required: `true`
+- Benchmark score artifacts: `experiments/agent-live/browseraction-official-raw-20260626/benchmark-score.json`, `experiments/agent-live/browseraction-official-fak-20260626/benchmark-score.json`
+- fak action evidence artifacts: `experiments/agent-live/browseraction-official-fak-20260626/fak-action-evidence.jsonl`, `experiments/agent-live/browseraction-official-fak-20260626/raw-fak-action-join.json`
+- Join keys: `task_id`, `turn_or_action_index`, `normalized_tool`, `evidence_id`, `state_hash`
+- Detail: The official compare artifact must join each benchmark-native score row to the mediated fak action verdict and evidence checkpoint for the same task/action.
 
 ## Gates
 
@@ -39,7 +59,7 @@
 | `same_budget_required` | yes | raw and fak official runs must use the same max steps, retry policy, and timeout |
 | `same_model_required` | yes | shared-agent-model |
 | `raw_arm_command` | yes | $env:BROWSERGYM_TASK_IDS='<space-separated BrowserGym env ids>'; $env:AGENTLAB_EXP_ROOT='experiments/agent-live/browseraction-official-raw-20260626'; $env:FAK_BROWSERGYM_AGENT='browsergym_agent_config'; $env:FAK_BROWSERGYM_MODEL='shared-agent-model'; $env:FAK_BROWSERGYM_MAX_STEPS='30'; python -c 'from agentlab.experiments.study import make_study; from importlib import import_module; import os; agent_args=getattr(import_module(os.environ[''FAK_BROWSERGYM_AGENT'']), ''AGENT_ARGS''); study=make_study(benchmark=''webarena'', agent_args=[agent_args], comment=os.environ[''FAK_BROWSERGYM_MODEL'']); study.run(n_jobs=1)' |
-| `fak_arm_command` | yes | $env:BROWSERGYM_TASK_IDS='<space-separated BrowserGym env ids>'; $env:AGENTLAB_EXP_ROOT='experiments/agent-live/browseraction-official-fak-20260626'; $env:FAK_BROWSERGYM_AGENT='browsergym_agent_config_through_fak'; $env:FAK_BROWSERGYM_MODEL='shared-agent-model'; $env:FAK_BROWSERGYM_MAX_STEPS='30'; $env:OPENAI_BASE_URL='http://localhost:8080/v1'; $env:OPENAI_API_BASE='http://localhost:8080/v1'; python -c 'from agentlab.experiments.study import make_study; from importlib import import_module; import os; agent_args=getattr(import_module(os.environ[''FAK_BROWSERGYM_AGENT'']), ''AGENT_ARGS''); study=make_study(benchmark=''webarena'', agent_args=[agent_args], comment=os.environ[''FAK_BROWSERGYM_MODEL'']); study.run(n_jobs=1)' |
+| `fak_arm_command` | yes | $env:BROWSERGYM_TASK_IDS='<space-separated BrowserGym env ids>'; $env:AGENTLAB_EXP_ROOT='experiments/agent-live/browseraction-official-fak-20260626'; $env:FAK_BROWSERGYM_AGENT='browsergym_agent_config-through-fak'; $env:FAK_BROWSERGYM_MODEL='shared-agent-model'; $env:FAK_BROWSERGYM_MAX_STEPS='30'; $env:OPENAI_BASE_URL='http://localhost:8080/v1'; $env:OPENAI_API_BASE='http://localhost:8080/v1'; python -c 'from agentlab.experiments.study import make_study; from importlib import import_module; import os; agent_args=getattr(import_module(os.environ[''FAK_BROWSERGYM_AGENT'']), ''AGENT_ARGS''); study=make_study(benchmark=''webarena'', agent_args=[agent_args], comment=os.environ[''FAK_BROWSERGYM_MODEL'']); study.run(n_jobs=1)' |
 | `official_harness_required` | yes | external BrowserGym or AgentLab run output with benchmark-native score and trace logs is required before promotion |
 
 ## Required Before Any Result Claim

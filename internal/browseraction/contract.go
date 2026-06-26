@@ -27,21 +27,36 @@ type OfficialRunContractInput struct {
 }
 
 type OfficialRunContract struct {
-	Schema               string                `json:"schema"`
-	GeneratedAt          string                `json:"generated_at"`
-	Benchmark            string                `json:"benchmark"`
-	Status               string                `json:"status"`
-	EvidenceClass        string                `json:"evidence_class"`
-	ClaimBoundary        string                `json:"claim_boundary"`
-	LocalFixtureArtifact string                `json:"local_fixture_artifact,omitempty"`
-	TaskSelection        ContractTaskSelection `json:"task_selection"`
-	Model                ContractModel         `json:"model"`
-	Arms                 []ContractArm         `json:"arms"`
-	UpstreamRefs         []UpstreamRef         `json:"upstream_refs"`
-	Gates                []ContractGate        `json:"gates"`
-	CompareMetrics       []string              `json:"compare_metrics"`
-	RequiredBeforeClaim  []string              `json:"required_before_claim"`
-	ResultClaimAllowed   bool                  `json:"result_claim_allowed"`
+	Schema               string                    `json:"schema"`
+	GeneratedAt          string                    `json:"generated_at"`
+	Benchmark            string                    `json:"benchmark"`
+	Status               string                    `json:"status"`
+	EvidenceClass        string                    `json:"evidence_class"`
+	ClaimBoundary        string                    `json:"claim_boundary"`
+	LocalFixtureArtifact string                    `json:"local_fixture_artifact,omitempty"`
+	TargetChoice         ContractTargetChoice      `json:"target_choice"`
+	TaskSelection        ContractTaskSelection     `json:"task_selection"`
+	Model                ContractModel             `json:"model"`
+	Arms                 []ContractArm             `json:"arms"`
+	ScoreEvidenceLink    ContractScoreEvidenceLink `json:"score_evidence_link"`
+	UpstreamRefs         []UpstreamRef             `json:"upstream_refs"`
+	Gates                []ContractGate            `json:"gates"`
+	CompareMetrics       []string                  `json:"compare_metrics"`
+	RequiredBeforeClaim  []string                  `json:"required_before_claim"`
+	ResultClaimAllowed   bool                      `json:"result_claim_allowed"`
+}
+
+type ContractTargetChoice struct {
+	Selected   string                    `json:"selected"`
+	Reason     string                    `json:"reason"`
+	Candidates []ContractTargetCandidate `json:"candidates"`
+}
+
+type ContractTargetCandidate struct {
+	Name        string `json:"name"`
+	Harness     string `json:"harness"`
+	AdapterCost string `json:"adapter_cost"`
+	Status      string `json:"status"`
 }
 
 type ContractTaskSelection struct {
@@ -79,6 +94,14 @@ type ContractArm struct {
 	Command           string   `json:"command"`
 	OutputDir         string   `json:"output_dir"`
 	RequiredArtifacts []string `json:"required_artifacts"`
+}
+
+type ContractScoreEvidenceLink struct {
+	Required                   bool     `json:"required"`
+	BenchmarkScoreArtifacts    []string `json:"benchmark_score_artifacts"`
+	FakActionEvidenceArtifacts []string `json:"fak_action_evidence_artifacts"`
+	JoinKeys                   []string `json:"join_keys"`
+	Detail                     string   `json:"detail"`
 }
 
 type UpstreamRef struct {
@@ -133,6 +156,7 @@ func BuildOfficialRunContract(in OfficialRunContractInput) OfficialRunContract {
 		EvidenceClass:        "EXTERNAL_RUN_CONTRACT",
 		LocalFixtureArtifact: strings.TrimSpace(in.LocalFixtureArtifact),
 		ClaimBoundary:        "External-run contract only: fixes the raw/fak BrowserGym/WebArena-style command shape, shared model/task/browser-state/budget requirements, evidence paths, and promotion gates. It is not an official browser or computer-use benchmark result until benchmark-native task traces, score reports, and a raw-vs-fak compare artifact are checked in.",
+		TargetChoice:         browserActionTargetChoice(in.Benchmark),
 		TaskSelection: ContractTaskSelection{
 			CandidateSuite:           strings.TrimSpace(in.SuitePath),
 			CandidateTaskIDs:         taskIDs,
@@ -177,6 +201,7 @@ func BuildOfficialRunContract(in OfficialRunContractInput) OfficialRunContract {
 				},
 			},
 		},
+		ScoreEvidenceLink: browserActionScoreEvidenceLink(in.RawOutputDir, in.FakOutputDir),
 		UpstreamRefs: []UpstreamRef{
 			{
 				Name:  "BrowserGym",
@@ -238,6 +263,19 @@ func RenderOfficialRunContractMarkdown(c OfficialRunContract) string {
 	}
 	fmt.Fprintf(&b, "- Boundary: %s\n\n", c.ClaimBoundary)
 
+	fmt.Fprintf(&b, "## Target Choice\n\n")
+	fmt.Fprintf(&b, "- Selected: `%s`\n", c.TargetChoice.Selected)
+	fmt.Fprintf(&b, "- Reason: %s\n\n", c.TargetChoice.Reason)
+	if len(c.TargetChoice.Candidates) > 0 {
+		fmt.Fprintf(&b, "| Candidate | Harness | Adapter cost | Status |\n")
+		fmt.Fprintf(&b, "|---|---|---|---|\n")
+		for _, candidate := range c.TargetChoice.Candidates {
+			fmt.Fprintf(&b, "| `%s` | `%s` | `%s` | %s |\n",
+				candidate.Name, candidate.Harness, candidate.AdapterCost, mdCell(candidate.Status))
+		}
+		fmt.Fprintf(&b, "\n")
+	}
+
 	fmt.Fprintf(&b, "## Task Selection\n\n")
 	fmt.Fprintf(&b, "- Candidate suite: `%s`\n", c.TaskSelection.CandidateSuite)
 	fmt.Fprintf(&b, "- Candidate task ids: `%s`\n", strings.Join(c.TaskSelection.CandidateTaskIDs, ", "))
@@ -260,6 +298,13 @@ func RenderOfficialRunContractMarkdown(c OfficialRunContract) string {
 		fmt.Fprintf(&b, "| `%s` | `%s` | `%s` | %s |\n", arm.Name, arm.Harness, arm.OutputDir, mdCell(arm.Command))
 	}
 
+	fmt.Fprintf(&b, "\n## Score Evidence Link\n\n")
+	fmt.Fprintf(&b, "- Required: `%t`\n", c.ScoreEvidenceLink.Required)
+	fmt.Fprintf(&b, "- Benchmark score artifacts: `%s`\n", strings.Join(c.ScoreEvidenceLink.BenchmarkScoreArtifacts, "`, `"))
+	fmt.Fprintf(&b, "- fak action evidence artifacts: `%s`\n", strings.Join(c.ScoreEvidenceLink.FakActionEvidenceArtifacts, "`, `"))
+	fmt.Fprintf(&b, "- Join keys: `%s`\n", strings.Join(c.ScoreEvidenceLink.JoinKeys, "`, `"))
+	fmt.Fprintf(&b, "- Detail: %s\n", c.ScoreEvidenceLink.Detail)
+
 	fmt.Fprintf(&b, "\n## Gates\n\n")
 	fmt.Fprintf(&b, "| Gate | OK | Detail |\n")
 	fmt.Fprintf(&b, "|---|:---:|---|\n")
@@ -276,6 +321,73 @@ func RenderOfficialRunContractMarkdown(c OfficialRunContract) string {
 		fmt.Fprintf(&b, "- %s\n", req)
 	}
 	return b.String()
+}
+
+func browserActionTargetChoice(selected string) ContractTargetChoice {
+	selected = strings.TrimSpace(selected)
+	if selected == "" {
+		selected = "webarena"
+	}
+	return ContractTargetChoice{
+		Selected: selected,
+		Reason:   "Chosen as the first target this adapter can mediate with browser-action tool calls and BrowserGym/AgentLab task traces before adding higher-cost desktop or answer-only bridges.",
+		Candidates: []ContractTargetCandidate{
+			{
+				Name:        "WebArena",
+				Harness:     "BrowserGym/AgentLab",
+				AdapterCost: "low",
+				Status:      "selected: browser actions map directly to browser.navigate/type/click/wait/extract tool calls",
+			},
+			{
+				Name:        "WorkArena",
+				Harness:     "BrowserGym/AgentLab",
+				AdapterCost: "medium",
+				Status:      "compatible target after WebArena; needs heavier service state, credentials, and reset evidence",
+			},
+			{
+				Name:        "OSWorld",
+				Harness:     "desktop/computer-use",
+				AdapterCost: "high",
+				Status:      "not selected here: desktop action checkpoints need a separate adapter",
+			},
+			{
+				Name:        "BrowseComp",
+				Harness:     "answer-scored browser research",
+				AdapterCost: "medium",
+				Status:      "not selected here: score is answer-level until a browser action trace bridge is available",
+			},
+		},
+	}
+}
+
+func browserActionScoreEvidenceLink(rawOutputDir, fakOutputDir string) ContractScoreEvidenceLink {
+	return ContractScoreEvidenceLink{
+		Required: true,
+		BenchmarkScoreArtifacts: []string{
+			joinArtifactPath(rawOutputDir, "benchmark-score.json"),
+			joinArtifactPath(fakOutputDir, "benchmark-score.json"),
+		},
+		FakActionEvidenceArtifacts: []string{
+			joinArtifactPath(fakOutputDir, "fak-action-evidence.jsonl"),
+			joinArtifactPath(fakOutputDir, "raw-fak-action-join.json"),
+		},
+		JoinKeys: []string{
+			"task_id",
+			"turn_or_action_index",
+			"normalized_tool",
+			"evidence_id",
+			"state_hash",
+		},
+		Detail: "The official compare artifact must join each benchmark-native score row to the mediated fak action verdict and evidence checkpoint for the same task/action.",
+	}
+}
+
+func joinArtifactPath(dir, leaf string) string {
+	dir = strings.TrimRight(strings.TrimSpace(dir), "/\\")
+	if dir == "" {
+		return leaf
+	}
+	return dir + "/" + leaf
 }
 
 func contractTaskCandidates(s ActionMediationSuite) []ContractTaskCandidate {

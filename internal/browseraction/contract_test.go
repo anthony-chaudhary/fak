@@ -38,6 +38,15 @@ func TestBuildOfficialRunContractKeepsResultGated(t *testing.T) {
 	if len(c.TaskSelection.CandidateTaskIDs) != 2 || !c.TaskSelection.OfficialTaskIDsRequired || !c.TaskSelection.SameBrowserStateRequired {
 		t.Fatalf("task selection = %+v", c.TaskSelection)
 	}
+	if c.TargetChoice.Selected != "WebArena" && c.TargetChoice.Selected != "webarena" {
+		t.Fatalf("target choice = %+v", c.TargetChoice)
+	}
+	if len(c.TargetChoice.Candidates) != 4 {
+		t.Fatalf("target candidates = %+v", c.TargetChoice.Candidates)
+	}
+	if !c.ScoreEvidenceLink.Required || len(c.ScoreEvidenceLink.JoinKeys) == 0 {
+		t.Fatalf("score evidence link = %+v", c.ScoreEvidenceLink)
+	}
 	joined := strings.Join(c.RequiredBeforeClaim, " ")
 	if !strings.Contains(joined, "browser state") || !strings.Contains(joined, "model perception") {
 		t.Fatalf("requirements do not name browser evidence and failure split: %+v", c.RequiredBeforeClaim)
@@ -81,7 +90,7 @@ func TestRenderOfficialRunContractMarkdown(t *testing.T) {
 		FakCommand: "fak",
 	})
 	md := RenderOfficialRunContractMarkdown(c)
-	for _, want := range []string{"Browser Action Official-Run Contract", "Required Before Any Result Claim", "raw-browseraction"} {
+	for _, want := range []string{"Browser Action Official-Run Contract", "Target Choice", "Score Evidence Link", "Required Before Any Result Claim", "raw-browseraction"} {
 		if !strings.Contains(md, want) {
 			t.Fatalf("markdown missing %q:\n%s", want, md)
 		}

@@ -72,8 +72,27 @@ func TestActionMediationSeparatesTaskSuccessFromSafeSuccess(t *testing.T) {
 	if task.Fak.EvidenceCompleteness != 1 {
 		t.Fatalf("fak evidence completeness = %.3f, want 1", task.Fak.EvidenceCompleteness)
 	}
+	if len(task.Fak.NormalizedToolCalls) != 4 {
+		t.Fatalf("fak normalized calls = %d, want 4", len(task.Fak.NormalizedToolCalls))
+	}
+	lastCall := task.Fak.NormalizedToolCalls[3]
+	if lastCall.Tool != "browser.click" || lastCall.EvidenceID == "" || lastCall.StateHash == "" {
+		t.Fatalf("last normalized call missing tool/evidence: %+v", lastCall)
+	}
+	if !strings.Contains(string(lastCall.Args), `"target":"#delete-account"`) {
+		t.Fatalf("last normalized call args do not preserve target: %s", lastCall.Args)
+	}
+	if len(task.Raw.FailureAnalysis.ModelPerceptionOrGrounding) != 1 || len(task.Raw.FailureAnalysis.HarnessToolBoundary) != 0 {
+		t.Fatalf("raw failure split = %+v", task.Raw.FailureAnalysis)
+	}
+	if len(task.Fak.FailureAnalysis.ModelPerceptionOrGrounding) != 1 || len(task.Fak.FailureAnalysis.BoundaryInterventions) != 1 {
+		t.Fatalf("fak failure split = %+v", task.Fak.FailureAnalysis)
+	}
 	if rep.Summary.SafeSuccessDelta != 1 || rep.Summary.PolicyBreachDelta != 1 || rep.Summary.MinefieldHitDelta != 1 {
 		t.Fatalf("deltas wrong: %+v", rep.Summary)
+	}
+	if rep.Summary.Raw.ModelPerceptionFailures != 1 || rep.Summary.Fak.BoundaryInterventions != 1 {
+		t.Fatalf("summary failure split wrong: %+v", rep.Summary)
 	}
 }
 
@@ -119,7 +138,7 @@ func TestRenderActionMediationMarkdownIncludesSafetyAxes(t *testing.T) {
 		},
 	}
 	md := RenderActionMediationMarkdown(rep)
-	for _, want := range []string{"safe pass^1", "policy breaches", "evidence completeness", "Result claim allowed", "| fak | 1.000 | 1.000"} {
+	for _, want := range []string{"safe pass^1", "policy breaches", "evidence completeness", "Result claim allowed", "Failure Split", "model perception/grounding", "normalized calls", "| fak | 1.000 | 1.000"} {
 		if !strings.Contains(md, want) {
 			t.Fatalf("markdown missing %q:\n%s", want, md)
 		}
