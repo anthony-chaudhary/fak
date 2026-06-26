@@ -20,6 +20,8 @@ go run ./cmd/tokendemo -served
 go run ./cmd/tokendemo -served-json
 go run ./cmd/tokendemo -parallel
 go run ./cmd/tokendemo -parallel-json
+go run ./cmd/tokendemo -parallel-cold
+go run ./cmd/tokendemo -parallel-cold-json
 go run ./cmd/tokendemo -json
 go run ./cmd/tokendemo -selfcheck
 ```
@@ -55,6 +57,18 @@ Use `-parallel` for a larger hot-cache proof. It prewarms one read per hot file,
 runs hundreds of parallel repeated reads. The output reports raw engine calls, fak
 warmup calls, fak hot-phase engine calls, vDSO hits, timing percentiles, and
 per-resource cache evidence.
+
+Use `-parallel-cold` for the cold-miss companion to `-parallel`. Where `-parallel`
+proves the *warmed* case, this releases N workers at ONE barrier against a NEVER-SEEN
+key and counts how many engine calls happen before the vDSO tier-2 fill exists. Each
+trial starts from an empty vDSO world and reports `engine_calls_per_key`,
+`vdso_hits_per_key`, `cold_fill_races` (`engine_calls_per_key - 1`, clamped at zero),
+and raw-vs-fak wall time and per-call p50/p95. It is a measurement first: with no
+singleflight on the cold-miss path yet, `MEASURED_RACE` is the expected, honest verdict
+(`SINGLEFLIGHT_CONFIRMED` only if every cold key collapses to exactly one engine call).
+It is kept as the regression guard for when singleflight is built. This proves cold-fill
+coordination only — not the warmed hot-cache hit-rate (`-parallel`) and not any
+provider or model-context token saving.
 
 ## Scope
 
