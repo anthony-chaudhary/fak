@@ -136,14 +136,75 @@ Read three things off the acceptance grid:
 
 **What this grid does NOT do (the honest gate that keeps #255 open).** It is the
 **host-computed reuse + coordination geometry**, exactly the measured/modeled split of §1 —
-*not* the live-model wall-clock and *not* the cross-framework comparison. The remaining
+*not* the live-model wall-clock. The **structural** cross-framework comparison (which
+orchestrator re-sends what, and the token multiplier that implies) is given in the next
+subsection; what stays deferred is the **live-model wall-clock** half. The remaining
 D-001 acceptance — **benchmark fak against LangGraph / AutoGen / CrewAI at these N with a
-live model** — is a `DeferredRun` (`deferred_run` field in the artifact): it needs a
-bench node with the three frameworks installed and a served model, which the agent host
-lacks. Running it here would starve the agent seat and skew the number, so it is named as
-deferred rather than fabricated (the BENCHMARK-AUTHORITY rule). That cross-framework
-task-success axis overlaps **#429** (the §5 controlled litmus) and the live-model seam
-**#106**.
+live model** (end-to-end wall-clock) — is a `DeferredRun` (`deferred_run` field in the
+artifact): it needs a bench node with the three frameworks installed and a served model,
+which the agent host lacks. Running it here would starve the agent seat and skew the
+number, so it is named as deferred rather than fabricated (the BENCHMARK-AUTHORITY rule).
+That cross-framework task-success axis overlaps **#429** (the §5 controlled litmus) and the
+live-model seam **#106**.
+
+### Cross-framework coordination-overhead model — the token multiplier each orchestrator imposes (structural, not wall-clock) (#255)
+
+The D-001 scope names two cross-framework asks — *"Compare against LangGraph / AutoGen /
+CrewAI"* and *"Document token multiplier."* The **live-model wall-clock** half of that is
+the `DeferredRun` above. This subsection ships the half that **is** host-runnable: a
+**structural** comparison of the coordination-token cost each orchestrator imposes **by
+construction**, derived from each framework's *documented* multi-agent topology — not a
+measured wall-clock, and not a head-to-head throughput claim. It is the same honest
+discipline as the committed CrewAI manager-worker model
+([`examples/crewai-crew/`](../../examples/crewai-crew/README.md), 4.93×): **deterministic
+token arithmetic from a stated geometry**, governed by
+[`BENCHMARK-AUTHORITY.md`](../../BENCHMARK-AUTHORITY.md), and it sits inside the
+already-declared `[SIMULATED]` reuse claim in `CLAIMS.md` (the win is **reuse-vs-reprefill
+over a stack that re-sends the shared prefix per coordination step — the common framework
+default — NOT** a win over a tuned shared-prefix engine).
+
+**The one structural fact all three share.** A multi-agent orchestrator advances by
+re-invoking a model endpoint, and on every coordination step it re-sends a **stable,
+growing shared prefix** — the goal/brief plus the accumulated history. None of the three
+implements cross-call **KV-prefix reuse in its own coordination layer**: the prefix is
+re-materialized each step unless the *serving backend* deduplicates it (vLLM Automatic
+Prefix Caching, SGLang/RadixAttention — both cited at the top of this doc) or the provider
+offers prompt caching. `fak` supplies that reuse **kernel-side, independent of backend** —
+the measured `(N−1)·P` prefill elision and the ~61.7% clawback plateau in the grid above.
+
+Token accounting at one stated geometry — shared brief **B = 2,000** tokens, per-step
+unique instruction **u = 300** tokens, **S = 12** coordination steps (a 3-worker crew over
+~4 rounds, the geometry the CrewAI example already uses). "Naive" re-prefills the shared
+prefix each step; "reuse" prefills it once and (for the append-only histories) incrementally
+caches the growing prefix so each step adds only its new `u` tokens:
+
+| Framework (multi-agent mode) | Documented coordination topology — what is re-sent per step | naive prefill | with prefix reuse | **structural token multiplier** |
+|---|---|---:|---:|---:|
+| **CrewAI** — hierarchical | manager re-sends the shared brief on every delegation ([docs](https://docs.crewai.com/en/learn/hierarchical-process)) | `S·B + S·u` = 27,600 | `B + S·u` = 5,600 | **4.93×** |
+| **AutoGen** — GroupChat | every agent re-reads the full, append-only transcript each turn — brief + growing history ([conversation patterns](https://microsoft.github.io/autogen/0.2/docs/tutorial/conversation-patterns/), [paper](https://arxiv.org/pdf/2308.08155), [growing speaker-selection history](https://github.com/microsoft/autogen/issues/2499)) | `S·B + u·S(S−1)/2` = 43,800 | `B + S·u` = 5,600 | **7.82×** |
+| **LangGraph** — StateGraph | each node re-receives the accumulated state; the default `add_messages` reducer is **append-only**, never deleting ([state ref](https://reference.langchain.com/python/langgraph/graph/state), [state management](https://deepwiki.com/langchain-ai/langgraph-101/3.1-state-management)) | `S·B + u·S(S−1)/2` = 43,800 | `B + S·u` = 5,600 | **7.82×** |
+
+Read three things off it:
+
+1. **The token multiplier is the count of coordination steps on the shared prefix.** Without
+   reuse, the brief (and, for AutoGen/LangGraph, the append-only transcript) is re-prefilled
+   every step — `S×` on the brief, super-linear once the transcript grows. With prefix reuse
+   it collapses toward `1×`. This is the "token multiplier" the scope asks to document,
+   generalized across the three frameworks.
+2. **AutoGen and LangGraph pay more than CrewAI because their history is broadcast/accumulated,
+   not just re-briefed.** The full transcript every agent re-reads each turn grows the prefill
+   `~S²` (`u·S(S−1)/2`), which is why AutoGen's own docs report a 10-round/4-agent chat landing
+   at 40k–80k tokens — the model here lands at 43,800 for S=12, inside that documented band (a
+   consistency cross-check, not an asserted measurement).
+3. **The frameworks are not the lever; the prefix cache is.** All three reach the "with reuse"
+   column **only** through a prefix-caching backend; `fak` is the one that provides it in the
+   kernel regardless of provider, so the reuse is the **measured** geometry above rather than a
+   backend the operator must hope is enabled.
+
+**Still deferred (unchanged):** the **live-model end-to-end wall-clock** with the three
+frameworks installed — token *and* latency, real model — remains the `DeferredRun` named
+above (bench-node-gated). This subsection prices the **structural** coordination tax the
+frameworks impose by design; it does not assert a live throughput number.
 
 ### Prefix-scale impact (new, fixed N=256)
 
