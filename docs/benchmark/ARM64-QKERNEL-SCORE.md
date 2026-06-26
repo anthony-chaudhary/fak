@@ -20,6 +20,8 @@ go run ./cmd/benchscore -root experiments/benchmark/runs/by-machine/node-macos-a
 - Every parsed artifact has `schema: fak.arm64-qkernel-score.v1`.
 - Recorded speedups are recomputed from the raw tok/s or ms fields in the same `score.json`.
 - `accepted_*` interpretation statuses require `verification.status: pass`.
+- Parsed benchmark rows without `interpretation.status` are surfaced as warnings in the
+  Markdown and JSON reports.
 - Decode follow-up rows are compared against the canonical Q8 decode baseline carried in the score file.
 - Exploratory rows, such as the 14B Q4_K load/decode probe, stay in the matrix without receiving an apples-to-apples speedup.
 

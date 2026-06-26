@@ -98,6 +98,42 @@ func TestScanFlagsAcceptedWithoutPassingVerification(t *testing.T) {
 	}
 }
 
+func TestScanWarnsAndRendersMissingInterpretationStatus(t *testing.T) {
+	root := t.TempDir()
+	writeScore(t, root, "missing-status", `{
+	  "schema": "fak.arm64-qkernel-score.v1",
+	  "machine": "node-macos-a",
+	  "model": {"name": "qwen2.5-1.5b"},
+	  "full_model": {
+	    "default_decode_tok_per_sec": 44,
+	    "amort_decode_tok_per_sec": 45
+	  },
+	  "baseline": {"decode_tok_per_sec": 40},
+	  "improvement": {
+	    "default_over_baseline": 1.1,
+	    "amort_over_baseline": 1.125
+	  }
+	}`)
+
+	report, err := Scan(root)
+	if err != nil {
+		t.Fatalf("Scan: %v", err)
+	}
+	if len(report.Issues) != 0 {
+		t.Fatalf("issues = %+v", report.Issues)
+	}
+	if len(report.Warnings) != 1 {
+		t.Fatalf("warnings = %+v, want one missing-status warning", report.Warnings)
+	}
+	if got := report.Warnings[0].Field; got != "interpretation.status" {
+		t.Fatalf("warning field = %q", got)
+	}
+	md := RenderMarkdown(report)
+	if !strings.Contains(md, "## Warnings") || !strings.Contains(md, "recognized benchmark rows should carry an interpretation status") {
+		t.Fatalf("markdown did not render warning:\n%s", md)
+	}
+}
+
 func TestScanBuildsDecodeProbeRows(t *testing.T) {
 	root := t.TempDir()
 	writeScore(t, root, "decode", `{

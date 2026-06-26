@@ -43,5 +43,9 @@
   "improvement": {
     "default_over_baseline": 1.156330,
     "amort_over_baseline": 1.171097
+  },
+  "interpretation": {
+    "status": "exploratory_decode_capacity",
+    "outcome": "Q8 decode worker-cap and amortized kernel probes beat the canonical Q8 CPU baseline modestly, but this row is exploratory and does not claim the tracked 2x/3x decode target."
   }
 }

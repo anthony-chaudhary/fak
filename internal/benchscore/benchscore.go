@@ -141,6 +141,9 @@ func scanFile(path string) ([]Row, []Issue, []Issue, error) {
 	if len(c.rows) == 0 {
 		c.warn("", "score schema found but no recognized benchmark rows were extracted")
 	}
+	if len(c.rows) > 0 && strings.TrimSpace(c.meta.status) == "" {
+		c.warn("interpretation.status", "recognized benchmark rows should carry an interpretation status")
+	}
 	return c.rows, c.issues, c.warnings, nil
 }
 
@@ -597,6 +600,17 @@ func RenderMarkdown(report Report) string {
 				field = "(file)"
 			}
 			fmt.Fprintf(&b, "- `%s` %s: %s\n", issue.Path, field, issue.Message)
+		}
+		fmt.Fprintf(&b, "\n")
+	}
+	if len(report.Warnings) > 0 {
+		fmt.Fprintf(&b, "## Warnings\n\n")
+		for _, warning := range report.Warnings {
+			field := warning.Field
+			if field == "" {
+				field = "(file)"
+			}
+			fmt.Fprintf(&b, "- `%s` %s: %s\n", warning.Path, field, warning.Message)
 		}
 		fmt.Fprintf(&b, "\n")
 	}
