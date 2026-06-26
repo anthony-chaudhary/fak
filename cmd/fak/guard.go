@@ -27,6 +27,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/guard"
 	"github.com/anthony-chaudhary/fak/internal/journal"
 	"github.com/anthony-chaudhary/fak/internal/policy"
+	"github.com/anthony-chaudhary/fak/internal/secretload"
 	"github.com/anthony-chaudhary/fak/internal/session"
 )
 
@@ -348,6 +349,109 @@ func cmdGuard(argv []string) {
 	runGuardChildAndReport(child, srv, cancel, serveErr, *quiet, auditJournal, auditSeq0, command[0])
 }
 
+const guardAnthropicOAuthSecretKey = "CLAUDE_SUBSCRIPTION_OAUTH_TOKEN"
+
+type guardOAuthEnvSource struct {
+	key string
+	env string
+}
+
+func (s guardOAuthEnvSource) Name() string { return "$" + s.env }
+
+func (s guardOAuthEnvSource) Lookup(key string) (string, bool) {
+	if key != s.key || s.env == "" {
+		return "", false
+	}
+	v := strings.TrimSpace(os.Getenv(s.env))
+	return v, v != ""
+}
+
+type guardOAuthCredentialsSource struct {
+	key  string
+	path string
+	now  func() time.Time
+	warn io.Writer
+}
+
+func (s guardOAuthCredentialsSource) Name() string { return s.path }
+
+func (s guardOAuthCredentialsSource) Lookup(key string) (string, bool) {
+	if key != s.key {
+		return "", false
+	}
+	b, err := os.ReadFile(s.path)
+	if err != nil {
+		return "", false
+	}
+	var doc struct {
+		ClaudeAIOauth struct {
+			AccessToken string `json:"accessToken"`
+			ExpiresAt   int64  `json:"expiresAt"`
+		} `json:"claudeAiOauth"`
+	}
+	if json.Unmarshal(b, &doc) != nil {
+		return "", false
+	}
+	v := strings.TrimSpace(doc.ClaudeAIOauth.AccessToken)
+	if v == "" {
+		return "", false
+	}
+	now := time.Now
+	if s.now != nil {
+		now = s.now
+	}
+	if exp := doc.ClaudeAIOauth.ExpiresAt; exp > 0 && exp < now().UnixMilli() && s.warn != nil {
+		fmt.Fprintf(s.warn, "fak guard: WARNING — the OAuth token in %s expired; Claude Code normally refreshes it. Re-run `claude` once, or use `claude setup-token` for a long-lived token.\n", s.path)
+	}
+	return v, true
+}
+
+type guardOAuthFileSource struct {
+	key  string
+	path string
+}
+
+func (s guardOAuthFileSource) Name() string { return s.path }
+
+func (s guardOAuthFileSource) Lookup(key string) (string, bool) {
+	if key != s.key {
+		return "", false
+	}
+	b, err := os.ReadFile(s.path)
+	if err != nil {
+		return "", false
+	}
+	v := strings.TrimSpace(string(b))
+	return v, v != ""
+}
+
+func guardAnthropicOAuthLoader(tokenEnv, cfgDir string, now func() time.Time, warn io.Writer) (*secretload.Loader, []string) {
+	tried := make([]string, 0, 3)
+	sources := make([]secretload.SecretSource, 0, 3)
+
+	if tokenEnv != "" {
+		tried = append(tried, "$"+tokenEnv)
+		sources = append(sources, guardOAuthEnvSource{key: guardAnthropicOAuthSecretKey, env: tokenEnv})
+	}
+
+	credPath := filepath.Join(cfgDir, ".credentials.json")
+	tried = append(tried, credPath)
+	sources = append(sources, guardOAuthCredentialsSource{
+		key:  guardAnthropicOAuthSecretKey,
+		path: credPath,
+		now:  now,
+		warn: warn,
+	})
+
+	setupPath := filepath.Join(cfgDir, ".oauth-token")
+	tried = append(tried, setupPath)
+	sources = append(sources, guardOAuthFileSource{key: guardAnthropicOAuthSecretKey, path: setupPath})
+
+	l := secretload.New(sources...)
+	l.Require(guardAnthropicOAuthSecretKey, "Claude Pro/Max subscription OAuth token", nil)
+	return l, tried
+}
+
 // resolveAnthropicOAuthToken finds a Claude Pro/Max SUBSCRIPTION OAuth token to
 // authenticate the upstream with, in priority order:
 //  1. the named env var (default CLAUDE_CODE_OAUTH_TOKEN) — the explicit
@@ -364,43 +468,9 @@ func cmdGuard(argv []string) {
 // else ~/.claude. Returns the token and a human source label, or an error that
 // names every place it looked so the operator can fix the setup.
 func resolveAnthropicOAuthToken(tokenEnv string) (token, source string, err error) {
-	tried := make([]string, 0, 3)
-
-	if tokenEnv != "" {
-		tried = append(tried, "$"+tokenEnv)
-		if v := strings.TrimSpace(os.Getenv(tokenEnv)); v != "" {
-			return v, "$" + tokenEnv, nil
-		}
-	}
-
-	cfgDir := guardClaudeConfigDir()
-
-	credPath := filepath.Join(cfgDir, ".credentials.json")
-	tried = append(tried, credPath)
-	if b, rerr := os.ReadFile(credPath); rerr == nil {
-		var doc struct {
-			ClaudeAIOauth struct {
-				AccessToken string `json:"accessToken"`
-				ExpiresAt   int64  `json:"expiresAt"`
-			} `json:"claudeAiOauth"`
-		}
-		if json.Unmarshal(b, &doc) == nil {
-			if v := strings.TrimSpace(doc.ClaudeAIOauth.AccessToken); v != "" {
-				label := credPath
-				if exp := doc.ClaudeAIOauth.ExpiresAt; exp > 0 && exp < time.Now().UnixMilli() {
-					fmt.Fprintf(os.Stderr, "fak guard: WARNING — the OAuth token in %s expired; Claude Code normally refreshes it. Re-run `claude` once, or use `claude setup-token` for a long-lived token.\n", credPath)
-				}
-				return v, label, nil
-			}
-		}
-	}
-
-	setupPath := filepath.Join(cfgDir, ".oauth-token")
-	tried = append(tried, setupPath)
-	if b, rerr := os.ReadFile(setupPath); rerr == nil {
-		if v := strings.TrimSpace(string(b)); v != "" {
-			return v, setupPath, nil
-		}
+	loader, tried := guardAnthropicOAuthLoader(tokenEnv, guardClaudeConfigDir(), time.Now, os.Stderr)
+	if v, src, ok := loader.LookupSource(guardAnthropicOAuthSecretKey); ok {
+		return v, src, nil
 	}
 
 	return "", "", fmt.Errorf("no Claude subscription OAuth token found (looked in: %s). Log into Claude Code (`claude`), or create a long-lived one with `claude setup-token` and export it as %s", strings.Join(tried, ", "), tokenEnv)

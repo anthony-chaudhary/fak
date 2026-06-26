@@ -606,6 +606,23 @@ func TestResolveAnthropicOAuthToken(t *testing.T) {
 	}
 }
 
+func TestGuardAnthropicOAuthLoaderRedactsResolvedSecret(t *testing.T) {
+	dir := t.TempDir()
+	const tokenEnv = "FAK_TEST_OAUTH_REDACT"
+	t.Setenv(tokenEnv, "plain-oauth-value-from-env")
+
+	loader, _ := guardAnthropicOAuthLoader(tokenEnv, dir, func() time.Time { return time.Unix(0, 0) }, io.Discard)
+	tok, src, ok := loader.LookupSource(guardAnthropicOAuthSecretKey)
+	if !ok || tok != "plain-oauth-value-from-env" || src != "$"+tokenEnv {
+		t.Fatalf("LookupSource = (%q,%q,%v), want env token from %s", tok, src, ok, tokenEnv)
+	}
+
+	out := loader.Redact("loaded " + tok + " for upstream auth")
+	if strings.Contains(out, tok) {
+		t.Fatalf("resolved OAuth token was not redacted: %q", out)
+	}
+}
+
 // TestGuardPassthroughFallbackFlag witnesses issue #835 failure 2: when the Anthropic
 // subscription-OAuth auto-lookup finds NO token, resolveGuardUpstream falls back to plain
 // passthrough and now marks passthroughFallback so cmdGuard can warn a cold agent (instead
