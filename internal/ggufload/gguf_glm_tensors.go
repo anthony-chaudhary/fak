@@ -194,6 +194,59 @@ func splitGLMMoeDsaExperts(layer int, proj string, shape []int, data []float32) 
 	return tensors, nil
 }
 
+// NamedResidentQ4K is one per-expert tensor split as RAW Q4_K bytes (no dequant): the name, the
+// model [out,in] shape, and the contiguous Q4_K super-block bytes for that expert.
+type NamedResidentQ4K struct {
+	Name  string
+	Shape []int
+	Raw   []byte
+}
+
+// q4kSuperBlockBytes / q4kSuperBlockWeights mirror internal/model/quant_q4k.go: a Q4_K super-block
+// is 144 bytes per 256 weights. The batched expert blob is E contiguous experts, each out*in
+// weights, so expert e's raw bytes are a clean byte slice IFF out*in is a multiple of 256 (which
+// Q4_K requires of any quantized tensor). This lets the routed experts — the 417 GB bulk of GLM-5.2
+// — load RESIDENT (raw bytes copied straight to host/VRAM, dequant fused into the GEMM) with NO
+// f32 round-trip, the load-time lever that turns a ~100-min lean load into an I/O-bound one.
+const (
+	q4kSuperBlockBytes   = 144
+	q4kSuperBlockWeights = 256
+)
+
+// splitGLMMoeDsaExpertsQ4KRaw expands a batched Q4_K routed-expert tensor (model shape [E,out,in])
+// into E per-expert resident-Q4_K byte slices WITHOUT dequantizing. It is the raw-byte twin of
+// splitGLMMoeDsaExperts; ok=false (no error) means the dims are not block-aligned for a clean raw
+// split, so the caller falls back to the f32 split. Each expert's bytes are copied into their own
+// backing array so a later resident-store cannot alias across experts.
+func splitGLMMoeDsaExpertsQ4KRaw(layer int, proj string, shape []int, raw []byte) ([]NamedResidentQ4K, bool, error) {
+	if len(shape) != 3 {
+		return nil, false, fmt.Errorf("gguf: glm_moe_dsa batched expert tensor must be 3-D [E,out,in], got shape %v", shape)
+	}
+	e, out, in := shape[0], shape[1], shape[2]
+	if e <= 0 || out <= 0 || in <= 0 {
+		return nil, false, fmt.Errorf("gguf: glm_moe_dsa batched expert tensor has non-positive dim in [%d,%d,%d]", e, out, in)
+	}
+	per := out * in
+	if per%q4kSuperBlockWeights != 0 {
+		return nil, false, nil // not block-aligned -> caller dequant-splits to f32 instead
+	}
+	perBytes := (per / q4kSuperBlockWeights) * q4kSuperBlockBytes
+	if len(raw) != e*perBytes {
+		return nil, false, fmt.Errorf("gguf: glm_moe_dsa Q4_K expert blob [%d,%d,%d] has %d raw bytes, want %d", e, out, in, len(raw), e*perBytes)
+	}
+	tensors := make([]NamedResidentQ4K, e)
+	for x := 0; x < e; x++ {
+		seg := make([]byte, perBytes)
+		copy(seg, raw[x*perBytes:(x+1)*perBytes])
+		tensors[x] = NamedResidentQ4K{
+			Name:  fmt.Sprintf("model.layers.%d.mlp.experts.%d.%s.weight", layer, x, proj),
+			Shape: []int{out, in},
+			Raw:   seg,
+		}
+	}
+	return tensors, true, nil
+}
+
 // The MLA KV-b up-projection is split in the GGUF (llama.cpp LLM_ARCH_GLM_DSA, inherited from
 // DeepSeek2's convert: kv_b is view()'d [n_head, qk_nope+v_head, kv_lora], split into k_b/v_b,
 // and k_b is TRANSPOSED) into these two per-layer tensors, which fak's forward consumes as ONE

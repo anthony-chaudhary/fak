@@ -95,10 +95,11 @@ func (s *WeightSource) QuantModelQ4KProfile(p *LoadProfiler) (*model.Model, erro
 				}
 				continue
 			}
-			// glm_moe_dsa batched routed experts: split the [E,out,in] blob 1->E into per-expert
-			// canonical tensors (the same split QuantModelProfile does). These are NOT resident-Q4_K
-			// eligible (the 1->E slice needs f32), so each per-expert tensor follows the standard
-			// dequant->Q8 builder path; the dense matmul weights still take the resident-Q4_K fast path.
+			// glm_moe_dsa batched routed experts: split the [E,out,in] blob 1->E. When the blob is
+			// Q4_K and block-aligned, split it as RAW Q4_K bytes and store each expert RESIDENT (no
+			// dequant) — the experts are GLM-5.2's 417 GB bulk, so this is the load-time lever that
+			// avoids the f32 round-trip. Falls back to the f32 dequant-split for a non-Q4_K blob or
+			// a name the resident gate excludes.
 			if layer, proj, ok := glmMoeDsaBatchedExpert(info.Name); ok {
 				shape, err := modelShapeFromGGUFDims(info.Name, info.Dims)
 				if err != nil {
@@ -107,6 +108,20 @@ func (s *WeightSource) QuantModelQ4KProfile(p *LoadProfiler) (*model.Model, erro
 				raw, _, err := s.TensorBytes(info.Name)
 				if err != nil {
 					return nil, err
+				}
+				if info.Type == TensorQ4_K {
+					q4kExperts, aligned, err := splitGLMMoeDsaExpertsQ4KRaw(layer, proj, shape, raw)
+					if err != nil {
+						return nil, err
+					}
+					if aligned && model.ResidentQ4KEligible(cfg, q4kExperts[0].Name) {
+						for _, ex := range q4kExperts {
+							if err := builder.AddResidentQ4K(ex.Name, ex.Shape, ex.Raw); err != nil {
+								return nil, err
+							}
+						}
+						continue
+					}
 				}
 				data, err := dequantF32(info, raw)
 				if err != nil {
