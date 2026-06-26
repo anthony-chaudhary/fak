@@ -71,6 +71,22 @@ type anthropicPassthrough struct {
 
 	promptTok, complTok, cacheRead, cacheCreate int
 	finishReason                                string
+
+	// firstTokenAt is the wall-clock of the FIRST content delta from the upstream —
+	// the prefill→decode boundary (time-to-first-token). Zero until the first delta
+	// arrives; streamAnthropicPassthroughLive turns it into the prefill/decode split
+	// it reports to observeInferenceTimed. A turn that never produces a delta (an
+	// immediate stop) leaves it zero, so prefill is reported as "not measured" rather
+	// than as the full turn.
+	firstTokenAt time.Time
+}
+
+// markFirstToken stamps the time-to-first-token boundary on the first content delta of
+// the turn. Idempotent: only the first delta sets it, so later deltas do not move it.
+func (p *anthropicPassthrough) markFirstToken(now time.Time) {
+	if p.firstTokenAt.IsZero() {
+		p.firstTokenAt = now
+	}
 }
 
 // start opens the client SSE stream exactly once: it writes the event-stream headers and
@@ -199,6 +215,10 @@ func (p *anthropicPassthrough) onEvent(ev agent.AnthropicSSEEvent) error {
 		if json.Unmarshal(ev.Data, &d) != nil {
 			return nil
 		}
+		// First content delta of the turn = the model's first produced token, whether
+		// it lands in a relayed text block or a held tool_use block. Stamp the TTFT
+		// boundary here so prefill (prompt ingest) is separated from decode below.
+		p.markFirstToken(time.Now())
 		if ta, held := p.toolBuf[d.Index]; held {
 			ta.args.WriteString(d.Delta.PartialJSON) // accumulate off-wire
 			return nil
@@ -297,7 +317,14 @@ func (s *Server) streamAnthropicPassthroughLive(w http.ResponseWriter, r *http.R
 	}
 	if p.started {
 		dur := time.Since(began)
-		s.metrics.observeInference(p.promptTok, p.complTok, p.cacheRead, p.finishReason, dur)
+		// TTFT = first-content-delta time minus turn start (zero if no delta arrived,
+		// e.g. an immediate stop). This is the prefill phase; observeInferenceTimed
+		// splits decode = dur - ttft from it.
+		var ttft time.Duration
+		if !p.firstTokenAt.IsZero() {
+			ttft = p.firstTokenAt.Sub(began)
+		}
+		s.metrics.observeInferenceTimed(p.promptTok, p.complTok, p.cacheRead, p.finishReason, dur, ttft)
 		if compacted {
 			s.metrics.recordCompactionCacheRead(p.cacheRead) // OBSERVED provider cache_read on a compacted streamed turn
 			s.observeResetHealth(reqTrace, p.promptTok, p.cacheRead, p.cacheCreate)

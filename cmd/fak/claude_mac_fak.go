@@ -263,6 +263,23 @@ type claudeMacDebugVars struct {
 		Admitted     int64   `json:"admitted"`
 		VDSOHitRatio float64 `json:"vdso_hit_ratio"`
 	} `json:"kernel"`
+	// Inference mirrors internal/gateway debugInferenceVars — the model-generation
+	// throughput that makes a busy proxy/chat gateway look busy. The kernel counters
+	// above stay 0 on a pure chat/proxy workload (no syscall, no fast-path lookup), so
+	// these fields are what an operator actually wants to see: prefill (cold first
+	// request) vs decode (steady-state) tok/s, and the oldest in-flight request's age
+	// as a slow/wedged-request detector.
+	Inference struct {
+		Turns                  int64   `json:"turns"`
+		PromptTokens           int64   `json:"prompt_tokens"`
+		CompletionTokens       int64   `json:"completion_tokens"`
+		OutputTokensPerSecond  float64 `json:"output_tokens_per_second"`
+		TTFTTurns              int64   `json:"ttft_turns"`
+		MeanTTFTSeconds        float64 `json:"mean_ttft_seconds"`
+		PrefillTokensPerSecond float64 `json:"prefill_tokens_per_second"`
+		DecodeTokensPerSecond  float64 `json:"decode_tokens_per_second"`
+		InflightMaxAgeSeconds  float64 `json:"inflight_max_age_seconds"`
+	} `json:"inference"`
 	Runtime struct {
 		NumGoroutine int `json:"num_goroutine"`
 		Memory       struct {
@@ -342,24 +359,88 @@ func renderClaudeMacPreflight(h claudeMacHealth, v claudeMacDebugVars, gatewayUR
 		healthWord = "DOWN"
 	}
 	engine := firstNonEmpty(h.Engine, v.Gateway.Engine)
-	fmt.Fprintf(&b, "health: %s  engine=%s  planner=%s\n", healthWord, blankDash(engine), blankDash(h.Planner))
+	planner := strings.TrimSpace(h.Planner)
+	// engine vs planner read as contradictory ("engine=inkernel planner=proxy") unless
+	// you know engine is the BUILD (what this binary CAN do) and planner is the LIVE
+	// backend actually answering /v1/* this run. Spell that out so the operator reads
+	// "proxy" as "this gateway is forwarding to an upstream model", which is the whole
+	// reason the first request is slow (cold upstream connect + model load), not a fault.
+	fmt.Fprintf(&b, "health: %s  engine(build)=%s  planner(live)=%s\n", healthWord, blankDash(engine), blankDash(planner))
 	vdso := "off"
 	if v.Gateway.VDSO {
 		vdso = "on"
 	}
-	fmt.Fprintf(&b, "vdso=%s  cache-hit %.2f  inflight %d  up %s\n",
-		vdso, v.Kernel.VDSOHitRatio, v.Gateway.InflightRequests, humanUptime(v.Gateway.UptimeSeconds))
+	// cache-hit is the vDSO/kernel fast-path ratio. On a proxy planner the kernel
+	// fast path is not exercised (every turn forwards upstream), so 0.00 here is
+	// EXPECTED, not a miss — annotate it rather than let it read as a broken cache.
+	cacheNote := ""
+	if isProxyPlanner(planner) && v.Kernel.VDSOHitRatio == 0 {
+		cacheNote = " (proxy: kernel fast-path not exercised — 0 is expected)"
+	}
+	fmt.Fprintf(&b, "vdso=%s  cache-hit %.2f%s  up %s\n", vdso, v.Kernel.VDSOHitRatio, cacheNote, humanUptime(v.Gateway.UptimeSeconds))
+	// Throughput: the model-generation rates the kernel counters cannot show on a
+	// proxy/chat workload. Prefill is the cold-ingest rate that dominates a slow FIRST
+	// request; decode is steady-state generation. Both read "-" until the first
+	// streamed turn measures a TTFT boundary, so an idle gateway never prints a phantom.
+	inf := v.Inference
+	fmt.Fprintf(&b, "throughput: prefill %s  decode %s  ttft %s  (over %d turn(s))\n",
+		tokRate(inf.PrefillTokensPerSecond), tokRate(inf.DecodeTokensPerSecond),
+		ttftLabel(inf.MeanTTFTSeconds, inf.TTFTTurns), inf.Turns)
+	// In-flight + oldest-request age: the slow/wedged-request detector. A request that
+	// is still running is in NO completion histogram yet, so without this a hung first
+	// request is invisible. Flag an old one loudly.
+	ageWord := inflightAgeLabel(v.Inference.InflightMaxAgeSeconds, v.Gateway.InflightRequests)
+	fmt.Fprintf(&b, "inflight %d%s\n", v.Gateway.InflightRequests, ageWord)
 	fmt.Fprintf(&b, "model %s  auth %s\n", blankDash(firstNonEmpty(model, h.Model, v.Gateway.Model)), blankDash(auth))
 	fmt.Fprintf(&b, "metrics: %s/metrics · %s/debug/vars", gatewayURL, gatewayURL)
 	if grafanaURL != "" {
 		fmt.Fprintf(&b, " · grafana %s", grafanaURL)
 	}
 	fmt.Fprintln(&b)
-	if strings.EqualFold(strings.TrimSpace(h.Planner), "mock") {
+	if strings.EqualFold(planner, "mock") {
 		fmt.Fprintln(&b, "WARN: planner=mock — responses are scripted, not model output")
 	}
 	fmt.Fprintln(&b, "-> launching claude ...")
 	return b.String()
+}
+
+func isProxyPlanner(planner string) bool {
+	return strings.EqualFold(strings.TrimSpace(planner), "proxy")
+}
+
+// tokRate renders a tokens/sec value, or "-" when it is 0 (not yet measured) so an idle
+// or buffered-only gateway never prints a misleading "0 tok/s" that looks like a stall.
+func tokRate(v float64) string {
+	if v <= 0 {
+		return "-"
+	}
+	return fmt.Sprintf("%.0f tok/s", v)
+}
+
+// ttftLabel renders the mean time-to-first-token over the turns that measured it, or "-"
+// when none have (a buffered-only or idle gateway).
+func ttftLabel(meanSec float64, turns int64) string {
+	if turns <= 0 || meanSec <= 0 {
+		return "-"
+	}
+	if meanSec >= 1 {
+		return fmt.Sprintf("%.1fs", meanSec)
+	}
+	return fmt.Sprintf("%dms", int(meanSec*1000))
+}
+
+// inflightAgeLabel annotates the in-flight count with the oldest request's age, loudly
+// when that age is high — the signal that the FIRST request is slow / wedged rather than
+// simply idle. Empty when nothing is in flight.
+func inflightAgeLabel(maxAgeSec float64, inflight int64) string {
+	if inflight <= 0 || maxAgeSec <= 0 {
+		return ""
+	}
+	word := fmt.Sprintf("  (oldest %s in flight", humanUptime(maxAgeSec))
+	if maxAgeSec >= 30 {
+		word += " — SLOW: cold upstream load or a wedged request"
+	}
+	return word + ")"
 }
 
 // renderClaudeMacOverlayLine renders one compact live line for the --overlay watch
@@ -371,9 +452,21 @@ func renderClaudeMacOverlayLine(v claudeMacDebugVars) string {
 	if v.Kernel.Submits > 0 {
 		pct = float64(v.Kernel.VDSOHits) / float64(v.Kernel.Submits) * 100
 	}
-	return fmt.Sprintf("submits %d  hits %d (%.1f%%)  engine %d  inflight %d  heap %s  gor %d",
+	// Lead with the throughput an operator on a proxy/chat workload actually wants:
+	// the kernel counters (submits/hits/engine) stay 0 there, so a line built only
+	// from them reads "dead" while the box is decoding tokens. prefill/decode tok/s
+	// and the oldest in-flight age make the real work — and a slow first request —
+	// visible; "-" until the first streamed turn measures a TTFT boundary.
+	inf := v.Inference
+	age := ""
+	if v.Gateway.InflightRequests > 0 && inf.InflightMaxAgeSeconds > 0 {
+		age = fmt.Sprintf(" (oldest %s)", humanUptime(inf.InflightMaxAgeSeconds))
+	}
+	return fmt.Sprintf("prefill %s  decode %s  turns %d  inflight %d%s  submits %d  hits %d (%.1f%%)  engine %d  heap %s  gor %d",
+		tokRate(inf.PrefillTokensPerSecond), tokRate(inf.DecodeTokensPerSecond), inf.Turns,
+		v.Gateway.InflightRequests, age,
 		v.Kernel.Submits, v.Kernel.VDSOHits, pct, v.Kernel.EngineCalls,
-		v.Gateway.InflightRequests, humanBytes(int64(v.Runtime.Memory.HeapAllocBytes)), v.Runtime.NumGoroutine)
+		humanBytes(int64(v.Runtime.Memory.HeapAllocBytes)), v.Runtime.NumGoroutine)
 }
 
 // runClaudeMacOverlay polls /debug/vars and prints one live line per tick until

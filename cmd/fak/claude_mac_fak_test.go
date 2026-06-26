@@ -241,7 +241,7 @@ func TestRenderClaudeMacPreflightWarnsOnMockWithoutBearerLeak(t *testing.T) {
 	)
 	for _, want := range []string{
 		"fak debug",
-		"planner=mock",
+		"planner(live)=mock",
 		"vdso=on",
 		"cache-hit 0.88",
 		"inflight 2",
@@ -275,9 +275,63 @@ func TestRenderClaudeMacOverlayLine(t *testing.T) {
 		"engine 6",
 		"inflight 2",
 		"gor 7",
+		// Throughput leads the line now; with no measured turns the rates read "-".
+		"prefill -",
+		"decode -",
+		"turns 0",
 	} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("overlay line missing %q: %s", want, out)
+		}
+	}
+}
+
+// TestRenderClaudeMacOverlayLineShowsThroughput proves the overlay surfaces real
+// model-generation throughput even when the kernel counters are 0 (the exact
+// proxy/chat case the user hit: submits 0 / engine 0 while the box decodes tokens).
+func TestRenderClaudeMacOverlayLineShowsThroughput(t *testing.T) {
+	var v claudeMacDebugVars
+	v.Gateway.InflightRequests = 1
+	v.Inference.Turns = 3
+	v.Inference.PrefillTokensPerSecond = 250
+	v.Inference.DecodeTokensPerSecond = 200
+	v.Inference.InflightMaxAgeSeconds = 42
+
+	out := renderClaudeMacOverlayLine(v)
+	for _, want := range []string{
+		"prefill 250 tok/s",
+		"decode 200 tok/s",
+		"turns 3",
+		"oldest 42s",
+	} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("throughput overlay line missing %q: %s", want, out)
+		}
+	}
+}
+
+// TestRenderClaudeMacPreflightProxyClarity proves the panel disambiguates the
+// engine(build)/planner(live) labels and annotates a 0.00 cache-hit on a proxy planner
+// as expected rather than a fault — the confusion the user flagged.
+func TestRenderClaudeMacPreflightProxyClarity(t *testing.T) {
+	var v claudeMacDebugVars
+	v.Gateway.VDSO = true
+	v.Gateway.InflightRequests = 1
+	v.Kernel.VDSOHitRatio = 0.0
+	v.Inference.InflightMaxAgeSeconds = 45 // a slow first request
+
+	out := renderClaudeMacPreflight(
+		claudeMacHealth{OK: true, Engine: "inkernel", Model: "qwen-local", Planner: "proxy"},
+		v, "http://node.example:8080", "qwen-local", "gateway-bearer", "",
+	)
+	for _, want := range []string{
+		"engine(build)=inkernel",
+		"planner(live)=proxy",
+		"proxy: kernel fast-path not exercised",
+		"SLOW: cold upstream load or a wedged request",
+	} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("proxy-clarity preflight missing %q:\n%s", want, out)
 		}
 	}
 }
@@ -311,7 +365,7 @@ func TestClaudeMacFakInteractiveEmitsDebugPanel(t *testing.T) {
 		"--command", "fak-no-such-claude-binary-xyz",
 	})
 	out := stdout.String()
-	for _, want := range []string{"fak debug", "planner=inkernel", "cache-hit 0.89", "-> launching claude ..."} {
+	for _, want := range []string{"fak debug", "planner(live)=inkernel", "cache-hit 0.89", "-> launching claude ..."} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("interactive --debug should emit the preflight panel; missing %q\nstdout=%s\nstderr=%s", want, out, stderr.String())
 		}

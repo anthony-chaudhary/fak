@@ -56,6 +56,26 @@ type gatewayMetrics struct {
 	inferCachedTokens uint64
 	inferCachedHits   uint64 // served turns whose prompt got a provider cache READ (>0 cached tokens)
 	inferDecodeSecs   float64
+	// Prefill (time-to-first-token) is split from decode ONLY on a path that can
+	// observe the first content delta — the streaming Anthropic passthrough. On a
+	// buffered turn the planner returns one all-up duration with no observable
+	// first-token boundary, so it contributes to inferDecodeSecs (the total) and
+	// leaves these two untouched. inferTTFTTurns is the denominator that keeps the
+	// prefill rate honest: it counts ONLY turns whose TTFT was actually measured, so
+	// a mixed buffered+streaming workload never divides streamed prefill tokens by
+	// buffered turns. inferPrefillPromptTokens is the prompt-token sum over just
+	// those measured turns (the prefill-rate numerator).
+	inferPrefillSecs         float64
+	inferTTFTTurns           uint64
+	inferPrefillPromptTokens uint64
+	// Decode side of the measured turns, kept as its own pair so the decode rate
+	// never mixes denominators: inferMeasuredDecodeSecs sums (dur-ttft) and
+	// inferMeasuredComplTokens sums completion tokens over the SAME ttftTurns. On a
+	// mixed buffered+streaming workload this divides measured completion tokens by
+	// measured decode time only — subtracting the all-workload decode total would
+	// skew it.
+	inferMeasuredDecodeSecs  float64
+	inferMeasuredComplTokens uint64
 
 	// reqMemoryMu guards cumulative in-kernel request-memory pressure observed after
 	// planner turns. The planner already exposes the most recent admission plan; these
@@ -491,6 +511,23 @@ func (s AdjudicationSummary) ProviderCacheEvidence() cachemeta.LookupVerdict {
 // (no syscall, no fast-path lookup), so without this family every panel reads 0 while
 // the box is in fact decoding tokens.
 func (m *gatewayMetrics) observeInference(promptTok, complTok, cachedTok int, finishReason string, dur time.Duration) {
+	// A buffered turn cannot observe the first-token boundary, so prefill is "not
+	// measured": ttft<=0 routes the whole duration into the decode-total accumulator
+	// and leaves the prefill split untouched (it stays an honest 0, never a phantom).
+	m.observeInferenceTimed(promptTok, complTok, cachedTok, finishReason, dur, 0)
+}
+
+// observeInferenceTimed is observeInference with an explicit time-to-first-token
+// split. ttft is the wall-clock from the planner call starting to the FIRST content
+// delta arriving (the prefill phase: prompt ingest + first token); dur is the whole
+// turn. When ttft is in (0, dur] the turn's time is split — prefill = ttft, decode =
+// dur-ttft — and the turn is counted toward the TTFT denominator so the prefill rate
+// divides streamed prefill tokens by only the turns that measured them. When ttft<=0
+// (a buffered turn, or a stream that produced no delta), the whole duration counts as
+// decode total and the prefill split is left untouched. inferDecodeSecs stays the
+// FULL inference wall-clock in both cases so the existing output_tokens_per_second and
+// the fleet-value agent-seconds denominator are byte-identical to before.
+func (m *gatewayMetrics) observeInferenceTimed(promptTok, complTok, cachedTok int, finishReason string, dur, ttft time.Duration) {
 	if m == nil {
 		return
 	}
@@ -514,6 +551,24 @@ func (m *gatewayMetrics) observeInference(promptTok, complTok, cachedTok int, fi
 	}
 	if dur > 0 {
 		m.inferDecodeSecs += dur.Seconds()
+	}
+	// Split prefill from decode only when TTFT was actually observed and is sane
+	// (positive and within the total). A clamp guards against a clock skew producing
+	// ttft>dur, which would otherwise make decode-seconds negative.
+	if ttft > 0 && dur > 0 {
+		pre := ttft
+		if pre > dur {
+			pre = dur
+		}
+		m.inferPrefillSecs += pre.Seconds()
+		m.inferTTFTTurns++
+		if promptTok > 0 {
+			m.inferPrefillPromptTokens += uint64(promptTok)
+		}
+		m.inferMeasuredDecodeSecs += (dur - pre).Seconds()
+		if complTok > 0 {
+			m.inferMeasuredComplTokens += uint64(complTok)
+		}
 	}
 	m.inferenceMu.Unlock()
 }
@@ -1338,6 +1393,17 @@ type inferenceSnapshot struct {
 	cachedTok  uint64
 	cachedHits uint64
 	decodeSecs float64
+	// prefillSecs is the cumulative TTFT wall-clock over the ttftTurns that measured
+	// it; prefillPromptTok is the prompt-token sum over those same turns. ttftTurns is
+	// the denominator that keeps the prefill rate honest on a mixed workload.
+	prefillSecs      float64
+	ttftTurns        uint64
+	prefillPromptTok uint64
+	// measuredDecodeSecs / measuredComplTok are the decode-rate pair over ttftTurns
+	// only (see the accumulator doc) — kept separate so a mixed workload never blends
+	// measured and unmeasured denominators.
+	measuredDecodeSecs float64
+	measuredComplTok   uint64
 }
 
 type compactionSnapshot struct {
@@ -1394,12 +1460,17 @@ func (m *gatewayMetrics) inferenceSnapshotData() inferenceSnapshot {
 		reqs[k] = v
 	}
 	return inferenceSnapshot{
-		reqs:       reqs,
-		promptTok:  m.inferPromptTokens,
-		complTok:   m.inferComplTokens,
-		cachedTok:  m.inferCachedTokens,
-		cachedHits: m.inferCachedHits,
-		decodeSecs: m.inferDecodeSecs,
+		reqs:               reqs,
+		promptTok:          m.inferPromptTokens,
+		complTok:           m.inferComplTokens,
+		cachedTok:          m.inferCachedTokens,
+		cachedHits:         m.inferCachedHits,
+		decodeSecs:         m.inferDecodeSecs,
+		prefillSecs:        m.inferPrefillSecs,
+		ttftTurns:          m.inferTTFTTurns,
+		prefillPromptTok:   m.inferPrefillPromptTokens,
+		measuredDecodeSecs: m.inferMeasuredDecodeSecs,
+		measuredComplTok:   m.inferMeasuredComplTokens,
 	}
 }
 
@@ -1608,6 +1679,36 @@ func (m *gatewayMetrics) writeInferenceMetrics(b *strings.Builder) inferenceSnap
 		tps = float64(snap.complTok) / snap.decodeSecs
 	}
 	fmt.Fprintf(b, "fak_gateway_inference_output_tokens_per_second %s\n", promFloat(tps))
+
+	// Prefill vs decode split (time-to-first-token). The output_tokens_per_second
+	// above blends prompt ingest (prefill) with generation (decode) into one mean,
+	// which hides the first-request-slow story: a cold prefill dominates the first
+	// turn's wall-clock while decode is fast. These two rates separate them, measured
+	// ONLY over the turns whose TTFT was observable (the streaming passthrough path);
+	// a buffered turn reports no boundary and is excluded so the rates never blend a
+	// measured turn with an unmeasured one. Until the first measured turn the
+	// denominators are 0 and the rates stay 0 (no phantom throughput).
+	writeHelpType(b, "fak_gateway_inference_ttft_turns_total", "Served turns whose time-to-first-token (prefill boundary) was observable — the streaming passthrough path only. The denominator behind the prefill seconds/rate below; buffered turns are excluded.", "counter")
+	fmt.Fprintf(b, "fak_gateway_inference_ttft_turns_total %d\n", snap.ttftTurns)
+	writeHelpType(b, "fak_gateway_inference_prefill_seconds_total", "Cumulative time-to-first-token wall-clock (prompt ingest + first token) across turns that measured it. Decode wall-clock is fak_gateway_inference_duration_seconds_total minus this over the same turns.", "counter")
+	fmt.Fprintf(b, "fak_gateway_inference_prefill_seconds_total %s\n", promFloat(snap.prefillSecs))
+	writeHelpType(b, "fak_gateway_inference_prefill_tokens_per_second", "Prefill throughput: prompt (input) tokens ingested per second of TTFT wall-clock, over the turns that measured TTFT (prefill_prompt_tokens / prefill_seconds; 0 until the first measured turn). This is the cold-prefill rate that dominates a slow first request.", "gauge")
+	prefillTPS := 0.0
+	if snap.prefillSecs > 0 {
+		prefillTPS = float64(snap.prefillPromptTok) / snap.prefillSecs
+	}
+	fmt.Fprintf(b, "fak_gateway_inference_prefill_tokens_per_second %s\n", promFloat(prefillTPS))
+	// Decode-only rate: completion tokens over the decode phase (total minus prefill)
+	// across the measured turns. This is the steady-state generation speed an operator
+	// expects — distinct from output_tokens_per_second, which is diluted by prefill.
+	// Falls back to 0 (not the blended rate) when no turn measured TTFT, so the two
+	// rates never silently coincide.
+	writeHelpType(b, "fak_gateway_inference_decode_tokens_per_second", "Decode throughput: completion (generated) tokens per second of DECODE wall-clock (total inference time minus prefill) over the turns that measured TTFT (0 until the first measured turn). The steady-state generation speed, undiluted by cold prefill — contrast fak_gateway_inference_output_tokens_per_second, which blends both.", "gauge")
+	decodeTPS := 0.0
+	if snap.measuredDecodeSecs > 0 {
+		decodeTPS = float64(snap.measuredComplTok) / snap.measuredDecodeSecs
+	}
+	fmt.Fprintf(b, "fak_gateway_inference_decode_tokens_per_second %s\n", promFloat(decodeTPS))
 	return snap
 }
 

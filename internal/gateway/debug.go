@@ -14,10 +14,34 @@ type debugVarsResponse struct {
 	Gateway       debugGatewayVars        `json:"gateway"`
 	Runtime       debugRuntimeVars        `json:"runtime"`
 	Kernel        debugKernelVars         `json:"kernel"`
+	Inference     debugInferenceVars      `json:"inference"`
 	ModelLoad     *debugModelLoadVars     `json:"model_load,omitempty"`
 	KVMemory      *debugKVMemoryVars      `json:"kv_memory,omitempty"`
 	RequestMemory *debugRequestMemoryVars `json:"request_memory,omitempty"`
 	Metrics       debugMetricsVars        `json:"metrics"`
+}
+
+// debugInferenceVars surfaces the model-generation throughput the kernel/vDSO counters
+// structurally cannot show on a pure chat/proxy workload (they stay 0 — no syscall, no
+// fast-path lookup), so an operator watching the panel sees real decode work instead of
+// a dead-looking "submits 0". The two rates separate the cold prefill that dominates a
+// slow FIRST request (PrefillTokensPerSecond) from steady-state generation
+// (DecodeTokensPerSecond); both are measured only over the streaming turns that could
+// observe a first-token boundary (TTFTTurns), so they never blend a measured turn with a
+// buffered one. InflightMaxAgeSeconds is the oldest in-flight request's age — the
+// hung/slow-request detector the completion histograms cannot show until a request ends.
+type debugInferenceVars struct {
+	Turns                  uint64  `json:"turns"`
+	PromptTokens           uint64  `json:"prompt_tokens"`
+	CompletionTokens       uint64  `json:"completion_tokens"`
+	DurationSeconds        float64 `json:"duration_seconds"`
+	OutputTokensPerSecond  float64 `json:"output_tokens_per_second"`
+	TTFTTurns              uint64  `json:"ttft_turns"`
+	PrefillSeconds         float64 `json:"prefill_seconds"`
+	MeanTTFTSeconds        float64 `json:"mean_ttft_seconds"`
+	PrefillTokensPerSecond float64 `json:"prefill_tokens_per_second"`
+	DecodeTokensPerSecond  float64 `json:"decode_tokens_per_second"`
+	InflightMaxAgeSeconds  float64 `json:"inflight_max_age_seconds"`
 }
 
 type debugGatewayVars struct {
@@ -291,6 +315,8 @@ func (s *Server) debugVars(now time.Time) debugVarsResponse {
 	compact := m.compactionSnapshotData()
 	oomRows := m.inKernelOOMSnapshotData()
 	reqMemoryRows := m.requestMemoryAggregateSnapshotData()
+	infer := m.inferenceSnapshotData()
+	_, inflightMaxAge := m.inflightSnapshot(now)
 
 	return debugVarsResponse{
 		Gateway: debugGatewayVars{
@@ -335,6 +361,7 @@ func (s *Server) debugVars(now time.Time) debugVarsResponse {
 			Admitted:     c.Admitted,
 			VDSOHitRatio: ratio,
 		},
+		Inference:     inferenceVarsFromSnapshot(infer, inflightMaxAge),
 		ModelLoad:     debugModelLoadProfile(s.modelLoadProfile()),
 		KVMemory:      debugKVMemory(s.planner),
 		RequestMemory: debugRequestMemory(s.planner),
@@ -357,6 +384,42 @@ func (s *Server) debugVars(now time.Time) debugVarsResponse {
 			InKernelPressureTrim: debugInKernelPressureTrimRows(s.planner),
 		},
 	}
+}
+
+// inferenceVarsFromSnapshot derives the /debug/vars inference block from the same
+// snapshot the Prometheus renderer (writeInferenceMetrics) reads, so the two surfaces
+// can never disagree. Every rate here uses the identical numerator/denominator the
+// metric line uses: output t/s = completion/total wall-clock; prefill t/s =
+// prefill-prompt-tokens/prefill-seconds over measured turns; decode t/s =
+// measured-completion/measured-decode-seconds; mean TTFT = prefill-seconds/ttft-turns.
+// A zero denominator yields 0 (no phantom throughput before the first measured turn).
+func inferenceVarsFromSnapshot(snap inferenceSnapshot, inflightMaxAge float64) debugInferenceVars {
+	var turns uint64
+	for _, n := range snap.reqs {
+		turns += n
+	}
+	out := debugInferenceVars{
+		Turns:                 turns,
+		PromptTokens:          snap.promptTok,
+		CompletionTokens:      snap.complTok,
+		DurationSeconds:       snap.decodeSecs,
+		TTFTTurns:             snap.ttftTurns,
+		PrefillSeconds:        snap.prefillSecs,
+		InflightMaxAgeSeconds: inflightMaxAge,
+	}
+	if snap.decodeSecs > 0 {
+		out.OutputTokensPerSecond = float64(snap.complTok) / snap.decodeSecs
+	}
+	if snap.prefillSecs > 0 {
+		out.PrefillTokensPerSecond = float64(snap.prefillPromptTok) / snap.prefillSecs
+	}
+	if snap.measuredDecodeSecs > 0 {
+		out.DecodeTokensPerSecond = float64(snap.measuredComplTok) / snap.measuredDecodeSecs
+	}
+	if snap.ttftTurns > 0 {
+		out.MeanTTFTSeconds = snap.prefillSecs / float64(snap.ttftTurns)
+	}
+	return out
 }
 
 func debugRequestMemory(p agent.Planner) *debugRequestMemoryVars {

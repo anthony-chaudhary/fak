@@ -356,6 +356,84 @@ func TestChatCompletionsPopulatesInferenceMetrics(t *testing.T) {
 	}
 }
 
+// TestInferencePrefillDecodeSplit proves the time-to-first-token split is real and
+// non-vacuous: a streamed turn that spends most of its wall-clock in prefill (cold
+// first request) reports a slow prefill rate and a fast decode rate, while a buffered
+// turn (no observable TTFT) is excluded from BOTH measured denominators. This is the
+// signal the user asked for — "prefill and decode tokens per second" — kept honest so
+// the cold first request shows up as a low prefill rate instead of being averaged away.
+func TestInferencePrefillDecodeSplit(t *testing.T) {
+	m := newGatewayMetrics(time.Now())
+
+	// Idle: every new rate reads 0, never a phantom throughput before a measured turn.
+	idle := renderInference(m)
+	for _, want := range []string{
+		"fak_gateway_inference_ttft_turns_total 0\n",
+		"fak_gateway_inference_prefill_seconds_total 0\n",
+		"fak_gateway_inference_prefill_tokens_per_second 0\n",
+		"fak_gateway_inference_decode_tokens_per_second 0\n",
+	} {
+		if !strings.Contains(idle, want) {
+			t.Fatalf("idle scrape missing %q\n%s", want, idle)
+		}
+	}
+
+	// A buffered turn: 200 prompt tokens, 100 completion, 5s all-up, NO TTFT boundary.
+	// It must contribute to the all-up duration/output rate but leave the measured
+	// (prefill/decode) denominators untouched.
+	m.observeInference(200, 100, 0, "stop", 5*time.Second)
+	// A streamed turn: 1000 prompt tokens, prefill took 4s (cold ingest), then decode
+	// generated 200 tokens in the remaining 1s → 8s total? No: dur=5s, ttft=4s, so
+	// decode=1s. prefill rate = 1000/4 = 250 tok/s; decode rate = 200/1 = 200 tok/s.
+	m.observeInferenceTimed(1000, 200, 0, "end_turn", 5*time.Second, 4*time.Second)
+
+	live := renderInference(m)
+	for _, want := range []string{
+		// Only ONE turn measured TTFT (the streamed one); the buffered turn is excluded.
+		"fak_gateway_inference_ttft_turns_total 1\n",
+		"fak_gateway_inference_prefill_seconds_total 4\n",
+		// prefill = 1000 prompt tokens / 4s = 250 tok/s (the buffered turn's 200 prompt
+		// tokens are NOT in this numerator — it had no measured TTFT).
+		"fak_gateway_inference_prefill_tokens_per_second 250\n",
+		// decode = 200 completion tokens / (5s-4s) = 200 tok/s (measured turn only).
+		"fak_gateway_inference_decode_tokens_per_second 200\n",
+		// Total wall-clock still sums BOTH turns: 5 + 5 = 10s.
+		"fak_gateway_inference_duration_seconds_total 10\n",
+		// Blended output rate over all turns: (100+200) / 10s = 30 tok/s — visibly
+		// different from the 200 tok/s decode rate, proving the split is not cosmetic.
+		"fak_gateway_inference_output_tokens_per_second 30\n",
+	} {
+		if !strings.Contains(live, want) {
+			t.Fatalf("split scrape missing %q\n--- inference ---\n%s", want, live)
+		}
+	}
+}
+
+// TestInferenceVarsMatchPrometheus proves the /debug/vars inference block derives the
+// exact same rates the Prometheus renderer does — the panel can never disagree with
+// /metrics. It feeds one streamed turn and asserts the struct fields equal the
+// hand-computed values.
+func TestInferenceVarsMatchPrometheus(t *testing.T) {
+	m := newGatewayMetrics(time.Now())
+	m.observeInferenceTimed(1000, 200, 0, "end_turn", 5*time.Second, 4*time.Second)
+	v := inferenceVarsFromSnapshot(m.inferenceSnapshotData(), 12.5)
+	if v.Turns != 1 || v.TTFTTurns != 1 {
+		t.Fatalf("turns=%d ttftTurns=%d, want 1/1", v.Turns, v.TTFTTurns)
+	}
+	if v.PrefillTokensPerSecond != 250 {
+		t.Errorf("prefill t/s = %v, want 250", v.PrefillTokensPerSecond)
+	}
+	if v.DecodeTokensPerSecond != 200 {
+		t.Errorf("decode t/s = %v, want 200", v.DecodeTokensPerSecond)
+	}
+	if v.MeanTTFTSeconds != 4 {
+		t.Errorf("mean TTFT = %v, want 4", v.MeanTTFTSeconds)
+	}
+	if v.InflightMaxAgeSeconds != 12.5 {
+		t.Errorf("inflight max age = %v, want 12.5 (passed through)", v.InflightMaxAgeSeconds)
+	}
+}
+
 func renderInference(m *gatewayMetrics) string {
 	var b strings.Builder
 	m.writeInferenceMetrics(&b)
