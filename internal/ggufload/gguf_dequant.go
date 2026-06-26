@@ -26,6 +26,17 @@ func alignOffset(off, align uint64) uint64 {
 	return off + (align-(off%align))%align
 }
 
+// tensorOnDiskBytes is the best-effort on-disk payload size of a tensor for load-progress
+// accounting: tensorPayloadBytes, or 0 if its shape/type is not byte-sizable. It never
+// errors — a 0 from an exotic tensor only understates the running GB, not the percentage.
+func tensorOnDiskBytes(t TensorInfo) int64 {
+	n, err := tensorPayloadBytes(t)
+	if err != nil {
+		return 0
+	}
+	return int64(n)
+}
+
 func tensorPayloadBytes(t TensorInfo) (uint64, error) {
 	elems, err := tensorElems(t)
 	if err != nil {

@@ -156,7 +156,9 @@ func (s *WeightSource) QuantModelProfile(p *LoadProfiler) (*model.Model, error) 
 	// adjacent in the tensor stream, so buffer the first half seen per layer and emit the merged
 	// kv_b_proj when its partner arrives (mergeGLMMoeDsaKVB). See gguf_glm_tensors.go.
 	kvbHalf := map[int]glmKVBHalf{}
+	p.SetTotal(len(s.File.Tensors)) // arm the progress reporter (no-op on nil / unset Progress)
 	for _, info := range s.File.Tensors {
+		p.Tick(tensorOnDiskBytes(info)) // one GGUF tensor consumed -> advance the % status
 		if cfg.ModelType == "glm_moe_dsa" {
 			if layer, half, ok := glmMoeDsaSplitKVB(info.Name); ok {
 				shape, err := modelShapeFromGGUFDims(info.Name, info.Dims)
