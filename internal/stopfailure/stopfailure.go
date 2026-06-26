@@ -34,6 +34,7 @@ type Options struct {
 type Marker struct {
 	SessionID         string    `json:"session_id"`
 	MarkerPath        string    `json:"marker_path"`
+	ArchivePath       string    `json:"archive_path,omitempty"`
 	Total             int       `json:"total"`
 	Consecutive       int       `json:"consecutive"`
 	MTime             time.Time `json:"mtime"`
@@ -64,6 +65,15 @@ type ResetResult struct {
 	Root       string   `json:"root"`
 	Candidates []Marker `json:"candidates"`
 	Updated    []Marker `json:"updated"`
+	Errors     []string `json:"errors,omitempty"`
+}
+
+type ArchiveResult struct {
+	Schema     string   `json:"schema"`
+	Applied    bool     `json:"applied"`
+	Root       string   `json:"root"`
+	Candidates []Marker `json:"candidates"`
+	Archived   []Marker `json:"archived"`
 	Errors     []string `json:"errors,omitempty"`
 }
 
@@ -148,6 +158,46 @@ func ResetStale(opts Options, apply bool) (ResetResult, error) {
 		marker.Consecutive = 0
 		marker.SettlementAction = ActionHealedNonzero
 		result.Updated = append(result.Updated, marker)
+	}
+	return result, nil
+}
+
+func ArchiveMarkerOnly(opts Options, apply bool) (ArchiveResult, error) {
+	opts = normalizeOptions(opts)
+	allOpts := opts
+	allOpts.Limit = 0
+	plan, err := BuildPlan(allOpts)
+	if err != nil {
+		return ArchiveResult{}, err
+	}
+	candidates := append([]Marker(nil), plan.Candidates[ActionStaleMarkerOnlyArchive]...)
+	if opts.Limit > 0 && len(candidates) > opts.Limit {
+		candidates = candidates[:opts.Limit]
+	}
+	for i := range candidates {
+		candidates[i].ArchivePath = archiveMarkerPath(candidates[i])
+	}
+	result := ArchiveResult{
+		Schema:     "fak.stopfailure.archive-marker-only.v1",
+		Applied:    apply,
+		Root:       plan.Root,
+		Candidates: candidates,
+	}
+	if !apply {
+		return result, nil
+	}
+	archiveDir := filepath.Join(plan.Root, ".dos", "stop-failures", "archive")
+	if err := os.MkdirAll(archiveDir, 0o755); err != nil {
+		return result, err
+	}
+	for _, marker := range candidates {
+		src := filepath.Join(plan.Root, filepath.FromSlash(marker.MarkerPath))
+		dst := filepath.Join(plan.Root, filepath.FromSlash(marker.ArchivePath))
+		if err := os.Rename(src, dst); err != nil {
+			result.Errors = append(result.Errors, fmt.Sprintf("%s: %v", marker.MarkerPath, err))
+			continue
+		}
+		result.Archived = append(result.Archived, marker)
 	}
 	return result, nil
 }
@@ -268,6 +318,10 @@ func intValue(v any) int {
 
 func relStopDir() string {
 	return filepath.ToSlash(filepath.Join(".dos", "stop-failures"))
+}
+
+func archiveMarkerPath(marker Marker) string {
+	return filepath.ToSlash(filepath.Join(".dos", "stop-failures", "archive", filepath.Base(marker.MarkerPath)))
 }
 
 type markerOrigin struct {

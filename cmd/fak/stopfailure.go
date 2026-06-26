@@ -24,6 +24,8 @@ func runStopFailure(stdout, stderr io.Writer, argv []string) int {
 		return runStopFailurePlan(stdout, stderr, argv[1:])
 	case "reset-stale":
 		return runStopFailureResetStale(stdout, stderr, argv[1:])
+	case "archive-marker-only":
+		return runStopFailureArchiveMarkerOnly(stdout, stderr, argv[1:])
 	case "-h", "--help", "help":
 		stopFailureUsage(stdout)
 		return 0
@@ -37,6 +39,7 @@ func runStopFailure(stdout, stderr io.Writer, argv []string) int {
 func stopFailureUsage(w io.Writer) {
 	fmt.Fprintln(w, "usage: fak stopfailure plan [--root DIR] [--since-hours N] [--recent-hours N] [--claude-home DIR] [--namespace NS] [--limit N] [--json]")
 	fmt.Fprintln(w, "       fak stopfailure reset-stale [--root DIR] [--since-hours N] [--recent-hours N] [--claude-home DIR] [--namespace NS] [--limit N] [--apply] [--json]")
+	fmt.Fprintln(w, "       fak stopfailure archive-marker-only [--root DIR] [--since-hours N] [--recent-hours N] [--claude-home DIR] [--namespace NS] [--limit N] [--apply] [--json]")
 }
 
 func runStopFailurePlan(stdout, stderr io.Writer, argv []string) int {
@@ -119,6 +122,48 @@ func runStopFailureResetStale(stdout, stderr io.Writer, argv []string) int {
 	return 0
 }
 
+func runStopFailureArchiveMarkerOnly(stdout, stderr io.Writer, argv []string) int {
+	fs := flag.NewFlagSet("fak stopfailure archive-marker-only", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	root := fs.String("root", ".", "repository root containing .dos/stop-failures")
+	sinceHours := fs.Int("since-hours", 24, "marker mtime lookback in hours; 0 means all history")
+	recentHours := fs.Int("recent-hours", stopfailure.DefaultRecentWindowHours, "recent active marker threshold in hours")
+	claudeHome := fs.String("claude-home", "", "user home containing .claude* roots; default FLEET_USER_HOME/USERPROFILE/home")
+	namespace := fs.String("namespace", stopfailure.DefaultTranscriptNamespace, "Claude projects namespace used for transcript origin lookup")
+	limit := fs.Int("limit", 0, "maximum marker-only files to archive; 0 means all candidates")
+	apply := fs.Bool("apply", false, "move stale marker-only files under .dos/stop-failures/archive; omitted means dry-run")
+	asJSON := fs.Bool("json", false, "emit JSON")
+	nowFlag := fs.String("now", "", "override current time as RFC3339 for deterministic tests")
+	if err := fs.Parse(argv); err != nil {
+		return 2
+	}
+	now, ok := parseStopFailureNow(*nowFlag, stderr)
+	if !ok {
+		return 2
+	}
+	result, err := stopfailure.ArchiveMarkerOnly(stopfailure.Options{
+		Root:                *root,
+		Now:                 now,
+		RecentWindow:        time.Duration(*recentHours) * time.Hour,
+		SinceWindow:         time.Duration(*sinceHours) * time.Hour,
+		Limit:               *limit,
+		ClaudeHome:          *claudeHome,
+		TranscriptNamespace: *namespace,
+	}, *apply)
+	if err != nil {
+		fmt.Fprintf(stderr, "fak stopfailure archive-marker-only: %v\n", err)
+		return 1
+	}
+	if *asJSON {
+		return writeStopFailureJSON(stdout, stderr, result)
+	}
+	printStopFailureArchive(stdout, result)
+	if len(result.Errors) > 0 {
+		return 1
+	}
+	return 0
+}
+
 func parseStopFailureNow(value string, stderr io.Writer) (time.Time, bool) {
 	if strings.TrimSpace(value) == "" {
 		return time.Time{}, true
@@ -181,6 +226,25 @@ func printStopFailureReset(w io.Writer, result stopfailure.ResetResult) {
 	printStopFailureRows(w, "stale reset", rows)
 	if !result.Applied && len(result.Candidates) > 0 {
 		fmt.Fprintln(w, "next: rerun with --apply to set consecutive=0 on stale markers only")
+	}
+	for _, err := range result.Errors {
+		fmt.Fprintf(w, "error: %s\n", err)
+	}
+}
+
+func printStopFailureArchive(w io.Writer, result stopfailure.ArchiveResult) {
+	mode := "DRY-RUN"
+	if result.Applied {
+		mode = "APPLIED"
+	}
+	fmt.Fprintf(w, "fak stopfailure archive-marker-only: %s candidates=%d archived=%d errors=%d\n", mode, len(result.Candidates), len(result.Archived), len(result.Errors))
+	rows := result.Candidates
+	if result.Applied {
+		rows = result.Archived
+	}
+	printStopFailureRows(w, "marker-only archive", rows)
+	if !result.Applied && len(result.Candidates) > 0 {
+		fmt.Fprintln(w, "next: rerun with --apply to move stale marker-only files under .dos/stop-failures/archive")
 	}
 	for _, err := range result.Errors {
 		fmt.Fprintf(w, "error: %s\n", err)

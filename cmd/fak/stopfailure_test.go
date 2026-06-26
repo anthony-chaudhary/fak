@@ -119,6 +119,45 @@ func TestStopFailurePlanAndResetStale(t *testing.T) {
 	assertStopFailureConsecutive(t, stopDir, "claudeonly", 0)
 	assertStopFailureConsecutive(t, stopDir, "markeronly", 1)
 	assertStopFailureConsecutive(t, stopDir, "recent", 1)
+
+	stdout.Reset()
+	stderr.Reset()
+	code = runStopFailure(&stdout, &stderr, []string{
+		"archive-marker-only",
+		"--root", root,
+		"--claude-home", claudeHome,
+		"--now", now.Format(time.RFC3339),
+	})
+	if code != 0 {
+		t.Fatalf("archive dry-run code=%d stderr=%s", code, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "DRY-RUN candidates=1 archived=0") {
+		t.Fatalf("archive dry-run output:\n%s", stdout.String())
+	}
+	if _, err := os.Stat(filepath.Join(stopDir, "markeronly.json")); err != nil {
+		t.Fatalf("markeronly should remain after dry-run: %v", err)
+	}
+
+	stdout.Reset()
+	stderr.Reset()
+	code = runStopFailure(&stdout, &stderr, []string{
+		"archive-marker-only",
+		"--root", root,
+		"--claude-home", claudeHome,
+		"--now", now.Format(time.RFC3339),
+		"--apply",
+		"--json",
+	})
+	if code != 0 {
+		t.Fatalf("archive apply code=%d stderr=%s", code, stderr.String())
+	}
+	if _, err := os.Stat(filepath.Join(stopDir, "markeronly.json")); !os.IsNotExist(err) {
+		t.Fatalf("markeronly active marker should be moved, stat err=%v", err)
+	}
+	if _, err := os.Stat(filepath.Join(stopDir, "archive", "markeronly.json")); err != nil {
+		t.Fatalf("markeronly archive missing: %v", err)
+	}
+	assertStopFailureConsecutive(t, stopDir, "recent", 1)
 }
 
 func writeStopFailureFixture(t *testing.T, dir, session, body string, mtime time.Time) {

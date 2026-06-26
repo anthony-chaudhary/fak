@@ -415,13 +415,13 @@ func usage() {
                  end to end  -  exit 1 naming the first broken link if a byte changed
                  since it was written; 'export' re-emits it as JSONL. A self-report is
                  not a witness  -  this is how the record is checked offline)
-  fak stopfailure plan | reset-stale
+  fak stopfailure plan | reset-stale | archive-marker-only
                 (operator surface for .dos/stop-failures breaker markers. plan is
                  read-only; reset-stale is dry-run unless --apply is passed. The
                  default one-day lens matches the guard/MCP status queue; pass
                  --since-hours 0 for all history. Only stale marker consecutive counts
-                 with transcript/stream evidence are reset; recent and marker-only
-                 markers stay review-only)
+                 with transcript/stream evidence are reset; marker-only stale files can
+                 be moved under archive/ explicitly. Recent markers stay review-only)
   fak headroom  list | status | compress [--via NAME] [--model ID] [--emit] [FILE|-]
                 (the CONTEXT-COMPRESSION seam: shrink tool outputs/logs/files before
                  they reach the model, reversibly. A pluggable AREA  -  one generic
