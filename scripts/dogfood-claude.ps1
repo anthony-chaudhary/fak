@@ -116,10 +116,11 @@ $ShimPort  = if ($env:FAK_DOGFOOD_SHIM_PORT) { [int]$env:FAK_DOGFOOD_SHIM_PORT }
 # by the installed launcher name via the .cmd shim. claude-glm-gcp => the glm-gcp preset:
 # point fak's openai backend at GLM-5.2 served on the GCP node (scripts/gcp-glm-serve.sh).
 # An explicit FAK_DOGFOOD_BACKEND / _MODEL / _BASE_URL still overrides the preset below.
-$Preset        = $env:FAK_DOGFOOD_PRESET
-$PresetBackend = ''
-$PresetBaseUrl = ''
-$PresetModel   = ''
+$Preset           = $env:FAK_DOGFOOD_PRESET
+$PresetBackend    = ''
+$PresetBaseUrl    = ''
+$PresetModel      = ''
+$PresetApiKeyEnv  = ''   # env var holding the upstream bearer token (authenticated remotes)
 if ($Preset) {
   switch ($Preset) {
     'glm-gcp' {
@@ -127,7 +128,16 @@ if ($Preset) {
       $PresetBaseUrl = if ($env:FAK_GLM_GCP_BASE_URL) { $env:FAK_GLM_GCP_BASE_URL } else { 'http://127.0.0.1:8200/v1' }
       $PresetModel   = if ($env:FAK_GLM_GCP_MODEL)    { $env:FAK_GLM_GCP_MODEL }    else { 'glm-5.2' }
     }
-    default { Die "unknown FAK_DOGFOOD_PRESET=$Preset (want glm-gcp)" }
+    'mac' {
+      # Point fak at the always-on Mac node (node-macos-a) running fak serve over Tailscale.
+      # FAK_MAC_GATEWAY and FAK_GATEWAY_KEY are the canonical env vars for the Mac node;
+      # FAK_MAC_MODEL names the currently-served model (set on the node and re-exported here).
+      $PresetBackend   = 'openai'
+      $PresetBaseUrl   = if ($env:FAK_MAC_GATEWAY)  { $env:FAK_MAC_GATEWAY }  else { Die 'FAK_DOGFOOD_PRESET=mac requires FAK_MAC_GATEWAY=http://<tailscale-ip>:8080' }
+      $PresetModel     = if ($env:FAK_MAC_MODEL)    { $env:FAK_MAC_MODEL }    else { 'lmstudio-community/Qwen3.6-27B-GGUF:Q4_K_M' }
+      $PresetApiKeyEnv = 'FAK_GATEWAY_KEY'
+    }
+    default { Die "unknown FAK_DOGFOOD_PRESET=$Preset (want glm-gcp|mac)" }
   }
 }
 
@@ -140,8 +150,9 @@ $KernelBackend = ($Backend -eq 'gguf')
 # The 'openai' backend fronts a REMOTE OpenAI-compatible /v1 (e.g. GLM-5.2 on the GCP
 # node) — fak proxies straight to it, no local model. The base URL comes from the preset
 # or FAK_DOGFOOD_BASE_URL; the model is resolved from /models when not pinned.
-$OpenaiBackend = ($Backend -eq 'openai')
-$OpenaiBaseUrl = if ($env:FAK_DOGFOOD_BASE_URL) { $env:FAK_DOGFOOD_BASE_URL } else { $PresetBaseUrl }
+$OpenaiBackend    = ($Backend -eq 'openai')
+$OpenaiBaseUrl    = if ($env:FAK_DOGFOOD_BASE_URL)      { $env:FAK_DOGFOOD_BASE_URL }      else { $PresetBaseUrl }
+$OpenaiApiKeyEnv  = if ($env:FAK_DOGFOOD_API_KEY_ENV)   { $env:FAK_DOGFOOD_API_KEY_ENV }   elseif ($PresetApiKeyEnv) { $PresetApiKeyEnv } else { '' }
 # The 'anthropic' upstream fronts the REAL Claude API — Claude Code keeps its own
 # real model tiers (claude-opus-4-8, etc.), so the single-model override is OFF and
 # the default 'model' is empty. Local backends still map every tier onto one model.
@@ -231,22 +242,30 @@ function Wait-Url { param([string]$url, [int]$timeoutSec = 120)
 # on the GCP node, reached over Tailscale or a localhost tunnel. These two helpers mirror
 # the bash twin's normalize_openai_base_url / first_openai_model_from_models: confirm the
 # endpoint answers /models (so we never wire a dead upstream) and pick a served model id.
-function Get-JsonOrNull { param([string]$url)
-  try { return (Invoke-WebRequest -Uri $url -TimeoutSec 5 -UseBasicParsing).Content } catch { return $null }
+function Get-JsonOrNull { param([string]$url, [hashtable]$headers = @{})
+  try { return (Invoke-WebRequest -Uri $url -Headers $headers -TimeoutSec 5 -UseBasicParsing).Content } catch { return $null }
 }
-function Resolve-OpenAiBaseUrl { param([string]$raw)
+function Resolve-OpenAiBaseUrl { param([string]$raw, [hashtable]$authHeaders = @{})
   $raw = ([string]$raw).TrimEnd('/')
   if (-not $raw) { return $null }
-  if ($raw -match '/v1$') {
-    if (Get-JsonOrNull "$raw/models") { return $raw }
-  } else {
-    if (Get-JsonOrNull "$raw/v1/models") { return "$raw/v1" }
+  # First try /healthz (auth-free fak probe, works even when /models requires a bearer).
+  $baseForHealthz = if ($raw -match '/v1$') { $raw -replace '/v1$','' } else { $raw }
+  if (Get-JsonOrNull "$baseForHealthz/healthz") {
+    # fak serve confirmed up; determine the canonical /v1 base.
+    if ($raw -match '/v1$') { return $raw }
+    return "$raw/v1"
   }
-  if (Get-JsonOrNull "$raw/models") { return $raw }
+  # Fallback: try /v1/models or /models with optional auth header.
+  if ($raw -match '/v1$') {
+    if (Get-JsonOrNull "$raw/models" $authHeaders) { return $raw }
+  } else {
+    if (Get-JsonOrNull "$raw/v1/models" $authHeaders) { return "$raw/v1" }
+  }
+  if (Get-JsonOrNull "$raw/models" $authHeaders) { return $raw }
   return $null
 }
-function Get-FirstOpenAiModel { param([string]$url)
-  $body = Get-JsonOrNull $url
+function Get-FirstOpenAiModel { param([string]$url, [hashtable]$headers = @{})
+  $body = Get-JsonOrNull $url $headers
   if (-not $body) { return $null }
   try {
     $doc = $body | ConvertFrom-Json
@@ -296,9 +315,17 @@ if ($Mode -eq 'install') {
   $glmShimBody = "@set FAK_DOGFOOD_PRESET=glm-gcp`r`n@powershell -NoProfile -ExecutionPolicy Bypass -File `"$self`" %*`r`n"
   [System.IO.File]::WriteAllText($glmShim, $glmShimBody, (New-Object System.Text.ASCIIEncoding))
 
+  # Write claude-mac.cmd: same script, preset=mac (fak → Mac fak serve → Qwen3.6-27B).
+  # Uses FAK_MAC_GATEWAY (required; set to http://<tailscale-ip>:8080), FAK_GATEWAY_KEY, and FAK_MAC_MODEL
+  # to route Claude Code through the always-on Mac node without a subscription.
+  $macShim = Join-Path $BinDir 'claude-mac.cmd'
+  $macShimBody = "@set FAK_DOGFOOD_PRESET=mac`r`n@powershell -NoProfile -ExecutionPolicy Bypass -File `"$self`" %*`r`n"
+  [System.IO.File]::WriteAllText($macShim, $macShimBody, (New-Object System.Text.ASCIIEncoding))
+
   Log "installed: $(Join-Path $BinDir 'fak.exe')  (copied; re-run --install to refresh)"
   Log "installed: $shim  -> $self"
   Log "installed: $glmShim  -> $self (preset glm-gcp)"
+  Log "installed: $macShim  -> $self (preset mac: fak -> Mac fak serve -> Qwen3.6-27B)"
   $onPath = (($env:PATH -split ';') | ForEach-Object { $_.TrimEnd('\') }) -contains $BinDir.TrimEnd('\')
   if ($onPath) {
     Log "ready - run ``fak-dogfood --smoke`` or ``fak serve --help`` from anywhere"
@@ -412,14 +439,17 @@ try {
       }
     }
     elseif ($Backend -eq 'openai') {
-      # Remote OpenAI-compatible upstream (e.g. GLM-5.2 on the GCP node). Validate it is
-      # reachable and resolve the served model; fak proxies straight to it (no local model
-      # to start). The endpoint is per-node and hardware-gated, so fail loud with the
-      # bring-up hint rather than wiring Claude Code to a dead upstream.
-      if (-not $OpenaiBaseUrl) { Die "FAK_DOGFOOD_BACKEND=openai needs a base URL - set FAK_DOGFOOD_BASE_URL (or FAK_GLM_GCP_BASE_URL for the glm-gcp preset)" }
-      $BaseUrl = Resolve-OpenAiBaseUrl $OpenaiBaseUrl
-      if (-not $BaseUrl) { Die "OpenAI-compatible endpoint not reachable at $OpenaiBaseUrl (/models or /v1/models).`n       Stand up the GLM-5.2 node first: scripts/gcp-glm-serve.sh, then point FAK_GLM_GCP_BASE_URL at its /v1 (Tailscale host or a localhost SSH/IAP tunnel)." }
-      if (-not $Model) { $Model = Get-FirstOpenAiModel "$BaseUrl/models" }
+      # Remote OpenAI-compatible upstream (e.g. GLM-5.2 on the GCP node, or the Mac fak serve).
+      # Validate it is reachable and resolve the served model; fak proxies straight to it (no
+      # local model to start). For authenticated endpoints (FAK_DOGFOOD_API_KEY_ENV / preset key),
+      # pass the bearer in probes — /healthz is checked first (auth-free) as the canonical
+      # fak-serve liveness signal, then /v1/models with the key as fallback.
+      if (-not $OpenaiBaseUrl) { Die "FAK_DOGFOOD_BACKEND=openai needs a base URL - set FAK_DOGFOOD_BASE_URL (or FAK_MAC_GATEWAY / FAK_GLM_GCP_BASE_URL for the presets)" }
+      $openaiKey = if ($OpenaiApiKeyEnv) { [System.Environment]::GetEnvironmentVariable($OpenaiApiKeyEnv) } else { '' }
+      $openaiAuthHeaders = if ($openaiKey) { @{ 'x-api-key' = $openaiKey } } else { @{} }
+      $BaseUrl = Resolve-OpenAiBaseUrl $OpenaiBaseUrl $openaiAuthHeaders
+      if (-not $BaseUrl) { Die "OpenAI-compatible endpoint not reachable at $OpenaiBaseUrl.`n       Check that the remote fak serve is up (curl $OpenaiBaseUrl/healthz) and the Tailscale / tunnel path is open." }
+      if (-not $Model) { $Model = Get-FirstOpenAiModel "$BaseUrl/models" $openaiAuthHeaders }
       if (-not $Model) { Die "could not resolve a model from $BaseUrl/models; set FAK_DOGFOOD_MODEL" }
       Log "using OpenAI-compatible backend $BaseUrl (model: $Model)"
     }
@@ -461,6 +491,12 @@ try {
     $kernelKey = if ($env:ANTHROPIC_API_KEY) { $env:ANTHROPIC_API_KEY } else { 'fak-local-dogfood' }
     Set-Item -Path "Env:$KeyEnv" -Value $kernelKey
     $serveArgs += @('--gguf', $Gguf, '--require-key-env', $KeyEnv)
+  }
+  if ($OpenaiApiKeyEnv -and $OpenaiBackend) {
+    # Authenticated OpenAI-compatible upstream (e.g. the Mac fak serve with --require-key-env).
+    # Pass the env var name through to fak serve so it can set the Authorization / x-api-key
+    # header on every upstream call; the value itself stays in the env and is never logged.
+    $serveArgs += @('--api-key-env', $OpenaiApiKeyEnv)
   }
   if ($env:FAK_DOGFOOD_POLICY) { $serveArgs += @('--policy', $env:FAK_DOGFOOD_POLICY) }
   Log "starting kernel: fak $($serveArgs -join ' ')"
