@@ -1,21 +1,29 @@
 openapi: 3.0.3
 info:
   title: fak gateway API
-  version: 0.30.0
+  version: 0.34.0
   description: |
     Machine-readable OpenAPI 3.0 reference for every HTTP endpoint exposed by
     `fak serve` — the agent kernel gateway. fak fronts the OpenAI
     (`/v1/chat/completions`, `/v1/embeddings`, `/v1/moderations`, `/v1/models`),
-    Anthropic Messages (`/v1/messages`, `/v1/messages/count_tokens`), fak-native
-    adjudication (`/v1/fak/*`), and MCP-over-HTTP (`/mcp`) wires on one port,
-    behind an optional default-deny capability floor.
+    Anthropic Messages (`/v1/messages`, `/v1/messages/count_tokens`), native
+    Gemini (`/v1beta/models/{model}:generateContent`), fak-native adjudication
+    and session control (`/v1/fak/*`), and MCP-over-HTTP (`/mcp`) wires on one
+    port, behind an optional default-deny capability floor.
 
-    This spec is the companion to the human-readable reference
-    [`docs/fak/api-reference.md`](api-reference.md). Every path, method, and
-    schema below is sourced from the gateway route table
-    (`internal/gateway/http.go`) and the wire DTOs (`internal/gateway/wire.go`,
-    `gateway.go`, `coherence.go`, `embeddings.go`, `moderations.go`, `debug.go`).
-    Field names are the exact JSON tags.
+    This spec is the **source of truth client SDKs are generated from** (F-007):
+    feed it to `openapi-generator` / `openapi-python-client` to emit a Python,
+    TypeScript, or Go client. It is the companion to the human-readable
+    reference [`docs/fak/api-reference.md`](api-reference.md). Every path,
+    method, and schema below is sourced from the gateway route table
+    (`internal/gateway/http.go`, `routeTable`) and the wire DTOs
+    (`internal/gateway/wire.go`, `gateway.go`, `coherence.go`, `embeddings.go`,
+    `moderations.go`, `debug.go`). Field names are the exact JSON tags.
+
+    The spec is gated against route drift: `internal/gateway/openapi_spec_test.go`
+    ranges over the live `routeTable` and fails the build if any served route is
+    missing a path here — so a generated SDK can never silently lag the surface
+    `fak serve` exposes.
 
     A refusal (DENY / QUARANTINE / TRANSFORM) is a **successful 200** carried as a
     value in the `verdict` object — HTTP error statuses are reserved for malformed
@@ -52,8 +60,10 @@ tags:
     description: OpenAI-compatible surface (`/v1/chat/completions`, `/v1/embeddings`, `/v1/moderations`, `/v1/models`).
   - name: Anthropic
     description: Native Anthropic Messages surface — the wire Claude Code uses.
+  - name: Gemini
+    description: Native Gemini generateContent surface — the wire the Gemini CLI / google-genai SDKs use.
   - name: fak-native
-    description: The simplest non-Go integration — one POST, one verdict (`/v1/fak/*`).
+    description: The simplest non-Go integration — one POST, one verdict (`/v1/fak/*`), plus the session DRIVE-state control surface.
   - name: MCP
     description: MCP-over-HTTP — JSON-RPC 2.0 over a single POST (`/mcp`).
   - name: Operational
@@ -264,6 +274,61 @@ paths:
         '400': { $ref: '#/components/responses/BadRequest' }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '405': { $ref: '#/components/responses/MethodNotAllowed' }
+
+  # -------------------------------------------------------------------------
+  # Native Gemini generateContent surface
+  # -------------------------------------------------------------------------
+  /v1beta/models/{model}:generateContent:
+    post:
+      tags: [Gemini]
+      summary: Adjudicating generateContent proxy
+      description: |
+        The adjudication proxy on the Gemini `generateContent` wire — the
+        Gemini-CLI / google-genai-facing sibling of `/v1/chat/completions` and
+        `/v1/messages`. The inbound `contents` are decoded into the canonical
+        transcript, the turn is run through the same planner + kernel boundary,
+        and any proposed `functionCall` is adjudicated before the caller sees
+        it. The method suffix selects buffered vs streaming: `:generateContent`
+        returns a single response; `:streamGenerateContent` streams. Both the
+        `/v1beta/` and `/v1/` version prefixes are accepted. Authenticate with
+        `x-goog-api-key: <token>` (or `?key=<token>`), the schemes the Gemini
+        clients use, when `--require-key-env` is set.
+      parameters:
+        - name: model
+          in: path
+          required: true
+          schema: { type: string }
+          description: 'The model id, as the Gemini path segment before the `:` method (e.g. `gemini-1.5-pro`). Echoed; the served model is fixed at boot.'
+        - $ref: '#/components/parameters/XTraceId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+              description: A Gemini `generateContent` request body (`contents`, `tools`, `systemInstruction`, `generationConfig`, …). Unknown fields are ignored for drop-in compatibility.
+            example:
+              contents:
+                - { role: user, parts: [{ text: "Say hello." }] }
+      responses:
+        '200':
+          description: A Gemini `generateContent` response (`candidates`, `usageMetadata`); proposed `functionCall` parts that the kernel denied are dropped.
+          headers:
+            X-Trace-Id: { $ref: '#/components/headers/XTraceIdResp' }
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '405': { $ref: '#/components/responses/MethodNotAllowed' }
+        '502':
+          description: Upstream model error (the raw provider body is not forwarded).
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
 
   # -------------------------------------------------------------------------
   # fak-native surface — one POST, one verdict
@@ -556,6 +621,181 @@ paths:
               schema: { $ref: '#/components/schemas/ErrorResponse' }
               example: { error: { message: "trace reset is not configured", type: "invalid_request_error", code: null, param: null } }
         '405': { $ref: '#/components/responses/MethodNotAllowed' }
+
+  /v1/fak/trace/{trace_id}:
+    get:
+      tags: [fak-native]
+      summary: Observe a session's IFC taint mark
+      description: |
+        The read-only complement of `/v1/fak/trace/reset`: returns the current
+        IFC taint high-water mark for a live/recent served session, so an
+        operator can see whether a session's taint is rising WITHOUT parsing
+        stderr. The observe implementation is injected by the host CLI; a
+        deployment that did not wire it returns 404.
+      parameters:
+        - name: trace_id
+          in: path
+          required: true
+          schema: { type: string }
+          description: The session id whose taint mark to read.
+      responses:
+        '200':
+          description: The session's current taint high-water mark.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TraceObserveResponse' }
+              example: { trace_id: t-7f3a9c, taint: untrusted, dangerous: true }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404':
+          description: Trace observe is not configured for this deployment.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+        '405': { $ref: '#/components/responses/MethodNotAllowed' }
+
+  /v1/fak/sessions:
+    get:
+      tags: [fak-native]
+      summary: Snapshot every live session's drive state
+      description: |
+        The MULTI-session read: a point-in-time snapshot of every retained
+        session's DRIVE state (run-state, budget, priority, pace), in the
+        scheduler's Snapshot order (priority ascending — lower yields first
+        under contention — ties broken by most-recently-changed). The snapshot
+        source is injected by the host CLI; a deployment that did not wire it
+        returns 404, never a silent empty reading.
+      responses:
+        '200':
+          description: Every retained session's drive state plus the count.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SessionListResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404':
+          description: Session list is not configured for this deployment.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+        '405': { $ref: '#/components/responses/MethodNotAllowed' }
+
+  /v1/fak/session/{trace_id}:
+    get:
+      tags: [fak-native]
+      summary: Observe one session's drive state
+      description: |
+        Returns one session's DRIVE state — run-state, budget, priority, pace —
+        the single-session twin of `/v1/fak/sessions`. The observe
+        implementation is injected by the host CLI; a deployment that did not
+        wire it returns 404.
+      parameters:
+        - name: trace_id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: The session's drive state.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SessionState' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404':
+          description: Session observe is not configured for this deployment.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+        '405': { $ref: '#/components/responses/MethodNotAllowed' }
+
+  /v1/fak/session/{trace_id}/{verb}:
+    post:
+      tags: [fak-native]
+      summary: Apply a session control verb
+      description: |
+        Applies a control verb to a live session. `{verb}` is one of `run`
+        (set run-state with a closed-vocabulary reason), `budget`, `pace`,
+        `priority`, or `steer` (enqueue operator text onto the session's
+        a2achan bus). Exactly the body field named by the verb is read. An
+        optional `if_rev` is a compare-and-set guard — a lost race returns 409.
+        A refused `steer` (tainted / over-scoped / uncapped) returns 422. The
+        control implementation is injected by the host CLI; a deployment that
+        did not wire it returns 404.
+      parameters:
+        - name: trace_id
+          in: path
+          required: true
+          schema: { type: string }
+        - name: verb
+          in: path
+          required: true
+          schema: { type: string, enum: [run, budget, pace, priority, steer] }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/SessionControlRequest' }
+            examples:
+              run:
+                summary: Pause a running session
+                value: { run: paused, reason: OPERATOR_HOLD }
+              budget:
+                summary: Cap remaining turns
+                value: { budget: { turns_left: 5, tokens_left: -1 } }
+              steer:
+                summary: 'Enqueue operator guidance (verb path .../steer)'
+                value: { text: "focus on the failing test first" }
+      responses:
+        '200':
+          description: The post-control session drive state (its `rev` is bumped).
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SessionState' }
+        '202':
+          description: 'A `steer` was accepted and enqueued — returns `{ "trace_id": "...", "steered": true }`.'
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404':
+          description: Session control is not configured for this deployment.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+        '405': { $ref: '#/components/responses/MethodNotAllowed' }
+        '409':
+          description: Terminal session, or an `if_rev` CAS guard lost the race — re-read and retry.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+        '422':
+          description: A `steer` was refused by the adjudication floor (tainted / over-scoped / uncapped).
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+
+  /v1/fak/tasks:
+    get:
+      tags: [fak-native]
+      summary: Read-only process task-manager snapshot
+      description: |
+        A point-in-time snapshot of the process task manager — task/step and
+        resource accounting only, never prompt or tool-result payload bytes.
+        Inert by default: 404 unless the host installed a snapshot provider
+        (`SetTasksSnapshotProvider`) AND the operator enabled the task manager
+        (`FAK_TASKMGR=1`). The snapshot shape is host-defined.
+      responses:
+        '200':
+          description: The host-defined task-manager snapshot.
+          content:
+            application/json:
+              schema: { type: object, additionalProperties: true }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404':
+          description: 'Task manager disabled — returns `{ "error": "task manager disabled; enable with FAK_TASKMGR=1" }`.'
+          content:
+            application/json:
+              schema: { type: object, additionalProperties: true }
+        '405':
+          description: Wrong HTTP method (GET only).
 
   # -------------------------------------------------------------------------
   # MCP-over-HTTP
@@ -872,6 +1112,70 @@ components:
       properties:
         reset: { type: boolean }
         trace_id: { type: string }
+
+    TraceObserveResponse:
+      type: object
+      description: The read-only IFC taint high-water mark for a served session.
+      properties:
+        trace_id: { type: string }
+        taint: { type: string, description: 'The taint level label (e.g. `trusted`, `untrusted`).' }
+        dangerous: { type: boolean, description: True when the mark has crossed the dangerous threshold for this session. }
+
+    SessionBudget:
+      type: object
+      description: A session's remaining budget. `turns_left`/`tokens_left` at -1 mean no cap (unbounded); `context_tokens_left` uses 0 as off.
+      properties:
+        turns_left: { type: integer }
+        tokens_left: { type: integer }
+        context_tokens_left: { type: integer }
+
+    SessionPace:
+      type: object
+      description: A session's pacing caps. Zero on either axis means that axis is uncapped.
+      properties:
+        max_tokens_per_turn: { type: integer }
+        min_turn_gap_ms: { type: integer }
+
+    SessionState:
+      type: object
+      description: One session's DRIVE state — the scheduler-visible run-state, budget, priority, and pace.
+      properties:
+        trace_id: { type: string }
+        run: { type: string, description: 'The run-state token (e.g. `running`, `paused`, `draining`, `stopped`).' }
+        budget: { $ref: '#/components/schemas/SessionBudget' }
+        priority: { type: integer, description: Lower yields first under contention. }
+        pace: { $ref: '#/components/schemas/SessionPace' }
+        reason: { type: string, description: 'Closed-vocabulary reason for the current run-state (present when set).' }
+        continuation_id: { type: string }
+        parent_trace: { type: string }
+        generation: { type: integer }
+        rev: { type: integer, description: The monotonic revision; bumped on every control verb (use as the next `if_rev` CAS guard). }
+
+    SessionControlRequest:
+      type: object
+      description: The body of POST /v1/fak/session/{trace_id}/{verb}. Exactly the field named by the path `verb` is read.
+      properties:
+        run: { type: string, description: 'verb `run` — the target run-state token.' }
+        reason: { type: string, description: 'verb `run` — a reason token from the closed vocabulary.' }
+        budget:
+          allOf:
+            - $ref: '#/components/schemas/SessionBudget'
+          description: 'verb `budget`.'
+        pace:
+          allOf:
+            - $ref: '#/components/schemas/SessionPace'
+          description: 'verb `pace`.'
+        priority: { type: integer, description: 'verb `priority`.' }
+        if_rev: { type: integer, description: Optional compare-and-set guard; the control is refused (409) if the live `rev` differs. }
+
+    SessionListResponse:
+      type: object
+      description: The snapshot of every retained session's drive state plus its count.
+      properties:
+        sessions:
+          type: array
+          items: { $ref: '#/components/schemas/SessionState' }
+        count: { type: integer, description: len(sessions), surfaced so a "0 live sessions" reading is explicit. }
 
     # ----- OpenAI chat wire ---------------------------------------------------
     ChatRequest:

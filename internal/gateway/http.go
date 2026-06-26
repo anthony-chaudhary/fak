@@ -22,48 +22,78 @@ import (
 // an untrusted client). 4 MiB is far above any real tool-args / chat payload.
 const maxBody = 4 << 20
 
-// Handler builds the gateway's HTTP routes wrapped in the optional bearer-auth
-// middleware. Routes: the OpenAI-compatible surface (/v1/chat/completions,
-// /v1/embeddings, /v1/moderations, /v1/models), the fak-native syscall/adjudicate
-// JSON endpoints, policy reload, Prometheus metrics (/metrics), expvar-style
-// diagnostics (/debug/vars), MCP-over-HTTP (/mcp), and an unauthenticated health
-// check (/healthz).
+// gatewayRoute pairs a ServeMux registration pattern with its handler. Handler
+// builds the mux from routeTable() rather than a sequence of inline HandleFunc
+// calls so that the served HTTP surface has a single, enumerable source of
+// truth — which the OpenAPI spec drift gate (openapi_spec_test.go) ranges over
+// to assert docs/fak/openapi.yaml documents every route (#205, F-007: the spec
+// the client SDKs are generated from must not drift behind the served surface).
+type gatewayRoute struct {
+	pattern string
+	handler http.HandlerFunc
+}
+
+// routeTable is the canonical, ordered list of the gateway's HTTP routes — the
+// single source of truth Handler registers and the OpenAPI spec test verifies
+// against. ServeMux dispatch is by pattern specificity, not registration order,
+// so building the mux from this slice is behavior-identical to inline
+// registration.
+func (s *Server) routeTable() []gatewayRoute {
+	return []gatewayRoute{
+		// OpenAI-compatible surface.
+		{"/v1/chat/completions", s.handleChatCompletions},
+		{"/v1/embeddings", s.handleEmbeddings},
+		{"/v1/moderations", s.handleModerations},
+		// Anthropic Messages surface.
+		{"/v1/messages", s.handleAnthropicMessages},
+		{"/v1/messages/count_tokens", s.handleAnthropicCountTokens},
+		// Native Gemini generateContent surface (/v1beta/models/{model}:{method}).
+		{"/v1beta/", s.handleGeminiGenerateContent},
+		// fak-native surface — one POST, one verdict.
+		{"/v1/fak/syscall", s.handleFakSyscall},
+		{"/v1/fak/adjudicate", s.handleFakAdjudicate},
+		{"/v1/fak/admit", s.handleFakAdmit},
+		{"/v1/fak/changes", s.handleFakChanges},
+		{"/v1/fak/events", s.handleFakEvents},
+		{"/v1/fak/revoke", s.handleFakRevoke},
+		{"/v1/fak/context/change", s.handleFakContextChange},
+		{"/v1/fak/policy/reload", s.handleFakPolicyReload},
+		{"/v1/fak/trace/reset", s.handleFakTraceReset},
+		{"/v1/fak/trace/", s.handleFakTraceObserve},
+		// /v1/fak/session/ is the DRIVE-state control surface: GET /v1/fak/session/{id}
+		// observes one session's run-state/budget/priority/pace; POST
+		// /v1/fak/session/{id}/{verb} applies a control verb (run|budget|pace|priority).
+		// One subtree handler dispatches on method + the trailing path segments.
+		{"/v1/fak/session/", s.handleFakSession},
+		// /v1/fak/sessions (no trailing slash) is the MULTI-session read: a snapshot of
+		// every live session's drive state. Registered distinctly from the singular
+		// /v1/fak/session/ subtree, so a single-id request never lands here.
+		{"/v1/fak/sessions", s.handleFakSessions},
+		// /v1/fak/tasks is the read-only process task-manager snapshot. Inert (404)
+		// unless a host installs a provider via SetTasksSnapshotProvider and the
+		// operator enables it; the snapshot carries accounting only, no payload bytes.
+		{"/v1/fak/tasks", s.handleFakTasks},
+		{"/v1/models", s.handleModels},
+		// MCP-over-HTTP, operational endpoints.
+		{"/mcp", s.handleMCPHTTP},
+		{"/healthz", s.handleHealth},
+		{"/metrics", s.handleMetrics},
+		{"/debug/vars", s.handleDebugVars},
+	}
+}
+
+// Handler builds the gateway's HTTP routes (routeTable) wrapped in the metrics
+// and optional bearer-auth middleware. Routes: the OpenAI-compatible surface
+// (/v1/chat/completions, /v1/embeddings, /v1/moderations, /v1/models), the
+// Anthropic Messages and native Gemini surfaces, the fak-native
+// syscall/adjudicate JSON endpoints, policy reload, Prometheus metrics
+// (/metrics), expvar-style diagnostics (/debug/vars), MCP-over-HTTP (/mcp), and
+// an unauthenticated health check (/healthz).
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
-	mux.HandleFunc("/v1/chat/completions", s.handleChatCompletions)
-	mux.HandleFunc("/v1/embeddings", s.handleEmbeddings)
-	mux.HandleFunc("/v1/moderations", s.handleModerations)
-	mux.HandleFunc("/v1/messages", s.handleAnthropicMessages)
-	mux.HandleFunc("/v1/messages/count_tokens", s.handleAnthropicCountTokens)
-	mux.HandleFunc("/v1beta/", s.handleGeminiGenerateContent)
-	mux.HandleFunc("/v1/fak/syscall", s.handleFakSyscall)
-	mux.HandleFunc("/v1/fak/adjudicate", s.handleFakAdjudicate)
-	mux.HandleFunc("/v1/fak/admit", s.handleFakAdmit)
-	mux.HandleFunc("/v1/fak/changes", s.handleFakChanges)
-	mux.HandleFunc("/v1/fak/events", s.handleFakEvents)
-	mux.HandleFunc("/v1/fak/revoke", s.handleFakRevoke)
-	mux.HandleFunc("/v1/fak/context/change", s.handleFakContextChange)
-	mux.HandleFunc("/v1/fak/policy/reload", s.handleFakPolicyReload)
-	mux.HandleFunc("/v1/fak/trace/reset", s.handleFakTraceReset)
-	mux.HandleFunc("/v1/fak/trace/", s.handleFakTraceObserve)
-	// /v1/fak/session/ is the DRIVE-state control surface: GET /v1/fak/session/{id}
-	// observes one session's run-state/budget/priority/pace; POST
-	// /v1/fak/session/{id}/{verb} applies a control verb (run|budget|pace|priority).
-	// One subtree handler dispatches on method + the trailing path segments.
-	mux.HandleFunc("/v1/fak/session/", s.handleFakSession)
-	// /v1/fak/sessions (no trailing slash) is the MULTI-session read: a snapshot of
-	// every live session's drive state. Registered distinctly from the singular
-	// /v1/fak/session/ subtree, so a single-id request never lands here.
-	mux.HandleFunc("/v1/fak/sessions", s.handleFakSessions)
-	// /v1/fak/tasks is the read-only process task-manager snapshot. Inert (404)
-	// unless a host installs a provider via SetTasksSnapshotProvider and the
-	// operator enables it; the snapshot carries accounting only, no payload bytes.
-	mux.HandleFunc("/v1/fak/tasks", s.handleFakTasks)
-	mux.HandleFunc("/v1/models", s.handleModels)
-	mux.HandleFunc("/mcp", s.handleMCPHTTP)
-	mux.HandleFunc("/healthz", s.handleHealth)
-	mux.HandleFunc("/metrics", s.handleMetrics)
-	mux.HandleFunc("/debug/vars", s.handleDebugVars)
+	for _, rt := range s.routeTable() {
+		mux.HandleFunc(rt.pattern, rt.handler)
+	}
 	return s.withMetrics(s.withAuth(mux))
 }
 
