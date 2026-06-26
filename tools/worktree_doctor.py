@@ -30,11 +30,34 @@ conservative (a commit on remote-master but not in the local ref reads as
 date. It never uses `git worktree remove --force` and never switches the primary's
 branch for you (a mid-merge primary is the operator's to resolve).
 
+THE TRUNK IS AUTO-DETECTED
+--------------------------
+The invariant says "on the trunk". The trunk's remote ref is detected from the repo
+(`origin/HEAD` -> e.g. `origin/main`), so the doctor anchors on the REAL trunk instead of
+a hardcoded `master`. (This repo is `main`; a stale `origin/master` default made the
+merged-check meaningless and reported the on-main primary as "off master" every run.)
+Override with --master-ref when you must.
+
+THE DISPOSABLE-WORKTREE SWEEP (--sweep-disposable)
+--------------------------------------------------
+The convergence logic above is conservative by design: it NEVER deletes a worktree that
+carries work. But this repo's real sprawl is the DETACHED worktrees the harness/agents
+spin into scratch dirs (`.../scratchpad/<name>`, `C:/work/pr-work/<name>`). Per AGENTS.md
+we "never open a worktree", so any worktree under those roots is a leftover, not canonical
+— yet many carry uncommitted scratch, so the safe doctor leaves them to pile up forever.
+The sweep closes that gap WITHOUT losing anything: it ARCHIVES each dirty worktree's diff
++ untracked files first (--archive-dir), then force-removes it. A freshness guard
+(--fresh-minutes) spares any worktree touched recently — a live session's scratch is left
+alone while a dead session's is reaped. This is the ONLY path that uses --force, and only
+after the work is safely archived.
+
 USAGE
 -----
   worktree_doctor.py                 # report: per-worktree disposition + safe plan
   worktree_doctor.py --json          # same, machine-readable (for cron/automation)
   worktree_doctor.py --prune         # execute ONLY the provably-safe removals; pass the rest
+  worktree_doctor.py --sweep-disposable   # archive-then-remove dead scratch worktrees (temp/pr-work)
+  worktree_doctor.py --fresh-minutes 180  # spare scratch worktrees touched in the last N minutes
   worktree_doctor.py --fetch         # refresh <master-ref>'s remote first (more accurate merged-check)
   worktree_doctor.py --master-ref origin/main
   worktree_doctor.py --allow-branch fak-v0.1     # an intentional long-lived worktree: RETAIN it,
@@ -68,7 +91,12 @@ import os
 import subprocess
 import sys
 
-DEFAULT_MASTER_REF = "origin/master"
+DEFAULT_MASTER_REF = "origin/master"  # last-resort fallback; main() AUTO-DETECTS the trunk
+
+# Path segments under which an extra worktree is ALWAYS a harness/agent leftover (never
+# canonical) — the scratch areas Claude/agents spin worktrees into. Matched per-segment so
+# both .../<uuid>/scratchpad/<name> and C:/work/pr-work/<name> qualify regardless of root.
+DISPOSABLE_MARKERS = ("scratchpad", "pr-work")
 
 
 def _git(args, cwd=None):
@@ -77,6 +105,19 @@ def _git(args, cwd=None):
         ["git", *args], cwd=cwd, capture_output=True, text=True
     )
     return p.returncode, p.stdout.strip(), p.stderr.strip()
+
+
+def detect_master_ref(repo, fallback=DEFAULT_MASTER_REF):
+    """Resolve the trunk's remote-tracking ref from the repo itself, so the doctor anchors
+    on the REAL trunk (this repo is `main`, not `master`). Prefer origin/HEAD's target;
+    then the first of origin/main / origin/master that exists; else the fallback."""
+    rc, out, _ = _git(["symbolic-ref", "--quiet", "refs/remotes/origin/HEAD"], cwd=repo)
+    if rc == 0 and out.startswith("refs/remotes/"):
+        return out[len("refs/remotes/"):]
+    for cand in ("origin/main", "origin/master"):
+        if _git(["rev-parse", "--verify", "--quiet", cand + "^{commit}"], cwd=repo)[0] == 0:
+            return cand
+    return fallback
 
 
 # --------------------------------------------------------------------------- #
@@ -154,7 +195,26 @@ def gather_signals(wt, master_ref=DEFAULT_MASTER_REF):
     sig["unmerged_to_master"] = _count(["rev-list", "--count", f"{master_ref}..HEAD"], path)
     # commits not on this branch's own upstream (informational).
     sig["unpushed"] = _count(["rev-list", "--count", "@{u}..HEAD"], path, default=None)
+    # crude "last activity" proxy for the disposable sweep's freshness guard.
+    sig["age_seconds"] = worktree_age_seconds(path)
     return sig
+
+
+def worktree_age_seconds(path, now=None):
+    """Seconds since the worktree was last touched, as a crude liveness proxy: the max
+    mtime of its working dir and its `.git` pointer (both bump on git activity). Returns
+    None if unreadable (the sweep treats unknown age as stale)."""
+    import time
+    now = time.time() if now is None else now
+    mtimes = []
+    for p in (path, os.path.join(path, ".git")):
+        try:
+            mtimes.append(os.path.getmtime(p))
+        except OSError:
+            pass
+    if not mtimes:
+        return None
+    return max(0.0, now - max(mtimes))
 
 
 def _count(args, cwd, default=0):
@@ -186,9 +246,9 @@ def issues_of(sig):
     return out
 
 
-def is_on_master(sig):
-    """Positional: this worktree's branch is master (regardless of cleanliness)."""
-    return sig.get("branch") == "master"
+def is_on_master(sig, trunk="master"):
+    """Positional: this worktree's branch IS the trunk (regardless of cleanliness)."""
+    return sig.get("branch") == trunk
 
 
 def primary_hard_issues(sig):
@@ -203,8 +263,8 @@ def primary_hard_issues(sig):
     return out
 
 
-def is_clean_master(sig):
-    return is_on_master(sig) and not issues_of(sig)
+def is_clean_master(sig, trunk="master"):
+    return is_on_master(sig, trunk) and not issues_of(sig)
 
 
 def safe_to_remove(sig):
@@ -212,7 +272,7 @@ def safe_to_remove(sig):
     return (not sig.get("is_primary")) and not issues_of(sig)
 
 
-def make_plan(sigs, master_ref=DEFAULT_MASTER_REF, allow_branches=()):
+def make_plan(sigs, master_ref=DEFAULT_MASTER_REF, allow_branches=(), trunk="master"):
     """Compose per-worktree signals into a safe convergence plan.
 
     keeper            the single worktree to keep (the primary if it is a clean
@@ -238,10 +298,10 @@ def make_plan(sigs, master_ref=DEFAULT_MASTER_REF, allow_branches=()):
     """
     allow = set(allow_branches or ())
     primary = next((s for s in sigs if s.get("is_primary")), None)
-    clean_masters = [s for s in sigs if is_clean_master(s)]
+    clean_masters = [s for s in sigs if is_clean_master(s, trunk)]
 
     keeper = None
-    if primary and is_clean_master(primary):
+    if primary and is_clean_master(primary, trunk):
         keeper = primary
     elif clean_masters:
         keeper = clean_masters[0]
@@ -269,7 +329,7 @@ def make_plan(sigs, master_ref=DEFAULT_MASTER_REF, allow_branches=()):
             continue
         # never delete the last remaining path to master.
         would_be_last_master = (
-            is_clean_master(s)
+            is_clean_master(s, trunk)
             and keeper is None
             and len([m for m in clean_masters if m is not s]) == 0
         )
@@ -279,7 +339,7 @@ def make_plan(sigs, master_ref=DEFAULT_MASTER_REF, allow_branches=()):
 
     # "off master" is a POSITIONAL defect (wrong branch / detached), NOT dirtiness.
     # A dirty primary that is already on master is the shared-worktree steady state.
-    primary_off_master = bool(primary) and not is_on_master(primary)
+    primary_off_master = bool(primary) and not is_on_master(primary, trunk)
     primary_stuck = primary_hard_issues(primary) if primary else []
     non_retained = [s for s in sigs if not is_retained(s)]
     converged = len(non_retained) == 1 and bool(keeper) and keeper.get("is_primary")
@@ -287,24 +347,24 @@ def make_plan(sigs, master_ref=DEFAULT_MASTER_REF, allow_branches=()):
 
     notes = []
     if primary_off_master:
-        why = issues_of(primary) or [f"on '{primary.get('branch')}', not master"]
+        why = issues_of(primary) or [f"on '{primary.get('branch')}', not {trunk}"]
         notes.append(
-            f"primary worktree {primary['path']} is off master: {', '.join(why)} "
-            f"(resolve, then `git -C {primary['path']} switch master`)"
+            f"primary worktree {primary['path']} is off {trunk}: {', '.join(why)} "
+            f"(resolve, then `git -C {primary['path']} switch {trunk}`)"
         )
     if primary_stuck:
         notes.append(
             f"primary worktree {primary['path']} on master but stuck: "
             f"{', '.join(primary_stuck)} (resolve before it blocks further work)"
         )
-    master_positioned = any(is_on_master(s) for s in sigs)
+    master_positioned = any(is_on_master(s, trunk) for s in sigs)
     if keeper is None and not master_positioned:
-        notes.append("no master worktree exists yet — nothing is safe to keep/prune")
+        notes.append(f"no {trunk} worktree exists yet — nothing is safe to keep/prune")
     elif keeper is None:
         # primary (or another worktree) is on master but dirty: the shared-worktree
         # norm. Safe surplus worktrees are still pruned; this is informational only.
         notes.append(
-            "primary is on master with in-flight work (normal for the shared worktree); "
+            f"primary is on {trunk} with in-flight work (normal for the shared worktree); "
             "safe surplus worktrees are still pruned"
         )
     for r in retained:
@@ -369,9 +429,9 @@ def do_prune_branches(names, repo, dry_run=True):
 # Rendering + actions.
 # --------------------------------------------------------------------------- #
 
-def render_text(sigs, plan):
+def render_text(sigs, plan, trunk="master"):
     lines = []
-    lines.append(f"worktree doctor — invariant: one worktree on master (ref {plan['master_ref']})")
+    lines.append(f"worktree doctor — invariant: one worktree on {trunk} (ref {plan['master_ref']})")
     lines.append("")
     retained_paths = {r["path"] for r in plan.get("retained", [])}
     for s in sigs:
@@ -381,7 +441,7 @@ def render_text(sigs, plan):
             state = "RETAINED (allow-listed): " + (", ".join(iss) if iss else "clean")
         elif not iss:
             state = "CLEAN"
-        elif s.get("is_primary") and is_on_master(s) and not primary_hard_issues(s):
+        elif s.get("is_primary") and is_on_master(s, trunk) and not primary_hard_issues(s):
             # shared-worktree steady state: on master with only soft (dirty/untracked)
             # issues — information, not a block. Never screams BLOCKED at the norm.
             state = "IN-FLIGHT (shared worktree): " + ", ".join(iss)
@@ -423,6 +483,117 @@ def do_prune(plan, dry_run=True):
     return results
 
 
+# --------------------------------------------------------------------------- #
+# Disposable-worktree sweep — the harness/agent scratch leftovers.
+#
+# The doctor above converges BRANCH worktrees safely and, by design, never deletes one
+# that carries work. But this repo's real sprawl is the DETACHED worktrees the harness and
+# agents spin into scratch dirs (.../scratchpad/<name>, C:/work/pr-work/<name>). Per
+# AGENTS.md we "never open a worktree", so any worktree under those roots is a leftover —
+# yet many carry uncommitted scratch the safe doctor (rightly) refuses to delete, so they
+# pile up forever. The sweep closes that gap WITHOUT losing anything: ARCHIVE each dirty
+# worktree's diff + untracked first, THEN force-remove. A freshness guard spares any
+# worktree touched recently (a live session); a dead session's scratch is reaped.
+# --------------------------------------------------------------------------- #
+
+def _has_disposable_segment(path, markers):
+    """True if any path segment of `path` equals a disposable marker (case-insensitive)."""
+    parts = {p.lower() for p in os.path.normpath(path).replace("\\", "/").split("/") if p}
+    return any(m.lower() in parts for m in markers)
+
+
+def is_disposable_path(path, roots=(), markers=DISPOSABLE_MARKERS):
+    """PURE: True if `path` is a harness/agent scratch worktree — under a disposable root,
+    or containing a disposable path segment (scratchpad / pr-work)."""
+    if not path:
+        return False
+    np = os.path.normcase(os.path.normpath(path))
+    for r in roots:
+        if not r:
+            continue
+        nr = os.path.normcase(os.path.normpath(r))
+        if np == nr or np.startswith(nr + os.sep):
+            return True
+    return _has_disposable_segment(path, markers)
+
+
+def sweep_candidates(sigs, roots=(), markers=DISPOSABLE_MARKERS, fresh_seconds=0,
+                     keep_paths=()):
+    """PURE: which worktrees the sweep will reap. A candidate is non-primary, lives in a
+    disposable location, is not explicitly kept, and was last touched longer ago than
+    fresh_seconds (an unknown age reads as +inf -> stale -> reaped). The freshness guard
+    is what spares a LIVE session's scratch worktree. Records carry whether work must be
+    archived first (has_work)."""
+    keep = {os.path.normcase(os.path.normpath(p)) for p in keep_paths if p}
+    out = []
+    for s in sigs:
+        if s.get("is_primary"):
+            continue
+        path = s.get("path")
+        if not path or not is_disposable_path(path, roots, markers):
+            continue
+        if os.path.normcase(os.path.normpath(path)) in keep:
+            continue
+        age = s.get("age_seconds")
+        age = float("inf") if age is None else age
+        if age < fresh_seconds:
+            continue  # touched recently -> a live session; leave it
+        has_work = bool(s.get("dirty")) or bool(s.get("untracked")) or bool(s.get("mid_op"))
+        out.append({"path": path, "branch": s.get("branch"),
+                    "detached": s.get("detached", False), "has_work": has_work,
+                    "age_seconds": None if age == float("inf") else age})
+    return out
+
+
+def archive_worktree(path, archive_dir, name=None):
+    """Preserve a worktree's uncommitted work before removal: write its tracked diff
+    (git diff HEAD) + base commit, and copy its untracked files, into archive_dir/<name>.
+    Best-effort; returns a summary dict. This is what makes the force-remove loss-free."""
+    import shutil
+    name = name or os.path.basename(os.path.normpath(path)) or "wt"
+    dest = os.path.join(archive_dir, name)
+    os.makedirs(dest, exist_ok=True)
+    summary = {"name": name, "dir": dest, "tracked_patch_bytes": 0, "untracked": 0}
+    rc, head, _ = _git(["rev-parse", "HEAD"], cwd=path)
+    if rc == 0:
+        with open(os.path.join(dest, "base-commit.txt"), "w", encoding="utf-8") as fh:
+            fh.write(head + "\n")
+    rc, diff, _ = _git(["diff", "HEAD"], cwd=path)
+    if rc == 0 and diff:
+        with open(os.path.join(dest, "tracked.patch"), "w", encoding="utf-8", newline="\n") as fh:
+            fh.write(diff + "\n")
+        summary["tracked_patch_bytes"] = len(diff)
+    rc, others, _ = _git(["ls-files", "--others", "--exclude-standard"], cwd=path)
+    if rc == 0:
+        for rel in [ln for ln in others.splitlines() if ln.strip()]:
+            try:
+                dst = os.path.join(dest, "untracked", rel)
+                os.makedirs(os.path.dirname(dst), exist_ok=True)
+                shutil.copy2(os.path.join(path, rel), dst)
+                summary["untracked"] += 1
+            except OSError:
+                pass
+    return summary
+
+
+def do_sweep(candidates, archive_dir, repo, dry_run=True):
+    """Archive any work, then `git worktree remove --force` each candidate. Force is safe
+    here ONLY because the work was archived first. Returns per-candidate results."""
+    results = []
+    for c in candidates:
+        if dry_run:
+            results.append({"path": c["path"], "removed": False, "dry_run": True,
+                            "archived": None})
+            continue
+        archived = archive_worktree(c["path"], archive_dir) if c.get("has_work") else None
+        rc, _, err = _git(["worktree", "remove", "--force", c["path"]], cwd=repo)
+        results.append({"path": c["path"], "removed": rc == 0, "archived": archived,
+                        "error": err if rc != 0 else None})
+    if any(r.get("removed") for r in results):
+        _git(["worktree", "prune"], cwd=repo)
+    return results
+
+
 def collect(repo, master_ref, fetch):
     if fetch:
         remote = master_ref.split("/", 1)[0] if "/" in master_ref else "origin"
@@ -434,10 +605,19 @@ def collect(repo, master_ref, fetch):
             if not w.get("bare")]
 
 
+def _default_archive_dir():
+    import datetime
+    import tempfile
+    base = os.path.join(os.environ.get("LOCALAPPDATA", tempfile.gettempdir()),
+                        "Fleet", "watchdog", "worktree-archive")
+    return os.path.join(base, datetime.date.today().isoformat())
+
+
 def main(argv=None):
-    ap = argparse.ArgumentParser(description="Converge to one worktree on master, safely.")
+    ap = argparse.ArgumentParser(description="Converge to one worktree on the trunk, safely.")
     ap.add_argument("--repo", default=".", help="repo path (default: cwd)")
-    ap.add_argument("--master-ref", default=DEFAULT_MASTER_REF)
+    ap.add_argument("--master-ref", default=None,
+                    help="trunk remote ref (default: auto-detect origin/HEAD, e.g. origin/main)")
     ap.add_argument("--json", action="store_true")
     ap.add_argument("--prune", action="store_true", help="remove the safe worktrees (else dry-run)")
     ap.add_argument("--fetch", action="store_true", help="refresh master-ref's remote first")
@@ -448,10 +628,28 @@ def main(argv=None):
     ap.add_argument("--prune-branches", action="store_true",
                     help="also delete merged, non-checked-out, non-protected local branches "
                          "(git branch -d) and `git remote prune` stale remote-tracking refs")
+    ap.add_argument("--sweep-disposable", action="store_true",
+                    help="archive-then-force-remove dead scratch worktrees under disposable "
+                         "roots (temp / pr-work / scratchpad); else dry-run-report them")
+    ap.add_argument("--disposable-root", action="append", default=[], metavar="DIR",
+                    help="extra root whose worktrees are disposable (repeatable)")
+    ap.add_argument("--fresh-minutes", type=float, default=180.0,
+                    help="spare a scratch worktree touched within this many minutes "
+                         "(protects a live session; default 180)")
+    ap.add_argument("--keep-path", action="append", default=[], metavar="DIR",
+                    help="never sweep this worktree path (repeatable; e.g. the current session)")
+    ap.add_argument("--archive-dir", default=None,
+                    help="where sweep archives a dirty worktree's work before removal "
+                         "(default: %%LOCALAPPDATA%%/Fleet/watchdog/worktree-archive/<date>)")
     args = ap.parse_args(argv)
 
+    # Anchor on the REAL trunk: detect origin/HEAD unless the operator pinned --master-ref.
+    master_ref = args.master_ref or detect_master_ref(args.repo)
+    trunk = master_ref.split("/", 1)[-1]
+    archive_dir = args.archive_dir or _default_archive_dir()
+
     try:
-        sigs = collect(args.repo, args.master_ref, args.fetch)
+        sigs = collect(args.repo, master_ref, args.fetch)
     except Exception as e:  # not a git repo / git error
         if args.json:
             print(json.dumps({"error": str(e)}))
@@ -459,14 +657,24 @@ def main(argv=None):
             print(f"worktree_doctor: {e}", file=sys.stderr)
         return 2
 
-    plan = make_plan(sigs, args.master_ref, allow_branches=args.allow_branch)
+    # Disposable-worktree sweep FIRST, so the convergence plan below reflects the survivors
+    # (and a successful sweep doesn't leave the just-reaped worktrees flagged needs_human).
+    cands = sweep_candidates(sigs, roots=args.disposable_root,
+                             fresh_seconds=args.fresh_minutes * 60.0,
+                             keep_paths=args.keep_path)
+    swept = do_sweep(cands, archive_dir, args.repo,
+                     dry_run=not args.sweep_disposable) if cands else []
+    if any(r.get("removed") for r in swept):
+        sigs = collect(args.repo, master_ref, fetch=False)  # refresh after real removals
+
+    plan = make_plan(sigs, master_ref, allow_branches=args.allow_branch, trunk=trunk)
     pruned = do_prune(plan, dry_run=not args.prune) if plan["prune"] else []
 
-    # Branch + remote-ref hygiene: protect master, the master-ref's own branch, and
+    # Branch + remote-ref hygiene: protect the trunk, the master-ref's own branch, and
     # every allow-listed branch; delete only the merged, non-checked-out remainder.
-    master_ref_branch = args.master_ref.split("/", 1)[-1]
-    protected = {"master", master_ref_branch, *args.allow_branch}
-    binfo = gather_branches(args.repo, args.master_ref)
+    master_ref_branch = master_ref.split("/", 1)[-1]
+    protected = {"master", trunk, master_ref_branch, *args.allow_branch}
+    binfo = gather_branches(args.repo, master_ref)
     deletable = deletable_branches(binfo["local"], protected,
                                    binfo["checked_out"], binfo["merged"])
     branch_results = do_prune_branches(deletable, args.repo,
@@ -477,16 +685,31 @@ def main(argv=None):
         remote_pruned = [ln for ln in out.splitlines() if ln.strip()] if rc == 0 else []
 
     if args.json:
-        print(json.dumps({"plan": plan, "pruned": pruned,
+        print(json.dumps({"master_ref": master_ref, "trunk": trunk,
+                          "plan": plan, "pruned": pruned, "swept": swept,
+                          "archive_dir": archive_dir,
                           "deletable_branches": deletable,
                           "branch_results": branch_results,
                           "remote_pruned": remote_pruned,
                           "worktrees": [{k: s.get(k) for k in
                                          ("path", "branch", "is_primary", "dirty",
                                           "untracked", "mid_op", "unmerged_to_master",
-                                          "unpushed")} for s in sigs]}, indent=2))
+                                          "unpushed", "age_seconds")} for s in sigs]}, indent=2))
     else:
-        print(render_text(sigs, plan))
+        print(render_text(sigs, plan, trunk=trunk))
+        if swept:
+            print("")
+            verb = "SWEPT" if args.sweep_disposable else "WOULD SWEEP (run with --sweep-disposable)"
+            print(f"DISPOSABLE SCRATCH WORKTREES — {verb} (archive: {archive_dir}):")
+            for r in swept:
+                if r.get("dry_run"):
+                    print(f"  - {r['path']}")
+                elif r["removed"]:
+                    arch = r.get("archived")
+                    tag = f" [archived {arch['tracked_patch_bytes']}B diff, {arch['untracked']} untracked]" if arch else ""
+                    print(f"  - reaped {r['path']}{tag}")
+                else:
+                    print(f"  - FAILED {r['path']}: {r['error']}")
         if pruned:
             print("")
             for r in pruned:
@@ -499,7 +722,7 @@ def main(argv=None):
         print("")
         if deletable:
             verb = "delete" if args.prune_branches else "would delete (run with --prune-branches)"
-            print(f"STALE LOCAL BRANCHES ({verb}): merged to {args.master_ref}, not checked out")
+            print(f"STALE LOCAL BRANCHES ({verb}): merged to {master_ref}, not checked out")
             for r in branch_results:
                 if r.get("dry_run"):
                     print(f"  - {r['branch']}")

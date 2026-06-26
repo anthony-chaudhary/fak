@@ -22,6 +22,7 @@ the shared setup work once, not every turn).
 | `internal/` | Kernel subsystems: `adjudicator`, `policy`, `vdso`, `engine`, `gateway`, `ctxmmu`, `model`, … |
 | `examples/` | Policy manifests **and** runnable demos (`adjudication-demo/`, `agentdojo-redteam/`, `mcp/`). |
 | `docs/` | Explainers, integration guides (`docs/integrations/`), benchmark methodology, proofs. |
+| `docs/private-comms-channel.md` | **The private comms channel** (Slack control-bridge to the lab GPU/DGX servers) — a public stub pointing to its home in the `fak-private` companion repo. Start here to reach the hardware. |
 
 ## Build / test / run
 
@@ -81,6 +82,11 @@ until it clears.
 - **Work directly on the trunk (`main`). Never open a feature branch or new worktree.**
   The trunk guard *refuses* off-trunk commits (the `OFF_TRUNK` law). A dirty/diverged
   tree means reconcile **in place** or STOP — never escape into a side branch.
+  - *Stray worktrees still accrue* — the harness and subagents spin scratch worktrees the
+    rule can't prevent. `tools/worktree_doctor.py` is the janitor: it auto-detects the
+    trunk, safely prunes loss-free strays, and `--sweep-disposable` archives-then-reaps
+    dead scratch worktrees (temp / scratchpad / pr-work) while sparing live sessions via a
+    freshness guard. A scheduled task runs it (`tools/register_worktree_doctor.ps1`).
   - *Diverged trunk (`git status` says "have diverged"):* `git fetch origin main`, then
     `git merge origin/main` **in place** and resolve. This is a shared trunk — peers
     routinely build the SAME feature under a different SHA, so most conflicts resolve to
@@ -135,7 +141,10 @@ until it clears.
   runbooks can live here once scrubbed to generic GPU-server language, but live Slack
   control code belongs in `fak-private`: `cmd|internal/*dgx*/`, Slack bridge/control
   packages, `cmd/slackgc/`, and the sunset `tools/bench_slack.py` path. See
-  [`docs/dgx-slack-boundary.md`](docs/dgx-slack-boundary.md).
+  [`docs/dgx-slack-boundary.md`](docs/dgx-slack-boundary.md). **To actually reach the
+  channel** (the Slack control-bridge to the lab GPU/DGX servers), start at the public stub
+  [`docs/private-comms-channel.md`](docs/private-comms-channel.md) — it points to the live
+  plumbing in `fak-private` (checked out at `../fak-private`).
 - **Never `find /` (also `find ~`, `find /mnt`, `find /proc`) in Git Bash on Windows.**
   `/` descends into `/proc/registry*` (the whole Windows Registry, x3 views) and `/mnt/c`
   (all of `C:`, which holds self-referential junction loops); MSYS `find` can't detect the

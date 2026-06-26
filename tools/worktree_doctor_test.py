@@ -208,5 +208,86 @@ class PorcelainParsing(unittest.TestCase):
         self.assertIsNone(wts[2]["branch"])
 
 
+class TrunkAware(unittest.TestCase):
+    """The doctor anchors on the REAL trunk (this repo is `main`), not a hardcoded
+    `master`. The pure plan logic takes a trunk= name; these prove `main` works."""
+
+    def test_main_primary_is_converged_on_main_trunk(self):
+        plan = wd.make_plan([sig("/repo", "main", primary=True)], trunk="main")
+        self.assertTrue(plan["converged"])
+        self.assertEqual(plan["keeper"], "/repo")
+        self.assertFalse(plan["primary_offtrack"])
+        self.assertFalse(plan["needs_human"])
+
+    def test_master_worktree_is_offtrack_when_trunk_is_main(self):
+        # a 'master' branch is NOT the trunk here; an on-master primary reads as off-trunk.
+        plan = wd.make_plan([sig("/repo", "master", primary=True)], trunk="main")
+        self.assertTrue(plan["primary_offtrack"])
+        self.assertTrue(any("off main" in n for n in plan["notes"]))
+
+    def test_default_trunk_is_still_master_for_back_compat(self):
+        # callers that pass no trunk= keep the original master semantics (existing tests).
+        self.assertTrue(wd.is_on_master(sig("/m", "master")))
+        self.assertTrue(wd.is_on_master(sig("/m", "main"), trunk="main"))
+        self.assertFalse(wd.is_on_master(sig("/m", "main")))
+
+
+def _swp(path, branch=None, primary=False, dirty=False, untracked=0, mid_op=None,
+         age_seconds=10_000, detached=True):
+    return {"path": path, "branch": branch, "is_primary": primary, "dirty": dirty,
+            "untracked": untracked, "mid_op": mid_op, "age_seconds": age_seconds,
+            "detached": detached}
+
+
+class DisposablePath(unittest.TestCase):
+    def test_scratchpad_and_prwork_segments_are_disposable(self):
+        self.assertTrue(wd.is_disposable_path("/tmp/claude/abc/scratchpad/rel-wt"))
+        self.assertTrue(wd.is_disposable_path("C:/work/pr-work/fak-pr-814"))
+
+    def test_a_normal_checkout_is_not_disposable(self):
+        self.assertFalse(wd.is_disposable_path("C:/work/fak"))
+        self.assertFalse(wd.is_disposable_path(""))
+
+    def test_explicit_root_makes_a_path_disposable(self):
+        self.assertTrue(wd.is_disposable_path("/scratch/x/wt", roots=["/scratch"]))
+        self.assertFalse(wd.is_disposable_path("/elsewhere/wt", roots=["/scratch"]))
+
+
+class SweepCandidates(unittest.TestCase):
+    def test_primary_is_never_swept_even_if_disposable(self):
+        sigs = [_swp("/tmp/scratchpad/wt", primary=True)]
+        self.assertEqual(wd.sweep_candidates(sigs), [])
+
+    def test_stale_disposable_is_reaped_and_flags_work(self):
+        sigs = [
+            _swp("/tmp/scratchpad/clean", age_seconds=10_000),
+            _swp("/tmp/scratchpad/dirty", dirty=True, untracked=2, age_seconds=10_000),
+        ]
+        got = wd.sweep_candidates(sigs, fresh_seconds=3600)
+        bypath = {c["path"]: c for c in got}
+        self.assertEqual(set(bypath), {"/tmp/scratchpad/clean", "/tmp/scratchpad/dirty"})
+        self.assertFalse(bypath["/tmp/scratchpad/clean"]["has_work"])
+        self.assertTrue(bypath["/tmp/scratchpad/dirty"]["has_work"])
+
+    def test_fresh_disposable_is_spared_protecting_live_sessions(self):
+        # a worktree touched 1 min ago is a live session — never reap it.
+        sigs = [_swp("/tmp/scratchpad/live", age_seconds=60)]
+        self.assertEqual(wd.sweep_candidates(sigs, fresh_seconds=3600), [])
+
+    def test_unknown_age_reads_as_stale(self):
+        sigs = [_swp("/tmp/scratchpad/old", age_seconds=None)]
+        got = wd.sweep_candidates(sigs, fresh_seconds=3600)
+        self.assertEqual([c["path"] for c in got], ["/tmp/scratchpad/old"])
+
+    def test_non_disposable_and_kept_paths_are_spared(self):
+        sigs = [
+            _swp("C:/work/fak/sub", age_seconds=10_000),          # not disposable
+            _swp("/tmp/scratchpad/keepme", age_seconds=10_000),   # disposable but kept
+        ]
+        got = wd.sweep_candidates(sigs, fresh_seconds=0,
+                                  keep_paths=["/tmp/scratchpad/keepme"])
+        self.assertEqual(got, [])
+
+
 if __name__ == "__main__":
     unittest.main()

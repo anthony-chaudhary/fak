@@ -1,12 +1,17 @@
 <#
 register_worktree_doctor.ps1 - install/remove/status the Scheduled Task that runs
-tools/worktree_doctor.py on a cadence, so this box stays at "one worktree on master"
-without anyone babysitting it. The doctor only ever removes the provably loss-free
-(non-primary, clean, no untracked, no mid-op, fully merged) and deletes branches with
-`git branch -d` (never -D), so unattended is safe by construction.
+tools/worktree_doctor.py on a cadence, so this box stays at "one worktree on the trunk"
+(auto-detected, e.g. main) without anyone babysitting it. Two safety stances run together:
+the converge step only ever removes the provably loss-free (non-primary, clean, no
+untracked, no mid-op, fully merged); the disposable SWEEP (--sweep-disposable) reaps dead
+scratch worktrees under temp/scratchpad/pr-work but ARCHIVES each dirty one's diff +
+untracked files first and spares any worktree touched recently (a live session). So
+unattended is safe by construction - nothing is ever lost.
 
-  .\register_worktree_doctor.ps1                  # install: daily safe prune (worktrees + branches)
-  .\register_worktree_doctor.ps1 -ReportOnly      # install: report only, never prune
+  .\register_worktree_doctor.ps1                  # install: prune safe worktrees + sweep dead scratch
+  .\register_worktree_doctor.ps1 -PruneBranches   # ALSO delete merged local branches (git branch -d)
+  .\register_worktree_doctor.ps1 -ReportOnly      # install: report only, never remove anything
+  .\register_worktree_doctor.ps1 -EveryHours 4    # repeat every N hours (0 = once daily at -At)
   .\register_worktree_doctor.ps1 -Action status
   .\register_worktree_doctor.ps1 -Action remove
   .\register_worktree_doctor.ps1 -At 02:00 -AllowBranch fak-v0.1,my-release
@@ -17,8 +22,10 @@ BOM-less non-ASCII .ps1 as Windows-1252 and breaks the parse.
 [CmdletBinding()]
 param(
   [ValidateSet('install','remove','status')] [string]$Action = 'install',
-  [switch]$ReportOnly,                       # install in report-only mode (no --prune)
+  [switch]$ReportOnly,                       # install in report-only mode (no removals at all)
+  [switch]$PruneBranches,                    # ALSO delete merged local branches (opt-in; default off)
   [string]$At = '03:30',                     # daily run time (HH:mm, 24h)
+  [int]$EveryHours = 4,                      # also repeat every N hours within the day (0 = daily only)
   [string[]]$AllowBranch = @('fak-v0.1'),    # long-lived worktree branches to RETAIN, never prune
   [string]$TaskName = 'FleetWorktreeDoctor'
 )
@@ -44,7 +51,11 @@ if ($Action -eq 'status') {
   if (-not $t) { Write-Output "NOT INSTALLED ($TaskName)"; return }
   $i = Get-ScheduledTaskInfo -TaskName $TaskName
   $a = ($t.Actions | Select-Object -First 1).Arguments
-  $mode = if ($a -match '--prune') { 'PRUNE (safe)' } else { 'REPORT-ONLY' }
+  $parts = @()
+  if ($a -match '--prune\b') { $parts += 'prune-worktrees' }
+  if ($a -match '--sweep-disposable') { $parts += 'sweep-scratch' }
+  if ($a -match '--prune-branches') { $parts += 'prune-branches' }
+  $mode = if ($parts.Count) { ($parts -join '+') } else { 'REPORT-ONLY' }
   Write-Output "State=$($t.State) mode=$mode LastRun=$($i.LastRunTime) LastResult=$($i.LastTaskResult) NextRun=$($i.NextRunTime)"
   Write-Output "log: $Log"
   return
@@ -59,9 +70,13 @@ if ($Action -eq 'remove') {
 $Python = Get-Python
 New-Item -ItemType Directory -Force $LogDir | Out-Null
 
-# Build the doctor args. --fetch makes the merged-check accurate against origin/master.
+# Build the doctor args. --fetch makes the merged-check accurate against the auto-detected
+# trunk ref. Default removals: safe worktree prune + the archived disposable-scratch sweep.
+# Branch deletion (git branch -d) is opt-in via -PruneBranches so a fresh install never
+# purges merged local branches by surprise.
 $dargs = @("`"$Doctor`"", '--repo', "`"$Repo`"", '--fetch')
-if (-not $ReportOnly) { $dargs += @('--prune', '--prune-branches') }
+if (-not $ReportOnly) { $dargs += @('--prune', '--sweep-disposable') }
+if ($PruneBranches -and -not $ReportOnly) { $dargs += '--prune-branches' }
 foreach ($b in $AllowBranch) { if ($b) { $dargs += @('--allow-branch', $b) } }
 $dargStr = $dargs -join ' '
 
@@ -78,6 +93,15 @@ $psArg = "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -Command `"$inn
 # so these are deliberately named $task*.
 $taskAction   = New-ScheduledTaskAction -Execute 'powershell.exe' -Argument $psArg -WorkingDirectory $Repo
 $taskTrigger  = New-ScheduledTaskTrigger -Daily -At $At
+# Scratch worktrees accrue across a busy multi-session day, not just overnight. Repeating
+# every N hours keeps the checkout swept through the day; the doctor's freshness guard
+# (--fresh-minutes) makes frequent runs safe (a live session's worktree is never reaped).
+if ($EveryHours -gt 0) {
+  $rep = New-ScheduledTaskTrigger -Once -At $At `
+           -RepetitionInterval (New-TimeSpan -Hours $EveryHours) `
+           -RepetitionDuration (New-TimeSpan -Days 1)
+  $taskTrigger.Repetition = $rep.Repetition
+}
 # StartWhenAvailable: a laptop asleep at $At still gets a catch-up run when it wakes.
 $taskSettings = New-ScheduledTaskSettingsSet -StartWhenAvailable -ExecutionTimeLimit (New-TimeSpan -Minutes 15) -MultipleInstances IgnoreNew
 $taskDesc     = "Keep this checkout at one-worktree-on-master, safely (worktree_doctor.py). Retains: $($AllowBranch -join ',')."
@@ -92,8 +116,15 @@ $taskPrincipal = New-ScheduledTaskPrincipal -UserId $env:USERNAME -LogonType S4U
 Register-ScheduledTask -TaskName $TaskName -Action $taskAction -Trigger $taskTrigger -Settings $taskSettings `
   -Principal $taskPrincipal -Description $taskDesc -Force | Out-Null
 
-$mode = if ($ReportOnly) { 'REPORT-ONLY (no prune)' } else { 'PRUNE (safe: loss-free worktrees + git branch -d only)' }
-Write-Output "installed $TaskName - daily at $At, $mode"
+$mode = if ($ReportOnly) {
+  'REPORT-ONLY (no removals)'
+} elseif ($PruneBranches) {
+  'PRUNE worktrees + SWEEP scratch (archived) + git branch -d merged'
+} else {
+  'PRUNE worktrees + SWEEP scratch (archived)'
+}
+$cadence = if ($EveryHours -gt 0) { "daily at $At, repeating every $EveryHours h" } else { "daily at $At" }
+Write-Output "installed $TaskName - $cadence, $mode"
 Write-Output "repo:    $Repo"
 Write-Output "retains: $($AllowBranch -join ', ')  (never pruned / no false alarm)"
 Write-Output "log:     $Log"
