@@ -75,7 +75,15 @@ planner behavior: pins stay resident, `OverBudget` is set, reported not hidden).
   time, but it under-counts paraphrased references.
 - Resident units are the **bytes/4 proxy** (`ctxplan.TokenCost`); a real BPE tokenizer shifts the
   absolutes, not the regime.
-- Off the live path: a bench cmd, not wired into the agent HTTP loop.
+- The **13.3× multiplier is this transcript-set's number, not a constant** — it scales with how long
+  the replayed sessions are (a longer session has more linear residency to bend away). The invariant
+  claim is the regime (O(1) resident + 100% exact recall vs compaction's mass loss); the multiplier
+  is whatever the heaviest sessions on a given box happen to be. See the reproduction below.
+- This bench is a measurement cmd, but the planner it measures is **no longer off the live path**:
+  the same `ctxplan.Materialize` view is now wired into the gateway's per-turn buffered path
+  (`--ctx-view-budget`, #555 shipped) and witnessed end-to-end through the real HTTP handler
+  (`internal/gateway/gateway_ctxview_http_test.go`). The flagship Anthropic `req.Raw` passthrough is
+  the one wire it does not yet reach (deferred #555 `req.Raw` transform).
 
 ## Reproduce
 
@@ -86,3 +94,18 @@ go run ./cmd/ctxplanbench -transcripts <path>.jsonl -out report.json
 ```
 
 Witnesses: `go test ./cmd/ctxplanbench` (`TestReplayInvariants`, `TestReplayLooseBudgetHoldsEverything`).
+
+### Reproduction (2026-06-26, independent re-run)
+
+`go run ./cmd/ctxplanbench -heaviest 5 -budget 8000 -window 6` re-run on this box's **current**
+heaviest-5 (the transcript set has grown since 2026-06-23, so these are different, longer sessions):
+
+| | turns | linear cum | planned cum | multiplier | faithful | refs | faults | served | refused | compaction lost |
+|---|---|---|---|---|---|---|---|---|---|---|
+| aggregate | **2055** | 158.13M | 16.00M | **9.9× fewer resident** | **2055/2055** | 353,646 | 196,271 (55.5%) | **196,271** | **0** | **2016/2055** |
+
+The regime reproduces exactly — **100% exact recall (2055/2055), 100% of misses served (0 refused, 0
+lost), compaction destroying facts on 2016/2055 turns** — at a *different* multiplier (9.9× here vs
+13.3× on the original set), because these sessions are longer and the heuristic forecast misses more
+often (55.5% vs 31.7%). Every additional miss is still a served page fault, never a lost fact. The
+multiplier moves with the transcript set; the recall/served invariants do not. `-selfcheck` exits 0.

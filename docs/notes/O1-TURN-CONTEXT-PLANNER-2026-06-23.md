@@ -183,8 +183,9 @@ never resident; a pin cannot launder poison.
 
 ## 6. Honest fences (what is NOT done)
 
-- **Wired to a real store and the KV cache; not yet on the gateway's live loop.** The
-  real-store adapter shipped (`recall.CtxStore`, the `recall` core image as a
+- **Wired to a real store, the KV cache, AND the gateway's live loop (buffered/non-passthrough
+  path, off by default); the flagship Anthropic `req.Raw` passthrough is the remaining residual.**
+  The real-store adapter shipped (`recall.CtxStore`, the `recall` core image as a
   `ctxplan.Store`, #545); the planned elision now drives a bit-exact KV eviction
   (`kvmmu.ApplyPlan` — an O(1) view becomes an O(1) KV residency, #550); the empirical
   resident-redundancy bench landed (#551); and a guarded agent-loop seam exists
@@ -196,10 +197,22 @@ never resident; a pin cannot launder poison.
   full-scan every turn — so the Θ(c·N) flatten is real on the loop, not a rebuild-per-turn
   Θ(N²). The index PERSISTS alongside the recall core image (`ctxplan.IndexImage`,
   `recall.PersistIndex`/`LoadIndex`, a sibling `index.json` next to `manifest.json`/`cas.json`,
-  #558 half a), so a resumed session re-attaches its index instead of rebuilding it. The
-  residual is the **gateway**: `fak serve`/`fak guard` does not yet thread a per-session
-  planner through each turn to replace compaction (filed as #555, gated on the `req.Raw`
-  passthrough transform — the seam mechanism is wired first, the gateway/`req.Raw` second).
+  #558 half a), so a resumed session re-attaches its index instead of rebuilding it.
+  **The gateway live-loop wiring then SHIPPED (#555, commit `7f3ae40`):** `fak serve`/`fak guard`
+  take `--ctx-view-budget` (default `0` = OFF, byte-for-byte unchanged); when set, the per-turn
+  buffered path (`gateway.Server.complete` → `maybePlanMessages`, keyed per-session) re-materializes
+  the forwarded history as an O(1) planned view in place of appending the whole transcript. It is
+  fail-safe (a planner error or empty render falls back to the full lossless history) and witnessed
+  end-to-end through the real HTTP handler (`internal/gateway/gateway_ctxview_http_test.go`: OFF
+  forwards the full history, ON forwards the bounded planned view, both read off the upstream body).
+  The residual is now narrow and specific: the planner reaches the in-kernel/non-passthrough
+  re-marshal wires, but NOT the flagship `fak guard -- claude` **Anthropic passthrough**, which
+  forwards `req.Raw` byte-for-byte so its client cache-prefix survives — there the planned view is
+  computed and discarded. That wire's live context lever today is the cache-prefix-preserving
+  `--compact-history-budget` (default-on at ~48k) + `--elide-result-bytes`; the full ctxplan view
+  on the passthrough waits on the deferred **`req.Raw` cache-prefix-preserving transform** (the
+  still-open half of #555), since you cannot re-plan that body without breaking the very cache
+  prefix the passthrough exists to preserve.
 - **The forecast is authored from the trajectory, not a model.** `ctxplan.TrajectoryAuthor`
   (#556) now AUTHORS `Forecast.Intents` from the recent trajectory (recency-weighted
   content-token recurrence — recurrence dominates, recency breaks near-ties), the
