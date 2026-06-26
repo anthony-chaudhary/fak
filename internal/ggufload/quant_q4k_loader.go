@@ -49,6 +49,10 @@ func (s *WeightSource) QuantModelQ4K() (*model.Model, error) {
 		// kv_b_proj when both arrive, before CanonicalTensorNameArch (which leaves them unmapped).
 		// The merged tensor follows the standard dequant->Q8 path (it is not resident-Q4_K eligible).
 		if cfg.ModelType == "glm_moe_dsa" {
+			// Drop the MTP ("nextn") head + any vision tower the text forward never reads.
+			if glmMoeDsaSkipGGUFTensor(info.Name) {
+				continue
+			}
 			if layer, half, ok := glmMoeDsaSplitKVB(info.Name); ok {
 				shape, err := modelShapeFromGGUFDims(info.Name, info.Dims)
 				if err != nil {

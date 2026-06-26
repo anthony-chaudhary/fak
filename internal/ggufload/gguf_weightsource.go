@@ -160,6 +160,11 @@ func (s *WeightSource) QuantModelProfile(p *LoadProfiler) (*model.Model, error) 
 	for _, info := range s.File.Tensors {
 		p.Tick(tensorOnDiskBytes(info)) // one GGUF tensor consumed -> advance the % status
 		if cfg.ModelType == "glm_moe_dsa" {
+			// Drop the MTP ("nextn") speculative head + any vision tower the text forward never
+			// reads (llama.cpp ignores them too), before canonical mapping would reject them.
+			if glmMoeDsaSkipGGUFTensor(info.Name) {
+				continue
+			}
 			if layer, half, ok := glmMoeDsaSplitKVB(info.Name); ok {
 				shape, err := modelShapeFromGGUFDims(info.Name, info.Dims)
 				if err != nil {
@@ -316,6 +321,10 @@ func (s *WeightSource) F32Tensors() (model.Config, []model.NamedTensorF32, error
 		// glm_moe_dsa batched routed experts: one [E,out,in] blob splits 1->E into per-expert
 		// canonical tensors. Handled before CanonicalTensorNameArch (which leaves them unmapped).
 		if cfg.ModelType == "glm_moe_dsa" {
+			// Drop the MTP ("nextn") head + any vision tower the text forward never reads.
+			if glmMoeDsaSkipGGUFTensor(info.Name) {
+				continue
+			}
 			if layer, proj, ok := glmMoeDsaBatchedExpert(info.Name); ok {
 				shape, err := modelShapeFromGGUFDims(info.Name, info.Dims)
 				if err != nil {
