@@ -382,8 +382,9 @@ func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 		Choices: []ChatChoice{{Index: 0, Message: asst, FinishReason: finish}},
 		Usage:   comp.Usage,
 	}
-	if len(adjs) > 0 || len(resultAdmissions) > 0 {
-		resp.Fak = &FakExt{Adjudications: adjs, ResultAdmissions: resultAdmissions}
+	redactions := wireRedactionsFrom(comp.PreSendRedactionRecords)
+	if len(adjs) > 0 || len(resultAdmissions) > 0 || len(redactions) > 0 {
+		resp.Fak = &FakExt{Adjudications: adjs, ResultAdmissions: resultAdmissions, Redactions: redactions}
 	}
 	if req.Stream {
 		writeChatCompletionStream(w, resp)

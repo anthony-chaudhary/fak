@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/anthony-chaudhary/fak/internal/wirescreen"
@@ -54,6 +55,18 @@ func TestPreSendRedactionsSurfaced(t *testing.T) {
 		if comp.PreSendRedactions <= 0 {
 			t.Fatalf("active redactor: PreSendRedactions = %d, want > 0 (the card span should have been redacted)", comp.PreSendRedactions)
 		}
+		// #882: the full reversible records survive, and the CAS Original restores the
+		// UNREDACTED bytes byte-exact (reversible-on-audit, not just a count).
+		if len(comp.PreSendRedactionRecords) != comp.PreSendRedactions {
+			t.Fatalf("PreSendRedactionRecords (%d) must match the count (%d)", len(comp.PreSendRedactionRecords), comp.PreSendRedactions)
+		}
+		orig, err := wirescreen.Restore(context.Background(), comp.PreSendRedactionRecords[0].Original)
+		if err != nil {
+			t.Fatalf("Restore the recorded Original: %v", err)
+		}
+		if !strings.Contains(string(orig), "4111 1111 1111 1111") {
+			t.Errorf("the CAS Original must restore the unredacted secret byte-exact, got %q", orig)
+		}
 	})
 
 	t.Run("inert redactor surfaces zero", func(t *testing.T) {
@@ -73,6 +86,9 @@ func TestPreSendRedactionsSurfaced(t *testing.T) {
 		}
 		if comp.PreSendRedactions != 0 {
 			t.Fatalf("inert redactor: PreSendRedactions = %d, want 0", comp.PreSendRedactions)
+		}
+		if len(comp.PreSendRedactionRecords) != 0 {
+			t.Fatalf("inert redactor: PreSendRedactionRecords = %d, want 0", len(comp.PreSendRedactionRecords))
 		}
 	})
 }

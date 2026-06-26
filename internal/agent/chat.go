@@ -274,6 +274,12 @@ type Completion struct {
 	// unset → wirescreen.ActiveRedactor() nil) and on the Anthropic raw-passthrough
 	// path (which forwards req.Raw verbatim and never re-marshals these messages).
 	PreSendRedactions int
+	// PreSendRedactionRecords are the full reversible records behind PreSendRedactions
+	// (#882): each carries the message index, the redactor, the redacted spans, and a
+	// CAS handle to the UNREDACTED original (wirescreen.Restore(ctx, .Original) returns
+	// it byte-exact) — the reversible-on-audit data a count alone cannot give. Nil on
+	// the default-inert and Anthropic-passthrough paths, exactly like the count.
+	PreSendRedactionRecords []TranscriptRedaction
 
 	// Model is the model id the UPSTREAM reported it served this completion with
 	// (the provider response's `model` field), or "" when the provider omitted it.
@@ -864,6 +870,7 @@ func (p *HTTPPlanner) Complete(ctx context.Context, messages []Message, tools []
 		comp.Raw = raw
 		comp.PreSendQuarantines = call.quarantined
 		comp.PreSendRedactions = call.redacted
+		comp.PreSendRedactionRecords = call.redactions
 		return comp, nil
 	}
 	return nil, fmt.Errorf("planner: failed after %d attempts: %w", maxAttempts, lastErr)

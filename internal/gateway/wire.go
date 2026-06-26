@@ -401,6 +401,44 @@ type ChatChoice struct {
 type FakExt struct {
 	Adjudications    []ToolAdjudication `json:"adjudications,omitempty"`
 	ResultAdmissions []ResultAdmission  `json:"result_admissions,omitempty"`
+	// Redactions are the OUTBOUND span-redactions the rung-5 wire point applied to
+	// this turn's messages before they were serialized upstream (#572/#882), surfaced
+	// so a client/auditor can see what was rewritten AND reverse it: each carries the
+	// CAS handle to the byte-exact original. Present only on the non-passthrough
+	// re-marshal path (the OpenAI-compatible proxy) where redaction actually runs.
+	Redactions []WireRedaction `json:"redactions,omitempty"`
+}
+
+// WireRedaction is the response view of one agent.TranscriptRedaction: enough to
+// audit (which message, which redactor, how many spans, the redacted length) and to
+// REVERSE it — Original is the CAS digest wirescreen.Restore resolves byte-exact.
+type WireRedaction struct {
+	Index    int    `json:"index"`
+	Tool     string `json:"tool,omitempty"`
+	By       string `json:"by"`
+	Original string `json:"original"` // CAS digest of the unredacted original (reversible audit)
+	Len      int    `json:"len"`
+	Spans    int    `json:"spans,omitempty"` // count of redacted spans
+}
+
+// wireRedactionsFrom projects the agent's reversible redaction records onto the wire
+// view, or nil when there were none (so the `redactions` key is omitted).
+func wireRedactionsFrom(recs []agent.TranscriptRedaction) []WireRedaction {
+	if len(recs) == 0 {
+		return nil
+	}
+	out := make([]WireRedaction, 0, len(recs))
+	for _, r := range recs {
+		out = append(out, WireRedaction{
+			Index:    r.Index,
+			Tool:     r.Tool,
+			By:       r.By,
+			Original: r.Original.Digest,
+			Len:      r.Len,
+			Spans:    len(r.Spans),
+		})
+	}
+	return out
 }
 
 // ToolAdjudication is one proposed tool_call's verdict.

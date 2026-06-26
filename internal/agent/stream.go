@@ -67,7 +67,8 @@ type upstreamCall struct {
 	apiKey       string
 	upstreamBeta string
 	quarantined  int
-	redacted     int // rung 5 (#572): messages whose content was span-redacted pre-send
+	redacted     int                   // rung 5 (#572): messages whose content was span-redacted pre-send
+	redactions   []TranscriptRedaction // the full reversible records (CAS Original) behind that count (#882)
 }
 
 // headers builds the per-request header set, applying the Anthropic-wire beta union
@@ -124,6 +125,7 @@ func (p *HTTPPlanner) prepareUpstream(messages []Message, tools []ToolDef, strea
 	// same fix Complete applied inline before the extraction.
 	var reqBody []byte
 	redactedN := 0
+	var redactions []TranscriptRedaction
 	if len(sp.RawRequestBody) > 0 && adapter.Provider() == ProviderAnthropic {
 		reqBody = forceAnthropicNonStreaming(sp.RawRequestBody)
 	} else {
@@ -132,7 +134,6 @@ func (p *HTTPPlanner) prepareUpstream(messages []Message, tools []ToolDef, strea
 		// and never serializes these messages, so redaction runs ONLY here, where the
 		// re-marshal can carry it to the wire. Default-inert: with FAK_WIRE_REDACT
 		// unset, RedactOutboundMessages returns safeMessages unchanged at zero cost.
-		var redactions []TranscriptRedaction
 		safeMessages, redactions = RedactOutboundMessages(safeMessages)
 		redactedN = len(redactions)
 		reqBody, err = adapter.MarshalRequest(adapterRequest{
@@ -167,6 +168,7 @@ func (p *HTTPPlanner) prepareUpstream(messages []Message, tools []ToolDef, strea
 		upstreamBeta: sp.UpstreamBeta,
 		quarantined:  len(quarantines),
 		redacted:     redactedN,
+		redactions:   redactions,
 	}, nil
 }
 
@@ -274,6 +276,7 @@ func (p *HTTPPlanner) CompleteStream(ctx context.Context, sink StreamSink, messa
 		comp.Raw = raw
 		comp.PreSendQuarantines = call.quarantined
 		comp.PreSendRedactions = call.redacted
+		comp.PreSendRedactionRecords = call.redactions
 		return comp, nil
 	}
 
@@ -364,6 +367,7 @@ func (p *HTTPPlanner) CompleteStream(ctx context.Context, sink StreamSink, messa
 	comp.Raw = rawBuf.Bytes()
 	comp.PreSendQuarantines = call.quarantined
 	comp.PreSendRedactions = call.redacted
+	comp.PreSendRedactionRecords = call.redactions
 	return comp, nil
 }
 
