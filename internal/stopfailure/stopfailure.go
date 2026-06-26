@@ -12,29 +12,36 @@ import (
 )
 
 const (
-	ActionRecentReview       = "RECENT_REVIEW"
-	ActionStaleReset         = "STALE_RESET_CANDIDATE"
-	ActionHealedNonzero      = "HEALED_NONZERO"
-	ActionZeroTotal          = "ZERO_TOTAL"
-	DefaultRecentWindowHours = 6
+	ActionRecentReview           = "RECENT_REVIEW"
+	ActionStaleReset             = "STALE_RESET_CANDIDATE"
+	ActionStaleMarkerOnlyArchive = "STALE_MARKER_ONLY_ARCHIVE_CANDIDATE"
+	ActionHealedNonzero          = "HEALED_NONZERO"
+	ActionZeroTotal              = "ZERO_TOTAL"
+	DefaultRecentWindowHours     = 6
+	DefaultTranscriptNamespace   = "C--work-fak"
 )
 
 type Options struct {
-	Root         string
-	Now          time.Time
-	RecentWindow time.Duration
-	SinceWindow  time.Duration
-	Limit        int
+	Root                string
+	Now                 time.Time
+	RecentWindow        time.Duration
+	SinceWindow         time.Duration
+	Limit               int
+	ClaudeHome          string
+	TranscriptNamespace string
 }
 
 type Marker struct {
-	SessionID        string    `json:"session_id"`
-	MarkerPath       string    `json:"marker_path"`
-	Total            int       `json:"total"`
-	Consecutive      int       `json:"consecutive"`
-	MTime            time.Time `json:"mtime"`
-	AgeSeconds       int64     `json:"age_seconds"`
-	SettlementAction string    `json:"settlement_action"`
+	SessionID         string    `json:"session_id"`
+	MarkerPath        string    `json:"marker_path"`
+	Total             int       `json:"total"`
+	Consecutive       int       `json:"consecutive"`
+	MTime             time.Time `json:"mtime"`
+	AgeSeconds        int64     `json:"age_seconds"`
+	Origin            string    `json:"origin"`
+	OriginLabels      []string  `json:"origin_labels,omitempty"`
+	TranscriptProject string    `json:"transcript_project,omitempty"`
+	SettlementAction  string    `json:"settlement_action"`
 }
 
 type Plan struct {
@@ -83,11 +90,12 @@ func BuildPlan(opts Options) (Plan, error) {
 		}
 		return Plan{}, err
 	}
+	origins := newOriginResolver(root, opts)
 	for _, entry := range entries {
 		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".json") {
 			continue
 		}
-		marker, err := readMarker(filepath.Join(stopDir, entry.Name()), entry.Name(), opts)
+		marker, err := readMarker(filepath.Join(stopDir, entry.Name()), entry.Name(), opts, origins)
 		if err != nil {
 			plan.Malformed++
 			continue
@@ -154,10 +162,13 @@ func normalizeOptions(opts Options) Options {
 	if opts.RecentWindow <= 0 {
 		opts.RecentWindow = DefaultRecentWindowHours * time.Hour
 	}
+	if opts.TranscriptNamespace == "" {
+		opts.TranscriptNamespace = DefaultTranscriptNamespace
+	}
 	return opts
 }
 
-func readMarker(path, name string, opts Options) (Marker, error) {
+func readMarker(path, name string, opts Options, origins originResolver) (Marker, error) {
 	raw, err := os.ReadFile(path)
 	if err != nil {
 		return Marker{}, err
@@ -178,6 +189,7 @@ func readMarker(path, name string, opts Options) (Marker, error) {
 	}
 	total := intValue(doc["total"])
 	consecutive := intValue(doc["consecutive"])
+	origin := origins.lookup(sessionID)
 	action := ActionStaleReset
 	switch {
 	case total <= 0:
@@ -186,15 +198,20 @@ func readMarker(path, name string, opts Options) (Marker, error) {
 		action = ActionHealedNonzero
 	case time.Duration(age)*time.Second <= opts.RecentWindow:
 		action = ActionRecentReview
+	case origin.Origin == "marker_only":
+		action = ActionStaleMarkerOnlyArchive
 	}
 	return Marker{
-		SessionID:        sessionID,
-		MarkerPath:       filepath.ToSlash(filepath.Join(".dos", "stop-failures", name)),
-		Total:            total,
-		Consecutive:      consecutive,
-		MTime:            mtime,
-		AgeSeconds:       age,
-		SettlementAction: action,
+		SessionID:         sessionID,
+		MarkerPath:        filepath.ToSlash(filepath.Join(".dos", "stop-failures", name)),
+		Total:             total,
+		Consecutive:       consecutive,
+		MTime:             mtime,
+		AgeSeconds:        age,
+		Origin:            origin.Origin,
+		OriginLabels:      origin.Labels,
+		TranscriptProject: origin.TranscriptProject,
+		SettlementAction:  action,
 	}, nil
 }
 
@@ -251,4 +268,101 @@ func intValue(v any) int {
 
 func relStopDir() string {
 	return filepath.ToSlash(filepath.Join(".dos", "stop-failures"))
+}
+
+type markerOrigin struct {
+	Origin            string
+	Labels            []string
+	TranscriptProject string
+}
+
+type originResolver struct {
+	root        string
+	transcripts map[string]markerOrigin
+}
+
+func newOriginResolver(root string, opts Options) originResolver {
+	return originResolver{
+		root:        root,
+		transcripts: transcriptIndex(opts),
+	}
+}
+
+func (r originResolver) lookup(sessionID string) markerOrigin {
+	labels := []string{}
+	if pathExists(filepath.Join(r.root, ".dos", "streams", sessionID+".jsonl")) {
+		labels = append(labels, "dos_stream")
+	}
+	transcript := r.transcripts[sessionID]
+	if transcript.Origin != "" {
+		labels = append(labels, "claude_transcript")
+	}
+	if len(labels) == 0 {
+		return markerOrigin{Origin: "marker_only", Labels: []string{"marker_only"}}
+	}
+	return markerOrigin{
+		Origin:            strings.Join(labels, "+"),
+		Labels:            labels,
+		TranscriptProject: transcript.TranscriptProject,
+	}
+}
+
+func transcriptIndex(opts Options) map[string]markerOrigin {
+	out := map[string]markerOrigin{}
+	for _, root := range claudeProjectRoots(opts) {
+		entries, err := os.ReadDir(root)
+		if err != nil {
+			continue
+		}
+		for _, entry := range entries {
+			if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".jsonl") {
+				continue
+			}
+			sessionID := strings.TrimSuffix(entry.Name(), ".jsonl")
+			if _, ok := out[sessionID]; ok {
+				continue
+			}
+			out[sessionID] = markerOrigin{
+				Origin:            "claude_transcript",
+				TranscriptProject: filepath.Base(root),
+			}
+		}
+	}
+	return out
+}
+
+func claudeProjectRoots(opts Options) []string {
+	namespace := opts.TranscriptNamespace
+	if namespace == "" {
+		namespace = DefaultTranscriptNamespace
+	}
+	userHome := strings.TrimSpace(opts.ClaudeHome)
+	if userHome == "" {
+		if configured := strings.TrimSpace(os.Getenv("CLAUDE_CONFIG_DIR")); configured != "" {
+			return []string{filepath.Join(configured, "projects", namespace)}
+		}
+	}
+	if userHome == "" {
+		userHome = strings.TrimSpace(os.Getenv("FLEET_USER_HOME"))
+	}
+	if userHome == "" {
+		userHome = strings.TrimSpace(os.Getenv("USERPROFILE"))
+	}
+	if userHome == "" {
+		userHome, _ = os.UserHomeDir()
+	}
+	if userHome == "" {
+		return nil
+	}
+	matches, err := filepath.Glob(filepath.Join(userHome, ".claude*", "projects", namespace))
+	if err != nil {
+		return nil
+	}
+	sort.Strings(matches)
+	return matches
+}
+
+func pathExists(path string) bool {
+	_, err := os.Stat(path)
+	return err == nil
 }

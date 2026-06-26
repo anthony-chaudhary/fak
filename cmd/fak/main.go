@@ -420,7 +420,8 @@ func usage() {
                  read-only; reset-stale is dry-run unless --apply is passed. The
                  default one-day lens matches the guard/MCP status queue; pass
                  --since-hours 0 for all history. Only stale marker consecutive counts
-                 are reset; recent markers stay review-only)
+                 with transcript/stream evidence are reset; recent and marker-only
+                 markers stay review-only)
   fak headroom  list | status | compress [--via NAME] [--model ID] [--emit] [FILE|-]
                 (the CONTEXT-COMPRESSION seam: shrink tool outputs/logs/files before
                  they reach the model, reversibly. A pluggable AREA  -  one generic

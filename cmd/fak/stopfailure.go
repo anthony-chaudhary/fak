@@ -35,8 +35,8 @@ func runStopFailure(stdout, stderr io.Writer, argv []string) int {
 }
 
 func stopFailureUsage(w io.Writer) {
-	fmt.Fprintln(w, "usage: fak stopfailure plan [--root DIR] [--since-hours N] [--recent-hours N] [--limit N] [--json]")
-	fmt.Fprintln(w, "       fak stopfailure reset-stale [--root DIR] [--since-hours N] [--recent-hours N] [--limit N] [--apply] [--json]")
+	fmt.Fprintln(w, "usage: fak stopfailure plan [--root DIR] [--since-hours N] [--recent-hours N] [--claude-home DIR] [--namespace NS] [--limit N] [--json]")
+	fmt.Fprintln(w, "       fak stopfailure reset-stale [--root DIR] [--since-hours N] [--recent-hours N] [--claude-home DIR] [--namespace NS] [--limit N] [--apply] [--json]")
 }
 
 func runStopFailurePlan(stdout, stderr io.Writer, argv []string) int {
@@ -45,6 +45,8 @@ func runStopFailurePlan(stdout, stderr io.Writer, argv []string) int {
 	root := fs.String("root", ".", "repository root containing .dos/stop-failures")
 	sinceHours := fs.Int("since-hours", 24, "marker mtime lookback in hours; 0 means all history")
 	recentHours := fs.Int("recent-hours", stopfailure.DefaultRecentWindowHours, "recent active marker threshold in hours")
+	claudeHome := fs.String("claude-home", "", "user home containing .claude* roots; default FLEET_USER_HOME/USERPROFILE/home")
+	namespace := fs.String("namespace", stopfailure.DefaultTranscriptNamespace, "Claude projects namespace used for transcript origin lookup")
 	limit := fs.Int("limit", 20, "maximum rows per settlement action in output; 0 means all")
 	asJSON := fs.Bool("json", false, "emit JSON")
 	nowFlag := fs.String("now", "", "override current time as RFC3339 for deterministic tests")
@@ -56,11 +58,13 @@ func runStopFailurePlan(stdout, stderr io.Writer, argv []string) int {
 		return 2
 	}
 	plan, err := stopfailure.BuildPlan(stopfailure.Options{
-		Root:         *root,
-		Now:          now,
-		RecentWindow: time.Duration(*recentHours) * time.Hour,
-		SinceWindow:  time.Duration(*sinceHours) * time.Hour,
-		Limit:        *limit,
+		Root:                *root,
+		Now:                 now,
+		RecentWindow:        time.Duration(*recentHours) * time.Hour,
+		SinceWindow:         time.Duration(*sinceHours) * time.Hour,
+		Limit:               *limit,
+		ClaudeHome:          *claudeHome,
+		TranscriptNamespace: *namespace,
 	})
 	if err != nil {
 		fmt.Fprintf(stderr, "fak stopfailure plan: %v\n", err)
@@ -79,6 +83,8 @@ func runStopFailureResetStale(stdout, stderr io.Writer, argv []string) int {
 	root := fs.String("root", ".", "repository root containing .dos/stop-failures")
 	sinceHours := fs.Int("since-hours", 24, "marker mtime lookback in hours; 0 means all history")
 	recentHours := fs.Int("recent-hours", stopfailure.DefaultRecentWindowHours, "recent active marker threshold in hours")
+	claudeHome := fs.String("claude-home", "", "user home containing .claude* roots; default FLEET_USER_HOME/USERPROFILE/home")
+	namespace := fs.String("namespace", stopfailure.DefaultTranscriptNamespace, "Claude projects namespace used for transcript origin lookup")
 	limit := fs.Int("limit", 0, "maximum stale markers to reset; 0 means all candidates")
 	apply := fs.Bool("apply", false, "write consecutive=0 to stale markers; omitted means dry-run")
 	asJSON := fs.Bool("json", false, "emit JSON")
@@ -91,11 +97,13 @@ func runStopFailureResetStale(stdout, stderr io.Writer, argv []string) int {
 		return 2
 	}
 	result, err := stopfailure.ResetStale(stopfailure.Options{
-		Root:         *root,
-		Now:          now,
-		RecentWindow: time.Duration(*recentHours) * time.Hour,
-		SinceWindow:  time.Duration(*sinceHours) * time.Hour,
-		Limit:        *limit,
+		Root:                *root,
+		Now:                 now,
+		RecentWindow:        time.Duration(*recentHours) * time.Hour,
+		SinceWindow:         time.Duration(*sinceHours) * time.Hour,
+		Limit:               *limit,
+		ClaudeHome:          *claudeHome,
+		TranscriptNamespace: *namespace,
 	}, *apply)
 	if err != nil {
 		fmt.Fprintf(stderr, "fak stopfailure reset-stale: %v\n", err)
@@ -136,22 +144,25 @@ func writeStopFailureJSON(stdout, stderr io.Writer, v any) int {
 func printStopFailurePlan(w io.Writer, plan stopfailure.Plan) {
 	recent := plan.Counts[stopfailure.ActionRecentReview]
 	stale := plan.Counts[stopfailure.ActionStaleReset]
+	archive := plan.Counts[stopfailure.ActionStaleMarkerOnlyArchive]
 	status := "OK"
-	if recent > 0 || stale > 0 || plan.Malformed > 0 {
+	if recent > 0 || stale > 0 || archive > 0 || plan.Malformed > 0 {
 		status = "WARN"
 	}
-	fmt.Fprintf(w, "fak stopfailure plan: %s markers=%d ignored_old=%d recent_review=%d stale_reset=%d healed=%d zero=%d malformed=%d\n",
+	fmt.Fprintf(w, "fak stopfailure plan: %s markers=%d ignored_old=%d recent_review=%d stale_reset=%d marker_only_archive=%d healed=%d zero=%d malformed=%d\n",
 		status,
 		plan.Markers,
 		plan.IgnoredOld,
 		recent,
 		stale,
+		archive,
 		plan.Counts[stopfailure.ActionHealedNonzero],
 		plan.Counts[stopfailure.ActionZeroTotal],
 		plan.Malformed,
 	)
 	printStopFailureRows(w, "recent review", plan.Candidates[stopfailure.ActionRecentReview])
 	printStopFailureRows(w, "stale reset", plan.Candidates[stopfailure.ActionStaleReset])
+	printStopFailureRows(w, "marker-only archive", plan.Candidates[stopfailure.ActionStaleMarkerOnlyArchive])
 	if stale > 0 {
 		fmt.Fprintln(w, "next: fak stopfailure reset-stale --apply")
 	}
@@ -182,11 +193,13 @@ func printStopFailureRows(w io.Writer, label string, rows []stopfailure.Marker) 
 	}
 	fmt.Fprintf(w, "  %s candidates:\n", label)
 	for _, row := range rows {
-		fmt.Fprintf(w, "    %s total=%d consecutive=%d age=%s action=%s\n",
+		fmt.Fprintf(w, "    %s total=%d consecutive=%d age=%s origin=%s project=%s action=%s\n",
 			row.MarkerPath,
 			row.Total,
 			row.Consecutive,
 			formatStopFailureAge(row.AgeSeconds),
+			row.Origin,
+			row.TranscriptProject,
 			row.SettlementAction,
 		)
 	}
