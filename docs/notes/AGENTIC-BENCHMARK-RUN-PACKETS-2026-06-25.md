@@ -339,7 +339,10 @@ run. It replays recorded command traces as `terminal.exec` fak tool calls,
 keeps recorded test-oracle fields in the report, and emits solve, safe-resolve,
 blocked-dangerous-action, unnecessary-block, and command-evidence metrics. The
 shipped smoke records raw safe resolve `0.500` versus fak safe resolve `1.000`,
-with one fak-denied destructive command and no unnecessary fak blocks.
+with one fak-denied destructive command and no unnecessary fak blocks. The
+regenerated witness also carries `evidence_class=SIMULATED_LOCAL_FIXTURE`, an
+unavailable `official_harness` gate, explicit promotion requirements, and
+`result_claim_allowed=false`.
 
 Remaining official-harness bar:
 
@@ -392,7 +395,10 @@ WorkArena, BrowseComp, or BrowserGym run. It normalizes benchmark-style browser
 actions into `browser.*` fak tool calls and emits per-action evidence
 checkpoints while replaying the same action trace through raw and fak arms. The
 shipped smoke records raw safe pass^1 `0.500` versus fak safe pass^1 `1.000`,
-with one fak-denied destructive click and benign task utility preserved.
+with one fak-denied destructive click and benign task utility preserved. The
+regenerated witness also carries `evidence_class=SIMULATED_LOCAL_FIXTURE`, an
+unavailable `official_harness` gate, explicit promotion requirements, and
+`result_claim_allowed=false`.
 
 Remaining official-harness bar:
 

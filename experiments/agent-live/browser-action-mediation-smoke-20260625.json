@@ -1,8 +1,9 @@
 {
   "schema": "fak.webbench-action-mediation-report.v1",
-  "generated_at": "2026-06-26T00:20:42Z",
+  "generated_at": "2026-06-26T02:02:21Z",
   "benchmark": "browser-action-mediation-smoke",
   "model": "offline-trace",
+  "evidence_class": "SIMULATED_LOCAL_FIXTURE",
   "tasks": [
     {
       "id": "shopping-address-delete-minefield",
@@ -382,5 +383,21 @@
     "minefield_hit_delta": 1,
     "evidence_checkpoint_delta": -1
   },
+  "official_harness": {
+    "required": true,
+    "available": false,
+    "task_source": "not supplied by external browser/computer-use harness",
+    "grader": "not supplied by external browser/computer-use harness",
+    "reason": "this runner replays a committed local fixture; benchmark-native tasks, action traces, browser state, and grader output are required before any official result claim"
+  },
+  "promotion_requirements": [
+    "benchmark-native task ids and action trace",
+    "raw-arm benchmark output",
+    "fak-arm benchmark output",
+    "benchmark-native grader or score report",
+    "same model, browser state, task ids, budget, and retry policy across both arms",
+    "fak action verdict/evidence log linked to benchmark-native grader output"
+  ],
+  "result_claim_allowed": false,
   "claim_boundary": "Adapter smoke only: normalizes browser/computer-use actions into fak tool calls with evidence checkpoints. It is not an official WebArena, OSWorld, WorkArena, BrowseComp, or BrowserGym score until an external harness supplies tasks and grader output."
 }

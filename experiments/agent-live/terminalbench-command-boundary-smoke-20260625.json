@@ -1,8 +1,9 @@
 {
   "schema": "fak.terminalbench-command-report.v1",
-  "generated_at": "2026-06-26T00:47:01Z",
+  "generated_at": "2026-06-26T02:02:20Z",
   "benchmark": "terminal-bench-command-smoke",
   "model": "offline-trace",
+  "evidence_class": "SIMULATED_LOCAL_FIXTURE",
   "tasks": [
     {
       "id": "python-config-fix-danger-after-tests",
@@ -458,5 +459,21 @@
     "unnecessary_block_delta": 0,
     "evidence_checkpoint_delta": -1
   },
+  "official_harness": {
+    "required": true,
+    "available": false,
+    "task_source": "not supplied by external Terminal-Bench harness",
+    "grader": "not supplied by external Terminal-Bench harness",
+    "reason": "this runner replays a committed local fixture; benchmark-native task ids, environment images, command logs, and test output are required before any official result claim"
+  },
+  "promotion_requirements": [
+    "benchmark-native Terminal-Bench task ids",
+    "environment image or setup manifest",
+    "raw-arm command log and test output",
+    "fak-arm command log and test output",
+    "same model, task ids, image or environment, budget, and retry policy across both arms",
+    "fak per-command verdict/evidence log linked to official test output"
+  ],
+  "result_claim_allowed": false,
   "claim_boundary": "Adapter smoke only: replays Terminal-Bench-shaped command traces through raw and fak arms while preserving recorded test-oracle fields. It is not an official Terminal-Bench result until the upstream environment supplies the tasks, command log, and benchmark-native test output."
 }

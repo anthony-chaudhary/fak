@@ -13,7 +13,16 @@ func RenderMarkdown(r *Report) string {
 	if r.Model != "" {
 		fmt.Fprintf(&b, "- Model: `%s`\n", r.Model)
 	}
+	if r.EvidenceClass != "" {
+		fmt.Fprintf(&b, "- Evidence class: `%s`\n", r.EvidenceClass)
+	}
 	fmt.Fprintf(&b, "- Tasks: `%d`\n", r.Summary.TaskCount)
+	fmt.Fprintf(&b, "- Official harness: required=%t available=%t", r.OfficialHarness.Required, r.OfficialHarness.Available)
+	if r.OfficialHarness.Reason != "" {
+		fmt.Fprintf(&b, " (%s)", r.OfficialHarness.Reason)
+	}
+	fmt.Fprintf(&b, "\n")
+	fmt.Fprintf(&b, "- Result claim allowed: `%t`\n", r.ResultClaimAllowed)
 	fmt.Fprintf(&b, "- Boundary: %s\n\n", r.ClaimBoundary)
 
 	fmt.Fprintf(&b, "| Arm | pass^1 | safe resolve | policy breaches | minefield hits | blocked dangerous | unnecessary blocks | denied commands | evidence completeness |\n")
@@ -29,6 +38,12 @@ func RenderMarkdown(r *Report) string {
 		fmt.Fprintf(&b, "| `%s` | %t | %t | %t | %t | %d | %d | %d |\n",
 			t.ID, t.Raw.TestSuccess, t.Raw.SafeResolve, t.Fak.TestSuccess, t.Fak.SafeResolve,
 			t.Fak.DeniedCommands, len(t.Fak.DangerousBlocks), len(t.Fak.UnnecessaryBlocks))
+	}
+	if len(r.PromotionRequirements) > 0 {
+		fmt.Fprintf(&b, "\n## Promotion Requirements\n\n")
+		for _, req := range r.PromotionRequirements {
+			fmt.Fprintf(&b, "- %s\n", req)
+		}
 	}
 	return b.String()
 }

@@ -21,8 +21,9 @@ import (
 )
 
 const (
-	SuiteSchema  = "fak.terminalbench-command-suite.v1"
-	ReportSchema = "fak.terminalbench-command-report.v1"
+	SuiteSchema        = "fak.terminalbench-command-suite.v1"
+	ReportSchema       = "fak.terminalbench-command-report.v1"
+	EvidenceLocalSmoke = "SIMULATED_LOCAL_FIXTURE"
 )
 
 type Suite struct {
@@ -64,13 +65,25 @@ type CommandStep struct {
 }
 
 type Report struct {
-	Schema        string       `json:"schema"`
-	GeneratedAt   string       `json:"generated_at"`
-	Benchmark     string       `json:"benchmark"`
-	Model         string       `json:"model,omitempty"`
-	Tasks         []TaskReport `json:"tasks"`
-	Summary       Summary      `json:"summary"`
-	ClaimBoundary string       `json:"claim_boundary"`
+	Schema                string          `json:"schema"`
+	GeneratedAt           string          `json:"generated_at"`
+	Benchmark             string          `json:"benchmark"`
+	Model                 string          `json:"model,omitempty"`
+	EvidenceClass         string          `json:"evidence_class"`
+	Tasks                 []TaskReport    `json:"tasks"`
+	Summary               Summary         `json:"summary"`
+	OfficialHarness       OfficialHarness `json:"official_harness"`
+	PromotionRequirements []string        `json:"promotion_requirements"`
+	ResultClaimAllowed    bool            `json:"result_claim_allowed"`
+	ClaimBoundary         string          `json:"claim_boundary"`
+}
+
+type OfficialHarness struct {
+	Required   bool   `json:"required"`
+	Available  bool   `json:"available"`
+	TaskSource string `json:"task_source"`
+	Grader     string `json:"grader"`
+	Reason     string `json:"reason"`
 }
 
 type TaskReport struct {
@@ -268,10 +281,27 @@ func Run(ctx context.Context, s Suite, generatedAt time.Time) (*Report, error) {
 		return nil, err
 	}
 	rep := &Report{
-		Schema:      ReportSchema,
-		GeneratedAt: generatedAt.UTC().Format(time.RFC3339),
-		Benchmark:   s.Benchmark,
-		Model:       s.Model,
+		Schema:        ReportSchema,
+		GeneratedAt:   generatedAt.UTC().Format(time.RFC3339),
+		Benchmark:     s.Benchmark,
+		Model:         s.Model,
+		EvidenceClass: EvidenceLocalSmoke,
+		OfficialHarness: OfficialHarness{
+			Required:   true,
+			Available:  false,
+			TaskSource: "not supplied by external Terminal-Bench harness",
+			Grader:     "not supplied by external Terminal-Bench harness",
+			Reason:     "this runner replays a committed local fixture; benchmark-native task ids, environment images, command logs, and test output are required before any official result claim",
+		},
+		PromotionRequirements: []string{
+			"benchmark-native Terminal-Bench task ids",
+			"environment image or setup manifest",
+			"raw-arm command log and test output",
+			"fak-arm command log and test output",
+			"same model, task ids, image or environment, budget, and retry policy across both arms",
+			"fak per-command verdict/evidence log linked to official test output",
+		},
+		ResultClaimAllowed: false,
 		ClaimBoundary: "Adapter smoke only: replays Terminal-Bench-shaped command traces through raw and fak arms while preserving recorded test-oracle fields. " +
 			"It is not an official Terminal-Bench result until the upstream environment supplies the tasks, command log, and benchmark-native test output.",
 	}

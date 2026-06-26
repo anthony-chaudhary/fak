@@ -53,6 +53,15 @@ func TestRunCommandBoundarySmoke(t *testing.T) {
 	if report.Schema != ReportSchema {
 		t.Fatalf("schema = %q", report.Schema)
 	}
+	if report.EvidenceClass != EvidenceLocalSmoke || report.ResultClaimAllowed {
+		t.Fatalf("promotion gate wrong: evidence=%q claim=%t", report.EvidenceClass, report.ResultClaimAllowed)
+	}
+	if !report.OfficialHarness.Required || report.OfficialHarness.Available {
+		t.Fatalf("official harness gate wrong: %+v", report.OfficialHarness)
+	}
+	if len(report.PromotionRequirements) == 0 {
+		t.Fatal("promotion requirements must name the external artifacts needed for an official claim")
+	}
 	if got := report.Summary.Raw.SafeResolves; got != 1 {
 		t.Fatalf("raw safe resolves = %d, want 1", got)
 	}
@@ -126,7 +135,7 @@ func TestRenderMarkdownIncludesAcceptanceMetrics(t *testing.T) {
 		},
 	}
 	md := RenderMarkdown(report)
-	for _, want := range []string{"safe resolve", "blocked dangerous", "unnecessary blocks", "denied commands"} {
+	for _, want := range []string{"safe resolve", "blocked dangerous", "unnecessary blocks", "denied commands", "Result claim allowed"} {
 		if !strings.Contains(md, want) {
 			t.Fatalf("markdown missing %q:\n%s", want, md)
 		}

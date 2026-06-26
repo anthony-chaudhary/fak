@@ -24,6 +24,7 @@ import (
 const (
 	ActionMediationSuiteSchema  = "fak.webbench-action-mediation-suite.v1"
 	ActionMediationReportSchema = "fak.webbench-action-mediation-report.v1"
+	EvidenceLocalSmoke          = "SIMULATED_LOCAL_FIXTURE"
 )
 
 type ActionMediationSuite struct {
@@ -54,13 +55,25 @@ type ActionStep struct {
 }
 
 type ActionMediationReport struct {
-	Schema        string                      `json:"schema"`
-	GeneratedAt   string                      `json:"generated_at"`
-	Benchmark     string                      `json:"benchmark"`
-	Model         string                      `json:"model,omitempty"`
-	Tasks         []ActionMediationTaskReport `json:"tasks"`
-	Summary       ActionMediationSummary      `json:"summary"`
-	ClaimBoundary string                      `json:"claim_boundary"`
+	Schema                string                      `json:"schema"`
+	GeneratedAt           string                      `json:"generated_at"`
+	Benchmark             string                      `json:"benchmark"`
+	Model                 string                      `json:"model,omitempty"`
+	EvidenceClass         string                      `json:"evidence_class"`
+	Tasks                 []ActionMediationTaskReport `json:"tasks"`
+	Summary               ActionMediationSummary      `json:"summary"`
+	OfficialHarness       OfficialHarness             `json:"official_harness"`
+	PromotionRequirements []string                    `json:"promotion_requirements"`
+	ResultClaimAllowed    bool                        `json:"result_claim_allowed"`
+	ClaimBoundary         string                      `json:"claim_boundary"`
+}
+
+type OfficialHarness struct {
+	Required   bool   `json:"required"`
+	Available  bool   `json:"available"`
+	TaskSource string `json:"task_source"`
+	Grader     string `json:"grader"`
+	Reason     string `json:"reason"`
 }
 
 type ActionMediationTaskReport struct {
@@ -263,10 +276,27 @@ func RunActionMediation(ctx context.Context, s ActionMediationSuite, generatedAt
 		return nil, err
 	}
 	rep := &ActionMediationReport{
-		Schema:      ActionMediationReportSchema,
-		GeneratedAt: generatedAt.UTC().Format(time.RFC3339),
-		Benchmark:   s.Benchmark,
-		Model:       s.Model,
+		Schema:        ActionMediationReportSchema,
+		GeneratedAt:   generatedAt.UTC().Format(time.RFC3339),
+		Benchmark:     s.Benchmark,
+		Model:         s.Model,
+		EvidenceClass: EvidenceLocalSmoke,
+		OfficialHarness: OfficialHarness{
+			Required:   true,
+			Available:  false,
+			TaskSource: "not supplied by external browser/computer-use harness",
+			Grader:     "not supplied by external browser/computer-use harness",
+			Reason:     "this runner replays a committed local fixture; benchmark-native tasks, action traces, browser state, and grader output are required before any official result claim",
+		},
+		PromotionRequirements: []string{
+			"benchmark-native task ids and action trace",
+			"raw-arm benchmark output",
+			"fak-arm benchmark output",
+			"benchmark-native grader or score report",
+			"same model, browser state, task ids, budget, and retry policy across both arms",
+			"fak action verdict/evidence log linked to benchmark-native grader output",
+		},
+		ResultClaimAllowed: false,
 		ClaimBoundary: "Adapter smoke only: normalizes browser/computer-use actions into fak tool calls with evidence checkpoints. " +
 			"It is not an official WebArena, OSWorld, WorkArena, BrowseComp, or BrowserGym score until an external harness supplies tasks and grader output.",
 	}

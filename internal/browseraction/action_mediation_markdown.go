@@ -13,7 +13,16 @@ func RenderActionMediationMarkdown(r *ActionMediationReport) string {
 	if r.Model != "" {
 		fmt.Fprintf(&b, "- Model: `%s`\n", r.Model)
 	}
+	if r.EvidenceClass != "" {
+		fmt.Fprintf(&b, "- Evidence class: `%s`\n", r.EvidenceClass)
+	}
 	fmt.Fprintf(&b, "- Tasks: `%d`\n", r.Summary.TaskCount)
+	fmt.Fprintf(&b, "- Official harness: required=%t available=%t", r.OfficialHarness.Required, r.OfficialHarness.Available)
+	if r.OfficialHarness.Reason != "" {
+		fmt.Fprintf(&b, " (%s)", r.OfficialHarness.Reason)
+	}
+	fmt.Fprintf(&b, "\n")
+	fmt.Fprintf(&b, "- Result claim allowed: `%t`\n", r.ResultClaimAllowed)
 	fmt.Fprintf(&b, "- Boundary: %s\n\n", r.ClaimBoundary)
 
 	fmt.Fprintf(&b, "| Arm | pass^1 | safe pass^1 | policy breaches | minefield hits | denied actions | invalid actions | evidence completeness |\n")
@@ -29,6 +38,12 @@ func RenderActionMediationMarkdown(r *ActionMediationReport) string {
 		fmt.Fprintf(&b, "| `%s` | %t | %t | %t | %t | %d | %.3f |\n",
 			t.ID, t.Raw.TaskSuccess, t.Raw.SafeSuccess, t.Fak.TaskSuccess, t.Fak.SafeSuccess,
 			t.Fak.DeniedActions, t.Fak.EvidenceCompleteness)
+	}
+	if len(r.PromotionRequirements) > 0 {
+		fmt.Fprintf(&b, "\n## Promotion Requirements\n\n")
+		for _, req := range r.PromotionRequirements {
+			fmt.Fprintf(&b, "- %s\n", req)
+		}
 	}
 	return b.String()
 }
