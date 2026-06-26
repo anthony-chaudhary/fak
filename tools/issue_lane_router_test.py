@@ -260,5 +260,46 @@ class CollectWiringTest(unittest.TestCase):
         self.assertEqual(p["verdict"], "FETCH_ERROR")
 
 
+class DispatchabilityTest(unittest.TestCase):
+    """Epic parents and human-blocked issues are kept out of the candidate set."""
+
+    def test_epic_label_is_not_dispatchable(self):
+        self.assertTrue(m.is_epic(issue(1, "anything", labels=["epic"])))
+        self.assertFalse(m.is_dispatchable(issue(1, "anything", labels=["epic"])))
+
+    def test_epic_title_convention_is_not_dispatchable(self):
+        self.assertTrue(m.is_epic(issue(2, "epic(serving): warm the next turn")))
+        self.assertTrue(m.is_epic(issue(3, "epic: ECC-style memory integrity")))
+        self.assertFalse(m.is_dispatchable(issue(2, "epic(serving): warm the next turn")))
+
+    def test_plain_fix_is_dispatchable(self):
+        # A normal issue (no epic label, title doesn't start with epic) is routable.
+        self.assertFalse(m.is_epic(issue(4, "fix(gateway): drop bad tool call")))
+        self.assertTrue(m.is_dispatchable(issue(4, "fix(gateway): drop bad tool call")))
+        # 'epic' merely mentioned mid-title is NOT an epic (anchored at start only).
+        self.assertFalse(m.is_epic(issue(5, "docs: describe the epic rollout plan")))
+
+    def test_human_blocked_still_not_dispatchable(self):
+        blocked = issue(6, "needs a trademark filing", labels=[m.BLOCKED_BY_HUMAN_LABEL])
+        self.assertFalse(m.is_dispatchable(blocked))
+
+    def test_collect_skips_epics_routes_the_rest(self):
+        orig = m.lane_taxonomy
+        m.lane_taxonomy = lambda ws: (LANES, TREES)
+        try:
+            p = m.collect(
+                Path("C:/work/fleet"),
+                fetcher=lambda _ws: [
+                    issue(1, "fix(gateway): a"),
+                    issue(2, "epic(gateway): umbrella", labels=["epic"]),
+                ],
+            )
+        finally:
+            m.lane_taxonomy = orig
+        # The epic is skipped (surfaced, not routed); only the plain issue routes.
+        self.assertEqual(p["counts"]["routed"], 1)
+        self.assertEqual(p["counts"]["skipped_human_blocked"], 1)
+
+
 if __name__ == "__main__":
     unittest.main()

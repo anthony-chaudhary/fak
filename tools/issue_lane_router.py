@@ -221,6 +221,29 @@ def is_blocked_by_human(issue: dict[str, Any], *, label: str = BLOCKED_BY_HUMAN_
     return label in _label_names(issue)
 
 
+# An epic is a PARENT/tracking issue (an umbrella over child issues), not a single
+# closeable change. A worker told to close it "with the smallest correct change"
+# burns a slot for minutes and ships a partial commit at best while the epic stays
+# open — measured waste (~7% of open issues, ~1 in 6 spawns landed on one). Skipping
+# the parent never strands a lane: collect() just routes the next closeable issue,
+# and the epic still closes normally when its children do. Detected by the `epic`
+# label OR the repo's `epic(scope):` / `epic:` commit-style title convention.
+_EPIC_TITLE_RE = re.compile(r"^\s*epic\b\s*[\(:]", re.IGNORECASE)
+
+
+def is_epic(issue: dict[str, Any]) -> bool:
+    """True when the issue is an epic parent (label `epic` or an `epic(...)`/`epic:`
+    title). Kept out of the dispatch candidate set like a human-blocked issue."""
+    if "epic" in _label_names(issue):
+        return True
+    return bool(_EPIC_TITLE_RE.match(str(issue.get("title") or "")))
+
+
+def is_dispatchable(issue: dict[str, Any]) -> bool:
+    """A worker can be pointed at this issue: not human-blocked, not an epic parent."""
+    return not is_blocked_by_human(issue) and not is_epic(issue)
+
+
 def route_issue(
     issue: dict[str, Any],
     concurrent: list[str],
@@ -457,10 +480,11 @@ def collect(
     fetch = fetcher or (lambda ws: fetch_issues(ws, limit=issue_limit))
     issues = fetch(root)
     coverage = compute_coverage(issues_fetched=len(issues), issue_limit=issue_limit)
-    # Drop human/external-blocked issues from the dispatch candidate set (the one
-    # chokepoint both lanes read), but surface them so the skip is never silent.
-    blocked = [i for i in issues if is_blocked_by_human(i)]
-    routable = [i for i in issues if not is_blocked_by_human(i)]
+    # Drop non-dispatchable issues (human/external-blocked AND epic parents) from the
+    # candidate set — the one chokepoint both lanes read — but surface them so the skip
+    # is never silent. Epics stay visible to humans and still close when their children do.
+    blocked = [i for i in issues if not is_dispatchable(i)]
+    routable = [i for i in issues if is_dispatchable(i)]
     fetch_error = None
     if not concurrent:
         fetch_error = "dos doctor returned no lanes — run from the repo root (not fak/)"
