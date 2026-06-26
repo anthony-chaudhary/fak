@@ -192,6 +192,30 @@
         "AMD Vulkan f32 is correct but ~58x slower than llama.cpp CPU; token-per-watt stays SIMULATED (no power meter on the box)"
       ],
       "durability_note": "Numerical parity is witnessed per backend (argmax-exact, cosine 1.0); throughput is claimed only where measured (the NVIDIA decode parity)."
+    },
+    {
+      "id": "model-routing",
+      "concept": "Model routing (per-aspect + ensemble — fak route)",
+      "category": "model",
+      "surface": "product",
+      "what_you_get": "Author a version-tagged JSON routing manifest and run `fak route` as the oracle: it selects a per-aspect Plan (whole request, one tool call, a sub-query, a reasoning step) or a first-class ensemble, and `--simulate` folds stand-in member outputs through the reduction so the ensemble runs end-to-end with no model in the loop.",
+      "audience": "developer",
+      "maturity": "shipped",
+      "claims_section": "Model routing (per-aspect + ensemble — `fak route`)",
+      "claims_tag": "SHIPPED",
+      "first_command": "go run ./cmd/fak route --manifest examples/model-routing.example.json --aspect tool",
+      "first_command_verb": "route",
+      "needs_gpu": false,
+      "needs_key": false,
+      "witness_path": "internal/modelroute",
+      "witness": "go test ./internal/modelroute (per-aspect routing, first-match, fail-closed default, manifest round-trip, TestCombine*); go test ./cmd/fak -run TestRoute*",
+      "entry_doc": "examples/model-routing.example.json",
+      "verdict": "durable-product",
+      "gaps": [
+        "The oracle decides and reduces stand-in outputs; binding a Plan to live model calls is the caller's integration",
+        "all_reduce is a weighted numeric mean over scalar outputs, not a tensor all-reduce"
+      ],
+      "durability_note": "Pure, stdlib-only (architest tier 1); the manifest loads with DisallowUnknownFields and round-trips --dump<->--check, mirroring the capability-floor policy idiom, with a fail-closed Default."
     }
   ]
 }

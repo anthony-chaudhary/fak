@@ -143,6 +143,54 @@
         "Go/JSON only on the decide path (Python/CUDA shell out, so they DEFER fail-open)"
       ],
       "durability_note": "The adjudicator does not import codelint (that would put exec on the request path); the off-by-default knob preserves the ABI golden freeze."
+    },
+    {
+      "id": "shared-task-record-fold",
+      "concept": "Shared task record fold (collaborative task contract)",
+      "category": "tooling",
+      "surface": "subsystem",
+      "what_you_get": "An in-memory reference fold for a shared task record: a Store that applies user/agent patches against a base revision, auto-merges commuting writes, returns typed conflicts for stale ones, and publishes accepted events on a capability-floored a2achan topic so collaborators observe live updates.",
+      "audience": "platform",
+      "maturity": "shipped",
+      "claims_section": "Shared task record fold",
+      "claims_tag": "SHIPPED",
+      "first_command": "",
+      "first_command_verb": "",
+      "needs_gpu": false,
+      "needs_key": false,
+      "witness_path": "internal/sharedtask",
+      "witness": "TestAcceptedPatchAdvancesRecordAndEmitsEvent, TestStaleAppendOpenDecisionAutoMerges, TestApplyAndPublishAcceptedPatchFansOut, TestJournalRoundTripRestoresCurrentRecordAndEvents",
+      "entry_doc": "docs/shared-task-record-contract.md",
+      "verdict": "real-not-easy",
+      "gaps": [
+        "Off the request path — it is the reference fold + scoped read projections, not a durable or networked task service",
+        "Replay is snapshot-based (Journal), not a claim that raw event rows alone rebuild state"
+      ],
+      "durability_note": "Disaggregated artifact/note/body refs are admitted only when digest-shaped and carrying a deletion certificate; missing witnesses are quarantined without advancing the record."
+    },
+    {
+      "id": "trajectory-observability",
+      "concept": "Trajectory observability primitives (data plane + reference similarity + scorer seam)",
+      "category": "tooling",
+      "surface": "subsystem",
+      "what_you_get": "A typed, exportable per-turn Turn record folded from the kernel's lifecycle stream (FAK_TRAJECTORY=1), a dependency-free simhash similarity index for finding near-duplicate bad queries, and a pluggable Turn→Finding scorer registry — the substrate the trajectory-garden skill builds on.",
+      "audience": "developer",
+      "maturity": "shipped",
+      "claims_section": "Trajectory observability primitives (data plane + reference similarity + scorer seam)",
+      "claims_tag": "SHIPPED",
+      "first_command": "",
+      "first_command_verb": "",
+      "needs_gpu": false,
+      "needs_key": false,
+      "witness_path": "internal/trajectory",
+      "witness": "TestRecorderFoldsTrace, TestExportImportRoundTrip (trajectory); TestNearDuplicateRanksAboveUnrelated (simhash); TestSampleCorpusGardening (trajhook)",
+      "entry_doc": "docs/observability/trajectory.md",
+      "verdict": "real-not-easy",
+      "gaps": [
+        "The `fak traj similar|cluster|score|gc|export` toolkit exists over an exported corpus, but is not yet listed in docs/cli-reference.md as a first-class verb",
+        "simhash is a hashing-trick sketch (same-intent/different-vocabulary pairs score ~0.35), not a learned embedding"
+      ],
+      "durability_note": "The Recorder is an abi.Emitter reading the OPEN Fields/Meta channels, so it adds no field to the frozen ABI; gc PROPOSES prune candidates, never deletes."
     }
   ]
 }

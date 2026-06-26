@@ -118,6 +118,54 @@
         "Suite-green defaults to go build+vet (a Windows-safe proxy); the full test suite is WSL-only"
       ],
       "durability_note": "The keep-bit is non-forgeable (witness + metrics); the loop never mutates main without an explicit gated land step; the journal is append-only."
+    },
+    {
+      "id": "a2a-in-kernel-channel",
+      "concept": "In-kernel agent-to-agent message channel (a2achan)",
+      "category": "platform",
+      "surface": "benchmark",
+      "what_you_get": "An in-kernel mailbox that delivers an addressed value from one agent to a different one — Send/Recv and Publish/Subscribe — gated by the same default-deny floor a tool call rides, so a send without the capability is denied and a private/quarantined body cannot cross channels.",
+      "audience": "platform",
+      "maturity": "shipped",
+      "claims_section": "In-kernel agent-to-agent message channel (`a2achan`)",
+      "claims_tag": "SHIPPED",
+      "first_command": "go run ./cmd/a2ademo",
+      "first_command_verb": "",
+      "needs_gpu": false,
+      "needs_key": false,
+      "witness_path": "internal/a2achan",
+      "witness": "TestDeterministicDelivery, TestFailClosedDefault, TestScopeTaintEnforcement, TestPubSubFanout (go test -race); cmd/a2ademo exit 0",
+      "entry_doc": "docs/a2a-in-kernel-channel.md",
+      "verdict": "usable-today",
+      "gaps": [
+        "Durable cross-process delivery (a session-image-backed mailbox) is the labeled-STUB next rung; in-process + continuation-id handoff is real today",
+        "Send/Recv are not yet routed as true kernel Ops (the abi Op table is registered but dormant)"
+      ],
+      "durability_note": "The floor lives in the same kernel registries every tool call folds (an a2aGate adjudicator + a2aIngress admitter), not a side library; a delivered body keeps its taint."
+    },
+    {
+      "id": "taskmgr-snapshot",
+      "concept": "Task manager snapshot (process-local resource fold)",
+      "category": "platform",
+      "surface": "benchmark",
+      "what_you_get": "Run `fak task sample` to get a JSON snapshot of the current process' running tasks/steps with per-task and per-step resource deltas (wall/CPU seconds, heap/sys memory, goroutines) and an ETA only when progress against a known total is positive.",
+      "audience": "platform",
+      "maturity": "shipped",
+      "claims_section": "Task manager snapshot",
+      "claims_tag": "SHIPPED",
+      "first_command": "go run ./cmd/fak task sample",
+      "first_command_verb": "task",
+      "needs_gpu": false,
+      "needs_key": false,
+      "witness_path": "internal/taskmgr",
+      "witness": "go test ./internal/taskmgr; go test ./cmd/fak -run TestTask",
+      "entry_doc": "docs/task-manager.md",
+      "verdict": "usable-today",
+      "gaps": [
+        "It is the embeddable in-process reference fold — not a durable scheduler, cross-PID monitor, or fleet oracle",
+        "Resource state is sampled from the current Go runtime, so it sees only this process"
+      ],
+      "durability_note": "Stdlib-only; ETA is emitted only on positive progress against a known total, so it never invents a finish time."
     }
   ]
 }

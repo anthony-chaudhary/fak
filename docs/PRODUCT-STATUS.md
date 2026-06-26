@@ -5,9 +5,9 @@ description: "A person-facing snapshot of where fak's product concepts stand: wh
 
 # Product status — durable, real, useful-today
 
-fak's product-status page is a tree-checked snapshot of which of fak's concepts a person can actually pick up and run today, versus which are still real-but-not-yet-a-surface subsystems or named gaps. As of v0.30.0 it counts 10 durable products you can run offline on a laptop this afternoon, 8 more usable today with a GPU, key, or network, and 17 witnessed subsystems that work but have no command a person runs directly. Every verdict is re-derived from tools/product_scorecard.data/ by tools/product_scorecard.py and cross-checked against the real tree, so nothing here is hand-typed. The 100/100 score grades how complete and honest that product map is — not how much fak wins — so a labeled honest stub counts as accurate, and only an overclaim counts as a defect.
+fak's product-status page is a tree-checked snapshot of which of fak's concepts a person can actually pick up and run today, versus which are still real-but-not-yet-a-surface subsystems or named gaps. As of v0.34.0 it counts 11 durable products you can run offline on a laptop this afternoon, 13 more usable today (benchmarks and proofs you run to see a result, plus the few needing a GPU, key, or network), and 21 witnessed subsystems that work but have no command a person runs directly. Every verdict is re-derived from tools/product_scorecard.data/ by tools/product_scorecard.py and cross-checked against the real tree, so nothing here is hand-typed. The 100/100 score grades how complete and honest that product map is — not how much fak wins — so a labeled honest stub counts as accurate, and only an overclaim counts as a defect.
 
-> **As of 2026-06-24 (fak v0.30.0).** This page answers the one question a person
+> **As of 2026-06-25 (fak v0.34.0).** This page answers the one question a person
 > asks of a project: *of the concepts fak ships, which can I pick up and use this
 > afternoon — and which are still a research seam or a named gap?* Every number and
 > verdict here is re-derived from `tools/product_scorecard.data/` by
@@ -20,10 +20,10 @@ fak's product-status page is a tree-checked snapshot of which of fak's concepts 
 
 | Metric | Value |
 |---|---|
-| **Durable products you can run on a laptop today** | **10** |
-| Usable today (needs a GPU / key / network, or a benchmark you run to see a result) | 8 |
-| Real subsystems, not yet a person-facing surface | 17 |
-| Coverage of the concept catalog | 100% (18/18 CLAIMS.md concept sections positioned) |
+| **Durable products you can run on a laptop today** | **11** |
+| Usable today (a benchmark/proof you run to see a result, or needs a GPU / key / network) | 13 |
+| Real subsystems, not yet a person-facing surface | 21 |
+| Coverage of the concept catalog | 100% (28/28 CLAIMS.md concept sections positioned) |
 | Product-debt (honesty + coverage defects) | 0 |
 | Composite map score | 100/100 (grade A) |
 
@@ -35,39 +35,39 @@ fak's product-status page is a tree-checked snapshot of which of fak's concepts 
 ## Standing at a glance
 
 ```text
-product standing chart — 35 concepts · score 100.0/100 (grade A) · product-debt 0
+product standing chart — 45 concepts · score 100.0/100 (grade A) · product-debt 0
 
 verdict ladder (count of concepts, best -> roadmap):
-  ★ durable-product ████████████████············ 10
-  ● usable-today    █████████████··············· 8
-  ◐ real-not-easy   ████████████████████████████ 17
+  ★ durable-product ███████████████············· 11
+  ● usable-today    █████████████████··········· 13
+  ◐ real-not-easy   ████████████████████████████ 21
   ○ honest-stub     ···························· 0
   · concept-only    ···························· 0
 
 verdict mix by category (each cell = one concept):
-  memory       ★◐◐              (3 concept(s); 1 durable, 0 usable-today)
-  model        ●◐◐◐◐◐◐◐         (8 concept(s); 0 durable, 1 usable-today)
-  performance  ●●●●◐◐◐          (7 concept(s); 0 durable, 4 usable-today)
-  platform     ★★●●●            (5 concept(s); 2 durable, 3 usable-today)
+  memory       ★◐◐◐             (4 concept(s); 1 durable, 0 usable-today)
+  model        ★●◐◐◐◐◐◐◐        (9 concept(s); 1 durable, 1 usable-today)
+  performance  ●●●●●●●◐◐◐◐      (11 concept(s); 0 durable, 7 usable-today)
+  platform     ★★●●●●●          (7 concept(s); 2 durable, 5 usable-today)
   security     ★★★◐◐◐           (6 concept(s); 3 durable, 0 usable-today)
-  tooling      ★★★★◐◐           (6 concept(s); 4 durable, 0 usable-today)
+  tooling      ★★★★◐◐◐◐         (8 concept(s); 4 durable, 0 usable-today)
 
 can a person run it today?
-  laptop (offline)   █████████████··············· 16
-  needs gpu/key/net  ██·························· 2
-  no direct command  ██████████████·············· 17
+  laptop (offline)   ██████████████·············· 22
+  needs gpu/key/net  █··························· 2
+  no direct command  █████████████··············· 21
 
-coverage  [████████████████████████████████] 100.0%  (18/18 concept sections positioned)
+coverage  [████████████████████████████████] 100.0%  (28/28 concept sections positioned)
 
 legend: ★ durable-product   ● usable-today   ◐ real-not-easy   ○ honest-stub   · concept-only
 ```
 
-The biggest bar is `real-not-easy` (17): real, witnessed subsystems with no surface a
+The biggest bar is `real-not-easy` (21): real, witnessed subsystems with no surface a
 person runs directly. `tooling` and `security` carry the most durable products;
 the `model` lane is almost entirely subsystem-deep (the kernel-owned KV cache, the
 quarantine bridge, the parity lanes) — proven in tests, not yet wired into a live run.
 
-## What you can run today (10 durable products)
+## What you can run today (11 durable products)
 
 Each ships, has an offline first command (no GPU, no key), a witness that exists, and
 an entry doc — usable on a laptop this afternoon.
@@ -88,13 +88,16 @@ an entry doc — usable on a laptop this afternoon.
 - **Doctor** — an operator diagnostic over answer-shape and kernel admit.
 - **Codelint** — language packs that check agent-written code actually parses, at the
   kernel boundary.
+- **Model routing (`fak route`)** — author a per-aspect / ensemble routing manifest
+  and run the `fak route` oracle (`--simulate` folds stand-in member outputs through
+  the reduction), with no model in the loop.
 
-Another **8 are usable today** but need a GPU, an API key, a network, or are a
+Another **13 are usable today** but need a GPU, an API key, a network, or are a
 benchmark you run to *see* a result (the governed gateway `fak serve`, the Claude Code
-passthrough, the fan-out / turn-tax / long-context benchmarks, the RSI ship-gate, and
+passthrough, the fan-out / turn-tax / long-context benchmarks, `fak ablate`, the `fak vcache prove*` proofs, `fak task sample`, the `a2ademo` channel proof, the RSI ship-gate, and
 the persistent context planner).
 
-## What's real but not yet a product surface (17)
+## What's real but not yet a product surface (21)
 
 These are the witnessed subsystems behind the headline guarantees — bit-exact KV
 eviction, the cross-engine co-residence seam, RadixAttention parity, the normalize-and-

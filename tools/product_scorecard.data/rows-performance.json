@@ -167,6 +167,102 @@
         "A library the gateway/agent consume, not a standalone surface"
       ],
       "durability_note": "Cassette replay makes offline runs deterministic and CI-stable; a live run carries a real transcript hash XOR an explicit unverified flag."
+    },
+    {
+      "id": "self-ablation-sweep",
+      "concept": "Self-ablation sweep (fak ablate)",
+      "category": "performance",
+      "surface": "benchmark",
+      "what_you_get": "Run `fak ablate --sweep vdso` to replay one frozen tool-call trace under an N-arm feature sweep and print one row per arm with the kernel counters and a per-arm delta vs the baseline — the deterministic, $0, no-model core of the self-ablation harness.",
+      "audience": "researcher",
+      "maturity": "shipped",
+      "claims_section": "Self-ablation sweep (`fak ablate`)",
+      "claims_tag": "SHIPPED",
+      "first_command": "go run ./cmd/fak ablate --sweep vdso",
+      "first_command_verb": "ablate",
+      "needs_gpu": false,
+      "needs_key": false,
+      "witness_path": "internal/ablate",
+      "witness": "TestSweep_VDSO_NArmGuardAndIsolatedDelta, TestValidate_RefusesMismatchedWorkloadHash, TestAblateJSONReport; go test ./cmd/fak",
+      "entry_doc": "docs/benchmarks/ABLATE-RESULTS.md",
+      "verdict": "usable-today",
+      "gaps": [
+        "Rung 1 sweeps only the runtime-settable vDSO knob; the ~40 env-gated features need the subprocess-re-exec rung (BuildSweep fails loud rather than measuring nothing)",
+        "The live-loop and cross-agent arms are separate rungs"
+      ],
+      "durability_note": "All arms are bound to the trace's single workload hash by an N-arm identical-workload guard, so the deltas are apples-to-apples."
+    },
+    {
+      "id": "cross-agent-ablation",
+      "concept": "Cross-agent ablation (Regime B — bare claude -p vs fak guard -- claude -p)",
+      "category": "performance",
+      "surface": "subsystem",
+      "what_you_get": "The first live cross-agent (Regime B) ablation: K=5 reps/arm on a fixed model measure what the fak guard hop costs an external agent. On the trivial pong task the guard was a net input-side cost (+input tokens from a reshaped prompt-cache split), reported honestly with its real sign — never spun as a saving.",
+      "audience": "researcher",
+      "maturity": "shipped",
+      "claims_section": "Cross-agent ablation (Regime B — bare `claude -p` vs `fak guard -- claude -p`)",
+      "claims_tag": "SHIPPED",
+      "first_command": "",
+      "first_command_verb": "",
+      "needs_gpu": false,
+      "needs_key": true,
+      "witness_path": "experiments/ablate/cross-agent-pong-opus.json",
+      "witness": "python tools/cross_agent_ablate_test.py (21 hermetic tests); every aggregate re-derives offline from raw_reps via tools/cross_agent_ablate.py report",
+      "entry_doc": "docs/benchmarks/ABLATE-RESULTS.md",
+      "verdict": "real-not-easy",
+      "gaps": [
+        "Live arm needs a real claude binary + an API key/account; only the committed-artifact report re-derives offline",
+        "One tiny tool-light task on one host/account — distributional validity, not a fleet SLA; a denial-inducing multi-tool task and a pure_fak arm are follow-on rungs"
+      ],
+      "durability_note": "The controller enforces the validity contract: no saved number unless both arms completed AND succeeded, mean +/- CI95 over K>=5, model held constant across and within arms, tokens always decomposed (input/output/cache_read/cache_create), never summed."
+    },
+    {
+      "id": "vcache-chains-recall-m4",
+      "concept": "vCache Chains & Recall (M4)",
+      "category": "performance",
+      "surface": "benchmark",
+      "what_you_get": "Run `fak vcache prove-recall` to exercise the prefix-DAG + cost-gated rebuild engine that decides, per recall, whether to replay a chain or send the unit cold — the default run refutes a single-unit rebuild (the 300x loss) and --siblings 301 proves the amortized fan-out exception.",
+      "audience": "developer",
+      "maturity": "shipped",
+      "claims_section": "vCache Chains & Recall (M4)",
+      "claims_tag": "SHIPPED",
+      "first_command": "go run ./cmd/fak vcache prove-recall",
+      "first_command_verb": "vcache",
+      "needs_gpu": false,
+      "needs_key": false,
+      "witness_path": "internal/vcachechain",
+      "witness": "TestProveRecall, TestPlanRecall, TestBreakEven, TestTopologicalReplay, TestPlaceBreakpoints; go test ./cmd/fak -run TestRunVCacheProveRecall",
+      "entry_doc": "docs/notes/VCACHE-VIRTUAL-API-CACHE-2026-06-24.md",
+      "verdict": "usable-today",
+      "gaps": [
+        "Gated off by default (DefaultEnabled=false) — every recall is sent cold until the live provider recall loop flips it on",
+        "Off-path decision engine (prefix DAG + cost gate + replay scheduler), not the live provider recall transport (waits on M1-M3)"
+      ],
+      "durability_note": "Correctness never depends on the verdict (Law A2): whatever PlanRecall returns, the caller can always re-send the full prefix."
+    },
+    {
+      "id": "vcache-governor-m5",
+      "concept": "vCache Governor (M5)",
+      "category": "performance",
+      "surface": "benchmark",
+      "what_you_get": "Run `fak vcache prove` (or prove-telemetry over a real Claude/Codex usage JSONL) to exercise the steady-state warm-set policy: pin/lazy/evict classification, a rate-safe warm budget, cross-shard affinity, and a Law-D4 secret classifier that refuses regulated content before any economics.",
+      "audience": "developer",
+      "maturity": "shipped",
+      "claims_section": "vCache Governor (M5)",
+      "claims_tag": "SHIPPED",
+      "first_command": "go run ./cmd/fak vcache prove",
+      "first_command_verb": "vcache",
+      "needs_gpu": false,
+      "needs_key": false,
+      "witness_path": "internal/vcachegov",
+      "witness": "go test ./internal/vcachegov ./cmd/fak -run \"TestRunVCache|TestProve\" (cutoff, warm-budget, affinity, secret refusal, OpenAI/Codex usage parsing); fak vcache prove-telemetry over committed live JSONL",
+      "entry_doc": "docs/notes/VCACHE-VIRTUAL-API-CACHE-2026-06-24.md",
+      "verdict": "usable-today",
+      "gaps": [
+        "Policy/decision layer plus cost proof only — correctness never depends on a provider cache hit; the live warming loop remains #716-#718",
+        "Observed telemetry numbers are relayed from the provider's own cache counters (a realized rebate), not a fak-caused effect"
+      ],
+      "durability_note": "Below-minimum or unsafe-content workloads are first-class REFUTED outcomes; observed provider telemetry is reconciled from JSONL instead of assumed."
     }
   ]
 }

@@ -71,6 +71,30 @@
         "Closes the BENIGN over-promotion arm of memory-poisoning; durable-framed poison still classifies durable (the adversarial arm is the trust gate's job)"
       ],
       "durability_note": "Rides the additive Meta map so the frozen ABI does not move; the default PromotionWarn posture is non-behavior-changing (stamps + counts, still persists) until an operator opts into Enforce."
+    },
+    {
+      "id": "session-image-portable",
+      "concept": "Portable session image + uniform dump/restore (session.Restore + sessionimage + snapshot)",
+      "category": "memory",
+      "surface": "subsystem",
+      "what_you_get": "A finished agent session packs into one model-agnostic .faksession bundle — drive state + recall core image + trajectory under a sha256 integrity index — that rehydrates on a different host or model, with a gate-sealed page still sealed after the offload round-trip.",
+      "audience": "developer",
+      "maturity": "shipped",
+      "claims_section": "Portable session image + uniform dump/restore (session.Restore + sessionimage + snapshot)",
+      "claims_tag": "SHIPPED",
+      "first_command": "",
+      "first_command_verb": "",
+      "needs_gpu": false,
+      "needs_key": false,
+      "witness_path": "internal/sessionimage",
+      "witness": "TestDumpLoadRoundTrip, TestPackUnpackPreservesQuarantineAcrossBoundary, TestLoadDirFailsClosedOnTamper, TestUnpackRejectsPathTraversal",
+      "entry_doc": "docs/fak/session-control.md",
+      "verdict": "real-not-easy",
+      "gaps": [
+        "It is the durable-resume substrate consumed by serve/guard/snapshot, not a single `fak` dump/restore verb a person runs directly",
+        "Carries logical content only (no KV cache / token ids) — a restore re-prefills on the new model"
+      ],
+      "durability_note": "Every part is integrity-checked against its sha256 on load; a flipped byte fails closed and a path-traversal tar entry is refused, so a tampered image cannot launder a sealed page."
     }
   ]
 }
