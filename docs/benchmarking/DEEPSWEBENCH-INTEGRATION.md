@@ -191,6 +191,13 @@ The runner rejects mismatched instance ids and empty patches. This keeps the
 official SWE-bench grader as the scoring source while making the DeepSWE/R2E-Gym
 baseline pluggable.
 
+The checked-in `cmd/fak-deepswe-runner --fixture` executable is a contract
+fixture, not a model runner. It proves the request/adapter/prediction path with
+`fak swebench run --agent deepswe`; the current witness lives at
+`experiments/agent-live/deepswe-adapter-smoke-20260626/` and records two
+grader-consumable prediction rows plus an honestly gated official-eval command.
+Do not use that fixture packet as pass@1 or cost evidence.
+
 DeepSWE has two modes the adapter should support:
 
 **Single Pass (Pass@1)**:

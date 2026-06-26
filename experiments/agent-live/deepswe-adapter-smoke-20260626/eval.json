@@ -1,0 +1,8 @@
+{
+  "available": false,
+  "reason": "swebench python module not importable — `pip install swebench[harness]` (or run scripts/install_swebench.py)",
+  "resolved": 0,
+  "total": 0,
+  "resolve_rate_pct": 0,
+  "command": "python -m swebench.harness.run_evaluation --dataset_name princeton-nlp/SWE-bench_Verified --predictions_path C:\\work\\fak\\experiments\\agent-live\\deepswe-adapter-smoke-20260626\\predictions.json --run_id deepswe-adapter-smoke-20260626 --max_workers 4"
+}

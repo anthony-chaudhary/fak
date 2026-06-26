@@ -1,0 +1,42 @@
+{
+  "runner": "deepswe",
+  "filter": "full",
+  "started_at": "2026-06-25T18:41:44-07:00",
+  "completed_at": "2026-06-25T18:41:45-07:00",
+  "elapsed_sec": 0.7626952,
+  "total_instances": 2,
+  "done_instances": 2,
+  "skipped": 0,
+  "failed": 0,
+  "instance_meta": [
+    {
+      "instance_id": "django__django-12345",
+      "status": "done",
+      "steps": 0,
+      "elapsed_sec": 0.5143631,
+      "patch_size": 358
+    },
+    {
+      "instance_id": "django__django-23456",
+      "status": "done",
+      "steps": 0,
+      "elapsed_sec": 0.2465045,
+      "patch_size": 358
+    }
+  ],
+  "config": {
+    "Runner": "deepswe",
+    "Filter": "full",
+    "Limit": 2,
+    "MaxSteps": 7,
+    "Timeout": 30000000000,
+    "OutputDir": "experiments/agent-live/deepswe-adapter-smoke-20260626",
+    "DatasetPath": "",
+    "Difficulty": "testdata/swebench_smoke.json",
+    "GatewayAddr": "localhost:8080",
+    "AllowExec": false,
+    "LintWrites": false,
+    "DeepSWERepo": "",
+    "Model": "DeepSWE-Preview-fixture"
+  }
+}

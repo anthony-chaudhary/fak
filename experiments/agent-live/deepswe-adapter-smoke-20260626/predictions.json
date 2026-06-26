@@ -1,0 +1,12 @@
+[
+  {
+    "instance_id": "django__django-12345",
+    "model_name_or_path": "DeepSWE-Preview-fixture",
+    "model_patch": "diff --git a/django_django-12345_fak_deepswe_fixture.txt b/django_django-12345_fak_deepswe_fixture.txt\nnew file mode 100644\nindex 0000000..f1c7000\n--- /dev/null\n+++ b/django_django-12345_fak_deepswe_fixture.txt\n@@ -0,0 +1,2 @@\n+DeepSWE adapter contract fixture for django__django-12345\n+This patch is grader-consumable shape evidence, not a benchmark score.\n"
+  },
+  {
+    "instance_id": "django__django-23456",
+    "model_name_or_path": "DeepSWE-Preview-fixture",
+    "model_patch": "diff --git a/django_django-23456_fak_deepswe_fixture.txt b/django_django-23456_fak_deepswe_fixture.txt\nnew file mode 100644\nindex 0000000..f1c7000\n--- /dev/null\n+++ b/django_django-23456_fak_deepswe_fixture.txt\n@@ -0,0 +1,2 @@\n+DeepSWE adapter contract fixture for django__django-23456\n+This patch is grader-consumable shape evidence, not a benchmark score.\n"
+  }
+]

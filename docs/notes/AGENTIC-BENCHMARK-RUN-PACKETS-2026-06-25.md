@@ -192,8 +192,8 @@ That requires the raw Opus arm on identical task ids and budget.
 
 ## Packet D: DeepSWE external coding benchmark
 
-Status: `adapter-contract-shipped`; real DeepSWE/R2E-Gym execution is still
-gated on an external adapter and task run.
+Status: `adapter-fixture-witness-shipped`; real DeepSWE/R2E-Gym execution is
+still gated on an external adapter and task run.
 
 Why it matters: DeepSWE is fresher than SWE-bench Verified and already reports
 cost, output tokens, and steps. It is a clean place to test whether fak as a
@@ -209,6 +209,13 @@ Current tree evidence:
   `DeepSWERepo`.
 - The adapter receives `fak.swebench.deepswe-request.v1` JSON on stdin and must
   emit canonical SWE-bench prediction JSON or a unified diff on stdout.
+- `cmd/fak-deepswe-runner --fixture` is a checked-in contract fixture adapter.
+  It is not a model runner; it exists so the `fak swebench run --agent deepswe`
+  execution path can be witnessed end to end without fabricating a DeepSWE
+  score.
+- `experiments/agent-live/deepswe-adapter-smoke-20260626/` records that witness:
+  two fixed SWE-bench smoke ids, `2/2` adapter invocations done, canonical
+  `predictions.json` rows emitted, and official eval honestly gated on this box.
 
 Configured witness command shape:
 
@@ -231,6 +238,9 @@ Evidence that would count now:
 - With an adapter configured, the run emits `predictions.json` entries whose
   `instance_id` matches the requested SWE-bench task id and whose `model_patch`
   is adapter-authored.
+- The fixture witness counts only for adapter plumbing and grader-consumable
+  prediction shape. It does not count as pass@1, safe-pass, cost, output-token,
+  or step evidence for DeepSWE itself.
 
 Adapter completion bar:
 
