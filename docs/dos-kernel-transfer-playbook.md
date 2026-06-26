@@ -204,6 +204,31 @@ The two lenses count over different windows — `dos helped` folds the lane jour
 while the raw grep counts the per-call observation log — so they report two
 nearby totals, not a disagreement (`dos helped` says as much in its own output).
 
+### Hook launcher failures vs advisory repeats
+
+A Claude "failed PreToolUse" / "failed PostToolUse" banner means the hook command
+itself crashed before DOS could apply its fail-safe contract. That is different
+from a DOS advisory warning. Healthy hook no-ops emit nothing and exit 0:
+
+```powershell
+'{}' | python -m dos.cli hook pretool --workspace .
+'{}' | python -m dos.cli hook posttool --workspace .
+'{}' | python -m dos.cli hook stop --workspace .
+```
+
+The checked-in `.claude/settings.json` therefore uses a shell-neutral
+`python -c` launcher that delegates to `python -m dos.cli ...` and exits 0 after
+the delegate returns. Real denies and Stop blocks are still preserved because
+they are stdout protocol objects, not nonzero process exits. The repo-guard
+PreToolUse hook follows the same rule: the launcher prefers the compiled
+`tools/.bin/repoguard(.exe)` when present and falls back to `tools/repo_guard.py`,
+then exits 0 so a missing binary never becomes a hook failure banner.
+
+PostToolUse also has one expected "background" shape: polling a still-running
+background task can produce repeated identical tool results. DOS may resurface
+that as additional advisory context so the next turn notices the repeat, but it
+does not block the tool and should not be treated as a failed hook.
+
 ### What a healthy pass looks like
 
 Measured on a live pass (window `2026-06-21T20:05Z → 2026-06-22T08:01Z`, 21,156

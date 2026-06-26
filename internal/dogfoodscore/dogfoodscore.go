@@ -388,9 +388,9 @@ func loadTree(root string) treeFacts {
 }
 
 func wiringResults(t treeFacts) []KPIResult {
-	guardWired := strings.Contains(t.settings, "dos hook pretool") &&
-		strings.Contains(t.settings, "dos hook stop") &&
-		strings.Contains(t.settings, "repoguard")
+	guardWired := settingsHasDOSHook(t.settings, "pretool") &&
+		settingsHasDOSHook(t.settings, "stop") &&
+		settingsHasRepoGuard(t.settings)
 	stopHookWired := strings.Contains(t.settingsLocal, "memory_sync.py")
 	registered := strings.Contains(t.mainGo, "dogfood-score")
 	return []KPIResult{
@@ -410,6 +410,18 @@ func wiringResults(t treeFacts) []KPIResult {
 			"the dogfood-score verb is registered in main.go", registered,
 			"cmd/fak/main.go dispatches `dogfood-score`"),
 	}
+}
+
+func settingsHasDOSHook(settings, verb string) bool {
+	return strings.Contains(settings, "dos hook "+verb) ||
+		(strings.Contains(settings, "dos.cli") &&
+			strings.Contains(settings, "'hook'") &&
+			strings.Contains(settings, "'"+verb+"'"))
+}
+
+func settingsHasRepoGuard(settings string) bool {
+	return strings.Contains(settings, "repoguard") ||
+		strings.Contains(settings, "repo_guard.py")
 }
 
 func honestyResults(t treeFacts, ev Evidence) []KPIResult {

@@ -193,6 +193,21 @@ func TestBuild_RegisteredInMain(t *testing.T) {
 	}
 }
 
+func TestSettingsHookDetectionAcceptsModuleLaunchers(t *testing.T) {
+	settings := `python -c "import subprocess,sys; subprocess.call([sys.executable,'-m','dos.cli','hook','pretool','--workspace','.']); sys.exit(0)"
+python -c "import subprocess,sys; subprocess.call([sys.executable,'-m','dos.cli','hook','stop','--workspace','.']); sys.exit(0)"
+python -c "import os,subprocess,sys; args=[sys.executable,os.path.join('tools','repo_guard.py'),'--hook']; subprocess.call(args); sys.exit(0)"`
+	if !settingsHasDOSHook(settings, "pretool") {
+		t.Fatal("module-form pretool hook should count as wired")
+	}
+	if !settingsHasDOSHook(settings, "stop") {
+		t.Fatal("module-form stop hook should count as wired")
+	}
+	if !settingsHasRepoGuard(settings) {
+		t.Fatal("repo_guard.py launcher should count as repo guard wiring")
+	}
+}
+
 func TestGradeLetter(t *testing.T) {
 	cases := map[int]string{100: "A", 90: "A", 85: "B", 75: "C", 65: "D", 40: "F"}
 	for score, want := range cases {
