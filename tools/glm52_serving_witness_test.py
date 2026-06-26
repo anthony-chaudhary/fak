@@ -117,6 +117,23 @@ class Glm52ServingWitnessTest(unittest.TestCase):
         self.assertEqual(origin, "http://node:8000")
         self.assertEqual(info["url"], "http://node:8000")
 
+    def test_help_explains_base_url_vs_upstream_base_url_flag_naming(self) -> None:
+        # #918: a reader who met --upstream-base-url in a ship/run loop's parent
+        # steps and --base-url in the witness step reads the rename as a typo. The
+        # witness runner is the public counterpart of that loop's `witness`
+        # subcommand, so its --help must state why this flag is --base-url, not
+        # --upstream-base-url (same endpoint, two flag names).
+        buf = StringIO()
+        with self.assertRaises(SystemExit) as cm, redirect_stdout(buf):
+            witness.main(["--help"])
+        self.assertEqual(cm.exception.code, 0)
+        # Collapse argparse's line-wrapping so the assertions are robust to where
+        # the formatter happens to break; the epilog keeps each flag token intact.
+        text = " ".join(buf.getvalue().split())
+        self.assertIn("--base-url", text)
+        self.assertIn("--upstream-base-url", text)
+        self.assertIn("two flag names", text)
+
     def test_fake_gateway_report_passes_required_acceptance_fields(self) -> None:
         server = ThreadingHTTPServer(("127.0.0.1", 0), FakeOpenAIHandler)
         thread = threading.Thread(target=server.serve_forever, daemon=True)

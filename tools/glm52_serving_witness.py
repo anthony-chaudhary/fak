@@ -470,8 +470,18 @@ def summarize(report: dict[str, Any]) -> None:
 
 
 def main(argv: list[str] | None = None) -> int:
-    ap = argparse.ArgumentParser(description="Run a GLM-5.2 full-size serving witness through fak")
-    ap.add_argument("--base-url", required=True, help="OpenAI-compatible full-size GLM-5.2 endpoint, e.g. http://node:8000/v1")
+    ap = argparse.ArgumentParser(
+        description="Run a GLM-5.2 full-size serving witness through fak",
+        epilog=(
+            "Flag naming: --base-url is this witness runner's own (subcommand-scoped) "
+            "argument for the upstream OpenAI-compatible endpoint. `fak serve` / `fak guard` "
+            "front that same URL with --base-url too, so the URL flag is --base-url end to "
+            "end in this flow. A ship/run loop that wraps serve+witness as subcommands may "
+            "expose the same URL to its parent steps as --upstream-base-url (a parent-scoped "
+            "flag, before the subcommand) -- same endpoint, two flag names."
+        ),
+    )
+    ap.add_argument("--base-url", required=True, help="OpenAI-compatible full-size GLM-5.2 endpoint, e.g. http://node:8000/v1 (the witness runner's own flag; a wrapping ship/run loop names the same URL --upstream-base-url)")
     ap.add_argument("--model", default=DEFAULT_MODEL)
     ap.add_argument("--provider", default="openai")
     ap.add_argument("--api-key-env", default="")
