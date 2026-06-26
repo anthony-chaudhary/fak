@@ -28,11 +28,17 @@ func TestBuildOfficialRunContractKeepsResultGated(t *testing.T) {
 	if c.Status != "READY_FOR_EXTERNAL_HARNESS" {
 		t.Fatalf("status = %q", c.Status)
 	}
+	if c.EvidenceClass != "EXTERNAL_RUN_CONTRACT" {
+		t.Fatalf("evidence class = %q", c.EvidenceClass)
+	}
 	if c.ResultClaimAllowed {
 		t.Fatal("official-run contract must not allow a result claim")
 	}
 	if len(c.TaskSelection.CandidateTaskIDs) != 2 || !c.TaskSelection.OfficialTaskIDsRequired {
 		t.Fatalf("task selection = %+v", c.TaskSelection)
+	}
+	if !c.ScoreEvidenceLink.Required || len(c.ScoreEvidenceLink.JoinKeys) == 0 {
+		t.Fatalf("score evidence link = %+v", c.ScoreEvidenceLink)
 	}
 	if len(c.RequiredBeforeClaim) == 0 || !strings.Contains(strings.Join(c.RequiredBeforeClaim, " "), "benchmark-native") {
 		t.Fatalf("requirements do not name benchmark-native evidence: %+v", c.RequiredBeforeClaim)
@@ -76,7 +82,7 @@ func TestRenderOfficialRunContractMarkdown(t *testing.T) {
 		FakCommand: "fak",
 	})
 	md := RenderOfficialRunContractMarkdown(c)
-	for _, want := range []string{"ToolSandbox/tau3 Official-Run Contract", "Required Before Any Result Claim", "raw-toolsandbox"} {
+	for _, want := range []string{"ToolSandbox/tau3 Official-Run Contract", "Score Evidence Link", "Required Before Any Result Claim", "raw-toolsandbox"} {
 		if !strings.Contains(md, want) {
 			t.Fatalf("markdown missing %q:\n%s", want, md)
 		}

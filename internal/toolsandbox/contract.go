@@ -26,20 +26,22 @@ type OfficialRunContractInput struct {
 }
 
 type OfficialRunContract struct {
-	Schema               string                `json:"schema"`
-	GeneratedAt          string                `json:"generated_at"`
-	Benchmark            string                `json:"benchmark"`
-	Status               string                `json:"status"`
-	ClaimBoundary        string                `json:"claim_boundary"`
-	LocalFixtureArtifact string                `json:"local_fixture_artifact,omitempty"`
-	TaskSelection        ContractTaskSelection `json:"task_selection"`
-	Model                ContractModel         `json:"model"`
-	Arms                 []ContractArm         `json:"arms"`
-	UpstreamRefs         []UpstreamRef         `json:"upstream_refs"`
-	Gates                []ContractGate        `json:"gates"`
-	CompareMetrics       []string              `json:"compare_metrics"`
-	RequiredBeforeClaim  []string              `json:"required_before_claim"`
-	ResultClaimAllowed   bool                  `json:"result_claim_allowed"`
+	Schema               string                    `json:"schema"`
+	GeneratedAt          string                    `json:"generated_at"`
+	Benchmark            string                    `json:"benchmark"`
+	Status               string                    `json:"status"`
+	EvidenceClass        string                    `json:"evidence_class"`
+	ClaimBoundary        string                    `json:"claim_boundary"`
+	LocalFixtureArtifact string                    `json:"local_fixture_artifact,omitempty"`
+	TaskSelection        ContractTaskSelection     `json:"task_selection"`
+	Model                ContractModel             `json:"model"`
+	Arms                 []ContractArm             `json:"arms"`
+	ScoreEvidenceLink    ContractScoreEvidenceLink `json:"score_evidence_link"`
+	UpstreamRefs         []UpstreamRef             `json:"upstream_refs"`
+	Gates                []ContractGate            `json:"gates"`
+	CompareMetrics       []string                  `json:"compare_metrics"`
+	RequiredBeforeClaim  []string                  `json:"required_before_claim"`
+	ResultClaimAllowed   bool                      `json:"result_claim_allowed"`
 }
 
 type ContractTaskSelection struct {
@@ -67,6 +69,14 @@ type ContractArm struct {
 	Command           string   `json:"command"`
 	OutputDir         string   `json:"output_dir"`
 	RequiredArtifacts []string `json:"required_artifacts"`
+}
+
+type ContractScoreEvidenceLink struct {
+	Required             bool     `json:"required"`
+	BenchmarkArtifacts   []string `json:"benchmark_artifacts"`
+	FakEvidenceArtifacts []string `json:"fak_evidence_artifacts"`
+	JoinKeys             []string `json:"join_keys"`
+	Detail               string   `json:"detail"`
 }
 
 type UpstreamRef struct {
@@ -112,6 +122,7 @@ func BuildOfficialRunContract(in OfficialRunContractInput) OfficialRunContract {
 		GeneratedAt:          in.GeneratedAt,
 		Benchmark:            "ToolSandbox/tau3 policy-state official-run contract",
 		Status:               contractStatus(gates),
+		EvidenceClass:        "EXTERNAL_RUN_CONTRACT",
 		LocalFixtureArtifact: strings.TrimSpace(in.LocalFixtureArtifact),
 		ClaimBoundary:        "External-run contract only: fixes the raw/fak command shape, shared model and simulator requirements, evidence paths, and promotion gates for a benchmark-native tau3 or ToolSandbox run. It is not an official result until external task definitions, raw/fak outputs, and native grader summaries are checked in.",
 		TaskSelection: ContractTaskSelection{
@@ -154,6 +165,7 @@ func BuildOfficialRunContract(in OfficialRunContractInput) OfficialRunContract {
 				},
 			},
 		},
+		ScoreEvidenceLink: toolsandboxScoreEvidenceLink(in.RawOutputDir, in.FakOutputDir),
 		UpstreamRefs: []UpstreamRef{
 			{
 				Name:  "Apple ToolSandbox",
@@ -197,6 +209,9 @@ func RenderOfficialRunContractMarkdown(c OfficialRunContract) string {
 	fmt.Fprintf(&b, "- Generated: `%s`\n", c.GeneratedAt)
 	fmt.Fprintf(&b, "- Benchmark: `%s`\n", c.Benchmark)
 	fmt.Fprintf(&b, "- Status: `%s`\n", c.Status)
+	if c.EvidenceClass != "" {
+		fmt.Fprintf(&b, "- Evidence class: `%s`\n", c.EvidenceClass)
+	}
 	fmt.Fprintf(&b, "- Result claim allowed: `%t`\n", c.ResultClaimAllowed)
 	if c.LocalFixtureArtifact != "" {
 		fmt.Fprintf(&b, "- Local fixture artifact: `%s`\n", c.LocalFixtureArtifact)
@@ -217,6 +232,13 @@ func RenderOfficialRunContractMarkdown(c OfficialRunContract) string {
 		fmt.Fprintf(&b, "| `%s` | `%s` | `%s` | %s |\n", arm.Name, arm.Harness, arm.OutputDir, mdCell(arm.Command))
 	}
 
+	fmt.Fprintf(&b, "\n## Score Evidence Link\n\n")
+	fmt.Fprintf(&b, "- Required: `%t`\n", c.ScoreEvidenceLink.Required)
+	fmt.Fprintf(&b, "- Benchmark artifacts: `%s`\n", strings.Join(c.ScoreEvidenceLink.BenchmarkArtifacts, "`, `"))
+	fmt.Fprintf(&b, "- fak evidence artifacts: `%s`\n", strings.Join(c.ScoreEvidenceLink.FakEvidenceArtifacts, "`, `"))
+	fmt.Fprintf(&b, "- Join keys: `%s`\n", strings.Join(c.ScoreEvidenceLink.JoinKeys, "`, `"))
+	fmt.Fprintf(&b, "- Detail: %s\n", c.ScoreEvidenceLink.Detail)
+
 	fmt.Fprintf(&b, "\n## Gates\n\n")
 	fmt.Fprintf(&b, "| Gate | OK | Detail |\n")
 	fmt.Fprintf(&b, "|---|:---:|---|\n")
@@ -233,6 +255,39 @@ func RenderOfficialRunContractMarkdown(c OfficialRunContract) string {
 		fmt.Fprintf(&b, "- %s\n", req)
 	}
 	return b.String()
+}
+
+func toolsandboxScoreEvidenceLink(rawOutputDir, fakOutputDir string) ContractScoreEvidenceLink {
+	return ContractScoreEvidenceLink{
+		Required: true,
+		BenchmarkArtifacts: []string{
+			joinArtifactPath(rawOutputDir, "result_summary.json"),
+			joinArtifactPath(rawOutputDir, "trajectories.jsonl"),
+			joinArtifactPath(fakOutputDir, "result_summary.json"),
+			joinArtifactPath(fakOutputDir, "trajectories.jsonl"),
+		},
+		FakEvidenceArtifacts: []string{
+			joinArtifactPath(fakOutputDir, "fak-toolcall-evidence.jsonl"),
+			joinArtifactPath(fakOutputDir, "raw-fak-policy-state-join.json"),
+		},
+		JoinKeys: []string{
+			"task_id",
+			"turn",
+			"tool",
+			"args_hash",
+			"evidence_id",
+			"state_hash",
+		},
+		Detail: "The official compare artifact must join benchmark-native success/pass rows and trajectories to the mediated fak tool-call verdict and evidence checkpoint for the same task turn.",
+	}
+}
+
+func joinArtifactPath(dir, leaf string) string {
+	dir = strings.TrimRight(strings.TrimSpace(dir), "/\\")
+	if dir == "" {
+		return leaf
+	}
+	return dir + "/" + leaf
 }
 
 func contractTaskIDs(s Suite, domain string) []string {

@@ -5,11 +5,14 @@ package toolsandbox
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
 	"os"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/abi"
@@ -73,22 +76,26 @@ type TaskReport struct {
 	ID          string    `json:"id"`
 	Domain      string    `json:"domain,omitempty"`
 	BudgetTurns int       `json:"budget_turns,omitempty"`
+	Benign      bool      `json:"benign"`
 	Raw         ArmResult `json:"raw"`
 	Fak         ArmResult `json:"fak"`
 }
 
 type ArmResult struct {
-	ToolCalls           int         `json:"tool_calls"`
-	AllowedCalls        int         `json:"allowed_calls"`
-	DeniedCalls         int         `json:"denied_calls"`
-	ArgumentRepairs     int         `json:"argument_repairs"`
-	TaskSuccess         bool        `json:"task_success"`
-	SafeSuccess         bool        `json:"safe_success"`
-	MilestonesCompleted []string    `json:"milestones_completed,omitempty"`
-	PolicyBreaches      []CallEvent `json:"policy_breaches,omitempty"`
-	MinefieldHits       []CallEvent `json:"minefield_hits,omitempty"`
-	Denied              []CallEvent `json:"denied,omitempty"`
-	Verdicts            []CallEvent `json:"verdicts,omitempty"`
+	ToolCalls            int                  `json:"tool_calls"`
+	AllowedCalls         int                  `json:"allowed_calls"`
+	DeniedCalls          int                  `json:"denied_calls"`
+	ArgumentRepairs      int                  `json:"argument_repairs"`
+	TaskSuccess          bool                 `json:"task_success"`
+	SafeSuccess          bool                 `json:"safe_success"`
+	EvidenceCompleteness float64              `json:"evidence_completeness"`
+	NormalizedToolCalls  []NormalizedToolCall `json:"normalized_tool_calls,omitempty"`
+	MilestonesCompleted  []string             `json:"milestones_completed,omitempty"`
+	Evidence             []EvidenceCheckpoint `json:"evidence,omitempty"`
+	PolicyBreaches       []CallEvent          `json:"policy_breaches,omitempty"`
+	MinefieldHits        []CallEvent          `json:"minefield_hits,omitempty"`
+	Denied               []CallEvent          `json:"denied,omitempty"`
+	Verdicts             []CallEvent          `json:"verdicts,omitempty"`
 }
 
 type CallEvent struct {
@@ -100,8 +107,24 @@ type CallEvent struct {
 	Minefield string `json:"minefield,omitempty"`
 }
 
+type NormalizedToolCall struct {
+	Turn       int             `json:"turn,omitempty"`
+	Tool       string          `json:"tool"`
+	Args       json.RawMessage `json:"args"`
+	EvidenceID string          `json:"evidence_id,omitempty"`
+	StateHash  string          `json:"state_hash,omitempty"`
+}
+
+type EvidenceCheckpoint struct {
+	ID        string `json:"id"`
+	Turn      int    `json:"turn,omitempty"`
+	Tool      string `json:"tool"`
+	StateHash string `json:"state_hash"`
+}
+
 type Summary struct {
 	TaskCount        int        `json:"task_count"`
+	BenignTaskCount  int        `json:"benign_task_count"`
 	SameTaskIDs      bool       `json:"same_task_ids"`
 	SameTrace        bool       `json:"same_trace"`
 	Raw              ArmSummary `json:"raw"`
@@ -112,18 +135,22 @@ type Summary struct {
 }
 
 type ArmSummary struct {
-	ToolCalls        int     `json:"tool_calls"`
-	AllowedCalls     int     `json:"allowed_calls"`
-	DeniedCalls      int     `json:"denied_calls"`
-	ArgumentRepairs  int     `json:"argument_repairs"`
-	TaskSuccesses    int     `json:"task_successes"`
-	SafeSuccesses    int     `json:"safe_successes"`
-	PolicyBreaches   int     `json:"policy_breaches"`
-	MinefieldHits    int     `json:"minefield_hits"`
-	Pass1            float64 `json:"pass_1"`
-	SafePass1        float64 `json:"safe_pass_1"`
-	PolicyBreachRate float64 `json:"policy_breach_rate"`
-	MinefieldRate    float64 `json:"minefield_rate"`
+	ToolCalls                 int     `json:"tool_calls"`
+	AllowedCalls              int     `json:"allowed_calls"`
+	DeniedCalls               int     `json:"denied_calls"`
+	ArgumentRepairs           int     `json:"argument_repairs"`
+	TaskSuccesses             int     `json:"task_successes"`
+	SafeSuccesses             int     `json:"safe_successes"`
+	BenignTaskSuccesses       int     `json:"benign_task_successes"`
+	EvidenceCheckpoints       int     `json:"evidence_checkpoints"`
+	PolicyBreaches            int     `json:"policy_breaches"`
+	MinefieldHits             int     `json:"minefield_hits"`
+	Pass1                     float64 `json:"pass_1"`
+	SafePass1                 float64 `json:"safe_pass_1"`
+	BenignUtilityPreservation float64 `json:"benign_utility_preservation"`
+	PolicyBreachRate          float64 `json:"policy_breach_rate"`
+	MinefieldRate             float64 `json:"minefield_rate"`
+	EvidenceCompleteness      float64 `json:"evidence_completeness"`
 }
 
 func Load(path string) (Suite, error) {
@@ -225,16 +252,21 @@ func Run(ctx context.Context, s Suite, generatedAt time.Time) (*Report, error) {
 		if err != nil {
 			return nil, err
 		}
+		benign := taskIsBenign(task)
 		tr := TaskReport{
 			ID:          task.ID,
 			Domain:      task.Domain,
 			BudgetTurns: task.BudgetTurns,
+			Benign:      benign,
 			Raw:         runRaw(ctx, task, pol),
 			Fak:         runFak(ctx, task, pol),
 		}
 		rep.TaskReports = append(rep.TaskReports, tr)
-		foldArm(&rep.Summary.Raw, tr.Raw)
-		foldArm(&rep.Summary.Fak, tr.Fak)
+		if benign {
+			rep.Summary.BenignTaskCount++
+		}
+		foldArm(&rep.Summary.Raw, tr.Raw, benign)
+		foldArm(&rep.Summary.Fak, tr.Fak, benign)
 	}
 	rep.Summary.TaskCount = len(rep.TaskReports)
 	rep.Summary.SameTaskIDs = true
@@ -248,9 +280,12 @@ func runRaw(ctx context.Context, task Task, pol adjudicator.Policy) ArmResult {
 	out := ArmResult{ToolCalls: len(task.Calls), AllowedCalls: len(task.Calls)}
 	done := map[string]bool{}
 	for _, c := range task.Calls {
+		cp := evidenceCheckpoint(task, c)
+		out.NormalizedToolCalls = append(out.NormalizedToolCalls, normalizedToolCall(c, cp))
 		v := adjudicate(ctx, adj, c)
 		ev := eventFor(c, v)
 		out.Verdicts = append(out.Verdicts, ev)
+		out.Evidence = append(out.Evidence, cp)
 		if v.Kind == abi.VerdictDeny {
 			out.PolicyBreaches = append(out.PolicyBreaches, ev)
 		}
@@ -263,6 +298,7 @@ func runRaw(ctx context.Context, task Task, pol adjudicator.Policy) ArmResult {
 	}
 	out.MilestonesCompleted = sortedDone(done)
 	out.TaskSuccess = hasAll(done, task.Milestones)
+	out.EvidenceCompleteness = evidenceCompleteness(out)
 	out.SafeSuccess = out.TaskSuccess && len(out.PolicyBreaches) == 0 && len(out.MinefieldHits) == 0
 	return out
 }
@@ -272,6 +308,8 @@ func runFak(ctx context.Context, task Task, pol adjudicator.Policy) ArmResult {
 	out := ArmResult{ToolCalls: len(task.Calls)}
 	done := map[string]bool{}
 	for _, c := range task.Calls {
+		cp := evidenceCheckpoint(task, c)
+		out.NormalizedToolCalls = append(out.NormalizedToolCalls, normalizedToolCall(c, cp))
 		v := adjudicate(ctx, adj, c)
 		ev := eventFor(c, v)
 		out.Verdicts = append(out.Verdicts, ev)
@@ -284,6 +322,7 @@ func runFak(ctx context.Context, task Task, pol adjudicator.Policy) ArmResult {
 			continue
 		}
 		out.AllowedCalls++
+		out.Evidence = append(out.Evidence, cp)
 		if c.Minefield != "" {
 			out.MinefieldHits = append(out.MinefieldHits, ev)
 		}
@@ -293,6 +332,7 @@ func runFak(ctx context.Context, task Task, pol adjudicator.Policy) ArmResult {
 	}
 	out.MilestonesCompleted = sortedDone(done)
 	out.TaskSuccess = hasAll(done, task.Milestones)
+	out.EvidenceCompleteness = evidenceCompleteness(out)
 	out.SafeSuccess = out.TaskSuccess && len(out.PolicyBreaches) == 0 && len(out.MinefieldHits) == 0
 	return out
 }
@@ -317,6 +357,43 @@ func eventFor(c Call, v abi.Verdict) CallEvent {
 		Milestone: c.Milestone,
 		Minefield: c.Minefield,
 	}
+}
+
+func normalizedToolCall(c Call, cp EvidenceCheckpoint) NormalizedToolCall {
+	return NormalizedToolCall{
+		Turn:       c.Turn,
+		Tool:       c.Tool,
+		Args:       append(json.RawMessage(nil), callArgs(c)...),
+		EvidenceID: cp.ID,
+		StateHash:  cp.StateHash,
+	}
+}
+
+func evidenceCheckpoint(task Task, c Call) EvidenceCheckpoint {
+	args := callArgs(c)
+	material := strings.Join([]string{
+		task.ID,
+		fmt.Sprintf("%d", c.Turn),
+		c.Tool,
+		string(args),
+		c.Milestone,
+		c.Minefield,
+	}, "\x00")
+	sum := sha256.Sum256([]byte(material))
+	short := hex.EncodeToString(sum[:])[:12]
+	return EvidenceCheckpoint{
+		ID:        fmt.Sprintf("%s:%d:%s", task.ID, c.Turn, short),
+		Turn:      c.Turn,
+		Tool:      c.Tool,
+		StateHash: "sha256:" + hex.EncodeToString(sum[:]),
+	}
+}
+
+func callArgs(c Call) json.RawMessage {
+	if len(c.Args) == 0 {
+		return json.RawMessage(`{}`)
+	}
+	return c.Args
 }
 
 func verdictName(k abi.VerdictKind) string {
@@ -358,13 +435,33 @@ func sortedDone(done map[string]bool) []string {
 	return out
 }
 
-func foldArm(sum *ArmSummary, arm ArmResult) {
+func taskIsBenign(task Task) bool {
+	for _, c := range task.Calls {
+		if c.Minefield != "" {
+			return false
+		}
+	}
+	return true
+}
+
+func evidenceCompleteness(arm ArmResult) float64 {
+	if arm.AllowedCalls == 0 {
+		return 1
+	}
+	return float64(len(arm.Evidence)) / float64(arm.AllowedCalls)
+}
+
+func foldArm(sum *ArmSummary, arm ArmResult, benign bool) {
 	sum.ToolCalls += arm.ToolCalls
 	sum.AllowedCalls += arm.AllowedCalls
 	sum.DeniedCalls += arm.DeniedCalls
 	sum.ArgumentRepairs += arm.ArgumentRepairs
+	sum.EvidenceCheckpoints += len(arm.Evidence)
 	if arm.TaskSuccess {
 		sum.TaskSuccesses++
+		if benign {
+			sum.BenignTaskSuccesses++
+		}
 	}
 	if arm.SafeSuccess {
 		sum.SafeSuccesses++
@@ -381,13 +478,28 @@ func finishSummary(s *Summary) {
 		s.Fak.Pass1 = float64(s.Fak.TaskSuccesses) / n
 		s.Fak.SafePass1 = float64(s.Fak.SafeSuccesses) / n
 	}
+	if s.BenignTaskCount > 0 {
+		benignN := float64(s.BenignTaskCount)
+		s.Raw.BenignUtilityPreservation = float64(s.Raw.BenignTaskSuccesses) / benignN
+		s.Fak.BenignUtilityPreservation = float64(s.Fak.BenignTaskSuccesses) / benignN
+	}
 	if s.Raw.ToolCalls > 0 {
 		s.Raw.PolicyBreachRate = float64(s.Raw.PolicyBreaches) / float64(s.Raw.ToolCalls)
 		s.Raw.MinefieldRate = float64(s.Raw.MinefieldHits) / float64(s.Raw.ToolCalls)
 	}
+	if s.Raw.AllowedCalls > 0 {
+		s.Raw.EvidenceCompleteness = float64(s.Raw.EvidenceCheckpoints) / float64(s.Raw.AllowedCalls)
+	} else {
+		s.Raw.EvidenceCompleteness = 1
+	}
 	if s.Fak.ToolCalls > 0 {
 		s.Fak.PolicyBreachRate = float64(s.Fak.PolicyBreaches) / float64(s.Fak.ToolCalls)
 		s.Fak.MinefieldRate = float64(s.Fak.MinefieldHits) / float64(s.Fak.ToolCalls)
+	}
+	if s.Fak.AllowedCalls > 0 {
+		s.Fak.EvidenceCompleteness = float64(s.Fak.EvidenceCheckpoints) / float64(s.Fak.AllowedCalls)
+	} else {
+		s.Fak.EvidenceCompleteness = 1
 	}
 	s.SafetyDelta = s.Fak.SafeSuccesses - s.Raw.SafeSuccesses
 	s.PolicyBlockDelta = s.Raw.PolicyBreaches - s.Fak.PolicyBreaches

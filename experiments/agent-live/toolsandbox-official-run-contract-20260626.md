@@ -1,15 +1,16 @@
 # ToolSandbox/tau3 Official-Run Contract
 
-- Generated: `2026-06-26T03:03:22Z`
+- Generated: `2026-06-26T11:18:57Z`
 - Benchmark: `ToolSandbox/tau3 policy-state official-run contract`
 - Status: `READY_FOR_EXTERNAL_HARNESS`
+- Evidence class: `EXTERNAL_RUN_CONTRACT`
 - Result claim allowed: `false`
 - Local fixture artifact: `experiments/agent-live/toolsandbox-policy-state-smoke-20260625.json`
 - Boundary: External-run contract only: fixes the raw/fak command shape, shared model and simulator requirements, evidence paths, and promotion gates for a benchmark-native tau3 or ToolSandbox run. It is not an official result until external task definitions, raw/fak outputs, and native grader summaries are checked in.
 
 ## Task Selection
 
-- Candidate suite: `testdata/toolsandbox/policy_state_smoke.json`
+- Candidate suite: `testdata\toolsandbox\policy_state_smoke.json`
 - Candidate task ids: `retail-refund-policy-minefield`
 - Official harness: `tau3`
 - Official domain: `retail`
@@ -21,6 +22,14 @@
 |---|---|---|---|
 | `raw-toolsandbox` | `benchmark-native` | `experiments/agent-live/toolsandbox-official-raw-20260626` | $env:TAU3_TASK_IDS='<space-separated official task ids>'; tau2 run --domain retail --agent-llm shared-agent-model --user-llm shared-agent-model --num-trials 1 --task-ids ($env:TAU3_TASK_IDS -split ' ') |
 | `fak-toolsandbox` | `benchmark-native-through-fak-gateway` | `experiments/agent-live/toolsandbox-official-fak-20260626` | $env:TAU3_TASK_IDS='<space-separated official task ids>'; $env:OPENAI_BASE_URL='http://localhost:8080/v1'; $env:OPENAI_API_BASE='http://localhost:8080/v1'; tau2 run --domain retail --agent-llm shared-agent-model --user-llm shared-agent-model --num-trials 1 --task-ids ($env:TAU3_TASK_IDS -split ' ') |
+
+## Score Evidence Link
+
+- Required: `true`
+- Benchmark artifacts: `experiments/agent-live/toolsandbox-official-raw-20260626/result_summary.json`, `experiments/agent-live/toolsandbox-official-raw-20260626/trajectories.jsonl`, `experiments/agent-live/toolsandbox-official-fak-20260626/result_summary.json`, `experiments/agent-live/toolsandbox-official-fak-20260626/trajectories.jsonl`
+- fak evidence artifacts: `experiments/agent-live/toolsandbox-official-fak-20260626/fak-toolcall-evidence.jsonl`, `experiments/agent-live/toolsandbox-official-fak-20260626/raw-fak-policy-state-join.json`
+- Join keys: `task_id`, `turn`, `tool`, `args_hash`, `evidence_id`, `state_hash`
+- Detail: The official compare artifact must join benchmark-native success/pass rows and trajectories to the mediated fak tool-call verdict and evidence checkpoint for the same task turn.
 
 ## Gates
 
