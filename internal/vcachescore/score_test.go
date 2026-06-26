@@ -56,6 +56,51 @@ func TestTelemetryOverridesActiveMultiplier(t *testing.T) {
 	}
 }
 
+func TestEconomicsBlockReportsHitReadRebateCostFromTelemetry(t *testing.T) {
+	// No telemetry: the observed economics block is absent (a hit/read/rebate
+	// value must always have a provider witness behind it).
+	if rep := Score(DefaultInput()); rep.Economics != nil {
+		t.Fatalf("economics=%+v, want nil without telemetry", rep.Economics)
+	}
+
+	in := DefaultInput()
+	in.TelemetryReadMult = 0.1
+	in.TelemetryRows = []vcachegov.TelemetryRow{
+		{InputTokens: 86, CacheReadInputTokens: 1920},
+	}
+	rep := Score(in)
+	e := rep.Economics
+	if e == nil {
+		t.Fatalf("economics is nil, want observed block from telemetry")
+	}
+	if e.Source != "telemetry" || e.Witness != "observed" {
+		t.Fatalf("economics provenance = %q/%q, want telemetry/observed", e.Source, e.Witness)
+	}
+	// hit = read / baseline; baseline is the whole prompt cold = 86 + 1920.
+	const baseline = 2006.0
+	if e.BaselineTokenEquiv != baseline || e.CacheReadTokens != 1920 || e.CacheCreationTokens != 0 {
+		t.Fatalf("read/baseline = %g/%g write=%g, want 1920/2006/0", e.CacheReadTokens, e.BaselineTokenEquiv, e.CacheCreationTokens)
+	}
+	if got, want := e.HitRate, 1920.0/baseline; got != want {
+		t.Fatalf("hit rate = %g, want %g", got, want)
+	}
+	// cost = baseline - (1-read_mult)*read; rebate = baseline - cost.
+	wantCost := baseline - 0.9*1920
+	if e.CostTokenEquiv != wantCost {
+		t.Fatalf("cost = %g, want %g (baseline - 0.9*read)", e.CostTokenEquiv, wantCost)
+	}
+	if e.RebateTokenEquiv != baseline-wantCost {
+		t.Fatalf("rebate = %g, want %g (baseline - cost)", e.RebateTokenEquiv, baseline-wantCost)
+	}
+	// The reported economics multiplier is the realized 2x gate number.
+	if e.Multiplier != rep.ActiveMultiplier {
+		t.Fatalf("economics multiplier=%g, active=%g, want equal", e.Multiplier, rep.ActiveMultiplier)
+	}
+	if got, want := e.Multiplier, baseline/wantCost; got != want {
+		t.Fatalf("multiplier=%g, want %g (baseline/cost)", got, want)
+	}
+}
+
 func TestFalseWarmRateFailsTwoXGate(t *testing.T) {
 	in := DefaultInput()
 	in.Prediction = vcachecal.PredictionError{Total: 100, TrueWarm: 90, FalseWarm: 10}

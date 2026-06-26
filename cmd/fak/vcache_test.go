@@ -358,6 +358,32 @@ func TestRunVCacheScoreTelemetryJSONAndOut(t *testing.T) {
 	}
 }
 
+func TestRunVCacheScoreTelemetryHumanReportsEconomics(t *testing.T) {
+	telemetry := filepath.Join(t.TempDir(), "openai.jsonl")
+	if err := os.WriteFile(telemetry, []byte(`{"usage":{"input_tokens":2006,"input_tokens_details":{"cached_tokens":1920}}}`+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	var out, errb bytes.Buffer
+	if code := runVCache(&out, &errb, []string{"score", "--telemetry", telemetry}); code != 0 {
+		t.Fatalf("score telemetry exit=%d stderr=%s output=%s", code, errb.String(), out.String())
+	}
+	s := out.String()
+	for _, want := range []string{
+		"active source: telemetry",
+		"2x gate: pass",
+		"economics (telemetry, observed): hit 95.71%",
+		"read 1920 cached (write 0)",
+		"rebate 1728.0 (86.14%)",
+		"cost 278.0 / 2006.0 baseline",
+		"7.22x",
+	} {
+		if !strings.Contains(s, want) {
+			t.Fatalf("score telemetry output missing %q:\n%s", want, s)
+		}
+	}
+}
+
 func TestRunVCacheScoreAnchorsFileWritesIndexArtifact(t *testing.T) {
 	dir := t.TempDir()
 	anchors := filepath.Join(dir, "anchors.jsonl")

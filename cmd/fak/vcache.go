@@ -441,6 +441,11 @@ func runVCacheScore(stdout, stderr io.Writer, argv []string) int {
 			rep.Observed.SavedPct,
 			formatObservedPositive(rep.Observed.FirstPositiveRequest))
 	}
+	if e := rep.Economics; e != nil {
+		fmt.Fprintf(stdout, "economics (%s, %s): hit %.2f%% | read %.0f cached (write %.0f) | rebate %.1f (%.2f%%) | cost %.1f / %.1f baseline | %.2fx\n",
+			e.Source, e.Witness, 100*e.HitRate, e.CacheReadTokens, e.CacheCreationTokens,
+			e.RebateTokenEquiv, e.RebatePct, e.CostTokenEquiv, e.BaselineTokenEquiv, e.Multiplier)
+	}
 	fmt.Fprintf(stdout, "concentration: s=%.2f measured=%v defeated=%v\n",
 		rep.Concentration.ZipfS, rep.Concentration.Measured, rep.Concentration.Defeated)
 	fmt.Fprintf(stdout, "hot-anchor index: top %d covers %.1f%% (target %.1f%%)\n",

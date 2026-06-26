@@ -57,16 +57,16 @@ correctness depends on cache hit: false
 ### Economics (hit / read / rebate / cost) — from the frozen artifact
 
 These are the four economics acceptance bar #1 asks for, read straight off
-`vcache-score-codex-telemetry-2026-06-25.json` (`observed` block); nothing here is
+`vcache-score-codex-telemetry-2026-06-25.json` (`economics` block); nothing here is
 hand-entered.
 
 | Economic | Value | Source field(s) |
 |----------|-------|-----------------|
-| **hit** — cache-read share of input | 95.53% (10,163,712 of 10,638,831 input token-equiv) | `cache_read_tokens / baseline_token_equiv` |
-| **read** — cached input tokens served | 10,163,712 (cache *writes* 0) | `cache_read_tokens` / `cache_creation_tokens` |
-| **rebate** — token-equivalents saved | 9,147,340.8 (85.98% of baseline) | `saved_token_equiv` / `saved_pct` |
-| **cost** — token-equivalents actually paid | 1,491,490.2 vs 10,638,831 baseline | `actual_token_equiv` vs `baseline_token_equiv` |
-| **2x readiness** | 7.13x ≥ 2.00x → pass | `active_multiplier` / `two_x_better` |
+| **hit** -- cache-read share of input | 95.53% (10,163,712 of 10,638,831 input token-equiv) | `economics.hit_rate` |
+| **read** -- cached input tokens served | 10,163,712 (cache *writes* 0) | `economics.cache_read_tokens` / `economics.cache_creation_tokens` |
+| **rebate** -- token-equivalents saved | 9,147,340.8 (85.98% of baseline) | `economics.rebate_token_equiv` / `economics.rebate_pct` |
+| **cost** -- token-equivalents actually paid | 1,491,490.2 vs 10,638,831 baseline | `economics.cost_token_equiv` vs `economics.baseline_token_equiv` |
+| **2x readiness** | 7.13x >= 2.00x -> pass | `economics.multiplier` / `two_x_better` |
 
 The cost is the realized read discount, not a trust claim: at `read_mult = 0.1` the
 identity `actual = baseline − (1 − read_mult)·read` holds exactly —

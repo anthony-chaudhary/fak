@@ -119,6 +119,26 @@ type AnchorIndexArtifact struct {
 	Entries        []AnchorIndexEntry `json:"entries"`
 }
 
+// EconomicsReport surfaces the four prompt-cache economics the agent-dev gate
+// reports from observed provider telemetry -- hit, read, rebate, cost -- alongside
+// the realized 2x multiplier. Every value is OBSERVED: it is relayed straight from
+// the provider's own cache counters, not a fak-caused effect. Budgeting still
+// happens at the uncached price; a cache hit is a realized rebate, never a trust
+// claim. It is emitted only when telemetry is supplied, so a value here always has
+// a provider witness behind it.
+type EconomicsReport struct {
+	Source              string  `json:"source"`                // "telemetry"
+	Witness             string  `json:"witness"`               // "observed"
+	HitRate             float64 `json:"hit_rate"`              // hit: cache_read / baseline
+	CacheReadTokens     float64 `json:"cache_read_tokens"`     // read: cached input tokens served
+	CacheCreationTokens float64 `json:"cache_creation_tokens"` // read companion: cache writes
+	RebateTokenEquiv    float64 `json:"rebate_token_equiv"`    // rebate: token-equivalents saved
+	RebatePct           float64 `json:"rebate_pct"`
+	CostTokenEquiv      float64 `json:"cost_token_equiv"`     // cost: token-equivalents actually paid
+	BaselineTokenEquiv  float64 `json:"baseline_token_equiv"` // cost companion: uncached baseline
+	Multiplier          float64 `json:"multiplier"`           // 2x readiness: baseline / cost
+}
+
 // PredictionReport surfaces prediction risk as rates and raw counts.
 type PredictionReport struct {
 	Total         int     `json:"total"`
@@ -142,6 +162,7 @@ type Report struct {
 	TwoXBetter       bool                             `json:"two_x_better"`
 	Planned          vcachegov.StarSavingsProof       `json:"planned"`
 	Observed         *vcachegov.TelemetrySavingsProof `json:"observed,omitempty"`
+	Economics        *EconomicsReport                 `json:"economics,omitempty"`
 	Concentration    vcachecal.Concentration          `json:"concentration"`
 	Index            IndexPlan                        `json:"index"`
 	Prediction       PredictionReport                 `json:"prediction"`
@@ -206,8 +227,34 @@ func Score(in Input) Report {
 		Prediction:       prediction,
 		Recall:           recall,
 	}
+	rep.Economics = economics(observed, activeMultiplier)
 	rep.Actions, rep.Risks = actionsAndRisks(rep, in.MaxFalseWarmRate)
 	return rep
+}
+
+// economics folds the observed telemetry proof into the hit/read/rebate/cost
+// economics the agent-dev gate reports. It returns nil when no telemetry was
+// supplied, so the block is present exactly when a provider witnessed the reads.
+func economics(observed *vcachegov.TelemetrySavingsProof, multiplier float64) *EconomicsReport {
+	if observed == nil {
+		return nil
+	}
+	hit := 0.0
+	if observed.BaselineTokenEquiv > 0 {
+		hit = observed.CacheReadTokens / observed.BaselineTokenEquiv
+	}
+	return &EconomicsReport{
+		Source:              "telemetry",
+		Witness:             "observed",
+		HitRate:             hit,
+		CacheReadTokens:     observed.CacheReadTokens,
+		CacheCreationTokens: observed.CacheCreationTokens,
+		RebateTokenEquiv:    observed.SavedTokenEquiv,
+		RebatePct:           observed.SavedPct,
+		CostTokenEquiv:      observed.ActualTokenEquiv,
+		BaselineTokenEquiv:  observed.BaselineTokenEquiv,
+		Multiplier:          multiplier,
+	}
 }
 
 func normalize(in Input) Input {

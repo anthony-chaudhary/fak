@@ -38,6 +38,18 @@
     "first_positive_request": 1,
     "correctness_depends_on_hit": false
   },
+  "economics": {
+    "source": "telemetry",
+    "witness": "observed",
+    "hit_rate": 0.9553410520385182,
+    "cache_read_tokens": 10163712,
+    "cache_creation_tokens": 0,
+    "rebate_token_equiv": 9147340.8,
+    "rebate_pct": 85.98069468346664,
+    "cost_token_equiv": 1491490.2,
+    "baseline_token_equiv": 10638831,
+    "multiplier": 7.1330210550495075
+  },
   "concentration": {
     "ZipfS": 1.7399999999999947,
     "Measured": true,
