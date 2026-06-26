@@ -54,6 +54,25 @@ planned proof:     PROVEN saved 73.4% (the deterministic floor, still reported)
 correctness depends on cache hit: false
 ```
 
+### Economics (hit / read / rebate / cost) — from the frozen artifact
+
+These are the four economics acceptance bar #1 asks for, read straight off
+`vcache-score-codex-telemetry-2026-06-25.json` (`observed` block); nothing here is
+hand-entered.
+
+| Economic | Value | Source field(s) |
+|----------|-------|-----------------|
+| **hit** — cache-read share of input | 95.53% (10,163,712 of 10,638,831 input token-equiv) | `cache_read_tokens / baseline_token_equiv` |
+| **read** — cached input tokens served | 10,163,712 (cache *writes* 0) | `cache_read_tokens` / `cache_creation_tokens` |
+| **rebate** — token-equivalents saved | 9,147,340.8 (85.98% of baseline) | `saved_token_equiv` / `saved_pct` |
+| **cost** — token-equivalents actually paid | 1,491,490.2 vs 10,638,831 baseline | `actual_token_equiv` vs `baseline_token_equiv` |
+| **2x readiness** | 7.13x ≥ 2.00x → pass | `active_multiplier` / `two_x_better` |
+
+The cost is the realized read discount, not a trust claim: at `read_mult = 0.1` the
+identity `actual = baseline − (1 − read_mult)·read` holds exactly —
+`1,491,490.2 = 10,638,831 − 0.9 × 10,163,712`. The rebate is what the provider's
+cache reads actually repaid; budgeting still happens at the uncached price.
+
 The scorecard reports realized hit/read/rebate economics and 2x readiness from
 the observed telemetry, and the planned star-anchor floor stays on its own line
 -- so the artifact carries both the provider-witnessed number and the number fak
@@ -61,12 +80,21 @@ can guarantee without a provider.
 
 ## Acceptance (issue #789)
 
-- [x] `fak vcache score` reports 2x readiness from live telemetry -- `active
-  source: telemetry`, multiplier 7.13x, gate pass.
+- [x] `fak vcache score` reports hit/read/rebate/cost AND 2x readiness from live
+  telemetry -- `active source: telemetry`; hit 95.53%, read 10,163,712 cached
+  tokens, rebate 9,147,340.8 token-equiv (85.98%), cost 1,491,490.2 vs 10,638,831
+  baseline, multiplier 7.13x, gate pass (see the economics table above).
 - [x] The artifact is regenerable by the documented command above.
 - [x] Secrets and customer data are out of the artifacts -- the telemetry is
   token-count rows only (verified: 0 secret-shaped matches; the sibling probe doc
   documents the capture and redaction).
+- [x] CLAIMS / BENCHMARK-AUTHORITY: no NEW public fak performance claim is made, so
+  no new authority row is required. The observed 85.98% / 7.13x is OBSERVED
+  (provider-relayed cache reads, not a fak-caused effect) and is already recorded
+  in CLAIMS.md's M5 vCache Governor entry; the deterministic planned floor (73.4%)
+  is the only fak-guaranteed number and is also in CLAIMS.md. BENCHMARK-AUTHORITY
+  indexes fak's own measured throughput/reuse numbers, not a relayed provider
+  counter.
 
 ## What this does and does not prove
 
