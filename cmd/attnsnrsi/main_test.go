@@ -218,4 +218,43 @@ func TestLoadSessionRoundTrips(t *testing.T) {
 	if _, err := loadSession(strings.NewReader(`{"bogus_field": 1}`)); err == nil {
 		t.Fatalf("loadSession must reject unknown fields")
 	}
+	if _, err := loadSession(strings.NewReader(string(b) + "\n{}")); err == nil {
+		t.Fatalf("loadSession must reject a second top-level JSON value")
+	}
+	if _, err := loadSession(strings.NewReader(string(b) + "\nnot-json")); err == nil {
+		t.Fatalf("loadSession must reject trailing non-JSON data")
+	}
+}
+
+func TestLoadSessionRejectsIncompleteReplayEvidence(t *testing.T) {
+	baseline, learned, session := controlledSession()
+	base := sessionDoc{Baseline: baseline, Candidates: []ctxplan.Forecast{learned}, Session: session}
+
+	for _, tc := range []struct {
+		name   string
+		mutate func(*sessionDoc)
+	}{
+		{"no-candidates", func(d *sessionDoc) { d.Candidates = nil }},
+		{"no-turns", func(d *sessionDoc) { d.Session = nil }},
+		{"turn-without-spans", func(d *sessionDoc) { d.Session[0].Spans = nil }},
+		{"negative-budget", func(d *sessionDoc) { d.Session[0].Budget.Tokens = -1 }},
+		{"no-witness", func(d *sessionDoc) {
+			d.Session[0].Attribution = nil
+			d.Session[0].Faults = nil
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			doc := base
+			doc.Candidates = append([]ctxplan.Forecast(nil), base.Candidates...)
+			doc.Session = append([]ctxplan.Turn(nil), base.Session...)
+			tc.mutate(&doc)
+			b, err := json.Marshal(doc)
+			if err != nil {
+				t.Fatalf("marshal: %v", err)
+			}
+			if _, err := loadSession(strings.NewReader(string(b))); err == nil {
+				t.Fatalf("loadSession accepted malformed replay %s", tc.name)
+			}
+		})
+	}
 }

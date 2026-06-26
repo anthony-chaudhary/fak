@@ -93,7 +93,42 @@ func loadSession(r io.Reader) (sessionDoc, error) {
 	if err := dec.Decode(&doc); err != nil {
 		return sessionDoc{}, fmt.Errorf("decode session: %w", err)
 	}
+	var extra struct{}
+	if err := dec.Decode(&extra); err != io.EOF {
+		if err == nil {
+			return sessionDoc{}, fmt.Errorf("decode session: trailing JSON value")
+		}
+		return sessionDoc{}, fmt.Errorf("decode session: trailing data: %w", err)
+	}
+	if err := validateSession(doc); err != nil {
+		return sessionDoc{}, err
+	}
 	return doc, nil
+}
+
+func validateSession(doc sessionDoc) error {
+	if len(doc.Candidates) == 0 {
+		return fmt.Errorf("decode session: at least one candidate forecast is required")
+	}
+	if len(doc.Session) == 0 {
+		return fmt.Errorf("decode session: at least one recorded turn is required")
+	}
+	hasWitness := false
+	for i, turn := range doc.Session {
+		if len(turn.Spans) == 0 {
+			return fmt.Errorf("decode session: turn %d has no spans", i+1)
+		}
+		if turn.Budget.Tokens < 0 {
+			return fmt.Errorf("decode session: turn %d has negative token budget", i+1)
+		}
+		if len(turn.Attribution) > 0 || len(turn.Faults) > 0 {
+			hasWitness = true
+		}
+	}
+	if !hasWitness {
+		return fmt.Errorf("decode session: at least one turn needs attribution or fault evidence")
+	}
+	return nil
 }
 
 func main() {
