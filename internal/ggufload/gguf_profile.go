@@ -57,12 +57,80 @@ type LoadProfiler struct {
 	TopN    int
 	Trace   io.Writer
 	Every   int
+
+	// Progress, when non-nil, receives a human-readable one-line load status
+	// (percent, tensors, GB, elapsed, throughput) emitted periodically as tensors
+	// are loaded — so a multi-minute large-model load is not a silent black box.
+	// Total is the expected tensor count (set by the loader before the loop) so the
+	// percent is meaningful; ProgressEvery throttles the lines (default every 5%).
+	Progress      io.Writer
+	Total         int
+	ProgressEvery float64 // percent step between progress lines (default 5)
+	loadStart     time.Time
+	cumBytes      int64
+	ggufSeen      int // GGUF tensors consumed (advances even for split/merged tensors)
+	lastPct       float64
 }
 
 // NewLoadProfiler returns an enabled load profiler that records per-phase timings and
 // keeps the top 16 slowest tensors by default.
 func NewLoadProfiler() *LoadProfiler {
 	return &LoadProfiler{stat: map[string]*LoadPhaseStat{}, TopN: 16}
+}
+
+// SetTotal records the expected tensor count and starts the load clock so the
+// Progress writer can report a meaningful percentage and elapsed time. Safe on nil.
+func (p *LoadProfiler) SetTotal(n int) {
+	if p == nil {
+		return
+	}
+	p.Total = n
+	p.loadStart = time.Now()
+	p.lastPct = -1
+}
+
+// Tick advances the GGUF-tensor progress counter by one (adding payloadBytes to the
+// running total) and emits a throttled progress line. The loader calls it once per GGUF
+// tensor it consumes — including the batched experts and the split KV-b halves, which do
+// NOT go through recordTensor — so the percentage tracks GGUF tensors read, not just the
+// canonical tensors added. Safe on nil / when Progress is unset.
+func (p *LoadProfiler) Tick(payloadBytes int64) {
+	if p == nil {
+		return
+	}
+	p.ggufSeen++
+	p.cumBytes += payloadBytes
+	p.emitProgress()
+}
+
+// emitProgress writes a throttled one-line load-progress status to p.Progress.
+// no-op when Progress is unset or Total is unknown.
+func (p *LoadProfiler) emitProgress() {
+	if p == nil || p.Progress == nil || p.Total <= 0 {
+		return
+	}
+	n := p.ggufSeen
+	pct := 100 * float64(n) / float64(p.Total)
+	step := p.ProgressEvery
+	if step <= 0 {
+		step = 5
+	}
+	// Emit on the first tensor, every `step` percent, and on the last tensor.
+	if n != 1 && n != p.Total && pct-p.lastPct < step {
+		return
+	}
+	p.lastPct = pct
+	elapsed := time.Duration(0)
+	if !p.loadStart.IsZero() {
+		elapsed = time.Since(p.loadStart)
+	}
+	gb := float64(p.cumBytes) / (1 << 30)
+	var rate float64
+	if s := elapsed.Seconds(); s > 0 {
+		rate = gb / s
+	}
+	fmt.Fprintf(p.Progress, "fak: loading model %.0f%% (%d/%d tensors, %.1f GB, %s elapsed, %.2f GB/s)\n",
+		pct, n, p.Total, gb, elapsed.Round(time.Second), rate)
 }
 
 func loadProfileStart(p *LoadProfiler) time.Time {

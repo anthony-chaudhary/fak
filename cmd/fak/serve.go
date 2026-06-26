@@ -99,7 +99,7 @@ func cmdServe(argv []string) {
 	sessionID := fs.String("session-id", "", "default trace/session id for callers that omit X-Trace-Id or MCP trace_id (empty = mint gw-N per request unless --context-budget-tokens is set)")
 	contextBudgetTokens := fs.Int("context-budget-tokens", 0, "seed the default session with this prompt/context-token budget; exhaustion returns a reset directive with continuation_id (0 = off)")
 	resetOnBudget := fs.Bool("reset-on-budget", false, "on context-budget exhaustion, re-arm the continuation trace with a carryover seed and continue transparently instead of returning 409 (requires --context-budget-tokens)")
-	cpuOffloadExperts := fs.Bool("cpu-offload-experts", false, "with --gguf --backend: keep the MoE expert GEMMs on host RAM while dense projections + router + attention run on the device — the `--n-cpu-moe` hybrid that lets a model whose experts dwarf VRAM (e.g. GLM-5.2 Q4 ~424GB experts) serve at all on a smaller VRAM pool. Switches the device load to the memory-lean Q8 quantize-at-load path; off (default) keeps the existing F32 device load byte-unchanged.")
+	cpuOffloadExperts := fs.Bool("cpu-offload-experts", false, "with --gguf --backend: keep the MoE expert GEMMs on host RAM while dense projections + router + attention run on the device — the `--n-cpu-moe` hybrid that lets a model whose experts dwarf VRAM (e.g. GLM-5.2 Q4 ~424GB experts) serve at all on a smaller VRAM pool. The device load uses the memory-lean Q8 quantize-at-load path when the backend advertises quantized upload; otherwise it falls back to F32 weights until that backend implements UploadDtype.")
 	budgetWebhook := fs.String("budget-webhook", "", "POST a JSON event to this URL when a served session's context budget crosses the warning threshold (--budget-warn-fraction) or is exhausted (the reset trigger), so an operator/monitor is notified before exhaustion (#743). Empty = off. Needs --context-budget-tokens to have a budget to watch.")
 	budgetWarnFraction := fs.Float64("budget-warn-fraction", 0.8, "consumed share (0..1) of the context budget at which --budget-webhook fires its pre-exhaustion warning (default 0.8 = 80%); <=0 or >=1 disables the warning while the exhaustion event still fires")
 	notifyNative := fs.Bool("notify-native", true, "emit a one-line native notification to stderr when a served session hits a PAUSED/DRAINING/STOPPED or budget boundary, carrying the closed stop-reason token — the SIGCHLD-equivalent so a waiting agent is never silent (#761); default on")
@@ -155,6 +155,18 @@ func cmdServe(argv []string) {
 		{Name: "policy-load", Dur: time.Since(tPolicy)},
 	}
 
+	// Resolve the optional in-kernel chat decode backend BEFORE eager model loading, so
+	// a known device can refuse an oversize GGUF from its header instead of OOMing during
+	// the load. Lookup (not Pick) keeps typos fail-loud rather than silently degrading to CPU.
+	chatBackend, err := resolveServeChatBackend(*backendName)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(2)
+	}
+	if chatBackend != nil {
+		fmt.Printf("fak: in-kernel chat decode → device backend %q\n", chatBackend.Name())
+	}
+
 	// Eager GGUF load: pull the weights resident BEFORE binding the listener so the
 	// (potentially multi-second) load is measured as part of time-to-ready and its
 	// phase breakdown is on /metrics, rather than a lazy cost paid on first request.
@@ -168,7 +180,7 @@ func cmdServe(argv []string) {
 	// The loaded *model.Model is ALSO kept for the gateway chat planner: with a tokenizer
 	// (explicit --tokenizer or the GGUF's embedded one) and no --base-url,
 	// /v1/chat/completions and /v1/messages serve it directly.
-	inKernelModel, inKernelQ4K, loadProfile, loadPhase := loadServeInKernelModel(*ggufPath, *backendName, *cpuOffloadExperts)
+	inKernelModel, inKernelQ4K, loadProfile, loadPhase := loadServeInKernelModel(*ggufPath, chatBackend, *cpuOffloadExperts, *contextBudgetTokens)
 	if loadPhase.Name != "" {
 		startupPhases = append(startupPhases, loadPhase)
 	}
@@ -236,21 +248,6 @@ func cmdServe(argv []string) {
 	}
 	if budgetObs != nil {
 		serveSessions.WatchBudget(*budgetWarnFraction, budgetObs)
-	}
-
-	// Resolve the optional in-kernel chat decode backend. Lookup (not Pick) so a typo
-	// or an unbuilt/absent device fails loud instead of silently degrading to CPU and
-	// masquerading as a GPU result. A device backend self-registers in its init() only
-	// under the matching build tag AND when a device is actually reachable at runtime.
-	var chatBackend compute.Backend
-	if *backendName != "" {
-		be, found := compute.Lookup(*backendName)
-		if !found {
-			fmt.Fprintf(os.Stderr, "fak serve: --backend %q is not available (registered backends: %v). A device backend needs both a matching build tag (e.g. -tags %s) and a reachable device at runtime.\n", *backendName, compute.Registered(), *backendName)
-			os.Exit(2)
-		}
-		chatBackend = be
-		fmt.Printf("fak: in-kernel chat decode → device backend %q\n", be.Name())
 	}
 
 	// Resolve the optional model-routing policy. Off by default: an empty --route-manifest
@@ -393,16 +390,136 @@ func toGatewayLoadProfile(p *ggufload.LoadProfile) *gateway.ModelLoadProfile {
 // /metrics rather than being a lazy cost on first request. It returns the resident model
 // (nil if no --gguf), whether the direct-resident-Q4_K path was taken, the load profile for
 // /metrics, and the model-load startup phase (zero Name when no load happened). The path
-// selection mirrors cmd/fakchat: a device --backend forces the F32 load (the compute HAL has
-// no quantized-upload seam yet), FAK_Q4K takes the direct-resident-Q4_K path, and the
-// default is the lean-Q8 round-trip; the Q8 path stays byte-identical when the env is unset.
-func loadServeInKernelModel(ggufPath, backendName string, cpuOffloadExperts bool) (inKernelModel *fakmodel.Model, inKernelQ4K bool, loadProfile *gateway.ModelLoadProfile, phase gateway.StartupPhase) {
+// selection mirrors cmd/fakchat with one device-specific split: a device --backend that
+// advertises quantized upload takes the lean-Q8 load, because the served planner runs
+// Session.Quant=true and the HAL can consume Q8_0 directly. Backends without UploadDtype keep
+// the F32 fallback until they can consume quantized resident weights. FAK_Q4K takes the
+// direct-resident-Q4_K CPU path, and the CPU default is the lean-Q8 round-trip; the Q8 path
+// stays byte-identical when the env is unset.
+func resolveServeChatBackend(backendName string) (compute.Backend, error) {
+	backendName = strings.TrimSpace(backendName)
+	if backendName == "" {
+		return nil, nil
+	}
+	be, found := compute.Lookup(backendName)
+	if !found {
+		return nil, fmt.Errorf("fak serve: --backend %q is not available (registered backends: %v). A device backend needs both a matching build tag (e.g. -tags %s) and a reachable device at runtime.", backendName, compute.Registered(), backendName)
+	}
+	return be, nil
+}
+
+const serveGGUFDeviceHeadroom = 0.15
+
+func fitServeGGUFOnDevice(ws *ggufload.WeightSource, be compute.Backend, f32Resident bool, contextBudgetTokens int) error {
+	if ws == nil || be == nil {
+		return nil
+	}
+	plan, err := serveGGUFMemoryPlan(ws, f32Resident, contextBudgetTokens)
+	if err != nil {
+		return err
+	}
+	return compute.RefuseMemoryPlanIfTooBig(be, plan, serveGGUFDeviceHeadroom)
+}
+
+func fitServeGGUFCPUOffloadOnDevice(ws *ggufload.WeightSource, be compute.Backend, contextBudgetTokens int) error {
+	if ws == nil || be == nil {
+		return nil
+	}
+	plan, err := serveGGUFCPUOffloadMemoryPlan(ws, contextBudgetTokens)
+	if err != nil {
+		return err
+	}
+	return compute.RefuseMemoryPlanIfTooBig(be, plan, serveGGUFDeviceHeadroom)
+}
+
+func serveGGUFMemoryPlan(ws *ggufload.WeightSource, f32Resident bool, contextBudgetTokens int) (compute.MemoryPlan, error) {
+	if ws == nil {
+		return nil, nil
+	}
+	var plan compute.MemoryPlan
+	if f32Resident {
+		weights, err := ws.EstimateF32LoadMemoryPlan()
+		if err != nil {
+			return nil, err
+		}
+		plan = append(plan, weights...)
+	} else {
+		weights, err := ws.EstimateLoadMemoryPlan()
+		if err != nil {
+			return nil, err
+		}
+		plan = append(plan, weights...)
+	}
+	return appendServeGGUFKVPlan(ws, plan, contextBudgetTokens), nil
+}
+
+func serveGGUFCPUOffloadMemoryPlan(ws *ggufload.WeightSource, contextBudgetTokens int) (compute.MemoryPlan, error) {
+	if ws == nil {
+		return nil, nil
+	}
+	plan, err := ws.EstimateCPUOffloadExpertsMemoryPlan()
+	if err != nil {
+		return nil, err
+	}
+	return appendServeGGUFKVPlan(ws, plan, contextBudgetTokens), nil
+}
+
+func appendServeGGUFKVPlan(ws *ggufload.WeightSource, plan compute.MemoryPlan, contextBudgetTokens int) compute.MemoryPlan {
+	if cfg, err := ws.File.Config(); err == nil {
+		if tokens := serveGGUFContextPlanTokens(cfg, contextBudgetTokens); tokens > 0 {
+			plan = append(plan, compute.EstimateKVStoreMemoryPlan(compute.KVConfig{
+				NumLayers:  cfg.NumLayers,
+				NumKVHeads: cfg.NumKVHeads,
+				HeadDim:    cfg.HeadDim,
+				RopeTheta:  cfg.RopeTheta,
+			}, tokens)...)
+		}
+	}
+	return plan
+}
+
+func serveGGUFContextPlanTokens(cfg fakmodel.Config, contextBudgetTokens int) int {
+	if contextBudgetTokens > 0 {
+		return contextBudgetTokens
+	}
+	return cfg.MaxPositionEmbeddings
+}
+
+func fitServeGGUFPathOnDevice(ggufPath string, be compute.Backend, f32Resident bool, contextBudgetTokens int) error {
+	if ggufPath == "" || be == nil {
+		return nil
+	}
+	ws, err := ggufload.OpenWeights(ggufPath)
+	if err != nil {
+		return err
+	}
+	defer ws.Close()
+	return fitServeGGUFOnDevice(ws, be, f32Resident, contextBudgetTokens)
+}
+
+func fitServeGGUFCPUOffloadPathOnDevice(ggufPath string, be compute.Backend, contextBudgetTokens int) error {
+	if ggufPath == "" || be == nil {
+		return nil
+	}
+	ws, err := ggufload.OpenWeights(ggufPath)
+	if err != nil {
+		return err
+	}
+	defer ws.Close()
+	return fitServeGGUFCPUOffloadOnDevice(ws, be, contextBudgetTokens)
+}
+
+func loadServeInKernelModel(ggufPath string, backend compute.Backend, cpuOffloadExperts bool, contextBudgetTokens int) (inKernelModel *fakmodel.Model, inKernelQ4K bool, loadProfile *gateway.ModelLoadProfile, phase gateway.StartupPhase) {
 	if ggufPath == "" {
 		return nil, false, nil, gateway.StartupPhase{}
 	}
 	tLoad := time.Now()
 	switch {
-	case backendName != "" && cpuOffloadExperts:
+	case backend != nil && cpuOffloadExperts:
+		if !backend.Caps().UploadDtype {
+			must(fmt.Errorf("fak serve: --cpu-offload-experts requires backend %q to advertise quantized UploadDtype (Q8_0 upload); use a quantized-upload backend or omit --cpu-offload-experts", backend.Name()))
+		}
+		fmt.Printf("fak: GGUF device load -> mixed precision on backend %q (Q8 resident dense/device weights, f32 activations/KV, experts host-resident)\n", backend.Name())
 		// Device backend + CPU expert-offload: the memory-lean Q8 quantize-at-load path (the
 		// SAME representation cmd/modelbench's `-lean -backend cuda` produces). The big matmul
 		// weights are dropped from f32 and kept Q8-resident, which the cuda HAL now consumes
@@ -411,18 +528,38 @@ func loadServeInKernelModel(ggufPath, backendName string, cpuOffloadExperts bool
 		// a model whose experts dwarf VRAM (GLM-5.2 Q4 experts ~424GB): with --cpu-offload-experts
 		// the per-request session keeps the expert GEMMs on host RAM while dense projections +
 		// router + attention run on the device (internal/model glmDsaMatKernel split).
+		// The fit check must use the dense-vs-expert split, not total GGUF bytes: experts are
+		// host-scoped offload demands, while dense/router/attention weights and KV consume the
+		// device budget. That keeps the valid "experts dwarf VRAM" use case alive while still
+		// refusing a dense side that cannot fit.
+		must(fitServeGGUFCPUOffloadPathOnDevice(ggufPath, backend, contextBudgetTokens))
 		prof := ggufload.NewLoadProfiler()
+		prof.Progress = os.Stderr // stream load % to stderr so a large multi-minute load is not silent
 		mm, err := ggufload.LoadModelQuantProfile(ggufPath, prof)
 		must(err)
 		modelengine.Preload(mm)
 		loadNanos := time.Since(tLoad).Nanoseconds()
 		profile := toGatewayLoadProfile(prof.Snapshot("gguf-lean-q8-device", ggufPath, loadNanos))
 		return mm, false, profile, gateway.StartupPhase{Name: "model-load", Dur: time.Duration(loadNanos)}
-	case backendName != "":
-		// A device backend (e.g. CUDA) with NO offload loads the GGUF as F32 — the SAME path
-		// cmd/modelbench uses before NewBackendSession, so the HAL takes its proven F32/Q8-narrow
-		// GEMV. (For a model that fits VRAM this is fine; pass --cpu-offload-experts for the
-		// lean+offload path when the experts dwarf VRAM.)
+	case backend != nil:
+		if backend.Caps().UploadDtype {
+			// A device backend that can consume Q8_0 uploads should not be forced through
+			// the f32 resident path. The served planner runs Session.Quant=true, so this
+			// is the memory-lean representation it will actually execute.
+			fmt.Printf("fak: GGUF device load -> mixed precision on backend %q (Q8 resident weights, f32 activations/KV)\n", backend.Name())
+			must(fitServeGGUFPathOnDevice(ggufPath, backend, false, contextBudgetTokens))
+			prof := ggufload.NewLoadProfiler()
+			mm, err := ggufload.LoadModelQuantProfile(ggufPath, prof)
+			must(err)
+			modelengine.Preload(mm)
+			loadNanos := time.Since(tLoad).Nanoseconds()
+			profile := toGatewayLoadProfile(prof.Snapshot("gguf-lean-q8-device", ggufPath, loadNanos))
+			return mm, false, profile, gateway.StartupPhase{Name: "model-load", Dur: time.Duration(loadNanos)}
+		}
+		// Backends without quantized upload still need f32-resident weights; a lean-Q8
+		// model would drop the f32 matmul weights they fall back to.
+		fmt.Printf("fak: GGUF device load -> f32 resident weights on backend %q (backend has no quantized UploadDtype)\n", backend.Name())
+		must(fitServeGGUFPathOnDevice(ggufPath, backend, true, contextBudgetTokens))
 		mm, err := ggufload.LoadModel(ggufPath)
 		must(err)
 		modelengine.Preload(mm)
@@ -455,6 +592,7 @@ func loadServeInKernelModel(ggufPath, backendName string, cpuOffloadExperts bool
 		return mm, true, profile, gateway.StartupPhase{Name: "model-load", Dur: time.Duration(loadNanos)}
 	default:
 		prof := ggufload.NewLoadProfiler()
+		prof.Progress = os.Stderr // stream load % to stderr so a large multi-minute load is not silent
 		mm, err := ggufload.LoadModelQuantProfile(ggufPath, prof)
 		must(err)
 		modelengine.Preload(mm)
