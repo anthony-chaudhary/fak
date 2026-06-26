@@ -121,6 +121,10 @@ var tier = map[string]int{
 	"hooks":           1, // commit-boundary gates run in ONE process: the Go port of the tools/check_*.py git-hook checkers (PUBLIC_LEAK/SECRET_SHAPE/DOC_PLACEMENT/BROKEN_LINK/FILE_ADMISSION/INDEX_SYNC/PROVENANCE_LABEL + commit-msg), folding one staged-diff read. stdlib-only, imports nothing internal, off the hot path.
 	"workflow":        1, // pure DAG/map-reduce/fan-out orchestration core (#245, D-005): JSON-DSL compiler + topo-validated executor + retry/fail-fast fault tolerance; stdlib-only, imports nothing internal, off the hot path.
 	"l3region":        1, // L3 disaggregated-cache child B Stage-1 seam (#77, epic #504): an abi.RegionBackend over a fake in-memory page-keyed L3 store — a Ref.Digest resolves to a page-key set (mget/mset), region round-trips bit-exact + verify-don't-trust. Imports only abi+stdlib; NOT registered (library leaf), off the hot path.
+	"lifecycle":       1, // canonical shared run-state vocabulary; stdlib-only, imported by session/loopmgr to avoid token drift.
+	"epochbridge":     1, // explicit session generation <-> abi speculation epoch converter; imports only abi/session and owns neither type.
+	"lifebridge":      1, // explicit session.RunState <-> loopmgr.LoopState converter over lifecycle; imports only tier-1 leaves.
+	"memview":         2, // typed virtual-view contract over canonical raw memory cells (#904): MemoryViewRecord binds a derived view (snippet/summary/qa/fact) to its source by a digest + byte span, inherits the source taint, and is invalidated when the source digest changes; a materialized view carries an abi.Verdict and re-enters adjudication before any effect. Mechanism: imports only abi(0)+stdlib, defines a RawPage interface so recall.Page adapts without an upward import; off the hot path, registers nothing.
 	// new-leaf:tier — `python tools/new_leaf.py <name> --tier <name>` inserts the
 	// declaration for a generated leaf immediately ABOVE this line. Keep the marker last.
 }

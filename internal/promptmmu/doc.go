@@ -34,6 +34,18 @@
 // never touches the decoded request the kernel adjudicates, so the trust
 // boundary is unchanged and the kernel still polices the exact same tool set.
 //
+// EXACT reuse is NOT a lossy memory view (#904). promptmmu and the vCache replay
+// decision (internal/vcachechain) answer "are these the SAME bytes / the SAME
+// prefix?" — a byte-identity check whose payoff is a cache hit. No projection, no
+// summarization, no information loss. A LOSSY semantic memory view
+// (internal/memview: MemoryViewRecord — summary / qa / fact projections of
+// canonical raw cells) is a different thing: it DERIVES a smaller/structured
+// projection, loses information by design, and must carry provenance + an
+// admission gate and re-enter adjudication before any effect. Conflating the two
+// — treating a lossy summary as if it were exact bytes, or expecting a cache hit
+// off a summarized projection — is exactly the failure #904 exists to prevent.
+// The cache-prefix splice here is the lossless side of that line.
+//
 // Tier: foundation (1) — see internal/architest. This package may import only
 // packages whose tier is <= 1; an upward import fails the architest gate. It
 // imports no agent/gateway type: the caller passes a `decode` callback so the
