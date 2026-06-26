@@ -100,6 +100,7 @@ The dedicated, cross-linked capability pages. Each lists one category of support
 - [The four layers of agent memory](docs/MEMORY-LAYERS-EXPLAINER.md): routing, addressing, fusion, and semantics as four distinct KV-cache problems, and why fak's change lives only at the semantics layer.
 - [Shared state ladder](docs/shared-state-ladder.md): the split between shared live messages, live mutable objects, durable handoff, disaggregated state, and user-level collaborative editing.
 - [Shared task record contract](docs/shared-task-record-contract.md): executable JSON envelopes and fixtures for collaborative task records, user patches, conflicts, approval gates, and disaggregated artifact refs.
+- [Multi-agent coordination protocol (RFC)](docs/multi-agent-coordination-protocol.md): the single normative spec for agent-to-agent coordination — the message format (`a2achan`), the shared-state API (`sharedtask`), and the wave coordination primitives (`comm`/`agenttopo`) — every coordination act adjudicated on the same default-deny capability floor as a tool call. The D-007 (#241) capstone.
 - [AWQ quantization support](docs/explainers/awq-quantization.md): fak's AWQ 4-bit activation-aware weight format, its dequantization formula, the LoadAWQ API, and the memory/accuracy trade-offs.
 - [Hardware portability via the compute HAL](docs/explainers/hardware-portability.md): how the `internal/compute` interface adds CUDA and Vulkan backends by registration instead of re-forking the in-kernel forward pass.
 

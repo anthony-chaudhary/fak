@@ -16,6 +16,11 @@ description: "Umbrella tracker for epic #304 (Track D - Agent Framework Parity).
 > *published* table is deferred to a bench node and says so plainly; no token/throughput
 > figure is invented here. Written **2026-06-25** on a win32 dev box (no live-model bench
 > node, no LangGraph/AutoGen/CrewAI install reachable from this host).
+>
+> **Updated 2026-06-26:** D-007 (#241) regraded — its RFC shipped
+> ([`docs/multi-agent-coordination-protocol.md`](../multi-agent-coordination-protocol.md), commit `4d0392e`),
+> binding three race/contract-tested pillars; the issue's stated acceptance is now met in-process.
+> See §1 (row D-007), §3, and §4. No other child's status changed.
 
 ---
 
@@ -71,18 +76,20 @@ adapter / example / benchmark* acceptance is not yet built.
 | **D-004** #248 AutoGen (P1) | 🟢 **Host-tractable acceptance shipped; live-model wall-clock folded into D-001** | AutoGen v0.4 `OpenAIChatCompletionClient(base_url=...)` reaches the gateway today (matrix row 62, "Yes"). A runnable, dependency-free **example group chat** (`examples/autogen-groupchat/`) now demonstrates the multi-agent pattern: governance over every agent tool call **and** speaker hand-off (verdicts match `fak preflight`) **and** **conversation-state preservation** through the shared transcript, documented with a **deterministic performance model** (modeled 7.67× prefill reduction at the illustrative geometry). The only open piece — the **live-model AutoGen-vs-native wall-clock** — is the deferred bench-node run owned by D-001 (#255), not asserted here. | [`examples/autogen-groupchat/`](../../examples/autogen-groupchat/README.md) · [`docs/integrations/compatibility-matrix.md`](../integrations/compatibility-matrix.md) (row 62) |
 | **D-005** #245 Workflow Orchestration (P2) | 🔴 **Not implemented** | No workflow DSL (YAML/JSON), no DAG execution engine, no built-in map-reduce / fan-out *product* layer. The fan-out topology in `turnbench`/`fanbench` is the **D-001 benchmark harness**, not a user-facing orchestration layer. Design-only. | — (none) |
 | **D-006** #243 Tool Ecosystem (P2) | 🔴 **Not implemented** | No built-in 20+ tool library (filesystem/HTTP/DB connectors). fak's architecture **gates** the agent's existing tools (deny-by-structure / repair / quarantine); it is not a tool *provider* — so this child is partly an architecture-fit question, not just unbuilt code. Design-only. | — (none) |
-| **D-007** #241 Coordination Protocol (P2) | 🟡 **Partial — shared-state scaffold; full protocol is a sibling epic** | A **shared-task-record contract** (fixtures + JSON schema + validator) gives coordinated multi-agent workflows a shared record, and `internal/comm` is a low-level comm driver. The full **message-passing protocol / shared-KV API / RFC** the issue names is the active epic **#639** (MPI-shaped message-passing primitives). | [`examples/shared-task-record`](../../examples/shared-task-record) · [`internal/comm/comm.go`](../../internal/comm/comm.go) |
+| **D-007** #241 Coordination Protocol (P2) | 🟢 **Acceptance met in-process — RFC + 3 tested pillars shipped; durable cross-process is the named next rung** | All four #241 acceptance items now map to a shipped, race/contract-tested artifact, bound under one normative spec: **message passing** = `internal/a2achan` (`Send`/`Recv`/`TryRecv` + `Publish`/`Subscribe` over a fail-closed capability floor); **shared KV/cache space** = `internal/sharedtask` (scoped, taint-tracked, patch-merged record + journal); **coordination primitives** = `internal/comm` collectives + `internal/agenttopo` declared topology DAG; **RFC/spec** = [the Multi-Agent Coordination Protocol RFC](../multi-agent-coordination-protocol.md). Honest scope (RFC §7): the `InKernel` message locale + every collective ship **in-process**; **durable cross-process delivery** (a session-image-backed `Session`/`Window` mailbox that survives a process boundary) is the named next rung, tracked under sibling epic **#639**. | [`docs/multi-agent-coordination-protocol.md`](../multi-agent-coordination-protocol.md) · [`internal/a2achan`](../../internal/a2achan/a2achan.go) · [`internal/sharedtask`](../../internal/sharedtask) · [`internal/comm/comm.go`](../../internal/comm/comm.go) · [`internal/agenttopo`](../../internal/agenttopo/agenttopo.go) |
 | **D-008** #238 Testing Framework (P2) | 🟡 **Partial — internal harness; public API not shipped** | Deterministic seeded agent-session generation + fixture-based scoring (`turnbench`), plus a transcript corpus + the trajectory-replay substrate (epic **#498**). No **public** assertion library, mock-tool-response API, or reproduce-from-transcript CLI yet. | [`internal/turnbench/`](../../internal/turnbench) · [`examples/trajectory`](../../examples/trajectory) |
 
 Legend: 🟢 done · 🟡 partial (scaffold / wire-supported / sibling-epic) · 🔴 not implemented.
 
 **Roll-up: 1 / 8 children closed (#253).** Of the 7 open: 1 is a scaffold whose published run
-is bench-node-gated (D-001); D-003 (CrewAI) and D-004 (AutoGen) have both shipped their
-host-tractable acceptance (a dependency-free example + a deterministic performance model),
-with only their live-model wall-clock folded into the D-001 deferred run; 2 are partial
-scaffolds whose public surface is tracked by a separate epic (D-007→#639, D-008→#498); and 2
-are unimplemented features (D-005, D-006). So #304 stays **OPEN** — correctly (its published
-headline run is still deferred).
+is bench-node-gated (D-001); D-003 (CrewAI), D-004 (AutoGen), and **D-007 (Coordination
+Protocol)** have all shipped their host-tractable acceptance — D-003/D-004 a dependency-free
+example + a deterministic performance model (live-model wall-clock folded into the D-001
+deferred run), and **D-007 the RFC + three race/contract-tested pillars in-process** (durable
+cross-process delivery is the named next rung under sibling epic #639); 1 is a partial scaffold
+whose public surface is tracked by a separate epic (D-008→#498); and 2 are unimplemented
+features (D-005, D-006). So #304 stays **OPEN** — correctly (its published headline run is
+still deferred, and the regraded children remain GitHub-open pending their last gate).
 
 ---
 
@@ -109,13 +116,18 @@ host**:
    for each — the live-model framework-vs-native **wall-clock** — is the deferred bench-node
    run owned by D-001 (#255), not a host-tractable change here.
 
-4. **Scaffolds whose public surface is a sibling epic (D-007, D-008).** The shared-task-record
-   contract and the turnbench/trajectory harness exist, but the protocol RFC (epic #639) and the
-   public testing API (epic #498) are tracked elsewhere and unshipped.
+4. **Scaffold whose public surface is a sibling epic (D-008).** The turnbench/trajectory harness
+   exists, but the public testing API (epic #498) is tracked elsewhere and unshipped. (D-007 was
+   in this class until 2026-06-26: its protocol RFC is now shipped —
+   `docs/multi-agent-coordination-protocol.md` — binding `a2achan` / `sharedtask` /
+   `comm`+`agenttopo`; only the durable cross-process rung remains, under #639.)
 
 **The single honest gate, stated plainly:** epic #304 closes only when all 8 children meet
-their acceptance, and **7 are open** — spanning a deferred bench-node run, two unbuilt features,
-two unbuilt adapters, and two scaffolds whose public surface is tracked by separate epics. No
+their acceptance on GitHub, and **7 remain open** — spanning a deferred bench-node run (D-001),
+two unbuilt features (D-005, D-006), two wire-supported integrations whose live-model wall-clock
+is bench-node-gated (D-003, D-004), one child whose stated acceptance is now met in-process but
+which stays open pending its durable next rung (D-007), and one scaffold whose public surface is
+tracked by a separate epic (D-008). No
 code or doc change on this host can flip those bits without fabricating a benchmark number or
 shipping multi-day features — which the repo's witness ledger and `make claims-lint` would
 reject. So the correct deliverable is this tracker, not a closed epic.
@@ -132,7 +144,7 @@ reject. So the correct deliverable is this tracker, not a closed epic.
 | D-004 #248 | **Shipped** (`examples/autogen-groupchat/`): example group chat + conversation-state-preservation model + deterministic performance model. Remaining: the live-model AutoGen-vs-native wall-clock, owned by D-001 (#255) | a live-model bench node (wall-clock only) |
 | D-005 #245 | Spec a workflow DSL (YAML) + a map-reduce/fan-out/DAG executor as a `new_leaf` package; CPU-correct first, then fault tolerance | host-tractable |
 | D-006 #243 | Decide the architecture fit first (does fak ship tools, or only gate them?); if shipping, add filesystem read/write/glob with safety annotations as the first leaf | host-tractable |
-| D-007 #241 | Graduate the shared-task-record contract into a message-passing API on `internal/comm`; write the RFC under epic #639 | host-tractable |
+| D-007 #241 | **Shipped** (RFC `docs/multi-agent-coordination-protocol.md` + `a2achan` / `sharedtask` / `comm`+`agenttopo`, all race/contract-tested). Remaining: the **durable cross-process** rung — a session-image-backed `Session`/`Window` mailbox so a handoff survives a process boundary — tracked under sibling epic #639 | host-tractable (next rung) |
 | D-008 #238 | Expose the turnbench fixture/scoring harness as a public assertion + mock-tool-response API; add reproduce-from-transcript over the trajectory corpus (epic #498) | host-tractable |
 
 ---
@@ -145,10 +157,12 @@ reject. So the correct deliverable is this tracker, not a closed epic.
   (every one an unrelated `examples:`/`serve(gateway)` issue; #314 and #328 closed).
 - **On-disk evidence:** `internal/bench/fanscale.go` + `fanscale_test.go`, `internal/turnbench/fanout.go`,
   `cmd/fanbench/main.go` (D-001); `docs/integrations/compatibility-matrix.md` rows 58-62 +
-  `docs/integrations/README.md` (D-002/003/004); `examples/shared-task-record` + `internal/comm/comm.go`
-  (D-007); `internal/turnbench/` + `examples/trajectory` (D-008).
-- **Witnessed gate:** `go test ./internal/bench -run FanScale -count=1` → `ok ... 0.440s` (WSL Ubuntu-24.04;
-  native Windows `go test` is OS-blocked — see AGENTS.md).
+  `docs/integrations/README.md` (D-002/003/004); `docs/multi-agent-coordination-protocol.md` (RFC) +
+  `internal/a2achan` + `internal/sharedtask` + `internal/comm/comm.go` + `internal/agenttopo` +
+  `examples/shared-task-record` (D-007); `internal/turnbench/` + `examples/trajectory` (D-008).
+- **Witnessed gate:** `go test ./internal/bench -run FanScale -count=1` → `ok ... 0.440s` (D-001);
+  `go test -race ./internal/a2achan ./internal/sharedtask ./internal/comm ./internal/agenttopo -count=1`
+  → all `ok` (D-007, 2026-06-26). Both on WSL Ubuntu-24.04; native Windows `go test` is OS-blocked — see AGENTS.md.
 - **Honesty rails:** `make claims-lint`, BENCHMARK-AUTHORITY — the D-001 published cell is deferred,
   never asserted.
 
@@ -156,4 +170,5 @@ reject. So the correct deliverable is this tracker, not a closed epic.
 
 - [`docs/notes/track-b-performance-parity-tracking-306.md`](track-b-performance-parity-tracking-306.md) · [`docs/notes/gpu-parity-tracking-480.md`](gpu-parity-tracking-480.md) · [`docs/notes/simd-cpu-parity-tracking-400.md`](simd-cpu-parity-tracking-400.md) — sibling parity trackers in the same house format.
 - [`docs/integrations/compatibility-matrix.md`](../integrations/compatibility-matrix.md) — the wire-level support matrix that grounds D-002/003/004.
-- Epics **#639** (MPI-shaped message-passing primitives, the D-007 protocol) and **#498** (trajectory-replay substrate, the D-008 testing surface).
+- [`docs/multi-agent-coordination-protocol.md`](../multi-agent-coordination-protocol.md) — the D-007 RFC (#241): the normative spec binding `a2achan` (message passing), `sharedtask` (shared state), and `comm`+`agenttopo` (coordination primitives) under one adjudication floor.
+- Epics **#639** (durable cross-process / MPI-shaped message passing — the D-007 protocol's named next rung) and **#498** (trajectory-replay substrate, the D-008 testing surface).
