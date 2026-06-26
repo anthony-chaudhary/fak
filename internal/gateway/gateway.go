@@ -527,12 +527,6 @@ type Server struct {
 	// tools[] unchanged.
 	toolFloorDenies func(toolName string) bool
 
-	// promptMMUSeen records which served traces have already spent their one safe
-	// promptmmu tool-prune window. A budget RESET continues under a fresh trace, so it gets
-	// a fresh one-shot window naturally; later turns on the same trace are identity.
-	promptMMUMu   sync.Mutex
-	promptMMUSeen map[string]bool
-
 	// pinUpstreamCredential, when set, makes the Anthropic passthrough authenticate
 	// upstream with the planner's OWN configured credential and ignore the inbound
 	// client's key (the subscription path — see Config.PinUpstreamCredential).

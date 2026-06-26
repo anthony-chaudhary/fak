@@ -79,6 +79,15 @@ concurrent = [
   "cohort",
   "agenttopo",
   "promptmmu",
+  # reconciled 2026-06-25 (#756, Pillar 2 / #748): internal/session is a real committed
+  # leaf (the per-session DRIVE state) that had NO declared lane; declared here per #756's
+  # fence so a `(fak session)` ship-stamp binds and the arbiter detects same-tree collisions.
+  "session",
+  # reconciled 2026-06-26 (#763, the `fak cron` sub-epic #749 / epic #748): internal/loopmgr
+  # is a real committed leaf (the loop event ledger + governor + recurring-job schedule) that
+  # had NO declared lane -> it folded into `global`, so a `(fak loopmgr)` ship-stamp could not
+  # bind and the arbiter could not detect a same-tree collision. Declared per #763's fence.
+  "loopmgr",
   # new-leaf:lane -- `python tools/new_leaf.py` inserts a generated leaf lane above
 ]
 exclusive = ["abi", "release", "global"]
@@ -118,6 +127,8 @@ autopick = [
   "cohort",
   "agenttopo",
   "promptmmu",
+  "session", # #756: internal/session leaf, see [lanes].concurrent note
+  "loopmgr", # #763: internal/loopmgr leaf, see [lanes].concurrent note
   # new-leaf:lane
 ]
 
@@ -235,6 +246,8 @@ comm = ["internal/comm/**"]
 cohort = ["internal/cohort/**"]
 agenttopo = ["internal/agenttopo/**"]
 promptmmu = ["internal/promptmmu/**"]
+session = ["internal/session/**"] # #756 (Pillar 2 / #748): per-session DRIVE state + cost ring
+loopmgr = ["internal/loopmgr/**"] # #763 (#749 `fak cron` / #748): loop ledger + governor + recurring-job schedule
 # new-leaf:tree -- generated leaf trees inserted above this line
 cmd         = ["cmd/**"]
 experiments = ["experiments/**"]
