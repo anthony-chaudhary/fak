@@ -10,6 +10,8 @@ or `python -m pytest tools/readme_freshness_audit_test.py -q`.
 from __future__ import annotations
 
 import datetime as _dt
+import contextlib
+import io
 import sys
 from pathlib import Path
 
@@ -69,6 +71,17 @@ def test_headline_authority_warn_when_number_absent() -> None:
 def test_headline_authority_ok_when_mirrored() -> None:
     c = rfa.check_headline_authority("**~4× vs SOTA**", "row: 4× session value")
     assert c["status"] == "OK", c
+
+
+def test_headline_authority_traces_rate_latency_numbers() -> None:
+    c = rfa.check_headline_authority("**~362 ns per call and 120 tok/s**",
+                                     "authority: 362 ns overhead; 120 tok/s decode")
+    assert c["status"] == "OK", c
+
+
+def test_headline_authority_warns_on_untraced_rate() -> None:
+    c = rfa.check_headline_authority("**999 tok/s**", "authority: 120 tok/s decode")
+    assert c["status"] == "WARN" and "999 tok/s" in c["items"], c
 
 
 def test_freshness_stamp_ok_when_recent() -> None:
@@ -161,6 +174,30 @@ def test_speed_claim_high_when_traced_and_bounded() -> None:
     authority = "row: ~362 ns decide … 120 tok/s parity"
     c = rfa.check_speed_claim(txt, authority, first_screen_lines=110)
     assert c["score"] >= 0.75, c
+
+
+def test_speed_claim_untraced_rate_not_saved_by_stray_measured() -> None:
+    txt = ("Measured on the lab rig last week.\n"
+           "The hero now claims 999 tok/s vs tuned, see BENCHMARK-AUTHORITY.")
+    c = rfa.check_speed_claim(txt, "authority says 120 tok/s", first_screen_lines=110)
+    assert "traced_or_marked" in c["items"], c
+    assert c["score"] < 1.0, c
+
+
+def test_speed_claim_same_sentence_measured_marks_rate() -> None:
+    txt = "The hero reports 999 tok/s measured on a replay run vs tuned; see benchmarks."
+    c = rfa.check_speed_claim(txt, "", first_screen_lines=110)
+    assert "traced_or_marked" not in c["items"], c
+
+
+def test_speed_claim_paired_honesty_drops_unsourced_tok_per_second() -> None:
+    sourced = ("The hero reports 120 tok/s vs tuned in-process; see benchmarks.")
+    fabricated = ("The hero reports 999 tok/s vs tuned in-process; see benchmarks.")
+    good = rfa.check_speed_claim(sourced, "authority: 120 tok/s", first_screen_lines=110)
+    bad = rfa.check_speed_claim(fabricated, "authority: 120 tok/s", first_screen_lines=110)
+    assert "traced_or_marked" not in good["items"], good
+    assert "traced_or_marked" in bad["items"], bad
+    assert bad["score"] < good["score"], (bad, good)
 
 
 def test_hero_above_fold_zero_without_a_number() -> None:
@@ -327,9 +364,15 @@ def test_compare_cli_reads_baseline_payload(tmp_path: Path) -> None:
     (tmp_path / "README.md").write_text("# fak\nplain readme\n", encoding="utf-8")
     baseline = tmp_path / "baseline.json"
     baseline.write_text('{"score": 0, "grade": "F"}', encoding="utf-8")
-    assert rfa.main(["--workspace", str(tmp_path), "--compare", str(baseline)]) == 0
+    out = io.StringIO()
+    with contextlib.redirect_stdout(out):
+        assert rfa.main(["--workspace", str(tmp_path), "--compare", str(baseline)]) == 0
+    assert "readme-freshness compare:" in out.getvalue()
     baseline.write_text('{"score": 100, "grade": "A"}', encoding="utf-8")
-    assert rfa.main(["--workspace", str(tmp_path), "--compare", str(baseline)]) == 1
+    out = io.StringIO()
+    with contextlib.redirect_stdout(out):
+        assert rfa.main(["--workspace", str(tmp_path), "--compare", str(baseline)]) == 1
+    assert "REGRESSED" in out.getvalue()
 
 
 # --- live smoke: the real committed README folds without error -------------

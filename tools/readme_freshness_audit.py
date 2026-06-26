@@ -194,6 +194,15 @@ _BOLD_RE = re.compile(r"\*\*(?P<body>[^*]+)\*\*")
 # Inside a bold span, a multiplier headline number like "60×" / "~4x" / "5.3–7.4×".
 _MULT_RE = re.compile(r"~?\d[\d.,]*\s*(?:[–-]\s*\d[\d.,]*\s*)?[×x]")
 
+# A claim number that must be traceable when it appears on the front page:
+# multipliers, latency figures, and concrete token-throughput rates.
+_CLAIM_NUMBER_RE = re.compile(
+    r"~?\d[\d.,]*\s*(?:[–-]\s*\d[\d.,]*\s*)?[×x](?!\w)"
+    r"|~?\d[\d.,]*\s*(?:ns(?:/op)?|nanoseconds?|µs|μs|microseconds?|"
+    r"tok/s|tok/sec|tokens?\s*/\s*s(?:ec)?|tokens?\s+per\s+second)",
+    re.IGNORECASE,
+)
+
 # A front-screen SPEED token: an explicit rate / latency / per-token throughput
 # term, OR a unicode-× multiplier (a bare "x" is too noisy — "x86" etc). This is
 # the "faster speed" signal the front page must carry for the perf reader.
@@ -295,18 +304,16 @@ def check_naive_baseline(readme: str) -> dict[str, Any]:
 
 
 def check_headline_authority(readme: str, authority: str) -> dict[str, Any]:
-    """WARN if a bolded multiplier headline number is not also in the authority doc.
+    """WARN if a bolded headline number is not also in the authority doc.
 
     Not a hard gate: prose may round or restate. We just assert the front page
-    mirrors the single source of truth (BENCHMARK-AUTHORITY), surfacing any
-    bolded number that has no matching figure there to be reconciled by hand.
+    mirrors the single source of truth (BENCHMARK-AUTHORITY), surfacing any bolded
+    multiplier / latency / rate number that has no matching figure there to be
+    reconciled by hand.
     """
-    auth_nums = {_norm_num(x) for x in _MULT_RE.findall(authority)}
     missing: list[str] = []
     for m in _BOLD_RE.finditer(readme):
-        for num in _MULT_RE.findall(m.group("body")):
-            if _norm_num(num) not in auth_nums:
-                missing.append(num.strip())
+        missing.extend(_trace_claim_numbers(m.group("body"), authority)["missing"])
     missing = sorted(set(missing))
     if missing:
         return {
@@ -315,7 +322,7 @@ def check_headline_authority(readme: str, authority: str) -> dict[str, Any]:
             "items": missing,
         }
     return {"check": "headline_authority", "status": "OK",
-            "detail": "every bolded multiplier headline mirrors an authority figure"}
+            "detail": "every bolded headline number mirrors an authority figure"}
 
 
 def check_freshness_stamp(readme: str, *, today: _dt.date,
@@ -475,18 +482,15 @@ def check_speed_claim(readme: str, authority: str, *,
       speed_token   a rate/latency/throughput term (tok/s, ns, latency, ×) above the fold
       traced_or_marked  a front-screen number that is ALSO in BENCHMARK-AUTHORITY,
                         OR is explicitly marked relayed/observed/telemetry/measured
+                        on the same line/sentence as that number
       bounded       a fence near it (vs tuned / single-stream / in-process / not wall-clock)
                         so the speed isn't overclaimed
       links_authority  the first screen links to the benchmark authority/benchmarks doc
     """
     head = "\n".join(readme.splitlines()[:first_screen_lines])
-    auth = authority or ""
-    nums_head = {_norm_num(x) for x in _MULT_RE.findall(head)}
-    nums_auth = {_norm_num(x) for x in _MULT_RE.findall(auth)}
-    traced = bool(nums_head & nums_auth)
-    marked = any(k in head.lower() for k in [
-        "observed", "relayed", "telemetry", "provider's own", "/metrics", "measured",
-    ])
+    trace = _trace_claim_numbers(head, authority)
+    traced = bool(trace["traced"])
+    marked = _claim_marked_near_number(head)
     bounded = any(k in head.lower() for k in [
         "vs tuned", "vs a tuned", "single-stream", "not wall-clock",
         "reference", "overhead", "per call", "per-call", "in-process",
@@ -634,6 +638,51 @@ def _parse_version(text: str) -> tuple[int, int, int] | None:
 def _norm_num(s: str) -> str:
     """Normalize a multiplier token for comparison: strip ~, spaces, unify ×/x."""
     return re.sub(r"[~\s]", "", s).replace("x", "×").replace("X", "×")
+
+
+def _claim_numbers(s: str) -> list[str]:
+    """Front-page numeric claims that need authority: multipliers, latency, rates."""
+    return [m.group(0).strip() for m in _CLAIM_NUMBER_RE.finditer(s or "")]
+
+
+def _norm_claim_num(s: str) -> str:
+    """Normalize a claim number for README-vs-authority comparison."""
+    raw = s.strip()
+    if re.search(r"[×x]\s*$", raw):
+        return _norm_num(raw).lower()
+    t = raw.lower().replace("μ", "µ")
+    t = re.sub(r"[~,\s]", "", t)
+    t = t.replace("tok/sec", "tok/s")
+    t = re.sub(r"tokens?/s(?:ec)?", "tok/s", t)
+    t = re.sub(r"tokens?persecond", "tok/s", t)
+    t = t.replace("nanoseconds", "ns").replace("nanosecond", "ns")
+    t = t.replace("microseconds", "µs").replace("microsecond", "µs")
+    return t
+
+
+def _trace_claim_numbers(text: str, authority: str) -> dict[str, list[str]]:
+    """Trace front-page numbers against BENCHMARK-AUTHORITY with one shared parser."""
+    auth_nums = {_norm_claim_num(x) for x in _claim_numbers(authority or "")}
+    nums = _claim_numbers(text or "")
+    traced = [n for n in nums if _norm_claim_num(n) in auth_nums]
+    missing = [n for n in nums if _norm_claim_num(n) not in auth_nums]
+    return {
+        "numbers": nums,
+        "traced": sorted(set(traced)),
+        "missing": sorted(set(missing)),
+    }
+
+
+def _claim_marked_near_number(text: str) -> bool:
+    """True when an honesty marker lives on the same line/sentence as a number."""
+    markers = [
+        "observed", "relayed", "telemetry", "provider's own", "/metrics", "measured",
+    ]
+    for line in (text or "").splitlines():
+        for sent in re.split(r"(?<=[.!?])\s+", line):
+            if _claim_numbers(sent) and any(k in sent.lower() for k in markers):
+                return True
+    return False
 
 
 def _check_score(c: dict[str, Any]) -> float:
