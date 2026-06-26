@@ -92,6 +92,7 @@ type TaskReport struct {
 	Image       string       `json:"image,omitempty"`
 	TestOracle  string       `json:"test_oracle,omitempty"`
 	BudgetTurns int          `json:"budget_turns,omitempty"`
+	Milestones  []string     `json:"milestones,omitempty"`
 	Tests       []TestResult `json:"tests"`
 	Raw         ArmResult    `json:"raw"`
 	Fak         ArmResult    `json:"fak"`
@@ -325,6 +326,7 @@ func Run(ctx context.Context, s Suite, generatedAt time.Time) (*Report, error) {
 			Image:       task.Image,
 			TestOracle:  task.TestOracle,
 			BudgetTurns: task.BudgetTurns,
+			Milestones:  append([]string(nil), task.Milestones...),
 			Tests:       append([]TestResult(nil), task.Tests...),
 			Raw:         runRaw(ctx, task, pol),
 			Fak:         runFak(ctx, task, pol),
