@@ -12,6 +12,8 @@ import (
 	"runtime"
 	"strings"
 	"time"
+
+	"github.com/anthony-chaudhary/fak/internal/secretload"
 )
 
 // RunnerType identifies the agent runner being used for a solve run.
@@ -354,7 +356,7 @@ func (d *deepSWERunner) RunInstance(ctx context.Context, in Instance) (Predictio
 		cmd.Dir = workdir
 	}
 	cmd.Stdin = bytes.NewReader(payload)
-	cmd.Env = append(os.Environ(),
+	cmd.Env = secretload.SandboxEnv(os.Environ(),
 		"FAK_SWEBENCH_INSTANCE_ID="+in.InstanceID,
 		"FAK_SWEBENCH_REPO="+in.RepoFull(),
 		"FAK_SWEBENCH_BASE_COMMIT="+in.BaseCommit,

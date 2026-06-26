@@ -380,8 +380,8 @@ func setNoNewPrivs() error {
 	return nil
 }
 
-// execAgent replaces this process image with the agent argv, inheriting the current env and
-// (when applied) the Landlock domain across execve.
+// execAgent replaces this process image with the agent argv, carrying only the
+// sandbox child env and (when applied) the Landlock domain across execve.
 func execAgent(argv []string) error {
 	if len(argv) == 0 {
 		return fmt.Errorf("guard: landlock trampoline: empty agent argv")
@@ -390,7 +390,7 @@ func execAgent(argv []string) error {
 	if err != nil {
 		return fmt.Errorf("guard: landlock trampoline: agent %q not found: %w", argv[0], err)
 	}
-	return syscall.Exec(bin, argv, os.Environ())
+	return syscall.Exec(bin, argv, landlockChildEnv())
 }
 
 // exarLookPath resolves argv[0] to an absolute executable path (syscall.Exec needs a path,

@@ -28,7 +28,7 @@ func LandlockTrampoline(args []string) error {
 	}
 	cmd := exec.Command(agentArgv[0], agentArgv[1:]...)
 	cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, os.Stdout, os.Stderr
-	cmd.Env = os.Environ()
+	cmd.Env = landlockChildEnv()
 	if err := cmd.Run(); err != nil {
 		if ee, ok := err.(*exec.ExitError); ok {
 			os.Exit(ee.ExitCode())

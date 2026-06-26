@@ -15,6 +15,7 @@ func TestDeepSWERunnerExternalAdapterJSON(t *testing.T) {
 	t.Setenv("FAK_DEEPSWE_RUNNER", os.Args[0])
 	t.Setenv("FAK_DEEPSWE_RUNNER_ARGS", "-test.run=TestDeepSWEHelperProcess")
 	t.Setenv("FAK_DEEPSWE_HELPER", "1")
+	t.Setenv("FAK_SANDBOX_ENV_ALLOW", "FAK_DEEPSWE_HELPER")
 
 	runner := deepSWERunner{cfg: RunConfig{Model: "DeepSWE-Preview", MaxSteps: 7}}
 	pred, err := runner.RunInstance(context.Background(), Instance{
@@ -33,6 +34,24 @@ func TestDeepSWERunnerExternalAdapterJSON(t *testing.T) {
 	}
 	if !strings.Contains(pred.ModelPatch, "diff --git") {
 		t.Fatalf("ModelPatch does not look like a diff: %q", pred.ModelPatch)
+	}
+}
+
+func TestDeepSWERunnerMasksParentEnvButKeepsExplicit(t *testing.T) {
+	t.Setenv("FAK_DEEPSWE_RUNNER", os.Args[0])
+	t.Setenv("FAK_DEEPSWE_RUNNER_ARGS", "-test.run=TestDeepSWEHelperProcess")
+	t.Setenv("FAK_DEEPSWE_HELPER", "1")
+	t.Setenv("FAK_DEEPSWE_HELPER_MODE", "envcheck")
+	t.Setenv("FAK_SANDBOX_ENV_ALLOW", "FAK_DEEPSWE_HELPER,FAK_DEEPSWE_HELPER_MODE")
+	t.Setenv("FAK_PARENT_SECRET", "do-not-cross")
+
+	runner := deepSWERunner{cfg: RunConfig{Model: "DeepSWE-Preview", MaxSteps: 7}}
+	if _, err := runner.RunInstance(context.Background(), Instance{
+		InstanceID: "django__django-10000",
+		Repo:       "django/django",
+		BaseCommit: "abc123",
+	}); err != nil {
+		t.Fatalf("RunInstance returned error: %v", err)
 	}
 }
 
@@ -63,6 +82,7 @@ func TestRunMarksTimeoutInstances(t *testing.T) {
 	t.Setenv("FAK_DEEPSWE_RUNNER_ARGS", "-test.run=TestDeepSWEHelperProcess")
 	t.Setenv("FAK_DEEPSWE_HELPER", "1")
 	t.Setenv("FAK_DEEPSWE_HELPER_MODE", "sleep")
+	t.Setenv("FAK_SANDBOX_ENV_ALLOW", "FAK_DEEPSWE_HELPER,FAK_DEEPSWE_HELPER_MODE")
 
 	res, err := Run(context.Background(), RunConfig{
 		Runner:     RunnerDeepSWE,
@@ -102,6 +122,20 @@ func TestDeepSWEHelperProcess(t *testing.T) {
 	if req.Schema != "fak.swebench.deepswe-request.v1" || req.Instance.InstanceID == "" {
 		fmt.Fprintf(os.Stderr, "bad request: %+v\n", req)
 		os.Exit(3)
+	}
+	if os.Getenv("FAK_DEEPSWE_HELPER_MODE") == "envcheck" {
+		if os.Getenv("FAK_PARENT_SECRET") != "" {
+			fmt.Fprintln(os.Stderr, "parent secret crossed sandbox env")
+			os.Exit(5)
+		}
+		if os.Getenv("FAK_SWEBENCH_INSTANCE_ID") != req.Instance.InstanceID {
+			fmt.Fprintln(os.Stderr, "explicit instance env missing")
+			os.Exit(6)
+		}
+		if os.Getenv("FAK_DEEPSWE_MODEL") != req.Model {
+			fmt.Fprintln(os.Stderr, "explicit model env missing")
+			os.Exit(7)
+		}
 	}
 	if os.Getenv("FAK_DEEPSWE_HELPER_MODE") == "sleep" {
 		time.Sleep(time.Hour)
