@@ -1,6 +1,6 @@
 ---
 name: skill-score
-description: One repeatable pass that keeps the skill pack itself effective — the one surface no other scorecard grades. Runs the skill-effectiveness scorecard (tools/skill_effectiveness_scorecard.py) over every .claude/skills/*/SKILL.md, reads the skill-debt work-list, and retires it worst-first by ADDING the real affordance — a sharp "Use when …" trigger, a reference that resolves on disk, the commit-by-path discipline a committing skill owes the shared trunk, a witness step, a scoped allowed-tools — never by spraying a keyword. Re-measures with --compare to PROVE skill-debt dropped, regenerates the committed snapshot, and commits only the skill lane by explicit path. An instance of the /score-2x loop pointed at the skill pack; the inward counterpart of agent-readiness (the agent's front door) and quality-score (the code). Use after adding or editing a skill, when a skill cites a tool that no longer exists, or on a /loop cadence to keep every skill discoverable, safe to operate, and trustworthy.
+description: One repeatable pass that keeps the skill pack itself effective — the one surface no other scorecard grades. Runs the skill-effectiveness scorecard (`fak skill-effectiveness-scorecard`) over every .claude/skills/*/SKILL.md, reads the skill-debt work-list, and retires it worst-first by ADDING the real affordance — a sharp "Use when …" trigger, a reference that resolves on disk, the commit-by-path discipline a committing skill owes the shared trunk, a witness step, a scoped allowed-tools — never by spraying a keyword. Re-measures to PROVE skill-debt dropped, regenerates the committed snapshot, and commits only the skill lane by explicit path. An instance of the /score-2x loop pointed at the skill pack; the inward counterpart of agent-readiness (the agent's front door) and quality-score (the code). Use after adding or editing a skill, when a skill cites a tool that no longer exists, or on a /loop cadence to keep every skill discoverable, safe to operate, and trustworthy.
 disable-model-invocation: false
 user-invocable: true
 allowed-tools: Read, Bash, Write, Edit, Grep, Glob
@@ -30,7 +30,7 @@ prove the drop → commit ONLY the skill lane by explicit path.**
 
 ## The measure (nine KPIs over every `.claude/skills/*/SKILL.md`)
 
-`tools/skill_effectiveness_scorecard.py` folds these into a composite score + the
+`fak skill-effectiveness-scorecard` folds these into a composite score + the
 skill-debt integer. **HARD** KPIs emit skill-debt; the two ECONOMY KPIs are **SOFT**
 (they lower the score but never gate — the cheap fix for either is a keyword, which is
 gaming).
@@ -55,9 +55,9 @@ ONLY the skills that commit to the shared trunk — the highest-privilege ones.
 ## Step 1 — Run the scorecard (it builds your work-list)
 
 ```bash
-python tools/skill_effectiveness_scorecard.py            # human scorecard (per-KPI + work-list)
-python tools/skill_effectiveness_scorecard.py --json     # machine payload
-python tools/skill_effectiveness_scorecard.py --json > /tmp/skill-base.json   # record the baseline
+go run ./cmd/fak skill-effectiveness-scorecard            # human scorecard (per-KPI + work-list)
+go run ./cmd/fak skill-effectiveness-scorecard --json     # machine payload
+go run ./cmd/fak skill-effectiveness-scorecard --json > /tmp/skill-base.json   # record the baseline
 ```
 
 It exits non-zero whenever skill-debt > 0. Read `corpus.score`, `corpus.skill_debt`,
@@ -89,18 +89,18 @@ but commit by explicit path so you don't sweep their other in-flight edits (Step
 ## Step 3 — Re-measure and PROVE the drop
 
 ```bash
-python tools/skill_effectiveness_scorecard.py --compare /tmp/skill-base.json
+go run ./cmd/fak skill-effectiveness-scorecard --json
 ```
 
-The `--compare` renderer prints the per-group deltas and the `≥3× / ≥2× / not-yet`
-VERDICT ladder. State the delta plainly: `skill-debt N → M (−k), score S → S'`.
+Compare the new JSON against the baseline you recorded and state the delta plainly:
+`skill-debt N → M (−k), score S → S'`.
 Regenerate the committed snapshot so the doc matches the tree (Bash `>` for UTF-8):
 
 ```bash
-python tools/skill_effectiveness_scorecard.py --markdown --stamp YYYY-MM-DD > docs/SKILL-EFFECTIVENESS-SCORECARD.md
+go run ./cmd/fak skill-effectiveness-scorecard --markdown > docs/SKILL-EFFECTIVENESS-SCORECARD.md
 ```
 
-If a surface SATURATES (skill-debt 0, grade A, `--compare` ratio `∞`), harden the bar
+If a surface SATURATES (skill-debt 0, grade A), harden the bar
 per [`/score-2x`](../score-2x/SKILL.md) Step 4 — tighten `DESC_MIN_CHARS`, lower
 `CONTEXT_SOFT_MAX`, or promote a SOFT KPI to HARD — then re-pin the control pane.
 
@@ -108,7 +108,7 @@ per [`/score-2x`](../score-2x/SKILL.md) Step 4 — tighten `DESC_MIN_CHARS`, low
 
 ```bash
 git pull --no-rebase --no-edit
-git add <the SKILL.md files you fixed> tools/skill_effectiveness_scorecard.py docs/SKILL-EFFECTIVENESS-SCORECARD.md
+git add <the SKILL.md files you fixed> cmd/fak/skill_effectiveness.go docs/SKILL-EFFECTIVENESS-SCORECARD.md
 git commit -s -m "<subject>" -m "<body: N→M skill-debt, what changed>" -m "(fak <leaf>)"
 dos commit-audit HEAD                                    # MUST print [diff-witnessed] / verdict OK
 git push
@@ -141,4 +141,4 @@ exactly this reason: their cheap fix is cosmetic, so they score but never gate.
 - On a **/loop cadence** to keep the pack discoverable, safe, and trustworthy as it grows.
 
 The scorecard is read-only; this skill's only writes are your genuine skill fixes,
-`docs/SKILL-EFFECTIVENESS-SCORECARD.md`, and the tool itself.
+`docs/SKILL-EFFECTIVENESS-SCORECARD.md`, and the Go subcommand itself.

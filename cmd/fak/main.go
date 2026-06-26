@@ -163,6 +163,10 @@ func main() {
 		cmdGuardRSIScorecard(os.Args[2:])
 	case "dogfood-score":
 		cmdDogfoodScore(os.Args[2:])
+	case "token-defaults-scorecard":
+		cmdTokenDefaultsScorecard(os.Args[2:])
+	case "skill-effectiveness-scorecard":
+		cmdSkillEffectivenessScorecard(os.Args[2:])
 	case "callavoid":
 		cmdCallavoid(os.Args[2:])
 	case "savings-vector":
@@ -437,6 +441,10 @@ func usage() {
                 (scores the launched-session dogfooding loop: is it WIRED to run honestly,
                  and does the model report itself truthfully  -  the keystone defect is a turn
                  that claims success over an OBSERVED Stop-hook error, read from real transcripts)
+  fak token-defaults-scorecard [--json] [--markdown]
+                (native token-saving-defaults control-pane payload)
+  fak skill-effectiveness-scorecard [--json] [--markdown]
+                (native skill-pack effectiveness control-pane payload)
   fak audit     verify <journal.jsonl> | export <journal.jsonl>
                 (the AUDIT-TRAIL consumer: 'verify' re-reads a decision journal (the
                  'fak guard' / FAK_AUDIT_JOURNAL trail) and validates its hash chain
@@ -1124,6 +1132,9 @@ func rateLimitKeyMode(key string) ratelimit.KeyMode {
 
 func ifcPolicy(rt policy.Runtime) ifc.Policy {
 	p := ifc.Policy{}
+	if len(rt.SafeSinks) > 0 || len(rt.AuthorizeRules) > 0 || len(rt.Sources) > 0 {
+		p.GatedSinks = ifc.StrictGatedSinks()
+	}
 	if len(rt.SafeSinks) > 0 {
 		p.SafeSinks = make(map[string]bool, len(rt.SafeSinks))
 		for _, tool := range rt.SafeSinks {

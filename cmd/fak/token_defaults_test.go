@@ -1,7 +1,7 @@
 package main
 
 // token_defaults_test.go — the regression sentinel for fak's OUT-OF-THE-BOX token-saving
-// default stack. The token-defaults scorecard (tools/token_defaults_scorecard.py) scores
+// default stack. The token-defaults scorecard (`fak token-defaults-scorecard`) scores
 // which stacking savers are on by default; this test is the lock its `default_on_locked`
 // KPI requires, so a peer who silently flips a saver back to off — unwires the tool floor,
 // drops the vDSO default, or zeroes the compaction budget — reds CI here, not in

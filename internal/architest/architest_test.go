@@ -504,9 +504,11 @@ var interpreterSuffix = []string{".py", ".sh", ".bash", ".ps1", ".rb", ".pl", ".
 // interpreterExecAllow is the conscious escape hatch: a request-path package that
 // legitimately execs something the gate cannot prove is a compiled binary (a
 // non-literal program arg), keyed to a one-line justification — the same review
-// chokepoint as regOffList. EMPTY at green: today every in-closure exec is a literal
-// "git". A future entry is a deliberate, reviewed decision, not a silent pass.
-var interpreterExecAllow = map[string]string{}
+// chokepoint as regOffList. Each entry is a deliberate, reviewed decision, not a
+// silent pass.
+var interpreterExecAllow = map[string]string{
+	"witness": "execution witnesses run caller-declared selector argv; the selector is evidence-gated and not a script interpreter dependency of the kernel itself",
+}
 
 // oracleSeamFiles names the off-path Python oracle/baseline seam scripts (DIRECTION.md
 // seam table row 1). They are the independent ML-ecosystem witness the Go model is

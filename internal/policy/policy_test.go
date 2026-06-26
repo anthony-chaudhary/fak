@@ -324,6 +324,9 @@ func TestIFCRuntimeConfigIsLoadBearing(t *testing.T) {
 
 func testIFCPolicy(rt Runtime) ifc.Policy {
 	p := ifc.Policy{}
+	if len(rt.SafeSinks) > 0 || len(rt.AuthorizeRules) > 0 || len(rt.Sources) > 0 {
+		p.GatedSinks = ifc.StrictGatedSinks()
+	}
 	if len(rt.SafeSinks) > 0 {
 		p.SafeSinks = make(map[string]bool, len(rt.SafeSinks))
 		for _, tool := range rt.SafeSinks {

@@ -1,6 +1,6 @@
 ---
 name: token-defaults-score
-description: One repeatable pass that keeps fak's OUT-OF-THE-BOX token economy amazing — every stacking token-saving method that can SAFELY default is on by default, honestly noted, and locked against regression. Runs the token-saving-defaults scorecard (tools/token_defaults_scorecard.py) over the entrypoint source (cmd/fak/guard.go, cmd/fak/serve.go, the gateway Default* constants, and the audited servewiringData rows), turns each HARD defect into a required fix — turn a WITNESSED-safe bounded-loss saver on by default with an honest note, write the missing regression lock, document a dark lever's gate, align the two front doors — and each off high-value saver into a tracked roadmap item (produce the missing witness, then default it). Retires token-defaults-debt worst-first WITHOUT ever shipping an unwitnessed claim, re-measures to PROVE the debt dropped, and commits only the scorecard lane by explicit path. The out-of-the-box-defaults counterpart of persona-score (who lands) and industry-score (the field). Use after a change to a saver default, the serve-wiring rows, or a new token-saving lever, or on a /loop cadence to keep the no-flag experience maximally cheap.
+description: One repeatable pass that keeps fak's OUT-OF-THE-BOX token economy amazing — every stacking token-saving method that can SAFELY default is on by default, honestly noted, and locked against regression. Runs the token-saving-defaults scorecard (`fak token-defaults-scorecard`) over the entrypoint source (cmd/fak/guard.go, cmd/fak/serve.go, the gateway Default* constants, and the audited servewiringData rows), turns each HARD defect into a required fix — turn a WITNESSED-safe bounded-loss saver on by default with an honest note, write the missing regression lock, document a dark lever's gate, align the two front doors — and each off high-value saver into a tracked roadmap item (produce the missing witness, then default it). Retires token-defaults-debt worst-first WITHOUT ever shipping an unwitnessed claim, re-measures to PROVE the debt dropped, and commits only the scorecard lane by explicit path. The out-of-the-box-defaults counterpart of persona-score (who lands) and industry-score (the field). Use after a change to a saver default, the serve-wiring rows, or a new token-saving lever, or on a /loop cadence to keep the no-flag experience maximally cheap.
 ---
 
 # token-defaults-score — keep the out-of-the-box token economy amazing
@@ -39,7 +39,7 @@ unwitnessed lever on to score.** Produce the witness first.
 
 ## The loop (the shared five steps, this surface)
 
-1. **Run it** — `python tools/token_defaults_scorecard.py` (human work-list);
+1. **Run it** — `go run ./cmd/fak token-defaults-scorecard` (human work-list);
    `--json` (machine payload); `--markdown` (the committed snapshot). Read the **per-lever
    status table** first — it's the "where each saver stands" view (default, witness,
    blocker, noted, locked).
@@ -62,16 +62,16 @@ unwitnessed lever on to score.** Produce the witness first.
    *witnessed-gated* lever needs its gate cleared. Producing a witness is real work; do it
    deliberately, then the next run promotes that lever to a must-default.
 
-4. **Re-measure + prove** — `python tools/token_defaults_scorecard.py --compare baseline.json`
-   prints the debt delta + the 2× verdict; regenerate the snapshot
-   (`--markdown --stamp DATE > docs/serving/token-defaults-scorecard.md`); run the locks
-   (`go test ./cmd/fak -run TestTokenDefault`) and the scorecard's own test
-   (`python tools/token_defaults_scorecard_test.py`).
+4. **Re-measure + prove** — rerun
+   `go run ./cmd/fak token-defaults-scorecard --json` and compare the debt against the
+   baseline you recorded; regenerate the snapshot
+   (`go run ./cmd/fak token-defaults-scorecard --markdown > docs/serving/token-defaults-scorecard.md`);
+   run the locks (`go test ./cmd/fak -run TestTokenDefault`).
 
 5. **Commit only the scorecard lane, by explicit path** — never `git add -A`. End the
    subject with the `(fak <leaf>)` trailer (stamp the dominant leaf — `tools` for a
    scorecard-only pass, `gateway`/`cmd` when the same pass flips a default). e.g.
-   `git commit -s -F msg -- tools/token_defaults_scorecard.py tools/token_defaults_scorecard_test.py docs/serving/token-defaults-scorecard.md`
+   `git commit -s -F msg -- cmd/fak/token_defaults.go cmd/fak/token_defaults_test.go docs/serving/token-defaults-scorecard.md`
 
 ## The anti-gaming rule (this surface)
 
