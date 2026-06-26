@@ -37,6 +37,11 @@
 # then from the laptop, once it reports healthy:
 #   fak serve --base-url http://<dgx>:8000/v1 ...   # front it
 #   python tools/glm52_serving_witness.py --base-url http://127.0.0.1:8000/v1 --model glm-5.2   # #130 evidence
+# Scope of this witness: it proves the fak-fronts-an-external-engine (llama.cpp)
+# form of #130 only -- fak governs/fronts the weights the outside engine serves. It
+# does NOT prove native in-kernel GLM-5.2 serving, which is the separate native track
+# (docs/notes/native-753b-track-staged-plan.md; the external-vs-native evidence
+# boundary is drawn in docs/serving/glm52-full-size-serving-witness.md section 6).
 set -euo pipefail
 
 GLM_DIR="${GLM_DIR:-/mnt/glm/glm52-q4}"
