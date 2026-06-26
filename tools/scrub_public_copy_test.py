@@ -13,6 +13,7 @@ Pure stdlib; builds a throwaway git repo in a temp dir.
 """
 from __future__ import annotations
 
+import json
 import os
 import subprocess
 import sys
@@ -20,6 +21,8 @@ import tempfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 SCRUB = os.path.join(HERE, "scrub_public_copy.py")
+sys.path.insert(0, HERE)
+import scrub_public_copy as scrub  # noqa: E402
 # A real secret-tier needle the gate must catch (the IP this change added).
 # Assembled from parts so the literal never appears in THIS file -- this test is
 # not SELF_REFERENTIAL, so a bare literal would (correctly) trip the leak gate on
@@ -224,6 +227,25 @@ def main() -> int:
         # 9) --json emits the ok + mode contract the control-pane loop reads.
         rc, jout = _audit_tree(repo, as_json=True)
         check("audit-tree --json emits ok+mode keys", '"ok"' in jout and '"mode"' in jout, jout)
+
+    # ---- root-hoisted DGX catalog/run scrub --------------------------------
+    with tempfile.TemporaryDirectory() as repo:
+        _write(repo, "experiments/benchmark/catalog.json", json.dumps({
+            "machines": {"dgx": {"runs": 1}, "local": {"runs": 1}},
+            "runs": [
+                {"run_id": "dgx-run", "machine_id": "dgx"},
+                {"run_id": "local-run", "machine_id": "local"},
+            ],
+            "index": {"by_machine": {"dgx": ["dgx-run"], "local": ["local-run"]}},
+        }))
+        dropped = scrub._strip_private_machines_from_catalog(repo)
+        cat = json.loads(open(os.path.join(repo, "experiments/benchmark/catalog.json"), encoding="utf-8").read())
+        check("root-hoisted catalog strips dgx runs", dropped == 1, str(cat))
+        check("root-hoisted catalog keeps non-dgx runs",
+              cat["runs"] == [{"run_id": "local-run", "machine_id": "local"}], str(cat))
+        check("root-hoisted dgx run glob is declared",
+              "experiments/benchmark/runs/by-machine/dgx*" in scrub.DELETE_GLOBS,
+              str(scrub.DELETE_GLOBS))
 
     # ---- §6 commit-gate EXPORT/identity-tier fold (its own repo) ------------
     # Under the hard cut the PUBLIC clone has no export step left to rewrite the

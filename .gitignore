@@ -137,12 +137,15 @@ tools/bench_nodes.json
 # unless deliberately removed, so only NEW outputs are hidden by these rules.
 fak/experiments/fleet-nodes/
 fak/experiments/dgx/
+experiments/dgx/
 # DGX benchmark runs registered into the catalog by tools/bench_slack.py
-# (register_dgx_run, machine_id=dgx*) land here. The GPU server lab subsystem is
-# PRIVATE-ONLY (PUBLIC-SCRUB-POLICY.md), so keep these run dirs untracked: a run
-# registered in ANY clone (public or private) is then private by default and can
-# never be `git add`-ed into either repo by accident.
+# (historical register_dgx_run, machine_id=dgx*) land here. The GPU server lab
+# subsystem is PRIVATE-ONLY, so keep these run dirs untracked: a run registered in
+# ANY clone (public or private) is then private by default and can never be
+# `git add`-ed into either repo by accident. Keep both layouts: the private
+# superrepo nests the module under fak/, while this public checkout is root-hoisted.
 fak/experiments/benchmark/runs/by-machine/dgx*/
+experiments/benchmark/runs/by-machine/dgx*/
 # DGX Slack control-bridge source is PRIVATE-ONLY. Its home is the private repo
 # fak-private (tools/dgxbridge/); fleet is the sunset archive. tools/check_committed_files.py
 # already REFUSES any cmd|internal/*dgx*/ path at commit (this is exactly how cmd/dgxbridge +

@@ -5,8 +5,8 @@ The public-copy scrubber rewrites the BACKSLASH form ``C:\\Users\\<op>\\`` to th
 generic ``...\\USER\\`` placeholder, but historically missed the FORWARD-slash and
 WSL forms (``C:/Users/<op>/...``, ``/mnt/c/Users/<op>/...``) and the harness slug
 form (``...-Users-<op>-...``). So an operator username + OneDrive desktop path
-survived verbatim in ``tools/bench_slack.py``. ``PUBLIC-SCRUB-POLICY.md`` classes
-an operator username + machine path as Must-REDACT.
+survived verbatim in the now-sunset ``tools/bench_slack.py``. ``PUBLIC-SCRUB-POLICY.md``
+classes an operator username + machine path as Must-REDACT.
 
 This test fails if any tools/ source re-introduces that needle in ANY of those
 slash/separator directions. The operator username literal is assembled from parts

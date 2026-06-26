@@ -55,6 +55,7 @@ DELETE_PATHS = [
     # Benchmark repo). Excluded from the PUBLIC COPY ONLY -- content stays in
     # the private canonical repo. See PUBLIC-SCRUB-POLICY.md PRIVATE-ONLY list. ---
     "fak/experiments/dgx",
+    "experiments/dgx",
     "docs/dgx-benchmark-methodology.md",
     "fak/QWEN36-DGX-STANDALONE-PREP.md",
     # The DGX Slack *control bridge* code subsystem. internal/dgxbridge speaks the
@@ -69,6 +70,10 @@ DELETE_PATHS = [
     "fak/cmd/dgxbridge",
     "fak/cmd/dgxbench",
     "fak/cmd/slackgc",
+    "internal/dgxbridge",
+    "cmd/dgxbridge",
+    "cmd/dgxbench",
+    "cmd/slackgc",
 ]
 
 DELETE_GLOBS = [
@@ -104,14 +109,15 @@ DELETE_GLOBS = [
     "fak/experiments/benchmark/runs/*peer-access-probe-*",
     "fak/experiments/benchmark/runs/*qwen36-direct-port-probe-*",
     # --- DGX-machine catalog runs ------------------------------------------
-    # `tools/bench_slack.py register_dgx_run` registers DGX results under
-    # by-machine/dgx*/<ts>-dgx/ (machine_id "dgx" / "dgx-test"). The DGX lab
-    # subsystem is private-only (above + PUBLIC-SCRUB-POLICY.md); the run *dirs*
-    # must never ship. fnmatch '*' crosses '/', so `dgx*` matches every file
-    # under any dgx* machine dir, depth-independently. (The catalog.json
+    # Historical tools/bench_slack.py and the private bridge register DGX results
+    # under by-machine/dgx*/<ts>-dgx/ (machine_id "dgx" / "dgx-test"). The DGX
+    # lab subsystem is private-only (above + PUBLIC-SCRUB-POLICY.md); the run
+    # *dirs* must never ship. fnmatch '*' crosses '/', so `dgx*` matches every
+    # file under any dgx* machine dir, depth-independently. (The catalog.json
     # AGGREGATE that references these runs is stripped separately by
     # _strip_private_machines_from_catalog -- deleting the dirs is not enough.)
     "fak/experiments/benchmark/runs/by-machine/dgx*",
+    "experiments/benchmark/runs/by-machine/dgx*",
 ]
 
 # Literal string replacements applied to every text file (incl. .svg, .json,
@@ -351,9 +357,10 @@ EXPORT_AUDIT_NEEDLES = AUDIT_NEEDLES + [
 ]
 
 # Machine-id prefixes whose benchmark runs are PRIVATE and must never reach the
-# public copy. The DGX lab subsystem (PUBLIC-SCRUB-POLICY.md) registers runs
-# under machine_id "dgx"/"dgx-test" via bench_slack.register_dgx_run. The
-# DELETE_GLOBS above drop the run *dirs*, but catalog.json is a committed
+# public copy. The DGX lab subsystem (PUBLIC-SCRUB-POLICY.md) historically
+# registered runs under machine_id "dgx"/"dgx-test" via bench_slack.register_dgx_run;
+# the private bridge may still use the same machine-id class. The DELETE_GLOBS
+# above drop the run *dirs*, but catalog.json is a committed
 # AGGREGATE that still carries their metadata (run_id, model, timestamps) --
 # _strip_private_machines_from_catalog() removes those from the export copy.
 PRIVATE_MACHINE_PREFIXES = ("dgx",)
@@ -420,39 +427,53 @@ def _strip_private_machines_from_catalog(export_dir: str):
     the export copy only (the private canonical catalog is untouched). Returns
     the number of runs dropped, 0 if none, or None if the catalog is absent.
     """
-    rel = os.path.join("fak", "experiments", "benchmark", "catalog.json")
-    path = os.path.join(export_dir, rel)
-    if not os.path.isfile(path):
-        return None
-    try:
-        with open(path, encoding="utf-8") as f:
-            cat = json.load(f)
-    except (OSError, json.JSONDecodeError):
-        return None
-
     def is_private(mid) -> bool:
         return any(str(mid).startswith(p) for p in PRIVATE_MACHINE_PREFIXES)
 
-    runs = cat.get("runs", []) or []
-    kept = [r for r in runs if not is_private(r.get("machine_id", ""))]
-    dropped_ids = {r.get("run_id") for r in runs if is_private(r.get("machine_id", ""))}
-    n_dropped = len(runs) - len(kept)
-    if n_dropped == 0:
-        return 0
-    cat["runs"] = kept
-    if isinstance(cat.get("machines"), dict):
-        cat["machines"] = {m: v for m, v in cat["machines"].items() if not is_private(m)}
-    idx = cat.get("index")
-    if isinstance(idx, dict):
-        for bucket in idx.values():
-            if isinstance(bucket, dict):
-                for key in list(bucket):
-                    bucket[key] = [rid for rid in bucket[key] if rid not in dropped_ids]
-                    if not bucket[key]:
-                        del bucket[key]
-    with open(path, "w", encoding="utf-8") as f:
-        json.dump(cat, f, indent=2, sort_keys=True)
-    return n_dropped
+    candidates = [
+        os.path.join("fak", "experiments", "benchmark", "catalog.json"),
+        os.path.join("experiments", "benchmark", "catalog.json"),
+    ]
+    seen = set()
+    total_dropped = 0
+    saw_catalog = False
+    for rel in candidates:
+        if rel in seen:
+            continue
+        seen.add(rel)
+        path = os.path.join(export_dir, rel)
+        if not os.path.isfile(path):
+            continue
+        saw_catalog = True
+        try:
+            with open(path, encoding="utf-8") as f:
+                cat = json.load(f)
+        except (OSError, json.JSONDecodeError):
+            continue
+
+        runs = cat.get("runs", []) or []
+        kept = [r for r in runs if not is_private(r.get("machine_id", ""))]
+        dropped_ids = {r.get("run_id") for r in runs if is_private(r.get("machine_id", ""))}
+        n_dropped = len(runs) - len(kept)
+        if n_dropped == 0:
+            continue
+        cat["runs"] = kept
+        if isinstance(cat.get("machines"), dict):
+            cat["machines"] = {m: v for m, v in cat["machines"].items() if not is_private(m)}
+        idx = cat.get("index")
+        if isinstance(idx, dict):
+            for bucket in idx.values():
+                if isinstance(bucket, dict):
+                    for key in list(bucket):
+                        bucket[key] = [rid for rid in bucket[key] if rid not in dropped_ids]
+                        if not bucket[key]:
+                            del bucket[key]
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(cat, f, indent=2, sort_keys=True)
+        total_dropped += n_dropped
+    if not saw_catalog:
+        return None
+    return total_dropped
 
 # Files that DEFINE the scrub (denylists, replacement rules, policy text). They
 # are excluded from the post-scrub AUDIT only -- they necessarily name the

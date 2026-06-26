@@ -65,8 +65,6 @@ var grandfathered = []string{
 	"tools/bench_plan_test.py",
 	"tools/bench_provenance.py",
 	"tools/bench_provenance_test.py",
-	"tools/bench_slack.py",
-	"tools/bench_slack_test.py",
 	"tools/bench_test.py",
 	"tools/bench_witness.py",
 	"tools/bench_witness_test.py",

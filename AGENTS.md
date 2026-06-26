@@ -128,6 +128,11 @@ until it clears.
   reds the trunk on any `tools/*.py` outside the baseline, and porting a grandfathered script
   to Go shrinks that baseline - the ratchet only ever tightens. When you *touch* a `tools/*.py`
   for non-trivial work, default to porting it to Go in the same pass (`REASON_NEW_PYTHON_TOOL`).
+- **DGX/Slack control is private; public evidence is scrubbed.** Benchmark results and
+  runbooks can live here once scrubbed to generic GPU-server language, but live Slack
+  control code belongs in `fak-private`: `cmd|internal/*dgx*/`, Slack bridge/control
+  packages, `cmd/slackgc/`, and the sunset `tools/bench_slack.py` path. See
+  [`docs/dgx-slack-boundary.md`](docs/dgx-slack-boundary.md).
 - **Never `find /` (also `find ~`, `find /mnt`, `find /proc`) in Git Bash on Windows.**
   `/` descends into `/proc/registry*` (the whole Windows Registry, x3 views) and `/mnt/c`
   (all of `C:`, which holds self-referential junction loops); MSYS `find` can't detect the

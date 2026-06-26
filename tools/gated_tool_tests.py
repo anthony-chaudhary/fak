@@ -70,8 +70,6 @@ QUARANTINE: dict[str, str] = {
     "session_checkpoint_test.py": "pytest",
     "visual_gen_bench_test.py": "pytest",
     "visual_gen_grade_test.py": "pytest",
-    # --- reaches the network / a live API ---
-    "bench_slack_test.py": "needs-network",
     # --- shells out to a binary/host absent on the hermetic box ---
     "extend_preflight_test.py": "needs-binary",
     "fak_laptop_test.py": "needs-binary",

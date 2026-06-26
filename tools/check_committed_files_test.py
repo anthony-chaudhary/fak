@@ -51,6 +51,16 @@ def test_slackgc_sibling_refused() -> None:
     assert cc._classify("cmd/slackgc/main.go", ROOT, MAX) is not None
 
 
+def test_future_slack_control_bridge_refused() -> None:
+    assert cc._classify("cmd/slackbridge/main.go", ROOT, MAX) is not None
+    assert cc._classify("internal/slackcontrol/client.go", ROOT, MAX) is not None
+
+
+def test_sunset_python_bench_slack_refused() -> None:
+    assert cc._classify("tools/bench_slack.py", ROOT, MAX) is not None
+    assert cc._classify("tools/bench_slack_test.py", ROOT, MAX) is not None
+
+
 # --- scope boundaries: only the connection subsystem, nothing legit ---------
 
 def test_normal_packages_allowed() -> None:
@@ -68,6 +78,11 @@ def test_dgx_token_outside_cmd_internal_is_not_private_only() -> None:
     assert not any(rx.search("tools/dgx_pure_kernel_bench.sh") for rx, _ in cc.PRIVATE_ONLY)
     assert not any(rx.search("experiments/qwen36/dgx-r4-20260622/compare.json")
                    for rx, _ in cc.PRIVATE_ONLY)
+
+
+def test_generic_slack_names_are_not_private_only() -> None:
+    assert cc._classify("internal/agent/send_slack_message.go", ROOT, MAX) is None
+    assert cc._classify("examples/slack-policy.json", ROOT, MAX) is None
 
 
 def test_token_must_be_in_first_component_not_substring_elsewhere() -> None:

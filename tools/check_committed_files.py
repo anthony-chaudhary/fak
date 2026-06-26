@@ -12,7 +12,8 @@ Rules:
     it in a secret store / gitignored dir.
   * PRIVATE-only — the operator's private lab GPU-server *connection* subsystem
     (the Slack control-bridge client + its lab orchestrator) — ALWAYS refused in
-    the PUBLIC tree; it lives only in the private canonical repo.
+    the PUBLIC tree; it lives only in the private canonical repo. This includes
+    the sunset Python bench_slack bridge path; do not resurrect it here.
   * HARD junk  — caches/compiled/OS-cruft/editor-scratch — ALWAYS refused.
   * SOFT junk  — *.log / *.tmp / report.json / agent-report.json — refused UNLESS
     under a data dir (fak/experiments/, fak/testdata/) where such files are real
@@ -76,9 +77,12 @@ KEEP_EXCEPTIONS = {
 # move-to-private intent, keyed on the FLATTENED public path (no fak/ prefix): any
 # cmd//internal/ package carrying the `dgx` token (so a NEW dedicated connection
 # tool, e.g. cmd/dgxconn, is covered without an edit here) plus the named Slack-
-# housekeeping sibling. A match is ALWAYS refused, at commit-time and in CI: move
-# it to the private repo. (Scope is the CONNECTION subsystem; the lab automation
-# under tools/*dgx* and the dgx result dirs are a separate, larger relocation.)
+# housekeeping sibling. The historical public Python bridge, tools/bench_slack.py,
+# is also refused after its sunset: restoring it would be both a new Python tool
+# under the ratchet and private control-plane code in the public tree. A match is
+# ALWAYS refused, at commit-time and in CI: move it to the private repo. (Scope is
+# the CONNECTION subsystem; the lab automation under tools/*dgx* and the dgx
+# result dirs are a separate, larger relocation.)
 #
 # Sibling gate: tools/repo_guard.py is the WRITE-TIME filesystem boundary
 # (OUT_OF_TREE_WRITE) and is content-blind — it judges only WHERE a path resolves; THIS
@@ -87,8 +91,10 @@ KEEP_EXCEPTIONS = {
 PRIVATE_ONLY = [
     (re.compile(r"^(cmd|internal)/[^/]*dgx[^/]*/"),
      "private lab GPU-server connection subsystem — belongs in the private repo, not the public tree"),
-    (re.compile(r"^cmd/slackgc/"),
-     "private lab Slack-housekeeping tool — belongs in the private repo, not the public tree"),
+    (re.compile(r"^(cmd|internal)/(?=[^/]*slack)(?=[^/]*(bridge|control|gc))[^/]*/"),
+     "private lab Slack control-bridge subsystem — belongs in the private repo, not the public tree"),
+    (re.compile(r"^tools/bench_slack(_test)?\.py$"),
+     "sunset Python Slack/DGX bridge — belongs in the private repo, not the public tree"),
 ]
 
 # Secret files: credentials / private keys must NEVER enter a forever-history
