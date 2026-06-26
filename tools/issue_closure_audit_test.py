@@ -8,6 +8,7 @@ load() importlib pattern mirrors the other tools/*_test.py files.
 from __future__ import annotations
 
 import importlib.util
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -336,7 +337,8 @@ class CollectWiringTest(unittest.TestCase):
         }
         m.git_total_commits = lambda ws: 10  # well under the window -> complete coverage
         try:
-            p = m.collect(Path("C:/work/fleet"), fetcher=fetcher, auditor=auditor)
+            p = m.collect(Path("C:/work/fleet"), fetcher=fetcher, auditor=auditor,
+                          use_cache=False)
         finally:
             m.git_issue_refs, m.git_total_commits = orig_refs, orig_total
 
@@ -350,11 +352,71 @@ class CollectWiringTest(unittest.TestCase):
         m.git_issue_refs = lambda ws, mc: {}
         m.git_total_commits = lambda ws: 10
         try:
-            p = m.collect(Path("C:/work/fleet"), fetcher=lambda _ws: [], auditor=lambda s, w: _audit())
+            p = m.collect(Path("C:/work/fleet"), fetcher=lambda _ws: [],
+                          auditor=lambda s, w: _audit(), use_cache=False)
         finally:
             m.git_issue_refs, m.git_total_commits = orig_refs, orig_total
         self.assertFalse(p["ok"])
         self.assertEqual(p["verdict"], "AUDIT_ERROR")
+
+
+class AuditCacheTest(unittest.TestCase):
+    """The per-SHA cache: a cold miss audits, a warm hit does NOT re-audit, and a
+    corrupt cache degrades to a cold audit instead of crashing."""
+
+    def _run(self, ws: Path, seen: list[str]) -> dict:
+        def fetcher(_ws):
+            return [_issue(142, state="CLOSED", reason="COMPLETED")]
+
+        def auditor(sha, _ws):
+            seen.append(sha)
+            return _audit()
+
+        orig_refs, orig_total = m.git_issue_refs, m.git_total_commits
+        m.git_issue_refs = lambda _ws, _mc: {
+            142: [{"sha": "resolve1", "subject": "fix", "kind": m.RESOLVING}],
+        }
+        m.git_total_commits = lambda _ws: 10
+        try:
+            return m.collect(ws, fetcher=fetcher, auditor=auditor, use_cache=True)
+        finally:
+            m.git_issue_refs, m.git_total_commits = orig_refs, orig_total
+
+    def test_cold_miss_audits_then_warm_hit_does_not(self):
+        with tempfile.TemporaryDirectory() as td:
+            ws = Path(td)
+            seen: list[str] = []
+            p1 = self._run(ws, seen)
+            self.assertEqual(seen, ["resolve1"])           # cold: audited
+            self.assertEqual(p1["counts"][m.TRUE_RESOLVED], 1)
+            self.assertTrue(m.cache_path(ws).exists())     # cache persisted
+
+            seen2: list[str] = []
+            p2 = self._run(ws, seen2)
+            self.assertEqual(seen2, [])                     # warm: NOT re-audited
+            self.assertEqual(p2["counts"][m.TRUE_RESOLVED], 1)  # same verdict from cache
+
+    def test_corrupt_cache_degrades_to_cold(self):
+        with tempfile.TemporaryDirectory() as td:
+            ws = Path(td)
+            cp = m.cache_path(ws)
+            cp.parent.mkdir(parents=True, exist_ok=True)
+            cp.write_text("{ this is not json", encoding="utf-8")  # garbage
+            seen: list[str] = []
+            p = self._run(ws, seen)
+            self.assertEqual(seen, ["resolve1"])            # cold audit ran anyway
+            self.assertEqual(p["counts"][m.TRUE_RESOLVED], 1)
+
+    def test_load_cache_missing_file_is_empty(self):
+        with tempfile.TemporaryDirectory() as td:
+            self.assertEqual(m.load_audit_cache(Path(td) / "nope.json"), {})
+
+    def test_save_then_load_roundtrips(self):
+        with tempfile.TemporaryDirectory() as td:
+            cp = Path(td) / m.AUDIT_CACHE_FILE
+            rec = {"sha": "abc", "verdict": "OK", "witness": "diff-witnessed", "claim_kind": "fix"}
+            m.save_audit_cache(cp, {"abc": rec})
+            self.assertEqual(m.load_audit_cache(cp)["abc"]["verdict"], "OK")
 
 
 if __name__ == "__main__":

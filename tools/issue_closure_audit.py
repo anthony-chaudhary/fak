@@ -32,10 +32,25 @@ import argparse
 import json
 import re
 import subprocess
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any, Callable
 
 SCHEMA = "fleet-issue-closure-audit/1"
+
+# Where the per-SHA audit cache lives, next to the dispatch loop's other run
+# artifacts. A commit's diff is immutable, so its `dos commit-audit` verdict never
+# changes — the cache is keyed by full SHA and has NO expiry: a hit is as true a
+# month later as the moment it was computed. This is the single change that turns
+# the closure audit from "always times out at 300s re-auditing ~400 SHAs serially"
+# into "<10s warm, only newly-shipped SHAs get a fresh `dos commit-audit`".
+RUNS_DIRNAME = ".dispatch-runs"
+AUDIT_CACHE_FILE = "commit-audit-cache.json"
+# Cold-start fan-out: each `dos commit-audit` is an independent subprocess (~2s),
+# so the uncached set is audited across a small thread pool instead of serially.
+# Bounded low — these are process spawns, not CPU work; ~8 keeps the first fill
+# (when the cache is empty) under the 300s budget without storming the box.
+_AUDIT_MAX_WORKERS = 8
 
 # git log record/field separators (unit/record sep — safe inside commit prose).
 _FIELD = "\x1f"
@@ -258,6 +273,49 @@ def audit_commit(sha: str, workspace: Path) -> dict[str, Any]:
 
 def commit_is_witnessed(audit: dict[str, Any]) -> bool:
     return str(audit.get("verdict")) == _VERDICT_OK and str(audit.get("witness")) == _WITNESS_OK
+
+
+# ---------------------------------------------------------------------------
+# Per-SHA audit cache (immutable verdicts -> permanent, no TTL)
+# ---------------------------------------------------------------------------
+
+def cache_path(workspace: Path) -> Path:
+    return workspace / RUNS_DIRNAME / AUDIT_CACHE_FILE
+
+
+def load_audit_cache(path: Path) -> dict[str, dict[str, Any]]:
+    """Read the SHA->{verdict,witness,claim_kind} cache. Fail-soft to empty: a
+    missing/corrupt cache must degrade to a cold audit, never crash the loop."""
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    if not isinstance(raw, dict):
+        return {}
+    entries = raw.get("audits")
+    if not isinstance(entries, dict):
+        return {}
+    # Keep only well-formed rows so a partially-written cache can't poison a grade.
+    out: dict[str, dict[str, Any]] = {}
+    for sha, rec in entries.items():
+        if isinstance(sha, str) and isinstance(rec, dict) and rec.get("verdict") is not None:
+            out[sha] = {"sha": sha, "verdict": rec.get("verdict"),
+                        "witness": rec.get("witness"), "claim_kind": rec.get("claim_kind")}
+    return out
+
+
+def save_audit_cache(path: Path, audits: dict[str, dict[str, Any]]) -> None:
+    """Persist the merged cache. Best-effort: an I/O failure (read-only dir, race)
+    just means the next run re-audits — correctness is never at stake."""
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(
+            json.dumps({"schema": "fleet-commit-audit-cache/1", "audits": audits},
+                       separators=(",", ":")),
+            encoding="utf-8",
+        )
+    except OSError:
+        pass
 
 
 # ---------------------------------------------------------------------------
@@ -489,6 +547,7 @@ def collect(
     issue_limit: int = 1000,
     fetcher: IssueFetcher | None = None,
     auditor: CommitAuditor | None = None,
+    use_cache: bool = True,
 ) -> dict[str, Any]:
     root = workspace.resolve()
     fetch = fetcher or (lambda ws: fetch_issues(ws, limit=issue_limit))
@@ -517,7 +576,29 @@ def collect(
             for r in commit_refs:
                 if r.get("kind") == RESOLVING:
                     to_audit.add(r["sha"])
-    audits: dict[str, dict[str, Any]] = {sha: do_audit(sha, root) for sha in sorted(to_audit)}
+
+    # Permanent per-SHA cache: reuse a prior `dos commit-audit` verdict for any SHA
+    # we've already graded (the diff is immutable, so the verdict can't change), and
+    # audit only the NEW shas. Cold misses are fanned out across a thread pool so the
+    # first fill (empty cache, ~400 spawns) still finishes under the 300s budget.
+    cpath = cache_path(root)
+    cache = load_audit_cache(cpath) if use_cache else {}
+    audits: dict[str, dict[str, Any]] = {sha: cache[sha] for sha in to_audit if sha in cache}
+    missing = sorted(sha for sha in to_audit if sha not in audits)
+    if missing:
+        if len(missing) > 1:
+            with ThreadPoolExecutor(max_workers=min(_AUDIT_MAX_WORKERS, len(missing))) as ex:
+                fresh = list(ex.map(lambda s: (s, do_audit(s, root)), missing))
+        else:
+            fresh = [(missing[0], do_audit(missing[0], root))]
+        for sha, rec in fresh:
+            audits[sha] = rec
+        if use_cache:
+            # Merge the new verdicts into whatever is on disk now (a peer pass may
+            # have grown it concurrently) and persist — best-effort, never fatal.
+            merged = load_audit_cache(cpath)
+            merged.update({sha: audits[sha] for sha in to_audit})
+            save_audit_cache(cpath, merged)
 
     return build_payload(
         workspace=str(root), issues=issues, refs=refs, audits=audits,
