@@ -1,0 +1,162 @@
+{
+  "schema": "fak.browseraction-official-run-contract.v1",
+  "generated_at": "2026-06-26T03:24:10Z",
+  "benchmark": "Browser/computer-use action official-run contract",
+  "status": "READY_FOR_EXTERNAL_HARNESS",
+  "evidence_class": "EXTERNAL_RUN_CONTRACT",
+  "claim_boundary": "External-run contract only: fixes the raw/fak BrowserGym/WebArena-style command shape, shared model/task/browser-state/budget requirements, evidence paths, and promotion gates. It is not an official browser or computer-use benchmark result until benchmark-native task traces, score reports, and a raw-vs-fak compare artifact are checked in.",
+  "local_fixture_artifact": "experiments/agent-live/browser-action-mediation-smoke-20260625.json",
+  "task_selection": {
+    "candidate_suite": "testdata/webbench/action_mediation_smoke.json",
+    "candidate_task_ids": [
+      "knowledgebase-search-benign",
+      "shopping-address-delete-minefield"
+    ],
+    "candidate_tasks": [
+      {
+        "id": "knowledgebase-search-benign",
+        "benchmark": "browser-agent",
+        "domain": "help.example",
+        "source_url": "https://help.example",
+        "budget_turns": 3
+      },
+      {
+        "id": "shopping-address-delete-minefield",
+        "benchmark": "browser-agent",
+        "domain": "shop.example",
+        "source_url": "https://shop.example/account",
+        "budget_turns": 4
+      }
+    ],
+    "official_harness": "BrowserGym/AgentLab",
+    "official_benchmark": "webarena",
+    "official_task_ids_required": true,
+    "same_task_ids_required": true,
+    "same_browser_state_required": true,
+    "same_budget_required": true,
+    "max_steps": 30
+  },
+  "model": {
+    "agent": "browsergym_agent_config",
+    "fak_agent": "browsergym_agent_config_through_fak",
+    "model": "shared-agent-model",
+    "fak_gateway": "http://localhost:8080/v1",
+    "same_model_required": true
+  },
+  "arms": [
+    {
+      "name": "raw-browseraction",
+      "harness": "benchmark-native",
+      "command": "$env:BROWSERGYM_TASK_IDS='\u003cspace-separated BrowserGym env ids\u003e'; $env:AGENTLAB_EXP_ROOT='experiments/agent-live/browseraction-official-raw-20260626'; $env:FAK_BROWSERGYM_AGENT='browsergym_agent_config'; $env:FAK_BROWSERGYM_MODEL='shared-agent-model'; $env:FAK_BROWSERGYM_MAX_STEPS='30'; python -c 'from agentlab.experiments.study import make_study; from importlib import import_module; import os; agent_args=getattr(import_module(os.environ[''FAK_BROWSERGYM_AGENT'']), ''AGENT_ARGS''); study=make_study(benchmark=''webarena'', agent_args=[agent_args], comment=os.environ[''FAK_BROWSERGYM_MODEL'']); study.run(n_jobs=1)'",
+      "output_dir": "experiments/agent-live/browseraction-official-raw-20260626",
+      "required_artifacts": [
+        "benchmark-native task trace or study directory",
+        "benchmark-native score report",
+        "browser state reset or environment manifest"
+      ]
+    },
+    {
+      "name": "fak-browseraction",
+      "harness": "benchmark-native-through-fak-gateway",
+      "command": "$env:BROWSERGYM_TASK_IDS='\u003cspace-separated BrowserGym env ids\u003e'; $env:AGENTLAB_EXP_ROOT='experiments/agent-live/browseraction-official-fak-20260626'; $env:FAK_BROWSERGYM_AGENT='browsergym_agent_config_through_fak'; $env:FAK_BROWSERGYM_MODEL='shared-agent-model'; $env:FAK_BROWSERGYM_MAX_STEPS='30'; $env:OPENAI_BASE_URL='http://localhost:8080/v1'; $env:OPENAI_API_BASE='http://localhost:8080/v1'; python -c 'from agentlab.experiments.study import make_study; from importlib import import_module; import os; agent_args=getattr(import_module(os.environ[''FAK_BROWSERGYM_AGENT'']), ''AGENT_ARGS''); study=make_study(benchmark=''webarena'', agent_args=[agent_args], comment=os.environ[''FAK_BROWSERGYM_MODEL'']); study.run(n_jobs=1)'",
+      "output_dir": "experiments/agent-live/browseraction-official-fak-20260626",
+      "required_artifacts": [
+        "benchmark-native task trace or study directory",
+        "benchmark-native score report",
+        "browser state reset or environment manifest",
+        "fak action verdict/evidence log linked to mediated browser actions"
+      ]
+    }
+  ],
+  "upstream_refs": [
+    {
+      "name": "BrowserGym",
+      "url": "https://github.com/ServiceNow/BrowserGym",
+      "notes": "Documents BrowserGym setup, benchmark packages, Gym environment ids, and WebArena/WorkArena task registration."
+    },
+    {
+      "name": "WorkArena",
+      "url": "https://github.com/ServiceNow/WorkArena",
+      "notes": "Documents the BrowserGym-based WorkArena setup and AgentLab as the preferred benchmark execution path."
+    },
+    {
+      "name": "AgentLab",
+      "url": "https://github.com/ServiceNow/AgentLab",
+      "notes": "Documents parallel BrowserGym benchmark experiments and study reload/run workflows."
+    },
+    {
+      "name": "BrowserGym leaderboard",
+      "url": "https://huggingface.co/spaces/ServiceNow/browsergym-leaderboard/blob/main/README.md",
+      "notes": "Documents benchmark result JSON files for WebArena and WorkArena leaderboard submission."
+    }
+  ],
+  "gates": [
+    {
+      "name": "candidate_task_ids",
+      "ok": true,
+      "detail": "2 candidate ids from local browser-action smoke suite"
+    },
+    {
+      "name": "official_harness_pin",
+      "ok": true,
+      "detail": "BrowserGym/AgentLab / webarena"
+    },
+    {
+      "name": "same_task_ids_required",
+      "ok": true,
+      "detail": "raw and fak official runs must use the same benchmark-native BrowserGym task ids"
+    },
+    {
+      "name": "same_browser_state_required",
+      "ok": true,
+      "detail": "raw and fak official runs must use the same browser profile, website snapshot, credentials, and reset policy"
+    },
+    {
+      "name": "same_budget_required",
+      "ok": true,
+      "detail": "raw and fak official runs must use the same max steps, retry policy, and timeout"
+    },
+    {
+      "name": "same_model_required",
+      "ok": true,
+      "detail": "shared-agent-model"
+    },
+    {
+      "name": "raw_arm_command",
+      "ok": true,
+      "detail": "$env:BROWSERGYM_TASK_IDS='\u003cspace-separated BrowserGym env ids\u003e'; $env:AGENTLAB_EXP_ROOT='experiments/agent-live/browseraction-official-raw-20260626'; $env:FAK_BROWSERGYM_AGENT='browsergym_agent_config'; $env:FAK_BROWSERGYM_MODEL='shared-agent-model'; $env:FAK_BROWSERGYM_MAX_STEPS='30'; python -c 'from agentlab.experiments.study import make_study; from importlib import import_module; import os; agent_args=getattr(import_module(os.environ[''FAK_BROWSERGYM_AGENT'']), ''AGENT_ARGS''); study=make_study(benchmark=''webarena'', agent_args=[agent_args], comment=os.environ[''FAK_BROWSERGYM_MODEL'']); study.run(n_jobs=1)'"
+    },
+    {
+      "name": "fak_arm_command",
+      "ok": true,
+      "detail": "$env:BROWSERGYM_TASK_IDS='\u003cspace-separated BrowserGym env ids\u003e'; $env:AGENTLAB_EXP_ROOT='experiments/agent-live/browseraction-official-fak-20260626'; $env:FAK_BROWSERGYM_AGENT='browsergym_agent_config_through_fak'; $env:FAK_BROWSERGYM_MODEL='shared-agent-model'; $env:FAK_BROWSERGYM_MAX_STEPS='30'; $env:OPENAI_BASE_URL='http://localhost:8080/v1'; $env:OPENAI_API_BASE='http://localhost:8080/v1'; python -c 'from agentlab.experiments.study import make_study; from importlib import import_module; import os; agent_args=getattr(import_module(os.environ[''FAK_BROWSERGYM_AGENT'']), ''AGENT_ARGS''); study=make_study(benchmark=''webarena'', agent_args=[agent_args], comment=os.environ[''FAK_BROWSERGYM_MODEL'']); study.run(n_jobs=1)'"
+    },
+    {
+      "name": "official_harness_required",
+      "ok": true,
+      "detail": "external BrowserGym or AgentLab run output with benchmark-native score and trace logs is required before promotion"
+    }
+  ],
+  "compare_metrics": [
+    "benchmark_native_task_success_or_score",
+    "safe_success",
+    "action_count",
+    "invalid_action_rate",
+    "policy_blocks",
+    "minefield_or_mutating_action_avoidance",
+    "runtime",
+    "cost_or_token_budget",
+    "fak_action_evidence_completeness"
+  ],
+  "required_before_claim": [
+    "benchmark-native BrowserGym/WebArena, WorkArena, OSWorld, or BrowseComp task ids for the selected fixed subset",
+    "browser state, website snapshot, credentials, reset policy, and environment manifest for each selected task",
+    "raw-arm benchmark-native trace or study directory with score report over those exact task ids",
+    "fak-arm benchmark-native trace or study directory with score report over those exact task ids",
+    "proof that raw and fak arms used the same model, task ids, browser state, budget, max steps, timeout, and retry policy",
+    "fak action verdict/evidence log linked to the corresponding benchmark-native action trace and score report",
+    "writeup separating model perception or grounding failures from harness/tool-boundary failures",
+    "raw/fak compare artifact reporting task success separately from safe success, action count, invalid actions, policy blocks, runtime, cost or token budget, and evidence completeness"
+  ],
+  "result_claim_allowed": false
+}

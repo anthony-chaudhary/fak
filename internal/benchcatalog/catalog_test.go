@@ -101,7 +101,7 @@ func TestBrowserActionBenchmarkIsDiscoverableOfflineGate(t *testing.T) {
 	if !strings.Contains(b.Run, "go run ./cmd/browseractionbench") {
 		t.Fatalf("browseractionbench run = %q, want cmd invocation", b.Run)
 	}
-	for _, want := range []string{"-suite", "-out", "-md"} {
+	for _, want := range []string{"-suite", "-contract", "-out", "-md"} {
 		if !containsFlag(b.Flags, want) {
 			t.Fatalf("browseractionbench flags = %v, missing %s", b.Flags, want)
 		}

@@ -98,7 +98,7 @@ var registry = []Bench{
 		Name: "browseractionbench", Kind: KindCmd, Need: NeedNone,
 		Summary: "Browser/computer-use action-mediation smoke: replays local browser traces through raw and fak arms and reports safe pass^1, policy breaches, minefield hits, denied actions, and evidence checkpoints.",
 		Run:     "go run ./cmd/browseractionbench",
-		Flags:   []string{"-suite  -  browser action mediation suite JSON", "-out  -  report JSON path", "-md  -  markdown summary path"},
+		Flags:   []string{"-suite  -  browser action mediation suite JSON", "-contract  -  emit external official-run contract", "-out  -  report JSON path", "-md  -  markdown summary path"},
 		Doc:     "docs/notes/AGENTIC-BENCHMARK-RUN-PACKETS-2026-06-25.md",
 	},
 	{

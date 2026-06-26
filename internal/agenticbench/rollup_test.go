@@ -89,7 +89,11 @@ func fixtureRoot(t *testing.T) string {
   "result_claim_allowed": false,
   "required_before_claim": ["official task ids", "raw run dir", "fak run dir", "test summaries"]
 }`)
-	write(t, root, "experiments/agent-live/browser-action-mediation-smoke-20260625.json", fixtureReport())
+	write(t, root, "experiments/agent-live/browseraction-official-run-contract-20260626.json", `{
+  "status": "READY_FOR_EXTERNAL_HARNESS",
+  "result_claim_allowed": false,
+  "required_before_claim": ["official task ids", "raw traces", "fak traces", "score reports"]
+}`)
 	write(t, root, "BENCHMARK-AUTHORITY.md", "# BENCHMARK AUTHORITY\n\n## AgentDojo Structural Safety Floor\n\n## ToolSandbox/tau3 Adapter Smoke\n\n### Promotion Gate\n")
 	return root
 }

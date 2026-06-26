@@ -1,13 +1,13 @@
 {
   "schema": "fak.agentic-benchmark-epic-rollup.v1",
-  "generated_at": "2026-06-26T03:13:56Z",
+  "generated_at": "2026-06-26T03:24:10Z",
   "epic": 868,
   "status": "PENDING_EXTERNAL_HARNESS",
   "result_claim_allowed": false,
   "summary": {
     "children_total": 8,
     "children_parsed": 8,
-    "local_evidence_artifacts": 3,
+    "local_evidence_artifacts": 2,
     "result_claim_artifacts": 0,
     "pending_children": [
       870,
@@ -116,19 +116,21 @@
       "issue": 875,
       "packet": "G",
       "title": "Browser/computer-use action mediation",
-      "artifact": "experiments/agent-live/browser-action-mediation-smoke-20260625.json",
-      "gate": "PASS_LOCAL",
-      "status": "SIMULATED_LOCAL_FIXTURE",
-      "evidence_class": "SIMULATED_LOCAL_FIXTURE",
+      "artifact": "experiments/agent-live/browseraction-official-run-contract-20260626.json",
+      "gate": "PENDING_EXTERNAL_HARNESS",
+      "status": "READY_FOR_EXTERNAL_HARNESS",
+      "evidence_class": "EXTERNAL_RUN_CONTRACT",
       "result_claim_allowed": false,
-      "detail": "local fixture is parseable and explicitly non-promotable",
+      "detail": "READY_FOR_EXTERNAL_HARNESS; benchmark-native browser/computer-use raw/fak traces, score reports, and linked fak action evidence still required",
       "missing": [
-        "benchmark-native task ids and action trace",
-        "raw-arm benchmark output",
-        "fak-arm benchmark output",
-        "benchmark-native grader or score report",
-        "same model, browser state, task ids, budget, and retry policy across both arms",
-        "fak action verdict/evidence log linked to benchmark-native grader output"
+        "benchmark-native BrowserGym/WebArena, WorkArena, OSWorld, or BrowseComp task ids for the selected fixed subset",
+        "browser state, website snapshot, credentials, reset policy, and environment manifest for each selected task",
+        "raw-arm benchmark-native trace or study directory with score report over those exact task ids",
+        "fak-arm benchmark-native trace or study directory with score report over those exact task ids",
+        "proof that raw and fak arms used the same model, task ids, browser state, budget, max steps, timeout, and retry policy",
+        "fak action verdict/evidence log linked to the corresponding benchmark-native action trace and score report",
+        "writeup separating model perception or grounding failures from harness/tool-boundary failures",
+        "raw/fak compare artifact reporting task success separately from safe success, action count, invalid actions, policy blocks, runtime, cost or token budget, and evidence completeness"
       ]
     },
     {
