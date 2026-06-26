@@ -21,7 +21,7 @@ import (
 // the idle tool window, and the real prefix then matches in full — it lands hot instead of
 // cold-prefilling the result span.
 func TestPrewarmWarmNowLandsHot(t *testing.T) {
-	tree := New(0) // unbounded: isolate the hit-rate effect from eviction
+	tree := New(0)           // unbounded: isolate the hit-rate effect from eviction
 	ctx := seq(1, 40)        // the demand context already served this turn
 	result := seq(500, 8)    // the tool result about to slot in — byte-known NOW
 	next := cat(ctx, result) // the next /v1/messages prefix, deterministic at dispatch
