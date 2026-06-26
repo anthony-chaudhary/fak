@@ -104,8 +104,8 @@ which is not stood up from the implementing host — same gate as
 
 | Item | Witness | Status |
 |---|---|---|
-| The `glm-gcp` preset resolves to fak's openai backend at the GLM `/v1` with model `glm-5.2` | `tools/claude_glm_gcp_test.py` (bash + PowerShell launchers) | ✅ proven on any host |
-| The bring-up plan renders the gcloud create + preflight-gated serve + the `claude-glm-gcp` hand-off, with no creds | `tools/claude_glm_gcp_test.py::test_bringup_plan_renders_without_creds` | ✅ proven on any host |
+| The `glm-gcp` preset resolves to fak's openai backend at the GLM `/v1` with model `glm-5.2` | `go test ./cmd/fak -run TestClaudeGLMGCP` (bash + PowerShell launchers) | ✅ proven on any host |
+| The bring-up plan renders the gcloud create + preflight-gated serve + the `claude-glm-gcp` hand-off, with no creds | `go test ./cmd/fak -run TestClaudeGLMGCPBringupPlanRendersWithoutCreds` | ✅ proven on any host |
 | The provisioner reads machine/accelerator/image from the single registry | `tools/gcp_accel.py --emit-shell` + `tools/gcp_accel_test.py` | ✅ proven on any host |
 | The wire end-to-end (Anthropic `/v1/messages` → kernel) | `claude-glm-gcp --smoke` (offline mock planner; no model needed) | ✅ runnable here |
 | A **live GLM-5.2 turn** through the preset | needs the GCP node up (Half A `--apply`) → `claude-glm-gcp --probe` | ⏳ hardware-gated (no GCP creds/GPU on the implementing host) |

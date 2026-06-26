@@ -5,11 +5,11 @@ description: "fak's deterministic token-saving-defaults scorecard: which stackin
 
 # Token-saving-defaults scorecard — is fak's out-of-the-box token economy amazing?
 
-<!-- token-defaults-scorecard: 2026-06-26 · process: tools/token_defaults_scorecard.py -->
+<!-- token-defaults-scorecard: 2026-06-26 · process: fak token-defaults-scorecard -->
 
-The question a cost-conscious operator asks the moment they run `fak guard -- claude` / `fak serve`: **of every token-saving method fak knows how to stack, which ones are ON by default — and are the high-value, low-loss ones turned on out of the box, or left dark behind a flag nobody flips?** Every number below is re-derived from the entrypoint source (`cmd/fak/guard.go`, `cmd/fak/serve.go`, the `Default*` constants in `internal/gateway/gateway.go`, and the audited `servewiringData` rows) by `tools/token_defaults_scorecard.py` — a lever's on/off state is the binary's real behavior, never a claim in the roster. The headline metric is **token-defaults-debt**: the count of concrete defects — a high-value saver left off, an on-by-default saver with no honest note, a default no test locks, a front door out of step. Driving it to zero means a user who runs fak with no flags gets the full stack of safe savings, each honestly labeled, none able to regress unnoticed.
+The question a cost-conscious operator asks the moment they run `fak guard -- claude` / `fak serve`: **of every token-saving method fak knows how to stack, which ones are ON by default — and are the high-value, low-loss ones turned on out of the box, or left dark behind a flag nobody flips?** Every number below is re-derived from the entrypoint source (`cmd/fak/guard.go`, `cmd/fak/serve.go`, the `Default*` constants in `internal/gateway/gateway.go`, and the audited `servewiringData` rows) by `fak token-defaults-scorecard` — a lever's on/off state is the binary's real behavior, never a claim in the roster. The headline metric is **token-defaults-debt**: the count of concrete defects — a high-value saver left off, an on-by-default saver with no honest note, a default no test locks, a front door out of step. Driving it to zero means a user who runs fak with no flags gets the full stack of safe savings, each honestly labeled, none able to regress unnoticed.
 
-> Regenerate: `python tools/token_defaults_scorecard.py --markdown --stamp DATE > docs/serving/token-defaults-scorecard.md`
+> Regenerate: `go run ./cmd/fak token-defaults-scorecard --markdown > docs/serving/token-defaults-scorecard.md`
 
 ## Headline
 
@@ -50,4 +50,3 @@ The question a cost-conscious operator asks the moment they run `fak guard -- cl
 ## Token-defaults-debt work-list
 
 No token-defaults-debt: every stacking saver fak can safely default is on out of the box, honestly noted, and locked against regression. 🎉
-

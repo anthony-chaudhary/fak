@@ -5,11 +5,11 @@ description: "fak's deterministic skill-effectiveness scorecard: nine mechanical
 
 # Skill-effectiveness scorecard — is each skill built to be effective
 
-<!-- skill-effectiveness-scorecard: 2026-06-26 · process: tools/skill_effectiveness_scorecard.py -->
+<!-- skill-effectiveness-scorecard: 2026-06-26 · process: fak skill-effectiveness-scorecard -->
 
-This is the measuring stick for the **skill pack itself**. The other scorecards grade product surfaces; this one asks whether each `.claude/skills/<name>/SKILL.md` is *built to be effective* — when the model reaches for it, can it **discover** the skill (a sharp "Use when …" trigger), **operate** it safely (a scoped tool surface, references that resolve on disk), and **trust** what it ships (a witness step, the commit-by-path discipline this shared trunk demands)? Every number below is re-derived from the git-tracked skill tree by `tools/skill_effectiveness_scorecard.py` — no hand-entry. The headline metric is **skill-debt**: the count of concrete affordances a skill is missing. Driving it to zero makes every skill in the pack pull its weight.
+This is the measuring stick for the **skill pack itself**. The other scorecards grade product surfaces; this one asks whether each `.claude/skills/<name>/SKILL.md` is *built to be effective* — when the model reaches for it, can it **discover** the skill (a sharp "Use when …" trigger), **operate** it safely (a scoped tool surface, references that resolve on disk), and **trust** what it ships (a witness step, the commit-by-path discipline this shared trunk demands)? Every number below is re-derived from the git-tracked skill tree by `fak skill-effectiveness-scorecard` — no hand-entry. The headline metric is **skill-debt**: the count of concrete affordances a skill is missing. Driving it to zero makes every skill in the pack pull its weight.
 
-> Regenerate: `python tools/skill_effectiveness_scorecard.py --markdown --stamp DATE > docs/SKILL-EFFECTIVENESS-SCORECARD.md`
+> Regenerate: `go run ./cmd/fak skill-effectiveness-scorecard --markdown > docs/SKILL-EFFECTIVENESS-SCORECARD.md`
 
 ## Headline
 
@@ -53,9 +53,7 @@ This is the measuring stick for the **skill pack itself**. The other scorecards 
 
 ### `refs_resolve` (operate) — 3 defect(s), score 91
 - dos-plan-price: cites `examples/plan_price/plan_price.py` which does not exist on disk — a dead reference (deleted/renamed/typo)
-- token-defaults-score: cites `tools/token_defaults_scorecard.py` which does not exist on disk — a dead reference (deleted/renamed/typo)
-- token-defaults-score: cites `tools/token_defaults_scorecard_test.py` which does not exist on disk — a dead reference (deleted/renamed/typo)
+- token-defaults-score: cites the Go scorecard subcommand; verify the generated snapshot stays in sync with `cmd/fak/token_defaults.go`
 
 ### `trigger_clause` (discover) — 1 defect(s), score 97
 - phased-plan: description states WHAT it does but not WHEN — add a "Use when / Use to / Use after …" trigger clause
-

@@ -74,7 +74,7 @@ for every node in the roster, so onboarding a pending node is: copy its entry in
 gitignored `bench_nodes.json`, fill in real identity, bootstrap, and `bench_node.sh <node> tests`.
 Each pending node also carries the GitHub `issue` that tracks its onboarding — a dedicated
 child where one is filed (#10 laptop-from-desktop, #12 GCP GPU VMs), else the umbrella #922
-itself (desktop, DGX A100) — so the roster doubles as a navigable decomposition index.
+itself (desktop, GPU server) — so the roster doubles as a navigable decomposition index.
 
 ## Design decisions (the adversarial-review fixes)
 

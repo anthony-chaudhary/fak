@@ -22,7 +22,7 @@ the shared setup work once, not every turn).
 | `internal/` | Kernel subsystems: `adjudicator`, `policy`, `vdso`, `engine`, `gateway`, `ctxmmu`, `model`, … |
 | `examples/` | Policy manifests **and** runnable demos (`adjudication-demo/`, `agentdojo-redteam/`, `mcp/`). |
 | `docs/` | Explainers, integration guides (`docs/integrations/`), benchmark methodology, proofs. |
-| `docs/private-comms-channel.md` | **The private comms channel** (Slack control-bridge to the lab GPU/DGX servers) — a public stub pointing to its home in the `fak-private` companion repo. Start here to reach the hardware. |
+| `docs/private-comms-channel.md` | **The private comms channel** (Slack control-bridge to the lab GPU servers) — a public stub pointing to its home in the `fak-private` companion repo. Start here to reach the hardware. |
 
 ## Build / test / run
 
@@ -142,7 +142,7 @@ until it clears.
   control code belongs in `fak-private`: `cmd|internal/*dgx*/`, Slack bridge/control
   packages, `cmd/slackgc/`, and the sunset `tools/bench_slack.py` path. See
   [`docs/dgx-slack-boundary.md`](docs/dgx-slack-boundary.md). **To actually reach the
-  channel** (the Slack control-bridge to the lab GPU/DGX servers), start at the public stub
+  channel** (the Slack control-bridge to the lab GPU servers), start at the public stub
   [`docs/private-comms-channel.md`](docs/private-comms-channel.md) — it points to the live
   plumbing in `fak-private` (checked out at `../fak-private`).
 - **Never `find /` (also `find ~`, `find /mnt`, `find /proc`) in Git Bash on Windows.**

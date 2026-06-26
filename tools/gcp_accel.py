@@ -156,6 +156,69 @@ TIERS: tuple[AccelTier, ...] = (
         ),
     ),
     AccelTier(
+        slug="a2-ultra-a100-80gb",
+        machine_type="a2-ultragpu-8g",
+        # The 80GB A100 dropped the "Tesla" prefix: its accelerator string is
+        # "nvidia-a100-80gb" (NOT "nvidia-tesla-a100", which is the 40GB part).
+        # Verified against cloud.google.com/compute/docs/gpus 2026-06-26.
+        accelerator_type="nvidia-a100-80gb",
+        gpu_label="NVIDIA A100 80GB (Ampere)",
+        gpu_count=8,
+        gpu_mem_gb_each=80,
+        vcpus=96,
+        host_mem_gb=1360,
+        gen_rank=22,
+        arch="ampere",
+        compute_capability="80",
+        approx_usd_per_hour=40.0,
+        common_zones=(
+            "us-central1-a",
+            "us-east4-c",
+            "europe-west4-a",
+            "asia-southeast1-c",
+        ),
+        blackwell=False,
+        notes=(
+            "Ampere (sm_80): BELOW the sm_90 DSA kernel floor, so stock SGLang/vLLM "
+            "cannot serve GLM-5.2 here (vLLM #35021). The bring-up wires the "
+            "llama.cpp MLA + CPU expert-offload path instead "
+            "(tools/glm52_stage_serve_dgx3.sh) -- the SAME 8x A100-80GB / 640 GB-VRAM "
+            "shape as the DGX A100 example, with the ~466 GB unsloth UD-Q4_K_M "
+            "experts offloaded to the 1,360 GB host RAM. The pragmatic 'A100 is what "
+            "is actually available' GLM-5.2 serving tier. a2-ultragpu auto-attaches "
+            "local SSD; the create downloads the GGUF to the boot disk."
+        ),
+    ),
+    AccelTier(
+        slug="a2-high-a100-40gb",
+        machine_type="a2-highgpu-8g",
+        # The 40GB A100 keeps the legacy "Tesla" prefix: "nvidia-tesla-a100". The
+        # 80GB part is "nvidia-a100-80gb" (see the ultra tier above). Re-confirm with
+        # `gcloud compute accelerator-types list` before a real run on a new region.
+        accelerator_type="nvidia-tesla-a100",
+        gpu_label="NVIDIA A100 40GB (Ampere)",
+        gpu_count=8,
+        gpu_mem_gb_each=40,
+        vcpus=96,
+        host_mem_gb=680,
+        gen_rank=20,
+        arch="ampere",
+        compute_capability="80",
+        approx_usd_per_hour=29.0,
+        common_zones=(
+            "us-central1-a",
+            "us-east1-b",
+            "europe-west4-a",
+            "asia-southeast1-c",
+        ),
+        blackwell=False,
+        notes=(
+            "Ampere (sm_80), 320 GB aggregate VRAM. Same llama.cpp MLA overcome as "
+            "the 80GB tier, but the 680 GB host RAM is tighter for the ~466 GB expert "
+            "offload -- prefer a2-ultra-a100-80gb when its quota is available."
+        ),
+    ),
+    AccelTier(
         slug="g2-l4",
         machine_type="g2-standard-8",
         accelerator_type="nvidia-l4",

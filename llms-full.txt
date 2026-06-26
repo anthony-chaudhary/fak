@@ -48,6 +48,7 @@
 
 ## Start here
 
+- [Charter](docs/notes/CHARTER.md): the ten principles fak is built to satisfy — agentic by default, industry-leading value, low-ego interoperability, DOS-verified, self-improving, up-to-date, great by default, agentic-first, win-win-win, and human-steerable — each mapped to the surface that embodies it, the scorecard that keeps it honest, and an honest alignment grade. The constitution above the 18-scorecard control pane.
 - [README](README.md): the full project overview — the two flips (policy in the kernel, addressable KV cache), the security results, and the install paths.
 - [Start Here](START-HERE.md): run a local AI model in under 10 minutes (no key, no GPU for small models).
 - [Getting Started](GETTING-STARTED.md): install the single static binary and put the gate in front of your model.
@@ -147,6 +148,167 @@ The dedicated, cross-linked capability pages. Each lists one category of support
 
 - [Concepts and story](docs/concepts-and-story.md): the parable, personas, and when-the-win-kicks-in tables.
 - [Advanced topics: scaling & HA](docs/fak/advanced-topics.md): tuning, replication, multi-region, and high availability for `fak serve`, with sticky `trace_id` routing for information-flow-control correctness.
+
+---
+
+# Charter
+
+> Source: `docs/notes/CHARTER.md`
+
+# CHARTER — the ten principles fak is built to satisfy
+
+This is fak's constitution: the small set of commitments every surface is meant to
+advance. It is the *why* above the *what* — read [`README.md`](https://github.com/anthony-chaudhary/fak/blob/main/README.md) for what
+fak is, [`AGENTS.md`](https://github.com/anthony-chaudhary/fak/blob/main/AGENTS.md) for how to work in the repo, and
+[`CLAIMS.md`](https://github.com/anthony-chaudhary/fak/blob/main/CLAIMS.md) for what is actually shipped. This page names what all of
+that is *for*.
+
+The charter is a north star, not a new gate. It does not block a commit. Instead it
+binds to the machinery the repo already runs: each principle points at a **surface
+that embodies it** and a **deterministic scorecard that keeps it honest**, and where
+no measuring stick exists yet, the charter says so in plain `not yet` language rather
+than claiming alignment it can't witness. The repo already folds **18 scorecards**
+into one debt number through [`tools/scorecard_control_pane.py`](https://github.com/anthony-chaudhary/fak/blob/main/tools/scorecard_control_pane.py);
+most of this charter is already measured there. The job of this document is to make
+the goal explicit, map it to that machinery, and grade the gap honestly.
+
+## The charter
+
+1. **Agentic built by default.**
+2. **Industry leading value.**
+3. **Low ego, flexible, Buddhist, works with anyone.**
+4. **DOS verified.**
+5. **Self improving, growth mindset.**
+6. **Up to date** — zero-day or pre-release support for popular concepts, papers, and models.
+7. **Great by default** — all optimizations and concepts "just work" out of the box.
+8. **Agentic first. Built by agents, for agents.**
+9. **Win-win-win** — e.g. a security win that also improves performance.
+10. **Coherent and remaining human-steerable, good for humanity.**
+
+## How the charter stays honest
+
+A charter that only inspires is decoration. This one is wired to evidence:
+
+- **Each principle has a surface and a stick.** The surface is the code or doc that
+  makes the principle real; the stick is the scorecard whose debt number falls when
+  the principle is better served. The score family lives in `tools/*_scorecard.py`,
+  is folded by the control pane, and is re-derived from the git tree on every run —
+  so the number can't be gamed by editing prose.
+- **The grades below were grounded, not asserted.** Each row's alignment was mapped
+  against the actual tree by an agent and then adversarially verified by a second
+  agent told to *refuse* an unwitnessed claim and default to lowering the grade. That
+  pass corrected two first drafts — it knocked "agentic-first" from A to B (the
+  agent-readiness stick measures whether an agent *can* build on fak, not whether
+  agents *are* the primary builders) and split "industry value" into an honesty grade
+  and a realized-value grade. Four rows could not finish the second agent pass before
+  a session limit; they are marked `verify pending` and graded conservatively.
+- **`not yet`, not failure.** A principle with no dedicated measuring stick is capped
+  below A and named as a gap to build, not scored as if the absence were success.
+  This is the same incomplete-state discipline [`AGENTS.md`](https://github.com/anthony-chaudhary/fak/blob/main/AGENTS.md) and
+  [`CLAIMS.md`](https://github.com/anthony-chaudhary/fak/blob/main/CLAIMS.md) already enforce.
+
+## Alignment scorecard (2026-06-26)
+
+Grades are current alignment, A (structurally embodied **and** measured **and**
+witnessed) through F. The control-pane key is the debt metric that already tracks the
+principle, or `— none yet` where the stick is missing.
+
+| # | Principle | Embodied by | Control-pane stick | Grade | Worst-first next action |
+|---|---|---|---|---|---|
+| 1 | Agentic by default | `AGENTS.md`, `.mcp.json`, `docs/integrations/`, `examples/mcp/` | `agent` (friction_debt **0**) | **A** | Add a real-world *adoption* witness; the affordances are perfect, usage in the wild is unmeasured. |
+| 2 | Industry leading value | `docs/industry-scorecard/`, `BENCHMARK-AUTHORITY.md` | `parity` (parity_debt **0**) | **B+** | Convert the 67 honest-gap rows to measured or out-of-scope; refresh the ~47 stale SOTA bars. |
+| 3 | Low ego, works with anyone | `docs/integrations/interoperability.md`, compatibility matrix (44 harnesses) | — none yet | **B** | Build an `interop` stick: extract + run each integration recipe's fenced command in CI. |
+| 4 | DOS verified | `dos.toml` `[reasons.*]`, the `(fak <leaf>)` trailer, `dos_verify` / `dos_commit_audit` | `ship_integrity` KPI (inside `code`) | **B** | Promote `dos-verified` to a portfolio-level stick (stamp-adoption rate, closure-audit pass rate). |
+| 5 | Self improving | `tools/scorecard_control_pane.py` (folds 18), `/score-2x`, `internal/rsiloop`, `guard-rsi` | `guard_rsi` (**1**) + the whole fold | **A−** | Close the remaining guard-RSI debt; promote the plan-mode RSI loops to journal-closing loops. |
+| 6 | Up to date | `tools/idea_scout.py` (daily arXiv+GitHub), `docs/notes/RESEARCH-*-triage-*` | — none yet *(verify pending)* | **B** | Build a `currency` stick: idea-scout cadence, triage latency, model-adoption lag. |
+| 7 | Great by default | `cmd/fak/serve.go` defaults, `fak token-defaults-scorecard` | token-defaults (debt **0**, 4/6 savers on) *(verify pending)* | **A−** | Witness the `elide-result` bounded-loss saver on real traffic, then default it on (4/6 → 5/6). |
+| 8 | Agentic first | `AGENTS.md`, `tools/new_leaf.py`, `docs/dispatch-loop.md`, this charter (agent-authored) | `agent` measures *usability*, not *primacy* | **B** | Add an agent-*primacy* witness (agent-authored commit / issue / PR share); usability is already A. |
+| 9 | Win-win-win | the unified `kernel.Syscall()` seam (one decision, many budgets), `compounding-benefits-of-a-saved-call` | `conflation` (live drift **+2**) *(verify pending)* | **B** | Re-label the 2 unlabeled `OBSERVED` metric help strings; re-pin conflation to 0. |
+| 10 | Human-steerable | `tools/steerability_scorecard.py`, `tools/stability_scorecard.py`, `POLICY.md`, `docs/ROLLBACK.md` | `steer` (live drift **+2**), `stability` (**0**) *(verify pending)* | **B** | Split the 2 dispatch god-files along their verb seams (`/modularize`); steer 2 → 0. |
+
+### Row notes (the honesty behind the grades)
+
+- **#1 Agentic by default — A.** Verified: `agent_readiness_scorecard.py` scores
+  100/100, grade A, `friction_debt = 0` across 23 KPIs, with a live witness
+  (`experiments/agent-live/claude-code-fak-guard-live-pilot-2026-06-25.json`) of
+  Claude Code running through `fak guard` with a dangerous call denied and useful work
+  continued in the same session. The only gap is *adoption in the wild*, which is not
+  the same thing as *readiness for adoption*.
+- **#2 Industry value — B+ (honesty A, realized value B+).** The industry scorecard
+  itself grades A (`parity_debt = 0`, 100% of 89 dimensions positioned) — fak is
+  *honest and complete* about where it stands. But only 5 of ~90 rows are measured
+  *leads* (e.g. 4.1× fleet serving vs a tuned warm-cache stack) and 67 are explicit
+  no-claim gaps. The principle's literal claim — value *at or above* SOTA — is proven
+  narrowly, so the realized grade is B+ even though the measuring discipline is A.
+- **#3 / #4 / #6 — B, capped by a missing stick.** These three principles are
+  structurally strong and witnessed in working artifacts, but none has a dedicated
+  deterministic scorecard folded into the control pane, so each is capped below A by
+  rule. Building those three sticks (interop, dos-verified, currency) is the single
+  highest-leverage charter move — it turns three B's into *measurable* B's that can
+  then be driven to A. New sticks ship as a `fak` subcommand in Go (the control pane
+  already runs `guard-rsi` and `dogfood` that way), never a new `tools/*.py` — the
+  `pythongate` ratchet reds the trunk on a new Python tool.
+- **#5 Self improving — A−.** This is the engine that runs every other row: the
+  control pane folds 18 scorecards into one ratcheted number
+  (`tools/scorecard_baseline.json`, pinned `total_debt = 366` @ `ba46040`), `/score-2x`
+  drives debt down while a surface is dirty and *hardens the metric* when it
+  saturates, and `internal/rsiloop` keeps-or-reverts on a witnessed signal. The −
+  is `guard_rsi_debt = 1` plus the honest note that some guard-RSI loops are still
+  plan-mode scaffolds, not journal-closing loops. (Grounded directly; the agent pass
+  for this row hit the session limit.)
+- **#8 Agentic first — B (corrected from A).** The adversarial pass earned its keep
+  here: agent-readiness being A proves the repo is *built for* agents, but "built *by*
+  agents" as a measured fact is unwitnessed — there is no agent-contribution or
+  feature-ownership metric, and git authorship is human (with `Co-Authored-By`). The
+  practice is real (this charter was drafted by an agent workflow); the *measurement
+  of primacy* is the gap.
+
+### Portfolio anchor
+
+The committed ratchet (`tools/scorecard_baseline.json` @ `ba46040`) pins
+`total_debt = 366`. The charter-aligned sticks are mostly already at the floor:
+`parity 0 · agent 0 · stability 0 · steer 0 · conflation 0 · demo 0 · robustness 0 ·
+readme 0`. The heaviest debt sits in `slop 261` (the long tail of "great by default"),
+then `seo 49 · appeal 19 · hygiene 15 · product 10 · code 8 · persona 2 · doc 1 ·
+guard_rsi 1`. At HEAD the control pane's early-warning lens flags two charter-relevant
+regressions vs the pinned floor — **steerability +2** (a dispatch god-file) and
+**conflation +2** (two unlabeled metric help strings) — which are the two cheapest
+worst-first wins on the board.
+
+## Actioning the charter
+
+Worst-first, by leverage rather than by principle number:
+
+1. **Give three principles a measuring stick** (low-ego, dos-verified, up-to-date).
+   Each is a B *only* because nothing measures it. Ship `fak interop-score`,
+   `fak dos-verified-score`, and `fak currency-score` as Go subcommands, fold each
+   into `tools/scorecard_control_pane.py` via the existing `cmd:` entry pattern, and
+   re-pin. This is the move that makes the charter self-policing.
+2. **Retire the two live early-warnings** — the cheapest real wins on the board.
+   Re-label the two `OBSERVED` metric help strings (`conflation` +2 → 0) and split the
+   two dispatch god-files along their verb seams (`steer` +2 → 0, via `/modularize`),
+   then `--pin` the control pane back down.
+3. **Close the realized-value gaps.** Convert industry's 67 no-claim rows into measured
+   head-to-heads or explicit out-of-scope declarations, and add the agent-primacy
+   witness that would let "agentic first" earn its A honestly.
+4. **Drain the tail.** `slop 261` is the single largest debt and the biggest drag on
+   "great by default"; run `/slop-score` worst-first.
+
+Every item above is already a named scorecard or skill. The charter does not invent
+new process — it *orders* the process that exists around a single set of goals.
+
+## Governance
+
+- **Amending the charter.** The ten principles change only by an explicit edit to this
+  file with a DCO sign-off — never silently. Treat a change here the way you would a
+  change to the frozen ABI: deliberate, reviewed, and rare.
+- **Keeping it honest.** The scorecards keep the charter honest; `/score-2x` keeps the
+  scorecards honest (debt down while a surface is dirty, the bar up when it saturates,
+  so a frozen A is never mistaken for a finished job).
+- **Companions.** [`AGENTS.md`](https://github.com/anthony-chaudhary/fak/blob/main/AGENTS.md) is the agent's working contract,
+  [`CLAIMS.md`](https://github.com/anthony-chaudhary/fak/blob/main/CLAIMS.md) is the per-capability claim ledger, [`STATUS.md`](https://github.com/anthony-chaudhary/fak/blob/main/STATUS.md)
+  is the critical path, and [`INDEX.md`](https://github.com/anthony-chaudhary/fak/blob/main/INDEX.md) is the full map. This charter is the
+  layer above all of them: the goals they exist to serve.
 
 ---
 
@@ -6685,6 +6847,7 @@ scaling laws, the explainers) live one level up in [`docs/`](https://github.com/
 | Stand up the Tier-2 GCP control VM | [gcp-tier2-control-vm.md](https://github.com/anthony-chaudhary/fak/blob/main/docs/fak/gcp-tier2-control-vm.md) |
 | Plan guard-hop RSI tuning | [guard-hop-rsi-loop.md](https://github.com/anthony-chaudhary/fak/blob/main/docs/fak/guard-hop-rsi-loop.md) |
 | Guard the opencode/GLM dispatch lane | [opencode-glm-guard.md](https://github.com/anthony-chaudhary/fak/blob/main/docs/fak/opencode-glm-guard.md) |
+| Use GLM-5.2 from the GCP kernel setup (the `claude-glm-gcp` preset) | [claude-glm-gcp.md](https://github.com/anthony-chaudhary/fak/blob/main/docs/fak/claude-glm-gcp.md) |
 
 ## Author and harden the policy
 
@@ -13265,17 +13428,6 @@ for example, has an oracle that documents the MLA tensor boundary but does not a
 full forward. Treat any family not in the table above as parse-and-axis support, not a
 proven forward.
 
-### Multimodal input support
-
-The in-kernel engine has a governed VLM input seam: `model.ForwardMultimodal` accepts
-ordered text token ids plus precomputed CLIP/LLaVA-style vision embeddings and runs them
-through the same decoder stack as text. It is opt-in only: the zero policy quarantines
-any image-bearing request, and `MultimodalPolicy{Mode: "quarantine"}` is required before
-bounded image embeddings become model-visible. Raw image bytes are accounted/digested for
-quarantine evidence, the embedding fingerprint is bound into the same evidence pointer,
-and raw bytes are never fed to the decoder. This is not a built-in CLIP/OCR tower; the
-encoder interface is where a concrete vision tower plugs in.
-
 ### Load and quantization formats
 
 The in-kernel engine loads weights in these formats. The reference path is f32; the
@@ -13435,7 +13587,6 @@ fak tags every capability with exactly one of three honest states:
 | Feature | Status | What it does |
 |---|---|---|
 | Pure-Go SmolLM2-135M forward pass | Shipped | Runs in-process with the KV cache as a kernel-owned Go structure; every rung proven against a HuggingFace oracle (per-layer cos=1.000000, KV-decode token-for-token identical). |
-| Governed multimodal input seam (#399) | Shipped | `ForwardMultimodal` admits ordered text plus externally-produced vision embeddings only under explicit quarantine-mode opt-in, with image count/bytes/pixels and embedding-token limits; raw image bytes stay out of the decoder path. |
 | Parity lane | Shipped | Parallel matmul, batched prefill GEMM, and an 8-accumulator `fdot`, each bit-identical to the serial reference; decode beats every same-precision HF f32 config. |
 | KV-quarantine bridge | Shipped | A ctxmmu Quarantine verdict mechanically evicts that result's K/V span, leaving the cache bit-identical (max|Δ|=0) to never-having-seen it (synthetic-model witness; live agent loop not yet wired). |
 | Planned-elision to KV-eviction residency bridge (#550) | Shipped | `kvmmu.Context.ApplyPlan` evicts every elided span so the cache's residency shrinks to the planner's O(1) view, bit-for-bit (synthetic-model witness; not yet wired into the live HTTP loop). |
@@ -16704,7 +16855,7 @@ prints a starter; `--check` validates one (unknown fields are rejected).
 
 ## The matching primitive (`Match.Matches` — the envelope-matching spine)
 
-`Match.Matches(Subject)` (`internal/modelroute/modelroute.go`) is the single
+`Match.Matches(Subject)` (`internal/modelroute/modelroute.go:297`) is the single
 tag-matching primitive every routing rule reduces to. It has the *shape* of MPI's
 point-to-point envelope match, without the point-to-point delivery:
 
@@ -16719,9 +16870,10 @@ point-to-point envelope match, without the point-to-point delivery:
   subject's label for the same key (`s.Labels[k] == v`); a key the rule omits is a
   wildcard for that key. Labels are the OPEN tag channel — domain, tenant, language,
   taint — that a deployment matches on without a code change.
-- **`tool` adds one wildcard form.** It matches an exact name, a single trailing `*`
-  prefix (`git_*` matches `git_push`), or bare `*` for any tool. The remaining fields
-  are exact, or — for the token band and `min_complexity` — banded / floored.
+- **`tool` adds one wildcard form.** The `toolMatch` helper matches an exact name, a
+  single trailing `*` prefix (`git_*` matches `git_push`), or bare `*` for any tool. The
+  remaining fields are exact, or — for the token band and `min_complexity` — banded /
+  floored.
 - **Rules are first-match-wins.** `Manifest.Route` walks `Rules` top-to-bottom and
   returns the first `Match` that fires, else the fail-closed `Default`: the deterministic
   first-match receive of the envelope analogue. Put the most specific rules first.
@@ -22243,6 +22395,7 @@ The lint witness (unit 96): every line beginning with `- [` carries one and only
 
 - [SHIPPED] A pure-Go SmolLM2-135M forward pass (134.5M params / 272 tensors) runs in-process with the **KV cache as a kernel-owned Go structure**; every rung is proven against a HuggingFace oracle — embedding exact, per-layer cos=1.000000, final-logits max|Δ|≈4.4e-5, KV-decode and KV-quarantine-evict token-for-token identical (max|Δ|=0). Witness: `go test ./internal/model` (oracle argmax-exact); `IN-KERNEL-MODEL-RESULTS.md`. Prior art: the kernel owning its KV cache for provable eviction (vs RadixAttention's LRU).
 - [SHIPPED] GPTQ resident CPU path (issue #300 / A-002): `model.LoadGPTQ` parses AutoGPTQ/GPTQModel safetensors directories (single-file or sharded index) into resident 4-bit or 8-bit `qweight`/`qzeros`/`scales` tensors, honors optional `g_idx` activation-order groups, keeps embeddings/norms/biases in the f32 manifest, and routes opt-in `Session.GPTQ` decode/prefill through the shared resident matmul skeleton (`residentMatRows`) with GPTQ GEMV for quantized projection/head weights and f32 for small tensors. The loader accepts the Llama/Mistral-shaped projection names the existing in-kernel session already runs. Honest fences: this is CPU-resident weight-only GPTQ support; it does not claim a native packed GPTQ CUDA kernel, a measured "within 2x llama.cpp GPTQ" throughput result, or real-checkpoint HuggingFace/llama.cpp oracle parity on this build box. Witness: `go test ./internal/model -run TestGPTQ` (`TestGPTQDequantAndMatRows4BitAnd8Bit`, `TestGPTQGIdxSelectsScaleGroup`, `TestLoadGPTQSafetensorsRoundTripAndResidentDispatch`, `TestGPTQSessionUsesResidentHead`, `TestGPTQSessionArgmaxExactAgainstDequantizedF32`).
+- [SHIPPED] Multi-node compute is runnable, not just loopback-tested: `fak cluster` runs a real cross-NODE collective (AllReduceSum / AllGather) over the `model.DistComm` coordinator-rooted process group on any two CPU hosts — `fak cluster coordinator --listen 0.0.0.0:PORT --size N --vec ...` on one box and `fak cluster worker --coord HOST:PORT --rank R --size N --vec ...` on each other, every rank holding ONLY its own part while the sum/concat is computed across the TCP wire (both nodes print the same result). It promotes the previously test-only `DistComm` into an operable command, and `fak cluster selftest` asserts the SAME path is bit-exact vs the in-process `LocalCollective` over loopback (max|Δ|=0, sizes 1..4) — the hardware-free witness an operator runs before a two-node launch. Honest fence: this is a cross-process / cross-node collective over HOST float32; it is NOT multi-GPU and NOT NCCL. The device-tensor collective (a non-cpu-ref `compute.CollectiveBackend` over NCCL/RCCL) is the separate GPU-gated rung, and live ForwardTP-across-processes, the band-running pipeline worker, and the KV→bytes byte mover are the named next rungs (docs/serving/multi-node-compute.md; #652, #639, #85, #30, #29, #25). Witness: `go test ./cmd/fak -run TestCluster` (`TestClusterSelftestPasses`, `TestRunLoopbackGroupAllReduce`, `TestRunLoopbackGroupRaggedFailsClosed`, the vec/width parsing gates) + the cross-process witnesses `go test ./internal/model -run 'DistComm|Pipeline|TP'`.
 - [SHIPPED] Governed multimodal input seam (#399): `model.ForwardMultimodal` runs an ordered text+image prompt by splicing externally-produced CLIP/LLaVA-style vision embeddings into the same hidden-state sequence the text `Forward` uses, behind `MultimodalPolicy{Mode: "quarantine"}`. The zero policy is fail-closed: text-only requests are bit-identical to `Forward`, but any image-bearing request is quarantined out of the model until explicit quarantine-mode opt-in; admitted images are bounded by image count, bytes, pixels, and embedding-token width/count, and image metadata/raw bytes plus the embedding fingerprint are digested into a `vision-sha256:` quarantine pointer while raw bytes are never fed to the decoder. Honest fence: this is the in-kernel VLM input/governance layer and encoder interface, not a built-in CLIP weight runner or OCR/VLM classifier. Witness: `go test ./internal/model -run Multimodal` (`TestForwardMultimodalTextOnlyMatchesForward`, `TestForwardMultimodalDefaultQuarantinesImages`, `TestForwardMultimodalQuarantineIDBindsEmbeddingBits`, `TestForwardMultimodalQuarantineModeAllowsBoundedEmbeddings`, `TestForwardMultimodalGovernanceLimits`, `TestForwardMultimodalRejectsWrongEmbeddingWidth`).
 - [SHIPPED] Parity lane: parallel matmul across output rows + batched prefill GEMM + an 8-accumulator `fdot`, each output **bit-identical** to the serial reference (`math.Float32bits` equality); decode now beats every same-precision HF f32 config and prefill closed ~16×, with no proven-correctness rung disturbed. Witness: `TestParallelMatchesSerial`, `TestPrefillBatchedMatchesSerial`; `MODEL-BASELINE-RESULTS.md` (Act 2).
 - [SHIPPED] KV-quarantine bridge: a ctxmmu `Quarantine` verdict on poison bytes mechanically **evicts that result's K/V span**, leaving the kernel-owned attention cache bit-identical (max|Δ|=0.0) to never-having-seen it, against a non-vacuous poison control (max|Δ|≈0.33). Witness: `go test ./internal/kvmmu` (green); `KV-QUARANTINE-BRIDGE-RESULTS.md`. (The bridge's witness uses a synthetic model; the numerics are proven separately by the HF oracle, and the live agent loop is not yet wired to it.)
@@ -22254,7 +22407,7 @@ The lint witness (unit 96): every line beginning with `- [` carries one and only
 - [SHIPPED] Pre-send PII/secret redaction — the privacy-compressor rung of the local-model-on-the-wire spine (issue #572, wirescreen RUNG 5; `internal/wirescreen/redactor.go`): the deterministic, model-free COMPLIANCE FLOOR that proposes [start,end) byte spans to redact before bytes leave the box, and an `Apply` that replaces each with a `[REDACTED:<kind>]` placeholder while pinning the UNREDACTED original in the shared CAS so an authorized `Restore` returns it byte-exact (the same `abi.PageOut` + `PinResolved` witness `ctxmmu`'s quarantine uses — a wrong proposal costs one demand-page fault, never a lost fact). The reference `piiRedactor` is high-precision regex + Luhn detection (credit cards, US SSNs, AWS/GitHub/Slack/Stripe/Google keys, emails, bearer tokens, PEM private keys), precision-biased so a compliance floor does not break legit content. It is the Screener-STYLE redaction peer of RUNG 1 (a witnessed, one-sided, additive proposer) but emits SPANS rather than a quarantine bit, because a redaction is an in-place rewrite, not a whole-result hold-out. DEFAULT-INERT (`FAK_WIRE_REDACT`) and touches NO ABI seam (registers no SemanticScreen, no capability), so the default binary is unchanged and `TestABIGoldenFreeze` / `TestDefaultInertRegistersNoABIScreen` are unaffected. Honest fences: this is a compliance floor, NOT a token saver (a placeholder can be longer than the secret it scrubs); it is WIRED on the non-passthrough re-marshal path via `agent.RedactOutboundMessages` (called from `prepareUpstream`, `internal/agent/stream.go`, which runs `Apply` over each outbound message's content before the non-passthrough marshal), so the redaction DOES reach the wire there (OpenAI/xAI proxy, mock, local serve); the flagship `fak guard -- claude` Anthropic passthrough still sends `req.Raw` verbatim, so the redaction cannot reach the model on THAT route until the cache-prefix-preserving `req.Raw` transform (#555, ctxplan-owned) lands — that flagship-passthrough arm is the named, #555-gated follow-on, deferred in code + claim. MEASURED pre-send latency (the "measure before default-on" gate): end-to-end `Apply` on a ~480 B body carrying every pattern shape + ordinary prose is ~54 µs/op (classify ~52 µs + ~2 µs CAS witness pin; `BenchmarkApply`/`BenchmarkPropose`, `internal/wirescreen/redactor_bench_test.go`) — orders of magnitude under a turn; the gated model arm's NER-classify latency is UNMEASURED until weights land; the model-backed `Redactor` (native CPU 1-3B span task) is the gated follow-on that needs weights + a measured span latency before default-on — the SAME fence the forecast AUTHOR row above shipped the deterministic seed under. This is the floor for the OUTBOUND surface, not a duplicate of ctxmmu's INBOUND `ScreenBytes` quarantine (which removes a whole secret-bearing RESULT). Witness: `go test ./internal/wirescreen` (`TestPIIRedactor_DetectsSecretsAndPII`, `TestPIIRedactor_HighPrecision`, `TestPropose_CoalescesOverlaps`, `TestApply_RedactsSpansAndPinsOriginal`, `TestApply_NoSpansIsNoOp`, `TestDefaultInert_NoActiveRedactor`, `TestEndToEndWithPIIRedactor`).
 - [SHIPPED] Useful page-out digest — the rung-3 page-out upgrade of the local-model-on-the-wire spine (issue #570, wirescreen RUNG 2; `internal/wirescreen/digester.go` + `internal/ctxmmu/mmu.go`): the RESERVED `abi.ScreenDigest` disposition is now WIRED. `ctxmmu.MMU.Admit` captures a `ScreenDigest` advisory from the screen chain and, on the oversize page-out path, pages the body out to a stub that carries the authored digest INSTEAD of the v0.1 opaque `{_paged,ref,len}` pointer, so the model reads the gist without a demand-page fault. The original is pinned in CAS under the held ledger and a witness `Clear` + `PageIn` restores it BYTE-EXACT — the digest is lossy display, never the witness. The reference `heuristicDigester` is the deterministic, model-free floor (leading-lines truncation to a ~200-token cap), the digest peer of RUNG 1's `heuristicScreener`; the model-backed `Digester` (native CPU 1-3B, decode-bound) is the gated follow-on that needs weights + a measured digest latency before default-on. DEFAULT-INERT (`FAK_WIRE_SCREEN`) and touches NO closed ABI value (`ScreenDisposition` is the OPEN additive enum, not the `VerdictKind` freeze), so `TestABIGoldenFreeze` / `TestDefaultInertRegistersNoABIScreen` are unaffected. Honest fences: a `ScreenDigest` on a NON-oversize body is captured but NOT applied (the full bytes are strictly better than a lossy digest) — the digest only UPGRADES the oversize page-out; the opaque v0.1 pointer is unchanged when no digest is advised; and the digest reaches the model only on the NON-passthrough re-marshal path — on the flagship `fak guard -- claude` Anthropic passthrough the model reads `req.Raw` verbatim, so the digest is dead there until the cache-prefix-preserving `req.Raw` transform (#555, ctxplan-owned) lands. Witness: `go test ./internal/ctxmmu` (`TestAdmitScreenDigestProducesDigestStubAndByteExactRestore`, `TestScreenDigestOnSmallBodyIsAdmittedAsIs`, `TestOpaqueOversizeUnchangedWithoutDigest`); `go test ./internal/wirescreen` (`TestHeuristicDigesterAuthorsLeadingLines`, `TestActiveDigesterInertWithoutEnv`).
 - [SHIPPED] Multi-modal screenshot triage — perceptual-hash frame DEDUP (issue #571, wirescreen RUNG 3; `internal/wirescreen/phash.go`): the buildable arm of the multi-modal triage rung, ZERO model (pure-Go DCT perceptual hash, stdlib only — no vision encoder, no GPU). `phashDigester` decodes a base64/raw/JSON image block, computes a 64-bit DCT perceptual hash, and compares it against a bounded FIFO store of recently-seen frames; on a hit (a near-identical re-send) it authors an "unchanged, see frame#k" dedup POINTER that rides rung 2's `ScreenDigest` -> `ctxmmu.digestToPointer` reversible path — the duplicate pixels page into the SAME CAS and a witness `Clear` + `PageIn` restores them BYTE-EXACT, so a wrong "unchanged" call costs one demand-page fault, never a lost frame. On a miss (a new frame, an undecodable or sub-threshold image) it declines, so the body falls through to today's opaque oversize page-out / allow path — strictly one-sided, never a new refusal. The counter `Dedups()` (peer of `Flags()`/`Digests()`/`ctxmmu.MMU.Digested()`) increments on each collapse. DEFAULT-INERT: selected by `FAK_WIRE_SCREEN=phash` (the env gate) or a host registering `PhashScreen()` (the programmatic opt-in); with neither, `ActiveDigester()` is nil / nothing is registered and the MMU is the bare regex floor. Touches NO closed ABI value (`ScreenDisposition` is the OPEN additive enum) and NO `internal/ctxmmu` code (it reuses #570's machinery verbatim), so `TestABIGoldenFreeze` / `TestDefaultInertRegistersNoABIScreen` are unaffected. Honest fences: it reaches the model only on the NON-passthrough re-marshal path (flagship `fak guard -- claude` sends `req.Raw` verbatim, dead until #555); the OCR/VLM and crop-to-ROI arms are BLOCKED on a vision encoder (`internal/model` is text-only) and filed as future sub-tasks; and the Hamming-dedup threshold is deliberately tight (8/64) so a genuinely different screen is never collapsed. Witness: `go test ./internal/ctxmmu` (`TestPhashDedupCollapseAndByteExactRestore`, `TestPhashDedupNewAndDifferentFramesFallThrough`, `TestPhashDedupReSendNamesSamePriorFrame`); `go test ./internal/wirescreen` (`TestPerceptualHashStableAndSeparating`, `TestPhashDigesterDedupsIdenticalAndDeclinesNew`, `TestDedupsCounterIncrements`, `TestDecodeImageBlockHandlesWireShapes`, `TestPhashScreenBridgesToScreenDigest`).
-- [SHIPPED] Planned view MEASURED over the heaviest REAL session transcripts (issue #559, `cmd/ctxplanbench`): the empirical counterpart to `scaling.go`'s synthetic Params model. Where `scaling.go` takes a mean tokens/turn + a hit rate and COMPUTES the resident curve, `ctxplanbench` ingests the heaviest real Claude Code transcripts through the SHIPPED `cdb`→`recall` ingest (so a result the write-time gate quarantines is sealed here too), bridges each `recall.Page` into a `ctxplan.Span`, and replays the session turn-by-turn through the real planner (`ctxplan.Materialize`) and the real page-fault handler (`ctxplan.DemandPage`). On the 5 heaviest transcripts on this box (715 replayed turns, 8 sealed by the real gate): resident tokens — planned cum 5.24M vs linear 69.81M (**13.3× fewer resident**, peak held to the 8000-token working set except documented pin-overrun turns); fault rate — 31.7% of the 38,068 real lexical back-references were forecast MISSES, and **100% of the 12,083 misses were SERVED** (0 refused, 0 lost — every miss is a recoverable page fault); quality vs compaction — planned kept exact recall 715/715 turns (`Audit.Faithful` witnessed on the real plans) while compaction destroyed facts on 695/715 turns, so the 12,083 served faults are exactly the facts the planned regime recovers that compaction would permanently lose. Honest fences: the forecast is a deliberately cheap recency-window heuristic (last K turn descriptors as intents + durable pins), NOT an oracle — a stronger forecast would lower the 31.7% miss rate, and the point of measuring it is that every miss is served, never lost; the "reference" ground truth is real lexical descriptor overlap (the same extractive signal the planner's relevance uses), not a fabricated oracle; resident units are the bytes/4 proxy (`ctxplan.TokenCost`), so a real BPE tokenizer shifts absolutes, not the regime; and it is off the live path (a bench cmd, not wired into the agent loop). Witness: `go test ./cmd/ctxplanbench` (`TestReplayInvariants`, `TestReplayLooseBudgetHoldsEverything`); `go run ./cmd/ctxplanbench -selfcheck` exit 0; the real-transcript run `go run ./cmd/ctxplanbench -heaviest 5`.
+- [SHIPPED] Planned view MEASURED over the heaviest REAL session transcripts (issue #559, `cmd/ctxplanbench`): the empirical counterpart to `scaling.go`'s synthetic Params model. Where `scaling.go` takes a mean tokens/turn + a hit rate and COMPUTES the resident curve, `ctxplanbench` ingests the heaviest real Claude Code transcripts through the SHIPPED `cdb`→`recall` ingest (so a result the write-time gate quarantines is sealed here too), bridges each `recall.Page` into a `ctxplan.Span`, and replays the session turn-by-turn through the real planner (`ctxplan.Materialize`) and the real page-fault handler (`ctxplan.DemandPage`). On the 5 heaviest transcripts on this box (715 replayed turns, 8 sealed by the real gate): resident tokens — planned cum 5.24M vs linear 69.81M (**13.3× fewer resident**, peak held to the 8000-token working set except documented pin-overrun turns); fault rate — 31.7% of the 38,068 real lexical back-references were forecast MISSES, and **100% of the 12,083 misses were SERVED** (0 refused, 0 lost — every miss is a recoverable page fault); quality vs compaction — planned kept exact recall 715/715 turns (`Audit.Faithful` witnessed on the real plans) while compaction destroyed facts on 695/715 turns, so the 12,083 served faults are exactly the facts the planned regime recovers that compaction would permanently lose. Honest fences: the forecast is a deliberately cheap recency-window heuristic (last K turn descriptors as intents + durable pins), NOT an oracle — a stronger forecast would lower the 31.7% miss rate, and the point of measuring it is that every miss is served, never lost; the "reference" ground truth is real lexical descriptor overlap (the same extractive signal the planner's relevance uses), not a fabricated oracle; resident units are the bytes/4 proxy (`ctxplan.TokenCost`), so a real BPE tokenizer shifts absolutes, not the regime; the **13.3× multiplier is this transcript-set's number, not a constant** (an independent 2026-06-26 re-run on the box's current, longer heaviest-5 reproduced the regime — 2055/2055 exact recall, 196,271/196,271 misses served, compaction lost facts on 2016/2055 turns — at 9.9×, since longer sessions miss the cheap forecast more often; the recall/served invariants hold, the multiplier moves with the set); and this `ctxplanbench` is a MEASUREMENT cmd, but the planner it measures is **no longer off the live path** — the same `ctxplan.Materialize` view is wired into the gateway per-turn buffered path (`--ctx-view-budget`, #555 shipped, OFF by default at 0) and witnessed end-to-end through the real HTTP handler (the flagship Anthropic `req.Raw` passthrough is the one wire it does not yet reach, the deferred #555 `req.Raw` transform, tracked as #927). Witness: `go test ./cmd/ctxplanbench` (`TestReplayInvariants`, `TestReplayLooseBudgetHoldsEverything`); `go run ./cmd/ctxplanbench -selfcheck` exit 0; the real-transcript run `go run ./cmd/ctxplanbench -heaviest 5`; the live-loop wiring witness `go test ./internal/gateway -run TestCtxViewHTTP` (`internal/gateway/gateway_ctxview_http_test.go`: OFF forwards the full history, ON forwards the bounded planned view, the passthrough forwards `req.Raw` byte-for-byte).
 - [SHIPPED] Planner per-turn COMPUTE flatten MEASURED over the heaviest REAL session transcripts (issues #558/#559, `cmd/ctxplanbench` planning-cost arm): the empirical counterpart to `Index`'s `IndexBoundedPlannerCompute` model (claim above) — measuring the planner's OWN work, not just its resident output. The bench maintains ONE persistent `ctxplan.Index` across the replay (the `SessionPlanner` pattern) and per turn scores the bounded `Index.PlanCells` probe alongside the full-scan `Materialize` plan under the IDENTICAL forecast/budget/`Optimize(ObjGreedy)`, so the only variable is the candidate set (N vs c). On the 5 heaviest transcripts (851 replayed turns, W=8000, default cap c=128/recency 32): the per-turn probe never overran the cap on ANY of 851 turns (the Θ(c·N) bound held), cumulative candidate-scoring **100.1K full-scan vs 68.0K bounded (1.5× less planner work, growing with N** — 43-turn session 1.0× → 342-turn 1.7×, the Θ(N²)→Θ(c·N) shape); resident-token efficiency is PRESERVED under the bounded planner (bounded cum 6.29M vs full-scan 6.36M, within 1.2%; both ~12× below linear 76.97M). Mechanism equivalence witnessed end-to-end: probe=ALL candidates ⇒ **342/342 IDENTICAL plans** on the largest session. Honest fences: at the SHIPPED default width the bounded plan picks a DIFFERENT resident set than the full scan on most long-session turns (plan-agree 208/851) — the divergence is access-path COVERAGE, not the cap (a real session spreads selection-worthy benefit across more spans than recency/relevance/durability reach) — but every divergence is a bounded efficiency miss, NEVER a lost fact (15,530 back-reference faults, 100% served, 0 lost), and the cap/recency are a measured cost↔fidelity dial (recency 32→4096 lifts agreement 39→131/342 at ~equal cost; the named next lever is a utility access path); the flatten is Θ(N) in the horizon (modest at hundreds of turns, pays off on long sessions); resident units are the bytes/4 proxy; hardware-independent exact counts (reproduces on `node-macos-a`); off the live path (a bench cmd; the `SessionPlanner` it mirrors, #558, is the agent-seam home, unit-witnessed by `TestSessionPlannerBoundedMatchesStatelessFullScan`). Witness: `go test ./cmd/ctxplanbench` (`TestReplayInvariants` asserts the bound + plan-agreement at N<cap; `TestPlanningCostFlattenWhenBounded` forces the cap to bite and asserts the Θ(c·N) ceiling + a real flatten); `go run ./cmd/ctxplanbench -selfcheck` exit 0; the real run `-heaviest 5`; `docs/notes/CTXPLAN-PLANNING-COST-FLATTEN-2026-06-23.md`.
 - [SHIPPED] Provable-deletion certificate (`internal/deletioncert`, demo `cmd/deletioncert`): a `DeletionCertificate` binds the evicted span, `EvictedCount`, the byte-exact equivalence (evicted == never-saw, max|Δ|=0), a tamper-evident hash-chained journal anchor, and the trust epoch under one ed25519 signature, and **fails closed** on any forged field, non-zero drift, or absent/rewritten anchor (re-verified live in the demo). Honest fences: it is a **self-signed v1** receipt (it attests the integrity of the recorded facts, not independence from the recorder); `EvictedCount` is a self-report; and the bound `max|Δ|=0` is checked as a **signed string, not re-measured** — the eviction's bit-exactness is proven separately by the KV-quarantine bridge above (synthetic model; HF numerics by the oracle). Witness: `go test ./internal/deletioncert`; `docs/proofs/deletioncert.md`; `go run ./cmd/deletioncert -selfcheck` exit 0.
 - [SHIPPED] The in-kernel model is wired as a `RegisterEngine` backend (`internal/modelengine`, id `inkernel`): an allowed tool call is completed by a real greedy Prefill+Step decode over the kernel-owned KV cache (`model.Session.Generate`) — selectable via `--engine inkernel`, one blank-import in `internal/registrations`. Closes the gap that `internal/agent`/`internal/engine` never imported `internal/model`. Lazily builds a deterministic synthetic checkpoint (runs with no model export); `FAK_MODEL_DIR` loads a real export through the identical dispatch path. Witness: `go test ./internal/modelengine` — a multi-call agent loop on `kernel.New("inkernel")` completes, the kernel's `EngineCalls` tally confirms one engine call per turn, decode is deterministic + input-driven (issue #14).
@@ -22285,6 +22438,8 @@ Honest ceiling, surfaced not hidden: the *detector* these drivers feed is ~100% 
 - [SHIPPED] `fak guard -- <agent>` is the one-command adopter front door that collapses the dogfood path (a shell launcher + two terminals + six env vars + manual teardown) into one cross-platform Go verb. It starts the in-process gateway on a private loopback port, injects its URL into the CHILD process env only (never the parent shell or `settings.json`), execs the real agent interactively, and prints a verdict roll-up on exit. The default upstream is the Anthropic API in passthrough mode, so `fak guard -- claude` wraps a normal Claude Code session with the capability floor armed while the user's own key + prompt-cache breakpoints pass through untouched. A secure floor is embedded in the binary so it works from any directory (`--dump-policy` prints it; `--policy FILE` overrides). The exit audit reads `Server.AdjudicationSummary` from the same operation counters `/metrics` exposes, so it cannot overstate the protection. Witness: `go test ./cmd/fak` — `TestGuardDefaultPolicyDeniesDangerAllowsBenign` (the embedded floor denies `rm -rf`/`sudo`/RCE-pipe, allows `Read`, fails closed on unlisted tools), `TestGuardEnvVar`, `TestGuardDefaultBaseURL`, `TestFormatAuditSummary`, `TestGuardWaitHealthy`; end-to-end, a wrapped child posting to `/v1/fak/adjudicate` is denied/allowed by the kernel and the exit line reports the real tally.
 - [SHIPPED] **Serving-latency observability — percentile-capable TTFT / TPOT / end-to-end histograms on `/metrics`.** The gateway emitted TTFT and decode only as cumulative MEANS (`fak_gateway_inference_prefill_seconds_total` / `_ttft_turns_total`, a derived rate), which structurally hide the P95/P99 tail an operator watches under load. `internal/gateway` `writeInferenceMetrics` now also emits three Prometheus HISTOGRAMS, fed on the same turn-completion path under the same `inferenceMu`: `fak_gateway_inference_ttft_seconds` (time-to-first-token, over the streaming turns whose prefill boundary is observable), `fak_gateway_inference_tpot_seconds` (per-output-token / inter-token latency = decode wall-clock ÷ generated tokens), and `fak_gateway_inference_e2e_seconds` (whole model-turn wall-clock, every served turn) — the fak analogues of vLLM's `vllm:time_to_first_token_seconds` / `vllm:inter_token_latency_seconds` / `vllm:e2e_request_latency_seconds`, so P50/P95/P99 are now queryable instead of only a mean. They stay empty (count 0) on an idle gateway, so no phantom distribution is published. With the existing running-request gauge (`fak_gateway_inflight_requests` + `_inflight_max_age_seconds`), the token-level prefix-cache-hit family (`fak_gateway_kv_prefix_{prompt,reused}_tokens_total` + `_reuse_ratio`), and the KV-residency family (`fak_gateway_kv_memory_*`), this brings the de facto vLLM Prometheus metric-SET to parity. Honest fence: OTLP/OpenTelemetry distributed-trace span EXPORT (gen_ai.* spans, vLLM's `--otlp-traces-endpoint`) is NOT shipped — fak threads an end-to-end `TraceID` but does not export OTLP spans. Witness: `go test ./internal/gateway -run TestInferenceLatencyHistograms` (idle histograms count 0; a buffered turn lands in e2e only; a streamed turn lands in all three with the right buckets and sums).
 - [SHIPPED] **Cache-prefix-preserving history compaction — the 100k+-session cost lever on the flagship `fak guard -- claude` / `fak serve` Anthropic passthrough, DEFAULT-ON** (`--compact-history-budget N`, defaulting to ~48k resident tokens via `gateway.DefaultCompactHistoryBudget` so a sprawling conversation is shed with NO operator configuration — a short session stays untouched, and `--compact-history-budget 0` is the explicit byte-for-byte opt-out; `agent.CompactAnthropicHistory` + `internal/gateway/messages.go:maybeCompactAnthropicRaw`; the #555 `req.Raw` transform). On the ONE route that forwards the body byte-for-byte (so the client's prompt-cache breakpoints survive), an append-only long session re-sends the whole transcript every turn. This compactor sheds OLD whole turns to a resident-token budget while keeping the cache_control prefix **byte-identical** — it SPLICES on the original bytes (a memcpy of the protected prefix through the last `cache_control` breakpoint, never a re-marshal that would reorder JSON keys and break the cache), so the upstream cache hit is preserved instead of destroyed. The protected prefix is whole-message-granular and the transform is **fail-safe identity** on any ambiguity (no breakpoint, suffix already under budget, non-JSON, <3 messages, or a splice that fails to re-decode), so it never breaks a turn; tool_use↔tool_result pairs and role alternation are preserved; a `[fak] compacted N earlier turns` stub marks the drop. It is a request-side transform only — the kernel still adjudicates the FULL decoded history, so the trust boundary is unchanged. Honest fence: token counts use the bytes/4 `EstimateAnthropicTokens` proxy (the budget unit); the value is provider-cache survival via byte-identity, and the live provider-side `cache_read_input_tokens` capture is the credentialed-host follow-on (epic #745). Witness: `go test ./internal/agent ./internal/gateway -run Compact` (`TestCompactPreservesCachePrefix`, the 8 fail-safe `TestCompactIdentityCases`, `TestCompactToolPairNotOrphaned`, `TestMaybeCompactOnShortensKeepsPrefix`, `TestMaybeCompactOffIsIdentity`, `TestMaybeCompactNonPassthroughIsIdentity`, the default-on trigger `TestMaybeCompactDefaultBudgetTrigger` + `TestMaybeCompactDefaultBudgetLeavesShortSessionAlone`, and the flag default `go test ./cmd/fak -run TestCompactHistoryBudgetDefaultsToDefaultConst`); end-to-end dogfood on the real wire — `experiments/agent-live/compact-100k-session-dogfood-2026-06-25.json` (142,516-token inbound → 6,597 forwarded, 95.4% shed, OFF/ON cache-prefix sha256 equal).
+- [SHIPPED] **Oversized-result elision TRADEOFF witness — the missing number that lets the `--elide-result-bytes` lever be flipped on a proof, not a guess.** The elision rewrite (`agent.ElideOversizedToolResults`; the third `req.Raw` byte-splice sibling of compaction) is STRUCTURALLY safe — its working-set guard (`DefaultKeepRecentTurnsForElide=6`) only ever shrinks a tool_result that has scrolled ≥6 turns past the active window, and it asserts cache-prefix byte-identity before shipping — but it had no witness QUANTIFYING the shed-vs-keep tradeoff, so it shipped DARK (`gateway.DefaultElideResultBytes=0`) and flipping the default blind would have been the unproven claim the repo refuses. `fak elide-witness` produces that witness: it discovers the operator's own local Claude Code session transcripts (the same `~/.claude*/projects/<ns>/*.jsonl` store `fak debug --list` reads), reconstructs each session's last-turn outbound `/v1/messages` body, and over each runs BOTH `agent.MeasureElisionTradeoff` (classifies every oversized result by zone — Elidable vs working-set-Protected vs prefix-Protected, sharing the exact zone math the rewrite uses, proven no-drift by `TestMeasureMatchesRewrite`) and the real `ElideOversizedToolResults` rewrite (asserting prefix byte-identity + a clean re-decode + zero orphaned tool_use/tool_result pairs on each real body). The headline is the tradeoff PAIR, never a bare shed number: tokens shed AND the count of oversized results the working-set guard HELD BACK. HONEST FENCES: the default is NOT flipped (`DefaultElideResultBytes` stays 0) — the witness makes the flip a deliberate, informed decision (`gateway.DocumentedElideResultBytes=16384` is the candidate), it does not auto-arm it; the shed is a bytes/4 `EstimateAnthropicTokens` proxy; the per-session figure is the worst-case last-turn body (each accumulated oversized result counts once), not a per-turn bill; PRIVACY — the artifact records only counts, byte lengths, token estimates, and session-id digests, never a prompt, tool argument, result body, or any raw transcript text. Witness: `go test ./internal/agent -run 'TestMeasure'` (zone split, no-drift vs the rewrite, whole-body working-set guard, fail-safe) + `go test ./cmd/fak -run TestElideWitness` (the tradeoff both ways on a synthetic 2-session corpus, prefix byte-identity on every fired rewrite, 0 orphaned pairs, NO_CORPUS honesty, privacy leak-scan); real-corpus run — `experiments/agent-live/elide-result-witness-2026-06-26.{json,md}` (200 local sessions: ~1.15M tokens shed across 158 elidable results in 64 sessions, the working-set guard HELD BACK 8 oversized results the model had just fetched in 6 sessions, cache-prefix byte-identity held on all 64 fired rewrites, 0 orphaned pairs).
+- [SHIPPED] **ctxplan planned VIEW on the Anthropic passthrough — the deferred #555 `req.Raw` transform (#927).** The buffered `maybePlanMessages` path re-plans the DECODED `[]Message`, which could never reach the flagship `fak guard -- claude` route (that route forwards `req.Raw` byte-for-byte so the client's `cache_control` prefix survives → a real upstream cache hit; a re-marshal would reorder JSON keys and bust the cache). `agent.CompactAnthropicHistoryToView` + `gateway.maybePlanAnthropicRaw` close that gap: when `--ctx-view-budget > 0`, each passthrough turn the gateway plans `req.Messages` into an O(1) resident view and materializes it onto `req.Raw` by REPLACING each elided middle message IN PLACE with a same-role `[fak] ctxview-elided` stub — so the message COUNT and the user/assistant role alternation are preserved EXACTLY (Anthropic accepts the body), the protected `cache_control` prefix bytes and every resident message's original bytes are copied VERBATIM (upstream cache hit survives), and the planner's non-contiguous resident-set misses are shed (strictly harder than compaction's contiguous-suffix drop). Gated behind `--ctx-view-budget` (OFF at 0, same posture as the buffered path); fail-safe identity on any ambiguity (no breakpoint, non-JSON, a would-be-elided message that carries its own `cache_control`, tool_use/tool_result blocks fak cannot confidently match — always kept, so tool pairings stay intact, or a splice that fails to re-decode or alters the prefix). Request-side transform only — the kernel still adjudicates the FULL decoded history, so the trust boundary is unchanged. Honest fence: the same-role-stub approach preserves alternation but does NOT reduce the message count (it shrinks bytes, not slots), so a session near Anthropic's message-count limit gains less headroom than compaction's contiguous drop; and the resident set is the heuristic forecast's selection, not an oracle (a miss costs one demand-page fault, never a lost fact — witnessed at the seam in `internal/agent`). Witness: `go test ./internal/gateway -run TestCtxViewHTTPAnthropicPassthrough` (OFF forwards `req.Raw` byte-for-byte; ON stubs the off-topic middle turn beyond the cached system prefix, prefix bytes byte-identical, the elided span demand-pages back under a permissive re-plan); `go test ./internal/agent -run TestCompactToView` (byte-level stub + identity-when-all-resident + tool-blocks-kept).
 
 ## Model routing (per-aspect + ensemble — `fak route`)
 
@@ -25474,6 +25629,10 @@ This is the source of truth for the recurring GPU-server/Slack confusion.
 > **Just want to reach the channel?** See [`private-comms-channel.md`](https://github.com/anthony-chaudhary/fak/blob/main/docs/private-comms-channel.md)
 > — the public stub that points to the live Slack control-bridge in `fak-private`. This doc
 > explains *what is public vs private and why*; that stub is the entry point.
+>
+> **Operating the box fleet?** See [`fleet.md`](https://github.com/anthony-chaudhary/fak/blob/main/docs/fleet.md) — the public, transport-agnostic
+> Go core (`fleetctl`: roster + fold + readiness score + render). It folds the per-box report
+> JSON the private bridge writes; the boundary below is the rule it lives inside.
 
 ## Public tree
 
@@ -25509,6 +25668,13 @@ Private-only paths and concepts:
 
 New public tooling is Go. Add a `fak` subcommand or a small `cmd/<name>/` binary, with
 pure logic under `internal/<name>/` where appropriate. Do not add a new `tools/*.py`.
+
+The public, transport-agnostic fleet core now exists in Go: `cmd/fleetctl/` (`fleetctl`)
+is the Go home the scattered `tools/fleet_*.py` helpers port into — a typed roster, a
+deterministic fold + readiness score, and a render that stays readable at 100+ boxes. It
+reads the per-box report JSON the private Slack bridge writes (the seam is a data contract,
+not a code import), so the live control plane stays private while the core stays public.
+See [`fleet.md`](https://github.com/anthony-chaudhary/fak/blob/main/docs/fleet.md).
 
 Existing Python tools are grandfathered only. The allowlist in `internal/pythongate` can
 shrink when a Python tool is ported or sunset, but it must not grow. Restoring

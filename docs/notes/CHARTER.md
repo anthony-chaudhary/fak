@@ -1,9 +1,9 @@
 # CHARTER — the ten principles fak is built to satisfy
 
 This is fak's constitution: the small set of commitments every surface is meant to
-advance. It is the *why* above the *what* — read [`README.md`](README.md) for what
-fak is, [`AGENTS.md`](AGENTS.md) for how to work in the repo, and
-[`CLAIMS.md`](CLAIMS.md) for what is actually shipped. This page names what all of
+advance. It is the *why* above the *what* — read [`README.md`](../../README.md) for what
+fak is, [`AGENTS.md`](../../AGENTS.md) for how to work in the repo, and
+[`CLAIMS.md`](../../CLAIMS.md) for what is actually shipped. This page names what all of
 that is *for*.
 
 The charter is a north star, not a new gate. It does not block a commit. Instead it
@@ -11,7 +11,7 @@ binds to the machinery the repo already runs: each principle points at a **surfa
 that embodies it** and a **deterministic scorecard that keeps it honest**, and where
 no measuring stick exists yet, the charter says so in plain `not yet` language rather
 than claiming alignment it can't witness. The repo already folds **18 scorecards**
-into one debt number through [`tools/scorecard_control_pane.py`](tools/scorecard_control_pane.py);
+into one debt number through [`tools/scorecard_control_pane.py`](../../tools/scorecard_control_pane.py);
 most of this charter is already measured there. The job of this document is to make
 the goal explicit, map it to that machinery, and grade the gap honestly.
 
@@ -47,8 +47,8 @@ A charter that only inspires is decoration. This one is wired to evidence:
   a session limit; they are marked `verify pending` and graded conservatively.
 - **`not yet`, not failure.** A principle with no dedicated measuring stick is capped
   below A and named as a gap to build, not scored as if the absence were success.
-  This is the same incomplete-state discipline [`AGENTS.md`](AGENTS.md) and
-  [`CLAIMS.md`](CLAIMS.md) already enforce.
+  This is the same incomplete-state discipline [`AGENTS.md`](../../AGENTS.md) and
+  [`CLAIMS.md`](../../CLAIMS.md) already enforce.
 
 ## Alignment scorecard (2026-06-26)
 
@@ -64,7 +64,7 @@ principle, or `— none yet` where the stick is missing.
 | 4 | DOS verified | `dos.toml` `[reasons.*]`, the `(fak <leaf>)` trailer, `dos_verify` / `dos_commit_audit` | `ship_integrity` KPI (inside `code`) | **B** | Promote `dos-verified` to a portfolio-level stick (stamp-adoption rate, closure-audit pass rate). |
 | 5 | Self improving | `tools/scorecard_control_pane.py` (folds 18), `/score-2x`, `internal/rsiloop`, `guard-rsi` | `guard_rsi` (**1**) + the whole fold | **A−** | Close the remaining guard-RSI debt; promote the plan-mode RSI loops to journal-closing loops. |
 | 6 | Up to date | `tools/idea_scout.py` (daily arXiv+GitHub), `docs/notes/RESEARCH-*-triage-*` | — none yet *(verify pending)* | **B** | Build a `currency` stick: idea-scout cadence, triage latency, model-adoption lag. |
-| 7 | Great by default | `cmd/fak/serve.go` defaults, `tools/token_defaults_scorecard.py` | token-defaults (debt **0**, 4/6 savers on) *(verify pending)* | **A−** | Witness the `elide-result` bounded-loss saver on real traffic, then default it on (4/6 → 5/6). |
+| 7 | Great by default | `cmd/fak/serve.go` defaults, `fak token-defaults-scorecard` | token-defaults (debt **0**, 4/6 savers on) *(verify pending)* | **A−** | Witness the `elide-result` bounded-loss saver on real traffic, then default it on (4/6 → 5/6). |
 | 8 | Agentic first | `AGENTS.md`, `tools/new_leaf.py`, `docs/dispatch-loop.md`, this charter (agent-authored) | `agent` measures *usability*, not *primacy* | **B** | Add an agent-*primacy* witness (agent-authored commit / issue / PR share); usability is already A. |
 | 9 | Win-win-win | the unified `kernel.Syscall()` seam (one decision, many budgets), `compounding-benefits-of-a-saved-call` | `conflation` (live drift **+2**) *(verify pending)* | **B** | Re-label the 2 unlabeled `OBSERVED` metric help strings; re-pin conflation to 0. |
 | 10 | Human-steerable | `tools/steerability_scorecard.py`, `tools/stability_scorecard.py`, `POLICY.md`, `docs/ROLLBACK.md` | `steer` (live drift **+2**), `stability` (**0**) *(verify pending)* | **B** | Split the 2 dispatch god-files along their verb seams (`/modularize`); steer 2 → 0. |
@@ -148,7 +148,7 @@ new process — it *orders* the process that exists around a single set of goals
 - **Keeping it honest.** The scorecards keep the charter honest; `/score-2x` keeps the
   scorecards honest (debt down while a surface is dirty, the bar up when it saturates,
   so a frozen A is never mistaken for a finished job).
-- **Companions.** [`AGENTS.md`](AGENTS.md) is the agent's working contract,
-  [`CLAIMS.md`](CLAIMS.md) is the per-capability claim ledger, [`STATUS.md`](STATUS.md)
-  is the critical path, and [`INDEX.md`](INDEX.md) is the full map. This charter is the
+- **Companions.** [`AGENTS.md`](../../AGENTS.md) is the agent's working contract,
+  [`CLAIMS.md`](../../CLAIMS.md) is the per-capability claim ledger, [`STATUS.md`](../../STATUS.md)
+  is the critical path, and [`INDEX.md`](../../INDEX.md) is the full map. This charter is the
   layer above all of them: the goals they exist to serve.

@@ -20,7 +20,8 @@ and the performance model.
 ## Run it
 
 The proof is **dependency-free** — it does not import `crewai`, does not call a model,
-and needs no key, network, or GPU. From the repository root:
+and needs no key, network, or GPU. It completes in seconds on a normal laptop. From the
+repository root:
 
 ```bash
 python examples/crewai-crew/crew_demo.py        # -> ends with "summary: PASS"

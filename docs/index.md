@@ -197,7 +197,7 @@ twice — tools wired directly vs. behind `fak` — and prints the before/after.
 
 | If you want… | Read |
 |---|---|
-| **The principles fak is built to satisfy** | [Charter](https://github.com/anthony-chaudhary/fak/blob/main/CHARTER.md) |
+| **The principles fak is built to satisfy** | [Charter](https://github.com/anthony-chaudhary/fak/blob/main/docs/notes/CHARTER.md) |
 | **The quick answers** | [FAQ](FAQ.md) |
 | **A guided first run** | [Tutorial](fak/tutorial.md) |
 | **What the words mean** (preflight vs inflight vs prefill) | [Glossary](glossary.md) |

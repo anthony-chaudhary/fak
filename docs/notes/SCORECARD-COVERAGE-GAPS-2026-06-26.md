@@ -23,7 +23,7 @@ tree-reading card, `product_scorecard.py` for a catalog card) and re-pointing it
 
 **0. skill-effectiveness** — is each `.claude/skills/*/SKILL.md` BUILT to be effective?
 Nine KPIs over discover / operate / trust / economy; debt key `skill_debt`.
-Tool: [`tools/skill_effectiveness_scorecard.py`](../../tools/skill_effectiveness_scorecard.py);
+Tool: `fak skill-effectiveness-scorecard` ([`cmd/fak/skill_effectiveness.go`](../../cmd/fak/skill_effectiveness.go));
 skill: [`/skill-score`](../../.claude/skills/skill-score/SKILL.md);
 snapshot: [`docs/SKILL-EFFECTIVENESS-SCORECARD.md`](../SKILL-EFFECTIVENESS-SCORECARD.md).
 Baseline at ship: 11 skill-debt over 31 skills, score 92.7 (grade A) — the

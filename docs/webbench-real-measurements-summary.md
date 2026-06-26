@@ -74,8 +74,8 @@ All docs updated with:
 
 ## Fleet-Scale (100+ Worker) Validation — #920
 
-Issue #920 asks for DGX-scale fleet runs (100+ concurrent agents). Two of its six
-sub-items are hardware-free and are verified here; the remaining four need the DGX
+Issue #920 asks for GPU server-scale fleet runs (100+ concurrent agents). Two of its six
+sub-items are hardware-free and are verified here; the remaining four need the GPU server
 fleet run (gated — see "What remains" below).
 
 ### Deterministic floor at 100+ workers (sub-item: validate floor predictions)
@@ -119,19 +119,19 @@ BenchmarkDecideReadClass/read_profile-16           774.8 ns/op   742 B/op   11 a
 Reproduce (WSL — native `go test` is blocked on the Windows host):
 `go test ./internal/adjudicator -run XXXNONE -bench BenchmarkDecideReadClass -benchtime=2s`
 
-### What remains gated (the DGX fleet run)
+### What remains gated (the GPU server fleet run)
 
-Sub-items NOT closed by this validation — they require the measured fleet run on DGX:
+Sub-items NOT closed by this validation — they require the measured fleet run on GPU server:
 
-- DGX node access (private Slack control bridge; lives in `fak-private`).
-- Deploy webbench harness to the DGX (model server + browser-use + network — none
+- GPU server node access (private Slack control bridge; lives in `fak-private`).
+- Deploy webbench harness to the GPU server (model server + browser-use + network — none
   confirmed configured even on the dev box; see `docs/webbench-blockers.md`).
 - Run the 100+ concurrent-agent fleet experiment.
 - MEASURE real cross-worker reuse / net elimination at high concurrency (the model
-  above predicts; the DGX run would confirm).
+  above predicts; the GPU server run would confirm).
 
 The deterministic floor and the adjudication overhead are now validated; the
-end-to-end MEASURED fleet number is still gated on DGX access + orchestration.
+end-to-end MEASURED fleet number is still gated on GPU server access + orchestration.
 
 ---
 

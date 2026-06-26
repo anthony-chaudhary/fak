@@ -74,6 +74,20 @@ case "$cmd" in
     go build -tags cuda ./internal/compute/
     echo "[cuda] OK build"
     ;;
+  binary)
+    # Build a -tags cuda binary of an arbitrary package with the SAME resolved CGO env
+    # (the -I/-L/-rpath set discovered above) + the freshly compiled libfakcuda.a, so a
+    # node-side serve/bench script links the cuda backend exactly like the witness tests
+    # do — no hand-rolled -L$CUDA_HOME/lib64 that silently drops -lfakcuda on a layout
+    # without lib64 (the prior dgx_glm_throughput_run.sh bug). Pairs with
+    # tools/glm52_fak_native_serve.sh.
+    #   usage: build_cuda.sh binary <pkg> <out-abs-path>
+    pkg="${2:?usage: build_cuda.sh binary <pkg> <out>}"
+    out="${3:?usage: build_cuda.sh binary <pkg> <out>}"
+    echo "[cuda] go build -tags cuda -o $out $pkg ..."
+    go build -tags cuda -o "$out" "$pkg"
+    echo "[cuda] OK binary $out"
+    ;;
   test)
     echo "[cuda] go test -tags cuda (default: graphs off) ..."
     go test -tags cuda -count=1 -run 'CUDA|HALDevice' ./internal/compute/ ./internal/model/

@@ -46,7 +46,14 @@ NCPU_MOE="${NCPU_MOE:-999}"
 CTX="${CTX:-8192}"
 PHASE="$GLM_DIR/PHASE"
 LOG="$GLM_DIR/stage_serve.log"
-export PATH="/usr/local/go/bin:/usr/local/cuda-12.8/bin:$PATH"
+# CUDA toolkit bin on PATH for the sm_80 llama.cpp build under systemd's clean env. The DGX
+# example ships CUDA 12.8; the GCP Deep-Learning image ships 12.9 at /usr/local/cuda. Prefer
+# CUDA_BIN, then the generic symlink, then known versions — so the SAME script builds on the
+# DGX A100 and a GCP a2 A100 node (the "bring the DGX example to GCP" path) with no edit.
+export PATH="/usr/local/go/bin:$PATH"
+for _cuda in "${CUDA_BIN:-}" /usr/local/cuda/bin /usr/local/cuda-12.9/bin /usr/local/cuda-12.8/bin; do
+  if [ -n "$_cuda" ] && [ -d "$_cuda" ]; then export PATH="$_cuda:$PATH"; break; fi
+done
 
 mkdir -p "$GLM_DIR"
 ph(){ echo "$(date -u +%H:%M:%S) $*" | tee -a "$LOG"; echo "$*" > "$PHASE"; }

@@ -29,6 +29,6 @@
     "tier": "a3-ultra-h200 (a3-ultragpu-8g, 8x H200, sm_90, ~$60/hr)",
     "renders": "gcloud compute instances create ... --accelerator=type=nvidia-h200-141gb,count=8 + the preflight-gated glm52_sglang_vllm_serve.sh + the claude-glm-gcp hand-off"
   },
-  "contract_test": "tools/claude_glm_gcp_test.py (5 cases) + tools/gcp_accel_test.py emit-shell — 19 passed",
+  "contract_test": "go test ./cmd/fak -run TestClaudeGLMGCP (5 cases) + tools/gcp_accel_test.py emit-shell — 19 passed",
   "hardware_gated_remaining": "Run scripts/gcp-glm-serve.sh --apply on an authenticated host with H200/B200 quota, tunnel to its /v1, then: claude-glm-gcp --probe \"say pong\"."
 }

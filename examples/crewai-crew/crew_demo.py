@@ -33,11 +33,20 @@ import os
 import sys
 import urllib.error
 import urllib.request
+import atexit
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 POLICY_PATH = Path(__file__).with_name("policy.json")
+
+
+def cleanup() -> None:
+    """No-op teardown marker: the demo is read-only today and future temp state belongs here."""
+    return None
+
+
+atexit.register(cleanup)
 
 
 # --------------------------------------------------------------------------- #
