@@ -88,6 +88,8 @@ func main() {
 		cmdTUI(os.Args[2:])
 	case "tui":
 		cmdTUI(os.Args[2:])
+	case "claude-mac-fak":
+		cmdClaudeMacFak(os.Args[2:])
 	case "loop":
 		cmdLoop(os.Args[2:])
 	case "snapshot":
@@ -352,6 +354,12 @@ func usage() {
                  plus garden health, guard proof packets, and a composed overview,
                  with fixture-friendly JSON models for deterministic use. fak tui
                  is the compatibility alias)
+  fak claude-mac-fak [--dry-run] [--probe] [--prompt STR]
+                (one-command Mac gateway dogfood: defaults to the always-on
+                 node-macos-a fak serve gateway, fetches the bearer over ssh when
+                 FAK_GATEWAY_KEY is empty, and opens interactive Claude Code
+                 through the existing fak console agent launcher. --probe runs
+                 a one-shot JSON check)
   fak loop      append | run -- CMD | status | admit
                 (the DURABLE LONG-RUNNING-LOOP ledger: hash-chained fire/admit/start/
                  end/witness events, an OS-scheduler wrapper, a read fold, and the

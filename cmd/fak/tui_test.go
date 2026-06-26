@@ -559,6 +559,98 @@ func TestTUIAgentJSONResolvesClaudeAccount(t *testing.T) {
 	}
 }
 
+func TestTUIAgentGatewayDryRunRedactsBearer(t *testing.T) {
+	t.Setenv("FAK_GATEWAY_KEY", "super-secret-test-key")
+	t.Setenv("API_TIMEOUT_MS", "")
+
+	var stdout, stderr bytes.Buffer
+	code := runTUI(&stdout, &stderr, []string{
+		"agent",
+		"--dry-run",
+		"--gateway-url", "http://node.example:8080/v1",
+		"--model", "lmstudio-community/Qwen3.6-27B-GGUF:Q4_K_M",
+		"--prompt", "Reply with exactly: OK",
+		"--width", "1000",
+	})
+	if code != 0 {
+		t.Fatalf("runTUI agent gateway dry-run code=%d stderr=%s", code, stderr.String())
+	}
+	out := stdout.String()
+	for _, want := range []string{"provider=existing-fak-gateway", "auth=gateway-bearer", "gateway=http://node.example:8080", "ANTHROPIC_BASE_URL", "ANTHROPIC_API_KEY", "<redacted from FAK_GATEWAY_KEY>", "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC", "API_TIMEOUT_MS", "claude -p"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("gateway dry-run output missing %q:\n%s", want, out)
+		}
+	}
+	if strings.Contains(out, "super-secret-test-key") {
+		t.Fatalf("gateway dry-run leaked bearer:\n%s", out)
+	}
+	if strings.Contains(out, "guard --provider") {
+		t.Fatalf("gateway dry-run should launch direct agent, not local guard:\n%s", out)
+	}
+}
+
+func TestTUIAgentGatewayJSONDoesNotEmbedBearer(t *testing.T) {
+	t.Setenv("FAK_GATEWAY_KEY", "super-secret-test-key")
+	t.Setenv("API_TIMEOUT_MS", "")
+
+	var stdout, stderr bytes.Buffer
+	code := runTUI(&stdout, &stderr, []string{
+		"agent",
+		"--json",
+		"--gateway-url", "http://node.example:8080",
+		"--model", "qwen-local",
+		"--prompt", "hello",
+	})
+	if code != 0 {
+		t.Fatalf("runTUI agent gateway json code=%d stderr=%s", code, stderr.String())
+	}
+	if strings.Contains(stdout.String(), "super-secret-test-key") {
+		t.Fatalf("gateway json leaked bearer:\n%s", stdout.String())
+	}
+	var report tuiAgentReport
+	if err := json.Unmarshal(stdout.Bytes(), &report); err != nil {
+		t.Fatalf("unmarshal agent gateway report: %v\n%s", err, stdout.String())
+	}
+	if report.Provider != "existing-fak-gateway" || report.Auth != "gateway-bearer" || report.GatewayURL != "http://node.example:8080" {
+		t.Fatalf("gateway report header = provider %q auth %q url %q", report.Provider, report.Auth, report.GatewayURL)
+	}
+	if hasTUIString(report.Launch, "guard") {
+		t.Fatalf("gateway launch should not include guard: %v", report.Launch)
+	}
+	if got := strings.Join(report.Command, " "); got != "claude -p hello" {
+		t.Fatalf("backend command = %q", got)
+	}
+	if !hasTUIAgentEnvFrom(report.Env, "ANTHROPIC_API_KEY", "FAK_GATEWAY_KEY", true) {
+		t.Fatalf("env = %+v, want sensitive ANTHROPIC_API_KEY from FAK_GATEWAY_KEY", report.Env)
+	}
+	if !hasTUIAgentEnv(report.Env, "ANTHROPIC_BASE_URL", "http://node.example:8080") {
+		t.Fatalf("env = %+v, want ANTHROPIC_BASE_URL", report.Env)
+	}
+	if !hasTUIAgentEnv(report.Env, "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC", "1") {
+		t.Fatalf("env = %+v, want CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1", report.Env)
+	}
+	if !hasTUIAgentEnv(report.Env, "ANTHROPIC_MODEL", "qwen-local") {
+		t.Fatalf("env = %+v, want model tier override", report.Env)
+	}
+}
+
+func TestTUIAgentGatewayRequiresKeyEnv(t *testing.T) {
+	t.Setenv("FAK_GATEWAY_KEY", "")
+
+	var stdout, stderr bytes.Buffer
+	code := runTUI(&stdout, &stderr, []string{
+		"agent",
+		"--json",
+		"--gateway-url", "http://node.example:8080",
+	})
+	if code != 2 {
+		t.Fatalf("runTUI code=%d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "requires FAK_GATEWAY_KEY to be set") {
+		t.Fatalf("stderr = %q", stderr.String())
+	}
+}
+
 func TestTUIOverviewHumanOutputFromFixtures(t *testing.T) {
 	guardPaths := writeTUIGuardFixtures(t)
 	var stdout, stderr bytes.Buffer
@@ -657,6 +749,15 @@ func hasTUIString(values []string, want string) bool {
 func hasTUIAgentEnv(env []tuiAgentEnv, name, value string) bool {
 	for _, kv := range env {
 		if kv.Name == name && kv.Value == value {
+			return true
+		}
+	}
+	return false
+}
+
+func hasTUIAgentEnvFrom(env []tuiAgentEnv, name, from string, sensitive bool) bool {
+	for _, kv := range env {
+		if kv.Name == name && kv.FromEnv == from && kv.Sensitive == sensitive {
 			return true
 		}
 	}

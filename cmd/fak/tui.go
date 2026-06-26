@@ -400,6 +400,7 @@ type tuiAgentReport struct {
 	Mode            string        `json:"mode"`
 	Provider        string        `json:"provider"`
 	Auth            string        `json:"auth"`
+	GatewayURL      string        `json:"gateway_url,omitempty"`
 	Account         string        `json:"account,omitempty"`
 	ResolvedAccount string        `json:"resolved_account,omitempty"`
 	AccountIdentity string        `json:"account_identity,omitempty"`
@@ -418,9 +419,11 @@ type tuiAgentReport struct {
 }
 
 type tuiAgentEnv struct {
-	Name   string `json:"name"`
-	Value  string `json:"value"`
-	Source string `json:"source"`
+	Name      string `json:"name"`
+	Value     string `json:"value,omitempty"`
+	Source    string `json:"source"`
+	FromEnv   string `json:"from_env,omitempty"`
+	Sensitive bool   `json:"sensitive,omitempty"`
 }
 
 type tuiAgentOptions struct {
@@ -439,6 +442,9 @@ type tuiAgentOptions struct {
 	RestartOnBudget     bool
 	RestartLimit        int
 	Passthrough         bool
+	GatewayURL          string
+	GatewayKeyEnv       string
+	APITimeoutMS        int
 }
 
 func cmdTUI(argv []string) { os.Exit(runTUI(os.Stdout, os.Stderr, argv)) }
@@ -928,6 +934,9 @@ func runTUIAgent(stdout, stderr io.Writer, argv []string) int {
 	restartOnBudget := fs.Bool("restart-on-budget", false, "ask guard to relaunch Claude on context-budget exhaustion")
 	restartLimit := fs.Int("restart-limit", 0, "maximum guard relaunches for --restart-on-budget; 0 means unlimited")
 	passthrough := fs.Bool("passthrough", false, "do not force subscription OAuth; let Claude Code forward its own credential")
+	gatewayURL := fs.String("gateway-url", "", "existing fak serve gateway to use instead of starting a local guard, e.g. http://node:8080")
+	gatewayKeyEnv := fs.String("gateway-key-env", "FAK_GATEWAY_KEY", "env var holding the existing gateway bearer for --gateway-url")
+	apiTimeoutMS := fs.Int("api-timeout-ms", 1800000, "API_TIMEOUT_MS for --gateway-url launches; 0 leaves it inherited")
 	atText := fs.String("at", "", "snapshot time (RFC3339 or YYYY-MM-DD, default: now)")
 	width := fs.Int("width", 120, "target terminal width for dry-run human rendering")
 	dryRun := fs.Bool("dry-run", false, "render the launch plan without starting the backend agent")
@@ -948,6 +957,10 @@ func runTUIAgent(stdout, stderr io.Writer, argv []string) int {
 	}
 	if *restartOnBudget && *contextBudget <= 0 {
 		fmt.Fprintln(stderr, "fak console agent: --restart-on-budget requires --context-budget-tokens N")
+		return 2
+	}
+	if *apiTimeoutMS < 0 {
+		fmt.Fprintln(stderr, "fak console agent: --api-timeout-ms must be non-negative")
 		return 2
 	}
 	at, err := parseTUITime(*atText)
@@ -971,6 +984,9 @@ func runTUIAgent(stdout, stderr io.Writer, argv []string) int {
 		RestartOnBudget:     *restartOnBudget,
 		RestartLimit:        *restartLimit,
 		Passthrough:         *passthrough,
+		GatewayURL:          *gatewayURL,
+		GatewayKeyEnv:       *gatewayKeyEnv,
+		APITimeoutMS:        *apiTimeoutMS,
 	}, at, tuiExecutable(), os.Getenv)
 	if err != nil {
 		fmt.Fprintf(stderr, "fak console agent: %v\n", err)
@@ -1125,6 +1141,9 @@ func buildTUIAgentReport(opt tuiAgentOptions, at time.Time, fakPath string, gete
 	if err != nil {
 		return tuiAgentReport{}, err
 	}
+	if strings.TrimSpace(opt.GatewayURL) != "" {
+		return buildTUIAgentGatewayReport(opt, at, backend, command, env, cfgDir, cfgSource, resolvedAccount, identity, notes, getenv)
+	}
 	guardArgs := []string{"guard", "--provider", "anthropic", "--session-id", sessionID}
 	auth := "claude-subscription-oauth"
 	if opt.Passthrough {
@@ -1176,6 +1195,103 @@ func buildTUIAgentReport(opt tuiAgentOptions, at time.Time, fakPath string, gete
 		Env:             env,
 		Notes:           notes,
 	}, nil
+}
+
+func buildTUIAgentGatewayReport(opt tuiAgentOptions, at time.Time, backend string, command []string, env []tuiAgentEnv, cfgDir, cfgSource, resolvedAccount, identity string, notes []string, getenv func(string) string) (tuiAgentReport, error) {
+	if strings.TrimSpace(opt.Policy) != "" || opt.ContextBudgetTokens > 0 || opt.RestartOnBudget || opt.RestartLimit > 0 || opt.Passthrough {
+		return tuiAgentReport{}, fmt.Errorf("--gateway-url launches an existing gateway; guard-only options (--policy, --context-budget-tokens, --restart-on-budget, --restart-limit, --passthrough) do not apply")
+	}
+	gatewayURL, err := normalizeTUIAgentGatewayURL(opt.GatewayURL)
+	if err != nil {
+		return tuiAgentReport{}, err
+	}
+	keyEnv := strings.TrimSpace(opt.GatewayKeyEnv)
+	if keyEnv == "" {
+		keyEnv = "FAK_GATEWAY_KEY"
+	}
+	if strings.TrimSpace(getenv(keyEnv)) == "" {
+		return tuiAgentReport{}, fmt.Errorf("--gateway-url requires %s to be set (or pass --gateway-key-env VAR)", keyEnv)
+	}
+	notes = filterTUIAgentGatewayNotes(notes)
+	env = append(env,
+		tuiAgentEnv{Name: "ANTHROPIC_BASE_URL", Value: gatewayURL, Source: "gateway-url"},
+		tuiAgentEnv{Name: "ANTHROPIC_API_KEY", Source: "env:" + keyEnv, FromEnv: keyEnv, Sensitive: true},
+	)
+	if strings.TrimSpace(getenv("CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC")) == "" {
+		env = append(env, tuiAgentEnv{Name: "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC", Value: "1", Source: "gateway-default"})
+	}
+	model := strings.TrimSpace(opt.Model)
+	if model != "" {
+		for _, name := range []string{
+			"ANTHROPIC_MODEL",
+			"ANTHROPIC_DEFAULT_OPUS_MODEL",
+			"ANTHROPIC_DEFAULT_SONNET_MODEL",
+			"ANTHROPIC_DEFAULT_HAIKU_MODEL",
+			"ANTHROPIC_SMALL_FAST_MODEL",
+		} {
+			env = append(env, tuiAgentEnv{Name: name, Value: model, Source: "model"})
+		}
+	}
+	if opt.APITimeoutMS > 0 && strings.TrimSpace(getenv("API_TIMEOUT_MS")) == "" {
+		env = append(env, tuiAgentEnv{Name: "API_TIMEOUT_MS", Value: strconv.Itoa(opt.APITimeoutMS), Source: "gateway-default"})
+	}
+	notes = append(notes,
+		"launches the agent directly against an existing fak serve gateway; no local fak guard is started",
+		fmt.Sprintf("gateway bearer is read from %s at launch and is not printed in dry-run output", keyEnv),
+	)
+	sessionID := strings.TrimSpace(opt.SessionID)
+	if sessionID == "" {
+		sessionID = "tui-agent"
+	}
+	return tuiAgentReport{
+		Schema:          tuiAgentSchema,
+		At:              at.UTC().Format(time.RFC3339),
+		Backend:         backend,
+		Mode:            "launch",
+		Provider:        "existing-fak-gateway",
+		Auth:            "gateway-bearer",
+		GatewayURL:      gatewayURL,
+		Account:         strings.TrimSpace(opt.Account),
+		ResolvedAccount: resolvedAccount,
+		AccountIdentity: identity,
+		ClaudeConfigDir: cfgDir,
+		ConfigSource:    cfgSource,
+		SessionID:       sessionID,
+		Model:           model,
+		Command:         command,
+		Launch:          command,
+		Env:             env,
+		Notes:           notes,
+	}, nil
+}
+
+func filterTUIAgentGatewayNotes(notes []string) []string {
+	if len(notes) == 0 {
+		return notes
+	}
+	out := notes[:0]
+	for _, note := range notes {
+		if strings.Contains(note, "has no live credentials; Claude may prompt for login") {
+			continue
+		}
+		out = append(out, note)
+	}
+	return out
+}
+
+func normalizeTUIAgentGatewayURL(raw string) (string, error) {
+	u := strings.TrimSpace(raw)
+	if u == "" {
+		return "", fmt.Errorf("--gateway-url must not be empty")
+	}
+	u = strings.TrimRight(u, "/")
+	if strings.HasSuffix(u, "/v1") {
+		u = strings.TrimSuffix(u, "/v1")
+	}
+	if !strings.HasPrefix(u, "http://") && !strings.HasPrefix(u, "https://") {
+		return "", fmt.Errorf("--gateway-url must start with http:// or https://")
+	}
+	return u, nil
 }
 
 func resolveTUIAgentClaudeConfig(opt tuiAgentOptions, getenv func(string) string) ([]tuiAgentEnv, string, string, string, string, []string, error) {
@@ -1261,7 +1377,11 @@ func mergeTUIAgentEnv(base []string, pairs []tuiAgentEnv) []string {
 		if name == "" {
 			continue
 		}
-		line := name + "=" + pair.Value
+		value := pair.Value
+		if strings.TrimSpace(pair.FromEnv) != "" {
+			value = os.Getenv(strings.TrimSpace(pair.FromEnv))
+		}
+		line := name + "=" + value
 		replaced := false
 		for i, cur := range out {
 			k, _, ok := strings.Cut(cur, "=")
@@ -2831,6 +2951,9 @@ func renderTUIAgent(report tuiAgentReport, width int) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "fak console agent  at=%s  backend=%s  provider=%s  mode=dry-run\n", report.At, report.Backend, report.Provider)
 	fmt.Fprintf(&b, "auth=%s  session=%s", report.Auth, report.SessionID)
+	if report.GatewayURL != "" {
+		fmt.Fprintf(&b, "  gateway=%s", report.GatewayURL)
+	}
 	if report.Account != "" {
 		fmt.Fprintf(&b, "  account=%s", report.Account)
 	}
@@ -2845,13 +2968,17 @@ func renderTUIAgent(report tuiAgentReport, width int) string {
 		fmt.Fprintf(&b, "identity=%s\n", report.AccountIdentity)
 	}
 	if report.Policy != "" || report.Model != "" || report.ContextBudget > 0 || report.RestartOnBudget {
-		fmt.Fprintf(&b, "guard_options policy=%s model=%s context=%d restart=%v limit=%d\n",
-			blankTUI(report.Policy), blankTUI(report.Model), report.ContextBudget, report.RestartOnBudget, report.RestartLimit)
+		label := "guard_options"
+		if report.Provider == "existing-fak-gateway" {
+			label = "agent_options"
+		}
+		fmt.Fprintf(&b, "%s policy=%s model=%s context=%d restart=%v limit=%d\n",
+			label, blankTUI(report.Policy), blankTUI(report.Model), report.ContextBudget, report.RestartOnBudget, report.RestartLimit)
 	}
 	if len(report.Env) > 0 {
 		fmt.Fprintln(&b, "\nEnv")
 		for _, kv := range report.Env {
-			fmt.Fprintf(&b, "%-18s %-12s %s\n", kv.Name, kv.Source, trimTUI(kv.Value, maxTUI(20, width-33)))
+			fmt.Fprintf(&b, "%-18s %-12s %s\n", kv.Name, kv.Source, trimTUI(displayTUIAgentEnvValue(kv), maxTUI(20, width-33)))
 		}
 	}
 	fmt.Fprintln(&b, "\nBackend Command")
@@ -2865,6 +2992,19 @@ func renderTUIAgent(report tuiAgentReport, width int) string {
 		}
 	}
 	return b.String()
+}
+
+func displayTUIAgentEnvValue(kv tuiAgentEnv) string {
+	if kv.Sensitive {
+		if kv.FromEnv != "" {
+			return "<redacted from " + kv.FromEnv + ">"
+		}
+		return "<redacted>"
+	}
+	if kv.FromEnv != "" && kv.Value == "" {
+		return "$" + kv.FromEnv
+	}
+	return kv.Value
 }
 
 func renderTUIOverview(report tuiOverviewReport, width int) string {
@@ -3545,7 +3685,8 @@ Alias: fak tui
   fak console guard  --guard-json FILE [--guard-json FILE ...] [--json]
                  [--width N] [--at RFC3339|YYYY-MM-DD]
   fak console agent [--account NAME | --claude-config-dir DIR] [--dry-run]
-                [--prompt STR] [--session-id ID] [--passthrough] [--json]
+                [--prompt STR] [--session-id ID] [--passthrough]
+                [--gateway-url URL --gateway-key-env VAR --model MODEL] [--json]
                 [--] [claude args...]
   fak console overview [--issues-json FILE] [--ledger FILE] [--sessions-json FILE]
                    [--garden-json FILE] [--guard-json FILE ...] [--json]
@@ -3566,9 +3707,10 @@ bundle and renders member health, gating regressions, and advisory actions.
 The guard pane reads existing guard/adjudication JSON artifacts and renders
 denials, reasons, audit status, and proof-packet gaps without replaying calls.
 
-The agent pane launches a real Claude Code backend through `+"`fak guard`"+`. It can pin
-CLAUDE_CONFIG_DIR from `+"`fak accounts`"+` and defaults to the Claude subscription OAuth
-path, so the native TUI can start an actual account-backed agent without an API key.
+The agent pane launches a real Claude Code backend. By default it starts a local
+`+"`fak guard`"+` and pins CLAUDE_CONFIG_DIR from `+"`fak accounts`"+`; with
+--gateway-url it instead launches Claude Code directly against an already-running
+`+"`fak serve`"+` gateway, reading the bearer from --gateway-key-env.
 
 The overview pane composes selected pane models into one ranked spine so
 operators can see issue, loop, session, garden, and guard pressure together.
