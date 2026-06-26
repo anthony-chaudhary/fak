@@ -68,7 +68,14 @@ func TestTurnIntentIsAdvisoryProjection(t *testing.T) {
 	if !(TurnIntent{}).IsZero() {
 		t.Fatal("zero TurnIntent must report IsZero (the safe 'fall back to GPU-visible' default)")
 	}
-	hint := TurnIntent{EndsSoon: true, WillDiscard: true, SharesPrefixWith: "peer", ResultAlreadyKnown: true}
+	hint := TurnIntent{
+		EndsSoon:           true,
+		WillDiscard:        true,
+		SharesPrefixWith:   "peer",
+		ArrivingInMillis:   25,
+		Prefix:             "sha256:known-prefix",
+		ResultAlreadyKnown: true,
+	}
 	if hint.IsZero() {
 		t.Fatal("a populated TurnIntent must NOT report IsZero")
 	}
@@ -115,6 +122,21 @@ func TestStateJSONOmitsZeroTurnIntent(t *testing.T) {
 	}
 	if !strings.Contains(string(raw), `"intent":{"ends_soon":true}`) {
 		t.Fatalf("non-zero intent must be present, got %s", raw)
+	}
+}
+
+func TestTurnIntentForwardReservationFieldsAreAdvisory(t *testing.T) {
+	hint := TurnIntent{ArrivingInMillis: 75, Prefix: "sha256:known-prefix"}
+	if hint.IsZero() {
+		t.Fatal("forward-looking reservation fields must make TurnIntent non-zero")
+	}
+	raw, err := json.Marshal(State{TraceID: "s", Run: Running, Budget: Budget{TurnsLeft: Unbounded, TokensLeft: Unbounded}, Intent: hint})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := string(raw)
+	if !strings.Contains(got, `"arriving_in":75`) || !strings.Contains(got, `"prefix":"sha256:known-prefix"`) {
+		t.Fatalf("forward-looking intent fields missing from JSON: %s", got)
 	}
 }
 

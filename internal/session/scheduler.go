@@ -17,10 +17,19 @@ package session
 // returns on the very next boundary — the priority-queue "let an urgent one pass"
 // move falls straight out of reading fresh state, no scheduler bookkeeping required.
 //
-// Foundation-only: stdlib (sync), off the request path, deterministic (no clock, no
-// randomness) so every policy is unit-testable to an exact pick sequence.
+// Foundation-only: stdlib (sync/time), off the request path, deterministic (no hidden
+// clock, no randomness) so every policy is unit-testable to an exact pick sequence.
 
-import "sync"
+import (
+	"sort"
+	"sync"
+	"time"
+)
+
+// DefaultReservationGrace is the reclaim window after a known-coming turn's predicted
+// arrival. The reservation is advisory and lower-class than real work: if the matching
+// request does not promote before this grace closes, the slot is reclaimed.
+const DefaultReservationGrace = time.Second
 
 // Policy selects how Pick breaks contention among the live, eligible sessions that
 // share one gateway. The zero value is StrictPriority — the safe, trivially-correct
@@ -98,6 +107,27 @@ type SlotEvent struct {
 	Rev     uint64    `json:"rev"`
 }
 
+// SlotReservation is the scheduler's advisory hold for a known-coming turn (#811).
+// It carries the exact prefix identity a host should keep resident and the expiry
+// boundary after which the hold must be reclaimed. It is deliberately not a table
+// write: reservations are scheduler-local policy, lower-class than real requests.
+type SlotReservation struct {
+	TraceID            string `json:"trace_id"`
+	Prefix             string `json:"prefix"`
+	SourceRev          uint64 `json:"source_rev,omitempty"`
+	ReservedAtUnixNano int64  `json:"reserved_at_unix_nano"`
+	ArrivesAtUnixNano  int64  `json:"arrives_at_unix_nano"`
+	ExpiresAtUnixNano  int64  `json:"expires_at_unix_nano"`
+}
+
+// SlotPromotion is returned when a real request matches an active reservation. Promoted
+// false is never returned; the bool return on PromoteReservation carries that bit. The
+// struct exists so a host can record "warm prefix adopted" with the reservation facts.
+type SlotPromotion struct {
+	SlotReservation
+	PromotedAtUnixNano int64 `json:"promoted_at_unix_nano"`
+}
+
 // AttachOptions carries the optional pass-through observers and warn fraction Attach
 // installs alongside the scheduler's own handlers. WatchBudget / WatchTransitions each
 // hold exactly ONE observer, so the scheduler composes: it installs a fan-out handler
@@ -133,15 +163,16 @@ type Scheduler struct {
 	// credits is the WeightedFair virtual-time state: a per-TraceID running credit,
 	// keyed by trace, rebuilt each Pick to hold only the currently-eligible set (so it
 	// is bounded and a session that leaves contention forgets its stale credit).
-	credits map[string]int64
-	onSlot  func(SlotEvent)
+	credits      map[string]int64
+	reservations map[reservationKey]SlotReservation
+	onSlot       func(SlotEvent)
 }
 
 // NewScheduler builds an unattached scheduler under the given Policy. Bind it to a
 // table with Attach before calling Pick; an unattached scheduler's Pick returns no
 // winner.
 func NewScheduler(policy Policy) *Scheduler {
-	return &Scheduler{policy: policy, credits: map[string]int64{}}
+	return &Scheduler{policy: policy, credits: map[string]int64{}, reservations: map[reservationKey]SlotReservation{}}
 }
 
 // Attach binds the scheduler to a table and installs the internal slot-freed handlers
@@ -237,6 +268,92 @@ func (s *Scheduler) Pick() (State, bool) {
 	default:
 		return pickStrictPriority(snap)
 	}
+}
+
+// ReserveKnownComing scans the live snapshot for #811 forward-looking TurnIntent
+// hints and records advisory reservations for those known-coming turns. The returned
+// reservations are the holds a host may use to pin matching KV residency and keep a
+// best-effort slot warm. They are strictly lower class than real requests: Pick ignores
+// them, and ExpireReservations/PromoteReservation reclaim them without touching table
+// state. now is supplied by the caller so the policy remains deterministic in tests.
+func (s *Scheduler) ReserveKnownComing(now time.Time) []SlotReservation {
+	if s == nil {
+		return nil
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.pruneReservationsLocked(now)
+	if s.table == nil {
+		return nil
+	}
+	snap := s.table.Snapshot()
+	out := make([]SlotReservation, 0)
+	for _, st := range snap {
+		r, ok := reservationFromState(st, now)
+		if !ok {
+			s.dropReservationsForTraceLocked(st.TraceID, "")
+			continue
+		}
+		s.dropReservationsForTraceLocked(st.TraceID, r.Prefix)
+		key := reservationKey{trace: r.TraceID, prefix: r.Prefix}
+		if cur, exists := s.reservations[key]; exists && cur.SourceRev == r.SourceRev {
+			out = append(out, cur)
+			continue
+		}
+		s.reservations[key] = r
+		out = append(out, r)
+	}
+	return out
+}
+
+// PromoteReservation adopts an active reservation into the real request slot when the
+// arriving request proves it is the same session and prefix. A prefix mismatch or an
+// expired/missing reservation returns ok=false and leaves any non-matching reservation
+// intact, so the caller falls back to the normal cold path rather than fabricating reuse.
+func (s *Scheduler) PromoteReservation(trace, prefix string, now time.Time) (SlotPromotion, bool) {
+	if s == nil || trace == "" || prefix == "" {
+		return SlotPromotion{}, false
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.pruneReservationsLocked(now)
+	key := reservationKey{trace: trace, prefix: prefix}
+	r, ok := s.reservations[key]
+	if !ok {
+		return SlotPromotion{}, false
+	}
+	delete(s.reservations, key)
+	return SlotPromotion{SlotReservation: r, PromotedAtUnixNano: now.UTC().UnixNano()}, true
+}
+
+// ExpireReservations reclaims stale advisory reservations and returns the slots it
+// dropped. It never mutates session state and never reports a live request as refused;
+// expiry only means the warm hold is gone and a later request must take the normal path.
+func (s *Scheduler) ExpireReservations(now time.Time) []SlotReservation {
+	if s == nil {
+		return nil
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.pruneReservationsLocked(now)
+}
+
+// Reservations returns the currently-active advisory reservations after first applying
+// expiry at now. The returned slice is a copy sorted in deterministic map iteration
+// replacement order by the table-free key fields.
+func (s *Scheduler) Reservations(now time.Time) []SlotReservation {
+	if s == nil {
+		return nil
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.pruneReservationsLocked(now)
+	out := make([]SlotReservation, 0, len(s.reservations))
+	for _, r := range s.reservations {
+		out = append(out, r)
+	}
+	sortReservations(out)
+	return out
 }
 
 // pickStrictPriority returns the first eligible session in snapshot order. Snapshot is
@@ -361,4 +478,66 @@ func slotCauseFor(to RunState) (SlotCause, bool) {
 		return CauseStopped, true
 	}
 	return 0, false
+}
+
+type reservationKey struct {
+	trace  string
+	prefix string
+}
+
+func reservationFromState(st State, now time.Time) (SlotReservation, bool) {
+	if st.Intent.ArrivingInMillis <= 0 || st.Intent.Prefix == "" {
+		return SlotReservation{}, false
+	}
+	if st.Intent.WillDiscard {
+		return SlotReservation{}, false
+	}
+	nowNs := now.UTC().UnixNano()
+	arrives := now.UTC().Add(time.Duration(st.Intent.ArrivingInMillis) * time.Millisecond)
+	expires := arrives.Add(DefaultReservationGrace)
+	return SlotReservation{
+		TraceID:            st.TraceID,
+		Prefix:             st.Intent.Prefix,
+		SourceRev:          st.Rev,
+		ReservedAtUnixNano: nowNs,
+		ArrivesAtUnixNano:  arrives.UnixNano(),
+		ExpiresAtUnixNano:  expires.UnixNano(),
+	}, true
+}
+
+func (s *Scheduler) pruneReservationsLocked(now time.Time) []SlotReservation {
+	if s.reservations == nil {
+		s.reservations = map[reservationKey]SlotReservation{}
+		return nil
+	}
+	nowNs := now.UTC().UnixNano()
+	var expired []SlotReservation
+	for key, r := range s.reservations {
+		if r.ExpiresAtUnixNano > 0 && nowNs >= r.ExpiresAtUnixNano {
+			expired = append(expired, r)
+			delete(s.reservations, key)
+		}
+	}
+	sortReservations(expired)
+	return expired
+}
+
+func (s *Scheduler) dropReservationsForTraceLocked(trace, keepPrefix string) {
+	for key := range s.reservations {
+		if key.trace == trace && (keepPrefix == "" || key.prefix != keepPrefix) {
+			delete(s.reservations, key)
+		}
+	}
+}
+
+func sortReservations(rs []SlotReservation) {
+	sort.Slice(rs, func(i, j int) bool {
+		if rs[i].TraceID != rs[j].TraceID {
+			return rs[i].TraceID < rs[j].TraceID
+		}
+		if rs[i].Prefix != rs[j].Prefix {
+			return rs[i].Prefix < rs[j].Prefix
+		}
+		return rs[i].ReservedAtUnixNano < rs[j].ReservedAtUnixNano
+	})
 }

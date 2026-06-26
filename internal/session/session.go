@@ -244,6 +244,15 @@ type TurnIntent struct {
 	// SharesPrefixWith names another live session (by TraceID) this turn shares a
 	// verbatim prompt prefix with — co-batch / pin the shared KV. "" means no known overlap.
 	SharesPrefixWith string `json:"shares_prefix_with,omitempty"`
+	// ArrivingInMillis is the deterministic forward-looking signal for a known-coming
+	// follow-up turn (issue #811): a tool has been dispatched and the kernel expects this
+	// session to re-enter after roughly this many milliseconds. It is advisory and
+	// expires in the scheduler; <=0 means no forward reservation request.
+	ArrivingInMillis int64 `json:"arriving_in,omitempty"`
+	// Prefix is the known reusable prefix identity for that follow-up turn. It is an
+	// opaque digest/key, never transcript text. A scheduler may pin matching KV residency
+	// and promote the reservation when the real request arrives with the same prefix.
+	Prefix string `json:"prefix,omitempty"`
 	// ResultAlreadyKnown: the call's output is determined — route to the avoid-the-
 	// forward-pass path (ties to vToolcall / vCache, #794/#795).
 	ResultAlreadyKnown bool `json:"result_already_known,omitempty"`
@@ -255,7 +264,8 @@ type TurnIntent struct {
 // positive hint.
 func (ti TurnIntent) IsZero() bool {
 	return !ti.EndsSoon && !ti.IsSpeculative && !ti.WillDiscard &&
-		ti.SharesPrefixWith == "" && !ti.ResultAlreadyKnown
+		ti.SharesPrefixWith == "" && ti.ArrivingInMillis <= 0 && ti.Prefix == "" &&
+		!ti.ResultAlreadyKnown
 }
 
 // DefaultState is the drive a fresh/unseen session reads: Running, unbounded budget,

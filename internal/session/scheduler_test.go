@@ -3,6 +3,7 @@ package session
 import (
 	"sync"
 	"testing"
+	"time"
 )
 
 // slotRecorder collects SlotEvents thread-safely for assertions (the scheduler's
@@ -266,6 +267,105 @@ func TestAttachComposesPassThroughObservers(t *testing.T) {
 	}
 	if ss[1].Cause != CausePaused || ss[1].TraceID != "c2" {
 		t.Fatalf("second slot event = %+v, want CausePaused for c2", ss[1])
+	}
+}
+
+func TestReserveKnownComingPromotesExactPrefixMatch(t *testing.T) {
+	tbl, s := attachedScheduler(t, StrictPriority)
+	now := time.Unix(100, 0)
+	const prefix = "sha256:known-prefix"
+
+	tbl.SetTurnIntent("tool-waiting", TurnIntent{ArrivingInMillis: 50, Prefix: prefix})
+	reserved := s.ReserveKnownComing(now)
+	if len(reserved) != 1 {
+		t.Fatalf("reservations = %+v, want one", reserved)
+	}
+	r := reserved[0]
+	if r.TraceID != "tool-waiting" || r.Prefix != prefix {
+		t.Fatalf("reservation = %+v, want trace/prefix match", r)
+	}
+	if r.ArrivesAtUnixNano != now.Add(50*time.Millisecond).UnixNano() {
+		t.Fatalf("arrives_at = %d, want %d", r.ArrivesAtUnixNano, now.Add(50*time.Millisecond).UnixNano())
+	}
+	if r.ExpiresAtUnixNano != now.Add(50*time.Millisecond).Add(DefaultReservationGrace).UnixNano() {
+		t.Fatalf("expires_at = %d, want arrival+grace", r.ExpiresAtUnixNano)
+	}
+
+	promo, ok := s.PromoteReservation("tool-waiting", prefix, now.Add(20*time.Millisecond))
+	if !ok {
+		t.Fatalf("expected exact trace+prefix match to promote")
+	}
+	if promo.TraceID != "tool-waiting" || promo.Prefix != prefix || promo.PromotedAtUnixNano == 0 {
+		t.Fatalf("promotion = %+v, want adopted reservation with promoted timestamp", promo)
+	}
+	if _, ok := s.PromoteReservation("tool-waiting", prefix, now.Add(21*time.Millisecond)); ok {
+		t.Fatalf("reservation promoted twice; want one adoption only")
+	}
+}
+
+func TestReserveKnownComingRequiresExactPrefixAndExpires(t *testing.T) {
+	tbl, s := attachedScheduler(t, StrictPriority)
+	now := time.Unix(200, 0)
+	const prefix = "sha256:warm"
+
+	tbl.SetTurnIntent("s", TurnIntent{ArrivingInMillis: 10, Prefix: prefix})
+	if got := s.ReserveKnownComing(now); len(got) != 1 {
+		t.Fatalf("reserve = %+v, want one", got)
+	}
+	if _, ok := s.PromoteReservation("s", "sha256:cold", now.Add(5*time.Millisecond)); ok {
+		t.Fatalf("wrong prefix promoted; want cold path")
+	}
+	if got := s.Reservations(now.Add(5 * time.Millisecond)); len(got) != 1 {
+		t.Fatalf("wrong-prefix promotion consumed reservation: %+v", got)
+	}
+
+	expiredAt := now.Add(10 * time.Millisecond).Add(DefaultReservationGrace)
+	expired := s.ExpireReservations(expiredAt)
+	if len(expired) != 1 || expired[0].TraceID != "s" || expired[0].Prefix != prefix {
+		t.Fatalf("expired = %+v, want the stale warm reservation", expired)
+	}
+	if _, ok := s.PromoteReservation("s", prefix, expiredAt); ok {
+		t.Fatalf("expired reservation promoted; want reclaimed cold path")
+	}
+}
+
+func TestReserveKnownComingDropsStalePrefixOnIntentUpdate(t *testing.T) {
+	tbl, s := attachedScheduler(t, StrictPriority)
+	now := time.Unix(250, 0)
+
+	tbl.SetTurnIntent("s", TurnIntent{ArrivingInMillis: 50, Prefix: "sha256:old"})
+	if got := s.ReserveKnownComing(now); len(got) != 1 {
+		t.Fatalf("initial reserve = %+v, want one", got)
+	}
+
+	tbl.SetTurnIntent("s", TurnIntent{ArrivingInMillis: 50, Prefix: "sha256:new"})
+	got := s.ReserveKnownComing(now.Add(10 * time.Millisecond))
+	if len(got) != 1 || got[0].Prefix != "sha256:new" {
+		t.Fatalf("updated reserve = %+v, want only new prefix", got)
+	}
+	if _, ok := s.PromoteReservation("s", "sha256:old", now.Add(20*time.Millisecond)); ok {
+		t.Fatalf("old prefix promoted after intent update; want stale reservation reclaimed")
+	}
+	if _, ok := s.PromoteReservation("s", "sha256:new", now.Add(20*time.Millisecond)); !ok {
+		t.Fatalf("new prefix did not promote")
+	}
+}
+
+func TestReservationsAreLowerClassThanRealPicks(t *testing.T) {
+	tbl, s := attachedScheduler(t, StrictPriority)
+	now := time.Unix(300, 0)
+
+	tbl.SetPriority("future", 0)
+	tbl.Transition("future", Paused, "")
+	tbl.SetTurnIntent("future", TurnIntent{ArrivingInMillis: 100, Prefix: "sha256:future"})
+	tbl.SetPriority("real", 10)
+
+	if got := s.ReserveKnownComing(now); len(got) != 1 {
+		t.Fatalf("reserve future = %+v, want one advisory hold", got)
+	}
+	picked, ok := s.Pick()
+	if !ok || picked.TraceID != "real" {
+		t.Fatalf("Pick with advisory reservation = (%q,%v), want real request", picked.TraceID, ok)
 	}
 }
 
