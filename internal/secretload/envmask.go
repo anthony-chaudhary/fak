@@ -1,6 +1,9 @@
 package secretload
 
-import "strings"
+import (
+	"runtime"
+	"strings"
+)
 
 // SandboxEnvAllowKey names the config/secretload key that extends the inherited
 // child-process environment allow-list. Its value is a comma/semicolon/whitespace
@@ -44,11 +47,11 @@ func SandboxEnvWithLoader(loader *Loader, environ []string, explicit ...string) 
 
 	allow := make(map[string]struct{}, len(defaultSandboxEnvAllow)+8)
 	for _, k := range defaultSandboxEnvAllow {
-		allow[k] = struct{}{}
+		allow[envMapKey(k)] = struct{}{}
 	}
 	if raw, ok := loader.Lookup(SandboxEnvAllowKey); ok {
 		for _, k := range parseEnvNameList(raw) {
-			allow[k] = struct{}{}
+			allow[envMapKey(k)] = struct{}{}
 		}
 	}
 
@@ -60,7 +63,7 @@ func SandboxEnvWithLoader(loader *Loader, environ []string, explicit ...string) 
 		if !ok {
 			continue
 		}
-		if _, keep := allow[k]; !keep {
+		if _, keep := allow[envMapKey(k)]; !keep {
 			continue
 		}
 		if _, overridden := explicitKeys[k]; overridden {
@@ -113,10 +116,21 @@ func envKeySet(env []string) map[string]struct{} {
 	out := make(map[string]struct{}, len(env))
 	for _, kv := range env {
 		if k, ok := envKey(kv); ok {
-			out[k] = struct{}{}
+			out[envMapKey(k)] = struct{}{}
 		}
 	}
 	return out
+}
+
+func envMapKey(k string) string {
+	return envMapKeyForGOOS(k, runtime.GOOS)
+}
+
+func envMapKeyForGOOS(k, goos string) string {
+	if goos == "windows" {
+		return strings.ToUpper(k)
+	}
+	return k
 }
 
 func envKey(kv string) (string, bool) {

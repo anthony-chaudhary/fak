@@ -54,6 +54,15 @@ func TestSandboxEnvInheritEscape(t *testing.T) {
 	}
 }
 
+func TestEnvMapKeyKeepsUnixCaseSensitivity(t *testing.T) {
+	if got := envMapKeyForGOOS("Path", "linux"); got != "Path" {
+		t.Fatalf("linux env key = %q, want Path", got)
+	}
+	if got := envMapKeyForGOOS("Path", "windows"); got != "PATH" {
+		t.Fatalf("windows env key = %q, want PATH", got)
+	}
+}
+
 func envHasKey(env []string, key string) bool {
 	prefix := key + "="
 	for _, kv := range env {
