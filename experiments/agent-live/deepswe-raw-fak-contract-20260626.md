@@ -1,9 +1,10 @@
 # DeepSWE Raw-vs-fak SWE-bench Contract
 
-- Generated: `2026-06-26T02:50:00Z`
+- Generated: `2026-06-26T11:22:10Z`
 - Benchmark: `SWE-bench Verified`
 - Runner: `deepswe`
 - Status: `READY_FOR_EXTERNAL_RUN`
+- Evidence class: `EXTERNAL_RUN_CONTRACT`
 - Boundary: Pre-run contract only: fixes task ids, DeepSWE/R2E-Gym adapter, model id, raw/fak endpoint routing, budget, and official-grader commands. It is not a solve-rate result until both arms produce predictions and the official SWE-bench harness grades them.
 
 ## Task Selection
@@ -27,6 +28,16 @@
 |---|---|---|---|---|
 | `raw-deepswe` | `deepswe-r2e-gym-raw` | `DeepSWE-Preview` | `experiments/agent-live/deepswe-raw-smoke-20260626/predictions.json` | `deepswe-raw-smoke` |
 | `fak-deepswe` | `deepswe-r2e-gym-through-fak-gateway` | `DeepSWE-Preview` | `experiments/agent-live/deepswe-fak-smoke-20260626/predictions.json` | `deepswe-fak-smoke` |
+
+## Compare Evidence Link
+
+- Required: `true`
+- Predictions: `experiments/agent-live/deepswe-raw-smoke-20260626/predictions.json`, `experiments/agent-live/deepswe-fak-smoke-20260626/predictions.json`
+- Metadata: `experiments/agent-live/deepswe-raw-smoke-20260626/meta.json`, `experiments/agent-live/deepswe-fak-smoke-20260626/meta.json`
+- Official eval: `experiments/agent-live/deepswe-raw-smoke-20260626/eval.json`, `experiments/agent-live/deepswe-fak-smoke-20260626/eval.json`
+- fak evidence: `experiments/agent-live/deepswe-fak-smoke-20260626/fak-adjudication-evidence.jsonl`, `experiments/agent-live/deepswe-fak-smoke-20260626/raw-fak-deepswe-compare.json`
+- Join keys: `instance_id`, `runner`, `model`, `prediction_sha256`, `evidence_id`
+- Detail: The raw/fak compare artifact must join each SWE-bench prediction and official grader row to the fak-arm adjudication evidence for the same instance id.
 
 ## Gates
 

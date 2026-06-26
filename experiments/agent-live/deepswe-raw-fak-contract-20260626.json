@@ -1,9 +1,10 @@
 {
   "schema": "fak.swebench-deepswe-raw-fak-contract.v1",
-  "generated_at": "2026-06-26T02:50:00Z",
+  "generated_at": "2026-06-26T11:22:10Z",
   "benchmark": "SWE-bench Verified",
   "runner": "deepswe",
   "status": "READY_FOR_EXTERNAL_RUN",
+  "evidence_class": "EXTERNAL_RUN_CONTRACT",
   "claim_boundary": "Pre-run contract only: fixes task ids, DeepSWE/R2E-Gym adapter, model id, raw/fak endpoint routing, budget, and official-grader commands. It is not a solve-rate result until both arms produce predictions and the official SWE-bench harness grades them.",
   "task_selection": {
     "source": "difficulty map testdata/swebench_smoke.json (5 instances from princeton-nlp/SWE-bench_Verified, bucket-derived geometry)",
@@ -61,6 +62,33 @@
       "eval_command": "python -m swebench.harness.run_evaluation --dataset_name princeton-nlp/SWE-bench_Verified --predictions_path experiments/agent-live/deepswe-fak-smoke-20260626/predictions.json --run_id deepswe-fak-smoke --max_workers 4"
     }
   ],
+  "compare_evidence_link": {
+    "required": true,
+    "predictions": [
+      "experiments/agent-live/deepswe-raw-smoke-20260626/predictions.json",
+      "experiments/agent-live/deepswe-fak-smoke-20260626/predictions.json"
+    ],
+    "metadata": [
+      "experiments/agent-live/deepswe-raw-smoke-20260626/meta.json",
+      "experiments/agent-live/deepswe-fak-smoke-20260626/meta.json"
+    ],
+    "official_eval": [
+      "experiments/agent-live/deepswe-raw-smoke-20260626/eval.json",
+      "experiments/agent-live/deepswe-fak-smoke-20260626/eval.json"
+    ],
+    "fak_evidence": [
+      "experiments/agent-live/deepswe-fak-smoke-20260626/fak-adjudication-evidence.jsonl",
+      "experiments/agent-live/deepswe-fak-smoke-20260626/raw-fak-deepswe-compare.json"
+    ],
+    "join_keys": [
+      "instance_id",
+      "runner",
+      "model",
+      "prediction_sha256",
+      "evidence_id"
+    ],
+    "detail": "The raw/fak compare artifact must join each SWE-bench prediction and official grader row to the fak-arm adjudication evidence for the same instance id."
+  },
   "gates": [
     {
       "name": "fixed_task_ids",

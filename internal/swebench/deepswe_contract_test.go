@@ -35,6 +35,9 @@ func TestBuildDeepSWERawFakContractGatesResultClaim(t *testing.T) {
 	if c.Status != "READY_FOR_EXTERNAL_RUN" {
 		t.Fatalf("status = %q", c.Status)
 	}
+	if c.EvidenceClass != "EXTERNAL_RUN_CONTRACT" {
+		t.Fatalf("evidence class = %q", c.EvidenceClass)
+	}
 	if c.ResultClaimAllowed {
 		t.Fatal("pre-run contract must not allow a result claim")
 	}
@@ -46,6 +49,9 @@ func TestBuildDeepSWERawFakContractGatesResultClaim(t *testing.T) {
 	}
 	if len(c.Arms) != 2 || c.Arms[0].EvalCommand == "" || c.Arms[1].EvalCommand == "" {
 		t.Fatalf("arms missing eval commands: %+v", c.Arms)
+	}
+	if !c.CompareEvidenceLink.Required || len(c.CompareEvidenceLink.Predictions) != 2 || len(c.CompareEvidenceLink.JoinKeys) == 0 {
+		t.Fatalf("compare evidence link = %+v", c.CompareEvidenceLink)
 	}
 	if len(c.RequiredBeforeClaim) == 0 {
 		t.Fatal("contract must list requirements before any result claim")
@@ -82,7 +88,7 @@ func TestRenderDeepSWERawFakContractMarkdown(t *testing.T) {
 		EvalCapability: EvalCapability{Runnable: true},
 	})
 	md := RenderDeepSWERawFakContractMarkdown(c)
-	for _, want := range []string{"DeepSWE Raw-vs-fak SWE-bench Contract", "Required Before Any Result Claim", "same_adapter"} {
+	for _, want := range []string{"DeepSWE Raw-vs-fak SWE-bench Contract", "Compare Evidence Link", "Required Before Any Result Claim", "same_adapter"} {
 		if !strings.Contains(md, want) {
 			t.Fatalf("markdown missing %q:\n%s", want, md)
 		}

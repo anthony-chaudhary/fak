@@ -33,7 +33,7 @@
     "official_eval_reason": "swebench python module not importable on this host"
   },
   "commands": {
-    "run": "$env:FAK_DEEPSWE_RUNNER='go'; $env:FAK_DEEPSWE_RUNNER_ARGS='run ./cmd/fak-deepswe-runner --fixture'; go run ./cmd/fak swebench run --agent deepswe --difficulty testdata/swebench_smoke.json --filter full --limit 2 --model DeepSWE-Preview-fixture --timeout 30s --max-steps 7 --preds-only --output experiments/agent-live/deepswe-adapter-smoke-20260626",
+    "run": "$env:FAK_DEEPSWE_RUNNER='go'; $env:FAK_DEEPSWE_RUNNER_ARGS='run ./cmd/fak-deepswe-runner --fixture'; $env:FAK_SANDBOX_ENV_ALLOW='LocalAppData,GOCACHE'; go run ./cmd/fak swebench run --agent deepswe --difficulty testdata/swebench_smoke.json --filter full --limit 2 --model DeepSWE-Preview-fixture --timeout 30s --max-steps 7 --preds-only --output experiments/agent-live/deepswe-adapter-smoke-20260626",
     "eval": "go run ./cmd/fak swebench eval --predictions experiments/agent-live/deepswe-adapter-smoke-20260626/predictions.json --run-id deepswe-adapter-smoke-20260626 --out experiments/agent-live/deepswe-adapter-smoke-20260626/eval.json"
   },
   "honesty": "This proves the configured DeepSWE adapter execution path emits SWE-bench grader-consumable predictions. It is not a real DeepSWE/R2E-Gym model run and carries no resolve-rate claim."

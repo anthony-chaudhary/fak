@@ -15,6 +15,7 @@ score, pass@1, or resolve rate.
 ```powershell
 $env:FAK_DEEPSWE_RUNNER='go'
 $env:FAK_DEEPSWE_RUNNER_ARGS='run ./cmd/fak-deepswe-runner --fixture'
+$env:FAK_SANDBOX_ENV_ALLOW='LocalAppData,GOCACHE'
 go run ./cmd/fak swebench run `
   --agent deepswe `
   --difficulty testdata/swebench_smoke.json `
@@ -26,6 +27,11 @@ go run ./cmd/fak swebench run `
   --preds-only `
   --output experiments/agent-live/deepswe-adapter-smoke-20260626
 ```
+
+The `FAK_SANDBOX_ENV_ALLOW` line is only for the local `go run` fixture
+adapter on Windows: the adapter subprocess otherwise cannot see Go's build
+cache location after env masking. A prebuilt DeepSWE/R2E-Gym adapter should not
+need those Go-specific variables.
 
 Official-grader readback:
 

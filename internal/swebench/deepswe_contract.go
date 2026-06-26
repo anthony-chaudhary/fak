@@ -29,22 +29,24 @@ type DeepSWERawFakContractInput struct {
 }
 
 type DeepSWERawFakContract struct {
-	Schema              string             `json:"schema"`
-	GeneratedAt         string             `json:"generated_at"`
-	Benchmark           string             `json:"benchmark"`
-	Runner              string             `json:"runner"`
-	Status              string             `json:"status"`
-	ClaimBoundary       string             `json:"claim_boundary"`
-	TaskSelection       SmokeTaskSelection `json:"task_selection"`
-	Adapter             DeepSWEAdapterSpec `json:"adapter"`
-	Model               DeepSWEModelSpec   `json:"model"`
-	Budget              DeepSWEBudgetSpec  `json:"budget"`
-	Arms                []SmokeArm         `json:"arms"`
-	Gates               []SmokeGate        `json:"gates"`
-	OfficialGrader      EvalCapability     `json:"official_grader"`
-	CompareMetrics      []string           `json:"compare_metrics"`
-	RequiredBeforeClaim []string           `json:"required_before_claim"`
-	ResultClaimAllowed  bool               `json:"result_claim_allowed"`
+	Schema              string                     `json:"schema"`
+	GeneratedAt         string                     `json:"generated_at"`
+	Benchmark           string                     `json:"benchmark"`
+	Runner              string                     `json:"runner"`
+	Status              string                     `json:"status"`
+	EvidenceClass       string                     `json:"evidence_class"`
+	ClaimBoundary       string                     `json:"claim_boundary"`
+	TaskSelection       SmokeTaskSelection         `json:"task_selection"`
+	Adapter             DeepSWEAdapterSpec         `json:"adapter"`
+	Model               DeepSWEModelSpec           `json:"model"`
+	Budget              DeepSWEBudgetSpec          `json:"budget"`
+	Arms                []SmokeArm                 `json:"arms"`
+	CompareEvidenceLink DeepSWECompareEvidenceLink `json:"compare_evidence_link"`
+	Gates               []SmokeGate                `json:"gates"`
+	OfficialGrader      EvalCapability             `json:"official_grader"`
+	CompareMetrics      []string                   `json:"compare_metrics"`
+	RequiredBeforeClaim []string                   `json:"required_before_claim"`
+	ResultClaimAllowed  bool                       `json:"result_claim_allowed"`
 }
 
 type DeepSWEAdapterSpec struct {
@@ -65,6 +67,16 @@ type DeepSWEBudgetSpec struct {
 	MaxSteps   int    `json:"max_steps"`
 	Timeout    string `json:"timeout"`
 	SameBudget bool   `json:"same_budget"`
+}
+
+type DeepSWECompareEvidenceLink struct {
+	Required     bool     `json:"required"`
+	Predictions  []string `json:"predictions"`
+	Metadata     []string `json:"metadata"`
+	OfficialEval []string `json:"official_eval"`
+	FakEvidence  []string `json:"fak_evidence"`
+	JoinKeys     []string `json:"join_keys"`
+	Detail       string   `json:"detail"`
 }
 
 func BuildDeepSWERawFakContract(in DeepSWERawFakContractInput) DeepSWERawFakContract {
@@ -124,6 +136,7 @@ func BuildDeepSWERawFakContract(in DeepSWERawFakContractInput) DeepSWERawFakCont
 		Benchmark:     "SWE-bench Verified",
 		Runner:        string(RunnerDeepSWE),
 		Status:        deepSWERawFakStatus(gates),
+		EvidenceClass: "EXTERNAL_RUN_CONTRACT",
 		ClaimBoundary: "Pre-run contract only: fixes task ids, DeepSWE/R2E-Gym adapter, model id, raw/fak endpoint routing, budget, and official-grader commands. It is not a solve-rate result until both arms produce predictions and the official SWE-bench harness grades them.",
 		TaskSelection: SmokeTaskSelection{
 			Source:         in.Source,
@@ -150,9 +163,10 @@ func BuildDeepSWERawFakContract(in DeepSWERawFakContractInput) DeepSWERawFakCont
 			Timeout:    in.Timeout,
 			SameBudget: in.MaxSteps > 0 && strings.TrimSpace(in.Timeout) != "",
 		},
-		Arms:           arms,
-		Gates:          gates,
-		OfficialGrader: in.EvalCapability,
+		Arms:                arms,
+		CompareEvidenceLink: deepSWECompareEvidenceLink(in.RawOutputDir, in.FakOutputDir, rawPreds, fakPreds),
+		Gates:               gates,
+		OfficialGrader:      in.EvalCapability,
 		CompareMetrics: []string{
 			"solve_rate",
 			"safe_completion",
@@ -181,6 +195,9 @@ func RenderDeepSWERawFakContractMarkdown(c DeepSWERawFakContract) string {
 	fmt.Fprintf(&b, "- Benchmark: `%s`\n", c.Benchmark)
 	fmt.Fprintf(&b, "- Runner: `%s`\n", c.Runner)
 	fmt.Fprintf(&b, "- Status: `%s`\n", c.Status)
+	if c.EvidenceClass != "" {
+		fmt.Fprintf(&b, "- Evidence class: `%s`\n", c.EvidenceClass)
+	}
 	fmt.Fprintf(&b, "- Boundary: %s\n\n", c.ClaimBoundary)
 
 	fmt.Fprintf(&b, "## Task Selection\n\n")
@@ -211,6 +228,14 @@ func RenderDeepSWERawFakContractMarkdown(c DeepSWERawFakContract) string {
 		fmt.Fprintf(&b, "| `%s` | `%s` | `%s` | `%s` | `%s` |\n",
 			mdCell(arm.Name), mdCell(arm.Harness), mdCell(arm.Model), mdCell(arm.PredictionsPath), mdCell(arm.EvalRunID))
 	}
+	fmt.Fprintf(&b, "\n## Compare Evidence Link\n\n")
+	fmt.Fprintf(&b, "- Required: `%t`\n", c.CompareEvidenceLink.Required)
+	fmt.Fprintf(&b, "- Predictions: `%s`\n", strings.Join(c.CompareEvidenceLink.Predictions, "`, `"))
+	fmt.Fprintf(&b, "- Metadata: `%s`\n", strings.Join(c.CompareEvidenceLink.Metadata, "`, `"))
+	fmt.Fprintf(&b, "- Official eval: `%s`\n", strings.Join(c.CompareEvidenceLink.OfficialEval, "`, `"))
+	fmt.Fprintf(&b, "- fak evidence: `%s`\n", strings.Join(c.CompareEvidenceLink.FakEvidence, "`, `"))
+	fmt.Fprintf(&b, "- Join keys: `%s`\n", strings.Join(c.CompareEvidenceLink.JoinKeys, "`, `"))
+	fmt.Fprintf(&b, "- Detail: %s\n", c.CompareEvidenceLink.Detail)
 	fmt.Fprintf(&b, "\n## Gates\n\n")
 	fmt.Fprintf(&b, "| Gate | OK | Detail |\n")
 	fmt.Fprintf(&b, "|---|:---:|---|\n")
@@ -226,6 +251,36 @@ func RenderDeepSWERawFakContractMarkdown(c DeepSWERawFakContract) string {
 		fmt.Fprintf(&b, "- %s\n", req)
 	}
 	return b.String()
+}
+
+func deepSWECompareEvidenceLink(rawOutputDir, fakOutputDir, rawPreds, fakPreds string) DeepSWECompareEvidenceLink {
+	return DeepSWECompareEvidenceLink{
+		Required: true,
+		Predictions: []string{
+			rawPreds,
+			fakPreds,
+		},
+		Metadata: []string{
+			joinPath(rawOutputDir, "meta.json"),
+			joinPath(fakOutputDir, "meta.json"),
+		},
+		OfficialEval: []string{
+			joinPath(rawOutputDir, "eval.json"),
+			joinPath(fakOutputDir, "eval.json"),
+		},
+		FakEvidence: []string{
+			joinPath(fakOutputDir, "fak-adjudication-evidence.jsonl"),
+			joinPath(fakOutputDir, "raw-fak-deepswe-compare.json"),
+		},
+		JoinKeys: []string{
+			"instance_id",
+			"runner",
+			"model",
+			"prediction_sha256",
+			"evidence_id",
+		},
+		Detail: "The raw/fak compare artifact must join each SWE-bench prediction and official grader row to the fak-arm adjudication evidence for the same instance id.",
+	}
 }
 
 func deepSWERawFakStatus(gates []SmokeGate) string {
