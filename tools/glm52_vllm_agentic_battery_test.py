@@ -254,6 +254,23 @@ class ManifestTest(unittest.TestCase):
         self.assertEqual(doc["shared_config"]["checkpoint_model"], "zai-org/GLM-5.2-FP8")
         self.assertEqual(doc["shared_config"]["selection"], "slice 0:20")
         self.assertEqual(doc["shared_config"]["budget"]["implicit_retries"], 0)
+        self.assertEqual(doc["claim_frame"]["allowed"], "same-model harness gain")
+        self.assertIn("safe_completion_rate", doc["metrics_required"])
+        self.assertIn("cost_proxy.total_tokens", doc["metrics_required"])
+        self.assertIn("policy_blocks", doc["metrics_required"])
+        self.assertIn("evidence_completeness", doc["metrics_required"])
+        metric_names = {
+            row["name"]
+            for row in doc["measurement_requirements"]["per_arm"]
+        }
+        self.assertIn("pass_rate", metric_names)
+        self.assertIn("policy_blocks", metric_names)
+        self.assertEqual(
+            doc["evidence_completeness"]["final_check"],
+            str(contract.with_name("final-check.json")).replace("\\", "/"),
+        )
+        self.assertTrue(doc["evidence_completeness"]["authority_link_required"])
+        self.assertIn("final_check", doc["required_artifacts"])
         self.assertIn("tools/dgx_swebench_compare.py", doc["commands"]["compare_run"])
         self.assertEqual(steps["raw_fak_run_contract"]["artifact_status"], "PASS")
         self.assertIn("--run-contract", final_cmd)
@@ -261,6 +278,32 @@ class ManifestTest(unittest.TestCase):
         self.assertIn(
             "result_claim_allowed=false",
             steps["raw_fak_run_contract"]["claim_boundary"],
+        )
+
+    def test_stale_run_contract_without_required_metrics_is_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            contract = root / "out" / "glm52-agentic-battery" / "raw-vllm-vs-fak-gateway-contract.json"
+            rc = bat.main(base_args(root) + [
+                "--run-contract", str(contract),
+                "--contract-only",
+            ])
+
+            self.assertEqual(rc, 0)
+            doc = json.loads(contract.read_text(encoding="utf-8"))
+            doc["metrics_required"].remove("safe_completion_rate")
+            contract.write_text(json.dumps(doc), encoding="utf-8")
+
+            parser = bat.argparse.ArgumentParser()
+            bat.add_common_args(parser)
+            parsed = parser.parse_args(base_args(root) + ["--run-contract", str(contract)])
+            report = bat.build_report(parsed)
+            steps = {row["id"]: row for row in report["steps"]}
+
+        self.assertEqual(steps["raw_fak_run_contract"]["artifact_status"], "FAIL")
+        self.assertIn(
+            "metrics_required missing safe_completion_rate",
+            steps["raw_fak_run_contract"]["artifact_detail"],
         )
 
     def test_main_writes_contract_before_manifest_check(self) -> None:

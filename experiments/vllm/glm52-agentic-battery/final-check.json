@@ -1,6 +1,6 @@
 {
   "schema": "fak.glm52-vllm-agentic-battery.v1",
-  "generated_at": "2026-06-26T02:37:42.264356Z",
+  "generated_at": "2026-06-26T11:30:21.561748Z",
   "model_family": "zai-org/GLM-5.2",
   "checkpoint_model": "zai-org/GLM-5.2-FP8",
   "served_model_name": "glm-5.2",

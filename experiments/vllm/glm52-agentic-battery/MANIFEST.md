@@ -1,6 +1,6 @@
 # GLM-5.2 vLLM Agentic Benchmark Battery
 
-- Generated: `2026-06-26T02:37:42.264356Z`
+- Generated: `2026-06-26T11:30:11.413499Z`
 - Model family: `zai-org/GLM-5.2`
 - Checkpoint: `zai-org/GLM-5.2-FP8` served as `glm-5.2`
 - Raw vLLM endpoint: `http://127.0.0.1:8000/v1`

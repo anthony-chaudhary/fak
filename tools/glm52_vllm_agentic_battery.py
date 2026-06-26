@@ -36,6 +36,33 @@ DEFAULT_SERVING_OUT_DIR = Path("experiments/glm52")
 DEFAULT_SWE_RUN_DIR = Path("/tmp/swe-glm52-vllm-20")
 REQUIRED_PREFLIGHT_VERDICTS = {"READY", "READY_PENDING_INSTALL"}
 RUN_CONTRACT_SCHEMA = "fak.glm52-vllm-raw-fak-run-contract.v1"
+RUN_CONTRACT_REQUIRED_ARTIFACTS = [
+    "serving_witness",
+    "vllm_tax",
+    "compare_preflight",
+    "compare_result",
+    "compare_markdown",
+    "done_rc",
+    "final_check",
+]
+RUN_CONTRACT_REQUIRED_METRICS = [
+    "completed",
+    "pass_rate",
+    "resolved",
+    "resolve_pct",
+    "safe_completion_rate",
+    "tool_call_counts",
+    "token_counts.prompt_tokens",
+    "token_counts.completion_tokens",
+    "token_counts.total_tokens",
+    "latency.agent_sec",
+    "latency.grade_sec",
+    "latency.gateway_tax",
+    "cost_proxy.total_tokens",
+    "cost_proxy.wall_seconds",
+    "policy_blocks",
+    "evidence_completeness",
+]
 
 
 def utc_now() -> str:
@@ -70,6 +97,15 @@ def nested(doc: dict[str, Any], path: list[str]) -> Any:
             return None
         cur = cur.get(key)
     return cur
+
+
+def require_list_values(problems: list[str], label: str, value: Any, required: list[str]) -> None:
+    if not isinstance(value, list):
+        problems.append(f"{label} missing")
+        return
+    missing = [want for want in required if want not in value]
+    if missing:
+        problems.append(f"{label} missing {', '.join(missing)}")
 
 
 def json_present(path: Path) -> tuple[bool, str]:
@@ -113,6 +149,7 @@ def compare_budget() -> dict[str, Any]:
 
 def build_run_contract(args: argparse.Namespace) -> dict[str, Any]:
     p = paths(args.out_dir, args.serving_out_dir, args.swe_run_dir)
+    run_contract = args.run_contract or default_run_contract_path(args.out_dir)
     selection = f"slice 0:{args.verified_count}"
     raw_base = norm_url(args.base_url)
     gateway_base = DEFAULT_GATEWAY_BASE_URL
@@ -177,18 +214,69 @@ def build_run_contract(args: argparse.Namespace) -> dict[str, Any]:
                 "request_path": "OpenAI-compatible /v1 through fak adjudication",
             },
         ],
-        "metrics_required": [
-            "completed",
-            "resolved",
-            "resolve_pct",
-            "agent_sec",
-            "grade_sec",
-            "patch_bytes",
-            "tool_call_probes.tool_calls",
-            "tool_call_probes.completion_tokens",
-            "vllm_tax.summary.latency_tax",
-            "vllm_tax.summary.decode_tps_tax",
-        ],
+        "claim_frame": {
+            "allowed": "same-model harness gain",
+            "must_not_claim": [
+                "GLM-5.2 superiority over other model families",
+                "fak-native reduced-scale GLM kernel superiority over full-size vLLM serving",
+                "vLLM throughput result before the live artifacts pass",
+            ],
+        },
+        "metrics_required": RUN_CONTRACT_REQUIRED_METRICS,
+        "measurement_requirements": {
+            "per_arm": [
+                {
+                    "name": "pass_rate",
+                    "source": "compare.json arms[].grade.resolve_pct from the official SWE-bench harness",
+                    "required_for": ["raw-vllm", "fak-gateway"],
+                },
+                {
+                    "name": "safe_completion_rate",
+                    "source": "serving witness plus compare artifact safety/completion fields",
+                    "required_for": ["raw-vllm", "fak-gateway"],
+                },
+                {
+                    "name": "token_counts",
+                    "source": "tool-call probes and tax witness usage prompt/completion/total tokens",
+                    "required_for": ["raw-vllm", "fak-gateway"],
+                },
+                {
+                    "name": "tool_call_counts",
+                    "source": "compare.json tool_call_probes[].tool_calls",
+                    "required_for": ["raw-vllm", "fak-gateway"],
+                },
+                {
+                    "name": "latency",
+                    "source": "compare.json arms[].agent.agent_sec, arms[].grade.grade_sec, and tax witness latency",
+                    "required_for": ["raw-vllm", "fak-gateway"],
+                },
+                {
+                    "name": "cost_proxy",
+                    "source": "total tokens plus wall seconds; no dollar claim without a separate price file",
+                    "required_for": ["raw-vllm", "fak-gateway"],
+                },
+                {
+                    "name": "policy_blocks",
+                    "source": "fak-gateway serving/tax/compare evidence; raw-vllm records zero-or-not-applicable explicitly",
+                    "required_for": ["raw-vllm", "fak-gateway"],
+                },
+            ],
+            "cross_arm": [
+                {
+                    "name": "same_task_ids",
+                    "source": "compare.json selection_instance_ids and selection_instance_ids_match",
+                },
+                {
+                    "name": "evidence_completeness",
+                    "source": "final-check.json summary.required_passed/required_artifacts with no missing or failed required artifacts",
+                },
+            ],
+        },
+        "evidence_completeness": {
+            "final_check": slash(run_contract.with_name("final-check.json")),
+            "complete_when": "summary.complete == true and required_missing/required_failed are empty",
+            "authority_link_required": True,
+        },
         "required_artifacts": {
             "serving_witness": slash(p["serving_json"]),
             "vllm_tax": slash(p["tax_json"]),
@@ -196,6 +284,7 @@ def build_run_contract(args: argparse.Namespace) -> dict[str, Any]:
             "compare_result": slash(p["swe_compare_json"]),
             "compare_markdown": slash(p["swe_compare_md"]),
             "done_rc": slash(p["swe_compare_done"]),
+            "final_check": slash(run_contract.with_name("final-check.json")),
         },
         "commands": {
             "compare_preflight": shell_join(swe_common + ["--preflight-only"]),
@@ -267,9 +356,51 @@ def check_run_contract(path: Path, expected: dict[str, Any]) -> tuple[bool, str]
         if gateway.get("model") != expected["served_model_name"]:
             problems.append(f"fak-gateway.model={gateway.get('model')!r}")
     required = doc.get("required_artifacts") if isinstance(doc.get("required_artifacts"), dict) else {}
-    for key in ("compare_preflight", "compare_result", "done_rc"):
+    for key in RUN_CONTRACT_REQUIRED_ARTIFACTS:
         if not isinstance(required.get(key), str) or not required.get(key):
             problems.append(f"required_artifacts.{key} missing")
+    require_list_values(problems, "metrics_required", doc.get("metrics_required"),
+                        RUN_CONTRACT_REQUIRED_METRICS)
+    claim_frame = doc.get("claim_frame")
+    if not isinstance(claim_frame, dict):
+        problems.append("claim_frame missing")
+    else:
+        if claim_frame.get("allowed") != "same-model harness gain":
+            problems.append(f"claim_frame.allowed={claim_frame.get('allowed')!r}")
+        forbidden = claim_frame.get("must_not_claim")
+        if not isinstance(forbidden, list) or not any("model families" in str(row) for row in forbidden):
+            problems.append("claim_frame.must_not_claim missing model-family guard")
+    measurement = doc.get("measurement_requirements")
+    if not isinstance(measurement, dict):
+        problems.append("measurement_requirements missing")
+    else:
+        per_arm = measurement.get("per_arm")
+        if not isinstance(per_arm, list):
+            problems.append("measurement_requirements.per_arm missing")
+        else:
+            names = [str(row.get("name")) for row in per_arm if isinstance(row, dict)]
+            for want in ("pass_rate", "safe_completion_rate", "token_counts",
+                         "tool_call_counts", "latency", "cost_proxy", "policy_blocks"):
+                if want not in names:
+                    problems.append(f"measurement_requirements.per_arm missing {want}")
+        cross_arm = measurement.get("cross_arm")
+        if not isinstance(cross_arm, list):
+            problems.append("measurement_requirements.cross_arm missing")
+        else:
+            names = [str(row.get("name")) for row in cross_arm if isinstance(row, dict)]
+            for want in ("same_task_ids", "evidence_completeness"):
+                if want not in names:
+                    problems.append(f"measurement_requirements.cross_arm missing {want}")
+    completeness = doc.get("evidence_completeness")
+    if not isinstance(completeness, dict):
+        problems.append("evidence_completeness missing")
+    else:
+        if not isinstance(completeness.get("final_check"), str) or not completeness.get("final_check"):
+            problems.append("evidence_completeness.final_check missing")
+        if completeness.get("authority_link_required") is not True:
+            problems.append(
+                f"evidence_completeness.authority_link_required={completeness.get('authority_link_required')!r}"
+            )
     commands = doc.get("commands") if isinstance(doc.get("commands"), dict) else {}
     if "tools/dgx_swebench_compare.py" not in str(commands.get("compare_run", "")):
         problems.append("commands.compare_run missing dgx_swebench_compare.py")

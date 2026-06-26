@@ -167,6 +167,12 @@ The benchmark is complete only when all of these are true:
   the two arms (`raw-vllm`, `fak-gateway`), the shared GLM-5.2/vLLM identity,
   the 20-task selection, budgets/retry policy, required metrics, and result
   artifact paths.
+- The run contract's required metrics include pass rate, safe-completion rate,
+  prompt/completion/total token counts, tool-call counts, agent/grade/gateway
+  latency, token and wall-clock cost proxies, policy blocks, and evidence
+  completeness.
+- The run contract frames any positive result as a same-model harness gain, not
+  GLM-5.2 model superiority or a fak-native kernel throughput win over vLLM.
 - `full-size-serving-witness.json` has `summary.full_size_serving_witness == "PASS"`.
 - `adjudication-tax-witness.json` reports measured raw-vLLM and fak-gateway legs.
 - SWE-bench `COMPARE-PREFLIGHT.json` passes and records `config` plus `runtime`

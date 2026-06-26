@@ -1,6 +1,6 @@
 {
   "schema": "fak.glm52-vllm-raw-fak-run-contract.v1",
-  "generated_at": "2026-06-26T01:34:00.567494Z",
+  "generated_at": "2026-06-26T11:30:21.560421Z",
   "status": "PENDING_MEASUREMENT",
   "result_claim_allowed": false,
   "result_claim_allowed_when": [
@@ -52,25 +52,115 @@
       "request_path": "OpenAI-compatible /v1 through fak adjudication"
     }
   ],
+  "claim_frame": {
+    "allowed": "same-model harness gain",
+    "must_not_claim": [
+      "GLM-5.2 superiority over other model families",
+      "fak-native reduced-scale GLM kernel superiority over full-size vLLM serving",
+      "vLLM throughput result before the live artifacts pass"
+    ]
+  },
   "metrics_required": [
     "completed",
+    "pass_rate",
     "resolved",
     "resolve_pct",
-    "agent_sec",
-    "grade_sec",
-    "patch_bytes",
-    "tool_call_probes.tool_calls",
-    "tool_call_probes.completion_tokens",
-    "vllm_tax.summary.latency_tax",
-    "vllm_tax.summary.decode_tps_tax"
+    "safe_completion_rate",
+    "tool_call_counts",
+    "token_counts.prompt_tokens",
+    "token_counts.completion_tokens",
+    "token_counts.total_tokens",
+    "latency.agent_sec",
+    "latency.grade_sec",
+    "latency.gateway_tax",
+    "cost_proxy.total_tokens",
+    "cost_proxy.wall_seconds",
+    "policy_blocks",
+    "evidence_completeness"
   ],
+  "measurement_requirements": {
+    "per_arm": [
+      {
+        "name": "pass_rate",
+        "source": "compare.json arms[].grade.resolve_pct from the official SWE-bench harness",
+        "required_for": [
+          "raw-vllm",
+          "fak-gateway"
+        ]
+      },
+      {
+        "name": "safe_completion_rate",
+        "source": "serving witness plus compare artifact safety/completion fields",
+        "required_for": [
+          "raw-vllm",
+          "fak-gateway"
+        ]
+      },
+      {
+        "name": "token_counts",
+        "source": "tool-call probes and tax witness usage prompt/completion/total tokens",
+        "required_for": [
+          "raw-vllm",
+          "fak-gateway"
+        ]
+      },
+      {
+        "name": "tool_call_counts",
+        "source": "compare.json tool_call_probes[].tool_calls",
+        "required_for": [
+          "raw-vllm",
+          "fak-gateway"
+        ]
+      },
+      {
+        "name": "latency",
+        "source": "compare.json arms[].agent.agent_sec, arms[].grade.grade_sec, and tax witness latency",
+        "required_for": [
+          "raw-vllm",
+          "fak-gateway"
+        ]
+      },
+      {
+        "name": "cost_proxy",
+        "source": "total tokens plus wall seconds; no dollar claim without a separate price file",
+        "required_for": [
+          "raw-vllm",
+          "fak-gateway"
+        ]
+      },
+      {
+        "name": "policy_blocks",
+        "source": "fak-gateway serving/tax/compare evidence; raw-vllm records zero-or-not-applicable explicitly",
+        "required_for": [
+          "raw-vllm",
+          "fak-gateway"
+        ]
+      }
+    ],
+    "cross_arm": [
+      {
+        "name": "same_task_ids",
+        "source": "compare.json selection_instance_ids and selection_instance_ids_match"
+      },
+      {
+        "name": "evidence_completeness",
+        "source": "final-check.json summary.required_passed/required_artifacts with no missing or failed required artifacts"
+      }
+    ]
+  },
+  "evidence_completeness": {
+    "final_check": "experiments/vllm/glm52-agentic-battery/final-check.json",
+    "complete_when": "summary.complete == true and required_missing/required_failed are empty",
+    "authority_link_required": true
+  },
   "required_artifacts": {
     "serving_witness": "experiments/glm52/full-size-serving-witness.json",
     "vllm_tax": "experiments/vllm/adjudication-tax-witness.json",
     "compare_preflight": "/tmp/swe-glm52-vllm-20/COMPARE-PREFLIGHT.json",
     "compare_result": "/tmp/swe-glm52-vllm-20/compare.json",
     "compare_markdown": "/tmp/swe-glm52-vllm-20/COMPARE.md",
-    "done_rc": "/tmp/swe-glm52-vllm-20/DONE.rc"
+    "done_rc": "/tmp/swe-glm52-vllm-20/DONE.rc",
+    "final_check": "experiments/vllm/glm52-agentic-battery/final-check.json"
   },
   "commands": {
     "compare_preflight": "python tools/dgx_swebench_compare.py --engine vllm --model zai-org/GLM-5.2-FP8 --served-model-name glm-5.2 --raw-base-url http://127.0.0.1:8000/v1 --verified-count 20 --skip-engine-serve --require-tool-calls --require-grade --run-dir /tmp/swe-glm52-vllm-20 --require-gpu-name H200 --preflight-only",
