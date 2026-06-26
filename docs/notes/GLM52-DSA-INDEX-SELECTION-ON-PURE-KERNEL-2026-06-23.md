@@ -115,6 +115,12 @@ is:
 The flagship-scale residual is unchanged and out of scope: the real 753B does not fit pure on an 8×
 GPU server (INT4 ≈ 376 GB > 320 GB) — the SGLang-serves + fak-fronts path, not the native engine.
 
+> **Superseded by progress (#917; see the [staged plan](native-753b-track-staged-plan.md)).**
+> The "SGLang-serves, not the native engine" posture above was the 2026-06-23 snapshot; once
+> `--cpu-offload-experts` shipped, fak's own engine loaded the full 466 GB model natively
+> ([2026-06-25 native-serve note](GLM52-FAK-NATIVE-SERVE-LOAD-SPEED-2026-06-25.md)). The
+> index-selection slice this note records stands; the flagship-serving direction does not.
+
 ## What is proven vs not (labeled)
 
 - **Proven on-box today (WSL go1.26):** GLM-5.2's DSA indexer score + top-k SELECTION routes through

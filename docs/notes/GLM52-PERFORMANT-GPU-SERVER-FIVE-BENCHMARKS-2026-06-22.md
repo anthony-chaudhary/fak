@@ -111,6 +111,14 @@ right now** — the on-device proof is reproducible, not a frozen one-off.
   the flagship at scale is the SGLang/vLLM-serves + fak-fronts path
   ([`QWEN36-27B-GPU-SERVER-RESULTS.md`](../benchmarks/QWEN36-27B-GPU-SERVER-RESULTS.md) is the
   analogous served-model rung), not the native engine — a tracked long arc.
+
+  > **Superseded by progress (#917; see the [staged plan](native-753b-track-staged-plan.md)).**
+  > The "flagship serving is the SGLang/vLLM path … the pure fak kernel has no CPU-offload"
+  > posture above was the 2026-06-22 snapshot; `--cpu-offload-experts` has since shipped and
+  > fak's own engine loads the full 466 GB model natively
+  > ([2026-06-25 native-serve note](GLM52-FAK-NATIVE-SERVE-LOAD-SPEED-2026-06-25.md)). The
+  > benchmark / MoE-on-kernel witnesses this note records stand; the "not the native engine"
+  > serving direction does not.
 - **No fresh same-session GPU re-run was taken.** The live control sessions are
   shared fleet worker shells; re-running the GPU witness on one would risk colliding
   with a peer's in-flight work, so this note rests the on-device claim on the

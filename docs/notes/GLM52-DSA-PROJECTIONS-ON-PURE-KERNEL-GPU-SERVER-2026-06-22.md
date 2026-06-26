@@ -121,6 +121,12 @@ The flagship-scale residual is unchanged and out of scope here: the real 753B do
 fit pure on an 8-GPU datacenter server (INT4 ≈ 376 GB > 320 GB) and needs the multi-GPU
 NCCL/offload reshape — the SGLang-serves + fak-fronts path, not the native engine.
 
+> **Superseded by progress (#917; see the [staged plan](native-753b-track-staged-plan.md)).**
+> The "SGLang-serves, not the native engine" posture above was the 2026-06-22 snapshot; once
+> `--cpu-offload-experts` shipped, fak's own engine loaded the full 466 GB model natively
+> ([2026-06-25 native-serve note](GLM52-FAK-NATIVE-SERVE-LOAD-SPEED-2026-06-25.md)). The
+> DSA-projection slice this note records stands; the flagship-serving direction does not.
+
 ## What is proven vs not (labeled)
 
 - **Proven on-box today:** GLM-5.2's DSA attention dense projections route through the

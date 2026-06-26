@@ -12,6 +12,13 @@ description: "Fresh on-hardware capture: GLM-5.2's complete DSA forward — the 
 > full-size 753B *serving* still routes through llama.cpp (the labeled comparison), because
 > fak's native engine is f32 / no quantized-GGUF device GEMM today.
 
+> **Superseded by progress (#917; see the [staged plan](native-753b-track-staged-plan.md)).**
+> The "753B serving still routes through llama.cpp … no quantized-GGUF device GEMM" boundary
+> above was the 2026-06-23 snapshot; the quantized device GEMM + `--cpu-offload-experts` rungs
+> have since landed and fak's own engine loads the full 466 GB model natively
+> ([2026-06-25 native-serve note](GLM52-FAK-NATIVE-SERVE-LOAD-SPEED-2026-06-25.md)). The
+> sm_80 DSA-forward witness this note records stands; the serving boundary does not.
+
 ## The headline: the full DSA forward on sm_80, cosine = 1.000000
 
 Until today the on-hardware GLM-5.2 pure-kernel captures were split across two arches:
