@@ -277,6 +277,128 @@ func TestShardedQuantOnLoadWeightSource(t *testing.T) {
 		q8Resident, f32Resident, resident, f32SizeOfQuantWeights, float64(f32SizeOfQuantWeights)/float64(q8Resident))
 }
 
+func TestQwen25ProductionShardedQuantLoadContract(t *testing.T) {
+	tests := []struct {
+		name      string
+		cfg       Config
+		groupSize int
+	}{
+		{
+			name: "7b-contract",
+			cfg: Config{
+				HiddenSize: 224, NumLayers: 1, NumHeads: 7, NumKVHeads: 1, HeadDim: 32,
+				IntermediateSize: 320, VocabSize: 64, RMSNormEps: 1e-6, RopeTheta: 1000000,
+				TieWordEmbeddings: false, AttentionBias: true, HiddenAct: "silu",
+				ModelType: "qwen2", MaxPositionEmbeddings: 32768,
+			},
+			groupSize: 7, // real Qwen2.5-7B is 28 query heads / 4 KV heads.
+		},
+		{
+			name: "32b-contract",
+			cfg: Config{
+				HiddenSize: 160, NumLayers: 1, NumHeads: 5, NumKVHeads: 1, HeadDim: 32,
+				IntermediateSize: 256, VocabSize: 64, RMSNormEps: 1e-6, RopeTheta: 1000000,
+				TieWordEmbeddings: false, AttentionBias: true, HiddenAct: "silu",
+				ModelType: "qwen2", MaxPositionEmbeddings: 32768,
+			},
+			groupSize: 5, // real Qwen2.5-32B is 40 query heads / 8 KV heads.
+		},
+	}
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			dir := buildQwen25ProductionShardFixture(t, tt.cfg)
+			m, err := LoadSafetensorsQuantDir(dir, tt.cfg)
+			if err != nil {
+				t.Fatalf("LoadSafetensorsQuantDir: %v", err)
+			}
+
+			if m.Cfg.ModelType != "qwen2" || !m.Cfg.AttentionBias || m.Cfg.activationName() != "silu" {
+				t.Fatalf("qwen2 axes not preserved: model_type=%q attention_bias=%v act=%q",
+					m.Cfg.ModelType, m.Cfg.AttentionBias, m.Cfg.activationName())
+			}
+			if got := m.Cfg.GroupSize(); got != tt.groupSize {
+				t.Fatalf("GQA group size = %d, want %d", got, tt.groupSize)
+			}
+
+			H, I, V := tt.cfg.HiddenSize, tt.cfg.IntermediateSize, tt.cfg.VocabSize
+			qRows := tt.cfg.NumHeads * tt.cfg.HeadDim
+			kvRows := tt.cfg.NumKVHeads * tt.cfg.HeadDim
+			assertQ8Shape(t, m, layerName(0, "self_attn.q_proj.weight"), qRows, H)
+			assertQ8Shape(t, m, layerName(0, "self_attn.k_proj.weight"), kvRows, H)
+			assertQ8Shape(t, m, layerName(0, "self_attn.v_proj.weight"), kvRows, H)
+			assertQ8Shape(t, m, layerName(0, "self_attn.o_proj.weight"), H, qRows)
+			assertQ8Shape(t, m, layerName(0, "mlp.gate_proj.weight"), I, H)
+			assertQ8Shape(t, m, layerName(0, "mlp.up_proj.weight"), I, H)
+			assertQ8Shape(t, m, layerName(0, "mlp.down_proj.weight"), H, I)
+			assertQ8Shape(t, m, "lm_head.weight", V, H)
+
+			assertTensorShape(t, m, "model.embed_tokens.weight", []int{V, H})
+			assertTensorShape(t, m, "model.norm.weight", []int{H})
+			assertTensorShape(t, m, layerName(0, "input_layernorm.weight"), []int{H})
+			assertTensorShape(t, m, layerName(0, "post_attention_layernorm.weight"), []int{H})
+			assertTensorShape(t, m, layerName(0, "self_attn.q_proj.bias"), []int{qRows})
+			assertTensorShape(t, m, layerName(0, "self_attn.k_proj.bias"), []int{kvRows})
+			assertTensorShape(t, m, layerName(0, "self_attn.v_proj.bias"), []int{kvRows})
+
+			assertQuantPrefillFinite(t, m, tt.cfg)
+		})
+	}
+}
+
+func buildQwen25ProductionShardFixture(t *testing.T, cfg Config) string {
+	t.Helper()
+	dir := t.TempDir()
+	H, I, V := cfg.HiddenSize, cfg.IntermediateSize, cfg.VocabSize
+	qRows := cfg.NumHeads * cfg.HeadDim
+	kvRows := cfg.NumKVHeads * cfg.HeadDim
+
+	shard1 := []stTensor{
+		{layerName(0, "self_attn.q_proj.weight"), []int{qRows, H}, rampF32(qRows*H, 11)},
+		{layerName(0, "self_attn.k_proj.weight"), []int{kvRows, H}, rampF32(kvRows*H, 12)},
+		{layerName(0, "self_attn.v_proj.weight"), []int{kvRows, H}, rampF32(kvRows*H, 13)},
+		{layerName(0, "self_attn.o_proj.weight"), []int{H, qRows}, rampF32(H*qRows, 14)},
+		{layerName(0, "self_attn.q_proj.bias"), []int{qRows}, rampF32(qRows, 15)},
+		{layerName(0, "self_attn.k_proj.bias"), []int{kvRows}, rampF32(kvRows, 16)},
+		{layerName(0, "self_attn.v_proj.bias"), []int{kvRows}, rampF32(kvRows, 17)},
+		{layerName(0, "input_layernorm.weight"), []int{H}, ones(H)},
+		{layerName(0, "post_attention_layernorm.weight"), []int{H}, ones(H)},
+	}
+	shard2 := []stTensor{
+		{layerName(0, "mlp.gate_proj.weight"), []int{I, H}, rampF32(I*H, 18)},
+		{layerName(0, "mlp.up_proj.weight"), []int{I, H}, rampF32(I*H, 19)},
+		{layerName(0, "mlp.down_proj.weight"), []int{H, I}, rampF32(H*I, 20)},
+		{"model.embed_tokens.weight", []int{V, H}, rampF32(V*H, 21)},
+		{"model.norm.weight", []int{H}, ones(H)},
+		{"lm_head.weight", []int{V, H}, rampF32(V*H, 22)},
+	}
+
+	shard1Name := "model-00001-of-00002.safetensors"
+	shard2Name := "model-00002-of-00002.safetensors"
+	writeSafetensorsShard(t, filepath.Join(dir, shard1Name), shard1)
+	writeSafetensorsShard(t, filepath.Join(dir, shard2Name), shard2)
+
+	weightMap := map[string]string{}
+	for _, ts := range shard1 {
+		weightMap[ts.name] = shard1Name
+	}
+	for _, ts := range shard2 {
+		weightMap[ts.name] = shard2Name
+	}
+	index := map[string]any{
+		"metadata":   map[string]any{"total_size": 0},
+		"weight_map": weightMap,
+	}
+	ib, err := json.Marshal(index)
+	if err != nil {
+		t.Fatalf("marshal index: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "model.safetensors.index.json"), ib, 0o644); err != nil {
+		t.Fatalf("write index: %v", err)
+	}
+	return dir
+}
+
 // residentQ8Bytes totals the bytes the Q8_0 store actually holds resident: int8 codes (1
 // B/code) + per-block f32 scales (4 B each). This is the quant-on-load footprint of the big
 // weights — what peak RSS reflects, not the f32 the loader never built.
