@@ -151,6 +151,14 @@ func (s *WeightSource) EstimateCPUOffloadExpertsMemoryPlan() (compute.MemoryPlan
 
 func tensorCPUOffloadExpert(name, modelType string) (bool, error) {
 	if modelType == "glm_moe_dsa" {
+		// The MTP ("nextn") head + vision tower are skipped at load (the text forward never
+		// reads them), so they contribute NOTHING to the memory plan — classify them as a
+		// zero-cost non-expert and let the caller's tensor-byte accounting drop them. This must
+		// match the loader skip (glmMoeDsaSkipGGUFTensor) or the estimate would reject a real
+		// GLM-5.2 checkpoint the loader happily loads.
+		if glmMoeDsaSkipGGUFTensor(name) {
+			return false, nil
+		}
 		if _, _, ok := glmMoeDsaBatchedExpert(name); ok {
 			return true, nil
 		}
