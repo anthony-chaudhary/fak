@@ -318,6 +318,7 @@ func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 	// empty stop), so an OpenAI client that omits them gets the planner default —
 	// identical to the pre-seam behavior — while one asking for a long completion is
 	// no longer hard-capped at the planner's 1024-token floor (#62).
+	began := time.Now()
 	comp, err := s.completeServed(ctx, sessionTurn, req.Messages, req.Tools,
 		agent.WithModel(req.Model), // no-op when the client omitted model
 		agent.WithMaxTokens(sessionTurn.maxTokensFor(req.MaxTokens)),
@@ -374,6 +375,7 @@ func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 	if respModel == "" {
 		respModel = reqModel
 	}
+	s.logInferenceTurn(reqTrace, "openai_chat_completions", req.Stream, comp.Usage, finish, time.Since(began), false)
 	resp := ChatResponse{
 		ID:      "chatcmpl-fak-" + itoa(uint64(time.Now().UnixNano())),
 		Object:  "chat.completion",

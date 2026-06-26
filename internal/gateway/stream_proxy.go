@@ -153,6 +153,7 @@ func (s *Server) streamChatLive(ctx context.Context, w http.ResponseWriter, req 
 		// normal stop to an OpenAI client.
 		finish = "stop"
 	}
+	s.logInferenceTurn(reqTrace, "openai_chat_completions", true, comp.Usage, finish, time.Since(began), false)
 
 	// Open the stream even for an empty turn (zero content, zero kept calls) so the
 	// client always gets a well-formed role → finish → [DONE] sequence.

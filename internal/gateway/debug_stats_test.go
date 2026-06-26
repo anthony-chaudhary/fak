@@ -2,6 +2,8 @@ package gateway
 
 import (
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
@@ -38,6 +40,9 @@ func TestFormatTurnDebugStats_CompactionAndCacheHit(t *testing.T) {
 	// cache_hit = 60/(60+20+20) = 0.60
 	if !strings.Contains(fired, "cache_hit=0.60") {
 		t.Fatalf("want cache_hit=0.60: %s", fired)
+	}
+	if !strings.Contains(fired, "request_tokens=100") || !strings.Contains(fired, "cache_rebate_tokens=54.0") {
+		t.Fatalf("want request total + read rebate estimate: %s", fired)
 	}
 	if !strings.Contains(fired, "recommend=no") {
 		t.Fatalf("healthy verdict should render recommend=no: %s", fired)
@@ -108,5 +113,52 @@ func TestRenderTurnDebugStats_UntrackedSessionReadsNA(t *testing.T) {
 	}
 	if s.resetHealth != nil {
 		t.Fatalf("the read-only peek must not mint a record for an untracked session")
+	}
+}
+
+func TestChatCompletionsDebugStatsEmitsOnePayloadFreeLine(t *testing.T) {
+	s := newTestServer(t)
+	s.planner = stubPlanner{comp: &agent.Completion{
+		Message:      agent.Message{Role: agent.RoleAssistant, Content: "model payload must stay off debug stats"},
+		FinishReason: "stop",
+		Usage: agent.Usage{
+			PromptTokens:             13,
+			CompletionTokens:         2,
+			CacheReadInputTokens:     7,
+			CacheCreationInputTokens: 3,
+		},
+	}}
+	var lines []string
+	s.debugStatsf = func(format string, args ...any) {
+		lines = append(lines, fmt.Sprintf(format, args...))
+	}
+	ts := httptest.NewServer(s.Handler())
+	defer ts.Close()
+
+	const secretPrompt = "sk-live-prompt-secret"
+	var resp ChatResponse
+	code := postJSON(t, ts.URL+"/v1/chat/completions", ChatRequest{
+		Model:    "test-model",
+		Messages: []agent.Message{{Role: "user", Content: "do not log " + secretPrompt}},
+	}, &resp)
+	if code != http.StatusOK {
+		t.Fatalf("chat status = %d, want 200", code)
+	}
+	if len(lines) != 1 {
+		t.Fatalf("debug lines = %d (%q), want exactly one", len(lines), strings.Join(lines, "\n"))
+	}
+	line := lines[0]
+	for _, want := range []string{
+		"wire=openai_chat_completions", "request_tokens=23", "prompt=13", "completion=2",
+		"cache_read=7", "cache_creation=3", "cache_hit=0.30", "cache_rebate_tokens=6.3",
+	} {
+		if !strings.Contains(line, want) {
+			t.Fatalf("debug line missing %q: %s", want, line)
+		}
+	}
+	for _, leak := range []string{secretPrompt, "model payload"} {
+		if strings.Contains(line, leak) {
+			t.Fatalf("debug line leaked payload %q: %s", leak, line)
+		}
 	}
 }

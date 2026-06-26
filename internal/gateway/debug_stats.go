@@ -4,7 +4,7 @@ package gateway
 // --debug-stats` / `fak serve --debug-stats` wire Config.DebugStatsf to stderr; then every
 // served turn prints ONE compact, payload-free line so an operator can watch turn-by-turn what
 // the field otherwise reconstructs from a JSON --log: the request/cache token split, the
-// compaction action, and the resetScore SHADOW health state.
+// cache-read rebate estimate, the compaction action, and the resetScore SHADOW health state.
 //
 // It REUSES the #792 per-session rolling health (reset_shadow.go): peekResetHealth scores the
 // CURRENT rolling state WITHOUT mutating it (the roll happened on the compacted turn via
@@ -69,16 +69,18 @@ func formatTurnDebugStats(trace, wire string, stream bool, finish string, prompt
 			recommend = "yes"
 		}
 	}
-	// cache_hit is the OBSERVED share of the prompt the provider served from cache this turn --
-	// a quick read of whether the cached prefix is still landing, computed from relayed counters.
-	total := cacheRead + prompt + cacheCreate
+	// cache_hit/cache_rebate_tokens are OBSERVED/provider-counter projections. The hit ratio
+	// shows whether the cached prefix is still landing; the rebate is token-equivalent savings
+	// from cache reads at the published 0.1x read multiplier, before any model-specific $/MTok.
+	requestTokens := cacheRead + prompt + cacheCreate
 	hit := "0.00"
-	if total > 0 {
-		hit = strconv.FormatFloat(float64(cacheRead)/float64(total), 'f', 2, 64)
+	if requestTokens > 0 {
+		hit = strconv.FormatFloat(float64(cacheRead)/float64(requestTokens), 'f', 2, 64)
 	}
+	rebate := strconv.FormatFloat(float64(cacheRead)*(1-CacheReadMultiplier), 'f', 1, 64)
 	var b strings.Builder
 	fmt.Fprintf(&b, "fak-turn trace=%s wire=%s stream=%s finish=%s", debugField(trace), debugField(wire), boolFlag(stream), debugField(finish))
-	fmt.Fprintf(&b, " prompt=%d completion=%d cache_read=%d cache_create=%d cache_hit=%s", prompt, completion, cacheRead, cacheCreate, hit)
+	fmt.Fprintf(&b, " request_tokens=%d prompt=%d completion=%d cache_read=%d cache_creation=%d cache_hit=%s cache_rebate_tokens=%s", requestTokens, prompt, completion, cacheRead, cacheCreate, hit, rebate)
 	fmt.Fprintf(&b, " compact=%s health=%s reset_score=%s recommend=%s", compact, health, score, recommend)
 	return b.String()
 }
