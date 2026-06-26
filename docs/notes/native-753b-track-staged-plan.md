@@ -10,6 +10,18 @@ on the pure fak engine, end to end. This note records the plan and the first sli
 that landed today; it is a living map, not a finished product. The track is
 multi-month and will not finish in one session.
 
+> **Current direction — and a reconciliation (#917).** Native 753B GLM-5.2 *is* the
+> active, committed track; **this plan is the single current direction.** Earlier
+> GLM-5.2 planning (mid-June 2026) treated in-kernel native serving as out-of-scope
+> / an air-gapped reference path only; **that posture is superseded** once
+> datacenter-GPU access lifted the compute gate and the loader, quantized device GEMM,
+> and `--cpu-offload-experts` rungs began landing on `origin/main`. The dated GLM-5.2
+> witnesses (2026-06-21 →) are point-in-time snapshots — read their "out of scope [for
+> that session]" residuals as superseded-by-progress along this plan, not as the current
+> posture. The external-engine serving track is a separate, parallel deliverable
+> ([#413 runbook](../serving/glm52-full-size-serving-witness.md)), not a replacement for
+> this one.
+
 ## Where we start
 
 fak already runs GLM-5.2's forward **bit-exact on GPU kernels** (cosine 1.0) and

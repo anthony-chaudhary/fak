@@ -16,6 +16,14 @@ description: "On-device datacenter GPU witnesses for the pure fak CUDA kernel ru
 > it carries the on-GPU residual that doc explicitly handed off ("serving the real 753B is
 > hardware-gated; the device numbers are handed off to a CUDA node").
 
+> **Current direction (see the [staged plan](native-753b-track-staged-plan.md), #917).**
+> This is a 2026-06-21 point-in-time witness. Its residual — "the pure fak kernel has no
+> CPU-offload … serving the flagship at scale … out of scope here" — has since been
+> superseded by progress: `--cpu-offload-experts` shipped and the full 466 GB model loads
+> natively (see the staged plan and the
+> [2026-06-25 native-serve note](GLM52-FAK-NATIVE-SERVE-LOAD-SPEED-2026-06-25.md)). Read
+> the claims below as the snapshot they were taken at, not the current posture.
+
 ## TL;DR (the honest split)
 
 "Run GLM-5.2 on the pure fak kernel, on a GPU, end-to-end" is **three** different claims, and
