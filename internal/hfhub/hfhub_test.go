@@ -176,7 +176,7 @@ func TestNewClientResolvesDotEnvToken(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Chdir(dir)
-	t.Setenv("HF_TOKEN", "")              // exported-but-blank must not shadow .env
+	t.Setenv("HF_TOKEN", "") // exported-but-blank must not shadow .env
 	t.Setenv("HUGGING_FACE_HUB_TOKEN", "")
 
 	if got := NewClient().Token; got != "from-dotenv" {
