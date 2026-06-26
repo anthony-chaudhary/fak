@@ -176,6 +176,14 @@ func (s *Server) handleMethod(ctx context.Context, method string, params json.Ra
 		return map[string]any{"tools": toolDescriptors()}, nil
 	case "tools/call":
 		return s.callTool(ctx, params)
+	case "resources/list":
+		return map[string]any{"resources": s.resourceDescriptors()}, nil
+	case "resources/read":
+		return s.readResource(params)
+	case "prompts/list":
+		return map[string]any{"prompts": promptDescriptors()}, nil
+	case "prompts/get":
+		return s.getPrompt(params)
 	default:
 		return nil, &rpcError{Code: rpcMethodNotFound, Message: "method not found: " + method}
 	}
@@ -217,8 +225,15 @@ func (s *Server) initializeResult(params json.RawMessage) map[string]any {
 	}
 	return map[string]any{
 		"protocolVersion": proto,
-		"capabilities":    map[string]any{"tools": map[string]any{}},
-		"serverInfo":      map[string]any{"name": "fak-gateway", "version": s.version},
+		// Advertise all three MCP primitives this server implements so a spec-
+		// compliant client knows it may call resources/* and prompts/* (#213),
+		// not just tools/* — an unadvertised capability is one a client won't probe.
+		"capabilities": map[string]any{
+			"tools":     map[string]any{},
+			"resources": map[string]any{},
+			"prompts":   map[string]any{},
+		},
+		"serverInfo": map[string]any{"name": "fak-gateway", "version": s.version},
 	}
 }
 
