@@ -62,6 +62,15 @@ MAX_PER_TICK = int(os.environ.get("FAK_MAX_PER_TICK", "2"))
 # eligible up to this many attempts; a CLEAN finish or an unrecoverable auth wall
 # still burns it once. Override with FAK_MAX_ATTEMPTS.
 MAX_ATTEMPTS = int(os.environ.get("FAK_MAX_ATTEMPTS", "3"))
+# Seconds to wait BETWEEN spawning each resume in a single tick. Without spacing the
+# launcher fires all MAX_PER_TICK resumes within the same second, and a burst that big
+# trips the server-side "temporarily limiting requests (not your usage limit)" 529 --
+# every freshly-resumed session gets one turn out, then strands on that transient wall
+# (observed: a cap-2/cap-4 burst stranded its whole batch on identical same-second
+# errors). Pacing the spawns lets the shared rate budget refill between launches so a
+# burst resumes cleanly instead of self-congesting. 0 restores the old all-at-once
+# behavior; the default is deliberately conservative. Override with FAK_LAUNCH_SPACING_SEC.
+LAUNCH_SPACING_SEC = float(os.environ.get("FAK_LAUNCH_SPACING_SEC", "8"))
 # The id of the session this watchdog is running inside (set by the Claude Code
 # harness). Used to refuse self-resume -- a live operator session can briefly look
 # like a stopped autonomous worker. Empty when run outside a Claude session (cron).
@@ -464,6 +473,11 @@ def main() -> int:
         note(f"  RESUMED {sid8} acct={acct} pid={proc.pid} "
              f"(attempt {attempt}/{MAX_ATTEMPTS}; re-eligible only if it fails recoverably)")
         toast("Resumed dead session", f"{sid8}  ({acct} / {p.get('project')})", "info")
+        # Pace the next spawn so a burst does not slam the shared rate budget and trip a
+        # transient 529 that strands the whole batch. Skipped after the final launch of
+        # the tick (nothing follows) and when spacing is disabled (FAK_LAUNCH_SPACING_SEC=0).
+        if LAUNCH_SPACING_SEC > 0 and launched < MAX_PER_TICK:
+            time.sleep(LAUNCH_SPACING_SEC)
 
     # 2. alert on true login-blocked accounts -- once per account blocker.
     notified_path = os.path.join(REG_DIR, "_notified.json")
