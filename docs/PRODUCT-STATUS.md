@@ -108,19 +108,29 @@ a build tag. Turning the highest-value ones into surfaces is the next frontier.
 ## What's next
 
 The product-scorecard pass surfaced four next steps that aren't already tracked. Each
-is filed; **#581 and #580 are resolved** (see *Resolved* below), leaving two open:
+is filed; **#582, #581, and #580 are resolved** (see *Resolved* below), leaving one open:
 
 - **[#579](https://github.com/anthony-chaudhary/fak/issues/579)** — wire the model-side
   KV quarantine (evict + planned-elision) into the **live** agent/serve loop. Today the
   bit-exact eviction is proven only against a synthetic model; this makes the flagship
   KV-quarantine guarantee fire on a real run.
-- **[#582](https://github.com/anthony-chaudhary/fak/issues/582)** — generalize the
-  product/durability **verdict ladder** itself into a domain-free DOS primitive: an
-  evidence-bound readiness score that can't be gamed by editing the claim. The same
-  distrust DOS applies to agents, applied to a project's claims about itself.
 
 ### Resolved
 
+- **[#582](https://github.com/anthony-chaudhary/fak/issues/582)** — *resolved by the
+  issue's "concept capture — no code commitment yet" branch.* The mechanism behind this
+  scorecard is lifted into a domain-free DOS primitive in
+  [`docs/notes/CONCEPT-DOS-READINESS-VERDICT-LADDER-2026-06-26.md`](notes/CONCEPT-DOS-READINESS-VERDICT-LADDER-2026-06-26.md)
+  (commit `e709281`): a **closed maturity ladder** whose every rung is gated by evidence the
+  claimant did not author, plus a **surface-ceiling gate** that stops a benchmark from posing
+  as a durable product — so a verdict moves only by changing the real tree. The note (1)
+  extracts the domain-free five-part core, (2) sketches a `dos`-grounded variant where the top
+  rung is closed by a `dos` witness (`dos_verify` / `dos_commit_audit`) and an overclaim is
+  refused with a structured reason (proposed `READINESS_OVERCLAIM`, cf. `dos_refuse_reasons`),
+  and (3) decides where it lives: this tool **stays the reference binding** (the fak-specific
+  shell), the core lifts into the DOS concept vocabulary. HONEST SCOPE: a `dos readiness` verb
+  and the `READINESS_OVERCLAIM` reason are a **dos-kernel** change (a different repository's
+  tree), named as the next step — not built here, per the issue's no-code scope.
 - **[#581](https://github.com/anthony-chaudhary/fak/issues/581)** — *resolved by the
   issue's own "or document why it stays an optional leaf" branch.* The RadixAttention
   prefix-tree KV reuse **is wired into `fak serve`** on the in-kernel model path
