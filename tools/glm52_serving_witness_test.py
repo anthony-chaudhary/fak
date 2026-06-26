@@ -134,6 +134,23 @@ class Glm52ServingWitnessTest(unittest.TestCase):
         self.assertIn("--upstream-base-url", text)
         self.assertIn("two flag names", text)
 
+    def test_help_states_witness_scope_is_external_engine_not_native(self) -> None:
+        # #919: the witness step captures #130 evidence with --engine-cache-engine
+        # sglang, but "witness" means two things across the GLM doc set. A reader
+        # cannot tell whether this proves native GLM serving (it does not) or only
+        # the fak-fronts-an-external-engine form (it does). This runner is the
+        # public counterpart of the private `glm52_dgx_loop.py witness` subcommand,
+        # so its --help must state the scope at the witness step, and must say the
+        # --engine-cache-engine choice does not make it a native witness.
+        buf = StringIO()
+        with self.assertRaises(SystemExit) as cm, redirect_stdout(buf):
+            witness.main(["--help"])
+        self.assertEqual(cm.exception.code, 0)
+        text = " ".join(buf.getvalue().split())
+        self.assertIn("fak-fronts-an-external-engine", text)
+        self.assertIn("does NOT prove native in-kernel", text)
+        self.assertIn("not make this a native witness", text)
+
     def test_fake_gateway_report_passes_required_acceptance_fields(self) -> None:
         server = ThreadingHTTPServer(("127.0.0.1", 0), FakeOpenAIHandler)
         thread = threading.Thread(target=server.serve_forever, daemon=True)

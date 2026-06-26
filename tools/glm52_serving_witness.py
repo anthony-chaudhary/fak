@@ -478,7 +478,13 @@ def main(argv: list[str] | None = None) -> int:
             "front that same URL with --base-url too, so the URL flag is --base-url end to "
             "end in this flow. A ship/run loop that wraps serve+witness as subcommands may "
             "expose the same URL to its parent steps as --upstream-base-url (a parent-scoped "
-            "flag, before the subcommand) -- same endpoint, two flag names."
+            "flag, before the subcommand) -- same endpoint, two flag names. "
+            "Witness scope: this proves the fak-fronts-an-external-engine "
+            "(SGLang/vLLM/llama.cpp) form of #130 / #413 only -- fak governs and fronts the "
+            "weights an outside engine serves. It does NOT prove native in-kernel GLM-5.2 "
+            "serving, which is the separate native track "
+            "(docs/notes/native-753b-track-staged-plan.md). --engine-cache-engine sglang|vllm "
+            "only selects the cache-reset fallback engine; it does not make this a native witness."
         ),
     )
     ap.add_argument("--base-url", required=True, help="OpenAI-compatible full-size GLM-5.2 endpoint, e.g. http://node:8000/v1 (the witness runner's own flag; a wrapping ship/run loop names the same URL --upstream-base-url)")
@@ -488,7 +494,7 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--engine-version", default="", help="serving engine/version string, if the endpoint has no version route")
     ap.add_argument("--context-length", type=int, default=0, help="served context length to record in the witness report")
     ap.add_argument("--gpu-memory-total-gb", type=float, default=0.0, help="manual total serving GPU memory when nvidia-smi is not local")
-    ap.add_argument("--engine-cache-engine", default="", choices=["", "sglang", "vllm"], help="enable fak cache reset fallback for this engine")
+    ap.add_argument("--engine-cache-engine", default="", choices=["", "sglang", "vllm"], help="enable fak's cache-reset fallback for this external engine; selects the fallback engine only and does NOT change what the witness proves (external-engine #130, never native in-kernel serving)")
     ap.add_argument("--engine-cache-base-url", default="", help="engine control/base URL; defaults to --base-url inside fak")
     ap.add_argument("--engine-cache-admin-key-env", default="")
     ap.add_argument("--engine-cache-idle-timeout-s", type=int, default=0)
