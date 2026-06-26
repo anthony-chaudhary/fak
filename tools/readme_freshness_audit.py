@@ -52,6 +52,23 @@ itself errored). The ``score`` (0–100, A–F) is the richer signal: it weights
 substance checks heavily, so "the page is fresh" and "the page is good" are two
 different numbers — the way they are in real life.
 
+**The keyword-gaming limit, and the one cross-check that closes it.** Every
+substance affordance above is a README-*text* heuristic — a keyword or regex
+presence over the front screen. That makes them honest about *intent* but blind
+to *reality*: unlike the dogfood score (which reads non-forgeable transcripts),
+here the README itself is the gamed surface, so a keyword with no real affordance
+behind it still scores. The scorecard anti-gaming law (``.claude/skills/scorecard/
+SKILL.md``) requires the score be cross-checked against something the author cannot
+forge by editing prose. We defend the single highest-leverage affordance that way:
+``lcd_onramp``'s bare-binary command — the line the no-setup reader actually
+pastes — only scores when the ``fak <verb>`` it names RESOLVES to a verb the
+binary really dispatches, parsed live from ``cmd/fak/main.go`` (never a hand-list).
+A page that stuffs ``fak <made-up-verb>`` to look runnable does not earn the point;
+the reader's first paste would have died on ``unknown verb``. When
+``cmd/fak/main.go`` is unreadable (the tool run outside the repo) the check abstains
+to presence-only — a missing source of truth is not a README defect. The remaining
+affordances stay text-only by design; this is the beachhead, not the whole wall.
+
 The three operator front-page laws this enforces:
   1. SOTA-vs-us, never naive   -> naive_baseline FAIL
   2. 6th-grade / Feynman voice  -> jargon_density advisory
@@ -68,6 +85,7 @@ import argparse
 import datetime as _dt
 import json
 import re
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -78,6 +96,10 @@ SCHEMA = "fleet-readme-freshness-audit/1"
 README_REL = "README.md"
 VERSION_REL = "VERSION"
 AUTHORITY_REL = "BENCHMARK-AUTHORITY.md"
+# The binary's real dispatch table — the source of truth for which `fak <verb>`
+# commands actually exist. Parsed live (never a hand-list) so the lcd_onramp
+# anti-gaming cross-check stays correct as verbs are added/renamed.
+MAIN_GO_REL = "cmd/fak/main.go"
 
 # How long a freshness stamp stays "fresh" before we WARN.
 DEFAULT_MAX_AGE_DAYS = 14
@@ -154,6 +176,17 @@ _LINK_RE = re.compile(r"\[(?P<text>[^\]]+)\]\((?P<target>[^)]+)\)")
 # MAJOR.MINOR.PATCH against the VERSION file. A pin like "v0.3.x" or "v0.25.x"
 # (a deliberate range) is matched on its leading numeric part.
 _VERSION_RE = re.compile(r"\bv?(\d+)\.(\d+)\.(?:(\d+)|x)\b")
+
+# A line-leading bare `fak <verb>` command — the invocation an LCD reader pastes
+# from the installed binary (a `$`/`>` prompt or fence indent is allowed before
+# it; `go run ./cmd/fak …` is deliberately NOT matched — that needs the clone).
+# The captured verb is cross-checked against the real cmd/fak dispatch set.
+_BARE_FAK_CMD_RE = re.compile(r"^\s*(?:[$>]\s+)?fak\s+([A-Za-z][\w-]*)", re.MULTILINE)
+
+# The main switch's verb cases. We intentionally parse string literals from the source of
+# truth instead of maintaining a duplicate verb list in Python.
+_MAIN_CASE_RE = re.compile(r"^\s*case\s+(?P<body>[^:]+):", re.MULTILINE)
+_GO_STRING_RE = re.compile(r'"([^"]+)"')
 
 # A bolded headline claim: **…** (the front page leads its numbers in bold).
 _BOLD_RE = re.compile(r"\*\*(?P<body>[^*]+)\*\*")
@@ -383,14 +416,20 @@ def check_guard_prominence(readme: str, *, first_screen_lines: int) -> dict[str,
 
 
 def check_lcd_onramp(readme: str, *, first_screen_lines: int,
-                     one_glance_lines: int) -> dict[str, Any]:
+                     one_glance_lines: int,
+                     dispatch: set[str] | None = None) -> dict[str, Any]:
     """The lowest-common-denominator reader gets a no-setup first command.
 
     The LCD reader landed from a link, will not read prose, has no key, and
     wants one line that visibly does something. Affordances:
       one_glance_value  a single plain "what is this" sentence in the first ~8 lines
       fenced_cmd        a copy-paste fenced block above the fold
-      bare_binary_cmd   a bare `fak …` command (works from the binary, no clone)
+      bare_binary_cmd   a bare `fak <verb>` command (works from the binary, no clone)
+                          whose verb RESOLVES against cmd/fak/main.go — the one
+                          anti-gaming cross-check: a made-up verb the reader's first
+                          paste would die on does NOT score (see module docstring).
+                          ``dispatch`` is the real verb set; when it is None/empty
+                          (source unreadable) the check abstains to presence-only.
       expected_output   the expected result shown inline (`# -> DENY`, →, …)
       no_setup_promise  "no key / no model / no GPU / no clone" stated above the fold
       install_reachable how to GET the binary (curl|go install|Install link) is nearby
@@ -399,6 +438,9 @@ def check_lcd_onramp(readme: str, *, first_screen_lines: int,
     head = lines[:first_screen_lines]
     headtext = "\n".join(head)
     glance = "\n".join(lines[:one_glance_lines])
+    # Every line-leading bare `fak <verb>` an LCD reader would paste from the
+    # front screen (NOT `go run ./cmd/fak …`, which needs the clone).
+    bare_verbs = _BARE_FAK_CMD_RE.findall(headtext)
     subs = {
         # A one-glance value = a blockquote/bold one-liner OR an explicit "in one
         # line" marker within the first few lines (above any long paragraph).
@@ -406,7 +448,11 @@ def check_lcd_onramp(readme: str, *, first_screen_lines: int,
         or bool(re.search(r"^\s*>\s*\*\*", glance, re.MULTILINE))
         or bool(re.search(r"^\s*\*\*[^*]+\*\*\s*$", glance, re.MULTILINE)),
         "fenced_cmd": "```" in headtext,
-        "bare_binary_cmd": bool(re.search(r"^\s*fak\s+\w", headtext, re.MULTILINE)),
+        # Anti-gaming cross-check: a bare command scores only if its verb is real.
+        # With a known dispatch set, a stuffed `fak <made-up-verb>` does not score;
+        # without one (tool run outside the repo) abstain to presence-only.
+        "bare_binary_cmd": (any(v in dispatch for v in bare_verbs)
+                            if dispatch else bool(bare_verbs)),
         "expected_output": bool(re.search(
             r"#\s*->|#\s*=>|→|->\s*(ALLOW|DENY|TRANSFORM|QUARANTINE)", headtext)),
         "no_setup_promise": any(k in headtext.lower() for k in [
@@ -598,6 +644,14 @@ def _check_score(c: dict[str, Any]) -> float:
     return {"OK": 1.0, "WARN": 0.5, "FAIL": 0.0, "ADVISORY": 1.0}.get(c["status"], 0.0)
 
 
+def _as_int(v: Any) -> int:
+    """Coerce a payload field to int, tolerant of None / floats / strings."""
+    try:
+        return int(v)
+    except (TypeError, ValueError):
+        return 0
+
+
 def _grade_letter(score: int) -> str:
     return ("A" if score >= 90 else "B" if score >= 80 else
             "C" if score >= 70 else "D" if score >= 60 else "F")
@@ -682,6 +736,74 @@ def build_payload(*, workspace: str, checks: list[dict[str, Any]],
 
 
 # ---------------------------------------------------------------------------
+# Before/after compare — prove a refresh pass actually lifted the front page.
+# Mirrors internal/dogfoodscore Compare() and tools/industry_scorecard
+# render_compare: a single *_debt integer (lower is better, zero is perfect),
+# folded before->after with the family's >=2x / >=3x improvement verdict.
+# ---------------------------------------------------------------------------
+
+def readme_debt(payload: dict[str, Any]) -> int:
+    """The front-page debt: distance from a perfect page (100 - score), floored.
+
+    The family scores debt so that LOWER is better and zero is perfect, and a
+    halving is the >=2x bar. The README auditor's headline is a 0–100 `score`
+    (higher is better), so its debt is simply the gap to 100. The score is
+    substance-only and clock-independent (the freshness stamp is a WARN, not a
+    substance check), so this debt is deterministic — the same payload always
+    folds to the same number. The 47->100 lift in ``70c6e5d`` reads here as
+    debt 53 -> 0, a >=3x improvement.
+    """
+    return max(0, 100 - _as_int(payload.get("score")))
+
+
+def _compare_verdict(b_debt: int, c_debt: int) -> str:
+    """The family's >=2x / >=3x improvement verdict over a debt before->after."""
+    if b_debt <= 0:
+        if c_debt > 0:
+            return f"REGRESSED from a perfect baseline (debt 0 -> {c_debt}) - the front page lost ground"
+        return "already perfect (debt 0 -> 0) - nothing to retire"
+    if c_debt > b_debt:
+        return f"REGRESSED (debt {b_debt} -> {c_debt}) - the front page got worse"
+    if c_debt == b_debt:
+        return f"no change (debt {b_debt} -> {c_debt})"
+    if c_debt * 3 <= b_debt:
+        return f">=3x improvement (debt {b_debt} -> {c_debt}, <= 1/3 of baseline)"
+    if c_debt * 2 <= b_debt:
+        return f">=2x improvement (debt {b_debt} -> {c_debt})"
+    return f"improved but < 2x (debt {b_debt} -> {c_debt})"
+
+
+def compare(current: dict[str, Any], baseline: dict[str, Any]) -> str:
+    """Pure before->after delta of readme_debt/score, with the family's verdict.
+
+    ``current`` and ``baseline`` are both audit payloads (``build_payload``
+    output). We fold their ``readme_debt`` + ``score`` + ``grade`` into a
+    before->after report and a >=2x / >=3x improvement verdict, exactly as
+    ``dogfoodscore.Compare`` and industry ``render_compare`` do. No disk, no
+    clock: a pure dict fold, so the same two payloads always render the same
+    string.
+    """
+    b_debt, c_debt = readme_debt(baseline), readme_debt(current)
+    b_score, c_score = _as_int(baseline.get("score")), _as_int(current.get("score"))
+    b_grade = baseline.get("grade") or _grade_letter(b_score)
+    c_grade = current.get("grade") or _grade_letter(c_score)
+    lines = [
+        "readme-freshness compare:",
+        f"  readme_debt: {b_debt} -> {c_debt}  (retired {b_debt - c_debt})",
+        f"  score:       {b_score}/100 -> {c_score}/100   grade {b_grade} -> {c_grade}",
+    ]
+    # When both payloads carry hygiene counts, surface the FAIL delta too: a
+    # regression that adds a dead link / stale pin shows here even if the
+    # substance score happened to hold.
+    if (baseline.get("counts") is not None) or (current.get("counts") is not None):
+        b_fail = _as_int((baseline.get("counts") or {}).get("FAIL"))
+        c_fail = _as_int((current.get("counts") or {}).get("FAIL"))
+        lines.append(f"  hygiene FAILs: {b_fail} -> {c_fail}")
+    lines.append("  VERDICT: " + _compare_verdict(b_debt, c_debt))
+    return "\n".join(lines)
+
+
+# ---------------------------------------------------------------------------
 # Wiring + CLI
 # ---------------------------------------------------------------------------
 
@@ -690,8 +812,29 @@ def repo_root(start: Path | None = None) -> Path:
     return here.parent.parent
 
 
+def fak_dispatch_verbs(root: Path) -> set[str] | None:
+    """Parse cmd/fak/main.go for the real `fak <verb>` dispatch set.
+
+    This is the anti-gaming witness for `lcd_onramp`: a front-screen bare command
+    only earns the binary-command affordance when its verb is actually dispatched
+    by the binary. If the source file cannot be read, return None so the check
+    abstains to presence-only rather than punishing out-of-repo runs.
+    """
+    text = _safe_read(root / MAIN_GO_REL)
+    if not text:
+        return None
+    verbs: set[str] = set()
+    for m in _MAIN_CASE_RE.finditer(text):
+        for verb in _GO_STRING_RE.findall(m.group("body")):
+            if not verb or verb.startswith("-") or verb == "help":
+                continue
+            verbs.add(verb)
+    return verbs or None
+
+
 def run_checks(readme: str, version: str, authority: str, root: Path, *,
-               today: _dt.date, max_age_days: int) -> list[dict[str, Any]]:
+               today: _dt.date, max_age_days: int,
+               dispatch: set[str] | None = None) -> list[dict[str, Any]]:
     """All checks over already-read text. The pure core; tests call this."""
     return [
         # hygiene — is the page correct?
@@ -704,7 +847,7 @@ def run_checks(readme: str, version: str, authority: str, root: Path, *,
         # substance — does the page do its job for the whole audience?
         check_guard_prominence(readme, first_screen_lines=FIRST_SCREEN_LINES),
         check_lcd_onramp(readme, first_screen_lines=FIRST_SCREEN_LINES,
-                         one_glance_lines=ONE_GLANCE_LINES),
+                         one_glance_lines=ONE_GLANCE_LINES, dispatch=dispatch),
         check_speed_claim(readme, authority, first_screen_lines=FIRST_SCREEN_LINES),
         check_hero_above_fold(readme, authority, first_screen_lines=FIRST_SCREEN_LINES),
         check_audience_footholds(readme, first_screen_lines=FIRST_SCREEN_LINES),
@@ -724,8 +867,9 @@ def collect(workspace: Path, *, today: _dt.date | None = None,
     # WARN inside that check, it does not error the whole audit.
     version = _safe_read(root / VERSION_REL)
     authority = _safe_read(root / AUTHORITY_REL)
+    dispatch = fak_dispatch_verbs(root)
     checks = run_checks(readme, version, authority, root,
-                        today=today, max_age_days=max_age_days)
+                        today=today, max_age_days=max_age_days, dispatch=dispatch)
     return build_payload(workspace=str(root), checks=checks)
 
 
@@ -763,10 +907,23 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--max-age-days", type=int, default=DEFAULT_MAX_AGE_DAYS,
                     help=f"freshness-stamp WARN window (default: {DEFAULT_MAX_AGE_DAYS})")
     ap.add_argument("--json", action="store_true", help="emit machine-readable JSON")
+    ap.add_argument("--compare", default="", metavar="BASELINE.json",
+                    help="print the readme_debt/score delta vs a prior baseline payload JSON")
     args = ap.parse_args(argv)
 
     workspace = Path(args.workspace).resolve() if args.workspace else repo_root()
     payload = collect(workspace, max_age_days=args.max_age_days)
+
+    if args.compare:
+        try:
+            baseline = json.loads(Path(args.compare).read_text(encoding="utf-8"))
+        except OSError as exc:
+            print(f"error: cannot read baseline {args.compare}: {exc}", file=sys.stderr)
+            return 2
+        print(compare(payload, baseline))
+        # Ratchet semantics: a regression (debt rose) exits non-zero so the
+        # delta can gate a refresh pass; flat or improved stays green.
+        return 0 if readme_debt(payload) <= readme_debt(baseline) else 1
 
     if args.json:
         print(json.dumps(payload, indent=2))

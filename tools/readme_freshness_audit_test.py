@@ -123,6 +123,25 @@ def test_lcd_onramp_high_when_complete() -> None:
     assert c["status"] == "OK" and c["score"] >= 0.75, c
 
 
+def test_lcd_onramp_scores_real_fak_verb_when_dispatch_known() -> None:
+    txt = ("# fak\n> **fak in one line:** put it in front of your agent.\n\n"
+           "No key, no model, no GPU. Install: `curl … install.sh | sh`.\n"
+           "```\nfak preflight --tool refund_payment   # -> DENY\n```\n")
+    c = rfa.check_lcd_onramp(txt, first_screen_lines=110, one_glance_lines=8,
+                             dispatch={"preflight"})
+    assert "bare_binary_cmd" not in c["items"], c
+
+
+def test_lcd_onramp_rejects_fake_fak_verb_when_dispatch_known() -> None:
+    txt = ("# fak\n> **fak in one line:** put it in front of your agent.\n\n"
+           "No key, no model, no GPU. Install: `curl … install.sh | sh`.\n"
+           "```\nfak totally-made-up --tool refund_payment   # -> DENY\n```\n")
+    c = rfa.check_lcd_onramp(txt, first_screen_lines=110, one_glance_lines=8,
+                             dispatch={"preflight", "guard"})
+    assert "bare_binary_cmd" in c["items"], c
+    assert c["score"] < 1.0, c
+
+
 def test_lcd_onramp_fails_with_no_command() -> None:
     c = rfa.check_lcd_onramp("just prose, no code, no install", first_screen_lines=110,
                              one_glance_lines=8)
@@ -196,6 +215,28 @@ def test_run_checks_bad_readme_fails_overall() -> None:
     assert {"links", "naive_baseline"} <= failed, failed
 
 
+def test_fak_dispatch_verbs_parses_main_switch(tmp_path: Path) -> None:
+    main_go = tmp_path / "cmd" / "fak" / "main.go"
+    main_go.parent.mkdir(parents=True)
+    main_go.write_text(
+        'package main\nfunc main() { switch os.Args[1] {\n'
+        'case "preflight":\ncase "version", "-v", "--version":\ncase "help":\n'
+        '}}\n',
+        encoding="utf-8",
+    )
+    assert rfa.fak_dispatch_verbs(tmp_path) == {"preflight", "version"}
+
+
+def test_run_checks_cross_checks_lcd_command_against_dispatch() -> None:
+    readme = ("# fak\n> **fak in one line:** put it in front of your agent.\n\n"
+              "No key, no model, no GPU. Install: `curl … install.sh | sh`.\n"
+              "```\nfak madeup --tool refund_payment   # -> DENY\n```\n")
+    checks = rfa.run_checks(readme, "0.25.0", "", Path("."), today=TODAY,
+                            max_age_days=14, dispatch={"preflight"})
+    lcd = next(c for c in checks if c["check"] == "lcd_onramp")
+    assert "bare_binary_cmd" in lcd["items"], lcd
+
+
 # --- composite score tests -------------------------------------------------
 
 def test_score_is_substance_only_not_padded_by_hygiene() -> None:
@@ -232,6 +273,63 @@ def test_hygiene_fail_caps_the_grade() -> None:
 def test_grade_letter_boundaries() -> None:
     assert rfa._grade_letter(90) == "A" and rfa._grade_letter(89) == "B"
     assert rfa._grade_letter(60) == "D" and rfa._grade_letter(59) == "F"
+
+
+# --- compare (before/after delta) tests ------------------------------------
+
+def test_readme_debt_is_gap_to_100() -> None:
+    # debt = distance from a perfect page; lower is better, missing = maximal.
+    assert rfa.readme_debt({"score": 47}) == 53
+    assert rfa.readme_debt({"score": 100}) == 0
+    assert rfa.readme_debt({}) == 100  # no score = maximal debt, not a crash
+
+
+def test_compare_improved_reports_multiplier_verdict() -> None:
+    # The 47 -> 100 lift in 70c6e5d: debt 53 -> 0, a >=3x improvement.
+    out = rfa.compare({"score": 100, "grade": "A"}, {"score": 47, "grade": "F"})
+    assert "readme_debt: 53 -> 0" in out, out
+    assert "score:       47/100 -> 100/100" in out, out
+    assert ">=3x improvement" in out, out
+
+
+def test_compare_two_x_when_debt_halved() -> None:
+    # baseline score 40 (debt 60) -> current 70 (debt 30): exactly halved.
+    out = rfa.compare({"score": 70}, {"score": 40})
+    assert ">=2x improvement (debt 60 -> 30)" in out, out
+
+
+def test_compare_flat_reports_no_change() -> None:
+    out = rfa.compare({"score": 80, "grade": "B"}, {"score": 80, "grade": "B"})
+    assert "readme_debt: 20 -> 20" in out, out
+    assert "no change" in out and "REGRESSED" not in out, out
+
+
+def test_compare_regressed_reports_regression() -> None:
+    # current worse than baseline: debt rose 10 -> 40.
+    out = rfa.compare({"score": 60, "grade": "D"}, {"score": 90, "grade": "A"})
+    assert "readme_debt: 10 -> 40" in out, out
+    assert "REGRESSED" in out, out
+
+
+def test_compare_surfaces_hygiene_fail_delta() -> None:
+    cur = {"score": 90, "grade": "A", "counts": {"FAIL": 1}}
+    base = {"score": 90, "grade": "A", "counts": {"FAIL": 0}}
+    out = rfa.compare(cur, base)
+    assert "hygiene FAILs: 0 -> 1" in out, out
+
+
+def test_compare_is_deterministic() -> None:
+    cur, base = {"score": 88, "grade": "B"}, {"score": 50, "grade": "F"}
+    assert rfa.compare(cur, base) == rfa.compare(cur, base)
+
+
+def test_compare_cli_reads_baseline_payload(tmp_path: Path) -> None:
+    (tmp_path / "README.md").write_text("# fak\nplain readme\n", encoding="utf-8")
+    baseline = tmp_path / "baseline.json"
+    baseline.write_text('{"score": 0, "grade": "F"}', encoding="utf-8")
+    assert rfa.main(["--workspace", str(tmp_path), "--compare", str(baseline)]) == 0
+    baseline.write_text('{"score": 100, "grade": "A"}', encoding="utf-8")
+    assert rfa.main(["--workspace", str(tmp_path), "--compare", str(baseline)]) == 1
 
 
 # --- live smoke: the real committed README folds without error -------------
