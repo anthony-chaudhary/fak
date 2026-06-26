@@ -57,6 +57,16 @@ type gatewayMetrics struct {
 	inferCachedHits   uint64 // served turns whose prompt got a provider cache READ (>0 cached tokens)
 	inferDecodeSecs   float64
 
+	// reqMemoryMu guards cumulative in-kernel request-memory pressure observed after
+	// planner turns. The planner already exposes the most recent admission plan; these
+	// accumulators keep the per-class totals/high-water marks so pressure is visible
+	// over time instead of only at scrape-time last value.
+	reqMemoryMu       sync.Mutex
+	reqMemoryObserved map[string]uint64 // backend -> turns with an observed request plan
+	reqMemoryPlan     map[requestMemoryMetricKey]*requestMemoryMetricStats
+	reqMemoryTokens   map[requestMemoryTokenKey]*requestMemoryTokenStats
+	reqMemoryFit      map[requestMemoryFitKey]*requestMemoryFitStats
+
 	// compactMu guards the history-compaction accumulators. Compaction (the
 	// --compact-history-budget lever on the Anthropic passthrough) is otherwise INVISIBLE: it
 	// returns identity on any bail with no signal, so a silent failure reads like success.
@@ -113,11 +123,47 @@ type operationMetricKey struct {
 	by          string // which adjudicator decided (forensics) — answers WHO refused, not just that it was refused
 }
 
+type requestMemoryMetricKey struct {
+	backend string
+	class   string
+	scope   string
+	dtype   string
+}
+
+type requestMemoryTokenKey struct {
+	backend string
+	kind    string
+}
+
+type requestMemoryFitKey struct {
+	backend string
+	scope   string
+}
+
 type inKernelOOMClassStats struct {
 	count           uint64
 	failedBytes     uint64
 	lastFailedBytes uint64
 	lastSite        string
+}
+
+type requestMemoryMetricStats struct {
+	observations   uint64
+	totalBytes     uint64
+	highWaterBytes int64
+}
+
+type requestMemoryTokenStats struct {
+	observations uint64
+	total        uint64
+	highWater    int
+}
+
+type requestMemoryFitStats struct {
+	observations   uint64
+	wantHighWater  int64
+	marginLowWater int64
+	marginKnown    bool
 }
 
 type latencyCounter struct {
@@ -134,6 +180,10 @@ func newGatewayMetrics(now time.Time) *gatewayMetrics {
 		inflightReq:        map[uint64]inflightEntry{},
 		compactAttempts:    map[string]uint64{},
 		compactBailReasons: map[string]uint64{},
+		reqMemoryObserved:  map[string]uint64{},
+		reqMemoryPlan:      map[requestMemoryMetricKey]*requestMemoryMetricStats{},
+		reqMemoryTokens:    map[requestMemoryTokenKey]*requestMemoryTokenStats{},
+		reqMemoryFit:       map[requestMemoryFitKey]*requestMemoryFitStats{},
 		inKernelOOM:        map[string]*inKernelOOMClassStats{},
 	}
 }
@@ -468,6 +518,116 @@ func (m *gatewayMetrics) observeInference(promptTok, complTok, cachedTok int, fi
 	m.inferenceMu.Unlock()
 }
 
+func (s *Server) observePlannerRequestMemory() {
+	if s == nil || s.metrics == nil || s.planner == nil {
+		return
+	}
+	reporter, ok := s.planner.(agent.RequestMemoryReporter)
+	if !ok {
+		return
+	}
+	s.metrics.observeRequestMemory(reporter.RequestMemoryStats())
+}
+
+func (m *gatewayMetrics) observeRequestMemory(st agent.RequestMemoryStats) {
+	if m == nil || !st.Observed {
+		return
+	}
+	backend := strings.TrimSpace(st.Backend)
+	if backend == "" {
+		backend = "unknown"
+	}
+	planRows := requestMemoryPlanByClassScopeDType(st.MemoryPlan)
+	fitRows := requestMemoryFitRows(st.MemoryPlan, st.Capacities, st.HeadroomRatio)
+
+	m.reqMemoryMu.Lock()
+	if m.reqMemoryObserved == nil {
+		m.reqMemoryObserved = map[string]uint64{}
+	}
+	if m.reqMemoryPlan == nil {
+		m.reqMemoryPlan = map[requestMemoryMetricKey]*requestMemoryMetricStats{}
+	}
+	if m.reqMemoryTokens == nil {
+		m.reqMemoryTokens = map[requestMemoryTokenKey]*requestMemoryTokenStats{}
+	}
+	if m.reqMemoryFit == nil {
+		m.reqMemoryFit = map[requestMemoryFitKey]*requestMemoryFitStats{}
+	}
+	m.reqMemoryObserved[backend]++
+	for _, row := range planRows {
+		k := requestMemoryMetricKey{backend: backend, class: row.Class, scope: row.Scope, dtype: row.DType}
+		st := m.reqMemoryPlan[k]
+		if st == nil {
+			st = &requestMemoryMetricStats{}
+			m.reqMemoryPlan[k] = st
+		}
+		st.observations++
+		st.totalBytes = addPositiveInt64ToUint64(st.totalBytes, row.Bytes)
+		if row.Bytes > st.highWaterBytes {
+			st.highWaterBytes = row.Bytes
+		}
+	}
+	m.observeRequestMemoryTokenLocked(backend, "prompt", st.PromptTokens)
+	m.observeRequestMemoryTokenLocked(backend, "max_new", st.MaxNewTokens)
+	m.observeRequestMemoryTokenLocked(backend, "planned", st.PlannedTokens)
+	for _, row := range fitRows {
+		k := requestMemoryFitKey{backend: backend, scope: row.Scope}
+		st := m.reqMemoryFit[k]
+		if st == nil {
+			st = &requestMemoryFitStats{}
+			m.reqMemoryFit[k] = st
+		}
+		st.observations++
+		if row.WantBytes > st.wantHighWater {
+			st.wantHighWater = row.WantBytes
+		}
+		if row.CapacityKnown && (!st.marginKnown || row.MarginBytes < st.marginLowWater) {
+			st.marginKnown = true
+			st.marginLowWater = row.MarginBytes
+		}
+	}
+	m.reqMemoryMu.Unlock()
+}
+
+func (m *gatewayMetrics) observeRequestMemoryTokenLocked(backend, kind string, value int) {
+	if value < 0 {
+		return
+	}
+	k := requestMemoryTokenKey{backend: backend, kind: kind}
+	st := m.reqMemoryTokens[k]
+	if st == nil {
+		st = &requestMemoryTokenStats{}
+		m.reqMemoryTokens[k] = st
+	}
+	st.observations++
+	st.total = addPositiveIntToUint64(st.total, value)
+	if value > st.highWater {
+		st.highWater = value
+	}
+}
+
+func addPositiveInt64ToUint64(total uint64, value int64) uint64 {
+	if value <= 0 {
+		return total
+	}
+	v := uint64(value)
+	if ^uint64(0)-total < v {
+		return ^uint64(0)
+	}
+	return total + v
+}
+
+func addPositiveIntToUint64(total uint64, value int) uint64 {
+	if value <= 0 {
+		return total
+	}
+	v := uint64(value)
+	if ^uint64(0)-total < v {
+		return ^uint64(0)
+	}
+	return total + v
+}
+
 func (s *Server) logInferenceTurn(traceID, wire string, stream bool, usage agent.Usage, finishReason string, dur time.Duration, compacted bool) {
 	if s == nil {
 		return
@@ -699,6 +859,7 @@ func (s *Server) renderMetrics() string {
 	writeKVPrefixMetrics(&b)
 	s.writeKVMemoryMetrics(&b)
 	s.writeRequestMemoryMetrics(&b)
+	m.writeRequestMemoryAggregateMetrics(&b)
 	inf := m.writeInferenceMetrics(&b)
 	m.writeInKernelOOMMetrics(&b)
 	s.writeInKernelOOMRetryMetrics(&b)
@@ -794,6 +955,66 @@ func (s *Server) writeRequestMemoryMetrics(b *strings.Builder) {
 			fmt.Fprintf(b, "fak_gateway_in_kernel_request_memory_fit_bytes{backend=\"%s\",scope=\"%s\",kind=\"margin\"} %d\n",
 				promQuote(backend), promQuote(row.Scope), row.MarginBytes)
 		}
+	}
+}
+
+func (m *gatewayMetrics) writeRequestMemoryAggregateMetrics(b *strings.Builder) {
+	snap := m.requestMemoryAggregateSnapshotData()
+	if len(snap.observed) == 0 {
+		return
+	}
+	writeHelpType(b, "fak_gateway_in_kernel_request_memory_observations_total", "In-kernel backend request memory plans observed after served planner turns, by backend. Includes successful turns and local OOM/capacity refusals that produced a plan.", "counter")
+	backends := make([]string, 0, len(snap.observed))
+	for backend := range snap.observed {
+		backends = append(backends, backend)
+	}
+	sort.Strings(backends)
+	for _, backend := range backends {
+		fmt.Fprintf(b, "fak_gateway_in_kernel_request_memory_observations_total{backend=\"%s\"} %d\n",
+			promQuote(backend), snap.observed[backend])
+	}
+	writeHelpType(b, "fak_gateway_in_kernel_request_memory_plan_observations_total", "Observed in-kernel request memory plan rows by backend, class, scope, and dtype.", "counter")
+	for _, row := range snap.plans {
+		fmt.Fprintf(b, "fak_gateway_in_kernel_request_memory_plan_observations_total{backend=\"%s\",class=\"%s\",scope=\"%s\",dtype=\"%s\"} %d\n",
+			promQuote(row.key.backend), promQuote(row.key.class), promQuote(row.key.scope), promQuote(row.key.dtype), row.observations)
+	}
+	writeHelpType(b, "fak_gateway_in_kernel_request_memory_plan_bytes_total", "Cumulative planned bytes observed for served in-kernel backend requests, by backend, class, scope, and dtype.", "counter")
+	for _, row := range snap.plans {
+		fmt.Fprintf(b, "fak_gateway_in_kernel_request_memory_plan_bytes_total{backend=\"%s\",class=\"%s\",scope=\"%s\",dtype=\"%s\"} %d\n",
+			promQuote(row.key.backend), promQuote(row.key.class), promQuote(row.key.scope), promQuote(row.key.dtype), row.totalBytes)
+	}
+	writeHelpType(b, "fak_gateway_in_kernel_request_memory_plan_high_water_bytes", "Largest single observed in-kernel request memory plan row, by backend, class, scope, and dtype.", "gauge")
+	for _, row := range snap.plans {
+		fmt.Fprintf(b, "fak_gateway_in_kernel_request_memory_plan_high_water_bytes{backend=\"%s\",class=\"%s\",scope=\"%s\",dtype=\"%s\"} %d\n",
+			promQuote(row.key.backend), promQuote(row.key.class), promQuote(row.key.scope), promQuote(row.key.dtype), row.highWaterBytes)
+	}
+	writeHelpType(b, "fak_gateway_in_kernel_request_memory_tokens_total", "Cumulative prompt/max_new/planned token windows from observed in-kernel request memory plans.", "counter")
+	for _, row := range snap.tokens {
+		fmt.Fprintf(b, "fak_gateway_in_kernel_request_memory_tokens_total{backend=\"%s\",kind=\"%s\"} %d\n",
+			promQuote(row.key.backend), promQuote(row.key.kind), row.total)
+	}
+	writeHelpType(b, "fak_gateway_in_kernel_request_memory_tokens_high_water", "Largest prompt/max_new/planned token window from an observed in-kernel request memory plan.", "gauge")
+	for _, row := range snap.tokens {
+		fmt.Fprintf(b, "fak_gateway_in_kernel_request_memory_tokens_high_water{backend=\"%s\",kind=\"%s\"} %d\n",
+			promQuote(row.key.backend), promQuote(row.key.kind), row.highWater)
+	}
+	writeHelpType(b, "fak_gateway_in_kernel_request_memory_fit_observations_total", "Observed in-kernel request memory fit rows by backend and scope.", "counter")
+	for _, row := range snap.fits {
+		fmt.Fprintf(b, "fak_gateway_in_kernel_request_memory_fit_observations_total{backend=\"%s\",scope=\"%s\"} %d\n",
+			promQuote(row.key.backend), promQuote(row.key.scope), row.observations)
+	}
+	writeHelpType(b, "fak_gateway_in_kernel_request_memory_fit_want_high_water_bytes", "Largest observed planned in-kernel request memory bytes by backend and scope.", "gauge")
+	for _, row := range snap.fits {
+		fmt.Fprintf(b, "fak_gateway_in_kernel_request_memory_fit_want_high_water_bytes{backend=\"%s\",scope=\"%s\"} %d\n",
+			promQuote(row.key.backend), promQuote(row.key.scope), row.wantHighWater)
+	}
+	writeHelpType(b, "fak_gateway_in_kernel_request_memory_fit_margin_low_water_bytes", "Smallest observed headroom-adjusted fit margin for known-capacity in-kernel requests, by backend and scope. Omitted for scopes whose capacity was unknown.", "gauge")
+	for _, row := range snap.fits {
+		if !row.marginKnown {
+			continue
+		}
+		fmt.Fprintf(b, "fak_gateway_in_kernel_request_memory_fit_margin_low_water_bytes{backend=\"%s\",scope=\"%s\"} %d\n",
+			promQuote(row.key.backend), promQuote(row.key.scope), row.marginLowWater)
 	}
 }
 
@@ -1071,6 +1292,35 @@ type compactionSnapshot struct {
 	lastCacheRd float64
 }
 
+type requestMemoryAggregateSnapshot struct {
+	observed map[string]uint64
+	plans    []requestMemoryPlanSnapshot
+	tokens   []requestMemoryTokenSnapshot
+	fits     []requestMemoryFitSnapshot
+}
+
+type requestMemoryPlanSnapshot struct {
+	key            requestMemoryMetricKey
+	observations   uint64
+	totalBytes     uint64
+	highWaterBytes int64
+}
+
+type requestMemoryTokenSnapshot struct {
+	key          requestMemoryTokenKey
+	observations uint64
+	total        uint64
+	highWater    int
+}
+
+type requestMemoryFitSnapshot struct {
+	key            requestMemoryFitKey
+	observations   uint64
+	wantHighWater  int64
+	marginLowWater int64
+	marginKnown    bool
+}
+
 type inKernelOOMSnapshot struct {
 	class           string
 	count           uint64
@@ -1121,6 +1371,80 @@ func (m *gatewayMetrics) compactionSnapshotData() compactionSnapshot {
 		cacheReads:  m.compactCacheReads,
 		lastCacheRd: m.compactLastCacheRd,
 	}
+}
+
+func (m *gatewayMetrics) requestMemoryAggregateSnapshotData() requestMemoryAggregateSnapshot {
+	if m == nil {
+		return requestMemoryAggregateSnapshot{observed: map[string]uint64{}}
+	}
+	m.reqMemoryMu.Lock()
+	defer m.reqMemoryMu.Unlock()
+	out := requestMemoryAggregateSnapshot{observed: map[string]uint64{}}
+	for backend, n := range m.reqMemoryObserved {
+		out.observed[backend] = n
+	}
+	for key, st := range m.reqMemoryPlan {
+		if st == nil {
+			continue
+		}
+		out.plans = append(out.plans, requestMemoryPlanSnapshot{
+			key:            key,
+			observations:   st.observations,
+			totalBytes:     st.totalBytes,
+			highWaterBytes: st.highWaterBytes,
+		})
+	}
+	for key, st := range m.reqMemoryTokens {
+		if st == nil {
+			continue
+		}
+		out.tokens = append(out.tokens, requestMemoryTokenSnapshot{
+			key:          key,
+			observations: st.observations,
+			total:        st.total,
+			highWater:    st.highWater,
+		})
+	}
+	for key, st := range m.reqMemoryFit {
+		if st == nil {
+			continue
+		}
+		out.fits = append(out.fits, requestMemoryFitSnapshot{
+			key:            key,
+			observations:   st.observations,
+			wantHighWater:  st.wantHighWater,
+			marginLowWater: st.marginLowWater,
+			marginKnown:    st.marginKnown,
+		})
+	}
+	sort.SliceStable(out.plans, func(i, j int) bool {
+		a, b := out.plans[i].key, out.plans[j].key
+		if a.backend != b.backend {
+			return a.backend < b.backend
+		}
+		if a.scope != b.scope {
+			return a.scope < b.scope
+		}
+		if a.class != b.class {
+			return a.class < b.class
+		}
+		return a.dtype < b.dtype
+	})
+	sort.SliceStable(out.tokens, func(i, j int) bool {
+		a, b := out.tokens[i].key, out.tokens[j].key
+		if a.backend != b.backend {
+			return a.backend < b.backend
+		}
+		return a.kind < b.kind
+	})
+	sort.SliceStable(out.fits, func(i, j int) bool {
+		a, b := out.fits[i].key, out.fits[j].key
+		if a.backend != b.backend {
+			return a.backend < b.backend
+		}
+		return a.scope < b.scope
+	})
+	return out
 }
 
 func (m *gatewayMetrics) inKernelOOMSnapshotData() []inKernelOOMSnapshot {

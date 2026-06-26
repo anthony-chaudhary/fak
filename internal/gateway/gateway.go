@@ -920,9 +920,13 @@ func (s *Server) complete(ctx context.Context, trace string, messages []agent.Me
 	comp, err := s.planner.Complete(ctx, messages, tools, opts...)
 	dur := time.Since(start)
 	if err != nil {
+		if _, _, _, ok := inKernelOOMObservation(err); ok {
+			s.observePlannerRequestMemory()
+		}
 		return nil, err
 	}
 	s.metrics.observeInference(comp.Usage.PromptTokens, comp.Usage.CompletionTokens, comp.Usage.CachedPromptTokens(), comp.FinishReason, dur)
+	s.observePlannerRequestMemory()
 	return comp, nil
 }
 

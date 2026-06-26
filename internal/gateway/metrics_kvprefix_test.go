@@ -313,3 +313,76 @@ func TestRequestMemoryMetricsAndDebugVars(t *testing.T) {
 		t.Fatalf("debug request_memory fit = %+v, want device+host fit rows", vars.RequestMemory.Fit)
 	}
 }
+
+func TestRequestMemoryAggregateMetricsAndDebugVars(t *testing.T) {
+	srv := newTestServer(t)
+	srv.planner = kvMemoryStatsPlanner{req: agent.RequestMemoryStats{
+		Observed:      true,
+		Backend:       "vulkan",
+		PromptTokens:  10,
+		MaxNewTokens:  5,
+		PlannedTokens: 15,
+		HeadroomRatio: 0.10,
+		MemoryPlan: []agent.RequestMemoryDemand{
+			{Class: "kv_cache", Scope: "device", DType: "f32", Bytes: 100},
+			{Class: "scratchpad", Scope: "device", DType: "f32", Bytes: 50},
+		},
+		Capacities: []agent.RequestMemoryCapacity{
+			{Scope: "device", TotalBytes: 1000, FreeBytes: 1000, Known: true, FreeKnown: true},
+		},
+	}}
+	srv.observePlannerRequestMemory()
+	srv.planner = kvMemoryStatsPlanner{req: agent.RequestMemoryStats{
+		Observed:      true,
+		Backend:       "vulkan",
+		PromptTokens:  20,
+		MaxNewTokens:  7,
+		PlannedTokens: 27,
+		HeadroomRatio: 0.10,
+		MemoryPlan: []agent.RequestMemoryDemand{
+			{Class: "activation", Scope: "device", DType: "f32", Bytes: 75},
+			{Class: "kv_cache", Scope: "device", DType: "f32", Bytes: 200},
+		},
+		Capacities: []agent.RequestMemoryCapacity{
+			{Scope: "device", TotalBytes: 1000, FreeBytes: 400, Known: true, FreeKnown: true},
+		},
+	}}
+	srv.observePlannerRequestMemory()
+
+	text := srv.renderMetrics()
+	for _, want := range []string{
+		`fak_gateway_in_kernel_request_memory_observations_total{backend="vulkan"} 2`,
+		`fak_gateway_in_kernel_request_memory_plan_observations_total{backend="vulkan",class="kv_cache",scope="device",dtype="f32"} 2`,
+		`fak_gateway_in_kernel_request_memory_plan_bytes_total{backend="vulkan",class="kv_cache",scope="device",dtype="f32"} 300`,
+		`fak_gateway_in_kernel_request_memory_plan_high_water_bytes{backend="vulkan",class="kv_cache",scope="device",dtype="f32"} 200`,
+		`fak_gateway_in_kernel_request_memory_tokens_total{backend="vulkan",kind="planned"} 42`,
+		`fak_gateway_in_kernel_request_memory_tokens_high_water{backend="vulkan",kind="prompt"} 20`,
+		`fak_gateway_in_kernel_request_memory_fit_observations_total{backend="vulkan",scope="device"} 2`,
+		`fak_gateway_in_kernel_request_memory_fit_want_high_water_bytes{backend="vulkan",scope="device"} 275`,
+		`fak_gateway_in_kernel_request_memory_fit_margin_low_water_bytes{backend="vulkan",scope="device"} 85`,
+	} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("request memory aggregate metrics missing %q\n--- metrics ---\n%s", want, text)
+		}
+	}
+
+	vars := srv.debugVars(time.Now())
+	var kv *debugRequestMemoryMetricVars
+	for i := range vars.Metrics.RequestMemory {
+		row := &vars.Metrics.RequestMemory[i]
+		if row.Class == "kv_cache" {
+			kv = row
+			break
+		}
+	}
+	if kv == nil || kv.Observations != 2 || kv.TotalBytes != 300 || kv.HighWaterBytes != 200 {
+		t.Fatalf("debug request_memory aggregate kv row = %+v, want observations=2 total=300 high=200", kv)
+	}
+	if len(vars.Metrics.RequestMemoryFit) != 1 || vars.Metrics.RequestMemoryFit[0].WantHighWater != 275 ||
+		vars.Metrics.RequestMemoryFit[0].MarginLowWater != 85 || !vars.Metrics.RequestMemoryFit[0].MarginLowWaterOK {
+		t.Fatalf("debug request_memory_fit = %+v, want high=275 low_margin=85", vars.Metrics.RequestMemoryFit)
+	}
+	if len(vars.Metrics.RequestMemoryTokens) != 3 {
+		t.Fatalf("debug request_memory_tokens = %+v, want prompt/max_new/planned rows", vars.Metrics.RequestMemoryTokens)
+	}
+}

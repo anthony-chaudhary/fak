@@ -89,6 +89,9 @@ func (s *Server) streamChatLive(ctx context.Context, w http.ResponseWriter, req 
 		agent.WithStop(normalizeStop(req.Stop)),
 	)
 	if err != nil {
+		if _, _, _, ok := inKernelOOMObservation(err); ok {
+			s.observePlannerRequestMemory()
+		}
 		if !started {
 			// Nothing on the wire yet — surface a real HTTP error, exactly as the
 			// buffered path does, and own the response (the message is generic so the
@@ -113,6 +116,7 @@ func (s *Server) streamChatLive(ctx context.Context, w http.ResponseWriter, req 
 	// The turn finished. The buffered path records inference metrics inside
 	// s.complete; this path bypasses it, so account here.
 	s.metrics.observeInference(comp.Usage.PromptTokens, comp.Usage.CompletionTokens, comp.Usage.CachedPromptTokens(), comp.FinishReason, time.Since(began))
+	s.observePlannerRequestMemory()
 	s.debitServedSessionTurn(ctx, sessionTurn, comp.Usage, req.Messages)
 
 	// Tool-call conformance fail-closed: the upstream announced tool_calls but none

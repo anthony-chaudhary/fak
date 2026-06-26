@@ -68,11 +68,14 @@ type debugKernelVars struct {
 }
 
 type debugMetricsVars struct {
-	HTTP               []debugHTTPMetricVars       `json:"http"`
-	Operations         []debugOperationMetricVars  `json:"operations"`
-	Compaction         debugCompactionVars         `json:"compaction"`
-	InKernelOOM        []debugInKernelOOMVars      `json:"in_kernel_oom"`
-	InKernelOOMRetries []debugInKernelOOMRetryVars `json:"in_kernel_oom_retries,omitempty"`
+	HTTP                []debugHTTPMetricVars          `json:"http"`
+	Operations          []debugOperationMetricVars     `json:"operations"`
+	Compaction          debugCompactionVars            `json:"compaction"`
+	RequestMemory       []debugRequestMemoryMetricVars `json:"request_memory,omitempty"`
+	RequestMemoryFit    []debugRequestMemoryFitVars    `json:"request_memory_fit,omitempty"`
+	RequestMemoryTokens []debugRequestMemoryTokenVars  `json:"request_memory_tokens,omitempty"`
+	InKernelOOM         []debugInKernelOOMVars         `json:"in_kernel_oom"`
+	InKernelOOMRetries  []debugInKernelOOMRetryVars    `json:"in_kernel_oom_retries,omitempty"`
 }
 
 type debugModelLoadVars struct {
@@ -191,6 +194,33 @@ type debugInKernelOOMVars struct {
 	LastSite        string `json:"last_site,omitempty"`
 }
 
+type debugRequestMemoryMetricVars struct {
+	Backend        string `json:"backend"`
+	Class          string `json:"class"`
+	Scope          string `json:"scope"`
+	DType          string `json:"dtype"`
+	Observations   uint64 `json:"observations"`
+	TotalBytes     uint64 `json:"total_bytes"`
+	HighWaterBytes int64  `json:"high_water_bytes"`
+}
+
+type debugRequestMemoryFitVars struct {
+	Backend          string `json:"backend"`
+	Scope            string `json:"scope"`
+	Observations     uint64 `json:"observations"`
+	WantHighWater    int64  `json:"want_high_water_bytes"`
+	MarginLowWater   int64  `json:"margin_low_water_bytes,omitempty"`
+	MarginLowWaterOK bool   `json:"margin_low_water_known"`
+}
+
+type debugRequestMemoryTokenVars struct {
+	Backend      string `json:"backend"`
+	Kind         string `json:"kind"`
+	Observations uint64 `json:"observations"`
+	Total        uint64 `json:"total"`
+	HighWater    int    `json:"high_water"`
+}
+
 type debugInKernelOOMRetryVars struct {
 	Backend         string `json:"backend"`
 	Class           string `json:"class"`
@@ -245,6 +275,7 @@ func (s *Server) debugVars(now time.Time) debugVarsResponse {
 	httpRows, opRows := m.snapshot()
 	compact := m.compactionSnapshotData()
 	oomRows := m.inKernelOOMSnapshotData()
+	reqMemoryRows := m.requestMemoryAggregateSnapshotData()
 
 	return debugVarsResponse{
 		Gateway: debugGatewayVars{
@@ -303,8 +334,11 @@ func (s *Server) debugVars(now time.Time) debugVarsResponse {
 				CacheReadTokens:             compact.cacheReads,
 				LastPostFireCacheReadTokens: compact.lastCacheRd,
 			},
-			InKernelOOM:        debugInKernelOOMRows(oomRows),
-			InKernelOOMRetries: debugInKernelOOMRetryRows(s.planner),
+			RequestMemory:       debugRequestMemoryMetricRows(reqMemoryRows.plans),
+			RequestMemoryFit:    debugRequestMemoryFitRows(reqMemoryRows.fits),
+			RequestMemoryTokens: debugRequestMemoryTokenRows(reqMemoryRows.tokens),
+			InKernelOOM:         debugInKernelOOMRows(oomRows),
+			InKernelOOMRetries:  debugInKernelOOMRetryRows(s.planner),
 		},
 	}
 }
@@ -509,6 +543,60 @@ func debugInKernelOOMRows(rows []inKernelOOMSnapshot) []debugInKernelOOMVars {
 			FailedBytes:     row.failedBytes,
 			LastFailedBytes: row.lastFailedBytes,
 			LastSite:        row.lastSite,
+		})
+	}
+	return out
+}
+
+func debugRequestMemoryMetricRows(rows []requestMemoryPlanSnapshot) []debugRequestMemoryMetricVars {
+	if len(rows) == 0 {
+		return nil
+	}
+	out := make([]debugRequestMemoryMetricVars, 0, len(rows))
+	for _, row := range rows {
+		out = append(out, debugRequestMemoryMetricVars{
+			Backend:        row.key.backend,
+			Class:          row.key.class,
+			Scope:          row.key.scope,
+			DType:          row.key.dtype,
+			Observations:   row.observations,
+			TotalBytes:     row.totalBytes,
+			HighWaterBytes: row.highWaterBytes,
+		})
+	}
+	return out
+}
+
+func debugRequestMemoryFitRows(rows []requestMemoryFitSnapshot) []debugRequestMemoryFitVars {
+	if len(rows) == 0 {
+		return nil
+	}
+	out := make([]debugRequestMemoryFitVars, 0, len(rows))
+	for _, row := range rows {
+		out = append(out, debugRequestMemoryFitVars{
+			Backend:          row.key.backend,
+			Scope:            row.key.scope,
+			Observations:     row.observations,
+			WantHighWater:    row.wantHighWater,
+			MarginLowWater:   row.marginLowWater,
+			MarginLowWaterOK: row.marginKnown,
+		})
+	}
+	return out
+}
+
+func debugRequestMemoryTokenRows(rows []requestMemoryTokenSnapshot) []debugRequestMemoryTokenVars {
+	if len(rows) == 0 {
+		return nil
+	}
+	out := make([]debugRequestMemoryTokenVars, 0, len(rows))
+	for _, row := range rows {
+		out = append(out, debugRequestMemoryTokenVars{
+			Backend:      row.key.backend,
+			Kind:         row.key.kind,
+			Observations: row.observations,
+			Total:        row.total,
+			HighWater:    row.highWater,
 		})
 	}
 	return out

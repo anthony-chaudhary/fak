@@ -146,6 +146,9 @@ func (s *Server) streamAnthropicPlannerLive(w http.ResponseWriter, r *http.Reque
 	close(stopPing)
 	<-pingDone
 	if err != nil {
+		if _, _, _, ok := inKernelOOMObservation(err); ok {
+			s.observePlannerRequestMemory()
+		}
 		if !started {
 			s.logf("gateway: upstream model error (messages stream): %v", err)
 			writeErr(w, http.StatusBadGateway, "upstream model error")
@@ -160,6 +163,7 @@ func (s *Server) streamAnthropicPlannerLive(w http.ResponseWriter, r *http.Reque
 		return true
 	}
 	s.metrics.observeInference(comp.Usage.PromptTokens, comp.Usage.CompletionTokens, comp.Usage.CachedPromptTokens(), comp.FinishReason, time.Since(began))
+	s.observePlannerRequestMemory()
 	s.debitServedSessionTurn(r.Context(), sessionTurn, comp.Usage, req.Messages)
 
 	if comp.ToolCallsDropped && len(comp.Message.ToolCalls) == 0 {
