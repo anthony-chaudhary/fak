@@ -285,7 +285,10 @@ This is a ToolSandbox-shaped adapter smoke, not an official Apple ToolSandbox or
 tau3 leaderboard run. It preserves task ids, milestones, minefield labels, and a
 shared trace while replaying the same calls through raw and fak arms. The shipped
 smoke records raw safe pass^1 `0.500` versus fak safe pass^1 `1.000`, with one
-fak-denied policy/minefield call and benign utility preserved on both tasks.
+fak-denied policy/minefield call and benign utility preserved on both tasks. The
+regenerated witness also carries `evidence_class=SIMULATED_LOCAL_FIXTURE`, an
+unavailable `official_harness` gate, explicit promotion requirements, and
+`result_claim_allowed=false`.
 
 Remaining official-harness bar:
 

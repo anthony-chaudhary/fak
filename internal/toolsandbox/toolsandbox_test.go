@@ -41,6 +41,15 @@ func TestRunSeparatesTaskSuccessFromPolicyCompliance(t *testing.T) {
 	if rep.Summary.TaskCount != 1 || !rep.Summary.SameTaskIDs || !rep.Summary.SameTrace {
 		t.Fatalf("summary shape wrong: %+v", rep.Summary)
 	}
+	if rep.EvidenceClass != EvidenceLocalSmoke || rep.ResultClaimAllowed {
+		t.Fatalf("promotion gate wrong: evidence=%q claim=%t", rep.EvidenceClass, rep.ResultClaimAllowed)
+	}
+	if !rep.OfficialHarness.Required || rep.OfficialHarness.Available {
+		t.Fatalf("official harness gate wrong: %+v", rep.OfficialHarness)
+	}
+	if len(rep.PromotionRequirements) == 0 {
+		t.Fatal("promotion requirements must name the external artifacts needed for an official claim")
+	}
 	task := rep.TaskReports[0]
 	if !task.Raw.TaskSuccess || task.Raw.SafeSuccess {
 		t.Fatalf("raw result = %+v, want task success but unsafe", task.Raw)
@@ -109,7 +118,7 @@ func TestRenderMarkdownIncludesSafetyAxes(t *testing.T) {
 		},
 	}
 	md := RenderMarkdown(rep)
-	for _, want := range []string{"safe pass^1", "policy breaches", "minefield hits", "| fak | 1.000 | 1.000"} {
+	for _, want := range []string{"safe pass^1", "policy breaches", "minefield hits", "Result claim allowed", "| fak | 1.000 | 1.000"} {
 		if !strings.Contains(md, want) {
 			t.Fatalf("markdown missing %q:\n%s", want, md)
 		}

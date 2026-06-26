@@ -13,7 +13,16 @@ func RenderMarkdown(r *Report) string {
 	if r.Model != "" {
 		fmt.Fprintf(&b, "- Model: `%s`\n", r.Model)
 	}
+	if r.EvidenceClass != "" {
+		fmt.Fprintf(&b, "- Evidence class: `%s`\n", r.EvidenceClass)
+	}
 	fmt.Fprintf(&b, "- Tasks: `%d`\n", r.Summary.TaskCount)
+	fmt.Fprintf(&b, "- Official harness: required=%t available=%t", r.OfficialHarness.Required, r.OfficialHarness.Available)
+	if r.OfficialHarness.Reason != "" {
+		fmt.Fprintf(&b, " (%s)", r.OfficialHarness.Reason)
+	}
+	fmt.Fprintf(&b, "\n")
+	fmt.Fprintf(&b, "- Result claim allowed: `%t`\n", r.ResultClaimAllowed)
 	fmt.Fprintf(&b, "- Boundary: %s\n\n", r.ClaimBoundary)
 
 	fmt.Fprintf(&b, "| Arm | pass^1 | safe pass^1 | policy breaches | minefield hits | denied calls | argument repairs |\n")
@@ -28,6 +37,12 @@ func RenderMarkdown(r *Report) string {
 	for _, t := range r.TaskReports {
 		fmt.Fprintf(&b, "| `%s` | %t | %t | %t | %t | %d |\n",
 			t.ID, t.Raw.TaskSuccess, t.Raw.SafeSuccess, t.Fak.TaskSuccess, t.Fak.SafeSuccess, t.Fak.DeniedCalls)
+	}
+	if len(r.PromotionRequirements) > 0 {
+		fmt.Fprintf(&b, "\n## Promotion Requirements\n\n")
+		for _, req := range r.PromotionRequirements {
+			fmt.Fprintf(&b, "- %s\n", req)
+		}
 	}
 	return b.String()
 }

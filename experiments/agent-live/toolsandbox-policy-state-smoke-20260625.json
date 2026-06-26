@@ -1,8 +1,9 @@
 {
   "schema": "fak.toolsandbox-adapter-report.v1",
-  "generated_at": "2026-06-25T23:52:05Z",
+  "generated_at": "2026-06-26T01:57:33Z",
   "benchmark": "toolsandbox-shaped-smoke",
   "model": "offline-trace",
+  "evidence_class": "SIMULATED_LOCAL_FIXTURE",
   "tasks": [
     {
       "id": "retail-refund-policy-minefield",
@@ -204,5 +205,21 @@
     "policy_breach_delta": 1,
     "minefield_hit_delta": 1
   },
+  "official_harness": {
+    "required": true,
+    "available": false,
+    "task_source": "not supplied by external tau3/ToolSandbox harness",
+    "grader": "not supplied by external tau3/ToolSandbox harness",
+    "reason": "this runner replays a committed local fixture; benchmark-native task definitions and grader output are required before any official result claim"
+  },
+  "promotion_requirements": [
+    "benchmark-native task manifest or scenario ids",
+    "raw-arm benchmark output",
+    "fak-arm benchmark output",
+    "benchmark-native grader or result summary",
+    "same model, simulator, task ids, budget, and retry policy across both arms",
+    "fak verdict/evidence log linked to each mediated tool call"
+  ],
+  "result_claim_allowed": false,
   "claim_boundary": "Adapter smoke only: preserves benchmark-native task ids, milestones, and minefield labels while replaying the same trace through fak adjudication. It is not an official tau3/ToolSandbox leaderboard result until the external benchmark harness supplies the tasks and grader."
 }

@@ -18,8 +18,9 @@ import (
 )
 
 const (
-	SuiteSchema  = "fak.toolsandbox-adapter-suite.v1"
-	ReportSchema = "fak.toolsandbox-adapter-report.v1"
+	SuiteSchema        = "fak.toolsandbox-adapter-suite.v1"
+	ReportSchema       = "fak.toolsandbox-adapter-report.v1"
+	EvidenceLocalSmoke = "SIMULATED_LOCAL_FIXTURE"
 )
 
 type Suite struct {
@@ -47,13 +48,25 @@ type Call struct {
 }
 
 type Report struct {
-	Schema        string       `json:"schema"`
-	GeneratedAt   string       `json:"generated_at"`
-	Benchmark     string       `json:"benchmark"`
-	Model         string       `json:"model,omitempty"`
-	TaskReports   []TaskReport `json:"tasks"`
-	Summary       Summary      `json:"summary"`
-	ClaimBoundary string       `json:"claim_boundary"`
+	Schema                string          `json:"schema"`
+	GeneratedAt           string          `json:"generated_at"`
+	Benchmark             string          `json:"benchmark"`
+	Model                 string          `json:"model,omitempty"`
+	EvidenceClass         string          `json:"evidence_class"`
+	TaskReports           []TaskReport    `json:"tasks"`
+	Summary               Summary         `json:"summary"`
+	OfficialHarness       OfficialHarness `json:"official_harness"`
+	PromotionRequirements []string        `json:"promotion_requirements"`
+	ResultClaimAllowed    bool            `json:"result_claim_allowed"`
+	ClaimBoundary         string          `json:"claim_boundary"`
+}
+
+type OfficialHarness struct {
+	Required   bool   `json:"required"`
+	Available  bool   `json:"available"`
+	TaskSource string `json:"task_source"`
+	Grader     string `json:"grader"`
+	Reason     string `json:"reason"`
 }
 
 type TaskReport struct {
@@ -188,7 +201,24 @@ func Run(ctx context.Context, s Suite, generatedAt time.Time) (*Report, error) {
 		GeneratedAt:   generatedAt.UTC().Format(time.RFC3339),
 		Benchmark:     s.Benchmark,
 		Model:         s.Model,
-		ClaimBoundary: "Adapter smoke only: preserves benchmark-native task ids, milestones, and minefield labels while replaying the same trace through fak adjudication. It is not an official tau3/ToolSandbox leaderboard result until the external benchmark harness supplies the tasks and grader.",
+		EvidenceClass: EvidenceLocalSmoke,
+		OfficialHarness: OfficialHarness{
+			Required:   true,
+			Available:  false,
+			TaskSource: "not supplied by external tau3/ToolSandbox harness",
+			Grader:     "not supplied by external tau3/ToolSandbox harness",
+			Reason:     "this runner replays a committed local fixture; benchmark-native task definitions and grader output are required before any official result claim",
+		},
+		PromotionRequirements: []string{
+			"benchmark-native task manifest or scenario ids",
+			"raw-arm benchmark output",
+			"fak-arm benchmark output",
+			"benchmark-native grader or result summary",
+			"same model, simulator, task ids, budget, and retry policy across both arms",
+			"fak verdict/evidence log linked to each mediated tool call",
+		},
+		ResultClaimAllowed: false,
+		ClaimBoundary:      "Adapter smoke only: preserves benchmark-native task ids, milestones, and minefield labels while replaying the same trace through fak adjudication. It is not an official tau3/ToolSandbox leaderboard result until the external benchmark harness supplies the tasks and grader.",
 	}
 	for _, task := range s.Tasks {
 		pol, err := task.Policy.ToPolicy()
