@@ -130,14 +130,14 @@ for long coding loops), **#805 / #809** (intent conduit + speculative-loop perf)
 
 ### The one gap with no owner
 
-No single epic frames *"coding agent behind fak"* as the primary use case and ties
+No single epic framed *"coding agent behind fak"* as the primary use case and tied
 the four pillars (adopt · floor · cost · witness) into one adoption-quality track —
-the threads live in #897, #745, #610, and the examples cluster independently. A
-candidate umbrella: `epic(coding): make "coding agent behind fak" the proven primary
-use case — adopt · floor · cost · witness`, owning the cross-cutting scorecard and
-the examples-visibility gap, referencing the four existing epics as its pillars.
-**Not filed** pending operator go-ahead (the backlog is dispatcher-managed at
-`AT_CAP`); this note is its durable form until then.
+the threads lived in #897, #745, #610, and the examples cluster independently. That
+gap is now owned by the umbrella epic **#924** (`epic(coding): make "coding agent
+behind fak" the proven primary use case`), which references the four existing epics
+as its pillars and links this scorecard as its readout. This note is its source of
+truth for the composite grade; the epic's DoD moves only when a pillar's owning work
+lands real evidence.
 
 ---
 
