@@ -1,0 +1,150 @@
+{
+  "schema": "fak-swebench-compare/1",
+  "generated_at": "2026-06-26T02:31:12Z",
+  "dataset": {
+    "instances": 20,
+    "difficulty_distribution": {
+      "1-4 hours": 3,
+      "15 min - 1 hour": 13,
+      "\u003c15 min fix": 4
+    },
+    "geometry_sources": {
+      "default": 20
+    },
+    "total_turns": 400
+  },
+  "workers": [
+    1,
+    2,
+    4,
+    8
+  ],
+  "families": [
+    {
+      "name": "prefill / KV-reuse work-elimination (deterministic)",
+      "bench_analog": "related to (NOT the same quantity as) bench's server-stream cache-hit/KV-reuse; live TTFT/wall-clock is the gated DGX number, not produced here",
+      "kind": "fak_native",
+      "provenance": "computed_deterministic",
+      "metrics": [
+        {
+          "name": "prefill_work_elimination_A_over_C@workers=1",
+          "value": 16.24,
+          "unit": "x",
+          "note": "fak's naive-re-prefill arm (A) vs fak-fused arm (C) — a fak-vs-fak ablation, not a fair-comparator win"
+        },
+        {
+          "name": "cross_worker_prefix_reuse_B_over_C@workers=1",
+          "value": 1,
+          "unit": "x",
+          "note": "fak's per-agent-KV arm (B) vs fak-fused shared-prefix arm (C) — a deterministic work-ratio, NOT bench's bounded token_hit_ratio_pct and NOT a head-to-head"
+        },
+        {
+          "name": "prefill_work_elimination_A_over_C@workers=2",
+          "value": 18.53,
+          "unit": "x",
+          "note": "fak's naive-re-prefill arm (A) vs fak-fused arm (C) — a fak-vs-fak ablation, not a fair-comparator win"
+        },
+        {
+          "name": "cross_worker_prefix_reuse_B_over_C@workers=2",
+          "value": 1.14,
+          "unit": "x",
+          "note": "fak's per-agent-KV arm (B) vs fak-fused shared-prefix arm (C) — a deterministic work-ratio, NOT bench's bounded token_hit_ratio_pct and NOT a head-to-head"
+        },
+        {
+          "name": "prefill_work_elimination_A_over_C@workers=4",
+          "value": 19.94,
+          "unit": "x",
+          "note": "fak's naive-re-prefill arm (A) vs fak-fused arm (C) — a fak-vs-fak ablation, not a fair-comparator win"
+        },
+        {
+          "name": "cross_worker_prefix_reuse_B_over_C@workers=4",
+          "value": 1.23,
+          "unit": "x",
+          "note": "fak's per-agent-KV arm (B) vs fak-fused shared-prefix arm (C) — a deterministic work-ratio, NOT bench's bounded token_hit_ratio_pct and NOT a head-to-head"
+        },
+        {
+          "name": "prefill_work_elimination_A_over_C@workers=8",
+          "value": 20.73,
+          "unit": "x",
+          "note": "fak's naive-re-prefill arm (A) vs fak-fused arm (C) — a fak-vs-fak ablation, not a fair-comparator win"
+        },
+        {
+          "name": "cross_worker_prefix_reuse_B_over_C@workers=8",
+          "value": 1.28,
+          "unit": "x",
+          "note": "fak's per-agent-KV arm (B) vs fak-fused shared-prefix arm (C) — a deterministic work-ratio, NOT bench's bounded token_hit_ratio_pct and NOT a head-to-head"
+        }
+      ]
+    },
+    {
+      "name": "turns + tokens",
+      "bench_analog": "agent-stream actual_agent_steps = (len(messages)-2)//2; prompt+completion tokens",
+      "kind": "comparable",
+      "provenance": "computed_deterministic",
+      "metrics": [
+        {
+          "name": "total_agent_steps",
+          "value": 400,
+          "unit": "steps",
+          "note": "Σ geometry turns ≈ Σ actual_agent_steps over the set"
+        },
+        {
+          "name": "median_agent_steps",
+          "value": 20,
+          "unit": "steps"
+        },
+        {
+          "name": "turn_tax_A_over_B",
+          "value": 16.24,
+          "unit": "x",
+          "note": "extra prefill work a re-prefill harness pays per turn vs KV persistence (worker-independent)"
+        }
+      ]
+    },
+    {
+      "name": "in-process adjudication cost",
+      "bench_analog": "none — bench measures a served endpoint, not the tool-call adjudication boundary",
+      "kind": "fak_native",
+      "provenance": "live_measured",
+      "metrics": [
+        {
+          "name": "in_process_adjudication_p50",
+          "value": 2888,
+          "unit": "ns"
+        },
+        {
+          "name": "spawn_per_hook_p50",
+          "value": 11698400,
+          "unit": "ns"
+        },
+        {
+          "name": "fusion_speedup",
+          "value": 4050.69,
+          "unit": "x",
+          "note": "in-process vs the deployed process-per-hook status quo"
+        }
+      ]
+    },
+    {
+      "name": "resolve-rate + safety",
+      "bench_analog": "agent-stream resolved_count / pass_rate_pct (report.json); safety is fak-native",
+      "kind": "comparable",
+      "provenance": "gated_dgx_only",
+      "metrics": [
+        {
+          "name": "pass_rate_pct",
+          "value": 0,
+          "unit": "%",
+          "note": "no predictions graded — resolve-rate needs a capable model + Docker (DGX); ~0 with the local 135M model"
+        }
+      ]
+    }
+  ],
+  "methodology": "fak metrics keyed to bench's critical-metrics vocabulary (agent stream + server stream). Prefill work-elimination is the deterministic, contention-free floor (sessionbench A/B/C formula) over the real instance set — comparable to bench's server-side cache-hit/KV-reuse. Turns map to mini-swe-agent actual_agent_steps. Resolve-rate uses the official harness (gated to a Docker box). Adjudication cost is the in-process vs spawn-per-hook gate.",
+  "honesty": [
+    "prefill work-elimination is a deterministic floor (exact token arithmetic), NOT a measured wall-clock — live timing is the GPU server headline",
+    "cross-worker reuse (B/C) is the value-stack lever; the A/C and turn-tax (A/B) numbers are fak-vs-harness-arms, reported as such, not as a tuned-SGLang head-to-head",
+    "resolve-rate is ~0 with the local 135M model; the real resolve number comes from a Qwen3.6-27B-class model on DGX via the same harness",
+    "to be scraped by bench like SGLang, fak serve needs a Prometheus /metrics route exposing kernel.Counters() — gap noted, not yet shipped"
+  ]
+}

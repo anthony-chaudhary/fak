@@ -1,6 +1,6 @@
 {
   "schema": "fak.glm52-vllm-agentic-battery.v1",
-  "generated_at": "2026-06-26T01:32:00.052205Z",
+  "generated_at": "2026-06-26T02:31:13.328401Z",
   "model_family": "zai-org/GLM-5.2",
   "checkpoint_model": "zai-org/GLM-5.2-FP8",
   "served_model_name": "glm-5.2",
@@ -13,7 +13,7 @@
   "out_dir": "experiments/vllm",
   "serving_out_dir": "experiments/glm52",
   "swe_run_dir": "/tmp/swe-glm52-vllm-20",
-  "swebench_difficulty": "",
+  "swebench_difficulty": "testdata/swebench_verified_20_difficulty.json",
   "swebench_dataset": "",
   "run_contract_artifact": "experiments/vllm/glm52-agentic-battery/raw-vllm-vs-fak-gateway-contract.json",
   "steps": [
@@ -270,7 +270,7 @@
       "kind": "fak-native-floor",
       "description": "Record the deterministic fak-native SWE-bench geometry floor at the same 20-task scale.",
       "required": true,
-      "status": "planned",
+      "status": "artifact-pass",
       "command": {
         "argv": [
           "go",
@@ -286,9 +286,11 @@
           "--out",
           "experiments/vllm/swebench-20-fak-floor.json",
           "--md",
-          "experiments/vllm/swebench-20-fak-floor.md"
+          "experiments/vllm/swebench-20-fak-floor.md",
+          "--difficulty",
+          "testdata/swebench_verified_20_difficulty.json"
         ],
-        "shell": "go run ./cmd/fak swebench compare --workers 1,2,4,8 --limit 20 --with-adjudication --out experiments/vllm/swebench-20-fak-floor.json --md experiments/vllm/swebench-20-fak-floor.md"
+        "shell": "go run ./cmd/fak swebench compare --workers 1,2,4,8 --limit 20 --with-adjudication --out experiments/vllm/swebench-20-fak-floor.json --md experiments/vllm/swebench-20-fak-floor.md --difficulty testdata/swebench_verified_20_difficulty.json"
       },
       "primary_artifact": "experiments/vllm/swebench-20-fak-floor.json",
       "artifacts": [
@@ -297,8 +299,8 @@
       ],
       "check": "swebench_floor",
       "claim_boundary": "This is deterministic mechanism evidence, not a raw vLLM head-to-head.",
-      "artifact_status": "MISSING",
-      "artifact_detail": "missing"
+      "artifact_status": "PASS",
+      "artifact_detail": "fak SWE-bench floor: 20 instances workers=[1,2,4,8]"
     },
     {
       "id": "turntax_airline",
@@ -428,7 +430,7 @@
     "complete": false,
     "status": "PENDING_MEASUREMENT",
     "required_artifacts": 11,
-    "required_passed": 4,
+    "required_passed": 5,
     "required_failed": [
       "preflight"
     ],
@@ -437,7 +439,6 @@
       "vllm_tax",
       "swebench_compare_preflight",
       "swebench_verified_20",
-      "swebench_floor_20",
       "sessionbench_synthetic"
     ],
     "honesty": "No GLM-5.2/vLLM benchmark number is quotable until every required artifact passes and any copied number is linked from BENCHMARK-AUTHORITY.md."

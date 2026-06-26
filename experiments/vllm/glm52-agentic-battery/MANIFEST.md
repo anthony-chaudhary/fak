@@ -1,11 +1,11 @@
 # GLM-5.2 vLLM Agentic Benchmark Battery
 
-- Generated: `2026-06-26T01:32:00.051843Z`
+- Generated: `2026-06-26T02:31:13.328401Z`
 - Model family: `zai-org/GLM-5.2`
 - Checkpoint: `zai-org/GLM-5.2-FP8` served as `glm-5.2`
 - Raw vLLM endpoint: `http://127.0.0.1:8000/v1`
 - Status: **`PENDING_MEASUREMENT`**
-- Required artifacts passed: `4/11`
+- Required artifacts passed: `5/11`
 
 > Pending measurement: this manifest contains commands and artifact checks, not benchmark results.
 
@@ -18,7 +18,7 @@
 | `vllm_tax` | live-serving | `experiments/vllm/adjudication-tax-witness.json` | MISSING | missing |
 | `swebench_compare_preflight` | live-agentic-preflight | `/tmp/swe-glm52-vllm-20/COMPARE-PREFLIGHT.json` | MISSING | missing |
 | `swebench_verified_20` | live-agentic | `/tmp/swe-glm52-vllm-20/compare.json` | MISSING | missing |
-| `swebench_floor_20` | fak-native-floor | `experiments/vllm/swebench-20-fak-floor.json` | MISSING | missing |
+| `swebench_floor_20` | fak-native-floor | `experiments/vllm/swebench-20-fak-floor.json` | PASS | fak SWE-bench floor: 20 instances workers=[1,2,4,8] |
 | `turntax_airline` | fak-native-floor | `experiments/vllm/turntax-airline.json` | PASS | turntax-airline turns_saved=9 |
 | `sessionbench_synthetic` | fak-native-floor | `experiments/vllm/sessionbench-synthetic.json` | MISSING | missing |
 | `fanbench_research` | fak-native-floor | `experiments/vllm/fanbench-research.json` | PASS | fanbench research grid/trials present |
@@ -87,7 +87,7 @@ python tools/dgx_swebench_compare.py --engine vllm --model zai-org/GLM-5.2-FP8 -
 Record the deterministic fak-native SWE-bench geometry floor at the same 20-task scale.
 
 ```bash
-go run ./cmd/fak swebench compare --workers 1,2,4,8 --limit 20 --with-adjudication --out experiments/vllm/swebench-20-fak-floor.json --md experiments/vllm/swebench-20-fak-floor.md
+go run ./cmd/fak swebench compare --workers 1,2,4,8 --limit 20 --with-adjudication --out experiments/vllm/swebench-20-fak-floor.json --md experiments/vllm/swebench-20-fak-floor.md --difficulty testdata/swebench_verified_20_difficulty.json
 ```
 
 ### turntax_airline
@@ -122,7 +122,7 @@ Measure RadixAttention-style prefix-cache hit-rate evidence.
 go run ./cmd/radixbench -live=false -out experiments/vllm/radixbench-synthetic.json
 ```
 
-Missing required artifacts: `serving_witness`, `vllm_tax`, `swebench_compare_preflight`, `swebench_verified_20`, `swebench_floor_20`, `sessionbench_synthetic`.
+Missing required artifacts: `serving_witness`, `vllm_tax`, `swebench_compare_preflight`, `swebench_verified_20`, `sessionbench_synthetic`.
 Failed required artifacts: `preflight`.
 
 No GLM-5.2/vLLM benchmark number is quotable until every required artifact passes and any copied number is linked from BENCHMARK-AUTHORITY.md.

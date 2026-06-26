@@ -1,6 +1,6 @@
 # Agentic Benchmark Epic #868 Rollup
 
-- Generated: `2026-06-26T02:14:56Z`
+- Generated: `2026-06-26T02:31:13Z`
 - Status: `PENDING_EXTERNAL_HARNESS`
 - Result claim allowed: `false`
 - Children parsed: `8/8`
@@ -12,7 +12,7 @@
 | Issue | Packet | Artifact | Gate | Status | Detail |
 |---:|---|---|---|---|---|
 | #869 | `A` | `experiments/agent-live/agentdojo-fak-fullstack-20260625.json` | `PASS_LOCAL` | `PASS` | local structural floor PASS; full-stack ASR successes 0; benign controls 2 |
-| #870 | `B` | `experiments/vllm/glm52-agentic-battery/final-check.json` | `PENDING_EXTERNAL_HARNESS` | `PENDING_MEASUREMENT` | GLM final-check PENDING_MEASUREMENT; required artifacts 4/11 passed |
+| #870 | `B` | `experiments/vllm/glm52-agentic-battery/final-check.json` | `PENDING_EXTERNAL_HARNESS` | `PENDING_MEASUREMENT` | GLM final-check PENDING_MEASUREMENT; required artifacts 5/11 passed |
 | #871 | `C` | `experiments/agent-live/swebench-opus-smoke-contract-20260626.json` | `PENDING_EXTERNAL_HARNESS` | `READY_FOR_REMOTE_GRADING` | READY_FOR_REMOTE_GRADING; raw/fak predictions and official SWE-bench reports still required |
 | #872 | `D` | `experiments/agent-live/deepswe-adapter-smoke-20260626/summary.json` | `PENDING_EXTERNAL_HARNESS` | `ADAPTER_FIXTURE_COMPLETE` | ADAPTER_FIXTURE_COMPLETE; fixture adapter only, real DeepSWE/R2E-Gym grading still required |
 | #873 | `E` | `experiments/agent-live/toolsandbox-policy-state-smoke-20260625.json` | `PASS_LOCAL` | `SIMULATED_LOCAL_FIXTURE` | local fixture is parseable and explicitly non-promotable |

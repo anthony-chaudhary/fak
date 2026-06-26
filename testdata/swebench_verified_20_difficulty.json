@@ -1,0 +1,33 @@
+{
+  "_meta": {
+    "_source_dataset": "SWE-bench/SWE-bench_Verified",
+    "_source_split": "test",
+    "_snapshot_date": "2026-06-26 Hugging Face datasets-server rows offset=0 length=20",
+    "_total_instances": 20,
+    "_bucket_counts": {
+      "<15 min fix": 4,
+      "1-4 hours": 3,
+      "15 min - 1 hour": 13
+    }
+  },
+  "astropy__astropy-12907": "15 min - 1 hour",
+  "astropy__astropy-13033": "15 min - 1 hour",
+  "astropy__astropy-13236": "15 min - 1 hour",
+  "astropy__astropy-13398": "1-4 hours",
+  "astropy__astropy-13453": "15 min - 1 hour",
+  "astropy__astropy-13579": "1-4 hours",
+  "astropy__astropy-13977": "15 min - 1 hour",
+  "astropy__astropy-14096": "15 min - 1 hour",
+  "astropy__astropy-14182": "15 min - 1 hour",
+  "astropy__astropy-14309": "<15 min fix",
+  "astropy__astropy-14365": "15 min - 1 hour",
+  "astropy__astropy-14369": "1-4 hours",
+  "astropy__astropy-14508": "15 min - 1 hour",
+  "astropy__astropy-14539": "15 min - 1 hour",
+  "astropy__astropy-14598": "15 min - 1 hour",
+  "astropy__astropy-14995": "<15 min fix",
+  "astropy__astropy-7166": "<15 min fix",
+  "astropy__astropy-7336": "<15 min fix",
+  "astropy__astropy-7606": "15 min - 1 hour",
+  "astropy__astropy-7671": "15 min - 1 hour"
+}

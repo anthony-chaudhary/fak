@@ -1,6 +1,6 @@
 {
   "schema": "fak.agentic-benchmark-epic-rollup.v1",
-  "generated_at": "2026-06-26T02:14:56Z",
+  "generated_at": "2026-06-26T02:31:13Z",
   "epic": 868,
   "status": "PENDING_EXTERNAL_HARNESS",
   "result_claim_allowed": false,
@@ -37,7 +37,7 @@
       "gate": "PENDING_EXTERNAL_HARNESS",
       "status": "PENDING_MEASUREMENT",
       "result_claim_allowed": false,
-      "detail": "GLM final-check PENDING_MEASUREMENT; required artifacts 4/11 passed"
+      "detail": "GLM final-check PENDING_MEASUREMENT; required artifacts 5/11 passed"
     },
     {
       "issue": 871,
