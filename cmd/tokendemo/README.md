@@ -4,6 +4,8 @@
 prefiltered bad call, and tool round-trips collapsed by a cached re-read. It replays the
 same fixtures through the real kernel path used by the other turn demos.
 
+For the shortest path, start with [`QUICKSTART.md`](QUICKSTART.md).
+
 ## Prerequisites
 
 Go 1.26+ from the repository root. No model, GPU, API key, browser, or network is
