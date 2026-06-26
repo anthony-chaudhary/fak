@@ -127,7 +127,8 @@ func TestEnsureClaudeMacGatewayKeySurfacesSSHStderr(t *testing.T) {
 		return cmd
 	}
 
-	err := ensureClaudeMacGatewayKey("FAK_GATEWAY_KEY", true, "user@node-macos-a.local", "")
+	// A remote (non-loopback) gateway: the ssh fetch must run and fail loudly.
+	err := ensureClaudeMacGatewayKey("FAK_GATEWAY_KEY", true, "user@node-macos-a.local", "", "http://node-macos-a.local:8080")
 	if err == nil {
 		t.Fatal("expected an error when the ssh fetch fails")
 	}
@@ -143,6 +144,31 @@ func TestEnsureClaudeMacGatewayKeySurfacesSSHStderr(t *testing.T) {
 	}
 	if strings.Contains(msg, "exit status 255") && !strings.Contains(msg, "Could not resolve hostname") {
 		t.Fatalf("error fell back to the opaque exit status:\n%s", msg)
+	}
+}
+
+// TestEnsureClaudeMacGatewayKeyLocalSkipsSSH is the easy-local-default
+// guarantee: when the gateway is loopback there is no Mac to ssh into and a
+// local fak serve without --require-key-env needs no bearer, so the ssh fetch
+// must be skipped entirely and an empty key tolerated — no error, no exec.
+func TestEnsureClaudeMacGatewayKeyLocalSkipsSSH(t *testing.T) {
+	t.Setenv("FAK_GATEWAY_KEY", "")
+	orig := execCommand
+	t.Cleanup(func() { execCommand = orig })
+	execCommand = func(name string, args ...string) *exec.Cmd {
+		t.Fatalf("local gateway must not invoke ssh; got %s %v", name, args)
+		return nil
+	}
+
+	for _, gw := range []string{
+		"http://127.0.0.1:8080",
+		"http://localhost:8080",
+		"http://[::1]:8080",
+		"http://127.0.0.1:8080/v1",
+	} {
+		if err := ensureClaudeMacGatewayKey("FAK_GATEWAY_KEY", true, "user@node-macos-a.local", "", gw); err != nil {
+			t.Fatalf("local gateway %q should skip the ssh fetch, got %v", gw, err)
+		}
 	}
 }
 

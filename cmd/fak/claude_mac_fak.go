@@ -6,7 +6,9 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -82,7 +84,7 @@ func runClaudeMacFak(stdout, stderr io.Writer, argv []string) int {
 		fmt.Fprintf(stderr, "fak claude-mac-fak: create --claude-config-dir: %v\n", err)
 		return 1
 	}
-	if err := ensureClaudeMacGatewayKey(*keyEnv, *fetchKey, *sshHost, *sshKey); err != nil {
+	if err := ensureClaudeMacGatewayKey(*keyEnv, *fetchKey, *sshHost, *sshKey, *gatewayURL); err != nil {
 		fmt.Fprintf(stderr, "fak claude-mac-fak: %v\n", err)
 		return 2
 	}
@@ -186,12 +188,38 @@ func defaultClaudeMacSSHKey() string {
 // leaves it as exec.Command.
 var execCommand = exec.Command
 
-func ensureClaudeMacGatewayKey(envName string, fetch bool, host, keyPath string) error {
+// gatewayIsLocal reports whether the gateway URL points at this machine
+// (loopback host). A local fak serve has no Mac to ssh into and, unless it was
+// started with --require-key-env, needs no bearer — so the ssh key-fetch is
+// both impossible and unnecessary. Used to skip the fetch for the easy local
+// default instead of dead-ending on a doomed ssh call.
+func gatewayIsLocal(gatewayURL string) bool {
+	u, err := url.Parse(strings.TrimSpace(gatewayURL))
+	if err != nil {
+		return false
+	}
+	host := u.Hostname()
+	if strings.EqualFold(host, "localhost") {
+		return true
+	}
+	if ip := net.ParseIP(host); ip != nil {
+		return ip.IsLoopback()
+	}
+	return false
+}
+
+func ensureClaudeMacGatewayKey(envName string, fetch bool, host, keyPath, gatewayURL string) error {
 	envName = strings.TrimSpace(envName)
 	if envName == "" {
 		envName = "FAK_GATEWAY_KEY"
 	}
 	if strings.TrimSpace(os.Getenv(envName)) != "" {
+		return nil
+	}
+	// Easy local default: a loopback gateway is a local fak serve with no Mac to
+	// reach over ssh. Skip the fetch and tolerate an empty bearer — a local serve
+	// without --require-key-env accepts unauthenticated requests.
+	if gatewayIsLocal(gatewayURL) {
 		return nil
 	}
 	if !fetch {
