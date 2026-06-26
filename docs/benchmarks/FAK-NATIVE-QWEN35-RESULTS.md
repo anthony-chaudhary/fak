@@ -90,6 +90,74 @@ What this does **not** claim yet:
   llama.cpp greedy tokens, but the three-token #93 oracle fails at step 2 (`8160`
   instead of llama.cpp's `90700`).
 
+## 2026-06-26 `FAK_QPROFILE` per-op phase profile + bottleneck split (#438)
+
+The 22-token smoke above reports only one prefill/decode number — it cannot say *where*
+the time goes (GDN projections vs conv/scan vs full-attention vs MLP vs head). `cmd/fakchat`
+now answers that: set **`FAK_QPROFILE=1`** and the cached `qwen3_5` (Gated-DeltaNet) prefill
+and decode each emit a per-op wall-time split to stderr. The profiler is opt-in and the
+default path attaches none (zero instrumentation cost). The instrumented op classes cover the
+whole hybrid forward, every item the #438 acceptance list names:
+
+- **embedding** (`embed`), **input/post/final norms** (`input_norm`, `post_attn_norm`,
+  `final_norm`), **activation quantization** (`q8_panel_quantize` / `q8_norm_quant`).
+- **GDN linear-attention**: in-projection (qkv/z/a/b) `qwen35_linear_in_proj`, depthwise
+  **conv1d** `qwen35_linear_conv`, q/k-norm `qwen35_linear_qk_norm`, **recurrent delta scan**
+  `qwen35_linear_recurrent`, **gated RMSNorm** `qwen35_linear_gated_norm`, **out-projection**
+  `qwen35_linear_out_proj` (and the `_step_` twins on the decode path).
+- **Gated full-attention**: `qwen35_full_qkv_proj`, `qwen35_full_split_gate`,
+  `qwen35_full_qk_norm_rope`, `qwen35_full_attn`, `qwen35_full_gate`, `qwen35_full_o_proj`.
+- **MLP** `mlp_gate_up_proj` / `mlp_activation` / `mlp_down_proj` (decode: `mlp_decode`) and
+  the **logits/head** `lm_head_q8`.
+
+The mechanism is pinned by `TestQwen35HybridQPhaseProfilerRecordsPrefillAndDecode`
+(`internal/model/qwen35_test.go`), which asserts both phases record their ops on a synthetic
+hybrid — so the profiler can run GPU-free in CI and cannot silently stop recording an op.
+
+### The measured profile (Qwen3.6-27B q4_k_m, Apple M3 Pro, `-tags fakmetal`)
+
+Captured clean on `node-macos-a` (M3 Pro / 36 GB, llama-server stopped for the whole pool),
+full method, fences, and raw artifact in
+[`docs/notes/MAC-QWEN36-27B-Q4K-METAL-PERF-DIAGNOSIS-2026-06-26.md`](../notes/MAC-QWEN36-27B-Q4K-METAL-PERF-DIAGNOSIS-2026-06-26.md)
+(artifact: `experiments/benchmark/runs/by-machine/node-macos-a/20260626T055239Z-q4k-metal-decode-27b/score.json`).
+Clean headline: **decode 1.2 tok/s** (64 tok / 54.12 s), **prefill 0.6 tok/s** (29 tok /
+48.27 s) vs the llama.cpp-Metal bar 7.29 / 51.55 and the 3× goal 2.7. The phase split below is
+from that run (a slightly longer prompt than the n=1 smoke, which gives the decode loop real
+steps to attribute); the per-op attribution, not the single-run tok/s, is the durable signal.
+
+**Decode** (total 54122 ms / 64 tokens = 845 ms/token):
+
+| phase | ms | % | calls | ms/call |
+|---|---:|---:|---:|---:|
+| `mlp_decode` | 29200 | **54.0%** | 4096 | 7.13 |
+| `qwen35_linear_step_in_proj` | 8697 | 16.1% | 3072 | 2.83 |
+| `qwen35_linear_step_out_proj` | 3453 | 6.4% | 3072 | 1.12 |
+| `qwen35_linear_step_recurrent` | 3199 | 5.9% | 3072 | 1.04 |
+| `full_attn_qkv_proj` | 2900 | 5.4% | 1024 | 2.83 |
+| `lm_head_q8` | 1934 | 3.6% | 64 | 30.2 |
+| `full_attn_o_proj` | 1066 | 2.0% | 1024 | 1.04 |
+| rest (attn, conv, norms, gate) | ~3700 | 6.8% | — | — |
+
+**Prefill** (total 48273 ms / 29 tokens): `mlp_gate_up_proj` **54.7%** (412 ms/call),
+`mlp_down_proj` 18.2%, `qwen35_linear_in_proj` 11.2%.
+
+The matmuls (MLP + projections) are ~85% of both phases. The cause is **orchestration, not
+arithmetic**: each decode token runs ~336 *separate* Metal command-buffer GEMVs, each ~360 µs
+launch/sync-bound on top of ~98 µs of bandwidth-limited work, so `mlp_decode` sits at 7.1
+ms/call where a ~40 MB Q4_K read at ~150 GB/s should be ~0.27 ms. The kernels are correct
+(GEMV cosine 1.000000 vs CPU; greedy decode token-parity) — they are launch-starved.
+
+### Top-two bottlenecks → follow-up tickets with before/after gates (#438 → #59)
+
+| # | bottleneck (profile evidence) | lever | follow-up | before → after gate |
+|---|---|---|---|---|
+| 1 | **Per-call command-buffer overhead** — `mlp_decode` 54% + every projection; ~336 command buffers/token, ~360 µs each | **one MTLCommandBuffer per token** (resident decode forward; the shipped resident *prefill* twin pays the launch once) | **#67** | decode **1.2 → ≥ 2.7 tok/s** (3× goal); `BenchmarkMetalQ4KGemvBatch` (64 GEMVs in one command buffer) is 5.2× faster/GEMV → projected ~5.9 tok/s |
+| 2 | **Low in-kernel `q4k.m` utilization** — GEMV 32.2 GB/s (≈21% of ~150) , GEMM 4.66 GB/s / 364 GFLOP/s (≈5% FLOP) | **kernel-efficiency pass**: coalesced dequant, threadgroup/grid sizing, `simdgroup_matrix`; resident weights (no per-call upload) | **#68** (decode GEMV) · **#69** (resident weights) | GEMV **21% → ≥ 60%** device BW (≥ ~90 GB/s); decode toward the llama.cpp-Metal **7.29** bar |
+
+Both levers are tracked under the Metal epic **#59**; #67 is the primary (decode) lever and
+#68/#69 the kernel/residency lever. This profiling ticket (#438) does **not** claim the speed
+fix — it splits it, evidenced.
+
 ## How it works today
 
 - **Arch dispatch**: `cfg.IsQwen35Hybrid()` (from `layer_types`) selects the hybrid
