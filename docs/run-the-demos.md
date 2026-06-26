@@ -23,10 +23,11 @@ front door:
 
 | Track | Use it when you want... | Demos |
 |---|---|---|
-| **Security and policy** | default-deny behavior, tool poisoning, safe escalation, policy reloads, or red-team corpora | `guarddemo`, `poisonedmcpdemo`, `examples/adjudication-demo`, `examples/agentdojo-redteam`, `examples/wire-quarantine-demo`, `examples/auth-hardening`, `examples/escalation-demo`, `examples/policy-hot-reload`, `examples/trace-reset` |
+| **Security and policy** | default-deny behavior, tool poisoning, safe escalation, policy reloads, or red-team corpora | `guarddemo`, `poisonedmcpdemo`, `examples/adjudication-demo`, `examples/agentdojo-redteam`, `examples/wire-proof`, `examples/wire-quarantine-demo`, `examples/auth-hardening`, `examples/escalation-demo`, `examples/policy-hot-reload`, `examples/trace-reset`, `examples/presets`, `examples/observability` |
 | **Research/science** | context reuse, KV/cache proofs, deletion certificates, or causal invalidation | `ctxdemo`, `demorace`, `tokendemo`, `unseedemo`, `ctxplandemo`, `causalbench`, `deletioncert`, `examples/routing-bench` |
 | **Memory and serving systems** | placement, CXL/pool economics, memory-query composition, or model-backed races | `hwcachedemo`, `cxlpooldemo`, `memqdemo`, `simpledemo`, `demorace` |
 | **Adoption and integrations** | wrapping existing agents, MCP, OpenAI Agents, AutoGen, CrewAI, or external drivers | `dropindemo`, `a2ademo`, `examples/mcp`, `examples/mcp-client`, `examples/openai-agents-guardrail`, `examples/autogen-groupchat`, `examples/crewai-crew`, `examples/extdriver` |
+| **Shared task records** | task-record interchange, verdict fixtures, and reproducible task-state payloads | `examples/shared-task-record`, `examples/shared-task-record-verdicts` |
 
 Browser demos by track:
 
