@@ -53,7 +53,12 @@ func (m *Model) ffnForLayer(layer int) ffnKind {
 	if !m.Cfg.IsMoE() {
 		return ffnFor(m.Cfg)
 	}
-	if m.Cfg.isGLMMoeDsa() && m.has(routerName(layer)) {
+	// GLM-MoE-DSA: the first FirstKDenseReplace layers are DENSE (a plain SwiGLU MLP with
+	// ffn_gate/up/down -> mlp.{gate,up,down}_proj), and only the layers after them carry a routed
+	// MoE block (ffn_gate_inp -> the mlp.gate.weight router). Gate on BOTH the per-layer router
+	// presence AND the dense-prefix count: a dense layer must never reach glmMoeFFN (whose router
+	// mul would panic in glmDsaWeightHAL for a router weight that does not exist on that layer).
+	if m.Cfg.isGLMMoeDsa() && layer >= m.Cfg.FirstKDenseReplace && m.has(routerName(layer)) {
 		return glmMoeFFN{}
 	}
 	if m.Cfg.isMiniMaxSparseAttn() {
