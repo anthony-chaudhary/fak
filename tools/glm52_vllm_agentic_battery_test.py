@@ -498,6 +498,7 @@ class ManifestTest(unittest.TestCase):
         self.assertIn("zai-org/GLM-5.2-FP8", script)
         self.assertIn("tools/dgx_swebench_compare.py", script)
         self.assertIn("--preflight-only", script)
+        self.assertIn("-counts-only", script)
         self.assertIn("FINAL-CHECK.md", script)
         self.assertIn("--authority-draft", script)
         self.assertIn("BENCHMARK-AUTHORITY-DRAFT.md", script)

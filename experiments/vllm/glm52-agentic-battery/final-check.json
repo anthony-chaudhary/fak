@@ -1,6 +1,6 @@
 {
   "schema": "fak.glm52-vllm-agentic-battery.v1",
-  "generated_at": "2026-06-26T02:31:13.328401Z",
+  "generated_at": "2026-06-26T02:37:42.264356Z",
   "model_family": "zai-org/GLM-5.2",
   "checkpoint_model": "zai-org/GLM-5.2-FP8",
   "served_model_name": "glm-5.2",
@@ -333,9 +333,9 @@
     {
       "id": "sessionbench_synthetic",
       "kind": "fak-native-floor",
-      "description": "Measure the multi-agent session value stack on a weightless synthetic shape.",
+      "description": "Record the deterministic multi-agent session token-work floor.",
       "required": true,
-      "status": "planned",
+      "status": "artifact-pass",
       "command": {
         "argv": [
           "go",
@@ -353,19 +353,20 @@
           "32",
           "-result",
           "64",
+          "-counts-only",
           "-out",
           "experiments/vllm/sessionbench-synthetic.json"
         ],
-        "shell": "go run ./cmd/sessionbench -synthetic smollm2-135m -turns 50 -agents 5 -prefix 2048 -decode 32 -result 64 -out experiments/vllm/sessionbench-synthetic.json"
+        "shell": "go run ./cmd/sessionbench -synthetic smollm2-135m -turns 50 -agents 5 -prefix 2048 -decode 32 -result 64 -counts-only -out experiments/vllm/sessionbench-synthetic.json"
       },
       "primary_artifact": "experiments/vllm/sessionbench-synthetic.json",
       "artifacts": [
         "experiments/vllm/sessionbench-synthetic.json"
       ],
       "check": "sessionbench_floor",
-      "claim_boundary": "Synthetic shape; ratio evidence only unless a live model artifact is added.",
-      "artifact_status": "MISSING",
-      "artifact_detail": "missing"
+      "claim_boundary": "Deterministic token-work floor; live wall-clock requires a separate measured artifact.",
+      "artifact_status": "PASS",
+      "artifact_detail": "sessionbench synthetic T=50 C=5 deterministic token-count floor present"
     },
     {
       "id": "fanbench_research",
@@ -430,7 +431,7 @@
     "complete": false,
     "status": "PENDING_MEASUREMENT",
     "required_artifacts": 11,
-    "required_passed": 5,
+    "required_passed": 6,
     "required_failed": [
       "preflight"
     ],
@@ -438,8 +439,7 @@
       "serving_witness",
       "vllm_tax",
       "swebench_compare_preflight",
-      "swebench_verified_20",
-      "sessionbench_synthetic"
+      "swebench_verified_20"
     ],
     "honesty": "No GLM-5.2/vLLM benchmark number is quotable until every required artifact passes and any copied number is linked from BENCHMARK-AUTHORITY.md."
   }

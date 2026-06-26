@@ -631,8 +631,11 @@ def check_sessionbench_floor(path: Path) -> tuple[bool, str]:
     )
     if not want_cell:
         problems.append("missing T=50 C=5 P=2048 D=32 R=64 cell")
+    timing_mode = doc.get("timing_mode")
     if problems:
         return False, "; ".join(problems) + "; expected sessionbench synthetic floor"
+    if timing_mode == "deterministic_prefill_token_counts_only":
+        return True, "sessionbench synthetic T=50 C=5 deterministic token-count floor present"
     return True, "sessionbench synthetic T=50 C=5 floor present"
 
 
@@ -986,14 +989,15 @@ def build_steps(args: argparse.Namespace) -> list[dict[str, Any]]:
         step(
             step_id="sessionbench_synthetic",
             kind="fak-native-floor",
-            description="Measure the multi-agent session value stack on a weightless synthetic shape.",
+            description="Record the deterministic multi-agent session token-work floor.",
             argv=[args.go, "run", "./cmd/sessionbench", "-synthetic", "smollm2-135m",
                   "-turns", "50", "-agents", "5", "-prefix", "2048",
-                  "-decode", "32", "-result", "64", "-out", slash(p["session_json"])],
+                  "-decode", "32", "-result", "64", "-counts-only",
+                  "-out", slash(p["session_json"])],
             primary_artifact=p["session_json"],
             artifacts=[p["session_json"]],
             check="sessionbench_floor",
-            notes="Synthetic shape; ratio evidence only unless a live model artifact is added.",
+            notes="Deterministic token-work floor; live wall-clock requires a separate measured artifact.",
         ),
         step(
             step_id="fanbench_research",

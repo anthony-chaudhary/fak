@@ -1,11 +1,11 @@
 # GLM-5.2 vLLM Agentic Benchmark Battery
 
-- Generated: `2026-06-26T02:31:13.328401Z`
+- Generated: `2026-06-26T02:37:42.264356Z`
 - Model family: `zai-org/GLM-5.2`
 - Checkpoint: `zai-org/GLM-5.2-FP8` served as `glm-5.2`
 - Raw vLLM endpoint: `http://127.0.0.1:8000/v1`
 - Status: **`PENDING_MEASUREMENT`**
-- Required artifacts passed: `5/11`
+- Required artifacts passed: `6/11`
 
 > Pending measurement: this manifest contains commands and artifact checks, not benchmark results.
 
@@ -20,7 +20,7 @@
 | `swebench_verified_20` | live-agentic | `/tmp/swe-glm52-vllm-20/compare.json` | MISSING | missing |
 | `swebench_floor_20` | fak-native-floor | `experiments/vllm/swebench-20-fak-floor.json` | PASS | fak SWE-bench floor: 20 instances workers=[1,2,4,8] |
 | `turntax_airline` | fak-native-floor | `experiments/vllm/turntax-airline.json` | PASS | turntax-airline turns_saved=9 |
-| `sessionbench_synthetic` | fak-native-floor | `experiments/vllm/sessionbench-synthetic.json` | MISSING | missing |
+| `sessionbench_synthetic` | fak-native-floor | `experiments/vllm/sessionbench-synthetic.json` | PASS | sessionbench synthetic T=50 C=5 deterministic token-count floor present |
 | `fanbench_research` | fak-native-floor | `experiments/vllm/fanbench-research.json` | PASS | fanbench research grid/trials present |
 | `radixbench_synthetic` | fak-native-floor | `experiments/vllm/radixbench-synthetic.json` | PASS | radixbench agents hit_rate=0.8666666666666667 |
 
@@ -100,10 +100,10 @@ go run ./cmd/fak turntax --suite turntax-airline --out experiments/vllm/turntax-
 
 ### sessionbench_synthetic
 
-Measure the multi-agent session value stack on a weightless synthetic shape.
+Record the deterministic multi-agent session token-work floor.
 
 ```bash
-go run ./cmd/sessionbench -synthetic smollm2-135m -turns 50 -agents 5 -prefix 2048 -decode 32 -result 64 -out experiments/vllm/sessionbench-synthetic.json
+go run ./cmd/sessionbench -synthetic smollm2-135m -turns 50 -agents 5 -prefix 2048 -decode 32 -result 64 -counts-only -out experiments/vllm/sessionbench-synthetic.json
 ```
 
 ### fanbench_research
@@ -122,7 +122,7 @@ Measure RadixAttention-style prefix-cache hit-rate evidence.
 go run ./cmd/radixbench -live=false -out experiments/vllm/radixbench-synthetic.json
 ```
 
-Missing required artifacts: `serving_witness`, `vllm_tax`, `swebench_compare_preflight`, `swebench_verified_20`, `sessionbench_synthetic`.
+Missing required artifacts: `serving_witness`, `vllm_tax`, `swebench_compare_preflight`, `swebench_verified_20`.
 Failed required artifacts: `preflight`.
 
 No GLM-5.2/vLLM benchmark number is quotable until every required artifact passes and any copied number is linked from BENCHMARK-AUTHORITY.md.

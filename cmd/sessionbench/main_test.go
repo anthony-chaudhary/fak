@@ -79,6 +79,34 @@ func TestPrefillTokensClosedForm(t *testing.T) {
 	}
 }
 
+func TestDeterministicReportKeepsExactTargetCell(t *testing.T) {
+	report := deterministicReport("smollm2-135m [synthetic]", false, []int{50}, []int{5}, 2048, 32, 64)
+	if report["model"] != "smollm2-135m [synthetic]" {
+		t.Fatalf("model = %v", report["model"])
+	}
+	if report["timing_mode"] != "deterministic_prefill_token_counts_only" {
+		t.Fatalf("timing_mode = %v", report["timing_mode"])
+	}
+	cells, ok := report["cells"].([]cell)
+	if !ok || len(cells) != 1 {
+		t.Fatalf("cells = %#v", report["cells"])
+	}
+	got := cells[0]
+	if got.Turns != 50 || got.Agents != 5 || got.Prefix != 2048 || got.Decode != 32 || got.Result != 64 {
+		t.Fatalf("unexpected target cell: %+v", got)
+	}
+	a, b, c := prefillTokens(2048, 50, 5, 32, 64)
+	if got.PrefillTok.A != a || got.PrefillTok.B != b || got.PrefillTok.C != c {
+		t.Fatalf("prefill tokens = %+v, want (%d,%d,%d)", got.PrefillTok, a, b, c)
+	}
+	if !approx(got.NetVsNaive, float64(a)/float64(c), 1e-9) {
+		t.Fatalf("NetVsNaive = %.6f, want %.6f", got.NetVsNaive, float64(a)/float64(c))
+	}
+	if got.A.Live || got.B.Live || got.C.Live {
+		t.Fatalf("counts-only arms must not be marked live: %+v %+v %+v", got.A, got.B, got.C)
+	}
+}
+
 func TestSampleLensSpansRange(t *testing.T) {
 	ls := sampleLens(2048, 6848)
 	if len(ls) < 4 {

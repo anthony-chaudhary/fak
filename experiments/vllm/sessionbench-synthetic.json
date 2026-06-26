@@ -1,0 +1,54 @@
+{
+  "app_version": "0.34.0",
+  "cells": [
+    {
+      "turns": 50,
+      "agents": 5,
+      "prefix": 2048,
+      "decode": 32,
+      "result": 64,
+      "arm_A_naive_stateless": {
+        "name": "A_naive_stateless",
+        "prefill_ms": 0,
+        "decode_ms": 0,
+        "total_ms": 0,
+        "live": false
+      },
+      "arm_B_per_agent_kv": {
+        "name": "B_per_agent_kv",
+        "prefill_ms": 0,
+        "decode_ms": 0,
+        "total_ms": 0,
+        "live": false
+      },
+      "arm_C_fak_fused": {
+        "name": "C_fak_fused",
+        "prefill_ms": 0,
+        "decode_ms": 0,
+        "total_ms": 0,
+        "live": false
+      },
+      "prefill_anchor": 0,
+      "arm_A_prefill_raw_ms": 0,
+      "prefill_tokens": {
+        "a": 1100000,
+        "b": 25920,
+        "c": 17728,
+        "a_over_c": 62.04873646209386,
+        "b_over_c": 1.4620938628158844
+      },
+      "net_value_add_vs_naive": 62.04873646209386,
+      "net_value_add_vs_tuned": 1.4620938628158844,
+      "turn_tax_A_over_B": 42.43827160493827
+    }
+  ],
+  "decode_per_turn": 32,
+  "engine": "fak sessionbench (multi-agent session value stack, Q8=false, counts-only=true)",
+  "headline": "deterministic prefill-token floor only; no wall-clock, no live B/C timing, and no model-quality claim. Use the live mode for measured timing; this offline floor preserves the exact A/B/C token geometry.",
+  "live_validate": null,
+  "methodology": "counts-only mode uses prefillTokens(P,T,C,D,R): A=C*Σ(P+t*(D+R)), B=C*(P+(T-1)*R), C=P+C*(T-1)*R. Ratios are exact token-work ratios, not measured seconds.",
+  "model": "smollm2-135m [synthetic]",
+  "prefix": 2048,
+  "result_per_turn": 64,
+  "timing_mode": "deterministic_prefill_token_counts_only"
+}

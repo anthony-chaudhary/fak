@@ -434,6 +434,7 @@ func main() {
 	reps := flag.Int("reps", 2, "best-of-N (min) wall-clock per arm component — least-contended sampling")
 	validate := flag.Bool("validate", true, "run arm A fully live at a small scale to anchor the computed arm-A wall-clock")
 	valScale := flag.String("val-scale", "256,8,3,16,32", "live-validate P,T,C,D,R")
+	countsOnly := flag.Bool("counts-only", false, "emit the deterministic prefill-token floor only; no live timing, no model load")
 	out := flag.String("out", "", "write JSON here (default stdout)")
 	flag.Parse()
 	// Expand a leading ~ in path flags (Go/PowerShell don't), so ~/... opens as intended.
@@ -446,6 +447,18 @@ func main() {
 	}
 	turns := parseInts(*turnsArg)
 	agents := parseInts(*agentsArg)
+	if *countsOnly {
+		if strings.TrimSpace(*synthetic) == "" {
+			fmt.Fprintln(os.Stderr, "-counts-only requires -synthetic so the report identity is explicit")
+			os.Exit(2)
+		}
+		if _, ok := syntheticShape(*synthetic); !ok {
+			fmt.Fprintf(os.Stderr, "unknown -synthetic shape %q (smollm2-135m|qwen25-1.5b|qwen25-7b)\n", *synthetic)
+			os.Exit(2)
+		}
+		writeSessionReport(deterministicReport(*synthetic+" [synthetic]", quant != 0, turns, agents, *prefix, *decode, *result), *out)
+		return
+	}
 
 	m, name, err := loadModel(*dir, *hf, *synthetic, *lean)
 	if err != nil {
@@ -566,6 +579,7 @@ func main() {
 		"app_version": appversion.Current(),
 		"engine":      "fak sessionbench (multi-agent session value stack, Q8=" + boolStr(quant != 0) + ")",
 		"model":       name,
+		"timing_mode": "live_BC_sampled_A",
 		"go_threads":  runtime.GOMAXPROCS(0),
 		"headline": "fak vs a WARM per-agent-KV cache (B/C = net_value_add_vs_tuned) — the honest serving baseline; " +
 			"fak's cross-agent prefix sharing on top of a warm cache. The cold no-cache re-prefill arm (A, net_value_add_vs_naive) " +
@@ -580,15 +594,65 @@ func main() {
 		"cells":           cells,
 		"live_validate":   liveVal,
 	}
+	writeSessionReport(report, *out)
+}
+
+func writeSessionReport(report map[string]any, out string) {
 	blob, _ := json.MarshalIndent(report, "", "  ")
-	if *out != "" {
-		if err := os.WriteFile(*out, blob, 0o644); err != nil {
-			fmt.Fprintf(os.Stderr, "write %s: %v\n", *out, err)
+	if out != "" {
+		if err := os.WriteFile(out, blob, 0o644); err != nil {
+			fmt.Fprintf(os.Stderr, "write %s: %v\n", out, err)
 			os.Exit(1)
 		}
-		fmt.Fprintf(os.Stderr, "wrote %s\n", *out)
+		fmt.Fprintf(os.Stderr, "wrote %s\n", out)
 	} else {
 		fmt.Println(string(blob))
+	}
+}
+
+func deterministicReport(name string, quant bool, turns, agents []int, prefix, decode, result int) map[string]any {
+	var cells []cell
+	for _, T := range turns {
+		for _, C := range agents {
+			if T < 1 || C < 1 {
+				continue
+			}
+			ta, tb, tc := prefillTokens(prefix, T, C, decode, result)
+			ptok := prefillTokCounts{A: ta, B: tb, C: tc}
+			if tc > 0 {
+				ptok.AOverC = float64(ta) / float64(tc)
+				ptok.BOverC = float64(tb) / float64(tc)
+			}
+			turnTax := 0.0
+			if tb > 0 {
+				turnTax = float64(ta) / float64(tb)
+			}
+			cells = append(cells, cell{
+				Turns: T, Agents: C, Prefix: prefix, Decode: decode, Result: result,
+				A: arm{Name: "A_naive_stateless", Live: false},
+				B: arm{Name: "B_per_agent_kv", Live: false},
+				C: arm{Name: "C_fak_fused", Live: false},
+				PrefillTok: ptok,
+				NetVsNaive: ptok.AOverC,
+				NetVsTuned: ptok.BOverC,
+				TurnTax:    turnTax,
+			})
+		}
+	}
+	return map[string]any{
+		"app_version": appversion.Current(),
+		"engine":      "fak sessionbench (multi-agent session value stack, Q8=" + boolStr(quant) + ", counts-only=true)",
+		"model":       name,
+		"timing_mode": "deterministic_prefill_token_counts_only",
+		"headline": "deterministic prefill-token floor only; no wall-clock, no live B/C timing, and no model-quality claim. " +
+			"Use the live mode for measured timing; this offline floor preserves the exact A/B/C token geometry.",
+		"methodology": "counts-only mode uses prefillTokens(P,T,C,D,R): A=C*Σ(P+t*(D+R)), B=C*(P+(T-1)*R), C=P+C*(T-1)*R. " +
+			"Ratios are exact token-work ratios, not measured seconds.",
+		"prefix":          prefix,
+		"decode_per_turn": decode,
+		"result_per_turn": result,
+		"cells":           cells,
+		"live_validate":   nil,
 	}
 }
 
