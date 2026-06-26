@@ -1,0 +1,27 @@
+fak a2achan — in-kernel agent-to-agent message channel (no key, no model)
+  capabilities negotiable: send=true recv=true
+
+[1] in-kernel point-to-point (concurrent agents rendezvous)
+    alpha SEND shared -> work                      -> ALLOW
+    bravo RECV work = "task: build the report"     -> ALLOW
+
+[2] the capability floor (default-deny on messages, like tool calls)
+    alpha SEND private -> another agent's channel  -> DENY (TRUST_VIOLATION)
+    alpha SEND quarantined -> work                 -> DENY (TRUST_VIOLATION)
+    alpha SEND with NO send-right                  -> DENY (DEFAULT_DENY)
+
+[3] between sessions (keyed by peer TraceID)
+    session S1 SEND -> session:S2                  -> ALLOW
+    session S2 RECV = "resume: step 4 of 7"        -> ALLOW
+
+[4] between context windows (self-handoff across compaction)
+    window N SEND private -> own continuation      -> ALLOW
+    window N+1 RECV = "summary + open tasks"       -> ALLOW
+
+[5] one-to-many (pub/sub: one adjudicated message, N subscribers)
+    coordinator PUBLISH (fanout=2)                 -> ALLOW
+    sub-a RECV "epoch rolled" ; sub-b RECV "epoch rolled"
+
+  bus audit: sent=5 received=5 denied=3 held=0
+
+a2ademo: OK — adjudicated A2A delivery across in-kernel / session / window locales + pub/sub

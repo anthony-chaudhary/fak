@@ -1,0 +1,15 @@
+{
+  "status": "PROVEN",
+  "reason": "observed provider telemetry shows positive realized cache savings",
+  "requests": 68,
+  "baseline_token_equiv": 10638831,
+  "actual_token_equiv": 1491490.2,
+  "saved_token_equiv": 9147340.8,
+  "saved_pct": 85.98069468346664,
+  "cache_read_tokens": 10163712,
+  "cache_creation_tokens": 0,
+  "ephemeral_1h_input_tokens": 0,
+  "ephemeral_5m_input_tokens": 0,
+  "first_positive_request": 1,
+  "correctness_depends_on_hit": false
+}

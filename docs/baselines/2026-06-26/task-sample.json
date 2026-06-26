@@ -1,0 +1,120 @@
+{
+  "schema": "fak.task-manager-snapshot.v1",
+  "process_id": 5716,
+  "goos": "windows",
+  "goarch": "amd64",
+  "go_version": "go1.26.3",
+  "started_unix_nano": 1782466575727225500,
+  "ts_unix_nano": 1782466575727225500,
+  "uptime_s": 0,
+  "resource": {
+    "ts_unix_nano": 1782466575727225500,
+    "wall_s": 0,
+    "cpu_s": 0,
+    "heap_alloc_bytes": 1382896,
+    "heap_inuse_bytes": 1982464,
+    "heap_sys_bytes": 8257536,
+    "sys_bytes": 11030528,
+    "goroutines": 1
+  },
+  "resource_delta": {
+    "wall_s": 0,
+    "cpu_s": 0,
+    "heap_alloc_bytes": 11120,
+    "heap_inuse_bytes": 49152
+  },
+  "tasks": [
+    {
+      "task_id": "process",
+      "title": "process sample",
+      "state": "running",
+      "liveness_class": "idle",
+      "started_unix_nano": 1782466575727225500,
+      "runtime_s": 0,
+      "progress": {},
+      "current_step": "snapshot",
+      "resource": {
+        "start": {
+          "ts_unix_nano": 1782466575727225500,
+          "wall_s": 0,
+          "cpu_s": 0,
+          "heap_alloc_bytes": 1381464,
+          "heap_inuse_bytes": 1982464,
+          "heap_sys_bytes": 8257536,
+          "sys_bytes": 11030528,
+          "goroutines": 1
+        },
+        "current": {
+          "ts_unix_nano": 1782466575727225500,
+          "wall_s": 0,
+          "cpu_s": 0,
+          "heap_alloc_bytes": 1382896,
+          "heap_inuse_bytes": 1982464,
+          "heap_sys_bytes": 8257536,
+          "sys_bytes": 11030528,
+          "goroutines": 1
+        },
+        "delta": {
+          "wall_s": 0,
+          "cpu_s": 0,
+          "heap_alloc_bytes": 1432
+        }
+      },
+      "steps": [
+        {
+          "step_id": "snapshot",
+          "title": "sample process resources",
+          "concept": "observe",
+          "state": "running",
+          "liveness_class": "idle",
+          "started_unix_nano": 1782466575727225500,
+          "runtime_s": 0,
+          "progress": {},
+          "resource": {
+            "start": {
+              "ts_unix_nano": 1782466575727225500,
+              "wall_s": 0,
+              "cpu_s": 0,
+              "heap_alloc_bytes": 1382192,
+              "heap_inuse_bytes": 1982464,
+              "heap_sys_bytes": 8257536,
+              "sys_bytes": 11030528,
+              "goroutines": 1
+            },
+            "current": {
+              "ts_unix_nano": 1782466575727225500,
+              "wall_s": 0,
+              "cpu_s": 0,
+              "heap_alloc_bytes": 1382896,
+              "heap_inuse_bytes": 1982464,
+              "heap_sys_bytes": 8257536,
+              "sys_bytes": 11030528,
+              "goroutines": 1
+            },
+            "delta": {
+              "wall_s": 0,
+              "cpu_s": 0,
+              "heap_alloc_bytes": 704
+            }
+          }
+        }
+      ],
+      "concepts": [
+        {
+          "concept": "observe",
+          "steps": 1,
+          "running_steps": 1,
+          "runtime_s": 0
+        }
+      ]
+    }
+  ],
+  "concepts": [
+    {
+      "concept": "observe",
+      "steps": 1,
+      "running_steps": 1,
+      "runtime_s": 0
+    }
+  ]
+}

@@ -1,0 +1,138 @@
+{
+  "provenance": {
+    "app_version": "0.34.0",
+    "command": "fak ablate --suite tau2-airline-smoke",
+    "engine_model": "mock-offline",
+    "slice_id": "tau2-airline-smoke",
+    "workload_hash": "9f1701415fb4a360",
+    "go_version": "go1.26.3",
+    "os": "windows",
+    "generated_by": "fak/internal/ablate"
+  },
+  "workload_hash": "9f1701415fb4a360",
+  "baseline_arm": "all-off",
+  "runs": [
+    {
+      "arm_id": "all-off",
+      "features": {
+        "vdso": "off"
+      },
+      "workload_hash": "9f1701415fb4a360",
+      "wall_seconds": 0.0697348,
+      "arm": {
+        "label": "all-off",
+        "calls": 12,
+        "p50_ns": 2848,
+        "p99_ns": 4052,
+        "mean_ns": 2883,
+        "engine_calls": 12,
+        "vdso_hits": 0,
+        "denies": 0,
+        "quarantines": 0,
+        "input_tokens": 687,
+        "output_tokens": 250,
+        "buckets": [
+          {
+            "label": "\u003c100ns",
+            "count": 0
+          },
+          {
+            "label": "\u003c1µs",
+            "count": 0
+          },
+          {
+            "label": "\u003c10µs",
+            "count": 12
+          },
+          {
+            "label": "\u003c100µs",
+            "count": 0
+          },
+          {
+            "label": "\u003c1ms",
+            "count": 0
+          },
+          {
+            "label": "\u003c10ms",
+            "count": 0
+          },
+          {
+            "label": "\u003c100ms",
+            "count": 0
+          },
+          {
+            "label": "\u003c1s",
+            "count": 0
+          },
+          {
+            "label": "\u003e=1s",
+            "count": 0
+          }
+        ],
+        "provider_cache_hits": 0,
+        "provider_cache_read_tokens": 0
+      }
+    },
+    {
+      "arm_id": "vdso",
+      "features": {
+        "vdso": "on"
+      },
+      "workload_hash": "9f1701415fb4a360",
+      "wall_seconds": 0.0647732,
+      "arm": {
+        "label": "vdso",
+        "calls": 12,
+        "p50_ns": 2605,
+        "p99_ns": 3753,
+        "mean_ns": 2656,
+        "engine_calls": 5,
+        "vdso_hits": 7,
+        "denies": 0,
+        "quarantines": 0,
+        "input_tokens": 298,
+        "output_tokens": 119,
+        "buckets": [
+          {
+            "label": "\u003c100ns",
+            "count": 0
+          },
+          {
+            "label": "\u003c1µs",
+            "count": 0
+          },
+          {
+            "label": "\u003c10µs",
+            "count": 12
+          },
+          {
+            "label": "\u003c100µs",
+            "count": 0
+          },
+          {
+            "label": "\u003c1ms",
+            "count": 0
+          },
+          {
+            "label": "\u003c10ms",
+            "count": 0
+          },
+          {
+            "label": "\u003c100ms",
+            "count": 0
+          },
+          {
+            "label": "\u003c1s",
+            "count": 0
+          },
+          {
+            "label": "\u003e=1s",
+            "count": 0
+          }
+        ],
+        "provider_cache_hits": 0,
+        "provider_cache_read_tokens": 0
+      }
+    }
+  ]
+}

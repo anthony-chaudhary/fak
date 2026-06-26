@@ -1,0 +1,220 @@
+{
+  "schema": "fak.systems-baseline/1",
+  "date": "2026-06-26",
+  "baseline_source": {
+    "binary": "fak",
+    "version": "v0.34.0",
+    "commit": "5239698",
+    "build": "git checkout v0.34.0 && go build -o fak ./cmd/fak && go build -o a2ademo ./cmd/a2ademo",
+    "note": "Pinned to the v0.34.0 release tag: on 2026-06-26 HEAD was transiently un-buildable (peer commits broke internal/model + internal/loopmgr). v0.34.0 is an ancestor of HEAD and green by construction. Inputs read from the repo tree at run time."
+  },
+  "host": {
+    "os": "windows",
+    "goarch": "amd64"
+  },
+  "systems": [
+    {
+      "id": "route-default",
+      "system": "fak route (oracle, fail-closed default)",
+      "surface": "durable-product",
+      "command": "fak route --json",
+      "reproduce": "go run ./cmd/fak route --json",
+      "artifact": "route.json",
+      "exit_expected": "0",
+      "deterministic": "yes",
+      "headline": {
+        "matched": false,
+        "primary": "default",
+        "reason": "no rule matched; fail-closed default model"
+      },
+      "pins": "the fail-closed default decision (no rule matched -> the safe default model), proving the oracle never fails open",
+      "fence": "a no-subject request hits the Default by design; supply --aspect/--tool/--manifest for a matched rule (see route-ensemble-refund.json)",
+      "compare": "re-run and diff JSON (byte-stable) or re-hash against sha256",
+      "sha256": "8a39b7537bdd91d0661d16feb27616e1e2e551e93f68688100f929ca56f43ec0"
+    },
+    {
+      "id": "route-ensemble",
+      "system": "fak route (matched vote-ensemble)",
+      "surface": "durable-product",
+      "command": "fak route --manifest examples/model-routing.example.json --aspect tool_call --tool refund_payment --json",
+      "reproduce": "go run ./cmd/fak route --manifest examples/model-routing.example.json --aspect tool_call --tool refund_payment --json",
+      "artifact": "route-ensemble-refund.json",
+      "exit_expected": "0",
+      "deterministic": "yes",
+      "headline": {
+        "matched": true,
+        "ensemble": true,
+        "reduce": "vote",
+        "members": [
+          "guard-a",
+          "guard-b"
+        ]
+      },
+      "pins": "a high-stakes write (refund_payment) routes to a 2-model vote ensemble (guard-a primary + guard-b verifier, reduce=vote)",
+      "fence": "deterministic policy oracle only; binding members to live model calls is the caller's integration",
+      "compare": "re-run and diff JSON or re-hash against sha256",
+      "sha256": "41ffda680c1dc9989fe44d62828c87a328fb9e07beaf232abee4987c14cb9288"
+    },
+    {
+      "id": "ablate-vdso",
+      "system": "fak ablate (self-ablation sweep, vDSO on/off)",
+      "surface": "usable-today",
+      "command": "fak ablate --sweep vdso --json",
+      "reproduce": "go run ./cmd/fak ablate --sweep vdso --json",
+      "artifact": "ablate-vdso.json",
+      "exit_expected": "0",
+      "deterministic": "counters yes / latency varies",
+      "headline": {
+        "workload_hash": "9f1701415fb4a360",
+        "all-off": {
+          "engine_calls": 12,
+          "vdso_hits": 0,
+          "calls": 12
+        },
+        "vdso": {
+          "engine_calls": 5,
+          "vdso_hits": 7,
+          "calls": 12
+        }
+      },
+      "pins": "on tau2-airline-smoke the vDSO turns 7/12 tool calls into local cache hits -> engine_calls 12->5 (the deterministic ablation delta), bound to workload_hash 9f1701415fb4a360",
+      "fence": "wall_seconds + p50/p99/mean_ns are environment-measured and VARY; the kernel counters + workload_hash are the stable pin (rung 1 sweeps only the runtime vDSO knob)",
+      "compare": "re-run and diff the COUNTER fields (engine_calls/vdso_hits/calls/deltas) + workload_hash; ignore the *_ns / wall_seconds latency fields",
+      "sha256": "440844b9391bedfaa2be5b39ef8ec0ffe8a022295d00d17aca7c8ab59c22c1d5"
+    },
+    {
+      "id": "vcache-prove",
+      "system": "fak vcache prove (M5 planned star-anchor floor)",
+      "surface": "usable-today",
+      "command": "fak vcache prove --json",
+      "reproduce": "go run ./cmd/fak vcache prove --json",
+      "artifact": "vcache-prove.json",
+      "exit_expected": "0 (PROVEN)",
+      "deterministic": "yes",
+      "headline": {
+        "status": "PROVEN",
+        "requests": 7,
+        "baseline_token_equiv": 28742,
+        "saved_token_equiv": 21094.4,
+        "saved_pct": 73.39
+      },
+      "pins": "the deterministic GUARANTEED floor: a star anchor saves 73.39% token-equivalents (21,094.4 of 28,742) across 7 sibling requests",
+      "fence": "this is the fak-guaranteed planned floor with NO provider; correctness never depends on a provider cache hit",
+      "compare": "exit 0 = PROVEN; diff saved_pct / saved_token_equiv against baseline",
+      "sha256": "79d7339fbbabbf24930d35cbb9f538f077f7323f883a5b627ea3805f070f03f7"
+    },
+    {
+      "id": "vcache-prove-recall",
+      "system": "fak vcache prove-recall (M4 recall cost gate)",
+      "surface": "usable-today",
+      "command": "fak vcache prove-recall --json",
+      "reproduce": "go run ./cmd/fak vcache prove-recall --json",
+      "artifact": "vcache-prove-recall.json",
+      "exit_expected": "1 (REFUTED by design)",
+      "deterministic": "yes",
+      "headline": {
+        "status": "refuted",
+        "decision": "cold_prefill",
+        "replay_cost": 3000,
+        "break_even_siblings": 301,
+        "siblings": 1
+      },
+      "pins": "the cost gate REFUSES a single-unit recall-by-rebuild (replay_cost 3000 vs sending cold; break-even = 301 siblings) -> decision cold_prefill",
+      "fence": "exit 1 is the CORRECT designed outcome (the ~300x loss caught); the gate is OFF by default until the live provider recall loop flips it on",
+      "compare": "exit 1 = correctly REFUTED; diff replay_cost / break_even_siblings",
+      "sha256": "1aef5cda8a989507c36722b5eb75bcae8ea85fa1d777ec95da5bdc5af68b65e8"
+    },
+    {
+      "id": "vcache-prove-telemetry",
+      "system": "fak vcache prove-telemetry (replay real Codex usage)",
+      "surface": "usable-today",
+      "command": "fak vcache prove-telemetry --file experiments/agent-live/vcache-codex-token-count-proof-2026-06-25.jsonl --json",
+      "reproduce": "go run ./cmd/fak vcache prove-telemetry --file experiments/agent-live/vcache-codex-token-count-proof-2026-06-25.jsonl --json",
+      "artifact": "vcache-prove-telemetry-codex.json",
+      "exit_expected": "0 (PROVEN)",
+      "deterministic": "yes",
+      "headline": {
+        "status": "PROVEN",
+        "requests": 68,
+        "baseline_token_equiv": 10638831,
+        "saved_token_equiv": 9147340.8,
+        "saved_pct": 85.98,
+        "cache_read_tokens": 10163712
+      },
+      "pins": "replaying the COMMITTED Codex CLI usage (68 events) shows 85.98% realized savings (9,147,340.8 of 10,638,831 token-equiv)",
+      "fence": "these are OBSERVED numbers relayed from the provider's own cache counters (a realized rebate), not a fak-caused effect; no network (replays a committed file)",
+      "compare": "exit 0 = PROVEN; diff saved_pct against this baseline for the same input file",
+      "sha256": "c56376cfe7d08642469dd280b360afc9f2b55659d83ac4d2c474d3bfc922e527"
+    },
+    {
+      "id": "vcache-score",
+      "system": "fak vcache score (2x agent-dev readiness gate)",
+      "surface": "usable-today",
+      "command": "fak vcache score --telemetry experiments/agent-live/vcache-codex-token-count-proof-2026-06-25.jsonl --json",
+      "reproduce": "go run ./cmd/fak vcache score --telemetry experiments/agent-live/vcache-codex-token-count-proof-2026-06-25.jsonl --json",
+      "artifact": "vcache-score-codex.json",
+      "exit_expected": "0",
+      "deterministic": "yes",
+      "headline": {
+        "status": "2x_ready",
+        "grade": "A",
+        "score": 100,
+        "active_source": "telemetry",
+        "active_multiplier": 7.13,
+        "two_x_better": true
+      },
+      "pins": "the composite readiness gate: grade A, score 100, 2x_ready, observed multiplier 7.13x >= 2.00x threshold on the Codex telemetry",
+      "fence": "the observed multiplier is what that provider delivered on that thread; the planned star-anchor floor (73.4%) is the only fak-guaranteed number",
+      "compare": "diff grade / score / two_x_better; the planned floor is the stable guaranteed value",
+      "sha256": "c49a5954b74081a6aa4f91c2f4c0b4f19850a0ef2683d7cd16f44e6284579c46"
+    },
+    {
+      "id": "task-sample",
+      "system": "fak task sample (process-local resource snapshot)",
+      "surface": "usable-today",
+      "command": "fak task sample --json",
+      "reproduce": "go run ./cmd/fak task sample --json",
+      "artifact": "task-sample.json",
+      "exit_expected": "0",
+      "deterministic": "shape only (resource values vary)",
+      "headline": {
+        "schema": "fak.task-manager-snapshot.v1",
+        "keys": [
+          "schema",
+          "process_id",
+          "goos",
+          "goarch",
+          "go_version",
+          "started_unix_nano",
+          "ts_unix_nano",
+          "uptime_s",
+          "resource",
+          "resource_delta",
+          "tasks",
+          "concepts"
+        ]
+      },
+      "pins": "the JSON SNAPSHOT SHAPE (schema + keys: process/resource/resource_delta/tasks/concepts) a long-running fak process embeds",
+      "fence": "resource values (wall/heap/sys/goroutines, *_unix_nano) sample LIVE runtime state and vary every run; pin the shape, not the values",
+      "compare": "diff the KEY SET / schema (structure), not the resource values",
+      "sha256": "d52acd8249829e498d09e27dfbbc467f8f19a951ab98aa25c33b2dabca3c83ac"
+    },
+    {
+      "id": "a2ademo",
+      "system": "a2ademo (in-kernel A2A channel, no-key proof)",
+      "surface": "usable-today",
+      "command": "go run ./cmd/a2ademo",
+      "reproduce": "go run ./cmd/a2ademo",
+      "artifact": "a2ademo.txt",
+      "exit_expected": "0",
+      "deterministic": "yes",
+      "headline": {
+        "legs": "point-to-point ALLOW; capability-floor DENY(TRUST_VIOLATION); pub/sub fan-out; session+window handoff"
+      },
+      "pins": "the deterministic demo trace: an in-kernel mailbox delivers an addressed value gated by the same default-deny floor a tool call rides (a cross-channel private send is DENY TRUST_VIOLATION)",
+      "fence": "in-process locales + continuation-id handoff are real; durable cross-process delivery is the labeled-STUB next rung",
+      "compare": "re-run and diff the trace (byte-stable) or re-hash against sha256",
+      "sha256": "e08cfe573698e88431dfddd4cb10ed07ccf7414f2b8a312f3ba4213f4d63de99"
+    }
+  ]
+}

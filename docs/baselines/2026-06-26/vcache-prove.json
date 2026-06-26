@@ -1,0 +1,16 @@
+{
+  "status": "PROVEN",
+  "reason": "star anchor saves token equivalents when the first natural request warms it and siblings read it",
+  "requests": 7,
+  "anchor_tokens": 4096,
+  "suffix_tokens": 10,
+  "min_prefix_tokens": 1024,
+  "read_mult": 0.1,
+  "write_mult": 1.25,
+  "baseline_token_equiv": 28742,
+  "vcache_token_equiv": 7647.6,
+  "saved_token_equiv": 21094.4,
+  "saved_pct": 73.39224827778165,
+  "break_even_requests": 2,
+  "correctness_depends_on_hit": false
+}

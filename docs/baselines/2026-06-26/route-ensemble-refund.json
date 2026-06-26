@@ -1,0 +1,44 @@
+{
+  "ensemble": true,
+  "matched": true,
+  "members": [
+    {
+      "model": "guard-a",
+      "weight": 1,
+      "role": "primary"
+    },
+    {
+      "model": "guard-b",
+      "weight": 1,
+      "role": "verifier"
+    }
+  ],
+  "primary": "guard-a",
+  "reason": "high-stakes write: two guard models must agree (majority vote) before the call proceeds",
+  "reduce": "vote",
+  "rule": "refund-guard-ensemble",
+  "scout": "",
+  "subject": {
+    "aspect": "tool_call",
+    "complexity": "",
+    "labels": null,
+    "latency": "",
+    "prompt_tokens": 0,
+    "tool": "refund_payment"
+  },
+  "usage": {
+    "frontier": "frontier",
+    "frontier_in": 3,
+    "frontier_out": 15,
+    "routed_in": 6,
+    "routed_out": 30,
+    "members": 2,
+    "saved_in_frac": -1,
+    "saved_out_frac": -1,
+    "assumed": [
+      "guard-a",
+      "guard-b"
+    ],
+    "estimable": true
+  }
+}

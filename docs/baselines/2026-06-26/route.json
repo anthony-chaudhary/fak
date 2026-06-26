@@ -1,0 +1,34 @@
+{
+  "ensemble": false,
+  "matched": false,
+  "members": [
+    {
+      "model": "default",
+      "role": "primary"
+    }
+  ],
+  "primary": "default",
+  "reason": "no rule matched; fail-closed default model",
+  "reduce": "",
+  "rule": "",
+  "scout": "",
+  "subject": {
+    "aspect": "request",
+    "complexity": "",
+    "labels": null,
+    "latency": "",
+    "prompt_tokens": 0,
+    "tool": ""
+  },
+  "usage": {
+    "frontier": "frontier",
+    "frontier_in": 3,
+    "frontier_out": 15,
+    "routed_in": 1,
+    "routed_out": 5,
+    "members": 1,
+    "saved_in_frac": 0.6666666666666666,
+    "saved_out_frac": 0.6666666666666666,
+    "estimable": true
+  }
+}

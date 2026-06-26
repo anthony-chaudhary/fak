@@ -1,0 +1,15 @@
+{
+  "status": "refuted",
+  "decision": "cold_prefill",
+  "reason": "cost gate refused: P·r \u003e= S·U — recall-by-rebuild is net-negative (§11.0); send the unit cold",
+  "prefix_tokens": 30000,
+  "unit_tokens": 10,
+  "read_mult": 0.1,
+  "siblings": 1,
+  "replay_cost": 3000,
+  "fresh_prefill_cost": 10,
+  "amortized_savings": 10,
+  "break_even_siblings": 301,
+  "loss_ratio": 300,
+  "correctness_depends_on": false
+}
