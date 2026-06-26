@@ -31,6 +31,49 @@ def test_blackwell_tiers_exist_with_exact_machine_types():
     assert a4x.blackwell is True
 
 
+def test_a100_tiers_exist_for_the_available_path():
+    # "whatever is available, a100 ok": the A100 serving tiers the GCP bring-up branches to
+    # the pure-fak-kernel / llama.cpp paths for (both Ampere sm_80, below the DSA floor).
+    ultra = gcp_accel.by_slug("a2-ultra-a100-80gb")
+    assert ultra is not None
+    assert ultra.machine_type == "a2-ultragpu-8g"
+    # 80GB A100 dropped the Tesla prefix; 40GB keeps it (verified vs GCP GPU docs 2026-06-26).
+    assert ultra.accelerator_type == "nvidia-a100-80gb"
+    assert ultra.gpu_count == 8
+    assert ultra.gpu_mem_gb_each == 80
+    assert ultra.arch == "ampere"
+    assert ultra.compute_capability == "80"  # sm_80, below the sm_90 DSA floor
+    assert ultra.blackwell is False
+
+    high = gcp_accel.by_slug("a2-high-a100-40gb")
+    assert high is not None
+    assert high.machine_type == "a2-highgpu-8g"
+    assert high.accelerator_type == "nvidia-tesla-a100"
+    assert high.gpu_count == 8
+    assert high.gpu_mem_gb_each == 40
+    assert high.compute_capability == "80"
+
+
+def test_a100_emit_shell_reports_sub_dsa_compute_cap():
+    # gcp-glm-serve.sh branches to the llama.cpp / pure-fak-kernel path when GLM_COMPUTE_CAP < 90.
+    out = gcp_accel.emit_shell("a2-ultra-a100-80gb")
+    lines = dict(line.split("=", 1) for line in out.splitlines())
+    import shlex
+    got = {k: shlex.split(v)[0] if v else "" for k, v in lines.items()}
+    assert got["GLM_MACHINE_TYPE"] == "a2-ultragpu-8g"
+    assert got["GLM_ACCEL_FLAG"] == "type=nvidia-a100-80gb,count=8"
+    assert got["GLM_COMPUTE_CAP"] == "80"
+    assert int(got["GLM_COMPUTE_CAP"]) < 90
+
+
+def test_a100_tiers_rank_below_hopper_above_l4():
+    pos = {t.slug: i for i, t in enumerate(gcp_accel.fallback_ladder())}
+    # Datacenter A100 outranks the cheap Ada/Turing proof tiers (better serving choice) but
+    # sits below the Hopper baseline in the preference ladder.
+    assert pos["a3-high-h100"] < pos["a2-ultra-a100-80gb"] < pos["g2-l4"]
+    assert pos["a2-ultra-a100-80gb"] < pos["a2-high-a100-40gb"]
+
+
 def test_ladder_is_newest_silicon_first():
     ladder = gcp_accel.fallback_ladder()
     ranks = [t.gen_rank for t in ladder]
