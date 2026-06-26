@@ -372,6 +372,13 @@ const (
 	glmKeyVHeadDim    = "attention.v_head_dim"
 	glmKeyKeyLength   = "attention.key_length"
 	glmKeyValueLength = "attention.value_length"
+	// GLM-5.2 (DSA) carries SEPARATE per-head MLA dims under *_mla keys: key_length_mla /
+	// value_length_mla are the PER-HEAD k/v widths the MLA forward + kv_b_proj use (256 each
+	// for GLM-5.2), distinct from the larger attention.key_length / value_length latent dims.
+	// Prefer the _mla keys for QKNopeHeadDim/VHeadDim — using key_length (576) / value_length
+	// (512) over-sizes the per-head dims and mis-shapes the KV cache + kv_b split.
+	glmKeyKeyLengthMLA   = "attention.key_length_mla"
+	glmKeyValueLengthMLA = "attention.value_length_mla"
 
 	// VALIDATED against the real GLM-5.2 (glm-dsa) Q4_K_M GGUF on the lab GPU server,
 	// 2026-06-24: the DSA-indexer scalars live under attention.indexer.* (the indexer head
@@ -445,18 +452,28 @@ func applyGLMMoeDsaConfig(f *File, p string, cfg *model.Config, ropeDim int) {
 	if cfg.QKRopeHeadDim == 0 {
 		cfg.QKRopeHeadDim = ropeDim
 	}
-	// qk_nope_head_dim: explicit key, else attention.key_length - qk_rope_head_dim
-	// (deepseek2 stores n_embd_head_k = nope + rope under attention.key_length).
+	// qk_nope_head_dim: explicit key, else the per-head MLA key length minus rope. GLM-5.2
+	// stores the per-head k dim under attention.key_length_mla (256); attention.key_length (576)
+	// is the larger latent dim and must NOT be used here. Fall back to key_length only when the
+	// _mla key is absent (older/other deepseek2 conversions that store n_embd_head_k there).
 	cfg.QKNopeHeadDim = intValueOrZero(f, p+glmKeyQKNopeDim)
 	if cfg.QKNopeHeadDim == 0 {
-		if kl := intValueOrZero(f, p+glmKeyKeyLength); kl > cfg.QKRopeHeadDim {
+		kl := intValueOrZero(f, p+glmKeyKeyLengthMLA)
+		if kl == 0 {
+			kl = intValueOrZero(f, p+glmKeyKeyLength)
+		}
+		if kl > cfg.QKRopeHeadDim {
 			cfg.QKNopeHeadDim = kl - cfg.QKRopeHeadDim
 		}
 	}
-	// v_head_dim: explicit key, else attention.value_length.
+	// v_head_dim: explicit key, else the per-head MLA value length (value_length_mla, 256),
+	// else attention.value_length. As with the key dim, the _mla variant is the PER-HEAD width.
 	cfg.VHeadDim = intValueOrZero(f, p+glmKeyVHeadDim)
 	if cfg.VHeadDim == 0 {
-		cfg.VHeadDim = intValueOrZero(f, p+glmKeyValueLength)
+		cfg.VHeadDim = intValueOrZero(f, p+glmKeyValueLengthMLA)
+		if cfg.VHeadDim == 0 {
+			cfg.VHeadDim = intValueOrZero(f, p+glmKeyValueLength)
+		}
 	}
 
 	// ---- DSA learned-indexer axis (GLM-5.2-specific) ------------------------
