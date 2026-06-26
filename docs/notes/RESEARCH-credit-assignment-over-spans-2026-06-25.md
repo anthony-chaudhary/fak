@@ -31,6 +31,9 @@ results, messages, retrieved docs, sub-agent outputs). A span that the useful pa
 attended heavily *earned its keep*; a span that never draws attention is noise an RSI loop
 should learn to stop carrying, stop retrieving, stop generating.
 
+This memo is the deliverable for
+[#864](https://github.com/anthony-chaudhary/fak/issues/864).
+
 That is, restated, a **credit-assignment problem**: given an outcome, attribute it back to the
 intermediate things that produced it. The RL and agent-training literature has spent a decade
 on exactly this question for *steps* and *retrieved items*; this note surveys what they did, and
@@ -274,17 +277,17 @@ The producer is a swap point: if attention fails validation, the same interface 
 reward ([#863]). This note is survey 4/5; the defensible-novelty boundary + one-sentence claim
 that gates the experiment is sibling [#865].
 
-### References (seed citations from the epic, to expand in the experiment write-up)
+### References
 
-- Lightman et al., "Let's Verify Step by Step", 2023 (PRM800K, process supervision).
-- Wang et al., "Math-Shepherd: Verify and Reinforce LLMs Step-by-step without Human Annotations", 2024 (automatic process reward).
-- Sutton & Barto, *Reinforcement Learning: An Introduction*, 2nd ed. (TD(λ), eligibility traces).
-- Schulman et al., "High-Dimensional Continuous Control Using Generalized Advantage Estimation", 2016 (the λ bias/variance dial).
-- Harutyunyan et al., "Hindsight Credit Assignment", NeurIPS 2019.
-- Asai et al., "Self-RAG: Learning to Retrieve, Generate, and Critique through Self-Reflection", 2023.
-- Shazeer et al., "Outrageously Large Neural Networks: The Sparsely-Gated Mixture-of-Experts Layer", 2017.
-- Abnar & Zuidema, "Quantifying Attention Flow in Transformers" (attention rollout), 2020.
-- Xiao et al., "Efficient Streaming Language Models with Attention Sinks" (StreamingLLM), 2023.
-- Zhang et al., "H2O: Heavy-Hitter Oracle for Efficient Generative Inference of Large Language Models", NeurIPS 2023.
-- Jain & Wallace, "Attention is not Explanation", NAACL 2019; Wiegreffe & Pinter, "Attention is not not Explanation", EMNLP 2019.
-- Cohen-Wang et al., "ContextCite: Attributing Model Generation to Context", 2024.
+- Lightman et al., ["Let's Verify Step by Step"](https://arxiv.org/abs/2305.20050), 2023 (PRM800K, process supervision).
+- Wang et al., ["Math-Shepherd: Verify and Reinforce LLMs Step-by-step without Human Annotations"](https://arxiv.org/abs/2312.08935), 2024 (automatic process reward).
+- Sutton & Barto, [*Reinforcement Learning: An Introduction*, 2nd ed.](http://incompleteideas.net/book/the-book-2nd.html) (TD(λ), eligibility traces).
+- Schulman et al., ["High-Dimensional Continuous Control Using Generalized Advantage Estimation"](https://arxiv.org/abs/1506.02438), 2016 (the λ bias/variance dial).
+- Harutyunyan et al., ["Hindsight Credit Assignment"](https://arxiv.org/abs/1912.02503), NeurIPS 2019.
+- Asai et al., ["Self-RAG: Learning to Retrieve, Generate, and Critique through Self-Reflection"](https://arxiv.org/abs/2310.11511), 2023.
+- Shazeer et al., ["Outrageously Large Neural Networks: The Sparsely-Gated Mixture-of-Experts Layer"](https://arxiv.org/abs/1701.06538), 2017.
+- Abnar & Zuidema, ["Quantifying Attention Flow in Transformers"](https://arxiv.org/abs/2005.00928) (attention rollout), 2020.
+- Xiao et al., ["Efficient Streaming Language Models with Attention Sinks"](https://arxiv.org/abs/2309.17453) (StreamingLLM), 2023.
+- Zhang et al., ["H2O: Heavy-Hitter Oracle for Efficient Generative Inference of Large Language Models"](https://arxiv.org/abs/2306.14048), NeurIPS 2023.
+- Jain & Wallace, ["Attention is not Explanation"](https://arxiv.org/abs/1902.10186), NAACL 2019; Wiegreffe & Pinter, ["Attention is not not Explanation"](https://arxiv.org/abs/1908.04626), EMNLP 2019.
+- Cohen-Wang et al., ["ContextCite: Attributing Model Generation to Context"](https://arxiv.org/abs/2409.00729), 2024.
